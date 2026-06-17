@@ -365,6 +365,51 @@ mod inplace_tests {
         let _ = std::fs::write(std::env::temp_dir().join("benchmark-converted.hwpx"), &out);
     }
 
+    /// Track A Phase 2: the DEEP lift captures per-run character formatting + paragraph shapes, and
+    /// the converter synthesizes them into the HWPX header pools. (Phase 1 was text-only.)
+    #[cfg(feature = "rhwp")]
+    #[test]
+    fn hwp5_lift_captures_formatting_and_synthesizes_charpr() {
+        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmark.hwp")).unwrap();
+        let doc = Engine::open(&bytes).unwrap();
+
+        // Pools translated (index 0 = default, then the document's real shapes).
+        assert!(doc.char_shapes.len() > 1, "char_shape pool translated: {}", doc.char_shapes.len());
+        assert!(doc.para_shapes.len() > 1, "para_shape pool translated: {}", doc.para_shapes.len());
+        assert!(!doc.header_pools.char.is_empty(), "header_pools mirrored for the editor");
+
+        // Run splitting + non-default formatting captured.
+        let runs: usize = doc.sections.iter().flat_map(|s| &s.blocks).map(|b| match b {
+            Block::Paragraph(p) => p.runs.len(),
+            _ => 0,
+        }).sum();
+        let formatted_shapes = doc.char_shapes.iter().filter(|c| !c.is_default()).count();
+        let bold = doc.char_shapes.iter().filter(|c| c.bold).count();
+        let colored = doc.char_shapes.iter().filter(|c| c.text_color != crate::Color::default()).count();
+        let aligned = doc.para_shapes.iter().filter(|p| p.align != HorizontalAlign::Justify).count();
+        eprintln!(
+            "Phase2: char_shapes={} para_shapes={} runs={} formatted={} bold={} colored={} non-justify-paras={}",
+            doc.char_shapes.len(), doc.para_shapes.len(), runs, formatted_shapes, bold, colored, aligned
+        );
+        assert!(formatted_shapes > 0, "at least one non-default char_shape (formatting captured)");
+
+        // The synthesized header gains charPr entries beyond the Skeleton's 7 (itemCnt grows), and
+        // the open-safety gate still passes.
+        let out = serialize_hwpx(&doc).unwrap();
+        assert!(validate_hwpx(&out).ok, "converted HWPX stays open-safe with synthesized shapes");
+        let pkg = hwp_hwpx::package::Package::open(&out).unwrap();
+        let header = String::from_utf8(pkg.read_header().unwrap()).unwrap();
+        let char_cnt = hwp_hwpx::synth::max_pool_id(&header, "charProperties");
+        eprintln!("Phase2: synthesized charProperties max id = {char_cnt} (Skeleton default max = 6)");
+        assert!(char_cnt > 6, "synthesized at least one charPr beyond the Skeleton's pool");
+        // The actual formatting reached the header (not just a bigger pool): bold + a real color.
+        assert!(header.contains("<hh:bold/>"), "a bold charPr was synthesized into the header");
+        let has_color = header
+            .match_indices("textColor=\"#")
+            .any(|(i, _)| !header[i..].starts_with("textColor=\"#000000"));
+        assert!(has_color, "a non-black textColor was synthesized into the header");
+    }
+
     /// Phase 1: undo restores the doc bit-for-bit (the byte-stability moat), redo replays it.
     #[test]
     fn editsession_undo_redo_is_byte_exact() {

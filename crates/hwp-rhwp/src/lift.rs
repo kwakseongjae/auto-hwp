@@ -1,85 +1,270 @@
 //! rhwp `Document` → our `SemanticDoc` lift.
 //!
-//! A real (subset) lift: sections → paragraphs (text) and tables (rows/cols/cells with
-//! spans + cell paragraphs). This is the foundation for HWP5 text extraction, the
-//! structure-preserving AI projection, and the edit/export pipeline. Deeper fidelity
-//! (resolved char/para shapes into header pools, images, equations, full passthrough)
-//! is the continuing M1/M3 work — un-modeled inline objects are simply not emitted yet
-//! (they remain faithfully RENDERED via rhwp's own pipeline).
+//! A DEEP lift: sections → paragraphs (text split into per-formatting runs) and tables
+//! (rows/cols/cells with spans + cell paragraphs), PLUS the document's `charPr`/`paraPr` pools
+//! translated into our `char_shapes`/`para_shapes` (mirrored into `header_pools` for the editor).
+//! Runs are split at rhwp `CharShapeRef` boundaries so per-run bold/italic/size/color survive into
+//! the HWP5→HWPX conversion. Un-modeled inline objects (equation/shape/field/image) are not yet
+//! emitted (they remain faithfully RENDERED via rhwp's own pipeline); fonts-per-script,
+//! sub/superscript, numbering and underline color are deferred (the serializer doesn't emit them
+//! yet — see crates/hwp-hwpx/src/synth.rs).
+
+use std::collections::HashMap;
 
 use hwp_model::prelude::*;
 use rhwp::model::control::Control;
+use rhwp::model::document::Document as RDoc;
 use rhwp::model::paragraph::Paragraph as RParagraph;
+use rhwp::model::style::{
+    Alignment, CharShape as RCharShape, ParaShape as RParaShape, UnderlineType,
+};
 use rhwp::model::table::Table as RTable;
 
 /// Parse HWP/HWPX bytes via rhwp and lift into our format-neutral `SemanticDoc`.
 pub fn parse_to_semantic(bytes: &[u8]) -> Result<SemanticDoc> {
     let doc = rhwp::parse_document(bytes).map_err(|e| Error::Parse(e.to_string()))?;
-    let mut out = SemanticDoc::default();
-    for sec in &doc.sections {
-        let mut section = Section {
+    Ok(Lifter::new(&doc).run())
+}
+
+/// Stateful lift: translates rhwp's pools once, recording rhwp-id → our-index maps so every
+/// run/paragraph references a VALID translated shape (never a raw rhwp id — that was the old
+/// dangling-ref bug where `para_shape_id` was forwarded straight into our index space).
+struct Lifter<'a> {
+    doc: &'a RDoc,
+    /// rhwp `char_shapes` index → our `char_shapes` index (always ≥ 1; 0 is the reserved default).
+    char_id_to_idx: HashMap<u32, usize>,
+    /// rhwp `para_shapes` index → our `para_shapes` index.
+    para_id_to_idx: HashMap<u16, usize>,
+}
+
+impl<'a> Lifter<'a> {
+    fn new(doc: &'a RDoc) -> Self {
+        Self { doc, char_id_to_idx: HashMap::new(), para_id_to_idx: HashMap::new() }
+    }
+
+    fn run(mut self) -> SemanticDoc {
+        let mut out = SemanticDoc::default();
+        // Index 0 is the canonical default in our model (a run/paragraph with no resolvable ref maps
+        // here; the serializer reuses the document's default charPr/paraPr for it).
+        out.char_shapes.push(CharShape::default());
+        out.para_shapes.push(ParaShape::default());
+
+        for (i, rcs) in self.doc.doc_info.char_shapes.iter().enumerate() {
+            let cs = lift_char_shape(rcs);
+            let idx = out.char_shapes.len();
+            self.char_id_to_idx.insert(i as u32, idx);
+            out.header_pools.char.insert(i as u64, cs.clone());
+            out.char_shapes.push(cs);
+        }
+        for (i, rps) in self.doc.doc_info.para_shapes.iter().enumerate() {
+            let ps = lift_para_shape(rps);
+            let idx = out.para_shapes.len();
+            self.para_id_to_idx.insert(i as u16, idx);
+            out.header_pools.para.insert(i as u64, ps.clone());
+            out.para_shapes.push(ps);
+        }
+
+        for sec in &self.doc.sections {
+            let mut section = Section {
+                provenance: Provenance { source: Some(SourceFormat::Hwp5), raw: None },
+                ..Default::default()
+            };
+            for para in &sec.paragraphs {
+                self.push_paragraph(para, &mut section.blocks);
+            }
+            out.sections.push(section);
+        }
+        out
+    }
+
+    /// Emit a paragraph (text split into per-shape runs), then any block-level tables in its controls.
+    fn push_paragraph(&self, p: &RParagraph, blocks: &mut Vec<Block>) {
+        blocks.push(Block::Paragraph(Paragraph {
+            para_shape: self.para_id_to_idx.get(&p.para_shape_id).copied().unwrap_or(0),
+            runs: self.lift_runs(p),
             provenance: Provenance { source: Some(SourceFormat::Hwp5), raw: None },
             ..Default::default()
-        };
-        for para in &sec.paragraphs {
-            push_paragraph(para, &mut section.blocks);
-        }
-        out.sections.push(section);
-    }
-    Ok(out)
-}
+        }));
 
-/// Emit a paragraph, then any block-level objects (tables) anchored in its controls.
-fn push_paragraph(p: &RParagraph, blocks: &mut Vec<Block>) {
-    let runs = if p.text.is_empty() {
-        Vec::new()
-    } else {
-        vec![Run {
-            char_shape: 0,
-            content: vec![Inline::Text(p.text.clone())],
-            ..Default::default()
-        }]
-    };
-    blocks.push(Block::Paragraph(Paragraph {
-        para_shape: p.para_shape_id as usize,
-        runs,
-        provenance: Provenance { source: Some(SourceFormat::Hwp5), raw: None },
-        ..Default::default()
-    }));
-
-    for ctrl in &p.controls {
-        if let Control::Table(t) = ctrl {
-            blocks.push(Block::Table(lift_table(t)));
-        }
-    }
-}
-
-fn lift_table(t: &RTable) -> Table {
-    let cells = t
-        .cells
-        .iter()
-        .map(|c| {
-            let mut blocks = Vec::new();
-            for p in &c.paragraphs {
-                push_paragraph(p, &mut blocks);
+        for ctrl in &p.controls {
+            if let Control::Table(t) = ctrl {
+                blocks.push(Block::Table(self.lift_table(t)));
             }
-            Cell {
-                row: c.row as usize,
-                col: c.col as usize,
-                row_span: (c.row_span.max(1)) as usize,
-                col_span: (c.col_span.max(1)) as usize,
-                blocks,
-                active: true,
+        }
+    }
+
+    /// Split a paragraph's text into runs at its `CharShapeRef` boundaries, each run referencing the
+    /// translated char_shape index. Slicing is by CHAR index (converted from rhwp's UTF-16 offsets)
+    /// so non-BMP characters (emoji, rare hanja) never corrupt a boundary. Full text coverage is
+    /// guaranteed (a leading gap before the first ref becomes a default-shape run) — text is never
+    /// dropped.
+    fn lift_runs(&self, p: &RParagraph) -> Vec<Run> {
+        if p.text.is_empty() {
+            return Vec::new();
+        }
+        let chars: Vec<char> = p.text.chars().collect();
+        let total = chars.len();
+
+        // (char_start, our char_shape index), sorted, covering [0, total).
+        let mut bounds: Vec<(usize, usize)> = p
+            .char_shapes
+            .iter()
+            .map(|r| {
+                let start = utf16_to_char_idx(&p.text, r.start_pos).min(total);
+                let idx = self.char_id_to_idx.get(&r.char_shape_id).copied().unwrap_or(0);
+                (start, idx)
+            })
+            .collect();
+        bounds.sort_by_key(|b| b.0);
+        if bounds.first().map(|b| b.0) != Some(0) {
+            bounds.insert(0, (0, 0)); // leading text with no style ref → default shape
+        }
+
+        let mut runs = Vec::new();
+        for k in 0..bounds.len() {
+            let (start, idx) = bounds[k];
+            let end = bounds.get(k + 1).map(|b| b.0).unwrap_or(total);
+            if start >= end {
+                continue; // zero-width or out-of-order boundary
+            }
+            let text: String = chars[start..end].iter().collect();
+            runs.push(Run { char_shape: idx, content: vec![Inline::Text(text)], ..Default::default() });
+        }
+        if runs.is_empty() {
+            // Defensive: every boundary collapsed → keep the whole text as one default run.
+            runs.push(Run {
+                char_shape: 0,
+                content: vec![Inline::Text(p.text.clone())],
                 ..Default::default()
-            }
-        })
-        .collect();
+            });
+        }
+        runs
+    }
 
-    Table {
-        rows: t.row_count as usize,
-        cols: t.col_count as usize,
-        cells,
-        provenance: Provenance { source: Some(SourceFormat::Hwp5), raw: None },
+    fn lift_table(&self, t: &RTable) -> Table {
+        let cells = t
+            .cells
+            .iter()
+            .map(|c| {
+                let mut blocks = Vec::new();
+                for p in &c.paragraphs {
+                    self.push_paragraph(p, &mut blocks);
+                }
+                Cell {
+                    row: c.row as usize,
+                    col: c.col as usize,
+                    row_span: c.row_span.max(1) as usize,
+                    col_span: c.col_span.max(1) as usize,
+                    blocks,
+                    active: true,
+                    ..Default::default()
+                }
+            })
+            .collect();
+
+        Table {
+            rows: t.row_count as usize,
+            cols: t.col_count as usize,
+            cells,
+            provenance: Provenance { source: Some(SourceFormat::Hwp5), raw: None },
+            ..Default::default()
+        }
+    }
+}
+
+/// Convert a UTF-16 code-unit offset (rhwp `CharShapeRef.start_pos`) to a char (Unicode scalar)
+/// index into `text`. rhwp stores positions in UTF-16; slicing a Rust `String` needs char indices,
+/// and the two diverge across non-BMP characters (each costs 2 UTF-16 units but 1 char).
+fn utf16_to_char_idx(text: &str, utf16_pos: u32) -> usize {
+    let mut units = 0u32;
+    for (char_idx, ch) in text.chars().enumerate() {
+        if units >= utf16_pos {
+            return char_idx;
+        }
+        units += ch.len_utf16() as u32;
+    }
+    text.chars().count()
+}
+
+/// Translate an rhwp `CharShape` into ours — but ONLY the fields the HWPX serializer actually emits
+/// (`synthesize_char_pr`: height, bold, italic, underline-on, strikeout-on, text color). Per-script
+/// font/장평/자간, sub/superscript, emphasis, and underline color are left at our defaults: the
+/// serializer can't emit them yet, and setting them would only force redundant charPr synthesis
+/// (it dedups identical results back to the document's default charPr).
+fn lift_char_shape(c: &RCharShape) -> CharShape {
+    CharShape {
+        height: c.base_size,
+        bold: c.bold,
+        italic: c.italic,
+        underline: c.underline_type != UnderlineType::None,
+        strikeout: c.strikethrough,
+        text_color: lift_text_color(c.text_color),
         ..Default::default()
+    }
+}
+
+/// rhwp `ColorRef` is `0x00BBGGRR` (NOT RGB) — unpack the channels by hand. Black (`0x000000`) is
+/// the default text color, so it maps to our `Color::default()`: `synthesize_char_pr` only patches
+/// `textColor` when the color differs from default, so a plain black run reuses the default charPr.
+fn lift_text_color(c: u32) -> Color {
+    if c & 0x00FF_FFFF == 0 {
+        Color::default()
+    } else {
+        Color { r: (c & 0xFF) as u8, g: ((c >> 8) & 0xFF) as u8, b: ((c >> 16) & 0xFF) as u8, a: 255 }
+    }
+}
+
+/// Translate an rhwp `ParaShape` into ours — the fields `synthesize_para_pr` emits: alignment and
+/// the margin block (indent, left/right margin, space before/after). Line spacing is intentionally
+/// left to inherit the base paraPr (a fixed-unit value emitted as PERCENT would distort layout);
+/// numbering/border-fill/head-type are deferred (not emitted yet).
+fn lift_para_shape(p: &RParaShape) -> ParaShape {
+    ParaShape {
+        align: match p.alignment {
+            Alignment::Left => HorizontalAlign::Left,
+            Alignment::Right => HorizontalAlign::Right,
+            Alignment::Center => HorizontalAlign::Center,
+            Alignment::Distribute => HorizontalAlign::Distribute,
+            Alignment::Split => HorizontalAlign::DistributeSpace,
+            Alignment::Justify => HorizontalAlign::Justify,
+        },
+        left_margin: p.margin_left,
+        right_margin: p.margin_right,
+        indent: p.indent,
+        space_before: p.spacing_before,
+        space_after: p.spacing_after,
+        ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_color_unpacks_bgr_not_rgb() {
+        // rhwp ColorRef is 0x00BBGGRR (NOT RGB): red=0x000000FF, blue=0x00FF0000, green=0x0000FF00.
+        assert_eq!(lift_text_color(0x0000_00FF), Color { r: 0xFF, g: 0, b: 0, a: 255 }, "red");
+        assert_eq!(
+            lift_text_color(0x00FF_0000),
+            Color { r: 0, g: 0, b: 0xFF, a: 255 },
+            "blue must NOT byte-swap into red"
+        );
+        assert_eq!(lift_text_color(0x0000_FF00), Color { r: 0, g: 0xFF, b: 0, a: 255 }, "green");
+        // Black is the default text color → Color::default(), so a plain run reuses the default charPr
+        // (synthesize_char_pr only patches textColor when it differs from default).
+        assert_eq!(lift_text_color(0), Color::default(), "black → default");
+    }
+
+    #[test]
+    fn utf16_offsets_map_to_char_indices_across_non_bmp() {
+        // "a😀b": 'a'=1 u16, '😀'=2 u16 (surrogate pair), 'b'=1 u16 → char idxs 0,1,2.
+        let t = "a😀b";
+        assert_eq!(utf16_to_char_idx(t, 0), 0, "before 'a'");
+        assert_eq!(utf16_to_char_idx(t, 1), 1, "before '😀' (after 'a')");
+        assert_eq!(utf16_to_char_idx(t, 3), 2, "before 'b' (😀 spans u16 1..3)");
+        assert_eq!(utf16_to_char_idx(t, 4), 3, "end");
+        // All-BMP Hangul: a UTF-16 offset equals the char index.
+        assert_eq!(utf16_to_char_idx("가나다", 2), 2);
     }
 }
