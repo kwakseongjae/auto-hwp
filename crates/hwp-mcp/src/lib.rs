@@ -25,6 +25,20 @@ pub struct Session {
     pub source_bytes: Option<Vec<u8>>,
     /// A validated-but-uncommitted edit from `propose_content`, awaiting `commit_proposal`.
     pub pending: Option<hwp_ai::Proposal>,
+    /// Persistent render state (engine seam 1): serialized bytes cached at a doc revision + a
+    /// parse-once `RenderCache`, so repeated page renders (scrolling) do not re-serialize/re-parse.
+    #[cfg(feature = "rhwp")]
+    render: RenderState,
+}
+
+/// Render-side cache for one open document (engine seam 1). Reset on `open_document`.
+#[cfg(feature = "rhwp")]
+#[derive(Default)]
+struct RenderState {
+    /// `(EditSession revision, serialized bytes)` — re-serialize only when the revision changes.
+    bytes: Option<(u64, Vec<u8>)>,
+    /// Parse-once cache over those bytes (reuses one parsed `DocumentCore` across pages).
+    cache: hwp_core::RenderCache,
 }
 
 /// The bytes to render: the LIVE edited HWPX if the doc serializes, else the original source
@@ -115,22 +129,44 @@ fn tools() -> Value {
     ])
 }
 
-/// Render the current document's page to SVG (live HWPX, or the original bytes for HW5).
+/// Ensure `render.bytes` holds the serialized document for its CURRENT revision — re-serializing
+/// only when the doc changed (engine seam 1). The revision comes from `EditSession`, which bumps it
+/// on every mutation, so this never serves stale bytes.
 #[cfg(feature = "rhwp")]
-fn render_current(session: &Session, page: u32) -> Result<String, String> {
-    let bytes = renderable_bytes(session)?;
-    hwp_core::render_page_svg(&bytes, page).map_err(|e| e.to_string())
+fn ensure_render_bytes(session: &mut Session) -> Result<(), String> {
+    let rev = session
+        .doc
+        .as_ref()
+        .ok_or("no document open (call open_document first)")?
+        .revision();
+    if !matches!(&session.render.bytes, Some((r, _)) if *r == rev) {
+        let bytes = renderable_bytes(session)?;
+        session.render.bytes = Some((rev, bytes));
+    }
+    Ok(())
+}
+
+/// Render the current document's page to SVG (live HWPX, or the original bytes for HW5). Reuses the
+/// session render cache: re-serialize only on edit, parse only once per revision (scroll is cheap).
+#[cfg(feature = "rhwp")]
+fn render_current(session: &mut Session, page: u32) -> Result<String, String> {
+    ensure_render_bytes(session)?;
+    let RenderState { bytes, cache } = &mut session.render;
+    let bytes = &bytes.as_ref().expect("ensured above").1;
+    cache.render_page_svg(bytes, page).map_err(|e| e.to_string())
 }
 #[cfg(not(feature = "rhwp"))]
 fn render_current(_session: &Session, _page: u32) -> Result<String, String> {
     Err("render_page needs a build with --features rhwp".into())
 }
 
-/// Rendered page count of the current document.
+/// Rendered page count of the current document (reuses the same cached parse as `render_current`).
 #[cfg(feature = "rhwp")]
-fn page_count_current(session: &Session) -> Result<String, String> {
-    let bytes = renderable_bytes(session)?;
-    Ok(hwp_core::page_count(&bytes).map_err(|e| e.to_string())?.to_string())
+fn page_count_current(session: &mut Session) -> Result<String, String> {
+    ensure_render_bytes(session)?;
+    let RenderState { bytes, cache } = &mut session.render;
+    let bytes = &bytes.as_ref().expect("ensured above").1;
+    Ok(cache.page_count(bytes).map_err(|e| e.to_string())?.to_string())
 }
 #[cfg(not(feature = "rhwp"))]
 fn page_count_current(_session: &Session) -> Result<String, String> {
@@ -190,6 +226,11 @@ fn call_tool(name: &str, args: &Value, session: &mut Session) -> Result<String, 
             session.source_path = Some(path.clone());
             session.source_bytes = Some(bytes);
             session.pending = None; // a fresh document drops any stale proposal
+            #[cfg(feature = "rhwp")]
+            {
+                // Revisions restart per EditSession, so a new doc must drop the render cache.
+                session.render = RenderState::default();
+            }
             Ok(format!("opened {path} ({label}, {n} section(s))"))
         }
         "get_context" => {
@@ -399,6 +440,37 @@ mod tests {
         // commit with nothing pending errors gracefully.
         let empty = call("commit_proposal", json!({}), &mut s);
         assert_eq!(empty["result"]["isError"], true, "{empty}");
+    }
+
+    /// Engine seam 1 wired into the session: render the same page twice → identical SVG (the
+    /// cache serves a consistent result), and rendering still works after an edit (revision bump
+    /// re-serializes + re-parses once). Needs the rhwp render bootstrap.
+    #[cfg(feature = "rhwp")]
+    #[test]
+    fn render_cache_is_consistent_across_pages_and_edits() {
+        let mut s = Session::default();
+        let call = |name: &str, args: Value, s: &mut Session| {
+            handle(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name,"arguments":args}}), s)
+                .unwrap()
+        };
+        let text = |r: &Value| r["result"]["content"][0]["text"].as_str().unwrap().to_string();
+
+        let open = call("open_document", json!({"path": showcase()}), &mut s);
+        assert_eq!(open["result"]["isError"], false, "{open}");
+
+        // Two renders of page 0 return byte-identical SVG (cache serves a consistent result).
+        let a = call("render_page", json!({"page": 0}), &mut s);
+        assert_eq!(a["result"]["isError"], false, "render: {a}");
+        let first = text(&a);
+        assert!(!first.is_empty(), "non-empty SVG");
+        let b = call("render_page", json!({"page": 0}), &mut s);
+        assert_eq!(text(&b), first, "second render is identical (cache hit)");
+
+        // After an edit (revision bumps → cache invalidates), rendering still succeeds.
+        let content = r#"{"blocks":[{"type":"paragraph","runs":[{"text":"렌더 캐시 편집"}]}]}"#;
+        call("apply_content", json!({"content": content}), &mut s);
+        let c = call("render_page", json!({"page": 0}), &mut s);
+        assert_eq!(c["result"]["isError"], false, "render after edit: {c}");
     }
 
     #[test]

@@ -94,10 +94,13 @@ pub fn run() {
         .expect("error while running tf-hwp viewer");
 }
 
-/// Lock in the invariant the A3 server relies on (Session is safe to share across threads).
+/// Lock in the invariant the A3 server relies on: the session is shared across threads ONLY behind
+/// `SharedSession` (a `Mutex`), so that is the type that must be `Send + Sync`. The inner `Session`
+/// need only be `Send` — its render cache (engine seam 1) holds a non-`Sync` parsed document, which
+/// is safe behind the `Mutex`.
 const _: fn() = || {
     fn assert_send_sync<T: Send + Sync + 'static>() {}
-    assert_send_sync::<hwp_mcp::Session>();
+    assert_send_sync::<SharedSession>();
 };
 
 #[cfg(test)]

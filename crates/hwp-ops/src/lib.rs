@@ -736,22 +736,33 @@ pub struct EditSession {
     /// Max retained undo snapshots (`0` = unbounded). Bounds memory: a snapshot deep-copies the
     /// whole package incl. the original `.hwpx` bytes held under `SOURCE_PART_TAG`.
     limit: usize,
+    /// Monotonic mutation counter — bumped on every successful `do_op`/`do_ops`/`undo`/`redo`.
+    /// Authoritative version signal for downstream caches (render/serialize): if `revision()` is
+    /// unchanged, the document bytes are unchanged. Lives here because every mutation funnels
+    /// through this type, so no caller can forget to bump it.
+    rev: u64,
 }
 
 impl EditSession {
     /// Start a session over a freshly parsed (or built) document. Default history depth 100.
     pub fn new(doc: SemanticDoc) -> Self {
-        EditSession { doc, undo: Vec::new(), redo: Vec::new(), limit: 100 }
+        EditSession { doc, undo: Vec::new(), redo: Vec::new(), limit: 100, rev: 0 }
     }
 
     /// Like [`EditSession::new`] but with an explicit history depth (`0` = unbounded).
     pub fn with_limit(doc: SemanticDoc, limit: usize) -> Self {
-        EditSession { doc, undo: Vec::new(), redo: Vec::new(), limit }
+        EditSession { doc, undo: Vec::new(), redo: Vec::new(), limit, rev: 0 }
     }
 
     /// The live document (read-only) — feed to the serializer / renderer.
     pub fn doc(&self) -> &SemanticDoc {
         &self.doc
+    }
+
+    /// Monotonic revision of the live document — bumps on every applied/undone/redone change.
+    /// A render or serialize cache can key on this: equal revision ⇒ identical document.
+    pub fn revision(&self) -> u64 {
+        self.rev
     }
 
     /// Consume the session, returning the live document.
@@ -781,6 +792,7 @@ impl EditSession {
         if self.limit != 0 && self.undo.len() > self.limit {
             self.undo.remove(0);
         }
+        self.rev += 1;
         Ok(())
     }
 
@@ -803,6 +815,7 @@ impl EditSession {
         if self.limit != 0 && self.undo.len() > self.limit {
             self.undo.remove(0);
         }
+        self.rev += 1;
         Ok(())
     }
 
@@ -810,6 +823,7 @@ impl EditSession {
     pub fn undo(&mut self) -> bool {
         let Some(prev) = self.undo.pop() else { return false };
         self.redo.push(std::mem::replace(&mut self.doc, prev));
+        self.rev += 1;
         true
     }
 
@@ -817,6 +831,7 @@ impl EditSession {
     pub fn redo(&mut self) -> bool {
         let Some(next) = self.redo.pop() else { return false };
         self.undo.push(std::mem::replace(&mut self.doc, next));
+        self.rev += 1;
         true
     }
 }
@@ -900,6 +915,24 @@ mod tests {
         assert!(!s.undo()); // empty
         assert!(s.redo() && s.redo() && s.redo());
         assert!(s.doc().any_dirty());
+    }
+
+    #[test]
+    fn revision_bumps_on_every_mutation_not_on_failure() {
+        let mut s = EditSession::new(doc_with(vec![simple_para(1, "가"), structural_para(2, "나")]));
+        assert_eq!(s.revision(), 0);
+        s.do_op(&Op::SetCharPr { range: Range { start: NodeId(1), end: NodeId(1) }, shape: bold() }).unwrap();
+        assert_eq!(s.revision(), 1);
+        s.do_ops(&[Op::SetCharPr { range: Range { start: NodeId(1), end: NodeId(1) }, shape: bold() }]).unwrap();
+        assert_eq!(s.revision(), 2);
+        assert!(s.undo());
+        assert_eq!(s.revision(), 3, "undo is a revision change");
+        assert!(s.redo());
+        assert_eq!(s.revision(), 4);
+        // A FAILED op must not bump the revision (doc unchanged).
+        let r = s.do_op(&Op::SetCharPr { range: Range { start: NodeId(2), end: NodeId(2) }, shape: bold() });
+        assert!(r.is_err());
+        assert_eq!(s.revision(), 4, "failed op leaves the revision unchanged");
     }
 
     #[test]
