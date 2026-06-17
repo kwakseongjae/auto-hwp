@@ -13,6 +13,7 @@ export default function App() {
   const [status, setStatus] = createSignal("문서를 여세요.");
   const [busy, setBusy] = createSignal(false);
   const [aiOpen, setAiOpen] = createSignal(false);
+  const [preview, setPreview] = createSignal<string | null>(null);
   const [content, setContent] = createSignal(
     '{"blocks":[{"type":"heading","text":"제목","style":"개요 1"},{"type":"paragraph","runs":[{"text":"본문 "},{"text":"강조","bold":true}]}]}',
   );
@@ -90,12 +91,25 @@ export default function App() {
     });
   }
 
-  async function applyContent() {
+  // AI diff/approve loop: propose (dry-run preview) → commit (apply, one undo unit) / discard.
+  async function doPropose() {
+    await guard("미리보기", async () => {
+      setPreview(await api.propose(content()));
+      setStatus("제안 준비됨 — 적용 또는 취소");
+    });
+  }
+  async function doCommit() {
     await guard("적용", async () => {
-      const n = await api.applyContent(content());
+      const n = await api.commitProposal();
+      setPreview(null);
       invalidate(n);
       setStatus(`적용됨 · ${n}쪽`);
     });
+  }
+  async function doDiscard() {
+    await api.discardProposal().catch(() => {});
+    setPreview(null);
+    setStatus("제안 취소됨");
   }
 
   async function exportHwpx() {
@@ -177,11 +191,32 @@ export default function App() {
             <h3 class="text-sm font-semibold">AI 콘텐츠 (템플릿 JSON)</h3>
             <textarea
               spellcheck={false}
-              class="h-64 w-full resize-none rounded-md border border-black/10 bg-white p-2 font-mono text-xs dark:border-white/10 dark:bg-neutral-900"
+              class="h-48 w-full resize-none rounded-md border border-black/10 bg-white p-2 font-mono text-xs dark:border-white/10 dark:bg-neutral-900"
               value={content()}
               onInput={(e) => setContent(e.currentTarget.value)}
             />
-            <Btn onClick={applyContent} disabled={pageCount() === 0}>적용 (op-bus)</Btn>
+            <Btn onClick={doPropose} disabled={pageCount() === 0}>미리보기 (제안)</Btn>
+            <Show when={preview()}>
+              <div class="flex flex-col gap-2 rounded-md border border-amber-400/40 bg-amber-50 p-2 dark:bg-amber-950/30">
+                <pre class="max-h-48 overflow-auto whitespace-pre-wrap text-xs text-neutral-700 dark:text-neutral-300">{preview()}</pre>
+                <div class="flex gap-2">
+                  <button
+                    onClick={doCommit}
+                    disabled={busy()}
+                    class="flex-1 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-40"
+                  >
+                    ✓ 적용
+                  </button>
+                  <button
+                    onClick={doDiscard}
+                    disabled={busy()}
+                    class="rounded-md px-3 py-1.5 text-sm font-medium text-neutral-600 hover:bg-neutral-200/70 dark:text-neutral-300 dark:hover:bg-neutral-700/60"
+                  >
+                    취소
+                  </button>
+                </div>
+              </div>
+            </Show>
           </aside>
         </Show>
       </div>

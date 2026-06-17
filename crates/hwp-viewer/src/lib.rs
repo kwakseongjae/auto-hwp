@@ -85,6 +85,32 @@ fn export_hwpx(path: String, sess: tauri::State<'_, SharedSession>) -> Result<St
     }
 }
 
+/// Dry-run AI content into a preview (rationale + per-op diff) WITHOUT mutating the document.
+#[tauri::command]
+fn propose(content: String, sess: tauri::State<'_, SharedSession>) -> Result<String, String> {
+    let mut s = sess.lock().map_err(|_| "session poisoned")?;
+    match apply_intent(&mut s, Intent::Propose { json: content })? {
+        Outcome::Proposed { rationale, preview } => Ok(format!("{rationale}\n\n{preview}")),
+        _ => Err("unexpected outcome".into()),
+    }
+}
+
+/// Commit the pending proposal (one undo unit); returns the new page count.
+#[tauri::command]
+fn commit_proposal(sess: tauri::State<'_, SharedSession>) -> Result<u32, String> {
+    let mut s = sess.lock().map_err(|_| "session poisoned")?;
+    apply_intent(&mut s, Intent::Commit)?;
+    Ok(pages(&mut s))
+}
+
+/// Drop the pending proposal without applying it.
+#[tauri::command]
+fn discard_proposal(sess: tauri::State<'_, SharedSession>) -> Result<(), String> {
+    let mut s = sess.lock().map_err(|_| "session poisoned")?;
+    apply_intent(&mut s, Intent::DiscardProposal)?;
+    Ok(())
+}
+
 /// Undo / redo the last edit; returns the new page count so the frontend re-renders.
 #[tauri::command]
 fn undo(sess: tauri::State<'_, SharedSession>) -> Result<u32, String> {
@@ -118,6 +144,9 @@ pub fn run() {
             doc_page_count,
             apply_content,
             export_hwpx,
+            propose,
+            commit_proposal,
+            discard_proposal,
             undo,
             redo
         ])

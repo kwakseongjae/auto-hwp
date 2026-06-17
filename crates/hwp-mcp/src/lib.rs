@@ -271,6 +271,12 @@ pub enum Intent {
     Undo,
     Redo,
     ExtractText,
+    /// Dry-run AI content into a previewable proposal WITHOUT mutating the doc (stashes it pending).
+    Propose { json: String },
+    /// Commit the pending proposal as one undo unit. Errors if none is pending.
+    Commit,
+    /// Drop the pending proposal without applying it.
+    DiscardProposal,
 }
 
 /// The typed result of an [`Intent`].
@@ -283,6 +289,10 @@ pub enum Outcome {
     Undone(bool),
     Redone(bool),
     Text(String),
+    /// A validated, uncommitted proposal: human-readable rationale + per-op diff preview.
+    Proposed { rationale: String, preview: String },
+    Committed { ops: usize },
+    Discarded(bool),
 }
 
 /// Apply a typed [`Intent`] against the session, returning a typed [`Outcome`] (no string parsing).
@@ -312,6 +322,25 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
             let doc = session.doc.as_ref().ok_or("no document open (call open_document first)")?.doc();
             Ok(Outcome::Text(doc.plain_text()))
         }
+        Intent::Propose { json } => {
+            let ai = hwp_ai::content::parse_content(&json).map_err(|e| e.to_string())?;
+            let doc = session.doc.as_ref().ok_or("no document open (call open_document first)")?.doc();
+            let proposal =
+                hwp_ai::propose_from_content(doc, &ai, "GUI 제안").map_err(|e| e.to_string())?;
+            let rationale = proposal.rationale.clone();
+            let preview = proposal.preview();
+            session.pending = Some(proposal);
+            Ok(Outcome::Proposed { rationale, preview })
+        }
+        Intent::Commit => {
+            let proposal =
+                session.pending.take().ok_or("대기 중인 제안이 없습니다 (propose first)")?;
+            let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
+            let ops = proposal.ops.len();
+            sess.do_ops(&proposal.ops).map_err(|e| e.to_string())?;
+            Ok(Outcome::Committed { ops })
+        }
+        Intent::DiscardProposal => Ok(Outcome::Discarded(session.pending.take().is_some())),
         Intent::PageCount => {
             #[cfg(feature = "rhwp")]
             {
@@ -549,6 +578,39 @@ mod tests {
             _ => panic!("expected Redone"),
         }
         assert!(text(&mut s).contains("인텐트 레인"));
+    }
+
+    #[test]
+    fn apply_intent_propose_preview_commit_loop() {
+        let mut s = Session::default();
+        apply_intent(&mut s, Intent::Open { path: showcase() }).unwrap();
+        let text = |s: &mut Session| match apply_intent(s, Intent::ExtractText).unwrap() {
+            Outcome::Text(t) => t,
+            _ => unreachable!(),
+        };
+
+        // Propose: returns a preview, does NOT mutate the document.
+        let content = r#"{"blocks":[{"type":"heading","text":"제안 미리보기","align":"center"}]}"#.to_string();
+        match apply_intent(&mut s, Intent::Propose { json: content }).unwrap() {
+            Outcome::Proposed { preview, .. } => assert!(preview.contains("문단")),
+            _ => panic!("expected Proposed"),
+        }
+        assert!(!text(&mut s).contains("제안 미리보기"), "propose must not commit");
+
+        // Commit: applies the pending proposal as one undo unit.
+        match apply_intent(&mut s, Intent::Commit).unwrap() {
+            Outcome::Committed { ops } => assert!(ops >= 1),
+            _ => panic!("expected Committed"),
+        }
+        assert!(text(&mut s).contains("제안 미리보기"));
+        match apply_intent(&mut s, Intent::Undo).unwrap() {
+            Outcome::Undone(c) => assert!(c),
+            _ => panic!(),
+        }
+        assert!(!text(&mut s).contains("제안 미리보기"), "one undo reverts the committed proposal");
+
+        // Commit with nothing pending errors.
+        assert!(apply_intent(&mut s, Intent::Commit).is_err());
     }
 
     #[test]
