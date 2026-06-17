@@ -463,12 +463,17 @@ fn bump_attr(s: &str, name: &str, delta: i64) -> String {
 /// rest of the secPr (grid, footnote/endnote prefs, columns) is preserved verbatim.
 pub fn patch_page(section_xml: &str, page: &PageSetup) -> String {
     let mut s = section_xml.to_string();
-    // <hp:pagePr … width=".." height="..">
+    // <hp:pagePr … landscape=".." width=".." height="..">. The orientation attr is load-bearing for
+    // the HWP5→HWPX converter: the Skeleton stub is hardcoded landscape="WIDELY", so a portrait .hwp
+    // would stay landscape unless we patch it. (HWPX-in only reaches here after a SetPageLayout,
+    // which writes the full PageSetup — consistent with the width/height patch below.)
     if let Some(p) = s.find("<hp:pagePr") {
         if let Some(rel) = s[p..].find('>') {
             let end = p + rel + 1;
             let tag = set_attr(&s[p..end], "width", &page.width.to_string());
             let tag = set_attr(&tag, "height", &page.height.to_string());
+            let tag =
+                set_attr(&tag, "landscape", if page.landscape { "WIDELY" } else { "NARROWLY" });
             s = format!("{}{}{}", &s[..p], tag, &s[end..]);
         }
     }

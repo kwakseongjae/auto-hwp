@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use hwp_model::prelude::*;
 use rhwp::model::control::Control;
 use rhwp::model::document::Document as RDoc;
+use rhwp::model::page::PageDef;
 use rhwp::model::paragraph::Paragraph as RParagraph;
 use rhwp::model::style::{
     Alignment, CharShape as RCharShape, ParaShape as RParaShape, UnderlineType,
@@ -66,6 +67,10 @@ impl<'a> Lifter<'a> {
 
         for sec in &self.doc.sections {
             let mut section = Section {
+                page: lift_page(&sec.section_def.page_def),
+                // The converted HWPX seeds the Skeleton's secPr (hardcoded landscape A4); mark the
+                // page edited so the serializer patches in THIS document's real geometry/orientation.
+                page_edited: true,
                 provenance: Provenance { source: Some(SourceFormat::Hwp5), raw: None },
                 ..Default::default()
             };
@@ -200,6 +205,22 @@ fn lift_char_shape(c: &RCharShape) -> CharShape {
         strikeout: c.strikethrough,
         text_color: lift_text_color(c.text_color),
         ..Default::default()
+    }
+}
+
+/// Translate an rhwp `PageDef` (구역 용지 설정) into our `PageSetup`: paper size, the four content
+/// margins, and orientation. (HWPUNIT u32 → i32; header/footer/gutter margins and multi-column are
+/// not emitted by the page patcher yet, so they're dropped here.)
+fn lift_page(pd: &PageDef) -> PageSetup {
+    PageSetup {
+        width: pd.width as i32,
+        height: pd.height as i32,
+        margin_left: pd.margin_left as i32,
+        margin_right: pd.margin_right as i32,
+        margin_top: pd.margin_top as i32,
+        margin_bottom: pd.margin_bottom as i32,
+        landscape: pd.landscape,
+        columns: 1,
     }
 }
 
