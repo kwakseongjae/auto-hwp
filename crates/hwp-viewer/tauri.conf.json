@@ -16,7 +16,15 @@
         "title": "tf-hwp viewer",
         "width": 1100,
         "height": 800,
-        "resizable": true
+        "minWidth": 720,
+        "minHeight": 480,
+        "resizable": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "windowEffects": {
+          "effects": ["sidebar"],
+          "state": "followsWindowActiveState"
+        }
       }
     ],
     "security": {

@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* Class-based dark mode: we toggle `.dark` on <html> deterministically from the native theme
+   event (WKWebView's prefers-color-scheme propagation is unreliable), instead of the media query. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* macOS-flavored base: system font stack resolves to San Francisco via CoreText. */
 :root {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Apple SD Gothic Neo",

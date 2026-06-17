@@ -1,5 +1,6 @@
-import { createSignal, For, Show } from "solid-js";
+import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
 
 /// tf-hwp viewer shell (Phase 1 skeleton): toolbar + virtualizable page list + AI panel, all
@@ -13,6 +14,23 @@ export default function App() {
   const [content, setContent] = createSignal(
     '{"blocks":[{"type":"heading","text":"제목","style":"개요 1"},{"type":"paragraph","runs":[{"text":"본문 "},{"text":"강조","bold":true}]}]}',
   );
+
+  // Deterministic dark mode: toggle `.dark` on <html> from the native theme event (the reliable
+  // signal on WKWebView), falling back to the media query outside Tauri.
+  onMount(async () => {
+    const apply = (t: string | null) => document.documentElement.classList.toggle("dark", t === "dark");
+    try {
+      const w = getCurrentWindow();
+      apply(await w.theme());
+      onCleanup(await w.onThemeChanged(({ payload }) => apply(payload)));
+    } catch {
+      const mq = window.matchMedia("(prefers-color-scheme: dark)");
+      const onChange = () => apply(mq.matches ? "dark" : "light");
+      onChange();
+      mq.addEventListener("change", onChange);
+      onCleanup(() => mq.removeEventListener("change", onChange));
+    }
+  });
 
   /// Re-render every page of the live document into the page column.
   async function refresh(n: number) {
@@ -75,8 +93,12 @@ export default function App() {
 
   return (
     <div class="flex h-full flex-col bg-neutral-100 text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100">
-      {/* Toolbar (a placeholder for the Overlay titlebar + vibrancy chrome of Phase 2). */}
-      <header class="flex items-center gap-1 border-b border-black/10 bg-neutral-50/80 px-3 py-2 backdrop-blur dark:border-white/10 dark:bg-neutral-800/70">
+      {/* Overlay-titlebar toolbar: draggable, with left clearance for the macOS traffic lights, and
+          a translucent blurred background that reads as native chrome. */}
+      <header
+        data-tauri-drag-region
+        class="flex items-center gap-1 border-b border-black/10 bg-neutral-50/70 py-2.5 pl-20 pr-3 backdrop-blur-xl dark:border-white/10 dark:bg-neutral-800/60"
+      >
         <Btn onClick={openDoc}>📂 열기</Btn>
         <Btn onClick={step("실행 취소", api.undo)}>↩︎ 실행취소</Btn>
         <Btn onClick={step("다시 실행", api.redo)}>↪︎ 다시실행</Btn>
