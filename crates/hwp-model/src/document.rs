@@ -88,9 +88,34 @@ pub struct Section {
     /// True once `page` was explicitly edited — the serializer then patches the section's `secPr`
     /// (parsed sections leave this false so their original page setup round-trips verbatim).
     pub page_edited: bool,
+    /// 머리말/꼬리말 (headers/footers) scoped to this section. DEFAULT EMPTY ⇒ no secPr change,
+    /// so HWPX-in round-trip is untouched; the converter splices these into the secPr-carrier run.
+    pub decorations: Vec<PageDecoration>,
     pub provenance: Provenance,
     pub passthrough: Passthrough,
     pub dirty: Dirty,
+}
+
+/// A header or footer (master pages deferred) and which pages it applies to.
+#[derive(Clone, Debug)]
+pub struct PageDecoration {
+    pub kind: DecoKind,
+    pub apply: ApplyPage,
+    pub blocks: Vec<Block>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DecoKind {
+    Header,
+    Footer,
+}
+
+/// Which pages a header/footer applies to (OWPML `applyPageType`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApplyPage {
+    Both,
+    Even,
+    Odd,
 }
 
 impl Section {

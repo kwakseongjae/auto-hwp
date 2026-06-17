@@ -92,11 +92,36 @@ impl<'a> Lifter<'a> {
             };
             for para in &sec.paragraphs {
                 self.push_paragraph(para, &mut section.blocks);
+                // 머리말/꼬리말 are section-scoped but anchored in a paragraph's controls.
+                for ctrl in &para.controls {
+                    match ctrl {
+                        Control::Header(h) => section.decorations.push(PageDecoration {
+                            kind: DecoKind::Header,
+                            apply: lift_apply(h.apply_to),
+                            blocks: self.lift_body(&h.paragraphs),
+                        }),
+                        Control::Footer(f) => section.decorations.push(PageDecoration {
+                            kind: DecoKind::Footer,
+                            apply: lift_apply(f.apply_to),
+                            blocks: self.lift_body(&f.paragraphs),
+                        }),
+                        _ => {}
+                    }
+                }
             }
             out.sections.push(section);
         }
         out.bin_data = self.bin_data.into_inner();
         out
+    }
+
+    /// Recurse a header/footer/note body's paragraphs into our blocks.
+    fn lift_body(&self, paras: &[RParagraph]) -> Vec<Block> {
+        let mut body = Vec::new();
+        for bp in paras {
+            self.push_paragraph(bp, &mut body);
+        }
+        body
     }
 
     /// Emit a paragraph (text split into per-shape runs + inline foot/endnote markers), then any
@@ -161,11 +186,7 @@ impl<'a> Lifter<'a> {
         suffix_char: u16,
         inst_id: u32,
     ) -> NoteRef {
-        let mut body = Vec::new();
-        for bp in paras {
-            self.push_paragraph(bp, &mut body);
-        }
-        NoteRef { kind, number, prefix_char, suffix_char, inst_id, body }
+        NoteRef { kind, number, prefix_char, suffix_char, inst_id, body: self.lift_body(paras) }
     }
 
     /// Lift an rhwp `Picture` → `ImageRef`, registering its bytes into `bin_data` (deduped by the
@@ -361,6 +382,16 @@ fn object_paragraph(inline: Inline) -> Block {
         provenance: Provenance { source: Some(SourceFormat::Hwp5), raw: None },
         ..Default::default()
     })
+}
+
+/// Map rhwp's header/footer apply scope to ours.
+fn lift_apply(a: rhwp::model::header_footer::HeaderFooterApply) -> ApplyPage {
+    use rhwp::model::header_footer::HeaderFooterApply as HFA;
+    match a {
+        HFA::Both => ApplyPage::Both,
+        HFA::Even => ApplyPage::Even,
+        HFA::Odd => ApplyPage::Odd,
+    }
 }
 
 /// A run carrying a single inline marker (field begin/end, bookmark).

@@ -235,6 +235,9 @@ fn collect_image_items(doc: &SemanticDoc) -> Vec<ImageItem> {
     let mut used = std::collections::BTreeSet::new();
     for s in &doc.sections {
         walk(&s.blocks, &mut used);
+        for d in &s.decorations {
+            walk(&d.blocks, &mut used); // SEAM D: images in headers/footers
+        }
     }
     doc.bin_data
         .iter()
@@ -352,6 +355,10 @@ fn collect_used_shapes(doc: &SemanticDoc, chars: &mut IdxSet, paras: &mut IdxSet
             if emit {
                 walk_all(std::slice::from_ref(b), chars, paras);
             }
+        }
+        // SEAM D: header/footer bodies are always emitted into the secPr — collect their shapes.
+        for d in &sec.decorations {
+            walk_all(&d.blocks, chars, paras);
         }
     }
 }
@@ -535,7 +542,7 @@ fn patch_section_xml(orig: &[u8], sec: &Section, table_ref: Option<&str>, plan: 
 
     // (3) APPENDED blocks (dirty, source=None) → emit + inject before the section close tag.
     let dirty: Vec<EmitBlock> = sec.blocks.iter().filter_map(dirty_emit).collect();
-    if dirty.is_empty() {
+    if dirty.is_empty() && sec.decorations.is_empty() {
         // Edits / page already applied (or nothing changed) — no append needed.
         return s.into_bytes();
     }
@@ -547,6 +554,35 @@ fn patch_section_xml(orig: &[u8], sec: &Section, table_ref: Option<&str>, plan: 
     // Resolve a run's interned char_shape index → charPrIDRef (synthesized id, or the plain ref).
     let cref = |idx: usize| plan.char_ref.get(&idx).cloned().unwrap_or_else(|| plain_ref_owned.clone());
     let mut next_id = max_id(&s) + 1;
+
+    // (2.5) HEADERS/FOOTERS: splice each as a <hp:ctrl><hp:header|footer><hp:subList>body</…> right
+    // after </hp:secPr> (the secPr-carrier run) — additive, only when the section has decorations.
+    if !sec.decorations.is_empty() {
+        if let Some(pos) = s.find("</hp:secPr>") {
+            let mut deco = String::new();
+            for d in &sec.decorations {
+                let tag = match d.kind {
+                    DecoKind::Header => "header",
+                    DecoKind::Footer => "footer",
+                };
+                let apply = match d.apply {
+                    ApplyPage::Both => "BOTH",
+                    ApplyPage::Even => "EVEN",
+                    ApplyPage::Odd => "ODD",
+                };
+                let body: Vec<EmitBlock> = d.blocks.iter().map(project_block).collect();
+                let did = next_id;
+                next_id += 1;
+                deco.push_str(&format!(
+                    "<hp:ctrl><hp:{tag} id=\"{did}\" applyPageType=\"{apply}\"><hp:subList id=\"\" textDirection=\"HORIZONTAL\" lineWrap=\"BREAK\" vertAlign=\"TOP\" linkListIDRef=\"0\" linkListNextIDRef=\"0\" textWidth=\"0\" textHeight=\"0\" hasTextRef=\"0\" hasNumRef=\"0\">"
+                ));
+                emit_cell_content(&mut deco, &body, base_para_ref, &plain_ref, &cref, table_ref.unwrap_or("1"), &plan.shade_ref, &mut next_id);
+                deco.push_str(&format!("</hp:subList></hp:{tag}></hp:ctrl>"));
+            }
+            let at = pos + "</hp:secPr>".len();
+            s.insert_str(at, &deco);
+        }
+    }
 
     let mut inject = String::new();
     for block in &dirty {
@@ -1753,6 +1789,35 @@ mod tests {
         // serialize_from_scratch clones — the caller's doc is untouched (no provenance, no dirty).
         assert!(doc.passthrough.parts.is_empty(), "input doc must not be mutated");
         assert!(!doc.sections[0].dirty.is_dirty(), "input doc must not be dirtied");
+    }
+
+    #[test]
+    fn from_scratch_header_splices_after_secpr() {
+        let mut doc = SemanticDoc::default();
+        let mut sec = Section::default();
+        sec.blocks.push(Block::Paragraph(Paragraph {
+            runs: vec![Run { char_shape: 0, content: vec![Inline::Text("본문".into())], ..Default::default() }],
+            ..Default::default()
+        }));
+        sec.decorations.push(PageDecoration {
+            kind: DecoKind::Header,
+            apply: ApplyPage::Both,
+            blocks: vec![Block::Paragraph(Paragraph {
+                runs: vec![Run { char_shape: 0, content: vec![Inline::Text("머리말텍스트".into())], ..Default::default() }],
+                ..Default::default()
+            })],
+        });
+        doc.sections.push(sec);
+
+        let out = serialize(&doc).expect("header doc serializes");
+        assert!(crate::export::validate_synthesis_safety(&out).ok, "header output open-safe");
+        let pkg = Package::open(&out).unwrap();
+        let sec0 = String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap();
+        // The header ctrl is spliced AFTER </hp:secPr> (the secPr-carrier run) + carries its body.
+        let secpr = sec0.find("</hp:secPr>").expect("secPr present");
+        let header = sec0.find(r#"<hp:header id"#).expect("header present");
+        assert!(header > secpr, "header spliced after secPr");
+        assert!(sec0.contains(r#"applyPageType="BOTH""#) && sec0.contains("머리말텍스트"), "header body text emitted");
     }
 
     #[test]
