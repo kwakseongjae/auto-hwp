@@ -18,6 +18,8 @@ export default function App() {
   const [docName, setDocName] = createSignal<string | null>(null);
   const [editable, setEditable] = createSignal(true);
   const [paletteOpen, setPaletteOpen] = createSignal(false);
+  // Authoring is only safe on an editable (HWPX) doc — a view-only .hwp must be exported first.
+  const canEdit = () => pageCount() > 0 && editable();
   const [composer, setComposer] = createSignal<ComposerMode>(null);
 
   let scrollRef!: HTMLDivElement;
@@ -45,10 +47,10 @@ export default function App() {
       inflight.delete(i);
     }
   }
-  function invalidate(n: number) {
+  function invalidate(n: number, scrollTo = 0) {
     setSvgCache({});
     setPageCount(n);
-    virtualizer.scrollToIndex(0);
+    queueMicrotask(() => virtualizer.scrollToIndex(Math.max(0, Math.min(scrollTo, n - 1))));
   }
 
   // ---- verbs (each maps to a typed Intent) ----
@@ -60,7 +62,13 @@ export default function App() {
       setDocName(path.split("/").pop() ?? path);
       setEditable(r.editable);
       invalidate(r.pages);
-      toast("ok", `${docName()} · ${r.pages}쪽`);
+      if (r.editable) {
+        toast("ok", `${docName()} · ${r.pages}쪽`);
+      } else {
+        toast("warn", "보기전용(.hwp) — 편집하려면 먼저 HWPX로 내보내세요", [
+          { label: "HWPX로 내보내기", run: () => void doExport() },
+        ]);
+      }
     } catch (e) {
       toast("warn", `열기 실패: ${e}`);
     }
@@ -89,13 +97,13 @@ export default function App() {
   const composerCtx = {
     applyContent: async (json: string) => {
       const n = await api.applyContent(json);
-      invalidate(n);
+      invalidate(n, n - 1); // jump to the appended content (document end)
       toast("ok", "문서 끝에 추가됨", [{ label: "실행취소", run: () => void doUndo() }]);
     },
     propose: (json: string) => api.propose(json),
     commit: async () => {
       const n = await api.commitProposal();
-      invalidate(n);
+      invalidate(n, n - 1);
       toast("ok", "제안 적용됨", [{ label: "실행취소", run: () => void doUndo() }]);
     },
     discard: () => api.discardProposal(),
@@ -104,13 +112,14 @@ export default function App() {
   // ---- palette command registry (reactive: disabled tracks pageCount) ----
   const commands = createMemo<Command[]>(() => {
     const haveDoc = pageCount() > 0;
+    const edit = canEdit();
     return [
       { id: "open", title: "문서 열기", group: "문서", keys: "⌘O", keywords: "open 열기 파일", run: doOpen },
-      { id: "export", title: "HWPX로 내보내기", group: "문서", keys: "⌘E", keywords: "export 내보내기 저장 hwpx", disabled: !haveDoc, run: doExport },
-      { id: "table", title: "표 추가 (문서 끝에)", group: "작성", keys: "⌘T", keywords: "table 표 추가 그리드", disabled: !haveDoc, run: () => { setComposer("table"); } },
-      { id: "ai", title: "AI 콘텐츠 제안", group: "작성", keys: "⌘.", keywords: "ai 제안 작성 propose", tone: "ai", disabled: !haveDoc, run: () => { setComposer("ai"); } },
-      { id: "undo", title: "실행 취소", group: "편집", keys: "⌘Z", keywords: "undo 실행취소", disabled: !haveDoc, run: doUndo },
-      { id: "redo", title: "다시 실행", group: "편집", keys: "⌘⇧Z", keywords: "redo 다시실행", disabled: !haveDoc, run: doRedo },
+      { id: "export", title: "HWPX로 내보내기 / 저장", group: "문서", keys: "⌘S", keywords: "export 내보내기 저장 save hwpx", disabled: !haveDoc, run: doExport },
+      { id: "table", title: "표 추가 (문서 끝에)", group: "작성", keys: "⌘T", keywords: "table 표 추가 그리드", disabled: !edit, run: () => { setComposer("table"); } },
+      { id: "ai", title: "AI 콘텐츠 제안", group: "작성", keys: "⌘.", keywords: "ai 제안 작성 propose", tone: "ai", disabled: !edit, run: () => { setComposer("ai"); } },
+      { id: "undo", title: "실행 취소", group: "편집", keys: "⌘Z", keywords: "undo 실행취소", disabled: !edit, run: doUndo },
+      { id: "redo", title: "다시 실행", group: "편집", keys: "⌘⇧Z", keywords: "redo 다시실행", disabled: !edit, run: doRedo },
     ];
   });
 
@@ -129,13 +138,17 @@ export default function App() {
         e.preventDefault();
         void doExport();
       },
+      "$mod+s": (e) => {
+        e.preventDefault();
+        void doExport();
+      },
       "$mod+t": (e) => {
         e.preventDefault();
-        if (pageCount() > 0) setComposer("table");
+        if (canEdit()) setComposer("table");
       },
       "$mod+.": (e) => {
         e.preventDefault();
-        if (pageCount() > 0) setComposer("ai");
+        if (canEdit()) setComposer("ai");
       },
       "$mod+z": (e) => {
         e.preventDefault();
@@ -180,7 +193,7 @@ export default function App() {
     <div class="flex h-full flex-col bg-neutral-100 text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100">
       <header
         data-tauri-drag-region
-        class="flex items-center gap-1 border-b border-black/10 bg-neutral-50/70 py-2 pl-20 pr-3 backdrop-blur-xl dark:border-white/10 dark:bg-neutral-800/60"
+        class="flex h-12 shrink-0 items-center gap-1 border-b border-black/10 bg-neutral-50/70 pl-20 pr-3 backdrop-blur-xl dark:border-white/10 dark:bg-neutral-800/60"
       >
         <Show when={docName()}>
           <span data-tauri-drag-region class="px-1 text-sm font-medium">{docName()}</span>
@@ -199,7 +212,7 @@ export default function App() {
         <div data-tauri-drag-region class="h-6 flex-1" />
         <Verb onClick={doOpen}>📂 열기</Verb>
         <Verb onClick={doExport} disabled={pageCount() === 0}>⬇︎ 내보내기</Verb>
-        <Verb onClick={() => setComposer("ai")} tone="ai" disabled={pageCount() === 0}>✦ AI 제안</Verb>
+        <Verb onClick={() => setComposer("ai")} tone="ai" disabled={!canEdit()}>✦ AI 제안</Verb>
         <button
           onClick={() => setPaletteOpen(true)}
           class="ml-1 flex items-center gap-1 rounded-md border border-black/10 px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-200/60 dark:border-white/10 dark:hover:bg-neutral-700/60"

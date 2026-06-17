@@ -27,6 +27,7 @@
         "resizable": true,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
+        "trafficLightPosition": { "x": 18, "y": 18 },
         "windowEffects": {
           "effects": ["sidebar"],
           "state": "followsWindowActiveState"

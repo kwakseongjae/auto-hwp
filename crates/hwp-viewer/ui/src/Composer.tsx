@@ -105,7 +105,7 @@ export function Composer(props: { mode: ComposerMode; onClose: () => void; ctx: 
               <Dialog.Title class="text-sm font-semibold text-ai">✦ AI 콘텐츠 (템플릿 JSON)</Dialog.Title>
               <textarea
                 spellcheck={false}
-                class="mt-3 h-40 w-full resize-none rounded-md border border-black/10 bg-neutral-50 p-2 font-mono text-xs dark:border-white/10 dark:bg-neutral-900"
+                class="mt-3 h-40 w-full resize-none rounded-md border border-black/10 bg-neutral-50 p-2 font-mono text-xs text-neutral-900 dark:border-white/10 dark:bg-neutral-900 dark:text-neutral-100"
                 value={ai()}
                 onInput={(e) => setAi(e.currentTarget.value)}
                 onKeyDown={(e) => {
