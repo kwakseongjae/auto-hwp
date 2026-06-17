@@ -9,10 +9,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@kobalte/core": "^0.13.7",
     "@tanstack/solid-virtual": "^3.10.8",
     "@tauri-apps/api": "^2.1.1",
     "@tauri-apps/plugin-dialog": "^2.0.1",
-    "solid-js": "^1.9.3"
+    "solid-js": "^1.9.3",
+    "tinykeys": "^3.0.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",

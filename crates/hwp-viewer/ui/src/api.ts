@@ -1,10 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 
+/** Result of opening a document: page count + 2-tier capability (editable) + a format label. */
+export type OpenResult = { pages: number; editable: boolean; format: string };
+
 /// Typed bindings to the Rust `Intent` command lane (crates/hwp-viewer/src/lib.rs). No prose
 /// parsing: each command returns a typed value the UI consumes directly.
 export const api = {
-  /** Open a .hwp/.hwpx; returns the page count. */
-  openDoc: (path: string) => invoke<number>("open_doc", { path }),
+  /** Open a .hwp/.hwpx; returns page count + capability. */
+  openDoc: (path: string) => invoke<OpenResult>("open_doc", { path }),
   /** Render one page to SVG markup. */
   renderPage: (page: number) => invoke<string>("render_page", { page }),
   /** Live page count of the open document. */

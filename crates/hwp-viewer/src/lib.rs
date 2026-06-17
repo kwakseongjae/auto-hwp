@@ -44,10 +44,14 @@ fn pages(s: &mut hwp_mcp::Session) -> u32 {
 }
 
 #[tauri::command]
-fn open_doc(path: String, sess: tauri::State<'_, SharedSession>) -> Result<u32, String> {
+fn open_doc(path: String, sess: tauri::State<'_, SharedSession>) -> Result<Value, String> {
     let mut s = sess.lock().map_err(|_| "session poisoned")?;
-    apply_intent(&mut s, Intent::Open { path })?; // accepts .hwp (view) and .hwpx
-    Ok(pages(&mut s))
+    // accepts .hwp (view) and .hwpx; surface the 2-tier capability (editable) + format for the chip.
+    let (format, editable) = match apply_intent(&mut s, Intent::Open { path })? {
+        Outcome::Opened { format, editable, .. } => (format, editable),
+        _ => return Err("unexpected outcome".into()),
+    };
+    Ok(json!({ "pages": pages(&mut s), "editable": editable, "format": format }))
 }
 
 #[tauri::command]
