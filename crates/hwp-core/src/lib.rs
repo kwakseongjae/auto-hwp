@@ -64,6 +64,22 @@ impl Engine {
 
 // ---- HWPX edit/export (rhwp-free; the round-trip moat) ----
 
+/// The honest fidelity notice for an HWP5→HWPX conversion — what is preserved vs still pending.
+/// Surface this whenever a binary `.hwp` was converted so users aren't surprised by the gaps.
+pub const HWP5_CONVERSION_NOTICE: &str = "HWP5(.hwp) → HWPX 변환: 본문 텍스트, 글자 서식\
+    (굵게/기울임/크기/색/밑줄/취소선), 표(중첩·병합 셀 포함), 페이지 크기·여백·방향이 보존됩니다. \
+    아직 지원 안 됨: 글꼴(스크립트별), 위·아래첨자, 문단 번호/글머리표, 이미지, 수식/도형, \
+    머리말/꼬리말, 다중 구역(현재 단일 구역만).";
+
+/// Open ANY supported document as an editable, HWPX-serializable `SemanticDoc`, reporting whether a
+/// binary→HWPX conversion happened. A binary HW5 (`.hwp`) is lifted via rhwp (needs `--features
+/// rhwp`) and serializes through the from-scratch synthesis path; an HWPX parses normally.
+/// `was_converted` is true for `.hwp`/`.hwp3` so callers can surface [`HWP5_CONVERSION_NOTICE`].
+pub fn open_as_hwpx(bytes: &[u8]) -> Result<(SemanticDoc, bool)> {
+    let was_converted = matches!(Engine::detect(bytes), SourceFormat::Hwp5 | SourceFormat::Hwp3);
+    Ok((Engine::open(bytes)?, was_converted))
+}
+
 /// Serialize a SemanticDoc back to HWPX (verbatim passthrough + dirty-only re-emit).
 pub fn serialize_hwpx(doc: &SemanticDoc) -> Result<Vec<u8>> {
     hwp_hwpx::HwpxWriter.serialize(doc)
@@ -427,6 +443,19 @@ mod inplace_tests {
         let pagepr = &sec0[sec0.find("<hp:pagePr").expect("has pagePr")..][..120];
         assert!(pagepr.contains(r#"landscape="NARROWLY""#), "portrait, not the Skeleton's WIDELY: {pagepr}");
         assert!(pagepr.contains(r#"width="59528""#), "portrait A4 width (210mm), not landscape: {pagepr}");
+    }
+
+    /// Track A Phase 5: open_as_hwpx flags a binary .hwp as converted and yields a doc that
+    /// serializes to an open-safe HWPX (the engine surface behind the CLI `convert` command).
+    #[cfg(feature = "rhwp")]
+    #[test]
+    fn open_as_hwpx_flags_conversion_and_serializes() {
+        let hwp = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmark.hwp")).unwrap();
+        let (doc, was_converted) = open_as_hwpx(&hwp).unwrap();
+        assert!(was_converted, ".hwp must be flagged as a conversion (for the fidelity notice)");
+        assert!(!doc.plain_text().trim().is_empty(), "lifted content present");
+        assert!(validate_hwpx(&serialize_hwpx(&doc).unwrap()).ok, "converts to an open-safe HWPX");
+        assert!(!HWP5_CONVERSION_NOTICE.is_empty());
     }
 
     /// Phase 1: undo restores the doc bit-for-bit (the byte-stability moat), redo replays it.

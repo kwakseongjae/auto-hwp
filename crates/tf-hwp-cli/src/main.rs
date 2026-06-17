@@ -93,6 +93,19 @@ enum Cmd {
         #[arg(long)]
         verify: bool,
     },
+    /// Convert a binary .hwp (HW5) to editable .hwpx — text + formatting + tables + page geometry.
+    /// Needs `--features rhwp` to lift .hwp; HWPX input is normalized (re-serialized). Output defaults
+    /// to the input path with a .hwpx extension (same folder), so `convert report.hwp` writes
+    /// `report.hwpx` beside it.
+    Convert {
+        file: PathBuf,
+        /// Output .hwpx path (default: input path with .hwpx extension).
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Verify Hancom-acceptability by opening the output in the oracle (soffice+H2Orestart).
+        #[arg(long)]
+        verify: bool,
+    },
     /// Edit an HWPX (append paragraphs) and export round-trip-safe HWPX. (No rhwp needed.)
     Edit {
         file: PathBuf,
@@ -152,6 +165,7 @@ fn run() -> Result<(), String> {
         Cmd::Fidelity { file } => fidelity(file)?,
         Cmd::Render { file, page, out } => render(&file, page, &out)?,
         Cmd::View { file, out } => view(&file, &out)?,
+        Cmd::Convert { file, out, verify } => convert(&file, out, verify)?,
         Cmd::Edit { file, append, out, verify } => edit(&file, &append, &out, verify)?,
         Cmd::AiFill { file, instruction, provider, out, verify, dry_run } => {
             ai_fill(&file, &instruction, &provider, &out, verify, dry_run)?
@@ -340,6 +354,44 @@ fn ai_fill(
         }
         let dir = std::env::temp_dir().join("tfhwp_aifill_verify");
         match hwp_oracle::convert_to_pdf(out, &dir) {
+            Ok(pdf) => println!("verify: ORACLE OPENS IT ✓ ({})", pdf.display()),
+            Err(e) => println!("verify: ORACLE REJECTS IT ✗ ({e})"),
+        }
+    }
+    Ok(())
+}
+
+fn convert(file: &PathBuf, out: Option<PathBuf>, verify: bool) -> Result<(), String> {
+    let bytes = read(file)?;
+    // Lifts .hwp (needs --features rhwp) or parses .hwpx; serialize_hwpx then produces the package
+    // (from-scratch synthesis for a lifted .hwp, verbatim round-trip for HWPX).
+    let (doc, was_converted) = hwp_core::open_as_hwpx(&bytes).map_err(|e| e.to_string())?;
+
+    let mut out_path = out.unwrap_or_else(|| file.with_extension("hwpx"));
+    if out_path == *file {
+        // Input was already .hwpx and no --out given: never overwrite the source.
+        let stem = file.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        out_path = file.with_file_name(format!("{stem}-converted.hwpx"));
+    }
+
+    let out_bytes = hwp_core::serialize_hwpx(&doc).map_err(|e| e.to_string())?;
+    std::fs::write(&out_path, &out_bytes).map_err(|e| e.to_string())?;
+    let report = hwp_core::validate_hwpx(&out_bytes);
+    println!("{} → {} ({} bytes)", file.display(), out_path.display(), out_bytes.len());
+    println!("editor-open-safety: {}", if report.ok { "OK ✓" } else { "FAIL ✗" });
+    for b in &report.blocking {
+        println!("  blocking: {b}");
+    }
+    if was_converted {
+        println!("\n참고: {}", hwp_core::HWP5_CONVERSION_NOTICE);
+    }
+    if verify {
+        if !hwp_oracle::soffice_available() {
+            println!("verify: skipped (soffice not available)");
+            return Ok(());
+        }
+        let dir = std::env::temp_dir().join("tfhwp_convert_verify");
+        match hwp_oracle::convert_to_pdf(&out_path, &dir) {
             Ok(pdf) => println!("verify: ORACLE OPENS IT ✓ ({})", pdf.display()),
             Err(e) => println!("verify: ORACLE REJECTS IT ✗ ({e})"),
         }
