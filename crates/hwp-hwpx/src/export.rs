@@ -86,12 +86,160 @@ pub fn validate_open_safety(bytes: &[u8]) -> SafetyReport {
     SafetyReport { ok: blocking.is_empty(), blocking, warnings }
 }
 
+/// STRICTER gate for the FROM-SCRATCH synthesis path (HWP5→HWPX). On top of [`validate_open_safety`]
+/// it checks the two ways a deep-lift off-by-one becomes a Hancom "damaged file" — neither of which
+/// the generic XML/OPC checks catch, and `build_synth_plan` silently no-ops on:
+///   (a) IDRef integrity — every `charPrIDRef`/`paraPrIDRef`/`borderFillIDRef`/`styleIDRef` in a
+///       section resolves to an id that EXISTS in the header pools;
+///   (b) `itemCnt` == actual child count for each header pool (Hancom trusts the declared count).
+///
+/// Kept SEPARATE from `validate_open_safety` (which the byte-stable HWPX-in round-trip asserts) so
+/// these additions can't regress that path — only the converter runs this, inside
+/// `serialize_from_scratch`, before returning.
+pub fn validate_synthesis_safety(bytes: &[u8]) -> SafetyReport {
+    let base = validate_open_safety(bytes);
+    let mut blocking = base.blocking;
+    let warnings = base.warnings;
+
+    if let Ok(pkg) = crate::package::Package::open(bytes) {
+        match pkg.read_header() {
+            Some(hb) => {
+                let header = String::from_utf8_lossy(&hb);
+                // (b) itemCnt == childcount for each synthesizable pool.
+                for (container, elem) in [
+                    ("charProperties", "charPr"),
+                    ("paraProperties", "paraPr"),
+                    ("fontfaces", "fontface"),
+                    ("borderFills", "borderFill"),
+                    ("styles", "style"),
+                ] {
+                    if let Some((declared, actual)) = pool_itemcnt_mismatch(&header, container, elem) {
+                        blocking.push(format!(
+                            "{container}: itemCnt={declared} but {actual} <hh:{elem}> children"
+                        ));
+                    }
+                }
+                // (a) IDRef integrity — section references must resolve to header pool ids.
+                let char_ids = pool_ids(&header, "charProperties", "charPr");
+                let para_ids = pool_ids(&header, "paraProperties", "paraPr");
+                let bf_ids = pool_ids(&header, "borderFills", "borderFill");
+                let style_ids = pool_ids(&header, "styles", "style");
+                for name in pkg.section_part_names() {
+                    if let Ok(b) = pkg.read_part(&name) {
+                        let s = String::from_utf8_lossy(&b);
+                        check_refs(&s, "charPrIDRef", &char_ids, &name, &mut blocking);
+                        check_refs(&s, "paraPrIDRef", &para_ids, &name, &mut blocking);
+                        check_refs(&s, "borderFillIDRef", &bf_ids, &name, &mut blocking);
+                        check_refs(&s, "styleIDRef", &style_ids, &name, &mut blocking);
+                    }
+                }
+            }
+            None => blocking.push("no header.xml to validate pool references against".into()),
+        }
+    }
+
+    SafetyReport { ok: blocking.is_empty(), blocking, warnings }
+}
+
+/// First `name="N"` (u64) within `tag`.
+fn attr_u64(tag: &str, name: &str) -> Option<u64> {
+    let pat = format!("{name}=\"");
+    let s = tag.find(&pat)? + pat.len();
+    let e = tag[s..].find('"')? + s;
+    tag[s..e].parse().ok()
+}
+
+/// The set of `id`s declared by `<hh:{elem} …>` elements inside the `<hh:{container}>` pool.
+fn pool_ids(header: &str, container: &str, elem: &str) -> std::collections::BTreeSet<u64> {
+    let mut ids = std::collections::BTreeSet::new();
+    let (open, close) = (format!("<hh:{container}"), format!("</hh:{container}>"));
+    let seg = match (header.find(&open), header.find(&close)) {
+        (Some(a), Some(b)) if b > a => &header[a..b],
+        _ => return ids,
+    };
+    let needle = format!("<hh:{elem} "); // trailing space: never matches the container open tag
+    let mut idx = 0;
+    while let Some(p) = seg[idx..].find(&needle) {
+        let start = idx + p + needle.len();
+        let tag_end = seg[start..].find('>').map(|e| start + e).unwrap_or(seg.len());
+        if let Some(id) = attr_u64(&seg[start..tag_end], "id") {
+            ids.insert(id);
+        }
+        idx = tag_end;
+    }
+    ids
+}
+
+/// `(declared itemCnt, actual child count)` for a pool, or None if they match / the pool is absent.
+fn pool_itemcnt_mismatch(header: &str, container: &str, elem: &str) -> Option<(u64, usize)> {
+    let open = format!("<hh:{container}");
+    let p = header.find(&open)?;
+    let tag_end = header[p..].find('>')? + p;
+    let declared = attr_u64(&header[p..=tag_end], "itemCnt")?;
+    let cstart = header[p..].find(&format!("</hh:{container}>"))? + p;
+    let actual = header[tag_end..cstart].matches(&format!("<hh:{elem} ")).count();
+    (declared as usize != actual).then_some((declared, actual))
+}
+
+/// Flag any `{attr}="N"` in `xml` whose `N` is not in `valid` (one message per distinct bad id).
+fn check_refs(
+    xml: &str,
+    attr: &str,
+    valid: &std::collections::BTreeSet<u64>,
+    part: &str,
+    out: &mut Vec<String>,
+) {
+    let needle = format!("{attr}=\"");
+    let mut idx = 0;
+    let mut bad = std::collections::BTreeSet::new();
+    while let Some(p) = xml[idx..].find(&needle) {
+        let start = idx + p + needle.len();
+        let end = xml[start..].find('"').map(|e| start + e).unwrap_or(xml.len());
+        if let Ok(id) = xml[start..end].parse::<u64>() {
+            if !valid.contains(&id) {
+                bad.insert(id);
+            }
+        }
+        idx = end;
+    }
+    for id in bad {
+        out.push(format!("{part}: {attr}=\"{id}\" has no matching header pool entry"));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     #[test]
     fn namespace_surface_has_15() {
         assert_eq!(HWPML_COMPAT_ROOT_NAMESPACES.len(), 15);
+    }
+
+    #[test]
+    fn pool_ids_collects_ids_and_skips_container_tag() {
+        let header = r#"<hh:charProperties itemCnt="2"><hh:charPr id="0"/><hh:charPr id="7"/></hh:charProperties>"#;
+        let ids = pool_ids(header, "charProperties", "charPr");
+        assert_eq!(ids, BTreeSet::from([0, 7]));
+    }
+
+    #[test]
+    fn itemcnt_mismatch_is_detected() {
+        let ok = r#"<hh:charProperties itemCnt="2"><hh:charPr id="0"/><hh:charPr id="1"/></hh:charProperties>"#;
+        assert_eq!(pool_itemcnt_mismatch(ok, "charProperties", "charPr"), None);
+        let bad = r#"<hh:charProperties itemCnt="3"><hh:charPr id="0"/><hh:charPr id="1"/></hh:charProperties>"#;
+        assert_eq!(pool_itemcnt_mismatch(bad, "charProperties", "charPr"), Some((3, 2)));
+    }
+
+    #[test]
+    fn check_refs_flags_dangling_only() {
+        let valid = BTreeSet::from([0u64, 1, 7]);
+        let mut out = Vec::new();
+        // 0 and 7 resolve; 99 does not.
+        let xml = r#"<hp:run charPrIDRef="0"/><hp:run charPrIDRef="7"/><hp:run charPrIDRef="99"/>"#;
+        check_refs(xml, "charPrIDRef", &valid, "section0.xml", &mut out);
+        assert_eq!(out.len(), 1, "exactly the dangling ref is flagged: {out:?}");
+        assert!(out[0].contains("99"));
     }
 }

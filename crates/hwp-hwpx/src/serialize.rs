@@ -141,7 +141,20 @@ fn serialize_from_scratch(doc: &SemanticDoc) -> Result<Vec<u8>> {
             mark_block_dirty(block);
         }
     }
-    serialize(&seeded)
+    let out = serialize(&seeded)?;
+
+    // v1 BLOCKER tripwire: a deep-lift off-by-one would emit a dangling charPr/paraPr/borderFill/
+    // styleIDRef (build_synth_plan silently no-ops on out-of-range ids) or a wrong itemCnt — both
+    // open as a Hancom "damaged file". Refuse to hand back such a package.
+    let report = crate::export::validate_synthesis_safety(&out);
+    if !report.ok {
+        return Err(Error::Serialize(format!(
+            "synthesized HWPX failed open-safety ({} issue(s)): {}",
+            report.blocking.len(),
+            report.blocking.join("; ")
+        )));
+    }
+    Ok(out)
 }
 
 /// Recursively mark a block dirty so the append path ([`dirty_emit`]) emits it: a lifted paragraph
