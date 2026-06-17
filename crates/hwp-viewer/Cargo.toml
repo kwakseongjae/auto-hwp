@@ -20,6 +20,9 @@ path = "src/main.rs"
 # removes the `--features rhwp` footgun (plain `cargo run -p hwp-viewer` now renders + captures).
 default = ["rhwp"]
 rhwp = ["hwp-core/rhwp", "hwp-mcp/rhwp"]
+# In-app AI generation (natural language → AiContent via a provider). Kept SEPARATE from default so
+# plain/CI builds stay lean (no reqwest/keyring). Run dev with: cargo tauri dev -f rhwp ai
+ai = ["hwp-ai/anthropic", "hwp-ai/keyring", "hwp-ai/local"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -29,6 +32,7 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 hwp-core = { workspace = true }
 hwp-mcp = { workspace = true }
+hwp-ai = { workspace = true }
 hwp-model = { workspace = true }
 serde_json = { workspace = true }
 # A3 embedded control server uses pure std::net + these (already in the workspace lock):

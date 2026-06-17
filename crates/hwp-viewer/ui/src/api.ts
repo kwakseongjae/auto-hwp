@@ -16,7 +16,9 @@ export const api = {
   applyContent: (content: string) => invoke<number>("apply_content", { content }),
   /** Serialize the edited document to a .hwpx path; returns a status line. */
   exportHwpx: (path: string) => invoke<string>("export_hwpx", { path }),
-  /** Dry-run AI content into a preview (rationale + diff) without mutating the doc. */
+  /** Natural-language AI: a provider turns a prompt into content, dry-run; returns rationale+preview. */
+  aiGenerate: (prompt: string) => invoke<string>("ai_generate", { prompt }),
+  /** Dry-run hand-authored content JSON into a preview without mutating the doc (advanced). */
   propose: (content: string) => invoke<string>("propose", { content }),
   /** Commit the pending proposal (one undo unit); returns the new page count. */
   commitProposal: () => invoke<number>("commit_proposal"),

@@ -115,6 +115,43 @@ fn discard_proposal(sess: tauri::State<'_, SharedSession>) -> Result<(), String>
     Ok(())
 }
 
+/// Natural-language AI authoring: a provider turns the prompt + document context into rich
+/// AiContent, dry-run into a pending proposal; returns the rationale + diff preview for review.
+/// `commit_proposal` then applies it (one undo unit). Needs `--features ai`.
+#[cfg(feature = "ai")]
+#[tauri::command]
+fn ai_generate(prompt: String, sess: tauri::State<'_, SharedSession>) -> Result<String, String> {
+    let mut s = sess.lock().map_err(|_| "session poisoned")?;
+    let provider = pick_provider();
+    let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+    let proposal = hwp_ai::propose(doc, &*provider, &prompt).map_err(|e| e.to_string())?;
+    let preview = format!("{}\n\n{}", proposal.rationale, proposal.preview());
+    s.pending = Some(proposal);
+    Ok(format!("[{}]\n{preview}", provider.name()))
+}
+
+#[cfg(not(feature = "ai"))]
+#[tauri::command]
+fn ai_generate(_prompt: String, _sess: tauri::State<'_, SharedSession>) -> Result<String, String> {
+    Err("AI 생성은 `--features ai` 빌드가 필요합니다 (cargo tauri dev -f rhwp ai)".into())
+}
+
+/// Pick an AI provider: a local model (Ollama) we control if reachable, else cloud BYOK
+/// (Anthropic key from env/keychain), else the deterministic Mock — so it never hard-fails.
+#[cfg(feature = "ai")]
+fn pick_provider() -> Box<dyn hwp_ai::LlmProvider> {
+    if hwp_ai::ollama::OllamaProvider::available() {
+        Box::new(hwp_ai::ollama::OllamaProvider::from_env())
+    } else if hwp_ai::secret::has_anthropic_key() {
+        match hwp_ai::anthropic::AnthropicProvider::from_env() {
+            Ok(p) => Box::new(p),
+            Err(_) => Box::new(hwp_ai::MockProvider),
+        }
+    } else {
+        Box::new(hwp_ai::MockProvider)
+    }
+}
+
 /// Undo / redo the last edit; returns the new page count so the frontend re-renders.
 #[tauri::command]
 fn undo(sess: tauri::State<'_, SharedSession>) -> Result<u32, String> {
@@ -151,6 +188,7 @@ pub fn run() {
             propose,
             commit_proposal,
             discard_proposal,
+            ai_generate,
             undo,
             redo
         ])

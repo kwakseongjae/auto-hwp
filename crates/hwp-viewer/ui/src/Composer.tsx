@@ -6,7 +6,9 @@ export type ComposerMode = "table" | "ai" | null;
 export type ComposerCtx = {
   /** Deterministic apply (one undo unit) → returns new page count. */
   applyContent: (json: string) => Promise<void>;
-  /** Dry-run a proposal → returns the rationale+preview text. */
+  /** Natural-language AI: provider turns a prompt into content (dry-run) → rationale+preview text. */
+  generate: (prompt: string) => Promise<string>;
+  /** Dry-run hand-authored content JSON → rationale+preview text (advanced). */
   propose: (json: string) => Promise<string>;
   commit: () => Promise<void>;
   discard: () => Promise<void>;
@@ -22,6 +24,8 @@ export function Composer(props: { mode: ComposerMode; onClose: () => void; ctx: 
   const [rows, setRows] = createSignal(3);
   const [cols, setCols] = createSignal(3);
   const [header, setHeader] = createSignal(true);
+  const [prompt, setPrompt] = createSignal("");
+  const [useJson, setUseJson] = createSignal(false);
   const [ai, setAi] = createSignal(DEFAULT_AI);
   const [preview, setPreview] = createSignal<string | null>(null);
   const [busy, setBusy] = createSignal(false);
@@ -46,6 +50,17 @@ export function Composer(props: { mode: ComposerMode; onClose: () => void; ctx: 
     try {
       await props.ctx.applyContent(tableJson());
       close();
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function doGenerate() {
+    if (!prompt().trim()) return;
+    setBusy(true);
+    try {
+      setPreview(await props.ctx.generate(prompt()));
+    } catch (e) {
+      setPreview(`생성 실패: ${e}`);
     } finally {
       setBusy(false);
     }
@@ -102,25 +117,56 @@ export function Composer(props: { mode: ComposerMode; onClose: () => void; ctx: 
             </Show>
 
             <Show when={props.mode === "ai"}>
-              <Dialog.Title class="text-sm font-semibold text-ai">✦ AI 콘텐츠 (템플릿 JSON)</Dialog.Title>
-              <textarea
-                spellcheck={false}
-                class="mt-3 h-40 w-full resize-none rounded-md border border-black/10 bg-neutral-50 p-2 font-mono text-xs text-neutral-900 dark:border-white/10 dark:bg-neutral-900 dark:text-neutral-100"
-                value={ai()}
-                onInput={(e) => setAi(e.currentTarget.value)}
-                onKeyDown={(e) => {
-                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                    e.preventDefault();
-                    void doPropose();
-                  }
-                }}
-              />
-              <Show when={!preview()}>
-                <div class="mt-3 flex justify-end gap-2 text-sm">
-                  <button onClick={close} class="rounded-md px-3 py-1.5 text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-700">취소</button>
-                  <button onClick={doPropose} disabled={busy()} class="rounded-md bg-ai px-3 py-1.5 font-medium text-white hover:opacity-90 disabled:opacity-40">미리보기 (제안) <kbd class="opacity-70">⌘⏎</kbd></button>
-                </div>
+              <div class="flex items-center justify-between">
+                <Dialog.Title class="text-sm font-semibold text-ai">✦ AI로 작성</Dialog.Title>
+                <button onClick={() => setUseJson(!useJson())} class="text-xs text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200">
+                  {useJson() ? "← 자연어로" : "고급: JSON 직접 입력"}
+                </button>
+              </div>
+
+              <Show when={!useJson()}>
+                <textarea
+                  spellcheck={false}
+                  placeholder="무엇을 추가할지 한국어로 적어주세요. 예: 팀원 구성에 대한 3열 표를 추가해줘"
+                  class="mt-3 h-32 w-full resize-none rounded-md border border-black/10 bg-neutral-50 p-2 text-sm text-neutral-900 placeholder:text-neutral-400 dark:border-white/10 dark:bg-neutral-900 dark:text-neutral-100"
+                  value={prompt()}
+                  onInput={(e) => setPrompt(e.currentTarget.value)}
+                  onKeyDown={(e) => {
+                    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                      e.preventDefault();
+                      void doGenerate();
+                    }
+                  }}
+                />
+                <Show when={!preview()}>
+                  <div class="mt-3 flex justify-end gap-2 text-sm">
+                    <button onClick={close} class="rounded-md px-3 py-1.5 text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-700">취소</button>
+                    <button onClick={doGenerate} disabled={busy() || !prompt().trim()} class="rounded-md bg-ai px-3 py-1.5 font-medium text-white hover:opacity-90 disabled:opacity-40">{busy() ? "생성 중…" : "✦ 생성"} <kbd class="opacity-70">⌘⏎</kbd></button>
+                  </div>
+                </Show>
               </Show>
+
+              <Show when={useJson()}>
+                <textarea
+                  spellcheck={false}
+                  class="mt-3 h-40 w-full resize-none rounded-md border border-black/10 bg-neutral-50 p-2 font-mono text-xs text-neutral-900 dark:border-white/10 dark:bg-neutral-900 dark:text-neutral-100"
+                  value={ai()}
+                  onInput={(e) => setAi(e.currentTarget.value)}
+                  onKeyDown={(e) => {
+                    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                      e.preventDefault();
+                      void doPropose();
+                    }
+                  }}
+                />
+                <Show when={!preview()}>
+                  <div class="mt-3 flex justify-end gap-2 text-sm">
+                    <button onClick={close} class="rounded-md px-3 py-1.5 text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-700">취소</button>
+                    <button onClick={doPropose} disabled={busy()} class="rounded-md bg-ai px-3 py-1.5 font-medium text-white hover:opacity-90 disabled:opacity-40">미리보기 <kbd class="opacity-70">⌘⏎</kbd></button>
+                  </div>
+                </Show>
+              </Show>
+
               <Show when={preview()}>
                 <div class="mt-3 flex flex-col gap-2 rounded-md border border-ai/30 bg-ai/5 p-2 text-sm">
                   <pre class="max-h-48 overflow-auto whitespace-pre-wrap text-xs text-neutral-700 dark:text-neutral-300">{preview()}</pre>

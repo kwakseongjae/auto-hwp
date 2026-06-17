@@ -100,6 +100,7 @@ export default function App() {
       invalidate(n, n - 1); // jump to the appended content (document end)
       toast("ok", "문서 끝에 추가됨", [{ label: "실행취소", run: () => void doUndo() }]);
     },
+    generate: (p: string) => api.aiGenerate(p),
     propose: (json: string) => api.propose(json),
     commit: async () => {
       const n = await api.commitProposal();

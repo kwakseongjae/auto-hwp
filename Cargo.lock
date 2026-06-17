@@ -2010,6 +2010,7 @@ name = "hwp-viewer"
 version = "0.0.1"
 dependencies = [
  "getrandom 0.3.4",
+ "hwp-ai",
  "hwp-core",
  "hwp-mcp",
  "hwp-model",
