@@ -1,0 +1,10 @@
+[package]
+name = "hwp-crypto"
+description = "배포용/password decryption (MSVC-rand LCG → SHA-1 → AES-128-ECB). Phase 5+; golden-vector, fail-closed."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hwp-model = { workspace = true }

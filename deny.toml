@@ -1,0 +1,24 @@
+# cargo-deny: enforce the license policy (see docs/DEPENDENCY-STRATEGY.md §3).
+# Run: cargo install cargo-deny && cargo deny check licenses
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+]
+# GPL/AGPL must NEVER be linked into the shipped core.
+# (LibreOffice + H2Orestart are GPL but run out-of-process only — not a cargo dep.)
+confidence-threshold = 0.9
+
+[bans]
+# pyhwp (AGPL) and any GPL crate are forbidden as linked dependencies.
+deny = []
+
+[advisories]
+yanked = "warn"

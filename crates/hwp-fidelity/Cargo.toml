@@ -1,0 +1,19 @@
+[package]
+name = "hwp-fidelity"
+description = "Benchmark-driven fidelity harness: render the corpus (benchmark.hwp + samples) with our engine and the oracle, compare per page (\"원본 그대로\" gate). Native/dev only."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hwp-model = { workspace = true }
+hwp-ingest = { workspace = true }
+hwp-core = { workspace = true }
+hwp-oracle = { workspace = true }
+image = { workspace = true }
+
+[features]
+default = []
+# Mirror hwp-core: enable to exercise the rhwp-backed engine render path in fidelity tests.
+rhwp = ["hwp-core/rhwp"]

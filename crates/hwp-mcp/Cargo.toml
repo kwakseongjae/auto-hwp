@@ -1,0 +1,31 @@
+[package]
+name = "hwp-mcp"
+description = "Headless MCP (Model Context Protocol) stdio server: exposes the tf-hwp op-bus (open/context/apply-content/export) to coding agents over JSON-RPC. Self-contained (no rmcp dep)."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "hwp-mcp"
+path = "src/main.rs"
+
+[lib]
+name = "hwp_mcp"
+path = "src/lib.rs"
+
+[features]
+default = []
+# Enables the `render_page` control tool (current doc → SVG) via the rhwp bootstrap.
+rhwp = ["hwp-core/rhwp"]
+
+[dependencies]
+hwp-model = { workspace = true }
+hwp-ops = { workspace = true }
+hwp-ai = { workspace = true }
+hwp-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# A3 loopback control server (pure std::net): constant-time token compare + CSPRNG token.
+subtle = "2"
+getrandom = "0.3"

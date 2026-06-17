@@ -1,0 +1,24 @@
+/target
+**/*.rs.bk
+Cargo.lock.bak
+.DS_Store
+
+# build / tooling
+/dist
+/pkg
+node_modules/
+
+# oracle / test scratch
+/tmp
+*.pdf.tmp
+/corpus/private/
+/out
+/benchmark.hwp
+/benchmark.pdf
+
+# local agent runtime state
+.claude/
+
+# editor
+.idea/
+.vscode/

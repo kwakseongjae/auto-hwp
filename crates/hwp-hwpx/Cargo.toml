@@ -1,0 +1,12 @@
+[package]
+name = "hwp-hwpx"
+description = "HWPX (OWPML) container reader + text extraction + our own Hancom-acceptable HWPX serializer/export contract."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hwp-model = { workspace = true }
+zip = { workspace = true }
+quick-xml = { workspace = true }

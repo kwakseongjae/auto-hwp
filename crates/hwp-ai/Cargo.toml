@@ -1,0 +1,19 @@
+[package]
+name = "hwp-ai"
+description = "AI layer: LlmProvider trait + ai_fill (op-bus), AST→Markdown projection. Anthropic BYOK provider behind the `anthropic` feature (native-only)."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+# BYOK cloud provider (Anthropic Messages API). Native-only; pulls reqwest.
+anthropic = ["dep:reqwest"]
+
+[dependencies]
+hwp-model = { workspace = true }
+hwp-ops = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }

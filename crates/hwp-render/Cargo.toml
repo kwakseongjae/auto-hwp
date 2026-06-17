@@ -1,0 +1,10 @@
+[package]
+name = "hwp-render"
+description = "PageLayerTree (paint IR) → backends (Canvas/WebGL/SVG/Skia). Phase 0: trait + null backend."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hwp-model = { workspace = true }

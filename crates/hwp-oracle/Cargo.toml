@@ -1,0 +1,10 @@
+[package]
+name = "hwp-oracle"
+description = "Fidelity oracle: LibreOffice + H2Orestart out-of-process (GPL-isolated, soffice CLI only). Native only."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hwp-model = { workspace = true }

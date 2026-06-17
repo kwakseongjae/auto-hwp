@@ -1,0 +1,10 @@
+[package]
+name = "hwp-ops"
+description = "Typed edit-op/command bus (UI + AI share this). undo/redo + op-log. Pure, wasm-clean."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hwp-model = { workspace = true }

@@ -1,0 +1,43 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+# The vendored rhwp bootstrap is its own package — keep it out of our workspace
+# (it builds standalone; hwp-rhwp path-deps into it behind the `rhwp` feature).
+exclude = ["external/rhwp"]
+
+[workspace.package]
+edition = "2021"
+version = "0.0.1"
+license = "MIT OR Apache-2.0"
+rust-version = "1.95"
+repository = "https://github.com/USER/tf-hwp"
+authors = ["tf-hwp contributors"]
+
+[workspace.dependencies]
+# --- BORROW-STABLE external deps (pure-Rust, wasm-ok where used in core) ---
+thiserror = "2"
+quick-xml = "0.37"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+flate2 = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+# --- internal crates ---
+hwp-model = { path = "crates/hwp-model" }
+hwp-ingest = { path = "crates/hwp-ingest" }
+hwp-hwpx = { path = "crates/hwp-hwpx" }
+hwp-typeset = { path = "crates/hwp-typeset" }
+hwp-render = { path = "crates/hwp-render" }
+hwp-ops = { path = "crates/hwp-ops" }
+hwp-ai = { path = "crates/hwp-ai" }
+hwp-crypto = { path = "crates/hwp-crypto" }
+hwp-rhwp = { path = "crates/hwp-rhwp" }
+hwp-oracle = { path = "crates/hwp-oracle" }
+hwp-core = { path = "crates/hwp-core" }
+hwp-mcp = { path = "crates/hwp-mcp" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"

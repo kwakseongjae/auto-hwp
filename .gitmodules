@@ -1,0 +1,3 @@
+[submodule "external/rhwp"]
+	path = external/rhwp
+	url = https://github.com/kwakseongjae/rhwp.git

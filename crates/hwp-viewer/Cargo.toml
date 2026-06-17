@@ -1,0 +1,36 @@
+[package]
+name = "hwp-viewer"
+description = "tf-hwp Tauri 2 viewer shell (A2): open an HWPX, render pages faithfully (rhwp SVG), and run AI content through the op-bus. Hosts the A3 embedded loopback control server."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "hwp_viewer_lib"
+path = "src/lib.rs"
+crate-type = ["lib"]
+
+[[bin]]
+name = "hwp-viewer"
+path = "src/main.rs"
+
+[features]
+# rhwp render is ON by default — a viewer without faithful page rendering is pointless, and this
+# removes the `--features rhwp` footgun (plain `cargo run -p hwp-viewer` now renders + captures).
+default = ["rhwp"]
+rhwp = ["hwp-core/rhwp", "hwp-mcp/rhwp"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+hwp-core = { workspace = true }
+hwp-mcp = { workspace = true }
+hwp-model = { workspace = true }
+serde_json = { workspace = true }
+# A3 embedded control server uses pure std::net + these (already in the workspace lock):
+subtle = "2"
+getrandom = "0.3"

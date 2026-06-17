@@ -1,0 +1,10 @@
+[package]
+name = "hwp-typeset"
+description = "Our separable typography/layout engine (자간/장평/배분·나눔/금칙/줄간격). Phase 0: trait + naive impl; grows to replace the rhwp bootstrap."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hwp-model = { workspace = true }

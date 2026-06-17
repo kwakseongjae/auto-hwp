@@ -1,0 +1,38 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive   # external/rhwp is an optional path-dep; needed for cargo resolve
+      - uses: dtolnay/rust-toolchain@1.95
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+      - name: fmt
+        run: cargo fmt --all --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: test (native)
+        run: cargo test --workspace
+      - name: wasm hygiene (pure core compiles to wasm32)
+        run: cargo check -p hwp-model -p hwp-ops -p hwp-ingest --target wasm32-unknown-unknown
+
+  licenses:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive   # external/rhwp is an optional path-dep; needed for cargo resolve
+      - uses: dtolnay/rust-toolchain@1.95
+      - run: cargo install cargo-deny --locked
+      - run: cargo deny check licenses

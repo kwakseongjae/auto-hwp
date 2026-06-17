@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>tf-hwp viewer</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="bar">
+      <button id="open">📂 HWPX 열기</button>
+      <span id="status">문서를 여세요.</span>
+      <button id="toggle-ai">🤖 AI 패널</button>
+    </header>
+    <main>
+      <section id="pages" class="pages"></section>
+      <aside id="ai" class="ai hidden">
+        <h3>AI 콘텐츠 (템플릿 JSON)</h3>
+        <textarea id="content" spellcheck="false" placeholder='{"blocks":[{"type":"heading","text":"제목","style":"개요 1"},{"type":"paragraph","runs":[{"text":"본문 ","bold":false},{"text":"강조","bold":true}]}]}'></textarea>
+        <div class="row">
+          <button id="apply">적용 (op-bus)</button>
+          <button id="export">내보내기 (.hwpx)</button>
+        </div>
+        <pre id="log" class="log"></pre>
+      </aside>
+    </main>
+    <script src="main.js"></script>
+  </body>
+</html>

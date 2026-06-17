@@ -1,0 +1,10 @@
+[package]
+name = "hwp-ingest"
+description = "Format detection (OLE/CFB vs ZIP+OWPML). Pure, wasm-clean."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hwp-model = { workspace = true }

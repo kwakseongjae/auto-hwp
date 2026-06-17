@@ -1,0 +1,10 @@
+[package]
+name = "hwp-model"
+description = "Format-neutral SemanticDoc AST + capability traits (provenance/passthrough/dirty). Pure, wasm-clean, no external runtime deps beyond thiserror."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }

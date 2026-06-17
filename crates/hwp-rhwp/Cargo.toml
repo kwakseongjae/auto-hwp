@@ -1,0 +1,19 @@
+[package]
+name = "hwp-rhwp"
+description = "rhwp bootstrap adapter — rhwp-backed impls of our capability traits, behind the `rhwp` feature. Without the feature it's inert (rhwp is not compiled), so default builds stay fast."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+# Enable to compile + call the vendored rhwp (external/rhwp submodule).
+rhwp = ["dep:rhwp"]
+
+[dependencies]
+hwp-model = { workspace = true }
+# Vendored fork (kwakseongjae/rhwp @ v0.7.15). Optional: only COMPILED with the `rhwp`
+# feature, but the submodule must be present for `cargo metadata` to resolve.
+# Single crate (rlib) → in-process native + wasm integration.
+rhwp = { path = "../../external/rhwp", optional = true }

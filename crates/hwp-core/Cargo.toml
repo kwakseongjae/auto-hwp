@@ -1,0 +1,21 @@
+[package]
+name = "hwp-core"
+description = "Capability registry / façade. Assembles the best-available implementation per capability (our own first; rhwp bootstrap when wired)."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+# Forwards to hwp-rhwp's `rhwp` feature to enable the bootstrap engine.
+rhwp = ["hwp-rhwp/rhwp"]
+
+[dependencies]
+hwp-model = { workspace = true }
+hwp-ingest = { workspace = true }
+hwp-hwpx = { workspace = true }
+hwp-typeset = { workspace = true }
+hwp-render = { workspace = true }
+hwp-ops = { workspace = true }
+hwp-rhwp = { workspace = true }
