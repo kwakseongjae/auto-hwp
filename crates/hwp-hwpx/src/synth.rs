@@ -271,6 +271,13 @@ pub fn synthesize_char_pr(base: &str, new_id: u64, shape: &CharShape, fontref: O
     if shape.strikeout {
         s = s.replacen("<hh:strikeout shape=\"NONE\"", "<hh:strikeout shape=\"SOLID\"", 1);
     }
+    // sub/superscript markers sit AFTER <hh:strikeout>, before <hh:outline> (schema order; verified
+    // against real Hancom charPrs). Mutually exclusive — superscript wins if both are set.
+    if shape.superscript {
+        s = s.replacen("<hh:outline", "<hh:supscript/><hh:outline", 1);
+    } else if shape.subscript {
+        s = s.replacen("<hh:outline", "<hh:subscript/><hh:outline", 1);
+    }
     s
 }
 
@@ -572,6 +579,21 @@ mod tests {
         assert!(out.contains(r##"textColor="#000000""##), "stays black (not the blue id=7 charPr)");
         // bold must sit immediately before underline (schema order)
         assert!(out.contains("<hh:bold/><hh:underline"), "bold precedes underline");
+    }
+
+    #[test]
+    fn superscript_synthesis_after_strikeout() {
+        let shape = CharShape { superscript: true, ..Default::default() };
+        let out = synthesize_char_pr(BASE, 50, &shape, None);
+        assert!(out.contains("<hh:supscript/>"), "supscript marker present: {out}");
+        // Schema order: it must sit between strikeout and outline.
+        let strike = out.find("<hh:strikeout").unwrap();
+        let sup = out.find("<hh:supscript/>").unwrap();
+        let outline = out.find("<hh:outline").unwrap();
+        assert!(strike < sup && sup < outline, "supscript between strikeout and outline");
+        // Subscript is mutually exclusive (superscript wins).
+        let both = synthesize_char_pr(BASE, 51, &CharShape { superscript: true, subscript: true, ..Default::default() }, None);
+        assert!(both.contains("<hh:supscript/>") && !both.contains("<hh:subscript/>"));
     }
 
     #[test]

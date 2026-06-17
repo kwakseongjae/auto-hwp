@@ -68,7 +68,7 @@ impl Engine {
 /// Surface this whenever a binary `.hwp` was converted so users aren't surprised by the gaps.
 pub const HWP5_CONVERSION_NOTICE: &str = "HWP5(.hwp) → HWPX 변환: 본문 텍스트, 글자 서식\
     (굵게/기울임/크기/색/밑줄/취소선), 글꼴(스크립트별), 표(중첩·병합 셀 포함), 페이지 크기·여백·방향, \
-    다중 구역, 이미지가 보존됩니다. 아직 지원 안 됨: 위·아래첨자, 문단 번호/글머리표, 수식/도형, \
+    다중 구역, 이미지, 위·아래첨자가 보존됩니다. 아직 지원 안 됨: 문단 번호/글머리표(자동), 수식/도형, \
     머리말/꼬리말.";
 
 /// Open ANY supported document as an editable, HWPX-serializable `SemanticDoc`, reporting whether a

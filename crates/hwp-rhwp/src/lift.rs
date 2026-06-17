@@ -273,6 +273,8 @@ fn lift_char_shape(c: &RCharShape, doc: &RDoc) -> CharShape {
         italic: c.italic,
         underline: c.underline_type != UnderlineType::None,
         strikeout: c.strikethrough,
+        superscript: c.superscript,
+        subscript: c.subscript,
         text_color: lift_text_color(c.text_color),
         fonts: lift_fonts(c, doc),
         ..Default::default()
