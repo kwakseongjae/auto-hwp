@@ -247,7 +247,10 @@ fn do_open(session: &mut Session, path: &str) -> Result<OpenInfo, String> {
     let fmt = hwp_core::Engine::detect(&bytes);
     let (format, editable) = match fmt {
         SourceFormat::Hwpx => ("HWPX (editable)", true),
-        SourceFormat::Hwp5 => ("HWP5 (view-only — export needs HWPX)", false),
+        // HW5 now converts to HWPX (Track A): editable + serializable. The faithful native render
+        // still drives the VIEW until an edit (see renderable_bytes); editing/export use the
+        // converted HWPX.
+        SourceFormat::Hwp5 => ("HWP5 → HWPX (converted, editable)", true),
         SourceFormat::Hwp3 => ("HWP3 (view-only)", false),
         SourceFormat::Unknown => return Err("unrecognized format (not HWP/HWPX)".into()),
     };

@@ -1,7 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 
-/** Result of opening a document: page count + 2-tier capability (editable) + a format label. */
-export type OpenResult = { pages: number; editable: boolean; format: string };
+/** Result of opening a document: page count + 2-tier capability (editable) + a format label.
+ *  `convertedPath` is set when a binary .hwp was auto-converted to an editable .hwpx saved beside it. */
+export type OpenResult = {
+  pages: number;
+  editable: boolean;
+  format: string;
+  convertedPath?: string | null;
+};
 
 /// Typed bindings to the Rust `Intent` command lane (crates/hwp-viewer/src/lib.rs). No prose
 /// parsing: each command returns a typed value the UI consumes directly.

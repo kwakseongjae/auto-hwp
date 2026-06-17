@@ -46,12 +46,35 @@ fn pages(s: &mut hwp_mcp::Session) -> u32 {
 #[tauri::command]
 fn open_doc(path: String, sess: tauri::State<'_, SharedSession>) -> Result<Value, String> {
     let mut s = sess.lock().map_err(|_| "session poisoned")?;
+    let original = path.clone();
     // accepts .hwp (view) and .hwpx; surface the 2-tier capability (editable) + format for the chip.
     let (format, editable) = match apply_intent(&mut s, Intent::Open { path })? {
         Outcome::Opened { format, editable, .. } => (format, editable),
         _ => return Err("unexpected outcome".into()),
     };
-    Ok(json!({ "pages": pages(&mut s), "editable": editable, "format": format }))
+
+    // Auto-convert a binary .hwp: save an editable `.hwpx` beside the original so the user gets a
+    // round-trip-safe copy to work in. Best-effort — a write failure (e.g. read-only folder) must
+    // NOT break opening the view, which keeps rendering the faithful native .hwp until an edit.
+    let mut converted_path = Value::Null;
+    if format.starts_with("HWP5") {
+        let hwpx = std::path::Path::new(&original).with_extension("hwpx");
+        if hwpx.as_os_str() != std::path::Path::new(&original).as_os_str() {
+            let dest = hwpx.to_string_lossy().into_owned();
+            if let Ok(Outcome::Exported { open_safe: true, .. }) =
+                apply_intent(&mut s, Intent::Export { path: dest.clone() })
+            {
+                converted_path = json!(dest);
+            }
+        }
+    }
+
+    Ok(json!({
+        "pages": pages(&mut s),
+        "editable": editable,
+        "format": format,
+        "convertedPath": converted_path,
+    }))
 }
 
 #[tauri::command]
@@ -226,6 +249,23 @@ mod tests {
         assert!(count >= 8, "benchmark has 8 pages, got {count}");
         let svg = mcp_call(&mut sess, "render_page", json!({ "page": 0 })).unwrap();
         assert!(svg.contains("<svg"), "HW5 page renders to SVG");
+    }
+
+    /// Track A: opening a .hwp can now export an open-safe HWPX — the substance behind open_doc's
+    /// auto-save of a `.hwpx` beside the original. (open_doc itself needs a Tauri State; this drives
+    /// the same Open→Export path through the session.)
+    #[cfg(feature = "rhwp")]
+    #[test]
+    fn hwp5_open_exports_open_safe_hwpx_beside() {
+        let mut sess = hwp_mcp::Session::default();
+        let bench = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmark.hwp");
+        let msg = mcp_call(&mut sess, "open_document", json!({ "path": bench })).unwrap();
+        assert!(msg.contains("HWP5"), "{msg}");
+        let dest = std::env::temp_dir().join("viewer-autoconvert.hwpx");
+        let out = mcp_call(&mut sess, "export_hwpx", json!({ "path": dest.to_str().unwrap() })).unwrap();
+        assert!(out.contains("OK"), "auto-converted .hwpx must be open-safe: {out}");
+        let reopened = hwp_core::Engine::open(&std::fs::read(&dest).unwrap()).unwrap();
+        assert!(!reopened.plain_text().trim().is_empty(), "converted .hwpx reopens with text");
     }
 
     #[test]

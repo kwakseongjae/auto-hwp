@@ -62,10 +62,14 @@ export default function App() {
       setDocName(path.split("/").pop() ?? path);
       setEditable(r.editable);
       invalidate(r.pages);
-      if (r.editable) {
+      if (r.convertedPath) {
+        // A binary .hwp was converted: an editable .hwpx was saved beside it.
+        const saved = r.convertedPath.split("/").pop() ?? r.convertedPath;
+        toast("ok", `${docName()} · ${r.pages}쪽 · 편집용 .hwpx 저장됨: ${saved}`);
+      } else if (r.editable) {
         toast("ok", `${docName()} · ${r.pages}쪽`);
       } else {
-        toast("warn", "보기전용(.hwp) — 편집하려면 먼저 HWPX로 내보내세요", [
+        toast("warn", "보기전용 — 편집하려면 먼저 HWPX로 내보내세요", [
           { label: "HWPX로 내보내기", run: () => void doExport() },
         ]);
       }
