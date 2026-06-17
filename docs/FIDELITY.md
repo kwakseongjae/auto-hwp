@@ -5,12 +5,18 @@
 > 정합성은 "한컴과 픽셀 동일"이 아니라 **"우리 골든 대비 회귀 없음 + 허용오차 내 구조 일치"** 로 게이트한다(한컴 출력조차 환경 의존적이라 절대 정답지가 아님 — PLAN §6).
 
 ## 구성 요소
-- `crates/hwp-fidelity` — 하베스. `benchmark_path()`, `Prerequisites::detect()`, `reference_pdf()`, `compare()`(SSIM/structural 스코어러, M1에서 구현), `FidelityBand{Green,Yellow,Red}`.
+- `crates/hwp-fidelity` — 하베스. `benchmark_path()`, `Prerequisites::detect()`, `reference_pdf()`, `compare()`(grayscale-MAE 스코어러), `FidelityBand{Green,Yellow,Red}`, `ReferenceKind{GroundTruthPdf,Oracle}`, **known-divergence allowlist**(`benchmark_allowlist()`, `unexpected_divergences()`).
 - `crates/hwp-oracle` — `soffice_available()`, `h2orestart_installed()`, `convert_to_pdf()`.
 - 테스트: `crates/hwp-fidelity/tests/benchmark.rs`
-  - `benchmark_present_and_hwp5` — 지금 실행(포맷 게이트).
-  - `benchmark_oracle_reference_renders` — `#[ignore]`, H2Orestart 필요.
-  - `benchmark_engine_matches_original` — `#[ignore]`, 엔진 렌더(rhwp/자체) 필요. **페이지 Red 0** 단언.
+  - `benchmark_present_and_hwp5` — CI 실행(포맷 게이트). **fixture가 없으면 graceful skip**(사용자 제공 문서가 없는 CI도 그린 유지).
+  - `benchmark_engine_has_no_unexpected_divergence` — `#[ignore]`, 엔진 렌더(`--features rhwp`) + 레퍼런스(ground-truth PDF 또는 H2Orestart 오라클) 필요. **allowlist 적용 후 unexpected divergence 0** 단언. ground-truth가 있으면 **페이지 수 정확 일치 + 전 페이지 Red 0**(절대 fidelity).
+  - allowlist/divergence **로직 자체는 `src/lib.rs`의 유닛테스트로 전제조건 없이 CI 실행** → fidelity 계약이 렌더 불가 머신에서도 강제됨.
+
+## known-divergence allowlist (회귀 게이트의 핵심)
+게이트는 *알려진* 구조적 차이만 명시적으로 면제하고, 새/미등재 발산은 전부 실패시킨다.
+- `benchmark_allowlist()`: 루트 `benchmark.hwp`의 면제 목록. **ground-truth Hancom PDF 대비로는 면제 0개**(8p 전부 일치). 유일한 엔트리는 약한 교차렌더(Oracle) 모드에서 LibreOffice의 재페이지네이션(8 vs 10)만 면제 — **페이지 *내용*은 여전히 페이지별로 게이트**.
+- `unexpected_divergences(report, allow)`: allowlist로 덮이지 않는 Red 페이지/페이지수 불일치 목록. 게이트는 이게 비어야 통과. 정렬-범위 내 content Red는 절대 면제 안 됨.
+- 새 발산을 면제하려면 **이유와 함께** allowlist에 엔트리를 추가한다(코드 리뷰 대상).
 
 ## 상태 확인
 ```bash
@@ -31,9 +37,9 @@ cargo test -p hwp-fidelity -- --ignored         # 전제조건 충족 시 전체
    cargo test -p hwp-fidelity --features rhwp -- --ignored # benchmark_oracle_and_fidelity
    ```
 
-## ⚠️ "교차렌더 일치도" ≠ 절대 fidelity
-스코어러는 **우리 엔진(rhwp) vs 오라클(LibreOffice+H2Orestart)** 의 페이지별 픽셀 일치도를 잰다. **둘 다 한컴 정답지가 아니다**(서로 다른 대체폰트·AA·페이지네이션). 따라서 회귀/발산 신호로 쓰되, 절대 fidelity는 **한컴이 생성한 PDF**를 정답지로 넣어야 한다.
-- 현재 `benchmark.hwp` 결과: page 1–8 GREEN(94–98% 일치), page 9–10은 **페이지수 발산(우리 8 vs 오라클 10)** 으로 RED → overall RED. 페이지네이션 차이는 구조 신호다(H2Orestart의 재페이지네이션). 페이지 *내용* 일치도는 높다.
+## ⚠️ "교차렌더 일치도" ≠ 절대 fidelity (→ ground-truth로 해소됨)
+스코어러는 레퍼런스를 자동 선택한다(`ReferenceKind`): 입력 옆에 `<stem>.pdf`(한컴 생성 정답지)가 있으면 **GroundTruthPdf = 절대 fidelity**(soffice/H2Orestart 불필요, 엔진 렌더만 필요), 없으면 **Oracle = 교차렌더 일치도**(LibreOffice+H2Orestart, 둘 다 한컴 정답지가 아님 — 대체폰트·AA·페이지네이션 상이).
+- **현재 상태(해소됨): `benchmark.pdf`(한컴 생성, 8p) 정답지 대비 page 1–8 전부 GREEN(94.9–99.2%), 페이지수 8 vs 8 정확 일치 → overall GREEN, 게이트 통과.** 과거의 "page 9–10 RED"는 오라클(LibreOffice 10p 재페이지네이션) 모드의 신호였고, 지금은 allowlist로 면제되며 ground-truth 모드에선 발생하지 않는다.
 
 ## 밴드 정책 (UX 게이트로 직결)
 - **Green** — 허용오차 내 일치 → 인라인 편집.

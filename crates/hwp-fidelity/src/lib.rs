@@ -113,6 +113,69 @@ pub fn reference_pdf_for(input: &Path) -> Option<PathBuf> {
     p.exists().then_some(p)
 }
 
+/// A documented, accepted divergence from the reference render. The fidelity gate exempts these so
+/// a KNOWN structural difference (e.g. a cross-renderer re-pagination) does not fail the build,
+/// while any new or unlisted divergence still does. Keep this list short and each entry justified.
+#[derive(Clone, Copy, Debug)]
+pub struct KnownDivergence {
+    /// Which reference mode this exemption applies to (it never softens ground-truth content).
+    pub reference: ReferenceKind,
+    pub kind: DivergenceKind,
+    pub reason: &'static str,
+}
+
+/// The shape of an accepted divergence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DivergenceKind {
+    /// A page-count mismatch against this reference is accepted (plus the surplus pages it implies).
+    PageCount,
+    /// A specific 0-based page index is allowed to band `Red` against this reference.
+    Page(usize),
+}
+
+/// Accepted divergences for the root `benchmark.hwp`. Against the ground-truth Hancom PDF there are
+/// NONE — all 8 pages match (94.9–99.2%). The single entry only softens the weaker cross-renderer
+/// (Oracle) mode, where LibreOffice re-paginates; the gate stays strict for absolute fidelity.
+pub fn benchmark_allowlist() -> &'static [KnownDivergence] {
+    &[KnownDivergence {
+        reference: ReferenceKind::Oracle,
+        kind: DivergenceKind::PageCount,
+        reason: "LibreOffice+H2Orestart re-paginates benchmark.hwp to 10 pages; the authoritative \
+                 Hancom PDF and our engine both yield 8 — a cross-renderer pagination difference, \
+                 not content loss (page CONTENT still gates per-page)",
+    }]
+}
+
+/// Divergences in `report` that are NOT covered by `allow` — the fidelity gate passes iff this is
+/// empty. A `Red` page that is purely a surplus implied by an allowlisted page-count mismatch is
+/// also exempted; an aligned-page content `Red` never is.
+pub fn unexpected_divergences(report: &FidelityReport, allow: &[KnownDivergence]) -> Vec<String> {
+    let count_allowed = allow
+        .iter()
+        .any(|d| d.reference == report.reference && d.kind == DivergenceKind::PageCount);
+    let aligned = report.our_pages.min(report.ref_pages);
+    let mut out = Vec::new();
+    if report.our_pages != report.ref_pages && !count_allowed {
+        out.push(format!("page-count mismatch: ours={} ref={}", report.our_pages, report.ref_pages));
+    }
+    for p in &report.pages {
+        if p.band != FidelityBand::Red {
+            continue;
+        }
+        // A Red page beyond the aligned range is a surplus page — covered by the count allowance.
+        if p.index >= aligned && count_allowed {
+            continue;
+        }
+        let page_allowed = allow
+            .iter()
+            .any(|d| d.reference == report.reference && d.kind == DivergenceKind::Page(p.index));
+        if !page_allowed {
+            out.push(format!("page {} RED (similarity {:?})", p.index + 1, p.similarity));
+        }
+    }
+    out
+}
+
 #[cfg(feature = "rhwp")]
 fn band_of(sim: f64) -> FidelityBand {
     // Lenient: different engines use different substitute fonts/AA, so even a faithful page
@@ -221,4 +284,61 @@ pub fn compare(_input: &Path) -> Result<FidelityReport> {
     Err(Error::CapabilityUnavailable(
         "fidelity compare needs the rhwp engine render: build with --features rhwp",
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    //! The allowlist/divergence LOGIC is pure — it runs in CI without rhwp, the oracle, or the
+    //! benchmark fixture, so the fidelity CONTRACT is enforced even where the render cannot run.
+    use super::*;
+
+    fn page(index: usize, band: FidelityBand) -> PageScore {
+        let similarity = Some(if band == FidelityBand::Green { 0.95 } else { 0.50 });
+        PageScore { index, similarity, band }
+    }
+
+    fn report(reference: ReferenceKind, our: usize, refp: usize, pages: Vec<PageScore>) -> FidelityReport {
+        let overall = if pages.iter().any(|p| p.band == FidelityBand::Red) || our != refp {
+            FidelityBand::Red
+        } else {
+            FidelityBand::Green
+        };
+        FidelityReport { reference, our_pages: our, ref_pages: refp, pages, overall }
+    }
+
+    #[test]
+    fn groundtruth_all_green_passes_the_gate() {
+        let r = report(ReferenceKind::GroundTruthPdf, 8, 8, (0..8).map(|i| page(i, FidelityBand::Green)).collect());
+        assert!(unexpected_divergences(&r, benchmark_allowlist()).is_empty());
+    }
+
+    #[test]
+    fn oracle_pagination_divergence_is_allowlisted() {
+        // 8 ours vs 10 oracle: aligned pages green, surplus pages 9 & 10 Red — exempt via PageCount.
+        let mut pages: Vec<_> = (0..8).map(|i| page(i, FidelityBand::Green)).collect();
+        pages.push(PageScore { index: 8, similarity: None, band: FidelityBand::Red });
+        pages.push(PageScore { index: 9, similarity: None, band: FidelityBand::Red });
+        let r = report(ReferenceKind::Oracle, 8, 10, pages);
+        assert!(unexpected_divergences(&r, benchmark_allowlist()).is_empty(), "pagination diff is known");
+    }
+
+    #[test]
+    fn aligned_content_red_is_never_allowlisted() {
+        // A real content regression on an aligned page must fail the gate in BOTH modes.
+        let mut pages: Vec<_> = (0..8).map(|i| page(i, FidelityBand::Green)).collect();
+        pages[3].band = FidelityBand::Red;
+        let r = report(ReferenceKind::Oracle, 8, 8, pages);
+        let unexpected = unexpected_divergences(&r, benchmark_allowlist());
+        assert_eq!(unexpected.len(), 1);
+        assert!(unexpected[0].contains("page 4"), "got: {unexpected:?}");
+    }
+
+    #[test]
+    fn groundtruth_pagecount_mismatch_fails() {
+        // The allowlist is Oracle-only: a page-count mismatch vs the ground truth is a real failure.
+        let mut pages: Vec<_> = (0..8).map(|i| page(i, FidelityBand::Green)).collect();
+        pages.push(PageScore { index: 8, similarity: None, band: FidelityBand::Red });
+        let r = report(ReferenceKind::GroundTruthPdf, 8, 9, pages);
+        assert!(!unexpected_divergences(&r, benchmark_allowlist()).is_empty());
+    }
 }

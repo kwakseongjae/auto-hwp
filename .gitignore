@@ -13,8 +13,6 @@ node_modules/
 *.pdf.tmp
 /corpus/private/
 /out
-/benchmark.hwp
-/benchmark.pdf
 
 # local agent runtime state
 .claude/
