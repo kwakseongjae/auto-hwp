@@ -66,6 +66,9 @@ enum Cmd {
         /// Verify Hancom-acceptability by opening the output in the oracle.
         #[arg(long)]
         verify: bool,
+        /// Preview the proposed change (rationale + per-op diff) and STOP — do not write output.
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Print the AI content template + the document context (the "read" tool of the AI loop).
     /// A coding agent (Claude Code) reads this, then authors a content JSON for `ai-apply`.
@@ -144,8 +147,8 @@ fn run() -> Result<(), String> {
         Cmd::Render { file, page, out } => render(&file, page, &out)?,
         Cmd::View { file, out } => view(&file, &out)?,
         Cmd::Edit { file, append, out, verify } => edit(&file, &append, &out, verify)?,
-        Cmd::AiFill { file, instruction, provider, out, verify } => {
-            ai_fill(&file, &instruction, &provider, &out, verify)?
+        Cmd::AiFill { file, instruction, provider, out, verify, dry_run } => {
+            ai_fill(&file, &instruction, &provider, &out, verify, dry_run)?
         }
         Cmd::AiContext { file } => ai_context(&file)?,
         Cmd::AiApply { file, content, out, verify } => ai_apply(&file, &content, &out, verify)?,
@@ -238,21 +241,35 @@ fn ai_fill(
     provider: &str,
     out: &PathBuf,
     verify: bool,
+    dry_run: bool,
 ) -> Result<(), String> {
     let bytes = read(file)?;
     if hwp_core::Engine::detect(&bytes) != SourceFormat::Hwpx {
         return Err("ai-fill operates on HWPX (.hwpx). Convert .hwp to HWPX first.".into());
     }
     let provider = pick_provider(provider)?;
-    let mut doc = hwp_core::Engine::open(&bytes).map_err(|e| e.to_string())?;
-    let ops = hwp_ai::ai_fill(&mut doc, &*provider, instruction).map_err(|e| e.to_string())?;
+    let doc = hwp_core::Engine::open(&bytes).map_err(|e| e.to_string())?;
+
+    // PROPOSE: the provider authors rich content, validated on a scratch copy (doc untouched).
+    let proposal = hwp_ai::propose(&doc, &*provider, instruction).map_err(|e| e.to_string())?;
+    println!("ai-fill via '{}' — 제안 (rationale):\n{}", provider.name(), proposal.rationale);
+    println!("\n변경 미리보기 ({} op):\n{}", proposal.ops.len(), proposal.preview());
+
+    if dry_run {
+        println!("dry-run: 출력은 쓰지 않았습니다. 적용하려면 --dry-run 없이 다시 실행하세요.");
+        return Ok(());
+    }
+
+    // COMMIT: apply the approved ops as ONE undoable change (same op-bus a human edit uses).
+    let mut session = hwp_ops::EditSession::new(doc);
+    session.do_ops(&proposal.ops).map_err(|e| e.to_string())?;
+    let doc = session.into_doc();
     let out_bytes = hwp_core::serialize_hwpx(&doc).map_err(|e| e.to_string())?;
     std::fs::write(out, &out_bytes).map_err(|e| e.to_string())?;
     let report = hwp_core::validate_hwpx(&out_bytes);
     println!(
-        "ai-fill via '{}' (+{} paragraph(s)) → {} ({} bytes)",
-        provider.name(),
-        ops.len(),
+        "\ncommitted (+{} op) → {} ({} bytes)",
+        proposal.ops.len(),
         out.display(),
         out_bytes.len()
     );

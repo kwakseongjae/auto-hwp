@@ -6,7 +6,7 @@
 //! with `TF_HWP_MODEL`. Sampling params (temperature/top_p/top_k) are intentionally omitted —
 //! they are removed on Opus 4.8 and would 400.
 
-use super::LlmProvider;
+use super::{content, LlmProvider};
 use hwp_model::error::{Error, Result};
 
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
@@ -39,21 +39,13 @@ impl AnthropicProvider {
     pub fn model(&self) -> &str {
         &self.model
     }
-}
 
-impl LlmProvider for AnthropicProvider {
-    fn name(&self) -> &str {
-        "anthropic"
-    }
-
-    fn propose_paragraphs(&self, context: &str, instruction: &str) -> Result<Vec<String>> {
-        let user = format!(
-            "[문서 맥락]\n{context}\n\n[지시]\n{instruction}\n\n위 지시에 따라 추가할 문단을 작성하세요."
-        );
+    /// One non-streaming Messages API call; returns the concatenated text blocks.
+    fn complete(&self, system: &str, user: &str) -> Result<String> {
         let body = serde_json::json!({
             "model": self.model,
             "max_tokens": 4096,
-            "system": SYSTEM_PROMPT,
+            "system": system,
             "messages": [{ "role": "user", "content": user }],
         });
 
@@ -80,7 +72,7 @@ impl LlmProvider for AnthropicProvider {
         }
 
         // content: [{type, text}, ...] → concatenate text blocks.
-        let text = val
+        Ok(val
             .get("content")
             .and_then(|c| c.as_array())
             .map(|arr| {
@@ -90,12 +82,44 @@ impl LlmProvider for AnthropicProvider {
                     .collect::<Vec<_>>()
                     .join("\n")
             })
-            .unwrap_or_default();
+            .unwrap_or_default())
+    }
+}
 
+/// Strip an optional Markdown code fence (```json … ```) so the model output parses as raw JSON.
+fn strip_code_fence(s: &str) -> &str {
+    let t = s.trim();
+    let Some(rest) = t.strip_prefix("```") else { return t };
+    // Drop the optional language tag on the opening fence line, then the trailing fence.
+    let after_lang = rest.find('\n').map(|i| &rest[i + 1..]).unwrap_or("");
+    after_lang.trim_end().strip_suffix("```").unwrap_or(after_lang).trim()
+}
+
+impl LlmProvider for AnthropicProvider {
+    fn name(&self) -> &str {
+        "anthropic"
+    }
+
+    fn propose_paragraphs(&self, context: &str, instruction: &str) -> Result<Vec<String>> {
+        let user = format!(
+            "[문서 맥락]\n{context}\n\n[지시]\n{instruction}\n\n위 지시에 따라 추가할 문단을 작성하세요."
+        );
+        let text = self.complete(SYSTEM_PROMPT, &user)?;
         Ok(text
             .lines()
             .map(|l| l.trim().to_string())
             .filter(|l| !l.is_empty())
             .collect())
+    }
+
+    /// Drive the RICH pipeline: prompt with the content template so the model emits a single
+    /// `AiContent` JSON object, then validate/parse it into typed content (no raw XML ever).
+    fn propose_content(&self, context: &str, instruction: &str) -> Result<content::AiContent> {
+        let user = format!(
+            "[문서 맥락]\n{context}\n\n[지시]\n{instruction}\n\n위 지시에 따라 추가할 콘텐츠를 \
+             템플릿 JSON으로 출력하세요."
+        );
+        let raw = self.complete(content::template_brief(), &user)?;
+        content::parse_content(strip_code_fence(&raw))
     }
 }

@@ -23,6 +23,8 @@ pub struct Session {
     pub source_path: Option<String>,
     /// Original file bytes — for rendering HW5 (view-only) sources that can't be serialized to HWPX.
     pub source_bytes: Option<Vec<u8>>,
+    /// A validated-but-uncommitted edit from `propose_content`, awaiting `commit_proposal`.
+    pub pending: Option<hwp_ai::Proposal>,
 }
 
 /// The bytes to render: the LIVE edited HWPX if the doc serializes, else the original source
@@ -94,6 +96,20 @@ fn tools() -> Value {
         {
             "name": "redo",
             "description": "Redo the last undone edit on the open document. No-op if there is nothing to redo.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "propose_content",
+            "description": "Validate template-conformant AI content JSON into a PROPOSAL (compiled ops, dry-run on a scratch copy) and return a human-readable preview + rationale WITHOUT changing the document. Then call commit_proposal to apply, or call propose_content again to replace it.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "content": { "type": "string", "description": "AiContent JSON (see get_context template)" } },
+                "required": ["content"]
+            }
+        },
+        {
+            "name": "commit_proposal",
+            "description": "Apply the pending proposal (from propose_content) to the document via the undoable op-bus. Errors if there is no pending proposal; reversible with undo.",
             "inputSchema": { "type": "object", "properties": {} }
         }
     ])
@@ -173,6 +189,7 @@ fn call_tool(name: &str, args: &Value, session: &mut Session) -> Result<String, 
             session.doc = Some(EditSession::new(doc));
             session.source_path = Some(path.clone());
             session.source_bytes = Some(bytes);
+            session.pending = None; // a fresh document drops any stale proposal
             Ok(format!("opened {path} ({label}, {n} section(s))"))
         }
         "get_context" => {
@@ -218,6 +235,25 @@ fn call_tool(name: &str, args: &Value, session: &mut Session) -> Result<String, 
         "redo" => {
             let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
             Ok(if sess.redo() { "redid the last undone edit".into() } else { "nothing to redo".into() })
+        }
+        "propose_content" => {
+            let content = arg_str("content").ok_or("missing `content`")?;
+            let sess = session.doc.as_ref().ok_or("no document open (call open_document first)")?;
+            let ai = hwp_ai::content::parse_content(&content).map_err(|e| e.to_string())?;
+            let proposal =
+                hwp_ai::propose_from_content(sess.doc(), &ai, "MCP 제안").map_err(|e| e.to_string())?;
+            let n = proposal.ops.len();
+            let preview = proposal.preview();
+            session.pending = Some(proposal);
+            Ok(format!("제안 준비됨 ({n} op) — 적용하려면 commit_proposal.\n\n미리보기:\n{preview}"))
+        }
+        "commit_proposal" => {
+            let proposal =
+                session.pending.take().ok_or("대기 중인 제안이 없습니다 (call propose_content first)")?;
+            let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
+            let n = proposal.ops.len();
+            sess.do_ops(&proposal.ops).map_err(|e| e.to_string())?;
+            Ok(format!("적용 완료 ({n} op) — undo 로 되돌릴 수 있습니다"))
         }
         "render_page" => {
             let page = args.get("page").and_then(Value::as_u64).unwrap_or(0) as u32;
@@ -331,6 +367,38 @@ mod tests {
         call("undo", json!({}), &mut s);
         let empty = call("undo", json!({}), &mut s);
         assert!(text(&empty).contains("nothing to undo"), "{empty}");
+    }
+
+    #[test]
+    fn propose_then_commit_proposal_loop() {
+        let mut s = Session::default();
+        let call = |name: &str, args: Value, s: &mut Session| {
+            handle(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name,"arguments":args}}), s)
+                .unwrap()
+        };
+        let text = |r: &Value| r["result"]["content"][0]["text"].as_str().unwrap().to_string();
+
+        call("open_document", json!({"path": showcase()}), &mut s);
+        let content = r#"{"blocks":[{"type":"heading","text":"제안 제목","align":"center"},{"type":"paragraph","runs":[{"text":"검증","bold":true}]}]}"#;
+
+        // propose_content previews WITHOUT mutating the doc.
+        let p = call("propose_content", json!({"content": content}), &mut s);
+        assert_eq!(p["result"]["isError"], false, "{p}");
+        assert!(text(&p).contains("미리보기"), "{}", text(&p));
+        assert!(!text(&call("extract_text", json!({}), &mut s)).contains("제안 제목"), "propose must not commit");
+
+        // commit_proposal applies it.
+        let c = call("commit_proposal", json!({}), &mut s);
+        assert_eq!(c["result"]["isError"], false, "{c}");
+        assert!(text(&call("extract_text", json!({}), &mut s)).contains("제안 제목"));
+
+        // committed via the undoable op-bus → undo reverts it.
+        call("undo", json!({}), &mut s);
+        assert!(!text(&call("extract_text", json!({}), &mut s)).contains("제안 제목"));
+
+        // commit with nothing pending errors gracefully.
+        let empty = call("commit_proposal", json!({}), &mut s);
+        assert_eq!(empty["result"]["isError"], true, "{empty}");
     }
 
     #[test]

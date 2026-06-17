@@ -784,6 +784,28 @@ impl EditSession {
         Ok(())
     }
 
+    /// Apply several ops as ONE atomic, single-undo-unit change (e.g. committing an AI proposal so
+    /// one `undo` reverts the whole edit). On any error the document is restored to its pre-batch
+    /// state and no snapshot is pushed. An empty batch is a no-op.
+    pub fn do_ops(&mut self, ops: &[Op]) -> Result<()> {
+        if ops.is_empty() {
+            return Ok(());
+        }
+        let snap = self.doc.clone();
+        for op in ops {
+            if let Err(e) = apply(&mut self.doc, op) {
+                self.doc = snap; // roll the whole batch back
+                return Err(e);
+            }
+        }
+        self.undo.push(snap);
+        self.redo.clear();
+        if self.limit != 0 && self.undo.len() > self.limit {
+            self.undo.remove(0);
+        }
+        Ok(())
+    }
+
     /// Undo the last committed op (in-memory swap; emits no XML). Returns false if nothing to undo.
     pub fn undo(&mut self) -> bool {
         let Some(prev) = self.undo.pop() else { return false };
@@ -878,6 +900,36 @@ mod tests {
         assert!(!s.undo()); // empty
         assert!(s.redo() && s.redo() && s.redo());
         assert!(s.doc().any_dirty());
+    }
+
+    #[test]
+    fn do_ops_is_one_atomic_undo_unit() {
+        let mut s = EditSession::new(doc_with(vec![simple_para(1, "가"), simple_para(2, "나")]));
+        // A batch of 2 ops commits as a SINGLE undo step.
+        s.do_ops(&[
+            Op::SetCharPr { range: Range { start: NodeId(1), end: NodeId(1) }, shape: bold() },
+            Op::SetCharPr { range: Range { start: NodeId(2), end: NodeId(2) }, shape: bold() },
+        ])
+        .unwrap();
+        assert!(s.doc().any_dirty());
+        assert!(s.undo());
+        assert!(!s.doc().any_dirty(), "one undo reverts the whole batch");
+        assert!(!s.undo(), "the batch was a single undo unit");
+    }
+
+    #[test]
+    fn do_ops_rolls_back_the_whole_batch_on_error() {
+        let mut s = EditSession::new(doc_with(vec![simple_para(1, "가"), structural_para(2, "나")]));
+        let pools = s.doc().char_shapes.len();
+        // Second op targets a non-simple para → the entire batch is rolled back.
+        let r = s.do_ops(&[
+            Op::SetCharPr { range: Range { start: NodeId(1), end: NodeId(1) }, shape: bold() },
+            Op::SetCharPr { range: Range { start: NodeId(2), end: NodeId(2) }, shape: bold() },
+        ]);
+        assert!(r.is_err());
+        assert!(!s.doc().any_dirty(), "failed batch leaves no dirty node");
+        assert!(!s.can_undo(), "failed batch pushes no snapshot");
+        assert_eq!(s.doc().char_shapes.len(), pools, "failed batch does not grow the pool");
     }
 
     #[test]
