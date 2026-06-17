@@ -631,4 +631,47 @@ mod tests {
         assert!(!base.contains("charProperties"), "must NOT include the container tag");
         assert!(base.ends_with("</hh:charPr>"));
     }
+
+    /// PIN TEST for the embedded `Skeleton.hwpx` (the base template the from-scratch HWPX synthesizer
+    /// seeds and re-enters the synth pipeline through). EVERY invariant here is load-bearing: if the
+    /// template is ever regenerated and one drifts, `build_synth_plan` silently no-ops
+    /// (`header_out = None`) and ALL converted content renders as 바탕글 with NO error. This test
+    /// fails LOUDLY instead. (Numbers measured directly from the file, not assumed.)
+    #[test]
+    fn skeleton_pin_invariants() {
+        let bytes =
+            std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/hwpx/Skeleton.hwpx"))
+                .expect("read corpus/hwpx/Skeleton.hwpx");
+        let pkg = crate::package::Package::open(&bytes).expect("open Skeleton package");
+
+        // header.xml — synth clones the DEFAULT charPr/paraPr (must be id=0) as the base for every
+        // synthesized entry; appends new entries at max_pool_id+1 (so we pin the MAX id, not itemCnt).
+        let header = String::from_utf8(pkg.read_header().expect("Skeleton has a header")).unwrap();
+        let dc = default_char_pr(&header).expect("default charPr present");
+        assert!(dc.starts_with(r#"<hh:charPr id="0""#), "default charPr must be id=0: {}", &dc[..40.min(dc.len())]);
+        let dp = default_para_pr(&header).expect("default paraPr present");
+        assert!(dp.starts_with(r#"<hh:paraPr id="0""#), "default paraPr must be id=0");
+
+        // Pool MAX ids (char/para are 0-based contiguous → max = itemCnt-1; borderFills are {1,2}).
+        assert_eq!(max_pool_id(&header, "charProperties"), 6, "charPr ids 0..=6 (itemCnt 7)");
+        assert_eq!(max_pool_id(&header, "paraProperties"), 19, "paraPr ids 0..=19 (itemCnt 20)");
+        assert_eq!(max_pool_id(&header, "borderFills"), 2, "borderFill ids {{1,2}}");
+
+        // itemCnt surface — patch_pool bumps these in lockstep; the Phase-4 validator asserts
+        // itemCnt == childcount, so the starting values must be exact.
+        assert!(header.contains(r#"<hh:charProperties itemCnt="7""#), "charProperties itemCnt=7");
+        assert!(header.contains(r#"<hh:paraProperties itemCnt="20""#), "paraProperties itemCnt=20");
+        assert!(header.contains(r#"<hh:fontfaces itemCnt="7""#), "fontfaces itemCnt=7");
+        assert!(header.contains(r#"<hh:borderFills itemCnt="2""#), "borderFills itemCnt=2");
+
+        // styles pool parses and carries the default 바탕글 (named-style application reads these).
+        let styles = parse_styles(&header);
+        assert!(styles.contains_key("바탕글"), "styles pool parses + has 바탕글: {} keys", styles.len());
+
+        // section0.xml — the body patch appends before </hs:sec>; the lone stub <hp:p> carries the
+        // MANDATORY <hp:secPr> (page geometry). Deleting the stub would drop the secPr → damaged file.
+        let sec0 = String::from_utf8(pkg.read_part("Contents/section0.xml").expect("section0")).unwrap();
+        assert!(sec0.trim_end().ends_with("</hs:sec>"), "section0 ends with </hs:sec>");
+        assert!(sec0.contains("<hp:secPr"), "section0 stub carries the mandatory secPr");
+    }
 }

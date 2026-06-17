@@ -314,6 +314,31 @@ mod inplace_tests {
         let _ = std::fs::write(std::env::temp_dir().join("nonsimple-parapr.hwpx"), &out);
     }
 
+    /// DIAGNOSTIC: does a HW5 (.hwp) document round-trip to a valid HWPX today? (Critical: HWP
+    /// compatibility.) Reports serialize Ok/Err + open-safety + how much content the lift captured.
+    #[cfg(feature = "rhwp")]
+    #[test]
+    #[ignore = "diagnostic; run with --features rhwp --ignored --nocapture"]
+    fn hwp5_to_hwpx_export_behavior() {
+        let p = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmark.hwp");
+        let bytes = std::fs::read(p).unwrap();
+        assert_eq!(Engine::detect(&bytes), SourceFormat::Hwp5, "benchmark.hwp is HW5");
+        let doc = Engine::open(&bytes).unwrap();
+        let blocks: usize = doc.sections.iter().map(|s| s.blocks.len()).sum();
+        let text_len = doc.plain_text().len();
+        match serialize_hwpx(&doc) {
+            Ok(b) => eprintln!(
+                "HWP5→HWPX: serialize OK · {} bytes · open_safe={} · sections={} · blocks={} · text={}B",
+                b.len(),
+                validate_hwpx(&b).ok,
+                doc.sections.len(),
+                blocks,
+                text_len
+            ),
+            Err(e) => eprintln!("HWP5→HWPX: serialize ERR: {e} · sections={} · blocks={} · text={}B", doc.sections.len(), blocks, text_len),
+        }
+    }
+
     /// Phase 1: undo restores the doc bit-for-bit (the byte-stability moat), redo replays it.
     #[test]
     fn editsession_undo_redo_is_byte_exact() {
