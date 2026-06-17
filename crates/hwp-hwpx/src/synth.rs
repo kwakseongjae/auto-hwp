@@ -403,6 +403,30 @@ pub fn intern_font(header: &str, family: &str) -> (String, String) {
     (out, format!("<hh:fontRef {}/>", refs.join(" ")))
 }
 
+/// Per-script font interning: for each slot (Hangul..User, aligned with `FONT_LANGS`) that names a
+/// font, intern it into THAT language's `<hh:fontface>` pool; slots that are `None`/absent keep
+/// `base_charpr`'s existing fontRef value for that language. Returns the patched header + the full
+/// `<hh:fontRef …/>` to substitute — so Hangul/Latin/Hanja keep distinct faces instead of one family
+/// forced onto all scripts (the limitation of [`intern_font`]).
+pub fn intern_fonts(header: &str, fonts: &[Option<String>], base_charpr: &str) -> (String, String) {
+    let base_ref = element(base_charpr, "<hh:fontRef", "/>").unwrap_or("");
+    let mut out = header.to_string();
+    let mut refs = Vec::with_capacity(7);
+    for (i, (lang, attr)) in FONT_LANGS.iter().enumerate() {
+        let id = match fonts.get(i).and_then(|f| f.as_deref()) {
+            Some(name) if !name.is_empty() => {
+                let (next, id) = ensure_font_in_lang(&out, lang, name);
+                out = next;
+                id.to_string()
+            }
+            // No font requested for this script → keep the base charPr's existing fontRef id.
+            _ => first_attr(base_ref, attr).unwrap_or("0").to_string(),
+        };
+        refs.push(format!("{attr}=\"{id}\""));
+    }
+    (out, format!("<hh:fontRef {}/>", refs.join(" ")))
+}
+
 /// Within the `<hh:fontface lang="{lang}">` pool: return the id of an existing `face="{family}"`,
 /// else clone the pool's first `<hh:font>…</hh:font>` as a template (new id = fontCnt), append it,
 /// bump fontCnt, and return the new id. Returns id 0 (a safe fallback) if the pool is malformed.

@@ -67,9 +67,9 @@ impl Engine {
 /// The honest fidelity notice for an HWP5→HWPX conversion — what is preserved vs still pending.
 /// Surface this whenever a binary `.hwp` was converted so users aren't surprised by the gaps.
 pub const HWP5_CONVERSION_NOTICE: &str = "HWP5(.hwp) → HWPX 변환: 본문 텍스트, 글자 서식\
-    (굵게/기울임/크기/색/밑줄/취소선), 표(중첩·병합 셀 포함), 페이지 크기·여백·방향, 다중 구역, \
-    이미지가 보존됩니다. 아직 지원 안 됨: 글꼴(스크립트별), 위·아래첨자, 문단 번호/글머리표, \
-    수식/도형, 머리말/꼬리말.";
+    (굵게/기울임/크기/색/밑줄/취소선), 글꼴(스크립트별), 표(중첩·병합 셀 포함), 페이지 크기·여백·방향, \
+    다중 구역, 이미지가 보존됩니다. 아직 지원 안 됨: 위·아래첨자, 문단 번호/글머리표, 수식/도형, \
+    머리말/꼬리말.";
 
 /// Open ANY supported document as an editable, HWPX-serializable `SemanticDoc`, reporting whether a
 /// binary→HWPX conversion happened. A binary HW5 (`.hwp`) is lifted via rhwp (needs `--features
@@ -443,6 +443,30 @@ mod inplace_tests {
         let pagepr = &sec0[sec0.find("<hp:pagePr").expect("has pagePr")..][..120];
         assert!(pagepr.contains(r#"landscape="NARROWLY""#), "portrait, not the Skeleton's WIDELY: {pagepr}");
         assert!(pagepr.contains(r#"width="59528""#), "portrait A4 width (210mm), not landscape: {pagepr}");
+    }
+
+    /// Track A v2-D: per-script fonts are lifted from the .hwp and interned into the HWPX fontfaces
+    /// pools — the converted doc keeps its REAL fonts instead of the Skeleton's default 함초롬 faces.
+    #[cfg(feature = "rhwp")]
+    #[test]
+    fn hwp5_fonts_are_lifted_into_fontfaces() {
+        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmark.hwp")).unwrap();
+        let doc = Engine::open(&bytes).unwrap();
+        // The lift captured per-script font names on the char shapes.
+        let lifted_fonts: std::collections::BTreeSet<&str> = doc.char_shapes.iter()
+            .flat_map(|c| c.fonts.iter().filter_map(|f| f.as_deref()))
+            .collect();
+        assert!(lifted_fonts.len() > 1, "multiple distinct fonts lifted: {lifted_fonts:?}");
+
+        let out = serialize_hwpx(&doc).unwrap();
+        assert!(validate_hwpx(&out).ok, "font output open-safe");
+        let pkg = hwp_hwpx::package::Package::open(&out).unwrap();
+        let header = String::from_utf8(pkg.read_header().unwrap()).unwrap();
+        // A real document font (not in the Skeleton's tiny default set) was interned into fontfaces,
+        // and a synthesized charPr references it via a per-script fontRef.
+        let synth_fonts = lifted_fonts.iter().filter(|f| header.contains(&format!("face=\"{f}\""))).count();
+        assert!(synth_fonts > 0, "a lifted font was interned into the header fontfaces pool");
+        assert!(header.contains("<hh:fontRef "), "synthesized charPr carries a fontRef");
     }
 
     /// Track A v2: an IMAGE-bearing .hwp converts — Picture controls become BinData parts + <hp:pic>

@@ -360,12 +360,20 @@ fn build_synth_plan(doc: &SemanticDoc, header_xml: Option<&str>, table_ref: Opti
             match doc.char_shapes.get(idx) {
                 Some(s) if s.is_default() => {}
                 Some(shape) => {
-                    // Resolve a requested font family → fontfaces pool entry (mutates `header`).
-                    let fontref = shape.font_family.as_deref().map(|fam| {
+                    // Resolve fonts → fontfaces pool ids (mutates `header`). Per-script `fonts` (each
+                    // script its own face) takes precedence; else a single `font_family` for all
+                    // scripts; else inherit the base charPr's fontRef.
+                    let fontref = if shape.fonts.iter().any(Option::is_some) {
+                        let (h, fr) = synth::intern_fonts(&header, &shape.fonts, base);
+                        header = h;
+                        Some(fr)
+                    } else if let Some(fam) = shape.font_family.as_deref() {
                         let (h, fr) = synth::intern_font(&header, fam);
                         header = h;
-                        fr
-                    });
+                        Some(fr)
+                    } else {
+                        None
+                    };
                     let frag = synth::synthesize_char_pr(base, next_id, shape, fontref.as_deref());
                     // Dedup (#003): reuse an existing pool charPr identical modulo id.
                     if let Some(existing) =

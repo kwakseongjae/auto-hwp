@@ -85,6 +85,13 @@ pub struct CharShape {
     /// Requested font family name (e.g. "맑은 고딕"), applied to all scripts. None = inherit.
     /// Resolved to per-script `face_id`s by the serializer's font interner on export.
     pub font_family: Option<String>,
+
+    /// Per-script font NAMES (HWP's 7 [`ScriptClass`] slots: Hangul, Latin, …), `None` = inherit the
+    /// document default for that script. Empty Vec = no per-script fonts requested (the common case).
+    /// Takes precedence over `font_family` on export — the serializer interns each script's font into
+    /// its own `<hh:fontface lang>` pool so Hangul/Latin/Hanja keep distinct faces (not one family
+    /// forced onto all scripts). Lifted from a binary `.hwp`'s per-script char-shape font ids.
+    pub fonts: Vec<Option<String>>,
 }
 
 impl CharShape {

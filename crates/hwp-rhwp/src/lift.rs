@@ -64,7 +64,7 @@ impl<'a> Lifter<'a> {
         out.para_shapes.push(ParaShape::default());
 
         for (i, rcs) in self.doc.doc_info.char_shapes.iter().enumerate() {
-            let cs = lift_char_shape(rcs);
+            let cs = lift_char_shape(rcs, self.doc);
             let idx = out.char_shapes.len();
             self.char_id_to_idx.insert(i as u32, idx);
             out.header_pools.char.insert(i as u64, cs.clone());
@@ -266,7 +266,7 @@ fn utf16_to_char_idx(text: &str, utf16_pos: u32) -> usize {
 /// font/장평/자간, sub/superscript, emphasis, and underline color are left at our defaults: the
 /// serializer can't emit them yet, and setting them would only force redundant charPr synthesis
 /// (it dedups identical results back to the document's default charPr).
-fn lift_char_shape(c: &RCharShape) -> CharShape {
+fn lift_char_shape(c: &RCharShape, doc: &RDoc) -> CharShape {
     CharShape {
         height: c.base_size,
         bold: c.bold,
@@ -274,8 +274,26 @@ fn lift_char_shape(c: &RCharShape) -> CharShape {
         underline: c.underline_type != UnderlineType::None,
         strikeout: c.strikethrough,
         text_color: lift_text_color(c.text_color),
+        fonts: lift_fonts(c, doc),
         ..Default::default()
     }
+}
+
+/// Resolve the char-shape's per-script font NAMES from rhwp's per-language font tables
+/// (`doc_info.font_faces[lang][font_ids[lang]]`). Returns a 7-slot Vec (Hangul..User) aligned with
+/// our `ScriptClass` order; a slot is `None` when the font table lacks that id or the name is empty.
+fn lift_fonts(c: &RCharShape, doc: &RDoc) -> Vec<Option<String>> {
+    (0..7)
+        .map(|i| {
+            let fid = c.font_ids[i] as usize;
+            doc.doc_info
+                .font_faces
+                .get(i)
+                .and_then(|lang| lang.get(fid))
+                .map(|f| f.name.clone())
+                .filter(|n| !n.is_empty())
+        })
+        .collect()
 }
 
 /// Translate an rhwp `PageDef` (구역 용지 설정) into our `PageSetup`: paper size, the four content
