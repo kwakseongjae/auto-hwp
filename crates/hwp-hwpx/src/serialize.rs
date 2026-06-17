@@ -542,13 +542,10 @@ fn patch_section_xml(orig: &[u8], sec: &Section, table_ref: Option<&str>, plan: 
                 // a run with no synthesized charPr falls back to the style's charPr, else plain.
                 let char_fallback =
                     style_ref.map(|s| s.char_pr.clone()).unwrap_or_else(|| plain_ref.to_string());
-                let resolved: Vec<(String, String)> = runs
-                    .iter()
-                    .map(|(t, idx)| {
-                        (t.clone(), plan.char_ref.get(idx).cloned().unwrap_or_else(|| char_fallback.clone()))
-                    })
-                    .collect();
-                emit_paragraph(&mut inject, next_id, &para_ref, style_id, &resolved);
+                let resolve = |idx: usize| {
+                    plan.char_ref.get(&idx).cloned().unwrap_or_else(|| char_fallback.clone())
+                };
+                emit_paragraph(&mut inject, next_id, &para_ref, style_id, runs, &resolve);
                 next_id += 1;
             }
             EmitBlock::Table { rows, cols, cells } => {
@@ -665,9 +662,20 @@ struct PlacedCell {
     shade: Option<String>,
 }
 
+/// One piece of a paragraph's run sequence, in document order. `Text` is a formatted text run;
+/// `Ctrl` is verbatim run-level control XML (e.g. `<hp:ctrl><hp:fieldBegin…/></hp:ctrl>` or a
+/// footnote/endnote marker) emitted inside its own `<hp:run>`. (SEAM A: lets inline markers ride
+/// the same emit path as text — a Text-only paragraph emits byte-identically to before.)
+enum RunPiece {
+    /// (text, char_shape index) → `<hp:run charPrIDRef=…><hp:t>text</hp:t></hp:run>`.
+    Text(String, usize),
+    /// Verbatim run-body XML → `<hp:run charPrIDRef="0">{xml}</hp:run>`.
+    Ctrl(String),
+}
+
 /// A dirty block ready to serialize: a paragraph, a table, or an embedded image.
 enum EmitBlock {
-    Para { para_shape: usize, style: Option<String>, runs: Vec<(String, usize)> },
+    Para { para_shape: usize, style: Option<String>, runs: Vec<RunPiece> },
     Table { rows: usize, cols: usize, cells: Vec<PlacedCell> },
     /// An image, emitted as a `<hp:pic>` wrapped in its own paragraph. `bin_ref` is the manifest
     /// item id + `binaryItemIDRef`; width/height are the display size in HWPUNIT.
@@ -753,22 +761,23 @@ fn placed_cells(t: &Table) -> Vec<PlacedCell> {
         .collect()
 }
 
-/// A paragraph's runs as (text, char_shape index).
-fn para_runs(p: &Paragraph) -> Vec<(String, usize)> {
-    p.runs
-        .iter()
-        .map(|r| {
-            let text: String = r
-                .content
-                .iter()
-                .filter_map(|inl| match inl {
-                    Inline::Text(t) => Some(t.as_str()),
-                    _ => None,
-                })
-                .collect();
-            (text, r.char_shape)
-        })
-        .collect()
+/// A paragraph's run sequence as ordered [`RunPiece`]s. Each run's text inlines collapse into one
+/// `Text` piece (byte-identical to before). Inline markers (fields/notes, added in later phases)
+/// flush the pending text and push a `Ctrl` piece in document order; Image/Equation are handled at
+/// the block level (own paragraph) so they don't appear here.
+fn para_runs(p: &Paragraph) -> Vec<RunPiece> {
+    let mut out = Vec::new();
+    for r in &p.runs {
+        let mut text = String::new();
+        for inl in &r.content {
+            match inl {
+                Inline::Text(t) => text.push_str(t),
+                _ => {}
+            }
+        }
+        out.push(RunPiece::Text(text, r.char_shape));
+    }
+    out
 }
 
 /// Emit a sequence of cell blocks (paragraphs + nested tables, recursively) inside an open
@@ -798,20 +807,7 @@ fn emit_cell_content(
             EmitBlock::Para { runs, .. } => {
                 let pid = *next_id;
                 *next_id += 1;
-                out.push_str(&format!(
-                    "<hp:p id=\"{pid}\" paraPrIDRef=\"{base_para_ref}\" styleIDRef=\"0\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\">"
-                ));
-                if runs.is_empty() {
-                    out.push_str("<hp:run charPrIDRef=\"0\"><hp:t></hp:t></hp:run>");
-                }
-                for (text, cs) in runs {
-                    out.push_str(&format!(
-                        "<hp:run charPrIDRef=\"{}\"><hp:t>{}</hp:t></hp:run>",
-                        cref(*cs),
-                        xml_escape(text)
-                    ));
-                }
-                out.push_str("</hp:p>");
+                emit_paragraph(out, pid, base_para_ref, "0", runs, cref);
             }
             EmitBlock::Table { rows, cols, cells } => {
                 // A nested table lives inside a wrapping <hp:p><hp:run>…</hp:run></hp:p>.
@@ -890,20 +886,34 @@ fn emit_equation(out: &mut String, pid: u64, eqid: u64, eq: &EquationRef, base_p
     ));
 }
 
-/// Emit one `<hp:p>` with a resolved `styleIDRef` + per-run charPrIDRef strings (linesegarray
-/// omitted — Hancom recomputes layout on open).
-fn emit_paragraph(out: &mut String, id: u64, para_ref: &str, style_ref: &str, runs: &[(String, String)]) {
+/// Emit one `<hp:p>` from its [`RunPiece`] sequence: Text pieces resolve their char_shape index via
+/// `cref` and emit `<hp:run><hp:t>`; Ctrl pieces emit verbatim run-body XML in a plain run. An empty
+/// piece list emits one empty run. (linesegarray omitted — Hancom recomputes layout on open.)
+fn emit_paragraph(
+    out: &mut String,
+    id: u64,
+    para_ref: &str,
+    style_ref: &str,
+    pieces: &[RunPiece],
+    cref: &dyn Fn(usize) -> String,
+) {
     out.push_str(&format!(
         "<hp:p id=\"{id}\" paraPrIDRef=\"{para_ref}\" styleIDRef=\"{style_ref}\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\">"
     ));
-    if runs.is_empty() {
+    if pieces.is_empty() {
         out.push_str("<hp:run charPrIDRef=\"0\"><hp:t></hp:t></hp:run>");
     }
-    for (text, cref) in runs {
-        out.push_str(&format!(
-            "<hp:run charPrIDRef=\"{cref}\"><hp:t>{}</hp:t></hp:run>",
-            xml_escape(text)
-        ));
+    for piece in pieces {
+        match piece {
+            RunPiece::Text(text, idx) => out.push_str(&format!(
+                "<hp:run charPrIDRef=\"{}\"><hp:t>{}</hp:t></hp:run>",
+                cref(*idx),
+                xml_escape(text)
+            )),
+            RunPiece::Ctrl(xml) => {
+                out.push_str(&format!("<hp:run charPrIDRef=\"0\">{xml}</hp:run>"));
+            }
+        }
     }
     out.push_str("</hp:p>");
 }
