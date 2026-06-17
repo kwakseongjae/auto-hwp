@@ -766,18 +766,73 @@ fn placed_cells(t: &Table) -> Vec<PlacedCell> {
 /// flush the pending text and push a `Ctrl` piece in document order; Image/Equation are handled at
 /// the block level (own paragraph) so they don't appear here.
 fn para_runs(p: &Paragraph) -> Vec<RunPiece> {
+    let has_marker = |r: &Run| {
+        r.content.iter().any(|i| {
+            matches!(i, Inline::FieldBegin(_) | Inline::FieldEnd(_) | Inline::Bookmark(_))
+        })
+    };
     let mut out = Vec::new();
     for r in &p.runs {
+        // Common case (no inline markers): collapse the run's text into one piece — byte-identical.
+        if !has_marker(r) {
+            let text: String = r
+                .content
+                .iter()
+                .filter_map(|i| if let Inline::Text(t) = i { Some(t.as_str()) } else { None })
+                .collect();
+            out.push(RunPiece::Text(text, r.char_shape));
+            continue;
+        }
+        // Marker run: walk content in order, flushing text segments + emitting Ctrl markers.
         let mut text = String::new();
+        let flush = |text: &mut String, out: &mut Vec<RunPiece>| {
+            if !text.is_empty() {
+                out.push(RunPiece::Text(std::mem::take(text), r.char_shape));
+            }
+        };
         for inl in &r.content {
             match inl {
                 Inline::Text(t) => text.push_str(t),
+                Inline::FieldBegin(m) => {
+                    flush(&mut text, &mut out);
+                    out.push(RunPiece::Ctrl(field_begin_xml(m)));
+                }
+                Inline::FieldEnd(id) => {
+                    flush(&mut text, &mut out);
+                    out.push(RunPiece::Ctrl(field_end_xml(*id)));
+                }
+                Inline::Bookmark(name) => {
+                    flush(&mut text, &mut out);
+                    out.push(RunPiece::Ctrl(format!(
+                        "<hp:ctrl><hp:bookmark name=\"{}\"/></hp:ctrl>",
+                        xml_escape(name)
+                    )));
+                }
                 _ => {}
             }
         }
-        out.push(RunPiece::Text(text, r.char_shape));
+        flush(&mut text, &mut out);
     }
     out
+}
+
+/// `<hp:fieldBegin>` for a field marker (wrapped in `<hp:ctrl>`). Minimal-but-valid: a single
+/// `Command` string param (a hyperlink's URL). `id` doubles as `fieldid` so the matching `fieldEnd`
+/// can reference it.
+fn field_begin_xml(m: &hwp_model::document::FieldMarker) -> String {
+    format!(
+        "<hp:ctrl><hp:fieldBegin id=\"{id}\" type=\"{ftype}\" name=\"\" editable=\"1\" dirty=\"0\" zorder=\"0\" fieldid=\"{id}\" metaTag=\"\">\
+<hp:parameters cnt=\"1\" name=\"\"><hp:stringParam name=\"Command\" xml:space=\"preserve\">{cmd}</hp:stringParam></hp:parameters>\
+</hp:fieldBegin></hp:ctrl>",
+        id = m.id,
+        ftype = m.field_type,
+        cmd = xml_escape(&m.command),
+    )
+}
+
+/// `<hp:fieldEnd>` referencing the matching `fieldBegin` id.
+fn field_end_xml(begin_id: u32) -> String {
+    format!("<hp:ctrl><hp:fieldEnd beginIDRef=\"{begin_id}\" fieldid=\"{begin_id}\"/></hp:ctrl>")
 }
 
 /// Emit a sequence of cell blocks (paragraphs + nested tables, recursively) inside an open

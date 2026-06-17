@@ -43,6 +43,8 @@ struct Lifter<'a> {
     /// rhwp `bin_data_id` (1-based) → our `bin_ref` ("image{id}"), so a re-referenced image is
     /// emitted once.
     bin_seen: RefCell<HashMap<u16, String>>,
+    /// Monotonic fallback id for fields lacking a stable `field_id` (so begin/end stay paired).
+    field_seq: RefCell<u32>,
 }
 
 impl<'a> Lifter<'a> {
@@ -53,6 +55,7 @@ impl<'a> Lifter<'a> {
             para_id_to_idx: HashMap::new(),
             bin_data: RefCell::new(Vec::new()),
             bin_seen: RefCell::new(HashMap::new()),
+            field_seq: RefCell::new(900_000_000),
         }
     }
 
@@ -190,7 +193,8 @@ impl<'a> Lifter<'a> {
             bounds.insert(0, (0, 0)); // leading text with no style ref → default shape
         }
 
-        let mut runs = Vec::new();
+        // (run, start_char) so field markers can snap to run boundaries.
+        let mut runs: Vec<(Run, usize)> = Vec::new();
         for k in 0..bounds.len() {
             let (start, idx) = bounds[k];
             let end = bounds.get(k + 1).map(|b| b.0).unwrap_or(total);
@@ -198,17 +202,64 @@ impl<'a> Lifter<'a> {
                 continue; // zero-width or out-of-order boundary
             }
             let text: String = chars[start..end].iter().collect();
-            runs.push(Run { char_shape: idx, content: vec![Inline::Text(text)], ..Default::default() });
+            runs.push((Run { char_shape: idx, content: vec![Inline::Text(text)], ..Default::default() }, start));
         }
         if runs.is_empty() {
             // Defensive: every boundary collapsed → keep the whole text as one default run.
-            runs.push(Run {
+            runs.push((Run {
                 char_shape: 0,
                 content: vec![Inline::Text(p.text.clone())],
                 ..Default::default()
-            });
+            }, 0));
         }
-        runs
+        self.splice_field_markers(p, runs)
+    }
+
+    /// Wrap field ranges (hyperlinks / click-here) in `Inline::FieldBegin`/`FieldEnd` marker runs,
+    /// snapped to run boundaries. Unknown field types are skipped (the spanned text still
+    /// round-trips). Markers are kept balanced so the open-safety validator's pairing check passes.
+    fn splice_field_markers(&self, p: &RParagraph, runs: Vec<(Run, usize)>) -> Vec<Run> {
+        if p.field_ranges.is_empty() {
+            return runs.into_iter().map(|(r, _)| r).collect();
+        }
+        // First run whose start char is ≥ pos (else past the end).
+        let idx_at = |pos: usize| runs.iter().position(|(_, s)| *s >= pos).unwrap_or(runs.len());
+        // (run_index, ordering, marker run). ord at the same index: field-end(0) < begin(1) < zero-len-end(2).
+        let mut inserts: Vec<(usize, u8, Run)> = Vec::new();
+        for fr in &p.field_ranges {
+            let Some(Control::Field(field)) = p.controls.get(fr.control_idx) else { continue };
+            let Some((ftype, command)) = field_type_token(field) else { continue };
+            let id = if field.field_id != 0 {
+                field.field_id
+            } else {
+                let mut s = self.field_seq.borrow_mut();
+                *s += 1;
+                *s
+            };
+            let begin = marker_run(Inline::FieldBegin(FieldMarker { id, field_type: ftype, command }));
+            let end = marker_run(Inline::FieldEnd(id));
+            let bi = idx_at(fr.start_char_idx);
+            if fr.end_char_idx <= fr.start_char_idx {
+                inserts.push((bi, 1, begin)); // zero-length: begin…
+                inserts.push((bi, 2, end)); // …then end, adjacent
+            } else {
+                inserts.push((bi, 1, begin));
+                inserts.push((idx_at(fr.end_char_idx), 0, end));
+            }
+        }
+        inserts.sort_by_key(|(i, ord, _)| (*i, *ord));
+        let mut it = inserts.into_iter().peekable();
+        let mut out = Vec::new();
+        for (i, (run, _)) in runs.into_iter().enumerate() {
+            while it.peek().is_some_and(|(idx, _, _)| *idx == i) {
+                out.push(it.next().unwrap().2);
+            }
+            out.push(run);
+        }
+        for (_, _, m) in it {
+            out.push(m); // markers anchored past the last run
+        }
+        out
     }
 
     fn lift_table(&self, t: &RTable) -> Table {
@@ -269,6 +320,22 @@ fn object_paragraph(inline: Inline) -> Block {
         provenance: Provenance { source: Some(SourceFormat::Hwp5), raw: None },
         ..Default::default()
     })
+}
+
+/// A run carrying a single inline marker (field begin/end, bookmark).
+fn marker_run(inline: Inline) -> Run {
+    Run { char_shape: 0, content: vec![inline], ..Default::default() }
+}
+
+/// Map an rhwp field to its OWPML (type token, command). v1 handles HYPERLINK only — its command is
+/// a plain URL (low risk). Other field types (click-here forms, cross-refs, …) return None so the
+/// spanned text still round-trips without a (riskier) synthesized field.
+fn field_type_token(field: &rhwp::model::control::Field) -> Option<(String, String)> {
+    use rhwp::model::control::FieldType;
+    match field.field_type {
+        FieldType::Hyperlink => Some(("HYPERLINK".to_string(), field.command.clone())),
+        _ => None,
+    }
 }
 
 /// Lift an rhwp `Equation` → `EquationRef`. The HWP equation script and OWPML `<hp:script>` are the

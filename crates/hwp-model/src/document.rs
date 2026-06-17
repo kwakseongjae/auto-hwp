@@ -163,9 +163,27 @@ pub enum Inline {
     Image(ImageRef),
     /// A 수식 (equation) — its HWP/OWPML script + display attributes.
     Equation(EquationRef),
-    /// Verbatim un-modeled inline content (shape, chart, field, …) — the raw `<hp:…>` XML,
-    /// preserved on export, even before an edit op exists.
+    /// Start of a field range (hyperlink / click-here / cross-ref …) — wraps the runs up to the
+    /// matching [`Inline::FieldEnd`].
+    FieldBegin(FieldMarker),
+    /// End of a field range; carries the matching `FieldBegin` id (`beginIDRef`).
+    FieldEnd(u32),
+    /// A 책갈피 (bookmark) anchor with its name.
+    Bookmark(String),
+    /// Verbatim un-modeled inline content (shape, chart, …) — the raw `<hp:…>` XML, preserved on
+    /// export, even before an edit op exists.
     Raw(crate::types::RawPart),
+}
+
+/// A field start marker (hyperlink, click-here, cross-reference, …).
+#[derive(Clone, Debug, Default)]
+pub struct FieldMarker {
+    /// Unique field id; the matching `FieldEnd` references it as `beginIDRef`.
+    pub id: u32,
+    /// OWPML field type token, e.g. "HYPERLINK", "CLICK_HERE".
+    pub field_type: String,
+    /// The field command/payload (a hyperlink's URL, a click-here's guide text, …).
+    pub command: String,
 }
 
 #[derive(Clone, Debug, Default)]

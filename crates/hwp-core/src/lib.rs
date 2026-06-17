@@ -445,6 +445,30 @@ mod inplace_tests {
         assert!(pagepr.contains(r#"width="59528""#), "portrait A4 width (210mm), not landscape: {pagepr}");
     }
 
+    /// Track A Tier-3: hyperlinks are lifted (Control::Field + FieldType::Hyperlink →
+    /// FieldBegin/FieldEnd markers) and emitted as balanced <hp:fieldBegin>/<hp:fieldEnd> pairs.
+    #[cfg(feature = "rhwp")]
+    #[test]
+    fn hwp5_hyperlinks_convert_to_balanced_fields() {
+        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/hwp/tac-img-02.hwp")).unwrap();
+        let doc = Engine::open(&bytes).unwrap();
+        let begins = doc.sections.iter().flat_map(|s| &s.blocks).map(|b| match b {
+            Block::Paragraph(p) => p.runs.iter().flat_map(|r| &r.content).filter(|i| matches!(i, Inline::FieldBegin(_))).count(),
+            _ => 0,
+        }).sum::<usize>();
+        assert!(begins > 0, "lift captured hyperlink fields: {begins}");
+
+        let out = serialize_hwpx(&doc).unwrap();
+        // validate_hwpx includes the field begin/end pairing gate (an unpaired field corrupts the doc).
+        assert!(validate_hwpx(&out).ok, "hyperlink output open-safe");
+        let pkg = hwp_hwpx::package::Package::open(&out).unwrap();
+        let sec0 = String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap();
+        let nb = sec0.matches("<hp:fieldBegin ").count();
+        let ne = sec0.matches("<hp:fieldEnd ").count();
+        assert!(nb > 0 && nb == ne, "balanced fields: {nb} begin / {ne} end");
+        assert!(sec0.contains(r#"type="HYPERLINK""#), "hyperlink field emitted");
+    }
+
     /// Track A Tier-3: equations are lifted (Control::Equation → Inline::Equation) and emitted as
     /// <hp:equation> with the script verbatim (HWP eqed == OWPML <hp:script>).
     #[cfg(feature = "rhwp")]

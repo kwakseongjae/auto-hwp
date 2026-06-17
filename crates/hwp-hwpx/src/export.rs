@@ -170,9 +170,50 @@ pub fn validate_synthesis_safety(bytes: &[u8]) -> SafetyReport {
                 }
             }
         }
+
+        // (d) field integrity — every <hp:fieldEnd beginIDRef> must match a <hp:fieldBegin id> in
+        // the SAME section (an unpaired field corrupts the document → Hancom repair prompt).
+        for name in pkg.section_part_names() {
+            if let Ok(b) = pkg.read_part(&name) {
+                let s = String::from_utf8_lossy(&b);
+                let begin_ids = tagged_attr_set(&s, "<hp:fieldBegin ", "id");
+                for end_ref in attr_values_after(&s, "<hp:fieldEnd ", "beginIDRef") {
+                    if !begin_ids.contains(end_ref.as_str()) {
+                        blocking.push(format!(
+                            "{name}: <hp:fieldEnd beginIDRef=\"{end_ref}\"> has no matching fieldBegin"
+                        ));
+                    }
+                }
+            }
+        }
     }
 
     SafetyReport { ok: blocking.is_empty(), blocking, warnings }
+}
+
+/// The set of `{attr}` values appearing in the open tag that starts at each `{tag}` occurrence
+/// (e.g. all `id`s of `<hp:fieldBegin …>` elements).
+fn tagged_attr_set(xml: &str, tag: &str, attr: &str) -> std::collections::BTreeSet<String> {
+    let mut out = std::collections::BTreeSet::new();
+    let mut idx = 0;
+    let pat = format!("{attr}=\"");
+    while let Some(p) = xml[idx..].find(tag) {
+        let start = idx + p + tag.len();
+        let tag_end = xml[start..].find('>').map(|e| start + e).unwrap_or(xml.len());
+        if let Some(a) = xml[start..tag_end].find(&pat) {
+            let vs = start + a + pat.len();
+            if let Some(ve) = xml[vs..tag_end].find('"') {
+                out.insert(xml[vs..vs + ve].to_string());
+            }
+        }
+        idx = tag_end;
+    }
+    out
+}
+
+/// Like [`tagged_attr_set`] but returns a Vec (duplicates kept) of `{attr}` from each `{tag}` tag.
+fn attr_values_after(xml: &str, tag: &str, attr: &str) -> Vec<String> {
+    tagged_attr_set(xml, tag, attr).into_iter().collect()
 }
 
 /// The set of `<opf:item …>` `{attr}` values in `content.hpf` (e.g. all `id`s or all `href`s).
