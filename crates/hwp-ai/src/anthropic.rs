@@ -24,14 +24,12 @@ pub struct AnthropicProvider {
 }
 
 impl AnthropicProvider {
-    /// BYOK: read the key from `ANTHROPIC_API_KEY`; model from `TF_HWP_MODEL` or the default.
+    /// BYOK: resolve the key from `ANTHROPIC_API_KEY` (env) or the OS keychain (feature `keyring`);
+    /// model from `TF_HWP_MODEL` or the default.
     pub fn from_env() -> Result<Self> {
-        let api_key = std::env::var("ANTHROPIC_API_KEY").map_err(|_| {
-            Error::CapabilityUnavailable("set ANTHROPIC_API_KEY (BYOK) to use the Anthropic provider")
-        })?;
-        if api_key.trim().is_empty() {
-            return Err(Error::CapabilityUnavailable("ANTHROPIC_API_KEY is empty"));
-        }
+        let api_key = super::secret::resolve_anthropic_key().ok_or(Error::CapabilityUnavailable(
+            "no Anthropic key — set ANTHROPIC_API_KEY or store one (tf-hwp ai-key set)",
+        ))?;
         let model = std::env::var("TF_HWP_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
         Ok(Self { api_key, model })
     }
@@ -86,15 +84,6 @@ impl AnthropicProvider {
     }
 }
 
-/// Strip an optional Markdown code fence (```json … ```) so the model output parses as raw JSON.
-fn strip_code_fence(s: &str) -> &str {
-    let t = s.trim();
-    let Some(rest) = t.strip_prefix("```") else { return t };
-    // Drop the optional language tag on the opening fence line, then the trailing fence.
-    let after_lang = rest.find('\n').map(|i| &rest[i + 1..]).unwrap_or("");
-    after_lang.trim_end().strip_suffix("```").unwrap_or(after_lang).trim()
-}
-
 impl LlmProvider for AnthropicProvider {
     fn name(&self) -> &str {
         "anthropic"
@@ -120,6 +109,6 @@ impl LlmProvider for AnthropicProvider {
              템플릿 JSON으로 출력하세요."
         );
         let raw = self.complete(content::template_brief(), &user)?;
-        content::parse_content(strip_code_fence(&raw))
+        content::parse_content(content::strip_code_fence(&raw))
     }
 }

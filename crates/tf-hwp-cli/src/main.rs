@@ -70,6 +70,12 @@ enum Cmd {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Manage the stored Anthropic BYOK key in the OS keychain (`--features ai`).
+    /// `set` reads the key from stdin (not argv); `status` shows the source; `clear` removes it.
+    AiKey {
+        /// Action: set | clear | status
+        action: String,
+    },
     /// Print the AI content template + the document context (the "read" tool of the AI loop).
     /// A coding agent (Claude Code) reads this, then authors a content JSON for `ai-apply`.
     AiContext { file: PathBuf },
@@ -150,6 +156,7 @@ fn run() -> Result<(), String> {
         Cmd::AiFill { file, instruction, provider, out, verify, dry_run } => {
             ai_fill(&file, &instruction, &provider, &out, verify, dry_run)?
         }
+        Cmd::AiKey { action } => ai_key(&action)?,
         Cmd::AiContext { file } => ai_context(&file)?,
         Cmd::AiApply { file, content, out, verify } => ai_apply(&file, &content, &out, verify)?,
     }
@@ -206,20 +213,22 @@ fn ai_apply(file: &PathBuf, content: &PathBuf, out: &PathBuf, verify: bool) -> R
 }
 
 fn pick_provider(name: &str) -> Result<Box<dyn hwp_ai::LlmProvider>, String> {
-    let key_present = std::env::var("ANTHROPIC_API_KEY")
-        .map(|k| !k.trim().is_empty())
-        .unwrap_or(false);
     match name {
         "mock" => Ok(Box::new(hwp_ai::MockProvider)),
         "anthropic" => anthropic_provider(),
+        "local" => local_provider(),
         "auto" => {
-            if key_present {
+            // Prefer a local model we control, then cloud BYOK, then the deterministic mock — so a
+            // test/CI machine with neither still gets our controlled generation.
+            if local_available() {
+                local_provider()
+            } else if hwp_ai::secret::has_anthropic_key() {
                 anthropic_provider().or_else(|_| Ok(Box::new(hwp_ai::MockProvider)))
             } else {
                 Ok(Box::new(hwp_ai::MockProvider))
             }
         }
-        other => Err(format!("unknown provider '{other}' (use auto | mock | anthropic)")),
+        other => Err(format!("unknown provider '{other}' (use auto | mock | anthropic | local)")),
     }
 }
 
@@ -232,7 +241,57 @@ fn anthropic_provider() -> Result<Box<dyn hwp_ai::LlmProvider>, String> {
 
 #[cfg(not(feature = "ai"))]
 fn anthropic_provider() -> Result<Box<dyn hwp_ai::LlmProvider>, String> {
-    Err("the anthropic provider needs a build with `--features ai` (then set ANTHROPIC_API_KEY)".into())
+    Err("the anthropic provider needs a build with `--features ai` (then set a key via `ai-key set` or ANTHROPIC_API_KEY)".into())
+}
+
+#[cfg(feature = "ai")]
+fn local_provider() -> Result<Box<dyn hwp_ai::LlmProvider>, String> {
+    Ok(Box::new(hwp_ai::ollama::OllamaProvider::from_env()) as Box<dyn hwp_ai::LlmProvider>)
+}
+
+#[cfg(not(feature = "ai"))]
+fn local_provider() -> Result<Box<dyn hwp_ai::LlmProvider>, String> {
+    Err("the local (Ollama) provider needs a build with `--features ai`".into())
+}
+
+#[cfg(feature = "ai")]
+fn local_available() -> bool {
+    hwp_ai::ollama::OllamaProvider::available()
+}
+
+#[cfg(not(feature = "ai"))]
+fn local_available() -> bool {
+    false
+}
+
+#[cfg(feature = "ai")]
+fn ai_key(action: &str) -> Result<(), String> {
+    use std::io::Read;
+    match action {
+        "status" => {
+            println!("BYOK 키 소스: {}", hwp_ai::secret::key_source().label());
+            Ok(())
+        }
+        "set" => {
+            eprintln!("Anthropic API 키를 입력하고 Ctrl-D (stdin → OS 키체인에 저장):");
+            let mut buf = String::new();
+            std::io::stdin().read_to_string(&mut buf).map_err(|e| e.to_string())?;
+            hwp_ai::secret::store_anthropic_key(buf.trim()).map_err(|e| e.to_string())?;
+            println!("키를 OS 키체인에 저장했습니다 (service=tf-hwp). 이후 ai-fill에서 자동 사용됩니다.");
+            Ok(())
+        }
+        "clear" => {
+            hwp_ai::secret::clear_anthropic_key().map_err(|e| e.to_string())?;
+            println!("키체인에서 키를 제거했습니다.");
+            Ok(())
+        }
+        other => Err(format!("unknown ai-key action '{other}' (use set | clear | status)")),
+    }
+}
+
+#[cfg(not(feature = "ai"))]
+fn ai_key(_action: &str) -> Result<(), String> {
+    Err("ai-key needs a build with `--features ai` (OS keychain support)".into())
 }
 
 fn ai_fill(

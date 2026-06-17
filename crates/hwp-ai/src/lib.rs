@@ -8,6 +8,11 @@ use hwp_model::prelude::*;
 use hwp_ops::Op;
 
 pub mod content;
+/// BYOK key resolution (env + optional OS keychain).
+pub mod secret;
+/// Local model provider (Ollama) — behind the `local` feature.
+#[cfg(feature = "local")]
+pub mod ollama;
 
 /// LLM backend abstraction. The cloud/local choice is purely a swap behind this trait.
 pub trait LlmProvider {

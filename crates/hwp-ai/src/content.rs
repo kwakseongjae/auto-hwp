@@ -230,6 +230,17 @@ pub fn parse_content(json: &str) -> Result<AiContent> {
     serde_json::from_str(json).map_err(|e| Error::Parse(format!("AI content JSON: {e}")))
 }
 
+/// Strip an optional Markdown code fence (```json … ```) some models wrap JSON in, so the body
+/// parses as raw JSON. Shared by the cloud + local providers (only those features use it).
+#[cfg(any(feature = "anthropic", feature = "local"))]
+pub(crate) fn strip_code_fence(s: &str) -> &str {
+    let t = s.trim();
+    let Some(rest) = t.strip_prefix("```") else { return t };
+    // Drop the optional language tag on the opening fence line, then the trailing fence.
+    let after_lang = rest.find('\n').map(|i| &rest[i + 1..]).unwrap_or("");
+    after_lang.trim_end().strip_suffix("```").unwrap_or(after_lang).trim()
+}
+
 const DIVIDER: &str = "──────────────────────────────";
 
 /// A list-item paragraph: marker + text with a hanging indent so wrapped lines align under the

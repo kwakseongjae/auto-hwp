@@ -10,6 +10,10 @@ rust-version.workspace = true
 default = []
 # BYOK cloud provider (Anthropic Messages API). Native-only; pulls reqwest.
 anthropic = ["dep:reqwest"]
+# Local model provider (Ollama HTTP, e.g. Qwen3) — out-of-process, our-controlled generation.
+local = ["dep:reqwest"]
+# Store the BYOK key in the OS keychain (ENV var still overrides). Native-only.
+keyring = ["dep:keyring"]
 
 [dependencies]
 hwp-model = { workspace = true }
@@ -17,3 +21,4 @@ hwp-ops = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }
+keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"], optional = true }
