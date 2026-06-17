@@ -445,6 +445,21 @@ mod inplace_tests {
         assert!(pagepr.contains(r#"width="59528""#), "portrait A4 width (210mm), not landscape: {pagepr}");
     }
 
+    /// Track A Tier-3 (frontier safe-drop): a doc with draw shapes / OLE — features we do NOT yet
+    /// faithfully convert — still converts to an open-safe HWPX with all OTHER content preserved
+    /// (shapes/OLE are dropped, never emitted as malformed/blank objects that would corrupt the doc).
+    #[cfg(feature = "rhwp")]
+    #[test]
+    fn hwp5_shapes_drop_safely() {
+        for f in ["draw-group.hwp", "shape-001.hwp", "한셀OLE.hwp"] {
+            let path = format!("{}/../../corpus/hwp/{}", env!("CARGO_MANIFEST_DIR"), f);
+            let bytes = std::fs::read(&path).unwrap();
+            let doc = Engine::open(&bytes).unwrap();
+            let out = serialize_hwpx(&doc).unwrap_or_else(|e| panic!("{f} must convert: {e}"));
+            assert!(validate_hwpx(&out).ok, "{f} converts to an open-safe HWPX (shapes/OLE dropped)");
+        }
+    }
+
     /// Track A Tier-3: hyperlinks are lifted (Control::Field + FieldType::Hyperlink →
     /// FieldBegin/FieldEnd markers) and emitted as balanced <hp:fieldBegin>/<hp:fieldEnd> pairs.
     #[cfg(feature = "rhwp")]
