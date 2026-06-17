@@ -1,1 +1,0 @@
-{"default":{"identifier":"default","description":"Core + dialog permissions for the tf-hwp viewer window.","local":true,"windows":["main"],"permissions":["core:default","dialog:default"]}}
