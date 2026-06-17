@@ -113,16 +113,11 @@ impl<'a> Lifter<'a> {
                 Control::Table(t) => blocks.push(Block::Table(self.lift_table(t))),
                 Control::Picture(pic) => {
                     if let Some(img) = self.lift_picture(pic) {
-                        blocks.push(Block::Paragraph(Paragraph {
-                            runs: vec![Run {
-                                char_shape: 0,
-                                content: vec![Inline::Image(img)],
-                                ..Default::default()
-                            }],
-                            provenance: Provenance { source: Some(SourceFormat::Hwp5), raw: None },
-                            ..Default::default()
-                        }));
+                        blocks.push(object_paragraph(Inline::Image(img)));
                     }
+                }
+                Control::Equation(eq) => {
+                    blocks.push(object_paragraph(Inline::Equation(lift_equation(eq))));
                 }
                 _ => {}
             }
@@ -266,6 +261,31 @@ fn utf16_to_char_idx(text: &str, utf16_pos: u32) -> usize {
 /// font/장평/자간, sub/superscript, emphasis, and underline color are left at our defaults: the
 /// serializer can't emit them yet, and setting them would only force redundant charPr synthesis
 /// (it dedups identical results back to the document's default charPr).
+/// Wrap a single inline object (image / equation) in its own paragraph block, emitted in reading
+/// order after the text paragraph it was anchored in. (Exact mid-run anchoring is a later refinement.)
+fn object_paragraph(inline: Inline) -> Block {
+    Block::Paragraph(Paragraph {
+        runs: vec![Run { char_shape: 0, content: vec![inline], ..Default::default() }],
+        provenance: Provenance { source: Some(SourceFormat::Hwp5), raw: None },
+        ..Default::default()
+    })
+}
+
+/// Lift an rhwp `Equation` → `EquationRef`. The HWP equation script and OWPML `<hp:script>` are the
+/// same markup language, so the script round-trips verbatim (no transcode).
+fn lift_equation(eq: &rhwp::model::control::Equation) -> EquationRef {
+    EquationRef {
+        script: eq.script.clone(),
+        font: eq.font_name.clone(),
+        base_unit: eq.font_size,
+        baseline: eq.baseline,
+        color: lift_text_color(eq.color),
+        width: eq.common.width as i32,
+        height: eq.common.height as i32,
+        version: eq.version_info.clone(),
+    }
+}
+
 fn lift_char_shape(c: &RCharShape, doc: &RDoc) -> CharShape {
     CharShape {
         height: c.base_size,

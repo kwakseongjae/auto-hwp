@@ -569,6 +569,12 @@ fn patch_section_xml(orig: &[u8], sec: &Section, table_ref: Option<&str>, plan: 
                 next_id += 2;
                 emit_pic(&mut inject, pid, picid, bin_ref, *width, *height, base_para_ref, &plain_ref);
             }
+            EmitBlock::Equation(eq) => {
+                let pid = next_id;
+                let eqid = next_id + 1;
+                next_id += 2;
+                emit_equation(&mut inject, pid, eqid, eq, base_para_ref, &plain_ref);
+            }
         }
     }
 
@@ -666,6 +672,8 @@ enum EmitBlock {
     /// An image, emitted as a `<hp:pic>` wrapped in its own paragraph. `bin_ref` is the manifest
     /// item id + `binaryItemIDRef`; width/height are the display size in HWPUNIT.
     Image { bin_ref: String, width: i32, height: i32 },
+    /// A 수식, emitted as `<hp:equation>` wrapped in its own paragraph (the script is verbatim).
+    Equation(EquationRef),
 }
 
 /// Project a dirty *APPENDED* `Block` to its `EmitBlock` (None if untouched OR if it is an
@@ -700,6 +708,21 @@ fn project_block(b: &Block) -> EmitBlock {
                 })
                 .expect("guard guarantees an image");
             EmitBlock::Image { bin_ref: im.bin_ref.clone(), width: im.width, height: im.height }
+        }
+        // An equation-bearing paragraph → EmitBlock::Equation (also before the text path).
+        Block::Paragraph(p)
+            if p.runs.iter().flat_map(|r| &r.content).any(|i| matches!(i, Inline::Equation(_))) =>
+        {
+            let eq = p
+                .runs
+                .iter()
+                .flat_map(|r| &r.content)
+                .find_map(|i| match i {
+                    Inline::Equation(eq) => Some(eq),
+                    _ => None,
+                })
+                .expect("guard guarantees an equation");
+            EmitBlock::Equation(eq.clone())
         }
         Block::Paragraph(p) => EmitBlock::Para {
             para_shape: p.para_shape,
@@ -807,6 +830,12 @@ fn emit_cell_content(
                 *next_id += 2;
                 emit_pic(out, pid, picid, bin_ref, *width, *height, base_para_ref, plain_ref);
             }
+            EmitBlock::Equation(eq) => {
+                let pid = *next_id;
+                let eqid = *next_id + 1;
+                *next_id += 2;
+                emit_equation(out, pid, eqid, eq, base_para_ref, plain_ref);
+            }
         }
     }
 }
@@ -833,6 +862,30 @@ fn emit_pic(out: &mut String, pid: u64, picid: u64, bin_ref: &str, w: i32, h: i3
 <hp:sz width=\"{w}\" widthRelTo=\"ABSOLUTE\" height=\"{h}\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/>\
 <hp:pos treatAsChar=\"1\" affectLSpacing=\"0\" flowWithText=\"1\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PARA\" horzRelTo=\"PARA\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"0\" horzOffset=\"0\"/>\
 <hp:outMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/></hp:pic>\
+<hp:t></hp:t></hp:run></hp:p>"
+    ));
+}
+
+/// Emit a 수식 as an inline (`treatAsChar`) `<hp:equation>` wrapped in its own `<hp:p>`. The HWP
+/// equation script is the SAME markup as OWPML's `<hp:script>`, so it round-trips verbatim (only
+/// XML-escaped). Child order is sz→pos→outMargin→script (verified against a real Hancom equation);
+/// empty font/version fall back to Hancom's defaults.
+fn emit_equation(out: &mut String, pid: u64, eqid: u64, eq: &EquationRef, base_para_ref: &str, plain_ref: &str) {
+    let w = eq.width.max(1);
+    let h = eq.height.max(1);
+    let font = if eq.font.is_empty() { "HYhwpEQ" } else { eq.font.as_str() };
+    let version = if eq.version.is_empty() { "Equation Version 60" } else { eq.version.as_str() };
+    let base_unit = if eq.base_unit == 0 { 1000 } else { eq.base_unit };
+    let baseline = eq.baseline;
+    let color = eq.color.to_hex();
+    let script = xml_escape(&eq.script);
+    out.push_str(&format!(
+        "<hp:p id=\"{pid}\" paraPrIDRef=\"{base_para_ref}\" styleIDRef=\"0\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\"><hp:run charPrIDRef=\"{plain_ref}\">\
+<hp:equation id=\"{eqid}\" zOrder=\"0\" numberingType=\"EQUATION\" textWrap=\"TOP_AND_BOTTOM\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" version=\"{version}\" baseLine=\"{baseline}\" textColor=\"{color}\" baseUnit=\"{base_unit}\" lineMode=\"CHAR\" font=\"{font}\">\
+<hp:sz width=\"{w}\" widthRelTo=\"ABSOLUTE\" height=\"{h}\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/>\
+<hp:pos treatAsChar=\"1\" affectLSpacing=\"0\" flowWithText=\"1\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PARA\" horzRelTo=\"PARA\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"0\" horzOffset=\"0\"/>\
+<hp:outMargin left=\"56\" right=\"56\" top=\"0\" bottom=\"0\"/>\
+<hp:script>{script}</hp:script></hp:equation>\
 <hp:t></hp:t></hp:run></hp:p>"
     ));
 }

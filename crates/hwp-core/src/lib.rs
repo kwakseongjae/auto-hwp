@@ -445,6 +445,25 @@ mod inplace_tests {
         assert!(pagepr.contains(r#"width="59528""#), "portrait A4 width (210mm), not landscape: {pagepr}");
     }
 
+    /// Track A Tier-3: equations are lifted (Control::Equation → Inline::Equation) and emitted as
+    /// <hp:equation> with the script verbatim (HWP eqed == OWPML <hp:script>).
+    #[cfg(feature = "rhwp")]
+    #[test]
+    fn hwp5_equations_convert_to_hp_equation() {
+        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/hwp/math-001.hwp")).unwrap();
+        let doc = Engine::open(&bytes).unwrap();
+        let eqs = doc.sections.iter().flat_map(|s| &s.blocks).filter(|b| matches!(b,
+            Block::Paragraph(p) if p.runs.iter().flat_map(|r| &r.content).any(|i| matches!(i, Inline::Equation(_))))).count();
+        assert!(eqs > 0, "lift captured equations: {eqs}");
+
+        let out = serialize_hwpx(&doc).unwrap();
+        assert!(validate_hwpx(&out).ok, "equation output open-safe");
+        let pkg = hwp_hwpx::package::Package::open(&out).unwrap();
+        let sec0 = String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap();
+        assert_eq!(sec0.matches("<hp:equation ").count(), eqs, "every equation emitted");
+        assert!(sec0.contains("<hp:script>"), "equation script emitted verbatim");
+    }
+
     /// Track A v2-D: per-script fonts are lifted from the .hwp and interned into the HWPX fontfaces
     /// pools — the converted doc keeps its REAL fonts instead of the Skeleton's default 함초롬 faces.
     #[cfg(feature = "rhwp")]

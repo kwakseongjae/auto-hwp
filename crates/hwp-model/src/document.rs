@@ -161,8 +161,10 @@ pub struct Run {
 pub enum Inline {
     Text(String),
     Image(ImageRef),
-    /// Verbatim un-modeled inline content (equation, shape, chart, field, …) —
-    /// rendered by the engine, preserved on export, even before an edit op exists.
+    /// A 수식 (equation) — its HWP/OWPML script + display attributes.
+    Equation(EquationRef),
+    /// Verbatim un-modeled inline content (shape, chart, field, …) — the raw `<hp:…>` XML,
+    /// preserved on export, even before an edit op exists.
     Raw(crate::types::RawPart),
 }
 
@@ -171,6 +173,23 @@ pub struct ImageRef {
     pub bin_ref: String,
     pub width: HwpUnit,
     pub height: HwpUnit,
+}
+
+/// A 수식. The `script` is HWP's equation markup (e.g. `"1 over 2"`), which is the SAME language as
+/// OWPML's `<hp:script>` — so it round-trips verbatim (no transcode). The rest are display attrs.
+#[derive(Clone, Debug)]
+pub struct EquationRef {
+    pub script: String,
+    /// Equation font (e.g. "HYhwpEQ"); empty → the default symbol font on export.
+    pub font: String,
+    /// Base size in HWPUNIT (OWPML `baseUnit`).
+    pub base_unit: u32,
+    pub baseline: i16,
+    pub color: crate::types::Color,
+    pub width: HwpUnit,
+    pub height: HwpUnit,
+    /// e.g. "Equation Version 60"; empty → the default on export.
+    pub version: String,
 }
 
 #[derive(Clone, Debug, Default)]
