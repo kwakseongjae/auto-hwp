@@ -22,7 +22,7 @@ default = ["rhwp"]
 rhwp = ["hwp-core/rhwp", "hwp-mcp/rhwp"]
 # In-app AI generation (natural language → AiContent via a provider). Kept SEPARATE from default so
 # plain/CI builds stay lean (no reqwest/keyring). Run dev with: cargo tauri dev -f rhwp ai
-ai = ["hwp-ai/anthropic", "hwp-ai/keyring", "hwp-ai/local"]
+ai = ["hwp-ai/anthropic", "hwp-ai/keyring", "hwp-ai/local", "hwp-ai/openrouter"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

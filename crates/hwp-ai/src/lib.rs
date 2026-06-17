@@ -13,6 +13,9 @@ pub mod secret;
 /// Local model provider (Ollama) — behind the `local` feature.
 #[cfg(feature = "local")]
 pub mod ollama;
+/// OpenRouter (OpenAI-compatible) cloud provider — behind the `openrouter` feature.
+#[cfg(feature = "openrouter")]
+pub mod openrouter;
 
 /// LLM backend abstraction. The cloud/local choice is purely a swap behind this trait.
 pub trait LlmProvider {

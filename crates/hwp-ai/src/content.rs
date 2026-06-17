@@ -232,7 +232,7 @@ pub fn parse_content(json: &str) -> Result<AiContent> {
 
 /// Strip an optional Markdown code fence (```json … ```) some models wrap JSON in, so the body
 /// parses as raw JSON. Shared by the cloud + local providers (only those features use it).
-#[cfg(any(feature = "anthropic", feature = "local"))]
+#[cfg(any(feature = "anthropic", feature = "local", feature = "openrouter"))]
 pub(crate) fn strip_code_fence(s: &str) -> &str {
     let t = s.trim();
     let Some(rest) = t.strip_prefix("```") else { return t };

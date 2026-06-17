@@ -140,16 +140,21 @@ fn ai_generate(_prompt: String, _sess: tauri::State<'_, SharedSession>) -> Resul
 /// (Anthropic key from env/keychain), else the deterministic Mock — so it never hard-fails.
 #[cfg(feature = "ai")]
 fn pick_provider() -> Box<dyn hwp_ai::LlmProvider> {
-    if hwp_ai::ollama::OllamaProvider::available() {
-        Box::new(hwp_ai::ollama::OllamaProvider::from_env())
-    } else if hwp_ai::secret::has_anthropic_key() {
-        match hwp_ai::anthropic::AnthropicProvider::from_env() {
-            Ok(p) => Box::new(p),
-            Err(_) => Box::new(hwp_ai::MockProvider),
+    // OpenRouter (BYOK) first when its key is set, then a local Ollama, then Anthropic, then Mock.
+    if hwp_ai::secret::has_openrouter_key() {
+        if let Ok(p) = hwp_ai::openrouter::OpenRouterProvider::from_env() {
+            return Box::new(p);
         }
-    } else {
-        Box::new(hwp_ai::MockProvider)
     }
+    if hwp_ai::ollama::OllamaProvider::available() {
+        return Box::new(hwp_ai::ollama::OllamaProvider::from_env());
+    }
+    if hwp_ai::secret::has_anthropic_key() {
+        if let Ok(p) = hwp_ai::anthropic::AnthropicProvider::from_env() {
+            return Box::new(p);
+        }
+    }
+    Box::new(hwp_ai::MockProvider)
 }
 
 /// Undo / redo the last edit; returns the new page count so the frontend re-renders.

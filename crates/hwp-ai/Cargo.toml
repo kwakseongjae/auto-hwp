@@ -12,6 +12,8 @@ default = []
 anthropic = ["dep:reqwest"]
 # Local model provider (Ollama HTTP, e.g. Qwen3) — out-of-process, our-controlled generation.
 local = ["dep:reqwest"]
+# OpenRouter (OpenAI-compatible) cloud provider — BYOK, any model slug (e.g. a Gemini Flash).
+openrouter = ["dep:reqwest"]
 # Store the BYOK key in the OS keychain (ENV var still overrides). Native-only.
 keyring = ["dep:keyring"]
 

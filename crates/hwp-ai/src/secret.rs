@@ -6,11 +6,13 @@
 #[cfg(feature = "keyring")]
 use hwp_model::error::{Error, Result};
 
-/// Keychain service/account identifying the stored Anthropic key.
+/// Keychain service/account identifying the stored keys.
 #[cfg(feature = "keyring")]
 const SERVICE: &str = "tf-hwp";
 #[cfg(feature = "keyring")]
 const ACCOUNT: &str = "anthropic-api-key";
+#[cfg(feature = "keyring")]
+const OPENROUTER_ACCOUNT: &str = "openrouter-api-key";
 
 /// The Anthropic API key, if available: `ANTHROPIC_API_KEY` env first, then the OS keychain
 /// (only when built with `--features keyring`). `None` if neither is set.
@@ -26,6 +28,34 @@ pub fn resolve_anthropic_key() -> Option<String> {
 /// True if a key is resolvable from either source (used for `auto` provider selection).
 pub fn has_anthropic_key() -> bool {
     resolve_anthropic_key().is_some()
+}
+
+/// The OpenRouter API key, if available: `OPENROUTER_API_KEY` env first, then the OS keychain.
+pub fn resolve_openrouter_key() -> Option<String> {
+    if let Ok(k) = std::env::var("OPENROUTER_API_KEY") {
+        if !k.trim().is_empty() {
+            return Some(k);
+        }
+    }
+    openrouter_keychain()
+}
+
+pub fn has_openrouter_key() -> bool {
+    resolve_openrouter_key().is_some()
+}
+
+#[cfg(feature = "keyring")]
+fn openrouter_keychain() -> Option<String> {
+    let entry = keyring::Entry::new(SERVICE, OPENROUTER_ACCOUNT).ok()?;
+    match entry.get_password() {
+        Ok(k) if !k.trim().is_empty() => Some(k),
+        _ => None,
+    }
+}
+
+#[cfg(not(feature = "keyring"))]
+fn openrouter_keychain() -> Option<String> {
+    None
 }
 
 #[cfg(feature = "keyring")]
