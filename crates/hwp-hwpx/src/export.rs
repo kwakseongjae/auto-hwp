@@ -91,7 +91,9 @@ pub fn validate_open_safety(bytes: &[u8]) -> SafetyReport {
 /// the generic XML/OPC checks catch, and `build_synth_plan` silently no-ops on:
 ///   (a) IDRef integrity — every `charPrIDRef`/`paraPrIDRef`/`borderFillIDRef`/`styleIDRef` in a
 ///       section resolves to an id that EXISTS in the header pools;
-///   (b) `itemCnt` == actual child count for each header pool (Hancom trusts the declared count).
+///   (b) `itemCnt` == actual child count for each header pool (Hancom trusts the declared count);
+///   (c) v2 manifest integrity — `content.hpf` lists every section + BinData part it ships, and
+///       every `<hc:img binaryItemIDRef>` resolves to a manifest item (dangling → broken image).
 ///
 /// Kept SEPARATE from `validate_open_safety` (which the byte-stable HWPX-in round-trip asserts) so
 /// these additions can't regress that path — only the converter runs this, inside
@@ -136,9 +138,75 @@ pub fn validate_synthesis_safety(bytes: &[u8]) -> SafetyReport {
             }
             None => blocking.push("no header.xml to validate pool references against".into()),
         }
+
+        // (c) v2 manifest integrity — content.hpf must list every section + BinData part it ships,
+        // and every <hc:img binaryItemIDRef> must resolve to a manifest item. A missing manifest
+        // entry or a dangling image ref opens as a Hancom "damaged file" / broken image.
+        if let Ok(hpf) = pkg.read_part("Contents/content.hpf") {
+            let hpf = String::from_utf8_lossy(&hpf);
+            // Manifest item ids + hrefs.
+            let item_ids = manifest_attr_set(&hpf, "id");
+            let item_hrefs = manifest_attr_set(&hpf, "href");
+
+            // Every Contents/section*.xml and BinData/* part is listed in the manifest (by href).
+            for name in &pkg.part_names {
+                let is_section = name.starts_with("Contents/section") && name.ends_with(".xml");
+                let is_bindata = name.starts_with("BinData/");
+                if (is_section || is_bindata) && !item_hrefs.contains(name.as_str()) {
+                    blocking.push(format!("content.hpf manifest is missing an entry for '{name}'"));
+                }
+            }
+            // Every image reference in a section resolves to a manifest item.
+            for name in pkg.section_part_names() {
+                if let Ok(b) = pkg.read_part(&name) {
+                    let s = String::from_utf8_lossy(&b);
+                    for id in attr_values(&s, "binaryItemIDRef") {
+                        if !item_ids.contains(id.as_str()) {
+                            blocking.push(format!(
+                                "{name}: binaryItemIDRef=\"{id}\" has no matching content.hpf item"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
     }
 
     SafetyReport { ok: blocking.is_empty(), blocking, warnings }
+}
+
+/// The set of `<opf:item …>` `{attr}` values in `content.hpf` (e.g. all `id`s or all `href`s).
+fn manifest_attr_set(hpf: &str, attr: &str) -> std::collections::BTreeSet<String> {
+    let mut out = std::collections::BTreeSet::new();
+    let mut idx = 0;
+    while let Some(p) = hpf[idx..].find("<opf:item ") {
+        let start = idx + p;
+        let end = hpf[start..].find("/>").map(|e| start + e).unwrap_or(hpf.len());
+        let tag = &hpf[start..end];
+        let pat = format!("{attr}=\"");
+        if let Some(a) = tag.find(&pat) {
+            let vs = a + pat.len();
+            if let Some(ve) = tag[vs..].find('"') {
+                out.insert(tag[vs..vs + ve].to_string());
+            }
+        }
+        idx = end + 2;
+    }
+    out
+}
+
+/// All distinct `{attr}="…"` values in `xml`.
+fn attr_values(xml: &str, attr: &str) -> std::collections::BTreeSet<String> {
+    let mut out = std::collections::BTreeSet::new();
+    let pat = format!("{attr}=\"");
+    let mut idx = 0;
+    while let Some(p) = xml[idx..].find(&pat) {
+        let start = idx + p + pat.len();
+        let end = xml[start..].find('"').map(|e| start + e).unwrap_or(xml.len());
+        out.insert(xml[start..end].to_string());
+        idx = end;
+    }
+    out
 }
 
 /// First `name="N"` (u64) within `tag`.
@@ -230,6 +298,21 @@ mod tests {
         assert_eq!(pool_itemcnt_mismatch(ok, "charProperties", "charPr"), None);
         let bad = r#"<hh:charProperties itemCnt="3"><hh:charPr id="0"/><hh:charPr id="1"/></hh:charProperties>"#;
         assert_eq!(pool_itemcnt_mismatch(bad, "charProperties", "charPr"), Some((3, 2)));
+    }
+
+    #[test]
+    fn manifest_and_attr_parsers() {
+        let hpf = r#"<opf:manifest><opf:item id="header" href="Contents/header.xml" media-type="application/xml"/><opf:item id="image1" href="BinData/image1.png" media-type="image/png" isEmbeded="1"/><opf:item id="section0" href="Contents/section0.xml" media-type="application/xml"/></opf:manifest>"#;
+        let ids = manifest_attr_set(hpf, "id");
+        assert!(ids.contains("image1") && ids.contains("section0") && ids.contains("header"));
+        let hrefs = manifest_attr_set(hpf, "href");
+        assert!(hrefs.contains("BinData/image1.png") && hrefs.contains("Contents/section0.xml"));
+
+        let sec = r#"<hp:run><hp:pic><hc:img binaryItemIDRef="image1"/></hp:pic></hp:run><hc:img binaryItemIDRef="image9"/>"#;
+        let refs = attr_values(sec, "binaryItemIDRef");
+        assert_eq!(refs, BTreeSet::from(["image1".to_string(), "image9".to_string()]));
+        // image9 is NOT in the manifest → the integrity check would flag it.
+        assert!(!ids.contains("image9"));
     }
 
     #[test]
