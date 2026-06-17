@@ -72,6 +72,18 @@ pub fn serialize(doc: &SemanticDoc) -> Result<Vec<u8>> {
         .collect::<std::result::Result<_, _>>()
         .map_err(|e: zip::result::ZipError| Error::Serialize(format!("read entries: {e}")))?;
 
+    // v2 PART-GENERATOR: the seed package may have FEWER section parts than the doc has sections —
+    // the from-scratch converter seeds only the Skeleton's section0, but a lifted .hwp can be
+    // multi-section. Append the missing `Contents/section{k}.xml` parts + any embedded images, and
+    // register them in `content.hpf`. HWPX-in seeds already have a part per section and no
+    // doc.bin_data → nothing extra is appended → the round-trip stays byte-identical (non-regression).
+    let new_section_items: Vec<(String, String)> = (section_names.len()..doc.sections.len())
+        .map(|k| (format!("section{k}"), format!("Contents/section{k}.xml")))
+        .collect();
+    let image_items = collect_image_items(doc);
+    let content_hpf_name =
+        names.iter().find(|n| n.to_ascii_lowercase().ends_with("content.hpf")).cloned();
+
     let deflate = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
     let mut out = ZipWriter::new(Cursor::new(Vec::new()));
     for (i, name) in names.iter().enumerate() {
@@ -82,9 +94,22 @@ pub fn serialize(doc: &SemanticDoc) -> Result<Vec<u8>> {
             .and_then(|si| doc.sections.get(si))
             .filter(|s| s.dirty.is_dirty());
 
+        let is_content_hpf = content_hpf_name.as_deref() == Some(name.as_str())
+            && (!new_section_items.is_empty() || !image_items.is_empty());
+
         if is_header && plan.header_out.is_some() {
             // PASS 2a — emit the fully-synthesized header.xml (fonts + charPr + paraPr pools).
             let patched = plan.header_out.as_deref().unwrap_or_default();
+            out.start_file(name, deflate).map_err(|e| Error::Serialize(e.to_string()))?;
+            out.write_all(patched.as_bytes()).map_err(|e| Error::Io(e.to_string()))?;
+        } else if is_content_hpf {
+            // PASS 2c — register the appended section/image parts in the package manifest + spine.
+            let orig = pkg.read_part(name).unwrap_or_default();
+            let patched = patch_content_hpf(
+                &String::from_utf8_lossy(&orig),
+                &new_section_items,
+                &image_items,
+            );
             out.start_file(name, deflate).map_err(|e| Error::Serialize(e.to_string()))?;
             out.write_all(patched.as_bytes()).map_err(|e| Error::Io(e.to_string()))?;
         } else if let Some(sec) = dirty_section {
@@ -97,6 +122,24 @@ pub fn serialize(doc: &SemanticDoc) -> Result<Vec<u8>> {
             // Verbatim copy: preserves compression, metadata, order (and STORED mimetype).
             let raw = zin.by_index_raw(i).map_err(|e| Error::Serialize(e.to_string()))?;
             out.raw_copy_file(raw).map_err(|e| Error::Serialize(e.to_string()))?;
+        }
+    }
+
+    // PASS 3 — append parts the seed package lacked: extra sections, then embedded images. (Empty
+    // for HWPX-in + v1 single-section → the zip is byte-identical to before.)
+    for k in section_names.len()..doc.sections.len() {
+        if let Some(sec) = doc.sections.get(k) {
+            let orig = sec.provenance.raw.as_deref().unwrap_or(b"");
+            let patched = patch_section_xml(orig, sec, table_ref.as_deref(), &plan);
+            out.start_file(format!("Contents/section{k}.xml"), deflate)
+                .map_err(|e| Error::Serialize(e.to_string()))?;
+            out.write_all(&patched).map_err(|e| Error::Io(e.to_string()))?;
+        }
+    }
+    for img in &image_items {
+        if let Some(bytes) = doc.bin_data.iter().find(|b| b.bin_ref == img.bin_ref).map(|b| &b.bytes) {
+            out.start_file(&img.href, deflate).map_err(|e| Error::Serialize(e.to_string()))?;
+            out.write_all(bytes).map_err(|e| Error::Io(e.to_string()))?;
         }
     }
 
@@ -117,25 +160,19 @@ const SKELETON: &[u8] =
 /// mandatory `secPr`), mark all content dirty, then RE-ENTER [`serialize`] so the existing,
 /// oracle-tested synth/patch pipeline runs unchanged against the Skeleton header + section.
 ///
-/// v1 is SINGLE-SECTION: multi-section hard-errors rather than silently dropping content (the
-/// Skeleton's `content.hpf` manifest lists only `section0`, and the output loop copies only the
-/// Skeleton's entries — it cannot emit a `section1.xml`). Images are likewise not yet emittable
-/// (no new `BinData/*` parts) and are dropped by the (shallow, for now) lift.
+/// v2: MULTI-SECTION + IMAGES are supported. Every section is seeded from the Skeleton's section0
+/// (which carries the mandatory secPr) as its `provenance.raw` base; the part-generator in
+/// `serialize()` then appends `Contents/section1..N.xml` + `BinData/*` and registers them in
+/// `content.hpf`. The shared header pools are synthesized once across ALL sections.
 fn serialize_from_scratch(doc: &SemanticDoc) -> Result<Vec<u8>> {
-    if doc.sections.len() > 1 {
-        return Err(Error::Serialize(format!(
-            "multi-section HWP5→HWPX is not yet supported (this document has {} sections; \
-             v1 converts single-section documents only)",
-            doc.sections.len()
-        )));
-    }
-    // The base section0.xml the body patcher appends lifted blocks into (before </hs:sec>).
+    // The base section0.xml each section's body patcher appends lifted blocks into (before </hs:sec>);
+    // it carries the secPr, so every emitted section gets one.
     let base_section0 = Package::open(SKELETON)?.read_part("Contents/section0.xml")?;
 
     let mut seeded = doc.clone();
     seeded.passthrough.push(SOURCE_PART_TAG, SKELETON.to_vec());
-    if let Some(sec) = seeded.sections.first_mut() {
-        sec.provenance.raw = Some(base_section0);
+    for sec in &mut seeded.sections {
+        sec.provenance.raw = Some(base_section0.clone());
         sec.dirty.mark();
         for block in &mut sec.blocks {
             mark_block_dirty(block);
@@ -155,6 +192,101 @@ fn serialize_from_scratch(doc: &SemanticDoc) -> Result<Vec<u8>> {
         )));
     }
     Ok(out)
+}
+
+/// An embedded image part to emit: its BinData ref (which is ALSO the manifest item id and the
+/// `<hc:img binaryItemIDRef>`), the zip part name (`Contents/BinData/{ref}.{kind}`), and the OWPML
+/// media-type (Hancom's exact spelling: `image/png`, `image/bmp`, `image/jpg`, …).
+struct ImageItem {
+    bin_ref: String,
+    href: String,
+    media_type: String,
+}
+
+/// Collect the distinct embedded images actually referenced by `Inline::Image` across all sections
+/// and table cells, paired with their `SemanticDoc::bin_data` bytes → the BinData parts to emit +
+/// manifest items. Empty for HWPX-in (no `bin_data`) and for the v1 text/table lift.
+fn collect_image_items(doc: &SemanticDoc) -> Vec<ImageItem> {
+    fn walk(blocks: &[Block], used: &mut std::collections::BTreeSet<String>) {
+        for b in blocks {
+            match b {
+                Block::Paragraph(p) => {
+                    for r in &p.runs {
+                        for inl in &r.content {
+                            if let Inline::Image(im) = inl {
+                                used.insert(im.bin_ref.clone());
+                            }
+                        }
+                    }
+                }
+                Block::Table(t) => {
+                    for c in &t.cells {
+                        walk(&c.blocks, used);
+                    }
+                }
+            }
+        }
+    }
+    let mut used = std::collections::BTreeSet::new();
+    for s in &doc.sections {
+        walk(&s.blocks, &mut used);
+    }
+    doc.bin_data
+        .iter()
+        .filter(|b| used.contains(&b.bin_ref))
+        .map(|b| ImageItem {
+            // BinData parts live at the package root (matches Hancom: `BinData/image1.png`), which is
+            // also the manifest href AND the zip entry name.
+            bin_ref: b.bin_ref.clone(),
+            href: format!("BinData/{}.{}", b.bin_ref, b.kind),
+            media_type: image_media_type(&b.kind),
+        })
+        .collect()
+}
+
+/// OWPML media-type for an image extension, matching Hancom's spelling (note: `image/jpg`, not
+/// `image/jpeg`).
+fn image_media_type(kind: &str) -> String {
+    match kind.to_ascii_lowercase().as_str() {
+        "png" => "image/png",
+        "bmp" => "image/bmp",
+        "jpg" | "jpeg" => "image/jpg",
+        "gif" => "image/gif",
+        "tif" | "tiff" => "image/tiff",
+        "wmf" => "image/wmf",
+        "emf" => "image/emf",
+        other => return format!("image/{other}"),
+    }
+    .to_string()
+}
+
+/// Register appended parts in `content.hpf`: each new section → a `<opf:item media-type=
+/// "application/xml">` in `<opf:manifest>` + an `<opf:itemref>` in `<opf:spine>`; each image → a
+/// manifest `<opf:item media-type="image/.." isEmbeded="1">` (images are NOT in the spine). Hrefs
+/// are package-root-relative as Hancom writes them: `Contents/section1.xml`, `BinData/image1.png`.
+fn patch_content_hpf(hpf: &str, sections: &[(String, String)], images: &[ImageItem]) -> String {
+    let mut manifest = String::new();
+    let mut spine = String::new();
+    for (id, href) in sections {
+        manifest.push_str(&format!(
+            "<opf:item id=\"{id}\" href=\"{href}\" media-type=\"application/xml\"/>"
+        ));
+        spine.push_str(&format!("<opf:itemref idref=\"{id}\" linear=\"yes\"/>"));
+    }
+    for img in images {
+        manifest.push_str(&format!(
+            "<opf:item id=\"{}\" href=\"{}\" media-type=\"{}\" isEmbeded=\"1\"/>",
+            img.bin_ref, img.href, img.media_type
+        ));
+    }
+    let mut s = hpf.to_string();
+    if let Some(p) = s.find("</opf:manifest>") {
+        s.insert_str(p, &manifest);
+    }
+    if let Some(p) = s.find("</opf:spine>") {
+        s.insert_str(p, &spine);
+    }
+    s
 }
 
 /// Recursively mark a block dirty so the append path ([`dirty_emit`]) emits it: a lifted paragraph
@@ -1368,13 +1500,32 @@ mod tests {
     }
 
     #[test]
-    fn from_scratch_multi_section_hard_errors() {
-        // v1 converts single-section only — a multi-section .hwp must error CLEANLY rather than
-        // silently drop sections (the Skeleton's content.hpf lists only section0).
+    fn from_scratch_multi_section_emits_all_sections_and_spine() {
+        // v2: a multi-section from-scratch doc emits Contents/section0.xml + section1.xml, both
+        // registered in content.hpf (manifest + spine), and stays open-safe.
         let mut doc = SemanticDoc::default();
-        doc.sections.push(Section::default());
-        doc.sections.push(Section::default());
-        let msg = serialize(&doc).unwrap_err().to_string();
-        assert!(msg.contains("multi-section"), "error must name the limitation: {msg}");
+        for t in ["첫 구역 본문.", "둘째 구역 본문."] {
+            let mut sec = Section::default();
+            sec.blocks.push(Block::Paragraph(Paragraph {
+                runs: vec![Run { char_shape: 0, content: vec![Inline::Text(t.into())], ..Default::default() }],
+                ..Default::default()
+            }));
+            doc.sections.push(sec);
+        }
+        let out = serialize(&doc).expect("multi-section from-scratch must serialize");
+        assert!(crate::export::validate_synthesis_safety(&out).ok, "multi-section output open-safe");
+
+        let pkg = Package::open(&out).unwrap();
+        let secs = pkg.section_part_names();
+        assert!(secs.iter().any(|n| n.ends_with("section0.xml")), "section0 present: {secs:?}");
+        assert!(secs.iter().any(|n| n.ends_with("section1.xml")), "section1 appended: {secs:?}");
+        let hpf = String::from_utf8(pkg.read_part("Contents/content.hpf").unwrap()).unwrap();
+        assert!(hpf.contains(r#"href="Contents/section1.xml""#), "section1 in manifest");
+        assert!(hpf.contains(r#"idref="section1""#), "section1 in spine");
+
+        // Both sections' text round-trips.
+        let re = parse_semantic(&out).unwrap();
+        let text = re.plain_text();
+        assert!(text.contains("첫 구역 본문.") && text.contains("둘째 구역 본문."), "both sections: {text}");
     }
 }

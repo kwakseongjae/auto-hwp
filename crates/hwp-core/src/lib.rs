@@ -67,9 +67,9 @@ impl Engine {
 /// The honest fidelity notice for an HWP5→HWPX conversion — what is preserved vs still pending.
 /// Surface this whenever a binary `.hwp` was converted so users aren't surprised by the gaps.
 pub const HWP5_CONVERSION_NOTICE: &str = "HWP5(.hwp) → HWPX 변환: 본문 텍스트, 글자 서식\
-    (굵게/기울임/크기/색/밑줄/취소선), 표(중첩·병합 셀 포함), 페이지 크기·여백·방향이 보존됩니다. \
-    아직 지원 안 됨: 글꼴(스크립트별), 위·아래첨자, 문단 번호/글머리표, 이미지, 수식/도형, \
-    머리말/꼬리말, 다중 구역(현재 단일 구역만).";
+    (굵게/기울임/크기/색/밑줄/취소선), 표(중첩·병합 셀 포함), 페이지 크기·여백·방향, 다중 구역이 \
+    보존됩니다. 아직 지원 안 됨: 글꼴(스크립트별), 위·아래첨자, 문단 번호/글머리표, 이미지, \
+    수식/도형, 머리말/꼬리말.";
 
 /// Open ANY supported document as an editable, HWPX-serializable `SemanticDoc`, reporting whether a
 /// binary→HWPX conversion happened. A binary HW5 (`.hwp`) is lifted via rhwp (needs `--features
@@ -443,6 +443,28 @@ mod inplace_tests {
         let pagepr = &sec0[sec0.find("<hp:pagePr").expect("has pagePr")..][..120];
         assert!(pagepr.contains(r#"landscape="NARROWLY""#), "portrait, not the Skeleton's WIDELY: {pagepr}");
         assert!(pagepr.contains(r#"width="59528""#), "portrait A4 width (210mm), not landscape: {pagepr}");
+    }
+
+    /// Track A v2: a MULTI-SECTION .hwp converts — every section is emitted (Contents/section0..N)
+    /// + registered in content.hpf, and all sections' text round-trips with NO duplication (the
+    /// whitespace-normalized equality would catch a doubled section).
+    #[cfg(feature = "rhwp")]
+    #[test]
+    fn hwp5_multi_section_converts_all_sections() {
+        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/hwp/hwp-multi-001.hwp")).unwrap();
+        let doc = Engine::open(&bytes).unwrap();
+        assert!(doc.sections.len() >= 2, "fixture is multi-section: {}", doc.sections.len());
+        let original = doc.plain_text();
+
+        let out = serialize_hwpx(&doc).expect("multi-section converts");
+        assert!(validate_hwpx(&out).ok, "multi-section output open-safe");
+        let pkg = hwp_hwpx::package::Package::open(&out).unwrap();
+        assert!(pkg.section_part_names().len() >= 2, "≥2 section parts emitted");
+
+        let reopened = Engine::open(&out).unwrap();
+        let norm = |s: &str| s.split_whitespace().collect::<String>();
+        assert_eq!(norm(&reopened.plain_text()), norm(&original), "all sections round-trip, no duplication");
+        let _ = std::fs::write(std::env::temp_dir().join("multi-converted.hwpx"), &out);
     }
 
     /// Track A Phase 5: open_as_hwpx flags a binary .hwp as converted and yields a doc that
