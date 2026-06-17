@@ -9,6 +9,7 @@
 //! sub/superscript, numbering and underline color are deferred (the serializer doesn't emit them
 //! yet — see crates/hwp-hwpx/src/synth.rs).
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 use hwp_model::prelude::*;
@@ -36,11 +37,23 @@ struct Lifter<'a> {
     char_id_to_idx: HashMap<u32, usize>,
     /// rhwp `para_shapes` index → our `para_shapes` index.
     para_id_to_idx: HashMap<u16, usize>,
+    /// Embedded images collected from Picture controls (deduped by rhwp bin_data_id). `RefCell` so
+    /// the `&self` recursive lift (paragraphs → tables → cell paragraphs) can register into it.
+    bin_data: RefCell<Vec<BinData>>,
+    /// rhwp `bin_data_id` (1-based) → our `bin_ref` ("image{id}"), so a re-referenced image is
+    /// emitted once.
+    bin_seen: RefCell<HashMap<u16, String>>,
 }
 
 impl<'a> Lifter<'a> {
     fn new(doc: &'a RDoc) -> Self {
-        Self { doc, char_id_to_idx: HashMap::new(), para_id_to_idx: HashMap::new() }
+        Self {
+            doc,
+            char_id_to_idx: HashMap::new(),
+            para_id_to_idx: HashMap::new(),
+            bin_data: RefCell::new(Vec::new()),
+            bin_seen: RefCell::new(HashMap::new()),
+        }
     }
 
     fn run(mut self) -> SemanticDoc {
@@ -79,6 +92,7 @@ impl<'a> Lifter<'a> {
             }
             out.sections.push(section);
         }
+        out.bin_data = self.bin_data.into_inner();
         out
     }
 
@@ -91,11 +105,67 @@ impl<'a> Lifter<'a> {
             ..Default::default()
         }));
 
+        // Block-level objects anchored in this paragraph's controls. Tables and (v2) embedded
+        // pictures are emitted in reading order; each picture becomes its own paragraph carrying an
+        // Inline::Image (exact inline anchoring within the text run is a later refinement).
         for ctrl in &p.controls {
-            if let Control::Table(t) = ctrl {
-                blocks.push(Block::Table(self.lift_table(t)));
+            match ctrl {
+                Control::Table(t) => blocks.push(Block::Table(self.lift_table(t))),
+                Control::Picture(pic) => {
+                    if let Some(img) = self.lift_picture(pic) {
+                        blocks.push(Block::Paragraph(Paragraph {
+                            runs: vec![Run {
+                                char_shape: 0,
+                                content: vec![Inline::Image(img)],
+                                ..Default::default()
+                            }],
+                            provenance: Provenance { source: Some(SourceFormat::Hwp5), raw: None },
+                            ..Default::default()
+                        }));
+                    }
+                }
+                _ => {}
             }
         }
+    }
+
+    /// Lift an rhwp `Picture` → `ImageRef`, registering its bytes into `bin_data` (deduped by the
+    /// rhwp `bin_data_id`). Returns None for an unresolved / external (no embedded bytes) image.
+    fn lift_picture(&self, pic: &rhwp::model::image::Picture) -> Option<ImageRef> {
+        let bin_id = pic.image_attr.bin_data_id;
+        if bin_id == 0 {
+            return None;
+        }
+        // rhwp bin ids are 1-based; the binary is at bin_data_content[id-1], else by .id match.
+        let content = self
+            .doc
+            .bin_data_content
+            .get((bin_id - 1) as usize)
+            .filter(|c| !c.data.is_empty())
+            .or_else(|| self.doc.bin_data_content.iter().find(|c| c.id == bin_id && !c.data.is_empty()))?;
+
+        let seen = self.bin_seen.borrow().get(&bin_id).cloned();
+        let bin_ref = if let Some(r) = seen {
+            r
+        } else {
+            // Normalize the extension (drop a leading dot, lowercase): "PNG" / ".png" → "png".
+            let kind = content.extension.trim_start_matches('.').to_ascii_lowercase();
+            let kind = if kind.is_empty() { "png".to_string() } else { kind };
+            let r = format!("image{bin_id}");
+            self.bin_data.borrow_mut().push(BinData {
+                bin_ref: r.clone(),
+                bytes: content.data.clone(),
+                kind,
+            });
+            self.bin_seen.borrow_mut().insert(bin_id, r.clone());
+            r
+        };
+
+        Some(ImageRef {
+            bin_ref,
+            width: pic.common.width as i32,
+            height: pic.common.height as i32,
+        })
     }
 
     /// Split a paragraph's text into runs at its `CharShapeRef` boundaries, each run referencing the

@@ -555,6 +555,12 @@ fn patch_section_xml(orig: &[u8], sec: &Section, table_ref: Option<&str>, plan: 
                 emit_table(&mut inject, tid, *rows, *cols, cells, base_para_ref, &plain_ref, &cref, bf, &plan.shade_ref, &mut next_id);
                 inject.push_str("<hp:t></hp:t></hp:run></hp:p>");
             }
+            EmitBlock::Image { bin_ref, width, height } => {
+                let pid = next_id;
+                let picid = next_id + 1;
+                next_id += 2;
+                emit_pic(&mut inject, pid, picid, bin_ref, *width, *height, base_para_ref, &plain_ref);
+            }
         }
     }
 
@@ -645,10 +651,13 @@ struct PlacedCell {
     shade: Option<String>,
 }
 
-/// A dirty block ready to serialize: a paragraph (its para_shape + style + runs), or a table.
+/// A dirty block ready to serialize: a paragraph, a table, or an embedded image.
 enum EmitBlock {
     Para { para_shape: usize, style: Option<String>, runs: Vec<(String, usize)> },
     Table { rows: usize, cols: usize, cells: Vec<PlacedCell> },
+    /// An image, emitted as a `<hp:pic>` wrapped in its own paragraph. `bin_ref` is the manifest
+    /// item id + `binaryItemIDRef`; width/height are the display size in HWPUNIT.
+    Image { bin_ref: String, width: i32, height: i32 },
 }
 
 /// Project a dirty *APPENDED* `Block` to its `EmitBlock` (None if untouched OR if it is an
@@ -668,6 +677,22 @@ fn dirty_emit(b: &Block) -> Option<EmitBlock> {
 /// into nested tables.
 fn project_block(b: &Block) -> EmitBlock {
     match b {
+        // An image-bearing paragraph (the v2 lift emits each picture as its own paragraph) becomes
+        // an EmitBlock::Image — checked BEFORE the text path, since para_runs() drops Inline::Image.
+        Block::Paragraph(p)
+            if p.runs.iter().flat_map(|r| &r.content).any(|i| matches!(i, Inline::Image(_))) =>
+        {
+            let im = p
+                .runs
+                .iter()
+                .flat_map(|r| &r.content)
+                .find_map(|i| match i {
+                    Inline::Image(im) => Some(im),
+                    _ => None,
+                })
+                .expect("guard guarantees an image");
+            EmitBlock::Image { bin_ref: im.bin_ref.clone(), width: im.width, height: im.height }
+        }
         Block::Paragraph(p) => EmitBlock::Para {
             para_shape: p.para_shape,
             style: p.style_name.clone(),
@@ -768,8 +793,40 @@ fn emit_cell_content(
                 emit_table(out, tid, *rows, *cols, cells, base_para_ref, plain_ref, cref, bf, shade_ref, next_id);
                 out.push_str("<hp:t></hp:t></hp:run></hp:p>");
             }
+            EmitBlock::Image { bin_ref, width, height } => {
+                let pid = *next_id;
+                let picid = *next_id + 1;
+                *next_id += 2;
+                emit_pic(out, pid, picid, bin_ref, *width, *height, base_para_ref, plain_ref);
+            }
         }
     }
+}
+
+/// Emit an embedded image as an inline (`treatAsChar`) `<hp:pic>` wrapped in its own `<hp:p>`. The
+/// `<hc:img binaryItemIDRef="{bin_ref}">` links to the manifest `<opf:item id="{bin_ref}">` whose
+/// href is the `BinData/{bin_ref}.{kind}` part. orgSz=curSz=display size with identity scale, so the
+/// image renders at its stored display size; crop/wrap/anchor/rotation are v2.1+.
+#[allow(clippy::too_many_arguments)]
+fn emit_pic(out: &mut String, pid: u64, picid: u64, bin_ref: &str, w: i32, h: i32, base_para_ref: &str, plain_ref: &str) {
+    let w = w.max(1);
+    let h = h.max(1);
+    let (cx, cy) = (w / 2, h / 2);
+    out.push_str(&format!(
+        "<hp:p id=\"{pid}\" paraPrIDRef=\"{base_para_ref}\" styleIDRef=\"0\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\"><hp:run charPrIDRef=\"{plain_ref}\">\
+<hp:pic id=\"{picid}\" zOrder=\"0\" numberingType=\"PICTURE\" textWrap=\"TOP_AND_BOTTOM\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"{picid}\" reverse=\"0\">\
+<hp:offset x=\"0\" y=\"0\"/><hp:orgSz width=\"{w}\" height=\"{h}\"/><hp:curSz width=\"{w}\" height=\"{h}\"/>\
+<hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"{cx}\" centerY=\"{cy}\" rotateimage=\"1\"/>\
+<hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo>\
+<hc:img binaryItemIDRef=\"{bin_ref}\" bright=\"0\" contrast=\"0\" effect=\"REAL_PIC\" alpha=\"0\"/>\
+<hp:imgRect><hc:pt0 x=\"0\" y=\"0\"/><hc:pt1 x=\"{w}\" y=\"0\"/><hc:pt2 x=\"{w}\" y=\"{h}\"/><hc:pt3 x=\"0\" y=\"{h}\"/></hp:imgRect>\
+<hp:imgClip left=\"0\" right=\"{w}\" top=\"0\" bottom=\"{h}\"/><hp:inMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/>\
+<hp:imgDim dimwidth=\"{w}\" dimheight=\"{h}\"/><hp:effects/>\
+<hp:sz width=\"{w}\" widthRelTo=\"ABSOLUTE\" height=\"{h}\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/>\
+<hp:pos treatAsChar=\"1\" affectLSpacing=\"0\" flowWithText=\"1\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PARA\" horzRelTo=\"PARA\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"0\" horzOffset=\"0\"/>\
+<hp:outMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/></hp:pic>\
+<hp:t></hp:t></hp:run></hp:p>"
+    ));
 }
 
 /// Emit one `<hp:p>` with a resolved `styleIDRef` + per-run charPrIDRef strings (linesegarray

@@ -67,8 +67,8 @@ impl Engine {
 /// The honest fidelity notice for an HWP5→HWPX conversion — what is preserved vs still pending.
 /// Surface this whenever a binary `.hwp` was converted so users aren't surprised by the gaps.
 pub const HWP5_CONVERSION_NOTICE: &str = "HWP5(.hwp) → HWPX 변환: 본문 텍스트, 글자 서식\
-    (굵게/기울임/크기/색/밑줄/취소선), 표(중첩·병합 셀 포함), 페이지 크기·여백·방향, 다중 구역이 \
-    보존됩니다. 아직 지원 안 됨: 글꼴(스크립트별), 위·아래첨자, 문단 번호/글머리표, 이미지, \
+    (굵게/기울임/크기/색/밑줄/취소선), 표(중첩·병합 셀 포함), 페이지 크기·여백·방향, 다중 구역, \
+    이미지가 보존됩니다. 아직 지원 안 됨: 글꼴(스크립트별), 위·아래첨자, 문단 번호/글머리표, \
     수식/도형, 머리말/꼬리말.";
 
 /// Open ANY supported document as an editable, HWPX-serializable `SemanticDoc`, reporting whether a
@@ -443,6 +443,31 @@ mod inplace_tests {
         let pagepr = &sec0[sec0.find("<hp:pagePr").expect("has pagePr")..][..120];
         assert!(pagepr.contains(r#"landscape="NARROWLY""#), "portrait, not the Skeleton's WIDELY: {pagepr}");
         assert!(pagepr.contains(r#"width="59528""#), "portrait A4 width (210mm), not landscape: {pagepr}");
+    }
+
+    /// Track A v2: an IMAGE-bearing .hwp converts — Picture controls become BinData parts + <hp:pic>
+    /// elements registered in content.hpf, and the output stays open-safe. (Rendering is confirmed
+    /// separately by the LibreOffice+H2Orestart oracle embedding the images in its PDF.)
+    #[cfg(feature = "rhwp")]
+    #[test]
+    fn hwp5_images_convert_to_bindata_and_pic() {
+        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/hwp/test-image.hwp")).unwrap();
+        let doc = Engine::open(&bytes).unwrap();
+        assert!(!doc.bin_data.is_empty(), "lift captured embedded image bytes");
+        let has_image = doc.sections.iter().flat_map(|s| &s.blocks).any(|b| matches!(b,
+            Block::Paragraph(p) if p.runs.iter().flat_map(|r| &r.content).any(|i| matches!(i, Inline::Image(_)))));
+        assert!(has_image, "lift produced an Inline::Image");
+
+        let out = serialize_hwpx(&doc).unwrap();
+        assert!(validate_hwpx(&out).ok, "image output open-safe");
+        let pkg = hwp_hwpx::package::Package::open(&out).unwrap();
+        // A BinData part + a manifest item + a <hp:pic> referencing it, all chained by bin_ref.
+        assert!(pkg.part_names.iter().any(|n| n.starts_with("BinData/")), "BinData part emitted: {:?}", pkg.part_names);
+        let hpf = String::from_utf8(pkg.read_part("Contents/content.hpf").unwrap()).unwrap();
+        assert!(hpf.contains("isEmbeded=\"1\"") && hpf.contains("BinData/"), "image in manifest");
+        let sec0 = String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap();
+        assert!(sec0.contains("<hp:pic ") && sec0.contains("binaryItemIDRef="), "hp:pic emitted");
+        let _ = std::fs::write(std::env::temp_dir().join("image-converted.hwpx"), &out);
     }
 
     /// Track A v2: a MULTI-SECTION .hwp converts — every section is emitted (Contents/section0..N)
