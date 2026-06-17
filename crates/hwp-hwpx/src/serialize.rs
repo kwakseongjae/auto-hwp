@@ -213,8 +213,13 @@ fn collect_image_items(doc: &SemanticDoc) -> Vec<ImageItem> {
                 Block::Paragraph(p) => {
                     for r in &p.runs {
                         for inl in &r.content {
-                            if let Inline::Image(im) = inl {
-                                used.insert(im.bin_ref.clone());
+                            match inl {
+                                Inline::Image(im) => {
+                                    used.insert(im.bin_ref.clone());
+                                }
+                                // SEAM D: images can live inside a note body — descend it.
+                                Inline::Note(nr) => walk(&nr.body, used),
+                                _ => {}
                             }
                         }
                     }
@@ -312,24 +317,42 @@ type IdxSet = std::collections::BTreeSet<usize>;
 
 /// Collect the char_shape AND para_shape indices referenced by dirty content (paragraphs + cells).
 fn collect_used_shapes(doc: &SemanticDoc, chars: &mut IdxSet, paras: &mut IdxSet) {
-    fn walk(blocks: &[Block], chars: &mut IdxSet, paras: &mut IdxSet) {
+    // Collect EVERY char/para shape in an emitted block tree — cells AND note bodies are always
+    // emitted in full, so they're walked unconditionally (SEAM D); a shape used only inside a note
+    // would otherwise dangle its charPrIDRef and fail the validator.
+    fn walk_all(blocks: &[Block], chars: &mut IdxSet, paras: &mut IdxSet) {
         for b in blocks {
             match b {
-                Block::Paragraph(p) if p.dirty.is_dirty() => {
-                    chars.extend(p.runs.iter().map(|r| r.char_shape));
+                Block::Paragraph(p) => {
                     paras.insert(p.para_shape);
-                }
-                Block::Table(t) if t.dirty.is_dirty() || t.cells.iter().any(|c| c.dirty.is_dirty()) => {
-                    for c in &t.cells {
-                        walk(&c.blocks, chars, paras);
+                    for r in &p.runs {
+                        chars.insert(r.char_shape);
+                        for inl in &r.content {
+                            if let Inline::Note(nr) = inl {
+                                walk_all(&nr.body, chars, paras);
+                            }
+                        }
                     }
                 }
-                _ => {}
+                Block::Table(t) => {
+                    for c in &t.cells {
+                        walk_all(&c.blocks, chars, paras);
+                    }
+                }
             }
         }
     }
+    // Top-level: only DIRTY blocks are appended/emitted.
     for sec in doc.sections.iter().filter(|s| s.dirty.is_dirty()) {
-        walk(&sec.blocks, chars, paras);
+        for b in &sec.blocks {
+            let emit = match b {
+                Block::Paragraph(p) => p.dirty.is_dirty(),
+                Block::Table(t) => t.dirty.is_dirty() || t.cells.iter().any(|c| c.dirty.is_dirty()),
+            };
+            if emit {
+                walk_all(std::slice::from_ref(b), chars, paras);
+            }
+        }
     }
 }
 
@@ -545,8 +568,16 @@ fn patch_section_xml(orig: &[u8], sec: &Section, table_ref: Option<&str>, plan: 
                 let resolve = |idx: usize| {
                     plan.char_ref.get(&idx).cloned().unwrap_or_else(|| char_fallback.clone())
                 };
-                emit_paragraph(&mut inject, next_id, &para_ref, style_id, runs, &resolve);
+                let ctx = BodyCtx {
+                    cref: &resolve,
+                    base_para_ref,
+                    plain_ref: &plain_ref,
+                    bf: table_ref.unwrap_or("1"),
+                    shade_ref: &plan.shade_ref,
+                };
+                let pid = next_id;
                 next_id += 1;
+                emit_paragraph(&mut inject, pid, &para_ref, style_id, runs, &ctx, &mut next_id);
             }
             EmitBlock::Table { rows, cols, cells } => {
                 // A table lives inside a wrapping <hp:p><hp:run>…</hp:run></hp:p>.
@@ -671,6 +702,9 @@ enum RunPiece {
     Text(String, usize),
     /// Verbatim run-body XML → `<hp:run charPrIDRef="0">{xml}</hp:run>`.
     Ctrl(String),
+    /// A foot/endnote whose body is emitted (via `emit_cell_content`) into a `<hp:subList>` inside
+    /// the note ctrl — needs the emit context, so it's rendered at emit time, not pre-rendered.
+    Note { kind: NoteKind, number: u16, prefix: u16, suffix: u16, inst: u32, body: Vec<EmitBlock> },
 }
 
 /// A dirty block ready to serialize: a paragraph, a table, or an embedded image.
@@ -768,7 +802,10 @@ fn placed_cells(t: &Table) -> Vec<PlacedCell> {
 fn para_runs(p: &Paragraph) -> Vec<RunPiece> {
     let has_marker = |r: &Run| {
         r.content.iter().any(|i| {
-            matches!(i, Inline::FieldBegin(_) | Inline::FieldEnd(_) | Inline::Bookmark(_))
+            matches!(
+                i,
+                Inline::FieldBegin(_) | Inline::FieldEnd(_) | Inline::Bookmark(_) | Inline::Note(_)
+            )
         })
     };
     let mut out = Vec::new();
@@ -807,6 +844,17 @@ fn para_runs(p: &Paragraph) -> Vec<RunPiece> {
                         "<hp:ctrl><hp:bookmark name=\"{}\"/></hp:ctrl>",
                         xml_escape(name)
                     )));
+                }
+                Inline::Note(nr) => {
+                    flush(&mut text, &mut out);
+                    out.push(RunPiece::Note {
+                        kind: nr.kind,
+                        number: nr.number,
+                        prefix: nr.prefix_char,
+                        suffix: nr.suffix_char,
+                        inst: nr.inst_id,
+                        body: nr.body.iter().map(project_block).collect(),
+                    });
                 }
                 _ => {}
             }
@@ -862,7 +910,8 @@ fn emit_cell_content(
             EmitBlock::Para { runs, .. } => {
                 let pid = *next_id;
                 *next_id += 1;
-                emit_paragraph(out, pid, base_para_ref, "0", runs, cref);
+                let ctx = BodyCtx { cref, base_para_ref, plain_ref, bf, shade_ref };
+                emit_paragraph(out, pid, base_para_ref, "0", runs, &ctx, next_id);
             }
             EmitBlock::Table { rows, cols, cells } => {
                 // A nested table lives inside a wrapping <hp:p><hp:run>…</hp:run></hp:p>.
@@ -941,16 +990,28 @@ fn emit_equation(out: &mut String, pid: u64, eqid: u64, eq: &EquationRef, base_p
     ));
 }
 
-/// Emit one `<hp:p>` from its [`RunPiece`] sequence: Text pieces resolve their char_shape index via
-/// `cref` and emit `<hp:run><hp:t>`; Ctrl pieces emit verbatim run-body XML in a plain run. An empty
-/// piece list emits one empty run. (linesegarray omitted — Hancom recomputes layout on open.)
+/// The recurring emit context threaded through paragraph/cell/note-body emission: how to resolve a
+/// run's char_shape index → charPrIDRef, plus the default refs a note body needs to recurse.
+struct BodyCtx<'a> {
+    cref: &'a dyn Fn(usize) -> String,
+    base_para_ref: &'a str,
+    plain_ref: &'a str,
+    bf: &'a str,
+    shade_ref: &'a BTreeMap<String, String>,
+}
+
+/// Emit one `<hp:p>` from its [`RunPiece`] sequence: Text pieces resolve their char_shape via
+/// `ctx.cref` → `<hp:run><hp:t>`; Ctrl pieces emit verbatim run-body XML; Note pieces emit the
+/// foot/endnote ctrl with its body recursed through `emit_cell_content` (SEAM B). An empty piece
+/// list emits one empty run. (linesegarray omitted — Hancom recomputes layout on open.)
 fn emit_paragraph(
     out: &mut String,
     id: u64,
     para_ref: &str,
     style_ref: &str,
     pieces: &[RunPiece],
-    cref: &dyn Fn(usize) -> String,
+    ctx: &BodyCtx,
+    next_id: &mut u64,
 ) {
     out.push_str(&format!(
         "<hp:p id=\"{id}\" paraPrIDRef=\"{para_ref}\" styleIDRef=\"{style_ref}\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\">"
@@ -962,11 +1023,23 @@ fn emit_paragraph(
         match piece {
             RunPiece::Text(text, idx) => out.push_str(&format!(
                 "<hp:run charPrIDRef=\"{}\"><hp:t>{}</hp:t></hp:run>",
-                cref(*idx),
+                (ctx.cref)(*idx),
                 xml_escape(text)
             )),
             RunPiece::Ctrl(xml) => {
                 out.push_str(&format!("<hp:run charPrIDRef=\"0\">{xml}</hp:run>"));
+            }
+            RunPiece::Note { kind, number, prefix, suffix, inst, body } => {
+                let tag = match kind {
+                    NoteKind::Foot => "footNote",
+                    NoteKind::End => "endNote",
+                };
+                out.push_str(&format!(
+                    "<hp:run charPrIDRef=\"0\"><hp:ctrl><hp:{tag} number=\"{number}\" prefixChar=\"{prefix}\" suffixChar=\"{suffix}\" instId=\"{inst}\">\
+<hp:subList id=\"\" textDirection=\"HORIZONTAL\" lineWrap=\"BREAK\" vertAlign=\"TOP\" linkListIDRef=\"0\" linkListNextIDRef=\"0\" textWidth=\"0\" textHeight=\"0\" hasTextRef=\"0\" hasNumRef=\"0\">"
+                ));
+                emit_cell_content(out, body, ctx.base_para_ref, ctx.plain_ref, ctx.cref, ctx.bf, ctx.shade_ref, next_id);
+                out.push_str(&format!("</hp:subList></hp:{tag}></hp:ctrl></hp:run>"));
             }
         }
     }
@@ -1680,6 +1753,44 @@ mod tests {
         // serialize_from_scratch clones — the caller's doc is untouched (no provenance, no dirty).
         assert!(doc.passthrough.parts.is_empty(), "input doc must not be mutated");
         assert!(!doc.sections[0].dirty.is_dirty(), "input doc must not be dirtied");
+    }
+
+    #[test]
+    fn from_scratch_endnote_emits_ctrl_with_body() {
+        // An endnote: an inline marker in a run whose body (a paragraph) is recursed into a subList.
+        let mut doc = SemanticDoc::default();
+        let mut sec = Section::default();
+        let note = NoteRef {
+            kind: NoteKind::End,
+            number: 1,
+            prefix_char: 0,
+            suffix_char: 41,
+            inst_id: 7,
+            body: vec![Block::Paragraph(Paragraph {
+                runs: vec![Run { char_shape: 0, content: vec![Inline::Text("미주 본문".into())], ..Default::default() }],
+                ..Default::default()
+            })],
+        };
+        sec.blocks.push(Block::Paragraph(Paragraph {
+            runs: vec![Run {
+                char_shape: 0,
+                content: vec![Inline::Text("본문".into()), Inline::Note(note)],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }));
+        doc.sections.push(sec);
+
+        let out = serialize(&doc).expect("endnote doc serializes");
+        assert!(crate::export::validate_synthesis_safety(&out).ok, "endnote output open-safe");
+        let pkg = Package::open(&out).unwrap();
+        let sec0 = String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap();
+        assert!(sec0.contains(r#"<hp:endNote number="1""#), "endNote ctrl emitted");
+        assert!(sec0.contains("<hp:subList"), "note body subList emitted");
+        // Both the referencing text and the note body text are present.
+        let re = parse_semantic(&out).unwrap();
+        let text = re.plain_text();
+        assert!(text.contains("본문") && text.contains("미주 본문"), "ref + note body text: {text}");
     }
 
     #[test]

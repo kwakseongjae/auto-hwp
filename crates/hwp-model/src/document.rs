@@ -170,9 +170,31 @@ pub enum Inline {
     FieldEnd(u32),
     /// A 책갈피 (bookmark) anchor with its name.
     Bookmark(String),
+    /// A 각주/미주 (foot/endnote): an inline reference marker whose body is a block sequence.
+    Note(NoteRef),
     /// Verbatim un-modeled inline content (shape, chart, …) — the raw `<hp:…>` XML, preserved on
     /// export, even before an edit op exists.
     Raw(crate::types::RawPart),
+}
+
+/// 각주 vs 미주.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NoteKind {
+    Foot,
+    End,
+}
+
+/// A foot/endnote: the reference appears inline; the `body` (paragraphs, possibly with tables/
+/// images) renders at the page foot (footnote) or document/section end (endnote).
+#[derive(Clone, Debug)]
+pub struct NoteRef {
+    pub kind: NoteKind,
+    pub number: u16,
+    /// Decoration chars (WChar code points) around the number; 0 = none.
+    pub prefix_char: u16,
+    pub suffix_char: u16,
+    pub inst_id: u32,
+    pub body: Vec<Block>,
 }
 
 /// A field start marker (hyperlink, click-here, cross-reference, …).

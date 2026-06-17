@@ -99,18 +99,40 @@ impl<'a> Lifter<'a> {
         out
     }
 
-    /// Emit a paragraph (text split into per-shape runs), then any block-level tables in its controls.
+    /// Emit a paragraph (text split into per-shape runs + inline foot/endnote markers), then any
+    /// block-level objects (tables, pictures, equations) anchored in its controls.
     fn push_paragraph(&self, p: &RParagraph, blocks: &mut Vec<Block>) {
+        let mut runs = self.lift_runs(p);
+        // Inline foot/endnote reference markers — appended at paragraph end for v1 (exact mid-run
+        // anchoring is a later refinement); the note body renders at the page foot / document end.
+        for ctrl in &p.controls {
+            match ctrl {
+                Control::Footnote(fp) => runs.push(marker_run(Inline::Note(self.lift_note(
+                    &fp.paragraphs,
+                    NoteKind::Foot,
+                    fp.number,
+                    fp.before_decoration_letter,
+                    fp.after_decoration_letter,
+                    fp.instance_id,
+                )))),
+                Control::Endnote(en) => runs.push(marker_run(Inline::Note(self.lift_note(
+                    &en.paragraphs,
+                    NoteKind::End,
+                    en.number,
+                    en.before_decoration_letter,
+                    en.after_decoration_letter,
+                    en.instance_id,
+                )))),
+                _ => {}
+            }
+        }
         blocks.push(Block::Paragraph(Paragraph {
             para_shape: self.para_id_to_idx.get(&p.para_shape_id).copied().unwrap_or(0),
-            runs: self.lift_runs(p),
+            runs,
             provenance: Provenance { source: Some(SourceFormat::Hwp5), raw: None },
             ..Default::default()
         }));
 
-        // Block-level objects anchored in this paragraph's controls. Tables and (v2) embedded
-        // pictures are emitted in reading order; each picture becomes its own paragraph carrying an
-        // Inline::Image (exact inline anchoring within the text run is a later refinement).
         for ctrl in &p.controls {
             match ctrl {
                 Control::Table(t) => blocks.push(Block::Table(self.lift_table(t))),
@@ -125,6 +147,25 @@ impl<'a> Lifter<'a> {
                 _ => {}
             }
         }
+    }
+
+    /// Lift a foot/endnote: recurse its body paragraphs (which may themselves carry tables/images/
+    /// notes) and capture the number + decoration chars.
+    #[allow(clippy::too_many_arguments)]
+    fn lift_note(
+        &self,
+        paras: &[RParagraph],
+        kind: NoteKind,
+        number: u16,
+        prefix_char: u16,
+        suffix_char: u16,
+        inst_id: u32,
+    ) -> NoteRef {
+        let mut body = Vec::new();
+        for bp in paras {
+            self.push_paragraph(bp, &mut body);
+        }
+        NoteRef { kind, number, prefix_char, suffix_char, inst_id, body }
     }
 
     /// Lift an rhwp `Picture` → `ImageRef`, registering its bytes into `bin_data` (deduped by the
