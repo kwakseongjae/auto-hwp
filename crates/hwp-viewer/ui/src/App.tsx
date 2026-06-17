@@ -145,8 +145,8 @@ export default function App() {
         <Btn onClick={step("실행 취소", api.undo)} disabled={pageCount() === 0}>↩︎ 실행취소</Btn>
         <Btn onClick={step("다시 실행", api.redo)} disabled={pageCount() === 0}>↪︎ 다시실행</Btn>
         <Btn onClick={exportHwpx} disabled={pageCount() === 0}>⬇︎ 내보내기</Btn>
-        <div class="flex-1" />
-        <span class="px-2 text-xs text-neutral-500 dark:text-neutral-400">{status()}</span>
+        <div data-tauri-drag-region class="h-6 flex-1" />
+        <span data-tauri-drag-region class="px-2 text-xs text-neutral-500 dark:text-neutral-400">{status()}</span>
         <Btn onClick={() => setAiOpen(!aiOpen())}>🤖 AI</Btn>
       </header>
 

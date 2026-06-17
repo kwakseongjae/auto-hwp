@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Core + dialog permissions for the tf-hwp viewer window.",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:default"]
+  "permissions": ["core:default", "core:window:allow-start-dragging", "dialog:default"]
 }
