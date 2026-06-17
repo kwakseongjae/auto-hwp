@@ -41,10 +41,32 @@ struct RenderState {
     cache: hwp_core::RenderCache,
 }
 
-/// The bytes to render: the LIVE edited HWPX if the doc serializes, else the original source
-/// (HW5 sources are view-only — they don't round-trip to HWPX, so we render the original).
+/// True if the session's ORIGINAL upload is a binary HW5 (.hwp) — an OLE/CFB file (magic
+/// `D0 CF 11 E0`). HWPX is a ZIP (`PK`), so this cleanly distinguishes the two without parsing.
+#[cfg(feature = "rhwp")]
+fn source_is_hwp5(session: &Session) -> bool {
+    session
+        .source_bytes
+        .as_deref()
+        .is_some_and(|b| b.starts_with(&[0xD0, 0xCF, 0x11, 0xE0]))
+}
+
+/// The bytes to render for the current view.
+///
+/// Default: the LIVE serialized HWPX (so edits and native HWPX layout show). EXCEPTION: an UNEDITED
+/// binary HW5 source renders from its ORIGINAL bytes — rhwp's native `.hwp` layout is more faithful
+/// than our still-maturing HWP5→HWPX conversion (page geometry, fonts, etc. land in later Track-A
+/// phases), so the initial view of an uploaded `.hwp` stays true to Hancom. Once the user edits, we
+/// must switch to the converted+edited HWPX (the original `.hwp` can't carry edits, and export is
+/// HWPX-only anyway).
 #[cfg(feature = "rhwp")]
 fn renderable_bytes(session: &Session) -> Result<Vec<u8>, String> {
+    let edited = session.doc.as_ref().is_some_and(|d| d.doc().any_dirty());
+    if source_is_hwp5(session) && !edited {
+        if let Some(src) = session.source_bytes.clone() {
+            return Ok(src);
+        }
+    }
     let serialized = session.doc.as_ref().and_then(|d| hwp_core::serialize_hwpx(d.doc()).ok());
     serialized.or_else(|| session.source_bytes.clone()).ok_or("no document open".into())
 }

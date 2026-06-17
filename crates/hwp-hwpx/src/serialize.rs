@@ -34,6 +34,14 @@ struct SynthPlan {
 
 /// Serialize a `SemanticDoc` (parsed from HWPX) back to HWPX bytes.
 pub fn serialize(doc: &SemanticDoc) -> Result<Vec<u8>> {
+    // FROM-SCRATCH path (HWP5→HWPX converter): a doc with no original HWPX provenance — e.g. one
+    // lifted from a binary .hwp — has nothing to patch in place. Synthesize a complete HWPX by
+    // seeding the embedded Skeleton and re-entering this function. HWPX-in docs ALWAYS carry
+    // SOURCE_PART_TAG (set at parse), so they never take this branch — the round-trip path below
+    // runs byte-identically to before. This invariant is what makes the change non-regressing.
+    if doc.passthrough.parts.iter().all(|p| p.tag != SOURCE_PART_TAG) {
+        return serialize_from_scratch(doc);
+    }
     let src = doc
         .passthrough
         .parts
@@ -94,6 +102,65 @@ pub fn serialize(doc: &SemanticDoc) -> Result<Vec<u8>> {
 
     let cur = out.finish().map_err(|e| Error::Serialize(e.to_string()))?;
     Ok(cur.into_inner())
+}
+
+/// The embedded base HWPX template — a minimal, Hancom-authored single-section package. The
+/// from-scratch synthesizer seeds it and re-enters the patch pipeline. Every invariant it relies on
+/// (default charPr/paraPr id=0, pool ids, the secPr-carrying section0 stub) is pinned by
+/// `synth::tests::skeleton_pin_invariants`, so a regeneration can't silently break synthesis.
+const SKELETON: &[u8] =
+    include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/hwpx/Skeleton.hwpx"));
+
+/// Synthesize a COMPLETE HWPX from a `SemanticDoc` with no original HWPX provenance (the HWP5→HWPX
+/// converter path). Strategy: clone the doc, seed the embedded [`SKELETON`] as its `SOURCE_PART_TAG`
+/// provenance and the section's `provenance.raw` (the base `section0.xml`, which carries the
+/// mandatory `secPr`), mark all content dirty, then RE-ENTER [`serialize`] so the existing,
+/// oracle-tested synth/patch pipeline runs unchanged against the Skeleton header + section.
+///
+/// v1 is SINGLE-SECTION: multi-section hard-errors rather than silently dropping content (the
+/// Skeleton's `content.hpf` manifest lists only `section0`, and the output loop copies only the
+/// Skeleton's entries — it cannot emit a `section1.xml`). Images are likewise not yet emittable
+/// (no new `BinData/*` parts) and are dropped by the (shallow, for now) lift.
+fn serialize_from_scratch(doc: &SemanticDoc) -> Result<Vec<u8>> {
+    if doc.sections.len() > 1 {
+        return Err(Error::Serialize(format!(
+            "multi-section HWP5→HWPX is not yet supported (this document has {} sections; \
+             v1 converts single-section documents only)",
+            doc.sections.len()
+        )));
+    }
+    // The base section0.xml the body patcher appends lifted blocks into (before </hs:sec>).
+    let base_section0 = Package::open(SKELETON)?.read_part("Contents/section0.xml")?;
+
+    let mut seeded = doc.clone();
+    seeded.passthrough.push(SOURCE_PART_TAG, SKELETON.to_vec());
+    if let Some(sec) = seeded.sections.first_mut() {
+        sec.provenance.raw = Some(base_section0);
+        sec.dirty.mark();
+        for block in &mut sec.blocks {
+            mark_block_dirty(block);
+        }
+    }
+    serialize(&seeded)
+}
+
+/// Recursively mark a block dirty so the append path ([`dirty_emit`]) emits it: a lifted paragraph
+/// carries no `source` span (`source.is_none()`), so marking it dirty routes it through the
+/// append-new branch rather than the in-place replace branch. For a table, mark the table and every
+/// cell (and the cells' inner paragraphs) so the whole structure is (re-)emitted.
+fn mark_block_dirty(block: &mut Block) {
+    match block {
+        Block::Paragraph(p) => p.dirty.mark(),
+        Block::Table(t) => {
+            t.dirty.mark();
+            for cell in &mut t.cells {
+                cell.dirty.mark();
+                for cb in &mut cell.blocks {
+                    mark_block_dirty(cb);
+                }
+            }
+        }
+    }
 }
 
 type IdxSet = std::collections::BTreeSet<usize>;
@@ -340,7 +407,7 @@ fn patch_section_xml(orig: &[u8], sec: &Section, table_ref: Option<&str>, plan: 
                 inject.push_str(&format!(
                     "<hp:p id=\"{pid}\" paraPrIDRef=\"{base_para_ref}\" styleIDRef=\"0\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\"><hp:run charPrIDRef=\"{plain_ref}\">"
                 ));
-                emit_table(&mut inject, tid, *rows, *cols, cells, base_para_ref, &cref, bf, &plan.shade_ref);
+                emit_table(&mut inject, tid, *rows, *cols, cells, base_para_ref, &plain_ref, &cref, bf, &plan.shade_ref, &mut next_id);
                 inject.push_str("<hp:t></hp:t></hp:run></hp:p>");
             }
         }
@@ -422,13 +489,14 @@ fn reemit_paragraph(orig_para: &str, p: &Paragraph, plan: &SynthPlan) -> String 
 }
 
 /// A placed table cell ready to emit (origin position + span + content + optional shade hex).
+/// `content` holds the cell's FULL block sequence — paragraphs AND nested tables, recursively — so
+/// multi-paragraph cells and tables-within-cells (both common in real .hwp) survive in full.
 struct PlacedCell {
     row: usize,
     col: usize,
     col_span: usize,
     row_span: usize,
-    text: String,
-    char_shape: usize,
+    content: Vec<EmitBlock>,
     shade: Option<String>,
 }
 
@@ -442,34 +510,46 @@ enum EmitBlock {
 /// in-place-edited existing paragraph — those carry `source` and are replaced surgically, not appended).
 fn dirty_emit(b: &Block) -> Option<EmitBlock> {
     match b {
-        Block::Paragraph(p) if p.dirty.is_dirty() && p.source.is_none() => Some(EmitBlock::Para {
-            para_shape: p.para_shape,
-            style: p.style_name.clone(),
-            runs: para_runs(p),
-        }),
+        Block::Paragraph(p) if p.dirty.is_dirty() && p.source.is_none() => Some(project_block(b)),
         Block::Table(t) if t.dirty.is_dirty() || t.cells.iter().any(|c| c.dirty.is_dirty()) => {
-            let (rows, cols) = (t.rows.max(1), t.cols.max(1));
-            let cells = t
-                .cells
-                .iter()
-                .filter(|c| c.active)
-                .map(|cell| {
-                    let (text, char_shape) = cell_text_shape(cell);
-                    PlacedCell {
-                        row: cell.row,
-                        col: cell.col,
-                        col_span: cell.col_span.max(1),
-                        row_span: cell.row_span.max(1),
-                        text,
-                        char_shape,
-                        shade: cell.shade_color.map(|c| c.to_hex()),
-                    }
-                })
-                .collect();
-            Some(EmitBlock::Table { rows, cols, cells })
+            Some(project_block(b))
         }
         _ => None,
     }
+}
+
+/// Project a `Block` to an `EmitBlock` UNCONDITIONALLY (the dirty gate lives in [`dirty_emit`]).
+/// Used for cell content, which is always emitted in full when its enclosing table is — recursing
+/// into nested tables.
+fn project_block(b: &Block) -> EmitBlock {
+    match b {
+        Block::Paragraph(p) => EmitBlock::Para {
+            para_shape: p.para_shape,
+            style: p.style_name.clone(),
+            runs: para_runs(p),
+        },
+        Block::Table(t) => EmitBlock::Table {
+            rows: t.rows.max(1),
+            cols: t.cols.max(1),
+            cells: placed_cells(t),
+        },
+    }
+}
+
+/// Project a table's ACTIVE cells to [`PlacedCell`]s, recursively projecting each cell's content.
+fn placed_cells(t: &Table) -> Vec<PlacedCell> {
+    t.cells
+        .iter()
+        .filter(|c| c.active)
+        .map(|cell| PlacedCell {
+            row: cell.row,
+            col: cell.col,
+            col_span: cell.col_span.max(1),
+            row_span: cell.row_span.max(1),
+            content: cell.blocks.iter().map(project_block).collect(),
+            shade: cell.shade_color.map(|c| c.to_hex()),
+        })
+        .collect()
 }
 
 /// A paragraph's runs as (text, char_shape index).
@@ -490,16 +570,61 @@ fn para_runs(p: &Paragraph) -> Vec<(String, usize)> {
         .collect()
 }
 
-/// A cell's (text, char_shape index), from its first paragraph's first run.
-fn cell_text_shape(cell: &Cell) -> (String, usize) {
-    for b in &cell.blocks {
-        if let Block::Paragraph(p) = b {
-            let shape = p.runs.first().map(|r| r.char_shape).unwrap_or(0);
-            let text = para_runs(p).into_iter().map(|(t, _)| t).collect::<String>();
-            return (text, shape);
+/// Emit a sequence of cell blocks (paragraphs + nested tables, recursively) inside an open
+/// `<hp:subList>`. `next_id` is a monotonic counter giving every `<hp:p>`/`<hp:tbl>` a unique id.
+/// An empty cell gets one empty paragraph (a subList requires ≥1 `<hp:p>`).
+#[allow(clippy::too_many_arguments)]
+fn emit_cell_content(
+    out: &mut String,
+    blocks: &[EmitBlock],
+    base_para_ref: &str,
+    plain_ref: &str,
+    cref: &dyn Fn(usize) -> String,
+    bf: &str,
+    shade_ref: &BTreeMap<String, String>,
+    next_id: &mut u64,
+) {
+    if blocks.is_empty() {
+        let pid = *next_id;
+        *next_id += 1;
+        out.push_str(&format!(
+            "<hp:p id=\"{pid}\" paraPrIDRef=\"{base_para_ref}\" styleIDRef=\"0\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\"><hp:run charPrIDRef=\"0\"><hp:t></hp:t></hp:run></hp:p>"
+        ));
+        return;
+    }
+    for block in blocks {
+        match block {
+            EmitBlock::Para { runs, .. } => {
+                let pid = *next_id;
+                *next_id += 1;
+                out.push_str(&format!(
+                    "<hp:p id=\"{pid}\" paraPrIDRef=\"{base_para_ref}\" styleIDRef=\"0\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\">"
+                ));
+                if runs.is_empty() {
+                    out.push_str("<hp:run charPrIDRef=\"0\"><hp:t></hp:t></hp:run>");
+                }
+                for (text, cs) in runs {
+                    out.push_str(&format!(
+                        "<hp:run charPrIDRef=\"{}\"><hp:t>{}</hp:t></hp:run>",
+                        cref(*cs),
+                        xml_escape(text)
+                    ));
+                }
+                out.push_str("</hp:p>");
+            }
+            EmitBlock::Table { rows, cols, cells } => {
+                // A nested table lives inside a wrapping <hp:p><hp:run>…</hp:run></hp:p>.
+                let pid = *next_id;
+                let tid = *next_id + 1;
+                *next_id += 2;
+                out.push_str(&format!(
+                    "<hp:p id=\"{pid}\" paraPrIDRef=\"{base_para_ref}\" styleIDRef=\"0\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\"><hp:run charPrIDRef=\"{plain_ref}\">"
+                ));
+                emit_table(out, tid, *rows, *cols, cells, base_para_ref, plain_ref, cref, bf, shade_ref, next_id);
+                out.push_str("<hp:t></hp:t></hp:run></hp:p>");
+            }
         }
     }
-    (String::new(), 0)
 }
 
 /// Emit one `<hp:p>` with a resolved `styleIDRef` + per-run charPrIDRef strings (linesegarray
@@ -532,9 +657,11 @@ fn emit_table(
     cols: usize,
     cells: &[PlacedCell],
     para_ref: &str,
+    plain_ref: &str,
     cref: &dyn Fn(usize) -> String,
     bf: &str,
     shade_ref: &BTreeMap<String, String>,
+    next_id: &mut u64,
 ) {
     const W: u64 = 42520; // standard A4 text width in HWPUNIT
     const RH: u64 = 2200; // ~7.7mm per row
@@ -567,15 +694,16 @@ fn emit_table(
             let header = if r == 0 { "1" } else { "0" };
             out.push_str(&format!(
                 "<hp:tc name=\"\" header=\"{header}\" hasMargin=\"0\" protect=\"0\" editable=\"0\" dirty=\"0\" borderFillIDRef=\"{cellbf}\">\
-<hp:subList id=\"\" textDirection=\"HORIZONTAL\" lineWrap=\"BREAK\" vertAlign=\"CENTER\" linkListIDRef=\"0\" linkListNextIDRef=\"0\" textWidth=\"0\" textHeight=\"0\" hasTextRef=\"0\" hasNumRef=\"0\">\
-<hp:p id=\"0\" paraPrIDRef=\"{para_ref}\" styleIDRef=\"0\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\"><hp:run charPrIDRef=\"{}\"><hp:t>{}</hp:t></hp:run></hp:p>\
-</hp:subList>\
+<hp:subList id=\"\" textDirection=\"HORIZONTAL\" lineWrap=\"BREAK\" vertAlign=\"CENTER\" linkListIDRef=\"0\" linkListNextIDRef=\"0\" textWidth=\"0\" textHeight=\"0\" hasTextRef=\"0\" hasNumRef=\"0\">"
+            ));
+            // The cell's full content — paragraphs AND nested tables, recursively.
+            emit_cell_content(out, &cell.content, para_ref, plain_ref, cref, bf, shade_ref, next_id);
+            out.push_str(&format!(
+                "</hp:subList>\
 <hp:cellAddr colAddr=\"{}\" rowAddr=\"{r}\"/>\
 <hp:cellSpan colSpan=\"{}\" rowSpan=\"{}\"/>\
 <hp:cellSz width=\"{}\" height=\"{}\"/>\
 <hp:cellMargin left=\"510\" right=\"510\" top=\"141\" bottom=\"141\"/></hp:tc>",
-                cref(cell.char_shape),
-                xml_escape(&cell.text),
                 cell.col,
                 cell.col_span,
                 cell.row_span,
@@ -1192,5 +1320,48 @@ mod tests {
             s.blocks.iter().any(|b| matches!(b, Block::Table(t) if t.cols >= 2 && t.rows >= 2))
         });
         assert!(has_table, "round-trip must yield a native Table block");
+    }
+
+    // ── FROM-SCRATCH (HWP5→HWPX converter) ────────────────────────────────────────────────────
+
+    #[test]
+    fn from_scratch_single_section_synthesizes_openable_hwpx() {
+        // A doc with NO original HWPX provenance — exactly what lifting a binary .hwp produces.
+        // Before this path, serialize() errored "no original HWPX provenance (parse an HWPX first)".
+        let mut doc = SemanticDoc::default();
+        let mut sec = Section::default();
+        for t in ["첫째 문단입니다.", "둘째 문단입니다."] {
+            sec.blocks.push(Block::Paragraph(Paragraph {
+                runs: vec![Run { char_shape: 0, content: vec![Inline::Text(t.into())], ..Default::default() }],
+                ..Default::default()
+            }));
+        }
+        doc.sections.push(sec);
+        assert!(doc.passthrough.parts.is_empty(), "precondition: no HWPX provenance");
+
+        let out =
+            serialize(&doc).expect("from-scratch serialize must succeed without original provenance");
+        // A valid, openable HWPX (the synthesis path's correctness gate).
+        assert!(crate::export::validate_open_safety(&out).ok, "from-scratch output must be open-safe");
+        // …that round-trips the text. (The Skeleton's secPr-carrier stub adds one leading empty
+        // paragraph; the lifted text follows it in order.)
+        let doc2 = parse_semantic(&out).unwrap();
+        let text = doc2.plain_text();
+        assert!(text.contains("첫째 문단입니다."), "first paragraph survives: {text}");
+        assert!(text.contains("둘째 문단입니다."), "second paragraph survives: {text}");
+        // serialize_from_scratch clones — the caller's doc is untouched (no provenance, no dirty).
+        assert!(doc.passthrough.parts.is_empty(), "input doc must not be mutated");
+        assert!(!doc.sections[0].dirty.is_dirty(), "input doc must not be dirtied");
+    }
+
+    #[test]
+    fn from_scratch_multi_section_hard_errors() {
+        // v1 converts single-section only — a multi-section .hwp must error CLEANLY rather than
+        // silently drop sections (the Skeleton's content.hpf lists only section0).
+        let mut doc = SemanticDoc::default();
+        doc.sections.push(Section::default());
+        doc.sections.push(Section::default());
+        let msg = serialize(&doc).unwrap_err().to_string();
+        assert!(msg.contains("multi-section"), "error must name the limitation: {msg}");
     }
 }

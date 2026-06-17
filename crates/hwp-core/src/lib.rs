@@ -339,6 +339,32 @@ mod inplace_tests {
         }
     }
 
+    /// Track A Phase 1 acceptance: a binary .hwp now CONVERTS to a valid, open-safe HWPX whose text
+    /// round-trips. (Before the from-scratch synthesis path, serialize_hwpx errored "no original
+    /// HWPX provenance".) Formatting fidelity is Phase 2+; this pins the plumbing: text in → text
+    /// out, openable. Writes the artifact to TMPDIR for the LibreOffice+H2Orestart oracle.
+    #[cfg(feature = "rhwp")]
+    #[test]
+    fn hwp5_converts_to_openable_hwpx_with_text_roundtrip() {
+        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmark.hwp")).unwrap();
+        let doc = Engine::open(&bytes).unwrap();
+        let original = doc.plain_text();
+        assert!(!original.trim().is_empty(), "lift must capture text");
+
+        let out = serialize_hwpx(&doc).expect("HWP5→HWPX must serialize (was erroring)");
+        assert!(validate_hwpx(&out).ok, "converted HWPX must be open-safe");
+
+        // Reopen the converted HWPX and confirm every non-whitespace character survives. (The
+        // Skeleton's secPr stub contributes one leading empty paragraph; lifted text follows it.)
+        // Every non-whitespace character must survive — including multi-paragraph table cells and
+        // tables nested inside cells (the benchmark has 10), which the cell emitter handles recursively.
+        let reopened = Engine::open(&out).unwrap();
+        let norm = |s: &str| s.split_whitespace().collect::<String>();
+        assert_eq!(norm(&reopened.plain_text()), norm(&original), "text must round-trip through conversion");
+
+        let _ = std::fs::write(std::env::temp_dir().join("benchmark-converted.hwpx"), &out);
+    }
+
     /// Phase 1: undo restores the doc bit-for-bit (the byte-stability moat), redo replays it.
     #[test]
     fn editsession_undo_redo_is_byte_exact() {
