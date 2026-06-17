@@ -179,48 +179,66 @@ export default function App() {
     }
   });
 
-  const Verb = (p: { onClick: () => void; children: any; tone?: "ai"; disabled?: boolean }) => (
+  // A control-strip button: icon + label + optional shortcut hint, left-aligned.
+  const Tool = (p: { onClick: () => void; icon: string; label: string; keys?: string; tone?: "ai"; disabled?: boolean }) => (
     <button
       onClick={p.onClick}
       disabled={p.disabled}
-      class="rounded-md px-2.5 py-1 text-sm font-medium hover:bg-neutral-200/70 disabled:opacity-40 dark:hover:bg-neutral-700/60"
+      title={p.keys ? `${p.label} (${p.keys})` : p.label}
+      class="flex items-center gap-1.5 rounded-md px-2 py-1 text-sm hover:bg-neutral-200/70 disabled:opacity-35 dark:hover:bg-neutral-700/60"
       classList={{ "text-ai": p.tone === "ai", "text-neutral-700 dark:text-neutral-200": p.tone !== "ai" }}
     >
-      {p.children}
+      <span class="text-xs opacity-80">{p.icon}</span>
+      <span>{p.label}</span>
+      <Show when={p.keys}>
+        <kbd class="ml-0.5 rounded bg-black/5 px-1 text-[10px] text-neutral-400 dark:bg-white/10">{p.keys}</kbd>
+      </Show>
     </button>
   );
+  const Sep = () => <span class="mx-1 h-5 w-px bg-black/10 dark:bg-white/10" />;
 
   return (
     <div class="flex h-full flex-col bg-neutral-100 text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100">
       <header
         data-tauri-drag-region
-        class="flex h-12 shrink-0 items-center gap-1 border-b border-black/10 bg-neutral-50/70 pl-20 pr-3 backdrop-blur-xl dark:border-white/10 dark:bg-neutral-800/60"
+        class="flex h-11 shrink-0 items-center gap-2 border-b border-black/10 bg-neutral-50/70 pl-20 pr-3 backdrop-blur-xl dark:border-white/10 dark:bg-neutral-800/60"
       >
-        <Show when={docName()}>
-          <span data-tauri-drag-region class="px-1 text-sm font-medium">{docName()}</span>
-          <span class="text-xs text-neutral-400">· {pageCount()}쪽</span>
+        <Show when={docName()} fallback={<span data-tauri-drag-region class="text-sm font-semibold tracking-tight text-neutral-400">한칸</span>}>
+          <span data-tauri-drag-region class="text-sm font-medium">{docName()}</span>
+          <span data-tauri-drag-region class="text-xs text-neutral-400">· {pageCount()}쪽</span>
           <span
-            class="ml-1 flex items-center gap-1 rounded-full px-2 py-0.5 text-xs"
+            class="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs"
             classList={{
               "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400": editable(),
               "bg-neutral-500/15 text-neutral-500": !editable(),
             }}
           >
             <span class="h-1.5 w-1.5 rounded-full" classList={{ "bg-emerald-500": editable(), "bg-neutral-400": !editable() }} />
-            {editable() ? "편집가능" : "보기전용 · HWPX로"}
+            {editable() ? "편집가능" : "보기전용"}
           </span>
         </Show>
         <div data-tauri-drag-region class="h-6 flex-1" />
-        <Verb onClick={doOpen}>📂 열기</Verb>
-        <Verb onClick={doExport} disabled={pageCount() === 0}>⬇︎ 내보내기</Verb>
-        <Verb onClick={() => setComposer("ai")} tone="ai" disabled={!canEdit()}>✦ AI 제안</Verb>
         <button
           onClick={() => setPaletteOpen(true)}
-          class="ml-1 flex items-center gap-1 rounded-md border border-black/10 px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-200/60 dark:border-white/10 dark:hover:bg-neutral-700/60"
+          class="flex items-center gap-1.5 rounded-md border border-black/10 px-2.5 py-1 text-xs text-neutral-500 hover:bg-neutral-200/60 dark:border-white/10 dark:text-neutral-400 dark:hover:bg-neutral-700/60"
         >
-          명령 <kbd>⌘K</kbd>
+          명령 <kbd class="rounded bg-black/5 px-1 dark:bg-white/10">⌘K</kbd>
         </button>
       </header>
+
+      {/* Control strip: visible verbs, left-aligned (moved off the top-right). Shown once a doc opens. */}
+      <Show when={pageCount() > 0}>
+        <div class="flex h-10 shrink-0 items-center gap-0.5 border-b border-black/10 bg-neutral-50/40 px-2 dark:border-white/10 dark:bg-neutral-800/30">
+          <Tool onClick={doOpen} icon="📂" label="열기" keys="⌘O" />
+          <Tool onClick={doExport} icon="⬇︎" label="내보내기" keys="⌘S" />
+          <Sep />
+          <Tool onClick={() => setComposer("table")} icon="▦" label="표" keys="⌘T" disabled={!canEdit()} />
+          <Tool onClick={() => setComposer("ai")} icon="✦" label="AI 작성" tone="ai" keys="⌘." disabled={!canEdit()} />
+          <Sep />
+          <Tool onClick={doUndo} icon="↩︎" label="실행취소" keys="⌘Z" disabled={!canEdit()} />
+          <Tool onClick={doRedo} icon="↪︎" label="다시실행" disabled={!canEdit()} />
+        </div>
+      </Show>
 
       <main ref={scrollRef} class="min-h-0 flex-1 overflow-auto p-6">
         <Show
