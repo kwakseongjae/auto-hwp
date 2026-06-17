@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+/* macOS-flavored base: system font stack resolves to San Francisco via CoreText. */
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Apple SD Gothic Neo",
+    "Pretendard", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+/* Rendered page SVGs scale to the page column width while keeping aspect ratio. */
+.page-svg svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}

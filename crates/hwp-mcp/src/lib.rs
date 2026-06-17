@@ -162,11 +162,15 @@ fn render_current(_session: &Session, _page: u32) -> Result<String, String> {
 
 /// Rendered page count of the current document (reuses the same cached parse as `render_current`).
 #[cfg(feature = "rhwp")]
-fn page_count_current(session: &mut Session) -> Result<String, String> {
+fn page_count_u32(session: &mut Session) -> Result<u32, String> {
     ensure_render_bytes(session)?;
     let RenderState { bytes, cache } = &mut session.render;
     let bytes = &bytes.as_ref().expect("ensured above").1;
-    Ok(cache.page_count(bytes).map_err(|e| e.to_string())?.to_string())
+    cache.page_count(bytes).map_err(|e| e.to_string())
+}
+#[cfg(feature = "rhwp")]
+fn page_count_current(session: &mut Session) -> Result<String, String> {
+    Ok(page_count_u32(session)?.to_string())
 }
 #[cfg(not(feature = "rhwp"))]
 fn page_count_current(_session: &Session) -> Result<String, String> {
@@ -204,34 +208,142 @@ pub fn handle(req: &Value, session: &mut Session) -> Option<Value> {
     })
 }
 
+// ---- Shared op-bus core (one implementation behind BOTH the typed `Intent` lane used by the GUI
+// ---- and the JSON `call_tool` lane used by agents — so they can never drift). ----
+
+/// Result of opening a document.
+pub(crate) struct OpenInfo {
+    pub format: &'static str,
+    pub editable: bool,
+    pub sections: usize,
+}
+
+/// Open `path` into the session (HWP5/HWPX both view; only HWPX round-trips to an edited export).
+fn do_open(session: &mut Session, path: &str) -> Result<OpenInfo, String> {
+    use hwp_model::types::SourceFormat;
+    let bytes = std::fs::read(path).map_err(|e| format!("read {path}: {e}"))?;
+    let fmt = hwp_core::Engine::detect(&bytes);
+    let (format, editable) = match fmt {
+        SourceFormat::Hwpx => ("HWPX (editable)", true),
+        SourceFormat::Hwp5 => ("HWP5 (view-only — export needs HWPX)", false),
+        SourceFormat::Hwp3 => ("HWP3 (view-only)", false),
+        SourceFormat::Unknown => return Err("unrecognized format (not HWP/HWPX)".into()),
+    };
+    let doc = hwp_core::Engine::open(&bytes).map_err(|e| e.to_string())?;
+    let sections = doc.sections.len();
+    session.doc = Some(EditSession::new(doc));
+    session.source_path = Some(path.to_string());
+    session.source_bytes = Some(bytes);
+    session.pending = None; // a fresh document drops any stale proposal
+    #[cfg(feature = "rhwp")]
+    {
+        // Revisions restart per EditSession, so a new doc must drop the render cache.
+        session.render = RenderState::default();
+    }
+    Ok(OpenInfo { format, editable, sections })
+}
+
+/// Compile + apply template-conformant content as ONE undo unit. Returns `(blocks, ops)`.
+fn do_apply_content(session: &mut Session, json: &str) -> Result<(usize, usize), String> {
+    let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
+    let ai = hwp_ai::content::parse_content(json).map_err(|e| e.to_string())?;
+    let ops = hwp_ai::content::compile_to_ops(&ai);
+    sess.do_ops(&ops).map_err(|e| e.to_string())?;
+    Ok((ai.blocks.len(), ops.len()))
+}
+
+/// Serialize the live doc to `path`. Returns `(byte_len, editor_open_safe)`.
+fn do_export(session: &Session, path: &str) -> Result<(usize, bool), String> {
+    let doc = session.doc.as_ref().ok_or("no document open (call open_document first)")?.doc();
+    let bytes = hwp_core::serialize_hwpx(doc).map_err(|e| e.to_string())?;
+    std::fs::write(path, &bytes).map_err(|e| format!("write {path}: {e}"))?;
+    Ok((bytes.len(), hwp_core::validate_hwpx(&bytes).ok))
+}
+
+/// A typed editor command/query — the GUI's mutation+query surface (no prose round-trips). The
+/// JSON `tools/*` lane (agents) is a separate transport; both drive the same op-bus core above.
+pub enum Intent {
+    Open { path: String },
+    PageCount,
+    Render { page: u32 },
+    ApplyContent { json: String },
+    Export { path: String },
+    Undo,
+    Redo,
+    ExtractText,
+}
+
+/// The typed result of an [`Intent`].
+pub enum Outcome {
+    Opened { format: &'static str, editable: bool, sections: usize },
+    PageCount(u32),
+    Rendered(String),
+    Applied { blocks: usize, ops: usize },
+    Exported { bytes: usize, open_safe: bool },
+    Undone(bool),
+    Redone(bool),
+    Text(String),
+}
+
+/// Apply a typed [`Intent`] against the session, returning a typed [`Outcome`] (no string parsing).
+pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, String> {
+    match intent {
+        Intent::Open { path } => {
+            let i = do_open(session, &path)?;
+            Ok(Outcome::Opened { format: i.format, editable: i.editable, sections: i.sections })
+        }
+        Intent::ApplyContent { json } => {
+            let (blocks, ops) = do_apply_content(session, &json)?;
+            Ok(Outcome::Applied { blocks, ops })
+        }
+        Intent::Export { path } => {
+            let (bytes, open_safe) = do_export(session, &path)?;
+            Ok(Outcome::Exported { bytes, open_safe })
+        }
+        Intent::Undo => {
+            let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
+            Ok(Outcome::Undone(sess.undo()))
+        }
+        Intent::Redo => {
+            let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
+            Ok(Outcome::Redone(sess.redo()))
+        }
+        Intent::ExtractText => {
+            let doc = session.doc.as_ref().ok_or("no document open (call open_document first)")?.doc();
+            Ok(Outcome::Text(doc.plain_text()))
+        }
+        Intent::PageCount => {
+            #[cfg(feature = "rhwp")]
+            {
+                Ok(Outcome::PageCount(page_count_u32(session)?))
+            }
+            #[cfg(not(feature = "rhwp"))]
+            {
+                Err("page_count needs a build with --features rhwp".into())
+            }
+        }
+        Intent::Render { page } => {
+            #[cfg(feature = "rhwp")]
+            {
+                Ok(Outcome::Rendered(render_current(session, page)?))
+            }
+            #[cfg(not(feature = "rhwp"))]
+            {
+                let _ = page;
+                Err("render needs a build with --features rhwp".into())
+            }
+        }
+    }
+}
+
 /// Dispatch a tool call. Ok = result text, Err = error text (surfaced as MCP `isError`).
 fn call_tool(name: &str, args: &Value, session: &mut Session) -> Result<String, String> {
     let arg_str = |k: &str| args.get(k).and_then(Value::as_str).map(str::to_string);
     match name {
         "open_document" => {
-            use hwp_model::types::SourceFormat;
             let path = arg_str("path").ok_or("missing `path`")?;
-            let bytes = std::fs::read(&path).map_err(|e| format!("read {path}: {e}"))?;
-            let fmt = hwp_core::Engine::detect(&bytes);
-            // HWP5/HWPX both open for VIEWING; only HWPX round-trips to an edited export.
-            let label = match fmt {
-                SourceFormat::Hwpx => "HWPX (editable)",
-                SourceFormat::Hwp5 => "HWP5 (view-only — export needs HWPX)",
-                SourceFormat::Hwp3 => "HWP3 (view-only)",
-                SourceFormat::Unknown => return Err("unrecognized format (not HWP/HWPX)".into()),
-            };
-            let doc = hwp_core::Engine::open(&bytes).map_err(|e| e.to_string())?;
-            let n = doc.sections.len();
-            session.doc = Some(EditSession::new(doc));
-            session.source_path = Some(path.clone());
-            session.source_bytes = Some(bytes);
-            session.pending = None; // a fresh document drops any stale proposal
-            #[cfg(feature = "rhwp")]
-            {
-                // Revisions restart per EditSession, so a new doc must drop the render cache.
-                session.render = RenderState::default();
-            }
-            Ok(format!("opened {path} ({label}, {n} section(s))"))
+            let i = do_open(session, &path)?;
+            Ok(format!("opened {path} ({}, {} section(s))", i.format, i.sections))
         }
         "get_context" => {
             let doc = session.doc.as_ref().ok_or("no document open (call open_document first)")?.doc();
@@ -244,25 +356,15 @@ fn call_tool(name: &str, args: &Value, session: &mut Session) -> Result<String, 
         }
         "apply_content" => {
             let content = arg_str("content").ok_or("missing `content`")?;
-            let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
-            let ai = hwp_ai::content::parse_content(&content).map_err(|e| e.to_string())?;
-            let ops = hwp_ai::content::compile_to_ops(&ai);
-            for op in &ops {
-                sess.do_op(op).map_err(|e| e.to_string())?;
-            }
-            Ok(format!("applied {} block(s) → {} op(s)", ai.blocks.len(), ops.len()))
+            let (blocks, ops) = do_apply_content(session, &content)?;
+            Ok(format!("applied {blocks} block(s) → {ops} op(s)"))
         }
         "export_hwpx" => {
             let path = arg_str("path").ok_or("missing `path`")?;
-            let doc = session.doc.as_ref().ok_or("no document open (call open_document first)")?.doc();
-            let bytes = hwp_core::serialize_hwpx(doc).map_err(|e| e.to_string())?;
-            std::fs::write(&path, &bytes).map_err(|e| format!("write {path}: {e}"))?;
-            let report = hwp_core::validate_hwpx(&bytes);
+            let (bytes, open_safe) = do_export(session, &path)?;
             Ok(format!(
-                "exported {} ({} bytes); editor-open-safety: {}",
-                path,
-                bytes.len(),
-                if report.ok { "OK" } else { "FAIL" }
+                "exported {path} ({bytes} bytes); editor-open-safety: {}",
+                if open_safe { "OK" } else { "FAIL" }
             ))
         }
         "extract_text" => {
@@ -408,6 +510,45 @@ mod tests {
         call("undo", json!({}), &mut s);
         let empty = call("undo", json!({}), &mut s);
         assert!(text(&empty).contains("nothing to undo"), "{empty}");
+    }
+
+    #[test]
+    fn apply_intent_typed_lane_open_edit_undo_redo() {
+        let mut s = Session::default();
+        match apply_intent(&mut s, Intent::Open { path: showcase() }).unwrap() {
+            Outcome::Opened { editable, sections, .. } => {
+                assert!(editable, "showcase is HWPX (editable)");
+                assert!(sections >= 1);
+            }
+            _ => panic!("expected Opened"),
+        }
+        let text = |s: &mut Session| match apply_intent(s, Intent::ExtractText).unwrap() {
+            Outcome::Text(t) => t,
+            _ => panic!("expected Text"),
+        };
+        assert!(!text(&mut s).contains("인텐트 레인"));
+
+        let content = r#"{"blocks":[{"type":"paragraph","runs":[{"text":"인텐트 레인"}]}]}"#.to_string();
+        match apply_intent(&mut s, Intent::ApplyContent { json: content }).unwrap() {
+            Outcome::Applied { blocks, ops } => {
+                assert_eq!(blocks, 1);
+                assert!(ops >= 1);
+            }
+            _ => panic!("expected Applied"),
+        }
+        assert!(text(&mut s).contains("인텐트 레인"), "typed apply mutates the doc");
+
+        // ApplyContent is ONE undo unit (do_ops): a single undo reverts it.
+        match apply_intent(&mut s, Intent::Undo).unwrap() {
+            Outcome::Undone(c) => assert!(c),
+            _ => panic!("expected Undone"),
+        }
+        assert!(!text(&mut s).contains("인텐트 레인"), "one undo reverts the whole apply");
+        match apply_intent(&mut s, Intent::Redo).unwrap() {
+            Outcome::Redone(c) => assert!(c),
+            _ => panic!("expected Redone"),
+        }
+        assert!(text(&mut s).contains("인텐트 레인"));
     }
 
     #[test]

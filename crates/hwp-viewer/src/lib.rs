@@ -31,44 +31,73 @@ pub fn mcp_call(session: &mut hwp_mcp::Session, name: &str, args: Value) -> Resu
     }
 }
 
-// ---- Tauri commands (thin wrappers over the pure logic above) ----
+// ---- Tauri commands: typed `Intent` lane (no prose parsing; same op-bus core as the MCP lane) ----
 
-/// Parse the `page_count` tool's text result into a number (0 on any failure).
-fn count_of(s: &mut hwp_mcp::Session) -> u32 {
-    mcp_call(s, "page_count", json!({})).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(0)
+use hwp_mcp::{apply_intent, Intent, Outcome};
+
+/// Live page count via the typed Intent lane (0 if unavailable, e.g. no rhwp render).
+fn pages(s: &mut hwp_mcp::Session) -> u32 {
+    match apply_intent(s, Intent::PageCount) {
+        Ok(Outcome::PageCount(n)) => n,
+        _ => 0,
+    }
 }
 
 #[tauri::command]
 fn open_doc(path: String, sess: tauri::State<'_, SharedSession>) -> Result<u32, String> {
     let mut s = sess.lock().map_err(|_| "session poisoned")?;
-    mcp_call(&mut s, "open_document", json!({ "path": path }))?; // accepts .hwp (view) and .hwpx
-    Ok(count_of(&mut s))
+    apply_intent(&mut s, Intent::Open { path })?; // accepts .hwp (view) and .hwpx
+    Ok(pages(&mut s))
 }
 
 #[tauri::command]
 fn render_page(page: u32, sess: tauri::State<'_, SharedSession>) -> Result<String, String> {
-    // Render via the shared tool: live HWPX (shows edits) or original bytes for HW5 (view-only).
     let mut s = sess.lock().map_err(|_| "session poisoned")?;
-    mcp_call(&mut s, "render_page", json!({ "page": page }))
+    match apply_intent(&mut s, Intent::Render { page })? {
+        Outcome::Rendered(svg) => Ok(svg),
+        _ => Err("unexpected outcome".into()),
+    }
 }
 
 /// Current page count of the live document (used by the frontend to re-render after edits).
 #[tauri::command]
 fn doc_page_count(sess: tauri::State<'_, SharedSession>) -> Result<u32, String> {
     let mut s = sess.lock().map_err(|_| "session poisoned")?;
-    Ok(count_of(&mut s))
+    Ok(pages(&mut s))
 }
 
+/// Apply AI content; returns the new page count so the frontend re-renders.
 #[tauri::command]
-fn apply_content(content: String, sess: tauri::State<'_, SharedSession>) -> Result<String, String> {
+fn apply_content(content: String, sess: tauri::State<'_, SharedSession>) -> Result<u32, String> {
     let mut s = sess.lock().map_err(|_| "session poisoned")?;
-    mcp_call(&mut s, "apply_content", json!({ "content": content }))
+    apply_intent(&mut s, Intent::ApplyContent { json: content })?;
+    Ok(pages(&mut s))
 }
 
 #[tauri::command]
 fn export_hwpx(path: String, sess: tauri::State<'_, SharedSession>) -> Result<String, String> {
     let mut s = sess.lock().map_err(|_| "session poisoned")?;
-    mcp_call(&mut s, "export_hwpx", json!({ "path": path }))
+    match apply_intent(&mut s, Intent::Export { path })? {
+        Outcome::Exported { bytes, open_safe } => {
+            Ok(format!("{bytes} bytes · editor-open-safety {}", if open_safe { "OK" } else { "FAIL" }))
+        }
+        _ => Err("unexpected outcome".into()),
+    }
+}
+
+/// Undo / redo the last edit; returns the new page count so the frontend re-renders.
+#[tauri::command]
+fn undo(sess: tauri::State<'_, SharedSession>) -> Result<u32, String> {
+    let mut s = sess.lock().map_err(|_| "session poisoned")?;
+    apply_intent(&mut s, Intent::Undo)?;
+    Ok(pages(&mut s))
+}
+
+#[tauri::command]
+fn redo(sess: tauri::State<'_, SharedSession>) -> Result<u32, String> {
+    let mut s = sess.lock().map_err(|_| "session poisoned")?;
+    apply_intent(&mut s, Intent::Redo)?;
+    Ok(pages(&mut s))
 }
 
 /// Build + run the viewer window. Manages the shared session + cached bytes, registers commands,
@@ -88,7 +117,9 @@ pub fn run() {
             render_page,
             doc_page_count,
             apply_content,
-            export_hwpx
+            export_hwpx,
+            undo,
+            redo
         ])
         .run(tauri::generate_context!())
         .expect("error while running tf-hwp viewer");

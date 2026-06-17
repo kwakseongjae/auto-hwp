@@ -4,7 +4,10 @@
   "version": "0.0.1",
   "identifier": "dev.tfhwp.viewer",
   "build": {
-    "frontendDist": "ui"
+    "frontendDist": "ui/dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "pnpm -C ui dev",
+    "beforeBuildCommand": "pnpm -C ui build"
   },
   "app": {
     "withGlobalTauri": true,
