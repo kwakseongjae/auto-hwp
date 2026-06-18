@@ -3,8 +3,9 @@ import { createVirtualizer } from "@tanstack/solid-virtual";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { tinykeys } from "tinykeys";
-import { api, type FindMatch } from "./api";
+import { api, type CaretRect, type FindMatch } from "./api";
 import { sanitizeSvg } from "./sanitize";
+import { advanceOffset, pageToScreen, screenToPage } from "./caret";
 import { type Command } from "./commands";
 import { Palette } from "./Palette";
 import { Composer, type ComposerMode } from "./Composer";
@@ -44,6 +45,73 @@ export default function App() {
   let scrollRef!: HTMLDivElement;
   const inflight = new Set<number>();
 
+  // ---- Interactive caret state (the P1 "interactive half", built on the shipped caret engine) ----
+  // `caret` is the EDITABLE model anchor; we ONLY ever store a non-null target (a click on a cell /
+  // unanchored run — HitTarget.node===null — clears it instead). page = which rendered page the
+  // click landed on; node = the editable NodeId (guaranteed non-null here); offset = paragraph char
+  // offset (Unicode-scalar count over the paragraph's concatenated run text); len = the paragraph's
+  // editable char length (so we clamp moves to it — caret_rect CLAMPS past-end offsets and returns a
+  // rect, so a null rect can NOT be used to detect end-of-paragraph).
+  const [caret, setCaret] = createSignal<{ page: number; node: number; offset: number; len: number } | null>(null);
+  // `caretRect` = the PAGE-unit geometry from api.caretRect, recomputed after every move/edit. It is
+  // null in the legitimate "anchor reflowed off this page → hide overlay until next click" state
+  // (caret set, caretRect null). The inverse (caretRect set while caret null) is impossible.
+  const [caretRect, setCaretRect] = createSignal<CaretRect | null>(null);
+  // `caretBox` = the caret geometry already converted to CSS px (left/top/height) against the live
+  // svg rect, so the overlay renders without re-reading rects mid-render. Recomputed in the same
+  // async step that sets caretRect. Null whenever caretRect is null (overlay hidden).
+  const [caretBox, setCaretBox] = createSignal<{ left: number; top: number; height: number } | null>(null);
+  // IME guard: true between compositionstart and compositionend; keydown early-returns while true so
+  // the printable-char path never double-inserts the IME's already-committed text.
+  const [composing, setComposing] = createSignal(false);
+  const caretActive = () => caret() !== null;
+  // Non-reactive ref to the hidden off-screen input that captures keystrokes + composition events.
+  let imeInput!: HTMLInputElement;
+  // Edit SERIALIZER: a mutation (insert/delete/IME-commit) is spawn_blocking behind the session
+  // Mutex, and offset bookkeeping is read-modify-write. Rather than DROP input that arrives mid-edit
+  // (which would lose a fast typist's keystrokes / a committed IME syllable), we chain every edit and
+  // move through one promise queue so they apply strictly in order, each reading the caret AFTER the
+  // prior one resolved. Errors are toasted and don't break the chain.
+  let editQueue: Promise<unknown> = Promise.resolve();
+  function enqueueEdit(fn: () => Promise<void>): Promise<void> {
+    const next = editQueue.then(fn).catch((err) => {
+      toast("warn", `${err}`);
+    });
+    editQueue = next;
+    return next;
+  }
+
+  // Re-acquire THIS page's live <svg> el by data-index under the scroll container, so caret geometry
+  // uses the current on-screen rect after any scroll. querySelector finds the innerHTML-injected svg.
+  function svgForPage(page: number): SVGSVGElement | null {
+    if (!scrollRef) return null;
+    return scrollRef.querySelector(`[data-index="${page}"] svg`) as SVGSVGElement | null;
+  }
+  // Convert the current caretRect (PAGE units) → CSS px against `page`'s live svg rect, store in
+  // caretBox. Called after every move/edit (and after re-render microtasks). Hides the box if the
+  // page isn't laid out / rect is degenerate.
+  function recomputeCaretBox(page: number, r: CaretRect | null) {
+    if (!r) {
+      setCaretBox(null);
+      return;
+    }
+    const svg = svgForPage(page);
+    if (!svg) {
+      setCaretBox(null);
+      return;
+    }
+    const rect = svg.getBoundingClientRect();
+    const vb = svg.viewBox.baseVal;
+    const box = pageToScreen(r, { width: rect.width, height: rect.height }, { width: vb.width, height: vb.height });
+    setCaretBox(box);
+  }
+  function clearCaret() {
+    setCaret(null);
+    setCaretRect(null);
+    setCaretBox(null);
+    setComposing(false);
+  }
+
   const virtualizer = createVirtualizer({
     get count() {
       return pageCount();
@@ -73,7 +141,163 @@ export default function App() {
   function invalidate(n: number, scrollTo = 0) {
     setSvgCache({});
     setPageCount(n);
+    // Any doc-level change (undo/redo/replace/open/apply) can drop the NodeId the caret pointed at,
+    // so never leave a stale anchor — the typed caret path (invalidateKeepingCaret) is the only one
+    // that re-establishes a caret after a mutation.
+    clearCaret();
     queueMicrotask(() => virtualizer.scrollToIndex(Math.max(0, Math.min(scrollTo, n - 1))));
+  }
+
+  // Re-render after an in-place edit (insert/delete) while KEEPING the caret anchored: the doc just
+  // reflowed and page_count may have changed, so we reuse the invalidate() teardown (drop svgCache +
+  // set pageCount) but, in a microtask AFTER the re-render, re-query caret_rect at the wanted offset
+  // and reposition. If the paragraph reflowed off `want.page` (caretRect===null) we keep the anchor
+  // but hide the overlay until it reflows back / the next click (spec'd behavior). Also re-focus the
+  // hidden imeInput because the innerHTML re-render blurs it (keystrokes would silently stop).
+  async function invalidateKeepingCaret(n: number, want: { page: number; node: number; offset: number; len: number }) {
+    setSvgCache({});
+    setPageCount(n);
+    setCaret(want);
+    // Let the For body re-render the page svgs before we read their rects / fetch geometry.
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    try {
+      const r = await api.caretRect(want.page, want.node, want.offset);
+      setCaretRect(r);
+      recomputeCaretBox(want.page, r);
+    } catch {
+      setCaretRect(null);
+      setCaretBox(null);
+    }
+    imeInput?.focus();
+  }
+
+  // ---- caret: click-to-place ----
+  // Attached to the page-list wrapper. DOM glue lives here (caret.ts stays DOM-free): find the
+  // clicked page via its [data-index] ancestor, read the live svg rect, map the click to page units,
+  // hit-test, and place an EDITABLE caret only when HitTarget.node!=null. A view-only .hwp skips the
+  // whole thing (no caret on a doc you can't edit). A null-node target (cell / unanchored run) clears
+  // the caret and hints why — we never store a typeable caret on a non-editable target.
+  async function onPageClick(e: MouseEvent) {
+    if (!canEdit()) return; // view-only docs show no caret
+    const host = (e.target as Element).closest("[data-index]");
+    if (!host) return;
+    const page = Number(host.getAttribute("data-index"));
+    if (!Number.isFinite(page)) return;
+    const svg = host.querySelector("svg") as SVGSVGElement | null;
+    if (!svg) return; // page not rendered yet
+    const rect = svg.getBoundingClientRect();
+    const vb = svg.viewBox.baseVal;
+    const pt = screenToPage(
+      e.clientX,
+      e.clientY,
+      { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      { width: vb.width, height: vb.height },
+    );
+    if (!pt) return; // page not laid out yet (zero dims)
+    try {
+      const hit = await api.hitTest(page, pt.x, pt.y);
+      if (!hit || hit.node === null) {
+        // Off any editable text line, OR a cell / unanchored run (node===null): not editable.
+        clearCaret();
+        if (hit && hit.node === null) toast("info", "표/머리말 등은 아직 편집할 수 없습니다");
+        return;
+      }
+      const want = { page, node: hit.node, offset: hit.offset, len: hit.paraLen };
+      const r = await api.caretRect(page, want.node, want.offset);
+      setCaret(want);
+      setCaretRect(r);
+      recomputeCaretBox(page, r);
+      // Route all subsequent keystrokes + composition through the hidden input.
+      imeInput?.focus();
+    } catch (err) {
+      toast("warn", `캐럿 배치 실패: ${err}`);
+    }
+  }
+
+  // ---- caret: edit loop (every helper is enqueued so concurrent input never races/drops; each is a
+  // no-op unless there is an editable caret, read AFTER the prior queued edit resolved) ----
+  // Insert `text` (one printable char, or a whole committed IME syllable cluster = ONE undo unit).
+  function doInsert(text: string) {
+    void enqueueEdit(async () => {
+      const c = caret();
+      if (!c || !canEdit()) return;
+      // P0-3 contract: a structural paragraph (inline image/equation) or out-of-range offset refuses
+      // in place — the queue's .catch surfaces the op-bus message, leaves the caret put, never crashes.
+      const inserted = advanceOffset(c.offset, text) - c.offset;
+      const pages = await api.insertText(c.node, c.offset, text);
+      await invalidateKeepingCaret(pages, { ...c, offset: c.offset + inserted, len: c.len + inserted });
+    });
+  }
+  function doDelete() {
+    void enqueueEdit(async () => {
+      const c = caret();
+      if (!c || !canEdit() || c.offset === 0) return;
+      const pages = await api.deleteBack(c.node, c.offset);
+      await invalidateKeepingCaret(pages, { ...c, offset: c.offset - 1, len: Math.max(0, c.len - 1) });
+    });
+  }
+  // Move ±1 char, clamped to the paragraph [0, len] (NOT inferred from a null caret_rect — the engine
+  // CLAMPS past-end offsets and returns a rect, so a runaway offset would otherwise desync the model).
+  // No mutation → no re-render, just reposition the overlay. Enqueued so it can't reorder against edits.
+  function doMove(d: -1 | 1) {
+    void enqueueEdit(async () => {
+      const c = caret();
+      if (!c) return;
+      const newOffset = c.offset + d;
+      if (newOffset < 0 || newOffset > c.len) return; // at a paragraph edge — leave the caret put
+      const r = await api.caretRect(c.page, c.node, newOffset);
+      if (r === null) return; // reflowed off this page — keep the anchor
+      setCaret({ ...c, offset: newOffset });
+      setCaretRect(r);
+      recomputeCaretBox(c.page, r);
+    });
+  }
+
+  // ---- caret: keyboard + IME handlers (attached to the hidden imeInput, NOT window, so ⌘K/⌘F and
+  // palette typing keep working). ----
+  function onCaretKeyDown(e: KeyboardEvent) {
+    // IME owns the keys while composing; the final text commits on compositionend. This early-return
+    // is the double-insert guard (the browser fires keydown with isComposing===true for IME keys).
+    if (composing() || e.isComposing) return;
+    // Let ⌘/Ctrl/Alt shortcuts bubble (⌘Z undo, ⌘F find, …) — don't treat them as text.
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (!caretActive()) return;
+    if (e.key.length === 1) {
+      e.preventDefault();
+      void doInsert(e.key);
+    } else if (e.key === "Backspace") {
+      e.preventDefault();
+      void doDelete();
+    } else if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      void doMove(-1);
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      void doMove(1);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      clearCaret();
+    }
+    // Home/End/selection/drag-highlight are intentionally NOT handled in this slice (next P1).
+  }
+  function onCompositionStart() {
+    setComposing(true);
+  }
+  function onCompositionUpdate() {
+    // v1: no in-place composing preview; the half-built syllable shows only in the (hidden) input.
+    // Final text commits on compositionend. A future pass would draw the composing jamo at the caret.
+  }
+  function onCompositionEnd(e: CompositionEvent) {
+    setComposing(false);
+    // Capture the committed text SYNCHRONOUSLY (before clearing the input), so a syllable committing
+    // while a prior edit is still in flight is never lost — it goes onto the serialized edit queue.
+    // WKWebView (macOS Tauri target) supplies the committed Hangul in e.data; fall back to the input's
+    // own value if a platform/IME leaves e.data empty. A cancelled composition → empty → no-op.
+    const text = e.data || imeInput?.value || "";
+    if (imeInput) imeInput.value = ""; // never re-feed on the next composition
+    if (!text) return;
+    // Commit the WHOLE finalized string as ONE insertText (one undo unit) via the shared edit path.
+    doInsert(text);
   }
 
   // ---- verbs (each maps to a typed Intent) ----
@@ -462,7 +686,7 @@ export default function App() {
             </div>
           }
         >
-          <div class="relative mx-auto max-w-3xl" style={{ height: `${virtualizer.getTotalSize()}px` }}>
+          <div class="relative mx-auto max-w-3xl" style={{ height: `${virtualizer.getTotalSize()}px` }} onClick={(e) => void onPageClick(e)}>
             <For each={virtualizer.getVirtualItems()}>
               {(item) => {
                 ensurePage(item.index);
@@ -473,12 +697,27 @@ export default function App() {
                     class="absolute left-0 w-full"
                     style={{ transform: `translateY(${item.start}px)` }}
                   >
+                    {/* The svg-host wrapper is `relative` so the caret overlay (absolute) positions
+                        against it and scrolls with the page automatically (shared scroll context). */}
                     <div
-                      class="w-full rounded-lg bg-white shadow-md ring-1 ring-black/5"
+                      class="relative w-full rounded-lg bg-white shadow-md ring-1 ring-black/5"
                       style={{ "content-visibility": "auto", "contain-intrinsic-size": "auto 920px" }}
                     >
                       <Show when={svgCache()[item.index]} fallback={<div class="grid aspect-[1/1.414] place-items-center text-neutral-300">{item.index + 1}쪽…</div>}>
                         <div class="page-svg" innerHTML={svgCache()[item.index]} />
+                      </Show>
+                      {/* Blinking caret overlay. Renders only when BOTH caret() and caretBox() exist
+                          AND this is the caret's page — so the reflowed-off-page state (caretBox null)
+                          hides it until the next click. pointer-events-none so it never eats a click. */}
+                      <Show when={caretActive() && caretRect() && caretBox() && caret()!.page === item.index}>
+                        <div
+                          class="caret-blink pointer-events-none absolute z-10 w-px bg-accent"
+                          style={{
+                            left: `${caretBox()!.left}px`,
+                            top: `${caretBox()!.top}px`,
+                            height: `${caretBox()!.height}px`,
+                          }}
+                        />
                       </Show>
                     </div>
                   </div>
@@ -513,6 +752,22 @@ export default function App() {
           </div>
         </div>
       </Show>
+
+      {/* Hidden off-screen IME-capture input. Keystrokes + composition events route here (focused on
+          an editable click) so the printable/Backspace/arrow/Esc and Korean compositionend-commit
+          paths fire WITHOUT clobbering ⌘K/⌘F/palette typing (those listen on window). aria-hidden so
+          screen readers skip it. v1 IME: final text commits on compositionend (no in-place jamo
+          preview — documented limit). */}
+      <input
+        ref={imeInput}
+        aria-hidden="true"
+        tabindex={-1}
+        class="absolute -left-[9999px] top-0 h-px w-px opacity-0"
+        onKeyDown={onCaretKeyDown}
+        onCompositionStart={onCompositionStart}
+        onCompositionUpdate={onCompositionUpdate}
+        onCompositionEnd={(e) => void onCompositionEnd(e)}
+      />
 
       <Palette open={paletteOpen()} onOpenChange={setPaletteOpen} commands={commands()} />
       <Composer mode={composer()} onClose={() => setComposer(null)} ctx={composerCtx} />

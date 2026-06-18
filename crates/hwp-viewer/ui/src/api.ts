@@ -32,6 +32,8 @@ export type HitTarget = {
   section: number;
   paraOrd: number;
   inCell: boolean;
+  /** Editable char length of the resolved paragraph — the UI clamps caret moves to it. */
+  paraLen: number;
 };
 
 /** WYSIWYG caret — a caret rectangle in page (unscaled) coordinates. Scale by the SVG zoom factor. */
@@ -80,4 +82,14 @@ export const api = {
    *  rectangle on `page` (null if the paragraph doesn't render on that page). */
   caretRect: (page: number, node: number, offset: number) =>
     invoke<CaretRect | null>("caret_rect", { page, node, offset }),
+  /** Interactive caret — insert `text` at a char-offset caret inside one simple paragraph as ONE
+   *  undo unit (per-keystroke / IME-commit). Returns the new page count (re-render after). Rejects
+   *  (throws the op-bus message) when the target paragraph is structural / the offset is out of
+   *  range — the caller should toast it, not crash. */
+  insertText: (node: number, offset: number, text: string) =>
+    invoke<number>("insert_text", { node, offset, text }),
+  /** Interactive caret — delete the single char ENDING at `offset` (Backspace) as ONE undo unit.
+   *  `offset === 0` is a no-op. Returns the new page count. */
+  deleteBack: (node: number, offset: number) =>
+    invoke<number>("delete_back", { node, offset }),
 };

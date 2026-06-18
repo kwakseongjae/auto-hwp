@@ -45,6 +45,10 @@ pub struct HitResult {
     pub section: usize,
     pub para_ord: usize,
     pub in_cell: bool,
+    /// Editable char length of the resolved paragraph (0 if unaddressed) — the frontend clamps caret
+    /// moves to it, since caret_rect clamps past-end offsets rather than returning None (so the UI
+    /// must NOT infer end-of-paragraph from a null rect).
+    pub para_len: usize,
 }
 
 /// A caret rectangle in page (unscaled) coordinates — the geometry half of the WYSIWYG caret. If the
@@ -287,16 +291,19 @@ fn hit_test_current(session: &mut Session, page: u32, x: f64, y: f64) -> Result<
     // Resolve to a NodeId against the live editable doc. Gated: cell runs AND unanchored runs (no
     // stable_key — e.g. a note-body run with para_index=None) stay node:None in v1 so a click never
     // mis-targets the first body paragraph.
-    let (node, block, offset) = if hit.in_cell || hit.stable_key.is_none() {
-        (None, None, hit.char_offset)
+    let (node, block, offset, para_len) = if hit.in_cell || hit.stable_key.is_none() {
+        (None, None, hit.char_offset, 0)
     } else {
         let doc = session.doc.as_ref().ok_or("no document open")?.doc();
         match hwp_core::resolve_key_to_node(doc, hit.section, hit.para_ord) {
             // Clamp the geometry offset to the paragraph's editable Text length: rhwp counts
             // note-ref/inline-object chars the model stores as 0-width inlines, so the raw offset can
             // exceed it — clamping keeps a future edit op in-bounds.
-            Some((id, bi)) => (Some(id.0), Some(bi), hit.char_offset.min(para_text_len(doc, hit.section, bi))),
-            None => (None, None, hit.char_offset),
+            Some((id, bi)) => {
+                let len = para_text_len(doc, hit.section, bi);
+                (Some(id.0), Some(bi), hit.char_offset.min(len), len)
+            }
+            None => (None, None, hit.char_offset, 0),
         }
     };
     Ok(Some(HitResult {
@@ -306,6 +313,7 @@ fn hit_test_current(session: &mut Session, page: u32, x: f64, y: f64) -> Result<
         section: hit.section,
         para_ord: hit.para_ord,
         in_cell: hit.in_cell,
+        para_len,
     }))
 }
 
@@ -485,6 +493,35 @@ fn do_replace(
     Ok(replaced)
 }
 
+/// Insert `text` at a char-offset caret inside one simple paragraph as ONE undo unit (`do_op`). The
+/// interactive caret's per-keystroke / IME-commit edit. Surfaces the op-bus error string verbatim
+/// (e.g. "paragraph N has structural content and cannot be edited in place" on an image/equation
+/// paragraph, or "caret offset X past paragraph end Y") so the UI can toast it without crashing.
+fn do_insert_text(session: &mut Session, node: u64, offset: usize, text: &str) -> Result<(), String> {
+    use hwp_model::types::NodeId;
+    use hwp_ops::{Caret, Op};
+    let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
+    let op = Op::InsertText { at: Caret { node: NodeId(node), offset }, text: text.to_string() };
+    sess.do_op(&op).map_err(|e| e.to_string()) // one undo unit
+}
+
+/// Delete the single char ENDING at `offset` (Backspace) as ONE undo unit. `offset == 0` is a
+/// graceful no-op (nothing precedes the caret). Otherwise builds `DeleteRange{offset-1, offset}`.
+/// Surfaces the op-bus error string verbatim (structural / out-of-range) so the UI can toast it.
+fn do_delete_back(session: &mut Session, node: u64, offset: usize) -> Result<(), String> {
+    use hwp_model::types::NodeId;
+    use hwp_ops::{Caret, Op};
+    if offset == 0 {
+        return Ok(()); // nothing before the caret — no-op, no rev bump
+    }
+    let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
+    let op = Op::DeleteRange {
+        start: Caret { node: NodeId(node), offset: offset - 1 },
+        end: Caret { node: NodeId(node), offset },
+    };
+    sess.do_op(&op).map_err(|e| e.to_string()) // one undo unit
+}
+
 /// A typed editor command/query — the GUI's mutation+query surface (no prose round-trips). The
 /// JSON `tools/*` lane (agents) is a separate transport; both drive the same op-bus core above.
 pub enum Intent {
@@ -512,6 +549,13 @@ pub enum Intent {
     /// WYSIWYG caret (engine half) — map a model target (NodeId + paragraph char offset) to a caret
     /// rectangle on `page`.
     CaretRect { page: u32, node: u64, offset: usize },
+    /// Interactive caret — insert `text` at a char-offset caret inside one simple paragraph as ONE
+    /// undo unit (the per-keystroke / IME-commit edit). Surfaces the op-bus refusal verbatim (e.g. a
+    /// structural paragraph or an out-of-range offset) so the UI can toast it.
+    InsertText { node: u64, offset: usize, text: String },
+    /// Interactive caret — delete the single char ENDING at `offset` (Backspace) as ONE undo unit
+    /// (`DeleteRange{offset-1, offset}`). `offset == 0` is a graceful no-op.
+    DeleteBack { node: u64, offset: usize },
 }
 
 /// The typed result of an [`Intent`].
@@ -536,6 +580,9 @@ pub enum Outcome {
     Hit(Option<HitResult>),
     /// Caret-rect result: the caret geometry, or `None` if the target doesn't render on that page.
     Caret(Option<CaretRect>),
+    /// In-place edit result (InsertText / DeleteBack): the new page count so the UI re-renders,
+    /// mirroring `Replaced` (0 when no rhwp render is available).
+    Edited { pages: u32 },
 }
 
 /// Apply a typed [`Intent`] against the session, returning a typed [`Outcome`] (no string parsing).
@@ -623,6 +670,23 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
         Intent::HitTest { page, x, y } => Ok(Outcome::Hit(hit_test_current(session, page, x, y)?)),
         Intent::CaretRect { page, node, offset } => {
             Ok(Outcome::Caret(caret_rect_current(session, page, node, offset)?))
+        }
+        Intent::InsertText { node, offset, text } => {
+            do_insert_text(session, node, offset, &text)?;
+            // Live page count after the reflow (0 when no rhwp render), mirroring Replaced.
+            #[cfg(feature = "rhwp")]
+            let pages = page_count_u32(session).unwrap_or(0);
+            #[cfg(not(feature = "rhwp"))]
+            let pages = 0;
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::DeleteBack { node, offset } => {
+            do_delete_back(session, node, offset)?;
+            #[cfg(feature = "rhwp")]
+            let pages = page_count_u32(session).unwrap_or(0);
+            #[cfg(not(feature = "rhwp"))]
+            let pages = 0;
+            Ok(Outcome::Edited { pages })
         }
     }
 }
@@ -1123,6 +1187,132 @@ mod tests {
         assert!(r.is_err(), "hit_test errors without rhwp");
         #[cfg(feature = "rhwp")]
         let _ = r; // with rhwp it's a valid (possibly None) result
+    }
+
+    // ---- Interactive caret: in-place InsertText / DeleteBack intents (per-keystroke edits) ----
+    //
+    // These drive the showcase's REAL parsed paragraphs, which carry NodeIds and are simple. We grab
+    // a body paragraph's NodeId via a hit-test so the offset/node are real (mirrors how the UI gets
+    // them from a click). rhwp-gated because the NodeId comes from the glyph-box hit-test.
+
+    /// The NodeId + a known piece of text of the first editable body paragraph on page 0.
+    #[cfg(feature = "rhwp")]
+    fn first_body_node(s: &Session) -> (u64, usize) {
+        let bytes = renderable_bytes(s).unwrap();
+        let boxes = hwp_core::page_glyph_boxes(&bytes, 0).unwrap();
+        let title = boxes
+            .iter()
+            .find(|b| !b.in_cell && b.char_len > 0 && b.stable_key.is_some())
+            .expect("a body run on page 0");
+        let doc = s.doc.as_ref().unwrap().doc();
+        let (id, _bi) =
+            hwp_core::resolve_key_to_node(doc, title.section, title.para_ord).expect("body run → NodeId");
+        (id.0, title.char_start)
+    }
+
+    /// InsertText at a caret advances the doc text + returns a page count, and a SINGLE undo reverts
+    /// the one keystroke (do_op = one undo unit). Offset-past-end is an Err, not a panic.
+    #[cfg(feature = "rhwp")]
+    #[test]
+    fn insert_text_intent_advances_and_single_undo_reverts() {
+        let mut s = Session::default();
+        apply_intent(&mut s, Intent::Open { path: showcase() }).unwrap();
+        let text = |s: &mut Session| match apply_intent(s, Intent::ExtractText).unwrap() {
+            Outcome::Text(t) => t,
+            _ => unreachable!(),
+        };
+        let (node, offset) = first_body_node(&s);
+        assert!(!text(&mut s).contains("끼움글자"));
+
+        // Insert a multi-scalar Korean string at the run's start.
+        match apply_intent(&mut s, Intent::InsertText { node, offset, text: "끼움글자".into() }).unwrap() {
+            Outcome::Edited { pages } => assert!(pages >= 1, "page count after insert"),
+            _ => panic!("expected Edited"),
+        }
+        assert!(text(&mut s).contains("끼움글자"), "insert advances doc text");
+
+        // One keystroke = one undo unit: a single undo reverts it.
+        match apply_intent(&mut s, Intent::Undo).unwrap() {
+            Outcome::Undone(c) => assert!(c),
+            _ => panic!("expected Undone"),
+        }
+        assert!(!text(&mut s).contains("끼움글자"), "one undo reverts a single insert");
+
+        // Offset way past the paragraph end is an Err (surfaced to the UI), never a panic.
+        let r = apply_intent(&mut s, Intent::InsertText { node, offset: 100_000, text: "X".into() });
+        assert!(r.is_err(), "offset past paragraph end errors, not panics");
+    }
+
+    /// DeleteBack at offset 0 is a graceful no-op (Edited, text unchanged, no rev bump); at offset N
+    /// it removes the preceding scalar; a single undo reverts that one deletion.
+    #[cfg(feature = "rhwp")]
+    #[test]
+    fn delete_back_intent_noop_at_zero_and_deletes_preceding_scalar() {
+        let mut s = Session::default();
+        apply_intent(&mut s, Intent::Open { path: showcase() }).unwrap();
+        let text = |s: &mut Session| match apply_intent(s, Intent::ExtractText).unwrap() {
+            Outcome::Text(t) => t,
+            _ => unreachable!(),
+        };
+        let (node, _start) = first_body_node(&s);
+
+        // offset 0 → no-op: text unchanged AND no undo unit pushed (revision unchanged).
+        let rev0 = s.doc.as_ref().unwrap().revision();
+        let before = text(&mut s);
+        match apply_intent(&mut s, Intent::DeleteBack { node, offset: 0 }).unwrap() {
+            Outcome::Edited { .. } => {}
+            _ => panic!("expected Edited"),
+        }
+        assert_eq!(text(&mut s), before, "delete-back at offset 0 changes nothing");
+        assert_eq!(s.doc.as_ref().unwrap().revision(), rev0, "offset-0 delete pushes no undo unit");
+
+        // Insert a sentinel char, then DeleteBack ending right after it removes exactly that scalar.
+        apply_intent(&mut s, Intent::InsertText { node, offset: 0, text: "Z".into() }).unwrap();
+        assert!(text(&mut s).contains('Z'), "sentinel inserted");
+        let count_before = text(&mut s).matches('Z').count();
+        match apply_intent(&mut s, Intent::DeleteBack { node, offset: 1 }).unwrap() {
+            Outcome::Edited { .. } => {}
+            _ => panic!("expected Edited"),
+        }
+        assert_eq!(text(&mut s).matches('Z').count(), count_before - 1, "delete-back removed the scalar");
+
+        // One undo reverts the single deletion (the 'Z' comes back).
+        match apply_intent(&mut s, Intent::Undo).unwrap() {
+            Outcome::Undone(c) => assert!(c),
+            _ => panic!("expected Undone"),
+        }
+        assert_eq!(text(&mut s).matches('Z').count(), count_before, "one undo reverts the deletion");
+    }
+
+    /// P0-3 contract: InsertText on a non-simple (structural: image/equation/ctrl/…) paragraph
+    /// returns the verbatim 'structural content cannot be edited in place' Err string — never panics.
+    /// The op-bus gates on `ParaSource.simple == false` (the parser sets it for any `<hp:p>` carrying
+    /// non-text children), so we build a NodeId'd paragraph whose source is marked non-simple.
+    #[test]
+    fn insert_text_on_structural_paragraph_errors_not_panics() {
+        use hwp_model::document::{Block, Inline, ParaSource, Paragraph, Run, Section};
+        use hwp_model::types::NodeId;
+
+        // A one-section doc whose only paragraph is marked structural (source.simple == false) + has
+        // a NodeId. Text content is irrelevant — the refusal triggers on the non-simple source flag.
+        let mut doc = hwp_model::document::SemanticDoc::default();
+        let para = Paragraph {
+            id: Some(NodeId(7)),
+            source: Some(ParaSource { simple: false, ..Default::default() }),
+            runs: vec![Run { content: vec![Inline::Text("그림".into())], ..Default::default() }],
+            ..Default::default()
+        };
+        doc.sections.push(Section { blocks: vec![Block::Paragraph(para)], ..Default::default() });
+        let mut s = Session { doc: Some(EditSession::new(doc)), ..Default::default() };
+
+        let err = match apply_intent(&mut s, Intent::InsertText { node: 7, offset: 0, text: "X".into() }) {
+            Err(e) => e,
+            Ok(_) => panic!("structural paragraph must refuse in-place edit"),
+        };
+        assert!(
+            err.contains("structural content") && err.contains("cannot be edited in place"),
+            "verbatim op-bus refusal surfaced: {err}"
+        );
     }
 
     #[test]

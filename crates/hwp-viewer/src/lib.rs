@@ -306,6 +306,7 @@ struct HitDto {
     section: usize,
     paraOrd: usize,
     inCell: bool,
+    paraLen: usize,
 }
 
 /// A caret rectangle in page (unscaled) coordinates. Scale by the SVG zoom factor on the frontend.
@@ -335,6 +336,7 @@ async fn hit_test(
                 section: h.section,
                 paraOrd: h.para_ord,
                 inCell: h.in_cell,
+                paraLen: h.para_len,
             })),
             _ => Err("unexpected outcome".into()),
         }
@@ -357,6 +359,54 @@ async fn caret_rect(
         let mut s = sess.lock().map_err(|_| "session poisoned")?;
         match apply_intent(&mut s, Intent::CaretRect { page, node, offset })? {
             Outcome::Caret(c) => Ok(c.map(|r| CaretDto { x: r.x, top: r.top, height: r.height })),
+            _ => Err("unexpected outcome".into()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+// ---- Interactive caret: in-place edit commands (typed Intent lane; same op-bus core as the MCP
+// ---- lane). The per-keystroke / IME-commit mutations the caret UI calls. Async/spawn_blocking like
+// ---- the other mutating commands; each is ONE undo unit (do_op) and returns the new page count so
+// ---- the frontend re-renders (reusing the invalidate() path), mirroring undo/redo/replace_text. ----
+
+/// Insert `text` at a char-offset caret inside one simple paragraph as ONE undo unit. Returns the
+/// new page count. On a structural / out-of-range target the op-bus error string is surfaced as an
+/// `Err` the UI toasts (no panic) — e.g. "paragraph N has structural content and cannot be edited in
+/// place". `node`/`offset`/`text` are already snake-free so Tauri binds them by exact JS key name.
+#[tauri::command]
+async fn insert_text(
+    node: u64,
+    offset: usize,
+    text: String,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<u32, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        match apply_intent(&mut s, Intent::InsertText { node, offset, text })? {
+            Outcome::Edited { pages } => Ok(pages),
+            _ => Err("unexpected outcome".into()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Delete the single char ENDING at `offset` (Backspace) as ONE undo unit; returns the new page
+/// count. `offset == 0` is a graceful no-op. Surfaces op-bus errors as an `Err` the UI toasts.
+#[tauri::command]
+async fn delete_back(
+    node: u64,
+    offset: usize,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<u32, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        match apply_intent(&mut s, Intent::DeleteBack { node, offset })? {
+            Outcome::Edited { pages } => Ok(pages),
             _ => Err("unexpected outcome".into()),
         }
     })
@@ -391,7 +441,9 @@ pub fn run() {
             find_text,
             replace_text,
             hit_test,
-            caret_rect
+            caret_rect,
+            insert_text,
+            delete_back
         ])
         .run(tauri::generate_context!())
         .expect("error while running tf-hwp viewer");
