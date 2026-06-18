@@ -2015,6 +2015,7 @@ dependencies = [
  "hwp-core",
  "hwp-mcp",
  "hwp-model",
+ "serde",
  "serde_json",
  "subtle",
  "tauri",

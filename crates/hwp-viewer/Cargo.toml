@@ -34,6 +34,7 @@ hwp-core = { workspace = true }
 hwp-mcp = { workspace = true }
 hwp-ai = { workspace = true }
 hwp-model = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 # A3 embedded control server uses pure std::net + these (already in the workspace lock):
 subtle = "2"

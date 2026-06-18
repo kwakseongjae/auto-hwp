@@ -3,7 +3,7 @@ import { createVirtualizer } from "@tanstack/solid-virtual";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { tinykeys } from "tinykeys";
-import { api } from "./api";
+import { api, type FindMatch } from "./api";
 import { sanitizeSvg } from "./sanitize";
 import { type Command } from "./commands";
 import { Palette } from "./Palette";
@@ -27,6 +27,19 @@ export default function App() {
   const [busyLabel, setBusyLabel] = createSignal<string | null>(null);
   // Per-page renders are async too; a subtle "loading…" badge shows when any page is in flight.
   const [rendering, setRendering] = createSignal(false);
+
+  // ---- Find / Replace bar state ----
+  // A docked top bar (⌘F to open, Esc to close). v1 backend scope: searches only the document's
+  // PARSED simple body paragraphs (NodeId-bearing) — appended/AI content, table cells, headers/
+  // footers, notes and cross-paragraph queries are NOT matched (surfaced in the bar's hint copy).
+  const [findOpen, setFindOpen] = createSignal(false);
+  const [findQuery, setFindQuery] = createSignal("");
+  const [replaceQuery, setReplaceQuery] = createSignal("");
+  const [caseSensitive, setCaseSensitive] = createSignal(false);
+  // `matches===null` = not searched yet; `[]` = searched, zero hits (drives the count label).
+  const [matches, setMatches] = createSignal<FindMatch[] | null>(null);
+  const [finding, setFinding] = createSignal(false);
+  let findInputRef!: HTMLInputElement;
 
   let scrollRef!: HTMLDivElement;
   const inflight = new Set<number>();
@@ -114,6 +127,60 @@ export default function App() {
     toast("info", "다시 실행");
   }
 
+  // ---- Find / Replace verbs ----
+  function openFind() {
+    if (pageCount() === 0) return;
+    setFindOpen(true);
+    // Focus + select the field on the next frame so ⌘F over an existing query re-targets it.
+    queueMicrotask(() => {
+      findInputRef?.focus();
+      findInputRef?.select();
+    });
+  }
+  function closeFind() {
+    setFindOpen(false);
+    setMatches(null);
+  }
+  // 찾기: count hits (read-only). Cheap, so a light inline spinner — not the blocking overlay.
+  async function doFind() {
+    const q = findQuery();
+    if (!q) {
+      setMatches(null);
+      return;
+    }
+    setFinding(true);
+    try {
+      setMatches(await api.findText(q, caseSensitive()));
+    } catch (e) {
+      toast("warn", `찾기 실패: ${e}`);
+    } finally {
+      setFinding(false);
+    }
+  }
+  // 바꾸기(all=false → first match) / 모두 바꾸기(all=true). Each is ONE undo unit; we reuse the
+  // exact invalidate() path (drop SVG cache + new page count) so the doc re-renders post-mutation.
+  async function doReplace(all: boolean) {
+    const q = findQuery();
+    if (!q || !canEdit()) return;
+    setBusyLabel(all ? "모두 바꾸는 중…" : "바꾸는 중…");
+    try {
+      const r = await api.replaceText(q, replaceQuery(), caseSensitive(), false, all);
+      invalidate(r.pages);
+      if (r.replaced > 0) {
+        toast("ok", `${r.replaced}개 바꿈`, [{ label: "실행취소", run: () => void doUndo() }]);
+        // Offsets shifted after a replace — re-run find so the count reflects the new doc.
+        await doFind();
+      } else {
+        toast("info", "바꿀 항목 없음");
+        setMatches([]);
+      }
+    } catch (e) {
+      toast("warn", `바꾸기 실패: ${e}`);
+    } finally {
+      setBusyLabel(null);
+    }
+  }
+
   const composerCtx = {
     applyContent: async (json: string) => {
       const n = await api.applyContent(json);
@@ -139,6 +206,7 @@ export default function App() {
       { id: "export", title: "HWPX로 내보내기 / 저장", group: "문서", keys: "⌘S", keywords: "export 내보내기 저장 save hwpx", disabled: !haveDoc, run: doExport },
       { id: "table", title: "표 추가 (문서 끝에)", group: "작성", keys: "⌘T", keywords: "table 표 추가 그리드", disabled: !edit, run: () => { setComposer("table"); } },
       { id: "ai", title: "AI 콘텐츠 제안", group: "작성", keys: "⌘.", keywords: "ai 제안 작성 propose", tone: "ai", disabled: !edit, run: () => { setComposer("ai"); } },
+      { id: "find", title: "찾기 / 바꾸기", group: "편집", keys: "⌘F", keywords: "find replace 찾기 바꾸기 검색 치환", disabled: !haveDoc, run: openFind },
       { id: "undo", title: "실행 취소", group: "편집", keys: "⌘Z", keywords: "undo 실행취소", disabled: !edit, run: doUndo },
       { id: "redo", title: "다시 실행", group: "편집", keys: "⌘⇧Z", keywords: "redo 다시실행", disabled: !edit, run: doRedo },
     ];
@@ -162,6 +230,10 @@ export default function App() {
       "$mod+s": (e) => {
         e.preventDefault();
         void doExport();
+      },
+      "$mod+f": (e) => {
+        e.preventDefault();
+        openFind();
       },
       "$mod+t": (e) => {
         e.preventDefault();
@@ -260,6 +332,120 @@ export default function App() {
         </div>
       </Show>
 
+      {/* Find / Replace bar (⌘F). Docked under the control strip, same overlay-toolbar look.
+          No caret/scroll-to-match geometry yet (next P1 piece) — so we DON'T fake a jump/highlight;
+          we honestly show a hit count + a few match snippets. Replace-all + count work fully. */}
+      <Show when={findOpen() && pageCount() > 0}>
+        <div class="flex shrink-0 flex-col gap-1.5 border-b border-black/10 bg-neutral-50/60 px-3 py-2 backdrop-blur-xl dark:border-white/10 dark:bg-neutral-800/50">
+          <div class="flex flex-wrap items-center gap-2">
+            <input
+              ref={findInputRef}
+              value={findQuery()}
+              onInput={(e) => {
+                setFindQuery(e.currentTarget.value);
+                setMatches(null); // query changed → stale count
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  closeFind();
+                } else if (e.key === "Enter") {
+                  e.preventDefault();
+                  void doFind();
+                }
+              }}
+              placeholder="찾을 내용"
+              class="w-48 rounded-md border border-black/10 bg-white px-2 py-1 text-sm outline-none focus:border-accent dark:border-white/10 dark:bg-neutral-900"
+            />
+            <input
+              value={replaceQuery()}
+              onInput={(e) => setReplaceQuery(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  closeFind();
+                }
+              }}
+              placeholder="바꿀 내용"
+              disabled={!canEdit()}
+              class="w-48 rounded-md border border-black/10 bg-white px-2 py-1 text-sm outline-none focus:border-accent disabled:opacity-40 dark:border-white/10 dark:bg-neutral-900"
+            />
+            <label class="flex cursor-pointer select-none items-center gap-1.5 text-xs text-neutral-600 dark:text-neutral-300">
+              <input
+                type="checkbox"
+                checked={caseSensitive()}
+                onChange={(e) => {
+                  setCaseSensitive(e.currentTarget.checked);
+                  setMatches(null); // option changed → stale count
+                }}
+                class="accent-accent"
+              />
+              대소문자 구분
+            </label>
+            <span class="mx-0.5 h-5 w-px bg-black/10 dark:bg-white/10" />
+            <button
+              onClick={() => void doFind()}
+              disabled={!findQuery() || finding()}
+              class="rounded-md px-2 py-1 text-sm text-neutral-700 hover:bg-neutral-200/70 disabled:opacity-35 dark:text-neutral-200 dark:hover:bg-neutral-700/60"
+            >
+              찾기
+            </button>
+            <button
+              onClick={() => void doReplace(false)}
+              disabled={!findQuery() || !canEdit() || !!busyLabel()}
+              title="문서의 첫 일치 항목을 바꿉니다"
+              class="rounded-md px-2 py-1 text-sm text-neutral-700 hover:bg-neutral-200/70 disabled:opacity-35 dark:text-neutral-200 dark:hover:bg-neutral-700/60"
+            >
+              바꾸기
+            </button>
+            <button
+              onClick={() => void doReplace(true)}
+              disabled={!findQuery() || !canEdit() || !!busyLabel()}
+              class="rounded-md px-2 py-1 text-sm text-neutral-700 hover:bg-neutral-200/70 disabled:opacity-35 dark:text-neutral-200 dark:hover:bg-neutral-700/60"
+            >
+              모두 바꾸기
+            </button>
+            <span class="flex-1" />
+            {/* honest status: spinner while finding, then a hit count (null = not searched yet) */}
+            <Show when={finding()}>
+              <span class="flex items-center gap-1.5 text-xs text-neutral-400">
+                <span class="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                찾는 중…
+              </span>
+            </Show>
+            <Show when={!finding() && matches() !== null}>
+              <span class="text-xs text-neutral-500 dark:text-neutral-400">
+                {matches()!.length > 0 ? `${matches()!.length}개 찾음` : "찾는 결과 없음"}
+              </span>
+            </Show>
+            <button
+              onClick={closeFind}
+              title="닫기 (Esc)"
+              class="rounded-md px-1.5 py-1 text-xs text-neutral-400 hover:bg-neutral-200/70 dark:hover:bg-neutral-700/60"
+            >
+              ✕
+            </button>
+          </div>
+          {/* No caret geometry yet → no scroll-to / in-page highlight. We surface a few snippet
+              previews instead of faking a jump (full highlight needs the P1 caret-geometry work). */}
+          <Show when={!finding() && matches() !== null && matches()!.length > 0}>
+            <div class="flex items-center gap-2 text-[11px] text-neutral-400">
+              <span class="shrink-0">위치</span>
+              <span class="truncate">
+                {matches()!
+                  .slice(0, 8)
+                  .map((m) => `${m.section + 1}-${m.block + 1}`)
+                  .join(", ")}
+                {matches()!.length > 8 ? " …" : ""}
+              </span>
+            </div>
+          </Show>
+          <p class="text-[11px] text-neutral-400">
+            본문의 단순 문단만 검색합니다 (표·머리말/꼬리말·각주, 추가한 콘텐츠, 문단 경계를 넘는 검색 제외).
+          </p>
+        </div>
+      </Show>
+
       <main ref={scrollRef} class="min-h-0 flex-1 overflow-auto p-6">
         <Show
           when={pageCount() > 0}
@@ -313,6 +499,7 @@ export default function App() {
         </Show>
         <span class="flex-1" />
         <span><kbd>⌘K</kbd> 명령</span>
+        <span><kbd>⌘F</kbd> 찾기</span>
         <span><kbd>⌘E</kbd> 내보내기</span>
         <span><kbd>⌘Z</kbd> 실행취소</span>
       </footer>

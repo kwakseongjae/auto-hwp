@@ -7,6 +7,10 @@
 
 use hwp_model::prelude::*;
 
+/// FIND / REPLACE engine: pure `find_matches` over the doc model + replace-op builders that the
+/// caller hands to [`EditSession::do_ops`] (replace-all = one undo unit). See [`find`].
+pub mod find;
+
 /// Schema version of the op vocabulary (UI and AI/MCP must agree).
 pub const OP_SCHEMA_VERSION: u32 = 1;
 

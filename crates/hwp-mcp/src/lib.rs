@@ -10,10 +10,28 @@
 pub mod server;
 
 use hwp_ops::EditSession;
+use serde::Serialize;
 use serde_json::{json, Value};
 
 /// MCP protocol revision we advertise (widely supported by current clients).
 pub const PROTOCOL_VERSION: &str = "2024-11-05";
+
+/// Serializable mirror of [`hwp_ops::find::Match`] for the typed/JSON boundary (`NodeId` is not
+/// `Serialize` in the model, so we expose its inner `u64`). Built via [`FindMatch::from`].
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct FindMatch {
+    pub node: u64,
+    pub start: usize,
+    pub len: usize,
+    pub section: usize,
+    pub block: usize,
+}
+
+impl From<&hwp_ops::find::Match> for FindMatch {
+    fn from(m: &hwp_ops::find::Match) -> Self {
+        FindMatch { node: m.node.0, start: m.start, len: m.len, section: m.section, block: m.block }
+    }
+}
 
 /// Server-side session: the currently-open document with its undo/redo history
 /// (mutated by `apply_content`; reverted by the `undo`/`redo` tools).
@@ -147,6 +165,34 @@ fn tools() -> Value {
             "name": "commit_proposal",
             "description": "Apply the pending proposal (from propose_content) to the document via the undoable op-bus. Errors if there is no pending proposal; reversible with undo.",
             "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "find_text",
+            "description": "Find occurrences of `query` in the open document's editable simple paragraphs (read-only). Searches top-level simple body paragraphs only (table cells / headers/footers / notes are out). Returns a count + one line per match.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Text to search for" },
+                    "case_sensitive": { "type": "boolean", "description": "Match case exactly (default false)" },
+                    "whole_word": { "type": "boolean", "description": "Match whole words only (default false)" }
+                },
+                "required": ["query"]
+            }
+        },
+        {
+            "name": "replace_text",
+            "description": "Replace `query` with `replacement` in the open document's editable simple paragraphs as ONE undo unit. With `all` true replaces every occurrence; otherwise only the first. Returns how many were replaced.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Text to search for" },
+                    "replacement": { "type": "string", "description": "Replacement text" },
+                    "case_sensitive": { "type": "boolean", "description": "Match case exactly (default false)" },
+                    "whole_word": { "type": "boolean", "description": "Match whole words only (default false)" },
+                    "all": { "type": "boolean", "description": "Replace all occurrences (default false = first only)" }
+                },
+                "required": ["query", "replacement"]
+            }
         }
     ])
 }
@@ -286,6 +332,47 @@ fn do_export(session: &Session, path: &str) -> Result<(usize, bool), String> {
     Ok((bytes.len(), hwp_core::validate_hwpx(&bytes).ok))
 }
 
+/// Find every match of `query` (read-only; no mutation, no rev bump). Reused by BOTH the typed
+/// `Intent::Find` lane and the `find_text` JSON tool so they can never drift.
+fn do_find(
+    session: &Session,
+    query: &str,
+    opts: hwp_ops::find::FindOptions,
+) -> Result<Vec<hwp_ops::find::Match>, String> {
+    let doc = session.doc.as_ref().ok_or("no document open (call open_document first)")?.doc();
+    Ok(hwp_ops::find::find_matches(doc, query, opts))
+}
+
+/// Replace `query` → `replacement` as ONE undo unit (replace-all when `all`, else the FIRST match).
+/// Returns the number replaced. Reused by `Intent::Replace` and the `replace_text` JSON tool.
+fn do_replace(
+    session: &mut Session,
+    query: &str,
+    replacement: &str,
+    opts: hwp_ops::find::FindOptions,
+    all: bool,
+) -> Result<usize, String> {
+    let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
+    // Read matches/build ops against an immutable borrow first; ops own their data, so the mutable
+    // `do_ops` borrow below is borrow-checker-safe.
+    let ops = if all {
+        hwp_ops::find::replace_all_ops(sess.doc(), query, replacement, opts)
+    } else {
+        match hwp_ops::find::find_matches(sess.doc(), query, opts).first() {
+            Some(m) => hwp_ops::find::replace_one_ops(sess.doc(), m, replacement),
+            None => Vec::new(),
+        }
+    };
+    // Count distinct matches replaced (robust against the op-builder's ops-per-match ratio).
+    let replaced = if all {
+        hwp_ops::find::find_count(sess.doc(), query, opts)
+    } else {
+        (!ops.is_empty()) as usize
+    };
+    sess.do_ops(&ops).map_err(|e| e.to_string())?; // one undo unit; no-op if empty
+    Ok(replaced)
+}
+
 /// A typed editor command/query — the GUI's mutation+query surface (no prose round-trips). The
 /// JSON `tools/*` lane (agents) is a separate transport; both drive the same op-bus core above.
 pub enum Intent {
@@ -303,6 +390,11 @@ pub enum Intent {
     Commit,
     /// Drop the pending proposal without applying it.
     DiscardProposal,
+    /// Read-only search of the open document's editable simple paragraphs.
+    Find { query: String, case_sensitive: bool, whole_word: bool },
+    /// Replace `query` → `replacement` as ONE undo unit. `all: true` = replace-all; `all: false` =
+    /// replace the FIRST match only.
+    Replace { query: String, replacement: String, case_sensitive: bool, whole_word: bool, all: bool },
 }
 
 /// The typed result of an [`Intent`].
@@ -319,6 +411,10 @@ pub enum Outcome {
     Proposed { rationale: String, preview: String },
     Committed { ops: usize },
     Discarded(bool),
+    /// Search results (read-only).
+    Found { matches: Vec<FindMatch> },
+    /// Replace result: number of occurrences replaced + the new page count (0 if no rhwp render).
+    Replaced { replaced: usize, pages: u32 },
 }
 
 /// Apply a typed [`Intent`] against the session, returning a typed [`Outcome`] (no string parsing).
@@ -367,6 +463,21 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
             Ok(Outcome::Committed { ops })
         }
         Intent::DiscardProposal => Ok(Outcome::Discarded(session.pending.take().is_some())),
+        Intent::Find { query, case_sensitive, whole_word } => {
+            let opts = hwp_ops::find::FindOptions { case_sensitive, whole_word };
+            let matches = do_find(session, &query, opts)?.iter().map(FindMatch::from).collect();
+            Ok(Outcome::Found { matches })
+        }
+        Intent::Replace { query, replacement, case_sensitive, whole_word, all } => {
+            let opts = hwp_ops::find::FindOptions { case_sensitive, whole_word };
+            let replaced = do_replace(session, &query, &replacement, opts, all)?;
+            // Live page count (0 when no rhwp render is available), mirroring other edit commands.
+            #[cfg(feature = "rhwp")]
+            let pages = page_count_u32(session).unwrap_or(0);
+            #[cfg(not(feature = "rhwp"))]
+            let pages = 0;
+            Ok(Outcome::Replaced { replaced, pages })
+        }
         Intent::PageCount => {
             #[cfg(feature = "rhwp")]
             {
@@ -465,6 +576,34 @@ fn call_tool(name: &str, args: &Value, session: &mut Session) -> Result<String, 
                 return Err("no document open (call open_document first)".into());
             }
             page_count_current(session)
+        }
+        "find_text" => {
+            let query = arg_str("query").ok_or("missing `query`")?;
+            let arg_bool = |k: &str| args.get(k).and_then(Value::as_bool).unwrap_or(false);
+            let opts = hwp_ops::find::FindOptions {
+                case_sensitive: arg_bool("case_sensitive"),
+                whole_word: arg_bool("whole_word"),
+            };
+            let matches = do_find(session, &query, opts)?;
+            let mut out = format!("{} match(es) for {query:?}", matches.len());
+            for m in &matches {
+                out.push_str(&format!(
+                    "\nsection {} block {} node {} @ char {} len {}",
+                    m.section, m.block, m.node.0, m.start, m.len
+                ));
+            }
+            Ok(out)
+        }
+        "replace_text" => {
+            let query = arg_str("query").ok_or("missing `query`")?;
+            let replacement = arg_str("replacement").ok_or("missing `replacement`")?;
+            let arg_bool = |k: &str| args.get(k).and_then(Value::as_bool).unwrap_or(false);
+            let opts = hwp_ops::find::FindOptions {
+                case_sensitive: arg_bool("case_sensitive"),
+                whole_word: arg_bool("whole_word"),
+            };
+            let replaced = do_replace(session, &query, &replacement, opts, arg_bool("all"))?;
+            Ok(format!("replaced {replaced} occurrence(s)"))
         }
         other => Err(format!("unknown tool: {other}")),
     }
@@ -700,6 +839,109 @@ mod tests {
         call("apply_content", json!({"content": content}), &mut s);
         let c = call("render_page", json!({"page": 0}), &mut s);
         assert_eq!(c["result"]["isError"], false, "render after edit: {c}");
+    }
+
+    #[test]
+    fn find_and_replace_typed_lane() {
+        // Searches the showcase's REAL parsed paragraphs (which carry NodeIds + are simple). Note:
+        // paragraphs appended via apply_content have `id: None`, so they are intentionally NOT
+        // searchable in v1 — find/replace operates on the existing editable body, the documented scope.
+        let mut s = Session::default();
+        apply_intent(&mut s, Intent::Open { path: showcase() }).unwrap();
+        let text = |s: &mut Session| match apply_intent(s, Intent::ExtractText).unwrap() {
+            Outcome::Text(t) => t,
+            _ => unreachable!(),
+        };
+        // '문서' appears twice in the showcase body (two different paragraphs).
+        let baseline = text(&mut s).matches("문서").count();
+        assert_eq!(baseline, 2, "showcase has two '문서' to search");
+
+        // Find: both occurrences, each len 2.
+        match apply_intent(
+            &mut s,
+            Intent::Find { query: "문서".into(), case_sensitive: false, whole_word: false },
+        )
+        .unwrap()
+        {
+            Outcome::Found { matches } => {
+                assert_eq!(matches.len(), 2, "two '문서' across the showcase body");
+                assert!(matches.iter().all(|m| m.len == 2));
+            }
+            _ => panic!("expected Found"),
+        }
+
+        // Replace-all → 2 replaced, then a SINGLE undo reverts the whole thing.
+        let replaced = match apply_intent(
+            &mut s,
+            Intent::Replace {
+                query: "문서".into(),
+                replacement: "파일".into(),
+                case_sensitive: false,
+                whole_word: false,
+                all: true,
+            },
+        )
+        .unwrap()
+        {
+            Outcome::Replaced { replaced, .. } => replaced,
+            _ => panic!("expected Replaced"),
+        };
+        assert_eq!(replaced, 2);
+        assert_eq!(text(&mut s).matches("파일").count(), 2, "both '문서' became '파일'");
+        assert_eq!(text(&mut s).matches("문서").count(), 0);
+        match apply_intent(&mut s, Intent::Undo).unwrap() {
+            Outcome::Undone(c) => assert!(c),
+            _ => panic!(),
+        }
+        assert_eq!(text(&mut s).matches("문서").count(), 2, "one undo reverts the whole replace-all");
+        assert_eq!(text(&mut s).matches("파일").count(), 0);
+    }
+
+    #[test]
+    fn replace_empty_query_is_noop_no_rev_bump() {
+        let mut s = Session::default();
+        apply_intent(&mut s, Intent::Open { path: showcase() }).unwrap();
+        let rev = s.doc.as_ref().unwrap().revision();
+        match apply_intent(
+            &mut s,
+            Intent::Replace {
+                query: "".into(),
+                replacement: "X".into(),
+                case_sensitive: false,
+                whole_word: false,
+                all: true,
+            },
+        )
+        .unwrap()
+        {
+            Outcome::Replaced { replaced, .. } => assert_eq!(replaced, 0),
+            _ => panic!("expected Replaced"),
+        }
+        assert_eq!(s.doc.as_ref().unwrap().revision(), rev, "empty replace pushes no undo unit");
+    }
+
+    #[test]
+    fn find_replace_json_tools() {
+        let mut s = Session::default();
+        let call = |name: &str, args: Value, s: &mut Session| {
+            handle(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name,"arguments":args}}), s)
+                .unwrap()
+        };
+        let text = |r: &Value| r["result"]["content"][0]["text"].as_str().unwrap().to_string();
+
+        call("open_document", json!({"path": showcase()}), &mut s);
+
+        // '문서' occurs twice in the showcase's existing (NodeId-bearing) paragraphs.
+        let f = call("find_text", json!({"query": "문서"}), &mut s);
+        assert_eq!(f["result"]["isError"], false, "{f}");
+        assert!(text(&f).contains("2 match"), "{}", text(&f));
+
+        let r = call("replace_text", json!({"query": "문서", "replacement": "파일", "all": true}), &mut s);
+        assert_eq!(r["result"]["isError"], false, "{r}");
+        assert!(text(&r).contains("replaced 2"), "{}", text(&r));
+        let after = text(&call("extract_text", json!({}), &mut s));
+        assert_eq!(after.matches("파일").count(), 2);
+        assert_eq!(after.matches("문서").count(), 0);
     }
 
     #[test]

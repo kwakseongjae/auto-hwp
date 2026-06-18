@@ -215,6 +215,78 @@ fn redo(sess: tauri::State<'_, SharedSession>) -> Result<u32, String> {
     Ok(pages(&mut s))
 }
 
+// ---- FIND / REPLACE (typed Intent lane; same op-bus core as the MCP `find_text`/`replace_text`) ----
+
+/// One search hit crossing the Tauri boundary (mirror of `hwp_mcp::FindMatch`). `node`/`start`/`len`
+/// are CHAR (Unicode-scalar) coordinates over the paragraph's concatenated run text.
+#[derive(serde::Serialize)]
+struct FindMatchDto {
+    node: u64,
+    start: usize,
+    len: usize,
+    section: usize,
+    block: usize,
+}
+
+/// Result of a replace: occurrences replaced + the live page count (so the frontend re-renders).
+#[derive(serde::Serialize)]
+struct ReplaceResult {
+    replaced: usize,
+    pages: u32,
+}
+
+/// Find occurrences of `query` in the open document's editable simple paragraphs (read-only; sync —
+/// find is cheap and does not serialize). Returns the matches for UI navigation/highlight.
+// camelCase params match the JS keys api.ts passes (Tauri binds by exact name).
+#[allow(non_snake_case)]
+#[tauri::command]
+fn find_text(
+    query: String,
+    caseSensitive: bool,
+    wholeWord: bool,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<Vec<FindMatchDto>, String> {
+    let mut s = sess.lock().map_err(|_| "session poisoned")?;
+    match apply_intent(
+        &mut s,
+        Intent::Find { query, case_sensitive: caseSensitive, whole_word: wholeWord },
+    )? {
+        Outcome::Found { matches } => Ok(matches
+            .into_iter()
+            .map(|m| FindMatchDto { node: m.node, start: m.start, len: m.len, section: m.section, block: m.block })
+            .collect()),
+        _ => Err("unexpected outcome".into()),
+    }
+}
+
+/// Replace `query` → `replacement` as ONE undo unit (replace-all when `all`, else the first match).
+/// Returns the count replaced + the new page count.
+#[allow(non_snake_case)]
+#[tauri::command]
+fn replace_text(
+    query: String,
+    replacement: String,
+    caseSensitive: bool,
+    wholeWord: bool,
+    all: bool,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<ReplaceResult, String> {
+    let mut s = sess.lock().map_err(|_| "session poisoned")?;
+    match apply_intent(
+        &mut s,
+        Intent::Replace {
+            query,
+            replacement,
+            case_sensitive: caseSensitive,
+            whole_word: wholeWord,
+            all,
+        },
+    )? {
+        Outcome::Replaced { replaced, pages } => Ok(ReplaceResult { replaced, pages }),
+        _ => Err("unexpected outcome".into()),
+    }
+}
+
 /// Build + run the viewer window. Manages the shared session + cached bytes, registers commands,
 /// and (in `setup`) spawns the A3 loopback control server so an external agent can drive this
 /// running instance.
@@ -238,7 +310,9 @@ pub fn run() {
             discard_proposal,
             ai_generate,
             undo,
-            redo
+            redo,
+            find_text,
+            replace_text
         ])
         .run(tauri::generate_context!())
         .expect("error while running tf-hwp viewer");
