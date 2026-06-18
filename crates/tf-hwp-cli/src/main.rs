@@ -106,6 +106,16 @@ enum Cmd {
         #[arg(long)]
         verify: bool,
     },
+    /// Visual self-verification: convert <in.hwp> → .hwpx, then render BOTH the original .hwp and
+    /// our converted .hwpx via rhwp into a side-by-side HTML — so you can eyeball conversion fidelity
+    /// independent of LibreOffice (and on equation-dense docs LibreOffice can't even load).
+    /// Needs `--features rhwp`.
+    VerifyConvert {
+        file: PathBuf,
+        /// Output HTML path.
+        #[arg(long, default_value = "verify.html")]
+        out: PathBuf,
+    },
     /// Edit an HWPX (append paragraphs) and export round-trip-safe HWPX. (No rhwp needed.)
     Edit {
         file: PathBuf,
@@ -166,6 +176,7 @@ fn run() -> Result<(), String> {
         Cmd::Render { file, page, out } => render(&file, page, &out)?,
         Cmd::View { file, out } => view(&file, &out)?,
         Cmd::Convert { file, out, verify } => convert(&file, out, verify)?,
+        Cmd::VerifyConvert { file, out } => verify_convert(&file, &out)?,
         Cmd::Edit { file, append, out, verify } => edit(&file, &append, &out, verify)?,
         Cmd::AiFill { file, instruction, provider, out, verify, dry_run } => {
             ai_fill(&file, &instruction, &provider, &out, verify, dry_run)?
@@ -483,6 +494,75 @@ align-items:center;gap:24px;font-family:sans-serif}}\
 #[cfg(not(feature = "rhwp"))]
 fn view(_file: &PathBuf, _out: &PathBuf) -> Result<(), String> {
     Err("`view` needs the rhwp bootstrap: build with `--features rhwp`".into())
+}
+
+#[cfg(feature = "rhwp")]
+fn verify_convert(file: &PathBuf, out: &PathBuf) -> Result<(), String> {
+    let bytes = read(file)?;
+    let (doc, converted) = hwp_core::open_as_hwpx(&bytes).map_err(|e| e.to_string())?;
+    let hwpx = hwp_core::serialize_hwpx(&doc).map_err(|e| e.to_string())?;
+
+    // Render every page of a doc via rhwp into a labeled column.
+    let column = |label: &str, b: &[u8]| -> Result<(u32, String), String> {
+        let n = hwp_core::page_count(b).map_err(|e| e.to_string())?;
+        let mut pages = String::new();
+        for p in 0..n {
+            let svg = hwp_core::render_page_svg(b, p).map_err(|e| e.to_string())?;
+            pages.push_str(&format!("<div class=\"page\">{svg}</div>"));
+        }
+        Ok((n, format!("<div class=\"col\"><h2>{label} · {n}쪽</h2>{pages}</div>")))
+    };
+
+    let (lpages, left) = column("원본 .hwp (rhwp)", &bytes)?;
+    let (rpages, right) = column("변환 .hwpx (rhwp)", &hwpx)?;
+
+    let html = format!(
+        "<!doctype html><html lang=\"ko\"><head><meta charset=\"utf-8\"><title>verify-convert — tf-hwp</title>\
+<style>body{{background:#525659;margin:0;font-family:sans-serif;color:#eee}}\
+.cols{{display:flex;gap:24px;align-items:flex-start;padding:24px}}\
+.col{{flex:1;display:flex;flex-direction:column;gap:16px;align-items:center;min-width:0}}\
+.col h2{{position:sticky;top:0;background:#333;width:100%;text-align:center;margin:0;padding:8px;font-size:14px;z-index:1}}\
+.page{{background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.4)}}\
+.page svg{{display:block;max-width:100%;height:auto}}</style></head>\
+<body><div class=\"cols\">{left}{right}</div></body></html>"
+    );
+    std::fs::write(out, &html).map_err(|e| e.to_string())?;
+    println!(
+        "verify-convert: {}{} → {} (원본 {lpages}쪽 | 변환 {rpages}쪽, rhwp 렌더)",
+        file.display(),
+        if converted { " [HWP5→HWPX]" } else { "" },
+        out.display()
+    );
+    if lpages != rpages {
+        println!(
+            "  ⚠ rhwp 쪽수 차이 {lpages}→{rpages}: 변환 .hwpx는 linesegarray(레이아웃 캐시)가 비어 있어 \
+rhwp가 페이지를 못 끊고 reflow/overflow합니다(내용은 보존). 깨끗한 레이아웃은 아래 LibreOffice 렌더로 확인하세요."
+        );
+    }
+
+    // ALSO emit LibreOffice+H2Orestart's render of the converted .hwpx — it RE-COMPUTES layout (no
+    // linesegarray needed), so it's the faithful clean render of our output. (Can't load
+    // equation-dense docs, which Hancom's own files also can't in LibreOffice.)
+    if hwp_oracle::soffice_available() {
+        let dir = out.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
+        let hwpx_path = dir.join("verify-converted.hwpx");
+        std::fs::write(&hwpx_path, &hwpx).map_err(|e| e.to_string())?;
+        match hwp_oracle::convert_to_pdf(&hwpx_path, &dir) {
+            Ok(pdf) => println!("  깨끗한 변환 렌더(LibreOffice): {}", pdf.display()),
+            Err(_) => println!("  (LibreOffice 변환 렌더 실패 — 수식 밀집 문서는 한컴 원본도 LibreOffice로 안 열림)"),
+        }
+        // The original, for a clean side reference too.
+        if let Ok(pdf) = hwp_oracle::convert_to_pdf(file, &dir) {
+            println!("  원본 렌더(LibreOffice): {}", pdf.display());
+        }
+    }
+    println!("  → HTML(rhwp, 내용 대조) + PDF(LibreOffice, 깔끔한 레이아웃)로 시각 검증하세요.");
+    Ok(())
+}
+
+#[cfg(not(feature = "rhwp"))]
+fn verify_convert(_file: &PathBuf, _out: &PathBuf) -> Result<(), String> {
+    Err("`verify-convert` needs the rhwp bootstrap: build with `--features rhwp`".into())
 }
 
 fn fidelity(file: Option<PathBuf>) -> Result<(), String> {
