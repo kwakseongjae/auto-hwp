@@ -283,6 +283,108 @@ mod spike_tests {
     }
 }
 
+// ---- Layout-engine oracle: our line-breaking + pagination vs Hancom's actual layout ----
+
+/// Per-document layout-fidelity score: OUR engine (`hwp-typeset`) vs **Hancom's actual layout** —
+/// the `<hp:lineseg>`s rhwp parses out of the original `.hwp`. This turns "is our line-breaking
+/// right?" into numbers we can iterate the approximate metrics against. Run it on an ORIGINAL `.hwp`
+/// (which carries Hancom-authored linesegs), not on our linesegarray-stripped conversion.
+#[derive(Clone, Debug, Default)]
+pub struct LayoutFidelity {
+    /// Pages Hancom laid out (rhwp `page_count`).
+    pub oracle_pages: u32,
+    /// Pages our `NaiveLayout` produced.
+    pub our_pages: usize,
+    /// Top-level body paragraphs compared (rhwp ↔ our, 1:1 in document order).
+    pub paragraphs: usize,
+    /// Paragraphs whose line count matches Hancom's exactly.
+    pub line_exact: usize,
+    /// Paragraphs within ±1 line of Hancom's.
+    pub line_within1: usize,
+    /// Σ Hancom line counts.
+    pub oracle_lines: usize,
+    /// Σ our line counts.
+    pub our_lines: usize,
+    /// Block-mix diagnostics (why pagination may diverge): tables, Σ table rows, anchored images,
+    /// equations, and the per-page body height (HWPUNIT, first section).
+    pub tables: usize,
+    pub table_rows: usize,
+    pub images: usize,
+    pub equations: usize,
+    pub body_height: i32,
+}
+
+#[cfg(feature = "rhwp")]
+pub fn layout_fidelity(bytes: &[u8]) -> Result<LayoutFidelity> {
+    use hwp_typeset::{layout_paragraph, ApproxFontMetrics, NaiveLayout};
+
+    let rdoc = rhwp::parse_document(bytes).map_err(|e| Error::Parse(e.to_string()))?;
+    let our = lift::parse_to_semantic(bytes)?;
+    let fonts = ApproxFontMetrics;
+
+    let mut f = LayoutFidelity {
+        oracle_pages: page_count(bytes).unwrap_or(0),
+        our_pages: NaiveLayout.layout(&our, &fonts)?.pages.len(),
+        ..Default::default()
+    };
+
+    if let Some(s0) = our.sections.first() {
+        f.body_height = s0.page.height - s0.page.margin_top - s0.page.margin_bottom;
+    }
+    for osec in &our.sections {
+        for b in &osec.blocks {
+            match b {
+                Block::Table(t) => {
+                    f.tables += 1;
+                    f.table_rows += t.rows;
+                }
+                Block::Paragraph(p) => {
+                    for run in &p.runs {
+                        for inl in &run.content {
+                            match inl {
+                                Inline::Image(_) => f.images += 1,
+                                Inline::Equation(_) => f.equations += 1,
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // The lift emits exactly one `Block::Paragraph` per rhwp top-level paragraph, in order (a pure
+    // object/table anchor still gets an empty paragraph first) — so the two streams zip 1:1.
+    for (rsec, osec) in rdoc.sections.iter().zip(our.sections.iter()) {
+        let body_w =
+            (osec.page.width - osec.page.margin_left - osec.page.margin_right).max(1) as f64;
+        let mut our_paras = osec.blocks.iter().filter_map(|b| match b {
+            Block::Paragraph(p) => Some(p),
+            _ => None,
+        });
+        for rp in &rsec.paragraphs {
+            let Some(op) = our_paras.next() else { break };
+            let oracle = rp.line_segs.len().max(1); // an empty paragraph still occupies one line
+            let ours = layout_paragraph(op, &our, body_w, &fonts).len();
+            f.paragraphs += 1;
+            f.oracle_lines += oracle;
+            f.our_lines += ours;
+            if ours == oracle {
+                f.line_exact += 1;
+            }
+            if ours.abs_diff(oracle) <= 1 {
+                f.line_within1 += 1;
+            }
+        }
+    }
+    Ok(f)
+}
+
+#[cfg(not(feature = "rhwp"))]
+pub fn layout_fidelity(_bytes: &[u8]) -> Result<LayoutFidelity> {
+    Err(Error::CapabilityUnavailable(NOT_WIRED))
+}
+
 #[cfg(not(feature = "rhwp"))]
 pub fn page_count(_bytes: &[u8]) -> Result<u32> {
     Err(Error::CapabilityUnavailable(NOT_WIRED))

@@ -87,6 +87,17 @@ impl LayoutEngine for NaiveLayout {
             for block in &sec.blocks {
                 match block {
                     Block::Paragraph(p) => {
+                        let ps = doc.para_shapes.get(p.para_shape);
+                        // "쪽 나누기 앞에서": force a page break before this paragraph (unless already
+                        // at the top of a fresh page).
+                        if ps.map(|s| s.page_break_before).unwrap_or(false) && vert > 0.0 {
+                            pages.push(new_page(page));
+                            vert = 0.0;
+                        }
+                        // 문단 위 간격 — Hancom adds it before the paragraph (suppressed at page top).
+                        if vert > 0.0 {
+                            vert += ps.map(|s| s.space_before).unwrap_or(0).max(0) as f64;
+                        }
                         let ratio = line_spacing_ratio(p, doc);
                         for ls in layout_paragraph(p, doc, body_w, fonts) {
                             if vert + ls.vert_size > body_h && vert > 0.0 {
@@ -97,16 +108,23 @@ impl LayoutEngine for NaiveLayout {
                             pages.last_mut().unwrap().lines.push(LineSeg { vert_pos: vert, ..ls });
                             vert += adv;
                         }
+                        // 문단 아래 간격.
+                        vert += ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;
                     }
-                    // A table is treated as one block of estimated height (rows × ~7.7mm) — good
-                    // enough for pagination accounting before real table layout lands.
+                    // Real table layout for pagination: height = Σ row heights, each row sized to
+                    // its tallest cell's laid-out content (cells break lines at an equal-split width).
                     Block::Table(t) => {
-                        let h = (t.rows.max(1) as f64) * 2200.0;
+                        let h = table_height(t, body_w, doc, fonts);
                         if vert + h > body_h && vert > 0.0 {
                             pages.push(new_page(page));
                             vert = 0.0;
                         }
                         vert += h;
+                        // A table taller than the body flows across pages (row-level break, approx).
+                        while vert > body_h {
+                            pages.push(new_page(page));
+                            vert -= body_h;
+                        }
                     }
                 }
             }
@@ -117,6 +135,53 @@ impl LayoutEngine for NaiveLayout {
 
 fn new_page(page: &PageSetup) -> PageLayout {
     PageLayout { width: page.width as f64, height: page.height as f64, lines: Vec::new() }
+}
+
+/// Vertical cell padding (HWPUNIT) — top+bottom default cell insets (~0.5mm each) plus a little
+/// row breathing room. Approximate; the per-cell margin override isn't modeled yet.
+const CELL_PAD: f64 = 600.0;
+
+/// Laid-out height of one block (HWPUNIT) at the given content width — paragraph (lines×spacing +
+/// 위/아래 간격) or a nested table (recursive). Drives table-row sizing + pagination accounting.
+fn block_height(b: &Block, doc: &SemanticDoc, width: f64, fonts: &dyn FontMetricsProvider) -> f64 {
+    match b {
+        Block::Paragraph(p) => {
+            let ps = doc.para_shapes.get(p.para_shape);
+            let sb = ps.map(|s| s.space_before).unwrap_or(0).max(0) as f64;
+            let sa = ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;
+            let ratio = line_spacing_ratio(p, doc);
+            let text: f64 = layout_paragraph(p, doc, width, fonts).iter().map(|l| l.vert_size * ratio).sum();
+            sb + text + sa
+        }
+        Block::Table(t) => table_height(t, width, doc, fonts),
+    }
+}
+
+/// Estimated height of a table (HWPUNIT): Σ row heights, each row = max content height of the cells
+/// occupying it (a row-spanning cell distributes its height evenly across the rows it covers).
+/// Cells break lines at an equal-split column width (`avail / cols × col_span`) — no per-column
+/// widths yet, but enough for faithful page accounting.
+pub fn table_height(t: &Table, avail_w: f64, doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> f64 {
+    if t.rows == 0 {
+        return 0.0;
+    }
+    let col_w = (avail_w / t.cols.max(1) as f64).max(1.0);
+    let mut row_h = vec![0.0f64; t.rows];
+    for c in &t.cells {
+        if !c.active {
+            continue;
+        }
+        let cw = (col_w * c.col_span.max(1) as f64).max(1.0);
+        let content: f64 =
+            c.blocks.iter().map(|b| block_height(b, doc, cw, fonts)).sum::<f64>() + CELL_PAD;
+        let span = c.row_span.max(1);
+        let per = content / span as f64;
+        let end = (c.row + span).min(t.rows);
+        for slot in row_h.iter_mut().take(end).skip(c.row) {
+            *slot = slot.max(per);
+        }
+    }
+    row_h.iter().sum()
 }
 
 /// Lay out a single paragraph into [`LineSeg`]s (vert_pos left at 0 — the caller stacks them). Greedy
@@ -139,9 +204,13 @@ pub fn layout_paragraph(p: &Paragraph, doc: &SemanticDoc, line_width: f64, fonts
     let font = plain_font();
     let adv = |i: usize| fonts.advance_width(&font, chars[i].0, chars[i].1);
 
+    // Tallest anchored object (image/equation) — an object paragraph is ONE line, but as tall as
+    // the object (so pagination accounts for a half-page image, not a 1000-unit text line).
+    let obj_h = object_height(p);
+
     if n == 0 {
-        // An empty paragraph still occupies one (empty) line.
-        return vec![mk_line(0, 1000, 0.0)];
+        // An empty paragraph still occupies one line — height = the object's if it anchors one.
+        return vec![mk_line(0, obj_h.max(1000), 0.0)];
     }
 
     let mut lines = Vec::new();
@@ -171,7 +240,33 @@ pub fn layout_paragraph(p: &Paragraph, doc: &SemanticDoc, line_width: f64, fonts
         lines.push(mk_line(start as u32, max_size, lw));
         start = line_end;
     }
+    // An inline object taller than the text bumps the line it sits on (approximated as the first).
+    if obj_h > 0 {
+        if let Some(first) = lines.first_mut() {
+            if obj_h as f64 > first.vert_size {
+                let h = obj_h as f64;
+                first.vert_size = h;
+                first.text_height = h;
+                first.baseline = h * BASELINE_RATIO;
+            }
+        }
+    }
     lines
+}
+
+/// Tallest anchored image/equation in the paragraph (HWPUNIT), or 0 if none.
+fn object_height(p: &Paragraph) -> i32 {
+    let mut h = 0;
+    for run in &p.runs {
+        for inl in &run.content {
+            match inl {
+                Inline::Image(img) => h = h.max(img.height),
+                Inline::Equation(eq) => h = h.max(eq.height),
+                _ => {}
+            }
+        }
+    }
+    h.max(0)
 }
 
 /// Sum of advances + max glyph size over `[a, b)`.
@@ -270,6 +365,45 @@ mod tests {
         let lines = layout_paragraph(&p, &doc, 5000.0, &ApproxFontMetrics);
         assert_eq!(lines.len(), 2, "wraps at a space, not mid-word");
         assert_eq!(lines[1].text_pos, 10, "line 2 starts at 'cccc' (after 'aaaa bbbb ')");
+    }
+
+    #[test]
+    fn table_height_sums_row_content() {
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape::default()); // size 1000
+        // 3-row × 1-col table, one short line per cell. Each row ≈ one 1000-unit line × 1.6 + CELL_PAD.
+        let mut t = Table { rows: 3, cols: 1, ..Default::default() };
+        for r in 0..3 {
+            t.cells.push(Cell {
+                row: r,
+                col: 0,
+                row_span: 1,
+                col_span: 1,
+                active: true,
+                blocks: vec![Block::Paragraph(para("셀"))],
+                ..Default::default()
+            });
+        }
+        let h = table_height(&t, 40000.0, &doc, &ApproxFontMetrics);
+        let per_row = 1000.0 * DEFAULT_LINESPACE + CELL_PAD;
+        assert!((h - 3.0 * per_row).abs() < 1.0, "3 rows × (line+pad): got {h}");
+    }
+
+    #[test]
+    fn page_break_before_forces_a_new_page() {
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape::default());
+        doc.para_shapes.push(ParaShape::default()); // index 0 = plain default
+        // ParaShape index 1 carries 쪽-나누기-앞에서.
+        doc.para_shapes.push(ParaShape { page_break_before: true, ..Default::default() });
+        let mut sec = Section::default();
+        sec.blocks.push(Block::Paragraph(para("first")));
+        let mut second = para("second");
+        second.para_shape = 1;
+        sec.blocks.push(Block::Paragraph(second));
+        doc.sections.push(sec);
+        let res = NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap();
+        assert_eq!(res.pages.len(), 2, "page-break-before splits two short paragraphs onto 2 pages");
     }
 
     #[test]

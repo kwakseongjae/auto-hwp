@@ -489,6 +489,7 @@ fn lift_text_color(c: u32) -> Color {
 /// left to inherit the base paraPr (a fixed-unit value emitted as PERCENT would distort layout);
 /// numbering/border-fill/head-type are deferred (not emitted yet).
 fn lift_para_shape(p: &RParaShape) -> ParaShape {
+    use rhwp::model::style::LineSpacingType as RLst;
     ParaShape {
         align: match p.alignment {
             Alignment::Left => HorizontalAlign::Left,
@@ -498,11 +499,22 @@ fn lift_para_shape(p: &RParaShape) -> ParaShape {
             Alignment::Split => HorizontalAlign::DistributeSpace,
             Alignment::Justify => HorizontalAlign::Justify,
         },
+        // Line spacing drives vertical advance (pagination); rhwp's resolver reads `line_spacing`
+        // for the percent value (e.g. 160). Map the type so the engine doesn't fall back to 160%.
+        line_spacing_type: match p.line_spacing_type {
+            RLst::Percent => LineSpacingType::Percent,
+            RLst::Fixed => LineSpacingType::Fixed,
+            RLst::SpaceOnly => LineSpacingType::BetweenLines,
+            RLst::Minimum => LineSpacingType::AtLeast,
+        },
+        line_spacing_value: p.line_spacing,
         left_margin: p.margin_left,
         right_margin: p.margin_right,
         indent: p.indent,
         space_before: p.spacing_before,
         space_after: p.spacing_after,
+        // attr1 bit 19 = "쪽 나누기 앞에서" (page-break-before) — needed for faithful pagination.
+        page_break_before: (p.attr1 >> 19) & 1 == 1,
         ..Default::default()
     }
 }
