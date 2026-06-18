@@ -287,6 +287,83 @@ fn replace_text(
     }
 }
 
+// ---- WYSIWYG caret: engine half (typed Intent lane; same op-bus/render cache as render_page) ----
+//
+// These are the COMMANDS the future interactive caret UI will call; the interactive half (caret
+// rendering, selection drag, Korean IME composition) is out of scope here. Both run on a
+// `spawn_blocking` worker (they parse/walk the layer tree) and reuse the session render cache, so
+// the geometry matches the SVG the view shows.
+
+/// The editable model target a click resolved to. `node`/`block` are null for a table-cell run or a
+/// doc without NodeIds (an unedited binary .hwp) — geometry is available, the editable target is not.
+/// `offset` is the caret position in PARAGRAPH chars (Unicode scalars).
+#[allow(non_snake_case)]
+#[derive(serde::Serialize)]
+struct HitDto {
+    node: Option<u64>,
+    block: Option<usize>,
+    offset: usize,
+    section: usize,
+    paraOrd: usize,
+    inCell: bool,
+}
+
+/// A caret rectangle in page (unscaled) coordinates. Scale by the SVG zoom factor on the frontend.
+#[derive(serde::Serialize)]
+struct CaretDto {
+    x: f64,
+    top: f64,
+    height: f64,
+}
+
+/// Map a page-space click `(x, y)` to an editable model target (or `null` for a click off any text).
+#[tauri::command]
+async fn hit_test(
+    page: u32,
+    x: f64,
+    y: f64,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<Option<HitDto>, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        match apply_intent(&mut s, Intent::HitTest { page, x, y })? {
+            Outcome::Hit(hit) => Ok(hit.map(|h| HitDto {
+                node: h.node,
+                block: h.block,
+                offset: h.offset,
+                section: h.section,
+                paraOrd: h.para_ord,
+                inCell: h.in_cell,
+            })),
+            _ => Err("unexpected outcome".into()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Map an editable model target (NodeId + paragraph char offset) to a page-space caret rectangle on
+/// `page` (or `null` if that paragraph doesn't render on the queried page).
+#[tauri::command]
+async fn caret_rect(
+    page: u32,
+    node: u64,
+    offset: usize,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<Option<CaretDto>, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        match apply_intent(&mut s, Intent::CaretRect { page, node, offset })? {
+            Outcome::Caret(c) => Ok(c.map(|r| CaretDto { x: r.x, top: r.top, height: r.height })),
+            _ => Err("unexpected outcome".into()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Build + run the viewer window. Manages the shared session + cached bytes, registers commands,
 /// and (in `setup`) spawns the A3 loopback control server so an external agent can drive this
 /// running instance.
@@ -312,7 +389,9 @@ pub fn run() {
             undo,
             redo,
             find_text,
-            replace_text
+            replace_text,
+            hit_test,
+            caret_rect
         ])
         .run(tauri::generate_context!())
         .expect("error while running tf-hwp viewer");

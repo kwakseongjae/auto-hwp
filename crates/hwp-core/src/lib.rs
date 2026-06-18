@@ -167,6 +167,14 @@ pub use hwp_rhwp::{layout_fidelity, LayoutFidelity};
 #[cfg(feature = "rhwp")]
 pub use hwp_rhwp::RenderCache;
 
+/// WYSIWYG caret geometry (engine half of click-to-edit): per-page glyph boxes, pure hit-test /
+/// caret-rect over them, and the stable-key↔NodeId resolver. See `hwp_rhwp` for the model + caveats.
+#[cfg(feature = "rhwp")]
+pub use hwp_rhwp::{
+    caret_rect_in_page, hit_test_page, node_to_section_para_ord, page_glyph_boxes, page_text_anchors,
+    parse_stable_key, resolve_key_to_node, CaretRect, GlyphBox, HitTarget, ParsedKey, TextAnchor,
+};
+
 #[cfg(test)]
 mod inplace_tests {
     use super::*;
@@ -744,6 +752,69 @@ mod inplace_tests {
             assert!(!s.can_undo(), "failed op pushes no snapshot");
             assert!(!s.doc().any_dirty(), "failed op leaves no dirty node");
             assert_eq!(serialize_hwpx(s.doc()).unwrap(), orig, "failed op is byte-identical to original");
+        }
+    }
+
+    /// REGRESSION (caret-engine adversarial review): the stable-key→NodeId resolver must map rhwp's
+    /// body `para:N` to the RIGHT paragraph on a doc whose footnote/endnote BODIES are flattened
+    /// (id=None) and interleaved among body paragraphs. The buggy resolver counted ALL
+    /// `Block::Paragraph`s → drift (proven: footnote-01 rhwp `para:9` → wrong NodeId, +3 by `para:14`)
+    /// → a click silently targets the wrong paragraph. This runs the PRODUCTION path (Engine::open +
+    /// page_text_anchors), the path the shipped showcase test did NOT exercise. We assert the resolved
+    /// paragraph CONTAINS the run's text (right paragraph) — not an exact char offset, since rhwp
+    /// counts note-ref/inline-object chars the model stores as 0-width inlines (offset divergence is a
+    /// separately-documented v1 limit; the paragraph must still be correct).
+    #[cfg(feature = "rhwp")]
+    #[test]
+    fn caret_resolver_aligns_on_note_bearing_doc() {
+        use hwp_model::prelude::*;
+        for fixture in ["footnote-01.hwpx", "form-01.hwpx"] {
+            let path = format!("{}/../../corpus/hwpx/{}", env!("CARGO_MANIFEST_DIR"), fixture);
+            let bytes = std::fs::read(&path).unwrap_or_else(|_| panic!("{fixture} in corpus/hwpx"));
+            let doc = Engine::open(&bytes).expect("open fixture");
+            let pages = page_count(&bytes).unwrap();
+            let (mut matched, mut mismatched) = (0usize, 0usize);
+            for page in 0..pages {
+                for a in page_text_anchors(&bytes, page).unwrap() {
+                    let Some(key) = a.stable_key.as_deref() else { continue };
+                    if a.text.trim().is_empty() {
+                        continue;
+                    }
+                    // Skip paragraph-head decorations (outline bullets ❏/❍, soft hyphen) — rhwp
+                    // emits them as char:0 text runs, but they come from the paraPr head shape, not
+                    // run content, so they are never in the model's Text. We test alignment on real
+                    // content runs (those carrying an alphanumeric/Hangul char).
+                    if !a.text.chars().any(|c| c.is_alphanumeric()) {
+                        continue;
+                    }
+                    let pk = parse_stable_key(key).expect("a well-formed key parses");
+                    if pk.cell.is_some() {
+                        continue; // cell paragraphs are unaddressed in v1
+                    }
+                    // section:1 note sentinels in a 1-section doc safely resolve to None → skip.
+                    let Some((node, block_idx)) = resolve_key_to_node(&doc, pk.section, pk.para) else {
+                        continue;
+                    };
+                    let Block::Paragraph(p) = &doc.sections[pk.section].blocks[block_idx] else {
+                        panic!("block_idx must point at a Paragraph");
+                    };
+                    assert_eq!(p.id, Some(node));
+                    let text: String = p
+                        .runs
+                        .iter()
+                        .flat_map(|r| &r.content)
+                        .filter_map(|i| if let Inline::Text(t) = i { Some(t.as_str()) } else { None })
+                        .collect();
+                    if text.contains(a.text.trim()) {
+                        matched += 1;
+                    } else {
+                        mismatched += 1;
+                        eprintln!("{fixture} key {key}: para {text:?} does NOT contain run {:?}", a.text);
+                    }
+                }
+            }
+            assert_eq!(mismatched, 0, "{fixture}: {mismatched} anchors resolved to the WRONG paragraph (alignment drift)");
+            assert!(matched > 0, "{fixture}: at least one body anchor resolved + matched");
         }
     }
 }

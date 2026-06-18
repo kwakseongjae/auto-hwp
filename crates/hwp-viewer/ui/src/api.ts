@@ -22,6 +22,21 @@ export type FindMatch = {
 /** Result of a replace: occurrences replaced + the new page count (re-render after). */
 export type ReplaceResult = { replaced: number; pages: number };
 
+/** WYSIWYG caret — the editable model target a click resolved to. `node`/`block` are null for a
+ *  table-cell run or a doc without NodeIds (an unedited binary .hwp): geometry is available, the
+ *  editable target is not. `offset` is the caret position in PARAGRAPH chars (Unicode scalars). */
+export type HitTarget = {
+  node: number | null;
+  block: number | null;
+  offset: number;
+  section: number;
+  paraOrd: number;
+  inCell: boolean;
+};
+
+/** WYSIWYG caret — a caret rectangle in page (unscaled) coordinates. Scale by the SVG zoom factor. */
+export type CaretRect = { x: number; top: number; height: number };
+
 /// Typed bindings to the Rust `Intent` command lane (crates/hwp-viewer/src/lib.rs). No prose
 /// parsing: each command returns a typed value the UI consumes directly.
 export const api = {
@@ -57,4 +72,12 @@ export const api = {
     wholeWord = false,
     all = false,
   ) => invoke<ReplaceResult>("replace_text", { query, replacement, caseSensitive, wholeWord, all }),
+  /** WYSIWYG caret (engine half) — map a page-space click to an editable model target (null = off any
+   *  text line). The interactive caret/selection/IME layer is built on top of this. */
+  hitTest: (page: number, x: number, y: number) =>
+    invoke<HitTarget | null>("hit_test", { page, x, y }),
+  /** WYSIWYG caret (engine half) — map a model target (NodeId + paragraph char offset) to a caret
+   *  rectangle on `page` (null if the paragraph doesn't render on that page). */
+  caretRect: (page: number, node: number, offset: number) =>
+    invoke<CaretRect | null>("caret_rect", { page, node, offset }),
 };

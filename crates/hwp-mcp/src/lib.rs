@@ -33,6 +33,29 @@ impl From<&hwp_ops::find::Match> for FindMatch {
     }
 }
 
+/// The model target a click resolved to (the editable half of the WYSIWYG caret). `node`/`block` are
+/// `None` for a click inside a table cell or on a doc whose paragraphs carry no NodeId (an unedited
+/// binary .hwp) — geometry is still available, but there is no editable target in v1. `offset` is the
+/// caret position in PARAGRAPH chars; `section`/`para_ord` index the geometry side.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct HitResult {
+    pub node: Option<u64>,
+    pub block: Option<usize>,
+    pub offset: usize,
+    pub section: usize,
+    pub para_ord: usize,
+    pub in_cell: bool,
+}
+
+/// A caret rectangle in page (unscaled) coordinates — the geometry half of the WYSIWYG caret. If the
+/// frontend zooms the SVG it must scale these by the same factor.
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct CaretRect {
+    pub x: f64,
+    pub top: f64,
+    pub height: f64,
+}
+
 /// Server-side session: the currently-open document with its undo/redo history
 /// (mutated by `apply_content`; reverted by the `undo`/`redo` tools).
 #[derive(Default)]
@@ -245,6 +268,95 @@ fn page_count_current(_session: &Session) -> Result<String, String> {
     Err("page_count needs a build with --features rhwp".into())
 }
 
+/// WYSIWYG caret — hit-test: map a page-space click `(x, y)` to an editable model target. Reuses the
+/// session render cache (the SAME parsed bytes the view renders), so the geometry matches the SVG.
+/// Resolves the run's stable key `(section, para_ord)` → NodeId against the LIVE editable doc
+/// (`session.doc.doc()`); `node`/`block` are `None` for a cell run or a doc without NodeIds (an
+/// unedited binary .hwp), in which case geometry is available but the editable target is not.
+#[cfg(feature = "rhwp")]
+fn hit_test_current(session: &mut Session, page: u32, x: f64, y: f64) -> Result<Option<HitResult>, String> {
+    ensure_render_bytes(session)?;
+    // Glyph boxes from the cached parse (clone the small result so the session borrow is released
+    // before we re-borrow `session.doc` for the resolver).
+    let boxes = {
+        let RenderState { bytes, cache } = &mut session.render;
+        let bytes = &bytes.as_ref().expect("ensured above").1;
+        cache.page_glyph_boxes(bytes, page).map_err(|e| e.to_string())?
+    };
+    let Some(hit) = hwp_core::hit_test_page(&boxes, x, y) else { return Ok(None) };
+    // Resolve to a NodeId against the live editable doc. Gated: cell runs AND unanchored runs (no
+    // stable_key — e.g. a note-body run with para_index=None) stay node:None in v1 so a click never
+    // mis-targets the first body paragraph.
+    let (node, block, offset) = if hit.in_cell || hit.stable_key.is_none() {
+        (None, None, hit.char_offset)
+    } else {
+        let doc = session.doc.as_ref().ok_or("no document open")?.doc();
+        match hwp_core::resolve_key_to_node(doc, hit.section, hit.para_ord) {
+            // Clamp the geometry offset to the paragraph's editable Text length: rhwp counts
+            // note-ref/inline-object chars the model stores as 0-width inlines, so the raw offset can
+            // exceed it — clamping keeps a future edit op in-bounds.
+            Some((id, bi)) => (Some(id.0), Some(bi), hit.char_offset.min(para_text_len(doc, hit.section, bi))),
+            None => (None, None, hit.char_offset),
+        }
+    };
+    Ok(Some(HitResult {
+        node,
+        block,
+        offset,
+        section: hit.section,
+        para_ord: hit.para_ord,
+        in_cell: hit.in_cell,
+    }))
+}
+
+/// Editable Text length (in chars) of the paragraph at `section`/`block` — used to clamp a
+/// geometry-derived caret offset that rhwp may report past the model's 0-width-inline-excluded text.
+#[cfg(feature = "rhwp")]
+fn para_text_len(doc: &hwp_model::document::SemanticDoc, section: usize, block: usize) -> usize {
+    use hwp_model::document::{Block, Inline};
+    match doc.sections.get(section).and_then(|s| s.blocks.get(block)) {
+        Some(Block::Paragraph(p)) => p
+            .runs
+            .iter()
+            .flat_map(|r| &r.content)
+            .filter_map(|i| if let Inline::Text(t) = i { Some(t.chars().count()) } else { None })
+            .sum(),
+        _ => 0,
+    }
+}
+#[cfg(not(feature = "rhwp"))]
+fn hit_test_current(_session: &mut Session, _page: u32, _x: f64, _y: f64) -> Result<Option<HitResult>, String> {
+    Err("hit_test needs a build with --features rhwp".into())
+}
+
+/// WYSIWYG caret — caret rect: map an editable model target (NodeId + paragraph char offset) to a
+/// page-space caret rectangle on `page`. Inverse of `hit_test_current`: NodeId → `(section, para_ord)`
+/// via a doc walk, then interpolate over the page's glyph boxes. `None` if that paragraph does not
+/// render on the queried page (the caller should query the page where it does).
+#[cfg(feature = "rhwp")]
+fn caret_rect_current(session: &mut Session, page: u32, node: u64, offset: usize) -> Result<Option<CaretRect>, String> {
+    // Resolve NodeId → (section, para_ord) on the live editable doc first (immutable borrow).
+    let (section, para_ord) = {
+        let doc = session.doc.as_ref().ok_or("no document open")?.doc();
+        match hwp_core::node_to_section_para_ord(doc, hwp_model::types::NodeId(node)) {
+            Some(sp) => sp,
+            None => return Ok(None),
+        }
+    };
+    ensure_render_bytes(session)?;
+    let boxes = {
+        let RenderState { bytes, cache } = &mut session.render;
+        let bytes = &bytes.as_ref().expect("ensured above").1;
+        cache.page_glyph_boxes(bytes, page).map_err(|e| e.to_string())?
+    };
+    Ok(hwp_core::caret_rect_in_page(&boxes, section, para_ord, offset)
+        .map(|r| CaretRect { x: r.x, top: r.top, height: r.height }))
+}
+#[cfg(not(feature = "rhwp"))]
+fn caret_rect_current(_session: &mut Session, _page: u32, _node: u64, _offset: usize) -> Result<Option<CaretRect>, String> {
+    Err("caret_rect needs a build with --features rhwp".into())
+}
+
 /// Handle one JSON-RPC message. Returns `Some(response)` for requests, `None` for notifications.
 pub fn handle(req: &Value, session: &mut Session) -> Option<Value> {
     let method = req.get("method").and_then(Value::as_str).unwrap_or("");
@@ -395,6 +507,11 @@ pub enum Intent {
     /// Replace `query` → `replacement` as ONE undo unit. `all: true` = replace-all; `all: false` =
     /// replace the FIRST match only.
     Replace { query: String, replacement: String, case_sensitive: bool, whole_word: bool, all: bool },
+    /// WYSIWYG caret (engine half) — map a page-space click to an editable model target.
+    HitTest { page: u32, x: f64, y: f64 },
+    /// WYSIWYG caret (engine half) — map a model target (NodeId + paragraph char offset) to a caret
+    /// rectangle on `page`.
+    CaretRect { page: u32, node: u64, offset: usize },
 }
 
 /// The typed result of an [`Intent`].
@@ -415,6 +532,10 @@ pub enum Outcome {
     Found { matches: Vec<FindMatch> },
     /// Replace result: number of occurrences replaced + the new page count (0 if no rhwp render).
     Replaced { replaced: usize, pages: u32 },
+    /// Hit-test result: the editable model target, or `None` for a click off any text line.
+    Hit(Option<HitResult>),
+    /// Caret-rect result: the caret geometry, or `None` if the target doesn't render on that page.
+    Caret(Option<CaretRect>),
 }
 
 /// Apply a typed [`Intent`] against the session, returning a typed [`Outcome`] (no string parsing).
@@ -498,6 +619,10 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
                 let _ = page;
                 Err("render needs a build with --features rhwp".into())
             }
+        }
+        Intent::HitTest { page, x, y } => Ok(Outcome::Hit(hit_test_current(session, page, x, y)?)),
+        Intent::CaretRect { page, node, offset } => {
+            Ok(Outcome::Caret(caret_rect_current(session, page, node, offset)?))
         }
     }
 }
@@ -942,6 +1067,62 @@ mod tests {
         let after = text(&call("extract_text", json!({}), &mut s));
         assert_eq!(after.matches("파일").count(), 2);
         assert_eq!(after.matches("문서").count(), 0);
+    }
+
+    /// WYSIWYG caret engine half through the typed Intent lane: open the showcase, hit-test a click
+    /// at a KNOWN glyph (the title run "형식 테스트 문서"), confirm it resolves to that paragraph's
+    /// NodeId, then round-trip the NodeId+offset back to a caret rect inside the page. Needs rhwp.
+    #[cfg(feature = "rhwp")]
+    #[test]
+    fn hit_test_and_caret_rect_intents_round_trip() {
+        let mut s = Session::default();
+        apply_intent(&mut s, Intent::Open { path: showcase() }).unwrap();
+
+        // Find the title run's box (page 0) to get a click point + its expected node.
+        let bytes = renderable_bytes(&s).unwrap();
+        let boxes = hwp_core::page_glyph_boxes(&bytes, 0).unwrap();
+        let title = boxes
+            .iter()
+            .find(|b| !b.in_cell && b.char_len > 0 && b.stable_key.is_some())
+            .expect("a body run on page 0");
+        let click_x = (title.x0 + title.x1) / 2.0;
+        let click_y = title.top + title.height / 2.0;
+
+        let hit = match apply_intent(&mut s, Intent::HitTest { page: 0, x: click_x, y: click_y }).unwrap() {
+            Outcome::Hit(h) => h.expect("a click on a glyph hits a target"),
+            _ => panic!("expected Hit"),
+        };
+        assert!(!hit.in_cell, "title is a body run");
+        let node = hit.node.expect("body run resolves to a NodeId");
+        assert_eq!(hit.section, title.section);
+        assert_eq!(hit.para_ord, title.para_ord);
+        // offset is within the run's char span.
+        assert!(hit.offset <= title.char_start + title.char_len);
+
+        // Round-trip: NodeId + offset → caret rect on the same page, inside page bounds.
+        let caret = match apply_intent(&mut s, Intent::CaretRect { page: 0, node, offset: hit.offset }).unwrap() {
+            Outcome::Caret(c) => c.expect("the target renders on page 0"),
+            _ => panic!("expected Caret"),
+        };
+        // The caret x equals the same interpolation hit_test used (within one char cell).
+        let cell = (title.x1 - title.x0) / title.char_len.max(1) as f64;
+        let want_x = title.x0 + cell * (hit.offset.saturating_sub(title.char_start)) as f64;
+        assert!((caret.x - want_x).abs() < cell + 1e-6, "caret x {} ~ {want_x}", caret.x);
+        assert_eq!(caret.top, title.top);
+        assert!(caret.height > 0.0);
+    }
+
+    /// Non-rhwp honesty: the caret intents report the capability gate (the default workspace build
+    /// compiles without rhwp). This always compiles; the arm differs by feature.
+    #[test]
+    fn caret_intents_gated_without_rhwp() {
+        let mut s = Session::default();
+        apply_intent(&mut s, Intent::Open { path: showcase() }).unwrap();
+        let r = apply_intent(&mut s, Intent::HitTest { page: 0, x: 0.0, y: 0.0 });
+        #[cfg(not(feature = "rhwp"))]
+        assert!(r.is_err(), "hit_test errors without rhwp");
+        #[cfg(feature = "rhwp")]
+        let _ = r; // with rhwp it's a valid (possibly None) result
     }
 
     #[test]
