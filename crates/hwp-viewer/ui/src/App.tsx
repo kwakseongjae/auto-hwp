@@ -4,6 +4,7 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { tinykeys } from "tinykeys";
 import { api } from "./api";
+import { sanitizeSvg } from "./sanitize";
 import { type Command } from "./commands";
 import { Palette } from "./Palette";
 import { Composer, type ComposerMode } from "./Composer";
@@ -21,6 +22,11 @@ export default function App() {
   // Authoring is only safe on an editable (HWPX) doc — a view-only .hwp must be exported first.
   const canEdit = () => pageCount() > 0 && editable();
   const [composer, setComposer] = createSignal<ComposerMode>(null);
+  // Heavy work (open/export) runs on a Rust spawn_blocking worker; show a blocking overlay while it
+  // runs so a tens-of-MB file reads as "working", not a hang. `busyLabel` doubles as the on/off flag.
+  const [busyLabel, setBusyLabel] = createSignal<string | null>(null);
+  // Per-page renders are async too; a subtle "loading…" badge shows when any page is in flight.
+  const [rendering, setRendering] = createSignal(false);
 
   let scrollRef!: HTMLDivElement;
   const inflight = new Set<number>();
@@ -38,13 +44,17 @@ export default function App() {
   async function ensurePage(i: number) {
     if (svgCache()[i] !== undefined || inflight.has(i)) return;
     inflight.add(i);
+    setRendering(true);
     try {
       const svg = await api.renderPage(i);
-      setSvgCache((c) => ({ ...c, [i]: svg }));
+      // Sanitize once, on ingest: rhwp-produced SVG is untrusted (a malicious .hwp could embed
+      // <script>/on*/<foreignObject>) and is injected via innerHTML below.
+      setSvgCache((c) => ({ ...c, [i]: sanitizeSvg(svg) }));
     } catch (e) {
       toast("warn", `렌더 실패(${i + 1}쪽): ${e}`);
     } finally {
       inflight.delete(i);
+      setRendering(inflight.size > 0);
     }
   }
   function invalidate(n: number, scrollTo = 0) {
@@ -57,6 +67,7 @@ export default function App() {
   async function doOpen() {
     const path = await openDialog({ filters: [{ name: "HWP/HWPX", extensions: ["hwpx", "hwp"] }] });
     if (typeof path !== "string") return;
+    setBusyLabel("문서 여는 중…");
     try {
       const r = await api.openDoc(path);
       setDocName(path.split("/").pop() ?? path);
@@ -75,16 +86,21 @@ export default function App() {
       }
     } catch (e) {
       toast("warn", `열기 실패: ${e}`);
+    } finally {
+      setBusyLabel(null);
     }
   }
   async function doExport() {
     if (pageCount() === 0) return;
     const path = await saveDialog({ defaultPath: "export.hwpx", filters: [{ name: "HWPX", extensions: ["hwpx"] }] });
     if (typeof path !== "string") return;
+    setBusyLabel("내보내는 중…");
     try {
       toast("ok", await api.exportHwpx(path));
     } catch (e) {
       toast("warn", `내보내기 실패: ${e}`);
+    } finally {
+      setBusyLabel(null);
     }
   }
   async function doUndo() {
@@ -202,7 +218,7 @@ export default function App() {
   const Sep = () => <span class="mx-1 h-5 w-px bg-black/10 dark:bg-white/10" />;
 
   return (
-    <div class="flex h-full flex-col bg-neutral-100 text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100">
+    <div class="relative flex h-full flex-col bg-neutral-100 text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100">
       <header
         data-tauri-drag-region
         class="flex h-11 shrink-0 items-center gap-2 border-b border-black/10 bg-neutral-50/70 pl-20 pr-3 backdrop-blur-xl dark:border-white/10 dark:bg-neutral-800/60"
@@ -289,11 +305,27 @@ export default function App() {
 
       <footer class="flex items-center gap-3 border-t border-black/10 px-4 py-1.5 text-xs text-neutral-500 dark:border-white/10 dark:text-neutral-400">
         <span>{pageCount() > 0 ? `${pageCount()}쪽` : "준비됨"}</span>
+        <Show when={rendering()}>
+          <span class="flex items-center gap-1.5 text-neutral-400">
+            <span class="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            렌더 중…
+          </span>
+        </Show>
         <span class="flex-1" />
         <span><kbd>⌘K</kbd> 명령</span>
         <span><kbd>⌘E</kbd> 내보내기</span>
         <span><kbd>⌘Z</kbd> 실행취소</span>
       </footer>
+
+      {/* Blocking overlay during heavy open/export so a large file reads as "working", not a hang. */}
+      <Show when={busyLabel()}>
+        <div class="absolute inset-0 z-50 grid place-items-center bg-black/20 backdrop-blur-sm dark:bg-black/40">
+          <div class="flex items-center gap-3 rounded-lg bg-neutral-50/90 px-5 py-3 text-sm shadow-lg ring-1 ring-black/10 dark:bg-neutral-800/90 dark:ring-white/10">
+            <span class="h-4 w-4 animate-spin rounded-full border-2 border-neutral-400 border-t-transparent" />
+            <span class="text-neutral-700 dark:text-neutral-200">{busyLabel()}</span>
+          </div>
+        </div>
+      </Show>
 
       <Palette open={paletteOpen()} onOpenChange={setPaletteOpen} commands={commands()} />
       <Composer mode={composer()} onClose={() => setComposer(null)} ctx={composerCtx} />

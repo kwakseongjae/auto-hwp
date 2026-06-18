@@ -9,11 +9,13 @@
 pub mod server;
 
 use serde_json::{json, Value};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// Shared op-bus session (the open document), mutated by `apply_content`/`export_hwpx` and by the
 /// embedded A3 control server — so the window renders the LIVE edited document, not a stale copy.
-pub type SharedSession = Mutex<hwp_mcp::Session>;
+/// `Arc` so the heavy commands can clone a handle out of `State` and move it into a
+/// `spawn_blocking` worker, keeping the parse/serialize/render off the async/IPC thread.
+pub type SharedSession = Arc<Mutex<hwp_mcp::Session>>;
 
 /// Call an MCP tool through the shared op-bus dispatch ([`hwp_mcp::handle`]) — the single mutation
 /// surface. Returns the tool's text on success, or its error text (MCP `isError`).
@@ -43,47 +45,60 @@ fn pages(s: &mut hwp_mcp::Session) -> u32 {
     }
 }
 
+// The heavy commands (parse/serialize/render) run on a `spawn_blocking` worker so the webview/event
+// loop stays responsive on tens-of-MB files; the `Mutex` lock is taken INSIDE the worker (cloning the
+// `Arc` out of `State` first), never on the async runtime thread.
 #[tauri::command]
-fn open_doc(path: String, sess: tauri::State<'_, SharedSession>) -> Result<Value, String> {
-    let mut s = sess.lock().map_err(|_| "session poisoned")?;
-    let original = path.clone();
-    // accepts .hwp (view) and .hwpx; surface the 2-tier capability (editable) + format for the chip.
-    let (format, editable) = match apply_intent(&mut s, Intent::Open { path })? {
-        Outcome::Opened { format, editable, .. } => (format, editable),
-        _ => return Err("unexpected outcome".into()),
-    };
+async fn open_doc(path: String, sess: tauri::State<'_, SharedSession>) -> Result<Value, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        let original = path.clone();
+        // accepts .hwp (view) and .hwpx; surface the 2-tier capability (editable) + format for the chip.
+        let (format, editable) = match apply_intent(&mut s, Intent::Open { path })? {
+            Outcome::Opened { format, editable, .. } => (format, editable),
+            _ => return Err("unexpected outcome".into()),
+        };
 
-    // Auto-convert a binary .hwp: save an editable `.hwpx` beside the original so the user gets a
-    // round-trip-safe copy to work in. Best-effort — a write failure (e.g. read-only folder) must
-    // NOT break opening the view, which keeps rendering the faithful native .hwp until an edit.
-    let mut converted_path = Value::Null;
-    if format.starts_with("HWP5") {
-        let hwpx = std::path::Path::new(&original).with_extension("hwpx");
-        if hwpx.as_os_str() != std::path::Path::new(&original).as_os_str() {
-            let dest = hwpx.to_string_lossy().into_owned();
-            if let Ok(Outcome::Exported { open_safe: true, .. }) =
-                apply_intent(&mut s, Intent::Export { path: dest.clone() })
-            {
-                converted_path = json!(dest);
+        // Auto-convert a binary .hwp: save an editable `.hwpx` beside the original so the user gets a
+        // round-trip-safe copy to work in. Best-effort — a write failure (e.g. read-only folder) must
+        // NOT break opening the view, which keeps rendering the faithful native .hwp until an edit.
+        let mut converted_path = Value::Null;
+        if format.starts_with("HWP5") {
+            let hwpx = std::path::Path::new(&original).with_extension("hwpx");
+            if hwpx.as_os_str() != std::path::Path::new(&original).as_os_str() {
+                let dest = hwpx.to_string_lossy().into_owned();
+                if let Ok(Outcome::Exported { open_safe: true, .. }) =
+                    apply_intent(&mut s, Intent::Export { path: dest.clone() })
+                {
+                    converted_path = json!(dest);
+                }
             }
         }
-    }
 
-    Ok(json!({
-        "pages": pages(&mut s),
-        "editable": editable,
-        "format": format,
-        "convertedPath": converted_path,
-    }))
+        Ok(json!({
+            "pages": pages(&mut s),
+            "editable": editable,
+            "format": format,
+            "convertedPath": converted_path,
+        }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn render_page(page: u32, sess: tauri::State<'_, SharedSession>) -> Result<String, String> {
-    let mut s = sess.lock().map_err(|_| "session poisoned")?;
-    match apply_intent(&mut s, Intent::Render { page })? {
-        Outcome::Rendered(svg) => Ok(svg),
-        _ => Err("unexpected outcome".into()),
-    }
+async fn render_page(page: u32, sess: tauri::State<'_, SharedSession>) -> Result<String, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        match apply_intent(&mut s, Intent::Render { page })? {
+            Outcome::Rendered(svg) => Ok(svg),
+            _ => Err("unexpected outcome".into()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Current page count of the live document (used by the frontend to re-render after edits).
@@ -102,14 +117,19 @@ fn apply_content(content: String, sess: tauri::State<'_, SharedSession>) -> Resu
 }
 
 #[tauri::command]
-fn export_hwpx(path: String, sess: tauri::State<'_, SharedSession>) -> Result<String, String> {
-    let mut s = sess.lock().map_err(|_| "session poisoned")?;
-    match apply_intent(&mut s, Intent::Export { path })? {
-        Outcome::Exported { bytes, open_safe } => {
-            Ok(format!("{bytes} bytes · editor-open-safety {}", if open_safe { "OK" } else { "FAIL" }))
+async fn export_hwpx(path: String, sess: tauri::State<'_, SharedSession>) -> Result<String, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        match apply_intent(&mut s, Intent::Export { path })? {
+            Outcome::Exported { bytes, open_safe } => {
+                Ok(format!("{bytes} bytes · editor-open-safety {}", if open_safe { "OK" } else { "FAIL" }))
+            }
+            _ => Err("unexpected outcome".into()),
         }
-        _ => Err("unexpected outcome".into()),
-    }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Dry-run AI content into a preview (rationale + per-op diff) WITHOUT mutating the document.
@@ -224,10 +244,10 @@ pub fn run() {
         .expect("error while running tf-hwp viewer");
 }
 
-/// Lock in the invariant the A3 server relies on: the session is shared across threads ONLY behind
-/// `SharedSession` (a `Mutex`), so that is the type that must be `Send + Sync`. The inner `Session`
-/// need only be `Send` — its render cache (engine seam 1) holds a non-`Sync` parsed document, which
-/// is safe behind the `Mutex`.
+/// Lock in the invariant the A3 server (and the `spawn_blocking` workers) rely on: the session is
+/// shared across threads ONLY behind `SharedSession` (an `Arc<Mutex<_>>`), so that is the type that
+/// must be `Send + Sync`. The inner `Session` need only be `Send` — its render cache (engine seam 1)
+/// holds a non-`Sync` parsed document, which is safe behind the `Mutex`.
 const _: fn() = || {
     fn assert_send_sync<T: Send + Sync + 'static>() {}
     assert_send_sync::<SharedSession>();

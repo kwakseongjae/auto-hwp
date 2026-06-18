@@ -219,7 +219,7 @@ fn ai_apply(file: &PathBuf, content: &PathBuf, out: &PathBuf, verify: bool) -> R
     }
     let doc = session.into_doc();
     let out_bytes = hwp_core::serialize_hwpx(&doc).map_err(|e| e.to_string())?;
-    std::fs::write(out, &out_bytes).map_err(|e| e.to_string())?;
+    hwp_core::atomic_write(out, &out_bytes).map_err(|e| e.to_string())?;
     let report = hwp_core::validate_hwpx(&out_bytes);
     println!(
         "ai-apply: {} block(s) → {} op(s) → {} ({} bytes)",
@@ -355,7 +355,7 @@ fn ai_fill(
     session.do_ops(&proposal.ops).map_err(|e| e.to_string())?;
     let doc = session.into_doc();
     let out_bytes = hwp_core::serialize_hwpx(&doc).map_err(|e| e.to_string())?;
-    std::fs::write(out, &out_bytes).map_err(|e| e.to_string())?;
+    hwp_core::atomic_write(out, &out_bytes).map_err(|e| e.to_string())?;
     let report = hwp_core::validate_hwpx(&out_bytes);
     println!(
         "\ncommitted (+{} op) → {} ({} bytes)",
@@ -392,7 +392,7 @@ fn convert(file: &PathBuf, out: Option<PathBuf>, verify: bool) -> Result<(), Str
     }
 
     let out_bytes = hwp_core::serialize_hwpx(&doc).map_err(|e| e.to_string())?;
-    std::fs::write(&out_path, &out_bytes).map_err(|e| e.to_string())?;
+    hwp_core::atomic_write(&out_path, &out_bytes).map_err(|e| e.to_string())?;
     let report = hwp_core::validate_hwpx(&out_bytes);
     println!("{} → {} ({} bytes)", file.display(), out_path.display(), out_bytes.len());
     println!("editor-open-safety: {}", if report.ok { "OK ✓" } else { "FAIL ✗" });
@@ -427,7 +427,7 @@ fn edit(file: &PathBuf, append: &[String], out: &PathBuf, verify: bool) -> Resul
             .map_err(|e| e.to_string())?;
     }
     let out_bytes = hwp_core::serialize_hwpx(&doc).map_err(|e| e.to_string())?;
-    std::fs::write(out, &out_bytes).map_err(|e| e.to_string())?;
+    hwp_core::atomic_write(out, &out_bytes).map_err(|e| e.to_string())?;
     let report = hwp_core::validate_hwpx(&out_bytes);
     println!(
         "edited (+{} paragraph(s)) → {} ({} bytes)",

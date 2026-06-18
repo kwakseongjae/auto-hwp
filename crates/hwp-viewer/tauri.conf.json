@@ -16,7 +16,7 @@
     }
   },
   "app": {
-    "withGlobalTauri": true,
+    "withGlobalTauri": false,
     "windows": [
       {
         "title": "tf-hwp viewer",
@@ -35,11 +35,38 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; img-src 'self' data: asset: https://asset.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'"
     }
   },
   "bundle": {
-    "active": false,
-    "icon": ["icons/icon.png"]
+    "active": true,
+    "targets": ["app", "dmg"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "fileAssociations": [
+      {
+        "name": "HWP Document",
+        "description": "Hancom HWP document",
+        "ext": ["hwp"],
+        "role": "Viewer",
+        "mimeType": "application/x-hwp"
+      },
+      {
+        "name": "HWPX Document",
+        "description": "Hancom HWPX (OWPML) document",
+        "ext": ["hwpx"],
+        "role": "Editor",
+        "mimeType": "application/hwp+zip"
+      }
+    ],
+    "macOS": {
+      "signingIdentity": "-",
+      "minimumSystemVersion": "11.0"
+    }
   }
 }

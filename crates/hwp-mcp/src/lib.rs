@@ -281,7 +281,8 @@ fn do_apply_content(session: &mut Session, json: &str) -> Result<(usize, usize),
 fn do_export(session: &Session, path: &str) -> Result<(usize, bool), String> {
     let doc = session.doc.as_ref().ok_or("no document open (call open_document first)")?.doc();
     let bytes = hwp_core::serialize_hwpx(doc).map_err(|e| e.to_string())?;
-    std::fs::write(path, &bytes).map_err(|e| format!("write {path}: {e}"))?;
+    // Crash-safe: temp+fsync+rename so a mid-write crash never corrupts the user's original file.
+    hwp_core::atomic_write(std::path::Path::new(path), &bytes).map_err(|e| format!("write {path}: {e}"))?;
     Ok((bytes.len(), hwp_core::validate_hwpx(&bytes).ok))
 }
 

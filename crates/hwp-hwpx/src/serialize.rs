@@ -519,7 +519,13 @@ fn patch_section_xml(orig: &[u8], sec: &Section, table_ref: Option<&str>, plan: 
                 let orig = &original[src.span.0..src.span.1];
                 // Simple paragraph → rebuild runs. Structural paragraph → keep the body verbatim
                 // and patch only the open tag (SetParaPr/ApplyStyle; body edits are refused upstream).
-                let xml = if src.simple {
+                // DEFENSE-IN-DEPTH: `reemit_paragraph` keeps only `Inline::Text`, so any verbatim
+                // `Inline::Raw` (shape/chart/OLE/textbox) it sees would be SILENTLY dropped. The
+                // `simple` flag is meant to exclude such paragraphs, but it's a parse-time proxy
+                // decoupled from the actual run content — so guard the rebuild on Raw directly and
+                // keep the body byte-verbatim (open-tag-only) when any Raw is present, never lose it.
+                let has_raw = p.runs.iter().flat_map(|r| &r.content).any(|i| matches!(i, Inline::Raw(_)));
+                let xml = if src.simple && !has_raw {
                     reemit_paragraph(orig, p, plan)
                 } else {
                     reemit_paragraph_open_only(orig, p, plan)
@@ -658,6 +664,9 @@ fn patch_section_xml(orig: &[u8], sec: &Section, table_ref: Option<&str>, plan: 
 /// (preserves id/paraPrIDRef/styleIDRef/pageBreak/… attrs), and rebuild the run content from the
 /// AST. Each run references a synthesized charPr if it was re-formatted (`char_shape` interned),
 /// else its original `charPrIDRef`. Simple paragraphs have no `<hp:linesegarray>` to preserve.
+/// CONTRACT: only `Inline::Text` survives here (other inlines are filtered out below), so the
+/// caller MUST keep `Inline::Raw`-bearing paragraphs off this path (see `patch_section_xml`) or
+/// the verbatim object would be silently dropped.
 /// Patch a `<hp:p …>` open tag's `paraPrIDRef`/`styleIDRef` for a SetParaPr/ApplyStyle edit. The
 /// tag is rewritten ONLY when the paragraph carries a synthesized para_shape or a named style — a
 /// runs-only edit (SetCharPr/InsertText/DeleteRange) leaves it byte-identical to the original.
@@ -1439,6 +1448,58 @@ mod tests {
         assert!(crate::export::validate_open_safety(&out).ok);
         // emit an artifact for oracle + visual cross-check (harmless side effect).
         let _ = std::fs::write(std::env::temp_dir().join("inplace-edit.hwpx"), &out);
+    }
+
+    /// P0 safety: an edited paragraph carrying `Inline::Raw` (a verbatim-preserved shape/chart/OLE/
+    /// textbox) must NEVER be silently dropped by the in-place re-emit. `reemit_paragraph` keeps
+    /// only `Inline::Text`, so the re-emit decision guards on Raw directly and routes a Raw-bearing
+    /// paragraph through the open-tag-only path — keeping its body bytes (where the Raw object
+    /// lives) verbatim. We model the Raw as carrying the paragraph's own original body bytes (its
+    /// real provenance) and assert those survive the round-trip, even though `source.simple` is
+    /// left `true` so the guard — not the parse-time `simple` proxy — is what saves the object.
+    #[test]
+    fn raw_bearing_edited_paragraph_is_preserved_not_dropped() {
+        let mut doc = parse_semantic(&showcase()).unwrap();
+        let orig_section = {
+            let pkg = Package::open(&showcase()).unwrap();
+            String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap()
+        };
+
+        // Find a simple, in-place-editable paragraph, capture its ORIGINAL body bytes, and replace
+        // its AST runs with a single `Inline::Raw` carrying exactly those bytes — the faithful
+        // shape of a Raw object that lives in the source span. `source.simple` stays true on
+        // purpose: without the guard, `reemit_paragraph` would run and drop the Raw silently.
+        let sec = doc.sections.get_mut(0).unwrap();
+        let mut raw_body: Option<String> = None;
+        for b in sec.blocks.iter_mut() {
+            if let Block::Paragraph(p) = b {
+                let Some(src) = p.source.as_ref() else { continue };
+                if !src.simple || p.runs.is_empty() {
+                    continue;
+                }
+                let para = &orig_section[src.span.0..src.span.1];
+                let body = &para[para.find('>').unwrap() + 1..];
+                raw_body = Some(body.to_string());
+                p.runs = vec![Run {
+                    char_shape: 0,
+                    char_ref: None,
+                    content: vec![Inline::Raw(RawPart { tag: "hp:run".into(), bytes: body.as_bytes().to_vec() })],
+                }];
+                p.dirty.mark();
+                break;
+            }
+        }
+        let raw_body = raw_body.expect("found a simple paragraph to carry an Inline::Raw");
+        sec.dirty.mark();
+
+        let out = serialize(&doc).unwrap();
+        let new_section = {
+            let pkg = Package::open(&out).unwrap();
+            String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap()
+        };
+        // The Raw object's bytes survive verbatim — they were NOT silently dropped on re-emit.
+        assert!(new_section.contains(&raw_body), "Inline::Raw object preserved verbatim, not dropped");
+        assert!(crate::export::validate_open_safety(&out).ok);
     }
 
     /// Phase 3: SetParaPr re-points a paragraph at a synthesized paraPr; the kept-verbatim open

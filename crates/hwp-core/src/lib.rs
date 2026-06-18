@@ -90,6 +90,56 @@ pub fn validate_hwpx(bytes: &[u8]) -> SafetyReport {
     hwp_hwpx::HwpxWriter.validate_open_safety(bytes)
 }
 
+/// Crash-safe file write: never leave a half-written document where the user's original was.
+///
+/// We write `bytes` into a sibling temp file in the SAME directory as the (symlink-resolved) target
+/// (so the final `rename` is an atomic intra-filesystem swap — a cross-device move would copy,
+/// defeating the guarantee), `fsync` the data to disk, then `rename` over the target. A crash before
+/// the rename leaves the original untouched; after it you get the new content — never a torn file.
+/// On overwrite we copy the existing file's permissions onto the temp first, so the fresh-inode
+/// rename does not reset mode to the umask default (which would silently widen access). A symlinked
+/// path is resolved so we replace the link's target, preserving the link. The temp name carries the
+/// pid + a process-local counter so a save never overwrites another's temp; a crash between create
+/// and rename can still leave an orphan `.tmp` dotfile (harmless), and two saves racing on the same
+/// target are last-rename-wins (still never torn). The parent dir is fsync'd best-effort for rename
+/// durability.
+pub fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    // Resolve through a symlink so we replace the link's TARGET (preserving the link), not the link
+    // itself. canonicalize fails for a not-yet-existing target (first save) — then write at `path`.
+    let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+
+    let dir = target.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| std::path::Path::new("."));
+    let stem = target.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let tmp = dir.join(format!(".{stem}.tmp.{}.{n}", std::process::id()));
+
+    // Write + fsync into the temp file in its own scope so the handle is dropped before the rename.
+    {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+    }
+    // Preserve the existing file's permissions on overwrite — a fresh-inode rename would otherwise
+    // reset mode to the umask default (e.g. 0o600 → 0o644), silently widening access.
+    if let Ok(meta) = std::fs::metadata(&target) {
+        let _ = std::fs::set_permissions(&tmp, meta.permissions());
+    }
+    // Atomic within a filesystem (old-or-new, never torn); clean up the temp if the swap fails.
+    std::fs::rename(&tmp, &target).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })?;
+    // Best-effort: fsync the directory entry so the rename itself survives a power loss.
+    if let Ok(d) = std::fs::File::open(dir) {
+        let _ = d.sync_all();
+    }
+    Ok(())
+}
+
 // ---- rhwp bootstrap render path (feature `rhwp`) ----
 // Faithful "원본 그대로" view via the vendored rhwp, in-process. The trait-based
 // parse→typeset→render pipeline supersedes this as our own engine matures.
@@ -617,6 +667,53 @@ mod inplace_tests {
         assert!(s.redo());
         let after_redo = serialize_hwpx(s.doc()).unwrap();
         assert_eq!(after_redo, edited, "redo is byte-identical to the edited output");
+    }
+
+    /// Atomic save: `atomic_write` lands the FULL content at the target and leaves no temp file
+    /// behind on success — and overwriting an existing file replaces it wholesale (no partial mix).
+    #[test]
+    fn atomic_write_writes_full_content_and_leaves_no_temp() {
+        let dir = std::env::temp_dir().join(format!("tfhwp_atomic_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("doc.hwpx");
+
+        // Pre-seed the target with old content to prove the rename replaces, not appends.
+        std::fs::write(&target, b"OLD-SHORTER").unwrap();
+
+        let payload = vec![0xABu8; 64 * 1024];
+        super::atomic_write(&target, &payload).unwrap();
+
+        assert_eq!(std::fs::read(&target).unwrap(), payload, "full new content present");
+
+        // No `.doc.hwpx.tmp.*` sibling survives a successful write.
+        let leftover = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .any(|e| e.file_name().to_string_lossy().contains(".tmp."));
+        assert!(!leftover, "no temp file left behind on success");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Overwriting an existing file must NOT widen its permissions — the fresh-inode rename copies
+    /// the old mode forward, so an owner-only (0o600) document does not silently become 0o644.
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_preserves_permissions_on_overwrite() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("tfhwp_atomic_perm_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("secret.hwpx");
+
+        std::fs::write(&target, b"old").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        super::atomic_write(&target, b"new content").unwrap();
+
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "owner-only mode is preserved across overwrite (got {mode:o})");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Phase 1: a failed op (range spanning a non-simple para) leaves the session pristine —
