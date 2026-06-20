@@ -1,0 +1,25 @@
+[package]
+name = "hwp-jsx"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Bidirectional codec between the canonical SemanticDoc and the JSX-content + CSS-design project projection (PIVOT M0)."
+
+[dependencies]
+hwp-model = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Optional, off by default: only to exercise the codec against the RICH rhwp-lift path (.hwp →
+# SemanticDoc with real notes/images/equations/fields/per-script fonts/merged cells) in tests.
+# The lift has NO shaper, so this stays headless. `cargo test -p hwp-jsx` (default) skips it.
+hwp-rhwp = { workspace = true, optional = true }
+
+[features]
+# Round-trip witnesses on the rich .hwp corpus via the rhwp lift (needs the rhwp submodule).
+rhwp = ["dep:hwp-rhwp", "hwp-rhwp/rhwp"]
+
+[dev-dependencies]
+hwp-hwpx = { workspace = true }

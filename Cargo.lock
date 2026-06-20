@@ -1949,6 +1949,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hwp-jsx"
+version = "0.0.1"
+dependencies = [
+ "hwp-hwpx",
+ "hwp-model",
+ "hwp-rhwp",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "hwp-mcp"
 version = "0.0.1"
 dependencies = [
@@ -4936,6 +4947,7 @@ dependencies = [
  "hwp-fidelity",
  "hwp-hwpx",
  "hwp-ingest",
+ "hwp-jsx",
  "hwp-model",
  "hwp-ops",
  "hwp-oracle",

@@ -1,6 +1,6 @@
 //! tf-hwp CLI. Phase-0 runnable surface: `detect`, `info`, `extract-text`, `oracle`.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
@@ -121,6 +121,32 @@ enum Cmd {
     /// paragraph line-count match %). The measurable oracle for the layout engine. Needs
     /// `--features rhwp`; run on an ORIGINAL .hwp (which carries Hancom's linesegs).
     LayoutCheck { file: PathBuf },
+    /// PIVOT M0: project an HWPX into a JSX(content)+CSS(design) project directory
+    /// (project.json, document.jsx, sections/, styles/document.css, assets/). HWPX-only.
+    OpenProject {
+        file: PathBuf,
+        /// Output project directory.
+        #[arg(long)]
+        out_dir: PathBuf,
+    },
+    /// PIVOT M0: apply ONE CSS-only AI-routing op (CssSetDecl) to a project dir, proving
+    /// content/design separation — only styles/document.css is re-written; the .jsx are untouched.
+    EditOp {
+        /// Project directory (written by `open-project`).
+        proj: PathBuf,
+        /// Target node id (e.g. "n1"), or a class ("c1"/"p1") via --class.
+        #[arg(long)]
+        node: Option<String>,
+        /// Target a CSS class directly (e.g. "c1").
+        #[arg(long)]
+        class: Option<String>,
+        /// CSS property (e.g. "font-size").
+        #[arg(long)]
+        prop: String,
+        /// CSS value (e.g. "14pt").
+        #[arg(long)]
+        value: String,
+    },
     /// Edit an HWPX (append paragraphs) and export round-trip-safe HWPX. (No rhwp needed.)
     Edit {
         file: PathBuf,
@@ -183,6 +209,10 @@ fn run() -> Result<(), String> {
         Cmd::Convert { file, out, verify } => convert(&file, out, verify)?,
         Cmd::VerifyConvert { file, out } => verify_convert(&file, &out)?,
         Cmd::LayoutCheck { file } => layout_check(&file)?,
+        Cmd::OpenProject { file, out_dir } => open_project(&file, &out_dir)?,
+        Cmd::EditOp { proj, node, class, prop, value } => {
+            edit_op(&proj, node, class, &prop, &value)?
+        }
         Cmd::Edit { file, append, out, verify } => edit(&file, &append, &out, verify)?,
         Cmd::AiFill { file, instruction, provider, out, verify, dry_run } => {
             ai_fill(&file, &instruction, &provider, &out, verify, dry_run)?
@@ -413,6 +443,57 @@ fn convert(file: &PathBuf, out: Option<PathBuf>, verify: bool) -> Result<(), Str
             Err(e) => println!("verify: ORACLE REJECTS IT ✗ ({e})"),
         }
     }
+    Ok(())
+}
+
+fn open_project(file: &PathBuf, out_dir: &Path) -> Result<(), String> {
+    let bytes = read(file)?;
+    if hwp_core::Engine::detect(&bytes) != SourceFormat::Hwpx {
+        return Err("open-project operates on HWPX (.hwpx) for M0.".into());
+    }
+    let doc = hwp_hwpx::parse::parse_semantic(&bytes).map_err(|e| e.to_string())?;
+    let proj = hwp_jsx::emit(&doc);
+    // Self-check the M0 invariant before writing (fail loud if the projection is lossy).
+    let back = hwp_jsx::parse(&proj).map_err(|e| e.to_string())?;
+    if !hwp_jsx::equality::doc_value_eq(&doc, &back) {
+        return Err("round-trip invariant FAILED for this file (projection is lossy)".into());
+    }
+    hwp_jsx::write_project_dir(&proj, out_dir).map_err(|e| e.to_string())?;
+    println!(
+        "open-project: {} → {} ({} section(s), {} CSS rule(s), {} asset(s)) [round-trip OK ✓]",
+        file.display(),
+        out_dir.display(),
+        proj.sections.len(),
+        proj.styles.rules.len(),
+        proj.assets.len()
+    );
+    Ok(())
+}
+
+fn edit_op(
+    proj_dir: &Path,
+    node: Option<String>,
+    class: Option<String>,
+    prop: &str,
+    value: &str,
+) -> Result<(), String> {
+    use hwp_jsx::op::{css_set_decl, CssSetDecl, CssTarget};
+    let mut proj = hwp_jsx::read_project_dir(proj_dir).map_err(|e| e.to_string())?;
+    let target = match (node, class) {
+        (Some(n), _) => CssTarget::Node(n),
+        (None, Some(c)) => CssTarget::Class(c),
+        (None, None) => return Err("provide --node <id> or --class <name>".into()),
+    };
+    let sel = css_set_decl(&mut proj, &CssSetDecl { target, prop: prop.into(), value: value.into() })
+        .map_err(|e| e.to_string())?;
+    // Dirty-only re-emit: rewrite ONLY styles/document.css; .jsx files stay byte-identical on disk.
+    let css = hwp_jsx::css::emit_css(&proj.styles);
+    std::fs::write(proj_dir.join("styles/document.css"), &css)
+        .map_err(|e| format!("write css: {e}"))?;
+    println!(
+        "edit-op: 🎨 {} {{ {prop}: {value} }} (CSS only) → styles/document.css rewritten; .jsx untouched",
+        sel.render()
+    );
     Ok(())
 }
 
