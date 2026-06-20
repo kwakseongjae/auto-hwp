@@ -129,6 +129,15 @@ enum Cmd {
         #[arg(long)]
         out_dir: PathBuf,
     },
+    /// PIVOT M1: render a document to ONE self-contained .html the browser lays out (semantic-
+    /// reflow, framing B). `.hwpx` works in the default build; `.hwp` needs `--features rhwp`.
+    /// Open the output in any browser — your HWP as a clean web page. Doubles as the HTML export.
+    ExportHtml {
+        file: PathBuf,
+        /// Output HTML path.
+        #[arg(long, short, default_value = "out.html")]
+        out: PathBuf,
+    },
     /// PIVOT M0: apply ONE CSS-only AI-routing op (CssSetDecl) to a project dir, proving
     /// content/design separation — only styles/document.css is re-written; the .jsx are untouched.
     EditOp {
@@ -210,6 +219,7 @@ fn run() -> Result<(), String> {
         Cmd::VerifyConvert { file, out } => verify_convert(&file, &out)?,
         Cmd::LayoutCheck { file } => layout_check(&file)?,
         Cmd::OpenProject { file, out_dir } => open_project(&file, &out_dir)?,
+        Cmd::ExportHtml { file, out } => export_html(&file, &out)?,
         Cmd::EditOp { proj, node, class, prop, value } => {
             edit_op(&proj, node, class, &prop, &value)?
         }
@@ -443,6 +453,22 @@ fn convert(file: &PathBuf, out: Option<PathBuf>, verify: bool) -> Result<(), Str
             Err(e) => println!("verify: ORACLE REJECTS IT ✗ ({e})"),
         }
     }
+    Ok(())
+}
+
+fn export_html(file: &PathBuf, out: &Path) -> Result<(), String> {
+    let bytes = read(file)?;
+    // Engine::open handles both: .hwpx parse (default build) + .hwp lift (needs --features rhwp).
+    let doc = hwp_core::Engine::open(&bytes).map_err(|e| e.to_string())?;
+    let proj = hwp_jsx::emit(&doc);
+    let title = file.file_stem().map(|s| s.to_string_lossy().into_owned());
+    let html = hwp_export::emit_html(&proj, &hwp_export::HtmlOptions { title });
+    std::fs::write(out, &html).map_err(|e| format!("write {}: {e}", out.display()))?;
+    println!(
+        "wrote {} ({} KB) — open it in any browser (semantic-reflow; not pixel-identical to 한글).",
+        out.display(),
+        html.len() / 1024
+    );
     Ok(())
 }
 

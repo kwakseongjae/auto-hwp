@@ -25,6 +25,7 @@ hwp-ops = { workspace = true }
 hwp-ai = { workspace = true }
 hwp-core = { workspace = true }
 hwp-jsx = { workspace = true }
+hwp-export = { workspace = true }
 hwp-oracle = { workspace = true }
 hwp-fidelity = { path = "../hwp-fidelity" }
 clap = { workspace = true }

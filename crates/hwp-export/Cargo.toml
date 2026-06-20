@@ -1,0 +1,13 @@
+[package]
+name = "hwp-export"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Export the JSX+CSS projection to web-native formats — M1: a standalone self-contained HTML page the browser renders (semantic-reflow). PDF/docx to follow."
+
+[dependencies]
+hwp-model = { workspace = true }
+hwp-jsx = { workspace = true }

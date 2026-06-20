@@ -38,6 +38,7 @@ hwp-oracle = { path = "crates/hwp-oracle" }
 hwp-core = { path = "crates/hwp-core" }
 hwp-mcp = { path = "crates/hwp-mcp" }
 hwp-jsx = { path = "crates/hwp-jsx" }
+hwp-export = { path = "crates/hwp-export" }
 
 [profile.release]
 opt-level = 3

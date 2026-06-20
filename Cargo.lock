@@ -1922,6 +1922,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "hwp-export"
+version = "0.0.1"
+dependencies = [
+ "hwp-jsx",
+ "hwp-model",
+]
+
+[[package]]
 name = "hwp-fidelity"
 version = "0.0.1"
 dependencies = [
@@ -4944,6 +4952,7 @@ dependencies = [
  "clap",
  "hwp-ai",
  "hwp-core",
+ "hwp-export",
  "hwp-fidelity",
  "hwp-hwpx",
  "hwp-ingest",
