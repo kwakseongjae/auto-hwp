@@ -150,15 +150,38 @@ pub enum AiBlock {
 }
 
 /// A table cell: either a plain string, or an object with merge spans / bold / shade.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 pub enum AiCell {
     Text(String),
     Rich(AiCellObj),
 }
 
+// LENIENT deserialize: LLMs (esp. smaller models) often emit a cell as a bare number/bool/null
+// instead of a string. Coerce any scalar → Text so one odd cell never fails the whole edit (the
+// user-facing "안 됨"); objects → Rich; arrays → empty text. This is the robustness fix for tables.
+impl<'de> Deserialize<'de> for AiCell {
+    fn deserialize<D>(d: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde_json::Value;
+        match Value::deserialize(d)? {
+            Value::String(s) => Ok(AiCell::Text(s)),
+            Value::Number(n) => Ok(AiCell::Text(n.to_string())),
+            Value::Bool(b) => Ok(AiCell::Text(b.to_string())),
+            Value::Null => Ok(AiCell::Text(String::new())),
+            v @ Value::Object(_) => {
+                serde_json::from_value(v).map(AiCell::Rich).map_err(serde::de::Error::custom)
+            }
+            Value::Array(_) => Ok(AiCell::Text(String::new())),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AiCellObj {
+    #[serde(default)]
     pub text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub col_span: Option<usize>,
@@ -331,5 +354,24 @@ mod tests {
         assert_eq!(ops.len(), 4);
         assert!(matches!(ops[0], Op::AppendRichParagraph { .. }));
         assert!(matches!(ops[3], Op::AppendRichTable { .. }));
+    }
+
+    #[test]
+    fn ai_cell_is_lenient_about_scalar_cells() {
+        // LLMs emit cells as bare numbers / bool / null / missing-text objects — all must parse
+        // (coerced to text), not fail the whole table (the user-facing "안 됨").
+        let json = r#"{"blocks":[{"type":"table","header":["순번","값","여부"],
+            "rows":[[1, "텍스트", true], [2, null, {"col_span":2}]]}]}"#;
+        let content = parse_content(json).expect("scalar cells must parse leniently");
+        let ops = compile_to_ops(&content);
+        assert!(matches!(ops[0], Op::AppendRichTable { .. }));
+        // a number cell became "1", null became "", the object-without-text became "" (span kept)
+        if let AiBlock::Table { rows, .. } = &content.blocks[0] {
+            assert!(matches!(&rows[0][0], AiCell::Text(t) if t == "1"));
+            assert!(matches!(&rows[1][1], AiCell::Text(t) if t.is_empty()));
+            assert!(matches!(&rows[1][2], AiCell::Rich(o) if o.col_span == Some(2)));
+        } else {
+            panic!("expected a table block");
+        }
     }
 }
