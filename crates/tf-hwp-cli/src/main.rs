@@ -70,6 +70,24 @@ enum Cmd {
         #[arg(long)]
         dry_run: bool,
     },
+    /// AI chat-edit ("vibe docs"): the LLM sees the doc as an anchored [s/b] outline and proposes
+    /// targeted edits (insert table/image/heading near an anchor, shade a column, delete a block).
+    /// Applied via the op-bus → export. Output format by extension: .html (browser) or .hwpx.
+    AiEdit {
+        file: PathBuf,
+        /// What to do, in natural language (e.g. "목차 아래에 표 만들어줘", "표의 좌측열을 헤더 색으로").
+        #[arg(long)]
+        instruction: String,
+        /// Provider: auto | mock | anthropic | local.
+        #[arg(long, default_value = "auto")]
+        provider: String,
+        /// Output path. `.html` → standalone HTML (vibe-docs view); otherwise round-trip-safe HWPX.
+        #[arg(long, default_value = "out.hwpx")]
+        out: PathBuf,
+        /// Preview the proposed edits (rationale + per-op diff) and STOP — do not write output.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Manage the stored Anthropic BYOK key in the OS keychain (`--features ai`).
     /// `set` reads the key from stdin (not argv); `status` shows the source; `clear` removes it.
     AiKey {
@@ -226,6 +244,9 @@ fn run() -> Result<(), String> {
         Cmd::Edit { file, append, out, verify } => edit(&file, &append, &out, verify)?,
         Cmd::AiFill { file, instruction, provider, out, verify, dry_run } => {
             ai_fill(&file, &instruction, &provider, &out, verify, dry_run)?
+        }
+        Cmd::AiEdit { file, instruction, provider, out, dry_run } => {
+            ai_edit(&file, &instruction, &provider, &out, dry_run)?
         }
         Cmd::AiKey { action } => ai_key(&action)?,
         Cmd::AiContext { file } => ai_context(&file)?,
@@ -414,6 +435,62 @@ fn ai_fill(
             Ok(pdf) => println!("verify: ORACLE OPENS IT ✓ ({})", pdf.display()),
             Err(e) => println!("verify: ORACLE REJECTS IT ✗ ({e})"),
         }
+    }
+    Ok(())
+}
+
+fn ai_edit(
+    file: &PathBuf,
+    instruction: &str,
+    provider: &str,
+    out: &Path,
+    dry_run: bool,
+) -> Result<(), String> {
+    let bytes = read(file)?;
+    // Engine::open handles .hwpx (default) + .hwp lift (--features rhwp).
+    let doc = hwp_core::Engine::open(&bytes).map_err(|e| e.to_string())?;
+    let provider = pick_provider(provider)?;
+
+    // PROPOSE: the provider sees the anchored [s/b] outline and authors an EditScript, compiled to
+    // anchored ops + dry-run on a scratch clone (doc untouched until commit).
+    let proposal = hwp_ai::propose_edits(&doc, &*provider, instruction).map_err(|e| e.to_string())?;
+    println!("ai-edit via '{}' — 제안 (rationale):\n{}", provider.name(), proposal.rationale);
+    println!("\n[문서 개요]\n{}", hwp_ai::to_markdown(&doc).unwrap_or_default());
+    println!("변경 미리보기 ({} op):\n{}", proposal.ops.len(), proposal.preview());
+
+    if dry_run {
+        println!("dry-run: 출력은 쓰지 않았습니다. 적용하려면 --dry-run 없이 다시 실행하세요.");
+        return Ok(());
+    }
+
+    // COMMIT: apply the approved ops as ONE undoable change (same op-bus a human edit uses).
+    let mut session = hwp_ops::EditSession::new(doc);
+    session.do_ops(&proposal.ops).map_err(|e| e.to_string())?;
+    let doc = session.into_doc();
+
+    // Output format by extension: .html → vibe-docs standalone HTML; else round-trip-safe HWPX.
+    if out.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("html")) == Some(true) {
+        let proj = hwp_jsx::emit(&doc);
+        let title = file.file_stem().map(|s| s.to_string_lossy().into_owned());
+        let html = hwp_export::emit_html(&proj, &hwp_export::HtmlOptions { title });
+        std::fs::write(out, &html).map_err(|e| format!("write {}: {e}", out.display()))?;
+        println!(
+            "\ncommitted (+{} op) → {} ({} KB) — open in any browser.",
+            proposal.ops.len(),
+            out.display(),
+            html.len() / 1024
+        );
+    } else {
+        let out_bytes = hwp_core::serialize_hwpx(&doc).map_err(|e| e.to_string())?;
+        hwp_core::atomic_write(out, &out_bytes).map_err(|e| e.to_string())?;
+        let report = hwp_core::validate_hwpx(&out_bytes);
+        println!(
+            "\ncommitted (+{} op) → {} ({} bytes)",
+            proposal.ops.len(),
+            out.display(),
+            out_bytes.len()
+        );
+        println!("editor-open-safety (cheap gate): {}", if report.ok { "OK ✓" } else { "FAIL ✗" });
     }
     Ok(())
 }

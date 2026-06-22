@@ -24,3 +24,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }
 keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"], optional = true }
+
+[dev-dependencies]
+# Integration test: prove vibe-docs edits render through the JSX/CSS → HTML deliverable path.
+hwp-jsx = { workspace = true }
+hwp-export = { workspace = true }
