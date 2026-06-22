@@ -123,6 +123,13 @@ pub fn para_shape_to_decls(s: &ParaShape) -> BTreeMap<String, String> {
     }
     if s.indent != 0 {
         d.insert("text-indent".into(), format_pt(s.indent));
+        // 내어쓰기 (hanging indent, negative first-line indent): absorb the negative offset with a
+        // matching left padding so the hung first line sits at the paragraph's left edge inside the
+        // cell, instead of `text-indent:-N` letting it overflow out the left of the box. The
+        // round-trip reads `indent` back from `text-indent` and ignores this derived padding.
+        if s.indent < 0 {
+            d.insert("padding-left".into(), format_pt(-s.indent));
+        }
     }
     if s.space_before != 0 {
         d.insert("margin-top".into(), format_pt(s.space_before));
