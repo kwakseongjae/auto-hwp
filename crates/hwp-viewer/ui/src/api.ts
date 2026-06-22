@@ -66,6 +66,23 @@ export const api = {
     }),
   /** Active AI provider name ("anthropic"/"ollama"/"openrouter"/"mock"/"none") — for an honest badge. */
   aiProviderName: () => invoke<string>("ai_provider_name"),
+  /** Insert a chat-attached image (base64) at the pointed target — deterministic, NO provider needed.
+   *  Dry-run into a pending proposal; `commitProposal()` applies it. `widthMm`/`heightMm` from aspect. */
+  insertImage: (
+    name: string,
+    dataB64: string,
+    scope: { section: number; block: number | null } | null,
+    widthMm: number,
+    heightMm: number,
+  ) =>
+    invoke<string>("propose_insert_image", {
+      name,
+      dataB64,
+      scopeSection: scope?.section ?? null,
+      scopeBlock: scope?.block ?? null,
+      widthMm,
+      heightMm,
+    }),
   /** Dry-run hand-authored content JSON into a preview without mutating the doc (advanced). */
   propose: (content: string) => invoke<string>("propose", { content }),
   /** Commit the pending proposal (one undo unit); returns the new page count. */

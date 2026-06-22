@@ -241,6 +241,68 @@ fn ai_provider_name() -> String {
     "none".into()
 }
 
+/// Insert a CHAT-ATTACHED image deterministically (no provider needed) at the user's pointed target:
+/// decode the base64 bytes to a temp file, then route ONE `InsertImage` edit through the SAME
+/// validated op-bus path the AI uses (`propose_from_edit_script`), leaving it pending for review.
+/// `scopeSection`/`scopeBlock` = the click-resolved target (insert AFTER that block, else section end).
+/// `widthMm`/`heightMm` come from the image's natural aspect (computed in the webview).
+#[allow(non_snake_case)]
+#[tauri::command]
+fn propose_insert_image(
+    name: String,
+    dataB64: String,
+    scopeSection: Option<usize>,
+    scopeBlock: Option<usize>,
+    widthMm: Option<f32>,
+    heightMm: Option<f32>,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<String, String> {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(dataB64.as_bytes())
+        .map_err(|e| format!("이미지 디코드 실패: {e}"))?;
+    if bytes.is_empty() {
+        return Err("빈 이미지입니다".into());
+    }
+    // Stash to a temp file (compile_edits reads it back); a sanitized basename keeps the extension.
+    let safe: String = std::path::Path::new(&name)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("image.png")
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+    let dir = std::env::temp_dir().join("tfhwp_imgs");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("임시 폴더 생성 실패: {e}"))?;
+    let path = dir.join(&safe);
+    std::fs::write(&path, &bytes).map_err(|e| format!("이미지 저장 실패: {e}"))?;
+
+    let mut s = sess.lock().map_err(|_| "session poisoned")?;
+    let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+    let (section, block, position) = match (scopeSection, scopeBlock) {
+        (Some(sec), Some(blk)) => (sec, blk, "after"),
+        (Some(sec), None) => (sec, 0, "end"),
+        _ => (0, 0, "end"),
+    };
+    let script = hwp_ai::edit::EditScript {
+        edits: vec![serde_json::from_value(serde_json::json!({
+            "op": "insert_image",
+            "section": section,
+            "block": block,
+            "position": position,
+            "path": path.to_string_lossy(),
+            "width_mm": widthMm,
+            "height_mm": heightMm,
+        }))
+        .map_err(|e| format!("이미지 편집 구성 실패: {e}"))?],
+    };
+    let proposal = hwp_ai::propose_from_edit_script(doc, &script, "이미지 삽입")
+        .map_err(|e| e.to_string())?;
+    let preview = proposal.preview();
+    s.pending = Some(proposal);
+    Ok(format!("📎 {safe}\n{preview}"))
+}
+
 /// Pick an AI provider: a local model (Ollama) we control if reachable, else cloud BYOK
 /// (Anthropic key from env/keychain), else the deterministic Mock — so it never hard-fails.
 #[cfg(feature = "ai")]
@@ -500,6 +562,7 @@ pub fn run() {
             ai_generate,
             ai_edit_propose,
             ai_provider_name,
+            propose_insert_image,
             undo,
             redo,
             find_text,

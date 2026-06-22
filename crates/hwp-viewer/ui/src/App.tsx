@@ -383,6 +383,8 @@ export default function App() {
     () => ({
       propose: (instruction: string, scopeArg: Scope | null) =>
         api.aiEdit(instruction, scopeArg ? { section: scopeArg.section, block: scopeArg.block } : undefined),
+      insertImage: (name: string, dataB64: string, scopeArg: Scope | null, widthMm: number, heightMm: number) =>
+        api.insertImage(name, dataB64, scopeArg ? { section: scopeArg.section, block: scopeArg.block } : null, widthMm, heightMm),
       commit: async () => {
         const n = await api.commitProposal();
         invalidate(n, scopeRef.current ? scopeRef.current.page : null);

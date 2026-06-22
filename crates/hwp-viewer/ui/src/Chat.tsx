@@ -6,11 +6,32 @@ export type ChatCtx = {
   /** Send a NL edit instruction (+ optional click-resolved scope); the provider proposes targeted
    *  edits (dry-run). Returns the rationale + per-op preview. Held pending on the Rust session. */
   propose: (instruction: string, scope: Scope | null) => Promise<string>;
+  /** Insert an attached image (base64) at the pointed target — deterministic, no provider needed. */
+  insertImage: (name: string, dataB64: string, scope: Scope | null, widthMm: number, heightMm: number) => Promise<string>;
   /** Commit the pending proposal (one undo unit). */
   commit: () => Promise<void>;
   /** Drop the pending proposal. */
   discard: () => Promise<void>;
 };
+
+type Attachment = { name: string; dataB64: string; dataUrl: string; widthMm: number; heightMm: number };
+
+/** Read a File to its base64 payload (no data: prefix) + keep the full data URL for the thumbnail. */
+function readImage(file: File): Promise<{ dataB64: string; dataUrl: string; w: number; h: number }> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onerror = () => reject(new Error("파일 읽기 실패"));
+    r.onload = () => {
+      const dataUrl = r.result as string;
+      const dataB64 = dataUrl.split(",")[1] ?? "";
+      const img = new Image();
+      img.onload = () => resolve({ dataB64, dataUrl, w: img.naturalWidth, h: img.naturalHeight });
+      img.onerror = () => resolve({ dataB64, dataUrl, w: 0, h: 0 });
+      img.src = dataUrl;
+    };
+    r.readAsDataURL(file);
+  });
+}
 
 type Msg =
   | { role: "user"; text: string }
@@ -31,8 +52,25 @@ export function Chat(props: {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [attach, setAttach] = useState<Attachment | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-picking the same file
+    if (!file) return;
+    try {
+      const { dataB64, dataUrl, w, h } = await readImage(file);
+      // Display box: cap width at 120mm, keep aspect (fall back to 100×75 if dims unknown).
+      const widthMm = 120;
+      const heightMm = w > 0 && h > 0 ? Math.round((widthMm * h) / w) : 90;
+      setAttach({ name: file.name, dataB64, dataUrl, widthMm, heightMm });
+    } catch {
+      setMsgs((m) => [...m, { role: "assistant", text: "이미지를 읽지 못했습니다", state: "error" }]);
+    }
+  }
 
   const isMock = props.provider === "mock" || props.provider === "none";
   const awaiting =
@@ -62,14 +100,22 @@ export function Chat(props: {
 
   async function send() {
     const text = input.trim();
-    if (!text || busy || awaiting) return;
+    if (busy || awaiting) return;
+    // Need either some text (NL edit) or an attached image (deterministic insert).
+    if (!text && !attach) return;
     const scope = props.scope;
     const where = scope ? ` (가리킨 위치 p.${scope.page + 1}${scope.block !== null ? `·블록 ${scope.block}` : ""})` : "";
+    const att = attach;
     setInput("");
-    setMsgs((m) => [...m, { role: "user", text: text + where }]);
+    setAttach(null);
+    setMsgs((m) => [...m, { role: "user", text: (att ? `📎 ${att.name} ` : "") + text + where }]);
     setBusy(true);
     try {
-      const preview = await props.ctx.propose(text, scope);
+      // An attached image takes the deterministic insert path (works with no provider/key); plain
+      // text goes through the AI edit proposer.
+      const preview = att
+        ? await props.ctx.insertImage(att.name, att.dataB64, scope, att.widthMm, att.heightMm)
+        : await props.ctx.propose(text, scope);
       setMsgs((m) => [...m, { role: "assistant", text: preview, state: "pending" }]);
     } catch (e) {
       setMsgs((m) => [...m, { role: "assistant", text: `${e}`, state: "error" }]);
@@ -162,13 +208,38 @@ export function Chat(props: {
             <button onClick={props.onClearScope} className="ml-auto rounded px-1 hover:bg-accent/20" title="선택 해제">✕</button>
           </div>
         )}
+        {attach && (
+          <div className="mb-1.5 flex items-center gap-2 rounded-md border border-ai/30 bg-ai/5 px-2 py-1 text-[11px] text-neutral-600 dark:text-neutral-300">
+            <img src={attach.dataUrl} alt="" className="h-8 w-8 rounded object-cover ring-1 ring-black/10" />
+            <span className="truncate">📎 {attach.name}</span>
+            <span className="shrink-0 text-neutral-400">{attach.widthMm}×{attach.heightMm}mm</span>
+            <button onClick={() => setAttach(null)} className="ml-auto rounded px-1 hover:bg-ai/20" title="첨부 제거">✕</button>
+          </div>
+        )}
+        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onPickFile} />
         <div className="flex items-end gap-2">
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={!props.canEdit || busy || awaiting}
+            title="이미지 첨부"
+            className="h-9 shrink-0 rounded-lg border border-black/10 px-2.5 text-sm text-neutral-500 hover:bg-neutral-200/70 disabled:opacity-40 dark:border-white/10 dark:hover:bg-neutral-700/60"
+          >
+            📎
+          </button>
           <textarea
             ref={inputRef}
             value={input}
             disabled={!props.canEdit || busy || awaiting}
             spellCheck={false}
-            placeholder={awaiting ? "위 제안을 적용/취소한 뒤 계속하세요" : props.scope ? "이 위치를 어떻게 바꿀까요?" : "무엇을 바꿀까요? (문서를 클릭하면 위치 지정)"}
+            placeholder={
+              awaiting
+                ? "위 제안을 적용/취소한 뒤 계속하세요"
+                : attach
+                  ? "📎 첨부 이미지를 넣습니다 — 보내기를 누르세요 (위치는 문서 클릭)"
+                  : props.scope
+                    ? "이 위치를 어떻게 바꿀까요?"
+                    : "무엇을 바꿀까요? (문서를 클릭하면 위치 지정)"
+            }
             className="h-16 flex-1 resize-none rounded-lg border border-black/10 bg-white px-2.5 py-2 text-sm outline-none placeholder:text-neutral-400 focus:border-accent disabled:opacity-50 dark:border-white/10 dark:bg-neutral-900"
             onChange={(e) => setInput(e.currentTarget.value)}
             onKeyDown={(e) => {
@@ -180,7 +251,7 @@ export function Chat(props: {
           />
           <button
             onClick={() => void send()}
-            disabled={!props.canEdit || busy || awaiting || !input.trim()}
+            disabled={!props.canEdit || busy || awaiting || (!input.trim() && !attach)}
             className="h-9 rounded-lg bg-ai px-3 text-sm font-medium text-white hover:opacity-90 disabled:opacity-40"
           >
             {busy ? "…" : "보내기"}

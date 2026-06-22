@@ -39,3 +39,5 @@ serde_json = { workspace = true }
 # A3 embedded control server uses pure std::net + these (already in the workspace lock):
 subtle = "2"
 getrandom = "0.3"
+# Decode chat-attached images (base64 over IPC) before stashing them to a temp file for insertion.
+base64 = "0.21"
