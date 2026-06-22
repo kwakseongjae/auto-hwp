@@ -622,6 +622,7 @@ color:#e8eaed;font-size:13px;border-bottom:1px solid rgba(255,255,255,.08)}}\
 }
 
 /// HTML-escape text for the viewer chrome (filename/title).
+#[cfg(feature = "rhwp")]
 fn esc_html(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
@@ -629,6 +630,7 @@ fn esc_html(s: &str) -> String {
 /// Minimal SVG safety for the embedded page render: strip <script>…</script> and on* handlers so an
 /// untrusted document can't run JS in the preview (P0-4 discipline; rhwp emits text/paths only, this
 /// is defense-in-depth). Coarse but sufficient for a trusted-renderer SVG.
+#[cfg(feature = "rhwp")]
 fn sanitize_svg(svg: &str) -> String {
     let mut out = svg.to_string();
     while let Some(a) = out.to_ascii_lowercase().find("<script") {
