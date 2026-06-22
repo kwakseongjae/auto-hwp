@@ -56,8 +56,16 @@ export const api = {
   aiGenerate: (prompt: string) => invoke<string>("ai_generate", { prompt }),
   /** Vibe-docs chat-edit: the provider sees the doc as an anchored [s/b] outline and proposes
    *  TARGETED edits (insert table/image near an anchor, shade a column, …), dry-run into a pending
-   *  proposal; returns rationale+preview. `commitProposal()` then applies it (one undo unit). */
-  aiEdit: (instruction: string) => invoke<string>("ai_edit_propose", { instruction }),
+   *  proposal; returns rationale+preview. `commitProposal()` then applies it (one undo unit).
+   *  `scope` is an optional click-resolved target the user pointed at (section, and block if known). */
+  aiEdit: (instruction: string, scope?: { section: number; block: number | null }) =>
+    invoke<string>("ai_edit_propose", {
+      instruction,
+      scopeSection: scope?.section ?? null,
+      scopeBlock: scope?.block ?? null,
+    }),
+  /** Active AI provider name ("anthropic"/"ollama"/"openrouter"/"mock"/"none") — for an honest badge. */
+  aiProviderName: () => invoke<string>("ai_provider_name"),
   /** Dry-run hand-authored content JSON into a preview without mutating the doc (advanced). */
   propose: (content: string) => invoke<string>("propose", { content }),
   /** Commit the pending proposal (one undo unit); returns the new page count. */

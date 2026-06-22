@@ -183,22 +183,62 @@ fn ai_generate(_prompt: String, _sess: tauri::State<'_, SharedSession>) -> Resul
 /// proposes TARGETED edits (insert table/image near an anchor, shade a column, delete a block),
 /// dry-run into a pending proposal; returns the rationale + per-op diff for review. `commit_proposal`
 /// then applies it (one undo unit). Needs `--features ai`.
+///
+/// `scopeSection`/`scopeBlock` = an optional click-resolved target the user pointed at in the viewer;
+/// when present we prepend a directive so the model anchors its edits there ("이거 바꿔줘" → that block).
 #[cfg(feature = "ai")]
+#[allow(non_snake_case)]
 #[tauri::command]
-fn ai_edit_propose(instruction: String, sess: tauri::State<'_, SharedSession>) -> Result<String, String> {
+fn ai_edit_propose(
+    instruction: String,
+    scopeSection: Option<usize>,
+    scopeBlock: Option<usize>,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<String, String> {
     let mut s = sess.lock().map_err(|_| "session poisoned")?;
     let provider = pick_provider();
     let doc = s.doc.as_ref().ok_or("no document open")?.doc();
-    let proposal = hwp_ai::propose_edits(doc, &*provider, &instruction).map_err(|e| e.to_string())?;
+    let scoped = match (scopeSection, scopeBlock) {
+        (Some(sec), Some(blk)) => format!(
+            "[편집 대상 위치: 섹션 {sec}, 블록 {blk} — 앵커 [s{sec}/b{blk}]. 사용자가 이 위치를 가리켰으니, \
+             다른 단서가 없으면 이 블록(또는 바로 그 아래)을 기준으로 편집하세요.]\n사용자 요청: {instruction}"
+        ),
+        (Some(sec), None) => format!(
+            "[편집 대상 위치: 섹션 {sec} 근처를 사용자가 가리켰습니다. 이 섹션을 기준으로 편집하세요.]\n\
+             사용자 요청: {instruction}"
+        ),
+        _ => instruction.clone(),
+    };
+    let proposal = hwp_ai::propose_edits(doc, &*provider, &scoped).map_err(|e| e.to_string())?;
     let preview = format!("{}\n\n{}", proposal.rationale, proposal.preview());
     s.pending = Some(proposal);
     Ok(format!("[{}]\n{preview}", provider.name()))
 }
 
 #[cfg(not(feature = "ai"))]
+#[allow(non_snake_case)]
 #[tauri::command]
-fn ai_edit_propose(_instruction: String, _sess: tauri::State<'_, SharedSession>) -> Result<String, String> {
+fn ai_edit_propose(
+    _instruction: String,
+    _scopeSection: Option<usize>,
+    _scopeBlock: Option<usize>,
+    _sess: tauri::State<'_, SharedSession>,
+) -> Result<String, String> {
     Err("AI 편집은 `--features ai` 빌드가 필요합니다 (cargo tauri dev -f rhwp ai)".into())
+}
+
+/// The active AI provider's name ("anthropic" / "ollama" / "openrouter" / "mock"), so the chat can
+/// show an honest badge — mock is a deterministic DEMO that ignores the request (no real edits).
+#[cfg(feature = "ai")]
+#[tauri::command]
+fn ai_provider_name() -> String {
+    pick_provider().name().to_string()
+}
+
+#[cfg(not(feature = "ai"))]
+#[tauri::command]
+fn ai_provider_name() -> String {
+    "none".into()
 }
 
 /// Pick an AI provider: a local model (Ollama) we control if reachable, else cloud BYOK
@@ -459,6 +499,7 @@ pub fn run() {
             discard_proposal,
             ai_generate,
             ai_edit_propose,
+            ai_provider_name,
             undo,
             redo,
             find_text,

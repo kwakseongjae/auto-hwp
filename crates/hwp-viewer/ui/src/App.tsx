@@ -9,7 +9,7 @@ import { advanceOffset, pageToScreen, screenToPage } from "./caret";
 import { type Command } from "./commands";
 import { Palette } from "./Palette";
 import { Composer, type ComposerMode } from "./Composer";
-import { Chat } from "./Chat";
+import { Chat, type Scope } from "./Chat";
 import { toast, Toaster } from "./toast";
 
 type CaretAnchor = { page: number; node: number; offset: number; len: number };
@@ -26,6 +26,14 @@ export default function App() {
   const [chatOpen, setChatOpen] = useState(false);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [rendering, setRendering] = useState(false);
+  // Vibe-docs: the active provider (for an honest "mock = demo" badge) + the click-resolved target the
+  // user pointed at (the scope chip). A page click while the chat is open captures it.
+  const [provider, setProvider] = useState("none");
+  const [scope, setScope] = useState<Scope | null>(null);
+  const scopeRef = useRef<Scope | null>(null);
+  scopeRef.current = scope;
+  const chatOpenRef = useRef(chatOpen);
+  chatOpenRef.current = chatOpen;
 
   // Authoring is only safe on an editable (HWPX) doc.
   const canEdit = pageCount > 0 && editable;
@@ -114,11 +122,15 @@ export default function App() {
   const svgCacheRef = useRef(svgCache);
   svgCacheRef.current = svgCache;
 
-  const invalidate = useCallback((n: number, scrollTo = 0) => {
+  // `scrollTo === null` keeps the current scroll (chat edits shouldn't yank the view to the doc end —
+  // the "결과가 튀는" issue); a number scrolls to that page.
+  const invalidate = useCallback((n: number, scrollTo: number | null = 0) => {
     setSvgCache({});
     setPageCount(n);
     clearCaret();
-    queueMicrotask(() => virtualizer.scrollToIndex(Math.max(0, Math.min(scrollTo, n - 1))));
+    if (scrollTo !== null) {
+      queueMicrotask(() => virtualizer.scrollToIndex(Math.max(0, Math.min(scrollTo, n - 1))));
+    }
   }, [clearCaret, virtualizer]);
 
   const invalidateKeepingCaret = useCallback(async (n: number, want: CaretAnchor) => {
@@ -157,9 +169,16 @@ export default function App() {
     if (!pt) return;
     try {
       const hit = await api.hitTest(page, pt.x, pt.y);
+      // Vibe-docs: while the chat is open, ANY click on the page captures a target "scope" (section
+      // always; block when it's a simple paragraph) so the user can point-then-ask ("이거 바꿔줘").
+      if (chatOpenRef.current && hit) {
+        setScope({ section: hit.section, block: hit.block, page });
+      }
       if (!hit || hit.node === null) {
         clearCaret();
-        if (hit && hit.node === null) toast("info", "표/머리말 등은 아직 편집할 수 없습니다");
+        // A table/heading click can't take a typing caret, but with the chat open it DID set a scope,
+        // so don't nag — only hint when there's no chat to receive the pointer.
+        if (hit && hit.node === null && !chatOpenRef.current) toast("info", "표/머리말 등은 아직 편집할 수 없습니다");
         return;
       }
       const want: CaretAnchor = { page, node: hit.node, offset: hit.offset, len: hit.paraLen };
@@ -357,13 +376,17 @@ export default function App() {
     [invalidate, doUndo],
   );
 
-  // The vibe-docs chat: propose anchored edits (dry-run) → 적용 commits through the same op-bus.
+  // The vibe-docs chat: propose anchored edits (dry-run, optionally scoped to a clicked target) →
+  // 적용 commits through the same op-bus. On apply, scroll to the pointed page (or stay put) instead
+  // of yanking to the doc end — and clear the spent scope.
   const chatCtx = useMemo(
     () => ({
-      propose: (instruction: string) => api.aiEdit(instruction),
+      propose: (instruction: string, scopeArg: Scope | null) =>
+        api.aiEdit(instruction, scopeArg ? { section: scopeArg.section, block: scopeArg.block } : undefined),
       commit: async () => {
         const n = await api.commitProposal();
-        invalidate(n, n - 1);
+        invalidate(n, scopeRef.current ? scopeRef.current.page : null);
+        setScope(null);
       },
       discard: () => api.discardProposal(),
     }),
@@ -404,6 +427,11 @@ export default function App() {
       "$mod+Shift+z": (e) => { e.preventDefault(); void handlers.current.doRedo(); },
     });
     return un;
+  }, []);
+
+  // Resolve the active AI provider once, for the chat's honest "mock = demo" badge.
+  useEffect(() => {
+    api.aiProviderName().then(setProvider).catch(() => setProvider("none"));
   }, []);
 
   // deterministic dark mode from the native theme event
@@ -601,7 +629,15 @@ export default function App() {
           )}
         </main>
 
-        <Chat open={chatOpen && pageCount > 0} canEdit={canEdit} ctx={chatCtx} onApplied={() => { /* re-render handled by commit→invalidate */ }} />
+        <Chat
+          open={chatOpen && pageCount > 0}
+          canEdit={canEdit}
+          provider={provider}
+          scope={scope}
+          onClearScope={() => setScope(null)}
+          ctx={chatCtx}
+          onApplied={() => { /* re-render + scroll handled by commit→invalidate */ }}
+        />
       </div>
 
       <footer className="flex items-center gap-3 border-t border-black/10 px-4 py-1.5 text-xs text-neutral-500 dark:border-white/10 dark:text-neutral-400">
