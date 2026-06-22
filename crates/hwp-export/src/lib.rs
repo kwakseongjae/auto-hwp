@@ -38,7 +38,9 @@ const BASE_CSS: &str = "\
 font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR',sans-serif;\
 line-height:1.7;color:#1a1a1a;word-break:keep-all;overflow-wrap:break-word}\
 .hwp-doc p{margin:0 0 .6em}\
-.hwp-doc table{border-collapse:collapse;margin:1em auto;width:100%;\
+.hwp-doc p:last-child{margin-bottom:0}\
+.hwp-doc td p,.hwp-doc th p{margin:0}\
+.hwp-doc table{border-collapse:collapse;border-spacing:0;margin:1em auto;width:100%;\
 font-family:'Malgun Gothic','맑은 고딕','Noto Sans KR','Apple SD Gothic Neo',sans-serif}\
 .hwp-doc th,.hwp-doc td{border:1px solid #000;padding:5px 7px;vertical-align:middle;line-height:1.5}\
 .hwp-doc td.hwp-th{background:#e6e6e6;font-weight:600;text-align:center}\

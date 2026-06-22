@@ -12,7 +12,7 @@
 //! re-synced from the human-readable props on parse so an AI edit to `font-size`
 //! actually changes the reparsed `CharShape::height`.
 
-use hwp_model::style::{CharShape, HorizontalAlign, ParaShape};
+use hwp_model::style::{CharShape, HorizontalAlign, LineSpacingType, ParaShape};
 use std::collections::BTreeMap;
 
 /// The custom property holding the full serde_json shape (lossless carrier).
@@ -139,6 +139,20 @@ pub fn para_shape_to_decls(s: &ParaShape) -> BTreeMap<String, String> {
     }
     if s.page_break_before {
         d.insert("page-break-before".into(), "always".into());
+    }
+    // line-height (줄 간격): was dropped entirely, so the HTML fell back to inherited BASE_CSS
+    // line-height — which WebKit (the Tauri/macOS webview) and Blink resolve differently against
+    // per-paragraph font-size, causing lines/blocks to overlap in-app. Emit it explicitly. Percent →
+    // unitless ratio (160 → 1.6); Fixed/AtLeast → pt. The round-trip restores line_spacing from the
+    // SHAPE_BLOB, so this is render-only (decls_to_para_shape ignores line-height).
+    match s.line_spacing_type {
+        LineSpacingType::Percent if s.line_spacing_value > 0 => {
+            d.insert("line-height".into(), format!("{}", s.line_spacing_value as f64 / 100.0));
+        }
+        LineSpacingType::Fixed | LineSpacingType::AtLeast if s.line_spacing_value > 0 => {
+            d.insert("line-height".into(), format_pt(s.line_spacing_value));
+        }
+        _ => {}
     }
     d.insert(SHAPE_BLOB.into(), serde_json_para(s));
     d

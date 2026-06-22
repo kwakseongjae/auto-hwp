@@ -652,7 +652,14 @@ export default function App() {
               title="문서 미리보기"
               srcDoc={docHtml ?? "<!doctype html><body style='font-family:sans-serif;color:#999;padding:2rem'>렌더 중…</body>"}
               sandbox="allow-same-origin"
-              className="mx-auto block h-full w-full max-w-3xl rounded-lg border-0 bg-white shadow-md ring-1 ring-black/5"
+              // Size the iframe to its CONTENT height (same-origin srcDoc) so the WebView can't squeeze
+              // it — a collapsed/short iframe was making WKWebView mis-lay-out and overlap blocks.
+              onLoad={(e) => {
+                const f = e.currentTarget;
+                const h = f.contentDocument?.body?.scrollHeight;
+                if (h && h > 0) f.style.height = `${h + 32}px`;
+              }}
+              className="mx-auto block w-full max-w-3xl rounded-lg border-0 bg-white shadow-md ring-1 ring-black/5"
             />
           ) : pageCount > 0 ? (
             <div className="relative mx-auto max-w-3xl" style={{ height: `${virtualizer.getTotalSize()}px` }} onClick={(e) => void onPageClick(e)}>
