@@ -177,17 +177,21 @@ fn render_table(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut Stri
         .map(|w| w.split(',').filter_map(|v| v.parse::<f64>().ok()).map(|h| h / 75.0).collect())
         .unwrap_or_default();
 
+    // Column PROPORTIONS as percentages (not absolute px): the table fills the container width
+    // (BASE_CSS .hwp-doc table{width:100%}) while columns keep the original ratios. Absolute px made
+    // gov-doc tables render narrower than the page and starved label columns (e.g. a 48px cell wrapped
+    // Korean one char per line). table-layout:fixed keeps the ratios exact.
+    let total: f64 = cols_px.iter().sum();
     out.push_str("<table");
     out.push_str(&class_attr(&el.class_list));
-    if !cols_px.is_empty() {
-        let total: f64 = cols_px.iter().sum();
-        out.push_str(&format!(" style=\"table-layout:fixed;width:{total:.0}px\""));
+    if !cols_px.is_empty() && total > 0.0 {
+        out.push_str(" style=\"table-layout:fixed\"");
     }
     out.push('>');
-    if !cols_px.is_empty() {
+    if !cols_px.is_empty() && total > 0.0 {
         out.push_str("<colgroup>");
         for w in &cols_px {
-            out.push_str(&format!("<col style=\"width:{w:.0}px\">"));
+            out.push_str(&format!("<col style=\"width:{:.3}%\">", w / total * 100.0));
         }
         out.push_str("</colgroup>");
     }
