@@ -101,6 +101,23 @@ async fn render_page(page: u32, sess: tauri::State<'_, SharedSession>) -> Result
     .map_err(|e| e.to_string())?
 }
 
+/// Render the LIVE document through the JSX(content)/CSS(design) → HTML path (the pivot's render):
+/// `hwp_jsx::emit` projects the SemanticDoc to a JsxCssProject, `hwp_export::emit_html` combines the
+/// two into one self-contained HTML document. This is the SAME output as `export-html`, so the in-app
+/// preview matches the export byte-for-byte. Edits repaint via the existing `doc-changed` event.
+#[tauri::command]
+async fn render_doc_html(sess: tauri::State<'_, SharedSession>) -> Result<String, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let s = sess.lock().map_err(|_| "session poisoned")?;
+        let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+        let proj = hwp_jsx::emit(doc);
+        Ok(hwp_export::emit_html(&proj, &hwp_export::HtmlOptions { title: None }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Current page count of the live document (used by the frontend to re-render after edits).
 #[tauri::command]
 fn doc_page_count(sess: tauri::State<'_, SharedSession>) -> Result<u32, String> {
@@ -553,6 +570,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_doc,
             render_page,
+            render_doc_html,
             doc_page_count,
             apply_content,
             export_hwpx,

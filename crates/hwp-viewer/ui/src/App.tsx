@@ -27,6 +27,22 @@ export default function App() {
   const [chatOpen, setChatOpen] = useState(false);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [rendering, setRendering] = useState(false);
+  // Preview mode: 'svg' = rhwp faithful render of the ORIGINAL (layout-preserve); 'html' = the
+  // JSX(content)/CSS(design) → HTML render (the pivot view — shows edits cleanly, matches export).
+  // Editable docs default to 'html' so chat edits are visible and the gov-doc styling shows.
+  const [viewMode, setViewMode] = useState<"svg" | "html">("svg");
+  const [docHtml, setDocHtml] = useState<string | null>(null);
+  const viewModeRef = useRef(viewMode);
+  viewModeRef.current = viewMode;
+
+  // Fetch the whole-doc HTML for the iframe preview (and after every edit when in html mode).
+  const loadDocHtml = useCallback(async () => {
+    try {
+      setDocHtml(await api.renderDocHtml());
+    } catch {
+      setDocHtml(null);
+    }
+  }, []);
   // Vibe-docs: the active provider (for an honest "mock = demo" badge) + the click-resolved target the
   // user pointed at (the scope chip). A page click while the chat is open captures it.
   const [provider, setProvider] = useState("none");
@@ -129,10 +145,12 @@ export default function App() {
     setSvgCache({});
     setPageCount(n);
     clearCaret();
+    // In HTML preview mode, re-fetch the combined JSX/CSS→HTML so edits show immediately.
+    if (viewModeRef.current === "html") void loadDocHtml();
     if (scrollTo !== null) {
       queueMicrotask(() => virtualizer.scrollToIndex(Math.max(0, Math.min(scrollTo, n - 1))));
     }
-  }, [clearCaret, virtualizer]);
+  }, [clearCaret, virtualizer, loadDocHtml]);
 
   const invalidateKeepingCaret = useCallback(async (n: number, want: CaretAnchor) => {
     setSvgCache({});
@@ -265,7 +283,13 @@ export default function App() {
       const name = path.split("/").pop() ?? path;
       setDocName(name);
       setEditable(r.editable);
+      // Editable docs default to the HTML (JSX/CSS) preview — shows edits + the gov-doc styling;
+      // a view-only original stays on the faithful rhwp SVG. The toolbar toggles either way.
+      const mode = r.editable ? "html" : "svg";
+      setViewMode(mode);
+      viewModeRef.current = mode;
       invalidate(r.pages);
+      if (mode === "html") void loadDocHtml();
       if (r.editable) setChatOpen(true); // surface the vibe-docs chat on an editable doc
       if (r.convertedPath) {
         const saved = r.convertedPath.split("/").pop() ?? r.convertedPath;
@@ -450,8 +474,10 @@ export default function App() {
             setEditable(true);
             setDocName((d) => d ?? "문서");
             setChatOpen(true);
+            setViewMode("html");
+            viewModeRef.current = "html";
           }
-          invalidate(n, null); // repaint in place, keep scroll
+          invalidate(n, null); // repaint in place (reloads HTML when in html mode)
         } catch {
           /* no document / render unavailable — ignore */
         }
@@ -542,6 +568,17 @@ export default function App() {
           <Tool onClick={() => setChatOpen((o) => !o)} icon="✦" label="바이브 편집" tone="ai" keys="⌘L" disabled={!canEdit} />
           <Tool onClick={() => setComposer("table")} icon="▦" label="표" keys="⌘T" disabled={!canEdit} />
           <Sep />
+          <Tool
+            onClick={() => {
+              const next = viewMode === "html" ? "svg" : "html";
+              setViewMode(next);
+              viewModeRef.current = next;
+              if (next === "html") void loadDocHtml();
+            }}
+            icon={viewMode === "html" ? "🅷" : "🖹"}
+            label={viewMode === "html" ? "HTML 보기" : "원본 보기"}
+          />
+          <Sep />
           <Tool onClick={doUndo} icon="↩︎" label="실행취소" keys="⌘Z" disabled={!canEdit} />
           <Tool onClick={doRedo} icon="↪︎" label="다시실행" disabled={!canEdit} />
         </div>
@@ -609,7 +646,15 @@ export default function App() {
       {/* The viewer + the docked vibe-docs chat, side by side. */}
       <div className="flex min-h-0 flex-1">
         <main ref={scrollRef} className="min-h-0 flex-1 overflow-auto p-6">
-          {pageCount > 0 ? (
+          {pageCount > 0 && viewMode === "html" ? (
+            // The JSX(content)/CSS(design) → HTML preview (the pivot view) in an isolated iframe.
+            <iframe
+              title="문서 미리보기"
+              srcDoc={docHtml ?? "<!doctype html><body style='font-family:sans-serif;color:#999;padding:2rem'>렌더 중…</body>"}
+              sandbox="allow-same-origin"
+              className="mx-auto block h-full w-full max-w-3xl rounded-lg border-0 bg-white shadow-md ring-1 ring-black/5"
+            />
+          ) : pageCount > 0 ? (
             <div className="relative mx-auto max-w-3xl" style={{ height: `${virtualizer.getTotalSize()}px` }} onClick={(e) => void onPageClick(e)}>
               {virtualizer.getVirtualItems().map((item) => {
                 void ensurePage(item.index);

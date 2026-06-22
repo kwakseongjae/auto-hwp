@@ -34,6 +34,9 @@ hwp-core = { workspace = true }
 hwp-mcp = { workspace = true }
 hwp-ai = { workspace = true }
 hwp-model = { workspace = true }
+# JSX(content)/CSS(design) → HTML preview path (the pivot's render): emit + emit_html on the live doc.
+hwp-jsx = { workspace = true }
+hwp-export = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # A3 embedded control server uses pure std::net + these (already in the workspace lock):

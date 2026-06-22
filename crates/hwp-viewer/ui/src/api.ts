@@ -44,8 +44,11 @@ export type CaretRect = { x: number; top: number; height: number };
 export const api = {
   /** Open a .hwp/.hwpx; returns page count + capability. */
   openDoc: (path: string) => invoke<OpenResult>("open_doc", { path }),
-  /** Render one page to SVG markup. */
+  /** Render one page to SVG markup (rhwp — faithful layout-preserve view of the original). */
   renderPage: (page: number) => invoke<string>("render_page", { page }),
+  /** Render the WHOLE live doc through the JSX/CSS→HTML path (the pivot view; shows edits cleanly,
+   *  matches export). Returned as one self-contained HTML document for an <iframe srcDoc>. */
+  renderDocHtml: () => invoke<string>("render_doc_html"),
   /** Live page count of the open document. */
   pageCount: () => invoke<number>("doc_page_count"),
   /** Apply template-conformant AI content JSON (one undo unit); returns the new page count. */
