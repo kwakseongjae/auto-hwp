@@ -582,26 +582,64 @@ fn render(_file: &PathBuf, _page: u32, _out: &PathBuf) -> Result<(), String> {
 fn view(file: &PathBuf, out: &PathBuf) -> Result<(), String> {
     let bytes = read(file)?;
     let n = hwp_core::page_count(&bytes).map_err(|e| e.to_string())?;
+    // Faithful "한컴 독스처럼 열어보기" paged preview: each HWP page is rhwp's own pixel-faithful SVG
+    // (exact tables + pagination + the doc's footer page numbers), shown as a white A4 sheet on a
+    // gray canvas — the layout-preserve VIEW (the JSX/CSS HTML export is the separate semantic-reflow
+    // form). rhwp paginates the document exactly (page breaks honored), so this matches 한컴.
     let mut pages = String::new();
     for p in 0..n {
-        let svg = hwp_core::render_page_svg(&bytes, p).map_err(|e| e.to_string())?;
-        pages.push_str("<div class=\"page\">");
-        pages.push_str(&svg);
-        pages.push_str("</div>\n");
+        let svg = sanitize_svg(&hwp_core::render_page_svg(&bytes, p).map_err(|e| e.to_string())?);
+        pages.push_str(&format!(
+            "<div class=\"sheet\"><div class=\"page\">{svg}</div><div class=\"pnum\">{} / {n}</div></div>\n",
+            p + 1
+        ));
     }
-    let title = file.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    let title = esc_html(&file.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default());
     let html = format!(
         "<!doctype html><html lang=\"ko\"><head><meta charset=\"utf-8\">\
-<title>{title} — tf-hwp</title><style>\
-body{{background:#525659;margin:0;padding:24px;display:flex;flex-direction:column;\
-align-items:center;gap:24px;font-family:sans-serif}}\
-.page{{background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.4)}}\
+<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
+<title>{title} — tf-hwp 미리보기</title><style>\
+:root{{color-scheme:dark}}\
+*{{box-sizing:border-box}}\
+body{{margin:0;background:#5b5e63;font-family:-apple-system,'Apple SD Gothic Neo','Malgun Gothic',sans-serif}}\
+.bar{{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:12px;\
+height:44px;padding:0 16px;background:rgba(32,33,36,.92);backdrop-filter:blur(8px);\
+color:#e8eaed;font-size:13px;border-bottom:1px solid rgba(255,255,255,.08)}}\
+.bar b{{font-weight:600}} .bar .sp{{flex:1}} .bar .muted{{color:#9aa0a6}}\
+.doc{{display:flex;flex-direction:column;align-items:center;gap:24px;padding:28px 12px 60px}}\
+.sheet{{display:flex;flex-direction:column;align-items:center;gap:9px}}\
+.page{{background:#fff;box-shadow:0 2px 14px rgba(0,0,0,.45);max-width:96vw}}\
 .page svg{{display:block;max-width:100%;height:auto}}\
-</style></head><body>{pages}</body></html>"
+.pnum{{color:#cdd0d4;font-size:12px;letter-spacing:.02em}}\
+</style></head><body>\
+<div class=\"bar\"><b>{title}</b><span class=\"muted\">한컴 독스 미리보기</span>\
+<span class=\"sp\"></span><span class=\"muted\">{n}쪽</span></div>\
+<div class=\"doc\">{pages}</div></body></html>"
     );
     std::fs::write(out, html).map_err(|e| e.to_string())?;
-    println!("rendered {n} pages → {}", out.display());
+    println!("rendered {n} pages → {} (open in a browser — 한컴 독스처럼 보입니다)", out.display());
     Ok(())
+}
+
+/// HTML-escape text for the viewer chrome (filename/title).
+fn esc_html(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
+/// Minimal SVG safety for the embedded page render: strip <script>…</script> and on* handlers so an
+/// untrusted document can't run JS in the preview (P0-4 discipline; rhwp emits text/paths only, this
+/// is defense-in-depth). Coarse but sufficient for a trusted-renderer SVG.
+fn sanitize_svg(svg: &str) -> String {
+    let mut out = svg.to_string();
+    while let Some(a) = out.to_ascii_lowercase().find("<script") {
+        let end = out[a..]
+            .to_ascii_lowercase()
+            .find("</script>")
+            .map(|e| a + e + "</script>".len())
+            .unwrap_or(out.len());
+        out.replace_range(a..end, "");
+    }
+    out
 }
 
 #[cfg(not(feature = "rhwp"))]
