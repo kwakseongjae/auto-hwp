@@ -38,8 +38,14 @@ const BASE_CSS: &str = "\
 font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR',sans-serif;\
 line-height:1.7;color:#1a1a1a;word-break:keep-all;overflow-wrap:break-word}\
 .hwp-doc p{margin:0 0 .6em}\
-.hwp-doc table{border-collapse:collapse;margin:1em auto}\
-.hwp-doc td{border:1px solid #888;padding:3px 6px;vertical-align:top}\
+.hwp-doc table{border-collapse:collapse;margin:1em auto;width:100%;\
+font-family:'Malgun Gothic','맑은 고딕','Noto Sans KR','Apple SD Gothic Neo',sans-serif}\
+.hwp-doc th,.hwp-doc td{border:1px solid #000;padding:5px 7px;vertical-align:middle;line-height:1.5}\
+.hwp-doc td.hwp-th{background:#e6e6e6;font-weight:600;text-align:center}\
+.hwp-doc td.hwp-label-col{background:#f0f0f0;font-weight:600}\
+.hwp-doc td.hwp-th.hwp-label-col{background:#dcdcdc}\
+.hwp-doc .hwp-title-box{border:1.5px solid #000;padding:8px 12px;margin:1em auto;\
+text-align:center;font-weight:700;font-size:1.15em}\
 .hwp-doc img{max-width:100%;height:auto}\
 .hwp-section+.hwp-section{margin-top:2.5rem;border-top:1px dashed #ddd;padding-top:2.5rem}\
 .hwp-eq,.hwp-raw{display:inline-block;color:#8a6d3b;background:#fcf6e3;border:1px solid #f0e3b8;\
@@ -191,13 +197,32 @@ fn render_table(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut Stri
             if cell.attrs.contains_key("data-inactive") {
                 continue; // covered cell — represented by the spanning cell's span
             }
+            // Position-derived design classes (Korean gov-doc convention): the top header row and the
+            // left label column are shaded gray. Computed from structural indices at RENDER time —
+            // never written into the JSX content — so content(JSX)/design(CSS) separation holds.
+            let r = cell.attrs.get("data-row").and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+            let c0 = cell.attrs.get("data-col").and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+            let mut cls = String::new();
+            if r == 0 {
+                cls.push_str("hwp-th");
+            }
+            if c0 == 0 {
+                if !cls.is_empty() {
+                    cls.push(' ');
+                }
+                cls.push_str("hwp-label-col");
+            }
             out.push_str("<td");
+            if !cls.is_empty() {
+                out.push_str(&format!(" class=\"{cls}\""));
+            }
             if let Some(cs) = cell.attrs.get("colSpan") {
                 out.push_str(&format!(" colspan=\"{}\"", esc_attr(cs)));
             }
             if let Some(rs) = cell.attrs.get("rowSpan") {
                 out.push_str(&format!(" rowspan=\"{}\"", esc_attr(rs)));
             }
+            // A real model shade (data-shade) is an INLINE background that wins over the class gray.
             if let Some(shade) = cell.attrs.get("data-shade") {
                 out.push_str(&format!(" style=\"background:{}\"", esc_attr(shade)));
             }
