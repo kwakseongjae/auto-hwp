@@ -60,7 +60,7 @@ pub struct AiRun {
 }
 
 impl AiRun {
-    fn to_run_spec(&self) -> RunSpec {
+    pub(crate) fn to_run_spec(&self) -> RunSpec {
         RunSpec {
             text: self.text.clone(),
             bold: self.bold,
@@ -100,7 +100,7 @@ pub struct AiPara {
 }
 
 impl AiPara {
-    fn to_para_spec(&self) -> ParaSpec {
+    pub(crate) fn to_para_spec(&self) -> ParaSpec {
         ParaSpec {
             style: self.style.clone(),
             align: self.align.clone(),
@@ -172,7 +172,7 @@ pub struct AiCellObj {
 }
 
 impl AiCell {
-    fn to_cell_spec(&self, header: bool) -> CellSpec {
+    pub(crate) fn to_cell_spec(&self, header: bool) -> CellSpec {
         match self {
             AiCell::Text(t) => CellSpec { text: t.clone(), bold: header, ..Default::default() },
             AiCell::Rich(o) => CellSpec {

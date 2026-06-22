@@ -88,4 +88,14 @@ impl LlmProvider for OpenRouterProvider {
         let raw = self.complete(content::template_brief(), &user)?;
         content::parse_content(content::strip_code_fence(&raw))
     }
+
+    /// Anchored chat-editing: prompt with the edit brief + the document's `[s/b]` outline so the
+    /// model emits one `EditScript` JSON, then parse it (no raw XML).
+    fn propose_edit_script(&self, outline: &str, instruction: &str) -> Result<super::edit::EditScript> {
+        let user = format!(
+            "[문서 개요]\n{outline}\n\n[편집 지시]\n{instruction}\n\n위 지시를 편집 명령 JSON으로 출력하세요."
+        );
+        let raw = self.complete(super::edit::edit_brief(), &user)?;
+        super::edit::parse_script(content::strip_code_fence(&raw))
+    }
 }

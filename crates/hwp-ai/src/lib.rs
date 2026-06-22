@@ -8,6 +8,8 @@ use hwp_model::prelude::*;
 use hwp_ops::Op;
 
 pub mod content;
+/// Anchored, conversational editing — the "vibe docs" core.
+pub mod edit;
 /// BYOK key resolution (env + optional OS keychain).
 pub mod secret;
 /// Local model provider (Ollama) — behind the `local` feature.
@@ -39,6 +41,15 @@ pub trait LlmProvider {
             })
             .collect();
         Ok(content::AiContent { blocks, page: None })
+    }
+
+    /// Anchored CHAT-EDITING ("vibe docs"): given the document as an anchored `[s/b]` outline and a
+    /// user instruction, return an [`edit::EditScript`] of anchored commands. The default errors —
+    /// only providers that can return structured JSON (cloud/local LLMs) override it.
+    fn propose_edit_script(&self, _outline: &str, _instruction: &str) -> Result<edit::EditScript> {
+        Err(Error::CapabilityUnavailable(
+            "이 provider는 대화형 편집(propose_edit_script)을 지원하지 않습니다",
+        ))
     }
 }
 
@@ -75,6 +86,21 @@ impl LlmProvider for MockProvider {
                 },
             ],
             page: None,
+        })
+    }
+
+    /// Deterministic edit: append a heading echoing the instruction at the end of section 0, so the
+    /// chat-edit pipeline (propose_edits → compile → scratch-validate) is exercisable with no key.
+    fn propose_edit_script(&self, _outline: &str, instruction: &str) -> Result<edit::EditScript> {
+        use edit::{EditCommand, EditScript, Position};
+        Ok(EditScript {
+            edits: vec![EditCommand::InsertHeading {
+                section: 0,
+                block: 0,
+                position: Position::End,
+                text: format!("[mock-ai] {instruction}"),
+                para: content::AiPara { align: Some("center".into()), ..Default::default() },
+            }],
         })
     }
 }
@@ -209,6 +235,43 @@ pub fn propose_from_content(
     Ok(Proposal { ops, rationale })
 }
 
+/// Run one **chat-edit** turn WITHOUT mutating `doc`: project the document to its anchored `[s/b]`
+/// outline, have the provider author an [`edit::EditScript`] against it, compile the script to
+/// anchored ops, and dry-run them on a scratch clone so any apply error surfaces BEFORE the human
+/// commits. Returns a [`Proposal`] the caller commits via [`hwp_ops::apply`] / an `EditSession`.
+///
+/// This is the "vibe docs" entry point: "목차 아래에 표 만들어줘" → validated ops, no raw XML.
+pub fn propose_edits(
+    doc: &SemanticDoc,
+    provider: &dyn LlmProvider,
+    instruction: &str,
+) -> Result<Proposal> {
+    let outline = to_markdown(doc).unwrap_or_else(|_| doc.plain_text());
+    let script = provider.propose_edit_script(&outline, instruction)?;
+    propose_from_edit_script(doc, &script, &format!("편집 지시: {instruction}"))
+}
+
+/// Validate an already-authored [`edit::EditScript`] into a [`Proposal`] WITHOUT mutating `doc`:
+/// compile to anchored ops and dry-run them on a scratch clone. Used by [`propose_edits`] and by
+/// any external agent (e.g. the MCP lane) that authored the script JSON itself.
+pub fn propose_from_edit_script(
+    doc: &SemanticDoc,
+    script: &edit::EditScript,
+    note: &str,
+) -> Result<Proposal> {
+    let ops = edit::compile_edits(doc, script)?;
+    if ops.is_empty() {
+        return Err(Error::Other("제안된 편집이 없습니다 (AI proposed no edits)".into()));
+    }
+    let mut scratch = doc.clone();
+    for op in &ops {
+        hwp_ops::apply(&mut scratch, op)?;
+    }
+    let rationale =
+        format!("{note}\n{} 편집 → {} op (스크래치 복사본에서 검증됨)", script.edits.len(), ops.len());
+    Ok(Proposal { ops, rationale })
+}
+
 /// One human-readable line summarizing an op (for [`Proposal::preview`]).
 fn op_summary(op: &Op) -> String {
     match op {
@@ -224,6 +287,27 @@ fn op_summary(op: &Op) -> String {
             format!("＋ 표 {}행 × {}열", rows.len() + usize::from(!header.is_empty()), cols)
         }
         Op::AppendRichTable { rows, .. } => format!("＋ 표 {}행", rows.len()),
+        Op::InsertParagraphAt { section, index, runs, .. } => {
+            let text: String = runs.iter().map(|r| r.text.as_str()).collect();
+            format!("＋ 문단 @[s{section}/b{index}]: {}", truncate(&text, 60))
+        }
+        Op::InsertTableAt { section, index, rows } => {
+            format!("＋ 표 {}행 @[s{section}/b{index}]", rows.len())
+        }
+        Op::InsertImageAt { section, index, bytes, kind, .. } => {
+            format!("＋ 그림({kind}, {}바이트) @[s{section}/b{index}]", bytes.len())
+        }
+        Op::DeleteBlock { section, index } => format!("－ 블록 @[s{section}/b{index}]"),
+        Op::SetTableCellShade { section, index, sel, shade } => {
+            let what = match sel {
+                hwp_ops::CellSel::Col(c) => format!("{c}열"),
+                hwp_ops::CellSel::Row(r) => format!("{r}행"),
+                hwp_ops::CellSel::Cell(r, c) => format!("({r},{c})칸"),
+                hwp_ops::CellSel::All => "전체".into(),
+            };
+            let color = shade.as_deref().unwrap_or("(해제)");
+            format!("◧ 표 @[s{section}/b{index}] {what} 음영 {color}")
+        }
         Op::SetPageLayout { orientation, margins_mm, .. } => {
             let o = orientation.as_deref().unwrap_or("(유지)");
             let m = margins_mm.as_ref().map(|m| format!(", 여백 {}mm", m.left)).unwrap_or_default();
