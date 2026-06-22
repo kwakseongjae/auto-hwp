@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
 import { tinykeys } from "tinykeys";
 import { api, type CaretRect, type FindMatch } from "./api";
 import { sanitizeSvg } from "./sanitize";
@@ -435,6 +436,29 @@ export default function App() {
   useEffect(() => {
     api.aiProviderName().then(setProvider).catch(() => setProvider("none"));
   }, []);
+
+  // Repaint when the embedded control server (or any out-of-band path) mutates the live session:
+  // it emits "doc-changed" after every call. Re-sync the page count + drop the SVG cache so the
+  // viewer reflects an externally opened/edited document. (The in-UI verbs repaint directly.)
+  useEffect(() => {
+    let un: undefined | (() => void);
+    (async () => {
+      un = await listen("doc-changed", async () => {
+        try {
+          const n = await api.pageCount();
+          if (n > 0) {
+            setEditable(true);
+            setDocName((d) => d ?? "문서");
+            setChatOpen(true);
+          }
+          invalidate(n, null); // repaint in place, keep scroll
+        } catch {
+          /* no document / render unavailable — ignore */
+        }
+      });
+    })();
+    return () => un?.();
+  }, [invalidate]);
 
   // deterministic dark mode from the native theme event
   useEffect(() => {
