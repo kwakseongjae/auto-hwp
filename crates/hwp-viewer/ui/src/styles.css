@@ -41,6 +41,17 @@ body,
   display: block;
 }
 
+/* The page is a faithful rhwp-rendered SVG IMAGE, not editable DOM text. Native drag would select
+   individual SVG <text> glyph runs (the "부자연스러운 드래그") — meaningless here, since editing is
+   chat-driven (vibe docs). Disable selection so the page reads as a stable document surface; a
+   click still places the WYSIWYG caret. (A real text-selection layer would need a DOM text overlay
+   aligned to the glyphs — a separate, larger piece, tracked for later.) */
+.page-svg,
+.page-svg * {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 /* Interactive caret blink: hard on/off (steps(1)) so it reads native, not a soft fade. The caret
    <div> is positioned over the page wrapper by the JS coordinate map (see caret.ts / App.tsx). */
 @keyframes caret-blink {
