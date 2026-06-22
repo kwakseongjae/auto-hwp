@@ -16,6 +16,10 @@ crates/hwp-viewer/gen/schemas/
 /corpus/private/
 /out
 
+# secrets — BYOK keys (OpenRouter/Anthropic). NEVER commit. .env.example is the committed template.
+.env
+.env.local
+
 # local agent runtime state
 .claude/
 

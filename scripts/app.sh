@@ -1,7 +1,26 @@
 #!/usr/bin/env bash
 # Launch the tf-hwp desktop app in dev with BOTH features on:
 #   rhwp = faithful page rendering, ai = the vibe-docs chat panel.
-# Usage: ./scripts/app.sh   (set ANTHROPIC_API_KEY first for real AI; else Mock provider)
+# Auto-loads repo-root .env (OPENROUTER_API_KEY / ANTHROPIC_API_KEY / TF_HWP_OPENROUTER_MODEL) so the
+# app gets a real provider — Tauri/cargo do NOT read .env on their own. No key → Mock (demo) provider.
 set -euo pipefail
-cd "$(dirname "$0")/../crates/hwp-viewer"
+root="$(cd "$(dirname "$0")/.." && pwd)"
+
+if [ -f "$root/.env" ]; then
+  set -a            # export every var defined while sourcing
+  # shellcheck disable=SC1091
+  . "$root/.env"
+  set +a
+  if [ -n "${OPENROUTER_API_KEY:-}" ]; then
+    echo "[app.sh] provider: OpenRouter (model ${TF_HWP_OPENROUTER_MODEL:-google/gemini-2.5-flash})"
+  elif [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+    echo "[app.sh] provider: Anthropic"
+  else
+    echo "[app.sh] no key in .env → Mock (demo) provider. Add OPENROUTER_API_KEY to .env."
+  fi
+else
+  echo "[app.sh] no .env found → Mock (demo) provider."
+fi
+
+cd "$root/crates/hwp-viewer"
 exec cargo tauri dev -f ai "$@"
