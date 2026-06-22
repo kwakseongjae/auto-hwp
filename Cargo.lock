@@ -2035,6 +2035,8 @@ dependencies = [
  "getrandom 0.3.4",
  "hwp-ai",
  "hwp-core",
+ "hwp-export",
+ "hwp-jsx",
  "hwp-mcp",
  "hwp-model",
  "serde",
