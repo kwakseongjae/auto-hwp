@@ -1,5 +1,5 @@
-import { Dialog } from "@kobalte/core/dialog";
-import { createSignal, Show } from "solid-js";
+import { useState } from "react";
+import { Modal } from "./Modal";
 
 export type ComposerMode = "table" | "ai" | null;
 
@@ -17,20 +17,18 @@ export type ComposerCtx = {
 const DEFAULT_AI =
   '{"blocks":[{"type":"heading","text":"제목","style":"개요 1"},{"type":"paragraph","runs":[{"text":"본문 "},{"text":"강조","bold":true}]}]}';
 
-/// Structured authoring composer (Kobalte Form/Dialog). Deterministic 표 추가 applies directly
-/// (one undo unit); AI content goes through propose → whole-proposal review → commit/discard.
-/// Shaped to graduate into the per-block inspector (Phase 4) with no mental-model change.
+/// Structured authoring composer. Deterministic 표 추가 applies directly (one undo unit); AI content
+/// goes through propose → whole-proposal review → commit/discard.
 export function Composer(props: { mode: ComposerMode; onClose: () => void; ctx: ComposerCtx }) {
-  const [rows, setRows] = createSignal(3);
-  const [cols, setCols] = createSignal(3);
-  const [header, setHeader] = createSignal(true);
-  const [prompt, setPrompt] = createSignal("");
-  const [useJson, setUseJson] = createSignal(false);
-  const [ai, setAi] = createSignal(DEFAULT_AI);
-  const [preview, setPreview] = createSignal<string | null>(null);
-  const [busy, setBusy] = createSignal(false);
+  const [rows, setRows] = useState(3);
+  const [cols, setCols] = useState(3);
+  const [header, setHeader] = useState(true);
+  const [prompt, setPrompt] = useState("");
+  const [useJson, setUseJson] = useState(false);
+  const [ai, setAi] = useState(DEFAULT_AI);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  const open = () => props.mode !== null;
   function close() {
     setPreview(null);
     setBusy(false);
@@ -38,9 +36,9 @@ export function Composer(props: { mode: ComposerMode; onClose: () => void; ctx: 
   }
 
   function tableJson(): string {
-    const c = Math.max(1, cols());
-    const bodyRows = Math.max(0, rows() - (header() ? 1 : 0));
-    const hdr = header() ? Array.from({ length: c }, (_, i) => `항목${i + 1}`) : [];
+    const c = Math.max(1, cols);
+    const bodyRows = Math.max(0, rows - (header ? 1 : 0));
+    const hdr = header ? Array.from({ length: c }, (_, i) => `항목${i + 1}`) : [];
     const body = Array.from({ length: bodyRows }, () => Array.from({ length: c }, () => ""));
     return JSON.stringify({ blocks: [{ type: "table", header: hdr, rows: body }] });
   }
@@ -55,10 +53,10 @@ export function Composer(props: { mode: ComposerMode; onClose: () => void; ctx: 
     }
   }
   async function doGenerate() {
-    if (!prompt().trim()) return;
+    if (!prompt.trim()) return;
     setBusy(true);
     try {
-      setPreview(await props.ctx.generate(prompt()));
+      setPreview(await props.ctx.generate(prompt));
     } catch (e) {
       setPreview(`생성 실패: ${e}`);
     } finally {
@@ -68,7 +66,7 @@ export function Composer(props: { mode: ComposerMode; onClose: () => void; ctx: 
   async function doPropose() {
     setBusy(true);
     try {
-      setPreview(await props.ctx.propose(ai()));
+      setPreview(await props.ctx.propose(ai));
     } finally {
       setBusy(false);
     }
@@ -88,98 +86,96 @@ export function Composer(props: { mode: ComposerMode; onClose: () => void; ctx: 
   }
 
   return (
-    <Dialog open={open()} onOpenChange={(o) => !o && close()}>
-      <Dialog.Portal>
-        <Dialog.Overlay class="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm" />
-        <div class="fixed inset-0 z-40 flex items-start justify-center pt-[14vh]">
-          <Dialog.Content class="w-[520px] max-w-[90vw] rounded-xl border border-black/10 bg-white p-5 shadow-2xl dark:border-white/10 dark:bg-neutral-800">
-            <Show when={props.mode === "table"}>
-              <Dialog.Title class="text-sm font-semibold">표 추가 <span class="font-normal text-neutral-400">· 문서 끝에 추가</span></Dialog.Title>
-              <div class="mt-4 flex flex-col gap-3 text-sm">
-                <div class="flex items-center gap-4">
-                  <label class="flex items-center gap-2">행
-                    <input type="number" min={1} value={rows()} onInput={(e) => setRows(+e.currentTarget.value || 1)}
-                      class="w-16 rounded-md border border-black/10 bg-transparent px-2 py-1 dark:border-white/10" />
-                  </label>
-                  <label class="flex items-center gap-2">열
-                    <input type="number" min={1} value={cols()} onInput={(e) => setCols(+e.currentTarget.value || 1)}
-                      class="w-16 rounded-md border border-black/10 bg-transparent px-2 py-1 dark:border-white/10" />
-                  </label>
-                  <label class="flex items-center gap-2">
-                    <input type="checkbox" checked={header()} onChange={(e) => setHeader(e.currentTarget.checked)} /> 머리글 행
-                  </label>
-                </div>
-                <div class="flex justify-end gap-2 pt-2">
-                  <button onClick={close} class="rounded-md px-3 py-1.5 text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-700">취소</button>
-                  <button onClick={addTable} disabled={busy()} class="rounded-md bg-accent px-3 py-1.5 font-medium text-white hover:opacity-90 disabled:opacity-40">추가 <kbd class="opacity-70">⌘⏎</kbd></button>
+    <Modal open={props.mode !== null} onClose={close}>
+      <div className="w-[520px] max-w-[90vw] rounded-xl border border-black/10 bg-white p-5 shadow-2xl dark:border-white/10 dark:bg-neutral-800">
+        {props.mode === "table" && (
+          <>
+            <div className="text-sm font-semibold">표 추가 <span className="font-normal text-neutral-400">· 문서 끝에 추가</span></div>
+            <div className="mt-4 flex flex-col gap-3 text-sm">
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2">행
+                  <input type="number" min={1} value={rows} onChange={(e) => setRows(+e.currentTarget.value || 1)}
+                    className="w-16 rounded-md border border-black/10 bg-transparent px-2 py-1 dark:border-white/10" />
+                </label>
+                <label className="flex items-center gap-2">열
+                  <input type="number" min={1} value={cols} onChange={(e) => setCols(+e.currentTarget.value || 1)}
+                    className="w-16 rounded-md border border-black/10 bg-transparent px-2 py-1 dark:border-white/10" />
+                </label>
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={header} onChange={(e) => setHeader(e.currentTarget.checked)} /> 머리글 행
+                </label>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button onClick={close} className="rounded-md px-3 py-1.5 text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-700">취소</button>
+                <button onClick={addTable} disabled={busy} className="rounded-md bg-accent px-3 py-1.5 font-medium text-white hover:opacity-90 disabled:opacity-40">추가 <kbd className="opacity-70">⌘⏎</kbd></button>
+              </div>
+            </div>
+          </>
+        )}
+
+        {props.mode === "ai" && (
+          <>
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-ai">✦ AI로 작성</div>
+              <button onClick={() => setUseJson(!useJson)} className="text-xs text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200">
+                {useJson ? "← 자연어로" : "고급: JSON 직접 입력"}
+              </button>
+            </div>
+
+            {!useJson && (
+              <textarea
+                spellCheck={false}
+                placeholder="무엇을 추가할지 한국어로 적어주세요. 예: 팀원 구성에 대한 3열 표를 추가해줘"
+                className="mt-3 h-32 w-full resize-none rounded-md border border-black/10 bg-neutral-50 p-2 text-sm text-neutral-900 placeholder:text-neutral-400 dark:border-white/10 dark:bg-neutral-900 dark:text-neutral-100"
+                value={prompt}
+                onChange={(e) => setPrompt(e.currentTarget.value)}
+                onKeyDown={(e) => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                    e.preventDefault();
+                    void doGenerate();
+                  }
+                }}
+              />
+            )}
+
+            {useJson && (
+              <textarea
+                spellCheck={false}
+                className="mt-3 h-40 w-full resize-none rounded-md border border-black/10 bg-neutral-50 p-2 font-mono text-xs text-neutral-900 dark:border-white/10 dark:bg-neutral-900 dark:text-neutral-100"
+                value={ai}
+                onChange={(e) => setAi(e.currentTarget.value)}
+                onKeyDown={(e) => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                    e.preventDefault();
+                    void doPropose();
+                  }
+                }}
+              />
+            )}
+
+            {!preview && (
+              <div className="mt-3 flex justify-end gap-2 text-sm">
+                <button onClick={close} className="rounded-md px-3 py-1.5 text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-700">취소</button>
+                {!useJson ? (
+                  <button onClick={doGenerate} disabled={busy || !prompt.trim()} className="rounded-md bg-ai px-3 py-1.5 font-medium text-white hover:opacity-90 disabled:opacity-40">{busy ? "생성 중…" : "✦ 생성"} <kbd className="opacity-70">⌘⏎</kbd></button>
+                ) : (
+                  <button onClick={doPropose} disabled={busy} className="rounded-md bg-ai px-3 py-1.5 font-medium text-white hover:opacity-90 disabled:opacity-40">미리보기 <kbd className="opacity-70">⌘⏎</kbd></button>
+                )}
+              </div>
+            )}
+
+            {preview && (
+              <div className="mt-3 flex flex-col gap-2 rounded-md border border-ai/30 bg-ai/5 p-2 text-sm">
+                <pre className="max-h-48 overflow-auto whitespace-pre-wrap text-xs text-neutral-700 dark:text-neutral-300">{preview}</pre>
+                <div className="flex justify-end gap-2">
+                  <button onClick={doDiscard} className="rounded-md px-3 py-1.5 text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-700">취소</button>
+                  <button onClick={doCommit} disabled={busy} className="rounded-md bg-accent px-3 py-1.5 font-medium text-white hover:opacity-90 disabled:opacity-40">✓ 적용 (전체·실행취소 1단계)</button>
                 </div>
               </div>
-            </Show>
-
-            <Show when={props.mode === "ai"}>
-              <div class="flex items-center justify-between">
-                <Dialog.Title class="text-sm font-semibold text-ai">✦ AI로 작성</Dialog.Title>
-                <button onClick={() => setUseJson(!useJson())} class="text-xs text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200">
-                  {useJson() ? "← 자연어로" : "고급: JSON 직접 입력"}
-                </button>
-              </div>
-
-              <Show when={!useJson()}>
-                <textarea
-                  spellcheck={false}
-                  placeholder="무엇을 추가할지 한국어로 적어주세요. 예: 팀원 구성에 대한 3열 표를 추가해줘"
-                  class="mt-3 h-32 w-full resize-none rounded-md border border-black/10 bg-neutral-50 p-2 text-sm text-neutral-900 placeholder:text-neutral-400 dark:border-white/10 dark:bg-neutral-900 dark:text-neutral-100"
-                  value={prompt()}
-                  onInput={(e) => setPrompt(e.currentTarget.value)}
-                  onKeyDown={(e) => {
-                    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                      e.preventDefault();
-                      void doGenerate();
-                    }
-                  }}
-                />
-                <Show when={!preview()}>
-                  <div class="mt-3 flex justify-end gap-2 text-sm">
-                    <button onClick={close} class="rounded-md px-3 py-1.5 text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-700">취소</button>
-                    <button onClick={doGenerate} disabled={busy() || !prompt().trim()} class="rounded-md bg-ai px-3 py-1.5 font-medium text-white hover:opacity-90 disabled:opacity-40">{busy() ? "생성 중…" : "✦ 생성"} <kbd class="opacity-70">⌘⏎</kbd></button>
-                  </div>
-                </Show>
-              </Show>
-
-              <Show when={useJson()}>
-                <textarea
-                  spellcheck={false}
-                  class="mt-3 h-40 w-full resize-none rounded-md border border-black/10 bg-neutral-50 p-2 font-mono text-xs text-neutral-900 dark:border-white/10 dark:bg-neutral-900 dark:text-neutral-100"
-                  value={ai()}
-                  onInput={(e) => setAi(e.currentTarget.value)}
-                  onKeyDown={(e) => {
-                    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                      e.preventDefault();
-                      void doPropose();
-                    }
-                  }}
-                />
-                <Show when={!preview()}>
-                  <div class="mt-3 flex justify-end gap-2 text-sm">
-                    <button onClick={close} class="rounded-md px-3 py-1.5 text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-700">취소</button>
-                    <button onClick={doPropose} disabled={busy()} class="rounded-md bg-ai px-3 py-1.5 font-medium text-white hover:opacity-90 disabled:opacity-40">미리보기 <kbd class="opacity-70">⌘⏎</kbd></button>
-                  </div>
-                </Show>
-              </Show>
-
-              <Show when={preview()}>
-                <div class="mt-3 flex flex-col gap-2 rounded-md border border-ai/30 bg-ai/5 p-2 text-sm">
-                  <pre class="max-h-48 overflow-auto whitespace-pre-wrap text-xs text-neutral-700 dark:text-neutral-300">{preview()}</pre>
-                  <div class="flex justify-end gap-2">
-                    <button onClick={doDiscard} class="rounded-md px-3 py-1.5 text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-700">취소</button>
-                    <button onClick={doCommit} disabled={busy()} class="rounded-md bg-accent px-3 py-1.5 font-medium text-white hover:opacity-90 disabled:opacity-40">✓ 적용 (전체·실행취소 1단계)</button>
-                  </div>
-                </div>
-              </Show>
-            </Show>
-          </Dialog.Content>
-        </div>
-      </Dialog.Portal>
-    </Dialog>
+            )}
+          </>
+        )}
+      </div>
+    </Modal>
   );
 }

@@ -54,6 +54,10 @@ export const api = {
   exportHwpx: (path: string) => invoke<string>("export_hwpx", { path }),
   /** Natural-language AI: a provider turns a prompt into content, dry-run; returns rationale+preview. */
   aiGenerate: (prompt: string) => invoke<string>("ai_generate", { prompt }),
+  /** Vibe-docs chat-edit: the provider sees the doc as an anchored [s/b] outline and proposes
+   *  TARGETED edits (insert table/image near an anchor, shade a column, …), dry-run into a pending
+   *  proposal; returns rationale+preview. `commitProposal()` then applies it (one undo unit). */
+  aiEdit: (instruction: string) => invoke<string>("ai_edit_propose", { instruction }),
   /** Dry-run hand-authored content JSON into a preview without mutating the doc (advanced). */
   propose: (content: string) => invoke<string>("propose", { content }),
   /** Commit the pending proposal (one undo unit); returns the new page count. */

@@ -179,6 +179,28 @@ fn ai_generate(_prompt: String, _sess: tauri::State<'_, SharedSession>) -> Resul
     Err("AI 생성은 `--features ai` 빌드가 필요합니다 (cargo tauri dev -f rhwp ai)".into())
 }
 
+/// Vibe-docs chat-edit: the provider sees the LIVE document as an anchored `[s/b]` outline and
+/// proposes TARGETED edits (insert table/image near an anchor, shade a column, delete a block),
+/// dry-run into a pending proposal; returns the rationale + per-op diff for review. `commit_proposal`
+/// then applies it (one undo unit). Needs `--features ai`.
+#[cfg(feature = "ai")]
+#[tauri::command]
+fn ai_edit_propose(instruction: String, sess: tauri::State<'_, SharedSession>) -> Result<String, String> {
+    let mut s = sess.lock().map_err(|_| "session poisoned")?;
+    let provider = pick_provider();
+    let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+    let proposal = hwp_ai::propose_edits(doc, &*provider, &instruction).map_err(|e| e.to_string())?;
+    let preview = format!("{}\n\n{}", proposal.rationale, proposal.preview());
+    s.pending = Some(proposal);
+    Ok(format!("[{}]\n{preview}", provider.name()))
+}
+
+#[cfg(not(feature = "ai"))]
+#[tauri::command]
+fn ai_edit_propose(_instruction: String, _sess: tauri::State<'_, SharedSession>) -> Result<String, String> {
+    Err("AI 편집은 `--features ai` 빌드가 필요합니다 (cargo tauri dev -f rhwp ai)".into())
+}
+
 /// Pick an AI provider: a local model (Ollama) we control if reachable, else cloud BYOK
 /// (Anthropic key from env/keychain), else the deterministic Mock — so it never hard-fails.
 #[cfg(feature = "ai")]
@@ -436,6 +458,7 @@ pub fn run() {
             commit_proposal,
             discard_proposal,
             ai_generate,
+            ai_edit_propose,
             undo,
             redo,
             find_text,
