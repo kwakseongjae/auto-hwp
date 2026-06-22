@@ -67,6 +67,33 @@ pub enum Op {
     AppendRichTable { section: usize, rows: Vec<Vec<CellSpec>> },
     /// Set a section's page orientation and/or margins (patches the existing `secPr` on export).
     SetPageLayout { section: usize, orientation: Option<String>, margins_mm: Option<PageMargins> },
+
+    // ---- vibe-docs: anchored, positional edits (anchor = (section, block index) == `[s/b]`) ----
+    /// Insert a rich paragraph at block `index` (shifting later blocks down). `index == len` appends.
+    InsertParagraphAt { section: usize, index: usize, runs: Vec<RunSpec>, para: ParaSpec },
+    /// Insert a rich table at block `index` (same coverage semantics as `AppendRichTable`).
+    InsertTableAt { section: usize, index: usize, rows: Vec<Vec<CellSpec>> },
+    /// Insert an embedded image at block `index`: `bytes`/`kind` (e.g. "png") become a `BinData`,
+    /// referenced by a fresh paragraph holding an `Inline::Image`. `width`/`height` in HWPUNIT.
+    InsertImageAt { section: usize, index: usize, bytes: Vec<u8>, kind: String, width: HwpUnit, height: HwpUnit },
+    /// Delete the block at `index` in `section`.
+    DeleteBlock { section: usize, index: usize },
+    /// Recolor cells of an EXISTING table (the `index`-th block): set/clear background shade for the
+    /// cells the selector picks (a whole column, a whole row, one cell, or all). `shade=None` clears.
+    SetTableCellShade { section: usize, index: usize, sel: CellSel, shade: Option<String> },
+}
+
+/// Which cells of an existing table a [`Op::SetTableCellShade`] targets.
+#[derive(Clone, Debug)]
+pub enum CellSel {
+    /// Every cell whose logical column-span covers column `0`-based index.
+    Col(usize),
+    /// Every cell whose logical row-span covers row `0`-based index.
+    Row(usize),
+    /// The single cell anchored at (row, col).
+    Cell(usize, usize),
+    /// Every cell in the table.
+    All,
 }
 
 /// Page margins in millimeters for `SetPageLayout`.
@@ -533,61 +560,9 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             Ok(())
         }
         Op::AppendRichTable { section, rows } => {
-            if rows.is_empty() {
-                return Err(Error::Other("AppendRichTable needs at least one row".into()));
-            }
-            let bold = intern_char_shape(doc, CharShape { bold: true, ..Default::default() });
-            let plain = intern_char_shape(doc, CharShape::default());
-
-            // Place cells with HTML-table coverage: each logical row lists only uncovered cells.
-            let mut covered: std::collections::BTreeSet<(usize, usize)> = Default::default();
-            let mut cells = Vec::new();
-            let mut ncols = 0usize;
-            for (r, row) in rows.iter().enumerate() {
-                let mut c = 0usize;
-                for spec in row {
-                    while covered.contains(&(r, c)) {
-                        c += 1;
-                    }
-                    let cs = spec.col_span.max(1);
-                    let rs = spec.row_span.max(1);
-                    for dr in 0..rs {
-                        for dc in 0..cs {
-                            if dr != 0 || dc != 0 {
-                                covered.insert((r + dr, c + dc));
-                            }
-                        }
-                    }
-                    ncols = ncols.max(c + cs);
-                    cells.push(Cell {
-                        row: r,
-                        col: c,
-                        row_span: rs,
-                        col_span: cs,
-                        shade_color: spec.shade.as_deref().and_then(Color::from_hex),
-                        blocks: vec![Block::Paragraph(Paragraph {
-                            runs: vec![Run {
-                                char_shape: if spec.bold { bold } else { plain },
-                                content: vec![Inline::Text(spec.text.clone())],
-                                ..Default::default()
-                            }],
-                            dirty: Dirty(true),
-                            ..Default::default()
-                        })],
-                        dirty: Dirty(true),
-                        ..Default::default()
-                    });
-                    c += cs;
-                }
-            }
+            let table = build_rich_table(doc, rows)?;
             let sec = section_mut(doc, *section)?;
-            sec.blocks.push(Block::Table(Table {
-                rows: rows.len(),
-                cols: ncols.max(1),
-                cells,
-                dirty: Dirty(true),
-                ..Default::default()
-            }));
+            sec.blocks.push(Block::Table(table));
             sec.dirty.mark();
             Ok(())
         }
@@ -714,10 +689,189 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                 p.style_name = Some(name.clone());
             })
         }
+        Op::InsertParagraphAt { section, index, runs, para } => {
+            let interned: Vec<(usize, String)> = runs
+                .iter()
+                .map(|r| (intern_char_shape(doc, r.to_char_shape()), r.text.clone()))
+                .collect();
+            let para_shape = intern_para_shape(doc, para.to_para_shape());
+            let style_name = para.style.clone().filter(|s| !s.trim().is_empty());
+            let sec = section_mut(doc, *section)?;
+            let at = block_insert_index(sec, *index)?;
+            let para_runs = interned
+                .into_iter()
+                .map(|(char_shape, text)| Run { char_shape, content: vec![Inline::Text(text)], ..Default::default() })
+                .collect();
+            sec.blocks.insert(at, Block::Paragraph(Paragraph {
+                runs: para_runs,
+                para_shape,
+                style_name,
+                dirty: Dirty(true),
+                ..Default::default()
+            }));
+            sec.dirty.mark();
+            Ok(())
+        }
+        Op::InsertTableAt { section, index, rows } => {
+            let table = build_rich_table(doc, rows)?;
+            let sec = section_mut(doc, *section)?;
+            let at = block_insert_index(sec, *index)?;
+            sec.blocks.insert(at, Block::Table(table));
+            sec.dirty.mark();
+            Ok(())
+        }
+        Op::InsertImageAt { section, index, bytes, kind, width, height } => {
+            if bytes.is_empty() {
+                return Err(Error::Other("InsertImageAt: image bytes are empty".into()));
+            }
+            // A stable, collision-free bin_ref: the next free "imgN" not already in the store.
+            let bin_ref = {
+                let mut n = doc.bin_data.len() + 1;
+                while doc.bin_data.iter().any(|b| b.bin_ref == format!("img{n}")) {
+                    n += 1;
+                }
+                format!("img{n}")
+            };
+            doc.bin_data.push(BinData { bin_ref: bin_ref.clone(), bytes: bytes.clone(), kind: kind.clone() });
+            let plain = intern_char_shape(doc, CharShape::default());
+            let sec = section_mut(doc, *section)?;
+            let at = block_insert_index(sec, *index)?;
+            sec.blocks.insert(at, Block::Paragraph(Paragraph {
+                runs: vec![Run {
+                    char_shape: plain,
+                    content: vec![Inline::Image(ImageRef { bin_ref, width: *width, height: *height })],
+                    ..Default::default()
+                }],
+                dirty: Dirty(true),
+                ..Default::default()
+            }));
+            sec.dirty.mark();
+            Ok(())
+        }
+        Op::DeleteBlock { section, index } => {
+            let sec = section_mut(doc, *section)?;
+            if *index >= sec.blocks.len() {
+                return Err(Error::Other(format!(
+                    "DeleteBlock: block index {index} out of range (section has {} blocks)",
+                    sec.blocks.len()
+                )));
+            }
+            sec.blocks.remove(*index);
+            sec.dirty.mark();
+            Ok(())
+        }
+        Op::SetTableCellShade { section, index, sel, shade } => {
+            let color = match shade {
+                Some(s) => Some(Color::from_hex(s).ok_or_else(|| {
+                    Error::Other(format!("SetTableCellShade: bad shade color {s:?} (want #RRGGBB)"))
+                })?),
+                None => None,
+            };
+            let sec = section_mut(doc, *section)?;
+            let block = sec.blocks.get_mut(*index).ok_or_else(|| {
+                Error::Other(format!("SetTableCellShade: block index {index} out of range"))
+            })?;
+            let Block::Table(t) = block else {
+                return Err(Error::Other(format!("SetTableCellShade: block {index} is not a table")));
+            };
+            let mut hit = 0usize;
+            for cell in &mut t.cells {
+                if !cell.active {
+                    continue;
+                }
+                let (r0, c0) = (cell.row, cell.col);
+                let (r1, c1) = (r0 + cell.row_span.max(1), c0 + cell.col_span.max(1));
+                let pick = match *sel {
+                    CellSel::Col(c) => c0 <= c && c < c1,
+                    CellSel::Row(r) => r0 <= r && r < r1,
+                    CellSel::Cell(r, c) => r0 == r && c0 == c,
+                    CellSel::All => true,
+                };
+                if pick {
+                    cell.shade_color = color;
+                    cell.dirty.mark();
+                    hit += 1;
+                }
+            }
+            if hit == 0 {
+                return Err(Error::Other("SetTableCellShade: selector matched no cells".into()));
+            }
+            t.dirty.mark();
+            sec.dirty.mark();
+            Ok(())
+        }
         _ => Err(Error::NotImplemented(
-            "op apply (MVP: Append*/SetPageLayout/Set{Char,Run,Para}Pr/ApplyStyle/Insert-Delete text)",
+            "op apply (MVP: Append*/SetPageLayout/Set{Char,Run,Para}Pr/ApplyStyle/Insert-Delete text/anchored Insert*At/DeleteBlock/SetTableCellShade)",
         )),
     }
+}
+
+/// Build a rich table node from per-row cell specs (shared by `AppendRichTable`/`InsertTableAt`).
+/// Cells use HTML-table coverage: each logical row lists only the *uncovered* cells.
+fn build_rich_table(doc: &mut SemanticDoc, rows: &[Vec<CellSpec>]) -> Result<Table> {
+    if rows.is_empty() {
+        return Err(Error::Other("rich table needs at least one row".into()));
+    }
+    let bold = intern_char_shape(doc, CharShape { bold: true, ..Default::default() });
+    let plain = intern_char_shape(doc, CharShape::default());
+    let mut covered: std::collections::BTreeSet<(usize, usize)> = Default::default();
+    let mut cells = Vec::new();
+    let mut ncols = 0usize;
+    for (r, row) in rows.iter().enumerate() {
+        let mut c = 0usize;
+        for spec in row {
+            while covered.contains(&(r, c)) {
+                c += 1;
+            }
+            let cs = spec.col_span.max(1);
+            let rs = spec.row_span.max(1);
+            for dr in 0..rs {
+                for dc in 0..cs {
+                    if dr != 0 || dc != 0 {
+                        covered.insert((r + dr, c + dc));
+                    }
+                }
+            }
+            ncols = ncols.max(c + cs);
+            cells.push(Cell {
+                row: r,
+                col: c,
+                row_span: rs,
+                col_span: cs,
+                shade_color: spec.shade.as_deref().and_then(Color::from_hex),
+                blocks: vec![Block::Paragraph(Paragraph {
+                    runs: vec![Run {
+                        char_shape: if spec.bold { bold } else { plain },
+                        content: vec![Inline::Text(spec.text.clone())],
+                        ..Default::default()
+                    }],
+                    dirty: Dirty(true),
+                    ..Default::default()
+                })],
+                dirty: Dirty(true),
+                ..Default::default()
+            });
+            c += cs;
+        }
+    }
+    Ok(Table {
+        rows: rows.len(),
+        cols: ncols.max(1),
+        cells,
+        dirty: Dirty(true),
+        ..Default::default()
+    })
+}
+
+/// Resolve a positional block-insert index, allowing `index == len` (append). Errors past the end.
+fn block_insert_index(sec: &Section, index: usize) -> Result<usize> {
+    if index > sec.blocks.len() {
+        return Err(Error::Other(format!(
+            "insert index {index} out of range (section has {} blocks)",
+            sec.blocks.len()
+        )));
+    }
+    Ok(index)
 }
 
 /// A document plus its undo/redo history — the **stateful** edit surface the UI/AI drive.
@@ -1182,5 +1336,127 @@ mod tests {
         // cross-paragraph delete refused
         let mut doc = doc_with(vec![simple_para(1, "가"), simple_para(2, "나")]);
         assert!(apply(&mut doc, &Op::DeleteRange { start: caret(1, 0), end: caret(2, 1) }).is_err());
+    }
+
+    // ---- vibe-docs: anchored, positional edits ----
+
+    fn run_spec(text: &str) -> RunSpec {
+        RunSpec { text: text.into(), ..Default::default() }
+    }
+
+    /// Text of the i-th top-level paragraph block of section 0 (panics if it isn't a paragraph).
+    fn block_para_text(doc: &SemanticDoc, i: usize) -> String {
+        match &doc.sections[0].blocks[i] {
+            Block::Paragraph(p) => run_texts(p).concat(),
+            _ => panic!("block {i} is not a paragraph"),
+        }
+    }
+
+    #[test]
+    fn insert_paragraph_at_shifts_later_blocks_and_appends_at_len() {
+        let mut doc = doc_with(vec![simple_para(1, "첫"), simple_para(2, "끝")]);
+        // insert "목차" between them (index 1)
+        apply(&mut doc, &Op::InsertParagraphAt {
+            section: 0, index: 1, runs: vec![run_spec("목차")], para: ParaSpec::default(),
+        }).unwrap();
+        assert_eq!(block_para_text(&doc, 0), "첫");
+        assert_eq!(block_para_text(&doc, 1), "목차");
+        assert_eq!(block_para_text(&doc, 2), "끝");
+        // index == len appends
+        let n = doc.sections[0].blocks.len();
+        apply(&mut doc, &Op::InsertParagraphAt {
+            section: 0, index: n, runs: vec![run_spec("맨끝")], para: ParaSpec::default(),
+        }).unwrap();
+        assert_eq!(block_para_text(&doc, n), "맨끝");
+        // past the end errors
+        assert!(apply(&mut doc, &Op::InsertParagraphAt {
+            section: 0, index: 999, runs: vec![run_spec("x")], para: ParaSpec::default(),
+        }).is_err());
+    }
+
+    #[test]
+    fn insert_table_at_anchor_after_table_of_contents() {
+        // "목차 아래에 표 만들어줘": find the 목차 block, insert a table right after it.
+        let mut doc = doc_with(vec![simple_para(1, "목차"), simple_para(2, "본문")]);
+        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
+        apply(&mut doc, &Op::InsertTableAt {
+            section: 0, index: 1,
+            rows: vec![vec![cell("항목"), cell("내용")], vec![cell("A"), cell("B")]],
+        }).unwrap();
+        assert_eq!(block_para_text(&doc, 0), "목차");
+        match &doc.sections[0].blocks[1] {
+            Block::Table(t) => { assert_eq!((t.rows, t.cols), (2, 2)); }
+            _ => panic!("expected a table after 목차"),
+        }
+        assert_eq!(block_para_text(&doc, 2), "본문");
+    }
+
+    #[test]
+    fn insert_image_at_embeds_bindata_and_references_it() {
+        let mut doc = doc_with(vec![simple_para(1, "여기")]);
+        let png = vec![0x89, b'P', b'N', b'G', 1, 2, 3];
+        apply(&mut doc, &Op::InsertImageAt {
+            section: 0, index: 1, bytes: png.clone(), kind: "png".into(), width: 1000, height: 800,
+        }).unwrap();
+        assert_eq!(doc.bin_data.len(), 1);
+        assert_eq!(doc.bin_data[0].bytes, png);
+        let bin_ref = doc.bin_data[0].bin_ref.clone();
+        match &doc.sections[0].blocks[1] {
+            Block::Paragraph(p) => match &p.runs[0].content[0] {
+                Inline::Image(img) => {
+                    assert_eq!(img.bin_ref, bin_ref);
+                    assert_eq!((img.width, img.height), (1000, 800));
+                }
+                _ => panic!("expected an image inline"),
+            },
+            _ => panic!("expected an image paragraph"),
+        }
+        // empty bytes refused
+        assert!(apply(&mut doc, &Op::InsertImageAt {
+            section: 0, index: 1, bytes: vec![], kind: "png".into(), width: 1, height: 1,
+        }).is_err());
+    }
+
+    #[test]
+    fn delete_block_removes_and_bounds_check() {
+        let mut doc = doc_with(vec![simple_para(1, "가"), simple_para(2, "나"), simple_para(3, "다")]);
+        apply(&mut doc, &Op::DeleteBlock { section: 0, index: 1 }).unwrap();
+        assert_eq!(doc.sections[0].blocks.len(), 2);
+        assert_eq!(block_para_text(&doc, 0), "가");
+        assert_eq!(block_para_text(&doc, 1), "다");
+        assert!(apply(&mut doc, &Op::DeleteBlock { section: 0, index: 9 }).is_err());
+    }
+
+    #[test]
+    fn set_table_column_shade_recolors_left_column_like_a_header() {
+        // "표의 좌측열을 헤더 색상으로": shade column 0 of an existing table.
+        let mut doc = doc_with(vec![simple_para(1, "앞")]);
+        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
+        apply(&mut doc, &Op::InsertTableAt {
+            section: 0, index: 1,
+            rows: vec![vec![cell("구분"), cell("값1")], vec![cell("항목"), cell("값2")]],
+        }).unwrap();
+        apply(&mut doc, &Op::SetTableCellShade {
+            section: 0, index: 1, sel: CellSel::Col(0), shade: Some("#D9E1F2".into()),
+        }).unwrap();
+        let want = Color::from_hex("#D9E1F2");
+        if let Block::Table(t) = &doc.sections[0].blocks[1] {
+            for c in &t.cells {
+                if c.col == 0 {
+                    assert_eq!(c.shade_color, want, "left column cell ({},{}) shaded", c.row, c.col);
+                } else {
+                    assert_eq!(c.shade_color, None, "right column untouched");
+                }
+            }
+        } else {
+            panic!("expected table");
+        }
+        // a selector that hits nothing errors; a non-table block errors
+        assert!(apply(&mut doc, &Op::SetTableCellShade {
+            section: 0, index: 1, sel: CellSel::Col(99), shade: None,
+        }).is_err());
+        assert!(apply(&mut doc, &Op::SetTableCellShade {
+            section: 0, index: 0, sel: CellSel::All, shade: None,
+        }).is_err());
     }
 }
