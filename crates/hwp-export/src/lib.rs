@@ -38,8 +38,8 @@ const BASE_CSS: &str = "\
 font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR',sans-serif;\
 line-height:1.7;color:#1a1a1a;word-break:keep-all;overflow-wrap:break-word}\
 .hwp-doc p{margin:0 0 .6em}\
-.hwp-doc table{border-collapse:collapse;margin:1em 0;max-width:100%}\
-.hwp-doc td{border:1px solid #c4c4c4;padding:4px 8px;vertical-align:top}\
+.hwp-doc table{border-collapse:collapse;margin:1em auto}\
+.hwp-doc td{border:1px solid #888;padding:3px 6px;vertical-align:top}\
 .hwp-doc img{max-width:100%;height:auto}\
 .hwp-section+.hwp-section{margin-top:2.5rem;border-top:1px dashed #ddd;padding-top:2.5rem}\
 .hwp-eq,.hwp-raw{display:inline-block;color:#8a6d3b;background:#fcf6e3;border:1px solid #f0e3b8;\
@@ -112,27 +112,10 @@ fn render_element(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut St
         }
         Some(Tag::Para) => wrap(el, "p", &id_attr(el), assets, out),
         Some(Tag::Run) | Some(Tag::Span) => wrap(el, "span", "", assets, out),
-        Some(Tag::Table) => wrap(el, "table", "", assets, out),
-        Some(Tag::TableRow) => wrap(el, "tr", "", assets, out),
-        Some(Tag::TableCell) => {
-            // A covered (merged-away) cell is represented by the spanning cell's colspan/rowspan, so
-            // omit it from the HTML grid.
-            if el.attrs.contains_key("data-inactive") {
-                return;
-            }
-            let mut extra = String::new();
-            if let Some(cs) = el.attrs.get("colSpan") {
-                extra.push_str(&format!(" colspan=\"{}\"", esc_attr(cs)));
-            }
-            if let Some(rs) = el.attrs.get("rowSpan") {
-                extra.push_str(&format!(" rowspan=\"{}\"", esc_attr(rs)));
-            }
-            if let Some(shade) = el.attrs.get("data-shade") {
-                // shade is a hex color our codec produced; inline it as a background.
-                extra.push_str(&format!(" style=\"background:{}\"", esc_attr(shade)));
-            }
-            wrap(el, "td", &extra, assets, out);
-        }
+        Some(Tag::Table) => render_table(el, assets, out),
+        // TableRow/TableCell are rendered by render_table (the codec emits cells FLAT under Table
+        // with data-row/data-col); a stray one outside a Table just renders its children.
+        Some(Tag::TableRow) | Some(Tag::TableCell) => render_children(el, assets, out),
         Some(Tag::Image) => render_image(el, assets, out),
         Some(Tag::Equation) => out.push_str("<span class=\"hwp-eq\" title=\"수식\">[수식]</span>"),
         Some(Tag::Field) => {
@@ -162,6 +145,69 @@ fn render_element(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut St
         // no content is ever lost.
         Some(Tag::Document) | None => render_children(el, assets, out),
     }
+}
+
+/// Render a table from the codec's FLAT cell list: group cells by their `data-row` into real `<tr>`
+/// rows (ascending row index), drop covered (`data-inactive`) cells, honor colspan/rowspan + shade,
+/// and — when the codec carries `data-colw` (per-column widths in px) — emit a `<colgroup>` with
+/// `table-layout:fixed` so the column proportions match the original.
+fn render_table(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut String) {
+    let mut rows: BTreeMap<usize, Vec<&JsxElement>> = BTreeMap::new();
+    for child in &el.children {
+        if let JsxNode::Element(cell) = child {
+            if cell.tag() == Some(Tag::TableCell) {
+                let r = cell.attrs.get("data-row").and_then(|s| s.parse().ok()).unwrap_or(0usize);
+                rows.entry(r).or_default().push(cell);
+            }
+        }
+    }
+
+    // Per-column widths (HWPUNIT) → px (1in = 7200 HWPUNIT = 96px ⇒ px = hwpunit/75) give the table
+    // its real column proportions (table-layout:fixed + a <colgroup>), so it matches the original
+    // instead of the browser's content-based auto-sizing.
+    let cols_px: Vec<f64> = el
+        .attrs
+        .get("data-colw")
+        .map(|w| w.split(',').filter_map(|v| v.parse::<f64>().ok()).map(|h| h / 75.0).collect())
+        .unwrap_or_default();
+
+    out.push_str("<table");
+    out.push_str(&class_attr(&el.class_list));
+    if !cols_px.is_empty() {
+        let total: f64 = cols_px.iter().sum();
+        out.push_str(&format!(" style=\"table-layout:fixed;width:{total:.0}px\""));
+    }
+    out.push('>');
+    if !cols_px.is_empty() {
+        out.push_str("<colgroup>");
+        for w in &cols_px {
+            out.push_str(&format!("<col style=\"width:{w:.0}px\">"));
+        }
+        out.push_str("</colgroup>");
+    }
+    for cells in rows.values() {
+        out.push_str("<tr>");
+        for cell in cells {
+            if cell.attrs.contains_key("data-inactive") {
+                continue; // covered cell — represented by the spanning cell's span
+            }
+            out.push_str("<td");
+            if let Some(cs) = cell.attrs.get("colSpan") {
+                out.push_str(&format!(" colspan=\"{}\"", esc_attr(cs)));
+            }
+            if let Some(rs) = cell.attrs.get("rowSpan") {
+                out.push_str(&format!(" rowspan=\"{}\"", esc_attr(rs)));
+            }
+            if let Some(shade) = cell.attrs.get("data-shade") {
+                out.push_str(&format!(" style=\"background:{}\"", esc_attr(shade)));
+            }
+            out.push('>');
+            render_children(cell, assets, out);
+            out.push_str("</td>");
+        }
+        out.push_str("</tr>");
+    }
+    out.push_str("</table>");
 }
 
 fn render_image(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut String) {

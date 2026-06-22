@@ -340,6 +340,7 @@ impl<'a> Lifter<'a> {
                     col_span: c.col_span.max(1) as usize,
                     blocks,
                     active: true,
+                    shade_color: self.cell_shade(c.border_fill_id),
                     ..Default::default()
                 }
             })
@@ -349,9 +350,25 @@ impl<'a> Lifter<'a> {
             rows: t.row_count as usize,
             cols: t.col_count as usize,
             cells,
+            // Per-column widths (HWPUNIT) for faithful column proportions on render.
+            col_widths: t.get_column_widths().iter().map(|&w| w as i32).collect(),
             provenance: Provenance { source: Some(SourceFormat::Hwp5), raw: None },
             ..Default::default()
         }
+    }
+
+    /// Resolve a cell's `border_fill_id` (1-based, per rhwp) → its solid background as a shade color,
+    /// or `None` for an unfilled / white cell. This is the gray header/title shading HWP docs use.
+    fn cell_shade(&self, border_fill_id: u16) -> Option<Color> {
+        let idx = (border_fill_id as usize).checked_sub(1)?;
+        let bf = self.doc.doc_info.border_fills.get(idx)?;
+        let solid = bf.fill.solid.as_ref()?;
+        let color = lift_text_color(solid.background_color);
+        // Skip "no shade": white (the default cell background) and pure black (unset) add no signal.
+        if color == (Color { r: 255, g: 255, b: 255, a: 255 }) || color == Color::default() {
+            return None;
+        }
+        Some(color)
     }
 }
 

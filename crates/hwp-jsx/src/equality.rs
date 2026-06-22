@@ -145,6 +145,7 @@ fn inline_eq(a: &Inline, b: &Inline) -> bool {
 fn table_eq(a: &Table, b: &Table) -> bool {
     a.rows == b.rows
         && a.cols == b.cols
+        && a.col_widths == b.col_widths
         && prov_eq(&a.provenance, &b.provenance)
         && pass_eq(&a.passthrough, &b.passthrough)
         && a.dirty == b.dirty

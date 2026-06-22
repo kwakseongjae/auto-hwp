@@ -318,6 +318,10 @@ fn emit_table(t: &Table) -> JsxNode {
     let mut el = JsxElement::new(Tag::Table)
         .with_attr("data-rows", t.rows.to_string())
         .with_attr("data-cols", t.cols.to_string());
+    if !t.col_widths.is_empty() {
+        let w = t.col_widths.iter().map(|w| w.to_string()).collect::<Vec<_>>().join(",");
+        el.attrs.insert("data-colw".into(), w);
+    }
     el.attrs.insert("data-prov".into(), encode_provenance(&t.provenance));
     if !t.passthrough.is_empty() {
         el.attrs.insert(
@@ -718,10 +722,16 @@ fn parse_table(el: &JsxElement) -> Result<Table> {
             _ => Err(Error::Parse("table child is not a TableCell".into())),
         })
         .collect::<Result<_>>()?;
+    let col_widths = el
+        .attrs
+        .get("data-colw")
+        .map(|s| s.split(',').filter_map(|w| w.parse().ok()).collect())
+        .unwrap_or_default();
     Ok(Table {
         rows: el.attrs.get("data-rows").and_then(|v| v.parse().ok()).unwrap_or(0),
         cols: el.attrs.get("data-cols").and_then(|v| v.parse().ok()).unwrap_or(0),
         cells,
+        col_widths,
         provenance: el.attrs.get("data-prov").map(|s| decode_provenance(s)).unwrap_or_default(),
         passthrough: parse_pass_attr(el)?,
         dirty: Dirty(el.attrs.contains_key("data-dirty")),
