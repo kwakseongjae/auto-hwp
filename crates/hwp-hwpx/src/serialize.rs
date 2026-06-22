@@ -621,7 +621,7 @@ fn patch_section_xml(orig: &[u8], sec: &Section, table_ref: Option<&str>, plan: 
                 next_id += 1;
                 emit_paragraph(&mut inject, pid, &para_ref, style_id, runs, &ctx, &mut next_id);
             }
-            EmitBlock::Table { rows, cols, cells } => {
+            EmitBlock::Table { rows, cols, cells, col_widths } => {
                 // A table lives inside a wrapping <hp:p><hp:run>…</hp:run></hp:p>.
                 let pid = next_id;
                 let tid = next_id + 1;
@@ -630,7 +630,7 @@ fn patch_section_xml(orig: &[u8], sec: &Section, table_ref: Option<&str>, plan: 
                 inject.push_str(&format!(
                     "<hp:p id=\"{pid}\" paraPrIDRef=\"{base_para_ref}\" styleIDRef=\"0\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\"><hp:run charPrIDRef=\"{plain_ref}\">"
                 ));
-                emit_table(&mut inject, tid, *rows, *cols, cells, base_para_ref, &plain_ref, &cref, bf, &plan.shade_ref, &mut next_id);
+                emit_table(&mut inject, tid, *rows, *cols, cells, col_widths, base_para_ref, &plain_ref, &cref, bf, &plan.shade_ref, &mut next_id);
                 inject.push_str("<hp:t></hp:t></hp:run></hp:p>");
             }
             EmitBlock::Image { bin_ref, width, height } => {
@@ -755,7 +755,9 @@ enum RunPiece {
 /// A dirty block ready to serialize: a paragraph, a table, or an embedded image.
 enum EmitBlock {
     Para { para_shape: usize, style: Option<String>, runs: Vec<RunPiece> },
-    Table { rows: usize, cols: usize, cells: Vec<PlacedCell> },
+    /// `col_widths` (HWPUNIT, `cols` entries) are the captured per-column widths; empty ⇒ the emitter
+    /// falls back to uniform columns. Carrying them preserves a .hwp table's real column proportions.
+    Table { rows: usize, cols: usize, cells: Vec<PlacedCell>, col_widths: Vec<i32> },
     /// An image, emitted as a `<hp:pic>` wrapped in its own paragraph. `bin_ref` is the manifest
     /// item id + `binaryItemIDRef`; width/height are the display size in HWPUNIT.
     Image { bin_ref: String, width: i32, height: i32 },
@@ -820,6 +822,7 @@ fn project_block(b: &Block) -> EmitBlock {
             rows: t.rows.max(1),
             cols: t.cols.max(1),
             cells: placed_cells(t),
+            col_widths: t.col_widths.clone(),
         },
     }
 }
@@ -958,7 +961,7 @@ fn emit_cell_content(
                 let ctx = BodyCtx { cref, base_para_ref, plain_ref, bf, shade_ref };
                 emit_paragraph(out, pid, base_para_ref, "0", runs, &ctx, next_id);
             }
-            EmitBlock::Table { rows, cols, cells } => {
+            EmitBlock::Table { rows, cols, cells, col_widths } => {
                 // A nested table lives inside a wrapping <hp:p><hp:run>…</hp:run></hp:p>.
                 let pid = *next_id;
                 let tid = *next_id + 1;
@@ -966,7 +969,7 @@ fn emit_cell_content(
                 out.push_str(&format!(
                     "<hp:p id=\"{pid}\" paraPrIDRef=\"{base_para_ref}\" styleIDRef=\"0\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\"><hp:run charPrIDRef=\"{plain_ref}\">"
                 ));
-                emit_table(out, tid, *rows, *cols, cells, base_para_ref, plain_ref, cref, bf, shade_ref, next_id);
+                emit_table(out, tid, *rows, *cols, cells, col_widths, base_para_ref, plain_ref, cref, bf, shade_ref, next_id);
                 out.push_str("<hp:t></hp:t></hp:run></hp:p>");
             }
             EmitBlock::Image { bin_ref, width, height } => {
@@ -1096,12 +1099,14 @@ fn emit_paragraph(
 /// Geometry is synthetic — columns sum to the standard text width (42520 HWPUNIT); Hancom
 /// re-lays-out on open.
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 fn emit_table(
     out: &mut String,
     tid: u64,
     rows: usize,
     cols: usize,
     cells: &[PlacedCell],
+    col_widths: &[i32],
     para_ref: &str,
     plain_ref: &str,
     cref: &dyn Fn(usize) -> String,
@@ -1109,15 +1114,25 @@ fn emit_table(
     shade_ref: &BTreeMap<String, String>,
     next_id: &mut u64,
 ) {
-    const W: u64 = 42520; // standard A4 text width in HWPUNIT
+    const W_DEFAULT: u64 = 42520; // standard A4 text width in HWPUNIT (fallback when widths unknown)
     const RH: u64 = 2200; // ~7.7mm per row
-    let col_w = W / cols as u64;
-    let col_w_at = |c: usize| if c + 1 == cols { W - col_w * (cols as u64 - 1) } else { col_w };
-    let span_w = |c: usize, n: usize| (c..(c + n).min(cols)).map(col_w_at).sum::<u64>();
+    // Use the CAPTURED per-column widths when they're present and valid (one positive entry per
+    // column) — this preserves a .hwp table's real proportions (e.g. a narrow label column + wide
+    // value column). Otherwise fall back to uniform columns summing to the standard text width.
+    let widths_ok = col_widths.len() == cols && col_widths.iter().all(|&w| w > 0);
+    let widths: Vec<u64> = if widths_ok {
+        col_widths.iter().map(|&w| w as u64).collect()
+    } else {
+        let cw = W_DEFAULT / cols as u64;
+        (0..cols).map(|c| if c + 1 == cols { W_DEFAULT - cw * (cols as u64 - 1) } else { cw }).collect()
+    };
+    let w_total: u64 = widths.iter().sum();
+    let span_w = |c: usize, n: usize| widths[c..(c + n).min(cols)].iter().sum::<u64>();
     let height = RH * rows as u64;
+    let w = w_total; // table box width = sum of column widths
     out.push_str(&format!(
         "<hp:tbl id=\"{tid}\" zOrder=\"0\" numberingType=\"TABLE\" textWrap=\"TOP_AND_BOTTOM\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" pageBreak=\"CELL\" repeatHeader=\"1\" rowCnt=\"{rows}\" colCnt=\"{cols}\" cellSpacing=\"0\" borderFillIDRef=\"{bf}\" noAdjust=\"0\">\
-<hp:sz width=\"{W}\" widthRelTo=\"ABSOLUTE\" height=\"{height}\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/>\
+<hp:sz width=\"{w}\" widthRelTo=\"ABSOLUTE\" height=\"{height}\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/>\
 <hp:pos treatAsChar=\"1\" affectLSpacing=\"0\" flowWithText=\"1\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PARA\" horzRelTo=\"COLUMN\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"0\" horzOffset=\"0\"/>\
 <hp:outMargin left=\"283\" right=\"283\" top=\"283\" bottom=\"283\"/>\
 <hp:inMargin left=\"510\" right=\"510\" top=\"141\" bottom=\"141\"/>"
