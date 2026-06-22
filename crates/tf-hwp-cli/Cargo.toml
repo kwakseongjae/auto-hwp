@@ -14,8 +14,8 @@ path = "src/main.rs"
 default = []
 # Compile the rhwp bootstrap so `render`/`view`/`fidelity` compare work (needs external/rhwp submodule).
 rhwp = ["hwp-core/rhwp", "hwp-fidelity/rhwp"]
-# Enable the AI providers for `ai-fill`: Anthropic BYOK (env or keychain) + local Ollama (Qwen3).
-ai = ["hwp-ai/anthropic", "hwp-ai/keyring", "hwp-ai/local"]
+# Enable the AI providers: Anthropic BYOK, local Ollama (Qwen3), OpenRouter (BYOK, OpenAI-compatible).
+ai = ["hwp-ai/anthropic", "hwp-ai/keyring", "hwp-ai/local", "hwp-ai/openrouter"]
 
 [dependencies]
 hwp-model = { workspace = true }

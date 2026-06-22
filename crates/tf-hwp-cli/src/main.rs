@@ -308,11 +308,15 @@ fn pick_provider(name: &str) -> Result<Box<dyn hwp_ai::LlmProvider>, String> {
     match name {
         "mock" => Ok(Box::new(hwp_ai::MockProvider)),
         "anthropic" => anthropic_provider(),
+        "openrouter" => openrouter_provider(),
         "local" => local_provider(),
         "auto" => {
-            // Prefer a local model we control, then cloud BYOK, then the deterministic mock — so a
-            // test/CI machine with neither still gets our controlled generation.
-            if local_available() {
+            // Same order as the desktop app (pick_provider in hwp-viewer): OpenRouter BYOK first, then
+            // a local Ollama we control, then Anthropic BYOK, then the deterministic mock — so a
+            // test/CI machine with none still gets our controlled generation.
+            if hwp_ai::secret::has_openrouter_key() {
+                openrouter_provider().or_else(|_| Ok(Box::new(hwp_ai::MockProvider)))
+            } else if local_available() {
                 local_provider()
             } else if hwp_ai::secret::has_anthropic_key() {
                 anthropic_provider().or_else(|_| Ok(Box::new(hwp_ai::MockProvider)))
@@ -320,8 +324,20 @@ fn pick_provider(name: &str) -> Result<Box<dyn hwp_ai::LlmProvider>, String> {
                 Ok(Box::new(hwp_ai::MockProvider))
             }
         }
-        other => Err(format!("unknown provider '{other}' (use auto | mock | anthropic | local)")),
+        other => Err(format!("unknown provider '{other}' (use auto | mock | anthropic | openrouter | local)")),
     }
+}
+
+#[cfg(feature = "ai")]
+fn openrouter_provider() -> Result<Box<dyn hwp_ai::LlmProvider>, String> {
+    hwp_ai::openrouter::OpenRouterProvider::from_env()
+        .map(|p| Box::new(p) as Box<dyn hwp_ai::LlmProvider>)
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(not(feature = "ai"))]
+fn openrouter_provider() -> Result<Box<dyn hwp_ai::LlmProvider>, String> {
+    Err("the openrouter provider needs a build with `--features ai` (then set OPENROUTER_API_KEY)".into())
 }
 
 #[cfg(feature = "ai")]
