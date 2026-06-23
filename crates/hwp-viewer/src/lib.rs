@@ -201,6 +201,70 @@ async fn export_hwpx(path: String, sess: tauri::State<'_, SharedSession>) -> Res
     .map_err(|e| e.to_string())?
 }
 
+/// Export the LIVE document to a self-contained HTML file at `path` (the pivot's web render): the
+/// SAME `hwp_jsx::emit` → `hwp_export::emit_html` path as the in-app HTML preview (`render_doc_html`)
+/// and the CLI `export-html`, so the written file matches what the viewer shows byte-for-byte.
+/// Edits are reflected because we project the live SemanticDoc, not a stale copy.
+#[tauri::command]
+async fn export_doc_html(path: String, sess: tauri::State<'_, SharedSession>) -> Result<String, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let s = sess.lock().map_err(|_| "session poisoned")?;
+        let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+        let title = std::path::Path::new(&path)
+            .file_stem()
+            .map(|t| t.to_string_lossy().into_owned());
+        let proj = hwp_jsx::emit(doc);
+        let html = hwp_export::emit_html(&proj, &hwp_export::HtmlOptions { title });
+        std::fs::write(&path, html.as_bytes()).map_err(|e| format!("write {path}: {e}"))?;
+        Ok(format!("{} bytes · HTML 저장됨", html.len()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Export the LIVE document to a PDF file at `path` through OUR OWN engine (NOT a browser print):
+/// the SAME path as the CLI `export-pdf` — `hwp_export::pdf::export_pdf` paginates+places the live
+/// SemanticDoc (`place_doc` → PageLayerTree → krilla), embedding a subset of the discovered Korean
+/// face. Under `--features shaper` the real rustybuzz advances drive placement, so the PDF matches
+/// the in-app "자체 렌더" view. Needs `--features pdf`; without it returns a clear, actionable error.
+#[cfg(feature = "pdf")]
+#[tauri::command]
+async fn export_doc_pdf(path: String, sess: tauri::State<'_, SharedSession>) -> Result<String, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let s = sess.lock().map_err(|_| "session poisoned")?;
+        let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+        let fonts = own_render_fonts();
+        let title = std::path::Path::new(&path)
+            .file_stem()
+            .map(|t| t.to_string_lossy().into_owned());
+        let result = hwp_export::pdf::export_pdf(doc, fonts.as_ref(), &hwp_export::pdf::PdfOptions { title })?;
+        std::fs::write(&path, &result.bytes).map_err(|e| format!("write {path}: {e}"))?;
+        let font = match &result.font_path {
+            Some(_) => "한글 글꼴 임베드됨",
+            None => "한글 글꼴 없음 — 글자는 빈 박스 (기하만)",
+        };
+        Ok(format!(
+            "{} pages · {} KB · {font}",
+            result.pages,
+            result.bytes.len() / 1024
+        ))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Without `--features pdf` the krilla backend isn't compiled in — return an actionable error rather
+/// than silently writing a wrong/empty file (mirrors the CLI `export-pdf` interim message).
+#[cfg(not(feature = "pdf"))]
+#[tauri::command]
+async fn export_doc_pdf(_path: String, _sess: tauri::State<'_, SharedSession>) -> Result<String, String> {
+    Err("PDF 내보내기는 `--features pdf` 빌드가 필요합니다 (cargo tauri dev -f \"rhwp ai pdf\"). \
+         대안: HTML로 내보낸 뒤 브라우저에서 인쇄 ▸ PDF로 저장."
+        .into())
+}
+
 /// Dry-run AI content into a preview (rationale + per-op diff) WITHOUT mutating the document.
 #[tauri::command]
 fn propose(content: String, sess: tauri::State<'_, SharedSession>) -> Result<String, String> {
@@ -628,6 +692,8 @@ pub fn run() {
             doc_page_count,
             apply_content,
             export_hwpx,
+            export_doc_html,
+            export_doc_pdf,
             propose,
             commit_proposal,
             discard_proposal,
@@ -705,5 +771,28 @@ mod tests {
         assert!(msg.contains("OK"), "editor-open-safety OK: {msg}");
         let doc = hwp_core::Engine::open(&std::fs::read(&out).unwrap()).unwrap();
         assert!(doc.plain_text().contains("뷰어에서 추가"));
+    }
+
+    /// PHASE C: the `export_doc_html` command body — project the LIVE (edited) doc through
+    /// `hwp_jsx::emit` → `hwp_export::emit_html` and write it. Drives the same logic the async Tauri
+    /// command runs (which needs a `State` we can't build headless), so the written HTML carries the
+    /// edit and is a self-contained document. Feature-free (no `pdf`/`rhwp`), like the path it tests.
+    #[test]
+    fn export_doc_html_writes_live_doc() {
+        let mut sess = hwp_mcp::Session::default();
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/hwpx/FormattingShowcase.hwpx");
+        mcp_call(&mut sess, "open_document", json!({ "path": path })).unwrap();
+        let content = r#"{"blocks":[{"type":"heading","text":"HTML로 내보내기","style":"개요 1"}]}"#;
+        mcp_call(&mut sess, "apply_content", json!({ "content": content })).unwrap();
+
+        let doc = sess.doc.as_ref().expect("doc open").doc();
+        let proj = hwp_jsx::emit(doc);
+        let html = hwp_export::emit_html(&proj, &hwp_export::HtmlOptions { title: Some("t".into()) });
+        let out = std::env::temp_dir().join("hwp_viewer_export.html");
+        std::fs::write(&out, html.as_bytes()).unwrap();
+
+        let written = std::fs::read_to_string(&out).unwrap();
+        assert!(written.starts_with("<!doctype html>"), "self-contained HTML document");
+        assert!(written.contains("HTML로 내보내기"), "the live edit is in the export");
     }
 }

@@ -61,6 +61,13 @@ export const api = {
   applyContent: (content: string) => invoke<number>("apply_content", { content }),
   /** Serialize the edited document to a .hwpx path; returns a status line. */
   exportHwpx: (path: string) => invoke<string>("export_hwpx", { path }),
+  /** Export the live doc to a self-contained HTML file (JSX/CSS → emit_html — matches the HTML
+   *  preview byte-for-byte). Returns a status line. */
+  exportHtml: (path: string) => invoke<string>("export_doc_html", { path }),
+  /** Export the live doc to a PDF file through OUR OWN engine (place_doc → paint IR → krilla —
+   *  matches 자체 렌더, NOT a browser print). Throws an actionable error if the build lacks
+   *  `--features pdf`. Returns a status line. */
+  exportPdf: (path: string) => invoke<string>("export_doc_pdf", { path }),
   /** Natural-language AI: a provider turns a prompt into content, dry-run; returns rationale+preview. */
   aiGenerate: (prompt: string) => invoke<string>("ai_generate", { prompt }),
   /** Vibe-docs chat-edit: the provider sees the doc as an anchored [s/b] outline and proposes

@@ -378,6 +378,37 @@ export default function App() {
       setBusyLabel(null);
     }
   }, []);
+
+  // Export the LIVE doc to a self-contained HTML file (JSX/CSS → emit_html; matches the HTML preview).
+  const doExportHtml = useCallback(async () => {
+    if (pageCountRef.current === 0) return;
+    const path = await saveDialog({ defaultPath: "export.html", filters: [{ name: "HTML", extensions: ["html", "htm"] }] });
+    if (typeof path !== "string") return;
+    setBusyLabel("HTML 내보내는 중…");
+    try {
+      toast("ok", `HTML 내보냄 · ${await api.exportHtml(path)}`);
+    } catch (e) {
+      toast("warn", `HTML 내보내기 실패: ${e}`);
+    } finally {
+      setBusyLabel(null);
+    }
+  }, []);
+
+  // Export the LIVE doc to a PDF through OUR OWN engine (place_doc → paint IR → krilla; matches 자체
+  // 렌더, not a browser print). Needs the `pdf` feature — the command surfaces a clear error if absent.
+  const doExportPdf = useCallback(async () => {
+    if (pageCountRef.current === 0) return;
+    const path = await saveDialog({ defaultPath: "export.pdf", filters: [{ name: "PDF", extensions: ["pdf"] }] });
+    if (typeof path !== "string") return;
+    setBusyLabel("PDF 내보내는 중…");
+    try {
+      toast("ok", `PDF 내보냄 · ${await api.exportPdf(path)}`);
+    } catch (e) {
+      toast("warn", `PDF 내보내기 실패: ${e}`);
+    } finally {
+      setBusyLabel(null);
+    }
+  }, []);
   const pageCountRef = useRef(pageCount);
   pageCountRef.current = pageCount;
 
@@ -502,6 +533,8 @@ export default function App() {
     return [
       { id: "open", title: "문서 열기", group: "문서", keys: "⌘O", keywords: "open 열기 파일", run: doOpen },
       { id: "export", title: "HWPX로 내보내기 / 저장", group: "문서", keys: "⌘S", keywords: "export 내보내기 저장 save hwpx", disabled: !haveDoc, run: doExport },
+      { id: "export-html", title: "HTML 내보내기", group: "문서", keywords: "export html 내보내기 웹 저장 save", disabled: !haveDoc, run: doExportHtml },
+      { id: "export-pdf", title: "PDF 내보내기", group: "문서", keywords: "export pdf 내보내기 저장 save 인쇄", disabled: !haveDoc, run: doExportPdf },
       { id: "chat", title: "AI 바이브 편집 (채팅)", group: "작성", keys: "⌘L", keywords: "ai chat 채팅 편집 vibe 바이브 표 이미지", tone: "ai", disabled: !canEdit, run: () => setChatOpen((o) => !o) },
       { id: "table", title: "표 추가 (문서 끝에)", group: "작성", keys: "⌘T", keywords: "table 표 추가 그리드", disabled: !canEdit, run: () => setComposer("table") },
       { id: "ai", title: "AI 콘텐츠 제안", group: "작성", keys: "⌘.", keywords: "ai 제안 작성 propose", tone: "ai", disabled: !canEdit, run: () => setComposer("ai") },
@@ -509,7 +542,7 @@ export default function App() {
       { id: "undo", title: "실행 취소", group: "편집", keys: "⌘Z", keywords: "undo 실행취소", disabled: !canEdit, run: doUndo },
       { id: "redo", title: "다시 실행", group: "편집", keys: "⌘⇧Z", keywords: "redo 다시실행", disabled: !canEdit, run: doRedo },
     ];
-  }, [pageCount, canEdit, doOpen, doExport, openFind, doUndo, doRedo]);
+  }, [pageCount, canEdit, doOpen, doExport, doExportHtml, doExportPdf, openFind, doUndo, doRedo]);
 
   // ---- global shortcuts: registered ONCE; closures call the always-current handler set via a ref. ----
   const handlers = useRef({ doOpen, doExport, doUndo, doRedo, openFind });
@@ -642,7 +675,9 @@ export default function App() {
       {pageCount > 0 && (
         <div className="flex h-10 shrink-0 items-center gap-0.5 border-b border-black/10 bg-neutral-50/40 px-2 dark:border-white/10 dark:bg-neutral-800/30">
           <Tool onClick={doOpen} icon="📂" label="열기" keys="⌘O" />
-          <Tool onClick={doExport} icon="⬇︎" label="내보내기" keys="⌘S" />
+          <Tool onClick={doExport} icon="⬇︎" label="HWPX" keys="⌘S" />
+          <Tool onClick={doExportHtml} icon="🅷" label="HTML" />
+          <Tool onClick={doExportPdf} icon="📄" label="PDF" />
           <Sep />
           <Tool onClick={() => setChatOpen((o) => !o)} icon="✦" label="바이브 편집" tone="ai" keys="⌘L" disabled={!canEdit} />
           <Tool onClick={() => setComposer("table")} icon="▦" label="표" keys="⌘T" disabled={!canEdit} />
