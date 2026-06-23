@@ -189,8 +189,11 @@ fn place_paragraph(
             x += adv;
         }
 
-        // A line text-box (stroked) gives the renderer/DOM a hit-target even for an empty line.
-        pg.rects.push(PlacedRect { x: x0, y: line_top, w: line_w.max(1.0), h: ls.vert_size, fill: None });
+        // (No per-line text-box: the SvgSink strokes fill:None rects as borders, so a box per line
+        // cluttered the display with little frames around every bullet/line. The own-render is a
+        // read-only fidelity view — caret hit-testing uses the rhwp path, not these boxes — so only
+        // table/cell borders are drawn. Line-level hit geometry can come back behind a flag if the
+        // own surface ever becomes editable.)
 
         // An anchored object sits on the first line of its paragraph.
         if li == 0 {
