@@ -349,9 +349,9 @@ impl<'a> Lifter<'a> {
         Table {
             rows: t.row_count as usize,
             cols: t.col_count as usize,
-            cells,
             // Per-column widths (HWPUNIT) for faithful column proportions on render.
-            col_widths: t.get_column_widths().iter().map(|&w| w as i32).collect(),
+            col_widths: derive_col_widths(&t.cells, t.col_count as usize),
+            cells,
             provenance: Provenance { source: Some(SourceFormat::Hwp5), raw: None },
             ..Default::default()
         }
@@ -399,6 +399,68 @@ fn object_paragraph(inline: Inline) -> Block {
         provenance: Provenance { source: Some(SourceFormat::Hwp5), raw: None },
         ..Default::default()
     })
+}
+
+/// Derive per-column widths (HWPUNIT) from ALL cells, including spanning ones.
+///
+/// rhwp's `get_column_widths` only reads `col_span == 1` cells, so a column that appears ONLY under a
+/// spanning cell gets no width and falls back to a 1800 default — far too narrow. In gov 일반현황
+/// tables the 직업 value column (covered only by spans) collapsed this way, cramping its text to many
+/// short lines. We seed exact widths from single-column cells, then iteratively resolve span-only
+/// columns: for a span whose other columns are known, the leftover width is split among the unknown
+/// columns. Remaining unknowns keep the 1800 fallback. Proportions then match Hancom's grid.
+fn derive_col_widths(cells: &[rhwp::model::table::Cell], cols: usize) -> Vec<i32> {
+    if cols == 0 {
+        return Vec::new();
+    }
+    let mut w = vec![0u32; cols];
+    let mut known = vec![false; cols];
+    // 1) Single-column cells give exact column widths (max across rows).
+    for c in cells {
+        let col = c.col as usize;
+        if c.col_span <= 1 && col < cols {
+            w[col] = w[col].max(c.width);
+            known[col] = true;
+        }
+    }
+    // 2) Resolve columns that only appear under spans: a span's width minus its known columns,
+    //    split evenly among its unknown columns. Iterate to a fixpoint (spans can chain).
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for c in cells {
+            let span = c.col_span.max(1) as usize;
+            let start = c.col as usize;
+            if span <= 1 || start >= cols {
+                continue;
+            }
+            let end = (start + span).min(cols);
+            let unknown: Vec<usize> = (start..end).filter(|&i| !known[i]).collect();
+            if unknown.is_empty() {
+                continue;
+            }
+            let known_sum: u32 = (start..end).filter(|&i| known[i]).map(|i| w[i]).sum();
+            if c.width <= known_sum {
+                continue; // can't split a non-positive remainder sensibly
+            }
+            let each = (c.width - known_sum) / unknown.len() as u32;
+            if each == 0 {
+                continue;
+            }
+            for &i in &unknown {
+                w[i] = each;
+                known[i] = true;
+            }
+            changed = true;
+        }
+    }
+    // 3) Any column still unresolved → the historical default (keeps prior behaviour for odd tables).
+    for x in &mut w {
+        if *x == 0 {
+            *x = 1800;
+        }
+    }
+    w.into_iter().map(|x| x as i32).collect()
 }
 
 /// Map rhwp's header/footer apply scope to ours.
