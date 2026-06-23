@@ -110,8 +110,9 @@ impl Page {
                 ch: g.ch,
                 size: g.size * PT_TO_HWP,
                 color: Color::default(),
-                // PDF-ingest glyphs carry no weight flag yet — treat as regular.
+                // PDF-ingest glyphs carry no weight/slant flags yet — treat as regular.
                 bold: false,
+                italic: false,
             })
             .collect();
         PageLayerTree { schema_version: PAINT_SCHEMA_VERSION, width: w, height: h, ops }

@@ -64,10 +64,11 @@ impl Default for PageLayerTree {
 /// outline) so older producers/consumers stay valid.
 #[derive(Clone, Debug)]
 pub enum PaintOp {
-    /// A single glyph: `(x, baseline)` left edge + baseline, the `ch`, EM `size`, text `color`, and
-    /// `bold` (the run's weight — backends pick a bold face / font-weight). `bold` is additive: older
-    /// producers leave it `false` (regular), so the schema stays v1-compatible.
-    Glyph { x: f64, y: f64, ch: char, size: f64, color: crate::types::Color, bold: bool },
+    /// A single glyph: `(x, baseline)` left edge + baseline, the `ch`, EM `size`, text `color`,
+    /// `bold` (the run's weight — backends pick a bold face / font-weight) and `italic` (slant —
+    /// backends use an italic face or a synthetic oblique shear). Both are additive: older producers
+    /// leave them `false`, so the schema stays v1-compatible.
+    Glyph { x: f64, y: f64, ch: char, size: f64, color: crate::types::Color, bold: bool, italic: bool },
     /// A box: `fill = Some(color)` paints a filled rect (shading); `None` strokes the outline
     /// (cell/line border).
     Rect { x: f64, y: f64, w: f64, h: f64, fill: Option<crate::types::Color> },

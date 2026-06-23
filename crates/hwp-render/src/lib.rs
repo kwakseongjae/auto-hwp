@@ -63,7 +63,7 @@ fn lower_page(pg: &PlacedPage) -> PageLayerTree {
     }
     // 4) Glyphs (y = baseline).
     for g in &pg.glyphs {
-        ops.push(PaintOp::Glyph { x: g.x, y: g.baseline, ch: g.ch, size: g.size, color: g.color, bold: g.bold });
+        ops.push(PaintOp::Glyph { x: g.x, y: g.baseline, ch: g.ch, size: g.size, color: g.color, bold: g.bold, italic: g.italic });
     }
 
     PageLayerTree { schema_version: PAINT_SCHEMA_VERSION, width: pg.width, height: pg.height, ops }
@@ -234,7 +234,7 @@ fn esc(s: &str) -> String {
 impl PaintSink for SvgSink<'_> {
     fn paint(&mut self, op: &PaintOp) {
         match op {
-            PaintOp::Glyph { x, y, ch, size, color, bold } => {
+            PaintOp::Glyph { x, y, ch, size, color, bold, italic } => {
                 // One <text> per glyph: we own the x, so no font-kerning surprise. Skip whitespace.
                 if ch.is_whitespace() {
                     return;
@@ -245,11 +245,13 @@ impl PaintSink for SvgSink<'_> {
                 // font-family pins the bundled free face (NanumGothic, @font-face'd in the app's
                 // styles.css) so the webview draws the SAME glyph shapes our metrics assume — not the
                 // platform default (AppleGothic/serif). sans-serif is the graceful fallback.
-                // font-weight:700 (when bold) selects the bundled NanumGothic-Bold @font-face.
+                // font-weight:700 (when bold) selects the bundled NanumGothic-Bold @font-face;
+                // font-style:italic lets the webview synthesize an oblique (NanumGothic has no italic).
                 let weight = if *bold { " font-weight=\"700\"" } else { "" };
+                let style = if *italic { " font-style=\"italic\"" } else { "" };
                 self.body.push_str(&format!(
                     "<text x=\"{x:.2}\" y=\"{y:.2}\" font-size=\"{sz:.2}\" \
-                     font-family=\"NanumGothic, sans-serif\"{weight} fill=\"{fill}\">{s}</text>",
+                     font-family=\"NanumGothic, sans-serif\"{weight}{style} fill=\"{fill}\">{s}</text>",
                     x = px(*x),
                     y = px(*y),
                     sz = px(*size),
@@ -432,6 +434,23 @@ mod tests {
         doc.char_shapes[0] = CharShape { text_color: Color::from_hex("#C00000").unwrap(), ..Default::default() };
         let svg = render_doc_svg(&doc, &ApproxFontMetrics);
         assert!(svg[0].contains("fill=\"#C00000\""), "glyph fill carries the run's text color");
+    }
+
+    #[test]
+    fn bold_and_italic_flow_to_svg_attrs() {
+        // A bold+italic run must emit font-weight="700" and font-style="italic" on its <text> so the
+        // webview selects NanumGothic-Bold / synthesizes an oblique (the gov-doc's example text).
+        let mut doc = doc_with(vec![Block::Paragraph(para("기재"))]);
+        doc.char_shapes[0] = CharShape { bold: true, italic: true, ..Default::default() };
+        let svg = render_doc_svg(&doc, &ApproxFontMetrics);
+        assert!(svg[0].contains("font-weight=\"700\""), "bold run emits font-weight 700");
+        assert!(svg[0].contains("font-style=\"italic\""), "italic run emits font-style italic");
+        // A plain run emits neither.
+        let mut plain = doc_with(vec![Block::Paragraph(para("평문"))]);
+        plain.char_shapes[0] = CharShape::default();
+        let psvg = render_doc_svg(&plain, &ApproxFontMetrics);
+        assert!(!psvg[0].contains("font-weight"), "plain run has no font-weight");
+        assert!(!psvg[0].contains("font-style"), "plain run has no font-style");
     }
 
     #[test]

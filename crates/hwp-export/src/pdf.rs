@@ -182,8 +182,8 @@ fn lower_tree_to_page(
             PaintOp::Image { x, y, w, h, bin_ref } => {
                 paint_image(&mut surface, *x, *y, *w, *h, bin_ref, doc);
             }
-            PaintOp::Glyph { x, y, ch, size, color, bold } => {
-                paint_glyph(&mut surface, *x, *y, *ch, *size, *color, *bold, embed);
+            PaintOp::Glyph { x, y, ch, size, color, bold, italic } => {
+                paint_glyph(&mut surface, *x, *y, *ch, *size, *color, *bold, *italic, embed);
             }
         }
     }
@@ -313,6 +313,7 @@ fn paint_glyph(
     size: f64,
     color: Color,
     bold: bool,
+    italic: bool,
     embed: Option<&EmbedFont>,
 ) {
     if ch.is_whitespace() {
@@ -331,15 +332,26 @@ fn paint_glyph(
             // Bold runs use the embedded bold face when present; else the regular face (no synthetic
             // bolding). This is what renders the gov-doc's bold labels/headings as real bold weight.
             let face = if bold { f.bold.as_ref().unwrap_or(&f.font) } else { &f.font };
+            let (bx, by) = (pt(x), pt(y));
+            // Italic: NanumGothic has no italic face, so synthesize an oblique by shearing the glyph
+            // about its baseline (x' = x - SLANT*y + SLANT*baseline) — ascenders lean right, the
+            // baseline origin stays put. Matches the webview's font-style:italic synthesis.
+            if italic {
+                const SLANT: f32 = 0.21; // ≈ 12°, the conventional faux-italic angle
+                surface.push_transform(&krilla::geom::Transform::from_row(1.0, 0.0, -SLANT, 1.0, SLANT * by, 0.0));
+            }
             // y is the baseline in our IR; krilla's draw_text `start` is the text baseline too.
             surface.draw_text(
-                Point::from_xy(pt(x), pt(y)),
+                Point::from_xy(bx, by),
                 face.clone(),
                 pt(size),
                 s,
                 false,
                 TextDirection::Auto,
             );
+            if italic {
+                surface.pop();
+            }
         }
         None => {
             // No font: outline the glyph's EM box so the layout is still inspectable.

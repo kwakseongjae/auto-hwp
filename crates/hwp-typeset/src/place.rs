@@ -32,6 +32,8 @@ pub struct PlacedGlyph {
     pub underline: bool,
     /// Bold weight from the run's char shape (renderer picks a bold face / font-weight).
     pub bold: bool,
+    /// Italic slant from the run's char shape (renderer uses an italic face / synthetic oblique).
+    pub italic: bool,
 }
 
 /// A positioned image/equation box in absolute page coordinates.
@@ -221,6 +223,7 @@ fn place_paragraph(
                     color: g.color,
                     underline: g.underline,
                     bold: g.bold,
+                    italic: g.italic,
                 });
             }
             x += adv;
@@ -356,6 +359,7 @@ fn place_cell_content(
                         color: g.color,
                         underline: g.underline,
                         bold: g.bold,
+                        italic: g.italic,
                     });
                 }
                 x += adv;
@@ -429,6 +433,7 @@ struct GlyphInfo {
     color: Color,
     underline: bool,
     bold: bool,
+    italic: bool,
 }
 
 fn paragraph_glyphs(p: &Paragraph, doc: &SemanticDoc) -> Vec<GlyphInfo> {
@@ -439,10 +444,11 @@ fn paragraph_glyphs(p: &Paragraph, doc: &SemanticDoc) -> Vec<GlyphInfo> {
         let color = cs.map(|c| c.text_color).unwrap_or_default();
         let underline = cs.map(|c| c.underline).unwrap_or(false);
         let bold = cs.map(|c| c.bold).unwrap_or(false);
+        let italic = cs.map(|c| c.italic).unwrap_or(false);
         for inl in &run.content {
             if let Inline::Text(t) = inl {
                 for ch in t.chars() {
-                    out.push(GlyphInfo { ch: crate::subst_glyph(ch), size, color, underline, bold });
+                    out.push(GlyphInfo { ch: crate::subst_glyph(ch), size, color, underline, bold, italic });
                 }
             }
         }
