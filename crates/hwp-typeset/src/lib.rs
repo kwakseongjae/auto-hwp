@@ -238,7 +238,9 @@ pub fn layout_paragraph(p: &Paragraph, doc: &SemanticDoc, line_width: f64, fonts
 
     if n == 0 {
         // An empty paragraph still occupies one line — height = the object's if it anchors one.
-        // No glyph → use the default 1000-EM line height from the metrics provider.
+        // No glyph → use the default 1000-EM line height from the metrics provider. (Measured: Hancom
+        // gives blank lines this full leading-based height too — the layout-check oracle drops 8→7
+        // pages if we shrink it to the bare EM, so the leading is load-bearing for pagination.)
         let lh = if obj_h > 0 { obj_h as f64 } else { fonts.line_height(1000) };
         return vec![mk_line(0, lh, 0.0)];
     }
