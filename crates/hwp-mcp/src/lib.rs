@@ -86,34 +86,33 @@ struct RenderState {
     cache: hwp_core::RenderCache,
 }
 
-/// True if the session's ORIGINAL upload is a binary HW5 (.hwp) — an OLE/CFB file (magic
-/// `D0 CF 11 E0`). HWPX is a ZIP (`PK`), so this cleanly distinguishes the two without parsing.
+/// True if the open document has been edited (any block marked dirty since the original parse).
 #[cfg(feature = "rhwp")]
-fn source_is_hwp5(session: &Session) -> bool {
-    session
-        .source_bytes
-        .as_deref()
-        .is_some_and(|b| b.starts_with(&[0xD0, 0xCF, 0x11, 0xE0]))
+fn doc_is_edited(session: &Session) -> bool {
+    session.doc.as_ref().is_some_and(|d| d.doc().any_dirty())
 }
 
-/// The bytes to render for the current view.
+/// The bytes to feed the rhwp SVG render path — **the UNEDITED ORIGINAL ONLY** (P1: rhwp is
+/// parse + faithful-original render; it must never re-render an EDITED document).
 ///
-/// Default: the LIVE serialized HWPX (so edits and native HWPX layout show). EXCEPTION: an UNEDITED
-/// binary HW5 source renders from its ORIGINAL bytes — rhwp's native `.hwp` layout is more faithful
-/// than our still-maturing HWP5→HWPX conversion (page geometry, fonts, etc. land in later Track-A
-/// phases), so the initial view of an uploaded `.hwp` stays true to Hancom. Once the user edits, we
-/// must switch to the converted+edited HWPX (the original `.hwp` can't carry edits, and export is
-/// HWPX-only anyway).
+/// rhwp's native render is the faithful "원본 보기" of an uploaded file (true to Hancom's page
+/// geometry/fonts, more faithful than our still-maturing conversion). But once the user edits, the
+/// ONLY safe display is the IR → `emit_html` projection (or our own renderer): synthesizing an HWPX
+/// from the edited `SemanticDoc` and re-rendering it through rhwp can silently DROP edited content
+/// (issue #196 — Hancom-incompatible round-trip), the exact foot-gun P1 removes. So:
+///   * UNEDITED → the original `source_bytes` (a `.hwp` OR a `.hwpx`), rendered faithfully by rhwp;
+///   * EDITED   → refuse here, so the SVG path cannot show edited content (the app uses HTML mode).
 #[cfg(feature = "rhwp")]
 fn renderable_bytes(session: &Session) -> Result<Vec<u8>, String> {
-    let edited = session.doc.as_ref().is_some_and(|d| d.doc().any_dirty());
-    if source_is_hwp5(session) && !edited {
-        if let Some(src) = session.source_bytes.clone() {
-            return Ok(src);
-        }
+    if doc_is_edited(session) {
+        return Err(
+            "원본(SVG) 렌더는 편집 전 문서에만 제공됩니다 — 편집된 문서는 HTML 미리보기로 표시됩니다 \
+             (edited docs display from the IR via emit_html, not an rhwp re-render)"
+                .into(),
+        );
     }
-    let serialized = session.doc.as_ref().and_then(|d| hwp_core::serialize_hwpx(d.doc()).ok());
-    serialized.or_else(|| session.source_bytes.clone()).ok_or("no document open".into())
+    // Unedited: render the faithful original. Both .hwp and .hwpx originals are rhwp-renderable.
+    session.source_bytes.clone().ok_or("no document open".into())
 }
 
 /// The tools we expose. Kept in one place so `tools/list` and `tools/call` agree.
@@ -241,8 +240,10 @@ fn ensure_render_bytes(session: &mut Session) -> Result<(), String> {
     Ok(())
 }
 
-/// Render the current document's page to SVG (live HWPX, or the original bytes for HW5). Reuses the
-/// session render cache: re-serialize only on edit, parse only once per revision (scroll is cheap).
+/// Render the current document's page to faithful SVG via rhwp — **the UNEDITED ORIGINAL ONLY**
+/// (P1). `renderable_bytes` refuses an edited doc, so this surfaces the "edited docs use HTML" error
+/// rather than re-rendering synthesized HWPX. Reuses the session render cache (parse once per
+/// revision; scrolling the original is cheap).
 #[cfg(feature = "rhwp")]
 fn render_current(session: &mut Session, page: u32) -> Result<String, String> {
     ensure_render_bytes(session)?;
@@ -255,21 +256,26 @@ fn render_current(_session: &Session, _page: u32) -> Result<String, String> {
     Err("render_page needs a build with --features rhwp".into())
 }
 
-/// Rendered page count of the current document (reuses the same cached parse as `render_current`).
-#[cfg(feature = "rhwp")]
+/// Live page count of the current document — the single display path's count.
+///
+/// P1 split: an EDITED document counts pages via OUR engine (`hwp_core::own_page_count` over the
+/// live IR) — never by serializing the edited model to HWPX and re-rendering through rhwp. The
+/// UNEDITED original keeps rhwp's faithful page count (matches the "원본 보기" SVG). Without the
+/// `rhwp` feature there is no original render, so we always use the own-engine count.
 fn page_count_u32(session: &mut Session) -> Result<u32, String> {
-    ensure_render_bytes(session)?;
-    let RenderState { bytes, cache } = &mut session.render;
-    let bytes = &bytes.as_ref().expect("ensured above").1;
-    cache.page_count(bytes).map_err(|e| e.to_string())
+    let doc = session.doc.as_ref().ok_or("no document open (call open_document first)")?;
+    #[cfg(feature = "rhwp")]
+    if !doc.doc().any_dirty() {
+        // Unedited original → rhwp's faithful page count (same cached parse as the SVG view).
+        ensure_render_bytes(session)?;
+        let RenderState { bytes, cache } = &mut session.render;
+        let bytes = &bytes.as_ref().expect("ensured above").1;
+        return cache.page_count(bytes).map_err(|e| e.to_string());
+    }
+    Ok(hwp_core::own_page_count(doc.doc()))
 }
-#[cfg(feature = "rhwp")]
 fn page_count_current(session: &mut Session) -> Result<String, String> {
     Ok(page_count_u32(session)?.to_string())
-}
-#[cfg(not(feature = "rhwp"))]
-fn page_count_current(_session: &Session) -> Result<String, String> {
-    Err("page_count needs a build with --features rhwp".into())
 }
 
 /// WYSIWYG caret — hit-test: map a page-space click `(x, y)` to an editable model target. Reuses the
@@ -639,23 +645,11 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
         Intent::Replace { query, replacement, case_sensitive, whole_word, all } => {
             let opts = hwp_ops::find::FindOptions { case_sensitive, whole_word };
             let replaced = do_replace(session, &query, &replacement, opts, all)?;
-            // Live page count (0 when no rhwp render is available), mirroring other edit commands.
-            #[cfg(feature = "rhwp")]
+            // Live page count via OUR engine after the edit (P1: edited docs count from the IR).
             let pages = page_count_u32(session).unwrap_or(0);
-            #[cfg(not(feature = "rhwp"))]
-            let pages = 0;
             Ok(Outcome::Replaced { replaced, pages })
         }
-        Intent::PageCount => {
-            #[cfg(feature = "rhwp")]
-            {
-                Ok(Outcome::PageCount(page_count_u32(session)?))
-            }
-            #[cfg(not(feature = "rhwp"))]
-            {
-                Err("page_count needs a build with --features rhwp".into())
-            }
-        }
+        Intent::PageCount => Ok(Outcome::PageCount(page_count_u32(session)?)),
         Intent::Render { page } => {
             #[cfg(feature = "rhwp")]
             {
@@ -673,19 +667,13 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
         }
         Intent::InsertText { node, offset, text } => {
             do_insert_text(session, node, offset, &text)?;
-            // Live page count after the reflow (0 when no rhwp render), mirroring Replaced.
-            #[cfg(feature = "rhwp")]
+            // Live page count after the reflow, via OUR engine (P1: edited docs count from the IR).
             let pages = page_count_u32(session).unwrap_or(0);
-            #[cfg(not(feature = "rhwp"))]
-            let pages = 0;
             Ok(Outcome::Edited { pages })
         }
         Intent::DeleteBack { node, offset } => {
             do_delete_back(session, node, offset)?;
-            #[cfg(feature = "rhwp")]
             let pages = page_count_u32(session).unwrap_or(0);
-            #[cfg(not(feature = "rhwp"))]
-            let pages = 0;
             Ok(Outcome::Edited { pages })
         }
     }
@@ -999,12 +987,13 @@ mod tests {
         assert_eq!(empty["result"]["isError"], true, "{empty}");
     }
 
-    /// Engine seam 1 wired into the session: render the same page twice → identical SVG (the
-    /// cache serves a consistent result), and rendering still works after an edit (revision bump
-    /// re-serializes + re-parses once). Needs the rhwp render bootstrap.
+    /// P1 contract: the rhwp SVG render is the faithful "원본 보기" of the UNEDITED original — the
+    /// same page renders byte-identically twice (cache hit). Once the doc is EDITED, the SVG path
+    /// REFUSES (edited content must display from the IR via emit_html, not an rhwp re-render of a
+    /// synthesized HWPX), while `page_count` keeps working off OUR engine. Needs the rhwp bootstrap.
     #[cfg(feature = "rhwp")]
     #[test]
-    fn render_cache_is_consistent_across_pages_and_edits() {
+    fn render_svg_is_original_only_edited_docs_refuse() {
         let mut s = Session::default();
         let call = |name: &str, args: Value, s: &mut Session| {
             handle(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name,"arguments":args}}), s)
@@ -1015,19 +1004,45 @@ mod tests {
         let open = call("open_document", json!({"path": showcase()}), &mut s);
         assert_eq!(open["result"]["isError"], false, "{open}");
 
-        // Two renders of page 0 return byte-identical SVG (cache serves a consistent result).
+        // Two renders of page 0 (unedited original) return byte-identical SVG (cache hit).
         let a = call("render_page", json!({"page": 0}), &mut s);
-        assert_eq!(a["result"]["isError"], false, "render: {a}");
+        assert_eq!(a["result"]["isError"], false, "render unedited original: {a}");
         let first = text(&a);
-        assert!(!first.is_empty(), "non-empty SVG");
+        assert!(!first.is_empty() && first.contains("<svg"), "non-empty original SVG");
         let b = call("render_page", json!({"page": 0}), &mut s);
         assert_eq!(text(&b), first, "second render is identical (cache hit)");
 
-        // After an edit (revision bumps → cache invalidates), rendering still succeeds.
+        // After an edit, the SVG path REFUSES (no rhwp re-render of edited content).
         let content = r#"{"blocks":[{"type":"paragraph","runs":[{"text":"렌더 캐시 편집"}]}]}"#;
         call("apply_content", json!({"content": content}), &mut s);
         let c = call("render_page", json!({"page": 0}), &mut s);
-        assert_eq!(c["result"]["isError"], false, "render after edit: {c}");
+        assert_eq!(c["result"]["isError"], true, "edited doc must NOT render via rhwp: {c}");
+        assert!(text(&c).contains("HTML"), "the refusal points the user to the HTML preview: {}", text(&c));
+
+        // …but page_count still works (via OUR engine over the edited IR), so the UI keeps a count.
+        let pc = call("page_count", json!({}), &mut s);
+        assert_eq!(pc["result"]["isError"], false, "page_count works on an edited doc: {pc}");
+        assert!(text(&pc).trim().parse::<u32>().unwrap() >= 1, "edited page count ≥ 1: {}", text(&pc));
+    }
+
+    /// P1: `page_count` works on an EDITED doc even WITHOUT the rhwp feature (own-engine pagination),
+    /// since the edited display path is IR→html, not rhwp. (Default workspace build has no rhwp.)
+    #[test]
+    fn page_count_uses_own_engine_after_edit() {
+        let mut s = Session::default();
+        apply_intent(&mut s, Intent::Open { path: showcase() }).unwrap();
+        // Edit, then ask the page count — must succeed (own engine), regardless of the rhwp feature.
+        apply_intent(
+            &mut s,
+            Intent::ApplyContent {
+                json: r#"{"blocks":[{"type":"paragraph","runs":[{"text":"자체 엔진 페이지수"}]}]}"#.into(),
+            },
+        )
+        .unwrap();
+        match apply_intent(&mut s, Intent::PageCount).unwrap() {
+            Outcome::PageCount(n) => assert!(n >= 1, "own-engine page count ≥ 1 after edit"),
+            _ => panic!("expected PageCount"),
+        }
     }
 
     #[test]

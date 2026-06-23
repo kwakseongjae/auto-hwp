@@ -140,11 +140,26 @@ pub fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()>
     Ok(())
 }
 
-// ---- rhwp bootstrap render path (feature `rhwp`) ----
-// Faithful "원본 그대로" view via the vendored rhwp, in-process. The trait-based
-// parse→typeset→render pipeline supersedes this as our own engine matures.
+// ---- Own-engine pagination (rhwp-free; always available) ----
 
-/// Page count via the rhwp bootstrap.
+/// Page count of an EDITABLE `SemanticDoc` via OUR layout engine (`hwp-typeset` `NaiveLayout`) — no
+/// rhwp, no synthesized-HWPX re-render. This is the page count for an EDITED document: the rhwp SVG
+/// path is faithful only for the UNEDITED original, so an edited doc must page-count (and display)
+/// from the IR, never by serializing the edited model to HWPX and re-rendering it through rhwp (which
+/// can silently drop content — issue #196). Falls back to 1 page for an empty doc.
+pub fn own_page_count(doc: &SemanticDoc) -> u32 {
+    NaiveLayout
+        .layout(doc, &NullFontMetrics)
+        .map(|r| r.pages.len().max(1) as u32)
+        .unwrap_or(1)
+}
+
+// ---- rhwp bootstrap render path (feature `rhwp`) ----
+// Faithful "원본 그대로" view via the vendored rhwp, in-process. ONLY for the UNEDITED original (a
+// view-only faithful render); an edited document displays + paginates from the IR (`own_page_count`
+// + the JSX/CSS→HTML projection), never by re-rendering synthesized HWPX through rhwp.
+
+/// Page count of raw bytes via the rhwp bootstrap (faithful original render).
 #[cfg(feature = "rhwp")]
 pub fn page_count(bytes: &[u8]) -> Result<u32> {
     hwp_rhwp::page_count(bytes)

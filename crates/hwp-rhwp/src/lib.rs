@@ -6,8 +6,15 @@
 //! feature, rhwp is not compiled and these report `CapabilityUnavailable` so default builds
 //! stay fast and the workspace never hard-depends on the bootstrap.
 //!
-//! NOTE: do NOT use rhwp's HWPX/HWP save path (issue #196: Hancom rejects) — `HwpxSerializer`
-//! stays in `hwp-hwpx`. rhwp here is parse + layout + render only.
+//! SCOPE — **PARSE + faithful render of the ORIGINAL, only** (P1 seal):
+//!   * `parse_to_semantic` / `DocumentParser::parse` — lift `.hwp`/`.hwpx` BYTES into our `SemanticDoc`;
+//!   * `page_count` / `render_page_svg` / glyph-box + layout-fidelity helpers — a faithful render of
+//!     the ORIGINAL uploaded bytes (the "원본 보기" read-only view).
+//! This crate re-exports **NO** rhwp serialize / edit / save API, and the app must NEVER feed it an
+//! HWPX synthesized from an EDITED `SemanticDoc`: that round-trips through rhwp incompatibly and can
+//! drop content (issue #196 — Hancom rejects rhwp's save). An EDITED document is displayed from the
+//! IR (`hwp_jsx::emit` → `hwp_export::emit_html`) + paged by `hwp_core::own_page_count`, not by
+//! re-rendering its bytes here. `HwpxSerializer` lives in `hwp-hwpx` (always ours), not rhwp.
 
 use hwp_model::prelude::*;
 

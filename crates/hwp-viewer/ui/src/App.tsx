@@ -34,6 +34,12 @@ export default function App() {
   const [docHtml, setDocHtml] = useState<string | null>(null);
   const viewModeRef = useRef(viewMode);
   viewModeRef.current = viewMode;
+  // Once the doc has been edited, the faithful rhwp SVG "원본 보기" no longer reflects the document
+  // (the backend refuses to re-render edited content — P1). So edits force/lock the HTML preview,
+  // which renders the LIVE IR. The toggle to 원본 is disabled after the first edit.
+  const [edited, setEdited] = useState(false);
+  const editedRef = useRef(edited);
+  editedRef.current = edited;
 
   // Fetch the whole-doc HTML for the iframe preview (and after every edit when in html mode).
   const loadDocHtml = useCallback(async () => {
@@ -218,6 +224,7 @@ export default function App() {
       if (!c || !canEditRef.current) return;
       const inserted = advanceOffset(c.offset, text) - c.offset;
       const pages = await api.insertText(c.node, c.offset, text);
+      setEdited(true);
       await invalidateKeepingCaret(pages, { ...c, offset: c.offset + inserted, len: c.len + inserted });
     });
   }, [enqueueEdit, invalidateKeepingCaret]);
@@ -226,6 +233,7 @@ export default function App() {
       const c = caretRef.current;
       if (!c || !canEditRef.current || c.offset === 0) return;
       const pages = await api.deleteBack(c.node, c.offset);
+      setEdited(true);
       await invalidateKeepingCaret(pages, { ...c, offset: c.offset - 1, len: Math.max(0, c.len - 1) });
     });
   }, [enqueueEdit, invalidateKeepingCaret]);
@@ -283,6 +291,7 @@ export default function App() {
       const name = path.split("/").pop() ?? path;
       setDocName(name);
       setEditable(r.editable);
+      setEdited(false); // a freshly opened doc is unedited → 원본 보기 (rhwp SVG) is faithful again
       // Editable docs default to the HTML (JSX/CSS) preview — shows edits + the gov-doc styling;
       // a view-only original stays on the faithful rhwp SVG. The toolbar toggles either way.
       const mode = r.editable ? "html" : "svg";
@@ -367,6 +376,7 @@ export default function App() {
     setBusyLabel(all ? "모두 바꾸는 중…" : "바꾸는 중…");
     try {
       const r = await api.replaceText(findQuery, replaceQuery, caseSensitive, false, all);
+      if (r.replaced > 0) setEdited(true);
       invalidate(r.pages);
       if (r.replaced > 0) {
         toast("ok", `${r.replaced}개 바꿈`, [{ label: "실행취소", run: () => void doUndo() }]);
@@ -386,6 +396,7 @@ export default function App() {
     () => ({
       applyContent: async (json: string) => {
         const n = await api.applyContent(json);
+        setEdited(true);
         invalidate(n, n - 1);
         toast("ok", "문서 끝에 추가됨", [{ label: "실행취소", run: () => void doUndo() }]);
       },
@@ -393,6 +404,7 @@ export default function App() {
       propose: (json: string) => api.propose(json),
       commit: async () => {
         const n = await api.commitProposal();
+        setEdited(true);
         invalidate(n, n - 1);
         toast("ok", "제안 적용됨", [{ label: "실행취소", run: () => void doUndo() }]);
       },
@@ -412,6 +424,7 @@ export default function App() {
         api.insertImage(name, dataB64, scopeArg ? { section: scopeArg.section, block: scopeArg.block } : null, widthMm, heightMm),
       commit: async () => {
         const n = await api.commitProposal();
+        setEdited(true);
         invalidate(n, scopeRef.current ? scopeRef.current.page : null);
         setScope(null);
       },
@@ -474,6 +487,9 @@ export default function App() {
             setEditable(true);
             setDocName((d) => d ?? "문서");
             setChatOpen(true);
+            // An out-of-band mutation may have edited the doc → lock to the HTML (IR) preview, since
+            // the rhwp SVG can no longer faithfully show it (P1).
+            setEdited(true);
             setViewMode("html");
             viewModeRef.current = "html";
           }
@@ -571,12 +587,19 @@ export default function App() {
           <Tool
             onClick={() => {
               const next = viewMode === "html" ? "svg" : "html";
+              // After an edit the rhwp SVG "원본 보기" can't show the edited document (P1: the backend
+              // refuses to re-render edited content). Keep the user on the HTML (IR) preview.
+              if (next === "svg" && editedRef.current) {
+                toast("info", "편집된 문서는 HTML 미리보기로만 표시됩니다 (원본 보기는 편집 전용)");
+                return;
+              }
               setViewMode(next);
               viewModeRef.current = next;
               if (next === "html") void loadDocHtml();
             }}
             icon={viewMode === "html" ? "🅷" : "🖹"}
             label={viewMode === "html" ? "HTML 보기" : "원본 보기"}
+            disabled={edited && viewMode === "html"}
           />
           <Sep />
           <Tool onClick={doUndo} icon="↩︎" label="실행취소" keys="⌘Z" disabled={!canEdit} />
