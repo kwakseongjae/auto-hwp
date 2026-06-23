@@ -243,7 +243,19 @@ pub fn layout_paragraph(p: &Paragraph, doc: &SemanticDoc, line_width: f64, fonts
         }
         // Mid-word Latin break → back up to the last space (Hangul/CJK break anywhere).
         let line_end = if end < n && !is_full_width(chars[end].0) {
-            last_space.filter(|&s| s > start).unwrap_or_else(|| end.max(start + 1))
+            match last_space.filter(|&s| s > start) {
+                Some(s) => s,
+                // No space to break at and we're mid Latin word: do NOT char-break the token.
+                // Hancom keeps the word whole (it overflows a too-narrow cell). Extend to the word
+                // end (next space / full-width char) so e.g. "(Solution)" stays on one line.
+                None => {
+                    let mut e = end;
+                    while e < n && chars[e].0 != ' ' && !is_full_width(chars[e].0) {
+                        e += 1;
+                    }
+                    e.max(start + 1)
+                }
+            }
         } else {
             end.max(start + 1)
         };
