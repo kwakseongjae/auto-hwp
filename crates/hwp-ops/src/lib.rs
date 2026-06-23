@@ -939,9 +939,18 @@ fn build_rich_table(doc: &mut SemanticDoc, rows: &[Vec<CellSpec>]) -> Result<Tab
             c += cs;
         }
     }
+    let cols = ncols.max(1);
     Ok(Table {
         rows: rows.len(),
-        cols: ncols.max(1),
+        cols,
+        // Explicit equal-split proportions so the renderer doesn't fall back to auto-layout (which
+        // made inserted tables reflow to a different grid than the doc's parsed tables). The renderer
+        // scales these to the body width, so equal values = equal columns.
+        col_widths: vec![1; cols],
+        // A small outer gap so a chat-inserted table doesn't abut the block above/below it (the
+        // "tables stuck together" artifact). ~1mm; parsed tables carry their real 바깥 여백 instead.
+        outer_margin_top: 280,
+        outer_margin_bottom: 280,
         cells,
         dirty: Dirty(true),
         ..Default::default()
@@ -1474,6 +1483,28 @@ mod tests {
             _ => panic!("expected a table after 목차"),
         }
         assert_eq!(block_para_text(&doc, 2), "본문");
+    }
+
+    #[test]
+    fn inserted_table_has_explicit_col_widths_and_outer_margins() {
+        // A chat-inserted table must carry explicit equal-split col_widths (so it doesn't reflow to a
+        // different grid than the doc's parsed tables) and a small outer margin (so it doesn't abut
+        // the neighbouring block). Regression for the "3 tables stuck together with weird borders".
+        let mut doc = doc_with(vec![simple_para(1, "팀 구성")]);
+        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
+        apply(&mut doc, &Op::InsertTableAt {
+            section: 0, index: 1,
+            rows: vec![vec![cell("번호"), cell("이름"), cell("역할"), cell("비고")]],
+        }).unwrap();
+        match &doc.sections[0].blocks[1] {
+            Block::Table(t) => {
+                assert_eq!(t.cols, 4);
+                assert_eq!(t.col_widths.len(), t.cols, "col_widths has one entry per column");
+                assert!(t.col_widths.iter().all(|&w| w > 0), "all column widths positive (no auto-layout fallback)");
+                assert!(t.outer_margin_top > 0 && t.outer_margin_bottom > 0, "outer gap so it doesn't abut");
+            }
+            _ => panic!("expected a table"),
+        }
     }
 
     #[test]

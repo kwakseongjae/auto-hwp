@@ -351,6 +351,9 @@ impl<'a> Lifter<'a> {
             cols: t.col_count as usize,
             // Per-column widths (HWPUNIT) for faithful column proportions on render.
             col_widths: derive_col_widths(&t.cells, t.col_count as usize),
+            // Outer vertical margins (바깥 여백) so consecutive tables keep HWP's real gap on render.
+            outer_margin_top: t.outer_margin_top.max(0) as i32,
+            outer_margin_bottom: t.outer_margin_bottom.max(0) as i32,
             cells,
             provenance: Provenance { source: Some(SourceFormat::Hwp5), raw: None },
             ..Default::default()

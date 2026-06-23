@@ -732,6 +732,8 @@ fn parse_table(el: &JsxElement) -> Result<Table> {
         cols: el.attrs.get("data-cols").and_then(|v| v.parse().ok()).unwrap_or(0),
         cells,
         col_widths,
+        outer_margin_top: el.attrs.get("data-omt").and_then(|v| v.parse().ok()).unwrap_or(0),
+        outer_margin_bottom: el.attrs.get("data-omb").and_then(|v| v.parse().ok()).unwrap_or(0),
         provenance: el.attrs.get("data-prov").map(|s| decode_provenance(s)).unwrap_or_default(),
         passthrough: parse_pass_attr(el)?,
         dirty: Dirty(el.attrs.contains_key("data-dirty")),

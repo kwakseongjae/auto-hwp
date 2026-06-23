@@ -113,12 +113,19 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                 }
                 Block::Table(t) => {
                     let h = table_height(t, body_w, doc, fonts);
+                    // Outer top margin (바깥 여백): the gap HWP keeps above the table, but only when
+                    // it isn't the first block on the page (mirrors paragraph space_before).
+                    if vert > 0.0 {
+                        vert += t.outer_margin_top.max(0) as f64;
+                    }
                     if vert + h > body_h && vert > 0.0 {
                         new_page(&mut pages, page);
                         vert = 0.0;
                     }
                     place_table(t, doc, fonts, ml, mt + vert, body_w, &mut pages);
                     vert += h;
+                    // Outer bottom margin so the next block doesn't abut the table.
+                    vert += t.outer_margin_bottom.max(0) as f64;
                     while vert > body_h {
                         new_page(&mut pages, page);
                         vert -= body_h;
@@ -513,6 +520,34 @@ mod tests {
         sec.blocks = blocks;
         doc.sections.push(sec);
         doc
+    }
+
+    fn one_cell_table(margin: i32) -> Table {
+        Table {
+            rows: 1,
+            cols: 1,
+            cells: vec![Cell { row: 0, col: 0, blocks: vec![Block::Paragraph(para("가"))], ..Default::default() }],
+            col_widths: vec![1],
+            outer_margin_top: margin,
+            outer_margin_bottom: margin,
+            ..Default::default()
+        }
+    }
+
+    fn bottom_table_y(margin: i32) -> f64 {
+        let doc = doc_with(vec![Block::Table(one_cell_table(margin)), Block::Table(one_cell_table(margin))]);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        // The bottom-most rect's y is the 2nd table's border top.
+        placed.pages[0].rects.iter().map(|r| r.y).fold(0.0, f64::max)
+    }
+
+    #[test]
+    fn consecutive_tables_get_an_outer_margin_gap() {
+        // Outer margins (바깥 여백) must push the 2nd table down so back-to-back tables don't abut.
+        // With 500-unit top+bottom margins the gap adds ~1000 HWPUNIT vs no margins.
+        let with = bottom_table_y(500);
+        let without = bottom_table_y(0);
+        assert!(with > without + 900.0, "outer margins separate consecutive tables: {with} vs {without}");
     }
 
     #[test]

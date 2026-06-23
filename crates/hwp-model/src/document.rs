@@ -269,6 +269,11 @@ pub struct Table {
     /// Per-column widths (HWPUNIT), `cols` entries — for faithful column proportions on render.
     /// Empty when unknown (then the renderer falls back to auto-layout).
     pub col_widths: Vec<HwpUnit>,
+    /// Outer vertical margins (바깥 여백, HWPUNIT) above/below the table object — the gap HWP keeps
+    /// between a table and its neighbours. Lifted from the binary; 0 when unknown. Without these,
+    /// consecutive tables abut with no breathing room (the "tables stuck together" artifact).
+    pub outer_margin_top: HwpUnit,
+    pub outer_margin_bottom: HwpUnit,
     pub provenance: Provenance,
     pub passthrough: Passthrough,
     pub dirty: Dirty,
