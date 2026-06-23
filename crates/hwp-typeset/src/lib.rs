@@ -199,6 +199,19 @@ pub fn table_height(t: &Table, avail_w: f64, doc: &SemanticDoc, fonts: &dyn Font
     row_h.iter().sum()
 }
 
+/// Substitute a few typographic chars that common free Korean faces (e.g. NanumGothic) lack with a
+/// present, visually-equivalent glyph, so a missing glyph renders as the intended mark instead of a
+/// blank .notdef gap. Applied at glyph-build time in BOTH the line-breaker and the placer so advances
+/// and drawing stay in lockstep. Currently: dot-leader / katakana middle dots → the middle dot (·),
+/// all used as separators (e.g. "제품·서비스") in gov-doc forms.
+pub(crate) fn subst_glyph(ch: char) -> char {
+    match ch {
+        // U+2024 ONE DOT LEADER, U+30FB KATAKANA MIDDLE DOT, U+FF65 HALFWIDTH KATAKANA MIDDLE DOT.
+        '\u{2024}' | '\u{30FB}' | '\u{FF65}' => '\u{00B7}',
+        _ => ch,
+    }
+}
+
 /// Lay out a single paragraph into [`LineSeg`]s (vert_pos left at 0 — the caller stacks them). Greedy
 /// break: fill the line, then for a Latin word that straddles the edge back up to the last space;
 /// Hangul/CJK break anywhere. Exposed for per-paragraph `linesegarray` emission.
@@ -210,7 +223,7 @@ pub fn layout_paragraph(p: &Paragraph, doc: &SemanticDoc, line_width: f64, fonts
         for inl in &run.content {
             if let Inline::Text(t) = inl {
                 for ch in t.chars() {
-                    chars.push((ch, size));
+                    chars.push((subst_glyph(ch), size));
                 }
             }
         }
@@ -236,7 +249,15 @@ pub fn layout_paragraph(p: &Paragraph, doc: &SemanticDoc, line_width: f64, fonts
         let mut w = 0.0;
         let mut end = start;
         let mut last_space: Option<usize> = None; // index AFTER a space within this line
+        let mut forced = false; // hit a '\n' (HWP forced line break within the paragraph)
         while end < n {
+            // A '\n' is a hard line break (강제 줄나눔, shift+enter): end the line BEFORE it and
+            // consume it (it draws nothing). Without this the breaker flows "라벨\n(Problem)" as one
+            // run and wraps by width, producing the wrong line split.
+            if chars[end].0 == '\n' {
+                forced = true;
+                break;
+            }
             let a = adv(end);
             if w + a > line_width && end > start {
                 break;
@@ -247,29 +268,49 @@ pub fn layout_paragraph(p: &Paragraph, doc: &SemanticDoc, line_width: f64, fonts
                 last_space = Some(end);
             }
         }
+        // Forced break: the line is [start, end); the '\n' at `end` is consumed (skipped) below.
+        let line_end = if forced {
+            end
         // Mid-word Latin break → back up to the last space (Hangul/CJK break anywhere).
-        let line_end = if end < n && !is_full_width(chars[end].0) {
+        } else if end < n && !is_full_width(chars[end].0) {
             match last_space.filter(|&s| s > start) {
                 Some(s) => s,
-                // No space to break at and we're mid Latin word: do NOT char-break the token.
-                // Hancom keeps the word whole (it overflows a too-narrow cell). Extend to the word
-                // end (next space / full-width char) so e.g. "(Solution)" stays on one line.
+                // No space to back up to, mid Latin word. Extend to the word end (next space /
+                // full-width char) and keep it whole IF it fits the line — but if the whole token is
+                // wider than the line itself (a long Latin word in a narrow label cell, e.g.
+                // "(Solution)"), keeping it whole would spill PAST the cell border into the neighbour.
+                // Hancom wraps such a token inside the box, so char-break at the last glyph that fit.
                 None => {
                     let mut e = end;
                     while e < n && chars[e].0 != ' ' && !is_full_width(chars[e].0) {
                         e += 1;
                     }
-                    e.max(start + 1)
+                    let e = e.max(start + 1);
+                    let (whole_w, _) = measure(&chars, start, e, &font, fonts);
+                    if whole_w > line_width {
+                        end.max(start + 1) // char-break: keep the line within line_width
+                    } else {
+                        e
+                    }
                 }
             }
         } else {
             end.max(start + 1)
         };
-        let (lw, max_size) = measure(&chars, start, line_end, &font, fonts);
+        let (lw, measured_size) = measure(&chars, start, line_end, &font, fonts);
+        // An empty line (a '\n' at the line start → blank line) has no glyph to size from; use the
+        // break char's own font size so the blank line gets a real height, not a collapsed sliver.
+        let max_size = if line_end == start {
+            chars.get(start).map(|c| c.1).unwrap_or(1000).max(1)
+        } else {
+            measured_size
+        };
         // Line box height = the font's real leading for the tallest glyph (real shaper) or flat EM
         // (approximation), NOT the bare EM — so rows match the actual face's line height.
         lines.push(mk_line(start as u32, fonts.line_height(max_size), lw));
-        start = line_end;
+        // Consume the '\n' itself on a forced break so the next line starts after it (it draws
+        // nothing — the place step skips '\n'). Otherwise advance to the computed break point.
+        start = if forced && line_end < n { line_end + 1 } else { line_end };
     }
     // An inline object taller than the text bumps the line it sits on (approximated as the first).
     if obj_h > 0 {
@@ -385,6 +426,31 @@ mod tests {
         assert_eq!(lines[0].text_pos, 0);
         assert_eq!(lines[1].text_pos, 10);
         assert_eq!(lines[2].text_pos, 20);
+    }
+
+    #[test]
+    fn newline_is_a_forced_line_break() {
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape::default());
+        // "1. 문제 인식\n(Problem)" — the '\n' must split into exactly two lines regardless of width,
+        // and must NOT be drawn (it's consumed). A wide line_width proves the break is forced, not
+        // width-driven.
+        let p = para("문제\n(Problem)");
+        let lines = layout_paragraph(&p, &doc, 100000.0, &ApproxFontMetrics);
+        assert_eq!(lines.len(), 2, "'\\n' forces a second line even when everything fits one line");
+        assert_eq!(lines[0].text_pos, 0, "line 1 starts at the beginning");
+        // chars: 문(0) 제(1) \n(2) ((3)... → line 2 starts AFTER the '\n', at index 3.
+        assert_eq!(lines[1].text_pos, 3, "line 2 starts after the consumed '\\n'");
+    }
+
+    #[test]
+    fn missing_glyph_dot_variants_map_to_middle_dot() {
+        // NanumGothic lacks U+2024 (one-dot leader) / U+30FB (katakana middle dot); they're used as
+        // separators ("제품·서비스") in gov forms. subst_glyph maps them to U+00B7 so they render.
+        assert_eq!(subst_glyph('\u{2024}'), '·');
+        assert_eq!(subst_glyph('\u{30FB}'), '·');
+        assert_eq!(subst_glyph('·'), '·', "an already-present middle dot is unchanged");
+        assert_eq!(subst_glyph('가'), '가', "ordinary glyphs pass through");
     }
 
     #[test]

@@ -442,7 +442,7 @@ fn paragraph_glyphs(p: &Paragraph, doc: &SemanticDoc) -> Vec<GlyphInfo> {
         for inl in &run.content {
             if let Inline::Text(t) = inl {
                 for ch in t.chars() {
-                    out.push(GlyphInfo { ch, size, color, underline, bold });
+                    out.push(GlyphInfo { ch: crate::subst_glyph(ch), size, color, underline, bold });
                 }
             }
         }
