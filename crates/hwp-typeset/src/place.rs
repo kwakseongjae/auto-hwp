@@ -248,6 +248,70 @@ fn place_table(
         }
         // Cell border (stroked).
         pg.rects.push(PlacedRect { x: cx, y: cy, w: cw, h: ch, fill: None });
+        // Cell TEXT: place the cell's paragraph glyphs inside the box, vertically centered (the
+        // Korean gov-doc convention: vertAlign=CENTER), honoring each paragraph's horizontal align.
+        place_cell_content(pg, &c.blocks, cx, cy, cw, ch, doc, fonts);
+    }
+}
+
+/// Horizontal inset for cell text from the cell's left/right edges (HWPUNIT ≈ 0.7mm).
+const CELL_PAD_X: f64 = 200.0;
+
+/// Place a cell's block content (paragraph glyphs) inside its box `(cx,cy,cw,ch)`, vertically centered.
+/// Nested tables inside a cell are NOT yet positioned (advance vertical only) — a follow-up.
+fn place_cell_content(
+    pg: &mut PlacedPage,
+    blocks: &[Block],
+    cx: f64,
+    cy: f64,
+    cw: f64,
+    ch: f64,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+) {
+    let textw = (cw - 2.0 * CELL_PAD_X).max(1.0);
+    // Total content height → start offset for vertical centering within the cell box.
+    let content_h: f64 = blocks.iter().map(|b| block_height_for_place(b, doc, textw, fonts)).sum();
+    let mut vy = cy + ((ch - content_h) / 2.0).max(0.0);
+    let plain = FontKey { family: String::new(), bold: false, italic: false };
+    for b in blocks {
+        let Block::Paragraph(p) = b else {
+            // nested table / other block: keep the vertical cursor moving so following paragraphs sit
+            // below it (the nested table's own glyphs aren't placed yet — TODO).
+            vy += block_height_for_place(b, doc, textw, fonts);
+            continue;
+        };
+        let glyphs = paragraph_glyphs(p, doc);
+        let align = doc.para_shapes.get(p.para_shape).map(|s| s.align).unwrap_or_default();
+        let ratio = line_spacing_ratio(p, doc);
+        let lines = layout_paragraph(p, doc, textw, fonts);
+        for (li, ls) in lines.iter().enumerate() {
+            let slack = (textw - ls.horz_size).max(0.0);
+            let x0 = cx + CELL_PAD_X + match align {
+                HorizontalAlign::Right => slack,
+                HorizontalAlign::Center => slack / 2.0,
+                _ => 0.0,
+            };
+            let baseline = vy + ls.baseline;
+            let start = ls.text_pos as usize;
+            let end = lines.get(li + 1).map(|n| n.text_pos as usize).unwrap_or(glyphs.len());
+            let mut x = x0;
+            for g in glyphs.get(start..end.min(glyphs.len())).unwrap_or(&[]) {
+                let adv = fonts.advance_width(&plain, g.ch, g.size as i32);
+                if g.ch != ' ' && g.ch != '\t' && g.ch != '\n' {
+                    pg.glyphs.push(PlacedGlyph {
+                        x,
+                        baseline,
+                        ch: g.ch,
+                        size: g.size,
+                        color: g.color,
+                        underline: g.underline,
+                    });
+                }
+                x += adv;
+            }
+            vy += ls.vert_size * ratio;
+        }
     }
 }
 
