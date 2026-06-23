@@ -81,6 +81,14 @@ pub enum Op {
     /// Recolor cells of an EXISTING table (the `index`-th block): set/clear background shade for the
     /// cells the selector picks (a whole column, a whole row, one cell, or all). `shade=None` clears.
     SetTableCellShade { section: usize, index: usize, sel: CellSel, shade: Option<String> },
+    /// Replace the text of one EXISTING cell of the `index`-th table (the active cell anchored at
+    /// `(row, col)` — same addressing as `SetTableCellShade`'s `CellSel::Cell`). The cell's blocks
+    /// are rebuilt from `runs` (one paragraph), so this *fills* an existing cell rather than insert.
+    SetTableCell { section: usize, index: usize, row: usize, col: usize, runs: Vec<RunSpec> },
+    /// Insert one or more BODY rows into the EXISTING `index`-th table at logical row `at`
+    /// (`at == t.rows` appends). Existing cells at row >= `at` shift down by `rows.len()`; the new
+    /// cells take `col_span`/`shade`/`bold` from each `CellSpec` (HTML-table coverage per row).
+    TableInsertRows { section: usize, index: usize, at: usize, rows: Vec<Vec<CellSpec>> },
 }
 
 /// Which cells of an existing table a [`Op::SetTableCellShade`] targets.
@@ -800,8 +808,85 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             sec.dirty.mark();
             Ok(())
         }
+        Op::SetTableCell { section, index, row, col, runs } => {
+            // Intern each run's CharShape first (mutable borrow on `doc`), then rebuild the cell's
+            // body — mirrors AppendRichParagraph's intern-then-build ordering.
+            let interned: Vec<(usize, String)> = runs
+                .iter()
+                .map(|r| (intern_char_shape(doc, r.to_char_shape()), r.text.clone()))
+                .collect();
+            let plain = intern_char_shape(doc, CharShape::default());
+            let (row, col) = (*row, *col);
+            let sec = section_mut(doc, *section)?;
+            let block = sec.blocks.get_mut(*index).ok_or_else(|| {
+                Error::Other(format!("SetTableCell: block index {index} out of range"))
+            })?;
+            let Block::Table(t) = block else {
+                return Err(Error::Other(format!("SetTableCell: block {index} is not a table")));
+            };
+            // The active cell anchored exactly at (row, col) — same as CellSel::Cell.
+            let cell = t.cells.iter_mut().find(|c| c.active && c.row == row && c.col == col).ok_or_else(|| {
+                Error::Other(format!("SetTableCell: no active cell at (row {row}, col {col})"))
+            })?;
+            let para_runs = if interned.is_empty() {
+                // An empty cell still needs one (empty) run so it round-trips/re-emits cleanly.
+                vec![Run { char_shape: plain, content: vec![Inline::Text(String::new())], ..Default::default() }]
+            } else {
+                interned
+                    .into_iter()
+                    .map(|(char_shape, text)| Run { char_shape, content: vec![Inline::Text(text)], ..Default::default() })
+                    .collect()
+            };
+            cell.blocks = vec![Block::Paragraph(Paragraph {
+                runs: para_runs,
+                dirty: Dirty(true),
+                ..Default::default()
+            })];
+            cell.dirty.mark();
+            t.dirty.mark();
+            sec.dirty.mark();
+            Ok(())
+        }
+        Op::TableInsertRows { section, index, at, rows } => {
+            if rows.is_empty() {
+                return Err(Error::Other("TableInsertRows: no rows to insert".into()));
+            }
+            // Build the new cells (interning shades/shapes) BEFORE the mutable table borrow.
+            let new_cells = build_rich_table(doc, rows)?.cells;
+            let n = rows.len();
+            let at = *at;
+            let sec = section_mut(doc, *section)?;
+            let block = sec.blocks.get_mut(*index).ok_or_else(|| {
+                Error::Other(format!("TableInsertRows: block index {index} out of range"))
+            })?;
+            let Block::Table(t) = block else {
+                return Err(Error::Other(format!("TableInsertRows: block {index} is not a table")));
+            };
+            if at > t.rows {
+                return Err(Error::Other(format!(
+                    "TableInsertRows: row {at} out of range (table has {} rows)",
+                    t.rows
+                )));
+            }
+            // Shift every existing cell at or below the insertion row down by N (keeps merges sane).
+            for c in &mut t.cells {
+                if c.row >= at {
+                    c.row += n;
+                    c.dirty.mark();
+                }
+            }
+            // Rebase the freshly-built rows (which start at row 0) to begin at `at`, then add them.
+            for mut c in new_cells {
+                c.row += at;
+                t.cells.push(c);
+            }
+            t.rows += n;
+            t.dirty.mark();
+            sec.dirty.mark();
+            Ok(())
+        }
         _ => Err(Error::NotImplemented(
-            "op apply (MVP: Append*/SetPageLayout/Set{Char,Run,Para}Pr/ApplyStyle/Insert-Delete text/anchored Insert*At/DeleteBlock/SetTableCellShade)",
+            "op apply (MVP: Append*/SetPageLayout/Set{Char,Run,Para}Pr/ApplyStyle/Insert-Delete text/anchored Insert*At/DeleteBlock/SetTableCellShade/SetTableCell/TableInsertRows)",
         )),
     }
 }
@@ -1457,6 +1542,101 @@ mod tests {
         }).is_err());
         assert!(apply(&mut doc, &Op::SetTableCellShade {
             section: 0, index: 0, sel: CellSel::All, shade: None,
+        }).is_err());
+    }
+
+    /// Text of the active cell anchored at (row, col) of the table at section-0 block `bi`.
+    fn cell_text(doc: &SemanticDoc, bi: usize, row: usize, col: usize) -> String {
+        let Block::Table(t) = &doc.sections[0].blocks[bi] else { panic!("block {bi} is not a table") };
+        let cell = t.cells.iter().find(|c| c.active && c.row == row && c.col == col).expect("active cell");
+        cell.blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Paragraph(p) => Some(run_texts(p).concat()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn set_table_cell_replaces_existing_cell_text() {
+        // "마지막 표의 한 칸을 채워줘": fill an EXISTING cell rather than make a new table.
+        let mut doc = doc_with(vec![simple_para(1, "앞")]);
+        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
+        apply(&mut doc, &Op::InsertTableAt {
+            section: 0, index: 1,
+            rows: vec![vec![cell("항목"), cell("내용")], vec![cell(""), cell("")]],
+        }).unwrap();
+        apply(&mut doc, &Op::SetTableCell {
+            section: 0, index: 1, row: 1, col: 0, runs: vec![run_spec("홍길동")],
+        }).unwrap();
+        apply(&mut doc, &Op::SetTableCell {
+            section: 0, index: 1, row: 1, col: 1, runs: vec![run_spec("대표")],
+        }).unwrap();
+        assert_eq!(cell_text(&doc, 1, 1, 0), "홍길동");
+        assert_eq!(cell_text(&doc, 1, 1, 1), "대표");
+        // header row left untouched
+        assert_eq!(cell_text(&doc, 1, 0, 0), "항목");
+        // bad address / non-table errors
+        assert!(apply(&mut doc, &Op::SetTableCell {
+            section: 0, index: 1, row: 9, col: 9, runs: vec![run_spec("x")],
+        }).is_err());
+        assert!(apply(&mut doc, &Op::SetTableCell {
+            section: 0, index: 0, row: 0, col: 0, runs: vec![run_spec("x")],
+        }).is_err());
+    }
+
+    #[test]
+    fn table_insert_rows_appends_three_body_rows() {
+        // "마지막 표에 행 3개를 채워줘": append 3 rows to an existing 1-row table.
+        let mut doc = doc_with(vec![simple_para(1, "앞")]);
+        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
+        apply(&mut doc, &Op::InsertTableAt {
+            section: 0, index: 1, rows: vec![vec![cell("번호"), cell("이름"), cell("역할")]],
+        }).unwrap();
+        let team = |a: &str, b: &str, c: &str| vec![cell(a), cell(b), cell(c)];
+        apply(&mut doc, &Op::TableInsertRows {
+            section: 0, index: 1, at: 1,
+            rows: vec![team("1", "홍길동", "대표"), team("2", "김철수", "개발"), team("3", "이영희", "디자인")],
+        }).unwrap();
+        if let Block::Table(t) = &doc.sections[0].blocks[1] {
+            assert_eq!(t.rows, 4, "1 header + 3 new body rows");
+        } else {
+            panic!("expected table");
+        }
+        assert_eq!(cell_text(&doc, 1, 0, 0), "번호"); // header survived
+        assert_eq!(cell_text(&doc, 1, 1, 1), "홍길동");
+        assert_eq!(cell_text(&doc, 1, 3, 2), "디자인");
+    }
+
+    #[test]
+    fn table_insert_rows_in_the_middle_shifts_later_rows_down() {
+        let mut doc = doc_with(vec![simple_para(1, "앞")]);
+        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
+        apply(&mut doc, &Op::InsertTableAt {
+            section: 0, index: 1, rows: vec![vec![cell("머리")], vec![cell("끝")]],
+        }).unwrap();
+        // insert one row at row 1, between header (row 0) and "끝" (was row 1 → now row 2).
+        apply(&mut doc, &Op::TableInsertRows {
+            section: 0, index: 1, at: 1, rows: vec![vec![cell("가운데")]],
+        }).unwrap();
+        if let Block::Table(t) = &doc.sections[0].blocks[1] {
+            assert_eq!(t.rows, 3);
+        } else {
+            panic!("expected table");
+        }
+        assert_eq!(cell_text(&doc, 1, 0, 0), "머리");
+        assert_eq!(cell_text(&doc, 1, 1, 0), "가운데");
+        assert_eq!(cell_text(&doc, 1, 2, 0), "끝");
+        // out-of-range row / non-table / empty rows error
+        assert!(apply(&mut doc, &Op::TableInsertRows {
+            section: 0, index: 1, at: 99, rows: vec![vec![cell("x")]],
+        }).is_err());
+        assert!(apply(&mut doc, &Op::TableInsertRows {
+            section: 0, index: 0, at: 0, rows: vec![vec![cell("x")]],
+        }).is_err());
+        assert!(apply(&mut doc, &Op::TableInsertRows {
+            section: 0, index: 1, at: 0, rows: vec![],
         }).is_err());
     }
 }

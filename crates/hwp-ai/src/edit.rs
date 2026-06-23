@@ -111,6 +111,38 @@ pub enum EditCommand {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         shade: Option<String>,
     },
+    /// Replace the text of ONE EXISTING cell of the anchor table (fill a single cell). `runs` is the
+    /// new cell content (formatted runs). This is for *filling* an existing table — never insert.
+    SetCell {
+        section: usize,
+        block: usize,
+        row: usize,
+        col: usize,
+        runs: Vec<AiRun>,
+    },
+    /// Replace the text of SEVERAL EXISTING cells of the anchor table in one batch (the dominant
+    /// "표를 채워줘" case). Each entry addresses a cell by `(row, col)` and sets its plain `text`.
+    SetCells { section: usize, block: usize, cells: Vec<CellEdit> },
+    /// Insert ONE body row into the EXISTING anchor table. `at` omitted = append at the end; each
+    /// cell is a bare string or `{text,col_span,row_span,bold,shade}` object (lenient [`AiCell`]).
+    InsertRow {
+        section: usize,
+        block: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<usize>,
+        cells: Vec<AiCell>,
+    },
+    /// Append SEVERAL body rows to the EXISTING anchor table (the "행 N개 추가/채워줘" case).
+    AppendRows { section: usize, block: usize, rows: Vec<Vec<AiCell>> },
+}
+
+/// One cell address+text for [`EditCommand::SetCells`] (batch existing-cell fill).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CellEdit {
+    pub row: usize,
+    pub col: usize,
+    #[serde(default)]
+    pub text: String,
 }
 
 /// mm → HWPUNIT (1/7200 inch). The same factor the op-bus uses for page margins.
@@ -148,6 +180,37 @@ fn adjust(changes: &[Drift], section: usize, raw: usize) -> usize {
     idx.max(0) as usize
 }
 
+/// Per-table record of rows inserted by an earlier command in the same script, so a later row-edit
+/// on the SAME table addresses post-insert row coordinates (block index is unaffected by row edits,
+/// so this is keyed by `(section, block)` rather than going through [`Drift`]).
+struct RowDrift {
+    section: usize,
+    block: usize,
+    /// The row index the earlier insert landed at (in then-current coordinates).
+    at: usize,
+    /// How many rows that earlier command added.
+    count: usize,
+}
+
+/// Effective row count of the table at `(section, block)`: its original `rows` plus every row a
+/// prior same-table insert in this script added — the correct append point for a later row insert.
+fn effective_rows(doc: &hwp_model::document::SemanticDoc, rows: &[RowDrift], section: usize, block: usize) -> usize {
+    let base = table_rows(doc, section, block);
+    let added: usize = rows.iter().filter(|r| r.section == section && r.block == block).map(|r| r.count).sum();
+    base + added
+}
+
+/// Adjust an explicit row index by prior same-table inserts (rows at-or-before it shift it down).
+fn adjust_row(rows: &[RowDrift], section: usize, block: usize, raw_at: usize) -> usize {
+    let mut at = raw_at;
+    for r in rows.iter().filter(|r| r.section == section && r.block == block) {
+        if r.at <= raw_at {
+            at += r.count;
+        }
+    }
+    at
+}
+
 /// Resolve an insert's raw insertion point from its anchor + position (against original lengths).
 fn raw_insert_point(sec_len: usize, block: usize, position: Position) -> usize {
     match position {
@@ -165,6 +228,9 @@ pub fn compile_edits(doc: &hwp_model::document::SemanticDoc, script: &EditScript
     let sec_len = |s: usize| doc.sections.get(s).map(|sec| sec.blocks.len()).unwrap_or(0);
     let mut ops = Vec::new();
     let mut changes: Vec<Drift> = Vec::new();
+    // Row inserts on existing tables don't move block indices, so they ride a separate tracker that
+    // lets sequential appends to the same table land in order (see [`RowDrift`]).
+    let mut row_changes: Vec<RowDrift> = Vec::new();
 
     for cmd in &script.edits {
         match cmd {
@@ -256,9 +322,69 @@ pub fn compile_edits(doc: &hwp_model::document::SemanticDoc, script: &EditScript
                     shade: shade.clone(),
                 });
             }
+            EditCommand::SetCell { section, block, row, col, runs } => {
+                let index = adjust(&changes, *section, *block);
+                ops.push(Op::SetTableCell {
+                    section: *section,
+                    index,
+                    row: *row,
+                    col: *col,
+                    runs: runs.iter().map(AiRun::to_run_spec).collect(),
+                });
+            }
+            EditCommand::SetCells { section, block, cells } => {
+                let index = adjust(&changes, *section, *block);
+                for cell in cells {
+                    ops.push(Op::SetTableCell {
+                        section: *section,
+                        index,
+                        row: cell.row,
+                        col: cell.col,
+                        runs: vec![AiRun { text: cell.text.clone(), ..Default::default() }.to_run_spec()],
+                    });
+                }
+            }
+            EditCommand::InsertRow { section, block, at, cells } => {
+                let index = adjust(&changes, *section, *block);
+                // Explicit `at` is a raw row coordinate (shift it by prior same-table inserts);
+                // omitted = append at the *effective* end (original rows + earlier inserts).
+                let at = match at {
+                    Some(a) => adjust_row(&row_changes, *section, index, *a),
+                    None => effective_rows(doc, &row_changes, *section, index),
+                };
+                ops.push(Op::TableInsertRows {
+                    section: *section,
+                    index,
+                    at,
+                    rows: vec![cells.iter().map(|c| c.to_cell_spec(false)).collect()],
+                });
+                row_changes.push(RowDrift { section: *section, block: index, at, count: 1 });
+            }
+            EditCommand::AppendRows { section, block, rows } => {
+                let index = adjust(&changes, *section, *block);
+                let at = effective_rows(doc, &row_changes, *section, index);
+                let grid: Vec<Vec<hwp_ops::CellSpec>> = rows
+                    .iter()
+                    .map(|row| row.iter().map(|c| c.to_cell_spec(false)).collect())
+                    .collect();
+                let count = grid.len();
+                ops.push(Op::TableInsertRows { section: *section, index, at, rows: grid });
+                row_changes.push(RowDrift { section: *section, block: index, at, count });
+            }
         }
     }
     Ok(ops)
+}
+
+/// Row count of the table at `(section, index)` (0 if that block isn't a table) — the append point
+/// for `insert_row`/`append_rows`. Reads the ORIGINAL doc, which is correct: table-edit ops don't
+/// shift block indices, so no in-script drift applies to the row count.
+fn table_rows(doc: &hwp_model::document::SemanticDoc, section: usize, index: usize) -> usize {
+    use hwp_model::document::Block;
+    match doc.sections.get(section).and_then(|s| s.blocks.get(index)) {
+        Some(Block::Table(t)) => t.rows,
+        _ => 0,
+    }
 }
 
 /// Parse an [`EditScript`] from the model's JSON (after stripping any code fence upstream).
@@ -285,7 +411,13 @@ pub fn edit_brief() -> &'static str {
   {"op":"delete_block","section":0,"block":5},
   {"op":"shade_column","section":0,"block":4,"col":0,"shade":"#D9E1F2"},
   {"op":"shade_row","section":0,"block":4,"row":0,"shade":"#FFF2CC"},
-  {"op":"shade_cell","section":0,"block":4,"row":1,"col":2,"shade":"#FCE4D6"}
+  {"op":"shade_cell","section":0,"block":4,"row":1,"col":2,"shade":"#FCE4D6"},
+  {"op":"set_cell","section":0,"block":4,"row":1,"col":0,"runs":[{"text":"홍길동","bold":true}]},
+  {"op":"set_cells","section":0,"block":4,
+   "cells":[{"row":1,"col":0,"text":"홍길동"},{"row":1,"col":1,"text":"대표"}]},
+  {"op":"insert_row","section":0,"block":4,"cells":["3","이영희","디자인"]},
+  {"op":"append_rows","section":0,"block":4,
+   "rows":[["1","홍길동","대표"],["2","김철수","개발"]]}
 ] }
 
 규칙:
@@ -294,9 +426,13 @@ pub fn edit_brief() -> &'static str {
 - run 속성(선택): bold, italic, underline, strike, color/highlight("#RRGGBB"), size_pt, font.
 - 표 셀: 문자열 또는 {text,col_span,row_span,bold,shade} 객체. header 는 굵은 첫 행.
 - shade 색상은 "#RRGGBB"; shade 를 생략하거나 null 이면 음영 제거.
-- 기존 표를 가리킬 때만 shade_*/delete 의 block 으로 그 표/블록의 앵커를 쓸 것.
+- 기존 표를 채우거나 행을 추가할 때는 그 표의 [s/b] 앵커로 set_cell/set_cells/insert_row/append_rows 를 쓰세요.
+  새 표를 만들 때만 insert_table. 표를 '채워달라'는 요청에 insert_table 로 빈 표를 새로 만들지 말 것.
+- insert_row 의 at 을 생략하면 표 맨 끝에 행을 추가; append_rows 는 항상 맨 끝에 여러 행 추가.
+- 기존 표를 가리킬 때만 set_*/insert_row/append_rows/shade_*/delete 의 block 으로 그 표/블록의 앵커를 쓸 것.
 - 허용 op: insert_paragraph, insert_heading, insert_table, insert_image, delete_block,
-  shade_column, shade_row, shade_cell. 그 외 키 금지. 좌표는 모두 0부터 시작."##
+  shade_column, shade_row, shade_cell, set_cell, set_cells, insert_row, append_rows.
+  그 외 키 금지. 좌표는 모두 0부터 시작."##
 }
 
 #[cfg(test)]
@@ -405,6 +541,94 @@ mod tests {
         // p1 gone; p0,p2,p3 remain then END
         let texts: Vec<String> = (0..doc.sections[0].blocks.len()).map(|i| para_text(&doc, i)).collect();
         assert_eq!(texts, vec!["p0", "p2", "p3", "END"]);
+    }
+
+    /// A doc whose section 0 is `[p0, <1-row table>]` — block 1 is an existing table to edit.
+    /// The single header row is `["번호","이름","역할"]` (built via the op-bus, like the real path).
+    fn doc_with_table() -> SemanticDoc {
+        let mut doc = doc_n(1); // p0
+        let cell = |t: &str| hwp_ops::CellSpec { text: t.into(), ..Default::default() };
+        hwp_ops::apply(
+            &mut doc,
+            &Op::InsertTableAt {
+                section: 0,
+                index: 1,
+                rows: vec![vec![cell("번호"), cell("이름"), cell("역할")]],
+            },
+        )
+        .expect("seed table");
+        doc
+    }
+
+    fn table_cell_text(doc: &SemanticDoc, bi: usize, row: usize, col: usize) -> String {
+        let Block::Table(t) = &doc.sections[0].blocks[bi] else { panic!("block {bi} not a table") };
+        let cell = t.cells.iter().find(|c| c.active && c.row == row && c.col == col).expect("cell");
+        cell.blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Paragraph(p) => Some(
+                    p.runs
+                        .iter()
+                        .flat_map(|r| &r.content)
+                        .filter_map(|c| match c {
+                            Inline::Text(t) => Some(t.as_str()),
+                            _ => None,
+                        })
+                        .collect::<String>(),
+                ),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// THE regression guard for the user's "마지막 표에 팀원 3명…" bug: a hand-written script using
+    /// `insert_row` / `set_cell` must PARSE (no "unknown variant 'insert_row'"), compile, and apply.
+    #[test]
+    fn fill_existing_table_script_parses_compiles_applies() {
+        let json = r##"{"edits":[
+            {"op":"insert_row","section":0,"block":1,"cells":["1","홍길동","대표"]},
+            {"op":"insert_row","section":0,"block":1,"cells":["2","김철수","개발"]},
+            {"op":"set_cell","section":0,"block":1,"row":0,"col":1,"runs":[{"text":"성명","bold":true}]}
+        ]}"##;
+        // 1) PARSE — this is exactly where the old vocabulary rejected `insert_row`.
+        let script = parse_script(json).expect("insert_row/set_cell must parse");
+        assert_eq!(script.edits.len(), 3);
+        // 2) COMPILE to typed ops.
+        let mut doc = doc_with_table();
+        let ops = compile_edits(&doc, &script).expect("compiles to ops");
+        // 3) APPLY — no parse/NotImplemented error; rows appended, header cell rewritten.
+        apply_all(&mut doc, &ops);
+        if let Block::Table(t) = &doc.sections[0].blocks[1] {
+            assert_eq!(t.rows, 3, "1 header + 2 appended rows");
+        } else {
+            panic!("block 1 must still be a table");
+        }
+        assert_eq!(table_cell_text(&doc, 1, 0, 1), "성명"); // set_cell rewrote the header
+        assert_eq!(table_cell_text(&doc, 1, 1, 1), "홍길동");
+        assert_eq!(table_cell_text(&doc, 1, 2, 2), "개발");
+    }
+
+    /// `set_cells` (batch fill) and `append_rows` (multi-row) over an existing table.
+    #[test]
+    fn set_cells_and_append_rows_compile_and_apply() {
+        let json = r##"{"edits":[
+            {"op":"append_rows","section":0,"block":1,
+             "rows":[["1","홍길동","대표"],["2","김철수","개발"],["3","이영희","디자인"]]},
+            {"op":"set_cells","section":0,"block":1,
+             "cells":[{"row":0,"col":0,"text":"No"},{"row":0,"col":2,"text":"담당"}]}
+        ]}"##;
+        let script = parse_script(json).expect("parses");
+        let mut doc = doc_with_table();
+        let ops = compile_edits(&doc, &script).expect("compiles");
+        apply_all(&mut doc, &ops);
+        if let Block::Table(t) = &doc.sections[0].blocks[1] {
+            assert_eq!(t.rows, 4, "1 header + 3 appended rows");
+        } else {
+            panic!("expected table");
+        }
+        assert_eq!(table_cell_text(&doc, 1, 0, 0), "No");
+        assert_eq!(table_cell_text(&doc, 1, 0, 2), "담당");
+        assert_eq!(table_cell_text(&doc, 1, 3, 1), "이영희");
     }
 
     #[test]
