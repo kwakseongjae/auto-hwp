@@ -424,7 +424,11 @@ fn do_open(session: &mut Session, path: &str) -> Result<OpenInfo, String> {
         // converted HWPX.
         SourceFormat::Hwp5 => ("HWP5 → HWPX (converted, editable)", true),
         SourceFormat::Hwp3 => ("HWP3 (view-only)", false),
-        SourceFormat::Unknown => return Err("unrecognized format (not HWP/HWPX)".into()),
+        // P5 foreign ingest: DOCX is a full-ish editable mapping; PDF is VIEW-MOSTLY (positioned
+        // glyphs + overlay), so it is not treated as round-trip-editable.
+        SourceFormat::Docx => ("DOCX → SemanticDoc (editable)", true),
+        SourceFormat::Pdf => ("PDF (view-mostly)", false),
+        SourceFormat::Unknown => return Err("unrecognized format (not HWP/HWPX/DOCX/PDF)".into()),
     };
     let doc = hwp_core::Engine::open(&bytes).map_err(|e| e.to_string())?;
     let sections = doc.sections.len();

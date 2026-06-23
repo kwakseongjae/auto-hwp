@@ -19,6 +19,10 @@ rhwp = ["hwp-core/rhwp", "hwp-fidelity/rhwp"]
 shaper = ["hwp-core/shaper", "hwp-typeset/shaper", "hwp-render/shaper", "hwp-export/shaper"]
 # PHASE P4: enable `export-pdf` (krilla PDF backend from our own layout + Korean font embedding).
 pdf = ["hwp-export/pdf"]
+# PHASE P5: open `.docx` (full-ish edit) — forwards to hwp-foreign's pure-Rust docx reader.
+docx = ["hwp-core/docx"]
+# PHASE P5: open `.pdf` (VIEW-MOSTLY: positioned glyphs/overlay) — forwards to hwp-foreign's lopdf reader.
+pdfin = ["hwp-core/pdfin"]
 # Enable the AI providers: Anthropic BYOK, local Ollama (Qwen3), OpenRouter (BYOK, OpenAI-compatible).
 ai = ["hwp-ai/anthropic", "hwp-ai/keyring", "hwp-ai/local", "hwp-ai/openrouter"]
 

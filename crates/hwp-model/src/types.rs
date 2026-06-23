@@ -9,6 +9,12 @@ pub enum SourceFormat {
     Hwp3,
     /// HWPX (OWPML / KS X 6101, ZIP+XML).
     Hwpx,
+    /// Office Open XML word-processing document (`.docx`, ZIP+XML). Ingested as a
+    /// full-ish editable `SemanticDoc` (P5).
+    Docx,
+    /// Portable Document Format (`.pdf`). VIEW-MOSTLY: ingested as positioned glyphs/images per page
+    /// (faithful view + overlay), NOT a semantic paragraph/table reconstruction (P5).
+    Pdf,
     Unknown,
 }
 
@@ -18,8 +24,16 @@ impl SourceFormat {
             SourceFormat::Hwp5 => "hwp5",
             SourceFormat::Hwp3 => "hwp3",
             SourceFormat::Hwpx => "hwpx",
+            SourceFormat::Docx => "docx",
+            SourceFormat::Pdf => "pdf",
             SourceFormat::Unknown => "unknown",
         }
+    }
+
+    /// True for formats that are VIEW-MOSTLY (faithful render + overlay, not a full edit model).
+    /// PDF ingest produces positioned glyphs/images, not editable paragraphs/tables.
+    pub fn is_view_mostly(self) -> bool {
+        matches!(self, SourceFormat::Pdf)
     }
 }
 

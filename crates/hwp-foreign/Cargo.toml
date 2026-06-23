@@ -1,0 +1,23 @@
+[package]
+name = "hwp-foreign"
+description = "Foreign-format ingest into SemanticDoc: DOCX (OOXML, full-ish edit) and PDF (view-mostly). Feature-gated; default build pulls no heavy/native deps."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+# DOCX (OOXML word-processing) reader. Pure-Rust: reuses the workspace zip + quick-xml — no native dep,
+# so it is cheap to enable. Gated only so the format set stays opt-in per the P5 plan.
+docx = ["dep:zip", "dep:quick-xml"]
+# PDF reader (VIEW-MOSTLY): positioned glyphs/images per page via lopdf (pure Rust, no native lib).
+pdfin = ["dep:lopdf"]
+
+[dependencies]
+hwp-model = { workspace = true }
+zip = { workspace = true, optional = true }
+quick-xml = { workspace = true, optional = true }
+# Pure-Rust PDF parser. Trim default features (chrono/jiff/rayon/time) — we only need object/content
+# parsing for positioned-text extraction, so we avoid pulling date/time + rayon into the build.
+lopdf = { version = "0.41", default-features = false, optional = true }

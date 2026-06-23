@@ -12,6 +12,10 @@ default = []
 rhwp = ["hwp-rhwp/rhwp"]
 # Forwards to the rustybuzz shaper so the layout oracle scores against real font advances.
 shaper = ["hwp-rhwp/shaper"]
+# P5: DOCX ingest (full-ish edit). Forwards to hwp-foreign's pure-Rust `docx` reader.
+docx = ["hwp-foreign/docx"]
+# P5: PDF ingest (VIEW-MOSTLY). Forwards to hwp-foreign's `pdfin` reader (lopdf).
+pdfin = ["hwp-foreign/pdfin"]
 
 [dependencies]
 hwp-model = { workspace = true }
@@ -21,3 +25,8 @@ hwp-typeset = { workspace = true }
 hwp-render = { workspace = true }
 hwp-ops = { workspace = true }
 hwp-rhwp = { workspace = true }
+hwp-foreign = { workspace = true }
+
+[dev-dependencies]
+# Build a tiny in-memory `.docx` for the P5 `Engine::open` DOCX-routing test (docx feature only).
+zip = { workspace = true }

@@ -21,6 +21,10 @@ pub struct SemanticDoc {
     pub bin_data: Vec<BinData>,
     /// Document-level un-modeled parts (settings, history, master pages, …).
     pub passthrough: Passthrough,
+    /// The on-disk format this document was opened FROM (`None` = synthesized/unknown). Remembered so
+    /// downstream (export, UI) can show the original kind and pick a save policy: HWPX round-trips,
+    /// `.hwp`/`.docx` are conversions, `.pdf` is view-mostly. Set by `Engine::open`/the readers.
+    pub origin: Option<crate::types::SourceFormat>,
 }
 
 /// The document's original `header.xml` shape pools, parsed to typed values (issue #003, P1).

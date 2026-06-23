@@ -44,16 +44,28 @@ impl Engine {
     }
 
     /// Open a document: detect format, route to the matching parser.
+    ///
+    /// HWPX/HWP keep their existing parsers; DOCX (full-ish edit) and PDF (VIEW-MOSTLY, positioned
+    /// glyphs) route to `hwp-foreign` behind the `docx`/`pdfin` features. With a feature off, the
+    /// foreign readers return [`Error::CapabilityUnavailable`] so the routing seam is always present
+    /// and the default build pulls no extra deps. Every path stamps `doc.origin` with the detected
+    /// format so downstream (export/UI) can pick a save policy.
     pub fn open(bytes: &[u8]) -> Result<SemanticDoc> {
         let fmt = hwp_ingest::detect(bytes);
-        match fmt {
-            SourceFormat::Hwpx => HwpxParser::new().parse(bytes, fmt),
+        let mut doc = match fmt {
+            SourceFormat::Hwpx => HwpxParser::new().parse(bytes, fmt)?,
             SourceFormat::Hwp5 | SourceFormat::Hwp3 => {
                 // Bootstrap path: rhwp parses binary HWP (when wired).
-                RhwpEngine::new().parse(bytes, fmt)
+                RhwpEngine::new().parse(bytes, fmt)?
             }
-            SourceFormat::Unknown => Err(Error::UnknownFormat),
+            SourceFormat::Docx => hwp_foreign::read_docx(bytes)?,
+            SourceFormat::Pdf => hwp_foreign::read_pdf(bytes)?,
+            SourceFormat::Unknown => return Err(Error::UnknownFormat),
+        };
+        if doc.origin.is_none() {
+            doc.origin = Some(fmt);
         }
+        Ok(doc)
     }
 
     /// Detected source format for the given bytes.
@@ -831,5 +843,37 @@ mod inplace_tests {
             assert_eq!(mismatched, 0, "{fixture}: {mismatched} anchors resolved to the WRONG paragraph (alignment drift)");
             assert!(matched > 0, "{fixture}: at least one body anchor resolved + matched");
         }
+    }
+}
+
+/// P5 foreign-format routing through the `Engine::open` façade (feature-gated). Verifies that the
+/// detector + dispatcher actually reach the `hwp-foreign` readers and stamp `doc.origin`.
+#[cfg(all(test, feature = "docx"))]
+mod docx_routing_tests {
+    use super::*;
+    use std::io::{Cursor, Write};
+
+    fn tiny_docx() -> Vec<u8> {
+        let mut buf = Vec::new();
+        {
+            let mut zw = zip::ZipWriter::new(Cursor::new(&mut buf));
+            let opts: zip::write::FileOptions<()> = zip::write::FileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            zw.start_file("[Content_Types].xml", opts).unwrap();
+            zw.write_all(br#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#).unwrap();
+            zw.start_file("word/document.xml", opts).unwrap();
+            zw.write_all(br#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Routed via Engine::open</w:t></w:r></w:p></w:body></w:document>"#).unwrap();
+            zw.finish().unwrap();
+        }
+        buf
+    }
+
+    #[test]
+    fn engine_open_routes_docx() {
+        let bytes = tiny_docx();
+        assert_eq!(Engine::detect(&bytes), SourceFormat::Docx);
+        let doc = Engine::open(&bytes).expect("open docx via Engine");
+        assert_eq!(doc.origin, Some(SourceFormat::Docx));
+        assert!(doc.plain_text().contains("Routed via Engine::open"));
     }
 }

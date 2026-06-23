@@ -241,6 +241,11 @@ fn run() -> Result<(), String> {
                     let doc = hwp_core::Engine::open(&bytes).map_err(|e| e.to_string())?;
                     print!("{}", doc.plain_text());
                 }
+                SourceFormat::Docx | SourceFormat::Pdf => {
+                    // DOCX (--features docx) / PDF view-mostly (--features pdfin) → SemanticDoc → text.
+                    let doc = hwp_core::Engine::open(&bytes).map_err(|e| e.to_string())?;
+                    print!("{}", doc.plain_text());
+                }
                 SourceFormat::Unknown => return Err("unrecognized format".into()),
             }
         }
@@ -1041,6 +1046,25 @@ fn info(file: &PathBuf) -> Result<(), String> {
         }
         let sections = pkg.section_part_names();
         println!("body sections: {}", sections.len());
+    }
+    if fmt.is_view_mostly() {
+        println!("note:   view-mostly (positioned glyphs + overlay; not a full edit model)");
+    }
+    if matches!(fmt, SourceFormat::Docx | SourceFormat::Pdf) {
+        // Summarize what we lifted into the IR (needs the matching --features docx/pdfin).
+        match hwp_core::Engine::open(&bytes) {
+            Ok(doc) => {
+                let paras: usize = doc
+                    .sections
+                    .iter()
+                    .flat_map(|s| &s.blocks)
+                    .filter(|b| matches!(b, hwp_model::document::Block::Paragraph(_)))
+                    .count();
+                println!("origin: {}", doc.origin.map(|o| o.as_str()).unwrap_or("?"));
+                println!("sections: {}  paragraphs: {}  images: {}", doc.sections.len(), paras, doc.bin_data.len());
+            }
+            Err(e) => println!("ingest: unavailable ({e}) — build with --features docx / pdfin"),
+        }
     }
     Ok(())
 }
