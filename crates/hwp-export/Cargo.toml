@@ -11,3 +11,16 @@ description = "Export the JSX+CSS projection to web-native formats — M1: a sta
 [dependencies]
 hwp-model = { workspace = true }
 hwp-jsx = { workspace = true }
+# PDF export from OUR layout (paint IR → krilla). Feature-gated so the DEFAULT build pulls NO heavy
+# PDF/font deps and stays network-safe; enable with `--features pdf`.
+hwp-render = { workspace = true, optional = true }
+hwp-typeset = { workspace = true, optional = true }
+krilla = { version = "0.8", optional = true, default-features = false, features = ["simple-text", "raster-images"] }
+
+[features]
+default = []
+# High-level PDF export (krilla): own layout → paint IR → PDF with Korean font subsetting. Pairs with
+# the caller's font provider; under `shaper` the real rustybuzz advances drive placement.
+pdf = ["dep:krilla", "dep:hwp-render", "dep:hwp-typeset"]
+# Drive the PDF export's placement with the real shaper (forwarded to hwp-render/hwp-typeset).
+shaper = ["hwp-render?/shaper", "hwp-typeset?/shaper"]

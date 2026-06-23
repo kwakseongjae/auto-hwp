@@ -169,6 +169,15 @@ enum Cmd {
         #[arg(long, short, default_value = "out.html")]
         out: PathBuf,
     },
+    /// PHASE P4: export a document to PDF from OUR OWN layout (so PDF == own-render), with Korean
+    /// font embedding/subsetting. Needs `--features pdf` (krilla); `--features shaper` drives the
+    /// placement with the real rustybuzz advances; `--features rhwp` also accepts binary `.hwp`.
+    ExportPdf {
+        file: PathBuf,
+        /// Output PDF path.
+        #[arg(long, short, default_value = "out.pdf")]
+        out: PathBuf,
+    },
     /// PIVOT M0: apply ONE CSS-only AI-routing op (CssSetDecl) to a project dir, proving
     /// content/design separation — only styles/document.css is re-written; the .jsx are untouched.
     EditOp {
@@ -252,6 +261,7 @@ fn run() -> Result<(), String> {
         Cmd::LayoutCheck { file } => layout_check(&file)?,
         Cmd::OpenProject { file, out_dir } => open_project(&file, &out_dir)?,
         Cmd::ExportHtml { file, out } => export_html(&file, &out)?,
+        Cmd::ExportPdf { file, out } => export_pdf(&file, &out)?,
         Cmd::EditOp { proj, node, class, prop, value } => {
             edit_op(&proj, node, class, &prop, &value)?
         }
@@ -577,6 +587,47 @@ fn export_html(file: &PathBuf, out: &Path) -> Result<(), String> {
         html.len() / 1024
     );
     Ok(())
+}
+
+/// PHASE P4: export to PDF from OUR OWN layout (paint IR → krilla, Korean font subsetting). The PDF
+/// matches own-render because both replay the same paint IR. Needs `--features pdf`.
+#[cfg(feature = "pdf")]
+fn export_pdf(file: &PathBuf, out: &Path) -> Result<(), String> {
+    let bytes = read(file)?;
+    // Engine::open handles both: .hwpx parse (default build) + .hwp lift (needs --features rhwp).
+    let doc = hwp_core::Engine::open(&bytes).map_err(|e| e.to_string())?;
+    let fonts = own_render_fonts();
+    let title = file.file_stem().map(|s| s.to_string_lossy().into_owned());
+    let result = hwp_export::pdf::export_pdf(&doc, fonts.as_ref(), &hwp_export::pdf::PdfOptions { title })?;
+    std::fs::write(out, &result.bytes).map_err(|e| format!("write {}: {e}", out.display()))?;
+    match &result.font_path {
+        Some(p) => println!(
+            "wrote {} ({} pages, {} KB) — Korean font embedded from {p}",
+            out.display(),
+            result.pages,
+            result.bytes.len() / 1024,
+        ),
+        None => println!(
+            "wrote {} ({} pages, {} KB) — NO Korean font found: glyphs are stub boxes (geometry only). \
+             Drop a Noto Sans KR at crates/hwp-typeset/assets/NotoSansKR-Regular.ttf for real text.",
+            out.display(),
+            result.pages,
+            result.bytes.len() / 1024,
+        ),
+    }
+    Ok(())
+}
+
+/// INTERIM (no `pdf` feature): explain the build flag + the headless-print fallback. We do NOT
+/// silently produce a wrong/empty file — the user gets an actionable message.
+#[cfg(not(feature = "pdf"))]
+fn export_pdf(file: &PathBuf, _out: &Path) -> Result<(), String> {
+    let _ = file;
+    Err("export-pdf needs a build with `--features pdf` (krilla PDF backend + Korean font embedding).\n\
+         Interim fallback without that feature: `tf-hwp export-html <doc> -o doc.html` then print the \
+         HTML to PDF from any browser (File ▸ Print ▸ Save as PDF) or a headless chrome \
+         (`chrome --headless --print-to-pdf=doc.pdf doc.html`)."
+        .into())
 }
 
 fn open_project(file: &PathBuf, out_dir: &Path) -> Result<(), String> {

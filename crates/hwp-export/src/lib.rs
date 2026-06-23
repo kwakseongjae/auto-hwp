@@ -19,6 +19,10 @@
 
 use std::collections::BTreeMap;
 
+/// PDF export from OUR own layout (paint IR → krilla, Korean font subsetting). Feature `pdf`.
+#[cfg(feature = "pdf")]
+pub mod pdf;
+
 use hwp_jsx::css::emit_css;
 use hwp_jsx::jsx::{JsxElement, JsxNode, Tag};
 use hwp_jsx::project::{Asset, JsxCssProject};

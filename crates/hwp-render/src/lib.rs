@@ -263,6 +263,14 @@ pub fn render_doc_svg(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec
         .collect()
 }
 
+/// Lower `doc` to one [`PageLayerTree`] (paint IR) per page via our own paginator/placer — WITHOUT a
+/// sink. This is the backend-agnostic entry: an SVG, PDF (krilla), or canvas consumer replays the
+/// SAME trees, so every export matches own-render. (The SVG sink uses this under the hood via
+/// [`render_doc_svg`]; PDF export in `hwp-export` consumes these directly.)
+pub fn render_doc_trees(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<PageLayerTree> {
+    place_doc(doc, fonts).pages.iter().map(lower_page).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
