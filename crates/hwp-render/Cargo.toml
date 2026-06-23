@@ -1,6 +1,6 @@
 [package]
 name = "hwp-render"
-description = "PageLayerTree (paint IR) → backends (Canvas/WebGL/SVG/Skia). Phase 0: trait + null backend."
+description = "PageLayerTree (paint IR) → backends (Canvas/WebGL/SVG/Skia). Own renderer: hwp-typeset placed layout → PaintOps + an SVG sink."
 edition.workspace = true
 version.workspace = true
 license.workspace = true
@@ -8,3 +8,13 @@ rust-version.workspace = true
 
 [dependencies]
 hwp-model = { workspace = true }
+hwp-typeset = { workspace = true }
+
+[features]
+default = []
+# Forward hwp-typeset's real shaper (rustybuzz advances) so the placed glyph x-positions are real.
+shaper = ["hwp-typeset/shaper"]
+
+[dev-dependencies]
+# Parse a corpus HWPX into a SemanticDoc for the end-to-end SVG render test (this path, NOT rhwp).
+hwp-hwpx = { workspace = true }

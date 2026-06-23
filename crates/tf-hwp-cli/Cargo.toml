@@ -14,8 +14,9 @@ path = "src/main.rs"
 default = []
 # Compile the rhwp bootstrap so `render`/`view`/`fidelity` compare work (needs external/rhwp submodule).
 rhwp = ["hwp-core/rhwp", "hwp-fidelity/rhwp"]
-# Score `layout-check` with the real rustybuzz shaper (real Latin advances + EM-grid Hangul).
-shaper = ["hwp-core/shaper"]
+# Score `layout-check` + drive `own-render` with the real rustybuzz shaper (real Latin advances +
+# EM-grid Hangul) instead of the per-script approximation.
+shaper = ["hwp-core/shaper", "hwp-typeset/shaper", "hwp-render/shaper"]
 # Enable the AI providers: Anthropic BYOK, local Ollama (Qwen3), OpenRouter (BYOK, OpenAI-compatible).
 ai = ["hwp-ai/anthropic", "hwp-ai/keyring", "hwp-ai/local", "hwp-ai/openrouter"]
 
@@ -29,5 +30,7 @@ hwp-core = { workspace = true }
 hwp-jsx = { workspace = true }
 hwp-export = { workspace = true }
 hwp-oracle = { workspace = true }
+hwp-typeset = { workspace = true }
+hwp-render = { workspace = true }
 hwp-fidelity = { path = "../hwp-fidelity" }
 clap = { workspace = true }

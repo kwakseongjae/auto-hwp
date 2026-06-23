@@ -57,10 +57,20 @@ impl Default for PageLayerTree {
     }
 }
 
+/// One paint primitive in page-top-left coordinates (HWPUNIT — backends scale to device px).
+///
+/// Schema v1 is additive-only: `Glyph` carries a `color` and `Rect` a `fill` (added with the own
+/// renderer); both default sensibly (`Color::default()` = opaque black, `fill: None` = a stroked
+/// outline) so older producers/consumers stay valid.
 #[derive(Clone, Debug)]
 pub enum PaintOp {
-    Glyph { x: f64, y: f64, ch: char, size: f64 },
-    Rect { x: f64, y: f64, w: f64, h: f64 },
+    /// A single glyph: `(x, baseline)` left edge + baseline, the `ch`, EM `size`, and text `color`.
+    Glyph { x: f64, y: f64, ch: char, size: f64, color: crate::types::Color },
+    /// A box: `fill = Some(color)` paints a filled rect (shading); `None` strokes the outline
+    /// (cell/line border).
+    Rect { x: f64, y: f64, w: f64, h: f64, fill: Option<crate::types::Color> },
+    /// An embedded image/object box referencing `bin_ref` into `SemanticDoc::bin_data` (empty for an
+    /// equation/unknown-object placeholder, which a backend draws as a stub box).
     Image { x: f64, y: f64, w: f64, h: f64, bin_ref: String },
 }
 

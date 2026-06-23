@@ -43,6 +43,19 @@ enum Cmd {
         #[arg(long, default_value = "page.svg")]
         out: PathBuf,
     },
+    /// Render to SVG via OUR OWN engine (hwp-typeset layout → hwp-render paint IR → SVG sink) — NO
+    /// rhwp, regenerated from the IR. The self-owned, browser-independent fidelity surface. HWPX works
+    /// in the default build; build `--features shaper` for real (rustybuzz) glyph advances, `--features
+    /// rhwp` to also accept binary `.hwp`. One `.svg` per page (`page.svg`, `page1.svg`, …).
+    OwnRender {
+        file: PathBuf,
+        /// Page index (0-based); omit to render ALL pages.
+        #[arg(long)]
+        page: Option<usize>,
+        /// Output SVG path (page suffix appended for multi-page output).
+        #[arg(long, default_value = "page.svg")]
+        out: PathBuf,
+    },
     /// Render ALL pages into a single self-contained HTML viewer (build with `--features rhwp`).
     View {
         file: PathBuf,
@@ -232,6 +245,7 @@ fn run() -> Result<(), String> {
         }
         Cmd::Fidelity { file } => fidelity(file)?,
         Cmd::Render { file, page, out } => render(&file, page, &out)?,
+        Cmd::OwnRender { file, page, out } => own_render(&file, page, &out)?,
         Cmd::View { file, out } => view(&file, &out)?,
         Cmd::Convert { file, out, verify } => convert(&file, out, verify)?,
         Cmd::VerifyConvert { file, out } => verify_convert(&file, &out)?,
@@ -669,6 +683,54 @@ fn render(_file: &PathBuf, _page: u32, _out: &PathBuf) -> Result<(), String> {
     Err("`render` needs the rhwp bootstrap: ./scripts/vendor-rhwp.sh then \
          `cargo run -p tf-hwp-cli --features rhwp -- render <file>`"
         .into())
+}
+
+/// `own-render`: parse → OUR layout (`hwp-typeset`) → OUR paint IR (`hwp-render`) → SVG sink. No rhwp
+/// on the HWPX path; the SVG is regenerated from the IR, so an edited doc renders faithfully. Writes
+/// one `.svg` per page (or just `--page N`). Under `--features shaper` glyph x-positions are real.
+fn own_render(file: &PathBuf, page: Option<usize>, out: &PathBuf) -> Result<(), String> {
+    let bytes = read(file)?;
+    let doc = hwp_core::Engine::open(&bytes).map_err(|e| e.to_string())?;
+    let fonts = own_render_fonts();
+    let svgs = hwp_render::render_doc_svg(&doc, fonts.as_ref());
+    if svgs.is_empty() {
+        return Err("nothing to render (no pages)".into());
+    }
+    match page {
+        Some(p) => {
+            let svg = svgs.get(p).ok_or_else(|| format!("page {p} out of range (0..{})", svgs.len()))?;
+            std::fs::write(out, svg).map_err(|e| e.to_string())?;
+            println!("own-render: {} page(s); wrote page {p} → {}", svgs.len(), out.display());
+        }
+        None => {
+            // page.svg, page1.svg, page2.svg, … — page 0 keeps the bare `--out` name.
+            for (i, svg) in svgs.iter().enumerate() {
+                let path = if i == 0 { out.clone() } else { suffix_path(out, i) };
+                std::fs::write(&path, svg).map_err(|e| e.to_string())?;
+            }
+            println!("own-render: wrote {} page(s) → {} (+ siblings)", svgs.len(), out.display());
+        }
+    }
+    Ok(())
+}
+
+/// Choose the font-metrics provider for `own-render`: the real rustybuzz shaper under `--features
+/// shaper` (real Latin advances + EM-grid Hangul), else the per-script approximation.
+#[cfg(feature = "shaper")]
+fn own_render_fonts() -> Box<dyn hwp_model::prelude::FontMetricsProvider> {
+    Box::new(hwp_typeset::RealFontMetrics::new())
+}
+#[cfg(not(feature = "shaper"))]
+fn own_render_fonts() -> Box<dyn hwp_model::prelude::FontMetricsProvider> {
+    Box::new(hwp_typeset::ApproxFontMetrics)
+}
+
+/// Insert `<n>` before a path's extension: `page.svg` + 1 → `page1.svg`.
+fn suffix_path(out: &Path, n: usize) -> PathBuf {
+    let stem = out.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let ext = out.extension().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "svg".into());
+    let name = format!("{stem}{n}.{ext}");
+    out.with_file_name(name)
 }
 
 #[cfg(feature = "rhwp")]

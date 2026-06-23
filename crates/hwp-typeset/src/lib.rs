@@ -18,6 +18,10 @@ pub mod shaper;
 #[cfg(feature = "shaper")]
 pub use shaper::RealFontMetrics;
 
+/// Positioned layout (glyphs/images/boxes per page) — the paint-IR bridge consumed by `hwp-render`.
+pub mod place;
+pub use place::{place_doc, PlacedDoc, PlacedGlyph, PlacedImage, PlacedPage, PlacedRect};
+
 /// Half the EM for half-width glyphs.
 const HALF: f64 = 0.5;
 /// Space advance as a fraction of the EM.
@@ -26,7 +30,7 @@ const SPACE: f64 = 0.3;
 /// paragraph carries no explicit percent line spacing.
 const DEFAULT_LINESPACE: f64 = 1.6;
 /// Baseline as a fraction of the line height (matches Hancom's 850/1000 convention).
-const BASELINE_RATIO: f64 = 0.85;
+pub(crate) const BASELINE_RATIO: f64 = 0.85;
 
 /// A plain (no family/style) font key — metrics here are per-script, family-independent.
 fn plain_font() -> FontKey {
@@ -146,7 +150,7 @@ fn new_page(page: &PageSetup) -> PageLayout {
 
 /// Vertical cell padding (HWPUNIT) — top+bottom default cell insets (~0.5mm each) plus a little
 /// row breathing room. Approximate; the per-cell margin override isn't modeled yet.
-const CELL_PAD: f64 = 600.0;
+pub(crate) const CELL_PAD: f64 = 600.0;
 
 /// Laid-out height of one block (HWPUNIT) at the given content width — paragraph (lines×spacing +
 /// 위/아래 간격) or a nested table (recursive). Drives table-row sizing + pagination accounting.
@@ -303,7 +307,7 @@ fn mk_line(text_pos: u32, size: i32, width: f64) -> LineSeg {
 
 /// Line advance as a multiple of the glyph size, from the paragraph's percent line spacing
 /// (default ≈ 160%). Fixed/min spacing types fall back to the default for now.
-fn line_spacing_ratio(p: &Paragraph, doc: &SemanticDoc) -> f64 {
+pub(crate) fn line_spacing_ratio(p: &Paragraph, doc: &SemanticDoc) -> f64 {
     match doc.para_shapes.get(p.para_shape) {
         Some(s) if s.line_spacing_type == LineSpacingType::Percent && s.line_spacing_value > 0 => {
             s.line_spacing_value as f64 / 100.0

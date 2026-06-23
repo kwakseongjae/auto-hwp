@@ -2008,7 +2008,9 @@ dependencies = [
 name = "hwp-render"
 version = "0.0.1"
 dependencies = [
+ "hwp-hwpx",
  "hwp-model",
+ "hwp-typeset",
 ]
 
 [[package]]
@@ -4967,6 +4969,8 @@ dependencies = [
  "hwp-model",
  "hwp-ops",
  "hwp-oracle",
+ "hwp-render",
+ "hwp-typeset",
 ]
 
 [[package]]
