@@ -249,7 +249,11 @@ fn decode_image(bin_ref: &str, doc: &SemanticDoc) -> Option<krilla::image::Image
         "png" => krilla::image::Image::from_png(data, false).ok(),
         "jpg" | "jpeg" => krilla::image::Image::from_jpeg(data, false).ok(),
         "gif" => krilla::image::Image::from_gif(data, false).ok(),
+        "webp" => krilla::image::Image::from_webp(data, false).ok(),
         // Unknown kind: sniff the magic bytes so a mislabeled raster still embeds.
+        // NOTE: BMP isn't natively decodable by krilla (no `from_bmp`); a BMP draws a stub box in PDF
+        // even though the SVG sink embeds it as data:image/bmp (WebView renders BMP). Parity TODO:
+        // decode BMP → rgba8 and use `Image::from_rgba8` to close this gap.
         _ => sniff_image(&bin.bytes),
     }
 }
@@ -263,6 +267,8 @@ fn sniff_image(bytes: &[u8]) -> Option<krilla::image::Image> {
         krilla::image::Image::from_jpeg(data, false).ok()
     } else if bytes.starts_with(b"GIF8") {
         krilla::image::Image::from_gif(data, false).ok()
+    } else if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        krilla::image::Image::from_webp(data, false).ok()
     } else {
         None
     }

@@ -9,6 +9,9 @@ rust-version.workspace = true
 [dependencies]
 hwp-model = { workspace = true }
 hwp-typeset = { workspace = true }
+# Base64-encode embedded image bytes into <image href="data:..."> for the SVG sink (feature-light,
+# already a viewer dep at the same version).
+base64 = "0.21"
 
 [features]
 default = []

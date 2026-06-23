@@ -773,7 +773,16 @@ export default function App() {
 
       {/* The viewer + the docked vibe-docs chat, side by side. */}
       <div className="flex min-h-0 flex-1">
-        <main ref={scrollRef} className="min-h-0 flex-1 overflow-auto p-6">
+        {/* SVG-page modes ('svg' 원본 / 'own' 자체 렌더) lay WHITE sheets on a light DOCUMENT PASTEBOARD
+            (like Word/Hancom keep a neutral canvas behind pages) so the inter-page gap reads as a soft
+            light band — NOT the dark app background, which made the gap look like a full-width black bar
+            in dark mode. The HTML iframe + empty state keep the normal app background. */}
+        <main
+          ref={scrollRef}
+          className={`min-h-0 flex-1 overflow-auto p-6 ${
+            listCount > 0 && viewMode !== "html" ? "bg-neutral-200 dark:bg-neutral-800" : ""
+          }`}
+        >
           {pageCount > 0 && viewMode === "html" ? (
             // The JSX(content)/CSS(design) → HTML preview (the pivot view) in an isolated iframe.
             <iframe

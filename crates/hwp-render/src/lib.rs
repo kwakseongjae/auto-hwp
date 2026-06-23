@@ -12,6 +12,8 @@
 //! [`NullRenderer`] (the trait scaffold) stays as a structural fallback that only knows the bare
 //! [`LayoutResult`] (no glyph text); prefer [`render_page`], which walks the doc for real glyphs.
 
+use base64::Engine as _;
+use hwp_model::document::BinData;
 use hwp_model::prelude::*;
 use hwp_model::types::Color;
 use hwp_typeset::{place_doc, PlacedPage};
@@ -135,31 +137,53 @@ const HWPUNIT_PER_PX: f64 = 7200.0 / 96.0;
 
 /// A [`PaintSink`] that accumulates one `<svg>` document per page from the paint IR. Text becomes
 /// `<text>` with per-glyph `x` (no kerning guesswork — we position each glyph ourselves), borders
-/// and shading become `<rect>`, images `<image>` (or a stub `<rect>` when the bytes/bin_ref are
-/// unavailable). The result is real DOM: hit-testable + a vector export, regenerated from the IR.
+/// and shading become `<rect>`, images `<image href="data:…">` when the real bytes are available
+/// (resolved through [`SvgSink::with_bins`]) — else a stub `<rect>` (equation/missing/unbacked slot).
+/// The result is real DOM: hit-testable + a vector export, regenerated from the IR.
 ///
 /// Usage: `paint` every op of a page, then [`SvgSink::finish_page`] to take that page's SVG string
 /// and reset for the next page. [`SvgSink::svg_for`] is a one-shot for a single [`PageLayerTree`].
+/// To embed real photos, build with [`SvgSink::with_bins`] (passing `&doc.bin_data`).
 #[derive(Default)]
-pub struct SvgSink {
+pub struct SvgSink<'a> {
     body: String,
     width: f64,
     height: f64,
+    /// Document `BinData` for resolving an `Image`'s `bin_ref` → bytes → a `data:` URI. `None`/empty
+    /// keeps the light stub box (the original behaviour, used by the trait/diagnostic callers).
+    bins: Option<&'a [BinData]>,
 }
 
-impl SvgSink {
+impl<'a> SvgSink<'a> {
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Render a whole [`PageLayerTree`] to a standalone `<svg>` string in one call.
+    /// Build a sink that resolves `Image` ops against `bins` (`&doc.bin_data`) so real photos embed as
+    /// `<image href="data:…">`. Slots with no matching/decodable bytes still fall back to a stub box.
+    pub fn with_bins(bins: &'a [BinData]) -> Self {
+        SvgSink { bins: Some(bins), ..Default::default() }
+    }
+
+    /// Render a whole [`PageLayerTree`] to a standalone `<svg>` string in one call (no image bytes —
+    /// image ops become stub boxes). Use [`SvgSink::svg_for_with_bins`] to embed real photos.
     pub fn svg_for(tree: &PageLayerTree) -> String {
-        let mut s = SvgSink::new();
-        s.begin_page(tree.width, tree.height);
+        SvgSink::new().render(tree)
+    }
+
+    /// Like [`SvgSink::svg_for`] but resolves image `bin_ref`s against `bins` (`&doc.bin_data`) so the
+    /// real photo bytes embed as a `data:` URI.
+    pub fn svg_for_with_bins(tree: &PageLayerTree, bins: &'a [BinData]) -> String {
+        SvgSink::with_bins(bins).render(tree)
+    }
+
+    /// Paint one whole [`PageLayerTree`] and return its `<svg>` string (shared by the `svg_for*` paths).
+    fn render(mut self, tree: &PageLayerTree) -> String {
+        self.begin_page(tree.width, tree.height);
         for op in &tree.ops {
-            s.paint(op);
+            self.paint(op);
         }
-        s.finish_page()
+        self.finish_page()
     }
 
     /// Start a fresh page of the given size (HWPUNIT). Resets any accumulated body.
@@ -207,7 +231,7 @@ fn esc(s: &str) -> String {
     out
 }
 
-impl PaintSink for SvgSink {
+impl PaintSink for SvgSink<'_> {
     fn paint(&mut self, op: &PaintOp) {
         match op {
             PaintOp::Glyph { x, y, ch, size, color } => {
@@ -237,13 +261,27 @@ impl PaintSink for SvgSink {
                 )),
             },
             PaintOp::Image { x, y, w, h, bin_ref } => {
-                // No data-URI embedding yet (that needs the BinData bytes threaded in) — emit a stub
-                // box tagged with the bin_ref so the slot is visible + hit-testable.
-                self.body.push_str(&format!(
-                    "<rect x=\"{x:.2}\" y=\"{y:.2}\" width=\"{w:.2}\" height=\"{h:.2}\" \
-                     fill=\"#F0F0F0\" stroke=\"#999999\" stroke-width=\"0.5\" data-bin-ref=\"{r}\"/>",
-                    x = px(*x), y = px(*y), w = px(*w), h = px(*h), r = esc(bin_ref),
-                ));
+                // Resolve the bin_ref → real bytes (when a sink was built `with_bins`) → a data: URI so
+                // the actual photo renders. preserveAspectRatio="none" matches the placed box exactly,
+                // like an HWP image frame. Fall back to the light stub when the bytes are absent or the
+                // kind isn't a known raster (equation/OLE/missing) — the slot stays visible + tagged.
+                let href = self
+                    .bins
+                    .and_then(|bins| image_data_uri(bins, bin_ref));
+                match href {
+                    // `href` first (right after `<image`) so the standard `<image href="data:` grep
+                    // matches; preserveAspectRatio="none" fits the box like an HWP image frame.
+                    Some(uri) => self.body.push_str(&format!(
+                        "<image href=\"{uri}\" x=\"{x:.2}\" y=\"{y:.2}\" width=\"{w:.2}\" height=\"{h:.2}\" \
+                         preserveAspectRatio=\"none\" data-bin-ref=\"{r}\"/>",
+                        x = px(*x), y = px(*y), w = px(*w), h = px(*h), r = esc(bin_ref),
+                    )),
+                    None => self.body.push_str(&format!(
+                        "<rect x=\"{x:.2}\" y=\"{y:.2}\" width=\"{w:.2}\" height=\"{h:.2}\" \
+                         fill=\"#F0F0F0\" stroke=\"#999999\" stroke-width=\"0.5\" data-bin-ref=\"{r}\"/>",
+                        x = px(*x), y = px(*y), w = px(*w), h = px(*h), r = esc(bin_ref),
+                    )),
+                }
             }
         }
     }
@@ -254,12 +292,62 @@ fn color_hex(c: Color) -> String {
     c.to_hex()
 }
 
-/// Render every page of `doc` to a vector of standalone `<svg>` strings via our own pipeline.
+/// Resolve an image `bin_ref` against `bins` (`&doc.bin_data`) to a `data:<mime>;base64,<…>` URI for
+/// an SVG `<image href>`. `None` when the ref is empty/missing or the bytes aren't a known raster
+/// (equation/OLE/unknown) — the sink then draws a stub box. Mirrors the krilla PDF path's kind +
+/// magic-byte detection so the SVG and PDF agree on which slots embed.
+fn image_data_uri(bins: &[BinData], bin_ref: &str) -> Option<String> {
+    if bin_ref.is_empty() {
+        return None;
+    }
+    let bin = bins.iter().find(|b| b.bin_ref == bin_ref)?;
+    if bin.bytes.is_empty() {
+        return None;
+    }
+    let mime = image_mime(&bin.kind, &bin.bytes)?;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bin.bytes);
+    Some(format!("data:{mime};base64,{b64}"))
+}
+
+/// Pick the `image/*` MIME for embedding: trust a known declared `kind` first, else sniff the magic
+/// bytes (a mislabeled raster still embeds). `None` for non-raster (OLE/equation/unknown) kinds.
+fn image_mime(kind: &str, bytes: &[u8]) -> Option<&'static str> {
+    match kind.to_ascii_lowercase().as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "bmp" => Some("image/bmp"),
+        "webp" => Some("image/webp"),
+        // Unknown/unhelpful kind: sniff the leading bytes.
+        _ => sniff_mime(bytes),
+    }
+}
+
+/// Best-effort magic-byte sniff → `image/*` MIME for a raster whose declared kind was unhelpful.
+fn sniff_mime(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+        Some("image/png")
+    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some("image/jpeg")
+    } else if bytes.starts_with(b"GIF8") {
+        Some("image/gif")
+    } else if bytes.starts_with(b"BM") {
+        Some("image/bmp")
+    } else if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        Some("image/webp")
+    } else {
+        None
+    }
+}
+
+/// Render every page of `doc` to a vector of standalone `<svg>` strings via our own pipeline. Real
+/// image bytes embed as `<image href="data:…">` (resolved through `doc.bin_data`); equation/missing
+/// objects keep the light stub box.
 pub fn render_doc_svg(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<String> {
     place_doc(doc, fonts)
         .pages
         .iter()
-        .map(|pg| SvgSink::svg_for(&lower_page(pg)))
+        .map(|pg| SvgSink::svg_for_with_bins(&lower_page(pg), &doc.bin_data))
         .collect()
 }
 
@@ -351,8 +439,57 @@ mod tests {
         let doc = doc_with(vec![Block::Paragraph(p)]);
         let tree = render_page(&doc, &ApproxFontMetrics, 0).unwrap();
         assert!(tree.ops.iter().any(|o| matches!(o, PaintOp::Image { bin_ref, .. } if bin_ref == "img1")));
+        // No bytes available → a tagged stub box (the slot is still visible + hit-testable).
         let svg = SvgSink::svg_for(&tree);
         assert!(svg.contains("data-bin-ref=\"img1\""), "image box tagged with its bin_ref");
+        assert!(svg.contains("fill=\"#F0F0F0\""), "falls back to the stub when no bytes are threaded");
+        assert!(!svg.contains("<image "), "no <image> element without real bytes");
+    }
+
+    /// A 1x1 PNG (valid magic + minimal IHDR/IDAT/IEND) — enough to drive the data-URI embed path.
+    const TINY_PNG: &[u8] = &[
+        0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, b'I', b'H', b'D', b'R',
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+        0x89, 0x00, 0x00, 0x00, 0x0A, b'I', b'D', b'A', b'T', 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+        0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, b'I', b'E', b'N', b'D', 0xAE,
+        0x42, 0x60, 0x82,
+    ];
+
+    #[test]
+    fn image_embeds_real_bytes_as_data_uri() {
+        // When the doc carries the bin bytes, the SVG sink resolves bin_ref → a <image href="data:…">.
+        let mut p = Paragraph::default();
+        p.runs.push(Run {
+            char_shape: 0,
+            content: vec![Inline::Image(ImageRef { bin_ref: "photo".into(), width: 10000, height: 8000 })],
+            ..Default::default()
+        });
+        let mut doc = doc_with(vec![Block::Paragraph(p)]);
+        doc.bin_data.push(BinData { bin_ref: "photo".into(), bytes: TINY_PNG.to_vec(), kind: "png".into() });
+        let svg = render_doc_svg(&doc, &ApproxFontMetrics);
+        let s = &svg[0];
+        assert!(s.contains("<image "), "real bytes render as an <image> element");
+        assert!(s.contains("href=\"data:image/png;base64,"), "embedded as a base64 PNG data URI");
+        assert!(s.contains("data-bin-ref=\"photo\""), "still tagged with the bin_ref");
+        assert!(!s.contains("fill=\"#F0F0F0\""), "no stub box when real bytes embed");
+    }
+
+    #[test]
+    fn image_falls_back_to_stub_for_non_raster_bytes() {
+        // An OLE/equation object (non-raster bytes) keeps the light stub box even when present.
+        let mut p = Paragraph::default();
+        p.runs.push(Run {
+            char_shape: 0,
+            content: vec![Inline::Image(ImageRef { bin_ref: "eq".into(), width: 10000, height: 8000 })],
+            ..Default::default()
+        });
+        let mut doc = doc_with(vec![Block::Paragraph(p)]);
+        doc.bin_data.push(BinData { bin_ref: "eq".into(), bytes: vec![0x01, 0x02, 0x03, 0x04], kind: "ole".into() });
+        let svg = render_doc_svg(&doc, &ApproxFontMetrics);
+        let s = &svg[0];
+        assert!(!s.contains("<image "), "non-raster bytes don't embed");
+        assert!(s.contains("fill=\"#F0F0F0\""), "they keep the stub box");
+        assert!(s.contains("data-bin-ref=\"eq\""), "stub still tagged");
     }
 
     #[test]
