@@ -23,4 +23,5 @@ else
 fi
 
 cd "$root/crates/hwp-viewer"
-exec cargo tauri dev -f ai "$@"
+# ai = vibe chat · shaper = real (rustybuzz) own-render fidelity · pdf = in-app PDF export.
+exec cargo tauri dev -f ai -f shaper -f pdf "$@"
