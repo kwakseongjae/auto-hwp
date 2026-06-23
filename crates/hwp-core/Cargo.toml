@@ -10,6 +10,8 @@ rust-version.workspace = true
 default = []
 # Forwards to hwp-rhwp's `rhwp` feature to enable the bootstrap engine.
 rhwp = ["hwp-rhwp/rhwp"]
+# Forwards to the rustybuzz shaper so the layout oracle scores against real font advances.
+shaper = ["hwp-rhwp/shaper"]
 
 [dependencies]
 hwp-model = { workspace = true }

@@ -836,8 +836,15 @@ fn layout_check(file: &PathBuf) -> Result<(), String> {
     println!("  문단       {} 개 대조", f.paragraphs);
     println!("    줄수 정확 일치   {:>5} ({:.1}%)", f.line_exact, pct(f.line_exact));
     println!("    줄수 ±1 이내     {:>5} ({:.1}%)", f.line_within1, pct(f.line_within1));
+    #[cfg(feature = "shaper")]
     println!(
-        "  → 근사 메트릭(전각1·반각0.5·공백0.3 EM)의 줄바꿈 충실도. 실제 셰이퍼(harfrust)로 좁힐 목표."
+        "  → 실제 셰이퍼(rustybuzz) 줄바꿈 충실도: 전각=EM 격자, 반각은 실제 폰트 advance. \
+         (--features shaper)"
+    );
+    #[cfg(not(feature = "shaper"))]
+    println!(
+        "  → 근사 메트릭(전각1·반각0.5·공백0.3 EM)의 줄바꿈 충실도. 실제 셰이퍼(rustybuzz)는 \
+         `--features shaper`."
     );
     Ok(())
 }

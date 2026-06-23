@@ -1049,11 +1049,17 @@ pub struct LayoutFidelity {
 
 #[cfg(feature = "rhwp")]
 pub fn layout_fidelity(bytes: &[u8]) -> Result<LayoutFidelity> {
-    use hwp_typeset::{layout_paragraph, ApproxFontMetrics, NaiveLayout};
+    use hwp_typeset::{layout_paragraph, NaiveLayout};
 
     let rdoc = rhwp::parse_document(bytes).map_err(|e| Error::Parse(e.to_string()))?;
     let our = lift::parse_to_semantic(bytes)?;
-    let fonts = ApproxFontMetrics;
+    // With the `shaper` feature, score against the REAL rustybuzz advances (real Latin widths +
+    // EM-grid Hangul) — falling back to the per-script approximation when no system font is found.
+    // Default build keeps the pure-Rust approximation (no rustybuzz/ttf-parser deps).
+    #[cfg(feature = "shaper")]
+    let fonts = hwp_typeset::RealFontMetrics::new();
+    #[cfg(not(feature = "shaper"))]
+    let fonts = hwp_typeset::ApproxFontMetrics;
 
     let mut f = LayoutFidelity {
         oracle_pages: page_count(bytes).unwrap_or(0),

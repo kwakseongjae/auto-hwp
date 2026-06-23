@@ -5,11 +5,18 @@
 //! it gates faithful in-app rendering, our own `linesegarray` emission (so rhwp/Hancom paginate our
 //! converted .hwpx correctly), and the WYSIWYG caret (screen↔doc coordinate mapping).
 //!
-//! STATUS: a real greedy line-breaker + vertical-accumulation paginator on per-script APPROXIMATE
-//! metrics — enough to break lines + paginate. NOT YET: real glyph shaping (harfrust), Korean 금칙
-//! (kinsoku), 배분/나눔 justification, 자간/장평, vertical text. Those layer on this skeleton.
+//! STATUS: a real greedy line-breaker + vertical-accumulation paginator. The DEFAULT build runs on
+//! per-script APPROXIMATE metrics ([`ApproxFontMetrics`]); the `shaper` feature swaps in a real
+//! rustybuzz (pure-Rust HarfBuzz) advance/metrics path ([`shaper::RealFontMetrics`]) with 자간/장평
+//! scaling from the [`CharShape`]. NOT YET: Korean 금칙 (kinsoku), 배분/나눔 justification,
+//! cluster-aware line breaking, vertical text. Those layer on this skeleton.
 
 use hwp_model::prelude::*;
+
+#[cfg(feature = "shaper")]
+pub mod shaper;
+#[cfg(feature = "shaper")]
+pub use shaper::RealFontMetrics;
 
 /// Half the EM for half-width glyphs.
 const HALF: f64 = 0.5;

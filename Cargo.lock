@@ -2025,6 +2025,8 @@ name = "hwp-typeset"
 version = "0.0.1"
 dependencies = [
  "hwp-model",
+ "rustybuzz",
+ "ttf-parser",
 ]
 
 [[package]]

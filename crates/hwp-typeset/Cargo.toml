@@ -8,3 +8,12 @@ rust-version.workspace = true
 
 [dependencies]
 hwp-model = { workspace = true }
+# Real text shaper (pure-Rust HarfBuzz port) + font tables — feature-gated so the DEFAULT build
+# keeps the per-script approximation and pulls NO extra deps (network-safe / wasm-friendly).
+rustybuzz = { version = "0.20", optional = true }
+ttf-parser = { version = "0.25", optional = true }
+
+[features]
+default = []
+# Swap in RealFontMetrics (rustybuzz advances + real font metrics). Off by default → no extra deps.
+shaper = ["dep:rustybuzz", "dep:ttf-parser"]

@@ -14,6 +14,8 @@ path = "src/main.rs"
 default = []
 # Compile the rhwp bootstrap so `render`/`view`/`fidelity` compare work (needs external/rhwp submodule).
 rhwp = ["hwp-core/rhwp", "hwp-fidelity/rhwp"]
+# Score `layout-check` with the real rustybuzz shaper (real Latin advances + EM-grid Hangul).
+shaper = ["hwp-core/shaper"]
 # Enable the AI providers: Anthropic BYOK, local Ollama (Qwen3), OpenRouter (BYOK, OpenAI-compatible).
 ai = ["hwp-ai/anthropic", "hwp-ai/keyring", "hwp-ai/local", "hwp-ai/openrouter"]
 
