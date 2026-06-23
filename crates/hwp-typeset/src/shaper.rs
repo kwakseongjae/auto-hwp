@@ -35,6 +35,25 @@ const FONT_CANDIDATES: &[(&str, u32)] = &[
     (concat!(env!("CARGO_MANIFEST_DIR"), "/assets/NotoSansKR-Regular.ttf"), 0),
 ];
 
+/// Proportional Latin/serif faces probed for Latin/digit/punctuation glyphs. The Korean system face
+/// (AppleGothic etc.) packs Latin too wide — '(Solution)' overflows a narrow cell — because it lays
+/// Latin on a near-full-width grid. A real proportional Latin face gives the tight advances Hancom
+/// uses for the default Latin font (a Times/serif family in most gov-docs). Probed Korean-first slot
+/// is empty → we use the Korean face for Latin (the old behavior), so this never regresses headless.
+const LATIN_FONT_CANDIDATES: &[(&str, u32)] = &[
+    // macOS — Hancom's default Latin face in most gov-docs is a serif (Times-like); Helvetica is the
+    // common sans fallback. Either is far tighter than AppleGothic's Latin.
+    ("/System/Library/Fonts/Supplemental/Times New Roman.ttf", 0),
+    ("/System/Library/Fonts/Times.ttc", 0),
+    ("/System/Library/Fonts/Supplemental/Arial.ttf", 0),
+    ("/System/Library/Fonts/Helvetica.ttc", 0),
+    // Linux — Liberation Serif/Sans (metric-compatible with Times/Arial), then DejaVu.
+    ("/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf", 0),
+    ("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", 0),
+    ("/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf", 0),
+    ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 0),
+];
+
 /// Real font metrics in font units, normalized to the EM (`units_per_em`). Advances/line metrics
 /// scale by `size_hwpunit` at query time so one loaded face serves every point size.
 struct LoadedFont {
@@ -51,7 +70,12 @@ struct LoadedFont {
 impl LoadedFont {
     /// Load the first parseable candidate; `None` if no Korean-capable font is on this machine.
     fn discover() -> Option<LoadedFont> {
-        for &(path, index) in FONT_CANDIDATES {
+        Self::discover_from(FONT_CANDIDATES)
+    }
+
+    /// Load the first parseable candidate from `candidates` (shared by the Korean + Latin slots).
+    fn discover_from(candidates: &[(&str, u32)]) -> Option<LoadedFont> {
+        for &(path, index) in candidates {
             let Ok(bytes) = std::fs::read(path) else { continue };
             if let Some(f) = LoadedFont::from_bytes(bytes.into_boxed_slice(), index, path.to_string()) {
                 return Some(f);
@@ -93,7 +117,11 @@ impl LoadedFont {
 /// is present it transparently falls back to the per-script approximation — same numbers as
 /// [`crate::ApproxFontMetrics`] — so the default contract is never violated.
 pub struct RealFontMetrics {
+    /// Korean/CJK face — Hangul/Hanja/Japanese + the no-Latin-font fallback for Latin too.
     font: Option<LoadedFont>,
+    /// Proportional Latin/serif face for Latin/digit/punctuation. `None` → route Latin to `font`
+    /// (the old single-face behavior), so a machine without a Latin face is never worse than before.
+    latin: Option<LoadedFont>,
     /// (char, size_hwpunit) → advance HWPUNIT. RefCell: the trait method is `&self`.
     cache: RefCell<HashMap<(char, i32), f64>>,
 }
@@ -108,7 +136,11 @@ impl RealFontMetrics {
     /// Discover a system/embedded Korean font and build the shaper. Always succeeds — falls back to
     /// the per-script approximation if no font is found (check [`RealFontMetrics::is_real`]).
     pub fn new() -> RealFontMetrics {
-        RealFontMetrics { font: LoadedFont::discover(), cache: RefCell::new(HashMap::new()) }
+        RealFontMetrics {
+            font: LoadedFont::discover(),
+            latin: LoadedFont::discover_from(LATIN_FONT_CANDIDATES),
+            cache: RefCell::new(HashMap::new()),
+        }
     }
 
     /// True when a real font backs the metrics (a Korean-capable face was found). False = the
@@ -120,6 +152,12 @@ impl RealFontMetrics {
     /// Path of the loaded font, or `None` when falling back to approximate metrics. Diagnostics.
     pub fn font_path(&self) -> Option<&str> {
         self.font.as_ref().map(|f| f.path.as_str())
+    }
+
+    /// Path of the loaded proportional Latin face, or `None` when Latin routes to the Korean face
+    /// (no separate Latin font present). Diagnostics.
+    pub fn latin_font_path(&self) -> Option<&str> {
+        self.latin.as_ref().map(|f| f.path.as_str())
     }
 
     /// Real vertical metrics in HWPUNIT for a line at `size_hwpunit`: (ascent, descent, line_gap).
@@ -150,17 +188,22 @@ impl RealFontMetrics {
         let adv = match &self.font {
             // Full-width glyphs (Hangul/CJK/fullwidth, 전각) snap to the 1-EM grid: Hancom spaces
             // them on the EM grid regardless of the font's own (often tighter) advance, so snapping
-            // keeps our line breaks aligned with Hancom's. Proportional glyphs (Latin/digit/punct)
-            // get the REAL HarfBuzz-shaped advance — that's where the shaper actually improves on
-            // the flat 0.5-EM approximation.
+            // keeps our line breaks aligned with Hancom's.
             Some(_) if is_full_width(ch) => em,
-            Some(f) => {
-                let raw = f.raw_advance(ch);
+            // Proportional glyphs (Latin/digit/punct) get the REAL HarfBuzz-shaped advance from the
+            // PROPORTIONAL LATIN face when present (Times/Helvetica/Liberation) — the Korean face
+            // packs Latin too wide (overflows narrow cells). The Latin face falls back to the Korean
+            // face, then the per-script approximation, so an absent glyph never collapses to zero.
+            Some(kor) => {
+                let latin = self.latin.as_ref().unwrap_or(kor);
+                let raw = latin.raw_advance(ch);
                 if raw > 0.0 {
-                    raw / f.units_per_em * em
+                    raw / latin.units_per_em * em
+                } else if self.latin.is_some() {
+                    // Glyph absent in the Latin face — try the Korean face before approximating.
+                    let kraw = kor.raw_advance(ch);
+                    if kraw > 0.0 { kraw / kor.units_per_em * em } else { approx_advance(ch, em) }
                 } else {
-                    // Glyph absent in this face — keep the per-script approximation so we never
-                    // collapse an unknown glyph to zero width (would corrupt line breaking).
                     approx_advance(ch, em)
                 }
             }
@@ -226,6 +269,17 @@ impl FontMetricsProvider for RealFontMetrics {
     fn advance_width(&self, _font: &FontKey, ch: char, size_hwpunit: i32) -> f64 {
         self.base_advance(ch, size_hwpunit)
     }
+
+    /// Real line height from the Korean face's vertical metrics (ascent + descent + line_gap),
+    /// scaled to `size_hwpunit`. A line's natural box is the CJK face's leading (it dominates a
+    /// mixed Korean line). Falls back to the flat EM (default trait impl semantics) with no font, so
+    /// headless/CI matches the approximation exactly. Clamped to ≥ 1 EM so a tight face never makes
+    /// rows SHORTER than the historical baseline (which would only worsen the too-tight pagination).
+    fn line_height(&self, size_hwpunit: i32) -> f64 {
+        let em = size_hwpunit.max(1) as f64;
+        let (asc, desc, gap) = self.vmetrics(size_hwpunit);
+        (asc + desc + gap).max(em)
+    }
 }
 
 #[cfg(test)]
@@ -248,7 +302,7 @@ mod tests {
     #[test]
     fn fallback_matches_approx_when_no_font() {
         // Force the no-font path by constructing a fallback-only provider.
-        let m = RealFontMetrics { font: None, cache: RefCell::new(HashMap::new()) };
+        let m = RealFontMetrics { font: None, latin: None, cache: RefCell::new(HashMap::new()) };
         let f = FontKey { family: String::new(), bold: false, italic: false };
         assert_eq!(m.advance_width(&f, '가', 1000), 1000.0);
         assert_eq!(m.advance_width(&f, 'a', 1000), 500.0);
@@ -299,5 +353,38 @@ mod tests {
         assert!(asc > 0.0 && desc >= 0.0 && gap >= 0.0);
         // ascent + descent should be near one EM (Korean faces run a touch over).
         assert!(asc + desc >= 900.0 && asc + desc <= 1400.0, "asc {asc} + desc {desc} ~ EM");
+    }
+
+    #[test]
+    fn line_height_is_at_least_em_and_matches_vmetrics() {
+        let m = RealFontMetrics::new();
+        let lh = m.line_height(1000);
+        // Never shorter than the EM (clamped), and equal to ascent+descent+gap for a real face.
+        assert!(lh >= 1000.0, "line height clamps to ≥ EM, got {lh}");
+        if m.is_real() {
+            let (a, d, g) = m.vmetrics(1000);
+            assert!((lh - (a + d + g).max(1000.0)).abs() < 1.0, "line height = leading: {lh}");
+            // A Korean face's leading runs OVER one EM — that's the whole point of the calibration.
+            assert!(lh > 1000.0, "real Korean face line height should exceed the bare EM, got {lh}");
+        }
+    }
+
+    #[test]
+    fn latin_uses_proportional_face_when_present() {
+        let m = RealFontMetrics::new();
+        // Only meaningful when BOTH a Korean and a separate Latin face are present (dev mac).
+        if !(m.is_real() && m.latin_font_path().is_some()) {
+            eprintln!("skip: need both a Korean and a separate Latin font");
+            return;
+        }
+        let f = FontKey { family: String::new(), bold: false, italic: false };
+        // A proportional Latin 'i' is FAR narrower than an 'W' — a Korean face packing Latin
+        // near-full-width would make them nearly equal. The proportional face keeps the ratio wide.
+        let i = m.advance_width(&f, 'i', 1000);
+        let w = m.advance_width(&f, 'W', 1000);
+        assert!(i > 0.0 && w > 0.0, "both Latin glyphs advance");
+        assert!(w > i * 2.0, "proportional Latin: 'W' ≫ 'i' ({w} vs {i})");
+        // And Latin stays well under the full-width EM (the overflow bug was Latin ≈ 1 EM).
+        assert!(i < 700.0, "proportional 'i' is narrow, got {i}");
     }
 }

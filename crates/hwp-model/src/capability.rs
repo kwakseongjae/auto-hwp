@@ -43,6 +43,15 @@ pub struct FontKey {
 pub trait FontMetricsProvider {
     /// Advance width in HWPUNIT. 자간/장평 are applied by the layout engine on top.
     fn advance_width(&self, font: &FontKey, ch: char, size_hwpunit: i32) -> f64;
+
+    /// Natural line height in HWPUNIT for a line whose tallest glyph is `size_hwpunit` (EM) — the
+    /// box the layout engine stacks before applying the paragraph's percent line-spacing. The
+    /// DEFAULT is the flat EM (`size_hwpunit`), matching the historical approximation; a real shaper
+    /// overrides this with the font's `ascent + descent + line_gap` so rows match the actual face
+    /// (Korean faces run ~1.15–1.3 EM, which is why flat-EM rows paginate a touch too tight).
+    fn line_height(&self, size_hwpunit: i32) -> f64 {
+        size_hwpunit.max(1) as f64
+    }
 }
 
 /// Result of the editor-open-safety acceptance gate.

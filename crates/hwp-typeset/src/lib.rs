@@ -225,7 +225,9 @@ pub fn layout_paragraph(p: &Paragraph, doc: &SemanticDoc, line_width: f64, fonts
 
     if n == 0 {
         // An empty paragraph still occupies one line — height = the object's if it anchors one.
-        return vec![mk_line(0, obj_h.max(1000), 0.0)];
+        // No glyph → use the default 1000-EM line height from the metrics provider.
+        let lh = if obj_h > 0 { obj_h as f64 } else { fonts.line_height(1000) };
+        return vec![mk_line(0, lh, 0.0)];
     }
 
     let mut lines = Vec::new();
@@ -264,7 +266,9 @@ pub fn layout_paragraph(p: &Paragraph, doc: &SemanticDoc, line_width: f64, fonts
             end.max(start + 1)
         };
         let (lw, max_size) = measure(&chars, start, line_end, &font, fonts);
-        lines.push(mk_line(start as u32, max_size, lw));
+        // Line box height = the font's real leading for the tallest glyph (real shaper) or flat EM
+        // (approximation), NOT the bare EM — so rows match the actual face's line height.
+        lines.push(mk_line(start as u32, fonts.line_height(max_size), lw));
         start = line_end;
     }
     // An inline object taller than the text bumps the line it sits on (approximated as the first).
@@ -307,9 +311,10 @@ fn measure(chars: &[(char, i32)], a: usize, b: usize, font: &FontKey, fonts: &dy
     (w, sz.max(1))
 }
 
-/// One line at `text_pos` with line height = `size`, content `width` (vert_pos filled by the caller).
-fn mk_line(text_pos: u32, size: i32, width: f64) -> LineSeg {
-    let h = size.max(1) as f64;
+/// One line at `text_pos` with line `height` (HWPUNIT, already resolved via the metrics provider's
+/// `line_height`), content `width` (vert_pos filled by the caller).
+fn mk_line(text_pos: u32, height: f64, width: f64) -> LineSeg {
+    let h = height.max(1.0);
     LineSeg {
         text_pos,
         vert_pos: 0.0,
@@ -392,6 +397,42 @@ mod tests {
         let lines = layout_paragraph(&p, &doc, 5000.0, &ApproxFontMetrics);
         assert_eq!(lines.len(), 2, "wraps at a space, not mid-word");
         assert_eq!(lines[1].text_pos, 10, "line 2 starts at 'cccc' (after 'aaaa bbbb ')");
+    }
+
+    #[test]
+    fn approx_line_height_is_bare_em() {
+        // The DEFAULT provider keeps the flat-EM line height (no calibration) so the default build's
+        // pagination is byte-for-byte what it was before the shaper's vmetrics path landed.
+        let m = ApproxFontMetrics;
+        assert_eq!(m.line_height(1000), 1000.0);
+        assert_eq!(m.line_height(1200), 1200.0);
+    }
+
+    /// A metrics provider that reports a taller-than-EM line height (like a real Korean face),
+    /// to verify `layout_paragraph` honors `line_height` for the line box.
+    struct TallLines;
+    impl FontMetricsProvider for TallLines {
+        fn advance_width(&self, _f: &FontKey, ch: char, size: i32) -> f64 {
+            ApproxFontMetrics.advance_width(_f, ch, size)
+        }
+        fn line_height(&self, size: i32) -> f64 {
+            size.max(1) as f64 * 1.2 // 1.2 EM leading
+        }
+    }
+
+    #[test]
+    fn line_height_provider_drives_lineseg_height() {
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape::default()); // size 1000
+        let p = para("가나다");
+        let flat = layout_paragraph(&p, &doc, 10000.0, &ApproxFontMetrics);
+        let tall = layout_paragraph(&p, &doc, 10000.0, &TallLines);
+        assert_eq!(flat.len(), 1);
+        assert_eq!(tall.len(), 1);
+        assert!((flat[0].vert_size - 1000.0).abs() < 1.0, "flat = 1 EM, got {}", flat[0].vert_size);
+        assert!((tall[0].vert_size - 1200.0).abs() < 1.0, "tall = 1.2 EM, got {}", tall[0].vert_size);
+        // Line breaking (advances) is identical — only the box height changed.
+        assert_eq!(flat[0].text_pos, tall[0].text_pos);
     }
 
     #[test]
