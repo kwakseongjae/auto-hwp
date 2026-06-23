@@ -302,8 +302,12 @@ fn place_table(
         if let Some(shade) = c.shade_color {
             pg.rects.push(PlacedRect { x: cx, y: cy, w: cw, h: ch, fill: Some(shade) });
         }
-        // Cell border (stroked).
-        pg.rects.push(PlacedRect { x: cx, y: cy, w: cw, h: ch, fill: None });
+        // Cell border (stroked) — only when the cell actually has a visible border. Borderless cells
+        // (all four edges 선없음) are skipped so the own render doesn't paint a spurious grid line
+        // (e.g. the section-header band's filler cell, spacer cells).
+        if c.has_border {
+            pg.rects.push(PlacedRect { x: cx, y: cy, w: cw, h: ch, fill: None });
+        }
         // Cell TEXT: place the cell's paragraph glyphs inside the box, vertically centered (the
         // Korean gov-doc convention: vertAlign=CENTER), honoring each paragraph's horizontal align.
         place_cell_content(pg, &c.blocks, cx, cy, cw, ch, doc, fonts);

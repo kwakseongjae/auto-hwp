@@ -341,6 +341,7 @@ impl<'a> Lifter<'a> {
                     blocks,
                     active: true,
                     shade_color: self.cell_shade(c.border_fill_id),
+                    has_border: self.cell_has_border(c.border_fill_id),
                     ..Default::default()
                 }
             })
@@ -358,6 +359,17 @@ impl<'a> Lifter<'a> {
             provenance: Provenance { source: Some(SourceFormat::Hwp5), raw: None },
             ..Default::default()
         }
+    }
+
+    /// Whether a cell's `border_fill_id` defines ANY visible edge (a line_type other than 선없음/None).
+    /// Cells whose four edges are all None render with no border box, so the renderer can skip them
+    /// instead of drawing a spurious black grid line. Unknown/missing borderFill → keep a border
+    /// (conservative: a real table cell without resolvable style still shows its grid).
+    fn cell_has_border(&self, border_fill_id: u16) -> bool {
+        let Some(idx) = (border_fill_id as usize).checked_sub(1) else { return true };
+        let Some(bf) = self.doc.doc_info.border_fills.get(idx) else { return true };
+        use rhwp::model::style::BorderLineType;
+        bf.borders.iter().any(|b| b.line_type != BorderLineType::None)
     }
 
     /// Resolve a cell's `border_fill_id` (1-based, per rhwp) → its solid background as a shade color,

@@ -750,6 +750,8 @@ fn parse_cell(el: &JsxElement) -> Result<Cell> {
         blocks,
         active: !el.attrs.contains_key("data-inactive"),
         shade_color: el.attrs.get("data-shade").and_then(|s| Color::from_hex(s)),
+        // Borderless cells carry data-noborder; absence keeps the default (bordered) cell.
+        has_border: !el.attrs.contains_key("data-noborder"),
         dirty: Dirty(el.attrs.contains_key("data-dirty")),
     })
 }

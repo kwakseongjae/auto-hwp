@@ -291,6 +291,12 @@ pub struct Cell {
     pub active: bool,
     /// Optional cell background shade (synthesized into a borderFill `fillBrush` on export).
     pub shade_color: Option<crate::types::Color>,
+    /// Whether this cell draws a visible border box. Lifted from the cell's borderFill (false when
+    /// all four edges are "선없음"). Default `true` keeps the legacy behavior for inserted/test cells
+    /// (which want a normal border). A `false` cell is skipped by the renderer — this removes the
+    /// spurious grid lines on borderless cells (e.g. the section-header banner's filler cell, spacer
+    /// cells) that made the own render look like a plain table instead of the original's clean band.
+    pub has_border: bool,
     pub dirty: Dirty,
 }
 
@@ -310,6 +316,7 @@ impl Default for Cell {
             blocks: Vec::new(),
             active: true,
             shade_color: None,
+            has_border: true,
             dirty: Dirty::default(),
         }
     }
