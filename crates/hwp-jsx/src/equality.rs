@@ -160,6 +160,9 @@ fn cell_eq(a: &Cell, b: &Cell) -> bool {
         && a.col_span == b.col_span
         && a.active == b.active
         && a.shade_color == b.shade_color
+        && a.has_border == b.has_border
+        && a.borders == b.borders
+        && a.diagonal == b.diagonal
         && a.dirty == b.dirty
         && blocks_eq(&a.blocks, &b.blocks)
 }

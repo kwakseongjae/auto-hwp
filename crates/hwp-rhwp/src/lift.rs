@@ -342,6 +342,8 @@ impl<'a> Lifter<'a> {
                     active: true,
                     shade_color: self.cell_shade(c.border_fill_id),
                     has_border: self.cell_has_border(c.border_fill_id),
+                    borders: self.cell_borders(c.border_fill_id),
+                    diagonal: self.cell_diagonal(c.border_fill_id),
                     ..Default::default()
                 }
             })
@@ -370,6 +372,45 @@ impl<'a> Lifter<'a> {
         let Some(bf) = self.doc.doc_info.border_fills.get(idx) else { return true };
         use rhwp::model::style::BorderLineType;
         bf.borders.iter().any(|b| b.line_type != BorderLineType::None)
+    }
+
+    /// Lift a cell's four per-edge borders from its `border_fill_id` so the renderer can draw exactly
+    /// the sides the doc specifies (each with its color/style/width), not one uniform box. Ordering is
+    /// HWP's `[left, right, top, bottom]`, mirrored into our `Cell::borders`. Every edge is `Some`
+    /// (incl. 선없음 → `LineStyle::None`, which the renderer SKIPS) so `Cell::has_edge_borders()` is
+    /// true and the legacy uniform box is bypassed. Unknown/missing borderFill → `[None;4]` (the cell
+    /// falls back to the legacy `has_border` box — inserted/test cells keep their normal grid).
+    fn cell_borders(&self, border_fill_id: u16) -> [Option<CellEdge>; 4] {
+        let Some(idx) = (border_fill_id as usize).checked_sub(1) else { return [None; 4] };
+        let Some(bf) = self.doc.doc_info.border_fills.get(idx) else { return [None; 4] };
+        let mut out = [None; 4];
+        for (i, b) in bf.borders.iter().enumerate().take(4) {
+            out[i] = Some(CellEdge {
+                color: opaque(lift_text_color(b.color)),
+                style: lift_line_style(b.line_type),
+                width_px: border_width_to_px(b.width),
+            });
+        }
+        out
+    }
+
+    /// Lift a cell's diagonal line (HWP borderFill `diagonal`) when one is drawn. `diagonal_type`
+    /// 0=Slash (/), 1=BackSlash (\\); 2 (Crooked) is approximated as a BackSlash. A `line_type`-less
+    /// diagonal (width 0 / 선없음 implied) yields `None`. The section-header banner's right cell uses
+    /// this — with its right/inner edges suppressed — to form the pointed pentagon end.
+    fn cell_diagonal(&self, border_fill_id: u16) -> Option<CellDiagonal> {
+        let idx = (border_fill_id as usize).checked_sub(1)?;
+        let bf = self.doc.doc_info.border_fills.get(idx)?;
+        let d = &bf.diagonal;
+        // A diagonal with zero width is not drawn (HWP stores an unset diagonal as width 0).
+        if d.width == 0 {
+            return None;
+        }
+        let kind = match d.diagonal_type {
+            0 => DiagonalKind::Slash,
+            _ => DiagonalKind::BackSlash, // 1=BackSlash, 2=Crooked → approximate as BackSlash
+        };
+        Some(CellDiagonal { kind, color: opaque(lift_text_color(d.color)), width_px: border_width_to_px(d.width) })
     }
 
     /// Resolve a cell's `border_fill_id` (1-based, per rhwp) → its solid background as a shade color,
@@ -592,6 +633,46 @@ fn lift_text_color(c: u32) -> Color {
     } else {
         Color { r: (c & 0xFF) as u8, g: ((c >> 8) & 0xFF) as u8, b: ((c >> 16) & 0xFF) as u8, a: 255 }
     }
+}
+
+/// Force a color opaque (`a = 255`). Border/diagonal colors are always opaque visually; this also
+/// makes them survive the JSX codec's `#RRGGBB` round-trip cleanly (`from_hex` yields `a = 255`),
+/// whereas `lift_text_color`'s black returns `Color::default()` with `a = 0`.
+fn opaque(c: Color) -> Color {
+    Color { a: 255, ..c }
+}
+
+/// Map an rhwp `BorderLineType` to our renderable `LineStyle`. 선없음 (None) → `LineStyle::None` (the
+/// renderer skips that edge); dash/long-dash → Dashed; dot/circle → Dotted; the double/triple family
+/// → Double; everything else (3D, wave, dash-dot variants) collapses to Solid (we don't draw those
+/// special strokes yet — a solid line is a faithful-enough stand-in vs dropping the edge).
+fn lift_line_style(lt: rhwp::model::style::BorderLineType) -> LineStyle {
+    use rhwp::model::style::BorderLineType as B;
+    match lt {
+        B::None => LineStyle::None,
+        B::Dash | B::LongDash => LineStyle::Dashed,
+        B::Dot | B::Circle => LineStyle::Dotted,
+        B::Double | B::ThinThickDouble | B::ThickThinDouble | B::ThinThickThinTriple => {
+            LineStyle::Double
+        }
+        _ => LineStyle::Solid,
+    }
+}
+
+/// HWP 테두리 굵기 인덱스 → device px (mirrors rhwp's `border_width_to_px`, spec 표 28: mm→96dpi px).
+/// Used for both cell edges and the diagonal so our stroke widths match Hancom's visual weight.
+fn border_width_to_px(width: u8) -> u32 {
+    const WIDTHS_PX: [f64; 16] = [
+        0.4, 0.5, 0.6, 0.75, 1.0, 1.1, 1.5, 1.9, 2.3, 2.6, 3.8, 5.7, 7.6, 11.3, 15.1, 18.9,
+    ];
+    let px = if (width as usize) < WIDTHS_PX.len() {
+        WIDTHS_PX[width as usize]
+    } else {
+        (width as f64 * 1.2).clamp(0.4, 20.0)
+    };
+    // Round to whole px ≥ 1 — these are thin cell strokes; sub-px detail is lost on screen anyway and
+    // the IR's `width` (px) is what backends scale. Keeps a 0.5px hairline visible as 1px.
+    px.round().max(1.0) as u32
 }
 
 /// Translate an rhwp `ParaShape` into ours — the fields `synthesize_para_pr` emits: alignment and

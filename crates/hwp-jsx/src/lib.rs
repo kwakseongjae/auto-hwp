@@ -356,6 +356,20 @@ fn emit_cell(c: &Cell) -> JsxNode {
     if let Some(sh) = c.shade_color {
         el.attrs.insert("data-shade".into(), sh.to_hex());
     }
+    // A borderless cell (has_border=false) carries the legacy data-noborder flag so the field
+    // round-trips faithfully. (When per-edge borders are also present the renderer uses THOSE, but we
+    // still preserve has_border exactly so the codec is lossless — see cell_eq.)
+    if !c.has_border {
+        el.attrs.insert("data-noborder".into(), "1".into());
+    }
+    // Per-edge borders (lifted from the real borderFill): "L|R|T|B" where each side is
+    // "style,hex,width" or "-" for an unspecified edge. data-diag = "kind,hex,width".
+    if c.has_edge_borders() {
+        el.attrs.insert("data-borders".into(), encode_cell_borders(&c.borders));
+    }
+    if let Some(d) = c.diagonal {
+        el.attrs.insert("data-diag".into(), encode_cell_diagonal(d));
+    }
     if c.dirty.is_dirty() {
         el.attrs.insert("data-dirty".into(), "1".into());
     }
@@ -363,6 +377,74 @@ fn emit_cell(c: &Cell) -> JsxNode {
         el.children.push(emit_block(b));
     }
     JsxNode::Element(el)
+}
+
+/// Encode the four per-edge borders as "left|right|top|bottom", each side "style,#RRGGBB,width" or
+/// "-" when the edge is unspecified (`None`). style ∈ {none,solid,dashed,dotted,double}.
+fn encode_cell_borders(borders: &[Option<CellEdge>; 4]) -> String {
+    borders
+        .iter()
+        .map(|e| match e {
+            Some(edge) => format!("{},{},{}", line_style_str(edge.style), edge.color.to_hex(), edge.width_px),
+            None => "-".to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn decode_cell_borders(s: &str) -> [Option<CellEdge>; 4] {
+    let mut out = [None; 4];
+    for (i, side) in s.split('|').enumerate().take(4) {
+        if side == "-" {
+            continue;
+        }
+        let mut it = side.split(',');
+        let style = it.next().map(line_style_from_str).unwrap_or(LineStyle::Solid);
+        let color = it.next().and_then(Color::from_hex).unwrap_or_default();
+        let width_px = it.next().and_then(|w| w.parse().ok()).unwrap_or(1);
+        out[i] = Some(CellEdge { color, style, width_px });
+    }
+    out
+}
+
+fn encode_cell_diagonal(d: CellDiagonal) -> String {
+    let kind = match d.kind {
+        DiagonalKind::Slash => "slash",
+        DiagonalKind::BackSlash => "backslash",
+    };
+    format!("{},{},{}", kind, d.color.to_hex(), d.width_px)
+}
+
+fn decode_cell_diagonal(s: &str) -> Option<CellDiagonal> {
+    let mut it = s.split(',');
+    let kind = match it.next()? {
+        "slash" => DiagonalKind::Slash,
+        "backslash" => DiagonalKind::BackSlash,
+        _ => return None,
+    };
+    let color = it.next().and_then(Color::from_hex).unwrap_or_default();
+    let width_px = it.next().and_then(|w| w.parse().ok()).unwrap_or(1);
+    Some(CellDiagonal { kind, color, width_px })
+}
+
+fn line_style_str(s: LineStyle) -> &'static str {
+    match s {
+        LineStyle::None => "none",
+        LineStyle::Solid => "solid",
+        LineStyle::Dashed => "dashed",
+        LineStyle::Dotted => "dotted",
+        LineStyle::Double => "double",
+    }
+}
+
+fn line_style_from_str(s: &str) -> LineStyle {
+    match s {
+        "none" => LineStyle::None,
+        "dashed" => LineStyle::Dashed,
+        "dotted" => LineStyle::Dotted,
+        "double" => LineStyle::Double,
+        _ => LineStyle::Solid,
+    }
 }
 
 // ---- scalar encoders (compact JSON, base64'd where needed) ----
@@ -752,6 +834,8 @@ fn parse_cell(el: &JsxElement) -> Result<Cell> {
         shade_color: el.attrs.get("data-shade").and_then(|s| Color::from_hex(s)),
         // Borderless cells carry data-noborder; absence keeps the default (bordered) cell.
         has_border: !el.attrs.contains_key("data-noborder"),
+        borders: el.attrs.get("data-borders").map(|s| decode_cell_borders(s)).unwrap_or([None; 4]),
+        diagonal: el.attrs.get("data-diag").and_then(|s| decode_cell_diagonal(s)),
         dirty: Dirty(el.attrs.contains_key("data-dirty")),
     })
 }

@@ -59,6 +59,21 @@ pub struct PlacedRect {
     pub fill: Option<Color>,
 }
 
+/// A positioned styled line segment (a single cell edge or a cell diagonal) in absolute page coords.
+/// The renderer lowers these into `PaintOp::Line` — distinct from a `PlacedRect` box so a table can
+/// draw exactly the sides the doc specifies, each with its own color/style/width.
+#[derive(Clone, Debug)]
+pub struct PlacedLine {
+    pub x1: f64,
+    pub y1: f64,
+    pub x2: f64,
+    pub y2: f64,
+    pub color: Color,
+    pub style: LineStyle,
+    /// Stroke width in device px (the renderer scales to its units).
+    pub width: f64,
+}
+
 /// All positioned content for one page, ready to lower into a `PageLayerTree`.
 #[derive(Clone, Debug, Default)]
 pub struct PlacedPage {
@@ -67,6 +82,9 @@ pub struct PlacedPage {
     pub glyphs: Vec<PlacedGlyph>,
     pub images: Vec<PlacedImage>,
     pub rects: Vec<PlacedRect>,
+    /// Per-edge cell borders + cell diagonals (styled lines). Drawn after `rects` (which now only
+    /// carry shading + the LEGACY uniform box for cells without per-edge data).
+    pub lines: Vec<PlacedLine>,
 }
 
 /// Positioned, paginated document — the renderer's direct input.
@@ -302,15 +320,66 @@ fn place_table(
         if let Some(shade) = c.shade_color {
             pg.rects.push(PlacedRect { x: cx, y: cy, w: cw, h: ch, fill: Some(shade) });
         }
-        // Cell border (stroked) — only when the cell actually has a visible border. Borderless cells
-        // (all four edges 선없음) are skipped so the own render doesn't paint a spurious grid line
-        // (e.g. the section-header band's filler cell, spacer cells).
-        if c.has_border {
+        // Cell borders. Two paths:
+        //  - PER-EDGE (lifted from the real borderFill): draw each visible edge as its own styled
+        //    line, skipping 선없음 sides. This is what makes the ※ guide boxes render DASHED and the
+        //    section-header band lose its inner/right edges (→ pentagon with the diagonal).
+        //  - LEGACY (no per-edge data, e.g. inserted/test cells): the uniform stroked box, gated on
+        //    `has_border`, exactly as before — so nothing regresses.
+        if c.has_edge_borders() {
+            push_cell_edges(pg, &c.borders, cx, cy, cw, ch);
+        } else if c.has_border {
             pg.rects.push(PlacedRect { x: cx, y: cy, w: cw, h: ch, fill: None });
+        }
+        // Cell diagonal (HWP borderFill `diagonal`) — drawn on top of the edges. Slash = ⤢ from the
+        // bottom-left to the top-right; BackSlash = ⤡ from the top-left to the bottom-right.
+        if let Some(d) = c.diagonal {
+            let (y1, y2) = match d.kind {
+                DiagonalKind::Slash => (cy + ch, cy), // bottom-left → top-right
+                DiagonalKind::BackSlash => (cy, cy + ch), // top-left → bottom-right
+            };
+            pg.lines.push(PlacedLine {
+                x1: cx,
+                y1,
+                x2: cx + cw,
+                y2,
+                color: d.color,
+                style: LineStyle::Solid,
+                width: d.width_px.max(1) as f64,
+            });
         }
         // Cell TEXT: place the cell's paragraph glyphs inside the box, vertically centered (the
         // Korean gov-doc convention: vertAlign=CENTER), honoring each paragraph's horizontal align.
         place_cell_content(pg, &c.blocks, cx, cy, cw, ch, doc, fonts);
+    }
+}
+
+/// Emit up to four styled edge lines for a cell box `(cx,cy,cw,ch)` from its per-edge `borders`
+/// (`[left, right, top, bottom]`). A `LineStyle::None` edge (선없음) emits NOTHING — that is how a
+/// per-edge cell suppresses a side (e.g. the section-header band's right/inner edges). A 0-px width
+/// is clamped to 1 so a hairline stays visible.
+fn push_cell_edges(pg: &mut PlacedPage, borders: &[Option<CellEdge>; 4], cx: f64, cy: f64, cw: f64, ch: f64) {
+    // (edge_index, x1, y1, x2, y2) — left, right, top, bottom.
+    let segs = [
+        (0usize, cx, cy, cx, cy + ch),           // left
+        (1, cx + cw, cy, cx + cw, cy + ch),      // right
+        (2, cx, cy, cx + cw, cy),                // top
+        (3, cx, cy + ch, cx + cw, cy + ch),      // bottom
+    ];
+    for (i, x1, y1, x2, y2) in segs {
+        let Some(edge) = borders[i] else { continue };
+        if edge.style == LineStyle::None {
+            continue; // 선없음 — side suppressed, draw nothing
+        }
+        pg.lines.push(PlacedLine {
+            x1,
+            y1,
+            x2,
+            y2,
+            color: edge.color,
+            style: edge.style,
+            width: edge.width_px.max(1) as f64,
+        });
     }
 }
 
@@ -744,6 +813,69 @@ mod tests {
         let cell_borders = placed.pages[0].rects.iter().filter(|r| r.fill.is_none()).count();
         // 4 cell borders + the line text-boxes inside each cell paragraph.
         assert!(cell_borders >= 4, "at least 4 cell border boxes, got {cell_borders}");
+    }
+
+    /// Build a 1-cell table whose single cell carries the given per-edge borders + diagonal.
+    fn edge_table(borders: [Option<CellEdge>; 4], diagonal: Option<CellDiagonal>) -> SemanticDoc {
+        let cell = Cell {
+            row: 0,
+            col: 0,
+            blocks: vec![Block::Paragraph(para("x"))],
+            borders,
+            diagonal,
+            ..Default::default()
+        };
+        doc_with(vec![Block::Table(Table {
+            rows: 1,
+            cols: 1,
+            cells: vec![cell],
+            col_widths: vec![1],
+            ..Default::default()
+        })])
+    }
+
+    #[test]
+    fn per_edge_borders_skip_none_and_emit_styled_lines() {
+        let blue = Color { r: 0, g: 0, b: 255, a: 255 };
+        // left = dashed blue, right = 선없음 (suppressed), top = solid black, bottom = unspecified.
+        let borders = [
+            Some(CellEdge { color: blue, style: LineStyle::Dashed, width_px: 2 }),
+            Some(CellEdge { color: Color::default(), style: LineStyle::None, width_px: 1 }),
+            Some(CellEdge { color: Color::default(), style: LineStyle::Solid, width_px: 1 }),
+            None,
+        ];
+        let doc = edge_table(borders, None);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let lines = &placed.pages[0].lines;
+        // A per-edge cell does NOT emit the legacy uniform border rect.
+        assert_eq!(
+            placed.pages[0].rects.iter().filter(|r| r.fill.is_none()).count(),
+            0,
+            "per-edge cell must not draw the legacy uniform box"
+        );
+        // Exactly two visible edges: the dashed-blue left and the solid-black top. The 선없음 right
+        // emits NO line; the unspecified (None) bottom emits no line either.
+        assert_eq!(lines.len(), 2, "only the two visible edges emit lines, got {}", lines.len());
+        let dashed = lines.iter().find(|l| l.style == LineStyle::Dashed).expect("a dashed edge line");
+        assert_eq!(dashed.color, blue, "dashed edge keeps its blue color");
+        assert_eq!(dashed.width, 2.0, "dashed edge keeps its width px");
+        assert!(lines.iter().any(|l| l.style == LineStyle::Solid), "the solid top edge is drawn");
+        assert!(
+            !lines.iter().any(|l| l.style == LineStyle::None),
+            "a 선없음 edge never emits a Line"
+        );
+    }
+
+    #[test]
+    fn cell_diagonal_emits_a_line_corner_to_corner() {
+        let red = Color { r: 255, g: 0, b: 0, a: 255 };
+        // No edge borders, just a back-slash diagonal: top-left → bottom-right.
+        let doc = edge_table([None; 4], Some(CellDiagonal { kind: DiagonalKind::BackSlash, color: red, width_px: 1 }));
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let lines = &placed.pages[0].lines;
+        let diag = lines.iter().find(|l| l.color == red).expect("a diagonal line");
+        // BackSlash goes from the cell's top-left down to its bottom-right (y increases x increases).
+        assert!(diag.x2 > diag.x1 && diag.y2 > diag.y1, "back-slash runs top-left → bottom-right");
     }
 
     #[test]

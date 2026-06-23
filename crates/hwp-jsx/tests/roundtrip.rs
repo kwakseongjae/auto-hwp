@@ -58,6 +58,44 @@ fn t1b_equality_is_falsifiable() {
     assert!(!doc_value_eq(&doc, &back), "equality must FAIL on a mutated doc");
 }
 
+/// T1c — per-edge cell borders + a diagonal round-trip through the JSX codec exactly (value-equal),
+/// and a 선없음 (`LineStyle::None`) edge survives distinct from a missing (`None`) edge.
+#[test]
+fn t1c_per_edge_borders_and_diagonal_roundtrip() {
+    let blue = Color { r: 0, g: 0, b: 255, a: 255 };
+    let red = Color { r: 255, g: 0, b: 0, a: 255 };
+    let black = Color { r: 0, g: 0, b: 0, a: 255 }; // opaque black (codec colors are always opaque)
+    let cell = Cell {
+        row: 0,
+        col: 0,
+        blocks: vec![Block::Paragraph(Paragraph::default())],
+        // left dashed-blue, right 선없음, top solid-black, bottom unspecified (None).
+        borders: [
+            Some(CellEdge { color: blue, style: LineStyle::Dashed, width_px: 2 }),
+            Some(CellEdge { color: black, style: LineStyle::None, width_px: 1 }),
+            Some(CellEdge { color: black, style: LineStyle::Solid, width_px: 1 }),
+            None,
+        ],
+        diagonal: Some(CellDiagonal { kind: DiagonalKind::Slash, color: red, width_px: 1 }),
+        ..Default::default()
+    };
+    let table = Table { rows: 1, cols: 1, cells: vec![cell], col_widths: vec![1], ..Default::default() };
+    let mut doc = SemanticDoc::default();
+    doc.char_shapes.push(CharShape::default());
+    doc.para_shapes.push(ParaShape::default());
+    doc.sections.push(Section { blocks: vec![Block::Table(table)], ..Default::default() });
+
+    let back = parse(&emit(&doc)).expect("parse(emit(doc))");
+    assert!(doc_value_eq(&doc, &back), "per-edge borders + diagonal must round-trip value-equal");
+
+    // Falsifiable: corrupt the round-tripped left edge style → equality must now FAIL.
+    let mut tampered = parse(&emit(&doc)).unwrap();
+    if let Some(Block::Table(t)) = tampered.sections[0].blocks.get_mut(0) {
+        t.cells[0].borders[0] = Some(CellEdge { color: blue, style: LineStyle::Solid, width_px: 2 });
+    }
+    assert!(!doc_value_eq(&doc, &tampered), "equality must catch a changed edge style");
+}
+
 /// T2 — CSS-only op: changes the stylesheet projection, leaves the JSX byte-identical,
 /// and the reparsed CharShape reflects the new font-size (height = 1400 for 14pt).
 #[test]

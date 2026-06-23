@@ -18,7 +18,7 @@
 //! PDF points (1pt = 1/72in), top-left origin, y-down — the SAME orientation — so we only scale by
 //! `HWPUNIT_PER_PT` (1in = 7200 HWPUNIT = 72pt ⇒ 100 HWPUNIT/pt). No y-flip needed.
 
-use hwp_model::document::SemanticDoc;
+use hwp_model::document::{LineStyle, SemanticDoc};
 use hwp_model::layout::{PageLayerTree, PaintOp};
 use hwp_model::prelude::FontMetricsProvider;
 use hwp_model::types::Color;
@@ -27,7 +27,7 @@ use krilla::color::rgb;
 use krilla::geom::{PathBuilder, Point, Rect};
 use krilla::num::NormalizedF32;
 use krilla::page::PageSettings;
-use krilla::paint::{Fill, Stroke};
+use krilla::paint::{Fill, Stroke, StrokeDash};
 use krilla::text::{Font, TextDirection};
 use krilla::Document;
 
@@ -179,6 +179,9 @@ fn lower_tree_to_page(
             PaintOp::Rect { x, y, w, h, fill } => {
                 paint_rect(&mut surface, *x, *y, *w, *h, *fill);
             }
+            PaintOp::Line { x1, y1, x2, y2, color, style, width } => {
+                paint_line(&mut surface, *x1, *y1, *x2, *y2, *color, *style, *width);
+            }
             PaintOp::Image { x, y, w, h, bin_ref } => {
                 paint_image(&mut surface, *x, *y, *w, *h, bin_ref, doc);
             }
@@ -232,6 +235,47 @@ fn paint_rect(surface: &mut krilla::surface::Surface, x: f64, y: f64, w: f64, h:
             surface.draw_path(&path);
         }
     }
+}
+
+/// 1 CSS px (the unit of `PaintOp::Line.width`) @ 96 DPI = 72/96 pt = 0.75 pt.
+const PT_PER_PX: f32 = 0.75;
+
+/// Paint a styled line (a cell edge or diagonal) as a stroked path. `style` maps to a dash pattern
+/// (dashed/dotted) or a solid stroke (solid/double — double is a single solid line for now, matching
+/// the SVG sink). `width` is in device px → scaled to pt. A `LineStyle::None` never reaches here (the
+/// placer skips suppressed edges), but we guard anyway.
+#[allow(clippy::too_many_arguments)]
+fn paint_line(
+    surface: &mut krilla::surface::Surface,
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    color: Color,
+    style: LineStyle,
+    width: f64,
+) {
+    if style == LineStyle::None {
+        return;
+    }
+    let w = (width as f32 * PT_PER_PX).max(0.3);
+    let dash = match style {
+        LineStyle::Dashed => Some(StrokeDash { array: vec![w * 4.0, w * 3.0], offset: 0.0 }),
+        LineStyle::Dotted => Some(StrokeDash { array: vec![w, w * 2.0], offset: 0.0 }),
+        _ => None,
+    };
+    let mut pb = PathBuilder::new();
+    pb.move_to(pt(x1), pt(y1));
+    pb.line_to(pt(x2), pt(y2));
+    let Some(path) = pb.finish() else { return };
+    surface.set_fill(None);
+    surface.set_stroke(Some(Stroke {
+        paint: rgb_of(color).into(),
+        width: w,
+        dash,
+        ..Default::default()
+    }));
+    surface.draw_path(&path);
 }
 
 /// Paint an embedded image box. Looks up `bin_ref` in `doc.bin_data`; PNG/JPEG bytes are embedded via

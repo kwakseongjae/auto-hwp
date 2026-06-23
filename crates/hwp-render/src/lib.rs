@@ -47,15 +47,28 @@ pub fn page_count(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> usize {
 /// Lower one positioned page into the paint IR. Order matters for correct overdraw: shading fills
 /// and borders first (background), then images, then glyphs on top.
 fn lower_page(pg: &PlacedPage) -> PageLayerTree {
-    let mut ops: Vec<PaintOp> = Vec::with_capacity(pg.rects.len() + pg.images.len() + pg.glyphs.len());
+    let mut ops: Vec<PaintOp> =
+        Vec::with_capacity(pg.rects.len() + pg.lines.len() + pg.images.len() + pg.glyphs.len());
 
     // 1) Fills (shading) first so borders/text sit above them.
     for r in pg.rects.iter().filter(|r| r.fill.is_some()) {
         ops.push(PaintOp::Rect { x: r.x, y: r.y, w: r.w, h: r.h, fill: r.fill });
     }
-    // 2) Stroked boxes (cell/line borders).
+    // 2) Stroked boxes (LEGACY uniform cell borders for cells without per-edge data).
     for r in pg.rects.iter().filter(|r| r.fill.is_none()) {
         ops.push(PaintOp::Rect { x: r.x, y: r.y, w: r.w, h: r.h, fill: None });
+    }
+    // 2b) Per-edge styled cell borders + cell diagonals (faithful per-side color/style/width).
+    for l in &pg.lines {
+        ops.push(PaintOp::Line {
+            x1: l.x1,
+            y1: l.y1,
+            x2: l.x2,
+            y2: l.y2,
+            color: l.color,
+            style: l.style,
+            width: l.width,
+        });
     }
     // 3) Images / object boxes.
     for im in &pg.images {
@@ -268,6 +281,23 @@ impl PaintSink for SvgSink<'_> {
                     x = px(*x), y = px(*y), w = px(*w), h = px(*h),
                 )),
             },
+            PaintOp::Line { x1, y1, x2, y2, color, style, width } => {
+                // One <line> per cell edge / diagonal. stroke-dasharray encodes dashed/dotted (the
+                // pattern scales with the stroke width so it reads at our px sizes). Double is drawn as
+                // a single solid line for now (a faithful-enough stand-in; true double-stroke later).
+                let w = px(*width).max(0.4);
+                let dash = match style {
+                    LineStyle::Dashed => format!(" stroke-dasharray=\"{:.2},{:.2}\"", w * 4.0, w * 3.0),
+                    LineStyle::Dotted => format!(" stroke-dasharray=\"{:.2},{:.2}\"", w, w * 2.0),
+                    _ => String::new(),
+                };
+                self.body.push_str(&format!(
+                    "<line x1=\"{x1:.2}\" y1=\"{y1:.2}\" x2=\"{x2:.2}\" y2=\"{y2:.2}\" \
+                     stroke=\"{c}\" stroke-width=\"{w:.2}\"{dash}/>",
+                    x1 = px(*x1), y1 = px(*y1), x2 = px(*x2), y2 = px(*y2),
+                    c = color_hex(*color),
+                ));
+            }
             PaintOp::Image { x, y, w, h, bin_ref } => {
                 // Resolve the bin_ref → real bytes (when a sink was built `with_bins`) → a data: URI so
                 // the actual photo renders. preserveAspectRatio="none" matches the placed box exactly,

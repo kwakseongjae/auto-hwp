@@ -72,6 +72,11 @@ pub enum PaintOp {
     /// A box: `fill = Some(color)` paints a filled rect (shading); `None` strokes the outline
     /// (cell/line border).
     Rect { x: f64, y: f64, w: f64, h: f64, fill: Option<crate::types::Color> },
+    /// A single styled line segment from `(x1,y1)` to `(x2,y2)` (HWPUNIT, page-top-left). Used for
+    /// PER-EDGE cell borders + cell diagonals so a table can draw exactly the sides the doc specifies
+    /// (with each side's color/style/width), instead of one uniform stroked `Rect`. `style` picks
+    /// solid/dashed/dotted/double; `width` is in device px (backends scale). Additive at schema v1.
+    Line { x1: f64, y1: f64, x2: f64, y2: f64, color: crate::types::Color, style: crate::document::LineStyle, width: f64 },
     /// An embedded image/object box referencing `bin_ref` into `SemanticDoc::bin_data` (empty for an
     /// equation/unknown-object placeholder, which a backend draws as a stub box).
     Image { x: f64, y: f64, w: f64, h: f64, bin_ref: String },

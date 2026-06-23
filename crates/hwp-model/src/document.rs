@@ -296,13 +296,73 @@ pub struct Cell {
     /// (which want a normal border). A `false` cell is skipped by the renderer — this removes the
     /// spurious grid lines on borderless cells (e.g. the section-header banner's filler cell, spacer
     /// cells) that made the own render look like a plain table instead of the original's clean band.
+    ///
+    /// NOTE: when `borders` carries per-edge styles (lifted from the real borderFill), the renderer
+    /// honors those EDGE-by-edge and ignores `has_border`. `has_border` is the LEGACY fallback for
+    /// cells WITHOUT per-edge data (inserted/test cells, older projects) — it still draws a uniform
+    /// solid box so nothing regresses.
     pub has_border: bool,
+    /// Per-edge border styles in `[left, right, top, bottom]` order (HWP's borderFill `borders`
+    /// ordering). `None` for an edge means "unspecified" — the renderer then leaves that edge to the
+    /// legacy `has_border` box. A specified `Some(edge)` overrides per side; a 선없음 edge becomes
+    /// `Some(CellEdge { style: None, .. })`-equivalent by being SET-but-invisible: we model that as
+    /// the edge simply being absent (`None` = legacy) vs present-and-drawn. Concretely: any edge the
+    /// real doc draws is `Some`, any edge the real doc suppresses is also `Some` (with a style flagged
+    /// so the renderer skips it). See [`CellEdge`].
+    pub borders: [Option<CellEdge>; 4],
+    /// An optional diagonal line across the cell (HWP borderFill `diagonal`). Drawing this on the
+    /// section-header banner's right cell — together with suppressed right edges — turns the 1×2 band
+    /// into a pointed pentagon.
+    pub diagonal: Option<CellDiagonal>,
     pub dirty: Dirty,
+}
+
+/// One cell edge's rendered border (a side of the box). Lifted from a borderFill `BorderLine`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CellEdge {
+    pub color: crate::types::Color,
+    pub style: LineStyle,
+    /// Stroke width in device px (≈ the SVG/PDF stroke width). Lifted from the HWP width index.
+    pub width_px: u32,
+}
+
+/// How a border line is drawn. `None` = 선없음 (the edge is suppressed: NO stroke emitted) — this is
+/// how a per-edge-aware cell turns OFF a side (e.g. the banner band's inner/right edges).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum LineStyle {
+    /// 선없음 — the edge is not drawn at all.
+    None,
+    #[default]
+    Solid,
+    Dashed,
+    Dotted,
+    Double,
+}
+
+/// A cell diagonal line (HWP borderFill `diagonal`). `kind` picks which corners it connects.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CellDiagonal {
+    pub kind: DiagonalKind,
+    pub color: crate::types::Color,
+    pub width_px: u32,
+}
+
+/// Slash = bottom-left→top-right (/); BackSlash = top-left→bottom-right (\\).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DiagonalKind {
+    Slash,
+    BackSlash,
 }
 
 impl Cell {
     fn any_dirty(&self) -> bool {
         self.dirty.is_dirty() || self.blocks.iter().any(Block::any_dirty)
+    }
+
+    /// True if ANY of the four edges carries a per-edge style (lifted from the real borderFill).
+    /// When true the renderer draws each edge individually and ignores the legacy `has_border` box.
+    pub fn has_edge_borders(&self) -> bool {
+        self.borders.iter().any(Option::is_some)
     }
 }
 
@@ -317,6 +377,8 @@ impl Default for Cell {
             active: true,
             shade_color: None,
             has_border: true,
+            borders: [None; 4],
+            diagonal: None,
             dirty: Dirty::default(),
         }
     }
