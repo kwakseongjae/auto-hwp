@@ -316,7 +316,7 @@ fn place_cell_content(
 }
 
 /// Per-column LEFT offsets (len `cols + 1`, last = full width) from `col_widths` or an equal split.
-fn column_offsets(t: &Table, avail_w: f64) -> Vec<f64> {
+pub(crate) fn column_offsets(t: &Table, avail_w: f64) -> Vec<f64> {
     let mut xs = vec![0.0f64; t.cols + 1];
     if t.col_widths.len() == t.cols && t.col_widths.iter().all(|&w| w > 0) {
         let total: f64 = t.col_widths.iter().map(|&w| w as f64).sum();

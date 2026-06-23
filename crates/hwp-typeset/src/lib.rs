@@ -176,13 +176,17 @@ pub fn table_height(t: &Table, avail_w: f64, doc: &SemanticDoc, fonts: &dyn Font
     if t.rows == 0 {
         return 0.0;
     }
-    let col_w = (avail_w / t.cols.max(1) as f64).max(1.0);
+    // Per-column offsets honoring the captured col_widths — the SAME widths place_table draws with,
+    // so the pagination RESERVATION equals the DRAWN height (an equal-split estimate over-reserved a
+    // wide-then-narrow gov-doc table by ~1.5×, shoving it onto the next page with the rest empty).
+    let xs = crate::place::column_offsets(t, avail_w);
     let mut row_h = vec![0.0f64; t.rows];
     for c in &t.cells {
         if !c.active {
             continue;
         }
-        let cw = (col_w * c.col_span.max(1) as f64).max(1.0);
+        let col_end = (c.col + c.col_span.max(1)).min(t.cols);
+        let cw = (xs[col_end] - xs[c.col.min(t.cols - 1)]).max(1.0);
         let content: f64 =
             c.blocks.iter().map(|b| block_height(b, doc, cw, fonts)).sum::<f64>() + CELL_PAD;
         let span = c.row_span.max(1);
