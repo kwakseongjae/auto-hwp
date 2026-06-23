@@ -429,6 +429,18 @@ mod tests {
     }
 
     #[test]
+    fn cell_text_color_flows_to_svg_fill() {
+        // The guide text in gov tables is BLUE — confirm a cell run's text color reaches the SVG fill
+        // through the recursive cell-glyph build (not just body paragraphs).
+        let mut t = Table { rows: 1, cols: 1, ..Default::default() };
+        t.cells.push(Cell { row: 0, col: 0, blocks: vec![Block::Paragraph(para("안내"))], ..Default::default() });
+        let mut doc = doc_with(vec![Block::Table(t)]);
+        doc.char_shapes[0] = CharShape { text_color: Color::from_hex("#0000FF").unwrap(), ..Default::default() };
+        let svg = render_doc_svg(&doc, &ApproxFontMetrics);
+        assert!(svg[0].contains("fill=\"#0000FF\""), "cell glyph fill carries the run's blue text color");
+    }
+
+    #[test]
     fn image_paragraph_emits_image_box() {
         let mut p = Paragraph::default();
         p.runs.push(Run {

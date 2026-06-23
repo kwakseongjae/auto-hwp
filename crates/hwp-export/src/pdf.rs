@@ -381,4 +381,29 @@ mod tests {
         assert!((pt(7200.0) - 72.0).abs() < 1e-3);
         assert!((pt(100.0) - 1.0).abs() < 1e-3);
     }
+
+    #[test]
+    fn glyph_color_maps_to_krilla_rgb_not_black() {
+        // The PDF glyph path fills with `rgb_of(color)` — confirm a per-run color (not black) is what
+        // flows to krilla. (krilla compresses the content stream, so we assert the conversion, which
+        // is the load-bearing step: the run's CharShape.text_color reaches the fill paint.)
+        let blue = Color { r: 0, g: 0, b: 0xFF, a: 0xFF };
+        let c = rgb_of(blue);
+        // krilla rgb::Color is constructed from the same 8-bit channels — round-trip via a fresh ctor.
+        assert_eq!(c, rgb::Color::new(0, 0, 0xFF), "blue run maps to krilla blue, not black");
+        assert_ne!(c, rgb::Color::black(), "color is not forced to black on the PDF path");
+    }
+
+    #[test]
+    fn blue_run_exports_a_pdf_without_panicking() {
+        // End-to-end: a blue paragraph must export (glyph path is exercised with a non-black fill).
+        let mut doc = doc_with(vec![Block::Paragraph(para("파란 글씨"))]);
+        doc.char_shapes[0] = CharShape {
+            text_color: Color { r: 0, g: 0, b: 0xFF, a: 0xFF },
+            ..Default::default()
+        };
+        let out = export_pdf(&doc, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
+        assert!(out.bytes.starts_with(b"%PDF-"));
+        assert!(out.pages >= 1);
+    }
 }

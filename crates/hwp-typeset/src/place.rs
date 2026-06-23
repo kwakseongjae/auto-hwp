@@ -127,6 +127,36 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
     PlacedDoc { pages }
 }
 
+/// 문단 들여쓰기/여백 (paragraph indent geometry) resolved from a [`ParaShape`].
+///
+/// `left` is the block left inset (`ParaShape.left_margin`, clamped ≥0) applied to EVERY line;
+/// `first_extra` is the additional offset on the FIRST line only (positive = 들여쓰기, negative =
+/// 내어쓰기/hanging — clamped so the first line never crosses left of the block's left inset);
+/// `wrap_w` is the line-break width shrunk by the block's left+right margins (so wrapping stays
+/// correct under the inset). The first-line indent is a positional x-shift, not a width change.
+struct Indent {
+    left: f64,
+    first_extra: f64,
+    wrap_w: f64,
+}
+
+/// Resolve indent geometry for a paragraph against an available width (body width or cell text width).
+fn indent_of(p: &Paragraph, doc: &SemanticDoc, avail_w: f64) -> Indent {
+    let ps = doc.para_shapes.get(p.para_shape);
+    let left = ps.map(|s| s.left_margin).unwrap_or(0).max(0) as f64;
+    let right = ps.map(|s| s.right_margin).unwrap_or(0).max(0) as f64;
+    let indent = ps.map(|s| s.indent).unwrap_or(0) as f64;
+    // First-line indent: positive shifts in (들여쓰기); negative is hanging (내어쓰기) — clamp so the
+    // first line's start never crosses left of the block left inset (i.e. first_extra >= -left… but
+    // since `left` is the new origin, the clamp is first_extra >= -0 relative to that origin → ≥ -left
+    // in absolute terms; we apply it relative to `left`, so clamp to ≥ -left is the same as the line
+    // not going past the page/body left). Hanging text simply starts back at the block left edge.
+    let first_extra = indent.max(-left);
+    // Wrap width shrinks by left+right block margins so line breaking respects the inset. Keep ≥1.
+    let wrap_w = (avail_w - left - right).max(1.0);
+    Indent { left, first_extra, wrap_w }
+}
+
 /// Place one paragraph's lines (glyphs + a line text-box), advancing `vert` and paginating exactly
 /// like [`crate::NaiveLayout`]. `ml`/`mt` are the body-origin margins; `body_w`/`body_h` the body box.
 #[allow(clippy::too_many_arguments)]
@@ -147,7 +177,9 @@ fn place_paragraph(
     let glyphs = paragraph_glyphs(p, doc);
     let align = doc.para_shapes.get(p.para_shape).map(|s| s.align).unwrap_or_default();
     let ratio = line_spacing_ratio(p, doc);
-    let lines = layout_paragraph(p, doc, body_w, fonts);
+    // Paragraph indent: block left/right margins shrink the wrap width; first-line indent shifts line 0.
+    let ind = indent_of(p, doc, body_w);
+    let lines = layout_paragraph(p, doc, ind.wrap_w, fonts);
 
     // Anchored object (image/equation) on this paragraph — placed on its (single) line.
     let obj = paragraph_object(p);
@@ -160,9 +192,11 @@ fn place_paragraph(
         let pg = pages.last_mut().unwrap();
         let line_top = mt + *vert;
         let line_w = ls.horz_size;
-        // Alignment offset within the body width (left/justify = 0, right = full slack, center = ½).
-        let slack = (body_w - line_w).max(0.0);
-        let x0 = ml + match align {
+        // First-line indent only shifts (and narrows the usable slack of) line 0.
+        let line_indent = ind.left + if li == 0 { ind.first_extra } else { 0.0 };
+        // Alignment offset within the indented width (left/justify = 0, right = full slack, center = ½).
+        let slack = (ind.wrap_w - if li == 0 { ind.first_extra.max(0.0) } else { 0.0 } - line_w).max(0.0);
+        let x0 = ml + line_indent + match align {
             HorizontalAlign::Right => slack,
             HorizontalAlign::Center => slack / 2.0,
             _ => 0.0,
@@ -239,12 +273,18 @@ fn place_table(
         if !c.active {
             continue;
         }
-        let cx = ml + col_x[c.col.min(t.cols - 1)];
+        // Defensive clamp: an LLM edit can append a row with MORE cells than the table has columns
+        // (or a stray row index). Such a cell would otherwise reuse the last column/row and draw on
+        // top of a real cell or outside the table box. Skip it entirely so nothing overlaps/escapes.
+        if c.col >= t.cols || c.row >= t.rows {
+            continue;
+        }
+        let cx = ml + col_x[c.col];
         let col_end = (c.col + c.col_span.max(1)).min(t.cols);
-        let cw = (col_x[col_end] - col_x[c.col.min(t.cols - 1)]).max(1.0);
-        let cy = row_top[c.row.min(t.rows - 1)];
+        let cw = (col_x[col_end] - col_x[c.col]).max(1.0);
+        let cy = row_top[c.row];
         let row_end = (c.row + c.row_span.max(1)).min(t.rows);
-        let ch = (row_top[row_end] - row_top[c.row.min(t.rows - 1)]).max(1.0);
+        let ch = (row_top[row_end] - row_top[c.row]).max(1.0);
         // Cell shade (fill) UNDER its border so the border stays visible.
         if let Some(shade) = c.shade_color {
             pg.rects.push(PlacedRect { x: cx, y: cy, w: cw, h: ch, fill: Some(shade) });
@@ -287,10 +327,13 @@ fn place_cell_content(
         let glyphs = paragraph_glyphs(p, doc);
         let align = doc.para_shapes.get(p.para_shape).map(|s| s.align).unwrap_or_default();
         let ratio = line_spacing_ratio(p, doc);
-        let lines = layout_paragraph(p, doc, textw, fonts);
+        // Same paragraph indent as the body: block left/right margins shrink wrap; first line shifts.
+        let ind = indent_of(p, doc, textw);
+        let lines = layout_paragraph(p, doc, ind.wrap_w, fonts);
         for (li, ls) in lines.iter().enumerate() {
-            let slack = (textw - ls.horz_size).max(0.0);
-            let x0 = cx + CELL_PAD_X + match align {
+            let line_indent = ind.left + if li == 0 { ind.first_extra } else { 0.0 };
+            let slack = (ind.wrap_w - if li == 0 { ind.first_extra.max(0.0) } else { 0.0 } - ls.horz_size).max(0.0);
+            let x0 = cx + CELL_PAD_X + line_indent + match align {
                 HorizontalAlign::Right => slack,
                 HorizontalAlign::Center => slack / 2.0,
                 _ => 0.0,
@@ -490,6 +533,146 @@ mod tests {
         // body_w = 59528 - 2*7200 = 45128; one 1000-wide glyph → slack/2 = (45128-1000)/2 = 22064;
         // x = ml(7200) + 22064 = 29264.
         assert!((g[0].x - 29264.0).abs() < 2.0, "centered glyph offset, got {}", g[0].x);
+    }
+
+    #[test]
+    fn paragraph_left_margin_indents_every_line() {
+        let mut doc = doc_with(vec![Block::Paragraph({
+            let mut p = para("가");
+            p.para_shape = 1;
+            p
+        })]);
+        // ParaShape 1 = left margin 3000 HWPUNIT (들여쓰기 block inset), left-aligned.
+        doc.para_shapes
+            .push(ParaShape { align: HorizontalAlign::Left, left_margin: 3000, ..Default::default() });
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let g = &placed.pages[0].glyphs;
+        assert_eq!(g.len(), 1);
+        // ml(7200) + left_margin(3000) = 10200.
+        assert!((g[0].x - 10200.0).abs() < 1.0, "left margin shifts the line in, got {}", g[0].x);
+    }
+
+    #[test]
+    fn first_line_indent_only_shifts_the_first_line() {
+        // Long enough to wrap to >=2 lines so we can compare line 0 vs line 1.
+        let text: String = "가".repeat(60);
+        let mut doc = doc_with(vec![Block::Paragraph({
+            let mut p = para(&text);
+            p.para_shape = 1;
+            p
+        })]);
+        // First-line indent 2000, left-aligned, no block margin.
+        doc.para_shapes
+            .push(ParaShape { align: HorizontalAlign::Left, indent: 2000, ..Default::default() });
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let g = &placed.pages[0].glyphs;
+        assert!(g.len() > 1, "wrapped to multiple glyphs");
+        let first = g[0].x;
+        // Find the first glyph on a later line: its x should be back at the bare margin (7200), while
+        // the first glyph sits indented by 2000 (→ 9200).
+        let later = g.iter().find(|gl| (gl.x - 7200.0).abs() < 1.0);
+        assert!((first - 9200.0).abs() < 1.0, "first line indented by 2000, got {}", first);
+        assert!(later.is_some(), "a later line starts back at the left margin (no first-line indent)");
+    }
+
+    #[test]
+    fn hanging_indent_clamps_to_the_left_margin() {
+        // 내어쓰기: negative indent larger than the block left margin must clamp so the first line does
+        // not cross left of the block inset.
+        let mut doc = doc_with(vec![Block::Paragraph({
+            let mut p = para("가");
+            p.para_shape = 1;
+            p
+        })]);
+        doc.para_shapes.push(ParaShape {
+            align: HorizontalAlign::Left,
+            left_margin: 1000,
+            indent: -5000, // way past the 1000 inset
+            ..Default::default()
+        });
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let g = &placed.pages[0].glyphs;
+        // first_extra clamps to -left(1000); line_indent = left(1000) + (-1000) = 0 → x = ml(7200).
+        assert!((g[0].x - 7200.0).abs() < 1.0, "hanging indent clamped to left margin, got {}", g[0].x);
+    }
+
+    #[test]
+    fn paragraph_text_color_carries_to_placed_glyph() {
+        let blue = Color::from_hex("#0000FF").unwrap();
+        let mut doc = doc_with(vec![Block::Paragraph(para("파"))]);
+        doc.char_shapes[0] = CharShape { text_color: blue, ..Default::default() };
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let g = &placed.pages[0].glyphs;
+        assert_eq!(g.len(), 1);
+        assert_eq!(g[0].color, blue, "run text color flows to the placed glyph");
+    }
+
+    #[test]
+    fn cell_glyph_carries_run_text_color() {
+        let blue = Color::from_hex("#0000FF").unwrap();
+        let mut t = Table { rows: 1, cols: 1, ..Default::default() };
+        t.cells.push(Cell { row: 0, col: 0, blocks: vec![Block::Paragraph(para("셀"))], ..Default::default() });
+        let mut doc = doc_with(vec![Block::Table(t)]);
+        doc.char_shapes[0] = CharShape { text_color: blue, ..Default::default() };
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let cell_glyph = placed.pages[0].glyphs.iter().find(|g| g.ch == '셀').unwrap();
+        assert_eq!(cell_glyph.color, blue, "cell run text color flows to the placed glyph");
+    }
+
+    #[test]
+    fn over_wide_row_does_not_overlap_or_escape() {
+        // A 2-col table, but a row whose cells claim col indices 0,1,2,3 (LLM added extras). The
+        // out-of-range cells (col >= 2) must be skipped, not stacked on the last column.
+        let mut t = Table { rows: 1, cols: 2, ..Default::default() };
+        for c in 0..4 {
+            t.cells.push(Cell { row: 0, col: c, blocks: vec![Block::Paragraph(para("x"))], ..Default::default() });
+        }
+        let doc = doc_with(vec![Block::Table(t)]);
+        let placed = place_doc(&doc, &ApproxFontMetrics); // must not panic
+        // Exactly 2 cell borders (cols 0 and 1); the over-wide cells produced none.
+        let borders = placed.pages[0].rects.iter().filter(|r| r.fill.is_none()).count();
+        assert_eq!(borders, 2, "only in-range cells draw a border, got {borders}");
+        // Every cell rect stays within the table box (page left margin .. right margin).
+        let page_right = 59528.0 - 7200.0;
+        for r in placed.pages[0].rects.iter().filter(|r| r.fill.is_none()) {
+            assert!(r.x + r.w <= page_right + 1.0, "cell stays inside the table box");
+        }
+    }
+
+    #[test]
+    fn cell_paragraph_center_align_offsets_within_cell_width() {
+        // A single full-width-table cell with a centered short paragraph: the glyph should sit roughly
+        // in the middle of the cell text width, not flush-left (gov-table numbers/headers center).
+        let mut t = Table { rows: 1, cols: 1, ..Default::default() };
+        t.cells.push(Cell {
+            row: 0,
+            col: 0,
+            blocks: vec![Block::Paragraph({
+                let mut p = para("중");
+                p.para_shape = 1;
+                p
+            })],
+            ..Default::default()
+        });
+        let mut doc = doc_with(vec![Block::Table(t)]);
+        doc.para_shapes.push(ParaShape { align: HorizontalAlign::Center, ..Default::default() });
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let g = placed.pages[0].glyphs.iter().find(|g| g.ch == '중').unwrap();
+        // Cell spans the full body width (45128); text width = 45128 - 2*CELL_PAD_X = 44728; one
+        // 1000-wide glyph centered → x ≈ ml(7200) + CELL_PAD_X(200) + (44728-1000)/2 = 29264.
+        let left_flush = 7200.0 + CELL_PAD_X;
+        assert!(g.x > left_flush + 5000.0, "centered cell glyph is pushed right of flush-left, got {}", g.x);
+    }
+
+    #[test]
+    fn out_of_range_row_index_is_skipped() {
+        let mut t = Table { rows: 1, cols: 1, ..Default::default() };
+        t.cells.push(Cell { row: 0, col: 0, blocks: vec![Block::Paragraph(para("ok"))], ..Default::default() });
+        t.cells.push(Cell { row: 5, col: 0, blocks: vec![Block::Paragraph(para("bad"))], ..Default::default() });
+        let doc = doc_with(vec![Block::Table(t)]);
+        let placed = place_doc(&doc, &ApproxFontMetrics); // must not panic
+        let borders = placed.pages[0].rects.iter().filter(|r| r.fill.is_none()).count();
+        assert_eq!(borders, 1, "the out-of-range row cell is skipped, got {borders}");
     }
 
     #[test]
