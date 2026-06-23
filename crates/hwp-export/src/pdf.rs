@@ -60,10 +60,20 @@ const FONT_CANDIDATES: &[(&str, u32)] = &[
     ),
 ];
 
+/// Bold faces for bold runs — vendored NanumGothic-Bold first, then Linux Nanum bold. If none load,
+/// bold runs fall back to the regular face (no synthetic bolding). macOS AppleGothic ships no separate
+/// bold file, so the bundled NanumGothic-Bold is what gives the gov-doc its visible bold weight.
+const BOLD_FONT_CANDIDATES: &[(&str, u32)] = &[
+    (concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/NanumGothic-Bold.ttf"), 0),
+    ("/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf", 0),
+];
+
 /// A loaded text face for embedding, paired with the path it came from (diagnostics) and whether it
 /// is a real Korean-capable face vs. a last-resort fallback.
 struct EmbedFont {
     font: Font,
+    /// Bold face for bold runs; `None` → bold runs draw with the regular face (no synthetic bolding).
+    bold: Option<Font>,
     path: String,
     /// True when a candidate from [`FONT_CANDIDATES`] loaded (Korean-capable). False = no font found
     /// (glyphs become stub rects so the box stays visible).
@@ -71,13 +81,25 @@ struct EmbedFont {
 }
 
 impl EmbedFont {
-    /// Load the first parseable candidate as a krilla [`Font`]. `None` only if NO candidate exists on
-    /// this machine — callers then render glyphs as stub boxes (never panic).
+    /// Load the first parseable candidate as a krilla [`Font`] (+ a bold companion when available).
+    /// `None` only if NO candidate exists on this machine — callers then render glyphs as stub boxes
+    /// (never panic).
     fn discover() -> Option<EmbedFont> {
         for &(path, index) in FONT_CANDIDATES {
             let Ok(bytes) = std::fs::read(path) else { continue };
             if let Some(font) = Font::new(bytes.into(), index) {
-                return Some(EmbedFont { font, path: path.to_string(), real: true });
+                return Some(EmbedFont { font, bold: Self::discover_bold(), path: path.to_string(), real: true });
+            }
+        }
+        None
+    }
+
+    /// Load the first parseable bold candidate, or `None` (bold runs then reuse the regular face).
+    fn discover_bold() -> Option<Font> {
+        for &(path, index) in BOLD_FONT_CANDIDATES {
+            let Ok(bytes) = std::fs::read(path) else { continue };
+            if let Some(font) = Font::new(bytes.into(), index) {
+                return Some(font);
             }
         }
         None
@@ -160,8 +182,8 @@ fn lower_tree_to_page(
             PaintOp::Image { x, y, w, h, bin_ref } => {
                 paint_image(&mut surface, *x, *y, *w, *h, bin_ref, doc);
             }
-            PaintOp::Glyph { x, y, ch, size, color } => {
-                paint_glyph(&mut surface, *x, *y, *ch, *size, *color, embed);
+            PaintOp::Glyph { x, y, ch, size, color, bold } => {
+                paint_glyph(&mut surface, *x, *y, *ch, *size, *color, *bold, embed);
             }
         }
     }
@@ -290,6 +312,7 @@ fn paint_glyph(
     ch: char,
     size: f64,
     color: Color,
+    bold: bool,
     embed: Option<&EmbedFont>,
 ) {
     if ch.is_whitespace() {
@@ -305,10 +328,13 @@ fn paint_glyph(
             }));
             let mut buf = [0u8; 4];
             let s = ch.encode_utf8(&mut buf);
+            // Bold runs use the embedded bold face when present; else the regular face (no synthetic
+            // bolding). This is what renders the gov-doc's bold labels/headings as real bold weight.
+            let face = if bold { f.bold.as_ref().unwrap_or(&f.font) } else { &f.font };
             // y is the baseline in our IR; krilla's draw_text `start` is the text baseline too.
             surface.draw_text(
                 Point::from_xy(pt(x), pt(y)),
-                f.font.clone(),
+                face.clone(),
                 pt(size),
                 s,
                 false,

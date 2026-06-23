@@ -63,7 +63,7 @@ fn lower_page(pg: &PlacedPage) -> PageLayerTree {
     }
     // 4) Glyphs (y = baseline).
     for g in &pg.glyphs {
-        ops.push(PaintOp::Glyph { x: g.x, y: g.baseline, ch: g.ch, size: g.size, color: g.color });
+        ops.push(PaintOp::Glyph { x: g.x, y: g.baseline, ch: g.ch, size: g.size, color: g.color, bold: g.bold });
     }
 
     PageLayerTree { schema_version: PAINT_SCHEMA_VERSION, width: pg.width, height: pg.height, ops }
@@ -234,7 +234,7 @@ fn esc(s: &str) -> String {
 impl PaintSink for SvgSink<'_> {
     fn paint(&mut self, op: &PaintOp) {
         match op {
-            PaintOp::Glyph { x, y, ch, size, color } => {
+            PaintOp::Glyph { x, y, ch, size, color, bold } => {
                 // One <text> per glyph: we own the x, so no font-kerning surprise. Skip whitespace.
                 if ch.is_whitespace() {
                     return;
@@ -245,9 +245,11 @@ impl PaintSink for SvgSink<'_> {
                 // font-family pins the bundled free face (NanumGothic, @font-face'd in the app's
                 // styles.css) so the webview draws the SAME glyph shapes our metrics assume — not the
                 // platform default (AppleGothic/serif). sans-serif is the graceful fallback.
+                // font-weight:700 (when bold) selects the bundled NanumGothic-Bold @font-face.
+                let weight = if *bold { " font-weight=\"700\"" } else { "" };
                 self.body.push_str(&format!(
                     "<text x=\"{x:.2}\" y=\"{y:.2}\" font-size=\"{sz:.2}\" \
-                     font-family=\"NanumGothic, sans-serif\" fill=\"{fill}\">{s}</text>",
+                     font-family=\"NanumGothic, sans-serif\"{weight} fill=\"{fill}\">{s}</text>",
                     x = px(*x),
                     y = px(*y),
                     sz = px(*size),
