@@ -365,8 +365,24 @@ impl<'a> Lifter<'a> {
     fn cell_shade(&self, border_fill_id: u16) -> Option<Color> {
         let idx = (border_fill_id as usize).checked_sub(1)?;
         let bf = self.doc.doc_info.border_fills.get(idx)?;
-        let solid = bf.fill.solid.as_ref()?;
-        let color = lift_text_color(solid.background_color);
+        // Prefer a solid background; otherwise approximate a GRADIENT fill by the mean of its stops
+        // (we don't render gradients yet, but a flat fill is far better than dropping the header
+        // shading entirely — without this, gradient-filled headers render with no background).
+        let color = if let Some(solid) = bf.fill.solid.as_ref() {
+            lift_text_color(solid.background_color)
+        } else if let Some(g) = bf.fill.gradient.as_ref().filter(|g| !g.colors.is_empty()) {
+            let (mut r, mut gg, mut b) = (0u32, 0u32, 0u32);
+            for &c in &g.colors {
+                let col = lift_text_color(c);
+                r += col.r as u32;
+                gg += col.g as u32;
+                b += col.b as u32;
+            }
+            let n = g.colors.len() as u32;
+            Color { r: (r / n) as u8, g: (gg / n) as u8, b: (b / n) as u8, a: 255 }
+        } else {
+            return None;
+        };
         // Skip "no shade": white (the default cell background) and pure black (unset) add no signal.
         if color == (Color { r: 255, g: 255, b: 255, a: 255 }) || color == Color::default() {
             return None;
