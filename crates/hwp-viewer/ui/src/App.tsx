@@ -28,12 +28,30 @@ export default function App() {
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [rendering, setRendering] = useState(false);
   // Preview mode: 'svg' = rhwp faithful render of the ORIGINAL (layout-preserve); 'html' = the
-  // JSX(content)/CSS(design) → HTML render (the pivot view — shows edits cleanly, matches export).
-  // Editable docs default to 'html' so chat edits are visible and the gov-doc styling shows.
-  const [viewMode, setViewMode] = useState<"svg" | "html">("svg");
+  // JSX(content)/CSS(design) → HTML render (the pivot view — shows edits cleanly, matches export);
+  // 'own' = OUR OWN engine (place_doc → paint IR → SvgSink) — the self-owned fidelity render that
+  // regenerates from the live IR (shows edits too). Editable docs default to 'html'.
+  const [viewMode, setViewMode] = useState<"svg" | "html" | "own">("svg");
   const [docHtml, setDocHtml] = useState<string | null>(null);
   const viewModeRef = useRef(viewMode);
   viewModeRef.current = viewMode;
+
+  // ---- Own-engine ('자체 렌더') page list: its OWN paginator can yield a different page count than
+  // rhwp, and its OWN SVG cache (keyed by page) is regenerated from the live IR, so it stays separate
+  // from the rhwp svgCache and is invalidated on every edit. ----
+  const [ownPageCount, setOwnPageCount] = useState(0);
+  const [ownSvgCache, setOwnSvgCache] = useState<Record<number, string>>({});
+  const ownSvgCacheRef = useRef(ownSvgCache);
+  ownSvgCacheRef.current = ownSvgCache;
+  const ownInflight = useRef(new Set<number>());
+  // Fetch the own-engine page count (after open + every edit while in 'own' mode).
+  const loadOwnPageCount = useCallback(async () => {
+    try {
+      setOwnPageCount(await api.ownPageCount());
+    } catch {
+      setOwnPageCount(0);
+    }
+  }, []);
   // Once the doc has been edited, the faithful rhwp SVG "원본 보기" no longer reflects the document
   // (the backend refuses to re-render edited content — P1). So edits force/lock the HTML preview,
   // which renders the LIVE IR. The toggle to 원본 is disabled after the first edit.
@@ -119,8 +137,10 @@ export default function App() {
     setComposing(false);
   }, []);
 
+  // In 'own' mode the page list is paginated by OUR engine (its count can differ from rhwp's).
+  const listCount = viewMode === "own" ? ownPageCount : pageCount;
   const virtualizer = useVirtualizer({
-    count: pageCount,
+    count: listCount,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 920,
     overscan: 2,
@@ -145,18 +165,43 @@ export default function App() {
   const svgCacheRef = useRef(svgCache);
   svgCacheRef.current = svgCache;
 
+  // The 'own' (자체 렌더) twin of ensurePage: fetch a page via the own-engine command. We generate the
+  // SVG ourselves, but keep sanitizeSvg for consistency with the rhwp path (defense-in-depth).
+  const ensureOwnPage = useCallback(async (i: number) => {
+    if (ownSvgCacheRef.current[i] !== undefined || ownInflight.current.has(i)) return;
+    ownInflight.current.add(i);
+    setRendering(true);
+    try {
+      const svg = await api.renderOwnPage(i);
+      setOwnSvgCache((c) => ({ ...c, [i]: sanitizeSvg(svg) }));
+    } catch (e) {
+      toast("warn", `자체 렌더 실패(${i + 1}쪽): ${e}`);
+    } finally {
+      ownInflight.current.delete(i);
+      setRendering(inflight.current.size + ownInflight.current.size > 0);
+    }
+  }, []);
+
   // `scrollTo === null` keeps the current scroll (chat edits shouldn't yank the view to the doc end —
   // the "결과가 튀는" issue); a number scrolls to that page.
   const invalidate = useCallback((n: number, scrollTo: number | null = 0) => {
     setSvgCache({});
     setPageCount(n);
     clearCaret();
-    // In HTML preview mode, re-fetch the combined JSX/CSS→HTML so edits show immediately.
+    // The own-engine SVGs are regenerated from the live IR — drop them too so an edit repaints. Its
+    // page count is fetched lazily (or eagerly when 'own' is the active mode).
+    setOwnSvgCache({});
     if (viewModeRef.current === "html") void loadDocHtml();
+    else if (viewModeRef.current === "own") void loadOwnPageCount();
     if (scrollTo !== null) {
-      queueMicrotask(() => virtualizer.scrollToIndex(Math.max(0, Math.min(scrollTo, n - 1))));
+      // Scroll within the active mode's list (own can have a different page count than rhwp).
+      const max = (viewModeRef.current === "own" ? ownPageCountRef.current : n) - 1;
+      queueMicrotask(() => virtualizer.scrollToIndex(Math.max(0, Math.min(scrollTo, max))));
     }
-  }, [clearCaret, virtualizer, loadDocHtml]);
+  }, [clearCaret, virtualizer, loadDocHtml, loadOwnPageCount]);
+  // own page count read inside the (stable) invalidate closure needs the latest value.
+  const ownPageCountRef = useRef(ownPageCount);
+  ownPageCountRef.current = ownPageCount;
 
   const invalidateKeepingCaret = useCallback(async (n: number, want: CaretAnchor) => {
     setSvgCache({});
@@ -177,6 +222,9 @@ export default function App() {
   // ---- caret: click-to-place ----
   async function onPageClick(e: React.MouseEvent) {
     if (!canEditRef.current) return;
+    // The caret hit-test geometry comes from the rhwp render path; in the 'own' fidelity view the
+    // displayed SVG is our engine's, so don't place a caret against mismatched coordinates.
+    if (viewModeRef.current === "own") return;
     const host = (e.target as Element).closest("[data-index]");
     if (!host) return;
     const page = Number(host.getAttribute("data-index"));
@@ -343,6 +391,21 @@ export default function App() {
     invalidate(await api.redo());
     toast("info", "다시 실행");
   }, [invalidate]);
+
+  // Switch the preview surface. 'svg' = rhwp 원본(layout-preserve), 'html' = JSX/CSS pivot, 'own' =
+  // OUR engine (자체 렌더). The rhwp 원본 can't show an EDITED doc (P1), so block 'svg' after an edit;
+  // 'html'/'own' both regenerate from the live IR. Each mode lazily loads what it needs.
+  const setMode = useCallback((next: "svg" | "html" | "own") => {
+    if (next === viewModeRef.current) return;
+    if (next === "svg" && editedRef.current) {
+      toast("info", "편집된 문서는 HTML/자체 렌더로만 표시됩니다 (원본 보기는 편집 전용)");
+      return;
+    }
+    setViewMode(next);
+    viewModeRef.current = next;
+    if (next === "html") void loadDocHtml();
+    else if (next === "own") void loadOwnPageCount();
+  }, [loadDocHtml, loadOwnPageCount]);
 
   // ---- Find / Replace verbs ----
   const openFind = useCallback(() => {
@@ -584,23 +647,30 @@ export default function App() {
           <Tool onClick={() => setChatOpen((o) => !o)} icon="✦" label="바이브 편집" tone="ai" keys="⌘L" disabled={!canEdit} />
           <Tool onClick={() => setComposer("table")} icon="▦" label="표" keys="⌘T" disabled={!canEdit} />
           <Sep />
-          <Tool
-            onClick={() => {
-              const next = viewMode === "html" ? "svg" : "html";
-              // After an edit the rhwp SVG "원본 보기" can't show the edited document (P1: the backend
-              // refuses to re-render edited content). Keep the user on the HTML (IR) preview.
-              if (next === "svg" && editedRef.current) {
-                toast("info", "편집된 문서는 HTML 미리보기로만 표시됩니다 (원본 보기는 편집 전용)");
-                return;
-              }
-              setViewMode(next);
-              viewModeRef.current = next;
-              if (next === "html") void loadDocHtml();
-            }}
-            icon={viewMode === "html" ? "🅷" : "🖹"}
-            label={viewMode === "html" ? "HTML 보기" : "원본 보기"}
-            disabled={edited && viewMode === "html"}
-          />
+          {/* View surface: 원본(rhwp layout-preserve) · HTML(JSX/CSS pivot) · 자체 렌더(OUR engine).
+              원본 is disabled once edited (rhwp can't re-render edits); the other two render the live IR. */}
+          <div className="flex items-center gap-0.5 rounded-md bg-black/5 p-0.5 dark:bg-white/10">
+            {([
+              { m: "svg", label: "원본", icon: "🖹", title: "원본 보기 (rhwp · 레이아웃 보존)", off: edited },
+              { m: "html", label: "HTML", icon: "🅷", title: "HTML 미리보기 (JSX/CSS · 내보내기와 동일)", off: false },
+              { m: "own", label: "자체 렌더", icon: "◈", title: "자체 렌더 (우리 엔진 · place_doc → SVG)", off: false },
+            ] as const).map((v) => (
+              <button
+                key={v.m}
+                onClick={() => setMode(v.m)}
+                disabled={v.off}
+                title={v.title}
+                className={`flex items-center gap-1 rounded px-2 py-1 text-sm disabled:opacity-35 ${
+                  viewMode === v.m
+                    ? "bg-white text-neutral-900 shadow-sm dark:bg-neutral-700 dark:text-neutral-100"
+                    : "text-neutral-600 hover:bg-black/5 dark:text-neutral-300 dark:hover:bg-white/10"
+                }`}
+              >
+                <span className="text-xs opacity-80">{v.icon}</span>
+                <span>{v.label}</span>
+              </button>
+            ))}
+          </div>
           <Sep />
           <Tool onClick={doUndo} icon="↩︎" label="실행취소" keys="⌘Z" disabled={!canEdit} />
           <Tool onClick={doRedo} icon="↪︎" label="다시실행" disabled={!canEdit} />
@@ -684,10 +754,14 @@ export default function App() {
               }}
               className="mx-auto block w-full max-w-3xl rounded-lg border-0 bg-white shadow-md ring-1 ring-black/5"
             />
-          ) : pageCount > 0 ? (
+          ) : listCount > 0 ? (
+            // SVG page list — shared by 'svg' (rhwp 원본) and 'own' (자체 렌더, OUR engine). The two have
+            // separate caches/ensure-fns + page counts; the caret (whose geometry is from the rhwp
+            // render path) only attaches in 'svg' mode.
             <div className="relative mx-auto max-w-3xl" style={{ height: `${virtualizer.getTotalSize()}px` }} onClick={(e) => void onPageClick(e)}>
               {virtualizer.getVirtualItems().map((item) => {
-                void ensurePage(item.index);
+                void (viewMode === "own" ? ensureOwnPage(item.index) : ensurePage(item.index));
+                const pageSvg = viewMode === "own" ? ownSvgCache[item.index] : svgCache[item.index];
                 return (
                   <div
                     key={item.key}
@@ -700,12 +774,12 @@ export default function App() {
                       className="relative w-full rounded-lg bg-white shadow-md ring-1 ring-black/5"
                       style={{ contentVisibility: "auto", containIntrinsicSize: "auto 920px" }}
                     >
-                      {svgCache[item.index] !== undefined ? (
-                        <div className="page-svg" dangerouslySetInnerHTML={{ __html: svgCache[item.index] }} />
+                      {pageSvg !== undefined ? (
+                        <div className="page-svg" dangerouslySetInnerHTML={{ __html: pageSvg }} />
                       ) : (
                         <div className="grid aspect-[1/1.414] place-items-center text-neutral-300">{item.index + 1}쪽…</div>
                       )}
-                      {caret && caretRect && caretBox && caret.page === item.index && (
+                      {viewMode === "svg" && caret && caretRect && caretBox && caret.page === item.index && (
                         <div
                           className="caret-blink pointer-events-none absolute z-10 w-px bg-accent"
                           style={{ left: `${caretBox.left}px`, top: `${caretBox.top}px`, height: `${caretBox.height}px` }}
@@ -715,6 +789,15 @@ export default function App() {
                   </div>
                 );
               })}
+            </div>
+          ) : pageCount > 0 ? (
+            // A doc IS open but the active list has no pages yet — e.g. switching to 'own' before its
+            // page count resolves. Show a render hint, not the open-file prompt.
+            <div className="grid h-full place-items-center text-neutral-400">
+              <span className="flex items-center gap-2 text-sm">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                자체 렌더 준비 중…
+              </span>
             </div>
           ) : (
             <div className="grid h-full place-items-center">

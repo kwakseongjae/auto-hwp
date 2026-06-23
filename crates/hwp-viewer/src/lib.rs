@@ -118,6 +118,58 @@ async fn render_doc_html(sess: tauri::State<'_, SharedSession>) -> Result<String
     .map_err(|e| e.to_string())?
 }
 
+/// Render ONE page of the LIVE document through OUR OWN engine (the self-owned faithful render):
+/// `hwp_typeset::place_doc` paginates+places the SemanticDoc, `hwp_render` lowers each page to our
+/// paint IR, and `SvgSink` emits standalone SVG. This is the SAME path as the CLI `own-render`
+/// subcommand (`render_doc_svg`), so the in-app "자체 렌더" view matches `tf-hwp own-render`. Unlike
+/// the rhwp "원본 보기" this regenerates from the live IR, so an EDITED doc renders faithfully too.
+/// Under `--features shaper` the glyph x-positions are real (rustybuzz advances).
+#[tauri::command]
+async fn render_own_page(page: u32, sess: tauri::State<'_, SharedSession>) -> Result<String, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let s = sess.lock().map_err(|_| "session poisoned")?;
+        let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+        let fonts = own_render_fonts();
+        let svgs = hwp_render::render_doc_svg(doc, fonts.as_ref());
+        svgs.get(page as usize)
+            .cloned()
+            .ok_or_else(|| format!("page {page} out of range (0..{})", svgs.len()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Page count of the LIVE document as paginated by OUR OWN engine (may differ from `doc_page_count`,
+/// which uses the rhwp paginator) — drives the "자체 렌더" virtualized page list. 0 if no document.
+#[tauri::command]
+async fn own_page_count(sess: tauri::State<'_, SharedSession>) -> Result<u32, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let s = sess.lock().map_err(|_| "session poisoned")?;
+        let doc = match s.doc.as_ref() {
+            Some(d) => d.doc(),
+            None => return Ok(0),
+        };
+        let fonts = own_render_fonts();
+        Ok(hwp_render::render_doc_svg(doc, fonts.as_ref()).len() as u32)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Choose the font-metrics provider for the OWN renderer: the real rustybuzz shaper under
+/// `--features shaper` (real Latin advances + EM-grid Hangul), else the per-script approximation.
+/// Mirrors the CLI `own_render_fonts` so the in-app view and `tf-hwp own-render` use the same metrics.
+#[cfg(feature = "shaper")]
+fn own_render_fonts() -> Box<dyn hwp_model::prelude::FontMetricsProvider> {
+    Box::new(hwp_typeset::RealFontMetrics::new())
+}
+#[cfg(not(feature = "shaper"))]
+fn own_render_fonts() -> Box<dyn hwp_model::prelude::FontMetricsProvider> {
+    Box::new(hwp_typeset::ApproxFontMetrics)
+}
+
 /// Current page count of the live document (used by the frontend to re-render after edits).
 #[tauri::command]
 fn doc_page_count(sess: tauri::State<'_, SharedSession>) -> Result<u32, String> {
@@ -571,6 +623,8 @@ pub fn run() {
             open_doc,
             render_page,
             render_doc_html,
+            render_own_page,
+            own_page_count,
             doc_page_count,
             apply_content,
             export_hwpx,

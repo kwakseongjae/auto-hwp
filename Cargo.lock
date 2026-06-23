@@ -2082,6 +2082,8 @@ dependencies = [
  "hwp-jsx",
  "hwp-mcp",
  "hwp-model",
+ "hwp-render",
+ "hwp-typeset",
  "serde",
  "serde_json",
  "subtle",

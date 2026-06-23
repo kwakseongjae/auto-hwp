@@ -23,6 +23,9 @@ rhwp = ["hwp-core/rhwp", "hwp-mcp/rhwp"]
 # In-app AI generation (natural language → AiContent via a provider). Kept SEPARATE from default so
 # plain/CI builds stay lean (no reqwest/keyring). Run dev with: cargo tauri dev -f rhwp ai
 ai = ["hwp-ai/anthropic", "hwp-ai/keyring", "hwp-ai/local", "hwp-ai/openrouter"]
+# Forward the real rustybuzz shaper down to the OWN renderer (hwp-typeset/hwp-render) so the in-app
+# "자체 렌더" view's glyph x-positions are real (matches the CLI `own-render --features shaper`).
+shaper = ["hwp-typeset/shaper", "hwp-render/shaper"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -37,6 +40,10 @@ hwp-model = { workspace = true }
 # JSX(content)/CSS(design) → HTML preview path (the pivot's render): emit + emit_html on the live doc.
 hwp-jsx = { workspace = true }
 hwp-export = { workspace = true }
+# OUR OWN engine: place_doc (hwp-typeset) → paint IR → SvgSink (hwp-render) for the in-app "자체 렌더"
+# fidelity view — the self-owned render path (no rhwp), same code the CLI `own-render` subcommand runs.
+hwp-typeset = { workspace = true }
+hwp-render = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # A3 embedded control server uses pure std::net + these (already in the workspace lock):

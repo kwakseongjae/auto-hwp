@@ -49,6 +49,12 @@ export const api = {
   /** Render the WHOLE live doc through the JSX/CSS→HTML path (the pivot view; shows edits cleanly,
    *  matches export). Returned as one self-contained HTML document for an <iframe srcDoc>. */
   renderDocHtml: () => invoke<string>("render_doc_html"),
+  /** Render ONE page to SVG through OUR OWN engine (자체 렌더 — place_doc → paint IR → SvgSink). The
+   *  self-owned faithful render; unlike `renderPage` (rhwp) it regenerates from the live IR so edits
+   *  show too. Same path as the CLI `own-render`. */
+  renderOwnPage: (page: number) => invoke<string>("render_own_page", { page }),
+  /** Page count of the live doc as paginated by OUR OWN engine (drives the 자체 렌더 page list). */
+  ownPageCount: () => invoke<number>("own_page_count"),
   /** Live page count of the open document. */
   pageCount: () => invoke<number>("doc_page_count"),
   /** Apply template-conformant AI content JSON (one undo unit); returns the new page count. */
