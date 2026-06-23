@@ -1,5 +1,23 @@
 @import "tailwindcss";
 
+/* Bundled FREE font (NanumGothic, OFL) — served from public/fonts so the own-render SVG's
+   <text font-family="NanumGothic"> draws the SAME glyph shapes our metrics/PDF use, instead of the
+   platform default. Files vendored at the workspace-root assets/fonts (Rust crates) + here (webview). */
+@font-face {
+  font-family: "NanumGothic";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/NanumGothic-Regular.ttf") format("truetype");
+}
+@font-face {
+  font-family: "NanumGothic";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/NanumGothic-Bold.ttf") format("truetype");
+}
+
 /* Class-based dark mode: we toggle `.dark` on <html> deterministically from the native theme
    event (WKWebView's prefers-color-scheme propagation is unreliable), instead of the media query. */
 @custom-variant dark (&:where(.dark, .dark *));

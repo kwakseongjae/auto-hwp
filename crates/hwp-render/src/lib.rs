@@ -242,8 +242,12 @@ impl PaintSink for SvgSink<'_> {
                 let fill = color_hex(*color);
                 let mut buf = [0u8; 4];
                 let s = esc(ch.encode_utf8(&mut buf));
+                // font-family pins the bundled free face (NanumGothic, @font-face'd in the app's
+                // styles.css) so the webview draws the SAME glyph shapes our metrics assume — not the
+                // platform default (AppleGothic/serif). sans-serif is the graceful fallback.
                 self.body.push_str(&format!(
-                    "<text x=\"{x:.2}\" y=\"{y:.2}\" font-size=\"{sz:.2}\" fill=\"{fill}\">{s}</text>",
+                    "<text x=\"{x:.2}\" y=\"{y:.2}\" font-size=\"{sz:.2}\" \
+                     font-family=\"NanumGothic, sans-serif\" fill=\"{fill}\">{s}</text>",
                     x = px(*x),
                     y = px(*y),
                     sz = px(*size),

@@ -7,11 +7,12 @@
 //! and margins come from the section's [`PageSetup`] (already baked into the placed coordinates and
 //! the page width/height, so we only convert units here).
 //!
-//! Korean font embedding: we load the SAME Korean-capable face the shaper prefers (full-EM AppleGothic
-//! et al., then a vendored Noto fallback) and hand the bytes to krilla, which subsets to exactly the
-//! glyphs we draw. If NO Korean font is found on the machine, glyphs that the fallback Latin face
-//! can't draw are emitted as outline-stub rects so the box stays visible (text geometry is still our
-//! own); this never panics headless/CI. Use [`is_font_real`] to check which path was taken.
+//! Font embedding: we load the SAME face the shaper prefers — the vendored FREE NanumGothic (OFL,
+//! Hangul + Latin in one family), then system Korean faces, then a vendored Noto fallback — and hand
+//! the bytes to krilla, which subsets to exactly the glyphs we draw. One consistent face for Hangul
+//! AND Latin means the PDF glyph SHAPES match our metrics (no AppleGothic-shaped Latin). If NO font is
+//! found, glyphs become outline-stub rects so the box stays visible (geometry is still our own); this
+//! never panics headless/CI. Use [`is_font_real`] to check which path was taken.
 //!
 //! Coordinate system: the paint IR is HWPUNIT, page-top-left origin, y-down. krilla's user space is
 //! PDF points (1pt = 1/72in), top-left origin, y-down — the SAME orientation — so we only scale by
@@ -38,9 +39,14 @@ fn pt(v: f64) -> f32 {
     (v / HWPUNIT_PER_PT) as f32
 }
 
-/// Same Korean-first candidate list the shaper prefers (a full-EM Hangul face keeps glyph metrics
-/// aligned with our layout), with a vendored Noto fallback. krilla subsets whichever loads first.
+/// Same candidate list the shaper prefers — vendored NanumGothic first (one free face for Hangul +
+/// Latin so the embedded shapes match our metrics), then system Korean faces, then a Noto fallback.
+/// krilla subsets whichever loads first to exactly the glyphs we draw.
 const FONT_CANDIDATES: &[(&str, u32)] = &[
+    // Vendored FREE font (OFL) FIRST — the SAME face the shaper prefers, so the PDF embeds and draws
+    // every glyph (Hangul AND Latin) in NanumGothic, matching our own metrics. This is what fixes the
+    // Latin glyph SHAPES (no more AppleGothic-shaped Latin) on the PDF/own-render path.
+    (concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/NanumGothic-Regular.ttf"), 0),
     ("/System/Library/Fonts/Supplemental/AppleGothic.ttf", 0),
     ("/System/Library/Fonts/Supplemental/AppleMyungjo.ttf", 0),
     ("/System/Library/Fonts/AppleSDGothicNeo.ttc", 0),

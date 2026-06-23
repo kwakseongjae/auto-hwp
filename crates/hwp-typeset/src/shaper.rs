@@ -23,6 +23,11 @@ use crate::is_full_width;
 /// Hangul out on the EM grid regardless of the glyph's own advance, so a full-EM face keeps our
 /// line breaks aligned with Hancom's. (The EM-grid snap below makes the choice robust either way.)
 const FONT_CANDIDATES: &[(&str, u32)] = &[
+    // Vendored FREE font (OFL) — the preferred face so the own-render uses ONE consistent, bundled,
+    // redistributable family for BOTH metrics and drawing (NanumGothic carries Hangul AND Latin, so
+    // the drawn glyph shapes match these metrics exactly — no AppleGothic-shape fallback). Lives at
+    // the workspace-root assets/fonts so every crate resolves the same file.
+    (concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/NanumGothic-Regular.ttf"), 0),
     // macOS — Korean-capable system faces (the .ttc needs a face index).
     ("/System/Library/Fonts/Supplemental/AppleGothic.ttf", 0),
     ("/System/Library/Fonts/Supplemental/AppleMyungjo.ttf", 0),
@@ -41,6 +46,10 @@ const FONT_CANDIDATES: &[(&str, u32)] = &[
 /// uses for the default Latin font (a Times/serif family in most gov-docs). Probed Korean-first slot
 /// is empty → we use the Korean face for Latin (the old behavior), so this never regresses headless.
 const LATIN_FONT_CANDIDATES: &[(&str, u32)] = &[
+    // Same vendored NanumGothic — its Latin is PROPORTIONAL (tight 'i', wide 'W'), so Latin metrics
+    // come from the SAME face we draw with (positions match the drawn glyphs, no Times/NanumGothic
+    // split). This is the whole point of bundling one consistent free font for the own-render.
+    (concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/NanumGothic-Regular.ttf"), 0),
     // macOS — Hancom's default Latin face in most gov-docs is a serif (Times-like); Helvetica is the
     // common sans fallback. Either is far tighter than AppleGothic's Latin.
     ("/System/Library/Fonts/Supplemental/Times New Roman.ttf", 0),
