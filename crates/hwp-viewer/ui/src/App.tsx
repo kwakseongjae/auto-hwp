@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { tinykeys } from "tinykeys";
 import { api, type CaretRect, type FindMatch } from "./api";
@@ -75,6 +76,8 @@ export default function App() {
   scopeRef.current = scope;
   const chatOpenRef = useRef(chatOpen);
   chatOpenRef.current = chatOpen;
+  // Drag-drop image insert: highlight the page container while a file is dragged over it (M1).
+  const [dragActive, setDragActive] = useState(false);
 
   // Authoring is only safe on an editable (HWPX) doc.
   const canEdit = pageCount > 0 && editable;
@@ -622,6 +625,83 @@ export default function App() {
     };
   }, []);
 
+  // ---- M1: drag a local IMAGE file onto a page → insert it at the pointed block (DIRECT manipulation:
+  // commits IMMEDIATELY as one undoable op, NOT a chat proposal). The browser `ondrop` never fires in
+  // the WebView, so we subscribe to Tauri's native `onDragDropEvent`, which carries the OS file PATHS
+  // (Rust reads the bytes) + a physical drop position we map to page coords → hit_test → InsertImageAt.
+  useEffect(() => {
+    const IMG_EXT = /\.(png|jpe?g|gif|bmp|webp|tiff?)$/i;
+    const isImage = (p: string) => IMG_EXT.test(p);
+    let un: undefined | (() => void);
+    (async () => {
+      un = await getCurrentWebviewWindow().onDragDropEvent((event) => {
+        const payload = event.payload;
+        if (payload.type === "leave") {
+          setDragActive(false);
+          return;
+        }
+        // 'enter'/'over' carry a position; show the drop affordance only for an editable doc in an
+        // SVG page mode (the caret/hit-test geometry — and thus our anchor — comes from that path).
+        if (payload.type === "enter" || payload.type === "over") {
+          const droppable = canEditRef.current && viewModeRef.current !== "html";
+          // 'enter' carries paths; only highlight when at least one is an image.
+          const hasImage = payload.type === "over" || payload.paths.some(isImage);
+          setDragActive(droppable && hasImage);
+          return;
+        }
+        // payload.type === "drop"
+        setDragActive(false);
+        if (!canEditRef.current || viewModeRef.current === "html") return;
+        const imgs = payload.paths.filter(isImage);
+        if (imgs.length === 0) {
+          if (payload.paths.length > 0) toast("info", "이미지 파일만 끌어다 놓을 수 있습니다 (png/jpg/gif…)");
+          return;
+        }
+        // GUARD the known Tauri HiDPI bug: the drop position arrives in PHYSICAL pixels, but
+        // elementFromPoint / getBoundingClientRect work in CSS pixels — divide by devicePixelRatio.
+        const dpr = window.devicePixelRatio || 1;
+        const clientX = payload.position.x / dpr;
+        const clientY = payload.position.y / dpr;
+        void enqueueEdit(async () => {
+          // Map the drop point to an editable anchor via the SAME page-coords→hit_test path as a click;
+          // on a miss fall back to the last-pointed scope, else the section/doc end (block=null → end).
+          let scopeArg: { section: number; block: number | null } | null = null;
+          const host = document.elementFromPoint(clientX, clientY)?.closest("[data-index]") ?? null;
+          const svg = host?.querySelector("svg") ?? null;
+          if (host && svg) {
+            const page = Number(host.getAttribute("data-index"));
+            const rect = svg.getBoundingClientRect();
+            const vb = svg.viewBox.baseVal;
+            const pt = screenToPage(
+              clientX,
+              clientY,
+              { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+              { width: vb.width, height: vb.height },
+            );
+            if (Number.isFinite(page) && pt) {
+              try {
+                const hit = await api.hitTest(page, pt.x, pt.y);
+                if (hit) scopeArg = { section: hit.section, block: hit.block };
+              } catch {
+                /* hit-test miss → fall through to the scope/end fallback below */
+              }
+            }
+          }
+          if (!scopeArg && scopeRef.current) {
+            scopeArg = { section: scopeRef.current.section, block: scopeRef.current.block };
+          }
+          // ONE undoable op, applied immediately (no propose→review) — the direct-manipulation contract.
+          const n = await api.applyImageDrop(imgs[0], scopeArg);
+          setEdited(true);
+          invalidate(n, scopeArg ? (scopeRef.current?.page ?? null) : null);
+          const more = imgs.length - 1;
+          toast("info", more > 0 ? `이미지 삽입됨 (나머지 ${more}개는 건너뜀)` : "이미지 삽입됨");
+        });
+      });
+    })();
+    return () => un?.();
+  }, [enqueueEdit, invalidate]);
+
   const Tool = (p: { onClick: () => void; icon: string; label: string; keys?: string; tone?: "ai"; disabled?: boolean }) => (
     <button
       onClick={p.onClick}
@@ -802,7 +882,11 @@ export default function App() {
             // SVG page list — shared by 'svg' (rhwp 원본) and 'own' (자체 렌더, OUR engine). The two have
             // separate caches/ensure-fns + page counts; the caret (whose geometry is from the rhwp
             // render path) only attaches in 'svg' mode.
-            <div className="relative mx-auto max-w-3xl" style={{ height: `${virtualizer.getTotalSize()}px` }} onClick={(e) => void onPageClick(e)}>
+            <div
+              className={`relative mx-auto max-w-3xl rounded-lg ${dragActive ? "ring-2 ring-accent ring-offset-4 ring-offset-neutral-200 dark:ring-offset-neutral-800" : ""}`}
+              style={{ height: `${virtualizer.getTotalSize()}px` }}
+              onClick={(e) => void onPageClick(e)}
+            >
               {virtualizer.getVirtualItems().map((item) => {
                 void (viewMode === "own" ? ensureOwnPage(item.index) : ensurePage(item.index));
                 const pageSvg = viewMode === "own" ? ownSvgCache[item.index] : svgCache[item.index];
@@ -853,6 +937,12 @@ export default function App() {
                 </button>
                 <div className="text-xs text-neutral-400">또는 <kbd className="rounded bg-black/5 px-1 dark:bg-white/10">⌘K</kbd> 로 모든 명령</div>
               </div>
+            </div>
+          )}
+          {/* M1: drop affordance — a sticky pill while an image file is dragged over the pages. */}
+          {dragActive && (
+            <div className="pointer-events-none sticky bottom-4 z-20 mx-auto flex w-fit items-center gap-2 rounded-full border border-accent/40 bg-accent/10 px-3 py-1.5 text-sm font-medium text-accent shadow-lg backdrop-blur">
+              🖼️ 여기에 놓아 이미지 삽입
             </div>
           )}
         </main>

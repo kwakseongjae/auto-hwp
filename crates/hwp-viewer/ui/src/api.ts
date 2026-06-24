@@ -99,6 +99,25 @@ export const api = {
       widthMm,
       heightMm,
     }),
+  /** DIRECT-MANIPULATION image insert: a native OS file DROP onto a page. Rust reads the dropped
+   *  file's bytes from `srcPath` (a native drop gives a path, not bytes) and COMMITS one undoable op
+   *  IMMEDIATELY (no propose→review) at the hit-tested target. Returns the new page count (re-render
+   *  after). `scope` is the resolved target (insert AFTER that block, else section/doc end). */
+  applyImageDrop: (
+    srcPath: string,
+    scope: { section: number; block: number | null } | null,
+    widthMm?: number,
+    heightMm?: number,
+  ) =>
+    invoke<number>("apply_insert_image", {
+      name: srcPath,
+      srcPath,
+      dataB64: null,
+      scopeSection: scope?.section ?? null,
+      scopeBlock: scope?.block ?? null,
+      widthMm: widthMm ?? null,
+      heightMm: heightMm ?? null,
+    }),
   /** Dry-run hand-authored content JSON into a preview without mutating the doc (advanced). */
   propose: (content: string) => invoke<string>("propose", { content }),
   /** Commit the pending proposal (one undo unit); returns the new page count. */

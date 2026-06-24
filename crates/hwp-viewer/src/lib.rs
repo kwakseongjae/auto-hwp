@@ -374,6 +374,75 @@ fn ai_provider_name() -> String {
     "none".into()
 }
 
+/// Materialize image bytes to a temp file `compile_edits` can read back, and return
+/// `(temp_path, safe_basename)`. The bytes come from EITHER a base64 payload (`dataB64`, the
+/// chat-attach lane) OR a source file `srcPath` (a native OS drag-drop gives a path, not bytes —
+/// we read it here in Rust); exactly one must be present. A sanitized basename keeps the extension.
+fn stash_image(
+    name: &str,
+    data_b64: Option<&str>,
+    src_path: Option<&str>,
+) -> Result<(std::path::PathBuf, String), String> {
+    use base64::Engine as _;
+    let bytes = match (data_b64, src_path) {
+        (Some(b64), _) => base64::engine::general_purpose::STANDARD
+            .decode(b64.as_bytes())
+            .map_err(|e| format!("이미지 디코드 실패: {e}"))?,
+        (None, Some(p)) => {
+            std::fs::read(p).map_err(|e| format!("이미지 파일 읽기 실패: {p} — {e}"))?
+        }
+        (None, None) => return Err("이미지 데이터(dataB64) 또는 경로(srcPath)가 필요합니다".into()),
+    };
+    if bytes.is_empty() {
+        return Err("빈 이미지입니다".into());
+    }
+    // A native drop carries the source path; prefer ITS basename for the visible name when given.
+    let basis = src_path.filter(|_| data_b64.is_none()).unwrap_or(name);
+    let safe: String = std::path::Path::new(basis)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("image.png")
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+    let dir = std::env::temp_dir().join("tfhwp_imgs");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("임시 폴더 생성 실패: {e}"))?;
+    let path = dir.join(&safe);
+    std::fs::write(&path, &bytes).map_err(|e| format!("이미지 저장 실패: {e}"))?;
+    Ok((path, safe))
+}
+
+/// Build a single-`InsertImage` [`EditScript`] anchored at the pointed target and validate it into a
+/// [`hwp_ai::Proposal`] against the LIVE doc (the SAME op-bus path the AI uses). Shared by the
+/// propose (chat, review-first) and apply (drag-drop, immediate) image-insert lanes.
+fn build_insert_image_proposal(
+    doc: &hwp_model::prelude::SemanticDoc,
+    path: &std::path::Path,
+    scope_section: Option<usize>,
+    scope_block: Option<usize>,
+    width_mm: Option<f32>,
+    height_mm: Option<f32>,
+) -> Result<hwp_ai::Proposal, String> {
+    let (section, block, position) = match (scope_section, scope_block) {
+        (Some(sec), Some(blk)) => (sec, blk, "after"),
+        (Some(sec), None) => (sec, 0, "end"),
+        _ => (0, 0, "end"),
+    };
+    let script = hwp_ai::edit::EditScript {
+        edits: vec![serde_json::from_value(serde_json::json!({
+            "op": "insert_image",
+            "section": section,
+            "block": block,
+            "position": position,
+            "path": path.to_string_lossy(),
+            "width_mm": width_mm,
+            "height_mm": height_mm,
+        }))
+        .map_err(|e| format!("이미지 편집 구성 실패: {e}"))?],
+    };
+    hwp_ai::propose_from_edit_script(doc, &script, "이미지 삽입").map_err(|e| e.to_string())
+}
+
 /// Insert a CHAT-ATTACHED image deterministically (no provider needed) at the user's pointed target:
 /// decode the base64 bytes to a temp file, then route ONE `InsertImage` edit through the SAME
 /// validated op-bus path the AI uses (`propose_from_edit_script`), leaving it pending for review.
@@ -390,50 +459,47 @@ fn propose_insert_image(
     heightMm: Option<f32>,
     sess: tauri::State<'_, SharedSession>,
 ) -> Result<String, String> {
-    use base64::Engine as _;
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(dataB64.as_bytes())
-        .map_err(|e| format!("이미지 디코드 실패: {e}"))?;
-    if bytes.is_empty() {
-        return Err("빈 이미지입니다".into());
-    }
-    // Stash to a temp file (compile_edits reads it back); a sanitized basename keeps the extension.
-    let safe: String = std::path::Path::new(&name)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("image.png")
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
-        .collect();
-    let dir = std::env::temp_dir().join("tfhwp_imgs");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("임시 폴더 생성 실패: {e}"))?;
-    let path = dir.join(&safe);
-    std::fs::write(&path, &bytes).map_err(|e| format!("이미지 저장 실패: {e}"))?;
-
+    let (path, safe) = stash_image(&name, Some(&dataB64), None)?;
     let mut s = sess.lock().map_err(|_| "session poisoned")?;
     let doc = s.doc.as_ref().ok_or("no document open")?.doc();
-    let (section, block, position) = match (scopeSection, scopeBlock) {
-        (Some(sec), Some(blk)) => (sec, blk, "after"),
-        (Some(sec), None) => (sec, 0, "end"),
-        _ => (0, 0, "end"),
-    };
-    let script = hwp_ai::edit::EditScript {
-        edits: vec![serde_json::from_value(serde_json::json!({
-            "op": "insert_image",
-            "section": section,
-            "block": block,
-            "position": position,
-            "path": path.to_string_lossy(),
-            "width_mm": widthMm,
-            "height_mm": heightMm,
-        }))
-        .map_err(|e| format!("이미지 편집 구성 실패: {e}"))?],
-    };
-    let proposal = hwp_ai::propose_from_edit_script(doc, &script, "이미지 삽입")
-        .map_err(|e| e.to_string())?;
+    let proposal =
+        build_insert_image_proposal(doc, &path, scopeSection, scopeBlock, widthMm, heightMm)?;
     let preview = proposal.preview();
     s.pending = Some(proposal);
     Ok(format!("📎 {safe}\n{preview}"))
+}
+
+/// DIRECT-MANIPULATION image insert (a native OS file drop onto a page): read the source file's
+/// bytes in Rust (a drop gives a PATH, not bytes), compile ONE `InsertImage` edit through the same
+/// validated op-bus path, and COMMIT it IMMEDIATELY as one undoable op via `do_ops` — mirroring how
+/// the caret edits apply (no propose→review). Returns the new page count so the UI re-renders.
+/// `srcPath` is the dropped file; `dataB64` is an alternate in-memory payload (tests / non-native
+/// drops). `scopeSection`/`scopeBlock` = the hit-tested target (insert AFTER that block, else end).
+#[allow(non_snake_case)]
+#[tauri::command]
+async fn apply_insert_image(
+    name: String,
+    srcPath: Option<String>,
+    dataB64: Option<String>,
+    scopeSection: Option<usize>,
+    scopeBlock: Option<usize>,
+    widthMm: Option<f32>,
+    heightMm: Option<f32>,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<u32, String> {
+    let (path, _safe) = stash_image(&name, dataB64.as_deref(), srcPath.as_deref())?;
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+        let proposal =
+            build_insert_image_proposal(doc, &path, scopeSection, scopeBlock, widthMm, heightMm)?;
+        let edit = s.doc.as_mut().ok_or("no document open")?;
+        edit.do_ops(&proposal.ops).map_err(|e| e.to_string())?; // ONE undo unit
+        Ok::<u32, String>(pages(&mut s))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Pick an AI provider: a local model (Ollama) we control if reachable, else cloud BYOK
@@ -701,6 +767,7 @@ pub fn run() {
             ai_edit_propose,
             ai_provider_name,
             propose_insert_image,
+            apply_insert_image,
             undo,
             redo,
             find_text,
@@ -794,5 +861,59 @@ mod tests {
         let written = std::fs::read_to_string(&out).unwrap();
         assert!(written.starts_with("<!doctype html>"), "self-contained HTML document");
         assert!(written.contains("HTML로 내보내기"), "the live edit is in the export");
+    }
+
+    /// M1 drag-drop: a native file DROP gives a PATH (not bytes), so the apply path must read the
+    /// file in Rust and commit ONE undoable op that embeds those bytes and references them — mirroring
+    /// hwp-ops' `insert_image_at_embeds_bindata_and_references_it`. Drives the same pure logic the
+    /// `apply_insert_image` command runs (the command itself needs a Tauri `State` we can't build
+    /// headless): `stash_image(srcPath)` → `build_insert_image_proposal` → `do_ops` (one undo unit).
+    #[test]
+    fn apply_insert_image_from_path_embeds_bytes_and_references_it() {
+        use hwp_model::prelude::{Block, Inline};
+        // A real PNG-signature file on disk is what a native drop hands us (a path, not bytes).
+        let png = vec![0x89u8, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3];
+        let src = std::env::temp_dir().join("tfhwp_drop_src.png");
+        std::fs::write(&src, &png).unwrap();
+
+        let mut sess = hwp_mcp::Session::default();
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/hwpx/FormattingShowcase.hwpx");
+        mcp_call(&mut sess, "open_document", json!({ "path": path })).unwrap();
+
+        // Read bytes from the PATH (no base64) exactly as the drop lane does.
+        let (stashed, safe) =
+            stash_image("ignored.png", None, Some(src.to_str().unwrap())).unwrap();
+        assert!(safe.ends_with(".png"), "basename comes from the dropped path: {safe}");
+        assert_eq!(std::fs::read(&stashed).unwrap(), png, "stash copies the dropped bytes verbatim");
+
+        let before_pages = pages(&mut sess);
+        let proposal = {
+            let doc = sess.doc.as_ref().unwrap().doc();
+            build_insert_image_proposal(doc, &stashed, Some(0), Some(0), Some(40.0), Some(30.0))
+                .unwrap()
+        };
+        // Commit immediately as ONE undo unit (the direct-manipulation contract).
+        let edit = sess.doc.as_mut().unwrap();
+        edit.do_ops(&proposal.ops).unwrap();
+
+        // The dropped bytes are embedded in bin_data and referenced by an inserted Image inline.
+        let doc = sess.doc.as_ref().unwrap().doc();
+        let bin = doc.bin_data.iter().find(|b| b.bytes == png).expect("dropped bytes embedded");
+        let found = doc.sections[0].blocks.iter().any(|blk| {
+            if let Block::Paragraph(p) = blk {
+                p.runs.iter().flat_map(|r| &r.content).any(|c| {
+                    matches!(c, Inline::Image(img) if img.bin_ref == bin.bin_ref)
+                })
+            } else {
+                false
+            }
+        });
+        assert!(found, "an Image inline references the embedded dropped bytes");
+
+        // One undo reverts the whole drop (single undoable op), and pages recompute.
+        let _ = before_pages;
+        assert!(sess.doc.as_mut().unwrap().undo(), "the drop is a single undoable op");
+        let doc = sess.doc.as_ref().unwrap().doc();
+        assert!(!doc.bin_data.iter().any(|b| b.bytes == png), "undo removes the embedded image");
     }
 }
