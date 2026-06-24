@@ -35,7 +35,7 @@ export default function App() {
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [outline, setOutline] = useState<OutlineItem[]>([]);
   // U5: a tiny point-action popover (right-click a block → AI로 편집 / 이미지 삽입) + a ? cheat-sheet.
-  const [pointMenu, setPointMenu] = useState<{ x: number; y: number; page: number; section: number; block: number | null; box?: { x: number; y: number; w: number; h: number } | null; kind?: string } | null>(null);
+  const [pointMenu, setPointMenu] = useState<{ x: number; y: number; page: number; section: number; block: number | null; box?: { x: number; y: number; w: number; h: number } | null; kind?: string; text?: string } | null>(null);
   const [cheatOpen, setCheatOpen] = useState(false);
   // Discoverability: a one-time hint card surfacing the (otherwise hidden) manual-edit gestures —
   // click-to-edit, the ⋯/우클릭 quick-action popover, image drag&drop. Dismissed forever via a
@@ -208,6 +208,7 @@ export default function App() {
     box: TableBox; // page-unit geometry + (section, block) anchor + rows/cols
     screen: { left: number; top: number; width: number; height: number };
     pxPerPageY: number;
+    colFracs: number[]; // cols+1 fractional column boundaries (0..1 across the table) for resize handles
   };
   const [tableSel, setTableSel] = useState<TableSel | null>(null);
   const tableSelRef = useRef<TableSel | null>(null);
@@ -220,9 +221,12 @@ export default function App() {
   // pin. Recomputed against the live SVG rect/viewBox on zoom (like the image/table overlays). ----
   type ScopePin = {
     page: number;
+    section: number;
+    block: number;
     box: { x: number; y: number; w: number; h: number }; // own-engine page units (anchor band)
     screen: { left: number; top: number; width: number; height: number };
     kind: string;
+    text: string; // the pointed block's current text — for Cmd+C copy
   };
   const [scopePin, setScopePin] = useState<ScopePin | null>(null);
   const scopePinRef = useRef<ScopePin | null>(null);
@@ -268,6 +272,10 @@ export default function App() {
   canEditRef.current = canEdit;
   const composingRef = useRef(composing);
   composingRef.current = composing;
+  // True while any modal/popover/palette is open — the own-mode key lane bails so a stray Backspace
+  // behind a modal (focus not on its input yet) can't delete the pinned block.
+  const modalOpenRef = useRef(false);
+  modalOpenRef.current = !!(composer || paletteOpen || cheatOpen || pointMenu || findOpen);
 
   // Edit SERIALIZER: chain every mutation/move through one promise queue so concurrent input applies
   // strictly in order (no dropped keystroke / IME syllable). Errors toast and don't break the chain.
@@ -340,12 +348,22 @@ export default function App() {
     const vb = svg.viewBox.baseVal;
     const screen = imageBoxToScreen(box, { width: rect.width, height: rect.height }, { width: vb.width, height: vb.height });
     if (!screen || vb.width === 0 || vb.height === 0) return setTableSel(null);
-    setTableSel({ page, box, screen, pxPerPageY: rect.height / vb.height });
+    setTableSel((prev) => ({ page, box, screen, pxPerPageY: rect.height / vb.height, colFracs: prev?.colFracs ?? [] }));
+    // Fetch the column-boundary fractions (for the resize handles) — async, patched in when ready.
+    void (async () => {
+      try {
+        const xs = await api.tableColBoundaries(page, box.section, box.block);
+        if (xs && box.w > 0) {
+          const fracs = xs.map((x) => (x - box.x) / box.w);
+          setTableSel((cur) => (cur && cur.box.section === box.section && cur.box.block === box.block ? { ...cur, colFracs: fracs } : cur));
+        }
+      } catch { /* leave colFracs empty → no handles */ }
+    })();
   }, []);
 
   // Re-place the scope PIN against the LIVE svg rect/viewBox (zoom/repaint) — the pointing twin of
   // `recomputeTableBox` (a band box shares the `x/y/w/h` shape so `imageBoxToScreen` maps it too).
-  const recomputeScopePin = useCallback((page: number, box: { x: number; y: number; w: number; h: number } | null, kind: string) => {
+  const recomputeScopePin = useCallback((page: number, section: number, block: number, box: { x: number; y: number; w: number; h: number } | null, kind: string, text: string) => {
     if (!box) return setScopePin(null);
     const svg = svgForPage(page);
     if (!svg) return setScopePin(null);
@@ -353,7 +371,7 @@ export default function App() {
     const vb = svg.viewBox.baseVal;
     const screen = imageBoxToScreen(box, { width: rect.width, height: rect.height }, { width: vb.width, height: vb.height });
     if (!screen || vb.width === 0 || vb.height === 0) return setScopePin(null);
-    setScopePin({ page, box, screen, kind });
+    setScopePin({ page, section, block, box, screen, kind, text });
   }, []);
 
   // In 'own' mode the page list is paginated by OUR engine (its count can differ from rhwp's).
@@ -379,7 +397,7 @@ export default function App() {
     // Re-place the image + table overlays too so they track the new zoom scale.
     if (imageSelRef.current) recomputeImageBox(imageSelRef.current.page, imageSelRef.current.box);
     if (tableSelRef.current) recomputeTableBox(tableSelRef.current.page, tableSelRef.current.box);
-    if (scopePinRef.current) recomputeScopePin(scopePinRef.current.page, scopePinRef.current.box, scopePinRef.current.kind);
+    if (scopePinRef.current) { const p = scopePinRef.current; recomputeScopePin(p.page, p.section, p.block, p.box, p.kind, p.text); }
     // Re-place the inline editor too so it stays over its cell/paragraph when the zoom changes.
     const ie = inlineEditRef.current;
     if (ie) {
@@ -525,20 +543,21 @@ export default function App() {
     let block: number | null = null;
     let box: { x: number; y: number; w: number; h: number } | null = null;
     let kind = "";
+    let text = "";
     if (pt) {
       try {
         if (viewModeRef.current === "own") {
           // Own-render: resolve the general block (paragraph included) so the popover anchors to what
           // was pointed at — and carry its band box so 'AI 편집' can drop the same visible pin.
           const hit = await api.ownHitTest(page, pt.x, pt.y);
-          if (hit) { section = hit.section; block = hit.block; box = { x: hit.x, y: hit.y, w: hit.w, h: hit.h }; kind = hit.kind; }
+          if (hit) { section = hit.section; block = hit.block; box = { x: hit.x, y: hit.y, w: hit.w, h: hit.h }; kind = hit.kind; text = hit.text; }
         } else {
           const hit = await api.hitTest(page, pt.x, pt.y);
           if (hit) { section = hit.section; block = hit.block; }
         }
       } catch { /* miss → section/doc-end scope */ }
     }
-    setPointMenu({ x: menuAt.x, y: menuAt.y, page, section, block, box, kind });
+    setPointMenu({ x: menuAt.x, y: menuAt.y, page, section, block, box, kind, text });
   }, []);
 
   // ---- U5: right-click a block → the point-action popover anchored at the click point. ----
@@ -597,6 +616,14 @@ export default function App() {
       // 2) Else a simple paragraph (not a table/image band) → inline-edit its text in place.
       const hit = await api.ownHitTest(page, pt.x, pt.y);
       if (hit && hit.kind === "paragraph") {
+        // Gate non-editable (structural/image/field) paragraphs BEFORE opening the editor so the user
+        // never types into something that will refuse on commit — point at it + guide to chat instead.
+        if (!hit.editable) {
+          setScope({ section: hit.section, block: hit.block, page });
+          recomputeScopePin(page, hit.section, hit.block, { x: hit.x, y: hit.y, w: hit.w, h: hit.h }, hit.kind, hit.text);
+          toast("info", "이 문단은 직접 편집 대상이 아니에요 — ✦바이브(채팅)로 편집하세요");
+          return;
+        }
         const box = { x: hit.x, y: hit.y, w: hit.w, h: Math.max(hit.h, 320 / HWPUNIT_PER_PX) };
         const screen = imageBoxToScreen(box, dim, vbd);
         if (screen) {
@@ -659,7 +686,7 @@ export default function App() {
         const hit = await api.ownHitTest(page, pt.x, pt.y);
         if (hit) {
           setScope({ section: hit.section, block: hit.block, page });
-          recomputeScopePin(page, { x: hit.x, y: hit.y, w: hit.w, h: hit.h }, hit.kind);
+          recomputeScopePin(page, hit.section, hit.block, { x: hit.x, y: hit.y, w: hit.w, h: hit.h }, hit.kind, hit.text);
         } else {
           clearScope();
         }
@@ -830,6 +857,94 @@ export default function App() {
     });
   }, [enqueueEdit, invalidate]);
 
+  // Delete a pointed (pin) block — the empty-paragraph / 우클릭 삭제 / Backspace lane. Works for any
+  // top-level block (paragraph/table/image) via DeleteBlock. Clears the pin (the block is gone).
+  const deleteBlockAt = useCallback((section: number, block: number) => {
+    void enqueueEdit(async () => {
+      if (!canEditRef.current) return;
+      try {
+        const pages = await api.deleteBlock(section, block);
+        setEdited(true);
+        invalidate(pages, null);
+        clearScope();
+        toast("info", "블록 삭제됨 (⌘Z로 되돌리기)");
+      } catch (err) {
+        toast("warn", `삭제 실패: ${err}`);
+      }
+    });
+  }, [enqueueEdit, invalidate, clearScope]);
+
+  // Copy/paste the POINTED block's text via the system clipboard (own-mode, when not inline-editing —
+  // the inline <textarea> handles native copy/paste itself). Cmd+C → copy the pin's text; Cmd+V → read
+  // the clipboard and replace the pointed block's text (paragraph only; tables edit per-cell).
+  const copyPointedText = useCallback(async () => {
+    const p = scopePinRef.current;
+    if (!p) return;
+    try {
+      await navigator.clipboard.writeText(p.text ?? "");
+      toast("info", "복사됨");
+    } catch {
+      toast("warn", "클립보드 접근이 거부되었습니다");
+    }
+  }, []);
+  const pastePointedText = useCallback(() => {
+    const p = scopePinRef.current;
+    if (!p || p.kind !== "paragraph") return; // tables/images paste per-cell via double-click edit
+    void (async () => {
+      let text = "";
+      try {
+        text = await navigator.clipboard.readText();
+      } catch {
+        toast("warn", "클립보드 접근이 거부되었습니다");
+        return;
+      }
+      if (!text) return;
+      void enqueueEdit(async () => {
+        if (!canEditRef.current) return;
+        try {
+          const pages = await api.setParagraphText(p.section, p.block, text);
+          setEdited(true);
+          invalidate(pages, null);
+        } catch (err) {
+          toast("warn", `${err}`);
+        }
+      });
+    })();
+  }, [enqueueEdit, invalidate]);
+
+  // own-mode keyboard lane for the POINTED block: ⌘C copy · ⌘V paste · Backspace/Delete delete. Gated
+  // so it never fires while typing (inline editor / chat / any input) or composing — own mode has no
+  // typing caret, so activeElement is <body> when a pin is active (a clean discriminator).
+  useEffect(() => {
+    if (!scopePin) return;
+    const isTyping = () => {
+      if (inlineEditRef.current || composingRef.current) return true;
+      const el = document.activeElement as HTMLElement | null;
+      return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      // Bail when not in own mode, while typing, while a modal/popover/palette is open (focus may rest
+      // on a non-input there), or while an image/table overlay is selected (it owns its own Delete).
+      if (viewModeRef.current !== "own" || isTyping() || modalOpenRef.current) return;
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && (e.key === "c" || e.key === "C")) {
+        // Don't hijack a real text selection copy.
+        if (window.getSelection()?.toString()) return;
+        e.preventDefault();
+        void copyPointedText();
+      } else if (mod && (e.key === "v" || e.key === "V")) {
+        e.preventDefault();
+        pastePointedText();
+      } else if (!mod && (e.key === "Backspace" || e.key === "Delete")) {
+        if (imageSelRef.current || tableSelRef.current) return; // the overlay deletes its own selection
+        const p = scopePinRef.current;
+        if (p) { e.preventDefault(); deleteBlockAt(p.section, p.block); }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [scopePin, copyPointedText, pastePointedText, deleteBlockAt]);
+
   // ---- table overlay: commit (one undoable op), then re-place the overlay on the table. Mirrors the
   // image overlay lane (reselectAfterRepaint / commitImageMove) but commits via MoveBlock + table ops.
   const reselectTableAfterRepaint = useCallback((page: number, section: number, block: number) => {
@@ -898,6 +1013,27 @@ export default function App() {
       }
     });
   }, [enqueueEdit, invalidate]);
+
+  // Column resize commit: fractional boundaries → integer column-width proportions (min 1), one undo
+  // unit (SetTableColWidths). The renderer rescales the proportions to the body width.
+  const commitTableColWidths = useCallback((fracs: number[]) => {
+    void enqueueEdit(async () => {
+      const sel = tableSelRef.current;
+      if (!sel || !canEditRef.current) return;
+      const widths: number[] = [];
+      for (let c = 0; c < sel.box.cols; c++) {
+        widths.push(Math.max(1, Math.round((fracs[c + 1] - fracs[c]) * 1000)));
+      }
+      try {
+        const pages = await api.setTableColWidths(sel.box.section, sel.box.block, widths);
+        setEdited(true);
+        invalidate(pages, null);
+        reselectTableAfterRepaint(sel.page, sel.box.section, sel.box.block);
+      } catch (err) {
+        toast("warn", `열 너비 변경 실패: ${err}`);
+      }
+    });
+  }, [enqueueEdit, invalidate, reselectTableAfterRepaint]);
 
   // The 칸 편집 toolbar button → open the INLINE editor over the selected table's first cell (the
   // double-click path is the primary one; this is the discoverable button). Resolves the cell rect via
@@ -1813,7 +1949,9 @@ export default function App() {
                         <div data-table-overlay className="pointer-events-none absolute inset-0 z-20">
                           <TableOverlay
                             box={tableSel.screen}
+                            colFracs={tableSel.colFracs}
                             onCommitMove={commitTableMove}
+                            onCommitColWidths={commitTableColWidths}
                             onAddRow={commitTableAddRow}
                             onEditCell={openCellEditor}
                             onDeleteTable={commitTableDeleteTable}
@@ -1844,9 +1982,14 @@ export default function App() {
                                 여기{scopePin.kind === "table" ? " · 표" : scopePin.kind === "image" ? " · 그림" : ""}에 요청
                               </button>
                               <button
+                                onClick={(e) => { e.stopPropagation(); deleteBlockAt(scopePin.section, scopePin.block); }}
+                                title="이 블록 삭제 (Delete)"
+                                className="ml-0.5 rounded px-0.5 leading-none hover:bg-white/25"
+                              >🗑</button>
+                              <button
                                 onClick={(e) => { e.stopPropagation(); clearScope(); }}
                                 title="가리키기 해제 (Esc)"
-                                className="ml-0.5 rounded px-0.5 leading-none hover:bg-white/25"
+                                className="rounded px-0.5 leading-none hover:bg-white/25"
                               >✕</button>
                             </span>
                           </div>
@@ -1872,9 +2015,11 @@ export default function App() {
                           data-inline-edit
                           autoFocus
                           defaultValue={inlineEdit.text}
+                          ref={(el) => { if (el) { el.style.height = "auto"; el.style.height = `${Math.max(el.scrollHeight, inlineEdit.screen.height, 22)}px`; } }}
                           onClick={(e) => e.stopPropagation()}
                           onDoubleClick={(e) => e.stopPropagation()}
                           onPointerDown={(e) => e.stopPropagation()}
+                          onInput={(e) => { const t = e.currentTarget; t.style.height = "auto"; t.style.height = `${Math.max(t.scrollHeight, inlineEdit.screen.height, 22)}px`; }}
                           onBlur={(e) => commitInlineEdit(e.currentTarget.value)}
                           onKeyDown={(e) => {
                             if (e.key === "Escape") { e.preventDefault(); setInlineEdit(null); }
@@ -1887,7 +2032,11 @@ export default function App() {
                             width: `${Math.max(inlineEdit.screen.width, 40)}px`,
                             minHeight: `${Math.max(inlineEdit.screen.height, 22)}px`,
                           }}
-                          className="z-40 resize-none overflow-hidden rounded-sm border-2 border-accent bg-white px-1 py-0.5 text-center text-sm leading-tight text-neutral-900 shadow-lg outline-none dark:bg-neutral-900 dark:text-neutral-100"
+                          // Always white/dark-text (the DOCUMENT page is white even in app dark mode — a
+                          // dark textarea read as a jarring black box). A soft accent ring + tint marks it
+                          // as the active editor; text is left-aligned for editing, real alignment is
+                          // restored on commit (para_shape preserved).
+                          className="z-40 resize-none overflow-auto rounded-[2px] bg-white px-1 py-0.5 text-left align-top text-sm leading-snug text-neutral-900 shadow-[0_0_0_2px_var(--color-accent,#2563eb)] outline-none ring-2 ring-accent/40"
                         />
                       )}
                       {/* Post-apply highlight pulse — a one-shot accent glow over the page a chat edit
@@ -2091,8 +2240,12 @@ export default function App() {
               className="flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left hover:bg-ai/10"
               onClick={() => {
                 setScope({ section: pointMenu.section, block: pointMenu.block, page: pointMenu.page });
+                // A pin and an image/table overlay are mutually exclusive (else two Backspace lanes arm
+                // at once → double-delete). Drop any overlay before pinning.
+                clearImageSel();
+                clearTableSel();
                 // Own-render: drop the visible pin on the resolved band so the target is unmistakable.
-                if (pointMenu.box) recomputeScopePin(pointMenu.page, pointMenu.box, pointMenu.kind ?? "");
+                if (pointMenu.box) recomputeScopePin(pointMenu.page, pointMenu.section, pointMenu.block ?? 0, pointMenu.box, pointMenu.kind ?? "", pointMenu.text ?? "");
                 setChatOpen(true);
                 setPointMenu(null);
               }}
@@ -2115,6 +2268,15 @@ export default function App() {
               <span className="font-medium">🖼️ 여기에 이미지 삽입</span>
               <span className="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">파일을 골라 이 위치 바로 뒤에 넣습니다 (문서 끝 아님)</span>
             </button>
+            {pointMenu.block !== null && (
+              <button
+                className="flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left hover:bg-red-500/10"
+                onClick={() => { const sel = pointMenu; setPointMenu(null); deleteBlockAt(sel.section, sel.block as number); }}
+              >
+                <span className="font-medium text-red-600 dark:text-red-400">🗑 여기 블록 삭제</span>
+                <span className="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">이 {pointMenu.kind === "table" ? "표" : pointMenu.kind === "image" ? "그림" : "문단"}을 삭제합니다 (⌘Z로 되돌리기)</span>
+              </button>
+            )}
           </div>
         </>
       )}
@@ -2135,7 +2297,7 @@ export default function App() {
                 primary model's quieter direct-manipulation paths are findable. */}
             <div className="mb-1.5 mt-4 text-xs font-medium uppercase tracking-wide text-neutral-400">직접 편집</div>
             <div className="flex flex-col gap-1.5 text-sm text-neutral-700 dark:text-neutral-300">
-              {([["클릭(자체 렌더)", "블록 클릭 → ✦여기 핀 (AI 대상 지정)"], ["더블클릭(자체 렌더)", "표 칸·문단 → 그 자리에서 바로 텍스트 입력"], ["우클릭 · ⋯", "빠른 작업 (여기를 AI로 편집 / 이미지 삽입)"], ["드래그&드롭", "이미지 파일을 페이지에 끌어다 삽입"], ["이미지·표(자체 렌더)", "클릭 선택 → 끌어서 이동 · 크기 / Delete 삭제"]] as [string, string][]).map(([k, d]) => (
+              {([["클릭(자체 렌더)", "블록 클릭 → ✦여기 핀 (AI 대상 지정)"], ["더블클릭", "표 칸·문단 → 그 자리에서 바로 텍스트 입력"], ["클릭 후 ⌘C/⌘V", "가리킨 문단 복사 / 붙여넣기"], ["클릭 후 Delete", "가리킨 블록 삭제 (또는 핀의 🗑 · 우클릭)"], ["우클릭 · ⋯", "여기를 AI로 편집 / 이미지 삽입 / 삭제"], ["드래그&드롭", "이미지 파일을 페이지에 끌어다 삽입"], ["이미지·표", "클릭 선택 → 끌어서 이동 · 크기 · 열 너비 / Delete"]] as [string, string][]).map(([k, d]) => (
                 <div key={k} className="flex items-center justify-between gap-4">
                   <span>{d}</span>
                   <kbd className="shrink-0 rounded bg-black/5 px-1.5 py-0.5 text-xs dark:bg-white/10">{k}</kbd>

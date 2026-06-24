@@ -705,6 +705,9 @@ pub enum Intent {
     /// Inline edit — replace a SIMPLE paragraph's text (the `block`-th block of `section`), preserving
     /// its char/para shape, as ONE undo unit (`SetParagraphText`). Refuses a structural paragraph.
     SetParagraphText { section: usize, block: usize, text: String },
+    /// Column resize — set the `index`-th table's column-width proportions as ONE undo unit
+    /// (`SetTableColWidths`). `widths.len()` must equal the table's column count.
+    SetTableColWidths { section: usize, index: usize, widths: Vec<i32> },
     /// Block delete — remove the block at `(section, index)` as ONE undo unit (`DeleteBlock`).
     DeleteBlock { section: usize, index: usize },
 }
@@ -855,6 +858,12 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
         Intent::SetParagraphText { section, block, text } => {
             let doc = session.doc.as_mut().ok_or("no document open")?;
             doc.do_op(&hwp_ops::Op::SetParagraphText { section, block, text }).map_err(|e| e.to_string())?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::SetTableColWidths { section, index, widths } => {
+            let doc = session.doc.as_mut().ok_or("no document open")?;
+            doc.do_op(&hwp_ops::Op::SetTableColWidths { section, index, widths }).map_err(|e| e.to_string())?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }

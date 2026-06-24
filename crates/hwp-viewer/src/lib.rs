@@ -1100,6 +1100,27 @@ async fn set_table_cell(
     .map_err(|e| e.to_string())?
 }
 
+/// Set the `index`-th table's column-width proportions as ONE undo unit (`SetTableColWidths`). The
+/// column-resize drag commit. `widths.len()` must equal the table's column count.
+#[tauri::command]
+async fn set_table_col_widths(
+    section: usize,
+    index: usize,
+    widths: Vec<i32>,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<u32, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        match apply_intent(&mut s, Intent::SetTableColWidths { section, index, widths })? {
+            Outcome::Edited { pages } => Ok(pages),
+            _ => Err("unexpected outcome".into()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Delete the block at `(section, index)` (e.g. 표 삭제) as ONE undo unit (`DeleteBlock`). Returns
 /// the new page count so the frontend repaints.
 #[tauri::command]
@@ -1137,6 +1158,20 @@ struct BlockHitDto {
     /// The block's plain text when it is a top-level PARAGRAPH (else empty) — lets a double-click open
     /// the inline editor pre-filled. Empty for a table band (cells edit via `table_cell_at`).
     text: String,
+    /// True when a PARAGRAPH is inline-editable (simple, all-text) — matches SetParagraphText's accept
+    /// rule, so the UI can gate double-click and avoid the user typing into a paragraph that will refuse.
+    editable: bool,
+}
+
+/// Whether a top-level paragraph block is inline-editable (mirrors SetParagraphText's accept rule:
+/// `source.simple` AND no non-text inline). False for tables/images/structural paragraphs.
+fn model_para_editable(doc: &hwp_model::prelude::SemanticDoc, section: usize, block: usize) -> bool {
+    use hwp_model::prelude::{Block, Inline};
+    let Some(sec) = doc.sections.get(section) else { return false };
+    let Some(Block::Paragraph(p)) = sec.blocks.get(block) else { return false };
+    let simple = p.source.as_ref().map(|s| s.simple).unwrap_or(true);
+    let all_text = p.runs.iter().all(|r| r.content.iter().all(|i| matches!(i, Inline::Text(_))));
+    simple && all_text
 }
 
 /// Concatenate the plain text of a top-level paragraph block `(section, block)` (empty if not a simple
@@ -1192,6 +1227,7 @@ async fn own_hit_test(
             h: b.h / k,
             // Pre-fill text only for a plain paragraph band (image/table → empty; not inline-editable text).
             text: if b.kind == hwp_typeset::BlockKind::Paragraph { model_para_text(doc, b.section, b.block) } else { String::new() },
+            editable: b.kind == hwp_typeset::BlockKind::Paragraph && model_para_editable(doc, b.section, b.block),
         }))
     })
     .await
@@ -1223,19 +1259,23 @@ fn model_cell_text(doc: &hwp_model::prelude::SemanticDoc, section: usize, block:
     let Some(sec) = doc.sections.get(section) else { return String::new() };
     let Some(Block::Table(t)) = sec.blocks.get(block) else { return String::new() };
     let Some(cell) = t.cells.iter().find(|c| c.row == row && c.col == col) else { return String::new() };
-    let mut out = String::new();
+    // Join multiple cell paragraphs with '\n' so a multi-line cell pre-fills readably; the layout
+    // engine renders a '\n' inside a run as a forced line break, so the edit round-trips.
+    let mut paras: Vec<String> = Vec::new();
     for b in &cell.blocks {
         if let Block::Paragraph(p) = b {
+            let mut line = String::new();
             for r in &p.runs {
                 for i in &r.content {
                     if let Inline::Text(s) = i {
-                        out.push_str(s);
+                        line.push_str(s);
                     }
                 }
             }
+            paras.push(line);
         }
     }
-    out
+    paras.join("\n")
 }
 
 /// Click-to-edit (own-render only): the table cell under a page-space double-click, in own-engine px
@@ -1280,6 +1320,40 @@ async fn table_cell_at(
             w: cell.w / k,
             h: cell.h / k,
         }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Column-boundary x-positions (PX, own SVG space) of the table at `(section, block)` on `page` — the
+/// x's the column-resize handles are drawn on. `cols + 1` absolute px boundaries from the table left to
+/// the table right, derived from `column_offsets` so they land exactly on the drawn grid. `null` if the
+/// table isn't on the page.
+#[tauri::command]
+async fn table_col_boundaries(
+    page: u32,
+    section: usize,
+    block: usize,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<Option<Vec<f64>>, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let s = sess.lock().map_err(|_| "session poisoned")?;
+        let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+        let fonts = own_render_fonts();
+        let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+        let Some(pg) = placed.pages.get(page as usize) else { return Ok(None) };
+        let Some(pt) = pg.tables.iter().find(|t| t.section == section && t.block == block) else {
+            return Ok(None);
+        };
+        let Some(hwp_model::prelude::Block::Table(model)) = doc.sections.get(section).and_then(|s| s.blocks.get(block)) else {
+            return Ok(None);
+        };
+        let k = HWPUNIT_PER_PX;
+        // column_offsets rescales the model col_widths to the table's drawn width (pt.w), so the boundary
+        // x's match the painted grid exactly. Absolute px = (table-left + col_x) / 75.
+        let col_x = hwp_typeset::column_offsets(model, pt.w);
+        Ok(Some(col_x.iter().map(|x| (pt.x + x) / k).collect()))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1381,11 +1455,13 @@ pub fn run() {
             table_at,
             own_hit_test,
             table_cell_at,
+            table_col_boundaries,
             move_table,
             table_add_rows,
             table_append_row,
             set_paragraph_text,
             set_table_cell,
+            set_table_col_widths,
             delete_block
         ])
         .run(tauri::generate_context!())

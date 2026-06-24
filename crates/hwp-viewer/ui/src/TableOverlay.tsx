@@ -17,6 +17,11 @@ export type ScreenBox = { left: number; top: number; width: number; height: numb
 type Props = {
   /** The table's outer box in CSS px relative to the page wrapper (already zoom-scaled by the caller). */
   box: ScreenBox;
+  /** Fractional column boundaries (0..1 across the table width), length = cols + 1. Inner boundaries
+   *  (1..cols-1) get a draggable divider handle; empty = no handles (geometry not loaded yet). */
+  colFracs: number[];
+  /** Commit a column resize: the new fractional boundaries (same shape as `colFracs`). */
+  onCommitColWidths: (fracs: number[]) => void;
   /** Commit a move: the DROP point in client (screen) px. The parent resolves which block that point
    *  lands on (own_hit_test) and relocates the table THERE — so it drops where you point, not a ±1
    *  nudge. A drop that didn't move beyond jitter never fires this (a select doesn't relocate). */
@@ -47,6 +52,8 @@ type Drag = { startX: number; startY: number; start: ScreenBox; moved: boolean }
 
 export default function TableOverlay({
   box,
+  colFracs,
+  onCommitColWidths,
   onCommitMove,
   onAddRow,
   onEditCell,
@@ -124,10 +131,52 @@ export default function TableOverlay({
     },
   });
 
+  // ---- Column resize: drag an inner column divider. `liveFracs` is the in-drag fractional boundary set
+  // (local-only); on pointerup it commits. Each handle stops propagation so it never starts the table
+  // MOVE drag. A boundary is clamped between its neighbors with a small minimum column width. ----
+  const MIN_FRAC = 0.04;
+  const [liveFracs, setLiveFracs] = useState<number[] | null>(null);
+  const colDrag = useRef<{ i: number; startX: number; startFracs: number[]; latest: number[] } | null>(null);
+  useEffect(() => setLiveFracs(null), [box.left, box.top, box.width, box.height]);
+  const onColMove = useCallback((e: PointerEvent) => {
+    const d = colDrag.current;
+    if (!d) return;
+    const delta = (e.clientX - d.startX) / Math.max(1, box.width);
+    const lo = d.startFracs[d.i - 1] + MIN_FRAC;
+    const hi = d.startFracs[d.i + 1] - MIN_FRAC;
+    if (hi <= lo) return; // flanking columns too narrow to resize without inverting — ignore the drag
+    const nf = Math.min(hi, Math.max(lo, d.startFracs[d.i] + delta));
+    const next = [...d.startFracs];
+    next[d.i] = nf;
+    d.latest = next;
+    setLiveFracs(next);
+  }, [box.width]);
+  const onColUp = useCallback(() => {
+    const d = colDrag.current;
+    colDrag.current = null;
+    window.removeEventListener("pointermove", onColMove);
+    window.removeEventListener("pointerup", onColUp);
+    setLiveFracs(null);
+    if (d && d.latest.some((v, i) => Math.abs(v - d.startFracs[i]) > 1e-4)) onCommitColWidths(d.latest);
+  }, [onColMove, onCommitColWidths]);
+  const startColDrag = useCallback((i: number) => (e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation(); // never trigger the table MOVE drag
+    const base = liveFracs ?? colFracs;
+    colDrag.current = { i, startX: e.clientX, startFracs: base, latest: base };
+    window.addEventListener("pointermove", onColMove);
+    window.addEventListener("pointerup", onColUp);
+  }, [colFracs, liveFracs, onColMove, onColUp]);
+  useEffect(() => () => {
+    window.removeEventListener("pointermove", onColMove);
+    window.removeEventListener("pointerup", onColUp);
+  }, [onColMove, onColUp]);
+
   const r = live ?? box;
+  const fracs = liveFracs ?? colFracs;
   return (
     <div
-      className="absolute z-20 cursor-move ring-2 ring-accent"
+      className="pointer-events-auto absolute z-20 cursor-move ring-2 ring-accent"
       style={{ left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` }}
       onPointerDown={startDrag}
       role="presentation"
@@ -152,6 +201,19 @@ export default function TableOverlay({
           표 삭제
         </button>
       </div>
+      {/* Column-resize handles: a thin draggable divider on each INNER column boundary. Dragging one
+          adjusts only that boundary (its neighbors hold); commit on pointerup → SetTableColWidths. */}
+      {fracs.length > 2 && fracs.slice(1, -1).map((f, idx) => (
+        <div
+          key={idx}
+          onPointerDown={startColDrag(idx + 1)}
+          title="드래그하여 열 너비 조정"
+          className="group absolute top-0 z-10 flex h-full w-2 -translate-x-1/2 cursor-col-resize items-stretch justify-center"
+          style={{ left: `${f * r.width}px` }}
+        >
+          <div className="w-0.5 bg-accent/40 group-hover:bg-accent" />
+        </div>
+      ))}
     </div>
   );
 }

@@ -84,7 +84,7 @@ export type OutlineItem = { section: number; block: number; level: number; text:
  *  label `kind` ("paragraph"/"table"/"image"), and its band box in own-engine PAGE units (`x/y/w/h`) so
  *  the UI can draw a pin/highlight over exactly what was pointed at. The own-render counterpart to a
  *  `HitTarget`, resolving paragraphs too (so a click sets an AI scope / insert target there). */
-export type BlockHit = { section: number; block: number; kind: string; x: number; y: number; w: number; h: number; text: string };
+export type BlockHit = { section: number; block: number; kind: string; x: number; y: number; w: number; h: number; text: string; editable: boolean };
 
 /** The table CELL the user double-clicked (own-render): the table anchor `(section, block)`, the cell
  *  `(row, col)`, the table's `(rows, cols)`, and the cell's CURRENT text — so the cell editor opens
@@ -245,6 +245,14 @@ export const api = {
    *  text, so the cell editor opens pre-filled for that exact cell. Null if not over a table cell. */
   tableCellAt: (page: number, x: number, y: number) =>
     invoke<CellHit | null>("table_cell_at", { page, x, y }),
+  /** Column-resize geometry (own-render only) — `cols+1` absolute px x-boundaries of the table at
+   *  `(section, block)` on `page`, for drawing the column-divider drag handles. Null if not on page. */
+  tableColBoundaries: (page: number, section: number, block: number) =>
+    invoke<number[] | null>("table_col_boundaries", { page, section, block }),
+  /** Column resize — set the `index`-th table's column-width proportions as ONE undo unit
+   *  (SetTableColWidths). `widths.length` must equal the table's column count. Returns new page count. */
+  setTableColWidths: (section: number, index: number, widths: number[]) =>
+    invoke<number>("set_table_col_widths", { section, index, widths }),
   /** Table drag-to-move — relocate the block at `(section, from)` to index `to` as ONE undo unit
    *  (MoveBlock — works for tables and paragraphs). The drop commit. Returns the new page count. */
   moveTable: (section: number, from: number, to: number) =>

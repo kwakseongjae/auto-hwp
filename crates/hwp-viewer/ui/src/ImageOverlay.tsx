@@ -154,6 +154,15 @@ export default function ImageOverlay({ box, pxPerPageX, pxPerPageY, onCommitResi
       onPointerDown={startDrag("move")}
       role="presentation"
     >
+      {/* A floating 🗑 above the box (parity with the table's 표 삭제) — Delete-key also works. */}
+      <button
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => { e.stopPropagation(); onDelete(); }}
+        title="이미지 삭제 (Delete)"
+        className="absolute -top-7 right-0 rounded-md border border-black/10 bg-white px-1.5 py-0.5 text-[11px] text-red-600 shadow-md hover:bg-red-500/10 dark:border-white/10 dark:bg-neutral-800 dark:text-red-400"
+      >
+        🗑 삭제
+      </button>
       {RESIZE_HANDLES.map(({ h, cls, cursor }) => (
         <span
           key={h}

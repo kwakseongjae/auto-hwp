@@ -108,6 +108,10 @@ pub enum Op {
     /// editing keeps the cell/paragraph's color/italic/alignment). Refuses a structural paragraph
     /// (image/field/multiple-inline) so we never silently flatten rich content — the UI falls back to chat.
     SetParagraphText { section: usize, block: usize, text: String },
+    /// Set the COLUMN WIDTH proportions of the `index`-th table (the column-resize drag commit). `widths`
+    /// must have exactly `t.cols` positive entries; the renderer rescales them to the body width, so only
+    /// the ratios matter. ONE undo unit.
+    SetTableColWidths { section: usize, index: usize, widths: Vec<i32> },
 }
 
 /// Which cells of an existing table a [`Op::SetTableCellShade`] targets.
@@ -1069,6 +1073,27 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             sec.dirty.mark();
             Ok(())
         }
+        Op::SetTableColWidths { section, index, widths } => {
+            let sec = section_mut(doc, *section)?;
+            let block = sec.blocks.get_mut(*index).ok_or_else(|| {
+                Error::Other(format!("SetTableColWidths: block index {index} out of range"))
+            })?;
+            let Block::Table(t) = block else {
+                return Err(Error::Other(format!("SetTableColWidths: block {index} is not a table")));
+            };
+            if widths.len() != t.cols {
+                return Err(Error::Other(format!(
+                    "SetTableColWidths: expected {} widths, got {}", t.cols, widths.len()
+                )));
+            }
+            if widths.iter().any(|&w| w <= 0) {
+                return Err(Error::Other("SetTableColWidths: widths must be positive".into()));
+            }
+            t.col_widths = widths.clone();
+            t.dirty.mark();
+            sec.dirty.mark();
+            Ok(())
+        }
         _ => Err(Error::NotImplemented(
             "op apply (MVP: Append*/SetPageLayout/Set{Char,Run,Para}Pr/ApplyStyle/Insert-Delete text/anchored Insert*At/DeleteBlock/MoveBlock/SetImageSize/SetTableCellShade/SetTableCell/TableInsertRows)",
         )),
@@ -1987,6 +2012,22 @@ mod tests {
         assert_eq!(t.rows, 3);
         let new_cols: std::collections::BTreeSet<usize> = t.cells.iter().filter(|c| c.active && c.row == 2).map(|c| c.col).collect();
         assert!(new_cols.contains(&0) && new_cols.contains(&1), "appended row covers BOTH columns (no hole), got {new_cols:?}");
+    }
+
+    #[test]
+    fn set_table_col_widths_sets_widths_and_validates_length() {
+        let mut doc = doc_with(vec![simple_para(1, "앞")]);
+        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
+        apply(&mut doc, &Op::InsertTableAt {
+            section: 0, index: 1, rows: vec![vec![cell("a"), cell("b"), cell("c")]],
+        }).unwrap();
+        // Correct length sets the proportions.
+        apply(&mut doc, &Op::SetTableColWidths { section: 0, index: 1, widths: vec![3, 1, 1] }).unwrap();
+        let Block::Table(t) = &doc.sections[0].blocks[1] else { panic!("table") };
+        assert_eq!(t.col_widths, vec![3, 1, 1]);
+        // Wrong length / non-positive is rejected (no partial mutation).
+        assert!(apply(&mut doc, &Op::SetTableColWidths { section: 0, index: 1, widths: vec![1, 1] }).is_err());
+        assert!(apply(&mut doc, &Op::SetTableColWidths { section: 0, index: 1, widths: vec![1, 0, 1] }).is_err());
     }
 
     #[test]
