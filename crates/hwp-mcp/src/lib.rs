@@ -699,6 +699,12 @@ pub enum Intent {
     /// Table quick-edit — replace the text of the cell at `(row, col)` of the `index`-th table as ONE
     /// undo unit (`SetTableCell`).
     SetTableCell { section: usize, index: usize, row: usize, col: usize, text: String },
+    /// Table quick-edit — append ONE empty body row to the `index`-th table that REPLICATES the last
+    /// row's column layout as ONE undo unit (`TableAppendEmptyRow`). The "+행" verb (merge-safe).
+    TableAppendRow { section: usize, index: usize },
+    /// Inline edit — replace a SIMPLE paragraph's text (the `block`-th block of `section`), preserving
+    /// its char/para shape, as ONE undo unit (`SetParagraphText`). Refuses a structural paragraph.
+    SetParagraphText { section: usize, block: usize, text: String },
     /// Block delete — remove the block at `(section, index)` as ONE undo unit (`DeleteBlock`).
     DeleteBlock { section: usize, index: usize },
 }
@@ -837,6 +843,18 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
         }
         Intent::SetTableCell { section, index, row, col, text } => {
             do_set_table_cell(session, section, index, row, col, &text)?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::TableAppendRow { section, index } => {
+            let doc = session.doc.as_mut().ok_or("no document open")?;
+            doc.do_op(&hwp_ops::Op::TableAppendEmptyRow { section, index }).map_err(|e| e.to_string())?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::SetParagraphText { section, block, text } => {
+            let doc = session.doc.as_mut().ok_or("no document open")?;
+            doc.do_op(&hwp_ops::Op::SetParagraphText { section, block, text }).map_err(|e| e.to_string())?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }

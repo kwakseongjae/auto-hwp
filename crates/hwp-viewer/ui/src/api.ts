@@ -84,12 +84,12 @@ export type OutlineItem = { section: number; block: number; level: number; text:
  *  label `kind` ("paragraph"/"table"/"image"), and its band box in own-engine PAGE units (`x/y/w/h`) so
  *  the UI can draw a pin/highlight over exactly what was pointed at. The own-render counterpart to a
  *  `HitTarget`, resolving paragraphs too (so a click sets an AI scope / insert target there). */
-export type BlockHit = { section: number; block: number; kind: string; x: number; y: number; w: number; h: number };
+export type BlockHit = { section: number; block: number; kind: string; x: number; y: number; w: number; h: number; text: string };
 
 /** The table CELL the user double-clicked (own-render): the table anchor `(section, block)`, the cell
  *  `(row, col)`, the table's `(rows, cols)`, and the cell's CURRENT text — so the cell editor opens
  *  pre-filled for that exact cell ("표에 내용 작성" by pointing at the cell). */
-export type CellHit = { section: number; block: number; row: number; col: number; rows: number; cols: number; text: string };
+export type CellHit = { section: number; block: number; row: number; col: number; rows: number; cols: number; text: string; x: number; y: number; w: number; h: number };
 
 /// Typed bindings to the Rust `Intent` command lane (crates/hwp-viewer/src/lib.rs). No prose
 /// parsing: each command returns a typed value the UI consumes directly.
@@ -253,6 +253,14 @@ export const api = {
    *  ONE undo unit (TableInsertRows). `cols` = the table's column count. Returns the new page count. */
   tableAddRows: (section: number, index: number, at: number, count: number, cols: number) =>
     invoke<number>("table_add_rows", { section, index, at, count, cols }),
+  /** Table "+행" — append ONE empty body row that REPLICATES the last row's column layout (merge-safe)
+   *  as ONE undo unit (TableAppendEmptyRow). Returns the new page count. */
+  appendTableRow: (section: number, index: number) =>
+    invoke<number>("table_append_row", { section, index }),
+  /** Inline edit — replace a SIMPLE paragraph's text (preserving its char/para shape) as ONE undo unit
+   *  (SetParagraphText). Throws the op's refusal (structural paragraph) for the UI to toast. */
+  setParagraphText: (section: number, block: number, text: string) =>
+    invoke<number>("set_paragraph_text", { section, block, text }),
   /** Table quick-edit — replace the text of the cell at `(row, col)` of the `index`-th table as ONE
    *  undo unit (SetTableCell). Empty `text` clears the cell. Returns the new page count. */
   setTableCell: (section: number, index: number, row: number, col: number, text: string) =>

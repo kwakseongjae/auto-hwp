@@ -1035,6 +1035,48 @@ async fn table_add_rows(
     .map_err(|e| e.to_string())?
 }
 
+/// Append ONE empty body row to the `index`-th table, REPLICATING the last row's column layout (so a
+/// merged-column table stays aligned) as ONE undo unit (`TableAppendEmptyRow`). The "+행" verb.
+#[tauri::command]
+async fn table_append_row(
+    section: usize,
+    index: usize,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<u32, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        match apply_intent(&mut s, Intent::TableAppendRow { section, index })? {
+            Outcome::Edited { pages } => Ok(pages),
+            _ => Err("unexpected outcome".into()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Replace a SIMPLE paragraph's text (the `block`-th block of `section`), preserving its char/para
+/// shape, as ONE undo unit (`SetParagraphText`). Inline paragraph editing / "무에서 텍스트 추가". The
+/// op refuses a structural paragraph (image/field) and that message is surfaced for the UI to toast.
+#[tauri::command]
+async fn set_paragraph_text(
+    section: usize,
+    block: usize,
+    text: String,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<u32, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        match apply_intent(&mut s, Intent::SetParagraphText { section, block, text })? {
+            Outcome::Edited { pages } => Ok(pages),
+            _ => Err("unexpected outcome".into()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Replace the text of the cell at `(row, col)` of the `index`-th table as ONE undo unit
 /// (`SetTableCell`). The hover toolbar / popover's 칸 편집 verb. Returns the new page count.
 #[tauri::command]
@@ -1092,6 +1134,26 @@ struct BlockHitDto {
     y: f64,
     w: f64,
     h: f64,
+    /// The block's plain text when it is a top-level PARAGRAPH (else empty) — lets a double-click open
+    /// the inline editor pre-filled. Empty for a table band (cells edit via `table_cell_at`).
+    text: String,
+}
+
+/// Concatenate the plain text of a top-level paragraph block `(section, block)` (empty if not a simple
+/// paragraph). Used to pre-fill the inline paragraph editor.
+fn model_para_text(doc: &hwp_model::prelude::SemanticDoc, section: usize, block: usize) -> String {
+    use hwp_model::prelude::{Block, Inline};
+    let Some(sec) = doc.sections.get(section) else { return String::new() };
+    let Some(Block::Paragraph(p)) = sec.blocks.get(block) else { return String::new() };
+    let mut out = String::new();
+    for r in &p.runs {
+        for i in &r.content {
+            if let Inline::Text(s) = i {
+                out.push_str(s);
+            }
+        }
+    }
+    out
 }
 
 /// Click-to-point (own-render only): resolve a page-space click to the top-level block under it, in
@@ -1128,6 +1190,8 @@ async fn own_hit_test(
             y: b.y / k,
             w: b.w / k,
             h: b.h / k,
+            // Pre-fill text only for a plain paragraph band (image/table → empty; not inline-editable text).
+            text: if b.kind == hwp_typeset::BlockKind::Paragraph { model_para_text(doc, b.section, b.block) } else { String::new() },
         }))
     })
     .await
@@ -1146,6 +1210,11 @@ struct CellHitDto {
     rows: usize,
     cols: usize,
     text: String,
+    /// The cell's page rect in PX (own SVG space) so the UI can place an inline editor over it.
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
 }
 
 /// Concatenate the plain text of the model cell at `(row, col)` of the table at `(section, block)`.
@@ -1206,6 +1275,10 @@ async fn table_cell_at(
             rows: t.rows,
             cols: t.cols,
             text: model_cell_text(doc, t.section, t.block, cell.row, cell.col),
+            x: cell.x / k,
+            y: cell.y / k,
+            w: cell.w / k,
+            h: cell.h / k,
         }))
     })
     .await
@@ -1310,6 +1383,8 @@ pub fn run() {
             table_cell_at,
             move_table,
             table_add_rows,
+            table_append_row,
+            set_paragraph_text,
             set_table_cell,
             delete_block
         ])

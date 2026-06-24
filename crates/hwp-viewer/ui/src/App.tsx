@@ -237,19 +237,24 @@ export default function App() {
   // NOT re-show the indicator (otherwise it sticks after the drag ends).
   const dropDragActive = useRef(false);
 
-  // ---- Cell editor: a tiny inline form for the table overlay's 칸 편집 verb. Asks for a (row, col)
-  // address + the new text, then commits ONE `SetTableCell` op. Screen-anchored near the table box. ----
-  type CellEdit = {
+  // ---- Inline editor (own-render): an in-place text box laid directly OVER a table CELL or a simple
+  // PARAGRAPH — double-click to type right there (no modal). `screen` is px relative to the page wrapper
+  // (same space as the overlays); commit calls set_table_cell (kind 'cell') / set_paragraph_text
+  // (kind 'para'). Replaces the old (row,col)-form modal. ----
+  type InlineEdit = {
+    kind: "cell" | "para";
+    page: number;
     section: number;
     block: number;
-    rows: number;
-    cols: number;
-    row: number;
-    col: number;
+    row?: number;
+    col?: number;
     text: string;
-    at: { left: number; top: number };
+    box: { x: number; y: number; w: number; h: number }; // own-engine px box → recompute screen on zoom
+    screen: { left: number; top: number; width: number; height: number };
   };
-  const [cellEdit, setCellEdit] = useState<CellEdit | null>(null);
+  const [inlineEdit, setInlineEdit] = useState<InlineEdit | null>(null);
+  const inlineEditRef = useRef<InlineEdit | null>(null);
+  inlineEditRef.current = inlineEdit;
 
   // Refs mirror the values that async (queued) edit/move closures must read at EXECUTION time, not at
   // the time the closure was created — React closures capture stale state otherwise.
@@ -375,6 +380,17 @@ export default function App() {
     if (imageSelRef.current) recomputeImageBox(imageSelRef.current.page, imageSelRef.current.box);
     if (tableSelRef.current) recomputeTableBox(tableSelRef.current.page, tableSelRef.current.box);
     if (scopePinRef.current) recomputeScopePin(scopePinRef.current.page, scopePinRef.current.box, scopePinRef.current.kind);
+    // Re-place the inline editor too so it stays over its cell/paragraph when the zoom changes.
+    const ie = inlineEditRef.current;
+    if (ie) {
+      const svg = svgForPage(ie.page);
+      if (svg) {
+        const r = svg.getBoundingClientRect();
+        const vb = svg.viewBox.baseVal;
+        const screen = imageBoxToScreen(ie.box, { width: r.width, height: r.height }, { width: vb.width, height: vb.height });
+        if (screen) setInlineEdit((cur) => (cur ? { ...cur, screen } : cur));
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageWidth]);
 
@@ -458,6 +474,7 @@ export default function App() {
     // marker (the chat scope chip is managed separately by the commit/clear paths).
     setScopePin(null);
     setDropHint(null); // any in-progress drag indicator is moot after a repaint
+    setInlineEdit(null); // a lingering inline editor's coords are stale after a repaint
     // The own-engine SVGs are regenerated from the live IR — drop them too so an edit repaints. Its
     // page count is fetched lazily (or eagerly when 'own' is the active mode).
     setOwnSvgCache({});
@@ -549,9 +566,9 @@ export default function App() {
     void openPointMenu(host, { clientX: cx, clientY: cy }, { x: at.right, y: at.bottom + 4 });
   }, [openPointMenu]);
 
-  // ---- double-click a table cell (own-render) → open the cell editor pre-filled for THAT cell, so
-  // writing into a table is "더블클릭 → 입력" instead of typing a row/col into a form. Resolves the
-  // cell via the own-engine geometry (table_cell_at); a double-click off any table cell is ignored. ----
+  // ---- double-click (own-render) → INLINE text editing right where you point. A table cell opens an
+  // in-place box over that cell; a simple paragraph (incl. an empty one — "무에서 텍스트 추가") opens one
+  // over the paragraph band. Single-click still sets the AI pin; double-click = type directly. ----
   async function onPageDoubleClick(e: React.MouseEvent) {
     if (!canEditRef.current || viewModeRef.current !== "own") return;
     const host = (e.target as Element).closest("[data-index]");
@@ -561,23 +578,33 @@ export default function App() {
     if (!svg || !Number.isFinite(page)) return;
     const rect = svg.getBoundingClientRect();
     const vb = svg.viewBox.baseVal;
-    const pt = screenToPage(e.clientX, e.clientY, { left: rect.left, top: rect.top, width: rect.width, height: rect.height }, { width: vb.width, height: vb.height });
+    const dim = { width: rect.width, height: rect.height };
+    const vbd = { width: vb.width, height: vb.height };
+    const pt = screenToPage(e.clientX, e.clientY, { left: rect.left, top: rect.top, ...dim }, vbd);
     if (!pt) return;
     try {
+      // 1) A table cell → inline-edit that cell.
       const cell = await api.tableCellAt(page, pt.x, pt.y);
       if (cell) {
-        setCellEdit({
-          section: cell.section,
-          block: cell.block,
-          rows: cell.rows,
-          cols: cell.cols,
-          row: cell.row,
-          col: cell.col,
-          text: cell.text,
-          at: { left: e.clientX, top: e.clientY },
-        });
+        const box = { x: cell.x, y: cell.y, w: cell.w, h: cell.h };
+        const screen = imageBoxToScreen(box, dim, vbd);
+        if (screen) {
+          setScopePin(null);
+          setInlineEdit({ kind: "cell", page, section: cell.section, block: cell.block, row: cell.row, col: cell.col, text: cell.text, box, screen });
+        }
+        return;
       }
-    } catch { /* not over a table cell — ignore */ }
+      // 2) Else a simple paragraph (not a table/image band) → inline-edit its text in place.
+      const hit = await api.ownHitTest(page, pt.x, pt.y);
+      if (hit && hit.kind === "paragraph") {
+        const box = { x: hit.x, y: hit.y, w: hit.w, h: Math.max(hit.h, 320 / HWPUNIT_PER_PX) };
+        const screen = imageBoxToScreen(box, dim, vbd);
+        if (screen) {
+          setScopePin(null);
+          setInlineEdit({ kind: "para", page, section: hit.section, block: hit.block, text: hit.text, box, screen });
+        }
+      }
+    } catch (err) { toast("warn", `${err}`); }
   }
 
   // ---- caret: click-to-place ----
@@ -845,8 +872,9 @@ export default function App() {
       const sel = tableSelRef.current;
       if (!sel || !canEditRef.current) return;
       try {
-        // Append one empty body row at the end (logical row = current row count).
-        const pages = await api.tableAddRows(sel.box.section, sel.box.block, sel.box.rows, 1, sel.box.cols);
+        // Append one empty body row that REPLICATES the table's last-row column layout (merge-safe) —
+        // a naive cols-cell row breaks tables with merged columns.
+        const pages = await api.appendTableRow(sel.box.section, sel.box.block);
         setEdited(true);
         invalidate(pages, null);
         reselectTableAfterRepaint(sel.page, sel.box.section, sel.box.block);
@@ -871,38 +899,54 @@ export default function App() {
     });
   }, [enqueueEdit, invalidate]);
 
-  // Open the cell editor over the selected table (defaults to cell 0,0). The form commits SetTableCell.
+  // The 칸 편집 toolbar button → open the INLINE editor over the selected table's first cell (the
+  // double-click path is the primary one; this is the discoverable button). Resolves the cell rect via
+  // the own-engine geometry at the table's top-left so the box lands on the real first cell.
   const openCellEditor = useCallback(() => {
     const sel = tableSelRef.current;
     if (!sel) return;
-    setCellEdit({
-      section: sel.box.section,
-      block: sel.box.block,
-      rows: sel.box.rows,
-      cols: sel.box.cols,
-      row: 0,
-      col: 0,
-      text: "",
-      at: { left: sel.screen.left, top: sel.screen.top },
-    });
+    const svg = svgForPage(sel.page);
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const vb = svg.viewBox.baseVal;
+    const dim = { width: rect.width, height: rect.height };
+    const vbd = { width: vb.width, height: vb.height };
+    void (async () => {
+      try {
+        // A point just inside the table's top-left → its first cell.
+        const cell = await api.tableCellAt(sel.page, sel.box.x + 2, sel.box.y + 2);
+        if (!cell) return;
+        const box = { x: cell.x, y: cell.y, w: cell.w, h: cell.h };
+        const screen = imageBoxToScreen(box, dim, vbd);
+        if (screen) setInlineEdit({ kind: "cell", page: sel.page, section: cell.section, block: cell.block, row: cell.row, col: cell.col, text: cell.text, box, screen });
+      } catch { /* ignore */ }
+    })();
   }, []);
 
-  const commitCellEdit = useCallback(() => {
-    const ce = cellEdit;
-    if (!ce) return;
-    setCellEdit(null);
+  // Commit the inline editor (cell or paragraph) as ONE undo unit, then re-place the table overlay. An
+  // empty paragraph stays editable; a structural-paragraph refusal is surfaced as a toast.
+  const commitInlineEdit = useCallback((value: string) => {
+    const ie = inlineEditRef.current;
+    if (!ie) return;
+    setInlineEdit(null);
     void enqueueEdit(async () => {
       if (!canEditRef.current) return;
       try {
-        const pages = await api.setTableCell(ce.section, ce.block, ce.row, ce.col, ce.text);
-        setEdited(true);
-        invalidate(pages, null);
-        reselectTableAfterRepaint(tableSelRef.current?.page ?? 0, ce.section, ce.block);
+        if (ie.kind === "cell") {
+          const pages = await api.setTableCell(ie.section, ie.block, ie.row ?? 0, ie.col ?? 0, value);
+          setEdited(true);
+          invalidate(pages, null);
+          reselectTableAfterRepaint(tableSelRef.current?.page ?? ie.page, ie.section, ie.block);
+        } else {
+          const pages = await api.setParagraphText(ie.section, ie.block, value);
+          setEdited(true);
+          invalidate(pages, null);
+        }
       } catch (err) {
-        toast("warn", `칸 편집 실패: ${err}`);
+        toast("warn", `${err}`);
       }
     });
-  }, [cellEdit, enqueueEdit, invalidate, reselectTableAfterRepaint]);
+  }, [enqueueEdit, invalidate, reselectTableAfterRepaint]);
 
   // ---- caret: edit loop (each helper enqueued; reads caretRef AFTER the prior queued edit resolved) ----
   const doInsert = useCallback((text: string) => {
@@ -1080,6 +1124,7 @@ export default function App() {
       clearImageSel();
       clearTableSel();
       setScopePin(null);
+      setInlineEdit(null);
     }
     if (next === "html") void loadDocHtml();
     else if (next === "own") void loadOwnPageCount();
@@ -1754,7 +1799,7 @@ export default function App() {
                             onCommitResize={commitImageResize}
                             onCommitMove={commitImageMove}
                             onDelete={commitImageDelete}
-                            deletable={!cellEdit}
+                            deletable={!inlineEdit}
                             onMovePoint={updateDropHint}
                             onMoveEnd={clearDropHint}
                             onDismiss={clearImageSel}
@@ -1772,7 +1817,7 @@ export default function App() {
                             onAddRow={commitTableAddRow}
                             onEditCell={openCellEditor}
                             onDeleteTable={commitTableDeleteTable}
-                            deletable={!cellEdit}
+                            deletable={!inlineEdit}
                             onMovePoint={updateDropHint}
                             onMoveEnd={clearDropHint}
                             onDismiss={clearTableSel}
@@ -1817,6 +1862,33 @@ export default function App() {
                             <span className="-translate-y-1/2 rounded bg-accent px-1 py-0.5 text-[9px] font-medium text-white">여기로 이동</span>
                           </div>
                         </div>
+                      )}
+                      {/* INLINE editor (own-render): an in-place text box laid over the double-clicked
+                          CELL or PARAGRAPH — type right there (no modal). Enter commits, Shift+Enter =
+                          newline, Esc cancels, blur commits. Stops its own pointer/click events so it
+                          doesn't re-trigger select/double-click on the page underneath. */}
+                      {viewMode === "own" && inlineEdit && inlineEdit.page === item.index && (
+                        <textarea
+                          data-inline-edit
+                          autoFocus
+                          defaultValue={inlineEdit.text}
+                          onClick={(e) => e.stopPropagation()}
+                          onDoubleClick={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onBlur={(e) => commitInlineEdit(e.currentTarget.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Escape") { e.preventDefault(); setInlineEdit(null); }
+                            else if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitInlineEdit((e.currentTarget as HTMLTextAreaElement).value); }
+                          }}
+                          style={{
+                            position: "absolute",
+                            left: `${inlineEdit.screen.left}px`,
+                            top: `${inlineEdit.screen.top}px`,
+                            width: `${Math.max(inlineEdit.screen.width, 40)}px`,
+                            minHeight: `${Math.max(inlineEdit.screen.height, 22)}px`,
+                          }}
+                          className="z-40 resize-none overflow-hidden rounded-sm border-2 border-accent bg-white px-1 py-0.5 text-center text-sm leading-tight text-neutral-900 shadow-lg outline-none dark:bg-neutral-900 dark:text-neutral-100"
+                        />
                       )}
                       {/* Post-apply highlight pulse — a one-shot accent glow over the page a chat edit
                           just landed on (cleared by a timer in `pulse`). */}
@@ -1887,76 +1959,8 @@ export default function App() {
               <button onClick={refinePending} disabled={pendingBusy} className="rounded-md border border-ai/30 px-2.5 py-1 text-xs text-ai hover:bg-ai/10 disabled:opacity-40">✎ 다시</button>
             </div>
           )}
-          {/* Cell editor — the table overlay's 칸 편집 verb. A small centered form: pick (행, 열) +
-              type the new text, commit one SetTableCell op. Esc / 취소 dismisses. */}
-          {cellEdit && (
-            <div
-              className="fixed inset-0 z-40 grid place-items-center bg-black/30"
-              onClick={() => setCellEdit(null)}
-              role="presentation"
-            >
-              <div
-                className="w-72 rounded-lg border border-black/10 bg-white p-4 shadow-xl dark:border-white/10 dark:bg-neutral-800"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="mb-3 text-sm font-medium text-neutral-700 dark:text-neutral-200">표 칸 편집</div>
-                <div className="mb-3 flex items-center gap-2 text-xs">
-                  <label className="flex items-center gap-1">
-                    행
-                    <input
-                      type="number"
-                      min={0}
-                      max={Math.max(0, cellEdit.rows - 1)}
-                      value={cellEdit.row}
-                      onChange={(e) =>
-                        setCellEdit((c) => (c ? { ...c, row: Math.max(0, Math.min(c.rows - 1, Number(e.target.value) || 0)) } : c))
-                      }
-                      className="w-14 rounded border border-black/15 bg-transparent px-1.5 py-1 tabular-nums dark:border-white/15"
-                    />
-                  </label>
-                  <label className="flex items-center gap-1">
-                    열
-                    <input
-                      type="number"
-                      min={0}
-                      max={Math.max(0, cellEdit.cols - 1)}
-                      value={cellEdit.col}
-                      onChange={(e) =>
-                        setCellEdit((c) => (c ? { ...c, col: Math.max(0, Math.min(c.cols - 1, Number(e.target.value) || 0)) } : c))
-                      }
-                      className="w-14 rounded border border-black/15 bg-transparent px-1.5 py-1 tabular-nums dark:border-white/15"
-                    />
-                  </label>
-                </div>
-                <input
-                  autoFocus
-                  type="text"
-                  value={cellEdit.text}
-                  placeholder="새 칸 내용"
-                  onChange={(e) => setCellEdit((c) => (c ? { ...c, text: e.target.value } : c))}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") commitCellEdit();
-                    if (e.key === "Escape") setCellEdit(null);
-                  }}
-                  className="mb-3 w-full rounded border border-black/15 bg-transparent px-2 py-1.5 text-sm dark:border-white/15"
-                />
-                <div className="flex justify-end gap-2">
-                  <button
-                    onClick={() => setCellEdit(null)}
-                    className="rounded px-3 py-1 text-xs text-neutral-500 hover:bg-black/5 dark:hover:bg-white/10"
-                  >
-                    취소
-                  </button>
-                  <button
-                    onClick={commitCellEdit}
-                    className="rounded bg-accent px-3 py-1 text-xs font-medium text-white hover:opacity-90"
-                  >
-                    적용
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+          {/* (The cell/paragraph editor is now INLINE — rendered over the target in the page list above —
+              so there's no modal here. Double-click a cell or a paragraph to edit in place.) */}
         </main>
 
         <Chat
@@ -2131,7 +2135,7 @@ export default function App() {
                 primary model's quieter direct-manipulation paths are findable. */}
             <div className="mb-1.5 mt-4 text-xs font-medium uppercase tracking-wide text-neutral-400">직접 편집</div>
             <div className="flex flex-col gap-1.5 text-sm text-neutral-700 dark:text-neutral-300">
-              {([["클릭(원본)", "본문 클릭 → 캐럿 입력"], ["클릭(자체 렌더)", "블록 클릭 → ✦여기 핀 (AI 대상 지정)"], ["우클릭 · ⋯", "빠른 작업 (여기를 AI로 편집 / 이미지 삽입)"], ["드래그&드롭", "이미지 파일을 페이지에 끌어다 삽입"], ["이미지·표(자체 렌더)", "클릭 선택 → 끌어서 이동 · 크기 · 칸 편집"]] as [string, string][]).map(([k, d]) => (
+              {([["클릭(자체 렌더)", "블록 클릭 → ✦여기 핀 (AI 대상 지정)"], ["더블클릭(자체 렌더)", "표 칸·문단 → 그 자리에서 바로 텍스트 입력"], ["우클릭 · ⋯", "빠른 작업 (여기를 AI로 편집 / 이미지 삽입)"], ["드래그&드롭", "이미지 파일을 페이지에 끌어다 삽입"], ["이미지·표(자체 렌더)", "클릭 선택 → 끌어서 이동 · 크기 / Delete 삭제"]] as [string, string][]).map(([k, d]) => (
                 <div key={k} className="flex items-center justify-between gap-4">
                   <span>{d}</span>
                   <kbd className="shrink-0 rounded bg-black/5 px-1.5 py-0.5 text-xs dark:bg-white/10">{k}</kbd>

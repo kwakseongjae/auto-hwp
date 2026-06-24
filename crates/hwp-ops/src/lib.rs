@@ -98,6 +98,16 @@ pub enum Op {
     /// (`at == t.rows` appends). Existing cells at row >= `at` shift down by `rows.len()`; the new
     /// cells take `col_span`/`shade`/`bold` from each `CellSpec` (HTML-table coverage per row).
     TableInsertRows { section: usize, index: usize, at: usize, rows: Vec<Vec<CellSpec>> },
+    /// Append ONE empty BODY row to the `index`-th table that REPLICATES the column layout of the
+    /// table's last active row (same per-cell `col`/`col_span` + borders, empty text). The interactive
+    /// "+행" verb: a naive `cols`-single-cell row breaks tables with merged columns (the 보유역량-spans-3
+    /// case → a misaligned grid), so we clone the existing column structure instead.
+    TableAppendEmptyRow { section: usize, index: usize },
+    /// Replace the text of a SIMPLE top-level paragraph (the `block`-th block of `section`) with one run
+    /// of `text`, PRESERVING the paragraph's existing first-run char shape + para shape (so inline
+    /// editing keeps the cell/paragraph's color/italic/alignment). Refuses a structural paragraph
+    /// (image/field/multiple-inline) so we never silently flatten rich content — the UI falls back to chat.
+    SetParagraphText { section: usize, block: usize, text: String },
 }
 
 /// Which cells of an existing table a [`Op::SetTableCellShade`] targets.
@@ -896,6 +906,13 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                 Block::Paragraph(p) => p.runs.first().map(|r| r.char_shape),
                 _ => None,
             });
+            // Preserve the cell's existing paragraph ALIGNMENT (para_shape) too — gov-doc cells are
+            // center-aligned; without this a refilled cell reset to the default (left) and read as
+            // "정렬 안 맞음" next to its centered siblings.
+            let existing_para = cell.blocks.iter().find_map(|b| match b {
+                Block::Paragraph(p) => Some(p.para_shape),
+                _ => None,
+            }).unwrap_or(0);
             let resolve_shape = |cs: usize| match existing_shape {
                 Some(prev) if cs == plain => prev,
                 _ => cs,
@@ -911,6 +928,7 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             };
             cell.blocks = vec![Block::Paragraph(Paragraph {
                 runs: para_runs,
+                para_shape: existing_para,
                 dirty: Dirty(true),
                 ..Default::default()
             })];
@@ -954,6 +972,100 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             }
             t.rows += n;
             t.dirty.mark();
+            sec.dirty.mark();
+            Ok(())
+        }
+        Op::TableAppendEmptyRow { section, index } => {
+            let sec = section_mut(doc, *section)?;
+            let block = sec.blocks.get_mut(*index).ok_or_else(|| {
+                Error::Other(format!("TableAppendEmptyRow: block index {index} out of range"))
+            })?;
+            let Block::Table(t) = block else {
+                return Err(Error::Other(format!("TableAppendEmptyRow: block {index} is not a table")));
+            };
+            if t.rows == 0 || t.cols == 0 {
+                return Err(Error::Other("TableAppendEmptyRow: empty table".into()));
+            }
+            let at = t.rows;
+            let ncols = t.cols;
+            // Clone the LAST anchored row's cells so the new row matches the table's column structure
+            // (col positions + col_span + borders), blanking the text + shade + diagonal. This keeps a
+            // merged-column table (보유역량 spans 3) from collapsing to a uniform `cols`-cell grid.
+            let last = t.cells.iter().filter(|c| c.active).map(|c| c.row).max().unwrap_or(0);
+            let template: Vec<Cell> = t.cells.iter().filter(|c| c.active && c.row == last).cloned().collect();
+            // An empty body paragraph carrying the body cell's char/para shape (so typing inherits the look).
+            let empty_para = |cs: usize, ps: usize| vec![Block::Paragraph(Paragraph {
+                runs: vec![Run { char_shape: cs, content: vec![Inline::Text(String::new())], ..Default::default() }],
+                para_shape: ps,
+                dirty: Dirty(true),
+                ..Default::default()
+            })];
+            let mut covered = vec![false; ncols];
+            let mut new_cells: Vec<Cell> = Vec::new();
+            for tc in template {
+                if tc.col >= ncols {
+                    continue;
+                }
+                let cspan = tc.col_span.max(1).min(ncols - tc.col);
+                for dc in 0..cspan {
+                    covered[tc.col + dc] = true;
+                }
+                let (cs, ps) = tc.blocks.iter().find_map(|b| match b {
+                    Block::Paragraph(p) => Some((p.runs.first().map(|r| r.char_shape).unwrap_or(0), p.para_shape)),
+                    _ => None,
+                }).unwrap_or((0, 0));
+                let blocks = empty_para(cs, ps);
+                new_cells.push(Cell {
+                    row: at,
+                    col: tc.col,
+                    col_span: cspan,
+                    row_span: 1,    // a new appended row is a single row, even if the template cell spanned
+                    blocks,
+                    shade_color: None, // fresh body row — don't copy a header tint
+                    diagonal: None,    // …or a banner/N-A slash
+                    dirty: Dirty(true),
+                    ..tc
+                });
+            }
+            // Fill any column NOT covered by the template — e.g. a vertical merge from an earlier row
+            // crosses the last row, so that column has no origin cell at `last`. Without this the new
+            // row would have a hole (the vertical analogue of the bug we're fixing).
+            for col in 0..ncols {
+                if !covered[col] {
+                    new_cells.push(Cell { row: at, col, blocks: empty_para(0, 0), dirty: Dirty(true), ..Default::default() });
+                }
+            }
+            for c in new_cells {
+                t.cells.push(c);
+            }
+            t.rows += 1;
+            t.dirty.mark();
+            sec.dirty.mark();
+            Ok(())
+        }
+        Op::SetParagraphText { section, block, text } => {
+            let sec = section_mut(doc, *section)?;
+            let blk = sec.blocks.get_mut(*block).ok_or_else(|| {
+                Error::Other(format!("SetParagraphText: block {block} out of range"))
+            })?;
+            let Block::Paragraph(p) = blk else {
+                return Err(Error::Other(format!("SetParagraphText: block {block} is not a paragraph")));
+            };
+            // Refuse a structural paragraph so we never silently flatten rich content — the UI surfaces
+            // this and falls back to chat. "Structural" = the parser marked it non-simple (raw/complex
+            // source) OR it carries any non-text inline (image/field/marker). A paragraph with no source
+            // (freshly inserted) is treated as simple/editable.
+            let simple = p.source.as_ref().map(|s| s.simple).unwrap_or(true);
+            let has_nontext = p.runs.iter().any(|r| r.content.iter().any(|i| !matches!(i, Inline::Text(_))));
+            if !simple || has_nontext {
+                return Err(Error::Other(
+                    "이 문단은 인라인 편집 대상이 아닙니다 (이미지/필드/복합 구조) — 채팅으로 편집하세요".into(),
+                ));
+            }
+            // Preserve the first run's char shape + the paragraph's para shape (color/italic/alignment).
+            let cs = p.runs.first().map(|r| r.char_shape).unwrap_or(0);
+            p.runs = vec![Run { char_shape: cs, content: vec![Inline::Text(text.clone())], ..Default::default() }];
+            p.dirty.mark();
             sec.dirty.mark();
             Ok(())
         }
@@ -1835,5 +1947,63 @@ mod tests {
         assert!(apply(&mut doc, &Op::TableInsertRows {
             section: 0, index: 1, at: 0, rows: vec![],
         }).is_err());
+    }
+
+    #[test]
+    fn table_append_empty_row_replicates_merged_column_layout() {
+        // The "+행" bug: a naive cols-single-cell row breaks a merged-column table. TableAppendEmptyRow
+        // must clone the LAST row's column structure (here a 2-col-span cell), not a flat grid.
+        let mut doc = doc_with(vec![simple_para(1, "앞")]);
+        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
+        let wide = |t: &str| CellSpec { text: t.into(), col_span: 2, ..Default::default() };
+        // Row 0: [A @col0 span1] [B @col1 span2] → 3 logical columns.
+        apply(&mut doc, &Op::InsertTableAt {
+            section: 0, index: 1, rows: vec![vec![cell("A"), wide("B")]],
+        }).unwrap();
+        apply(&mut doc, &Op::TableAppendEmptyRow { section: 0, index: 1 }).unwrap();
+        let Block::Table(t) = &doc.sections[0].blocks[1] else { panic!("expected table") };
+        assert_eq!(t.rows, 2, "one appended row");
+        let new_row: Vec<(usize, usize)> = t.cells.iter().filter(|c| c.row == 1).map(|c| (c.col, c.col_span)).collect();
+        // The new row mirrors the template: a single cell at col0 and a 2-span cell at col1 — NOT three
+        // single cells (which is what broke the rendered grid).
+        assert!(new_row.contains(&(0, 1)) && new_row.contains(&(1, 2)), "new row replicates merged layout, got {new_row:?}");
+        assert_eq!(new_row.len(), 2, "two cells, not a flat 3-cell grid");
+        assert_eq!(cell_text(&doc, 1, 1, 0), "", "appended cells are empty");
+    }
+
+    #[test]
+    fn table_append_empty_row_fills_columns_under_a_vertical_merge() {
+        // A vertical merge from an earlier row crossing the LAST row leaves that column with no origin
+        // cell at `last` — the appended row must still cover ALL columns (no hole).
+        let mut doc = doc_with(vec![simple_para(1, "앞")]);
+        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
+        let tall = |t: &str| CellSpec { text: t.into(), row_span: 2, ..Default::default() };
+        // Row 0: [L spans rows 0-1 @col0] [R0 @col1]; Row 1: [R1 @col1] (col0 covered by L's row_span).
+        apply(&mut doc, &Op::InsertTableAt {
+            section: 0, index: 1, rows: vec![vec![tall("L"), cell("R0")], vec![cell("R1")]],
+        }).unwrap();
+        apply(&mut doc, &Op::TableAppendEmptyRow { section: 0, index: 1 }).unwrap();
+        let Block::Table(t) = &doc.sections[0].blocks[1] else { panic!("expected table") };
+        assert_eq!(t.rows, 3);
+        let new_cols: std::collections::BTreeSet<usize> = t.cells.iter().filter(|c| c.active && c.row == 2).map(|c| c.col).collect();
+        assert!(new_cols.contains(&0) && new_cols.contains(&1), "appended row covers BOTH columns (no hole), got {new_cols:?}");
+    }
+
+    #[test]
+    fn set_paragraph_text_preserves_shape_and_refuses_structural() {
+        let mut doc = doc_with(vec![simple_para(1, "원래 내용"), structural_para(2, "구조적")]);
+        // The simple paragraph keeps its first-run char shape + para shape, only the text changes.
+        let before_shape = if let Block::Paragraph(p) = &doc.sections[0].blocks[0] { p.runs[0].char_shape } else { panic!() };
+        apply(&mut doc, &Op::SetParagraphText { section: 0, block: 0, text: "새 내용".into() }).unwrap();
+        if let Block::Paragraph(p) = &doc.sections[0].blocks[0] {
+            assert_eq!(p.runs.len(), 1);
+            assert_eq!(p.runs[0].char_shape, before_shape, "char shape preserved");
+            let txt: String = p.runs[0].content.iter().filter_map(|i| if let Inline::Text(s) = i { Some(s.as_str()) } else { None }).collect();
+            assert_eq!(txt, "새 내용");
+        } else { panic!("expected paragraph") }
+        // A structural paragraph is refused (never silently flattened).
+        assert!(apply(&mut doc, &Op::SetParagraphText { section: 0, block: 1, text: "x".into() }).is_err(), "structural paragraph refused");
+        // Empty text is allowed (clears the paragraph) — "무에서" 시작점.
+        assert!(apply(&mut doc, &Op::SetParagraphText { section: 0, block: 0, text: String::new() }).is_ok());
     }
 }
