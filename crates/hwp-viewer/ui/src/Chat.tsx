@@ -118,6 +118,9 @@ export function Chat(props: {
   onClearScope: () => void;
   onJumpToPage: (page: number) => void;
   ctx: ChatCtx;
+  /** Signal raised by the INLINE document toolbar (✓확정/✕취소) so the mirrored chat card settles to
+   *  the same terminal state. `n` is monotonic; the effect runs once per bump. */
+  settleSignal: { n: number; state: "applied" | "discarded" } | null;
   onApplied: () => void;
 }) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
@@ -156,6 +159,13 @@ export function Chat(props: {
   useEffect(() => {
     if (props.open && !collapsed) queueMicrotask(() => inputRef.current?.focus());
   }, [props.open, collapsed]);
+  // When the user confirms/rejects from the INLINE document toolbar, settle the mirrored chat card to
+  // the same terminal state so the two review surfaces never disagree. Keyed on the monotonic `n`.
+  const settleN = props.settleSignal?.n;
+  useEffect(() => {
+    if (props.settleSignal) settleLast(props.settleSignal.state);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settleN]);
 
   // ---- left-edge resize drag (pointer events; clamps to [MIN_W, MAX_W]) ----
   const onResizeDown = useCallback((e: React.PointerEvent) => {

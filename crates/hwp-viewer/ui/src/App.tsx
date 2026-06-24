@@ -5,7 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { tinykeys } from "tinykeys";
-import { api, type CaretRect, type FindMatch, type ImageBox, type OutlineItem, type TableBox } from "./api";
+import { api, type CaretRect, type FindMatch, type ImageBox, type OutlineItem, type Proposal, type ProposalOp, type TableBox } from "./api";
 import { sanitizeSvg } from "./sanitize";
 import { advanceOffset, imageBoxToScreen, pageToScreen, screenToPage } from "./caret";
 import ImageOverlay from "./ImageOverlay";
@@ -14,6 +14,7 @@ import { type Command } from "./commands";
 import { Palette } from "./Palette";
 import { Composer, type ComposerMode } from "./Composer";
 import { Chat, type Scope } from "./Chat";
+import { PendingInline } from "./PendingInline";
 import { Button, IconButton, Sep, SegmentedControl } from "./ui";
 import { toast, Toaster } from "./toast";
 
@@ -128,6 +129,20 @@ export default function App() {
     pulseTimer.current = window.setTimeout(() => setPulsePage(null), 1500);
   }, []);
   useEffect(() => () => window.clearTimeout(pulseTimer.current), []);
+  // IMPLEMENT B — INLINE pending review: when the chat proposer returns a (still dry-run) proposal,
+  // we lift it here so the review moves INTO the document. `pending` carries the structured ops, the
+  // page the user pointed at (or the page in view) to anchor the "제안됨" band + ✓확정/✕취소/✎다시
+  // toolbar, the provider (mock = honest "예시 제안"), and the primary op's (section, block) so ✎다시
+  // can re-open the chat scoped to exactly that block. The chat CARD still mirrors this (both call the
+  // SAME commit_proposal/discard_proposal); `pendingSettle` is the signal that settles the card when
+  // the user acts on the INLINE toolbar. Cleared on commit/discard/undo and on a new document.
+  type Pending = { ops: ProposalOp[]; provider: string; rationale: string; page: number; section: number | null; block: number | null };
+  const [pending, setPending] = useState<Pending | null>(null);
+  const [pendingBusy, setPendingBusy] = useState(false);
+  // A monotonic signal (+ the terminal state) the chat watches to settle its mirrored card when the
+  // user confirms/rejects from the INLINE toolbar instead of the panel.
+  const [pendingSettle, setPendingSettle] = useState<{ n: number; state: "applied" | "discarded" } | null>(null);
+  const settleSeq = useRef(0);
   const chatOpenRef = useRef(chatOpen);
   chatOpenRef.current = chatOpen;
   // Drag-drop image insert: highlight the page container while a file is dragged over it (M1).
@@ -702,6 +717,7 @@ export default function App() {
       setDocName(name);
       setEditable(r.editable);
       setEdited(false); // a freshly opened doc is unedited → 원본 보기 (rhwp SVG) is faithful again
+      setPending(null); // drop any stale inline proposal from a previous document
       // Editable docs default to the HTML (JSX/CSS) preview — shows edits + the gov-doc styling;
       // a view-only original stays on the faithful rhwp SVG. The toolbar toggles either way.
       const mode = r.editable ? "html" : "svg";
@@ -776,6 +792,7 @@ export default function App() {
 
   const doUndo = useCallback(async () => {
     if (pageCountRef.current === 0) return;
+    setPending(null); // an undo changes the doc shape under any pending proposal — drop it
     invalidate(await api.undo());
     toast("info", "실행 취소");
   }, [invalidate]);
@@ -873,6 +890,14 @@ export default function App() {
     }
   }
 
+  // Scroll the page list to a 0-based page index (the chat's jump-to-block link + the inline pending
+  // band reuse this to bring the target into view). Clamps to the active list's bounds.
+  const scrollToPage = useCallback((page: number) => {
+    if (listCountRef.current === 0) return;
+    const idx = Math.max(0, Math.min(page, listCountRef.current - 1));
+    virtualizer.scrollToIndex(idx, { align: "center" });
+  }, [virtualizer]);
+
   const composerCtx = useMemo(
     () => ({
       applyContent: async (json: string) => {
@@ -894,36 +919,92 @@ export default function App() {
     [invalidate, doUndo],
   );
 
-  // The vibe-docs chat: propose anchored edits (dry-run, optionally scoped to a clicked target) →
-  // 적용 commits through the same op-bus. On apply, scroll to the pointed page (or stay put) instead
-  // of yanking to the doc end — and clear the spent scope.
+  // Lift a returned (dry-run) proposal into the INLINE pending state: anchor it to the pointed page
+  // (or the page currently in view), remember the primary op's (section, block) for ✎다시, then scroll
+  // it into view so the "제안됨" band is visible — reusing the same scroll path the commit flow uses.
+  const liftToPending = useCallback((proposal: Proposal, page: number | null) => {
+    const primary = proposal.ops.find((o) => o.section !== null) ?? proposal.ops[0];
+    const at = page ?? Math.max(0, (virtualizer.getVirtualItems()[0]?.index ?? 0));
+    setPending({
+      ops: proposal.ops,
+      provider: proposal.provider,
+      rationale: proposal.rationale,
+      page: at,
+      section: primary?.section ?? null,
+      block: primary?.block ?? null,
+    });
+    queueMicrotask(() => scrollToPage(at));
+  }, [virtualizer, scrollToPage]);
+
+  // The vibe-docs chat: propose anchored edits (dry-run, optionally scoped to a clicked target). Each
+  // proposal is lifted into the INLINE pending state (review ON the document) AND returned for the chat
+  // card. 적용 commits through the same op-bus; on apply, scroll to the pointed page (or stay put) and
+  // clear the spent scope + the inline pending state.
   const chatCtx = useMemo(
     () => ({
-      propose: (instruction: string, scopeArg: Scope | null) =>
-        api.aiEdit(instruction, scopeArg ? { section: scopeArg.section, block: scopeArg.block } : undefined),
-      insertImage: (name: string, dataB64: string, scopeArg: Scope | null, widthMm: number, heightMm: number) =>
-        api.insertImage(name, dataB64, scopeArg ? { section: scopeArg.section, block: scopeArg.block } : null, widthMm, heightMm),
+      propose: async (instruction: string, scopeArg: Scope | null) => {
+        const p = await api.aiEdit(instruction, scopeArg ? { section: scopeArg.section, block: scopeArg.block } : undefined);
+        liftToPending(p, scopeArg ? scopeArg.page : null);
+        return p;
+      },
+      insertImage: async (name: string, dataB64: string, scopeArg: Scope | null, widthMm: number, heightMm: number) => {
+        const p = await api.insertImage(name, dataB64, scopeArg ? { section: scopeArg.section, block: scopeArg.block } : null, widthMm, heightMm);
+        liftToPending(p, scopeArg ? scopeArg.page : null);
+        return p;
+      },
       commit: async () => {
-        const landed = scopeRef.current ? scopeRef.current.page : null;
+        const landed = scopeRef.current ? scopeRef.current.page : (pendingRef.current?.page ?? null);
         const n = await api.commitProposal();
         setEdited(true);
         invalidate(n, landed);
         setScope(null);
+        setPending(null); // the proposal settled INTO the doc — drop the inline pending state
         // Flash a highlight pulse on the page the edit landed on (after the re-render settles).
         if (landed !== null) queueMicrotask(() => pulse(landed));
       },
-      discard: () => api.discardProposal(),
+      discard: async () => {
+        await api.discardProposal();
+        setPending(null);
+      },
     }),
-    [invalidate, pulse],
+    [invalidate, pulse, liftToPending],
   );
+  // pending read inside the (stable) chatCtx.commit closure needs the latest value.
+  const pendingRef = useRef(pending);
+  pendingRef.current = pending;
 
-  // Scroll the page list to a 0-based page index (the chat's jump-to-block link reuses this to bring
-  // the pointed target into view). Clamps to the active list's bounds.
-  const scrollToPage = useCallback((page: number) => {
-    if (listCountRef.current === 0) return;
-    const idx = Math.max(0, Math.min(page, listCountRef.current - 1));
-    virtualizer.scrollToIndex(idx, { align: "center" });
-  }, [virtualizer]);
+  // Settle the chat's mirrored card when the user acts on the INLINE toolbar (so both surfaces stay
+  // in sync). Bumps a monotonic signal Chat watches; the card flips to ✓적용됨 / 취소됨.
+  const signalSettle = useCallback((state: "applied" | "discarded") => {
+    settleSeq.current += 1;
+    setPendingSettle({ n: settleSeq.current, state });
+  }, []);
+
+  // ---- INLINE pending review actions (the ✓확정 / ✕취소 / ✎다시 toolbar on the document) ----
+  // ✓ 확정: commit the pending proposal through the SAME op-bus the chat card uses.
+  const confirmPending = useCallback(() => {
+    setPendingBusy(true);
+    void chatCtx.commit()
+      .then(() => signalSettle("applied"))
+      .catch((e) => toast("warn", `적용 실패: ${e}`))
+      .finally(() => setPendingBusy(false));
+  }, [chatCtx, signalSettle]);
+  // ✕ 취소: discard the pending proposal (drops it on the Rust session too).
+  const rejectPending = useCallback(() => {
+    setPendingBusy(true);
+    void chatCtx.discard()
+      .then(() => signalSettle("discarded"))
+      .catch(() => {})
+      .finally(() => setPendingBusy(false));
+  }, [chatCtx, signalSettle]);
+  // ✎ 다시: keep the proposal pending, but re-open the chat scoped to the changed block so the user
+  // can type more feedback / fill content ("이 표 채워줘"). Seeds the scope chip + focuses the panel.
+  const refinePending = useCallback(() => {
+    const p = pendingRef.current;
+    if (!p) return;
+    if (p.section !== null) setScope({ section: p.section, block: p.block, page: p.page });
+    setChatOpen(true);
+  }, []);
 
   // ---- palette command registry ----
   const commands = useMemo<Command[]>(() => {
@@ -985,6 +1066,7 @@ export default function App() {
     (async () => {
       un = await listen("doc-changed", async () => {
         try {
+          setPending(null); // an out-of-band mutation can invalidate a pending proposal's anchors
           const n = await api.pageCount();
           if (n > 0) {
             setEditable(true);
@@ -1109,6 +1191,14 @@ export default function App() {
   // Current page for the status bar: the first virtual item still on screen (the virtualizer re-renders
   // on scroll, so this stays live). 1-based for display; falls back to 1 before the first measure.
   const currentPage = listCount > 0 ? (virtualizer.getVirtualItems()[0]?.index ?? 0) + 1 : 0;
+  // Robustness for the INLINE pending band: the on-page band only mounts when the target page is in
+  // the virtual window AND we're in an SVG mode (the HTML iframe can't host the overlay). When it
+  // isn't (HTML mode, or the user scrolled the target off-screen), show a sticky fallback bar so the
+  // ✓확정/✕취소/✎다시 controls are NEVER lost — clicking ↪ scrolls the band back into view.
+  const pendingPageVisible =
+    pending !== null &&
+    viewMode !== "html" &&
+    virtualizer.getVirtualItems().some((v) => v.index === pending.page);
   // Go-to-page: clamp to [1, listCount], scroll, sync the input. Empty/NaN input is a no-op.
   const goToPage = useCallback((oneBased: number) => {
     if (listCount === 0 || !Number.isFinite(oneBased)) return;
@@ -1374,6 +1464,19 @@ export default function App() {
                       {pulsePage === item.index && (
                         <div key={`pulse-${pulseTimer.current}`} className="apply-pulse pointer-events-none absolute inset-0 z-10" />
                       )}
+                      {/* IMPLEMENT B — INLINE pending review: a distinct "제안됨" band + the
+                          ✓확정/✕취소/✎다시 toolbar pinned to the page the proposal targets, so the AI
+                          content is reviewed ON the document (the chat card mirrors these actions). */}
+                      {pending && pending.page === item.index && (
+                        <PendingInline
+                          ops={pending.ops}
+                          provider={pending.provider}
+                          busy={pendingBusy}
+                          onConfirm={confirmPending}
+                          onReject={rejectPending}
+                          onRefine={refinePending}
+                        />
+                      )}
                     </div>
                   </div>
                 );
@@ -1404,6 +1507,25 @@ export default function App() {
           {dragActive && (
             <div className="pointer-events-none sticky bottom-4 z-20 mx-auto flex w-fit items-center gap-2 rounded-full border border-accent/40 bg-accent/10 px-3 py-1.5 text-sm font-medium text-accent shadow-lg backdrop-blur">
               🖼️ 여기에 놓아 이미지 삽입
+            </div>
+          )}
+          {/* IMPLEMENT B — robust FALLBACK for the inline pending review: when the target page's band
+              isn't on screen (HTML mode, or scrolled away), pin a clearly-styled 확정/취소/다시 bar so
+              the controls are never lost. ↪ scrolls the "제안됨" band back into view. */}
+          {pending && !pendingPageVisible && (
+            <div className="sticky bottom-4 z-30 mx-auto flex w-fit items-center gap-2 rounded-full border-2 border-dashed border-ai/50 bg-ai/10 px-3 py-1.5 text-sm shadow-lg backdrop-blur">
+              <span className="font-medium text-ai">✦ {pending.provider === "mock" || pending.provider === "none" ? "예시 제안" : "AI 제안"} 검토 중</span>
+              <button
+                onClick={() => scrollToPage(pending.page)}
+                className="rounded px-1.5 py-0.5 text-xs text-ai hover:bg-ai/15"
+                title="제안된 위치로 이동"
+              >
+                ↪ p.{pending.page + 1}
+              </button>
+              <span className="mx-0.5 h-4 w-px bg-ai/30" />
+              <button onClick={confirmPending} disabled={pendingBusy} className="rounded-md bg-ai px-2.5 py-1 text-xs font-medium text-white hover:opacity-90 disabled:opacity-40">✓ 확정</button>
+              <button onClick={rejectPending} disabled={pendingBusy} className="rounded-md px-2.5 py-1 text-xs text-neutral-600 hover:bg-neutral-200/70 disabled:opacity-40 dark:text-neutral-300 dark:hover:bg-neutral-700/60">✕ 취소</button>
+              <button onClick={refinePending} disabled={pendingBusy} className="rounded-md border border-ai/30 px-2.5 py-1 text-xs text-ai hover:bg-ai/10 disabled:opacity-40">✎ 다시</button>
             </div>
           )}
           {/* Cell editor — the table overlay's 칸 편집 verb. A small centered form: pick (행, 열) +
@@ -1486,6 +1608,9 @@ export default function App() {
           onClearScope={() => setScope(null)}
           onJumpToPage={scrollToPage}
           ctx={chatCtx}
+          // The inline toolbar (on the document) and the chat card are the SAME review — when the
+          // user acts inline, this signal flips the mirrored card to ✓적용됨 / 취소됨 so they agree.
+          settleSignal={pendingSettle}
           onApplied={() => { /* re-render + scroll handled by commit→invalidate */ }}
         />
       </div>

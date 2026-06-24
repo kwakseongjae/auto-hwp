@@ -164,6 +164,30 @@ body,
   animation: apply-pulse 1.5s ease-out forwards;
 }
 
+/* Inline PENDING band: an AI-proposed edit awaiting review, marked ON the document (not just the
+   chat panel). A dashed generative-lane (purple/ai) outline + a soft tint reads as "not yet settled"
+   — clearly distinct from committed document ink — and a gentle breathing pulse keeps it noticed.
+   The band hosts the ✓확정 / ✕취소 / ✎다시 toolbar (PendingInline.tsx). Reduced-motion stills it. */
+@keyframes pending-breathe {
+  0%,
+  100% {
+    outline-color: color-mix(in oklch, var(--color-ai) 55%, transparent);
+  }
+  50% {
+    outline-color: color-mix(in oklch, var(--color-ai) 85%, transparent);
+  }
+}
+.pending-band {
+  background: color-mix(in oklch, var(--color-ai) 10%, white);
+  outline: 2px dashed color-mix(in oklch, var(--color-ai) 60%, transparent);
+  outline-offset: -1px;
+  box-shadow: 0 6px 18px -8px color-mix(in oklch, var(--color-ai) 45%, transparent);
+  animation: pending-breathe 2.4s ease-in-out infinite;
+}
+.dark .pending-band {
+  background: color-mix(in oklch, var(--color-ai) 22%, rgb(23 23 23));
+}
+
 /* Interactive caret blink: hard on/off (steps(1)) so it reads native, not a soft fade. The caret
    <div> is positioned over the page wrapper by the JS coordinate map (see caret.ts / App.tsx). */
 @keyframes caret-blink {
