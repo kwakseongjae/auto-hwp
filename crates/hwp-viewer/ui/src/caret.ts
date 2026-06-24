@@ -47,6 +47,38 @@ export function pageToScreen(
   };
 }
 
+/** An image box in PAGE units (mirrors api.ImageBox geometry; DOM-free for testability). */
+export type ImageBoxLike = { x: number; y: number; w: number; h: number };
+/** An on-screen box in CSS px relative to the page's <svg>. */
+export type ScreenBox = { left: number; top: number; width: number; height: number };
+
+/** Map a PAGE-unit image box → CSS-px {left,top,width,height} relative to the .page-svg box — the
+ *  inverse-scale the move/resize overlay handles use (same rect/viewBox ratio as `pageToScreen`, so
+ *  the overlay tracks the SVG zoom exactly). Returns null on any zero dimension (page not laid out). */
+export function imageBoxToScreen(
+  box: ImageBoxLike,
+  rect: { width: number; height: number },
+  vb: VbLike,
+): ScreenBox | null {
+  if (rect.width === 0 || rect.height === 0 || vb.width === 0 || vb.height === 0) return null;
+  const sx = rect.width / vb.width;
+  const sy = rect.height / vb.height;
+  return { left: box.x * sx, top: box.y * sy, width: box.w * sx, height: box.h * sy };
+}
+
+/** Map a CSS-px size delta (drag distance, in screen px) back to PAGE units along each axis — used to
+ *  convert a resize drag into the HWPUNIT width/height the `SetImageSize` op wants. Returns null on
+ *  any zero dimension. */
+export function screenDeltaToPage(
+  dxPx: number,
+  dyPx: number,
+  rect: { width: number; height: number },
+  vb: VbLike,
+): { dx: number; dy: number } | null {
+  if (rect.width === 0 || rect.height === 0 || vb.width === 0 || vb.height === 0) return null;
+  return { dx: (dxPx / rect.width) * vb.width, dy: (dyPx / rect.height) * vb.height };
+}
+
 /** Advance a paragraph char offset past `text`, counting UNICODE SCALARS (NOT UTF-16 code units, NOT
  *  bytes) so multi-scalar Korean syllables and astral emoji move the caret by the correct amount.
  *  `[...text]` iterates by code point; the engine's offset is a Unicode-scalar count over the
@@ -93,6 +125,24 @@ export function runCaretSelfChecks(): { passed: number; failed: number } {
   ok(screenToPage(0, 0, rect, { width: 0, height: 10 }) === null, "screenToPage null on zero vb.width");
   ok(pageToScreen({ x: 1, top: 1, height: 1 }, { width: 10, height: 0 }, vb) === null, "pageToScreen null on zero rect.height");
   ok(pageToScreen({ x: 1, top: 1, height: 1 }, { width: 10, height: 10 }, { width: 10, height: 0 }) === null, "pageToScreen null on zero vb.height");
+
+  // imageBoxToScreen scales by the rect/vb ratio (overlay tracks SVG zoom); identity when rect==vb.
+  const box = imageBoxToScreen({ x: 100, y: 200, w: 400, h: 300 }, { width: 400, height: 600 }, vb);
+  ok(
+    box !== null && near(box.left, 50) && near(box.top, 100) && near(box.width, 200) && near(box.height, 150),
+    "imageBoxToScreen scales by rect/vb ratio",
+  );
+  const idBox = imageBoxToScreen({ x: 10, y: 20, w: 30, h: 40 }, { width: 800, height: 1200 }, vb);
+  ok(
+    idBox !== null && near(idBox.left, 10) && near(idBox.top, 20) && near(idBox.width, 30) && near(idBox.height, 40),
+    "imageBoxToScreen identity when rect==vb",
+  );
+  ok(imageBoxToScreen({ x: 1, y: 1, w: 1, h: 1 }, { width: 0, height: 10 }, vb) === null, "imageBoxToScreen null on zero rect.width");
+
+  // screenDeltaToPage inverts imageBoxToScreen's scale (a 200px x-drag on a half-scale box = 400 page units).
+  const d = screenDeltaToPage(200, 150, { width: 400, height: 600 }, vb);
+  ok(d !== null && near(d.dx, 400) && near(d.dy, 300), "screenDeltaToPage scales screen px → page units");
+  ok(screenDeltaToPage(1, 1, { width: 10, height: 0 }, vb) === null, "screenDeltaToPage null on zero rect.height");
 
   // advanceOffset counts unicode scalars, not UTF-16 units / bytes
   ok(advanceOffset(0, "a") === 1, "advanceOffset ASCII");

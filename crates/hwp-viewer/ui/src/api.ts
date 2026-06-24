@@ -57,6 +57,11 @@ export type HitTarget = {
 /** WYSIWYG caret — a caret rectangle in page (unscaled) coordinates. Scale by the SVG zoom factor. */
 export type CaretRect = { x: number; top: number; height: number };
 
+/** An anchored image's placed box in own-engine PAGE (unscaled HWPUNIT) coordinates + its model
+ *  anchor `(section, block)`. The move/resize overlay draws its 8 handles over `x/y/w/h` (scaled by
+ *  the same SVG zoom factor the caret uses) and commits via `setImageSize`/`moveImage`. */
+export type ImageBox = { x: number; y: number; w: number; h: number; section: number; block: number };
+
 /// Typed bindings to the Rust `Intent` command lane (crates/hwp-viewer/src/lib.rs). No prose
 /// parsing: each command returns a typed value the UI consumes directly.
 export const api = {
@@ -174,4 +179,21 @@ export const api = {
    *  `offset === 0` is a no-op. Returns the new page count. */
   deleteBack: (node: number, offset: number) =>
     invoke<number>("delete_back", { node, offset }),
+  /** Image overlay (own-render only) — locate the placed box of the image anchored at
+   *  `(section, block)` on `page`, in own-engine PAGE units (null if it doesn't fall on that page).
+   *  Same geometry as the 자체 렌더 SVG, so the overlay handles align with what's drawn. */
+  imageBbox: (page: number, section: number, block: number) =>
+    invoke<ImageBox | null>("image_bbox", { page, section, block }),
+  /** Image overlay (own-render only) — the topmost image under a page-space click `(x,y)` on `page`
+   *  (with its `(section, block)` anchor), or null if the click misses every image. Click-to-select. */
+  imageAt: (page: number, x: number, y: number) =>
+    invoke<ImageBox | null>("image_at", { page, x, y }),
+  /** Image overlay — resize the image anchored at `(section, block)` to `width`×`height` HWPUNIT as
+   *  ONE undo unit (SetImageSize). The resize handle's pointerup commit. Returns the new page count. */
+  setImageSize: (section: number, block: number, width: number, height: number) =>
+    invoke<number>("set_image_size", { section, block, width, height }),
+  /** Image overlay — move the image from block `from` to block `to` in `section` as ONE undo unit
+   *  (DeleteBlock + InsertImageAt; size preserved). Returns the new page count. */
+  moveImage: (section: number, from: number, to: number, width: number, height: number) =>
+    invoke<number>("move_image", { section, from, to, width, height }),
 };

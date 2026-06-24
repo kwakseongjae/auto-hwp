@@ -5,9 +5,10 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { tinykeys } from "tinykeys";
-import { api, type CaretRect, type FindMatch } from "./api";
+import { api, type CaretRect, type FindMatch, type ImageBox } from "./api";
 import { sanitizeSvg } from "./sanitize";
-import { advanceOffset, pageToScreen, screenToPage } from "./caret";
+import { advanceOffset, imageBoxToScreen, pageToScreen, screenToPage } from "./caret";
+import ImageOverlay from "./ImageOverlay";
 import { type Command } from "./commands";
 import { Palette } from "./Palette";
 import { Composer, type ComposerMode } from "./Composer";
@@ -147,6 +148,20 @@ export default function App() {
   const [composing, setComposing] = useState(false);
   const imeInput = useRef<HTMLInputElement>(null);
 
+  // ---- Image move/resize overlay (own-render only): the selected image + its CSS-px screen box. The
+  // box is recomputed from the page-unit `ImageBox` against the live SVG rect/viewBox (so it tracks
+  // zoom), mirroring `recomputeCaretBox`. Cleared on repaint / mode-switch / deselect. ----
+  type ImageSel = {
+    page: number;
+    box: ImageBox; // page-unit geometry + (section, block) anchor
+    screen: { left: number; top: number; width: number; height: number };
+    pxPerPageX: number;
+    pxPerPageY: number;
+  };
+  const [imageSel, setImageSel] = useState<ImageSel | null>(null);
+  const imageSelRef = useRef<ImageSel | null>(null);
+  imageSelRef.current = imageSel;
+
   // Refs mirror the values that async (queued) edit/move closures must read at EXECUTION time, not at
   // the time the closure was created — React closures capture stale state otherwise.
   const caretRef = useRef<CaretAnchor | null>(null);
@@ -188,6 +203,20 @@ export default function App() {
     setCaretBox(null);
     setComposing(false);
   }, []);
+  const clearImageSel = useCallback(() => setImageSel(null), []);
+
+  // Re-place a known image selection's overlay against the LIVE svg rect/viewBox (after zoom or a
+  // repaint) — the move/resize twin of `recomputeCaretBox`. `null` box drops the selection.
+  const recomputeImageBox = useCallback((page: number, box: ImageBox | null) => {
+    if (!box) return setImageSel(null);
+    const svg = svgForPage(page);
+    if (!svg) return setImageSel(null);
+    const rect = svg.getBoundingClientRect();
+    const vb = svg.viewBox.baseVal;
+    const screen = imageBoxToScreen(box, { width: rect.width, height: rect.height }, { width: vb.width, height: vb.height });
+    if (!screen || vb.width === 0 || vb.height === 0) return setImageSel(null);
+    setImageSel({ page, box, screen, pxPerPageX: rect.width / vb.width, pxPerPageY: rect.height / vb.height });
+  }, []);
 
   // In 'own' mode the page list is paginated by OUR engine (its count can differ from rhwp's).
   const listCount = viewMode === "own" ? ownPageCount : pageCount;
@@ -209,6 +238,8 @@ export default function App() {
   useEffect(() => {
     virtualizer.measure();
     if (caretRef.current && caretRectRef.current) recomputeCaretBox(caretRef.current.page, caretRectRef.current);
+    // Re-place the image overlay too so its handles track the new zoom scale.
+    if (imageSelRef.current) recomputeImageBox(imageSelRef.current.page, imageSelRef.current.box);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageWidth]);
 
@@ -265,6 +296,7 @@ export default function App() {
     setSvgCache({});
     setPageCount(n);
     clearCaret();
+    clearImageSel();
     // The own-engine SVGs are regenerated from the live IR — drop them too so an edit repaints. Its
     // page count is fetched lazily (or eagerly when 'own' is the active mode).
     setOwnSvgCache({});
@@ -299,9 +331,8 @@ export default function App() {
   // ---- caret: click-to-place ----
   async function onPageClick(e: React.MouseEvent) {
     if (!canEditRef.current) return;
-    // The caret hit-test geometry comes from the rhwp render path; in the 'own' fidelity view the
-    // displayed SVG is our engine's, so don't place a caret against mismatched coordinates.
-    if (viewModeRef.current === "own") return;
+    // A click landing ON the overlay handles is the overlay's own gesture — don't re-hit-test.
+    if ((e.target as Element).closest("[data-image-overlay]")) return;
     const host = (e.target as Element).closest("[data-index]");
     if (!host) return;
     const page = Number(host.getAttribute("data-index"));
@@ -317,6 +348,18 @@ export default function App() {
       { width: vb.width, height: vb.height },
     );
     if (!pt) return;
+    // In the 'own' (자체 렌더) fidelity view the displayed SVG is OUR engine's, so the rhwp caret
+    // hit-test geometry doesn't apply — but the image overlay DOES use own-engine geometry. Click to
+    // select the image under the pointer (or deselect on an empty click); no caret in own mode.
+    if (viewModeRef.current === "own") {
+      try {
+        const img = await api.imageAt(page, pt.x, pt.y);
+        recomputeImageBox(page, img);
+      } catch (err) {
+        toast("warn", `이미지 선택 실패: ${err}`);
+      }
+      return;
+    }
     try {
       const hit = await api.hitTest(page, pt.x, pt.y);
       // Vibe-docs: while the chat is open, ANY click on the page captures a target "scope" (section
@@ -341,6 +384,61 @@ export default function App() {
       toast("warn", `캐럿 배치 실패: ${err}`);
     }
   }
+
+  // ---- image overlay: commit (one undoable op on pointerup), then re-place the overlay on the image.
+  // After the op the doc repaints (invalidate clears the SVG cache + selection); we re-fetch the new
+  // bbox for the resolved anchor once the fresh page paints so the handles stay on the image. ----
+  const reselectAfterRepaint = useCallback((page: number, section: number, block: number) => {
+    // Wait for the repaint (cache cleared → SVG re-fetched) before the bbox query, then re-place.
+    queueMicrotask(async () => {
+      try {
+        const box = await api.imageBbox(page, section, block);
+        recomputeImageBox(page, box);
+      } catch {
+        setImageSel(null);
+      }
+    });
+  }, [recomputeImageBox]);
+
+  const commitImageResize = useCallback((pageW: number, pageH: number) => {
+    void enqueueEdit(async () => {
+      const sel = imageSelRef.current;
+      if (!sel || !canEditRef.current) return;
+      const w = Math.max(1, Math.round(pageW));
+      const h = Math.max(1, Math.round(pageH));
+      try {
+        const pages = await api.setImageSize(sel.box.section, sel.box.block, w, h);
+        setEdited(true);
+        invalidate(pages, null); // keep scroll; clears caret + image selection
+        reselectAfterRepaint(sel.page, sel.box.section, sel.box.block);
+      } catch (err) {
+        toast("warn", `크기 변경 실패: ${err}`);
+      }
+    });
+  }, [enqueueEdit, invalidate, reselectAfterRepaint]);
+
+  const commitImageMove = useCallback((dyPage: number) => {
+    void enqueueEdit(async () => {
+      const sel = imageSelRef.current;
+      if (!sel || !canEditRef.current) return;
+      // Flow layout: a downward drag relocates the image AFTER the next block, an upward drag BEFORE
+      // the previous one (the smallest faithful "move" via DeleteBlock + InsertImageAt).
+      const from = sel.box.block;
+      const to = dyPage > 0 ? from + 2 : from - 1;
+      if (to < 0 || to === from) return;
+      try {
+        const pages = await api.moveImage(sel.box.section, from, to, Math.round(sel.box.w), Math.round(sel.box.h));
+        setEdited(true);
+        invalidate(pages, null);
+        // The move shifts indices: DeleteBlock(from) then InsertImageAt(to'); the landed index is
+        // `to-1` when moving down (delete shifted it), else `to`. Re-place on that block.
+        const landed = to > from ? to - 1 : to;
+        reselectAfterRepaint(sel.page, sel.box.section, landed);
+      } catch (err) {
+        toast("warn", `이동 실패: ${err}`);
+      }
+    });
+  }, [enqueueEdit, invalidate, reselectAfterRepaint]);
 
   // ---- caret: edit loop (each helper enqueued; reads caretRef AFTER the prior queued edit resolved) ----
   const doInsert = useCallback((text: string) => {
@@ -511,9 +609,11 @@ export default function App() {
     }
     setViewMode(next);
     viewModeRef.current = next;
+    // The image overlay only exists in 'own' mode — drop any selection when leaving it.
+    if (next !== "own") clearImageSel();
     if (next === "html") void loadDocHtml();
     else if (next === "own") void loadOwnPageCount();
-  }, [loadDocHtml, loadOwnPageCount]);
+  }, [loadDocHtml, loadOwnPageCount, clearImageSel]);
 
   // ---- Zoom verbs ----
   // ⌘+/⌘- step through the same discrete levels the segmented control offers (excluding fit-width,
@@ -1013,6 +1113,20 @@ export default function App() {
                           className="caret-blink pointer-events-none absolute z-10 w-px bg-accent"
                           style={{ left: `${caretBox.left}px`, top: `${caretBox.top}px`, height: `${caretBox.height}px` }}
                         />
+                      )}
+                      {/* Image move/resize overlay (own-render only): 8 handles over the selected
+                          image, live-drag = CSS-only, pointerup = ONE undoable op (resize/move). */}
+                      {viewMode === "own" && imageSel && imageSel.page === item.index && (
+                        <div data-image-overlay className="absolute inset-0 z-20">
+                          <ImageOverlay
+                            box={imageSel.screen}
+                            pxPerPageX={imageSel.pxPerPageX}
+                            pxPerPageY={imageSel.pxPerPageY}
+                            onCommitResize={commitImageResize}
+                            onCommitMove={commitImageMove}
+                            onDismiss={clearImageSel}
+                          />
+                        </div>
                       )}
                       {/* Post-apply highlight pulse — a one-shot accent glow over the page a chat edit
                           just landed on (cleared by a timer in `pulse`). */}

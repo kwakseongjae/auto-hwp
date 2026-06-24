@@ -45,6 +45,11 @@ pub struct PlacedImage {
     pub h: f64,
     /// `bin_ref` into [`SemanticDoc::bin_data`]; empty for an equation placeholder.
     pub bin_ref: String,
+    /// Source provenance: the `(section, block index)` anchor the image's paragraph occupies in the
+    /// SemanticDoc — lets an overlay/edit map a placed box back to the editable model (the
+    /// `image_bbox` query + a `SetImageSize` op). The renderer ignores these.
+    pub section: usize,
+    pub block: usize,
 }
 
 /// A positioned box (line text-box, cell, table outline, cell shade). The renderer emits these as
@@ -100,7 +105,7 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
     let mut pages: Vec<PlacedPage> = vec![PlacedPage::default()];
     let mut started = false; // any content placed on the current page yet?
 
-    for sec in &doc.sections {
+    for (sec_idx, sec) in doc.sections.iter().enumerate() {
         let page = &sec.page;
         let ml = page.margin_left as f64;
         let mt = page.margin_top as f64;
@@ -114,7 +119,7 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
         set_page_size(pages.last_mut().unwrap(), page);
         let mut vert = 0.0f64; // page-relative vertical cursor (within the body box)
 
-        for block in &sec.blocks {
+        for (blk_idx, block) in sec.blocks.iter().enumerate() {
             match block {
                 Block::Paragraph(p) => {
                     let ps = doc.para_shapes.get(p.para_shape);
@@ -125,7 +130,7 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                     if vert > 0.0 {
                         vert += ps.map(|s| s.space_before).unwrap_or(0).max(0) as f64;
                     }
-                    place_paragraph(p, doc, fonts, ml, mt, body_w, body_h, &mut vert, &mut pages, page);
+                    place_paragraph(p, doc, fonts, ml, mt, body_w, body_h, &mut vert, &mut pages, page, sec_idx, blk_idx);
                     vert += ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;
                     started = true;
                 }
@@ -200,6 +205,8 @@ fn place_paragraph(
     vert: &mut f64,
     pages: &mut Vec<PlacedPage>,
     page: &PageSetup,
+    section: usize,
+    block: usize,
 ) {
     // Flat (char, size, color, underline) over the paragraph's text — same order layout_paragraph
     // breaks on, so line `text_pos` indexes straight into this.
@@ -263,7 +270,15 @@ fn place_paragraph(
         // An anchored object sits on the first line of its paragraph.
         if li == 0 {
             if let Some((w, h, bin_ref)) = &obj {
-                pg.images.push(PlacedImage { x: x0, y: line_top, w: *w, h: *h, bin_ref: bin_ref.clone() });
+                pg.images.push(PlacedImage {
+                    x: x0,
+                    y: line_top,
+                    w: *w,
+                    h: *h,
+                    bin_ref: bin_ref.clone(),
+                    section,
+                    block,
+                });
             }
         }
 

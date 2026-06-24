@@ -78,6 +78,10 @@ pub enum Op {
     InsertImageAt { section: usize, index: usize, bytes: Vec<u8>, kind: String, width: HwpUnit, height: HwpUnit },
     /// Delete the block at `index` in `section`.
     DeleteBlock { section: usize, index: usize },
+    /// Resize the anchored image of the `index`-th block: set the `ImageRef`'s `width`/`height` (in
+    /// HWPUNIT) on the first image inline of that paragraph. The direct-manipulation resize handle
+    /// commits exactly this on pointerup (one undoable op); "move" is `DeleteBlock` + `InsertImageAt`.
+    SetImageSize { section: usize, index: usize, width: HwpUnit, height: HwpUnit },
     /// Recolor cells of an EXISTING table (the `index`-th block): set/clear background shade for the
     /// cells the selector picks (a whole column, a whole row, one cell, or all). `shade=None` clears.
     SetTableCellShade { section: usize, index: usize, sel: CellSel, shade: Option<String> },
@@ -768,6 +772,33 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             sec.dirty.mark();
             Ok(())
         }
+        Op::SetImageSize { section, index, width, height } => {
+            if *width <= 0 || *height <= 0 {
+                return Err(Error::Other(format!(
+                    "SetImageSize: width/height must be positive (got {width}×{height})"
+                )));
+            }
+            let sec = section_mut(doc, *section)?;
+            let block = sec.blocks.get_mut(*index).ok_or_else(|| {
+                Error::Other(format!("SetImageSize: block index {index} out of range"))
+            })?;
+            let Block::Paragraph(p) = block else {
+                return Err(Error::Other(format!("SetImageSize: block {index} is not a paragraph")));
+            };
+            // Resize the FIRST image inline of the paragraph (matches place_doc, which anchors the
+            // paragraph's image as the PlacedImage the overlay was drawn over).
+            let img = p
+                .runs
+                .iter_mut()
+                .flat_map(|r| r.content.iter_mut())
+                .find_map(|i| if let Inline::Image(img) = i { Some(img) } else { None })
+                .ok_or_else(|| Error::Other(format!("SetImageSize: block {index} has no image")))?;
+            img.width = *width;
+            img.height = *height;
+            p.dirty.mark();
+            sec.dirty.mark();
+            Ok(())
+        }
         Op::SetTableCellShade { section, index, sel, shade } => {
             let color = match shade {
                 Some(s) => Some(Color::from_hex(s).ok_or_else(|| {
@@ -886,7 +917,7 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             Ok(())
         }
         _ => Err(Error::NotImplemented(
-            "op apply (MVP: Append*/SetPageLayout/Set{Char,Run,Para}Pr/ApplyStyle/Insert-Delete text/anchored Insert*At/DeleteBlock/SetTableCellShade/SetTableCell/TableInsertRows)",
+            "op apply (MVP: Append*/SetPageLayout/Set{Char,Run,Para}Pr/ApplyStyle/Insert-Delete text/anchored Insert*At/DeleteBlock/SetImageSize/SetTableCellShade/SetTableCell/TableInsertRows)",
         )),
     }
 }
@@ -1541,6 +1572,59 @@ mod tests {
         assert_eq!(block_para_text(&doc, 0), "가");
         assert_eq!(block_para_text(&doc, 1), "다");
         assert!(apply(&mut doc, &Op::DeleteBlock { section: 0, index: 9 }).is_err());
+    }
+
+    #[test]
+    fn set_image_size_resizes_the_anchored_image() {
+        // Insert an image, then resize it — the overlay's pointerup commit.
+        let mut doc = doc_with(vec![simple_para(1, "여기")]);
+        let png = vec![0x89, b'P', b'N', b'G', 1, 2, 3];
+        apply(&mut doc, &Op::InsertImageAt {
+            section: 0, index: 1, bytes: png, kind: "png".into(), width: 1000, height: 800,
+        }).unwrap();
+        apply(&mut doc, &Op::SetImageSize { section: 0, index: 1, width: 2500, height: 1600 }).unwrap();
+        match &doc.sections[0].blocks[1] {
+            Block::Paragraph(p) => match &p.runs[0].content[0] {
+                Inline::Image(img) => assert_eq!((img.width, img.height), (2500, 1600)),
+                _ => panic!("expected an image inline"),
+            },
+            _ => panic!("expected an image paragraph"),
+        }
+        // Non-positive dims refused; a non-image block refused; out-of-range refused.
+        assert!(apply(&mut doc, &Op::SetImageSize { section: 0, index: 1, width: 0, height: 10 }).is_err());
+        assert!(apply(&mut doc, &Op::SetImageSize { section: 0, index: 0, width: 10, height: 10 }).is_err());
+        assert!(apply(&mut doc, &Op::SetImageSize { section: 0, index: 9, width: 10, height: 10 }).is_err());
+    }
+
+    #[test]
+    fn image_move_is_one_undo_unit_via_delete_plus_insert() {
+        // "Move" = DeleteBlock + InsertImageAt batched in one do_ops → a single undoable op.
+        let mut s = EditSession::new(doc_with(vec![simple_para(1, "앞"), simple_para(2, "뒤")]));
+        let png = vec![0x89, b'P', b'N', b'G', 9];
+        // Seed an image at index 1, as its own undo step.
+        s.do_op(&Op::InsertImageAt {
+            section: 0, index: 1, bytes: png.clone(), kind: "png".into(), width: 900, height: 600,
+        })
+        .unwrap();
+        let bin_before = s.doc().bin_data.len();
+        // Move it to the end: delete then re-insert under ONE batch.
+        s.do_ops(&[
+            Op::DeleteBlock { section: 0, index: 1 },
+            Op::InsertImageAt { section: 0, index: 2, bytes: png, kind: "png".into(), width: 900, height: 600 },
+        ])
+        .unwrap();
+        // The image now sits at the new index.
+        match &s.doc().sections[0].blocks[2] {
+            Block::Paragraph(p) => assert!(matches!(p.runs[0].content[0], Inline::Image(_))),
+            _ => panic!("expected the moved image paragraph"),
+        }
+        // One undo reverts the whole move (delete + insert), leaving the original placement.
+        assert!(s.undo());
+        match &s.doc().sections[0].blocks[1] {
+            Block::Paragraph(p) => assert!(matches!(p.runs[0].content[0], Inline::Image(_))),
+            _ => panic!("undo should restore the image at its original index"),
+        }
+        assert!(s.doc().bin_data.len() >= bin_before, "move re-embeds bytes; undo keeps the store sane");
     }
 
     #[test]

@@ -704,6 +704,129 @@ async fn caret_rect(
     .map_err(|e| e.to_string())?
 }
 
+// ---- Image move/resize overlay: bbox query (own-engine geometry) + commit ops (op-bus lane) ----
+
+/// An anchored image's placed box in own-engine PAGE (unscaled HWPUNIT) coordinates + its model
+/// anchor. The frontend draws the 8-handle overlay over `x/y/w/h` (scaled by the same SVG zoom the
+/// caret uses) and commits a resize via `set_image_size(section, block, …)` on pointerup.
+#[derive(serde::Serialize)]
+struct ImageBoxDto {
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    section: usize,
+    block: usize,
+}
+
+/// Locate the placed box of the image anchored at `(section, block)` on `page`, in own-engine page
+/// coordinates — the geometry the move/resize overlay is drawn over. Re-drives `place_doc` over the
+/// LIVE IR with the SAME `own_render_fonts` as `render_own_page`, so the box matches the "자체 렌더"
+/// SVG exactly. Returns `null` if that image doesn't fall on the queried page or the anchor holds no
+/// image. svg-mode (own-render) only — the overlay is not wired for the rhwp "원본 보기".
+#[tauri::command]
+async fn image_bbox(
+    page: u32,
+    section: usize,
+    block: usize,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<Option<ImageBoxDto>, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let s = sess.lock().map_err(|_| "session poisoned")?;
+        let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+        let fonts = own_render_fonts();
+        let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+        let Some(pg) = placed.pages.get(page as usize) else { return Ok(None) };
+        Ok(pg
+            .images
+            .iter()
+            .find(|im| im.section == section && im.block == block && !im.bin_ref.is_empty())
+            .map(|im| ImageBoxDto { x: im.x, y: im.y, w: im.w, h: im.h, section: im.section, block: im.block }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Click-to-select: the topmost image whose placed box contains page-space `(x, y)` on `page`, in
+/// own-engine page coordinates (with its `(section, block)` anchor). `null` if the click misses every
+/// image. Pairs with `image_bbox` (which RE-fetches a known anchor's box after a repaint). Own-render
+/// geometry, like `image_bbox` — the SAME `place_doc` the "자체 렌더" SVG is drawn from.
+#[tauri::command]
+async fn image_at(
+    page: u32,
+    x: f64,
+    y: f64,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<Option<ImageBoxDto>, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let s = sess.lock().map_err(|_| "session poisoned")?;
+        let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+        let fonts = own_render_fonts();
+        let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+        let Some(pg) = placed.pages.get(page as usize) else { return Ok(None) };
+        // Last match wins → topmost in paint order (later images draw over earlier ones).
+        Ok(pg
+            .images
+            .iter()
+            .filter(|im| !im.bin_ref.is_empty())
+            .filter(|im| x >= im.x && x <= im.x + im.w && y >= im.y && y <= im.y + im.h)
+            .last()
+            .map(|im| ImageBoxDto { x: im.x, y: im.y, w: im.w, h: im.h, section: im.section, block: im.block }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Resize the image anchored at `(section, block)` to `width`×`height` HWPUNIT as ONE undo unit
+/// (`SetImageSize` via the op-bus). The resize handle's pointerup commit; returns the new page count
+/// so the frontend repaints, mirroring `insert_text`/`replace_text`.
+#[allow(non_snake_case)]
+#[tauri::command]
+async fn set_image_size(
+    section: usize,
+    block: usize,
+    width: i32,
+    height: i32,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<u32, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        match apply_intent(&mut s, Intent::SetImageSize { section, index: block, width, height })? {
+            Outcome::Edited { pages } => Ok(pages),
+            _ => Err("unexpected outcome".into()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Move the image anchored at block `from` to block `to` in `section` as ONE undo unit (`DeleteBlock`
+/// + `InsertImageAt` batched; size preserved). Returns the new page count so the frontend repaints.
+#[allow(non_snake_case)]
+#[tauri::command]
+async fn move_image(
+    section: usize,
+    from: usize,
+    to: usize,
+    width: i32,
+    height: i32,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<u32, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        match apply_intent(&mut s, Intent::MoveImage { section, from, to, width, height })? {
+            Outcome::Edited { pages } => Ok(pages),
+            _ => Err("unexpected outcome".into()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 // ---- Interactive caret: in-place edit commands (typed Intent lane; same op-bus core as the MCP
 // ---- lane). The per-keystroke / IME-commit mutations the caret UI calls. Async/spawn_blocking like
 // ---- the other mutating commands; each is ONE undo unit (do_op) and returns the new page count so
@@ -790,7 +913,11 @@ pub fn run() {
             hit_test,
             caret_rect,
             insert_text,
-            delete_back
+            delete_back,
+            image_bbox,
+            image_at,
+            set_image_size,
+            move_image
         ])
         .run(tauri::generate_context!())
         .expect("error while running tf-hwp viewer");

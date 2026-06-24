@@ -532,6 +532,70 @@ fn do_delete_back(session: &mut Session, node: u64, offset: usize) -> Result<(),
     sess.do_op(&op).map_err(|e| e.to_string()) // one undo unit
 }
 
+/// Resize the image anchored at `(section, index)` to `width`×`height` HWPUNIT as ONE undo unit
+/// (`SetImageSize`). The overlay's pointerup resize commit. Surfaces the op-bus refusal verbatim.
+fn do_set_image_size(
+    session: &mut Session,
+    section: usize,
+    index: usize,
+    width: i32,
+    height: i32,
+) -> Result<(), String> {
+    use hwp_ops::Op;
+    let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
+    sess.do_op(&Op::SetImageSize { section, index, width, height })
+        .map_err(|e| e.to_string()) // one undo unit
+}
+
+/// Move the image anchored at `(section, from)` to block index `to` as ONE undo unit: `DeleteBlock`
+/// + `InsertImageAt` batched via `do_ops` (no `MoveBlock` op exists; this is the smallest faithful
+/// relocation). `width`/`height` preserve the image's current size across the move. The bytes are
+/// re-embedded from the existing `BinData` the image references (so the moved copy is independent).
+fn do_move_image(
+    session: &mut Session,
+    section: usize,
+    from: usize,
+    to: usize,
+    width: i32,
+    height: i32,
+) -> Result<(), String> {
+    use hwp_model::document::{Block, Inline};
+    use hwp_ops::Op;
+    let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
+    // Resolve the source paragraph's image bytes/kind from the store BEFORE mutating.
+    let (bytes, kind) = {
+        let doc = sess.doc();
+        let blk = doc
+            .sections
+            .get(section)
+            .and_then(|s| s.blocks.get(from))
+            .ok_or_else(|| format!("move_image: block ({section},{from}) out of range"))?;
+        let Block::Paragraph(p) = blk else {
+            return Err(format!("move_image: block ({section},{from}) is not a paragraph"));
+        };
+        let img = p
+            .runs
+            .iter()
+            .flat_map(|r| &r.content)
+            .find_map(|i| if let Inline::Image(img) = i { Some(img) } else { None })
+            .ok_or_else(|| format!("move_image: block ({section},{from}) has no image"))?;
+        let bin = doc
+            .bin_data
+            .iter()
+            .find(|b| b.bin_ref == img.bin_ref)
+            .ok_or_else(|| format!("move_image: bin_ref {:?} not found", img.bin_ref))?;
+        (bin.bytes.clone(), bin.kind.clone())
+    };
+    // Deleting `from` shifts later blocks down by one; rebase the insert index accordingly so the
+    // image lands where the user dropped it.
+    let insert_at = if to > from { to - 1 } else { to };
+    sess.do_ops(&[
+        Op::DeleteBlock { section, index: from },
+        Op::InsertImageAt { section, index: insert_at, bytes, kind, width, height },
+    ])
+    .map_err(|e| e.to_string()) // one undo unit
+}
+
 /// A typed editor command/query — the GUI's mutation+query surface (no prose round-trips). The
 /// JSON `tools/*` lane (agents) is a separate transport; both drive the same op-bus core above.
 pub enum Intent {
@@ -566,6 +630,12 @@ pub enum Intent {
     /// Interactive caret — delete the single char ENDING at `offset` (Backspace) as ONE undo unit
     /// (`DeleteRange{offset-1, offset}`). `offset == 0` is a graceful no-op.
     DeleteBack { node: u64, offset: usize },
+    /// Image overlay — resize the image anchored at `(section, index)` to `width`×`height` HWPUNIT as
+    /// ONE undo unit (`SetImageSize`). The resize handle's pointerup commit.
+    SetImageSize { section: usize, index: usize, width: i32, height: i32 },
+    /// Image overlay — move the image from block `from` to block `to` in `section` as ONE undo unit
+    /// (`DeleteBlock` + `InsertImageAt`; preserving `width`/`height`).
+    MoveImage { section: usize, from: usize, to: usize, width: i32, height: i32 },
 }
 
 /// The typed result of an [`Intent`].
@@ -677,6 +747,16 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
         }
         Intent::DeleteBack { node, offset } => {
             do_delete_back(session, node, offset)?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::SetImageSize { section, index, width, height } => {
+            do_set_image_size(session, section, index, width, height)?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::MoveImage { section, from, to, width, height } => {
+            do_move_image(session, section, from, to, width, height)?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }

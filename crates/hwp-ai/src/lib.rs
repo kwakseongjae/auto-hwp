@@ -244,6 +244,7 @@ fn op_target(op: &Op) -> (&'static str, Option<usize>, Option<usize>) {
         Op::InsertTableAt { section, index, .. } => ("insert_table", Some(*section), Some(*index)),
         Op::InsertImageAt { section, index, .. } => ("insert_image", Some(*section), Some(*index)),
         Op::DeleteBlock { section, index } => ("delete_block", Some(*section), Some(*index)),
+        Op::SetImageSize { section, index, .. } => ("resize_image", Some(*section), Some(*index)),
         Op::SetTableCellShade { section, index, .. } => ("shade_cells", Some(*section), Some(*index)),
         Op::SetTableCell { section, index, .. } => ("set_cell", Some(*section), Some(*index)),
         Op::TableInsertRows { section, index, .. } => ("insert_rows", Some(*section), Some(*index)),
@@ -347,6 +348,9 @@ fn op_summary(op: &Op) -> String {
             format!("＋ 그림({kind}, {}바이트) @[s{section}/b{index}]", bytes.len())
         }
         Op::DeleteBlock { section, index } => format!("－ 블록 @[s{section}/b{index}]"),
+        Op::SetImageSize { section, index, width, height } => {
+            format!("⤡ 그림 크기 {width}×{height} @[s{section}/b{index}]")
+        }
         Op::SetTableCellShade { section, index, sel, shade } => {
             let what = match sel {
                 hwp_ops::CellSel::Col(c) => format!("{c}열"),
