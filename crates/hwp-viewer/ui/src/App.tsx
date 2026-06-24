@@ -37,6 +37,24 @@ export default function App() {
   const viewModeRef = useRef(viewMode);
   viewModeRef.current = viewMode;
 
+  // ---- Zoom: the page column is sized off a base A4 CSS width (≈794px = 210mm @ 96dpi). `zoom` is a
+  // factor where 1 = 100%; "fit-width" (zoom === 0 sentinel) tracks the scroll viewport's width so a
+  // page fills the column. Page height follows the A4 ratio (√2). The virtualizer's estimate + the
+  // SVG wrapper's containIntrinsicSize are derived from this so a zoom change re-lays the list.
+  const A4_W = 794; // CSS px for 210mm at 96dpi — the 100% page width
+  const A4_RATIO = 1.414; // A4 height/width (297/210)
+  const ZOOM_MIN = 0.5;
+  const ZOOM_MAX = 1; // discrete control tops out at 100%; ⌘+ won't overshoot the segmented range
+  // zoom === 0 is the "맞춤(가로)" / fit-width sentinel (resolved against the live viewport width).
+  const [zoom, setZoom] = useState(1);
+  const [fitWidth, setFitWidth] = useState(A4_W); // measured viewport width for the fit-width mode
+  // Resolve the zoom factor to a concrete CSS page width. Fit-width clamps to a sane band so a tiny or
+  // huge window doesn't produce an unusable page.
+  const pageWidth = zoom === 0 ? Math.max(360, Math.min(fitWidth, 1400)) : A4_W * zoom;
+  const pageHeight = pageWidth * A4_RATIO;
+  // Status-bar go-to-page input (controlled string; commit on Enter / blur).
+  const [gotoText, setGotoText] = useState("");
+
   // ---- Own-engine ('자체 렌더') page list: its OWN paginator can yield a different page count than
   // rhwp, and its OWN SVG cache (keyed by page) is regenerated from the live IR, so it stays separate
   // from the rhwp svgCache and is invalidated on every edit. ----
@@ -106,6 +124,10 @@ export default function App() {
   // the time the closure was created — React closures capture stale state otherwise.
   const caretRef = useRef<CaretAnchor | null>(null);
   caretRef.current = caret;
+  // caretRect mirrored to a ref so a zoom-driven re-layout can re-place the caret box without it being
+  // a dependency of the zoom effect.
+  const caretRectRef = useRef<CaretRect | null>(null);
+  caretRectRef.current = caretRect;
   const canEditRef = useRef(canEdit);
   canEditRef.current = canEdit;
   const composingRef = useRef(composing);
@@ -145,10 +167,33 @@ export default function App() {
   const virtualizer = useVirtualizer({
     count: listCount,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 920,
+    // Zoom-derived A4 page height (was a hardcoded 920) so a zoom change re-estimates every page; the
+    // real per-page height still comes from measureElement once the SVG paints.
+    estimateSize: () => Math.round(pageHeight),
     overscan: 2,
     gap: 24,
   });
+
+  // A zoom change resizes every page, so re-measure the virtual list (estimateSize already reads the
+  // new pageHeight; this forces the cached measurements to be dropped + recomputed). Re-running the
+  // caret box keeps it pinned to the (now differently scaled) glyph.
+  useEffect(() => {
+    virtualizer.measure();
+    if (caretRef.current && caretRectRef.current) recomputeCaretBox(caretRef.current.page, caretRectRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageWidth]);
+
+  // Track the scroll viewport's width so "맞춤(가로)" (fit-width) keeps a page filling the column as
+  // the window or chat panel resizes. p-6 = 24px padding each side on <main>.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const update = () => setFitWidth(Math.max(0, el.clientWidth - 48));
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const ensurePage = useCallback(async (i: number) => {
     if (svgCacheRef.current[i] !== undefined || inflight.current.has(i)) return;
@@ -441,6 +486,26 @@ export default function App() {
     else if (next === "own") void loadOwnPageCount();
   }, [loadDocHtml, loadOwnPageCount]);
 
+  // ---- Zoom verbs ----
+  // ⌘+/⌘- step through the same discrete levels the segmented control offers (excluding fit-width,
+  // which is a viewport-relative mode). ⌘0 resets to 100%.
+  const ZOOM_STEPS = useMemo(() => [0.5, 0.75, 1], []);
+  const zoomIn = useCallback(() => {
+    setZoom((z) => {
+      const cur = z === 0 ? 1 : z; // from fit-width, ⌘+ snaps into the discrete band at 100%
+      const next = ZOOM_STEPS.find((s) => s > cur + 1e-6);
+      return next ?? Math.min(ZOOM_MAX, cur);
+    });
+  }, [ZOOM_STEPS]);
+  const zoomOut = useCallback(() => {
+    setZoom((z) => {
+      const cur = z === 0 ? 1 : z;
+      const lower = [...ZOOM_STEPS].reverse().find((s) => s < cur - 1e-6);
+      return lower ?? Math.max(ZOOM_MIN, cur);
+    });
+  }, [ZOOM_STEPS]);
+  const zoomReset = useCallback(() => setZoom(1), []);
+
   // ---- Find / Replace verbs ----
   const openFind = useCallback(() => {
     if (pageCountRef.current === 0) return;
@@ -548,17 +613,24 @@ export default function App() {
   }, [pageCount, canEdit, doOpen, doExport, doExportHtml, doExportPdf, openFind, doUndo, doRedo]);
 
   // ---- global shortcuts: registered ONCE; closures call the always-current handler set via a ref. ----
-  const handlers = useRef({ doOpen, doExport, doUndo, doRedo, openFind });
-  handlers.current = { doOpen, doExport, doUndo, doRedo, openFind };
+  const handlers = useRef({ doOpen, doExport, doUndo, doRedo, openFind, zoomIn, zoomOut, zoomReset });
+  handlers.current = { doOpen, doExport, doUndo, doRedo, openFind, zoomIn, zoomOut, zoomReset };
   const canEditForKeys = useRef(canEdit);
   canEditForKeys.current = canEdit;
   useEffect(() => {
     const un = tinykeys(window, {
       "$mod+k": (e) => { e.preventDefault(); setPaletteOpen((o) => !o); },
       "$mod+o": (e) => { e.preventDefault(); void handlers.current.doOpen(); },
-      "$mod+e": (e) => { e.preventDefault(); void handlers.current.doExport(); },
+      // ⌘S and ⌘E are the SAME verb (save/export HWPX). Bound once each to the shared handler so the
+      // two accelerators advertised across the UI (palette ⌘S, footer ⌘E) both work — no real conflict.
       "$mod+s": (e) => { e.preventDefault(); void handlers.current.doExport(); },
+      "$mod+e": (e) => { e.preventDefault(); void handlers.current.doExport(); },
       "$mod+f": (e) => { e.preventDefault(); handlers.current.openFind(); },
+      // Zoom: ⌘0 → 100%, ⌘+ (=⌘⇧=) / ⌘= → in, ⌘- → out. Bound by KEY CODE so the shifted '+' on a
+      // US/Korean layout still lands on Equal.
+      "$mod+Digit0": (e) => { e.preventDefault(); handlers.current.zoomReset(); },
+      "$mod+Equal": (e) => { e.preventDefault(); handlers.current.zoomIn(); },
+      "$mod+Minus": (e) => { e.preventDefault(); handlers.current.zoomOut(); },
       "$mod+l": (e) => { e.preventDefault(); if (canEditForKeys.current) setChatOpen((o) => !o); },
       "$mod+t": (e) => { e.preventDefault(); if (canEditForKeys.current) setComposer("table"); },
       "$mod+.": (e) => { e.preventDefault(); if (canEditForKeys.current) setComposer("ai"); },
@@ -701,6 +773,17 @@ export default function App() {
     })();
     return () => un?.();
   }, [enqueueEdit, invalidate]);
+
+  // Current page for the status bar: the first virtual item still on screen (the virtualizer re-renders
+  // on scroll, so this stays live). 1-based for display; falls back to 1 before the first measure.
+  const currentPage = listCount > 0 ? (virtualizer.getVirtualItems()[0]?.index ?? 0) + 1 : 0;
+  // Go-to-page: clamp to [1, listCount], scroll, sync the input. Empty/NaN input is a no-op.
+  const goToPage = useCallback((oneBased: number) => {
+    if (listCount === 0 || !Number.isFinite(oneBased)) return;
+    const idx = Math.max(0, Math.min(Math.round(oneBased) - 1, listCount - 1));
+    virtualizer.scrollToIndex(idx, { align: "start" });
+    setGotoText("");
+  }, [virtualizer, listCount]);
 
   const Tool = (p: { onClick: () => void; icon: string; label: string; keys?: string; tone?: "ai"; disabled?: boolean }) => (
     <button
@@ -876,15 +959,19 @@ export default function App() {
                 const h = f.contentDocument?.body?.scrollHeight;
                 if (h && h > 0) f.style.height = `${h + 32}px`;
               }}
-              className="mx-auto block w-full max-w-3xl rounded-lg border-0 bg-white shadow-md ring-1 ring-black/5"
+              // Zoom-derived page width (replaces the fixed max-w-3xl) so the HTML preview tracks the
+              // segmented zoom / fit-width control like the SVG pages do.
+              style={{ width: `${pageWidth}px` }}
+              className="mx-auto block rounded-lg border-0 bg-white shadow-md ring-1 ring-black/5"
             />
           ) : listCount > 0 ? (
             // SVG page list — shared by 'svg' (rhwp 원본) and 'own' (자체 렌더, OUR engine). The two have
             // separate caches/ensure-fns + page counts; the caret (whose geometry is from the rhwp
             // render path) only attaches in 'svg' mode.
             <div
-              className={`relative mx-auto max-w-3xl rounded-lg ${dragActive ? "ring-2 ring-accent ring-offset-4 ring-offset-neutral-200 dark:ring-offset-neutral-800" : ""}`}
-              style={{ height: `${virtualizer.getTotalSize()}px` }}
+              className={`relative mx-auto rounded-lg ${dragActive ? "ring-2 ring-accent ring-offset-4 ring-offset-neutral-200 dark:ring-offset-neutral-800" : ""}`}
+              // Zoom-derived column width (replaces max-w-3xl); height is the virtualizer total.
+              style={{ width: `${pageWidth}px`, height: `${virtualizer.getTotalSize()}px` }}
               onClick={(e) => void onPageClick(e)}
             >
               {virtualizer.getVirtualItems().map((item) => {
@@ -900,7 +987,9 @@ export default function App() {
                   >
                     <div
                       className="relative w-full rounded-lg bg-white shadow-md ring-1 ring-black/5"
-                      style={{ contentVisibility: "auto", containIntrinsicSize: "auto 920px" }}
+                      // Zoom-derived intrinsic height (was a fixed 920px) so off-screen pages reserve
+                      // the right space before their SVG paints.
+                      style={{ contentVisibility: "auto", containIntrinsicSize: `auto ${Math.round(pageHeight)}px` }}
                     >
                       {pageSvg !== undefined ? (
                         <div className="page-svg" dangerouslySetInnerHTML={{ __html: pageSvg }} />
@@ -958,19 +1047,81 @@ export default function App() {
         />
       </div>
 
-      <footer className="flex items-center gap-3 border-t border-black/10 px-4 py-1.5 text-xs text-neutral-500 dark:border-white/10 dark:text-neutral-400">
-        <span>{pageCount > 0 ? `${pageCount}쪽` : "준비됨"}</span>
+      <footer className="flex h-7 shrink-0 items-center gap-3 border-t border-black/10 px-3 text-xs text-neutral-500 dark:border-white/10 dark:text-neutral-400">
+        {/* LEFT: doc name · page X / N + a go-to-page input. */}
+        {pageCount > 0 ? (
+          <>
+            {docName && <span className="max-w-[16rem] truncate font-medium text-neutral-600 dark:text-neutral-300">{docName}</span>}
+            <span className="flex items-center gap-1 tabular-nums">
+              <span>쪽</span>
+              <input
+                type="number"
+                min={1}
+                max={listCount}
+                value={gotoText === "" ? currentPage : gotoText}
+                onChange={(e) => setGotoText(e.currentTarget.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); goToPage(Number(e.currentTarget.value)); e.currentTarget.blur(); }
+                  else if (e.key === "Escape") { e.preventDefault(); setGotoText(""); e.currentTarget.blur(); }
+                }}
+                onBlur={(e) => { if (gotoText !== "") goToPage(Number(e.currentTarget.value)); }}
+                title="이동할 쪽 번호"
+                className="w-10 rounded border border-black/10 bg-white px-1 py-0.5 text-center tabular-nums outline-none focus:border-accent dark:border-white/10 dark:bg-neutral-900"
+              />
+              <span>/ {listCount}</span>
+            </span>
+          </>
+        ) : (
+          <span>준비됨</span>
+        )}
+
+        <span className="flex-1" />
+
+        {/* CENTER-RIGHT: zoom segmented control — 50 / 75 / 100 / 맞춤(가로). */}
+        {pageCount > 0 && (
+          <div className="flex items-center gap-0.5 rounded-md bg-black/5 p-0.5 dark:bg-white/10">
+            {([
+              { v: 0.5, label: "50%" },
+              { v: 0.75, label: "75%" },
+              { v: 1, label: "100%" },
+              { v: 0, label: "맞춤" },
+            ] as const).map((z) => (
+              <button
+                key={z.label}
+                onClick={() => setZoom(z.v)}
+                title={z.v === 0 ? "가로 맞춤" : `${z.label} 배율`}
+                className={`rounded px-1.5 py-0.5 tabular-nums ${
+                  zoom === z.v
+                    ? "bg-white text-neutral-900 shadow-sm dark:bg-neutral-700 dark:text-neutral-100"
+                    : "text-neutral-500 hover:bg-black/5 dark:text-neutral-400 dark:hover:bg-white/10"
+                }`}
+              >
+                {z.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* RIGHT: provider badge · edited/saved dot · render spinner. */}
+        {pageCount > 0 && (
+          <>
+            <span className="h-3.5 w-px bg-black/10 dark:bg-white/10" />
+            <span title={`AI 제공자: ${provider}`} className="flex items-center gap-1 text-[11px]">
+              <span className={`h-1.5 w-1.5 rounded-full ${provider !== "none" && provider !== "mock" ? "bg-emerald-500" : "bg-neutral-400"}`} />
+              {provider === "none" ? "AI 없음" : provider}
+            </span>
+            <span title={edited ? "저장되지 않은 변경 있음" : "저장됨"} className="flex items-center gap-1 text-[11px]">
+              <span className={`h-1.5 w-1.5 rounded-full ${edited ? "bg-amber-500" : "bg-emerald-500"}`} />
+              {edited ? "수정됨" : "저장됨"}
+            </span>
+          </>
+        )}
         {rendering && (
           <span className="flex items-center gap-1.5 text-neutral-400">
             <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
             렌더 중…
           </span>
         )}
-        <span className="flex-1" />
-        <span><kbd>⌘K</kbd> 명령</span>
-        <span><kbd>⌘L</kbd> 바이브</span>
-        <span><kbd>⌘F</kbd> 찾기</span>
-        <span><kbd>⌘E</kbd> 내보내기</span>
       </footer>
 
       {busyLabel && (
