@@ -32,6 +32,10 @@ type Props = {
   onEditCell: () => void;
   /** Delete the whole table block (표 삭제). */
   onDeleteTable: () => void;
+  /** Apply/clear a background color (배경색) to the active cell's row/col/cell or the whole table. */
+  onShade: (sel: "row" | "col" | "cell" | "all", color: string | null) => void;
+  /** Whether a specific cell is active (single-clicked) — gates the 칸/행/열 scope wording. */
+  hasActiveCell?: boolean;
   /** When false (e.g. the cell-editor modal is open), Delete/Backspace is ignored so we don't delete
    *  the table behind a modal. Defaults to deletable. */
   deletable?: boolean;
@@ -58,11 +62,16 @@ export default function TableOverlay({
   onAddRow,
   onEditCell,
   onDeleteTable,
+  onShade,
+  hasActiveCell = false,
   deletable = true,
   onMovePoint,
   onMoveEnd,
   onDismiss,
 }: Props) {
+  // 배경색 palette popover (toggled by the toolbar button).
+  const [shadeOpen, setShadeOpen] = useState(false);
+  const SWATCHES = ["#D8D8D8", "#CCCCCC", "#EEEEEE", "#E3F2FD", "#E8F5E9", "#FFF9C4", "#FCE4EC"];
   // `live` is the box the overlay RENDERS while dragging (local-only, no parent repaint); null = idle.
   // Reset whenever the committed box changes (a repaint re-places it from the fresh bbox).
   const [live, setLive] = useState<ScreenBox | null>(null);
@@ -197,10 +206,46 @@ export default function TableOverlay({
         <button className="rounded px-1.5 py-0.5 hover:bg-accent/10 hover:text-accent" {...verb(onEditCell)}>
           칸 편집
         </button>
+        <button
+          className={`rounded px-1.5 py-0.5 hover:bg-accent/10 hover:text-accent ${shadeOpen ? "bg-accent/10 text-accent" : ""}`}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); setShadeOpen((o) => !o); }}
+        >
+          🎨 배경색
+        </button>
         <button className="rounded px-1.5 py-0.5 text-red-600 hover:bg-red-500/10 dark:text-red-400" {...verb(onDeleteTable)}>
           표 삭제
         </button>
       </div>
+      {/* 배경색 palette — pick a SCOPE (이 칸 / 이 행 / 이 열) + a swatch (or 지우기). Applied to the
+          single-click active cell's row/col (or header row 0 when no cell is active). */}
+      {shadeOpen && (
+        <div
+          className="absolute -top-7 right-0 z-30 flex translate-y-[-100%] flex-col gap-1.5 rounded-md border border-black/10 bg-white p-2 text-[11px] shadow-xl dark:border-white/10 dark:bg-neutral-800"
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <div className="text-neutral-500 dark:text-neutral-400">{hasActiveCell ? "선택한 칸 기준" : "헤더(첫 행/열) 기준"} — 적용 범위 + 색</div>
+          {(["row", "col", "cell"] as const).map((scope) => (
+            <div key={scope} className="flex items-center gap-1.5">
+              <span className="w-10 shrink-0 text-neutral-600 dark:text-neutral-300">{scope === "row" ? "이 행" : scope === "col" ? "이 열" : "이 칸"}</span>
+              {SWATCHES.map((c) => (
+                <button
+                  key={c}
+                  title={c}
+                  onClick={(e) => { e.stopPropagation(); onShade(scope, c); setShadeOpen(false); }}
+                  className="h-4 w-4 rounded-[3px] border border-black/20 hover:ring-2 hover:ring-accent"
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+              <button
+                onClick={(e) => { e.stopPropagation(); onShade(scope, null); setShadeOpen(false); }}
+                title="색 지우기"
+                className="rounded border border-black/15 px-1 leading-none text-neutral-500 hover:bg-black/5 dark:border-white/15"
+              >지우기</button>
+            </div>
+          ))}
+        </div>
+      )}
       {/* Column-resize handles: a thin draggable divider on each INNER column boundary. Dragging one
           adjusts only that boundary (its neighbors hold); commit on pointerup → SetTableColWidths. */}
       {fracs.length > 2 && fracs.slice(1, -1).map((f, idx) => (
@@ -208,10 +253,12 @@ export default function TableOverlay({
           key={idx}
           onPointerDown={startColDrag(idx + 1)}
           title="드래그하여 열 너비 조정"
-          className="group absolute top-0 z-10 flex h-full w-2 -translate-x-1/2 cursor-col-resize items-stretch justify-center"
+          className="group absolute top-0 z-10 flex h-full w-2.5 -translate-x-1/2 cursor-col-resize items-stretch justify-center"
           style={{ left: `${f * r.width}px` }}
         >
-          <div className="w-0.5 bg-accent/40 group-hover:bg-accent" />
+          {/* Invisible by default so the table reads like the document; the divider line only appears
+              when you hover that boundary (no persistent grid clutter). */}
+          <div className="w-0.5 bg-transparent group-hover:bg-accent" />
         </div>
       ))}
     </div>

@@ -253,6 +253,13 @@ export const api = {
    *  (SetTableColWidths). `widths.length` must equal the table's column count. Returns new page count. */
   setTableColWidths: (section: number, index: number, widths: number[]) =>
     invoke<number>("set_table_col_widths", { section, index, widths }),
+  /** Cell shading (배경색) — set/clear the background color of cells in the `index`-th table as ONE undo
+   *  unit. `sel` ∈ "row"|"col"|"cell"|"all" keyed off `(row, col)`; `shade` = "#RRGGBB" or null to clear. */
+  setTableCellShade: (section: number, index: number, sel: "row" | "col" | "cell" | "all", row: number, col: number, shade: string | null) =>
+    invoke<number>("set_table_cell_shade", { section, index, sel, row, col, shade }),
+  /** OS clipboard (own-mode copy/paste) — reliable read/write via Rust (the WKWebView clipboard is not). */
+  clipboardRead: () => invoke<string>("clipboard_read"),
+  clipboardWrite: (text: string) => invoke<void>("clipboard_write", { text }),
   /** Table drag-to-move — relocate the block at `(section, from)` to index `to` as ONE undo unit
    *  (MoveBlock — works for tables and paragraphs). The drop commit. Returns the new page count. */
   moveTable: (section: number, from: number, to: number) =>

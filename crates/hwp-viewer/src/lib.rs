@@ -1121,6 +1121,49 @@ async fn set_table_col_widths(
     .map_err(|e| e.to_string())?
 }
 
+/// Shade (background-color) cells of the `index`-th table as ONE undo unit (`SetTableCellShade`).
+/// `sel` picks the target — "row"/"col"/"cell"/"all" using `(row, col)`; `shade` is "#RRGGBB" or null
+/// to clear. The 배경색 verb (header-row / column tinting).
+#[allow(non_snake_case)]
+#[tauri::command]
+async fn set_table_cell_shade(
+    section: usize,
+    index: usize,
+    sel: String,
+    row: usize,
+    col: usize,
+    shade: Option<String>,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<u32, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        match apply_intent(&mut s, Intent::SetTableCellShade { section, index, sel, row, col, shade })? {
+            Outcome::Edited { pages } => Ok(pages),
+            _ => Err("unexpected outcome".into()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Read the OS clipboard as text (own-mode ⌘V). Empty string when the clipboard holds no text.
+#[tauri::command]
+fn clipboard_read() -> Result<String, String> {
+    arboard::Clipboard::new()
+        .and_then(|mut c| c.get_text())
+        .or_else(|_| Ok::<String, arboard::Error>(String::new()))
+        .map_err(|e| e.to_string())
+}
+
+/// Write text to the OS clipboard (own-mode ⌘C).
+#[tauri::command]
+fn clipboard_write(text: String) -> Result<(), String> {
+    arboard::Clipboard::new()
+        .and_then(|mut c| c.set_text(text))
+        .map_err(|e| e.to_string())
+}
+
 /// Delete the block at `(section, index)` (e.g. 표 삭제) as ONE undo unit (`DeleteBlock`). Returns
 /// the new page count so the frontend repaints.
 #[tauri::command]
@@ -1462,6 +1505,9 @@ pub fn run() {
             set_paragraph_text,
             set_table_cell,
             set_table_col_widths,
+            set_table_cell_shade,
+            clipboard_read,
+            clipboard_write,
             delete_block
         ])
         .run(tauri::generate_context!())

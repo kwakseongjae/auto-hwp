@@ -5,7 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { tinykeys } from "tinykeys";
-import { api, type CaretRect, type FindMatch, type ImageBox, type OutlineItem, type Proposal, type ProposalOp, type TableBox } from "./api";
+import { api, type CellHit, type CaretRect, type FindMatch, type ImageBox, type OutlineItem, type Proposal, type ProposalOp, type TableBox } from "./api";
 import { sanitizeSvg } from "./sanitize";
 import { advanceOffset, imageBoxToScreen, pageToScreen, screenToPage } from "./caret";
 import ImageOverlay from "./ImageOverlay";
@@ -214,6 +214,25 @@ export default function App() {
   const tableSelRef = useRef<TableSel | null>(null);
   tableSelRef.current = tableSel;
 
+  // ---- Active CELL (own-render): a SINGLE click inside a table marks one cell as active (alongside the
+  // table overlay) so ⌘C/⌘V/Delete and 배경색 target THAT cell without entering the inline editor. A
+  // subtle ring highlights it; double-click still opens inline edit. Cleared on repaint/deselect. ----
+  type ActiveCell = {
+    page: number;
+    section: number;
+    block: number;
+    row: number;
+    col: number;
+    rows: number;
+    cols: number;
+    text: string;
+    box: { x: number; y: number; w: number; h: number }; // own-engine px box → recompute screen on zoom
+    screen: { left: number; top: number; width: number; height: number };
+  };
+  const [activeCell, setActiveCell] = useState<ActiveCell | null>(null);
+  const activeCellRef = useRef<ActiveCell | null>(null);
+  activeCellRef.current = activeCell;
+
   // ---- Point-to-scope PIN (the visible "여기" marker, own-render): when the user POINTS at a block
   // (a click on body text in 자체 렌더, or right-click/⋯ → AI 편집), we resolve it to a block band via
   // `own_hit_test` and pin a highlight + label over it so "가리키기"(pointing) is tangible and the
@@ -259,6 +278,19 @@ export default function App() {
   const [inlineEdit, setInlineEdit] = useState<InlineEdit | null>(null);
   const inlineEditRef = useRef<InlineEdit | null>(null);
   inlineEditRef.current = inlineEdit;
+  // True once the open editor has been committed/cancelled — so the unmount blur that fires when the
+  // textarea closes doesn't commit a SECOND time (Enter/Escape → close → unmount → blur). Reset by
+  // `openInlineEdit` when a new editor opens.
+  const inlineClosedRef = useRef(false);
+  const openInlineEdit = useCallback((ie: InlineEdit) => {
+    inlineClosedRef.current = false;
+    setScopePin(null);
+    setInlineEdit(ie);
+  }, []);
+  const cancelInlineEdit = useCallback(() => {
+    inlineClosedRef.current = true; // the unmount blur must NOT commit a cancel
+    setInlineEdit(null);
+  }, []);
 
   // Refs mirror the values that async (queued) edit/move closures must read at EXECUTION time, not at
   // the time the closure was created — React closures capture stale state otherwise.
@@ -374,6 +406,19 @@ export default function App() {
     setScopePin({ page, section, block, box, screen, kind, text });
   }, []);
 
+  // Re-place the active-cell highlight against the live svg rect/viewBox (mirrors recomputeScopePin).
+  const recomputeActiveCell = useCallback((page: number, cell: CellHit | null) => {
+    if (!cell) return setActiveCell(null);
+    const svg = svgForPage(page);
+    if (!svg) return setActiveCell(null);
+    const rect = svg.getBoundingClientRect();
+    const vb = svg.viewBox.baseVal;
+    const box = { x: cell.x, y: cell.y, w: cell.w, h: cell.h };
+    const screen = imageBoxToScreen(box, { width: rect.width, height: rect.height }, { width: vb.width, height: vb.height });
+    if (!screen || vb.width === 0 || vb.height === 0) return setActiveCell(null);
+    setActiveCell({ page, section: cell.section, block: cell.block, row: cell.row, col: cell.col, rows: cell.rows, cols: cell.cols, text: cell.text, box, screen });
+  }, []);
+
   // In 'own' mode the page list is paginated by OUR engine (its count can differ from rhwp's).
   const listCount = viewMode === "own" ? ownPageCount : pageCount;
   const listCountRef = useRef(listCount);
@@ -398,6 +443,16 @@ export default function App() {
     if (imageSelRef.current) recomputeImageBox(imageSelRef.current.page, imageSelRef.current.box);
     if (tableSelRef.current) recomputeTableBox(tableSelRef.current.page, tableSelRef.current.box);
     if (scopePinRef.current) { const p = scopePinRef.current; recomputeScopePin(p.page, p.section, p.block, p.box, p.kind, p.text); }
+    if (activeCellRef.current) {
+      const a = activeCellRef.current;
+      const svg = svgForPage(a.page);
+      if (svg) {
+        const r = svg.getBoundingClientRect();
+        const vb = svg.viewBox.baseVal;
+        const screen = imageBoxToScreen(a.box, { width: r.width, height: r.height }, { width: vb.width, height: vb.height });
+        if (screen) setActiveCell((cur) => (cur ? { ...cur, screen } : cur));
+      }
+    }
     // Re-place the inline editor too so it stays over its cell/paragraph when the zoom changes.
     const ie = inlineEditRef.current;
     if (ie) {
@@ -491,6 +546,7 @@ export default function App() {
     // The pin's band box is stale after a repaint (block indices/positions shift) — drop the visible
     // marker (the chat scope chip is managed separately by the commit/clear paths).
     setScopePin(null);
+    setActiveCell(null); // the cell's box/text is stale after a repaint
     setDropHint(null); // any in-progress drag indicator is moot after a repaint
     setInlineEdit(null); // a lingering inline editor's coords are stale after a repaint
     // The own-engine SVGs are regenerated from the live IR — drop them too so an edit repaints. Its
@@ -593,13 +649,23 @@ export default function App() {
     const host = (e.target as Element).closest("[data-index]");
     if (!host) return;
     const page = Number(host.getAttribute("data-index"));
-    const svg = host.querySelector("svg");
-    if (!svg || !Number.isFinite(page)) return;
+    if (!Number.isFinite(page)) return;
+    const clientX = e.clientX;
+    const clientY = e.clientY; // capture before any await (React may reuse the event)
+    // If an editor (A) is open, the first mousedown already blurred+committed it. Wait for that commit's
+    // repaint to SETTLE before resolving/opening B — so B opens AFTER A's invalidate (no clear) and its
+    // box is computed against the FRESH layout (A's edit may have shifted B). Otherwise open immediately.
+    if (inlineEditRef.current) {
+      try { await editQueue.current; } catch { /* edit error already toasted */ }
+      await new Promise<void>((resolve) => whenPagePainted(page, resolve));
+    }
+    const svg = svgForPage(page);
+    if (!svg) return;
     const rect = svg.getBoundingClientRect();
     const vb = svg.viewBox.baseVal;
     const dim = { width: rect.width, height: rect.height };
     const vbd = { width: vb.width, height: vb.height };
-    const pt = screenToPage(e.clientX, e.clientY, { left: rect.left, top: rect.top, ...dim }, vbd);
+    const pt = screenToPage(clientX, clientY, { left: rect.left, top: rect.top, ...dim }, vbd);
     if (!pt) return;
     try {
       // 1) A table cell → inline-edit that cell.
@@ -608,8 +674,7 @@ export default function App() {
         const box = { x: cell.x, y: cell.y, w: cell.w, h: cell.h };
         const screen = imageBoxToScreen(box, dim, vbd);
         if (screen) {
-          setScopePin(null);
-          setInlineEdit({ kind: "cell", page, section: cell.section, block: cell.block, row: cell.row, col: cell.col, text: cell.text, box, screen });
+          openInlineEdit({ kind: "cell", page, section: cell.section, block: cell.block, row: cell.row, col: cell.col, text: cell.text, box, screen });
         }
         return;
       }
@@ -627,8 +692,7 @@ export default function App() {
         const box = { x: hit.x, y: hit.y, w: hit.w, h: Math.max(hit.h, 320 / HWPUNIT_PER_PX) };
         const screen = imageBoxToScreen(box, dim, vbd);
         if (screen) {
-          setScopePin(null);
-          setInlineEdit({ kind: "para", page, section: hit.section, block: hit.block, text: hit.text, box, screen });
+          openInlineEdit({ kind: "para", page, section: hit.section, block: hit.block, text: hit.text, box, screen });
         }
       }
     } catch (err) { toast("warn", `${err}`); }
@@ -668,6 +732,7 @@ export default function App() {
         const img = await api.imageAt(page, pt.x, pt.y);
         if (img) {
           setTableSel(null);
+          setActiveCell(null);
           recomputeImageBox(page, img);
           setScope({ section: img.section, block: img.block, page });
           setScopePin(null);
@@ -679,10 +744,13 @@ export default function App() {
           recomputeTableBox(page, tbl);
           setScope({ section: tbl.section, block: tbl.block, page });
           setScopePin(null);
+          // Mark the clicked CELL active (for ⌘C/⌘V/Delete/배경색); the overlay still shows for the table.
+          recomputeActiveCell(page, await api.tableCellAt(page, pt.x, pt.y));
           return;
         }
         setImageSel(null);
         setTableSel(null);
+        setActiveCell(null);
         const hit = await api.ownHitTest(page, pt.x, pt.y);
         if (hit) {
           setScope({ section: hit.section, block: hit.block, page });
@@ -737,6 +805,21 @@ export default function App() {
       })();
     });
   }, [recomputeImageBox, whenPagePainted]);
+
+  // ---- table overlay: re-place the overlay on the table after a repaint (mirrors reselectAfterRepaint).
+  // Declared here (above the clipboard/edit handlers that use it) to avoid a use-before-declaration.
+  const reselectTableAfterRepaint = useCallback((page: number, section: number, block: number) => {
+    whenPagePainted(page, () => {
+      void (async () => {
+        try {
+          const box = await api.tableBbox(page, section, block);
+          recomputeTableBox(page, box);
+        } catch {
+          setTableSel(null);
+        }
+      })();
+    });
+  }, [recomputeTableBox, whenPagePainted]);
 
   // Resolve the document block under a DROP point (own-engine geometry), restricted to `section` (a
   // MoveBlock relocation stays within its section). Returns the target block index, or null on a miss /
@@ -874,92 +957,109 @@ export default function App() {
     });
   }, [enqueueEdit, invalidate, clearScope]);
 
-  // Copy/paste the POINTED block's text via the system clipboard (own-mode, when not inline-editing —
-  // the inline <textarea> handles native copy/paste itself). Cmd+C → copy the pin's text; Cmd+V → read
-  // the clipboard and replace the pointed block's text (paragraph only; tables edit per-cell).
-  const copyPointedText = useCallback(async () => {
+  // Clear the active cell's text (Delete/Backspace on a single-click-selected cell — distinct from
+  // deleting the whole table). Re-fetches the overlay/active-cell after the repaint.
+  const clearActiveCellText = useCallback((c: ActiveCell) => {
+    void enqueueEdit(async () => {
+      if (!canEditRef.current) return;
+      try {
+        const pages = await api.setTableCell(c.section, c.block, c.row, c.col, "");
+        setEdited(true);
+        invalidate(pages, null);
+        reselectTableAfterRepaint(c.page, c.section, c.block);
+        toast("info", "칸 내용 지움 (⌘Z로 되돌리기)");
+      } catch (err) {
+        toast("warn", `${err}`);
+      }
+    });
+  }, [enqueueEdit, invalidate, reselectTableAfterRepaint]);
+
+  // ⌘C / ⌘V on the POINTED target (own-mode, not inline-editing — the inline <textarea> handles native
+  // copy/paste). Targets the active CELL first, else the paragraph pin. Uses the OS clipboard via Rust
+  // (the WKWebView clipboard read is unreliable). Both copy AND paste toast.
+  const copyActiveText = useCallback(async () => {
+    const c = activeCellRef.current;
     const p = scopePinRef.current;
-    if (!p) return;
+    const text = c ? c.text : (p ? p.text : null);
+    if (text === null) return;
     try {
-      await navigator.clipboard.writeText(p.text ?? "");
-      toast("info", "복사됨");
+      await api.clipboardWrite(text ?? "");
+      toast("info", c ? "칸 복사됨" : "복사됨");
     } catch {
-      toast("warn", "클립보드 접근이 거부되었습니다");
+      toast("warn", "클립보드 복사 실패");
     }
   }, []);
-  const pastePointedText = useCallback(() => {
+  const pasteActiveText = useCallback(() => {
+    const c = activeCellRef.current;
     const p = scopePinRef.current;
-    if (!p || p.kind !== "paragraph") return; // tables/images paste per-cell via double-click edit
+    if (!c && !(p && p.kind === "paragraph")) return;
     void (async () => {
       let text = "";
       try {
-        text = await navigator.clipboard.readText();
+        text = await api.clipboardRead();
       } catch {
-        toast("warn", "클립보드 접근이 거부되었습니다");
+        toast("warn", "클립보드 읽기 실패");
         return;
       }
       if (!text) return;
       void enqueueEdit(async () => {
         if (!canEditRef.current) return;
         try {
-          const pages = await api.setParagraphText(p.section, p.block, text);
-          setEdited(true);
-          invalidate(pages, null);
+          if (c) {
+            const pages = await api.setTableCell(c.section, c.block, c.row, c.col, text);
+            setEdited(true);
+            invalidate(pages, null);
+            reselectTableAfterRepaint(c.page, c.section, c.block);
+            toast("info", "칸에 붙여넣음");
+          } else if (p) {
+            const pages = await api.setParagraphText(p.section, p.block, text);
+            setEdited(true);
+            invalidate(pages, null);
+            toast("info", "붙여넣음");
+          }
         } catch (err) {
           toast("warn", `${err}`);
         }
       });
     })();
-  }, [enqueueEdit, invalidate]);
+  }, [enqueueEdit, invalidate, reselectTableAfterRepaint]);
 
-  // own-mode keyboard lane for the POINTED block: ⌘C copy · ⌘V paste · Backspace/Delete delete. Gated
-  // so it never fires while typing (inline editor / chat / any input) or composing — own mode has no
-  // typing caret, so activeElement is <body> when a pin is active (a clean discriminator).
+  // own-mode keyboard lane for the POINTED target (active cell OR paragraph pin): ⌘C copy · ⌘V paste ·
+  // Backspace/Delete (clear cell / delete block). Gated so it never fires while typing (inline editor /
+  // chat / any input), composing (IME), a modal is open, or an image/table overlay owns the gesture.
   useEffect(() => {
-    if (!scopePin) return;
+    if (!scopePin && !activeCell) return;
     const isTyping = () => {
       if (inlineEditRef.current || composingRef.current) return true;
       const el = document.activeElement as HTMLElement | null;
       return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
     };
     const onKey = (e: KeyboardEvent) => {
-      // Bail when not in own mode, while typing, while a modal/popover/palette is open (focus may rest
-      // on a non-input there), or while an image/table overlay is selected (it owns its own Delete).
       if (viewModeRef.current !== "own" || isTyping() || modalOpenRef.current) return;
+      if (e.key === "Escape") { setActiveCell(null); clearScope(); return; }
       const mod = e.metaKey || e.ctrlKey;
       if (mod && (e.key === "c" || e.key === "C")) {
-        // Don't hijack a real text selection copy.
-        if (window.getSelection()?.toString()) return;
+        if (window.getSelection()?.toString()) return; // don't hijack a real text selection copy
         e.preventDefault();
-        void copyPointedText();
+        void copyActiveText();
       } else if (mod && (e.key === "v" || e.key === "V")) {
         e.preventDefault();
-        pastePointedText();
+        pasteActiveText();
       } else if (!mod && (e.key === "Backspace" || e.key === "Delete")) {
-        if (imageSelRef.current || tableSelRef.current) return; // the overlay deletes its own selection
+        const c = activeCellRef.current;
+        if (c) { e.preventDefault(); clearActiveCellText(c); return; } // clear the cell, NOT the table
+        if (imageSelRef.current || tableSelRef.current) return; // the overlay owns its own delete
         const p = scopePinRef.current;
         if (p) { e.preventDefault(); deleteBlockAt(p.section, p.block); }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [scopePin, copyPointedText, pastePointedText, deleteBlockAt]);
+  }, [scopePin, activeCell, copyActiveText, pasteActiveText, clearActiveCellText, deleteBlockAt, clearScope]);
 
   // ---- table overlay: commit (one undoable op), then re-place the overlay on the table. Mirrors the
   // image overlay lane (reselectAfterRepaint / commitImageMove) but commits via MoveBlock + table ops.
-  const reselectTableAfterRepaint = useCallback((page: number, section: number, block: number) => {
-    whenPagePainted(page, () => {
-      void (async () => {
-        try {
-          const box = await api.tableBbox(page, section, block);
-          recomputeTableBox(page, box);
-        } catch {
-          setTableSel(null);
-        }
-      })();
-    });
-  }, [recomputeTableBox, whenPagePainted]);
-
+  // (reselectTableAfterRepaint is declared earlier, next to reselectAfterRepaint.)
   const commitTableMove = useCallback((dropClientX: number, dropClientY: number) => {
     void enqueueEdit(async () => {
       const sel = tableSelRef.current;
@@ -998,6 +1098,37 @@ export default function App() {
       }
     });
   }, [enqueueEdit, invalidate, reselectTableAfterRepaint]);
+
+  // Apply/clear a background color to the active cell's ROW / COLUMN / the CELL / ALL of the table
+  // (SetTableCellShade). Row/col come from the single-click active cell (default 0,0 = header).
+  const commitShade = useCallback((sel: "row" | "col" | "cell" | "all", color: string | null) => {
+    void enqueueEdit(async () => {
+      const t = tableSelRef.current;
+      if (!t || !canEditRef.current) return;
+      const a = activeCellRef.current;
+      const row = a?.row ?? 0;
+      const col = a?.col ?? 0;
+      try {
+        const pages = await api.setTableCellShade(t.box.section, t.box.block, sel, row, col, color);
+        setEdited(true);
+        invalidate(pages, null);
+        reselectTableAfterRepaint(t.page, t.box.section, t.box.block);
+        // Re-establish the active-cell ring after the repaint (shading doesn't move cells, so the stored
+        // box is still valid) — so a follow-up 배경색 keeps targeting the same cell, not the header.
+        if (a) whenPagePainted(a.page, () => {
+          const svg = svgForPage(a.page);
+          if (!svg) return;
+          const rect = svg.getBoundingClientRect();
+          const vb = svg.viewBox.baseVal;
+          const screen = imageBoxToScreen(a.box, { width: rect.width, height: rect.height }, { width: vb.width, height: vb.height });
+          if (screen) setActiveCell({ ...a, screen });
+        });
+        toast("info", color ? "배경색 적용됨" : "배경색 지움");
+      } catch (err) {
+        toast("warn", `배경색 변경 실패: ${err}`);
+      }
+    });
+  }, [enqueueEdit, invalidate, reselectTableAfterRepaint, whenPagePainted]);
 
   const commitTableDeleteTable = useCallback(() => {
     void enqueueEdit(async () => {
@@ -1054,16 +1185,20 @@ export default function App() {
         if (!cell) return;
         const box = { x: cell.x, y: cell.y, w: cell.w, h: cell.h };
         const screen = imageBoxToScreen(box, dim, vbd);
-        if (screen) setInlineEdit({ kind: "cell", page: sel.page, section: cell.section, block: cell.block, row: cell.row, col: cell.col, text: cell.text, box, screen });
+        if (screen) openInlineEdit({ kind: "cell", page: sel.page, section: cell.section, block: cell.block, row: cell.row, col: cell.col, text: cell.text, box, screen });
       } catch { /* ignore */ }
     })();
   }, []);
 
   // Commit the inline editor (cell or paragraph) as ONE undo unit, then re-place the table overlay. An
   // empty paragraph stays editable; a structural-paragraph refusal is surfaced as a toast.
-  const commitInlineEdit = useCallback((value: string) => {
-    const ie = inlineEditRef.current;
-    if (!ie) return;
+  // Takes the EXACT target `ie` the value came from (captured in the textarea's render closure) — NOT
+  // inlineEditRef — so a value can never be paired with a different cell's address (the A→B overwrite
+  // bug: switching cells reused the uncontrolled textarea, leaving the ref pointing at B while the value
+  // was still A's). The textarea is also keyed per-address so it remounts fresh on a cell switch.
+  const commitInlineEdit = useCallback((ie: InlineEdit, value: string) => {
+    if (!ie || inlineClosedRef.current) return; // already committed/cancelled (e.g. the unmount blur)
+    inlineClosedRef.current = true;
     setInlineEdit(null);
     void enqueueEdit(async () => {
       if (!canEditRef.current) return;
@@ -1235,12 +1370,12 @@ export default function App() {
   const doUndo = useCallback(async () => {
     if (pageCountRef.current === 0) return;
     setPending(null); // an undo changes the doc shape under any pending proposal — drop it
-    invalidate(await api.undo());
+    invalidate(await api.undo(), null); // keep scroll — undo must not yank the view to page 1
     toast("info", "실행 취소");
   }, [invalidate]);
   const doRedo = useCallback(async () => {
     if (pageCountRef.current === 0) return;
-    invalidate(await api.redo());
+    invalidate(await api.redo(), null); // keep scroll
     toast("info", "다시 실행");
   }, [invalidate]);
 
@@ -1260,6 +1395,7 @@ export default function App() {
       clearImageSel();
       clearTableSel();
       setScopePin(null);
+      setActiveCell(null);
       setInlineEdit(null);
     }
     if (next === "html") void loadDocHtml();
@@ -1950,17 +2086,27 @@ export default function App() {
                           <TableOverlay
                             box={tableSel.screen}
                             colFracs={tableSel.colFracs}
+                            hasActiveCell={!!activeCell}
                             onCommitMove={commitTableMove}
                             onCommitColWidths={commitTableColWidths}
                             onAddRow={commitTableAddRow}
                             onEditCell={openCellEditor}
                             onDeleteTable={commitTableDeleteTable}
-                            deletable={!inlineEdit}
+                            onShade={commitShade}
+                            deletable={!inlineEdit && !activeCell}
                             onMovePoint={updateDropHint}
                             onMoveEnd={clearDropHint}
                             onDismiss={clearTableSel}
                           />
                         </div>
+                      )}
+                      {/* Active CELL highlight (own-render): a subtle ring on the single-clicked cell so
+                          ⌘C/⌘V/Delete/배경색 have a visible target. Click-through; double-click edits. */}
+                      {viewMode === "own" && activeCell && activeCell.page === item.index && (
+                        <div
+                          className="pointer-events-none absolute z-30 rounded-[1px] ring-2 ring-accent/70"
+                          style={{ left: `${activeCell.screen.left}px`, top: `${activeCell.screen.top}px`, width: `${activeCell.screen.width}px`, height: `${activeCell.screen.height}px` }}
+                        />
                       )}
                       {/* Point-to-scope PIN (own-render): a dashed accent box + a "✦ 여기" tag over the
                           block the user pointed at, so "가리키기"(pointing) is visible and the chat/insert
@@ -2012,6 +2158,9 @@ export default function App() {
                           doesn't re-trigger select/double-click on the page underneath. */}
                       {viewMode === "own" && inlineEdit && inlineEdit.page === item.index && (
                         <textarea
+                          // Keyed per cell/paragraph address so a cell SWITCH remounts a fresh node (an
+                          // uncontrolled textarea reused across cells kept the old text → wrote A into B).
+                          key={`ie-${inlineEdit.section}-${inlineEdit.block}-${inlineEdit.row ?? "p"}-${inlineEdit.col ?? "p"}`}
                           data-inline-edit
                           autoFocus
                           defaultValue={inlineEdit.text}
@@ -2020,10 +2169,10 @@ export default function App() {
                           onDoubleClick={(e) => e.stopPropagation()}
                           onPointerDown={(e) => e.stopPropagation()}
                           onInput={(e) => { const t = e.currentTarget; t.style.height = "auto"; t.style.height = `${Math.max(t.scrollHeight, inlineEdit.screen.height, 22)}px`; }}
-                          onBlur={(e) => commitInlineEdit(e.currentTarget.value)}
+                          onBlur={(e) => commitInlineEdit(inlineEdit, e.currentTarget.value)}
                           onKeyDown={(e) => {
-                            if (e.key === "Escape") { e.preventDefault(); setInlineEdit(null); }
-                            else if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitInlineEdit((e.currentTarget as HTMLTextAreaElement).value); }
+                            if (e.key === "Escape") { e.preventDefault(); cancelInlineEdit(); }
+                            else if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitInlineEdit(inlineEdit, (e.currentTarget as HTMLTextAreaElement).value); }
                           }}
                           style={{
                             position: "absolute",

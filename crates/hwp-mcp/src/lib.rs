@@ -708,6 +708,10 @@ pub enum Intent {
     /// Column resize — set the `index`-th table's column-width proportions as ONE undo unit
     /// (`SetTableColWidths`). `widths.len()` must equal the table's column count.
     SetTableColWidths { section: usize, index: usize, widths: Vec<i32> },
+    /// Cell shading — set/clear the background color of cells in the `index`-th table as ONE undo unit
+    /// (`SetTableCellShade`). `sel` ∈ {"row","col","cell","all"} keyed off `(row, col)`; `shade` is
+    /// "#RRGGBB" or None to clear.
+    SetTableCellShade { section: usize, index: usize, sel: String, row: usize, col: usize, shade: Option<String> },
     /// Block delete — remove the block at `(section, index)` as ONE undo unit (`DeleteBlock`).
     DeleteBlock { section: usize, index: usize },
 }
@@ -864,6 +868,19 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
         Intent::SetTableColWidths { section, index, widths } => {
             let doc = session.doc.as_mut().ok_or("no document open")?;
             doc.do_op(&hwp_ops::Op::SetTableColWidths { section, index, widths }).map_err(|e| e.to_string())?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::SetTableCellShade { section, index, sel, row, col, shade } => {
+            use hwp_ops::CellSel;
+            let cellsel = match sel.as_str() {
+                "row" => CellSel::Row(row),
+                "col" => CellSel::Col(col),
+                "all" => CellSel::All,
+                _ => CellSel::Cell(row, col),
+            };
+            let doc = session.doc.as_mut().ok_or("no document open")?;
+            doc.do_op(&hwp_ops::Op::SetTableCellShade { section, index, sel: cellsel, shade }).map_err(|e| e.to_string())?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }
