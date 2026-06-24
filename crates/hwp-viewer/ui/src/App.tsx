@@ -12,6 +12,7 @@ import { type Command } from "./commands";
 import { Palette } from "./Palette";
 import { Composer, type ComposerMode } from "./Composer";
 import { Chat, type Scope } from "./Chat";
+import { Button, IconButton, Sep, SegmentedControl } from "./ui";
 import { toast, Toaster } from "./toast";
 
 type CaretAnchor = { page: number; node: number; offset: number; len: number };
@@ -27,6 +28,20 @@ export default function App() {
   const [composer, setComposer] = useState<ComposerMode>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
+  // The full-screen busy overlay is BLOCKING, so only raise it for genuinely slow work: while busy, a
+  // thin top progress bar shows immediately, and the dimming overlay only appears if the op is still
+  // running after a short grace period (fast ops finish first → no jarring flash). `overlayBusy`
+  // gates the full overlay; the top bar tracks `busyLabel` directly.
+  const OVERLAY_DELAY_MS = 250;
+  const [overlayBusy, setOverlayBusy] = useState(false);
+  useEffect(() => {
+    if (!busyLabel) {
+      setOverlayBusy(false);
+      return;
+    }
+    const t = window.setTimeout(() => setOverlayBusy(true), OVERLAY_DELAY_MS);
+    return () => window.clearTimeout(t);
+  }, [busyLabel]);
   const [rendering, setRendering] = useState(false);
   // Preview mode: 'svg' = rhwp faithful render of the ORIGINAL (layout-preserve); 'html' = the
   // JSX(content)/CSS(design) → HTML render (the pivot view — shows edits cleanly, matches export);
@@ -785,20 +800,6 @@ export default function App() {
     setGotoText("");
   }, [virtualizer, listCount]);
 
-  const Tool = (p: { onClick: () => void; icon: string; label: string; keys?: string; tone?: "ai"; disabled?: boolean }) => (
-    <button
-      onClick={p.onClick}
-      disabled={p.disabled}
-      title={p.keys ? `${p.label} (${p.keys})` : p.label}
-      className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-sm hover:bg-neutral-200/70 disabled:opacity-35 dark:hover:bg-neutral-700/60 ${p.tone === "ai" ? "text-ai" : "text-neutral-700 dark:text-neutral-200"}`}
-    >
-      <span className="text-xs opacity-80">{p.icon}</span>
-      <span>{p.label}</span>
-      {p.keys && <kbd className="ml-0.5 rounded bg-black/5 px-1 text-[10px] text-neutral-400 dark:bg-white/10">{p.keys}</kbd>}
-    </button>
-  );
-  const Sep = () => <span className="mx-1 h-5 w-px bg-black/10 dark:bg-white/10" />;
-
   return (
     <div className="relative flex h-full flex-col bg-neutral-100 text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100">
       <header
@@ -819,59 +820,39 @@ export default function App() {
         )}
         <div data-tauri-drag-region className="h-6 flex-1" />
         {canEdit && (
-          <button
-            onClick={() => setChatOpen((o) => !o)}
-            title="AI 바이브 편집 (⌘L)"
-            className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs ${chatOpen ? "border-ai/40 bg-ai/10 text-ai" : "border-black/10 text-neutral-500 hover:bg-neutral-200/60 dark:border-white/10 dark:text-neutral-400 dark:hover:bg-neutral-700/60"}`}
-          >
+          <IconButton onClick={() => setChatOpen((o) => !o)} title="AI 바이브 편집 (⌘L)" active={chatOpen} tone="ai">
             ✦ 바이브 <kbd className="rounded bg-black/5 px-1 dark:bg-white/10">⌘L</kbd>
-          </button>
+          </IconButton>
         )}
-        <button
-          onClick={() => setPaletteOpen(true)}
-          className="flex items-center gap-1.5 rounded-md border border-black/10 px-2.5 py-1 text-xs text-neutral-500 hover:bg-neutral-200/60 dark:border-white/10 dark:text-neutral-400 dark:hover:bg-neutral-700/60"
-        >
+        <IconButton onClick={() => setPaletteOpen(true)} title="명령 팔레트 (⌘K)">
           명령 <kbd className="rounded bg-black/5 px-1 dark:bg-white/10">⌘K</kbd>
-        </button>
+        </IconButton>
       </header>
 
       {pageCount > 0 && (
         <div className="flex h-10 shrink-0 items-center gap-0.5 border-b border-black/10 bg-neutral-50/40 px-2 dark:border-white/10 dark:bg-neutral-800/30">
-          <Tool onClick={doOpen} icon="📂" label="열기" keys="⌘O" />
-          <Tool onClick={doExport} icon="⬇︎" label="HWPX" keys="⌘S" />
-          <Tool onClick={doExportHtml} icon="🅷" label="HTML" />
-          <Tool onClick={doExportPdf} icon="📄" label="PDF" />
+          <Button onClick={doOpen} icon="📂" label="열기" keys="⌘O" />
+          <Button onClick={doExport} icon="⬇︎" label="HWPX" keys="⌘S" />
+          <Button onClick={doExportHtml} icon="🅷" label="HTML" />
+          <Button onClick={doExportPdf} icon="📄" label="PDF" />
           <Sep />
-          <Tool onClick={() => setChatOpen((o) => !o)} icon="✦" label="바이브 편집" tone="ai" keys="⌘L" disabled={!canEdit} />
-          <Tool onClick={() => setComposer("table")} icon="▦" label="표" keys="⌘T" disabled={!canEdit} />
+          <Button onClick={() => setChatOpen((o) => !o)} icon="✦" label="바이브 편집" tone="ai" keys="⌘L" disabled={!canEdit} />
+          <Button onClick={() => setComposer("table")} icon="▦" label="표" keys="⌘T" disabled={!canEdit} />
           <Sep />
           {/* View surface: 원본(rhwp layout-preserve) · HTML(JSX/CSS pivot) · 자체 렌더(OUR engine).
               원본 is disabled once edited (rhwp can't re-render edits); the other two render the live IR. */}
-          <div className="flex items-center gap-0.5 rounded-md bg-black/5 p-0.5 dark:bg-white/10">
-            {([
-              { m: "svg", label: "원본", icon: "🖹", title: "원본 보기 (rhwp · 레이아웃 보존)", off: edited },
-              { m: "html", label: "HTML", icon: "🅷", title: "HTML 미리보기 (JSX/CSS · 내보내기와 동일)", off: false },
-              { m: "own", label: "자체 렌더", icon: "◈", title: "자체 렌더 (우리 엔진 · place_doc → SVG)", off: false },
-            ] as const).map((v) => (
-              <button
-                key={v.m}
-                onClick={() => setMode(v.m)}
-                disabled={v.off}
-                title={v.title}
-                className={`flex items-center gap-1 rounded px-2 py-1 text-sm disabled:opacity-35 ${
-                  viewMode === v.m
-                    ? "bg-white text-neutral-900 shadow-sm dark:bg-neutral-700 dark:text-neutral-100"
-                    : "text-neutral-600 hover:bg-black/5 dark:text-neutral-300 dark:hover:bg-white/10"
-                }`}
-              >
-                <span className="text-xs opacity-80">{v.icon}</span>
-                <span>{v.label}</span>
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            value={viewMode}
+            onChange={setMode}
+            segments={[
+              { value: "svg", label: "원본", icon: "🖹", title: "원본 보기 (rhwp · 레이아웃 보존)", disabled: edited },
+              { value: "html", label: "HTML", icon: "🅷", title: "HTML 미리보기 (JSX/CSS · 내보내기와 동일)" },
+              { value: "own", label: "자체 렌더", icon: "◈", title: "자체 렌더 (우리 엔진 · place_doc → SVG)" },
+            ]}
+          />
           <Sep />
-          <Tool onClick={doUndo} icon="↩︎" label="실행취소" keys="⌘Z" disabled={!canEdit} />
-          <Tool onClick={doRedo} icon="↪︎" label="다시실행" disabled={!canEdit} />
+          <Button onClick={doUndo} icon="↩︎" label="실행취소" keys="⌘Z" disabled={!canEdit} />
+          <Button onClick={doRedo} icon="↪︎" label="다시실행" disabled={!canEdit} />
         </div>
       )}
 
@@ -994,7 +975,13 @@ export default function App() {
                       {pageSvg !== undefined ? (
                         <div className="page-svg" dangerouslySetInnerHTML={{ __html: pageSvg }} />
                       ) : (
-                        <div className="grid aspect-[1/1.414] place-items-center text-neutral-300">{item.index + 1}쪽…</div>
+                        // Page-shaped skeleton (A4 1:1.414) with a subtle shimmer while the SVG renders —
+                        // reads as a loading page, not a blank box. The page number sits faintly centered.
+                        <div className="page-skeleton relative grid aspect-[1/1.414] place-items-center overflow-hidden rounded-lg">
+                          <span className="text-xs font-medium tabular-nums text-neutral-300 dark:text-neutral-600">
+                            {item.index + 1}쪽
+                          </span>
+                        </div>
                       )}
                       {viewMode === "svg" && caret && caretRect && caretBox && caret.page === item.index && (
                         <div
@@ -1079,27 +1066,17 @@ export default function App() {
 
         {/* CENTER-RIGHT: zoom segmented control — 50 / 75 / 100 / 맞춤(가로). */}
         {pageCount > 0 && (
-          <div className="flex items-center gap-0.5 rounded-md bg-black/5 p-0.5 dark:bg-white/10">
-            {([
-              { v: 0.5, label: "50%" },
-              { v: 0.75, label: "75%" },
-              { v: 1, label: "100%" },
-              { v: 0, label: "맞춤" },
-            ] as const).map((z) => (
-              <button
-                key={z.label}
-                onClick={() => setZoom(z.v)}
-                title={z.v === 0 ? "가로 맞춤" : `${z.label} 배율`}
-                className={`rounded px-1.5 py-0.5 tabular-nums ${
-                  zoom === z.v
-                    ? "bg-white text-neutral-900 shadow-sm dark:bg-neutral-700 dark:text-neutral-100"
-                    : "text-neutral-500 hover:bg-black/5 dark:text-neutral-400 dark:hover:bg-white/10"
-                }`}
-              >
-                {z.label}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            size="sm"
+            value={zoom}
+            onChange={setZoom}
+            segments={[
+              { value: 0.5, label: "50%", title: "50% 배율" },
+              { value: 0.75, label: "75%", title: "75% 배율" },
+              { value: 1, label: "100%", title: "100% 배율" },
+              { value: 0, label: "맞춤", title: "가로 맞춤" },
+            ]}
+          />
         )}
 
         {/* RIGHT: provider badge · edited/saved dot · render spinner. */}
@@ -1124,7 +1101,16 @@ export default function App() {
         )}
       </footer>
 
+      {/* Top progress bar — appears instantly while busy so quick ops give immediate feedback without
+          the blocking dim. A slim accent sliver slides across the very top edge. */}
       {busyLabel && (
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-[60] h-0.5 overflow-hidden">
+          <div className="top-progress absolute top-0 h-full rounded-full bg-accent" />
+        </div>
+      )}
+
+      {/* Blocking overlay — gated behind a short delay (overlayBusy) so it ONLY dims for slow ops. */}
+      {busyLabel && overlayBusy && (
         <div className="absolute inset-0 z-50 grid place-items-center bg-black/20 backdrop-blur-sm dark:bg-black/40">
           <div className="flex items-center gap-3 rounded-lg bg-neutral-50/90 px-5 py-3 text-sm shadow-lg ring-1 ring-black/10 dark:bg-neutral-800/90 dark:ring-white/10">
             <span className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-400 border-t-transparent" />
