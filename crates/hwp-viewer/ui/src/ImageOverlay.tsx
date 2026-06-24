@@ -39,6 +39,16 @@ type Props = {
   /** Commit a move: the DROP point in client (screen) px. The parent resolves which block that point
    *  lands on (own_hit_test) and relocates the image THERE — so it drops where you point. */
   onCommitMove: (dropClientX: number, dropClientY: number) => void;
+  /** Delete the selected image block (Delete/Backspace, like a normal doc app). */
+  onDelete: () => void;
+  /** When false (e.g. the cell-editor modal is open), Delete/Backspace is ignored so we don't delete
+   *  the block behind a modal. Defaults to deletable. */
+  deletable?: boolean;
+  /** Live drag feedback: the current pointer (client px) while MOVING, so the parent can show a
+   *  "drops here" insertion line at the resolved target block. Cleared via `onMoveEnd`. */
+  onMovePoint?: (clientX: number, clientY: number) => void;
+  /** The move drag ended (drop or cancel) — clear any drop indicator. */
+  onMoveEnd?: () => void;
   /** Deselect (Escape / click-away handled by the parent; this is the overlay's own dismiss). */
   onDismiss: () => void;
 };
@@ -46,7 +56,7 @@ type Props = {
 /** A live drag in progress: the originating handle + the pointer-down screen coords + the box at start. */
 type Drag = { handle: Handle; startX: number; startY: number; start: ScreenBox };
 
-export default function ImageOverlay({ box, pxPerPageX, pxPerPageY, onCommitResize, onCommitMove, onDismiss }: Props) {
+export default function ImageOverlay({ box, pxPerPageX, pxPerPageY, onCommitResize, onCommitMove, onDelete, deletable = true, onMovePoint, onMoveEnd, onDismiss }: Props) {
   // `live` is the box the overlay RENDERS while dragging (local-only, no parent repaint); null = idle
   // (render the committed `box` straight from props). Reset whenever the committed box changes.
   const [live, setLive] = useState<ScreenBox | null>(null);
@@ -83,7 +93,8 @@ export default function ImageOverlay({ box, pxPerPageX, pxPerPageY, onCommitResi
     const d = drag.current;
     if (!d) return;
     setLive(apply(d, e.clientX, e.clientY));
-  }, [apply]);
+    if (d.handle === "move") onMovePoint?.(e.clientX, e.clientY); // live "drops here" feedback
+  }, [apply, onMovePoint]);
 
   const onPointerUp = useCallback((e: PointerEvent) => {
     const d = drag.current;
@@ -93,6 +104,7 @@ export default function ImageOverlay({ box, pxPerPageX, pxPerPageY, onCommitResi
     if (!d) return;
     const next = apply(d, e.clientX, e.clientY);
     setLive(null); // the parent repaint will re-place the overlay from the fresh bbox
+    if (d.handle === "move") onMoveEnd?.(); // clear the drop indicator
     if (d.handle === "move") {
       const dyPx = next.top - d.start.top;
       const dxPx = next.left - d.start.left;
@@ -121,19 +133,23 @@ export default function ImageOverlay({ box, pxPerPageX, pxPerPageY, onCommitResi
     window.removeEventListener("pointerup", onPointerUp);
   }, [onPointerMove, onPointerUp]);
 
-  // Escape dismisses the selection.
+  // Escape dismisses the selection; Delete/Backspace removes the image block (normal doc-app gesture).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Ignore when typing in a field (the cell editor / chat) so we don't eat their Backspace.
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
       if (e.key === "Escape") onDismiss();
+      else if (deletable && (e.key === "Delete" || e.key === "Backspace")) { e.preventDefault(); onDelete(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onDismiss]);
+  }, [onDismiss, onDelete, deletable]);
 
   const r = live ?? box;
   return (
     <div
-      className="absolute z-20 cursor-move ring-2 ring-accent"
+      className="pointer-events-auto absolute z-20 cursor-move ring-2 ring-accent"
       style={{ left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` }}
       onPointerDown={startDrag("move")}
       role="presentation"

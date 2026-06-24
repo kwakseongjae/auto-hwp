@@ -27,6 +27,14 @@ type Props = {
   onEditCell: () => void;
   /** Delete the whole table block (표 삭제). */
   onDeleteTable: () => void;
+  /** When false (e.g. the cell-editor modal is open), Delete/Backspace is ignored so we don't delete
+   *  the table behind a modal. Defaults to deletable. */
+  deletable?: boolean;
+  /** Live drag feedback: the current pointer (client px) while dragging, so the parent can show a
+   *  "drops here" insertion line at the resolved target block. Cleared via `onMoveEnd`. */
+  onMovePoint?: (clientX: number, clientY: number) => void;
+  /** The drag ended (drop or cancel) — clear any drop indicator. */
+  onMoveEnd?: () => void;
   /** Deselect (Escape / click-away handled by the parent; this is the overlay's own dismiss). */
   onDismiss: () => void;
 };
@@ -43,6 +51,9 @@ export default function TableOverlay({
   onAddRow,
   onEditCell,
   onDeleteTable,
+  deletable = true,
+  onMovePoint,
+  onMoveEnd,
   onDismiss,
 }: Props) {
   // `live` is the box the overlay RENDERS while dragging (local-only, no parent repaint); null = idle.
@@ -59,7 +70,8 @@ export default function TableOverlay({
     if (Math.abs(dy) > MIN_DRAG_PX || Math.abs(dx) > MIN_DRAG_PX) d.moved = true;
     // Only the vertical translation matters (the table keeps its width); show it dragging up/down.
     setLive({ ...d.start, top: d.start.top + dy });
-  }, []);
+    if (d.moved) onMovePoint?.(e.clientX, e.clientY); // live "drops here" feedback
+  }, [onMovePoint]);
 
   const onPointerUp = useCallback((e: PointerEvent) => {
     const d = drag.current;
@@ -68,12 +80,13 @@ export default function TableOverlay({
     window.removeEventListener("pointerup", onPointerUp);
     if (!d) return;
     setLive(null); // the parent repaint will re-place the overlay from the fresh bbox
+    onMoveEnd?.(); // clear the drop indicator
     const dyPx = e.clientY - d.startY;
     const dxPx = e.clientX - d.startX;
     // Ignore a trivial jitter (a click that didn't really drag) so a select doesn't relocate; otherwise
     // hand the parent the DROP point so it can relocate the table to whatever block lands there.
     if (d.moved && (Math.abs(dyPx) > MIN_DRAG_PX || Math.abs(dxPx) > MIN_DRAG_PX)) onCommitMove(e.clientX, e.clientY);
-  }, [onPointerMove, onCommitMove]);
+  }, [onPointerMove, onCommitMove, onMoveEnd]);
 
   const startDrag = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
@@ -89,14 +102,18 @@ export default function TableOverlay({
     window.removeEventListener("pointerup", onPointerUp);
   }, [onPointerMove, onPointerUp]);
 
-  // Escape dismisses the selection.
+  // Escape dismisses the selection; Delete/Backspace removes the whole table (normal doc-app gesture).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Ignore when typing in a field (cell editor / chat) so we don't eat their Backspace.
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
       if (e.key === "Escape") onDismiss();
+      else if (deletable && (e.key === "Delete" || e.key === "Backspace")) { e.preventDefault(); onDeleteTable(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onDismiss]);
+  }, [onDismiss, onDeleteTable, deletable]);
 
   // A toolbar button: stop the press from starting a move-drag, run the verb on click.
   const verb = (run: () => void) => ({

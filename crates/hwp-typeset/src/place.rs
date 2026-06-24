@@ -69,6 +69,33 @@ pub struct PlacedTable {
     /// the column count + the append-at row) without a second query.
     pub rows: usize,
     pub cols: usize,
+    /// Per-cell page rects (provenance only) so a double-click can resolve which CELL was hit — the
+    /// basis for direct "표에 내용 작성" (point a cell → edit it). Empty for tables placed before this
+    /// was added; populated by `place_table`.
+    pub cells: Vec<PlacedCell>,
+}
+
+/// One placed table cell's page rect + its `(row, col)` address (provenance only; not drawn). Powers
+/// `table_cell_at` — a double-click → the cell editor for exactly the clicked cell.
+#[derive(Clone, Debug)]
+pub struct PlacedCell {
+    pub row: usize,
+    pub col: usize,
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+impl PlacedTable {
+    /// The cell containing page-space `(x, y)` — tightest (smallest-area) on overlap so a merged cell
+    /// doesn't swallow a smaller neighbour. `None` if the point is outside every cell.
+    pub fn cell_at(&self, x: f64, y: f64) -> Option<&PlacedCell> {
+        self.cells
+            .iter()
+            .filter(|c| x >= c.x && x <= c.x + c.w && y >= c.y && y <= c.y + c.h)
+            .min_by(|a, b| (a.w * a.h).total_cmp(&(b.w * b.h)))
+    }
 }
 
 /// What kind of top-level block a [`PlacedBlock`] band came from — lets a point-action UI label the
@@ -543,7 +570,9 @@ fn place_table(
         block,
         rows: t.rows,
         cols: t.cols,
+        cells: Vec::new(), // filled in the loop below, then attached
     });
+    let mut placed_cells: Vec<PlacedCell> = Vec::new();
     for c in &t.cells {
         if !c.active {
             continue;
@@ -560,6 +589,8 @@ fn place_table(
         let cy = row_top[c.row];
         let row_end = (c.row + c.row_span.max(1)).min(t.rows);
         let ch = (row_top[row_end] - row_top[c.row]).max(1.0);
+        // Cell provenance rect (point→cell for double-click editing).
+        placed_cells.push(PlacedCell { row: c.row, col: c.col, x: cx, y: cy, w: cw, h: ch });
         // Cell shade (fill) UNDER its border so the border stays visible.
         if let Some(shade) = c.shade_color {
             pg.rects.push(PlacedRect { x: cx, y: cy, w: cw, h: ch, fill: Some(shade) });
@@ -599,6 +630,10 @@ fn place_table(
         // Cell TEXT: place the cell's paragraph glyphs inside the box, vertically centered (the
         // Korean gov-doc convention: vertAlign=CENTER), honoring each paragraph's horizontal align.
         place_cell_content(pg, &c.blocks, cx, cy, cw, ch, doc, fonts);
+    }
+    // Attach the per-cell rects to the table we pushed (point→cell for double-click editing).
+    if let Some(pt) = pg.tables.last_mut() {
+        pt.cells = placed_cells;
     }
 }
 

@@ -228,6 +228,15 @@ export default function App() {
   const scopePinRef = useRef<ScopePin | null>(null);
   scopePinRef.current = scopePin;
 
+  // ---- Drag drop INDICATOR (own-render): while dragging an image/table, a horizontal accent line marks
+  // the block its drop would land before, so "들어갈 곳" is visible. `top` is screen-px in the page
+  // wrapper. Resolved (throttled, one-in-flight) via own_hit_test on pointer-move; cleared on drop. ----
+  const [dropHint, setDropHint] = useState<{ page: number; top: number } | null>(null);
+  const dropHintBusy = useRef(false);
+  // True only while a drag is in progress — an own_hit_test resolve that returns AFTER the drop must
+  // NOT re-show the indicator (otherwise it sticks after the drag ends).
+  const dropDragActive = useRef(false);
+
   // ---- Cell editor: a tiny inline form for the table overlay's 칸 편집 verb. Asks for a (row, col)
   // address + the new text, then commits ONE `SetTableCell` op. Screen-anchored near the table box. ----
   type CellEdit = {
@@ -269,6 +278,18 @@ export default function App() {
   function svgForPage(page: number): SVGSVGElement | null {
     return scrollRef.current?.querySelector(`[data-index="${page}"] svg`) ?? null;
   }
+  // Run `cb` once `page`'s SVG is back in the DOM after a repaint (an edit clears the cache, so the SVG
+  // is briefly a skeleton while it re-fetches). Without this an overlay re-place fires too early —
+  // `svgForPage` returns null → the selection/overlay vanishes (the "행 추가 시 UI가 튀는" flicker).
+  // Polls a bounded number of frames so an off-screen page (never repainted) doesn't loop forever.
+  const whenPagePainted = useCallback((page: number, cb: () => void) => {
+    let tries = 0;
+    const tick = () => {
+      if (svgForPage(page) || tries++ > 40) { cb(); return; }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }, []);
   const recomputeCaretBox = useCallback((page: number, r: CaretRect | null) => {
     if (!r) return setCaretBox(null);
     const svg = svgForPage(page);
@@ -416,6 +437,18 @@ export default function App() {
   // `scrollTo === null` keeps the current scroll (chat edits shouldn't yank the view to the doc end —
   // the "결과가 튀는" issue); a number scrolls to that page.
   const invalidate = useCallback((n: number, scrollTo: number | null = 0) => {
+    // Keep-scroll edits (scrollTo === null) must hold the viewport STILL: clearing the cache collapses
+    // pages to skeletons for a frame, which otherwise yanks the scroll (the "행 추가 시 UI가 튀는"
+    // jank). Snapshot scrollTop now and pin it back over the next few frames as pages re-measure.
+    const holdScroll = scrollTo === null ? (scrollRef.current?.scrollTop ?? null) : null;
+    if (holdScroll !== null) {
+      let frames = 0;
+      const pin = () => {
+        if (scrollRef.current) scrollRef.current.scrollTop = holdScroll;
+        if (frames++ < 6) requestAnimationFrame(pin);
+      };
+      requestAnimationFrame(pin);
+    }
     setSvgCache({});
     setPageCount(n);
     clearCaret();
@@ -424,6 +457,7 @@ export default function App() {
     // The pin's band box is stale after a repaint (block indices/positions shift) — drop the visible
     // marker (the chat scope chip is managed separately by the commit/clear paths).
     setScopePin(null);
+    setDropHint(null); // any in-progress drag indicator is moot after a repaint
     // The own-engine SVGs are regenerated from the live IR — drop them too so an edit repaints. Its
     // page count is fetched lazily (or eagerly when 'own' is the active mode).
     setOwnSvgCache({});
@@ -515,6 +549,37 @@ export default function App() {
     void openPointMenu(host, { clientX: cx, clientY: cy }, { x: at.right, y: at.bottom + 4 });
   }, [openPointMenu]);
 
+  // ---- double-click a table cell (own-render) → open the cell editor pre-filled for THAT cell, so
+  // writing into a table is "더블클릭 → 입력" instead of typing a row/col into a form. Resolves the
+  // cell via the own-engine geometry (table_cell_at); a double-click off any table cell is ignored. ----
+  async function onPageDoubleClick(e: React.MouseEvent) {
+    if (!canEditRef.current || viewModeRef.current !== "own") return;
+    const host = (e.target as Element).closest("[data-index]");
+    if (!host) return;
+    const page = Number(host.getAttribute("data-index"));
+    const svg = host.querySelector("svg");
+    if (!svg || !Number.isFinite(page)) return;
+    const rect = svg.getBoundingClientRect();
+    const vb = svg.viewBox.baseVal;
+    const pt = screenToPage(e.clientX, e.clientY, { left: rect.left, top: rect.top, width: rect.width, height: rect.height }, { width: vb.width, height: vb.height });
+    if (!pt) return;
+    try {
+      const cell = await api.tableCellAt(page, pt.x, pt.y);
+      if (cell) {
+        setCellEdit({
+          section: cell.section,
+          block: cell.block,
+          rows: cell.rows,
+          cols: cell.cols,
+          row: cell.row,
+          col: cell.col,
+          text: cell.text,
+          at: { left: e.clientX, top: e.clientY },
+        });
+      }
+    } catch { /* not over a table cell — ignore */ }
+  }
+
   // ---- caret: click-to-place ----
   async function onPageClick(e: React.MouseEvent) {
     if (!canEditRef.current) return;
@@ -605,22 +670,37 @@ export default function App() {
   // After the op the doc repaints (invalidate clears the SVG cache + selection); we re-fetch the new
   // bbox for the resolved anchor once the fresh page paints so the handles stay on the image. ----
   const reselectAfterRepaint = useCallback((page: number, section: number, block: number) => {
-    // Wait for the repaint (cache cleared → SVG re-fetched) before the bbox query, then re-place.
-    queueMicrotask(async () => {
-      try {
-        const box = await api.imageBbox(page, section, block);
-        recomputeImageBox(page, box);
-      } catch {
-        setImageSel(null);
-      }
+    // Wait for the actual repaint (cache cleared → SVG re-fetched) before the bbox query + re-place, so
+    // the handles don't vanish on a still-skeleton page.
+    whenPagePainted(page, () => {
+      void (async () => {
+        try {
+          const box = await api.imageBbox(page, section, block);
+          recomputeImageBox(page, box);
+        } catch {
+          setImageSel(null);
+        }
+      })();
     });
-  }, [recomputeImageBox]);
+  }, [recomputeImageBox, whenPagePainted]);
 
   // Resolve the document block under a DROP point (own-engine geometry), restricted to `section` (a
   // MoveBlock relocation stays within its section). Returns the target block index, or null on a miss /
   // cross-section drop. Shared by the table + image drag-to-move commits so a drop lands WHERE pointed.
+  // The page wrapper under a screen point, SKIPPING the drag overlay (which sits on top and would
+  // otherwise resolve to its ORIGINAL page even when dragged over a different one).
+  const pageHostAt = useCallback((clientX: number, clientY: number): Element | null => {
+    const els = document.elementsFromPoint(clientX, clientY);
+    for (const el of els) {
+      if (el.closest("[data-image-overlay],[data-table-overlay]")) continue;
+      const host = el.closest("[data-index]");
+      if (host) return host;
+    }
+    return null;
+  }, []);
+
   const resolveDropBlock = useCallback(async (clientX: number, clientY: number, section: number): Promise<number | null> => {
-    const host = document.elementFromPoint(clientX, clientY)?.closest("[data-index]") ?? null;
+    const host = pageHostAt(clientX, clientY);
     const svg = host?.querySelector("svg") ?? null;
     if (!host || !svg) return null;
     const page = Number(host.getAttribute("data-index"));
@@ -634,7 +714,35 @@ export default function App() {
       if (hit && hit.section === section) return hit.block;
     } catch { /* miss → no target */ }
     return null;
-  }, []);
+  }, [pageHostAt]);
+
+  // Live drop indicator: resolve the block under the dragged pointer (throttled to one in-flight call)
+  // and place a horizontal accent line at its top edge. Skips the overlay so the page under the pointer
+  // is used, mirroring resolveDropBlock.
+  const updateDropHint = useCallback((clientX: number, clientY: number) => {
+    dropDragActive.current = true; // a drag is live
+    if (dropHintBusy.current) return;
+    const host = pageHostAt(clientX, clientY);
+    const svg = host?.querySelector("svg") ?? null;
+    if (!host || !svg) return;
+    const page = Number(host.getAttribute("data-index"));
+    if (!Number.isFinite(page)) return;
+    const rect = svg.getBoundingClientRect();
+    const vb = svg.viewBox.baseVal;
+    const pt = screenToPage(clientX, clientY, { left: rect.left, top: rect.top, width: rect.width, height: rect.height }, { width: vb.width, height: vb.height });
+    if (!pt) return;
+    dropHintBusy.current = true;
+    api.ownHitTest(page, pt.x, pt.y)
+      .then((hit) => {
+        // Drop already ended (this resolve lost the race) → don't resurrect the indicator.
+        if (!hit || !dropDragActive.current) return;
+        const screen = imageBoxToScreen({ x: hit.x, y: hit.y, w: hit.w, h: hit.h }, { width: rect.width, height: rect.height }, { width: vb.width, height: vb.height });
+        if (screen) setDropHint({ page, top: screen.top });
+      })
+      .catch(() => {})
+      .finally(() => { dropHintBusy.current = false; });
+  }, [pageHostAt]);
+  const clearDropHint = useCallback(() => { dropDragActive.current = false; setDropHint(null); }, []);
 
   const commitImageResize = useCallback((pageW: number, pageH: number) => {
     void enqueueEdit(async () => {
@@ -677,18 +785,38 @@ export default function App() {
     });
   }, [enqueueEdit, invalidate, reselectAfterRepaint, resolveDropBlock]);
 
+  // Delete the selected image block (Delete/Backspace on the overlay) — ONE undoable op, then drop the
+  // selection. Mirrors 표 삭제 (commitTableDeleteTable).
+  const commitImageDelete = useCallback(() => {
+    void enqueueEdit(async () => {
+      const sel = imageSelRef.current;
+      if (!sel || !canEditRef.current) return;
+      try {
+        const pages = await api.deleteBlock(sel.box.section, sel.box.block);
+        setEdited(true);
+        invalidate(pages, null);
+        setImageSel(null); // the image is gone — drop the selection
+        toast("info", "이미지 삭제됨 (⌘Z로 되돌리기)");
+      } catch (err) {
+        toast("warn", `이미지 삭제 실패: ${err}`);
+      }
+    });
+  }, [enqueueEdit, invalidate]);
+
   // ---- table overlay: commit (one undoable op), then re-place the overlay on the table. Mirrors the
   // image overlay lane (reselectAfterRepaint / commitImageMove) but commits via MoveBlock + table ops.
   const reselectTableAfterRepaint = useCallback((page: number, section: number, block: number) => {
-    queueMicrotask(async () => {
-      try {
-        const box = await api.tableBbox(page, section, block);
-        recomputeTableBox(page, box);
-      } catch {
-        setTableSel(null);
-      }
+    whenPagePainted(page, () => {
+      void (async () => {
+        try {
+          const box = await api.tableBbox(page, section, block);
+          recomputeTableBox(page, box);
+        } catch {
+          setTableSel(null);
+        }
+      })();
     });
-  }, [recomputeTableBox]);
+  }, [recomputeTableBox, whenPagePainted]);
 
   const commitTableMove = useCallback((dropClientX: number, dropClientY: number) => {
     void enqueueEdit(async () => {
@@ -1563,6 +1691,7 @@ export default function App() {
               // Zoom-derived column width (replaces max-w-3xl); height is the virtualizer total.
               style={{ width: `${pageWidth}px`, height: `${virtualizer.getTotalSize()}px` }}
               onClick={(e) => void onPageClick(e)}
+              onDoubleClick={(e) => void onPageDoubleClick(e)}
               onContextMenu={(e) => void onPageContextMenu(e)}
             >
               {virtualizer.getVirtualItems().map((item) => {
@@ -1617,13 +1746,17 @@ export default function App() {
                       {/* Image move/resize overlay (own-render only): 8 handles over the selected
                           image, live-drag = CSS-only, pointerup = ONE undoable op (resize/move). */}
                       {viewMode === "own" && imageSel && imageSel.page === item.index && (
-                        <div data-image-overlay className="absolute inset-0 z-20">
+                        <div data-image-overlay className="pointer-events-none absolute inset-0 z-20">
                           <ImageOverlay
                             box={imageSel.screen}
                             pxPerPageX={imageSel.pxPerPageX}
                             pxPerPageY={imageSel.pxPerPageY}
                             onCommitResize={commitImageResize}
                             onCommitMove={commitImageMove}
+                            onDelete={commitImageDelete}
+                            deletable={!cellEdit}
+                            onMovePoint={updateDropHint}
+                            onMoveEnd={clearDropHint}
                             onDismiss={clearImageSel}
                           />
                         </div>
@@ -1632,13 +1765,16 @@ export default function App() {
                           to relocate the table (MoveBlock), or use the toolbar verbs (행 추가 / 칸 편집
                           / 표 삭제). Live-drag = CSS-only, pointerup = ONE undoable op. */}
                       {viewMode === "own" && tableSel && tableSel.page === item.index && (
-                        <div data-table-overlay className="absolute inset-0 z-20">
+                        <div data-table-overlay className="pointer-events-none absolute inset-0 z-20">
                           <TableOverlay
                             box={tableSel.screen}
                             onCommitMove={commitTableMove}
                             onAddRow={commitTableAddRow}
                             onEditCell={openCellEditor}
                             onDeleteTable={commitTableDeleteTable}
+                            deletable={!cellEdit}
+                            onMovePoint={updateDropHint}
+                            onMoveEnd={clearDropHint}
                             onDismiss={clearTableSel}
                           />
                         </div>
@@ -1668,6 +1804,17 @@ export default function App() {
                                 className="ml-0.5 rounded px-0.5 leading-none hover:bg-white/25"
                               >✕</button>
                             </span>
+                          </div>
+                        </div>
+                      )}
+                      {/* Drag drop INDICATOR (own-render): a horizontal accent line at the block the
+                          drop would land before, so "들어갈 곳" is visible while dragging an image/table. */}
+                      {viewMode === "own" && dropHint && dropHint.page === item.index && (
+                        <div className="pointer-events-none absolute inset-x-0 z-30" style={{ top: `${dropHint.top}px` }}>
+                          <div className="mx-2 flex items-center gap-1">
+                            <span className="h-2 w-2 -translate-y-1/2 rounded-full bg-accent" />
+                            <span className="h-0.5 flex-1 -translate-y-1/2 rounded-full bg-accent" />
+                            <span className="-translate-y-1/2 rounded bg-accent px-1 py-0.5 text-[9px] font-medium text-white">여기로 이동</span>
                           </div>
                         </div>
                       )}
@@ -1929,11 +2076,15 @@ export default function App() {
         <>
           <div className="fixed inset-0 z-40" onClick={() => setPointMenu(null)} onContextMenu={(e) => { e.preventDefault(); setPointMenu(null); }} />
           <div
-            className="fixed z-50 min-w-[10rem] overflow-hidden rounded-lg border border-black/10 bg-white py-1 text-sm shadow-xl dark:border-white/10 dark:bg-neutral-800"
-            style={{ left: Math.min(pointMenu.x, window.innerWidth - 184), top: Math.min(pointMenu.y, window.innerHeight - 96) }}
+            className="fixed z-50 w-64 overflow-hidden rounded-lg border border-black/10 bg-white py-1 text-sm shadow-xl dark:border-white/10 dark:bg-neutral-800"
+            style={{ left: Math.min(pointMenu.x, window.innerWidth - 264), top: Math.min(pointMenu.y, window.innerHeight - 150) }}
           >
+            {/* Header: what was pointed at, so the verbs below read as "do this TO this block". */}
+            <div className="px-3 py-1.5 text-[11px] text-neutral-400 dark:text-neutral-500">
+              {pointMenu.kind === "table" ? "표" : pointMenu.kind === "image" ? "그림" : "문단"} 위치 · {pointMenu.page + 1}쪽 기준
+            </div>
             <button
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-ai/10"
+              className="flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left hover:bg-ai/10"
               onClick={() => {
                 setScope({ section: pointMenu.section, block: pointMenu.block, page: pointMenu.page });
                 // Own-render: drop the visible pin on the resolved band so the target is unmistakable.
@@ -1941,19 +2092,25 @@ export default function App() {
                 setChatOpen(true);
                 setPointMenu(null);
               }}
-            >✦ 여기를 AI로 편집</button>
+            >
+              <span className="font-medium text-ai">✦ 여기를 AI로 편집</span>
+              <span className="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">이 위치를 대상으로 채팅을 엽니다 — “이 표 채워줘”처럼 요청</span>
+            </button>
             <button
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-accent/10"
+              className="flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left hover:bg-accent/10"
               onClick={() => {
                 const sel = pointMenu; setPointMenu(null);
                 void (async () => {
                   const path = await openDialog({ multiple: false, filters: [{ name: "이미지", extensions: ["png", "jpg", "jpeg", "gif", "bmp", "webp"] }] });
                   if (typeof path !== "string") return;
-                  try { const n = await api.applyImageDrop(path, { section: sel.section, block: sel.block }); setEdited(true); invalidate(n, null); toast("info", "이미지 삽입됨"); }
+                  try { const n = await api.applyImageDrop(path, { section: sel.section, block: sel.block }); setEdited(true); invalidate(n, sel.page); toast("info", "이미지 삽입됨 (⌘Z로 되돌리기)"); }
                   catch (err) { toast("warn", `이미지 삽입 실패: ${err}`); }
                 })();
               }}
-            >🖼️ 여기에 이미지 삽입</button>
+            >
+              <span className="font-medium">🖼️ 여기에 이미지 삽입</span>
+              <span className="text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">파일을 골라 이 위치 바로 뒤에 넣습니다 (문서 끝 아님)</span>
+            </button>
           </div>
         </>
       )}

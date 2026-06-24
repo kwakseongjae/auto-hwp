@@ -888,13 +888,25 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             let cell = t.cells.iter_mut().find(|c| c.active && c.row == row && c.col == col).ok_or_else(|| {
                 Error::Other(format!("SetTableCell: no active cell at (row {row}, col {col})"))
             })?;
+            // Preserve the cell's CURRENT run style for a PLAIN (unstyled) text edit — so replacing the
+            // text of a blue/italic template cell keeps its look instead of resetting to black-plain.
+            // A run that carried explicit styling (interned to something other than the default `plain`)
+            // overrides as before; only default-styled runs adopt the existing shape.
+            let existing_shape = cell.blocks.iter().find_map(|b| match b {
+                Block::Paragraph(p) => p.runs.first().map(|r| r.char_shape),
+                _ => None,
+            });
+            let resolve_shape = |cs: usize| match existing_shape {
+                Some(prev) if cs == plain => prev,
+                _ => cs,
+            };
             let para_runs = if interned.is_empty() {
                 // An empty cell still needs one (empty) run so it round-trips/re-emits cleanly.
-                vec![Run { char_shape: plain, content: vec![Inline::Text(String::new())], ..Default::default() }]
+                vec![Run { char_shape: existing_shape.unwrap_or(plain), content: vec![Inline::Text(String::new())], ..Default::default() }]
             } else {
                 interned
                     .into_iter()
-                    .map(|(char_shape, text)| Run { char_shape, content: vec![Inline::Text(text)], ..Default::default() })
+                    .map(|(char_shape, text)| Run { char_shape: resolve_shape(char_shape), content: vec![Inline::Text(text)], ..Default::default() })
                     .collect()
             };
             cell.blocks = vec![Block::Paragraph(Paragraph {

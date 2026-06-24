@@ -394,22 +394,23 @@ impl<'a> Lifter<'a> {
         out
     }
 
-    /// Lift a cell's diagonal line (HWP borderFill `diagonal`) when one is drawn. `diagonal_type`
-    /// 0=Slash (/), 1=BackSlash (\\); 2 (Crooked) is approximated as a BackSlash. A `line_type`-less
-    /// diagonal (width 0 / 선없음 implied) yields `None`. The section-header banner's right cell uses
-    /// this — with its right/inner edges suppressed — to form the pointed pentagon end.
+    /// Lift a cell's diagonal line (HWP borderFill `diagonal`) ONLY when the borderFill's `attr`
+    /// property bits actually request one. CRITICAL: a borderFill ALWAYS carries a `diagonal` border
+    /// (type/width/color) as the STYLE to use IF a diagonal is drawn — its width is non-zero for nearly
+    /// every cell, so keying off `width` drew a slash through every cell (the bug behind the spurious
+    /// diagonals on empty table rows). The real "is a diagonal drawn" signal is the attr bits (mirrors
+    /// rhwp's own renderer/layout/border_rendering.rs):
+    ///   slash_bits     = (attr >> 2) & 0b111   // 0 = none, else a "/" diagonal
+    ///   backslash_bits = (attr >> 5) & 0b111   // 0 = none, else a "\\" diagonal
+    /// Both zero → no diagonal. The section-header banner's filler cell DOES set these bits → its pointed
+    /// pentagon end still draws.
     fn cell_diagonal(&self, border_fill_id: u16) -> Option<CellDiagonal> {
         let idx = (border_fill_id as usize).checked_sub(1)?;
         let bf = self.doc.doc_info.border_fills.get(idx)?;
+        let kind = diagonal_kind(bf.attr, bf.diagonal.diagonal_type)?;
         let d = &bf.diagonal;
-        // A diagonal with zero width is not drawn (HWP stores an unset diagonal as width 0).
-        if d.width == 0 {
-            return None;
-        }
-        let kind = match d.diagonal_type {
-            0 => DiagonalKind::Slash,
-            _ => DiagonalKind::BackSlash, // 1=BackSlash, 2=Crooked → approximate as BackSlash
-        };
+        // Style from the diagonal border (color + width); border_width_to_px floors a 0/unset width to a
+        // hairline so a requested-but-zero-width diagonal still draws.
         Some(CellDiagonal { kind, color: opaque(lift_text_color(d.color)), width_px: border_width_to_px(d.width) })
     }
 
@@ -659,6 +660,24 @@ fn lift_line_style(lt: rhwp::model::style::BorderLineType) -> LineStyle {
     }
 }
 
+/// Decide a cell's diagonal direction from its borderFill `attr` property bits + the diagonal LINE
+/// TYPE — the SAME two-stage gate rhwp's renderer uses (renderer/layout/border_rendering.rs). A diagonal
+/// is drawn only when (a) a direction bit is set AND (b) the diagonal line type is non-none:
+///   - slash_bits     = (attr >> 2) & 0b111  (0 = no "/" diagonal)
+///   - backslash_bits = (attr >> 5) & 0b111  (0 = no "\\" diagonal)
+///   - `diagonal_type` is a LINE-STYLE code (0 = 선없음/none) — NOT a direction; a borderFill can set the
+///     direction bits with NO `<diagonal>` line element (type 0), and Hancom then draws nothing (rhwp's
+///     #1038 guard). Keying off the diagonal border's WIDTH instead drew a slash through nearly every cell.
+/// A backslash wins when both bits are set (the rare "X" is collapsed to one line).
+fn diagonal_kind(attr: u16, diagonal_type: u8) -> Option<DiagonalKind> {
+    let slash = (attr >> 2) & 0b111;
+    let backslash = (attr >> 5) & 0b111;
+    if (slash == 0 && backslash == 0) || diagonal_type == 0 {
+        return None;
+    }
+    Some(if backslash != 0 { DiagonalKind::BackSlash } else { DiagonalKind::Slash })
+}
+
 /// HWP 테두리 굵기 인덱스 → device px (mirrors rhwp's `border_width_to_px`, spec 표 28: mm→96dpi px).
 /// Used for both cell edges and the diagonal so our stroke widths match Hancom's visual weight.
 ///
@@ -718,6 +737,22 @@ fn lift_para_shape(p: &RParaShape) -> ParaShape {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn diagonal_kind_gates_on_direction_bits_and_line_type() {
+        // 방향 비트 없음 → None (선 타입과 무관).
+        assert_eq!(diagonal_kind(0, 1), None, "no direction bits → no diagonal");
+        // 방향(slash) 비트는 있으나 선 타입 0(선없음) → None. 이게 #1038 회귀(폭 기준 판단 시 모든 셀에
+        // 슬래시가 그려지던 버그)를 막는 핵심 가드. slash 방향 = (attr>>2)&7, CENTER=0b010 → attr=0b010<<2.
+        let slash_attr = 0b010u16 << 2;
+        assert_eq!(diagonal_kind(slash_attr, 0), None, "direction bit set but line type none → no diagonal (#1038)");
+        // 방향 비트 + 실제 선 타입(1=solid) → 그 방향으로 그림.
+        assert_eq!(diagonal_kind(slash_attr, 1), Some(DiagonalKind::Slash), "slash direction + solid line → Slash");
+        let backslash_attr = 0b010u16 << 5;
+        assert_eq!(diagonal_kind(backslash_attr, 1), Some(DiagonalKind::BackSlash), "backslash direction + solid line → BackSlash");
+        // 둘 다 설정(X) → 단일 backslash 로 축약(렌더러가 단선만 그림).
+        assert_eq!(diagonal_kind(slash_attr | backslash_attr, 1), Some(DiagonalKind::BackSlash), "both set → single BackSlash");
+    }
 
     #[test]
     fn text_color_unpacks_bgr_not_rgb() {

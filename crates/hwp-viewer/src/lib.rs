@@ -1134,6 +1134,84 @@ async fn own_hit_test(
     .map_err(|e| e.to_string())?
 }
 
+/// The table CELL the user double-clicked: its table anchor `(section, block)`, the cell `(row, col)`,
+/// the table's `(rows, cols)`, and the cell's CURRENT text — so the UI can open the cell editor
+/// pre-filled for exactly that cell ("표에 내용 작성" by pointing). px-space click like `own_hit_test`.
+#[derive(serde::Serialize)]
+struct CellHitDto {
+    section: usize,
+    block: usize,
+    row: usize,
+    col: usize,
+    rows: usize,
+    cols: usize,
+    text: String,
+}
+
+/// Concatenate the plain text of the model cell at `(row, col)` of the table at `(section, block)`.
+fn model_cell_text(doc: &hwp_model::prelude::SemanticDoc, section: usize, block: usize, row: usize, col: usize) -> String {
+    use hwp_model::prelude::{Block, Inline};
+    let Some(sec) = doc.sections.get(section) else { return String::new() };
+    let Some(Block::Table(t)) = sec.blocks.get(block) else { return String::new() };
+    let Some(cell) = t.cells.iter().find(|c| c.row == row && c.col == col) else { return String::new() };
+    let mut out = String::new();
+    for b in &cell.blocks {
+        if let Block::Paragraph(p) = b {
+            for r in &p.runs {
+                for i in &r.content {
+                    if let Inline::Text(s) = i {
+                        out.push_str(s);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Click-to-edit (own-render only): the table cell under a page-space double-click, in own-engine px
+/// geometry. Powers direct "write into a table" — double-click a cell → the cell editor opens pre-filled
+/// for that exact `(row, col)`. `null` when the point isn't over any table cell.
+#[tauri::command]
+async fn table_cell_at(
+    page: u32,
+    x: f64,
+    y: f64,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<Option<CellHitDto>, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let s = sess.lock().map_err(|_| "session poisoned")?;
+        let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+        let fonts = own_render_fonts();
+        let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+        let Some(pg) = placed.pages.get(page as usize) else { return Ok(None) };
+        let k = HWPUNIT_PER_PX;
+        let (hx, hy) = (x * k, y * k); // px click → HWPUNIT
+        // Topmost table containing the point, then the cell within it.
+        let Some(t) = pg
+            .tables
+            .iter()
+            .filter(|t| hx >= t.x && hx <= t.x + t.w && hy >= t.y && hy <= t.y + t.h)
+            .last()
+        else {
+            return Ok(None);
+        };
+        let Some(cell) = t.cell_at(hx, hy) else { return Ok(None) };
+        Ok(Some(CellHitDto {
+            section: t.section,
+            block: t.block,
+            row: cell.row,
+            col: cell.col,
+            rows: t.rows,
+            cols: t.cols,
+            text: model_cell_text(doc, t.section, t.block, cell.row, cell.col),
+        }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 // ---- Interactive caret: in-place edit commands (typed Intent lane; same op-bus core as the MCP
 // ---- lane). The per-keystroke / IME-commit mutations the caret UI calls. Async/spawn_blocking like
 // ---- the other mutating commands; each is ONE undo unit (do_op) and returns the new page count so
@@ -1229,6 +1307,7 @@ pub fn run() {
             table_bbox,
             table_at,
             own_hit_test,
+            table_cell_at,
             move_table,
             table_add_rows,
             set_table_cell,

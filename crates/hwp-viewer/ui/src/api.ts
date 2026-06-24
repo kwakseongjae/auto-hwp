@@ -86,6 +86,11 @@ export type OutlineItem = { section: number; block: number; level: number; text:
  *  `HitTarget`, resolving paragraphs too (so a click sets an AI scope / insert target there). */
 export type BlockHit = { section: number; block: number; kind: string; x: number; y: number; w: number; h: number };
 
+/** The table CELL the user double-clicked (own-render): the table anchor `(section, block)`, the cell
+ *  `(row, col)`, the table's `(rows, cols)`, and the cell's CURRENT text — so the cell editor opens
+ *  pre-filled for that exact cell ("표에 내용 작성" by pointing at the cell). */
+export type CellHit = { section: number; block: number; row: number; col: number; rows: number; cols: number; text: string };
+
 /// Typed bindings to the Rust `Intent` command lane (crates/hwp-viewer/src/lib.rs). No prose
 /// parsing: each command returns a typed value the UI consumes directly.
 export const api = {
@@ -236,6 +241,10 @@ export const api = {
    *  edits land at what the user pointed at, not the document end. Null only if the page has no blocks. */
   ownHitTest: (page: number, x: number, y: number) =>
     invoke<BlockHit | null>("own_hit_test", { page, x, y }),
+  /** Point-to-cell (own-render only) — the table cell under a page-space double-click, with its current
+   *  text, so the cell editor opens pre-filled for that exact cell. Null if not over a table cell. */
+  tableCellAt: (page: number, x: number, y: number) =>
+    invoke<CellHit | null>("table_cell_at", { page, x, y }),
   /** Table drag-to-move — relocate the block at `(section, from)` to index `to` as ONE undo unit
    *  (MoveBlock — works for tables and paragraphs). The drop commit. Returns the new page count. */
   moveTable: (section: number, from: number, to: number) =>
