@@ -80,6 +80,12 @@ export type TableBox = {
  *  `text`, and the 0-based `page` it starts on (for click-to-scroll in the outline panel). */
 export type OutlineItem = { section: number; block: number; level: number; text: string; page: number };
 
+/** The top-level block the user POINTED at on the own-render surface: its `(section, block)` anchor, a
+ *  label `kind` ("paragraph"/"table"/"image"), and its band box in own-engine PAGE units (`x/y/w/h`) so
+ *  the UI can draw a pin/highlight over exactly what was pointed at. The own-render counterpart to a
+ *  `HitTarget`, resolving paragraphs too (so a click sets an AI scope / insert target there). */
+export type BlockHit = { section: number; block: number; kind: string; x: number; y: number; w: number; h: number };
+
 /// Typed bindings to the Rust `Intent` command lane (crates/hwp-viewer/src/lib.rs). No prose
 /// parsing: each command returns a typed value the UI consumes directly.
 export const api = {
@@ -225,6 +231,11 @@ export const api = {
    *  (with its `(section, block)` anchor), or null if the click misses every table. Hover-to-grab. */
   tableAt: (page: number, x: number, y: number) =>
     invoke<TableBox | null>("table_at", { page, x, y }),
+  /** Point-to-block (own-render only) — the top-level block under a page-space click `(x,y)` on `page`,
+   *  resolving PARAGRAPHS too (unlike `imageAt`/`tableAt`). Powers click-to-scope / point-to-insert so
+   *  edits land at what the user pointed at, not the document end. Null only if the page has no blocks. */
+  ownHitTest: (page: number, x: number, y: number) =>
+    invoke<BlockHit | null>("own_hit_test", { page, x, y }),
   /** Table drag-to-move — relocate the block at `(section, from)` to index `to` as ONE undo unit
    *  (MoveBlock — works for tables and paragraphs). The drop commit. Returns the new page count. */
   moveTable: (section: number, from: number, to: number) =>

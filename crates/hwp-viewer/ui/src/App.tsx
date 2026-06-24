@@ -35,7 +35,7 @@ export default function App() {
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [outline, setOutline] = useState<OutlineItem[]>([]);
   // U5: a tiny point-action popover (right-click a block → AI로 편집 / 이미지 삽입) + a ? cheat-sheet.
-  const [pointMenu, setPointMenu] = useState<{ x: number; y: number; page: number; section: number; block: number | null } | null>(null);
+  const [pointMenu, setPointMenu] = useState<{ x: number; y: number; page: number; section: number; block: number | null; box?: { x: number; y: number; w: number; h: number } | null; kind?: string } | null>(null);
   const [cheatOpen, setCheatOpen] = useState(false);
   // Discoverability: a one-time hint card surfacing the (otherwise hidden) manual-edit gestures —
   // click-to-edit, the ⋯/우클릭 quick-action popover, image drag&drop. Dismissed forever via a
@@ -79,6 +79,10 @@ export default function App() {
   // SVG wrapper's containIntrinsicSize are derived from this so a zoom change re-lays the list.
   const A4_W = 794; // CSS px for 210mm at 96dpi — the 100% page width
   const A4_RATIO = 1.414; // A4 height/width (297/210)
+  // HWPUNIT per CSS px (the own SVG's HWPUNIT→px scale). Own-engine geometry commands speak the SVG's
+  // px space (so clicks/handles line up), but the edit OPS (SetImageSize / MoveImage size) want
+  // HWPUNIT — convert px→HWPUNIT at the commit boundary.
+  const HWPUNIT_PER_PX = 7200 / 96;
   const ZOOM_MIN = 0.5;
   const ZOOM_MAX = 1; // discrete control tops out at 100%; ⌘+ won't overshoot the segmented range
   // zoom === 0 is the "맞춤(가로)" / fit-width sentinel (resolved against the live viewport width).
@@ -209,6 +213,21 @@ export default function App() {
   const tableSelRef = useRef<TableSel | null>(null);
   tableSelRef.current = tableSel;
 
+  // ---- Point-to-scope PIN (the visible "여기" marker, own-render): when the user POINTS at a block
+  // (a click on body text in 자체 렌더, or right-click/⋯ → AI 편집), we resolve it to a block band via
+  // `own_hit_test` and pin a highlight + label over it so "가리키기"(pointing) is tangible and the
+  // chat/insert knows the target. The pin mirrors the chat's scope chip; clearing the scope clears the
+  // pin. Recomputed against the live SVG rect/viewBox on zoom (like the image/table overlays). ----
+  type ScopePin = {
+    page: number;
+    box: { x: number; y: number; w: number; h: number }; // own-engine page units (anchor band)
+    screen: { left: number; top: number; width: number; height: number };
+    kind: string;
+  };
+  const [scopePin, setScopePin] = useState<ScopePin | null>(null);
+  const scopePinRef = useRef<ScopePin | null>(null);
+  scopePinRef.current = scopePin;
+
   // ---- Cell editor: a tiny inline form for the table overlay's 칸 편집 verb. Asks for a (row, col)
   // address + the new text, then commits ONE `SetTableCell` op. Screen-anchored near the table box. ----
   type CellEdit = {
@@ -266,6 +285,11 @@ export default function App() {
   }, []);
   const clearImageSel = useCallback(() => setImageSel(null), []);
   const clearTableSel = useCallback(() => setTableSel(null), []);
+  // Clear the AI scope AND its visible pin together (the chip + the on-page marker are one concept).
+  const clearScope = useCallback(() => {
+    setScope(null);
+    setScopePin(null);
+  }, []);
 
   // Re-place a known image selection's overlay against the LIVE svg rect/viewBox (after zoom or a
   // repaint) — the move/resize twin of `recomputeCaretBox`. `null` box drops the selection.
@@ -293,6 +317,19 @@ export default function App() {
     setTableSel({ page, box, screen, pxPerPageY: rect.height / vb.height });
   }, []);
 
+  // Re-place the scope PIN against the LIVE svg rect/viewBox (zoom/repaint) — the pointing twin of
+  // `recomputeTableBox` (a band box shares the `x/y/w/h` shape so `imageBoxToScreen` maps it too).
+  const recomputeScopePin = useCallback((page: number, box: { x: number; y: number; w: number; h: number } | null, kind: string) => {
+    if (!box) return setScopePin(null);
+    const svg = svgForPage(page);
+    if (!svg) return setScopePin(null);
+    const rect = svg.getBoundingClientRect();
+    const vb = svg.viewBox.baseVal;
+    const screen = imageBoxToScreen(box, { width: rect.width, height: rect.height }, { width: vb.width, height: vb.height });
+    if (!screen || vb.width === 0 || vb.height === 0) return setScopePin(null);
+    setScopePin({ page, box, screen, kind });
+  }, []);
+
   // In 'own' mode the page list is paginated by OUR engine (its count can differ from rhwp's).
   const listCount = viewMode === "own" ? ownPageCount : pageCount;
   const listCountRef = useRef(listCount);
@@ -316,8 +353,18 @@ export default function App() {
     // Re-place the image + table overlays too so they track the new zoom scale.
     if (imageSelRef.current) recomputeImageBox(imageSelRef.current.page, imageSelRef.current.box);
     if (tableSelRef.current) recomputeTableBox(tableSelRef.current.page, tableSelRef.current.box);
+    if (scopePinRef.current) recomputeScopePin(scopePinRef.current.page, scopePinRef.current.box, scopePinRef.current.kind);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageWidth]);
+
+  // Escape clears the scope pin (only attached while one exists; the image/table overlays own their
+  // own Esc, and a pin never coexists with an overlay so there's no conflict).
+  useEffect(() => {
+    if (!scopePin) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") clearScope(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [scopePin, clearScope]);
 
   // Track the scroll viewport's width so "맞춤(가로)" (fit-width) keeps a page filling the column as
   // the window or chat panel resizes. p-6 = 24px padding each side on <main>.
@@ -374,6 +421,9 @@ export default function App() {
     clearCaret();
     clearImageSel();
     clearTableSel();
+    // The pin's band box is stale after a repaint (block indices/positions shift) — drop the visible
+    // marker (the chat scope chip is managed separately by the commit/clear paths).
+    setScopePin(null);
     // The own-engine SVGs are regenerated from the live IR — drop them too so an edit repaints. Its
     // page count is fetched lazily (or eagerly when 'own' is the active mode).
     setOwnSvgCache({});
@@ -422,13 +472,22 @@ export default function App() {
     const pt = screenToPage(pagePt.clientX, pagePt.clientY, { left: rect.left, top: rect.top, width: rect.width, height: rect.height }, { width: vb.width, height: vb.height });
     let section = 0;
     let block: number | null = null;
-    if (pt && viewModeRef.current !== "own") {
+    let box: { x: number; y: number; w: number; h: number } | null = null;
+    let kind = "";
+    if (pt) {
       try {
-        const hit = await api.hitTest(page, pt.x, pt.y);
-        if (hit) { section = hit.section; block = hit.block; }
+        if (viewModeRef.current === "own") {
+          // Own-render: resolve the general block (paragraph included) so the popover anchors to what
+          // was pointed at — and carry its band box so 'AI 편집' can drop the same visible pin.
+          const hit = await api.ownHitTest(page, pt.x, pt.y);
+          if (hit) { section = hit.section; block = hit.block; box = { x: hit.x, y: hit.y, w: hit.w, h: hit.h }; kind = hit.kind; }
+        } else {
+          const hit = await api.hitTest(page, pt.x, pt.y);
+          if (hit) { section = hit.section; block = hit.block; }
+        }
       } catch { /* miss → section/doc-end scope */ }
     }
-    setPointMenu({ x: menuAt.x, y: menuAt.y, page, section, block });
+    setPointMenu({ x: menuAt.x, y: menuAt.y, page, section, block, box, kind });
   }, []);
 
   // ---- U5: right-click a block → the point-action popover anchored at the click point. ----
@@ -482,16 +541,35 @@ export default function App() {
     // select the image under the pointer (or deselect on an empty click); no caret in own mode.
     if (viewModeRef.current === "own") {
       try {
-        // An image wins over a table (it sits on top); fall back to the table under the pointer so a
-        // click on a table selects it for drag-to-move + quick-edits. Either selection clears the other.
+        // Priority: an image (sits on top) → its move/resize overlay; else a table → its drag /
+        // quick-edit overlay; else the top-level block under the point → an AI scope + a visible PIN.
+        // EVERY case sets the chat scope to what was clicked, so "point-then-ask" ("이거 채워줘") works
+        // and inserts land HERE, not at the document end. The overlay RING is the marker for an
+        // image/table (no extra pin); a paragraph gets the explicit pin highlight.
         const img = await api.imageAt(page, pt.x, pt.y);
         if (img) {
           setTableSel(null);
           recomputeImageBox(page, img);
-        } else {
-          const tbl = await api.tableAt(page, pt.x, pt.y);
+          setScope({ section: img.section, block: img.block, page });
+          setScopePin(null);
+          return;
+        }
+        const tbl = await api.tableAt(page, pt.x, pt.y);
+        if (tbl) {
           setImageSel(null);
           recomputeTableBox(page, tbl);
+          setScope({ section: tbl.section, block: tbl.block, page });
+          setScopePin(null);
+          return;
+        }
+        setImageSel(null);
+        setTableSel(null);
+        const hit = await api.ownHitTest(page, pt.x, pt.y);
+        if (hit) {
+          setScope({ section: hit.section, block: hit.block, page });
+          recomputeScopePin(page, { x: hit.x, y: hit.y, w: hit.w, h: hit.h }, hit.kind);
+        } else {
+          clearScope();
         }
       } catch (err) {
         toast("warn", `선택 실패: ${err}`);
@@ -538,12 +616,33 @@ export default function App() {
     });
   }, [recomputeImageBox]);
 
+  // Resolve the document block under a DROP point (own-engine geometry), restricted to `section` (a
+  // MoveBlock relocation stays within its section). Returns the target block index, or null on a miss /
+  // cross-section drop. Shared by the table + image drag-to-move commits so a drop lands WHERE pointed.
+  const resolveDropBlock = useCallback(async (clientX: number, clientY: number, section: number): Promise<number | null> => {
+    const host = document.elementFromPoint(clientX, clientY)?.closest("[data-index]") ?? null;
+    const svg = host?.querySelector("svg") ?? null;
+    if (!host || !svg) return null;
+    const page = Number(host.getAttribute("data-index"));
+    if (!Number.isFinite(page)) return null;
+    const rect = svg.getBoundingClientRect();
+    const vb = svg.viewBox.baseVal;
+    const pt = screenToPage(clientX, clientY, { left: rect.left, top: rect.top, width: rect.width, height: rect.height }, { width: vb.width, height: vb.height });
+    if (!pt) return null;
+    try {
+      const hit = await api.ownHitTest(page, pt.x, pt.y);
+      if (hit && hit.section === section) return hit.block;
+    } catch { /* miss → no target */ }
+    return null;
+  }, []);
+
   const commitImageResize = useCallback((pageW: number, pageH: number) => {
     void enqueueEdit(async () => {
       const sel = imageSelRef.current;
       if (!sel || !canEditRef.current) return;
-      const w = Math.max(1, Math.round(pageW));
-      const h = Math.max(1, Math.round(pageH));
+      // The overlay reports the new size in the SVG's px space; the op wants HWPUNIT.
+      const w = Math.max(1, Math.round(pageW * HWPUNIT_PER_PX));
+      const h = Math.max(1, Math.round(pageH * HWPUNIT_PER_PX));
       try {
         const pages = await api.setImageSize(sel.box.section, sel.box.block, w, h);
         setEdited(true);
@@ -555,28 +654,28 @@ export default function App() {
     });
   }, [enqueueEdit, invalidate, reselectAfterRepaint]);
 
-  const commitImageMove = useCallback((dyPage: number) => {
+  const commitImageMove = useCallback((dropClientX: number, dropClientY: number) => {
     void enqueueEdit(async () => {
       const sel = imageSelRef.current;
       if (!sel || !canEditRef.current) return;
-      // Flow layout: a downward drag relocates the image AFTER the next block, an upward drag BEFORE
-      // the previous one (the smallest faithful "move" via DeleteBlock + InsertImageAt).
       const from = sel.box.block;
-      const to = dyPage > 0 ? from + 2 : from - 1;
-      if (to < 0 || to === from) return;
+      // Relocate the image to the block under the DROP point (own-engine hit-test). Dropping back on
+      // itself (or a cross-section / off-page drop) is a no-op — just re-place the handles.
+      const to = await resolveDropBlock(dropClientX, dropClientY, sel.box.section);
+      if (to === null || to === from) { reselectAfterRepaint(sel.page, sel.box.section, from); return; }
       try {
-        const pages = await api.moveImage(sel.box.section, from, to, Math.round(sel.box.w), Math.round(sel.box.h));
+        const pages = await api.moveImage(sel.box.section, from, to, Math.round(sel.box.w * HWPUNIT_PER_PX), Math.round(sel.box.h * HWPUNIT_PER_PX));
         setEdited(true);
         invalidate(pages, null);
-        // The move shifts indices: DeleteBlock(from) then InsertImageAt(to'); the landed index is
-        // `to-1` when moving down (delete shifted it), else `to`. Re-place on that block.
+        // MoveBlock removes at `from` then reinserts at the rebased `to`: the landed index is `to-1`
+        // when moving down (the delete shifted it), else `to`. Re-place the handles there.
         const landed = to > from ? to - 1 : to;
         reselectAfterRepaint(sel.page, sel.box.section, landed);
       } catch (err) {
         toast("warn", `이동 실패: ${err}`);
       }
     });
-  }, [enqueueEdit, invalidate, reselectAfterRepaint]);
+  }, [enqueueEdit, invalidate, reselectAfterRepaint, resolveDropBlock]);
 
   // ---- table overlay: commit (one undoable op), then re-place the overlay on the table. Mirrors the
   // image overlay lane (reselectAfterRepaint / commitImageMove) but commits via MoveBlock + table ops.
@@ -591,16 +690,15 @@ export default function App() {
     });
   }, [recomputeTableBox]);
 
-  const commitTableMove = useCallback((dyPage: number) => {
+  const commitTableMove = useCallback((dropClientX: number, dropClientY: number) => {
     void enqueueEdit(async () => {
       const sel = tableSelRef.current;
       if (!sel || !canEditRef.current) return;
-      // Flow layout (same heuristic as the image move): a downward drag relocates the table AFTER the
-      // next block (slot from+2), an upward drag BEFORE the previous one (slot from-1). MoveBlock
-      // rebases the post-removal index itself, so we pass the ORIGINAL-list slot.
       const from = sel.box.block;
-      const to = dyPage > 0 ? from + 2 : from - 1;
-      if (to < 0 || to === from) return;
+      // Relocate the table to the block under the DROP point (own-engine hit-test) — drops WHERE you
+      // point, not a fixed ±1 nudge. Dropping back on itself / off-page / cross-section is a no-op.
+      const to = await resolveDropBlock(dropClientX, dropClientY, sel.box.section);
+      if (to === null || to === from) { reselectTableAfterRepaint(sel.page, sel.box.section, from); return; }
       try {
         const pages = await api.moveTable(sel.box.section, from, to);
         setEdited(true);
@@ -612,7 +710,7 @@ export default function App() {
         toast("warn", `표 이동 실패: ${err}`);
       }
     });
-  }, [enqueueEdit, invalidate, reselectTableAfterRepaint]);
+  }, [enqueueEdit, invalidate, reselectTableAfterRepaint, resolveDropBlock]);
 
   const commitTableAddRow = useCallback(() => {
     void enqueueEdit(async () => {
@@ -849,10 +947,11 @@ export default function App() {
     }
     setViewMode(next);
     viewModeRef.current = next;
-    // The image + table overlays only exist in 'own' mode — drop any selection when leaving it.
+    // The image + table overlays + the scope pin only exist in 'own' mode — drop them when leaving it.
     if (next !== "own") {
       clearImageSel();
       clearTableSel();
+      setScopePin(null);
     }
     if (next === "html") void loadDocHtml();
     else if (next === "own") void loadOwnPageCount();
@@ -1188,6 +1287,9 @@ export default function App() {
           // Map the drop point to an editable anchor via the SAME page-coords→hit_test path as a click;
           // on a miss fall back to the last-pointed scope, else the section/doc end (block=null → end).
           let scopeArg: { section: number; block: number | null } | null = null;
+          // The page the insert actually anchored to — drives the post-insert scroll/pulse so the view
+          // follows where the image LANDED (the drop page on a hit, else the fallback scope's page).
+          let landedPage: number | null = null;
           const host = document.elementFromPoint(clientX, clientY)?.closest("[data-index]") ?? null;
           const svg = host?.querySelector("svg") ?? null;
           if (host && svg) {
@@ -1202,8 +1304,12 @@ export default function App() {
             );
             if (Number.isFinite(page) && pt) {
               try {
-                const hit = await api.hitTest(page, pt.x, pt.y);
-                if (hit) scopeArg = { section: hit.section, block: hit.block };
+                // Own-render uses the own-engine point→block resolver (rhwp geometry doesn't apply to
+                // OUR SVG — that mismatch is exactly why drops used to miss and pile up at the doc end).
+                const hit = viewModeRef.current === "own"
+                  ? await api.ownHitTest(page, pt.x, pt.y)
+                  : await api.hitTest(page, pt.x, pt.y);
+                if (hit) { scopeArg = { section: hit.section, block: hit.block }; landedPage = page; }
               } catch {
                 /* hit-test miss → fall through to the scope/end fallback below */
               }
@@ -1211,11 +1317,14 @@ export default function App() {
           }
           if (!scopeArg && scopeRef.current) {
             scopeArg = { section: scopeRef.current.section, block: scopeRef.current.block };
+            landedPage = scopeRef.current.page;
           }
           // ONE undoable op, applied immediately (no propose→review) — the direct-manipulation contract.
           const n = await api.applyImageDrop(imgs[0], scopeArg);
           setEdited(true);
-          invalidate(n, scopeArg ? (scopeRef.current?.page ?? null) : null);
+          // Scroll to where the image actually landed (the drop page / fallback-scope page); a pure
+          // doc-end append (no anchor) keeps the scroll put (null) so the view doesn't yank to the end.
+          invalidate(n, landedPage);
           const more = imgs.length - 1;
           toast("info", more > 0 ? `이미지 삽입됨 (나머지 ${more}개는 건너뜀)` : "이미지 삽입됨");
         });
@@ -1526,13 +1635,40 @@ export default function App() {
                         <div data-table-overlay className="absolute inset-0 z-20">
                           <TableOverlay
                             box={tableSel.screen}
-                            pxPerPageY={tableSel.pxPerPageY}
                             onCommitMove={commitTableMove}
                             onAddRow={commitTableAddRow}
                             onEditCell={openCellEditor}
                             onDeleteTable={commitTableDeleteTable}
                             onDismiss={clearTableSel}
                           />
+                        </div>
+                      )}
+                      {/* Point-to-scope PIN (own-render): a dashed accent box + a "✦ 여기" tag over the
+                          block the user pointed at, so "가리키기"(pointing) is visible and the chat/insert
+                          target is unmistakable. The box is click-through (pointer-events-none) so a new
+                          click re-points; the tag's ✕ clears it. Mirrors the chat's scope chip. */}
+                      {viewMode === "own" && scopePin && scopePin.page === item.index && (
+                        <div data-scope-pin className="pointer-events-none absolute inset-0 z-20">
+                          <div
+                            className="absolute rounded-md border-2 border-dashed border-ai/70 bg-ai/5"
+                            style={{ left: `${scopePin.screen.left}px`, top: `${scopePin.screen.top}px`, width: `${scopePin.screen.width}px`, height: `${scopePin.screen.height}px` }}
+                          >
+                            <span className="pointer-events-auto absolute -left-px -top-[1.3rem] flex items-center gap-1 rounded-t-md bg-ai px-1.5 py-0.5 text-[10px] font-medium text-white shadow-sm">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setChatOpen(true); }}
+                                title="이 위치를 AI에게 요청 (채팅 열기)"
+                                className="flex items-center gap-1 leading-none"
+                              >
+                                <span aria-hidden>✦</span>
+                                여기{scopePin.kind === "table" ? " · 표" : scopePin.kind === "image" ? " · 그림" : ""}에 요청
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); clearScope(); }}
+                                title="가리키기 해제 (Esc)"
+                                className="ml-0.5 rounded px-0.5 leading-none hover:bg-white/25"
+                              >✕</button>
+                            </span>
+                          </div>
                         </div>
                       )}
                       {/* Post-apply highlight pulse — a one-shot accent glow over the page a chat edit
@@ -1681,7 +1817,7 @@ export default function App() {
           canEdit={canEdit}
           provider={provider}
           scope={scope}
-          onClearScope={() => setScope(null)}
+          onClearScope={clearScope}
           onJumpToPage={scrollToPage}
           ctx={chatCtx}
           // The inline toolbar (on the document) and the chat card are the SAME review — when the
@@ -1798,7 +1934,13 @@ export default function App() {
           >
             <button
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-ai/10"
-              onClick={() => { setScope({ section: pointMenu.section, block: pointMenu.block, page: pointMenu.page }); setChatOpen(true); setPointMenu(null); }}
+              onClick={() => {
+                setScope({ section: pointMenu.section, block: pointMenu.block, page: pointMenu.page });
+                // Own-render: drop the visible pin on the resolved band so the target is unmistakable.
+                if (pointMenu.box) recomputeScopePin(pointMenu.page, pointMenu.box, pointMenu.kind ?? "");
+                setChatOpen(true);
+                setPointMenu(null);
+              }}
             >✦ 여기를 AI로 편집</button>
             <button
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-accent/10"
@@ -1832,7 +1974,7 @@ export default function App() {
                 primary model's quieter direct-manipulation paths are findable. */}
             <div className="mb-1.5 mt-4 text-xs font-medium uppercase tracking-wide text-neutral-400">직접 편집</div>
             <div className="flex flex-col gap-1.5 text-sm text-neutral-700 dark:text-neutral-300">
-              {([["클릭", "본문 클릭 → 캐럿 입력 (원본/자체 렌더)"], ["우클릭 · ⋯", "빠른 작업 (AI 편집 / 이미지 삽입)"], ["드래그&드롭", "이미지 파일을 페이지에 끌어다 삽입"], ["자체 렌더", "이미지·표 클릭 → 이동 / 크기 / 칸 편집"]] as [string, string][]).map(([k, d]) => (
+              {([["클릭(원본)", "본문 클릭 → 캐럿 입력"], ["클릭(자체 렌더)", "블록 클릭 → ✦여기 핀 (AI 대상 지정)"], ["우클릭 · ⋯", "빠른 작업 (여기를 AI로 편집 / 이미지 삽입)"], ["드래그&드롭", "이미지 파일을 페이지에 끌어다 삽입"], ["이미지·표(자체 렌더)", "클릭 선택 → 끌어서 이동 · 크기 · 칸 편집"]] as [string, string][]).map(([k, d]) => (
                 <div key={k} className="flex items-center justify-between gap-4">
                   <span>{d}</span>
                   <kbd className="shrink-0 rounded bg-black/5 px-1.5 py-0.5 text-xs dark:bg-white/10">{k}</kbd>

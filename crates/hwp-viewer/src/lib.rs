@@ -779,6 +779,14 @@ async fn caret_rect(
     .map_err(|e| e.to_string())?
 }
 
+// ---- Own-engine geometry (overlays + point-to-block) lives in HWPUNIT in `place_doc`, but the
+// ---- own-render SVG (and therefore the clicks `screenToPage` produces + the `imageBoxToScreen` the
+// ---- overlays use) is in CSS px = HWPUNIT / HWPUNIT_PER_PX (the SvgSink divides by the same factor).
+// ---- So every own-engine geometry command accepts clicks AND returns boxes in PX, converting at the
+// ---- boundary — otherwise the ~75× mismatch makes clicks never hit and handles land far off-screen
+// ---- (the bug behind "이미지/표 이동·리사이즈가 전혀 안 됨"). ----
+const HWPUNIT_PER_PX: f64 = 7200.0 / 96.0;
+
 // ---- Image move/resize overlay: bbox query (own-engine geometry) + commit ops (op-bus lane) ----
 
 /// An anchored image's placed box in own-engine PAGE (unscaled HWPUNIT) coordinates + its model
@@ -813,11 +821,12 @@ async fn image_bbox(
         let fonts = own_render_fonts();
         let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
         let Some(pg) = placed.pages.get(page as usize) else { return Ok(None) };
+        let k = HWPUNIT_PER_PX;
         Ok(pg
             .images
             .iter()
             .find(|im| im.section == section && im.block == block && !im.bin_ref.is_empty())
-            .map(|im| ImageBoxDto { x: im.x, y: im.y, w: im.w, h: im.h, section: im.section, block: im.block }))
+            .map(|im| ImageBoxDto { x: im.x / k, y: im.y / k, w: im.w / k, h: im.h / k, section: im.section, block: im.block }))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -841,6 +850,8 @@ async fn image_at(
         let fonts = own_render_fonts();
         let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
         let Some(pg) = placed.pages.get(page as usize) else { return Ok(None) };
+        let k = HWPUNIT_PER_PX;
+        let (x, y) = (x * k, y * k); // px click → HWPUNIT (place_doc space)
         // Last match wins → topmost in paint order (later images draw over earlier ones).
         Ok(pg
             .images
@@ -848,7 +859,7 @@ async fn image_at(
             .filter(|im| !im.bin_ref.is_empty())
             .filter(|im| x >= im.x && x <= im.x + im.w && y >= im.y && y <= im.y + im.h)
             .last()
-            .map(|im| ImageBoxDto { x: im.x, y: im.y, w: im.w, h: im.h, section: im.section, block: im.block }))
+            .map(|im| ImageBoxDto { x: im.x / k, y: im.y / k, w: im.w / k, h: im.h / k, section: im.section, block: im.block }))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -938,11 +949,12 @@ async fn table_bbox(
         let fonts = own_render_fonts();
         let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
         let Some(pg) = placed.pages.get(page as usize) else { return Ok(None) };
+        let k = HWPUNIT_PER_PX;
         Ok(pg
             .tables
             .iter()
             .find(|t| t.section == section && t.block == block)
-            .map(|t| TableBoxDto { x: t.x, y: t.y, w: t.w, h: t.h, section: t.section, block: t.block, rows: t.rows, cols: t.cols }))
+            .map(|t| TableBoxDto { x: t.x / k, y: t.y / k, w: t.w / k, h: t.h / k, section: t.section, block: t.block, rows: t.rows, cols: t.cols }))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -965,13 +977,15 @@ async fn table_at(
         let fonts = own_render_fonts();
         let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
         let Some(pg) = placed.pages.get(page as usize) else { return Ok(None) };
+        let k = HWPUNIT_PER_PX;
+        let (x, y) = (x * k, y * k); // px click → HWPUNIT (place_doc space)
         // Last match wins → topmost in paint order (a nested table draws after its outer table).
         Ok(pg
             .tables
             .iter()
             .filter(|t| x >= t.x && x <= t.x + t.w && y >= t.y && y <= t.y + t.h)
             .last()
-            .map(|t| TableBoxDto { x: t.x, y: t.y, w: t.w, h: t.h, section: t.section, block: t.block, rows: t.rows, cols: t.cols }))
+            .map(|t| TableBoxDto { x: t.x / k, y: t.y / k, w: t.w / k, h: t.h / k, section: t.section, block: t.block, rows: t.rows, cols: t.cols }))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1059,6 +1073,62 @@ async fn delete_block(
             Outcome::Edited { pages } => Ok(pages),
             _ => Err("unexpected outcome".into()),
         }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+// ---- Own-render point-to-block: the general counterpart to image_at/table_at. ----
+
+/// The top-level block the user pointed at, in own-engine PAGE coordinates: its `(section, block)`
+/// anchor, a label `kind` ("paragraph"/"table"/"image"), and its band box `x/y/w/h` (so the UI can
+/// draw a pin/highlight over exactly what was pointed at).
+#[derive(serde::Serialize)]
+struct BlockHitDto {
+    section: usize,
+    block: usize,
+    kind: String,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+}
+
+/// Click-to-point (own-render only): resolve a page-space click to the top-level block under it, in
+/// own-engine geometry. Unlike `image_at`/`table_at` (which find ONLY images/tables) this resolves
+/// PARAGRAPHS too — the missing primitive that lets the 자체 렌더 surface set an AI scope / insert
+/// target at whatever the user points at (so inserts land THERE, not at the document end). Re-drives
+/// `place_doc` over the LIVE IR with the SAME fonts as `render_own_page`, so the band matches the SVG.
+/// `null` only when the page has no placed blocks.
+#[tauri::command]
+async fn own_hit_test(
+    page: u32,
+    x: f64,
+    y: f64,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<Option<BlockHitDto>, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let s = sess.lock().map_err(|_| "session poisoned")?;
+        let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+        let fonts = own_render_fonts();
+        let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+        let Some(pg) = placed.pages.get(page as usize) else { return Ok(None) };
+        let k = HWPUNIT_PER_PX;
+        Ok(pg.block_at(x * k, y * k).map(|b| BlockHitDto {
+            section: b.section,
+            block: b.block,
+            kind: match b.kind {
+                hwp_typeset::BlockKind::Paragraph => "paragraph",
+                hwp_typeset::BlockKind::Table => "table",
+                hwp_typeset::BlockKind::Image => "image",
+            }
+            .into(),
+            x: b.x / k,
+            y: b.y / k,
+            w: b.w / k,
+            h: b.h / k,
+        }))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1158,6 +1228,7 @@ pub fn run() {
             move_image,
             table_bbox,
             table_at,
+            own_hit_test,
             move_table,
             table_add_rows,
             set_table_cell,
@@ -1301,5 +1372,33 @@ mod tests {
         assert!(sess.doc.as_mut().unwrap().undo(), "the drop is a single undoable op");
         let doc = sess.doc.as_ref().unwrap().doc();
         assert!(!doc.bin_data.iter().any(|b| b.bytes == png), "undo removes the embedded image");
+    }
+
+    /// own_hit_test (point-to-block) speaks the own-render SVG's PX space: the clicks `screenToPage`
+    /// sends + the boxes the overlays draw are HWPUNIT/HWPUNIT_PER_PX, so the command converts px→HWPUNIT
+    /// before resolving and px on the way out. This locks that boundary on the real gov-doc: a PX click
+    /// over a block's center must resolve back to that block (a sign/scale slip here = "clicks never
+    /// land", the bug behind dead own-mode selection).
+    #[cfg(feature = "rhwp")]
+    #[test]
+    fn own_hit_test_resolves_a_px_click_to_the_pointed_block() {
+        let bench = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmark.hwp");
+        let doc = hwp_core::Engine::open(&std::fs::read(bench).unwrap()).unwrap();
+        let fonts = own_render_fonts();
+        let placed = hwp_typeset::place_doc(&doc, fonts.as_ref());
+        let k = HWPUNIT_PER_PX;
+        // A page with content → take its first band; click its center in PX (what the frontend sends).
+        let (pi, b) = placed
+            .pages
+            .iter()
+            .enumerate()
+            .find_map(|(i, p)| p.blocks.first().map(|b| (i, b.clone())))
+            .expect("a placed block exists");
+        let (px, py) = ((b.x + b.w / 2.0) / k, (b.y + b.h / 2.0) / k);
+        // Mirror the command body: px click → HWPUNIT → block_at.
+        let hit = placed.pages[pi].block_at(px * k, py * k).expect("a px click resolves a block");
+        assert_eq!((hit.section, hit.block), (b.section, b.block), "px click resolves to the pointed block");
+        // And a click far to the LEFT margin at the same row still snaps to a block (row-based pointing).
+        assert!(placed.pages[pi].block_at(1.0 * k, py * k).is_some(), "margin click still snaps to a block");
     }
 }

@@ -71,6 +71,32 @@ pub struct PlacedTable {
     pub cols: usize,
 }
 
+/// What kind of top-level block a [`PlacedBlock`] band came from — lets a point-action UI label the
+/// pointed target ("문단"/"표"/"그림") and decide whether to offer a caret vs an overlay.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlockKind {
+    Paragraph,
+    Table,
+    Image,
+}
+
+/// The page-space VERTICAL BAND a top-level block occupies on one page + its `(section, block)`
+/// anchor. Unlike [`PlacedGlyph`] (no provenance), this is what lets the own-render surface answer
+/// "which block did the user point at?" — the missing primitive behind point-to-scope / point-to-insert
+/// in the 자체 렌더 view. One band per page-portion (a block spanning a page break gets a band on each
+/// page it touches). `x/w` span the body column for a paragraph, or the table's own extent for a table;
+/// resolution is by `y` (row-based pointing), see [`PlacedPage::block_at`]. Provenance only — not drawn.
+#[derive(Clone, Debug)]
+pub struct PlacedBlock {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    pub section: usize,
+    pub block: usize,
+    pub kind: BlockKind,
+}
+
 /// A positioned box (line text-box, cell, table outline, cell shade). The renderer emits these as
 /// `PaintOp::Rect`; `fill` distinguishes a stroked border (None) from a shaded fill (Some(color)).
 #[derive(Clone, Debug)]
@@ -108,10 +134,83 @@ pub struct PlacedPage {
     /// Per-table outer-box provenance (anchor → page rect). Provenance only; not drawn (see
     /// [`PlacedTable`]). Powers the drag-to-move overlay's `table_bbox`/`table_at`.
     pub tables: Vec<PlacedTable>,
+    /// Per-top-level-block vertical bands (anchor → page band). Provenance only; not drawn. Powers
+    /// `own_hit_test` (point → block) so the 자체 렌더 surface can scope/insert at what's pointed at.
+    pub blocks: Vec<PlacedBlock>,
     pub rects: Vec<PlacedRect>,
     /// Per-edge cell borders + cell diagonals (styled lines). Drawn after `rects` (which now only
     /// carry shading + the LEGACY uniform box for cells without per-edge data).
     pub lines: Vec<PlacedLine>,
+}
+
+impl PlacedPage {
+    /// Resolve a page-space point to the top-level block the user pointed at — the missing primitive
+    /// for own-render point-to-scope / point-to-insert. Resolution is ROW-BASED (by `y`): the band
+    /// whose vertical extent contains the point wins (tightest height if bands overlap, e.g. a table
+    /// inside the flow); if the point falls in an inter-block gap or a margin, the vertically NEAREST
+    /// band wins so a near-miss still scopes a real block. `None` only when the page has no blocks.
+    pub fn block_at(&self, _x: f64, y: f64) -> Option<&PlacedBlock> {
+        if self.blocks.is_empty() {
+            return None;
+        }
+        self.blocks
+            .iter()
+            .filter(|b| y >= b.y && y <= b.y + b.h)
+            .min_by(|a, c| a.h.total_cmp(&c.h))
+            .or_else(|| {
+                self.blocks
+                    .iter()
+                    .min_by(|a, c| band_vdist(a, y).total_cmp(&band_vdist(c, y)))
+            })
+    }
+}
+
+/// Vertical distance from `y` to a block's band `[b.y, b.y + b.h]` (0 inside the band).
+fn band_vdist(b: &PlacedBlock, y: f64) -> f64 {
+    if y < b.y {
+        b.y - y
+    } else if y > b.y + b.h {
+        y - (b.y + b.h)
+    } else {
+        0.0
+    }
+}
+
+/// Record full-width band(s) for a top-level block that occupies `[start_page,start_y] ..
+/// [end_page,end_y]` in the flow (page-relative y's), one band per page-portion it touches. `mt`/`body_h`
+/// frame the body box so a block spanning a page break gets the right slice on each page.
+#[allow(clippy::too_many_arguments)]
+fn record_block_band(
+    pages: &mut [PlacedPage],
+    start_page: usize,
+    start_y: f64,
+    end_page: usize,
+    end_y: f64,
+    ml: f64,
+    body_w: f64,
+    mt: f64,
+    body_h: f64,
+    section: usize,
+    block: usize,
+    kind: BlockKind,
+) {
+    if start_page == end_page {
+        if let Some(pg) = pages.get_mut(start_page) {
+            pg.blocks.push(PlacedBlock { x: ml, y: start_y, w: body_w, h: (end_y - start_y).max(0.0), section, block, kind });
+        }
+        return;
+    }
+    if let Some(pg) = pages.get_mut(start_page) {
+        pg.blocks.push(PlacedBlock { x: ml, y: start_y, w: body_w, h: (mt + body_h - start_y).max(0.0), section, block, kind });
+    }
+    for p in (start_page + 1)..end_page {
+        if let Some(pg) = pages.get_mut(p) {
+            pg.blocks.push(PlacedBlock { x: ml, y: mt, w: body_w, h: body_h, section, block, kind });
+        }
+    }
+    if let Some(pg) = pages.get_mut(end_page) {
+        pg.blocks.push(PlacedBlock { x: ml, y: mt, w: body_w, h: (end_y - mt).max(0.0), section, block, kind });
+    }
 }
 
 /// Positioned, paginated document — the renderer's direct input.
@@ -152,7 +251,15 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                     if vert > 0.0 {
                         vert += ps.map(|s| s.space_before).unwrap_or(0).max(0) as f64;
                     }
+                    let bstart_page = pages.len() - 1;
+                    let bstart_y = mt + vert;
                     place_paragraph(p, doc, fonts, ml, mt, body_w, body_h, &mut vert, &mut pages, page, sec_idx, blk_idx);
+                    // Provenance band for point-to-scope: the paragraph's row extent on each page it
+                    // touched. Tag it IMAGE when it carries an anchored object so the UI can label it.
+                    let bend_page = pages.len() - 1;
+                    let bend_y = mt + vert;
+                    let kind = if paragraph_object(p).is_some() { BlockKind::Image } else { BlockKind::Paragraph };
+                    record_block_band(&mut pages, bstart_page, bstart_y, bend_page, bend_y, ml, body_w, mt, body_h, sec_idx, blk_idx, kind);
                     vert += ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;
                     started = true;
                 }
@@ -168,6 +275,19 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                         vert = 0.0;
                     }
                     place_table(t, doc, fonts, ml, mt + vert, body_w, &mut pages, sec_idx, blk_idx);
+                    // Provenance band for point-to-scope: reuse the exact outer box place_table just
+                    // recorded (a table is single-page in our flow) so the band matches what's drawn.
+                    // Guard on the anchor: a degenerate 0×N/N×0 table makes place_table early-return
+                    // WITHOUT pushing, so `tables.last()` would be the PREVIOUS table — only adopt the
+                    // box when it actually belongs to THIS block (else skip; an empty table draws
+                    // nothing, so there's nothing to point at).
+                    let tpage = pages.len() - 1;
+                    if let Some(pt) = pages[tpage].tables.last() {
+                        if pt.section == sec_idx && pt.block == blk_idx {
+                            let b = PlacedBlock { x: pt.x, y: pt.y, w: pt.w, h: pt.h, section: pt.section, block: pt.block, kind: BlockKind::Table };
+                            pages[tpage].blocks.push(b);
+                        }
+                    }
                     vert += h;
                     // Outer bottom margin so the next block doesn't abut the table.
                     vert += t.outer_margin_bottom.max(0) as f64;
@@ -786,6 +906,53 @@ mod tests {
         let with = bottom_table_y(500);
         let without = bottom_table_y(0);
         assert!(with > without + 900.0, "outer margins separate consecutive tables: {with} vs {without}");
+    }
+
+    #[test]
+    fn placed_blocks_resolve_point_to_the_right_block() {
+        // Two paragraphs framing a table: every top-level block must get exactly one provenance band
+        // (in reading order), and `block_at` must map a page point back to the block the user pointed
+        // at — the primitive behind own-render point-to-scope / point-to-insert.
+        let doc = doc_with(vec![
+            Block::Paragraph(para("첫 문단")),
+            Block::Table(one_cell_table(0)),
+            Block::Paragraph(para("끝 문단")),
+        ]);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let pg = &placed.pages[0];
+        assert_eq!(pg.blocks.len(), 3, "one band per top-level block");
+        // Bands are in reading order, anchored to their real block index, and the table is tagged.
+        assert_eq!(pg.blocks.iter().map(|b| b.block).collect::<Vec<_>>(), vec![0, 1, 2]);
+        assert_eq!(pg.blocks[1].kind, BlockKind::Table, "the middle band is the table");
+        assert!(pg.blocks[0].kind == BlockKind::Paragraph && pg.blocks[2].kind == BlockKind::Paragraph);
+        // Bands descend the page in order, no overlap of the paragraph rows with the table.
+        assert!(pg.blocks[0].y < pg.blocks[1].y && pg.blocks[1].y < pg.blocks[2].y, "bands flow downward");
+        // A point inside each band resolves to that exact block.
+        let mid = |i: usize| pg.blocks[i].y + pg.blocks[i].h / 2.0;
+        assert_eq!(pg.block_at(8000.0, mid(0)).unwrap().block, 0, "point in para-0 → block 0");
+        let tbl = pg.block_at(8000.0, mid(1)).unwrap();
+        assert_eq!((tbl.block, tbl.kind), (1, BlockKind::Table), "point in the table → block 1 (table)");
+        assert_eq!(pg.block_at(8000.0, mid(2)).unwrap().block, 2, "point in para-2 → block 2");
+        // A point far BELOW all content snaps to the nearest band (the last block) — a near-miss in the
+        // bottom margin still scopes a real block instead of failing.
+        assert_eq!(pg.block_at(8000.0, 10_000_000.0).unwrap().block, 2, "below-everything snaps to last");
+    }
+
+    #[test]
+    fn empty_table_does_not_borrow_a_prior_tables_band() {
+        // A degenerate 0×0 table makes place_table early-return without pushing a PlacedTable, so the
+        // band recorder's `tables.last()` would point at the PREVIOUS table. The anchor guard must keep
+        // the empty table from stealing the real table's (section, block) band.
+        let real = one_cell_table(0); // 1×1, block 0
+        let empty = Table { rows: 0, cols: 0, ..Default::default() }; // block 1, draws nothing
+        let doc = doc_with(vec![Block::Table(real), Block::Table(empty)]);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let pg = &placed.pages[0];
+        assert!(
+            pg.blocks.iter().all(|b| b.block == 0),
+            "the empty table must not produce a band (esp. not one carrying block 0's geometry): {:?}",
+            pg.blocks.iter().map(|b| (b.block, b.kind)).collect::<Vec<_>>()
+        );
     }
 
     #[test]

@@ -17,11 +17,10 @@ export type ScreenBox = { left: number; top: number; width: number; height: numb
 type Props = {
   /** The table's outer box in CSS px relative to the page wrapper (already zoom-scaled by the caller). */
   box: ScreenBox;
-  /** CSS px per PAGE unit on the vertical axis (the SVG rect/viewBox ratio) — converts a move drag to
-   *  page units so the parent can decide the target block. */
-  pxPerPageY: number;
-  /** Commit a move: the vertical drag delta in PAGE units (parent decides the target block from sign). */
-  onCommitMove: (dyPage: number) => void;
+  /** Commit a move: the DROP point in client (screen) px. The parent resolves which block that point
+   *  lands on (own_hit_test) and relocates the table THERE — so it drops where you point, not a ±1
+   *  nudge. A drop that didn't move beyond jitter never fires this (a select doesn't relocate). */
+  onCommitMove: (dropClientX: number, dropClientY: number) => void;
   /** Append one empty body row to the table (행 추가). */
   onAddRow: () => void;
   /** Edit a cell — opens the cell editor (칸 편집). */
@@ -40,7 +39,6 @@ type Drag = { startX: number; startY: number; start: ScreenBox; moved: boolean }
 
 export default function TableOverlay({
   box,
-  pxPerPageY,
   onCommitMove,
   onAddRow,
   onEditCell,
@@ -71,9 +69,11 @@ export default function TableOverlay({
     if (!d) return;
     setLive(null); // the parent repaint will re-place the overlay from the fresh bbox
     const dyPx = e.clientY - d.startY;
-    // Ignore a trivial jitter (a click that didn't really drag) so a select doesn't relocate.
-    if (d.moved && Math.abs(dyPx) > MIN_DRAG_PX && pxPerPageY > 0) onCommitMove(dyPx / pxPerPageY);
-  }, [onPointerMove, onCommitMove, pxPerPageY]);
+    const dxPx = e.clientX - d.startX;
+    // Ignore a trivial jitter (a click that didn't really drag) so a select doesn't relocate; otherwise
+    // hand the parent the DROP point so it can relocate the table to whatever block lands there.
+    if (d.moved && (Math.abs(dyPx) > MIN_DRAG_PX || Math.abs(dxPx) > MIN_DRAG_PX)) onCommitMove(e.clientX, e.clientY);
+  }, [onPointerMove, onCommitMove]);
 
   const startDrag = useCallback((e: React.PointerEvent) => {
     e.preventDefault();

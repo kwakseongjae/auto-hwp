@@ -36,8 +36,9 @@ type Props = {
   pxPerPageY: number;
   /** Commit a resize: the new width/height in PAGE units (the op layer converts page→HWPUNIT 1:1). */
   onCommitResize: (pageW: number, pageH: number) => void;
-  /** Commit a move: the vertical drag delta in PAGE units (parent decides the target block from sign). */
-  onCommitMove: (dyPage: number) => void;
+  /** Commit a move: the DROP point in client (screen) px. The parent resolves which block that point
+   *  lands on (own_hit_test) and relocates the image THERE — so it drops where you point. */
+  onCommitMove: (dropClientX: number, dropClientY: number) => void;
   /** Deselect (Escape / click-away handled by the parent; this is the overlay's own dismiss). */
   onDismiss: () => void;
 };
@@ -94,8 +95,10 @@ export default function ImageOverlay({ box, pxPerPageX, pxPerPageY, onCommitResi
     setLive(null); // the parent repaint will re-place the overlay from the fresh bbox
     if (d.handle === "move") {
       const dyPx = next.top - d.start.top;
-      // Ignore a trivial jitter (a click that didn't really drag) so a select doesn't relocate.
-      if (Math.abs(dyPx) > MIN_PX && pxPerPageY > 0) onCommitMove(dyPx / pxPerPageY);
+      const dxPx = next.left - d.start.left;
+      // Ignore a trivial jitter (a click that didn't really drag) so a select doesn't relocate; else
+      // hand the parent the DROP point so it relocates the image to whatever block lands there.
+      if (Math.abs(dyPx) > MIN_PX || Math.abs(dxPx) > MIN_PX) onCommitMove(e.clientX, e.clientY);
     } else if (pxPerPageX > 0 && pxPerPageY > 0) {
       // Only commit when the size actually changed (a click on a handle without a drag is a no-op).
       if (Math.abs(next.width - d.start.width) > 0.5 || Math.abs(next.height - d.start.height) > 0.5) {
