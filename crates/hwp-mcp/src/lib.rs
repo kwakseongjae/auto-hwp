@@ -596,6 +596,60 @@ fn do_move_image(
     .map_err(|e| e.to_string()) // one undo unit
 }
 
+/// Move the block at `(section, from)` to block index `to` as ONE undo unit (`MoveBlock`). The
+/// general relocation for ANY block — tables (the drag-to-move overlay) and paragraphs alike. Unlike
+/// `do_move_image` this re-uses the existing node in place (no byte re-embed), so it is the faithful
+/// move for a table. Surfaces the op-bus refusal verbatim (out-of-range index, etc.).
+fn do_move_block(session: &mut Session, section: usize, from: usize, to: usize) -> Result<(), String> {
+    use hwp_ops::Op;
+    let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
+    sess.do_op(&Op::MoveBlock { section, from, to }).map_err(|e| e.to_string()) // one undo unit
+}
+
+/// Append `count` empty BODY rows to the `index`-th table at logical row `at` as ONE undo unit
+/// (`TableInsertRows`). Each new row gets `cols` empty cells so the grid stays rectangular.
+fn do_table_insert_rows(
+    session: &mut Session,
+    section: usize,
+    index: usize,
+    at: usize,
+    count: usize,
+    cols: usize,
+) -> Result<(), String> {
+    use hwp_ops::{CellSpec, Op};
+    if count == 0 || cols == 0 {
+        return Err("table_insert_rows: count and cols must be positive".into());
+    }
+    let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
+    let row = || (0..cols).map(|_| CellSpec::default()).collect::<Vec<_>>();
+    let rows = (0..count).map(|_| row()).collect::<Vec<_>>();
+    sess.do_op(&Op::TableInsertRows { section, index, at, rows }).map_err(|e| e.to_string())
+}
+
+/// Replace the text of the cell anchored at `(row, col)` of the `index`-th table as ONE undo unit
+/// (`SetTableCell` with a single plain run). Empty `text` clears the cell.
+fn do_set_table_cell(
+    session: &mut Session,
+    section: usize,
+    index: usize,
+    row: usize,
+    col: usize,
+    text: &str,
+) -> Result<(), String> {
+    use hwp_ops::{Op, RunSpec};
+    let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
+    let runs = if text.is_empty() { vec![] } else { vec![RunSpec { text: text.to_string(), ..Default::default() }] };
+    sess.do_op(&Op::SetTableCell { section, index, row, col, runs }).map_err(|e| e.to_string())
+}
+
+/// Delete the block at `(section, index)` as ONE undo unit (`DeleteBlock`). Used by the table
+/// hover toolbar's 행 삭제 / 표 삭제 verbs (delete-last-row is a table edit; here we delete the block).
+fn do_delete_block(session: &mut Session, section: usize, index: usize) -> Result<(), String> {
+    use hwp_ops::Op;
+    let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
+    sess.do_op(&Op::DeleteBlock { section, index }).map_err(|e| e.to_string())
+}
+
 /// A typed editor command/query — the GUI's mutation+query surface (no prose round-trips). The
 /// JSON `tools/*` lane (agents) is a separate transport; both drive the same op-bus core above.
 pub enum Intent {
@@ -636,6 +690,17 @@ pub enum Intent {
     /// Image overlay — move the image from block `from` to block `to` in `section` as ONE undo unit
     /// (`DeleteBlock` + `InsertImageAt`; preserving `width`/`height`).
     MoveImage { section: usize, from: usize, to: usize, width: i32, height: i32 },
+    /// Block drag-to-move — relocate the block at `(section, from)` to index `to` as ONE undo unit
+    /// (`MoveBlock`). The table/paragraph drag overlay's drop commit (the faithful in-place move).
+    MoveBlock { section: usize, from: usize, to: usize },
+    /// Table quick-edit — append `count` empty BODY rows of `cols` cells at logical row `at` of the
+    /// `index`-th table as ONE undo unit (`TableInsertRows`).
+    TableInsertRows { section: usize, index: usize, at: usize, count: usize, cols: usize },
+    /// Table quick-edit — replace the text of the cell at `(row, col)` of the `index`-th table as ONE
+    /// undo unit (`SetTableCell`).
+    SetTableCell { section: usize, index: usize, row: usize, col: usize, text: String },
+    /// Block delete — remove the block at `(section, index)` as ONE undo unit (`DeleteBlock`).
+    DeleteBlock { section: usize, index: usize },
 }
 
 /// The typed result of an [`Intent`].
@@ -757,6 +822,26 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
         }
         Intent::MoveImage { section, from, to, width, height } => {
             do_move_image(session, section, from, to, width, height)?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::MoveBlock { section, from, to } => {
+            do_move_block(session, section, from, to)?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::TableInsertRows { section, index, at, count, cols } => {
+            do_table_insert_rows(session, section, index, at, count, cols)?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::SetTableCell { section, index, row, col, text } => {
+            do_set_table_cell(session, section, index, row, col, &text)?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::DeleteBlock { section, index } => {
+            do_delete_block(session, section, index)?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }

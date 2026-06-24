@@ -78,6 +78,11 @@ pub enum Op {
     InsertImageAt { section: usize, index: usize, bytes: Vec<u8>, kind: String, width: HwpUnit, height: HwpUnit },
     /// Delete the block at `index` in `section`.
     DeleteBlock { section: usize, index: usize },
+    /// Move the block at index `from` to index `to` within `section` (removing it, then reinserting at
+    /// the post-removal index). Generalizes M4's "move = DeleteBlock + InsertImageAt" to ANY block
+    /// (tables, paragraphs) in ONE op so a single undo restores the original order. `to == len` (the
+    /// block-count BEFORE removal) moves it to the end; `from == to` is a no-op.
+    MoveBlock { section: usize, from: usize, to: usize },
     /// Resize the anchored image of the `index`-th block: set the `ImageRef`'s `width`/`height` (in
     /// HWPUNIT) on the first image inline of that paragraph. The direct-manipulation resize handle
     /// commits exactly this on pointerup (one undoable op); "move" is `DeleteBlock` + `InsertImageAt`.
@@ -772,6 +777,30 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             sec.dirty.mark();
             Ok(())
         }
+        Op::MoveBlock { section, from, to } => {
+            let sec = section_mut(doc, *section)?;
+            let len = sec.blocks.len();
+            if *from >= len {
+                return Err(Error::Other(format!(
+                    "MoveBlock: from index {from} out of range (section has {len} blocks)"
+                )));
+            }
+            // `to` addresses an insertion slot over the ORIGINAL list (0..=len): `to == len` appends.
+            if *to > len {
+                return Err(Error::Other(format!(
+                    "MoveBlock: to index {to} out of range (section has {len} blocks)"
+                )));
+            }
+            if from == to {
+                return Ok(()); // no-op: don't churn dirty flags
+            }
+            let block = sec.blocks.remove(*from);
+            // Removing `from` shifts every later block left by one, so a target past it rebases down.
+            let dest = if *to > *from { *to - 1 } else { *to };
+            sec.blocks.insert(dest, block);
+            sec.dirty.mark();
+            Ok(())
+        }
         Op::SetImageSize { section, index, width, height } => {
             if *width <= 0 || *height <= 0 {
                 return Err(Error::Other(format!(
@@ -917,7 +946,7 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             Ok(())
         }
         _ => Err(Error::NotImplemented(
-            "op apply (MVP: Append*/SetPageLayout/Set{Char,Run,Para}Pr/ApplyStyle/Insert-Delete text/anchored Insert*At/DeleteBlock/SetImageSize/SetTableCellShade/SetTableCell/TableInsertRows)",
+            "op apply (MVP: Append*/SetPageLayout/Set{Char,Run,Para}Pr/ApplyStyle/Insert-Delete text/anchored Insert*At/DeleteBlock/MoveBlock/SetImageSize/SetTableCellShade/SetTableCell/TableInsertRows)",
         )),
     }
 }
@@ -1572,6 +1601,47 @@ mod tests {
         assert_eq!(block_para_text(&doc, 0), "가");
         assert_eq!(block_para_text(&doc, 1), "다");
         assert!(apply(&mut doc, &Op::DeleteBlock { section: 0, index: 9 }).is_err());
+    }
+
+    #[test]
+    fn move_block_reorders_forward_and_backward() {
+        // [가,나,다,라] move block 0 → slot 2 (over the ORIGINAL list, i.e. before original idx 2 "다").
+        // Remove 가 → [나,다,라]; the target rebases past the removed slot → 가 lands before 다 → [나,가,다,라].
+        let mut doc = doc_with(vec![simple_para(1, "가"), simple_para(2, "나"), simple_para(3, "다"), simple_para(4, "라")]);
+        apply(&mut doc, &Op::MoveBlock { section: 0, from: 0, to: 2 }).unwrap();
+        assert_eq!(
+            (0..4).map(|i| block_para_text(&doc, i)).collect::<Vec<_>>(),
+            vec!["나", "가", "다", "라"],
+        );
+        // now [나,가,다,라]: move block 3 → slot 0 (backward) → 라 to the front → [라,나,가,다].
+        apply(&mut doc, &Op::MoveBlock { section: 0, from: 3, to: 0 }).unwrap();
+        assert_eq!(
+            (0..4).map(|i| block_para_text(&doc, i)).collect::<Vec<_>>(),
+            vec!["라", "나", "가", "다"],
+        );
+        // to == len appends to the end: move block 0 (라) to slot 4 → [나,가,다,라].
+        apply(&mut doc, &Op::MoveBlock { section: 0, from: 0, to: 4 }).unwrap();
+        assert_eq!(block_para_text(&doc, 3), "라");
+        // bounds + no-op
+        assert!(apply(&mut doc, &Op::MoveBlock { section: 0, from: 9, to: 0 }).is_err());
+        assert!(apply(&mut doc, &Op::MoveBlock { section: 0, from: 0, to: 9 }).is_err());
+    }
+
+    #[test]
+    fn move_block_is_one_undo_unit_and_restores_order() {
+        // A table drag-to-move emits one MoveBlock; a single undo restores the original block order.
+        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
+        let mut s = EditSession::new(doc_with(vec![simple_para(1, "앞"), simple_para(2, "뒤")]));
+        // Seed a table at the end (index 2), as its own undo step.
+        s.do_op(&Op::InsertTableAt { section: 0, index: 2, rows: vec![vec![cell("표")]] }).unwrap();
+        // Drag it to the front: MoveBlock 2 → 0 (one undo unit).
+        s.do_op(&Op::MoveBlock { section: 0, from: 2, to: 0 }).unwrap();
+        assert!(matches!(s.doc().sections[0].blocks[0], Block::Table(_)), "table moved to the front");
+        assert_eq!(block_para_text(s.doc(), 1), "앞");
+        // One undo puts the table back at the end.
+        assert!(s.undo());
+        assert!(matches!(s.doc().sections[0].blocks[2], Block::Table(_)), "undo restores the table at the end");
+        assert_eq!(block_para_text(s.doc(), 0), "앞");
     }
 
     #[test]

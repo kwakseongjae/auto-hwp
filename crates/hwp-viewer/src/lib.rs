@@ -902,6 +902,168 @@ async fn move_image(
     .map_err(|e| e.to_string())?
 }
 
+// ---- Table drag-to-move overlay: bbox/hit-test queries (own-engine geometry) + MoveBlock commit +
+// ---- table quick-edits (add row / delete / edit cell). Mirrors the image overlay lane exactly. ----
+
+/// A placed table's OUTER box in own-engine PAGE (unscaled HWPUNIT) coordinates + its model anchor.
+/// The frontend draws the drag affordance over `x/y/w/h` (scaled by the same SVG zoom the image
+/// overlay uses) and commits a relocation via `move_table(section, from, to)` on drop.
+#[derive(serde::Serialize)]
+struct TableBoxDto {
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    section: usize,
+    block: usize,
+    rows: usize,
+    cols: usize,
+}
+
+/// Locate the placed outer box of the table anchored at `(section, block)` on `page`, in own-engine
+/// page coordinates. Re-drives `place_doc` over the LIVE IR with the SAME `own_render_fonts` as
+/// `render_own_page` so the box matches the "자체 렌더" SVG exactly. `null` if that table doesn't fall
+/// on the queried page. svg-mode (own-render) only — the overlay is not wired for the rhwp "원본 보기".
+#[tauri::command]
+async fn table_bbox(
+    page: u32,
+    section: usize,
+    block: usize,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<Option<TableBoxDto>, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let s = sess.lock().map_err(|_| "session poisoned")?;
+        let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+        let fonts = own_render_fonts();
+        let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+        let Some(pg) = placed.pages.get(page as usize) else { return Ok(None) };
+        Ok(pg
+            .tables
+            .iter()
+            .find(|t| t.section == section && t.block == block)
+            .map(|t| TableBoxDto { x: t.x, y: t.y, w: t.w, h: t.h, section: t.section, block: t.block, rows: t.rows, cols: t.cols }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Click-to-select: the topmost table whose placed outer box contains page-space `(x, y)` on `page`,
+/// in own-engine page coordinates (with its `(section, block)` anchor). `null` if the click misses
+/// every table. Pairs with `table_bbox` (which RE-fetches a known anchor's box after a repaint).
+#[tauri::command]
+async fn table_at(
+    page: u32,
+    x: f64,
+    y: f64,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<Option<TableBoxDto>, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let s = sess.lock().map_err(|_| "session poisoned")?;
+        let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+        let fonts = own_render_fonts();
+        let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+        let Some(pg) = placed.pages.get(page as usize) else { return Ok(None) };
+        // Last match wins → topmost in paint order (a nested table draws after its outer table).
+        Ok(pg
+            .tables
+            .iter()
+            .filter(|t| x >= t.x && x <= t.x + t.w && y >= t.y && y <= t.y + t.h)
+            .last()
+            .map(|t| TableBoxDto { x: t.x, y: t.y, w: t.w, h: t.h, section: t.section, block: t.block, rows: t.rows, cols: t.cols }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Move the block (table or paragraph) at `(section, from)` to block index `to` as ONE undo unit
+/// (`MoveBlock`). The drag-to-move drop commit; returns the new page count so the frontend repaints.
+#[tauri::command]
+async fn move_table(
+    section: usize,
+    from: usize,
+    to: usize,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<u32, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        match apply_intent(&mut s, Intent::MoveBlock { section, from, to })? {
+            Outcome::Edited { pages } => Ok(pages),
+            _ => Err("unexpected outcome".into()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Append `count` empty body rows to the `index`-th table at logical row `at` as ONE undo unit
+/// (`TableInsertRows`). The hover toolbar's 행 추가 verb. Returns the new page count.
+#[tauri::command]
+async fn table_add_rows(
+    section: usize,
+    index: usize,
+    at: usize,
+    count: usize,
+    cols: usize,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<u32, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        match apply_intent(&mut s, Intent::TableInsertRows { section, index, at, count, cols })? {
+            Outcome::Edited { pages } => Ok(pages),
+            _ => Err("unexpected outcome".into()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Replace the text of the cell at `(row, col)` of the `index`-th table as ONE undo unit
+/// (`SetTableCell`). The hover toolbar / popover's 칸 편집 verb. Returns the new page count.
+#[tauri::command]
+async fn set_table_cell(
+    section: usize,
+    index: usize,
+    row: usize,
+    col: usize,
+    text: String,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<u32, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        match apply_intent(&mut s, Intent::SetTableCell { section, index, row, col, text })? {
+            Outcome::Edited { pages } => Ok(pages),
+            _ => Err("unexpected outcome".into()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Delete the block at `(section, index)` (e.g. 표 삭제) as ONE undo unit (`DeleteBlock`). Returns
+/// the new page count so the frontend repaints.
+#[tauri::command]
+async fn delete_block(
+    section: usize,
+    index: usize,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<u32, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        match apply_intent(&mut s, Intent::DeleteBlock { section, index })? {
+            Outcome::Edited { pages } => Ok(pages),
+            _ => Err("unexpected outcome".into()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 // ---- Interactive caret: in-place edit commands (typed Intent lane; same op-bus core as the MCP
 // ---- lane). The per-keystroke / IME-commit mutations the caret UI calls. Async/spawn_blocking like
 // ---- the other mutating commands; each is ONE undo unit (do_op) and returns the new page count so
@@ -993,7 +1155,13 @@ pub fn run() {
             image_bbox,
             image_at,
             set_image_size,
-            move_image
+            move_image,
+            table_bbox,
+            table_at,
+            move_table,
+            table_add_rows,
+            set_table_cell,
+            delete_block
         ])
         .run(tauri::generate_context!())
         .expect("error while running tf-hwp viewer");

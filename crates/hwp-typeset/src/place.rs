@@ -52,6 +52,25 @@ pub struct PlacedImage {
     pub block: usize,
 }
 
+/// A positioned table's OUTER box in absolute page coordinates + its model anchor. Provenance only
+/// (mirrors [`PlacedImage`]): lets a drag-to-move overlay map a table's placed box back to the
+/// editable `(section, block)` so it can emit a `MoveBlock`. The renderer ignores these (the visible
+/// table is drawn from `rects`/`lines`); they exist purely so `table_bbox`/`table_at` can find a table.
+#[derive(Clone, Debug)]
+pub struct PlacedTable {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    /// The `(section, block index)` anchor the table occupies in the SemanticDoc.
+    pub section: usize,
+    pub block: usize,
+    /// Logical row/column counts — so a quick-edit overlay can append a row (`TableInsertRows` wants
+    /// the column count + the append-at row) without a second query.
+    pub rows: usize,
+    pub cols: usize,
+}
+
 /// A positioned box (line text-box, cell, table outline, cell shade). The renderer emits these as
 /// `PaintOp::Rect`; `fill` distinguishes a stroked border (None) from a shaded fill (Some(color)).
 #[derive(Clone, Debug)]
@@ -86,6 +105,9 @@ pub struct PlacedPage {
     pub height: f64,
     pub glyphs: Vec<PlacedGlyph>,
     pub images: Vec<PlacedImage>,
+    /// Per-table outer-box provenance (anchor → page rect). Provenance only; not drawn (see
+    /// [`PlacedTable`]). Powers the drag-to-move overlay's `table_bbox`/`table_at`.
+    pub tables: Vec<PlacedTable>,
     pub rects: Vec<PlacedRect>,
     /// Per-edge cell borders + cell diagonals (styled lines). Drawn after `rects` (which now only
     /// carry shading + the LEGACY uniform box for cells without per-edge data).
@@ -145,7 +167,7 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                         new_page(&mut pages, page);
                         vert = 0.0;
                     }
-                    place_table(t, doc, fonts, ml, mt + vert, body_w, &mut pages);
+                    place_table(t, doc, fonts, ml, mt + vert, body_w, &mut pages, sec_idx, blk_idx);
                     vert += h;
                     // Outer bottom margin so the next block doesn't abut the table.
                     vert += t.outer_margin_bottom.max(0) as f64;
@@ -371,6 +393,8 @@ fn place_table(
     top: f64,
     avail_w: f64,
     pages: &mut [PlacedPage],
+    section: usize,
+    block: usize,
 ) {
     if t.rows == 0 || t.cols == 0 {
         return;
@@ -388,6 +412,18 @@ fn place_table(
         Some(p) => p,
         None => return,
     };
+    // Outer-box provenance (anchor → page rect) for the drag-to-move overlay. Drawn from the actual
+    // placed column/row extents so it matches the visible table exactly. Provenance only — not painted.
+    pg.tables.push(PlacedTable {
+        x: ml,
+        y: top,
+        w: col_x[t.cols],
+        h: row_top[t.rows] - top,
+        section,
+        block,
+        rows: t.rows,
+        cols: t.cols,
+    });
     for c in &t.cells {
         if !c.active {
             continue;

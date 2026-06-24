@@ -62,6 +62,20 @@ export type CaretRect = { x: number; top: number; height: number };
  *  the same SVG zoom factor the caret uses) and commits via `setImageSize`/`moveImage`. */
 export type ImageBox = { x: number; y: number; w: number; h: number; section: number; block: number };
 
+/** A placed table's OUTER box in own-engine PAGE (unscaled HWPUNIT) coordinates + its model anchor
+ *  `(section, block)`. The drag-to-move overlay draws the grab handle / drop indicator over `x/y/w/h`
+ *  (scaled by the same SVG zoom the image overlay uses) and commits via `moveTable`. */
+export type TableBox = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  section: number;
+  block: number;
+  rows: number;
+  cols: number;
+};
+
 /** One document-outline heading: model anchor `(section, block)`, a heuristic `level`, the heading
  *  `text`, and the 0-based `page` it starts on (for click-to-scroll in the outline panel). */
 export type OutlineItem = { section: number; block: number; level: number; text: string; page: number };
@@ -202,4 +216,29 @@ export const api = {
    *  (DeleteBlock + InsertImageAt; size preserved). Returns the new page count. */
   moveImage: (section: number, from: number, to: number, width: number, height: number) =>
     invoke<number>("move_image", { section, from, to, width, height }),
+  /** Table overlay (own-render only) — locate the outer box of the table anchored at
+   *  `(section, block)` on `page`, in own-engine PAGE units (null if it doesn't fall on that page).
+   *  Same geometry as the 자체 렌더 SVG, so the drag handle / drop indicator align with what's drawn. */
+  tableBbox: (page: number, section: number, block: number) =>
+    invoke<TableBox | null>("table_bbox", { page, section, block }),
+  /** Table overlay (own-render only) — the topmost table under a page-space click `(x,y)` on `page`
+   *  (with its `(section, block)` anchor), or null if the click misses every table. Hover-to-grab. */
+  tableAt: (page: number, x: number, y: number) =>
+    invoke<TableBox | null>("table_at", { page, x, y }),
+  /** Table drag-to-move — relocate the block at `(section, from)` to index `to` as ONE undo unit
+   *  (MoveBlock — works for tables and paragraphs). The drop commit. Returns the new page count. */
+  moveTable: (section: number, from: number, to: number) =>
+    invoke<number>("move_table", { section, from, to }),
+  /** Table quick-edit — append `count` empty body rows at logical row `at` of the `index`-th table as
+   *  ONE undo unit (TableInsertRows). `cols` = the table's column count. Returns the new page count. */
+  tableAddRows: (section: number, index: number, at: number, count: number, cols: number) =>
+    invoke<number>("table_add_rows", { section, index, at, count, cols }),
+  /** Table quick-edit — replace the text of the cell at `(row, col)` of the `index`-th table as ONE
+   *  undo unit (SetTableCell). Empty `text` clears the cell. Returns the new page count. */
+  setTableCell: (section: number, index: number, row: number, col: number, text: string) =>
+    invoke<number>("set_table_cell", { section, index, row, col, text }),
+  /** Delete the block at `(section, index)` (e.g. 표 삭제) as ONE undo unit (DeleteBlock). Returns the
+   *  new page count. */
+  deleteBlock: (section: number, index: number) =>
+    invoke<number>("delete_block", { section, index }),
 };

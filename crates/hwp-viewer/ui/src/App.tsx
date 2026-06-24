@@ -5,10 +5,11 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { tinykeys } from "tinykeys";
-import { api, type CaretRect, type FindMatch, type ImageBox, type OutlineItem } from "./api";
+import { api, type CaretRect, type FindMatch, type ImageBox, type OutlineItem, type TableBox } from "./api";
 import { sanitizeSvg } from "./sanitize";
 import { advanceOffset, imageBoxToScreen, pageToScreen, screenToPage } from "./caret";
 import ImageOverlay from "./ImageOverlay";
+import TableOverlay from "./TableOverlay";
 import { type Command } from "./commands";
 import { Palette } from "./Palette";
 import { Composer, type ComposerMode } from "./Composer";
@@ -169,6 +170,33 @@ export default function App() {
   const imageSelRef = useRef<ImageSel | null>(null);
   imageSelRef.current = imageSel;
 
+  // ---- Table drag-to-move + quick-edit overlay (own-render only): the selected table + its CSS-px
+  // screen box, recomputed from the page-unit `TableBox` against the live SVG rect/viewBox (so it
+  // tracks zoom), mirroring `imageSel`. Cleared on repaint / mode-switch / deselect. ----
+  type TableSel = {
+    page: number;
+    box: TableBox; // page-unit geometry + (section, block) anchor + rows/cols
+    screen: { left: number; top: number; width: number; height: number };
+    pxPerPageY: number;
+  };
+  const [tableSel, setTableSel] = useState<TableSel | null>(null);
+  const tableSelRef = useRef<TableSel | null>(null);
+  tableSelRef.current = tableSel;
+
+  // ---- Cell editor: a tiny inline form for the table overlay's 칸 편집 verb. Asks for a (row, col)
+  // address + the new text, then commits ONE `SetTableCell` op. Screen-anchored near the table box. ----
+  type CellEdit = {
+    section: number;
+    block: number;
+    rows: number;
+    cols: number;
+    row: number;
+    col: number;
+    text: string;
+    at: { left: number; top: number };
+  };
+  const [cellEdit, setCellEdit] = useState<CellEdit | null>(null);
+
   // Refs mirror the values that async (queued) edit/move closures must read at EXECUTION time, not at
   // the time the closure was created — React closures capture stale state otherwise.
   const caretRef = useRef<CaretAnchor | null>(null);
@@ -211,6 +239,7 @@ export default function App() {
     setComposing(false);
   }, []);
   const clearImageSel = useCallback(() => setImageSel(null), []);
+  const clearTableSel = useCallback(() => setTableSel(null), []);
 
   // Re-place a known image selection's overlay against the LIVE svg rect/viewBox (after zoom or a
   // repaint) — the move/resize twin of `recomputeCaretBox`. `null` box drops the selection.
@@ -223,6 +252,19 @@ export default function App() {
     const screen = imageBoxToScreen(box, { width: rect.width, height: rect.height }, { width: vb.width, height: vb.height });
     if (!screen || vb.width === 0 || vb.height === 0) return setImageSel(null);
     setImageSel({ page, box, screen, pxPerPageX: rect.width / vb.width, pxPerPageY: rect.height / vb.height });
+  }, []);
+
+  // Re-place a known table selection's overlay against the LIVE svg rect/viewBox — the move twin of
+  // `recomputeImageBox` (a `TableBox` shares the `x/y/w/h` shape so `imageBoxToScreen` maps it too).
+  const recomputeTableBox = useCallback((page: number, box: TableBox | null) => {
+    if (!box) return setTableSel(null);
+    const svg = svgForPage(page);
+    if (!svg) return setTableSel(null);
+    const rect = svg.getBoundingClientRect();
+    const vb = svg.viewBox.baseVal;
+    const screen = imageBoxToScreen(box, { width: rect.width, height: rect.height }, { width: vb.width, height: vb.height });
+    if (!screen || vb.width === 0 || vb.height === 0) return setTableSel(null);
+    setTableSel({ page, box, screen, pxPerPageY: rect.height / vb.height });
   }, []);
 
   // In 'own' mode the page list is paginated by OUR engine (its count can differ from rhwp's).
@@ -245,8 +287,9 @@ export default function App() {
   useEffect(() => {
     virtualizer.measure();
     if (caretRef.current && caretRectRef.current) recomputeCaretBox(caretRef.current.page, caretRectRef.current);
-    // Re-place the image overlay too so its handles track the new zoom scale.
+    // Re-place the image + table overlays too so they track the new zoom scale.
     if (imageSelRef.current) recomputeImageBox(imageSelRef.current.page, imageSelRef.current.box);
+    if (tableSelRef.current) recomputeTableBox(tableSelRef.current.page, tableSelRef.current.box);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageWidth]);
 
@@ -304,6 +347,7 @@ export default function App() {
     setPageCount(n);
     clearCaret();
     clearImageSel();
+    clearTableSel();
     // The own-engine SVGs are regenerated from the live IR — drop them too so an edit repaints. Its
     // page count is fetched lazily (or eagerly when 'own' is the active mode).
     setOwnSvgCache({});
@@ -364,8 +408,9 @@ export default function App() {
   // ---- caret: click-to-place ----
   async function onPageClick(e: React.MouseEvent) {
     if (!canEditRef.current) return;
-    // A click landing ON the overlay handles is the overlay's own gesture — don't re-hit-test.
-    if ((e.target as Element).closest("[data-image-overlay]")) return;
+    // A click landing ON an overlay (image handles / table grab+toolbar) is that overlay's own
+    // gesture — don't re-hit-test (it would deselect mid-drag).
+    if ((e.target as Element).closest("[data-image-overlay],[data-table-overlay]")) return;
     const host = (e.target as Element).closest("[data-index]");
     if (!host) return;
     const page = Number(host.getAttribute("data-index"));
@@ -386,10 +431,19 @@ export default function App() {
     // select the image under the pointer (or deselect on an empty click); no caret in own mode.
     if (viewModeRef.current === "own") {
       try {
+        // An image wins over a table (it sits on top); fall back to the table under the pointer so a
+        // click on a table selects it for drag-to-move + quick-edits. Either selection clears the other.
         const img = await api.imageAt(page, pt.x, pt.y);
-        recomputeImageBox(page, img);
+        if (img) {
+          setTableSel(null);
+          recomputeImageBox(page, img);
+        } else {
+          const tbl = await api.tableAt(page, pt.x, pt.y);
+          setImageSel(null);
+          recomputeTableBox(page, tbl);
+        }
       } catch (err) {
-        toast("warn", `이미지 선택 실패: ${err}`);
+        toast("warn", `선택 실패: ${err}`);
       }
       return;
     }
@@ -472,6 +526,106 @@ export default function App() {
       }
     });
   }, [enqueueEdit, invalidate, reselectAfterRepaint]);
+
+  // ---- table overlay: commit (one undoable op), then re-place the overlay on the table. Mirrors the
+  // image overlay lane (reselectAfterRepaint / commitImageMove) but commits via MoveBlock + table ops.
+  const reselectTableAfterRepaint = useCallback((page: number, section: number, block: number) => {
+    queueMicrotask(async () => {
+      try {
+        const box = await api.tableBbox(page, section, block);
+        recomputeTableBox(page, box);
+      } catch {
+        setTableSel(null);
+      }
+    });
+  }, [recomputeTableBox]);
+
+  const commitTableMove = useCallback((dyPage: number) => {
+    void enqueueEdit(async () => {
+      const sel = tableSelRef.current;
+      if (!sel || !canEditRef.current) return;
+      // Flow layout (same heuristic as the image move): a downward drag relocates the table AFTER the
+      // next block (slot from+2), an upward drag BEFORE the previous one (slot from-1). MoveBlock
+      // rebases the post-removal index itself, so we pass the ORIGINAL-list slot.
+      const from = sel.box.block;
+      const to = dyPage > 0 ? from + 2 : from - 1;
+      if (to < 0 || to === from) return;
+      try {
+        const pages = await api.moveTable(sel.box.section, from, to);
+        setEdited(true);
+        invalidate(pages, null);
+        // Where the table landed after removal: moving down → to-1 (delete shifted it), else `to`.
+        const landed = to > from ? to - 1 : to;
+        reselectTableAfterRepaint(sel.page, sel.box.section, landed);
+      } catch (err) {
+        toast("warn", `표 이동 실패: ${err}`);
+      }
+    });
+  }, [enqueueEdit, invalidate, reselectTableAfterRepaint]);
+
+  const commitTableAddRow = useCallback(() => {
+    void enqueueEdit(async () => {
+      const sel = tableSelRef.current;
+      if (!sel || !canEditRef.current) return;
+      try {
+        // Append one empty body row at the end (logical row = current row count).
+        const pages = await api.tableAddRows(sel.box.section, sel.box.block, sel.box.rows, 1, sel.box.cols);
+        setEdited(true);
+        invalidate(pages, null);
+        reselectTableAfterRepaint(sel.page, sel.box.section, sel.box.block);
+      } catch (err) {
+        toast("warn", `행 추가 실패: ${err}`);
+      }
+    });
+  }, [enqueueEdit, invalidate, reselectTableAfterRepaint]);
+
+  const commitTableDeleteTable = useCallback(() => {
+    void enqueueEdit(async () => {
+      const sel = tableSelRef.current;
+      if (!sel || !canEditRef.current) return;
+      try {
+        const pages = await api.deleteBlock(sel.box.section, sel.box.block);
+        setEdited(true);
+        invalidate(pages, null);
+        setTableSel(null); // the table is gone — drop the selection
+      } catch (err) {
+        toast("warn", `표 삭제 실패: ${err}`);
+      }
+    });
+  }, [enqueueEdit, invalidate]);
+
+  // Open the cell editor over the selected table (defaults to cell 0,0). The form commits SetTableCell.
+  const openCellEditor = useCallback(() => {
+    const sel = tableSelRef.current;
+    if (!sel) return;
+    setCellEdit({
+      section: sel.box.section,
+      block: sel.box.block,
+      rows: sel.box.rows,
+      cols: sel.box.cols,
+      row: 0,
+      col: 0,
+      text: "",
+      at: { left: sel.screen.left, top: sel.screen.top },
+    });
+  }, []);
+
+  const commitCellEdit = useCallback(() => {
+    const ce = cellEdit;
+    if (!ce) return;
+    setCellEdit(null);
+    void enqueueEdit(async () => {
+      if (!canEditRef.current) return;
+      try {
+        const pages = await api.setTableCell(ce.section, ce.block, ce.row, ce.col, ce.text);
+        setEdited(true);
+        invalidate(pages, null);
+        reselectTableAfterRepaint(tableSelRef.current?.page ?? 0, ce.section, ce.block);
+      } catch (err) {
+        toast("warn", `칸 편집 실패: ${err}`);
+      }
+    });
+  }, [cellEdit, enqueueEdit, invalidate, reselectTableAfterRepaint]);
 
   // ---- caret: edit loop (each helper enqueued; reads caretRef AFTER the prior queued edit resolved) ----
   const doInsert = useCallback((text: string) => {
@@ -642,11 +796,14 @@ export default function App() {
     }
     setViewMode(next);
     viewModeRef.current = next;
-    // The image overlay only exists in 'own' mode — drop any selection when leaving it.
-    if (next !== "own") clearImageSel();
+    // The image + table overlays only exist in 'own' mode — drop any selection when leaving it.
+    if (next !== "own") {
+      clearImageSel();
+      clearTableSel();
+    }
     if (next === "html") void loadDocHtml();
     else if (next === "own") void loadOwnPageCount();
-  }, [loadDocHtml, loadOwnPageCount, clearImageSel]);
+  }, [loadDocHtml, loadOwnPageCount, clearImageSel, clearTableSel]);
 
   // ---- Zoom verbs ----
   // ⌘+/⌘- step through the same discrete levels the segmented control offers (excluding fit-width,
@@ -1196,6 +1353,22 @@ export default function App() {
                           />
                         </div>
                       )}
+                      {/* Table drag-to-move + quick-edit overlay (own-render only): press-drag the box
+                          to relocate the table (MoveBlock), or use the toolbar verbs (행 추가 / 칸 편집
+                          / 표 삭제). Live-drag = CSS-only, pointerup = ONE undoable op. */}
+                      {viewMode === "own" && tableSel && tableSel.page === item.index && (
+                        <div data-table-overlay className="absolute inset-0 z-20">
+                          <TableOverlay
+                            box={tableSel.screen}
+                            pxPerPageY={tableSel.pxPerPageY}
+                            onCommitMove={commitTableMove}
+                            onAddRow={commitTableAddRow}
+                            onEditCell={openCellEditor}
+                            onDeleteTable={commitTableDeleteTable}
+                            onDismiss={clearTableSel}
+                          />
+                        </div>
+                      )}
                       {/* Post-apply highlight pulse — a one-shot accent glow over the page a chat edit
                           just landed on (cleared by a timer in `pulse`). */}
                       {pulsePage === item.index && (
@@ -1231,6 +1404,76 @@ export default function App() {
           {dragActive && (
             <div className="pointer-events-none sticky bottom-4 z-20 mx-auto flex w-fit items-center gap-2 rounded-full border border-accent/40 bg-accent/10 px-3 py-1.5 text-sm font-medium text-accent shadow-lg backdrop-blur">
               🖼️ 여기에 놓아 이미지 삽입
+            </div>
+          )}
+          {/* Cell editor — the table overlay's 칸 편집 verb. A small centered form: pick (행, 열) +
+              type the new text, commit one SetTableCell op. Esc / 취소 dismisses. */}
+          {cellEdit && (
+            <div
+              className="fixed inset-0 z-40 grid place-items-center bg-black/30"
+              onClick={() => setCellEdit(null)}
+              role="presentation"
+            >
+              <div
+                className="w-72 rounded-lg border border-black/10 bg-white p-4 shadow-xl dark:border-white/10 dark:bg-neutral-800"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="mb-3 text-sm font-medium text-neutral-700 dark:text-neutral-200">표 칸 편집</div>
+                <div className="mb-3 flex items-center gap-2 text-xs">
+                  <label className="flex items-center gap-1">
+                    행
+                    <input
+                      type="number"
+                      min={0}
+                      max={Math.max(0, cellEdit.rows - 1)}
+                      value={cellEdit.row}
+                      onChange={(e) =>
+                        setCellEdit((c) => (c ? { ...c, row: Math.max(0, Math.min(c.rows - 1, Number(e.target.value) || 0)) } : c))
+                      }
+                      className="w-14 rounded border border-black/15 bg-transparent px-1.5 py-1 tabular-nums dark:border-white/15"
+                    />
+                  </label>
+                  <label className="flex items-center gap-1">
+                    열
+                    <input
+                      type="number"
+                      min={0}
+                      max={Math.max(0, cellEdit.cols - 1)}
+                      value={cellEdit.col}
+                      onChange={(e) =>
+                        setCellEdit((c) => (c ? { ...c, col: Math.max(0, Math.min(c.cols - 1, Number(e.target.value) || 0)) } : c))
+                      }
+                      className="w-14 rounded border border-black/15 bg-transparent px-1.5 py-1 tabular-nums dark:border-white/15"
+                    />
+                  </label>
+                </div>
+                <input
+                  autoFocus
+                  type="text"
+                  value={cellEdit.text}
+                  placeholder="새 칸 내용"
+                  onChange={(e) => setCellEdit((c) => (c ? { ...c, text: e.target.value } : c))}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") commitCellEdit();
+                    if (e.key === "Escape") setCellEdit(null);
+                  }}
+                  className="mb-3 w-full rounded border border-black/15 bg-transparent px-2 py-1.5 text-sm dark:border-white/15"
+                />
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={() => setCellEdit(null)}
+                    className="rounded px-3 py-1 text-xs text-neutral-500 hover:bg-black/5 dark:hover:bg-white/10"
+                  >
+                    취소
+                  </button>
+                  <button
+                    onClick={commitCellEdit}
+                    className="rounded bg-accent px-3 py-1 text-xs font-medium text-white hover:opacity-90"
+                  >
+                    적용
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </main>
