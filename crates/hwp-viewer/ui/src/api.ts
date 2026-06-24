@@ -62,6 +62,10 @@ export type CaretRect = { x: number; top: number; height: number };
  *  the same SVG zoom factor the caret uses) and commits via `setImageSize`/`moveImage`. */
 export type ImageBox = { x: number; y: number; w: number; h: number; section: number; block: number };
 
+/** One document-outline heading: model anchor `(section, block)`, a heuristic `level`, the heading
+ *  `text`, and the 0-based `page` it starts on (for click-to-scroll in the outline panel). */
+export type OutlineItem = { section: number; block: number; level: number; text: string; page: number };
+
 /// Typed bindings to the Rust `Intent` command lane (crates/hwp-viewer/src/lib.rs). No prose
 /// parsing: each command returns a typed value the UI consumes directly.
 export const api = {
@@ -80,6 +84,8 @@ export const api = {
   ownPageCount: () => invoke<number>("own_page_count"),
   /** Live page count of the open document. */
   pageCount: () => invoke<number>("doc_page_count"),
+  /** Document outline (□ labels + numbered section bands) with the page each starts on. */
+  docOutline: () => invoke<OutlineItem[]>("doc_outline"),
   /** Apply template-conformant AI content JSON (one undo unit); returns the new page count. */
   applyContent: (content: string) => invoke<number>("apply_content", { content }),
   /** Serialize the edited document to a .hwpx path; returns a status line. */

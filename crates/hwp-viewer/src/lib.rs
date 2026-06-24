@@ -158,6 +158,81 @@ async fn own_page_count(sess: tauri::State<'_, SharedSession>) -> Result<u32, St
     .map_err(|e| e.to_string())?
 }
 
+/// One heading in the document outline: where it lives in the model + the page it starts on.
+#[derive(serde::Serialize)]
+struct OutlineItem {
+    section: usize,
+    block: usize,
+    level: u8,
+    text: String,
+    page: u32,
+}
+
+/// Document outline for the left nav panel: the gov-doc's top-level headings — □-prefixed section
+/// labels and numbered section bands ("1. 문제 인식 …") — each with the 0-based page it starts on
+/// (via [`hwp_typeset::block_pages`]). Heuristic + gov-doc-tuned; empty when no doc is open.
+#[tauri::command]
+async fn doc_outline(sess: tauri::State<'_, SharedSession>) -> Result<Vec<OutlineItem>, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let s = sess.lock().map_err(|_| "session poisoned")?;
+        let doc = match s.doc.as_ref() {
+            Some(d) => d.doc(),
+            None => return Ok(Vec::new()),
+        };
+        let fonts = own_render_fonts();
+        let pages = hwp_typeset::block_pages(doc, fonts.as_ref());
+        let mut out = Vec::new();
+        for (si, sec) in doc.sections.iter().enumerate() {
+            for (bi, block) in sec.blocks.iter().enumerate() {
+                if let Some((level, text)) = outline_heading(block) {
+                    let page = pages.get(si).and_then(|p| p.get(bi)).copied().unwrap_or(0) as u32;
+                    out.push(OutlineItem { section: si, block: bi, level, text, page });
+                }
+            }
+        }
+        Ok(out)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Detect a heading block → `(level, text)`. Level 1 = a □/■-prefixed section label paragraph;
+/// level 2 = a numbered section-band table ("N. …"). Returns `None` for body content.
+fn outline_heading(block: &hwp_model::document::Block) -> Option<(u8, String)> {
+    use hwp_model::document::{Block, Inline};
+    fn para_text(p: &hwp_model::document::Paragraph) -> String {
+        p.runs
+            .iter()
+            .flat_map(|r| r.content.iter().filter_map(|i| if let Inline::Text(s) = i { Some(s.as_str()) } else { None }))
+            .collect()
+    }
+    match block {
+        Block::Paragraph(p) => {
+            let t = para_text(p);
+            let tt = t.trim();
+            if (tt.starts_with('□') || tt.starts_with('■')) && tt.chars().count() < 40 {
+                return Some((1, tt.to_string()));
+            }
+            None
+        }
+        Block::Table(t) => {
+            // The first non-empty cell text; a numbered band starts with a digit and contains '.'.
+            let first = t.cells.iter().find_map(|c| {
+                let s: String = c
+                    .blocks
+                    .iter()
+                    .filter_map(|b| if let Block::Paragraph(p) = b { Some(para_text(p)) } else { None })
+                    .collect();
+                let s = s.trim().to_string();
+                (!s.is_empty()).then_some(s)
+            })?;
+            let numbered = first.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) && first.contains('.');
+            (numbered && first.chars().count() < 80).then_some((2, first))
+        }
+    }
+}
+
 /// Choose the font-metrics provider for the OWN renderer: the real rustybuzz shaper under
 /// `--features shaper` (real Latin advances + EM-grid Hangul), else the per-script approximation.
 /// Mirrors the CLI `own_render_fonts` so the in-app view and `tf-hwp own-render` use the same metrics.
@@ -894,6 +969,7 @@ pub fn run() {
             render_own_page,
             own_page_count,
             doc_page_count,
+            doc_outline,
             apply_content,
             export_hwpx,
             export_doc_html,

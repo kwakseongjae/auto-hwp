@@ -161,6 +161,79 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
     PlacedDoc { pages }
 }
 
+/// Map each top-level block to the 0-based page index its first line/row STARTS on, re-driving the
+/// SAME vertical accounting as [`place_doc`] (fresh page per section, paragraph space-before/after,
+/// table outer margins + fit/overflow page breaks) WITHOUT placing glyphs. `out[section][block]` =
+/// page index. Lets a document-outline / page-nav panel scroll the page list to a heading's page.
+pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Vec<usize>> {
+    let mut out: Vec<Vec<usize>> = Vec::with_capacity(doc.sections.len());
+    let mut page_idx = 0usize; // current (global) page index
+    let mut started = false;
+    for sec in &doc.sections {
+        let page = &sec.page;
+        let body_w = (page.width - page.margin_left - page.margin_right).max(1) as f64;
+        let body_h = (page.height - page.margin_top - page.margin_bottom).max(1) as f64;
+        if started {
+            page_idx += 1; // each section starts on a fresh page
+        }
+        let mut vert = 0.0f64;
+        let mut sec_pages = Vec::with_capacity(sec.blocks.len());
+        for block in &sec.blocks {
+            match block {
+                Block::Paragraph(p) => {
+                    let ps = doc.para_shapes.get(p.para_shape);
+                    if ps.map(|s| s.page_break_before).unwrap_or(false) && vert > 0.0 {
+                        page_idx += 1;
+                        vert = 0.0;
+                    }
+                    if vert > 0.0 {
+                        vert += ps.map(|s| s.space_before).unwrap_or(0).max(0) as f64;
+                    }
+                    let ratio = line_spacing_ratio(p, doc);
+                    let ind = indent_of(p, doc, body_w);
+                    let lines = layout_paragraph(p, doc, ind.wrap_w, fonts);
+                    let mut recorded = false;
+                    for ls in &lines {
+                        if vert + ls.vert_size > body_h && vert > 0.0 {
+                            page_idx += 1;
+                            vert = 0.0;
+                        }
+                        if !recorded {
+                            sec_pages.push(page_idx); // the block starts where its first line lands
+                            recorded = true;
+                        }
+                        vert += ls.vert_size * ratio;
+                    }
+                    if !recorded {
+                        sec_pages.push(page_idx);
+                    }
+                    vert += ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;
+                    started = true;
+                }
+                Block::Table(t) => {
+                    let h = table_height(t, body_w, doc, fonts);
+                    if vert > 0.0 {
+                        vert += t.outer_margin_top.max(0) as f64;
+                    }
+                    if vert + h > body_h && vert > 0.0 {
+                        page_idx += 1;
+                        vert = 0.0;
+                    }
+                    sec_pages.push(page_idx); // the table starts here
+                    vert += h + t.outer_margin_bottom.max(0) as f64;
+                    while vert > body_h {
+                        page_idx += 1;
+                        vert -= body_h;
+                    }
+                    started = true;
+                }
+            }
+        }
+        out.push(sec_pages);
+    }
+    out
+}
+
 /// 문단 들여쓰기/여백 (paragraph indent geometry) resolved from a [`ParaShape`].
 ///
 /// `left` is the block left inset (`ParaShape.left_margin`, clamped ≥0) applied to EVERY line;
@@ -642,6 +715,28 @@ mod tests {
         let placed = place_doc(&doc, &ApproxFontMetrics);
         // The bottom-most rect's y is the 2nd table's border top.
         placed.pages[0].rects.iter().map(|r| r.y).fold(0.0, f64::max)
+    }
+
+    #[test]
+    fn block_pages_agrees_with_place_doc_pagination() {
+        // Two paragraphs + a table; block_pages must give one page index per block, all within the
+        // page count place_doc produces, monotonically non-decreasing in reading order.
+        let mut t = Table { rows: 1, cols: 1, col_widths: vec![1], ..Default::default() };
+        t.cells.push(Cell { row: 0, col: 0, blocks: vec![Block::Paragraph(para("셀"))], ..Default::default() });
+        let doc = doc_with(vec![
+            Block::Paragraph(para("첫 문단")),
+            Block::Table(t),
+            Block::Paragraph(para("끝 문단")),
+        ]);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let bp = block_pages(&doc, &ApproxFontMetrics);
+        assert_eq!(bp.len(), 1, "one section");
+        assert_eq!(bp[0].len(), 3, "one page index per block");
+        let npages = placed.pages.len();
+        assert!(bp[0].iter().all(|&p| p < npages), "every block page index is in range: {bp:?} of {npages}");
+        assert!(bp[0].windows(2).all(|w| w[0] <= w[1]), "block pages are non-decreasing in reading order");
+        // The last block's start page never exceeds the last page.
+        assert_eq!(*bp[0].iter().max().unwrap(), npages - 1, "content reaches the last page");
     }
 
     #[test]

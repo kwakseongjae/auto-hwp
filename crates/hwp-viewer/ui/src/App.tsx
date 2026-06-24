@@ -5,7 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { tinykeys } from "tinykeys";
-import { api, type CaretRect, type FindMatch, type ImageBox } from "./api";
+import { api, type CaretRect, type FindMatch, type ImageBox, type OutlineItem } from "./api";
 import { sanitizeSvg } from "./sanitize";
 import { advanceOffset, imageBoxToScreen, pageToScreen, screenToPage } from "./caret";
 import ImageOverlay from "./ImageOverlay";
@@ -28,6 +28,10 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [composer, setComposer] = useState<ComposerMode>(null);
   const [chatOpen, setChatOpen] = useState(false);
+  // U4: document outline (left nav). `outlineOpen` toggles the panel (⌘\); `outline` is fetched on
+  // open + after every edit (doc-changed) so headings + their pages stay current.
+  const [outlineOpen, setOutlineOpen] = useState(false);
+  const [outline, setOutline] = useState<OutlineItem[]>([]);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
   // The full-screen busy overlay is BLOCKING, so only raise it for genuinely slow work: while busy, a
   // thin top progress bar shows immediately, and the dimming overlay only appears if the op is still
@@ -307,6 +311,9 @@ export default function App() {
       const max = (viewModeRef.current === "own" ? ownPageCountRef.current : n) - 1;
       queueMicrotask(() => virtualizer.scrollToIndex(Math.max(0, Math.min(scrollTo, max))));
     }
+    // U4: refresh the outline (headings + their pages) after open/edit.
+    if (n > 0) api.docOutline().then(setOutline).catch(() => setOutline([]));
+    else setOutline([]);
   }, [clearCaret, virtualizer, loadDocHtml, loadOwnPageCount]);
   // own page count read inside the (stable) invalidate closure needs the latest value.
   const ownPageCountRef = useRef(ownPageCount);
@@ -772,6 +779,7 @@ export default function App() {
       "$mod+Equal": (e) => { e.preventDefault(); handlers.current.zoomIn(); },
       "$mod+Minus": (e) => { e.preventDefault(); handlers.current.zoomOut(); },
       "$mod+l": (e) => { e.preventDefault(); if (canEditForKeys.current) setChatOpen((o) => !o); },
+      "$mod+Backslash": (e) => { e.preventDefault(); setOutlineOpen((o) => !o); },
       "$mod+t": (e) => { e.preventDefault(); if (canEditForKeys.current) setComposer("table"); },
       "$mod+.": (e) => { e.preventDefault(); if (canEditForKeys.current) setComposer("ai"); },
       "$mod+z": (e) => { e.preventDefault(); void handlers.current.doUndo(); },
@@ -944,6 +952,11 @@ export default function App() {
           <span data-tauri-drag-region className="text-sm font-semibold tracking-tight text-neutral-400">한칸</span>
         )}
         <div data-tauri-drag-region className="h-6 flex-1" />
+        {pageCount > 0 && (
+          <IconButton onClick={() => setOutlineOpen((o) => !o)} title="문서 개요 (⌘\\)" active={outlineOpen}>
+            ☰ 개요
+          </IconButton>
+        )}
         {canEdit && (
           <IconButton onClick={() => setChatOpen((o) => !o)} title="AI 바이브 편집 (⌘L)" active={chatOpen} tone="ai">
             ✦ 바이브 <kbd className="rounded bg-black/5 px-1 dark:bg-white/10">⌘L</kbd>
@@ -1042,6 +1055,33 @@ export default function App() {
 
       {/* The viewer + the docked vibe-docs chat, side by side. */}
       <div className="flex min-h-0 flex-1">
+        {/* U4: document outline (left nav) — read-only orientation; click a heading → scroll its page. */}
+        {outlineOpen && pageCount > 0 && (
+          <aside className="flex w-56 shrink-0 flex-col border-r border-black/10 bg-neutral-50/60 dark:border-white/10 dark:bg-neutral-900/40">
+            <div className="flex h-9 shrink-0 items-center justify-between px-3 text-xs font-medium text-neutral-500 dark:text-neutral-400">
+              <span>문서 개요</span>
+              <button onClick={() => setOutlineOpen(false)} title="닫기 (⌘\\)" className="rounded px-1 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200">✕</button>
+            </div>
+            <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+              {outline.length === 0 ? (
+                <p className="px-2 py-1 text-xs text-neutral-400">개요 항목이 없습니다</p>
+              ) : (
+                outline.map((it, i) => (
+                  <button
+                    key={`${it.section}-${it.block}-${i}`}
+                    onClick={() => scrollToPage(it.page)}
+                    title={`${it.text} · ${it.page + 1}쪽`}
+                    className="flex w-full items-baseline gap-2 truncate rounded-md px-2 py-1 text-left text-xs text-neutral-700 hover:bg-black/5 dark:text-neutral-300 dark:hover:bg-white/10"
+                    style={{ paddingLeft: `${0.5 + (it.level - 1) * 0.75}rem` }}
+                  >
+                    <span className="truncate">{it.text}</span>
+                    <span className="ml-auto shrink-0 tabular-nums text-[10px] text-neutral-400">{it.page + 1}</span>
+                  </button>
+                ))
+              )}
+            </nav>
+          </aside>
+        )}
         {/* SVG-page modes ('svg' 원본 / 'own' 자체 렌더) lay WHITE sheets on a light DOCUMENT PASTEBOARD
             (like Word/Hancom keep a neutral canvas behind pages) so the inter-page gap reads as a soft
             light band — NOT the dark app background, which made the gap look like a full-width black bar
