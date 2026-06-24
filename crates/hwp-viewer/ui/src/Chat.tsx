@@ -1,13 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { Proposal, ProposalOp } from "./api";
 
 export type Scope = { section: number; block: number | null; page: number };
 
 export type ChatCtx = {
   /** Send a NL edit instruction (+ optional click-resolved scope); the provider proposes targeted
-   *  edits (dry-run). Returns the rationale + per-op preview. Held pending on the Rust session. */
-  propose: (instruction: string, scope: Scope | null) => Promise<string>;
+   *  edits (dry-run). Returns the structured proposal (rationale + per-op cards). Held pending. */
+  propose: (instruction: string, scope: Scope | null) => Promise<Proposal>;
   /** Insert an attached image (base64) at the pointed target — deterministic, no provider needed. */
-  insertImage: (name: string, dataB64: string, scope: Scope | null, widthMm: number, heightMm: number) => Promise<string>;
+  insertImage: (name: string, dataB64: string, scope: Scope | null, widthMm: number, heightMm: number) => Promise<Proposal>;
   /** Commit the pending proposal (one undo unit). */
   commit: () => Promise<void>;
   /** Drop the pending proposal. */
@@ -33,19 +34,89 @@ function readImage(file: File): Promise<{ dataB64: string; dataUrl: string; w: n
   });
 }
 
+// One assistant turn carries the STRUCTURED proposal (rationale + per-op cards) plus the page the
+// user pointed at (so the card's jump-to-block link can scroll there). `state` tracks the review.
 type Msg =
   | { role: "user"; text: string }
-  | { role: "assistant"; text: string; state: "pending" | "applied" | "discarded" | "error" };
+  | { role: "assistant"; state: "applied" | "discarded"; proposal: Proposal; page: number | null }
+  | { role: "assistant"; state: "pending"; proposal: Proposal; page: number | null }
+  | { role: "assistant"; state: "error"; text: string };
+
+// Reusable prompt chips — the empty-state suggestions AND the always-available quick row above the
+// composer. Each either fills the input (so the user can tweak before sending) or is a one-tap send.
+const PROMPT_CHIPS: { label: string; prompt: string }[] = [
+  { label: "표 추가", prompt: "여기 아래에 표를 하나 넣어줘" },
+  { label: "이 블록 삭제", prompt: "이 블록을 지워줘" },
+  { label: "문단 추가", prompt: "결론 문단 하나 추가해줘" },
+  { label: "열 음영", prompt: "이 표의 첫 번째 열에 연한 회색 음영을 넣어줘" },
+  { label: "제목 추가", prompt: "여기 위에 소제목을 추가해줘" },
+];
+
+// Per-op-kind label + glyph for the structured proposal CARD header (falls back for unknown kinds).
+const OP_META: Record<string, { label: string; icon: string }> = {
+  append_paragraph: { label: "문단 추가", icon: "¶" },
+  insert_paragraph: { label: "문단 삽입", icon: "¶" },
+  append_table: { label: "표 추가", icon: "▦" },
+  insert_table: { label: "표 삽입", icon: "▦" },
+  insert_image: { label: "그림 삽입", icon: "🖼" },
+  insert_rows: { label: "행 삽입", icon: "▤" },
+  set_cell: { label: "칸 채우기", icon: "▣" },
+  shade_cells: { label: "음영", icon: "◧" },
+  delete_block: { label: "블록 삭제", icon: "－" },
+  page_layout: { label: "페이지 설정", icon: "▭" },
+  edit: { label: "편집", icon: "✎" },
+};
+
+/** A structured per-op proposal CARD: op kind, a target chip {section,block} with a jump-to-block
+ *  link that scrolls the page, and the human summary line — replaces the old prose <pre> blob. */
+function OpCard(props: { op: ProposalOp; page: number | null; onJump: (page: number) => void }) {
+  const { op, page, onJump } = props;
+  const meta = OP_META[op.kind] ?? OP_META.edit;
+  const hasTarget = op.section !== null;
+  return (
+    <div className="rounded-lg border border-ai/25 bg-white/60 px-2.5 py-2 dark:bg-neutral-900/40">
+      <div className="flex items-center gap-1.5">
+        <span className="text-sm leading-none">{meta.icon}</span>
+        <span className="text-[12px] font-medium text-neutral-700 dark:text-neutral-200">{meta.label}</span>
+        {hasTarget && (
+          <span
+            className="ml-auto inline-flex items-center gap-1 rounded-full bg-accent/10 px-1.5 py-0.5 font-mono text-[10px] text-accent"
+            title="편집 대상 위치 (섹션/블록)"
+          >
+            s{op.section}
+            {op.block !== null ? `·b${op.block}` : ""}
+          </span>
+        )}
+      </div>
+      <p className="mt-1 break-words text-[12px] leading-snug text-neutral-600 dark:text-neutral-300">{op.summary}</p>
+      {page !== null && (
+        <button
+          onClick={() => onJump(page)}
+          className="mt-1 inline-flex items-center gap-1 text-[11px] text-accent hover:underline"
+          title="이 편집이 적용되는 쪽으로 이동"
+        >
+          ↪ p.{page + 1}로 이동
+        </button>
+      )}
+    </div>
+  );
+}
+
+const MIN_W = 300;
+const MAX_W = 640;
+const RAIL_W = 44; // collapsed rail width
 
 /// The vibe-docs chat panel — the PRIMARY editing surface. The user POINTS at the document (a click
 /// captures a `scope` chip) and says what they want ("이거 지워줘", "여기 아래 표 넣어줘"); the AI proposes
-/// anchored edits, shown as a reviewable card with 적용/취소. Applying commits through the op-bus.
+/// anchored edits, shown as reviewable per-op CARDS with 적용/취소. Applying commits through the op-bus.
+/// The panel is resizable (drag the left edge) and collapsible to a thin rail.
 export function Chat(props: {
   open: boolean;
   canEdit: boolean;
   provider: string;
   scope: Scope | null;
   onClearScope: () => void;
+  onJumpToPage: (page: number) => void;
   ctx: ChatCtx;
   onApplied: () => void;
 }) {
@@ -53,6 +124,9 @@ export function Chat(props: {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [attach, setAttach] = useState<Attachment | null>(null);
+  // Resizable + collapsible-to-rail panel state (replaces the old hardcoded w-[360px]).
+  const [width, setWidth] = useState(380);
+  const [collapsed, setCollapsed] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -68,29 +142,48 @@ export function Chat(props: {
       const heightMm = w > 0 && h > 0 ? Math.round((widthMm * h) / w) : 90;
       setAttach({ name: file.name, dataB64, dataUrl, widthMm, heightMm });
     } catch {
-      setMsgs((m) => [...m, { role: "assistant", text: "이미지를 읽지 못했습니다", state: "error" }]);
+      setMsgs((m) => [...m, { role: "assistant", state: "error", text: "이미지를 읽지 못했습니다" }]);
     }
   }
 
   const isMock = props.provider === "mock" || props.provider === "none";
-  const awaiting =
-    msgs.length > 0 &&
-    msgs[msgs.length - 1].role === "assistant" &&
-    (msgs[msgs.length - 1] as { state: string }).state === "pending";
+  const last = msgs[msgs.length - 1];
+  const awaiting = last?.role === "assistant" && last.state === "pending";
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
-  }, [msgs]);
+  }, [msgs, busy]);
   useEffect(() => {
-    if (props.open) queueMicrotask(() => inputRef.current?.focus());
-  }, [props.open]);
+    if (props.open && !collapsed) queueMicrotask(() => inputRef.current?.focus());
+  }, [props.open, collapsed]);
 
-  function settleLast(state: "applied" | "discarded" | "error") {
+  // ---- left-edge resize drag (pointer events; clamps to [MIN_W, MAX_W]) ----
+  const onResizeDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = width;
+    const onMove = (ev: PointerEvent) => {
+      // Dragging the LEFT edge: moving left (smaller clientX) widens the panel.
+      const next = Math.max(MIN_W, Math.min(MAX_W, startW + (startX - ev.clientX)));
+      setWidth(next);
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      document.body.style.cursor = "";
+    };
+    document.body.style.cursor = "col-resize";
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }, [width]);
+
+  function settleLast(state: "applied" | "discarded") {
     setMsgs((m) => {
       const copy = m.slice();
       for (let i = copy.length - 1; i >= 0; i--) {
-        if (copy[i].role === "assistant" && (copy[i] as { state: string }).state === "pending") {
-          copy[i] = { ...(copy[i] as Msg & { role: "assistant" }), state };
+        const c = copy[i];
+        if (c.role === "assistant" && c.state === "pending") {
+          copy[i] = { ...c, state };
           break;
         }
       }
@@ -98,27 +191,28 @@ export function Chat(props: {
     });
   }
 
-  async function send() {
-    const text = input.trim();
+  async function send(text: string) {
     if (busy || awaiting) return;
+    const trimmed = text.trim();
     // Need either some text (NL edit) or an attached image (deterministic insert).
-    if (!text && !attach) return;
+    if (!trimmed && !attach) return;
     const scope = props.scope;
+    const page = scope ? scope.page : null;
     const where = scope ? ` (가리킨 위치 p.${scope.page + 1}${scope.block !== null ? `·블록 ${scope.block}` : ""})` : "";
     const att = attach;
     setInput("");
     setAttach(null);
-    setMsgs((m) => [...m, { role: "user", text: (att ? `📎 ${att.name} ` : "") + text + where }]);
+    setMsgs((m) => [...m, { role: "user", text: (att ? `📎 ${att.name} ` : "") + trimmed + where }]);
     setBusy(true);
     try {
       // An attached image takes the deterministic insert path (works with no provider/key); plain
-      // text goes through the AI edit proposer.
-      const preview = att
+      // text goes through the AI edit proposer. Both return a STRUCTURED proposal.
+      const proposal = att
         ? await props.ctx.insertImage(att.name, att.dataB64, scope, att.widthMm, att.heightMm)
-        : await props.ctx.propose(text, scope);
-      setMsgs((m) => [...m, { role: "assistant", text: preview, state: "pending" }]);
+        : await props.ctx.propose(trimmed, scope);
+      setMsgs((m) => [...m, { role: "assistant", state: "pending", proposal, page }]);
     } catch (e) {
-      setMsgs((m) => [...m, { role: "assistant", text: `${e}`, state: "error" }]);
+      setMsgs((m) => [...m, { role: "assistant", state: "error", text: `${e}` }]);
     } finally {
       setBusy(false);
     }
@@ -131,7 +225,7 @@ export function Chat(props: {
       settleLast("applied");
       props.onApplied();
     } catch (e) {
-      setMsgs((m) => [...m, { role: "assistant", text: `적용 실패: ${e}`, state: "error" }]);
+      setMsgs((m) => [...m, { role: "assistant", state: "error", text: `적용 실패: ${e}` }]);
     } finally {
       setBusy(false);
     }
@@ -143,11 +237,55 @@ export function Chat(props: {
 
   if (!props.open) return null;
 
+  // ---- collapsed RAIL: a thin vertical strip that re-expands the panel ----
+  if (collapsed) {
+    return (
+      <aside
+        style={{ width: RAIL_W }}
+        className="flex shrink-0 flex-col items-center gap-3 border-l border-black/10 bg-neutral-50/60 py-3 backdrop-blur-xl dark:border-white/10 dark:bg-neutral-800/40"
+      >
+        <button
+          onClick={() => setCollapsed(false)}
+          title="바이브 편집 패널 펼치기"
+          className="rounded-md px-1.5 py-1 text-ai hover:bg-ai/10"
+        >
+          ✦
+        </button>
+        <span
+          className="text-[11px] font-medium text-neutral-400"
+          style={{ writingMode: "vertical-rl" }}
+        >
+          바이브 편집
+        </span>
+        {awaiting && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" title="검토 대기 중인 제안" />}
+      </aside>
+    );
+  }
+
   return (
-    <aside className="flex w-[360px] shrink-0 flex-col border-l border-black/10 bg-neutral-50/60 backdrop-blur-xl dark:border-white/10 dark:bg-neutral-800/40">
+    <aside
+      style={{ width }}
+      className="relative flex shrink-0 flex-col border-l border-black/10 bg-neutral-50/60 backdrop-blur-xl dark:border-white/10 dark:bg-neutral-800/40"
+    >
+      {/* Left-edge resize handle: a 5px hit-strip; the visible line brightens on hover/drag. */}
+      <div
+        onPointerDown={onResizeDown}
+        title="너비 조절 (드래그)"
+        className="group absolute -left-[3px] top-0 z-20 h-full w-[6px] cursor-col-resize"
+      >
+        <div className="mx-auto h-full w-px bg-transparent transition-colors group-hover:bg-accent/40" />
+      </div>
+
       <div className="flex h-10 shrink-0 items-center gap-2 border-b border-black/10 px-3 text-sm font-medium text-ai dark:border-white/10">
         ✦ 바이브 편집
         <span className="font-normal text-neutral-400">· 가리키고 말하세요</span>
+        <button
+          onClick={() => setCollapsed(true)}
+          title="패널 접기"
+          className="ml-auto rounded px-1.5 py-0.5 text-neutral-400 hover:bg-neutral-200/70 dark:hover:bg-neutral-700/60"
+        >
+          ⇥
+        </button>
       </div>
 
       {isMock && (
@@ -159,12 +297,19 @@ export function Chat(props: {
 
       <div ref={listRef} className="min-h-0 flex-1 overflow-auto p-3">
         {msgs.length === 0 && (
-          <div className="mt-6 flex flex-col gap-2 text-center text-xs text-neutral-400">
+          <div className="mt-6 flex flex-col gap-3 text-center text-xs text-neutral-400">
             <p>문서의 한 곳을 <b>클릭해서 가리키고</b>, 무엇을 바꿀지 말하세요.</p>
-            <div className="mx-auto flex flex-col gap-1 text-left text-neutral-500 dark:text-neutral-400">
-              <span>· (목차 클릭) → “이 표 지우고 새로 만들어줘”</span>
-              <span>· (문단 클릭) → “여기 아래에 표 넣어줘”</span>
-              <span>· “결론 문단 하나 추가해줘”</span>
+            <div className="mx-auto flex flex-wrap justify-center gap-1.5">
+              {PROMPT_CHIPS.map((c) => (
+                <button
+                  key={c.label}
+                  onClick={() => { setInput(c.prompt); inputRef.current?.focus(); }}
+                  disabled={!props.canEdit || busy || awaiting}
+                  className="rounded-full border border-ai/30 bg-ai/5 px-2.5 py-1 text-[11px] text-neutral-600 hover:bg-ai/10 disabled:opacity-40 dark:text-neutral-300"
+                >
+                  {c.label}
+                </button>
+              ))}
             </div>
           </div>
         )}
@@ -174,16 +319,24 @@ export function Chat(props: {
               <div key={i} className="self-end max-w-[85%] rounded-2xl rounded-br-sm bg-accent px-3 py-2 text-sm text-white">
                 {m.text}
               </div>
-            ) : (
+            ) : m.state === "error" ? (
               <div key={i} className="self-start max-w-[95%]">
-                <div
-                  className={`rounded-2xl rounded-bl-sm border px-3 py-2 text-xs ${
-                    m.state === "error"
-                      ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400"
-                      : "border-ai/30 bg-ai/5 text-neutral-700 dark:text-neutral-300"
-                  }`}
-                >
+                <div className="rounded-2xl rounded-bl-sm border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
                   <pre className="max-h-60 overflow-auto whitespace-pre-wrap font-sans">{m.text}</pre>
+                </div>
+              </div>
+            ) : (
+              <div key={i} className="self-start w-full max-w-[95%]">
+                <div className="rounded-2xl rounded-bl-sm border border-ai/30 bg-ai/5 px-2.5 py-2">
+                  {m.proposal.rationale && (
+                    <p className="mb-2 px-0.5 text-xs leading-snug text-neutral-600 dark:text-neutral-300">{m.proposal.rationale}</p>
+                  )}
+                  {/* Structured per-op CARDS — op kind + target chip + jump-to-block link. */}
+                  <div className="flex flex-col gap-1.5">
+                    {m.proposal.ops.map((op, j) => (
+                      <OpCard key={j} op={op} page={m.page} onJump={props.onJumpToPage} />
+                    ))}
+                  </div>
                 </div>
                 {m.state === "pending" && (
                   <div className="mt-1.5 flex gap-2">
@@ -196,11 +349,36 @@ export function Chat(props: {
               </div>
             ),
           )}
+          {/* Assistant typing/thinking bubble while a proposal is being generated. */}
+          {busy && !awaiting && (
+            <div className="self-start">
+              <div className="flex items-center gap-1 rounded-2xl rounded-bl-sm border border-ai/30 bg-ai/5 px-3 py-2.5">
+                <span className="typing-dot h-1.5 w-1.5 rounded-full bg-ai" style={{ animationDelay: "0ms" }} />
+                <span className="typing-dot h-1.5 w-1.5 rounded-full bg-ai" style={{ animationDelay: "150ms" }} />
+                <span className="typing-dot h-1.5 w-1.5 rounded-full bg-ai" style={{ animationDelay: "300ms" }} />
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
       <div className="shrink-0 border-t border-black/10 p-2 dark:border-white/10">
         {!props.canEdit && <p className="px-1 pb-1.5 text-[11px] text-neutral-400">편집하려면 먼저 HWPX 문서를 여세요.</p>}
+        {/* Always-available quick prompt chips above the composer (reuse the same set). */}
+        {props.canEdit && (
+          <div className="mb-1.5 flex flex-wrap gap-1.5">
+            {PROMPT_CHIPS.slice(0, 3).map((c) => (
+              <button
+                key={c.label}
+                onClick={() => { setInput(c.prompt); inputRef.current?.focus(); }}
+                disabled={busy || awaiting}
+                className="rounded-full border border-black/10 px-2 py-0.5 text-[11px] text-neutral-500 hover:bg-neutral-200/70 disabled:opacity-40 dark:border-white/10 dark:text-neutral-400 dark:hover:bg-neutral-700/60"
+              >
+                {c.label}
+              </button>
+            ))}
+          </div>
+        )}
         {props.scope && (
           <div className="mb-1.5 flex items-center gap-1.5 rounded-md border border-accent/30 bg-accent/10 px-2 py-1 text-[11px] text-accent">
             📍 가리킨 위치: p.{props.scope.page + 1}
@@ -245,12 +423,12 @@ export function Chat(props: {
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
-                void send();
+                void send(input);
               }
             }}
           />
           <button
-            onClick={() => void send()}
+            onClick={() => void send(input)}
             disabled={!props.canEdit || busy || awaiting || (!input.trim() && !attach)}
             className="h-9 rounded-lg bg-ai px-3 text-sm font-medium text-white hover:opacity-90 disabled:opacity-40"
           >

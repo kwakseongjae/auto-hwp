@@ -201,6 +201,55 @@ impl Proposal {
         }
         s
     }
+
+    /// Structured, per-op preview for a UI that renders a CARD per op (kind + target anchor +
+    /// summary line) instead of a prose blob. `section`/`block` are the anchored target `[s/b]`
+    /// when the op addresses one (None for whole-doc / append ops).
+    pub fn structured_ops(&self) -> Vec<ProposalOp> {
+        self.ops.iter().map(ProposalOp::from_op).collect()
+    }
+}
+
+/// One op rendered for the chat's per-op proposal card: a machine `kind`, the human `summary`
+/// line (same text as [`Proposal::preview`]), and the anchored `[section/block]` target when the
+/// op addresses one (so the UI can show a target chip + a jump-to-block link).
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct ProposalOp {
+    /// Stable machine label for the op kind (e.g. "insert_table", "delete_block").
+    pub kind: &'static str,
+    /// Human-readable one-line summary (identical to the [`Proposal::preview`] line).
+    pub summary: String,
+    /// Target section index, when the op is anchored to one.
+    pub section: Option<usize>,
+    /// Target block index within the section, when the op is anchored to one.
+    pub block: Option<usize>,
+}
+
+impl ProposalOp {
+    fn from_op(op: &Op) -> Self {
+        let (kind, section, block) = op_target(op);
+        ProposalOp { kind, summary: op_summary(op), section, block }
+    }
+}
+
+/// Map an op to its stable machine `kind` + the anchored `(section, block)` target it addresses
+/// (block is None for section-level / append ops; both None for whole-doc ops).
+fn op_target(op: &Op) -> (&'static str, Option<usize>, Option<usize>) {
+    match op {
+        Op::AppendParagraph { section, .. } => ("append_paragraph", Some(*section), None),
+        Op::AppendRichParagraph { section, .. } => ("append_paragraph", Some(*section), None),
+        Op::AppendTable { section, .. } => ("append_table", Some(*section), None),
+        Op::AppendRichTable { section, .. } => ("append_table", Some(*section), None),
+        Op::InsertParagraphAt { section, index, .. } => ("insert_paragraph", Some(*section), Some(*index)),
+        Op::InsertTableAt { section, index, .. } => ("insert_table", Some(*section), Some(*index)),
+        Op::InsertImageAt { section, index, .. } => ("insert_image", Some(*section), Some(*index)),
+        Op::DeleteBlock { section, index } => ("delete_block", Some(*section), Some(*index)),
+        Op::SetTableCellShade { section, index, .. } => ("shade_cells", Some(*section), Some(*index)),
+        Op::SetTableCell { section, index, .. } => ("set_cell", Some(*section), Some(*index)),
+        Op::TableInsertRows { section, index, .. } => ("insert_rows", Some(*section), Some(*index)),
+        Op::SetPageLayout { section, .. } => ("page_layout", Some(*section), None),
+        _ => ("edit", None, None),
+    }
 }
 
 /// Produce a validated [`Proposal`] WITHOUT mutating `doc`: the provider authors template-conformant
@@ -354,6 +403,30 @@ mod tests {
         let ops = ai_fill(&mut doc, &MockProvider, "결론 문단 추가").unwrap();
         assert_eq!(ops.len(), 2);
         assert!(doc.any_dirty());
+    }
+
+    #[test]
+    fn structured_ops_carry_kind_and_anchor() {
+        // An anchored insert + a delete → structured cards with the right kind + [s/b] target.
+        let proposal = Proposal {
+            rationale: "x".into(),
+            ops: vec![
+                Op::InsertTableAt { section: 0, index: 3, rows: vec![] },
+                Op::DeleteBlock { section: 1, index: 5 },
+                Op::AppendParagraph { section: 0, text: "끝에".into() },
+            ],
+        };
+        let cards = proposal.structured_ops();
+        assert_eq!(cards.len(), 3);
+        assert_eq!(cards[0].kind, "insert_table");
+        assert_eq!((cards[0].section, cards[0].block), (Some(0), Some(3)));
+        assert_eq!(cards[1].kind, "delete_block");
+        assert_eq!((cards[1].section, cards[1].block), (Some(1), Some(5)));
+        // Append ops anchor to a section but have no block target.
+        assert_eq!(cards[2].kind, "append_paragraph");
+        assert_eq!((cards[2].section, cards[2].block), (Some(0), None));
+        // The summary line matches the prose preview line.
+        assert!(cards[1].summary.contains("블록"), "summary: {}", cards[1].summary);
     }
 
     #[test]

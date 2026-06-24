@@ -122,6 +122,48 @@ body,
   animation: top-progress 1.1s ease-in-out infinite;
 }
 
+/* Chat "typing" bubble: three dots that fade in sequence while a proposal is being generated.
+   Each dot is offset so the wave reads as "the assistant is thinking". Reduced-motion flattens it. */
+@keyframes typing-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+.typing-dot {
+  animation: typing-dot 1.2s ease-in-out infinite;
+}
+
+/* Post-apply highlight PULSE: a soft accent glow that flashes over the page a chat edit just
+   landed on, then fades — so the eye is led to "what changed". One-shot (forwards), self-removed
+   by a timer in App.tsx. The overlay <div> is positioned over the page wrapper like the caret. */
+@keyframes apply-pulse {
+  0% {
+    opacity: 0;
+    box-shadow: 0 0 0 0 var(--color-accent);
+  }
+  15% {
+    opacity: 1;
+    box-shadow: 0 0 0 4px color-mix(in oklch, var(--color-accent) 45%, transparent);
+  }
+  100% {
+    opacity: 0;
+    box-shadow: 0 0 0 10px color-mix(in oklch, var(--color-accent) 0%, transparent);
+  }
+}
+.apply-pulse {
+  border-radius: 0.5rem;
+  background: color-mix(in oklch, var(--color-accent) 12%, transparent);
+  outline: 2px solid color-mix(in oklch, var(--color-accent) 55%, transparent);
+  animation: apply-pulse 1.5s ease-out forwards;
+}
+
 /* Interactive caret blink: hard on/off (steps(1)) so it reads native, not a soft fade. The caret
    <div> is positioned over the page wrapper by the JS coordinate map (see caret.ts / App.tsx). */
 @keyframes caret-blink {

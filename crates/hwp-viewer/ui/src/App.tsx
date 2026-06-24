@@ -107,6 +107,18 @@ export default function App() {
   const [scope, setScope] = useState<Scope | null>(null);
   const scopeRef = useRef<Scope | null>(null);
   scopeRef.current = scope;
+  // Post-apply highlight PULSE: after a chat edit commits we flash a soft accent glow over the page
+  // it landed on, then clear it (a one-shot timer) so the eye is led to "what changed". The pulse
+  // overlay is drawn on the SVG page wrapper whose `data-index` matches `pulsePage`.
+  const [pulsePage, setPulsePage] = useState<number | null>(null);
+  const pulseTimer = useRef<number | undefined>(undefined);
+  const pulse = useCallback((page: number | null) => {
+    if (page === null) return;
+    window.clearTimeout(pulseTimer.current);
+    setPulsePage(page);
+    pulseTimer.current = window.setTimeout(() => setPulsePage(null), 1500);
+  }, []);
+  useEffect(() => () => window.clearTimeout(pulseTimer.current), []);
   const chatOpenRef = useRef(chatOpen);
   chatOpenRef.current = chatOpen;
   // Drag-drop image insert: highlight the page container while a file is dragged over it (M1).
@@ -179,6 +191,8 @@ export default function App() {
 
   // In 'own' mode the page list is paginated by OUR engine (its count can differ from rhwp's).
   const listCount = viewMode === "own" ? ownPageCount : pageCount;
+  const listCountRef = useRef(listCount);
+  listCountRef.current = listCount;
   const virtualizer = useVirtualizer({
     count: listCount,
     getScrollElement: () => scrollRef.current,
@@ -600,15 +614,26 @@ export default function App() {
       insertImage: (name: string, dataB64: string, scopeArg: Scope | null, widthMm: number, heightMm: number) =>
         api.insertImage(name, dataB64, scopeArg ? { section: scopeArg.section, block: scopeArg.block } : null, widthMm, heightMm),
       commit: async () => {
+        const landed = scopeRef.current ? scopeRef.current.page : null;
         const n = await api.commitProposal();
         setEdited(true);
-        invalidate(n, scopeRef.current ? scopeRef.current.page : null);
+        invalidate(n, landed);
         setScope(null);
+        // Flash a highlight pulse on the page the edit landed on (after the re-render settles).
+        if (landed !== null) queueMicrotask(() => pulse(landed));
       },
       discard: () => api.discardProposal(),
     }),
-    [invalidate],
+    [invalidate, pulse],
   );
+
+  // Scroll the page list to a 0-based page index (the chat's jump-to-block link reuses this to bring
+  // the pointed target into view). Clamps to the active list's bounds.
+  const scrollToPage = useCallback((page: number) => {
+    if (listCountRef.current === 0) return;
+    const idx = Math.max(0, Math.min(page, listCountRef.current - 1));
+    virtualizer.scrollToIndex(idx, { align: "center" });
+  }, [virtualizer]);
 
   // ---- palette command registry ----
   const commands = useMemo<Command[]>(() => {
@@ -989,6 +1014,11 @@ export default function App() {
                           style={{ left: `${caretBox.left}px`, top: `${caretBox.top}px`, height: `${caretBox.height}px` }}
                         />
                       )}
+                      {/* Post-apply highlight pulse — a one-shot accent glow over the page a chat edit
+                          just landed on (cleared by a timer in `pulse`). */}
+                      {pulsePage === item.index && (
+                        <div key={`pulse-${pulseTimer.current}`} className="apply-pulse pointer-events-none absolute inset-0 z-10" />
+                      )}
                     </div>
                   </div>
                 );
@@ -1029,6 +1059,7 @@ export default function App() {
           provider={provider}
           scope={scope}
           onClearScope={() => setScope(null)}
+          onJumpToPage={scrollToPage}
           ctx={chatCtx}
           onApplied={() => { /* re-render + scroll handled by commit→invalidate */ }}
         />

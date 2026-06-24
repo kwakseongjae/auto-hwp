@@ -327,7 +327,7 @@ fn ai_edit_propose(
     scopeSection: Option<usize>,
     scopeBlock: Option<usize>,
     sess: tauri::State<'_, SharedSession>,
-) -> Result<String, String> {
+) -> Result<Value, String> {
     let mut s = sess.lock().map_err(|_| "session poisoned")?;
     let provider = pick_provider();
     let doc = s.doc.as_ref().ok_or("no document open")?.doc();
@@ -343,9 +343,9 @@ fn ai_edit_propose(
         _ => instruction.clone(),
     };
     let proposal = hwp_ai::propose_edits(doc, &*provider, &scoped).map_err(|e| e.to_string())?;
-    let preview = format!("{}\n\n{}", proposal.rationale, proposal.preview());
+    let out = proposal_json(provider.name(), &proposal);
     s.pending = Some(proposal);
-    Ok(format!("[{}]\n{preview}", provider.name()))
+    Ok(out)
 }
 
 #[cfg(not(feature = "ai"))]
@@ -356,8 +356,20 @@ fn ai_edit_propose(
     _scopeSection: Option<usize>,
     _scopeBlock: Option<usize>,
     _sess: tauri::State<'_, SharedSession>,
-) -> Result<String, String> {
+) -> Result<Value, String> {
     Err("AI 편집은 `--features ai` 빌드가 필요합니다 (cargo tauri dev -f rhwp ai)".into())
+}
+
+/// Shape a validated [`hwp_ai::Proposal`] into the structured JSON the chat panel renders: the
+/// provider name (for the honest mock badge), the rationale prose, and one `ProposalOp` per op
+/// (machine `kind` + `[section/block]` target + the human summary line) so the UI can show a card
+/// with a target chip + a jump-to-block link instead of a prose blob.
+fn proposal_json(provider: &str, proposal: &hwp_ai::Proposal) -> Value {
+    json!({
+        "provider": provider,
+        "rationale": proposal.rationale,
+        "ops": proposal.structured_ops(),
+    })
 }
 
 /// The active AI provider's name ("anthropic" / "ollama" / "openrouter" / "mock"), so the chat can
@@ -458,15 +470,18 @@ fn propose_insert_image(
     widthMm: Option<f32>,
     heightMm: Option<f32>,
     sess: tauri::State<'_, SharedSession>,
-) -> Result<String, String> {
+) -> Result<Value, String> {
     let (path, safe) = stash_image(&name, Some(&dataB64), None)?;
     let mut s = sess.lock().map_err(|_| "session poisoned")?;
     let doc = s.doc.as_ref().ok_or("no document open")?.doc();
     let proposal =
         build_insert_image_proposal(doc, &path, scopeSection, scopeBlock, widthMm, heightMm)?;
-    let preview = proposal.preview();
+    // No provider on the deterministic image path — label the rationale with the filename so the
+    // card reads "📎 <name>"; the structured op carries the anchored target like any other.
+    let mut out = proposal_json("deterministic", &proposal);
+    out["rationale"] = json!(format!("📎 {safe}"));
     s.pending = Some(proposal);
-    Ok(format!("📎 {safe}\n{preview}"))
+    Ok(out)
 }
 
 /// DIRECT-MANIPULATION image insert (a native OS file drop onto a page): read the source file's

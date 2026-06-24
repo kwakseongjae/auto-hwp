@@ -22,6 +22,24 @@ export type FindMatch = {
 /** Result of a replace: occurrences replaced + the new page count (re-render after). */
 export type ReplaceResult = { replaced: number; pages: number };
 
+/** One op in an AI/deterministic edit proposal, structured for the per-op chat CARD: a machine
+ *  `kind`, the human `summary` line, and the anchored `[section/block]` target when the op addresses
+ *  one (block is null for section-level / append ops; both null for whole-doc ops). */
+export type ProposalOp = {
+  kind: string;
+  summary: string;
+  section: number | null;
+  block: number | null;
+};
+
+/** A pending edit proposal (dry-run, held on the Rust session): the active provider (for the honest
+ *  mock badge), a rationale prose line, and the structured ops. `commitProposal()` applies it. */
+export type Proposal = {
+  provider: string;
+  rationale: string;
+  ops: ProposalOp[];
+};
+
 /** WYSIWYG caret — the editable model target a click resolved to. `node`/`block` are null for a
  *  table-cell run or a doc without NodeIds (an unedited binary .hwp): geometry is available, the
  *  editable target is not. `offset` is the caret position in PARAGRAPH chars (Unicode scalars). */
@@ -75,7 +93,7 @@ export const api = {
    *  proposal; returns rationale+preview. `commitProposal()` then applies it (one undo unit).
    *  `scope` is an optional click-resolved target the user pointed at (section, and block if known). */
   aiEdit: (instruction: string, scope?: { section: number; block: number | null }) =>
-    invoke<string>("ai_edit_propose", {
+    invoke<Proposal>("ai_edit_propose", {
       instruction,
       scopeSection: scope?.section ?? null,
       scopeBlock: scope?.block ?? null,
@@ -91,7 +109,7 @@ export const api = {
     widthMm: number,
     heightMm: number,
   ) =>
-    invoke<string>("propose_insert_image", {
+    invoke<Proposal>("propose_insert_image", {
       name,
       dataB64,
       scopeSection: scope?.section ?? null,
