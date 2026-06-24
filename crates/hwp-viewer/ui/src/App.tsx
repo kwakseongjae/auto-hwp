@@ -32,6 +32,9 @@ export default function App() {
   // open + after every edit (doc-changed) so headings + their pages stay current.
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [outline, setOutline] = useState<OutlineItem[]>([]);
+  // U5: a tiny point-action popover (right-click a block → AI로 편집 / 이미지 삽입) + a ? cheat-sheet.
+  const [pointMenu, setPointMenu] = useState<{ x: number; y: number; page: number; section: number; block: number | null } | null>(null);
+  const [cheatOpen, setCheatOpen] = useState(false);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
   // The full-screen busy overlay is BLOCKING, so only raise it for genuinely slow work: while busy, a
   // thin top progress bar shows immediately, and the dimming overlay only appears if the op is still
@@ -334,6 +337,29 @@ export default function App() {
     }
     imeInput.current?.focus();
   }, [recomputeCaretBox]);
+
+  // ---- U5: right-click a block → a tiny point-action popover (AI 편집 scope / 이미지 삽입 here) ----
+  async function onPageContextMenu(e: React.MouseEvent) {
+    if (!canEditRef.current) return;
+    const host = (e.target as Element).closest("[data-index]");
+    if (!host) return;
+    e.preventDefault();
+    const page = Number(host.getAttribute("data-index"));
+    const svg = host.querySelector("svg");
+    if (!svg || !Number.isFinite(page)) return;
+    const rect = svg.getBoundingClientRect();
+    const vb = svg.viewBox.baseVal;
+    const pt = screenToPage(e.clientX, e.clientY, { left: rect.left, top: rect.top, width: rect.width, height: rect.height }, { width: vb.width, height: vb.height });
+    let section = 0;
+    let block: number | null = null;
+    if (pt && viewModeRef.current !== "own") {
+      try {
+        const hit = await api.hitTest(page, pt.x, pt.y);
+        if (hit) { section = hit.section; block = hit.block; }
+      } catch { /* miss → section/doc-end scope */ }
+    }
+    setPointMenu({ x: e.clientX, y: e.clientY, page, section, block });
+  }
 
   // ---- caret: click-to-place ----
   async function onPageClick(e: React.MouseEvent) {
@@ -780,6 +806,7 @@ export default function App() {
       "$mod+Minus": (e) => { e.preventDefault(); handlers.current.zoomOut(); },
       "$mod+l": (e) => { e.preventDefault(); if (canEditForKeys.current) setChatOpen((o) => !o); },
       "$mod+Backslash": (e) => { e.preventDefault(); setOutlineOpen((o) => !o); },
+      "$mod+Slash": (e) => { e.preventDefault(); setCheatOpen((o) => !o); },
       "$mod+t": (e) => { e.preventDefault(); if (canEditForKeys.current) setComposer("table"); },
       "$mod+.": (e) => { e.preventDefault(); if (canEditForKeys.current) setComposer("ai"); },
       "$mod+z": (e) => { e.preventDefault(); void handlers.current.doUndo(); },
@@ -1119,6 +1146,7 @@ export default function App() {
               // Zoom-derived column width (replaces max-w-3xl); height is the virtualizer total.
               style={{ width: `${pageWidth}px`, height: `${virtualizer.getTotalSize()}px` }}
               onClick={(e) => void onPageClick(e)}
+              onContextMenu={(e) => void onPageContextMenu(e)}
             >
               {virtualizer.getVirtualItems().map((item) => {
                 void (viewMode === "own" ? ensureOwnPage(item.index) : ensurePage(item.index));
@@ -1315,6 +1343,51 @@ export default function App() {
         onCompositionEnd={onCompositionEnd}
       />
 
+      {/* U5: minimal point-action popover (right-click a block). NOT a Notion block toolbar — 2 verbs
+          so the chat stays the obvious editing path. AI 편집 seeds the chat scope; 이미지 삽입 is direct. */}
+      {pointMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setPointMenu(null)} onContextMenu={(e) => { e.preventDefault(); setPointMenu(null); }} />
+          <div
+            className="fixed z-50 min-w-[10rem] overflow-hidden rounded-lg border border-black/10 bg-white py-1 text-sm shadow-xl dark:border-white/10 dark:bg-neutral-800"
+            style={{ left: Math.min(pointMenu.x, window.innerWidth - 184), top: Math.min(pointMenu.y, window.innerHeight - 96) }}
+          >
+            <button
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-ai/10"
+              onClick={() => { setScope({ section: pointMenu.section, block: pointMenu.block, page: pointMenu.page }); setChatOpen(true); setPointMenu(null); }}
+            >✦ 여기를 AI로 편집</button>
+            <button
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-accent/10"
+              onClick={() => {
+                const sel = pointMenu; setPointMenu(null);
+                void (async () => {
+                  const path = await openDialog({ multiple: false, filters: [{ name: "이미지", extensions: ["png", "jpg", "jpeg", "gif", "bmp", "webp"] }] });
+                  if (typeof path !== "string") return;
+                  try { const n = await api.applyImageDrop(path, { section: sel.section, block: sel.block }); setEdited(true); invalidate(n, null); toast("info", "이미지 삽입됨"); }
+                  catch (err) { toast("warn", `이미지 삽입 실패: ${err}`); }
+                })();
+              }}
+            >🖼️ 여기에 이미지 삽입</button>
+          </div>
+        </>
+      )}
+      {/* U6: keyboard cheat-sheet (⌘/). */}
+      {cheatOpen && (
+        <div className="fixed inset-0 z-[60] grid place-items-center bg-black/30 p-4 backdrop-blur-sm" onClick={() => setCheatOpen(false)}>
+          <div className="w-[22rem] rounded-xl border border-black/10 bg-white p-5 shadow-2xl dark:border-white/10 dark:bg-neutral-800" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-3 text-base font-semibold">키보드 단축키</div>
+            <div className="flex flex-col gap-1.5 text-sm text-neutral-700 dark:text-neutral-300">
+              {([["⌘O", "문서 열기"], ["⌘K", "명령 팔레트"], ["⌘L", "AI 바이브 편집"], ["⌘\\", "문서 개요"], ["⌘F", "찾기"], ["⌘= / ⌘-", "확대 / 축소"], ["⌘0", "100%"], ["⌘S / ⌘E", "내보내기(HWPX)"], ["⌘Z / ⌘⇧Z", "실행취소 / 다시실행"], ["우클릭", "빠른 작업 메뉴"], ["⌘/", "이 도움말"]] as [string, string][]).map(([k, d]) => (
+                <div key={k} className="flex items-center justify-between gap-4">
+                  <span>{d}</span>
+                  <kbd className="shrink-0 rounded bg-black/5 px-1.5 py-0.5 text-xs dark:bg-white/10">{k}</kbd>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 text-right"><button onClick={() => setCheatOpen(false)} className="rounded-md px-3 py-1 text-xs text-neutral-500 hover:bg-black/5 dark:hover:bg-white/10">닫기</button></div>
+          </div>
+        </div>
+      )}
       <Palette open={paletteOpen} onOpenChange={setPaletteOpen} commands={commands} />
       <Composer mode={composer} onClose={() => setComposer(null)} ctx={composerCtx} />
       <Toaster />
