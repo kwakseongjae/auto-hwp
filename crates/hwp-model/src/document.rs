@@ -318,12 +318,13 @@ pub struct Cell {
 }
 
 /// One cell edge's rendered border (a side of the box). Lifted from a borderFill `BorderLine`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CellEdge {
     pub color: crate::types::Color,
     pub style: LineStyle,
     /// Stroke width in device px (≈ the SVG/PDF stroke width). Lifted from the HWP width index.
-    pub width_px: u32,
+    /// f64 so sub-px gov-doc hairlines (0.5/0.7px) survive — not rounded up to a heavier 1px.
+    pub width_px: f64,
 }
 
 /// How a border line is drawn. `None` = 선없음 (the edge is suppressed: NO stroke emitted) — this is
@@ -340,11 +341,12 @@ pub enum LineStyle {
 }
 
 /// A cell diagonal line (HWP borderFill `diagonal`). `kind` picks which corners it connects.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CellDiagonal {
     pub kind: DiagonalKind,
     pub color: crate::types::Color,
-    pub width_px: u32,
+    /// Stroke width in device px (f64 — same hairline rationale as [`CellEdge::width_px`]).
+    pub width_px: f64,
 }
 
 /// Slash = bottom-left→top-right (/); BackSlash = top-left→bottom-right (\\).

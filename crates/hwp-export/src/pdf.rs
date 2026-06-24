@@ -206,7 +206,8 @@ fn rgb_of(c: Color) -> rgb::Color {
 }
 
 /// Paint a `Rect`: `fill = Some` → a filled box (shading); `None` → a thin black stroked outline
-/// (cell/line border). Mirrors the SVG sink's stroke width (0.5px ≈ 0.375pt) scaled to points.
+/// (cell/line border). Mirrors the SVG sink's stroke width — the SAME hairline weight as the per-edge
+/// lines (`BORDER_HAIRLINE_PX` px → pt) so legacy-box and per-edge cells read identically.
 fn paint_rect(surface: &mut krilla::surface::Surface, x: f64, y: f64, w: f64, h: f64, fill: Option<Color>) {
     let Some(rect) = Rect::from_xywh(pt(x), pt(y), pt(w).max(0.01), pt(h).max(0.01)) else {
         return;
@@ -229,7 +230,7 @@ fn paint_rect(surface: &mut krilla::surface::Surface, x: f64, y: f64, w: f64, h:
             surface.set_fill(None);
             surface.set_stroke(Some(Stroke {
                 paint: rgb::Color::black().into(),
-                width: 0.375,
+                width: BORDER_HAIRLINE_PX * PT_PER_PX,
                 ..Default::default()
             }));
             surface.draw_path(&path);
@@ -239,6 +240,11 @@ fn paint_rect(surface: &mut krilla::surface::Surface, x: f64, y: f64, w: f64, h:
 
 /// 1 CSS px (the unit of `PaintOp::Line.width`) @ 96 DPI = 72/96 pt = 0.75 pt.
 const PT_PER_PX: f32 = 0.75;
+
+/// Thinnest border stroke (CSS px) — the gov-doc hairline floor, shared by the legacy box stroke and
+/// the per-edge/diagonal lines so both border paths print at the same weight. Mirrors the SVG sink's
+/// `BORDER_HAIRLINE_PX`. At `PT_PER_PX` this is 0.375 pt (the old hand-tuned box-stroke weight).
+const BORDER_HAIRLINE_PX: f32 = 0.5;
 
 /// Paint a styled line (a cell edge or diagonal) as a stroked path. `style` maps to a dash pattern
 /// (dashed/dotted) or a solid stroke (solid/double — double is a single solid line for now, matching
@@ -258,7 +264,9 @@ fn paint_line(
     if style == LineStyle::None {
         return;
     }
-    let w = (width as f32 * PT_PER_PX).max(0.3);
+    // Clamp at the shared hairline floor (in px) BEFORE the pt conversion so a 0.4px gov-doc border
+    // and the legacy box stroke print at the exact same weight.
+    let w = (width as f32).max(BORDER_HAIRLINE_PX) * PT_PER_PX;
     let dash = match style {
         LineStyle::Dashed => Some(StrokeDash { array: vec![w * 4.0, w * 3.0], offset: 0.0 }),
         LineStyle::Dotted => Some(StrokeDash { array: vec![w, w * 2.0], offset: 0.0 }),

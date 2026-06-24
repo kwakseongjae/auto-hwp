@@ -71,12 +71,12 @@ fn t1c_per_edge_borders_and_diagonal_roundtrip() {
         blocks: vec![Block::Paragraph(Paragraph::default())],
         // left dashed-blue, right 선없음, top solid-black, bottom unspecified (None).
         borders: [
-            Some(CellEdge { color: blue, style: LineStyle::Dashed, width_px: 2 }),
-            Some(CellEdge { color: black, style: LineStyle::None, width_px: 1 }),
-            Some(CellEdge { color: black, style: LineStyle::Solid, width_px: 1 }),
+            Some(CellEdge { color: blue, style: LineStyle::Dashed, width_px: 2.0 }),
+            Some(CellEdge { color: black, style: LineStyle::None, width_px: 1.0 }),
+            Some(CellEdge { color: black, style: LineStyle::Solid, width_px: 1.0 }),
             None,
         ],
-        diagonal: Some(CellDiagonal { kind: DiagonalKind::Slash, color: red, width_px: 1 }),
+        diagonal: Some(CellDiagonal { kind: DiagonalKind::Slash, color: red, width_px: 1.0 }),
         ..Default::default()
     };
     let table = Table { rows: 1, cols: 1, cells: vec![cell], col_widths: vec![1], ..Default::default() };
@@ -91,7 +91,7 @@ fn t1c_per_edge_borders_and_diagonal_roundtrip() {
     // Falsifiable: corrupt the round-tripped left edge style → equality must now FAIL.
     let mut tampered = parse(&emit(&doc)).unwrap();
     if let Some(Block::Table(t)) = tampered.sections[0].blocks.get_mut(0) {
-        t.cells[0].borders[0] = Some(CellEdge { color: blue, style: LineStyle::Solid, width_px: 2 });
+        t.cells[0].borders[0] = Some(CellEdge { color: blue, style: LineStyle::Solid, width_px: 2.0 });
     }
     assert!(!doc_value_eq(&doc, &tampered), "equality must catch a changed edge style");
 }

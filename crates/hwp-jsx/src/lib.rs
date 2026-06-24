@@ -401,7 +401,7 @@ fn decode_cell_borders(s: &str) -> [Option<CellEdge>; 4] {
         let mut it = side.split(',');
         let style = it.next().map(line_style_from_str).unwrap_or(LineStyle::Solid);
         let color = it.next().and_then(Color::from_hex).unwrap_or_default();
-        let width_px = it.next().and_then(|w| w.parse().ok()).unwrap_or(1);
+        let width_px = it.next().and_then(|w| w.parse().ok()).unwrap_or(1.0);
         out[i] = Some(CellEdge { color, style, width_px });
     }
     out
@@ -423,7 +423,7 @@ fn decode_cell_diagonal(s: &str) -> Option<CellDiagonal> {
         _ => return None,
     };
     let color = it.next().and_then(Color::from_hex).unwrap_or_default();
-    let width_px = it.next().and_then(|w| w.parse().ok()).unwrap_or(1);
+    let width_px = it.next().and_then(|w| w.parse().ok()).unwrap_or(1.0);
     Some(CellDiagonal { kind, color, width_px })
 }
 

@@ -437,7 +437,7 @@ fn place_table(
                 y2,
                 color: d.color,
                 style: LineStyle::Solid,
-                width: d.width_px.max(1) as f64,
+                width: d.width_px.max(HAIRLINE_MIN_PX),
             });
         }
         // Cell TEXT: place the cell's paragraph glyphs inside the box, vertically centered (the
@@ -481,13 +481,17 @@ fn push_cell_edges(pg: &mut PlacedPage, borders: &[Option<CellEdge>; 4], cx: f64
             y2,
             color: edge.color,
             style: edge.style,
-            width: edge.width_px.max(1) as f64,
+            width: edge.width_px.max(HAIRLINE_MIN_PX),
         });
     }
 }
 
 /// Horizontal inset for cell text from the cell's left/right edges (HWPUNIT ≈ 0.7mm).
 const CELL_PAD_X: f64 = 200.0;
+
+/// Floor for any border/diagonal stroke width (device px). Matches rhwp's hairline clamp so a 0.4px
+/// gov-doc border still renders as a crisp ~0.5px hairline instead of vanishing at our scale.
+const HAIRLINE_MIN_PX: f64 = 0.5;
 
 /// Place a cell's block content (paragraph glyphs) inside its box `(cx,cy,cw,ch)`, vertically centered.
 /// Nested tables inside a cell are NOT yet positioned (advance vertical only) — a follow-up.
@@ -968,9 +972,9 @@ mod tests {
         let blue = Color { r: 0, g: 0, b: 255, a: 255 };
         // left = dashed blue, right = 선없음 (suppressed), top = solid black, bottom = unspecified.
         let borders = [
-            Some(CellEdge { color: blue, style: LineStyle::Dashed, width_px: 2 }),
-            Some(CellEdge { color: Color::default(), style: LineStyle::None, width_px: 1 }),
-            Some(CellEdge { color: Color::default(), style: LineStyle::Solid, width_px: 1 }),
+            Some(CellEdge { color: blue, style: LineStyle::Dashed, width_px: 2.0 }),
+            Some(CellEdge { color: Color::default(), style: LineStyle::None, width_px: 1.0 }),
+            Some(CellEdge { color: Color::default(), style: LineStyle::Solid, width_px: 1.0 }),
             None,
         ];
         let doc = edge_table(borders, None);
@@ -988,7 +992,9 @@ mod tests {
         let dashed = lines.iter().find(|l| l.style == LineStyle::Dashed).expect("a dashed edge line");
         assert_eq!(dashed.color, blue, "dashed edge keeps its blue color");
         assert_eq!(dashed.width, 2.0, "dashed edge keeps its width px");
-        assert!(lines.iter().any(|l| l.style == LineStyle::Solid), "the solid top edge is drawn");
+        let solid = lines.iter().find(|l| l.style == LineStyle::Solid).expect("the solid top edge");
+        // A 1.0px (above-floor) edge keeps its width — placement only clamps the floor, never rounds.
+        assert_eq!(solid.width, 1.0, "an above-floor edge width is preserved verbatim");
         assert!(
             !lines.iter().any(|l| l.style == LineStyle::None),
             "a 선없음 edge never emits a Line"
@@ -996,11 +1002,26 @@ mod tests {
     }
 
     #[test]
+    fn sub_floor_edge_width_clamps_to_hairline_not_zero() {
+        // A 0.3px hairline (below HAIRLINE_MIN_PX) must clamp UP to the floor so it stays visible —
+        // not pass through at 0.3 (would anti-alias to nothing) nor round up to a heavier 1px.
+        let borders = [
+            Some(CellEdge { color: Color::default(), style: LineStyle::Solid, width_px: 0.3 }),
+            None,
+            None,
+            None,
+        ];
+        let placed = place_doc(&edge_table(borders, None), &ApproxFontMetrics);
+        let edge = placed.pages[0].lines.first().expect("the one visible edge");
+        assert_eq!(edge.width, HAIRLINE_MIN_PX, "sub-floor width clamps to the hairline floor");
+    }
+
+    #[test]
     fn cell_diagonal_emits_a_line_corner_to_corner_on_empty_cell() {
         let red = Color { r: 255, g: 0, b: 0, a: 255 };
         // An EMPTY cell with a back-slash diagonal (top-left → bottom-right): the diagonal forms a
         // shape (the section-header band's pointed end / an N/A slash) so it IS drawn.
-        let doc = edge_table_text([None; 4], Some(CellDiagonal { kind: DiagonalKind::BackSlash, color: red, width_px: 1 }), "");
+        let doc = edge_table_text([None; 4], Some(CellDiagonal { kind: DiagonalKind::BackSlash, color: red, width_px: 1.0 }), "");
         let placed = place_doc(&doc, &ApproxFontMetrics);
         let lines = &placed.pages[0].lines;
         let diag = lines.iter().find(|l| l.color == red).expect("a diagonal line on the empty cell");
@@ -1012,7 +1033,7 @@ mod tests {
         // A diagonal on a TEXT cell (e.g. the wide banner cell sharing the band's borderFill) is NOT
         // drawn — Hancom doesn't slash through the words; only the empty point cell shows the line.
         let red = Color { r: 255, g: 0, b: 0, a: 255 };
-        let doc = edge_table_text([None; 4], Some(CellDiagonal { kind: DiagonalKind::BackSlash, color: red, width_px: 1 }), "제목");
+        let doc = edge_table_text([None; 4], Some(CellDiagonal { kind: DiagonalKind::BackSlash, color: red, width_px: 1.0 }), "제목");
         let placed = place_doc(&doc, &ApproxFontMetrics);
         assert!(
             !placed.pages[0].lines.iter().any(|l| l.color == red),

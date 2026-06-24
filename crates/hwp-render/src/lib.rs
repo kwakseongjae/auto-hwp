@@ -148,6 +148,11 @@ impl PaintSink for CountingSink {
 /// is in px so the page renders at a sane on-screen size; coordinates divide by this.
 const HWPUNIT_PER_PX: f64 = 7200.0 / 96.0;
 
+/// The thinnest cell-border stroke we draw (CSS px). Gov-doc tables are crisp hairlines; this is the
+/// single floor shared by BOTH the legacy uniform box stroke AND the per-edge/diagonal lines, so the
+/// two border paths read at the SAME weight (no thick/thin mismatch between cell types).
+const BORDER_HAIRLINE_PX: f64 = 0.5;
+
 /// A [`PaintSink`] that accumulates one `<svg>` document per page from the paint IR. Text becomes
 /// `<text>` with per-glyph `x` (no kerning guesswork — we position each glyph ourselves), borders
 /// and shading become `<rect>`, images `<image href="data:…">` when the real bytes are available
@@ -277,15 +282,18 @@ impl PaintSink for SvgSink<'_> {
                 )),
                 None => self.body.push_str(&format!(
                     "<rect x=\"{x:.2}\" y=\"{y:.2}\" width=\"{w:.2}\" height=\"{h:.2}\" \
-                     fill=\"none\" stroke=\"#000000\" stroke-width=\"0.5\"/>",
-                    x = px(*x), y = px(*y), w = px(*w), h = px(*h),
+                     fill=\"none\" stroke=\"#000000\" stroke-width=\"{sw}\"/>",
+                    x = px(*x), y = px(*y), w = px(*w), h = px(*h), sw = BORDER_HAIRLINE_PX,
                 )),
             },
             PaintOp::Line { x1, y1, x2, y2, color, style, width } => {
                 // One <line> per cell edge / diagonal. stroke-dasharray encodes dashed/dotted (the
                 // pattern scales with the stroke width so it reads at our px sizes). Double is drawn as
                 // a single solid line for now (a faithful-enough stand-in; true double-stroke later).
-                let w = px(*width).max(0.4);
+                // `width` is ALREADY device px (the SVG viewBox is in px) — do NOT run it through px(),
+                // which would divide by HWPUNIT_PER_PX and collapse every stroke to the floor. Clamp to
+                // BORDER_HAIRLINE_PX so a gov-doc hairline stays crisp and matches the legacy box stroke.
+                let w = (*width).max(BORDER_HAIRLINE_PX);
                 let dash = match style {
                     LineStyle::Dashed => format!(" stroke-dasharray=\"{:.2},{:.2}\"", w * 4.0, w * 3.0),
                     LineStyle::Dotted => format!(" stroke-dasharray=\"{:.2},{:.2}\"", w, w * 2.0),

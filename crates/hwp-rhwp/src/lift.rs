@@ -661,7 +661,14 @@ fn lift_line_style(lt: rhwp::model::style::BorderLineType) -> LineStyle {
 
 /// HWP 테두리 굵기 인덱스 → device px (mirrors rhwp's `border_width_to_px`, spec 표 28: mm→96dpi px).
 /// Used for both cell edges and the diagonal so our stroke widths match Hancom's visual weight.
-fn border_width_to_px(width: u8) -> u32 {
+///
+/// Returns f64 (NOT rounded up): gov-doc tables overwhelmingly use the two thinnest indices (0.4/0.5px
+/// hairlines). Rounding those up to 1px made our borders read HEAVIER than the original — so we keep the
+/// sub-px value and only clamp the floor to `HAIRLINE_MIN_PX` so a hairline still survives at our scale.
+fn border_width_to_px(width: u8) -> f64 {
+    /// The thinnest stroke we still draw — a crisp gov-doc hairline. Below this, sub-px strokes
+    /// disappear on screen / anti-alias to nothing in the PDF; this keeps them just visible.
+    const HAIRLINE_MIN_PX: f64 = 0.5;
     const WIDTHS_PX: [f64; 16] = [
         0.4, 0.5, 0.6, 0.75, 1.0, 1.1, 1.5, 1.9, 2.3, 2.6, 3.8, 5.7, 7.6, 11.3, 15.1, 18.9,
     ];
@@ -670,9 +677,7 @@ fn border_width_to_px(width: u8) -> u32 {
     } else {
         (width as f64 * 1.2).clamp(0.4, 20.0)
     };
-    // Round to whole px ≥ 1 — these are thin cell strokes; sub-px detail is lost on screen anyway and
-    // the IR's `width` (px) is what backends scale. Keeps a 0.5px hairline visible as 1px.
-    px.round().max(1.0) as u32
+    px.max(HAIRLINE_MIN_PX)
 }
 
 /// Translate an rhwp `ParaShape` into ours — the fields `synthesize_para_pr` emits: alignment and
@@ -727,6 +732,22 @@ mod tests {
         // Black is the default text color → Color::default(), so a plain run reuses the default charPr
         // (synthesize_char_pr only patches textColor when it differs from default).
         assert_eq!(lift_text_color(0), Color::default(), "black → default");
+    }
+
+    #[test]
+    fn border_width_index_keeps_distinct_hairlines_and_clamps_floor() {
+        // The two thinnest gov-doc indices stay DISTINCT sub-px hairlines (not both rounded up to 1px,
+        // which read heavier than the original). Index 0 (0.4px) is lifted to the 0.5px hairline floor;
+        // index 1 (0.5px) is already at the floor.
+        assert_eq!(border_width_to_px(0), 0.5, "0.4px → clamped up to the 0.5px hairline floor");
+        assert_eq!(border_width_to_px(1), 0.5, "0.5px hairline preserved (at floor)");
+        // Thicker indices preserve their spec px exactly (no rounding to whole px).
+        assert_eq!(border_width_to_px(2), 0.6, "0.6px preserved, not rounded to 1");
+        assert_eq!(border_width_to_px(4), 1.0);
+        assert_eq!(border_width_to_px(6), 1.5);
+        // Out-of-table index falls back to the scaled formula, never below the floor.
+        assert!(border_width_to_px(20) >= 0.5);
+        assert!(border_width_to_px(255) <= 20.0);
     }
 
     #[test]
