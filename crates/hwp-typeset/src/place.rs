@@ -333,7 +333,11 @@ fn place_table(
         }
         // Cell diagonal (HWP borderFill `diagonal`) — drawn on top of the edges. Slash = ⤢ from the
         // bottom-left to the top-right; BackSlash = ⤡ from the top-left to the bottom-right.
-        if let Some(d) = c.diagonal {
+        // ONLY on an EMPTY cell: an empty cell's diagonal forms a shape (the section-header band's
+        // pointed end on its narrow filler cell, or a "해당없음" N/A slash). A TEXT cell carrying a
+        // diagonal is a shared-borderFill artifact (the wide banner cell references the same fill) and
+        // Hancom does NOT slash through the text — so we suppress it to avoid a line across the words.
+        if let Some(d) = c.diagonal.filter(|_| !cell_has_text(&c.blocks)) {
             let (y1, y2) = match d.kind {
                 DiagonalKind::Slash => (cy + ch, cy), // bottom-left → top-right
                 DiagonalKind::BackSlash => (cy, cy + ch), // top-left → bottom-right
@@ -352,6 +356,17 @@ fn place_table(
         // Korean gov-doc convention: vertAlign=CENTER), honoring each paragraph's horizontal align.
         place_cell_content(pg, &c.blocks, cx, cy, cw, ch, doc, fonts);
     }
+}
+
+/// True if a cell's blocks contain any non-empty text run — used to decide whether a cell's diagonal
+/// is decorative shape (empty cell → draw) or a shared-borderFill artifact over words (text → skip).
+fn cell_has_text(blocks: &[Block]) -> bool {
+    blocks.iter().any(|b| match b {
+        Block::Paragraph(p) => p.runs.iter().any(|r| {
+            r.content.iter().any(|i| matches!(i, Inline::Text(s) if !s.trim().is_empty()))
+        }),
+        Block::Table(t) => t.cells.iter().any(|c| cell_has_text(&c.blocks)),
+    })
 }
 
 /// Emit up to four styled edge lines for a cell box `(cx,cy,cw,ch)` from its per-edge `borders`
@@ -817,10 +832,14 @@ mod tests {
 
     /// Build a 1-cell table whose single cell carries the given per-edge borders + diagonal.
     fn edge_table(borders: [Option<CellEdge>; 4], diagonal: Option<CellDiagonal>) -> SemanticDoc {
+        edge_table_text(borders, diagonal, "x")
+    }
+
+    fn edge_table_text(borders: [Option<CellEdge>; 4], diagonal: Option<CellDiagonal>, text: &str) -> SemanticDoc {
         let cell = Cell {
             row: 0,
             col: 0,
-            blocks: vec![Block::Paragraph(para("x"))],
+            blocks: vec![Block::Paragraph(para(text))],
             borders,
             diagonal,
             ..Default::default()
@@ -867,15 +886,28 @@ mod tests {
     }
 
     #[test]
-    fn cell_diagonal_emits_a_line_corner_to_corner() {
+    fn cell_diagonal_emits_a_line_corner_to_corner_on_empty_cell() {
         let red = Color { r: 255, g: 0, b: 0, a: 255 };
-        // No edge borders, just a back-slash diagonal: top-left → bottom-right.
-        let doc = edge_table([None; 4], Some(CellDiagonal { kind: DiagonalKind::BackSlash, color: red, width_px: 1 }));
+        // An EMPTY cell with a back-slash diagonal (top-left → bottom-right): the diagonal forms a
+        // shape (the section-header band's pointed end / an N/A slash) so it IS drawn.
+        let doc = edge_table_text([None; 4], Some(CellDiagonal { kind: DiagonalKind::BackSlash, color: red, width_px: 1 }), "");
         let placed = place_doc(&doc, &ApproxFontMetrics);
         let lines = &placed.pages[0].lines;
-        let diag = lines.iter().find(|l| l.color == red).expect("a diagonal line");
-        // BackSlash goes from the cell's top-left down to its bottom-right (y increases x increases).
+        let diag = lines.iter().find(|l| l.color == red).expect("a diagonal line on the empty cell");
         assert!(diag.x2 > diag.x1 && diag.y2 > diag.y1, "back-slash runs top-left → bottom-right");
+    }
+
+    #[test]
+    fn cell_diagonal_suppressed_when_cell_has_text() {
+        // A diagonal on a TEXT cell (e.g. the wide banner cell sharing the band's borderFill) is NOT
+        // drawn — Hancom doesn't slash through the words; only the empty point cell shows the line.
+        let red = Color { r: 255, g: 0, b: 0, a: 255 };
+        let doc = edge_table_text([None; 4], Some(CellDiagonal { kind: DiagonalKind::BackSlash, color: red, width_px: 1 }), "제목");
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        assert!(
+            !placed.pages[0].lines.iter().any(|l| l.color == red),
+            "a diagonal over text is suppressed"
+        );
     }
 
     #[test]
