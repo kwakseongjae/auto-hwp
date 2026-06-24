@@ -37,6 +37,17 @@ export default function App() {
   // U5: a tiny point-action popover (right-click a block → AI로 편집 / 이미지 삽입) + a ? cheat-sheet.
   const [pointMenu, setPointMenu] = useState<{ x: number; y: number; page: number; section: number; block: number | null } | null>(null);
   const [cheatOpen, setCheatOpen] = useState(false);
+  // Discoverability: a one-time hint card surfacing the (otherwise hidden) manual-edit gestures —
+  // click-to-edit, the ⋯/우클릭 quick-action popover, image drag&drop. Dismissed forever via a
+  // localStorage flag so it never nags a returning user; shown only once a doc is editable.
+  const HINT_KEY = "hankan.manualEditHintSeen";
+  const [hintSeen, setHintSeen] = useState(() => {
+    try { return localStorage.getItem(HINT_KEY) === "1"; } catch { return true; }
+  });
+  const dismissHint = useCallback(() => {
+    setHintSeen(true);
+    try { localStorage.setItem(HINT_KEY, "1"); } catch { /* private mode — just hide it this session */ }
+  }, []);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
   // The full-screen busy overlay is BLOCKING, so only raise it for genuinely slow work: while busy, a
   // thin top progress bar shows immediately, and the dimming overlay only appears if the op is still
@@ -397,18 +408,18 @@ export default function App() {
     imeInput.current?.focus();
   }, [recomputeCaretBox]);
 
-  // ---- U5: right-click a block → a tiny point-action popover (AI 편집 scope / 이미지 삽입 here) ----
-  async function onPageContextMenu(e: React.MouseEvent) {
+  // ---- U5: open the point-action popover (AI 편집 scope / 이미지 삽입) at a screen point, resolving the
+  // (section, block) the point falls on. Shared by right-click AND the hover ⋯ 편집 handle so editing
+  // isn't hidden behind right-click only. `host` is the page wrapper; `menuAt` is where the popover
+  // anchors (the click point for right-click, the handle's corner for the hover affordance). ----
+  const openPointMenu = useCallback(async (host: Element, pagePt: { clientX: number; clientY: number }, menuAt: { x: number; y: number }) => {
     if (!canEditRef.current) return;
-    const host = (e.target as Element).closest("[data-index]");
-    if (!host) return;
-    e.preventDefault();
     const page = Number(host.getAttribute("data-index"));
     const svg = host.querySelector("svg");
     if (!svg || !Number.isFinite(page)) return;
     const rect = svg.getBoundingClientRect();
     const vb = svg.viewBox.baseVal;
-    const pt = screenToPage(e.clientX, e.clientY, { left: rect.left, top: rect.top, width: rect.width, height: rect.height }, { width: vb.width, height: vb.height });
+    const pt = screenToPage(pagePt.clientX, pagePt.clientY, { left: rect.left, top: rect.top, width: rect.width, height: rect.height }, { width: vb.width, height: vb.height });
     let section = 0;
     let block: number | null = null;
     if (pt && viewModeRef.current !== "own") {
@@ -417,8 +428,33 @@ export default function App() {
         if (hit) { section = hit.section; block = hit.block; }
       } catch { /* miss → section/doc-end scope */ }
     }
-    setPointMenu({ x: e.clientX, y: e.clientY, page, section, block });
+    setPointMenu({ x: menuAt.x, y: menuAt.y, page, section, block });
+  }, []);
+
+  // ---- U5: right-click a block → the point-action popover anchored at the click point. ----
+  async function onPageContextMenu(e: React.MouseEvent) {
+    if (!canEditRef.current) return;
+    const host = (e.target as Element).closest("[data-index]");
+    if (!host) return;
+    e.preventDefault();
+    await openPointMenu(host, { clientX: e.clientX, clientY: e.clientY }, { x: e.clientX, y: e.clientY });
   }
+
+  // ---- Discoverability: the hover ⋯ 편집 handle (top-right of an editable page) opens the SAME
+  // point-action popover, hit-testing the page center so editing isn't hidden behind right-click. ----
+  const onEditHandle = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    const host = (e.currentTarget as Element).closest("[data-index]");
+    if (!host) return;
+    const svg = host.querySelector("svg");
+    const r = svg?.getBoundingClientRect();
+    // Hit-test the page's horizontal center near the handle's vertical position so the resolved scope
+    // is a real block on that page (the handle sits in the margin, off any glyph).
+    const cx = r ? r.left + r.width / 2 : e.clientX;
+    const cy = r ? Math.min(Math.max(e.clientY, r.top + 8), r.bottom - 8) : e.clientY;
+    const at = (e.currentTarget as Element).getBoundingClientRect();
+    void openPointMenu(host, { clientX: cx, clientY: cy }, { x: at.right, y: at.bottom + 4 });
+  }, [openPointMenu]);
 
   // ---- caret: click-to-place ----
   async function onPageClick(e: React.MouseEvent) {
@@ -1366,6 +1402,31 @@ export default function App() {
             listCount > 0 && viewMode !== "html" ? "bg-neutral-200 dark:bg-neutral-800" : ""
           }`}
         >
+          {/* Discoverability: a one-time hint that the document is directly editable (the manual-edit
+              gestures are otherwise hidden). Dismissed forever via localStorage. Editing stays
+              chat-primary — this just points at the quieter manual paths. */}
+          {pageCount > 0 && canEdit && !hintSeen && (
+            <div className="mx-auto mb-4 flex max-w-2xl items-start gap-3 rounded-lg border border-black/10 bg-neutral-50/90 px-4 py-3 text-sm shadow-sm ring-1 ring-black/5 backdrop-blur dark:border-white/10 dark:bg-neutral-800/90">
+              <span className="mt-0.5 text-base leading-none text-ai" aria-hidden>✦</span>
+              <div className="min-w-0 flex-1 text-neutral-600 dark:text-neutral-300">
+                <p className="font-medium text-neutral-800 dark:text-neutral-100">직접 편집할 수 있어요</p>
+                <p className="mt-1 leading-relaxed">
+                  <span className="text-neutral-800 dark:text-neutral-100">✦ 바이브 편집</span>이 가장 빠른 길이에요.
+                  세부 조정은 <span className="font-medium">블록을 클릭해 입력</span> ·
+                  <span className="font-medium"> 우클릭 / ⋯</span>으로 빠른 작업 ·
+                  <span className="font-medium"> 이미지 드래그&드롭</span>으로 삽입하세요.
+                  <button onClick={() => setCheatOpen(true)} className="ml-1 text-accent underline-offset-2 hover:underline">단축키 (⌘/)</button>
+                </p>
+              </div>
+              <button
+                onClick={dismissHint}
+                title="다시 보지 않기"
+                className="shrink-0 rounded px-1.5 py-0.5 text-xs text-neutral-400 hover:bg-black/5 hover:text-neutral-600 dark:hover:bg-white/10 dark:hover:text-neutral-200"
+              >
+                알겠어요 ✕
+              </button>
+            </div>
+          )}
           {pageCount > 0 && viewMode === "html" ? (
             // The JSX(content)/CSS(design) → HTML preview (the pivot view) in an isolated iframe.
             <iframe
@@ -1407,11 +1468,26 @@ export default function App() {
                     style={{ transform: `translateY(${item.start}px)` }}
                   >
                     <div
-                      className="relative w-full rounded-lg bg-white shadow-md ring-1 ring-black/5"
+                      className="group relative w-full rounded-lg bg-white shadow-md ring-1 ring-black/5"
                       // Zoom-derived intrinsic height (was a fixed 920px) so off-screen pages reserve
                       // the right space before their SVG paints.
                       style={{ contentVisibility: "auto", containIntrinsicSize: `auto ${Math.round(pageHeight)}px` }}
                     >
+                      {/* Discoverability: a subtle ⋯ 편집 grip that fades in on hover (editable SVG
+                          modes) so the point-action popover — click-to-edit / AI 편집 / 이미지 삽입 —
+                          isn't hidden behind right-click only. Keeps chat the primary path; this is a
+                          quiet margin affordance, not a Notion block toolbar. */}
+                      {canEdit && viewMode !== "html" && pageSvg !== undefined && (
+                        <button
+                          type="button"
+                          onClick={onEditHandle}
+                          title="빠른 편집 (또는 우클릭)"
+                          className="absolute right-2 top-2 z-30 flex items-center gap-1 rounded-token border border-black/10 bg-white/90 px-2 py-1 text-[11px] text-neutral-500 opacity-0 shadow-sm backdrop-blur transition-opacity hover:bg-neutral-100 hover:text-neutral-800 focus-visible:opacity-100 group-hover:opacity-100 dark:border-white/10 dark:bg-neutral-800/90 dark:text-neutral-400 dark:hover:bg-neutral-700 dark:hover:text-neutral-100"
+                        >
+                          <span aria-hidden className="leading-none">⋯</span>
+                          <span>편집</span>
+                        </button>
+                      )}
                       {pageSvg !== undefined ? (
                         <div className="page-svg" dangerouslySetInnerHTML={{ __html: pageSvg }} />
                       ) : (
@@ -1745,7 +1821,18 @@ export default function App() {
           <div className="w-[22rem] rounded-xl border border-black/10 bg-white p-5 shadow-2xl dark:border-white/10 dark:bg-neutral-800" onClick={(e) => e.stopPropagation()}>
             <div className="mb-3 text-base font-semibold">키보드 단축키</div>
             <div className="flex flex-col gap-1.5 text-sm text-neutral-700 dark:text-neutral-300">
-              {([["⌘O", "문서 열기"], ["⌘K", "명령 팔레트"], ["⌘L", "AI 바이브 편집"], ["⌘\\", "문서 개요"], ["⌘F", "찾기"], ["⌘= / ⌘-", "확대 / 축소"], ["⌘0", "100%"], ["⌘S / ⌘E", "내보내기(HWPX)"], ["⌘Z / ⌘⇧Z", "실행취소 / 다시실행"], ["우클릭", "빠른 작업 메뉴"], ["⌘/", "이 도움말"]] as [string, string][]).map(([k, d]) => (
+              {([["⌘O", "문서 열기"], ["⌘K", "명령 팔레트"], ["⌘L", "AI 바이브 편집"], ["⌘\\", "문서 개요"], ["⌘F", "찾기"], ["⌘= / ⌘-", "확대 / 축소"], ["⌘0", "100%"], ["⌘S / ⌘E", "내보내기(HWPX)"], ["⌘Z / ⌘⇧Z", "실행취소 / 다시실행"], ["⌘/", "이 도움말"]] as [string, string][]).map(([k, d]) => (
+                <div key={k} className="flex items-center justify-between gap-4">
+                  <span>{d}</span>
+                  <kbd className="shrink-0 rounded bg-black/5 px-1.5 py-0.5 text-xs dark:bg-white/10">{k}</kbd>
+                </div>
+              ))}
+            </div>
+            {/* Discoverability: the manual-edit GESTURES (mouse, not keys) live here too so the chat-
+                primary model's quieter direct-manipulation paths are findable. */}
+            <div className="mb-1.5 mt-4 text-xs font-medium uppercase tracking-wide text-neutral-400">직접 편집</div>
+            <div className="flex flex-col gap-1.5 text-sm text-neutral-700 dark:text-neutral-300">
+              {([["클릭", "본문 클릭 → 캐럿 입력 (원본/자체 렌더)"], ["우클릭 · ⋯", "빠른 작업 (AI 편집 / 이미지 삽입)"], ["드래그&드롭", "이미지 파일을 페이지에 끌어다 삽입"], ["자체 렌더", "이미지·표 클릭 → 이동 / 크기 / 칸 편집"]] as [string, string][]).map(([k, d]) => (
                 <div key={k} className="flex items-center justify-between gap-4">
                   <span>{d}</span>
                   <kbd className="shrink-0 rounded bg-black/5 px-1.5 py-0.5 text-xs dark:bg-white/10">{k}</kbd>
