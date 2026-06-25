@@ -1100,7 +1100,7 @@ export default function App() {
   }, [enqueueEdit, invalidate, reselectTableAfterRepaint]);
 
   // Apply/clear a background color to the active cell's ROW / COLUMN / the CELL / ALL of the table
-  // (SetTableCellShade). Row/col come from the single-click active cell (default 0,0 = header).
+  // (SetTableCellShade). Row/col come from the single-click active cell (the palette is gated on one).
   const commitShade = useCallback((sel: "row" | "col" | "cell" | "all", color: string | null) => {
     void enqueueEdit(async () => {
       const t = tableSelRef.current;

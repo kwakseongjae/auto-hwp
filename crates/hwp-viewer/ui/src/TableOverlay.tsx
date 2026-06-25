@@ -218,8 +218,8 @@ export default function TableOverlay({
           표 삭제
         </button>
       </div>
-      {/* 배경색 palette — pick a SCOPE (이 칸 / 이 행 / 이 열) + a swatch (or 지우기). Applied to the
-          single-click active cell's row/col (or header row 0 when no cell is active). */}
+      {/* 배경색 palette — requires an active cell (single-click one first). Shows that cell as the
+          reference, then pick a SCOPE (이 칸 / 이 행 / 이 열) + a swatch (or 지우기). */}
       {shadeOpen && (
         <div
           className="absolute -top-7 right-0 z-30 flex w-60 translate-y-[-100%] flex-col gap-2 rounded-lg border border-black/10 bg-white p-2.5 text-[11px] shadow-xl dark:border-white/10 dark:bg-neutral-800"
@@ -235,7 +235,7 @@ export default function TableOverlay({
           )}
           {/* 2) apply scope — single choice, plain wording */}
           <div className="flex gap-1">
-            {([["cell", "이 칸만"], ["row", "가로 줄(행) 전체"], ["col", "세로 칸(열) 전체"]] as const).map(([s, label]) => (
+            {([["row", "가로 줄(행) 전체"], ["col", "세로 칸(열) 전체"], ["cell", "이 칸만"]] as const).map(([s, label]) => (
               <button
                 key={s}
                 onClick={(e) => { e.stopPropagation(); setShadeScope(s); }}
