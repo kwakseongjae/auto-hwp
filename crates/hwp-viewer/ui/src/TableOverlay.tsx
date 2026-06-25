@@ -305,6 +305,9 @@ export default function TableOverlay({
                 key={c}
                 disabled={!activeCell}
                 title={c}
+                // preventDefault keeps the inline editor focused (no blur→commit→repaint) so the focused
+                // cell survives the click; commitShade snapshots + commits any edit itself.
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={(e) => { e.stopPropagation(); onShade(shadeScope, c); setShadeOpen(false); }}
                 className="h-5 w-5 rounded-[3px] border border-black/20 hover:ring-2 hover:ring-accent disabled:cursor-not-allowed disabled:opacity-40"
                 style={{ backgroundColor: c }}
@@ -312,6 +315,7 @@ export default function TableOverlay({
             ))}
             <button
               disabled={!activeCell}
+              onMouseDown={(e) => e.preventDefault()}
               onClick={(e) => { e.stopPropagation(); onShade(shadeScope, null); setShadeOpen(false); }}
               title="색 지우기"
               className="ml-auto rounded border border-black/15 px-1.5 py-0.5 leading-none text-neutral-500 hover:bg-black/5 disabled:opacity-40 dark:border-white/15"

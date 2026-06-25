@@ -91,6 +91,10 @@ export type BlockHit = { section: number; block: number; kind: string; x: number
  *  pre-filled for that exact cell ("표에 내용 작성" by pointing at the cell). */
 export type CellHit = { section: number; block: number; row: number; col: number; rows: number; cols: number; text: string; x: number; y: number; w: number; h: number };
 
+/** Page geometry in CSS px (own-render): the page box (`w`,`h`) and printable-area margins
+ *  (`ml`,`mt`,`mr`,`mb`) for the editor chrome — margin corner marks + top ruler. */
+export type PageGeom = { w: number; h: number; ml: number; mt: number; mr: number; mb: number };
+
 /// Typed bindings to the Rust `Intent` command lane (crates/hwp-viewer/src/lib.rs). No prose
 /// parsing: each command returns a typed value the UI consumes directly.
 export const api = {
@@ -257,6 +261,10 @@ export const api = {
    *  `(section, block)` on `page`, for drawing the row-divider drag handles. Null if not on page. */
   tableRowBoundaries: (page: number, section: number, block: number) =>
     invoke<number[] | null>("table_row_boundaries", { page, section, block }),
+  /** Page geometry in CSS px (own-render only) — the page box + printable-area margins of `page`, for
+   *  the editor chrome (margin corner marks + top ruler). Null if the page is out of range. */
+  pageGeometry: (page: number) =>
+    invoke<PageGeom | null>("page_geometry", { page }),
   /** Row resize — set the `index`-th table's per-row minimum-height override as ONE undo unit
    *  (SetTableRowHeights). `heights.length` must equal the table's row count; 0 = content-sized.
    *  Returns new page count. */

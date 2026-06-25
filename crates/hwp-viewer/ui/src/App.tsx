@@ -5,7 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { tinykeys } from "tinykeys";
-import { api, type CellHit, type CaretRect, type FindMatch, type ImageBox, type OutlineItem, type Proposal, type ProposalOp, type TableBox } from "./api";
+import { api, type CellHit, type CaretRect, type FindMatch, type ImageBox, type OutlineItem, type PageGeom, type Proposal, type ProposalOp, type TableBox } from "./api";
 import { sanitizeSvg } from "./sanitize";
 import { advanceOffset, imageBoxToScreen, pageToScreen, screenToPage } from "./caret";
 import ImageOverlay from "./ImageOverlay";
@@ -19,6 +19,38 @@ import { Button, IconButton, Sep, SegmentedControl } from "./ui";
 import { toast, Toaster } from "./toast";
 
 type CaretAnchor = { page: number; node: number; offset: number; len: number };
+
+/// 1 cm in own-render px (HWPUNIT/cm = 7200/2.54 = 2834.6; ÷ HWPUNIT_PER_PX(75)). For the ruler ticks.
+const CM_PX = 2834.6457 / 75;
+
+/// Editor chrome over an own-render page (NOT in the SVG → never exported): the 한글식 printable-area
+/// corner brackets + a top ruler with 1 cm ticks. Positioned as PERCENTAGES of the page box so it tracks
+/// zoom for free (the wrapper is the page at the current zoom). `geom` is in own-render px at zoom 1.
+function PageChrome({ geom }: { geom: PageGeom }) {
+  const { w, h, ml, mt, mr, mb } = geom;
+  if (w <= 0 || h <= 0) return null;
+  const lp = (ml / w) * 100, tp = (mt / h) * 100, rp = ((w - mr) / w) * 100, bp = ((h - mb) / h) * 100;
+  const ARM = 14; // px arm length of each corner bracket (constant on screen)
+  const printW = Math.max(0, w - ml - mr);
+  const nTicks = Math.min(60, Math.floor(printW / CM_PX)); // guard pathological tiny pages
+  const ticks = Array.from({ length: nTicks + 1 }, (_, i) => ({ i, left: ((ml + i * CM_PX) / w) * 100 }));
+  return (
+    <div className="pointer-events-none absolute inset-0 z-[5]" aria-hidden>
+      {/* printable-area corner brackets */}
+      <div className="absolute border-l-2 border-t-2 border-accent/45" style={{ left: `${lp}%`, top: `${tp}%`, width: ARM, height: ARM }} />
+      <div className="absolute border-r-2 border-t-2 border-accent/45" style={{ left: `${rp}%`, top: `${tp}%`, width: ARM, height: ARM, transform: "translateX(-100%)" }} />
+      <div className="absolute border-l-2 border-b-2 border-accent/45" style={{ left: `${lp}%`, top: `${bp}%`, width: ARM, height: ARM, transform: "translateY(-100%)" }} />
+      <div className="absolute border-r-2 border-b-2 border-accent/45" style={{ left: `${rp}%`, top: `${bp}%`, width: ARM, height: ARM, transform: "translate(-100%,-100%)" }} />
+      {/* top ruler: printable span tinted + 1 cm ticks (taller every 5 cm) */}
+      <div className="absolute left-0 right-0 top-0 h-3 border-b border-black/5 bg-neutral-100/70 dark:border-white/5 dark:bg-neutral-700/50">
+        <div className="absolute inset-y-0 bg-accent/10" style={{ left: `${lp}%`, width: `${Math.max(0, rp - lp)}%` }} />
+        {ticks.map(({ i, left }) => (
+          <div key={i} className="absolute bottom-0 w-px bg-neutral-400/70 dark:bg-neutral-400/50" style={{ left: `${left}%`, height: i % 5 === 0 ? "100%" : "45%" }} />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 /// 한칸 (Hankan) — Raycast-grade shell, now React. A ⌘K palette over the virtualized SVG viewer, an
 /// overlay titlebar, a structured composer, the WYSIWYG caret, and the vibe-docs Chat panel.
@@ -533,6 +565,23 @@ export default function App() {
     }
   }, []);
 
+  // Per-page geometry (own mode) for the editor chrome — margin corner marks + top ruler. Fetched
+  // lazily per visible page, cleared on repaint (edits can change page size / margins / page count).
+  const [pageGeom, setPageGeom] = useState<Record<number, PageGeom>>({});
+  const pageGeomRef = useRef(pageGeom);
+  pageGeomRef.current = pageGeom;
+  const pageGeomInflight = useRef<Set<number>>(new Set());
+  const ensurePageGeom = useCallback(async (i: number) => {
+    if (pageGeomRef.current[i] !== undefined || pageGeomInflight.current.has(i)) return;
+    pageGeomInflight.current.add(i);
+    try {
+      const g = await api.pageGeometry(i);
+      if (g) setPageGeom((c) => ({ ...c, [i]: g }));
+    } catch { /* no chrome for this page */ } finally {
+      pageGeomInflight.current.delete(i);
+    }
+  }, []);
+
   // `scrollTo === null` keeps the current scroll (chat edits shouldn't yank the view to the doc end —
   // the "결과가 튀는" issue); a number scrolls to that page.
   const invalidate = useCallback((n: number, scrollTo: number | null = 0) => {
@@ -562,6 +611,7 @@ export default function App() {
     // The own-engine SVGs are regenerated from the live IR — drop them too so an edit repaints. Its
     // page count is fetched lazily (or eagerly when 'own' is the active mode).
     setOwnSvgCache({});
+    setPageGeom({}); // page size/margins can shift after an edit — re-fetch the chrome geometry
     if (viewModeRef.current === "html") void loadDocHtml();
     else if (viewModeRef.current === "own") void loadOwnPageCount();
     if (scrollTo !== null) {
@@ -1115,15 +1165,27 @@ export default function App() {
   // Apply/clear a background color to the active cell's ROW / COLUMN / the CELL / ALL of the table
   // (SetTableCellShade). Row/col come from the single-click active cell (the palette is gated on one).
   const commitShade = useCallback((sel: "row" | "col" | "cell" | "all", color: string | null) => {
+    // SNAPSHOT the target NOW, synchronously — refs are live at click time. The swatch button
+    // preventDefaults its mousedown so it does NOT blur the editor, which means activeCell is still set
+    // here (invalidate() would otherwise null it AND disable the swatch before the click lands). Also
+    // grab the open editor's current text so a shade doesn't discard an in-progress cell edit.
+    const a = activeCellRef.current;
+    if (!a) return;
+    const ie = inlineEditRef.current;
+    const liveText = ie && ie.kind === "cell"
+      ? (document.querySelector("[data-inline-edit]") as HTMLTextAreaElement | null)?.value
+      : undefined;
     void enqueueEdit(async () => {
-      // Source the table + cell from the FOCUSED cell (activeCell), NOT tableSel: when shading WHILE
-      // inline-editing, the swatch click first blur-commits the cell text, whose invalidate() calls
-      // clearTableSel() before this runs — so tableSelRef would be null here and shading would silently
-      // no-op. activeCell survives invalidate(), and it already carries the table anchor (section/block)
-      // plus the cell (row/col), so it's the robust source for both the edit and non-edit flows.
-      const a = activeCellRef.current;
-      if (!a || !canEditRef.current) return;
+      if (!canEditRef.current) return;
       try {
+        // 1) Commit the cell text FIRST (only if it actually changed) so the shade repaint doesn't drop
+        //    an in-progress edit; close the editor so its now-stale box doesn't linger.
+        if (ie && ie.kind === "cell" && liveText !== undefined && liveText !== ie.text) {
+          inlineClosedRef.current = true;
+          setInlineEdit(null);
+          await api.setTableCell(ie.section, ie.block, ie.row ?? 0, ie.col ?? 0, liveText);
+        }
+        // 2) Apply the shade to the focused cell (table anchor + row/col from activeCell).
         const pages = await api.setTableCellShade(a.section, a.block, sel, a.row, a.col, color);
         setEdited(true);
         invalidate(pages, null);
@@ -2055,6 +2117,7 @@ export default function App() {
             >
               {virtualizer.getVirtualItems().map((item) => {
                 void (viewMode === "own" ? ensureOwnPage(item.index) : ensurePage(item.index));
+                if (viewMode === "own") void ensurePageGeom(item.index);
                 const pageSvg = viewMode === "own" ? ownSvgCache[item.index] : svgCache[item.index];
                 return (
                   <div
@@ -2095,6 +2158,11 @@ export default function App() {
                             {item.index + 1}쪽
                           </span>
                         </div>
+                      )}
+                      {/* Editor chrome (own-render): 한글식 printable-area corner marks + top ruler. Drawn
+                          only once the page SVG has painted so it aligns with the rendered page box. */}
+                      {viewMode === "own" && pageSvg !== undefined && pageGeom[item.index] && (
+                        <PageChrome geom={pageGeom[item.index]} />
                       )}
                       {viewMode === "svg" && caret && caretRect && caretBox && caret.page === item.index && (
                         <div
@@ -2238,6 +2306,35 @@ export default function App() {
                           // restored on commit (para_shape preserved).
                           className="z-40 resize-none overflow-auto rounded-[2px] bg-white px-1 py-0.5 text-left align-top text-sm leading-snug text-neutral-900 shadow-[0_0_0_2px_var(--color-accent,#2563eb)] outline-none ring-2 ring-accent/40"
                         />
+                      )}
+                      {/* Inline-editor commit affordance — makes the (otherwise hidden) save/cancel verbs
+                          explicit so users don't have to guess that ↵ commits ('엔터 반영' 헷갈림). Anchored
+                          just above the editor so it stays put as the textarea grows; the buttons
+                          preventDefault their mousedown so they don't blur-commit before the click. */}
+                      {viewMode === "own" && inlineEdit && inlineEdit.page === item.index && (
+                        <div
+                          className="pointer-events-auto absolute z-50 flex items-center gap-1 rounded-md border border-black/10 bg-white/95 px-1 py-0.5 text-[10px] text-neutral-500 shadow-md backdrop-blur dark:border-white/10 dark:bg-neutral-800/95 dark:text-neutral-300"
+                          style={{ left: `${inlineEdit.screen.left}px`, top: `${Math.max(inlineEdit.screen.top - 24, 0)}px` }}
+                          onPointerDown={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const ta = document.querySelector("[data-inline-edit]") as HTMLTextAreaElement | null;
+                              commitInlineEdit(inlineEdit, ta ? ta.value : inlineEdit.text);
+                            }}
+                            className="rounded bg-accent px-1.5 py-0.5 font-medium leading-none text-white hover:bg-accent/90"
+                          >✓ 저장</button>
+                          <button
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={(e) => { e.stopPropagation(); cancelInlineEdit(); }}
+                            className="rounded px-1 py-0.5 leading-none hover:bg-black/5 dark:hover:bg-white/10"
+                          >✕</button>
+                          <span className="ml-0.5 hidden border-l border-black/10 pl-1.5 leading-none sm:inline dark:border-white/10">
+                            ↵ 저장 · ⇧↵ 줄바꿈 · esc 취소
+                          </span>
+                        </div>
                       )}
                       {/* Post-apply highlight pulse — a one-shot accent glow over the page a chat edit
                           just landed on (cleared by a timer in `pulse`). */}

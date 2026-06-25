@@ -1461,6 +1461,31 @@ async fn table_row_boundaries(
     .map_err(|e| e.to_string())?
 }
 
+/// Page geometry in CSS px (own-render only): the page box + the printable-area margins of `page`, for
+/// the editor chrome (한글식 모서리 영역 표시 + 줄자). All values are px (HWPUNIT / 75). `None` when the
+/// page is out of range. NOT baked into the SVG, so the guides/ruler never leak into export.
+#[derive(serde::Serialize)]
+struct PageGeom { w: f64, h: f64, ml: f64, mt: f64, mr: f64, mb: f64 }
+
+#[tauri::command]
+async fn page_geometry(page: u32, sess: tauri::State<'_, SharedSession>) -> Result<Option<PageGeom>, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let s = sess.lock().map_err(|_| "session poisoned")?;
+        let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+        let fonts = own_render_fonts();
+        let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+        let Some(pg) = placed.pages.get(page as usize) else { return Ok(None) };
+        let k = HWPUNIT_PER_PX;
+        Ok(Some(PageGeom {
+            w: pg.width / k, h: pg.height / k,
+            ml: pg.margin_left / k, mt: pg.margin_top / k, mr: pg.margin_right / k, mb: pg.margin_bottom / k,
+        }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 // ---- Interactive caret: in-place edit commands (typed Intent lane; same op-bus core as the MCP
 // ---- lane). The per-keystroke / IME-commit mutations the caret UI calls. Async/spawn_blocking like
 // ---- the other mutating commands; each is ONE undo unit (do_op) and returns the new page count so
@@ -1559,6 +1584,7 @@ pub fn run() {
             table_cell_at,
             table_col_boundaries,
             table_row_boundaries,
+            page_geometry,
             move_table,
             table_add_rows,
             table_append_row,

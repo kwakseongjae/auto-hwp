@@ -156,6 +156,13 @@ pub struct PlacedLine {
 pub struct PlacedPage {
     pub width: f64,
     pub height: f64,
+    /// Printable-area margins (HWPUNIT, page-top-left origin) from the section's `PageSetup`. Provenance
+    /// for the editor's margin guides / ruler chrome — NOT drawn into the page SVG, so they never leak
+    /// into export. 0 on a default page.
+    pub margin_left: f64,
+    pub margin_top: f64,
+    pub margin_right: f64,
+    pub margin_bottom: f64,
     pub glyphs: Vec<PlacedGlyph>,
     pub images: Vec<PlacedImage>,
     /// Per-table outer-box provenance (anchor → page rect). Provenance only; not drawn (see
@@ -872,6 +879,10 @@ fn paragraph_object(p: &Paragraph) -> Option<(f64, f64, String)> {
 fn set_page_size(pg: &mut PlacedPage, page: &PageSetup) {
     pg.width = page.width as f64;
     pg.height = page.height as f64;
+    pg.margin_left = page.margin_left as f64;
+    pg.margin_top = page.margin_top as f64;
+    pg.margin_right = page.margin_right as f64;
+    pg.margin_bottom = page.margin_bottom as f64;
 }
 
 fn new_page(pages: &mut Vec<PlacedPage>, page: &PageSetup) {
