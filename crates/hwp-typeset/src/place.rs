@@ -328,12 +328,13 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                             pages[pi].blocks.push(b);
                         }
                     }
-                    // Outer bottom margin so the next block doesn't abut the table.
+                    // Outer bottom margin so the next block doesn't abut the table. NO trailing
+                    // page-slice: place_table already broke every row that didn't fit, so any leftover
+                    // (an over-tall row's clipped overflow, or a bottom-margin spill) is left as
+                    // vert>body_h and resolved by the NEXT block's page reserve — IDENTICAL to
+                    // NaiveLayout, keeping the two page counts in lockstep (a `while vert>body_h` here
+                    // would re-fragment an over-tall row that NaiveLayout leaves whole → page drift).
                     vert += t.outer_margin_bottom.max(0) as f64;
-                    while vert > body_h {
-                        new_page(&mut pages, page);
-                        vert -= body_h;
-                    }
                     started = true;
                 }
             }
@@ -412,10 +413,9 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
                         vert += rh;
                     }
                     vert += t.outer_margin_bottom.max(0) as f64;
-                    while vert > body_h {
-                        page_idx += 1;
-                        vert -= body_h;
-                    }
+                    // No trailing page-slice (matches place_doc/NaiveLayout): a leftover over-tall row /
+                    // margin spill is resolved by the next block's reserve, so the recorded start pages
+                    // stay aligned with place_doc's fragment pages.
                     started = true;
                 }
             }
@@ -1112,6 +1112,38 @@ mod tests {
         // place_doc's page count agrees with the oracle's NaiveLayout accounting (lockstep → oracle-safe).
         let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap().pages.len();
         assert_eq!(placed.pages.len(), naive, "own-render pages == NaiveLayout pages (kept in lockstep)");
+    }
+
+    #[test]
+    fn over_tall_row_keeps_place_doc_and_naive_in_lockstep() {
+        use crate::LayoutEngine;
+        // A single row TALLER than the page body must NOT re-fragment in place_doc while NaiveLayout
+        // leaves it whole (the over-tall row draws + clips; a following block breaks). Regression for the
+        // page-drift blocker (place_doc 13 vs NaiveLayout 1).
+        let tall = (0..40).map(|_| Block::Paragraph(para("긴 내용"))).collect::<Vec<_>>();
+        let t = Table {
+            rows: 1, cols: 1, col_widths: vec![1],
+            cells: vec![Cell { row: 0, col: 0, blocks: tall, ..Default::default() }],
+            ..Default::default()
+        };
+        let doc = doc_with_page(vec![Block::Table(t)], 5000);
+        let placed = place_doc(&doc, &ApproxFontMetrics).pages.len();
+        let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap().pages.len();
+        assert_eq!(placed, naive, "over-tall row: place_doc {placed} == NaiveLayout {naive} (no re-fragment drift)");
+    }
+
+    #[test]
+    fn table_outer_margins_keep_place_doc_and_naive_in_lockstep() {
+        use crate::LayoutEngine;
+        // A multi-page table carrying outer margins, preceded by a paragraph (so vert>0) — the margins
+        // must be accounted IDENTICALLY in both paths. Regression for the margin page-drift (9 vs 8).
+        let mut tbl = n_row_table(15);
+        tbl.outer_margin_top = 2000;
+        tbl.outer_margin_bottom = 2000;
+        let doc = doc_with_page(vec![Block::Paragraph(para("앞 문단")), Block::Table(tbl)], 5000);
+        let placed = place_doc(&doc, &ApproxFontMetrics).pages.len();
+        let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap().pages.len();
+        assert_eq!(placed, naive, "table outer margins: place_doc {placed} == NaiveLayout {naive}");
     }
 
     #[test]

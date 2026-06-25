@@ -125,10 +125,15 @@ impl LayoutEngine for NaiveLayout {
                     // Real table layout for pagination: each row is sized to its tallest cell's
                     // laid-out content (cells break lines at an equal-split width). A row that doesn't
                     // fit the remaining body flows to the NEXT page (한글식 row-level split) instead of
-                    // jumping the whole table (which left big white gaps). Uses the SAME per-row sizing
-                    // the reserve sums (table_height = Σ table_row_heights), so this page count stays in
-                    // lockstep with place_doc's fragment placement.
+                    // jumping the whole table (which left big white gaps). IDENTICAL accounting to
+                    // place_doc/place_table — outer top margin (suppressed at page top), the row-level
+                    // split (an over-tall row draws and leaves vert>body_h for the NEXT block to break,
+                    // NO trailing page-slice), then the outer bottom margin — so this page count stays
+                    // in LOCKSTEP with place_doc's fragment placement (oracle can't drift).
                     Block::Table(t) => {
+                        if vert > 0.0 {
+                            vert += t.outer_margin_top.max(0) as f64;
+                        }
                         for rh in table_row_heights(t, body_w, doc, fonts) {
                             if vert + rh > body_h && vert > 0.0 {
                                 pages.push(new_page(page));
@@ -136,6 +141,7 @@ impl LayoutEngine for NaiveLayout {
                             }
                             vert += rh;
                         }
+                        vert += t.outer_margin_bottom.max(0) as f64;
                     }
                 }
             }
