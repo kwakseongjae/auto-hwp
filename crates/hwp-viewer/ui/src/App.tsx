@@ -61,38 +61,32 @@ function PageChrome({ geom }: { geom: PageGeom }) {
 /// in the chosen family (the webview renders it if installed); export resolves it via the serializer.
 const FONT_CHOICES = ["맑은 고딕", "바탕", "굴림", "돋움", "함초롬바탕", "함초롬돋움", "궁서"];
 
-/// The manual character-format bar (볼드/이태릭/크기/글꼴) over the focused cell or pointed paragraph.
-/// Buttons preventDefault their mousedown so clicking one doesn't blur an open inline editor / deselect
-/// the target. `onPatch` sends ONLY the changed attribute (B/I toggle off the current state).
-function FormatBar({ fmt, left, top, onPatch }: {
+/// The character-format controls (볼드/이태릭/크기/글꼴) — a position-free row used in the TOP edit
+/// toolbar (like a normal document editor's ribbon), not floating over the content. Buttons
+/// preventDefault their mousedown so clicking one doesn't blur an open inline editor / deselect the
+/// target. `onPatch` sends ONLY the changed attribute (B/I toggle off the current state).
+function FormatControls({ fmt, onPatch }: {
   fmt: CharFmt;
-  left: number;
-  top: number;
   onPatch: (p: { bold?: boolean; italic?: boolean; sizePt?: number; font?: string }) => void;
 }) {
   const size = Math.round(fmt.size_pt);
-  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
   const keep = (e: React.MouseEvent) => e.preventDefault();
   return (
-    <div
-      className="pointer-events-auto absolute z-50 flex items-center gap-0.5 rounded-md border border-black/10 bg-white/95 px-1 py-0.5 text-[11px] text-neutral-700 shadow-md backdrop-blur dark:border-white/10 dark:bg-neutral-800/95 dark:text-neutral-200"
-      style={{ left: `${left}px`, top: `${Math.max(top - 30, 0)}px` }}
-      onPointerDown={stop}
-    >
-      <button title="굵게" onMouseDown={keep} onClick={(e) => { stop(e); onPatch({ bold: !fmt.bold }); }}
-        className={`h-5 w-5 rounded font-bold ${fmt.bold ? "bg-accent text-white" : "hover:bg-black/5 dark:hover:bg-white/10"}`}>가</button>
-      <button title="기울임" onMouseDown={keep} onClick={(e) => { stop(e); onPatch({ italic: !fmt.italic }); }}
-        className={`h-5 w-5 rounded italic ${fmt.italic ? "bg-accent text-white" : "hover:bg-black/5 dark:hover:bg-white/10"}`}>가</button>
+    <div className="flex items-center gap-0.5">
+      <button title="굵게" onMouseDown={keep} onClick={() => onPatch({ bold: !fmt.bold })}
+        className={`h-6 w-6 rounded font-bold ${fmt.bold ? "bg-accent text-white" : "hover:bg-black/5 dark:hover:bg-white/10"}`}>가</button>
+      <button title="기울임" onMouseDown={keep} onClick={() => onPatch({ italic: !fmt.italic })}
+        className={`h-6 w-6 rounded italic ${fmt.italic ? "bg-accent text-white" : "hover:bg-black/5 dark:hover:bg-white/10"}`}>가</button>
       <span className="mx-0.5 h-4 w-px bg-black/10 dark:bg-white/10" />
-      <button title="작게" onMouseDown={keep} onClick={(e) => { stop(e); onPatch({ sizePt: Math.max(4, size - 1) }); }}
-        className="h-5 w-5 rounded hover:bg-black/5 dark:hover:bg-white/10">−</button>
-      <span className="min-w-[1.4rem] text-center tabular-nums" title="글자 크기(pt)">{size}</span>
-      <button title="크게" onMouseDown={keep} onClick={(e) => { stop(e); onPatch({ sizePt: Math.min(96, size + 1) }); }}
-        className="h-5 w-5 rounded hover:bg-black/5 dark:hover:bg-white/10">+</button>
+      <button title="작게" onMouseDown={keep} onClick={() => onPatch({ sizePt: Math.max(4, size - 1) })}
+        className="h-6 w-6 rounded hover:bg-black/5 dark:hover:bg-white/10">−</button>
+      <span className="min-w-[1.6rem] text-center tabular-nums" title="글자 크기(pt)">{size}</span>
+      <button title="크게" onMouseDown={keep} onClick={() => onPatch({ sizePt: Math.min(96, size + 1) })}
+        className="h-6 w-6 rounded hover:bg-black/5 dark:hover:bg-white/10">+</button>
       <span className="mx-0.5 h-4 w-px bg-black/10 dark:bg-white/10" />
-      <select title="글꼴" value={fmt.font ?? ""} onMouseDown={stop} onClick={stop}
-        onChange={(e) => { stop(e); onPatch({ font: e.target.value }); }}
-        className="max-w-[6.5rem] cursor-pointer rounded bg-transparent text-[11px] outline-none">
+      <select title="글꼴" value={fmt.font ?? ""} onMouseDown={(e) => e.stopPropagation()}
+        onChange={(e) => onPatch({ font: e.target.value })}
+        className="max-w-[7rem] cursor-pointer rounded bg-transparent text-xs outline-none">
         <option value="">(기본 글꼴)</option>
         {FONT_CHOICES.map((f) => <option key={f} value={f}>{f}</option>)}
       </select>
@@ -2082,7 +2076,7 @@ export default function App() {
     <div className="relative flex h-full flex-col bg-neutral-100 text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100">
       <header
         data-tauri-drag-region
-        className="flex h-11 shrink-0 items-center gap-2 border-b border-black/10 bg-neutral-50/70 pl-20 pr-3 backdrop-blur-xl dark:border-white/10 dark:bg-neutral-800/60"
+        className="flex h-12 shrink-0 items-center gap-2 border-b border-black/10 bg-neutral-50/70 pl-24 pr-3 backdrop-blur-xl dark:border-white/10 dark:bg-neutral-800/60"
       >
         {docName ? (
           <>
@@ -2136,6 +2130,48 @@ export default function App() {
           <Sep />
           <Button onClick={doUndo} icon="↩︎" label="실행취소" keys="⌘Z" disabled={!canEdit} />
           <Button onClick={doRedo} icon="↪︎" label="다시실행" disabled={!canEdit} />
+        </div>
+      )}
+
+      {/* EDIT RIBBON (own-render) — a PERSISTENT format toolbar at the TOP, like a normal document
+          editor, so formatting + save/cancel never float over the text being edited / drag-selected
+          (the old floating bars obscured the content). Always present in 편집 mode so selecting a cell
+          doesn't shift the page (which would also stale the overlay positions); its CONTENT is
+          contextual: format controls for the focused cell/paragraph, save/cancel while inline-editing. */}
+      {viewMode === "own" && canEdit && pageCount > 0 && (
+        <div className="flex h-10 shrink-0 items-center gap-2 border-b border-black/10 bg-neutral-50/40 px-3 text-xs dark:border-white/10 dark:bg-neutral-800/30">
+          {charFmtState && fmtTarget ? (
+            <>
+              <span className="shrink-0 font-medium text-neutral-600 dark:text-neutral-300">
+                {inlineEdit ? "✏️ 편집 중" : "✦ 서식"}
+                {fmtTarget.row != null ? ` · ${fmtTarget.row + 1}행 ${(fmtTarget.col ?? 0) + 1}열` : " · 문단"}
+              </span>
+              <span className="h-4 w-px bg-black/10 dark:bg-white/10" />
+              <FormatControls fmt={charFmtState} onPatch={commitCharFmt} />
+            </>
+          ) : (
+            <span className="text-neutral-400">칸이나 문단을 클릭하면 글자 서식(굵게·기울임·크기·글꼴)을 바꿀 수 있어요</span>
+          )}
+          {inlineEdit && (
+            <div className="ml-auto flex shrink-0 items-center gap-1.5">
+              <span className="hidden text-neutral-400 lg:inline">↵ 저장 · ⇧↵ 줄바꿈 · esc 취소</span>
+              <button
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  const ie = inlineEditRef.current;
+                  if (!ie) return;
+                  const ta = document.querySelector("[data-inline-edit]") as HTMLTextAreaElement | null;
+                  commitInlineEdit(ie, ta ? ta.value : ie.text);
+                }}
+                className="rounded bg-accent px-2.5 py-1 font-medium text-white hover:bg-accent/90"
+              >✓ 저장</button>
+              <button
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => cancelInlineEdit()}
+                className="rounded px-2 py-1 text-neutral-600 hover:bg-black/5 dark:text-neutral-300 dark:hover:bg-white/10"
+              >취소</button>
+            </div>
+          )}
         </div>
       )}
 
@@ -2404,17 +2440,8 @@ export default function App() {
                           </span>
                         </div>
                       )}
-                      {/* Manual character-format bar (볼드/이태릭/크기/글꼴) over the focused cell / pointed
-                          paragraph. Above the target; a paragraph gets extra lift so it clears the scope
-                          pin's tag. Applies to the whole target (sub-cell selection is v2). */}
-                      {viewMode === "own" && charFmtState && fmtTarget && fmtTarget.page === item.index && (
-                        <FormatBar
-                          fmt={charFmtState}
-                          left={fmtTarget.screen.left}
-                          top={fmtTarget.row != null ? fmtTarget.screen.top : fmtTarget.screen.top - 22}
-                          onPatch={commitCharFmt}
-                        />
-                      )}
+                      {/* (Format controls + save/cancel moved to the TOP edit toolbar — see below the
+                          main toolbar — so they don't float over and obscure the text being edited.) */}
                       {/* Point-to-scope PIN (own-render): a dashed accent box + a "✦ 여기" tag over the
                           block the user pointed at, so "가리키기"(pointing) is visible and the chat/insert
                           target is unmistakable. The box is click-through (pointer-events-none) so a new
@@ -2495,35 +2522,8 @@ export default function App() {
                           className="z-40 resize-none overflow-auto rounded-[2px] bg-white px-1 py-0.5 text-left align-top text-sm leading-snug text-neutral-900 shadow-[0_0_0_2px_var(--color-accent,#2563eb)] outline-none ring-2 ring-accent/40"
                         />
                       )}
-                      {/* Inline-editor commit affordance — makes the (otherwise hidden) save/cancel verbs
-                          explicit so users don't have to guess that ↵ commits ('엔터 반영' 헷갈림). Anchored
-                          just above the editor so it stays put as the textarea grows; the buttons
-                          preventDefault their mousedown so they don't blur-commit before the click. */}
-                      {viewMode === "own" && inlineEdit && inlineEdit.page === item.index && (
-                        <div
-                          className="pointer-events-auto absolute z-50 flex items-center gap-1 rounded-md border border-black/10 bg-white/95 px-1 py-0.5 text-[10px] text-neutral-500 shadow-md backdrop-blur dark:border-white/10 dark:bg-neutral-800/95 dark:text-neutral-300"
-                          style={{ left: `${inlineEdit.screen.left}px`, top: `${Math.max(inlineEdit.screen.top - 24, 0)}px` }}
-                          onPointerDown={(e) => e.stopPropagation()}
-                        >
-                          <button
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              const ta = document.querySelector("[data-inline-edit]") as HTMLTextAreaElement | null;
-                              commitInlineEdit(inlineEdit, ta ? ta.value : inlineEdit.text);
-                            }}
-                            className="rounded bg-accent px-1.5 py-0.5 font-medium leading-none text-white hover:bg-accent/90"
-                          >✓ 저장</button>
-                          <button
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={(e) => { e.stopPropagation(); cancelInlineEdit(); }}
-                            className="rounded px-1 py-0.5 leading-none hover:bg-black/5 dark:hover:bg-white/10"
-                          >✕</button>
-                          <span className="ml-0.5 hidden border-l border-black/10 pl-1.5 leading-none sm:inline dark:border-white/10">
-                            ↵ 저장 · ⇧↵ 줄바꿈 · esc 취소
-                          </span>
-                        </div>
-                      )}
+                      {/* (Save/cancel + keymap hint moved to the TOP edit toolbar so they don't float over
+                          the text being edited — see the edit toolbar below the main toolbar.) */}
                       {/* Post-apply highlight pulse — a one-shot accent glow over the page a chat edit
                           just landed on (cleared by a timer in `pulse`). */}
                       {pulsePage === item.index && (
