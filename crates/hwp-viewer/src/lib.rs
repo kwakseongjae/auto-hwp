@@ -1390,6 +1390,41 @@ async fn table_cell_at(
     .map_err(|e| e.to_string())?
 }
 
+/// The PX box (own SVG space) + page of the cell at `(section, block, row, col)`, looked up BY ADDRESS
+/// (not by point) across all pages — so the active-cell ring can be re-placed against the FRESH geometry
+/// after an edit GROWS the row (a font-size bump). Searches every page's tables so a cell that reflowed
+/// onto a different page is still found. `None` if the cell isn't placed (degenerate/covered cell).
+#[derive(serde::Serialize)]
+struct CellBox { page: u32, x: f64, y: f64, w: f64, h: f64 }
+
+#[tauri::command]
+async fn table_cell_box(
+    section: usize,
+    block: usize,
+    row: usize,
+    col: usize,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<Option<CellBox>, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let s = sess.lock().map_err(|_| "session poisoned")?;
+        let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+        let fonts = own_render_fonts();
+        let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+        let k = HWPUNIT_PER_PX;
+        for (pi, pg) in placed.pages.iter().enumerate() {
+            for t in pg.tables.iter().filter(|t| t.section == section && t.block == block) {
+                if let Some(cell) = t.cells.iter().find(|c| c.row == row && c.col == col) {
+                    return Ok(Some(CellBox { page: pi as u32, x: cell.x / k, y: cell.y / k, w: cell.w / k, h: cell.h / k }));
+                }
+            }
+        }
+        Ok(None)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Column-boundary x-positions (PX, own SVG space) of the table at `(section, block)` on `page` — the
 /// x's the column-resize handles are drawn on. `cols + 1` absolute px boundaries from the table left to
 /// the table right, derived from `column_offsets` so they land exactly on the drawn grid. `null` if the
@@ -1515,6 +1550,35 @@ async fn set_char_fmt(
         let mut s = sess.lock().map_err(|_| "session poisoned")?;
         let cell = row.zip(col);
         match apply_intent(&mut s, Intent::SetCharFmt { section, block, cell, bold, italic, size_pt, font })? {
+            Outcome::Edited { pages } => Ok(pages),
+            _ => Err("unexpected outcome".into()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Patch 볼드/이태릭 on the char RANGE `[start, end)` of a target paragraph/cell as ONE undo unit
+/// (`SetRunCharFmt`) — the dragged-selection (⌘B/⌘I) twin of `set_char_fmt`. `start`/`end` are CHAR
+/// offsets into the target's text. Returns the new page count.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+async fn set_run_char_fmt(
+    section: usize,
+    block: usize,
+    row: Option<usize>,
+    col: Option<usize>,
+    start: usize,
+    end: usize,
+    bold: Option<bool>,
+    italic: Option<bool>,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<u32, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        let cell = row.zip(col);
+        match apply_intent(&mut s, Intent::SetRunCharFmt { section, block, cell, start, end, bold, italic })? {
             Outcome::Edited { pages } => Ok(pages),
             _ => Err("unexpected outcome".into()),
         }
@@ -1662,6 +1726,7 @@ pub fn run() {
             table_at,
             own_hit_test,
             table_cell_at,
+            table_cell_box,
             table_col_boundaries,
             table_row_boundaries,
             page_geometry,
@@ -1673,6 +1738,7 @@ pub fn run() {
             set_table_col_widths,
             set_table_row_heights,
             set_char_fmt,
+            set_run_char_fmt,
             char_fmt,
             set_table_cell_shade,
             clipboard_read,

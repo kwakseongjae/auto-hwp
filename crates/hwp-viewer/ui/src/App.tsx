@@ -357,14 +357,21 @@ export default function App() {
   // textarea closes doesn't commit a SECOND time (Enter/Escape → close → unmount → blur). Reset by
   // `openInlineEdit` when a new editor opens.
   const inlineClosedRef = useRef(false);
+  // A char-format op (whole-target or ⌘B/⌘I range) was applied to the IR while the editor stayed open,
+  // so the SVG behind it is stale and must be repainted on the next commit/cancel (even a no-op commit).
+  const fmtDeferredRef = useRef(false);
+  // Diff-refresh the own page in place (no editor unmount) — used to flush a deferred format repaint.
+  const flushDeferredRepaint = useRef<() => void>(() => {});
   const openInlineEdit = useCallback((ie: InlineEdit) => {
     inlineClosedRef.current = false;
+    fmtDeferredRef.current = false; // a fresh editor starts with no pending format repaint
     setScopePin(null);
     setInlineEdit(ie);
   }, []);
   const cancelInlineEdit = useCallback(() => {
     inlineClosedRef.current = true; // the unmount blur must NOT commit a cancel
     setInlineEdit(null);
+    if (fmtDeferredRef.current) { fmtDeferredRef.current = false; flushDeferredRepaint.current(); }
   }, []);
 
   // Refs mirror the values that async (queued) edit/move closures must read at EXECUTION time, not at
@@ -1294,6 +1301,8 @@ export default function App() {
   // The format TARGET is the focused cell (activeCell), else a pointed PARAGRAPH (scopePin). The bar
   // applies to the WHOLE target (own-render has no sub-cell caret yet — partial selection is v2).
   const [charFmtState, setCharFmtState] = useState<CharFmt | null>(null);
+  const charFmtStateRef = useRef<CharFmt | null>(null);
+  charFmtStateRef.current = charFmtState;
   const fmtTarget = useMemo(() => {
     if (activeCell) {
       return { section: activeCell.section, block: activeCell.block, row: activeCell.row as number | null, col: activeCell.col as number | null, page: activeCell.page, screen: activeCell.screen };
@@ -1317,19 +1326,40 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fmtTarget?.section, fmtTarget?.block, fmtTarget?.row, fmtTarget?.col, viewMode]);
 
+  // Re-place the active-cell ring from the FRESH cell geometry after a repaint (the row may have GROWN
+  // from a size change — reusing the pre-edit box left the bigger text poking out of a stale ring).
+  const reselectCellAfterRepaint = useCallback((section: number, block: number, row: number, col: number) => {
+    whenPagePainted(activeCellRef.current?.page ?? 0, () => {
+      void (async () => {
+        try {
+          const box = await api.tableCellBox(section, block, row, col);
+          if (!box) return;
+          const svg = svgForPage(box.page);
+          if (!svg) return;
+          const rect = svg.getBoundingClientRect();
+          const vb = svg.viewBox.baseVal;
+          const b = { x: box.x, y: box.y, w: box.w, h: box.h };
+          const screen = imageBoxToScreen(b, { width: rect.width, height: rect.height }, { width: vb.width, height: vb.height });
+          const a = activeCellRef.current;
+          if (screen && a) setActiveCell({ ...a, page: box.page, box: b, screen });
+        } catch { /* ring just won't re-show */ }
+      })();
+    });
+  }, [whenPagePainted]);
+
   const commitCharFmt = useCallback((patch: { bold?: boolean; italic?: boolean; sizePt?: number; font?: string }) => {
     const t = fmtTargetRef.current;
     if (!t) return;
-    const a = activeCellRef.current; // cell ring to re-establish after the repaint
     const pin = scopePinRef.current; // paragraph pin to re-establish after the repaint
-    // If a cell editor is OPEN on this exact cell, snapshot its live text NOW — the format button
-    // preventDefaults its mousedown (no blur→commit), and the upcoming invalidate unmounts the editor,
-    // so without this the just-typed text would be lost. Commit it first (mirrors commitShade).
     const ie = inlineEditRef.current;
-    const liveText = ie && ie.kind === "cell" && t.row != null && ie.row === t.row && ie.col === t.col
-      ? (document.querySelector("[data-inline-edit]") as HTMLTextAreaElement | null)?.value
-      : undefined;
-    // Optimistic: reflect the patch in the bar immediately (the engine confirms on the next fetch).
+    // Are we inline-editing THIS exact target? If so, apply to the IR but DEFER the SVG repaint — the
+    // open textarea occludes the (now-stale) page, so repainting only closes the editor + flickers
+    // without showing anything (the textarea is plain). The deferred repaint runs on commit/cancel.
+    const editingHere = !!ie && (
+      (t.row != null && ie.kind === "cell" && ie.section === t.section && ie.block === t.block && ie.row === t.row && ie.col === t.col) ||
+      (t.row == null && ie.kind === "para" && ie.section === t.section && ie.block === t.block)
+    );
+    // Optimistic: reflect the patch in the ribbon immediately (so B/I toggles light up).
     setCharFmtState((prev) => (prev ? {
       bold: patch.bold ?? prev.bold,
       italic: patch.italic ?? prev.italic,
@@ -1339,24 +1369,18 @@ export default function App() {
     void enqueueEdit(async () => {
       if (!canEditRef.current) return;
       try {
-        if (ie && liveText !== undefined && liveText !== ie.text) {
-          inlineClosedRef.current = true;
-          setInlineEdit(null);
-          await api.setTableCell(ie.section, ie.block, ie.row ?? 0, ie.col ?? 0, liveText);
-        }
         const pages = await api.setCharFmt(t.section, t.block, t.row, t.col, patch);
         setEdited(true);
+        if (editingHere) {
+          // SMOOTH path: leave the editor mounted + focused; mark the page stale so commit/cancel repaints.
+          // (A later text commit rebuilds the cell runs preserving this shape, so the format survives.)
+          fmtDeferredRef.current = true;
+          return;
+        }
         invalidate(pages, null);
         if (t.row != null && t.col != null) {
           reselectTableAfterRepaint(t.page, t.section, t.block);
-          if (a) whenPagePainted(a.page, () => {
-            const svg = svgForPage(a.page);
-            if (!svg) return;
-            const rect = svg.getBoundingClientRect();
-            const vb = svg.viewBox.baseVal;
-            const screen = imageBoxToScreen(a.box, { width: rect.width, height: rect.height }, { width: vb.width, height: vb.height });
-            if (screen) setActiveCell({ ...a, screen }); // keep the cell focused so a follow-up format works
-          });
+          reselectCellAfterRepaint(t.section, t.block, t.row, t.col); // fresh-box ring (handles grown row)
         } else if (pin) {
           whenPagePainted(t.page, () => recomputeScopePin(pin.page, pin.section, pin.block, pin.box, pin.kind, pin.text));
         }
@@ -1364,7 +1388,57 @@ export default function App() {
         toast("warn", `서식 변경 실패: ${err}`);
       }
     });
-  }, [enqueueEdit, invalidate, reselectTableAfterRepaint, whenPagePainted, recomputeScopePin]);
+  }, [enqueueEdit, invalidate, reselectTableAfterRepaint, reselectCellAfterRepaint, whenPagePainted, recomputeScopePin]);
+
+  // Wire the deferred-repaint flusher (used by commit/cancel after a mid-edit format): repaint the own
+  // page in place (no editor unmount) + re-place the cell ring from the fresh box. Assigned to a ref so
+  // the early-declared cancelInlineEdit/commitInlineEdit can call it without a declaration-order cycle.
+  flushDeferredRepaint.current = () => {
+    if (viewModeRef.current !== "own") return;
+    ownRefreshRef.current = refreshOwnPages();
+    void loadOwnPageCount();
+    const a = activeCellRef.current;
+    if (a) reselectCellAfterRepaint(a.section, a.block, a.row, a.col);
+  };
+
+  // ⌘B/⌘I on the DRAGGED selection inside the inline editor — bold/italic ONLY the char range
+  // [startChar, endChar) of the cell/paragraph (Op::SetRunCharFmt). Toggle direction from the ribbon's
+  // current (whole-target) state. If the text is UNCHANGED we apply on the model + DEFER the repaint so
+  // the editor + selection stay live; if the user typed, flush the text first (offsets must match), then
+  // apply + repaint (the editor closes — selection is lost, acceptable v1).
+  const commitRunCharFmt = useCallback((startChar: number, endChar: number, attr: "bold" | "italic") => {
+    const ie = inlineEditRef.current;
+    if (!ie || startChar >= endChar) return;
+    const cur = charFmtStateRef.current;
+    const newVal = !((attr === "bold" ? cur?.bold : cur?.italic) ?? false);
+    const ta = document.querySelector("[data-inline-edit]") as HTMLTextAreaElement | null;
+    const liveText = ta ? ta.value : ie.text;
+    const changed = liveText !== ie.text;
+    const row = ie.kind === "cell" ? (ie.row ?? null) : null;
+    const col = ie.kind === "cell" ? (ie.col ?? null) : null;
+    setCharFmtState((prev) => (prev ? { ...prev, [attr]: newVal } : prev)); // optimistic ribbon toggle
+    void enqueueEdit(async () => {
+      if (!canEditRef.current) return;
+      try {
+        if (changed) {
+          inlineClosedRef.current = true;
+          setInlineEdit(null);
+          if (ie.kind === "cell") await api.setTableCell(ie.section, ie.block, ie.row ?? 0, ie.col ?? 0, liveText);
+          else await api.setParagraphText(ie.section, ie.block, liveText);
+        }
+        const pages = await api.setRunCharFmt(ie.section, ie.block, row, col, startChar, endChar, { [attr]: newVal });
+        setEdited(true);
+        if (changed) {
+          invalidate(pages, null);
+          if (ie.kind === "cell") reselectTableAfterRepaint(ie.page, ie.section, ie.block);
+        } else {
+          fmtDeferredRef.current = true; // editor + selection stay; repaint on commit/cancel
+        }
+      } catch (err) {
+        toast("warn", `서식 변경 실패: ${err}`);
+      }
+    });
+  }, [enqueueEdit, invalidate, reselectTableAfterRepaint]);
 
   const commitTableDeleteTable = useCallback(() => {
     void enqueueEdit(async () => {
@@ -1472,9 +1546,13 @@ export default function App() {
     inlineClosedRef.current = true;
     setInlineEdit(null);
     // NO-OP short-circuit: clicking outside (blur) commits — but if the text is UNCHANGED there's
-    // nothing to apply, so skip the op AND the repaint entirely. This kills the "바깥 클릭 시 변경도
-    // 없는데 전체 재렌더+깜빡임" waste; only a real change re-renders.
-    if (value === ie.text) return;
+    // nothing to apply, so skip the op AND the repaint entirely. EXCEPTION: if a char format was applied
+    // mid-edit (deferred), the SVG is stale and MUST repaint now to show the bold/size/font.
+    if (value === ie.text) {
+      if (fmtDeferredRef.current) { fmtDeferredRef.current = false; flushDeferredRepaint.current(); }
+      return;
+    }
+    fmtDeferredRef.current = false; // a real text commit repaints below, showing any deferred format too
     void enqueueEdit(async () => {
       if (!canEditRef.current) return;
       try {
@@ -2154,7 +2232,7 @@ export default function App() {
           )}
           {inlineEdit && (
             <div className="ml-auto flex shrink-0 items-center gap-1.5">
-              <span className="hidden text-neutral-400 lg:inline">↵ 저장 · ⇧↵ 줄바꿈 · esc 취소</span>
+              <span className="hidden text-neutral-400 lg:inline">드래그 선택 후 ⌘B/⌘I · ↵ 저장 · ⇧↵ 줄바꿈 · esc 취소</span>
               <button
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
@@ -2505,6 +2583,19 @@ export default function App() {
                           onInput={(e) => { const t = e.currentTarget; t.style.height = "auto"; t.style.height = `${Math.max(t.scrollHeight, inlineEdit.screen.height, 22)}px`; }}
                           onBlur={(e) => commitInlineEdit(inlineEdit, e.currentTarget.value)}
                           onKeyDown={(e) => {
+                            // ⌘B / ⌘I → bold/italic the DRAGGED selection only (run-level range format).
+                            if ((e.metaKey || e.ctrlKey) && (e.key === "b" || e.key === "B" || e.key === "i" || e.key === "I")) {
+                              e.preventDefault();
+                              const ta = e.currentTarget as HTMLTextAreaElement;
+                              const s = ta.selectionStart, en = ta.selectionEnd;
+                              if (en <= s) return; // no selection → nothing to range-format (use the ribbon for whole-cell)
+                              // textarea offsets are UTF-16 code units; convert to Unicode scalar (char) offsets the engine counts.
+                              const v = ta.value;
+                              const startChar = [...v.slice(0, s)].length;
+                              const endChar = [...v.slice(0, en)].length;
+                              commitRunCharFmt(startChar, endChar, (e.key === "b" || e.key === "B") ? "bold" : "italic");
+                              return;
+                            }
                             if (e.key === "Escape") { e.preventDefault(); cancelInlineEdit(); }
                             else if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitInlineEdit(inlineEdit, (e.currentTarget as HTMLTextAreaElement).value); }
                           }}

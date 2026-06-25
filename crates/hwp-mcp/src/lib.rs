@@ -723,6 +723,17 @@ pub enum Intent {
         size_pt: Option<f32>,
         font: Option<String>,
     },
+    /// Range char format — patch 볼드/이태릭 on the char range `[start, end)` of a target paragraph/cell
+    /// as ONE undo unit (`SetRunCharFmt`). The dragged-selection twin of `SetCharFmt`.
+    SetRunCharFmt {
+        section: usize,
+        block: usize,
+        cell: Option<(usize, usize)>,
+        start: usize,
+        end: usize,
+        bold: Option<bool>,
+        italic: Option<bool>,
+    },
     /// Cell shading — set/clear the background color of cells in the `index`-th table as ONE undo unit
     /// (`SetTableCellShade`). `sel` ∈ {"row","col","cell","all"} keyed off `(row, col)`; `shade` is
     /// "#RRGGBB" or None to clear.
@@ -895,6 +906,12 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
         Intent::SetCharFmt { section, block, cell, bold, italic, size_pt, font } => {
             let doc = session.doc.as_mut().ok_or("no document open")?;
             doc.do_op(&hwp_ops::Op::SetCharFmt { section, block, cell, bold, italic, size_pt, font }).map_err(|e| e.to_string())?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::SetRunCharFmt { section, block, cell, start, end, bold, italic } => {
+            let doc = session.doc.as_mut().ok_or("no document open")?;
+            doc.do_op(&hwp_ops::Op::SetRunCharFmt { section, block, cell, start, end, bold, italic }).map_err(|e| e.to_string())?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }

@@ -131,6 +131,21 @@ pub enum Op {
         size_pt: Option<f32>,
         font: Option<String>,
     },
+    /// The RANGE twin of [`Op::SetCharFmt`] — patch 볼드/이태릭 on only the CHAR RANGE `[start, end)` of
+    /// the target paragraph/cell (the dragged selection in the inline editor), splitting runs at the
+    /// boundaries and preserving every other attribute of the spanned runs. Targets the block paragraph
+    /// (`cell` = None) or the `(row, col)` cell — reaching cell paragraphs that [`Op::SetRunCharPr`]
+    /// can't (cell paragraphs have no `NodeId`). Char offsets (not bytes). At least one of bold/italic
+    /// must be `Some`. ONE undo unit.
+    SetRunCharFmt {
+        section: usize,
+        block: usize,
+        cell: Option<(usize, usize)>,
+        start: usize,
+        end: usize,
+        bold: Option<bool>,
+        italic: Option<bool>,
+    },
 }
 
 /// Which cells of an existing table a [`Op::SetTableCellShade`] targets.
@@ -1242,6 +1257,65 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             sec.dirty.mark();
             Ok(())
         }
+        Op::SetRunCharFmt { section, block, cell, start, end, bold, italic } => {
+            if bold.is_none() && italic.is_none() {
+                return Err(Error::Other("SetRunCharFmt: no attribute specified (bold/italic)".into()));
+            }
+            if start > end {
+                return Err(Error::Other(format!("SetRunCharFmt: start {start} > end {end}")));
+            }
+            if start == end {
+                return Ok(()); // empty selection — no-op
+            }
+            // Pass A (scoped &mut): resolve the FIRST formattable target paragraph (the inline editor edits
+            // one paragraph's text), split its runs at [start, end), and collect the spanned runs' OLD
+            // shape indices. The borrow is dropped before interning (which needs &mut doc).
+            let (lo, hi, old_indices) = {
+                let sec = section_mut(doc, *section)?;
+                let blk = sec.blocks.get_mut(*block).ok_or_else(|| Error::Other(format!("SetRunCharFmt: block {block} out of range")))?;
+                let Some(p) = char_fmt_target_paras_mut(blk, *cell)?.into_iter().next() else {
+                    return Err(Error::Other(
+                        "이 대상은 서식 변경 대상이 아닙니다 (이미지/필드/복합 구조) — 채팅으로 편집하세요".into(),
+                    ));
+                };
+                let total: usize = p.runs.iter().map(run_char_len).sum();
+                let end_c = (*end).min(total);
+                if *start >= end_c {
+                    return Ok(()); // selection past text end → nothing to format
+                }
+                let (lo, hi) = split_runs_for_range(&mut p.runs, *start, end_c)?;
+                let mut idx: Vec<usize> = Vec::new();
+                for r in &p.runs[lo..hi] {
+                    if !idx.contains(&r.char_shape) {
+                        idx.push(r.char_shape);
+                    }
+                }
+                (lo, hi, idx)
+            };
+            // Pass B: patch each spanned shape (preserving every other attr) → interned remap.
+            let mut remap: Vec<(usize, usize)> = Vec::with_capacity(old_indices.len());
+            for old in old_indices {
+                let mut sh = doc.char_shapes.get(old).cloned().unwrap_or_default();
+                if let Some(b) = bold { sh.bold = *b; }
+                if let Some(i) = italic { sh.italic = *i; }
+                let new = intern_char_shape(doc, sh);
+                remap.push((old, new));
+            }
+            // Pass C: reassign the spanned runs [lo, hi) (the split persisted, so indices still hold).
+            let sec = section_mut(doc, *section)?;
+            let blk = sec.blocks.get_mut(*block).ok_or_else(|| Error::Other(format!("SetRunCharFmt: block {block} out of range")))?;
+            if let Some(p) = char_fmt_target_paras_mut(blk, *cell)?.into_iter().next() {
+                let hi = hi.min(p.runs.len());
+                for r in &mut p.runs[lo.min(hi)..hi] {
+                    if let Some(&(_, new)) = remap.iter().find(|(old, _)| *old == r.char_shape) {
+                        r.char_shape = new;
+                    }
+                }
+                p.dirty.mark();
+            }
+            sec.dirty.mark();
+            Ok(())
+        }
         _ => Err(Error::NotImplemented(
             "op apply (MVP: Append*/SetPageLayout/Set{Char,Run,Para}Pr/ApplyStyle/Insert-Delete text/anchored Insert*At/DeleteBlock/MoveBlock/SetImageSize/SetTableCellShade/SetTableCell/TableInsertRows)",
         )),
@@ -2225,6 +2299,38 @@ mod tests {
         }).unwrap();
         let Block::Paragraph(p) = &doc.sections[0].blocks[0] else { panic!() };
         assert_eq!(doc.char_shapes[p.runs[0].char_shape].font_family, None, "empty font clears font_family");
+    }
+
+    #[test]
+    fn set_run_char_fmt_bolds_only_the_range_in_a_cell() {
+        // A 1-row 1-col table whose cell paragraph is "ABCDEF"; bold only chars [2,4) → run split so the
+        // middle run is bold and the surrounding runs keep their (non-bold) shape. Critically this targets
+        // a CELL paragraph (cell=Some), which Op::SetRunCharPr can't reach (no NodeId on cell paragraphs).
+        let mut doc = doc_with(vec![simple_para(1, "앞")]);
+        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
+        apply(&mut doc, &Op::InsertTableAt { section: 0, index: 1, rows: vec![vec![cell("ABCDEF")]] }).unwrap();
+        apply(&mut doc, &Op::SetRunCharFmt {
+            section: 0, block: 1, cell: Some((0, 0)), start: 2, end: 4, bold: Some(true), italic: None,
+        }).unwrap();
+        let Block::Table(t) = &doc.sections[0].blocks[1] else { panic!("table") };
+        let cell0 = t.cells.iter().find(|c| c.active && c.row == 0 && c.col == 0).unwrap();
+        let Block::Paragraph(p) = &cell0.blocks[0] else { panic!("cell paragraph") };
+        // Reconstruct text + bold per char to assert ONLY [2,4) is bold.
+        let mut bolded = String::new();
+        let mut plain = String::new();
+        for r in &p.runs {
+            let b = doc.char_shapes.get(r.char_shape).map(|s| s.bold).unwrap_or(false);
+            for inl in &r.content {
+                if let Inline::Text(s) = inl {
+                    if b { bolded.push_str(s); } else { plain.push_str(s); }
+                }
+            }
+        }
+        assert_eq!(bolded, "CD", "only chars [2,4) are bold");
+        assert_eq!(plain, "ABEF", "the rest stays non-bold");
+        // start==end no-op; start>end errors.
+        assert!(apply(&mut doc, &Op::SetRunCharFmt { section: 0, block: 1, cell: Some((0,0)), start: 1, end: 1, bold: Some(true), italic: None }).is_ok());
+        assert!(apply(&mut doc, &Op::SetRunCharFmt { section: 0, block: 1, cell: Some((0,0)), start: 3, end: 1, bold: Some(true), italic: None }).is_err());
     }
 
     #[test]

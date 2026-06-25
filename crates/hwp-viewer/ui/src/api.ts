@@ -284,6 +284,20 @@ export const api = {
     bold: fmt.bold ?? null, italic: fmt.italic ?? null,
     size_pt: fmt.sizePt ?? null, font: fmt.font ?? null,
   }),
+  /** Patch 볼드/이태릭 on the char range [start,end) of a target paragraph/cell (the dragged ⌘B/⌘I
+   *  selection in the inline editor) as ONE undo unit (SetRunCharFmt). Returns new page count. */
+  setRunCharFmt: (
+    section: number, block: number, row: number | null, col: number | null,
+    start: number, end: number, fmt: { bold?: boolean; italic?: boolean },
+  ) => invoke<number>("set_run_char_fmt", {
+    section, block, row, col, start, end,
+    bold: fmt.bold ?? null, italic: fmt.italic ?? null,
+  }),
+  /** The cell's PX box + page looked up BY ADDRESS (section,block,row,col) — to re-place the active-cell
+   *  ring against the FRESH geometry after an edit grows the row. Null if the cell isn't placed. */
+  tableCellBox: (section: number, block: number, row: number, col: number) =>
+    invoke<{ page: number; x: number; y: number; w: number; h: number } | null>(
+      "table_cell_box", { section, block, row, col }),
   /** The current char format of a target's first run (for the format bar's toggle/display state).
    *  Null if the target can't be resolved. */
   charFmt: (section: number, block: number, row: number | null, col: number | null) =>
