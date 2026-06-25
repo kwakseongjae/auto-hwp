@@ -48,6 +48,15 @@ pub enum EditCommand {
         #[serde(default, flatten)]
         para: AiPara,
     },
+    /// FILL/replace the text of an EXISTING paragraph (the anchor block) — for "이 문단을 채워줘/작성해줘/
+    /// 바꿔줘", especially filling an EMPTY pointed line. NEVER insert a new paragraph for a fill request.
+    /// Preserves the paragraph's char/para shape (color/italic/alignment); refuses a structural paragraph.
+    SetParagraph {
+        section: usize,
+        #[serde(default)]
+        block: usize,
+        text: String,
+    },
     /// Insert a heading (bold, optionally centered/styled) relative to the anchor block.
     InsertHeading {
         section: usize,
@@ -245,6 +254,12 @@ pub fn compile_edits(doc: &hwp_model::document::SemanticDoc, script: &EditScript
                 });
                 changes.push(Drift { section: *section, point: raw, delta: 1 });
             }
+            EditCommand::SetParagraph { section, block, text } => {
+                // Fill an EXISTING paragraph (no block-count change → no Drift); adjust the anchor for any
+                // prior inserts in this same script.
+                let index = adjust(&changes, *section, *block);
+                ops.push(Op::SetParagraphText { section: *section, block: index, text: text.clone() });
+            }
             EditCommand::InsertHeading { section, block, position, text, para } => {
                 let raw = raw_insert_point(sec_len(*section), *block, *position);
                 let index = adjust(&changes, *section, raw);
@@ -403,6 +418,7 @@ pub fn edit_brief() -> &'static str {
 { "edits": [
   {"op":"insert_paragraph","section":0,"block":3,"position":"after",
    "runs":[{"text":"본문 "},{"text":"강조","bold":true}],"align":"justify"},
+  {"op":"set_paragraph","section":0,"block":41,"text":"곽성재는 천재"},
   {"op":"insert_heading","section":0,"block":3,"position":"after","text":"새 제목","align":"center"},
   {"op":"insert_table","section":0,"block":3,"position":"after",
    "header":["항목","내용"],"rows":[["A","..."],["B","..."]]},
@@ -426,11 +442,14 @@ pub fn edit_brief() -> &'static str {
 - run 속성(선택): bold, italic, underline, strike, color/highlight("#RRGGBB"), size_pt, font.
 - 표 셀: 문자열 또는 {text,col_span,row_span,bold,shade} 객체. header 는 굵은 첫 행.
 - shade 색상은 "#RRGGBB"; shade 를 생략하거나 null 이면 음영 제거.
+- 기존 문단을 '채워줘/작성해줘/바꿔줘' → 그 문단의 [s/b] 앵커로 set_paragraph(text 로 교체). 특히 빈 줄을
+  가리켜 채워달라면 insert_paragraph 로 새 줄을 만들지 말고 set_paragraph 로 그 줄을 채울 것. insert_paragraph 는
+  진짜 새 문단을 추가할 때만.
 - 기존 표를 채우거나 행을 추가할 때는 그 표의 [s/b] 앵커로 set_cell/set_cells/insert_row/append_rows 를 쓰세요.
   새 표를 만들 때만 insert_table. 표를 '채워달라'는 요청에 insert_table 로 빈 표를 새로 만들지 말 것.
 - insert_row 의 at 을 생략하면 표 맨 끝에 행을 추가; append_rows 는 항상 맨 끝에 여러 행 추가.
 - 기존 표를 가리킬 때만 set_*/insert_row/append_rows/shade_*/delete 의 block 으로 그 표/블록의 앵커를 쓸 것.
-- 허용 op: insert_paragraph, insert_heading, insert_table, insert_image, delete_block,
+- 허용 op: set_paragraph, insert_paragraph, insert_heading, insert_table, insert_image, delete_block,
   shade_column, shade_row, shade_cell, set_cell, set_cells, insert_row, append_rows.
   그 외 키 금지. 좌표는 모두 0부터 시작."##
 }
@@ -606,6 +625,25 @@ mod tests {
         assert_eq!(table_cell_text(&doc, 1, 0, 1), "성명"); // set_cell rewrote the header
         assert_eq!(table_cell_text(&doc, 1, 1, 1), "홍길동");
         assert_eq!(table_cell_text(&doc, 1, 2, 2), "개발");
+    }
+
+    /// "이 (빈) 문단을 채워줘" → set_paragraph FILLS the anchor block in place (no new paragraph) —
+    /// the fix for the AI inserting b42 instead of filling the pointed b41.
+    #[test]
+    fn set_paragraph_fills_the_anchor_block_in_place() {
+        let json = r##"{"edits":[{"op":"set_paragraph","section":0,"block":1,"text":"곽성재는 천재"}]}"##;
+        let script = parse_script(json).expect("set_paragraph must parse");
+        let mut doc = doc_n(3);
+        let before = doc.sections[0].blocks.len();
+        let ops = compile_edits(&doc, &script).expect("compiles");
+        apply_all(&mut doc, &ops);
+        assert_eq!(doc.sections[0].blocks.len(), before, "fill must NOT add a block");
+        if let Block::Paragraph(p) = &doc.sections[0].blocks[1] {
+            let txt: String = p.runs.iter().flat_map(|r| &r.content).filter_map(|i| if let Inline::Text(s) = i { Some(s.as_str()) } else { None }).collect();
+            assert_eq!(txt, "곽성재는 천재", "the anchor paragraph's text is replaced in place");
+        } else {
+            panic!("block 1 must still be a paragraph");
+        }
     }
 
     /// `set_cells` (batch fill) and `append_rows` (multi-row) over an existing table.

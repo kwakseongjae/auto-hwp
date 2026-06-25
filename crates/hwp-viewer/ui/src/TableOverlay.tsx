@@ -34,8 +34,8 @@ type Props = {
   onDeleteTable: () => void;
   /** Apply/clear a background color (배경색) to the active cell's row/col/cell or the whole table. */
   onShade: (sel: "row" | "col" | "cell" | "all", color: string | null) => void;
-  /** Whether a specific cell is active (single-clicked) — gates the 칸/행/열 scope wording. */
-  hasActiveCell?: boolean;
+  /** The single-clicked reference cell (0-based row/col) the shade applies to — null = none clicked. */
+  activeCell?: { row: number; col: number } | null;
   /** When false (e.g. the cell-editor modal is open), Delete/Backspace is ignored so we don't delete
    *  the table behind a modal. Defaults to deletable. */
   deletable?: boolean;
@@ -63,14 +63,15 @@ export default function TableOverlay({
   onEditCell,
   onDeleteTable,
   onShade,
-  hasActiveCell = false,
+  activeCell = null,
   deletable = true,
   onMovePoint,
   onMoveEnd,
   onDismiss,
 }: Props) {
-  // 배경색 palette popover (toggled by the toolbar button).
+  // 배경색 palette popover (toggled by the toolbar button) + the chosen apply SCOPE.
   const [shadeOpen, setShadeOpen] = useState(false);
+  const [shadeScope, setShadeScope] = useState<"cell" | "row" | "col">("row");
   const SWATCHES = ["#D8D8D8", "#CCCCCC", "#EEEEEE", "#E3F2FD", "#E8F5E9", "#FFF9C4", "#FCE4EC"];
   // `live` is the box the overlay RENDERS while dragging (local-only, no parent repaint); null = idle.
   // Reset whenever the committed box changes (a repaint re-places it from the fresh bbox).
@@ -221,29 +222,46 @@ export default function TableOverlay({
           single-click active cell's row/col (or header row 0 when no cell is active). */}
       {shadeOpen && (
         <div
-          className="absolute -top-7 right-0 z-30 flex translate-y-[-100%] flex-col gap-1.5 rounded-md border border-black/10 bg-white p-2 text-[11px] shadow-xl dark:border-white/10 dark:bg-neutral-800"
+          className="absolute -top-7 right-0 z-30 flex w-60 translate-y-[-100%] flex-col gap-2 rounded-lg border border-black/10 bg-white p-2.5 text-[11px] shadow-xl dark:border-white/10 dark:bg-neutral-800"
           onPointerDown={(e) => e.stopPropagation()}
         >
-          <div className="text-neutral-500 dark:text-neutral-400">{hasActiveCell ? "선택한 칸 기준" : "헤더(첫 행/열) 기준"} — 적용 범위 + 색</div>
-          {(["row", "col", "cell"] as const).map((scope) => (
-            <div key={scope} className="flex items-center gap-1.5">
-              <span className="w-10 shrink-0 text-neutral-600 dark:text-neutral-300">{scope === "row" ? "이 행" : scope === "col" ? "이 열" : "이 칸"}</span>
-              {SWATCHES.map((c) => (
-                <button
-                  key={c}
-                  title={c}
-                  onClick={(e) => { e.stopPropagation(); onShade(scope, c); setShadeOpen(false); }}
-                  className="h-4 w-4 rounded-[3px] border border-black/20 hover:ring-2 hover:ring-accent"
-                  style={{ backgroundColor: c }}
-                />
-              ))}
-              <button
-                onClick={(e) => { e.stopPropagation(); onShade(scope, null); setShadeOpen(false); }}
-                title="색 지우기"
-                className="rounded border border-black/15 px-1 leading-none text-neutral-500 hover:bg-black/5 dark:border-white/15"
-              >지우기</button>
+          {/* 1) which cell is the reference */}
+          {activeCell ? (
+            <div className="text-neutral-600 dark:text-neutral-300">
+              기준 칸: <b className="text-neutral-900 dark:text-neutral-100">{activeCell.row + 1}행 {activeCell.col + 1}열</b>
             </div>
-          ))}
+          ) : (
+            <div className="rounded bg-amber-500/10 px-1.5 py-1 text-amber-700 dark:text-amber-400">표의 칸을 한 번 클릭해 색칠 기준을 정하세요</div>
+          )}
+          {/* 2) apply scope — single choice, plain wording */}
+          <div className="flex gap-1">
+            {([["cell", "이 칸만"], ["row", "가로 줄(행) 전체"], ["col", "세로 칸(열) 전체"]] as const).map(([s, label]) => (
+              <button
+                key={s}
+                onClick={(e) => { e.stopPropagation(); setShadeScope(s); }}
+                className={`flex-1 rounded px-1.5 py-1 leading-tight ${shadeScope === s ? "bg-accent text-white" : "bg-black/5 text-neutral-600 hover:bg-black/10 dark:bg-white/10 dark:text-neutral-300"}`}
+              >{label}</button>
+            ))}
+          </div>
+          {/* 3) pick a color (applies to the chosen scope) */}
+          <div className="flex items-center gap-1">
+            {SWATCHES.map((c) => (
+              <button
+                key={c}
+                disabled={!activeCell}
+                title={c}
+                onClick={(e) => { e.stopPropagation(); onShade(shadeScope, c); setShadeOpen(false); }}
+                className="h-5 w-5 rounded-[3px] border border-black/20 hover:ring-2 hover:ring-accent disabled:cursor-not-allowed disabled:opacity-40"
+                style={{ backgroundColor: c }}
+              />
+            ))}
+            <button
+              disabled={!activeCell}
+              onClick={(e) => { e.stopPropagation(); onShade(shadeScope, null); setShadeOpen(false); }}
+              title="색 지우기"
+              className="ml-auto rounded border border-black/15 px-1.5 py-0.5 leading-none text-neutral-500 hover:bg-black/5 disabled:opacity-40 dark:border-white/15"
+            >지우기</button>
+          </div>
         </div>
       )}
       {/* Column-resize handles: a thin draggable divider on each INNER column boundary. Dragging one

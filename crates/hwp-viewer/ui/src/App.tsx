@@ -2086,7 +2086,7 @@ export default function App() {
                           <TableOverlay
                             box={tableSel.screen}
                             colFracs={tableSel.colFracs}
-                            hasActiveCell={!!activeCell}
+                            activeCell={activeCell ? { row: activeCell.row, col: activeCell.col } : null}
                             onCommitMove={commitTableMove}
                             onCommitColWidths={commitTableColWidths}
                             onAddRow={commitTableAddRow}

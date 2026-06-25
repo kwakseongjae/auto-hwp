@@ -361,6 +361,14 @@ fn op_summary(op: &Op) -> String {
             let color = shade.as_deref().unwrap_or("(해제)");
             format!("◧ 표 @[s{section}/b{index}] {what} 음영 {color}")
         }
+        Op::SetParagraphText { section, block, text } => {
+            format!("✎ 문단 채움 @[s{section}/b{block}]: {}", truncate(text, 60))
+        }
+        Op::SetTableCell { section, index, row, col, runs } => {
+            let text: String = runs.iter().map(|r| r.text.as_str()).collect();
+            format!("✎ 칸 @[s{section}/b{index}] ({row},{col}): {}", truncate(&text, 40))
+        }
+        Op::SetTableColWidths { section, index, .. } => format!("↔ 표 @[s{section}/b{index}] 열 너비 조정"),
         Op::SetPageLayout { orientation, margins_mm, .. } => {
             let o = orientation.as_deref().unwrap_or("(유지)");
             let m = margins_mm.as_ref().map(|m| format!(", 여백 {}mm", m.left)).unwrap_or_default();
