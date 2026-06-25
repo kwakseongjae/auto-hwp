@@ -1403,9 +1403,13 @@ export default function App() {
 
   // ⌘B/⌘I on the DRAGGED selection inside the inline editor — bold/italic ONLY the char range
   // [startChar, endChar) of the cell/paragraph (Op::SetRunCharFmt). Toggle direction from the ribbon's
-  // current (whole-target) state. If the text is UNCHANGED we apply on the model + DEFER the repaint so
-  // the editor + selection stay live; if the user typed, flush the text first (offsets must match), then
-  // apply + repaint (the editor closes — selection is lost, acceptable v1).
+  // current (whole-target) state — correct for a uniform cell; approximate for an already-mixed range (v1).
+  // This ALWAYS COMMITS (closes the editor) rather than deferring: the op splits the paragraph into
+  // mixed-shape runs, and any later plain-text commit (setTableCell/setParagraphText) collapses runs to
+  // the FIRST run's shape — so a deferred range format would be SILENTLY DROPPED the moment the user typed
+  // more and committed. Committing now applies + repaints it cleanly. (Selection is lost — re-select to
+  // format another range. NOTE: re-editing the cell's text later still collapses the range — a plain
+  // textarea can't carry per-run formatting; true rich in-place editing is a follow-up.)
   const commitRunCharFmt = useCallback((startChar: number, endChar: number, attr: "bold" | "italic") => {
     const ie = inlineEditRef.current;
     if (!ie || startChar >= endChar) return;
@@ -1417,23 +1421,23 @@ export default function App() {
     const row = ie.kind === "cell" ? (ie.row ?? null) : null;
     const col = ie.kind === "cell" ? (ie.col ?? null) : null;
     setCharFmtState((prev) => (prev ? { ...prev, [attr]: newVal } : prev)); // optimistic ribbon toggle
+    // Close the editor up-front (real commit); clear any earlier deferred flag — this repaint shows it too.
+    inlineClosedRef.current = true;
+    fmtDeferredRef.current = false;
+    setInlineEdit(null);
     void enqueueEdit(async () => {
       if (!canEditRef.current) return;
       try {
+        // Flush the typed text FIRST so the range offsets index the committed text (setTableCell/
+        // setParagraphText collapse to one run, then setRunCharFmt re-splits at [start,end)).
         if (changed) {
-          inlineClosedRef.current = true;
-          setInlineEdit(null);
           if (ie.kind === "cell") await api.setTableCell(ie.section, ie.block, ie.row ?? 0, ie.col ?? 0, liveText);
           else await api.setParagraphText(ie.section, ie.block, liveText);
         }
         const pages = await api.setRunCharFmt(ie.section, ie.block, row, col, startChar, endChar, { [attr]: newVal });
         setEdited(true);
-        if (changed) {
-          invalidate(pages, null);
-          if (ie.kind === "cell") reselectTableAfterRepaint(ie.page, ie.section, ie.block);
-        } else {
-          fmtDeferredRef.current = true; // editor + selection stay; repaint on commit/cancel
-        }
+        invalidate(pages, null);
+        if (ie.kind === "cell") reselectTableAfterRepaint(ie.page, ie.section, ie.block);
       } catch (err) {
         toast("warn", `서식 변경 실패: ${err}`);
       }
