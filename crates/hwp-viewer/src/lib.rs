@@ -1121,6 +1121,28 @@ async fn set_table_col_widths(
     .map_err(|e| e.to_string())?
 }
 
+/// Set the `index`-th table's per-row minimum-height OVERRIDE as ONE undo unit (`SetTableRowHeights`).
+/// The row-resize drag commit. `heights.len()` must equal the table's row count; a `0` entry leaves
+/// that row content-sized, a `> 0` entry is a floor (HWPUNIT) honored as `max(content, override)`.
+#[tauri::command]
+async fn set_table_row_heights(
+    section: usize,
+    index: usize,
+    heights: Vec<i32>,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<u32, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        match apply_intent(&mut s, Intent::SetTableRowHeights { section, index, heights })? {
+            Outcome::Edited { pages } => Ok(pages),
+            _ => Err("unexpected outcome".into()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Shade (background-color) cells of the `index`-th table as ONE undo unit (`SetTableCellShade`).
 /// `sel` picks the target — "row"/"col"/"cell"/"all" using `(row, col)`; `shade` is "#RRGGBB" or null
 /// to clear. The 배경색 verb (header-row / column tinting).
@@ -1402,6 +1424,43 @@ async fn table_col_boundaries(
     .map_err(|e| e.to_string())?
 }
 
+/// Row-resize geometry (own-render only) — `rows + 1` absolute px y-boundaries of the `block`-th table
+/// on `page`, top→bottom, for the row-height drag handles. The row twin of `table_col_boundaries`;
+/// `None` when the table isn't on the page. Row heights are content-measured, so this needs the
+/// typesetter (`row_offsets`) — the y's match the painted grid exactly (table-top + row_top) / 75.
+#[tauri::command]
+async fn table_row_boundaries(
+    page: u32,
+    section: usize,
+    block: usize,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<Option<Vec<f64>>, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let s = sess.lock().map_err(|_| "session poisoned")?;
+        let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+        let fonts = own_render_fonts();
+        let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+        let Some(pg) = placed.pages.get(page as usize) else { return Ok(None) };
+        let Some(pt) = pg.tables.iter().find(|t| t.section == section && t.block == block) else {
+            return Ok(None);
+        };
+        let Some(hwp_model::prelude::Block::Table(model)) = doc.sections.get(section).and_then(|s| s.blocks.get(block)) else {
+            return Ok(None);
+        };
+        let k = HWPUNIT_PER_PX;
+        // row_offsets measures content (+ any row_heights override) the SAME way place_table draws, so
+        // the boundary y's line up with the painted rows. Scale to the drawn height (pt.h) so the last
+        // boundary lands on the table bottom even if content rounding drifted by a hair.
+        let row_y = hwp_typeset::row_offsets(model, pt.w, doc, fonts.as_ref());
+        let total = row_y.last().copied().unwrap_or(0.0);
+        let scale = if total > 0.0 { pt.h / total } else { 1.0 };
+        Ok(Some(row_y.iter().map(|y| (pt.y + y * scale) / k).collect()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 // ---- Interactive caret: in-place edit commands (typed Intent lane; same op-bus core as the MCP
 // ---- lane). The per-keystroke / IME-commit mutations the caret UI calls. Async/spawn_blocking like
 // ---- the other mutating commands; each is ONE undo unit (do_op) and returns the new page count so
@@ -1499,12 +1558,14 @@ pub fn run() {
             own_hit_test,
             table_cell_at,
             table_col_boundaries,
+            table_row_boundaries,
             move_table,
             table_add_rows,
             table_append_row,
             set_paragraph_text,
             set_table_cell,
             set_table_col_widths,
+            set_table_row_heights,
             set_table_cell_shade,
             clipboard_read,
             clipboard_write,

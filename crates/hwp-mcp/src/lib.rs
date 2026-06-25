@@ -708,6 +708,9 @@ pub enum Intent {
     /// Column resize — set the `index`-th table's column-width proportions as ONE undo unit
     /// (`SetTableColWidths`). `widths.len()` must equal the table's column count.
     SetTableColWidths { section: usize, index: usize, widths: Vec<i32> },
+    /// Row resize — set the `index`-th table's per-row minimum-height override as ONE undo unit
+    /// (`SetTableRowHeights`). `heights.len()` must equal the table's row count; `0` = content-sized.
+    SetTableRowHeights { section: usize, index: usize, heights: Vec<i32> },
     /// Cell shading — set/clear the background color of cells in the `index`-th table as ONE undo unit
     /// (`SetTableCellShade`). `sel` ∈ {"row","col","cell","all"} keyed off `(row, col)`; `shade` is
     /// "#RRGGBB" or None to clear.
@@ -868,6 +871,12 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
         Intent::SetTableColWidths { section, index, widths } => {
             let doc = session.doc.as_mut().ok_or("no document open")?;
             doc.do_op(&hwp_ops::Op::SetTableColWidths { section, index, widths }).map_err(|e| e.to_string())?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::SetTableRowHeights { section, index, heights } => {
+            let doc = session.doc.as_mut().ok_or("no document open")?;
+            doc.do_op(&hwp_ops::Op::SetTableRowHeights { section, index, heights }).map_err(|e| e.to_string())?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }

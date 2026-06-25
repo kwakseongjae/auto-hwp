@@ -22,6 +22,11 @@ type Props = {
   colFracs: number[];
   /** Commit a column resize: the new fractional boundaries (same shape as `colFracs`). */
   onCommitColWidths: (fracs: number[]) => void;
+  /** Fractional row boundaries (0..1 down the table height), length = rows + 1. Inner boundaries
+   *  (1..rows-1) get a draggable horizontal divider; empty = no handles (geometry not loaded yet). */
+  rowFracs?: number[];
+  /** Commit a row resize: the new fractional boundaries (same shape as `rowFracs`). */
+  onCommitRowHeights?: (fracs: number[]) => void;
   /** Commit a move: the DROP point in client (screen) px. The parent resolves which block that point
    *  lands on (own_hit_test) and relocates the table THERE — so it drops where you point, not a ±1
    *  nudge. A drop that didn't move beyond jitter never fires this (a select doesn't relocate). */
@@ -58,6 +63,8 @@ export default function TableOverlay({
   box,
   colFracs,
   onCommitColWidths,
+  rowFracs = [],
+  onCommitRowHeights,
   onCommitMove,
   onAddRow,
   onEditCell,
@@ -71,7 +78,7 @@ export default function TableOverlay({
 }: Props) {
   // 배경색 palette popover (toggled by the toolbar button) + the chosen apply SCOPE.
   const [shadeOpen, setShadeOpen] = useState(false);
-  const [shadeScope, setShadeScope] = useState<"cell" | "row" | "col">("row");
+  const [shadeScope, setShadeScope] = useState<"cell" | "row" | "col">("cell");
   const SWATCHES = ["#D8D8D8", "#CCCCCC", "#EEEEEE", "#E3F2FD", "#E8F5E9", "#FFF9C4", "#FCE4EC"];
   // `live` is the box the overlay RENDERS while dragging (local-only, no parent repaint); null = idle.
   // Reset whenever the committed box changes (a repaint re-places it from the fresh bbox).
@@ -182,8 +189,50 @@ export default function TableOverlay({
     window.removeEventListener("pointerup", onColUp);
   }, [onColMove, onColUp]);
 
+  // ---- Row resize: drag an inner row divider VERTICALLY. The exact twin of the column logic, but on
+  // the Y axis (fraction of the box HEIGHT). Dragging the boundary below row 0 sets the header-row
+  // height. Commits SetTableRowHeights on pointerup. ----
+  const MIN_ROW_FRAC = 0.03;
+  const [liveRowFracs, setLiveRowFracs] = useState<number[] | null>(null);
+  const rowDrag = useRef<{ i: number; startY: number; startFracs: number[]; latest: number[] } | null>(null);
+  useEffect(() => setLiveRowFracs(null), [box.left, box.top, box.width, box.height]);
+  const onRowMove = useCallback((e: PointerEvent) => {
+    const d = rowDrag.current;
+    if (!d) return;
+    const delta = (e.clientY - d.startY) / Math.max(1, box.height);
+    const lo = d.startFracs[d.i - 1] + MIN_ROW_FRAC;
+    const hi = d.startFracs[d.i + 1] - MIN_ROW_FRAC;
+    if (hi <= lo) return; // flanking rows too short to resize without inverting — ignore
+    const nf = Math.min(hi, Math.max(lo, d.startFracs[d.i] + delta));
+    const next = [...d.startFracs];
+    next[d.i] = nf;
+    d.latest = next;
+    setLiveRowFracs(next);
+  }, [box.height]);
+  const onRowUp = useCallback(() => {
+    const d = rowDrag.current;
+    rowDrag.current = null;
+    window.removeEventListener("pointermove", onRowMove);
+    window.removeEventListener("pointerup", onRowUp);
+    setLiveRowFracs(null);
+    if (d && d.latest.some((v, i) => Math.abs(v - d.startFracs[i]) > 1e-4)) onCommitRowHeights?.(d.latest);
+  }, [onRowMove, onCommitRowHeights]);
+  const startRowDrag = useCallback((i: number) => (e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation(); // never trigger the table MOVE drag
+    const base = liveRowFracs ?? rowFracs;
+    rowDrag.current = { i, startY: e.clientY, startFracs: base, latest: base };
+    window.addEventListener("pointermove", onRowMove);
+    window.addEventListener("pointerup", onRowUp);
+  }, [rowFracs, liveRowFracs, onRowMove, onRowUp]);
+  useEffect(() => () => {
+    window.removeEventListener("pointermove", onRowMove);
+    window.removeEventListener("pointerup", onRowUp);
+  }, [onRowMove, onRowUp]);
+
   const r = live ?? box;
   const fracs = liveFracs ?? colFracs;
+  const rFracs = liveRowFracs ?? rowFracs;
   return (
     <div
       className="pointer-events-auto absolute z-20 cursor-move ring-2 ring-accent"
@@ -210,6 +259,10 @@ export default function TableOverlay({
         <button
           className={`rounded px-1.5 py-0.5 hover:bg-accent/10 hover:text-accent ${shadeOpen ? "bg-accent/10 text-accent" : ""}`}
           onPointerDown={(e) => e.stopPropagation()}
+          // preventDefault on mousedown keeps focus where it is — so opening the palette WHILE a cell
+          // is being inline-edited doesn't blur→commit→repaint the editor out from under the click
+          // (that race is why 배경색 "안 열려" during edit).
+          onMouseDown={(e) => e.preventDefault()}
           onClick={(e) => { e.stopPropagation(); setShadeOpen((o) => !o); }}
         >
           🎨 배경색
@@ -218,11 +271,12 @@ export default function TableOverlay({
           표 삭제
         </button>
       </div>
-      {/* 배경색 palette — requires an active cell (single-click one first). Shows that cell as the
-          reference, then pick a SCOPE (이 칸 / 이 행 / 이 열) + a swatch (or 지우기). */}
+      {/* 배경색 palette — the reference is the FOCUSED cell (click or double-click-to-edit a cell).
+          Shows that cell, then pick a SCOPE (이 칸만 / 행 / 열) + a swatch (or 지우기). z-50 so it sits
+          ABOVE an open inline editor (z-40); preventDefault on the controls keeps the editor alive. */}
       {shadeOpen && (
         <div
-          className="absolute -top-7 right-0 z-30 flex w-60 translate-y-[-100%] flex-col gap-2 rounded-lg border border-black/10 bg-white p-2.5 text-[11px] shadow-xl dark:border-white/10 dark:bg-neutral-800"
+          className="absolute -top-7 right-0 z-50 flex w-60 translate-y-[-100%] flex-col gap-2 rounded-lg border border-black/10 bg-white p-2.5 text-[11px] shadow-xl dark:border-white/10 dark:bg-neutral-800"
           onPointerDown={(e) => e.stopPropagation()}
         >
           {/* 1) which cell is the reference */}
@@ -231,13 +285,14 @@ export default function TableOverlay({
               기준 칸: <b className="text-neutral-900 dark:text-neutral-100">{activeCell.row + 1}행 {activeCell.col + 1}열</b>
             </div>
           ) : (
-            <div className="rounded bg-amber-500/10 px-1.5 py-1 text-amber-700 dark:text-amber-400">표의 칸을 한 번 클릭해 색칠 기준을 정하세요</div>
+            <div className="rounded bg-amber-500/10 px-1.5 py-1 text-amber-700 dark:text-amber-400">표의 칸을 클릭(또는 더블클릭해 편집)하면 그 칸이 기준이 됩니다</div>
           )}
-          {/* 2) apply scope — single choice, plain wording */}
+          {/* 2) apply scope — single choice, plain wording. 이 칸만 is the default (leftmost). */}
           <div className="flex gap-1">
-            {([["row", "가로 줄(행) 전체"], ["col", "세로 칸(열) 전체"], ["cell", "이 칸만"]] as const).map(([s, label]) => (
+            {([["cell", "이 칸만"], ["row", "가로 줄(행) 전체"], ["col", "세로 칸(열) 전체"]] as const).map(([s, label]) => (
               <button
                 key={s}
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={(e) => { e.stopPropagation(); setShadeScope(s); }}
                 className={`flex-1 rounded px-1.5 py-1 leading-tight ${shadeScope === s ? "bg-accent text-white" : "bg-black/5 text-neutral-600 hover:bg-black/10 dark:bg-white/10 dark:text-neutral-300"}`}
               >{label}</button>
@@ -268,15 +323,29 @@ export default function TableOverlay({
           adjusts only that boundary (its neighbors hold); commit on pointerup → SetTableColWidths. */}
       {fracs.length > 2 && fracs.slice(1, -1).map((f, idx) => (
         <div
-          key={idx}
+          key={`c${idx}`}
           onPointerDown={startColDrag(idx + 1)}
           title="드래그하여 열 너비 조정"
           className="group absolute top-0 z-10 flex h-full w-2.5 -translate-x-1/2 cursor-col-resize items-stretch justify-center"
           style={{ left: `${f * r.width}px` }}
         >
-          {/* Invisible by default so the table reads like the document; the divider line only appears
-              when you hover that boundary (no persistent grid clutter). */}
-          <div className="w-0.5 bg-transparent group-hover:bg-accent" />
+          {/* Faintly visible WHILE THE TABLE IS SELECTED (this overlay is only mounted when selected),
+              so the resize affordance is discoverable; solid accent on hover. No persistent doc clutter
+              because the divider exists only inside the selection overlay. */}
+          <div className="w-0.5 bg-accent/30 group-hover:bg-accent" />
+        </div>
+      ))}
+      {/* Row-resize handles: the horizontal twin — a draggable divider on each INNER row boundary.
+          Drag the one below the header row to set its height. Commit → SetTableRowHeights. */}
+      {onCommitRowHeights && rFracs.length > 2 && rFracs.slice(1, -1).map((f, idx) => (
+        <div
+          key={`r${idx}`}
+          onPointerDown={startRowDrag(idx + 1)}
+          title="드래그하여 행 높이 조정"
+          className="group absolute left-0 z-10 flex w-full h-2.5 -translate-y-1/2 cursor-row-resize flex-col items-stretch justify-center"
+          style={{ top: `${f * r.height}px` }}
+        >
+          <div className="h-0.5 bg-accent/30 group-hover:bg-accent" />
         </div>
       ))}
     </div>

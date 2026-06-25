@@ -784,7 +784,21 @@ fn row_heights(t: &Table, avail_w: f64, doc: &SemanticDoc, fonts: &dyn FontMetri
             *slot = slot.max(per);
         }
     }
+    crate::apply_row_overrides(&mut row_h, t);
     row_h
+}
+
+/// Cumulative row TOPS relative to the table's top edge, length `rows + 1` — the row twin of
+/// [`column_offsets`]. `row_offsets[r]` is the y of row r's top edge; `row_offsets[rows]` is the
+/// table's content height. Needs `doc`/`fonts` because row heights are content-measured (unlike the
+/// explicit column widths). Powers the `table_row_boundaries` resize-handle geometry.
+pub fn row_offsets(t: &Table, avail_w: f64, doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<f64> {
+    let row_h = row_heights(t, avail_w, doc, fonts);
+    let mut tops = vec![0.0f64; t.rows + 1];
+    for r in 0..t.rows {
+        tops[r + 1] = tops[r] + row_h[r];
+    }
+    tops
 }
 
 /// Laid-out height of a block at `width` — paragraph (lines×spacing + 위/아래 간격) or nested table.

@@ -253,6 +253,15 @@ export const api = {
    *  (SetTableColWidths). `widths.length` must equal the table's column count. Returns new page count. */
   setTableColWidths: (section: number, index: number, widths: number[]) =>
     invoke<number>("set_table_col_widths", { section, index, widths }),
+  /** Row-resize geometry (own-render only) — `rows+1` absolute px y-boundaries of the table at
+   *  `(section, block)` on `page`, for drawing the row-divider drag handles. Null if not on page. */
+  tableRowBoundaries: (page: number, section: number, block: number) =>
+    invoke<number[] | null>("table_row_boundaries", { page, section, block }),
+  /** Row resize — set the `index`-th table's per-row minimum-height override as ONE undo unit
+   *  (SetTableRowHeights). `heights.length` must equal the table's row count; 0 = content-sized.
+   *  Returns new page count. */
+  setTableRowHeights: (section: number, index: number, heights: number[]) =>
+    invoke<number>("set_table_row_heights", { section, index, heights }),
   /** Cell shading (배경색) — set/clear the background color of cells in the `index`-th table as ONE undo
    *  unit. `sel` ∈ "row"|"col"|"cell"|"all" keyed off `(row, col)`; `shade` = "#RRGGBB" or null to clear. */
   setTableCellShade: (section: number, index: number, sel: "row" | "col" | "cell" | "all", row: number, col: number, shade: string | null) =>

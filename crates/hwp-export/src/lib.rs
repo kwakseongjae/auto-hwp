@@ -183,6 +183,15 @@ fn render_table(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut Stri
         .map(|w| w.split(',').filter_map(|v| v.parse::<f64>().ok()).map(|h| h / 75.0).collect())
         .unwrap_or_default();
 
+    // Per-row MINIMUM heights (HWPUNIT) → px (÷75), the row twin of `data-colw`. A `<tr>` `height` acts
+    // as a floor (the row still grows for taller content), matching the override's `max(content, …)`
+    // semantics. Empty / `0` slot ⇒ that row stays content-sized (no style emitted).
+    let rows_px: Vec<f64> = el
+        .attrs
+        .get("data-rowh")
+        .map(|h| h.split(',').filter_map(|v| v.parse::<f64>().ok()).map(|x| x / 75.0).collect())
+        .unwrap_or_default();
+
     // Column PROPORTIONS as percentages (not absolute px): the table fills the container width
     // (BASE_CSS .hwp-doc table{width:100%}) while columns keep the original ratios. Absolute px made
     // gov-doc tables render narrower than the page and starved label columns (e.g. a 48px cell wrapped
@@ -201,8 +210,11 @@ fn render_table(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut Stri
         }
         out.push_str("</colgroup>");
     }
-    for cells in rows.values() {
-        out.push_str("<tr>");
+    for (row_idx, cells) in &rows {
+        match rows_px.get(*row_idx).copied() {
+            Some(h) if h > 0.0 => out.push_str(&format!("<tr style=\"height:{h:.1}px\">")),
+            _ => out.push_str("<tr>"),
+        }
         for cell in cells {
             if cell.attrs.contains_key("data-inactive") {
                 continue; // covered cell — represented by the spanning cell's span
@@ -428,6 +440,23 @@ mod tests {
         assert!(html.contains("colspan=\"2\""), "spanning cell keeps its colspan");
         // exactly ONE <td> (the inactive covered cell is omitted)
         assert_eq!(html.matches("<td").count(), 1, "covered cell omitted from the HTML grid");
+    }
+
+    #[test]
+    fn table_row_height_override_round_trips_to_html() {
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape::default());
+        doc.para_shapes.push(ParaShape::default());
+        // 2 rows × 1 col; row 0 floored to 3000 HWPUNIT (= 40px), row 1 left content-sized (0).
+        let mut t = Table { rows: 2, cols: 1, row_heights: vec![3000, 0], ..Default::default() };
+        t.cells.push(Cell { row: 0, col: 0, col_span: 1, row_span: 1, active: true, ..Default::default() });
+        t.cells.push(Cell { row: 1, col: 0, col_span: 1, row_span: 1, active: true, ..Default::default() });
+        doc.sections.push(Section { blocks: vec![Block::Table(t)], ..Default::default() });
+        let html = html_of(&doc);
+        // 3000 / 75 = 40.0px on the first row; the 0-slot row stays a bare <tr>.
+        assert!(html.contains("<tr style=\"height:40.0px\">"), "row-0 height override reaches HTML: {html}");
+        assert_eq!(html.matches("<tr").count(), 2, "two rows emitted");
+        assert_eq!(html.matches("<tr style=").count(), 1, "only the overridden row carries a height");
     }
 
     #[test]

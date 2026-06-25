@@ -146,6 +146,7 @@ fn table_eq(a: &Table, b: &Table) -> bool {
     a.rows == b.rows
         && a.cols == b.cols
         && a.col_widths == b.col_widths
+        && a.row_heights == b.row_heights
         && prov_eq(&a.provenance, &b.provenance)
         && pass_eq(&a.passthrough, &b.passthrough)
         && a.dirty == b.dirty

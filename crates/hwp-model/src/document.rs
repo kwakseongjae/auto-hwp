@@ -269,6 +269,14 @@ pub struct Table {
     /// Per-column widths (HWPUNIT), `cols` entries — for faithful column proportions on render.
     /// Empty when unknown (then the renderer falls back to auto-layout).
     pub col_widths: Vec<HwpUnit>,
+    /// Per-row MINIMUM height OVERRIDE (HWPUNIT), `rows` entries — a user-set row height (드래그로 행
+    /// 높이 조정). EMPTY = every row sizes to its content (the default; the parser never fills this, so
+    /// existing docs/layout/oracle are unaffected). A slot of `0` means "that row stays content-sized";
+    /// a slot `> 0` is honored as a FLOOR (`max(content, override)`) in the typesetter
+    /// (`hwp_typeset::apply_row_overrides`). Honored by the own-render surface, the PDF export (both go
+    /// through `place_doc`), and the HTML export (`data-rowh` → per-row `min-height`). NOT yet honored
+    /// by the HWPX serializer, which emits a uniform constant row height (a separate fidelity gap).
+    pub row_heights: Vec<HwpUnit>,
     /// Outer vertical margins (바깥 여백, HWPUNIT) above/below the table object — the gap HWP keeps
     /// between a table and its neighbours. Lifted from the binary; 0 when unknown. Without these,
     /// consecutive tables abut with no breathing room (the "tables stuck together" artifact).

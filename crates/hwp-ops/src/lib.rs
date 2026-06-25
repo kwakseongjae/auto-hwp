@@ -112,6 +112,11 @@ pub enum Op {
     /// must have exactly `t.cols` positive entries; the renderer rescales them to the body width, so only
     /// the ratios matter. ONE undo unit.
     SetTableColWidths { section: usize, index: usize, widths: Vec<i32> },
+    /// Set the per-row MINIMUM HEIGHT override (HWPUNIT) of the `index`-th table (the row-resize drag
+    /// commit). `heights` must have exactly `t.rows` entries, each `>= 0` (`0` = that row stays
+    /// content-sized; `> 0` = a floor so text never clips). The typesetter honors these as
+    /// `max(content, override)`. ONE undo unit. See [`hwp_model::prelude::Table::row_heights`].
+    SetTableRowHeights { section: usize, index: usize, heights: Vec<i32> },
 }
 
 /// Which cells of an existing table a [`Op::SetTableCellShade`] targets.
@@ -1094,6 +1099,27 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             sec.dirty.mark();
             Ok(())
         }
+        Op::SetTableRowHeights { section, index, heights } => {
+            let sec = section_mut(doc, *section)?;
+            let block = sec.blocks.get_mut(*index).ok_or_else(|| {
+                Error::Other(format!("SetTableRowHeights: block index {index} out of range"))
+            })?;
+            let Block::Table(t) = block else {
+                return Err(Error::Other(format!("SetTableRowHeights: block {index} is not a table")));
+            };
+            if heights.len() != t.rows {
+                return Err(Error::Other(format!(
+                    "SetTableRowHeights: expected {} heights, got {}", t.rows, heights.len()
+                )));
+            }
+            if heights.iter().any(|&h| h < 0) {
+                return Err(Error::Other("SetTableRowHeights: heights must be non-negative".into()));
+            }
+            t.row_heights = heights.clone();
+            t.dirty.mark();
+            sec.dirty.mark();
+            Ok(())
+        }
         _ => Err(Error::NotImplemented(
             "op apply (MVP: Append*/SetPageLayout/Set{Char,Run,Para}Pr/ApplyStyle/Insert-Delete text/anchored Insert*At/DeleteBlock/MoveBlock/SetImageSize/SetTableCellShade/SetTableCell/TableInsertRows)",
         )),
@@ -2028,6 +2054,26 @@ mod tests {
         // Wrong length / non-positive is rejected (no partial mutation).
         assert!(apply(&mut doc, &Op::SetTableColWidths { section: 0, index: 1, widths: vec![1, 1] }).is_err());
         assert!(apply(&mut doc, &Op::SetTableColWidths { section: 0, index: 1, widths: vec![1, 0, 1] }).is_err());
+    }
+
+    #[test]
+    fn set_table_row_heights_sets_override_and_validates_length() {
+        let mut doc = doc_with(vec![simple_para(1, "앞")]);
+        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
+        // A 2-row, 1-col table.
+        apply(&mut doc, &Op::InsertTableAt {
+            section: 0, index: 1, rows: vec![vec![cell("a")], vec![cell("b")]],
+        }).unwrap();
+        // Default: no override stored (every row content-sized) — the oracle-safe default.
+        let Block::Table(t0) = &doc.sections[0].blocks[1] else { panic!("table") };
+        assert!(t0.row_heights.is_empty(), "parser/insert never fills row_heights");
+        // Correct length sets the per-row floor; 0 = keep that row content-sized.
+        apply(&mut doc, &Op::SetTableRowHeights { section: 0, index: 1, heights: vec![4000, 0] }).unwrap();
+        let Block::Table(t) = &doc.sections[0].blocks[1] else { panic!("table") };
+        assert_eq!(t.row_heights, vec![4000, 0]);
+        // Wrong length / negative is rejected (no partial mutation).
+        assert!(apply(&mut doc, &Op::SetTableRowHeights { section: 0, index: 1, heights: vec![1000] }).is_err());
+        assert!(apply(&mut doc, &Op::SetTableRowHeights { section: 0, index: 1, heights: vec![1000, -1] }).is_err());
     }
 
     #[test]

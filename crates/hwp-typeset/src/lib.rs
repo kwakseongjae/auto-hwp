@@ -20,7 +20,7 @@ pub use shaper::RealFontMetrics;
 
 /// Positioned layout (glyphs/images/boxes per page) — the paint-IR bridge consumed by `hwp-render`.
 pub mod place;
-pub use place::{block_pages, column_offsets, place_doc, BlockKind, PlacedBlock, PlacedCell, PlacedDoc, PlacedGlyph, PlacedImage, PlacedPage, PlacedRect, PlacedTable};
+pub use place::{block_pages, column_offsets, place_doc, row_offsets, BlockKind, PlacedBlock, PlacedCell, PlacedDoc, PlacedGlyph, PlacedImage, PlacedPage, PlacedRect, PlacedTable};
 
 /// Half the EM for half-width glyphs.
 const HALF: f64 = 0.5;
@@ -196,7 +196,23 @@ pub fn table_height(t: &Table, avail_w: f64, doc: &SemanticDoc, fonts: &dyn Font
             *slot = slot.max(per);
         }
     }
+    apply_row_overrides(&mut row_h, t);
     row_h.iter().sum()
+}
+
+/// Apply per-row MINIMUM-height overrides (HWPUNIT) from [`Table::row_heights`] as a FLOOR on the
+/// content-derived heights (drag-to-resize 행 높이). An empty vec or a `0` slot leaves the content
+/// size untouched — so the default path (every parsed table, which never sets `row_heights`) is
+/// byte-for-byte identical and the layout oracle is unaffected. Used by both the pagination
+/// reservation (`table_height`) and the cell placer (`place::row_heights`) so they stay in lockstep.
+pub(crate) fn apply_row_overrides(row_h: &mut [f64], t: &Table) {
+    for (r, slot) in row_h.iter_mut().enumerate() {
+        if let Some(&h) = t.row_heights.get(r) {
+            if h > 0 {
+                *slot = slot.max(h as f64);
+            }
+        }
+    }
 }
 
 /// Substitute a few typographic chars that common free Korean faces (e.g. NanumGothic) lack with a

@@ -322,6 +322,10 @@ fn emit_table(t: &Table) -> JsxNode {
         let w = t.col_widths.iter().map(|w| w.to_string()).collect::<Vec<_>>().join(",");
         el.attrs.insert("data-colw".into(), w);
     }
+    if !t.row_heights.is_empty() {
+        let h = t.row_heights.iter().map(|h| h.to_string()).collect::<Vec<_>>().join(",");
+        el.attrs.insert("data-rowh".into(), h);
+    }
     el.attrs.insert("data-prov".into(), encode_provenance(&t.provenance));
     if !t.passthrough.is_empty() {
         el.attrs.insert(
@@ -809,11 +813,17 @@ fn parse_table(el: &JsxElement) -> Result<Table> {
         .get("data-colw")
         .map(|s| s.split(',').filter_map(|w| w.parse().ok()).collect())
         .unwrap_or_default();
+    let row_heights = el
+        .attrs
+        .get("data-rowh")
+        .map(|s| s.split(',').filter_map(|h| h.parse().ok()).collect())
+        .unwrap_or_default();
     Ok(Table {
         rows: el.attrs.get("data-rows").and_then(|v| v.parse().ok()).unwrap_or(0),
         cols: el.attrs.get("data-cols").and_then(|v| v.parse().ok()).unwrap_or(0),
         cells,
         col_widths,
+        row_heights,
         outer_margin_top: el.attrs.get("data-omt").and_then(|v| v.parse().ok()).unwrap_or(0),
         outer_margin_bottom: el.attrs.get("data-omb").and_then(|v| v.parse().ok()).unwrap_or(0),
         provenance: el.attrs.get("data-prov").map(|s| decode_provenance(s)).unwrap_or_default(),

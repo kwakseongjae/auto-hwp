@@ -209,6 +209,7 @@ export default function App() {
     screen: { left: number; top: number; width: number; height: number };
     pxPerPageY: number;
     colFracs: number[]; // cols+1 fractional column boundaries (0..1 across the table) for resize handles
+    rowFracs: number[]; // rows+1 fractional row boundaries (0..1 down the table) for row-resize handles
   };
   const [tableSel, setTableSel] = useState<TableSel | null>(null);
   const tableSelRef = useRef<TableSel | null>(null);
@@ -380,8 +381,8 @@ export default function App() {
     const vb = svg.viewBox.baseVal;
     const screen = imageBoxToScreen(box, { width: rect.width, height: rect.height }, { width: vb.width, height: vb.height });
     if (!screen || vb.width === 0 || vb.height === 0) return setTableSel(null);
-    setTableSel((prev) => ({ page, box, screen, pxPerPageY: rect.height / vb.height, colFracs: prev?.colFracs ?? [] }));
-    // Fetch the column-boundary fractions (for the resize handles) — async, patched in when ready.
+    setTableSel((prev) => ({ page, box, screen, pxPerPageY: rect.height / vb.height, colFracs: prev?.colFracs ?? [], rowFracs: prev?.rowFracs ?? [] }));
+    // Fetch the column + row boundary fractions (for the resize handles) — async, patched in when ready.
     void (async () => {
       try {
         const xs = await api.tableColBoundaries(page, box.section, box.block);
@@ -390,6 +391,15 @@ export default function App() {
           setTableSel((cur) => (cur && cur.box.section === box.section && cur.box.block === box.block ? { ...cur, colFracs: fracs } : cur));
         }
       } catch { /* leave colFracs empty → no handles */ }
+    })();
+    void (async () => {
+      try {
+        const ys = await api.tableRowBoundaries(page, box.section, box.block);
+        if (ys && box.h > 0) {
+          const fracs = ys.map((y) => (y - box.y) / box.h);
+          setTableSel((cur) => (cur && cur.box.section === box.section && cur.box.block === box.block ? { ...cur, rowFracs: fracs } : cur));
+        }
+      } catch { /* leave rowFracs empty → no handles */ }
     })();
   }, []);
 
@@ -674,6 +684,9 @@ export default function App() {
         const box = { x: cell.x, y: cell.y, w: cell.w, h: cell.h };
         const screen = imageBoxToScreen(box, dim, vbd);
         if (screen) {
+          // The cell being edited IS the shading reference — mark it active so 🎨 배경색 → 이 칸만 has a
+          // visible, unambiguous target right there during the edit (the user's "더블클릭 상태에 배경색").
+          recomputeActiveCell(page, cell);
           openInlineEdit({ kind: "cell", page, section: cell.section, block: cell.block, row: cell.row, col: cell.col, text: cell.text, box, screen });
         }
         return;
@@ -1103,19 +1116,21 @@ export default function App() {
   // (SetTableCellShade). Row/col come from the single-click active cell (the palette is gated on one).
   const commitShade = useCallback((sel: "row" | "col" | "cell" | "all", color: string | null) => {
     void enqueueEdit(async () => {
-      const t = tableSelRef.current;
-      if (!t || !canEditRef.current) return;
+      // Source the table + cell from the FOCUSED cell (activeCell), NOT tableSel: when shading WHILE
+      // inline-editing, the swatch click first blur-commits the cell text, whose invalidate() calls
+      // clearTableSel() before this runs — so tableSelRef would be null here and shading would silently
+      // no-op. activeCell survives invalidate(), and it already carries the table anchor (section/block)
+      // plus the cell (row/col), so it's the robust source for both the edit and non-edit flows.
       const a = activeCellRef.current;
-      const row = a?.row ?? 0;
-      const col = a?.col ?? 0;
+      if (!a || !canEditRef.current) return;
       try {
-        const pages = await api.setTableCellShade(t.box.section, t.box.block, sel, row, col, color);
+        const pages = await api.setTableCellShade(a.section, a.block, sel, a.row, a.col, color);
         setEdited(true);
         invalidate(pages, null);
-        reselectTableAfterRepaint(t.page, t.box.section, t.box.block);
+        reselectTableAfterRepaint(a.page, a.section, a.block);
         // Re-establish the active-cell ring after the repaint (shading doesn't move cells, so the stored
         // box is still valid) — so a follow-up 배경색 keeps targeting the same cell, not the header.
-        if (a) whenPagePainted(a.page, () => {
+        whenPagePainted(a.page, () => {
           const svg = svgForPage(a.page);
           if (!svg) return;
           const rect = svg.getBoundingClientRect();
@@ -1166,6 +1181,30 @@ export default function App() {
     });
   }, [enqueueEdit, invalidate, reselectTableAfterRepaint]);
 
+  // Row resize commit: fractional row boundaries → per-row MIN-height overrides (HWPUNIT), one undo
+  // unit (SetTableRowHeights). Pins each row to its current displayed height (box.h is own-engine px,
+  // ×HWPUNIT_PER_PX = HWPUNIT) with the dragged boundary moved. The override is a FLOOR, so a row never
+  // clips below its content — dragging GROWS a row (e.g. a taller header); it can't shrink below text.
+  const commitTableRowHeights = useCallback((fracs: number[]) => {
+    void enqueueEdit(async () => {
+      const sel = tableSelRef.current;
+      if (!sel || !canEditRef.current) return;
+      const total = sel.box.h * HWPUNIT_PER_PX; // table height in HWPUNIT
+      const heights: number[] = [];
+      for (let rr = 0; rr < sel.box.rows; rr++) {
+        heights.push(Math.max(1, Math.round((fracs[rr + 1] - fracs[rr]) * total)));
+      }
+      try {
+        const pages = await api.setTableRowHeights(sel.box.section, sel.box.block, heights);
+        setEdited(true);
+        invalidate(pages, null);
+        reselectTableAfterRepaint(sel.page, sel.box.section, sel.box.block);
+      } catch (err) {
+        toast("warn", `행 높이 변경 실패: ${err}`);
+      }
+    });
+  }, [enqueueEdit, invalidate, reselectTableAfterRepaint]);
+
   // The 칸 편집 toolbar button → open the INLINE editor over the selected table's first cell (the
   // double-click path is the primary one; this is the discoverable button). Resolves the cell rect via
   // the own-engine geometry at the table's top-left so the box lands on the real first cell.
@@ -1185,7 +1224,10 @@ export default function App() {
         if (!cell) return;
         const box = { x: cell.x, y: cell.y, w: cell.w, h: cell.h };
         const screen = imageBoxToScreen(box, dim, vbd);
-        if (screen) openInlineEdit({ kind: "cell", page: sel.page, section: cell.section, block: cell.block, row: cell.row, col: cell.col, text: cell.text, box, screen });
+        if (screen) {
+          recomputeActiveCell(sel.page, cell); // focused cell = shading reference (see onPageDoubleClick)
+          openInlineEdit({ kind: "cell", page: sel.page, section: cell.section, block: cell.block, row: cell.row, col: cell.col, text: cell.text, box, screen });
+        }
       } catch { /* ignore */ }
     })();
   }, []);
@@ -2086,9 +2128,11 @@ export default function App() {
                           <TableOverlay
                             box={tableSel.screen}
                             colFracs={tableSel.colFracs}
+                            rowFracs={tableSel.rowFracs}
                             activeCell={activeCell ? { row: activeCell.row, col: activeCell.col } : null}
                             onCommitMove={commitTableMove}
                             onCommitColWidths={commitTableColWidths}
+                            onCommitRowHeights={commitTableRowHeights}
                             onAddRow={commitTableAddRow}
                             onEditCell={openCellEditor}
                             onDeleteTable={commitTableDeleteTable}
@@ -2100,13 +2144,20 @@ export default function App() {
                           />
                         </div>
                       )}
-                      {/* Active CELL highlight (own-render): a subtle ring on the single-clicked cell so
-                          ⌘C/⌘V/Delete/배경색 have a visible target. Click-through; double-click edits. */}
+                      {/* Focused CELL highlight (own-render): a FILLED accent tint + a solid "N행 M열"
+                          badge on the clicked/edited cell so ⌘C/⌘V/Delete/배경색 have an unmistakable
+                          target (a bare ring blended into the table-selection ring — "이 칸을 어떻게
+                          알아?"). Click-through; double-click edits; the badge sits just above the cell
+                          so it stays readable over an open inline editor. */}
                       {viewMode === "own" && activeCell && activeCell.page === item.index && (
                         <div
-                          className="pointer-events-none absolute z-30 rounded-[1px] ring-2 ring-accent/70"
+                          className="pointer-events-none absolute z-30 rounded-[1px] bg-accent/10 ring-2 ring-accent"
                           style={{ left: `${activeCell.screen.left}px`, top: `${activeCell.screen.top}px`, width: `${activeCell.screen.width}px`, height: `${activeCell.screen.height}px` }}
-                        />
+                        >
+                          <span className="absolute -top-[1.15rem] left-0 whitespace-nowrap rounded-t bg-accent px-1 py-0.5 text-[9px] font-medium leading-none text-white shadow-sm">
+                            {activeCell.row + 1}행 {activeCell.col + 1}열
+                          </span>
+                        </div>
                       )}
                       {/* Point-to-scope PIN (own-render): a dashed accent box + a "✦ 여기" tag over the
                           block the user pointed at, so "가리키기"(pointing) is visible and the chat/insert
