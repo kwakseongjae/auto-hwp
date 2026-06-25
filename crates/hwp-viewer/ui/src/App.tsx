@@ -23,6 +23,11 @@ type CaretAnchor = { page: number; node: number; offset: number; len: number };
 /// 1 cm in own-render px (HWPUNIT/cm = 7200/2.54 = 2834.6; ÷ HWPUNIT_PER_PX(75)). For the ruler ticks.
 const CM_PX = 2834.6457 / 75;
 
+/// Page geometry equality (own-render chrome diff) — skip re-rendering a page's margin/ruler overlay
+/// when its geometry is unchanged after an edit.
+const geomEq = (a: PageGeom | undefined, b: PageGeom) =>
+  !!a && a.w === b.w && a.h === b.h && a.ml === b.ml && a.mt === b.mt && a.mr === b.mr && a.mb === b.mb;
+
 /// Editor chrome over an own-render page (NOT in the SVG → never exported): the 한글식 printable-area
 /// corner brackets + a top ruler with 1 cm ticks. Positioned as PERCENTAGES of the page box so it tracks
 /// zoom for free (the wrapper is the page at the current zoom). `geom` is in own-render px at zoom 1.
@@ -360,13 +365,20 @@ export default function App() {
   // is briefly a skeleton while it re-fetches). Without this an overlay re-place fires too early —
   // `svgForPage` returns null → the selection/overlay vanishes (the "행 추가 시 UI가 튀는" flicker).
   // Polls a bounded number of frames so an off-screen page (never repainted) doesn't loop forever.
+  // The in-flight own-render diff-refresh (set by invalidate). whenPagePainted awaits it so overlays
+  // re-place against the FRESH post-edit SVG, not the pre-edit one still in the DOM (the diff-refresh
+  // keeps the old SVG mounted until the new one swaps in — so svgForPage alone is no longer a "repaint
+  // finished" signal). Resolved by default (no refresh pending / svg mode).
+  const ownRefreshRef = useRef<Promise<void>>(Promise.resolve());
   const whenPagePainted = useCallback((page: number, cb: () => void) => {
-    let tries = 0;
-    const tick = () => {
-      if (svgForPage(page) || tries++ > 40) { cb(); return; }
+    void ownRefreshRef.current.then(() => {
+      let tries = 0;
+      const tick = () => {
+        if (svgForPage(page) || tries++ > 40) { cb(); return; }
+        requestAnimationFrame(tick);
+      };
       requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
+    });
   }, []);
   const recomputeCaretBox = useCallback((page: number, r: CaretRect | null) => {
     if (!r) return setCaretBox(null);
@@ -584,6 +596,33 @@ export default function App() {
 
   // `scrollTo === null` keeps the current scroll (chat edits shouldn't yank the view to the doc end —
   // the "결과가 튀는" issue); a number scrolls to that page.
+  // After an edit, REFRESH the own-render in place instead of emptying the cache: re-render only the
+  // pages currently cached (the visible/scrolled set — bounded by the viewport, not the doc length),
+  // and swap a page's SVG into the cache ONLY when it actually changed. An unchanged page returns the
+  // byte-identical SVG (the engine renders deterministically) → same cache reference → React skips its
+  // re-render and keeps its exact DOM node → no skeleton flash, no flicker. A single-cell edit thus
+  // repaints just the 1 page that changed; pages an edit didn't touch don't re-render at all. Pages an
+  // edit REMOVED (count shrank) error on re-render and are dropped; ADDED pages fetch lazily on scroll.
+  const refreshOwnPages = useCallback(async () => {
+    const idx = Object.keys(ownSvgCacheRef.current).map(Number);
+    await Promise.all(idx.map(async (i) => {
+      try {
+        const svg = sanitizeSvg(await api.renderOwnPage(i));
+        setOwnSvgCache((c) => (c[i] === svg ? c : { ...c, [i]: svg })); // swap only if changed
+      } catch {
+        setOwnSvgCache((c) => { if (!(i in c)) return c; const { [i]: _drop, ...rest } = c; return rest; });
+      }
+    }));
+    const gidx = Object.keys(pageGeomRef.current).map(Number);
+    await Promise.all(gidx.map(async (i) => {
+      try {
+        const g = await api.pageGeometry(i);
+        if (g) setPageGeom((c) => (geomEq(c[i], g) ? c : { ...c, [i]: g }));
+        else setPageGeom((c) => { if (!(i in c)) return c; const { [i]: _d, ...rest } = c; return rest; });
+      } catch { /* keep the existing chrome */ }
+    }));
+  }, []);
+
   const invalidate = useCallback((n: number, scrollTo: number | null = 0) => {
     // Keep-scroll edits (scrollTo === null) must hold the viewport STILL: clearing the cache collapses
     // pages to skeletons for a frame, which otherwise yanks the scroll (the "행 추가 시 UI가 튀는"
@@ -608,10 +647,17 @@ export default function App() {
     setActiveCell(null); // the cell's box/text is stale after a repaint
     setDropHint(null); // any in-progress drag indicator is moot after a repaint
     setInlineEdit(null); // a lingering inline editor's coords are stale after a repaint
-    // The own-engine SVGs are regenerated from the live IR — drop them too so an edit repaints. Its
-    // page count is fetched lazily (or eagerly when 'own' is the active mode).
-    setOwnSvgCache({});
-    setPageGeom({}); // page size/margins can shift after an edit — re-fetch the chrome geometry
+    // Own-render repaint: when 'own' is ACTIVE, diff-refresh in place (no flicker, only changed pages
+    // re-render — see refreshOwnPages). When it's NOT active (svg/html mode), just drop the stale own
+    // cache so it re-fetches fresh on the next switch to 'own'.
+    if (viewModeRef.current === "own") {
+      // Hold the refresh promise so whenPagePainted (overlay re-placement) waits for the post-edit
+      // SVGs to actually swap into the DOM before measuring.
+      ownRefreshRef.current = refreshOwnPages();
+    } else {
+      setOwnSvgCache({});
+      setPageGeom({});
+    }
     if (viewModeRef.current === "html") void loadDocHtml();
     else if (viewModeRef.current === "own") void loadOwnPageCount();
     if (scrollTo !== null) {
@@ -622,7 +668,7 @@ export default function App() {
     // U4: refresh the outline (headings + their pages) after open/edit.
     if (n > 0) api.docOutline().then(setOutline).catch(() => setOutline([]));
     else setOutline([]);
-  }, [clearCaret, virtualizer, loadDocHtml, loadOwnPageCount]);
+  }, [clearCaret, virtualizer, loadDocHtml, loadOwnPageCount, refreshOwnPages]);
   // own page count read inside the (stable) invalidate closure needs the latest value.
   const ownPageCountRef = useRef(ownPageCount);
   ownPageCountRef.current = ownPageCount;
@@ -1312,6 +1358,10 @@ export default function App() {
     if (!ie || inlineClosedRef.current) return; // already committed/cancelled (e.g. the unmount blur)
     inlineClosedRef.current = true;
     setInlineEdit(null);
+    // NO-OP short-circuit: clicking outside (blur) commits — but if the text is UNCHANGED there's
+    // nothing to apply, so skip the op AND the repaint entirely. This kills the "바깥 클릭 시 변경도
+    // 없는데 전체 재렌더+깜빡임" waste; only a real change re-renders.
+    if (value === ie.text) return;
     void enqueueEdit(async () => {
       if (!canEditRef.current) return;
       try {
