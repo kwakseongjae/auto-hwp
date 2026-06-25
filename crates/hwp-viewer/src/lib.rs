@@ -1450,12 +1450,19 @@ async fn table_row_boundaries(
         };
         let k = HWPUNIT_PER_PX;
         // row_offsets measures content (+ any row_heights override) the SAME way place_table draws, so
-        // the boundary y's line up with the painted rows. Scale to the drawn height (pt.h) so the last
-        // boundary lands on the table bottom even if content rounding drifted by a hair.
+        // the boundary y's line up with the painted rows. A SPLIT table's `pt` is the per-page FRAGMENT,
+        // so slice row_offsets to the fragment's [first_row, last_row] and rebase to the fragment top —
+        // otherwise the whole-table rows would be squashed onto one fragment's box. For a single-fragment
+        // table (first_row=0, last_row=rows) this is identical to the full set.
         let row_y = hwp_typeset::row_offsets(model, pt.w, doc, fonts.as_ref());
-        let total = row_y.last().copied().unwrap_or(0.0);
-        let scale = if total > 0.0 { pt.h / total } else { 1.0 };
-        Ok(Some(row_y.iter().map(|y| (pt.y + y * scale) / k).collect()))
+        let (f, l) = (pt.first_row, pt.last_row);
+        if f >= l || l >= row_y.len() {
+            return Ok(None);
+        }
+        let base = row_y[f];
+        let frag_total = row_y[l] - base;
+        let scale = if frag_total > 0.0 { pt.h / frag_total } else { 1.0 };
+        Ok(Some(row_y[f..=l].iter().map(|y| (pt.y + (y - base) * scale) / k).collect()))
     })
     .await
     .map_err(|e| e.to_string())?

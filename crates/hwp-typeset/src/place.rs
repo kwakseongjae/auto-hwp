@@ -65,13 +65,21 @@ pub struct PlacedTable {
     /// The `(section, block index)` anchor the table occupies in the SemanticDoc.
     pub section: usize,
     pub block: usize,
-    /// Logical row/column counts — so a quick-edit overlay can append a row (`TableInsertRows` wants
-    /// the column count + the append-at row) without a second query.
+    /// Logical row/column counts of the WHOLE table — so a quick-edit overlay can append a row
+    /// (`TableInsertRows` wants the column count + the append-at row) without a second query. These are
+    /// the full-table counts even on a continuation fragment (see `first_row`/`last_row`).
     pub rows: usize,
     pub cols: usize,
+    /// The half-open ROW RANGE `[first_row, last_row)` this placed box covers. A table that fits one
+    /// page is the degenerate single fragment `0..rows`. A table SPLIT across pages emits one
+    /// `PlacedTable` per page, each keyed to the SAME `(section, block)` but covering only its rows — so
+    /// a consumer must treat "a fragment is per-page" (pick by page / aggregate), never "one box = whole
+    /// table". `cells` holds only this fragment's rows.
+    pub first_row: usize,
+    pub last_row: usize,
     /// Per-cell page rects (provenance only) so a double-click can resolve which CELL was hit — the
     /// basis for direct "표에 내용 작성" (point a cell → edit it). Empty for tables placed before this
-    /// was added; populated by `place_table`.
+    /// was added; populated by `place_table`. Holds only this fragment's rows when the table is split.
     pub cells: Vec<PlacedCell>,
 }
 
@@ -298,31 +306,28 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                     started = true;
                 }
                 Block::Table(t) => {
-                    let h = table_height(t, body_w, doc, fonts);
-                    // Outer top margin (바깥 여백): the gap HWP keeps above the table, but only when
-                    // it isn't the first block on the page (mirrors paragraph space_before).
+                    // Outer top margin (바깥 여백): the gap HWP keeps above the table, but only when it
+                    // isn't the first block on the page (mirrors paragraph space_before).
                     if vert > 0.0 {
                         vert += t.outer_margin_top.max(0) as f64;
                     }
-                    if vert + h > body_h && vert > 0.0 {
-                        new_page(&mut pages, page);
-                        vert = 0.0;
-                    }
-                    place_table(t, doc, fonts, ml, mt + vert, body_w, &mut pages, sec_idx, blk_idx);
-                    // Provenance band for point-to-scope: reuse the exact outer box place_table just
-                    // recorded (a table is single-page in our flow) so the band matches what's drawn.
-                    // Guard on the anchor: a degenerate 0×N/N×0 table makes place_table early-return
-                    // WITHOUT pushing, so `tables.last()` would be the PREVIOUS table — only adopt the
-                    // box when it actually belongs to THIS block (else skip; an empty table draws
-                    // nothing, so there's nothing to point at).
-                    let tpage = pages.len() - 1;
-                    if let Some(pt) = pages[tpage].tables.last() {
-                        if pt.section == sec_idx && pt.block == blk_idx {
-                            let b = PlacedBlock { x: pt.x, y: pt.y, w: pt.w, h: pt.h, section: pt.section, block: pt.block, kind: BlockKind::Table };
-                            pages[tpage].blocks.push(b);
+                    let start_page = pages.len() - 1;
+                    // place_table SPLITS the table across pages itself (한글식 row-level break): a
+                    // first-row reserve, then a new page whenever the next row crosses the body bottom,
+                    // emitting one bordered fragment per page. Returns the final page-relative cursor.
+                    vert = place_table(t, doc, fonts, ml, mt, body_h, vert, body_w, &mut pages, page, sec_idx, blk_idx);
+                    let end_page = pages.len() - 1;
+                    // Provenance bands for point-to-scope: one band per fragment page from its ACTUAL box,
+                    // so own_hit_test resolves the table — and the scope pin hugs it — on EVERY page it
+                    // touches. A degenerate 0×N table pushes no fragment, so the find simply yields none.
+                    for pi in start_page..=end_page {
+                        let band = pages[pi].tables.iter().rev()
+                            .find(|pt| pt.section == sec_idx && pt.block == blk_idx)
+                            .map(|pt| PlacedBlock { x: pt.x, y: pt.y, w: pt.w, h: pt.h, section: sec_idx, block: blk_idx, kind: BlockKind::Table });
+                        if let Some(b) = band {
+                            pages[pi].blocks.push(b);
                         }
                     }
-                    vert += h;
                     // Outer bottom margin so the next block doesn't abut the table.
                     vert += t.outer_margin_bottom.max(0) as f64;
                     while vert > body_h {
@@ -387,16 +392,26 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
                     started = true;
                 }
                 Block::Table(t) => {
-                    let h = table_height(t, body_w, doc, fonts);
                     if vert > 0.0 {
                         vert += t.outer_margin_top.max(0) as f64;
                     }
-                    if vert + h > body_h && vert > 0.0 {
+                    // Row-level split accounting, matching place_doc/place_table: a row that doesn't fit
+                    // the remaining body flows to the next page. Record the page where the FIRST row
+                    // lands as the table's start page (outline/page-nav only needs the start).
+                    let row_h = crate::table_row_heights(t, body_w, doc, fonts);
+                    if vert > 0.0 && row_h.first().map(|&rh| vert + rh > body_h).unwrap_or(false) {
                         page_idx += 1;
                         vert = 0.0;
                     }
-                    sec_pages.push(page_idx); // the table starts here
-                    vert += h + t.outer_margin_bottom.max(0) as f64;
+                    sec_pages.push(page_idx); // the table starts here (where its first row lands)
+                    for (r, rh) in row_h.iter().enumerate() {
+                        if r > 0 && vert + rh > body_h && vert > 0.0 {
+                            page_idx += 1;
+                            vert = 0.0;
+                        }
+                        vert += rh;
+                    }
+                    vert += t.outer_margin_bottom.max(0) as f64;
                     while vert > body_h {
                         page_idx += 1;
                         vert -= body_h;
@@ -535,77 +550,143 @@ fn place_paragraph(
     }
 }
 
-/// Draw a table as its cell boxes (+ shades) with cell text positioned recursively. Column widths
-/// come from `col_widths` when present, else an equal split (mirrors `table_height`). Anchored at
-/// `(ml, top)` in absolute page coords; assumes the table fits the current page (row-level flow is
-/// handled by the caller's `vert` accounting — cells beyond the page bottom are clipped by the sink).
+/// Place a table, SPLITTING it across pages at row boundaries when it doesn't fit (한글식 표 나눔).
+/// Column widths come from `col_widths` (else an equal split, mirroring `table_height`). `vert` is the
+/// page-relative cursor where the table starts; `mt`/`body_h` frame the body. A first-row reserve moves
+/// the table to a fresh page if even its first row won't fit the remaining space; thereafter each row
+/// that would cross the body bottom starts a NEW page (via `new_page`). Emits ONE `PlacedTable` fragment
+/// per page (a proper bordered box over only that page's rows), so the per-page renderer draws the table
+/// form on each page with no table awareness. Returns the final page-relative cursor (last fragment's
+/// bottom). A table that fits yields exactly one fragment — byte-identical to the pre-split output.
+#[allow(clippy::too_many_arguments)]
 fn place_table(
     t: &Table,
     doc: &SemanticDoc,
     fonts: &dyn FontMetricsProvider,
     ml: f64,
-    top: f64,
+    mt: f64,
+    body_h: f64,
+    vert: f64,
     avail_w: f64,
+    pages: &mut Vec<PlacedPage>,
+    page: &PageSetup,
+    section: usize,
+    block: usize,
+) -> f64 {
+    if t.rows == 0 || t.cols == 0 {
+        return vert;
+    }
+    let col_x = column_offsets(t, avail_w);
+    // Per-row heights: the SAME sizing the reservation summed (table_height), so fragment heights add up
+    // exactly and the page boundaries match NaiveLayout's row-level accounting.
+    let row_h = row_heights(t, avail_w, doc, fonts);
+
+    let mut vert = vert;
+    // First-row reserve: if not at page top and even the first row won't fit the remaining body, start
+    // the table on a fresh page (a table that fits stays put; one that doesn't begins on a clean page).
+    if vert > 0.0 && vert + row_h[0] > body_h {
+        new_page(pages, page);
+        vert = 0.0;
+    }
+    let mut frag_first = 0usize; // first row index of the current page fragment
+    let mut frag_top = mt + vert; // absolute y of the current fragment's top edge
+    let mut y = mt + vert; // absolute running top of the next row
+    for r in 0..t.rows {
+        // Break BEFORE row r if it would cross the body bottom — but never before a fragment's own first
+        // row (a row taller than a whole page draws and clips, like before, rather than looping forever).
+        if r > frag_first && (y - mt) + row_h[r] > body_h {
+            flush_fragment(pages, t, doc, fonts, ml, frag_top, &col_x, &row_h, frag_first, r, section, block);
+            new_page(pages, page);
+            frag_first = r;
+            frag_top = mt;
+            y = mt;
+        }
+        y += row_h[r];
+    }
+    flush_fragment(pages, t, doc, fonts, ml, frag_top, &col_x, &row_h, frag_first, t.rows, section, block);
+    y - mt // final page-relative cursor (bottom of the last fragment)
+}
+
+/// Draw ONE page fragment of a table: rows `[first, last)` anchored at `frag_top` on the LAST page, as a
+/// bordered box with per-cell shade/edges/diagonal/text. Pushes one `PlacedTable` covering this row range
+/// (keyed to the table's `(section, block)`). A merged cell straddling the fragment boundary has its
+/// drawn span CLAMPED to this fragment's rows (its box continues on each page; its TEXT is drawn only in
+/// the fragment that owns the cell's top row, so it isn't duplicated across the break).
+#[allow(clippy::too_many_arguments)]
+fn flush_fragment(
     pages: &mut [PlacedPage],
+    t: &Table,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+    ml: f64,
+    frag_top: f64,
+    col_x: &[f64],
+    row_h: &[f64],
+    first: usize,
+    last: usize,
     section: usize,
     block: usize,
 ) {
-    if t.rows == 0 || t.cols == 0 {
+    if first >= last {
         return;
     }
-    // Per-column x offsets + widths.
-    let col_x = column_offsets(t, avail_w);
-    // Row tops: reuse table_height's row sizing so cell boxes line up with the reserved height.
-    let row_h = row_heights(t, avail_w, doc, fonts);
-    let mut row_top = vec![top; t.rows + 1];
-    for r in 0..t.rows {
-        row_top[r + 1] = row_top[r] + row_h[r];
+    // Row tops within THIS fragment, rebased to frag_top (index r-first).
+    let mut row_top = vec![frag_top; last - first + 1];
+    for r in first..last {
+        row_top[r + 1 - first] = row_top[r - first] + row_h[r];
     }
+    let top_of = |r: usize| -> f64 { row_top[r.clamp(first, last) - first] };
 
     let pg = match pages.last_mut() {
         Some(p) => p,
         None => return,
     };
-    // Outer-box provenance (anchor → page rect) for the drag-to-move overlay. Drawn from the actual
-    // placed column/row extents so it matches the visible table exactly. Provenance only — not painted.
+    // Outer-box provenance (anchor → page rect) for the drag-to-move overlay + point-to-scope. Drawn
+    // from the actual placed extents so it matches the visible fragment exactly. Provenance only.
     pg.tables.push(PlacedTable {
         x: ml,
-        y: top,
+        y: frag_top,
         w: col_x[t.cols],
-        h: row_top[t.rows] - top,
+        h: row_top[last - first] - frag_top,
         section,
         block,
         rows: t.rows,
         cols: t.cols,
-        cells: Vec::new(), // filled in the loop below, then attached
+        first_row: first,
+        last_row: last,
+        cells: Vec::new(), // filled below, then attached
     });
     let mut placed_cells: Vec<PlacedCell> = Vec::new();
     for c in &t.cells {
         if !c.active {
             continue;
         }
-        // Defensive clamp: an LLM edit can append a row with MORE cells than the table has columns
-        // (or a stray row index). Such a cell would otherwise reuse the last column/row and draw on
-        // top of a real cell or outside the table box. Skip it entirely so nothing overlaps/escapes.
+        // Defensive clamp: an LLM edit can append a row with MORE cells than the table has columns (or a
+        // stray row index). Such a cell would otherwise reuse the last column/row and draw over a real
+        // cell or outside the table box. Skip it entirely so nothing overlaps/escapes.
         if c.col >= t.cols || c.row >= t.rows {
+            continue;
+        }
+        // Clamp the cell's drawn ROW span to THIS fragment; skip a cell wholly outside it.
+        let r0 = c.row.max(first);
+        let r1 = (c.row + c.row_span.max(1)).min(last);
+        if r0 >= r1 {
             continue;
         }
         let cx = ml + col_x[c.col];
         let col_end = (c.col + c.col_span.max(1)).min(t.cols);
         let cw = (col_x[col_end] - col_x[c.col]).max(1.0);
-        let cy = row_top[c.row];
-        let row_end = (c.row + c.row_span.max(1)).min(t.rows);
-        let ch = (row_top[row_end] - row_top[c.row]).max(1.0);
-        // Cell provenance rect (point→cell for double-click editing).
+        let cy = top_of(r0);
+        let ch = (top_of(r1) - cy).max(1.0);
+        // Cell provenance rect (point→cell for double-click editing) — keyed to the real (row, col).
         placed_cells.push(PlacedCell { row: c.row, col: c.col, x: cx, y: cy, w: cw, h: ch });
         // Cell shade (fill) UNDER its border so the border stays visible.
         if let Some(shade) = c.shade_color {
             pg.rects.push(PlacedRect { x: cx, y: cy, w: cw, h: ch, fill: Some(shade) });
         }
         // Cell borders. Two paths:
-        //  - PER-EDGE (lifted from the real borderFill): draw each visible edge as its own styled
-        //    line, skipping 선없음 sides. This is what makes the ※ guide boxes render DASHED and the
-        //    section-header band lose its inner/right edges (→ pentagon with the diagonal).
+        //  - PER-EDGE (lifted from the real borderFill): draw each visible edge as its own styled line,
+        //    skipping 선없음 sides — makes the ※ guide boxes DASHED, the section-header band a pentagon.
         //  - LEGACY (no per-edge data, e.g. inserted/test cells): the uniform stroked box, gated on
         //    `has_border`, exactly as before — so nothing regresses.
         if c.has_edge_borders() {
@@ -613,12 +694,8 @@ fn place_table(
         } else if c.has_border {
             pg.rects.push(PlacedRect { x: cx, y: cy, w: cw, h: ch, fill: None });
         }
-        // Cell diagonal (HWP borderFill `diagonal`) — drawn on top of the edges. Slash = ⤢ from the
-        // bottom-left to the top-right; BackSlash = ⤡ from the top-left to the bottom-right.
-        // ONLY on an EMPTY cell: an empty cell's diagonal forms a shape (the section-header band's
-        // pointed end on its narrow filler cell, or a "해당없음" N/A slash). A TEXT cell carrying a
-        // diagonal is a shared-borderFill artifact (the wide banner cell references the same fill) and
-        // Hancom does NOT slash through the text — so we suppress it to avoid a line across the words.
+        // Cell diagonal (HWP borderFill `diagonal`) — only on an EMPTY cell (forms a shape; a text cell's
+        // diagonal is a shared-borderFill artifact Hancom doesn't draw through the words).
         if let Some(d) = c.diagonal.filter(|_| !cell_has_text(&c.blocks)) {
             let (y1, y2) = match d.kind {
                 DiagonalKind::Slash => (cy + ch, cy), // bottom-left → top-right
@@ -634,11 +711,14 @@ fn place_table(
                 width: d.width_px.max(HAIRLINE_MIN_PX),
             });
         }
-        // Cell TEXT: place the cell's paragraph glyphs inside the box, vertically centered (the
-        // Korean gov-doc convention: vertAlign=CENTER), honoring each paragraph's horizontal align.
-        place_cell_content(pg, &c.blocks, cx, cy, cw, ch, doc, fonts);
+        // Cell TEXT: only in the fragment that OWNS the cell's TOP row (c.row >= first) so a cell whose
+        // span crosses the page break doesn't draw its text twice. Vertically centered (gov-doc
+        // vertAlign=CENTER), honoring each paragraph's horizontal align.
+        if c.row >= first {
+            place_cell_content(pg, &c.blocks, cx, cy, cw, ch, doc, fonts);
+        }
     }
-    // Attach the per-cell rects to the table we pushed (point→cell for double-click editing).
+    // Attach the per-cell rects to the fragment we pushed (point→cell for double-click editing).
     if let Some(pt) = pg.tables.last_mut() {
         pt.cells = placed_cells;
     }
@@ -957,6 +1037,81 @@ mod tests {
         assert!(bp[0].windows(2).all(|w| w[0] <= w[1]), "block pages are non-decreasing in reading order");
         // The last block's start page never exceeds the last page.
         assert_eq!(*bp[0].iter().max().unwrap(), npages - 1, "content reaches the last page");
+    }
+
+    /// A doc with one section whose page is `height` tall (no margins, wide body) — lets a test force a
+    /// table to overflow with a known body height.
+    fn doc_with_page(blocks: Vec<Block>, height: i32) -> SemanticDoc {
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape::default());
+        doc.para_shapes.push(ParaShape::default());
+        let mut sec = Section::default();
+        sec.page.width = 60000;
+        sec.page.height = height;
+        sec.page.margin_left = 0;
+        sec.page.margin_top = 0;
+        sec.page.margin_right = 0;
+        sec.page.margin_bottom = 0;
+        sec.blocks = blocks;
+        doc.sections.push(sec);
+        doc
+    }
+
+    fn n_row_table(n: usize) -> Table {
+        let cells = (0..n)
+            .map(|r| Cell { row: r, col: 0, blocks: vec![Block::Paragraph(para("행"))], ..Default::default() })
+            .collect();
+        Table { rows: n, cols: 1, cells, col_widths: vec![1], ..Default::default() }
+    }
+
+    #[test]
+    fn table_that_fits_yields_exactly_one_fragment() {
+        // A 2-row table on a tall page → ONE PlacedTable covering 0..rows (byte-identical to pre-split).
+        let doc = doc_with_page(vec![Block::Table(n_row_table(2))], 800_000);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let frags: Vec<&PlacedTable> = placed.pages.iter().flat_map(|p| p.tables.iter()).collect();
+        assert_eq!(frags.len(), 1, "a fitting table is one fragment");
+        assert_eq!((frags[0].first_row, frags[0].last_row), (0, 2));
+        assert_eq!(placed.pages.len(), 1, "no extra pages");
+    }
+
+    #[test]
+    fn tall_table_splits_into_contiguous_per_page_fragments() {
+        use crate::LayoutEngine;
+        // A 20-row table on a SHORT page → must split across pages, row by row.
+        let rows = 20;
+        let doc = doc_with_page(vec![Block::Table(n_row_table(rows))], 5000);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        // Collect fragments in page order, each carrying its (first_row, last_row, page, height).
+        let mut frags: Vec<(usize, &PlacedTable)> = Vec::new();
+        for (pi, pg) in placed.pages.iter().enumerate() {
+            for pt in &pg.tables {
+                assert_eq!((pt.section, pt.block), (0, 0));
+                frags.push((pi, pt));
+            }
+        }
+        assert!(frags.len() >= 2, "a too-tall table splits into ≥2 fragments, got {}", frags.len());
+        // Contiguous, gap-free row coverage 0..rows, one page step per fragment.
+        assert_eq!(frags.first().unwrap().1.first_row, 0, "starts at row 0");
+        assert_eq!(frags.last().unwrap().1.last_row, rows, "ends at the last row");
+        for w in frags.windows(2) {
+            assert_eq!(w[0].1.last_row, w[1].1.first_row, "fragments are row-contiguous (no gap/overlap)");
+            assert!(w[1].0 > w[0].0, "each fragment is on a later page");
+            assert!(w[0].1.last_row > w[0].1.first_row, "no empty fragment");
+        }
+        // Fragment heights sum to the whole-table height (the reservation invariant).
+        let body_w = 60000.0;
+        let total_h: f64 = frags.iter().map(|(_, pt)| pt.h).sum();
+        let table_h = crate::table_height(&n_row_table(rows), body_w, &doc, &ApproxFontMetrics);
+        assert!((total_h - table_h).abs() < 1.0, "fragment heights sum to table_height: {total_h} vs {table_h}");
+        // Every row's cell is placed in exactly one fragment (later-page rows stay clickable).
+        let mut seen_rows: Vec<usize> = placed.pages.iter().flat_map(|p| p.tables.iter()).flat_map(|t| t.cells.iter().map(|c| c.row)).collect();
+        seen_rows.sort_unstable();
+        seen_rows.dedup();
+        assert_eq!(seen_rows, (0..rows).collect::<Vec<_>>(), "all rows have a placed cell across the fragments");
+        // place_doc's page count agrees with the oracle's NaiveLayout accounting (lockstep → oracle-safe).
+        let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap().pages.len();
+        assert_eq!(placed.pages.len(), naive, "own-render pages == NaiveLayout pages (kept in lockstep)");
     }
 
     #[test]

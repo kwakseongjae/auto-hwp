@@ -122,19 +122,19 @@ impl LayoutEngine for NaiveLayout {
                         // 문단 아래 간격.
                         vert += ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;
                     }
-                    // Real table layout for pagination: height = Σ row heights, each row sized to
-                    // its tallest cell's laid-out content (cells break lines at an equal-split width).
+                    // Real table layout for pagination: each row is sized to its tallest cell's
+                    // laid-out content (cells break lines at an equal-split width). A row that doesn't
+                    // fit the remaining body flows to the NEXT page (한글식 row-level split) instead of
+                    // jumping the whole table (which left big white gaps). Uses the SAME per-row sizing
+                    // the reserve sums (table_height = Σ table_row_heights), so this page count stays in
+                    // lockstep with place_doc's fragment placement.
                     Block::Table(t) => {
-                        let h = table_height(t, body_w, doc, fonts);
-                        if vert + h > body_h && vert > 0.0 {
-                            pages.push(new_page(page));
-                            vert = 0.0;
-                        }
-                        vert += h;
-                        // A table taller than the body flows across pages (row-level break, approx).
-                        while vert > body_h {
-                            pages.push(new_page(page));
-                            vert -= body_h;
+                        for rh in table_row_heights(t, body_w, doc, fonts) {
+                            if vert + rh > body_h && vert > 0.0 {
+                                pages.push(new_page(page));
+                                vert = 0.0;
+                            }
+                            vert += rh;
                         }
                     }
                 }
@@ -173,12 +173,20 @@ fn block_height(b: &Block, doc: &SemanticDoc, width: f64, fonts: &dyn FontMetric
 /// Cells break lines at an equal-split column width (`avail / cols × col_span`) — no per-column
 /// widths yet, but enough for faithful page accounting.
 pub fn table_height(t: &Table, avail_w: f64, doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> f64 {
+    table_row_heights(t, avail_w, doc, fonts).iter().sum()
+}
+
+/// Per-row heights (HWPUNIT) — the SINGLE sizing truth shared by the pagination reserve
+/// ([`table_height`] = their sum), the row-level page split in [`NaiveLayout`], and the cell placer
+/// ([`crate::place`] uses an identical computation). Each row = max content height of its cells
+/// (a spanning cell distributes evenly) + [`CELL_PAD`], with any `Table::row_heights` override applied
+/// as a floor. Column offsets honor the captured `col_widths` — the SAME widths place_table draws with,
+/// so the RESERVATION equals the DRAWN height (an equal-split estimate over-reserved a wide-then-narrow
+/// gov-doc table by ~1.5×, shoving it onto the next page with the rest empty).
+pub(crate) fn table_row_heights(t: &Table, avail_w: f64, doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<f64> {
     if t.rows == 0 {
-        return 0.0;
+        return Vec::new();
     }
-    // Per-column offsets honoring the captured col_widths — the SAME widths place_table draws with,
-    // so the pagination RESERVATION equals the DRAWN height (an equal-split estimate over-reserved a
-    // wide-then-narrow gov-doc table by ~1.5×, shoving it onto the next page with the rest empty).
     let xs = crate::place::column_offsets(t, avail_w);
     let mut row_h = vec![0.0f64; t.rows];
     for c in &t.cells {
@@ -197,7 +205,7 @@ pub fn table_height(t: &Table, avail_w: f64, doc: &SemanticDoc, fonts: &dyn Font
         }
     }
     apply_row_overrides(&mut row_h, t);
-    row_h.iter().sum()
+    row_h
 }
 
 /// Apply per-row MINIMUM-height overrides (HWPUNIT) from [`Table::row_heights`] as a FLOOR on the

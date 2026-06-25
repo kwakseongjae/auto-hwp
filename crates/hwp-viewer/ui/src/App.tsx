@@ -1251,6 +1251,14 @@ export default function App() {
     void enqueueEdit(async () => {
       const sel = tableSelRef.current;
       if (!sel || !canEditRef.current) return;
+      // `fracs` has one entry per row boundary of the SELECTED box. For a table split across pages the
+      // overlay box is a per-page FRAGMENT (fewer boundaries than the whole table), so row-resize on a
+      // split table isn't supported yet — bail with a toast rather than send a wrong-length op (the
+      // op validates heights.len()==rows). The common single-page table has fracs.length == rows+1.
+      if (fracs.length !== sel.box.rows + 1) {
+        toast("info", "여러 페이지로 나뉜 표는 아직 행 높이 조정을 지원하지 않아요");
+        return;
+      }
       const total = sel.box.h * HWPUNIT_PER_PX; // table height in HWPUNIT
       const heights: number[] = [];
       for (let rr = 0; rr < sel.box.rows; rr++) {
