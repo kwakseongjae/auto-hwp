@@ -117,6 +117,20 @@ pub enum Op {
     /// content-sized; `> 0` = a floor so text never clips). The typesetter honors these as
     /// `max(content, override)`. ONE undo unit. See [`hwp_model::prelude::Table::row_heights`].
     SetTableRowHeights { section: usize, index: usize, heights: Vec<i32> },
+    /// Patch the CHARACTER FORMAT of a target's runs (볼드/이태릭/크기/글꼴) PRESERVING every other
+    /// attribute (color, underline, spacing, per-run variation). Target = the `block`-th block's
+    /// paragraph when `cell` is `None`, else the `(row, col)` cell of that table. Each `Some` field is
+    /// applied to every run; `size_pt` is points (CharShape.height = round(pt*100)); `font` sets
+    /// `font_family` (empty string clears it). At least one field must be `Some`. ONE undo unit.
+    SetCharFmt {
+        section: usize,
+        block: usize,
+        cell: Option<(usize, usize)>,
+        bold: Option<bool>,
+        italic: Option<bool>,
+        size_pt: Option<f32>,
+        font: Option<String>,
+    },
 }
 
 /// Which cells of an existing table a [`Op::SetTableCellShade`] targets.
@@ -279,6 +293,37 @@ fn section_mut(doc: &mut SemanticDoc, section: usize) -> Result<&mut Section> {
     doc.sections
         .get_mut(section)
         .ok_or_else(|| Error::Other(format!("section {section} out of range")))
+}
+
+/// Resolve the paragraphs an [`Op::SetCharFmt`] targets: the block's own paragraph (`cell == None`), or
+/// the top-level paragraphs of the `(row, col)` cell of that table. Errors on a target/cell mismatch.
+fn char_fmt_target_paras(block: &Block, cell: Option<(usize, usize)>) -> Result<Vec<&Paragraph>> {
+    match (block, cell) {
+        (Block::Paragraph(p), None) => Ok(vec![p]),
+        (Block::Table(t), Some((row, col))) => {
+            let c = t.cells.iter().find(|c| c.active && c.row == row && c.col == col).ok_or_else(|| {
+                Error::Other(format!("SetCharFmt: no active cell at (row {row}, col {col})"))
+            })?;
+            Ok(c.blocks.iter().filter_map(|b| if let Block::Paragraph(p) = b { Some(p) } else { None }).collect())
+        }
+        (Block::Table(_), None) => Err(Error::Other("SetCharFmt: target is a table — a cell (row, col) is required".into())),
+        (Block::Paragraph(_), Some(_)) => Err(Error::Other("SetCharFmt: target is a paragraph — no cell expected".into())),
+    }
+}
+
+/// `&mut` twin of [`char_fmt_target_paras`].
+fn char_fmt_target_paras_mut(block: &mut Block, cell: Option<(usize, usize)>) -> Result<Vec<&mut Paragraph>> {
+    match (block, cell) {
+        (Block::Paragraph(p), None) => Ok(vec![p]),
+        (Block::Table(t), Some((row, col))) => {
+            let c = t.cells.iter_mut().find(|c| c.active && c.row == row && c.col == col).ok_or_else(|| {
+                Error::Other(format!("SetCharFmt: no active cell at (row {row}, col {col})"))
+            })?;
+            Ok(c.blocks.iter_mut().filter_map(|b| if let Block::Paragraph(p) = b { Some(p) } else { None }).collect())
+        }
+        (Block::Table(_), None) => Err(Error::Other("SetCharFmt: target is a table — a cell (row, col) is required".into())),
+        (Block::Paragraph(_), Some(_)) => Err(Error::Other("SetCharFmt: target is a paragraph — no cell expected".into())),
+    }
 }
 
 /// Run `edit` on every addressed top-level paragraph whose `NodeId` is in `lo..=hi`, marking it
@@ -1117,6 +1162,67 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             }
             t.row_heights = heights.clone();
             t.dirty.mark();
+            sec.dirty.mark();
+            Ok(())
+        }
+        Op::SetCharFmt { section, block, cell, bold, italic, size_pt, font } => {
+            if bold.is_none() && italic.is_none() && size_pt.is_none() && font.is_none() {
+                return Err(Error::Other("SetCharFmt: no attribute specified (bold/italic/size_pt/font)".into()));
+            }
+            if let Some(s) = size_pt {
+                if !(*s > 0.0) {
+                    return Err(Error::Other("SetCharFmt: size_pt must be > 0".into()));
+                }
+            }
+            // 1) Collect the DISTINCT current char-shape indices of every run of the target paragraph(s)
+            //    (immutable scan) — so we patch each distinct shape once and remap.
+            let mut distinct: Vec<usize> = Vec::new();
+            {
+                let sec = doc.sections.get(*section).ok_or_else(|| Error::Other(format!("SetCharFmt: section {section} out of range")))?;
+                let blk = sec.blocks.get(*block).ok_or_else(|| Error::Other(format!("SetCharFmt: block {block} out of range")))?;
+                let paras = char_fmt_target_paras(blk, *cell)?;
+                if paras.is_empty() {
+                    return Err(Error::Other("SetCharFmt: target has no editable paragraph".into()));
+                }
+                for p in paras {
+                    for r in &p.runs {
+                        if !distinct.contains(&r.char_shape) {
+                            distinct.push(r.char_shape);
+                        }
+                    }
+                }
+            }
+            // 2) Patch each distinct shape → a freshly interned index (mutates the shape pool),
+            //    preserving every field this op doesn't touch.
+            let mut remap: Vec<(usize, usize)> = Vec::with_capacity(distinct.len());
+            for &old in &distinct {
+                let mut sh = doc.char_shapes.get(old).cloned().unwrap_or_default();
+                if let Some(b) = bold { sh.bold = *b; }
+                if let Some(i) = italic { sh.italic = *i; }
+                if let Some(s) = size_pt { sh.height = (*s * 100.0).round() as HwpUnit; }
+                if let Some(f) = font {
+                    let f = f.trim();
+                    if f.is_empty() {
+                        sh.font_family = None;
+                    } else {
+                        sh.font_family = Some(f.to_string());
+                        sh.fonts = Vec::new(); // let font_family apply to all scripts (it loses to per-script `fonts`)
+                    }
+                }
+                let new = intern_char_shape(doc, sh);
+                remap.push((old, new));
+            }
+            // 3) Reassign the target runs (mutable scan).
+            let sec = section_mut(doc, *section)?;
+            let blk = sec.blocks.get_mut(*block).ok_or_else(|| Error::Other(format!("SetCharFmt: block {block} out of range")))?;
+            for p in char_fmt_target_paras_mut(blk, *cell)? {
+                for r in &mut p.runs {
+                    if let Some(&(_, new)) = remap.iter().find(|(old, _)| *old == r.char_shape) {
+                        r.char_shape = new;
+                    }
+                }
+                p.dirty.mark();
+            }
             sec.dirty.mark();
             Ok(())
         }
@@ -2074,6 +2180,35 @@ mod tests {
         // Wrong length / negative is rejected (no partial mutation).
         assert!(apply(&mut doc, &Op::SetTableRowHeights { section: 0, index: 1, heights: vec![1000] }).is_err());
         assert!(apply(&mut doc, &Op::SetTableRowHeights { section: 0, index: 1, heights: vec![1000, -1] }).is_err());
+    }
+
+    #[test]
+    fn set_char_fmt_patches_targeted_attrs_preserving_the_rest() {
+        // A paragraph whose run carries underline+italic — patching bold/size/font must PRESERVE those.
+        let mut doc = doc_with(vec![simple_para(1, "제목")]);
+        let styled = intern_char_shape(&mut doc, CharShape { underline: true, italic: true, ..Default::default() });
+        if let Block::Paragraph(p) = &mut doc.sections[0].blocks[0] { p.runs[0].char_shape = styled; }
+        apply(&mut doc, &Op::SetCharFmt {
+            section: 0, block: 0, cell: None,
+            bold: Some(true), italic: None, size_pt: Some(14.0), font: Some("맑은 고딕".into()),
+        }).unwrap();
+        let Block::Paragraph(p) = &doc.sections[0].blocks[0] else { panic!("paragraph") };
+        let sh = &doc.char_shapes[p.runs[0].char_shape];
+        assert!(sh.bold, "bold applied");
+        assert_eq!(sh.height, 1400, "14pt → height 1400");
+        assert_eq!(sh.font_family.as_deref(), Some("맑은 고딕"), "font_family set");
+        assert!(sh.underline, "underline PRESERVED (not in the patch)");
+        assert!(sh.italic, "italic PRESERVED (not in the patch)");
+        // No attribute specified → rejected (no silent no-op edit).
+        assert!(apply(&mut doc, &Op::SetCharFmt {
+            section: 0, block: 0, cell: None, bold: None, italic: None, size_pt: None, font: None,
+        }).is_err());
+        // Empty font string clears font_family.
+        apply(&mut doc, &Op::SetCharFmt {
+            section: 0, block: 0, cell: None, bold: None, italic: None, size_pt: None, font: Some(String::new()),
+        }).unwrap();
+        let Block::Paragraph(p) = &doc.sections[0].blocks[0] else { panic!() };
+        assert_eq!(doc.char_shapes[p.runs[0].char_shape].font_family, None, "empty font clears font_family");
     }
 
     #[test]

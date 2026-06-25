@@ -68,7 +68,7 @@ pub enum PaintOp {
     /// `bold` (the run's weight — backends pick a bold face / font-weight) and `italic` (slant —
     /// backends use an italic face or a synthetic oblique shear). Both are additive: older producers
     /// leave them `false`, so the schema stays v1-compatible.
-    Glyph { x: f64, y: f64, ch: char, size: f64, color: crate::types::Color, bold: bool, italic: bool },
+    Glyph { x: f64, y: f64, ch: char, size: f64, color: crate::types::Color, bold: bool, italic: bool, font: Option<String> },
     /// A box: `fill = Some(color)` paints a filled rect (shading); `None` strokes the outline
     /// (cell/line border).
     Rect { x: f64, y: f64, w: f64, h: f64, fill: Option<crate::types::Color> },

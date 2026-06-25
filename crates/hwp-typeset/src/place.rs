@@ -34,6 +34,10 @@ pub struct PlacedGlyph {
     pub bold: bool,
     /// Italic slant from the run's char shape (renderer uses an italic face / synthetic oblique).
     pub italic: bool,
+    /// Requested font family (CharShape.font_family) — DISPLAY only (the renderer sets it as the SVG
+    /// `font-family`); glyph advances still use the default metrics, so a font change re-displays
+    /// without reflowing. `None` = the document default face.
+    pub font: Option<String>,
 }
 
 /// A positioned image/equation box in absolute page coordinates.
@@ -520,6 +524,7 @@ fn place_paragraph(
                     underline: g.underline,
                     bold: g.bold,
                     italic: g.italic,
+                    font: g.font.clone(),
                 });
             }
             x += adv;
@@ -825,6 +830,7 @@ fn place_cell_content(
                         underline: g.underline,
                         bold: g.bold,
                         italic: g.italic,
+                        font: g.font.clone(),
                     });
                 }
                 x += adv;
@@ -913,6 +919,9 @@ struct GlyphInfo {
     underline: bool,
     bold: bool,
     italic: bool,
+    /// Requested font family (CharShape.font_family) — display only (the SVG/text font-family); advances
+    /// still use the default metrics, so a font change re-DISPLAYS without reflowing.
+    font: Option<String>,
 }
 
 fn paragraph_glyphs(p: &Paragraph, doc: &SemanticDoc) -> Vec<GlyphInfo> {
@@ -924,10 +933,11 @@ fn paragraph_glyphs(p: &Paragraph, doc: &SemanticDoc) -> Vec<GlyphInfo> {
         let underline = cs.map(|c| c.underline).unwrap_or(false);
         let bold = cs.map(|c| c.bold).unwrap_or(false);
         let italic = cs.map(|c| c.italic).unwrap_or(false);
+        let font = cs.and_then(|c| c.font_family.clone()).filter(|s| !s.trim().is_empty());
         for inl in &run.content {
             if let Inline::Text(t) = inl {
                 for ch in t.chars() {
-                    out.push(GlyphInfo { ch: crate::subst_glyph(ch), size, color, underline, bold, italic });
+                    out.push(GlyphInfo { ch: crate::subst_glyph(ch), size, color, underline, bold, italic, font: font.clone() });
                 }
             }
         }

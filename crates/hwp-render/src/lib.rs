@@ -76,7 +76,7 @@ fn lower_page(pg: &PlacedPage) -> PageLayerTree {
     }
     // 4) Glyphs (y = baseline).
     for g in &pg.glyphs {
-        ops.push(PaintOp::Glyph { x: g.x, y: g.baseline, ch: g.ch, size: g.size, color: g.color, bold: g.bold, italic: g.italic });
+        ops.push(PaintOp::Glyph { x: g.x, y: g.baseline, ch: g.ch, size: g.size, color: g.color, bold: g.bold, italic: g.italic, font: g.font.clone() });
     }
 
     PageLayerTree { schema_version: PAINT_SCHEMA_VERSION, width: pg.width, height: pg.height, ops }
@@ -252,7 +252,7 @@ fn esc(s: &str) -> String {
 impl PaintSink for SvgSink<'_> {
     fn paint(&mut self, op: &PaintOp) {
         match op {
-            PaintOp::Glyph { x, y, ch, size, color, bold, italic } => {
+            PaintOp::Glyph { x, y, ch, size, color, bold, italic, font } => {
                 // One <text> per glyph: we own the x, so no font-kerning surprise. Skip whitespace.
                 if ch.is_whitespace() {
                     return;
@@ -260,16 +260,21 @@ impl PaintSink for SvgSink<'_> {
                 let fill = color_hex(*color);
                 let mut buf = [0u8; 4];
                 let s = esc(ch.encode_utf8(&mut buf));
-                // font-family pins the bundled free face (NanumGothic, @font-face'd in the app's
-                // styles.css) so the webview draws the SAME glyph shapes our metrics assume — not the
-                // platform default (AppleGothic/serif). sans-serif is the graceful fallback.
-                // font-weight:700 (when bold) selects the bundled NanumGothic-Bold @font-face;
-                // font-style:italic lets the webview synthesize an oblique (NanumGothic has no italic).
+                // font-family: a requested family (CharShape.font_family, e.g. a 글꼴 change) is tried
+                // FIRST, then the bundled free face (NanumGothic, @font-face'd in styles.css) so the
+                // webview draws the SAME glyph shapes our metrics assume, then sans-serif. NOTE: a
+                // requested family changes the DISPLAY only — advances still use NanumGothic metrics, so
+                // a font swap re-renders without reflowing (close for same-size Korean faces).
+                // font-weight:700 (bold) selects NanumGothic-Bold; font-style:italic synthesizes oblique.
+                let fam = match font {
+                    Some(f) if !f.trim().is_empty() => format!("{}, NanumGothic, sans-serif", esc(f)),
+                    _ => "NanumGothic, sans-serif".to_string(),
+                };
                 let weight = if *bold { " font-weight=\"700\"" } else { "" };
                 let style = if *italic { " font-style=\"italic\"" } else { "" };
                 self.body.push_str(&format!(
                     "<text x=\"{x:.2}\" y=\"{y:.2}\" font-size=\"{sz:.2}\" \
-                     font-family=\"NanumGothic, sans-serif\"{weight}{style} fill=\"{fill}\">{s}</text>",
+                     font-family=\"{fam}\"{weight}{style} fill=\"{fill}\">{s}</text>",
                     x = px(*x),
                     y = px(*y),
                     sz = px(*size),

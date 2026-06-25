@@ -185,7 +185,9 @@ fn lower_tree_to_page(
             PaintOp::Image { x, y, w, h, bin_ref } => {
                 paint_image(&mut surface, *x, *y, *w, *h, bin_ref, doc);
             }
-            PaintOp::Glyph { x, y, ch, size, color, bold, italic } => {
+            PaintOp::Glyph { x, y, ch, size, color, bold, italic, font: _ } => {
+                // font_family is honored by the HWPX serializer + own SVG display; the PDF face stays
+                // the embedded default for now (krilla font-by-name selection is a separate task).
                 paint_glyph(&mut surface, *x, *y, *ch, *size, *color, *bold, *italic, embed);
             }
         }

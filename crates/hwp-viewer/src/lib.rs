@@ -1493,6 +1493,79 @@ async fn page_geometry(page: u32, sess: tauri::State<'_, SharedSession>) -> Resu
     .map_err(|e| e.to_string())?
 }
 
+/// Patch the character format (볼드/이태릭/크기/글꼴) of a target's runs as ONE undo unit (`SetCharFmt`),
+/// preserving every other attribute. Target = the `block`-th paragraph (row/col both `None`), or the
+/// `(row, col)` cell of that table. Each `Some` field applies; `size_pt` in points; `font` sets the
+/// family ("" clears it). Returns the new page count. Surfaces the op-bus error string as `Err`.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+async fn set_char_fmt(
+    section: usize,
+    block: usize,
+    row: Option<usize>,
+    col: Option<usize>,
+    bold: Option<bool>,
+    italic: Option<bool>,
+    size_pt: Option<f32>,
+    font: Option<String>,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<u32, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        let cell = row.zip(col);
+        match apply_intent(&mut s, Intent::SetCharFmt { section, block, cell, bold, italic, size_pt, font })? {
+            Outcome::Edited { pages } => Ok(pages),
+            _ => Err("unexpected outcome".into()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The CURRENT character format of a target's first run — so the manual format bar can show + toggle
+/// the right state. Target same as `set_char_fmt`. `None` if the target/run can't be resolved.
+#[derive(serde::Serialize)]
+struct CharFmt { bold: bool, italic: bool, size_pt: f32, font: Option<String> }
+
+#[tauri::command]
+async fn char_fmt(
+    section: usize,
+    block: usize,
+    row: Option<usize>,
+    col: Option<usize>,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<Option<CharFmt>, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let s = sess.lock().map_err(|_| "session poisoned")?;
+        let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+        use hwp_model::prelude::Block;
+        let Some(sec) = doc.sections.get(section) else { return Ok(None) };
+        let Some(blk) = sec.blocks.get(block) else { return Ok(None) };
+        let first_run_shape = match (blk, row, col) {
+            (Block::Paragraph(p), None, None) => p.runs.first().map(|r| r.char_shape),
+            (Block::Table(t), Some(r), Some(c)) => t.cells.iter()
+                .find(|cell| cell.active && cell.row == r && cell.col == c)
+                .and_then(|cell| cell.blocks.iter().find_map(|b| match b {
+                    Block::Paragraph(p) => p.runs.first().map(|run| run.char_shape),
+                    _ => None,
+                })),
+            _ => None,
+        };
+        let Some(idx) = first_run_shape else { return Ok(None) };
+        let sh = doc.char_shapes.get(idx).cloned().unwrap_or_default();
+        Ok(Some(CharFmt {
+            bold: sh.bold,
+            italic: sh.italic,
+            size_pt: if sh.height > 0 { sh.height as f32 / 100.0 } else { 10.0 },
+            font: sh.font_family.clone(),
+        }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 // ---- Interactive caret: in-place edit commands (typed Intent lane; same op-bus core as the MCP
 // ---- lane). The per-keystroke / IME-commit mutations the caret UI calls. Async/spawn_blocking like
 // ---- the other mutating commands; each is ONE undo unit (do_op) and returns the new page count so
@@ -1599,6 +1672,8 @@ pub fn run() {
             set_table_cell,
             set_table_col_widths,
             set_table_row_heights,
+            set_char_fmt,
+            char_fmt,
             set_table_cell_shade,
             clipboard_read,
             clipboard_write,

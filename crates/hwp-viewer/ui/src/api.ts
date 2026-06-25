@@ -95,6 +95,9 @@ export type CellHit = { section: number; block: number; row: number; col: number
  *  (`ml`,`mt`,`mr`,`mb`) for the editor chrome — margin corner marks + top ruler. */
 export type PageGeom = { w: number; h: number; ml: number; mt: number; mr: number; mb: number };
 
+/** Current character format of a target's first run — for the manual format bar (B/I/size/font). */
+export type CharFmt = { bold: boolean; italic: boolean; size_pt: number; font: string | null };
+
 /// Typed bindings to the Rust `Intent` command lane (crates/hwp-viewer/src/lib.rs). No prose
 /// parsing: each command returns a typed value the UI consumes directly.
 export const api = {
@@ -270,6 +273,21 @@ export const api = {
    *  Returns new page count. */
   setTableRowHeights: (section: number, index: number, heights: number[]) =>
     invoke<number>("set_table_row_heights", { section, index, heights }),
+  /** Character format — patch 볼드/이태릭/크기/글꼴 of a target's runs as ONE undo unit (SetCharFmt),
+   *  preserving other attrs. Target = the `block` paragraph (row/col null), or its `(row, col)` cell.
+   *  Pass only the fields that change (size in points; font "" clears). Returns new page count. */
+  setCharFmt: (
+    section: number, block: number, row: number | null, col: number | null,
+    fmt: { bold?: boolean; italic?: boolean; sizePt?: number; font?: string },
+  ) => invoke<number>("set_char_fmt", {
+    section, block, row, col,
+    bold: fmt.bold ?? null, italic: fmt.italic ?? null,
+    size_pt: fmt.sizePt ?? null, font: fmt.font ?? null,
+  }),
+  /** The current char format of a target's first run (for the format bar's toggle/display state).
+   *  Null if the target can't be resolved. */
+  charFmt: (section: number, block: number, row: number | null, col: number | null) =>
+    invoke<CharFmt | null>("char_fmt", { section, block, row, col }),
   /** Cell shading (배경색) — set/clear the background color of cells in the `index`-th table as ONE undo
    *  unit. `sel` ∈ "row"|"col"|"cell"|"all" keyed off `(row, col)`; `shade` = "#RRGGBB" or null to clear. */
   setTableCellShade: (section: number, index: number, sel: "row" | "col" | "cell" | "all", row: number, col: number, shade: string | null) =>

@@ -57,6 +57,26 @@ pub enum EditCommand {
         block: usize,
         text: String,
     },
+    /// Change the CHARACTER FORMAT (볼드/이태릭/크기/글꼴) of an EXISTING target, preserving other attrs
+    /// (color/밑줄/정렬). Target = the `block` paragraph; add `row`+`col` to target one table cell. Set
+    /// ONLY the fields that change. `size_pt` in points (e.g. 14); `font` is a family name ("" clears).
+    SetCharFmt {
+        section: usize,
+        #[serde(default)]
+        block: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        row: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        col: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bold: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        italic: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        size_pt: Option<f32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        font: Option<String>,
+    },
     /// Insert a heading (bold, optionally centered/styled) relative to the anchor block.
     InsertHeading {
         section: usize,
@@ -260,6 +280,20 @@ pub fn compile_edits(doc: &hwp_model::document::SemanticDoc, script: &EditScript
                 let index = adjust(&changes, *section, *block);
                 ops.push(Op::SetParagraphText { section: *section, block: index, text: text.clone() });
             }
+            EditCommand::SetCharFmt { section, block, row, col, bold, italic, size_pt, font } => {
+                // Re-format an EXISTING paragraph/cell (no block-count change → no Drift); adjust the
+                // anchor for prior inserts in this script.
+                let index = adjust(&changes, *section, *block);
+                ops.push(Op::SetCharFmt {
+                    section: *section,
+                    block: index,
+                    cell: (*row).zip(*col),
+                    bold: *bold,
+                    italic: *italic,
+                    size_pt: *size_pt,
+                    font: font.clone(),
+                });
+            }
             EditCommand::InsertHeading { section, block, position, text, para } => {
                 let raw = raw_insert_point(sec_len(*section), *block, *position);
                 let index = adjust(&changes, *section, raw);
@@ -433,7 +467,9 @@ pub fn edit_brief() -> &'static str {
    "cells":[{"row":1,"col":0,"text":"홍길동"},{"row":1,"col":1,"text":"대표"}]},
   {"op":"insert_row","section":0,"block":4,"cells":["3","이영희","디자인"]},
   {"op":"append_rows","section":0,"block":4,
-   "rows":[["1","홍길동","대표"],["2","김철수","개발"]]}
+   "rows":[["1","홍길동","대표"],["2","김철수","개발"]]},
+  {"op":"set_char_fmt","section":0,"block":2,"bold":true,"size_pt":14},
+  {"op":"set_char_fmt","section":0,"block":4,"row":0,"col":0,"italic":true,"font":"맑은 고딕"}
 ] }
 
 규칙:
@@ -449,8 +485,11 @@ pub fn edit_brief() -> &'static str {
   새 표를 만들 때만 insert_table. 표를 '채워달라'는 요청에 insert_table 로 빈 표를 새로 만들지 말 것.
 - insert_row 의 at 을 생략하면 표 맨 끝에 행을 추가; append_rows 는 항상 맨 끝에 여러 행 추가.
 - 기존 표를 가리킬 때만 set_*/insert_row/append_rows/shade_*/delete 의 block 으로 그 표/블록의 앵커를 쓸 것.
-- 허용 op: set_paragraph, insert_paragraph, insert_heading, insert_table, insert_image, delete_block,
-  shade_column, shade_row, shade_cell, set_cell, set_cells, insert_row, append_rows.
+- 글자 서식(굵게/기울임/크기/글꼴) 변경은 set_char_fmt: 그 문단의 [s/b] 앵커, 표 칸이면 row+col 추가.
+  바뀌는 속성만 넣기(bold/italic: true·false, size_pt: 숫자, font: 글꼴명, ""=글꼴 해제). 텍스트는 안 바뀜.
+  예: "제목 굵게" → set_char_fmt + bold:true / "본문 12pt" → size_pt:12 / "이 칸 맑은고딕" → row,col + font.
+- 허용 op: set_paragraph, set_char_fmt, insert_paragraph, insert_heading, insert_table, insert_image,
+  delete_block, shade_column, shade_row, shade_cell, set_cell, set_cells, insert_row, append_rows.
   그 외 키 금지. 좌표는 모두 0부터 시작."##
 }
 
@@ -641,6 +680,25 @@ mod tests {
         if let Block::Paragraph(p) = &doc.sections[0].blocks[1] {
             let txt: String = p.runs.iter().flat_map(|r| &r.content).filter_map(|i| if let Inline::Text(s) = i { Some(s.as_str()) } else { None }).collect();
             assert_eq!(txt, "곽성재는 천재", "the anchor paragraph's text is replaced in place");
+        } else {
+            panic!("block 1 must still be a paragraph");
+        }
+    }
+
+    #[test]
+    fn set_char_fmt_parses_compiles_and_applies_to_a_paragraph() {
+        let json = r##"{"edits":[{"op":"set_char_fmt","section":0,"block":1,"bold":true,"size_pt":14,"font":"맑은 고딕"}]}"##;
+        let script = parse_script(json).expect("set_char_fmt must parse");
+        let mut doc = doc_n(3);
+        let before = doc.sections[0].blocks.len();
+        let ops = compile_edits(&doc, &script).expect("compiles");
+        apply_all(&mut doc, &ops);
+        assert_eq!(doc.sections[0].blocks.len(), before, "format change must NOT add a block");
+        if let Block::Paragraph(p) = &doc.sections[0].blocks[1] {
+            let sh = &doc.char_shapes[p.runs[0].char_shape];
+            assert!(sh.bold, "bold applied");
+            assert_eq!(sh.height, 1400, "14pt → height 1400");
+            assert_eq!(sh.font_family.as_deref(), Some("맑은 고딕"), "font_family set");
         } else {
             panic!("block 1 must still be a paragraph");
         }

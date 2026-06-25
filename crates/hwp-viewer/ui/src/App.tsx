@@ -5,7 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { tinykeys } from "tinykeys";
-import { api, type CellHit, type CaretRect, type FindMatch, type ImageBox, type OutlineItem, type PageGeom, type Proposal, type ProposalOp, type TableBox } from "./api";
+import { api, type CellHit, type CaretRect, type CharFmt, type FindMatch, type ImageBox, type OutlineItem, type PageGeom, type Proposal, type ProposalOp, type TableBox } from "./api";
 import { sanitizeSvg } from "./sanitize";
 import { advanceOffset, imageBoxToScreen, pageToScreen, screenToPage } from "./caret";
 import ImageOverlay from "./ImageOverlay";
@@ -53,6 +53,49 @@ function PageChrome({ geom }: { geom: PageGeom }) {
           <div key={i} className="absolute bottom-0 w-px bg-neutral-400/70 dark:bg-neutral-400/50" style={{ left: `${left}%`, height: i % 5 === 0 ? "100%" : "45%" }} />
         ))}
       </div>
+    </div>
+  );
+}
+
+/// A few common Korean faces offered in the manual format bar's 글꼴 picker. A font change re-DISPLAYS
+/// in the chosen family (the webview renders it if installed); export resolves it via the serializer.
+const FONT_CHOICES = ["맑은 고딕", "바탕", "굴림", "돋움", "함초롬바탕", "함초롬돋움", "궁서"];
+
+/// The manual character-format bar (볼드/이태릭/크기/글꼴) over the focused cell or pointed paragraph.
+/// Buttons preventDefault their mousedown so clicking one doesn't blur an open inline editor / deselect
+/// the target. `onPatch` sends ONLY the changed attribute (B/I toggle off the current state).
+function FormatBar({ fmt, left, top, onPatch }: {
+  fmt: CharFmt;
+  left: number;
+  top: number;
+  onPatch: (p: { bold?: boolean; italic?: boolean; sizePt?: number; font?: string }) => void;
+}) {
+  const size = Math.round(fmt.size_pt);
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+  const keep = (e: React.MouseEvent) => e.preventDefault();
+  return (
+    <div
+      className="pointer-events-auto absolute z-50 flex items-center gap-0.5 rounded-md border border-black/10 bg-white/95 px-1 py-0.5 text-[11px] text-neutral-700 shadow-md backdrop-blur dark:border-white/10 dark:bg-neutral-800/95 dark:text-neutral-200"
+      style={{ left: `${left}px`, top: `${Math.max(top - 30, 0)}px` }}
+      onPointerDown={stop}
+    >
+      <button title="굵게" onMouseDown={keep} onClick={(e) => { stop(e); onPatch({ bold: !fmt.bold }); }}
+        className={`h-5 w-5 rounded font-bold ${fmt.bold ? "bg-accent text-white" : "hover:bg-black/5 dark:hover:bg-white/10"}`}>가</button>
+      <button title="기울임" onMouseDown={keep} onClick={(e) => { stop(e); onPatch({ italic: !fmt.italic }); }}
+        className={`h-5 w-5 rounded italic ${fmt.italic ? "bg-accent text-white" : "hover:bg-black/5 dark:hover:bg-white/10"}`}>가</button>
+      <span className="mx-0.5 h-4 w-px bg-black/10 dark:bg-white/10" />
+      <button title="작게" onMouseDown={keep} onClick={(e) => { stop(e); onPatch({ sizePt: Math.max(4, size - 1) }); }}
+        className="h-5 w-5 rounded hover:bg-black/5 dark:hover:bg-white/10">−</button>
+      <span className="min-w-[1.4rem] text-center tabular-nums" title="글자 크기(pt)">{size}</span>
+      <button title="크게" onMouseDown={keep} onClick={(e) => { stop(e); onPatch({ sizePt: Math.min(96, size + 1) }); }}
+        className="h-5 w-5 rounded hover:bg-black/5 dark:hover:bg-white/10">+</button>
+      <span className="mx-0.5 h-4 w-px bg-black/10 dark:bg-white/10" />
+      <select title="글꼴" value={fmt.font ?? ""} onMouseDown={stop} onClick={stop}
+        onChange={(e) => { stop(e); onPatch({ font: e.target.value }); }}
+        className="max-w-[6.5rem] cursor-pointer rounded bg-transparent text-[11px] outline-none">
+        <option value="">(기본 글꼴)</option>
+        {FONT_CHOICES.map((f) => <option key={f} value={f}>{f}</option>)}
+      </select>
     </div>
   );
 }
@@ -1253,6 +1296,70 @@ export default function App() {
     });
   }, [enqueueEdit, invalidate, reselectTableAfterRepaint, whenPagePainted]);
 
+  // ---- Manual character format (볼드/이태릭/크기/글꼴) ----
+  // The format TARGET is the focused cell (activeCell), else a pointed PARAGRAPH (scopePin). The bar
+  // applies to the WHOLE target (own-render has no sub-cell caret yet — partial selection is v2).
+  const [charFmtState, setCharFmtState] = useState<CharFmt | null>(null);
+  const fmtTarget = useMemo(() => {
+    if (activeCell) {
+      return { section: activeCell.section, block: activeCell.block, row: activeCell.row as number | null, col: activeCell.col as number | null, page: activeCell.page, screen: activeCell.screen };
+    }
+    if (scopePin && scopePin.kind === "paragraph") {
+      return { section: scopePin.section, block: scopePin.block, row: null as number | null, col: null as number | null, page: scopePin.page, screen: scopePin.screen };
+    }
+    return null;
+  }, [activeCell, scopePin]);
+  const fmtTargetRef = useRef(fmtTarget);
+  fmtTargetRef.current = fmtTarget;
+  // Fetch the target's current format when its identity changes (own mode only) so the bar shows the
+  // right B/I/size/font + toggles correctly.
+  useEffect(() => {
+    if (!fmtTarget || viewModeRef.current !== "own") { setCharFmtState(null); return; }
+    let cancelled = false;
+    api.charFmt(fmtTarget.section, fmtTarget.block, fmtTarget.row, fmtTarget.col)
+      .then((f) => { if (!cancelled) setCharFmtState(f); })
+      .catch(() => { if (!cancelled) setCharFmtState(null); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fmtTarget?.section, fmtTarget?.block, fmtTarget?.row, fmtTarget?.col, viewMode]);
+
+  const commitCharFmt = useCallback((patch: { bold?: boolean; italic?: boolean; sizePt?: number; font?: string }) => {
+    const t = fmtTargetRef.current;
+    if (!t) return;
+    const a = activeCellRef.current; // cell ring to re-establish after the repaint
+    const pin = scopePinRef.current; // paragraph pin to re-establish after the repaint
+    // Optimistic: reflect the patch in the bar immediately (the engine confirms on the next fetch).
+    setCharFmtState((prev) => (prev ? {
+      bold: patch.bold ?? prev.bold,
+      italic: patch.italic ?? prev.italic,
+      size_pt: patch.sizePt ?? prev.size_pt,
+      font: patch.font !== undefined ? (patch.font || null) : prev.font,
+    } : prev));
+    void enqueueEdit(async () => {
+      if (!canEditRef.current) return;
+      try {
+        const pages = await api.setCharFmt(t.section, t.block, t.row, t.col, patch);
+        setEdited(true);
+        invalidate(pages, null);
+        if (t.row != null && t.col != null) {
+          reselectTableAfterRepaint(t.page, t.section, t.block);
+          if (a) whenPagePainted(a.page, () => {
+            const svg = svgForPage(a.page);
+            if (!svg) return;
+            const rect = svg.getBoundingClientRect();
+            const vb = svg.viewBox.baseVal;
+            const screen = imageBoxToScreen(a.box, { width: rect.width, height: rect.height }, { width: vb.width, height: vb.height });
+            if (screen) setActiveCell({ ...a, screen }); // keep the cell focused so a follow-up format works
+          });
+        } else if (pin) {
+          whenPagePainted(t.page, () => recomputeScopePin(pin.page, pin.section, pin.block, pin.box, pin.kind, pin.text));
+        }
+      } catch (err) {
+        toast("warn", `서식 변경 실패: ${err}`);
+      }
+    });
+  }, [enqueueEdit, invalidate, reselectTableAfterRepaint, whenPagePainted, recomputeScopePin]);
+
   const commitTableDeleteTable = useCallback(() => {
     void enqueueEdit(async () => {
       const sel = tableSelRef.current;
@@ -2284,6 +2391,17 @@ export default function App() {
                             {activeCell.row + 1}행 {activeCell.col + 1}열
                           </span>
                         </div>
+                      )}
+                      {/* Manual character-format bar (볼드/이태릭/크기/글꼴) over the focused cell / pointed
+                          paragraph. Above the target; a paragraph gets extra lift so it clears the scope
+                          pin's tag. Applies to the whole target (sub-cell selection is v2). */}
+                      {viewMode === "own" && charFmtState && fmtTarget && fmtTarget.page === item.index && (
+                        <FormatBar
+                          fmt={charFmtState}
+                          left={fmtTarget.screen.left}
+                          top={fmtTarget.row != null ? fmtTarget.screen.top : fmtTarget.screen.top - 22}
+                          onPatch={commitCharFmt}
+                        />
                       )}
                       {/* Point-to-scope PIN (own-render): a dashed accent box + a "✦ 여기" tag over the
                           block the user pointed at, so "가리키기"(pointing) is visible and the chat/insert

@@ -113,6 +113,7 @@ impl Page {
                 // PDF-ingest glyphs carry no weight/slant flags yet — treat as regular.
                 bold: false,
                 italic: false,
+                font: None,
             })
             .collect();
         PageLayerTree { schema_version: PAINT_SCHEMA_VERSION, width: w, height: h, ops }

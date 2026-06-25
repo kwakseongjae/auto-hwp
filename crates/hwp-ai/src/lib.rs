@@ -369,6 +369,15 @@ fn op_summary(op: &Op) -> String {
             format!("✎ 칸 @[s{section}/b{index}] ({row},{col}): {}", truncate(&text, 40))
         }
         Op::SetTableColWidths { section, index, .. } => format!("↔ 표 @[s{section}/b{index}] 열 너비 조정"),
+        Op::SetCharFmt { section, block, cell, bold, italic, size_pt, font } => {
+            let mut parts: Vec<String> = Vec::new();
+            if let Some(b) = bold { parts.push(if *b { "굵게".into() } else { "굵게 해제".into() }); }
+            if let Some(i) = italic { parts.push(if *i { "기울임".into() } else { "기울임 해제".into() }); }
+            if let Some(s) = size_pt { parts.push(format!("{s}pt")); }
+            if let Some(f) = font { parts.push(if f.trim().is_empty() { "글꼴 기본".into() } else { format!("글꼴 {f}") }); }
+            let at = match cell { Some((r, c)) => format!("s{section}/b{block} ({r},{c})"), None => format!("s{section}/b{block}") };
+            format!("✦ 서식 @[{at}]: {}", parts.join(", "))
+        }
         Op::SetPageLayout { orientation, margins_mm, .. } => {
             let o = orientation.as_deref().unwrap_or("(유지)");
             let m = margins_mm.as_ref().map(|m| format!(", 여백 {}mm", m.left)).unwrap_or_default();
