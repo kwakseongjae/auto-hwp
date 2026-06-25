@@ -295,35 +295,49 @@ fn section_mut(doc: &mut SemanticDoc, section: usize) -> Result<&mut Section> {
         .ok_or_else(|| Error::Other(format!("section {section} out of range")))
 }
 
-/// Resolve the paragraphs an [`Op::SetCharFmt`] targets: the block's own paragraph (`cell == None`), or
-/// the top-level paragraphs of the `(row, col)` cell of that table. Errors on a target/cell mismatch.
+/// Whether a paragraph's runs can be RE-FORMATTED in place. A per-run char_shape change only takes
+/// effect via the run-body re-emit path; a structural (`!simple`) paragraph or one carrying a non-text
+/// inline (image/field/bookmark/note/raw) is kept VERBATIM on export, so its charPr change would be
+/// SILENTLY DROPPED on save (own-render would show it but the file wouldn't). Mirrors the
+/// `SetParagraphText` guard — such paragraphs are skipped (and the op errors if NONE are formattable).
+fn is_formattable_para(p: &Paragraph) -> bool {
+    let simple = p.source.as_ref().map(|s| s.simple).unwrap_or(true);
+    let has_nontext = p.runs.iter().any(|r| r.content.iter().any(|i| !matches!(i, Inline::Text(_))));
+    simple && !has_nontext
+}
+
+/// Resolve the FORMATTABLE paragraphs an [`Op::SetCharFmt`] targets: the block's own paragraph
+/// (`cell == None`), or the top-level paragraphs of the `(row, col)` cell of that table — filtered to
+/// the ones [`is_formattable_para`] accepts (so a format edit never silently vanishes on export).
 fn char_fmt_target_paras(block: &Block, cell: Option<(usize, usize)>) -> Result<Vec<&Paragraph>> {
-    match (block, cell) {
-        (Block::Paragraph(p), None) => Ok(vec![p]),
+    let paras: Vec<&Paragraph> = match (block, cell) {
+        (Block::Paragraph(p), None) => vec![p],
         (Block::Table(t), Some((row, col))) => {
             let c = t.cells.iter().find(|c| c.active && c.row == row && c.col == col).ok_or_else(|| {
                 Error::Other(format!("SetCharFmt: no active cell at (row {row}, col {col})"))
             })?;
-            Ok(c.blocks.iter().filter_map(|b| if let Block::Paragraph(p) = b { Some(p) } else { None }).collect())
+            c.blocks.iter().filter_map(|b| if let Block::Paragraph(p) = b { Some(p) } else { None }).collect()
         }
-        (Block::Table(_), None) => Err(Error::Other("SetCharFmt: target is a table — a cell (row, col) is required".into())),
-        (Block::Paragraph(_), Some(_)) => Err(Error::Other("SetCharFmt: target is a paragraph — no cell expected".into())),
-    }
+        (Block::Table(_), None) => return Err(Error::Other("SetCharFmt: target is a table — a cell (row, col) is required".into())),
+        (Block::Paragraph(_), Some(_)) => return Err(Error::Other("SetCharFmt: target is a paragraph — no cell expected".into())),
+    };
+    Ok(paras.into_iter().filter(|p| is_formattable_para(p)).collect())
 }
 
-/// `&mut` twin of [`char_fmt_target_paras`].
+/// `&mut` twin of [`char_fmt_target_paras`] (same formattable filter).
 fn char_fmt_target_paras_mut(block: &mut Block, cell: Option<(usize, usize)>) -> Result<Vec<&mut Paragraph>> {
-    match (block, cell) {
-        (Block::Paragraph(p), None) => Ok(vec![p]),
+    let paras: Vec<&mut Paragraph> = match (block, cell) {
+        (Block::Paragraph(p), None) => vec![p],
         (Block::Table(t), Some((row, col))) => {
             let c = t.cells.iter_mut().find(|c| c.active && c.row == row && c.col == col).ok_or_else(|| {
                 Error::Other(format!("SetCharFmt: no active cell at (row {row}, col {col})"))
             })?;
-            Ok(c.blocks.iter_mut().filter_map(|b| if let Block::Paragraph(p) = b { Some(p) } else { None }).collect())
+            c.blocks.iter_mut().filter_map(|b| if let Block::Paragraph(p) = b { Some(p) } else { None }).collect()
         }
-        (Block::Table(_), None) => Err(Error::Other("SetCharFmt: target is a table — a cell (row, col) is required".into())),
-        (Block::Paragraph(_), Some(_)) => Err(Error::Other("SetCharFmt: target is a paragraph — no cell expected".into())),
-    }
+        (Block::Table(_), None) => return Err(Error::Other("SetCharFmt: target is a table — a cell (row, col) is required".into())),
+        (Block::Paragraph(_), Some(_)) => return Err(Error::Other("SetCharFmt: target is a paragraph — no cell expected".into())),
+    };
+    Ok(paras.into_iter().filter(|p| is_formattable_para(p)).collect())
 }
 
 /// Run `edit` on every addressed top-level paragraph whose `NodeId` is in `lo..=hi`, marking it
@@ -1182,7 +1196,9 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                 let blk = sec.blocks.get(*block).ok_or_else(|| Error::Other(format!("SetCharFmt: block {block} out of range")))?;
                 let paras = char_fmt_target_paras(blk, *cell)?;
                 if paras.is_empty() {
-                    return Err(Error::Other("SetCharFmt: target has no editable paragraph".into()));
+                    return Err(Error::Other(
+                        "이 대상은 서식 변경 대상이 아닙니다 (이미지/필드/복합 구조) — 채팅으로 편집하세요".into(),
+                    ));
                 }
                 for p in paras {
                     for r in &p.runs {
@@ -2209,6 +2225,19 @@ mod tests {
         }).unwrap();
         let Block::Paragraph(p) = &doc.sections[0].blocks[0] else { panic!() };
         assert_eq!(doc.char_shapes[p.runs[0].char_shape].font_family, None, "empty font clears font_family");
+    }
+
+    #[test]
+    fn set_char_fmt_refuses_a_structural_paragraph() {
+        // A structural paragraph is kept verbatim on export, so a per-run charPr change would silently
+        // vanish on save — refuse it (mirrors SetParagraphText), so the UI can surface + fall back to chat.
+        let mut doc = doc_with(vec![structural_para(1, "구조적")]);
+        assert!(
+            apply(&mut doc, &Op::SetCharFmt {
+                section: 0, block: 0, cell: None, bold: Some(true), italic: None, size_pt: None, font: None,
+            }).is_err(),
+            "structural paragraph must be refused (no silently-dropped format on export)"
+        );
     }
 
     #[test]

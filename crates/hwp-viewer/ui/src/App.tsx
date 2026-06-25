@@ -1328,6 +1328,13 @@ export default function App() {
     if (!t) return;
     const a = activeCellRef.current; // cell ring to re-establish after the repaint
     const pin = scopePinRef.current; // paragraph pin to re-establish after the repaint
+    // If a cell editor is OPEN on this exact cell, snapshot its live text NOW — the format button
+    // preventDefaults its mousedown (no blur→commit), and the upcoming invalidate unmounts the editor,
+    // so without this the just-typed text would be lost. Commit it first (mirrors commitShade).
+    const ie = inlineEditRef.current;
+    const liveText = ie && ie.kind === "cell" && t.row != null && ie.row === t.row && ie.col === t.col
+      ? (document.querySelector("[data-inline-edit]") as HTMLTextAreaElement | null)?.value
+      : undefined;
     // Optimistic: reflect the patch in the bar immediately (the engine confirms on the next fetch).
     setCharFmtState((prev) => (prev ? {
       bold: patch.bold ?? prev.bold,
@@ -1338,6 +1345,11 @@ export default function App() {
     void enqueueEdit(async () => {
       if (!canEditRef.current) return;
       try {
+        if (ie && liveText !== undefined && liveText !== ie.text) {
+          inlineClosedRef.current = true;
+          setInlineEdit(null);
+          await api.setTableCell(ie.section, ie.block, ie.row ?? 0, ie.col ?? 0, liveText);
+        }
         const pages = await api.setCharFmt(t.section, t.block, t.row, t.col, patch);
         setEdited(true);
         invalidate(pages, null);
