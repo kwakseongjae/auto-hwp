@@ -26,9 +26,10 @@ use std::sync::{Arc, Mutex};
 #[cfg(target_os = "macos")]
 mod mac_titlebar {
     /// Left inset of the close button, and the buttons' TOP inset from the window top (they bottom-align
-    /// in the container we resize to button_height+INSET_Y). 17 ≈ centered in the 48px (h-12) header.
+    /// in the container we resize to button_height+INSET_Y). Calibrated by eye: 17 sat slightly high, 34
+    /// way low → 21 ≈ centered in the 48px (h-12) header. Bigger = lower.
     const INSET_X: f64 = 19.0;
-    const INSET_Y: f64 = 17.0;
+    const INSET_Y: f64 = 21.0;
 
     /// Wire it up: apply once now, then re-apply on every event macOS uses to reset the position.
     pub fn install(app: &tauri::App) {
