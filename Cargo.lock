@@ -2152,6 +2152,7 @@ dependencies = [
  "hwp-jsx",
  "hwp-mcp",
  "hwp-model",
+ "hwp-ops",
  "hwp-render",
  "hwp-typeset",
  "serde",

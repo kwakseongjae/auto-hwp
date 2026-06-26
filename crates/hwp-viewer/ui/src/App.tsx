@@ -5,7 +5,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { tinykeys } from "tinykeys";
-import { api, type CellHit, type CaretRect, type CharFmt, type FindMatch, type ImageBox, type OutlineItem, type PageGeom, type Proposal, type ProposalOp, type TableBox } from "./api";
+import { api, type CellHit, type CaretRect, type CharFmt, type FindMatch, type ImageBox, type OutlineItem, type PageGeom, type Proposal, type ProposalOp, type RunDto, type TableBox } from "./api";
+import { runsToHtml, serializeEditor, runsEqual, applyLiveStyle } from "./richedit";
 import { sanitizeSvg } from "./sanitize";
 import { advanceOffset, imageBoxToScreen, pageToScreen, screenToPage } from "./caret";
 import ImageOverlay from "./ImageOverlay";
@@ -347,6 +348,8 @@ export default function App() {
     row?: number;
     col?: number;
     text: string;
+    runs: RunDto[]; // the block's styled runs → rendered as the contentEditable's initial HTML (WYSIWYG)
+    scale: number; // page zoom (rect.width/viewBox.width) at open — for run size px ↔ pt round-trip
     box: { x: number; y: number; w: number; h: number }; // own-engine px box → recompute screen on zoom
     screen: { left: number; top: number; width: number; height: number };
   };
@@ -827,7 +830,9 @@ export default function App() {
           // The cell being edited IS the shading reference — mark it active so 🎨 배경색 → 이 칸만 has a
           // visible, unambiguous target right there during the edit (the user's "더블클릭 상태에 배경색").
           recomputeActiveCell(page, cell);
-          openInlineEdit({ kind: "cell", page, section: cell.section, block: cell.block, row: cell.row, col: cell.col, text: cell.text, box, screen });
+          const scale = dim.width / vbd.width;
+          const runs = await api.getBlockRuns(cell.section, cell.block, cell.row, cell.col).catch(() => [{ text: cell.text }]);
+          openInlineEdit({ kind: "cell", page, section: cell.section, block: cell.block, row: cell.row, col: cell.col, text: cell.text, runs, scale, box, screen });
         }
         return;
       }
@@ -845,7 +850,9 @@ export default function App() {
         const box = { x: hit.x, y: hit.y, w: hit.w, h: Math.max(hit.h, 320 / HWPUNIT_PER_PX) };
         const screen = imageBoxToScreen(box, dim, vbd);
         if (screen) {
-          openInlineEdit({ kind: "para", page, section: hit.section, block: hit.block, text: hit.text, box, screen });
+          const scale = dim.width / vbd.width;
+          const runs = await api.getBlockRuns(hit.section, hit.block, null, null).catch(() => [{ text: hit.text }]);
+          openInlineEdit({ kind: "para", page, section: hit.section, block: hit.block, text: hit.text, runs, scale, box, screen });
         }
       }
     } catch (err) { toast("warn", `${err}`); }
@@ -1262,18 +1269,17 @@ export default function App() {
     const a = activeCellRef.current;
     if (!a) return;
     const ie = inlineEditRef.current;
-    const liveText = ie && ie.kind === "cell"
-      ? (document.querySelector("[data-inline-edit]") as HTMLTextAreaElement | null)?.value
-      : undefined;
+    const editorEl = ie && ie.kind === "cell" ? (document.querySelector("[data-inline-edit]") as HTMLElement | null) : null;
+    const liveRuns = editorEl && ie ? serializeEditor(editorEl, ie.scale) : null;
     void enqueueEdit(async () => {
       if (!canEditRef.current) return;
       try {
-        // 1) Commit the cell text FIRST (only if it actually changed) so the shade repaint doesn't drop
-        //    an in-progress edit; close the editor so its now-stale box doesn't linger.
-        if (ie && ie.kind === "cell" && liveText !== undefined && liveText !== ie.text) {
+        // 1) Commit the cell's STYLED runs FIRST (only if changed) so the shade repaint doesn't drop an
+        //    in-progress edit; close the editor so its now-stale box doesn't linger.
+        if (ie && ie.kind === "cell" && liveRuns && !runsEqual(liveRuns, ie.runs)) {
           inlineClosedRef.current = true;
           setInlineEdit(null);
-          await api.setTableCell(ie.section, ie.block, ie.row ?? 0, ie.col ?? 0, liveText);
+          await api.setTableCellRuns(ie.section, ie.block, ie.row ?? 0, ie.col ?? 0, liveRuns);
         }
         // 2) Apply the shade to the focused cell (table anchor + row/col from activeCell).
         const pages = await api.setTableCellShade(a.section, a.block, sel, a.row, a.col, color);
@@ -1401,48 +1407,9 @@ export default function App() {
     if (a) reselectCellAfterRepaint(a.section, a.block, a.row, a.col);
   };
 
-  // ⌘B/⌘I on the DRAGGED selection inside the inline editor — bold/italic ONLY the char range
-  // [startChar, endChar) of the cell/paragraph (Op::SetRunCharFmt). Toggle direction from the ribbon's
-  // current (whole-target) state — correct for a uniform cell; approximate for an already-mixed range (v1).
-  // This ALWAYS COMMITS (closes the editor) rather than deferring: the op splits the paragraph into
-  // mixed-shape runs, and any later plain-text commit (setTableCell/setParagraphText) collapses runs to
-  // the FIRST run's shape — so a deferred range format would be SILENTLY DROPPED the moment the user typed
-  // more and committed. Committing now applies + repaints it cleanly. (Selection is lost — re-select to
-  // format another range. NOTE: re-editing the cell's text later still collapses the range — a plain
-  // textarea can't carry per-run formatting; true rich in-place editing is a follow-up.)
-  const commitRunCharFmt = useCallback((startChar: number, endChar: number, attr: "bold" | "italic") => {
-    const ie = inlineEditRef.current;
-    if (!ie || startChar >= endChar) return;
-    const cur = charFmtStateRef.current;
-    const newVal = !((attr === "bold" ? cur?.bold : cur?.italic) ?? false);
-    const ta = document.querySelector("[data-inline-edit]") as HTMLTextAreaElement | null;
-    const liveText = ta ? ta.value : ie.text;
-    const changed = liveText !== ie.text;
-    const row = ie.kind === "cell" ? (ie.row ?? null) : null;
-    const col = ie.kind === "cell" ? (ie.col ?? null) : null;
-    setCharFmtState((prev) => (prev ? { ...prev, [attr]: newVal } : prev)); // optimistic ribbon toggle
-    // Close the editor up-front (real commit); clear any earlier deferred flag — this repaint shows it too.
-    inlineClosedRef.current = true;
-    fmtDeferredRef.current = false;
-    setInlineEdit(null);
-    void enqueueEdit(async () => {
-      if (!canEditRef.current) return;
-      try {
-        // Flush the typed text FIRST so the range offsets index the committed text (setTableCell/
-        // setParagraphText collapse to one run, then setRunCharFmt re-splits at [start,end)).
-        if (changed) {
-          if (ie.kind === "cell") await api.setTableCell(ie.section, ie.block, ie.row ?? 0, ie.col ?? 0, liveText);
-          else await api.setParagraphText(ie.section, ie.block, liveText);
-        }
-        const pages = await api.setRunCharFmt(ie.section, ie.block, row, col, startChar, endChar, { [attr]: newVal });
-        setEdited(true);
-        invalidate(pages, null);
-        if (ie.kind === "cell") reselectTableAfterRepaint(ie.page, ie.section, ie.block);
-      } catch (err) {
-        toast("warn", `서식 변경 실패: ${err}`);
-      }
-    });
-  }, [enqueueEdit, invalidate, reselectTableAfterRepaint]);
+  // (⌘B/⌘I and the ribbon now style the LIVE contentEditable selection via applyLiveStyle — visible
+  // immediately, serialized to runs on commit. The old range op + the deferred-repaint machinery are
+  // retired; whole-target format on a NON-editing cell/paragraph still goes through commitCharFmt.)
 
   const commitTableDeleteTable = useCallback(() => {
     void enqueueEdit(async () => {
@@ -1533,7 +1500,9 @@ export default function App() {
         const screen = imageBoxToScreen(box, dim, vbd);
         if (screen) {
           recomputeActiveCell(sel.page, cell); // focused cell = shading reference (see onPageDoubleClick)
-          openInlineEdit({ kind: "cell", page: sel.page, section: cell.section, block: cell.block, row: cell.row, col: cell.col, text: cell.text, box, screen });
+          const scale = dim.width / vbd.width;
+          const runs = await api.getBlockRuns(cell.section, cell.block, cell.row, cell.col).catch(() => [{ text: cell.text }]);
+          openInlineEdit({ kind: "cell", page: sel.page, section: cell.section, block: cell.block, row: cell.row, col: cell.col, text: cell.text, runs, scale, box, screen });
         }
       } catch { /* ignore */ }
     })();
@@ -1545,28 +1514,26 @@ export default function App() {
   // inlineEditRef — so a value can never be paired with a different cell's address (the A→B overwrite
   // bug: switching cells reused the uncontrolled textarea, leaving the ref pointing at B while the value
   // was still A's). The textarea is also keyed per-address so it remounts fresh on a cell switch.
-  const commitInlineEdit = useCallback((ie: InlineEdit, value: string) => {
+  // Commit the WYSIWYG editor: SERIALIZE the contentEditable DOM → styled runs (RunDto[]) and write them
+  // back, preserving per-run bold/italic/size/color/font (no run-collapse). The blur/Enter handlers pass
+  // the already-serialized runs (captured from the live DOM at the exact moment of commit).
+  const commitInlineEdit = useCallback((ie: InlineEdit, runs: RunDto[]) => {
     if (!ie || inlineClosedRef.current) return; // already committed/cancelled (e.g. the unmount blur)
     inlineClosedRef.current = true;
     setInlineEdit(null);
-    // NO-OP short-circuit: clicking outside (blur) commits — but if the text is UNCHANGED there's
-    // nothing to apply, so skip the op AND the repaint entirely. EXCEPTION: if a char format was applied
-    // mid-edit (deferred), the SVG is stale and MUST repaint now to show the bold/size/font.
-    if (value === ie.text) {
-      if (fmtDeferredRef.current) { fmtDeferredRef.current = false; flushDeferredRepaint.current(); }
-      return;
-    }
-    fmtDeferredRef.current = false; // a real text commit repaints below, showing any deferred format too
+    fmtDeferredRef.current = false;
+    // NO-OP short-circuit: nothing changed (text AND styling identical) → skip the op + repaint.
+    if (runsEqual(runs, ie.runs)) return;
     void enqueueEdit(async () => {
       if (!canEditRef.current) return;
       try {
         if (ie.kind === "cell") {
-          const pages = await api.setTableCell(ie.section, ie.block, ie.row ?? 0, ie.col ?? 0, value);
+          const pages = await api.setTableCellRuns(ie.section, ie.block, ie.row ?? 0, ie.col ?? 0, runs);
           setEdited(true);
           invalidate(pages, null);
           reselectTableAfterRepaint(tableSelRef.current?.page ?? ie.page, ie.section, ie.block);
         } else {
-          const pages = await api.setParagraphText(ie.section, ie.block, value);
+          const pages = await api.setParagraphRuns(ie.section, ie.block, runs);
           setEdited(true);
           invalidate(pages, null);
         }
@@ -1575,6 +1542,14 @@ export default function App() {
       }
     });
   }, [enqueueEdit, invalidate, reselectTableAfterRepaint]);
+
+  // Serialize the live contentEditable, then commit (blur/Enter/✓). Reads the DOM at call time so the
+  // value can never be paired with a stale snapshot.
+  const commitInlineEditFromDom = useCallback((ie: InlineEdit) => {
+    const el = document.querySelector("[data-inline-edit]") as HTMLElement | null;
+    const runs = el ? serializeEditor(el, ie.scale) : ie.runs;
+    commitInlineEdit(ie, runs);
+  }, [commitInlineEdit]);
 
   // ---- caret: edit loop (each helper enqueued; reads caretRef AFTER the prior queued edit resolved) ----
   const doInsert = useCallback((text: string) => {
@@ -2229,7 +2204,12 @@ export default function App() {
                 {fmtTarget.row != null ? ` · ${fmtTarget.row + 1}행 ${(fmtTarget.col ?? 0) + 1}열` : " · 문단"}
               </span>
               <span className="h-4 w-px bg-black/10 dark:bg-white/10" />
-              <FormatControls fmt={charFmtState} onPatch={commitCharFmt} />
+              {/* While EDITING, the ribbon styles the LIVE contentEditable selection (visible now);
+                  otherwise it applies a whole-target format op to the clicked cell/paragraph. */}
+              <FormatControls
+                fmt={charFmtState}
+                onPatch={(p) => { if (inlineEditRef.current) applyLiveStyle(p, inlineEditRef.current.scale); else commitCharFmt(p); }}
+              />
             </>
           ) : (
             <span className="text-neutral-400">칸이나 문단을 클릭하면 글자 서식(굵게·기울임·크기·글꼴)을 바꿀 수 있어요</span>
@@ -2239,12 +2219,7 @@ export default function App() {
               <span className="hidden text-neutral-400 lg:inline">드래그 선택 후 ⌘B/⌘I · ↵ 저장 · ⇧↵ 줄바꿈 · esc 취소</span>
               <button
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  const ie = inlineEditRef.current;
-                  if (!ie) return;
-                  const ta = document.querySelector("[data-inline-edit]") as HTMLTextAreaElement | null;
-                  commitInlineEdit(ie, ta ? ta.value : ie.text);
-                }}
+                onClick={() => { const ie = inlineEditRef.current; if (ie) commitInlineEditFromDom(ie); }}
                 className="rounded bg-accent px-2.5 py-1 font-medium text-white hover:bg-accent/90"
               >✓ 저장</button>
               <button
@@ -2568,40 +2543,52 @@ export default function App() {
                           </div>
                         </div>
                       )}
-                      {/* INLINE editor (own-render): an in-place text box laid over the double-clicked
-                          CELL or PARAGRAPH — type right there (no modal). Enter commits, Shift+Enter =
-                          newline, Esc cancels, blur commits. Stops its own pointer/click events so it
-                          doesn't re-trigger select/double-click on the page underneath. */}
+                      {/* WYSIWYG INLINE editor (own-render): a contentEditable laid over the double-clicked
+                          CELL or PARAGRAPH, rendering the block's STYLED runs so bold/italic/size/color/
+                          font are visible WHILE typing. ⌘B/⌘I + the ribbon style the live selection;
+                          Enter commits (Shift+Enter = newline), Esc cancels, blur commits. innerHTML is set
+                          ONCE (uncontrolled) — never on render — so the caret + Korean IME survive. */}
                       {viewMode === "own" && inlineEdit && inlineEdit.page === item.index && (
-                        <textarea
-                          // Keyed per cell/paragraph address so a cell SWITCH remounts a fresh node (an
-                          // uncontrolled textarea reused across cells kept the old text → wrote A into B).
+                        <div
+                          // Keyed per address so a cell SWITCH remounts fresh (no stale content carryover).
                           key={`ie-${inlineEdit.section}-${inlineEdit.block}-${inlineEdit.row ?? "p"}-${inlineEdit.col ?? "p"}`}
                           data-inline-edit
-                          autoFocus
-                          defaultValue={inlineEdit.text}
-                          ref={(el) => { if (el) { el.style.height = "auto"; el.style.height = `${Math.max(el.scrollHeight, inlineEdit.screen.height, 22)}px`; } }}
+                          contentEditable
+                          suppressContentEditableWarning
+                          // Set the styled HTML ONCE on mount (uncontrolled) + focus. Never re-set from React.
+                          ref={(el) => {
+                            if (el && el.dataset.init !== "1") {
+                              el.dataset.init = "1";
+                              el.innerHTML = runsToHtml(inlineEdit.runs, inlineEdit.scale);
+                              el.focus();
+                              const r = document.createRange();
+                              r.selectNodeContents(el);
+                              r.collapse(false); // caret at end
+                              const sel = window.getSelection();
+                              sel?.removeAllRanges();
+                              sel?.addRange(r);
+                            }
+                          }}
                           onClick={(e) => e.stopPropagation()}
                           onDoubleClick={(e) => e.stopPropagation()}
                           onPointerDown={(e) => e.stopPropagation()}
-                          onInput={(e) => { const t = e.currentTarget; t.style.height = "auto"; t.style.height = `${Math.max(t.scrollHeight, inlineEdit.screen.height, 22)}px`; }}
-                          onBlur={(e) => commitInlineEdit(inlineEdit, e.currentTarget.value)}
+                          onPaste={(e) => {
+                            // Strip to PLAIN text so pasted HTML never injects styles the serializer can't map.
+                            e.preventDefault();
+                            const text = e.clipboardData.getData("text/plain");
+                            document.execCommand("insertText", false, text);
+                          }}
+                          onBlur={() => commitInlineEditFromDom(inlineEdit)}
                           onKeyDown={(e) => {
-                            // ⌘B / ⌘I → bold/italic the DRAGGED selection only (run-level range format).
-                            if ((e.metaKey || e.ctrlKey) && (e.key === "b" || e.key === "B" || e.key === "i" || e.key === "I")) {
+                            // ⌘B / ⌘I / ⌘U → toggle the LIVE selection (visible immediately, serialized on commit).
+                            if ((e.metaKey || e.ctrlKey) && /^[biu]$/i.test(e.key)) {
                               e.preventDefault();
-                              const ta = e.currentTarget as HTMLTextAreaElement;
-                              const s = ta.selectionStart, en = ta.selectionEnd;
-                              if (en <= s) return; // no selection → nothing to range-format (use the ribbon for whole-cell)
-                              // textarea offsets are UTF-16 code units; convert to Unicode scalar (char) offsets the engine counts.
-                              const v = ta.value;
-                              const startChar = [...v.slice(0, s)].length;
-                              const endChar = [...v.slice(0, en)].length;
-                              commitRunCharFmt(startChar, endChar, (e.key === "b" || e.key === "B") ? "bold" : "italic");
+                              const k = e.key.toLowerCase();
+                              applyLiveStyle(k === "b" ? { bold: true } : k === "i" ? { italic: true } : { underline: true }, inlineEdit.scale);
                               return;
                             }
                             if (e.key === "Escape") { e.preventDefault(); cancelInlineEdit(); }
-                            else if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitInlineEdit(inlineEdit, (e.currentTarget as HTMLTextAreaElement).value); }
+                            else if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitInlineEditFromDom(inlineEdit); }
                           }}
                           style={{
                             position: "absolute",
@@ -2610,11 +2597,10 @@ export default function App() {
                             width: `${Math.max(inlineEdit.screen.width, 40)}px`,
                             minHeight: `${Math.max(inlineEdit.screen.height, 22)}px`,
                           }}
-                          // Always white/dark-text (the DOCUMENT page is white even in app dark mode — a
-                          // dark textarea read as a jarring black box). A soft accent ring + tint marks it
-                          // as the active editor; text is left-aligned for editing, real alignment is
-                          // restored on commit (para_shape preserved).
-                          className="z-40 resize-none overflow-auto rounded-[2px] bg-white px-1 py-0.5 text-left align-top text-sm leading-snug text-neutral-900 shadow-[0_0_0_2px_var(--color-accent,#2563eb)] outline-none ring-2 ring-accent/40"
+                          // White bg (the page is white even in app dark mode); an accent ring marks the
+                          // active editor. leading-snug ≈ the own-render line spacing. The span styles carry
+                          // the per-run font/size/weight so the text reads WYSIWYG.
+                          className="z-40 overflow-auto whitespace-pre-wrap break-words rounded-[2px] bg-white px-1 py-0.5 text-left leading-snug text-neutral-900 shadow-[0_0_0_2px_var(--color-accent,#2563eb)] outline-none ring-2 ring-accent/40"
                         />
                       )}
                       {/* (Save/cancel + keymap hint moved to the TOP edit toolbar so they don't float over

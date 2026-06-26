@@ -1,0 +1,162 @@
+// WYSIWYG in-place editor helpers: render a block's styled runs into a contentEditable, and serialize
+// the edited DOM back to RunDto[]. The contentEditable shows formatting LIVE (bold/italic/size/color/
+// font), unlike the old plain textarea. Glyph layout is the browser's during edit (approximate); the
+// own SVG re-renders the exact layout on commit.
+
+import type { RunDto } from "./api";
+
+const NANUM = "NanumGothic, sans-serif";
+const HWPUNIT_PER_PX = 7200 / 96; // 75 — matches the Rust HWPUNIT_PER_PX
+const DEFAULT_PT = 10; // an inherited (size_pt=null) run draws at the doc default ~10pt (height 1000)
+
+function esc(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** size_pt (or default) → SCREEN px at the page's zoom `scale` (= rect.width / viewBox.width). */
+function sizePx(sizePt: number | null | undefined, scale: number): number {
+  return ((sizePt ?? DEFAULT_PT) * 100) / HWPUNIT_PER_PX * scale;
+}
+
+/** Render runs as styled <span>s matching the own SVG <text> (NanumGothic, weight/style/underline/
+ *  color/font, size in screen px). "\n" in a run → <br>. Set ONCE as the contentEditable innerHTML
+ *  (uncontrolled) — never re-set on keystroke (would kill the caret + Korean IME). */
+export function runsToHtml(runs: RunDto[], scale: number): string {
+  if (!runs.length || runs.every((r) => r.text === "")) return "<span><br></span>";
+  return runs
+    .map((r) => {
+      const styles = [
+        `font-family:${r.font ? `"${r.font}", ${NANUM}` : NANUM}`,
+        `font-weight:${r.bold ? 700 : 400}`,
+        `font-style:${r.italic ? "italic" : "normal"}`,
+        `font-size:${sizePx(r.size_pt, scale).toFixed(2)}px`,
+      ];
+      if (r.underline) styles.push("text-decoration:underline");
+      if (r.color) styles.push(`color:${r.color}`);
+      const html = esc(r.text).replace(/\n/g, "<br>");
+      return `<span style="${styles.join(";")}">${html}</span>`;
+    })
+    .join("");
+}
+
+function rgbToHex(rgb: string): string | undefined {
+  const m = rgb.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+  if (!m) return undefined;
+  const [r, g, b] = [m[1], m[2], m[3]].map((n) => parseInt(n, 10));
+  if (r === 0 && g === 0 && b === 0) return undefined; // black ≈ the default text color (inherit)
+  return "#" + [r, g, b].map((n) => n.toString(16).padStart(2, "0")).join("");
+}
+
+type Style = Omit<RunDto, "text">;
+
+/** The EFFECTIVE styles of a text node's nearest element, read from the computed style (works no matter
+ *  how the style was applied — execCommand spans, our render spans, inline styles all compute the same). */
+function styleOf(el: HTMLElement | null, scale: number): Style {
+  if (!el) return {};
+  const cs = getComputedStyle(el);
+  const st: Style = {};
+  if (parseInt(cs.fontWeight, 10) >= 600) st.bold = true;
+  if (cs.fontStyle === "italic" || cs.fontStyle === "oblique") st.italic = true;
+  const deco = `${cs.textDecorationLine || ""} ${cs.textDecoration || ""}`;
+  if (deco.includes("underline")) st.underline = true;
+  const px = parseFloat(cs.fontSize);
+  if (px > 0 && scale > 0) st.size_pt = Math.round((px * HWPUNIT_PER_PX) / 100 / scale * 10) / 10;
+  const hex = rgbToHex(cs.color);
+  if (hex) st.color = hex;
+  const fam = (cs.fontFamily || "").split(",")[0].replace(/["']/g, "").trim();
+  if (fam && fam !== "NanumGothic" && fam !== "sans-serif") st.font = fam;
+  return st;
+}
+
+function eqStyle(a: Style, b: Style): boolean {
+  return !!a.bold === !!b.bold && !!a.italic === !!b.italic && !!a.underline === !!b.underline
+    && (a.size_pt ?? null) === (b.size_pt ?? null) && (a.color ?? null) === (b.color ?? null)
+    && (a.font ?? null) === (b.font ?? null);
+}
+
+/** Walk the contentEditable DOM → RunDto[]: each text segment's computed style → a run; adjacent
+ *  same-style segments merge; <br> and browser block boundaries (div/p on Enter) → "\n" in the run text;
+ *  &nbsp; → space. Empty editor → one empty run. */
+export function serializeEditor(root: HTMLElement, scale: number): RunDto[] {
+  const runs: RunDto[] = [];
+  const addText = (text: string, st: Style) => {
+    if (!text) return;
+    const last = runs[runs.length - 1];
+    if (last && eqStyle(last, st)) last.text += text;
+    else runs.push({ text, ...st });
+  };
+  const addBreak = () => {
+    if (runs.length) runs[runs.length - 1].text += "\n";
+  };
+  const walk = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const t = (node.textContent ?? "").replace(/ /g, " ");
+      if (t) addText(t, styleOf(node.parentElement, scale));
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    const el = node as HTMLElement;
+    if (el.tagName === "BR") { addBreak(); return; }
+    Array.from(el.childNodes).forEach(walk);
+    if (/^(DIV|P)$/.test(el.tagName)) addBreak(); // a browser-injected block boundary
+  };
+  Array.from(root.childNodes).forEach(walk);
+  // A trailing block boundary appends a spurious newline — trim one.
+  if (runs.length) {
+    const last = runs[runs.length - 1];
+    if (last.text.endsWith("\n")) last.text = last.text.slice(0, -1);
+    if (last.text === "" && runs.length > 1) runs.pop();
+  }
+  return runs.length ? runs : [{ text: "" }];
+}
+
+/** The plain text of the runs (for the no-op / unchanged compare baseline + ribbon state). */
+export function runsText(runs: RunDto[]): string {
+  return runs.map((r) => r.text).join("");
+}
+
+/** Deep-equal two run lists (text + style) — the commit no-op check (skip if the edit changed nothing). */
+export function runsEqual(a: RunDto[], b: RunDto[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((x, i) => x.text === b[i].text && eqStyle(x, b[i]));
+}
+
+/** Wrap the current selection in a <span> with the given CSS (for size/font, which execCommand can't do
+ *  precisely). No-op on a collapsed selection. */
+function wrapSelectionStyle(css: string): void {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+  const range = sel.getRangeAt(0);
+  if (range.collapsed) return;
+  const span = document.createElement("span");
+  span.style.cssText = css;
+  try {
+    range.surroundContents(span);
+  } catch {
+    // The range crosses element boundaries → extract its contents and wrap them.
+    span.appendChild(range.extractContents());
+    range.insertNode(span);
+  }
+  sel.removeAllRanges();
+  const r = document.createRange();
+  r.selectNodeContents(span);
+  sel.addRange(r);
+}
+
+/** Apply a format LIVE to the inline editor's current selection (⌘B/⌘I and the ribbon while editing):
+ *  bold/italic/color toggle via execCommand; size/font wrap the selection in a styled span. Visible
+ *  immediately, no SVG repaint — the styled DOM is serialized to runs on commit. */
+export function applyLiveStyle(
+  patch: { bold?: boolean; italic?: boolean; underline?: boolean; sizePt?: number; font?: string },
+  scale: number,
+): void {
+  const el = document.querySelector("[data-inline-edit]") as HTMLElement | null;
+  if (!el) return;
+  el.focus();
+  try { document.execCommand("styleWithCSS", false, "true"); } catch { /* older webview */ }
+  if (patch.bold !== undefined) document.execCommand("bold");
+  if (patch.italic !== undefined) document.execCommand("italic");
+  if (patch.underline !== undefined) document.execCommand("underline");
+  if (patch.font !== undefined) wrapSelectionStyle(`font-family:${patch.font ? `"${patch.font}", ${NANUM}` : NANUM}`);
+  if (patch.sizePt !== undefined) wrapSelectionStyle(`font-size:${sizePx(patch.sizePt, scale).toFixed(2)}px`);
+}

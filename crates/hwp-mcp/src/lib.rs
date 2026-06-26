@@ -734,6 +734,11 @@ pub enum Intent {
         bold: Option<bool>,
         italic: Option<bool>,
     },
+    /// The WYSIWYG commit — replace a cell with STYLED runs (`SetTableCell` with `Vec<RunSpec>`,
+    /// preserving per-run bold/italic/size/color/font instead of collapsing to one plain run).
+    SetTableCellRuns { section: usize, index: usize, row: usize, col: usize, runs: Vec<hwp_ops::RunSpec> },
+    /// The WYSIWYG commit for a paragraph — replace it with STYLED runs (`SetParagraphRuns`).
+    SetParagraphRuns { section: usize, block: usize, runs: Vec<hwp_ops::RunSpec> },
     /// Cell shading — set/clear the background color of cells in the `index`-th table as ONE undo unit
     /// (`SetTableCellShade`). `sel` ∈ {"row","col","cell","all"} keyed off `(row, col)`; `shade` is
     /// "#RRGGBB" or None to clear.
@@ -912,6 +917,18 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
         Intent::SetRunCharFmt { section, block, cell, start, end, bold, italic } => {
             let doc = session.doc.as_mut().ok_or("no document open")?;
             doc.do_op(&hwp_ops::Op::SetRunCharFmt { section, block, cell, start, end, bold, italic }).map_err(|e| e.to_string())?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::SetTableCellRuns { section, index, row, col, runs } => {
+            let doc = session.doc.as_mut().ok_or("no document open")?;
+            doc.do_op(&hwp_ops::Op::SetTableCell { section, index, row, col, runs }).map_err(|e| e.to_string())?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::SetParagraphRuns { section, block, runs } => {
+            let doc = session.doc.as_mut().ok_or("no document open")?;
+            doc.do_op(&hwp_ops::Op::SetParagraphRuns { section, block, runs }).map_err(|e| e.to_string())?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }

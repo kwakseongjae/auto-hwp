@@ -1630,6 +1630,144 @@ async fn char_fmt(
     .map_err(|e| e.to_string())?
 }
 
+/// FE↔Rust wire type for a STYLED text run — the WYSIWYG editor reads a block's runs (`get_block_runs`)
+/// to render styled spans, and writes them back (`set_table_cell_runs` / `set_paragraph_runs`).
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
+struct RunDto {
+    text: String,
+    #[serde(default)] bold: bool,
+    #[serde(default)] italic: bool,
+    #[serde(default)] underline: bool,
+    #[serde(default)] strike: bool,
+    #[serde(default)] size_pt: Option<f32>,
+    #[serde(default)] color: Option<String>,
+    #[serde(default)] highlight: Option<String>,
+    #[serde(default)] font: Option<String>,
+}
+impl RunDto {
+    fn to_run_spec(&self) -> hwp_ops::RunSpec {
+        hwp_ops::RunSpec {
+            text: self.text.clone(),
+            bold: self.bold,
+            italic: self.italic,
+            underline: self.underline,
+            strike: self.strike,
+            size_pt: self.size_pt,
+            color: self.color.clone(),
+            highlight: self.highlight.clone(),
+            font: self.font.clone(),
+        }
+    }
+}
+
+/// Read ALL styled runs of a target paragraph/cell (per-run shapes) so the WYSIWYG editor can render
+/// them as styled spans. Unlike `char_fmt` (first run only), this returns every run. A multi-paragraph
+/// cell's paragraphs are joined by a `\n` run (parity with `model_cell_text`).
+#[tauri::command]
+async fn get_block_runs(
+    section: usize,
+    block: usize,
+    row: Option<usize>,
+    col: Option<usize>,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<Vec<RunDto>, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let s = sess.lock().map_err(|_| "session poisoned")?;
+        let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+        use hwp_model::prelude::{Block, CharShape, Inline, Paragraph};
+        let default_color = CharShape::default().text_color;
+        let read_para = |p: &Paragraph, out: &mut Vec<RunDto>| {
+            for run in &p.runs {
+                let sh = doc.char_shapes.get(run.char_shape).cloned().unwrap_or_default();
+                let text: String = run.content.iter()
+                    .filter_map(|i| if let Inline::Text(t) = i { Some(t.as_str()) } else { None })
+                    .collect();
+                out.push(RunDto {
+                    text,
+                    bold: sh.bold,
+                    italic: sh.italic,
+                    underline: sh.underline,
+                    strike: sh.strikeout,
+                    size_pt: if sh.height > 0 { Some(sh.height as f32 / 100.0) } else { None },
+                    color: if sh.text_color == default_color { None } else { Some(sh.text_color.to_hex()) },
+                    highlight: None,
+                    font: sh.font_family.clone(),
+                });
+            }
+        };
+        let Some(sec) = doc.sections.get(section) else { return Ok(Vec::new()) };
+        let Some(blk) = sec.blocks.get(block) else { return Ok(Vec::new()) };
+        let mut out: Vec<RunDto> = Vec::new();
+        match (blk, row, col) {
+            (Block::Paragraph(p), None, None) => read_para(p, &mut out),
+            (Block::Table(t), Some(r), Some(c)) => {
+                if let Some(cell) = t.cells.iter().find(|cc| cc.active && cc.row == r && cc.col == c) {
+                    let mut first = true;
+                    for b in &cell.blocks {
+                        if let Block::Paragraph(p) = b {
+                            if !first {
+                                out.push(RunDto { text: "\n".into(), ..Default::default() });
+                            }
+                            read_para(p, &mut out);
+                            first = false;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(out)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The WYSIWYG commit for a CELL — replace it with STYLED runs (preserves per-run formatting; the
+/// run-based `SetTableCell`). Returns the new page count.
+#[tauri::command]
+async fn set_table_cell_runs(
+    section: usize,
+    index: usize,
+    row: usize,
+    col: usize,
+    runs: Vec<RunDto>,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<u32, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        let rs: Vec<hwp_ops::RunSpec> = runs.iter().map(RunDto::to_run_spec).collect();
+        match apply_intent(&mut s, Intent::SetTableCellRuns { section, index, row, col, runs: rs })? {
+            Outcome::Edited { pages } => Ok(pages),
+            _ => Err("unexpected outcome".into()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The WYSIWYG commit for a PARAGRAPH — replace it with STYLED runs (`SetParagraphRuns`).
+#[tauri::command]
+async fn set_paragraph_runs(
+    section: usize,
+    block: usize,
+    runs: Vec<RunDto>,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<u32, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        let rs: Vec<hwp_ops::RunSpec> = runs.iter().map(RunDto::to_run_spec).collect();
+        match apply_intent(&mut s, Intent::SetParagraphRuns { section, block, runs: rs })? {
+            Outcome::Edited { pages } => Ok(pages),
+            _ => Err("unexpected outcome".into()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 // ---- Interactive caret: in-place edit commands (typed Intent lane; same op-bus core as the MCP
 // ---- lane). The per-keystroke / IME-commit mutations the caret UI calls. Async/spawn_blocking like
 // ---- the other mutating commands; each is ONE undo unit (do_op) and returns the new page count so
@@ -1740,6 +1878,9 @@ pub fn run() {
             set_char_fmt,
             set_run_char_fmt,
             char_fmt,
+            get_block_runs,
+            set_table_cell_runs,
+            set_paragraph_runs,
             set_table_cell_shade,
             clipboard_read,
             clipboard_write,

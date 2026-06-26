@@ -108,6 +108,12 @@ pub enum Op {
     /// editing keeps the cell/paragraph's color/italic/alignment). Refuses a structural paragraph
     /// (image/field/multiple-inline) so we never silently flatten rich content — the UI falls back to chat.
     SetParagraphText { section: usize, block: usize, text: String },
+    /// Replace a SIMPLE top-level paragraph's content with STYLED runs (the WYSIWYG in-place editor's
+    /// commit — preserves per-run bold/italic/size/color/font instead of collapsing to one plain run like
+    /// `SetParagraphText`). Each `RunSpec` interns its char shape; a default (unstyled) run keeps the
+    /// paragraph's existing first-run shape; the para shape (alignment) is preserved. Refuses a structural
+    /// paragraph. ONE undo unit.
+    SetParagraphRuns { section: usize, block: usize, runs: Vec<RunSpec> },
     /// Set the COLUMN WIDTH proportions of the `index`-th table (the column-resize drag commit). `widths`
     /// must have exactly `t.cols` positive entries; the renderer rescales them to the body width, so only
     /// the ratios matter. ONE undo unit.
@@ -1148,6 +1154,47 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             // Preserve the first run's char shape + the paragraph's para shape (color/italic/alignment).
             let cs = p.runs.first().map(|r| r.char_shape).unwrap_or(0);
             p.runs = vec![Run { char_shape: cs, content: vec![Inline::Text(text.clone())], ..Default::default() }];
+            p.dirty.mark();
+            sec.dirty.mark();
+            Ok(())
+        }
+        Op::SetParagraphRuns { section, block, runs } => {
+            // The WYSIWYG commit: replace a SIMPLE paragraph's body with STYLED runs (per-run shapes),
+            // keeping its source/para_shape/id. Intern shapes first (mutable doc), then rebuild.
+            let interned: Vec<(usize, String)> = runs
+                .iter()
+                .map(|r| (intern_char_shape(doc, r.to_char_shape()), r.text.clone()))
+                .collect();
+            let plain = intern_char_shape(doc, CharShape::default());
+            let sec = section_mut(doc, *section)?;
+            let blk = sec.blocks.get_mut(*block).ok_or_else(|| {
+                Error::Other(format!("SetParagraphRuns: block {block} out of range"))
+            })?;
+            let Block::Paragraph(p) = blk else {
+                return Err(Error::Other(format!("SetParagraphRuns: block {block} is not a paragraph")));
+            };
+            let simple = p.source.as_ref().map(|s| s.simple).unwrap_or(true);
+            let has_nontext = p.runs.iter().any(|r| r.content.iter().any(|i| !matches!(i, Inline::Text(_))));
+            if !simple || has_nontext {
+                return Err(Error::Other(
+                    "이 문단은 인라인 편집 대상이 아닙니다 (이미지/필드/복합 구조) — 채팅으로 편집하세요".into(),
+                ));
+            }
+            // A default (unstyled) run keeps the paragraph's existing first-run shape (color/etc.), exactly
+            // like SetTableCell — so untouched text doesn't reset to black-plain.
+            let existing_shape = p.runs.first().map(|r| r.char_shape);
+            let resolve_shape = |cs: usize| match existing_shape {
+                Some(prev) if cs == plain => prev,
+                _ => cs,
+            };
+            p.runs = if interned.is_empty() {
+                vec![Run { char_shape: existing_shape.unwrap_or(plain), content: vec![Inline::Text(String::new())], ..Default::default() }]
+            } else {
+                interned
+                    .into_iter()
+                    .map(|(cs, text)| Run { char_shape: resolve_shape(cs), content: vec![Inline::Text(text)], ..Default::default() })
+                    .collect()
+            };
             p.dirty.mark();
             sec.dirty.mark();
             Ok(())
@@ -2331,6 +2378,27 @@ mod tests {
         // start==end no-op; start>end errors.
         assert!(apply(&mut doc, &Op::SetRunCharFmt { section: 0, block: 1, cell: Some((0,0)), start: 1, end: 1, bold: Some(true), italic: None }).is_ok());
         assert!(apply(&mut doc, &Op::SetRunCharFmt { section: 0, block: 1, cell: Some((0,0)), start: 3, end: 1, bold: Some(true), italic: None }).is_err());
+    }
+
+    #[test]
+    fn set_paragraph_runs_keeps_per_run_styling() {
+        // The WYSIWYG commit: a paragraph → two runs, "보통"(plain) + "굵게"(bold). Both runs survive
+        // with their own shape (no collapse), and the paragraph stays simple/re-emittable.
+        let mut doc = doc_with(vec![simple_para(1, "원본")]);
+        let r = |t: &str, bold: bool| RunSpec { text: t.into(), bold, ..Default::default() };
+        apply(&mut doc, &Op::SetParagraphRuns {
+            section: 0, block: 0, runs: vec![r("보통", false), r("굵게", true)],
+        }).unwrap();
+        let Block::Paragraph(p) = &doc.sections[0].blocks[0] else { panic!("paragraph") };
+        assert_eq!(p.runs.len(), 2, "two styled runs, not collapsed to one");
+        let txt = |r: &Run| -> String { r.content.iter().filter_map(|i| if let Inline::Text(s) = i { Some(s.as_str()) } else { None }).collect() };
+        assert_eq!(txt(&p.runs[0]), "보통");
+        assert_eq!(txt(&p.runs[1]), "굵게");
+        assert!(!doc.char_shapes[p.runs[0].char_shape].bold, "first run plain");
+        assert!(doc.char_shapes[p.runs[1].char_shape].bold, "second run bold");
+        // Structural paragraph is refused.
+        let mut d2 = doc_with(vec![structural_para(1, "구조적")]);
+        assert!(apply(&mut d2, &Op::SetParagraphRuns { section: 0, block: 0, runs: vec![r("x", false)] }).is_err());
     }
 
     #[test]

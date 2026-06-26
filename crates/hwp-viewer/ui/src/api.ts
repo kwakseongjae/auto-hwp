@@ -98,6 +98,19 @@ export type PageGeom = { w: number; h: number; ml: number; mt: number; mr: numbe
 /** Current character format of a target's first run — for the manual format bar (B/I/size/font). */
 export type CharFmt = { bold: boolean; italic: boolean; size_pt: number; font: string | null };
 
+/** A styled text run (WYSIWYG editor ↔ engine). `size_pt`/`color`/`font` null = inherit the default. */
+export type RunDto = {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strike?: boolean;
+  size_pt?: number | null;
+  color?: string | null;
+  highlight?: string | null;
+  font?: string | null;
+};
+
 /// Typed bindings to the Rust `Intent` command lane (crates/hwp-viewer/src/lib.rs). No prose
 /// parsing: each command returns a typed value the UI consumes directly.
 export const api = {
@@ -298,6 +311,16 @@ export const api = {
   tableCellBox: (section: number, block: number, row: number, col: number) =>
     invoke<{ page: number; x: number; y: number; w: number; h: number } | null>(
       "table_cell_box", { section, block, row, col }),
+  /** Read ALL styled runs of a target paragraph/cell (per-run bold/italic/size/color/font) — the WYSIWYG
+   *  editor renders these as styled spans. A multi-paragraph cell joins paragraphs with a "\n" run. */
+  getBlockRuns: (section: number, block: number, row: number | null, col: number | null) =>
+    invoke<RunDto[]>("get_block_runs", { section, block, row, col }),
+  /** WYSIWYG commit for a CELL — replace it with STYLED runs (preserves per-run formatting). */
+  setTableCellRuns: (section: number, index: number, row: number, col: number, runs: RunDto[]) =>
+    invoke<number>("set_table_cell_runs", { section, index, row, col, runs }),
+  /** WYSIWYG commit for a PARAGRAPH — replace it with STYLED runs (SetParagraphRuns). */
+  setParagraphRuns: (section: number, block: number, runs: RunDto[]) =>
+    invoke<number>("set_paragraph_runs", { section, block, runs }),
   /** The current char format of a target's first run (for the format bar's toggle/display state).
    *  Null if the target can't be resolved. */
   charFmt: (section: number, block: number, row: number | null, col: number | null) =>

@@ -40,6 +40,7 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 hwp-core = { workspace = true }
 hwp-mcp = { workspace = true }
+hwp-ops = { workspace = true }
 hwp-ai = { workspace = true }
 hwp-model = { workspace = true }
 # JSX(content)/CSS(design) → HTML preview path (the pivot's render): emit + emit_html on the live doc.
