@@ -60,11 +60,3 @@ base64 = "0.21"
 # OS clipboard for own-mode copy/paste — the WKWebView's navigator.clipboard.readText is unreliable
 # (no browser-grade permission/gesture pipeline under our strict CSP), so read/write go through here.
 arboard = "3"
-
-# macOS ONLY: re-pin the window traffic-light buttons. The `trafficLightPosition` config is applied once
-# at window creation but macOS RESETS it on create/resize/title-change (tauri-apps/tauri#13044) — a
-# config y value can never stay centered. We re-apply the inset programmatically on resize/focus via the
-# same objc2 bindings tao/wry already pull (cached, no new download).
-[target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSView", "NSControl", "NSButton", "NSResponder"] }
-objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
