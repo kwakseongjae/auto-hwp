@@ -11,6 +11,80 @@ pub mod server;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 
+/// macOS: keep the window traffic-light buttons vertically centered in our 48px custom titlebar.
+///
+/// The `trafficLightPosition` config (tauri.conf.json) is applied ONCE at window creation, but macOS
+/// RESETS it to the default (top-left) on window creation order, resize, fullscreen, theme change, and
+/// `set_title` (tauri-apps/tauri#13044). That is why a config-only `y` value never stays centered — it
+/// gets reset, so the lights snap back up. The robust fix every serious macOS Tauri app uses is to
+/// re-pin the buttons PROGRAMMATICALLY on those events (this is what tauri-plugin-decorum does too).
+///
+/// We move the three standard buttons via AppKit: resize the titlebar container to `button_height + Y`
+/// so the (auto-centered) buttons' CENTER lands at `(button_height + Y)/2` from the window top — for a
+/// 48px bar that means Y ≈ 34 to center a ~14px button at 24px. `X` is the left inset.
+#[cfg(target_os = "macos")]
+mod mac_titlebar {
+    /// Left inset of the close button, and the titlebar-container vertical padding knob (the buttons'
+    /// center sits at (button_height + INSET_Y)/2 from the window top — tuned to center in the 48px bar).
+    const INSET_X: f64 = 19.0;
+    const INSET_Y: f64 = 34.0;
+
+    /// Wire it up: apply once now, then re-apply on every event macOS uses to reset the position.
+    pub fn install(app: &tauri::App) {
+        use tauri::Manager;
+        let Some(win) = app.get_webview_window("main") else { return };
+        apply(&win);
+        let w = win.clone();
+        win.on_window_event(move |event| {
+            use tauri::WindowEvent;
+            if matches!(
+                event,
+                WindowEvent::Resized(_) | WindowEvent::Focused(true) | WindowEvent::ScaleFactorChanged { .. }
+            ) {
+                apply(&w);
+            }
+        });
+    }
+
+    fn apply(win: &tauri::WebviewWindow) {
+        // ns_window() yields the live NSWindow pointer; window events fire on the main thread on macOS.
+        if let Ok(ptr) = win.ns_window() {
+            unsafe { reposition(ptr) };
+        }
+    }
+
+    /// SAFETY: `ns_window_ptr` must be a live `NSWindow*` (from Tauri's `ns_window()`), called on the
+    /// main thread. We only read/set existing AppKit view frames — no ownership is taken.
+    unsafe fn reposition(ns_window_ptr: *mut std::ffi::c_void) {
+        use objc2_app_kit::{NSWindow, NSWindowButton};
+        let window: &NSWindow = &*(ns_window_ptr as *const NSWindow);
+        let (Some(close), Some(mini), Some(zoom)) = (
+            window.standardWindowButton(NSWindowButton::CloseButton),
+            window.standardWindowButton(NSWindowButton::MiniaturizeButton),
+            window.standardWindowButton(NSWindowButton::ZoomButton),
+        ) else {
+            return;
+        };
+        // close → its superview (the buttons' wrapper) → the titlebar container we resize.
+        let Some(container) = close.superview().and_then(|sv| sv.superview()) else {
+            return;
+        };
+        let button_h = close.frame().size.height;
+        let bar_h = button_h + INSET_Y;
+        let mut bar = container.frame();
+        bar.size.height = bar_h;
+        bar.origin.y = window.frame().size.height - bar_h; // pin the container to the window top
+        container.setFrame(bar);
+        // Lay the three buttons left-to-right at the X inset, preserving their (now-centered) Y.
+        let space = mini.frame().origin.x - close.frame().origin.x;
+        for (i, b) in [&close, &mini, &zoom].into_iter().enumerate() {
+            let mut origin = b.frame().origin;
+            origin.x = INSET_X + (i as f64) * space;
+            b.setFrameOrigin(origin);
+        }
+    }
+}
+
 /// Shared op-bus session (the open document), mutated by `apply_content`/`export_hwpx` and by the
 /// embedded A3 control server — so the window renders the LIVE edited document, not a stale copy.
 /// `Arc` so the heavy commands can clone a handle out of `State` and move it into a
@@ -1880,6 +1954,9 @@ pub fn run() {
         .manage(SharedSession::default())
         .setup(|app| {
             server::spawn(app.handle().clone());
+            // macOS: re-pin the traffic lights (config position gets reset by macOS — see mac_titlebar).
+            #[cfg(target_os = "macos")]
+            mac_titlebar::install(app);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
