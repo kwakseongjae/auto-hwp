@@ -42,17 +42,25 @@ function PageChrome({ geom }: { geom: PageGeom }) {
   const ticks = Array.from({ length: nTicks + 1 }, (_, i) => ({ i, left: ((ml + i * CM_PX) / w) * 100 }));
   return (
     <div className="pointer-events-none absolute inset-0 z-[5]" aria-hidden>
-      {/* printable-area corner brackets */}
-      <div className="absolute border-l-2 border-t-2 border-accent/45" style={{ left: `${lp}%`, top: `${tp}%`, width: ARM, height: ARM }} />
-      <div className="absolute border-r-2 border-t-2 border-accent/45" style={{ left: `${rp}%`, top: `${tp}%`, width: ARM, height: ARM, transform: "translateX(-100%)" }} />
-      <div className="absolute border-l-2 border-b-2 border-accent/45" style={{ left: `${lp}%`, top: `${bp}%`, width: ARM, height: ARM, transform: "translateY(-100%)" }} />
-      <div className="absolute border-r-2 border-b-2 border-accent/45" style={{ left: `${rp}%`, top: `${bp}%`, width: ARM, height: ARM, transform: "translate(-100%,-100%)" }} />
-      {/* top ruler: printable span tinted + 1 cm ticks (taller every 5 cm) */}
-      <div className="absolute left-0 right-0 top-0 h-3 border-b border-black/5 bg-neutral-100/70 dark:border-white/5 dark:bg-neutral-700/50">
+      {/* printable-area corner brackets — arms point OUTWARD toward the page edges (한컴식 모서리 꺾쇠),
+          the elbow sitting AT each printable corner. */}
+      <div className="absolute border-r-2 border-b-2 border-accent/45" style={{ left: `${lp}%`, top: `${tp}%`, width: ARM, height: ARM, transform: "translate(-100%,-100%)" }} />
+      <div className="absolute border-l-2 border-b-2 border-accent/45" style={{ left: `${rp}%`, top: `${tp}%`, width: ARM, height: ARM, transform: "translateY(-100%)" }} />
+      <div className="absolute border-r-2 border-t-2 border-accent/45" style={{ left: `${lp}%`, top: `${bp}%`, width: ARM, height: ARM, transform: "translateX(-100%)" }} />
+      <div className="absolute border-l-2 border-t-2 border-accent/45" style={{ left: `${rp}%`, top: `${bp}%`, width: ARM, height: ARM }} />
+      {/* top ruler (한컴식 줄자): full-width bar, printable span tinted, 1 cm ticks + cm NUMBERS, and a
+          margin marker (▼) at each side — the printable origin reads as 0 at the left margin. */}
+      <div className="absolute left-0 right-0 top-0 h-5 border-b border-black/10 bg-neutral-100/85 text-neutral-500 backdrop-blur-sm dark:border-white/10 dark:bg-neutral-700/70 dark:text-neutral-300">
         <div className="absolute inset-y-0 bg-accent/10" style={{ left: `${lp}%`, width: `${Math.max(0, rp - lp)}%` }} />
         {ticks.map(({ i, left }) => (
-          <div key={i} className="absolute bottom-0 w-px bg-neutral-400/70 dark:bg-neutral-400/50" style={{ left: `${left}%`, height: i % 5 === 0 ? "100%" : "45%" }} />
+          <div key={`t${i}`} className="absolute bottom-0 w-px bg-neutral-400/70 dark:bg-neutral-400/50" style={{ left: `${left}%`, height: i % 5 === 0 ? "55%" : "30%" }} />
         ))}
+        {ticks.filter((t) => t.i > 0).map(({ i, left }) => (
+          <span key={`n${i}`} className="absolute top-px -translate-x-1/2 text-[8px] leading-none tabular-nums" style={{ left: `${left}%` }}>{i}</span>
+        ))}
+        {/* left + right margin markers (downward triangle at each printable boundary) */}
+        <div className="absolute top-0 h-0 w-0 -translate-x-1/2 border-x-[4px] border-t-[6px] border-x-transparent border-t-accent/70" style={{ left: `${lp}%` }} />
+        <div className="absolute top-0 h-0 w-0 -translate-x-1/2 border-x-[4px] border-t-[6px] border-x-transparent border-t-accent/70" style={{ left: `${rp}%` }} />
       </div>
     </div>
   );
@@ -360,6 +368,13 @@ export default function App() {
   const [inlineEdit, setInlineEdit] = useState<InlineEdit | null>(null);
   const inlineEditRef = useRef<InlineEdit | null>(null);
   inlineEditRef.current = inlineEdit;
+  // A static, non-interactive snapshot of the JUST-committed editor content (the NEW text, styled like the
+  // cell), held from the moment of commit until the post-edit SVG repaints. Without it, the editor unmounts
+  // on commit and the STALE pre-edit SVG flashes through for the async round-trip ("편집 전으로 보였다가
+  // 리렌더링되며 반영"). The overlay bridges that gap: editor(new) → frozen(new) → fresh SVG(new), seamless.
+  const [frozenEdit, setFrozenEdit] = useState<
+    { html: string; page: number; screen: { left: number; top: number; width: number; height: number }; shade: string | null; align: string } | null
+  >(null);
   // True once the open editor has been committed/cancelled — so the unmount blur that fires when the
   // textarea closes doesn't commit a SECOND time (Enter/Escape → close → unmount → blur). Reset by
   // `openInlineEdit` when a new editor opens.
@@ -373,11 +388,13 @@ export default function App() {
     inlineClosedRef.current = false;
     fmtDeferredRef.current = false; // a fresh editor starts with no pending format repaint
     setScopePin(null);
+    setFrozenEdit(null); // any leftover post-commit snapshot is moot once a new editor opens
     setInlineEdit(ie);
   }, []);
   const cancelInlineEdit = useCallback(() => {
     inlineClosedRef.current = true; // the unmount blur must NOT commit a cancel
     setInlineEdit(null);
+    setFrozenEdit(null);
     if (fmtDeferredRef.current) { fmtDeferredRef.current = false; flushDeferredRepaint.current(); }
   }, []);
 
@@ -1537,8 +1554,11 @@ export default function App() {
     fmtDeferredRef.current = false;
     // NO-OP short-circuit: nothing changed (text AND styling identical) → skip the op + repaint.
     if (runsUnchanged(runs, ie.runs)) return;
+    // Freeze the committed content (the NEW text, styled like the cell) over the page so the stale pre-edit
+    // SVG never flashes through while the op applies + the page re-renders; cleared once the fresh SVG paints.
+    setFrozenEdit({ html: runsToHtml(runs, ie.scale), page: ie.page, screen: ie.screen, shade: ie.shade, align: ie.align });
     void enqueueEdit(async () => {
-      if (!canEditRef.current) return;
+      if (!canEditRef.current) { setFrozenEdit(null); return; }
       try {
         if (ie.kind === "cell") {
           const pages = await api.setTableCellRuns(ie.section, ie.block, ie.row ?? 0, ie.col ?? 0, runs);
@@ -1550,11 +1570,14 @@ export default function App() {
           setEdited(true);
           invalidate(pages, null);
         }
+        // Drop the snapshot only AFTER the post-edit SVG has painted → seamless new→new handoff (no flash).
+        whenPagePainted(ie.page, () => setFrozenEdit(null));
       } catch (err) {
+        setFrozenEdit(null);
         toast("warn", `${err}`);
       }
     });
-  }, [enqueueEdit, invalidate, reselectTableAfterRepaint]);
+  }, [enqueueEdit, invalidate, reselectTableAfterRepaint, whenPagePainted]);
 
   // Serialize the live contentEditable, then commit (blur/Enter/✓). Reads the DOM at call time so the
   // value can never be paired with a stale snapshot.
@@ -2146,7 +2169,7 @@ export default function App() {
     <div className="relative flex h-full flex-col bg-neutral-100 text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100">
       <header
         data-tauri-drag-region
-        className="flex h-11 shrink-0 items-center gap-2 border-b border-black/10 bg-neutral-50/70 pl-24 pr-3 backdrop-blur-xl dark:border-white/10 dark:bg-neutral-800/60"
+        className="flex h-12 shrink-0 items-center gap-2 border-b border-black/10 bg-neutral-50/70 pl-24 pr-3 backdrop-blur-xl dark:border-white/10 dark:bg-neutral-800/60"
       >
         {docName ? (
           <>
@@ -2552,6 +2575,29 @@ export default function App() {
                             <span className="-translate-y-1/2 rounded bg-accent px-1 py-0.5 text-[9px] font-medium text-white">여기로 이동</span>
                           </div>
                         </div>
+                      )}
+                      {/* Post-commit FREEZE overlay (own-render): a static, non-interactive snapshot of the
+                          just-saved content (styled like the cell), shown from commit until the fresh SVG
+                          paints — so the pre-edit SVG never flashes through during the re-render round-trip. */}
+                      {viewMode === "own" && frozenEdit && frozenEdit.page === item.index && (
+                        <div
+                          aria-hidden
+                          className="pointer-events-none z-40 overflow-hidden whitespace-pre-wrap break-words rounded-[2px] px-1 py-0.5 leading-snug"
+                          style={{
+                            position: "absolute",
+                            left: `${frozenEdit.screen.left}px`,
+                            top: `${frozenEdit.screen.top}px`,
+                            width: `${Math.max(frozenEdit.screen.width, 40)}px`,
+                            minHeight: `${Math.max(frozenEdit.screen.height, 22)}px`,
+                            color: "#000000",
+                            backgroundColor: frozenEdit.shade ?? "#ffffff",
+                            textAlign: (frozenEdit.align as React.CSSProperties["textAlign"]) || "left",
+                            display: "flex",
+                            flexDirection: "column",
+                            justifyContent: "safe center",
+                          }}
+                          dangerouslySetInnerHTML={{ __html: frozenEdit.html }}
+                        />
                       )}
                       {/* WYSIWYG INLINE editor (own-render): a contentEditable laid over the double-clicked
                           CELL or PARAGRAPH, rendering the block's STYLED runs so bold/italic/size/color/
