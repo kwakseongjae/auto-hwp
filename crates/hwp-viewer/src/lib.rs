@@ -20,14 +20,15 @@ use std::sync::{Arc, Mutex};
 /// re-pin the buttons PROGRAMMATICALLY on those events (this is what tauri-plugin-decorum does too).
 ///
 /// We move the three standard buttons via AppKit: resize the titlebar container to `button_height + Y`
-/// so the (auto-centered) buttons' CENTER lands at `(button_height + Y)/2` from the window top — for a
-/// 48px bar that means Y ≈ 34 to center a ~14px button at 24px. `X` is the left inset.
+/// pinned to the window top. EMPIRICALLY the buttons sit at the container BOTTOM, so the button TOP lands
+/// at `Y` px from the window top (Y=34 put them near the bottom of the 48px bar). To center a ~14px button
+/// in the 48px (h-12) header — top at (48-14)/2 ≈ 17 — use Y ≈ 17. `X` is the left inset.
 #[cfg(target_os = "macos")]
 mod mac_titlebar {
-    /// Left inset of the close button, and the titlebar-container vertical padding knob (the buttons'
-    /// center sits at (button_height + INSET_Y)/2 from the window top — tuned to center in the 48px bar).
+    /// Left inset of the close button, and the buttons' TOP inset from the window top (they bottom-align
+    /// in the container we resize to button_height+INSET_Y). 17 ≈ centered in the 48px (h-12) header.
     const INSET_X: f64 = 19.0;
-    const INSET_Y: f64 = 34.0;
+    const INSET_Y: f64 = 17.0;
 
     /// Wire it up: apply once now, then re-apply on every event macOS uses to reset the position.
     pub fn install(app: &tauri::App) {
