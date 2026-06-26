@@ -31,7 +31,12 @@ export function runsToHtml(runs: RunDto[], scale: number): string {
         `font-style:${r.italic ? "italic" : "normal"}`,
         `font-size:${sizePx(r.size_pt, scale).toFixed(2)}px`,
       ];
-      if (r.underline) styles.push("text-decoration:underline");
+      // underline + strike combine into one text-decoration so a struck run actually SHOWS struck
+      // (and round-trips); without this strikethrough was a silent WYSIWYG lie + lost on commit.
+      const deco: string[] = [];
+      if (r.underline) deco.push("underline");
+      if (r.strike) deco.push("line-through");
+      if (deco.length) styles.push(`text-decoration:${deco.join(" ")}`);
       if (r.color) styles.push(`color:${r.color}`);
       const html = esc(r.text).replace(/\n/g, "<br>");
       return `<span style="${styles.join(";")}">${html}</span>`;
@@ -59,8 +64,11 @@ function styleOf(el: HTMLElement | null, scale: number): Style {
   if (cs.fontStyle === "italic" || cs.fontStyle === "oblique") st.italic = true;
   const deco = `${cs.textDecorationLine || ""} ${cs.textDecoration || ""}`;
   if (deco.includes("underline")) st.underline = true;
+  if (deco.includes("line-through")) st.strike = true;
   const px = parseFloat(cs.fontSize);
-  if (px > 0 && scale > 0) st.size_pt = Math.round((px * HWPUNIT_PER_PX) / 100 / scale * 10) / 10;
+  // 2-dp round (HWP height is 1/100pt) so a non-integer imported size — e.g. 12.34pt — round-trips
+  // exactly instead of snapping to 12.3 and writing a spurious size change on an untouched run.
+  if (px > 0 && scale > 0) st.size_pt = Math.round((px * HWPUNIT_PER_PX) / 100 / scale * 100) / 100;
   const hex = rgbToHex(cs.color);
   if (hex) st.color = hex;
   const fam = (cs.fontFamily || "").split(",")[0].replace(/["']/g, "").trim();
@@ -70,6 +78,7 @@ function styleOf(el: HTMLElement | null, scale: number): Style {
 
 function eqStyle(a: Style, b: Style): boolean {
   return !!a.bold === !!b.bold && !!a.italic === !!b.italic && !!a.underline === !!b.underline
+    && !!a.strike === !!b.strike
     && (a.size_pt ?? null) === (b.size_pt ?? null) && (a.color ?? null) === (b.color ?? null)
     && (a.font ?? null) === (b.font ?? null);
 }
@@ -119,6 +128,35 @@ export function runsText(runs: RunDto[]): string {
 export function runsEqual(a: RunDto[], b: RunDto[]): boolean {
   if (a.length !== b.length) return false;
   return a.every((x, i) => x.text === b[i].text && eqStyle(x, b[i]));
+}
+
+/** Canonicalize a run list to the exact shape serializeEditor would emit, so the no-op compare is robust
+ *  to (a) get_block_runs' standalone "\n" paragraph-join runs — a <br> attaches to the PRECEDING span on
+ *  round-trip, folding its (default) style away — and (b) all-empty blocks, which runsToHtml renders as
+ *  one styleless empty run. Without this, opening a multi-paragraph or empty cell and clicking away (zero
+ *  edits) failed runsEqual and fired a spurious write + undo unit. */
+export function canonRuns(runs: RunDto[]): RunDto[] {
+  if (runs.every((r) => r.text === "")) return [{ text: "" }];
+  const out: RunDto[] = [];
+  for (const r of runs) {
+    const { text, ...st } = r;
+    if (text === "\n" && out.length) { out[out.length - 1].text += "\n"; continue; } // paragraph-join run
+    const last = out[out.length - 1];
+    if (last && eqStyle(last as Style, st as Style)) last.text += text;
+    else out.push({ text, ...st });
+  }
+  if (out.length) {
+    const last = out[out.length - 1];
+    if (last.text.endsWith("\n")) last.text = last.text.slice(0, -1); // serializeEditor trims one trailing \n
+    if (last.text === "" && out.length > 1) out.pop();
+  }
+  return out.length ? out : [{ text: "" }];
+}
+
+/** The commit no-op check: did the edit change nothing? Compares canonicalized forms so the synthetic
+ *  paragraph-join "\n" runs + all-empty blocks don't read as a spurious change. */
+export function runsUnchanged(serialized: RunDto[], baseline: RunDto[]): boolean {
+  return runsEqual(canonRuns(serialized), canonRuns(baseline));
 }
 
 /** Wrap the current selection in a <span> with the given CSS (for size/font, which execCommand can't do

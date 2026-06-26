@@ -997,30 +997,44 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             });
             // Preserve the cell's existing paragraph ALIGNMENT (para_shape) too — gov-doc cells are
             // center-aligned; without this a refilled cell reset to the default (left) and read as
-            // "정렬 안 맞음" next to its centered siblings.
-            let existing_para = cell.blocks.iter().find_map(|b| match b {
+            // "정렬 안 맞음" next to its centered siblings. A multi-paragraph cell is joined into the
+            // editor with "\n" between paragraphs; we split back on "\n" and map each rebuilt paragraph
+            // to the ORIGINAL paragraph at the same index (fallback: the first) so per-paragraph
+            // alignment/spacing survives instead of collapsing every line into one first-shaped paragraph.
+            let orig_para_shapes: Vec<usize> = cell.blocks.iter().filter_map(|b| match b {
                 Block::Paragraph(p) => Some(p.para_shape),
                 _ => None,
-            }).unwrap_or(0);
+            }).collect();
+            let para_shape_for = |i: usize| orig_para_shapes.get(i).copied()
+                .or_else(|| orig_para_shapes.first().copied()).unwrap_or(0);
             let resolve_shape = |cs: usize| match existing_shape {
                 Some(prev) if cs == plain => prev,
                 _ => cs,
             };
-            let para_runs = if interned.is_empty() {
-                // An empty cell still needs one (empty) run so it round-trips/re-emits cleanly.
-                vec![Run { char_shape: existing_shape.unwrap_or(plain), content: vec![Inline::Text(String::new())], ..Default::default() }]
-            } else {
-                interned
-                    .into_iter()
-                    .map(|(char_shape, text)| Run { char_shape: resolve_shape(char_shape), content: vec![Inline::Text(text)], ..Default::default() })
-                    .collect()
-            };
-            cell.blocks = vec![Block::Paragraph(Paragraph {
-                runs: para_runs,
-                para_shape: existing_para,
-                dirty: Dirty(true),
-                ..Default::default()
-            })];
+            // Split the interned runs at "\n" into one group per paragraph (a "\n" inside a run's text is a
+            // paragraph boundary, not a literal newline — HWP paragraphs are line-blocks).
+            let mut paras: Vec<Vec<(usize, String)>> = vec![Vec::new()];
+            for (cs, text) in interned {
+                let mut segs = text.split('\n');
+                if let Some(first) = segs.next() {
+                    if !first.is_empty() { paras.last_mut().unwrap().push((cs, first.to_string())); }
+                }
+                for seg in segs {
+                    paras.push(Vec::new());
+                    if !seg.is_empty() { paras.last_mut().unwrap().push((cs, seg.to_string())); }
+                }
+            }
+            cell.blocks = paras.into_iter().enumerate().map(|(i, group)| {
+                let runs = if group.is_empty() {
+                    // An empty paragraph still needs one (empty) run so it round-trips/re-emits cleanly.
+                    vec![Run { char_shape: existing_shape.unwrap_or(plain), content: vec![Inline::Text(String::new())], ..Default::default() }]
+                } else {
+                    group.into_iter()
+                        .map(|(char_shape, text)| Run { char_shape: resolve_shape(char_shape), content: vec![Inline::Text(text)], ..Default::default() })
+                        .collect()
+                };
+                Block::Paragraph(Paragraph { runs, para_shape: para_shape_for(i), dirty: Dirty(true), ..Default::default() })
+            }).collect();
             cell.dirty.mark();
             t.dirty.mark();
             sec.dirty.mark();
@@ -2187,6 +2201,38 @@ mod tests {
         assert!(apply(&mut doc, &Op::SetTableCell {
             section: 0, index: 0, row: 0, col: 0, runs: vec![run_spec("x")],
         }).is_err());
+    }
+
+    #[test]
+    fn set_table_cell_splits_newlines_into_paragraphs_keeping_each_para_shape() {
+        // A multi-paragraph cell is joined into the editor with "\n"; committing must split it BACK into
+        // one paragraph per line, preserving each ORIGINAL paragraph's para_shape (alignment/spacing) —
+        // not collapse every line into one first-shaped paragraph (which silently lost 2nd+ alignment).
+        let mut doc = doc_with(vec![simple_para(1, "앞")]);
+        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
+        apply(&mut doc, &Op::InsertTableAt {
+            section: 0, index: 1, rows: vec![vec![cell("a")]],
+        }).unwrap();
+        // Give the target cell two paragraphs with DISTINCT para_shapes (7 then 9).
+        if let Block::Table(t) = &mut doc.sections[0].blocks[1] {
+            let c = t.cells.iter_mut().find(|c| c.active && c.row == 0 && c.col == 0).unwrap();
+            c.blocks = vec![
+                Block::Paragraph(Paragraph { runs: vec![Run { content: vec![Inline::Text("첫".into())], ..Default::default() }], para_shape: 7, ..Default::default() }),
+                Block::Paragraph(Paragraph { runs: vec![Run { content: vec![Inline::Text("둘".into())], ..Default::default() }], para_shape: 9, ..Default::default() }),
+            ];
+        } else { panic!("expected table"); }
+        // Re-fill via the editor's "\n"-joined form.
+        apply(&mut doc, &Op::SetTableCell {
+            section: 0, index: 1, row: 0, col: 0, runs: vec![run_spec("가나\n다라")],
+        }).unwrap();
+        if let Block::Table(t) = &doc.sections[0].blocks[1] {
+            let c = t.cells.iter().find(|c| c.active && c.row == 0 && c.col == 0).unwrap();
+            let paras: Vec<(&str, usize)> = c.blocks.iter().filter_map(|b| match b {
+                Block::Paragraph(p) => Some((p.runs[0].content.iter().find_map(|i| if let Inline::Text(s) = i { Some(s.as_str()) } else { None }).unwrap_or(""), p.para_shape)),
+                _ => None,
+            }).collect();
+            assert_eq!(paras, vec![("가나", 7), ("다라", 9)], "split on \\n + preserved each para_shape");
+        } else { panic!("expected table"); }
     }
 
     #[test]

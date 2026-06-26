@@ -6,7 +6,7 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { tinykeys } from "tinykeys";
 import { api, type CellHit, type CaretRect, type CharFmt, type FindMatch, type ImageBox, type OutlineItem, type PageGeom, type Proposal, type ProposalOp, type RunDto, type TableBox } from "./api";
-import { runsToHtml, serializeEditor, runsEqual, applyLiveStyle } from "./richedit";
+import { runsToHtml, serializeEditor, runsUnchanged, applyLiveStyle } from "./richedit";
 import { sanitizeSvg } from "./sanitize";
 import { advanceOffset, imageBoxToScreen, pageToScreen, screenToPage } from "./caret";
 import ImageOverlay from "./ImageOverlay";
@@ -1276,7 +1276,7 @@ export default function App() {
       try {
         // 1) Commit the cell's STYLED runs FIRST (only if changed) so the shade repaint doesn't drop an
         //    in-progress edit; close the editor so its now-stale box doesn't linger.
-        if (ie && ie.kind === "cell" && liveRuns && !runsEqual(liveRuns, ie.runs)) {
+        if (ie && ie.kind === "cell" && liveRuns && !runsUnchanged(liveRuns, ie.runs)) {
           inlineClosedRef.current = true;
           setInlineEdit(null);
           await api.setTableCellRuns(ie.section, ie.block, ie.row ?? 0, ie.col ?? 0, liveRuns);
@@ -1523,7 +1523,7 @@ export default function App() {
     setInlineEdit(null);
     fmtDeferredRef.current = false;
     // NO-OP short-circuit: nothing changed (text AND styling identical) → skip the op + repaint.
-    if (runsEqual(runs, ie.runs)) return;
+    if (runsUnchanged(runs, ie.runs)) return;
     void enqueueEdit(async () => {
       if (!canEditRef.current) return;
       try {
@@ -2596,6 +2596,11 @@ export default function App() {
                             top: `${inlineEdit.screen.top}px`,
                             width: `${Math.max(inlineEdit.screen.width, 40)}px`,
                             minHeight: `${Math.max(inlineEdit.screen.height, 22)}px`,
+                            // PURE black (not neutral-900 ≈ rgb(23,23,23)): default-color runs inherit this,
+                            // and serializeEditor maps exact rgb(0,0,0) → color-less, so untouched black text
+                            // round-trips without writing a spurious #171717 (which also recolored true black
+                            // and defeated the engine's shape-preservation no-op).
+                            color: "#000000",
                           }}
                           // White bg (the page is white even in app dark mode); an accent ring marks the
                           // active editor. leading-snug ≈ the own-render line spacing. The span styles carry
