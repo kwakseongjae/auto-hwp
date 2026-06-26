@@ -79,7 +79,10 @@ function styleOf(el: HTMLElement | null, scale: number): Style {
 function eqStyle(a: Style, b: Style): boolean {
   return !!a.bold === !!b.bold && !!a.italic === !!b.italic && !!a.underline === !!b.underline
     && !!a.strike === !!b.strike
-    && (a.size_pt ?? null) === (b.size_pt ?? null) && (a.color ?? null) === (b.color ?? null)
+    // An inherited-size run (size_pt null, e.g. an HWPX/AI run with CharShape height 0) renders at the
+    // DEFAULT and serializes back as DEFAULT_PT — getComputedStyle can never report "inherited". Treat
+    // null and DEFAULT_PT as equal so opening such a run and leaving isn't a spurious size-pinning write.
+    && (a.size_pt ?? DEFAULT_PT) === (b.size_pt ?? DEFAULT_PT) && (a.color ?? null) === (b.color ?? null)
     && (a.font ?? null) === (b.font ?? null);
 }
 
@@ -181,6 +184,19 @@ function wrapSelectionStyle(css: string): void {
   sel.addRange(r);
 }
 
+// The inline editor's selection at the moment a ribbon control was PRESSED. A native <select> (the 글꼴
+// picker) can't preventDefault its focus the way the B/I/size buttons do, so it blurs the contentEditable
+// and the selection is lost by the time onChange fires — we save it on the select's mousedown and restore
+// it before applying, so the font styles the live SELECTION (not the whole cell).
+let savedRange: Range | null = null;
+export function saveInlineSelection(): void {
+  const el = document.querySelector("[data-inline-edit]") as HTMLElement | null;
+  const sel = window.getSelection();
+  if (el && sel && sel.rangeCount && el.contains(sel.anchorNode)) {
+    savedRange = sel.getRangeAt(0).cloneRange();
+  }
+}
+
 /** Apply a format LIVE to the inline editor's current selection (⌘B/⌘I and the ribbon while editing):
  *  bold/italic/color toggle via execCommand; size/font wrap the selection in a styled span. Visible
  *  immediately, no SVG repaint — the styled DOM is serialized to runs on commit. */
@@ -191,6 +207,13 @@ export function applyLiveStyle(
   const el = document.querySelector("[data-inline-edit]") as HTMLElement | null;
   if (!el) return;
   el.focus();
+  // If focus left the editor (a ribbon <select> stole it) the selection is gone — restore the range we
+  // captured on the control's mousedown so we style the intended span, not a collapsed/empty selection.
+  const cur = window.getSelection();
+  if (savedRange && (!cur || cur.rangeCount === 0 || !el.contains(cur.anchorNode))) {
+    cur?.removeAllRanges();
+    cur?.addRange(savedRange);
+  }
   try { document.execCommand("styleWithCSS", false, "true"); } catch { /* older webview */ }
   if (patch.bold !== undefined) document.execCommand("bold");
   if (patch.italic !== undefined) document.execCommand("italic");

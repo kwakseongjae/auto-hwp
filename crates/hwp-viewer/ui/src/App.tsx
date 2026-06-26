@@ -6,7 +6,7 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { tinykeys } from "tinykeys";
 import { api, type CellHit, type CaretRect, type CharFmt, type FindMatch, type ImageBox, type OutlineItem, type PageGeom, type Proposal, type ProposalOp, type RunDto, type TableBox } from "./api";
-import { runsToHtml, serializeEditor, runsUnchanged, applyLiveStyle } from "./richedit";
+import { runsToHtml, serializeEditor, runsUnchanged, applyLiveStyle, saveInlineSelection } from "./richedit";
 import { sanitizeSvg } from "./sanitize";
 import { advanceOffset, imageBoxToScreen, pageToScreen, screenToPage } from "./caret";
 import ImageOverlay from "./ImageOverlay";
@@ -85,7 +85,9 @@ function FormatControls({ fmt, onPatch }: {
       <button title="크게" onMouseDown={keep} onClick={() => onPatch({ sizePt: Math.min(96, size + 1) })}
         className="h-6 w-6 rounded hover:bg-black/5 dark:hover:bg-white/10">+</button>
       <span className="mx-0.5 h-4 w-px bg-black/10 dark:bg-white/10" />
-      <select title="글꼴" value={fmt.font ?? ""} onMouseDown={(e) => e.stopPropagation()}
+      {/* A native <select> takes focus on mousedown (preventDefault would stop the dropdown opening), so it
+          blurs the inline editor — save the editor's selection NOW so applyLiveStyle can restore + style it. */}
+      <select title="글꼴" value={fmt.font ?? ""} onMouseDown={(e) => { e.stopPropagation(); saveInlineSelection(); }}
         onChange={(e) => onPatch({ font: e.target.value })}
         className="max-w-[7rem] cursor-pointer rounded bg-transparent text-xs outline-none">
         <option value="">(기본 글꼴)</option>
@@ -2196,7 +2198,7 @@ export default function App() {
           doesn't shift the page (which would also stale the overlay positions); its CONTENT is
           contextual: format controls for the focused cell/paragraph, save/cancel while inline-editing. */}
       {viewMode === "own" && canEdit && pageCount > 0 && (
-        <div className="flex h-10 shrink-0 items-center gap-2 border-b border-black/10 bg-neutral-50/40 px-3 text-xs dark:border-white/10 dark:bg-neutral-800/30">
+        <div data-edit-ribbon className="flex h-10 shrink-0 items-center gap-2 border-b border-black/10 bg-neutral-50/40 px-3 text-xs dark:border-white/10 dark:bg-neutral-800/30">
           {charFmtState && fmtTarget ? (
             <>
               <span className="shrink-0 font-medium text-neutral-600 dark:text-neutral-300">
@@ -2578,7 +2580,14 @@ export default function App() {
                             const text = e.clipboardData.getData("text/plain");
                             document.execCommand("insertText", false, text);
                           }}
-                          onBlur={() => commitInlineEditFromDom(inlineEdit)}
+                          onBlur={(e) => {
+                            // Focus moving to a ribbon control (e.g. the 글꼴 <select>, which can't
+                            // preventDefault its focus) is NOT a real blur — keep the editor open so the
+                            // format routes to the live selection (applyLiveStyle), not a whole-cell op.
+                            const to = e.relatedTarget as HTMLElement | null;
+                            if (to && to.closest("[data-edit-ribbon]")) return;
+                            commitInlineEditFromDom(inlineEdit);
+                          }}
                           onKeyDown={(e) => {
                             // ⌘B / ⌘I / ⌘U → toggle the LIVE selection (visible immediately, serialized on commit).
                             if ((e.metaKey || e.ctrlKey) && /^[biu]$/i.test(e.key)) {
