@@ -2167,9 +2167,13 @@ export default function App() {
 
   return (
     <div className="relative flex h-full flex-col bg-neutral-100 text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100">
+      {/* Titlebar height is tuned to the NATIVE macOS traffic-light position (config trafficLightPosition,
+          ~18px center) so the OS lights land in the bar's vertical center WITHOUT us moving them — moving
+          them programmatically races macOS's layout and flickers (see lib.rs history). Shrink/grow this
+          height (and items-center keeps the content aligned to the lights) to fine-tune the centering. */}
       <header
         data-tauri-drag-region
-        className="flex h-12 shrink-0 items-center gap-2 border-b border-black/10 bg-neutral-50/70 pl-24 pr-3 backdrop-blur-xl dark:border-white/10 dark:bg-neutral-800/60"
+        className="flex h-9 shrink-0 items-center gap-2 border-b border-black/10 bg-neutral-50/70 pl-24 pr-3 backdrop-blur-xl dark:border-white/10 dark:bg-neutral-800/60"
       >
         {docName ? (
           <>
