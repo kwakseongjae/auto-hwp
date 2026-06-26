@@ -776,8 +776,71 @@ const CELL_PAD_X: f64 = 200.0;
 /// gov-doc border still renders as a crisp ~0.5px hairline instead of vanishing at our scale.
 const HAIRLINE_MIN_PX: f64 = 0.5;
 
-/// Place a cell's block content (paragraph glyphs) inside its box `(cx,cy,cw,ch)`, vertically centered.
-/// Nested tables inside a cell are NOT yet positioned (advance vertical only) — a follow-up.
+/// Draw a NESTED table (a table that lives inside a cell) at origin `(ox, oy)` within width `avail_w` on a
+/// SINGLE page. A nested table never paginates internally — its whole height is reserved as part of the
+/// outer cell's row — so this draws ALL rows at once (clipping if taller than the page, matching how an
+/// over-tall outer row already clips). Mirrors `flush_fragment`'s per-cell drawing (shade → border → diagonal
+/// → content) minus the page/fragment logic, and recurses through `place_cell_content` for deeper nesting.
+/// No `PlacedTable` provenance is pushed (nested cells aren't drag/edit targets yet).
+fn place_nested_table(
+    pg: &mut PlacedPage,
+    t: &Table,
+    ox: f64,
+    oy: f64,
+    avail_w: f64,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+) {
+    if t.rows == 0 || t.cols == 0 {
+        return;
+    }
+    let col_x = column_offsets(t, avail_w);
+    let row_h = row_heights(t, avail_w, doc, fonts);
+    // Absolute row tops (rebased to oy) — same accounting flush_fragment uses, so the drawn height equals
+    // the height block_height_for_place reserved for this nested table.
+    let mut row_top = vec![oy; t.rows + 1];
+    for r in 0..t.rows {
+        row_top[r + 1] = row_top[r] + row_h[r];
+    }
+    for c in &t.cells {
+        if !c.active || c.col >= t.cols || c.row >= t.rows {
+            continue;
+        }
+        let cx = ox + col_x[c.col];
+        let col_end = (c.col + c.col_span.max(1)).min(t.cols);
+        let cw = (col_x[col_end] - col_x[c.col]).max(1.0);
+        let cy = row_top[c.row];
+        let r1 = (c.row + c.row_span.max(1)).min(t.rows);
+        let ch = (row_top[r1] - cy).max(1.0);
+        if let Some(shade) = c.shade_color {
+            pg.rects.push(PlacedRect { x: cx, y: cy, w: cw, h: ch, fill: Some(shade) });
+        }
+        if c.has_edge_borders() {
+            push_cell_edges(pg, &c.borders, cx, cy, cw, ch);
+        } else if c.has_border {
+            pg.rects.push(PlacedRect { x: cx, y: cy, w: cw, h: ch, fill: None });
+        }
+        if let Some(d) = c.diagonal.filter(|_| !cell_has_text(&c.blocks)) {
+            let (y1, y2) = match d.kind {
+                DiagonalKind::Slash => (cy + ch, cy),
+                DiagonalKind::BackSlash => (cy, cy + ch),
+            };
+            pg.lines.push(PlacedLine {
+                x1: cx,
+                y1,
+                x2: cx + cw,
+                y2,
+                color: d.color,
+                style: LineStyle::Solid,
+                width: d.width_px.max(HAIRLINE_MIN_PX),
+            });
+        }
+        place_cell_content(pg, &c.blocks, cx, cy, cw, ch, doc, fonts);
+    }
+}
+
+/// Place a cell's block content (paragraph glyphs + nested tables) inside its box `(cx,cy,cw,ch)`,
+/// vertically centered. A nested table is drawn in place (see `place_nested_table`).
 fn place_cell_content(
     pg: &mut PlacedPage,
     blocks: &[Block],
@@ -795,8 +858,14 @@ fn place_cell_content(
     let plain = FontKey { family: String::new(), bold: false, italic: false };
     for b in blocks {
         let Block::Paragraph(p) = b else {
-            // nested table / other block: keep the vertical cursor moving so following paragraphs sit
-            // below it (the nested table's own glyphs aren't placed yet — TODO).
+            // A NESTED table (a table inside this cell): DRAW it at the current cursor — its height is
+            // already reserved in `content_h` (block_height_for_place's Table arm), so the cursor advances
+            // by the SAME amount and the pagination math is untouched. Before this, the nested table's
+            // glyphs/borders were skipped entirely → the cell (e.g. the 자가진단표 wrapped in a 1×1 table)
+            // rendered BLANK. Other block kinds just advance the cursor as before.
+            if let Block::Table(nt) = b {
+                place_nested_table(pg, nt, cx + CELL_PAD_X, vy, textw, doc, fonts);
+            }
             vy += block_height_for_place(b, doc, textw, fonts);
             continue;
         };
