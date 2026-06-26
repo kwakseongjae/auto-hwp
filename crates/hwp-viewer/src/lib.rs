@@ -1723,6 +1723,60 @@ async fn get_block_runs(
     .map_err(|e| e.to_string())?
 }
 
+/// The target cell/paragraph's BACKGROUND fill + horizontal alignment — the WYSIWYG inline editor paints
+/// itself to MATCH the original (a shaded cell stays shaded, a centered header stays centered) instead of
+/// a plain white left-aligned box, so editing reads as true in-place WYSIWYG.
+#[derive(serde::Serialize)]
+struct BlockStyleDto {
+    /// Cell fill as "#RRGGBB" (None = no fill / a paragraph → the white page background).
+    shade: Option<String>,
+    /// Horizontal text alignment: "left" | "center" | "right" | "justify".
+    align: String,
+}
+
+#[tauri::command]
+async fn block_style(
+    section: usize,
+    block: usize,
+    row: Option<usize>,
+    col: Option<usize>,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<BlockStyleDto, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let s = sess.lock().map_err(|_| "session poisoned")?;
+        let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+        use hwp_model::prelude::{Block, HorizontalAlign, Paragraph};
+        let align_of = |p: &Paragraph| -> String {
+            match doc.para_shapes.get(p.para_shape).map(|ps| ps.align).unwrap_or_default() {
+                HorizontalAlign::Left => "left",
+                HorizontalAlign::Right => "right",
+                HorizontalAlign::Center => "center",
+                _ => "justify", // Justify (양쪽, default) / Distribute / DistributeSpace
+            }
+            .to_string()
+        };
+        let mut dto = BlockStyleDto { shade: None, align: "justify".into() };
+        let Some(sec) = doc.sections.get(section) else { return Ok(dto) };
+        let Some(blk) = sec.blocks.get(block) else { return Ok(dto) };
+        match (blk, row, col) {
+            (Block::Paragraph(p), None, None) => dto.align = align_of(p),
+            (Block::Table(t), Some(r), Some(c)) => {
+                if let Some(cell) = t.cells.iter().find(|cc| cc.active && cc.row == r && cc.col == c) {
+                    dto.shade = cell.shade_color.map(|c| c.to_hex());
+                    if let Some(Block::Paragraph(p)) = cell.blocks.iter().find(|b| matches!(b, Block::Paragraph(_))) {
+                        dto.align = align_of(p);
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(dto)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// The WYSIWYG commit for a CELL — replace it with STYLED runs (preserves per-run formatting; the
 /// run-based `SetTableCell`). Returns the new page count.
 #[tauri::command]
@@ -1879,6 +1933,7 @@ pub fn run() {
             set_run_char_fmt,
             char_fmt,
             get_block_runs,
+            block_style,
             set_table_cell_runs,
             set_paragraph_runs,
             set_table_cell_shade,

@@ -315,6 +315,9 @@ export const api = {
    *  editor renders these as styled spans. A multi-paragraph cell joins paragraphs with a "\n" run. */
   getBlockRuns: (section: number, block: number, row: number | null, col: number | null) =>
     invoke<RunDto[]>("get_block_runs", { section, block, row, col }),
+  /** The target cell/paragraph's background fill + alignment, so the inline editor matches the original. */
+  blockStyle: (section: number, block: number, row: number | null, col: number | null) =>
+    invoke<{ shade: string | null; align: string }>("block_style", { section, block, row, col }),
   /** WYSIWYG commit for a CELL — replace it with STYLED runs (preserves per-run formatting). */
   setTableCellRuns: (section: number, index: number, row: number, col: number, runs: RunDto[]) =>
     invoke<number>("set_table_cell_runs", { section, index, row, col, runs }),

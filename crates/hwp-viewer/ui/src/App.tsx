@@ -352,6 +352,8 @@ export default function App() {
     text: string;
     runs: RunDto[]; // the block's styled runs → rendered as the contentEditable's initial HTML (WYSIWYG)
     scale: number; // page zoom (rect.width/viewBox.width) at open — for run size px ↔ pt round-trip
+    shade: string | null; // the cell's background fill (#RRGGBB) so the editor matches the original, not white
+    align: string; // "left"|"center"|"right"|"justify" — the editor matches the original alignment
     box: { x: number; y: number; w: number; h: number }; // own-engine px box → recompute screen on zoom
     screen: { left: number; top: number; width: number; height: number };
   };
@@ -833,8 +835,11 @@ export default function App() {
           // visible, unambiguous target right there during the edit (the user's "더블클릭 상태에 배경색").
           recomputeActiveCell(page, cell);
           const scale = dim.width / vbd.width;
-          const runs = await api.getBlockRuns(cell.section, cell.block, cell.row, cell.col).catch(() => [{ text: cell.text }]);
-          openInlineEdit({ kind: "cell", page, section: cell.section, block: cell.block, row: cell.row, col: cell.col, text: cell.text, runs, scale, box, screen });
+          const [runs, style] = await Promise.all([
+            api.getBlockRuns(cell.section, cell.block, cell.row, cell.col).catch(() => [{ text: cell.text }]),
+            api.blockStyle(cell.section, cell.block, cell.row, cell.col).catch(() => ({ shade: null, align: "justify" })),
+          ]);
+          openInlineEdit({ kind: "cell", page, section: cell.section, block: cell.block, row: cell.row, col: cell.col, text: cell.text, runs, scale, shade: style.shade, align: style.align, box, screen });
         }
         return;
       }
@@ -853,8 +858,11 @@ export default function App() {
         const screen = imageBoxToScreen(box, dim, vbd);
         if (screen) {
           const scale = dim.width / vbd.width;
-          const runs = await api.getBlockRuns(hit.section, hit.block, null, null).catch(() => [{ text: hit.text }]);
-          openInlineEdit({ kind: "para", page, section: hit.section, block: hit.block, text: hit.text, runs, scale, box, screen });
+          const [runs, style] = await Promise.all([
+            api.getBlockRuns(hit.section, hit.block, null, null).catch(() => [{ text: hit.text }]),
+            api.blockStyle(hit.section, hit.block, null, null).catch(() => ({ shade: null, align: "justify" })),
+          ]);
+          openInlineEdit({ kind: "para", page, section: hit.section, block: hit.block, text: hit.text, runs, scale, shade: style.shade, align: style.align, box, screen });
         }
       }
     } catch (err) { toast("warn", `${err}`); }
@@ -1503,8 +1511,11 @@ export default function App() {
         if (screen) {
           recomputeActiveCell(sel.page, cell); // focused cell = shading reference (see onPageDoubleClick)
           const scale = dim.width / vbd.width;
-          const runs = await api.getBlockRuns(cell.section, cell.block, cell.row, cell.col).catch(() => [{ text: cell.text }]);
-          openInlineEdit({ kind: "cell", page: sel.page, section: cell.section, block: cell.block, row: cell.row, col: cell.col, text: cell.text, runs, scale, box, screen });
+          const [runs, style] = await Promise.all([
+            api.getBlockRuns(cell.section, cell.block, cell.row, cell.col).catch(() => [{ text: cell.text }]),
+            api.blockStyle(cell.section, cell.block, cell.row, cell.col).catch(() => ({ shade: null, align: "justify" })),
+          ]);
+          openInlineEdit({ kind: "cell", page: sel.page, section: cell.section, block: cell.block, row: cell.row, col: cell.col, text: cell.text, runs, scale, shade: style.shade, align: style.align, box, screen });
         }
       } catch { /* ignore */ }
     })();
@@ -2511,24 +2522,21 @@ export default function App() {
                             className="absolute rounded-md border-2 border-dashed border-ai/70 bg-ai/5"
                             style={{ left: `${scopePin.screen.left}px`, top: `${scopePin.screen.top}px`, width: `${scopePin.screen.width}px`, height: `${scopePin.screen.height}px` }}
                           >
-                            <span className="pointer-events-auto absolute -left-px -top-[1.3rem] flex items-center gap-1 rounded-t-md bg-ai px-1.5 py-0.5 text-[10px] font-medium text-white shadow-sm">
+                            {/* Bigger, more legible chip; the 🗑 delete button is removed (Delete/Backspace
+                                already deletes the pointed block) per the user's request. */}
+                            <span className="pointer-events-auto absolute -left-px -top-8 flex items-center gap-1.5 rounded-t-md bg-ai px-2.5 py-1 text-sm font-medium text-white shadow-sm">
                               <button
                                 onClick={(e) => { e.stopPropagation(); setChatOpen(true); }}
                                 title="이 위치를 AI에게 요청 (채팅 열기)"
-                                className="flex items-center gap-1 leading-none"
+                                className="flex items-center gap-1.5 leading-none"
                               >
                                 <span aria-hidden>✦</span>
                                 여기{scopePin.kind === "table" ? " · 표" : scopePin.kind === "image" ? " · 그림" : ""}에 요청
                               </button>
                               <button
-                                onClick={(e) => { e.stopPropagation(); deleteBlockAt(scopePin.section, scopePin.block); }}
-                                title="이 블록 삭제 (Delete)"
-                                className="ml-0.5 rounded px-0.5 leading-none hover:bg-white/25"
-                              >🗑</button>
-                              <button
                                 onClick={(e) => { e.stopPropagation(); clearScope(); }}
                                 title="가리키기 해제 (Esc)"
-                                className="rounded px-0.5 leading-none hover:bg-white/25"
+                                className="ml-0.5 rounded px-1 text-base leading-none hover:bg-white/25"
                               >✕</button>
                             </span>
                           </div>
@@ -2610,11 +2618,21 @@ export default function App() {
                             // round-trips without writing a spurious #171717 (which also recolored true black
                             // and defeated the engine's shape-preservation no-op).
                             color: "#000000",
+                            // TRUE WYSIWYG: paint the editor with the cell's OWN background + alignment so it
+                            // reads as in-place editing harmonized with the original, not a white box over a
+                            // shaded table. No shade (or a paragraph) → white page background.
+                            backgroundColor: inlineEdit.shade ?? "#ffffff",
+                            textAlign: (inlineEdit.align as React.CSSProperties["textAlign"]) || "left",
+                            // Vertically center the line(s) the way HWP table cells do (the cell box is the
+                            // row height), so a single-line header sits where the original draws it.
+                            display: "flex",
+                            flexDirection: "column",
+                            justifyContent: "safe center", // center single lines; fall back to top when content overflows (no clip)
                           }}
-                          // White bg (the page is white even in app dark mode); an accent ring marks the
-                          // active editor. leading-snug ≈ the own-render line spacing. The span styles carry
-                          // the per-run font/size/weight so the text reads WYSIWYG.
-                          className="z-40 overflow-auto whitespace-pre-wrap break-words rounded-[2px] bg-white px-1 py-0.5 text-left leading-snug text-neutral-900 shadow-[0_0_0_2px_var(--color-accent,#2563eb)] outline-none ring-2 ring-accent/40"
+                          // An accent ring marks the active editor; bg/align come from the cell (inline style
+                          // above). leading-snug ≈ the own-render line spacing; the span styles carry the
+                          // per-run font/size/weight/color so the text reads WYSIWYG.
+                          className="z-40 overflow-auto whitespace-pre-wrap break-words rounded-[2px] px-1 py-0.5 leading-snug shadow-[0_0_0_2px_var(--color-accent,#2563eb)] outline-none ring-2 ring-accent/40"
                         />
                       )}
                       {/* (Save/cancel + keymap hint moved to the TOP edit toolbar so they don't float over
