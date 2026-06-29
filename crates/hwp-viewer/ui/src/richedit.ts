@@ -54,6 +54,21 @@ function rgbToHex(rgb: string): string | undefined {
 
 type Style = Omit<RunDto, "text">;
 
+/** The EFFECTIVE char style at the current selection (caret/anchor) inside a contentEditable — for
+ *  live-syncing the format ribbon as the caret moves over differently-styled text. `scale` maps px→pt.
+ *  Returns null when there's no selection or it isn't inside `root`. */
+export function readCaretStyle(
+  root: HTMLElement,
+  scale: number,
+): { bold: boolean; italic: boolean; size_pt: number; font: string | null } | null {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || !sel.anchorNode || !root.contains(sel.anchorNode)) return null;
+  const node = sel.anchorNode;
+  const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as HTMLElement);
+  const st = styleOf(el, scale);
+  return { bold: !!st.bold, italic: !!st.italic, size_pt: st.size_pt ?? DEFAULT_PT, font: st.font ?? null };
+}
+
 /** The EFFECTIVE styles of a text node's nearest element, read from the computed style (works no matter
  *  how the style was applied — execCommand spans, our render spans, inline styles all compute the same). */
 function styleOf(el: HTMLElement | null, scale: number): Style {

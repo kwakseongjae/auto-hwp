@@ -6,7 +6,7 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { tinykeys } from "tinykeys";
 import { api, type CellHit, type CaretRect, type CharFmt, type FindMatch, type ImageBox, type OutlineItem, type PageGeom, type Proposal, type ProposalOp, type RunDto, type TableBox } from "./api";
-import { runsToHtml, serializeEditor, runsUnchanged, applyLiveStyle, saveInlineSelection } from "./richedit";
+import { runsToHtml, serializeEditor, runsUnchanged, applyLiveStyle, saveInlineSelection, readCaretStyle } from "./richedit";
 import { sanitizeSvg } from "./sanitize";
 import { advanceOffset, imageBoxToScreen, pageToScreen, screenToPage } from "./caret";
 import ImageOverlay from "./ImageOverlay";
@@ -169,6 +169,15 @@ function FormatControls({ fmt, onPatch }: {
 }) {
   const size = Math.round(fmt.size_pt);
   const keep = (e: React.MouseEvent) => e.preventDefault();
+  // The size box is directly EDITABLE: type a value + Enter/blur applies it. Kept in a local string
+  // so partial typing doesn't fight the controlled value; re-synced whenever the selection's size changes.
+  const [sizeText, setSizeText] = useState(String(size));
+  useEffect(() => setSizeText(String(size)), [size]);
+  const applySize = () => {
+    const v = parseInt(sizeText, 10);
+    if (Number.isFinite(v) && v >= 4 && v <= 96 && v !== size) onPatch({ sizePt: v });
+    else setSizeText(String(size)); // invalid/empty → revert to the current size
+  };
   return (
     <div className="flex items-center gap-0.5">
       <button title="굵게" onMouseDown={keep} onClick={() => onPatch({ bold: !fmt.bold })}
@@ -178,7 +187,18 @@ function FormatControls({ fmt, onPatch }: {
       <span className="mx-0.5 h-4 w-px bg-black/10 dark:bg-white/10" />
       <button title="작게" onMouseDown={keep} onClick={() => onPatch({ sizePt: Math.max(4, size - 1) })}
         className="h-6 w-6 rounded hover:bg-black/5 dark:hover:bg-white/10">−</button>
-      <span className="min-w-[1.6rem] text-center tabular-nums" title="글자 크기(pt)">{size}</span>
+      {/* editable size (pt). preventDefault would block focus, so instead save the editor selection on
+          mousedown (like the font <select>) so applyLiveStyle can restore + style it on Enter/blur. */}
+      <input
+        value={sizeText}
+        title="글자 크기(pt) — 입력 후 Enter"
+        inputMode="numeric"
+        onMouseDown={(e) => { e.stopPropagation(); saveInlineSelection(); }}
+        onChange={(e) => setSizeText(e.target.value.replace(/[^0-9]/g, "").slice(0, 2))}
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); applySize(); (e.currentTarget as HTMLInputElement).blur(); } }}
+        onBlur={applySize}
+        className="w-8 rounded bg-transparent text-center tabular-nums outline-none focus:bg-black/5 dark:focus:bg-white/10"
+      />
       <button title="크게" onMouseDown={keep} onClick={() => onPatch({ sizePt: Math.min(96, size + 1) })}
         className="h-6 w-6 rounded hover:bg-black/5 dark:hover:bg-white/10">+</button>
       <span className="mx-0.5 h-4 w-px bg-black/10 dark:bg-white/10" />
@@ -1453,6 +1473,23 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fmtTarget?.section, fmtTarget?.block, fmtTarget?.row, fmtTarget?.col, viewMode]);
 
+  // Live-sync the ribbon to the caret as it moves in the WYSIWYG editor — so the size/굵게/기울임/글꼴
+  // display reflects the text AT the cursor in real time (not just the cell's initial format). Active
+  // only while inline-editing; reads the effective computed style at the selection anchor.
+  useEffect(() => {
+    if (!inlineEdit || inlineEdit.kind !== "cell") return;
+    const scale = inlineEdit.scale;
+    const onSel = () => {
+      const el = document.querySelector("[data-inline-edit]") as HTMLElement | null;
+      if (!el) return;
+      const s = readCaretStyle(el, scale);
+      if (!s) return;
+      setCharFmtState((prev) => (prev ? { ...prev, bold: s.bold, italic: s.italic, size_pt: s.size_pt, font: s.font } : prev));
+    };
+    document.addEventListener("selectionchange", onSel);
+    return () => document.removeEventListener("selectionchange", onSel);
+  }, [inlineEdit]);
+
   // Re-place the active-cell ring from the FRESH cell geometry after a repaint (the row may have GROWN
   // from a size change — reusing the pre-edit box left the bigger text poking out of a stale ring).
   const reselectCellAfterRepaint = useCallback((section: number, block: number, row: number, col: number) => {
@@ -2398,7 +2435,20 @@ export default function App() {
                   otherwise it applies a whole-target format op to the clicked cell/paragraph. */}
               <FormatControls
                 fmt={charFmtState}
-                onPatch={(p) => { if (inlineEditRef.current) applyLiveStyle(p, inlineEditRef.current.scale); else commitCharFmt(p); }}
+                onPatch={(p) => {
+                  if (inlineEditRef.current) {
+                    applyLiveStyle(p, inlineEditRef.current.scale);
+                    // Reflect the change in the ribbon IMMEDIATELY (the live-edit path doesn't re-fetch
+                    // the cell format, so without this the size/bold/italic display lagged behind the edit).
+                    setCharFmtState((prev) => prev ? {
+                      ...prev,
+                      bold: p.bold ?? prev.bold,
+                      italic: p.italic ?? prev.italic,
+                      size_pt: p.sizePt ?? prev.size_pt,
+                      font: p.font ?? prev.font,
+                    } : prev);
+                  } else commitCharFmt(p);
+                }}
               />
             </>
           ) : (
