@@ -2805,9 +2805,10 @@ export default function App() {
                             color: "#000000",
                             backgroundColor: frozenEdit.shade ?? "#ffffff",
                             textAlign: (frozenEdit.align as React.CSSProperties["textAlign"]) || "left",
-                            display: "flex",
-                            flexDirection: "column",
-                            justifyContent: "safe center",
+                            // table-cell + middle = vertical center WITHOUT stacking each run-span on its own
+                            // row (must match the live editor so the post-commit snapshot doesn't reflow).
+                            display: "table-cell",
+                            verticalAlign: "middle",
                           }}
                           dangerouslySetInnerHTML={{ __html: frozenEdit.html }}
                         />
@@ -2883,15 +2884,16 @@ export default function App() {
                             backgroundColor: inlineEdit.shade ?? "#ffffff",
                             textAlign: (inlineEdit.align as React.CSSProperties["textAlign"]) || "left",
                             // Vertically center the line(s) the way HWP table cells do (the cell box is the
-                            // row height), so a single-line header sits where the original draws it.
-                            display: "flex",
-                            flexDirection: "column",
-                            justifyContent: "safe center", // center single lines; fall back to top when content overflows (no clip)
+                            // row height). table-cell + middle keeps the RUN SPANS flowing INLINE (a flex
+                            // column made each run its own row → a spurious line break after a symbol run
+                            // like "Ⅱ." / "※ "); table-cell vertical-centers inline content without stacking.
+                            display: "table-cell",
+                            verticalAlign: "middle",
                           }}
                           // An accent ring marks the active editor; bg/align come from the cell (inline style
                           // above). leading-snug ≈ the own-render line spacing; the span styles carry the
                           // per-run font/size/weight/color so the text reads WYSIWYG.
-                          className="z-40 overflow-auto whitespace-pre-wrap break-words rounded-[2px] px-1 py-0.5 leading-snug shadow-[0_0_0_2px_var(--color-accent,#2563eb)] outline-none ring-2 ring-accent/40"
+                          className="z-40 whitespace-pre-wrap break-words rounded-[2px] px-1 py-0.5 leading-snug shadow-[0_0_0_2px_var(--color-accent,#2563eb)] outline-none ring-2 ring-accent/40"
                         />
                       )}
                       {/* (Save/cancel + keymap hint moved to the TOP edit toolbar so they don't float over
