@@ -171,6 +171,9 @@ impl RealFontMetrics {
 
     /// Real vertical metrics in HWPUNIT for a line at `size_hwpunit`: (ascent, descent, line_gap).
     /// Scaled from the font's `units_per_em`. Falls back to Hancom's 850/150/0 split if no font.
+    /// Retained for a future Fixed/Minimum (고정/최소) line-spacing floor — Percent spacing (the common
+    /// case) multiplies the bare EM, so `line_height` no longer consults the leading.
+    #[allow(dead_code)]
     pub fn vmetrics(&self, size_hwpunit: i32) -> (f64, f64, f64) {
         let em = size_hwpunit.max(1) as f64;
         match &self.font {
@@ -285,9 +288,13 @@ impl FontMetricsProvider for RealFontMetrics {
     /// headless/CI matches the approximation exactly. Clamped to ≥ 1 EM so a tight face never makes
     /// rows SHORTER than the historical baseline (which would only worsen the too-tight pagination).
     fn line_height(&self, size_hwpunit: i32) -> f64 {
-        let em = size_hwpunit.max(1) as f64;
-        let (asc, desc, gap) = self.vmetrics(size_hwpunit);
-        (asc + desc + gap).max(em)
+        // HWP percent line spacing (줄간격 N%) multiplies the EM (font size), NOT the font leading:
+        // Hancom's measured real per-line advance = N% × EM (rhwp LineSeg vertical_pos confirms 1.60 for
+        // 160% on BOTH benchmarks). Returning the leading (asc+desc+gap ≈ 1.25em) here made the advance
+        // (line_height × ratio) ≈ 1.25em×1.6 = 1.92em — ~25% too tall, the dominant table over-reservation.
+        // Bare EM matches Hancom + ApproxFontMetrics. (The font leading is not applied to Percent spacing;
+        // a Fixed/Minimum-spacing floor can be reintroduced per-type later if needed.)
+        size_hwpunit.max(1) as f64
     }
 }
 
@@ -365,17 +372,14 @@ mod tests {
     }
 
     #[test]
-    fn line_height_is_at_least_em_and_matches_vmetrics() {
+    fn line_height_is_bare_em_for_percent_spacing() {
+        // HWP 줄간격 N% multiplies the EM, NOT the font leading. So line_height returns the bare EM
+        // (per-line advance = line_height × ratio = EM × N%, matching Hancom's measured 1.60 for 160%).
+        // Using the leading here double-counted it (~25% over-tall rows). vmetrics() is retained for a
+        // future Fixed/Minimum-spacing floor but no longer drives the Percent-spacing line box.
         let m = RealFontMetrics::new();
-        let lh = m.line_height(1000);
-        // Never shorter than the EM (clamped), and equal to ascent+descent+gap for a real face.
-        assert!(lh >= 1000.0, "line height clamps to ≥ EM, got {lh}");
-        if m.is_real() {
-            let (a, d, g) = m.vmetrics(1000);
-            assert!((lh - (a + d + g).max(1000.0)).abs() < 1.0, "line height = leading: {lh}");
-            // A Korean face's leading runs OVER one EM — that's the whole point of the calibration.
-            assert!(lh > 1000.0, "real Korean face line height should exceed the bare EM, got {lh}");
-        }
+        assert_eq!(m.line_height(1000), 1000.0, "line height = bare EM (percent spacing scales the EM)");
+        assert_eq!(m.line_height(1200), 1200.0);
     }
 
     #[test]

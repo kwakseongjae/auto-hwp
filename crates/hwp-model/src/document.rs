@@ -148,6 +148,10 @@ pub struct Paragraph {
     pub id: Option<NodeId>,
     /// Index into `SemanticDoc::para_shapes`.
     pub para_shape: usize,
+    /// A hard 쪽 나누기 (page break) BEFORE this paragraph — per-INSTANCE, from HWP's paragraph
+    /// `column_type == Page/Section` (NOT the shared para_shape's attr1 bit19, which can't carry a
+    /// per-paragraph break). Pagination forces a fresh page when set, OR'd with the para_shape flag.
+    pub page_break_before: bool,
     /// Requested named style (e.g. "개요 1"); resolved to a `styleIDRef` by the serializer.
     pub style_name: Option<String>,
     pub runs: Vec<Run>,

@@ -154,6 +154,14 @@ impl<'a> Lifter<'a> {
         blocks.push(Block::Paragraph(Paragraph {
             para_shape: self.para_id_to_idx.get(&p.para_shape_id).copied().unwrap_or(0),
             runs,
+            // A hard 쪽/구역 나누기 carried on the PARAGRAPH (not the shared para_shape). Hancom paginates
+            // these gov templates by forced page breaks on chapter headings — without honoring them our
+            // page count only matched by coincidence (inflated heights). Page and Section both start a
+            // fresh page for our purposes.
+            page_break_before: matches!(
+                p.column_type,
+                rhwp::model::paragraph::ColumnBreakType::Page | rhwp::model::paragraph::ColumnBreakType::Section
+            ),
             provenance: Provenance { source: Some(SourceFormat::Hwp5), raw: None },
             ..Default::default()
         }));

@@ -290,7 +290,7 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
             match block {
                 Block::Paragraph(p) => {
                     let ps = doc.para_shapes.get(p.para_shape);
-                    if ps.map(|s| s.page_break_before).unwrap_or(false) && vert > 0.0 {
+                    if (p.page_break_before || ps.map(|s| s.page_break_before).unwrap_or(false)) && vert > 0.0 {
                         new_page(&mut pages, page);
                         vert = 0.0;
                     }
@@ -368,7 +368,7 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
             match block {
                 Block::Paragraph(p) => {
                     let ps = doc.para_shapes.get(p.para_shape);
-                    if ps.map(|s| s.page_break_before).unwrap_or(false) && vert > 0.0 {
+                    if (p.page_break_before || ps.map(|s| s.page_break_before).unwrap_or(false)) && vert > 0.0 {
                         page_idx += 1;
                         vert = 0.0;
                     }

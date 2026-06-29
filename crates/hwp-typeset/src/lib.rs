@@ -100,8 +100,9 @@ impl LayoutEngine for NaiveLayout {
                     Block::Paragraph(p) => {
                         let ps = doc.para_shapes.get(p.para_shape);
                         // "쪽 나누기 앞에서": force a page break before this paragraph (unless already
-                        // at the top of a fresh page).
-                        if ps.map(|s| s.page_break_before).unwrap_or(false) && vert > 0.0 {
+                        // at the top of a fresh page). The per-paragraph flag (HWP column_type Page/
+                        // Section) OR the shared para_shape's attr1 bit19.
+                        if (p.page_break_before || ps.map(|s| s.page_break_before).unwrap_or(false)) && vert > 0.0 {
                             pages.push(new_page(page));
                             vert = 0.0;
                         }
@@ -157,9 +158,11 @@ fn new_page(page: &PageSetup) -> PageLayout {
     PageLayout { width: page.width as f64, height: page.height as f64, lines: Vec::new() }
 }
 
-/// Vertical cell padding (HWPUNIT) — top+bottom default cell insets (~0.5mm each) plus a little
-/// row breathing room. Approximate; the per-cell margin override isn't modeled yet.
-pub(crate) const CELL_PAD: f64 = 600.0;
+/// Vertical cell padding (HWPUNIT) — HWP's default top+bottom cell insets (~141 HWPUNIT ≈ 0.49 mm each
+/// = ~280 total), measured from rhwp's parsed cell geometry (277.8 on benchmark1 / 281.4 on benchmark).
+/// Was 600 (≈2.15× too high), which over-reserved every table row; safe to correct now that the gate's
+/// page count is anchored by structural 쪽 나누기 (column_type) rather than inflated row heights.
+pub(crate) const CELL_PAD: f64 = 280.0;
 
 /// Laid-out height of one block (HWPUNIT) at the given content width — paragraph (lines×spacing +
 /// 위/아래 간격) or a nested table (recursive). Drives table-row sizing + pagination accounting.
