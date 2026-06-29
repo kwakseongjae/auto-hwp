@@ -588,6 +588,12 @@ fn lift_equation(eq: &rhwp::model::control::Equation) -> EquationRef {
 fn lift_char_shape(c: &RCharShape, doc: &RDoc) -> CharShape {
     CharShape {
         height: c.base_size,
+        // 장평/자간 drive cell line-breaking (this doc compresses dense table text to ratio 90–98% /
+        // spacing −5…−12); dropping them over-wrapped the 자가진단/동의서 tables → extra pages. rhwp's
+        // per-script arrays are already in our ScriptClass order (Hangul, Latin, Hanja, Japanese, Other,
+        // Symbol, User). Display/export still ignore these — they exist for the line-break advance.
+        ratio: PerScript(c.ratios),
+        spacing: PerScript(c.spacings),
         bold: c.bold,
         italic: c.italic,
         underline: c.underline_type != UnderlineType::None,

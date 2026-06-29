@@ -528,7 +528,7 @@ fn place_paragraph(
         let mut x = x0;
         let plain = FontKey { family: String::new(), bold: false, italic: false };
         for g in glyphs.get(start..end.min(glyphs.len())).unwrap_or(&[]) {
-            let adv = fonts.advance_width(&plain, g.ch, g.size as i32);
+            let adv = fonts.advance_width(&plain, g.ch, g.size as i32) * g.ratio + g.spacing_em * g.size;
             if g.ch != ' ' && g.ch != '\t' && g.ch != '\n' {
                 pg.glyphs.push(PlacedGlyph {
                     x,
@@ -932,7 +932,7 @@ fn place_cell_content(
             let end = lines.get(li + 1).map(|n| n.text_pos as usize).unwrap_or(glyphs.len());
             let mut x = x0;
             for g in glyphs.get(start..end.min(glyphs.len())).unwrap_or(&[]) {
-                let adv = fonts.advance_width(&plain, g.ch, g.size as i32);
+                let adv = fonts.advance_width(&plain, g.ch, g.size as i32) * g.ratio + g.spacing_em * g.size;
                 if g.ch != ' ' && g.ch != '\t' && g.ch != '\n' {
                     pg.glyphs.push(PlacedGlyph {
                         x,
@@ -1040,6 +1040,12 @@ struct GlyphInfo {
     /// Requested font family (CharShape.font_family) — display only (the SVG/text font-family); advances
     /// still use the default metrics, so a font change re-DISPLAYS without reflowing.
     font: Option<String>,
+    /// 장평 (width scale, default 1.0) + 자간 (letter gap as a fraction of the EM, default 0.0), resolved
+    /// from the run's char shape per the glyph's script. The DRAWN advance must apply these so glyphs
+    /// sit where the line-breaker (which now scales advances) computed — else a compressed run renders
+    /// ~10% too wide and overflows its column.
+    ratio: f64,
+    spacing_em: f64,
 }
 
 fn paragraph_glyphs(p: &Paragraph, doc: &SemanticDoc) -> Vec<GlyphInfo> {
@@ -1055,7 +1061,16 @@ fn paragraph_glyphs(p: &Paragraph, doc: &SemanticDoc) -> Vec<GlyphInfo> {
         for inl in &run.content {
             if let Inline::Text(t) = inl {
                 for ch in t.chars() {
-                    out.push(GlyphInfo { ch: crate::subst_glyph(ch), size, color, underline, bold, italic, font: font.clone() });
+                    let sch = crate::subst_glyph(ch);
+                    let (ratio, spacing_em) = cs
+                        .map(|c| {
+                            let slot = crate::script_slot(sch);
+                            let r = match *c.ratio.get(slot) { 0 => 100, r => r.clamp(50, 200) } as f64 / 100.0;
+                            let s = (*c.spacing.get(slot)).clamp(-50, 50) as f64 / 100.0;
+                            (r, s)
+                        })
+                        .unwrap_or((1.0, 0.0));
+                    out.push(GlyphInfo { ch: sch, size, color, underline, bold, italic, font: font.clone(), ratio, spacing_em });
                 }
             }
         }

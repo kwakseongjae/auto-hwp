@@ -338,21 +338,25 @@ pub(crate) fn subst_glyph(ch: char) -> char {
 /// break: fill the line, then for a Latin word that straddles the edge back up to the last space;
 /// Hangul/CJK break anywhere. Exposed for per-paragraph `linesegarray` emission.
 pub fn layout_paragraph(p: &Paragraph, doc: &SemanticDoc, line_width: f64, fonts: &dyn FontMetricsProvider) -> Vec<LineSeg> {
-    // (char, size_hwpunit) for every text glyph, in order.
+    // (char, size_hwpunit) for every text glyph, in order, plus its 장평/자간-scaled advance.
     let mut chars: Vec<(char, i32)> = Vec::new();
+    let mut advs: Vec<f64> = Vec::new();
+    let font = plain_font();
     for run in &p.runs {
-        let size = doc.char_shapes.get(run.char_shape).map(|c| c.height).filter(|&h| h > 0).unwrap_or(1000);
+        let cs = doc.char_shapes.get(run.char_shape);
+        let size = cs.map(|c| c.height).filter(|&h| h > 0).unwrap_or(1000);
         for inl in &run.content {
             if let Inline::Text(t) = inl {
                 for ch in t.chars() {
-                    chars.push((subst_glyph(ch), size));
+                    let sch = subst_glyph(ch);
+                    chars.push((sch, size));
+                    advs.push(scaled_advance(sch, size, cs, &font, fonts));
                 }
             }
         }
     }
     let n = chars.len();
-    let font = plain_font();
-    let adv = |i: usize| fonts.advance_width(&font, chars[i].0, chars[i].1);
+    let adv = |i: usize| advs[i];
 
     // Tallest anchored object (image/equation) — an object paragraph is ONE line, but as tall as
     // the object (so pagination accounts for a half-page image, not a 1000-unit text line).
@@ -410,7 +414,7 @@ pub fn layout_paragraph(p: &Paragraph, doc: &SemanticDoc, line_width: f64, fonts
                         e += 1;
                     }
                     let e = e.max(start + 1);
-                    let (whole_w, _) = measure(&chars, start, e, &font, fonts);
+                    let (whole_w, _) = measure(&chars, &advs, start, e);
                     if whole_w > line_width {
                         end.max(start + 1) // char-break: keep the line within line_width
                     } else {
@@ -421,7 +425,7 @@ pub fn layout_paragraph(p: &Paragraph, doc: &SemanticDoc, line_width: f64, fonts
         } else {
             end.max(start + 1)
         };
-        let (lw, measured_size) = measure(&chars, start, line_end, &font, fonts);
+        let (lw, measured_size) = measure(&chars, &advs, start, line_end);
         // An empty line (a '\n' at the line start → blank line) has no glyph to size from; use the
         // break char's own font size so the blank line gets a real height, not a collapsed sliver.
         let max_size = if line_end == start {
@@ -465,15 +469,44 @@ fn object_height(p: &Paragraph) -> i32 {
     h.max(0)
 }
 
-/// Sum of advances + max glyph size over `[a, b)`.
-fn measure(chars: &[(char, i32)], a: usize, b: usize, font: &FontKey, fonts: &dyn FontMetricsProvider) -> (f64, i32) {
+/// Sum of (pre-scaled) advances + max glyph size over `[a, b)`. `advs` parallels `chars` and already
+/// carries each glyph's 장평/자간-scaled advance (see `scaled_advance`).
+fn measure(chars: &[(char, i32)], advs: &[f64], a: usize, b: usize) -> (f64, i32) {
     let mut w = 0.0;
     let mut sz = 0;
-    for &(ch, size) in &chars[a..b] {
-        w += fonts.advance_width(font, ch, size);
-        sz = sz.max(size);
+    for i in a..b {
+        w += advs[i];
+        sz = sz.max(chars[i].1);
     }
     (w, sz.max(1))
+}
+
+/// Per-glyph advance (HWPUNIT) with 장평 (width ratio) + 자간 (letter spacing) from the run's char shape
+/// applied — a pure geometric transform on the font's base advance, face-independent. 장평 scales the
+/// advance (50–200%; 0/unset = 100%); 자간 adds a per-glyph gap as a fraction of the EM (−50…50%). A
+/// `None` shape or the default 0/0 is an EXACT no-op, so paragraphs with no 장평/자간 break byte-for-byte
+/// as before. Mirrors `shaper::RealFontMetrics::advance_scaled` so the breaker, NaiveLayout and the
+/// placer share ONE width truth.
+fn scaled_advance(ch: char, size: i32, cs: Option<&CharShape>, font: &FontKey, fonts: &dyn FontMetricsProvider) -> f64 {
+    let base = fonts.advance_width(font, ch, size);
+    let Some(cs) = cs else { return base };
+    let script = script_slot(ch);
+    let ratio = match *cs.ratio.get(script) { 0 => 100, r => r.clamp(50, 200) } as f64 / 100.0;
+    let spacing = (*cs.spacing.get(script)).clamp(-50, 50) as f64 / 100.0;
+    base * ratio + spacing * size as f64
+}
+
+/// Coarse Unicode → [`ScriptClass`] for picking the per-script 장평/자간 slot (mirrors the shaper's
+/// `script_of`). Most docs set the 7 slots uniformly, so the exact split rarely matters. `pub(crate)`
+/// so the placer (place.rs) resolves the same slot when it scales the DRAWN glyph advance.
+pub(crate) fn script_slot(ch: char) -> ScriptClass {
+    match ch as u32 {
+        0x1100..=0x11FF | 0x3130..=0x318F | 0xA960..=0xA97F | 0xAC00..=0xD7A3 | 0xD7B0..=0xD7FF => ScriptClass::Hangul,
+        0x2E80..=0x2FDF | 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF => ScriptClass::Hanja,
+        0x3040..=0x30FF => ScriptClass::Japanese,
+        0x0000..=0x024F => ScriptClass::Latin,
+        _ => ScriptClass::Other,
+    }
 }
 
 /// One line at `text_pos` with line `height` (HWPUNIT, already resolved via the metrics provider's
@@ -550,6 +583,20 @@ mod tests {
         assert_eq!(lines[0].text_pos, 0);
         assert_eq!(lines[1].text_pos, 10);
         assert_eq!(lines[2].text_pos, 20);
+    }
+
+    #[test]
+    fn jangpyeong_ratio_compresses_advances_and_fits_more_per_line() {
+        // 장평 (CharShape.ratio) scales the line-break advance: at 50% each full-width glyph advances
+        // 500 (not 1000), so twice as many fit per line → fewer lines. Regression for the dense gov-doc
+        // cell over-wrap (consent/자가진단 tables compress to ratio 90–98%). 자간 0 here isolates 장평.
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape { ratio: PerScript::uniform(50), ..Default::default() }); // 50% 장평
+        let p = para(&"가".repeat(30));
+        // width 10000: at 50% 장평, 20 glyphs/line → 2 lines (vs 3 lines at 100% — see hangul_breaks_*).
+        let lines = layout_paragraph(&p, &doc, 10000.0, &ApproxFontMetrics);
+        assert_eq!(lines.len(), 2, "50% 장평 packs 20 glyphs/line → 2 lines (3 at full width)");
+        assert_eq!(lines[1].text_pos, 20);
     }
 
     #[test]
