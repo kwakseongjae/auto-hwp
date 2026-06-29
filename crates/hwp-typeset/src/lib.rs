@@ -233,6 +233,18 @@ pub(crate) fn unwrap_frame_table(t: &Table) -> Option<(Table, Option<CellEdge>)>
     Some((inner, frame))
 }
 
+/// A blank paragraph — no visible text and no anchored object. INSIDE a table cell Hancom collapses
+/// these (they don't reserve a full leading line), so the cell-height fns (`block_height` +
+/// `block_height_for_place`) give them 0. The BODY path (`layout_paragraph`) still gives a top-level
+/// blank paragraph its full-EM line, which is load-bearing for benchmark.hwp's page count — so this
+/// collapse is scoped to the cell-content height fns ONLY.
+pub(crate) fn is_blank_para(p: &Paragraph) -> bool {
+    object_height(p) == 0
+        && p.runs.iter().all(|r| {
+            r.content.iter().all(|i| !matches!(i, Inline::Text(s) if !s.trim().is_empty()))
+        })
+}
+
 /// Laid-out height of one block (HWPUNIT) at the given content width — paragraph (lines×spacing +
 /// 위/아래 간격) or a nested table (recursive). Drives table-row sizing + pagination accounting.
 fn block_height(b: &Block, doc: &SemanticDoc, width: f64, fonts: &dyn FontMetricsProvider) -> f64 {
@@ -242,7 +254,12 @@ fn block_height(b: &Block, doc: &SemanticDoc, width: f64, fonts: &dyn FontMetric
             let sb = ps.map(|s| s.space_before).unwrap_or(0).max(0) as f64;
             let sa = ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;
             let ratio = line_spacing_ratio(p, doc);
-            let text: f64 = layout_paragraph(p, doc, width, fonts).iter().map(|l| l.vert_size * ratio).sum();
+            // Blank in-cell lines collapse (Hancom packs them); other paragraphs size to their lines.
+            let text: f64 = if is_blank_para(p) {
+                0.0
+            } else {
+                layout_paragraph(p, doc, width, fonts).iter().map(|l| l.vert_size * ratio).sum()
+            };
             sb + text + sa
         }
         Block::Table(t) => table_height(t, width, doc, fonts),
