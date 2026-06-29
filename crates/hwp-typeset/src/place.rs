@@ -310,6 +310,15 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                     started = true;
                 }
                 Block::Table(t) => {
+                    // Promote a 1×1 frame-wrapper (자가진단표) to its inner table so a tall nested grid
+                    // splits at row granularity instead of bumping whole; the outer box rides along as
+                    // `frame` and is redrawn per page fragment. Identical predicate in NaiveLayout +
+                    // block_pages → lockstep.
+                    let unwrapped = crate::unwrap_frame_table(t);
+                    let (t, frame) = match &unwrapped {
+                        Some((inner, f)) => (inner, *f),
+                        None => (t, None),
+                    };
                     // Outer top margin (바깥 여백): the gap HWP keeps above the table, but only when it
                     // isn't the first block on the page (mirrors paragraph space_before).
                     if vert > 0.0 {
@@ -319,7 +328,7 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                     // place_table SPLITS the table across pages itself (한글식 row-level break): a
                     // first-row reserve, then a new page whenever the next row crosses the body bottom,
                     // emitting one bordered fragment per page. Returns the final page-relative cursor.
-                    vert = place_table(t, doc, fonts, ml, mt, body_h, vert, body_w, &mut pages, page, sec_idx, blk_idx);
+                    vert = place_table(t, doc, fonts, ml, mt, body_h, vert, body_w, &mut pages, page, sec_idx, blk_idx, frame);
                     let end_page = pages.len() - 1;
                     // Provenance bands for point-to-scope: one band per fragment page from its ACTUAL box,
                     // so own_hit_test resolves the table — and the scope pin hugs it — on EVERY page it
@@ -397,6 +406,10 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
                     started = true;
                 }
                 Block::Table(t) => {
+                    // Promote a 1×1 frame-wrapper (자가진단표) to its inner table — identical to place_doc +
+                    // NaiveLayout so the start pages stay lockstep.
+                    let unwrapped = crate::unwrap_frame_table(t);
+                    let t = unwrapped.as_ref().map(|(it, _)| it).unwrap_or(t);
                     if vert > 0.0 {
                         vert += t.outer_margin_top.max(0) as f64;
                     }
@@ -579,6 +592,7 @@ fn place_table(
     page: &PageSetup,
     section: usize,
     block: usize,
+    frame: Option<CellEdge>,
 ) -> f64 {
     if t.rows == 0 || t.cols == 0 {
         return vert;
@@ -608,7 +622,7 @@ fn place_table(
         // and never to give a row TALLER than the whole body its own page (it can't fit there either, so
         // the break would only waste the current page). `rh <= body_h` mirrors NaiveLayout/block_pages.
         if r > frag_first && (y - mt) + row_h[r] > body_h && row_h[r] <= body_h {
-            flush_fragment(pages, t, doc, fonts, ml, frag_top, &col_x, &row_h, frag_first, r, section, block);
+            flush_fragment(pages, t, doc, fonts, ml, frag_top, &col_x, &row_h, frag_first, r, section, block, frame);
             new_page(pages, page);
             frag_first = r;
             frag_top = mt;
@@ -616,7 +630,7 @@ fn place_table(
         }
         y += row_h[r];
     }
-    flush_fragment(pages, t, doc, fonts, ml, frag_top, &col_x, &row_h, frag_first, t.rows, section, block);
+    flush_fragment(pages, t, doc, fonts, ml, frag_top, &col_x, &row_h, frag_first, t.rows, section, block, frame);
     y - mt // final page-relative cursor (bottom of the last fragment)
 }
 
@@ -639,6 +653,7 @@ fn flush_fragment(
     last: usize,
     section: usize,
     block: usize,
+    frame: Option<CellEdge>,
 ) {
     if first >= last {
         return;
@@ -729,6 +744,27 @@ fn flush_fragment(
         // vertAlign=CENTER), honoring each paragraph's horizontal align.
         if c.row >= first {
             place_cell_content(pg, &c.blocks, cx, cy, cw, ch, doc, fonts);
+        }
+    }
+    // Outer frame (an unwrapped 1×1-wrapper's box, e.g. 자가진단표): the left/right sides draw on EVERY
+    // fragment; the top only on the table's TRUE first row and the bottom only on its TRUE last row — so
+    // the box continues across the page split (한글식) instead of closing per page.
+    if let Some(f) = frame.filter(|f| f.style != LineStyle::None) {
+        let x0 = ml;
+        let x1 = ml + col_x[t.cols];
+        let y0 = frag_top;
+        let y1 = row_top[last - first];
+        let w = f.width_px.max(HAIRLINE_MIN_PX);
+        let mut edge = |x1_: f64, y1_: f64, x2_: f64, y2_: f64| {
+            pg.lines.push(PlacedLine { x1: x1_, y1: y1_, x2: x2_, y2: y2_, color: f.color, style: f.style, width: w });
+        };
+        edge(x0, y0, x0, y1); // left
+        edge(x1, y0, x1, y1); // right
+        if first == 0 {
+            edge(x0, y0, x1, y0); // top — only the table's first fragment
+        }
+        if last == t.rows {
+            edge(x0, y1, x1, y1); // bottom — only the last fragment
         }
     }
     // Attach the per-cell rects to the fragment we pushed (point→cell for double-click editing).
@@ -1149,6 +1185,42 @@ mod tests {
             .map(|r| Cell { row: r, col: 0, blocks: vec![Block::Paragraph(para("행"))], ..Default::default() })
             .collect();
         Table { rows: n, cols: 1, cells, col_widths: vec![1], ..Default::default() }
+    }
+
+    #[test]
+    fn frame_wrapper_table_unwraps_and_splits_at_row_granularity() {
+        use crate::LayoutEngine;
+        // 자가진단표 regression: a 1×1 table whose only cell wraps a 20-row nested table, preceded by a
+        // heading paragraph (vert>0). The nested grid must be PROMOTED and SPLIT at row boundaries
+        // (flowing from the heading's page) — NOT bumped whole to the next page as one atomic 1×1 row.
+        let frame = CellEdge { color: Color { r: 0, g: 0, b: 0, a: 255 }, style: LineStyle::Solid, width_px: 2.0 };
+        let outer = Table {
+            rows: 1,
+            cols: 1,
+            col_widths: vec![1],
+            cells: vec![Cell {
+                row: 0,
+                col: 0,
+                blocks: vec![Block::Table(n_row_table(20))],
+                borders: [Some(frame); 4],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let doc = doc_with_page(vec![Block::Paragraph(para("Ⅰ. 자가진단표")), Block::Table(outer)], 8000);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        // Promoted + split: ≥2 row fragments (the atomic 1×1 outer would have yielded exactly one).
+        let frags: Vec<&PlacedTable> = placed.pages.iter().flat_map(|p| p.tables.iter()).collect();
+        assert!(frags.len() >= 2, "frame wrapper splits into ≥2 row fragments, got {}", frags.len());
+        // Promoted to the inner 20×1, not the 1×1 outer.
+        assert_eq!(frags[0].rows, 20, "fragments are keyed to the promoted inner table (20 rows)");
+        // Flows from the heading's page (page 0), not bumped to a fresh page.
+        assert!(!placed.pages[0].tables.is_empty(), "the grid starts on the heading's page");
+        // The outer frame is redrawn on the first fragment's page (a stroked box continues across the split).
+        assert!(!placed.pages[0].lines.is_empty(), "the frame box draws on the first fragment");
+        // Lockstep with the oracle.
+        let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap().pages.len();
+        assert_eq!(placed.pages.len(), naive, "place_doc {} == NaiveLayout {naive}", placed.pages.len());
     }
 
     #[test]

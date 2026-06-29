@@ -132,6 +132,11 @@ impl LayoutEngine for NaiveLayout {
                     // NO trailing page-slice), then the outer bottom margin — so this page count stays
                     // in LOCKSTEP with place_doc's fragment placement (oracle can't drift).
                     Block::Table(t) => {
+                        // Promote a 1×1 frame-wrapper to its inner table so a tall nested grid splits at
+                        // row granularity (자가진단표) instead of bumping whole. Identical in place_doc +
+                        // block_pages → lockstep. (NaiveLayout only sizes, so the frame is discarded here.)
+                        let unwrapped = unwrap_frame_table(t);
+                        let t = unwrapped.as_ref().map(|(it, _)| it).unwrap_or(t);
                         if vert > 0.0 {
                             vert += t.outer_margin_top.max(0) as f64;
                         }
@@ -163,6 +168,70 @@ fn new_page(page: &PageSetup) -> PageLayout {
 /// Was 600 (≈2.15× too high), which over-reserved every table row; safe to correct now that the gate's
 /// page count is anchored by structural 쪽 나누기 (column_type) rather than inflated row heights.
 pub(crate) const CELL_PAD: f64 = 280.0;
+
+/// If `t` is a 1×1 "frame" table whose only active cell wraps exactly ONE multi-row nested table (plus
+/// optional empty paragraphs), promote that inner table to the top level so the NORMAL row-level page
+/// split applies — instead of collapsing all its rows into one atomic outer row that gets bumped whole to
+/// the next page (the 자가진단표: a 17×3 grid wrapped in a 1×1 → page 1 went blank below the heading, the
+/// whole grid jumped to page 2). Returns `(inner_table, outer_frame)`: the outer cell's uniform border
+/// rides along as `frame` so `place_table`/`flush_fragment` redraws the box around each page fragment (it
+/// continues across the split). `None` when `t` isn't such a wrapper — the predicate is deliberately
+/// narrow so it fires only on real single-cell frame wrappers, and it is applied IDENTICALLY in place_doc,
+/// NaiveLayout and block_pages, so the three page counts stay in lockstep.
+pub(crate) fn unwrap_frame_table(t: &Table) -> Option<(Table, Option<CellEdge>)> {
+    if t.rows != 1 || t.cols != 1 {
+        return None;
+    }
+    let cell = t.cells.iter().find(|c| c.active && c.row == 0 && c.col == 0)?;
+    let mut inner: Option<&Table> = None;
+    for b in &cell.blocks {
+        match b {
+            Block::Table(nt) => {
+                if inner.is_some() {
+                    return None; // two nested tables → not a simple frame wrapper
+                }
+                inner = Some(nt);
+            }
+            Block::Paragraph(p) => {
+                // real text beside the table means the cell has its own content → keep it whole
+                let has_text = p.runs.iter().any(|r| {
+                    r.content.iter().any(|i| matches!(i, Inline::Text(s) if !s.trim().is_empty()))
+                });
+                if has_text {
+                    return None;
+                }
+            }
+        }
+    }
+    let inner = inner?;
+    if inner.rows <= 1 {
+        return None; // a 1-row inner gains nothing (still atomic)
+    }
+    let mut inner = inner.clone();
+    // Preserve the outer table's breathing room (바깥 여백) if the inner didn't carry its own.
+    if inner.outer_margin_top == 0 {
+        inner.outer_margin_top = t.outer_margin_top;
+    }
+    if inner.outer_margin_bottom == 0 {
+        inner.outer_margin_bottom = t.outer_margin_bottom;
+    }
+    // The outer cell's frame edge (the box around the wrapped table). Prefer a real per-edge border;
+    // fall back to a default hairline only when the cell merely flags a legacy box.
+    let frame = cell
+        .borders
+        .iter()
+        .flatten()
+        .find(|e| e.style != LineStyle::None)
+        .copied()
+        .or_else(|| {
+            cell.has_border.then_some(CellEdge {
+                color: Color { r: 0, g: 0, b: 0, a: 255 },
+                style: LineStyle::Solid,
+                width_px: 1.0,
+            })
+        });
+    Some((inner, frame))
+}
 
 /// Laid-out height of one block (HWPUNIT) at the given content width — paragraph (lines×spacing +
 /// 위/아래 간격) or a nested table (recursive). Drives table-row sizing + pagination accounting.
