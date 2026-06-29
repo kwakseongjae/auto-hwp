@@ -926,6 +926,11 @@ fn place_cell_content(
             vy += block_height_for_place(b, doc, textw, fonts);
             continue;
         };
+        // Blank cell line: reserved 0 (block_height_for_place) → draw nothing + advance 0, so the drawn
+        // height matches content_h (no overflow/overlap). Hancom auto-fits these blank rows the same way.
+        if crate::is_blank_para(p) {
+            continue;
+        }
         let glyphs = paragraph_glyphs(p, doc);
         let align = doc.para_shapes.get(p.para_shape).map(|s| s.align).unwrap_or_default();
         let ratio = line_spacing_ratio(p, doc);
@@ -1024,6 +1029,9 @@ pub fn row_offsets(t: &Table, avail_w: f64, doc: &SemanticDoc, fonts: &dyn FontM
 /// Mirrors `lib.rs::block_height` (private there); kept in lockstep so cell sizing matches pagination.
 fn block_height_for_place(b: &Block, doc: &SemanticDoc, width: f64, fonts: &dyn FontMetricsProvider) -> f64 {
     match b {
+        // Blank cell line → 0 (Hancom auto-fits it). MUST stay in lockstep with place_cell_content, which
+        // skips the same paragraph when drawing — so the reserved content_h equals the drawn height.
+        Block::Paragraph(p) if crate::is_blank_para(p) => 0.0,
         Block::Paragraph(p) => {
             let ps = doc.para_shapes.get(p.para_shape);
             let sb = ps.map(|s| s.space_before).unwrap_or(0).max(0) as f64;

@@ -238,10 +238,24 @@ pub(crate) fn unwrap_frame_table(t: &Table) -> Option<(Table, Option<CellEdge>)>
     Some((inner, frame))
 }
 
+/// A blank paragraph — no visible text, no anchored object. INSIDE a table cell Hancom AUTO-FITS such a
+/// line to ~0 (measured: blank rows reserve ≈0–480 HWPUNIT, far below a full 160% leading), so the cell
+/// height fns give it 0. ⚠️ MUST be mirrored in the cell DRAWER (`place_cell_content` skips it) so the
+/// reserved `content_h` equals the drawn height — otherwise drawn text overflows its row and overlaps.
+/// Scoped to cells: the BODY path keeps a top-level blank paragraph's full line (load-bearing for the
+/// benchmark.hwp page count).
+pub(crate) fn is_blank_para(p: &Paragraph) -> bool {
+    object_height(p) == 0
+        && p.runs.iter().all(|r| {
+            r.content.iter().all(|i| !matches!(i, Inline::Text(s) if !s.trim().is_empty()))
+        })
+}
+
 /// Laid-out height of one block (HWPUNIT) at the given content width — paragraph (lines×spacing +
 /// 위/아래 간격) or a nested table (recursive). Drives table-row sizing + pagination accounting.
 fn block_height(b: &Block, doc: &SemanticDoc, width: f64, fonts: &dyn FontMetricsProvider) -> f64 {
     match b {
+        Block::Paragraph(p) if is_blank_para(p) => 0.0, // blank cell line → auto-fit (drawer skips it too)
         Block::Paragraph(p) => {
             let ps = doc.para_shapes.get(p.para_shape);
             let sb = ps.map(|s| s.space_before).unwrap_or(0).max(0) as f64;
@@ -585,6 +599,21 @@ mod tests {
         let lines = layout_paragraph(&p, &doc, 10000.0, &ApproxFontMetrics);
         assert_eq!(lines.len(), 2, "50% 장평 packs 20 glyphs/line → 2 lines (3 at full width)");
         assert_eq!(lines[1].text_pos, 20);
+    }
+
+    #[test]
+    fn blank_cell_paragraph_reserves_zero_height() {
+        // A blank cell paragraph auto-fits to 0 in the cell-height calc (Hancom packs blank rows). The
+        // DRAWER (place_cell_content) skips the same paragraph, so reserved == drawn (no overlap). A text
+        // paragraph reserves its real line height. Regression for the reserve↔draw mismatch that
+        // overlapped cell text when only the reserve side collapsed.
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape::default());
+        doc.para_shapes.push(ParaShape::default());
+        assert_eq!(block_height(&Block::Paragraph(Paragraph::default()), &doc, 10000.0, &ApproxFontMetrics), 0.0,
+            "blank cell paragraph reserves 0 (auto-fit)");
+        assert!(block_height(&Block::Paragraph(para("내용")), &doc, 10000.0, &ApproxFontMetrics) > 0.0,
+            "a text paragraph reserves its line height");
     }
 
     #[test]
