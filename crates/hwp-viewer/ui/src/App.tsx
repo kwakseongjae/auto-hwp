@@ -50,30 +50,29 @@ function PageChrome({ geom }: { geom: PageGeom }) {
   );
 }
 
-/// The SINGLE 한컴식 horizontal ruler — one sticky bar pinned at the top of the document column (not
-/// repeated on every page; that was 너무 불편). It mirrors the CURRENTLY-VISIBLE page's geometry: 1 cm
-/// ticks + cm NUMBERS over the full page width, the printable span tinted, and a margin marker (▼) at each
-/// printable boundary. `geom` is the visible page in own-render px at zoom 1; `scale` maps it to on-screen
-/// px so the ruler is exactly as wide as the page below it and stays aligned through zoom + horizontal
-/// scroll (it lives in the same centered column). When a table is selected, `colXs` (its column-boundary
-/// x-fractions across the PAGE, 0..1) draws ▽ markers a user can grab — `onColDrag(boundary, pageFrac)`
-/// is wired to the same SetTableColumnWidths op as the in-page handles. */
-function TopRuler({ geom, scale, colXs, onColDrag, onColDragEnd }: {
-  geom: PageGeom; scale: number;
+/// The SINGLE 한컴식 horizontal ruler bar — rendered ONCE inside a fixed dock above the scroll viewport
+/// (RulerDock), NOT per page and NOT scrolling (sticky scrolled content under it). It mirrors the
+/// currently-visible page's geometry: 1 cm ticks + cm NUMBERS over the full page width, the printable span
+/// tinted, a margin marker (▼) at each printable boundary. `geom` is the visible page in own-render px at
+/// zoom 1; `widthPx` is the page's on-screen width and `leftPx` its on-screen left within the dock, so the
+/// ruler sits exactly over the page column and tracks zoom + horizontal scroll. When a table is selected,
+/// `colXs` (column-boundary x-fractions across the PAGE, 0..1) draws ▽ markers a user can grab —
+/// `onColDrag(boundary, pageFrac)` is wired to the same SetTableColumnWidths op as the in-page handles.
+function TopRuler({ geom, widthPx, leftPx, colXs, onColDrag, onColDragEnd }: {
+  geom: PageGeom; widthPx: number; leftPx: number;
   colXs?: number[];
   onColDrag?: (boundary: number, pageFrac: number) => void;
   onColDragEnd?: () => void;
 }) {
   const { w, ml, mr } = geom;
-  if (w <= 0) return null;
-  const widthPx = w * scale;
+  if (w <= 0 || widthPx <= 0) return null;
   const lp = (ml / w) * 100, rp = ((w - mr) / w) * 100;
   const printW = Math.max(0, w - ml - mr);
   const nTicks = Math.min(60, Math.floor(printW / CM_PX));
   const ticks = Array.from({ length: nTicks + 1 }, (_, i) => ({ i, left: ((ml + i * CM_PX) / w) * 100 }));
   return (
-    <div className="sticky top-0 z-20 mx-auto h-6 select-none" style={{ width: `${widthPx}px` }} aria-hidden>
-      <div className="relative h-full overflow-hidden rounded-t-md border border-b-0 border-black/10 bg-neutral-100/95 text-neutral-500 shadow-sm backdrop-blur dark:border-white/10 dark:bg-neutral-800/95 dark:text-neutral-300">
+    <div className="absolute top-0 h-full select-none" style={{ width: `${widthPx}px`, left: `${leftPx}px` }} aria-hidden>
+      <div className="relative h-full text-neutral-500 dark:text-neutral-300">
         <div className="absolute inset-y-0 bg-accent/10" style={{ left: `${lp}%`, width: `${Math.max(0, rp - lp)}%` }} />
         {ticks.map(({ i, left }) => (
           <div key={`t${i}`} className="absolute bottom-0 w-px bg-neutral-400/70 dark:bg-neutral-400/50" style={{ left: `${left}%`, height: i % 5 === 0 ? "50%" : "28%" }} />
@@ -651,7 +650,10 @@ export default function App() {
   }, [scopePin, clearScope]);
 
   // Track the scroll viewport's width so "맞춤(가로)" (fit-width) keeps a page filling the column as
-  // the window or chat panel resizes. p-6 = 24px padding each side on <main>.
+  // the window or chat panel resizes. p-6 = 24px padding each side on <main>. Also track horizontal
+  // scrollLeft so the docked 한컴식 ruler (above the viewport) stays aligned with the page column when
+  // the page is zoomed wider than the viewport and the user scrolls sideways.
+  const [scrollLeft, setScrollLeft] = useState(0);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -659,7 +661,9 @@ export default function App() {
     update();
     const ro = new ResizeObserver(update);
     ro.observe(el);
-    return () => ro.disconnect();
+    const onScroll = () => setScrollLeft(el.scrollLeft);
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => { ro.disconnect(); el.removeEventListener("scroll", onScroll); };
   }, []);
 
   const ensurePage = useCallback(async (i: number) => {
@@ -2202,12 +2206,15 @@ export default function App() {
   // on scroll, so this stays live). 1-based for display; falls back to 1 before the first measure.
   const currentPage = listCount > 0 ? (virtualizer.getVirtualItems()[0]?.index ?? 0) + 1 : 0;
 
-  // ---- the SINGLE top ruler (own mode): geometry of the first visible page + on-screen scale, and the
-  // selected table's column boundaries projected to PAGE fractions so the ruler can show drag-to-resize
-  // ▽ markers wired to the same SetTableColumnWidths op as the in-page handles. ----
+  // ---- the SINGLE 한컴식 ruler (own mode), docked above the scroll viewport: geometry of the first
+  // visible page, its on-screen width (= pageWidth) and LEFT within the dock (mirrors <main>'s mx-auto
+  // centering + horizontal scrollLeft so it sits exactly over the page column), plus the selected table's
+  // column boundaries projected to PAGE fractions for the drag-to-resize ▽ markers (same op as in-page). -
   const rulerIndex = listCount > 0 ? (virtualizer.getVirtualItems()[0]?.index ?? 0) : 0;
   const rulerGeom = viewMode === "own" ? pageGeom[rulerIndex] : undefined;
-  const rulerScale = rulerGeom && rulerGeom.w > 0 ? pageWidth / rulerGeom.w : 1;
+  // The page column's left edge from <main>'s border: 24px (p-6) + the mx-auto side margin when the page
+  // is narrower than the content box; minus how far the user has scrolled horizontally.
+  const rulerLeftPx = 24 + Math.max(0, (fitWidth - pageWidth) / 2) - scrollLeft;
   // Column boundaries (0..1 across the PAGE) for the selected table, only when it's on the ruler's page.
   const rulerColXs = useMemo(() => {
     if (!rulerGeom || !tableSel || tableSel.page !== rulerIndex) return undefined;
@@ -2444,6 +2451,14 @@ export default function App() {
             </nav>
           </aside>
         )}
+        {/* The document column: a FIXED 한컴식 ruler dock on top (own mode only — never scrolls, so
+            content can't peek into a gap above it), then the scrolling page pasteboard below. */}
+        <div className="flex min-h-0 flex-1 flex-col">
+        {viewMode === "own" && rulerGeom && listCount > 0 && (
+          <div className="relative h-6 shrink-0 overflow-hidden border-b border-black/10 bg-neutral-100/95 shadow-sm dark:border-white/10 dark:bg-neutral-800/95">
+            <TopRuler geom={rulerGeom} widthPx={pageWidth} leftPx={rulerLeftPx} colXs={rulerColXs} onColDrag={onRulerColDrag} onColDragEnd={onRulerColDragEnd} />
+          </div>
+        )}
         {/* SVG-page modes ('svg' 원본 / 'own' 자체 렌더) lay WHITE sheets on a light DOCUMENT PASTEBOARD
             (like Word/Hancom keep a neutral canvas behind pages) so the inter-page gap reads as a soft
             light band — NOT the dark app background, which made the gap look like a full-width black bar
@@ -2500,12 +2515,8 @@ export default function App() {
           ) : listCount > 0 ? (
             // SVG page list — shared by 'svg' (rhwp 원본) and 'own' (자체 렌더, OUR engine). The two have
             // separate caches/ensure-fns + page counts; the caret (whose geometry is from the rhwp
-            // render path) only attaches in 'svg' mode. Own mode prepends the SINGLE 한컴식 ruler, which
-            // sticks to the top of the scroll viewport and tracks the visible page's geometry.
-            <>
-            {viewMode === "own" && rulerGeom && (
-              <TopRuler geom={rulerGeom} scale={rulerScale} colXs={rulerColXs} onColDrag={onRulerColDrag} onColDragEnd={onRulerColDragEnd} />
-            )}
+            // render path) only attaches in 'svg' mode. The 한컴식 ruler is NOT here — it's docked above
+            // the scroll viewport (see the RulerDock), so it never scrolls under content.
             <div
               className={`relative mx-auto rounded-lg ${dragActive ? "ring-2 ring-accent ring-offset-4 ring-offset-neutral-200 dark:ring-offset-neutral-800" : ""}`}
               // Zoom-derived column width (replaces max-w-3xl); height is the virtualizer total.
@@ -2799,7 +2810,6 @@ export default function App() {
                 );
               })}
             </div>
-            </>
           ) : pageCount > 0 ? (
             // A doc IS open but the active list has no pages yet — e.g. switching to 'own' before its
             // page count resolves. Show a render hint, not the open-file prompt.
@@ -2849,6 +2859,7 @@ export default function App() {
           {/* (The cell/paragraph editor is now INLINE — rendered over the target in the page list above —
               so there's no modal here. Double-click a cell or a paragraph to edit in place.) */}
         </main>
+        </div>
 
         <Chat
           open={chatOpen && pageCount > 0}
