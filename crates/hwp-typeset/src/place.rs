@@ -1029,12 +1029,7 @@ fn block_height_for_place(b: &Block, doc: &SemanticDoc, width: f64, fonts: &dyn 
             let sb = ps.map(|s| s.space_before).unwrap_or(0).max(0) as f64;
             let sa = ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;
             let ratio = line_spacing_ratio(p, doc);
-            // Blank in-cell lines collapse (mirror lib.rs::block_height — keep the two paths identical).
-            let text: f64 = if crate::is_blank_para(p) {
-                0.0
-            } else {
-                layout_paragraph(p, doc, width, fonts).iter().map(|l| l.vert_size * ratio).sum()
-            };
+            let text: f64 = layout_paragraph(p, doc, width, fonts).iter().map(|l| l.vert_size * ratio).sum();
             sb + text + sa
         }
         Block::Table(t) => table_height(t, width, doc, fonts),
