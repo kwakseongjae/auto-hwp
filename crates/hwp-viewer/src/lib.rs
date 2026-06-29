@@ -1143,6 +1143,30 @@ async fn set_table_row_heights(
     .map_err(|e| e.to_string())?
 }
 
+/// Set `section`'s page margins (mm) as ONE undo unit (`SetPageLayout`, margins only) — the 한컴식
+/// ruler's draggable margin markers. The UI passes all four (undragged edges keep their current value);
+/// the whole document re-flows to the new printable width. Returns the new page count.
+#[tauri::command]
+async fn set_page_margins(
+    section: usize,
+    left_mm: f32,
+    right_mm: f32,
+    top_mm: f32,
+    bottom_mm: f32,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<u32, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        match apply_intent(&mut s, Intent::SetPageMargins { section, left_mm, right_mm, top_mm, bottom_mm })? {
+            Outcome::Edited { pages } => Ok(pages),
+            _ => Err("unexpected outcome".into()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Shade (background-color) cells of the `index`-th table as ONE undo unit (`SetTableCellShade`).
 /// `sel` picks the target — "row"/"col"/"cell"/"all" using `(row, col)`; `shade` is "#RRGGBB" or null
 /// to clear. The 배경색 verb (header-row / column tinting).
@@ -1928,6 +1952,7 @@ pub fn run() {
             set_paragraph_text,
             set_table_cell,
             set_table_col_widths,
+            set_page_margins,
             set_table_row_heights,
             set_char_fmt,
             set_run_char_fmt,

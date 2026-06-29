@@ -273,6 +273,10 @@ export const api = {
    *  (SetTableColWidths). `widths.length` must equal the table's column count. Returns new page count. */
   setTableColWidths: (section: number, index: number, widths: number[]) =>
     invoke<number>("set_table_col_widths", { section, index, widths }),
+  /** Page margins (mm) for `section` as ONE undo unit (SetPageLayout) — the ruler's draggable margin
+   *  markers. Pass all four (undragged edges keep their current value). Returns new page count. */
+  setPageMargins: (section: number, leftMm: number, rightMm: number, topMm: number, bottomMm: number) =>
+    invoke<number>("set_page_margins", { section, leftMm, rightMm, topMm, bottomMm }),
   /** Row-resize geometry (own-render only) — `rows+1` absolute px y-boundaries of the table at
    *  `(section, block)` on `page`, for drawing the row-divider drag handles. Null if not on page. */
   tableRowBoundaries: (page: number, section: number, block: number) =>

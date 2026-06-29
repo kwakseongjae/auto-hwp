@@ -711,6 +711,10 @@ pub enum Intent {
     /// Row resize — set the `index`-th table's per-row minimum-height override as ONE undo unit
     /// (`SetTableRowHeights`). `heights.len()` must equal the table's row count; `0` = content-sized.
     SetTableRowHeights { section: usize, index: usize, heights: Vec<i32> },
+    /// Page margin change (the 한컴식 ruler's draggable margin markers) — set `section`'s page margins
+    /// (mm) as ONE undo unit (`SetPageLayout`, margins only). All four are passed (the UI keeps the
+    /// undragged edges at their current value); the whole document re-flows to the new printable width.
+    SetPageMargins { section: usize, left_mm: f32, right_mm: f32, top_mm: f32, bottom_mm: f32 },
     /// Character format — patch 볼드/이태릭/크기/글꼴 of a target's runs as ONE undo unit (`SetCharFmt`),
     /// preserving other attrs. `cell` = `Some((row, col))` for a table cell, `None` for the block
     /// paragraph. Each `Some` field applies; `size_pt` in points; `font` sets the family ("" clears it).
@@ -905,6 +909,17 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
         Intent::SetTableRowHeights { section, index, heights } => {
             let doc = session.doc.as_mut().ok_or("no document open")?;
             doc.do_op(&hwp_ops::Op::SetTableRowHeights { section, index, heights }).map_err(|e| e.to_string())?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::SetPageMargins { section, left_mm, right_mm, top_mm, bottom_mm } => {
+            let doc = session.doc.as_mut().ok_or("no document open")?;
+            doc.do_op(&hwp_ops::Op::SetPageLayout {
+                section,
+                orientation: None,
+                margins_mm: Some(hwp_ops::PageMargins { left: left_mm, right: right_mm, top: top_mm, bottom: bottom_mm }),
+            })
+            .map_err(|e| e.to_string())?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }

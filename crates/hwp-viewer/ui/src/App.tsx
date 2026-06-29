@@ -58,31 +58,69 @@ function PageChrome({ geom }: { geom: PageGeom }) {
 /// ruler sits exactly over the page column and tracks zoom + horizontal scroll. When a table is selected,
 /// `colXs` (column-boundary x-fractions across the PAGE, 0..1) draws ▽ markers a user can grab —
 /// `onColDrag(boundary, pageFrac)` is wired to the same SetTableColumnWidths op as the in-page handles.
-function TopRuler({ geom, widthPx, leftPx, colXs, onColDrag, onColDragEnd }: {
+function TopRuler({ geom, widthPx, leftPx, colXs, onColDrag, onColDragEnd, onMarginCommit }: {
   geom: PageGeom; widthPx: number; leftPx: number;
   colXs?: number[];
   onColDrag?: (boundary: number, pageFrac: number) => void;
   onColDragEnd?: () => void;
+  onMarginCommit?: (side: "left" | "right", pageFrac: number) => void;
 }) {
   const { w, ml, mr } = geom;
+  // Live drag preview for the margin markers (the ▼ follow the pointer; the page re-flows on release).
+  const [marginDrag, setMarginDrag] = useState<{ side: "left" | "right"; frac: number } | null>(null);
   if (w <= 0 || widthPx <= 0) return null;
   const lp = (ml / w) * 100, rp = ((w - mr) / w) * 100;
   const printW = Math.max(0, w - ml - mr);
   const nTicks = Math.min(60, Math.floor(printW / CM_PX));
   const ticks = Array.from({ length: nTicks + 1 }, (_, i) => ({ i, left: ((ml + i * CM_PX) / w) * 100 }));
+  // Drag a margin marker: track the pointer as a page fraction, clamp so it can't cross the other margin,
+  // commit on release (the undgrag edges keep their value). A pure visual move until pointerup.
+  const startMargin = (side: "left" | "right") => (e: React.PointerEvent) => {
+    if (!onMarginCommit) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const bar = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect();
+    let last = side === "left" ? lp / 100 : rp / 100;
+    const move = (ev: PointerEvent) => {
+      const raw = Math.min(1, Math.max(0, (ev.clientX - bar.left) / bar.width));
+      // keep a 5%-of-page gap between the two margins
+      last = side === "left" ? Math.min(raw, rp / 100 - 0.05) : Math.max(raw, lp / 100 + 0.05);
+      setMarginDrag({ side, frac: last });
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setMarginDrag(null);
+      onMarginCommit(side, last);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  const leftFrac = marginDrag?.side === "left" ? marginDrag.frac * 100 : lp;
+  const rightFrac = marginDrag?.side === "right" ? marginDrag.frac * 100 : rp;
   return (
-    <div className="absolute top-0 h-full select-none" style={{ width: `${widthPx}px`, left: `${leftPx}px` }} aria-hidden>
+    <div className="absolute top-0 h-full select-none" style={{ width: `${widthPx}px`, left: `${leftPx}px` }}>
       <div className="relative h-full text-neutral-500 dark:text-neutral-300">
-        <div className="absolute inset-y-0 bg-accent/10" style={{ left: `${lp}%`, width: `${Math.max(0, rp - lp)}%` }} />
+        <div className="absolute inset-y-0 bg-accent/10" style={{ left: `${leftFrac}%`, width: `${Math.max(0, rightFrac - leftFrac)}%` }} />
         {ticks.map(({ i, left }) => (
           <div key={`t${i}`} className="absolute bottom-0 w-px bg-neutral-400/70 dark:bg-neutral-400/50" style={{ left: `${left}%`, height: i % 5 === 0 ? "50%" : "28%" }} />
         ))}
         {ticks.filter((t) => t.i > 0).map(({ i, left }) => (
           <span key={`n${i}`} className="absolute top-0.5 -translate-x-1/2 text-[8px] leading-none tabular-nums" style={{ left: `${left}%` }}>{i}</span>
         ))}
-        {/* left + right margin markers (▼ at each printable boundary) */}
-        <div className="absolute top-0 h-0 w-0 -translate-x-1/2 border-x-[4px] border-t-[7px] border-x-transparent border-t-accent/70" style={{ left: `${lp}%` }} />
-        <div className="absolute top-0 h-0 w-0 -translate-x-1/2 border-x-[4px] border-t-[7px] border-x-transparent border-t-accent/70" style={{ left: `${rp}%` }} />
+        {/* left + right margin markers (▼) — DRAG to change the page's left/right margin (한컴식 줄자). */}
+        {([["left", leftFrac], ["right", rightFrac]] as const).map(([side, frac]) => (
+          <div
+            key={side}
+            role="separator"
+            title="여백 조절 — 드래그"
+            className={`pointer-events-auto absolute top-0 z-10 h-3 w-3 -translate-x-1/2 ${onMarginCommit ? "cursor-ew-resize" : ""}`}
+            style={{ left: `${frac}%` }}
+            onPointerDown={startMargin(side)}
+          >
+            <div className="mx-auto h-0 w-0 border-x-[4px] border-t-[7px] border-x-transparent border-t-accent/80" />
+          </div>
+        ))}
         {/* column-boundary markers (▽) for the selected table — drag to resize. Interior boundaries only
             (the two outer ones coincide with the table edges, already shown by the margin markers). */}
         {colXs && colXs.length > 2 && onColDrag && colXs.slice(1, -1).map((fx, k) => (
@@ -2240,6 +2278,27 @@ export default function App() {
     const cur = tableSelRef.current;
     if (cur && cur.colFracs.length > 2) commitTableColWidths(cur.colFracs);
   }, [commitTableColWidths]);
+  // Drag a ruler margin marker → change the page's left/right margin (SetPageLayout). The dragged edge
+  // moves to `pageFrac`; the other three keep their current value. px→mm: 1px = HWPUNIT_PER_PX HWPUNIT,
+  // 1mm = 7200/25.4 HWPUNIT. (Single-section assumption: patches section 0 — the common gov-template case.)
+  const onRulerMarginCommit = useCallback((side: "left" | "right", pageFrac: number) => {
+    const geom = pageGeomRef.current[rulerIndex];
+    if (!geom || geom.w <= 0) return;
+    const pxToMm = (HWPUNIT_PER_PX * 25.4) / 7200;
+    const curTopMm = geom.mt * pxToMm, curBottomMm = geom.mb * pxToMm;
+    const leftMm = (side === "left" ? pageFrac * geom.w : geom.ml) * pxToMm;
+    const rightMm = (side === "right" ? geom.w - pageFrac * geom.w : geom.mr) * pxToMm;
+    void enqueueEdit(async () => {
+      if (!canEditRef.current) return;
+      try {
+        const pages = await api.setPageMargins(0, leftMm, rightMm, curTopMm, curBottomMm);
+        setEdited(true);
+        invalidate(pages, null);
+      } catch (err) {
+        toast("warn", `여백 변경 실패: ${err}`);
+      }
+    });
+  }, [rulerIndex, HWPUNIT_PER_PX, enqueueEdit, invalidate]);
   // Robustness for the INLINE pending band: the on-page band only mounts when the target page is in
   // the virtual window AND we're in an SVG mode (the HTML iframe can't host the overlay). When it
   // isn't (HTML mode, or the user scrolled the target off-screen), show a sticky fallback bar so the
@@ -2456,7 +2515,7 @@ export default function App() {
         <div className="flex min-h-0 flex-1 flex-col">
         {viewMode === "own" && rulerGeom && listCount > 0 && (
           <div className="relative h-6 shrink-0 overflow-hidden border-b border-black/10 bg-neutral-100/95 shadow-sm dark:border-white/10 dark:bg-neutral-800/95">
-            <TopRuler geom={rulerGeom} widthPx={pageWidth} leftPx={rulerLeftPx} colXs={rulerColXs} onColDrag={onRulerColDrag} onColDragEnd={onRulerColDragEnd} />
+            <TopRuler geom={rulerGeom} widthPx={pageWidth} leftPx={rulerLeftPx} colXs={rulerColXs} onColDrag={onRulerColDrag} onColDragEnd={onRulerColDragEnd} onMarginCommit={canEdit ? onRulerMarginCommit : undefined} />
           </div>
         )}
         {/* SVG-page modes ('svg' 원본 / 'own' 자체 렌더) lay WHITE sheets on a light DOCUMENT PASTEBOARD
