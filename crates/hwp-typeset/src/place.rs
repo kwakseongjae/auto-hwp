@@ -294,6 +294,12 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                         new_page(&mut pages, page);
                         vert = 0.0;
                     }
+                    // A pure table anchor reserves NO height + draws nothing — the following Table block
+                    // owns the space. Mirrors NaiveLayout + block_pages (skip its line) for lockstep.
+                    if p.is_table_anchor {
+                        started = true;
+                        continue;
+                    }
                     if vert > 0.0 {
                         vert += ps.map(|s| s.space_before).unwrap_or(0).max(0) as f64;
                     }
@@ -380,6 +386,13 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
                     if (p.page_break_before || ps.map(|s| s.page_break_before).unwrap_or(false)) && vert > 0.0 {
                         page_idx += 1;
                         vert = 0.0;
+                    }
+                    // A pure table anchor reserves no height; still record ONE start page (block→page must
+                    // stay 1:1) at the current page, then skip. Mirrors NaiveLayout + place_doc.
+                    if p.is_table_anchor {
+                        sec_pages.push(page_idx);
+                        started = true;
+                        continue;
                     }
                     if vert > 0.0 {
                         vert += ps.map(|s| s.space_before).unwrap_or(0).max(0) as f64;
@@ -1205,6 +1218,22 @@ mod tests {
             .map(|r| Cell { row: r, col: 0, blocks: vec![Block::Paragraph(para("행"))], ..Default::default() })
             .collect();
         Table { rows: n, cols: 1, cells, col_widths: vec![1], ..Default::default() }
+    }
+
+    #[test]
+    fn table_anchor_paragraph_reserves_no_height() {
+        use crate::LayoutEngine;
+        // A pure table-anchor paragraph (empty, is_table_anchor) reserves NO vertical space: the table
+        // starts at the page top, exactly as if the anchor weren't there. A normal empty paragraph would
+        // push the table down by one line. Regression for the benchmark1 phantom-anchor over-reservation.
+        let anchor = Paragraph { is_table_anchor: true, ..Default::default() };
+        let doc = doc_with_page(vec![Block::Paragraph(anchor), Block::Table(n_row_table(2))], 800_000);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let t = placed.pages[0].tables.first().expect("table placed on page 0");
+        assert!((t.y - 0.0).abs() < 1.0, "anchor reserves no line → table top at page-top (mt=0), got {}", t.y);
+        // Lockstep with the oracle.
+        let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap().pages.len();
+        assert_eq!(placed.pages.len(), naive, "place_doc {} == NaiveLayout {naive}", placed.pages.len());
     }
 
     #[test]

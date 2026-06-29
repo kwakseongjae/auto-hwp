@@ -151,6 +151,14 @@ impl<'a> Lifter<'a> {
                 _ => {}
             }
         }
+        // A pure table anchor: this host paragraph carries a Table control and NO visible text — Hancom
+        // reserves no line for it, so flag it for the paginators to skip its height. A text-empty
+        // paragraph that does NOT host a table (a genuine blank spacer) is left unflagged (keeps its line).
+        let hosts_table = p.controls.iter().any(|c| matches!(c, Control::Table(_)));
+        let text_empty = !runs
+            .iter()
+            .any(|r| r.content.iter().any(|i| matches!(i, Inline::Text(s) if !s.trim().is_empty())));
+        let is_table_anchor = hosts_table && text_empty;
         blocks.push(Block::Paragraph(Paragraph {
             para_shape: self.para_id_to_idx.get(&p.para_shape_id).copied().unwrap_or(0),
             runs,
@@ -162,6 +170,7 @@ impl<'a> Lifter<'a> {
                 p.column_type,
                 rhwp::model::paragraph::ColumnBreakType::Page | rhwp::model::paragraph::ColumnBreakType::Section
             ),
+            is_table_anchor,
             provenance: Provenance { source: Some(SourceFormat::Hwp5), raw: None },
             ..Default::default()
         }));

@@ -106,6 +106,11 @@ impl LayoutEngine for NaiveLayout {
                             pages.push(new_page(page));
                             vert = 0.0;
                         }
+                        // A pure table anchor reserves NO height (Hancom hangs the table off it with no
+                        // line); the following Table block accounts for the space. Skip its line + spacing.
+                        if p.is_table_anchor {
+                            continue;
+                        }
                         // 문단 위 간격 — Hancom adds it before the paragraph (suppressed at page top).
                         if vert > 0.0 {
                             vert += ps.map(|s| s.space_before).unwrap_or(0).max(0) as f64;

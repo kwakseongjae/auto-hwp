@@ -152,6 +152,11 @@ pub struct Paragraph {
     /// `column_type == Page/Section` (NOT the shared para_shape's attr1 bit19, which can't carry a
     /// per-paragraph break). Pagination forces a fresh page when set, OR'd with the para_shape flag.
     pub page_break_before: bool,
+    /// This (empty) paragraph is a pure TABLE/object ANCHOR — in HWP a table control hangs off a host
+    /// paragraph; the lift emits that host as an empty `Paragraph` immediately before the `Table` block.
+    /// Hancom reserves NO line for such an anchor, so pagination skips its height (a genuine blank
+    /// spacer paragraph — text-empty but NOT hosting a control — is left alone and keeps its line).
+    pub is_table_anchor: bool,
     /// Requested named style (e.g. "개요 1"); resolved to a `styleIDRef` by the serializer.
     pub style_name: Option<String>,
     pub runs: Vec<Run>,

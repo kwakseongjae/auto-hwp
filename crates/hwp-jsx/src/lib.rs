@@ -729,9 +729,10 @@ fn parse_para(el: &JsxElement) -> Result<Paragraph> {
         provenance: el.attrs.get("data-prov").map(|s| decode_provenance(s)).unwrap_or_default(),
         passthrough: parse_pass_attr(el)?,
         dirty: Dirty(el.attrs.contains_key("data-dirty")),
-        // Per-paragraph hard page break isn't carried through the HTML/JSX projection (own-render gets it
-        // from the rhwp lift); default false here.
+        // Per-paragraph hard page break + table-anchor flag aren't carried through the HTML/JSX projection
+        // (own-render gets them from the rhwp lift); default false here.
         page_break_before: false,
+        is_table_anchor: false,
     })
 }
 
