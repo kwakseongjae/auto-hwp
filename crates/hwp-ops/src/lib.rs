@@ -334,7 +334,7 @@ fn char_fmt_target_paras(block: &Block, cell: Option<(usize, usize)>) -> Result<
     let paras: Vec<&Paragraph> = match (block, cell) {
         (Block::Paragraph(p), None) => vec![p],
         (Block::Table(t), Some((row, col))) => {
-            let c = t.cells.iter().find(|c| c.active && c.row == row && c.col == col).ok_or_else(|| {
+            let c = t.edit_target().cells.iter().find(|c| c.active && c.row == row && c.col == col).ok_or_else(|| {
                 Error::Other(format!("SetCharFmt: no active cell at (row {row}, col {col})"))
             })?;
             c.blocks.iter().filter_map(|b| if let Block::Paragraph(p) = b { Some(p) } else { None }).collect()
@@ -350,7 +350,7 @@ fn char_fmt_target_paras_mut(block: &mut Block, cell: Option<(usize, usize)>) ->
     let paras: Vec<&mut Paragraph> = match (block, cell) {
         (Block::Paragraph(p), None) => vec![p],
         (Block::Table(t), Some((row, col))) => {
-            let c = t.cells.iter_mut().find(|c| c.active && c.row == row && c.col == col).ok_or_else(|| {
+            let c = t.edit_target_mut().cells.iter_mut().find(|c| c.active && c.row == row && c.col == col).ok_or_else(|| {
                 Error::Other(format!("SetCharFmt: no active cell at (row {row}, col {col})"))
             })?;
             c.blocks.iter_mut().filter_map(|b| if let Block::Paragraph(p) = b { Some(p) } else { None }).collect()
@@ -941,6 +941,7 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             let Block::Table(t) = block else {
                 return Err(Error::Other(format!("SetTableCellShade: block {index} is not a table")));
             };
+            let t = t.edit_target_mut(); // a 1×1 frame wrapper (자가진단표) → edit the inner table
             let mut hit = 0usize;
             for cell in &mut t.cells {
                 if !cell.active {
@@ -983,6 +984,7 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             let Block::Table(t) = block else {
                 return Err(Error::Other(format!("SetTableCell: block {index} is not a table")));
             };
+            let t = t.edit_target_mut(); // a 1×1 frame wrapper (자가진단표) → edit the inner table
             // The active cell anchored exactly at (row, col) — same as CellSel::Cell.
             let cell = t.cells.iter_mut().find(|c| c.active && c.row == row && c.col == col).ok_or_else(|| {
                 Error::Other(format!("SetTableCell: no active cell at (row {row}, col {col})"))
@@ -1055,6 +1057,7 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             let Block::Table(t) = block else {
                 return Err(Error::Other(format!("TableInsertRows: block {index} is not a table")));
             };
+            let t = t.edit_target_mut(); // a 1×1 frame wrapper (자가진단표) → edit the inner table
             if at > t.rows {
                 return Err(Error::Other(format!(
                     "TableInsertRows: row {at} out of range (table has {} rows)",
@@ -1086,6 +1089,7 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             let Block::Table(t) = block else {
                 return Err(Error::Other(format!("TableAppendEmptyRow: block {index} is not a table")));
             };
+            let t = t.edit_target_mut(); // a 1×1 frame wrapper (자가진단표) → edit the inner table
             if t.rows == 0 || t.cols == 0 {
                 return Err(Error::Other("TableAppendEmptyRow: empty table".into()));
             }
@@ -1221,6 +1225,7 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             let Block::Table(t) = block else {
                 return Err(Error::Other(format!("SetTableColWidths: block {index} is not a table")));
             };
+            let t = t.edit_target_mut(); // a 1×1 frame wrapper (자가진단표) → edit the inner table
             if widths.len() != t.cols {
                 return Err(Error::Other(format!(
                     "SetTableColWidths: expected {} widths, got {}", t.cols, widths.len()
@@ -1242,6 +1247,7 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             let Block::Table(t) = block else {
                 return Err(Error::Other(format!("SetTableRowHeights: block {index} is not a table")));
             };
+            let t = t.edit_target_mut(); // a 1×1 frame wrapper (자가진단표) → edit the inner table
             if heights.len() != t.rows {
                 return Err(Error::Other(format!(
                     "SetTableRowHeights: expected {} heights, got {}", t.rows, heights.len()

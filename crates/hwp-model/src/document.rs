@@ -296,6 +296,67 @@ pub struct Table {
     pub dirty: Dirty,
 }
 
+impl Table {
+    /// If this is a 1×1 "frame wrapper" whose single active cell holds exactly ONE multi-row nested table
+    /// (plus only empty paragraphs), return that inner table. This is what actually gets RENDERED and
+    /// EDITED (e.g. the 자가진단표 = a 17×3 grid wrapped in a 1×1). The render unwrap (hwp_typeset) AND the
+    /// edit commands/ops resolve THROUGH this, so a click/double-click/edit on a nested cell targets the
+    /// SAME table the renderer drew — without it, nested cells were un-editable (the edit op only saw the
+    /// outer 1×1's single cell). `None` for any normal table.
+    pub fn frame_inner(&self) -> Option<&Table> {
+        if self.rows != 1 || self.cols != 1 {
+            return None;
+        }
+        let cell = self.cells.iter().find(|c| c.active && c.row == 0 && c.col == 0)?;
+        let mut inner: Option<&Table> = None;
+        for b in &cell.blocks {
+            match b {
+                Block::Table(t) => {
+                    if inner.is_some() {
+                        return None; // two nested tables → not a simple wrapper
+                    }
+                    inner = Some(t);
+                }
+                Block::Paragraph(p) => {
+                    let has_text = p
+                        .runs
+                        .iter()
+                        .any(|r| r.content.iter().any(|i| matches!(i, Inline::Text(s) if !s.trim().is_empty())));
+                    if has_text {
+                        return None; // real text beside the table → keep the whole cell
+                    }
+                }
+            }
+        }
+        inner.filter(|t| t.rows > 1)
+    }
+
+    /// Mutable twin of [`frame_inner`] — the nested table to MUTATE when editing a frame-wrapper's cell.
+    pub fn frame_inner_mut(&mut self) -> Option<&mut Table> {
+        if self.frame_inner().is_none() {
+            return None; // the immutable borrow ends here, so the mutable walk below is fine (NLL)
+        }
+        let cell = self.cells.iter_mut().find(|c| c.active && c.row == 0 && c.col == 0)?;
+        cell.blocks.iter_mut().find_map(|b| if let Block::Table(t) = b { Some(t) } else { None })
+    }
+
+    /// The table a click/edit at `(row, col)` should target: the inner table for a frame wrapper, else
+    /// this table. Use everywhere a cell is read/edited so nested 자가진단표 cells become editable.
+    pub fn edit_target(&self) -> &Table {
+        self.frame_inner().unwrap_or(self)
+    }
+
+    /// Mutable [`edit_target`]. Two-phase (probe immutably, then re-borrow mutably) to satisfy the
+    /// borrow checker — returning `self` in a `match self.frame_inner_mut()` arm would overlap borrows.
+    pub fn edit_target_mut(&mut self) -> &mut Table {
+        if self.frame_inner().is_some() {
+            self.frame_inner_mut().expect("frame_inner_mut agrees with frame_inner")
+        } else {
+            self
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Cell {
     pub row: usize,
@@ -437,5 +498,46 @@ impl Default for PageSetup {
             landscape: false,
             columns: 1,
         }
+    }
+}
+
+#[cfg(test)]
+mod frame_wrapper_tests {
+    use super::*;
+
+    fn n_row_table(rows: usize) -> Table {
+        Table {
+            rows,
+            cols: 1,
+            cells: (0..rows).map(|r| Cell { row: r, col: 0, active: true, ..Default::default() }).collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn frame_inner_unwraps_1x1_wrapping_a_multirow_table() {
+        // The 자가진단표 shape: a 1×1 whose only cell holds one multi-row table → edits resolve to it.
+        let wrapper = Table {
+            rows: 1,
+            cols: 1,
+            cells: vec![Cell { row: 0, col: 0, active: true, blocks: vec![Block::Table(n_row_table(3))], ..Default::default() }],
+            ..Default::default()
+        };
+        assert_eq!(wrapper.frame_inner().map(|t| t.rows), Some(3));
+        assert_eq!(wrapper.edit_target().rows, 3);
+        assert_eq!(wrapper.clone().edit_target_mut().rows, 3);
+
+        // A normal table is its own edit target (no unwrap).
+        let normal = n_row_table(2);
+        assert!(normal.frame_inner().is_none());
+        assert_eq!(normal.edit_target().rows, 2);
+
+        // A 1×1 holding TEXT (not just a table) is NOT a frame wrapper — keep the whole cell.
+        let mut with_text = wrapper.clone();
+        with_text.cells[0].blocks.push(Block::Paragraph(Paragraph {
+            runs: vec![Run { content: vec![Inline::Text("내용".into())], ..Default::default() }],
+            ..Default::default()
+        }));
+        assert!(with_text.frame_inner().is_none(), "text beside the table → not a pure wrapper");
     }
 }

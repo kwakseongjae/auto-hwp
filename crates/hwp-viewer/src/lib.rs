@@ -1347,6 +1347,7 @@ fn model_cell_text(doc: &hwp_model::prelude::SemanticDoc, section: usize, block:
     use hwp_model::prelude::{Block, Inline};
     let Some(sec) = doc.sections.get(section) else { return String::new() };
     let Some(Block::Table(t)) = sec.blocks.get(block) else { return String::new() };
+    let t = t.edit_target(); // frame wrapper (자가진단표) → inner table
     let Some(cell) = t.cells.iter().find(|c| c.row == row && c.col == col) else { return String::new() };
     // Join multiple cell paragraphs with '\n' so a multi-line cell pre-fills readably; the layout
     // engine renders a '\n' inside a run as a forced line break, so the edit round-trips.
@@ -1473,6 +1474,7 @@ async fn table_col_boundaries(
         let Some(hwp_model::prelude::Block::Table(model)) = doc.sections.get(section).and_then(|s| s.blocks.get(block)) else {
             return Ok(None);
         };
+        let model = model.edit_target(); // a frame wrapper (자가진단표) → the inner table the grid drew
         let k = HWPUNIT_PER_PX;
         // column_offsets rescales the model col_widths to the table's drawn width (pt.w), so the boundary
         // x's match the painted grid exactly. Absolute px = (table-left + col_x) / 75.
@@ -1507,6 +1509,7 @@ async fn table_row_boundaries(
         let Some(hwp_model::prelude::Block::Table(model)) = doc.sections.get(section).and_then(|s| s.blocks.get(block)) else {
             return Ok(None);
         };
+        let model = model.edit_target(); // frame wrapper (자가진단표) → the inner table the grid drew
         let k = HWPUNIT_PER_PX;
         // row_offsets measures content (+ any row_heights override) the SAME way place_table draws, so
         // the boundary y's line up with the painted rows. A SPLIT table's `pt` is the per-page FRAGMENT,
@@ -1633,7 +1636,7 @@ async fn char_fmt(
         let Some(blk) = sec.blocks.get(block) else { return Ok(None) };
         let first_run_shape = match (blk, row, col) {
             (Block::Paragraph(p), None, None) => p.runs.first().map(|r| r.char_shape),
-            (Block::Table(t), Some(r), Some(c)) => t.cells.iter()
+            (Block::Table(t), Some(r), Some(c)) => t.edit_target().cells.iter()
                 .find(|cell| cell.active && cell.row == r && cell.col == c)
                 .and_then(|cell| cell.blocks.iter().find_map(|b| match b {
                     Block::Paragraph(p) => p.runs.first().map(|run| run.char_shape),
@@ -1726,6 +1729,9 @@ async fn get_block_runs(
         match (blk, row, col) {
             (Block::Paragraph(p), None, None) => read_para(p, &mut out),
             (Block::Table(t), Some(r), Some(c)) => {
+                // Resolve through a 1×1 frame wrapper (자가진단표) to the inner table the user actually
+                // clicked, so its nested cells are editable like any top-level cell.
+                let t = t.edit_target();
                 if let Some(cell) = t.cells.iter().find(|cc| cc.active && cc.row == r && cc.col == c) {
                     let mut first = true;
                     for b in &cell.blocks {
@@ -1786,6 +1792,7 @@ async fn block_style(
         match (blk, row, col) {
             (Block::Paragraph(p), None, None) => dto.align = align_of(p),
             (Block::Table(t), Some(r), Some(c)) => {
+                let t = t.edit_target(); // frame wrapper (자가진단표) → inner table
                 if let Some(cell) = t.cells.iter().find(|cc| cc.active && cc.row == r && cc.col == c) {
                     dto.shade = cell.shade_color.map(|c| c.to_hex());
                     if let Some(Block::Paragraph(p)) = cell.blocks.iter().find(|b| matches!(b, Block::Paragraph(_))) {
