@@ -135,7 +135,10 @@ impl LayoutEngine for NaiveLayout {
                             vert += t.outer_margin_top.max(0) as f64;
                         }
                         for rh in table_row_heights(t, body_w, doc, fonts) {
-                            if vert + rh > body_h && vert > 0.0 {
+                            // `rh <= body_h`: a row taller than the whole body never triggers a break — it
+                            // can't fit a fresh page either, so a break would only waste the current page
+                            // (the 자가진단표 1×1 mega-cell). Mirrors place_table + block_pages for lockstep.
+                            if vert + rh > body_h && vert > 0.0 && rh <= body_h {
                                 pages.push(new_page(page));
                                 vert = 0.0;
                             }

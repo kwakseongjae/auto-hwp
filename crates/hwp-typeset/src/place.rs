@@ -404,13 +404,15 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
                     // the remaining body flows to the next page. Record the page where the FIRST row
                     // lands as the table's start page (outline/page-nav only needs the start).
                     let row_h = crate::table_row_heights(t, body_w, doc, fonts);
-                    if vert > 0.0 && row_h.first().map(|&rh| vert + rh > body_h).unwrap_or(false) {
+                    // `rh <= body_h` on both checks: an over-tall row (taller than the whole body) never
+                    // forces a page bump — mirrors place_table + NaiveLayout so the start pages stay aligned.
+                    if vert > 0.0 && row_h.first().map(|&rh| vert + rh > body_h && rh <= body_h).unwrap_or(false) {
                         page_idx += 1;
                         vert = 0.0;
                     }
                     sec_pages.push(page_idx); // the table starts here (where its first row lands)
                     for (r, rh) in row_h.iter().enumerate() {
-                        if r > 0 && vert + rh > body_h && vert > 0.0 {
+                        if r > 0 && vert + rh > body_h && vert > 0.0 && *rh <= body_h {
                             page_idx += 1;
                             vert = 0.0;
                         }
@@ -589,7 +591,11 @@ fn place_table(
     let mut vert = vert;
     // First-row reserve: if not at page top and even the first row won't fit the remaining body, start
     // the table on a fresh page (a table that fits stays put; one that doesn't begins on a clean page).
-    if vert > 0.0 && vert + row_h[0] > body_h {
+    // EXCEPT a row taller than the whole body (e.g. the 자가진단표 wrapped in one 1×1 cell): bumping it to
+    // a fresh page can't help — it won't fit there either — and only wastes the current page (leaving the
+    // heading's page blank below it). Draw it here and let it overflow/clip, same as a mid-table over-tall
+    // row. Mirrored in NaiveLayout + block_pages (lib.rs) to keep the page counts in lockstep.
+    if vert > 0.0 && vert + row_h[0] > body_h && row_h[0] <= body_h {
         new_page(pages, page);
         vert = 0.0;
     }
@@ -598,8 +604,10 @@ fn place_table(
     let mut y = mt + vert; // absolute running top of the next row
     for r in 0..t.rows {
         // Break BEFORE row r if it would cross the body bottom — but never before a fragment's own first
-        // row (a row taller than a whole page draws and clips, like before, rather than looping forever).
-        if r > frag_first && (y - mt) + row_h[r] > body_h {
+        // row (a row taller than a whole page draws and clips, like before, rather than looping forever),
+        // and never to give a row TALLER than the whole body its own page (it can't fit there either, so
+        // the break would only waste the current page). `rh <= body_h` mirrors NaiveLayout/block_pages.
+        if r > frag_first && (y - mt) + row_h[r] > body_h && row_h[r] <= body_h {
             flush_fragment(pages, t, doc, fonts, ml, frag_top, &col_x, &row_h, frag_first, r, section, block);
             new_page(pages, page);
             frag_first = r;
@@ -1209,6 +1217,28 @@ mod tests {
         let placed = place_doc(&doc, &ApproxFontMetrics).pages.len();
         let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap().pages.len();
         assert_eq!(placed, naive, "over-tall row: place_doc {placed} == NaiveLayout {naive} (no re-fragment drift)");
+    }
+
+    #[test]
+    fn over_tall_table_after_heading_stays_on_the_heading_page() {
+        use crate::LayoutEngine;
+        // 자가진단표 regression: a heading paragraph (vert>0) followed by a 1×1 table whose single row is
+        // TALLER than the body. The first-row reserve must NOT bump it to a fresh page (that left the
+        // heading's page blank below the heading); the over-tall row draws on the heading's page instead.
+        let tall = (0..40).map(|_| Block::Paragraph(para("자가진단 항목 내용"))).collect::<Vec<_>>();
+        let t = Table {
+            rows: 1, cols: 1, col_widths: vec![1],
+            cells: vec![Cell { row: 0, col: 0, blocks: tall, ..Default::default() }],
+            ..Default::default()
+        };
+        let doc = doc_with_page(vec![Block::Paragraph(para("Ⅰ. 자가진단표")), Block::Table(t)], 5000);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        // The table fragment must land on page 0 — the same page as the heading (no blank-page bump).
+        let table_page = placed.pages.iter().position(|p| !p.tables.is_empty());
+        assert_eq!(table_page, Some(0), "over-tall table starts on the heading's page, not a fresh one");
+        // …and the two layout paths still agree (lockstep → oracle-safe).
+        let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap().pages.len();
+        assert_eq!(placed.pages.len(), naive, "place_doc {} == NaiveLayout {naive}", placed.pages.len());
     }
 
     #[test]
