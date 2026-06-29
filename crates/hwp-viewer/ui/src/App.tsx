@@ -29,17 +29,15 @@ const CM_PX = 2834.6457 / 75;
 const geomEq = (a: PageGeom | undefined, b: PageGeom) =>
   !!a && a.w === b.w && a.h === b.h && a.ml === b.ml && a.mt === b.mt && a.mr === b.mr && a.mb === b.mb;
 
-/// Editor chrome over an own-render page (NOT in the SVG → never exported): the 한글식 printable-area
-/// corner brackets + a top ruler with 1 cm ticks. Positioned as PERCENTAGES of the page box so it tracks
-/// zoom for free (the wrapper is the page at the current zoom). `geom` is in own-render px at zoom 1.
+/// Editor chrome over an own-render page (NOT in the SVG → never exported): the 한컴식 printable-area
+/// corner brackets. Positioned as PERCENTAGES of the page box so it tracks zoom for free (the wrapper is
+/// the page at the current zoom). `geom` is in own-render px at zoom 1. The horizontal ruler is no longer
+/// per-page — it's a SINGLE sticky bar at the top of the document column (see TopRuler).
 function PageChrome({ geom }: { geom: PageGeom }) {
   const { w, h, ml, mt, mr, mb } = geom;
   if (w <= 0 || h <= 0) return null;
   const lp = (ml / w) * 100, tp = (mt / h) * 100, rp = ((w - mr) / w) * 100, bp = ((h - mb) / h) * 100;
   const ARM = 14; // px arm length of each corner bracket (constant on screen)
-  const printW = Math.max(0, w - ml - mr);
-  const nTicks = Math.min(60, Math.floor(printW / CM_PX)); // guard pathological tiny pages
-  const ticks = Array.from({ length: nTicks + 1 }, (_, i) => ({ i, left: ((ml + i * CM_PX) / w) * 100 }));
   return (
     <div className="pointer-events-none absolute inset-0 z-[5]" aria-hidden>
       {/* printable-area corner brackets — arms point OUTWARD toward the page edges (한컴식 모서리 꺾쇠),
@@ -48,19 +46,73 @@ function PageChrome({ geom }: { geom: PageGeom }) {
       <div className="absolute border-l-2 border-b-2 border-accent/45" style={{ left: `${rp}%`, top: `${tp}%`, width: ARM, height: ARM, transform: "translateY(-100%)" }} />
       <div className="absolute border-r-2 border-t-2 border-accent/45" style={{ left: `${lp}%`, top: `${bp}%`, width: ARM, height: ARM, transform: "translateX(-100%)" }} />
       <div className="absolute border-l-2 border-t-2 border-accent/45" style={{ left: `${rp}%`, top: `${bp}%`, width: ARM, height: ARM }} />
-      {/* top ruler (한컴식 줄자): full-width bar, printable span tinted, 1 cm ticks + cm NUMBERS, and a
-          margin marker (▼) at each side — the printable origin reads as 0 at the left margin. */}
-      <div className="absolute left-0 right-0 top-0 h-5 border-b border-black/10 bg-neutral-100/85 text-neutral-500 backdrop-blur-sm dark:border-white/10 dark:bg-neutral-700/70 dark:text-neutral-300">
+    </div>
+  );
+}
+
+/// The SINGLE 한컴식 horizontal ruler — one sticky bar pinned at the top of the document column (not
+/// repeated on every page; that was 너무 불편). It mirrors the CURRENTLY-VISIBLE page's geometry: 1 cm
+/// ticks + cm NUMBERS over the full page width, the printable span tinted, and a margin marker (▼) at each
+/// printable boundary. `geom` is the visible page in own-render px at zoom 1; `scale` maps it to on-screen
+/// px so the ruler is exactly as wide as the page below it and stays aligned through zoom + horizontal
+/// scroll (it lives in the same centered column). When a table is selected, `colXs` (its column-boundary
+/// x-fractions across the PAGE, 0..1) draws ▽ markers a user can grab — `onColDrag(boundary, pageFrac)`
+/// is wired to the same SetTableColumnWidths op as the in-page handles. */
+function TopRuler({ geom, scale, colXs, onColDrag, onColDragEnd }: {
+  geom: PageGeom; scale: number;
+  colXs?: number[];
+  onColDrag?: (boundary: number, pageFrac: number) => void;
+  onColDragEnd?: () => void;
+}) {
+  const { w, ml, mr } = geom;
+  if (w <= 0) return null;
+  const widthPx = w * scale;
+  const lp = (ml / w) * 100, rp = ((w - mr) / w) * 100;
+  const printW = Math.max(0, w - ml - mr);
+  const nTicks = Math.min(60, Math.floor(printW / CM_PX));
+  const ticks = Array.from({ length: nTicks + 1 }, (_, i) => ({ i, left: ((ml + i * CM_PX) / w) * 100 }));
+  return (
+    <div className="sticky top-0 z-20 mx-auto h-6 select-none" style={{ width: `${widthPx}px` }} aria-hidden>
+      <div className="relative h-full overflow-hidden rounded-t-md border border-b-0 border-black/10 bg-neutral-100/95 text-neutral-500 shadow-sm backdrop-blur dark:border-white/10 dark:bg-neutral-800/95 dark:text-neutral-300">
         <div className="absolute inset-y-0 bg-accent/10" style={{ left: `${lp}%`, width: `${Math.max(0, rp - lp)}%` }} />
         {ticks.map(({ i, left }) => (
-          <div key={`t${i}`} className="absolute bottom-0 w-px bg-neutral-400/70 dark:bg-neutral-400/50" style={{ left: `${left}%`, height: i % 5 === 0 ? "55%" : "30%" }} />
+          <div key={`t${i}`} className="absolute bottom-0 w-px bg-neutral-400/70 dark:bg-neutral-400/50" style={{ left: `${left}%`, height: i % 5 === 0 ? "50%" : "28%" }} />
         ))}
         {ticks.filter((t) => t.i > 0).map(({ i, left }) => (
-          <span key={`n${i}`} className="absolute top-px -translate-x-1/2 text-[8px] leading-none tabular-nums" style={{ left: `${left}%` }}>{i}</span>
+          <span key={`n${i}`} className="absolute top-0.5 -translate-x-1/2 text-[8px] leading-none tabular-nums" style={{ left: `${left}%` }}>{i}</span>
         ))}
-        {/* left + right margin markers (downward triangle at each printable boundary) */}
-        <div className="absolute top-0 h-0 w-0 -translate-x-1/2 border-x-[4px] border-t-[6px] border-x-transparent border-t-accent/70" style={{ left: `${lp}%` }} />
-        <div className="absolute top-0 h-0 w-0 -translate-x-1/2 border-x-[4px] border-t-[6px] border-x-transparent border-t-accent/70" style={{ left: `${rp}%` }} />
+        {/* left + right margin markers (▼ at each printable boundary) */}
+        <div className="absolute top-0 h-0 w-0 -translate-x-1/2 border-x-[4px] border-t-[7px] border-x-transparent border-t-accent/70" style={{ left: `${lp}%` }} />
+        <div className="absolute top-0 h-0 w-0 -translate-x-1/2 border-x-[4px] border-t-[7px] border-x-transparent border-t-accent/70" style={{ left: `${rp}%` }} />
+        {/* column-boundary markers (▽) for the selected table — drag to resize. Interior boundaries only
+            (the two outer ones coincide with the table edges, already shown by the margin markers). */}
+        {colXs && colXs.length > 2 && onColDrag && colXs.slice(1, -1).map((fx, k) => (
+          <div
+            key={`c${k}`}
+            role="separator"
+            title="열 너비 조절 — 드래그"
+            className="pointer-events-auto absolute bottom-0 top-0 z-10 -translate-x-1/2 cursor-col-resize"
+            style={{ left: `${fx * 100}%`, width: 11 }}
+            onPointerDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const bar = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect();
+              const move = (ev: PointerEvent) => {
+                const frac = Math.min(1, Math.max(0, (ev.clientX - bar.left) / bar.width));
+                onColDrag(k + 1, frac);
+              };
+              const up = () => {
+                window.removeEventListener("pointermove", move);
+                window.removeEventListener("pointerup", up);
+                onColDragEnd?.();
+              };
+              window.addEventListener("pointermove", move);
+              window.addEventListener("pointerup", up);
+            }}
+          >
+            <div className="mx-auto mt-0.5 h-0 w-0 border-x-[4px] border-b-[7px] border-x-transparent border-b-neutral-500/80" />
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -2149,6 +2201,38 @@ export default function App() {
   // Current page for the status bar: the first virtual item still on screen (the virtualizer re-renders
   // on scroll, so this stays live). 1-based for display; falls back to 1 before the first measure.
   const currentPage = listCount > 0 ? (virtualizer.getVirtualItems()[0]?.index ?? 0) + 1 : 0;
+
+  // ---- the SINGLE top ruler (own mode): geometry of the first visible page + on-screen scale, and the
+  // selected table's column boundaries projected to PAGE fractions so the ruler can show drag-to-resize
+  // ▽ markers wired to the same SetTableColumnWidths op as the in-page handles. ----
+  const rulerIndex = listCount > 0 ? (virtualizer.getVirtualItems()[0]?.index ?? 0) : 0;
+  const rulerGeom = viewMode === "own" ? pageGeom[rulerIndex] : undefined;
+  const rulerScale = rulerGeom && rulerGeom.w > 0 ? pageWidth / rulerGeom.w : 1;
+  // Column boundaries (0..1 across the PAGE) for the selected table, only when it's on the ruler's page.
+  const rulerColXs = useMemo(() => {
+    if (!rulerGeom || !tableSel || tableSel.page !== rulerIndex) return undefined;
+    const { colFracs, box } = tableSel;
+    if (colFracs.length < 3 || box.w <= 0) return undefined; // need ≥1 interior boundary
+    return colFracs.map((f) => (box.x + f * box.w) / rulerGeom.w);
+  }, [rulerGeom, tableSel, rulerIndex]);
+  // Drag a ruler column marker → update the selection's table-relative fracs live (the in-page handles
+  // and the ▽ move together); commit on release via the existing column-width op.
+  const onRulerColDrag = useCallback((boundary: number, pageFrac: number) => {
+    setTableSel((cur) => {
+      if (!cur || cur.box.w <= 0) return cur;
+      const geomW = pageGeomRef.current[cur.page]?.w;
+      if (!geomW) return cur;
+      const tableFrac = (pageFrac * geomW - cur.box.x) / cur.box.w;
+      const fr = cur.colFracs.slice();
+      const lo = fr[boundary - 1] + 0.02, hi = fr[boundary + 1] - 0.02; // keep neighbors from collapsing
+      fr[boundary] = Math.min(hi, Math.max(lo, tableFrac));
+      return { ...cur, colFracs: fr };
+    });
+  }, []);
+  const onRulerColDragEnd = useCallback(() => {
+    const cur = tableSelRef.current;
+    if (cur && cur.colFracs.length > 2) commitTableColWidths(cur.colFracs);
+  }, [commitTableColWidths]);
   // Robustness for the INLINE pending band: the on-page band only mounts when the target page is in
   // the virtual window AND we're in an SVG mode (the HTML iframe can't host the overlay). When it
   // isn't (HTML mode, or the user scrolled the target off-screen), show a sticky fallback bar so the
@@ -2416,7 +2500,12 @@ export default function App() {
           ) : listCount > 0 ? (
             // SVG page list — shared by 'svg' (rhwp 원본) and 'own' (자체 렌더, OUR engine). The two have
             // separate caches/ensure-fns + page counts; the caret (whose geometry is from the rhwp
-            // render path) only attaches in 'svg' mode.
+            // render path) only attaches in 'svg' mode. Own mode prepends the SINGLE 한컴식 ruler, which
+            // sticks to the top of the scroll viewport and tracks the visible page's geometry.
+            <>
+            {viewMode === "own" && rulerGeom && (
+              <TopRuler geom={rulerGeom} scale={rulerScale} colXs={rulerColXs} onColDrag={onRulerColDrag} onColDragEnd={onRulerColDragEnd} />
+            )}
             <div
               className={`relative mx-auto rounded-lg ${dragActive ? "ring-2 ring-accent ring-offset-4 ring-offset-neutral-200 dark:ring-offset-neutral-800" : ""}`}
               // Zoom-derived column width (replaces max-w-3xl); height is the virtualizer total.
@@ -2710,6 +2799,7 @@ export default function App() {
                 );
               })}
             </div>
+            </>
           ) : pageCount > 0 ? (
             // A doc IS open but the active list has no pages yet — e.g. switching to 'own' before its
             // page count resolves. Show a render hint, not the open-file prompt.
