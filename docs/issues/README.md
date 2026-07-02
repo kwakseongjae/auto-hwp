@@ -29,7 +29,7 @@
 | [015](015-wasm-npm-package.md) | wasm npm 패키지 `@tf-hwp/engine` — HWP5 런타임 8p·골든 바이트동일·편집루프 wasm 실증 | **done** (PDF 글리프만 018) | P4-A | 4fb1ced · pkg/는 빌드산출물(gitignore, 레시피로 재빌드) |
 | [017](017-hwp-mcp-wasm.md) | hwp-mcp wasm화 (http 게이트 + open_bytes/export_bytes) — 015 선행 | **done** | P2b | 3acfc5e · wasm exit0, 네이티브 무변경, smoke 14/14 |
 | [018](018-pdf-font-injection.md) | PDF 폰트 바이트 주입(wasm 한글 PDF) + tableAt null 폴리시 | **done** | P4-A후속 | 10ab153 · 네이티브 PDF 골든 바이트동일, FontFile2/CIDFontType2 임베드 실증 |
-| [019](019-business-plan-k-poc.md) | 창업지원도움e 통합 PoC — /hwp-lab 페이지 + LLM 프록시 (크로스-레포, additive-only) | open | P5 | 016, 018 done → 착수가능 |
+| [019](019-business-plan-k-poc.md) | 통합 실험 앱 `apps/hwp-lab` (Next.js, **사용자 QA 기준**) — 업로드→렌더→바이브편집→PDF | open | P5 | 방향변경: 운영레포 무접촉, tf-hwp 내 독립 앱 |
 | [016](016-react-component-library.md) | React 컴포넌트 라이브러리 `@tf-hwp/react` — sanitize 강제·mock 플로우 10테스트 | **done** | P4-B | 5a18459 · 브라우저 데모는 manual |
 
 > 완료된 완성형 핵심(글자/문단/글꼴/표 병합·음영/목록)은 `docs/COMPLETION-ROADMAP.md`와 `CHECKLIST.md` 참고.
