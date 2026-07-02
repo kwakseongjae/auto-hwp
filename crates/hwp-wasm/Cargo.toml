@@ -29,10 +29,12 @@ hwp5 = ["hwp-mcp/rhwp"]
 # inheritance here — the `http` default would leak back in and re-pull getrandom.
 hwp-mcp = { path = "../hwp-mcp", default-features = false }
 # RENDER / GEOMETRY / EXPORT lane: own-render SVG, hit-test/table geometry, HTML + krilla PDF. `pdf`
-# enables emit_pdf; we deliberately DO NOT enable `shaper` — its RealFontMetrics reads fonts via
-# std::fs (fails silently on wasm) and would diverge from a shaper-less native own-render, breaking
-# the golden cross-check. ApproxFontMetrics is deterministic and font-file-free.
-hwp-session = { workspace = true, features = ["pdf"] }
+# enables emit_pdf. `shaper` is ON as of issue 022: RealFontMetrics now has a BYTE constructor
+# (`from_bytes`) so `registerFont` feeds the injected face into the metrics path too — NOT std::fs
+# discovery (which returns None on wasm → the deterministic Approx fallback for the UN-registered
+# state, preserving backward compat). With a font registered, the SAME bytes drive screen SVG, layout
+# pagination AND the krilla PDF embed, so the three stay in lockstep (issue 022 §2 cross-golden).
+hwp-session = { workspace = true, features = ["pdf", "shaper"] }
 # Needed to reach the live SemanticDoc inside the mcp Session for the render/geometry/export calls.
 hwp-ops = { workspace = true }
 hwp-model = { workspace = true }

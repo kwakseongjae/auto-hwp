@@ -173,6 +173,9 @@ export class HwpDoc {
   redo() {
     return this.#call((r) => r.redo());
   }
+  /** Inject a single-face TTF/OTF font used for BOTH layout metrics AND the PDF embed (issue 022).
+   *  ⚠️ RE-LAYOUTS the document: `renderPageSvg` and `pageCount()` can change — re-query + re-render
+   *  after calling. Throws `{code:"ttc_unsupported"}` for a TTC collection. */
   registerFont(family, bytes) {
     return this.#call((r) => r.registerFont(family, bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)));
   }

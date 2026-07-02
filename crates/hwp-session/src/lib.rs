@@ -50,12 +50,44 @@ pub fn own_render_fonts() -> Box<dyn hwp_model::prelude::FontMetricsProvider> {
     Box::new(hwp_typeset::ApproxFontMetrics)
 }
 
+/// Like [`own_render_fonts`], but backed by CALLER-INJECTED font bytes when present — the wasm/web
+/// path where `std::fs` finds no fonts to discover (issue 022 §1, mirroring 018's PDF byte-injection).
+/// The FIRST parseable injected face backs the rustybuzz shaper, so the SCREEN SVG, the LAYOUT
+/// pagination and the PDF embed all measure with the SAME bytes. An EMPTY slice returns EXACTLY
+/// [`own_render_fonts`] (same provider construction → byte-identical output), and a build WITHOUT the
+/// `shaper` feature ignores the bytes (no rustybuzz to feed) and stays on the Approx fallback — so the
+/// native discover/Approx paths are byte-unchanged (the golden regime). v1 uses the first injected
+/// face for every document font name (the "모든 문서 폰트명 → 현재 선택 폰트 1개" mapping, issue §3).
+#[cfg(feature = "shaper")]
+pub fn own_render_fonts_with(injected: &[(String, Vec<u8>)]) -> Box<dyn hwp_model::prelude::FontMetricsProvider> {
+    match injected.iter().find(|(_, b)| !b.is_empty()) {
+        Some((_family, bytes)) => Box::new(hwp_typeset::RealFontMetrics::from_bytes(bytes)),
+        None => own_render_fonts(),
+    }
+}
+#[cfg(not(feature = "shaper"))]
+pub fn own_render_fonts_with(_injected: &[(String, Vec<u8>)]) -> Box<dyn hwp_model::prelude::FontMetricsProvider> {
+    // No `shaper` feature → no rustybuzz to feed the injected bytes into; Approx is the deterministic
+    // fallback (the injected face still drives the PDF embed via `emit_pdf_with_fonts`).
+    own_render_fonts()
+}
+
 /// Render every page of `doc` through OUR OWN engine (`place_doc` → paint IR → `SvgSink`), one
 /// standalone SVG string per page. The self-owned, browser-independent fidelity surface — the SAME
 /// path the CLI `own-render` runs and the in-app "자체 렌더" view shows. Under `shaper` glyph
 /// x-positions are real (rustybuzz advances).
 pub fn render_svg(doc: &SemanticDoc) -> Vec<String> {
     let fonts = own_render_fonts();
+    hwp_render::render_doc_svg(doc, fonts.as_ref())
+}
+
+/// Like [`render_svg`], but measures with CALLER-INJECTED font bytes (issue 022 §2) so the wasm/web
+/// screen SVG uses the SAME face as its layout + PDF. An EMPTY slice is byte-identical to
+/// [`render_svg`] (delegates through [`own_render_fonts_with`]). Registering/replacing a font changes
+/// pagination, so the host MUST re-query [`crate`]-derived page counts after `registerFont` (the wasm
+/// `HwpDoc` invalidates its revision-keyed SVG cache on register).
+pub fn render_svg_with(doc: &SemanticDoc, injected: &[(String, Vec<u8>)]) -> Vec<String> {
+    let fonts = own_render_fonts_with(injected);
     hwp_render::render_doc_svg(doc, fonts.as_ref())
 }
 
@@ -219,6 +251,22 @@ pub fn table_at(doc: &SemanticDoc, page: u32, x: f64, y: f64) -> Option<TableBox
         .map(|t| TableBoxDto { x: t.x / k, y: t.y / k, w: t.w / k, h: t.h / k, section: t.section, block: t.block, rows: t.rows, cols: t.cols, first_row: t.first_row })
 }
 
+/// [`table_at`] measured with CALLER-INJECTED font bytes (issue 022) — the wasm/web path where a
+/// registered font changed the pagination, so the geometry MUST agree with the injected-metric SVG or
+/// clicks miss. Empty slice → identical to [`table_at`].
+pub fn table_at_with(doc: &SemanticDoc, page: u32, x: f64, y: f64, injected: &[(String, Vec<u8>)]) -> Option<TableBoxDto> {
+    let fonts = own_render_fonts_with(injected);
+    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    let pg = placed.pages.get(page as usize)?;
+    let k = HWPUNIT_PER_PX;
+    let (x, y) = (x * k, y * k);
+    pg.tables
+        .iter()
+        .filter(|t| x >= t.x && x <= t.x + t.w && y >= t.y && y <= t.y + t.h)
+        .last()
+        .map(|t| TableBoxDto { x: t.x / k, y: t.y / k, w: t.w / k, h: t.h / k, section: t.section, block: t.block, rows: t.rows, cols: t.cols, first_row: t.first_row })
+}
+
 // ---- Own-render point-to-block ----------------------------------------------------------------
 
 /// The top-level block the user pointed at, in own-render px: its `(section, block)` anchor, a label
@@ -295,6 +343,32 @@ pub fn own_hit_test(doc: &SemanticDoc, page: u32, x: f64, y: f64) -> Option<Bloc
     })
 }
 
+/// [`own_hit_test`] measured with CALLER-INJECTED font bytes (issue 022) — the wasm/web path so the
+/// click-to-point geometry agrees with the injected-metric SVG. Empty slice → identical to
+/// [`own_hit_test`].
+pub fn own_hit_test_with(doc: &SemanticDoc, page: u32, x: f64, y: f64, injected: &[(String, Vec<u8>)]) -> Option<BlockHitDto> {
+    let fonts = own_render_fonts_with(injected);
+    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    let pg = placed.pages.get(page as usize)?;
+    let k = HWPUNIT_PER_PX;
+    pg.block_at(x * k, y * k).map(|b| BlockHitDto {
+        section: b.section,
+        block: b.block,
+        kind: match b.kind {
+            hwp_typeset::BlockKind::Paragraph => "paragraph",
+            hwp_typeset::BlockKind::Table => "table",
+            hwp_typeset::BlockKind::Image => "image",
+        }
+        .into(),
+        x: b.x / k,
+        y: b.y / k,
+        w: b.w / k,
+        h: b.h / k,
+        text: if b.kind == hwp_typeset::BlockKind::Paragraph { model_para_text(doc, b.section, b.block) } else { String::new() },
+        editable: b.kind == hwp_typeset::BlockKind::Paragraph && model_para_editable(doc, b.section, b.block),
+    })
+}
+
 /// Marquee (rubber-band) select (own-render only): every top-level block whose placed BAND intersects
 /// the page-space rectangle `(x0,y0)-(x1,y1)`, in own-render px geometry. The rectangle corners come in
 /// either order (a drag can go up-left); they're normalized here. Additive to [`own_hit_test`] — it uses
@@ -307,7 +381,18 @@ pub fn own_hit_test(doc: &SemanticDoc, page: u32, x: f64, y: f64) -> Option<Bloc
 /// scope — the caller clips the rect to the start page and queries that page only.
 pub fn blocks_in_rect(doc: &SemanticDoc, page: u32, x0: f64, y0: f64, x1: f64, y1: f64) -> Vec<BlockHitDto> {
     let fonts = own_render_fonts();
-    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    blocks_in_rect_impl(doc, page, x0, y0, x1, y1, fonts.as_ref())
+}
+
+/// [`blocks_in_rect`] measured with CALLER-INJECTED font bytes (issue 022) — the wasm/web path so the
+/// marquee geometry agrees with the injected-metric SVG. Empty slice → identical to [`blocks_in_rect`].
+pub fn blocks_in_rect_with(doc: &SemanticDoc, page: u32, x0: f64, y0: f64, x1: f64, y1: f64, injected: &[(String, Vec<u8>)]) -> Vec<BlockHitDto> {
+    let fonts = own_render_fonts_with(injected);
+    blocks_in_rect_impl(doc, page, x0, y0, x1, y1, fonts.as_ref())
+}
+
+fn blocks_in_rect_impl(doc: &SemanticDoc, page: u32, x0: f64, y0: f64, x1: f64, y1: f64, fonts: &dyn hwp_model::prelude::FontMetricsProvider) -> Vec<BlockHitDto> {
+    let placed = hwp_typeset::place_doc(doc, fonts);
     let Some(pg) = placed.pages.get(page as usize) else { return Vec::new() };
     let k = HWPUNIT_PER_PX;
     // Normalize the (possibly reversed) corners, then px → HWPUNIT (place_doc space).
@@ -1111,6 +1196,19 @@ mod tests {
         assert!(narrow_anchors.contains(&(0, 1)), "the narrow rect over the table still hits the table");
         assert!(!narrow_anchors.contains(&(0, 2)), "the narrow rect does NOT reach the footer paragraph");
         assert!(narrow.len() < all.len(), "narrow marquee is a strict subset of the full-page marquee");
+    }
+
+    #[test]
+    fn render_svg_with_empty_matches_render_svg() {
+        // The golden invariant (issue 022 §1): an EMPTY injection must be byte-identical to the
+        // discover/Approx path — the injection is a NEW entry point, the old one is untouched.
+        let doc = doc_with_stacked_blocks();
+        assert_eq!(render_svg_with(&doc, &[]), render_svg(&doc), "empty injection == render_svg");
+        // Geometry `_with` variants likewise agree with their bare counterparts on an empty slice.
+        assert_eq!(
+            blocks_in_rect_with(&doc, 0, 0.0, 0.0, 1e5, 1e5, &[]).len(),
+            blocks_in_rect(&doc, 0, 0.0, 0.0, 1e5, 1e5).len(),
+        );
     }
 
     #[test]

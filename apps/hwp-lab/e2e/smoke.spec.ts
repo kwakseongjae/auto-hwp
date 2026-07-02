@@ -59,3 +59,27 @@ test("업로드 → 8페이지 SVG → mock 편집 적용 → undo", async ({ pa
   await page.locator('.hw-tool[title="실행취소"]').click();
   await expect(page.locator(".hw-sheet")).toHaveCount(8, { timeout: 30_000 });
 });
+
+// issue 022: 열기 직후 기본 폰트(NanumGothic)가 자동 등록되어 화면 @font-face 가 주입되고,
+// FontPicker 가 현재 글꼴을 표시하며, PDF 버튼이 즉시 활성화되어 실제 PDF 가 내려받아진다.
+test("기본 폰트 자동 적용 → FontPicker 표시 + @font-face 주입 + PDF 다운로드", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('[data-testid="file-input"]').setInputFiles(BENCHMARK);
+  await expect(page.locator(".hw-sheet svg").first()).toBeVisible({ timeout: 60_000 });
+
+  // FontPicker 가 보이고 기본 폰트(Nanum Gothic)가 현재 글꼴로 표시된다(자동 registerFont 성공).
+  await expect(page.locator('[data-testid="font-picker"]')).toBeVisible();
+  await expect(page.locator(".hw-fontpicker-current")).toContainText("Nanum Gothic", { timeout: 30_000 });
+
+  // 화면 @font-face/별칭 스타일이 주입되어 있다(화면·PDF 폰트 일치의 근거).
+  await expect(page.locator('style[data-testid="hw-fontface"]')).toHaveCount(1);
+
+  // PDF 버튼 활성 + 클릭 시 실제 다운로드(기본 폰트가 등록되어 font_missing 없이 성공).
+  const pdfBtn = page.locator('.hw-tool[title="PDF 다운로드"]');
+  await expect(pdfBtn).toBeEnabled();
+  const [download] = await Promise.all([
+    page.waitForEvent("download", { timeout: 90_000 }),
+    pdfBtn.click(),
+  ]);
+  expect(download.suggestedFilename()).toMatch(/\.pdf$/i);
+});

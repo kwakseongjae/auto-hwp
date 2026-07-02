@@ -47,7 +47,7 @@ doc.free();                              // free the wasm allocation on swap (R1
 | `tableAt(page, x, y)` | `TableBox \| null` | own-render **px** coords (marking). |
 | `applyIntent(intent)` | `Outcome` | object or JSON string; Intent schema v0. |
 | `undo()` / `redo()` | `boolean` | graceful no-op when empty. |
-| `registerFont(family, bytes)` | `void` | required before `exportPdf` (R8). |
+| `registerFont(family, bytes)` | `void` | drives metrics **and** PDF; **re-layouts** (re-query `pageCount`). |
 | `exportPdf()` | `Uint8Array` | throws `{code:"font_missing"}` if none. |
 | `exportHtml()` | `string` | self-contained HTML. |
 | `toHwpx()` | `Uint8Array` | round-trip-safe HWPX. |
@@ -103,11 +103,28 @@ const pdf = doc.exportPdf();              // real, subsetted Korean glyphs embed
 `exportPdf()` throws `{code:"font_missing"}` if no font was registered (never silently emits empty
 glyphs).
 
-**Font bytes must be a single-face TTF/OTF** — a TTC (TrueType Collection) is **not** accepted (krilla's
-`simple-text` backend can't subset a collection). The injected bytes now thread all the way through to
-krilla (issue 018): the first parseable registered face becomes the PDF body face, so the exported PDF
-embeds a **real subset of your Korean glyphs**. v1 uses the injected face as the single body default —
-document-level per-family mapping is a follow-up; register the face you want the body text drawn in.
+**Font bytes must be a single-face TTF/OTF** — a TTC (TrueType Collection) is **not** accepted: it
+throws `{code:"ttc_unsupported"}` (krilla's `simple-text` backend can't subset a collection, and the
+shaper takes face index 0 only). The injected bytes thread all the way through to krilla (issue 018):
+the first parseable registered face becomes the PDF body face, so the exported PDF embeds a **real
+subset of your Korean glyphs**.
+
+### Registering a font re-layouts the document (issue 022)
+
+`registerFont` now feeds the injected face into the **layout metrics** as well as the PDF embed — the
+same bytes shape screen SVG, pagination *and* PDF, so all three agree. Until you register a font,
+render/layout use a deterministic per-script **Approx** fallback (no font file needed). Because real
+metrics differ from Approx, **registering (or replacing) a font can change the page count and line
+breaks**, so:
+
+```js
+doc.registerFont('Nanum Gothic', font); // → re-layouts; internal SVG cache invalidated
+const pages = doc.pageCount();           // re-query — may differ from before
+for (let i = 0; i < pages; i++) render(doc.renderPageSvgSanitized(i)); // re-render every page
+```
+
+v1 maps **every** document font name to this one injected face (register the face you want the body
+drawn in); document-level per-family mapping is a follow-up.
 
 ## Bundle size
 

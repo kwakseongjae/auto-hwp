@@ -69,6 +69,7 @@ export interface EngineError extends Error {
     | 'needs_rhwp'
     | 'out_of_range'
     | 'font_missing'
+    | 'ttc_unsupported'
     | 'serialize'
     | 'engine'
     | 'wasm_trap'
@@ -92,7 +93,11 @@ export class HwpDoc {
   applyIntent(intent: object | string): Outcome;
   undo(): boolean;
   redo(): boolean;
-  /** Inject a TTF/OTF font face (R8 — fonts are never bundled). Required before exportPdf. */
+  /** Inject a single-face TTF/OTF font (R8 — fonts are never bundled). Used for BOTH the layout
+   *  metrics AND the PDF embed (issue 022): the SAME bytes drive screen SVG, pagination and PDF.
+   *  ⚠️ Registering (or replacing) a font RE-LAYOUTS the document — `renderPageSvg` output and the
+   *  page count can change — so re-query `pageCount()` and re-render every page after calling this.
+   *  Throws `{code:"ttc_unsupported"}` for a TTC collection (single TTF/OTF only). */
   registerFont(family: string, bytes: Uint8Array | ArrayBuffer): void;
   /** Throws {code:"font_missing"} if no font registered. See README for the wasm glyph-embedding note. */
   exportPdf(): Uint8Array;

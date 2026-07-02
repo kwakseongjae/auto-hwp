@@ -11,6 +11,12 @@ export { SelectionOverlay } from "./components/SelectionOverlay";
 export type { SelectionOverlayProps, Mark, Marquee } from "./components/SelectionOverlay";
 export { ChatPanel } from "./components/ChatPanel";
 export type { ChatPanelProps } from "./components/ChatPanel";
+export { FontPicker } from "./components/FontPicker";
+export type { FontPickerProps } from "./components/FontPicker";
+
+// Font system v1 (issue 022): the curated OFL catalog + screen @font-face/alias helpers.
+export { FONT_CATALOG, catalogUrl, buildFontFaceCss, svgFontFamilies, isTtc } from "./fonts";
+export type { FontCatalogEntry } from "./fonts";
 
 // Backend seam
 export type { EngineAdapter } from "./EngineAdapter";

@@ -1,16 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { HwpWorkspace, WasmAdapter, type Anchor, type DocContext, type Intent } from "@tf-hwp/react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { HwpWorkspace, WasmAdapter, FONT_CATALOG, type Anchor, type DocContext, type Intent } from "@tf-hwp/react";
 import { resetEngine } from "@tf-hwp/engine";
 
 type Mode = "loading" | "mock" | "live";
 type Doc = { bytes: Uint8Array; name: string };
 
-// public/fonts 에 이 파일이 있으면 PDF용 폰트로 자동 fetch(폰트 파일은 git에 넣지 않음 — 사용자가
-// 로컬에 떨어뜨리거나 헤더의 폰트 선택으로 주입). OFL Noto Sans KR 권장.
-const PUBLIC_FONT_PATH = "/fonts/NotoSansKR-Regular.ttf";
-const PUBLIC_FONT_FAMILY = "Noto Sans KR";
+// 기본 폰트: 레포 자산 NanumGothic(OFL) — copy-fonts.mjs 가 public/fonts 로 복사하므로 오프라인에서도
+// 항상 존재한다. 열기 직후 자동 등록되어 화면·조판·PDF 가 즉시 이 폰트로 일치하고 PDF 버튼이 활성화된다.
+// 카탈로그의 나머지 폰트(scripts/fetch-fonts.mjs, git 제외)는 툴바 FontPicker 에서 선택/업로드한다.
+const DEFAULT_FONT_PATH = "/fonts/NanumGothic-Regular.ttf";
+const DEFAULT_FONT_FAMILY = "Nanum Gothic";
+const FONT_URL_BASE = "/fonts";
 
 const msg = (e: unknown): string => {
   if (e && typeof e === "object" && "message" in e) return String((e as { message: unknown }).message);
@@ -43,8 +45,8 @@ export default function LabWorkspace() {
   const [doc, setDoc] = useState<Doc | null>(null);
   const [labError, setLabError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const fontRef = useRef<File | null>(null);
-  const [fontName, setFontName] = useState<string | null>(null);
+  // 기본 폰트 바이트(NanumGothic) — 열기 직후 자동 등록되도록 HwpWorkspace 에 defaultFont 로 전달.
+  const [defaultFont, setDefaultFont] = useState<{ family: string; bytes: Uint8Array } | null>(null);
 
   // ssr:false 로 로드되므로 window 존재. wasm은 public 정적 에셋을 명시적 URL로 fetch(번들러 마법 X).
   const wasmUrl = useMemo(() => new URL("/hwp/hwp_wasm_bg.wasm", window.location.origin), []);
@@ -60,6 +62,24 @@ export default function LabWorkspace() {
       })
       .catch(() => {
         if (!cancelled) setMode("mock");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 기본 폰트(NanumGothic)를 한 번 fetch 해 둔다 — HwpWorkspace 가 문서를 열면 이 바이트를 자동
+  // registerFont 하여(메트릭+PDF) 화면/PDF 가 즉시 일치하고 PDF 버튼이 활성화된다. copy-fonts.mjs 가
+  // public/fonts 에 레포 자산을 복사하므로 오프라인에서도 성공한다(실패 시 FontPicker 업로드로 폴백).
+  useEffect(() => {
+    let cancelled = false;
+    fetch(DEFAULT_FONT_PATH)
+      .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status)))))
+      .then((buf) => {
+        if (!cancelled) setDefaultFont({ family: DEFAULT_FONT_FAMILY, bytes: new Uint8Array(buf) });
+      })
+      .catch(() => {
+        /* 기본 폰트 미배치 — copy-fonts.mjs 실행 전이거나 오프라인. FontPicker 로 직접 선택/업로드 가능. */
       });
     return () => {
       cancelled = true;
@@ -138,26 +158,23 @@ export default function LabWorkspace() {
     return data.intents ?? [];
   }, []);
 
-  // R8: 폰트는 번들하지 않는다. PDF 클릭 시 폰트 미주입이면 호출된다.
-  // 우선순위: 헤더에서 선택한 로컬 .ttf → public/fonts 의 폰트 → (없으면) 안내 후 취소.
+  // R8: 폰트는 번들하지 않는다. 기본 NanumGothic 이 자동 등록되므로 PDF 는 곧바로 활성화되지만,
+  // (기본 폰트 fetch 실패 등으로) 미주입 상태에서 PDF 를 누르면 이 폴백이 호출된다: 기본 폰트를 다시
+  // 시도하고, 그래도 없으면 툴바 FontPicker(카탈로그/업로드)로 안내한다.
   const requestFont = useCallback(async (): Promise<{ family: string; bytes: Uint8Array } | null> => {
-    if (fontRef.current) {
-      return { family: fontRef.current.name, bytes: new Uint8Array(await fontRef.current.arrayBuffer()) };
-    }
+    if (defaultFont) return defaultFont;
     try {
-      const r = await fetch(PUBLIC_FONT_PATH);
-      if (r.ok) {
-        return { family: PUBLIC_FONT_FAMILY, bytes: new Uint8Array(await r.arrayBuffer()) };
-      }
+      const r = await fetch(DEFAULT_FONT_PATH);
+      if (r.ok) return { family: DEFAULT_FONT_FAMILY, bytes: new Uint8Array(await r.arrayBuffer()) };
     } catch {
-      /* public/fonts 미배치 — 로컬 선택으로 폴백 */
+      /* 기본 폰트 미배치 — FontPicker 로 폴백 */
     }
     setLabError(
-      `PDF용 폰트가 없습니다.\n헤더의 "폰트 선택 (.ttf/.otf)"으로 폰트를 주입하거나, ` +
-        `public/fonts/NotoSansKR-Regular.ttf 를 배치하세요. (한컴/함초롬 폰트는 재배포 불가로 번들하지 않습니다.)`,
+      `PDF용 폰트가 없습니다.\n상단 툴바의 "글꼴" 선택기에서 카탈로그 폰트를 고르거나 .ttf/.otf 를 업로드하세요. ` +
+        `(scripts/fetch-fonts.mjs 로 카탈로그를 내려받을 수 있습니다. 한컴/함초롬 폰트는 재배포 불가로 번들하지 않습니다.)`,
     );
     return null;
-  }, []);
+  }, [defaultFont]);
 
   const badge =
     mode === "loading" ? (
@@ -187,20 +204,7 @@ export default function LabWorkspace() {
           <input type="file" accept=".hwp,.hwpx" hidden onChange={onFile} data-testid="file-input" />
         </label>
 
-        <label className="lab-btn">
-          폰트 선택 (.ttf/.otf)
-          <input
-            type="file"
-            accept=".ttf,.otf"
-            hidden
-            onChange={(e) => {
-              const f = e.target.files?.[0] ?? null;
-              fontRef.current = f;
-              setFontName(f?.name ?? null);
-            }}
-          />
-        </label>
-        {fontName && <span className="lab-note">폰트: {fontName}</span>}
+        {/* 글꼴 선택은 문서 툴바의 FontPicker(카탈로그+업로드)가 담당한다 — 화면·조판·PDF 일치. */}
 
         <span className="lab-spacer" />
 
@@ -225,13 +229,16 @@ export default function LabWorkspace() {
             document={doc}
             onAiRequest={onAiRequest}
             requestFont={requestFont}
+            fontCatalog={FONT_CATALOG}
+            defaultFont={defaultFont}
+            fontUrlBase={FONT_URL_BASE}
             isMock={mode === "mock"}
           />
         ) : (
           <div className="lab-empty">
             상단의 <b>&nbsp;파일 열기&nbsp;</b>로 <code>.hwp / .hwpx</code>를 업로드하세요.
             <br />
-            데모 픽스처: 레포 루트의 <code>benchmark.hwp</code>(8쪽) · <code>benchmark1.hwp</code>(19쪽).
+            데모 픽스처: 레포 루트의 <code>benchmark.hwp</code>(8쪽) · <code>benchmark1.hwp</code>(18쪽).
           </div>
         )}
         {busy && doc && <div className="lab-loading-overlay">{busy}</div>}

@@ -152,6 +152,19 @@ impl RealFontMetrics {
         }
     }
 
+    /// Build the shaper from CALLER-INJECTED font bytes — the wasm/web path where `std::fs` has no
+    /// fonts to discover (issue 022: metric injection, mirroring 018's PDF byte-injection). The SAME
+    /// injected face backs BOTH the Korean/CJK slot and the Latin slot (`latin: None` routes Latin to
+    /// `font` — NanumGothic and every catalog OFL face carry Latin too), so ONE injected TTF/OTF
+    /// drives every glyph. This is byte-for-byte equivalent to [`RealFontMetrics::new`] when the same
+    /// NanumGothic-Regular.ttf is injected as the native discover path finds (both slots resolve to the
+    /// same bytes → identical advances). Bytes that don't parse fall back to the per-script
+    /// approximation (never panics). TTF/OTF single-face only (face index 0); a TTC isn't accepted.
+    pub fn from_bytes(bytes: &[u8]) -> RealFontMetrics {
+        let font = LoadedFont::from_bytes(bytes.to_vec().into_boxed_slice(), 0, "<injected>".to_string());
+        RealFontMetrics { font, latin: None, cache: RefCell::new(HashMap::new()) }
+    }
+
     /// True when a real font backs the metrics (a Korean-capable face was found). False = the
     /// approximate fallback is active (no font on this machine / CI).
     pub fn is_real(&self) -> bool {
@@ -380,6 +393,44 @@ mod tests {
         let m = RealFontMetrics::new();
         assert_eq!(m.line_height(1000), 1000.0, "line height = bare EM (percent spacing scales the EM)");
         assert_eq!(m.line_height(1200), 1200.0);
+    }
+
+    #[test]
+    fn from_bytes_injection_matches_native_discover() {
+        // Inject the SAME vendored NanumGothic the native discover path finds. The metric injection
+        // (wasm/web path) must produce byte-for-byte identical advances to `new()` — that equivalence
+        // is what makes the cross-golden (wasm vs native --features shaper) hold.
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/NanumGothic-Regular.ttf");
+        let Ok(bytes) = std::fs::read(path) else {
+            eprintln!("skip: vendored NanumGothic not present");
+            return;
+        };
+        let injected = RealFontMetrics::from_bytes(&bytes);
+        assert!(injected.is_real(), "injected NanumGothic must back real metrics");
+        let native = RealFontMetrics::new();
+        if !(native.is_real() && native.font_path().map(|p| p.ends_with("NanumGothic-Regular.ttf")).unwrap_or(false)) {
+            eprintln!("skip: native discover didn't resolve the vendored NanumGothic");
+            return;
+        }
+        let f = FontKey { family: String::new(), bold: false, italic: false };
+        // Hangul (EM-grid), Latin (proportional), digit, punctuation — the full advance surface.
+        for ch in ['한', '가', 'A', 'i', 'W', '1', '.', '(', ')'] {
+            for size in [1000, 1200, 900] {
+                let a = injected.advance_width(&f, ch, size);
+                let b = native.advance_width(&f, ch, size);
+                assert!((a - b).abs() < 1e-9, "injected vs native advance for {ch:?}@{size}: {a} vs {b}");
+            }
+        }
+    }
+
+    #[test]
+    fn from_bytes_garbage_falls_back_to_approx() {
+        // Unparseable bytes → approximate fallback (never panics), same numbers as ApproxFontMetrics.
+        let m = RealFontMetrics::from_bytes(&[0, 1, 2, 3, 4]);
+        assert!(!m.is_real(), "garbage bytes must NOT back a real font");
+        let f = FontKey { family: String::new(), bold: false, italic: false };
+        assert_eq!(m.advance_width(&f, '가', 1000), 1000.0);
+        assert_eq!(m.advance_width(&f, 'a', 1000), 500.0);
     }
 
     #[test]

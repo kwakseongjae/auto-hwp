@@ -41,6 +41,22 @@
 .hw-tool-accent { background: var(--hw-accent); color: #fff; border-color: var(--hw-accent); }
 .hw-tool-accent:hover { opacity: 0.9; background: var(--hw-accent); }
 
+/* ---- font picker (issue 022) ---- */
+.hw-fontpicker { display: inline-flex; align-items: center; gap: 6px; }
+.hw-fontpicker-label { font-size: 12px; color: var(--hw-muted); }
+.hw-fontpicker-select {
+  font: inherit; font-size: 13px; padding: 4px 6px; max-width: 160px;
+  border: 1px solid #cdd0d6; border-radius: 6px; background: #fff; cursor: pointer;
+}
+.hw-fontpicker-select:disabled { opacity: 0.4; cursor: default; }
+.hw-fontpicker-upload {
+  font: inherit; font-size: 13px; padding: 5px 10px;
+  border: 1px solid #cdd0d6; border-radius: 6px; background: #fff; cursor: pointer;
+}
+.hw-fontpicker-upload:hover { background: #f0f1f3; }
+.hw-fontpicker-upload:disabled { opacity: 0.4; cursor: default; }
+.hw-fontpicker-current { font-size: 11px; color: var(--hw-muted); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ---- body: canvas + chat ---- */
 .hw-body { display: flex; flex: 1; min-height: 0; }
 .hw-canvas { flex: 1; overflow: auto; padding: 20px; }

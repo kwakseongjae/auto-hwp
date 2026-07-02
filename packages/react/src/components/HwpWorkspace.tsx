@@ -5,6 +5,8 @@ import type { Anchor, BlockHit, DocContext, Intent, OnAiRequest, OpenResult, Tab
 import { ChatPanel } from "./ChatPanel";
 import { HwpPageView, type PageClick } from "./HwpPageView";
 import { SelectionOverlay, type Marquee, type Mark } from "./SelectionOverlay";
+import { FontPicker } from "./FontPicker";
+import { buildFontFaceCss, type FontCatalogEntry } from "../fonts";
 
 export interface HwpWorkspaceProps {
   /** The backend seam (WasmAdapter for the web, or a host adapter). */
@@ -19,6 +21,14 @@ export interface HwpWorkspaceProps {
   /** Supply a TTF/OTF face for PDF export on demand (R8). Called when PDF is requested and no font is
    *  registered yet. Return null to cancel. The DEMO wires this to a local .ttf picker / Noto fetch. */
   requestFont?: () => Promise<{ family: string; bytes: Uint8Array } | null>;
+  /** The curated OFL font catalog (issue 022). When present, a FontPicker is shown in the toolbar so
+   *  the user can pick/upload a font that drives screen + layout + PDF alike. Omit to hide the picker. */
+  fontCatalog?: readonly FontCatalogEntry[];
+  /** A default font `{ family, bytes }` auto-registered right after opening (issue 022) — screen SVG,
+   *  pagination and PDF all use it immediately (PDF button usable without a manual pick). */
+  defaultFont?: { family: string; bytes: Uint8Array } | null;
+  /** Base URL the catalog fonts are served from (default `/fonts`); forwarded to the FontPicker. */
+  fontUrlBase?: string;
   className?: string;
 }
 
@@ -117,6 +127,10 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const [status, setStatus] = useState<string>("");
   const undoStack = useRef<number[]>([]); // batch sizes (ops per applied proposal)
   const redoStack = useRef<number[]>([]);
+  // Selected font for the SCREEN (issue 022): family + a blob URL of the SAME bytes registered for
+  // metrics + PDF, so the @font-face'd SVG matches the exported PDF exactly.
+  const [selectedFont, setSelectedFont] = useState<{ family: string; url: string } | null>(null);
+  const defaultFontAppliedFor = useRef<Uint8Array | null>(null);
 
   // The live selection is the single source of truth; the chat anchors + page marks are views of it.
   const anchors = useMemo(() => selection.map((s) => s.anchor), [selection]);
@@ -187,6 +201,59 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       cancelled = true;
     };
   }, [adapter, props.document, toast, clearSelection]);
+
+  // Apply a font to EVERYTHING (issue 022): register it into the engine (metrics + PDF), rebuild the
+  // screen @font-face (blob URL of the SAME bytes → screen == PDF), and re-render + re-query the page
+  // count (real metrics re-paginate). Shared by the auto-registered defaultFont and the FontPicker.
+  const applyFont = useCallback(
+    async (family: string, bytes: Uint8Array) => {
+      try {
+        await adapter.registerFont(family, bytes);
+      } catch (e) {
+        const code = (e as { code?: string })?.code;
+        if (code === "ttc_unsupported") toast("TTC(글꼴 컬렉션)는 지원하지 않습니다 — 단일 TTF/OTF 폰트를 선택하세요");
+        else toast(`글꼴 적용 실패: ${e}`);
+        return;
+      }
+      // Copy into a fresh ArrayBuffer so the Blob part is a concrete ArrayBuffer (not a possibly-shared
+      // view) — same pattern as the download() helper.
+      const buf = new ArrayBuffer(bytes.byteLength);
+      new Uint8Array(buf).set(bytes);
+      const url = URL.createObjectURL(new Blob([buf], { type: "font/ttf" }));
+      setSelectedFont((prev) => {
+        if (prev) URL.revokeObjectURL(prev.url);
+        return { family, url };
+      });
+      // Registering a font re-layouts (issue 022 contract): re-query the page count + re-render all pages.
+      try {
+        const pages = await adapter.pageCount();
+        setMeta((m) => (m ? { ...m, pages } : m));
+      } catch {
+        /* keep the previous count on a transient error */
+      }
+      setRefreshToken((t) => t + 1);
+      toast(`글꼴 적용: ${family}`);
+    },
+    [adapter, toast],
+  );
+
+  // Auto-register the default font once per opened document (issue 022 §5): the PDF button is usable
+  // immediately and the screen matches. Guarded by a ref keyed on the document bytes so it runs once
+  // per open (a re-render that only bumps the page count won't re-apply).
+  useEffect(() => {
+    if (!meta || !props.defaultFont || !props.document) return;
+    if (defaultFontAppliedFor.current === props.document.bytes) return;
+    defaultFontAppliedFor.current = props.document.bytes;
+    void applyFont(props.defaultFont.family, props.defaultFont.bytes);
+  }, [meta, props.defaultFont, props.document, applyFont]);
+
+  // Revoke the blob URL when the component unmounts (avoid leaking the object URL).
+  useEffect(() => () => {
+    setSelectedFont((prev) => {
+      if (prev) URL.revokeObjectURL(prev.url);
+      return null;
+    });
+  }, []);
 
   const canEdit = !!meta?.editable;
 
@@ -429,6 +496,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
 
   return (
     <div className={`hw-workspace ${props.className ?? ""}`}>
+      {/* Screen font-face + alias (issue 022 §3): map every document font name to the selected face so
+          the SVG on screen matches the exported PDF. Injected only when a font is selected. */}
+      {selectedFont && <style data-testid="hw-fontface">{buildFontFaceCss(selectedFont.family, selectedFont.url)}</style>}
       <div className="hw-toolbar">
         <span className="hw-brand">tf-hwp</span>
         <span className="hw-doc-meta">{meta ? `${meta.format.toUpperCase()} · ${meta.pages}쪽` : "문서 없음"}</span>
@@ -446,6 +516,16 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         <button className="hw-tool" onClick={redo} disabled={!meta} title="다시 실행">
           ↷
         </button>
+        {props.fontCatalog && (
+          <FontPicker
+            catalog={props.fontCatalog}
+            selected={selectedFont?.family ?? null}
+            urlBase={props.fontUrlBase}
+            disabled={!meta}
+            onPick={({ family, bytes }) => void applyFont(family, bytes)}
+            onError={(m) => toast(m)}
+          />
+        )}
         <button className="hw-tool" onClick={exportHtml} disabled={!meta} title="HTML 다운로드">
           HTML
         </button>

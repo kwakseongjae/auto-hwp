@@ -9,8 +9,10 @@
 //!   geometry (px space), and HTML/PDF projection.
 //!
 //! No LLM lives here (R6): the host app runs the AI server-side and applies the resulting Intent
-//! JSON via [`HwpDoc::apply_intent`]. Fonts are **injected, never bundled** (R8): the PDF path needs a
-//! font registered first ([`HwpDoc::register_font`]) or `export_pdf` throws (no silent empty glyphs).
+//! JSON via [`HwpDoc::apply_intent`]. Fonts are **injected, never bundled** (R8): [`HwpDoc::register_font`]
+//! now feeds the injected face into the LAYOUT METRICS *and* the PDF embed (issue 022) — the SAME bytes
+//! drive screen SVG, pagination and PDF, so the three agree. Un-registered, render/layout use the
+//! deterministic Approx fallback and `export_pdf` throws (no silent empty glyphs).
 //!
 //! ## wasm panic recovery (R4 web variant)
 //! A panic on `wasm32` is a trap — it POISONS the instance. `rhwp`'s `catch_unwind` guard is a no-op
@@ -128,7 +130,10 @@ impl HwpDoc {
             }
         }
         let doc = self.doc()?;
-        let svgs = hwp_session::render_svg(doc);
+        // Measure with the injected face when one is registered (issue 022): screen SVG, layout
+        // pagination and PDF embed then all use the SAME bytes. No font registered → an empty slice,
+        // which `render_svg_with` maps to the un-injected discover/Approx path (backward compat).
+        let svgs = hwp_session::render_svg_with(doc, &self.fonts);
         *self.svg_cache.borrow_mut() = Some((rev, svgs.clone()));
         Ok(svgs)
     }
@@ -157,7 +162,9 @@ impl HwpDoc {
     #[wasm_bindgen(js_name = hitTest)]
     pub fn hit_test(&self, page: u32, x: f64, y: f64) -> Result<Option<String>, JsValue> {
         let doc = self.doc()?;
-        match hwp_session::own_hit_test(doc, page, x, y) {
+        // `_with` variants so the click geometry agrees with the injected-metric SVG (a registered
+        // font can change pagination — Approx geometry over shaper layout would miss, issue §단위 slip).
+        match hwp_session::own_hit_test_with(doc, page, x, y, &self.fonts) {
             Some(hit) => Ok(Some(serde_json::to_string(&hit).map_err(|e| js_err("serialize", &e.to_string()))?)),
             None => Ok(None),
         }
@@ -169,7 +176,7 @@ impl HwpDoc {
     #[wasm_bindgen(js_name = tableAt)]
     pub fn table_at(&self, page: u32, x: f64, y: f64) -> Result<Option<String>, JsValue> {
         let doc = self.doc()?;
-        match hwp_session::table_at(doc, page, x, y) {
+        match hwp_session::table_at_with(doc, page, x, y, &self.fonts) {
             Some(t) => Ok(Some(serde_json::to_string(&t).map_err(|e| js_err("serialize", &e.to_string()))?)),
             None => Ok(None),
         }
@@ -183,7 +190,7 @@ impl HwpDoc {
     #[wasm_bindgen(js_name = blocksInRect)]
     pub fn blocks_in_rect(&self, page: u32, x0: f64, y0: f64, x1: f64, y1: f64) -> Result<String, JsValue> {
         let doc = self.doc()?;
-        let hits = hwp_session::blocks_in_rect(doc, page, x0, y0, x1, y1);
+        let hits = hwp_session::blocks_in_rect_with(doc, page, x0, y0, x1, y1, &self.fonts);
         serde_json::to_string(&hits).map_err(|e| js_err("serialize", &e.to_string()))
     }
 
@@ -210,17 +217,33 @@ impl HwpDoc {
         self.session.doc.as_mut().map(|d| d.redo()).unwrap_or(false)
     }
 
-    /// Inject a font face `(family, bytes)` for PDF export (R8 — fonts are NEVER bundled). Call this
-    /// before `export_pdf`. `bytes` is a **single-face TTF/OTF** (e.g. Noto Sans KR, OFL); a TTC
-    /// collection is NOT accepted (krilla's simple-text backend can't subset a collection).
+    /// Inject a font face `(family, bytes)` used for BOTH the layout metrics AND the PDF embed (issue
+    /// 022 — mirrors 018's PDF byte-injection into the metric path). `bytes` is a **single-face
+    /// TTF/OTF** (e.g. NanumGothic/Noto Sans KR, OFL); a **TTC collection is rejected** with
+    /// `{code:"ttc_unsupported"}` (krilla's simple-text can't subset a collection and our shaper takes
+    /// face index 0 only) — no silent wrong-glyph fallback (issue §함정).
     ///
-    /// The registered bytes now thread all the way through to krilla (issue 018): the first parseable
-    /// injected face becomes the PDF body face, so wasm-exported PDFs embed REAL Korean glyphs
-    /// (subsetted), not stub boxes. v1 uses the injected face as the single body default — per-family
-    /// mapping is a follow-up.
+    /// ## Contract: registering/replacing a font RE-LAYOUTS the document
+    /// v1 maps EVERY document font name to this ONE injected face (issue §3). Because real metrics
+    /// differ from the Approx fallback, registering (or replacing) a font can change the page count and
+    /// line breaks. This method therefore **invalidates the SVG cache**; the host MUST re-query
+    /// [`HwpDoc::page_count`] and re-render every page after calling it (the `@tf-hwp/react` workspace
+    /// bumps its refresh token on `registerFont`). Until a font is registered, render/layout use the
+    /// deterministic Approx fallback (backward compatible) and `export_pdf` throws `font_missing`.
     #[wasm_bindgen(js_name = registerFont)]
-    pub fn register_font(&mut self, family: String, bytes: Vec<u8>) {
-        self.fonts.push((family, bytes));
+    pub fn register_font(&mut self, family: String, bytes: Vec<u8>) -> Result<(), JsValue> {
+        if bytes.starts_with(b"ttcf") {
+            return Err(js_err(
+                "ttc_unsupported",
+                "TTC(글꼴 컬렉션)는 지원하지 않습니다 — 단일 TTF/OTF 파일을 선택하세요 (krilla 서브셋 제약)",
+            ));
+        }
+        // v1 single active font: replace (not accumulate) so a picked face takes effect immediately for
+        // metrics AND PDF. Invalidate the revision-keyed SVG cache — the new metrics re-paginate, and a
+        // stale cache would make the screen disagree with the PDF (issue §함정: 캐시 무효화).
+        self.fonts = vec![(family, bytes)];
+        *self.svg_cache.borrow_mut() = None;
+        Ok(())
     }
 
     /// Export the live document to PDF bytes (krilla, via `hwp-session::emit_pdf_with_fonts`). Throws

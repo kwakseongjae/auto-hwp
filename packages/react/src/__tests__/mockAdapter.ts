@@ -8,6 +8,7 @@ export class MockAdapter implements EngineAdapter {
   undos = 0;
   redos = 0;
   fontRegistered = false;
+  registeredFonts: { family: string; bytes: Uint8Array }[] = [];
 
   constructor(
     private opts: {
@@ -55,7 +56,8 @@ export class MockAdapter implements EngineAdapter {
     this.redos++;
     return true;
   }
-  async registerFont(): Promise<void> {
+  async registerFont(family: string, bytes: Uint8Array): Promise<void> {
+    this.registeredFonts.push({ family, bytes });
     this.fontRegistered = true;
   }
   hasFont(): boolean {
