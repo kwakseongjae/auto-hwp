@@ -26,8 +26,10 @@
 | [012](012-hwp-session-extraction.md) | `hwp-session` 파사드 추출 (기능변화 0, golden 바이트동일) | **done** | P2 | a18a776 · LEAF(hwp-mcp 미wrap) 채택 → Session-core absorb는 013로 |
 | [013](013-headless-service-container.md) | 헤드리스 서비스 컨테이너 (Shell B) | open | P3 | 012, **014** |
 | [014](014-input-hardening.md) | 신뢰불가 입력 하드닝 (파서 DoS 방어) | **done** | P3-pre | b999dc1 · guard 노출만, 배선은 013 |
-| [015](015-wasm-npm-package.md) | wasm npm 패키지 `@tf-hwp/engine` (Shell C) | open | P4-A | 007, 012, **017** |
+| [015](015-wasm-npm-package.md) | wasm npm 패키지 `@tf-hwp/engine` — HWP5 런타임 8p·골든 바이트동일·편집루프 wasm 실증 | **done** (PDF 글리프만 018) | P4-A | 4fb1ced · pkg/는 빌드산출물(gitignore, 레시피로 재빌드) |
 | [017](017-hwp-mcp-wasm.md) | hwp-mcp wasm화 (http 게이트 + open_bytes/export_bytes) — 015 선행 | **done** | P2b | 3acfc5e · wasm exit0, 네이티브 무변경, smoke 14/14 |
+| [018](018-pdf-font-injection.md) | PDF 폰트 바이트 주입(wasm 한글 PDF) + tableAt null 폴리시 | open | P4-A후속 | 015 · **019 선행** |
+| 019 (예정) | 창업지원도움e(business_plan_k) 통합 PoC — 업로드→렌더→바이브편집→PDF | planned | P5 | 016, 018 |
 | [016](016-react-component-library.md) | React 컴포넌트 라이브러리 `@tf-hwp/react` | open | P4-B | 015 |
 
 > 완료된 완성형 핵심(글자/문단/글꼴/표 병합·음영/목록)은 `docs/COMPLETION-ROADMAP.md`와 `CHECKLIST.md` 참고.
