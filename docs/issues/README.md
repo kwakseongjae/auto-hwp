@@ -32,4 +32,14 @@
 | [019](019-business-plan-k-poc.md) | 통합 실험 앱 `apps/hwp-lab` (Next.js, **사용자 QA 기준**) — Playwright 스모크 통과 | **done** (사용자 QA 대기) | P5 | cf116e4 · QA.md ①~⑨로 QA; 실LLM·PDF육안·성능은 manual |
 | [016](016-react-component-library.md) | React 컴포넌트 라이브러리 `@tf-hwp/react` — sanitize 강제·mock 플로우 10테스트 | **done** | P4-B | 5a18459 · 브라우저 데모는 manual |
 
+## 로드맵 v2 — QA 라운드 1 (2026-07-02, 사용자 QA 피드백)
+
+사용자 QA 4건 → 이슈 3개. 착수: **020 ∥ 021** (파일 disjoint) → **022** (020·021 병합 후).
+
+| # | 제목 | 상태 | 단계 | 비고 |
+|---|------|------|------|------|
+| [020](020-benchmark1-page1-spill.md) | benchmark1 1페이지 스필 정밀 수정 (per-row 실측, 19→18) | open | QA-P0 | 웹 회귀 아님 실측 확인 — 기존 19vs18 잔차의 전용 수정 |
+| [021](021-selection-ux-v2.md) | 선택 UX v2 — 클릭=교체 / ⌘·Ctrl=토글 / 러버밴드 마퀴 | open | QA-P1 | +엔진 blocks_in_rect 질의 |
+| [022](022-font-system-v1.md) | 폰트 시스템 v1 — 카탈로그(OFL)+업로드+화면·조판·PDF 삼위일치 | open | QA-P1 | R8 하드게이트; wasm 셰이퍼 켜기(메트릭 바이트 주입) |
+
 > 완료된 완성형 핵심(글자/문단/글꼴/표 병합·음영/목록)은 `docs/COMPLETION-ROADMAP.md`와 `CHECKLIST.md` 참고.
