@@ -23,7 +23,7 @@
 | [009](009-anchor-chips.md) | 앵커 칩: 마킹 → 채팅 컨텍스트 | **done** (수동검증 대기) | P1-A | 76c415a · LLM준수/first_row 시각확인은 cargo tauri dev 필요; ai_fill 펜스는 011로 이관 |
 | [010](010-ai-preview-apply-undo.md) | AI 편집 프리뷰→적용 게이트 + undo (게이트 기존재 → undo 상한50 + ⌘Z 가드 잔여분) | **done** (수동검증 대기) | P1-B | e8c885c · 인터랙티브 e2e는 cargo tauri dev 필요 |
 | [011](011-content-presets.md) | 콘텐츠 프리셋 (약력 표 채우기·불릿 정렬) | open | P1-C | 009, 010 |
-| [012](012-hwp-session-extraction.md) | `hwp-session` 파사드 추출 (기능변화 0) | open | P2 | 008 |
+| [012](012-hwp-session-extraction.md) | `hwp-session` 파사드 추출 (기능변화 0, golden 바이트동일) | **done** | P2 | a18a776 · LEAF(hwp-mcp 미wrap) 채택 → Session-core absorb는 013로 |
 | [013](013-headless-service-container.md) | 헤드리스 서비스 컨테이너 (Shell B) | open | P3 | 012, **014** |
 | [014](014-input-hardening.md) | 신뢰불가 입력 하드닝 (파서 DoS 방어) | **done** | P3-pre | b999dc1 · guard 노출만, 배선은 013 |
 | [015](015-wasm-npm-package.md) | wasm npm 패키지 `@tf-hwp/engine` (Shell C) | open | P4-A | 007, 012 |
