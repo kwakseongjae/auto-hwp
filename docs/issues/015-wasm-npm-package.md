@@ -51,32 +51,43 @@ AI 티키타카는 호스트 앱이 서버사이드에서 수행하고, 결과 I
 - 갱신: `docs/LICENSE-POLICY.md` (폰트 재배포 정책 — R8)
 
 ## 구현 단계
-1. **바인딩 표면 (얇게, JSON in/out)**:
+1. **바인딩 표면 (얇게, JSON in/out — 편집은 hwp-mcp 레인 그대로)**:
    ```
    class HwpDoc {
-     static openHwpx(bytes: Uint8Array): HwpDoc   // throws typed error
+     static open(bytes: Uint8Array, name?: string): HwpDoc  // .hwp/.hwpx 자동 감지 (hwp_mcp::open_bytes)
      pageCount(): number
      renderPageSvg(n: number): string             // sanitize는 016의 책임 — README에 명시
      hitTest(page: number, x: number, y: number): string /*JSON*/
-     apply(intentJson: string): string            /*JSON: ok|error, 영향 블록*/
+     tableAt(page: number, x: number, y: number): string /*JSON — 마킹용*/
+     applyIntent(intentJson: string): string      /*hwp_mcp::apply_intent_json — Propose/Commit/Undo 포함*/
      undo(): boolean; redo(): boolean
      registerFont(family: string, bytes: Uint8Array): void
      exportPdf(): Uint8Array
      exportHtml(): string
-     toHwpx(): Uint8Array                          // 저장
+     toHwpx(): Uint8Array                          // hwp_mcp::export_bytes
      free(): void
    }
    ```
    에러는 전부 JS 예외로 던지되 `{ code, message }` 구조 유지(014의 typed 에러를 그대로 태움).
-2. **wasm-pack 빌드**: `wasm-pack build --target web`. `packages/engine`에서 wasm 산출물을
-   감싸 npm 패키지화(로더 + .d.ts + README). 번들 크기를 보고에 기록(목표: gzip 3MB 이하,
-   폰트 제외 — 초과 시 원인 크레이트를 `twiggy`/`wasm-opt`로 분석해 보고).
+   hwp-mcp는 `default-features = false`로 소비(017), 렌더/지오메트리는 hwp-session.
+2. **번들링 (wasm-pack 미설치 환경 — 레시피 고정)**: crates/hwp-wasm에 `wasm-bindgen`
+   의존을 추가한 뒤, **그 정확한 버전으로** `cargo install wasm-bindgen-cli --version <동일버전>`
+   (crates.io 소스 빌드 — GitHub 불필요). 빌드:
+   `cargo build -p hwp-wasm --release --target wasm32-unknown-unknown` →
+   `wasm-bindgen --target web --out-dir packages/engine/pkg target/wasm32-unknown-unknown/release/hwp_wasm.wasm`.
+   wasm-opt(binaryen)는 없으면 스킵하고 "미최적화 크기"로 보고. cargo install까지 불가한
+   오프라인이면 crates/hwp-wasm(cargo check wasm 그린)+packages 스캐폴드까지 완성하고
+   번들링만 partial로 정직 보고. 크기 기록(목표: gzip 3MB 이하, 폰트 제외).
 3. **메모리 위생(R13)**: 문서 교체 시 이전 인스턴스 free를 강제하는 API 설계
-   (openHwpx는 정적 생성자 — 호스트가 free를 잊으면 누수. README에 수명 규약 명시,
-   가능하면 `FinalizationRegistry` 안전망).
-4. **데모 페이지**: `packages/engine/demo/index.html` — 파일 입력으로 .hwpx 열기 →
-   페이지 SVG 표시 → intent JSON 텍스트박스로 apply → PDF 다운로드 버튼.
-   프레임워크 없이 순수 HTML/JS (016과 분리 검증용).
+   (open은 정적 생성자 — 호스트가 free를 잊으면 누수. README에 수명 규약 명시,
+   가능하면 `FinalizationRegistry` 안전망). + wasm 패닉 복구(위 §참조)를 JS 로더에 내장.
+4. **데모 페이지 = 창업지원도움e PoC 1호 시나리오** (`packages/engine/demo/index.html`,
+   순수 HTML/JS — 016과 분리 검증용). **이 데모가 018 통합의 원형이다**:
+   ① 파일 입력으로 .hwp **또는** .hwpx 업로드 → ② 전 페이지 SVG 렌더(sanitize 경유) →
+   ③ 페이지 클릭 → hitTest/tableAt으로 셀 좌표 표시(마킹) → ④ intent JSON 입력창
+   (SetTableCell 프리필 예제 제공) → applyIntent → 재렌더 → ⑤ undo 버튼 →
+   ⑥ "PDF 다운로드"(Noto Sans KR fetch→registerFont→exportPdf→Blob) + "HTML 다운로드".
+   LLM은 데모에 없음(호스트 몫) — intent 입력창이 프록시 응답의 대역이다.
 5. **PDF 폰트 주입**: 데모에서 Noto Sans KR(OFL)을 fetch해 registerFont → exportPdf →
    한글이 깨지지 않는 PDF 확인. `docs/LICENSE-POLICY.md`에 "번들 금지·주입만,
    OFL 폰트 권장, 함초롬 계열 재배포 불가" 명문화.
