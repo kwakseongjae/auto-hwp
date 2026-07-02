@@ -9,5 +9,8 @@ export default defineConfig({
     globals: true,
     environment: "jsdom",
     include: ["src/**/*.test.{ts,tsx}"],
+    // Polyfill PointerEvent / setPointerCapture (jsdom lacks both) so the selection model's pointer
+    // handlers (issue 021) fire under test.
+    setupFiles: ["src/test-setup.ts"],
   },
 });

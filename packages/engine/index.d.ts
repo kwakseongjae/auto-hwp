@@ -86,6 +86,9 @@ export class HwpDoc {
   renderPageSvgSanitized(n: number): string;
   hitTest(page: number, x: number, y: number): BlockHit | null;
   tableAt(page: number, x: number, y: number): TableBox | null;
+  /** Marquee select: every top-level block whose band intersects the own-render px rect
+   *  `(x0,y0)-(x1,y1)` (corners in any order). Empty array on a miss (never null). */
+  blocksInRect(page: number, x0: number, y0: number, x1: number, y1: number): BlockHit[];
   applyIntent(intent: object | string): Outcome;
   undo(): boolean;
   redo(): boolean;

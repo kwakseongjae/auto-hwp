@@ -21,6 +21,11 @@ export interface TauriAdapterOptions {
 ///   • applyIntent(Intent) vs. the app's per-op commands — this dispatches the common schema-v0 Intents
 ///     (SetTableCell, MoveBlock, TableInsertRows, Undo/Redo) to their command; unmapped Intents throw a
 ///     clear message rather than silently no-op. A future `apply_intent_json` command collapses this.
+///
+/// NOTE: `blocksInRect` (marquee select, issue 021) is INTENTIONALLY not implemented here — the desktop
+/// app has no matching Tauri command yet (a `blocks_in_rect` command is the follow-up). The method is
+/// OPTIONAL on `EngineAdapter`, so omitting it makes `HwpWorkspace` disable marquee for this backend;
+/// click / ⌘-click selection still work through `hitTest`/`tableAt`.
 export class TauriAdapter implements EngineAdapter {
   private invoke: Invoke;
   private resolveOpenPath?: (bytes: Uint8Array, name?: string) => Promise<string>;

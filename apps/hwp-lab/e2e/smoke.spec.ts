@@ -18,7 +18,8 @@ test("업로드 → 8페이지 SVG → mock 편집 적용 → undo", async ({ pa
   expect(svgCount).toBe(8);
 
   // 표를 마킹할 클릭 지점을 그리드로 스캔(헤드리스에서 정확한 표 좌표를 몰라도 앵커 칩이 뜰 때까지).
-  // 표 앵커(라벨 "표…")가 SetTableCell mock 을 유발하므로 우선 채택.
+  // 선택 모델 v2(이슈 021): 클릭 = 교체 → 각 클릭은 앵커를 누적하지 않고 하나로 갈아끼운다. 스캔은
+  // 표 앵커(라벨 "표…")가 뜨는 즉시 멈추므로, 마지막 클릭 = 표 하나면 성립한다(SetTableCell mock 유발).
   const anchor = page.locator(".hw-anchor");
   const firstSheet = page.locator('.hw-sheet[data-page="0"]');
   const box = await firstSheet.boundingBox();
@@ -41,6 +42,8 @@ test("업로드 → 8페이지 SVG → mock 편집 적용 → undo", async ({ pa
   if (!anchored) {
     await expect(anchor.first()).toBeVisible({ timeout: 10_000 });
   }
+  // 교체 모델 검증: 여러 번 클릭했어도 선택은 정확히 하나여야 한다(누적 금지).
+  expect(await anchor.count()).toBe(1);
 
   // 프롬프트 전송 → mock 제안 카드 → 적용.
   await page.locator(".hw-textarea").fill("이 칸을 채워줘");

@@ -157,6 +157,11 @@ export class HwpDoc {
       return s == null ? null : JSON.parse(s);
     });
   }
+  /** Marquee select: every top-level block whose band intersects the own-render px rect
+   *  `(x0,y0)-(x1,y1)` (corners in any order). Returns a `BlockHit[]` — an EMPTY ARRAY on a miss. */
+  blocksInRect(page, x0, y0, x1, y1) {
+    return this.#call((r) => JSON.parse(r.blocksInRect(page, x0, y0, x1, y1))); // wasm returns "[]" on a miss
+  }
   /** Apply an Intent (schema v0). Accepts an object or a JSON string; returns the parsed Outcome. */
   applyIntent(intent) {
     const s = typeof intent === 'string' ? intent : JSON.stringify(intent);

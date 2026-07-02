@@ -67,6 +67,12 @@
 }
 .hw-mark-table .hw-mark-label { background: var(--hw-ai); }
 
+/* marquee (rubber-band) rectangle drawn while dragging over empty space */
+.hw-marquee {
+  position: absolute; border: 1.5px dashed var(--hw-accent);
+  background: rgba(37, 99, 235, 0.08); border-radius: 2px; pointer-events: none;
+}
+
 /* ---- chat panel ---- */
 .hw-chat {
   width: 360px; flex-shrink: 0; display: flex; flex-direction: column;
@@ -141,7 +147,15 @@
 /* ---- composer ---- */
 .hw-composer { flex-shrink: 0; border-top: 1px solid var(--hw-border); padding: 8px; }
 .hw-composer-hint { margin: 0 0 6px; padding: 0 4px; font-size: 11px; color: var(--hw-muted); }
-.hw-anchors { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.hw-anchors-wrap { margin-bottom: 6px; }
+.hw-anchors-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.hw-anchors-hint { font-size: 11px; color: var(--hw-muted); cursor: help; }
+.hw-anchors-clear {
+  font: inherit; font-size: 11px; color: var(--hw-ai); background: none; border: none;
+  cursor: pointer; padding: 0 2px;
+}
+.hw-anchors-clear:hover { text-decoration: underline; }
+.hw-anchors { display: flex; flex-wrap: wrap; gap: 6px; }
 .hw-anchor {
   display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--hw-ai);
   border: 1px solid rgba(124, 58, 237, 0.4); background: rgba(124, 58, 237, 0.1);

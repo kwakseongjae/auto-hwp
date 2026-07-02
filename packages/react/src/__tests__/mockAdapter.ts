@@ -13,7 +13,10 @@ export class MockAdapter implements EngineAdapter {
     private opts: {
       svg?: (page: number) => string;
       table?: TableBox | null;
-      hit?: BlockHit | null;
+      /** A fixed hit, or a coordinate-aware resolver (so a test can place distinct blocks by point). */
+      hit?: BlockHit | null | ((page: number, x: number, y: number) => BlockHit | null);
+      /** Canned marquee result for `blocksInRect` (issue 021). */
+      blocks?: BlockHit[];
       pages?: number;
     } = {},
   ) {}
@@ -30,11 +33,15 @@ export class MockAdapter implements EngineAdapter {
       ? this.opts.svg(page)
       : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 794 1123" width="794" height="1123"><rect width="794" height="1123" fill="#fff"/></svg>`;
   }
-  async hitTest(): Promise<BlockHit | null> {
-    return this.opts.hit ?? null;
+  async hitTest(page: number, x: number, y: number): Promise<BlockHit | null> {
+    const h = this.opts.hit;
+    return (typeof h === "function" ? h(page, x, y) : h) ?? null;
   }
   async tableAt(): Promise<TableBox | null> {
     return this.opts.table ?? null;
+  }
+  async blocksInRect(): Promise<BlockHit[]> {
+    return this.opts.blocks ?? [];
   }
   async applyIntent(intent: Intent): Promise<Outcome> {
     this.applied.push(intent);

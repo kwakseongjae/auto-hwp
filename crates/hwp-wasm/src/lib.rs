@@ -175,6 +175,18 @@ impl HwpDoc {
         }
     }
 
+    /// Marquee (rubber-band) select on `page`: every top-level block whose placed band intersects the
+    /// own-render px rectangle `(x0,y0)-(x1,y1)` (corners in any order), as a JSON **string** of a
+    /// `BlockHit[]` array. A miss returns the JSON **`"[]"`** (an EMPTY ARRAY, never `null` — the
+    /// caller always gets an iterable). Additive to `hitTest`: same `PlacedBlock` bands, but 2-D AABB
+    /// overlap against the rect. Multi-page marquee is out of scope — clip the rect to the start page.
+    #[wasm_bindgen(js_name = blocksInRect)]
+    pub fn blocks_in_rect(&self, page: u32, x0: f64, y0: f64, x1: f64, y1: f64) -> Result<String, JsValue> {
+        let doc = self.doc()?;
+        let hits = hwp_session::blocks_in_rect(doc, page, x0, y0, x1, y1);
+        serde_json::to_string(&hits).map_err(|e| js_err("serialize", &e.to_string()))
+    }
+
     /// Apply one Intent-JSON envelope (schema v0, issue 008) via the SAME op-bus the desktop uses
     /// ([`hwp_mcp::apply_intent_json`]) — Propose/Commit/Undo/Redo and every edit variant included.
     /// Returns a JSON `Outcome` (`{kind, …}`). Throws a `{code, message}` error on a bad envelope or a

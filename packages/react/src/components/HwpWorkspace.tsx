@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EngineAdapter } from "../EngineAdapter";
-import type { Anchor, DocContext, Intent, OnAiRequest, OpenResult } from "../types";
+import { modLabel } from "../platform";
+import type { Anchor, BlockHit, DocContext, Intent, OnAiRequest, OpenResult, TableBox } from "../types";
 import { ChatPanel } from "./ChatPanel";
 import { HwpPageView, type PageClick } from "./HwpPageView";
-import { SelectionOverlay, type Mark } from "./SelectionOverlay";
+import { SelectionOverlay, type Marquee, type Mark } from "./SelectionOverlay";
 
 export interface HwpWorkspaceProps {
   /** The backend seam (WasmAdapter for the web, or a host adapter). */
@@ -21,52 +22,145 @@ export interface HwpWorkspaceProps {
   className?: string;
 }
 
-/** Derive a structural Anchor from a page click's hit. Coordinates are STRUCTURE indices, never px. */
-function deriveMarkAndAnchor(
-  click: PageClick,
-  table: { section: number; block: number; x: number; y: number; w: number; h: number; rows: number; cols: number } | null,
-  hit: { section: number; block: number; kind: string; x: number; y: number; w: number; h: number; text: string } | null,
-): { mark: Mark; anchor: Anchor } | null {
+/** One selected block = its structural Anchor (rides to the chat) + its visual Mark (drawn on the page).
+ *  The selection array is the SINGLE source of truth (issue 021); `anchors`/`marks` are views of it. */
+type Sel = { anchor: Anchor; mark: Mark };
+
+/** Selection identity: two selections are the same block iff they share `(section, block)`. Click/⌘-click
+ *  and marquee all operate at whole-block granularity, so this is enough for replace/toggle/union dedup. */
+const selKey = (a: Anchor): string => `${a.section}:${a.block}`;
+
+/** Movement (in CLIENT px) past which a press becomes a drag (marquee) rather than a click. */
+const DRAG_THRESHOLD_PX = 4;
+
+/** Derive a Sel from a resolved click hit (table preferred, else a block band). Coordinates are STRUCTURE
+ *  indices, never px. Returns null when the point resolved to nothing. */
+function deriveSel(page: number, table: TableBox | null, hit: BlockHit | null): Sel | null {
   if (table) {
+    const label = `표 (p.${page + 1})`;
     return {
-      mark: { page: click.page, box: { x: table.x, y: table.y, w: table.w, h: table.h }, label: `표 (p.${click.page + 1})`, kind: "table" },
-      anchor: { kind: "table", section: table.section, block: table.block, label: `표 (p.${click.page + 1})`, page: click.page },
+      mark: { page, box: { x: table.x, y: table.y, w: table.w, h: table.h }, label, kind: "table" },
+      anchor: { kind: "table", section: table.section, block: table.block, label, page },
     };
   }
   if (hit) {
     const snip = hit.text.trim().replace(/\s+/g, " ").slice(0, 14);
     const kind = hit.kind === "table" ? "table" : hit.kind === "image" ? "image" : "paragraph";
-    const label = kind === "paragraph" ? (snip ? `“${snip}”` : `문단 (p.${click.page + 1})`) : `${kind} (p.${click.page + 1})`;
+    const label = kind === "paragraph" ? (snip ? `“${snip}”` : `문단 (p.${page + 1})`) : `${kind} (p.${page + 1})`;
     return {
-      mark: { page: click.page, box: { x: hit.x, y: hit.y, w: hit.w, h: hit.h }, label, kind },
-      anchor: { kind: kind === "image" ? "paragraph" : (kind as Anchor["kind"]), section: hit.section, block: hit.block, label, page: click.page, text: hit.text },
+      mark: { page, box: { x: hit.x, y: hit.y, w: hit.w, h: hit.h }, label, kind },
+      anchor: { kind: kind === "image" ? "paragraph" : (kind as Anchor["kind"]), section: hit.section, block: hit.block, label, page, text: hit.text },
     };
   }
   return null;
 }
 
-const sameAnchor = (a: Anchor, b: Anchor) => a.kind === b.kind && a.section === b.section && a.block === b.block;
+/** Convert a marquee BlockHit to a Sel, EXCLUDING unsupported kinds (images can't be anchored — issue
+ *  §함정). Returns null for an excluded hit so the caller can count what was dropped. */
+function blockHitToSel(hit: BlockHit, page: number): Sel | null {
+  if (hit.kind === "image") return null; // not an editable anchor target
+  const snip = hit.text.trim().replace(/\s+/g, " ").slice(0, 14);
+  const kind = hit.kind === "table" ? "table" : "paragraph";
+  const label = kind === "paragraph" ? (snip ? `“${snip}”` : `문단 (p.${page + 1})`) : `표 (p.${page + 1})`;
+  return {
+    mark: { page, box: { x: hit.x, y: hit.y, w: hit.w, h: hit.h }, label, kind },
+    anchor: { kind, section: hit.section, block: hit.block, label, page, text: hit.text },
+  };
+}
+
+/** Fold `incoming` into the current selection: `replace` (dedup incoming, drop the rest), `toggle` (a
+ *  single ⌘/Ctrl-click: add if absent, remove if present), `union` (a ⌘/Ctrl-marquee: add all absent). */
+function mergeSelection(prev: Sel[], incoming: Sel[], mode: "replace" | "toggle" | "union"): Sel[] {
+  if (mode === "replace") {
+    const seen = new Set<string>();
+    const out: Sel[] = [];
+    for (const s of incoming) {
+      const k = selKey(s.anchor);
+      if (!seen.has(k)) {
+        seen.add(k);
+        out.push(s);
+      }
+    }
+    return out;
+  }
+  if (mode === "toggle") {
+    const s = incoming[0];
+    if (!s) return prev;
+    const k = selKey(s.anchor);
+    return prev.some((p) => selKey(p.anchor) === k) ? prev.filter((p) => selKey(p.anchor) !== k) : [...prev, s];
+  }
+  // union
+  const keys = new Set(prev.map((p) => selKey(p.anchor)));
+  const add: Sel[] = [];
+  for (const s of incoming) {
+    const k = selKey(s.anchor);
+    if (!keys.has(k)) {
+      keys.add(k);
+      add.push(s);
+    }
+  }
+  return [...prev, ...add];
+}
 
 /// HwpWorkspace — the one-line assembly (issue 016 step 2): page view + selection overlay + chat panel.
-/// Open a document, mark a cell/table (click), say what to change, review the previewed Intents, apply,
-/// and download HTML/PDF. The AI is delegated to `onAiRequest` (R6); SVG is sanitized in HwpPageView
-/// (R7); fonts are injected via `requestFont` (R8). Tauri-only concerns (native file drop, window
-/// management) are deliberately OUT — the host drives `document`.
+/// Open a document, SELECT blocks (OS-style: click = replace, ⌘/Ctrl-click = toggle, drag over empty
+/// space = marquee/rubber-band select — issue 021), say what to change, review the previewed Intents,
+/// apply, and download HTML/PDF. The AI is delegated to `onAiRequest` (R6); SVG is sanitized in
+/// HwpPageView (R7); fonts are injected via `requestFont` (R8).
 export function HwpWorkspace(props: HwpWorkspaceProps) {
   const { adapter } = props;
   const [meta, setMeta] = useState<OpenResult | null>(null);
   const [zoom, setZoom] = useState(0.9);
   const [refreshToken, setRefreshToken] = useState(0);
-  const [anchors, setAnchors] = useState<Anchor[]>([]);
-  const [marks, setMarks] = useState<Mark[]>([]);
+  const [selection, setSelection] = useState<Sel[]>([]);
+  const [marquee, setMarquee] = useState<Marquee | null>(null);
   const [status, setStatus] = useState<string>("");
   const undoStack = useRef<number[]>([]); // batch sizes (ops per applied proposal)
   const redoStack = useRef<number[]>([]);
+
+  // The live selection is the single source of truth; the chat anchors + page marks are views of it.
+  const anchors = useMemo(() => selection.map((s) => s.anchor), [selection]);
+  const marks = useMemo(() => selection.map((s) => s.mark), [selection]);
+  const mod = useMemo(() => modLabel(), []);
+
+  // Active pointer-drag bookkeeping (ref: mutated every move without re-rendering; only the marquee box
+  // is state). `empty` resolves async (was the press on empty space?); `resolved` caches the click hit.
+  const dragRef = useRef<
+    | {
+        page: number;
+        startX: number;
+        startY: number;
+        curX: number;
+        curY: number;
+        clientX: number;
+        clientY: number;
+        meta: boolean;
+        empty: boolean | null;
+        marqueeing: boolean;
+        resolved?: { table: TableBox | null; hit: BlockHit | null };
+      }
+    | null
+  >(null);
 
   const toast = useCallback((s: string) => {
     setStatus(s);
     window.setTimeout(() => setStatus((cur) => (cur === s ? "" : cur)), 4000);
   }, []);
+
+  const clearSelection = useCallback(() => {
+    setSelection([]);
+    setMarquee(null);
+    dragRef.current = null;
+  }, []);
+
+  // Esc anywhere clears the whole selection + any in-progress marquee (issue 021).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") clearSelection();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [clearSelection]);
 
   // Open the document whenever the bytes reference changes.
   useEffect(() => {
@@ -80,8 +174,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         const r = await adapter.open(props.document!.bytes, props.document!.name);
         if (cancelled) return;
         setMeta(r);
-        setAnchors([]);
-        setMarks([]);
+        clearSelection();
         undoStack.current = [];
         redoStack.current = [];
         setRefreshToken((t) => t + 1);
@@ -93,7 +186,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     return () => {
       cancelled = true;
     };
-  }, [adapter, props.document, toast]);
+  }, [adapter, props.document, toast, clearSelection]);
 
   const canEdit = !!meta?.editable;
 
@@ -105,27 +198,140 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     anchors,
   };
 
-  // A page click → hit-test (table preferred) → set the mark + add an anchor chip.
-  const onPageClick = useCallback(
-    async (click: PageClick) => {
+  const onTrap = useCallback(
+    (e: unknown, msg: string) => {
+      if (String(e).includes("wasm_trap")) {
+        toast(msg);
+        setRefreshToken((t) => t + 1);
+        return true;
+      }
+      return false;
+    },
+    [toast],
+  );
+
+  // pointerdown: record the drag origin + resolve (async) whether it landed on EMPTY space so a drag from
+  // empty starts a marquee while a drag from a block does not (issue §함정).
+  const onPointerDown = useCallback(
+    (click: PageClick) => {
+      dragRef.current = {
+        page: click.page,
+        startX: click.x,
+        startY: click.y,
+        curX: click.x,
+        curY: click.y,
+        clientX: click.client.x,
+        clientY: click.client.y,
+        meta: click.meta,
+        empty: null,
+        marqueeing: false,
+      };
+      setMarquee(null);
+      (async () => {
+        try {
+          const table = await adapter.tableAt(click.page, click.x, click.y);
+          const hit = table ? null : await adapter.hitTest(click.page, click.x, click.y);
+          // "empty" = not over a table AND not STRICTLY inside a block band (hitTest returns the nearest
+          // band even in a gap, so we re-check strict containment here rather than trust a non-null hit).
+          const strictInside = !!hit && click.x >= hit.x && click.x <= hit.x + hit.w && click.y >= hit.y && click.y <= hit.y + hit.h;
+          const d = dragRef.current;
+          if (d && d.page === click.page && d.startX === click.x && d.startY === click.y) {
+            d.empty = !table && !strictInside;
+            d.resolved = { table, hit };
+          }
+        } catch (e) {
+          onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
+        }
+      })();
+    },
+    [adapter, onTrap],
+  );
+
+  // pointermove: past the 4px threshold, an EMPTY-origin drag becomes a marquee (dashed rect), clipped to
+  // the START page (v1: single-page marquee).
+  const onPointerMove = useCallback(
+    (click: PageClick) => {
+      const d = dragRef.current;
+      if (!d || click.page !== d.page) return; // ignore moves that stray onto another page (clip to start)
+      d.curX = click.x;
+      d.curY = click.y;
+      if (!d.marqueeing) {
+        const moved = Math.hypot(click.client.x - d.clientX, click.client.y - d.clientY) > DRAG_THRESHOLD_PX;
+        if (!moved) return;
+        if (d.empty !== true) return; // only empty-space drags marquee (null = still resolving → wait)
+        if (!adapter.blocksInRect) return; // backend can't answer a rect query → no marquee
+        d.marqueeing = true;
+      }
+      const x = Math.min(d.startX, d.curX);
+      const y = Math.min(d.startY, d.curY);
+      setMarquee({ page: d.page, box: { x, y, w: Math.abs(d.curX - d.startX), h: Math.abs(d.curY - d.startY) } });
+    },
+    [adapter],
+  );
+
+  // Finish a marquee: query blocksInRect on the start page, convert to Sels (excluding images), then
+  // replace or (with ⌘/Ctrl) union into the selection.
+  const finishMarquee = useCallback(
+    async (d: NonNullable<typeof dragRef.current>) => {
+      if (!adapter.blocksInRect) return;
+      const x0 = Math.min(d.startX, d.curX);
+      const y0 = Math.min(d.startY, d.curY);
+      const x1 = Math.max(d.startX, d.curX);
+      const y1 = Math.max(d.startY, d.curY);
       try {
-        const table = await adapter.tableAt(click.page, click.x, click.y);
-        const hit = table ? null : await adapter.hitTest(click.page, click.x, click.y);
-        const derived = deriveMarkAndAnchor(click, table, hit);
-        if (!derived) {
-          setMarks([]);
-          return;
+        const hits = await adapter.blocksInRect(d.page, x0, y0, x1, y1);
+        const sels: Sel[] = [];
+        let excluded = 0;
+        for (const h of hits) {
+          const s = blockHitToSel(h, d.page);
+          if (s) sels.push(s);
+          else excluded++;
         }
-        setMarks([derived.mark]);
-        setAnchors((prev) => (prev.some((p) => sameAnchor(p, derived.anchor)) ? prev : [...prev, derived.anchor]));
+        if (sels.length === 0 && !d.meta) setSelection([]);
+        else setSelection((prev) => mergeSelection(prev, sels, d.meta ? "union" : "replace"));
+        if (excluded > 0) toast(`${sels.length}개 선택 · 그림 등 ${excluded}개 제외`);
+        else if (sels.length > 0) toast(`${sels.length}개 블록 선택`);
       } catch (e) {
-        if (String(e).includes("wasm_trap")) {
-          toast("엔진을 복구했습니다 — 다시 시도하세요");
-          setRefreshToken((t) => t + 1);
-        }
+        onTrap(e, "엔진 트랩 — 문서를 복구했습니다");
       }
     },
-    [adapter, toast],
+    [adapter, toast, onTrap],
+  );
+
+  // Finish a click (no drag): select the resolved block — replace, or ⌘/Ctrl toggle.
+  const finishClick = useCallback(
+    async (d: NonNullable<typeof dragRef.current>) => {
+      try {
+        let table = d.resolved?.table ?? null;
+        let hit = d.resolved?.hit ?? null;
+        if (!d.resolved) {
+          // The async resolve didn't land before pointerup (a very fast click) — resolve now.
+          table = await adapter.tableAt(d.page, d.startX, d.startY);
+          hit = table ? null : await adapter.hitTest(d.page, d.startX, d.startY);
+        }
+        const sel = deriveSel(d.page, table, hit);
+        if (!sel) {
+          if (!d.meta) setSelection([]); // a plain click on nothing clears
+          return;
+        }
+        setSelection((prev) => mergeSelection(prev, [sel], d.meta ? "toggle" : "replace"));
+      } catch (e) {
+        onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
+      }
+    },
+    [adapter, onTrap],
+  );
+
+  const onPointerUp = useCallback(
+    (_click: PageClick) => {
+      const d = dragRef.current;
+      dragRef.current = null;
+      setMarquee(null);
+      if (!d) return;
+      if (d.marqueeing) void finishMarquee(d);
+      else void finishClick(d);
+    },
+    [finishMarquee, finishClick],
   );
 
   const onApply = useCallback(
@@ -140,7 +346,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         redoStack.current = [];
         const pages = await adapter.pageCount();
         setMeta((m) => (m ? { ...m, pages } : m));
-        setMarks([]);
+        clearSelection();
         setRefreshToken((t) => t + 1);
         toast(`적용됨: ${applied}개 편집`);
       } catch (e) {
@@ -152,7 +358,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       }
       return applied;
     },
-    [adapter, toast],
+    [adapter, toast, clearSelection],
   );
 
   const undo = useCallback(async () => {
@@ -249,15 +455,23 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       </div>
 
       <div className="hw-body">
-        <div className="hw-canvas">
+        <div
+          className="hw-canvas"
+          onPointerDown={(e) => {
+            // A press on the gray canvas background (outside every page sheet) clears the selection.
+            if (!(e.target as HTMLElement).closest(".hw-sheet")) clearSelection();
+          }}
+        >
           {meta ? (
             <HwpPageView
               adapter={adapter}
               pageCount={meta.pages}
               zoom={zoom}
               refreshToken={refreshToken}
-              onPageClick={(c) => void onPageClick(c)}
-              renderOverlay={(page, scale) => <SelectionOverlay marks={marks} page={page} scale={scale} />}
+              onPagePointerDown={(c) => onPointerDown(c)}
+              onPagePointerMove={(c) => onPointerMove(c)}
+              onPagePointerUp={(c) => onPointerUp(c)}
+              renderOverlay={(page, scale) => <SelectionOverlay marks={marks} marquee={marquee} page={page} scale={scale} />}
             />
           ) : (
             <div className="hw-empty-canvas">문서를 열면 여기에 페이지가 표시됩니다.</div>
@@ -266,8 +480,10 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         <ChatPanel
           canEdit={canEdit}
           anchors={anchors}
-          onRemoveAnchor={(i) => setAnchors((a) => a.filter((_, k) => k !== i))}
-          onConsumeAnchors={() => setAnchors([])}
+          modLabel={mod}
+          onRemoveAnchor={(i) => setSelection((s) => s.filter((_, k) => k !== i))}
+          onClearAnchors={clearSelection}
+          onConsumeAnchors={clearSelection}
           onAiRequest={props.onAiRequest}
           docContext={docContext}
           onApply={onApply}

@@ -9,6 +9,14 @@ export interface Mark {
   kind: "cell" | "range" | "paragraph" | "table" | "image" | string;
 }
 
+/** The in-progress marquee (rubber-band) rectangle while the user drags over empty space. `box` is in
+ *  own-render PAGE px on `page`; the overlay draws it as a dashed rectangle (Finder-style). v1 clips a
+ *  marquee to the page it started on, so only that page's overlay ever draws it. */
+export interface Marquee {
+  page: number;
+  box: PageBox;
+}
+
 export interface SelectionOverlayProps {
   /** All marks; the overlay renders only those whose `page === page`. */
   marks: Mark[];
@@ -16,16 +24,20 @@ export interface SelectionOverlayProps {
   page: number;
   /** rendered px / viewBox px for this page (from HwpPageView). */
   scale: number;
+  /** The active marquee rectangle (or null). Drawn only when `marquee.page === page`. */
+  marquee?: Marquee | null;
 }
 
-/// SelectionOverlay — the cell/range/paragraph/table MARKING layer (issue 016 step 2). It draws a box
-/// (page-px → client-px via coords.ts, so it tracks zoom) with a small label chip over exactly what the
-/// user marked, so "가리키기"(pointing) is tangible and the marked spot rides along to the chat panel as
-/// an anchor. The v1 package deliberately EXCLUDES the desktop app's batch-format toolbar (shade/align
-/// buttons) — marking only.
-export function SelectionOverlay({ marks, page, scale }: SelectionOverlayProps) {
+/// SelectionOverlay — the cell/range/paragraph/table MARKING layer (issue 016 step 2) + the marquee
+/// (rubber-band) rectangle (issue 021). It draws a box (page-px → client-px via `scale`, so it tracks
+/// zoom) with a small label chip over exactly what the user marked, so "가리키기"(pointing) is tangible
+/// and the marked spot rides along to the chat panel as an anchor. While dragging over empty space it
+/// also draws the dashed marquee rectangle. This layer is `pointer-events: none` — pointer handling
+/// lives on the page sheet (HwpPageView → HwpWorkspace); the overlay is purely visual.
+export function SelectionOverlay({ marks, page, scale, marquee }: SelectionOverlayProps) {
   const mine = marks.filter((m) => m.page === page);
-  if (mine.length === 0) return null;
+  const rubber = marquee && marquee.page === page ? marquee : null;
+  if (mine.length === 0 && !rubber) return null;
   return (
     <div className="hw-overlay" aria-hidden>
       {mine.map((m, i) => {
@@ -40,6 +52,12 @@ export function SelectionOverlay({ marks, page, scale }: SelectionOverlayProps) 
           </div>
         );
       })}
+      {rubber && (
+        <div
+          className="hw-marquee"
+          style={{ left: rubber.box.x * scale, top: rubber.box.y * scale, width: rubber.box.w * scale, height: rubber.box.h * scale }}
+        />
+      )}
     </div>
   );
 }

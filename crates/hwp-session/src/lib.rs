@@ -295,6 +295,55 @@ pub fn own_hit_test(doc: &SemanticDoc, page: u32, x: f64, y: f64) -> Option<Bloc
     })
 }
 
+/// Marquee (rubber-band) select (own-render only): every top-level block whose placed BAND intersects
+/// the page-space rectangle `(x0,y0)-(x1,y1)`, in own-render px geometry. The rectangle corners come in
+/// either order (a drag can go up-left); they're normalized here. Additive to [`own_hit_test`] — it uses
+/// the SAME `PlacedBlock` bands, but tests full 2-D AABB overlap against the rect (not the point-nearest
+/// fallback), so only blocks the box actually crosses are returned. One [`BlockHitDto`] per distinct
+/// `(section, block)` (a block appears once per page). Empty vec when nothing intersects (never `None`).
+///
+/// Units mirror [`own_hit_test`]: the rect is in own-render px (= HWPUNIT/75, page-local), converted to
+/// place_doc HWPUNIT at the boundary; the returned boxes are back in px. Multi-page marquee is out of
+/// scope — the caller clips the rect to the start page and queries that page only.
+pub fn blocks_in_rect(doc: &SemanticDoc, page: u32, x0: f64, y0: f64, x1: f64, y1: f64) -> Vec<BlockHitDto> {
+    let fonts = own_render_fonts();
+    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    let Some(pg) = placed.pages.get(page as usize) else { return Vec::new() };
+    let k = HWPUNIT_PER_PX;
+    // Normalize the (possibly reversed) corners, then px → HWPUNIT (place_doc space).
+    let (rx0, rx1) = (x0.min(x1) * k, x0.max(x1) * k);
+    let (ry0, ry1) = (y0.min(y1) * k, y0.max(y1) * k);
+    let mut seen: std::collections::BTreeSet<(usize, usize)> = std::collections::BTreeSet::new();
+    let mut out: Vec<BlockHitDto> = Vec::new();
+    for b in &pg.blocks {
+        // 2-D AABB overlap: the band [b.x, b.x+b.w] × [b.y, b.y+b.h] intersects the rect.
+        let overlaps = b.x <= rx1 && b.x + b.w >= rx0 && b.y <= ry1 && b.y + b.h >= ry0;
+        if !overlaps {
+            continue;
+        }
+        if !seen.insert((b.section, b.block)) {
+            continue; // one chip per block even if it somehow bands twice on a page
+        }
+        let kind = match b.kind {
+            hwp_typeset::BlockKind::Paragraph => "paragraph",
+            hwp_typeset::BlockKind::Table => "table",
+            hwp_typeset::BlockKind::Image => "image",
+        };
+        out.push(BlockHitDto {
+            section: b.section,
+            block: b.block,
+            kind: kind.into(),
+            x: b.x / k,
+            y: b.y / k,
+            w: b.w / k,
+            h: b.h / k,
+            text: if b.kind == hwp_typeset::BlockKind::Paragraph { model_para_text(doc, b.section, b.block) } else { String::new() },
+            editable: b.kind == hwp_typeset::BlockKind::Paragraph && model_para_editable(doc, b.section, b.block),
+        });
+    }
+    out
+}
+
 /// The table CELL the user double-clicked: its table anchor `(section, block)`, the cell `(row, col)`,
 /// the table's `(rows, cols)`, the cell's CURRENT text, and its PX box (own SVG space).
 #[derive(serde::Serialize)]
@@ -996,6 +1045,78 @@ mod tests {
         assert_eq!(protect_table_header_rows(&doc, &mut ops, None), 0);
         assert_eq!(protect_table_header_rows(&doc, &mut ops, Some("[]")), 0);
         assert_eq!(ops.len(), 2, "nothing stripped when no anchor rides along");
+    }
+
+    /// A section-0 doc with THREE distinct top-level blocks stacked down the page: a header paragraph,
+    /// a 3×2 table, then a footer paragraph — so `blocks_in_rect` has separable vertical bands to test.
+    fn doc_with_stacked_blocks() -> SemanticDoc {
+        use hwp_model::document::{Block, Paragraph, Section};
+        use hwp_ops::ParaSpec;
+        let mut doc = SemanticDoc {
+            char_shapes: vec![Default::default()],
+            para_shapes: vec![Default::default()],
+            ..Default::default()
+        };
+        doc.sections.push(Section {
+            blocks: vec![Block::Paragraph(Paragraph::default())],
+            ..Default::default()
+        });
+        // block 0 = header paragraph.
+        hwp_ops::apply(&mut doc, &Op::SetParagraphText { section: 0, block: 0, text: "머리말 문단입니다".into() })
+            .expect("header text");
+        // block 1 = table.
+        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
+        hwp_ops::apply(
+            &mut doc,
+            &Op::InsertTableAt {
+                section: 0,
+                index: 1,
+                rows: vec![vec![cell("항목"), cell("내용")], vec![cell("A"), cell("B")], vec![cell("C"), cell("D")]],
+            },
+        )
+        .expect("seed table");
+        // block 2 = footer paragraph (appended after the table).
+        hwp_ops::apply(
+            &mut doc,
+            &Op::InsertParagraphAt { section: 0, index: 2, runs: vec![RunSpec { text: "꼬리말 문단입니다".into(), ..Default::default() }], para: ParaSpec::default() },
+        )
+        .expect("footer para");
+        doc
+    }
+
+    #[test]
+    fn blocks_in_rect_full_returns_all_narrow_returns_subset() {
+        let doc = doc_with_stacked_blocks();
+        // A generous rect covering the whole page (px units, page-local) hits every stacked block.
+        let all = blocks_in_rect(&doc, 0, 0.0, 0.0, 100_000.0, 100_000.0);
+        let anchors: std::collections::BTreeSet<(usize, usize)> = all.iter().map(|b| (b.section, b.block)).collect();
+        assert!(anchors.contains(&(0, 0)), "header paragraph is in the full-page marquee");
+        assert!(anchors.contains(&(0, 1)), "table is in the full-page marquee");
+        assert!(anchors.contains(&(0, 2)), "footer paragraph is in the full-page marquee");
+        assert_eq!(anchors.len(), all.len(), "no duplicate (section, block) chips");
+
+        // Returned boxes are px (page-local): within the page's px extent, never HWPUNIT-scale.
+        let geom = page_geometry(&doc, 0).expect("page 0 geometry");
+        for b in &all {
+            assert!(b.x >= -0.5 && b.x + b.w <= geom.w + 1.0, "band x in page px [0,{}]: got {}..{}", geom.w, b.x, b.x + b.w);
+            assert!(b.y >= -0.5 && b.y + b.h <= geom.h + 1.0, "band y in page px [0,{}]: got {}..{}", geom.h, b.y, b.y + b.h);
+        }
+
+        // A narrow rect hugging ONLY the table band's vertical extent is a strict subset (excludes the
+        // footer paragraph below it). Use the table's own returned box as the probe rect.
+        let table = all.iter().find(|b| b.kind == "table").expect("table block present");
+        let mid_y = table.y + table.h / 2.0;
+        let narrow = blocks_in_rect(&doc, 0, table.x + 1.0, mid_y - 1.0, table.x + table.w - 1.0, mid_y + 1.0);
+        let narrow_anchors: std::collections::BTreeSet<(usize, usize)> = narrow.iter().map(|b| (b.section, b.block)).collect();
+        assert!(narrow_anchors.contains(&(0, 1)), "the narrow rect over the table still hits the table");
+        assert!(!narrow_anchors.contains(&(0, 2)), "the narrow rect does NOT reach the footer paragraph");
+        assert!(narrow.len() < all.len(), "narrow marquee is a strict subset of the full-page marquee");
+    }
+
+    #[test]
+    fn blocks_in_rect_empty_on_out_of_range_page() {
+        let doc = doc_with_stacked_blocks();
+        assert!(blocks_in_rect(&doc, 99, 0.0, 0.0, 100_000.0, 100_000.0).is_empty(), "off-page marquee → empty vec, not a panic");
     }
 
     #[test]

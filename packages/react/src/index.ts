@@ -8,7 +8,7 @@ export type { HwpWorkspaceProps } from "./components/HwpWorkspace";
 export { HwpPageView } from "./components/HwpPageView";
 export type { HwpPageViewProps, PageClick } from "./components/HwpPageView";
 export { SelectionOverlay } from "./components/SelectionOverlay";
-export type { SelectionOverlayProps, Mark } from "./components/SelectionOverlay";
+export type { SelectionOverlayProps, Mark, Marquee } from "./components/SelectionOverlay";
 export { ChatPanel } from "./components/ChatPanel";
 export type { ChatPanelProps } from "./components/ChatPanel";
 
@@ -22,6 +22,9 @@ export type { TauriAdapterOptions, Invoke } from "./TauriAdapter";
 // R7: the sanitizer is exported so hosts can reuse it, but the components never expose an SVG-string
 // prop that bypasses it (all injection goes through HwpPageView → sanitizeSvg).
 export { sanitizeSvg } from "./sanitize";
+
+// Platform helpers for the selection UX (issue 021): the additive/toggle modifier label (⌘/Ctrl).
+export { isMac, modLabel, hasMod } from "./platform";
 
 // Helpers + types
 export { describeIntent } from "./describeIntent";

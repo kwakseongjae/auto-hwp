@@ -95,6 +95,10 @@ export class WasmAdapter implements EngineAdapter {
     return this.guard((d) => d.tableAt(page, x, y) as TableBox | null);
   }
 
+  blocksInRect(page: number, x0: number, y0: number, x1: number, y1: number): Promise<BlockHit[]> {
+    return this.guard((d) => d.blocksInRect(page, x0, y0, x1, y1) as BlockHit[]);
+  }
+
   applyIntent(intent: Intent): Promise<Outcome> {
     return this.guard((d) => d.applyIntent(intent) as Outcome);
   }

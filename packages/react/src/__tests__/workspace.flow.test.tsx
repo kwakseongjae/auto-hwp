@@ -38,8 +38,9 @@ describe("HwpWorkspace mock flow", () => {
       return el as HTMLElement;
     });
 
-    // Click the page → tableAt hit → mark + anchor chip.
-    fireEvent.click(sheet, { clientX: 100, clientY: 100 });
+    // Press-release the page (no movement → a click) → tableAt hit → mark + anchor chip (replace model).
+    fireEvent.pointerDown(sheet, { clientX: 100, clientY: 100, button: 0, pointerId: 1 });
+    fireEvent.pointerUp(sheet, { clientX: 100, clientY: 100, button: 0, pointerId: 1 });
     await waitFor(() => {
       expect(container.querySelector(".hw-mark")).toBeTruthy();
       expect(container.querySelector(".hw-anchor")).toBeTruthy();

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { describeIntent } from "../describeIntent";
+import { modLabel } from "../platform";
 import type { Anchor, DocContext, Intent, IntentCard, OnAiRequest } from "../types";
 
 export interface ChatPanelProps {
@@ -9,6 +10,11 @@ export interface ChatPanelProps {
   anchors: Anchor[];
   /** Remove the i-th anchor chip. */
   onRemoveAnchor: (i: number) => void;
+  /** Clear ALL anchor chips ("모두 지우기"). Optional — when omitted the button is hidden. */
+  onClearAnchors?: () => void;
+  /** Label for the additive/toggle modifier key ("⌘"/"Ctrl") in the hint tooltip. Defaults to a
+   *  platform-detected label. */
+  modLabel?: string;
   /** The host AI bridge (R6). The package never calls an LLM — this returns the Intents to preview. */
   onAiRequest: OnAiRequest;
   /** Read-only doc context passed to `onAiRequest`. */
@@ -69,6 +75,7 @@ export function ChatPanel(props: ChatPanelProps) {
 
   const last = msgs[msgs.length - 1];
   const awaiting = last?.role === "assistant" && last.state === "pending";
+  const mod = props.modLabel ?? modLabel();
 
   useEffect(() => {
     const el = listRef.current;
@@ -212,16 +219,28 @@ export function ChatPanel(props: ChatPanelProps) {
       <div className="hw-composer">
         {!props.canEdit && <p className="hw-composer-hint">편집하려면 먼저 문서를 여세요.</p>}
         {props.anchors.length > 0 && (
-          <div className="hw-anchors">
-            {props.anchors.map((a, i) => (
-              <span key={`${a.section}:${a.block}:${i}`} className="hw-anchor" title={`대상 [s${a.section}/b${a.block}] — 이 위치만 편집됩니다`}>
-                <span aria-hidden>◆</span>
-                {a.label}
-                <button className="hw-anchor-x" onClick={() => props.onRemoveAnchor(i)} title="이 대상 제거">
-                  ✕
-                </button>
+          <div className="hw-anchors-wrap">
+            <div className="hw-anchors-head">
+              <span className="hw-anchors-hint" title={`클릭: 선택 교체 · ${mod}+클릭: 선택 추가/토글 · 빈 곳 드래그: 영역 선택`}>
+                {props.anchors.length}개 선택됨
               </span>
-            ))}
+              {props.onClearAnchors && (
+                <button className="hw-anchors-clear" onClick={props.onClearAnchors} title="선택 모두 해제 (Esc)">
+                  모두 지우기
+                </button>
+              )}
+            </div>
+            <div className="hw-anchors">
+              {props.anchors.map((a, i) => (
+                <span key={`${a.section}:${a.block}:${i}`} className="hw-anchor" title={`대상 [s${a.section}/b${a.block}] — 이 위치만 편집됩니다`}>
+                  <span aria-hidden>◆</span>
+                  {a.label}
+                  <button className="hw-anchor-x" onClick={() => props.onRemoveAnchor(i)} title="이 대상 제거">
+                    ✕
+                  </button>
+                </span>
+              ))}
+            </div>
           </div>
         )}
         <div className="hw-composer-row">

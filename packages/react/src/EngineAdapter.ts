@@ -29,6 +29,12 @@ export interface EngineAdapter {
   /** Placed table box under a PAGE-LOCAL px point (for marking), or null on a miss. */
   tableAt(page: number, x: number, y: number): Promise<TableBox | null>;
 
+  /** OPTIONAL — marquee (rubber-band) select: every top-level block whose band intersects the
+   *  PAGE-LOCAL px rectangle `(x0,y0)-(x1,y1)` (corners in any order). Resolves to an EMPTY ARRAY on a
+   *  miss (never null). Backends that can't answer (e.g. the reference `TauriAdapter`) OMIT this method;
+   *  the workspace then simply disables marquee selection (click/⌘-click still work). */
+  blocksInRect?(page: number, x0: number, y0: number, x1: number, y1: number): Promise<BlockHit[]>;
+
   /** Apply an Intent (schema v0). One undo unit per accepted Intent. */
   applyIntent(intent: Intent): Promise<Outcome>;
 
