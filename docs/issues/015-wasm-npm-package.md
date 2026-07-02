@@ -3,8 +3,20 @@
 - 상태: **open**
 - 우선순위: P4 (목표 2 후반부 — 사이트 내 엔진 이식)
 - 영역: 웹 이식 / 라이브러리화
-- 선행: **007 (wasm 판정), 012 (hwp-session)**. 병렬 가능: 013
-- 레드팀: **R6, R8, R9, R13**
+- 선행: **007 (wasm 판정), 012 (hwp-session), 017 (hwp-mcp wasm화)**. 병렬 가능: 013
+- 레드팀: **R6, R8, R9, R13** + wasm 패닉 복구(아래)
+
+## ⚠️ 편집 레인의 출처 (012 LEAF 결정 반영)
+편집(Intent 적용/undo/프리뷰)은 hwp-session이 아니라 **hwp-mcp lib** (`default-features = false`,
+017 완료 후 wasm-safe)에서 온다: `Session` + `apply_intent_json`(008 계약) + `open_bytes`/
+`export_bytes`. hwp-session은 렌더/지오메트리/HTML·PDF export. 바인딩(`HwpDoc`)은 이 둘을 감싼다 —
+편집 레인을 재구현하지 마라.
+
+## ⚠️ wasm 패닉 복구 (R4의 웹 변형 — 필수 설계)
+014의 rhwp `catch_unwind` 방어는 **wasm32에서 무력**하다(패닉=트랩, 인스턴스 사망). 악성/손상
+.hwp가 파서 패닉을 일으키면 wasm 인스턴스째 죽으므로, **JS 래퍼가 모든 호출을 try/catch로 감싸고
+RuntimeError 시 인스턴스를 재생성하는 복구 규약**을 npm 패키지에 내장하라(호스트 페이지는 죽지
+않음 — 문서 상태만 소실되므로 "다시 열기" UX로 수렴). README에 명시.
 
 ## 전제 (007 판정 완료 — 2026-07-02: **A안**)
 - **007 판정 = A안 (전 코어 11/11 wasm32 컴파일 통과)**. rhwp(HWP5 파싱)와 krilla(PDF)
