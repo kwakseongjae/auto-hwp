@@ -97,17 +97,17 @@ This package ships **no fonts** (redistributing Hancom/함초롬 faces is not pe
 ```js
 const font = new Uint8Array(await (await fetch('/fonts/NotoSansKR-Regular.ttf')).arrayBuffer());
 doc.registerFont('Noto Sans KR', font);   // OFL — safe to serve yourself
-const pdf = doc.exportPdf();
+const pdf = doc.exportPdf();              // real, subsetted Korean glyphs embedded
 ```
 
 `exportPdf()` throws `{code:"font_missing"}` if no font was registered (never silently emits empty
 glyphs).
 
-> **Known limitation (this build):** the underlying PDF backend (`hwp-export` → krilla) still discovers
-> its embedded face from `std::fs` paths, which do not exist on wasm — so today the exported PDF has
-> **faithful geometry but stub-box glyphs** on wasm. Threading the injected bytes into krilla needs a
-> `font bytes` parameter on `hwp-export::pdf::export_pdf` (out of this package's "pure consumer" scope).
-> `registerFont` already stores the bytes for the day that parameter lands.
+**Font bytes must be a single-face TTF/OTF** — a TTC (TrueType Collection) is **not** accepted (krilla's
+`simple-text` backend can't subset a collection). The injected bytes now thread all the way through to
+krilla (issue 018): the first parseable registered face becomes the PDF body face, so the exported PDF
+embeds a **real subset of your Korean glyphs**. v1 uses the injected face as the single body default —
+document-level per-family mapping is a follow-up; register the face you want the body text drawn in.
 
 ## Bundle size
 

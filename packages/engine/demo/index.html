@@ -30,6 +30,7 @@
     <header>
       <h1>@tf-hwp/engine · PoC</h1>
       <label class="filebtn">파일 열기 (.hwp/.hwpx)<input id="file" type="file" accept=".hwp,.hwpx" hidden /></label>
+      <label class="filebtn">폰트 선택 (.ttf/.otf)<input id="font" type="file" accept=".ttf,.otf" hidden /></label>
       <button id="undo" disabled>실행취소</button>
       <span class="sp"></span>
       <button id="dlHtml" disabled>HTML 다운로드</button>
@@ -60,6 +61,8 @@
       const NOTO_URL = 'https://cdn.jsdelivr.net/gh/notofonts/notofonts.github.io/fonts/NotoSansKR/hinted/ttf/NotoSansKR-Regular.ttf';
 
       let doc = null, bytes = null, fileName = 'document.hwpx';
+      // Offline fallback: a locally-chosen TTF/OTF overrides the network Noto fetch (no network needed).
+      let localFont = null, localFontName = null;
 
       await initEngine();
       log('engine ready.');
@@ -160,11 +163,27 @@
         catch (err) { recover(err, () => {}); }
       });
 
+      $('font').addEventListener('change', async (e) => {
+        const f = e.target.files[0];
+        if (!f) return;
+        localFont = new Uint8Array(await f.arrayBuffer());
+        localFontName = f.name;
+        log('font loaded (offline):', f.name, '·', localFont.length, 'bytes');
+      });
+
       $('dlPdf').addEventListener('click', async () => {
         try {
-          log('fetching Noto Sans KR (OFL) …');
-          const font = new Uint8Array(await (await fetch(NOTO_URL)).arrayBuffer());
-          doc.registerFont('Noto Sans KR', font);
+          // Prefer a locally-selected face (offline); else fetch the OFL Noto Sans KR over the network.
+          let font, family;
+          if (localFont) {
+            font = localFont; family = localFontName || 'Injected Font';
+            log('using local font:', family);
+          } else {
+            log('fetching Noto Sans KR (OFL) …');
+            font = new Uint8Array(await (await fetch(NOTO_URL)).arrayBuffer());
+            family = 'Noto Sans KR';
+          }
+          doc.registerFont(family, font);
           const pdf = doc.exportPdf();
           download(new Blob([pdf], { type: 'application/pdf' }), fileName + '.pdf');
           log('PDF exported:', pdf.length, 'bytes');

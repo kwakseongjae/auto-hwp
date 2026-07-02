@@ -143,11 +143,19 @@ export class HwpDoc {
   renderPageSvgSanitized(n) {
     return sanitizeSvg(this.renderPageSvg(n));
   }
+  /** Structural block under (x,y) in own-render px, or `null` on a miss. */
   hitTest(page, x, y) {
-    return this.#call((r) => JSON.parse(r.hitTest(page, x, y)));
+    return this.#call((r) => {
+      const s = r.hitTest(page, x, y); // Option<String> → JS string | null/undefined on a miss
+      return s == null ? null : JSON.parse(s);
+    });
   }
+  /** Placed table box under (x,y) in own-render px, or `null` on a miss. */
   tableAt(page, x, y) {
-    return this.#call((r) => JSON.parse(r.tableAt(page, x, y)));
+    return this.#call((r) => {
+      const s = r.tableAt(page, x, y); // Option<String> → JS string | null/undefined on a miss
+      return s == null ? null : JSON.parse(s);
+    });
   }
   /** Apply an Intent (schema v0). Accepts an object or a JSON string; returns the parsed Outcome. */
   applyIntent(intent) {

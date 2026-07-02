@@ -701,10 +701,31 @@ pub fn emit_html(doc: &SemanticDoc, title: Option<String>) -> String {
 /// krilla), embedding a subset of the discovered Korean face. Under `shaper` the real rustybuzz
 /// advances drive placement. Returns the krilla export result (bytes + page count + embedded font
 /// path). Needs the `pdf` feature.
+///
+/// Native shells (viewer/CLI) call this — it forwards to [`emit_pdf_with_fonts`] with no injected
+/// fonts, so the discover path (and its bytes) are unchanged.
 #[cfg(feature = "pdf")]
 pub fn emit_pdf(doc: &SemanticDoc, title: Option<String>) -> Result<hwp_export::pdf::PdfExport, String> {
+    emit_pdf_with_fonts(doc, title, &[])
+}
+
+/// Like [`emit_pdf`], but threads CALLER-INJECTED font faces `(family, bytes)` all the way to krilla
+/// (issue 018) — the wasm/web path where `std::fs` has no fonts. When `injected_fonts` is non-empty and
+/// parseable, the injected face backs the glyphs; an empty slice takes the native discover path
+/// unchanged. TTF/OTF single-face bytes only (a TTC collection isn't accepted by krilla's simple-text).
+#[cfg(feature = "pdf")]
+pub fn emit_pdf_with_fonts(
+    doc: &SemanticDoc,
+    title: Option<String>,
+    injected_fonts: &[(String, Vec<u8>)],
+) -> Result<hwp_export::pdf::PdfExport, String> {
     let fonts = own_render_fonts();
-    hwp_export::pdf::export_pdf(doc, fonts.as_ref(), &hwp_export::pdf::PdfOptions { title })
+    hwp_export::pdf::export_pdf_with_fonts(
+        doc,
+        fonts.as_ref(),
+        &hwp_export::pdf::PdfOptions { title },
+        injected_fonts,
+    )
 }
 
 // ---- Image insert (proposal builder + fs stash) -----------------------------------------------

@@ -151,22 +151,28 @@ impl HwpDoc {
             .ok_or_else(|| js_err("out_of_range", &format!("page {n} out of range (0..{})", svgs.len())))
     }
 
-    /// Click-to-point hit test on `page` at own-render px `(x, y)` — JSON of the top-level block under
-    /// the point (`section`/`block`/`kind`/box/`text`/`editable`), or the string `"null"` on a miss.
+    /// Click-to-point hit test on `page` at own-render px `(x, y)` — a JSON **string** of the top-level
+    /// block under the point (`section`/`block`/`kind`/box/`text`/`editable`), or **JS `null`** on a
+    /// miss (an `Option<String>` → `null`, never the literal string `"null"` — bindings policy 018).
     #[wasm_bindgen(js_name = hitTest)]
-    pub fn hit_test(&self, page: u32, x: f64, y: f64) -> Result<String, JsValue> {
+    pub fn hit_test(&self, page: u32, x: f64, y: f64) -> Result<Option<String>, JsValue> {
         let doc = self.doc()?;
-        let hit = hwp_session::own_hit_test(doc, page, x, y);
-        serde_json::to_string(&hit).map_err(|e| js_err("serialize", &e.to_string()))
+        match hwp_session::own_hit_test(doc, page, x, y) {
+            Some(hit) => Ok(Some(serde_json::to_string(&hit).map_err(|e| js_err("serialize", &e.to_string()))?)),
+            None => Ok(None),
+        }
     }
 
-    /// Click-to-mark table hit test on `page` at own-render px `(x, y)` — JSON of the placed table box
-    /// (`section`/`block`/box/`rows`/`cols`/`first_row`) for marking, or `"null"` on a miss.
+    /// Click-to-mark table hit test on `page` at own-render px `(x, y)` — a JSON **string** of the
+    /// placed table box (`section`/`block`/box/`rows`/`cols`/`first_row`) for marking, or **JS `null`**
+    /// on a miss (an `Option<String>` → `null`, never the literal string `"null"` — policy 018).
     #[wasm_bindgen(js_name = tableAt)]
-    pub fn table_at(&self, page: u32, x: f64, y: f64) -> Result<String, JsValue> {
+    pub fn table_at(&self, page: u32, x: f64, y: f64) -> Result<Option<String>, JsValue> {
         let doc = self.doc()?;
-        let t = hwp_session::table_at(doc, page, x, y);
-        serde_json::to_string(&t).map_err(|e| js_err("serialize", &e.to_string()))
+        match hwp_session::table_at(doc, page, x, y) {
+            Some(t) => Ok(Some(serde_json::to_string(&t).map_err(|e| js_err("serialize", &e.to_string()))?)),
+            None => Ok(None),
+        }
     }
 
     /// Apply one Intent-JSON envelope (schema v0, issue 008) via the SAME op-bus the desktop uses
@@ -193,21 +199,22 @@ impl HwpDoc {
     }
 
     /// Inject a font face `(family, bytes)` for PDF export (R8 — fonts are NEVER bundled). Call this
-    /// before `export_pdf`. `bytes` is a TTF/OTF face (e.g. Noto Sans KR, OFL).
+    /// before `export_pdf`. `bytes` is a **single-face TTF/OTF** (e.g. Noto Sans KR, OFL); a TTC
+    /// collection is NOT accepted (krilla's simple-text backend can't subset a collection).
     ///
-    /// ⚠️ Current embedding limitation (issue-code gap, reported): the underlying
-    /// `hwp_export::pdf::export_pdf` still discovers its embedded face via `std::fs` candidates, which
-    /// return nothing on wasm — so on wasm the exported PDF's GLYPHS are stub boxes (geometry is
-    /// faithful). Threading these injected bytes into krilla needs a `font bytes` parameter on
-    /// `hwp-export` (out of 015's "pure consumer" scope). Presence is still enforced so the contract
-    /// and demo flow are correct the day that parameter lands.
+    /// The registered bytes now thread all the way through to krilla (issue 018): the first parseable
+    /// injected face becomes the PDF body face, so wasm-exported PDFs embed REAL Korean glyphs
+    /// (subsetted), not stub boxes. v1 uses the injected face as the single body default — per-family
+    /// mapping is a follow-up.
     #[wasm_bindgen(js_name = registerFont)]
     pub fn register_font(&mut self, family: String, bytes: Vec<u8>) {
         self.fonts.push((family, bytes));
     }
 
-    /// Export the live document to PDF bytes (krilla, via `hwp-session::emit_pdf`). Throws
-    /// `{code:"font_missing"}` if no font was registered (no silent empty glyphs — issue §함정).
+    /// Export the live document to PDF bytes (krilla, via `hwp-session::emit_pdf_with_fonts`). Throws
+    /// `{code:"font_missing"}` if no font was registered (no silent empty glyphs — issue §함정). The
+    /// registered `(family, bytes)` faces are handed to krilla, which subsets the injected face to the
+    /// glyphs actually drawn.
     #[wasm_bindgen(js_name = exportPdf)]
     pub fn export_pdf(&self) -> Result<Vec<u8>, JsValue> {
         if self.fonts.is_empty() {
@@ -217,7 +224,7 @@ impl HwpDoc {
             ));
         }
         let doc = self.doc()?;
-        let out = hwp_session::emit_pdf(doc, self.title.clone()).map_err(engine_err)?;
+        let out = hwp_session::emit_pdf_with_fonts(doc, self.title.clone(), &self.fonts).map_err(engine_err)?;
         Ok(out.bytes)
     }
 

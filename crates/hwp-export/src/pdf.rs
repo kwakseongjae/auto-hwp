@@ -104,6 +104,33 @@ impl EmbedFont {
         }
         None
     }
+
+    /// Build an [`EmbedFont`] from CALLER-INJECTED bytes (the wasm/web path where `std::fs` has no
+    /// fonts — issue 018). The first parseable `(family, bytes)` becomes the body face; per the issue,
+    /// v1 does NOT do document-level font-family matching (that's a follow-up) — the injected face is
+    /// simply used as the default face for ALL runs. Bold runs reuse the regular face (no synthetic
+    /// bolding) unless an injected family name contains "bold". `None` if nothing parses → the caller
+    /// falls back to `discover` (native) or stub boxes (wasm). TTF/OTF single-face bytes only (krilla's
+    /// `simple-text` can't take a TTC collection).
+    fn from_injected(injected: &[(String, Vec<u8>)]) -> Option<EmbedFont> {
+        // Best-effort bold: an injected face whose family hints "bold" backs bold runs (still v1-simple
+        // — no family-to-run mapping). Parsed lazily so a non-bold-only injection costs nothing.
+        let bold = injected
+            .iter()
+            .find(|(family, _)| family.to_ascii_lowercase().contains("bold"))
+            .and_then(|(_, bytes)| Font::new(bytes.clone().into(), 0));
+        for (family, bytes) in injected {
+            if let Some(font) = Font::new(bytes.clone().into(), 0) {
+                return Some(EmbedFont {
+                    font,
+                    bold: bold.clone(),
+                    path: format!("injected:{family}"),
+                    real: true,
+                });
+            }
+        }
+        None
+    }
 }
 
 /// Options for [`export_pdf`].
@@ -131,15 +158,41 @@ pub fn is_font_real() -> bool {
 /// Export `doc` to a PDF byte buffer, driving OUR paginator/placer over `fonts` (inject
 /// `hwp_typeset::RealFontMetrics` under `--features shaper`, else `ApproxFontMetrics`). Every page of
 /// the paint IR is replayed onto a krilla page so the PDF matches own-render. Korean glyphs embed a
-/// subset of the discovered face. Returns the bytes + page count + the embedded font path.
+/// subset of the DISCOVERED face (`std::fs` candidates). Returns the bytes + page count + the embedded
+/// font path.
+///
+/// This is the NATIVE entry point (viewer/CLI) and its behavior is byte-for-byte unchanged — it simply
+/// forwards to [`export_pdf_with_fonts`] with no injected fonts, so the discover path is taken exactly
+/// as before.
 pub fn export_pdf(
     doc: &SemanticDoc,
     fonts: &dyn FontMetricsProvider,
     opts: &PdfOptions,
 ) -> Result<PdfExport, String> {
+    export_pdf_with_fonts(doc, fonts, opts, &[])
+}
+
+/// Like [`export_pdf`], but the caller may INJECT font faces `(family, bytes)` — the wasm/web path
+/// where `std::fs` holds no fonts (issue 018). Selection policy: if `injected_fonts` is non-empty and
+/// at least one face parses, that injected face backs the glyphs (**preferred over discover**); if the
+/// injected bytes don't parse we fall back to `discover`; and with an EMPTY slice we go straight to
+/// `discover` — i.e. the native path is unchanged. Font-family→run matching is intentionally NOT done
+/// in v1 (the injected face is the single body default; a document-level mapping is a follow-up).
+pub fn export_pdf_with_fonts(
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+    opts: &PdfOptions,
+    injected_fonts: &[(String, Vec<u8>)],
+) -> Result<PdfExport, String> {
     // One PageLayerTree per page from our own pipeline — the SAME IR the SVG sink replays.
     let trees = hwp_render::render_doc_trees(doc, fonts);
-    let embed = EmbedFont::discover();
+    // Injected bytes win over discover (wasm has no fs fonts); an empty slice → pure discover (native
+    // path, byte-identical). A non-empty-but-unparseable injection still falls back to discover.
+    let embed = if injected_fonts.is_empty() {
+        EmbedFont::discover()
+    } else {
+        EmbedFont::from_injected(injected_fonts).or_else(EmbedFont::discover)
+    };
 
     let mut document = Document::new();
     if let Some(title) = &opts.title {
@@ -490,6 +543,37 @@ mod tests {
         // krilla rgb::Color is constructed from the same 8-bit channels — round-trip via a fresh ctor.
         assert_eq!(c, rgb::Color::new(0, 0, 0xFF), "blue run maps to krilla blue, not black");
         assert_ne!(c, rgb::Color::black(), "color is not forced to black on the PDF path");
+    }
+
+    #[test]
+    fn injected_font_is_preferred_over_discover() {
+        // Inject the vendored NanumGothic bytes; the export must embed the INJECTED face (font_path
+        // "injected:…"), proving bytes thread through to krilla instead of the fs-discovered face.
+        let bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/NanumGothic-Regular.ttf"
+        ))
+        .expect("vendored NanumGothic present for the test");
+        let doc = doc_with(vec![Block::Paragraph(para("한글 주입 폰트"))]);
+        let injected = vec![("Nanum Gothic".to_string(), bytes)];
+        let out = export_pdf_with_fonts(&doc, &ApproxFontMetrics, &PdfOptions::default(), &injected).unwrap();
+        assert!(out.bytes.starts_with(b"%PDF-"));
+        assert_eq!(
+            out.font_path.as_deref(),
+            Some("injected:Nanum Gothic"),
+            "injected face is preferred over discover"
+        );
+    }
+
+    #[test]
+    fn empty_injection_falls_back_to_discover_unchanged() {
+        // An empty injection slice takes the pure-discover path — `export_pdf` and
+        // `export_pdf_with_fonts(.., &[])` must produce byte-identical output (native path unchanged).
+        let doc = doc_with(vec![Block::Paragraph(para("동일성 확인"))]);
+        let a = export_pdf(&doc, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
+        let b = export_pdf_with_fonts(&doc, &ApproxFontMetrics, &PdfOptions::default(), &[]).unwrap();
+        assert_eq!(a.bytes, b.bytes, "empty injection == discover, byte-identical");
+        assert_eq!(a.font_path, b.font_path);
     }
 
     #[test]
