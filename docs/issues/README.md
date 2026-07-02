@@ -18,9 +18,9 @@
 
 | # | 제목 | 상태 | 단계 | 선행 |
 |---|------|------|------|------|
-| [007](007-wasm-smoke-build.md) | wasm 스모크 빌드 (코어 wasm32 판정 → A/B/C안) | open | P0-A | — |
-| [008](008-intent-schema-v0.md) | Intent 스키마 v0 동결 + 버저닝 | open | P0-B | — |
-| [009](009-anchor-chips.md) | 앵커 칩: 마킹 → 채팅 컨텍스트 | open | P1-A | — |
+| [007](007-wasm-smoke-build.md) | wasm 스모크 빌드 → **A안 확정** (11/11 조합 컴파일, rhwp·krilla 포함) | **done** | P0-A | 7531b35 |
+| [008](008-intent-schema-v0.md) | Intent 스키마 v0 동결 + 버저닝 (35 variant, deny_unknown, schema_v0 8테스트) | **done** | P0-B | 8fdae65 |
+| [009](009-anchor-chips.md) | 앵커 칩: 마킹 → 채팅 컨텍스트 | **done** (수동검증 대기) | P1-A | 76c415a · LLM준수/first_row 시각확인은 cargo tauri dev 필요; ai_fill 펜스는 011로 이관 |
 | [010](010-ai-preview-apply-undo.md) | AI 편집 프리뷰→적용 게이트 + undo | open | P1-B | 009 |
 | [011](011-content-presets.md) | 콘텐츠 프리셋 (약력 표 채우기·불릿 정렬) | open | P1-C | 009, 010 |
 | [012](012-hwp-session-extraction.md) | `hwp-session` 파사드 추출 (기능변화 0) | open | P2 | 008 |
