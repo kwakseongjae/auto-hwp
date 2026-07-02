@@ -151,7 +151,15 @@ enum Cmd {
     /// our line-breaking + pagination to the `<hp:lineseg>`s Hancom authored (page count, per-
     /// paragraph line-count match %). The measurable oracle for the layout engine. Needs
     /// `--features rhwp`; run on an ORIGINAL .hwp (which carries Hancom's linesegs).
-    LayoutCheck { file: PathBuf },
+    LayoutCheck {
+        file: PathBuf,
+        /// Diagnostic (issue 020): per-row height audit of ONE table — OUR reserved row heights
+        /// (term-decomposed: lines × EM × linespace + 위/아래 간격 + CELL_PAD) vs Hancom's actual
+        /// (rhwp-parsed) cell heights + lineseg sums. Format `<section>/<block>` indexing OUR lifted
+        /// SemanticDoc (the same block ordinal the oracle walks). E.g. `--rows 0/6`.
+        #[arg(long, value_name = "SECTION/BLOCK")]
+        rows: Option<String>,
+    },
     /// PIVOT M0: project an HWPX into a JSX(content)+CSS(design) project directory
     /// (project.json, document.jsx, sections/, styles/document.css, assets/). HWPX-only.
     OpenProject {
@@ -263,7 +271,7 @@ fn run() -> Result<(), String> {
         Cmd::View { file, out } => view(&file, &out)?,
         Cmd::Convert { file, out, verify } => convert(&file, out, verify)?,
         Cmd::VerifyConvert { file, out } => verify_convert(&file, &out)?,
-        Cmd::LayoutCheck { file } => layout_check(&file)?,
+        Cmd::LayoutCheck { file, rows } => layout_check(&file, rows.as_deref())?,
         Cmd::OpenProject { file, out_dir } => open_project(&file, &out_dir)?,
         Cmd::ExportHtml { file, out } => export_html(&file, &out)?,
         Cmd::ExportPdf { file, out } => export_pdf(&file, &out)?,
@@ -915,8 +923,11 @@ fn verify_convert(_file: &PathBuf, _out: &PathBuf) -> Result<(), String> {
 }
 
 #[cfg(feature = "rhwp")]
-fn layout_check(file: &PathBuf) -> Result<(), String> {
+fn layout_check(file: &PathBuf, rows: Option<&str>) -> Result<(), String> {
     let bytes = read(file)?;
+    if let Some(spec) = rows {
+        return table_row_audit_print(&bytes, spec);
+    }
     let f = hwp_core::layout_fidelity(&bytes).map_err(|e| e.to_string())?;
     let pct = |n: usize| if f.paragraphs == 0 { 0.0 } else { 100.0 * n as f64 / f.paragraphs as f64 };
     println!("레이아웃 엔진 대조 (vs 한컴 실제 레이아웃): {}", file.display());
@@ -952,8 +963,46 @@ fn layout_check(file: &PathBuf) -> Result<(), String> {
     Ok(())
 }
 
+/// Issue 020 diagnostic: print a table's per-row height audit (OUR reserved vs Hancom actual).
+#[cfg(feature = "rhwp")]
+fn table_row_audit_print(bytes: &[u8], spec: &str) -> Result<(), String> {
+    let (s, b) = spec
+        .split_once('/')
+        .ok_or_else(|| format!("--rows expects <section>/<block>, got {spec:?}"))?;
+    let section: usize = s.trim().parse().map_err(|_| format!("bad section in {spec:?}"))?;
+    let block: usize = b.trim().parse().map_err(|_| format!("bad block in {spec:?}"))?;
+    let r = hwp_core::table_row_audit(bytes, section, block).map_err(|e| e.to_string())?;
+    println!(
+        "표 행별 높이 대조 (우리 예약 vs 한컴 실측): 섹션 {}/블록 {} · 전역 표순번 {} · {}행×{}열 · 본문폭 {:.0} HWPUNIT",
+        r.section, r.block, r.table_ordinal, r.rows, r.cols, r.body_w
+    );
+    println!(
+        "  {:>3} | {:>8} {:>4} {:>7} {:>5} {:>8} {:>6} | {:>8} {:>8} {:>6} {:>7} {:>8} {:>4} | {:>8}",
+        "행", "우리예약", "줄", "ΣEM", "간격", "Σ간격줄", "패딩",
+        "한컴셀h", "한컴내용", "한컴슬랙", "선언패딩", "한컴줄seg", "seg", "델타"
+    );
+    for a in &r.audits {
+        println!(
+            "  {:>3} | {:>8.0} {:>4} {:>7.0} {:>5.2} {:>8.0} {:>6.0} | {:>8.0} {:>8.0} {:>6.0} {:>7.0} {:>8.0} {:>4} | {:>+8.0}",
+            a.row, a.our_reserved, a.our_lines, a.our_raw_em, a.our_linespace, a.our_spaced,
+            a.our_cell_pad, a.han_cell_h, a.han_content, a.han_pad, a.han_cell_pad, a.han_lineseg,
+            a.han_linesegs, a.delta
+        );
+    }
+    let n = r.rows.max(1) as f64;
+    println!(
+        "  합계: 우리 {:.0} · 한컴(셀h) {:.0} · 한컴(줄seg) {:.0} · 총델타 {:+.0} (행당 평균 {:+.0})",
+        r.our_total,
+        r.han_cell_total,
+        r.han_lineseg_total,
+        r.our_total - r.han_cell_total,
+        (r.our_total - r.han_cell_total) / n
+    );
+    Ok(())
+}
+
 #[cfg(not(feature = "rhwp"))]
-fn layout_check(_file: &PathBuf) -> Result<(), String> {
+fn layout_check(_file: &PathBuf, _rows: Option<&str>) -> Result<(), String> {
     Err("`layout-check` needs the rhwp bootstrap (한컴 linesegs 파싱): build with `--features rhwp`".into())
 }
 

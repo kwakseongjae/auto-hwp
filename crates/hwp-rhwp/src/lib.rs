@@ -1177,6 +1177,237 @@ pub fn layout_fidelity(bytes: &[u8]) -> Result<LayoutFidelity> {
     Ok(f)
 }
 
+// ---- Per-row table audit: OUR reserved row heights vs Hancom's, term by term (issue 020) ----
+
+/// One row of a table's OUR-vs-Hancom height audit (HWPUNIT). `our_*` mirror
+/// [`hwp_typeset::RowTermBreakdown`] (the determining cell's decomposition); `han_*` come from rhwp's
+/// parse of Hancom's ACTUAL layout for that row's determining cell (the one whose stored height/span
+/// is largest):
+/// - `han_cell_h` — the stored cell height (Hancom's actual row contribution, includes its padding);
+/// - `han_content` — the laid-out content span from linesegs (`last.vertical_pos + last.line_height −
+///   first.vertical_pos`), i.e. Hancom's real stacked line height WITH inter-line spacing (0 when
+///   linesegs carry no vertical_pos — some HWP paths leave it unfilled, then fall back to Σ line_height);
+/// - `han_pad` — implied cell padding = `han_cell_h − han_content` (compare to our constant CELL_PAD);
+/// - `han_lineseg` — Σ `line_height` (bare line boxes, NO spacing — the leading-excluded reference);
+/// - `han_linesegs` — lineseg count. `delta` = `our_reserved − han_cell_h` (>0 ⇒ we over-reserve).
+#[derive(Clone, Debug, Default)]
+pub struct RowAudit {
+    pub row: usize,
+    pub our_reserved: f64,
+    pub our_lines: usize,
+    pub our_raw_em: f64,
+    pub our_linespace: f64,
+    pub our_spaced: f64,
+    pub our_space_ba: f64,
+    pub our_cell_pad: f64,
+    pub han_cell_h: f64,
+    pub han_content: f64,
+    pub han_pad: f64,
+    /// The determining cell's DECLARED vertical padding (top+bottom, HWPUNIT) — cell padding when
+    /// `apply_inner_margin`, else the table default. Direct test of hypothesis (c): compare to our
+    /// constant CELL_PAD (280).
+    pub han_cell_pad: f64,
+    pub han_lineseg: f64,
+    pub han_linesegs: usize,
+    pub delta: f64,
+}
+
+/// A table's full row-by-row audit (issue 020 standing diagnostic).
+#[derive(Clone, Debug, Default)]
+pub struct TableRowAuditReport {
+    pub section: usize,
+    pub block: usize,
+    pub table_ordinal: usize,
+    pub rows: usize,
+    pub cols: usize,
+    pub body_w: f64,
+    pub our_total: f64,
+    pub han_cell_total: f64,
+    pub han_lineseg_total: f64,
+    pub audits: Vec<RowAudit>,
+}
+
+/// Per-row height audit of ONE table: OUR reserved row heights (term-decomposed) vs Hancom's actual
+/// (rhwp-parsed) cell heights + lineseg sums. `section`/`block` index OUR lifted [`SemanticDoc`]
+/// (the same block ordinal the layout oracle walks); the matching rhwp table is found by its global
+/// table ordinal (the lift emits `Block::Table` in rhwp control order, 1:1). This is the tracked
+/// diagnostic for the "우리 19 vs 한컴 18" residual — it attributes the per-row over-reservation to a
+/// specific term (linespace / last-line leading / CELL_PAD / metrics) instead of guessing.
+#[cfg(feature = "rhwp")]
+pub fn table_row_audit(bytes: &[u8], section: usize, block: usize) -> Result<TableRowAuditReport> {
+    #[cfg(feature = "shaper")]
+    let fonts = hwp_typeset::RealFontMetrics::new();
+    #[cfg(not(feature = "shaper"))]
+    let fonts = hwp_typeset::ApproxFontMetrics;
+
+    let rdoc = guarded("table_row_audit/parse_document", || {
+        rhwp::parse_document(bytes).map_err(|e| Error::Parse(e.to_string()))
+    })?;
+    let our = guarded("table_row_audit/lift", || lift::parse_to_semantic(bytes))?;
+
+    let osec = our
+        .sections
+        .get(section)
+        .ok_or_else(|| Error::Parse(format!("section {section} out of range ({} sections)", our.sections.len())))?;
+    let blk = osec
+        .blocks
+        .get(block)
+        .ok_or_else(|| Error::Parse(format!("block {block} out of range ({} blocks)", osec.blocks.len())))?;
+    let Block::Table(ot) = blk else {
+        return Err(Error::Parse(format!(
+            "block {section}/{block} is not a table (it is a {})",
+            match blk { Block::Paragraph(_) => "paragraph", Block::Table(_) => "table" }
+        )));
+    };
+
+    // Global table ordinal = number of Block::Table in document order strictly before (section, block).
+    let mut ordinal = 0usize;
+    'count: for (si, s) in our.sections.iter().enumerate() {
+        for (bi, b) in s.blocks.iter().enumerate() {
+            if si == section && bi == block {
+                break 'count;
+            }
+            if matches!(b, Block::Table(_)) {
+                ordinal += 1;
+            }
+        }
+    }
+
+    // Walk rhwp controls in the SAME order the lift emits Block::Table, grab the `ordinal`-th table.
+    let rtable = {
+        let mut seen = 0usize;
+        let mut found: Option<&rhwp::model::table::Table> = None;
+        'walk: for rsec in &rdoc.sections {
+            for rp in &rsec.paragraphs {
+                for ctrl in &rp.controls {
+                    if let rhwp::model::control::Control::Table(t) = ctrl {
+                        if seen == ordinal {
+                            found = Some(t);
+                            break 'walk;
+                        }
+                        seen += 1;
+                    }
+                }
+            }
+        }
+        found.ok_or_else(|| Error::Parse(format!("no rhwp table for global ordinal {ordinal}")))?
+    };
+
+    // A 1×1 frame wrapper (자가진단표: a multi-row nested grid boxed in a single cell) paginates via
+    // its INNER table (hwp_typeset::unwrap_frame_table — the same transform place_doc/NaiveLayout use),
+    // so audit the inner grid to see the per-row reservation that actually drives the page count.
+    let unwrapped = hwp_typeset::unwrap_frame_table(ot);
+    let ot: &Table = unwrapped.as_ref().map(|(it, _)| it).unwrap_or(ot);
+    let inner_rtable;
+    let rtable: &rhwp::model::table::Table = if unwrapped.is_some() {
+        inner_rtable = rtable
+            .cells
+            .iter()
+            .flat_map(|c| c.paragraphs.iter())
+            .flat_map(|p| p.controls.iter())
+            .find_map(|ctrl| match ctrl {
+                rhwp::model::control::Control::Table(t) => Some(t),
+                _ => None,
+            })
+            .ok_or_else(|| Error::Parse("frame wrapper has no nested rhwp table".into()))?;
+        inner_rtable
+    } else {
+        rtable
+    };
+
+    let page = &osec.page;
+    let body_w = (page.width - page.margin_left - page.margin_right).max(1) as f64;
+    let our_rows = hwp_typeset::row_term_breakdown(ot, body_w, &our, &fonts);
+    let rows = ot.rows;
+    let cols = ot.cols;
+
+    // Hancom side, per row: the row HEIGHT (max stored cell.height/span — Hancom writes the final row
+    // height into every cell of the row) is decoupled from the CONTENT (max laid-out lineseg span/span
+    // — the tallest cell's real text height). `han_pad` = height − content is the slack Hancom leaves
+    // (real cell padding + any fixed/min-row-height). `han_lineseg` tracks the content cell's Σ
+    // line_height (bare boxes, no spacing) so we can see whether Hancom's stacking added leading.
+    let mut han_cell = vec![0.0f64; rows]; // row height (max stored cell height / span)
+    let mut han_content = vec![0.0f64; rows]; // tallest real content (max lineseg span / span)
+    let mut han_lineseg = vec![0.0f64; rows]; // Σ line_height of the tallest-content cell
+    let mut han_cell_pad = vec![0.0f64; rows]; // declared vertical padding of the tallest-content cell
+    let mut han_ls_count = vec![0usize; rows];
+    let table_pad = (rtable.padding.top as f64 + rtable.padding.bottom as f64).max(0.0);
+    for c in &rtable.cells {
+        let span = c.row_span.max(1) as usize;
+        let per_h = c.height as f64 / span as f64;
+        let cell_pad = if c.apply_inner_margin {
+            (c.padding.top as f64 + c.padding.bottom as f64).max(0.0)
+        } else {
+            table_pad
+        };
+        // Flatten every lineseg of the cell (across its paragraphs) in document order.
+        let segs: Vec<&rhwp::model::paragraph::LineSeg> =
+            c.paragraphs.iter().flat_map(|p| p.line_segs.iter()).collect();
+        let ls_sum: f64 = segs.iter().map(|l| l.line_height as f64).sum();
+        let ls_n = segs.len();
+        // Real content span from vertical_pos (includes inter-line spacing). vertical_pos may be 0 on
+        // some parse paths — then fall back to Σ line_height (bare boxes), the best available.
+        let content = match (segs.first(), segs.last()) {
+            (Some(f), Some(l)) => {
+                let span_h = (l.vertical_pos + l.line_height) as f64 - f.vertical_pos as f64;
+                if span_h > 0.0 && f.vertical_pos != 0 { span_h } else { ls_sum }
+            }
+            _ => 0.0,
+        };
+        let per_c = content / span as f64;
+        let start = c.row as usize;
+        let end = (start + span).min(rows);
+        for r in start..end {
+            han_cell[r] = han_cell[r].max(per_h);
+            if per_c > han_content[r] {
+                han_content[r] = per_c;
+                han_lineseg[r] = ls_sum / span as f64;
+                han_cell_pad[r] = cell_pad;
+                han_ls_count[r] = ls_n;
+            }
+        }
+    }
+
+    let mut audits = Vec::with_capacity(rows);
+    for (r, bd) in our_rows.iter().enumerate() {
+        audits.push(RowAudit {
+            row: r,
+            our_reserved: bd.reserved,
+            our_lines: bd.lines,
+            our_raw_em: bd.raw_em,
+            our_linespace: bd.linespace,
+            our_spaced: bd.spaced,
+            our_space_ba: bd.space_ba,
+            our_cell_pad: bd.cell_pad,
+            han_cell_h: han_cell[r],
+            han_content: han_content[r],
+            han_pad: han_cell[r] - han_content[r],
+            han_cell_pad: han_cell_pad[r],
+            han_lineseg: han_lineseg[r],
+            han_linesegs: han_ls_count[r],
+            delta: bd.reserved - han_cell[r],
+        });
+    }
+
+    Ok(TableRowAuditReport {
+        section,
+        block,
+        table_ordinal: ordinal,
+        rows,
+        cols,
+        body_w,
+        our_total: our_rows.iter().map(|b| b.reserved).sum(),
+        han_cell_total: han_cell.iter().sum(),
+        han_lineseg_total: han_lineseg.iter().sum(),
+        audits,
+    })
+}
+
+#[cfg(not(feature = "rhwp"))]
+pub fn table_row_audit(_bytes: &[u8], _section: usize, _block: usize) -> Result<TableRowAuditReport> {
+    Err(Error::CapabilityUnavailable(NOT_WIRED))
+}
+
 #[cfg(not(feature = "rhwp"))]
 pub fn layout_fidelity(_bytes: &[u8]) -> Result<LayoutFidelity> {
     Err(Error::CapabilityUnavailable(NOT_WIRED))

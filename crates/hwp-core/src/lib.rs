@@ -186,7 +186,7 @@ pub fn render_page_svg(bytes: &[u8], page: u32) -> Result<String> {
 /// Score OUR layout engine (line-breaking + pagination) against Hancom's actual layout — the
 /// linesegs rhwp parses out of the original `.hwp`. The measurable oracle for the layout engine.
 #[cfg(feature = "rhwp")]
-pub use hwp_rhwp::{layout_fidelity, LayoutFidelity};
+pub use hwp_rhwp::{layout_fidelity, table_row_audit, LayoutFidelity, RowAudit, TableRowAuditReport};
 
 /// Persistent layout/render cache (engine seam 1): reuse ONE parsed document across page renders
 /// so scrolling does not re-parse per page. Hold one per open document; it self-invalidates when

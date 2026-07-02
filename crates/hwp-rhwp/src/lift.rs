@@ -369,6 +369,17 @@ impl<'a> Lifter<'a> {
         Table {
             rows: t.row_count as usize,
             cols: t.col_count as usize,
+            // MINIMUM row-height floors from Hancom's stored cell heights (issue 020). HWP writes each
+            // cell's laid-out height; where that height EXCEEDS our content-measured height, the row is a
+            // fixed/minimum-height row (측정: benchmark1 표순번 6 rows sit at 2990 HWPUNIT regardless of
+            // their 1–2 line content, with declared padding only 280 — a real min-row-height, NOT extra
+            // padding). `apply_row_overrides` honors these as a FLOOR (max(content, floor)) in BOTH
+            // sizing twins, so content-driven rows (where content ≥ stored) are untouched and only the
+            // genuinely fixed rows grow. Without this, the cell-paragraph trailing-leading fix
+            // (hwp_typeset::cell_paragraph_height) UNMASKS these min-heights and benchmark1 under-shoots
+            // to 17; together they land Hancom's 18 exactly (bench.hwp stays 8). A row-spanning cell
+            // distributes its stored height evenly (height/span) so the sum over the span is preserved.
+            row_heights: stored_row_heights(&t.cells, t.row_count as usize),
             // Per-column widths (HWPUNIT) for faithful column proportions on render.
             col_widths: derive_col_widths(&t.cells, t.col_count as usize),
             // Outer vertical margins (바깥 여백) so consecutive tables keep HWP's real gap on render.
@@ -489,6 +500,29 @@ fn object_paragraph(inline: Inline) -> Block {
         provenance: Provenance { source: Some(SourceFormat::Hwp5), raw: None },
         ..Default::default()
     })
+}
+
+/// Per-row MINIMUM-height floors (HWPUNIT) from Hancom's stored cell heights — the min-row-height
+/// mechanism (issue 020). Each cell contributes `height / row_span` to every row it spans (so the sum
+/// over a merged span is preserved), taking the max across cells in a row. `apply_row_overrides` honors
+/// the result as a FLOOR, so content-driven rows are untouched and only genuinely fixed rows grow. A
+/// height of 0 (empty/unsized cell) leaves the row content-sized. See the call site for why this pairs
+/// with the trailing-leading trim to land benchmark1's 18 pages.
+fn stored_row_heights(cells: &[rhwp::model::table::Cell], rows: usize) -> Vec<i32> {
+    let mut row_h = vec![0i32; rows];
+    for c in cells {
+        let span = c.row_span.max(1) as usize;
+        let per = (c.height as i32) / span as i32;
+        if per <= 0 {
+            continue;
+        }
+        let start = c.row as usize;
+        let end = (start + span).min(rows);
+        for slot in row_h.iter_mut().take(end).skip(start) {
+            *slot = (*slot).max(per);
+        }
+    }
+    row_h
 }
 
 /// Derive per-column widths (HWPUNIT) from ALL cells, including spanning ones.

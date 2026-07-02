@@ -1026,18 +1026,13 @@ pub fn row_offsets(t: &Table, avail_w: f64, doc: &SemanticDoc, fonts: &dyn FontM
     tops
 }
 
-/// Laid-out height of a block at `width` — paragraph (lines×spacing + 위/아래 간격) or nested table.
-/// Mirrors `lib.rs::block_height` (private there); kept in lockstep so cell sizing matches pagination.
+/// Laid-out height of a block at `width` — paragraph (lines×spacing + 위/아래 간격, trailing leading
+/// trimmed) or nested table. Delegates the paragraph arm to `crate::cell_paragraph_height` — the SAME
+/// helper `lib.rs::block_height` uses — so the drawn cell and the pagination reserve are LOCKSTEP by
+/// construction (no parallel formula to drift). See `cell_paragraph_height` for the last-line rationale.
 fn block_height_for_place(b: &Block, doc: &SemanticDoc, width: f64, fonts: &dyn FontMetricsProvider) -> f64 {
     match b {
-        Block::Paragraph(p) => {
-            let ps = doc.para_shapes.get(p.para_shape);
-            let sb = ps.map(|s| s.space_before).unwrap_or(0).max(0) as f64;
-            let sa = ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;
-            let ratio = line_spacing_ratio(p, doc);
-            let text: f64 = layout_paragraph(p, doc, width, fonts).iter().map(|l| l.vert_size * ratio).sum();
-            sb + text + sa
-        }
+        Block::Paragraph(p) => crate::cell_paragraph_height(p, doc, width, fonts),
         Block::Table(t) => table_height(t, width, doc, fonts),
     }
 }

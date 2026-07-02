@@ -183,7 +183,7 @@ pub(crate) const CELL_PAD: f64 = 280.0;
 /// continues across the split). `None` when `t` isn't such a wrapper — the predicate is deliberately
 /// narrow so it fires only on real single-cell frame wrappers, and it is applied IDENTICALLY in place_doc,
 /// NaiveLayout and block_pages, so the three page counts stay in lockstep.
-pub(crate) fn unwrap_frame_table(t: &Table) -> Option<(Table, Option<CellEdge>)> {
+pub fn unwrap_frame_table(t: &Table) -> Option<(Table, Option<CellEdge>)> {
     if t.rows != 1 || t.cols != 1 {
         return None;
     }
@@ -238,18 +238,34 @@ pub(crate) fn unwrap_frame_table(t: &Table) -> Option<(Table, Option<CellEdge>)>
     Some((inner, frame))
 }
 
+/// Reserved height (HWPUNIT) of ONE paragraph INSIDE A TABLE CELL at `width`: 위/아래 간격 +
+/// (n−1 inter-line gaps at `vert_size × linespace`) + the LAST line's bare box. Hancom's line-spacing
+/// leading sits BETWEEN lines, not below the last one, so a cell paragraph reserves `Σ vert_size×ratio`
+/// MINUS the last line's extra leading `vert_size_last × (ratio−1)`. We used to leave that trailing
+/// leading in every cell row — a per-row over-reservation (≈ one line's leading) that accumulated tens
+/// of thousands of HWPUNIT across benchmark1's page-1 checklist grid and spilled it to a 19th page
+/// (issue 020; measured in docs/BENCHMARK1-ROW-AUDIT.md). The last line's leading is empty space BELOW
+/// its ink, so dropping it from the reserve never clips the glyphs — it just tightens the row to the
+/// text the way 한글 does. Shared by both sizing twins ([`block_height`] + `place::block_height_for_place`)
+/// so the pagination reserve and the drawn cell stay in LOCKSTEP. Body pagination does NOT use this
+/// (NaiveLayout stacks body lines directly), so this change is scoped to table-cell content only.
+pub(crate) fn cell_paragraph_height(p: &Paragraph, doc: &SemanticDoc, width: f64, fonts: &dyn FontMetricsProvider) -> f64 {
+    let ps = doc.para_shapes.get(p.para_shape);
+    let sb = ps.map(|s| s.space_before).unwrap_or(0).max(0) as f64;
+    let sa = ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;
+    let ratio = line_spacing_ratio(p, doc);
+    let lines = layout_paragraph(p, doc, width, fonts);
+    let text: f64 = lines.iter().map(|l| l.vert_size * ratio).sum();
+    let last_leading = lines.last().map(|l| l.vert_size * (ratio - 1.0)).unwrap_or(0.0).max(0.0);
+    sb + (text - last_leading) + sa
+}
+
 /// Laid-out height of one block (HWPUNIT) at the given content width — paragraph (lines×spacing +
-/// 위/아래 간격) or a nested table (recursive). Drives table-row sizing + pagination accounting.
+/// 위/아래 간격, trailing leading trimmed per [`cell_paragraph_height`]) or a nested table (recursive).
+/// Drives table-row sizing + pagination accounting.
 fn block_height(b: &Block, doc: &SemanticDoc, width: f64, fonts: &dyn FontMetricsProvider) -> f64 {
     match b {
-        Block::Paragraph(p) => {
-            let ps = doc.para_shapes.get(p.para_shape);
-            let sb = ps.map(|s| s.space_before).unwrap_or(0).max(0) as f64;
-            let sa = ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;
-            let ratio = line_spacing_ratio(p, doc);
-            let text: f64 = layout_paragraph(p, doc, width, fonts).iter().map(|l| l.vert_size * ratio).sum();
-            sb + text + sa
-        }
+        Block::Paragraph(p) => cell_paragraph_height(p, doc, width, fonts),
         Block::Table(t) => table_height(t, width, doc, fonts),
     }
 }
@@ -310,6 +326,107 @@ pub(crate) fn apply_row_overrides(row_h: &mut [f64], t: &Table) {
             }
         }
     }
+}
+
+/// Per-row decomposition of OUR reserved table-row height (issue 020 diagnostic — kept tracked as the
+/// standing fidelity tool). Mirrors [`table_row_heights`] EXACTLY (same column offsets, same padded
+/// text width, same span distribution, same override floor) but also records the *determining* cell's
+/// term breakdown so the row-audit can attribute an over/under-reservation to a specific term:
+/// `lines` × (`raw_em` bare-EM box) × `linespace` = `spaced` line advance, + `space_ba` (문단 위/아래),
+/// + [`CELL_PAD`] vertical inset. `reserved` is the final row height (post span-max + override).
+#[derive(Clone, Debug, Default)]
+pub struct RowTermBreakdown {
+    pub reserved: f64,
+    /// Total laid-out lines in the determining cell.
+    pub lines: usize,
+    /// Σ bare-EM line boxes (vert_size) of the determining cell (pre-linespace).
+    pub raw_em: f64,
+    /// The linespace ratio of the determining cell's first text paragraph (representative).
+    pub linespace: f64,
+    /// Σ (vert_size × linespace) — the actual stacked line advance of the determining cell.
+    pub spaced: f64,
+    /// 문단 위/아래 간격 (space_before + space_after) summed across the determining cell's paragraphs.
+    pub space_ba: f64,
+    /// The constant vertical cell padding term ([`CELL_PAD`]).
+    pub cell_pad: f64,
+    /// Determining cell's row span (content is divided by this before the per-row max).
+    pub row_span: usize,
+}
+
+/// One cell's content decomposition at a padded text width — the per-cell half of [`row_term_breakdown`].
+/// `spaced` is the ACTUAL reserved line advance (per-paragraph trailing leading trimmed, exactly like
+/// [`cell_paragraph_height`]), so `spaced + space_ba + cell_pad` reconciles with the reserved row height.
+fn cell_term_breakdown(c: &Cell, tw: f64, doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> RowTermBreakdown {
+    let mut b = RowTermBreakdown { cell_pad: CELL_PAD, row_span: c.row_span.max(1), ..Default::default() };
+    let mut first_ratio: Option<f64> = None;
+    for blk in &c.blocks {
+        match blk {
+            Block::Paragraph(p) => {
+                let ps = doc.para_shapes.get(p.para_shape);
+                b.space_ba += ps.map(|s| s.space_before).unwrap_or(0).max(0) as f64;
+                b.space_ba += ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;
+                let ratio = line_spacing_ratio(p, doc);
+                if first_ratio.is_none() {
+                    first_ratio = Some(ratio);
+                }
+                let lines = layout_paragraph(p, doc, tw, fonts);
+                let raw: f64 = lines.iter().map(|l| l.vert_size).sum();
+                let spaced: f64 = lines.iter().map(|l| l.vert_size * ratio).sum();
+                let last_leading = lines.last().map(|l| l.vert_size * (ratio - 1.0)).unwrap_or(0.0).max(0.0);
+                b.lines += lines.len();
+                b.raw_em += raw;
+                b.spaced += spaced - last_leading;
+            }
+            // Nested table: fold its whole height into `spaced` as one "line" so the totals reconcile
+            // (it is measured, not text — the audit flags it via a jump in raw_em vs spaced).
+            Block::Table(nt) => {
+                let h = table_height(nt, tw, doc, fonts);
+                b.spaced += h;
+                b.raw_em += h;
+                b.lines += 1;
+            }
+        }
+    }
+    b.linespace = first_ratio.unwrap_or(DEFAULT_LINESPACE);
+    b
+}
+
+/// Per-row term breakdown for a table, LOCKSTEP with [`table_row_heights`]. The reserved height of
+/// each row is set by the cell whose `(content)/span` is largest; that cell's decomposition is what
+/// the audit reports for the row.
+pub fn row_term_breakdown(t: &Table, avail_w: f64, doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<RowTermBreakdown> {
+    if t.rows == 0 {
+        return Vec::new();
+    }
+    let xs = crate::place::column_offsets(t, avail_w);
+    let heights = table_row_heights(t, avail_w, doc, fonts);
+    let mut per_row: Vec<(f64, RowTermBreakdown)> = vec![(0.0, RowTermBreakdown::default()); t.rows];
+    for c in &t.cells {
+        if !c.active {
+            continue;
+        }
+        let col_end = (c.col + c.col_span.max(1)).min(t.cols);
+        let cw = (xs[col_end] - xs[c.col.min(t.cols - 1)]).max(1.0);
+        let tw = (cw - 2.0 * crate::place::CELL_PAD_X).max(1.0);
+        let bd = cell_term_breakdown(c, tw, doc, fonts);
+        let content = bd.spaced + bd.space_ba + bd.cell_pad;
+        let span = c.row_span.max(1);
+        let per = content / span as f64;
+        let end = (c.row + span).min(t.rows);
+        for slot in per_row.iter_mut().take(end).skip(c.row) {
+            if per > slot.0 {
+                *slot = (per, bd.clone());
+            }
+        }
+    }
+    per_row
+        .into_iter()
+        .enumerate()
+        .map(|(r, (_, mut bd))| {
+            bd.reserved = heights[r];
+            bd
+        })
+        .collect()
 }
 
 /// Substitute a few typographic chars that common free Korean faces (e.g. NanumGothic) lack with a
@@ -667,7 +784,9 @@ mod tests {
     fn table_height_sums_row_content() {
         let mut doc = SemanticDoc::default();
         doc.char_shapes.push(CharShape::default()); // size 1000
-        // 3-row × 1-col table, one short line per cell. Each row ≈ one 1000-unit line × 1.6 + CELL_PAD.
+        // 3-row × 1-col table, one short line per cell. A SINGLE-line cell has no inter-line gap, so
+        // Hancom reserves just the bare EM + CELL_PAD — the line-spacing leading is NOT applied to a
+        // lone/last line (issue 020: `cell_paragraph_height` trims the trailing leading).
         let mut t = Table { rows: 3, cols: 1, ..Default::default() };
         for r in 0..3 {
             t.cells.push(Cell {
@@ -681,8 +800,27 @@ mod tests {
             });
         }
         let h = table_height(&t, 40000.0, &doc, &ApproxFontMetrics);
-        let per_row = 1000.0 * DEFAULT_LINESPACE + CELL_PAD;
-        assert!((h - 3.0 * per_row).abs() < 1.0, "3 rows × (line+pad): got {h}");
+        let per_row = 1000.0 + CELL_PAD; // one bare EM (no trailing leading) + vertical padding
+        assert!((h - 3.0 * per_row).abs() < 1.0, "3 rows × (EM+pad): got {h}");
+    }
+
+    #[test]
+    fn cell_paragraph_trims_only_the_trailing_leading() {
+        // A cell paragraph reserves (n−1) inter-line gaps at `ratio` + the last line's BARE box, so a
+        // 2-line cell = EM + EM×ratio (one gap), NOT 2×EM×ratio. Guards the issue-020 mechanism against
+        // regressing back to the "leading on every line" over-reservation. Width forces exactly 2 lines.
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape::default()); // size 1000, full-width glyph advance = 1000
+        let p = para("가나"); // two full-width glyphs
+        let two_line_w = 1500.0; // one glyph per line (1000 fits, 2000 doesn't)
+        let lines = layout_paragraph(&p, &doc, two_line_w, &ApproxFontMetrics);
+        assert_eq!(lines.len(), 2, "width forces two lines");
+        let h = cell_paragraph_height(&p, &doc, two_line_w, &ApproxFontMetrics);
+        let ratio = DEFAULT_LINESPACE; // 1.6 (no explicit percent spacing)
+        let want = 1000.0 * ratio + 1000.0; // one gap at ratio + last bare box
+        assert!((h - want).abs() < 1.0, "2-line cell = EM×ratio + EM ({want}); got {h}");
+        // Sanity: strictly less than the old "ratio on every line" reserve.
+        assert!(h < 2.0 * 1000.0 * ratio, "trimmed height is below the untrimmed 2×EM×ratio");
     }
 
     #[test]
