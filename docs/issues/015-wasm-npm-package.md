@@ -6,11 +6,19 @@
 - 선행: **007 (wasm 판정), 012 (hwp-session)**. 병렬 가능: 013
 - 레드팀: **R6, R8, R9, R13**
 
-## 전제 (007의 판정에 따라 갱신할 것)
-- 007이 B안(rhwp wasm 불가)으로 판정하면: **웹 v1 = HWPX 전용**. .hwp는 013 서비스가
-  HWPX로 변환해 내려준다. 이 문서는 B안을 기본 가정으로 쓴다 — 007 결과가 A안이면
-  `open_hwp`도 표면에 추가하라.
-- 007이 C안(krilla wasm 불가)이면 PDF는 서비스 경유로 강등하고 §단계 5를 스킵.
+## 전제 (007 판정 완료 — 2026-07-02: **A안**)
+- **007 판정 = A안 (전 코어 11/11 wasm32 컴파일 통과)**. rhwp(HWP5 파싱)와 krilla(PDF)
+  모두 wasm으로 컴파일된다. getrandom은 어느 closure에도 없다. 근거·판정표는
+  `docs/WASM-FEASIBILITY.md`.
+- 따라서:
+  - **`open_hwp`(=.hwp 직접 열기)를 바인딩 표면에 추가하라** — 웹 v1은 HWPX 전용에
+    묶이지 않는다. HWPX 변환을 013 서비스에 의존할 필요 없음(B안 폐기).
+  - **PDF export는 wasm 안에서 수행**(krilla in-wasm). 서비스 경유 강등 불필요(C안 폐기).
+    §단계 5(폰트 주입 PDF)는 그대로 수행.
+- 단, **컴파일 통과 ≠ 런타임 안전**: 폰트 로딩이 `std::fs::read`(hwp-typeset/src/shaper.rs,
+  hwp-export/src/pdf.rs)라 wasm 런타임에서 트랩한다. 폰트는 반드시 **바이트 주입**
+  (`register_font(bytes)`)으로 설계할 것(R8과 동일 방향). `cfb 0.14`가 `Instant`를
+  `web-time`으로 우회하므로 Instant 런타임 트랩은 rhwp CFB 경로엔 해당 없음.
 
 ## 목표
 `hwp-session`(012)을 wasm-bindgen으로 감싸 **브라우저에서 열기→렌더(SVG)→편집(Intent)

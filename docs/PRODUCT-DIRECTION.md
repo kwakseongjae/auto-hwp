@@ -108,7 +108,7 @@ cd crates/hwp-viewer/ui && npx tsc --noEmit && npm run build
 
 | 단계 | 이슈 | 제목 | 의존 |
 |------|------|------|------|
-| P0-A | [007](issues/007-wasm-smoke-build.md) | wasm 스모크 빌드 (코어 4크레이트 wasm32 판정) | — |
+| P0-A | [007](issues/007-wasm-smoke-build.md) | wasm 스모크 빌드 (코어 9크레이트/11조합 wasm32 판정 → **A안 확정**) | — |
 | P0-B | [008](issues/008-intent-schema-v0.md) | Intent 스키마 v0 동결 + 버저닝 | — |
 | P1-A | [009](issues/009-anchor-chips.md) | 앵커 칩: 마킹 → 채팅 컨텍스트 | — |
 | P1-B | [010](issues/010-ai-preview-apply-undo.md) | AI 편집 프리뷰→적용 게이트 + undo | 009 |
