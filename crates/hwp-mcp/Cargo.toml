@@ -9,13 +9,23 @@ rust-version.workspace = true
 [[bin]]
 name = "hwp-mcp"
 path = "src/main.rs"
+# The stdio/HTTP binary needs the loopback control server (std::net + getrandom/subtle), which lives
+# behind the `http` feature. `required-features` keeps `cargo check --no-default-features` (the wasm
+# lane, issue 017) from trying to build this binary — the lib alone is what must be wasm-safe.
+required-features = ["http"]
 
 [lib]
 name = "hwp_mcp"
 path = "src/lib.rs"
 
 [features]
-default = []
+# `http` is on by default so every existing native consumer (viewer / mcp binary) is unchanged; the
+# wasm edit lane (issue 017) is the only caller that opts out via `default-features = false`.
+default = ["http"]
+# A3 loopback HTTP control server (std::net + getrandom CSPRNG + subtle constant-time compare).
+# Gating it lets the lib compile to wasm32 under `--no-default-features` (Session/Intent/apply_intent
+# are already wasm-safe; only the HTTP server pulled getrandom/std::net).
+http = ["dep:getrandom", "dep:subtle"]
 # Enables the `render_page` control tool (current doc → SVG) via the rhwp bootstrap.
 rhwp = ["hwp-core/rhwp"]
 
@@ -26,9 +36,10 @@ hwp-ai = { workspace = true }
 hwp-core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-# A3 loopback control server (pure std::net): constant-time token compare + CSPRNG token.
-subtle = "2"
-getrandom = "0.3"
+# A3 loopback control server (pure std::net): constant-time token compare + CSPRNG token. Gated by
+# `http` so the wasm lib (no default features) drops both — neither is wasm-safe without extra cfg.
+subtle = { version = "2", optional = true }
+getrandom = { version = "0.3", optional = true }
 
 [dev-dependencies]
 # Intent-schema-v0 snapshot test (tests/schema_v0.rs) drives the JSON→Intent→Op path directly:

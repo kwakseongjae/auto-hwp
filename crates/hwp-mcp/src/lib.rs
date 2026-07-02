@@ -7,6 +7,10 @@
 //! version churn and keep the dependency surface license-clean — the project's "own where deps
 //! block us" principle. The dispatch is pure (`handle`) so it is unit-testable without a real pipe.
 
+// The loopback HTTP control server pulls std::net + getrandom + subtle (wasm-unsafe without extra
+// cfg). It is gated behind the `http` feature (on by default) so the lib alone compiles to wasm32
+// under `--no-default-features` (issue 017). Its security tests run under the default build.
+#[cfg(feature = "http")]
 pub mod server;
 
 use hwp_ops::EditSession;
@@ -405,8 +409,9 @@ pub fn handle(req: &Value, session: &mut Session) -> Option<Value> {
 // ---- Shared op-bus core (one implementation behind BOTH the typed `Intent` lane used by the GUI
 // ---- and the JSON `call_tool` lane used by agents — so they can never drift). ----
 
-/// Result of opening a document.
-pub(crate) struct OpenInfo {
+/// Result of opening a document. Public so [`open_bytes`] — the bytes-in surface shells consume
+/// (issue 017) — can return it.
+pub struct OpenInfo {
     pub format: &'static str,
     pub editable: bool,
     pub sections: usize,
@@ -418,10 +423,21 @@ pub(crate) struct OpenInfo {
 const LIVE_UNDO_LIMIT: usize = 50;
 
 /// Open `path` into the session (HWP5/HWPX both view; only HWPX round-trips to an edited export).
+/// Thin fs wrapper over [`open_bytes`]: read the file, then run the identical bytes-in open logic
+/// (the wasm edit lane, issue 017, calls `open_bytes` directly since it has no filesystem).
 fn do_open(session: &mut Session, path: &str) -> Result<OpenInfo, String> {
-    use hwp_model::types::SourceFormat;
     let bytes = std::fs::read(path).map_err(|e| format!("read {path}: {e}"))?;
-    let fmt = hwp_core::Engine::detect(&bytes);
+    open_bytes(session, &bytes, path)
+}
+
+/// Open a document from its raw `bytes` (no filesystem) into the session — the bytes-in surface the
+/// wasm/service shells consume (issue 017). `name` is a display/source hint stored as `source_path`
+/// (e.g. the uploaded filename). Detects the format, converts/parses through `hwp_core::Engine`, and
+/// installs a fresh capped `EditSession`, dropping any stale proposal (and the rhwp render cache).
+/// This is the single open implementation; `do_open` is just "fs::read → open_bytes".
+pub fn open_bytes(session: &mut Session, bytes: &[u8], name: &str) -> Result<OpenInfo, String> {
+    use hwp_model::types::SourceFormat;
+    let fmt = hwp_core::Engine::detect(bytes);
     let (format, editable) = match fmt {
         SourceFormat::Hwpx => ("HWPX (editable)", true),
         // HW5 now converts to HWPX (Track A): editable + serializable. The faithful native render
@@ -435,11 +451,11 @@ fn do_open(session: &mut Session, path: &str) -> Result<OpenInfo, String> {
         SourceFormat::Pdf => ("PDF (view-mostly)", false),
         SourceFormat::Unknown => return Err("unrecognized format (not HWP/HWPX/DOCX/PDF)".into()),
     };
-    let doc = hwp_core::Engine::open(&bytes).map_err(|e| e.to_string())?;
+    let doc = hwp_core::Engine::open(bytes).map_err(|e| e.to_string())?;
     let sections = doc.sections.len();
     session.doc = Some(EditSession::with_limit(doc, LIVE_UNDO_LIMIT));
-    session.source_path = Some(path.to_string());
-    session.source_bytes = Some(bytes);
+    session.source_path = Some(name.to_string());
+    session.source_bytes = Some(bytes.to_vec());
     session.pending = None; // a fresh document drops any stale proposal
     #[cfg(feature = "rhwp")]
     {
@@ -458,10 +474,18 @@ fn do_apply_content(session: &mut Session, json: &str) -> Result<(usize, usize),
     Ok((ai.blocks.len(), ops.len()))
 }
 
-/// Serialize the live doc to `path`. Returns `(byte_len, editor_open_safe)`.
-fn do_export(session: &Session, path: &str) -> Result<(usize, bool), String> {
+/// Serialize the live doc to round-trip-safe HWPX bytes (no filesystem) — the bytes-out surface the
+/// wasm/service shells consume (issue 017; the browser hands these to a download). This is the
+/// serialize half of `do_export`, which adds the atomic file write around it.
+pub fn export_bytes(session: &Session) -> Result<Vec<u8>, String> {
     let doc = session.doc.as_ref().ok_or("no document open (call open_document first)")?.doc();
-    let bytes = hwp_core::serialize_hwpx(doc).map_err(|e| e.to_string())?;
+    hwp_core::serialize_hwpx(doc).map_err(|e| e.to_string())
+}
+
+/// Serialize the live doc to `path`. Returns `(byte_len, editor_open_safe)`. Serializes via
+/// [`export_bytes`], then writes atomically (no logic duplicated between the two surfaces).
+fn do_export(session: &Session, path: &str) -> Result<(usize, bool), String> {
+    let bytes = export_bytes(session)?;
     // Crash-safe: temp+fsync+rename so a mid-write crash never corrupts the user's original file.
     hwp_core::atomic_write(std::path::Path::new(path), &bytes).map_err(|e| format!("write {path}: {e}"))?;
     Ok((bytes.len(), hwp_core::validate_hwpx(&bytes).ok))
@@ -1757,6 +1781,57 @@ mod tests {
             err.contains("structural content") && err.contains("cannot be edited in place"),
             "verbatim op-bus refusal surfaced: {err}"
         );
+    }
+
+    /// Issue 017 equivalence: `open_bytes` (the filesystem-free surface the wasm/service shells use)
+    /// produces the SAME result as `do_open(path)` — `do_open` is now just "fs::read → open_bytes",
+    /// so opening a file vs opening its bytes is indistinguishable: identical OpenInfo
+    /// (format/editable/sections), source hint, parsed text, and own-engine page count.
+    #[test]
+    fn open_bytes_equals_do_open() {
+        let path = showcase();
+        // Filesystem-path lane.
+        let mut a = Session::default();
+        let ia = do_open(&mut a, &path).unwrap();
+        // Bytes lane: the same file's bytes, name hint = the path.
+        let bytes = std::fs::read(&path).unwrap();
+        let mut b = Session::default();
+        let ib = open_bytes(&mut b, &bytes, &path).unwrap();
+
+        assert_eq!(ia.format, ib.format, "same format label");
+        assert_eq!(ia.editable, ib.editable, "same editable flag");
+        assert_eq!(ia.sections, ib.sections, "same section count");
+        assert_eq!(a.source_path, b.source_path, "name hint fills source_path like the path did");
+        assert_eq!(
+            a.doc.as_ref().unwrap().doc().plain_text(),
+            b.doc.as_ref().unwrap().doc().plain_text(),
+            "same parsed document text",
+        );
+        assert_eq!(
+            page_count_u32(&mut a).unwrap(),
+            page_count_u32(&mut b).unwrap(),
+            "same page count",
+        );
+    }
+
+    /// Issue 017 equivalence: `export_bytes` returns EXACTLY the bytes `do_export` (save) writes to
+    /// disk — save is now "export_bytes → atomic_write", so the in-memory bytes and the file bytes
+    /// are byte-identical. Proven after an edit so the serialization is non-trivial.
+    #[test]
+    fn export_bytes_equals_saved_file_bytes() {
+        let mut s = Session::default();
+        do_open(&mut s, &showcase()).unwrap();
+        // A real edit so the serialized bytes aren't just the pristine original.
+        do_apply_content(&mut s, r#"{"blocks":[{"type":"paragraph","runs":[{"text":"바이트 동등성"}]}]}"#)
+            .unwrap();
+
+        let in_memory = export_bytes(&s).unwrap();
+        let out = std::env::temp_dir().join("hwp_mcp_export_bytes_eq.hwpx");
+        let (len, _open_safe) = do_export(&s, out.to_str().unwrap()).unwrap();
+        let on_disk = std::fs::read(&out).unwrap();
+
+        assert_eq!(in_memory, on_disk, "export_bytes == the bytes save writes to disk");
+        assert_eq!(in_memory.len(), len, "reported byte length matches export_bytes");
     }
 
     #[test]

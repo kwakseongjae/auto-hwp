@@ -6,7 +6,8 @@
 # crates against wasm32-unknown-unknown and reports a per-combo verdict. The full
 # writeup + architecture decision lives in docs/WASM-FEASIBILITY.md.
 #
-# Verdict as of 2026-07-02: A안 — ALL 11 combos pass (rhwp + krilla compile to wasm).
+# Verdict as of 2026-07-02: A안 — ALL combos pass (rhwp + krilla compile to wasm; issue 017 added
+# hwp-core, hwp-core+rhwp, and the hwp-mcp edit lib with its HTTP server feature-gated off → 14).
 # Every combo below is therefore in the PASS set: the script exits non-zero if ANY
 # of them regresses. If a combo ever starts failing, MOVE it out of PASS_SET into
 # a commented "known-failing" note below (with the offending crate/API) rather than
@@ -44,6 +45,10 @@ PASS_SET=(
   "-p hwp-export --features pdf"
   "-p hwp-ingest"
   "-p hwp-rhwp --features rhwp"
+  # issue 017: the aggregate engine core AND the edit lane (hwp-mcp lib, HTTP server gated off).
+  "-p hwp-core"
+  "-p hwp-core --features rhwp"
+  "-p hwp-mcp --no-default-features"
 )
 
 # --- known-failing set (none as of A안) ---

@@ -40,6 +40,23 @@ v1 = HWPX-only"). The web shell CAN open `.hwp` directly and CAN export PDF in-b
 | 10 | `hwp-ingest` | ✅ | hwp-model only (pure format detection OLE/CFB vs ZIP+OWPML). |
 | 11 | `hwp-rhwp --features rhwp` | ✅ | + rhwp 0.7.15 → cfb 0.14 (uses `web-time` on wasm as an `Instant` shim), zip 8.6, flate2, png 0.18, image 0.25, blake3, moxcms, pcx, codepage, snafu, strum, uuid. wasm-only block: js-sys / web-sys / web-time / console_error_panic_hook. No getrandom. |
 
+## Issue 017 additions — the edit lane on wasm (3 more combos, 14/14 ✅)
+
+Issue 017 gated `hwp-mcp`'s loopback HTTP server (the ONLY `getrandom` + `std::net` user) behind a
+default-on `http` feature, so the edit lib — `Session` / `Intent` / `apply_intent` / `open_bytes` /
+`export_bytes` — compiles to wasm32 under `--no-default-features`. These 3 combos join the smoke set:
+
+| #  | Combo | Result | Notes / key deps in wasm closure |
+|----|-------|--------|----------------------------------|
+| 12 | `hwp-core` | ✅ | Aggregate engine core (ingest→model→typeset→render→export→ops), no rhwp/pdf. Pure. |
+| 13 | `hwp-core --features rhwp` | ✅ | + the combo-11 rhwp closure. Still no getrandom. |
+| 14 | `hwp-mcp --no-default-features` | ✅ | Edit lane: hwp-core + hwp-ops + hwp-ai + hwp-model. `http` feature OFF drops getrandom/subtle + the `server` module; the `hwp-mcp` binary is skipped via `required-features = ["http"]`. |
+
+Verdict A안 (all pass) is unchanged and reinforced: the wasm shell (015) can open `.hwp`, edit via
+the same Intent/op-bus the desktop uses, and export HWPX — all in-browser. `Intent::Open{path}` /
+`Export{path}` keep their `std::fs` (compile-safe on wasm, runtime-trap) since the wasm shell drives
+`open_bytes`/`export_bytes` instead; deleting them was out of scope and would break the native shells.
+
 ## `getrandom` trap — clear
 
 `getrandom` needs a `wasm_js` feature to work on wasm and must NOT be in the core closure.
