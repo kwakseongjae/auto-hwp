@@ -1,0 +1,846 @@
+//! tf-hwp **shell-independent document-session logic** (issue 012).
+//!
+//! This crate holds the document logic that used to live inside the Tauri viewer's command bodies
+//! (`hwp-viewer/src/lib.rs`): DTO assembly, own-engine geometry queries, styled-run reads, HTML/PDF
+//! export projection, and the image-insert proposal builder. It is a **pure, synchronous, wasm-safe
+//! leaf**: no `tauri`, no locks/threads/async, and no `std::fs` unless the `fs` feature is on. The
+//! three shells (Tauri app / headless service / wasm npm) each own their I/O + state and wrap the
+//! SAME functions here, so a change lands identically everywhere.
+//!
+//! ## Facade surface (what a shell wraps)
+//! Every entry point takes a `&SemanticDoc` (the live document the shell holds) plus plain scalars,
+//! and returns a serde-serializable DTO / SVG string / HTML string — never a session handle:
+//! - **render**: [`render_svg`] (per-page own-render SVG), [`outline`] (heading nav).
+//! - **geometry** (own-render px space, converts px↔HWPUNIT at the boundary): [`image_bbox`],
+//!   [`image_at`], [`table_bbox`], [`table_at`], [`own_hit_test`], [`table_cell_at`],
+//!   [`table_cell_box`], [`table_col_boundaries`], [`table_row_boundaries`], [`page_geometry`].
+//! - **style reads**: [`char_fmt`], [`block_runs`], [`block_style`].
+//! - **export**: [`emit_html`] (+ [`emit_pdf`] under `pdf`).
+//! - **image insert**: [`build_insert_image_proposal`] (+ [`stash_image`] under `fs`).
+//!
+//! The op-bus edit lane (`Intent`/`apply_intent`, undo/redo, the shared `Session`) stays in the
+//! shell — it carries locks/threads and (via `hwp-mcp`) a non-wasm `getrandom`/`std::net` surface, so
+//! folding it in here would break the wasm-safe guarantee. Unifying that behind this facade is the
+//! follow-up the recon deferred (Session absorb, issue 013).
+
+use hwp_model::prelude::SemanticDoc;
+use serde_json::{json, Value};
+
+// ---- Own-engine geometry unit boundary --------------------------------------------------------
+//
+// Own-engine geometry lives in HWPUNIT in `place_doc`, but the own-render SVG (and therefore the
+// clicks `screenToPage` produces + the boxes the overlays draw) is in CSS px = HWPUNIT /
+// HWPUNIT_PER_PX (the SvgSink divides by the same factor). So every own-engine geometry query here
+// accepts clicks AND returns boxes in PX, converting at the boundary — otherwise the ~75× mismatch
+// makes clicks never hit and handles land far off-screen (the bug behind "이미지/표 이동·리사이즈가
+// 전혀 안 됨"). This is the ONLY place px↔HWPUNIT conversion happens; the edit-commit lane already
+// speaks HWPUNIT/mm end-to-end.
+pub const HWPUNIT_PER_PX: f64 = 7200.0 / 96.0;
+
+/// Choose the font-metrics provider for the OWN renderer: the real rustybuzz shaper under
+/// `--features shaper` (real Latin advances + EM-grid Hangul), else the per-script approximation.
+/// Every own-render / geometry path uses this, so the in-app view, `tf-hwp own-render`, and the
+/// geometry overlays all measure identically.
+#[cfg(feature = "shaper")]
+pub fn own_render_fonts() -> Box<dyn hwp_model::prelude::FontMetricsProvider> {
+    Box::new(hwp_typeset::RealFontMetrics::new())
+}
+#[cfg(not(feature = "shaper"))]
+pub fn own_render_fonts() -> Box<dyn hwp_model::prelude::FontMetricsProvider> {
+    Box::new(hwp_typeset::ApproxFontMetrics)
+}
+
+/// Render every page of `doc` through OUR OWN engine (`place_doc` → paint IR → `SvgSink`), one
+/// standalone SVG string per page. The self-owned, browser-independent fidelity surface — the SAME
+/// path the CLI `own-render` runs and the in-app "자체 렌더" view shows. Under `shaper` glyph
+/// x-positions are real (rustybuzz advances).
+pub fn render_svg(doc: &SemanticDoc) -> Vec<String> {
+    let fonts = own_render_fonts();
+    hwp_render::render_doc_svg(doc, fonts.as_ref())
+}
+
+// ---- Outline (heading nav) --------------------------------------------------------------------
+
+/// One heading in the document outline: where it lives in the model + the page it starts on.
+#[derive(serde::Serialize)]
+pub struct OutlineItem {
+    pub section: usize,
+    pub block: usize,
+    pub level: u8,
+    pub text: String,
+    pub page: u32,
+}
+
+/// Document outline for the left nav panel: the gov-doc's top-level headings — □-prefixed section
+/// labels and numbered section bands ("1. 문제 인식 …") — each with the 0-based page it starts on
+/// (via [`hwp_typeset::block_pages`]). Heuristic + gov-doc-tuned; empty when the doc has none.
+pub fn outline(doc: &SemanticDoc) -> Vec<OutlineItem> {
+    let fonts = own_render_fonts();
+    let pages = hwp_typeset::block_pages(doc, fonts.as_ref());
+    let mut out = Vec::new();
+    for (si, sec) in doc.sections.iter().enumerate() {
+        for (bi, block) in sec.blocks.iter().enumerate() {
+            if let Some((level, text)) = outline_heading(block) {
+                let page = pages.get(si).and_then(|p| p.get(bi)).copied().unwrap_or(0) as u32;
+                out.push(OutlineItem { section: si, block: bi, level, text, page });
+            }
+        }
+    }
+    out
+}
+
+/// Detect a heading block → `(level, text)`. Level 1 = a □/■-prefixed section label paragraph;
+/// level 2 = a numbered section-band table ("N. …"). Returns `None` for body content.
+fn outline_heading(block: &hwp_model::document::Block) -> Option<(u8, String)> {
+    use hwp_model::document::{Block, Inline};
+    fn para_text(p: &hwp_model::document::Paragraph) -> String {
+        p.runs
+            .iter()
+            .flat_map(|r| r.content.iter().filter_map(|i| if let Inline::Text(s) = i { Some(s.as_str()) } else { None }))
+            .collect()
+    }
+    match block {
+        Block::Paragraph(p) => {
+            let t = para_text(p);
+            let tt = t.trim();
+            if (tt.starts_with('□') || tt.starts_with('■')) && tt.chars().count() < 40 {
+                return Some((1, tt.to_string()));
+            }
+            None
+        }
+        Block::Table(t) => {
+            // The first non-empty cell text; a numbered band starts with a digit and contains '.'.
+            let first = t.cells.iter().find_map(|c| {
+                let s: String = c
+                    .blocks
+                    .iter()
+                    .filter_map(|b| if let Block::Paragraph(p) = b { Some(para_text(p)) } else { None })
+                    .collect();
+                let s = s.trim().to_string();
+                (!s.is_empty()).then_some(s)
+            })?;
+            let numbered = first.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) && first.contains('.');
+            (numbered && first.chars().count() < 80).then_some((2, first))
+        }
+    }
+}
+
+// ---- Image move/resize overlay geometry -------------------------------------------------------
+
+/// An anchored image's placed box in own-render PX (own SVG space) + its model anchor. The frontend
+/// draws the 8-handle overlay over `x/y/w/h` and commits a resize via `set_image_size`.
+#[derive(serde::Serialize)]
+pub struct ImageBoxDto {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    pub section: usize,
+    pub block: usize,
+}
+
+/// Locate the placed box of the image anchored at `(section, block)` on `page`, in own-render px.
+/// Re-drives `place_doc` over the LIVE IR with the SAME `own_render_fonts` as [`render_svg`], so the
+/// box matches the "자체 렌더" SVG exactly. `None` if that image doesn't fall on the queried page or
+/// the anchor holds no image.
+pub fn image_bbox(doc: &SemanticDoc, page: u32, section: usize, block: usize) -> Option<ImageBoxDto> {
+    let fonts = own_render_fonts();
+    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    let pg = placed.pages.get(page as usize)?;
+    let k = HWPUNIT_PER_PX;
+    pg.images
+        .iter()
+        .find(|im| im.section == section && im.block == block && !im.bin_ref.is_empty())
+        .map(|im| ImageBoxDto { x: im.x / k, y: im.y / k, w: im.w / k, h: im.h / k, section: im.section, block: im.block })
+}
+
+/// Click-to-select: the topmost image whose placed box contains page-space `(x, y)` on `page`, in
+/// own-render px (with its `(section, block)` anchor). `None` if the click misses every image.
+pub fn image_at(doc: &SemanticDoc, page: u32, x: f64, y: f64) -> Option<ImageBoxDto> {
+    let fonts = own_render_fonts();
+    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    let pg = placed.pages.get(page as usize)?;
+    let k = HWPUNIT_PER_PX;
+    let (x, y) = (x * k, y * k); // px click → HWPUNIT (place_doc space)
+    // Last match wins → topmost in paint order (later images draw over earlier ones).
+    pg.images
+        .iter()
+        .filter(|im| !im.bin_ref.is_empty())
+        .filter(|im| x >= im.x && x <= im.x + im.w && y >= im.y && y <= im.y + im.h)
+        .last()
+        .map(|im| ImageBoxDto { x: im.x / k, y: im.y / k, w: im.w / k, h: im.h / k, section: im.section, block: im.block })
+}
+
+// ---- Table move/select/edit overlay geometry --------------------------------------------------
+
+/// A placed table's OUTER box in own-render PX + its model anchor.
+#[derive(serde::Serialize)]
+pub struct TableBoxDto {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    pub section: usize,
+    pub block: usize,
+    pub rows: usize,
+    pub cols: usize,
+    /// For a table SPLIT across pages, this fragment's FIRST global row index (0 for a single-page
+    /// table). The cell-range selection adds this offset to its fragment-local row indices so a batch
+    /// op targets the correct GLOBAL rows of the (possibly frame-wrapped) table.
+    pub first_row: usize,
+}
+
+/// Locate the placed outer box of the table anchored at `(section, block)` on `page`, in own-render
+/// px. `None` if that table doesn't fall on the queried page.
+pub fn table_bbox(doc: &SemanticDoc, page: u32, section: usize, block: usize) -> Option<TableBoxDto> {
+    let fonts = own_render_fonts();
+    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    let pg = placed.pages.get(page as usize)?;
+    let k = HWPUNIT_PER_PX;
+    pg.tables
+        .iter()
+        .find(|t| t.section == section && t.block == block)
+        .map(|t| TableBoxDto { x: t.x / k, y: t.y / k, w: t.w / k, h: t.h / k, section: t.section, block: t.block, rows: t.rows, cols: t.cols, first_row: t.first_row })
+}
+
+/// Click-to-select: the topmost table whose placed outer box contains page-space `(x, y)` on `page`,
+/// in own-render px (with its `(section, block)` anchor). `None` if the click misses every table.
+pub fn table_at(doc: &SemanticDoc, page: u32, x: f64, y: f64) -> Option<TableBoxDto> {
+    let fonts = own_render_fonts();
+    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    let pg = placed.pages.get(page as usize)?;
+    let k = HWPUNIT_PER_PX;
+    let (x, y) = (x * k, y * k); // px click → HWPUNIT (place_doc space)
+    // Last match wins → topmost in paint order (a nested table draws after its outer table).
+    pg.tables
+        .iter()
+        .filter(|t| x >= t.x && x <= t.x + t.w && y >= t.y && y <= t.y + t.h)
+        .last()
+        .map(|t| TableBoxDto { x: t.x / k, y: t.y / k, w: t.w / k, h: t.h / k, section: t.section, block: t.block, rows: t.rows, cols: t.cols, first_row: t.first_row })
+}
+
+// ---- Own-render point-to-block ----------------------------------------------------------------
+
+/// The top-level block the user pointed at, in own-render px: its `(section, block)` anchor, a label
+/// `kind` ("paragraph"/"table"/"image"), and its band box `x/y/w/h`.
+#[derive(serde::Serialize)]
+pub struct BlockHitDto {
+    pub section: usize,
+    pub block: usize,
+    pub kind: String,
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    /// The block's plain text when it is a top-level PARAGRAPH (else empty) — lets a double-click open
+    /// the inline editor pre-filled. Empty for a table band (cells edit via `table_cell_at`).
+    pub text: String,
+    /// True when a PARAGRAPH is inline-editable (simple, all-text) — matches SetParagraphText's accept
+    /// rule, so the UI can gate double-click and avoid the user typing into a paragraph that will refuse.
+    pub editable: bool,
+}
+
+/// Whether a top-level paragraph block is inline-editable (mirrors SetParagraphText's accept rule:
+/// `source.simple` AND no non-text inline). False for tables/images/structural paragraphs.
+fn model_para_editable(doc: &SemanticDoc, section: usize, block: usize) -> bool {
+    use hwp_model::prelude::{Block, Inline};
+    let Some(sec) = doc.sections.get(section) else { return false };
+    let Some(Block::Paragraph(p)) = sec.blocks.get(block) else { return false };
+    let simple = p.source.as_ref().map(|s| s.simple).unwrap_or(true);
+    let all_text = p.runs.iter().all(|r| r.content.iter().all(|i| matches!(i, Inline::Text(_))));
+    simple && all_text
+}
+
+/// Concatenate the plain text of a top-level paragraph block `(section, block)` (empty if not a simple
+/// paragraph). Used to pre-fill the inline paragraph editor.
+fn model_para_text(doc: &SemanticDoc, section: usize, block: usize) -> String {
+    use hwp_model::prelude::{Block, Inline};
+    let Some(sec) = doc.sections.get(section) else { return String::new() };
+    let Some(Block::Paragraph(p)) = sec.blocks.get(block) else { return String::new() };
+    let mut out = String::new();
+    for r in &p.runs {
+        for i in &r.content {
+            if let Inline::Text(s) = i {
+                out.push_str(s);
+            }
+        }
+    }
+    out
+}
+
+/// Click-to-point (own-render only): resolve a page-space click to the top-level block under it, in
+/// own-render px geometry. Unlike [`image_at`]/[`table_at`] this resolves PARAGRAPHS too. `None` only
+/// when the page has no placed blocks.
+pub fn own_hit_test(doc: &SemanticDoc, page: u32, x: f64, y: f64) -> Option<BlockHitDto> {
+    let fonts = own_render_fonts();
+    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    let pg = placed.pages.get(page as usize)?;
+    let k = HWPUNIT_PER_PX;
+    pg.block_at(x * k, y * k).map(|b| BlockHitDto {
+        section: b.section,
+        block: b.block,
+        kind: match b.kind {
+            hwp_typeset::BlockKind::Paragraph => "paragraph",
+            hwp_typeset::BlockKind::Table => "table",
+            hwp_typeset::BlockKind::Image => "image",
+        }
+        .into(),
+        x: b.x / k,
+        y: b.y / k,
+        w: b.w / k,
+        h: b.h / k,
+        // Pre-fill text only for a plain paragraph band (image/table → empty; not inline-editable text).
+        text: if b.kind == hwp_typeset::BlockKind::Paragraph { model_para_text(doc, b.section, b.block) } else { String::new() },
+        editable: b.kind == hwp_typeset::BlockKind::Paragraph && model_para_editable(doc, b.section, b.block),
+    })
+}
+
+/// The table CELL the user double-clicked: its table anchor `(section, block)`, the cell `(row, col)`,
+/// the table's `(rows, cols)`, the cell's CURRENT text, and its PX box (own SVG space).
+#[derive(serde::Serialize)]
+pub struct CellHitDto {
+    pub section: usize,
+    pub block: usize,
+    pub row: usize,
+    pub col: usize,
+    pub rows: usize,
+    pub cols: usize,
+    pub text: String,
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+/// Concatenate the plain text of the model cell at `(row, col)` of the table at `(section, block)`.
+fn model_cell_text(doc: &SemanticDoc, section: usize, block: usize, row: usize, col: usize) -> String {
+    use hwp_model::prelude::{Block, Inline};
+    let Some(sec) = doc.sections.get(section) else { return String::new() };
+    let Some(Block::Table(t)) = sec.blocks.get(block) else { return String::new() };
+    let t = t.edit_target(); // frame wrapper (자가진단표) → inner table
+    let Some(cell) = t.cells.iter().find(|c| c.row == row && c.col == col) else { return String::new() };
+    // Join multiple cell paragraphs with '\n' so a multi-line cell pre-fills readably; the layout
+    // engine renders a '\n' inside a run as a forced line break, so the edit round-trips.
+    let mut paras: Vec<String> = Vec::new();
+    for b in &cell.blocks {
+        if let Block::Paragraph(p) = b {
+            let mut line = String::new();
+            for r in &p.runs {
+                for i in &r.content {
+                    if let Inline::Text(s) = i {
+                        line.push_str(s);
+                    }
+                }
+            }
+            paras.push(line);
+        }
+    }
+    paras.join("\n")
+}
+
+/// Click-to-edit (own-render only): the table cell under a page-space double-click, in own-render px
+/// geometry. `None` when the point isn't over any table cell.
+pub fn table_cell_at(doc: &SemanticDoc, page: u32, x: f64, y: f64) -> Option<CellHitDto> {
+    let fonts = own_render_fonts();
+    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    let pg = placed.pages.get(page as usize)?;
+    let k = HWPUNIT_PER_PX;
+    let (hx, hy) = (x * k, y * k); // px click → HWPUNIT
+    // Topmost table containing the point, then the cell within it.
+    let t = pg
+        .tables
+        .iter()
+        .filter(|t| hx >= t.x && hx <= t.x + t.w && hy >= t.y && hy <= t.y + t.h)
+        .last()?;
+    let cell = t.cell_at(hx, hy)?;
+    Some(CellHitDto {
+        section: t.section,
+        block: t.block,
+        row: cell.row,
+        col: cell.col,
+        rows: t.rows,
+        cols: t.cols,
+        text: model_cell_text(doc, t.section, t.block, cell.row, cell.col),
+        x: cell.x / k,
+        y: cell.y / k,
+        w: cell.w / k,
+        h: cell.h / k,
+    })
+}
+
+/// The PX box (own SVG space) + page of the cell at `(section, block, row, col)`, looked up BY ADDRESS
+/// (not by point) across all pages — so the active-cell ring can be re-placed against FRESH geometry
+/// after an edit GROWS the row. `None` if the cell isn't placed (degenerate/covered cell).
+#[derive(serde::Serialize)]
+pub struct CellBox {
+    pub page: u32,
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+pub fn table_cell_box(doc: &SemanticDoc, section: usize, block: usize, row: usize, col: usize) -> Option<CellBox> {
+    let fonts = own_render_fonts();
+    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    let k = HWPUNIT_PER_PX;
+    for (pi, pg) in placed.pages.iter().enumerate() {
+        for t in pg.tables.iter().filter(|t| t.section == section && t.block == block) {
+            if let Some(cell) = t.cells.iter().find(|c| c.row == row && c.col == col) {
+                return Some(CellBox { page: pi as u32, x: cell.x / k, y: cell.y / k, w: cell.w / k, h: cell.h / k });
+            }
+        }
+    }
+    None
+}
+
+/// Column-boundary x-positions (PX, own SVG space) of the table at `(section, block)` on `page` — the
+/// x's the column-resize handles are drawn on. `cols + 1` absolute px boundaries from the table left to
+/// the table right, derived from `column_offsets` so they land exactly on the drawn grid. `None` if the
+/// table isn't on the page.
+pub fn table_col_boundaries(doc: &SemanticDoc, page: u32, section: usize, block: usize) -> Option<Vec<f64>> {
+    let fonts = own_render_fonts();
+    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    let pg = placed.pages.get(page as usize)?;
+    let pt = pg.tables.iter().find(|t| t.section == section && t.block == block)?;
+    let hwp_model::prelude::Block::Table(model) = doc.sections.get(section).and_then(|s| s.blocks.get(block))? else {
+        return None;
+    };
+    let model = model.edit_target(); // a frame wrapper (자가진단표) → the inner table the grid drew
+    let k = HWPUNIT_PER_PX;
+    // column_offsets rescales the model col_widths to the table's drawn width (pt.w), so the boundary
+    // x's match the painted grid exactly. Absolute px = (table-left + col_x) / 75.
+    let col_x = hwp_typeset::column_offsets(model, pt.w);
+    Some(col_x.iter().map(|x| (pt.x + x) / k).collect())
+}
+
+/// Row-resize geometry (own-render only) — `rows + 1` absolute px y-boundaries of the `block`-th table
+/// on `page`, top→bottom, for the row-height drag handles. `None` when the table isn't on the page.
+pub fn table_row_boundaries(doc: &SemanticDoc, page: u32, section: usize, block: usize) -> Option<Vec<f64>> {
+    let fonts = own_render_fonts();
+    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    let pg = placed.pages.get(page as usize)?;
+    let pt = pg.tables.iter().find(|t| t.section == section && t.block == block)?;
+    let hwp_model::prelude::Block::Table(model) = doc.sections.get(section).and_then(|s| s.blocks.get(block))? else {
+        return None;
+    };
+    let model = model.edit_target(); // frame wrapper (자가진단표) → the inner table the grid drew
+    let k = HWPUNIT_PER_PX;
+    // row_offsets measures content (+ any row_heights override) the SAME way place_table draws, so
+    // the boundary y's line up with the painted rows. A SPLIT table's `pt` is the per-page FRAGMENT,
+    // so slice row_offsets to the fragment's [first_row, last_row] and rebase to the fragment top —
+    // otherwise the whole-table rows would be squashed onto one fragment's box. For a single-fragment
+    // table (first_row=0, last_row=rows) this is identical to the full set.
+    let row_y = hwp_typeset::row_offsets(model, pt.w, doc, fonts.as_ref());
+    let (f, l) = (pt.first_row, pt.last_row);
+    if f >= l || l >= row_y.len() {
+        return None;
+    }
+    let base = row_y[f];
+    let frag_total = row_y[l] - base;
+    let scale = if frag_total > 0.0 { pt.h / frag_total } else { 1.0 };
+    Some(row_y[f..=l].iter().map(|y| (pt.y + (y - base) * scale) / k).collect())
+}
+
+/// Page geometry in CSS px (own-render only): the page box + the printable-area margins of `page`, for
+/// the editor chrome (한글식 모서리 영역 표시 + 줄자). All values are px (HWPUNIT / 75). `None` when the
+/// page is out of range.
+#[derive(serde::Serialize)]
+pub struct PageGeom {
+    pub w: f64,
+    pub h: f64,
+    pub ml: f64,
+    pub mt: f64,
+    pub mr: f64,
+    pub mb: f64,
+}
+
+pub fn page_geometry(doc: &SemanticDoc, page: u32) -> Option<PageGeom> {
+    let fonts = own_render_fonts();
+    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    let pg = placed.pages.get(page as usize)?;
+    let k = HWPUNIT_PER_PX;
+    Some(PageGeom {
+        w: pg.width / k,
+        h: pg.height / k,
+        ml: pg.margin_left / k,
+        mt: pg.margin_top / k,
+        mr: pg.margin_right / k,
+        mb: pg.margin_bottom / k,
+    })
+}
+
+// ---- Character-format / styled-run reads ------------------------------------------------------
+
+/// The CURRENT character format of a target's first run — so the manual format bar can show + toggle
+/// the right state. `None` if the target/run can't be resolved.
+#[derive(serde::Serialize)]
+pub struct CharFmt {
+    pub bold: bool,
+    pub italic: bool,
+    pub size_pt: f32,
+    pub font: Option<String>,
+    pub color: Option<String>,
+}
+
+/// Read the first run's char format of the `block`-th paragraph (row/col `None`) or the `(row, col)`
+/// cell of that table. `None` if the target/run can't be resolved.
+pub fn char_fmt(doc: &SemanticDoc, section: usize, block: usize, row: Option<usize>, col: Option<usize>) -> Option<CharFmt> {
+    use hwp_model::prelude::Block;
+    let sec = doc.sections.get(section)?;
+    let blk = sec.blocks.get(block)?;
+    let first_run_shape = match (blk, row, col) {
+        (Block::Paragraph(p), None, None) => p.runs.first().map(|r| r.char_shape),
+        (Block::Table(t), Some(r), Some(c)) => t.edit_target().cells.iter()
+            .find(|cell| cell.active && cell.row == r && cell.col == c)
+            .and_then(|cell| cell.blocks.iter().find_map(|b| match b {
+                Block::Paragraph(p) => p.runs.first().map(|run| run.char_shape),
+                _ => None,
+            })),
+        _ => None,
+    };
+    let idx = first_run_shape?;
+    let sh = doc.char_shapes.get(idx).cloned().unwrap_or_default();
+    let default_color = hwp_model::prelude::CharShape::default().text_color;
+    Some(CharFmt {
+        bold: sh.bold,
+        italic: sh.italic,
+        size_pt: if sh.height > 0 { sh.height as f32 / 100.0 } else { 10.0 },
+        font: sh.font_family.clone(),
+        color: if sh.text_color == default_color { None } else { Some(sh.text_color.to_hex()) },
+    })
+}
+
+/// FE↔Rust wire type for a STYLED text run — the WYSIWYG editor reads a block's runs ([`block_runs`])
+/// to render styled spans, and writes them back (via the run-based table-cell / paragraph commits).
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
+pub struct RunDto {
+    pub text: String,
+    #[serde(default)] pub bold: bool,
+    #[serde(default)] pub italic: bool,
+    #[serde(default)] pub underline: bool,
+    #[serde(default)] pub strike: bool,
+    #[serde(default)] pub size_pt: Option<f32>,
+    #[serde(default)] pub color: Option<String>,
+    #[serde(default)] pub highlight: Option<String>,
+    #[serde(default)] pub font: Option<String>,
+}
+impl RunDto {
+    pub fn to_run_spec(&self) -> hwp_ops::RunSpec {
+        hwp_ops::RunSpec {
+            text: self.text.clone(),
+            bold: self.bold,
+            italic: self.italic,
+            underline: self.underline,
+            strike: self.strike,
+            size_pt: self.size_pt,
+            color: self.color.clone(),
+            highlight: self.highlight.clone(),
+            font: self.font.clone(),
+        }
+    }
+}
+
+/// Convert a slice of [`RunDto`] (the WYSIWYG editor's wire form) into op-bus [`hwp_ops::RunSpec`]s —
+/// the ONLY transform the run-commit commands need before delegating to the op-bus.
+pub fn run_specs(runs: &[RunDto]) -> Vec<hwp_ops::RunSpec> {
+    runs.iter().map(RunDto::to_run_spec).collect()
+}
+
+/// Read ALL styled runs of a target paragraph/cell (per-run shapes) so the WYSIWYG editor can render
+/// them as styled spans. Unlike [`char_fmt`] (first run only), this returns every run. A multi-paragraph
+/// cell's paragraphs are joined by a `\n` run (parity with the cell-text reader).
+pub fn block_runs(doc: &SemanticDoc, section: usize, block: usize, row: Option<usize>, col: Option<usize>) -> Vec<RunDto> {
+    use hwp_model::prelude::{Block, CharShape, Inline, Paragraph};
+    let default_color = CharShape::default().text_color;
+    let read_para = |p: &Paragraph, out: &mut Vec<RunDto>| {
+        for run in &p.runs {
+            let sh = doc.char_shapes.get(run.char_shape).cloned().unwrap_or_default();
+            let text: String = run.content.iter()
+                .filter_map(|i| if let Inline::Text(t) = i { Some(t.as_str()) } else { None })
+                .collect();
+            out.push(RunDto {
+                text,
+                bold: sh.bold,
+                italic: sh.italic,
+                underline: sh.underline,
+                strike: sh.strikeout,
+                size_pt: if sh.height > 0 { Some(sh.height as f32 / 100.0) } else { None },
+                color: if sh.text_color == default_color { None } else { Some(sh.text_color.to_hex()) },
+                highlight: None,
+                font: sh.font_family.clone(),
+            });
+        }
+    };
+    let Some(sec) = doc.sections.get(section) else { return Vec::new() };
+    let Some(blk) = sec.blocks.get(block) else { return Vec::new() };
+    let mut out: Vec<RunDto> = Vec::new();
+    match (blk, row, col) {
+        (Block::Paragraph(p), None, None) => read_para(p, &mut out),
+        (Block::Table(t), Some(r), Some(c)) => {
+            // Resolve through a 1×1 frame wrapper (자가진단표) to the inner table the user actually
+            // clicked, so its nested cells are editable like any top-level cell.
+            let t = t.edit_target();
+            if let Some(cell) = t.cells.iter().find(|cc| cc.active && cc.row == r && cc.col == c) {
+                let mut first = true;
+                for b in &cell.blocks {
+                    if let Block::Paragraph(p) = b {
+                        if !first {
+                            out.push(RunDto { text: "\n".into(), ..Default::default() });
+                        }
+                        read_para(p, &mut out);
+                        first = false;
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    out
+}
+
+/// The target cell/paragraph's BACKGROUND fill + horizontal alignment + per-paragraph indent — the
+/// WYSIWYG inline editor paints itself to MATCH the original (shaded cell stays shaded, centered header
+/// stays centered, numbered list keeps its indent) instead of a plain white left-aligned box.
+#[derive(serde::Serialize)]
+pub struct BlockStyleDto {
+    /// Cell fill as "#RRGGBB" (None = no fill / a paragraph → the white page background).
+    pub shade: Option<String>,
+    /// Horizontal text alignment: "left" | "center" | "right" | "justify".
+    pub align: String,
+    /// Paragraph indent geometry in HWPUNIT (mirrors the FIRST paragraph — back-compat single-para path).
+    pub indent_left: i32,
+    pub indent_first: i32,
+    pub indent_right: i32,
+    /// PER-PARAGRAPH style, one entry per paragraph in the SAME order [`block_runs`] emits them
+    /// (a cell's paragraphs joined by standalone "\n" runs), so each editor block keeps its own indent.
+    pub paragraphs: Vec<ParaStyleDto>,
+}
+
+/// One paragraph's indent (HWPUNIT) + alignment — the per-paragraph half of [`BlockStyleDto`].
+#[derive(serde::Serialize)]
+pub struct ParaStyleDto {
+    pub indent_left: i32,
+    pub indent_first: i32,
+    pub indent_right: i32,
+    pub align: String,
+}
+
+pub fn block_style(doc: &SemanticDoc, section: usize, block: usize, row: Option<usize>, col: Option<usize>) -> BlockStyleDto {
+    use hwp_model::prelude::{Block, HorizontalAlign, Paragraph};
+    let align_of = |p: &Paragraph| -> String {
+        match doc.para_shapes.get(p.para_shape).map(|ps| ps.align).unwrap_or_default() {
+            HorizontalAlign::Left => "left",
+            HorizontalAlign::Right => "right",
+            HorizontalAlign::Center => "center",
+            _ => "justify", // Justify (양쪽, default) / Distribute / DistributeSpace
+        }
+        .to_string()
+    };
+    // Mirror hwp_typeset::place::indent_of's clamping so the editor's inset matches the placed glyphs.
+    let indent_of = |p: &Paragraph| -> (i32, i32, i32) {
+        let ps = doc.para_shapes.get(p.para_shape);
+        let left = ps.map(|s| s.left_margin).unwrap_or(0).max(0);
+        let right = ps.map(|s| s.right_margin).unwrap_or(0).max(0);
+        let indent = ps.map(|s| s.indent).unwrap_or(0);
+        let first = indent.max(-left); // 들여(+)/내어(−)쓰기, clamped so line 0 never crosses the inset
+        (left as i32, first as i32, right as i32)
+    };
+    let para_style = |p: &Paragraph| -> ParaStyleDto {
+        let (l, f, r) = indent_of(p);
+        ParaStyleDto { indent_left: l, indent_first: f, indent_right: r, align: align_of(p) }
+    };
+    let mut dto = BlockStyleDto {
+        shade: None,
+        align: "justify".into(),
+        indent_left: 0,
+        indent_first: 0,
+        indent_right: 0,
+        paragraphs: Vec::new(),
+    };
+    let Some(sec) = doc.sections.get(section) else { return dto };
+    let Some(blk) = sec.blocks.get(block) else { return dto };
+    match (blk, row, col) {
+        (Block::Paragraph(p), None, None) => dto.paragraphs.push(para_style(p)),
+        (Block::Table(t), Some(r), Some(c)) => {
+            let t = t.edit_target(); // frame wrapper (자가진단표) → inner table
+            if let Some(cell) = t.cells.iter().find(|cc| cc.active && cc.row == r && cc.col == c) {
+                dto.shade = cell.shade_color.map(|c| c.to_hex());
+                // SAME paragraph iteration as `block_runs` so paragraphs[i] aligns with the i-th editor
+                // block (lockstep — an off-by-one would mis-indent every later line).
+                for b in &cell.blocks {
+                    if let Block::Paragraph(p) = b {
+                        dto.paragraphs.push(para_style(p));
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    // The first paragraph drives the back-compat single-indent fields + the container alignment.
+    if let Some(first) = dto.paragraphs.first() {
+        dto.align = first.align.clone();
+        dto.indent_left = first.indent_left;
+        dto.indent_first = first.indent_first;
+        dto.indent_right = first.indent_right;
+    }
+    dto
+}
+
+// ---- Export (HTML / PDF) ----------------------------------------------------------------------
+
+/// Project the LIVE document to a self-contained HTML string via the JSX(content)/CSS(design) path:
+/// `hwp_jsx::emit` → `hwp_export::emit_html`. Byte-identical to the CLI `export-html` and the in-app
+/// HTML preview. `title` = the browser/document title (e.g. the file stem), or `None`.
+pub fn emit_html(doc: &SemanticDoc, title: Option<String>) -> String {
+    let proj = hwp_jsx::emit(doc);
+    hwp_export::emit_html(&proj, &hwp_export::HtmlOptions { title })
+}
+
+/// Export the LIVE document to PDF bytes through OUR OWN engine (`place_doc` → PageLayerTree →
+/// krilla), embedding a subset of the discovered Korean face. Under `shaper` the real rustybuzz
+/// advances drive placement. Returns the krilla export result (bytes + page count + embedded font
+/// path). Needs the `pdf` feature.
+#[cfg(feature = "pdf")]
+pub fn emit_pdf(doc: &SemanticDoc, title: Option<String>) -> Result<hwp_export::pdf::PdfExport, String> {
+    let fonts = own_render_fonts();
+    hwp_export::pdf::export_pdf(doc, fonts.as_ref(), &hwp_export::pdf::PdfOptions { title })
+}
+
+// ---- Image insert (proposal builder + fs stash) -----------------------------------------------
+
+/// Build a single-`InsertImage` [`hwp_ai::edit::EditScript`] anchored at the pointed target and
+/// validate it into a [`hwp_ai::Proposal`] against the LIVE doc (the SAME op-bus path the AI uses).
+/// Shared by the propose (chat, review-first) and apply (drag-drop, immediate) image-insert lanes.
+pub fn build_insert_image_proposal(
+    doc: &SemanticDoc,
+    path: &std::path::Path,
+    scope_section: Option<usize>,
+    scope_block: Option<usize>,
+    width_mm: Option<f32>,
+    height_mm: Option<f32>,
+) -> Result<hwp_ai::Proposal, String> {
+    let (section, block, position) = match (scope_section, scope_block) {
+        (Some(sec), Some(blk)) => (sec, blk, "after"),
+        (Some(sec), None) => (sec, 0, "end"),
+        _ => (0, 0, "end"),
+    };
+    let script = hwp_ai::edit::EditScript {
+        edits: vec![serde_json::from_value(serde_json::json!({
+            "op": "insert_image",
+            "section": section,
+            "block": block,
+            "position": position,
+            "path": path.to_string_lossy(),
+            "width_mm": width_mm,
+            "height_mm": height_mm,
+        }))
+        .map_err(|e| format!("이미지 편집 구성 실패: {e}"))?],
+    };
+    hwp_ai::propose_from_edit_script(doc, &script, "이미지 삽입").map_err(|e| e.to_string())
+}
+
+/// Shape a validated [`hwp_ai::Proposal`] into the structured JSON the chat panel renders: the
+/// provider name (for the honest mock badge), the rationale prose, and one `ProposalOp` per op.
+pub fn proposal_json(provider: &str, proposal: &hwp_ai::Proposal) -> Value {
+    json!({
+        "provider": provider,
+        "rationale": proposal.rationale,
+        "ops": proposal.structured_ops(),
+    })
+}
+
+/// Materialize image bytes to a temp file the op-bus can read back, and return
+/// `(temp_path, safe_basename)`. The bytes come from EITHER a base64 payload (`data_b64`, the
+/// chat-attach lane) OR a source file `src_path` (a native OS drag-drop gives a path); exactly one
+/// must be present. A sanitized basename keeps the extension. Needs the `fs` feature (touches disk).
+#[cfg(feature = "fs")]
+pub fn stash_image(
+    name: &str,
+    data_b64: Option<&str>,
+    src_path: Option<&str>,
+) -> Result<(std::path::PathBuf, String), String> {
+    use base64::Engine as _;
+    let bytes = match (data_b64, src_path) {
+        (Some(b64), _) => base64::engine::general_purpose::STANDARD
+            .decode(b64.as_bytes())
+            .map_err(|e| format!("이미지 디코드 실패: {e}"))?,
+        (None, Some(p)) => {
+            std::fs::read(p).map_err(|e| format!("이미지 파일 읽기 실패: {p} — {e}"))?
+        }
+        (None, None) => return Err("이미지 데이터(dataB64) 또는 경로(srcPath)가 필요합니다".into()),
+    };
+    if bytes.is_empty() {
+        return Err("빈 이미지입니다".into());
+    }
+    // A native drop carries the source path; prefer ITS basename for the visible name when given.
+    let basis = src_path.filter(|_| data_b64.is_none()).unwrap_or(name);
+    let safe: String = std::path::Path::new(basis)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("image.png")
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+    let dir = std::env::temp_dir().join("tfhwp_imgs");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("임시 폴더 생성 실패: {e}"))?;
+    let path = dir.join(&safe);
+    std::fs::write(&path, &bytes).map_err(|e| format!("이미지 저장 실패: {e}"))?;
+    Ok((path, safe))
+}
+
+// ---- AI edit-scope directive ------------------------------------------------------------------
+
+/// One structural edit ANCHOR the user marked in the viewer (issue #009), deserialized from the JSON
+/// the UI passes. Coordinates are STRUCTURE indices (never pixels): `rows`/`cols` are inclusive GLOBAL
+/// bounds addressing the live model table directly (same space as `hwp_ai::edit::EditCommand`).
+#[derive(serde::Deserialize)]
+pub struct AnchorDto {
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub section: usize,
+    #[serde(default)]
+    pub block: usize,
+    #[serde(default)]
+    pub rows: Option<[usize; 2]>,
+    #[serde(default)]
+    pub cols: Option<[usize; 2]>,
+    #[serde(default)]
+    pub label: String,
+}
+
+/// Turn the marked anchors into a Korean directive prepended to the user's instruction, telling the
+/// model to edit ONLY those spots (with their exact `[s/b]` + row/col structure coords). Returns
+/// `None` when the JSON is absent/empty/unparseable, so the caller falls back to the click-scope path.
+pub fn anchor_directive(anchors_json: Option<&str>, instruction: &str) -> Option<String> {
+    let list: Vec<AnchorDto> = serde_json::from_str(anchors_json?).ok()?;
+    if list.is_empty() {
+        return None;
+    }
+    let mut lines = String::new();
+    for a in &list {
+        let mut coord = format!("section={}, block={}", a.section, a.block);
+        if let Some([r0, r1]) = a.rows {
+            if r0 == r1 {
+                coord.push_str(&format!(", row={r0}"));
+            } else {
+                coord.push_str(&format!(", row {r0}..={r1}"));
+            }
+        }
+        if let Some([c0, c1]) = a.cols {
+            if c0 == c1 {
+                coord.push_str(&format!(", col={c0}"));
+            } else {
+                coord.push_str(&format!(", col {c0}..={c1}"));
+            }
+        }
+        let label = if a.label.is_empty() { a.kind.as_str() } else { a.label.as_str() };
+        lines.push_str(&format!("- [s{}/b{}] {label} ({coord})\n", a.section, a.block));
+    }
+    Some(format!(
+        "[편집 대상 앵커 — 사용자가 문서에서 직접 지정한 위치입니다. 아래 앵커가 가리키는 곳만 편집하고, \
+         다른 블록은 절대 건드리지 마세요. 좌표는 0부터 시작하는 구조 인덱스(섹션/블록/행/열)입니다:\n\
+         {lines}]\n사용자 요청: {instruction}"
+    ))
+}

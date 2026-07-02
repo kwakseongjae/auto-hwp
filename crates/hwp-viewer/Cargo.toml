@@ -26,11 +26,11 @@ ai = ["hwp-ai/anthropic", "hwp-ai/keyring", "hwp-ai/local", "hwp-ai/openrouter"]
 # Forward the real rustybuzz shaper down to the OWN renderer (hwp-typeset/hwp-render) so the in-app
 # "자체 렌더" view's glyph x-positions are real (matches the CLI `own-render --features shaper`). Also
 # forwards to hwp-export so the PDF placement uses the real shaper when `pdf` is on.
-shaper = ["hwp-typeset/shaper", "hwp-render/shaper", "hwp-export/shaper"]
+shaper = ["hwp-typeset/shaper", "hwp-render/shaper", "hwp-export/shaper", "hwp-session/shaper"]
 # PDF export (own layout → paint IR → krilla, Korean font subsetting) for the `export_doc_pdf`
 # command. SEPARATE from default so plain/CI builds pull NO heavy krilla/font deps; enable with
 # `cargo tauri dev -f "rhwp ai pdf"`. Without it `export_doc_pdf` returns a clear error.
-pdf = ["hwp-export/pdf"]
+pdf = ["hwp-export/pdf", "hwp-session/pdf"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -40,6 +40,10 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 hwp-core = { workspace = true }
 hwp-mcp = { workspace = true }
+# Shell-independent document-session logic (issue 012): DTO assembly, own-engine geometry queries,
+# styled-run reads, HTML/PDF export projection, image-insert proposal. The Tauri commands are thin
+# wrappers over this. `fs` = the path-based `stash_image` (this shell always has a filesystem).
+hwp-session = { workspace = true, features = ["fs"] }
 hwp-ops = { workspace = true }
 hwp-ai = { workspace = true }
 hwp-model = { workspace = true }

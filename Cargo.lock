@@ -2134,6 +2134,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "hwp-session"
+version = "0.0.1"
+dependencies = [
+ "base64 0.21.7",
+ "hwp-ai",
+ "hwp-export",
+ "hwp-jsx",
+ "hwp-model",
+ "hwp-ops",
+ "hwp-render",
+ "hwp-typeset",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "hwp-typeset"
 version = "0.0.1"
 dependencies = [
@@ -2157,6 +2173,7 @@ dependencies = [
  "hwp-model",
  "hwp-ops",
  "hwp-render",
+ "hwp-session",
  "hwp-typeset",
  "serde",
  "serde_json",
@@ -5213,6 +5230,7 @@ dependencies = [
  "hwp-ops",
  "hwp-oracle",
  "hwp-render",
+ "hwp-session",
  "hwp-typeset",
 ]
 

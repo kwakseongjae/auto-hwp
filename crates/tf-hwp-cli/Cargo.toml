@@ -16,9 +16,9 @@ default = []
 rhwp = ["hwp-core/rhwp", "hwp-fidelity/rhwp"]
 # Score `layout-check` + drive `own-render` with the real rustybuzz shaper (real Latin advances +
 # EM-grid Hangul) instead of the per-script approximation.
-shaper = ["hwp-core/shaper", "hwp-typeset/shaper", "hwp-render/shaper", "hwp-export/shaper"]
+shaper = ["hwp-core/shaper", "hwp-typeset/shaper", "hwp-render/shaper", "hwp-export/shaper", "hwp-session/shaper"]
 # PHASE P4: enable `export-pdf` (krilla PDF backend from our own layout + Korean font embedding).
-pdf = ["hwp-export/pdf"]
+pdf = ["hwp-export/pdf", "hwp-session/pdf"]
 # PHASE P5: open `.docx` (full-ish edit) — forwards to hwp-foreign's pure-Rust docx reader.
 docx = ["hwp-core/docx"]
 # PHASE P5: open `.pdf` (VIEW-MOSTLY: positioned glyphs/overlay) — forwards to hwp-foreign's lopdf reader.
@@ -35,6 +35,9 @@ hwp-ai = { workspace = true }
 hwp-core = { workspace = true }
 hwp-jsx = { workspace = true }
 hwp-export = { workspace = true }
+# Shell-independent session logic (issue 012): the CLI's own-render / export-html / export-pdf now
+# consume the SAME functions the viewer does, instead of duplicating own_render_fonts + the emit calls.
+hwp-session = { workspace = true }
 hwp-oracle = { workspace = true }
 hwp-typeset = { workspace = true }
 hwp-render = { workspace = true }

@@ -515,9 +515,8 @@ fn ai_edit(
 
     // Output format by extension: .html → vibe-docs standalone HTML; else round-trip-safe HWPX.
     if out.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("html")) == Some(true) {
-        let proj = hwp_jsx::emit(&doc);
         let title = file.file_stem().map(|s| s.to_string_lossy().into_owned());
-        let html = hwp_export::emit_html(&proj, &hwp_export::HtmlOptions { title });
+        let html = hwp_session::emit_html(&doc, title);
         std::fs::write(out, &html).map_err(|e| format!("write {}: {e}", out.display()))?;
         println!(
             "\ncommitted (+{} op) → {} ({} KB) — open in any browser.",
@@ -582,9 +581,8 @@ fn export_html(file: &PathBuf, out: &Path) -> Result<(), String> {
     let bytes = read(file)?;
     // Engine::open handles both: .hwpx parse (default build) + .hwp lift (needs --features rhwp).
     let doc = hwp_core::Engine::open(&bytes).map_err(|e| e.to_string())?;
-    let proj = hwp_jsx::emit(&doc);
     let title = file.file_stem().map(|s| s.to_string_lossy().into_owned());
-    let html = hwp_export::emit_html(&proj, &hwp_export::HtmlOptions { title });
+    let html = hwp_session::emit_html(&doc, title);
     std::fs::write(out, &html).map_err(|e| format!("write {}: {e}", out.display()))?;
     println!(
         "wrote {} ({} KB) — open it in any browser (semantic-reflow; not pixel-identical to 한글).",
@@ -601,9 +599,8 @@ fn export_pdf(file: &PathBuf, out: &Path) -> Result<(), String> {
     let bytes = read(file)?;
     // Engine::open handles both: .hwpx parse (default build) + .hwp lift (needs --features rhwp).
     let doc = hwp_core::Engine::open(&bytes).map_err(|e| e.to_string())?;
-    let fonts = own_render_fonts();
     let title = file.file_stem().map(|s| s.to_string_lossy().into_owned());
-    let result = hwp_export::pdf::export_pdf(&doc, fonts.as_ref(), &hwp_export::pdf::PdfOptions { title })?;
+    let result = hwp_session::emit_pdf(&doc, title)?;
     std::fs::write(out, &result.bytes).map_err(|e| format!("write {}: {e}", out.display()))?;
     match &result.font_path {
         Some(p) => println!(
@@ -747,8 +744,7 @@ fn render(_file: &PathBuf, _page: u32, _out: &PathBuf) -> Result<(), String> {
 fn own_render(file: &PathBuf, page: Option<usize>, out: &PathBuf) -> Result<(), String> {
     let bytes = read(file)?;
     let doc = hwp_core::Engine::open(&bytes).map_err(|e| e.to_string())?;
-    let fonts = own_render_fonts();
-    let svgs = hwp_render::render_doc_svg(&doc, fonts.as_ref());
+    let svgs = hwp_session::render_svg(&doc);
     if svgs.is_empty() {
         return Err("nothing to render (no pages)".into());
     }
@@ -768,17 +764,6 @@ fn own_render(file: &PathBuf, page: Option<usize>, out: &PathBuf) -> Result<(), 
         }
     }
     Ok(())
-}
-
-/// Choose the font-metrics provider for `own-render`: the real rustybuzz shaper under `--features
-/// shaper` (real Latin advances + EM-grid Hangul), else the per-script approximation.
-#[cfg(feature = "shaper")]
-fn own_render_fonts() -> Box<dyn hwp_model::prelude::FontMetricsProvider> {
-    Box::new(hwp_typeset::RealFontMetrics::new())
-}
-#[cfg(not(feature = "shaper"))]
-fn own_render_fonts() -> Box<dyn hwp_model::prelude::FontMetricsProvider> {
-    Box::new(hwp_typeset::ApproxFontMetrics)
 }
 
 /// Insert `<n>` before a path's extension: `page.svg` + 1 → `page1.svg`.

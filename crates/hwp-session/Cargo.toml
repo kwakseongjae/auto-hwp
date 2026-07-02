@@ -1,0 +1,37 @@
+[package]
+name = "hwp-session"
+description = "Shell-independent document-session facade (issue 012): the DTO assembly, own-engine geometry queries (px↔HWPUNIT at the boundary), styled-run reads, HTML/PDF export, and image-insert proposal logic that used to live in the Tauri viewer's command bodies. Pure + wasm-safe: NO tauri, NO locks/threads, and NO std::fs unless the `fs` feature is on. The three shells (Tauri app / service / wasm) wrap the SAME functions here."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+name = "hwp_session"
+path = "src/lib.rs"
+
+[features]
+default = []
+# Forward the real rustybuzz shaper to the OWN renderer/typesetter/PDF placement, mirroring the
+# viewer/CLI `shaper` feature so `own_render_fonts` (and everything downstream) uses real advances.
+shaper = ["hwp-typeset/shaper", "hwp-render/shaper", "hwp-export/shaper"]
+# High-level PDF export (krilla) via `emit_pdf`. SEPARATE so default/wasm builds stay lean.
+pdf = ["hwp-export/pdf"]
+# Path-based helpers that touch the local filesystem (`stash_image` reads/writes temp files). Gated so
+# the crate stays wasm-safe by default — the byte-slice / in-memory APIs need no fs.
+fs = []
+
+[dependencies]
+hwp-model = { workspace = true }
+hwp-ops = { workspace = true }
+hwp-ai = { workspace = true }
+hwp-jsx = { workspace = true }
+hwp-export = { workspace = true }
+hwp-typeset = { workspace = true }
+hwp-render = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Decode chat-attached images (base64) before stashing — pure-Rust, wasm-safe (used only under `fs`).
+base64 = "0.21"
