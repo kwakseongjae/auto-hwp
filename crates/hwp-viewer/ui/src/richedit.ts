@@ -18,28 +18,68 @@ function sizePx(sizePt: number | null | undefined, scale: number): number {
   return ((sizePt ?? DEFAULT_PT) * 100) / HWPUNIT_PER_PX * scale;
 }
 
-/** Render runs as styled <span>s matching the own SVG <text> (NanumGothic, weight/style/underline/
- *  color/font, size in screen px). "\n" in a run → <br>. Set ONCE as the contentEditable innerHTML
- *  (uncontrolled) — never re-set on keystroke (would kill the caret + Korean IME). */
-export function runsToHtml(runs: RunDto[], scale: number): string {
-  if (!runs.length || runs.every((r) => r.text === "")) return "<span><br></span>";
-  return runs
-    .map((r) => {
-      const styles = [
-        `font-family:${r.font ? `"${r.font}", ${NANUM}` : NANUM}`,
-        `font-weight:${r.bold ? 700 : 400}`,
-        `font-style:${r.italic ? "italic" : "normal"}`,
-        `font-size:${sizePx(r.size_pt, scale).toFixed(2)}px`,
-      ];
-      // underline + strike combine into one text-decoration so a struck run actually SHOWS struck
-      // (and round-trips); without this strikethrough was a silent WYSIWYG lie + lost on commit.
-      const deco: string[] = [];
-      if (r.underline) deco.push("underline");
-      if (r.strike) deco.push("line-through");
-      if (deco.length) styles.push(`text-decoration:${deco.join(" ")}`);
-      if (r.color) styles.push(`color:${r.color}`);
-      const html = esc(r.text).replace(/\n/g, "<br>");
-      return `<span style="${styles.join(";")}">${html}</span>`;
+/** Per-paragraph indent (SCREEN px, already ×scale) + alignment for the per-<div> editor render. */
+export type ParaIndent = { indentLeft: number; indentFirst: number; indentRight: number; align: string };
+
+/** One run → a styled <span> matching the own SVG <text>. Intra-run "\n" → <br> (a forced break). */
+function spanFor(r: RunDto, scale: number): string {
+  const styles = [
+    `font-family:${r.font ? `"${r.font}", ${NANUM}` : NANUM}`,
+    `font-weight:${r.bold ? 700 : 400}`,
+    `font-style:${r.italic ? "italic" : "normal"}`,
+    `font-size:${sizePx(r.size_pt, scale).toFixed(2)}px`,
+  ];
+  // underline + strike combine into one text-decoration so a struck run actually SHOWS struck
+  // (and round-trips); without this strikethrough was a silent WYSIWYG lie + lost on commit.
+  const deco: string[] = [];
+  if (r.underline) deco.push("underline");
+  if (r.strike) deco.push("line-through");
+  if (deco.length) styles.push(`text-decoration:${deco.join(" ")}`);
+  if (r.color) styles.push(`color:${r.color}`);
+  const html = esc(r.text).replace(/\n/g, "<br>");
+  return `<span style="${styles.join(";")}">${html}</span>`;
+}
+
+/** Render runs as styled <span>s matching the own SVG <text>. Set ONCE as the contentEditable innerHTML
+ *  (uncontrolled) — never re-set on keystroke (would kill the caret + Korean IME).
+ *
+ *  When `paras` (one entry per paragraph, same order as get_block_runs) is supplied for a MULTI-paragraph
+ *  block, each paragraph is wrapped in its OWN <div> carrying that paragraph's indent/alignment — so a
+ *  numbered list ("[첨부] 1. / 2. / 3." where lines 2-3 have a deeper left indent) keeps each line's indent
+ *  WHILE editing instead of all collapsing to line 0's. The standalone "\n" runs get_block_runs emits
+ *  between paragraphs are the paragraph boundaries (not rendered). Single-paragraph blocks keep the flat
+ *  span render (the container applies the one indent), unchanged. */
+export function runsToHtml(runs: RunDto[], scale: number, paras?: ParaIndent[]): string {
+  // Per-<div> whenever we have paragraph data (now ALWAYS, even a single paragraph) — uniform structure
+  // means serializeEditor's "one structural trailing \n" assumption is ALWAYS correct, so the no-op /
+  // newline handling is deterministic (the flat-span path was ambiguous about a trailing line break).
+  const perDiv = !!paras && paras.length >= 1;
+  if (!runs.length || runs.every((r) => r.text === "")) {
+    return perDiv ? "<div><br></div>" : "<span><br></span>";
+  }
+  if (!perDiv) {
+    return runs.map((r) => spanFor(r, scale)).join(""); // no style data at all → flat fallback
+  }
+  // Multi-paragraph: split into per-paragraph groups, one <div> each. A "\n" delimits a paragraph
+  // whether it's a standalone join run (editor-init runs from get_block_runs) or embedded in a run's
+  // text (serialized runs for the post-commit snapshot) — matching how the commit op splits paragraphs.
+  const groups: RunDto[][] = [[]];
+  for (const r of runs) {
+    const parts = r.text.split("\n");
+    parts.forEach((part, idx) => {
+      if (idx > 0) groups.push([]); // each "\n" starts a new paragraph
+      if (part !== "") groups[groups.length - 1].push({ ...r, text: part });
+    });
+  }
+  return groups
+    .map((g, i) => {
+      const p = paras[Math.min(i, paras.length - 1)];
+      // The div carries the indent; the editor CONTAINER supplies only the small base padding (so the
+      // first glyph lands at base + left + first, matching the single-paragraph formula).
+      const style = `padding-left:${p.indentLeft.toFixed(1)}px;text-indent:${p.indentFirst.toFixed(1)}px;`
+        + `padding-right:${p.indentRight.toFixed(1)}px;text-align:${p.align || "left"}`;
+      const inner = g.length && !g.every((r) => r.text === "") ? g.map((r) => spanFor(r, scale)).join("") : "<br>";
+      return `<div style="${style}">${inner}</div>`;
     })
     .join("");
 }
@@ -123,7 +163,13 @@ export function serializeEditor(root: HTMLElement, scale: number): RunDto[] {
     }
     if (node.nodeType !== Node.ELEMENT_NODE) return;
     const el = node as HTMLElement;
-    if (el.tagName === "BR") { addBreak(); return; }
+    if (el.tagName === "BR") {
+      // A <br> that is the LAST child of its block is WebKit's "filler" br (it makes an empty block
+      // visible); the block's own boundary already emits the newline, so counting the filler too would
+      // double a blank line. Only a <br> with following content is a real intra-block line break.
+      if (el.nextSibling) addBreak();
+      return;
+    }
     Array.from(el.childNodes).forEach(walk);
     if (/^(DIV|P)$/.test(el.tagName)) addBreak(); // a browser-injected block boundary
   };
@@ -216,7 +262,7 @@ export function saveInlineSelection(): void {
  *  bold/italic/color toggle via execCommand; size/font wrap the selection in a styled span. Visible
  *  immediately, no SVG repaint — the styled DOM is serialized to runs on commit. */
 export function applyLiveStyle(
-  patch: { bold?: boolean; italic?: boolean; underline?: boolean; sizePt?: number; font?: string },
+  patch: { bold?: boolean; italic?: boolean; underline?: boolean; sizePt?: number; font?: string; color?: string },
   scale: number,
 ): void {
   const el = document.querySelector("[data-inline-edit]") as HTMLElement | null;
@@ -235,4 +281,7 @@ export function applyLiveStyle(
   if (patch.underline !== undefined) document.execCommand("underline");
   if (patch.font !== undefined) wrapSelectionStyle(`font-family:${patch.font ? `"${patch.font}", ${NANUM}` : NANUM}`);
   if (patch.sizePt !== undefined) wrapSelectionStyle(`font-size:${sizePx(patch.sizePt, scale).toFixed(2)}px`);
+  // 글자색 — execCommand foreColor (styleWithCSS already on) colors the live selection; serializeEditor
+  // reads the computed color back per run, so it round-trips on commit.
+  if (patch.color !== undefined) document.execCommand("foreColor", false, patch.color);
 }

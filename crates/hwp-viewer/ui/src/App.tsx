@@ -6,7 +6,7 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { tinykeys } from "tinykeys";
 import { api, type CellHit, type CaretRect, type CharFmt, type FindMatch, type ImageBox, type OutlineItem, type PageGeom, type Proposal, type ProposalOp, type RunDto, type TableBox } from "./api";
-import { runsToHtml, serializeEditor, runsUnchanged, applyLiveStyle, saveInlineSelection, readCaretStyle } from "./richedit";
+import { runsToHtml, serializeEditor, runsEqual, applyLiveStyle, saveInlineSelection, readCaretStyle, type ParaIndent } from "./richedit";
 import { sanitizeSvg } from "./sanitize";
 import { advanceOffset, imageBoxToScreen, pageToScreen, screenToPage } from "./caret";
 import ImageOverlay from "./ImageOverlay";
@@ -165,7 +165,7 @@ const FONT_CHOICES = ["맑은 고딕", "바탕", "굴림", "돋움", "함초롬�
 /// target. `onPatch` sends ONLY the changed attribute (B/I toggle off the current state).
 function FormatControls({ fmt, onPatch }: {
   fmt: CharFmt;
-  onPatch: (p: { bold?: boolean; italic?: boolean; sizePt?: number; font?: string }) => void;
+  onPatch: (p: { bold?: boolean; italic?: boolean; sizePt?: number; font?: string; color?: string }) => void;
 }) {
   const size = Math.round(fmt.size_pt);
   const keep = (e: React.MouseEvent) => e.preventDefault();
@@ -210,6 +210,15 @@ function FormatControls({ fmt, onPatch }: {
         <option value="">(기본 글꼴)</option>
         {FONT_CHOICES.map((f) => <option key={f} value={f}>{f}</option>)}
       </select>
+      <span className="mx-0.5 h-4 w-px bg-black/10 dark:bg-white/10" />
+      {/* 글자색 — 연속 스펙트럼(OS 색상 선택기). Opening the picker blurs the editor, so save the live
+          selection on mousedown (like the 글꼴 select) → applyLiveStyle restores + colors the SELECTION. */}
+      <label title="글자색" className="flex h-6 w-6 cursor-pointer items-center justify-center rounded font-medium hover:bg-black/5 dark:hover:bg-white/10"
+        onMouseDown={(e) => { e.stopPropagation(); saveInlineSelection(); }}>
+        <span className="leading-none">가</span>
+        <span className="mt-2.5 -ml-3 h-1 w-3.5" style={{ backgroundColor: fmt.color ?? "#000000" }} />
+        <input type="color" value={fmt.color ?? "#000000"} className="sr-only" onChange={(e) => onPatch({ color: e.target.value })} />
+      </label>
     </div>
   );
 }
@@ -277,6 +286,26 @@ export default function App() {
   // px space (so clicks/handles line up), but the edit OPS (SetImageSize / MoveImage size) want
   // HWPUNIT — convert px→HWPUNIT at the commit boundary.
   const HWPUNIT_PER_PX = 7200 / 96;
+  // Convert a block_style indent (HWPUNIT) → SCREEN px (×scale) for the inline editor, so its text inset
+  // reproduces the placed glyphs' 들여/내어쓰기. Also maps the PER-paragraph array (one per editor block)
+  // so a multi-paragraph cell keeps each line's own indent (a numbered list "1./2./3." doesn't collapse).
+  const indentPxFromStyle = (
+    style: {
+      indent_left: number; indent_first: number; indent_right: number;
+      paragraphs?: { indent_left: number; indent_first: number; indent_right: number; align: string }[];
+    },
+    scale: number,
+  ) => {
+    const px = (hu: number) => (hu / HWPUNIT_PER_PX) * scale;
+    return {
+      indentLeft: px(style.indent_left),
+      indentFirst: px(style.indent_first),
+      indentRight: px(style.indent_right),
+      paras: (style.paragraphs ?? []).map((p) => ({
+        indentLeft: px(p.indent_left), indentFirst: px(p.indent_first), indentRight: px(p.indent_right), align: p.align,
+      })) as ParaIndent[],
+    };
+  };
   const ZOOM_MIN = 0.5;
   const ZOOM_MAX = 1; // discrete control tops out at 100%; ⌘+ won't overshoot the segmented range
   // zoom === 0 is the "맞춤(가로)" / fit-width sentinel (resolved against the live viewport width).
@@ -428,6 +457,29 @@ export default function App() {
   const activeCellRef = useRef<ActiveCell | null>(null);
   activeCellRef.current = activeCell;
 
+  // ---- Multi-cell RANGE (own-render): a drag from one cell to another selects the rectangular block of
+  // cells spanning them, so a single batch op can restyle font/정렬/배경/글자색 across the whole region
+  // (한컴 표 블록 선택). `r0/c0..r1/c1` are normalized inclusive logical row/col bounds; `box` is the
+  // union px box of the corner cells (recompute screen on zoom, like activeCell). Cleared on
+  // repaint/deselect/mode-switch; mutually exclusive with a single activeCell. ----
+  type CellRange = {
+    page: number;
+    section: number;
+    block: number; // the table's block index
+    r0: number; c0: number; r1: number; c1: number; // normalized inclusive bounds (FRAGMENT-LOCAL rows)
+    firstRow: number; // this fragment's first GLOBAL row — added to r0/r1 when calling the batch op
+    cols: number; // the table's column count (for batch-op addressing)
+    box: { x: number; y: number; w: number; h: number }; // own-engine px union box
+    screen: { left: number; top: number; width: number; height: number };
+  };
+  const [cellRange, setCellRange] = useState<CellRange | null>(null);
+  const cellRangeRef = useRef<CellRange | null>(null);
+  cellRangeRef.current = cellRange;
+  // Monotonic counter bumped on every USER range change (onRangeChange) — so a batch op's
+  // re-placement (reselectRangeAfterRepaint), which fires after an async repaint, can detect that the
+  // user has since picked a DIFFERENT range and skip restoring the stale one (no wrong-range flashback).
+  const rangeGenRef = useRef(0);
+
   // ---- Point-to-scope PIN (the visible "여기" marker, own-render): when the user POINTS at a block
   // (a click on body text in 자체 렌더, or right-click/⋯ → AI 편집), we resolve it to a block band via
   // `own_hit_test` and pin a highlight + label over it so "가리키기"(pointing) is tangible and the
@@ -471,18 +523,31 @@ export default function App() {
     scale: number; // page zoom (rect.width/viewBox.width) at open — for run size px ↔ pt round-trip
     shade: string | null; // the cell's background fill (#RRGGBB) so the editor matches the original, not white
     align: string; // "left"|"center"|"right"|"justify" — the editor matches the original alignment
+    // Paragraph indent in SCREEN px (already ×scale) so the editor reproduces the placed glyphs' inset:
+    // `indentLeft`/`indentRight` pad every line; `indentFirst` is the first-line 들여(+)/내어(−)쓰기 shift.
+    // These are the FIRST paragraph (single-paragraph fast path / container fallback).
+    indentLeft: number; indentFirst: number; indentRight: number;
+    // PER-paragraph indent/align (screen px) — one per editor block. When >1 the editor renders each
+    // paragraph in its own <div> so a multi-paragraph cell keeps each line's own indent while editing.
+    paras: ParaIndent[];
     box: { x: number; y: number; w: number; h: number }; // own-engine px box → recompute screen on zoom
     screen: { left: number; top: number; width: number; height: number };
   };
   const [inlineEdit, setInlineEdit] = useState<InlineEdit | null>(null);
   const inlineEditRef = useRef<InlineEdit | null>(null);
   inlineEditRef.current = inlineEdit;
+  // The editor's content SERIALIZED right after its initial render — the no-op baseline. Comparing a
+  // commit's serialization against THIS (same render→serialize transform) is exact: open+blur with no
+  // keystroke is definitionally unchanged, and ANY edit (incl. a trailing 줄바꿈) reliably differs. This
+  // replaced comparing against the canonicalized get_block_runs baseline, which the trailing-\n trim
+  // could make falsely equal → "엔터만 하고 닫으면 반영 안 됨".
+  const openSnapshotRef = useRef<RunDto[] | null>(null);
   // A static, non-interactive snapshot of the JUST-committed editor content (the NEW text, styled like the
   // cell), held from the moment of commit until the post-edit SVG repaints. Without it, the editor unmounts
   // on commit and the STALE pre-edit SVG flashes through for the async round-trip ("편집 전으로 보였다가
   // 리렌더링되며 반영"). The overlay bridges that gap: editor(new) → frozen(new) → fresh SVG(new), seamless.
   const [frozenEdit, setFrozenEdit] = useState<
-    { html: string; page: number; screen: { left: number; top: number; width: number; height: number }; shade: string | null; align: string } | null
+    { html: string; page: number; screen: { left: number; top: number; width: number; height: number }; shade: string | null; align: string; indentLeft: number; indentFirst: number; indentRight: number; multiPara: boolean } | null
   >(null);
   // True once the open editor has been committed/cancelled — so the unmount blur that fires when the
   // textarea closes doesn't commit a SECOND time (Enter/Escape → close → unmount → blur). Reset by
@@ -578,6 +643,18 @@ export default function App() {
     setScope(null);
     setScopePin(null);
   }, []);
+  // Drop EVERY on-page selection at once — used when a click lands on the empty canvas around/below the
+  // pages (the gray/white background): table/image/cell selection, the multi-cell drag range, the AI
+  // scope+pin, and any typing caret. This is the "click outside to deselect" gesture.
+  const deselectAll = useCallback(() => {
+    setImageSel(null);
+    setTableSel(null);
+    setActiveCell(null);
+    setCellRange(null);
+    setScope(null);
+    setScopePin(null);
+    clearCaret();
+  }, [clearCaret]);
 
   // Re-place a known image selection's overlay against the LIVE svg rect/viewBox (after zoom or a
   // repaint) — the move/resize twin of `recomputeCaretBox`. `null` box drops the selection.
@@ -827,6 +904,7 @@ export default function App() {
     // marker (the chat scope chip is managed separately by the commit/clear paths).
     setScopePin(null);
     setActiveCell(null); // the cell's box/text is stale after a repaint
+    setCellRange(null); // a multi-cell range's boxes are stale after a repaint too
     setDropHint(null); // any in-progress drag indicator is moot after a repaint
     setInlineEdit(null); // a lingering inline editor's coords are stale after a repaint
     // Own-render repaint: when 'own' is ACTIVE, diff-refresh in place (no flicker, only changed pages
@@ -968,9 +1046,9 @@ export default function App() {
           const scale = dim.width / vbd.width;
           const [runs, style] = await Promise.all([
             api.getBlockRuns(cell.section, cell.block, cell.row, cell.col).catch(() => [{ text: cell.text }]),
-            api.blockStyle(cell.section, cell.block, cell.row, cell.col).catch(() => ({ shade: null, align: "justify" })),
+            api.blockStyle(cell.section, cell.block, cell.row, cell.col).catch(() => ({ shade: null, align: "justify", indent_left: 0, indent_first: 0, indent_right: 0, paragraphs: [] })),
           ]);
-          openInlineEdit({ kind: "cell", page, section: cell.section, block: cell.block, row: cell.row, col: cell.col, text: cell.text, runs, scale, shade: style.shade, align: style.align, box, screen });
+          openInlineEdit({ kind: "cell", page, section: cell.section, block: cell.block, row: cell.row, col: cell.col, text: cell.text, runs, scale, shade: style.shade, align: style.align, ...indentPxFromStyle(style, scale), box, screen });
         }
         return;
       }
@@ -991,9 +1069,9 @@ export default function App() {
           const scale = dim.width / vbd.width;
           const [runs, style] = await Promise.all([
             api.getBlockRuns(hit.section, hit.block, null, null).catch(() => [{ text: hit.text }]),
-            api.blockStyle(hit.section, hit.block, null, null).catch(() => ({ shade: null, align: "justify" })),
+            api.blockStyle(hit.section, hit.block, null, null).catch(() => ({ shade: null, align: "justify", indent_left: 0, indent_first: 0, indent_right: 0, paragraphs: [] })),
           ]);
-          openInlineEdit({ kind: "para", page, section: hit.section, block: hit.block, text: hit.text, runs, scale, shade: style.shade, align: style.align, box, screen });
+          openInlineEdit({ kind: "para", page, section: hit.section, block: hit.block, text: hit.text, runs, scale, shade: style.shade, align: style.align, ...indentPxFromStyle(style, scale), box, screen });
         }
       }
     } catch (err) { toast("warn", `${err}`); }
@@ -1006,7 +1084,10 @@ export default function App() {
     // gesture — don't re-hit-test (it would deselect mid-drag).
     if ((e.target as Element).closest("[data-image-overlay],[data-table-overlay]")) return;
     const host = (e.target as Element).closest("[data-index]");
-    if (!host) return;
+    // No page under the pointer → the click landed in a GAP between pages (within the page column).
+    // Treat it as "click outside to deselect": drop every selection. (The wider gray margin around the
+    // column is handled by the <main> background handler, which doesn't bubble through here.)
+    if (!host) { deselectAll(); return; }
     const page = Number(host.getAttribute("data-index"));
     if (!Number.isFinite(page)) return;
     const svg = host.querySelector("svg");
@@ -1042,6 +1123,7 @@ export default function App() {
         const tbl = await api.tableAt(page, pt.x, pt.y);
         if (tbl) {
           setImageSel(null);
+          setCellRange(null); // a plain click collapses any multi-cell range back to a single cell
           recomputeTableBox(page, tbl);
           setScope({ section: tbl.section, block: tbl.block, page });
           setScopePin(null);
@@ -1052,8 +1134,17 @@ export default function App() {
         setImageSel(null);
         setTableSel(null);
         setActiveCell(null);
+        setCellRange(null);
         const hit = await api.ownHitTest(page, pt.x, pt.y);
-        if (hit) {
+        // own_hit_test SNAPS to the nearest block (so a near-miss still targets), but for a DESELECT
+        // gesture that's wrong: clicking the white page area below the content (or in a margin) snapped to
+        // a far block and RE-pinned it instead of clearing. So only pin when the click is actually INSIDE
+        // the resolved block's band (small tolerance); otherwise treat the white space as a deselect.
+        const TOL = 6; // own px
+        const insideBand = !!hit
+          && pt.x >= hit.x - TOL && pt.x <= hit.x + hit.w + TOL
+          && pt.y >= hit.y - TOL && pt.y <= hit.y + hit.h + TOL;
+        if (hit && insideBand) {
           setScope({ section: hit.section, block: hit.block, page });
           recomputeScopePin(page, hit.section, hit.block, { x: hit.x, y: hit.y, w: hit.w, h: hit.h }, hit.kind, hit.text);
         } else {
@@ -1337,7 +1428,7 @@ export default function App() {
     };
     const onKey = (e: KeyboardEvent) => {
       if (viewModeRef.current !== "own" || isTyping() || modalOpenRef.current) return;
-      if (e.key === "Escape") { setActiveCell(null); clearScope(); return; }
+      if (e.key === "Escape") { setActiveCell(null); setCellRange(null); clearScope(); return; }
       const mod = e.metaKey || e.ctrlKey;
       if (mod && (e.key === "c" || e.key === "C")) {
         if (window.getSelection()?.toString()) return; // don't hijack a real text selection copy
@@ -1417,7 +1508,7 @@ export default function App() {
       try {
         // 1) Commit the cell's STYLED runs FIRST (only if changed) so the shade repaint doesn't drop an
         //    in-progress edit; close the editor so its now-stale box doesn't linger.
-        if (ie && ie.kind === "cell" && liveRuns && !runsUnchanged(liveRuns, ie.runs)) {
+        if (ie && ie.kind === "cell" && liveRuns && !(openSnapshotRef.current && runsEqual(liveRuns, openSnapshotRef.current))) {
           inlineClosedRef.current = true;
           setInlineEdit(null);
           await api.setTableCellRuns(ie.section, ie.block, ie.row ?? 0, ie.col ?? 0, liveRuns);
@@ -1511,7 +1602,7 @@ export default function App() {
     });
   }, [whenPagePainted]);
 
-  const commitCharFmt = useCallback((patch: { bold?: boolean; italic?: boolean; sizePt?: number; font?: string }) => {
+  const commitCharFmt = useCallback((patch: { bold?: boolean; italic?: boolean; sizePt?: number; font?: string; color?: string }) => {
     const t = fmtTargetRef.current;
     if (!t) return;
     const pin = scopePinRef.current; // paragraph pin to re-establish after the repaint
@@ -1523,6 +1614,23 @@ export default function App() {
       (t.row != null && ie.kind === "cell" && ie.section === t.section && ie.block === t.block && ie.row === t.row && ie.col === t.col) ||
       (t.row == null && ie.kind === "para" && ie.section === t.section && ie.block === t.block)
     );
+    // Non-editing 글자색: SetCharFmt has no color attribute, so route it through the 1-cell range op
+    // (which does support color) for a CELL. A paragraph has no color op yet → guide to edit mode.
+    if (patch.color !== undefined && !editingHere) {
+      if (t.row == null || t.col == null) { toast("info", "문단 글자색은 더블클릭해 편집 상태에서 적용하세요"); return; }
+      setCharFmtState((prev) => (prev ? { ...prev, color: patch.color ?? prev.color } : prev));
+      void enqueueEdit(async () => {
+        if (!canEditRef.current) return;
+        try {
+          const pages = await api.setCellRangeFmt(t.section, t.block, t.row!, t.col!, t.row!, t.col!, { color: patch.color });
+          setEdited(true);
+          invalidate(pages, null);
+          reselectTableAfterRepaint(t.page, t.section, t.block);
+          reselectCellAfterRepaint(t.section, t.block, t.row!, t.col!);
+        } catch (err) { toast("warn", `글자색 변경 실패: ${err}`); }
+      });
+      return;
+    }
     // Optimistic: reflect the patch in the ribbon immediately (so B/I toggles light up).
     setCharFmtState((prev) => (prev ? {
       bold: patch.bold ?? prev.bold,
@@ -1637,6 +1745,123 @@ export default function App() {
     });
   }, [enqueueEdit, invalidate, reselectTableAfterRepaint]);
 
+  // ---- Multi-cell range (표 블록 선택) + batch format (#4) ----
+  // Build the parent `cellRange` from drag-committed (normalized) bounds — the union px box is derived
+  // from the table's fractional col/row boundaries (no IPC). A null clears it. A range supersedes the
+  // single active cell (and the inline editor closes), so the batch toolbar targets the whole block.
+  const onRangeChange = useCallback((bounds: { r0: number; c0: number; r1: number; c1: number } | null) => {
+    rangeGenRef.current += 1; // a user selection change — invalidate any in-flight re-placement
+    const sel = tableSelRef.current;
+    if (!sel || !bounds) { setCellRange(null); return; }
+    const cf = sel.colFracs, rf = sel.rowFracs;
+    if (cf.length < bounds.c1 + 2 || rf.length < bounds.r1 + 2) { setCellRange(null); return; }
+    const ownBox = {
+      x: sel.box.x + cf[bounds.c0] * sel.box.w,
+      y: sel.box.y + rf[bounds.r0] * sel.box.h,
+      w: (cf[bounds.c1 + 1] - cf[bounds.c0]) * sel.box.w,
+      h: (rf[bounds.r1 + 1] - rf[bounds.r0]) * sel.box.h,
+    };
+    const svg = svgForPage(sel.page);
+    let screen = { left: 0, top: 0, width: 0, height: 0 };
+    if (svg) {
+      const rect = svg.getBoundingClientRect();
+      const vb = svg.viewBox.baseVal;
+      screen = imageBoxToScreen(ownBox, { width: rect.width, height: rect.height }, { width: vb.width, height: vb.height }) ?? screen;
+    }
+    setActiveCell(null);
+    if (inlineEditRef.current) setInlineEdit(null);
+    setCellRange({
+      page: sel.page, section: sel.box.section, block: sel.box.block,
+      r0: bounds.r0, c0: bounds.c0, r1: bounds.r1, c1: bounds.c1,
+      firstRow: sel.box.first_row ?? 0,
+      cols: sel.box.cols, box: ownBox, screen,
+    });
+  }, []);
+
+  // A plain CLICK on a cell inside the selected-table overlay → move the ACTIVE cell there. The overlay
+  // swallows clicks (so onPageClick can't), which is why clicking a different cell used to do nothing
+  // until you deselected + reclicked. Resolves the cell via the proven point hit-test (handles merged/
+  // split/frame-wrapped), clears any range, and re-places the active-cell ring.
+  const onCellPick = useCallback((clientX: number, clientY: number) => {
+    const sel = tableSelRef.current;
+    if (!sel) return;
+    const svg = svgForPage(sel.page);
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const vb = svg.viewBox.baseVal;
+    const pt = screenToPage(clientX, clientY, { left: rect.left, top: rect.top, width: rect.width, height: rect.height }, { width: vb.width, height: vb.height });
+    if (!pt) return;
+    setCellRange(null);
+    void (async () => {
+      try { recomputeActiveCell(sel.page, await api.tableCellAt(sel.page, pt.x, pt.y)); }
+      catch { /* leave the current active cell */ }
+    })();
+  }, [recomputeActiveCell]);
+
+  // Re-place the cell range after a batch-op repaint (the table stays put; only the box/screen are
+  // refreshed against the fresh boundaries) so the user can apply several formats to the same block.
+  const reselectRangeAfterRepaint = useCallback((cr: { page: number; section: number; block: number; r0: number; c0: number; r1: number; c1: number; firstRow: number; cols: number }, gen: number) => {
+    whenPagePainted(cr.page, () => {
+      // The user changed the selection while the op was in flight — don't restore the stale range.
+      if (rangeGenRef.current !== gen) return;
+      void (async () => {
+        try {
+          const [cxs, rys] = await Promise.all([
+            api.tableColBoundaries(cr.page, cr.section, cr.block),
+            api.tableRowBoundaries(cr.page, cr.section, cr.block),
+          ]);
+          if (rangeGenRef.current !== gen) return; // re-check after the async boundary fetch
+          const svg = svgForPage(cr.page);
+          if (!svg || !cxs || !rys || cxs.length < cr.c1 + 2 || rys.length < cr.r1 + 2) { setCellRange(null); return; }
+          const ownBox = { x: cxs[cr.c0], y: rys[cr.r0], w: cxs[cr.c1 + 1] - cxs[cr.c0], h: rys[cr.r1 + 1] - rys[cr.r0] };
+          const rect = svg.getBoundingClientRect();
+          const vb = svg.viewBox.baseVal;
+          const screen = imageBoxToScreen(ownBox, { width: rect.width, height: rect.height }, { width: vb.width, height: vb.height });
+          setCellRange({ ...cr, box: ownBox, screen: screen ?? { left: 0, top: 0, width: 0, height: 0 } });
+        } catch { setCellRange(null); }
+      })();
+    });
+  }, [whenPagePainted]);
+
+  const commitRangeFmt = useCallback((fmt: { bold?: boolean; italic?: boolean; sizePt?: number; font?: string; color?: string; align?: string }) => {
+    const cr = cellRangeRef.current;
+    if (!cr) return;
+    void enqueueEdit(async () => {
+      if (!canEditRef.current) return;
+      try {
+        const gen = rangeGenRef.current;
+        // Fragment-local rows → GLOBAL (the op addresses the whole table's rows); cols never split.
+        const f = cr.firstRow;
+        const pages = await api.setCellRangeFmt(cr.section, cr.block, cr.r0 + f, cr.c0, cr.r1 + f, cr.c1, fmt);
+        setEdited(true);
+        invalidate(pages, null);
+        reselectTableAfterRepaint(cr.page, cr.section, cr.block);
+        reselectRangeAfterRepaint(cr, gen);
+      } catch (err) {
+        toast("warn", `일괄 서식 실패: ${err}`);
+      }
+    });
+  }, [enqueueEdit, invalidate, reselectTableAfterRepaint, reselectRangeAfterRepaint]);
+
+  const commitRangeShade = useCallback((color: string | null) => {
+    const cr = cellRangeRef.current;
+    if (!cr) return;
+    void enqueueEdit(async () => {
+      if (!canEditRef.current) return;
+      try {
+        const gen = rangeGenRef.current;
+        const f = cr.firstRow;
+        const pages = await api.setCellRangeShade(cr.section, cr.block, cr.r0 + f, cr.c0, cr.r1 + f, cr.c1, color);
+        setEdited(true);
+        invalidate(pages, null);
+        reselectTableAfterRepaint(cr.page, cr.section, cr.block);
+        reselectRangeAfterRepaint(cr, gen);
+      } catch (err) {
+        toast("warn", `배경색 변경 실패: ${err}`);
+      }
+    });
+  }, [enqueueEdit, invalidate, reselectTableAfterRepaint, reselectRangeAfterRepaint]);
+
   // The 칸 편집 toolbar button → open the INLINE editor over the selected table's first cell (the
   // double-click path is the primary one; this is the discoverable button). Resolves the cell rect via
   // the own-engine geometry at the table's top-left so the box lands on the real first cell.
@@ -1661,9 +1886,9 @@ export default function App() {
           const scale = dim.width / vbd.width;
           const [runs, style] = await Promise.all([
             api.getBlockRuns(cell.section, cell.block, cell.row, cell.col).catch(() => [{ text: cell.text }]),
-            api.blockStyle(cell.section, cell.block, cell.row, cell.col).catch(() => ({ shade: null, align: "justify" })),
+            api.blockStyle(cell.section, cell.block, cell.row, cell.col).catch(() => ({ shade: null, align: "justify", indent_left: 0, indent_first: 0, indent_right: 0, paragraphs: [] })),
           ]);
-          openInlineEdit({ kind: "cell", page: sel.page, section: cell.section, block: cell.block, row: cell.row, col: cell.col, text: cell.text, runs, scale, shade: style.shade, align: style.align, box, screen });
+          openInlineEdit({ kind: "cell", page: sel.page, section: cell.section, block: cell.block, row: cell.row, col: cell.col, text: cell.text, runs, scale, shade: style.shade, align: style.align, ...indentPxFromStyle(style, scale), box, screen });
         }
       } catch { /* ignore */ }
     })();
@@ -1683,11 +1908,12 @@ export default function App() {
     inlineClosedRef.current = true;
     setInlineEdit(null);
     fmtDeferredRef.current = false;
-    // NO-OP short-circuit: nothing changed (text AND styling identical) → skip the op + repaint.
-    if (runsUnchanged(runs, ie.runs)) return;
+    // NO-OP short-circuit: nothing changed vs the OPEN snapshot (same render→serialize transform) → skip
+    // the op + repaint. Robust to the trailing-\n trim, so a deliberate 줄바꿈 always commits.
+    if (openSnapshotRef.current && runsEqual(runs, openSnapshotRef.current)) return;
     // Freeze the committed content (the NEW text, styled like the cell) over the page so the stale pre-edit
     // SVG never flashes through while the op applies + the page re-renders; cleared once the fresh SVG paints.
-    setFrozenEdit({ html: runsToHtml(runs, ie.scale), page: ie.page, screen: ie.screen, shade: ie.shade, align: ie.align });
+    setFrozenEdit({ html: runsToHtml(runs, ie.scale, ie.paras), page: ie.page, screen: ie.screen, shade: ie.shade, align: ie.align, indentLeft: ie.indentLeft, indentFirst: ie.indentFirst, indentRight: ie.indentRight, multiPara: ie.paras.length >= 1 });
     void enqueueEdit(async () => {
       if (!canEditRef.current) { setFrozenEdit(null); return; }
       try {
@@ -2446,6 +2672,7 @@ export default function App() {
                       italic: p.italic ?? prev.italic,
                       size_pt: p.sizePt ?? prev.size_pt,
                       font: p.font ?? prev.font,
+                      color: p.color ?? prev.color,
                     } : prev);
                   } else commitCharFmt(p);
                 }}
@@ -2456,12 +2683,12 @@ export default function App() {
           )}
           {inlineEdit && (
             <div className="ml-auto flex shrink-0 items-center gap-1.5">
-              <span className="hidden text-neutral-400 lg:inline">드래그 선택 후 ⌘B/⌘I · ↵ 저장 · ⇧↵ 줄바꿈 · esc 취소</span>
+              <span className="text-neutral-400"><kbd className="rounded bg-black/5 px-1 dark:bg-white/10">↵</kbd> 줄바꿈 · <kbd className="rounded bg-black/5 px-1 dark:bg-white/10">⌘↵</kbd> 저장 · <kbd className="rounded bg-black/5 px-1 dark:bg-white/10">esc</kbd> 취소</span>
               <button
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => { const ie = inlineEditRef.current; if (ie) commitInlineEditFromDom(ie); }}
                 className="rounded bg-accent px-2.5 py-1 font-medium text-white hover:bg-accent/90"
-              >✓ 저장</button>
+              >✓ 저장 (⌘↵)</button>
               <button
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => cancelInlineEdit()}
@@ -2574,6 +2801,10 @@ export default function App() {
             in dark mode. The HTML iframe + empty state keep the normal app background. */}
         <main
           ref={scrollRef}
+          // Click on the bare scroll background (the gray margin around/below the page column — the click
+          // targets <main> itself, not a page child) = "click outside to deselect". Children (the page
+          // column, overlays) stop here via their own targets, so this only fires for a true empty click.
+          onClick={(e) => { if (e.target === e.currentTarget && canEditRef.current) deselectAll(); }}
           className={`min-h-0 flex-1 overflow-auto p-6 ${
             listCount > 0 && viewMode !== "html" ? "bg-neutral-200 dark:bg-neutral-800" : ""
           }`}
@@ -2717,6 +2948,16 @@ export default function App() {
                             colFracs={tableSel.colFracs}
                             rowFracs={tableSel.rowFracs}
                             activeCell={activeCell ? { row: activeCell.row, col: activeCell.col } : null}
+                            rows={tableSel.box.rows}
+                            cols={tableSel.box.cols}
+                            tableWidthMm={(tableSel.box.w * HWPUNIT_PER_PX * 25.4) / 7200}
+                            tableHeightMm={(tableSel.box.h * HWPUNIT_PER_PX * 25.4) / 7200}
+                            range={cellRange && cellRange.section === tableSel.box.section && cellRange.block === tableSel.box.block
+                              ? { r0: cellRange.r0, c0: cellRange.c0, r1: cellRange.r1, c1: cellRange.c1 } : null}
+                            onRangeChange={onRangeChange}
+                            onCellPick={onCellPick}
+                            onRangeFmt={commitRangeFmt}
+                            onRangeShade={commitRangeShade}
                             onCommitMove={commitTableMove}
                             onCommitColWidths={commitTableColWidths}
                             onCommitRowHeights={commitTableRowHeights}
@@ -2724,7 +2965,7 @@ export default function App() {
                             onEditCell={openCellEditor}
                             onDeleteTable={commitTableDeleteTable}
                             onShade={commitShade}
-                            deletable={!inlineEdit && !activeCell}
+                            deletable={!inlineEdit && !activeCell && !cellRange}
                             onMovePoint={updateDropHint}
                             onMoveEnd={clearDropHint}
                             onDismiss={clearTableSel}
@@ -2805,6 +3046,11 @@ export default function App() {
                             color: "#000000",
                             backgroundColor: frozenEdit.shade ?? "#ffffff",
                             textAlign: (frozenEdit.align as React.CSSProperties["textAlign"]) || "left",
+                            // Match the live editor's indent so the post-commit snapshot doesn't horizontally jump.
+                            // (multi-paragraph: the per-<div> html carries each indent → container base only.)
+                            paddingLeft: frozenEdit.multiPara ? "4px" : `${4 + frozenEdit.indentLeft}px`,
+                            paddingRight: frozenEdit.multiPara ? "4px" : `${4 + frozenEdit.indentRight}px`,
+                            textIndent: frozenEdit.multiPara ? "0px" : `${frozenEdit.indentFirst}px`,
                             // table-cell + middle = vertical center WITHOUT stacking each run-span on its own
                             // row (must match the live editor so the post-commit snapshot doesn't reflow).
                             display: "table-cell",
@@ -2816,8 +3062,8 @@ export default function App() {
                       {/* WYSIWYG INLINE editor (own-render): a contentEditable laid over the double-clicked
                           CELL or PARAGRAPH, rendering the block's STYLED runs so bold/italic/size/color/
                           font are visible WHILE typing. ⌘B/⌘I + the ribbon style the live selection;
-                          Enter commits (Shift+Enter = newline), Esc cancels, blur commits. innerHTML is set
-                          ONCE (uncontrolled) — never on render — so the caret + Korean IME survive. */}
+                          Enter inserts a 줄바꿈 (한글 셀 입력), ⌘/Ctrl+Enter or click-away commits, Esc cancels.
+                          innerHTML is set ONCE (uncontrolled) — never on render — so caret + Korean IME survive. */}
                       {viewMode === "own" && inlineEdit && inlineEdit.page === item.index && (
                         <div
                           // Keyed per address so a cell SWITCH remounts fresh (no stale content carryover).
@@ -2829,7 +3075,10 @@ export default function App() {
                           ref={(el) => {
                             if (el && el.dataset.init !== "1") {
                               el.dataset.init = "1";
-                              el.innerHTML = runsToHtml(inlineEdit.runs, inlineEdit.scale);
+                              el.innerHTML = runsToHtml(inlineEdit.runs, inlineEdit.scale, inlineEdit.paras);
+                              // Capture the no-op baseline: the freshly-rendered DOM serialized the SAME
+                              // way a commit will be, so "no keystrokes" round-trips to an exact match.
+                              openSnapshotRef.current = serializeEditor(el, inlineEdit.scale);
                               el.focus();
                               const r = document.createRange();
                               r.selectNodeContents(el);
@@ -2857,6 +3106,9 @@ export default function App() {
                             commitInlineEditFromDom(inlineEdit);
                           }}
                           onKeyDown={(e) => {
+                            // ⌘/Ctrl+Enter → COMMIT (Enter alone now inserts a 줄바꿈, matching 한글 셀 입력 —
+                            // pressing Enter to break a line no longer ends the edit). Esc cancels, blur commits.
+                            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); commitInlineEditFromDom(inlineEdit); return; }
                             // ⌘B / ⌘I / ⌘U → toggle the LIVE selection (visible immediately, serialized on commit).
                             if ((e.metaKey || e.ctrlKey) && /^[biu]$/i.test(e.key)) {
                               e.preventDefault();
@@ -2865,7 +3117,7 @@ export default function App() {
                               return;
                             }
                             if (e.key === "Escape") { e.preventDefault(); cancelInlineEdit(); }
-                            else if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitInlineEditFromDom(inlineEdit); }
+                            // plain Enter: let the browser insert a line break (don't preventDefault/commit).
                           }}
                           style={{
                             position: "absolute",
@@ -2883,6 +3135,16 @@ export default function App() {
                             // shaded table. No shade (or a paragraph) → white page background.
                             backgroundColor: inlineEdit.shade ?? "#ffffff",
                             textAlign: (inlineEdit.align as React.CSSProperties["textAlign"]) || "left",
+                            // Reproduce the paragraph's indent so a numbered list ("1. 2. 3.") keeps its
+                            // 들여/내어쓰기 WHILE editing (was flushing left, then jumping back on commit). 4px
+                            // base = the old px-1 breathing room; box-sizing:border-box keeps the text
+                            // wrap-width = body − left − right, matching the placed glyphs. textIndent shifts
+                            // only line 0 (negative = 내어쓰기/hanging; clamped server-side so it never clips).
+                            // Per-<div> render (whenever paragraph data exists): each paragraph's <div>
+                            // carries its OWN indent, so the container holds only the base padding.
+                            paddingLeft: inlineEdit.paras.length >= 1 ? "4px" : `${4 + inlineEdit.indentLeft}px`,
+                            paddingRight: inlineEdit.paras.length >= 1 ? "4px" : `${4 + inlineEdit.indentRight}px`,
+                            textIndent: inlineEdit.paras.length >= 1 ? "0px" : `${inlineEdit.indentFirst}px`,
                             // Vertically center the line(s) the way HWP table cells do (the cell box is the
                             // row height). table-cell + middle keeps the RUN SPANS flowing INLINE (a flex
                             // column made each run its own row → a spurious line break after a symbol run

@@ -356,6 +356,7 @@ fn op_summary(op: &Op) -> String {
                 hwp_ops::CellSel::Col(c) => format!("{c}열"),
                 hwp_ops::CellSel::Row(r) => format!("{r}행"),
                 hwp_ops::CellSel::Cell(r, c) => format!("({r},{c})칸"),
+                hwp_ops::CellSel::Rect { r0, c0, r1, c1 } => format!("({r0},{c0})–({r1},{c1})범위"),
                 hwp_ops::CellSel::All => "전체".into(),
             };
             let color = shade.as_deref().unwrap_or("(해제)");

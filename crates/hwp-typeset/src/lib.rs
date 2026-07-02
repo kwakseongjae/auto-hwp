@@ -281,8 +281,11 @@ pub(crate) fn table_row_heights(t: &Table, avail_w: f64, doc: &SemanticDoc, font
         }
         let col_end = (c.col + c.col_span.max(1)).min(t.cols);
         let cw = (xs[col_end] - xs[c.col.min(t.cols - 1)]).max(1.0);
+        // LOCKSTEP with place::row_heights: reserve at the padded text width (cw - 2*CELL_PAD_X) the cell
+        // placer draws glyphs at, so the pagination reserve equals the drawn height (no row under-reserve).
+        let tw = (cw - 2.0 * crate::place::CELL_PAD_X).max(1.0);
         let content: f64 =
-            c.blocks.iter().map(|b| block_height(b, doc, cw, fonts)).sum::<f64>() + CELL_PAD;
+            c.blocks.iter().map(|b| block_height(b, doc, tw, fonts)).sum::<f64>() + CELL_PAD;
         let span = c.row_span.max(1);
         let per = content / span as f64;
         let end = (c.row + span).min(t.rows);

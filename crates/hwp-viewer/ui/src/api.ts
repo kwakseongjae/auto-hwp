@@ -74,6 +74,8 @@ export type TableBox = {
   block: number;
   rows: number;
   cols: number;
+  /** Split-table fragment's first GLOBAL row index (0 for single-page tables). */
+  first_row: number;
 };
 
 /** One document-outline heading: model anchor `(section, block)`, a heuristic `level`, the heading
@@ -96,7 +98,7 @@ export type CellHit = { section: number; block: number; row: number; col: number
 export type PageGeom = { w: number; h: number; ml: number; mt: number; mr: number; mb: number };
 
 /** Current character format of a target's first run — for the manual format bar (B/I/size/font). */
-export type CharFmt = { bold: boolean; italic: boolean; size_pt: number; font: string | null };
+export type CharFmt = { bold: boolean; italic: boolean; size_pt: number; font: string | null; color?: string | null };
 
 /** A styled text run (WYSIWYG editor ↔ engine). `size_pt`/`color`/`font` null = inherit the default. */
 export type RunDto = {
@@ -319,9 +321,16 @@ export const api = {
    *  editor renders these as styled spans. A multi-paragraph cell joins paragraphs with a "\n" run. */
   getBlockRuns: (section: number, block: number, row: number | null, col: number | null) =>
     invoke<RunDto[]>("get_block_runs", { section, block, row, col }),
-  /** The target cell/paragraph's background fill + alignment, so the inline editor matches the original. */
+  /** The target cell/paragraph's background fill + alignment + indent geometry (HWPUNIT), so the inline
+   *  editor matches the original — incl. the left/first-line(들여·내어쓰기)/right inset of a numbered list.
+   *  `paragraphs` is the PER-paragraph indent/align (one per editor block, same order as get_block_runs)
+   *  so a multi-paragraph cell keeps each line's own indent while editing. */
   blockStyle: (section: number, block: number, row: number | null, col: number | null) =>
-    invoke<{ shade: string | null; align: string }>("block_style", { section, block, row, col }),
+    invoke<{
+      shade: string | null; align: string;
+      indent_left: number; indent_first: number; indent_right: number;
+      paragraphs: { indent_left: number; indent_first: number; indent_right: number; align: string }[];
+    }>("block_style", { section, block, row, col }),
   /** WYSIWYG commit for a CELL — replace it with STYLED runs (preserves per-run formatting). */
   setTableCellRuns: (section: number, index: number, row: number, col: number, runs: RunDto[]) =>
     invoke<number>("set_table_cell_runs", { section, index, row, col, runs }),
@@ -336,6 +345,20 @@ export const api = {
    *  unit. `sel` ∈ "row"|"col"|"cell"|"all" keyed off `(row, col)`; `shade` = "#RRGGBB" or null to clear. */
   setTableCellShade: (section: number, index: number, sel: "row" | "col" | "cell" | "all", row: number, col: number, shade: string | null) =>
     invoke<number>("set_table_cell_shade", { section, index, sel, row, col, shade }),
+  /** Multi-cell batch BACKGROUND — set/clear the shade of every cell in the rectangle [r0..r1]×[c0..c1]
+   *  of the `index`-th table as ONE undo unit (표 블록 선택 → 배경색). `shade` = "#RRGGBB" or null to clear. */
+  setCellRangeShade: (section: number, index: number, r0: number, c0: number, r1: number, c1: number, shade: string | null) =>
+    invoke<number>("set_cell_range_shade", { section, index, r0, c0, r1, c1, shade }),
+  /** Multi-cell batch CHARACTER/ALIGNMENT format over [r0..r1]×[c0..c1] of the `index`-th table as ONE
+   *  undo unit (볼드/이태릭/크기/글꼴/글자색/정렬). Pass only the fields that change. Returns new page count. */
+  setCellRangeFmt: (
+    section: number, index: number, r0: number, c0: number, r1: number, c1: number,
+    fmt: { bold?: boolean; italic?: boolean; sizePt?: number; font?: string; color?: string; align?: string },
+  ) => invoke<number>("set_cell_range_fmt", {
+    section, index, r0, c0, r1, c1,
+    bold: fmt.bold ?? null, italic: fmt.italic ?? null, size_pt: fmt.sizePt ?? null,
+    font: fmt.font ?? null, color: fmt.color ?? null, align: fmt.align ?? null,
+  }),
   /** OS clipboard (own-mode copy/paste) — reliable read/write via Rust (the WKWebView clipboard is not). */
   clipboardRead: () => invoke<string>("clipboard_read"),
   clipboardWrite: (text: string) => invoke<void>("clipboard_write", { text }),

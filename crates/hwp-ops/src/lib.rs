@@ -152,6 +152,27 @@ pub enum Op {
         bold: Option<bool>,
         italic: Option<bool>,
     },
+    /// The RANGE twin of [`Op::SetCharFmt`] for a TABLE: patch the character format (볼드/이태릭/크기/
+    /// 글꼴/글자색) and/or paragraph alignment of EVERY active cell whose span overlaps the inclusive
+    /// rectangle `[r0..=r1] × [c0..=c1]` of the `index`-th table — the 표 블록 선택 → 일괄 서식. Each
+    /// `Some` field applies (preserving every other attribute); `font`/`align` empty-string semantics
+    /// mirror [`Op::SetCharFmt`] / the paraPr parser. At least one field must be `Some`. ONE undo unit.
+    SetCellRangeFmt {
+        section: usize,
+        index: usize,
+        r0: usize,
+        c0: usize,
+        r1: usize,
+        c1: usize,
+        bold: Option<bool>,
+        italic: Option<bool>,
+        size_pt: Option<f32>,
+        font: Option<String>,
+        /// Text color `#RRGGBB` (None = leave each run's color).
+        color: Option<String>,
+        /// "left"|"center"|"right"|"justify"|"distribute" (None = leave each paragraph's alignment).
+        align: Option<String>,
+    },
 }
 
 /// Which cells of an existing table a [`Op::SetTableCellShade`] targets.
@@ -163,6 +184,9 @@ pub enum CellSel {
     Row(usize),
     /// The single cell anchored at (row, col).
     Cell(usize, usize),
+    /// Every cell whose span overlaps the inclusive rectangle `[r0..=r1] × [c0..=c1]` — the
+    /// multi-cell drag-selection (표 블록 선택). Bounds are normalized by the caller (r0≤r1, c0≤c1).
+    Rect { r0: usize, c0: usize, r1: usize, c1: usize },
     /// Every cell in the table.
     All,
 }
@@ -953,6 +977,10 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                     CellSel::Col(c) => c0 <= c && c < c1,
                     CellSel::Row(r) => r0 <= r && r < r1,
                     CellSel::Cell(r, c) => r0 == r && c0 == c,
+                    // Span-overlap test against the (normalized) selection rectangle.
+                    CellSel::Rect { r0: rr0, c0: cc0, r1: rr1, c1: cc1 } => {
+                        r0 <= rr1 && rr0 < r1 && c0 <= cc1 && cc0 < c1
+                    }
                     CellSel::All => true,
                 };
                 if pick {
@@ -1301,7 +1329,10 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                 if let Some(f) = font {
                     let f = f.trim();
                     if f.is_empty() {
+                        // "기본 글꼴로" — clear BOTH font_family AND the per-script `fonts` (which take
+                        // precedence on export); leaving `fonts` would silently keep the old faces.
                         sh.font_family = None;
+                        sh.fonts = Vec::new();
                     } else {
                         sh.font_family = Some(f.to_string());
                         sh.fonts = Vec::new(); // let font_family apply to all scripts (it loses to per-script `fonts`)
@@ -1380,6 +1411,130 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                 }
                 p.dirty.mark();
             }
+            sec.dirty.mark();
+            Ok(())
+        }
+        Op::SetCellRangeFmt { section, index, r0, c0, r1, c1, bold, italic, size_pt, font, color, align } => {
+            if bold.is_none() && italic.is_none() && size_pt.is_none() && font.is_none() && color.is_none() && align.is_none() {
+                return Err(Error::Other("SetCellRangeFmt: no attribute specified".into()));
+            }
+            if let Some(s) = size_pt {
+                if !(*s > 0.0) {
+                    return Err(Error::Other("SetCellRangeFmt: size_pt must be > 0".into()));
+                }
+            }
+            let text_color = match color {
+                Some(s) => Some(Color::from_hex(s).ok_or_else(|| {
+                    Error::Other(format!("SetCellRangeFmt: bad color {s:?} (want #RRGGBB)"))
+                })?),
+                None => None,
+            };
+            let new_align = align.as_deref().map(|a| match a.to_ascii_lowercase().as_str() {
+                "left" => HorizontalAlign::Left,
+                "right" => HorizontalAlign::Right,
+                "center" => HorizontalAlign::Center,
+                "distribute" => HorizontalAlign::Distribute,
+                "distribute_space" | "divide" => HorizontalAlign::DistributeSpace,
+                _ => HorizontalAlign::Justify,
+            });
+            // Normalize the rectangle (caller should pass normalized, but be defensive).
+            let (rlo, rhi) = (*r0.min(r1), *r0.max(r1));
+            let (clo, chi) = (*c0.min(c1), *c0.max(c1));
+            let has_char = bold.is_some() || italic.is_some() || size_pt.is_some() || font.is_some() || text_color.is_some();
+            // A cell's span overlaps the (inclusive) selection rectangle.
+            let in_range = |cell: &Cell| -> bool {
+                let (cr0, cc0) = (cell.row, cell.col);
+                let (cr1, cc1) = (cr0 + cell.row_span.max(1), cc0 + cell.col_span.max(1));
+                cr0 <= rhi && rlo < cr1 && cc0 <= chi && clo < cc1
+            };
+            // Pass 1: collect the DISTINCT char-shape + para-shape indices across the targeted cells'
+            // formattable paragraphs (immutable scan) — patch each distinct shape once, then remap.
+            let mut distinct_cs: Vec<usize> = Vec::new();
+            let mut distinct_ps: Vec<usize> = Vec::new();
+            {
+                let sec = doc.sections.get(*section).ok_or_else(|| Error::Other(format!("SetCellRangeFmt: section {section} out of range")))?;
+                let blk = sec.blocks.get(*index).ok_or_else(|| Error::Other(format!("SetCellRangeFmt: block {index} out of range")))?;
+                let Block::Table(t) = blk else {
+                    return Err(Error::Other(format!("SetCellRangeFmt: block {index} is not a table")));
+                };
+                let t = t.edit_target();
+                for cell in t.cells.iter().filter(|c| c.active && in_range(c)) {
+                    for b in &cell.blocks {
+                        if let Block::Paragraph(p) = b {
+                            if !is_formattable_para(p) { continue; }
+                            if new_align.is_some() && !distinct_ps.contains(&p.para_shape) {
+                                distinct_ps.push(p.para_shape);
+                            }
+                            if has_char {
+                                for run in &p.runs {
+                                    if !distinct_cs.contains(&run.char_shape) {
+                                        distinct_cs.push(run.char_shape);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // Pass 2: intern patched shapes (mutates the shape pools) → remap tables.
+            let mut cs_remap: Vec<(usize, usize)> = Vec::with_capacity(distinct_cs.len());
+            for &old in &distinct_cs {
+                let mut sh = doc.char_shapes.get(old).cloned().unwrap_or_default();
+                if let Some(b) = bold { sh.bold = *b; }
+                if let Some(i) = italic { sh.italic = *i; }
+                if let Some(s) = size_pt { sh.height = (*s * 100.0).round() as HwpUnit; }
+                if let Some(c) = text_color { sh.text_color = c; }
+                if let Some(f) = font {
+                    let f = f.trim();
+                    if f.is_empty() {
+                        sh.font_family = None;
+                    } else {
+                        sh.font_family = Some(f.to_string());
+                        sh.fonts = Vec::new();
+                    }
+                }
+                cs_remap.push((old, intern_char_shape(doc, sh)));
+            }
+            let mut ps_remap: Vec<(usize, usize)> = Vec::with_capacity(distinct_ps.len());
+            for &old in &distinct_ps {
+                let mut sh = doc.para_shapes.get(old).cloned().unwrap_or_default();
+                if let Some(a) = new_align { sh.align = a; }
+                ps_remap.push((old, intern_para_shape(doc, sh)));
+            }
+            // Pass 3: reassign the targeted cells' paragraphs (mutable scan).
+            let sec = section_mut(doc, *section)?;
+            let blk = sec.blocks.get_mut(*index).ok_or_else(|| Error::Other(format!("SetCellRangeFmt: block {index} out of range")))?;
+            let Block::Table(t) = blk else {
+                return Err(Error::Other(format!("SetCellRangeFmt: block {index} is not a table")));
+            };
+            let t = t.edit_target_mut();
+            let mut hit = 0usize;
+            for cell in t.cells.iter_mut().filter(|c| c.active && in_range(c)) {
+                let mut touched = false;
+                for b in &mut cell.blocks {
+                    if let Block::Paragraph(p) = b {
+                        if !is_formattable_para(p) { continue; }
+                        if let Some(&(_, new)) = ps_remap.iter().find(|(o, _)| *o == p.para_shape) {
+                            p.para_shape = new;
+                        }
+                        for run in &mut p.runs {
+                            if let Some(&(_, new)) = cs_remap.iter().find(|(o, _)| *o == run.char_shape) {
+                                run.char_shape = new;
+                            }
+                        }
+                        p.dirty.mark();
+                        touched = true;
+                    }
+                }
+                if touched {
+                    cell.dirty.mark();
+                    hit += 1;
+                }
+            }
+            if hit == 0 {
+                return Err(Error::Other("SetCellRangeFmt: 선택 영역에 서식을 적용할 칸이 없습니다".into()));
+            }
+            t.dirty.mark();
             sec.dirty.mark();
             Ok(())
         }
@@ -2165,6 +2320,56 @@ mod tests {
         }).is_err());
         assert!(apply(&mut doc, &Op::SetTableCellShade {
             section: 0, index: 0, sel: CellSel::All, shade: None,
+        }).is_err());
+    }
+
+    #[test]
+    fn set_cell_range_fmt_restyles_only_the_selected_block() {
+        // Build a 3×3 table; batch-format the TOP-LEFT 2×2 block (bold + center) and a shade Rect.
+        let mut doc = doc_with(vec![simple_para(1, "앞")]);
+        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
+        let row = || vec![cell("a"), cell("b"), cell("c")];
+        apply(&mut doc, &Op::InsertTableAt { section: 0, index: 1, rows: vec![row(), row(), row()] }).unwrap();
+        // Helpers reading a cell's first run bold + first paragraph alignment.
+        let probe = |doc: &SemanticDoc, r: usize, c: usize| -> (bool, HorizontalAlign) {
+            let Block::Table(t) = &doc.sections[0].blocks[1] else { panic!("not a table") };
+            let cell = t.cells.iter().find(|cc| cc.active && cc.row == r && cc.col == c).expect("active cell");
+            let p = cell.blocks.iter().find_map(|b| if let Block::Paragraph(p) = b { Some(p) } else { None }).expect("para");
+            let bold = doc.char_shapes[p.runs[0].char_shape].bold;
+            let align = doc.para_shapes[p.para_shape].align;
+            (bold, align)
+        };
+        apply(&mut doc, &Op::SetCellRangeFmt {
+            section: 0, index: 1, r0: 0, c0: 0, r1: 1, c1: 1,
+            bold: Some(true), italic: None, size_pt: None, font: None, color: None, align: Some("center".into()),
+        }).unwrap();
+        for r in 0..3 {
+            for c in 0..3 {
+                let (bold, align) = probe(&doc, r, c);
+                let inside = r <= 1 && c <= 1;
+                assert_eq!(bold, inside, "bold @({r},{c}) inside={inside}");
+                assert_eq!(align == HorizontalAlign::Center, inside, "center @({r},{c}) inside={inside}");
+            }
+        }
+        // A shade Rect over the same block tints exactly those 4 cells.
+        apply(&mut doc, &Op::SetTableCellShade {
+            section: 0, index: 1, sel: CellSel::Rect { r0: 0, c0: 0, r1: 1, c1: 1 }, shade: Some("#FFF9C4".into()),
+        }).unwrap();
+        let want = Color::from_hex("#FFF9C4");
+        if let Block::Table(t) = &doc.sections[0].blocks[1] {
+            for cc in &t.cells {
+                let inside = cc.row <= 1 && cc.col <= 1;
+                assert_eq!(cc.shade_color == want, inside, "shade @({},{}) inside={inside}", cc.row, cc.col);
+            }
+        }
+        // A no-attribute call and a non-table target both error.
+        assert!(apply(&mut doc, &Op::SetCellRangeFmt {
+            section: 0, index: 1, r0: 0, c0: 0, r1: 0, c1: 0,
+            bold: None, italic: None, size_pt: None, font: None, color: None, align: None,
+        }).is_err());
+        assert!(apply(&mut doc, &Op::SetCellRangeFmt {
+            section: 0, index: 0, r0: 0, c0: 0, r1: 0, c1: 0,
+            bold: Some(true), italic: None, size_pt: None, font: None, color: None, align: None,
         }).is_err());
     }
 

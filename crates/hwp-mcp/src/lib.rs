@@ -747,6 +747,17 @@ pub enum Intent {
     /// (`SetTableCellShade`). `sel` ∈ {"row","col","cell","all"} keyed off `(row, col)`; `shade` is
     /// "#RRGGBB" or None to clear.
     SetTableCellShade { section: usize, index: usize, sel: String, row: usize, col: usize, shade: Option<String> },
+    /// Multi-cell batch background — set/clear the shade of every cell overlapping the rectangle
+    /// `[r0..=r1] × [c0..=c1]` of the `index`-th table as ONE undo unit (`SetTableCellShade` +
+    /// `CellSel::Rect`). `shade` is "#RRGGBB" or None to clear.
+    SetCellRangeShade { section: usize, index: usize, r0: usize, c0: usize, r1: usize, c1: usize, shade: Option<String> },
+    /// Multi-cell batch character/alignment format over the rectangle `[r0..=r1] × [c0..=c1]` of the
+    /// `index`-th table as ONE undo unit (`SetCellRangeFmt`). Each `Some` field applies.
+    SetCellRangeFmt {
+        section: usize, index: usize, r0: usize, c0: usize, r1: usize, c1: usize,
+        bold: Option<bool>, italic: Option<bool>, size_pt: Option<f32>, font: Option<String>,
+        color: Option<String>, align: Option<String>,
+    },
     /// Block delete — remove the block at `(section, index)` as ONE undo unit (`DeleteBlock`).
     DeleteBlock { section: usize, index: usize },
 }
@@ -957,6 +968,21 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
             };
             let doc = session.doc.as_mut().ok_or("no document open")?;
             doc.do_op(&hwp_ops::Op::SetTableCellShade { section, index, sel: cellsel, shade }).map_err(|e| e.to_string())?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::SetCellRangeShade { section, index, r0, c0, r1, c1, shade } => {
+            use hwp_ops::CellSel;
+            let doc = session.doc.as_mut().ok_or("no document open")?;
+            doc.do_op(&hwp_ops::Op::SetTableCellShade { section, index, sel: CellSel::Rect { r0, c0, r1, c1 }, shade })
+                .map_err(|e| e.to_string())?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::SetCellRangeFmt { section, index, r0, c0, r1, c1, bold, italic, size_pt, font, color, align } => {
+            let doc = session.doc.as_mut().ok_or("no document open")?;
+            doc.do_op(&hwp_ops::Op::SetCellRangeFmt { section, index, r0, c0, r1, c1, bold, italic, size_pt, font, color, align })
+                .map_err(|e| e.to_string())?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }

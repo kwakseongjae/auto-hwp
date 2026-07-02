@@ -929,6 +929,10 @@ struct TableBoxDto {
     block: usize,
     rows: usize,
     cols: usize,
+    /// For a table SPLIT across pages, this fragment's FIRST global row index (0 for a single-page
+    /// table). The cell-range selection adds this offset to its fragment-local row indices so a batch
+    /// op (SetCellRangeFmt) targets the correct GLOBAL rows of the (possibly frame-wrapped) table.
+    first_row: usize,
 }
 
 /// Locate the placed outer box of the table anchored at `(section, block)` on `page`, in own-engine
@@ -954,7 +958,7 @@ async fn table_bbox(
             .tables
             .iter()
             .find(|t| t.section == section && t.block == block)
-            .map(|t| TableBoxDto { x: t.x / k, y: t.y / k, w: t.w / k, h: t.h / k, section: t.section, block: t.block, rows: t.rows, cols: t.cols }))
+            .map(|t| TableBoxDto { x: t.x / k, y: t.y / k, w: t.w / k, h: t.h / k, section: t.section, block: t.block, rows: t.rows, cols: t.cols, first_row: t.first_row }))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -985,7 +989,7 @@ async fn table_at(
             .iter()
             .filter(|t| x >= t.x && x <= t.x + t.w && y >= t.y && y <= t.y + t.h)
             .last()
-            .map(|t| TableBoxDto { x: t.x / k, y: t.y / k, w: t.w / k, h: t.h / k, section: t.section, block: t.block, rows: t.rows, cols: t.cols }))
+            .map(|t| TableBoxDto { x: t.x / k, y: t.y / k, w: t.w / k, h: t.h / k, section: t.section, block: t.block, rows: t.rows, cols: t.cols, first_row: t.first_row }))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1185,6 +1189,63 @@ async fn set_table_cell_shade(
     tauri::async_runtime::spawn_blocking(move || {
         let mut s = sess.lock().map_err(|_| "session poisoned")?;
         match apply_intent(&mut s, Intent::SetTableCellShade { section, index, sel, row, col, shade })? {
+            Outcome::Edited { pages } => Ok(pages),
+            _ => Err("unexpected outcome".into()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Multi-cell batch BACKGROUND — set/clear the shade of every cell overlapping the rectangle
+/// `[r0..=r1] × [c0..=c1]` of the `index`-th table as ONE undo unit. Returns the new page count.
+#[tauri::command]
+async fn set_cell_range_shade(
+    section: usize,
+    index: usize,
+    r0: usize,
+    c0: usize,
+    r1: usize,
+    c1: usize,
+    shade: Option<String>,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<u32, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        match apply_intent(&mut s, Intent::SetCellRangeShade { section, index, r0, c0, r1, c1, shade })? {
+            Outcome::Edited { pages } => Ok(pages),
+            _ => Err("unexpected outcome".into()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Multi-cell batch CHARACTER/ALIGNMENT format over the rectangle `[r0..=r1] × [c0..=c1]` of the
+/// `index`-th table as ONE undo unit (볼드/이태릭/크기/글꼴/글자색/정렬). Each `Some` field applies.
+/// Returns the new page count.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn set_cell_range_fmt(
+    section: usize,
+    index: usize,
+    r0: usize,
+    c0: usize,
+    r1: usize,
+    c1: usize,
+    bold: Option<bool>,
+    italic: Option<bool>,
+    size_pt: Option<f32>,
+    font: Option<String>,
+    color: Option<String>,
+    align: Option<String>,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<u32, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        match apply_intent(&mut s, Intent::SetCellRangeFmt { section, index, r0, c0, r1, c1, bold, italic, size_pt, font, color, align })? {
             Outcome::Edited { pages } => Ok(pages),
             _ => Err("unexpected outcome".into()),
         }
@@ -1617,7 +1678,7 @@ async fn set_run_char_fmt(
 /// The CURRENT character format of a target's first run — so the manual format bar can show + toggle
 /// the right state. Target same as `set_char_fmt`. `None` if the target/run can't be resolved.
 #[derive(serde::Serialize)]
-struct CharFmt { bold: bool, italic: bool, size_pt: f32, font: Option<String> }
+struct CharFmt { bold: bool, italic: bool, size_pt: f32, font: Option<String>, color: Option<String> }
 
 #[tauri::command]
 async fn char_fmt(
@@ -1646,11 +1707,13 @@ async fn char_fmt(
         };
         let Some(idx) = first_run_shape else { return Ok(None) };
         let sh = doc.char_shapes.get(idx).cloned().unwrap_or_default();
+        let default_color = hwp_model::prelude::CharShape::default().text_color;
         Ok(Some(CharFmt {
             bold: sh.bold,
             italic: sh.italic,
             size_pt: if sh.height > 0 { sh.height as f32 / 100.0 } else { 10.0 },
             font: sh.font_family.clone(),
+            color: if sh.text_color == default_color { None } else { Some(sh.text_color.to_hex()) },
         }))
     })
     .await
@@ -1762,6 +1825,30 @@ struct BlockStyleDto {
     shade: Option<String>,
     /// Horizontal text alignment: "left" | "center" | "right" | "justify".
     align: String,
+    /// Paragraph indent geometry in HWPUNIT, matching the renderer's `indent_of` so the inline editor
+    /// reproduces the SAME left inset / first-line (들여/내어쓰기) shift / right inset that the placed
+    /// glyphs use — otherwise a numbered list ("1. 2. 3.") flushes left in the editor then jumps back to
+    /// its indent when editing ends. `indent_left`/`indent_right` apply to every line (clamped ≥0);
+    /// `indent_first` is the first-line extra (positive 들여쓰기, negative 내어쓰기, clamped ≥ -left).
+    /// These mirror the FIRST paragraph (back-compat / single-paragraph fast path).
+    indent_left: i32,
+    indent_first: i32,
+    indent_right: i32,
+    /// PER-PARAGRAPH style, one entry per paragraph in the SAME order `get_block_runs` emits them
+    /// (a cell's paragraphs joined by standalone "\n" runs). The editor renders each paragraph in its
+    /// own block so a multi-paragraph cell (e.g. a "[첨부] 1. / 2. / 3." numbered list where lines 2-3
+    /// carry their OWN left indent) keeps each line's indent/alignment WHILE editing — a single
+    /// container indent forced all lines to line 0's value, so 2-3 flushed left then jumped back.
+    paragraphs: Vec<ParaStyleDto>,
+}
+
+/// One paragraph's indent (HWPUNIT) + alignment — the per-paragraph half of [`BlockStyleDto`].
+#[derive(serde::Serialize)]
+struct ParaStyleDto {
+    indent_left: i32,
+    indent_first: i32,
+    indent_right: i32,
+    align: String,
 }
 
 #[tauri::command]
@@ -1786,21 +1873,48 @@ async fn block_style(
             }
             .to_string()
         };
-        let mut dto = BlockStyleDto { shade: None, align: "justify".into() };
+        // Mirror hwp_typeset::place::indent_of's clamping so the editor's inset matches the placed glyphs.
+        let indent_of = |p: &Paragraph| -> (i32, i32, i32) {
+            let ps = doc.para_shapes.get(p.para_shape);
+            let left = ps.map(|s| s.left_margin).unwrap_or(0).max(0);
+            let right = ps.map(|s| s.right_margin).unwrap_or(0).max(0);
+            let indent = ps.map(|s| s.indent).unwrap_or(0);
+            let first = indent.max(-left); // 들여(+)/내어(−)쓰기, clamped so line 0 never crosses the inset
+            (left as i32, first as i32, right as i32)
+        };
+        let para_style = |p: &Paragraph| -> ParaStyleDto {
+            let (l, f, r) = indent_of(p);
+            ParaStyleDto { indent_left: l, indent_first: f, indent_right: r, align: align_of(p) }
+        };
+        let mut dto = BlockStyleDto {
+            shade: None, align: "justify".into(),
+            indent_left: 0, indent_first: 0, indent_right: 0, paragraphs: Vec::new(),
+        };
         let Some(sec) = doc.sections.get(section) else { return Ok(dto) };
         let Some(blk) = sec.blocks.get(block) else { return Ok(dto) };
         match (blk, row, col) {
-            (Block::Paragraph(p), None, None) => dto.align = align_of(p),
+            (Block::Paragraph(p), None, None) => dto.paragraphs.push(para_style(p)),
             (Block::Table(t), Some(r), Some(c)) => {
                 let t = t.edit_target(); // frame wrapper (자가진단표) → inner table
                 if let Some(cell) = t.cells.iter().find(|cc| cc.active && cc.row == r && cc.col == c) {
                     dto.shade = cell.shade_color.map(|c| c.to_hex());
-                    if let Some(Block::Paragraph(p)) = cell.blocks.iter().find(|b| matches!(b, Block::Paragraph(_))) {
-                        dto.align = align_of(p);
+                    // SAME paragraph iteration as `get_block_runs` so paragraphs[i] aligns with the
+                    // i-th editor block (lockstep — an off-by-one would mis-indent every later line).
+                    for b in &cell.blocks {
+                        if let Block::Paragraph(p) = b {
+                            dto.paragraphs.push(para_style(p));
+                        }
                     }
                 }
             }
             _ => {}
+        }
+        // The first paragraph drives the back-compat single-indent fields + the container alignment.
+        if let Some(first) = dto.paragraphs.first() {
+            dto.align = first.align.clone();
+            dto.indent_left = first.indent_left;
+            dto.indent_first = first.indent_first;
+            dto.indent_right = first.indent_right;
         }
         Ok(dto)
     })
@@ -1969,6 +2083,8 @@ pub fn run() {
             set_table_cell_runs,
             set_paragraph_runs,
             set_table_cell_shade,
+            set_cell_range_shade,
+            set_cell_range_fmt,
             clipboard_read,
             clipboard_write,
             delete_block

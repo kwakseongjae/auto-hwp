@@ -826,8 +826,11 @@ fn push_cell_edges(pg: &mut PlacedPage, borders: &[Option<CellEdge>; 4], cx: f64
     }
 }
 
-/// Horizontal inset for cell text from the cell's left/right edges (HWPUNIT ≈ 0.7mm).
-const CELL_PAD_X: f64 = 200.0;
+/// Horizontal inset for cell text from the cell's left/right edges (HWPUNIT ≈ 0.7mm). Cell text is
+/// laid out (and its height RESERVED) at `cw - 2*CELL_PAD_X` so the reservation equals what's drawn —
+/// otherwise a label that fits at the full `cw` but wraps at the padded width drew a 2nd line BELOW the
+/// reserved row, overlapping the next cell.
+pub(crate) const CELL_PAD_X: f64 = 80.0;
 
 /// Floor for any border/diagonal stroke width (device px). Matches rhwp's hairline clamp so a 0.4px
 /// gov-doc border still renders as a crisp ~0.5px hairline instead of vanishing at our scale.
@@ -994,8 +997,11 @@ fn row_heights(t: &Table, avail_w: f64, doc: &SemanticDoc, fonts: &dyn FontMetri
         }
         let col_end = (c.col + c.col_span.max(1)).min(t.cols);
         let cw = (col_x[col_end] - col_x[c.col.min(t.cols - 1)]).max(1.0);
+        // Reserve at the SAME padded text width the glyphs are drawn at (place_cell_content), so a row
+        // never reserves fewer lines than get drawn (the 2-line-label-over-next-cell overlap).
+        let tw = (cw - 2.0 * CELL_PAD_X).max(1.0);
         let content: f64 =
-            c.blocks.iter().map(|b| block_height_for_place(b, doc, cw, fonts)).sum::<f64>() + crate::CELL_PAD;
+            c.blocks.iter().map(|b| block_height_for_place(b, doc, tw, fonts)).sum::<f64>() + crate::CELL_PAD;
         let span = c.row_span.max(1);
         let per = content / span as f64;
         let end = (c.row + span).min(t.rows);
