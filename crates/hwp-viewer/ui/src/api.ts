@@ -40,6 +40,21 @@ export type Proposal = {
   ops: ProposalOp[];
 };
 
+/** A structural edit ANCHOR the user marked in the document (issue #009: cell/range/paragraph/table)
+ *  that rides along with a chat prompt so the AI edits exactly that spot. Coordinates are STRUCTURE
+ *  indices — NEVER pixels (invalidated by zoom/repaint): `section`/`block` are the model anchor;
+ *  `rows`/`cols` are inclusive GLOBAL bounds (split-table `first_row` already folded into a range's
+ *  rows). `label` is the human-readable Korean chip text; `page` is the 0-based page for context. */
+export type Anchor = {
+  kind: "cell" | "range" | "paragraph" | "table";
+  section: number;
+  block: number;
+  rows?: [number, number];
+  cols?: [number, number];
+  label: string;
+  page: number;
+};
+
 /** WYSIWYG caret — the editable model target a click resolved to. `node`/`block` are null for a
  *  table-cell run or a doc without NodeIds (an unedited binary .hwp): geometry is available, the
  *  editable target is not. `offset` is the caret position in PARAGRAPH chars (Unicode scalars). */
@@ -149,12 +164,19 @@ export const api = {
   /** Vibe-docs chat-edit: the provider sees the doc as an anchored [s/b] outline and proposes
    *  TARGETED edits (insert table/image near an anchor, shade a column, …), dry-run into a pending
    *  proposal; returns rationale+preview. `commitProposal()` then applies it (one undo unit).
-   *  `scope` is an optional click-resolved target the user pointed at (section, and block if known). */
-  aiEdit: (instruction: string, scope?: { section: number; block: number | null }) =>
+   *  `scope` is an optional click-resolved target the user pointed at (section, and block if known).
+   *  `anchors` are the marked anchor chips (issue #009) — when present, Rust scopes the edit to those
+   *  exact spots (their structure coords) instead of the single click-scope. */
+  aiEdit: (
+    instruction: string,
+    scope?: { section: number; block: number | null },
+    anchors?: Anchor[],
+  ) =>
     invoke<Proposal>("ai_edit_propose", {
       instruction,
       scopeSection: scope?.section ?? null,
       scopeBlock: scope?.block ?? null,
+      anchors: anchors && anchors.length ? JSON.stringify(anchors) : null,
     }),
   /** Active AI provider name ("anthropic"/"ollama"/"openrouter"/"mock"/"none") — for an honest badge. */
   aiProviderName: () => invoke<string>("ai_provider_name"),

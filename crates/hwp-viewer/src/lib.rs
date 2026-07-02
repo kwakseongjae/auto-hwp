@@ -387,6 +387,63 @@ fn ai_generate(_prompt: String, _sess: tauri::State<'_, SharedSession>) -> Resul
     Err("AI 생성은 `--features ai` 빌드가 필요합니다 (cargo tauri dev -f rhwp ai)".into())
 }
 
+/// One structural edit ANCHOR the user marked in the viewer (issue #009), deserialized from the JSON
+/// the UI passes. Coordinates are STRUCTURE indices (never pixels): `rows`/`cols` are inclusive GLOBAL
+/// bounds — the UI already folds a split-table fragment's `first_row` into a range's rows, so these
+/// address the live model table directly (same space as [`hwp_ai::edit::EditCommand`]'s row/col).
+#[cfg(feature = "ai")]
+#[derive(serde::Deserialize)]
+struct AnchorDto {
+    #[serde(default)]
+    kind: String,
+    #[serde(default)]
+    section: usize,
+    #[serde(default)]
+    block: usize,
+    #[serde(default)]
+    rows: Option<[usize; 2]>,
+    #[serde(default)]
+    cols: Option<[usize; 2]>,
+    #[serde(default)]
+    label: String,
+}
+
+/// Turn the marked anchors into a Korean directive prepended to the user's instruction, telling the
+/// model to edit ONLY those spots (with their exact `[s/b]` + row/col structure coords). Returns
+/// `None` when the JSON is absent/empty/unparseable, so the caller falls back to the click-scope path.
+#[cfg(feature = "ai")]
+fn anchor_directive(anchors_json: Option<&str>, instruction: &str) -> Option<String> {
+    let list: Vec<AnchorDto> = serde_json::from_str(anchors_json?).ok()?;
+    if list.is_empty() {
+        return None;
+    }
+    let mut lines = String::new();
+    for a in &list {
+        let mut coord = format!("section={}, block={}", a.section, a.block);
+        if let Some([r0, r1]) = a.rows {
+            if r0 == r1 {
+                coord.push_str(&format!(", row={r0}"));
+            } else {
+                coord.push_str(&format!(", row {r0}..={r1}"));
+            }
+        }
+        if let Some([c0, c1]) = a.cols {
+            if c0 == c1 {
+                coord.push_str(&format!(", col={c0}"));
+            } else {
+                coord.push_str(&format!(", col {c0}..={c1}"));
+            }
+        }
+        let label = if a.label.is_empty() { a.kind.as_str() } else { a.label.as_str() };
+        lines.push_str(&format!("- [s{}/b{}] {label} ({coord})\n", a.section, a.block));
+    }
+    Some(format!(
+        "[편집 대상 앵커 — 사용자가 문서에서 직접 지정한 위치입니다. 아래 앵커가 가리키는 곳만 편집하고, \
+         다른 블록은 절대 건드리지 마세요. 좌표는 0부터 시작하는 구조 인덱스(섹션/블록/행/열)입니다:\n\
+         {lines}]\n사용자 요청: {instruction}"
+    ))
+}
+
 /// Vibe-docs chat-edit: the provider sees the LIVE document as an anchored `[s/b]` outline and
 /// proposes TARGETED edits (insert table/image near an anchor, shade a column, delete a block),
 /// dry-run into a pending proposal; returns the rationale + per-op diff for review. `commit_proposal`
@@ -394,6 +451,8 @@ fn ai_generate(_prompt: String, _sess: tauri::State<'_, SharedSession>) -> Resul
 ///
 /// `scopeSection`/`scopeBlock` = an optional click-resolved target the user pointed at in the viewer;
 /// when present we prepend a directive so the model anchors its edits there ("이거 바꿔줘" → that block).
+/// `anchors` = the marked anchor chips' JSON (issue #009); when non-empty they take priority and scope
+/// the edit to exactly those spots (their structure coords), else we fall back to the click-scope.
 #[cfg(feature = "ai")]
 #[allow(non_snake_case)]
 #[tauri::command]
@@ -401,21 +460,28 @@ fn ai_edit_propose(
     instruction: String,
     scopeSection: Option<usize>,
     scopeBlock: Option<usize>,
+    anchors: Option<String>,
     sess: tauri::State<'_, SharedSession>,
 ) -> Result<Value, String> {
     let mut s = sess.lock().map_err(|_| "session poisoned")?;
     let provider = pick_provider();
     let doc = s.doc.as_ref().ok_or("no document open")?.doc();
-    let scoped = match (scopeSection, scopeBlock) {
-        (Some(sec), Some(blk)) => format!(
-            "[편집 대상 위치: 섹션 {sec}, 블록 {blk} — 앵커 [s{sec}/b{blk}]. 사용자가 이 위치를 가리켰으니, \
-             다른 단서가 없으면 이 블록(또는 바로 그 아래)을 기준으로 편집하세요.]\n사용자 요청: {instruction}"
-        ),
-        (Some(sec), None) => format!(
-            "[편집 대상 위치: 섹션 {sec} 근처를 사용자가 가리켰습니다. 이 섹션을 기준으로 편집하세요.]\n\
-             사용자 요청: {instruction}"
-        ),
-        _ => instruction.clone(),
+    // Marked anchors (issue #009) take priority over the single click-scope: they carry exact structure
+    // coords (row/col, first_row-corrected) and scope the edit to just those spots. Fall back to the
+    // legacy click-scope directive when no anchors ride along (keeps the no-chip flow byte-identical).
+    let scoped = match anchor_directive(anchors.as_deref(), &instruction) {
+        Some(d) => d,
+        None => match (scopeSection, scopeBlock) {
+            (Some(sec), Some(blk)) => format!(
+                "[편집 대상 위치: 섹션 {sec}, 블록 {blk} — 앵커 [s{sec}/b{blk}]. 사용자가 이 위치를 가리켰으니, \
+                 다른 단서가 없으면 이 블록(또는 바로 그 아래)을 기준으로 편집하세요.]\n사용자 요청: {instruction}"
+            ),
+            (Some(sec), None) => format!(
+                "[편집 대상 위치: 섹션 {sec} 근처를 사용자가 가리켰습니다. 이 섹션을 기준으로 편집하세요.]\n\
+                 사용자 요청: {instruction}"
+            ),
+            _ => instruction.clone(),
+        },
     };
     let proposal = hwp_ai::propose_edits(doc, &*provider, &scoped).map_err(|e| e.to_string())?;
     let out = proposal_json(provider.name(), &proposal);
@@ -430,6 +496,7 @@ fn ai_edit_propose(
     _instruction: String,
     _scopeSection: Option<usize>,
     _scopeBlock: Option<usize>,
+    _anchors: Option<String>,
     _sess: tauri::State<'_, SharedSession>,
 ) -> Result<Value, String> {
     Err("AI 편집은 `--features ai` 빌드가 필요합니다 (cargo tauri dev -f rhwp ai)".into())

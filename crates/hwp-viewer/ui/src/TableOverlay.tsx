@@ -59,6 +59,8 @@ type Props = {
   onRangeFmt: (fmt: { bold?: boolean; italic?: boolean; sizePt?: number; font?: string; color?: string; align?: string }) => void;
   /** Batch background for the current range — "#RRGGBB" or null to clear. */
   onRangeShade: (color: string | null) => void;
+  /** Snapshot the current range as a chat anchor chip (issue #009) + open the chat. Optional. */
+  onSendRangeToChat?: () => void;
   /** When false (e.g. the cell-editor modal is open), Delete/Backspace is ignored so we don't delete
    *  the table behind a modal. Defaults to deletable. */
   deletable?: boolean;
@@ -98,6 +100,7 @@ export default function TableOverlay({
   onCellPick,
   onRangeFmt,
   onRangeShade,
+  onSendRangeToChat,
   deletable = true,
   onMovePoint,
   onMoveEnd,
@@ -602,6 +605,13 @@ export default function TableOverlay({
                 <button title="배경색" className={`${fmtBtn} ${rangeMenu === "bg" ? "bg-accent/10 text-accent" : ""}`} onMouseDown={keep} onClick={() => setRangeMenu((m) => (m === "bg" ? null : "bg"))}>🎨</button>
                 <span className="mx-0.5 h-4 w-px bg-black/10 dark:bg-white/10" />
                 <button title="크기 (열 너비 / 행 높이 · 균등 분배)" className={`${fmtBtn} ${rangeMenu === "size" ? "bg-accent/10 text-accent" : ""}`} onMouseDown={keep} onClick={() => setRangeMenu((m) => (m === "size" ? null : "size"))}>크기 ▾</button>
+                {onSendRangeToChat && (
+                  <>
+                    <span className="mx-0.5 h-4 w-px bg-black/10 dark:bg-white/10" />
+                    {/* 💬 채팅에 넣기 (issue #009): snapshot this range as an anchor chip + open the chat. */}
+                    <button title="이 영역을 채팅 편집 대상으로 추가" className={`${fmtBtn} text-ai`} onMouseDown={keep} onClick={() => onSendRangeToChat()}>💬 채팅</button>
+                  </>
+                )}
                 {/* popovers */}
                 {rangeMenu === "font" && (
                   <div className="absolute left-0 top-full z-[61] mt-1 flex w-36 flex-col rounded-md border border-black/10 bg-white p-1 shadow-xl dark:border-white/10 dark:bg-neutral-800" onPointerDown={stop}>

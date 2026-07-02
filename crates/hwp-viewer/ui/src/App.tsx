@@ -5,7 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { tinykeys } from "tinykeys";
-import { api, type CellHit, type CaretRect, type CharFmt, type FindMatch, type ImageBox, type OutlineItem, type PageGeom, type Proposal, type ProposalOp, type RunDto, type TableBox } from "./api";
+import { api, type Anchor, type CellHit, type CaretRect, type CharFmt, type FindMatch, type ImageBox, type OutlineItem, type PageGeom, type Proposal, type ProposalOp, type RunDto, type TableBox } from "./api";
 import { runsToHtml, serializeEditor, runsEqual, applyLiveStyle, saveInlineSelection, readCaretStyle, type ParaIndent } from "./richedit";
 import { sanitizeSvg } from "./sanitize";
 import { advanceOffset, imageBoxToScreen, pageToScreen, screenToPage } from "./caret";
@@ -355,6 +355,12 @@ export default function App() {
   const [scope, setScope] = useState<Scope | null>(null);
   const scopeRef = useRef<Scope | null>(null);
   scopeRef.current = scope;
+  // Vibe-docs anchor CHIPS (issue #009): the cell/range/paragraph/table spots the user marked to ride
+  // along with the next chat prompt. A SNAPSHOT list (derived from the live selection at capture time),
+  // so changing the selection afterwards doesn't mutate already-pinned chips.
+  const [anchors, setAnchors] = useState<Anchor[]>([]);
+  const anchorsRef = useRef<Anchor[]>([]);
+  anchorsRef.current = anchors;
   // Post-apply highlight PULSE: after a chat edit commits we flash a soft accent glow over the page
   // it landed on, then clear it (a one-shot timer) so the eye is led to "what changed". The pulse
   // overlay is drawn on the SVG page wrapper whose `data-index` matches `pulsePage`.
@@ -654,7 +660,85 @@ export default function App() {
     setScope(null);
     setScopePin(null);
     clearCaret();
+    // NOTE: anchor CHIPS are deliberately NOT cleared here — they're a snapshot the user manages via ✕
+    // (issue #009: "선택이 바뀌어도 이미 붙은 칩은 유지"). They clear on send (consumed) or explicit ✕.
   }, [clearCaret]);
+
+  // ---- Anchor chips (issue #009): derive a structural Anchor from the live selection ----
+  // PURE derivation: given the current cell-range / active-cell / scope-pin selection snapshots, return
+  // the structural Anchor (section/block + GLOBAL row/col bounds + a Korean label) the chip carries, or
+  // null when nothing markable is selected. Coordinates are STRUCTURE indices — never pixels.
+  //  • range  → r0/r1 are FRAGMENT-LOCAL, so add `firstRow` for the ABSOLUTE model rows (split-table fix).
+  //  • cell   → activeCell.row is ALREADY the global model row (PlacedCell.row) — do NOT add firstRow.
+  //  • pin    → a pointed paragraph/table block (no row/col).
+  const deriveAnchor = (
+    cr: CellRange | null,
+    ac: ActiveCell | null,
+    pin: ScopePin | null,
+  ): Anchor | null => {
+    if (cr) {
+      const r0 = cr.r0 + cr.firstRow;
+      const r1 = cr.r1 + cr.firstRow;
+      const rowPart = r0 === r1 ? `${r0 + 1}행` : `${r0 + 1}–${r1 + 1}행`;
+      const colPart = cr.c0 === cr.c1 ? `${cr.c0 + 1}열` : `${cr.c0 + 1}–${cr.c1 + 1}열`;
+      return {
+        kind: "range",
+        section: cr.section,
+        block: cr.block,
+        rows: [r0, r1],
+        cols: [cr.c0, cr.c1],
+        label: `표 ${rowPart} ${colPart}`,
+        page: cr.page,
+      };
+    }
+    if (ac) {
+      return {
+        kind: "cell",
+        section: ac.section,
+        block: ac.block,
+        rows: [ac.row, ac.row],
+        cols: [ac.col, ac.col],
+        label: `표 ${ac.row + 1}행 ${ac.col + 1}열`,
+        page: ac.page,
+      };
+    }
+    if (pin) {
+      // A real nested table (place_nested_table) isn't an edit target yet; a pointed image isn't an
+      // anchor kind. Both surface as a scope pin whose kind isn't paragraph/table — skip (caller toasts).
+      if (pin.kind === "paragraph") {
+        const snip = pin.text.trim().replace(/\s+/g, " ").slice(0, 14);
+        return { kind: "paragraph", section: pin.section, block: pin.block, label: snip ? `“${snip}”` : `문단 (p.${pin.page + 1})`, page: pin.page };
+      }
+      if (pin.kind === "table") {
+        return { kind: "table", section: pin.section, block: pin.block, label: `표 (p.${pin.page + 1})`, page: pin.page };
+      }
+    }
+    return null;
+  };
+
+  // Two anchors are the SAME spot when kind+section+block+row/col bounds match (so re-focusing the
+  // composer on an unchanged selection doesn't stack duplicate chips).
+  const sameAnchor = (a: Anchor, b: Anchor) =>
+    a.kind === b.kind && a.section === b.section && a.block === b.block &&
+    (a.rows?.[0] ?? -1) === (b.rows?.[0] ?? -1) && (a.rows?.[1] ?? -1) === (b.rows?.[1] ?? -1) &&
+    (a.cols?.[0] ?? -1) === (b.cols?.[0] ?? -1) && (a.cols?.[1] ?? -1) === (b.cols?.[1] ?? -1);
+
+  // Snapshot the current selection into an anchor chip. `explicit` = the user pressed a "채팅에 넣기"
+  // button (opens the chat too); the composer-focus path calls it silently (explicit=false). An image
+  // pin isn't an anchor KIND, so it derives no chip but still opens the chat scoped to it (no toast);
+  // a truly empty explicit press hints the user (covers a nested-table cell, which has no selection).
+  const captureAnchor = useCallback((explicit: boolean) => {
+    const a = deriveAnchor(cellRangeRef.current, activeCellRef.current, scopePinRef.current);
+    if (a) {
+      setAnchors((prev) => (prev.some((p) => sameAnchor(p, a)) ? prev : [...prev, a]));
+    } else if (explicit && !scopeRef.current && !scopePinRef.current) {
+      toast("info", "채팅에 넣을 대상이 없어요 — 셀/영역을 선택하거나 문단을 클릭하세요 (중첩표 안 셀은 아직 지원 안 함)");
+    }
+    if (explicit) setChatOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const removeAnchor = useCallback((i: number) => setAnchors((prev) => prev.filter((_, j) => j !== i)), []);
 
   // Re-place a known image selection's overlay against the LIVE svg rect/viewBox (after zoom or a
   // repaint) — the move/resize twin of `recomputeCaretBox`. `null` box drops the selection.
@@ -2247,9 +2331,15 @@ export default function App() {
   // clear the spent scope + the inline pending state.
   const chatCtx = useMemo(
     () => ({
-      propose: async (instruction: string, scopeArg: Scope | null) => {
-        const p = await api.aiEdit(instruction, scopeArg ? { section: scopeArg.section, block: scopeArg.block } : undefined);
-        liftToPending(p, scopeArg ? scopeArg.page : null);
+      propose: async (instruction: string, scopeArg: Scope | null, anchorsArg: Anchor[]) => {
+        const p = await api.aiEdit(
+          instruction,
+          scopeArg ? { section: scopeArg.section, block: scopeArg.block } : undefined,
+          anchorsArg.length ? anchorsArg : undefined,
+        );
+        // The pending highlight lands on the first marked anchor's page (else the click-scope page).
+        liftToPending(p, anchorsArg.length ? anchorsArg[0].page : scopeArg ? scopeArg.page : null);
+        setAnchors([]); // chips are consumed INTO this turn (like the attachment)
         return p;
       },
       insertImage: async (name: string, dataB64: string, scopeArg: Scope | null, widthMm: number, heightMm: number) => {
@@ -2958,6 +3048,7 @@ export default function App() {
                             onCellPick={onCellPick}
                             onRangeFmt={commitRangeFmt}
                             onRangeShade={commitRangeShade}
+                            onSendRangeToChat={() => captureAnchor(true)}
                             onCommitMove={commitTableMove}
                             onCommitColWidths={commitTableColWidths}
                             onCommitRowHeights={commitTableRowHeights}
@@ -2982,8 +3073,14 @@ export default function App() {
                           className="pointer-events-none absolute z-30 rounded-[1px] bg-accent/10 ring-2 ring-accent"
                           style={{ left: `${activeCell.screen.left}px`, top: `${activeCell.screen.top}px`, width: `${activeCell.screen.width}px`, height: `${activeCell.screen.height}px` }}
                         >
-                          <span className="absolute -top-[1.15rem] left-0 whitespace-nowrap rounded-t bg-accent px-1 py-0.5 text-[9px] font-medium leading-none text-white shadow-sm">
+                          <span className="pointer-events-auto absolute -top-[1.25rem] left-0 flex items-center gap-1 whitespace-nowrap rounded-t bg-accent px-1 py-0.5 text-[9px] font-medium leading-none text-white shadow-sm">
                             {activeCell.row + 1}행 {activeCell.col + 1}열
+                            {/* 💬 채팅에 넣기 (issue #009): snapshot this cell as an anchor chip + open chat. */}
+                            <button
+                              onClick={(e) => { e.stopPropagation(); captureAnchor(true); }}
+                              title="이 칸을 채팅 편집 대상으로 추가"
+                              className="rounded px-0.5 hover:bg-white/25"
+                            >💬 채팅에 넣기</button>
                           </span>
                         </div>
                       )}
@@ -3003,8 +3100,8 @@ export default function App() {
                                 already deletes the pointed block) per the user's request. */}
                             <span className="pointer-events-auto absolute -left-px -top-8 flex items-center gap-1.5 rounded-t-md bg-ai px-2.5 py-1 text-sm font-medium text-white shadow-sm">
                               <button
-                                onClick={(e) => { e.stopPropagation(); setChatOpen(true); }}
-                                title="이 위치를 AI에게 요청 (채팅 열기)"
+                                onClick={(e) => { e.stopPropagation(); captureAnchor(true); }}
+                                title="이 위치를 채팅 편집 대상으로 추가 (채팅 열기)"
                                 className="flex items-center gap-1.5 leading-none"
                               >
                                 <span aria-hidden>✦</span>
@@ -3241,6 +3338,9 @@ export default function App() {
           scope={scope}
           onClearScope={clearScope}
           onJumpToPage={scrollToPage}
+          anchors={anchors}
+          onRemoveAnchor={removeAnchor}
+          onCaptureAnchor={() => captureAnchor(false)}
           ctx={chatCtx}
           // The inline toolbar (on the document) and the chat card are the SAME review — when the
           // user acts inline, this signal flips the mirrored card to ✓적용됨 / 취소됨 so they agree.

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Proposal, ProposalOp } from "./api";
+import type { Anchor, Proposal, ProposalOp } from "./api";
 
 export type Scope = { section: number; block: number | null; page: number };
 
 export type ChatCtx = {
-  /** Send a NL edit instruction (+ optional click-resolved scope); the provider proposes targeted
-   *  edits (dry-run). Returns the structured proposal (rationale + per-op cards). Held pending. */
-  propose: (instruction: string, scope: Scope | null) => Promise<Proposal>;
+  /** Send a NL edit instruction (+ optional click-resolved scope + marked anchor chips); the provider
+   *  proposes targeted edits (dry-run). Returns the structured proposal (rationale + per-op cards). */
+  propose: (instruction: string, scope: Scope | null, anchors: Anchor[]) => Promise<Proposal>;
   /** Insert an attached image (base64) at the pointed target — deterministic, no provider needed. */
   insertImage: (name: string, dataB64: string, scope: Scope | null, widthMm: number, heightMm: number) => Promise<Proposal>;
   /** Commit the pending proposal (one undo unit). */
@@ -117,6 +117,13 @@ export function Chat(props: {
   scope: Scope | null;
   onClearScope: () => void;
   onJumpToPage: (page: number) => void;
+  /** The marked anchor chips (issue #009) that will ride along with the next prompt. */
+  anchors: Anchor[];
+  /** Remove the i-th anchor chip. */
+  onRemoveAnchor: (i: number) => void;
+  /** Snapshot the current document selection into an anchor chip (called when the composer gains
+   *  focus and on the "채팅에 넣기" button). No-op when nothing is selected. */
+  onCaptureAnchor: () => void;
   ctx: ChatCtx;
   /** Signal raised by the INLINE document toolbar (✓확정/✕취소) so the mirrored chat card settles to
    *  the same terminal state. `n` is monotonic; the effect runs once per bump. */
@@ -207,8 +214,14 @@ export function Chat(props: {
     // Need either some text (NL edit) or an attached image (deterministic insert).
     if (!trimmed && !attach) return;
     const scope = props.scope;
-    const page = scope ? scope.page : null;
-    const where = scope ? ` (가리킨 위치 p.${scope.page + 1}${scope.block !== null ? `·블록 ${scope.block}` : ""})` : "";
+    const anchors = props.anchors;
+    // Prefer the marked anchor chips for the transcript label; else fall back to the click-scope note.
+    const page = anchors.length ? anchors[0].page : scope ? scope.page : null;
+    const where = anchors.length
+      ? ` (대상: ${anchors.map((a) => a.label).join(", ")})`
+      : scope
+        ? ` (가리킨 위치 p.${scope.page + 1}${scope.block !== null ? `·블록 ${scope.block}` : ""})`
+        : "";
     const att = attach;
     setInput("");
     setAttach(null);
@@ -219,7 +232,7 @@ export function Chat(props: {
       // text goes through the AI edit proposer. Both return a STRUCTURED proposal.
       const proposal = att
         ? await props.ctx.insertImage(att.name, att.dataB64, scope, att.widthMm, att.heightMm)
-        : await props.ctx.propose(trimmed, scope);
+        : await props.ctx.propose(trimmed, scope, anchors);
       setMsgs((m) => [...m, { role: "assistant", state: "pending", proposal, page }]);
     } catch (e) {
       setMsgs((m) => [...m, { role: "assistant", state: "error", text: `${e}` }]);
@@ -389,6 +402,28 @@ export function Chat(props: {
             ))}
           </div>
         )}
+        {/* Marked ANCHOR chips (issue #009): the cell/range/paragraph/table spots the user pinned for
+            this prompt. Each is a snapshot (unaffected by later selection changes) and removable with ✕.
+            The next 보내기 rides these along so the AI edits ONLY those spots. */}
+        {props.anchors.length > 0 && (
+          <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+            {props.anchors.map((a, i) => (
+              <span
+                key={`${a.section}:${a.block}:${a.rows?.join("-") ?? ""}:${a.cols?.join("-") ?? ""}:${i}`}
+                className="inline-flex items-center gap-1 rounded-full border border-ai/40 bg-ai/10 px-2 py-0.5 text-[11px] text-ai"
+                title={`대상 [s${a.section}/b${a.block}] — 이 위치만 편집됩니다`}
+              >
+                <span aria-hidden>◆</span>
+                {a.label}
+                <button
+                  onClick={() => props.onRemoveAnchor(i)}
+                  className="ml-0.5 rounded px-0.5 hover:bg-ai/25"
+                  title="이 대상 제거"
+                >✕</button>
+              </span>
+            ))}
+          </div>
+        )}
         {props.scope && (
           <div className="mb-1.5 flex items-center gap-1.5 rounded-md border border-accent/30 bg-accent/10 px-2 py-1 text-[11px] text-accent">
             📍 가리킨 위치: p.{props.scope.page + 1}
@@ -429,6 +464,9 @@ export function Chat(props: {
                     : "무엇을 바꿀까요? (문서를 클릭하면 위치 지정)"
             }
             className="h-16 flex-1 resize-none rounded-lg border border-black/10 bg-white px-2.5 py-2 text-sm outline-none placeholder:text-neutral-400 focus:border-accent disabled:opacity-50 dark:border-white/10 dark:bg-neutral-900"
+            // Focusing the composer while something is marked snapshots it into an anchor chip (issue
+            // #009) — a no-op when nothing is selected or the current selection is already a chip.
+            onFocus={() => props.onCaptureAnchor()}
             onChange={(e) => setInput(e.currentTarget.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
