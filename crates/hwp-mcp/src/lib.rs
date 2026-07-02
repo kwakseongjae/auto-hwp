@@ -10,7 +10,7 @@
 pub mod server;
 
 use hwp_ops::EditSession;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 /// MCP protocol revision we advertise (widely supported by current clients).
@@ -652,6 +652,20 @@ fn do_delete_block(session: &mut Session, section: usize, index: usize) -> Resul
 
 /// A typed editor command/query — the GUI's mutation+query surface (no prose round-trips). The
 /// JSON `tools/*` lane (agents) is a separate transport; both drive the same op-bus core above.
+///
+/// **Intent JSON schema v0** (issue 008): this enum is the frozen wire contract shared by every
+/// shell. It deserializes 1:1 from JSON as an *internally tagged* object keyed on `"intent"`
+/// (e.g. `{"intent":"SetImageSize","section":0,"index":1,"width":1000,"height":800}`); parse it
+/// through [`deserialize_intent`] (which also handles the optional `intent_version` envelope
+/// field). `deny_unknown_fields` makes a misspelled Intent name (`unknown variant`) or field
+/// (`unknown field`) a hard error instead of a silent no-op — an agent must never mistake a typo
+/// for success. The full field/unit/error tables live in `docs/INTENT-SCHEMA.md`.
+///
+/// Compatibility policy (frozen at v0): NEW fields may be added only as `Option` (absent → `None`);
+/// renaming/removing a field or changing its meaning requires an `intent_version` bump. The Tauri
+/// shell constructs these variants directly in Rust, so this derive is purely additive to it.
+#[derive(Deserialize)]
+#[serde(tag = "intent", deny_unknown_fields)]
 pub enum Intent {
     Open { path: String },
     PageCount,
@@ -787,6 +801,53 @@ pub enum Outcome {
     /// In-place edit result (InsertText / DeleteBack): the new page count so the UI re-renders,
     /// mirroring `Replaced` (0 when no rhwp render is available).
     Edited { pages: u32 },
+}
+
+/// The highest `intent_version` this build understands (issue 008). The request envelope may carry
+/// an optional `intent_version`; absent means `0` (backward compatible with every existing caller,
+/// none of which sends the field). A value outside `0..=INTENT_VERSION` is rejected with an explicit
+/// error so a future client can never have its unsupported schema silently mis-parsed.
+pub const INTENT_VERSION: u32 = 0;
+
+/// Deserialize one Intent-JSON request envelope into a typed [`Intent`] (issue 008 — the JSON→Intent
+/// boundary the GUI's per-command Rust constructors don't exercise, but agents/SDKs do).
+///
+/// The envelope is the tagged Intent object itself, plus an OPTIONAL sibling `intent_version` field:
+/// `{"intent_version":0,"intent":"Undo"}`. `intent_version` is stripped before the tagged decode
+/// (so it isn't seen as an unknown field), version-checked against [`INTENT_VERSION`], and defaulted
+/// to `0` when absent. Errors are plain strings (mirroring the `call_tool` lane): a bad version, a
+/// non-object body, an unknown `intent` tag, or an unknown/mistyped field all surface here rather
+/// than being silently ignored.
+pub fn deserialize_intent(value: &Value) -> Result<Intent, String> {
+    let obj = value.as_object().ok_or("intent envelope must be a JSON object")?;
+    // Optional version envelope. Absent → 0 (legacy). Present → must be an integer in range.
+    if let Some(v) = obj.get("intent_version") {
+        let n = v
+            .as_u64()
+            .ok_or("intent_version must be a non-negative integer")?;
+        if n > INTENT_VERSION as u64 {
+            return Err(format!(
+                "unsupported intent_version {n} (this build supports 0..={INTENT_VERSION})"
+            ));
+        }
+    }
+    // Strip the envelope field so `deny_unknown_fields` on the tagged Intent doesn't reject it, then
+    // decode the tagged body. `serde_json::from_value` needs an owned Value; clone only the map.
+    let body = if obj.contains_key("intent_version") {
+        let mut m = obj.clone();
+        m.remove("intent_version");
+        Value::Object(m)
+    } else {
+        value.clone()
+    };
+    serde_json::from_value::<Intent>(body).map_err(|e| e.to_string())
+}
+
+/// Convenience end-to-end entry: deserialize a JSON envelope ([`deserialize_intent`]) then dispatch
+/// it through [`apply_intent`]. The single "JSON in → Outcome out" seam an external consumer uses.
+pub fn apply_intent_json(session: &mut Session, value: &Value) -> Result<Outcome, String> {
+    let intent = deserialize_intent(value)?;
+    apply_intent(session, intent)
 }
 
 /// Apply a typed [`Intent`] against the session, returning a typed [`Outcome`] (no string parsing).

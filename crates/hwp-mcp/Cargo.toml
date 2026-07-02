@@ -29,3 +29,11 @@ serde_json = { workspace = true }
 # A3 loopback control server (pure std::net): constant-time token compare + CSPRNG token.
 subtle = "2"
 getrandom = "0.3"
+
+[dev-dependencies]
+# Intent-schema-v0 snapshot test (tests/schema_v0.rs) drives the JSON→Intent→Op path directly:
+# serde_json builds the envelopes; hwp-ops/hwp-model build a deterministic synthetic doc so the
+# formatting/table dispatch targets don't depend on any fixture's geometry.
+serde_json = { workspace = true }
+hwp-ops = { workspace = true }
+hwp-model = { workspace = true }

@@ -8,3 +8,7 @@ rust-version.workspace = true
 
 [dependencies]
 hwp-model = { workspace = true }
+# `RunSpec` is the portable, wire-facing run representation carried in Intent JSON
+# (SetTableCellRuns / SetParagraphRuns). Deriving Deserialize here lets the hwp-mcp
+# Intent enum deserialize 1:1 from JSON (issue 008) with no shadow/mirror type to drift.
+serde = { workspace = true }

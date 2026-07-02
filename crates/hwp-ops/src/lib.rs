@@ -219,7 +219,13 @@ impl Default for CellSpec {
 
 /// A formatted text run for `AppendRichParagraph` (the portable representation the AI content
 /// preprocessor emits). Maps 1:1 to a synthesized `CharShape` → `<hh:charPr>` on export.
-#[derive(Clone, Debug, Default)]
+///
+/// `Deserialize` (issue 008): this is the wire shape carried inside the `SetTableCellRuns` /
+/// `SetParagraphRuns` Intents. `#[serde(default)]` lets a run omit any field (missing → the
+/// field's `Default`, e.g. `{"text":"강조","bold":true}`); `deny_unknown_fields` rejects a
+/// misspelled run key rather than silently dropping formatting.
+#[derive(Clone, Debug, Default, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct RunSpec {
     pub text: String,
     pub bold: bool,
