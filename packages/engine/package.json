@@ -1,0 +1,34 @@
+{
+  "name": "@tf-hwp/engine",
+  "version": "0.0.1",
+  "description": "tf-hwp engine as WebAssembly: open .hwp/.hwpx in the browser, render pages to SVG, edit via Intent JSON, export HTML/PDF/HWPX. No LLM, no filesystem, no bundled fonts.",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "main": "./index.js",
+  "module": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js"
+    },
+    "./pkg/hwp_wasm_bg.wasm": "./pkg/hwp_wasm_bg.wasm",
+    "./package.json": "./package.json"
+  },
+  "sideEffects": [
+    "./pkg/hwp_wasm.js"
+  ],
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "pkg/hwp_wasm.js",
+    "pkg/hwp_wasm.d.ts",
+    "pkg/hwp_wasm_bg.wasm",
+    "pkg/hwp_wasm_bg.wasm.d.ts",
+    "README.md"
+  ],
+  "keywords": ["hwp", "hwpx", "hancom", "wasm", "webassembly", "svg", "pdf", "document"],
+  "engines": {
+    "node": ">=18"
+  }
+}

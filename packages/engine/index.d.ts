@@ -1,0 +1,109 @@
+// Type definitions for @tf-hwp/engine (the safety-wrapped surface in index.js).
+// The raw wasm-bindgen types live in ./pkg/hwp_wasm.d.ts.
+
+/** Instantiate the wasm engine once. `input` is an optional wasm URL/Response/bytes (defaults to the
+ *  co-located hwp_wasm_bg.wasm). Idempotent. Await this before HwpDoc.open. */
+export function initEngine(input?: string | URL | Request | BufferSource | WebAssembly.Module): Promise<unknown>;
+
+/** Re-instantiate after a wasm trap. Every previously-opened HwpDoc becomes dead; re-open documents. */
+export function resetEngine(input?: string | URL | Request | BufferSource | WebAssembly.Module): Promise<unknown>;
+
+/** Synchronous init from an already-fetched module/bytes (advanced/bundler use). */
+export function initEngineSync(moduleOrBytes: WebAssembly.Module | BufferSource): unknown;
+
+/** Strip <script>/on*/<foreignObject>/javascript: from an untrusted SVG string (R7). Minimal — see 016. */
+export function sanitizeSvg(svg: string): string;
+
+/** A structural block hit (own-render px space); null on a miss. */
+export interface BlockHit {
+  section: number;
+  block: number;
+  kind: 'paragraph' | 'table' | 'image';
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  text: string;
+  editable: boolean;
+}
+
+/** A placed table box for marking (own-render px space); null on a miss. */
+export interface TableBox {
+  section: number;
+  block: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rows: number;
+  cols: number;
+  first_row: number;
+}
+
+/** Tagged result of applyIntent (Intent schema v0). `kind` discriminates the payload. */
+export type Outcome =
+  | { kind: 'opened'; format: string; editable: boolean; sections: number }
+  | { kind: 'pageCount'; pages: number }
+  | { kind: 'rendered'; svg: string }
+  | { kind: 'applied'; blocks: number; ops: number }
+  | { kind: 'exported'; bytes: number; openSafe: boolean }
+  | { kind: 'undone'; changed: boolean }
+  | { kind: 'redone'; changed: boolean }
+  | { kind: 'text'; text: string }
+  | { kind: 'proposed'; rationale: string; preview: string }
+  | { kind: 'committed'; ops: number }
+  | { kind: 'discarded'; discarded: boolean }
+  | { kind: 'found'; matches: unknown[] }
+  | { kind: 'replaced'; replaced: number; pages: number }
+  | { kind: 'hit'; hit: BlockHit | null }
+  | { kind: 'caret'; caret: unknown | null }
+  | { kind: 'edited'; pages: number };
+
+/** An engine error carries a machine-readable `code` alongside the message. */
+export interface EngineError extends Error {
+  code:
+    | 'no_document'
+    | 'bad_intent'
+    | 'bad_intent_version'
+    | 'bad_json'
+    | 'needs_rhwp'
+    | 'out_of_range'
+    | 'font_missing'
+    | 'serialize'
+    | 'engine'
+    | 'wasm_trap'
+    | 'dead_handle';
+}
+
+/** A safe handle to one open document. Every method is trap-guarded (see resetEngine). */
+export class HwpDoc {
+  private constructor();
+  /** Open a `.hwp` (needs the hwp5/rhwp build) or `.hwpx` from bytes. `name` seeds the title. */
+  static open(bytes: Uint8Array | ArrayBuffer, name?: string): HwpDoc;
+  pageCount(): number;
+  /** UNTRUSTED SVG string — never innerHTML raw; prefer renderPageSvgSanitized / sanitizeSvg (R7). */
+  renderPageSvg(n: number): string;
+  renderPageSvgSanitized(n: number): string;
+  hitTest(page: number, x: number, y: number): BlockHit | null;
+  tableAt(page: number, x: number, y: number): TableBox | null;
+  applyIntent(intent: object | string): Outcome;
+  undo(): boolean;
+  redo(): boolean;
+  /** Inject a TTF/OTF font face (R8 — fonts are never bundled). Required before exportPdf. */
+  registerFont(family: string, bytes: Uint8Array | ArrayBuffer): void;
+  /** Throws {code:"font_missing"} if no font registered. See README for the wasm glyph-embedding note. */
+  exportPdf(): Uint8Array;
+  exportHtml(): string;
+  toHwpx(): Uint8Array;
+  /** Free the wasm allocation on document swap (R13). Idempotent. */
+  free(): void;
+}
+
+declare const _default: {
+  initEngine: typeof initEngine;
+  resetEngine: typeof resetEngine;
+  initEngineSync: typeof initEngineSync;
+  HwpDoc: typeof HwpDoc;
+  sanitizeSvg: typeof sanitizeSvg;
+};
+export default _default;

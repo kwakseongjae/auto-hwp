@@ -2184,6 +2184,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "hwp-wasm"
+version = "0.0.1"
+dependencies = [
+ "console_error_panic_hook",
+ "hwp-mcp",
+ "hwp-model",
+ "hwp-ops",
+ "hwp-session",
+ "js-sys",
+ "serde_json",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "hyper"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

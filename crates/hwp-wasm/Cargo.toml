@@ -1,0 +1,44 @@
+[package]
+name = "hwp-wasm"
+description = "wasm-bindgen bindings for the tf-hwp engine (issue 015, Shell C). A THIN consumer of hwp-session (render / geometry / HTML+PDF export) and hwp-mcp (the edit lane: Session + open_bytes + apply_intent_json + export_bytes). No LLM, no filesystem — the browser hands bytes in and gets SVG/HTML/PDF/HWPX bytes out."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+name = "hwp_wasm"
+# cdylib → the .wasm artifact wasm-bindgen post-processes; rlib keeps the crate `cargo check`-able as
+# a normal library on the host too.
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# `hwp5` wires hwp-mcp's `rhwp` feature (→ hwp-core/rhwp) so the wasm shell can open BINARY .hwp
+# (HWP5) directly, not only .hwpx (007 A안). It pulls the whole rhwp closure into the bundle, so a
+# lean HWPX-only build is available with `--no-default-features`. ON by default to honor the issue.
+default = ["hwp5"]
+hwp5 = ["hwp-mcp/rhwp"]
+
+[dependencies]
+# EDIT lane (issue 012 LEAF decision): Session / open_bytes / apply_intent_json / export_bytes. The
+# `http` default feature (std::net + getrandom + subtle — wasm-unsafe) is OFF via default-features =
+# false; issue 017 made the lib wasm-safe under that config. Declared as a direct path dep (not
+# `workspace = true`) because Cargo does NOT honor `default-features = false` through workspace
+# inheritance here — the `http` default would leak back in and re-pull getrandom.
+hwp-mcp = { path = "../hwp-mcp", default-features = false }
+# RENDER / GEOMETRY / EXPORT lane: own-render SVG, hit-test/table geometry, HTML + krilla PDF. `pdf`
+# enables emit_pdf; we deliberately DO NOT enable `shaper` — its RealFontMetrics reads fonts via
+# std::fs (fails silently on wasm) and would diverge from a shaper-less native own-render, breaking
+# the golden cross-check. ApproxFontMetrics is deterministic and font-file-free.
+hwp-session = { workspace = true, features = ["pdf"] }
+# Needed to reach the live SemanticDoc inside the mcp Session for the render/geometry/export calls.
+hwp-ops = { workspace = true }
+hwp-model = { workspace = true }
+
+wasm-bindgen = "=0.2.125"
+js-sys = "0.3"
+serde_json = { workspace = true }
+# Readable panics in the browser console (also what rhwp uses). Pure-Rust, wasm-only cost.
+console_error_panic_hook = "0.1"

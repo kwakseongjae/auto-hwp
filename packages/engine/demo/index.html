@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@tf-hwp/engine — 창업지원도움e PoC 원형</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: -apple-system, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; background: #f4f5f7; color: #1a1a1a; }
+      header { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px; background: #fff; border-bottom: 1px solid #e2e4e8; }
+      header h1 { font-size: 14px; margin: 0 12px 0 0; font-weight: 700; }
+      button, .filebtn { font: inherit; font-size: 13px; padding: 6px 12px; border: 1px solid #cdd0d6; border-radius: 6px; background: #fff; cursor: pointer; }
+      button:disabled { opacity: 0.45; cursor: default; }
+      button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+      .sp { flex: 1; }
+      main { display: grid; grid-template-columns: 1fr 340px; gap: 16px; padding: 16px; align-items: start; }
+      #pages { display: flex; flex-direction: column; gap: 16px; align-items: center; }
+      .sheet { position: relative; background: #fff; box-shadow: 0 1px 8px rgba(0,0,0,.15); max-width: 100%; }
+      .sheet svg { display: block; max-width: 100%; height: auto; }
+      .mark { position: absolute; border: 2px solid #2563eb; background: rgba(37,99,235,.12); pointer-events: none; }
+      aside { position: sticky; top: 64px; display: flex; flex-direction: column; gap: 10px; }
+      aside label { font-size: 12px; font-weight: 600; color: #444; }
+      textarea { width: 100%; min-height: 150px; font: 12px/1.5 ui-monospace, Menlo, monospace; padding: 8px; border: 1px solid #cdd0d6; border-radius: 6px; resize: vertical; }
+      #log { font: 11px/1.5 ui-monospace, monospace; white-space: pre-wrap; background: #0f172a; color: #cbd5e1; padding: 8px; border-radius: 6px; max-height: 220px; overflow: auto; }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; }
+      .muted { color: #6b7280; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>@tf-hwp/engine · PoC</h1>
+      <label class="filebtn">파일 열기 (.hwp/.hwpx)<input id="file" type="file" accept=".hwp,.hwpx" hidden /></label>
+      <button id="undo" disabled>실행취소</button>
+      <span class="sp"></span>
+      <button id="dlHtml" disabled>HTML 다운로드</button>
+      <button id="dlPdf" class="primary" disabled>PDF 다운로드</button>
+    </header>
+    <main>
+      <div id="pages"><p class="muted" style="padding:24px">문서를 열면 전 페이지가 SVG로 렌더됩니다. 페이지의 표를 클릭하면 셀 좌표가 표시되고 아래 Intent가 프리필됩니다.</p></div>
+      <aside>
+        <label>Intent JSON (스키마 v0)</label>
+        <textarea id="intent">{ "intent": "SetTableCell", "section": 0, "index": 1, "row": 0, "col": 0, "text": "셀 값" }</textarea>
+        <div class="row">
+          <button id="apply" class="primary" disabled>적용 (applyIntent)</button>
+          <button id="mark" disabled>마킹 지우기</button>
+        </div>
+        <p class="muted">LLM은 이 데모에 없습니다 — 호스트가 서버사이드에서 AI를 돌리고 결과 Intent만 넣습니다. 이 입력창이 그 대역입니다.</p>
+        <label>로그</label>
+        <div id="log"></div>
+      </aside>
+    </main>
+
+    <script type="module">
+      import { initEngine, resetEngine, HwpDoc } from '../index.js';
+
+      const $ = (id) => document.getElementById(id);
+      const log = (...a) => { $('log').textContent = a.join(' ') + '\n' + $('log').textContent; };
+
+      // R8: fonts are injected, never bundled. Fetch an OFL face for the PDF (self-served in real apps).
+      const NOTO_URL = 'https://cdn.jsdelivr.net/gh/notofonts/notofonts.github.io/fonts/NotoSansKR/hinted/ttf/NotoSansKR-Regular.ttf';
+
+      let doc = null, bytes = null, fileName = 'document.hwpx';
+
+      await initEngine();
+      log('engine ready.');
+
+      $('file').addEventListener('change', async (e) => {
+        const f = e.target.files[0];
+        if (!f) return;
+        fileName = f.name;
+        bytes = new Uint8Array(await f.arrayBuffer());
+        await openDoc();
+      });
+
+      async function openDoc() {
+        try {
+          if (doc) doc.free();
+          doc = HwpDoc.open(bytes, fileName);
+          render();
+          ['undo', 'apply', 'dlHtml', 'dlPdf', 'mark'].forEach((id) => ($(id).disabled = false));
+          log('opened', fileName, '· pages =', doc.pageCount());
+        } catch (err) {
+          await recover(err, openDoc);
+        }
+      }
+
+      function render() {
+        const host = $('pages');
+        host.innerHTML = '';
+        const n = doc.pageCount();
+        for (let p = 0; p < n; p++) {
+          const sheet = document.createElement('div');
+          sheet.className = 'sheet';
+          sheet.dataset.page = p;
+          sheet.innerHTML = doc.renderPageSvgSanitized(p); // R7: sanitized before it touches the DOM
+          sheet.addEventListener('click', onPageClick);
+          host.appendChild(sheet);
+        }
+      }
+
+      function onPageClick(ev) {
+        const sheet = ev.currentTarget;
+        const svg = sheet.querySelector('svg');
+        if (!svg) return;
+        const rect = svg.getBoundingClientRect();
+        const nativeW = svg.viewBox && svg.viewBox.baseVal && svg.viewBox.baseVal.width
+          ? svg.viewBox.baseVal.width
+          : parseFloat(svg.getAttribute('width')) || rect.width;
+        const scale = rect.width / nativeW;              // rendered px → own-render px
+        const x = (ev.clientX - rect.left) / scale;
+        const y = (ev.clientY - rect.top) / scale;
+        const page = Number(sheet.dataset.page);
+        try {
+          const table = doc.tableAt(page, x, y);
+          const hit = doc.hitTest(page, x, y);
+          clearMarks();
+          if (table) {
+            drawMark(sheet, table, scale);
+            $('intent').value = JSON.stringify(
+              { intent: 'SetTableCell', section: table.section, index: table.block, row: 0, col: 0, text: '셀 값' },
+              null, 0
+            );
+            log('table @', page, '→ section', table.section, 'block', table.block, `(${table.rows}×${table.cols})`);
+          } else if (hit) {
+            drawMark(sheet, hit, scale);
+            log('block @', page, '→', hit.kind, 'section', hit.section, 'block', hit.block);
+          } else {
+            log('click @', page, '→ (no block)');
+          }
+        } catch (err) { recover(err, () => {}); }
+      }
+
+      function drawMark(sheet, box, scale) {
+        const m = document.createElement('div');
+        m.className = 'mark';
+        m.style.left = box.x * scale + 'px';
+        m.style.top = box.y * scale + 'px';
+        m.style.width = box.w * scale + 'px';
+        m.style.height = box.h * scale + 'px';
+        sheet.appendChild(m);
+      }
+      function clearMarks() { document.querySelectorAll('.mark').forEach((m) => m.remove()); }
+
+      $('mark').addEventListener('click', clearMarks);
+
+      $('apply').addEventListener('click', () => {
+        try {
+          const out = doc.applyIntent($('intent').value);
+          log('applyIntent →', JSON.stringify(out));
+          render();
+        } catch (err) { recover(err, () => {}); }
+      });
+
+      $('undo').addEventListener('click', () => {
+        try { log('undo →', doc.undo()); render(); } catch (err) { recover(err, () => {}); }
+      });
+
+      $('dlHtml').addEventListener('click', () => {
+        try { download(new Blob([doc.exportHtml()], { type: 'text/html' }), fileName + '.html'); }
+        catch (err) { recover(err, () => {}); }
+      });
+
+      $('dlPdf').addEventListener('click', async () => {
+        try {
+          log('fetching Noto Sans KR (OFL) …');
+          const font = new Uint8Array(await (await fetch(NOTO_URL)).arrayBuffer());
+          doc.registerFont('Noto Sans KR', font);
+          const pdf = doc.exportPdf();
+          download(new Blob([pdf], { type: 'application/pdf' }), fileName + '.pdf');
+          log('PDF exported:', pdf.length, 'bytes');
+        } catch (err) {
+          log('PDF export failed:', err.code || '', err.message);
+        }
+      });
+
+      function download(blob, name) {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = name;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      }
+
+      // wasm panic recovery protocol: on a trap, re-instantiate + re-open, then retry the action.
+      async function recover(err, retry) {
+        if (err && err.code === 'wasm_trap') {
+          log('⚠ wasm trap — re-instantiating engine and re-opening document …');
+          await resetEngine();
+          doc = null;
+          if (bytes) { await openDoc(); }
+          return;
+        }
+        log('error:', err.code || '', err.message || String(err));
+      }
+    </script>
+  </body>
+</html>
