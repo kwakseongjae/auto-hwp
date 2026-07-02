@@ -1,5 +1,9 @@
 //! Format detection by magic bytes. Pure & wasm-clean (no zip/xml deps here).
 
+/// Untrusted-input hardening: shared resource-limit constants + typed [`limits::DocLimit`] errors
+/// + boundary predicates + the (un-wired) layout guard. See the module docs. (issue #014)
+pub mod limits;
+
 use hwp_model::types::SourceFormat;
 
 /// OLE2 / Compound File Binary magic.

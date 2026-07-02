@@ -2053,6 +2053,7 @@ dependencies = [
 name = "hwp-hwpx"
 version = "0.0.1"
 dependencies = [
+ "hwp-ingest",
  "hwp-model",
  "quick-xml 0.37.5",
  "zip 2.4.2",
@@ -2126,6 +2127,7 @@ dependencies = [
 name = "hwp-rhwp"
 version = "0.0.1"
 dependencies = [
+ "hwp-ingest",
  "hwp-model",
  "hwp-typeset",
  "rhwp",

@@ -8,5 +8,12 @@ rust-version.workspace = true
 
 [dependencies]
 hwp-model = { workspace = true }
+hwp-ingest = { workspace = true }
 zip = { workspace = true }
 quick-xml = { workspace = true }
+
+[dev-dependencies]
+# Integration tests (tests/hostile_inputs.rs) build hostile archives in-memory + match the typed
+# limit errors, so they need direct access to zip's writer and hwp-ingest's DocLimit/HardenedError.
+hwp-ingest = { workspace = true }
+zip = { workspace = true }

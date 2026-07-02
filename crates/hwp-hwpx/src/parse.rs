@@ -6,6 +6,7 @@
 //! fidelity (charPr/paraPr pools, images, equations, full passthrough) grows from here.
 
 use crate::package::Package;
+use hwp_ingest::limits::{self, DocLimit, HardenedError};
 use hwp_model::prelude::*;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::reader::Reader;
@@ -48,7 +49,45 @@ pub fn parse_semantic(bytes: &[u8]) -> Result<SemanticDoc> {
             },
             ..Default::default()
         };
-        parse_section(&text, &mut section.blocks);
+        // Table-nesting guard (#014): a pathologically nested table is rejected as a fast, explicit
+        // error rather than building an unbounded structure. Legacy path folds it into Error::Parse.
+        parse_section(&text, &mut section.blocks).map_err(|l| Error::Parse(l.to_string()))?;
+        doc.sections.push(section);
+    }
+    assign_node_ids(&mut doc);
+    Ok(doc)
+}
+
+/// Hardened variant of [`parse_semantic`] for **untrusted** input (issue #014; the service path,
+/// 013 wires it). Mirrors `parse_semantic` byte-for-byte in what it produces, but every boundary
+/// fails with the typed [`HardenedError`] (so a service switches on the variant): raw-size /
+/// entry-count / cumulative-decompression caps via [`Package::open_guarded`] + `read_part_guarded`,
+/// and the table-nesting cap via [`parse_section`]. A parsed doc still owes the caller a
+/// post-parse [`limits::check_layout_limits`] pass before layout (that guard is un-wired here per
+/// the #010/#013 split — see its docs).
+pub fn parse_semantic_guarded(bytes: &[u8]) -> std::result::Result<SemanticDoc, HardenedError> {
+    let pkg = Package::open_guarded(bytes)?;
+    let mut doc = SemanticDoc::default();
+    // Reserve index 0 as the DEFAULT shape (see `parse_semantic`).
+    doc.char_shapes.push(CharShape::default());
+    doc.para_shapes.push(ParaShape::default());
+    if let Some(name) = pkg.header_part_name() {
+        if let Ok(h) = pkg.read_part_guarded(&name) {
+            doc.header_pools = crate::synth::parse_header_pools(&String::from_utf8_lossy(&h));
+        }
+    }
+    doc.passthrough.push(SOURCE_PART_TAG, bytes.to_vec());
+    for name in pkg.section_part_names() {
+        let raw = pkg.read_part_guarded(&name)?;
+        let text = String::from_utf8_lossy(&raw).into_owned();
+        let mut section = Section {
+            provenance: Provenance {
+                source: Some(SourceFormat::Hwpx),
+                raw: Some(text.clone().into_bytes()),
+            },
+            ..Default::default()
+        };
+        parse_section(&text, &mut section.blocks).map_err(HardenedError::Limit)?;
         doc.sections.push(section);
     }
     assign_node_ids(&mut doc);
@@ -89,7 +128,11 @@ struct ParaAccum {
     cur_run: Option<(Option<String>, String)>, // open run (charPrIDRef, text)
 }
 
-fn parse_section(xml: &str, out: &mut Vec<Block>) {
+/// Parse one section's XML into `out`. Returns `Err(DocLimit::TableNestingTooDeep)` if table-in-
+/// table nesting exceeds [`limits::MAX_TABLE_NESTING`] — the concrete "XML depth counter" for the
+/// only nesting that grows unbounded structures. All other malformation is tolerated (best-effort
+/// parse); the reader stops at the first hard error/EOF as before.
+fn parse_section(xml: &str, out: &mut Vec<Block>) -> std::result::Result<(), DocLimit> {
     let mut reader = Reader::from_str(xml);
     // Stack of block containers (section, then nested table-cell sublists).
     let mut blocks: Vec<Vec<Block>> = vec![Vec::new()];
@@ -120,6 +163,9 @@ fn parse_section(xml: &str, out: &mut Vec<Block>) {
                     }
                     b"t" => in_t = true,
                     b"tbl" => {
+                        // Depth counter (#014): `tbls.len()` IS the current table-nesting depth.
+                        // Reject before pushing the level that would exceed the cap.
+                        limits::check_table_nesting(tbls.len())?;
                         mark_not_simple(&mut paras);
                         let rows = attr_usize(&e, b"rowCnt").unwrap_or(0);
                         let cols = attr_usize(&e, b"colCnt").unwrap_or(0);
@@ -227,6 +273,7 @@ fn parse_section(xml: &str, out: &mut Vec<Block>) {
     if let Some(root) = blocks.first_mut() {
         out.append(root);
     }
+    Ok(())
 }
 
 /// Push the open run (if any) into the paragraph's run list — empty-text runs are KEPT (dropping
@@ -280,7 +327,7 @@ mod tests {
           </hp:tbl></hp:run></hp:p>
         </hs:sec>"#;
         let mut blocks = Vec::new();
-        parse_section(xml, &mut blocks);
+        parse_section(xml, &mut blocks).unwrap();
         // one paragraph + one table
         assert!(blocks.iter().any(|b| matches!(b, Block::Paragraph(_))));
         let tbl = blocks.iter().find_map(|b| match b {
@@ -325,7 +372,7 @@ mod tests {
     fn captures_source_spans_refs_and_simple_flag() {
         let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p id="100" paraPrIDRef="3" styleIDRef="0"><hp:run charPrIDRef="0"><hp:t>가</hp:t></hp:run><hp:run charPrIDRef="7"><hp:t>나</hp:t></hp:run></hp:p><hp:p id="200" paraPrIDRef="3"><hp:run charPrIDRef="0"><hp:tbl rowCnt="1" colCnt="1"><hp:tr><hp:tc><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:subList><hp:p><hp:run><hp:t>셀</hp:t></hp:run></hp:p></hp:subList></hp:tc></hp:tr></hp:tbl></hp:run></hp:p></hs:sec>"#;
         let mut blocks = Vec::new();
-        parse_section(xml, &mut blocks);
+        parse_section(xml, &mut blocks).unwrap();
         let paras: Vec<&Paragraph> = blocks.iter().filter_map(|b| match b {
             Block::Paragraph(p) => Some(p),
             _ => None,

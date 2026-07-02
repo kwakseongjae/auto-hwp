@@ -16,6 +16,7 @@
 //! IR (`hwp_jsx::emit` → `hwp_export::emit_html`) + paged by `hwp_core::own_page_count`, not by
 //! re-rendering its bytes here. `HwpxSerializer` lives in `hwp-hwpx` (always ours), not rhwp.
 
+use hwp_ingest::limits::HardenedError;
 use hwp_model::prelude::*;
 
 #[cfg(feature = "rhwp")]
@@ -24,6 +25,26 @@ mod lift;
 #[cfg(not(feature = "rhwp"))]
 const NOT_WIRED: &str =
     "rhwp bootstrap not compiled (run scripts/vendor-rhwp.sh, then build --features rhwp)";
+
+/// Run an rhwp FFI call under `catch_unwind`, converting a panic in the **vendored (unmodifiable)**
+/// HWP5 parser into an explicit error instead of unwinding through our boundary — the ONLY defense
+/// available since `external/rhwp` must not be patched (#014 step 3).
+///
+/// FUNNEL: every public rhwp-backed entry point (`page_count`, `render_page_svg`,
+/// `page_text_anchors`, `page_glyph_boxes`, `layout_fidelity`, `DocumentParser::parse`) and the
+/// shared cached parse (`RenderCache::core_for`) routes its rhwp call through here.
+///
+/// 함정 (#014): `catch_unwind` is only effective under the default **`unwind`** panic strategy.
+/// Verified: no `panic = "abort"` in any workspace profile today. A future service/release profile
+/// that switches to `abort` would make this a no-op — such a profile MUST keep `unwind`.
+#[cfg(feature = "rhwp")]
+fn guarded<T>(what: &'static str, f: impl FnOnce() -> Result<T>) -> Result<T> {
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+    match catch_unwind(AssertUnwindSafe(f)) {
+        Ok(r) => r,
+        Err(_) => Err(Error::Parse(format!("rhwp panicked (guarded) in {what}"))),
+    }
+}
 
 /// rhwp-backed engine handle.
 #[derive(Default)]
@@ -39,23 +60,53 @@ impl RhwpEngine {
     }
 }
 
+/// Hardened HWP5 parse for **untrusted** input (issue #014; the service path — 013 wires it). Caps
+/// the raw size, then runs the vendored parser under `catch_unwind` so a panic in `external/rhwp`
+/// becomes `DocLimit::Panicked` instead of tearing down the process. A malformed-but-non-panicking
+/// input surfaces as `HardenedError::Malformed`. A parsed doc still owes the caller a post-parse
+/// `hwp_ingest::limits::check_layout_limits` pass before layout (un-wired here per the #010/#013
+/// split — see that fn's docs).
+#[cfg(feature = "rhwp")]
+pub fn parse_to_semantic_guarded(bytes: &[u8]) -> std::result::Result<SemanticDoc, HardenedError> {
+    use hwp_ingest::limits::{self, DocLimit};
+    limits::check_raw_size(bytes.len())?;
+    // `guarded` maps a panic → Error::Parse("rhwp panicked …"); re-key that to the typed
+    // DocLimit::Panicked here, and pass other parse failures through as Malformed.
+    match guarded("parse_to_semantic_guarded", || lift::parse_to_semantic(bytes)) {
+        Ok(doc) => Ok(doc),
+        Err(Error::Parse(msg)) if msg.contains("panicked (guarded)") => {
+            Err(HardenedError::Limit(DocLimit::Panicked))
+        }
+        Err(e) => Err(HardenedError::Malformed(e.to_string())),
+    }
+}
+
+#[cfg(not(feature = "rhwp"))]
+pub fn parse_to_semantic_guarded(_bytes: &[u8]) -> std::result::Result<SemanticDoc, HardenedError> {
+    Err(HardenedError::Malformed(NOT_WIRED.to_string()))
+}
+
 // ---- Bootstrap viewer path: bytes → page count / SVG (in-process via rhwp) ----
 
 /// Number of laid-out pages.
 #[cfg(feature = "rhwp")]
 pub fn page_count(bytes: &[u8]) -> Result<u32> {
-    let core = rhwp::DocumentCore::from_bytes(bytes).map_err(|e| Error::Parse(e.to_string()))?;
-    Ok(core.page_count())
+    guarded("page_count", || {
+        let core = rhwp::DocumentCore::from_bytes(bytes).map_err(|e| Error::Parse(e.to_string()))?;
+        Ok(core.page_count())
+    })
 }
 
 /// Render one page to SVG (faithful, via rhwp's typeset+paint pipeline).
 #[cfg(feature = "rhwp")]
 pub fn render_page_svg(bytes: &[u8], page: u32) -> Result<String> {
-    let core = rhwp::DocumentCore::from_bytes(bytes).map_err(|e| Error::Parse(e.to_string()))?;
-    let svg = core
-        .render_page_svg_native(page)
-        .map_err(|e| Error::Other(e.to_string()))?;
-    Ok(unclip_borders(&svg))
+    guarded("render_page_svg", || {
+        let core = rhwp::DocumentCore::from_bytes(bytes).map_err(|e| Error::Parse(e.to_string()))?;
+        let svg = core
+            .render_page_svg_native(page)
+            .map_err(|e| Error::Other(e.to_string()))?;
+        Ok(unclip_borders(&svg))
+    })
 }
 
 /// Content hash for cache keying (std SipHash) — O(n) over the bytes but far cheaper than a parse.
@@ -94,8 +145,9 @@ impl RenderCache {
     fn core_for(&mut self, bytes: &[u8]) -> Result<&rhwp::DocumentCore> {
         let h = content_hash(bytes);
         if !matches!(&self.cached, Some((ch, _)) if *ch == h) {
-            let core =
-                rhwp::DocumentCore::from_bytes(bytes).map_err(|e| Error::Parse(e.to_string()))?;
+            let core = guarded("core_for", || {
+                rhwp::DocumentCore::from_bytes(bytes).map_err(|e| Error::Parse(e.to_string()))
+            })?;
             self.cached = Some((h, core));
             self.parses += 1;
         }
@@ -138,8 +190,10 @@ pub struct TextAnchor {
 /// Extract a page's text-source anchors from rhwp's `build_page_layer_tree` paint IR (seam 2).
 #[cfg(feature = "rhwp")]
 pub fn page_text_anchors(bytes: &[u8], page: u32) -> Result<Vec<TextAnchor>> {
-    let core = rhwp::DocumentCore::from_bytes(bytes).map_err(|e| Error::Parse(e.to_string()))?;
-    anchors_from_core(&core, page)
+    guarded("page_text_anchors", || {
+        let core = rhwp::DocumentCore::from_bytes(bytes).map_err(|e| Error::Parse(e.to_string()))?;
+        anchors_from_core(&core, page)
+    })
 }
 
 #[cfg(feature = "rhwp")]
@@ -328,8 +382,10 @@ pub fn node_to_section_para_ord(
 /// when a parsed core is already cached.
 #[cfg(feature = "rhwp")]
 pub fn page_glyph_boxes(bytes: &[u8], page: u32) -> Result<Vec<GlyphBox>> {
-    let core = rhwp::DocumentCore::from_bytes(bytes).map_err(|e| Error::Parse(e.to_string()))?;
-    glyph_boxes_from_core(&core, page)
+    guarded("page_glyph_boxes", || {
+        let core = rhwp::DocumentCore::from_bytes(bytes).map_err(|e| Error::Parse(e.to_string()))?;
+        glyph_boxes_from_core(&core, page)
+    })
 }
 
 #[cfg(not(feature = "rhwp"))]
@@ -1051,8 +1107,10 @@ pub struct LayoutFidelity {
 pub fn layout_fidelity(bytes: &[u8]) -> Result<LayoutFidelity> {
     use hwp_typeset::{layout_paragraph, NaiveLayout};
 
-    let rdoc = rhwp::parse_document(bytes).map_err(|e| Error::Parse(e.to_string()))?;
-    let our = lift::parse_to_semantic(bytes)?;
+    let rdoc = guarded("layout_fidelity/parse_document", || {
+        rhwp::parse_document(bytes).map_err(|e| Error::Parse(e.to_string()))
+    })?;
+    let our = guarded("layout_fidelity/lift", || lift::parse_to_semantic(bytes))?;
     // With the `shaper` feature, score against the REAL rustybuzz advances (real Latin widths +
     // EM-grid Hangul) — falling back to the per-script approximation when no system font is found.
     // Default build keeps the pure-Rust approximation (no rustybuzz/ttf-parser deps).
@@ -1146,7 +1204,7 @@ impl DocumentParser for RhwpEngine {
     fn parse(&self, bytes: &[u8], _fmt: SourceFormat) -> Result<SemanticDoc> {
         #[cfg(feature = "rhwp")]
         {
-            lift::parse_to_semantic(bytes)
+            guarded("DocumentParser::parse", || lift::parse_to_semantic(bytes))
         }
         #[cfg(not(feature = "rhwp"))]
         {

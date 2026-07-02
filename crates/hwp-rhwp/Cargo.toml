@@ -16,6 +16,9 @@ shaper = ["hwp-typeset/shaper"]
 
 [dependencies]
 hwp-model = { workspace = true }
+# Shared input-hardening limits + typed DocLimit/HardenedError (issue #014). Used by the guarded
+# HWP5 entry point (raw-size cap + catch_unwind → DocLimit::Panicked).
+hwp-ingest = { workspace = true }
 # Our own layout engine — used by the rhwp-feature `layout_fidelity` oracle to score our
 # line-breaking + pagination against Hancom's actual linesegs (which rhwp parses).
 hwp-typeset = { workspace = true }
@@ -23,3 +26,8 @@ hwp-typeset = { workspace = true }
 # feature, but the submodule must be present for `cargo metadata` to resolve.
 # Single crate (rlib) → in-process native + wasm integration.
 rhwp = { path = "../../external/rhwp", optional = true }
+
+[dev-dependencies]
+# Integration test (tests/hostile_rhwp.rs) matches the typed DocLimit/HardenedError from the
+# catch_unwind boundary.
+hwp-ingest = { workspace = true }
