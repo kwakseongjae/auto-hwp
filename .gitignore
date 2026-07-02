@@ -20,6 +20,19 @@ crates/hwp-viewer/gen/schemas/
 .env
 .env.local
 
+# apps/hwp-lab (issue 019) — Next.js build + copied artifacts. wasm/fonts are NOT committed as
+# binaries; copy-wasm.mjs (prebuild/predev) fills public/hwp from packages/engine/pkg.
+apps/hwp-lab/.next/
+apps/hwp-lab/out/
+apps/hwp-lab/public/hwp/
+apps/hwp-lab/public/fonts/
+apps/hwp-lab/.turbo/
+apps/hwp-lab/tsconfig.tsbuildinfo
+apps/hwp-lab/next-env.d.ts
+apps/hwp-lab/test-results/
+apps/hwp-lab/playwright-report/
+apps/hwp-lab/playwright/.cache/
+
 # local agent runtime state
 .claude/
 
