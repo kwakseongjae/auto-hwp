@@ -38,8 +38,8 @@
 
 | # | 제목 | 상태 | 단계 | 비고 |
 |---|------|------|------|------|
-| [020](020-benchmark1-page1-spill.md) | benchmark1 1페이지 스필 정밀 수정 (per-row 실측, 19→18) | open | QA-P0 | 웹 회귀 아님 실측 확인 — 기존 19vs18 잔차의 전용 수정 |
-| [021](021-selection-ux-v2.md) | 선택 UX v2 — 클릭=교체 / ⌘·Ctrl=토글 / 러버밴드 마퀴 | open | QA-P1 | +엔진 blocks_in_rect 질의 |
+| [020](020-benchmark1-page1-spill.md) | benchmark1 1페이지 스필 — **18==18 달성** (마지막줄 leading 트림 + stored 행높이 floor) | **done** | QA-P0 | b70ac3f · --rows 진단도구 tracked, 게이트 8==8 불변 |
+| [021](021-selection-ux-v2.md) | 선택 UX v2 — 클릭=교체 / ⌘·Ctrl=토글 / 러버밴드 마퀴 | **done** | QA-P1 | 0cb666b · blocksInRect + vitest 14 + Playwright 갱신 통과 |
 | [022](022-font-system-v1.md) | 폰트 시스템 v1 — 카탈로그(OFL)+업로드+화면·조판·PDF 삼위일치 | open | QA-P1 | R8 하드게이트; wasm 셰이퍼 켜기(메트릭 바이트 주입) |
 
 > 완료된 완성형 핵심(글자/문단/글꼴/표 병합·음영/목록)은 `docs/COMPLETION-ROADMAP.md`와 `CHECKLIST.md` 참고.
