@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Anchor, Proposal, ProposalOp } from "./api";
+import { PRESETS, type Preset, type PresetTarget } from "./presets";
 
 export type Scope = { section: number; block: number | null; page: number };
 
@@ -13,6 +14,13 @@ export type ChatCtx = {
   commit: () => Promise<void>;
   /** Drop the pending proposal. */
   discard: () => Promise<void>;
+  /** issue #011 presets: whether a matching target is currently marked — decides whether the source
+   *  sheet opens vs. the empty-state toast fires. Pure/synchronous (reads the live selection). */
+  presetHasTarget: (target: PresetTarget) => boolean;
+  /** issue #011 presets: run a preset — snapshot the marked anchor(s), build the pre-baked prompt, and
+   *  propose through the SAME dry-run gate. Resolves to the pending proposal + its page, or null when
+   *  nothing suitable is marked (the parent already toasted + guided to the marking step). */
+  runPreset: (presetId: string, source: string) => Promise<{ proposal: Proposal; page: number | null } | null>;
 };
 
 type Attachment = { name: string; dataB64: string; dataUrl: string; widthMm: number; heightMm: number };
@@ -134,6 +142,9 @@ export function Chat(props: {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [attach, setAttach] = useState<Attachment | null>(null);
+  // issue #011 presets: the preset whose source-text sheet is open (표 채우기), + its pasted text.
+  const [sheet, setSheet] = useState<Preset | null>(null);
+  const [sheetText, setSheetText] = useState("");
   // Resizable + collapsible-to-rail panel state (replaces the old hardcoded w-[360px]).
   const [width, setWidth] = useState(380);
   const [collapsed, setCollapsed] = useState(false);
@@ -239,6 +250,47 @@ export function Chat(props: {
     } finally {
       setBusy(false);
     }
+  }
+
+  // ---- issue #011 content-flow presets ----
+  // Run a preset through the SAME propose→pending gate as a normal send, then mirror it as a user line
+  // + a pending assistant card. A null result = empty state (the ctx already toasted + guided) — no card.
+  async function runPresetAndShow(preset: Preset, source: string) {
+    if (busy || awaiting) return;
+    setBusy(true);
+    try {
+      const res = await props.ctx.runPreset(preset.id, source);
+      if (res) {
+        setMsgs((m) => [
+          ...m,
+          { role: "user", text: `${preset.icon} ${preset.label}${source.trim() ? " · 소스 텍스트 첨부" : ""}` },
+          { role: "assistant", state: "pending", proposal: res.proposal, page: res.page },
+        ]);
+      }
+    } catch (e) {
+      setMsgs((m) => [...m, { role: "assistant", state: "error", text: `${e}` }]);
+    } finally {
+      setBusy(false);
+    }
+  }
+  // Click a preset chip: 표 채우기 (needs source) with a target marked → open the source sheet; otherwise
+  // run straight away — which also covers the empty-state path (runPreset toasts + guides, sends nothing).
+  function clickPreset(preset: Preset) {
+    if (busy || awaiting) return;
+    if (preset.needsSourceText && props.ctx.presetHasTarget(preset.target)) {
+      setSheetText("");
+      setSheet(preset);
+    } else {
+      void runPresetAndShow(preset, "");
+    }
+  }
+  function submitSheet() {
+    if (!sheet || !sheetText.trim()) return;
+    const preset = sheet;
+    const source = sheetText;
+    setSheet(null);
+    setSheetText("");
+    void runPresetAndShow(preset, source);
   }
 
   async function apply() {
@@ -387,6 +439,56 @@ export function Chat(props: {
 
       <div className="shrink-0 border-t border-black/10 p-2 dark:border-white/10">
         {!props.canEdit && <p className="px-1 pb-1.5 text-[11px] text-neutral-400">편집하려면 먼저 HWPX 문서를 여세요.</p>}
+        {/* Content-flow PRESETS (issue #011): one-tap flows over the existing propose→적용 gate. 표 채우기
+            marks a 표/범위 → opens a source-text sheet; 불릿 정렬 marks 문단 → normalizes markers. Pressing
+            one with nothing marked toasts "먼저 선택" + guides the mark step. */}
+        {props.canEdit && !sheet && (
+          <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-medium text-ai/80">프리셋</span>
+            {PRESETS.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => clickPreset(p)}
+                disabled={busy || awaiting}
+                title={p.needsSourceText ? `${p.label} — 표/범위를 마킹하고 누르면 소스 텍스트 시트가 열립니다` : `${p.label} — 문단을 마킹하고 누르세요`}
+                className="inline-flex items-center gap-1 rounded-full border border-ai/40 bg-ai/10 px-2.5 py-0.5 text-[11px] font-medium text-ai hover:bg-ai/20 disabled:opacity-40"
+              >
+                <span aria-hidden>{p.icon}</span>
+                {p.label}
+              </button>
+            ))}
+          </div>
+        )}
+        {/* 표 채우기 SOURCE-TEXT sheet: paste 회사 소개글/약력; 채우기 sends it (fenced as data) through the
+            preview gate. Cancel closes without sending. */}
+        {props.canEdit && sheet && (
+          <div className="mb-1.5 rounded-lg border border-ai/30 bg-ai/5 p-2">
+            <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium text-ai">
+              <span aria-hidden>{sheet.icon}</span>
+              {sheet.label} · 소스 텍스트
+              <button
+                onClick={() => { setSheet(null); setSheetText(""); }}
+                className="ml-auto rounded px-1 text-neutral-400 hover:bg-ai/20"
+                title="닫기"
+              >✕</button>
+            </div>
+            <textarea
+              autoFocus
+              spellCheck={false}
+              value={sheetText}
+              placeholder={sheet.sourcePlaceholder}
+              className="h-24 w-full resize-none rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none placeholder:text-neutral-400 focus:border-accent dark:border-white/10 dark:bg-neutral-900"
+              onChange={(e) => setSheetText(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitSheet(); }
+              }}
+            />
+            <div className="mt-1 flex justify-end gap-2">
+              <button onClick={() => { setSheet(null); setSheetText(""); }} className="rounded-md px-2.5 py-1 text-[11px] text-neutral-600 hover:bg-neutral-200/70 dark:text-neutral-300 dark:hover:bg-neutral-700/60">취소</button>
+              <button onClick={submitSheet} disabled={busy || awaiting || !sheetText.trim()} className="rounded-md bg-ai px-2.5 py-1 text-[11px] font-medium text-white hover:opacity-90 disabled:opacity-40">채우기 <kbd className="opacity-70">⌘⏎</kbd></button>
+            </div>
+          </div>
+        )}
         {/* Always-available quick prompt chips above the composer (reuse the same set). */}
         {props.canEdit && (
           <div className="mb-1.5 flex flex-wrap gap-1.5">

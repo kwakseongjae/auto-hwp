@@ -166,17 +166,21 @@ export const api = {
    *  proposal; returns rationale+preview. `commitProposal()` then applies it (one undo unit).
    *  `scope` is an optional click-resolved target the user pointed at (section, and block if known).
    *  `anchors` are the marked anchor chips (issue #009) — when present, Rust scopes the edit to those
-   *  exact spots (their structure coords) instead of the single click-scope. */
+   *  exact spots (their structure coords) instead of the single click-scope.
+   *  `guardTableHeader` (issue #011 "표 채우기" preset) makes Rust strip any fill op that would overwrite
+   *  a protected header/음영 row of a marked table — a structural backstop behind the prompt guard. */
   aiEdit: (
     instruction: string,
     scope?: { section: number; block: number | null },
     anchors?: Anchor[],
+    guardTableHeader?: boolean,
   ) =>
     invoke<Proposal>("ai_edit_propose", {
       instruction,
       scopeSection: scope?.section ?? null,
       scopeBlock: scope?.block ?? null,
       anchors: anchors && anchors.length ? JSON.stringify(anchors) : null,
+      guardTableHeader: guardTableHeader ?? null,
     }),
   /** Active AI provider name ("anthropic"/"ollama"/"openrouter"/"mock"/"none") — for an honest badge. */
   aiProviderName: () => invoke<string>("ai_provider_name"),

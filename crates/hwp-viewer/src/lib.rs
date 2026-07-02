@@ -322,6 +322,8 @@ fn ai_generate(_prompt: String, _sess: tauri::State<'_, SharedSession>) -> Resul
 /// when present we prepend a directive so the model anchors its edits there ("이거 바꿔줘" → that block).
 /// `anchors` = the marked anchor chips' JSON (issue #009); when non-empty they take priority and scope
 /// the edit to exactly those spots (their structure coords), else we fall back to the click-scope.
+/// `guardTableHeader` (issue #011 "표 채우기" preset) = when true, strip any fill op that would overwrite
+/// a protected header/음영 row of a marked table — a STRUCTURAL backstop behind the prompt instruction.
 #[cfg(feature = "ai")]
 #[allow(non_snake_case)]
 #[tauri::command]
@@ -330,6 +332,7 @@ fn ai_edit_propose(
     scopeSection: Option<usize>,
     scopeBlock: Option<usize>,
     anchors: Option<String>,
+    guardTableHeader: Option<bool>,
     sess: tauri::State<'_, SharedSession>,
 ) -> Result<Value, String> {
     let mut s = sess.lock().map_err(|_| "session poisoned")?;
@@ -352,7 +355,18 @@ fn ai_edit_propose(
             _ => instruction.clone(),
         },
     };
-    let proposal = hwp_ai::propose_edits(doc, &*provider, &scoped).map_err(|e| e.to_string())?;
+    let mut proposal = hwp_ai::propose_edits(doc, &*provider, &scoped).map_err(|e| e.to_string())?;
+    // Preset "표 채우기" (issue #011): the prompt already tells the model to preserve the header/음영
+    // rows, but this makes it structural — drop any text-fill op that targets a protected row so a model
+    // that ignores the prompt can never clobber them. All `doc` reads finish here (before s.pending).
+    if guardTableHeader == Some(true) {
+        let blocked = hwp_session::protect_table_header_rows(doc, &mut proposal.ops, anchors.as_deref());
+        if blocked > 0 {
+            proposal.rationale.push_str(&format!(
+                "\n※ 헤더/음영 행 보존: 보호된 행을 덮어쓰려는 편집 {blocked}건을 제외했습니다."
+            ));
+        }
+    }
     let out = hwp_session::proposal_json(provider.name(), &proposal);
     s.pending = Some(proposal);
     Ok(out)
@@ -366,6 +380,7 @@ fn ai_edit_propose(
     _scopeSection: Option<usize>,
     _scopeBlock: Option<usize>,
     _anchors: Option<String>,
+    _guardTableHeader: Option<bool>,
     _sess: tauri::State<'_, SharedSession>,
 ) -> Result<Value, String> {
     Err("AI 편집은 `--features ai` 빌드가 필요합니다 (cargo tauri dev -f rhwp ai)".into())

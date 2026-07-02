@@ -844,3 +844,152 @@ pub fn anchor_directive(anchors_json: Option<&str>, instruction: &str) -> Option
          {lines}]\n사용자 요청: {instruction}"
     ))
 }
+
+// ---- Table-fill header/shade guard (issue #011 "표 채우기") ------------------------------------
+
+/// The set of rows that MUST NOT be overwritten by a "표 채우기" preset for the table at
+/// `(section, block)`: the header row (row 0) plus every row that carries a background shade in the
+/// live document. Detecting shade needs the doc, so this reads the model directly.
+fn protected_rows(doc: &SemanticDoc, section: usize, block: usize) -> std::collections::BTreeSet<usize> {
+    use hwp_model::document::Block;
+    let mut rows = std::collections::BTreeSet::new();
+    rows.insert(0); // the header row is always protected
+    if let Some(Block::Table(t)) = doc.sections.get(section).and_then(|s| s.blocks.get(block)) {
+        for cell in t.cells.iter().filter(|c| c.active && c.shade_color.is_some()) {
+            rows.insert(cell.row);
+        }
+    }
+    rows
+}
+
+/// Post-process guard (issue #011 "표 채우기"): the preset's prompt tells the model to preserve the
+/// header row (row 0) and any 음영(shaded) row, but a prompt is not a guarantee. This makes the guard
+/// STRUCTURAL — it drops every pending text-fill op (`Op::SetTableCell`) that targets a protected row
+/// of a table the user marked, so a model that ignores the prompt still can never clobber a header or
+/// shaded row. Formatting/shading ops are left untouched (they don't overwrite content). Reads the
+/// marked anchors' `(section, block)` and returns how many writes were blocked (0 = nothing stripped),
+/// so the caller can surface a note. No-op when no anchor rides along or the JSON is empty/unparseable.
+pub fn protect_table_header_rows(
+    doc: &SemanticDoc,
+    ops: &mut Vec<hwp_ops::Op>,
+    anchors_json: Option<&str>,
+) -> usize {
+    let Some(json) = anchors_json else { return 0 };
+    let Ok(anchors): std::result::Result<Vec<AnchorDto>, _> = serde_json::from_str(json) else {
+        return 0;
+    };
+    if anchors.is_empty() {
+        return 0;
+    }
+    // Protected rows keyed by the anchored table's (section, block). A single marked table/range is the
+    // common case, but several anchors are handled the same way.
+    let mut guard: std::collections::HashMap<(usize, usize), std::collections::BTreeSet<usize>> =
+        std::collections::HashMap::new();
+    for a in &anchors {
+        guard
+            .entry((a.section, a.block))
+            .or_insert_with(|| protected_rows(doc, a.section, a.block));
+    }
+    let before = ops.len();
+    ops.retain(|op| match op {
+        hwp_ops::Op::SetTableCell { section, index, row, .. } => {
+            !guard.get(&(*section, *index)).is_some_and(|rows| rows.contains(row))
+        }
+        _ => true,
+    });
+    before - ops.len()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hwp_ops::{CellSel, CellSpec, Op, RunSpec};
+
+    /// A section-0 doc whose block 1 is a 3-row × 2-col table (row 0 = header, rows 1–2 = body).
+    fn doc_with_table() -> SemanticDoc {
+        use hwp_model::document::{Block, Paragraph, Section};
+        let mut doc = SemanticDoc {
+            char_shapes: vec![Default::default()],
+            para_shapes: vec![Default::default()],
+            ..Default::default()
+        };
+        doc.sections.push(Section {
+            blocks: vec![Block::Paragraph(Paragraph::default())],
+            ..Default::default()
+        });
+        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
+        hwp_ops::apply(
+            &mut doc,
+            &Op::InsertTableAt {
+                section: 0,
+                index: 1,
+                rows: vec![
+                    vec![cell("항목"), cell("내용")],
+                    vec![cell(""), cell("")],
+                    vec![cell(""), cell("")],
+                ],
+            },
+        )
+        .expect("seed table");
+        doc
+    }
+
+    fn fill(row: usize, col: usize) -> Op {
+        Op::SetTableCell {
+            section: 0,
+            index: 1,
+            row,
+            col,
+            runs: vec![RunSpec { text: "x".into(), ..Default::default() }],
+        }
+    }
+
+    #[test]
+    fn guard_strips_header_and_shaded_writes_keeps_body() {
+        let mut doc = doc_with_table();
+        // Shade the whole SECOND body row (model row 2) → it becomes protected alongside the header.
+        hwp_ops::apply(
+            &mut doc,
+            &Op::SetTableCellShade { section: 0, index: 1, sel: CellSel::Row(2), shade: Some("#FFF2CC".into()) },
+        )
+        .expect("shade row 2");
+
+        let anchors = r#"[{"kind":"range","section":0,"block":1,"rows":[0,2],"cols":[0,1],"label":"표"}]"#;
+        let mut ops = vec![
+            fill(0, 0), // header → stripped
+            fill(0, 1), // header → stripped
+            fill(1, 0), // body   → kept
+            fill(1, 1), // body   → kept
+            fill(2, 0), // shaded → stripped
+        ];
+        let blocked = protect_table_header_rows(&doc, &mut ops, Some(anchors));
+        assert_eq!(blocked, 3, "row 0 (header ×2) + row 2 (shaded ×1) stripped");
+        assert_eq!(ops.len(), 2, "only the two unshaded body writes survive");
+        assert!(ops.iter().all(|o| matches!(o, Op::SetTableCell { row: 1, .. })));
+    }
+
+    #[test]
+    fn guard_is_noop_without_anchors() {
+        let doc = doc_with_table();
+        let mut ops = vec![fill(0, 0), fill(1, 0)];
+        assert_eq!(protect_table_header_rows(&doc, &mut ops, None), 0);
+        assert_eq!(protect_table_header_rows(&doc, &mut ops, Some("[]")), 0);
+        assert_eq!(ops.len(), 2, "nothing stripped when no anchor rides along");
+    }
+
+    #[test]
+    fn guard_leaves_formatting_and_shading_ops_untouched() {
+        // Only text-fill (SetTableCell) writes are guarded; a shade op on the header must survive
+        // (freeform "헤더 색 바꿔줘" through a preset must still work).
+        let doc = doc_with_table();
+        let anchors = r#"[{"kind":"table","section":0,"block":1,"label":"표"}]"#;
+        let mut ops = vec![
+            Op::SetTableCellShade { section: 0, index: 1, sel: CellSel::Row(0), shade: Some("#D9E1F2".into()) },
+            fill(0, 0), // header text → stripped
+        ];
+        let blocked = protect_table_header_rows(&doc, &mut ops, Some(anchors));
+        assert_eq!(blocked, 1);
+        assert_eq!(ops.len(), 1);
+        assert!(matches!(ops[0], Op::SetTableCellShade { .. }), "shade op is preserved");
+    }
+}

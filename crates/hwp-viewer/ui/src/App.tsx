@@ -15,6 +15,7 @@ import { type Command } from "./commands";
 import { Palette } from "./Palette";
 import { Composer, type ComposerMode } from "./Composer";
 import { Chat, type Scope } from "./Chat";
+import { PRESETS, presetAccepts, type PresetTarget } from "./presets";
 import { PendingInline } from "./PendingInline";
 import { Button, IconButton, Sep, SegmentedControl } from "./ui";
 import { toast, Toaster } from "./toast";
@@ -2348,6 +2349,38 @@ export default function App() {
         const p = await api.insertImage(name, dataB64, scopeArg ? { section: scopeArg.section, block: scopeArg.block } : null, widthMm, heightMm);
         liftToPending(p, scopeArg ? scopeArg.page : null);
         return p;
+      },
+      // ---- Content-flow presets (issue #011): pure synchronous "is a matching target marked?" check
+      // (drives whether the source sheet opens vs. the empty-state toast) + the one-tap run. Both derive
+      // the anchor from the LIVE selection (refs) union the already-pinned chips — no React-state race.
+      presetHasTarget: (target: PresetTarget) => {
+        const cand = deriveAnchor(cellRangeRef.current, activeCellRef.current, scopePinRef.current);
+        const pool = [...anchorsRef.current, ...(cand ? [cand] : [])];
+        return pool.some((a) => presetAccepts(target, a));
+      },
+      // Run a preset: snapshot the marked anchor(s), build the pre-baked prompt, and propose through the
+      // SAME dry-run gate the chat uses (with the header/음영 guard flag for 표 채우기). Returns the pending
+      // proposal + its page, or null when nothing suitable is marked (we toast + guide to the mark step).
+      runPreset: async (presetId: string, source: string) => {
+        const preset = PRESETS.find((p) => p.id === presetId);
+        if (!preset) return null;
+        const cand = deriveAnchor(cellRangeRef.current, activeCellRef.current, scopePinRef.current);
+        const pool = [
+          ...anchorsRef.current,
+          ...(cand && !anchorsRef.current.some((p) => sameAnchor(p, cand)) ? [cand] : []),
+        ];
+        const matching = pool.filter((a) => presetAccepts(preset.target, a));
+        if (matching.length === 0) {
+          toast("info", preset.emptyHint);
+          setChatOpen(true);
+          return null;
+        }
+        const prompt = preset.buildPrompt(matching, source);
+        const p = await api.aiEdit(prompt, undefined, matching, preset.guardTableHeader);
+        const page = matching[0].page;
+        liftToPending(p, page);
+        setAnchors([]); // chips consumed INTO this turn (same as a normal send)
+        return { proposal: p, page };
       },
       commit: async () => {
         const landed = scopeRef.current ? scopeRef.current.page : (pendingRef.current?.page ?? null);
