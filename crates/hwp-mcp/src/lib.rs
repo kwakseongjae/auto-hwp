@@ -412,6 +412,11 @@ pub(crate) struct OpenInfo {
     pub sections: usize,
 }
 
+/// Max undo snapshots retained on the LIVE session (R13, issue #010): each snapshot deep-copies the
+/// whole package incl. the original `.hwpx` bytes, so an unbounded stack grows without limit over a
+/// long-lived edit session (service/web). 50 keeps memory bounded while covering realistic undo depth.
+const LIVE_UNDO_LIMIT: usize = 50;
+
 /// Open `path` into the session (HWP5/HWPX both view; only HWPX round-trips to an edited export).
 fn do_open(session: &mut Session, path: &str) -> Result<OpenInfo, String> {
     use hwp_model::types::SourceFormat;
@@ -432,7 +437,7 @@ fn do_open(session: &mut Session, path: &str) -> Result<OpenInfo, String> {
     };
     let doc = hwp_core::Engine::open(&bytes).map_err(|e| e.to_string())?;
     let sections = doc.sections.len();
-    session.doc = Some(EditSession::new(doc));
+    session.doc = Some(EditSession::with_limit(doc, LIVE_UNDO_LIMIT));
     session.source_path = Some(path.to_string());
     session.source_bytes = Some(bytes);
     session.pending = None; // a fresh document drops any stale proposal
@@ -1361,6 +1366,54 @@ mod tests {
         // commit with nothing pending errors gracefully.
         let empty = call("commit_proposal", json!({}), &mut s);
         assert_eq!(empty["result"]["isError"], true, "{empty}");
+    }
+
+    /// R13 (issue #010): the LIVE session opened via `do_open` caps its undo history at
+    /// [`LIVE_UNDO_LIMIT`] snapshots, so a long-lived edit session can't grow memory without bound.
+    /// Prove behaviorally: after 55 committed edits, exactly 50 undos succeed (the 5 oldest snapshots
+    /// were dropped) — the 51st undo reports "nothing to undo".
+    #[test]
+    fn live_session_undo_stack_capped_at_50() {
+        let mut s = Session::default();
+        apply_intent(&mut s, Intent::Open { path: showcase() }).unwrap();
+        let content = r#"{"blocks":[{"type":"paragraph","runs":[{"text":"상한"}]}]}"#;
+        for _ in 0..(LIVE_UNDO_LIMIT + 5) {
+            apply_intent(&mut s, Intent::ApplyContent { json: content.into() }).unwrap();
+        }
+        let mut undone = 0;
+        loop {
+            match apply_intent(&mut s, Intent::Undo).unwrap() {
+                Outcome::Undone(true) => undone += 1,
+                Outcome::Undone(false) => break,
+                _ => panic!("expected Undone"),
+            }
+        }
+        assert_eq!(undone, LIVE_UNDO_LIMIT, "undo history is capped at {LIVE_UNDO_LIMIT}");
+    }
+
+    /// Acceptance (issue #010): "되돌리기 후 문서가 편집 전과 동일" — verified at the SESSION boundary by
+    /// comparing serialized HWPX bytes (the automated stand-in for the manual export-compare; no LLM
+    /// provider needed since `propose_content` authors the ops directly). Snapshot-based undo restores
+    /// the clean node's verbatim ride, so the bytes match exactly. (Engine-level proof lives in
+    /// `hwp_core::editsession_undo_redo_is_byte_exact`; this locks the same invariant through the full
+    /// `apply_intent` open→propose→commit→undo lane the GUI/MCP actually drives.)
+    #[test]
+    fn undo_after_commit_is_byte_identical_through_session() {
+        let mut s = Session::default();
+        apply_intent(&mut s, Intent::Open { path: showcase() }).unwrap();
+        let serialize = |s: &Session| hwp_core::serialize_hwpx(s.doc.as_ref().unwrap().doc()).unwrap();
+        let before = serialize(&s);
+
+        let content = r#"{"blocks":[{"type":"paragraph","runs":[{"text":"바이트 되돌리기"}]}]}"#.to_string();
+        apply_intent(&mut s, Intent::Propose { json: content }).unwrap();
+        apply_intent(&mut s, Intent::Commit).unwrap();
+        assert_ne!(serialize(&s), before, "commit must change the serialized bytes");
+
+        match apply_intent(&mut s, Intent::Undo).unwrap() {
+            Outcome::Undone(c) => assert!(c),
+            _ => panic!("expected Undone"),
+        }
+        assert_eq!(serialize(&s), before, "undo restores the document byte-for-byte");
     }
 
     /// P1 contract: the rhwp SVG render is the faithful "원본 보기" of the UNEDITED original — the

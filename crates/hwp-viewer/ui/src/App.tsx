@@ -2178,12 +2178,14 @@ export default function App() {
 
   const doUndo = useCallback(async () => {
     if (pageCountRef.current === 0) return;
+    if (inlineEditRef.current) return; // editor-open: leave undo to native contentEditable (issue #010)
     setPending(null); // an undo changes the doc shape under any pending proposal — drop it
     invalidate(await api.undo(), null); // keep scroll — undo must not yank the view to page 1
     toast("info", "실행 취소");
   }, [invalidate]);
   const doRedo = useCallback(async () => {
     if (pageCountRef.current === 0) return;
+    if (inlineEditRef.current) return; // editor-open: leave redo to native contentEditable (issue #010)
     invalidate(await api.redo(), null); // keep scroll
     toast("info", "다시 실행");
   }, [invalidate]);
@@ -2442,8 +2444,12 @@ export default function App() {
       "$mod+Slash": (e) => { e.preventDefault(); setCheatOpen((o) => !o); },
       "$mod+t": (e) => { e.preventDefault(); if (canEditForKeys.current) setComposer("table"); },
       "$mod+.": (e) => { e.preventDefault(); if (canEditForKeys.current) setComposer("ai"); },
-      "$mod+z": (e) => { e.preventDefault(); void handlers.current.doUndo(); },
-      "$mod+Shift+z": (e) => { e.preventDefault(); void handlers.current.doRedo(); },
+      // ⌘Z / ⇧⌘Z drive the SESSION undo/redo — but ONLY when the WYSIWYG in-place editor is CLOSED
+      // (issue #010 step 3): while a contentEditable is open, the keystroke belongs to the browser's
+      // native text undo. Returning BEFORE preventDefault lets that native undo run (and keeps the two
+      // mutation paths from colliding — the 함정 in the issue). inlineEditRef is the "editor open" flag.
+      "$mod+z": (e) => { if (inlineEditRef.current) return; e.preventDefault(); void handlers.current.doUndo(); },
+      "$mod+Shift+z": (e) => { if (inlineEditRef.current) return; e.preventDefault(); void handlers.current.doRedo(); },
     });
     return un;
   }, []);
