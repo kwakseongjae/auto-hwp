@@ -1,6 +1,6 @@
 # 037 — R7-1: 페이지 가상화 — 뷰포트 밖 시트는 높이만 남기고 언마운트 (FG-01)
 
-- 상태: **open** · 우선순위: **R7-P0** (FG 백로그 잔여 중 유일 P0) · 영역: packages/react (HwpPageView 소유)
+- 상태: **done** (03969c2) · 우선순위: **R7-P0** (FG 백로그 잔여 중 유일 P0) · 영역: packages/react (HwpPageView 소유)
 - 병렬: 038(HoverLayer/HwpWorkspace/styles 소유 — **이 이슈는 그 파일 금지**). HwpPageView.tsx는 이 이슈의 단독 소유.
 
 ## 실측 근거 (033, scripts/figma-grade/measure-browser.mjs)

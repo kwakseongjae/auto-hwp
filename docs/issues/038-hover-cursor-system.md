@@ -1,6 +1,6 @@
 # 038 — R7-2: 호버 프리하이라이트 + 커서 상태 체계 (FG-09 + FG-06)
 
-- 상태: **open** · 우선순위: R7-P1 · 영역: packages/react (신규 HoverLayer + HwpWorkspace 배선 + styles.css 소유)
+- 상태: **done** (c3a9807) · 우선순위: R7-P1 · 영역: packages/react (신규 HoverLayer + HwpWorkspace 배선 + styles.css 소유)
 - 병렬: 037(HwpPageView 소유 — **이 이슈는 HwpPageView.tsx 접촉 금지**; 포인터는 HwpPageView가
   이미 HwpWorkspace로 전달하는 onPagePointerMove 경로만 사용).
 

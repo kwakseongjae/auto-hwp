@@ -48,8 +48,8 @@
 
 | # | 제목 | 상태 | 단계 | 비고 |
 |---|------|------|------|------|
-| [037](037-page-virtualization.md) | 페이지 가상화 — 뷰포트 밖 시트 언마운트(placeholder 크기 유지) | open | R7-P0 | FG-01; 25p 19,825 DOM 요소 → 대폭 감소 목표 |
-| [038](038-hover-cursor-system.md) | 호버 프리하이라이트 + 커서 상태 체계(I-beam/row-resize/grab) | open | R7-P1 | FG-09+06; 030 rAF+ref 패턴, 렌더 0 |
+| [037](037-page-virtualization.md) | 페이지 가상화 — 뷰포트 밖 시트 언마운트(placeholder 크기 유지) | **done** (03969c2) | R7-P0 | DOM 19,826→3,819(−80.7%), SVG 25→3; 034 정합 |
+| [038](038-hover-cursor-system.md) | 호버 프리하이라이트 + 커서 상태 체계(I-beam/row-resize/grab) | **done** (c3a9807) | R7-P1 | 호버 렌더 0 계측; hit-test 중앙값 1.2µs |
 | [039](039-context-menu.md) | 컨텍스트 메뉴 — 우클릭 앵커 액션(기존 intent 위임만) | open | R7-P2 | FG-07; 028과 공용 액션 유틸 |
 
 ## 로드맵 R6 — 라운드 6 (2026-07-03, 033 백로그 집행)
