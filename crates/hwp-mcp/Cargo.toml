@@ -28,12 +28,21 @@ default = ["http"]
 http = ["dep:getrandom", "dep:subtle"]
 # Enables the `render_page` control tool (current doc → SVG) via the rhwp bootstrap.
 rhwp = ["hwp-core/rhwp"]
+# Issue 013 (service container): the `export_pdf` control tool. Pulls hwp-session/pdf (krilla) — a
+# native-only, wasm-unsafe backend — so it is a SEPARATE opt-in feature the container build turns on;
+# the default/wasm lib never compiles it. Byte-identical to the CLI `export-pdf` (same emit_pdf path).
+pdf = ["dep:hwp-session", "hwp-session/pdf", "hwp-session/shaper"]
 
 [dependencies]
 hwp-model = { workspace = true }
 hwp-ops = { workspace = true }
 hwp-ai = { workspace = true }
 hwp-core = { workspace = true }
+# Issue 014/013: the post-parse layout guard (`check_layout_limits`) wired into the open path. Pure &
+# wasm-clean (only depends on hwp-model), so it does NOT jeopardise the wasm lib (issue 017).
+hwp-ingest = { workspace = true }
+# Issue 013: `export_pdf` control tool, behind the `pdf` feature only (krilla is native-only).
+hwp-session = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # A3 loopback control server (pure std::net): constant-time token compare + CSPRNG token. Gated by

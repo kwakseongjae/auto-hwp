@@ -1,0 +1,62 @@
+# syntax=docker/dockerfile:1
+#
+# Dockerfile.service — issue 013: the headless tf-hwp service (agent Shell B).
+#
+# Ships the `hwp-mcp` binary in NETWORK mode (`--http-network`): a fail-closed JSON-RPC service that
+# an agent (business_plan_k / 에르메스) drives with open_document → apply_content → export_{hwpx,pdf}.
+#
+# SECURITY MODEL (see docs/SERVICE-DEPLOY.md):
+#   * Runs as a NON-ROOT user.
+#   * NEVER exposes itself to the public internet — put it behind a private network / reverse proxy;
+#     we do NOT terminate TLS here (out of scope by design).
+#   * HWP_MCP_TOKEN is REQUIRED at `docker run` (no token ⇒ the process refuses to start).
+#   * All document paths are confined under HWP_WORKSPACE_ROOT=/work (a mounted volume).
+#   * Memory is capped by the deployer: `docker run --memory=1g --cpus=1` (R4 last line of defense).
+#
+# Build:  docker build -f Dockerfile.service -t tf-hwp-service .
+# Run:    docker run --rm -p 8752:8752 --memory=1g --cpus=1 \
+#             -e HWP_MCP_TOKEN=$(openssl rand -hex 32) -v "$PWD/work:/work" tf-hwp-service
+
+# ---- Stage 1: build the release binary (http + rhwp + pdf) ----------------------------------------
+FROM rust:1.95-bookworm AS builder
+WORKDIR /build
+# The whole workspace + the vendored rhwp submodule + Cargo.lock (reproducible). `.dockerignore`
+# keeps target/, node_modules/, the UI, and fixtures out of the context.
+COPY . .
+# `rhwp` lifts .hwp → HWPX (government forms are .hwp); `pdf` compiles the krilla export_pdf tool.
+# `http` is a default feature (the network server), so it does not need to be named here.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/build/target \
+    cargo build --release -p hwp-mcp --features "rhwp pdf" \
+    && cp /build/target/release/hwp-mcp /usr/local/bin/hwp-mcp
+
+# ---- Stage 2: minimal runtime ---------------------------------------------------------------------
+FROM debian:bookworm-slim AS runtime
+# ca-certificates for any outbound TLS (e.g. an ANTHROPIC_API_KEY-driven call from hwp-ai, if a
+# future tool needs it); the service itself does not require it. No compilers / no source.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Non-root service account.
+RUN groupadd --system hwp && useradd --system --gid hwp --home /home/hwp --create-home hwp
+
+COPY --from=builder /usr/local/bin/hwp-mcp /usr/local/bin/hwp-mcp
+
+# Korean font for export_pdf. Placed at BOTH the compiled-in first discovery path
+# (/build/assets/fonts/... — matches the binary's `CARGO_MANIFEST_DIR/../../assets/fonts`) AND a
+# standard Linux path, so the container embeds the SAME vendored NanumGothic (OFL) the local CLI
+# does → export-pdf bytes match (modulo krilla determinism). See crates/hwp-typeset/src/shaper.rs.
+COPY --from=builder /build/assets/fonts/NanumGothic-Regular.ttf /build/assets/fonts/NanumGothic-Regular.ttf
+COPY --from=builder /build/assets/fonts/NanumGothic-Regular.ttf /usr/share/fonts/truetype/nanum/NanumGothic.ttf
+
+# Confined workspace volume (owned by the service account so exports can be written).
+RUN mkdir -p /work && chown hwp:hwp /work
+VOLUME ["/work"]
+
+ENV HWP_WORKSPACE_ROOT=/work \
+    BIND_ADDR=0.0.0.0:8752
+EXPOSE 8752
+USER hwp
+# HWP_MCP_TOKEN is intentionally NOT set here — it MUST be injected at run time (fail-closed).
+ENTRYPOINT ["hwp-mcp", "--http-network"]

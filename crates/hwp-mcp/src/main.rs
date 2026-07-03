@@ -1,18 +1,37 @@
-//! `hwp-mcp` — headless MCP server for tf-hwp. Two transports:
+//! `hwp-mcp` — headless MCP server for tf-hwp. Three transports:
 //!   * default (stdio): newline-delimited JSON-RPC on stdin/stdout, for `claude mcp add --transport stdio`.
 //!   * `--http [--port N]`: loopback HTTP control server (A3) — writes a 0600 `{port}\n{token}\n`
 //!     file (path printed to stderr) and serves `POST /mcp`; for `claude mcp add --transport http`.
+//!   * `--http-network`: opt-in SERVICE mode (issue 013) — fail-closed env config (`HWP_MCP_TOKEN`,
+//!     `HWP_WORKSPACE_ROOT`), workspace path confinement, reopen-force guard, Origin-always-403.
+//!     For a container behind a private net / reverse proxy — NEVER the public internet, NO TLS here.
 
-use hwp_mcp::{handle, server, Session};
+use hwp_mcp::{handle, network, server, Session};
 use std::io::{BufRead, Write};
 use std::sync::Mutex;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if args.iter().any(|a| a == "--http") {
+    // `--http-network` is a distinct, opt-in mode; it must NOT fall through to the loopback `--http`
+    // path, so it is matched first. The loopback mode is otherwise byte-for-byte unchanged.
+    if args.iter().any(|a| a == "--http-network") {
+        run_http_network();
+    } else if args.iter().any(|a| a == "--http") {
         run_http(&args);
     } else {
         run_stdio();
+    }
+}
+
+/// Network SERVICE mode (issue 013): parse the fail-closed env config, then serve. A missing token
+/// or workspace root aborts BEFORE binding — a misconfigured service must not come up "open".
+fn run_http_network() {
+    match network::NetworkConfig::from_env() {
+        Ok(cfg) => network::run(cfg),
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(2);
+        }
     }
 }
 

@@ -1,0 +1,20 @@
+# Keep the build context small & the image reproducible. The service build needs the workspace
+# sources, external/rhwp (submodule), and assets/fonts (runtime font) — nothing else.
+target/
+**/target/
+node_modules/
+**/node_modules/
+.git/
+.github/
+.claude/
+apps/
+packages/
+docs/
+*.pdf
+benchmark*.hwp
+benchmark*.hwpx
+# The viewer UI / lab front-ends are not part of the headless service.
+crates/hwp-viewer/ui/
+crates/hwp-viewer/lab/
+# corpus/ is KEPT: hwp-hwpx embeds corpus/hwpx/Skeleton.hwpx via include_bytes! at COMPILE time
+# (crates/hwp-hwpx/src/serialize.rs) — excluding it breaks the build. It is only 132 KB.
