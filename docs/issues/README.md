@@ -42,6 +42,15 @@
 | [021](021-selection-ux-v2.md) | 선택 UX v2 — 클릭=교체 / ⌘·Ctrl=토글 / 러버밴드 마퀴 | **done** | QA-P1 | 0cb666b · blocksInRect + vitest 14 + Playwright 갱신 통과 |
 | [022](022-font-system-v1.md) | 폰트 시스템 v1 — OFL 카탈로그 8종+업로드+삼위일치 (**교차골든 26p 바이트동일**) | **done** | QA-P1 | cb9f7b3 · 셰이퍼 +8.8KB, 라이선스 표 전수 OFL |
 
+## 로드맵 R4 — 라운드 4 (2026-07-03)
+
+착수: **028 ∥ 029** (react/lab vs docs — disjoint).
+
+| # | 제목 | 상태 | 단계 | 비고 |
+|---|------|------|------|------|
+| [028](028-floating-selection-toolbar.md) | 플로팅 셀렉션 툴바(네이버 블로그 패턴) + "AI에게 전달" | open | R4-P0 | 027 커맨드 재사용 — 표면 재설계 |
+| [029](029-integration-handover.md) | 실통합 인수인계 문서(창업지원도움e 개발자용) + 실행 검증 스크립트 | open | R4-P1 | 실통합은 사용자 수행 — 문서로 전달 |
+
 ## 로드맵 R3 — 라운드 3 (2026-07-03, 사용자 QA + SDK 재설계)
 
 설계 총괄: **[docs/SDK-LAYERS.md](../SDK-LAYERS.md)** (L1 엔진 / L2 editor-core / L2' ai-protocol / L3 react — 커스텀 계약).
