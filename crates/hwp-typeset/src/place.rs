@@ -966,6 +966,18 @@ fn place_cell_content(
             }
             vy += ls.vert_size * ratio;
         }
+        // Trailing-leading trim — LOCKSTEP with `crate::cell_paragraph_height` (the reserve helper this
+        // cell's box height was sized by). Line-spacing leading sits BETWEEN lines, not below a
+        // paragraph's LAST line, so the NEXT paragraph (or the cell bottom) must start at the trimmed
+        // position. Without this the drawn stack over-advanced by one line's leading PER paragraph: a
+        // multi-paragraph cell (자가진단표 r16 = 11 paragraphs) drifted ~1278 HWPUNIT and pushed its final
+        // line ("…이사장 귀하") BELOW the cell/frame box, so 귀하 escaped the outer 상자 (issue 024). The
+        // reserve already subtracts this leading, so trimming the DRAW makes drawn == reserved and the
+        // content sits inside the box. The trimmed span is empty space below the last line's ink → no
+        // glyph is clipped. Reserve-only (pagination) is untouched, so page counts stay in lockstep.
+        if let Some(last) = lines.last() {
+            vy -= (last.vert_size * (ratio - 1.0)).max(0.0);
+        }
     }
 }
 

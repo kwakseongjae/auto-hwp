@@ -31,3 +31,6 @@ rhwp = { path = "../../external/rhwp", optional = true }
 # Integration test (tests/hostile_rhwp.rs) matches the typed DocLimit/HardenedError from the
 # catch_unwind boundary.
 hwp-ingest = { workspace = true }
+# Issue 024 regression (tests/self_diag_no_loss.rs): render benchmark1 to the REAL own-render SVG and
+# assert the 자가진단표's "…이사장 귀하" survives AND sits inside the outer 상자 (no silent overflow drop).
+hwp-render = { workspace = true }
