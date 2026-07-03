@@ -42,6 +42,16 @@
 | [021](021-selection-ux-v2.md) | 선택 UX v2 — 클릭=교체 / ⌘·Ctrl=토글 / 러버밴드 마퀴 | **done** | QA-P1 | 0cb666b · blocksInRect + vitest 14 + Playwright 갱신 통과 |
 | [022](022-font-system-v1.md) | 폰트 시스템 v1 — OFL 카탈로그 8종+업로드+삼위일치 (**교차골든 26p 바이트동일**) | **done** | QA-P1 | cb9f7b3 · 셰이퍼 +8.8KB, 라이선스 표 전수 OFL |
 
+## 로드맵 R7 — 라운드 7 (2026-07-04, 033 백로그 잔여 P0/S급)
+
+착수: **037 ∥ 038** (소유권: 037=HwpPageView, 038=HoverLayer 신규+HwpWorkspace+styles) → **039** (037·038 병합 후).
+
+| # | 제목 | 상태 | 단계 | 비고 |
+|---|------|------|------|------|
+| [037](037-page-virtualization.md) | 페이지 가상화 — 뷰포트 밖 시트 언마운트(placeholder 크기 유지) | open | R7-P0 | FG-01; 25p 19,825 DOM 요소 → 대폭 감소 목표 |
+| [038](038-hover-cursor-system.md) | 호버 프리하이라이트 + 커서 상태 체계(I-beam/row-resize/grab) | open | R7-P1 | FG-09+06; 030 rAF+ref 패턴, 렌더 0 |
+| [039](039-context-menu.md) | 컨텍스트 메뉴 — 우클릭 앵커 액션(기존 intent 위임만) | open | R7-P2 | FG-07; 028과 공용 액션 유틸 |
+
 ## 로드맵 R6 — 라운드 6 (2026-07-03, 033 백로그 집행)
 
 착수: **034 ∥ 035** (소유권: 034=HwpPageView/refresh, 035=HwpWorkspace 뷰포트/줌/팬) → **036** (키보드 셀 내비).
