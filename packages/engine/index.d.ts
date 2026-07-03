@@ -99,6 +99,8 @@ export class HwpDoc {
   /** Open a `.hwp` (needs the hwp5/rhwp build) or `.hwpx` from bytes. `name` seeds the title. */
   static open(bytes: Uint8Array | ArrayBuffer, name?: string): HwpDoc;
   pageCount(): number;
+  /** Layout-cache diagnostics (issue 025): number of real re-typesets vs cache hits since open. */
+  placedStats(): { placeBuilds: number; placeHits: number; revision: number; fonts: number };
   /** UNTRUSTED SVG string — never innerHTML raw; prefer renderPageSvgSanitized / sanitizeSvg (R7). */
   renderPageSvg(n: number): string;
   renderPageSvgSanitized(n: number): string;

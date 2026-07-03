@@ -21,7 +21,7 @@
 //! try/catch, and a `WebAssembly.RuntimeError` re-instantiates the module and asks the host to
 //! re-open the document. This crate just installs `console_error_panic_hook` for a readable message.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use wasm_bindgen::prelude::*;
 
@@ -85,6 +85,25 @@ pub struct HwpDoc {
     /// Own-render SVG cache keyed by the edit-session revision, so scrolling all pages is O(pages)
     /// not O(pages²) and an edit transparently invalidates it (the revision bumps).
     svg_cache: RefCell<Option<(u64, Vec<String>)>>,
+    /// Placed-document cache (issue 025): the whole document typeset ONCE, reused by every geometry
+    /// query so an UNCHANGED document is never re-typeset on a click / drag / marquee — the body of the
+    /// "선택·드래그 딜레이". Keyed by `(edit revision, font fingerprint)` — the two things that change
+    /// layout — so it is transparently invalidated at exactly the five mutation points and NEVER on a
+    /// read-only query:
+    ///   • `open`       → a fresh handle starts with `None`.
+    ///   • `applyIntent` that EDITS → `EditSession` bumps the revision → key miss → rebuild. A read-only
+    ///     intent (HitTest/CaretRect/PageCount/…) pushes no undo unit → revision unchanged → cache HIT.
+    ///   • `undo`/`redo` that changed something → revision bumps → rebuild (a no-op undo/redo returns
+    ///     `false` and does NOT bump → cache kept).
+    ///   • `registerFont` → the font fingerprint changes → key miss → rebuild.
+    /// The fingerprint is `(family, bytes.len())` per injected face (issue §2). See [`HwpDoc::placed_stats`]
+    /// for the hit/build counters that PROVE "unchanged document ⇒ placed once".
+    placed_cache: RefCell<Option<(u64, Vec<(String, usize)>, hwp_session::PlacedDoc)>>,
+    /// How many times the placed cache was actually (re)built — i.e. real `place_doc` runs (issue 025
+    /// counter: an unchanged document over N geometry queries must show this at 1).
+    place_builds: Cell<u32>,
+    /// How many geometry queries were served from the cached placement (no re-typeset).
+    place_hits: Cell<u32>,
 }
 
 #[wasm_bindgen]
@@ -103,7 +122,15 @@ impl HwpDoc {
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or(n)
         });
-        Ok(HwpDoc { session, title, fonts: Vec::new(), svg_cache: RefCell::new(None) })
+        Ok(HwpDoc {
+            session,
+            title,
+            fonts: Vec::new(),
+            svg_cache: RefCell::new(None),
+            placed_cache: RefCell::new(None),
+            place_builds: Cell::new(0),
+            place_hits: Cell::new(0),
+        })
     }
 
     /// Borrow the live `SemanticDoc` from the edit session (render/geometry/export read this).
@@ -138,6 +165,55 @@ impl HwpDoc {
         Ok(svgs)
     }
 
+    /// The current injected-font fingerprint `(family, len)` — the second half of the placed-cache key
+    /// (issue 025). A registered/replaced face changes it, invalidating the cached placement.
+    fn font_fingerprint(&self) -> Vec<(String, usize)> {
+        self.fonts.iter().map(|(fam, b)| (fam.clone(), b.len())).collect()
+    }
+
+    /// Run `f` against the document's placed geometry, TYPESETTING only when the cache is cold or the
+    /// `(revision, font fingerprint)` key changed — otherwise the cached [`hwp_session::PlacedDoc`] is
+    /// reused (issue 025). This is the single choke point that turns per-click re-typesetting into
+    /// "typeset once per document". `f` receives BOTH the live `SemanticDoc` (some queries read model
+    /// text back) and the placed geometry.
+    fn with_placed<R>(
+        &self,
+        f: impl FnOnce(&hwp_model::prelude::SemanticDoc, &hwp_session::PlacedDoc) -> R,
+    ) -> Result<R, JsValue> {
+        let rev = self.revision();
+        let fp = self.font_fingerprint();
+        // Fast path: a live cache whose key still matches → no typeset.
+        if let Some((crev, cfp, placed)) = self.placed_cache.borrow().as_ref() {
+            if *crev == rev && *cfp == fp {
+                self.place_hits.set(self.place_hits.get() + 1);
+                let doc = self.doc()?;
+                return Ok(f(doc, placed));
+            }
+        }
+        // Miss: typeset once, run `f`, then store for the next query at this revision/font.
+        let doc = self.doc()?;
+        let placed = hwp_session::place(doc, &self.fonts);
+        self.place_builds.set(self.place_builds.get() + 1);
+        let out = f(doc, &placed);
+        *self.placed_cache.borrow_mut() = Some((rev, fp, placed));
+        Ok(out)
+    }
+
+    /// Diagnostics for the layout cache (issue 025): a JSON string `{placeBuilds, placeHits, revision,
+    /// fonts}`. `placeBuilds` is how many real `place_doc` runs happened; after opening a document and
+    /// firing N geometry queries WITHOUT editing, it must read `1` (the rest are `placeHits`). The node
+    /// benchmark reads this to prove "문서 불변 시 place 1회".
+    #[wasm_bindgen(js_name = placedStats)]
+    pub fn placed_stats(&self) -> String {
+        format!(
+            "{{\"placeBuilds\":{},\"placeHits\":{},\"revision\":{},\"fonts\":{}}}",
+            self.place_builds.get(),
+            self.place_hits.get(),
+            self.revision(),
+            self.fonts.len()
+        )
+    }
+
     /// Number of pages in the current document (OUR own-render pagination — no rhwp re-render).
     #[wasm_bindgen(js_name = pageCount)]
     pub fn page_count(&self) -> Result<usize, JsValue> {
@@ -161,13 +237,11 @@ impl HwpDoc {
     /// miss (an `Option<String>` → `null`, never the literal string `"null"` — bindings policy 018).
     #[wasm_bindgen(js_name = hitTest)]
     pub fn hit_test(&self, page: u32, x: f64, y: f64) -> Result<Option<String>, JsValue> {
-        let doc = self.doc()?;
-        // `_with` variants so the click geometry agrees with the injected-metric SVG (a registered
-        // font can change pagination — Approx geometry over shaper layout would miss, issue §단위 slip).
-        match hwp_session::own_hit_test_with(doc, page, x, y, &self.fonts) {
-            Some(hit) => Ok(Some(serde_json::to_string(&hit).map_err(|e| js_err("serialize", &e.to_string()))?)),
-            None => Ok(None),
-        }
+        // Served from the cached placement (issue 025) so a click never re-typesets. The `_placed`
+        // query agrees with the injected-metric SVG because the cache is built with the SAME injected
+        // fonts (a registered font re-paginates — Approx geometry over shaper layout would miss).
+        let hit = self.with_placed(|doc, placed| hwp_session::own_hit_test_placed(doc, placed, page, x, y))?;
+        hit.map(|h| serde_json::to_string(&h).map_err(|e| js_err("serialize", &e.to_string()))).transpose()
     }
 
     /// Click-to-mark table hit test on `page` at own-render px `(x, y)` — a JSON **string** of the
@@ -175,11 +249,8 @@ impl HwpDoc {
     /// on a miss (an `Option<String>` → `null`, never the literal string `"null"` — policy 018).
     #[wasm_bindgen(js_name = tableAt)]
     pub fn table_at(&self, page: u32, x: f64, y: f64) -> Result<Option<String>, JsValue> {
-        let doc = self.doc()?;
-        match hwp_session::table_at_with(doc, page, x, y, &self.fonts) {
-            Some(t) => Ok(Some(serde_json::to_string(&t).map_err(|e| js_err("serialize", &e.to_string()))?)),
-            None => Ok(None),
-        }
+        let t = self.with_placed(|_doc, placed| hwp_session::table_at_placed(placed, page, x, y))?;
+        t.map(|t| serde_json::to_string(&t).map_err(|e| js_err("serialize", &e.to_string()))).transpose()
     }
 
     /// Cell-level marking hit test on `page` at own-render px `(x, y)` — a JSON **string** of the table
@@ -191,11 +262,8 @@ impl HwpDoc {
     /// would resolve the wrong cell / miss).
     #[wasm_bindgen(js_name = tableCellAt)]
     pub fn table_cell_at(&self, page: u32, x: f64, y: f64) -> Result<Option<String>, JsValue> {
-        let doc = self.doc()?;
-        match hwp_session::table_cell_at_with(doc, page, x, y, &self.fonts) {
-            Some(c) => Ok(Some(serde_json::to_string(&c).map_err(|e| js_err("serialize", &e.to_string()))?)),
-            None => Ok(None),
-        }
+        let c = self.with_placed(|doc, placed| hwp_session::table_cell_at_placed(doc, placed, page, x, y))?;
+        c.map(|c| serde_json::to_string(&c).map_err(|e| js_err("serialize", &e.to_string()))).transpose()
     }
 
     /// Marquee (rubber-band) select on `page`: every top-level block whose placed band intersects the
@@ -205,8 +273,7 @@ impl HwpDoc {
     /// overlap against the rect. Multi-page marquee is out of scope — clip the rect to the start page.
     #[wasm_bindgen(js_name = blocksInRect)]
     pub fn blocks_in_rect(&self, page: u32, x0: f64, y0: f64, x1: f64, y1: f64) -> Result<String, JsValue> {
-        let doc = self.doc()?;
-        let hits = hwp_session::blocks_in_rect_with(doc, page, x0, y0, x1, y1, &self.fonts);
+        let hits = self.with_placed(|doc, placed| hwp_session::blocks_in_rect_placed(doc, placed, page, x0, y0, x1, y1))?;
         serde_json::to_string(&hits).map_err(|e| js_err("serialize", &e.to_string()))
     }
 
@@ -259,6 +326,10 @@ impl HwpDoc {
         // stale cache would make the screen disagree with the PDF (issue §함정: 캐시 무효화).
         self.fonts = vec![(family, bytes)];
         *self.svg_cache.borrow_mut() = None;
+        // The placed-cache key already carries the font fingerprint (so it would rebuild on the next
+        // query anyway), but drop it explicitly here too — registerFont is one of the five documented
+        // invalidation points and the new metrics re-paginate (issue 025 §함정: registerFont 무효화).
+        *self.placed_cache.borrow_mut() = None;
         Ok(())
     }
 

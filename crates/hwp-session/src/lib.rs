@@ -26,6 +26,10 @@
 use hwp_model::prelude::SemanticDoc;
 use serde_json::{json, Value};
 
+/// The positioned, paginated document produced by [`place`] — re-exported so a caller (the wasm
+/// `HwpDoc` layout cache, issue 025) can name and store it without depending on `hwp-typeset` directly.
+pub use hwp_typeset::PlacedDoc;
+
 // ---- Own-engine geometry unit boundary --------------------------------------------------------
 //
 // Own-engine geometry lives in HWPUNIT in `place_doc`, but the own-render SVG (and therefore the
@@ -89,6 +93,23 @@ pub fn render_svg(doc: &SemanticDoc) -> Vec<String> {
 pub fn render_svg_with(doc: &SemanticDoc, injected: &[(String, Vec<u8>)]) -> Vec<String> {
     let fonts = own_render_fonts_with(injected);
     hwp_render::render_doc_svg(doc, fonts.as_ref())
+}
+
+// ---- Reusable placement (issue 025 — layout cache) --------------------------------------------
+
+/// Typeset the whole document ONCE into positioned pages — the reusable geometry surface (issue 025).
+/// Every `*_placed` query below reads a `&PlacedDoc` instead of re-typesetting, so a caller (the wasm
+/// `HwpDoc` cache, a shell) can place once per document revision and answer many clicks / drags /
+/// marquees without paying the pagination cost on every event (the body of "선택·드래그 딜레이"). The
+/// bare and `_with` query families are re-expressed as `place() + *_placed()` — the geometry logic lives
+/// ONLY in the `_placed` bodies, so there is no duplicated (drift-prone) copy.
+///
+/// `injected` threads caller-supplied font faces exactly like the `_with` family: an EMPTY slice is
+/// byte-identical to the discover/Approx placement (`own_render_fonts_with(&[]) == own_render_fonts`),
+/// so the native golden path (own-render / export-pdf / layout-check) is unchanged.
+pub fn place(doc: &SemanticDoc, injected: &[(String, Vec<u8>)]) -> PlacedDoc {
+    let fonts = own_render_fonts_with(injected);
+    hwp_typeset::place_doc(doc, fonts.as_ref())
 }
 
 // ---- Outline (heading nav) --------------------------------------------------------------------
@@ -176,8 +197,12 @@ pub struct ImageBoxDto {
 /// box matches the "자체 렌더" SVG exactly. `None` if that image doesn't fall on the queried page or
 /// the anchor holds no image.
 pub fn image_bbox(doc: &SemanticDoc, page: u32, section: usize, block: usize) -> Option<ImageBoxDto> {
-    let fonts = own_render_fonts();
-    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    image_bbox_placed(&place(doc, &[]), page, section, block)
+}
+
+/// [`image_bbox`] against an already-placed document (issue 025 cache surface). No typesetting here —
+/// pure geometry over `placed`.
+pub fn image_bbox_placed(placed: &PlacedDoc, page: u32, section: usize, block: usize) -> Option<ImageBoxDto> {
     let pg = placed.pages.get(page as usize)?;
     let k = HWPUNIT_PER_PX;
     pg.images
@@ -189,8 +214,11 @@ pub fn image_bbox(doc: &SemanticDoc, page: u32, section: usize, block: usize) ->
 /// Click-to-select: the topmost image whose placed box contains page-space `(x, y)` on `page`, in
 /// own-render px (with its `(section, block)` anchor). `None` if the click misses every image.
 pub fn image_at(doc: &SemanticDoc, page: u32, x: f64, y: f64) -> Option<ImageBoxDto> {
-    let fonts = own_render_fonts();
-    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    image_at_placed(&place(doc, &[]), page, x, y)
+}
+
+/// [`image_at`] against an already-placed document (issue 025 cache surface).
+pub fn image_at_placed(placed: &PlacedDoc, page: u32, x: f64, y: f64) -> Option<ImageBoxDto> {
     let pg = placed.pages.get(page as usize)?;
     let k = HWPUNIT_PER_PX;
     let (x, y) = (x * k, y * k); // px click → HWPUNIT (place_doc space)
@@ -225,8 +253,11 @@ pub struct TableBoxDto {
 /// Locate the placed outer box of the table anchored at `(section, block)` on `page`, in own-render
 /// px. `None` if that table doesn't fall on the queried page.
 pub fn table_bbox(doc: &SemanticDoc, page: u32, section: usize, block: usize) -> Option<TableBoxDto> {
-    let fonts = own_render_fonts();
-    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    table_bbox_placed(&place(doc, &[]), page, section, block)
+}
+
+/// [`table_bbox`] against an already-placed document (issue 025 cache surface).
+pub fn table_bbox_placed(placed: &PlacedDoc, page: u32, section: usize, block: usize) -> Option<TableBoxDto> {
     let pg = placed.pages.get(page as usize)?;
     let k = HWPUNIT_PER_PX;
     pg.tables
@@ -238,28 +269,23 @@ pub fn table_bbox(doc: &SemanticDoc, page: u32, section: usize, block: usize) ->
 /// Click-to-select: the topmost table whose placed outer box contains page-space `(x, y)` on `page`,
 /// in own-render px (with its `(section, block)` anchor). `None` if the click misses every table.
 pub fn table_at(doc: &SemanticDoc, page: u32, x: f64, y: f64) -> Option<TableBoxDto> {
-    let fonts = own_render_fonts();
-    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
-    let pg = placed.pages.get(page as usize)?;
-    let k = HWPUNIT_PER_PX;
-    let (x, y) = (x * k, y * k); // px click → HWPUNIT (place_doc space)
-    // Last match wins → topmost in paint order (a nested table draws after its outer table).
-    pg.tables
-        .iter()
-        .filter(|t| x >= t.x && x <= t.x + t.w && y >= t.y && y <= t.y + t.h)
-        .last()
-        .map(|t| TableBoxDto { x: t.x / k, y: t.y / k, w: t.w / k, h: t.h / k, section: t.section, block: t.block, rows: t.rows, cols: t.cols, first_row: t.first_row })
+    table_at_placed(&place(doc, &[]), page, x, y)
 }
 
 /// [`table_at`] measured with CALLER-INJECTED font bytes (issue 022) — the wasm/web path where a
 /// registered font changed the pagination, so the geometry MUST agree with the injected-metric SVG or
 /// clicks miss. Empty slice → identical to [`table_at`].
 pub fn table_at_with(doc: &SemanticDoc, page: u32, x: f64, y: f64, injected: &[(String, Vec<u8>)]) -> Option<TableBoxDto> {
-    let fonts = own_render_fonts_with(injected);
-    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    table_at_placed(&place(doc, injected), page, x, y)
+}
+
+/// [`table_at`] against an already-placed document (issue 025 cache surface). The wasm `HwpDoc` calls
+/// this with its cached `PlacedDoc` so a click does not re-typeset the document.
+pub fn table_at_placed(placed: &PlacedDoc, page: u32, x: f64, y: f64) -> Option<TableBoxDto> {
     let pg = placed.pages.get(page as usize)?;
     let k = HWPUNIT_PER_PX;
-    let (x, y) = (x * k, y * k);
+    let (x, y) = (x * k, y * k); // px click → HWPUNIT (place_doc space)
+    // Last match wins → topmost in paint order (a nested table draws after its outer table).
     pg.tables
         .iter()
         .filter(|t| x >= t.x && x <= t.x + t.w && y >= t.y && y <= t.y + t.h)
@@ -320,35 +346,20 @@ fn model_para_text(doc: &SemanticDoc, section: usize, block: usize) -> String {
 /// own-render px geometry. Unlike [`image_at`]/[`table_at`] this resolves PARAGRAPHS too. `None` only
 /// when the page has no placed blocks.
 pub fn own_hit_test(doc: &SemanticDoc, page: u32, x: f64, y: f64) -> Option<BlockHitDto> {
-    let fonts = own_render_fonts();
-    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
-    let pg = placed.pages.get(page as usize)?;
-    let k = HWPUNIT_PER_PX;
-    pg.block_at(x * k, y * k).map(|b| BlockHitDto {
-        section: b.section,
-        block: b.block,
-        kind: match b.kind {
-            hwp_typeset::BlockKind::Paragraph => "paragraph",
-            hwp_typeset::BlockKind::Table => "table",
-            hwp_typeset::BlockKind::Image => "image",
-        }
-        .into(),
-        x: b.x / k,
-        y: b.y / k,
-        w: b.w / k,
-        h: b.h / k,
-        // Pre-fill text only for a plain paragraph band (image/table → empty; not inline-editable text).
-        text: if b.kind == hwp_typeset::BlockKind::Paragraph { model_para_text(doc, b.section, b.block) } else { String::new() },
-        editable: b.kind == hwp_typeset::BlockKind::Paragraph && model_para_editable(doc, b.section, b.block),
-    })
+    own_hit_test_placed(doc, &place(doc, &[]), page, x, y)
 }
 
 /// [`own_hit_test`] measured with CALLER-INJECTED font bytes (issue 022) — the wasm/web path so the
 /// click-to-point geometry agrees with the injected-metric SVG. Empty slice → identical to
 /// [`own_hit_test`].
 pub fn own_hit_test_with(doc: &SemanticDoc, page: u32, x: f64, y: f64, injected: &[(String, Vec<u8>)]) -> Option<BlockHitDto> {
-    let fonts = own_render_fonts_with(injected);
-    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    own_hit_test_placed(doc, &place(doc, injected), page, x, y)
+}
+
+/// [`own_hit_test`] against an already-placed document (issue 025 cache surface). Takes BOTH `placed`
+/// (geometry) and `doc` (the model text/editable read-back), so the wasm `HwpDoc` can serve every click
+/// from its cached `PlacedDoc` while still resolving the paragraph pre-fill text from the live model.
+pub fn own_hit_test_placed(doc: &SemanticDoc, placed: &PlacedDoc, page: u32, x: f64, y: f64) -> Option<BlockHitDto> {
     let pg = placed.pages.get(page as usize)?;
     let k = HWPUNIT_PER_PX;
     pg.block_at(x * k, y * k).map(|b| BlockHitDto {
@@ -380,19 +391,19 @@ pub fn own_hit_test_with(doc: &SemanticDoc, page: u32, x: f64, y: f64, injected:
 /// place_doc HWPUNIT at the boundary; the returned boxes are back in px. Multi-page marquee is out of
 /// scope — the caller clips the rect to the start page and queries that page only.
 pub fn blocks_in_rect(doc: &SemanticDoc, page: u32, x0: f64, y0: f64, x1: f64, y1: f64) -> Vec<BlockHitDto> {
-    let fonts = own_render_fonts();
-    blocks_in_rect_impl(doc, page, x0, y0, x1, y1, fonts.as_ref())
+    blocks_in_rect_placed(doc, &place(doc, &[]), page, x0, y0, x1, y1)
 }
 
 /// [`blocks_in_rect`] measured with CALLER-INJECTED font bytes (issue 022) — the wasm/web path so the
 /// marquee geometry agrees with the injected-metric SVG. Empty slice → identical to [`blocks_in_rect`].
 pub fn blocks_in_rect_with(doc: &SemanticDoc, page: u32, x0: f64, y0: f64, x1: f64, y1: f64, injected: &[(String, Vec<u8>)]) -> Vec<BlockHitDto> {
-    let fonts = own_render_fonts_with(injected);
-    blocks_in_rect_impl(doc, page, x0, y0, x1, y1, fonts.as_ref())
+    blocks_in_rect_placed(doc, &place(doc, injected), page, x0, y0, x1, y1)
 }
 
-fn blocks_in_rect_impl(doc: &SemanticDoc, page: u32, x0: f64, y0: f64, x1: f64, y1: f64, fonts: &dyn hwp_model::prelude::FontMetricsProvider) -> Vec<BlockHitDto> {
-    let placed = hwp_typeset::place_doc(doc, fonts);
+/// [`blocks_in_rect`] against an already-placed document (issue 025 cache surface) — the marquee path.
+/// The wasm `HwpDoc` calls this with its cached `PlacedDoc` on pointer-up so a rubber-band select does
+/// not re-typeset. `doc` is still needed for each block's model text/editable read-back.
+pub fn blocks_in_rect_placed(doc: &SemanticDoc, placed: &PlacedDoc, page: u32, x0: f64, y0: f64, x1: f64, y1: f64) -> Vec<BlockHitDto> {
     let Some(pg) = placed.pages.get(page as usize) else { return Vec::new() };
     let k = HWPUNIT_PER_PX;
     // Normalize the (possibly reversed) corners, then px → HWPUNIT (place_doc space).
@@ -475,8 +486,13 @@ fn model_cell_text(doc: &SemanticDoc, section: usize, block: usize, row: usize, 
 /// Click-to-edit (own-render only): the table cell under a page-space double-click, in own-render px
 /// geometry. `None` when the point isn't over any table cell.
 pub fn table_cell_at(doc: &SemanticDoc, page: u32, x: f64, y: f64) -> Option<CellHitDto> {
-    let fonts = own_render_fonts();
-    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    table_cell_at_placed(doc, &place(doc, &[]), page, x, y)
+}
+
+/// [`table_cell_at`] against an already-placed document (issue 025 cache surface). Takes BOTH `placed`
+/// (geometry) and `doc` (the cell text read-back), so the wasm `HwpDoc` serves cell-marking clicks from
+/// its cached `PlacedDoc`. `row`/`col` stay MODEL-GLOBAL (do NOT re-add `first_row` on a split fragment).
+pub fn table_cell_at_placed(doc: &SemanticDoc, placed: &PlacedDoc, page: u32, x: f64, y: f64) -> Option<CellHitDto> {
     let pg = placed.pages.get(page as usize)?;
     let k = HWPUNIT_PER_PX;
     let (hx, hy) = (x * k, y * k); // px click → HWPUNIT
@@ -510,30 +526,7 @@ pub fn table_cell_at(doc: &SemanticDoc, page: u32, x: f64, y: f64) -> Option<Cel
 /// byte-identical to [`table_cell_at`]. `row`/`col` remain MODEL-GLOBAL (PlacedCell.row is global even in
 /// a split fragment — do NOT re-add `first_row`, issue §좌표계).
 pub fn table_cell_at_with(doc: &SemanticDoc, page: u32, x: f64, y: f64, injected: &[(String, Vec<u8>)]) -> Option<CellHitDto> {
-    let fonts = own_render_fonts_with(injected);
-    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
-    let pg = placed.pages.get(page as usize)?;
-    let k = HWPUNIT_PER_PX;
-    let (hx, hy) = (x * k, y * k); // px click → HWPUNIT
-    let t = pg
-        .tables
-        .iter()
-        .filter(|t| hx >= t.x && hx <= t.x + t.w && hy >= t.y && hy <= t.y + t.h)
-        .last()?;
-    let cell = t.cell_at(hx, hy)?;
-    Some(CellHitDto {
-        section: t.section,
-        block: t.block,
-        row: cell.row,
-        col: cell.col,
-        rows: t.rows,
-        cols: t.cols,
-        text: model_cell_text(doc, t.section, t.block, cell.row, cell.col),
-        x: cell.x / k,
-        y: cell.y / k,
-        w: cell.w / k,
-        h: cell.h / k,
-    })
+    table_cell_at_placed(doc, &place(doc, injected), page, x, y)
 }
 
 /// The PX box (own SVG space) + page of the cell at `(section, block, row, col)`, looked up BY ADDRESS
@@ -549,8 +542,11 @@ pub struct CellBox {
 }
 
 pub fn table_cell_box(doc: &SemanticDoc, section: usize, block: usize, row: usize, col: usize) -> Option<CellBox> {
-    let fonts = own_render_fonts();
-    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    table_cell_box_placed(&place(doc, &[]), section, block, row, col)
+}
+
+/// [`table_cell_box`] against an already-placed document (issue 025 cache surface).
+pub fn table_cell_box_placed(placed: &PlacedDoc, section: usize, block: usize, row: usize, col: usize) -> Option<CellBox> {
     let k = HWPUNIT_PER_PX;
     for (pi, pg) in placed.pages.iter().enumerate() {
         for t in pg.tables.iter().filter(|t| t.section == section && t.block == block) {
@@ -567,8 +563,12 @@ pub fn table_cell_box(doc: &SemanticDoc, section: usize, block: usize, row: usiz
 /// the table right, derived from `column_offsets` so they land exactly on the drawn grid. `None` if the
 /// table isn't on the page.
 pub fn table_col_boundaries(doc: &SemanticDoc, page: u32, section: usize, block: usize) -> Option<Vec<f64>> {
-    let fonts = own_render_fonts();
-    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    table_col_boundaries_placed(doc, &place(doc, &[]), page, section, block)
+}
+
+/// [`table_col_boundaries`] against an already-placed document (issue 025 cache surface). `doc` is still
+/// read for the model table's `column_offsets`.
+pub fn table_col_boundaries_placed(doc: &SemanticDoc, placed: &PlacedDoc, page: u32, section: usize, block: usize) -> Option<Vec<f64>> {
     let pg = placed.pages.get(page as usize)?;
     let pt = pg.tables.iter().find(|t| t.section == section && t.block == block)?;
     let hwp_model::prelude::Block::Table(model) = doc.sections.get(section).and_then(|s| s.blocks.get(block))? else {
@@ -587,6 +587,21 @@ pub fn table_col_boundaries(doc: &SemanticDoc, page: u32, section: usize, block:
 pub fn table_row_boundaries(doc: &SemanticDoc, page: u32, section: usize, block: usize) -> Option<Vec<f64>> {
     let fonts = own_render_fonts();
     let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    table_row_boundaries_placed(doc, &placed, fonts.as_ref(), page, section, block)
+}
+
+/// [`table_row_boundaries`] against an already-placed document (issue 025 cache surface). Unlike the
+/// other `_placed` queries this ALSO needs the `fonts` provider, because `row_offsets` re-measures the
+/// row content heights the same way `place_table` drew them — pass the SAME provider `placed` was built
+/// with, or the boundaries won't line up with the painted grid.
+pub fn table_row_boundaries_placed(
+    doc: &SemanticDoc,
+    placed: &PlacedDoc,
+    fonts: &dyn hwp_model::prelude::FontMetricsProvider,
+    page: u32,
+    section: usize,
+    block: usize,
+) -> Option<Vec<f64>> {
     let pg = placed.pages.get(page as usize)?;
     let pt = pg.tables.iter().find(|t| t.section == section && t.block == block)?;
     let hwp_model::prelude::Block::Table(model) = doc.sections.get(section).and_then(|s| s.blocks.get(block))? else {
@@ -599,7 +614,7 @@ pub fn table_row_boundaries(doc: &SemanticDoc, page: u32, section: usize, block:
     // so slice row_offsets to the fragment's [first_row, last_row] and rebase to the fragment top —
     // otherwise the whole-table rows would be squashed onto one fragment's box. For a single-fragment
     // table (first_row=0, last_row=rows) this is identical to the full set.
-    let row_y = hwp_typeset::row_offsets(model, pt.w, doc, fonts.as_ref());
+    let row_y = hwp_typeset::row_offsets(model, pt.w, doc, fonts);
     let (f, l) = (pt.first_row, pt.last_row);
     if f >= l || l >= row_y.len() {
         return None;
@@ -624,8 +639,11 @@ pub struct PageGeom {
 }
 
 pub fn page_geometry(doc: &SemanticDoc, page: u32) -> Option<PageGeom> {
-    let fonts = own_render_fonts();
-    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    page_geometry_placed(&place(doc, &[]), page)
+}
+
+/// [`page_geometry`] against an already-placed document (issue 025 cache surface).
+pub fn page_geometry_placed(placed: &PlacedDoc, page: u32) -> Option<PageGeom> {
     let pg = placed.pages.get(page as usize)?;
     let k = HWPUNIT_PER_PX;
     Some(PageGeom {
@@ -1324,6 +1342,74 @@ mod tests {
         // A miss returns None (not a panic) on both paths (018 null policy).
         assert!(table_cell_at(&doc, 999, 0.0, 0.0).is_none(), "off-page → None");
         assert!(table_cell_at_with(&doc, 0, -1.0, -1.0, &[]).is_none(), "off-table → None");
+    }
+
+    #[test]
+    fn placed_queries_equal_the_re_placing_queries() {
+        // Issue 025 §동일성: a query answered from a SHARED `place()` result must be byte-identical to
+        // the bare query that re-typesets internally — the cache surface is a pure factoring, not a new
+        // geometry. Place ONCE, then compare every `_placed` variant to its self-placing sibling.
+        let doc = doc_with_stacked_blocks();
+        let placed = place(&doc, &[]);
+
+        // own_hit_test: probe the centre of every stacked block's band.
+        for probe_y in [50.0f64, 300.0, 500.0] {
+            let bare = own_hit_test(&doc, 0, 40.0, probe_y);
+            let cached = own_hit_test_placed(&doc, &placed, 0, 40.0, probe_y);
+            assert_eq!(
+                serde_json::to_string(&bare).unwrap(),
+                serde_json::to_string(&cached).unwrap(),
+                "own_hit_test == own_hit_test_placed at y={probe_y}"
+            );
+        }
+        // blocks_in_rect over the whole page.
+        assert_eq!(
+            serde_json::to_string(&blocks_in_rect(&doc, 0, 0.0, 0.0, 1e5, 1e5)).unwrap(),
+            serde_json::to_string(&blocks_in_rect_placed(&doc, &placed, 0, 0.0, 0.0, 1e5, 1e5)).unwrap(),
+        );
+        // page geometry.
+        assert_eq!(
+            serde_json::to_string(&page_geometry(&doc, 0)).unwrap(),
+            serde_json::to_string(&page_geometry_placed(&placed, 0)).unwrap(),
+        );
+        // A table lives at block 1 — its outer box + cell hit + col boundaries all match.
+        let tb = table_bbox(&doc, 0, 0, 1).expect("table present");
+        assert_eq!(
+            serde_json::to_string(&Some(&tb)).unwrap(),
+            serde_json::to_string(&table_bbox_placed(&placed, 0, 0, 1)).unwrap(),
+        );
+        let (cx, cy) = (tb.x + tb.w / 2.0, tb.y + tb.h / 2.0);
+        assert_eq!(
+            serde_json::to_string(&table_at(&doc, 0, cx, cy)).unwrap(),
+            serde_json::to_string(&table_at_placed(&placed, 0, cx, cy)).unwrap(),
+        );
+        assert_eq!(
+            serde_json::to_string(&table_cell_at(&doc, 0, cx, cy)).unwrap(),
+            serde_json::to_string(&table_cell_at_placed(&doc, &placed, 0, cx, cy)).unwrap(),
+        );
+        assert_eq!(
+            serde_json::to_string(&table_col_boundaries(&doc, 0, 0, 1)).unwrap(),
+            serde_json::to_string(&table_col_boundaries_placed(&doc, &placed, 0, 0, 1)).unwrap(),
+        );
+    }
+
+    #[test]
+    fn place_empty_injection_equals_place_via_with_variants() {
+        // The `_with` family and the bare family must both fold onto `place()`: an empty injection is
+        // byte-identical, so a `_placed` result driven by `place(&doc, &[])` equals the `_with(&[])` path.
+        let doc = tall_split_table_doc(30, 5000);
+        let placed = place(&doc, &[]);
+        let bx = table_cell_box_placed(&placed, 0, 0, 27, 0).expect("row 27 placed");
+        let (px, py) = (bx.x + bx.w / 2.0, bx.y + bx.h / 2.0);
+        assert_eq!(
+            serde_json::to_string(&table_cell_at_with(&doc, bx.page, px, py, &[])).unwrap(),
+            serde_json::to_string(&table_cell_at_placed(&doc, &place(&doc, &[]), bx.page, px, py)).unwrap(),
+        );
+        // table_cell_box likewise round-trips through the placed surface.
+        assert_eq!(
+            serde_json::to_string(&table_cell_box(&doc, 0, 0, 27, 0)).unwrap(),
+            serde_json::to_string(&table_cell_box_placed(&placed, 0, 0, 27, 0)).unwrap(),
+        );
     }
 
     #[test]

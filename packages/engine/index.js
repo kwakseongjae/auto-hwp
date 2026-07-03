@@ -136,6 +136,11 @@ export class HwpDoc {
   pageCount() {
     return this.#call((r) => r.pageCount());
   }
+  /** Layout-cache diagnostics (issue 025): `{placeBuilds, placeHits, revision, fonts}`. `placeBuilds`
+   *  is the number of real re-typesets — after opening + N geometry queries with no edit it reads 1. */
+  placedStats() {
+    return this.#call((r) => JSON.parse(r.placedStats()));
+  }
   /** UNTRUSTED SVG string — do NOT innerHTML raw; prefer renderPageSvgSanitized or sanitizeSvg. */
   renderPageSvg(n) {
     return this.#call((r) => r.renderPageSvg(n));
