@@ -48,8 +48,8 @@
 
 | # | 제목 | 상태 | 단계 | 비고 |
 |---|------|------|------|------|
-| [028](028-floating-selection-toolbar.md) | 플로팅 셀렉션 툴바(네이버 블로그 패턴) + "AI에게 전달" | open | R4-P0 | 027 커맨드 재사용 — 표면 재설계 |
-| [029](029-integration-handover.md) | 실통합 인수인계 문서(창업지원도움e 개발자용) + 실행 검증 스크립트 | open | R4-P1 | 실통합은 사용자 수행 — 문서로 전달 |
+| [028](028-floating-selection-toolbar.md) | 플로팅 셀렉션 툴바 + "✨AI에게 전달" | **done** | R4-P0 | 7f1f85a · 위치유틸 6테스트·e2e 거리assert·vitest 61 |
+| [029](029-integration-handover.md) | 실통합 인수인계 — INTEGRATION-HANDOVER.md + handover-verify.sh | **done** | R4-P1 | d8ae46f · 문서==스크립트 드리프트0, 아키텍트 직접 exit0 재현; **R4 완료** |
 
 ## 로드맵 R3 — 라운드 3 (2026-07-03, 사용자 QA + SDK 재설계)
 
