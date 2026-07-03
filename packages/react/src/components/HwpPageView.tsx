@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import type { EngineAdapter } from "../EngineAdapter";
 import { screenToPage } from "../coords";
 import { sanitizeSvg } from "../sanitize";
@@ -11,6 +11,28 @@ export type PageClick = { page: number; x: number; y: number; meta: boolean; cli
 
 /** One rendered page: sanitized SVG + its parsed viewBox dimensions (own-render px). */
 type PageState = { svg: string; vbW: number; vbH: number };
+
+// ── dev-only render instrumentation (issue 030) ─────────────────────────────────────────────────────
+// A global counter of how many times a document SHEET (a heavy per-page SVG) actually re-renders. The
+// perf regression this issue kills is "the whole workspace re-renders on every marquee pointermove", so
+// we PROVE the fix by asserting this counter stays flat across a 30-move drag. `DEV_INSTRUMENT` is a
+// build-time constant (Vite folds `import.meta.env.PROD`), so the whole counter branch is dead-code
+// eliminated from a production bundle — zero runtime cost in prod.
+const DEV_INSTRUMENT: boolean = (import.meta as { env?: { PROD?: boolean } }).env?.PROD !== true;
+type RenderGlobal = { __hwSheetRenders?: number };
+function bumpSheetRenderCount(): void {
+  if (!DEV_INSTRUMENT) return;
+  const g = globalThis as RenderGlobal;
+  g.__hwSheetRenders = (g.__hwSheetRenders ?? 0) + 1;
+}
+/** DEV/test helper: how many times any document sheet has rendered since the last reset. */
+export function __getSheetRenderCount(): number {
+  return (globalThis as RenderGlobal).__hwSheetRenders ?? 0;
+}
+/** DEV/test helper: zero the sheet render counter (call right before a measured gesture). */
+export function __resetSheetRenderCount(): void {
+  (globalThis as RenderGlobal).__hwSheetRenders = 0;
+}
 
 export interface HwpPageViewProps {
   adapter: EngineAdapter;
@@ -48,11 +70,55 @@ function parseViewBox(svg: string): { w: number; h: number } {
   return { w: w ? parseFloat(w[1]) : 0, h: h ? parseFloat(h[1]) : 0 };
 }
 
+/** The (page, event) → nothing pointer/mouse handlers threaded into a sheet. Kept STABLE across renders
+ *  in HwpPageView (via useCallback with `page` passed as an argument, not captured in a per-page closure)
+ *  so PageSheet's React.memo actually holds — a fresh closure per render would defeat memoization. */
+type SheetHandlers = {
+  onClick: (page: number, ev: React.MouseEvent<HTMLDivElement>) => void;
+  onDoubleClick: (page: number, ev: React.MouseEvent<HTMLDivElement>) => void;
+  onPointerDown: (page: number, ev: React.PointerEvent<HTMLDivElement>) => void;
+  onPointerMove: (page: number, ev: React.PointerEvent<HTMLDivElement>) => void;
+  onPointerUp: (page: number, ev: React.PointerEvent<HTMLDivElement>) => void;
+};
+
+interface PageSheetProps extends SheetHandlers {
+  page: number;
+  /** The sanitized SVG string. Same document revision → same string (025's wasm SVG cache), so this is
+   *  a STABLE reference across selection/marquee/toolbar churn and React.memo skips the re-render. */
+  svg: string;
+}
+
+/// PageSheet — ONE document sheet (a heavy per-page SVG injected via dangerouslySetInnerHTML). Memoized
+/// on (page, svg, handlers): selection / marquee / toolbar state changes DO NOT touch these props, so the
+/// SVG never re-renders during a drag (issue 030 — the render-count assertion proves it). The handlers
+/// are stable (see SheetHandlers) and `svg` is a stable string per revision, so memo compares equal.
+function PageSheetImpl({ page, svg, onClick, onDoubleClick, onPointerDown, onPointerMove, onPointerUp }: PageSheetProps) {
+  bumpSheetRenderCount(); // dev-only; folded out of production bundles
+  return (
+    <div
+      className="hw-sheet"
+      data-page={page}
+      onClick={(e) => onClick(page, e)}
+      onDoubleClick={(e) => onDoubleClick(page, e)}
+      onPointerDown={(e) => onPointerDown(page, e)}
+      onPointerMove={(e) => onPointerMove(page, e)}
+      onPointerUp={(e) => onPointerUp(page, e)}
+      // R7: `svg` is the ONLY value ever handed to dangerouslySetInnerHTML, and it is always the output of
+      // sanitizeSvg in HwpPageView below. No prop feeds this bypassing the gate.
+      dangerouslySetInnerHTML={{ __html: svg }}
+    />
+  );
+}
+const PageSheet = memo(PageSheetImpl);
+
 /// HwpPageView — renders EVERY page of the document as an inline SVG sheet with zoom. The SVG string
 /// comes from `adapter.pageSvg(n)` and is ALWAYS routed through this package's `sanitizeSvg` before it
 /// is injected via dangerouslySetInnerHTML (R7 — there is no prop that takes an SVG string directly).
 /// A click is converted from client px to own-render PAGE px HERE (coords.ts), so the coordinate math
 /// lives in one place and every backend's hit-test gets page-local px.
+///
+/// Each sheet is a memoized PageSheet (issue 030): a drag/marquee/toolbar state change re-renders the
+/// lightweight overlay layer, NEVER the SVG sheets. The overlay closure is passed as `renderOverlay`.
 export function HwpPageView(props: HwpPageViewProps) {
   const { adapter, pageCount, zoom = 1, refreshToken = 0, onPageClick, onPageDoubleClick, onPagePointerDown, onPagePointerMove, onPagePointerUp, renderOverlay } = props;
   const [pages, setPages] = useState<Record<number, PageState>>({});
@@ -95,8 +161,10 @@ export function HwpPageView(props: HwpPageViewProps) {
     [pages],
   );
 
+  // The five sheet handlers, each STABLE (page arrives as an argument, not captured per-page) so
+  // PageSheet's memo holds across selection/marquee churn (only `pages` — an SVG re-fetch — moves them).
   const handleClick = useCallback(
-    (page: number) => (ev: React.MouseEvent<HTMLDivElement>) => {
+    (page: number, ev: React.MouseEvent<HTMLDivElement>) => {
       if (!onPageClick) return;
       const c = eventToClick(page, ev);
       if (c) onPageClick(c);
@@ -105,7 +173,7 @@ export function HwpPageView(props: HwpPageViewProps) {
   );
 
   const handleDoubleClick = useCallback(
-    (page: number) => (ev: React.MouseEvent<HTMLDivElement>) => {
+    (page: number, ev: React.MouseEvent<HTMLDivElement>) => {
       if (!onPageDoubleClick) return;
       const c = eventToClick(page, ev);
       if (c) onPageDoubleClick(c);
@@ -114,7 +182,7 @@ export function HwpPageView(props: HwpPageViewProps) {
   );
 
   const handlePointerDown = useCallback(
-    (page: number) => (ev: React.PointerEvent<HTMLDivElement>) => {
+    (page: number, ev: React.PointerEvent<HTMLDivElement>) => {
       if (!onPagePointerDown || ev.button !== 0) return; // primary button only
       const c = eventToClick(page, ev);
       if (!c) return;
@@ -130,7 +198,7 @@ export function HwpPageView(props: HwpPageViewProps) {
   );
 
   const handlePointerMove = useCallback(
-    (page: number) => (ev: React.PointerEvent<HTMLDivElement>) => {
+    (page: number, ev: React.PointerEvent<HTMLDivElement>) => {
       if (!onPagePointerMove || ev.buttons === 0) return; // only while a button is held (a drag)
       const c = eventToClick(page, ev);
       if (c) onPagePointerMove(c, ev);
@@ -139,7 +207,7 @@ export function HwpPageView(props: HwpPageViewProps) {
   );
 
   const handlePointerUp = useCallback(
-    (page: number) => (ev: React.PointerEvent<HTMLDivElement>) => {
+    (page: number, ev: React.PointerEvent<HTMLDivElement>) => {
       if (!onPagePointerUp) return;
       const c = eventToClick(page, ev);
       if (c) onPagePointerUp(c, ev);
@@ -156,17 +224,14 @@ export function HwpPageView(props: HwpPageViewProps) {
         const scale = st && st.vbW > 0 ? width / st.vbW : 1;
         return (
           <div key={p} className="hw-sheet-wrap" style={{ width }}>
-            <div
-              className="hw-sheet"
-              data-page={p}
-              onClick={handleClick(p)}
-              onDoubleClick={handleDoubleClick(p)}
-              onPointerDown={handlePointerDown(p)}
-              onPointerMove={handlePointerMove(p)}
-              onPointerUp={handlePointerUp(p)}
-              // R7: `st.svg` is the ONLY value ever handed to dangerouslySetInnerHTML, and it is always
-              // the output of sanitizeSvg above. No prop feeds this bypassing the gate.
-              dangerouslySetInnerHTML={{ __html: st?.svg ?? "" }}
+            <PageSheet
+              page={p}
+              svg={st?.svg ?? ""}
+              onClick={handleClick}
+              onDoubleClick={handleDoubleClick}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
             />
             {renderOverlay?.(p, scale)}
           </div>

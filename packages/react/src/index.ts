@@ -9,6 +9,10 @@ export { HwpPageView } from "./components/HwpPageView";
 export type { HwpPageViewProps, PageClick } from "./components/HwpPageView";
 export { SelectionOverlay } from "./components/SelectionOverlay";
 export type { SelectionOverlayProps, Mark, Marquee } from "./components/SelectionOverlay";
+// Issue 030 — the marquee (rubber-band) as an ISOLATED layer: it subscribes to the core's selection model
+// directly, so a drag never re-renders the workspace or the SVG sheets (only the rectangle sweeps).
+export { MarqueeLayer } from "./components/MarqueeLayer";
+export type { MarqueeLayerProps } from "./components/MarqueeLayer";
 export { ChatPanel } from "./components/ChatPanel";
 export type { ChatPanelProps } from "./components/ChatPanel";
 export { FontPicker } from "./components/FontPicker";

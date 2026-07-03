@@ -5,7 +5,8 @@ import { modLabel } from "../platform";
 import { useHwpEditor } from "../useHwpEditor";
 import { ChatPanel } from "./ChatPanel";
 import { HwpPageView, type PageClick } from "./HwpPageView";
-import { SelectionOverlay, type Marquee, type Mark } from "./SelectionOverlay";
+import { SelectionOverlay, type Mark } from "./SelectionOverlay";
+import { MarqueeLayer } from "./MarqueeLayer";
 import { FontPicker } from "./FontPicker";
 import { ColumnResizeOverlay } from "./ColumnResizeOverlay";
 import { TableInsertButton } from "./TableInsertButton";
@@ -15,6 +16,27 @@ import { FloatingToolbar, type ToolbarAlign } from "./FloatingToolbar";
 import { buildFontFaceCss, type FontCatalogEntry } from "../fonts";
 
 const A4_W = 794; // CSS px for 210mm @ 96dpi (mirrors HwpPageView) — the 100% page width.
+
+// ── dev-only render instrumentation (issue 030) ─────────────────────────────────────────────────────
+// Counts how many times HwpWorkspace itself commits. The marquee decoupling means a pointermove during a
+// drag no longer bumps a workspace `useState`, so this counter stays FLAT across a 30-move drag (only the
+// isolated MarqueeLayer updates). `DEV_INSTRUMENT` is a build-time constant so the branch is stripped
+// from production bundles (Vite folds `import.meta.env.PROD`).
+const DEV_INSTRUMENT: boolean = (import.meta as { env?: { PROD?: boolean } }).env?.PROD !== true;
+type WsRenderGlobal = { __hwWorkspaceRenders?: number };
+function bumpWorkspaceRenderCount(): void {
+  if (!DEV_INSTRUMENT) return;
+  const g = globalThis as WsRenderGlobal;
+  g.__hwWorkspaceRenders = (g.__hwWorkspaceRenders ?? 0) + 1;
+}
+/** DEV/test helper: how many times HwpWorkspace has committed since the last reset. */
+export function __getWorkspaceRenderCount(): number {
+  return (globalThis as WsRenderGlobal).__hwWorkspaceRenders ?? 0;
+}
+/** DEV/test helper: zero the workspace render counter (call right before a measured gesture). */
+export function __resetWorkspaceRenderCount(): void {
+  (globalThis as WsRenderGlobal).__hwWorkspaceRenders = 0;
+}
 
 /** The single-selection edit target the issue-027 editing chrome hangs off (column handles / format
  *  toolbar / text popover). Resolved async from the current selection (adds the table box + column
@@ -76,8 +98,9 @@ const toPointerInput = (c: PageClick): PointerInput => ({ page: c.page, x: c.x, 
 /// The AI is delegated to `onAiRequest` (R6); SVG is sanitized in HwpPageView (R7); fonts are injected
 /// via `requestFont`/`defaultFont` (R8).
 export function HwpWorkspace(props: HwpWorkspaceProps) {
+  bumpWorkspaceRenderCount(); // dev-only; folded out of production bundles (issue 030 render-count proof)
   const { adapter } = props;
-  const { core, meta, selection, marquee, refreshToken, bumpRefresh } = useHwpEditor(adapter);
+  const { core, meta, selection, refreshToken, bumpRefresh } = useHwpEditor(adapter);
   const [zoom, setZoom] = useState(0.9);
   const [status, setStatus] = useState<string>("");
   // Selected font for the SCREEN (issue 022): family + a blob URL of the SAME bytes registered for
@@ -572,12 +595,15 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                 pageCount={meta.pages}
                 zoom={zoom}
                 refreshToken={refreshToken}
-                onPagePointerDown={(c) => onPointerDown(c)}
-                onPagePointerMove={(c) => onPointerMove(c)}
-                onPagePointerUp={(c) => onPointerUp(c)}
+                onPagePointerDown={onPointerDown}
+                onPagePointerMove={onPointerMove}
+                onPagePointerUp={onPointerUp}
                 renderOverlay={(page, scale) => (
                   <>
-                    <SelectionOverlay marks={marks} marquee={marquee as Marquee | null} page={page} scale={scale} />
+                    <SelectionOverlay marks={marks} page={page} scale={scale} />
+                    {/* issue 030: the marquee is an ISOLATED layer — it subscribes to the core itself, so a
+                        drag re-renders neither this workspace nor the SVG sheets (only the rect moves). */}
+                    <MarqueeLayer core={core} page={page} scale={scale} />
                     {editingOn && editTarget && editTarget.page === page && editTarget.boundaries && editTarget.tableBox && (
                       <ColumnResizeOverlay
                         boundaries={editTarget.boundaries}
@@ -587,7 +613,10 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                         onCommit={(b) => void onColCommit(b)}
                       />
                     )}
-                    {editingOn && toolbarPage === page && marks.length > 0 && !(pointerActive || marquee) && (
+                    {/* issue 028: hide the floating toolbar mid-gesture. `pointerActive` is true for the
+                        WHOLE press→release (set on pointerDown, cleared on pointerUp), so it already covers
+                        a marquee drag — the marquee state (now isolated, issue 030) is no longer needed here. */}
+                    {editingOn && toolbarPage === page && marks.length > 0 && !pointerActive && (
                       <FloatingToolbar
                         marks={marks.filter((m) => m.page === page).map((m) => m.box)}
                         scale={scale}
