@@ -42,6 +42,16 @@
 | [021](021-selection-ux-v2.md) | 선택 UX v2 — 클릭=교체 / ⌘·Ctrl=토글 / 러버밴드 마퀴 | **done** | QA-P1 | 0cb666b · blocksInRect + vitest 14 + Playwright 갱신 통과 |
 | [022](022-font-system-v1.md) | 폰트 시스템 v1 — OFL 카탈로그 8종+업로드+삼위일치 (**교차골든 26p 바이트동일**) | **done** | QA-P1 | cb9f7b3 · 셰이퍼 +8.8KB, 라이선스 표 전수 OFL |
 
+## 로드맵 R6 — 라운드 6 (2026-07-03, 033 백로그 집행)
+
+착수: **034 ∥ 035** (소유권: 034=HwpPageView/refresh, 035=HwpWorkspace 뷰포트/줌/팬) → **036** (키보드 셀 내비).
+
+| # | 제목 | 상태 | 단계 | 비고 |
+|---|------|------|------|------|
+| [034](034-page-selective-refresh.md) | 페이지 선택적 갱신 — 편집 DOM 세금 107ms→≤15ms (문자열 비교 스킵) | open | R6-P0 | 033 백로그 1순위 |
+| [035](035-pan-zoom-gestures.md) | 피그마식 팬/줌 — Space드래그·커서중심 ⌘휠/핀치·⌘0, 제스처 중 CSS transform | open | R6-P0 | 줌 리플로우 50ms 완화 |
+| [036](036-keyboard-cell-nav.md) | 키보드 셀 내비 — 방향키 이동·Enter 편집·Tab 저장+이동 | open | R6-P1 | 034·035 후; core moveCell |
+
 ## 로드맵 R5 — 라운드 5 (2026-07-03, 사용자 QA: 피그마급 UX)
 
 착수: **030 ∥ 031 ∥ 033** (파일 소유권 분할: 030=useHwpEditor/HwpPageView/styles, 031=units/ColumnResizeOverlay/e2e, 033=docs) → **032** (030 후).
