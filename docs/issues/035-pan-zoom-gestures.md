@@ -1,6 +1,6 @@
 # 035 — R6-2: 피그마식 팬/줌 — Space+드래그, 커서 중심 ⌘휠/핀치 줌
 
-- 상태: **open** · 우선순위: R6-P0 · 영역: packages/react (HwpWorkspace 뷰포트 영역) + styles
+- 상태: **done** (229f8e3) · 우선순위: R6-P0 · 영역: packages/react (HwpWorkspace 뷰포트 영역) + styles
 - 병렬: 034(HwpPageView/refresh 경로 소유 — **이 이슈는 그 파일/경로 금지**)
 
 ## 사용자 북극성 (033 카탈로그)

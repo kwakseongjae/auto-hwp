@@ -1,6 +1,6 @@
 # 034 — R6-1: 페이지 선택적 갱신 — 편집 반영 DOM 세금 107ms 제거
 
-- 상태: **open** · 우선순위: **R6-P0** (033 백로그 1순위) · 영역: packages/react (useHwpEditor/HwpPageView)
+- 상태: **done** (8c9cc5a) · 우선순위: **R6-P0** (033 백로그 1순위) · 영역: packages/react (useHwpEditor/HwpPageView)
 - 병렬: 035(HwpWorkspace 뷰포트/줌/팬 소유 — **이 이슈는 그 영역 금지**), 서로 파일 소유권 준수
 
 ## 실측 근거 (033, scripts/figma-grade/measure-browser.mjs)
