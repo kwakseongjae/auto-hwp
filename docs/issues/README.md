@@ -48,10 +48,10 @@
 
 | # | 제목 | 상태 | 단계 | 비고 |
 |---|------|------|------|------|
-| [030](030-render-perf-cursor.md) | 드래그 버벅임(React 렌더 경로) + 커서 정상화 | open | R5-P0 | 진단 확정: useHwpEditor가 move마다 setState→전체 리렌더; crosshair=styles.css:69 |
-| [031](031-resize-reliability.md) | 열너비/행높이 "성공 토스트인데 무반영" 버그 + 어포던스 | open | R5-P0 | 진단: e2e가 시각 변화 미검증; ratios 정수화/캐시 후보 — node 재현 우선 |
+| [030](030-render-perf-cursor.md) | 드래그 버벅임 — **시트 렌더 90→0** (MarqueeLayer rAF+memo) + 커서 default | **done** | R5-P0 | 366ab20 |
+| [031](031-resize-reliability.md) | 리사이즈 truth — closest 원점버그 수정+적용검증+행드래그+**분할표 remap** | **done(v2)** | R5-P0 | 72caa35 · v1 diff 병합사고 소실→스펙 기반 재구현(프로토콜 3칙 신설) |
 | [032](032-figma-inplace-edit.md) | 피그마식 제자리 텍스트 편집(팝오버 크롬 제거) | open | R5-P1 | 030 후 |
-| [033](033-figma-grade-research.md) | 피그마급 격차 리서치 → 실행 백로그(FIGMA-GRADE-UX.md) | open | R5-P1 | docs-only, 실측 의무 |
+| [033](033-figma-grade-research.md) | 피그마 격차 리서치 — **엔진은 이미 피그마급(2ms open)**, 병목=DOM 재주입 107ms | **done** | R5-P1 | 382e5d6 · 백로그 12행+ |
 
 ## 로드맵 R4 — 라운드 4 (2026-07-03)
 
