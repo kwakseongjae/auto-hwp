@@ -8,6 +8,8 @@ import { ChatPanel } from "./ChatPanel";
 import { HwpPageView, type PageClick } from "./HwpPageView";
 import { SelectionOverlay, type Mark } from "./SelectionOverlay";
 import { MarqueeLayer } from "./MarqueeLayer";
+import { HoverLayer } from "./HoverLayer";
+import { useHover } from "../useHover";
 import { FontPicker } from "./FontPicker";
 import { ColumnResizeOverlay, RowResizeOverlay } from "./ColumnResizeOverlay";
 import { TableInsertButton } from "./TableInsertButton";
@@ -177,6 +179,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const editorRef = useRef(editor);
   editorRef.current = editor;
   const tabMovingRef = useRef(false);
+  // Live boolean mirror for the hover suppression gate (issue 038) — true while the in-place editor is open.
+  const editorOpenRef = useRef(false);
+  editorOpenRef.current = editor != null;
 
   const toast = useCallback((s: string) => {
     setStatus(s);
@@ -865,6 +870,23 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     [core, editingOn, openEditorAt],
   );
 
+  // ── issue 038: hover pre-highlight + cursor system (FG-09 + FG-06) ────────────────────────────────
+  // Hover rides the WORKSPACE's own pointer surface (the zoom layer), never HwpPageView (037-owned): a
+  // hover move bubbles to `hover.onPointerMove`, which rAF-throttles + dedups + hit-tests via the adapter
+  // and pushes the result into `hover.store` that HoverLayer draws by ref (0 workspace/sheet renders,
+  // mirroring 030). Suppressed during a drag/marquee, Space-pan, an open in-place editor, or over a 031
+  // resize grip; the cursor is written straight to `.hw-canvas[data-hover-cursor]` (a DOM write, no render).
+  const hoverSuppressed = panMode || panning || editor != null || pointerActive;
+  const hover = useHover({
+    adapter,
+    editingOn,
+    cursorHostRef: canvasRef,
+    panModeRef,
+    panningRef,
+    editorOpenRef,
+    suppressed: hoverSuppressed,
+  });
+
   const onApply = useCallback(
     async (intents: Intent[]): Promise<number> => {
       try {
@@ -1004,7 +1026,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
               {/* issue 035: the zoom TRANSFORM layer wraps ONLY the pages — continuous ⌘/pinch zoom scales
                   this via a direct style mutation (0 React renders) until the debounced commit re-lays-out
                   the sheets at the real scale. */}
-              <div className="hw-zoom-layer" ref={zoomLayerRef}>
+              {/* issue 038: the hover pointer surface. Hover moves bubble here (never into HwpPageView,
+                  037-owned); onPointerLeave clears the highlight when the pointer leaves the pages. */}
+              <div className="hw-zoom-layer" ref={zoomLayerRef} onPointerMove={hover.onPointerMove} onPointerLeave={hover.onPointerLeave}>
               <HwpPageView
                 adapter={adapter}
                 pageCount={meta.pages}
@@ -1015,6 +1039,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                 onPagePointerUp={onPointerUp}
                 renderOverlay={(page, scale) => (
                   <>
+                    {/* issue 038: the hover pre-highlight sits UNDER the selection marks (rendered first) and
+                        is pointer-events:none, so it never interferes with clicks/marks — it only points. */}
+                    <HoverLayer store={hover.store} page={page} scale={scale} />
                     <SelectionOverlay marks={marks} page={page} scale={scale} />
                     {/* issue 030: the marquee is an ISOLATED layer — it subscribes to the core itself, so a
                         drag re-renders neither this workspace nor the SVG sheets (only the rect moves). */}

@@ -13,6 +13,15 @@ export type { SelectionOverlayProps, Mark, Marquee } from "./components/Selectio
 // directly, so a drag never re-renders the workspace or the SVG sheets (only the rectangle sweeps).
 export { MarqueeLayer } from "./components/MarqueeLayer";
 export type { MarqueeLayerProps } from "./components/MarqueeLayer";
+// Issue 038 — the hover PRE-HIGHLIGHT layer (FG-09) + the cursor system (FG-06). HoverLayer is MarqueeLayer's
+// twin (subscribes to a HoverStore, draws by ref → 0 workspace/sheet renders); useHover owns the pointermove
+// → hit-test → store pipeline; cursorForContext is the single pure hit-kind → cursor mapping.
+export { HoverLayer } from "./components/HoverLayer";
+export type { HoverLayerProps } from "./components/HoverLayer";
+export { useHover } from "./useHover";
+export type { UseHoverParams, UseHoverResult } from "./useHover";
+export { HoverStore, cursorForContext, pointInBox, sameHighlight } from "./hover";
+export type { HoverHighlight, HoverCursor, CursorContext } from "./hover";
 export { ChatPanel } from "./components/ChatPanel";
 export type { ChatPanelProps } from "./components/ChatPanel";
 export { FontPicker } from "./components/FontPicker";
