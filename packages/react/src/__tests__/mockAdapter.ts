@@ -1,5 +1,5 @@
 import type { EngineAdapter } from "../EngineAdapter";
-import type { BlockHit, Intent, OpenResult, Outcome, TableBox } from "../types";
+import type { BlockHit, CellHit, Intent, OpenResult, Outcome, TableBox } from "../types";
 
 /** A headless EngineAdapter for tests: canned SVG (optionally malicious, to exercise the R7 gate), a
  *  fixed table hit, and a spy-able applyIntent. No wasm — pure in-memory. */
@@ -13,14 +13,26 @@ export class MockAdapter implements EngineAdapter {
   constructor(
     private opts: {
       svg?: (page: number) => string;
-      table?: TableBox | null;
+      /** A fixed table box, or a coordinate-aware resolver (so a test can place a table region by point
+       *  and empty space elsewhere — needed for cell/block MIXED selection, issue 023). */
+      table?: TableBox | null | ((page: number, x: number, y: number) => TableBox | null);
       /** A fixed hit, or a coordinate-aware resolver (so a test can place distinct blocks by point). */
       hit?: BlockHit | null | ((page: number, x: number, y: number) => BlockHit | null);
+      /** A fixed cell hit, or a coordinate-aware resolver (cell-level marking, issue 023). Present opts
+       *  make `tableCellAt` answer; omitting it entirely OMITS the method (reference `TauriAdapter` parity
+       *  → whole-table fallback). */
+      cell?: CellHit | null | ((page: number, x: number, y: number) => CellHit | null);
       /** Canned marquee result for `blocksInRect` (issue 021). */
       blocks?: BlockHit[];
       pages?: number;
     } = {},
-  ) {}
+  ) {
+    // Only expose `tableCellAt` when a `cell` option was supplied — so tests can exercise BOTH the
+    // cell-capable backend (WasmAdapter parity) and a backend that omits the optional method.
+    if (!("cell" in this.opts)) {
+      (this as { tableCellAt?: unknown }).tableCellAt = undefined;
+    }
+  }
 
   async open(_bytes: Uint8Array, name?: string): Promise<OpenResult> {
     void _bytes;
@@ -38,8 +50,13 @@ export class MockAdapter implements EngineAdapter {
     const h = this.opts.hit;
     return (typeof h === "function" ? h(page, x, y) : h) ?? null;
   }
-  async tableAt(): Promise<TableBox | null> {
-    return this.opts.table ?? null;
+  async tableAt(page: number, x: number, y: number): Promise<TableBox | null> {
+    const t = this.opts.table;
+    return (typeof t === "function" ? t(page, x, y) : t) ?? null;
+  }
+  async tableCellAt(page: number, x: number, y: number): Promise<CellHit | null> {
+    const c = this.opts.cell;
+    return (typeof c === "function" ? c(page, x, y) : c) ?? null;
   }
   async blocksInRect(): Promise<BlockHit[]> {
     return this.opts.blocks ?? [];

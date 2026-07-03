@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EngineAdapter } from "../EngineAdapter";
 import { modLabel } from "../platform";
-import type { Anchor, BlockHit, DocContext, Intent, OnAiRequest, OpenResult, TableBox } from "../types";
+import type { Anchor, BlockHit, CellHit, DocContext, Intent, OnAiRequest, OpenResult, TableBox } from "../types";
 import { ChatPanel } from "./ChatPanel";
 import { HwpPageView, type PageClick } from "./HwpPageView";
 import { SelectionOverlay, type Marquee, type Mark } from "./SelectionOverlay";
@@ -36,16 +36,49 @@ export interface HwpWorkspaceProps {
  *  The selection array is the SINGLE source of truth (issue 021); `anchors`/`marks` are views of it. */
 type Sel = { anchor: Anchor; mark: Mark };
 
-/** Selection identity: two selections are the same block iff they share `(section, block)`. Click/⌘-click
- *  and marquee all operate at whole-block granularity, so this is enough for replace/toggle/union dedup. */
-const selKey = (a: Anchor): string => `${a.section}:${a.block}`;
+/** Selection identity for replace/toggle/union dedup. A whole-block selection (paragraph/table from
+ *  click or marquee) is identified by `(section, block)`; a CELL anchor (issue 023) additionally by its
+ *  `rows`/`cols` so distinct cells of the SAME table are distinct selections (⌘-click toggles the exact
+ *  clicked cell). Blocks carry no rows/cols → an empty `::` suffix, so their identity is unchanged. */
+const selKey = (a: Anchor): string => {
+  const r = a.rows ? `${a.rows[0]}-${a.rows[1]}` : "";
+  const c = a.cols ? `${a.cols[0]}-${a.cols[1]}` : "";
+  return `${a.section}:${a.block}:${r}:${c}`;
+};
 
 /** Movement (in CLIENT px) past which a press becomes a drag (marquee) rather than a click. */
 const DRAG_THRESHOLD_PX = 4;
 
-/** Derive a Sel from a resolved click hit (table preferred, else a block band). Coordinates are STRUCTURE
- *  indices, never px. Returns null when the point resolved to nothing. */
-function deriveSel(page: number, table: TableBox | null, hit: BlockHit | null): Sel | null {
+/** Cell chip label = a short text snippet + a 1-based "N행 M열" (issue 023). Empty cell → "표 N행 M열".
+ *  The snippet is trimmed/whitespace-collapsed and elided to ~12 chars. */
+function cellLabel(cell: CellHit): string {
+  const snip = cell.text.trim().replace(/\s+/g, " ").slice(0, 12);
+  const where = `${cell.row + 1}행 ${cell.col + 1}열`;
+  return snip ? `“${snip}” (${where})` : `표 ${where}`;
+}
+
+/** Derive a Sel from a resolved click hit. Priority: CELL > table > block band (issue 023 — a click
+ *  inside a table anchors the exact cell; a cell miss on a border/merged boundary falls back to the
+ *  whole-table anchor, never an error). Coordinates are STRUCTURE indices, never px — a cell anchor's
+ *  `rows`/`cols` are the MODEL-GLOBAL cell address `[r,r]`/`[c,c]` (PlacedCell.row is already global on a
+ *  split fragment; NEVER re-add first_row). Returns null when the point resolved to nothing. */
+function deriveSel(page: number, table: TableBox | null, cell: CellHit | null, hit: BlockHit | null): Sel | null {
+  if (cell) {
+    const label = cellLabel(cell);
+    return {
+      mark: { page, box: { x: cell.x, y: cell.y, w: cell.w, h: cell.h }, label, kind: "cell" },
+      anchor: {
+        kind: "cell",
+        section: cell.section,
+        block: cell.block,
+        rows: [cell.row, cell.row],
+        cols: [cell.col, cell.col],
+        label,
+        page,
+        text: cell.text,
+      },
+    };
+  }
   if (table) {
     const label = `표 (p.${page + 1})`;
     return {
@@ -151,10 +184,23 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         meta: boolean;
         empty: boolean | null;
         marqueeing: boolean;
-        resolved?: { table: TableBox | null; hit: BlockHit | null };
+        resolved?: { table: TableBox | null; cell: CellHit | null; hit: BlockHit | null };
       }
     | null
   >(null);
+
+  // Resolve a page-local click to (table, cell, block-band). Priority for anchoring is cell > table >
+  // block (issue 023); we query the cell only when a table was hit AND the backend supports the optional
+  // `tableCellAt` (the reference TauriAdapter omits it → whole-table marking, 021 parity).
+  const resolveHit = useCallback(
+    async (page: number, x: number, y: number): Promise<{ table: TableBox | null; cell: CellHit | null; hit: BlockHit | null }> => {
+      const table = await adapter.tableAt(page, x, y);
+      const cell = table && adapter.tableCellAt ? await adapter.tableCellAt(page, x, y) : null;
+      const hit = table ? null : await adapter.hitTest(page, x, y);
+      return { table, cell, hit };
+    },
+    [adapter],
+  );
 
   const toast = useCallback((s: string) => {
     setStatus(s);
@@ -296,22 +342,21 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       setMarquee(null);
       (async () => {
         try {
-          const table = await adapter.tableAt(click.page, click.x, click.y);
-          const hit = table ? null : await adapter.hitTest(click.page, click.x, click.y);
+          const { table, cell, hit } = await resolveHit(click.page, click.x, click.y);
           // "empty" = not over a table AND not STRICTLY inside a block band (hitTest returns the nearest
           // band even in a gap, so we re-check strict containment here rather than trust a non-null hit).
           const strictInside = !!hit && click.x >= hit.x && click.x <= hit.x + hit.w && click.y >= hit.y && click.y <= hit.y + hit.h;
           const d = dragRef.current;
           if (d && d.page === click.page && d.startX === click.x && d.startY === click.y) {
             d.empty = !table && !strictInside;
-            d.resolved = { table, hit };
+            d.resolved = { table, cell, hit };
           }
         } catch (e) {
           onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
         }
       })();
     },
-    [adapter, onTrap],
+    [resolveHit, onTrap],
   );
 
   // pointermove: past the 4px threshold, an EMPTY-origin drag becomes a marquee (dashed rect), clipped to
@@ -369,14 +414,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const finishClick = useCallback(
     async (d: NonNullable<typeof dragRef.current>) => {
       try {
-        let table = d.resolved?.table ?? null;
-        let hit = d.resolved?.hit ?? null;
-        if (!d.resolved) {
-          // The async resolve didn't land before pointerup (a very fast click) — resolve now.
-          table = await adapter.tableAt(d.page, d.startX, d.startY);
-          hit = table ? null : await adapter.hitTest(d.page, d.startX, d.startY);
-        }
-        const sel = deriveSel(d.page, table, hit);
+        // The async resolve didn't land before pointerup (a very fast click) → resolve now.
+        const r = d.resolved ?? (await resolveHit(d.page, d.startX, d.startY));
+        const sel = deriveSel(d.page, r.table, r.cell, r.hit);
         if (!sel) {
           if (!d.meta) setSelection([]); // a plain click on nothing clears
           return;
@@ -386,7 +426,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
       }
     },
-    [adapter, onTrap],
+    [resolveHit, onTrap],
   );
 
   const onPointerUp = useCallback(

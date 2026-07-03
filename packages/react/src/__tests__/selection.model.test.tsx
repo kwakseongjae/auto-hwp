@@ -1,7 +1,7 @@
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { HwpWorkspace } from "../components/HwpWorkspace";
-import type { BlockHit } from "../types";
+import type { BlockHit, CellHit, TableBox } from "../types";
 import { MockAdapter } from "./mockAdapter";
 
 // jsdom does no layout → getBoundingClientRect returns zeros. Stub a full A4 box so screenToPage maps
@@ -131,5 +131,129 @@ describe("selection model (issue 021)", () => {
 
     fireEvent.keyDown(window, { key: "Escape" });
     await waitFor(() => expect(chips(container)).toBe(0));
+  });
+});
+
+// Cell-level marking (issue 023): a click inside a table anchors the exact CELL (chip = text snippet +
+// "N행 M열", 1-based; global row/col preserved), ⌘/Ctrl toggles the exact clicked cell, and cells mix
+// with block anchors. The 3×2 table fills the top of the page; a coordinate-aware `cell` resolver maps a
+// point to (row, col) so distinct cells are addressable.
+const CELL_TABLE: TableBox = { section: 0, block: 1, x: 0, y: 0, w: 794, h: 780, rows: 3, cols: 2, first_row: 0 };
+// row bands: y<260 → 0, <520 → 1, else 2 (within the 0..780 table). col: x<397 → 0, else 1.
+const cellAt = (_p: number, x: number, y: number): CellHit => {
+  const row = y < 260 ? 0 : y < 520 ? 1 : 2;
+  const col = x < 397 ? 0 : 1;
+  const text = row === 1 && col === 0 ? "1-2. 제품·서비스의 개요 설명" : row === 0 ? "항목" : "";
+  return { section: 0, block: 1, row, col, rows: 3, cols: 2, text, x: col * 397, y: row * 260, w: 397, h: 260 };
+};
+
+describe("cell-level marking (issue 023)", () => {
+  it("click inside a table anchors the exact CELL (snippet + 1-based N행 M열, global coords)", async () => {
+    const adapter = new MockAdapter({ pages: 1, table: CELL_TABLE, cell: cellAt });
+    const { container } = openDoc(adapter);
+    const sheet = await sheetOf(container);
+
+    // Click into row 1, col 0 (page y≈390, x≈100).
+    down(sheet, 100, 390);
+    up(sheet, 100, 390);
+    await waitFor(() => expect(chips(container)).toBe(1));
+    const label = chipText(container)[0];
+    expect(label).toContain("2행 1열"); // row 1 → 2행, col 0 → 1열 (1-based, global)
+    expect(label).toContain("제품"); // the cell text snippet rides along
+    // The green cell mark (not the purple whole-table mark) is drawn.
+    await waitFor(() => expect(container.querySelector(".hw-mark-cell")).toBeTruthy());
+    expect(container.querySelector(".hw-mark-table")).toBeNull();
+  });
+
+  it("a plain click on ANOTHER cell replaces (still one chip, new address)", async () => {
+    const adapter = new MockAdapter({ pages: 1, table: CELL_TABLE, cell: cellAt });
+    const { container } = openDoc(adapter);
+    const sheet = await sheetOf(container);
+
+    down(sheet, 100, 100); // row 0 col 0
+    up(sheet, 100, 100);
+    await waitFor(() => expect(chipText(container)[0]).toContain("1행 1열"));
+
+    down(sheet, 600, 650); // row 2 col 1
+    up(sheet, 600, 650);
+    await waitFor(() => expect(chipText(container)[0]).toContain("3행 2열"));
+    expect(chips(container)).toBe(1); // replace, never accumulate
+  });
+
+  it("⌘/Ctrl+click TOGGLES the exact clicked cell in and out", async () => {
+    const adapter = new MockAdapter({ pages: 1, table: CELL_TABLE, cell: cellAt });
+    const { container } = openDoc(adapter);
+    const sheet = await sheetOf(container);
+
+    down(sheet, 100, 390, true); // row 1 col 0
+    up(sheet, 100, 390, true);
+    await waitFor(() => expect(chips(container)).toBe(1)); // absent → added
+
+    down(sheet, 100, 390, true); // SAME cell
+    up(sheet, 100, 390, true);
+    await waitFor(() => expect(chips(container)).toBe(0)); // present → removed
+  });
+
+  it("two DIFFERENT cells of the same table accumulate under ⌘/Ctrl (distinct identity)", async () => {
+    const adapter = new MockAdapter({ pages: 1, table: CELL_TABLE, cell: cellAt });
+    const { container } = openDoc(adapter);
+    const sheet = await sheetOf(container);
+
+    down(sheet, 100, 100); // row 0 col 0
+    up(sheet, 100, 100);
+    await waitFor(() => expect(chips(container)).toBe(1));
+
+    down(sheet, 100, 390, true); // row 1 col 0 — different cell, same table
+    up(sheet, 100, 390, true);
+    await waitFor(() => expect(chips(container)).toBe(2)); // both kept (rows/cols make identity)
+    const labels = chipText(container).join(" ");
+    expect(labels).toContain("1행 1열");
+    expect(labels).toContain("2행 1열");
+  });
+
+  it("cell + block MIXED selection: a cell anchor coexists with a ⌘-added paragraph", async () => {
+    // Top half (y<500) is the table; below that is a paragraph (no table, no cell there).
+    const adapter = new MockAdapter({
+      pages: 1,
+      table: (_p, _x, y) => (y < 500 ? CELL_TABLE : null),
+      cell: (_p, x, y) => (y < 500 ? cellAt(_p, x, y) : null),
+      hit: (_p, _x, y) => (y >= 500 ? para(7, 500, 400, "결론 문단") : null),
+    });
+    const { container } = openDoc(adapter);
+    const sheet = await sheetOf(container);
+
+    down(sheet, 100, 100); // a cell
+    up(sheet, 100, 100);
+    await waitFor(() => expect(chips(container)).toBe(1));
+
+    down(sheet, 100, 700, true); // ⌘-click the paragraph below the table
+    up(sheet, 100, 700, true);
+    await waitFor(() => expect(chips(container)).toBe(2));
+    const labels = chipText(container).join(" ");
+    expect(labels).toContain("1행 1열"); // the cell
+    expect(labels).toContain("결론 문단"); // the paragraph block
+  });
+
+  it("split-table fragment: the chip shows the GLOBAL row (no fragment-local reset)", async () => {
+    // A cell whose MODEL-GLOBAL address is row 15 / col 1 of a 20-row table — the UI must render "16행"
+    // (1-based global), never a fragment-local index. Verified on a second page to mimic a split.
+    const splitCell: CellHit = { section: 0, block: 3, row: 15, col: 1, rows: 20, cols: 2, text: "분할표 하단 셀", x: 100, y: 40, w: 300, h: 44 };
+    const adapter = new MockAdapter({
+      pages: 2,
+      table: { section: 0, block: 3, x: 0, y: 0, w: 794, h: 900, rows: 20, cols: 2, first_row: 12 },
+      cell: () => splitCell,
+    });
+    const { container } = openDoc(adapter);
+    await sheetOf(container); // page 0 ready
+    const sheet1 = await waitFor(() => {
+      const el = container.querySelector('.hw-sheet[data-page="1"]') as HTMLElement | null;
+      expect(el?.querySelector("svg")).toBeTruthy();
+      return el as HTMLElement;
+    });
+
+    down(sheet1, 200, 200);
+    up(sheet1, 200, 200);
+    await waitFor(() => expect(chips(container)).toBe(1));
+    expect(chipText(container)[0]).toContain("16행 2열"); // row 15 → 16행, col 1 → 2열 (global, 1-based)
   });
 });

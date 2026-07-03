@@ -40,6 +40,23 @@ export interface TableBox {
   first_row: number;
 }
 
+/** A table CELL hit for cell-level marking (own-render px space; issue 023); null on a miss. `row`/`col`
+ *  are MODEL-GLOBAL — already global on a split-table fragment (do NOT re-add first_row). `text` is the
+ *  cell's current plain text (multi-paragraph cells joined by "\n"), used for the chip snippet label. */
+export interface CellHit {
+  section: number;
+  block: number;
+  row: number;
+  col: number;
+  rows: number;
+  cols: number;
+  text: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 /** Tagged result of applyIntent (Intent schema v0). `kind` discriminates the payload. */
 export type Outcome =
   | { kind: 'opened'; format: string; editable: boolean; sections: number }
@@ -87,6 +104,8 @@ export class HwpDoc {
   renderPageSvgSanitized(n: number): string;
   hitTest(page: number, x: number, y: number): BlockHit | null;
   tableAt(page: number, x: number, y: number): TableBox | null;
+  /** Table CELL under (x,y) in own-render px for cell-level marking (issue 023); null on a miss. */
+  tableCellAt(page: number, x: number, y: number): CellHit | null;
   /** Marquee select: every top-level block whose band intersects the own-render px rect
    *  `(x0,y0)-(x1,y1)` (corners in any order). Empty array on a miss (never null). */
   blocksInRect(page: number, x0: number, y0: number, x1: number, y1: number): BlockHit[];

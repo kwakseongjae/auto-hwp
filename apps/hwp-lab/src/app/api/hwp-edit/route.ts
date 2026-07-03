@@ -102,7 +102,9 @@ function mockIntents(instruction: string, anchors: Anchor[]): Intent[] {
   const a = anchors[0];
   if (!a) return [];
   if (a.kind === "table" || a.kind === "range" || a.kind === "cell") {
-    return [{ intent: "SetTableCell", section: a.section, index: a.block, row: 0, col: 0, text: "PoC ✔" }];
+    // 셀 앵커(023)면 클릭한 그 셀(rows/cols)을 겨냥한다 — row0/col0 고정 제거. 표/범위 앵커는 rows/cols
+    // 가 없으므로 첫 칸(0,0)으로 폴백. (live SYSTEM_PROMPT 는 이미 앵커 좌표를 겨냥하도록 지시.)
+    return [{ intent: "SetTableCell", section: a.section, index: a.block, row: a.rows?.[0] ?? 0, col: a.cols?.[0] ?? 0, text: "PoC ✔" }];
   }
   if (a.kind === "paragraph") {
     const text = instruction.trim().slice(0, 60) || "PoC ✔";

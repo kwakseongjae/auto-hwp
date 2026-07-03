@@ -1,6 +1,6 @@
 import { HwpDoc, initEngine, resetEngine } from "@tf-hwp/engine";
 import type { EngineAdapter } from "./EngineAdapter";
-import type { BlockHit, Intent, OpenResult, Outcome, TableBox } from "./types";
+import type { BlockHit, CellHit, Intent, OpenResult, Outcome, TableBox } from "./types";
 
 type WasmInput = string | URL | Request | BufferSource | WebAssembly.Module;
 
@@ -93,6 +93,10 @@ export class WasmAdapter implements EngineAdapter {
 
   tableAt(page: number, x: number, y: number): Promise<TableBox | null> {
     return this.guard((d) => d.tableAt(page, x, y) as TableBox | null);
+  }
+
+  tableCellAt(page: number, x: number, y: number): Promise<CellHit | null> {
+    return this.guard((d) => d.tableCellAt(page, x, y) as CellHit | null);
   }
 
   blocksInRect(page: number, x0: number, y0: number, x1: number, y1: number): Promise<BlockHit[]> {

@@ -28,6 +28,23 @@ export interface TableBox {
   first_row: number;
 }
 
+/** A table CELL hit for cell-level marking in own-render px space (mirrors @tf-hwp/engine CellHit; issue
+ *  023). `row`/`col` are MODEL-GLOBAL — already global on a split-table fragment, so NEVER re-add
+ *  `first_row` (§좌표계). `text` is the cell's current plain text, used for the chip snippet label. */
+export interface CellHit {
+  section: number;
+  block: number;
+  row: number;
+  col: number;
+  rows: number;
+  cols: number;
+  text: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 /** An Intent (schema v0) — an internally-tagged object discriminated by `intent`. Kept loose here so
  *  the host AI callback can return any op the engine's `deserialize_intent` accepts (SetTableCell,
  *  ApplyContent, Replace, …). The adapter forwards it to the engine verbatim. */

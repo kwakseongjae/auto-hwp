@@ -1,4 +1,4 @@
-import type { BlockHit, Intent, OpenResult, Outcome, TableBox } from "./types";
+import type { BlockHit, CellHit, Intent, OpenResult, Outcome, TableBox } from "./types";
 
 /// EngineAdapter — the backend seam (issue 016 step 1). It abstracts the ACTUAL surface the desktop
 /// app's api.ts uses (open / page SVG / hit-test·tableAt / applyIntent / undo·redo / export) so the
@@ -28,6 +28,12 @@ export interface EngineAdapter {
 
   /** Placed table box under a PAGE-LOCAL px point (for marking), or null on a miss. */
   tableAt(page: number, x: number, y: number): Promise<TableBox | null>;
+
+  /** OPTIONAL — the table CELL under a PAGE-LOCAL px point for cell-level marking (issue 023), or null
+   *  on a miss (table border / merged-cell boundary → null; the workspace falls back to the whole-table
+   *  anchor). `row`/`col` are MODEL-GLOBAL. Backends that can't answer a cell query (e.g. the reference
+   *  `TauriAdapter`) OMIT this method — the workspace then marks at whole-table granularity (021 parity).*/
+  tableCellAt?(page: number, x: number, y: number): Promise<CellHit | null>;
 
   /** OPTIONAL — marquee (rubber-band) select: every top-level block whose band intersects the
    *  PAGE-LOCAL px rectangle `(x0,y0)-(x1,y1)` (corners in any order). Resolves to an EMPTY ARRAY on a

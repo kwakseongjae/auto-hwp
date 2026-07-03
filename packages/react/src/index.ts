@@ -44,6 +44,7 @@ export type {
   Anchor,
   BlockHit,
   TableBox,
+  CellHit,
   Intent,
   Outcome,
   OpenResult,

@@ -502,6 +502,40 @@ pub fn table_cell_at(doc: &SemanticDoc, page: u32, x: f64, y: f64) -> Option<Cel
     })
 }
 
+/// [`table_cell_at`] measured with CALLER-INJECTED font bytes (issue 022/023) — the wasm/web path where
+/// a registered font changed the pagination, so the CELL geometry MUST agree with the injected-metric
+/// SVG (and with `table_at_with`/`own_hit_test_with`) or a click resolves to the wrong cell / misses.
+/// 022 added the `_with` metric variants for `table_at`/`own_hit_test`/`blocks_in_rect` but not for the
+/// cell hit; this is the missing member of that family (additive — no new geometry logic). Empty slice →
+/// byte-identical to [`table_cell_at`]. `row`/`col` remain MODEL-GLOBAL (PlacedCell.row is global even in
+/// a split fragment — do NOT re-add `first_row`, issue §좌표계).
+pub fn table_cell_at_with(doc: &SemanticDoc, page: u32, x: f64, y: f64, injected: &[(String, Vec<u8>)]) -> Option<CellHitDto> {
+    let fonts = own_render_fonts_with(injected);
+    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    let pg = placed.pages.get(page as usize)?;
+    let k = HWPUNIT_PER_PX;
+    let (hx, hy) = (x * k, y * k); // px click → HWPUNIT
+    let t = pg
+        .tables
+        .iter()
+        .filter(|t| hx >= t.x && hx <= t.x + t.w && hy >= t.y && hy <= t.y + t.h)
+        .last()?;
+    let cell = t.cell_at(hx, hy)?;
+    Some(CellHitDto {
+        section: t.section,
+        block: t.block,
+        row: cell.row,
+        col: cell.col,
+        rows: t.rows,
+        cols: t.cols,
+        text: model_cell_text(doc, t.section, t.block, cell.row, cell.col),
+        x: cell.x / k,
+        y: cell.y / k,
+        w: cell.w / k,
+        h: cell.h / k,
+    })
+}
+
 /// The PX box (own SVG space) + page of the cell at `(section, block, row, col)`, looked up BY ADDRESS
 /// (not by point) across all pages — so the active-cell ring can be re-placed against FRESH geometry
 /// after an edit GROWS the row. `None` if the cell isn't placed (degenerate/covered cell).
@@ -1215,6 +1249,81 @@ mod tests {
     fn blocks_in_rect_empty_on_out_of_range_page() {
         let doc = doc_with_stacked_blocks();
         assert!(blocks_in_rect(&doc, 99, 0.0, 0.0, 100_000.0, 100_000.0).is_empty(), "off-page marquee → empty vec, not a panic");
+    }
+
+    /// A section-0 doc that is ONE tall single-column table on a SHORT page, so `place_doc` splits it
+    /// across many page fragments (row-granular). Row `r`'s cell text is `"행{r}"`.
+    fn tall_split_table_doc(rows: usize, page_height: i32) -> SemanticDoc {
+        use hwp_model::document::{Block, Cell, Paragraph, Run, Section, Table};
+        use hwp_model::prelude::Inline;
+        let mut doc = SemanticDoc {
+            char_shapes: vec![Default::default()],
+            para_shapes: vec![Default::default()],
+            ..Default::default()
+        };
+        let cells = (0..rows)
+            .map(|r| Cell {
+                row: r,
+                col: 0,
+                active: true,
+                blocks: vec![Block::Paragraph(Paragraph {
+                    runs: vec![Run { char_shape: 0, content: vec![Inline::Text(format!("행{r}"))], ..Default::default() }],
+                    ..Default::default()
+                })],
+                ..Default::default()
+            })
+            .collect();
+        let table = Table { rows, cols: 1, cells, col_widths: vec![1], ..Default::default() };
+        let mut sec = Section::default();
+        sec.page.width = 60000;
+        sec.page.height = page_height;
+        sec.page.margin_left = 0;
+        sec.page.margin_top = 0;
+        sec.page.margin_right = 0;
+        sec.page.margin_bottom = 0;
+        sec.blocks = vec![Block::Table(table)];
+        doc.sections.push(sec);
+        doc
+    }
+
+    #[test]
+    fn table_cell_at_reports_global_row_on_a_split_fragment() {
+        // 023 §함정 (1순위 예상 버그): a table SPLIT across pages must report a MODEL-GLOBAL row on a
+        // LATER fragment — PlacedCell.row is already global, so `table_cell_at` returns it verbatim (NO
+        // first_row re-add / fragment-local reset, the 009 desktop landmine). Round-trip: look a KNOWN
+        // global row up BY ADDRESS (`table_cell_box` → its page + px box), click that box's center
+        // (`table_cell_at`), and assert the hit's row is the SAME global index on a page > 0.
+        let rows = 30usize;
+        let doc = tall_split_table_doc(rows, 5000);
+        let target_row = rows - 3; // a high row → guaranteed onto a later fragment
+        let bx = table_cell_box(&doc, 0, 0, target_row, 0).expect("target row is placed");
+        assert!(bx.page > 0, "row {target_row} must land on a later fragment (page>0), got page {}", bx.page);
+        let hit = table_cell_at(&doc, bx.page, bx.x + bx.w / 2.0, bx.y + bx.h / 2.0).expect("cell center hits a cell");
+        assert_eq!(hit.row, target_row, "split fragment reports the GLOBAL row (no first_row double-add)");
+        assert_eq!(hit.col, 0);
+        assert_eq!(hit.rows, rows, "the whole-table row count rides along");
+        assert_eq!(hit.text, format!("행{target_row}"), "the hit's snippet is that global cell's text");
+        // A low row still resolves to its own global index (round-trip on page 0 too).
+        let b0 = table_cell_box(&doc, 0, 0, 1, 0).expect("row 1 placed");
+        let h0 = table_cell_at(&doc, b0.page, b0.x + b0.w / 2.0, b0.y + b0.h / 2.0).expect("row 1 hit");
+        assert_eq!(h0.row, 1, "row 1 → global row 1");
+    }
+
+    #[test]
+    fn table_cell_at_with_empty_matches_table_cell_at() {
+        // Golden invariant (issue 022/023 §1): the injected-metric `_with` variant on an EMPTY slice is
+        // byte-identical to the bare metric path — the wasm cell hit is a NEW entry point, the old one is
+        // untouched. (The wasm binding always calls `_with`, so this pins its no-injection equivalence.)
+        let doc = tall_split_table_doc(30, 5000);
+        let bx = table_cell_box(&doc, 0, 0, 27, 0).expect("row 27 placed");
+        let (px, py) = (bx.x + bx.w / 2.0, bx.y + bx.h / 2.0);
+        let bare = table_cell_at(&doc, bx.page, px, py).expect("bare hit");
+        let with = table_cell_at_with(&doc, bx.page, px, py, &[]).expect("with-empty hit");
+        assert_eq!((with.section, with.block, with.row, with.col), (bare.section, bare.block, bare.row, bare.col));
+        assert_eq!(with.text, bare.text);
+        // A miss returns None (not a panic) on both paths (018 null policy).
+        assert!(table_cell_at(&doc, 999, 0.0, 0.0).is_none(), "off-page → None");
+        assert!(table_cell_at_with(&doc, 0, -1.0, -1.0, &[]).is_none(), "off-table → None");
     }
 
     #[test]

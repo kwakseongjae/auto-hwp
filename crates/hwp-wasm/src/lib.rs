@@ -182,6 +182,22 @@ impl HwpDoc {
         }
     }
 
+    /// Cell-level marking hit test on `page` at own-render px `(x, y)` — a JSON **string** of the table
+    /// CELL under the point (`section`/`block`/`row`/`col`/`rows`/`cols`/`text`/box) for cell-precise
+    /// anchoring (issue 023), or **JS `null`** on a miss (an `Option<String>` → `null`, never the literal
+    /// string `"null"` — policy 018). `row`/`col` are MODEL-GLOBAL (already global on a split-table
+    /// fragment — do NOT re-add `first_row`). Uses the `_with` metric variant so the cell geometry agrees
+    /// with the injected-metric SVG (a registered font re-paginates — Approx geometry over shaper layout
+    /// would resolve the wrong cell / miss).
+    #[wasm_bindgen(js_name = tableCellAt)]
+    pub fn table_cell_at(&self, page: u32, x: f64, y: f64) -> Result<Option<String>, JsValue> {
+        let doc = self.doc()?;
+        match hwp_session::table_cell_at_with(doc, page, x, y, &self.fonts) {
+            Some(c) => Ok(Some(serde_json::to_string(&c).map_err(|e| js_err("serialize", &e.to_string()))?)),
+            None => Ok(None),
+        }
+    }
+
     /// Marquee (rubber-band) select on `page`: every top-level block whose placed band intersects the
     /// own-render px rectangle `(x0,y0)-(x1,y1)` (corners in any order), as a JSON **string** of a
     /// `BlockHit[]` array. A miss returns the JSON **`"[]"`** (an EMPTY ARRAY, never `null` — the

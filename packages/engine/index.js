@@ -157,6 +157,14 @@ export class HwpDoc {
       return s == null ? null : JSON.parse(s);
     });
   }
+  /** Table CELL under (x,y) in own-render px for cell-level marking (issue 023), or `null` on a miss.
+   *  `row`/`col` are MODEL-GLOBAL (already global on a split-table fragment — no first_row re-add). */
+  tableCellAt(page, x, y) {
+    return this.#call((r) => {
+      const s = r.tableCellAt(page, x, y); // Option<String> → JS string | null/undefined on a miss
+      return s == null ? null : JSON.parse(s);
+    });
+  }
   /** Marquee select: every top-level block whose band intersects the own-render px rect
    *  `(x0,y0)-(x1,y1)` (corners in any order). Returns a `BlockHit[]` — an EMPTY ARRAY on a miss. */
   blocksInRect(page, x0, y0, x1, y1) {

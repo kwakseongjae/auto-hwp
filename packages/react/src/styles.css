@@ -77,11 +77,14 @@
   background: rgba(37, 99, 235, 0.12); border-radius: 2px;
 }
 .hw-mark-table { border-color: var(--hw-ai); background: rgba(124, 58, 237, 0.1); }
+/* cell-level mark (issue 023) — distinct emerald so a cell anchor reads apart from a whole-table mark */
+.hw-mark-cell { border-color: #059669; background: rgba(5, 150, 105, 0.12); }
 .hw-mark-label {
   position: absolute; top: -18px; left: 0; font-size: 10px; line-height: 1;
   background: var(--hw-accent); color: #fff; padding: 2px 5px; border-radius: 4px; white-space: nowrap;
 }
 .hw-mark-table .hw-mark-label { background: var(--hw-ai); }
+.hw-mark-cell .hw-mark-label { background: #059669; }
 
 /* marquee (rubber-band) rectangle drawn while dragging over empty space */
 .hw-marquee {
