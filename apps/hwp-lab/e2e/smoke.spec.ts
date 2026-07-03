@@ -1,9 +1,9 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 
-// 데모 픽스처: 레포 루트의 benchmark.hwp(8쪽). test:e2e 는 apps/hwp-lab 에서 실행되므로 cwd 기준
-// ../../benchmark.hwp.
-const BENCHMARK = path.resolve(process.cwd(), "..", "..", "benchmark.hwp");
+// 데모 픽스처: 레포 benchmarks/benchmark.hwp(8쪽). test:e2e 는 apps/hwp-lab 에서 실행되므로 cwd 기준
+// ../../benchmarks/benchmark.hwp.
+const BENCHMARK = path.resolve(process.cwd(), "..", "..", "benchmarks", "benchmark.hwp");
 
 test("업로드 → 8페이지 SVG → 셀 클릭 마킹 → mock 편집이 그 셀을 바꿈 → undo", async ({ page }) => {
   await page.goto("/");

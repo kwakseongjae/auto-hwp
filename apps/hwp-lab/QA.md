@@ -29,14 +29,14 @@ npm run dev          # predev 훅이 wasm을 public/hwp 로 복사. http://local
 - **실 LLM**: `ANTHROPIC_API_KEY=sk-... npm run dev` → 배지 `실 LLM 모드`. 키는 서버
   전용(route handler)이며 클라이언트 번들/네트워크 응답에 노출되지 않는다.
 
-데모 픽스처: 레포 루트의 `benchmark.hwp`(8쪽), `benchmark1.hwp`(19쪽).
+데모 픽스처: 레포 루트의 `benchmarks/benchmark.hwp`(8쪽), `benchmarks/benchmark1.hwp`(19쪽).
 
 ---
 
 ## 시나리오
 
 ### ① 벤치마크 .hwp 업로드 → 8페이지 렌더 확인
-- 단계: 상단 **파일 열기 (.hwp/.hwpx)** → `benchmark.hwp` 선택.
+- 단계: 상단 **파일 열기 (.hwp/.hwpx)** → `benchmarks/benchmark.hwp` 선택.
 - 기대결과: 잠깐 `문서 여는 중…` 상태 후, 본문에 **8개의 페이지 SVG**가 세로로 렌더된다.
   상단 툴바에 `HWP · 8쪽` 표기. 콘솔 에러 없음. 한글 텍스트가 육안으로 정상 표시.
 
@@ -91,7 +91,7 @@ npm run dev          # predev 훅이 wasm을 public/hwp 로 복사. http://local
   ③④와 동일. `<document-content>` 안의 지시문은 무시된다(R5).
 
 ### ⑨ 대형 문서(benchmark1, 18p) 렌더 성능 체감
-- 단계: `benchmark1.hwp` 업로드.
+- 단계: `benchmarks/benchmark1.hwp` 업로드.
 - 기대결과: 18쪽이 모두 렌더된다(초기 렌더에 수 초 걸릴 수 있음). 스크롤/줌(±)이 멈춤 없이
   동작. 표 마킹/편집도 ②③과 동일하게 동작.
 
@@ -100,7 +100,7 @@ npm run dev          # predev 훅이 wasm을 public/hwp 로 복사. http://local
   - 확장자 불일치(.png 등): 즉시 "지원하지 않는 형식입니다" 에러.
   - 손상된 .hwp/.hwpx: "파일을 열 수 없습니다 … 손상되었거나 지원하지 않는 파일…" 에러.
 - 기대결과: **화면 상단에 빨간 에러 박스**가 표시된다(콘솔 전용 아님). 기존에 열려 있던 문서/앱은
-  죽지 않는다. 이후 정상 파일(benchmark.hwp)을 다시 업로드하면 정상 렌더된다(엔진 트랩 시
+  죽지 않는다. 이후 정상 파일(benchmarks/benchmark.hwp)을 다시 업로드하면 정상 렌더된다(엔진 트랩 시
   인스턴스 자동 재생성 → 복구).
 
 ---
@@ -111,7 +111,7 @@ npm run dev          # predev 훅이 wasm을 public/hwp 로 복사. http://local
 - 에러: 상단 빨간 박스(파일 열기/폰트/네트워크 실패).
 
 ## 자동화(Playwright 스모크)
-`apps/hwp-lab/e2e/smoke.spec.ts` — 페이지 로드 → benchmark.hwp 업로드 → SVG 8페이지 assert →
+`apps/hwp-lab/e2e/smoke.spec.ts` — 페이지 로드 → benchmarks/benchmark.hwp 업로드 → SVG 8페이지 assert →
 mock 편집 적용 → undo. 실행:
 
 ```bash

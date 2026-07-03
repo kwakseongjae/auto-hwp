@@ -44,7 +44,7 @@ fn corrupt_cfb_is_caught_not_crashing() {
 /// Truncated valid HWP5: a real file cut to a few hundred bytes. Same guarantee.
 #[test]
 fn truncated_hwp5_is_caught_not_crashing() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmark.hwp");
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp");
     let full = std::fs::read(path).expect("benchmark.hwp at repo root");
     let truncated = &full[..full.len().min(300)];
     let err =
@@ -72,7 +72,7 @@ fn oversize_raw_is_rejected_before_rhwp() {
 /// not reject legitimate input) and passes the layout guard.
 #[test]
 fn valid_hwp5_still_parses_through_guarded_boundary() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmark.hwp");
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp");
     let bytes = std::fs::read(path).expect("benchmark.hwp");
     let doc = parse_to_semantic_guarded(&bytes).expect("benchmark.hwp parses through the boundary");
     assert!(!doc.sections.is_empty(), "benchmark.hwp has sections");

@@ -3,8 +3,8 @@
 # golden.sh — issue 012 (P2): freeze the "pure move" invariant BEFORE the hwp-session
 # extraction, and re-check it after every slice. The move must be byte-identical:
 #
-#   1. layout-check benchmark.hwp — the 8==8 page gate + line-break accuracy.
-#   2. own-render benchmark.hwp / benchmark1.hwp — the self-owned SVG per page.
+#   1. layout-check benchmarks/benchmark.hwp — the 8==8 page gate + line-break accuracy.
+#   2. own-render benchmarks/benchmark.hwp / benchmarks/benchmark1.hwp — the self-owned SVG per page.
 #      We render TWICE and diff the two runs first (own-render SVG must be
 #      deterministic; if not, the offending field is normalized before hashing —
 #      see the notes at the bottom). Then shasum every page SVG.
@@ -34,14 +34,14 @@ mkdir -p "$OUT"
 echo "== golden ($MODE) — features: $FEATURES =="
 
 # --- 1. layout-check (the 8==8 gate + line accuracy) ---
-cargo run -q -p tf-hwp-cli --features "$FEATURES" -- layout-check benchmark.hwp \
+cargo run -q -p tf-hwp-cli --features "$FEATURES" -- layout-check benchmarks/benchmark.hwp \
   > "$OUT/layout_benchmark.txt" 2>&1
-echo "-- layout-check benchmark.hwp --"
+echo "-- layout-check benchmarks/benchmark.hwp --"
 cat "$OUT/layout_benchmark.txt"
 
-cargo run -q -p tf-hwp-cli --features "$FEATURES" -- layout-check benchmark1.hwp \
+cargo run -q -p tf-hwp-cli --features "$FEATURES" -- layout-check benchmarks/benchmark1.hwp \
   > "$OUT/layout_benchmark1.txt" 2>&1
-echo "-- layout-check benchmark1.hwp --"
+echo "-- layout-check benchmarks/benchmark1.hwp --"
 cat "$OUT/layout_benchmark1.txt"
 
 # --- 2. own-render SVG, TWICE, to prove determinism ---
@@ -51,7 +51,7 @@ render_all () {
     --out "$OUT/${tag}_r${run}.svg" >/dev/null 2>&1
 }
 
-for pair in "benchmark.hwp:b" "benchmark1.hwp:b1"; do
+for pair in "benchmark.hwp:b" "benchmarks/benchmark1.hwp:b1"; do
   file="${pair%%:*}"; tag="${pair##*:}"
   render_all "$file" "$tag" 1
   render_all "$file" "$tag" 2

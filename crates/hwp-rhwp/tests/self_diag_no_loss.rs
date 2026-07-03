@@ -16,8 +16,8 @@ use hwp_model::prelude::*;
 use hwp_typeset::{place_doc, PlacedPage, RealFontMetrics};
 
 fn benchmark1() -> SemanticDoc {
-    let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmark1.hwp"))
-        .expect("benchmark1.hwp at repo root");
+    let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark1.hwp"))
+        .expect("benchmarks/benchmark1.hwp");
     hwp_rhwp::parse_to_semantic_guarded(&bytes).expect("lift benchmark1")
 }
 

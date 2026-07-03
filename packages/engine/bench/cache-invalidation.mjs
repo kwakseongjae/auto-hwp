@@ -12,7 +12,7 @@ import { initEngineSync, HwpDoc } from '../index.js';
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, '..', '..', '..');
 initEngineSync({ module: readFileSync(join(here, '..', 'pkg', 'hwp_wasm_bg.wasm')) });
-const docBytes = readFileSync(join(repo, 'benchmark1.hwp'));
+const docBytes = readFileSync(join(repo, 'benchmarks', 'benchmark1.hwp'));
 const fontBytes = new Uint8Array(readFileSync(join(repo, 'assets', 'fonts', 'NanumGothic-Regular.ttf')));
 
 let passed = 0;

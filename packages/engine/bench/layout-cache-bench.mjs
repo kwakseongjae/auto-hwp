@@ -21,7 +21,7 @@ const repo = join(here, '..', '..', '..');
 const wasmBytes = readFileSync(join(here, '..', 'pkg', 'hwp_wasm_bg.wasm'));
 initEngineSync({ module: wasmBytes });
 
-const docBytes = readFileSync(join(repo, 'benchmark1.hwp'));
+const docBytes = readFileSync(join(repo, 'benchmarks', 'benchmark1.hwp'));
 const fontBytes = new Uint8Array(readFileSync(join(repo, 'assets', 'fonts', 'NanumGothic-Regular.ttf')));
 
 const median = (xs) => {
