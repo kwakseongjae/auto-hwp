@@ -48,7 +48,7 @@
 
 | # | 제목 | 상태 | 단계 | 비고 |
 |---|------|------|------|------|
-| [023](023-cell-level-marking-web.md) | 웹 셀 단위 마킹(데스크톱 패리티) + 셀 텍스트 스니펫 칩 | open | R2-P0 | 엔진 로직 기존재(session table_cell_at) — 노출/배선 |
-| [013](013-headless-service-container.md) | 헤드리스 서비스 컨테이너 (에르메스 트랙) **+부록A 갱신** | open | R2-P1 | docker 가용 확인; absorb 폐기·env키 기존재·guard/펜스 배선 포함 |
+| [023](023-cell-level-marking-web.md) | 웹 셀 단위 마킹 + 스니펫 칩 (분할표 전역row 테스트 고정) | **done** | R2-P0 | a9f7664 · vitest 34, Playwright 셀편집 e2e 통과 |
+| [013](013-headless-service-container.md) | 헤드리스 서비스 컨테이너 — 네트워크모드 fail-closed·경로감금·Docker 174MB | **done** | R2-P1 | c0f8f3e · 라이브 컨테이너 보안 검증(403/401/기동거부); **로드맵 v1 전체 종료** |
 
 > 완료된 완성형 핵심(글자/문단/글꼴/표 병합·음영/목록)은 `docs/COMPLETION-ROADMAP.md`와 `CHECKLIST.md` 참고.
