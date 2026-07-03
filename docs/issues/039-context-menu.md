@@ -1,6 +1,6 @@
 # 039 — R7-3: 컨텍스트 메뉴 — 우클릭 → 앵커 기반 액션 (FG-07)
 
-- 상태: **open** · 우선순위: R7-P2 · 영역: packages/react (신규 ContextMenu + HwpWorkspace 배선)
+- 상태: **done** (c98ea0a) · 우선순위: R7-P2 · 영역: packages/react (신규 ContextMenu + HwpWorkspace 배선)
 - 선행: **037·038 병합 후** (HwpWorkspace 파일 충돌 방지 — 038이 같은 파일을 소유 중)
 
 ## 근거 (033)
