@@ -42,6 +42,18 @@
 | [021](021-selection-ux-v2.md) | 선택 UX v2 — 클릭=교체 / ⌘·Ctrl=토글 / 러버밴드 마퀴 | **done** | QA-P1 | 0cb666b · blocksInRect + vitest 14 + Playwright 갱신 통과 |
 | [022](022-font-system-v1.md) | 폰트 시스템 v1 — OFL 카탈로그 8종+업로드+삼위일치 (**교차골든 26p 바이트동일**) | **done** | QA-P1 | cb9f7b3 · 셰이퍼 +8.8KB, 라이선스 표 전수 OFL |
 
+## 로드맵 R3 — 라운드 3 (2026-07-03, 사용자 QA + SDK 재설계)
+
+설계 총괄: **[docs/SDK-LAYERS.md](../SDK-LAYERS.md)** (L1 엔진 / L2 editor-core / L2' ai-protocol / L3 react — 커스텀 계약).
+착수: **024 ∥ 025** (엔진, disjoint) → **026** (SDK 재배치) → **027** (편집 패리티 UI).
+
+| # | 제목 | 상태 | 단계 | 비고 |
+|---|------|------|------|------|
+| [024](024-para-border-frame-overflow.md) | 자가진단표 충실도 — 문단테두리 렌더 + 프레임 오버플로(귀하 소실 회귀) | open | R3-P0 | 진단: ParaShape.border_fill_id 미소비 + 프레임 초과 드롭 |
+| [025](025-layout-cache-perf.md) | 인터랙션 성능 — 레이아웃 캐시(질의마다 전체 재조판 제거) | open | R3-P0 | 진단: 모든 지오메트리/렌더가 place_doc 매회 호출 |
+| [026](026-editor-core-sdk.md) | @tf-hwp/editor-core + @tf-hwp/ai-protocol 신설(headless SDK) | open | R3-P1 | 024·025 후; React 0줄 코어 + LLM 규격 라이브러리 |
+| [027](027-editing-parity-ui.md) | 편집 패리티 — 룰러·열너비·표추가·텍스트·서식·배경 | open | R3-P1 | 026 후; Intent는 전부 기존재 — UI 계층 작업 |
+
 ## 로드맵 R2 — 라운드 2 (2026-07-03)
 
 착수: **023 ∥ 013** (파일 disjoint: wasm/react/lab vs hwp-mcp/ingest/Docker).
