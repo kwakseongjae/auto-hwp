@@ -42,6 +42,17 @@
 | [021](021-selection-ux-v2.md) | 선택 UX v2 — 클릭=교체 / ⌘·Ctrl=토글 / 러버밴드 마퀴 | **done** | QA-P1 | 0cb666b · blocksInRect + vitest 14 + Playwright 갱신 통과 |
 | [022](022-font-system-v1.md) | 폰트 시스템 v1 — OFL 카탈로그 8종+업로드+삼위일치 (**교차골든 26p 바이트동일**) | **done** | QA-P1 | cb9f7b3 · 셰이퍼 +8.8KB, 라이선스 표 전수 OFL |
 
+## 로드맵 R5 — 라운드 5 (2026-07-03, 사용자 QA: 피그마급 UX)
+
+착수: **030 ∥ 031 ∥ 033** (파일 소유권 분할: 030=useHwpEditor/HwpPageView/styles, 031=units/ColumnResizeOverlay/e2e, 033=docs) → **032** (030 후).
+
+| # | 제목 | 상태 | 단계 | 비고 |
+|---|------|------|------|------|
+| [030](030-render-perf-cursor.md) | 드래그 버벅임(React 렌더 경로) + 커서 정상화 | open | R5-P0 | 진단 확정: useHwpEditor가 move마다 setState→전체 리렌더; crosshair=styles.css:69 |
+| [031](031-resize-reliability.md) | 열너비/행높이 "성공 토스트인데 무반영" 버그 + 어포던스 | open | R5-P0 | 진단: e2e가 시각 변화 미검증; ratios 정수화/캐시 후보 — node 재현 우선 |
+| [032](032-figma-inplace-edit.md) | 피그마식 제자리 텍스트 편집(팝오버 크롬 제거) | open | R5-P1 | 030 후 |
+| [033](033-figma-grade-research.md) | 피그마급 격차 리서치 → 실행 백로그(FIGMA-GRADE-UX.md) | open | R5-P1 | docs-only, 실측 의무 |
+
 ## 로드맵 R4 — 라운드 4 (2026-07-03)
 
 착수: **028 ∥ 029** (react/lab vs docs — disjoint).
