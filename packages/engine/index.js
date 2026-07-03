@@ -175,6 +175,30 @@ export class HwpDoc {
   blocksInRect(page, x0, y0, x1, y1) {
     return this.#call((r) => JSON.parse(r.blocksInRect(page, x0, y0, x1, y1))); // wasm returns "[]" on a miss
   }
+  /** Column-boundary x-positions (own-render px) of the table at `(section, block)` on `page` — a
+   *  `number[]` of `cols + 1` absolute px for the column-resize handles (issue 027), or `null` when the
+   *  table isn't on the page. */
+  tableColBoundaries(page, section, block) {
+    return this.#call((r) => {
+      const s = r.tableColBoundaries(page, section, block); // Option<String> → string | null/undefined on a miss
+      return s == null ? null : JSON.parse(s);
+    });
+  }
+  /** Page geometry (own-render px) `{w,h,ml,mt,mr,mb}` of `page` for the ruler (issue 027), or `null`
+   *  when the page is out of range. */
+  pageGeometry(page) {
+    return this.#call((r) => {
+      const s = r.pageGeometry(page); // Option<String> → string | null/undefined on a miss
+      return s == null ? null : JSON.parse(s);
+    });
+  }
+  /** The CURRENT styled runs of the `(row, col)` cell of the table at `(section, block)`, or of the
+   *  paragraph at `(section, block)` when `row`/`col` are omitted — a `RunSpec[]` the text-edit popover
+   *  reads to PRESERVE run styling on a plain-text edit (issue 027). Multi-paragraph cells join with a
+   *  `{ text:"\n" }` run. Empty array when the target has no runs. */
+  blockRuns(section, block, row, col) {
+    return this.#call((r) => JSON.parse(r.blockRuns(section, block, row ?? null, col ?? null)));
+  }
   /** Apply an Intent (schema v0). Accepts an object or a JSON string; returns the parsed Outcome. */
   applyIntent(intent) {
     const s = typeof intent === 'string' ? intent : JSON.stringify(intent);

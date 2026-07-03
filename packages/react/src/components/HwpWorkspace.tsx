@@ -1,12 +1,38 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { EngineAdapter, Intent, DocContext, PointerInput } from "@tf-hwp/editor-core";
+import type { EngineAdapter, Intent, DocContext, PointerInput, PageGeom, Box, Selection } from "@tf-hwp/editor-core";
+import { boundariesToRatios, firstRunStyle } from "@tf-hwp/editor-core";
 import { modLabel } from "../platform";
 import { useHwpEditor } from "../useHwpEditor";
 import { ChatPanel } from "./ChatPanel";
 import { HwpPageView, type PageClick } from "./HwpPageView";
 import { SelectionOverlay, type Marquee, type Mark } from "./SelectionOverlay";
 import { FontPicker } from "./FontPicker";
+import { ColumnResizeOverlay } from "./ColumnResizeOverlay";
+import { TableInsertButton } from "./TableInsertButton";
+import { Ruler } from "./Ruler";
+import { CellTextPopover } from "./CellTextPopover";
+import { FormatToolbar } from "./FormatToolbar";
 import { buildFontFaceCss, type FontCatalogEntry } from "../fonts";
+
+const A4_W = 794; // CSS px for 210mm @ 96dpi (mirrors HwpPageView) — the 100% page width.
+
+/** The single-selection edit target the issue-027 editing chrome hangs off (column handles / format
+ *  toolbar / text popover). Resolved async from the current selection (adds the table box + column
+ *  boundaries + current bold/italic for a table selection). */
+interface EditTarget {
+  page: number;
+  section: number;
+  block: number;
+  kind: string;
+  box: Box;
+  rows?: [number, number];
+  cols?: [number, number];
+  text: string;
+  tableBox?: Box | null;
+  boundaries?: number[] | null;
+  curBold: boolean;
+  curItalic: boolean;
+}
 
 export interface HwpWorkspaceProps {
   /** The backend seam (WasmAdapter for the web, or a host adapter). */
@@ -29,6 +55,10 @@ export interface HwpWorkspaceProps {
   defaultFont?: { family: string; bytes: Uint8Array } | null;
   /** Base URL the catalog fonts are served from (default `/fonts`); forwarded to the FontPicker. */
   fontUrlBase?: string;
+  /** Opt-in: enable the issue-027 MANUAL editing chrome (표 추가 버튼 · 상단 룰러 · 열너비 드래그 ·
+   *  더블클릭 텍스트 팝오버 · 선택 서식 툴바). Default OFF — the workspace behaves exactly as before
+   *  (chat-only) when omitted, so existing hosts/tests are unaffected. */
+  enableEditing?: boolean;
   className?: string;
 }
 
@@ -55,6 +85,18 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // re-pagination is owned by the core; this state is the DOM/@font-face half only.)
   const [selectedFont, setSelectedFont] = useState<{ family: string; url: string } | null>(null);
   const defaultFontAppliedFor = useRef<Uint8Array | null>(null);
+  // Last pointer-up (time + client px) for the double-click detector. We can't use the DOM `dblclick`
+  // event: HwpPageView `setPointerCapture`s on pointerdown, which redirects the pointerup so the browser
+  // never synthesizes click/dblclick. So we detect "two quick ups at ~the same spot" ourselves.
+  const lastUpRef = useRef<{ t: number; x: number; y: number } | null>(null);
+  // Issue 027 editing chrome (opt-in): the resolved single-selection edit target, the ruler geometry,
+  // and the open text popover. All null/off when `enableEditing` is not set.
+  const editingOn = !!props.enableEditing;
+  const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
+  const [pageGeom0, setPageGeom0] = useState<PageGeom | null>(null);
+  const [popover, setPopover] = useState<
+    { page: number; box: Box; section: number; block: number; kind: string; rows?: [number, number]; cols?: [number, number]; text: string } | null
+  >(null);
 
   // The live selection is the single source of truth (in the core); the chat anchors + page marks are
   // views of it, mapped here for the components.
@@ -169,11 +211,201 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // The read-only doc context handed to the host AI callback (doc meta + the live marked anchors).
   const docContext: DocContext = core.edit.docContext();
 
+  // ── issue 027 editing chrome (opt-in) ────────────────────────────────────────────────────────────
+  // Resolve the single-selection edit target: for a table/cell/range add its table box + column
+  // boundaries (for the resize handles) + current bold/italic (for the toolbar toggles). Non-table
+  // selections carry just the box. Cleared whenever the selection isn't exactly one item.
+  useEffect(() => {
+    if (!editingOn) return;
+    let cancelled = false;
+    const sel: Selection[] = selection;
+    const one = sel.length === 1 ? sel[0] : null;
+    if (!one) {
+      setEditTarget(null);
+      return;
+    }
+    const { anchor, mark } = one;
+    (async () => {
+      const base: EditTarget = {
+        page: mark.page,
+        section: anchor.section,
+        block: anchor.block,
+        kind: mark.kind,
+        box: mark.box,
+        rows: anchor.rows,
+        cols: anchor.cols,
+        text: anchor.text ?? "",
+        curBold: false,
+        curItalic: false,
+      };
+      if (mark.kind === "table" || mark.kind === "cell" || mark.kind === "range") {
+        const cx = mark.box.x + mark.box.w / 2;
+        const cy = mark.box.y + mark.box.h / 2;
+        try {
+          const [tableBox, boundaries, runs] = await Promise.all([
+            adapter.tableAt(mark.page, cx, cy),
+            core.session.colBoundaries(mark.page, anchor.section, anchor.block),
+            core.session.runsAt(anchor.section, anchor.block, anchor.rows?.[0], anchor.cols?.[0]),
+          ]);
+          if (cancelled) return;
+          const style = firstRunStyle(runs);
+          setEditTarget({ ...base, tableBox: tableBox as Box | null, boundaries, curBold: !!style.bold, curItalic: !!style.italic });
+        } catch {
+          if (!cancelled) setEditTarget(base);
+        }
+      } else {
+        setEditTarget(base);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [editingOn, selection, adapter, core]);
+
+  // Fetch page-0 geometry for the top ruler (own-render px) whenever the doc / layout changes.
+  useEffect(() => {
+    if (!editingOn || !meta) {
+      setPageGeom0(null);
+      return;
+    }
+    let cancelled = false;
+    core.session
+      .pageGeom(0)
+      .then((g) => {
+        if (!cancelled) setPageGeom0(g);
+      })
+      .catch(() => {
+        if (!cancelled) setPageGeom0(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [editingOn, meta, refreshToken, core]);
+
+  // Close the popover when the layout re-flows (an applied edit) so it never floats over stale geometry.
+  useEffect(() => {
+    setPopover(null);
+  }, [refreshToken]);
+
+  const onInsertTable = useCallback(
+    async (rows: number, cols: number) => {
+      try {
+        await core.edit.insertTable(rows, cols);
+        toast(`${rows}×${cols} 표를 문서 끝에 추가했습니다`);
+      } catch (e) {
+        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`표 추가 실패: ${e}`);
+      }
+    },
+    [core, toast, onTrap],
+  );
+
+  const onColCommit = useCallback(
+    async (newBoundaries: number[]) => {
+      if (!editTarget) return;
+      try {
+        await core.edit.setColumnWidths(editTarget.section, editTarget.block, boundariesToRatios(newBoundaries));
+        toast("열 너비를 변경했습니다");
+      } catch (e) {
+        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`열 너비 변경 실패: ${e}`);
+      }
+    },
+    [core, editTarget, toast, onTrap],
+  );
+
+  const onMarginsCommit = useCallback(
+    async (mm: { left: number; right: number; top: number; bottom: number }) => {
+      // SetPageMargins is DOCUMENT-WIDE (all pages) — confirm before applying (issue 027 §함정).
+      const ok = window.confirm(
+        `문서 전체의 페이지 여백을 바꿉니다 (모든 페이지에 적용):\n` +
+          `좌 ${mm.left}mm · 우 ${mm.right}mm · 상 ${mm.top}mm · 하 ${mm.bottom}mm\n\n계속할까요?`,
+      );
+      if (!ok) return;
+      try {
+        await core.edit.setPageMargins(0, mm);
+        toast("페이지 여백을 변경했습니다 (문서 전체)");
+      } catch (e) {
+        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`여백 변경 실패: ${e}`);
+      }
+    },
+    [core, toast, onTrap],
+  );
+
+  // Open the inline text popover for the point `c` by resolving the hit DIRECTLY (cell → paragraph). Used
+  // by the double-click detector below. Race-free: it re-hit-tests the (x,y) rather than reading the
+  // async selection.
+  const openPopoverAt = useCallback(
+    async (c: PageClick) => {
+      try {
+        const cell = adapter.tableCellAt ? await adapter.tableCellAt(c.page, c.x, c.y) : null;
+        if (cell) {
+          setPopover({ page: c.page, box: { x: cell.x, y: cell.y, w: cell.w, h: cell.h }, section: cell.section, block: cell.block, kind: "cell", rows: [cell.row, cell.row], cols: [cell.col, cell.col], text: cell.text });
+          return;
+        }
+        if (await adapter.tableAt(c.page, c.x, c.y)) return; // on a table border but not a cell → no popover
+        const hit = await adapter.hitTest(c.page, c.x, c.y);
+        if (hit && hit.kind === "paragraph" && hit.editable) {
+          setPopover({ page: c.page, box: { x: hit.x, y: hit.y, w: hit.w, h: hit.h }, section: hit.section, block: hit.block, kind: "paragraph", text: hit.text });
+        }
+      } catch (e) {
+        onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
+      }
+    },
+    [adapter, onTrap],
+  );
+
+  const onPopoverCommit = useCallback(
+    async (text: string) => {
+      if (!popover) return;
+      try {
+        if (popover.kind === "paragraph") {
+          await core.edit.editParagraphText(popover.section, popover.block, text);
+        } else {
+          await core.edit.editCellText(popover.section, popover.block, popover.rows?.[0] ?? 0, popover.cols?.[0] ?? 0, text);
+        }
+        toast("텍스트를 수정했습니다");
+      } catch (e) {
+        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`텍스트 수정 실패: ${e}`);
+      } finally {
+        setPopover(null);
+      }
+    },
+    [core, popover, toast, onTrap],
+  );
+
+  // Format toolbar → SetCellRangeFmt / SetCellRangeShade over the selected cell/range.
+  const fmtRange = editTarget?.rows && editTarget?.cols ? { r0: editTarget.rows[0], c0: editTarget.cols[0], r1: editTarget.rows[1], c1: editTarget.cols[1] } : null;
+  const runFmt = useCallback(
+    async (fn: () => Promise<number>, ok: string) => {
+      try {
+        await fn();
+        toast(ok);
+      } catch (e) {
+        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`서식 적용 실패: ${e}`);
+      }
+    },
+    [toast, onTrap],
+  );
+
   // pointer lifecycle → the core selection model (issues 021/023). React fires them fire-and-forget; the
   // core emits selection/marquee changes that useHwpEditor mirrors back into state.
   const onPointerDown = useCallback((c: PageClick) => void core.selection.pointerDown(toPointerInput(c)), [core]);
   const onPointerMove = useCallback((c: PageClick) => core.selection.pointerMove(toPointerInput(c)), [core]);
-  const onPointerUp = useCallback((c: PageClick) => void core.selection.pointerUp(toPointerInput(c)), [core]);
+  const onPointerUp = useCallback(
+    (c: PageClick) => {
+      void core.selection.pointerUp(toPointerInput(c));
+      if (!editingOn) return;
+      // Detect a double-click (two ups within 400ms, ~same client point) → open the text popover.
+      const now = Date.now();
+      const prev = lastUpRef.current;
+      if (prev && now - prev.t < 400 && Math.hypot(c.client.x - prev.x, c.client.y - prev.y) < 6) {
+        lastUpRef.current = null;
+        void openPopoverAt(c);
+      } else {
+        lastUpRef.current = { t: now, x: c.client.x, y: c.client.y };
+      }
+    },
+    [core, editingOn, openPopoverAt],
+  );
 
   const onApply = useCallback(
     async (intents: Intent[]): Promise<number> => {
@@ -265,6 +497,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         <button className="hw-tool" onClick={redo} disabled={!meta} title="다시 실행">
           ↷
         </button>
+        {editingOn && <TableInsertButton disabled={!canEdit} onPick={(r, c) => void onInsertTable(r, c)} />}
         {props.fontCatalog && (
           <FontPicker
             catalog={props.fontCatalog}
@@ -292,16 +525,54 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           }}
         >
           {meta ? (
-            <HwpPageView
-              adapter={adapter}
-              pageCount={meta.pages}
-              zoom={zoom}
-              refreshToken={refreshToken}
-              onPagePointerDown={(c) => onPointerDown(c)}
-              onPagePointerMove={(c) => onPointerMove(c)}
-              onPagePointerUp={(c) => onPointerUp(c)}
-              renderOverlay={(page, scale) => <SelectionOverlay marks={marks} marquee={marquee as Marquee | null} page={page} scale={scale} />}
-            />
+            <>
+              {/* 상단 룰러 (issue 027 step 3): 페이지 폭·좌우 여백 표시 + (편집 모드) 여백 드래그. */}
+              {editingOn && pageGeom0 && (
+                <div className="hw-ruler-wrap" style={{ width: A4_W * zoom }}>
+                  <Ruler geom={pageGeom0} scale={(A4_W * zoom) / pageGeom0.w} onCommitMargins={canEdit ? onMarginsCommit : undefined} />
+                </div>
+              )}
+              <HwpPageView
+                adapter={adapter}
+                pageCount={meta.pages}
+                zoom={zoom}
+                refreshToken={refreshToken}
+                onPagePointerDown={(c) => onPointerDown(c)}
+                onPagePointerMove={(c) => onPointerMove(c)}
+                onPagePointerUp={(c) => onPointerUp(c)}
+                renderOverlay={(page, scale) => (
+                  <>
+                    <SelectionOverlay marks={marks} marquee={marquee as Marquee | null} page={page} scale={scale} />
+                    {editingOn && editTarget && editTarget.page === page && editTarget.boundaries && editTarget.tableBox && (
+                      <ColumnResizeOverlay
+                        boundaries={editTarget.boundaries}
+                        top={editTarget.tableBox.y}
+                        height={editTarget.tableBox.h}
+                        scale={scale}
+                        onCommit={(b) => void onColCommit(b)}
+                      />
+                    )}
+                    {editingOn && editTarget && editTarget.page === page && (editTarget.kind === "cell" || editTarget.kind === "range" || editTarget.kind === "paragraph") && (
+                      <FormatToolbar
+                        box={editTarget.box}
+                        scale={scale}
+                        kind={editTarget.kind}
+                        fonts={selectedFont ? [selectedFont.family] : undefined}
+                        onBold={() => fmtRange && void runFmt(() => core.edit.formatCellRange(editTarget.section, editTarget.block, fmtRange, { bold: !editTarget.curBold }), editTarget.curBold ? "굵게 해제" : "굵게 적용")}
+                        onItalic={() => fmtRange && void runFmt(() => core.edit.formatCellRange(editTarget.section, editTarget.block, fmtRange, { italic: !editTarget.curItalic }), "기울임 적용")}
+                        onSize={(pt) => fmtRange && void runFmt(() => core.edit.formatCellRange(editTarget.section, editTarget.block, fmtRange, { size_pt: pt }), `글자 크기 ${pt}pt`)}
+                        onFont={(f) => fmtRange && void runFmt(() => core.edit.formatCellRange(editTarget.section, editTarget.block, fmtRange, { font: f }), `서체 ${f}`)}
+                        onColor={(hex) => fmtRange && void runFmt(() => core.edit.formatCellRange(editTarget.section, editTarget.block, fmtRange, { color: hex }), "글자색 적용")}
+                        onShade={(hex) => fmtRange && void runFmt(() => core.edit.shadeCellRange(editTarget.section, editTarget.block, fmtRange, hex), hex ? "배경색 적용" : "배경 지움")}
+                      />
+                    )}
+                    {editingOn && popover && popover.page === page && (
+                      <CellTextPopover box={popover.box} scale={scale} initialText={popover.text} onCommit={(t) => void onPopoverCommit(t)} onCancel={() => setPopover(null)} />
+                    )}
+                  </>
+                )}
+              />
+            </>
           ) : (
             <div className="hw-empty-canvas">문서를 열면 여기에 페이지가 표시됩니다.</div>
           )}

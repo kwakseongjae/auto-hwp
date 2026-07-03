@@ -53,6 +53,33 @@ export interface CellHit {
  *  ApplyContent, Replace, …). The adapter forwards it to the engine verbatim. */
 export type Intent = { intent: string; [field: string]: unknown };
 
+/** A STYLED text run (Intent schema v0 `RunSpec`, INTENT-SCHEMA §6.7) — the read shape `blockRuns`
+ *  returns AND the write shape `SetTableCellRuns`/`SetParagraphRuns` accept, so a text edit round-trips
+ *  through the SAME type (run-format preservation, issue 027 §함정). A multi-paragraph cell's paragraphs
+ *  are joined by a bare `{ text: "\n" }` run. All style fields are optional (unset = inherit). */
+export interface RunSpec {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strike?: boolean;
+  size_pt?: number;
+  color?: string;
+  highlight?: string;
+  font?: string;
+}
+
+/** Page geometry in own-render PAGE px (= HWPUNIT/75) — the page box + printable-area margins, for the
+ *  ruler (issue 027). Mirrors @tf-hwp/engine's `pageGeometry` / hwp-session `PageGeom`. */
+export interface PageGeom {
+  /** Page width (px). */ w: number;
+  /** Page height (px). */ h: number;
+  /** Left / top / right / bottom printable-area margins (px). */ ml: number;
+  mt: number;
+  mr: number;
+  mb: number;
+}
+
 /** The tagged result of applyIntent (mirrors @tf-hwp/engine Outcome). */
 export type Outcome = { kind: string; [field: string]: unknown };
 

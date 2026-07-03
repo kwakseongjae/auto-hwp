@@ -1,6 +1,6 @@
 import type { EngineAdapter } from "./adapter";
 import { Emitter } from "./events";
-import type { Anchor, DocContext, Intent, OpenResult } from "./types";
+import type { Anchor, DocContext, Intent, OpenResult, PageGeom, RunSpec } from "./types";
 
 /// DocSession — the document lifecycle facade over an EngineAdapter (SDK-LAYERS L2), DESCENDED from
 /// HwpWorkspace's document/undo/font state. It owns: the open-document metadata (`OpenResult`), the
@@ -127,6 +127,25 @@ export class DocSession {
     this.fontFamily = family;
     await this.refreshPages();
     this.layoutInvalidated.emit();
+  }
+
+  // ── read-only geometry / runs (issue 027 — optional adapter methods) ──────────────────────────────
+  /** Column-boundary x's (own-render px) of the table at `(section, block)` on `page` for the resize
+   *  handles, or `null` (table off-page / backend can't answer). Read-only — no undo unit. */
+  async colBoundaries(page: number, section: number, block: number): Promise<number[] | null> {
+    return (await this.adapter.tableColBoundaries?.(page, section, block)) ?? null;
+  }
+
+  /** Page geometry (own-render px) for the ruler, or `null` (out of range / backend can't answer). */
+  async pageGeom(page: number): Promise<PageGeom | null> {
+    return (await this.adapter.pageGeometry?.(page)) ?? null;
+  }
+
+  /** The CURRENT styled runs of the `(row, col)` cell of the table at `(section, block)`, or of the
+   *  paragraph at `(section, block)` when `row`/`col` are omitted — read by the text-edit popover to
+   *  PRESERVE run styling (issue 027 §함정). `[]` when the backend can't answer / the target is empty. */
+  async runsAt(section: number, block: number, row?: number, col?: number): Promise<RunSpec[]> {
+    return (await this.adapter.blockRuns?.(section, block, row, col)) ?? [];
   }
 
   /** Build the read-only DocContext handed to the host AI callback (meta + the marked anchors). */

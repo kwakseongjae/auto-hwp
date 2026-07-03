@@ -1,6 +1,6 @@
 import { HwpDoc, initEngine, resetEngine } from "@tf-hwp/engine";
 import type { EngineAdapter } from "./EngineAdapter";
-import type { BlockHit, CellHit, Intent, OpenResult, Outcome, TableBox } from "./types";
+import type { BlockHit, CellHit, Intent, OpenResult, Outcome, PageGeom, RunSpec, TableBox } from "./types";
 
 type WasmInput = string | URL | Request | BufferSource | WebAssembly.Module;
 
@@ -101,6 +101,18 @@ export class WasmAdapter implements EngineAdapter {
 
   blocksInRect(page: number, x0: number, y0: number, x1: number, y1: number): Promise<BlockHit[]> {
     return this.guard((d) => d.blocksInRect(page, x0, y0, x1, y1) as BlockHit[]);
+  }
+
+  tableColBoundaries(page: number, section: number, block: number): Promise<number[] | null> {
+    return this.guard((d) => d.tableColBoundaries(page, section, block));
+  }
+
+  pageGeometry(page: number): Promise<PageGeom | null> {
+    return this.guard((d) => d.pageGeometry(page) as PageGeom | null);
+  }
+
+  blockRuns(section: number, block: number, row?: number, col?: number): Promise<RunSpec[]> {
+    return this.guard((d) => d.blockRuns(section, block, row ?? null, col ?? null) as RunSpec[]);
   }
 
   applyIntent(intent: Intent): Promise<Outcome> {

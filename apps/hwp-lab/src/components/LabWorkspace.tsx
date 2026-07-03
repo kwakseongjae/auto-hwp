@@ -225,6 +225,8 @@ export default function LabWorkspace() {
             defaultFont={defaultFont}
             fontUrlBase={FONT_URL_BASE}
             isMock={mode === "mock"}
+            // 이슈 027: 수동 편집 UI(표 추가·룰러·열너비 드래그·더블클릭 텍스트·서식 툴바) 옵트인.
+            enableEditing
           />
         ) : (
           <div className="lab-empty">

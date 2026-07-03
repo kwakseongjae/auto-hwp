@@ -57,6 +57,32 @@ export interface CellHit {
   h: number;
 }
 
+/** Page geometry in own-render px (= HWPUNIT/75): page box + printable-area margins, for the ruler
+ *  (issue 027). Mirrors hwp-session `PageGeom`. */
+export interface PageGeom {
+  w: number;
+  h: number;
+  ml: number;
+  mt: number;
+  mr: number;
+  mb: number;
+}
+
+/** A STYLED text run (Intent schema v0 `RunSpec`) — the shape `blockRuns` returns AND
+ *  `SetTableCellRuns`/`SetParagraphRuns` accept (run-format preservation, issue 027). Style fields are
+ *  optional (unset = inherit); a multi-paragraph cell joins its paragraphs with a `{text:"\n"}` run. */
+export interface RunSpec {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strike?: boolean;
+  size_pt?: number;
+  color?: string;
+  highlight?: string;
+  font?: string;
+}
+
 /** Tagged result of applyIntent (Intent schema v0). `kind` discriminates the payload. */
 export type Outcome =
   | { kind: 'opened'; format: string; editable: boolean; sections: number }
@@ -111,6 +137,15 @@ export class HwpDoc {
   /** Marquee select: every top-level block whose band intersects the own-render px rect
    *  `(x0,y0)-(x1,y1)` (corners in any order). Empty array on a miss (never null). */
   blocksInRect(page: number, x0: number, y0: number, x1: number, y1: number): BlockHit[];
+  /** Column-boundary x-positions (own-render px) of the table at `(section, block)` on `page` — a
+   *  `number[]` of `cols + 1` absolute px for the column-resize handles (issue 027); `null` off-page. */
+  tableColBoundaries(page: number, section: number, block: number): number[] | null;
+  /** Page geometry (own-render px) for the ruler (issue 027); `null` when the page is out of range. */
+  pageGeometry(page: number): PageGeom | null;
+  /** The CURRENT styled runs of the `(row,col)` cell of the table at `(section,block)`, or of the
+   *  paragraph at `(section,block)` when `row`/`col` are omitted — read to PRESERVE run styling on a
+   *  plain-text edit (issue 027). Multi-paragraph cells join with a `{text:"\n"}` run. */
+  blockRuns(section: number, block: number, row?: number | null, col?: number | null): RunSpec[];
   applyIntent(intent: object | string): Outcome;
   undo(): boolean;
   redo(): boolean;

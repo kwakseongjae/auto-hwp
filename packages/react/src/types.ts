@@ -20,4 +20,9 @@ export type {
   SelMark,
   SelMarquee,
   PointerInput,
+  PageGeom,
+  RunSpec,
+  CellRange,
+  CellFmt,
+  PageMarginsMm,
 } from "@tf-hwp/editor-core";

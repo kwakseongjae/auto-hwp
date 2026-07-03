@@ -1,4 +1,4 @@
-import type { BlockHit, CellHit, Intent, OpenResult, Outcome, TableBox } from "./types";
+import type { BlockHit, CellHit, Intent, OpenResult, Outcome, PageGeom, RunSpec, TableBox } from "./types";
 
 /// EngineAdapter — the backend seam (SDK-LAYERS L1↔L2). It abstracts the ACTUAL surface a backend
 /// exposes (open / page SVG / hit-test·tableAt / applyIntent / undo·redo / export) so the SAME
@@ -42,6 +42,24 @@ export interface EngineAdapter {
    *  miss (never null). Backends that can't answer (e.g. the reference `TauriAdapter`) OMIT this method;
    *  the caller then simply disables marquee selection (click/⌘-click still work). */
   blocksInRect?(page: number, x0: number, y0: number, x1: number, y1: number): Promise<BlockHit[]>;
+
+  /** OPTIONAL — column-boundary x-positions (own-render PAGE px) of the table at `(section, block)` on
+   *  `page`: `cols + 1` absolute px from the table's left to its right, for the column-resize handles
+   *  (issue 027). Resolves to `null` when the table isn't on the page. Backends that can't answer (e.g.
+   *  the reference `TauriAdapter`) OMIT this method — the caller then hides the column-resize handles. */
+  tableColBoundaries?(page: number, section: number, block: number): Promise<number[] | null>;
+
+  /** OPTIONAL — page geometry (own-render PAGE px): the page box + printable-area margins of `page`, for
+   *  the ruler (issue 027). Resolves to `null` when the page is out of range. Backends that omit it →
+   *  the caller hides the ruler's margin handles. */
+  pageGeometry?(page: number): Promise<PageGeom | null>;
+
+  /** OPTIONAL — the CURRENT styled runs of the `(row, col)` cell of the table at `(section, block)`, or
+   *  of the paragraph at `(section, block)` when `row`/`col` are omitted (issue 027 §함정: run 서식 보존).
+   *  The text-edit popover reads these so a plain-text edit INHERITS the existing run styling instead of
+   *  flattening it. Resolves to `[]` when the target has no runs. Backends that omit it → the caller
+   *  falls back to a single unstyled run (no preservation), never the plain-text `SetTableCell` variant. */
+  blockRuns?(section: number, block: number, row?: number, col?: number): Promise<RunSpec[]>;
 
   /** Apply an Intent (schema v0). One undo unit per accepted Intent. */
   applyIntent(intent: Intent): Promise<Outcome>;

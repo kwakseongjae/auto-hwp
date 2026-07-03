@@ -92,6 +92,81 @@
   background: rgba(37, 99, 235, 0.08); border-radius: 2px; pointer-events: none;
 }
 
+/* ================= issue 027 — editing-parity chrome ================= */
+
+/* step 1 — column-width drag handles over a marked table */
+.hw-col-resize { position: absolute; inset: 0; pointer-events: none; }
+.hw-col-grip {
+  position: absolute; width: 9px; margin-left: -4.5px; pointer-events: auto;
+  cursor: col-resize; background: transparent; z-index: 6;
+}
+.hw-col-grip::before {
+  content: ""; position: absolute; left: 4px; top: 0; bottom: 0; width: 1.5px;
+  background: var(--hw-accent); opacity: 0; transition: opacity 0.1s;
+}
+.hw-col-grip:hover::before, .hw-col-grip-active::before { opacity: 0.9; }
+
+/* step 2 — 표 추가 grid picker */
+.hw-tableins { position: relative; display: inline-flex; }
+.hw-tableins-pop {
+  position: absolute; top: 34px; left: 0; z-index: 30; background: #fff;
+  border: 1px solid var(--hw-border); border-radius: 8px; padding: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+}
+.hw-tableins-grid { display: grid; grid-template-columns: repeat(8, 16px); gap: 2px; }
+.hw-tableins-cell {
+  width: 16px; height: 16px; padding: 0; border: 1px solid #d4d4d8; background: #fff;
+  border-radius: 2px; cursor: pointer;
+}
+.hw-tableins-on { background: rgba(37, 99, 235, 0.35); border-color: var(--hw-accent); }
+.hw-tableins-label { margin-top: 6px; font-size: 12px; color: var(--hw-muted); text-align: center; }
+
+/* step 3 — top ruler */
+.hw-ruler-wrap { margin: 0 auto 6px; }
+.hw-ruler { position: relative; font-size: 10px; color: var(--hw-muted); user-select: none; }
+.hw-ruler-track {
+  position: relative; height: 18px; background: #f4f4f5;
+  border: 1px solid var(--hw-border); border-radius: 3px;
+}
+.hw-ruler-tick { position: absolute; top: 0; }
+.hw-ruler-tick-mark { position: absolute; top: 0; width: 1px; height: 6px; background: #a1a1aa; }
+.hw-ruler-tick-label { position: absolute; top: 6px; left: 2px; font-style: normal; font-size: 9px; }
+.hw-ruler-printable { position: absolute; top: 0; height: 100%; background: rgba(37, 99, 235, 0.06); }
+.hw-ruler-margin { position: absolute; top: 0; width: 2px; height: 100%; margin-left: -1px; background: var(--hw-accent); }
+.hw-ruler-margin-drag { width: 7px; margin-left: -3.5px; background: transparent; cursor: col-resize; }
+.hw-ruler-margin-drag::before { content: ""; position: absolute; left: 3px; top: 0; bottom: 0; width: 2px; background: var(--hw-accent); }
+.hw-ruler-readout { margin-top: 3px; font-size: 11px; text-align: center; }
+
+/* step 4 — inline cell/paragraph text popover */
+.hw-cellpop {
+  position: absolute; z-index: 20; background: #fff; border: 1px solid var(--hw-accent);
+  border-radius: 6px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.2); padding: 4px; pointer-events: auto;
+}
+.hw-cellpop-textarea {
+  width: 100%; min-height: 26px; resize: vertical; border: 1px solid var(--hw-border);
+  border-radius: 4px; padding: 4px 6px; font: inherit; font-size: 13px; color: #000; box-sizing: border-box;
+}
+.hw-cellpop-actions { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.hw-cellpop-hint { flex: 1; font-size: 10px; color: var(--hw-muted); }
+.hw-cellpop-btn { font-size: 12px; padding: 3px 8px; border: 1px solid var(--hw-border); border-radius: 4px; background: #fff; cursor: pointer; }
+.hw-cellpop-btn-primary { background: var(--hw-accent); color: #fff; border-color: var(--hw-accent); }
+
+/* step 5 — floating format toolbar */
+.hw-fmtbar {
+  position: absolute; z-index: 18; display: flex; align-items: center; gap: 3px;
+  background: #fff; border: 1px solid var(--hw-border); border-radius: 8px; padding: 3px 5px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.18); pointer-events: auto;
+}
+.hw-fmt-btn {
+  min-width: 26px; height: 26px; padding: 0 5px; border: 1px solid transparent; border-radius: 5px;
+  background: #fff; cursor: pointer; font-size: 12px;
+}
+.hw-fmt-btn:hover:not(:disabled) { background: #f0f1f3; }
+.hw-fmt-btn:disabled, .hw-fmt-size:disabled, .hw-fmt-font:disabled { opacity: 0.4; cursor: not-allowed; }
+.hw-fmt-size, .hw-fmt-font { height: 26px; border: 1px solid var(--hw-border); border-radius: 5px; font-size: 12px; background: #fff; }
+.hw-fmt-color { display: inline-flex; align-items: center; gap: 2px; font-size: 10px; color: var(--hw-muted); }
+.hw-fmt-color input[type="color"] { width: 22px; height: 22px; padding: 0; border: 1px solid var(--hw-border); border-radius: 4px; background: none; cursor: pointer; }
+
 /* ---- chat panel ---- */
 .hw-chat {
   width: 360px; flex-shrink: 0; display: flex; flex-direction: column;

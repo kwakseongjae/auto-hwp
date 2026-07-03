@@ -22,6 +22,8 @@ export interface HwpPageViewProps {
   refreshToken?: number;
   /** A page-local click, already converted to own-render PAGE px (§4.5 lives in the component). */
   onPageClick?: (click: PageClick) => void;
+  /** A page-local DOUBLE-click (issue 027: open the inline text popover). Same page-px conversion. */
+  onPageDoubleClick?: (click: PageClick) => void;
   /** Pointer lifecycle for the selection model (issue 021): each carries the same page-local px + the
    *  modifier + the raw client point. On pointerdown the sheet captures the pointer so a drag that
    *  leaves the page still reports move/up here (marquee clips to the start page). Optional — a backend
@@ -52,7 +54,7 @@ function parseViewBox(svg: string): { w: number; h: number } {
 /// A click is converted from client px to own-render PAGE px HERE (coords.ts), so the coordinate math
 /// lives in one place and every backend's hit-test gets page-local px.
 export function HwpPageView(props: HwpPageViewProps) {
-  const { adapter, pageCount, zoom = 1, refreshToken = 0, onPageClick, onPagePointerDown, onPagePointerMove, onPagePointerUp, renderOverlay } = props;
+  const { adapter, pageCount, zoom = 1, refreshToken = 0, onPageClick, onPageDoubleClick, onPagePointerDown, onPagePointerMove, onPagePointerUp, renderOverlay } = props;
   const [pages, setPages] = useState<Record<number, PageState>>({});
 
   // Fetch + sanitize every page's SVG. Re-runs when the doc/adapter/refreshToken/pageCount changes.
@@ -102,6 +104,15 @@ export function HwpPageView(props: HwpPageViewProps) {
     [onPageClick, eventToClick],
   );
 
+  const handleDoubleClick = useCallback(
+    (page: number) => (ev: React.MouseEvent<HTMLDivElement>) => {
+      if (!onPageDoubleClick) return;
+      const c = eventToClick(page, ev);
+      if (c) onPageDoubleClick(c);
+    },
+    [onPageDoubleClick, eventToClick],
+  );
+
   const handlePointerDown = useCallback(
     (page: number) => (ev: React.PointerEvent<HTMLDivElement>) => {
       if (!onPagePointerDown || ev.button !== 0) return; // primary button only
@@ -149,6 +160,7 @@ export function HwpPageView(props: HwpPageViewProps) {
               className="hw-sheet"
               data-page={p}
               onClick={handleClick(p)}
+              onDoubleClick={handleDoubleClick(p)}
               onPointerDown={handlePointerDown(p)}
               onPointerMove={handlePointerMove(p)}
               onPointerUp={handlePointerUp(p)}

@@ -1,5 +1,5 @@
 import type { EngineAdapter } from "../EngineAdapter";
-import type { BlockHit, CellHit, Intent, OpenResult, Outcome, TableBox } from "../types";
+import type { BlockHit, CellHit, Intent, OpenResult, Outcome, PageGeom, RunSpec, TableBox } from "../types";
 
 /** A headless EngineAdapter for tests: canned SVG (optionally malicious, to exercise the R7 gate), a
  *  fixed table hit, and a spy-able applyIntent. No wasm — pure in-memory. */
@@ -24,14 +24,19 @@ export class MockAdapter implements EngineAdapter {
       cell?: CellHit | null | ((page: number, x: number, y: number) => CellHit | null);
       /** Canned marquee result for `blocksInRect` (issue 021). */
       blocks?: BlockHit[];
+      /** Canned column boundaries / page geometry / cell runs (issue 027). Omit to OMIT the method. */
+      colBoundaries?: number[] | null;
+      pageGeom?: PageGeom | null;
+      runs?: RunSpec[];
       pages?: number;
     } = {},
   ) {
-    // Only expose `tableCellAt` when a `cell` option was supplied — so tests can exercise BOTH the
-    // cell-capable backend (WasmAdapter parity) and a backend that omits the optional method.
-    if (!("cell" in this.opts)) {
-      (this as { tableCellAt?: unknown }).tableCellAt = undefined;
-    }
+    // Only expose the OPTIONAL methods when the corresponding opt was supplied — so tests exercise BOTH
+    // the capable backend (WasmAdapter parity) and a backend that omits the optional method.
+    if (!("cell" in this.opts)) (this as { tableCellAt?: unknown }).tableCellAt = undefined;
+    if (!("colBoundaries" in this.opts)) (this as { tableColBoundaries?: unknown }).tableColBoundaries = undefined;
+    if (!("pageGeom" in this.opts)) (this as { pageGeometry?: unknown }).pageGeometry = undefined;
+    if (!("runs" in this.opts)) (this as { blockRuns?: unknown }).blockRuns = undefined;
   }
 
   async open(_bytes: Uint8Array, name?: string): Promise<OpenResult> {
@@ -60,6 +65,15 @@ export class MockAdapter implements EngineAdapter {
   }
   async blocksInRect(): Promise<BlockHit[]> {
     return this.opts.blocks ?? [];
+  }
+  async tableColBoundaries(): Promise<number[] | null> {
+    return this.opts.colBoundaries ?? null;
+  }
+  async pageGeometry(): Promise<PageGeom | null> {
+    return this.opts.pageGeom ?? null;
+  }
+  async blockRuns(): Promise<RunSpec[]> {
+    return this.opts.runs ?? [];
   }
   async applyIntent(intent: Intent): Promise<Outcome> {
     this.applied.push(intent);

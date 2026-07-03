@@ -14,6 +14,19 @@ export type { ChatPanelProps } from "./components/ChatPanel";
 export { FontPicker } from "./components/FontPicker";
 export type { FontPickerProps } from "./components/FontPicker";
 
+// Issue 027 — editing-parity opt-in components. Each is individually importable and drives a single
+// @tf-hwp/editor-core command; a host can compose them WITHOUT HwpWorkspace (see the README recipe).
+export { ColumnResizeOverlay } from "./components/ColumnResizeOverlay";
+export type { ColumnResizeOverlayProps } from "./components/ColumnResizeOverlay";
+export { TableInsertButton } from "./components/TableInsertButton";
+export type { TableInsertButtonProps } from "./components/TableInsertButton";
+export { Ruler } from "./components/Ruler";
+export type { RulerProps } from "./components/Ruler";
+export { CellTextPopover } from "./components/CellTextPopover";
+export type { CellTextPopoverProps } from "./components/CellTextPopover";
+export { FormatToolbar } from "./components/FormatToolbar";
+export type { FormatToolbarProps } from "./components/FormatToolbar";
+
 // Font system v1 (issue 022): the curated OFL catalog + screen @font-face/alias helpers.
 export { FONT_CATALOG, catalogUrl, buildFontFaceCss, svgFontFamilies, isTtc } from "./fonts";
 export type { FontCatalogEntry } from "./fonts";
@@ -31,6 +44,20 @@ export type { TauriAdapterOptions, Invoke } from "./TauriAdapter";
 export { useHwpEditor } from "./useHwpEditor";
 export type { HwpEditorState } from "./useHwpEditor";
 export { createEditorCore, EditorCore, DocSession, SelectionModel, EditController } from "@tf-hwp/editor-core";
+// Issue 027 — the single px↔mm↔ratio conversion utils + the run-preservation helper, re-exported so a
+// host composing the opt-in components by hand shares the SAME conversion point (never re-derives it).
+export {
+  PX_PER_MM,
+  pxToMm,
+  mmToPx,
+  roundMm,
+  boundariesToWidths,
+  widthsToRatios,
+  boundariesToRatios,
+  resizeBoundary,
+  inheritRuns,
+  firstRunStyle,
+} from "@tf-hwp/editor-core";
 
 // R7: the sanitizer is exported so hosts can reuse it, but the components never expose an SVG-string
 // prop that bypasses it (all injection goes through HwpPageView → sanitizeSvg).

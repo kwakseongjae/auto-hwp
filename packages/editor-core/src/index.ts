@@ -23,9 +23,26 @@ export {
 } from "./selection";
 export type { SelectResult } from "./selection";
 
-// Edit assembly / preview / apply
+// Edit assembly / preview / apply + the issue-027 manual edit command types
 export { EditController } from "./edit";
+export type { CellRange, CellFmt, PageMarginsMm } from "./edit";
 export { describeIntent } from "./describeIntent";
+
+// Unit conversion (issue 027) — the SINGLE px↔mm↔ratio point the ruler + column-resize share.
+export {
+  PX_PER_MM,
+  pxToMm,
+  mmToPx,
+  roundMm,
+  boundariesToWidths,
+  widthsToRatios,
+  boundariesToRatios,
+  resizeBoundary,
+} from "./units";
+
+// Run-format preservation (issue 027) — the pure text-edit inheritance rule.
+export { inheritRuns, firstRunStyle } from "./runs";
+export type { RunStyle } from "./runs";
 
 // Event emitter primitive
 export { Emitter } from "./events";
@@ -43,7 +60,9 @@ export type {
   OnAiRequest,
   OpenResult,
   Outcome,
+  PageGeom,
   PointerInput,
+  RunSpec,
   Selection,
   SelMark,
   SelMarquee,

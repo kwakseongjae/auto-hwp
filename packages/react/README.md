@@ -83,7 +83,48 @@ interface EngineAdapter {
 | `SelectionOverlay` | Draws the cell/table/paragraph marking box (no batch-format toolbar in v1). |
 | `ChatPanel` | Anchor chips + per-op preview cards (적용/취소) + `onAiRequest` delegation. |
 
-v1 scope is **chat editing only** — the desktop app's WYSIWYG in-place editor is intentionally out.
+### Manual editing (issue 027) — opt-in
+
+Set `enableEditing` on `HwpWorkspace` to turn on the manual editing chrome (열너비 드래그 · 표 추가 ·
+상단 룰러 · 더블클릭 텍스트 수정 · 선택 서식 툴바). Off by default — the workspace is chat-only unless
+you ask for it, so existing hosts are unaffected.
+
+```tsx
+<HwpWorkspace adapter={adapter} document={doc} onAiRequest={onAiRequest} enableEditing />
+```
+
+Each feature is also an **individually importable** component driving a single
+[editor-core](../editor-core) command — you can compose them WITHOUT `HwpWorkspace`:
+
+| Component | editor-core command | Intent (schema v0) |
+|-----------|---------------------|--------------------|
+| `ColumnResizeOverlay` | `core.edit.setColumnWidths` | `SetTableColWidths` (px→ratio via `boundariesToRatios`) |
+| `TableInsertButton` | `core.edit.insertTable` | `ApplyContent` (table block) |
+| `Ruler` | `core.edit.setPageMargins` | `SetPageMargins` (mm — **document-wide**, confirm first) |
+| `CellTextPopover` | `core.edit.editCellText` / `editParagraphText` | `SetTableCellRuns` / `SetParagraphRuns` (run styling preserved) |
+| `FormatToolbar` | `core.edit.formatCellRange` / `shadeCellRange` | `SetCellRangeFmt` / `SetCellRangeShade` |
+
+All px↔mm↔ratio conversion is the single `@tf-hwp/editor-core` `units` module (`pxToMm`/`mmToPx`/
+`boundariesToRatios`/`resizeBoundary`); a text edit preserves the cell's run styling via `inheritRuns`.
+
+```tsx
+// Assemble the column-resize handles over YOUR OWN page surface, no HwpWorkspace:
+import { ColumnResizeOverlay } from "@tf-hwp/react";
+import { createEditorCore, boundariesToRatios } from "@tf-hwp/editor-core";
+
+const core = createEditorCore(adapter);
+const boundaries = await core.session.colBoundaries(page, section, block); // own-render px
+<ColumnResizeOverlay
+  boundaries={boundaries!}
+  top={tableBox.y}
+  height={tableBox.h}
+  scale={renderedPx / viewBoxPx}
+  onCommit={(next) => core.edit.setColumnWidths(section, block, boundariesToRatios(next))}
+/>;
+```
+
+The desktop app's WYSIWYG contentEditable editor is intentionally out — the v1 text editor is a simple
+textarea popover (IME-safe: no commit mid-composition).
 
 ## Server-side AI proxy (R6)
 

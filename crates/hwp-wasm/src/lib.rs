@@ -277,6 +277,41 @@ impl HwpDoc {
         serde_json::to_string(&hits).map_err(|e| js_err("serialize", &e.to_string()))
     }
 
+    /// Column-boundary x-positions (own-render px) of the table at `(section, block)` on `page` — the
+    /// `cols + 1` absolute px the column-resize handles are drawn on, from the table left to its right
+    /// (issue 027 열너비 드래그). A JSON **string** of a `number[]`, or **JS `null`** when the table
+    /// isn't on the page (an `Option<String>` → `null` — policy 018). Served from the cached placement
+    /// (issue 025) so a drag never re-typesets; the boundaries land exactly on the painted grid because
+    /// they derive from the SAME `column_offsets` the renderer used. Additive wasm binding of the
+    /// existing `hwp_session::table_col_boundaries_placed` (geometry exposure gap — issue 027 §열 경계).
+    #[wasm_bindgen(js_name = tableColBoundaries)]
+    pub fn table_col_boundaries(&self, page: u32, section: usize, block: usize) -> Result<Option<String>, JsValue> {
+        let b = self.with_placed(|doc, placed| hwp_session::table_col_boundaries_placed(doc, placed, page, section, block))?;
+        b.map(|b| serde_json::to_string(&b).map_err(|e| js_err("serialize", &e.to_string()))).transpose()
+    }
+
+    /// Page geometry in own-render px: the page box + printable-area margins of `page`, for the editor
+    /// ruler (issue 027 룰러). A JSON **string** `{w,h,ml,mt,mr,mb}` (all px = HWPUNIT/75), or **JS
+    /// `null`** when the page is out of range (an `Option<String>` → `null` — policy 018). Additive wasm
+    /// binding of the existing `hwp_session::page_geometry_placed` (geometry exposure gap — issue 027).
+    #[wasm_bindgen(js_name = pageGeometry)]
+    pub fn page_geometry(&self, page: u32) -> Result<Option<String>, JsValue> {
+        let g = self.with_placed(|_doc, placed| hwp_session::page_geometry_placed(placed, page))?;
+        g.map(|g| serde_json::to_string(&g).map_err(|e| js_err("serialize", &e.to_string()))).transpose()
+    }
+
+    /// ALL styled runs of a target paragraph (`row`/`col` = `null`) or the `(row, col)` cell — a JSON
+    /// **string** of a `RunSpec[]` (`{text,bold,italic,underline,strike,size_pt,color,highlight,font}`),
+    /// a multi-paragraph cell's paragraphs joined by a `"\n"` run. The text-edit popover reads these so a
+    /// plain-text edit can INHERIT the existing run styling (issue 027 §함정: 볼드 셀 수정 후 볼드 유지 —
+    /// 평문 variant 금지). Additive wasm binding of the existing `hwp_session::block_runs` (the run-preserve
+    /// read the edit lane exposed on desktop but never on wasm).
+    #[wasm_bindgen(js_name = blockRuns)]
+    pub fn block_runs(&self, section: usize, block: usize, row: Option<usize>, col: Option<usize>) -> Result<String, JsValue> {
+        let runs = hwp_session::block_runs(self.doc()?, section, block, row, col);
+        serde_json::to_string(&runs).map_err(|e| js_err("serialize", &e.to_string()))
+    }
+
     /// Apply one Intent-JSON envelope (schema v0, issue 008) via the SAME op-bus the desktop uses
     /// ([`hwp_mcp::apply_intent_json`]) — Propose/Commit/Undo/Redo and every edit variant included.
     /// Returns a JSON `Outcome` (`{kind, …}`). Throws a `{code, message}` error on a bad envelope or a
