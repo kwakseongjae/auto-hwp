@@ -49,8 +49,8 @@
 
 | # | 제목 | 상태 | 단계 | 비고 |
 |---|------|------|------|------|
-| [024](024-para-border-frame-overflow.md) | 자가진단표 충실도 — 문단테두리 렌더 + 프레임 오버플로(귀하 소실 회귀) | open | R3-P0 | 진단: ParaShape.border_fill_id 미소비 + 프레임 초과 드롭 |
-| [025](025-layout-cache-perf.md) | 인터랙션 성능 — 레이아웃 캐시(질의마다 전체 재조판 제거) | open | R3-P0 | 진단: 모든 지오메트리/렌더가 place_doc 매회 호출 |
+| [024](024-para-border-frame-overflow.md) | 자가진단표 — draw-side leading 트림(귀하 상자 안 복귀) | **done** | R3-P0 | c445cb6 · 실측이 가설 2개 뒤집음(상자=셀테두리 기렌더/귀하=과전진); 무소실 회귀테스트 tracked |
+| [025](025-layout-cache-perf.md) | 레이아웃 캐시 — hitTest 100회 293→3.8ms (**76×**), placeBuilds 100→1 | **done** | R3-P0 | 06b5fa0(amend 복구) · 동일성 2계층+무효화 5지점+골든 불변 |
 | [026](026-editor-core-sdk.md) | @tf-hwp/editor-core + @tf-hwp/ai-protocol 신설(headless SDK) | open | R3-P1 | 024·025 후; React 0줄 코어 + LLM 규격 라이브러리 |
 | [027](027-editing-parity-ui.md) | 편집 패리티 — 룰러·열너비·표추가·텍스트·서식·배경 | open | R3-P1 | 026 후; Intent는 전부 기존재 — UI 계층 작업 |
 
