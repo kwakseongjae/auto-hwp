@@ -183,6 +183,24 @@ describe("EditController manual commands (issue 027) — each = ONE Intent = ONE
     expect(parsed.blocks[0].rows[0]).toEqual(["", "", ""]);
   });
 
+  it("행 삽입 (issue 039) delegates to the EXISTING TableInsertRows op — below = at row+1, above = at row", async () => {
+    const { core, adapter } = await openCore();
+    // 아래에 행 삽입: selected row 2 of a 3-col table → at = 3, count defaults to 1, cols stays rectangular.
+    await core.edit.insertRows(0, 1, 3, 3);
+    expect(adapter.applied[0]).toEqual({ intent: "TableInsertRows", section: 0, index: 1, at: 3, count: 1, cols: 3 });
+    // 위에 행 삽입: selected row 0 → at = 0.
+    await core.edit.insertRows(0, 1, 0, 3);
+    expect(adapter.applied[1]).toEqual({ intent: "TableInsertRows", section: 0, index: 1, at: 0, count: 1, cols: 3 });
+    // NO new intent kind is introduced — it reuses the same tag the schema already accepts (schema_v0 Synthetic).
+    expect(adapter.applied.every((i) => i.intent === "TableInsertRows")).toBe(true);
+  });
+
+  it("행 삽입 clamps count/cols to ≥1 (never an illegal empty insert)", async () => {
+    const { core, adapter } = await openCore();
+    await core.edit.insertRows(0, 1, 1, 0, 0);
+    expect(adapter.applied[0]).toEqual({ intent: "TableInsertRows", section: 0, index: 1, at: 1, count: 1, cols: 1 });
+  });
+
   it("step3 setPageMargins passes mm through to SetPageMargins (document-wide)", async () => {
     const { core, adapter } = await openCore();
     await core.edit.setPageMargins(0, { left: 20, right: 20, top: 15, bottom: 15 });

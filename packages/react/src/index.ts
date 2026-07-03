@@ -58,6 +58,18 @@ export type { FloatingToolbarProps, ToolbarAlign } from "./components/FloatingTo
 export { computeFloatingPosition, unionPageBox } from "./floatingPosition";
 export type { FloatViewport, FloatOptions, FloatPlacement, FloatPosition } from "./floatingPosition";
 
+// Issue 039 — the right-click CONTEXT MENU (셀/문단/바탕 3분기) + the shared selection-action set + the
+// pure viewport clamp. Every menu action delegates to an existing intent/EditController path (신규 op 0);
+// the shared `useSelectionActions` is what the 028 FloatingToolbar and the menu BOTH drive (중복 코드 금지).
+export { ContextMenu } from "./components/ContextMenu";
+export type { ContextMenuProps, ContextMenuItem } from "./components/ContextMenu";
+export { TableSizeGrid } from "./components/TableSizeGrid";
+export type { TableSizeGridProps } from "./components/TableSizeGrid";
+export { useSelectionActions } from "./useSelectionActions";
+export type { SelectionActions, SelectionActionTarget, SelectionRange } from "./useSelectionActions";
+export { clampMenuPosition } from "./contextMenuPosition";
+export type { MenuViewport, MenuPosition } from "./contextMenuPosition";
+
 // Font system v1 (issue 022): the curated OFL catalog + screen @font-face/alias helpers.
 export { FONT_CATALOG, catalogUrl, buildFontFaceCss, svgFontFamilies, isTtc } from "./fonts";
 export type { FontCatalogEntry } from "./fonts";

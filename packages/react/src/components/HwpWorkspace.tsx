@@ -15,7 +15,11 @@ import { ColumnResizeOverlay, RowResizeOverlay } from "./ColumnResizeOverlay";
 import { TableInsertButton } from "./TableInsertButton";
 import { Ruler } from "./Ruler";
 import { InPlaceCellEditor } from "./InPlaceCellEditor";
-import { FloatingToolbar, type ToolbarAlign } from "./FloatingToolbar";
+import { FloatingToolbar } from "./FloatingToolbar";
+import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
+import { TableSizeGrid } from "./TableSizeGrid";
+import { useSelectionActions } from "../useSelectionActions";
+import { readViewBox, screenToPage } from "../coords";
 import { buildFontFaceCss, type FontCatalogEntry } from "../fonts";
 
 const A4_W = 794; // CSS px for 210mm @ 96dpi (mirrors HwpPageView) — the 100% page width.
@@ -164,6 +168,22 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const [editor, setEditor] = useState<
     { page: number; box: Box; section: number; block: number; kind: string; rows?: [number, number]; cols?: [number, number]; text: string; fontSizePt?: number } | null
   >(null);
+  // Issue 039: the OPEN right-click context menu. `kind` branches the item set (셀/문단/바탕); `click`
+  // carries the page-local point so 텍스트 편집 re-opens the in-place editor exactly where the user
+  // right-clicked; `cell` carries the address + column count for 행 삽입 (existing TableInsertRows path).
+  const [contextMenu, setContextMenu] = useState<
+    | {
+        x: number;
+        y: number;
+        kind: "cell" | "paragraph" | "background";
+        click: PageClick;
+        cell?: { section: number; block: number; row: number; cols: number };
+      }
+    | null
+  >(null);
+  // A hidden native color input the context menu's 배경색 item triggers — so that item delegates to the
+  // SAME shadeCellRange action as the 028 toolbar's 배경 swatch (신규 액션 0), just entered via a menu click.
+  const shadeInputRef = useRef<HTMLInputElement>(null);
 
   // The live selection is the single source of truth (in the core); the chat anchors + page marks are
   // views of it, mapped here for the components.
@@ -805,7 +825,6 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   }, [editingOn, moveCellAndScroll, openCellEditor]);
 
   // Format toolbar → SetCellRangeFmt / SetCellRangeShade over the selected cell/range.
-  const fmtRange = editTarget?.rows && editTarget?.cols ? { r0: editTarget.rows[0], c0: editTarget.cols[0], r1: editTarget.rows[1], c1: editTarget.cols[1] } : null;
   const runFmt = useCallback(
     async (fn: () => Promise<number>, ok: string) => {
       try {
@@ -818,10 +837,84 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     [toast, onTrap],
   );
 
+  // The SHARED selection-format action set (issue 039): the 028 FloatingToolbar AND the 039 context menu
+  // drive these SAME handlers (중복 코드 금지) — each is a pure delegation to editor-core's
+  // formatCellRange/shadeCellRange (027 core, 신규 op 0), resolved against the current single-cell/range
+  // target. `runFmt` owns the apply+toast+trap-recovery, so the emitted Intents/toasts match the pre-039
+  // inline handlers exactly (028 무회귀).
+  const fmtActions = useSelectionActions(core, editTarget, runFmt);
+  const fmtRange = fmtActions.fmtRange;
+
   // "AI에게 전달" (issue 028): the marked selection is ALREADY the anchor chip (anchors = selection); this
   // only bumps the token that focuses the chat composer. No new prompt logic, and the selection is NOT
   // cleared so the chips ride along with the next message (the existing captureAnchor flow).
   const onSendToAi = useCallback(() => setAiFocusToken((t) => t + 1), []);
+
+  // 행 삽입 (issue 039): delegate to the EXISTING TableInsertRows op via editor-core (신규 op 0). The op-bus
+  // refuses an out-of-range row / a non-table block, so a mistargeted insert surfaces an error toast rather
+  // than a false success (031). `at == row` inserts above, `row + 1` below.
+  const onInsertRows = useCallback(
+    async (section: number, block: number, at: number, cols: number) => {
+      try {
+        await core.edit.insertRows(section, block, at, cols);
+        toast("행을 삽입했습니다");
+      } catch (e) {
+        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`행 삽입 실패: ${e}`);
+      }
+    },
+    [core, toast, onTrap],
+  );
+
+  // 우클릭 → 컨텍스트 메뉴 (issue 039). Only over a page sheet (시트 위에서만 브라우저 기본 메뉴 차단 —
+  // 채팅 패널·회색 여백·그립·제자리 에디터 위에서는 기본 메뉴 유지). The right-click point updates the
+  // selection with the SAME rule as a click (023/021 replace), then the resolved hit branches the menu
+  // (셀/문단/바탕). Actions always target "현재 선택" (028과 같은 계약).
+  const onSheetContextMenu = useCallback(
+    async (e: React.MouseEvent) => {
+      if (!editingOn) return; // read-only host → native menu (the editing chrome is opt-in)
+      if (editorRef.current) return; // in-place text editor open → keep the native text menu
+      const target = e.target as Element | null;
+      const sheet = target?.closest?.(".hw-sheet") as HTMLElement | null;
+      if (!sheet || sheet.dataset.page == null) return; // off a page → native menu (§함정)
+      const svg = sheet.querySelector("svg") as SVGSVGElement | null;
+      if (!svg) return; // a virtualized placeholder has no SVG → native menu
+      e.preventDefault(); // 시트 위에서만 기본 메뉴 차단
+      const page = Number(sheet.dataset.page);
+      const rect = svg.getBoundingClientRect();
+      const pt = screenToPage(e.clientX, e.clientY, rect, readViewBox(svg));
+      if (!pt) return;
+      const clientX = e.clientX;
+      const clientY = e.clientY;
+      const click: PageClick = { page, x: pt.x, y: pt.y, meta: false, client: { x: clientX, y: clientY } };
+      // 1) Update the selection exactly like a click here (so the marks show + actions target this spot).
+      try {
+        await core.selection.pointerDown(toPointerInput(click));
+        await core.selection.pointerUp(toPointerInput(click));
+      } catch (err) {
+        onTrap(err, "엔진을 복구했습니다 — 다시 시도하세요");
+      }
+      // 2) Resolve what's under the point to branch the menu (cell > table/paragraph > 바탕).
+      try {
+        const cell = adapter.tableCellAt ? await adapter.tableCellAt(page, pt.x, pt.y) : null;
+        if (cell) {
+          setContextMenu({ x: clientX, y: clientY, kind: "cell", click, cell: { section: cell.section, block: cell.block, row: cell.row, cols: cell.cols } });
+          return;
+        }
+        const table = await adapter.tableAt(page, pt.x, pt.y);
+        const hit = table ? null : await adapter.hitTest(page, pt.x, pt.y);
+        const strictInside = !!hit && pt.x >= hit.x && pt.x <= hit.x + hit.w && pt.y >= hit.y && pt.y <= hit.y + hit.h;
+        if (hit && hit.kind === "paragraph" && hit.editable && strictInside) {
+          setContextMenu({ x: clientX, y: clientY, kind: "paragraph", click });
+          return;
+        }
+        // A whole-table border / image / empty page area → 바탕(비개체) menu (표 추가).
+        setContextMenu({ x: clientX, y: clientY, kind: "background", click });
+      } catch (err) {
+        if (!onTrap(err, "엔진을 복구했습니다 — 다시 시도하세요")) setContextMenu({ x: clientX, y: clientY, kind: "background", click });
+      }
+    },
+    [editingOn, adapter, core, onTrap],
+  );
 
   // The 서체 catalog family names for the toolbar's font dropdown (reuses the existing fontCatalog prop);
   // falls back to just the currently-applied face when no catalog is supplied.
@@ -876,7 +969,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // and pushes the result into `hover.store` that HoverLayer draws by ref (0 workspace/sheet renders,
   // mirroring 030). Suppressed during a drag/marquee, Space-pan, an open in-place editor, or over a 031
   // resize grip; the cursor is written straight to `.hw-canvas[data-hover-cursor]` (a DOM write, no render).
-  const hoverSuppressed = panMode || panning || editor != null || pointerActive;
+  // issue 039: an OPEN context menu joins the 038 suppression gate — no pre-highlight/cursor churn while
+  // the menu owns the interaction (the menu is the active surface until it closes).
+  const hoverSuppressed = panMode || panning || editor != null || pointerActive || contextMenu != null;
   const hover = useHover({
     adapter,
     editingOn,
@@ -1011,6 +1106,8 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
             // A press on the gray canvas background (outside every page sheet) clears the selection.
             if (!(e.target as HTMLElement).closest(".hw-sheet")) clearSelection();
           }}
+          // issue 039: right-click → context menu (only on a page sheet; §함정 시트 위에서만 기본 메뉴 차단).
+          onContextMenu={(e) => void onSheetContextMenu(e)}
         >
           {meta ? (
             <>
@@ -1067,8 +1164,10 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                     {/* issue 028: hide the floating toolbar mid-gesture. `pointerActive` is true for the
                         WHOLE press→release (set on pointerDown, cleared on pointerUp), so it already covers
                         a marquee drag — the marquee state (now isolated, issue 030) is no longer needed here.
-                        issue 032: also hide it while the in-place editor is open (two chromes must not fight). */}
-                    {editingOn && toolbarPage === page && marks.length > 0 && !pointerActive && !editor && (
+                        issue 032: also hide it while the in-place editor is open (two chromes must not fight).
+                        issue 039: also hide it while the right-click context menu is open (one surface at a
+                        time). Both surfaces drive the SAME `fmtActions` handlers (공용 유틸). */}
+                    {editingOn && toolbarPage === page && marks.length > 0 && !pointerActive && !editor && !contextMenu && (
                       <FloatingToolbar
                         marks={marks.filter((m) => m.page === page).map((m) => m.box)}
                         scale={scale}
@@ -1077,13 +1176,13 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                         formatDisabledReason={formatDisabledReason}
                         fonts={fontFamilies}
                         aiEnabled={canEdit}
-                        onBold={() => editTarget && fmtRange && void runFmt(() => core.edit.formatCellRange(editTarget.section, editTarget.block, fmtRange, { bold: !editTarget.curBold }), editTarget.curBold ? "굵게 해제" : "굵게 적용")}
-                        onItalic={() => editTarget && fmtRange && void runFmt(() => core.edit.formatCellRange(editTarget.section, editTarget.block, fmtRange, { italic: !editTarget.curItalic }), "기울임 적용")}
-                        onSize={(pt) => editTarget && fmtRange && void runFmt(() => core.edit.formatCellRange(editTarget.section, editTarget.block, fmtRange, { size_pt: pt }), `글자 크기 ${pt}pt`)}
-                        onFont={(f) => editTarget && fmtRange && void runFmt(() => core.edit.formatCellRange(editTarget.section, editTarget.block, fmtRange, { font: f }), `서체 ${f}`)}
-                        onColor={(hex) => editTarget && fmtRange && void runFmt(() => core.edit.formatCellRange(editTarget.section, editTarget.block, fmtRange, { color: hex }), "글자색 적용")}
-                        onShade={(hex) => editTarget && fmtRange && void runFmt(() => core.edit.shadeCellRange(editTarget.section, editTarget.block, fmtRange, hex), hex ? "배경색 적용" : "배경 지움")}
-                        onAlign={(a: ToolbarAlign) => editTarget && fmtRange && void runFmt(() => core.edit.formatCellRange(editTarget.section, editTarget.block, fmtRange, { align: a }), "정렬 적용")}
+                        onBold={fmtActions.bold}
+                        onItalic={fmtActions.italic}
+                        onSize={fmtActions.setSize}
+                        onFont={fmtActions.setFont}
+                        onColor={fmtActions.setColor}
+                        onShade={fmtActions.setShade}
+                        onAlign={fmtActions.setAlign}
                         onSendToAi={onSendToAi}
                       />
                     )}
@@ -1128,6 +1227,53 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           focusToken={aiFocusToken}
         />
       </div>
+
+      {/* issue 039: the right-click context menu. Its actions are ALL delegations to existing paths —
+          텍스트 편집 → the 032 in-place editor (openEditorAt), 굵게/배경색 → the shared `fmtActions`
+          (formatCellRange/shadeCellRange, 028과 동일 액션), 행 삽입 → editor-core `insertRows`
+          (existing TableInsertRows op), ✨AI에게 전달 → the 028 chat-focus, 표 추가 → the 027 picker
+          (onInsertTable). No new intent/action is introduced. */}
+      {contextMenu && (() => {
+        const cm = contextMenu;
+        const close = () => setContextMenu(null);
+        if (cm.kind === "background") {
+          // 바탕(비개체): 표 추가 — the SAME 027 grid picker (TableSizeGrid) the top toolbar uses.
+          return (
+            <ContextMenu x={cm.x} y={cm.y} heading="표 추가" onClose={close}>
+              <TableSizeGrid onPick={(r, c) => { close(); void onInsertTable(r, c); }} />
+            </ContextMenu>
+          );
+        }
+        const items: ContextMenuItem[] = [];
+        items.push({ type: "action", key: "edit", label: "텍스트 편집", icon: "✎", onSelect: () => void openEditorAt(cm.click) });
+        if (cm.kind === "cell") {
+          const fmtOk = !!fmtActions.fmtRange;
+          const fmtWhy = fmtOk ? undefined : "이 셀에는 서식을 적용할 수 없습니다";
+          items.push({ type: "action", key: "bold", label: editTarget?.curBold ? "굵게 해제" : "굵게", icon: "B", disabled: !fmtOk, title: fmtWhy, onSelect: fmtActions.bold });
+          items.push({ type: "action", key: "shade", label: "배경색", icon: "◧", disabled: !fmtOk, title: fmtWhy, onSelect: () => shadeInputRef.current?.click() });
+          if (cm.cell) {
+            const { section, block, row, cols } = cm.cell;
+            items.push({ type: "separator", key: "sep-row" });
+            items.push({ type: "action", key: "row-above", label: "위에 행 삽입", icon: "↥", onSelect: () => void onInsertRows(section, block, row, cols) });
+            items.push({ type: "action", key: "row-below", label: "아래에 행 삽입", icon: "↧", onSelect: () => void onInsertRows(section, block, row + 1, cols) });
+          }
+        }
+        items.push({ type: "separator", key: "sep-ai" });
+        items.push({ type: "action", key: "ai", label: "✨ AI에게 전달", disabled: !canEdit, title: canEdit ? undefined : "편집하려면 먼저 문서를 여세요", onSelect: onSendToAi });
+        return <ContextMenu x={cm.x} y={cm.y} items={items} onClose={close} />;
+      })()}
+      {/* issue 039: the hidden color input the context menu's 배경색 item clicks — routes to the SAME
+          shadeCellRange action as the 028 toolbar swatch (신규 액션 0). Kept mounted so the ref is stable. */}
+      {editingOn && (
+        <input
+          ref={shadeInputRef}
+          type="color"
+          data-testid="hw-ctx-shade-input"
+          defaultValue="#ffff00"
+          style={{ position: "fixed", left: -9999, top: -9999, width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
+          onChange={(e) => fmtActions.setShade(e.target.value)}
+        />
+      )}
 
       {status && <div className="hw-status">{status}</div>}
     </div>

@@ -95,6 +95,21 @@ export class EditController {
     return this.session.applyBatch([{ intent: "ApplyContent", json }]);
   }
 
+  /** 행 삽입 (issue 039): insert `count` empty rows at logical row `at` (whole-table index, `0..=rowCount`)
+   *  of the `index`-th table, delegating to the EXISTING `TableInsertRows` op — NO new intent is introduced
+   *  (§함정 실측: `TableInsertRows`/`TableAppendRow` exist; row-DELETE and column insert/delete do NOT, so
+   *  those verbs are OUT of scope — the menu must not offer them). `cols` = the table's column count so each
+   *  new row stays rectangular. `at == row` inserts ABOVE that row, `at == row + 1` inserts BELOW it (the
+   *  engine shifts every cell whose `row >= at` down by `count`). The op-bus REFUSES an out-of-range `at`
+   *  or a non-table block, so a mistargeted insert surfaces an error rather than a silent no-op (031
+   *  false-success 회피 — `TableInsertRows` has no ratio-collapse no-op path: it either grows the grid or
+   *  throws). One undo batch. */
+  async insertRows(section: number, index: number, at: number, cols: number, count = 1): Promise<number> {
+    const r = Math.max(1, Math.floor(count));
+    const c = Math.max(1, Math.floor(cols));
+    return this.session.applyBatch([{ intent: "TableInsertRows", section, index, at, count: r, cols: c }]);
+  }
+
   /** 룰러 (step 3): set the section's page margins (INTENT-SCHEMA `SetPageMargins`, mm). ⚠️ document-wide
    *  — the caller MUST have confirmed the whole-document effect. One undo batch (full re-flow). */
   async setPageMargins(section: number, mm: PageMarginsMm): Promise<number> {
