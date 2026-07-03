@@ -31,7 +31,13 @@
 .hw-brand { font-weight: 700; font-size: 14px; }
 .hw-doc-meta { font-size: 12px; color: var(--hw-muted); }
 .hw-spacer { flex: 1; }
-.hw-zoom { font-size: 12px; color: var(--hw-muted); min-width: 40px; text-align: center; }
+/* zoom % readout — also a button (⌘0 → 100%). Looks like plain text until hovered (issue 035). */
+.hw-zoom {
+  font: inherit; font-size: 12px; color: var(--hw-muted); min-width: 44px; text-align: center;
+  padding: 4px 4px; border: 1px solid transparent; border-radius: 6px; background: none; cursor: pointer;
+}
+.hw-zoom:hover:not(:disabled) { background: #f0f1f3; border-color: #cdd0d6; }
+.hw-zoom:disabled { opacity: 0.4; cursor: default; }
 .hw-tool {
   font: inherit; font-size: 13px; padding: 5px 10px;
   border: 1px solid #cdd0d6; border-radius: 6px; background: #fff; cursor: pointer;
@@ -61,6 +67,19 @@
 .hw-body { display: flex; flex: 1; min-height: 0; }
 .hw-canvas { flex: 1; overflow: auto; padding: 20px; }
 .hw-empty-canvas { color: var(--hw-muted); font-size: 13px; padding: 40px; text-align: center; }
+
+/* issue 035 — the zoom TRANSFORM layer. `min-width: max-content` lets a zoomed-IN page (wider than the
+ * viewport) overflow SYMMETRICALLY so BOTH scroll axes reach the whole sheet (the classic flex-center
+ * "can't scroll to the left edge" trap is avoided); at ≤100% it collapses to the viewport width so the
+ * pages stay centered exactly as before. `transform-origin` is overridden inline per gesture. */
+.hw-zoom-layer { min-width: max-content; transform-origin: 0 0; }
+
+/* issue 035 — Space-hold pan cursors. grab while Space is down, grabbing while dragging; the cursor is
+ * forced over the page sheets too (they default to `cursor: default`). `user-select: none` stops the
+ * SVG text from being selected mid-pan. */
+.hw-canvas.hw-pan { cursor: grab; user-select: none; }
+.hw-canvas.hw-pan .hw-sheet { cursor: grab; }
+.hw-canvas.hw-panning, .hw-canvas.hw-panning .hw-sheet { cursor: grabbing; }
 
 .hw-pages { display: flex; flex-direction: column; gap: 16px; align-items: center; }
 .hw-sheet-wrap { position: relative; }

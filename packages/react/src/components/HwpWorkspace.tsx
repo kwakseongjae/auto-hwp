@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { EngineAdapter, Intent, DocContext, PointerInput, PageGeom, Box, Selection, TableBox } from "@tf-hwp/editor-core";
 import { boundariesToRatios, remapFragmentHeights, appliedReflectsDrag, firstRunStyle } from "@tf-hwp/editor-core";
 import { modLabel } from "../platform";
+import { ZOOM_STEP, clampZoom, isEditableTarget, panBy, wheelToZoomFactor, zoomAt } from "../viewport";
 import { useHwpEditor } from "../useHwpEditor";
 import { ChatPanel } from "./ChatPanel";
 import { HwpPageView, type PageClick } from "./HwpPageView";
@@ -107,6 +108,27 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const { core, meta, selection, refreshToken, bumpRefresh } = useHwpEditor(adapter);
   const [zoom, setZoom] = useState(0.9);
   const [status, setStatus] = useState<string>("");
+  // ── issue 035 pan/zoom viewport ────────────────────────────────────────────────────────────────────
+  // The scroll container (`.hw-canvas`) + the transform layer wrapping the pages. Continuous ⌘/pinch zoom
+  // mutates `zoomLayer.style.transform` DIRECTLY (0 React renders per tick — see the gesture refs below);
+  // the debounced commit is the single `setZoom` that re-lays-out the sheets at the new scale.
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const zoomLayerRef = useRef<HTMLDivElement>(null);
+  const zoomRef = useRef(zoom); // live mirror so the once-attached wheel listener reads the current zoom
+  zoomRef.current = zoom;
+  // Space-hold pan: `panMode` = Space is down (grab cursor); `panning` = a pan drag is in progress
+  // (grabbing cursor). The drag itself mutates scroll via refs (no per-move render, issue 030 discipline).
+  const [panMode, setPanMode] = useState(false);
+  const [panning, setPanning] = useState(false);
+  const panModeRef = useRef(false);
+  panModeRef.current = panMode;
+  const panLastRef = useRef<{ x: number; y: number } | null>(null);
+  const panningRef = useRef(false);
+  // The in-flight continuous-zoom gesture (null between gestures). Cached at gesture start so every wheel
+  // tick reuses the SAME transform-origin/scroll/baseZoom while only the accumulated `factor` grows.
+  const zoomGestureRef = useRef<{ originX: number; originY: number; scrollLeft: number; scrollTop: number; baseZoom: number; factor: number } | null>(null);
+  const zoomCommitTimerRef = useRef<number | null>(null);
+  const pendingScrollRef = useRef<{ left: number; top: number } | null>(null);
   // Selected font for the SCREEN (issue 022): family + a blob URL of the SAME bytes registered for
   // metrics + PDF, so the @font-face'd SVG matches the exported PDF exactly. (The engine-side register +
   // re-pagination is owned by the core; this state is the DOM/@font-face half only.)
@@ -144,6 +166,189 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   }, []);
 
   const clearSelection = useCallback(() => core.selection.clear(), [core]);
+
+  // ── issue 035: continuous zoom (CSS transform) → debounced real-scale commit ─────────────────────────
+  // Commit the accumulated gesture: convert the transient transform into a real `setZoom` (single
+  // re-layout) + the cursor-anchored scroll. The transform stays applied until the useLayoutEffect below
+  // clears it in the SAME frame the new width lands, so there is no double-scale flash on settle.
+  const commitZoomGesture = useCallback(() => {
+    const g = zoomGestureRef.current;
+    const canvas = canvasRef.current;
+    const layer = zoomLayerRef.current;
+    zoomGestureRef.current = null;
+    if (zoomCommitTimerRef.current != null) {
+      window.clearTimeout(zoomCommitTimerRef.current);
+      zoomCommitTimerRef.current = null;
+    }
+    if (!g || !canvas || !layer) return;
+    const res = zoomAt({
+      zoom: g.baseZoom,
+      factor: g.factor,
+      pointerX: g.originX - g.scrollLeft, // on-screen offset of the anchor from the content-box top-left
+      pointerY: g.originY - g.scrollTop,
+      scrollLeft: g.scrollLeft,
+      scrollTop: g.scrollTop,
+    });
+    // Zoom didn't change (already clamped at 25%/400%): reset the transform + apply scroll now, since a
+    // no-change setZoom would NOT fire the useLayoutEffect that normally does it.
+    if (res.zoom === zoomRef.current) {
+      layer.style.transform = "";
+      layer.style.transformOrigin = "";
+      canvas.scrollLeft = res.scrollLeft;
+      canvas.scrollTop = res.scrollTop;
+      return;
+    }
+    pendingScrollRef.current = { left: res.scrollLeft, top: res.scrollTop };
+    setZoom(res.zoom);
+  }, []);
+
+  // ⌘/Ctrl + wheel (and macOS trackpad pinch = ctrlKey wheel): zoom about the cursor. Plain wheel is left
+  // to native scroll (no preventDefault). Each tick mutates ONLY the layer transform (no React render); a
+  // 150ms-idle debounce fires the real commit once. Attached passive:false on the scroll container so the
+  // ⌘-wheel preventDefault actually takes (§함정: wheel 리스너는 스크롤 컨테이너에만 passive:false).
+  const onWheelZoom = useCallback(
+    (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return; // plain wheel → native scroll (do NOT preventDefault)
+      const canvas = canvasRef.current;
+      const layer = zoomLayerRef.current;
+      if (!canvas || !layer) return;
+      e.preventDefault();
+      const tick = wheelToZoomFactor(e.deltaY);
+      let g = zoomGestureRef.current;
+      if (!g) {
+        const rect = layer.getBoundingClientRect(); // untransformed at gesture start → stable anchor
+        g = { originX: e.clientX - rect.left, originY: e.clientY - rect.top, scrollLeft: canvas.scrollLeft, scrollTop: canvas.scrollTop, baseZoom: zoomRef.current, factor: 1 };
+        zoomGestureRef.current = g;
+      }
+      // Accumulate + clamp so baseZoom×factor stays in [25%,400%]; keep the transform-origin fixed.
+      const desired = clampZoom(g.baseZoom * g.factor * tick);
+      g.factor = desired / g.baseZoom;
+      layer.style.transformOrigin = `${g.originX}px ${g.originY}px`;
+      layer.style.transform = `scale(${g.factor})`;
+      if (zoomCommitTimerRef.current != null) window.clearTimeout(zoomCommitTimerRef.current);
+      zoomCommitTimerRef.current = window.setTimeout(commitZoomGesture, 150);
+    },
+    [commitZoomGesture],
+  );
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.addEventListener("wheel", onWheelZoom, { passive: false });
+    return () => canvas.removeEventListener("wheel", onWheelZoom);
+  }, [onWheelZoom]);
+
+  // Reset the transform + apply the anchored scroll in the SAME frame the new sheet widths land (settle).
+  useLayoutEffect(() => {
+    const p = pendingScrollRef.current;
+    if (!p) return;
+    pendingScrollRef.current = null;
+    const canvas = canvasRef.current;
+    const layer = zoomLayerRef.current;
+    if (layer) {
+      layer.style.transform = "";
+      layer.style.transformOrigin = "";
+    }
+    if (canvas) {
+      canvas.scrollLeft = p.left;
+      canvas.scrollTop = p.top;
+    }
+  }, [zoom]);
+
+  // Discrete zoom about the viewport CENTER (toolbar ± and ⌘+/-/0). Reuses the SAME zoomAt math + the
+  // single setZoom-then-settle path — the toolbar buttons and keys are one unified zoom state.
+  const zoomAtCenter = useCallback((factor: number) => {
+    const canvas = canvasRef.current;
+    const layer = zoomLayerRef.current;
+    if (!canvas || !layer) {
+      setZoom((z) => clampZoom(z * factor));
+      return;
+    }
+    const cRect = canvas.getBoundingClientRect();
+    const lRect = layer.getBoundingClientRect();
+    const cx = cRect.left + canvas.clientWidth / 2;
+    const cy = cRect.top + canvas.clientHeight / 2;
+    const res = zoomAt({
+      zoom: zoomRef.current,
+      factor,
+      pointerX: cx - lRect.left - canvas.scrollLeft,
+      pointerY: cy - lRect.top - canvas.scrollTop,
+      scrollLeft: canvas.scrollLeft,
+      scrollTop: canvas.scrollTop,
+    });
+    if (res.zoom === zoomRef.current) return;
+    pendingScrollRef.current = { left: res.scrollLeft, top: res.scrollTop };
+    setZoom(res.zoom);
+  }, []);
+
+  const zoomReset = useCallback(() => {
+    const cur = zoomRef.current;
+    if (Math.abs(cur - 1) < 1e-6) return;
+    zoomAtCenter(1 / cur); // → 100%
+  }, [zoomAtCenter]);
+
+  // ⌘/Ctrl +/−/0 zoom keys + Space pan-mode toggle. The zoom keys work regardless of focus (Figma/browser
+  // convention); Space is NEVER stolen from a text-entry surface (§함정) — that guard is isEditableTarget.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey) {
+        if (e.key === "=" || e.key === "+") { e.preventDefault(); zoomAtCenter(ZOOM_STEP); return; }
+        if (e.key === "-" || e.key === "_") { e.preventDefault(); zoomAtCenter(1 / ZOOM_STEP); return; }
+        if (e.key === "0") { e.preventDefault(); zoomReset(); return; }
+      }
+      if (e.code === "Space") {
+        // NEVER steal Space from a text-entry surface (in-place editor / chat composer / size input).
+        if (isEditableTarget(e.target as Element | null) || isEditableTarget(document.activeElement)) return;
+        e.preventDefault(); // suppress page-scroll for the WHOLE hold (incl. key auto-repeat) — Space is the pan modifier
+        if (!e.repeat) setPanMode(true);
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "Space") setPanMode(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, [zoomAtCenter, zoomReset]);
+
+  // Clear any pending zoom-commit timer on unmount.
+  useEffect(() => () => { if (zoomCommitTimerRef.current != null) window.clearTimeout(zoomCommitTimerRef.current); }, []);
+
+  // Space-pan pointer drag (capture phase on the canvas → wins over the sheet's selection handlers, so a
+  // pan never marquees/selects). Scroll is mutated directly on the container each move (no React render).
+  const onPanPointerDown = useCallback((e: React.PointerEvent) => {
+    if (!panModeRef.current || e.button !== 0) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    e.preventDefault();
+    e.stopPropagation(); // keep the selection model / background-clear from firing under a pan
+    panningRef.current = true;
+    panLastRef.current = { x: e.clientX, y: e.clientY };
+    try { canvas.setPointerCapture(e.pointerId); } catch { /* jsdom / unsupported */ }
+    setPanning(true);
+  }, []);
+  const onPanPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!panningRef.current) return;
+    e.stopPropagation();
+    const canvas = canvasRef.current;
+    const last = panLastRef.current;
+    if (!canvas || !last) return;
+    const next = panBy({ scrollLeft: canvas.scrollLeft, scrollTop: canvas.scrollTop }, e.clientX - last.x, e.clientY - last.y);
+    panLastRef.current = { x: e.clientX, y: e.clientY };
+    canvas.scrollLeft = next.scrollLeft;
+    canvas.scrollTop = next.scrollTop;
+  }, []);
+  const onPanPointerUp = useCallback((e: React.PointerEvent) => {
+    if (!panningRef.current) return;
+    e.stopPropagation();
+    panningRef.current = false;
+    panLastRef.current = null;
+    try { canvasRef.current?.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+    setPanning(false);
+  }, []);
 
   // A wasm trap poisons the engine instance; the adapter recovers it (reopen). Surface a toast + force a
   // page re-fetch (the recovered doc lost the last edit). Returns whether it handled a trap.
@@ -592,11 +797,13 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         <span className="hw-brand">tf-hwp</span>
         <span className="hw-doc-meta">{meta ? `${meta.format.toUpperCase()} · ${meta.pages}쪽` : "문서 없음"}</span>
         <span className="hw-spacer" />
-        <button className="hw-tool" onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.1).toFixed(2)))} title="축소" disabled={!meta}>
+        <button className="hw-tool" onClick={() => zoomAtCenter(1 / ZOOM_STEP)} title="축소 (⌘−)" disabled={!meta}>
           －
         </button>
-        <span className="hw-zoom">{Math.round(zoom * 100)}%</span>
-        <button className="hw-tool" onClick={() => setZoom((z) => Math.min(1.5, +(z + 0.1).toFixed(2)))} title="확대" disabled={!meta}>
+        <button className="hw-zoom" onClick={zoomReset} title="100% (⌘0)" disabled={!meta}>
+          {Math.round(zoom * 100)}%
+        </button>
+        <button className="hw-tool" onClick={() => zoomAtCenter(ZOOM_STEP)} title="확대 (⌘+)" disabled={!meta}>
           ＋
         </button>
         <button className="hw-tool" onClick={undo} disabled={!meta} title="실행취소">
@@ -626,7 +833,13 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
 
       <div className="hw-body">
         <div
-          className="hw-canvas"
+          ref={canvasRef}
+          className={`hw-canvas${panMode ? " hw-pan" : ""}${panning ? " hw-panning" : ""}`}
+          // issue 035: Space-pan drag is captured here (capture phase) so it wins over the sheet's
+          // selection handlers — a pan never marquees or selects. No-ops unless panMode is on.
+          onPointerDownCapture={onPanPointerDown}
+          onPointerMoveCapture={onPanPointerMove}
+          onPointerUpCapture={onPanPointerUp}
           onPointerDown={(e) => {
             // A press on the gray canvas background (outside every page sheet) clears the selection.
             if (!(e.target as HTMLElement).closest(".hw-sheet")) clearSelection();
@@ -634,12 +847,19 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         >
           {meta ? (
             <>
-              {/* 상단 룰러 (issue 027 step 3): 페이지 폭·좌우 여백 표시 + (편집 모드) 여백 드래그. */}
+              {/* 상단 룰러 (issue 027 step 3): 페이지 폭·좌우 여백 표시 + (편집 모드) 여백 드래그.
+                  issue 035: the ruler is OUTSIDE the zoom-transform layer on purpose — its height is fixed
+                  (it does not scale with zoom), so keeping it out of the transform makes the cursor-anchored
+                  vertical fixed point hold exactly (the ruler height cancels out of the pages layer's top). */}
               {editingOn && pageGeom0 && (
                 <div className="hw-ruler-wrap" style={{ width: A4_W * zoom }}>
                   <Ruler geom={pageGeom0} scale={(A4_W * zoom) / pageGeom0.w} onCommitMargins={canEdit ? onMarginsCommit : undefined} />
                 </div>
               )}
+              {/* issue 035: the zoom TRANSFORM layer wraps ONLY the pages — continuous ⌘/pinch zoom scales
+                  this via a direct style mutation (0 React renders) until the debounced commit re-lays-out
+                  the sheets at the real scale. */}
+              <div className="hw-zoom-layer" ref={zoomLayerRef}>
               <HwpPageView
                 adapter={adapter}
                 pageCount={meta.pages}
@@ -704,6 +924,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                   </>
                 )}
               />
+              </div>
             </>
           ) : (
             <div className="hw-empty-canvas">문서를 열면 여기에 페이지가 표시됩니다.</div>

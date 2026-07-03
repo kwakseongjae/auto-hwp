@@ -88,6 +88,22 @@ export { sanitizeSvg } from "./sanitize";
 // Platform helpers for the selection UX (issue 021): the additive/toggle modifier label (⌘/Ctrl).
 export { isMac, modLabel, hasMod } from "./platform";
 
+// Issue 035 — the PURE pan/zoom viewport math (cursor-anchored zoom + grab-hand pan + wheel/pinch factor +
+// the Space guard). HwpWorkspace owns the DOM wiring; a host building a custom viewport reuses these.
+export {
+  ZOOM_MIN,
+  ZOOM_MAX,
+  ZOOM_STEP,
+  clampZoom,
+  zoomAt,
+  panBy,
+  wheelToZoomFactor,
+  isEditableTarget,
+  fixedPointScreenX,
+  fixedPointScreenY,
+} from "./viewport";
+export type { ZoomAtInput, ZoomAtResult, ScrollOffset } from "./viewport";
+
 // Helpers + types
 export { describeIntent } from "./describeIntent";
 export {
