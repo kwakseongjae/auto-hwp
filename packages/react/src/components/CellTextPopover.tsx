@@ -15,6 +15,11 @@ export interface CellTextPopoverProps {
   onCancel: () => void;
 }
 
+/// @deprecated Since issue 032 — superseded by `InPlaceCellEditor`, which edits the cell IN PLACE (over the
+/// cell rect at the cell's own font size, chrome = a thin focus ring only) instead of this popover card
+/// (bordered box + 저장/취소 buttons + hint). Kept as an export for backward compatibility; HwpWorkspace's
+/// enableEditing path no longer mounts it. Prefer `InPlaceCellEditor` for new code.
+///
 /// CellTextPopover — the opt-in inline text editor (issue 027 step 4): a simple textarea popover anchored
 /// over the marked cell/paragraph. v1 is DELIBERATELY a plain textarea — the desktop contentEditable
 /// WYSIWYG gotchas (#000 rule etc.) are NOT ported. It is IME-SAFE: a commit is REFUSED while a Korean

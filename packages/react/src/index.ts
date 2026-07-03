@@ -26,7 +26,15 @@ export { TableInsertButton } from "./components/TableInsertButton";
 export type { TableInsertButtonProps } from "./components/TableInsertButton";
 export { Ruler } from "./components/Ruler";
 export type { RulerProps } from "./components/Ruler";
+// Issue 032 — the Figma-style IN-PLACE cell/paragraph editor + its pure positioning helper. HwpWorkspace's
+// enableEditing path now opens THIS over the cell rect (no popover card). CellTextPopover below is kept for
+// backward compatibility only (deprecated).
+export { InPlaceCellEditor, computeInPlaceEditorStyle, PAGE_PX_PER_PT } from "./components/InPlaceCellEditor";
+export type { InPlaceCellEditorProps, InPlaceEditorStyle } from "./components/InPlaceCellEditor";
+/** @deprecated Since issue 032 — superseded by {@link InPlaceCellEditor} (in-place, no popover card).
+ *  Kept as an export for backward compatibility; HwpWorkspace no longer uses it. */
 export { CellTextPopover } from "./components/CellTextPopover";
+/** @deprecated Since issue 032 — see {@link CellTextPopover}. */
 export type { CellTextPopoverProps } from "./components/CellTextPopover";
 // FormatToolbar — the ORIGINAL fixed toolbar (issue 027). Kept for backward compatibility; HwpWorkspace's
 // enableEditing path now uses FloatingToolbar (issue 028). Still individually importable for hosts that

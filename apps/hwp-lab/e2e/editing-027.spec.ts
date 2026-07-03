@@ -107,25 +107,36 @@ test("행높이 드래그: 표 선택 → 행 핸들 드래그 → 행 경계가
   await expect(page.locator(".hw-status")).toContainText("실행취소", { timeout: 30_000 });
 });
 
-test("텍스트 수정: 셀 더블클릭 → 팝오버 → 저장(SetTableCellRuns) → 문서에 반영", async ({ page }) => {
+test("텍스트 수정: 셀 더블클릭 → 제자리 InPlace 에디터(셀 bbox<4px) → Enter(SetTableCellRuns) → 문서에 반영", async ({ page }) => {
   await open(page);
   // 셀 앵커("N행 M열" 포함)가 뜨는 지점을 찾는다 — 텍스트 수정은 셀을 대상으로 한다.
   const found = await scanForCell(page);
   expect(found, "표 셀을 클릭해 셀 앵커가 떠야 한다").toBeTruthy();
   // 선택된 셀의 마킹 박스(.hw-mark-cell) 중앙을 빠르게 두 번 클릭 = 더블클릭. (setPointerCapture 가
   // DOM dblclick 을 억제하므로 pointerup 타이밍으로 감지한다.) 스캔 좌표의 async 지연과 무관하게
-  // 반드시 그 셀 안에서 팝오버가 열린다.
+  // 반드시 그 셀 안에서 에디터가 열린다.
   const markBox = await page.locator(".hw-mark-cell").first().boundingBox();
   if (!markBox) throw new Error("셀 마킹 박스를 찾지 못함");
   const cx = markBox.x + markBox.width / 2;
   const cy = markBox.y + markBox.height / 2;
   await page.mouse.click(cx, cy);
   await page.mouse.click(cx, cy);
-  const ta = page.locator('[data-testid="hw-cell-textarea"]');
+  // 이슈 032: 별도 팝오버 카드가 아니라 셀 그 자리를 덮는 InPlace 에디터가 뜬다.
+  const ta = page.locator('[data-testid="hw-inplace-editor"]');
   await expect(ta).toBeVisible({ timeout: 15_000 });
+  // ★ 제자리 assert(032): 에디터 bbox 가 셀 마킹 bbox 와 근사(위치·폭 오차<4px). 편집 상태로 들어가도
+  //   셀의 위치·크기가 그대로여야 한다("피그마처럼 보이는 그 자리 그 크기"). 높이는 입력 오버플로 시
+  //   아래로 확장될 수 있으므로(step 3) 셀을 덮는지(top 정렬 + 셀 높이 이상)만 확인한다.
+  const eb = await ta.boundingBox();
+  const mb = await page.locator(".hw-mark-cell").first().boundingBox();
+  if (!eb || !mb) throw new Error("에디터/셀 마킹 박스를 찾지 못함");
+  expect(Math.abs(eb.x - mb.x), "left 오차<4px").toBeLessThan(4);
+  expect(Math.abs(eb.y - mb.y), "top 오차<4px").toBeLessThan(4);
+  expect(Math.abs(eb.width - mb.width), "width 오차<4px").toBeLessThan(4);
+  expect(eb.height, "에디터가 셀 높이를 덮어야 한다").toBeGreaterThanOrEqual(mb.height - 4);
+  // 타이핑 → Enter=저장(저장 버튼 없음). 커밋되면 문서 SVG 에 새 텍스트가 나타난다(run 보존 커밋 경로).
   await ta.fill("ZZZ텍스트확인");
-  await page.locator('[data-testid="hw-cell-save"]').click();
-  // 커밋되면 문서 SVG 에 새 텍스트가 나타난다(run 보존 커밋 경로).
+  await ta.press("Enter");
   await expect(page.locator(".hw-pages")).toContainText("ZZZ텍스트확인", { timeout: 30_000 });
   await page.locator('.hw-tool[title="실행취소"]').click();
   await expect(page.locator(".hw-pages")).not.toContainText("ZZZ텍스트확인", { timeout: 30_000 });

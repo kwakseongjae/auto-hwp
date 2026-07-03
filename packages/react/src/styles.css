@@ -152,7 +152,19 @@
 .hw-ruler-margin-drag::before { content: ""; position: absolute; left: 3px; top: 0; bottom: 0; width: 2px; background: var(--hw-accent); }
 .hw-ruler-readout { margin-top: 3px; font-size: 11px; text-align: center; }
 
-/* step 4 — inline cell/paragraph text popover */
+/* issue 032 — Figma-style in-place cell/paragraph editor: covers the cell rect EXACTLY at the cell's own
+ * font size; the only chrome is a thin focus ring (outline). No card, no buttons, no hints. `box-sizing:
+ * border-box` so width/min-height are the cell's exact rect (the ring is an outline, outside the box, so it
+ * never inflates the measured bbox). White background covers the SVG cell text beneath it. */
+.hw-inplace-editor {
+  position: absolute; z-index: 22; margin: 0; box-sizing: border-box;
+  border: none; outline: 2px solid var(--hw-accent); outline-offset: -1px;
+  background: #fff; color: #000; padding: 1px 3px; border-radius: 0;
+  font: inherit; line-height: 1.2; resize: none; overflow: hidden; pointer-events: auto;
+}
+
+/* step 4 (DEPRECATED — kept for backward compatibility, superseded by .hw-inplace-editor above) — the
+ * inline cell/paragraph text popover card. */
 .hw-cellpop {
   position: absolute; z-index: 20; background: #fff; border: 1px solid var(--hw-accent);
   border-radius: 6px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.2); padding: 4px; pointer-events: auto;

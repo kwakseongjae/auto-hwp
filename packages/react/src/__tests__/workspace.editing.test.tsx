@@ -150,7 +150,9 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
     });
   });
 
-  it("double-click a cell → text popover → save PRESERVES bold via SetTableCellRuns", async () => {
+  it("double-click a cell → IN-PLACE editor (over the cell rect) → Enter PRESERVES bold via SetTableCellRuns", async () => {
+    // issue 032: the popover card is gone — the double-click now opens the Figma-style in-place editor over
+    // the cell rect (data-testid hw-inplace-editor) and Enter commits through the SAME run-preserving path.
     const cell: CellHit = { section: 0, block: 1, row: 0, col: 0, rows: 3, cols: 3, text: "굵게", x: 40, y: 60, w: 100, h: 40 };
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "굵게", bold: true }], pages: 1 });
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
@@ -161,14 +163,35 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
     fireEvent.pointerUp(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
     fireEvent.pointerDown(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
     fireEvent.pointerUp(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
-    const ta = await screen.findByTestId("hw-cell-textarea");
+    const ta = (await screen.findByTestId("hw-inplace-editor")) as HTMLTextAreaElement;
+    // The editor sits EXACTLY over the cell rect (page px × scale). The default zoom is 0.9, so scale = 0.9:
+    // left/top/width = cell box × 0.9 — entering edit mode does not move/resize the cell (issue 032 <4px).
+    expect(ta.style.left).toBe("36px"); // 40 × 0.9
+    expect(ta.style.top).toBe("54px"); // 60 × 0.9
+    expect(ta.style.width).toBe("90px"); // 100 × 0.9
     fireEvent.change(ta, { target: { value: "바뀐 값" } });
-    fireEvent.click(screen.getByTestId("hw-cell-save"));
+    fireEvent.keyDown(ta, { key: "Enter" }); // Enter=저장 (Shift+Enter would be a newline)
     await waitFor(() => {
       const applied = adapter.applied.find((i) => i.intent === "SetTableCellRuns") as (Intent & { runs: unknown[] }) | undefined;
       expect(applied).toBeTruthy();
       expect(applied!.runs).toEqual([{ text: "바뀐 값", bold: true }]); // bold inherited
     });
+  });
+
+  it("while the in-place editor is open, the 028 floating toolbar is HIDDEN (two chromes must not fight)", async () => {
+    const cell: CellHit = { section: 0, block: 1, row: 1, col: 1, rows: 3, cols: 3, text: "칸", x: 140, y: 100, w: 100, h: 40 };
+    const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const sheet = await sheetOf(container);
+    // Single click selects the cell → the floating toolbar appears.
+    fireEvent.pointerDown(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
+    fireEvent.pointerUp(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
+    await screen.findByTestId("hw-floating-toolbar");
+    // Now open the editor with a double-click → the toolbar must disappear.
+    fireEvent.pointerDown(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
+    fireEvent.pointerUp(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
+    await screen.findByTestId("hw-inplace-editor");
+    await waitFor(() => expect(screen.queryByTestId("hw-floating-toolbar")).toBeNull());
   });
 
   it("marking a cell shows the FLOATING toolbar; 굵게 applies SetCellRangeFmt", async () => {

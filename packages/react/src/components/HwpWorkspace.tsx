@@ -11,7 +11,7 @@ import { FontPicker } from "./FontPicker";
 import { ColumnResizeOverlay, RowResizeOverlay } from "./ColumnResizeOverlay";
 import { TableInsertButton } from "./TableInsertButton";
 import { Ruler } from "./Ruler";
-import { CellTextPopover } from "./CellTextPopover";
+import { InPlaceCellEditor } from "./InPlaceCellEditor";
 import { FloatingToolbar, type ToolbarAlign } from "./FloatingToolbar";
 import { buildFontFaceCss, type FontCatalogEntry } from "../fonts";
 
@@ -125,8 +125,11 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // progress, and a monotonic token the "AI에게 전달" button bumps to focus the chat composer.
   const [pointerActive, setPointerActive] = useState(false);
   const [aiFocusToken, setAiFocusToken] = useState(0);
-  const [popover, setPopover] = useState<
-    { page: number; box: Box; section: number; block: number; kind: string; rows?: [number, number]; cols?: [number, number]; text: string } | null
+  // Issue 032: the OPEN in-place text editor (Figma-style), replacing the 027 popover card. Carries the
+  // cell's FIRST-run size (px→pt via firstRunStyle) so InPlaceCellEditor renders at the cell's own font
+  // size. `fontSizePt` is undefined when the run size is unknown (editor inherits the sheet default).
+  const [editor, setEditor] = useState<
+    { page: number; box: Box; section: number; block: number; kind: string; rows?: [number, number]; cols?: [number, number]; text: string; fontSizePt?: number } | null
   >(null);
 
   // The live selection is the single source of truth (in the core); the chat anchors + page marks are
@@ -316,9 +319,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     };
   }, [editingOn, meta, refreshToken, core]);
 
-  // Close the popover when the layout re-flows (an applied edit) so it never floats over stale geometry.
+  // Close the editor when the layout re-flows (an applied edit) so it never floats over stale geometry.
   useEffect(() => {
-    setPopover(null);
+    setEditor(null);
   }, [refreshToken]);
 
   const onInsertTable = useCallback(
@@ -397,46 +400,53 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     [core, toast, onTrap],
   );
 
-  // Open the inline text popover for the point `c` by resolving the hit DIRECTLY (cell → paragraph). Used
+  // Open the in-place text editor for the point `c` by resolving the hit DIRECTLY (cell → paragraph). Used
   // by the double-click detector below. Race-free: it re-hit-tests the (x,y) rather than reading the
-  // async selection.
-  const openPopoverAt = useCallback(
+  // async selection. It ALSO reads the target's FIRST-run size (issue 032: the editor renders at the
+  // cell's own font size) via the SAME 027 runs path (`runsAt` → `firstRunStyle`) that preserves style.
+  const openEditorAt = useCallback(
     async (c: PageClick) => {
       try {
         const cell = adapter.tableCellAt ? await adapter.tableCellAt(c.page, c.x, c.y) : null;
         if (cell) {
-          setPopover({ page: c.page, box: { x: cell.x, y: cell.y, w: cell.w, h: cell.h }, section: cell.section, block: cell.block, kind: "cell", rows: [cell.row, cell.row], cols: [cell.col, cell.col], text: cell.text });
+          const runs = await core.session.runsAt(cell.section, cell.block, cell.row, cell.col);
+          setEditor({ page: c.page, box: { x: cell.x, y: cell.y, w: cell.w, h: cell.h }, section: cell.section, block: cell.block, kind: "cell", rows: [cell.row, cell.row], cols: [cell.col, cell.col], text: cell.text, fontSizePt: firstRunStyle(runs).size_pt });
           return;
         }
-        if (await adapter.tableAt(c.page, c.x, c.y)) return; // on a table border but not a cell → no popover
+        if (await adapter.tableAt(c.page, c.x, c.y)) return; // on a table border but not a cell → no editor
         const hit = await adapter.hitTest(c.page, c.x, c.y);
         if (hit && hit.kind === "paragraph" && hit.editable) {
-          setPopover({ page: c.page, box: { x: hit.x, y: hit.y, w: hit.w, h: hit.h }, section: hit.section, block: hit.block, kind: "paragraph", text: hit.text });
+          const runs = await core.session.runsAt(hit.section, hit.block);
+          setEditor({ page: c.page, box: { x: hit.x, y: hit.y, w: hit.w, h: hit.h }, section: hit.section, block: hit.block, kind: "paragraph", text: hit.text, fontSizePt: firstRunStyle(runs).size_pt });
         }
       } catch (e) {
         onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
       }
     },
-    [adapter, onTrap],
+    [adapter, core, onTrap],
   );
 
-  const onPopoverCommit = useCallback(
+  const onEditorCommit = useCallback(
     async (text: string) => {
-      if (!popover) return;
+      if (!editor) return;
       try {
-        if (popover.kind === "paragraph") {
-          await core.edit.editParagraphText(popover.section, popover.block, text);
+        if (editor.kind === "paragraph") {
+          await core.edit.editParagraphText(editor.section, editor.block, text);
         } else {
-          await core.edit.editCellText(popover.section, popover.block, popover.rows?.[0] ?? 0, popover.cols?.[0] ?? 0, text);
+          await core.edit.editCellText(editor.section, editor.block, editor.rows?.[0] ?? 0, editor.cols?.[0] ?? 0, text);
         }
         toast("텍스트를 수정했습니다");
+        // Success: the applied edit bumps refreshToken which ALSO closes the editor; clearing here too keeps
+        // it closed even when the layout didn't reflow (a no-op re-flow).
+        setEditor(null);
       } catch (e) {
         if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`텍스트 수정 실패: ${e}`);
-      } finally {
-        setPopover(null);
+        // Re-raise WITHOUT clearing `editor`: the InPlaceCellEditor un-latches on rejection and STAYS open
+        // so the user can retry (issue 032 step 2: 저장 실패 시 에디터 유지 + 에러 토스트).
+        throw e;
       }
     },
-    [core, popover, toast, onTrap],
+    [core, editor, toast, onTrap],
   );
 
   // Format toolbar → SetCellRangeFmt / SetCellRangeShade over the selected cell/range.
@@ -492,17 +502,17 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       setPointerActive(false); // gesture ended → the toolbar re-appears once the new selection resolves
       void core.selection.pointerUp(toPointerInput(c));
       if (!editingOn) return;
-      // Detect a double-click (two ups within 400ms, ~same client point) → open the text popover.
+      // Detect a double-click (two ups within 400ms, ~same client point) → open the in-place editor.
       const now = Date.now();
       const prev = lastUpRef.current;
       if (prev && now - prev.t < 400 && Math.hypot(c.client.x - prev.x, c.client.y - prev.y) < 6) {
         lastUpRef.current = null;
-        void openPopoverAt(c);
+        void openEditorAt(c);
       } else {
         lastUpRef.current = { t: now, x: c.client.x, y: c.client.y };
       }
     },
-    [core, editingOn, openPopoverAt],
+    [core, editingOn, openEditorAt],
   );
 
   const onApply = useCallback(
@@ -664,8 +674,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                     )}
                     {/* issue 028: hide the floating toolbar mid-gesture. `pointerActive` is true for the
                         WHOLE press→release (set on pointerDown, cleared on pointerUp), so it already covers
-                        a marquee drag — the marquee state (now isolated, issue 030) is no longer needed here. */}
-                    {editingOn && toolbarPage === page && marks.length > 0 && !pointerActive && (
+                        a marquee drag — the marquee state (now isolated, issue 030) is no longer needed here.
+                        issue 032: also hide it while the in-place editor is open (two chromes must not fight). */}
+                    {editingOn && toolbarPage === page && marks.length > 0 && !pointerActive && !editor && (
                       <FloatingToolbar
                         marks={marks.filter((m) => m.page === page).map((m) => m.box)}
                         scale={scale}
@@ -684,8 +695,11 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                         onSendToAi={onSendToAi}
                       />
                     )}
-                    {editingOn && popover && popover.page === page && (
-                      <CellTextPopover box={popover.box} scale={scale} initialText={popover.text} onCommit={(t) => void onPopoverCommit(t)} onCancel={() => setPopover(null)} />
+                    {/* issue 032: the Figma-style IN-PLACE editor sits over the cell rect at the cell's own
+                        font size (no popover card). onCommit returns a Promise so the editor un-latches +
+                        stays open on failure; onCancel (Esc) just closes it. */}
+                    {editingOn && editor && editor.page === page && (
+                      <InPlaceCellEditor box={editor.box} scale={scale} initialText={editor.text} fontSizePt={editor.fontSizePt} onCommit={onEditorCommit} onCancel={() => setEditor(null)} />
                     )}
                   </>
                 )}
