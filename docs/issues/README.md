@@ -50,7 +50,7 @@
 |---|------|------|------|------|
 | [030](030-render-perf-cursor.md) | 드래그 버벅임 — **시트 렌더 90→0** (MarqueeLayer rAF+memo) + 커서 default | **done** | R5-P0 | 366ab20 |
 | [031](031-resize-reliability.md) | 리사이즈 truth — closest 원점버그 수정+적용검증+행드래그+**분할표 remap** | **done(v2)** | R5-P0 | 72caa35 · v1 diff 병합사고 소실→스펙 기반 재구현(프로토콜 3칙 신설) |
-| [032](032-figma-inplace-edit.md) | 피그마식 제자리 텍스트 편집(팝오버 크롬 제거) | open | R5-P1 | 030 후 |
+| [032](032-figma-inplace-edit.md) | 피그마식 제자리 편집 — bbox<4px·run보존·IME가드 | **done** | R5-P1 | b211349 · API오류 중단→worktree 이어받기 재개로 완성; **R5 완료** |
 | [033](033-figma-grade-research.md) | 피그마 격차 리서치 — **엔진은 이미 피그마급(2ms open)**, 병목=DOM 재주입 107ms | **done** | R5-P1 | 382e5d6 · 백로그 12행+ |
 
 ## 로드맵 R4 — 라운드 4 (2026-07-03)
