@@ -167,6 +167,49 @@
 .hw-fmt-color { display: inline-flex; align-items: center; gap: 2px; font-size: 10px; color: var(--hw-muted); }
 .hw-fmt-color input[type="color"] { width: 22px; height: 22px; padding: 0; border: 1px solid var(--hw-border); border-radius: 4px; background: none; cursor: pointer; }
 
+/* ================= issue 028 — floating capsule selection toolbar (네이버 블로그 패턴) ================= */
+.hw-floatbar {
+  position: absolute; z-index: 24; display: inline-flex; align-items: center; gap: 3px;
+  background: #fff; border: 1px solid var(--hw-border); border-radius: 10px; padding: 4px 7px;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.2); pointer-events: auto; white-space: nowrap; font-size: 12px;
+}
+.hw-floatbar-btn {
+  min-width: 26px; height: 26px; padding: 0 6px; border: 1px solid transparent; border-radius: 6px;
+  background: #fff; cursor: pointer; font-size: 13px; color: #111; line-height: 1;
+}
+.hw-floatbar-btn:hover:not(:disabled) { background: #f0f1f3; }
+.hw-floatbar-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.hw-floatbar-size {
+  width: 46px; height: 26px; border: 1px solid var(--hw-border); border-radius: 6px; font-size: 12px;
+  padding: 0 4px; text-align: center; background: #fff; color: #111;
+}
+.hw-floatbar-font {
+  height: 26px; max-width: 112px; border: 1px solid var(--hw-border); border-radius: 6px;
+  font-size: 12px; background: #fff; color: #111;
+}
+.hw-floatbar-size:disabled, .hw-floatbar-font:disabled { opacity: 0.4; cursor: not-allowed; }
+.hw-floatbar-color { display: inline-flex; align-items: center; gap: 2px; font-size: 10px; color: var(--hw-muted); }
+.hw-floatbar-color input[type="color"] {
+  width: 22px; height: 22px; padding: 0; border: 1px solid var(--hw-border); border-radius: 4px;
+  background: none; cursor: pointer;
+}
+.hw-floatbar-color input[type="color"]:disabled { opacity: 0.4; cursor: not-allowed; }
+.hw-floatbar-sep { width: 1px; height: 20px; background: var(--hw-border); margin: 0 2px; }
+.hw-floatbar-ai {
+  height: 26px; padding: 0 10px; border: 1px solid var(--hw-ai); border-radius: 6px;
+  background: var(--hw-ai); color: #fff; cursor: pointer; font-size: 12px; font-weight: 600; line-height: 1;
+}
+.hw-floatbar-ai:hover:not(:disabled) { filter: brightness(1.06); }
+.hw-floatbar-ai:disabled { opacity: 0.4; cursor: not-allowed; }
+/* tail (caret) — points at the selection; flips with data-placement (above ⇒ ▼, below ⇒ ▲) */
+.hw-floatbar-tail { position: absolute; width: 0; height: 0; margin-left: -6px; }
+.hw-floatbar[data-placement="above"] .hw-floatbar-tail {
+  bottom: -6px; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 6px solid #fff;
+}
+.hw-floatbar[data-placement="below"] .hw-floatbar-tail {
+  top: -6px; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 6px solid #fff;
+}
+
 /* ---- chat panel ---- */
 .hw-chat {
   width: 360px; flex-shrink: 0; display: flex; flex-direction: column;

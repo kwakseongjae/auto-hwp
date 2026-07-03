@@ -11,7 +11,7 @@ import { ColumnResizeOverlay } from "./ColumnResizeOverlay";
 import { TableInsertButton } from "./TableInsertButton";
 import { Ruler } from "./Ruler";
 import { CellTextPopover } from "./CellTextPopover";
-import { FormatToolbar } from "./FormatToolbar";
+import { FloatingToolbar, type ToolbarAlign } from "./FloatingToolbar";
 import { buildFontFaceCss, type FontCatalogEntry } from "../fonts";
 
 const A4_W = 794; // CSS px for 210mm @ 96dpi (mirrors HwpPageView) — the 100% page width.
@@ -94,6 +94,10 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const editingOn = !!props.enableEditing;
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
   const [pageGeom0, setPageGeom0] = useState<PageGeom | null>(null);
+  // Issue 028 floating toolbar surface: hide the toolbar while a pointer gesture (drag/marquee) is in
+  // progress, and a monotonic token the "AI에게 전달" button bumps to focus the chat composer.
+  const [pointerActive, setPointerActive] = useState(false);
+  const [aiFocusToken, setAiFocusToken] = useState(0);
   const [popover, setPopover] = useState<
     { page: number; box: Box; section: number; block: number; kind: string; rows?: [number, number]; cols?: [number, number]; text: string } | null
   >(null);
@@ -386,12 +390,43 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     [toast, onTrap],
   );
 
+  // "AI에게 전달" (issue 028): the marked selection is ALREADY the anchor chip (anchors = selection); this
+  // only bumps the token that focuses the chat composer. No new prompt logic, and the selection is NOT
+  // cleared so the chips ride along with the next message (the existing captureAnchor flow).
+  const onSendToAi = useCallback(() => setAiFocusToken((t) => t + 1), []);
+
+  // The 서체 catalog family names for the toolbar's font dropdown (reuses the existing fontCatalog prop);
+  // falls back to just the currently-applied face when no catalog is supplied.
+  const fontFamilies = useMemo<readonly string[] | undefined>(() => {
+    if (props.fontCatalog && props.fontCatalog.length > 0) return props.fontCatalog.map((f) => f.family);
+    return selectedFont ? [selectedFont.family] : undefined;
+  }, [props.fontCatalog, selectedFont]);
+
+  // The page the floating toolbar anchors to = the FIRST mark's page (multi-page selection → first mark's
+  // page, per the issue). Its format controls stay enabled only for a single cell/range target (027 scope);
+  // any other combination is disabled with a Korean reason tooltip (never a silent no-op).
+  const toolbarPage = marks.length ? marks[0].page : null;
+  const formatDisabledReason: string | undefined = !editTarget
+    ? "여러 곳을 함께 선택하면 서식은 한 번에 적용할 수 없습니다 — 표의 한 셀/범위를 선택하세요"
+    : editTarget.kind === "cell" || editTarget.kind === "range"
+      ? fmtRange
+        ? undefined
+        : "이 셀에는 서식을 적용할 수 없습니다"
+      : "표 셀/범위를 선택하면 서식을 적용할 수 있습니다";
+
   // pointer lifecycle → the core selection model (issues 021/023). React fires them fire-and-forget; the
   // core emits selection/marquee changes that useHwpEditor mirrors back into state.
-  const onPointerDown = useCallback((c: PageClick) => void core.selection.pointerDown(toPointerInput(c)), [core]);
+  const onPointerDown = useCallback(
+    (c: PageClick) => {
+      setPointerActive(true); // a gesture began → hide the floating toolbar until it settles (028)
+      void core.selection.pointerDown(toPointerInput(c));
+    },
+    [core],
+  );
   const onPointerMove = useCallback((c: PageClick) => core.selection.pointerMove(toPointerInput(c)), [core]);
   const onPointerUp = useCallback(
     (c: PageClick) => {
+      setPointerActive(false); // gesture ended → the toolbar re-appears once the new selection resolves
       void core.selection.pointerUp(toPointerInput(c));
       if (!editingOn) return;
       // Detect a double-click (two ups within 400ms, ~same client point) → open the text popover.
@@ -552,18 +587,23 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                         onCommit={(b) => void onColCommit(b)}
                       />
                     )}
-                    {editingOn && editTarget && editTarget.page === page && (editTarget.kind === "cell" || editTarget.kind === "range" || editTarget.kind === "paragraph") && (
-                      <FormatToolbar
-                        box={editTarget.box}
+                    {editingOn && toolbarPage === page && marks.length > 0 && !(pointerActive || marquee) && (
+                      <FloatingToolbar
+                        marks={marks.filter((m) => m.page === page).map((m) => m.box)}
                         scale={scale}
-                        kind={editTarget.kind}
-                        fonts={selectedFont ? [selectedFont.family] : undefined}
-                        onBold={() => fmtRange && void runFmt(() => core.edit.formatCellRange(editTarget.section, editTarget.block, fmtRange, { bold: !editTarget.curBold }), editTarget.curBold ? "굵게 해제" : "굵게 적용")}
-                        onItalic={() => fmtRange && void runFmt(() => core.edit.formatCellRange(editTarget.section, editTarget.block, fmtRange, { italic: !editTarget.curItalic }), "기울임 적용")}
-                        onSize={(pt) => fmtRange && void runFmt(() => core.edit.formatCellRange(editTarget.section, editTarget.block, fmtRange, { size_pt: pt }), `글자 크기 ${pt}pt`)}
-                        onFont={(f) => fmtRange && void runFmt(() => core.edit.formatCellRange(editTarget.section, editTarget.block, fmtRange, { font: f }), `서체 ${f}`)}
-                        onColor={(hex) => fmtRange && void runFmt(() => core.edit.formatCellRange(editTarget.section, editTarget.block, fmtRange, { color: hex }), "글자색 적용")}
-                        onShade={(hex) => fmtRange && void runFmt(() => core.edit.shadeCellRange(editTarget.section, editTarget.block, fmtRange, hex), hex ? "배경색 적용" : "배경 지움")}
+                        viewportWidth={A4_W * zoom}
+                        kind={editTarget?.kind ?? "multi"}
+                        formatDisabledReason={formatDisabledReason}
+                        fonts={fontFamilies}
+                        aiEnabled={canEdit}
+                        onBold={() => editTarget && fmtRange && void runFmt(() => core.edit.formatCellRange(editTarget.section, editTarget.block, fmtRange, { bold: !editTarget.curBold }), editTarget.curBold ? "굵게 해제" : "굵게 적용")}
+                        onItalic={() => editTarget && fmtRange && void runFmt(() => core.edit.formatCellRange(editTarget.section, editTarget.block, fmtRange, { italic: !editTarget.curItalic }), "기울임 적용")}
+                        onSize={(pt) => editTarget && fmtRange && void runFmt(() => core.edit.formatCellRange(editTarget.section, editTarget.block, fmtRange, { size_pt: pt }), `글자 크기 ${pt}pt`)}
+                        onFont={(f) => editTarget && fmtRange && void runFmt(() => core.edit.formatCellRange(editTarget.section, editTarget.block, fmtRange, { font: f }), `서체 ${f}`)}
+                        onColor={(hex) => editTarget && fmtRange && void runFmt(() => core.edit.formatCellRange(editTarget.section, editTarget.block, fmtRange, { color: hex }), "글자색 적용")}
+                        onShade={(hex) => editTarget && fmtRange && void runFmt(() => core.edit.shadeCellRange(editTarget.section, editTarget.block, fmtRange, hex), hex ? "배경색 적용" : "배경 지움")}
+                        onAlign={(a: ToolbarAlign) => editTarget && fmtRange && void runFmt(() => core.edit.formatCellRange(editTarget.section, editTarget.block, fmtRange, { align: a }), "정렬 적용")}
+                        onSendToAi={onSendToAi}
                       />
                     )}
                     {editingOn && popover && popover.page === page && (
@@ -589,6 +629,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           onApply={onApply}
           onJumpToPage={jumpToPage}
           isMock={props.isMock}
+          focusToken={aiFocusToken}
         />
       </div>
 

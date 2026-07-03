@@ -27,6 +27,10 @@ export interface ChatPanelProps {
   onJumpToPage?: (page: number) => void;
   /** Show the honest "mock/demo" badge (host passes true when `onAiRequest` returns canned Intents). */
   isMock?: boolean;
+  /** A monotonically-bumped token; when it CHANGES the composer is focused + scrolled into view. The
+   *  floating toolbar's "AI에게 전달" bumps it (issue 028) — the marked selection is already the anchor
+   *  chip, so this just brings the user to the composer. No new prompt logic. */
+  focusToken?: number;
 }
 
 // One assistant turn carries the previewed Intents (rendered as per-op CARDS); `state` tracks review.
@@ -81,6 +85,22 @@ export function ChatPanel(props: ChatPanelProps) {
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight; // scrollTop is settable everywhere (scrollTo isn't in jsdom)
   }, [msgs, busy]);
+
+  // "AI에게 전달" (issue 028): focus the composer when the token bumps. Skip the initial mount (token 0/
+  // undefined) so opening the workspace doesn't steal focus. The marked selection is already shown as an
+  // anchor chip above — this only routes the user to the composer to type.
+  const focusToken = props.focusToken;
+  const firstFocus = useRef(true);
+  useEffect(() => {
+    if (firstFocus.current) {
+      firstFocus.current = false;
+      return;
+    }
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus();
+    el.scrollIntoView?.({ block: "nearest" });
+  }, [focusToken]);
 
   function settleLast(state: "applied" | "discarded") {
     setMsgs((m) => {

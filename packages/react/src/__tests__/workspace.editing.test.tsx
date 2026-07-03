@@ -90,13 +90,15 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
     });
   });
 
-  it("marking a cell shows the format toolbar; 굵게 applies SetCellRangeFmt", async () => {
+  it("marking a cell shows the FLOATING toolbar; 굵게 applies SetCellRangeFmt", async () => {
     const cell: CellHit = { section: 0, block: 1, row: 1, col: 1, rows: 3, cols: 3, text: "칸", x: 140, y: 100, w: 100, h: 40 };
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
     fireEvent.pointerDown(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
     fireEvent.pointerUp(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
+    // the new capsule toolbar carries the same control testids (issue 028 surface redesign).
+    await screen.findByTestId("hw-floating-toolbar");
     const bold = await screen.findByTestId("hw-fmt-bold");
     fireEvent.click(bold);
     await waitFor(() => {
@@ -105,5 +107,50 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
       expect(applied!.bold).toBe(true);
       expect(applied!.r0).toBe(1); // the clicked cell's row
     });
+  });
+});
+
+describe("HwpWorkspace issue-028 — floating toolbar show/hide + AI entry", () => {
+  const cell: CellHit = { section: 0, block: 1, row: 1, col: 1, rows: 3, cols: 3, text: "칸", x: 140, y: 100, w: 100, h: 40 };
+  const mkAdapter = () => new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
+
+  it("선택→표시, Esc→숨김", async () => {
+    const { container } = render(<HwpWorkspace adapter={mkAdapter()} document={doc} onAiRequest={noAi} enableEditing />);
+    const sheet = await sheetOf(container);
+    fireEvent.pointerDown(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
+    fireEvent.pointerUp(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
+    await screen.findByTestId("hw-floating-toolbar");
+    // Esc clears the selection → toolbar disappears.
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByTestId("hw-floating-toolbar")).toBeNull());
+  });
+
+  it("드래그(포인터 제스처) 중 숨김 → 놓으면 재등장", async () => {
+    const { container } = render(<HwpWorkspace adapter={mkAdapter()} document={doc} onAiRequest={noAi} enableEditing />);
+    const sheet = await sheetOf(container);
+    fireEvent.pointerDown(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
+    fireEvent.pointerUp(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
+    await screen.findByTestId("hw-floating-toolbar");
+    // a new gesture begins → the toolbar hides while dragging…
+    fireEvent.pointerDown(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 2 });
+    await waitFor(() => expect(screen.queryByTestId("hw-floating-toolbar")).toBeNull());
+    // …and re-appears once the gesture settles.
+    fireEvent.pointerUp(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 2 });
+    await screen.findByTestId("hw-floating-toolbar");
+  });
+
+  it("AI에게 전달 → 채팅 포커스 + 앵커 칩 유지 (신규 프롬프트 로직 0)", async () => {
+    const { container } = render(<HwpWorkspace adapter={mkAdapter()} document={doc} onAiRequest={noAi} enableEditing />);
+    const sheet = await sheetOf(container);
+    fireEvent.pointerDown(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
+    fireEvent.pointerUp(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
+    await screen.findByTestId("hw-floating-toolbar");
+    // the marked cell is already an anchor chip.
+    await waitFor(() => expect(container.querySelector(".hw-anchor")).toBeTruthy());
+    fireEvent.click(screen.getByTestId("hw-fmt-ai"));
+    const ta = container.querySelector(".hw-textarea") as HTMLTextAreaElement;
+    await waitFor(() => expect(document.activeElement).toBe(ta));
+    // the chip is NOT consumed — it rides along with the next message.
+    expect(container.querySelector(".hw-anchor")).toBeTruthy();
   });
 });

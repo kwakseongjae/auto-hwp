@@ -93,17 +93,17 @@ test("텍스트 수정: 셀 더블클릭 → 팝오버 → 저장(SetTableCellRu
   await expect(page.locator(".hw-pages")).not.toContainText("ZZZ텍스트확인", { timeout: 30_000 });
 });
 
-test("볼드+배경: 셀 선택 → 서식 툴바 굵게 + 배경색 → SetCellRangeFmt/Shade", async ({ page }) => {
+test("볼드+배경: 셀 선택 → 플로팅 툴바 굵게 + 배경색 → SetCellRangeFmt/Shade", async ({ page }) => {
   await open(page);
-  // 셀을 선택해야 서식 툴바가 활성화된다(문단 선택은 비활성).
+  // 셀을 선택해야 서식 컨트롤이 활성화된다(문단 선택은 비활성). 이제 새 플로팅 툴바(028)를 경유한다.
   const found = await scanForCell(page);
-  expect(found, "표 셀을 선택하면 서식 툴바가 떠야 한다").toBeTruthy();
-  await expect(page.locator('[data-testid="hw-format-toolbar"]')).toBeVisible({ timeout: 30_000 });
+  expect(found, "표 셀을 선택하면 플로팅 툴바가 떠야 한다").toBeTruthy();
+  await expect(page.locator('[data-testid="hw-floating-toolbar"]')).toBeVisible({ timeout: 30_000 });
   // 굵게 적용/해제(SetCellRangeFmt) — 셀의 현재 볼드 상태에 따라 토글.
   await page.locator('[data-testid="hw-fmt-bold"]').click();
   await expect(page.locator(".hw-status")).toContainText("굵게", { timeout: 30_000 });
-  // 서식 툴바가 여전히 있어야 배경색을 이어서 적용할 수 있다(선택 유지).
-  await expect(page.locator('[data-testid="hw-format-toolbar"]')).toBeVisible({ timeout: 30_000 });
+  // 툴바가 여전히 있어야 배경색을 이어서 적용할 수 있다(선택 유지).
+  await expect(page.locator('[data-testid="hw-floating-toolbar"]')).toBeVisible({ timeout: 30_000 });
   // 배경색 적용. color input 값을 NATIVE setter 로 설정해야(React 의 value 추적기 우회) onChange 가
   // 발생한다 — 인스턴스 setter 로 넣으면 추적값이 함께 갱신되어 이벤트가 무시된다.
   await page.locator('[data-testid="hw-fmt-shade"]').evaluate((el: HTMLInputElement) => {
@@ -113,4 +113,38 @@ test("볼드+배경: 셀 선택 → 서식 툴바 굵게 + 배경색 → SetCell
     el.dispatchEvent(new Event("change", { bubbles: true }));
   });
   await expect(page.locator(".hw-status")).toContainText("배경색 적용", { timeout: 30_000 });
+});
+
+// 이슈 028 신규: 드래그로 셀을 선택 → 플로팅 툴바가 선택 bbox 인접에 뜬다(거리 assert) → B 적용 →
+// "AI에게 전달"이 채팅 포커스 + 앵커 칩을 확정한다(신규 프롬프트 로직 0).
+test("드래그 선택 → 플로팅 툴바 인접 표시 → B → AI에게 전달 → 칩 확정", async ({ page }) => {
+  await open(page);
+  // 표 셀 앵커가 뜨는 지점을 찾아 그 셀을 선택 상태로 만든다.
+  const found = await scanForCell(page);
+  expect(found, "표 셀을 선택해야 플로팅 툴바가 뜬다").toBeTruthy();
+  const mark = await page.locator(".hw-mark-cell").first().boundingBox();
+  if (!mark) throw new Error("셀 마킹 박스를 찾지 못함");
+  // 셀 안에서 작은 드래그(마퀴 아님) — 선택은 그 셀로 유지되고, 놓으면 툴바가 등장한다.
+  await page.mouse.move(mark.x + mark.width * 0.3, mark.y + mark.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(mark.x + mark.width * 0.6, mark.y + mark.height / 2, { steps: 4 });
+  await page.mouse.up();
+
+  const bar = page.locator('[data-testid="hw-floating-toolbar"]');
+  await expect(bar).toBeVisible({ timeout: 30_000 });
+  // 인접 표시(거리 assert): 툴바가 선택 bbox 바로 위/아래에 붙는다.
+  const tb = await bar.boundingBox();
+  const m2 = await page.locator(".hw-mark-cell").first().boundingBox();
+  if (!tb || !m2) throw new Error("툴바/마킹 박스를 찾지 못함");
+  const gap = Math.min(Math.abs(m2.y - (tb.y + tb.height)), Math.abs(m2.y + m2.height - tb.y));
+  expect(gap, "툴바가 선택 bbox에 인접해야 한다").toBeLessThan(40);
+
+  // B 적용(SetCellRangeFmt) — 선택은 유지된다(서식 커밋이 선택을 지우지 않음).
+  await page.locator('[data-testid="hw-fmt-bold"]').click();
+  await expect(page.locator(".hw-status")).toContainText("굵게", { timeout: 30_000 });
+
+  // "AI에게 전달" → 채팅 입력 포커스 + 앵커 칩 유지(칩 확정, 기존 흐름 재사용).
+  await page.locator('[data-testid="hw-fmt-ai"]').click();
+  await expect(page.locator(".hw-textarea")).toBeFocused({ timeout: 15_000 });
+  await expect(page.locator(".hw-anchor").first()).toContainText("행");
 });

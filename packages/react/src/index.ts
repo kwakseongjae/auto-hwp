@@ -24,8 +24,18 @@ export { Ruler } from "./components/Ruler";
 export type { RulerProps } from "./components/Ruler";
 export { CellTextPopover } from "./components/CellTextPopover";
 export type { CellTextPopoverProps } from "./components/CellTextPopover";
+// FormatToolbar — the ORIGINAL fixed toolbar (issue 027). Kept for backward compatibility; HwpWorkspace's
+// enableEditing path now uses FloatingToolbar (issue 028). Still individually importable for hosts that
+// built their own chrome around it.
 export { FormatToolbar } from "./components/FormatToolbar";
 export type { FormatToolbarProps } from "./components/FormatToolbar";
+
+// Issue 028 — the opt-in capsule FLOATING selection toolbar (네이버 블로그 패턴) + its pure position engine.
+// It reuses the 027 core commands (formatCellRange/shadeCellRange) and adds the "AI에게 전달" vibe-edit entry.
+export { FloatingToolbar } from "./components/FloatingToolbar";
+export type { FloatingToolbarProps, ToolbarAlign } from "./components/FloatingToolbar";
+export { computeFloatingPosition, unionPageBox } from "./floatingPosition";
+export type { FloatViewport, FloatOptions, FloatPlacement, FloatPosition } from "./floatingPosition";
 
 // Font system v1 (issue 022): the curated OFL catalog + screen @font-face/alias helpers.
 export { FONT_CATALOG, catalogUrl, buildFontFaceCss, svgFontFamilies, isTtc } from "./fonts";
