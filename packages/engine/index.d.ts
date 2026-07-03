@@ -140,6 +140,10 @@ export class HwpDoc {
   /** Column-boundary x-positions (own-render px) of the table at `(section, block)` on `page` — a
    *  `number[]` of `cols + 1` absolute px for the column-resize handles (issue 027); `null` off-page. */
   tableColBoundaries(page: number, section: number, block: number): number[] | null;
+  /** Row-boundary y-positions (own-render px) of the table at `(section, block)` on `page` — a
+   *  `number[]` of `rows + 1` absolute px for the ROW-height resize handles (issue 031); `null` off-page.
+   *  A SPLIT table returns the per-page FRAGMENT's boundaries (rebased to the fragment top — 023 규칙). */
+  tableRowBoundaries(page: number, section: number, block: number): number[] | null;
   /** Page geometry (own-render px) for the ruler (issue 027); `null` when the page is out of range. */
   pageGeometry(page: number): PageGeom | null;
   /** The CURRENT styled runs of the `(row,col)` cell of the table at `(section,block)`, or of the

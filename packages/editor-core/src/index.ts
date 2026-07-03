@@ -31,12 +31,16 @@ export { describeIntent } from "./describeIntent";
 // Unit conversion (issue 027) — the SINGLE px↔mm↔ratio point the ruler + column-resize share.
 export {
   PX_PER_MM,
+  HWPUNIT_PER_PX,
   pxToMm,
   mmToPx,
   roundMm,
   boundariesToWidths,
   widthsToRatios,
   boundariesToRatios,
+  boundariesToHeights,
+  remapFragmentHeights,
+  appliedReflectsDrag,
   resizeBoundary,
 } from "./units";
 

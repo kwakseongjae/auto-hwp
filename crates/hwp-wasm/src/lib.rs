@@ -290,6 +290,25 @@ impl HwpDoc {
         b.map(|b| serde_json::to_string(&b).map_err(|e| js_err("serialize", &e.to_string()))).transpose()
     }
 
+    /// Row-boundary y-positions (own-render px) of the table at `(section, block)` on `page` — the
+    /// `rows + 1` absolute px the ROW-height resize handles are drawn on, top→bottom (issue 031 행높이
+    /// 드래그). A JSON **string** of a `number[]`, or **JS `null`** when the table isn't on the page (an
+    /// `Option<String>` → `null` — policy 018). Additive wasm binding of the existing
+    /// `hwp_session::table_row_boundaries_placed` — the ROW twin of `tableColBoundaries`. Unlike the
+    /// column query, row geometry ALSO needs the font-metrics provider (it re-measures the row content
+    /// heights the way `place_table` drew them), so we build the SAME `own_render_fonts_with(&self.fonts)`
+    /// the cached placement was built with — otherwise the boundaries wouldn't line up with the grid. On
+    /// a SPLIT table `_placed` returns the per-page FRAGMENT's boundaries (already rebased to the fragment
+    /// top — 023 규칙), which the host remaps to a whole-table `heights` vector before committing.
+    #[wasm_bindgen(js_name = tableRowBoundaries)]
+    pub fn table_row_boundaries(&self, page: u32, section: usize, block: usize) -> Result<Option<String>, JsValue> {
+        let fonts = hwp_session::own_render_fonts_with(&self.fonts);
+        let b = self.with_placed(|doc, placed| {
+            hwp_session::table_row_boundaries_placed(doc, placed, fonts.as_ref(), page, section, block)
+        })?;
+        b.map(|b| serde_json::to_string(&b).map_err(|e| js_err("serialize", &e.to_string()))).transpose()
+    }
+
     /// Page geometry in own-render px: the page box + printable-area margins of `page`, for the editor
     /// ruler (issue 027 룰러). A JSON **string** `{w,h,ml,mt,mr,mb}` (all px = HWPUNIT/75), or **JS
     /// `null`** when the page is out of range (an `Option<String>` → `null` — policy 018). Additive wasm

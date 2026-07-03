@@ -136,6 +136,13 @@ export class DocSession {
     return (await this.adapter.tableColBoundaries?.(page, section, block)) ?? null;
   }
 
+  /** Row-boundary y's (own-render px) of the table at `(section, block)` on `page` for the row-height
+   *  drag handles (issue 031), or `null` (table off-page / backend can't answer). A SPLIT table returns
+   *  the per-page FRAGMENT's boundaries (023). Read-only — no undo unit. */
+  async rowBoundaries(page: number, section: number, block: number): Promise<number[] | null> {
+    return (await this.adapter.tableRowBoundaries?.(page, section, block)) ?? null;
+  }
+
   /** Page geometry (own-render px) for the ruler, or `null` (out of range / backend can't answer). */
   async pageGeom(page: number): Promise<PageGeom | null> {
     return (await this.adapter.pageGeometry?.(page)) ?? null;

@@ -184,6 +184,15 @@ export class HwpDoc {
       return s == null ? null : JSON.parse(s);
     });
   }
+  /** Row-boundary y-positions (own-render px) of the table at `(section, block)` on `page` — a
+   *  `number[]` of `rows + 1` absolute px for the ROW-height resize handles (issue 031), or `null` when
+   *  the table isn't on the page. A SPLIT table returns the per-page FRAGMENT's boundaries (023 규칙). */
+  tableRowBoundaries(page, section, block) {
+    return this.#call((r) => {
+      const s = r.tableRowBoundaries(page, section, block); // Option<String> → string | null/undefined on a miss
+      return s == null ? null : JSON.parse(s);
+    });
+  }
   /** Page geometry (own-render px) `{w,h,ml,mt,mr,mb}` of `page` for the ruler (issue 027), or `null`
    *  when the page is out of range. */
   pageGeometry(page) {

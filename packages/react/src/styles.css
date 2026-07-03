@@ -94,17 +94,32 @@
 
 /* ================= issue 027 — editing-parity chrome ================= */
 
-/* step 1 — column-width drag handles over a marked table */
+/* step 1 — column-width drag handles over a marked table (issue 027; affordance polish issue 031) */
 .hw-col-resize { position: absolute; inset: 0; pointer-events: none; }
 .hw-col-grip {
-  position: absolute; width: 9px; margin-left: -4.5px; pointer-events: auto;
+  position: absolute; width: 11px; margin-left: -5.5px; pointer-events: auto; /* hit area ≥ 8px (031) */
   cursor: col-resize; background: transparent; z-index: 6;
 }
 .hw-col-grip::before {
-  content: ""; position: absolute; left: 4px; top: 0; bottom: 0; width: 1.5px;
-  background: var(--hw-accent); opacity: 0; transition: opacity 0.1s;
+  content: ""; position: absolute; left: 4.75px; top: 0; bottom: 0; width: 1.5px;
+  background: var(--hw-accent); opacity: 0.28; transition: opacity 0.1s; /* discoverable once marked (031) */
 }
-.hw-col-grip:hover::before, .hw-col-grip-active::before { opacity: 0.9; }
+.hw-col-grip:hover::before, .hw-col-grip-active::before { opacity: 0.95; }
+/* while dragging, the active grip reads as a full-height guideline */
+.hw-col-grip-active::before { width: 2px; box-shadow: 0 0 0 0.5px rgba(37, 99, 235, 0.35); }
+
+/* issue 031 — row-height drag handles (the horizontal twin of the column grips) */
+.hw-row-resize { position: absolute; inset: 0; pointer-events: none; }
+.hw-row-grip {
+  position: absolute; height: 11px; margin-top: -5.5px; pointer-events: auto; /* hit area ≥ 8px */
+  cursor: row-resize; background: transparent; z-index: 6;
+}
+.hw-row-grip::before {
+  content: ""; position: absolute; top: 4.75px; left: 0; right: 0; height: 1.5px;
+  background: var(--hw-accent); opacity: 0.28; transition: opacity 0.1s;
+}
+.hw-row-grip:hover::before, .hw-row-grip-active::before { opacity: 0.95; }
+.hw-row-grip-active::before { height: 2px; box-shadow: 0 0 0 0.5px rgba(37, 99, 235, 0.35); }
 
 /* step 2 — 표 추가 grid picker */
 .hw-tableins { position: relative; display: inline-flex; }

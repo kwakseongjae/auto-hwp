@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { EngineAdapter, Intent, DocContext, PointerInput, PageGeom, Box, Selection } from "@tf-hwp/editor-core";
-import { boundariesToRatios, firstRunStyle } from "@tf-hwp/editor-core";
+import type { EngineAdapter, Intent, DocContext, PointerInput, PageGeom, Box, Selection, TableBox } from "@tf-hwp/editor-core";
+import { boundariesToRatios, remapFragmentHeights, appliedReflectsDrag, firstRunStyle } from "@tf-hwp/editor-core";
 import { modLabel } from "../platform";
 import { useHwpEditor } from "../useHwpEditor";
 import { ChatPanel } from "./ChatPanel";
@@ -8,7 +8,7 @@ import { HwpPageView, type PageClick } from "./HwpPageView";
 import { SelectionOverlay, type Mark } from "./SelectionOverlay";
 import { MarqueeLayer } from "./MarqueeLayer";
 import { FontPicker } from "./FontPicker";
-import { ColumnResizeOverlay } from "./ColumnResizeOverlay";
+import { ColumnResizeOverlay, RowResizeOverlay } from "./ColumnResizeOverlay";
 import { TableInsertButton } from "./TableInsertButton";
 import { Ruler } from "./Ruler";
 import { CellTextPopover } from "./CellTextPopover";
@@ -50,8 +50,12 @@ interface EditTarget {
   rows?: [number, number];
   cols?: [number, number];
   text: string;
-  tableBox?: Box | null;
+  /** The placed table box (own-render px) — carries `first_row`/`rows` for the split-table row remap. */
+  tableBox?: TableBox | null;
+  /** `cols + 1` column-boundary x's for the column-resize handles (issue 027). */
   boundaries?: number[] | null;
+  /** `rows + 1` row-boundary y's (per-page fragment on a split table) for the row-resize handles (031). */
+  rowBoundaries?: number[] | null;
   curBold: boolean;
   curItalic: boolean;
 }
@@ -269,14 +273,15 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         const cx = mark.box.x + mark.box.w / 2;
         const cy = mark.box.y + mark.box.h / 2;
         try {
-          const [tableBox, boundaries, runs] = await Promise.all([
+          const [tableBox, boundaries, rowBoundaries, runs] = await Promise.all([
             adapter.tableAt(mark.page, cx, cy),
             core.session.colBoundaries(mark.page, anchor.section, anchor.block),
+            core.session.rowBoundaries(mark.page, anchor.section, anchor.block),
             core.session.runsAt(anchor.section, anchor.block, anchor.rows?.[0], anchor.cols?.[0]),
           ]);
           if (cancelled) return;
           const style = firstRunStyle(runs);
-          setEditTarget({ ...base, tableBox: tableBox as Box | null, boundaries, curBold: !!style.bold, curItalic: !!style.italic });
+          setEditTarget({ ...base, tableBox: tableBox as TableBox | null, boundaries, rowBoundaries, curBold: !!style.bold, curItalic: !!style.italic });
         } catch {
           if (!cancelled) setEditTarget(base);
         }
@@ -287,7 +292,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     return () => {
       cancelled = true;
     };
-  }, [editingOn, selection, adapter, core]);
+    // `refreshToken` is a dep so the resize geometry (col/row boundaries + table box) RE-RESOLVES after an
+    // applied edit — the handles then track the NEW layout instead of floating over stale px (issue 031).
+  }, [editingOn, selection, adapter, core, refreshToken]);
 
   // Fetch page-0 geometry for the top ruler (own-render px) whenever the doc / layout changes.
   useEffect(() => {
@@ -326,14 +333,47 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     [core, toast, onTrap],
   );
 
+  // 열 너비 커밋 (issue 031): apply SetTableColWidths, then RE-QUERY the boundaries and confirm the
+  // dragged edge actually MOVED (apply-verify). A no-op apply (frozen engine / ratio collapse) → error
+  // toast, never the old FALSE success. The px→ratio conversion stays in the core (single point).
   const onColCommit = useCallback(
     async (newBoundaries: number[]) => {
-      if (!editTarget) return;
+      if (!editTarget || !editTarget.boundaries) return;
+      const before = editTarget.boundaries;
       try {
         await core.edit.setColumnWidths(editTarget.section, editTarget.block, boundariesToRatios(newBoundaries));
+        const after = await core.session.colBoundaries(editTarget.page, editTarget.section, editTarget.block);
+        if (after && !appliedReflectsDrag(before, newBoundaries, after)) {
+          toast("열 너비 변경이 반영되지 않았습니다 — 다시 시도하세요");
+          return;
+        }
         toast("열 너비를 변경했습니다");
       } catch (e) {
         if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`열 너비 변경 실패: ${e}`);
+      }
+    },
+    [core, editTarget, toast, onTrap],
+  );
+
+  // 행 높이 커밋 (issue 031): remap the dragged FRAGMENT boundaries to a WHOLE-table HWPUNIT `heights`
+  // vector (rows outside the on-page fragment stay 0 = content-sized — the v2 split-table fix), apply
+  // SetTableRowHeights, then RE-QUERY + verify the dragged edge moved (apply-verify — false-success 차단).
+  const onRowCommit = useCallback(
+    async (newBoundaries: number[]) => {
+      if (!editTarget || !editTarget.rowBoundaries || !editTarget.tableBox) return;
+      const before = editTarget.rowBoundaries;
+      const { first_row, rows } = editTarget.tableBox;
+      const heights = remapFragmentHeights(newBoundaries, first_row, rows);
+      try {
+        await core.edit.setRowHeights(editTarget.section, editTarget.block, heights);
+        const after = await core.session.rowBoundaries(editTarget.page, editTarget.section, editTarget.block);
+        if (after && !appliedReflectsDrag(before, newBoundaries, after)) {
+          toast("행 높이 변경이 반영되지 않았습니다 — 다시 시도하세요");
+          return;
+        }
+        toast("행 높이를 변경했습니다");
+      } catch (e) {
+        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`행 높이 변경 실패: ${e}`);
       }
     },
     [core, editTarget, toast, onTrap],
@@ -611,6 +651,15 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                         height={editTarget.tableBox.h}
                         scale={scale}
                         onCommit={(b) => void onColCommit(b)}
+                      />
+                    )}
+                    {editingOn && editTarget && editTarget.page === page && editTarget.rowBoundaries && editTarget.tableBox && (
+                      <RowResizeOverlay
+                        boundaries={editTarget.rowBoundaries}
+                        left={editTarget.tableBox.x}
+                        width={editTarget.tableBox.w}
+                        scale={scale}
+                        onCommit={(b) => void onRowCommit(b)}
                       />
                     )}
                     {/* issue 028: hide the floating toolbar mid-gesture. `pointerActive` is true for the

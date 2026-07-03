@@ -20,8 +20,8 @@ export type { FontPickerProps } from "./components/FontPicker";
 
 // Issue 027 — editing-parity opt-in components. Each is individually importable and drives a single
 // @tf-hwp/editor-core command; a host can compose them WITHOUT HwpWorkspace (see the README recipe).
-export { ColumnResizeOverlay } from "./components/ColumnResizeOverlay";
-export type { ColumnResizeOverlayProps } from "./components/ColumnResizeOverlay";
+export { ColumnResizeOverlay, RowResizeOverlay } from "./components/ColumnResizeOverlay";
+export type { ColumnResizeOverlayProps, RowResizeOverlayProps } from "./components/ColumnResizeOverlay";
 export { TableInsertButton } from "./components/TableInsertButton";
 export type { TableInsertButtonProps } from "./components/TableInsertButton";
 export { Ruler } from "./components/Ruler";

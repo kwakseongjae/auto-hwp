@@ -50,22 +50,103 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
     expect(JSON.parse(intent.json).blocks[0].rows).toHaveLength(2);
   });
 
-  it("marking a table shows column-resize grips; a drag commits SetTableColWidths (1 undo)", async () => {
-    const adapter = new MockAdapter({ table, colBoundaries: [40, 140, 240, 340], pageGeom: { w: 794, h: 1123, ml: 90, mt: 90, mr: 90, mb: 90 }, pages: 1 });
+  it("marking a table shows column-resize grips; a drag MOVES the boundary + commits SetTableColWidths (issue 031)", async () => {
+    // liveResize: the engine reflects the ratios back so apply-verify confirms movement (SUCCESS path).
+    const adapter = new MockAdapter({ table, colBoundaries: [40, 140, 240, 340], liveResize: true, pageGeom: { w: 794, h: 1123, ml: 90, mt: 90, mr: 90, mb: 90 }, pages: 1 });
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
     // click the table → whole-table mark.
     fireEvent.pointerDown(sheet, { clientX: 100, clientY: 100, button: 0, pointerId: 1 });
     fireEvent.pointerUp(sheet, { clientX: 100, clientY: 100, button: 0, pointerId: 1 });
     const grip = await screen.findByTestId("hw-col-grip-1");
+    const leftBefore = parseFloat((grip as HTMLElement).style.left); // rendered boundary x (client px)
     const resize = screen.getByTestId("hw-col-resize");
+    // Drag the interior boundary to the RIGHT (issue 031 root cause was: this preview never moved).
     fireEvent.pointerDown(grip, { clientX: 140, clientY: 100, pointerId: 2 });
-    fireEvent.pointerMove(resize, { clientX: 180, clientY: 100, pointerId: 2 });
-    fireEvent.pointerUp(resize, { clientX: 180, clientY: 100, pointerId: 2 });
+    fireEvent.pointerMove(resize, { clientX: 220, clientY: 100, pointerId: 2 });
+    fireEvent.pointerUp(resize, { clientX: 220, clientY: 100, pointerId: 2 });
     await waitFor(() => {
       const applied = adapter.applied.find((i) => i.intent === "SetTableColWidths") as (Intent & { widths: number[] }) | undefined;
       expect(applied).toBeTruthy();
       expect(applied!.widths.length).toBe(3);
+    });
+    // apply-verify SUCCESS toast (NOT the false-success no-op): the boundary was confirmed moved.
+    await waitFor(() => expect(screen.getByText("열 너비를 변경했습니다")).toBeTruthy());
+    // the rendered grip actually moved right (the drag preview + re-queried geometry both reflect it).
+    await waitFor(() => {
+      const g = screen.getByTestId("hw-col-grip-1") as HTMLElement;
+      expect(parseFloat(g.style.left)).toBeGreaterThan(leftBefore + 15);
+    });
+  });
+
+  it("FROZEN engine (no geometry change) → apply-verify ERROR toast, NOT a false success (issue 031)", async () => {
+    // No liveResize → tableColBoundaries stays frozen: the classic no-op that used to toast success.
+    const adapter = new MockAdapter({ table, colBoundaries: [40, 140, 240, 340], pageGeom: { w: 794, h: 1123, ml: 90, mt: 90, mr: 90, mb: 90 }, pages: 1 });
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const sheet = await sheetOf(container);
+    fireEvent.pointerDown(sheet, { clientX: 100, clientY: 100, button: 0, pointerId: 1 });
+    fireEvent.pointerUp(sheet, { clientX: 100, clientY: 100, button: 0, pointerId: 1 });
+    const grip = await screen.findByTestId("hw-col-grip-1");
+    const resize = screen.getByTestId("hw-col-resize");
+    fireEvent.pointerDown(grip, { clientX: 140, clientY: 100, pointerId: 2 });
+    fireEvent.pointerMove(resize, { clientX: 220, clientY: 100, pointerId: 2 });
+    fireEvent.pointerUp(resize, { clientX: 220, clientY: 100, pointerId: 2 });
+    // the intent IS sent (the op-bus tried), but the re-query showed no movement → HONEST error toast.
+    await waitFor(() => expect(adapter.applied.some((i) => i.intent === "SetTableColWidths")).toBe(true));
+    await waitFor(() => expect(screen.getByText("열 너비 변경이 반영되지 않았습니다 — 다시 시도하세요")).toBeTruthy());
+    expect(screen.queryByText("열 너비를 변경했습니다")).toBeNull();
+  });
+
+  it("marking a table shows ROW-resize grips; a drag commits SetTableRowHeights (whole-table heights, issue 031)", async () => {
+    const adapter = new MockAdapter({ table, rowBoundaries: [60, 100, 140, 180], liveResize: true, pageGeom: { w: 794, h: 1123, ml: 90, mt: 90, mr: 90, mb: 90 }, pages: 1 });
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const sheet = await sheetOf(container);
+    fireEvent.pointerDown(sheet, { clientX: 100, clientY: 100, button: 0, pointerId: 1 });
+    fireEvent.pointerUp(sheet, { clientX: 100, clientY: 100, button: 0, pointerId: 1 });
+    const grip = await screen.findByTestId("hw-row-grip-1");
+    const topBefore = parseFloat((grip as HTMLElement).style.top);
+    const resize = screen.getByTestId("hw-row-resize");
+    // Drag the interior row boundary DOWN → row 0 grows.
+    fireEvent.pointerDown(grip, { clientX: 100, clientY: 90, pointerId: 3 });
+    fireEvent.pointerMove(resize, { clientX: 100, clientY: 110, pointerId: 3 });
+    fireEvent.pointerUp(resize, { clientX: 100, clientY: 110, pointerId: 3 });
+    await waitFor(() => {
+      const applied = adapter.applied.find((i) => i.intent === "SetTableRowHeights") as (Intent & { heights: number[] }) | undefined;
+      expect(applied).toBeTruthy();
+      expect(applied!.heights.length).toBe(3); // WHOLE-table heights (table.rows === 3)
+      expect(applied!.heights[0]).toBeGreaterThan(3000); // row 0 grew past its ~40px (3000 HWPUNIT) content
+    });
+    await waitFor(() => expect(screen.getByText("행 높이를 변경했습니다")).toBeTruthy());
+    await waitFor(() => {
+      const g = screen.getByTestId("hw-row-grip-1") as HTMLElement;
+      expect(parseFloat(g.style.top)).toBeGreaterThan(topBefore); // boundary moved down
+    });
+  });
+
+  it("SPLIT table: a fragment row drag remaps to a WHOLE-table heights vector, 0 outside the fragment (issue 031 v2)", async () => {
+    // A split table whose on-page FRAGMENT covers GLOBAL rows 2..3 (first_row=2) of a 5-row table. The
+    // fragment boundaries are page-local; the commit must build a length-5 heights vector with the dragged
+    // heights at indices 2,3 and 0 (content-sized) everywhere else — the v1 fail-safe this replaces.
+    const split: TableBox = { section: 0, block: 1, x: 40, y: 200, w: 300, h: 80, rows: 5, cols: 3, first_row: 2 };
+    const adapter = new MockAdapter({ table: split, rowBoundaries: [200, 240, 280], liveResize: true, pageGeom: { w: 794, h: 1123, ml: 90, mt: 90, mr: 90, mb: 90 }, pages: 1 });
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const sheet = await sheetOf(container);
+    fireEvent.pointerDown(sheet, { clientX: 100, clientY: 210, button: 0, pointerId: 1 });
+    fireEvent.pointerUp(sheet, { clientX: 100, clientY: 210, button: 0, pointerId: 1 });
+    const grip = await screen.findByTestId("hw-row-grip-1");
+    const resize = screen.getByTestId("hw-row-resize");
+    fireEvent.pointerDown(grip, { clientX: 100, clientY: 216, pointerId: 3 });
+    fireEvent.pointerMove(resize, { clientX: 100, clientY: 232, pointerId: 3 });
+    fireEvent.pointerUp(resize, { clientX: 100, clientY: 232, pointerId: 3 });
+    await waitFor(() => {
+      const applied = adapter.applied.find((i) => i.intent === "SetTableRowHeights") as (Intent & { heights: number[] }) | undefined;
+      expect(applied).toBeTruthy();
+      expect(applied!.heights.length).toBe(5); // WHOLE table, not the 2-row fragment (v1's engine error)
+      expect(applied!.heights[0]).toBe(0); // rows OUTSIDE the fragment stay content-sized
+      expect(applied!.heights[1]).toBe(0);
+      expect(applied!.heights[4]).toBe(0);
+      expect(applied!.heights[2]).toBeGreaterThan(0); // the fragment rows carry the dragged heights
+      expect(applied!.heights[3]).toBeGreaterThan(0);
     });
   });
 

@@ -49,6 +49,13 @@ export interface EngineAdapter {
    *  the reference `TauriAdapter`) OMIT this method — the caller then hides the column-resize handles. */
   tableColBoundaries?(page: number, section: number, block: number): Promise<number[] | null>;
 
+  /** OPTIONAL — row-boundary y-positions (own-render PAGE px) of the table at `(section, block)` on
+   *  `page`: `rows + 1` absolute px from the table's top to its bottom, for the ROW-height resize handles
+   *  (issue 031). A SPLIT table returns the per-page FRAGMENT's boundaries (rebased to the fragment top —
+   *  023). Resolves to `null` when the table isn't on the page. Backends that can't answer (e.g. the
+   *  reference `TauriAdapter`) OMIT this method — the caller then hides the row-resize handles. */
+  tableRowBoundaries?(page: number, section: number, block: number): Promise<number[] | null>;
+
   /** OPTIONAL — page geometry (own-render PAGE px): the page box + printable-area margins of `page`, for
    *  the ruler (issue 027). Resolves to `null` when the page is out of range. Backends that omit it →
    *  the caller hides the ruler's margin handles. */

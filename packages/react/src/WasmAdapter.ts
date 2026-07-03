@@ -107,6 +107,10 @@ export class WasmAdapter implements EngineAdapter {
     return this.guard((d) => d.tableColBoundaries(page, section, block));
   }
 
+  tableRowBoundaries(page: number, section: number, block: number): Promise<number[] | null> {
+    return this.guard((d) => d.tableRowBoundaries(page, section, block));
+  }
+
   pageGeometry(page: number): Promise<PageGeom | null> {
     return this.guard((d) => d.pageGeometry(page) as PageGeom | null);
   }

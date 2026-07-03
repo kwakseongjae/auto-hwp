@@ -76,6 +76,14 @@ export class EditController {
     return this.session.applyBatch([{ intent: "SetTableColWidths", section, index, widths }]);
   }
 
+  /** 행 높이 (issue 031): apply a WHOLE-table per-row minimum-height override to a table
+   *  (INTENT-SCHEMA `SetTableRowHeights`, HWPUNIT; `0` = content-sized). `heights.length` MUST equal the
+   *  table's row count — the px→HWPUNIT + split-table fragment→whole-table remap lives in `units.ts`
+   *  (`remapFragmentHeights`), so the UI passes the already-derived whole-table `heights`. One undo batch. */
+  async setRowHeights(section: number, index: number, heights: number[]): Promise<number> {
+    return this.session.applyBatch([{ intent: "SetTableRowHeights", section, index, heights }]);
+  }
+
   /** 표 추가 (step 2): append a fresh `rows × cols` empty table at the document END via `ApplyContent`
    *  (the existing insert path — no `InsertTableAt` op exists; see the issue note). One undo batch. */
   async insertTable(rows: number, cols: number, section = 0): Promise<number> {

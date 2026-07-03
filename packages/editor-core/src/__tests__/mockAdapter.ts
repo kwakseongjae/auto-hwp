@@ -24,6 +24,8 @@ export class MockAdapter implements EngineAdapter {
       blocks?: BlockHit[];
       /** Canned column boundaries for `tableColBoundaries` (issue 027). Omit to OMIT the method. */
       colBoundaries?: number[] | null;
+      /** Canned row boundaries for `tableRowBoundaries` (issue 031). Omit to OMIT the method. */
+      rowBoundaries?: number[] | null;
       /** Canned page geometry for `pageGeometry` (issue 027). Omit to OMIT the method. */
       pageGeom?: PageGeom | null;
       /** Canned current runs for `blockRuns` (issue 027 run-preservation). Omit to OMIT the method. */
@@ -36,6 +38,7 @@ export class MockAdapter implements EngineAdapter {
     if (!("cell" in this.opts)) (this as { tableCellAt?: unknown }).tableCellAt = undefined;
     if (!("blocks" in this.opts)) (this as { blocksInRect?: unknown }).blocksInRect = undefined;
     if (!("colBoundaries" in this.opts)) (this as { tableColBoundaries?: unknown }).tableColBoundaries = undefined;
+    if (!("rowBoundaries" in this.opts)) (this as { tableRowBoundaries?: unknown }).tableRowBoundaries = undefined;
     if (!("pageGeom" in this.opts)) (this as { pageGeometry?: unknown }).pageGeometry = undefined;
     if (!("runs" in this.opts)) (this as { blockRuns?: unknown }).blockRuns = undefined;
   }
@@ -67,6 +70,9 @@ export class MockAdapter implements EngineAdapter {
   }
   async tableColBoundaries(): Promise<number[] | null> {
     return this.opts.colBoundaries ?? null;
+  }
+  async tableRowBoundaries(): Promise<number[] | null> {
+    return this.opts.rowBoundaries ?? null;
   }
   async pageGeometry(): Promise<PageGeom | null> {
     return this.opts.pageGeom ?? null;

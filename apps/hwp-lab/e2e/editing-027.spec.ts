@@ -51,20 +51,58 @@ test("표 추가: 툴바 버튼 → 2×3 픽커 → ApplyContent 로 표 삽입 
   await expect(page.locator(".hw-status")).toContainText("실행취소", { timeout: 30_000 });
 });
 
-test("열너비 드래그: 표 선택 → 열 경계 핸들 드래그 → SetTableColWidths", async ({ page }) => {
+test("열너비 드래그: 표 선택 → 핸들 드래그 → 경계가 실제로 오른쪽으로 이동 (issue 031 시각 assert)", async ({ page }) => {
   await open(page);
   // 다열 표를 찾을 때까지 스캔(열 경계 핸들 hw-col-grip-1 이 뜨는 지점).
   const found = await scanForClick(page, '[data-testid="hw-col-grip-1"]');
   expect(found, "다열 표를 찾아 열 경계 핸들이 떠야 한다").toBeTruthy();
-  const grip = page.locator('[data-testid="hw-col-grip-1"]').first();
-  const gb = await grip.boundingBox();
+  const gripSel = '[data-testid="hw-col-grip-1"]';
+  const gb = await page.locator(gripSel).first().boundingBox();
   if (!gb) throw new Error("열 경계 핸들 박스를 찾지 못함");
-  // 핸들을 오른쪽으로 40px 드래그(프리뷰 → 놓으면 비율 적용).
-  await page.mouse.move(gb.x + gb.width / 2, gb.y + gb.height / 2);
+  const xBefore = gb.x + gb.width / 2;
+  // 핸들을 오른쪽으로 48px 드래그(프리뷰 → 놓으면 비율 적용).
+  await page.mouse.move(xBefore, gb.y + gb.height / 2);
   await page.mouse.down();
-  await page.mouse.move(gb.x + gb.width / 2 + 40, gb.y + gb.height / 2, { steps: 6 });
+  await page.mouse.move(xBefore + 48, gb.y + gb.height / 2, { steps: 8 });
   await page.mouse.up();
-  await expect(page.locator(".hw-status")).toContainText("열 너비를 변경", { timeout: 30_000 });
+  // 성공 토스트(apply-verify 통과 — 무반영이면 에러 토스트가 뜬다).
+  await expect(page.locator(".hw-status")).toContainText("열 너비를 변경했습니다", { timeout: 30_000 });
+  // ★ 시각 이동 assert(031): 커밋 후 재조회된 핸들이 실제로 +15px 이상 오른쪽으로 이동했는지 확인.
+  //   (intent 발사만 확인하던 기존 방식은 무반영 버그를 통과시켰다.)
+  await expect
+    .poll(async () => {
+      const b = await page.locator(gripSel).first().boundingBox();
+      return b ? b.x + b.width / 2 : -1;
+    }, { timeout: 30_000 })
+    .toBeGreaterThan(xBefore + 15);
+  await page.locator('.hw-tool[title="실행취소"]').click();
+  await expect(page.locator(".hw-status")).toContainText("실행취소", { timeout: 30_000 });
+});
+
+test("행높이 드래그: 표 선택 → 행 핸들 드래그 → 행 경계가 실제로 아래로 성장 (issue 031)", async ({ page }) => {
+  await open(page);
+  // 행 경계 핸들 hw-row-grip-1 이 뜨는 다행 표를 찾는다.
+  const found = await scanForClick(page, '[data-testid="hw-row-grip-1"]');
+  expect(found, "다행 표를 찾아 행 경계 핸들이 떠야 한다").toBeTruthy();
+  const gripSel = '[data-testid="hw-row-grip-1"]';
+  const gb = await page.locator(gripSel).first().boundingBox();
+  if (!gb) throw new Error("행 경계 핸들 박스를 찾지 못함");
+  const yBefore = gb.y + gb.height / 2;
+  // 핸들을 아래로 48px 드래그 → 위 행이 커진다.
+  await page.mouse.move(gb.x + gb.width / 2, yBefore);
+  await page.mouse.down();
+  await page.mouse.move(gb.x + gb.width / 2, yBefore + 48, { steps: 8 });
+  await page.mouse.up();
+  await expect(page.locator(".hw-status")).toContainText("행 높이를 변경했습니다", { timeout: 30_000 });
+  // ★ 시각 성장 assert(031): 커밋 후 재조회된 행 핸들이 아래로 이동(행이 커짐)했는지 확인. 아래 행이
+  //   최소높이 밑으로 줄지 못하므로 위 행 성장폭은 클램프로 제한된다 — 무반영(0px) 버그와는 확실히
+  //   구별되는 양(+4px 이상)이면 충분하다(주 신호는 apply-verify 성공 토스트: 무반영이면 에러 토스트).
+  await expect
+    .poll(async () => {
+      const b = await page.locator(gripSel).first().boundingBox();
+      return b ? b.y + b.height / 2 : -1;
+    }, { timeout: 30_000 })
+    .toBeGreaterThan(yBefore + 4);
   await page.locator('.hw-tool[title="실행취소"]').click();
   await expect(page.locator(".hw-status")).toContainText("실행취소", { timeout: 30_000 });
 });
