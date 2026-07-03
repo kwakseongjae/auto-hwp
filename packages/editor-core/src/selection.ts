@@ -18,6 +18,13 @@ import type { Anchor, BlockHit, CellHit, PointerInput, Selection, SelMarquee, Ta
  *  a client point is supplied (zoom-independent), else in page px. */
 export const DRAG_THRESHOLD_PX = 4;
 
+/** A keyboard cell-navigation direction (issue 036). Spreadsheet/Figma arrow-key semantics. */
+export type CellDir = "up" | "down" | "left" | "right";
+
+/** How far PAST the current cell's box edge `moveCell` probes for the neighbour, in own-render PAGE px.
+ *  A few px reliably clears the ~1px cell border and lands inside the (much wider) neighbour cell. */
+const CELL_PROBE_PX = 3;
+
 /** Selection identity for replace/toggle/union dedup. A whole-block selection (paragraph/table from
  *  click or marquee) is identified by `(section, block)`; a CELL anchor (issue 023) additionally by its
  *  `rows`/`cols` so distinct cells of the SAME table are distinct selections (⌘-click toggles the exact
@@ -335,5 +342,91 @@ export class SelectionModel {
   /** Remove the i-th selection item (anchor chip ✕). */
   removeAt(i: number): void {
     this.setSelection(this.sels.filter((_, k) => k !== i));
+  }
+
+  // ── keyboard cell navigation (issue 036) ──────────────────────────────────
+  /** The single "active" CELL to navigate from = the LAST cell selection (spreadsheet: arrow keys move the
+   *  one active cell). Non-cell selections are ignored. `null` when nothing cell-like is selected. */
+  activeCell(): Selection | null {
+    for (let i = this.sels.length - 1; i >= 0; i--) {
+      if (this.sels[i].anchor.kind === "cell") return this.sels[i];
+    }
+    return null;
+  }
+
+  /// moveCell — keyboard cell navigation (issue 036). Move the active CELL selection ONE cell in `dir`,
+  /// REPLACING the selection with the new cell (Figma/spreadsheet). There is no engine "cell box by
+  /// address" query (and the engine is frozen), so we RE-PROBE `tableCellAt` a few px PAST the current
+  /// cell's box edge — the adapter's own geometry decides the neighbour. Resolves `true` if the selection
+  /// moved, `false` when it CLAMPED (a table/document boundary → stay put) or there is no active cell.
+  ///
+  /// MERGED-CELL RULE (measured against hwp-typeset place.rs — PlacedCell.w/h span the WHOLE merge:
+  /// `cw = col_x[col+col_span] - col_x[col]`, and the cell address is the merge's TOP-LEFT origin). Because
+  /// the mark box already spans the whole merged rectangle, probing PAST `box.x+box.w` / `box.y+box.h`
+  /// lands in the cell AFTER the span — i.e. "다음 좌표 = span 끝+1" — with no col_span/row_span needed
+  /// (CellHit does not even carry the span). Clamping is implicit: a probe off the table → `tableCellAt`
+  /// null → no move.
+  ///
+  /// SPLIT TABLE (전역 row): a vertical probe that falls off the on-page fragment top/bottom re-tries on the
+  /// ADJACENT page's fragment of the SAME `(section, block)` (issue 023 — the row is already model-global,
+  /// so the next fragment's top row is exactly `row+1`). Needs `tableRowBoundaries`; a backend that omits it
+  /// simply clamps at the page break (graceful, TauriAdapter parity).
+  async moveCell(dir: CellDir): Promise<boolean> {
+    const active = this.activeCell();
+    if (!active || !this.adapter.tableCellAt) return false;
+    const { page, box } = active.mark;
+    const { section, block } = active.anchor;
+    const r = active.anchor.rows?.[0] ?? 0;
+    const c = active.anchor.cols?.[0] ?? 0;
+    try {
+      // 1) Same-page neighbour: probe just past the current cell's box edge in `dir`.
+      let px: number;
+      let py: number;
+      switch (dir) {
+        case "right": px = box.x + box.w + CELL_PROBE_PX; py = box.y + box.h / 2; break;
+        case "left": px = box.x - CELL_PROBE_PX; py = box.y + box.h / 2; break;
+        case "down": px = box.x + box.w / 2; py = box.y + box.h + CELL_PROBE_PX; break;
+        case "up": px = box.x + box.w / 2; py = box.y - CELL_PROBE_PX; break;
+      }
+      const near = await this.adapter.tableCellAt(page, px, py);
+      // Accept only a DIFFERENT cell of the SAME table (never re-select the current/merged-origin cell, and
+      // never jump into a neighbouring/nested table — that clamps at this table's own boundary).
+      if (near && near.section === section && near.block === block && !(near.row === r && near.col === c)) {
+        return this.applyCellMove(page, near);
+      }
+      // 2) Vertical fall-through across a SPLIT-table page break (전역 row → next/prev fragment).
+      if ((dir === "up" || dir === "down") && this.adapter.tableRowBoundaries) {
+        const target = dir === "down" ? page + 1 : page - 1;
+        if (target < 0) return false;
+        let count = Infinity;
+        try {
+          count = await this.adapter.pageCount();
+        } catch {
+          /* fall through — the rowBoundaries null-guard below still protects an out-of-range query */
+        }
+        if (target >= count) return false;
+        const rowB = await this.adapter.tableRowBoundaries(target, section, block);
+        if (rowB && rowB.length >= 2) {
+          const cx = box.x + box.w / 2; // columns align across fragments → the same absolute x holds
+          const cy = dir === "down" ? rowB[0] + CELL_PROBE_PX : rowB[rowB.length - 1] - CELL_PROBE_PX;
+          const cross = await this.adapter.tableCellAt(target, cx, cy);
+          if (cross && cross.section === section && cross.block === block) return this.applyCellMove(target, cross);
+        }
+      }
+    } catch (e) {
+      this.errors.emit(e);
+    }
+    return false; // clamp: at a table/document boundary → stay put
+  }
+
+  // Replace the selection with the moved-to cell (deriveSel gives the same cell mark/anchor/label as a
+  // click), clearing any drag/marquee. Returns true (the caller reports "moved").
+  private applyCellMove(page: number, cell: CellHit): boolean {
+    const sel = deriveSel(page, null, cell, null);
+    if (!sel) return false;
+    this.drag = null;
+    if (this.marquee) this.setMarquee(null);
+    this.setSelection([sel]);
+    return true;
   }
 }

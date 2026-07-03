@@ -24,8 +24,9 @@ export class MockAdapter implements EngineAdapter {
       blocks?: BlockHit[];
       /** Canned column boundaries for `tableColBoundaries` (issue 027). Omit to OMIT the method. */
       colBoundaries?: number[] | null;
-      /** Canned row boundaries for `tableRowBoundaries` (issue 031). Omit to OMIT the method. */
-      rowBoundaries?: number[] | null;
+      /** Canned row boundaries for `tableRowBoundaries` (issue 031), or a page-aware resolver (so a split
+       *  table returns a different per-page FRAGMENT — issue 036 cross-page cell nav). Omit to OMIT it. */
+      rowBoundaries?: number[] | null | ((page: number, section: number, block: number) => number[] | null);
       /** Canned page geometry for `pageGeometry` (issue 027). Omit to OMIT the method. */
       pageGeom?: PageGeom | null;
       /** Canned current runs for `blockRuns` (issue 027 run-preservation). Omit to OMIT the method. */
@@ -71,8 +72,9 @@ export class MockAdapter implements EngineAdapter {
   async tableColBoundaries(): Promise<number[] | null> {
     return this.opts.colBoundaries ?? null;
   }
-  async tableRowBoundaries(): Promise<number[] | null> {
-    return this.opts.rowBoundaries ?? null;
+  async tableRowBoundaries(page: number, section: number, block: number): Promise<number[] | null> {
+    const rb = this.opts.rowBoundaries;
+    return (typeof rb === "function" ? rb(page, section, block) : rb) ?? null;
   }
   async pageGeometry(): Promise<PageGeom | null> {
     return this.opts.pageGeom ?? null;

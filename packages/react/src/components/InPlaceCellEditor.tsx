@@ -63,9 +63,15 @@ export interface InPlaceCellEditorProps {
   onCommit: (text: string) => void | Promise<void>;
   /** Fired on cancel (Esc). */
   onCancel: () => void;
+  /** OPTIONAL (issue 036): Tab / Shift+Tab inside a CELL editor = commit THEN move to the right/left cell
+   *  and re-enter edit. The host commits (run-preserving) and, ONLY on a successful commit, navigates +
+   *  re-opens the editor. Like `onCommit` it may REJECT (commit failed) → the editor un-latches and stays
+   *  open with the move CANCELLED (031 apply-verify spirit). Omitted (e.g. a paragraph editor) → Tab is the
+   *  textarea default. IME-safe: never fires mid Korean composition. */
+  onCommitMove?: (dir: "left" | "right", text: string) => void | Promise<void>;
 }
 
-export function InPlaceCellEditor({ box, scale, initialText, fontSizePt, onCommit, onCancel }: InPlaceCellEditorProps) {
+export function InPlaceCellEditor({ box, scale, initialText, fontSizePt, onCommit, onCancel, onCommitMove }: InPlaceCellEditorProps) {
   const [text, setText] = useState(initialText);
   const composing = useRef(false);
   // Latched once a commit/cancel is in flight so the trailing blur (or a second Enter) can't double-fire.
@@ -111,11 +117,33 @@ export function InPlaceCellEditor({ box, scale, initialText, fontSizePt, onCommi
     onCancel();
   }, [onCancel]);
 
+  // Tab / Shift+Tab = commit-then-move (issue 036). Same latch + IME gate + reject→un-latch as `commit`,
+  // but routed through `onCommitMove` so the host moves + re-enters ONLY on a successful commit.
+  const commitMove = useCallback(
+    (dir: "left" | "right") => {
+      if (!onCommitMove) return;
+      if (done.current) return;
+      if (composing.current) return; // never commit mid IME composition
+      done.current = true;
+      Promise.resolve(onCommitMove(dir, text)).catch(() => {
+        done.current = false; // commit failed → un-latch, move cancelled, editor stays open (031)
+      });
+    },
+    [text, onCommitMove],
+  );
+
   const onKeyDown = useCallback(
     (ev: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (ev.key === "Escape") {
         ev.preventDefault();
         cancel();
+        return;
+      }
+      // Tab=오른쪽 셀로 저장+이동, Shift+Tab=왼쪽 (only when the host wired onCommitMove — a cell editor).
+      if (ev.key === "Tab" && onCommitMove) {
+        if (composing.current || (ev.nativeEvent as { isComposing?: boolean }).isComposing) return;
+        ev.preventDefault();
+        commitMove(ev.shiftKey ? "left" : "right");
         return;
       }
       // Enter=저장, Shift+Enter=개행(default). Guard the IME gate: the Enter that CONFIRMS a composition
@@ -126,7 +154,7 @@ export function InPlaceCellEditor({ box, scale, initialText, fontSizePt, onCommi
         commit();
       }
     },
-    [commit, cancel],
+    [commit, cancel, commitMove, onCommitMove],
   );
 
   return (

@@ -21,7 +21,7 @@ export {
   blockHitToSel,
   mergeSelection,
 } from "./selection";
-export type { SelectResult } from "./selection";
+export type { SelectResult, CellDir } from "./selection";
 
 // Edit assembly / preview / apply + the issue-027 manual edit command types
 export { EditController } from "./edit";

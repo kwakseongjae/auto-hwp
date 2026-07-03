@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { EngineAdapter, Intent, DocContext, PointerInput, PageGeom, Box, Selection, TableBox } from "@tf-hwp/editor-core";
+import type { EngineAdapter, Intent, DocContext, PointerInput, PageGeom, Box, CellDir, Selection, TableBox } from "@tf-hwp/editor-core";
 import { boundariesToRatios, remapFragmentHeights, appliedReflectsDrag, firstRunStyle } from "@tf-hwp/editor-core";
 import { modLabel } from "../platform";
 import { ZOOM_STEP, clampZoom, isEditableTarget, panBy, wheelToZoomFactor, zoomAt } from "../viewport";
@@ -17,6 +17,15 @@ import { FloatingToolbar, type ToolbarAlign } from "./FloatingToolbar";
 import { buildFontFaceCss, type FontCatalogEntry } from "../fonts";
 
 const A4_W = 794; // CSS px for 210mm @ 96dpi (mirrors HwpPageView) — the 100% page width.
+
+// Arrow key → cell-nav direction (issue 036). Only these four keys navigate; everything else falls through
+// to the document default (native scroll / editor caret).
+const ARROW_DIR: Record<string, CellDir | undefined> = {
+  ArrowRight: "right",
+  ArrowLeft: "left",
+  ArrowUp: "up",
+  ArrowDown: "down",
+};
 
 // ── dev-only render instrumentation (issue 030) ─────────────────────────────────────────────────────
 // Counts how many times HwpWorkspace itself commits. The marquee decoupling means a pointermove during a
@@ -159,6 +168,15 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const anchors = useMemo(() => selection.map((s) => s.anchor), [selection]);
   const marks = useMemo<Mark[]>(() => selection.map((s) => s.mark), [selection]);
   const mod = useMemo(() => modLabel(), []);
+
+  // Live mirrors so the (once-attached) cell-nav keydown listener reads the CURRENT selection/editor
+  // without re-subscribing on every change (issue 036 — coexists with the 035 window keydown). `tabMoving`
+  // suppresses the refreshToken editor-close while a Tab commit-move re-enters the next cell.
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
+  const editorRef = useRef(editor);
+  editorRef.current = editor;
+  const tabMovingRef = useRef(false);
 
   const toast = useCallback((s: string) => {
     setStatus(s);
@@ -525,7 +543,10 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   }, [editingOn, meta, refreshToken, core]);
 
   // Close the editor when the layout re-flows (an applied edit) so it never floats over stale geometry.
+  // EXCEPTION (issue 036): a Tab commit-move re-flows too, but it re-opens the editor at the NEXT cell
+  // itself — so skip the close while `tabMoving` is set, or it would clobber that re-entry.
   useEffect(() => {
+    if (tabMovingRef.current) return;
     setEditor(null);
   }, [refreshToken]);
 
@@ -631,6 +652,66 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     [adapter, core, onTrap],
   );
 
+  // Open the in-place editor directly over a SELECTED cell (issue 036 Enter/Tab entry). Unlike
+  // `openEditorAt` (which re-hit-tests a click point) this reads the cell address + rect straight off the
+  // selection, then reads the FIRST-run size (027 runs path) so the editor renders at the cell's own size.
+  const openCellEditor = useCallback(
+    async (sel: Selection): Promise<void> => {
+      const { anchor, mark } = sel;
+      if (anchor.kind !== "cell") return;
+      const row = anchor.rows?.[0] ?? 0;
+      const col = anchor.cols?.[0] ?? 0;
+      try {
+        const runs = await core.session.runsAt(anchor.section, anchor.block, row, col);
+        setEditor({ page: mark.page, box: mark.box, section: anchor.section, block: anchor.block, kind: "cell", rows: [row, row], cols: [col, col], text: anchor.text ?? "", fontSizePt: firstRunStyle(runs).size_pt });
+      } catch (e) {
+        onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
+      }
+    },
+    [core, onTrap],
+  );
+
+  // Minimal scrollIntoView for a cell rect (own-render PAGE px on `page`): scroll the canvas ONLY enough to
+  // bring the cell inside the viewport (with a small margin), like a spreadsheet's scroll-on-nav. The
+  // page-px → client-px scale is read from the sheet's own SVG (rendered width / viewBox width).
+  const scrollCellIntoView = useCallback((page: number, box: Box) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const sheet = canvas.querySelector(`.hw-sheet[data-page="${page}"]`);
+    const svg = sheet?.querySelector("svg") as SVGSVGElement | null;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const vbW = svg.viewBox?.baseVal?.width || rect.width;
+    const scale = vbW > 0 ? rect.width / vbW : 1;
+    const cRect = canvas.getBoundingClientRect();
+    const M = 24; // keep a little breathing room around the target cell
+    const cellTop = rect.top + box.y * scale;
+    const cellBottom = rect.top + (box.y + box.h) * scale;
+    const cellLeft = rect.left + box.x * scale;
+    const cellRight = rect.left + (box.x + box.w) * scale;
+    let dTop = 0;
+    if (cellTop < cRect.top + M) dTop = cellTop - (cRect.top + M);
+    else if (cellBottom > cRect.bottom - M) dTop = cellBottom - (cRect.bottom - M);
+    let dLeft = 0;
+    if (cellLeft < cRect.left + M) dLeft = cellLeft - (cRect.left + M);
+    else if (cellRight > cRect.right - M) dLeft = cellRight - (cRect.right - M);
+    if (dTop) canvas.scrollTop += dTop;
+    if (dLeft) canvas.scrollLeft += dLeft;
+  }, []);
+
+  // Arrow-key nav: move the active cell one step (core owns the geometry), then scroll it into view.
+  const moveCellAndScroll = useCallback(
+    async (dir: CellDir): Promise<boolean> => {
+      const moved = await core.selection.moveCell(dir);
+      if (moved) {
+        const sel = core.selection.activeCell();
+        if (sel) scrollCellIntoView(sel.mark.page, sel.mark.box);
+      }
+      return moved;
+    },
+    [core, scrollCellIntoView],
+  );
+
   const onEditorCommit = useCallback(
     async (text: string) => {
       if (!editor) return;
@@ -653,6 +734,70 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     },
     [core, editor, toast, onTrap],
   );
+
+  // Tab / Shift+Tab inside a cell editor (issue 036): commit the current text, and ONLY on a successful
+  // commit move one cell right/left and re-enter edit. A commit FAILURE rethrows so the InPlaceCellEditor
+  // un-latches and stays open with the move CANCELLED (031 apply-verify spirit). `tabMoving` shields the
+  // refreshToken close effect for the whole transition (the commit re-flows), so the re-entered editor
+  // isn't clobbered; it's reset one macrotask later, AFTER React has flushed that render.
+  const onEditorCommitMove = useCallback(
+    async (dir: "left" | "right", text: string) => {
+      const ed = editorRef.current;
+      if (!ed) return;
+      tabMovingRef.current = true;
+      try {
+        if (ed.kind === "paragraph") await core.edit.editParagraphText(ed.section, ed.block, text);
+        else await core.edit.editCellText(ed.section, ed.block, ed.rows?.[0] ?? 0, ed.cols?.[0] ?? 0, text);
+        toast("텍스트를 수정했습니다");
+        // Move + re-enter. moveCell probes from the just-committed cell's box (stable x/w for a text edit)
+        // and returns the NEIGHBOUR's fresh post-edit geometry; a clamp (table edge) just closes.
+        const moved = await core.selection.moveCell(dir === "right" ? "right" : "left");
+        const next = moved ? core.selection.activeCell() : null;
+        if (next && next.anchor.kind === "cell") {
+          scrollCellIntoView(next.mark.page, next.mark.box);
+          await openCellEditor(next);
+        } else {
+          setEditor(null);
+        }
+        // Release the shield only after this task's React flush (macrotask) so the refreshToken close from
+        // the commit can't reopen-then-close the re-entered editor.
+        window.setTimeout(() => (tabMovingRef.current = false), 0);
+      } catch (e) {
+        tabMovingRef.current = false; // failed commit: no re-flow to shield; editor stays open on rethrow
+        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`텍스트 수정 실패: ${e}`);
+        throw e;
+      }
+    },
+    [core, toast, onTrap, scrollCellIntoView, openCellEditor],
+  );
+
+  // Cell-nav keydown (issue 036), a SEPARATE window listener that coexists with the 035 zoom/Space listener
+  // and the 021 Esc listener. It only acts when a SINGLE cell is selected and the focus is NOT a text-entry
+  // surface (reusing the 035 `isEditableTarget` guard — no new arithmetic): 방향키 → moveCell (셀 선택이
+  // 있을 때만 preventDefault, 페이지 스크롤과 경합 방지), Enter → 그 셀 제자리 편집. ⌘/Ctrl 조합은
+  // 035(줌)에 양보한다. Tab/Shift+Tab 은 편집 중일 때 InPlaceCellEditor 안에서 처리된다.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return; // ⌘/Ctrl combos belong to 035 (zoom) etc.
+      // A text-entry surface (in-place editor / chat composer / size input) keeps its own arrows + Enter.
+      if (isEditableTarget(e.target as Element | null) || isEditableTarget(document.activeElement)) return;
+      const sels = selectionRef.current;
+      const single = sels.length === 1 && sels[0].anchor.kind === "cell" ? sels[0] : null;
+      if (!single) return; // 비셀 선택 / 다중선택 / 무선택 → 방향키·Enter 는 문서 기본동작 유지
+      const dir = ARROW_DIR[e.key];
+      if (dir) {
+        e.preventDefault(); // 셀 선택이 있을 때만 스크롤 기본동작을 막는다 (issue 036 §함정)
+        void moveCellAndScroll(dir);
+        return;
+      }
+      if (e.key === "Enter" && editingOn && !editorRef.current) {
+        e.preventDefault();
+        void openCellEditor(single);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [editingOn, moveCellAndScroll, openCellEditor]);
 
   // Format toolbar → SetCellRangeFmt / SetCellRangeShade over the selected cell/range.
   const fmtRange = editTarget?.rows && editTarget?.cols ? { r0: editTarget.rows[0], c0: editTarget.cols[0], r1: editTarget.rows[1], c1: editTarget.cols[1] } : null;
@@ -919,7 +1064,18 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                         font size (no popover card). onCommit returns a Promise so the editor un-latches +
                         stays open on failure; onCancel (Esc) just closes it. */}
                     {editingOn && editor && editor.page === page && (
-                      <InPlaceCellEditor box={editor.box} scale={scale} initialText={editor.text} fontSizePt={editor.fontSizePt} onCommit={onEditorCommit} onCancel={() => setEditor(null)} />
+                      // `key` = the cell address so a Tab move REMOUNTS the editor at the next cell (fresh
+                      // latch + focus/select-all) instead of reusing the committed instance (issue 036).
+                      <InPlaceCellEditor
+                        key={`${editor.section}:${editor.block}:${editor.rows?.[0] ?? "p"}:${editor.cols?.[0] ?? "p"}:${editor.page}`}
+                        box={editor.box}
+                        scale={scale}
+                        initialText={editor.text}
+                        fontSizePt={editor.fontSizePt}
+                        onCommit={onEditorCommit}
+                        onCancel={() => setEditor(null)}
+                        onCommitMove={editor.kind === "cell" ? onEditorCommitMove : undefined}
+                      />
                     )}
                   </>
                 )}
