@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import type { EngineAdapter } from "../EngineAdapter";
 import { screenToPage } from "../coords";
 import { sanitizeSvg } from "../sanitize";
@@ -32,6 +32,39 @@ export function __getSheetRenderCount(): number {
 /** DEV/test helper: zero the sheet render counter (call right before a measured gesture). */
 export function __resetSheetRenderCount(): void {
   (globalThis as RenderGlobal).__hwSheetRenders = 0;
+}
+
+// ── dev-only page-selective-refresh instrumentation (issue 034) ─────────────────────────────────────
+// Per issue 034 the perf regression this file kills is "every edit re-fetches, re-sanitizes and re-injects
+// ALL pages" (measure-browser.mjs: 25p → ~107ms DOM tax). The fix compares each page's RAW svg string to
+// its previous value and only sanitizes+injects the pages that actually changed. We PROVE the fix by
+// counting, per refresh, how many pages were INJECTED (changed → paid sanitize+setState) vs SKIPPED
+// (raw string identical → no sanitize, no state churn). Same build-time `DEV_INSTRUMENT` gate as above, so
+// the counter branch is dead-code eliminated from a production bundle (prod tree-shaking verified).
+type PageRefreshGlobal = { __hwPageInject?: number; __hwPageSkip?: number };
+function bumpPageInjectCount(): void {
+  if (!DEV_INSTRUMENT) return;
+  const g = globalThis as PageRefreshGlobal;
+  g.__hwPageInject = (g.__hwPageInject ?? 0) + 1;
+}
+function bumpPageSkipCount(): void {
+  if (!DEV_INSTRUMENT) return;
+  const g = globalThis as PageRefreshGlobal;
+  g.__hwPageSkip = (g.__hwPageSkip ?? 0) + 1;
+}
+/** DEV/test helper: how many pages were sanitized+injected (i.e. changed) since the last reset. */
+export function __getPageInjectCount(): number {
+  return (globalThis as PageRefreshGlobal).__hwPageInject ?? 0;
+}
+/** DEV/test helper: how many pages were skipped (raw svg unchanged) since the last reset. */
+export function __getPageSkipCount(): number {
+  return (globalThis as PageRefreshGlobal).__hwPageSkip ?? 0;
+}
+/** DEV/test helper: zero the page inject/skip counters (call right before a measured refresh). */
+export function __resetPageRefreshCounts(): void {
+  const g = globalThis as PageRefreshGlobal;
+  g.__hwPageInject = 0;
+  g.__hwPageSkip = 0;
 }
 
 export interface HwpPageViewProps {
@@ -123,46 +156,108 @@ export function HwpPageView(props: HwpPageViewProps) {
   const { adapter, pageCount, zoom = 1, refreshToken = 0, onPageClick, onPageDoubleClick, onPagePointerDown, onPagePointerMove, onPagePointerUp, renderOverlay } = props;
   const [pages, setPages] = useState<Record<number, PageState>>({});
 
-  // Fetch + sanitize every page's SVG. Re-runs when the doc/adapter/refreshToken/pageCount changes.
+  // Per-page RAW (pre-sanitize) svg cache, kept across refreshes so a refresh can compare each page's raw
+  // string to its previous value and skip pages that didn't change (issue 034). It is tied to the current
+  // adapter; an adapter swap (new document) invalidates it so every page re-injects. A ref (not state) so
+  // updating it never itself triggers a render — the visible state lives in `pages`.
+  const rawCacheRef = useRef<{ adapter: EngineAdapter | null; raw: Record<number, string> }>({ adapter: null, raw: {} });
+
+  // Fetch every page's RAW svg, DIFF it against the previous raw string, and only sanitize+inject the
+  // pages that actually changed (issue 034 — page-selective refresh). Why content-diff and not "compute
+  // the edited page set": an edit can push content down (row growth → all later pages shift), so a naive
+  // "only the edited page" set is wrong. Comparing raw strings is reflow-safe — a shifted page's string
+  // differs, a truly-unchanged page's string is identical (025's wasm svg cache makes unchanged pages the
+  // SAME string). The comparison is on the RAW string BEFORE sanitize, so an unchanged page pays neither
+  // the sanitize (DOMParser+serialize) nor the setState/re-inject. Re-runs on doc/adapter/refresh/count.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const next: Record<number, PageState> = {};
+      const cache = rawCacheRef.current;
+      // Adapter swap → the cached raw strings belong to a different document; drop them so every page is
+      // treated as changed (full re-inject) for the new doc.
+      if (cache.adapter !== adapter) {
+        cache.adapter = adapter;
+        cache.raw = {};
+      }
+      const prevRaw = cache.raw;
+      const nextRaw: Record<number, string> = {};
+      const changed: Record<number, PageState> = {};
+      let anyChanged = false;
       for (let p = 0; p < pageCount; p++) {
+        let raw: string;
         try {
-          const clean = sanitizeSvg(await adapter.pageSvg(p)); // R7: the single injection gate
-          const { w, h } = parseViewBox(clean);
-          next[p] = { svg: clean, vbW: w, vbH: h };
+          raw = await adapter.pageSvg(p);
         } catch {
-          next[p] = { svg: "", vbW: 0, vbH: 0 }; // a failed page renders blank, not a crash
+          raw = ""; // a failed page renders blank, not a crash
         }
         if (cancelled) return;
+        nextRaw[p] = raw;
+        // Cheap string compare on the RAW svg — unchanged pages skip sanitize + setState entirely.
+        if (p in prevRaw && prevRaw[p] === raw) {
+          bumpPageSkipCount();
+          continue;
+        }
+        // Changed (or brand-new) page: pay the sanitize gate exactly once, for this page only.
+        try {
+          const clean = sanitizeSvg(raw); // R7: the single injection gate
+          const { w, h } = parseViewBox(clean);
+          changed[p] = { svg: clean, vbW: w, vbH: h };
+        } catch {
+          changed[p] = { svg: "", vbW: 0, vbH: 0 };
+        }
+        bumpPageInjectCount();
+        anyChanged = true;
       }
-      if (!cancelled) setPages(next);
+      if (cancelled) return;
+      // Commit the raw cache (scoped to the live page count — trailing pages, if the doc shrank, are gone).
+      cache.raw = nextRaw;
+      // Rebuild `pages` REUSING the unchanged PageState object references (so each PageSheet's `svg` prop is
+      // the identical string → React.memo holds → no re-render, no re-inject) and only swapping the changed
+      // pages. If nothing changed AND the page count is unchanged, keep the same object so the parent doesn't
+      // even re-render.
+      setPages((prev) => {
+        const hadExtra = Object.keys(prev).some((k) => Number(k) >= pageCount);
+        if (!anyChanged && !hadExtra) return prev;
+        const nextState: Record<number, PageState> = {};
+        for (let p = 0; p < pageCount; p++) {
+          nextState[p] = changed[p] ?? prev[p] ?? { svg: "", vbW: 0, vbH: 0 };
+        }
+        return nextState;
+      });
     })();
     return () => {
       cancelled = true;
     };
   }, [adapter, pageCount, refreshToken]);
 
+  // Latest-`pages` ref so `eventToClick` reads the current viewBox WITHOUT depending on `pages` (issue 034):
+  // a page-selective refresh changes `pages` on every edit, and if `eventToClick` (hence the five sheet
+  // handlers) churned with it, EVERY PageSheet would re-render on every refresh (memo broken by new handler
+  // refs) — defeating the "only the changed sheet re-renders" goal (§구현 5). Reading through a ref keeps
+  // the handlers stable across refreshes, so skipped pages' sheets truly do not re-render.
+  const pagesRef = useRef(pages);
+  pagesRef.current = pages;
+
   // client px → own-render PAGE px for `page` (the ONE place §4.5 lives). null when the page isn't laid
-  // out yet (zero dimension). Shared by the click and the pointer (marquee) paths.
+  // out yet (zero dimension). Shared by the click and the pointer (marquee) paths. STABLE ([] deps) — it
+  // reads live `pages` via the ref above, so handler identity survives a refresh.
   const eventToClick = useCallback(
     (page: number, ev: React.MouseEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement>): PageClick | null => {
       const svg = ev.currentTarget.querySelector("svg") as SVGSVGElement | null;
       if (!svg) return null;
       const rect = svg.getBoundingClientRect();
-      const st = pages[page];
+      const st = pagesRef.current[page];
       const vb = st && st.vbW > 0 ? { width: st.vbW, height: st.vbH } : { width: rect.width, height: rect.height };
       const pt = screenToPage(ev.clientX, ev.clientY, rect, vb);
       if (!pt) return null;
       return { page, x: pt.x, y: pt.y, meta: ev.metaKey || ev.ctrlKey, client: { x: ev.clientX, y: ev.clientY } };
     },
-    [pages],
+    [],
   );
 
   // The five sheet handlers, each STABLE (page arrives as an argument, not captured per-page) so
-  // PageSheet's memo holds across selection/marquee churn (only `pages` — an SVG re-fetch — moves them).
+  // PageSheet's memo holds across selection/marquee churn AND across a page-selective refresh — they now
+  // move only when the host swaps an on* prop, not when `pages` re-fetches (issue 034: eventToClick is [] ).
   const handleClick = useCallback(
     (page: number, ev: React.MouseEvent<HTMLDivElement>) => {
       if (!onPageClick) return;
