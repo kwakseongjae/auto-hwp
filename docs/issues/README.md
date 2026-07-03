@@ -52,7 +52,7 @@
 | [024](024-para-border-frame-overflow.md) | 자가진단표 — draw-side leading 트림(귀하 상자 안 복귀) | **done** | R3-P0 | c445cb6 · 실측이 가설 2개 뒤집음(상자=셀테두리 기렌더/귀하=과전진); 무소실 회귀테스트 tracked |
 | [025](025-layout-cache-perf.md) | 레이아웃 캐시 — hitTest 100회 293→3.8ms (**76×**), placeBuilds 100→1 | **done** | R3-P0 | 06b5fa0(amend 복구) · 동일성 2계층+무효화 5지점+골든 불변 |
 | [026](026-editor-core-sdk.md) | @tf-hwp/editor-core + @tf-hwp/ai-protocol — headless SDK 재배치 | **done** | R3-P1 | core 20테스트(node)·protocol 13(프롬프트 바이트동일)·vanilla 증명·e2e 무수정 통과 |
-| [027](027-editing-parity-ui.md) | 편집 패리티 — 룰러·열너비·표추가·텍스트·서식·배경 | open | R3-P1 | 026 후; Intent는 전부 기존재 — UI 계층 작업 |
+| [027](027-editing-parity-ui.md) | 편집 패리티 — 룰러·열너비·표추가·텍스트(run보존)·서식·배경 | **done** | R3-P1 | d1b0c71 · core 37/react 48/e2e 6; **R3 완료** |
 
 ## 로드맵 R2 — 라운드 2 (2026-07-03)
 
