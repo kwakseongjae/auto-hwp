@@ -50,7 +50,7 @@
 |---|------|------|------|------|
 | [034](034-page-selective-refresh.md) | 페이지 선택적 갱신 — 편집 DOM 세금 107ms→≤15ms (문자열 비교 스킵) | **done** (8c9cc5a) | R6-P0 | 105.5→4.5ms(23.4×); 실앱 확인 inject=1/skip=7 |
 | [035](035-pan-zoom-gestures.md) | 피그마식 팬/줌 — Space드래그·커서중심 ⌘휠/핀치·⌘0, 제스처 중 CSS transform | **done** (229f8e3) | R6-P0 | 고정점 ±2px e2e; 제스처 중 렌더 0 |
-| [036](036-keyboard-cell-nav.md) | 키보드 셀 내비 — 방향키 이동·Enter 편집·Tab 저장+이동 | open | R6-P1 | 034·035 후; core moveCell |
+| [036](036-keyboard-cell-nav.md) | 키보드 셀 내비 — 방향키 이동·Enter 편집·Tab 저장+이동 | **done** (bb49949) | R6-P1 | moveCell=px 재프로브; 병합셀 span끝+1 자연 착지 |
 
 ## 로드맵 R5 — 라운드 5 (2026-07-03, 사용자 QA: 피그마급 UX)
 

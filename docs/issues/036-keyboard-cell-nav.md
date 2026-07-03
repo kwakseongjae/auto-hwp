@@ -1,6 +1,6 @@
 # 036 — R6-3: 키보드 셀 네비게이션 — 방향키 이동 · Enter 편집 · Tab 이동
 
-- 상태: **open** · 우선순위: R6-P1 · 영역: editor-core(SelectionModel 커맨드) + react(keydown 배선)
+- 상태: **done** (bb49949) · 우선순위: R6-P1 · 영역: editor-core(SelectionModel 커맨드) + react(keydown 배선)
 - 선행: **034·035 병합 후** (HwpWorkspace 키/포커스 영역 충돌 방지)
 
 ## 목표 (피그마/스프레드시트 관례)
