@@ -42,4 +42,13 @@
 | [021](021-selection-ux-v2.md) | 선택 UX v2 — 클릭=교체 / ⌘·Ctrl=토글 / 러버밴드 마퀴 | **done** | QA-P1 | 0cb666b · blocksInRect + vitest 14 + Playwright 갱신 통과 |
 | [022](022-font-system-v1.md) | 폰트 시스템 v1 — OFL 카탈로그 8종+업로드+삼위일치 (**교차골든 26p 바이트동일**) | **done** | QA-P1 | cb9f7b3 · 셰이퍼 +8.8KB, 라이선스 표 전수 OFL |
 
+## 로드맵 R2 — 라운드 2 (2026-07-03)
+
+착수: **023 ∥ 013** (파일 disjoint: wasm/react/lab vs hwp-mcp/ingest/Docker).
+
+| # | 제목 | 상태 | 단계 | 비고 |
+|---|------|------|------|------|
+| [023](023-cell-level-marking-web.md) | 웹 셀 단위 마킹(데스크톱 패리티) + 셀 텍스트 스니펫 칩 | open | R2-P0 | 엔진 로직 기존재(session table_cell_at) — 노출/배선 |
+| [013](013-headless-service-container.md) | 헤드리스 서비스 컨테이너 (에르메스 트랙) **+부록A 갱신** | open | R2-P1 | docker 가용 확인; absorb 폐기·env키 기존재·guard/펜스 배선 포함 |
+
 > 완료된 완성형 핵심(글자/문단/글꼴/표 병합·음영/목록)은 `docs/COMPLETION-ROADMAP.md`와 `CHECKLIST.md` 참고.
