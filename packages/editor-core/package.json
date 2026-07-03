@@ -1,0 +1,34 @@
+{
+  "name": "@tf-hwp/editor-core",
+  "version": "0.0.1",
+  "description": "Headless, framework-agnostic editor core for tf-hwp: DocSession (open/pages/undo/font), SelectionModel (cell/block/marquee/⌘-toggle), EditController (Intent assembly + apply). Zero React, zero DOM — unit-testable in plain node. Drive any UI (or none) over an EngineAdapter.",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  },
+  "keywords": ["hwp", "hwpx", "editor", "headless", "selection", "framework-agnostic"],
+  "engines": {
+    "node": ">=18"
+  }
+}

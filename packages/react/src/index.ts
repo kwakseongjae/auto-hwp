@@ -25,6 +25,13 @@ export type { CodedError } from "./WasmAdapter";
 export { TauriAdapter } from "./TauriAdapter";
 export type { TauriAdapterOptions, Invoke } from "./TauriAdapter";
 
+// Headless core (issue 026) — the React binding hook + a re-export of @tf-hwp/editor-core so a host can
+// build a fully custom UI over the SAME core (no @tf-hwp/react components required). The heavy editing
+// logic lives in editor-core; the components below are a thin, optional binding.
+export { useHwpEditor } from "./useHwpEditor";
+export type { HwpEditorState } from "./useHwpEditor";
+export { createEditorCore, EditorCore, DocSession, SelectionModel, EditController } from "@tf-hwp/editor-core";
+
 // R7: the sanitizer is exported so hosts can reuse it, but the components never expose an SVG-string
 // prop that bypasses it (all injection goes through HwpPageView → sanitizeSvg).
 export { sanitizeSvg } from "./sanitize";

@@ -53,6 +53,11 @@
 - L3에 비즈니스 로직 넣지 않기 (전부 L2 호출로 표현)
 
 ## 이슈 매핑
-- 026: L2/L2' 신설 + L3 재배선 + 문서/데모 마이그레이션
+- 026 ✅: L2 `@tf-hwp/editor-core`(DocSession/SelectionModel/EditController/EngineAdapter — react·DOM 0,
+  node 단위테스트) + L2' `@tf-hwp/ai-protocol`(EditRequest/EditResponse·buildDocContext·buildSystemPrompt·
+  validateRequest/validateResponse — fetch·키·벤더 0, isomorphic) 신설. L3 `@tf-hwp/react`는
+  `useHwpEditor(core)` 훅으로 재배선(공개 API 하위호환, 기존 34 vitest·lab Playwright 2 그대로 통과).
+  route.ts·LabWorkspace는 ai-protocol 을 공유 import(프롬프트/펜스/검증 단일 출처). vanilla 예제 =
+  React 없이 open→선택→intent→undo→export 증명.
 - 027: 편집 기능 패리티(룰러/열너비/표추가/텍스트·서식·배경)를 L2 커맨드 + L3 옵트인 UI로
 - (선행) 024: 충실도 — 문단 테두리 + 프레임 오버플로 / 025: 성능 — 레이아웃 캐시

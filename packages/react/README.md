@@ -31,6 +31,23 @@ npm i @tf-hwp/react @tf-hwp/engine react react-dom
 `react` / `react-dom` are peer deps. `@tf-hwp/engine` ships the wasm; your bundler (Vite/webpack) must
 serve its co-located `hwp_wasm_bg.wasm` (both resolve `new URL(..., import.meta.url)` out of the box).
 
+## Headless core — this is a thin binding (issue 026)
+
+All the editing *logic* — document lifecycle, undo, the OS-style selection model (click/⌘-toggle/marquee,
+cell vs table vs block), Intent apply — lives in the framework-agnostic **[`@tf-hwp/editor-core`](../editor-core)**
+(L2). `@tf-hwp/react` is a thin binding: `useHwpEditor(adapter)` mirrors the core's events into React
+state, and the components render it. Nothing here is required to use tf-hwp.
+
+- **Custom UI, still React:** call `useHwpEditor(adapter)` and draw your own toolbar/overlay/chat over
+  `core.selection` / `core.session` / `core.edit`. `EngineAdapter`, `EditorCore`, `SelectionModel`,
+  `DocSession`, `EditController` and all model/geometry/edit types are re-exported from `@tf-hwp/react`
+  (or import them from `@tf-hwp/editor-core` directly).
+- **No React at all:** drive `@tf-hwp/editor-core` directly — see its
+  [`examples/vanilla.ts`](../editor-core/examples/vanilla.ts) (open → select → apply → undo → export,
+  zero DOM).
+- **LLM protocol:** the doc-context/prompt/whitelist live in **[`@tf-hwp/ai-protocol`](../ai-protocol)**
+  (vendor-neutral, isomorphic); your server proxy and your client import the same module.
+
 ## Architecture — the `EngineAdapter` seam
 
 The components speak to one interface, so the same UI runs against the wasm engine (web) or the desktop

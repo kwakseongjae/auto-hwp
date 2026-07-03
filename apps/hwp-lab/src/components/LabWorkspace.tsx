@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { HwpWorkspace, WasmAdapter, FONT_CATALOG, type Anchor, type DocContext, type Intent } from "@tf-hwp/react";
+import { buildDocContext } from "@tf-hwp/ai-protocol";
 import { resetEngine } from "@tf-hwp/engine";
 
 type Mode = "loading" | "mock" | "live";
@@ -26,19 +27,9 @@ const isTrap = (e: unknown): boolean => {
   return code === "wasm_trap" || /RuntimeError|unreachable|memory access out of bounds/i.test(msg(e));
 };
 
-/**
- * 마킹된 앵커/문서 메타를 프록시가 R5 펜스(`<document-content>`)로 감쌀 "문서 콘텐츠" 문자열로
- * 만든다. 앵커의 `text`는 문서에서 파생된 신뢰불가 데이터다. (프록시 계약: docContext=string.)
- */
-function buildDocContextString(anchors: Anchor[], ctx: DocContext): string {
-  const head = `format=${ctx.format} pages=${ctx.pages} editable=${ctx.editable} sections=${ctx.sections}`;
-  const lines = anchors.map((a, i) => {
-    const rows = a.rows ? ` rows=[${a.rows[0]},${a.rows[1]}]` : "";
-    const cols = a.cols ? ` cols=[${a.cols[0]},${a.cols[1]}]` : "";
-    return `#${i} ${a.kind} section=${a.section} block=${a.block}${rows}${cols} text=${JSON.stringify(a.text ?? "")}`;
-  });
-  return [head, ...lines].join("\n").slice(0, 8000);
-}
+// 마킹된 앵커/문서 메타를 프록시가 R5 펜스로 감쌀 "문서 콘텐츠" 문자열로 만드는 로직은 이제
+// @tf-hwp/ai-protocol 의 buildDocContext 가 소유한다(이슈 026) — 서버 route.ts 의 프롬프트/펜스
+// 조립과 같은 모듈에서 나와 계약이 어긋날 수 없다. 앵커의 `text`는 문서 파생 신뢰불가 데이터.
 
 export default function LabWorkspace() {
   const [mode, setMode] = useState<Mode>("loading");
@@ -141,7 +132,8 @@ export default function LabWorkspace() {
       body: JSON.stringify({
         instruction,
         anchors,
-        docContext: buildDocContextString(anchors, ctx),
+        // R5-펜스용 doc-context 문자열 — ai-protocol 이 서버와 공유하는 조립기(이슈 026).
+        docContext: buildDocContext({ format: ctx.format, pages: ctx.pages, editable: ctx.editable, sections: ctx.sections }, anchors),
       }),
     });
     if (!res.ok) {

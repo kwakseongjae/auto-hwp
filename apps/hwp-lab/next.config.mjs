@@ -18,8 +18,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
  *    끌어넣지 않도록 한다.
  */
 const nextConfig = {
-  // file: 심링크 패키지를 Next가 트랜스파일하도록 명시.
-  transpilePackages: ["@tf-hwp/react", "@tf-hwp/engine"],
+  // file: 심링크 패키지를 Next가 트랜스파일하도록 명시. (026: ai-protocol 은 route.ts·클라 양쪽에서
+  // import, editor-core 는 react 가 re-export 하는 타입 소스 — 둘 다 심링크 스코프에 넣는다.)
+  transpilePackages: ["@tf-hwp/react", "@tf-hwp/engine", "@tf-hwp/ai-protocol", "@tf-hwp/editor-core"],
   // file: 의존은 모노레포 루트(../../) 밖이 아니라 그 안에 산다. 파일 트레이싱 루트를 레포
   // 루트로 고정해 심링크 추적/멀티 lockfile 경고를 정리한다.
   outputFileTracingRoot: path.join(__dirname, "..", ".."),

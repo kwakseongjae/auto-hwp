@@ -1,0 +1,34 @@
+{
+  "name": "@tf-hwp/ai-protocol",
+  "version": "0.0.1",
+  "description": "Vendor-neutral LLM protocol for tf-hwp chat-editing: EditRequest/EditResponse types, buildDocContext (R5 fence), buildSystemPrompt (INTENT-SCHEMA excerpt, allowed-intent subset), validateRequest/validateResponse (whitelist + structure). Pure, isomorphic (node + browser) — ZERO fetch, ZERO LLM client, ZERO keys. The server proxy and the client import the SAME module.",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  },
+  "keywords": ["hwp", "hwpx", "llm", "intent", "protocol", "isomorphic", "prompt"],
+  "engines": {
+    "node": ">=18"
+  }
+}

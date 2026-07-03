@@ -10,6 +10,22 @@ LLM, no filesystem, no bundled fonts.
 - The AI stays on the host **server** (R6): run your model server-side and apply the resulting Intent
   JSON here. This package never sees an API key.
 
+## Where this sits in the SDK (layer map)
+
+This wasm engine is **L1** — the headless engine (parse/layout/render/geometry/Intent/undo/export). It
+knows only the document; it has no UI and no selection state. See [`docs/SDK-LAYERS.md`](../../docs/SDK-LAYERS.md).
+
+```
+L4 host app (apps/hwp-lab, Tauri, your app) — supplies the LLM proxy (its key) + assembles a UI
+L3 @tf-hwp/react        — optional React binding (useHwpEditor + components); all replaceable
+L2 @tf-hwp/editor-core  — headless editor (DocSession/SelectionModel/EditController) over an EngineAdapter
+L2' @tf-hwp/ai-protocol — vendor-neutral LLM protocol (prompt/context/validate); no fetch, no keys
+L1 @tf-hwp/engine (this) / hwp-mcp — headless engine; state is the document only
+```
+
+A `WasmAdapter` (in `@tf-hwp/react`) wraps this package to satisfy L2's `EngineAdapter` contract, so the
+same editor-core drives the web (wasm) and a desktop app (Tauri) alike.
+
 ## Install & quick start
 
 ```js
