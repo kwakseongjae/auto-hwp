@@ -24,7 +24,7 @@
 | [010](010-ai-preview-apply-undo.md) | AI 편집 프리뷰→적용 게이트 + undo (게이트 기존재 → undo 상한50 + ⌘Z 가드 잔여분) | **done** (수동검증 대기) | P1-B | e8c885c · 인터랙티브 e2e는 cargo tauri dev 필요 |
 | [011](011-content-presets.md) | 콘텐츠 프리셋 (표 채우기·불릿 정렬) + ai_fill R5 펜스 + 헤더/음영 구조 가드 | **done** (수동검증 대기) | P1-C | a737c1b · e2e 시맨틱은 실 provider 필요; set_para_shape(행잉 인덴트)는 후속 |
 | [012](012-hwp-session-extraction.md) | `hwp-session` 파사드 추출 (기능변화 0, golden 바이트동일) | **done** | P2 | a18a776 · LEAF(hwp-mcp 미wrap) 채택 → Session-core absorb는 013로 |
-| [013](013-headless-service-container.md) | 헤드리스 서비스 컨테이너 (Shell B) | open | P3 | 012, **014** |
+| [013](013-headless-service-container.md) | 헤드리스 서비스 컨테이너 (Shell B) | **done** (c0f8f3e, R2) | P3 | R9에서 전면 보안감사(라이브 공격 시나리오) 통과 — 아래 R9 참조 |
 | [014](014-input-hardening.md) | 신뢰불가 입력 하드닝 (파서 DoS 방어) | **done** | P3-pre | b999dc1 · guard 노출만, 배선은 013 |
 | [015](015-wasm-npm-package.md) | wasm npm 패키지 `@tf-hwp/engine` — HWP5 런타임 8p·골든 바이트동일·편집루프 wasm 실증 | **done** (PDF 글리프만 018) | P4-A | 4fb1ced · pkg/는 빌드산출물(gitignore, 레시피로 재빌드) |
 | [017](017-hwp-mcp-wasm.md) | hwp-mcp wasm화 (http 게이트 + open_bytes/export_bytes) — 015 선행 | **done** | P2b | 3acfc5e · wasm exit0, 네이티브 무변경, smoke 14/14 |
@@ -41,6 +41,15 @@
 | [020](020-benchmark1-page1-spill.md) | benchmark1 1페이지 스필 — **18==18 달성** (마지막줄 leading 트림 + stored 행높이 floor) | **done** | QA-P0 | b70ac3f · --rows 진단도구 tracked, 게이트 8==8 불변 |
 | [021](021-selection-ux-v2.md) | 선택 UX v2 — 클릭=교체 / ⌘·Ctrl=토글 / 러버밴드 마퀴 | **done** | QA-P1 | 0cb666b · blocksInRect + vitest 14 + Playwright 갱신 통과 |
 | [022](022-font-system-v1.md) | 폰트 시스템 v1 — OFL 카탈로그 8종+업로드+삼위일치 (**교차골든 26p 바이트동일**) | **done** | QA-P1 | cb9f7b3 · 셰이퍼 +8.8KB, 라이선스 표 전수 OFL |
+
+## 로드맵 R9 — 라운드 9 (2026-07-04, 013 보안 감사)
+
+013은 R2(c0f8f3e)에서 이미 병합돼 있었음이 착수 시점에 확인됨(인덱스 상태 줄이 낡아 있었다 — 이 표가 정정본).
+R9는 기존 구현에 대한 **최초의 전면 보안 감사**로 전환: 라이브 컨테이너 공격 시나리오(빈/공백 토큰,
+Host 스푸핑, ../ 순회 변형, 컨테이너 내 심링크 탈출 생성) 전부 방어 확인, 루프백 무변경(178 insertions/
+0 deletions), HWPX 산출물 로컬 CLI와 byte-identical, PDF는 /Title stem 제외 byte-identical,
+business_plan_k 픽스처 패리티 재확인(그쪽 레포 무변경), workspace 346 테스트 0 fail, 게이트 8==8·18==18,
+wasm 14/14 + 017 불변, e2e 20/20. 발견·수정: benchmarks/ 이전(a6e6b4e)이 남긴 낡은 픽스처 경로 5파일.
 
 ## 로드맵 R8 — 라운드 8 (2026-07-04, 텍스트 편집 심화)
 
