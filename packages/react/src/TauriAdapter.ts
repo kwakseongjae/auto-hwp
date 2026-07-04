@@ -1,5 +1,17 @@
 import type { EngineAdapter } from "./EngineAdapter";
-import type { BlockHit, Intent, OpenResult, Outcome, TableBox } from "./types";
+import type { BlockHit, CaretRect, HitResult, Intent, OpenResult, Outcome, TableBox } from "./types";
+
+/** The desktop `hit_test` command's DTO (camelCase, crates/hwp-viewer/src/lib.rs `HitDto`). Remapped
+ *  into editor-core's snake_case `HitResult` below so both adapters return ONE shape. */
+type TauriHitDto = {
+  node: number | null;
+  block: number | null;
+  offset: number;
+  section: number;
+  paraOrd: number;
+  inCell: boolean;
+  paraLen: number;
+};
 
 /** The `invoke` surface (matches `@tauri-apps/api/core`'s `invoke`). Injected so this package has NO
  *  hard @tauri-apps dependency — the host passes its own `invoke`. */
@@ -58,6 +70,31 @@ export class TauriAdapter implements EngineAdapter {
 
   tableAt(page: number, x: number, y: number): Promise<TableBox | null> {
     return this.invoke<TableBox | null>("table_at", { page, x, y });
+  }
+
+  /** WYSIWYG GLYPH caret (engine half) — the desktop `hit_test` command (crates/hwp-viewer, same rhwp
+   *  glyph-box `Intent::HitTest` the wasm path uses). Returns `null` off any glyph (018 null policy).
+   *  The command answers in camelCase; remap it to editor-core's snake_case `HitResult` so both
+   *  backends return ONE shape. `node`/`block` are null for cell text / an unanchored .hwp paragraph. */
+  async hitTestText(page: number, x: number, y: number): Promise<HitResult | null> {
+    const r = await this.invoke<TauriHitDto | null>("hit_test", { page, x, y });
+    if (!r) return null;
+    return {
+      node: r.node,
+      block: r.block,
+      offset: r.offset,
+      section: r.section,
+      para_ord: r.paraOrd,
+      in_cell: r.inCell,
+      para_len: r.paraLen,
+    };
+  }
+
+  /** WYSIWYG GLYPH caret (geometry half) — the desktop `caret_rect` command. Its DTO already matches
+   *  `CaretRect` ({x, top, height}); `null` when the paragraph isn't on `page` (a past-end offset is
+   *  clamped by the engine, never null). */
+  caretRect(page: number, node: number, offset: number): Promise<CaretRect | null> {
+    return this.invoke<CaretRect | null>("caret_rect", { page, node, offset });
   }
 
   async applyIntent(intent: Intent): Promise<Outcome> {

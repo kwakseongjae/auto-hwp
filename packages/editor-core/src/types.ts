@@ -80,6 +80,55 @@ export interface PageGeom {
   mb: number;
 }
 
+/** WYSIWYG GLYPH caret — the editable model target a click resolves to (engine `HitTest` intent, the
+ *  rhwp glyph-box path). This is the CHARACTER-precise caret hit, DISTINCT from the own-render `BlockHit`
+ *  (which is a block box with no char offset). `node`/`block` are `null` for a TABLE-CELL run OR a
+ *  paragraph that carries no NodeId (an unedited binary `.hwp`): the caret GEOMETRY is available
+ *  (`offset`/`section`/`para_ord`), but there is no editable text target in v1 — see docs/CARET-GAP.md
+ *  for the measured extent of that gap on the benchmark corpus. `offset` is the caret position in
+ *  PARAGRAPH chars (Unicode scalars); `section`/`para_ord` index the GEOMETRY side. Field names mirror
+ *  the engine's wasm JSON verbatim (snake_case) so `WasmAdapter` forwards it untouched — `TauriAdapter`
+ *  remaps the desktop command's camelCase into this shape. */
+export interface HitResult {
+  node: number | null;
+  block: number | null;
+  offset: number;
+  section: number;
+  para_ord: number;
+  in_cell: boolean;
+  /** Editable char length of the resolved paragraph (0 when unaddressed). The caller CLAMPS caret moves
+   *  to `[0, para_len]`; `caretRect` clamps a PAST-END offset to the paragraph end and returns a rect
+   *  (NOT null), so the UI must NEVER infer end-of-paragraph from a null rect (018 null policy). */
+  para_len: number;
+}
+
+/** WYSIWYG GLYPH caret — a caret rectangle in own-render PAGE px (= HWPUNIT/75), the GEOMETRY half of
+ *  the caret (engine `CaretRect` intent). If the view zooms the SVG, scale these by the same factor.
+ *  A `caretRect` query resolves to `null` only when the target paragraph does NOT render on the queried
+ *  page (query the page it does) — a valid-but-past-end offset is CLAMPED, never null. */
+export interface CaretRect {
+  x: number;
+  top: number;
+  height: number;
+}
+
+/** A resolved TEXT caret position in the MODEL — the editable half of a glyph caret, derived from a
+ *  `HitResult` via `hitResultToTextAnchor`. Unlike the pixel-space `HitResult`, this addresses the doc
+ *  in STRUCTURE indices so an edit op (InsertText / DeleteBack) can target it. Only constructible when
+ *  the hit resolved to an editable `node` (a body paragraph). CELL text is NOT addressable in v1 — the
+ *  `cell` field is a RESERVED shape for the 042 follow-up (a cell-addressed CaretRect variant); v1
+ *  always leaves it undefined. See docs/CARET-GAP.md for why. */
+export interface TextAnchor {
+  section: number;
+  block: number;
+  node: number;
+  offset: number;
+  /** The paragraph's editable char length — the clamp bound for caret moves (`0..paraLen`). */
+  paraLen: number;
+  /** RESERVED (042): the `(row, col)` of a cell-addressed anchor. Always undefined in v1. */
+  cell?: { row: number; col: number };
+}
+
 /** The tagged result of applyIntent (mirrors @tf-hwp/engine Outcome). */
 export type Outcome = { kind: string; [field: string]: unknown };
 

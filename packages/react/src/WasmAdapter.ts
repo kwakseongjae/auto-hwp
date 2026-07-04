@@ -1,6 +1,6 @@
 import { HwpDoc, initEngine, resetEngine } from "@tf-hwp/engine";
 import type { EngineAdapter } from "./EngineAdapter";
-import type { BlockHit, CellHit, Intent, OpenResult, Outcome, PageGeom, RunSpec, TableBox } from "./types";
+import type { BlockHit, CaretRect, CellHit, HitResult, Intent, OpenResult, Outcome, PageGeom, RunSpec, TableBox } from "./types";
 
 type WasmInput = string | URL | Request | BufferSource | WebAssembly.Module;
 
@@ -117,6 +117,43 @@ export class WasmAdapter implements EngineAdapter {
 
   blockRuns(section: number, block: number, row?: number, col?: number): Promise<RunSpec[]> {
     return this.guard((d) => d.blockRuns(section, block, row ?? null, col ?? null) as RunSpec[]);
+  }
+
+  /** WYSIWYG GLYPH caret (engine half) — the rhwp glyph-box `HitTest` intent via the applyIntent JSON
+   *  seam (issue 041: crates untouched — this is pure JSON wiring). Returns the char-precise `HitResult`,
+   *  or `null` off any glyph. `hit.node` is null for cell text / an unanchored binary-.hwp paragraph
+   *  (docs/CARET-GAP.md). `caretMiss` normalizes the `needs_rhwp` capability gate (a lean
+   *  `--no-default-features` wasm build) to `null` so the caller never sees a throw for "no caret path". */
+  hitTestText(page: number, x: number, y: number): Promise<HitResult | null> {
+    return this.caretMiss(() =>
+      this.guard((d) => {
+        const out = d.applyIntent({ intent: "HitTest", page, x, y }) as { hit?: HitResult | null };
+        return out.hit ?? null;
+      }),
+    );
+  }
+
+  /** WYSIWYG GLYPH caret (geometry half) — the `CaretRect` intent via applyIntent JSON. Returns the caret
+   *  rect (own-render PAGE px), or `null` when the paragraph isn't on `page`. A past-end `offset` is
+   *  CLAMPED by the engine (returns a rect, never null). `needs_rhwp` → null (capability gate). */
+  caretRect(page: number, node: number, offset: number): Promise<CaretRect | null> {
+    return this.caretMiss(() =>
+      this.guard((d) => {
+        const out = d.applyIntent({ intent: "CaretRect", page, node, offset }) as { caret?: CaretRect | null };
+        return out.caret ?? null;
+      }),
+    );
+  }
+
+  /** Normalize the `needs_rhwp` capability-gate error to `null` (018: no caret path ⇒ null, not a throw).
+   *  Only that ONE coded error is swallowed; traps and every other engine error propagate unchanged. */
+  private async caretMiss<T>(run: () => Promise<T>): Promise<T | null> {
+    try {
+      return await run();
+    } catch (e) {
+      if ((e as CodedError).code === "needs_rhwp") return null;
+      throw e;
+    }
   }
 
   applyIntent(intent: Intent): Promise<Outcome> {

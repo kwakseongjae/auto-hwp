@@ -48,6 +48,9 @@ export {
 export { inheritRuns, firstRunStyle } from "./runs";
 export type { RunStyle } from "./runs";
 
+// Glyph-caret model (issue 041, FG-12 前半) — pure HitResult→TextAnchor + the para_len clamp / null policy.
+export { clampOffset, hitResultToTextAnchor, isCaretGap } from "./caret";
+
 // Event emitter primitive
 export { Emitter } from "./events";
 export type { Listener } from "./events";
@@ -57,8 +60,10 @@ export type {
   Anchor,
   BlockHit,
   Box,
+  CaretRect,
   CellHit,
   DocContext,
+  HitResult,
   Intent,
   IntentCard,
   OnAiRequest,
@@ -71,4 +76,5 @@ export type {
   SelMark,
   SelMarquee,
   TableBox,
+  TextAnchor,
 } from "./types";

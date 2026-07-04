@@ -1,5 +1,5 @@
 import type { EngineAdapter } from "../adapter";
-import type { BlockHit, CellHit, Intent, OpenResult, Outcome, PageGeom, RunSpec, TableBox } from "../types";
+import type { BlockHit, CaretRect, CellHit, HitResult, Intent, OpenResult, Outcome, PageGeom, RunSpec, TableBox } from "../types";
 
 /** A headless EngineAdapter for node tests: canned geometry resolvers + a spy-able applyIntent/undo.
  *  No wasm, no DOM — pure in-memory. Mirrors @tf-hwp/react's test MockAdapter so the same selection
@@ -31,6 +31,12 @@ export class MockAdapter implements EngineAdapter {
       pageGeom?: PageGeom | null;
       /** Canned current runs for `blockRuns` (issue 027 run-preservation). Omit to OMIT the method. */
       runs?: RunSpec[];
+      /** Canned glyph-caret hit for `hitTestText` (issue 041), or a coordinate-aware resolver. Present
+       *  makes `hitTestText` answer; omit to OMIT the method (a no-glyph-caret backend). */
+      hitText?: HitResult | null | ((page: number, x: number, y: number) => HitResult | null);
+      /** Canned caret rect for `caretRect` (issue 041), or a `(page, node, offset)` resolver (so a test
+       *  can model past-end CLAMP + "not on this page" = null). Omit to OMIT the method. */
+      caret?: CaretRect | null | ((page: number, node: number, offset: number) => CaretRect | null);
       pages?: number;
     } = {},
   ) {
@@ -42,6 +48,8 @@ export class MockAdapter implements EngineAdapter {
     if (!("rowBoundaries" in this.opts)) (this as { tableRowBoundaries?: unknown }).tableRowBoundaries = undefined;
     if (!("pageGeom" in this.opts)) (this as { pageGeometry?: unknown }).pageGeometry = undefined;
     if (!("runs" in this.opts)) (this as { blockRuns?: unknown }).blockRuns = undefined;
+    if (!("hitText" in this.opts)) (this as { hitTestText?: unknown }).hitTestText = undefined;
+    if (!("caret" in this.opts)) (this as { caretRect?: unknown }).caretRect = undefined;
   }
 
   async open(_bytes: Uint8Array, name?: string): Promise<OpenResult> {
@@ -81,6 +89,14 @@ export class MockAdapter implements EngineAdapter {
   }
   async blockRuns(): Promise<RunSpec[]> {
     return this.opts.runs ?? [];
+  }
+  async hitTestText(page: number, x: number, y: number): Promise<HitResult | null> {
+    const h = this.opts.hitText;
+    return (typeof h === "function" ? h(page, x, y) : h) ?? null;
+  }
+  async caretRect(page: number, node: number, offset: number): Promise<CaretRect | null> {
+    const c = this.opts.caret;
+    return (typeof c === "function" ? c(page, node, offset) : c) ?? null;
   }
   async applyIntent(intent: Intent): Promise<Outcome> {
     this.applied.push(intent);

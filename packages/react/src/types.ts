@@ -25,4 +25,7 @@ export type {
   CellRange,
   CellFmt,
   PageMarginsMm,
+  HitResult,
+  CaretRect,
+  TextAnchor,
 } from "@tf-hwp/editor-core";

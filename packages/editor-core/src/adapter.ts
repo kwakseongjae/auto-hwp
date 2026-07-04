@@ -1,4 +1,4 @@
-import type { BlockHit, CellHit, Intent, OpenResult, Outcome, PageGeom, RunSpec, TableBox } from "./types";
+import type { BlockHit, CaretRect, CellHit, HitResult, Intent, OpenResult, Outcome, PageGeom, RunSpec, TableBox } from "./types";
 
 /// EngineAdapter — the backend seam (SDK-LAYERS L1↔L2). It abstracts the ACTUAL surface a backend
 /// exposes (open / page SVG / hit-test·tableAt / applyIntent / undo·redo / export) so the SAME
@@ -67,6 +67,22 @@ export interface EngineAdapter {
    *  flattening it. Resolves to `[]` when the target has no runs. Backends that omit it → the caller
    *  falls back to a single unstyled run (no preservation), never the plain-text `SetTableCell` variant. */
   blockRuns?(section: number, block: number, row?: number, col?: number): Promise<RunSpec[]>;
+
+  /** OPTIONAL — WYSIWYG GLYPH caret (engine half). Map a PAGE-LOCAL px click to the editable model
+   *  target + CHARACTER offset (`HitResult`), or `null` off any glyph (018 null policy — a miss is null,
+   *  never a throw). This is the rhwp glyph-box path (char-precise `offset`/`para_len`), DISTINCT from
+   *  `hitTest` (own-render BLOCK box, no char offset). `HitResult.node`/`block` are null for a table-cell
+   *  run or an unanchored binary-.hwp paragraph — the caret geometry exists but there is no editable text
+   *  target in v1 (docs/CARET-GAP.md). Backends without the rhwp glyph path (or a `--no-default-features`
+   *  wasm build) OMIT this method — the caller then has no glyph text caret and falls back to marking. */
+  hitTestText?(page: number, x: number, y: number): Promise<HitResult | null>;
+
+  /** OPTIONAL — WYSIWYG GLYPH caret (geometry half). Map an editable target (`node` + paragraph char
+   *  `offset`) to a caret rectangle in own-render PAGE px on `page`, or `null` when that paragraph does
+   *  NOT render on the queried page (query the page it does). A PAST-END `offset` is CLAMPED to the
+   *  paragraph end and returns a rect — NEVER null — so the caller must not read a null rect as
+   *  "end of paragraph" (see `HitResult.para_len`). Backends that can't answer OMIT this method. */
+  caretRect?(page: number, node: number, offset: number): Promise<CaretRect | null>;
 
   /** Apply an Intent (schema v0). One undo unit per accepted Intent. */
   applyIntent(intent: Intent): Promise<Outcome>;
