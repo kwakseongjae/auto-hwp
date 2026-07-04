@@ -1,6 +1,6 @@
 # 043 — R10-1: Tauri 셸 수렴 전제 — 격차 감사 + TauriAdapter 완전화
 
-- 상태: **open** · 우선순위: **R10-P0** · 영역: packages/react(TauriAdapter만) + crates/hwp-viewer(Tauri 커맨드 additive만) + docs
+- 상태: **done** · 우선순위: **R10-P0** · 영역: packages/react(TauriAdapter만) + crates/hwp-viewer(Tauri 커맨드 additive만) + docs
 - 후속: 044(플래그 뒤 셸 교체)가 이 이슈의 감사표를 그대로 실행한다 — **여기서 UI를 만들지 마라.**
 
 ## 배경 (사용자 승인 방향)
