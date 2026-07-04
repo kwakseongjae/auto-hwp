@@ -49,7 +49,8 @@
 
 | # | 제목 | 상태 | 단계 | 비고 |
 |---|------|------|------|------|
-| [043](043-tauri-convergence-audit.md) | 수렴 전제 — 양방향 격차 감사표 + TauriAdapter 완전화 | **done** | R10-P0 | 22/22 구현; SDK승격 8·host chrome 6·보류 1; 044 계획 확정 |
+| [043](043-tauri-convergence-audit.md) | 수렴 전제 — 양방향 격차 감사표 + TauriAdapter 완전화 | **done** (8518b64) | R10-P0 | 22/22 구현; SDK승격 8·host chrome 6·보류 1; 044 계획 확정 |
+| [044](044-tauri-shell-swap.md) | 데스크톱 신 셸 — 플래그(VITE_SHELL=workspace) 뒤 HwpWorkspace + host chrome 4종 | open | R10-P0 | 기존 App 무변경; 기본 전환은 후속 게이트 |
 
 ## 로드맵 R9 — 라운드 9 (2026-07-04, 013 보안 감사)
 
