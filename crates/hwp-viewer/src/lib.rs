@@ -1500,7 +1500,7 @@ mod tests {
     fn opens_and_renders_hwp5_benchmark() {
         // The core goal: open an uploaded .hwp (HW5) and render it faithfully (view-only).
         let mut sess = hwp_mcp::Session::default();
-        let bench = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmark.hwp");
+        let bench = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp");
         let msg = mcp_call(&mut sess, "open_document", json!({ "path": bench })).unwrap();
         assert!(msg.contains("HWP5"), "opened as HW5 view: {msg}");
         let count: u32 = mcp_call(&mut sess, "page_count", json!({})).unwrap().trim().parse().unwrap();
@@ -1516,7 +1516,7 @@ mod tests {
     #[test]
     fn hwp5_open_exports_open_safe_hwpx_beside() {
         let mut sess = hwp_mcp::Session::default();
-        let bench = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmark.hwp");
+        let bench = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp");
         let msg = mcp_call(&mut sess, "open_document", json!({ "path": bench })).unwrap();
         assert!(msg.contains("HWP5"), "{msg}");
         let dest = std::env::temp_dir().join("viewer-autoconvert.hwpx");
@@ -1626,7 +1626,7 @@ mod tests {
     #[cfg(feature = "rhwp")]
     #[test]
     fn own_hit_test_resolves_a_px_click_to_the_pointed_block() {
-        let bench = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmark.hwp");
+        let bench = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp");
         let doc = hwp_core::Engine::open(&std::fs::read(bench).unwrap()).unwrap();
         let fonts = hwp_session::own_render_fonts();
         let placed = hwp_typeset::place_doc(&doc, fonts.as_ref());

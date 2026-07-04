@@ -44,7 +44,7 @@ fn zero_table(doc: &mut SemanticDoc, t: &mut hwp_model::document::Table) {
 
 #[test]
 fn probe_cell_spacing() {
-    let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmark1.hwpx")).unwrap();
+    let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark1.hwpx")).unwrap();
     let doc = hwp_core::Engine::open(&bytes).unwrap();
     let fonts = ApproxFontMetrics;
 

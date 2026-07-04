@@ -426,7 +426,7 @@ mod inplace_tests {
     #[test]
     #[ignore = "diagnostic; run with --features rhwp --ignored --nocapture"]
     fn hwp5_to_hwpx_export_behavior() {
-        let p = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmark.hwp");
+        let p = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp");
         let bytes = std::fs::read(p).unwrap();
         assert_eq!(Engine::detect(&bytes), SourceFormat::Hwp5, "benchmark.hwp is HW5");
         let doc = Engine::open(&bytes).unwrap();
@@ -452,7 +452,7 @@ mod inplace_tests {
     #[cfg(feature = "rhwp")]
     #[test]
     fn hwp5_converts_to_openable_hwpx_with_text_roundtrip() {
-        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmark.hwp")).unwrap();
+        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp")).unwrap();
         let doc = Engine::open(&bytes).unwrap();
         let original = doc.plain_text();
         assert!(!original.trim().is_empty(), "lift must capture text");
@@ -476,7 +476,7 @@ mod inplace_tests {
     #[cfg(feature = "rhwp")]
     #[test]
     fn hwp5_lift_captures_formatting_and_synthesizes_charpr() {
-        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmark.hwp")).unwrap();
+        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp")).unwrap();
         let doc = Engine::open(&bytes).unwrap();
 
         // Pools translated (index 0 = default, then the document's real shapes).
@@ -522,7 +522,7 @@ mod inplace_tests {
     #[cfg(feature = "rhwp")]
     #[test]
     fn hwp5_page_geometry_is_lifted_not_skeleton_landscape() {
-        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmark.hwp")).unwrap();
+        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp")).unwrap();
         let doc = Engine::open(&bytes).unwrap();
         assert!(!doc.sections[0].page.landscape, "benchmark is portrait");
         assert!(doc.sections[0].page_edited, "page marked edited so the secPr is patched");
@@ -598,7 +598,7 @@ mod inplace_tests {
     #[cfg(feature = "rhwp")]
     #[test]
     fn hwp5_fonts_are_lifted_into_fontfaces() {
-        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmark.hwp")).unwrap();
+        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp")).unwrap();
         let doc = Engine::open(&bytes).unwrap();
         // The lift captured per-script font names on the char shapes.
         let lifted_fonts: std::collections::BTreeSet<&str> = doc.char_shapes.iter()
@@ -669,7 +669,7 @@ mod inplace_tests {
     #[cfg(feature = "rhwp")]
     #[test]
     fn open_as_hwpx_flags_conversion_and_serializes() {
-        let hwp = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmark.hwp")).unwrap();
+        let hwp = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp")).unwrap();
         let (doc, was_converted) = open_as_hwpx(&hwp).unwrap();
         assert!(was_converted, ".hwp must be flagged as a conversion (for the fidelity notice)");
         assert!(!doc.plain_text().trim().is_empty(), "lifted content present");

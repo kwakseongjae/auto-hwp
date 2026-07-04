@@ -182,7 +182,7 @@ fn oversize_raw_file_is_rejected_upfront() {
 fn normal_corpus_hwpx_still_parses_through_guarded_path() {
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
     for rel in [
-        "benchmark1.hwpx",
+        "benchmarks/benchmark1.hwpx",
         "corpus/hwpx/FormattingShowcase.hwpx",
         "corpus/hwpx/footnote-01.hwpx",
         "corpus/hwpx/form-01.hwpx",

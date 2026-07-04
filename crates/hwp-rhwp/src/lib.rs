@@ -696,7 +696,7 @@ mod spike_tests {
     use super::{page_count, page_text_anchors, render_page_svg, RenderCache};
 
     fn benchmark() -> Vec<u8> {
-        let p = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmark.hwp");
+        let p = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp");
         std::fs::read(p).expect("benchmark.hwp at repo root")
     }
 
@@ -888,7 +888,7 @@ mod caret_rhwp_tests {
             .expect("FormattingShowcase.hwpx in corpus/hwpx")
     }
     fn benchmark() -> Vec<u8> {
-        std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmark.hwp")).expect("benchmark.hwp")
+        std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp")).expect("benchmark.hwp")
     }
 
     /// Every GlyphBox sits inside the page, has a sane x-extent, and a positive line height.
@@ -1481,7 +1481,7 @@ mod spike_timing {
     #[test]
     #[ignore = "timing illustration; run with --ignored --nocapture"]
     fn seam1_speedup() {
-        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmark.hwp")).unwrap();
+        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp")).unwrap();
         let n = super::page_count(&bytes).unwrap();
         let t0 = Instant::now();
         for p in 0..n { let _ = render_page_svg(&bytes, p).unwrap(); }
