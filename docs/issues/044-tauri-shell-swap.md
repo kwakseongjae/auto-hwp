@@ -1,6 +1,6 @@
 # 044 — R10-2: 데스크톱 신 셸 — 플래그 뒤 HwpWorkspace 마운트 + host chrome
 
-- 상태: **open** · 우선순위: R10-P0 · 영역: crates/hwp-viewer/ui (신규 엔트리 분기 + host chrome) — **기존 App.tsx 경로 무변경**
+- 상태: **done** · 우선순위: R10-P0 · 영역: crates/hwp-viewer/ui (신규 엔트리 분기 + host chrome) — **기존 App.tsx 경로 무변경**
 - 선행: 043 done (TauriAdapter 22/22, docs/TAURI-CONVERGENCE.md의 044 실행 계획이 이 이슈의 스펙)
 
 ## 목표
