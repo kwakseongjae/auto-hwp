@@ -1404,6 +1404,119 @@ async fn delete_back(
     .map_err(|e| e.to_string())?
 }
 
+// ---- SDK convergence lane (issue 043): the GENERAL Intent-JSON + geometry + byte-export commands the
+// ---- `@tf-hwp/react` `TauriAdapter` consumes, so the shared HwpWorkspace runs against this shell. Each
+// ---- is ADDITIVE (the existing per-op/path commands above are untouched) and routes through the SAME
+// ---- op-bus / hwp-session facade the wasm backend uses — identical semantics + identical null policy. ----
+
+/// Serialize a typed [`Outcome`] into the SAME `{kind, …}` JSON the wasm backend returns
+/// (`hwp-wasm::outcome_to_json`), so both `EngineAdapter` backends hand editor-core one Outcome shape.
+fn outcome_to_json(o: &Outcome) -> Value {
+    match o {
+        Outcome::Opened { format, editable, sections } => {
+            json!({ "kind": "opened", "format": format, "editable": editable, "sections": sections })
+        }
+        Outcome::PageCount(n) => json!({ "kind": "pageCount", "pages": n }),
+        Outcome::Rendered(svg) => json!({ "kind": "rendered", "svg": svg }),
+        Outcome::Applied { blocks, ops } => json!({ "kind": "applied", "blocks": blocks, "ops": ops }),
+        Outcome::Exported { bytes, open_safe } => json!({ "kind": "exported", "bytes": bytes, "openSafe": open_safe }),
+        Outcome::Undone(changed) => json!({ "kind": "undone", "changed": changed }),
+        Outcome::Redone(changed) => json!({ "kind": "redone", "changed": changed }),
+        Outcome::Text(text) => json!({ "kind": "text", "text": text }),
+        Outcome::Proposed { rationale, preview } => {
+            json!({ "kind": "proposed", "rationale": rationale, "preview": preview })
+        }
+        Outcome::Committed { ops } => json!({ "kind": "committed", "ops": ops }),
+        Outcome::Discarded(discarded) => json!({ "kind": "discarded", "discarded": discarded }),
+        Outcome::Found { matches } => {
+            json!({ "kind": "found", "matches": serde_json::to_value(matches).unwrap_or(Value::Null) })
+        }
+        Outcome::Replaced { replaced, pages } => json!({ "kind": "replaced", "replaced": replaced, "pages": pages }),
+        Outcome::Hit(hit) => json!({ "kind": "hit", "hit": serde_json::to_value(hit).unwrap_or(Value::Null) }),
+        Outcome::Caret(caret) => json!({ "kind": "caret", "caret": serde_json::to_value(caret).unwrap_or(Value::Null) }),
+        Outcome::Edited { pages } => json!({ "kind": "edited", "pages": pages }),
+    }
+}
+
+/// Apply ONE Intent-JSON envelope (schema v0, issue 008) via the SAME op-bus the desktop's per-op
+/// commands use ([`hwp_mcp::apply_intent_json`]) — the GENERAL edit lane the `TauriAdapter.applyIntent`
+/// dispatches, so every schema-v0 Intent (SetTableCellRuns / SetCellRangeFmt / ApplyContent / …) is
+/// covered without a per-Intent command. Returns the `{kind, …}` Outcome JSON (wasm-identical). A bad
+/// envelope / refused edit surfaces the typed op-bus error verbatim as `Err` (the UI toasts it).
+#[tauri::command]
+async fn apply_intent_json(intent: Value, sess: tauri::State<'_, SharedSession>) -> Result<Value, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        let outcome = hwp_mcp::apply_intent_json(&mut s, &intent)?;
+        Ok(outcome_to_json(&outcome))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Marquee (rubber-band) select — every top-level block whose band intersects the own-render PX rect
+/// `(x0,y0)-(x1,y1)` on `page`. Delegates to [`hwp_session::blocks_in_rect`]; an out-of-range page (or a
+/// miss) yields an EMPTY vec, never a panic (018 null policy = the wasm `blocksInRect` "[]"-on-miss).
+#[tauri::command]
+async fn blocks_in_rect(
+    page: u32,
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<Vec<hwp_session::BlockHitDto>, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let s = sess.lock().map_err(|_| "session poisoned")?;
+        let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+        Ok(hwp_session::blocks_in_rect(doc, page, x0, y0, x1, y1))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Serialize the LIVE document to round-trip-safe HWPX BYTES (no file path) — the byte twin of the
+/// path-based `export_hwpx`, for `TauriAdapter.toHwpx`. Reuses [`hwp_mcp::export_bytes`] (the exact
+/// serialize half `do_export`/atomic-save wraps), so the bytes match a saved `.hwpx` exactly.
+#[tauri::command]
+async fn export_hwpx_bytes(sess: tauri::State<'_, SharedSession>) -> Result<Vec<u8>, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let s = sess.lock().map_err(|_| "session poisoned")?;
+        hwp_mcp::export_bytes(&s)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Export the LIVE document to PDF BYTES (no file path) through OUR OWN engine — the byte twin of the
+/// path-based `export_doc_pdf`, for `TauriAdapter.exportPdf`. Reuses [`hwp_session::emit_pdf`] (the SAME
+/// place_doc → paint IR → krilla path). Needs `--features pdf`; without it a clear error (below).
+#[cfg(feature = "pdf")]
+#[tauri::command]
+async fn export_pdf_bytes(sess: tauri::State<'_, SharedSession>) -> Result<Vec<u8>, String> {
+    let sess = sess.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let s = sess.lock().map_err(|_| "session poisoned")?;
+        let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+        Ok(hwp_session::emit_pdf(doc, None)?.bytes)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Without `--features pdf` the krilla backend isn't compiled in — return an actionable error rather
+/// than silently producing empty bytes (mirrors `export_doc_pdf`'s non-pdf stub).
+#[cfg(not(feature = "pdf"))]
+#[tauri::command]
+async fn export_pdf_bytes(_sess: tauri::State<'_, SharedSession>) -> Result<Vec<u8>, String> {
+    Err("PDF 내보내기는 `--features pdf` 빌드가 필요합니다 (cargo tauri dev -f \"rhwp ai pdf\"). \
+         대안: HTML로 내보낸 뒤 브라우저에서 인쇄 ▸ PDF로 저장."
+        .into())
+}
+
 /// Build + run the viewer window. Manages the shared session + cached bytes, registers commands,
 /// and (in `setup`) spawns the A3 loopback control server so an external agent can drive this
 /// running instance.
@@ -1476,7 +1589,12 @@ pub fn run() {
             set_cell_range_fmt,
             clipboard_read,
             clipboard_write,
-            delete_block
+            delete_block,
+            // issue 043 — SDK convergence lane (additive; consumed by @tf-hwp/react TauriAdapter)
+            apply_intent_json,
+            blocks_in_rect,
+            export_hwpx_bytes,
+            export_pdf_bytes
         ])
         .run(tauri::generate_context!())
         .expect("error while running tf-hwp viewer");
@@ -1644,5 +1762,80 @@ mod tests {
         assert_eq!((hit.section, hit.block), (b.section, b.block), "px click resolves to the pointed block");
         // And a click far to the LEFT margin at the same row still snaps to a block (row-based pointing).
         assert!(placed.pages[pi].block_at(1.0 * k, py * k).is_some(), "margin click still snaps to a block");
+    }
+
+    // ---- issue 043: the SDK convergence lane commands (the command bodies need a Tauri State, so these
+    // ---- drive the SAME pure halves each command wraps — the op-bus dispatch + the Outcome shaping). ----
+
+    /// The general `apply_intent_json` command routes an Intent-JSON envelope through the SAME op-bus
+    /// (`hwp_mcp::apply_intent_json`) the wasm backend uses, then shapes the Outcome with the SAME
+    /// `{kind, …}` mapping (`outcome_to_json`). An ApplyContent envelope edits + reports `kind:"applied"`,
+    /// and the SAME lane undoes it (`kind:"undone"`, `changed:true`).
+    #[test]
+    fn apply_intent_json_edits_via_op_bus_and_shapes_outcome() {
+        let mut sess = hwp_mcp::Session::default();
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/hwpx/FormattingShowcase.hwpx");
+        mcp_call(&mut sess, "open_document", json!({ "path": path })).unwrap();
+
+        // The exact JSON envelope the TauriAdapter forwards (schema v0 ApplyContent).
+        let envelope = json!({
+            "intent": "ApplyContent",
+            "json": r#"{"blocks":[{"type":"heading","text":"043 수렴","style":"개요 1"}]}"#
+        });
+        let outcome = hwp_mcp::apply_intent_json(&mut sess, &envelope).expect("apply_intent_json applies");
+        let shaped = outcome_to_json(&outcome);
+        assert_eq!(shaped["kind"], "applied", "ApplyContent → kind:applied (wasm-identical): {shaped}");
+        assert!(shaped["ops"].as_u64().unwrap() >= 1, "at least one op applied");
+
+        // Undo through the same lane shapes `kind:"undone"` with the changed flag (wasm parity).
+        let undone = outcome_to_json(&hwp_mcp::apply_intent_json(&mut sess, &json!({ "intent": "Undo" })).unwrap());
+        assert_eq!(undone["kind"], "undone");
+        assert_eq!(undone["changed"], true, "the ApplyContent is undoable");
+    }
+
+    /// An unknown / mistyped Intent field is a HARD error (deny_unknown_fields, R11) surfaced verbatim as
+    /// the command's `Err` — never a silent no-op the adapter would mistake for success (issue 018 policy).
+    #[test]
+    fn apply_intent_json_rejects_unknown_field() {
+        let mut sess = hwp_mcp::Session::default();
+        // `Outcome` has no `Debug`, so use `.err()` (drops the Ok value) rather than `.unwrap_err()`.
+        let err = hwp_mcp::apply_intent_json(&mut sess, &json!({ "intent": "Undo", "bogus": 1 }))
+            .err()
+            .expect("unknown field must be rejected, not silently accepted");
+        assert!(!err.is_empty(), "unknown field is rejected with a message: {err}");
+    }
+
+    /// `blocks_in_rect` (marquee) delegates to hwp-session and returns an EMPTY vec on an out-of-range
+    /// page — the wasm `blocksInRect` "[]"-on-miss null policy — never a panic.
+    #[cfg(feature = "rhwp")]
+    #[test]
+    fn blocks_in_rect_covers_page_and_is_empty_off_page() {
+        let bench = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp");
+        let doc = hwp_core::Engine::open(&std::fs::read(bench).unwrap()).unwrap();
+        let all = hwp_session::blocks_in_rect(&doc, 0, 0.0, 0.0, 1e5, 1e5);
+        assert!(!all.is_empty(), "a full-page marquee returns the page's blocks");
+        assert!(
+            hwp_session::blocks_in_rect(&doc, 999, 0.0, 0.0, 1e5, 1e5).is_empty(),
+            "off-page marquee → empty vec, not a panic"
+        );
+    }
+
+    /// `export_hwpx_bytes` returns round-trip-safe HWPX bytes (the byte twin of the path save), reusing
+    /// `hwp_mcp::export_bytes`: the bytes reopen with the live edit's text present.
+    #[test]
+    fn export_hwpx_bytes_returns_reopenable_bytes() {
+        let mut sess = hwp_mcp::Session::default();
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/hwpx/FormattingShowcase.hwpx");
+        mcp_call(&mut sess, "open_document", json!({ "path": path })).unwrap();
+        mcp_call(
+            &mut sess,
+            "apply_content",
+            json!({ "content": r#"{"blocks":[{"type":"heading","text":"바이트 내보내기","style":"개요 1"}]}"# }),
+        )
+        .unwrap();
+        let bytes = hwp_mcp::export_bytes(&sess).expect("export_bytes");
+        assert!(!bytes.is_empty(), "HWPX bytes are non-empty");
+        let reopened = hwp_core::Engine::open(&bytes).expect("exported bytes reopen");
+        assert!(reopened.plain_text().contains("바이트 내보내기"), "the live edit is in the exported bytes");
     }
 }
