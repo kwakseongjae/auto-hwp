@@ -42,6 +42,15 @@
 | [021](021-selection-ux-v2.md) | 선택 UX v2 — 클릭=교체 / ⌘·Ctrl=토글 / 러버밴드 마퀴 | **done** | QA-P1 | 0cb666b · blocksInRect + vitest 14 + Playwright 갱신 통과 |
 | [022](022-font-system-v1.md) | 폰트 시스템 v1 — OFL 카탈로그 8종+업로드+삼위일치 (**교차골든 26p 바이트동일**) | **done** | QA-P1 | cb9f7b3 · 셰이퍼 +8.8KB, 라이선스 표 전수 OFL |
 
+## 로드맵 R8 — 라운드 8 (2026-07-04, 텍스트 편집 심화)
+
+착수: **040 ∥ 041** (소유권: 040=에디터/richedit/HwpWorkspace, 041=어댑터/editor-core — UI 없음) → 실측 보고서(CARET-GAP.md) 기반으로 042(캐럿 UI)·FG-13 잔여분 재평가.
+
+| # | 제목 | 상태 | 단계 | 비고 |
+|---|------|------|------|------|
+| [040](040-rich-inplace-editor.md) | 리치 제자리 에디터 — 부분 서식(런 단위), 데스크톱 richedit 포팅 | open | R8-P0 | FG-11; contentEditable가 캐럿·IME 네이티브 처리(FG-13 에디터-내 부분 흡수) |
+| [041](041-caret-geometry-exposure.md) | 글리프 캐럿 지오메트리 노출 + 셀 캐럿 갭 실측(CARET-GAP.md) | open | R8-P1 | FG-12 전반부; HitTest offset·CaretRect는 이미 wasm 배선 — 셀=node None 갭이 관건 |
+
 ## 로드맵 R7 — 라운드 7 (2026-07-04, 033 백로그 잔여 P0/S급)
 
 착수: **037 ∥ 038** (소유권: 037=HwpPageView, 038=HoverLayer 신규+HwpWorkspace+styles) → **039** (037·038 병합 후).
