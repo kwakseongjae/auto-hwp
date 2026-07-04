@@ -1,6 +1,6 @@
 # 041 — R8-2: 글리프 캐럿 지오메트리 노출 + 셀 캐럿 갭 실측 (FG-12 전반부)
 
-- 상태: **open** · 우선순위: R8-P1 · 영역: packages/editor-core + packages/react의 어댑터 파일만
+- 상태: **done** (7248b71) · 우선순위: R8-P1 · 영역: packages/editor-core + packages/react의 어댑터 파일만
   (WasmAdapter.ts/TauriAdapter.ts/EngineAdapter — **컴포넌트/HwpWorkspace/styles/index.ts 금지**)
 - 병렬: 040(에디터/HwpWorkspace 소유). UI 없음 — 이 이슈는 **모델+어댑터+테스트+실측 보고서**가 산출물.
 

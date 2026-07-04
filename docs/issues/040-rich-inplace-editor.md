@@ -1,6 +1,6 @@
 # 040 — R8-1: 리치 제자리 에디터 — 부분 서식(런 단위) 편집 (FG-11)
 
-- 상태: **open** · 우선순위: **R8-P0** · 영역: packages/react (InPlaceCellEditor + 신규 richedit 모듈 + HwpWorkspace 커밋 경로 + styles.css + index.ts)
+- 상태: **done** (b807f7c) · 우선순위: **R8-P0** · 영역: packages/react (InPlaceCellEditor + 신규 richedit 모듈 + HwpWorkspace 커밋 경로 + styles.css + index.ts)
 - 병렬: 041(WasmAdapter/TauriAdapter/editor-core 소유 — **이 이슈는 그 파일 금지**)
 
 ## 근거 (033 FG-11)

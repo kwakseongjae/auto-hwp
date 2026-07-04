@@ -48,8 +48,8 @@
 
 | # | 제목 | 상태 | 단계 | 비고 |
 |---|------|------|------|------|
-| [040](040-rich-inplace-editor.md) | 리치 제자리 에디터 — 부분 서식(런 단위), 데스크톱 richedit 포팅 | open | R8-P0 | FG-11; contentEditable가 캐럿·IME 네이티브 처리(FG-13 에디터-내 부분 흡수) |
-| [041](041-caret-geometry-exposure.md) | 글리프 캐럿 지오메트리 노출 + 셀 캐럿 갭 실측(CARET-GAP.md) | open | R8-P1 | FG-12 전반부; HitTest offset·CaretRect는 이미 wasm 배선 — 셀=node None 갭이 관건 |
+| [040](040-rich-inplace-editor.md) | 리치 제자리 에디터 — 부분 서식(런 단위), 데스크톱 richedit 포팅 | **done** (b807f7c) | R8-P0 | 부분볼드 e2e(SVG 반영+재개봉 왕복+undo); StrictMode 커밋 버그 발견·수정 |
+| [041](041-caret-geometry-exposure.md) | 글리프 캐럿 지오메트리 노출 + 셀 캐럿 갭 실측(CARET-GAP.md) | **done** (7248b71) | R8-P1 | 실측: 바이너리 .hwp 앵커 0% → **042 캐럿 UI는 엔진 P1(셀 주소형 CaretRect) 전까지 보류** |
 
 ## 로드맵 R7 — 라운드 7 (2026-07-04, 033 백로그 잔여 P0/S급)
 
