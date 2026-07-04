@@ -149,6 +149,72 @@ wasm(브라우저)은 폰트가 **없어서** `registerFont(bytes)`로 메트릭
 - **배포용 crypto 보류**: 신 셸 전환의 게이트가 아니다(어느 셸에도 없음).
 - **데스크톱 자체 UI는 044에서 수렴** — 043은 어댑터/커맨드 전제조건만(현 앱 무변경).
 
+### 4.6 044 실행 결과 (플래그 뒤 신 셸 — 구현 완료)
+
+`crates/hwp-viewer/ui`에 **비파괴 엔트리 분기**를 넣었다. 기존 `App.tsx`와 그 의존은 **한 줄도 안 건드렸다**.
+
+- **엔트리 분기 (`src/main.tsx`)**: 빌드타임 상수 `__WORKSPACE_SHELL__`(vite `define`, `VITE_SHELL=workspace`일
+  때만 `true`)로 분기. off면 esbuild/rollup이 `if` 블록(동적 `import("./WorkspaceShell")` 포함)을 통째로
+  **DCE**하고 `else`만 남는다 — `else`를 레거시 부트스트랩과 **한 글자도 같게**(createRoot를 각 분기 안에서 호출,
+  hoist 금지) 써서 **off 번들 = pre-044 번들 sha256 동일**(아래 검증). 롤백 = 플래그 제거.
+- **신 셸 (`src/WorkspaceShell.tsx`)**: `new TauriAdapter({ invoke, resolveOpenPath })`로 `HwpWorkspace`를
+  마운트(043에서 어댑터 22/22 완비 → 순수 조립). `resolveOpenPath`는 네이티브 경로를 `document.bytes`에 인코딩→
+  디코딩하는 무비용 브릿지(임시파일/신규 커맨드 없음 — Rust `open_doc`가 실제 파일을 제자리에서 연다).
+- **host chrome 4종 배선**:
+  1. **타이틀바** — `h-9`(36px) + `data-tauri-drag-region` + `pl-24`. ccb9d5a 규율 그대로(신호등 고정, 재작업 0).
+  2. **파일 열기** — `@tauri-apps/plugin-dialog` `open` → 경로 → `adapter.open`(resolveOpenPath 경유).
+  3. **저장/내보내기** — HWPX 저장은 기존 **atomic `export_hwpx`**(P0-1: temp+fsync+rename) 경로 재사용;
+     HTML/PDF는 `HwpWorkspace`의 신규 opt-in **`onExport`** prop이 브라우저 다운로드를 가로채 네이티브 저장
+     다이얼로그 + 기존 `export_doc_html`/`export_doc_pdf`(같은 라이브 세션 재직렬화)로 보낸다.
+  4. **드래그드롭 열기** — `getCurrentWebviewWindow().onDragDropEvent`(OS 경로) → `.hwp/.hwpx`면 open.
+  나머지 2종(클립보드 심화·파일연결)은 §2대로 기존 앱 소유로 유지(신 셸 게이트 아님).
+- **registerFont**: `fontCatalog` 미주입(폰트픽커 숨김) — 네이티브 폰트 no-op(§3) 그대로.
+- **채팅(바이브 편집) — v1 비활성 (감사표 갱신)**: `HwpWorkspace.onAiRequest` 계약은
+  `(instruction, anchors, ctx) => Intent[]`를 워크스페이스가 **미리보기→`adapter.applyIntent`로 커밋**하는 구조다.
+  데스크톱 AI 경로는 **상태를 가진 dry-run/commit 게이트**(`ai_edit_propose`가 세션에 요약 제안을 스테이징 →
+  `commit_proposal`이 적용)로, schema-v0 `Intent[]`를 절대 노출하지 않고 커밋도 `applyIntent`가 아니다.
+  둘을 잇자면 **엔진 인접 신규 Rust 커맨드**가 필요 → 044 스코프의 "억지 개조 금지"에 걸린다. 그래서 v1은
+  가짜 제안을 만들지 않고 **정직한 사유로 reject**(`WorkspaceShell.tsx`의 `disabledAi`). 수동 편집(`enableEditing`:
+  더블클릭 제자리 편집·서식 툴바·열/행 크기·우클릭 메뉴)은 **완전 배선**되어 무영향. → 채팅 연결은 044+ 후속(신규
+  커맨드가 `Intent[]`를 반환하도록 op-bus를 확장하는 별도 이슈).
+
+**`HwpWorkspace`에 추가한 opt-in prop = `onExport?` 하나뿐**(웹 기본 동작 불변): 생략 시 기존 브라우저
+`<a download>` 경로를 그대로 탄다. 웹 vitest(`workspaceShell.tauri.test.tsx`)가 "onExport 있으면 가로채고
+`<a>.click` 미발생 / onExport 없으면 `<a>.click` 1회"를 **양방향으로 잠근다**(웹 불변 증명).
+
+### 4.7 044 검증 결과 (자동)
+
+- **ui vite build 플래그 off/on 둘 다 exit 0.** off 번들 = **pre-044 baseline과 `diff -rq` 동일(트리 전체)** +
+  JS/CSS/index.html **sha256 3종 모두 일치**(App.tsx 등 기존 경로 파일 git diff 0). on 번들은 별도
+  `WorkspaceShell-*.js` 청크(HwpWorkspace/onDragDropEvent/export_hwpx 배선)로 App은 트리셰이크됨.
+- **`cargo check --workspace` = 0 · `cargo check -p hwp-viewer --features pdf` = 0** (엔진/커맨드 Rust 무접촉 —
+  이번 044는 TS/설정/문서만 변경; `crates/hwp-viewer/src/*.rs` diff 0 → 게이트 v2(8==8·18==18)는 N/A).
+- **`packages/react` vitest 180 그린**(기존 177 + 신규 `workspaceShell.tauri.test.tsx` 3: 마운트 스모크
+  open→pageSvg→셀클릭 · onExport 가로채기 · 웹 불변).
+- **웹 e2e**(`apps/hwp-lab`, `.next` 삭제 후 전 스펙): onExport는 opt-in이라 웹 앱은 미사용 → 무회귀.
+
+### 4.8 수동 QA 체크리스트 — `VITE_SHELL=workspace cargo tauri dev`
+
+GUI는 헤드리스 불가라 아래는 **사람이 도는 큐**(빌드·마운트 스모크까지가 자동, 나머지 수동):
+
+```
+# 워크트리/레포 루트에서 (빌드 순서: editor-core → ai-protocol → react → ui)
+pnpm -C packages/editor-core build && pnpm -C packages/react build
+VITE_SHELL=workspace cargo tauri dev   # (또는 tauri.conf의 beforeDevCommand에 VITE_SHELL 주입)
+```
+
+- [ ] **타이틀바**: macOS 신호등이 h-9 바 **세로 중앙**에 온다(재핀 금지 규율 유지). `열기`/`저장` 버튼 + 드래그 영역.
+- [ ] **열기**: `열기` → 네이티브 다이얼로그 → .hwp/.hwpx 선택 → 렌더. 같은 파일 재선택도 재오픈.
+- [ ] **드래그드롭**: Finder에서 .hwpx 드롭 → 열림. 비문서 파일 드롭 → "hwp/hwpx만" 안내.
+- [ ] **렌더/상호작용**: 팬/줌 · 호버 프리하이라이트 · 키보드 셀 내비 · 우클릭 컨텍스트 메뉴 · 셀 더블클릭
+      **리치 인플레이스 편집**(굵게/기울임/크기/색) → 커밋 후 반영.
+- [ ] **저장(HWPX)**: `저장` → 저장 다이얼로그 → **atomic write**(temp+fsync+rename)로 기록, 토스트 확인.
+- [ ] **내보내기(HTML/PDF)**: 내보내기 버튼 → 네이티브 저장 다이얼로그 → 파일 생성(브라우저 다운로드 아님).
+- [ ] **채팅**: v1 비활성 — AI 전달 시 정직한 사유 노출(크래시 아님). 수동 편집은 정상.
+- [ ] **회귀 0**: 플래그 off로 재빌드 시 기존 앱과 **동일**(위 자동 sha256 동일이 근거).
+
+기본값 전환(플래그 default→workspace)은 **이 QA 전 항목 0 회귀 확인 후**의 후속 이슈다(044는 default 안 바꿈).
+
 ---
 
 ## 5. 검증(043)

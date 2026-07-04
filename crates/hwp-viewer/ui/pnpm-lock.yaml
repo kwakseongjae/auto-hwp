@@ -17,6 +17,15 @@ importers:
       '@tauri-apps/plugin-dialog':
         specifier: ^2.0.1
         version: 2.7.1
+      '@tf-hwp/editor-core':
+        specifier: file:../../../packages/editor-core
+        version: file:../../../packages/editor-core
+      '@tf-hwp/engine':
+        specifier: file:../../../packages/engine
+        version: file:../../../packages/engine
+      '@tf-hwp/react':
+        specifier: file:../../../packages/react
+        version: file:../../../packages/react(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -555,6 +564,21 @@ packages:
 
   '@tauri-apps/plugin-dialog@2.7.1':
     resolution: {integrity: sha512-OK1UBXYt+ojcmxMktzzuyonYIFta8CmAASpX+CA+DTGK24KlHjhYI6x2iOJ/TjZF4N7/ACK1oFmEOjIY9IhzOQ==}
+
+  '@tf-hwp/editor-core@file:../../../packages/editor-core':
+    resolution: {directory: ../../../packages/editor-core, type: directory}
+    engines: {node: '>=18'}
+
+  '@tf-hwp/engine@file:../../../packages/engine':
+    resolution: {directory: ../../../packages/engine, type: directory}
+    engines: {node: '>=18'}
+
+  '@tf-hwp/react@file:../../../packages/react':
+    resolution: {directory: ../../../packages/react, type: directory}
+    engines: {node: '>=18'}
+    peerDependencies:
+      react: '>=18'
+      react-dom: '>=18'
 
   '@types/babel__core@7.20.5':
     resolution: {integrity: sha512-qoQprZvz5wQFJwMDqeseRXWv3rqMvhgpbXFfVyWhbx9X47POIA6i/+dXefEmZKoAgOaTdaIgNSMqMIU61yRyzA==}
@@ -1247,6 +1271,17 @@ snapshots:
   '@tauri-apps/plugin-dialog@2.7.1':
     dependencies:
       '@tauri-apps/api': 2.11.0
+
+  '@tf-hwp/editor-core@file:../../../packages/editor-core': {}
+
+  '@tf-hwp/engine@file:../../../packages/engine': {}
+
+  '@tf-hwp/react@file:../../../packages/react(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
+    dependencies:
+      '@tf-hwp/editor-core': file:../../../packages/editor-core
+      '@tf-hwp/engine': file:../../../packages/engine
+      react: 18.3.1
+      react-dom: 18.3.1(react@18.3.1)
 
   '@types/babel__core@7.20.5':
     dependencies:

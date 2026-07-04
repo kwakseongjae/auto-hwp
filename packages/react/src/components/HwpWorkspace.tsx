@@ -102,6 +102,12 @@ export interface HwpWorkspaceProps {
    *  더블클릭 텍스트 팝오버 · 선택 서식 툴바). Default OFF — the workspace behaves exactly as before
    *  (chat-only) when omitted, so existing hosts/tests are unaffected. */
   enableEditing?: boolean;
+  /** Opt-in (issue 044): intercept the HTML/PDF export buttons. Called with the export payload
+   *  (`Uint8Array` for PDF, `string` for HTML), a suggested filename, and the MIME type. When omitted
+   *  the workspace uses the WEB default — a browser `<a download>` — UNCHANGED (web vitest pins this).
+   *  A DESKTOP host supplies this to route the output to a native save dialog + atomic write instead of
+   *  a browser download (the `<a download>` web convention must not leak into the Tauri shell). */
+  onExport?: (data: Uint8Array | string, filename: string, mime: string) => void | Promise<void>;
   className?: string;
 }
 
@@ -1041,11 +1047,15 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
 
   const exportHtml = useCallback(async () => {
     try {
-      download(await adapter.exportHtml(), `${props.document?.name ?? "document"}.html`, "text/html");
+      const html = await adapter.exportHtml();
+      const name = `${props.document?.name ?? "document"}.html`;
+      // Issue 044: a host `onExport` (desktop) replaces the browser download; omitted (web) = unchanged.
+      if (props.onExport) await props.onExport(html, name, "text/html");
+      else download(html, name, "text/html");
     } catch (e) {
       toast(`HTML 내보내기 실패: ${e}`);
     }
-  }, [adapter, props.document, toast]);
+  }, [adapter, props.document, props.onExport, toast]);
 
   const exportPdf = useCallback(async () => {
     try {
@@ -1059,13 +1069,17 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           return;
         }
       }
-      download(await adapter.exportPdf(), `${props.document?.name ?? "document"}.pdf`, "application/pdf");
+      const pdf = await adapter.exportPdf();
+      const name = `${props.document?.name ?? "document"}.pdf`;
+      // Issue 044: a host `onExport` (desktop) replaces the browser download; omitted (web) = unchanged.
+      if (props.onExport) await props.onExport(pdf, name, "application/pdf");
+      else download(pdf, name, "application/pdf");
     } catch (e) {
       const code = (e as { code?: string })?.code;
       if (code === "font_missing") toast("폰트가 주입되지 않았습니다 — .ttf/.otf 파일을 선택하세요");
       else toast(`PDF 내보내기 실패: ${e}`);
     }
-  }, [adapter, props.requestFont, props.document, toast]);
+  }, [adapter, props.requestFont, props.document, props.onExport, toast]);
 
   const jumpToPage = useCallback((page: number) => {
     const el = window.document.querySelector(`.hw-sheet[data-page="${page}"]`);

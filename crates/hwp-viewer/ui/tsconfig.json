@@ -11,7 +11,12 @@
     "isolatedModules": true,
     "skipLibCheck": true,
     "noUnusedLocals": true,
-    "noUnusedParameters": true
+    "noUnusedParameters": true,
+    "paths": {
+      "@tf-hwp/react": ["../../../packages/react/dist/index.d.ts"],
+      "@tf-hwp/editor-core": ["../../../packages/editor-core/dist/index.d.ts"],
+      "@tf-hwp/engine": ["../../../packages/engine/index.d.ts"]
+    }
   },
   "include": ["src"]
 }
