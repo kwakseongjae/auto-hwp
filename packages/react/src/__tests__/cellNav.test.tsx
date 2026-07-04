@@ -94,7 +94,7 @@ describe("issue 036 — arrow-key cell navigation binding", () => {
     const sheet = await sheetOf(container);
     clickAt(sheet, 50, 20); // cell (0,0)
     await waitFor(() => expect(anchorText(container)).toContain("1행 1열"));
-    const composer = container.querySelector(".hw-textarea") as HTMLTextAreaElement;
+    const composer = container.querySelector(".hw-textarea") as HTMLElement;
     composer.focus();
     fireEvent.keyDown(composer, { key: "ArrowRight" }); // bubbles to window; target is the textarea
     await new Promise((r) => setTimeout(r, 10));
@@ -110,7 +110,7 @@ describe("issue 036 — Enter opens the editor, Tab commits + moves + re-enters"
     clickAt(sheet, 50, 20); // cell (0,0)
     await waitFor(() => expect(anchorText(container)).toContain("1행 1열"));
     fireEvent.keyDown(window, { key: "Enter" });
-    const ta = (await screen.findByTestId("hw-inplace-editor")) as HTMLTextAreaElement;
+    const ta = (await screen.findByTestId("hw-inplace-editor")) as HTMLElement;
     // Editor sits over cell (0,0): left/top = box × zoom(0.9) = 0.
     expect(ta.style.left).toBe("0px");
     expect(ta.style.top).toBe("0px");
@@ -124,9 +124,9 @@ describe("issue 036 — Enter opens the editor, Tab commits + moves + re-enters"
     clickAt(sheet, 50, 20); // cell (0,0)
     await waitFor(() => expect(anchorText(container)).toContain("1행 1열"));
     fireEvent.keyDown(window, { key: "Enter" });
-    const ta = (await screen.findByTestId("hw-inplace-editor")) as HTMLTextAreaElement;
+    const ta = (await screen.findByTestId("hw-inplace-editor")) as HTMLElement;
     expect(ta.style.left).toBe("0px"); // over cell (0,0)
-    fireEvent.change(ta, { target: { value: "새값" } });
+    ta.textContent = "새값";
     fireEvent.keyDown(ta, { key: "Tab" }); // 저장 + 오른쪽 셀 이동 + 재진입
 
     // committed via the run-preserving path.
@@ -137,7 +137,7 @@ describe("issue 036 — Enter opens the editor, Tab commits + moves + re-enters"
     });
     // the selection moved right and the editor RE-ENTERED at cell (0,1) (left = 100 × 0.9 = 90px).
     await waitFor(() => {
-      const ed = screen.getByTestId("hw-inplace-editor") as HTMLTextAreaElement;
+      const ed = screen.getByTestId("hw-inplace-editor") as HTMLElement;
       expect(ed.style.left).toBe("90px");
     });
     await waitFor(() => expect(anchorText(container)).toContain("1행 2열"));
@@ -150,12 +150,12 @@ describe("issue 036 — Enter opens the editor, Tab commits + moves + re-enters"
     clickAt(sheet, 150, 20); // cell (0,1)
     await waitFor(() => expect(anchorText(container)).toContain("1행 2열"));
     fireEvent.keyDown(window, { key: "Enter" });
-    const ta = (await screen.findByTestId("hw-inplace-editor")) as HTMLTextAreaElement;
+    const ta = (await screen.findByTestId("hw-inplace-editor")) as HTMLElement;
     expect(ta.style.left).toBe("90px"); // over cell (0,1)
-    fireEvent.change(ta, { target: { value: "왼쪽" } });
+    ta.textContent = "왼쪽";
     fireEvent.keyDown(ta, { key: "Tab", shiftKey: true });
     await waitFor(() => {
-      const ed = screen.getByTestId("hw-inplace-editor") as HTMLTextAreaElement;
+      const ed = screen.getByTestId("hw-inplace-editor") as HTMLElement;
       expect(ed.style.left).toBe("0px"); // moved to cell (0,0)
     });
     await waitFor(() => expect(anchorText(container)).toContain("1행 1열"));

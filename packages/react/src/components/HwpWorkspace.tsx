@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { EngineAdapter, Intent, DocContext, PointerInput, PageGeom, Box, CellDir, Selection, TableBox } from "@tf-hwp/editor-core";
+import type { EngineAdapter, Intent, DocContext, PointerInput, PageGeom, Box, CellDir, Selection, TableBox, RunSpec } from "@tf-hwp/editor-core";
 import { boundariesToRatios, remapFragmentHeights, appliedReflectsDrag, firstRunStyle } from "@tf-hwp/editor-core";
+import { runsUnchanged } from "../richedit";
 import { modLabel } from "../platform";
 import { ZOOM_STEP, clampZoom, isEditableTarget, panBy, wheelToZoomFactor, zoomAt } from "../viewport";
 import { useHwpEditor } from "../useHwpEditor";
@@ -165,8 +166,11 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // Issue 032: the OPEN in-place text editor (Figma-style), replacing the 027 popover card. Carries the
   // cell's FIRST-run size (px→pt via firstRunStyle) so InPlaceCellEditor renders at the cell's own font
   // size. `fontSizePt` is undefined when the run size is unknown (editor inherits the sheet default).
+  // Issue 040: the editor now carries the target's CURRENT styled `runs` (not just plain `text`) so the
+  // contentEditable rich editor renders + round-trips per-run formatting, and the commit compares against
+  // them for the no-op (미접촉 셀 재커밋 = no-op) check. `text` is kept for the anchor/label snippet.
   const [editor, setEditor] = useState<
-    { page: number; box: Box; section: number; block: number; kind: string; rows?: [number, number]; cols?: [number, number]; text: string; fontSizePt?: number } | null
+    { page: number; box: Box; section: number; block: number; kind: string; rows?: [number, number]; cols?: [number, number]; text: string; runs: RunSpec[]; fontSizePt?: number } | null
   >(null);
   // Issue 039: the OPEN right-click context menu. `kind` branches the item set (셀/문단/바탕); `click`
   // carries the page-local point so 텍스트 편집 re-opens the in-place editor exactly where the user
@@ -661,14 +665,14 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         const cell = adapter.tableCellAt ? await adapter.tableCellAt(c.page, c.x, c.y) : null;
         if (cell) {
           const runs = await core.session.runsAt(cell.section, cell.block, cell.row, cell.col);
-          setEditor({ page: c.page, box: { x: cell.x, y: cell.y, w: cell.w, h: cell.h }, section: cell.section, block: cell.block, kind: "cell", rows: [cell.row, cell.row], cols: [cell.col, cell.col], text: cell.text, fontSizePt: firstRunStyle(runs).size_pt });
+          setEditor({ page: c.page, box: { x: cell.x, y: cell.y, w: cell.w, h: cell.h }, section: cell.section, block: cell.block, kind: "cell", rows: [cell.row, cell.row], cols: [cell.col, cell.col], text: cell.text, runs, fontSizePt: firstRunStyle(runs).size_pt });
           return;
         }
         if (await adapter.tableAt(c.page, c.x, c.y)) return; // on a table border but not a cell → no editor
         const hit = await adapter.hitTest(c.page, c.x, c.y);
         if (hit && hit.kind === "paragraph" && hit.editable) {
           const runs = await core.session.runsAt(hit.section, hit.block);
-          setEditor({ page: c.page, box: { x: hit.x, y: hit.y, w: hit.w, h: hit.h }, section: hit.section, block: hit.block, kind: "paragraph", text: hit.text, fontSizePt: firstRunStyle(runs).size_pt });
+          setEditor({ page: c.page, box: { x: hit.x, y: hit.y, w: hit.w, h: hit.h }, section: hit.section, block: hit.block, kind: "paragraph", text: hit.text, runs, fontSizePt: firstRunStyle(runs).size_pt });
         }
       } catch (e) {
         onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
@@ -688,7 +692,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       const col = anchor.cols?.[0] ?? 0;
       try {
         const runs = await core.session.runsAt(anchor.section, anchor.block, row, col);
-        setEditor({ page: mark.page, box: mark.box, section: anchor.section, block: anchor.block, kind: "cell", rows: [row, row], cols: [col, col], text: anchor.text ?? "", fontSizePt: firstRunStyle(runs).size_pt });
+        setEditor({ page: mark.page, box: mark.box, section: anchor.section, block: anchor.block, kind: "cell", rows: [row, row], cols: [col, col], text: anchor.text ?? "", runs, fontSizePt: firstRunStyle(runs).size_pt });
       } catch (e) {
         onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
       }
@@ -737,15 +741,30 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     [core, scrollCellIntoView],
   );
 
+  // Issue 040: commit the editor's SERIALIZED runs run-preserving. A cell → SetTableCellRuns, a paragraph →
+  // SetParagraphRuns (never a plain-text variant — 교훈 6), applied as ONE undo batch via the SAME
+  // session.applyBatch path editCellText uses (page re-flow + layoutInvalidated → the refreshToken close).
+  const applyEditorRuns = useCallback(
+    (ed: { kind: string; section: number; block: number; rows?: [number, number]; cols?: [number, number] }, runs: RunSpec[]) => {
+      const intent: Intent =
+        ed.kind === "paragraph"
+          ? { intent: "SetParagraphRuns", section: ed.section, block: ed.block, runs }
+          : { intent: "SetTableCellRuns", section: ed.section, index: ed.block, row: ed.rows?.[0] ?? 0, col: ed.cols?.[0] ?? 0, runs };
+      return core.session.applyBatch([intent]);
+    },
+    [core],
+  );
+
   const onEditorCommit = useCallback(
-    async (text: string) => {
+    async (runs: RunSpec[]) => {
       if (!editor) return;
+      // No-op guard (교훈 1 / 미접촉 셀 재커밋 = no-op): if nothing changed, close WITHOUT a write + undo unit.
+      if (runsUnchanged(runs, editor.runs)) {
+        setEditor(null);
+        return;
+      }
       try {
-        if (editor.kind === "paragraph") {
-          await core.edit.editParagraphText(editor.section, editor.block, text);
-        } else {
-          await core.edit.editCellText(editor.section, editor.block, editor.rows?.[0] ?? 0, editor.cols?.[0] ?? 0, text);
-        }
+        await applyEditorRuns(editor, runs);
         toast("텍스트를 수정했습니다");
         // Success: the applied edit bumps refreshToken which ALSO closes the editor; clearing here too keeps
         // it closed even when the layout didn't reflow (a no-op re-flow).
@@ -757,7 +776,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         throw e;
       }
     },
-    [core, editor, toast, onTrap],
+    [applyEditorRuns, editor, toast, onTrap],
   );
 
   // Tab / Shift+Tab inside a cell editor (issue 036): commit the current text, and ONLY on a successful
@@ -766,14 +785,17 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // refreshToken close effect for the whole transition (the commit re-flows), so the re-entered editor
   // isn't clobbered; it's reset one macrotask later, AFTER React has flushed that render.
   const onEditorCommitMove = useCallback(
-    async (dir: "left" | "right", text: string) => {
+    async (dir: "left" | "right", runs: RunSpec[]) => {
       const ed = editorRef.current;
       if (!ed) return;
       tabMovingRef.current = true;
       try {
-        if (ed.kind === "paragraph") await core.edit.editParagraphText(ed.section, ed.block, text);
-        else await core.edit.editCellText(ed.section, ed.block, ed.rows?.[0] ?? 0, ed.cols?.[0] ?? 0, text);
-        toast("텍스트를 수정했습니다");
+        // Commit run-preserving ONLY when the runs actually changed (a bare Tab through cells is a no-op —
+        // no write, no undo unit); the move happens either way (issue 040 no-op guard + 036 Tab nav).
+        if (!runsUnchanged(runs, ed.runs)) {
+          await applyEditorRuns(ed, runs);
+          toast("텍스트를 수정했습니다");
+        }
         // Move + re-enter. moveCell probes from the just-committed cell's box (stable x/w for a text edit)
         // and returns the NEIGHBOUR's fresh post-edit geometry; a clamp (table edge) just closes.
         const moved = await core.selection.moveCell(dir === "right" ? "right" : "left");
@@ -1186,9 +1208,10 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                         onSendToAi={onSendToAi}
                       />
                     )}
-                    {/* issue 032: the Figma-style IN-PLACE editor sits over the cell rect at the cell's own
-                        font size (no popover card). onCommit returns a Promise so the editor un-latches +
-                        stays open on failure; onCancel (Esc) just closes it. */}
+                    {/* issue 032/040: the Figma-style IN-PLACE rich editor sits over the cell rect at the
+                        cell's own font size (no popover card). It renders the cell's styled RUNS so partial
+                        formatting shows + round-trips; onCommit returns the serialized runs as a Promise so
+                        the editor un-latches + stays open on failure; onCancel (Esc) just closes it. */}
                     {editingOn && editor && editor.page === page && (
                       // `key` = the cell address so a Tab move REMOUNTS the editor at the next cell (fresh
                       // latch + focus/select-all) instead of reusing the committed instance (issue 036).
@@ -1196,7 +1219,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                         key={`${editor.section}:${editor.block}:${editor.rows?.[0] ?? "p"}:${editor.cols?.[0] ?? "p"}:${editor.page}`}
                         box={editor.box}
                         scale={scale}
-                        initialText={editor.text}
+                        initialRuns={editor.runs}
                         fontSizePt={editor.fontSizePt}
                         onCommit={onEditorCommit}
                         onCancel={() => setEditor(null)}

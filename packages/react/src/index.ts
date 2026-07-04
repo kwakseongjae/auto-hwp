@@ -40,6 +40,23 @@ export type { RulerProps } from "./components/Ruler";
 // backward compatibility only (deprecated).
 export { InPlaceCellEditor, computeInPlaceEditorStyle, PAGE_PX_PER_PT } from "./components/InPlaceCellEditor";
 export type { InPlaceCellEditorProps, InPlaceEditorStyle } from "./components/InPlaceCellEditor";
+// Issue 040 — the rich in-place editor's run↔DOM helpers (ported from the desktop richedit). runsToHtml
+// renders styled runs into a contentEditable; serializeEditor reads the edited DOM back to RunSpec[];
+// runsUnchanged is the commit no-op check. Exported so a host building a custom editor reuses the SAME
+// lossless round-trip (and tests can pin it). applyLiveStyle formats the live selection (⌘B/⌘I/⌘U/⌘⇧S).
+export {
+  runsToHtml,
+  serializeEditor,
+  runsText,
+  runsEqual,
+  canonRuns,
+  runsUnchanged,
+  readCaretStyle,
+  applyLiveStyle,
+  saveInlineSelection,
+  sizePx,
+} from "./richedit";
+export type { ParaIndent } from "./richedit";
 /** @deprecated Since issue 032 — superseded by {@link InPlaceCellEditor} (in-place, no popover card).
  *  Kept as an export for backward compatibility; HwpWorkspace no longer uses it. */
 export { CellTextPopover } from "./components/CellTextPopover";

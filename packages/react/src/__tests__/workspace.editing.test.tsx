@@ -150,9 +150,10 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
     });
   });
 
-  it("double-click a cell → IN-PLACE editor (over the cell rect) → Enter PRESERVES bold via SetTableCellRuns", async () => {
-    // issue 032: the popover card is gone — the double-click now opens the Figma-style in-place editor over
-    // the cell rect (data-testid hw-inplace-editor) and Enter commits through the SAME run-preserving path.
+  it("double-click a cell → IN-PLACE rich editor (over the cell rect) → Enter PRESERVES bold via SetTableCellRuns", async () => {
+    // issue 032/040: the popover card is gone — the double-click opens the Figma-style contentEditable rich
+    // editor over the cell rect (data-testid hw-inplace-editor); Enter serializes the DOM to RUNS and commits
+    // through the run-preserving SetTableCellRuns path, so per-run formatting survives (교훈 6).
     const cell: CellHit = { section: 0, block: 1, row: 0, col: 0, rows: 3, cols: 3, text: "굵게", x: 40, y: 60, w: 100, h: 40 };
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "굵게", bold: true }], pages: 1 });
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
@@ -163,18 +164,60 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
     fireEvent.pointerUp(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
     fireEvent.pointerDown(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
     fireEvent.pointerUp(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
-    const ta = (await screen.findByTestId("hw-inplace-editor")) as HTMLTextAreaElement;
+    const ta = (await screen.findByTestId("hw-inplace-editor")) as HTMLElement;
     // The editor sits EXACTLY over the cell rect (page px × scale). The default zoom is 0.9, so scale = 0.9:
     // left/top/width = cell box × 0.9 — entering edit mode does not move/resize the cell (issue 032 <4px).
     expect(ta.style.left).toBe("36px"); // 40 × 0.9
     expect(ta.style.top).toBe("54px"); // 60 × 0.9
     expect(ta.style.width).toBe("90px"); // 100 × 0.9
-    fireEvent.change(ta, { target: { value: "바뀐 값" } });
+    expect(ta.getAttribute("contenteditable")).toBe("true");
+    // Edit the text WITHIN the bold span (the browser keeps the span when typing into the selection) → the
+    // bold formatting is PRESERVED (the whole point of the rich editor — no flatten to plain text).
+    ta.innerHTML = `<div><span style="font-weight:700">바뀐 값</span></div>`;
     fireEvent.keyDown(ta, { key: "Enter" }); // Enter=저장 (Shift+Enter would be a newline)
     await waitFor(() => {
       const applied = adapter.applied.find((i) => i.intent === "SetTableCellRuns") as (Intent & { runs: unknown[] }) | undefined;
       expect(applied).toBeTruthy();
-      expect(applied!.runs).toEqual([{ text: "바뀐 값", bold: true }]); // bold inherited
+      expect(applied!.runs).toEqual([{ text: "바뀐 값", bold: true }]); // bold PRESERVED through the rich round-trip
+    });
+  });
+
+  it("no-op: opening a cell and committing WITHOUT an edit applies NO intent (미접촉 셀 재커밋 = no-op, 교훈 1)", async () => {
+    // issue 040 #000 규율: an untouched cell round-trips to the SAME runs, so the commit is a no-op — no
+    // SetTableCellRuns write, no undo unit (opening a bold cell and clicking away must not pin a spurious run).
+    const cell: CellHit = { section: 0, block: 1, row: 0, col: 0, rows: 3, cols: 3, text: "굵게", x: 40, y: 60, w: 100, h: 40 };
+    const adapter = new MockAdapter({ table, cell, runs: [{ text: "굵게", bold: true }], pages: 1 });
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const sheet = await sheetOf(container);
+    fireEvent.pointerDown(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
+    fireEvent.pointerUp(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
+    fireEvent.pointerDown(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
+    fireEvent.pointerUp(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
+    const ta = await screen.findByTestId("hw-inplace-editor");
+    fireEvent.keyDown(ta, { key: "Enter" }); // commit WITHOUT touching anything
+    await waitFor(() => expect(screen.queryByTestId("hw-inplace-editor")).toBeNull()); // editor closed
+    expect(adapter.applied.some((i) => i.intent === "SetTableCellRuns")).toBe(false); // no write emitted
+  });
+
+  it("PARTIAL edit: only the plain part changes; a bold run stays byte-unchanged (issue 040 run 보존)", async () => {
+    // A cell whose runs are [보통][굵게 bold]. Editing the plain leading run must leave the bold run's bytes
+    // intact — the whole point of the rich editor (per-run preservation, not a whole-cell flatten).
+    const cell: CellHit = { section: 0, block: 1, row: 0, col: 0, rows: 3, cols: 3, text: "보통굵게", x: 40, y: 60, w: 100, h: 40 };
+    const adapter = new MockAdapter({ table, cell, runs: [{ text: "보통" }, { text: "굵게", bold: true }], pages: 1 });
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const sheet = await sheetOf(container);
+    fireEvent.pointerDown(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
+    fireEvent.pointerUp(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
+    fireEvent.pointerDown(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
+    fireEvent.pointerUp(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
+    const ta = (await screen.findByTestId("hw-inplace-editor")) as HTMLElement;
+    // Change ONLY the plain run's text (the bold span is left exactly as it was).
+    ta.innerHTML = `<div><span>새로운</span><span style="font-weight:700">굵게</span></div>`;
+    fireEvent.keyDown(ta, { key: "Enter" });
+    await waitFor(() => {
+      const applied = adapter.applied.find((i) => i.intent === "SetTableCellRuns") as (Intent & { runs: unknown[] }) | undefined;
+      expect(applied).toBeTruthy();
+      expect(applied!.runs).toEqual([{ text: "새로운" }, { text: "굵게", bold: true }]); // bold run untouched
     });
   });
 
