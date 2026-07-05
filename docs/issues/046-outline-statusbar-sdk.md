@@ -1,6 +1,6 @@
 # 046 — R11-2: 아웃라인 패널 + 상태바 SDK 승격 (quick win S+S)
 
-- 상태: **open** · 우선순위: R11-P1 · 영역: packages/react(OutlinePanel/StatusBar 신규 + HwpWorkspace **레이아웃 컨테이너**) + editor-core(outline 질의)
+- 상태: **done** (3096bc0) · 우선순위: R11-P1 · 영역: packages/react(OutlinePanel/StatusBar 신규 + HwpWorkspace **레이아웃 컨테이너**) + editor-core(outline 질의)
 - 병렬: 045(찾기/바꾸기 — HwpWorkspace의 키보드 이펙트·상단 바 영역 소유). 이 이슈는 **좌측
   사이드바·하단 상태바 컨테이너**만 만지고 keydown 이펙트/툴바/FindBar 영역을 만지지 마라.
 

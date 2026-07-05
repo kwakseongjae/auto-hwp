@@ -49,8 +49,8 @@ HwpWorkspace 영역 소유권: 045=키보드 이펙트·상단 바 / 046=좌측 
 
 | # | 제목 | 상태 | 단계 | 비고 |
 |---|------|------|------|------|
-| [045](045-find-replace-sdk.md) | 찾기/바꾸기 — ⌘F 바·하이라이트·스크롤-투-매치·run 보존 replace | open | R11-P0 | 엔진 기존 Find/Replace 재사용(신작 금지 원칙) |
-| [046](046-outline-statusbar-sdk.md) | 아웃라인 패널 + 상태바 (quick win S+S) | open | R11-P1 | wasm 파리티 실측(필요 시 additive 바인딩+게이트) |
+| [045](045-find-replace-sdk.md) | 찾기/바꾸기 — ⌘F 바·하이라이트·스크롤-투-매치·run 보존 replace | **done** (8b52825) | R11-P0 | 매치 지오메트리=caretRect 재사용; 편집 후 하이라이트는 count+nav 축소(엔진 스코프); .hwp는 NodeId 부재로 0매치 |
+| [046](046-outline-statusbar-sdk.md) | 아웃라인 패널 + 상태바 (quick win S+S) | **done** (3096bc0) | R11-P1 | wasm outline() additive(+13/−0)+게이트·골든 재확인; 데스크톱 doc_outline과 동일 소스 |
 
 ## 로드맵 R10 — 라운드 10 (2026-07-04, Tauri 셸 수렴)
 

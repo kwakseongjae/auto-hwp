@@ -1,6 +1,6 @@
 # 045 — R11-1: 찾기/바꾸기 SDK 승격 — ⌘F 바 + 매치 하이라이트 + 스크롤-투-매치
 
-- 상태: **open** · 우선순위: **R11-P0** (감사표 SDK 승격 1순위) · 영역: packages/editor-core(find 컨트롤러) + packages/react(FindBar 신규 + HwpWorkspace 배선)
+- 상태: **done** (8b52825) · 우선순위: **R11-P0** (감사표 SDK 승격 1순위) · 영역: packages/editor-core(find 컨트롤러) + packages/react(FindBar 신규 + HwpWorkspace 배선)
 - 병렬: 046(아웃라인+상태바 — HwpWorkspace의 **레이아웃 컨테이너** 소유). 이 이슈는 HwpWorkspace의
   **키보드 이펙트·상단 바 영역**만 소유 — 사이드바/하단바 컨테이너 구조를 만지지 마라.
 
