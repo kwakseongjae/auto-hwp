@@ -1,6 +1,6 @@
 # 049 — R11-5: 이미지 이동/리사이즈 SDK 승격 — 선택 핸들 + 드래그
 
-- 상태: **open** · 우선순위: R11-P1 · 영역: packages/react(신규 ImageOverlay + HwpWorkspace 이미지 선택/오버레이 영역) + editor-core(이미지 커맨드) + 필요 시 wasm additive
+- 상태: **done** · 우선순위: R11-P1 · 영역: packages/react(신규 ImageOverlay + HwpWorkspace 이미지 선택/오버레이 영역) + editor-core(이미지 커맨드) + 필요 시 wasm additive
 - 병렬: 050(이미지 삽입 — 드롭 존/업로드 버튼/삽입 intent 영역 소유). 삽입 경로 접촉 금지.
 
 ## 근거 (감사표 "이미지 이동/리사이즈" M — 데스크톱 M1/M4)

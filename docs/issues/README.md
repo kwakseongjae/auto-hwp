@@ -53,8 +53,8 @@ HwpWorkspace 영역 소유권: 045=키보드 이펙트·상단 바 / 046=좌측 
 | [046](046-outline-statusbar-sdk.md) | 아웃라인 패널 + 상태바 (quick win S+S) | **done** (3096bc0) | R11-P1 | wasm outline() additive(+13/−0)+게이트·골든 재확인; 데스크톱 doc_outline과 동일 소스 |
 | [047](047-precise-width-shade-sdk.md) | 열너비 mm 정밀+균등 분배+편집 중 셀음영 | **done** (d84da6f) | R11-P1 | 정직 1dp mm·적용-확인·에디터 유지 shield |
 | [048](048-ribbon-sdk.md) | 상단 서식 리본 — 선택+편집(라이브) 이중 동작 | **done** (bf64130) | R11-P1 | 데스크톱 이중 라우팅 포팅; 선택 유지=preventDefault+savedRange |
-| [049](049-image-move-resize-sdk.md) | 이미지 이동/리사이즈 — 피그마식 핸들+적용-확인 | open | R11-P1 | 배치 C; 049=이미지 선택/핸들 소유 |
-| [050](050-image-insert-sdk.md) | 이미지 삽입 — 드롭/업로드→InsertImageAt, HWPX 왕복 | open | R11-P1 | 배치 C; 050=삽입 경로 소유 |
+| [049](049-image-move-resize-sdk.md) | 이미지 이동/리사이즈 — 피그마식 핸들+적용-확인 | **done** | R11-P1 | move=앵커 재배치(실측, 거짓 자유도 0); needs-manual은 실이미지 루프로 해소 |
+| [050](050-image-insert-sdk.md) | 이미지 삽입 — 드롭/업로드→InsertImageAt, HWPX 왕복 | **done** (ebff42c) | R11-P1 | Intent 스키마 35→36(additive); HWPX BinData 왕복 Rust 증명; 재열기 파서 갭은 엔진 후속 |
 
 ## 로드맵 R10 — 라운드 10 (2026-07-04, Tauri 셸 수렴)
 

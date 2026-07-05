@@ -1,6 +1,6 @@
 # 050 — R11-6: 이미지 삽입 SDK 승격 — 드롭/업로드 → InsertImageAt
 
-- 상태: **open** · 우선순위: R11-P1 · 영역: packages/react(드롭 존/업로드 진입 + 삽입 배선) + editor-core(insertImage 커맨드) + 필요 시 wasm additive
+- 상태: **done** (ebff42c) · 우선순위: R11-P1 · 영역: packages/react(드롭 존/업로드 진입 + 삽입 배선) + editor-core(insertImage 커맨드) + 필요 시 wasm additive
 - 병렬: 049(이미지 선택/핸들/이동/리사이즈 오버레이 소유). 그 영역 접촉 금지.
 
 ## 근거 (감사표 "이미지 삽입" L — 데스크톱 M1)
