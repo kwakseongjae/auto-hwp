@@ -13,6 +13,7 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  position: relative; /* issue 045: anchor for the top-right 찾기 capsule (.hw-find) */
   font-family: -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
   color: var(--hw-text);
   background: var(--hw-bg);
@@ -414,4 +415,53 @@
   position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
   background: rgba(15, 23, 42, 0.92); color: #e2e8f0; font-size: 12px;
   padding: 8px 16px; border-radius: 8px; z-index: 50; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+/* ================= issue 045 — 찾기/바꾸기 ================= */
+
+/* the ⌘F capsule: a floating card pinned to the top-right of the workspace, over the document. */
+.hw-find {
+  position: absolute; top: 8px; right: 16px; z-index: 40;
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 8px 10px; background: var(--hw-panel);
+  border: 1px solid var(--hw-border); border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
+}
+.hw-find-row { display: flex; align-items: center; gap: 6px; }
+.hw-find-input {
+  font: inherit; font-size: 13px; padding: 5px 8px; width: 168px;
+  border: 1px solid #cdd0d6; border-radius: 6px; background: #fff; color: var(--hw-text); outline: none;
+}
+.hw-find-input:focus { border-color: var(--hw-accent); }
+.hw-find-input:disabled { opacity: 0.4; }
+.hw-find-count {
+  font-size: 11px; color: var(--hw-muted); min-width: 46px; text-align: center;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.hw-find-nav, .hw-find-close {
+  font: inherit; font-size: 12px; line-height: 1; padding: 4px 7px;
+  border: 1px solid transparent; border-radius: 6px; background: none; color: var(--hw-muted); cursor: pointer;
+}
+.hw-find-nav:hover:not(:disabled), .hw-find-close:hover { background: #f0f1f3; color: var(--hw-text); }
+.hw-find-nav:disabled { opacity: 0.35; cursor: default; }
+.hw-find-case {
+  display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--hw-muted);
+  cursor: pointer; user-select: none; padding: 0 2px;
+}
+.hw-find-btn {
+  font: inherit; font-size: 12px; padding: 5px 8px; white-space: nowrap;
+  border: 1px solid #cdd0d6; border-radius: 6px; background: #fff; cursor: pointer;
+}
+.hw-find-btn:hover:not(:disabled) { background: #f0f1f3; }
+.hw-find-btn:disabled { opacity: 0.4; cursor: default; }
+.hw-find-note { margin: 0; font-size: 11px; color: var(--hw-muted); max-width: 320px; }
+
+/* the per-page match highlight overlay (twin of .hw-overlay) — purely visual. */
+.hw-find-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
+.hw-find-hit {
+  position: absolute; border-radius: 1px;
+  background: rgba(250, 204, 21, 0.38); box-shadow: inset 0 0 0 1px rgba(202, 138, 4, 0.55);
+}
+.hw-find-current {
+  background: rgba(249, 115, 22, 0.5); box-shadow: inset 0 0 0 1.5px rgba(234, 88, 12, 0.9);
 }

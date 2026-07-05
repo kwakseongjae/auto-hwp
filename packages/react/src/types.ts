@@ -28,4 +28,9 @@ export type {
   HitResult,
   CaretRect,
   TextAnchor,
+  FindMatch,
+  FindOptions,
+  FindReplaceOptions,
+  ReplaceResult,
+  MatchBox,
 } from "@tf-hwp/editor-core";

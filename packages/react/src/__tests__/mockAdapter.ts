@@ -1,5 +1,5 @@
 import type { EngineAdapter } from "../EngineAdapter";
-import type { BlockHit, CellHit, Intent, OpenResult, Outcome, PageGeom, RunSpec, TableBox } from "../types";
+import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, Intent, OpenResult, Outcome, PageGeom, ReplaceResult, RunSpec, TableBox } from "../types";
 
 /** A headless EngineAdapter for tests: canned SVG (optionally malicious, to exercise the R7 gate), a
  *  fixed table hit, and a spy-able applyIntent. No wasm — pure in-memory. */
@@ -9,6 +9,9 @@ export class MockAdapter implements EngineAdapter {
   redos = 0;
   fontRegistered = false;
   registeredFonts: { family: string; bytes: Uint8Array }[] = [];
+  /** issue 045 spies: find queries + replace calls. */
+  finds: { query: string; opts: FindOptions }[] = [];
+  replaces: { query: string; replacement: string; opts: FindReplaceOptions }[] = [];
 
   constructor(
     private opts: {
@@ -34,6 +37,14 @@ export class MockAdapter implements EngineAdapter {
       liveResize?: boolean;
       pageGeom?: PageGeom | null;
       runs?: RunSpec[];
+      /** Canned find matches (issue 045), or a `(query, opts)` resolver. Present makes `find`/`replace`
+       *  answer; omit to OMIT both (a backend without find). */
+      find?: FindMatch[] | ((query: string, opts: FindOptions) => FindMatch[]);
+      /** Explicit replaced-count for `replace`; default = current match count (all) / min(1, n). */
+      replaceCount?: number;
+      /** Canned caret rect for `caretRect` (issue 041/045 geometry), or a `(page, node, offset)` resolver.
+       *  Omit to OMIT the method (a backend that can't locate matches → count/nav only). */
+      caret?: CaretRect | null | ((page: number, node: number, offset: number) => CaretRect | null);
       pages?: number;
     } = {},
   ) {
@@ -44,8 +55,18 @@ export class MockAdapter implements EngineAdapter {
     if (!("rowBoundaries" in this.opts)) (this as { tableRowBoundaries?: unknown }).tableRowBoundaries = undefined;
     if (!("pageGeom" in this.opts)) (this as { pageGeometry?: unknown }).pageGeometry = undefined;
     if (!("runs" in this.opts)) (this as { blockRuns?: unknown }).blockRuns = undefined;
+    if (!("caret" in this.opts)) (this as { caretRect?: unknown }).caretRect = undefined;
+    if (!("find" in this.opts)) {
+      (this as { find?: unknown }).find = undefined;
+      (this as { replace?: unknown }).replace = undefined;
+    }
     this.liveCol = this.opts.colBoundaries ? this.opts.colBoundaries.slice() : null;
     this.liveRow = this.opts.rowBoundaries ? this.opts.rowBoundaries.slice() : null;
+  }
+
+  private matchesFor(query: string, opts: FindOptions): FindMatch[] {
+    const f = this.opts.find;
+    return (typeof f === "function" ? f(query, opts) : f) ?? [];
   }
 
   // Mutable copies the liveResize simulation edits (so a re-query returns the post-apply geometry).
@@ -94,6 +115,20 @@ export class MockAdapter implements EngineAdapter {
   }
   async blockRuns(): Promise<RunSpec[]> {
     return this.opts.runs ?? [];
+  }
+  async caretRect(page: number, node: number, offset: number): Promise<CaretRect | null> {
+    const c = this.opts.caret;
+    return (typeof c === "function" ? c(page, node, offset) : c) ?? null;
+  }
+  async find(query: string, opts: FindOptions): Promise<FindMatch[]> {
+    this.finds.push({ query, opts });
+    return this.matchesFor(query, opts);
+  }
+  async replace(query: string, replacement: string, opts: FindReplaceOptions): Promise<ReplaceResult> {
+    this.replaces.push({ query, replacement, opts });
+    const n = this.matchesFor(query, opts).length;
+    const replaced = this.opts.replaceCount ?? (opts.all ? n : Math.min(1, n));
+    return { replaced, pages: this.opts.pages ?? 1 };
   }
   async applyIntent(intent: Intent): Promise<Outcome> {
     this.applied.push(intent);

@@ -1,6 +1,6 @@
 import { HwpDoc, initEngine, resetEngine } from "@tf-hwp/engine";
 import type { EngineAdapter } from "./EngineAdapter";
-import type { BlockHit, CaretRect, CellHit, HitResult, Intent, OpenResult, Outcome, PageGeom, RunSpec, TableBox } from "./types";
+import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, Intent, OpenResult, Outcome, PageGeom, ReplaceResult, RunSpec, TableBox } from "./types";
 
 type WasmInput = string | URL | Request | BufferSource | WebAssembly.Module;
 
@@ -154,6 +154,34 @@ export class WasmAdapter implements EngineAdapter {
       if ((e as CodedError).code === "needs_rhwp") return null;
       throw e;
     }
+  }
+
+  /** Find (issue 045) — the read-only `Find` Intent via applyIntent JSON. The engine's `{kind:"found"}`
+   *  outcome carries `matches` in the SAME shape as editor-core's `FindMatch` (node/start/len/section/
+   *  block are all single-word keys — no remap). The Intent fields are snake_case (`case_sensitive`/
+   *  `whole_word`) because the op-bus Intent enum uses `deny_unknown_fields` with no rename. */
+  find(query: string, opts: FindOptions): Promise<FindMatch[]> {
+    return this.guard((d) => {
+      const out = d.applyIntent({ intent: "Find", query, case_sensitive: !!opts.caseSensitive, whole_word: !!opts.wholeWord }) as { matches?: FindMatch[] };
+      return out.matches ?? [];
+    });
+  }
+
+  /** Replace (issue 045) — the `Replace` Intent via applyIntent JSON, ONE undo unit. The `{kind:"replaced"}`
+   *  outcome gives the count + live page count. Run formatting is preserved by the op-bus (it rebuilds runs
+   *  across the replaced range — never a plain-text collapse). */
+  replace(query: string, replacement: string, opts: FindReplaceOptions): Promise<ReplaceResult> {
+    return this.guard((d) => {
+      const out = d.applyIntent({
+        intent: "Replace",
+        query,
+        replacement,
+        case_sensitive: !!opts.caseSensitive,
+        whole_word: !!opts.wholeWord,
+        all: !!opts.all,
+      }) as { replaced?: number; pages?: number };
+      return { replaced: out.replaced ?? 0, pages: out.pages ?? 0 };
+    });
   }
 
   applyIntent(intent: Intent): Promise<Outcome> {

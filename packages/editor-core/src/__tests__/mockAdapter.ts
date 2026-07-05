@@ -1,5 +1,5 @@
 import type { EngineAdapter } from "../adapter";
-import type { BlockHit, CaretRect, CellHit, HitResult, Intent, OpenResult, Outcome, PageGeom, RunSpec, TableBox } from "../types";
+import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, Intent, OpenResult, Outcome, PageGeom, ReplaceResult, RunSpec, TableBox } from "../types";
 
 /** A headless EngineAdapter for node tests: canned geometry resolvers + a spy-able applyIntent/undo.
  *  No wasm, no DOM — pure in-memory. Mirrors @tf-hwp/react's test MockAdapter so the same selection
@@ -10,6 +10,9 @@ export class MockAdapter implements EngineAdapter {
   redos = 0;
   fontRegistered = false;
   registeredFonts: { family: string; bytes: Uint8Array }[] = [];
+  /** Spy for issue-045 find/replace: every find query + every replace call (query/replacement/opts). */
+  finds: { query: string; opts: FindOptions }[] = [];
+  replaces: { query: string; replacement: string; opts: FindReplaceOptions }[] = [];
 
   constructor(
     private opts: {
@@ -37,6 +40,11 @@ export class MockAdapter implements EngineAdapter {
       /** Canned caret rect for `caretRect` (issue 041), or a `(page, node, offset)` resolver (so a test
        *  can model past-end CLAMP + "not on this page" = null). Omit to OMIT the method. */
       caret?: CaretRect | null | ((page: number, node: number, offset: number) => CaretRect | null);
+      /** Canned find matches (issue 045), or a `(query, opts)` resolver. Present makes `find`/`replace`
+       *  answer; omit to OMIT both (a backend without find/replace). */
+      find?: FindMatch[] | ((query: string, opts: FindOptions) => FindMatch[]);
+      /** Explicit replaced-count for `replace`; default = the current `find` match count (all) or min(1,n). */
+      replaceCount?: number;
       pages?: number;
     } = {},
   ) {
@@ -50,6 +58,15 @@ export class MockAdapter implements EngineAdapter {
     if (!("runs" in this.opts)) (this as { blockRuns?: unknown }).blockRuns = undefined;
     if (!("hitText" in this.opts)) (this as { hitTestText?: unknown }).hitTestText = undefined;
     if (!("caret" in this.opts)) (this as { caretRect?: unknown }).caretRect = undefined;
+    if (!("find" in this.opts)) {
+      (this as { find?: unknown }).find = undefined;
+      (this as { replace?: unknown }).replace = undefined;
+    }
+  }
+
+  private matchesFor(query: string, opts: FindOptions): FindMatch[] {
+    const f = this.opts.find;
+    return (typeof f === "function" ? f(query, opts) : f) ?? [];
   }
 
   async open(_bytes: Uint8Array, name?: string): Promise<OpenResult> {
@@ -97,6 +114,16 @@ export class MockAdapter implements EngineAdapter {
   async caretRect(page: number, node: number, offset: number): Promise<CaretRect | null> {
     const c = this.opts.caret;
     return (typeof c === "function" ? c(page, node, offset) : c) ?? null;
+  }
+  async find(query: string, opts: FindOptions): Promise<FindMatch[]> {
+    this.finds.push({ query, opts });
+    return this.matchesFor(query, opts);
+  }
+  async replace(query: string, replacement: string, opts: FindReplaceOptions): Promise<ReplaceResult> {
+    this.replaces.push({ query, replacement, opts });
+    const n = this.matchesFor(query, opts).length;
+    const replaced = this.opts.replaceCount ?? (opts.all ? n : Math.min(1, n));
+    return { replaced, pages: this.opts.pages ?? 1 };
   }
   async applyIntent(intent: Intent): Promise<Outcome> {
     this.applied.push(intent);

@@ -48,6 +48,10 @@ export {
 export { inheritRuns, firstRunStyle } from "./runs";
 export type { RunStyle } from "./runs";
 
+// Find/Replace controller (issue 045) — search/next/prev/replaceCurrent/replaceAll + caretRect-derived
+// match geometry (locate/locateAll). Drives the adapter's find/replace surface; UI-agnostic (node-tested).
+export { FindController } from "./find";
+
 // Glyph-caret model (issue 041, FG-12 前半) — pure HitResult→TextAnchor + the para_len clamp / null policy.
 export { clampOffset, hitResultToTextAnchor, isCaretGap } from "./caret";
 
@@ -63,14 +67,19 @@ export type {
   CaretRect,
   CellHit,
   DocContext,
+  FindMatch,
+  FindOptions,
+  FindReplaceOptions,
   HitResult,
   Intent,
   IntentCard,
+  MatchBox,
   OnAiRequest,
   OpenResult,
   Outcome,
   PageGeom,
   PointerInput,
+  ReplaceResult,
   RunSpec,
   Selection,
   SelMark,

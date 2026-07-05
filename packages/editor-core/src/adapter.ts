@@ -1,4 +1,4 @@
-import type { BlockHit, CaretRect, CellHit, HitResult, Intent, OpenResult, Outcome, PageGeom, RunSpec, TableBox } from "./types";
+import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, Intent, OpenResult, Outcome, PageGeom, ReplaceResult, RunSpec, TableBox } from "./types";
 
 /// EngineAdapter — the backend seam (SDK-LAYERS L1↔L2). It abstracts the ACTUAL surface a backend
 /// exposes (open / page SVG / hit-test·tableAt / applyIntent / undo·redo / export) so the SAME
@@ -83,6 +83,20 @@ export interface EngineAdapter {
    *  paragraph end and returns a rect — NEVER null — so the caller must not read a null rect as
    *  "end of paragraph" (see `HitResult.para_len`). Backends that can't answer OMIT this method. */
   caretRect?(page: number, node: number, offset: number): Promise<CaretRect | null>;
+
+  /** OPTIONAL — read-only search of the doc's editable simple paragraphs (issue 045). Returns the matches
+   *  in reading order (char coords over each paragraph's concatenated run text), or `[]` on no hit. No
+   *  mutation, no undo unit. Backends that can't answer OMIT this — `FindController` then reports the
+   *  feature unsupported. Reference impls: `WasmAdapter` via the `Find` Intent (applyIntent JSON),
+   *  `TauriAdapter` via the desktop `find_text` command (043 homomorphic-parity pattern). */
+  find?(query: string, opts: FindOptions): Promise<FindMatch[]>;
+
+  /** OPTIONAL — replace `query`→`replacement` as ONE undo unit (issue 045): `all: true` = every match,
+   *  `all: false` = the FIRST match in the document (the engine's `do_replace` contract). Preserves run
+   *  formatting (the op-bus rebuilds runs — never a plain-text collapse). Returns the count replaced +
+   *  the live page count. Backends that omit `find` omit this too. Reference impls: `WasmAdapter` via the
+   *  `Replace` Intent, `TauriAdapter` via the desktop `replace_text` command. */
+  replace?(query: string, replacement: string, opts: FindReplaceOptions): Promise<ReplaceResult>;
 
   /** Apply an Intent (schema v0). One undo unit per accepted Intent. */
   applyIntent(intent: Intent): Promise<Outcome>;

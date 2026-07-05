@@ -97,6 +97,20 @@ export class DocSession {
     return applied;
   }
 
+  /** Record that ONE engine undo unit was applied OUTSIDE `applyBatch` — used by `FindController` when it
+   *  mutates through the adapter's NATIVE replace command (`TauriAdapter` → `replace_text`) instead of the
+   *  generic `applyIntent` lane, so the undo bookkeeping stays coherent (issue 045 undo 실측). The engine's
+   *  replace-all is ONE `do_ops` = ONE undo unit, so this pushes a batch of size 1; a later `undo()` then
+   *  reverts the whole replace with one `adapter.undo()`. Also re-queries the page count + signals a layout
+   *  invalidation, exactly like `applyBatch`, so the view re-paginates/repaints and any open find bar knows
+   *  its matches went stale (refreshToken bump). */
+  async recordExternalEdit(): Promise<void> {
+    this.undoBatches.push(1);
+    this.redoBatches = [];
+    await this.refreshPages();
+    this.layoutInvalidated.emit();
+  }
+
   /** Undo the last applied batch (N adapter.undo() calls). Resolves `false` (no-op) when the stack is
    *  empty, `true` when a batch was undone. */
   async undo(): Promise<boolean> {

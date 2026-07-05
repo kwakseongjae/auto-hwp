@@ -26,6 +26,12 @@ export { ChatPanel } from "./components/ChatPanel";
 export type { ChatPanelProps } from "./components/ChatPanel";
 export { FontPicker } from "./components/FontPicker";
 export type { FontPickerProps } from "./components/FontPicker";
+// Issue 045 — 찾기/바꾸기: the ⌘F capsule (FindBar) + the per-page match highlight layer (FindMatchOverlay).
+// HwpWorkspace wires both to the editor-core FindController; a host can also compose them over the core.
+export { FindBar } from "./components/FindBar";
+export type { FindBarProps } from "./components/FindBar";
+export { FindMatchOverlay } from "./components/FindMatchOverlay";
+export type { FindMatchOverlayProps } from "./components/FindMatchOverlay";
 
 // Issue 027 — editing-parity opt-in components. Each is individually importable and drives a single
 // @tf-hwp/editor-core command; a host can compose them WITHOUT HwpWorkspace (see the README recipe).
@@ -103,7 +109,7 @@ export type { TauriAdapterOptions, Invoke } from "./TauriAdapter";
 // logic lives in editor-core; the components below are a thin, optional binding.
 export { useHwpEditor } from "./useHwpEditor";
 export type { HwpEditorState } from "./useHwpEditor";
-export { createEditorCore, EditorCore, DocSession, SelectionModel, EditController } from "@tf-hwp/editor-core";
+export { createEditorCore, EditorCore, DocSession, SelectionModel, EditController, FindController } from "@tf-hwp/editor-core";
 // Issue 027 — the single px↔mm↔ratio conversion utils + the run-preservation helper, re-exported so a
 // host composing the opt-in components by hand shares the SAME conversion point (never re-derives it).
 export {
@@ -161,4 +167,9 @@ export type {
   DocContext,
   OnAiRequest,
   IntentCard,
+  FindMatch,
+  FindOptions,
+  FindReplaceOptions,
+  ReplaceResult,
+  MatchBox,
 } from "./types";

@@ -1,5 +1,5 @@
 import type { EngineAdapter } from "./EngineAdapter";
-import type { BlockHit, CaretRect, CellHit, HitResult, Intent, OpenResult, Outcome, PageGeom, RunSpec, TableBox } from "./types";
+import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, Intent, OpenResult, Outcome, PageGeom, ReplaceResult, RunSpec, TableBox } from "./types";
 
 /** The desktop `hit_test` command's DTO (camelCase, crates/hwp-viewer/src/lib.rs `HitDto`). Remapped
  *  into editor-core's snake_case `HitResult` below so both adapters return ONE shape. */
@@ -140,6 +140,27 @@ export class TauriAdapter implements EngineAdapter {
    *  clamped by the engine, never null). */
   caretRect(page: number, node: number, offset: number): Promise<CaretRect | null> {
     return this.invoke<CaretRect | null>("caret_rect", { page, node, offset });
+  }
+
+  /** Find (issue 045) — the desktop `find_text` command (same op-bus `do_find` the wasm `Find` Intent
+   *  uses, so identical matches). Its `FindMatchDto` (node/start/len/section/block) matches `FindMatch`
+   *  verbatim — no remap. `caseSensitive`/`wholeWord` are the command's camelCase param keys. Read-only,
+   *  no undo unit. */
+  find(query: string, opts: FindOptions): Promise<FindMatch[]> {
+    return this.invoke<FindMatch[]>("find_text", { query, caseSensitive: !!opts.caseSensitive, wholeWord: !!opts.wholeWord });
+  }
+
+  /** Replace (issue 045) — the desktop `replace_text` command, ONE undo unit (all=false → the first match
+   *  in the doc). Its `ReplaceResult` ({replaced, pages}) matches editor-core's `ReplaceResult` verbatim.
+   *  Same run-preserving op-bus core as the wasm `Replace` Intent (040 교훈: no plain-text collapse). */
+  replace(query: string, replacement: string, opts: FindReplaceOptions): Promise<ReplaceResult> {
+    return this.invoke<ReplaceResult>("replace_text", {
+      query,
+      replacement,
+      caseSensitive: !!opts.caseSensitive,
+      wholeWord: !!opts.wholeWord,
+      all: !!opts.all,
+    });
   }
 
   /** Apply one schema-v0 Intent through the desktop's GENERAL `apply_intent_json` command (issue 043) —

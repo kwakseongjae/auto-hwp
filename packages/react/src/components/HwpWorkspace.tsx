@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { EngineAdapter, Intent, DocContext, PointerInput, PageGeom, Box, CellDir, Selection, TableBox, RunSpec } from "@tf-hwp/editor-core";
+import type { EngineAdapter, Intent, DocContext, PointerInput, PageGeom, Box, CellDir, Selection, TableBox, RunSpec, MatchBox } from "@tf-hwp/editor-core";
 import { boundariesToRatios, remapFragmentHeights, appliedReflectsDrag, firstRunStyle } from "@tf-hwp/editor-core";
 import { runsUnchanged } from "../richedit";
 import { modLabel } from "../platform";
@@ -19,6 +19,8 @@ import { InPlaceCellEditor } from "./InPlaceCellEditor";
 import { FloatingToolbar } from "./FloatingToolbar";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { TableSizeGrid } from "./TableSizeGrid";
+import { FindBar } from "./FindBar";
+import { FindMatchOverlay } from "./FindMatchOverlay";
 import { useSelectionActions } from "../useSelectionActions";
 import { readViewBox, screenToPage } from "../coords";
 import { buildFontFaceCss, type FontCatalogEntry } from "../fonts";
@@ -194,6 +196,39 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // A hidden native color input the context menu's 배경색 item triggers — so that item delegates to the
   // SAME shadeCellRange action as the 028 toolbar's 배경 swatch (신규 액션 0), just entered via a menu click.
   const shadeInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Issue 045: 찾기/바꾸기 state ─────────────────────────────────────────────────────────────────────
+  // The ⌘F bar drives the editor-core FindController (core.find). `findCount` is null until a search runs
+  // for the CURRENT query (typing invalidates it → the "n/m" readout hides), matching the desktop bar.
+  // `findBoxes` are the caretRect-resolved match boxes the FindMatchOverlay draws (null where geometry is
+  // unavailable). Refs mirror the values the (stable) ⌘F keydown listener + search callbacks read.
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findReplace, setFindReplace] = useState("");
+  const [findCase, setFindCase] = useState(false);
+  const [findCount, setFindCount] = useState<number | null>(null);
+  const [findOrdinal, setFindOrdinal] = useState(0);
+  const [findBoxes, setFindBoxes] = useState<(MatchBox | null)[]>([]);
+  const [findBusy, setFindBusy] = useState(false);
+  const [findFocusToken, setFindFocusToken] = useState(0);
+  const findQueryRef = useRef(findQuery);
+  findQueryRef.current = findQuery;
+  const findCaseRef = useRef(findCase);
+  findCaseRef.current = findCase;
+  const findReplaceRef = useRef(findReplace);
+  findReplaceRef.current = findReplace;
+  const findBoxesRef = useRef(findBoxes);
+  findBoxesRef.current = findBoxes;
+  const findOpenRef = useRef(findOpen);
+  findOpenRef.current = findOpen;
+  // Live mirror of `meta` so the once-attached ⌘F keydown listener knows a document is open without
+  // re-subscribing on every meta change.
+  const metaRef = useRef(meta);
+  metaRef.current = meta;
+  // Serializes ALL find engine ops (search / re-find-after-edit / replace) through one async chain so two
+  // never race on the shared FindController state (e.g. a replace's auto re-find colliding with a fresh
+  // user search would interleave `search()` calls and corrupt the match set). Last-enqueued wins.
+  const findChainRef = useRef<Promise<void>>(Promise.resolve());
 
   // The live selection is the single source of truth (in the core); the chat anchors + page marks are
   // views of it, mapped here for the components.
@@ -747,6 +782,150 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     [core, scrollCellIntoView],
   );
 
+  // ── Issue 045: 찾기/바꾸기 verbs ─────────────────────────────────────────────────────────────────────
+  // Scroll the CURRENT match into view — reuses the generalized 036 scrollCellIntoView (page, box); the
+  // match box is already own-render PAGE px, so it scrolls exactly like a cell nav.
+  const scrollToMatch = useCallback(
+    (boxes: (MatchBox | null)[], cursor: number) => {
+      const mb = cursor >= 0 ? boxes[cursor] : null;
+      if (mb) scrollCellIntoView(mb.page, mb.box);
+    },
+    [scrollCellIntoView],
+  );
+
+  // Serialize a find engine op onto the single chain (no concurrent FindController mutation).
+  const enqueueFind = useCallback((fn: () => Promise<void>): Promise<void> => {
+    const next = findChainRef.current.then(fn, fn);
+    findChainRef.current = next.catch(() => {});
+    return next;
+  }, []);
+
+  // Run a fresh search for the current query: search → resolve match boxes (caretRect) → surface count +
+  // (optionally) scroll to the first hit. Serialized so it can't interleave with a post-edit re-find. The
+  // empty-query / no-doc / no-match paths clear cleanly.
+  const runFind = useCallback(
+    (scrollToFirst: boolean): Promise<void> =>
+      enqueueFind(async () => {
+        const q = findQueryRef.current;
+        if (!q) {
+          core.find.clear();
+          setFindCount(null);
+          setFindOrdinal(0);
+          setFindBoxes([]);
+          return;
+        }
+        setFindBusy(true);
+        try {
+          await core.find.search(q, { caseSensitive: findCaseRef.current });
+          const boxes = await core.find.locateAll(core.session.pages);
+          setFindBoxes(boxes);
+          setFindCount(core.find.count);
+          setFindOrdinal(core.find.ordinal);
+          if (scrollToFirst) scrollToMatch(boxes, core.find.cursor);
+        } catch (e) {
+          if (!onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요")) toast(`찾기 실패: ${e}`);
+        } finally {
+          setFindBusy(false);
+        }
+      }),
+    [core, onTrap, toast, scrollToMatch, enqueueFind],
+  );
+
+  // Next / previous match: advance the FindController cursor, reflect the ordinal, scroll the new current
+  // match into view (minimal scroll — 스크롤-투-매치).
+  const findStep = useCallback(
+    (dir: "next" | "prev") => {
+      if (dir === "next") core.find.next();
+      else core.find.prev();
+      setFindOrdinal(core.find.ordinal);
+      scrollToMatch(findBoxesRef.current, core.find.cursor);
+    },
+    [core, scrollToMatch],
+  );
+
+  // Replace the first match / every match as ONE undo unit. The replace records an undo batch + re-flows
+  // the doc (recordExternalEdit → refreshToken bump), and the refreshToken effect below re-finds + re-
+  // locates the (now shifted) matches. Undo is the workspace ↶ button (one undo reverts a 모두 바꾸기).
+  const runReplace = useCallback(
+    (all: boolean): Promise<void> =>
+      enqueueFind(async () => {
+        if (!canEdit || !findQueryRef.current) return;
+        setFindBusy(true);
+        try {
+          const res = all ? await core.find.replaceAll(findReplaceRef.current) : await core.find.replaceCurrent(findReplaceRef.current);
+          if (res.replaced > 0) toast(`${res.replaced}개 바꿈 — 실행취소는 ↶`);
+          else toast("바꿀 내용을 찾지 못했습니다");
+        } catch (e) {
+          if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`바꾸기 실패: ${e}`);
+        } finally {
+          setFindBusy(false);
+        }
+      }),
+    [core, canEdit, onTrap, toast, enqueueFind],
+  );
+
+  // ⌘F opens the bar (or re-focuses it if already open, via the focus token). Decision (issue 045 §함정 —
+  // 제자리 에디터 열림 중 동작): when the in-place editor is OPEN we IGNORE ⌘F (no close) so an uncommitted
+  // edit is never silently discarded (규율 6 — 콘텐츠 삭제 금지); the user Esc's out first. Otherwise the
+  // isEditableTarget guard is deliberately NOT applied (⌘F must work even from a text field — the norm).
+  const openFind = useCallback(() => {
+    if (editorRef.current) return; // in-place editor open → let the user finish/cancel first
+    setFindOpen(true);
+    setFindFocusToken((t) => t + 1);
+  }, []);
+
+  const closeFind = useCallback(() => {
+    setFindOpen(false);
+    core.find.clear();
+    setFindCount(null);
+    setFindOrdinal(0);
+    setFindBoxes([]);
+  }, [core]);
+
+  // ⌘/Ctrl+F opens the find bar — a SEPARATE window listener that coexists with the 035 zoom/Space
+  // listener and the 036 cell-nav listener (which bails on any ⌘/Ctrl combo, so it never fights this).
+  // Only intercepts when a document is open (else the browser's native find still works).
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === "f" || e.key === "F")) {
+        if (!metaRef.current) return; // no document → leave native browser find alone
+        e.preventDefault();
+        openFind();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [openFind]);
+
+  // 함정 fix: an edit (AI apply / manual commit / our own replace) re-flows the doc, so the match char
+  // offsets go stale. On every layout invalidation (refreshToken) while the bar is open with a live query,
+  // re-find + re-locate WITHOUT scrolling (a background invalidation, not a user navigation). A find/next
+  // is read-only (no refreshToken bump), so this never double-runs a plain search.
+  useEffect(() => {
+    if (!findOpenRef.current || !findQueryRef.current) return;
+    let cancelled = false;
+    // Serialized onto the SAME chain as runFind so a post-edit re-find never interleaves with a user search
+    // (issue 045 concurrency: two search() calls would corrupt the shared match set).
+    void enqueueFind(async () => {
+      if (cancelled || !findOpenRef.current || !findQueryRef.current) return;
+      try {
+        await core.find.refresh();
+        if (cancelled) return;
+        const boxes = await core.find.locateAll(core.session.pages);
+        if (cancelled) return;
+        setFindBoxes(boxes);
+        setFindCount(core.find.count);
+        setFindOrdinal(core.find.ordinal);
+      } catch {
+        /* a transient re-find failure keeps the last results; the next search recovers */
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshToken, core, enqueueFind]);
+
   // Issue 040: commit the editor's SERIALIZED runs run-preserving. A cell → SetTableCellRuns, a paragraph →
   // SetParagraphRuns (never a plain-text variant — 교훈 6), applied as ONE undo batch via the SAME
   // session.applyBatch path editCellText uses (page re-flow + layoutInvalidated → the refreshToken close).
@@ -1129,6 +1308,46 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         </button>
       </div>
 
+      {/* issue 045: the ⌘F 찾기/바꾸기 capsule — a top-right overlay over the document (keyboard-effect +
+          top-area surface; it never touches the 046 sidebar/status-bar containers). Rendered only when a
+          document is open AND the bar is toggled on (⌘F). */}
+      {meta && findOpen && (
+        <FindBar
+          query={findQuery}
+          replaceValue={findReplace}
+          caseSensitive={findCase}
+          count={findCount}
+          ordinal={findOrdinal}
+          busy={findBusy}
+          supported={core.find.supported}
+          canReplace={canEdit}
+          canLocate={core.find.canLocate}
+          focusToken={findFocusToken}
+          onQueryChange={(v) => {
+            setFindQuery(v);
+            // Typing invalidates the current results (hide the "n/m" until the next search) — desktop parity.
+            core.find.clear();
+            setFindCount(null);
+            setFindOrdinal(0);
+            setFindBoxes([]);
+          }}
+          onReplaceChange={setFindReplace}
+          onCaseToggle={(v) => {
+            setFindCase(v);
+            core.find.clear();
+            setFindCount(null);
+            setFindOrdinal(0);
+            setFindBoxes([]);
+          }}
+          onSearch={() => void runFind(true)}
+          onNext={() => findStep("next")}
+          onPrev={() => findStep("prev")}
+          onReplaceOne={() => void runReplace(false)}
+          onReplaceAll={() => void runReplace(true)}
+          onClose={closeFind}
+        />
+      )}
+
       <div className="hw-body">
         <div
           ref={canvasRef}
@@ -1176,6 +1395,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                         is pointer-events:none, so it never interferes with clicks/marks — it only points. */}
                     <HoverLayer store={hover.store} page={page} scale={scale} />
                     <SelectionOverlay marks={marks} page={page} scale={scale} />
+                    {/* issue 045: the 찾기 match highlight (current 강조 / rest 옅게), visually distinct from
+                        the selection marks. pointer-events:none — purely visual, like the selection overlay. */}
+                    {findOpen && <FindMatchOverlay boxes={findBoxes} current={core.find.cursor} page={page} scale={scale} />}
                     {/* issue 030: the marquee is an ISOLATED layer — it subscribes to the core itself, so a
                         drag re-renders neither this workspace nor the SVG sheets (only the rect moves). */}
                     <MarqueeLayer core={core} page={page} scale={scale} />

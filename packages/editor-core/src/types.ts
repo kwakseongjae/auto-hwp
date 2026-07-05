@@ -191,6 +191,49 @@ export interface Box {
   h: number;
 }
 
+/** One find hit (issue 045) — mirrors the engine's `FindMatch` DTO (hwp-mcp `FindMatch` / the desktop
+ *  `find_text` command / the wasm `{kind:"found"}` outcome). `node`/`start`/`len` are CHAR (Unicode-
+ *  scalar) coordinates over the owning paragraph's concatenated run text — the SAME space `caretRect`
+ *  reads, so a match resolves to on-page geometry through the existing caret query (no new engine
+ *  arithmetic). `section`/`block` index the model for reading-order navigation. NOTE (engine scope):
+ *  Find only surfaces NodeId-bearing SIMPLE body paragraphs, so an unedited binary `.hwp` (no NodeIds)
+ *  yields zero matches; HWPX (and edited docs) carry NodeIds and resolve both the match and its box. */
+export interface FindMatch {
+  node: number;
+  start: number;
+  len: number;
+  section: number;
+  block: number;
+}
+
+/** Search options for `find`/`replace` (issue 045). Both default to false (case-insensitive, substring).
+ *  Field names are the editor-core camelCase; each adapter maps them to its backend's key convention. */
+export interface FindOptions {
+  caseSensitive?: boolean;
+  wholeWord?: boolean;
+}
+
+/** Replace options — `FindOptions` plus the replace scope (`all: true` = every match as ONE undo unit,
+ *  `all: false` = the FIRST match in the document, matching the engine's `do_replace` contract). */
+export interface FindReplaceOptions extends FindOptions {
+  all: boolean;
+}
+
+/** The result of a replace (issue 045) — occurrences replaced + the live page count after re-flow
+ *  (mirrors the desktop `replace_text` / wasm `{kind:"replaced"}` outcome). */
+export interface ReplaceResult {
+  replaced: number;
+  pages: number;
+}
+
+/** A LOCATED find match (issue 045): the page it renders on + its box in own-render PAGE px, resolved
+ *  from the match's char coords via `caretRect` (the highlight overlay + scroll-to-match draw this).
+ *  `null` entries in a located list mean geometry was unavailable (a backend without the caret query). */
+export interface MatchBox {
+  page: number;
+  box: Box;
+}
+
 /** A visible MARK over a selected cell/range/table/paragraph on ONE page — the visual view of a
  *  selection item. `box` is own-render PAGE px; the UI scales it to screen px. */
 export interface SelMark {
