@@ -1,6 +1,6 @@
 # 047 — R11-3: 열너비 mm 정밀 + 균등 분배 + 편집 중 셀음영 SDK 승격
 
-- 상태: **open** · 우선순위: R11-P1 · 영역: packages/react(표 오버레이/유틸/신규 다이얼로그) + editor-core(폭 커맨드) — **HwpWorkspace는 표 오버레이·그립 배선 영역만**
+- 상태: **done** (d84da6f) · 우선순위: R11-P1 · 영역: packages/react(표 오버레이/유틸/신규 다이얼로그) + editor-core(폭 커맨드) — **HwpWorkspace는 표 오버레이·그립 배선 영역만**
 - 병렬: 048(리본 — HwpWorkspace **헤더/상단 영역** + 에디터 라이브 스타일 소유). 그 영역 접촉 금지.
 
 ## 근거 (TAURI-CONVERGENCE.md 감사표 "셀음영/열너비mm" M)
