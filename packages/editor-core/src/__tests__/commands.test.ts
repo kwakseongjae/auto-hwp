@@ -5,12 +5,15 @@ import {
   boundariesToHeights,
   boundariesToRatios,
   boundariesToWidths,
+  columnWidthMm,
+  equalizeColumns,
   HWPUNIT_PER_PX,
   mmToPx,
   pxToMm,
   remapFragmentHeights,
   resizeBoundary,
   roundMm,
+  setColumnWidthMm,
   widthsToRatios,
 } from "../units";
 import { firstRunStyle, inheritRuns } from "../runs";
@@ -121,6 +124,72 @@ describe("units — apply-verify predicate (issue 031 §거짓 성공 차단)", 
   it("no meaningful drag (below epsilon) → TRUE (nothing to verify); length change → TRUE (re-paginated)", () => {
     expect(appliedReflectsDrag([0, 100, 200], [0, 100, 200], [0, 100, 200])).toBe(true); // no drag
     expect(appliedReflectsDrag([0, 100, 200], [0, 160, 200], [0, 100, 150, 220])).toBe(true); // re-paginated
+  });
+});
+
+describe("units — precise column width (mm) + 균등 분배 (issue 047)", () => {
+  it("columnWidthMm reads a column's PAGE-px width as rounded mm (honest 1dp, no false precision)", () => {
+    // A4-ish table: boundaries in PAGE px. Column 0 = 200px, column 1 = 100px. 200px @ 96dpi = 52.9mm.
+    const b = [0, 200, 300, 400];
+    expect(columnWidthMm(b, 0)).toBeCloseTo(roundMm(pxToMm(200)), 6);
+    expect(columnWidthMm(b, 1)).toBeCloseTo(roundMm(pxToMm(100)), 6);
+    // never more precise than 0.1mm (the readout of the live geometry).
+    expect(columnWidthMm(b, 0)).toBe(Math.round(pxToMm(200) * 10) / 10);
+    // out of range → 0 (no crash).
+    expect(columnWidthMm(b, 9)).toBe(0);
+    expect(columnWidthMm(b, -1)).toBe(0);
+  });
+
+  it("setColumnWidthMm moves the RIGHT boundary to hit the target mm (interior column)", () => {
+    const b = [0, 200, 300, 400]; // 3 cols
+    // Set column 0 to 20mm. 20mm @ 96dpi ≈ 75.59px → its right boundary lands at 0 + 75.59.
+    const next = setColumnWidthMm(b, 0, 20);
+    expect(next[1]).toBeCloseTo(mmToPx(20), 6);
+    // the neighbour boundary (index 2) and endpoints are untouched.
+    expect(next[0]).toBe(0);
+    expect(next[2]).toBe(300);
+    expect(next[3]).toBe(400);
+    // a fresh readout of the resized column reflects ~20mm (roundtrip honesty).
+    expect(columnWidthMm(next, 0)).toBeCloseTo(20, 1);
+  });
+
+  it("setColumnWidthMm on the LAST column steals from its LEFT neighbour", () => {
+    const b = [0, 200, 300, 400]; // last column = index 2 (300..400 = 100px)
+    const next = setColumnWidthMm(b, 2, 40); // 40mm ≈ 151.2px → left boundary = 400 - 151.2
+    expect(next[2]).toBeCloseTo(400 - mmToPx(40), 6);
+    expect(next[3]).toBe(400); // table right edge fixed
+    expect(next[0]).toBe(0);
+  });
+
+  it("setColumnWidthMm clamps so neither the column nor its neighbour collapses below minPx", () => {
+    const b = [0, 100, 200, 300];
+    // Ask for an absurdly wide column 0 → clamp at the right neighbour minus minPx(8).
+    expect(setColumnWidthMm(b, 0, 9999)[1]).toBe(200 - 8);
+    // A 1-column table has nothing to resize against → unchanged.
+    expect(setColumnWidthMm([0, 300], 0, 50)).toEqual([0, 300]);
+    // out-of-range col → unchanged.
+    expect(setColumnWidthMm(b, 9, 50)).toEqual(b);
+  });
+
+  it("equalizeColumns redistributes a range to equal widths, holding the bounding boundaries + others", () => {
+    // 4 columns of px widths 100 / 40 / 40 / 120. Equalize the middle two (indices 1..2): the span
+    // 100..180 (80px) splits into 40/40 — already equal here, so pick an UNequal span.
+    const b = [0, 100, 130, 180, 300]; // widths 100/30/50/120
+    const next = equalizeColumns(b, 1, 2); // span 100..180 (80px) → two 40px columns
+    expect(next).toEqual([0, 100, 140, 180, 300]);
+    // whole-table equalize (0..3): span 0..300 → four 75px columns.
+    expect(equalizeColumns(b, 0, 3)).toEqual([0, 75, 150, 225, 300]);
+    // degenerate (single column / out of range) → unchanged.
+    expect(equalizeColumns(b, 1, 1)).toEqual(b);
+    expect(equalizeColumns(b, 0, 9)).toEqual(b);
+  });
+
+  it("the committed ratios of an equalized range are equal (proportion check)", () => {
+    const next = equalizeColumns([0, 100, 130, 180, 300], 0, 3); // [0,75,150,225,300]
+    const ratios = boundariesToRatios(next);
+    expect(ratios[0]).toBe(ratios[1]);
+    expect(ratios[1]).toBe(ratios[2]);
+    expect(ratios[2]).toBe(ratios[3]);
   });
 });
 

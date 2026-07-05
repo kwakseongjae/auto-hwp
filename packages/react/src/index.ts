@@ -103,6 +103,15 @@ export type { SelectionActions, SelectionActionTarget, SelectionRange } from "./
 export { clampMenuPosition } from "./contextMenuPosition";
 export type { MenuViewport, MenuPosition } from "./contextMenuPosition";
 
+// Issue 047 — precise column width (mm) + 균등 분배 dialog, and the 편집 중 셀음영 palette. The dialog is a
+// small popover (mm 입력 · 균등 분배); the palette is shown WHILE the in-place editor is open so the current
+// cell's background can be set without leaving edit mode. Both are presentational — the mm→px→ratio math
+// lives in editor-core units.ts (single conversion point: columnWidthMm/setColumnWidthMm/equalizeColumns).
+export { ColumnWidthDialog } from "./components/ColumnWidthDialog";
+export type { ColumnWidthDialogProps } from "./components/ColumnWidthDialog";
+export { CellShadePalette } from "./components/CellShadePalette";
+export type { CellShadePaletteProps } from "./components/CellShadePalette";
+
 // Font system v1 (issue 022): the curated OFL catalog + screen @font-face/alias helpers.
 export { FONT_CATALOG, catalogUrl, buildFontFaceCss, svgFontFamilies, isTtc } from "./fonts";
 export type { FontCatalogEntry } from "./fonts";
@@ -131,6 +140,9 @@ export {
   widthsToRatios,
   boundariesToRatios,
   resizeBoundary,
+  columnWidthMm,
+  setColumnWidthMm,
+  equalizeColumns,
   inheritRuns,
   firstRunStyle,
 } from "@tf-hwp/editor-core";

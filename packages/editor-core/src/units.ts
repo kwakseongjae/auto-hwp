@@ -102,6 +102,58 @@ export function appliedReflectsDrag(before: number[], intended: number[], applie
   return Math.sign(appliedDelta) === Math.sign(intendedDelta) && Math.abs(appliedDelta) >= frac * Math.abs(intendedDelta);
 }
 
+/** The mm width of column `col` (0-based) given the `cols + 1` PAGE-px boundary array (issue 047). Rounded
+ *  to `digits` decimals so the 열너비 다이얼로그 shows an HONEST reading (거짓 정밀도 금지): it is derived
+ *  from the ACTUAL live boundaries and never carries more precision than 0.1mm. Because the commit path is
+ *  px→relative-ratios (the engine rescales to the drawn table width), a fresh re-query of the boundaries is
+ *  the source of truth AFTER an apply — this readout reflects that geometry directly (적용-확인 표시).
+ *  An out-of-range `col` yields 0. */
+export function columnWidthMm(boundaries: number[], col: number, digits = 1): number {
+  if (col < 0 || col + 1 >= boundaries.length) return 0;
+  return roundMm(pxToMm(boundaries[col + 1] - boundaries[col]), digits);
+}
+
+/** Set column `col` (0-based) to `mm` millimetres by moving the boundary it shares with its RIGHT neighbour
+ *  (or, for the LAST column, its LEFT boundary — stealing from the neighbour), clamped so neither the column
+ *  nor the affected neighbour shrinks below `minPx` (issue 047 — mirrors the desktop `setColWidthMm`, in
+ *  PAGE px here rather than fractional). Returns a NEW `cols + 1` PAGE-px boundary array — the source of the
+ *  committed ratios via `boundariesToRatios`. A 1-column table (or an out-of-range `col`) returns the input
+ *  unchanged (there is no neighbour to resize against — an honest no-op the apply-verify then reports). */
+export function setColumnWidthMm(boundaries: number[], col: number, mm: number, minPx = 8): number[] {
+  const cols = boundaries.length - 1;
+  if (cols < 2 || col < 0 || col >= cols) return boundaries.slice();
+  const targetPx = Math.max(minPx, mmToPx(Math.max(0, mm)));
+  const next = boundaries.slice();
+  if (col < cols - 1) {
+    // Move the RIGHT boundary; clamp so neither this column nor the right neighbour collapses below minPx.
+    const lo = boundaries[col] + minPx;
+    const hi = boundaries[col + 2] - minPx;
+    next[col + 1] = Math.max(lo, Math.min(hi, boundaries[col] + targetPx));
+  } else {
+    // Last column: move the LEFT boundary instead (steal from the left neighbour).
+    const lo = boundaries[col - 1] + minPx;
+    const hi = boundaries[col + 1] - minPx;
+    next[col] = Math.max(lo, Math.min(hi, boundaries[col + 1] - targetPx));
+  }
+  return next;
+}
+
+/** 균등 분배 (issue 047): redistribute the columns in the inclusive index range `[c0 .. c1]` so each is
+ *  EQUAL width, holding the two bounding boundaries (`boundaries[c0]` and `boundaries[c1 + 1]`) fixed — every
+ *  OTHER column keeps its width. Returns a NEW `cols + 1` PAGE-px boundary array (mirrors the desktop
+ *  `equalizeCols`, fractional there / PAGE px here). A degenerate range (`c0 >= c1`, or out of range) returns
+ *  the input unchanged (equalizing one column is a no-op). */
+export function equalizeColumns(boundaries: number[], c0: number, c1: number): number[] {
+  const cols = boundaries.length - 1;
+  if (c0 < 0 || c1 >= cols || c1 <= c0) return boundaries.slice();
+  const lo = boundaries[c0];
+  const hi = boundaries[c1 + 1];
+  const n = c1 - c0 + 1;
+  const next = boundaries.slice();
+  for (let k = 0; k <= n; k++) next[c0 + k] = lo + ((hi - lo) * k) / n;
+  return next;
+}
+
 /** Move the INTERIOR boundary `i` (1 … len-2 — the two outer edges are the fixed table extents) to
  *  `newX` px, clamped so neither the column to its left nor to its right shrinks below `minPx`. Returns
  *  a NEW boundary array (the drag preview + the source of the committed ratios). An out-of-range `i`

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Box, CellDir, DocContext, EngineAdapter, Intent, MatchBox, OutlineItem, PageGeom, PointerInput, RunSpec, Selection, TableBox } from "@tf-hwp/editor-core";
-import { boundariesToRatios, remapFragmentHeights, appliedReflectsDrag, firstRunStyle } from "@tf-hwp/editor-core";
+import { boundariesToRatios, remapFragmentHeights, appliedReflectsDrag, firstRunStyle, columnWidthMm, setColumnWidthMm, equalizeColumns } from "@tf-hwp/editor-core";
 import { OutlinePanel } from "./OutlinePanel";
 import { StatusBar } from "./StatusBar";
 import { pageAtReference } from "../outline";
@@ -21,6 +21,8 @@ import { Ruler } from "./Ruler";
 import { InPlaceCellEditor } from "./InPlaceCellEditor";
 import { FloatingToolbar } from "./FloatingToolbar";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
+import { ColumnWidthDialog } from "./ColumnWidthDialog";
+import { CellShadePalette } from "./CellShadePalette";
 import { TableSizeGrid } from "./TableSizeGrid";
 import { FindBar } from "./FindBar";
 import { FindMatchOverlay } from "./FindMatchOverlay";
@@ -223,6 +225,17 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // A hidden native color input the context menu's 배경색 item triggers — so that item delegates to the
   // SAME shadeCellRange action as the 028 toolbar's 배경 swatch (신규 액션 0), just entered via a menu click.
   const shadeInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Issue 047: 열 너비 mm 다이얼로그 + 편집 중 셀음영 ────────────────────────────────────────────────────
+  // The OPEN 열 너비 dialog (a small popover; only its anchor is state — its current mm / column span are
+  // derived LIVE from `editTarget`, so after an apply the re-resolved boundaries update the readout = 적용-
+  // 확인). Opened from the cell context menu ("열 너비…"). Cleared when the selection/target goes away.
+  const [colWidthDialog, setColWidthDialog] = useState<{ x: number; y: number } | null>(null);
+  // A shield (mirrors `tabMoving`): true WHILE a 편집 중 셀음영 apply is in flight, so the refreshToken close
+  // effect does NOT close the in-place editor when the shade op re-flows — the shade lands on the committed
+  // cell background while the uncommitted text stays in the editor (op-bus SetTableCell rebuilds only the
+  // cell's paragraphs, never `shade_color`, so a later text commit preserves the shade). 경합 금지.
+  const shadingRef = useRef(false);
 
   // ── Issue 045: 찾기/바꾸기 state ─────────────────────────────────────────────────────────────────────
   // The ⌘F bar drives the editor-core FindController (core.find). `findCount` is null until a search runs
@@ -642,8 +655,10 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // Close the editor when the layout re-flows (an applied edit) so it never floats over stale geometry.
   // EXCEPTION (issue 036): a Tab commit-move re-flows too, but it re-opens the editor at the NEXT cell
   // itself — so skip the close while `tabMoving` is set, or it would clobber that re-entry.
+  // EXCEPTION (issue 047): a 편집 중 셀음영 apply re-flows too, but the shade does NOT touch the cell's text
+  // or geometry — so keep the editor open (with its uncommitted text) while `shading` is set.
   useEffect(() => {
-    if (tabMovingRef.current) return;
+    if (tabMovingRef.current || shadingRef.current) return;
     setEditor(null);
   }, [refreshToken]);
 
@@ -680,6 +695,75 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     },
     [core, editTarget, toast, onTrap],
   );
+
+  // ── Issue 047: 열 너비 mm 다이얼로그 — precise mm + 균등 분배 (both reuse `onColCommit`'s apply-verify) ──
+  // The dialog's live readouts, derived from `editTarget` (re-resolved on refreshToken → 적용-확인): the
+  // target column index (the anchored cell's column), its measured mm width, and the 균등 분배 scope. A
+  // single-column selection equalizes the WHOLE table (전 열 등폭 — 목표 2); a multi-column range equalizes
+  // just that span (desktop 시맨틱). `null` when the target isn't a table with resolvable boundaries.
+  const colWidthTarget = useMemo(() => {
+    const b = editTarget?.boundaries;
+    if (!b || b.length < 2) return null;
+    const cols = b.length - 1;
+    const c0 = editTarget?.cols?.[0] ?? 0;
+    const c1 = editTarget?.cols?.[1] ?? c0;
+    const col = Math.min(Math.max(0, c0), cols - 1);
+    // Equalize the SELECTED span when it covers >1 column; otherwise the whole table (전 열).
+    const [e0, e1] = c1 > c0 ? [c0, c1] : [0, cols - 1];
+    return { boundaries: b, cols, col, e0, e1, currentMm: columnWidthMm(b, col), equalizeCount: e1 - e0 + 1 };
+  }, [editTarget]);
+
+  // Apply a precise mm width to the target column (mm→px via units.ts `setColumnWidthMm`, then the SAME
+  // `onColCommit` apply-verify: re-query + confirm the boundary MOVED, honest failure toast otherwise). The
+  // dialog stays open so its readout re-measures the real applied width (적용-확인 / 왕복 오차 반영).
+  const onApplyColMm = useCallback(
+    (mm: number) => {
+      if (!colWidthTarget) return;
+      void onColCommit(setColumnWidthMm(colWidthTarget.boundaries, colWidthTarget.col, mm));
+    },
+    [colWidthTarget, onColCommit],
+  );
+
+  // 균등 분배: equalize the target span to one width (units.ts `equalizeColumns`), committed through the SAME
+  // apply-verify path. R13-4 lesson: the selection is by column INDEX (not px), so it stays valid after the
+  // repaint; the geometry (boundaries) re-resolves via refreshToken, so the dialog readout refreshes too.
+  const onEqualizeCols = useCallback(() => {
+    if (!colWidthTarget) return;
+    void onColCommit(equalizeColumns(colWidthTarget.boundaries, colWidthTarget.e0, colWidthTarget.e1));
+  }, [colWidthTarget, onColCommit]);
+
+  // ── Issue 047: 편집 중 셀음영 — set the CURRENTLY-edited cell's background WITHOUT leaving edit mode ──────
+  // Applies a 1-cell `SetCellRangeShade` on the editor's cell (desktop R7-Part1 parity). `shading` shields
+  // the refreshToken editor-close so the in-place editor stays open with its uncommitted text; the shade op
+  // rebuilds nothing in the cell's paragraphs (op-bus SetTableCell leaves `shade_color`), so a later text
+  // commit preserves the shade. The palette buttons `preventDefault` their mousedown so this never fires
+  // via a blur→commit race (커밋/에디터 상태와 경합 금지).
+  const shadeEditorCell = useCallback(
+    async (hex: string | null) => {
+      const ed = editorRef.current;
+      if (!ed || ed.kind !== "cell") return;
+      const r = ed.rows?.[0] ?? 0;
+      const c = ed.cols?.[0] ?? 0;
+      shadingRef.current = true;
+      try {
+        await core.edit.shadeCellRange(ed.section, ed.block, { r0: r, c0: c, r1: r, c1: c }, hex);
+        toast(hex ? "배경색 적용" : "배경 지움");
+      } catch (e) {
+        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`배경색 변경 실패: ${e}`);
+      } finally {
+        // Release the shield only after this task's React flush (macrotask) so the refreshToken close from
+        // the shade apply can't slip through — mirrors the `tabMoving` release discipline (issue 036).
+        window.setTimeout(() => (shadingRef.current = false), 0);
+      }
+    },
+    [core, toast, onTrap],
+  );
+
+  // Close the 열 너비 dialog if its target evaporates (selection cleared / became a non-table), so a stale
+  // popover never lingers over the wrong thing. (An apply keeps it open — colWidthTarget re-resolves.)
+  useEffect(() => {
+    if (colWidthDialog && !colWidthTarget) setColWidthDialog(null);
+  }, [colWidthDialog, colWidthTarget]);
 
   // 행 높이 커밋 (issue 031): remap the dragged FRAGMENT boundaries to a WHOLE-table HWPUNIT `heights`
   // vector (rows outside the on-page fragment stay 0 = content-sized — the v2 split-table fix), apply
@@ -1576,6 +1660,13 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                         onCommitMove={editor.kind === "cell" ? onEditorCommitMove : undefined}
                       />
                     )}
+                    {/* issue 047 목표 3: 편집 중 셀음영 — while a CELL is being edited in place, a swatch bar
+                        lets the user set that cell's background without leaving edit mode (desktop R7-Part1).
+                        Its buttons preventDefault mousedown so they never blur→commit the editor; the apply is
+                        shielded so the editor stays open with its uncommitted text (커밋/에디터 경합 금지). */}
+                    {editingOn && editor && editor.kind === "cell" && editor.page === page && (
+                      <CellShadePalette box={editor.box} scale={scale} onPick={(hex) => void shadeEditorCell(hex)} />
+                    )}
                   </>
                 )}
               />
@@ -1637,6 +1728,19 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           const fmtWhy = fmtOk ? undefined : "이 셀에는 서식을 적용할 수 없습니다";
           items.push({ type: "action", key: "bold", label: editTarget?.curBold ? "굵게 해제" : "굵게", icon: "B", disabled: !fmtOk, title: fmtWhy, onSelect: fmtActions.bold });
           items.push({ type: "action", key: "shade", label: "배경색", icon: "◧", disabled: !fmtOk, title: fmtWhy, onSelect: () => shadeInputRef.current?.click() });
+          // issue 047: 열 너비… → the precise mm + 균등 분배 dialog (opened at the menu anchor). Needs a
+          // table with ≥2 resolvable column boundaries; disabled with a reason otherwise (미지원은 조용한
+          // 무시 금지). Delegates to the SAME `onColCommit` apply-verify the drag handles use.
+          const colOk = !!colWidthTarget && colWidthTarget.cols >= 2;
+          items.push({
+            type: "action",
+            key: "colwidth",
+            label: "열 너비…",
+            icon: "↔",
+            disabled: !colOk,
+            title: colOk ? undefined : "열이 2개 이상인 표에서 열 너비를 조정할 수 있습니다",
+            onSelect: () => setColWidthDialog({ x: cm.x, y: cm.y }),
+          });
           if (cm.cell) {
             const { section, block, row, cols } = cm.cell;
             items.push({ type: "separator", key: "sep-row" });
@@ -1648,6 +1752,24 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         items.push({ type: "action", key: "ai", label: "✨ AI에게 전달", disabled: !canEdit, title: canEdit ? undefined : "편집하려면 먼저 문서를 여세요", onSelect: onSendToAi });
         return <ContextMenu x={cm.x} y={cm.y} items={items} onClose={close} />;
       })()}
+      {/* issue 047: the 열 너비 mm + 균등 분배 dialog. Its readouts (currentMm / column span) come LIVE from
+          `colWidthTarget` (= editTarget, re-resolved on refreshToken) so an apply's re-measured width shows
+          immediately (적용-확인). Both actions commit through the SAME `onColCommit` apply-verify. */}
+      {colWidthDialog && colWidthTarget && (
+        <ColumnWidthDialog
+          x={colWidthDialog.x}
+          y={colWidthDialog.y}
+          currentMm={colWidthTarget.currentMm}
+          columnLabel={`${colWidthTarget.col + 1}열`}
+          equalizeCount={colWidthTarget.equalizeCount}
+          onApplyMm={onApplyColMm}
+          onEqualize={() => {
+            onEqualizeCols();
+            setColWidthDialog(null);
+          }}
+          onClose={() => setColWidthDialog(null)}
+        />
+      )}
       {/* issue 039: the hidden color input the context menu's 배경색 item clicks — routes to the SAME
           shadeCellRange action as the 028 toolbar swatch (신규 액션 0). Kept mounted so the ref is stable. */}
       {editingOn && (

@@ -42,6 +42,9 @@ export {
   remapFragmentHeights,
   appliedReflectsDrag,
   resizeBoundary,
+  columnWidthMm,
+  setColumnWidthMm,
+  equalizeColumns,
 } from "./units";
 
 // Run-format preservation (issue 027) — the pure text-edit inheritance rule.
