@@ -162,6 +162,23 @@ export class HwpDoc {
       return s == null ? null : JSON.parse(s);
     });
   }
+  /** ANCHORED IMAGE under (x,y) in own-render px (issue 049) — the topmost image's own box + `(section,
+   *  block)` anchor for the 8-handle move/resize overlay, or `null` on a miss. Distinct from `hitTest`
+   *  (which returns the paragraph band that holds the image). */
+  imageAt(page, x, y) {
+    return this.#call((r) => {
+      const s = r.imageAt(page, x, y); // Option<String> → JS string | null/undefined on a miss
+      return s == null ? null : JSON.parse(s);
+    });
+  }
+  /** Placed box of the image anchored at `(section, block)` on `page` (issue 049), or `null` when that
+   *  image isn't on the page — re-queried to re-place the overlay + apply-verify a move/resize commit. */
+  imageBbox(page, section, block) {
+    return this.#call((r) => {
+      const s = r.imageBbox(page, section, block); // Option<String> → string | null/undefined on a miss
+      return s == null ? null : JSON.parse(s);
+    });
+  }
   /** Table CELL under (x,y) in own-render px for cell-level marking (issue 023), or `null` on a miss.
    *  `row`/`col` are MODEL-GLOBAL (already global on a split-table fragment — no first_row re-add). */
   tableCellAt(page, x, y) {

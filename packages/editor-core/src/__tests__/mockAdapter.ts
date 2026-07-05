@@ -1,5 +1,5 @@
 import type { EngineAdapter } from "../adapter";
-import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "../types";
+import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "../types";
 
 /** A headless EngineAdapter for node tests: canned geometry resolvers + a spy-able applyIntent/undo.
  *  No wasm, no DOM — pure in-memory. Mirrors @tf-hwp/react's test MockAdapter so the same selection
@@ -47,6 +47,12 @@ export class MockAdapter implements EngineAdapter {
       replaceCount?: number;
       /** Canned document outline for `outline` (issue 046). Omit to OMIT the method (page-list fallback). */
       outline?: OutlineItem[];
+      /** Canned image hit for `imageAt` (issue 049), or a `(page, x, y)` resolver. Present makes `imageAt`
+       *  answer; omit to OMIT the method (a backend with no image overlay). */
+      image?: ImageBox | null | ((page: number, x: number, y: number) => ImageBox | null);
+      /** Canned image box for `imageBbox` (issue 049), or a `(page, section, block)` resolver (so a test can
+       *  model a post-resize re-query = 적용-확인). Omit to OMIT the method. */
+      imageBox?: ImageBox | null | ((page: number, section: number, block: number) => ImageBox | null);
       pages?: number;
     } = {},
   ) {
@@ -65,6 +71,8 @@ export class MockAdapter implements EngineAdapter {
       (this as { replace?: unknown }).replace = undefined;
     }
     if (!("outline" in this.opts)) (this as { outline?: unknown }).outline = undefined;
+    if (!("image" in this.opts)) (this as { imageAt?: unknown }).imageAt = undefined;
+    if (!("imageBox" in this.opts)) (this as { imageBbox?: unknown }).imageBbox = undefined;
   }
 
   private matchesFor(query: string, opts: FindOptions): FindMatch[] {
@@ -106,6 +114,14 @@ export class MockAdapter implements EngineAdapter {
   }
   async pageGeometry(): Promise<PageGeom | null> {
     return this.opts.pageGeom ?? null;
+  }
+  async imageAt(page: number, x: number, y: number): Promise<ImageBox | null> {
+    const im = this.opts.image;
+    return (typeof im === "function" ? im(page, x, y) : im) ?? null;
+  }
+  async imageBbox(page: number, section: number, block: number): Promise<ImageBox | null> {
+    const ib = this.opts.imageBox;
+    return (typeof ib === "function" ? ib(page, section, block) : ib) ?? null;
   }
   async blockRuns(): Promise<RunSpec[]> {
     return this.opts.runs ?? [];

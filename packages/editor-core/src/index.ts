@@ -49,7 +49,11 @@ export {
   columnWidthMm,
   setColumnWidthMm,
   equalizeColumns,
+  imageSizeToHwpunit,
+  resizeImageBox,
+  appliedReflectsResize,
 } from "./units";
+export type { XYWH, ImageHandle } from "./units";
 
 // Run-format preservation (issue 027) — the pure text-edit inheritance rule.
 export { inheritRuns, firstRunStyle } from "./runs";
@@ -78,6 +82,7 @@ export type {
   FindOptions,
   FindReplaceOptions,
   HitResult,
+  ImageBox,
   Intent,
   IntentCard,
   MatchBox,

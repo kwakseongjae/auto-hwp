@@ -196,3 +196,82 @@ export function resizeBoundary(boundaries: number[], i: number, newX: number, mi
   next[i] = clamped;
   return next;
 }
+
+// ── issue 049: image move/resize geometry — the SINGLE px↔HWPUNIT point + the pure 8-handle resize math ──
+
+/** A rectangle in a single px space (own-render PAGE px OR screen px — the callers keep both consistent). */
+export interface XYWH {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Which handle of the 8-handle image overlay is being dragged. Corners (nw/ne/se/sw) preserve aspect;
+ *  edges (n/s/e/w) resize one axis. `"move"` (the body) relocates and is handled by the caller, not here. */
+export type ImageHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
+
+/** Own-render PAGE px image dimensions → the HWPUNIT `width`/`height` the `SetImageSize`/`MoveImage`
+ *  Intents take (INTENT-SCHEMA §6.6 — image sizes are HWPUNIT). This is the ONE px→HWPUNIT point for
+ *  images (mirrors the desktop `Math.round(pageW * HWPUNIT_PER_PX)` in crates/hwp-viewer/ui/App.tsx). Each
+ *  axis is `Math.max(1, round(px × HWPUNIT_PER_PX))` — the op-bus `SetImageSize` REFUSES a non-positive
+ *  size, so we never emit 0. */
+export function imageSizeToHwpunit(pageW: number, pageH: number): { width: number; height: number } {
+  return {
+    width: Math.max(1, Math.round(pageW * HWPUNIT_PER_PX)),
+    height: Math.max(1, Math.round(pageH * HWPUNIT_PER_PX)),
+  };
+}
+
+/** Apply a resize-handle drag to the START box `start`, returning the NEW box in the SAME space. `dx`/`dy`
+ *  are the pointer delta from the drag origin (same space as `start`). The OPPOSITE edge/corner stays
+ *  fixed; a corner (nw/ne/se/sw) PRESERVES the start aspect ratio unless `free` (Shift held) — the Figma
+ *  convention the issue mandates ("모서리는 종횡비 유지, Shift로 해제"); an edge (n/s/e/w) resizes one axis
+ *  only. Never shrinks below `minPx` on the driven axis (and, for a locked corner, the aspect keeps the
+ *  other axis ≥ 0). Pure — the drag PREVIEW and the source of the committed HWPUNIT size both flow through
+ *  here (no unit slip). */
+export function resizeImageBox(start: XYWH, handle: ImageHandle, dx: number, dy: number, free = false, minPx = 8): XYWH {
+  const hasE = handle.includes("e");
+  const hasW = handle.includes("w");
+  const hasN = handle.includes("n");
+  const hasS = handle.includes("s");
+  const isCorner = (hasE || hasW) && (hasN || hasS);
+
+  // 1) Independent per-axis proposals from the raw drag (clamped to a minimum on the DRIVEN axis).
+  let w = hasE ? start.w + dx : hasW ? start.w - dx : start.w;
+  let h = hasS ? start.h + dy : hasN ? start.h - dy : start.h;
+  if (hasE || hasW) w = Math.max(minPx, w);
+  if (hasN || hasS) h = Math.max(minPx, h);
+
+  // 2) Corner + aspect lock: tie the two axes to the START ratio; the DOMINANT drag axis wins (larger
+  //    relative change), so a diagonal drag feels natural while the ratio holds. `free` (Shift) skips it.
+  if (isCorner && !free && start.w > 0 && start.h > 0) {
+    const aspect = start.w / start.h;
+    const relW = w / start.w;
+    const relH = h / start.h;
+    if (relW >= relH) h = Math.max(minPx, w / aspect);
+    else w = Math.max(minPx, h * aspect);
+  }
+
+  // 3) Re-anchor: the side OPPOSITE the dragged handle is fixed. A west/north handle moves the box origin
+  //    so its east/south edge stays put; an east/south (or centre) handle leaves the origin.
+  const x = hasW ? start.x + start.w - w : start.x;
+  const y = hasN ? start.y + start.h - h : start.y;
+  return { x, y, w, h };
+}
+
+/** APPLY-VERIFY for an image RESIZE (issue 049 §적용-확인, mirrors `appliedReflectsDrag`): after a
+ *  `SetImageSize` commit, re-query the image box and ask "did it actually change size TOWARD the intended
+ *  dimensions?". Compares the axis of GREATER intended change and checks the applied delta has the same
+ *  sign and is ≥ `frac` of the intended magnitude (so a clamped-but-real resize still verifies, while a
+ *  frozen no-op engine is caught). Returns `true` when there was no meaningful intended change (nothing to
+ *  verify — an honest no-op). All three boxes are in the SAME px space. */
+export function appliedReflectsResize(before: { w: number; h: number }, intended: { w: number; h: number }, applied: { w: number; h: number }, frac = 0.5, epsilon = 0.5): boolean {
+  const dwI = intended.w - before.w;
+  const dhI = intended.h - before.h;
+  const axis = Math.abs(dwI) >= Math.abs(dhI) ? "w" : "h";
+  const intendedDelta = axis === "w" ? dwI : dhI;
+  if (Math.abs(intendedDelta) < epsilon) return true; // no real resize → nothing to verify
+  const appliedDelta = (axis === "w" ? applied.w : applied.h) - (axis === "w" ? before.w : before.h);
+  return Math.sign(appliedDelta) === Math.sign(intendedDelta) && Math.abs(appliedDelta) >= frac * Math.abs(intendedDelta);
+}

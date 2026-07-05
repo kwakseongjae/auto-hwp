@@ -195,6 +195,31 @@
 .hw-row-grip:hover::before, .hw-row-grip-active::before { opacity: 0.95; }
 .hw-row-grip-active::before { height: 2px; box-shadow: 0 0 0 0.5px rgba(37, 99, 235, 0.35); }
 
+/* issue 049 — image move/resize overlay (8-handle, Figma-style) over a selected image */
+.hw-img-overlay {
+  position: absolute; pointer-events: auto; cursor: move; z-index: 20;
+  box-shadow: 0 0 0 1.5px var(--hw-accent); box-sizing: border-box;
+}
+.hw-img-handle {
+  position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px;
+  background: var(--hw-accent); border: 1.5px solid #fff; border-radius: 2px;
+  box-shadow: 0 0 1px rgba(0, 0, 0, 0.4); pointer-events: auto; z-index: 21;
+}
+.hw-img-h-nw { left: 0; top: 0; }
+.hw-img-h-n  { left: 50%; top: 0; }
+.hw-img-h-ne { left: 100%; top: 0; }
+.hw-img-h-e  { left: 100%; top: 50%; }
+.hw-img-h-se { left: 100%; top: 100%; }
+.hw-img-h-s  { left: 50%; top: 100%; }
+.hw-img-h-sw { left: 0; top: 100%; }
+.hw-img-h-w  { left: 0; top: 50%; }
+.hw-img-delete {
+  position: absolute; top: -28px; right: 0; padding: 2px 6px; font-size: 11px;
+  color: #dc2626; background: #fff; border: 1px solid rgba(0, 0, 0, 0.1); border-radius: 6px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15); cursor: pointer; z-index: 22;
+}
+.hw-img-delete:hover { background: rgba(239, 68, 68, 0.1); }
+
 /* step 2 — 표 추가 grid picker */
 .hw-tableins { position: relative; display: inline-flex; }
 .hw-tableins-pop {

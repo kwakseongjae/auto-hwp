@@ -1,5 +1,5 @@
 import type { EngineAdapter } from "../EngineAdapter";
-import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "../types";
+import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "../types";
 
 /** A headless EngineAdapter for tests: canned SVG (optionally malicious, to exercise the R7 gate), a
  *  fixed table hit, and a spy-able applyIntent. No wasm — pure in-memory. */
@@ -47,6 +47,15 @@ export class MockAdapter implements EngineAdapter {
       caret?: CaretRect | null | ((page: number, node: number, offset: number) => CaretRect | null);
       /** Canned document outline for `outline` (issue 046). Omit to OMIT the method (page-list fallback). */
       outline?: OutlineItem[];
+      /** Canned image hit for `imageAt` (issue 049), or a `(page, x, y)` resolver. Present makes `imageAt`
+       *  answer; omit to OMIT the method (a backend with no image overlay). */
+      image?: ImageBox | null | ((page: number, x: number, y: number) => ImageBox | null);
+      /** Canned image box for `imageBbox` (issue 049), or a `(page, section, block)` resolver. Omit to OMIT. */
+      imageBox?: ImageBox | null | ((page: number, section: number, block: number) => ImageBox | null);
+      /** When set, applyIntent(SetImageSize/MoveImage) MUTATES the live image box so a `imageBbox` re-query
+       *  reflects the commit (issue 049 apply-verify SUCCESS path). Omitted → the image box is FROZEN (a
+       *  no-op engine) so the false-success guard test can observe an unchanged box. Needs `image`+`imageBox`. */
+      liveImage?: boolean;
       pages?: number;
     } = {},
   ) {
@@ -63,8 +72,11 @@ export class MockAdapter implements EngineAdapter {
       (this as { replace?: unknown }).replace = undefined;
     }
     if (!("outline" in this.opts)) (this as { outline?: unknown }).outline = undefined;
+    if (!("image" in this.opts)) (this as { imageAt?: unknown }).imageAt = undefined;
+    if (!("imageBox" in this.opts)) (this as { imageBbox?: unknown }).imageBbox = undefined;
     this.liveCol = this.opts.colBoundaries ? this.opts.colBoundaries.slice() : null;
     this.liveRow = this.opts.rowBoundaries ? this.opts.rowBoundaries.slice() : null;
+    this.liveImg = this.opts.imageBox && typeof this.opts.imageBox !== "function" ? { ...this.opts.imageBox } : null;
   }
 
   private matchesFor(query: string, opts: FindOptions): FindMatch[] {
@@ -75,6 +87,7 @@ export class MockAdapter implements EngineAdapter {
   // Mutable copies the liveResize simulation edits (so a re-query returns the post-apply geometry).
   private liveCol: number[] | null = null;
   private liveRow: number[] | null = null;
+  private liveImg: ImageBox | null = null;
   private firstRow(): number {
     const t = this.opts.table;
     return t && typeof t !== "function" ? t.first_row : 0;
@@ -116,6 +129,19 @@ export class MockAdapter implements EngineAdapter {
   async pageGeometry(): Promise<PageGeom | null> {
     return this.opts.pageGeom ?? null;
   }
+  async imageAt(page: number, x: number, y: number): Promise<ImageBox | null> {
+    const im = this.opts.image;
+    return (typeof im === "function" ? im(page, x, y) : im) ?? null;
+  }
+  async imageBbox(page: number, section: number, block: number): Promise<ImageBox | null> {
+    const ib = this.opts.imageBox;
+    if (typeof ib === "function") return ib(page, section, block) ?? null;
+    // Answer ONLY for the image's CURRENT anchor (post-commit the box/anchor may have moved via liveImage);
+    // a query for any other (section, block) is a miss — this is what lets the apply-verify distinguish a
+    // real move (found at the landed anchor) from a frozen no-op (not found at the landed anchor).
+    if (this.liveImg && this.liveImg.section === section && this.liveImg.block === block) return { ...this.liveImg };
+    return null;
+  }
   async blockRuns(): Promise<RunSpec[]> {
     return this.opts.runs ?? [];
   }
@@ -145,6 +171,17 @@ export class MockAdapter implements EngineAdapter {
         this.liveCol = distribute(this.liveCol, intent.widths as number[]);
       } else if (intent.intent === "SetTableRowHeights" && this.liveRow) {
         this.liveRow = applyHeights(this.liveRow, intent.heights as number[], this.firstRow());
+      }
+    }
+    // liveImage: reflect a SetImageSize (px = HWPUNIT/75) / MoveImage (anchor reorder) into the live image
+    // box so a `imageBbox` re-query shows the post-commit geometry (issue 049 apply-verify SUCCESS path).
+    if (this.opts.liveImage && this.liveImg) {
+      if (intent.intent === "SetImageSize" && intent.section === this.liveImg.section && intent.index === this.liveImg.block) {
+        this.liveImg = { ...this.liveImg, w: (intent.width as number) / 75, h: (intent.height as number) / 75 };
+      } else if (intent.intent === "MoveImage" && intent.section === this.liveImg.section && intent.from === this.liveImg.block) {
+        const from = intent.from as number;
+        const to = intent.to as number;
+        this.liveImg = { ...this.liveImg, block: to > from ? to - 1 : to };
       }
     }
     return { kind: "applied", ops: 1 };

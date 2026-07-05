@@ -1,5 +1,5 @@
 import type { EngineAdapter } from "./EngineAdapter";
-import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "./types";
+import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "./types";
 
 /** The desktop `hit_test` command's DTO (camelCase, crates/hwp-viewer/src/lib.rs `HitDto`). Remapped
  *  into editor-core's snake_case `HitResult` below so both adapters return ONE shape. */
@@ -82,6 +82,21 @@ export class TauriAdapter implements EngineAdapter {
    *  boundary → null, the caller falls back to whole-table). Same null policy as the wasm backend. */
   tableCellAt(page: number, x: number, y: number): Promise<CellHit | null> {
     return this.invoke<CellHit | null>("table_cell_at", { page, x, y });
+  }
+
+  /** Image click-select (issue 049) — the desktop `image_at` command (crates/hwp-viewer, delegates to
+   *  `hwp_session::image_at`). Its `ImageBoxDto` (`{x,y,w,h,section,block}`) matches `ImageBox` verbatim;
+   *  `null` off any image (018 null policy) — SAME shape + null policy as the wasm `imageAt` binding, so
+   *  both backends drive the ImageOverlay identically (043 homomorphic parity). */
+  imageAt(page: number, x: number, y: number): Promise<ImageBox | null> {
+    return this.invoke<ImageBox | null>("image_at", { page, x, y });
+  }
+
+  /** Image box by anchor (issue 049) — the desktop `image_bbox` command (delegates to
+   *  `hwp_session::image_bbox`). Re-queried after a move/resize commit to re-place the overlay +
+   *  apply-verify; `null` when that image isn't on `page`. Matches the wasm `imageBbox` binding verbatim. */
+  imageBbox(page: number, section: number, block: number): Promise<ImageBox | null> {
+    return this.invoke<ImageBox | null>("image_bbox", { page, section, block });
   }
 
   /** Marquee select (issue 021) — the desktop `blocks_in_rect` (own-render px rect). Returns a

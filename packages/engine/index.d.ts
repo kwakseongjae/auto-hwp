@@ -40,6 +40,18 @@ export interface TableBox {
   first_row: number;
 }
 
+/** An anchored image's placed box (own-render px space; issue 049); null on a miss. `x/y/w/h` is the
+ *  image's OWN rectangle (for the 8-handle overlay), `(section, block)` the model anchor SetImageSize /
+ *  MoveImage target. Mirrors hwp-session `ImageBoxDto`. */
+export interface ImageBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  section: number;
+  block: number;
+}
+
 /** A table CELL hit for cell-level marking (own-render px space; issue 023); null on a miss. `row`/`col`
  *  are MODEL-GLOBAL — already global on a split-table fragment (do NOT re-add first_row). `text` is the
  *  cell's current plain text (multi-paragraph cells joined by "\n"), used for the chip snippet label. */
@@ -143,6 +155,13 @@ export class HwpDoc {
   renderPageSvgSanitized(n: number): string;
   hitTest(page: number, x: number, y: number): BlockHit | null;
   tableAt(page: number, x: number, y: number): TableBox | null;
+  /** ANCHORED IMAGE under (x,y) in own-render px for click-select + the 8-handle overlay (issue 049) — the
+   *  topmost image's own box + `(section, block)` anchor; null on a miss. Distinct from `hitTest` (which
+   *  returns the paragraph band that holds the image). */
+  imageAt(page: number, x: number, y: number): ImageBox | null;
+  /** Placed box of the image anchored at `(section, block)` on `page` (issue 049) — for re-placing the
+   *  overlay + apply-verifying a move/resize commit; null when that image isn't on the page. */
+  imageBbox(page: number, section: number, block: number): ImageBox | null;
   /** Table CELL under (x,y) in own-render px for cell-level marking (issue 023); null on a miss. */
   tableCellAt(page: number, x: number, y: number): CellHit | null;
   /** Marquee select: every top-level block whose band intersects the own-render px rect

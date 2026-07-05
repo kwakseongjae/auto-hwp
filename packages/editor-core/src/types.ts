@@ -31,6 +31,20 @@ export interface TableBox {
   first_row: number;
 }
 
+/** An anchored image's placed box in own-render px space (mirrors @tf-hwp/engine ImageBox / hwp-session
+ *  `ImageBoxDto`; issue 049). `x/y/w/h` is the image's OWN placed rectangle (NOT the paragraph band that
+ *  holds it — the 8-handle overlay draws over exactly this box), and `(section, block)` is the model anchor
+ *  the resize (`SetImageSize`) / move (`MoveImage`) Intents target. Field order matches the DTO verbatim so
+ *  both backends pass it through untouched (043 homomorphic parity). null on a miss (018 null policy). */
+export interface ImageBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  section: number;
+  block: number;
+}
+
 /** A table CELL hit for cell-level marking in own-render px space (mirrors @tf-hwp/engine CellHit; issue
  *  023). `row`/`col` are MODEL-GLOBAL — already global on a split-table fragment, so NEVER re-add
  *  `first_row` (§좌표계). `text` is the cell's current plain text, used for the chip snippet label. */

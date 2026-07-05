@@ -84,6 +84,25 @@ export class EditController {
     return this.session.applyBatch([{ intent: "SetTableRowHeights", section, index, heights }]);
   }
 
+  /** 이미지 크기 (issue 049): resize the image at block `index` to `width`×`height` HWPUNIT via `SetImageSize`
+   *  (INTENT-SCHEMA §6.6 — image sizes are HWPUNIT; the op-bus REFUSES a non-positive size). The px→HWPUNIT
+   *  conversion lives in `units.ts` `imageSizeToHwpunit` (single point), so the UI passes already-derived
+   *  HWPUNIT. One undo batch — a single ⌘Z reverts the whole resize. The overlay's pointerup commit. */
+  async resizeImage(section: number, index: number, width: number, height: number): Promise<number> {
+    return this.session.applyBatch([{ intent: "SetImageSize", section, index, width, height }]);
+  }
+
+  /** 이미지 이동 (issue 049): relocate the image from block `from` to block `to` in `section` via `MoveImage`
+   *  (`DeleteBlock` + `InsertImageAt`, batched into ONE undo unit by the op-bus). ⚠️ SEMANTIC (실측): the
+   *  engine's move is an ANCHOR REORDER within the section's block flow — NOT a free 2-D offset. The image is
+   *  anchored to a paragraph block; "move" changes WHICH block position it sits at. The UI must therefore
+   *  resolve the DROP point to a target block index (via `hitTest`) and NOT pretend the image can be placed
+   *  at an arbitrary `(x, y)` (거짓 자유도 금지). `width`/`height` (HWPUNIT) preserve the image's size across
+   *  the move. One undo batch. */
+  async moveImage(section: number, from: number, to: number, width: number, height: number): Promise<number> {
+    return this.session.applyBatch([{ intent: "MoveImage", section, from, to, width, height }]);
+  }
+
   /** 표 추가 (step 2): append a fresh `rows × cols` empty table at the document END via `ApplyContent`
    *  (the existing insert path — no `InsertTableAt` op exists; see the issue note). One undo batch. */
   async insertTable(rows: number, cols: number, section = 0): Promise<number> {

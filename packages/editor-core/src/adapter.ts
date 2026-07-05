@@ -1,4 +1,4 @@
-import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "./types";
+import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "./types";
 
 /// EngineAdapter — the backend seam (SDK-LAYERS L1↔L2). It abstracts the ACTUAL surface a backend
 /// exposes (open / page SVG / hit-test·tableAt / applyIntent / undo·redo / export) so the SAME
@@ -30,6 +30,20 @@ export interface EngineAdapter {
 
   /** Placed table box under a PAGE-LOCAL px point (for marking), or null on a miss. */
   tableAt(page: number, x: number, y: number): Promise<TableBox | null>;
+
+  /** OPTIONAL — the ANCHORED IMAGE under a PAGE-LOCAL px point (issue 049), or null on a miss. Returns the
+   *  TOPMOST image's own placed box `{x,y,w,h}` + its `(section, block)` model anchor (own-render px), so
+   *  the UI can draw the 8-handle move/resize overlay over exactly the image. Distinct from `hitTest` (which
+   *  returns the paragraph BAND that holds the image, not the image's own rect). Backends that can't answer
+   *  OMIT this — the caller then simply has no image overlay (018 null policy: a miss is null, never throw).
+   *  Reference impls: `WasmAdapter` via the engine `imageAt` binding; `TauriAdapter` via `image_at`. */
+  imageAt?(page: number, x: number, y: number): Promise<ImageBox | null>;
+
+  /** OPTIONAL — the placed box of the image anchored at `(section, block)` on `page` (issue 049), or null
+   *  when that image doesn't fall on the queried page. The overlay re-queries this AFTER a move/resize commit
+   *  to RE-PLACE the handles on the moved image AND to APPLY-VERIFY the edit (적용-확인: the box must actually
+   *  reflect the change). Own-render px. Backends that can't answer OMIT this (image overlay disabled). */
+  imageBbox?(page: number, section: number, block: number): Promise<ImageBox | null>;
 
   /** OPTIONAL — the table CELL under a PAGE-LOCAL px point for cell-level marking (issue 023), or null
    *  on a miss (table border / merged-cell boundary → null; the caller falls back to the whole-table

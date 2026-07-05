@@ -253,6 +253,31 @@ impl HwpDoc {
         t.map(|t| serde_json::to_string(&t).map_err(|e| js_err("serialize", &e.to_string()))).transpose()
     }
 
+    /// Click-to-select the ANCHORED IMAGE under `page` at own-render px `(x, y)` — a JSON **string** of the
+    /// topmost image's own placed box (`{x,y,w,h,section,block}`) for the 8-handle move/resize overlay
+    /// (issue 049), or **JS `null`** on a miss (an `Option<String>` → `null`, never the literal `"null"` —
+    /// policy 018). Distinct from `hitTest` (which returns the paragraph BAND that holds the image); this
+    /// reads the image's OWN rectangle from the placed `pg.images` list. Served from the cached placement
+    /// (issue 025) so a click never re-typesets. Additive wasm binding of the existing
+    /// `hwp_session::image_at_placed` (the geometry the desktop `image_at` command already exposes).
+    #[wasm_bindgen(js_name = imageAt)]
+    pub fn image_at(&self, page: u32, x: f64, y: f64) -> Result<Option<String>, JsValue> {
+        let im = self.with_placed(|_doc, placed| hwp_session::image_at_placed(placed, page, x, y))?;
+        im.map(|im| serde_json::to_string(&im).map_err(|e| js_err("serialize", &e.to_string()))).transpose()
+    }
+
+    /// The placed box of the image anchored at `(section, block)` on `page` — a JSON **string** of
+    /// `{x,y,w,h,section,block}` (own-render px), or **JS `null`** when that image isn't on the page (an
+    /// `Option<String>` → `null` — policy 018). The overlay re-queries this AFTER a move/resize commit to
+    /// RE-PLACE the handles on the moved image AND to APPLY-VERIFY the edit (issue 049 §적용-확인). Served
+    /// from the cached placement (issue 025). Additive wasm binding of `hwp_session::image_bbox_placed`
+    /// (the `image_bbox` command's twin — the desktop had it, wasm didn't).
+    #[wasm_bindgen(js_name = imageBbox)]
+    pub fn image_bbox(&self, page: u32, section: usize, block: usize) -> Result<Option<String>, JsValue> {
+        let b = self.with_placed(|_doc, placed| hwp_session::image_bbox_placed(placed, page, section, block))?;
+        b.map(|b| serde_json::to_string(&b).map_err(|e| js_err("serialize", &e.to_string()))).transpose()
+    }
+
     /// Cell-level marking hit test on `page` at own-render px `(x, y)` — a JSON **string** of the table
     /// CELL under the point (`section`/`block`/`row`/`col`/`rows`/`cols`/`text`/box) for cell-precise
     /// anchoring (issue 023), or **JS `null`** on a miss (an `Option<String>` → `null`, never the literal

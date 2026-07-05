@@ -1,6 +1,6 @@
 import type { EngineAdapter } from "./adapter";
 import { Emitter } from "./events";
-import type { Anchor, DocContext, Intent, OpenResult, OutlineItem, PageGeom, RunSpec } from "./types";
+import type { Anchor, DocContext, ImageBox, Intent, OpenResult, OutlineItem, PageGeom, RunSpec } from "./types";
 
 /// DocSession — the document lifecycle facade over an EngineAdapter (SDK-LAYERS L2), DESCENDED from
 /// HwpWorkspace's document/undo/font state. It owns: the open-document metadata (`OpenResult`), the
@@ -160,6 +160,19 @@ export class DocSession {
   /** Page geometry (own-render px) for the ruler, or `null` (out of range / backend can't answer). */
   async pageGeom(page: number): Promise<PageGeom | null> {
     return (await this.adapter.pageGeometry?.(page)) ?? null;
+  }
+
+  /** The anchored IMAGE under a page-local px point (issue 049) — the topmost image's own box + anchor, or
+   *  `null` (no image there / backend can't answer). Read-only — no undo unit. Drives image click-select. */
+  async imageAt(page: number, x: number, y: number): Promise<ImageBox | null> {
+    return (await this.adapter.imageAt?.(page, x, y)) ?? null;
+  }
+
+  /** The placed box of the image anchored at `(section, block)` on `page` (issue 049), or `null` (not on
+   *  the page / backend can't answer). Re-queried after a move/resize commit to re-place the overlay +
+   *  apply-verify the edit (적용-확인). Read-only — no undo unit. */
+  async imageBbox(page: number, section: number, block: number): Promise<ImageBox | null> {
+    return (await this.adapter.imageBbox?.(page, section, block)) ?? null;
   }
 
   /** The CURRENT styled runs of the `(row, col)` cell of the table at `(section, block)`, or of the

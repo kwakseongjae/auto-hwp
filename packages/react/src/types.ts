@@ -9,6 +9,7 @@ export type {
   BlockHit,
   TableBox,
   CellHit,
+  ImageBox,
   Intent,
   Outcome,
   OpenResult,

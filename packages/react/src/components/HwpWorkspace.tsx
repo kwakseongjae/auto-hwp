@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { Box, CellDir, DocContext, EngineAdapter, Intent, MatchBox, OutlineItem, PageGeom, PointerInput, RunSpec, Selection, TableBox } from "@tf-hwp/editor-core";
-import { boundariesToRatios, remapFragmentHeights, appliedReflectsDrag, firstRunStyle, columnWidthMm, setColumnWidthMm, equalizeColumns, imageInsertSize } from "@tf-hwp/editor-core";
+import type { Box, CellDir, DocContext, EngineAdapter, ImageBox, Intent, MatchBox, OutlineItem, PageGeom, PointerInput, RunSpec, Selection, TableBox, XYWH } from "@tf-hwp/editor-core";
+import { boundariesToRatios, remapFragmentHeights, appliedReflectsDrag, firstRunStyle, columnWidthMm, setColumnWidthMm, equalizeColumns, imageInsertSize, imageSizeToHwpunit, appliedReflectsResize } from "@tf-hwp/editor-core";
 import { OutlinePanel } from "./OutlinePanel";
 import { StatusBar } from "./StatusBar";
 import { pageAtReference } from "../outline";
@@ -16,6 +16,7 @@ import { HoverLayer } from "./HoverLayer";
 import { useHover } from "../useHover";
 import { FontPicker } from "./FontPicker";
 import { ColumnResizeOverlay, RowResizeOverlay } from "./ColumnResizeOverlay";
+import { ImageOverlay } from "./ImageOverlay";
 import { TableInsertButton } from "./TableInsertButton";
 import { Ruler } from "./Ruler";
 import { InPlaceCellEditor } from "./InPlaceCellEditor";
@@ -217,6 +218,15 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const editingOn = !!props.enableEditing;
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
   const [pageGeom0, setPageGeom0] = useState<PageGeom | null>(null);
+  // ── issue 049: image move/resize overlay (own-render only) ──────────────────────────────────────────
+  // The selected image = its page + own-render px box + `(section, block)` anchor (from `imageAt`). The
+  // 8-handle ImageOverlay draws over it; a drag lives in the OVERLAY's local state (workspace render 0),
+  // and a commit re-places it via `imageBbox` (적용-확인). `imageCommittingRef` shields the refreshToken
+  // clear during OUR OWN resize/move re-flow so the re-place isn't clobbered (mirrors `tabMoving`/`shading`).
+  const [imageSel, setImageSel] = useState<{ page: number; box: ImageBox } | null>(null);
+  const imageSelRef = useRef<{ page: number; box: ImageBox } | null>(null);
+  imageSelRef.current = imageSel;
+  const imageCommittingRef = useRef(false);
   // Issue 028 floating toolbar surface: hide the toolbar while a pointer gesture (drag/marquee) is in
   // progress, and a monotonic token the "AI에게 전달" button bumps to focus the chat composer.
   const [pointerActive, setPointerActive] = useState(false);
@@ -526,10 +536,13 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     [toast, bumpRefresh],
   );
 
-  // Esc anywhere clears the whole selection + any in-progress marquee (issue 021).
+  // Esc anywhere clears the whole selection + any in-progress marquee (issue 021) + an image selection (049).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") core.selection.clear();
+      if (e.key === "Escape") {
+        core.selection.clear();
+        setImageSel((s) => (s ? null : s));
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -694,6 +707,14 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   useEffect(() => {
     if (tabMovingRef.current || shadingRef.current) return;
     setEditor(null);
+  }, [refreshToken]);
+
+  // issue 049: an edit re-flow (AI apply / manual commit) may move an image, so a stale imageSel box would
+  // float over the wrong spot — clear it. EXCEPTION: OUR OWN resize/move commit re-flows too, but it
+  // re-places the overlay from the fresh `imageBbox` afterwards, so skip the clear while `imageCommitting`.
+  useEffect(() => {
+    if (imageCommittingRef.current) return;
+    setImageSel((s) => (s ? null : s));
   }, [refreshToken]);
 
   const onInsertTable = useCallback(
@@ -1051,6 +1072,134 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       return moved;
     },
     [core, scrollCellIntoView],
+  );
+
+  // ── issue 049: image move/resize commits (own-render only) ──────────────────────────────────────────
+  // Locate the image's placed box across pages — a resize/move may REFLOW it onto a different page, so we
+  // scan (cheap: only on a commit) and return the found page + box so the overlay re-places correctly.
+  const findImageBbox = useCallback(
+    async (section: number, block: number): Promise<{ page: number; box: ImageBox } | null> => {
+      const n = core.session.pages;
+      for (let p = 0; p < n; p++) {
+        try {
+          const b = await core.session.imageBbox(p, section, block);
+          if (b) return { page: p, box: b };
+        } catch {
+          /* keep scanning — a transient page error shouldn't abort the locate */
+        }
+      }
+      return null;
+    },
+    [core],
+  );
+
+  // Resolve the document block under a DROP point (own-engine hit-test), restricted to `section` (an image
+  // move stays within its section). Skips the image overlay (which sits on top) so the page UNDER the
+  // pointer is used. Returns the target block index, or null on a miss / cross-section drop.
+  const resolveDropBlock = useCallback(
+    async (clientX: number, clientY: number, section: number): Promise<number | null> => {
+      let sheet: HTMLElement | null = null;
+      for (const el of window.document.elementsFromPoint(clientX, clientY)) {
+        if ((el as Element).closest("[data-image-overlay]")) continue;
+        const s = (el as Element).closest(".hw-sheet") as HTMLElement | null;
+        if (s && s.dataset.page != null) {
+          sheet = s;
+          break;
+        }
+      }
+      const svg = sheet?.querySelector("svg") as SVGSVGElement | null;
+      if (!sheet || !svg || sheet.dataset.page == null) return null;
+      const page = Number(sheet.dataset.page);
+      const pt = screenToPage(clientX, clientY, svg.getBoundingClientRect(), readViewBox(svg));
+      if (!pt) return null;
+      try {
+        const hit = await adapter.hitTest(page, pt.x, pt.y);
+        if (hit && hit.section === section) return hit.block;
+      } catch {
+        /* miss → no target */
+      }
+      return null;
+    },
+    [adapter],
+  );
+
+  // 이미지 크기 (issue 049): commit the overlay's NEW box (PAGE px) as `SetImageSize` (HWPUNIT via units.ts),
+  // then RE-QUERY the image box and confirm the size actually changed (appliedReflectsResize — 적용-확인 /
+  // false-success 차단). A no-op apply → honest failure toast, never a silent success. The px→HWPUNIT
+  // conversion is the SINGLE `imageSizeToHwpunit` point. `imageCommitting` shields the refreshToken clear so
+  // the re-place below survives the resize re-flow.
+  const commitImageResize = useCallback(
+    (pageBox: XYWH) => {
+      const sel = imageSelRef.current;
+      if (!sel || !canEdit) return;
+      const before = { w: sel.box.w, h: sel.box.h };
+      const intended = { w: pageBox.w, h: pageBox.h };
+      const { width, height } = imageSizeToHwpunit(pageBox.w, pageBox.h);
+      imageCommittingRef.current = true;
+      void (async () => {
+        try {
+          await core.edit.resizeImage(sel.box.section, sel.box.block, width, height);
+          const found = await findImageBbox(sel.box.section, sel.box.block);
+          if (!found) {
+            setImageSel(null);
+            toast("이미지 크기 변경이 반영되지 않았습니다 — 다시 시도하세요");
+            return;
+          }
+          setImageSel(found); // re-place the handles on the (possibly reflowed) image
+          if (!appliedReflectsResize(before, intended, { w: found.box.w, h: found.box.h })) {
+            toast("이미지 크기 변경이 반영되지 않았습니다 — 다시 시도하세요");
+            return;
+          }
+          toast("이미지 크기를 변경했습니다");
+        } catch (e) {
+          if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`크기 변경 실패: ${e}`);
+        } finally {
+          window.setTimeout(() => (imageCommittingRef.current = false), 0);
+        }
+      })();
+    },
+    [core, canEdit, findImageBbox, toast, onTrap],
+  );
+
+  // 이미지 이동 (issue 049): the engine move is an ANCHOR REORDER (실측) — resolve the DROP point to a block
+  // index (`resolveDropBlock` → hitTest) and relocate the image THERE via `MoveImage`, NOT a free offset. A
+  // drop onto the same block / a miss / a cross-section drop is a no-op (just re-place the handles). After a
+  // real move, re-query the LANDED anchor and re-place; a not-found = honest failure toast (적용-확인).
+  const commitImageMove = useCallback(
+    (dropClientX: number, dropClientY: number) => {
+      const sel = imageSelRef.current;
+      if (!sel || !canEdit) return;
+      imageCommittingRef.current = true;
+      void (async () => {
+        try {
+          const from = sel.box.block;
+          const to = await resolveDropBlock(dropClientX, dropClientY, sel.box.section);
+          if (to === null || to === from) {
+            const found = await findImageBbox(sel.box.section, from);
+            if (found) setImageSel(found);
+            return; // no-op relocation (dropped on itself / off-page / cross-section)
+          }
+          const { width, height } = imageSizeToHwpunit(sel.box.w, sel.box.h); // preserve size across the move
+          await core.edit.moveImage(sel.box.section, from, to, width, height);
+          // MoveImage removes at `from` then reinserts at the rebased `to`: the landed index is `to-1` when
+          // moving down (the delete shifted it), else `to`.
+          const landed = to > from ? to - 1 : to;
+          const found = await findImageBbox(sel.box.section, landed);
+          if (!found) {
+            setImageSel(null);
+            toast("이미지 이동이 반영되지 않았습니다 — 다시 시도하세요");
+            return;
+          }
+          setImageSel(found);
+          toast("이미지를 이동했습니다");
+        } catch (e) {
+          if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`이동 실패: ${e}`);
+        } finally {
+          window.setTimeout(() => (imageCommittingRef.current = false), 0);
+        }
+      })();
+    },
+    [core, canEdit, resolveDropBlock, findImageBbox, toast, onTrap],
   );
 
   // ── Issue 045: 찾기/바꾸기 verbs ─────────────────────────────────────────────────────────────────────
@@ -1499,12 +1648,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     [core],
   );
   const onPointerMove = useCallback((c: PageClick) => core.selection.pointerMove(toPointerInput(c)), [core]);
-  const onPointerUp = useCallback(
+  // Detect a double-click (two ups within 400ms, ~same client point) → open the in-place editor.
+  const detectDoubleClick = useCallback(
     (c: PageClick) => {
-      setPointerActive(false); // gesture ended → the toolbar re-appears once the new selection resolves
-      void core.selection.pointerUp(toPointerInput(c));
-      if (!editingOn) return;
-      // Detect a double-click (two ups within 400ms, ~same client point) → open the in-place editor.
       const now = Date.now();
       const prev = lastUpRef.current;
       if (prev && now - prev.t < 400 && Math.hypot(c.client.x - prev.x, c.client.y - prev.y) < 6) {
@@ -1514,7 +1660,41 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         lastUpRef.current = { t: now, x: c.client.x, y: c.client.y };
       }
     },
-    [core, editingOn, openEditorAt],
+    [openEditorAt],
+  );
+  const onPointerUp = useCallback(
+    (c: PageClick) => {
+      setPointerActive(false); // gesture ended → the toolbar re-appears once the new selection resolves
+      // issue 049: an image click SELECTS the image (its own 8-handle overlay), NOT a block. Probe `imageAt`
+      // FIRST (the image sits on top of its paragraph band); on a hit take over the selection + skip the
+      // block-select/double-click. A miss falls through to the normal selection resolve. The overlay owns its
+      // OWN drag (stopPropagation), so a pointerup reaching here is always a fresh click, never a handle drag.
+      if (editingOn && adapter.imageAt) {
+        void (async () => {
+          let img: ImageBox | null = null;
+          try {
+            img = (await adapter.imageAt!(c.page, c.x, c.y)) ?? null;
+          } catch (e) {
+            onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
+          }
+          if (img) {
+            core.selection.clear(); // block selection cleared + drag reset — the image overlay takes over
+            setEditor(null);
+            setImageSel({ page: c.page, box: img });
+            lastUpRef.current = null; // never let an image click count toward a double-click
+            return;
+          }
+          setImageSel((s) => (s ? null : s)); // clicked off any image → drop the image selection
+          void core.selection.pointerUp(toPointerInput(c));
+          detectDoubleClick(c);
+        })();
+        return;
+      }
+      void core.selection.pointerUp(toPointerInput(c));
+      if (!editingOn) return;
+      detectDoubleClick(c);
+    },
+    [core, editingOn, adapter, onTrap, detectDoubleClick],
   );
 
   // ── issue 038: hover pre-highlight + cursor system (FG-09 + FG-06) ────────────────────────────────
@@ -1830,8 +2010,13 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           onPointerMoveCapture={onPanPointerMove}
           onPointerUpCapture={onPanPointerUp}
           onPointerDown={(e) => {
-            // A press on the gray canvas background (outside every page sheet) clears the selection.
-            if (!(e.target as HTMLElement).closest(".hw-sheet")) clearSelection();
+            // A press on the gray canvas background (outside every page sheet) clears the selection. A press
+            // ON the image overlay is that overlay's own gesture (it stops propagation) — this only fires for
+            // a true background click, which also drops the image selection (issue 049).
+            if (!(e.target as HTMLElement).closest(".hw-sheet")) {
+              clearSelection();
+              setImageSel((s) => (s ? null : s));
+            }
           }}
           // issue 039: right-click → context menu (only on a page sheet; §함정 시트 위에서만 기본 메뉴 차단).
           onContextMenu={(e) => void onSheetContextMenu(e)}
@@ -1901,6 +2086,20 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                         width={editTarget.tableBox.w}
                         scale={scale}
                         onCommit={(b) => void onRowCommit(b)}
+                      />
+                    )}
+                    {/* issue 049: the image move/resize 8-handle overlay. A drag lives in the OVERLAY's local
+                        state (workspace render 0 — 030); a commit re-places it from `imageBbox` (적용-확인).
+                        Move is an anchor reorder (resolveDropBlock → MoveImage), resize is SetImageSize with
+                        corner aspect-lock. Only shown when a document is editable (canEdit) so the handles
+                        never promise an edit the backend will refuse. */}
+                    {editingOn && canEdit && imageSel && imageSel.page === page && (
+                      <ImageOverlay
+                        box={imageSel.box}
+                        scale={scale}
+                        onCommitResize={commitImageResize}
+                        onCommitMove={commitImageMove}
+                        onDismiss={() => setImageSel(null)}
                       />
                     )}
                     {/* issue 028: hide the floating toolbar mid-gesture. `pointerActive` is true for the

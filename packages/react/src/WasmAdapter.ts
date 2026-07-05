@@ -1,6 +1,6 @@
 import { HwpDoc, initEngine, resetEngine } from "@tf-hwp/engine";
 import type { EngineAdapter } from "./EngineAdapter";
-import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "./types";
+import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "./types";
 
 type WasmInput = string | URL | Request | BufferSource | WebAssembly.Module;
 
@@ -97,6 +97,20 @@ export class WasmAdapter implements EngineAdapter {
 
   tableCellAt(page: number, x: number, y: number): Promise<CellHit | null> {
     return this.guard((d) => d.tableCellAt(page, x, y) as CellHit | null);
+  }
+
+  /** Image click-select (issue 049) — the engine `imageAt` binding (delegates to hwp-session's
+   *  `image_at_placed`, the SAME geometry the desktop `image_at` command reads). Returns the topmost
+   *  image's own box + `(section, block)` anchor, or `null` off any image (018 null policy). */
+  imageAt(page: number, x: number, y: number): Promise<ImageBox | null> {
+    return this.guard((d) => d.imageAt(page, x, y) as ImageBox | null);
+  }
+
+  /** Image box by anchor (issue 049) — the engine `imageBbox` binding (delegates to `image_bbox_placed`).
+   *  Re-queried after a move/resize commit to re-place the overlay + apply-verify; `null` when that image
+   *  isn't on the queried page. */
+  imageBbox(page: number, section: number, block: number): Promise<ImageBox | null> {
+    return this.guard((d) => d.imageBbox(page, section, block) as ImageBox | null);
   }
 
   blocksInRect(page: number, x0: number, y0: number, x1: number, y1: number): Promise<BlockHit[]> {
