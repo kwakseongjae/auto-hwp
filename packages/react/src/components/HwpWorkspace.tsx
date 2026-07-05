@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { EngineAdapter, Intent, DocContext, PointerInput, PageGeom, Box, CellDir, Selection, TableBox, RunSpec, MatchBox } from "@tf-hwp/editor-core";
+import type { Box, CellDir, DocContext, EngineAdapter, Intent, MatchBox, OutlineItem, PageGeom, PointerInput, RunSpec, Selection, TableBox } from "@tf-hwp/editor-core";
 import { boundariesToRatios, remapFragmentHeights, appliedReflectsDrag, firstRunStyle } from "@tf-hwp/editor-core";
+import { OutlinePanel } from "./OutlinePanel";
+import { StatusBar } from "./StatusBar";
+import { pageAtReference } from "../outline";
 import { runsUnchanged } from "../richedit";
 import { modLabel } from "../platform";
 import { ZOOM_STEP, clampZoom, isEditableTarget, panBy, wheelToZoomFactor, zoomAt } from "../viewport";
@@ -26,6 +29,24 @@ import { readViewBox, screenToPage } from "../coords";
 import { buildFontFaceCss, type FontCatalogEntry } from "../fonts";
 
 const A4_W = 794; // CSS px for 210mm @ 96dpi (mirrors HwpPageView) — the 100% page width.
+
+// issue 046: the outline panel remembers its collapsed state across sessions (localStorage). Guarded so a
+// non-browser / private-mode environment (or a test without storage) degrades to "expanded" silently.
+const OUTLINE_COLLAPSED_KEY = "tf-hwp:outline-collapsed";
+function readOutlineCollapsed(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(OUTLINE_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+function writeOutlineCollapsed(v: boolean): void {
+  try {
+    globalThis.localStorage?.setItem(OUTLINE_COLLAPSED_KEY, v ? "1" : "0");
+  } catch {
+    /* storage unavailable — the in-memory state still works for this session */
+  }
+}
 
 // Arrow key → cell-nav direction (issue 036). Only these four keys navigate; everything else falls through
 // to the document default (native scroll / editor caret).
@@ -132,6 +153,12 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const { core, meta, selection, refreshToken, bumpRefresh } = useHwpEditor(adapter);
   const [zoom, setZoom] = useState(0.9);
   const [status, setStatus] = useState<string>("");
+  // ── issue 046: outline panel + status bar (leftbar/bottombar layout only — 045 owns keydown/toolbar) ──
+  // The document outline (engine headings), the page currently at the top of the viewport (a SCROLL-
+  // POSITION calc, independent of the 037 virtualization visible set), and the panel's persisted collapse.
+  const [outline, setOutline] = useState<OutlineItem[]>([]);
+  const [currentPage, setCurrentPage] = useState(0);
+  const [outlineCollapsed, setOutlineCollapsed] = useState<boolean>(() => readOutlineCollapsed());
   // ── issue 035 pan/zoom viewport ────────────────────────────────────────────────────────────────────
   // The scroll container (`.hw-canvas`) + the transform layer wrapping the pages. Continuous ⌘/pinch zoom
   // mutates `zoomLayer.style.transform` DIRECTLY (0 React renders per tick — see the gesture refs below);
@@ -1265,6 +1292,80 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     el?.scrollIntoView?.({ behavior: "smooth", block: "start" });
   }, []);
 
+  // ── issue 046: fetch the document outline (engine headings) whenever the doc / layout changes ─────────
+  // Read-only query (no undo unit) through the SAME facade both backends share (`session.outline` →
+  // `adapter.outline?`), so the web and the new-shell desktop get identical headings. A backend that omits
+  // `outline` (or a doc with none) yields `[]` → the panel shows the page-list fallback (§함정 빈 패널 금지).
+  useEffect(() => {
+    if (!meta) {
+      setOutline([]);
+      return;
+    }
+    let cancelled = false;
+    core.session
+      .outline()
+      .then((items) => {
+        if (!cancelled) setOutline(items);
+      })
+      .catch(() => {
+        if (!cancelled) setOutline([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [meta, refreshToken, core]);
+
+  // ── issue 046: current-page tracking = a SCROLL-POSITION calc (NOT the 037 visible set — §함정) ───────
+  // A rAF-throttled scroll listener reads each page WRAPPER's top (every page has an exact-height wrapper,
+  // real sheet or virtualization placeholder) and picks the last one at/above a reference line near the
+  // viewport top (pure `pageAtReference`). This drives BOTH the outline highlight and the status-bar page,
+  // and is correct even while pages are virtualized. It writes only `currentPage` (a cheap scalar) and
+  // dedups, so a scroll never churns the heavy sheets (030 discipline).
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !meta) {
+      setCurrentPage(0);
+      return;
+    }
+    let raf = 0;
+    const compute = () => {
+      raf = 0;
+      const cRect = canvas.getBoundingClientRect();
+      const wraps = canvas.querySelectorAll<HTMLElement>(".hw-sheet-wrap[data-page]");
+      if (wraps.length === 0) return;
+      const rows = Array.from(wraps, (w) => ({ page: Number(w.dataset.page), top: w.getBoundingClientRect().top - cRect.top }));
+      const ref = cRect.height * 0.3; // a reference line ~30% down from the viewport top
+      const p = pageAtReference(rows, ref);
+      setCurrentPage((prev) => (prev === p ? prev : p));
+    };
+    const onScroll = () => {
+      if (!raf) raf = requestAnimationFrame(compute);
+    };
+    compute(); // seed immediately (before the first scroll)
+    canvas.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      canvas.removeEventListener("scroll", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [meta, refreshToken, zoom]);
+
+  // Toggle + persist the outline panel's collapsed state (issue 046: 접기 상태 기억, localStorage).
+  const toggleOutlineCollapse = useCallback(() => {
+    setOutlineCollapsed((c) => {
+      const next = !c;
+      writeOutlineCollapsed(next);
+      return next;
+    });
+  }, []);
+
+  // The status-bar selection summary reuses the ANCHOR label (no new arithmetic): a single selection shows
+  // its label ("3행 2열" / 문단 …); a multi-selection shows the count. Null when nothing is selected.
+  const selectionSummary = useMemo<string | null>(() => {
+    if (selection.length === 0) return null;
+    if (selection.length === 1) return selection[0].anchor.label;
+    return `${selection.length}개 선택`;
+  }, [selection]);
+
   return (
     <div className={`hw-workspace ${props.className ?? ""}`}>
       {/* Screen font-face + alias (issue 022 §3): map every document font name to the selected face so
@@ -1349,6 +1450,19 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       )}
 
       <div className="hw-body">
+        {/* issue 046: the left, collapsible outline nav. Only the hw-body LEFT slot (045 owns keydown /
+            top bar). Clicking an item reuses `jumpToPage` (the EXISTING scroll source — 035 줌 정합), and
+            the current-page highlight rides the scroll-position `currentPage` (037 무관). */}
+        {meta && (
+          <OutlinePanel
+            items={outline}
+            pageCount={meta.pages}
+            currentPage={currentPage}
+            collapsed={outlineCollapsed}
+            onToggleCollapse={toggleOutlineCollapse}
+            onJump={jumpToPage}
+          />
+        )}
         <div
           ref={canvasRef}
           className={`hw-canvas${panMode ? " hw-pan" : ""}${panning ? " hw-panning" : ""}`}
@@ -1486,6 +1600,19 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           focusToken={aiFocusToken}
         />
       </div>
+
+      {/* issue 046: the thin bottom status bar (hw-body BOTTOM slot). Current page/total = the scroll
+          -position `currentPage`; the selection summary reuses the anchor label; the edit badge tracks
+          `enableEditing`. Zoom % is intentionally omitted (owned by the top toolbar — 중복 금지). */}
+      {meta && (
+        <StatusBar
+          currentPage={currentPage}
+          pageCount={meta.pages}
+          selectionSummary={selectionSummary}
+          editing={editingOn}
+          canEdit={canEdit}
+        />
+      )}
 
       {/* issue 039: the right-click context menu. Its actions are ALL delegations to existing paths —
           텍스트 편집 → the 032 in-place editor (openEditorAt), 굵게/배경색 → the shared `fmtActions`

@@ -1,6 +1,6 @@
 import { HwpDoc, initEngine, resetEngine } from "@tf-hwp/engine";
 import type { EngineAdapter } from "./EngineAdapter";
-import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, Intent, OpenResult, Outcome, PageGeom, ReplaceResult, RunSpec, TableBox } from "./types";
+import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "./types";
 
 type WasmInput = string | URL | Request | BufferSource | WebAssembly.Module;
 
@@ -117,6 +117,14 @@ export class WasmAdapter implements EngineAdapter {
 
   blockRuns(section: number, block: number, row?: number, col?: number): Promise<RunSpec[]> {
     return this.guard((d) => d.blockRuns(section, block, row ?? null, col ?? null) as RunSpec[]);
+  }
+
+  /** Document outline (issue 046) — the engine `outline()` binding (delegates to hwp-session's outline,
+   *  the SAME heading source the desktop `doc_outline` command uses). Returns an EMPTY ARRAY when the
+   *  document has no detected heading (never null — 018), so the panel's page-list fallback is a UI
+   *  decision, not a null check. */
+  outline(): Promise<OutlineItem[]> {
+    return this.guard((d) => d.outline() as OutlineItem[]);
   }
 
   /** WYSIWYG GLYPH caret (engine half) — the rhwp glyph-box `HitTest` intent via the applyIntent JSON

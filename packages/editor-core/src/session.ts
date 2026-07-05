@@ -1,6 +1,6 @@
 import type { EngineAdapter } from "./adapter";
 import { Emitter } from "./events";
-import type { Anchor, DocContext, Intent, OpenResult, PageGeom, RunSpec } from "./types";
+import type { Anchor, DocContext, Intent, OpenResult, OutlineItem, PageGeom, RunSpec } from "./types";
 
 /// DocSession — the document lifecycle facade over an EngineAdapter (SDK-LAYERS L2), DESCENDED from
 /// HwpWorkspace's document/undo/font state. It owns: the open-document metadata (`OpenResult`), the
@@ -167,6 +167,13 @@ export class DocSession {
    *  PRESERVE run styling (issue 027 §함정). `[]` when the backend can't answer / the target is empty. */
   async runsAt(section: number, block: number, row?: number, col?: number): Promise<RunSpec[]> {
     return (await this.adapter.blockRuns?.(section, block, row, col)) ?? [];
+  }
+
+  /** The document outline (issue 046) — the top-level headings for the left nav panel, or `[]` when the
+   *  document has no detected heading / the backend can't answer (the UI then falls back to a page list).
+   *  Read-only — no undo unit. */
+  async outline(): Promise<OutlineItem[]> {
+    return (await this.adapter.outline?.()) ?? [];
   }
 
   /** Build the read-only DocContext handed to the host AI callback (meta + the marked anchors). */

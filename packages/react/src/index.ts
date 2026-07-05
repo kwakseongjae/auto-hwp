@@ -33,6 +33,16 @@ export type { FindBarProps } from "./components/FindBar";
 export { FindMatchOverlay } from "./components/FindMatchOverlay";
 export type { FindMatchOverlayProps } from "./components/FindMatchOverlay";
 
+// Issue 046 — the outline nav (left, collapsible) + the bottom status bar (page X/N · selection · edit
+// badge). Individually importable (a host can compose them without HwpWorkspace); the pure helpers
+// (activeOutlineIndex / pageAtReference) drive the current-position highlight from a SCROLL-POSITION calc
+// that is independent of the 037 virtualization visible set.
+export { OutlinePanel } from "./components/OutlinePanel";
+export type { OutlinePanelProps } from "./components/OutlinePanel";
+export { StatusBar } from "./components/StatusBar";
+export type { StatusBarProps } from "./components/StatusBar";
+export { activeOutlineIndex, pageAtReference } from "./outline";
+
 // Issue 027 — editing-parity opt-in components. Each is individually importable and drives a single
 // @tf-hwp/editor-core command; a host can compose them WITHOUT HwpWorkspace (see the README recipe).
 export { ColumnResizeOverlay, RowResizeOverlay } from "./components/ColumnResizeOverlay";
@@ -164,6 +174,7 @@ export type {
   Intent,
   Outcome,
   OpenResult,
+  OutlineItem,
   DocContext,
   OnAiRequest,
   IntentCard,

@@ -57,6 +57,17 @@ export interface CellHit {
   h: number;
 }
 
+/** One heading in the document outline (issue 046): where it lives in the model (`section`/`block`), its
+ *  `level` (1 = □/■ section label, 2 = numbered section-band table), the heading `text`, and the 0-based
+ *  `page` it starts on. Mirrors hwp-session `OutlineItem`. */
+export interface OutlineItem {
+  section: number;
+  block: number;
+  level: number;
+  text: string;
+  page: number;
+}
+
 /** Page geometry in own-render px (= HWPUNIT/75): page box + printable-area margins, for the ruler
  *  (issue 027). Mirrors hwp-session `PageGeom`. */
 export interface PageGeom {
@@ -150,6 +161,10 @@ export class HwpDoc {
    *  paragraph at `(section,block)` when `row`/`col` are omitted — read to PRESERVE run styling on a
    *  plain-text edit (issue 027). Multi-paragraph cells join with a `{text:"\n"}` run. */
   blockRuns(section: number, block: number, row?: number | null, col?: number | null): RunSpec[];
+  /** Document outline (issue 046) — the top-level headings each with `{section, block, level, text,
+   *  page}`. Returns an EMPTY ARRAY when the document has no detected heading (caller falls back to a
+   *  page list). The SAME heading source the desktop `doc_outline` command uses. */
+  outline(): OutlineItem[];
   applyIntent(intent: object | string): Outcome;
   undo(): boolean;
   redo(): boolean;

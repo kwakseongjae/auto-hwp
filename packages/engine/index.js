@@ -208,6 +208,13 @@ export class HwpDoc {
   blockRuns(section, block, row, col) {
     return this.#call((r) => JSON.parse(r.blockRuns(section, block, row ?? null, col ?? null)));
   }
+  /** Document outline (issue 046) — the top-level headings each with `{section, block, level, text,
+   *  page}` (0-based `page`), as an `OutlineItem[]`. Returns an EMPTY ARRAY when the document has no
+   *  detected heading (the caller then falls back to a plain page list). The SAME heading source the
+   *  desktop `doc_outline` command uses, so both shells agree. */
+  outline() {
+    return this.#call((r) => JSON.parse(r.outline())); // wasm returns "[]" when there is no heading
+  }
   /** Apply an Intent (schema v0). Accepts an object or a JSON string; returns the parsed Outcome. */
   applyIntent(intent) {
     const s = typeof intent === 'string' ? intent : JSON.stringify(intent);

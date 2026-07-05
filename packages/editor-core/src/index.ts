@@ -77,6 +77,7 @@ export type {
   OnAiRequest,
   OpenResult,
   Outcome,
+  OutlineItem,
   PageGeom,
   PointerInput,
   ReplaceResult,

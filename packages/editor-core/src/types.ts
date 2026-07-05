@@ -69,6 +69,19 @@ export interface RunSpec {
   font?: string;
 }
 
+/** One heading in the document outline (issue 046) — the left nav panel's item. `section`/`block` are the
+ *  MODEL anchor (for a future jump-to-block); `level` is 1 (□/■ section label) or 2 (numbered section-band
+ *  table); `text` is the heading label; `page` is the 0-based page it starts on (drives click-to-scroll +
+ *  current-position highlight). Mirrors @tf-hwp/engine's `OutlineItem` / hwp-session `OutlineItem` verbatim
+ *  (both adapters return this SAME shape — 043 homomorphic parity). */
+export interface OutlineItem {
+  section: number;
+  block: number;
+  level: number;
+  text: string;
+  page: number;
+}
+
 /** Page geometry in own-render PAGE px (= HWPUNIT/75) — the page box + printable-area margins, for the
  *  ruler (issue 027). Mirrors @tf-hwp/engine's `pageGeometry` / hwp-session `PageGeom`. */
 export interface PageGeom {

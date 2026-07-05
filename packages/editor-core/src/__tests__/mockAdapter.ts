@@ -1,5 +1,6 @@
 import type { EngineAdapter } from "../adapter";
 import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, Intent, OpenResult, Outcome, PageGeom, ReplaceResult, RunSpec, TableBox } from "../types";
+import type { BlockHit, CaretRect, CellHit, HitResult, Intent, OpenResult, Outcome, OutlineItem, PageGeom, RunSpec, TableBox } from "../types";
 
 /** A headless EngineAdapter for node tests: canned geometry resolvers + a spy-able applyIntent/undo.
  *  No wasm, no DOM — pure in-memory. Mirrors @tf-hwp/react's test MockAdapter so the same selection
@@ -45,6 +46,8 @@ export class MockAdapter implements EngineAdapter {
       find?: FindMatch[] | ((query: string, opts: FindOptions) => FindMatch[]);
       /** Explicit replaced-count for `replace`; default = the current `find` match count (all) or min(1,n). */
       replaceCount?: number;
+      /** Canned document outline for `outline` (issue 046). Omit to OMIT the method (page-list fallback). */
+      outline?: OutlineItem[];
       pages?: number;
     } = {},
   ) {
@@ -67,6 +70,7 @@ export class MockAdapter implements EngineAdapter {
   private matchesFor(query: string, opts: FindOptions): FindMatch[] {
     const f = this.opts.find;
     return (typeof f === "function" ? f(query, opts) : f) ?? [];
+    if (!("outline" in this.opts)) (this as { outline?: unknown }).outline = undefined;
   }
 
   async open(_bytes: Uint8Array, name?: string): Promise<OpenResult> {
@@ -124,6 +128,9 @@ export class MockAdapter implements EngineAdapter {
     const n = this.matchesFor(query, opts).length;
     const replaced = this.opts.replaceCount ?? (opts.all ? n : Math.min(1, n));
     return { replaced, pages: this.opts.pages ?? 1 };
+  }
+  async outline(): Promise<OutlineItem[]> {
+    return this.opts.outline ?? [];
   }
   async applyIntent(intent: Intent): Promise<Outcome> {
     this.applied.push(intent);

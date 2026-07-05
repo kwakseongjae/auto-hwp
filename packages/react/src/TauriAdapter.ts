@@ -1,5 +1,5 @@
 import type { EngineAdapter } from "./EngineAdapter";
-import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, Intent, OpenResult, Outcome, PageGeom, ReplaceResult, RunSpec, TableBox } from "./types";
+import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "./types";
 
 /** The desktop `hit_test` command's DTO (camelCase, crates/hwp-viewer/src/lib.rs `HitDto`). Remapped
  *  into editor-core's snake_case `HitResult` below so both adapters return ONE shape. */
@@ -115,6 +115,14 @@ export class TauriAdapter implements EngineAdapter {
    *  op-bus's paragraph target) when absent, mirroring the wasm binding's `row ?? null`. */
   blockRuns(section: number, block: number, row?: number, col?: number): Promise<RunSpec[]> {
     return this.invoke<RunSpec[]>("get_block_runs", { section, block, row: row ?? null, col: col ?? null });
+  }
+
+  /** Document outline (issue 046) — the desktop `doc_outline` command (crates/hwp-viewer, delegates to
+   *  `hwp_session::outline`). Its `OutlineItem` DTO (`{section, block, level, text, page}`) matches the
+   *  wasm binding verbatim, and the command returns a `Vec` (an EMPTY ARRAY on an empty doc, never null —
+   *  018), so both backends hand `HwpWorkspace` the SAME shape (043 homomorphic parity). */
+  outline(): Promise<OutlineItem[]> {
+    return this.invoke<OutlineItem[]>("doc_outline");
   }
 
   /** WYSIWYG GLYPH caret (engine half) — the desktop `hit_test` command (crates/hwp-viewer, same rhwp

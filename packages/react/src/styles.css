@@ -64,10 +64,55 @@
 .hw-fontpicker-upload:disabled { opacity: 0.4; cursor: default; }
 .hw-fontpicker-current { font-size: 11px; color: var(--hw-muted); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* ---- body: canvas + chat ---- */
+/* ---- body: outline + canvas + chat ---- */
 .hw-body { display: flex; flex: 1; min-height: 0; }
 .hw-canvas { flex: 1; overflow: auto; padding: 20px; }
 .hw-empty-canvas { color: var(--hw-muted); font-size: 13px; padding: 40px; text-align: center; }
+
+/* ---- outline panel (issue 046) — left, collapsible document-structure nav ---- */
+.hw-outline {
+  flex: 0 0 auto; width: 220px; display: flex; flex-direction: column; min-height: 0;
+  background: var(--hw-panel); border-right: 1px solid var(--hw-border);
+}
+.hw-outline-collapsed { width: 40px; align-items: center; }
+.hw-outline-head {
+  display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+  border-bottom: 1px solid var(--hw-border);
+}
+.hw-outline-title { font-size: 12px; font-weight: 600; color: var(--hw-muted); flex: 1; }
+.hw-outline-collapse, .hw-outline-expand {
+  font: inherit; font-size: 14px; line-height: 1; color: var(--hw-muted); cursor: pointer;
+  border: 1px solid transparent; border-radius: 6px; background: none; padding: 4px 7px;
+}
+.hw-outline-collapse:hover, .hw-outline-expand:hover { background: #f0f1f3; border-color: #cdd0d6; }
+.hw-outline-expand { margin-top: 8px; }
+.hw-outline-list { overflow: auto; padding: 6px 6px 12px; display: flex; flex-direction: column; }
+.hw-outline-item {
+  display: flex; align-items: baseline; gap: 8px; width: 100%; text-align: left;
+  font: inherit; font-size: 12px; color: var(--hw-text); cursor: pointer;
+  border: none; background: none; border-radius: 6px; padding: 6px 8px;
+}
+.hw-outline-item:hover { background: #f0f1f3; }
+.hw-outline-l2 { padding-left: 20px; color: var(--hw-muted); }
+.hw-outline-active { background: #e8effc; color: var(--hw-accent); font-weight: 600; }
+.hw-outline-active:hover { background: #dfe9fb; }
+.hw-outline-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hw-outline-page { font-size: 11px; color: var(--hw-muted); flex: 0 0 auto; }
+.hw-outline-active .hw-outline-page { color: var(--hw-accent); }
+
+/* ---- status bar (issue 046) — thin bottom bar (page X/N · selection · edit badge; NO zoom) ---- */
+.hw-statusbar {
+  display: flex; align-items: center; gap: 14px; height: 26px; padding: 0 14px; flex: 0 0 auto;
+  background: var(--hw-panel); border-top: 1px solid var(--hw-border);
+  font-size: 12px; color: var(--hw-muted);
+}
+.hw-statusbar-page { font-variant-numeric: tabular-nums; }
+.hw-statusbar-sel { color: var(--hw-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; }
+.hw-statusbar-spacer { flex: 1; }
+.hw-statusbar-mode {
+  font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #eef0f3; color: var(--hw-muted);
+}
+.hw-statusbar-mode-on { background: #e8effc; color: var(--hw-accent); }
 
 /* issue 035 — the zoom TRANSFORM layer. `min-width: max-content` lets a zoomed-IN page (wider than the
  * viewport) overflow SYMMETRICALLY so BOTH scroll axes reach the whole sheet (the classic flex-center

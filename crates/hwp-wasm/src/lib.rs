@@ -331,6 +331,19 @@ impl HwpDoc {
         serde_json::to_string(&runs).map_err(|e| js_err("serialize", &e.to_string()))
     }
 
+    /// Document outline for the left nav panel (issue 046) — the gov-doc's top-level headings (□/■-prefixed
+    /// section labels + numbered section-band tables), each with the 0-based `page` it starts on, as a JSON
+    /// **string** of an `OutlineItem[]` (`{section, block, level, text, page}`). Returns the JSON **`"[]"`**
+    /// for a document with no detected heading (an EMPTY ARRAY, never null — the caller always gets an
+    /// iterable and falls back to a plain page list). Additive wasm binding of the existing
+    /// [`hwp_session::outline`] — the SAME heading source the desktop `doc_outline` command uses, so cell
+    /// text is never mistaken for a heading (issue §셀 텍스트 오인 금지) and both shells agree.
+    #[wasm_bindgen(js_name = outline)]
+    pub fn outline(&self) -> Result<String, JsValue> {
+        let items = hwp_session::outline(self.doc()?);
+        serde_json::to_string(&items).map_err(|e| js_err("serialize", &e.to_string()))
+    }
+
     /// Apply one Intent-JSON envelope (schema v0, issue 008) via the SAME op-bus the desktop uses
     /// ([`hwp_mcp::apply_intent_json`]) — Propose/Commit/Undo/Redo and every edit variant included.
     /// Returns a JSON `Outcome` (`{kind, …}`). Throws a `{code, message}` error on a bad envelope or a

@@ -1,4 +1,4 @@
-import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, Intent, OpenResult, Outcome, PageGeom, ReplaceResult, RunSpec, TableBox } from "./types";
+import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "./types";
 
 /// EngineAdapter — the backend seam (SDK-LAYERS L1↔L2). It abstracts the ACTUAL surface a backend
 /// exposes (open / page SVG / hit-test·tableAt / applyIntent / undo·redo / export) so the SAME
@@ -97,6 +97,12 @@ export interface EngineAdapter {
    *  the live page count. Backends that omit `find` omit this too. Reference impls: `WasmAdapter` via the
    *  `Replace` Intent, `TauriAdapter` via the desktop `replace_text` command. */
   replace?(query: string, replacement: string, opts: FindReplaceOptions): Promise<ReplaceResult>;
+  /** OPTIONAL — the document outline (issue 046): the top-level headings each with `{section, block,
+   *  level, text, page}` for the left nav panel. Resolves to an EMPTY ARRAY when the document has no
+   *  detected heading (never null — the caller falls back to a plain page list). Both real backends answer
+   *  (WasmAdapter via the engine `outline()` binding; TauriAdapter via the `doc_outline` command) with the
+   *  SAME shape; a backend that can't OMITS the method → the panel shows the page-list fallback. */
+  outline?(): Promise<OutlineItem[]>;
 
   /** Apply an Intent (schema v0). One undo unit per accepted Intent. */
   applyIntent(intent: Intent): Promise<Outcome>;

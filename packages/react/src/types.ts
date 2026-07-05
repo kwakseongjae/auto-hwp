@@ -12,6 +12,7 @@ export type {
   Intent,
   Outcome,
   OpenResult,
+  OutlineItem,
   DocContext,
   OnAiRequest,
   IntentCard,

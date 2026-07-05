@@ -1,5 +1,6 @@
 import type { EngineAdapter } from "../EngineAdapter";
 import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, Intent, OpenResult, Outcome, PageGeom, ReplaceResult, RunSpec, TableBox } from "../types";
+import type { BlockHit, CellHit, Intent, OpenResult, Outcome, OutlineItem, PageGeom, RunSpec, TableBox } from "../types";
 
 /** A headless EngineAdapter for tests: canned SVG (optionally malicious, to exercise the R7 gate), a
  *  fixed table hit, and a spy-able applyIntent. No wasm — pure in-memory. */
@@ -45,6 +46,8 @@ export class MockAdapter implements EngineAdapter {
       /** Canned caret rect for `caretRect` (issue 041/045 geometry), or a `(page, node, offset)` resolver.
        *  Omit to OMIT the method (a backend that can't locate matches → count/nav only). */
       caret?: CaretRect | null | ((page: number, node: number, offset: number) => CaretRect | null);
+      /** Canned document outline for `outline` (issue 046). Omit to OMIT the method (page-list fallback). */
+      outline?: OutlineItem[];
       pages?: number;
     } = {},
   ) {
@@ -60,6 +63,7 @@ export class MockAdapter implements EngineAdapter {
       (this as { find?: unknown }).find = undefined;
       (this as { replace?: unknown }).replace = undefined;
     }
+    if (!("outline" in this.opts)) (this as { outline?: unknown }).outline = undefined;
     this.liveCol = this.opts.colBoundaries ? this.opts.colBoundaries.slice() : null;
     this.liveRow = this.opts.rowBoundaries ? this.opts.rowBoundaries.slice() : null;
   }
@@ -129,6 +133,9 @@ export class MockAdapter implements EngineAdapter {
     const n = this.matchesFor(query, opts).length;
     const replaced = this.opts.replaceCount ?? (opts.all ? n : Math.min(1, n));
     return { replaced, pages: this.opts.pages ?? 1 };
+  }
+  async outline(): Promise<OutlineItem[]> {
+    return this.opts.outline ?? [];
   }
   async applyIntent(intent: Intent): Promise<Outcome> {
     this.applied.push(intent);
