@@ -42,6 +42,16 @@
 | [021](021-selection-ux-v2.md) | 선택 UX v2 — 클릭=교체 / ⌘·Ctrl=토글 / 러버밴드 마퀴 | **done** | QA-P1 | 0cb666b · blocksInRect + vitest 14 + Playwright 갱신 통과 |
 | [022](022-font-system-v1.md) | 폰트 시스템 v1 — OFL 카탈로그 8종+업로드+삼위일치 (**교차골든 26p 바이트동일**) | **done** | QA-P1 | cb9f7b3 · 셰이퍼 +8.8KB, 라이선스 표 전수 OFL |
 
+## 로드맵 R11 — 라운드 11 (2026-07-05, SDK 승격 배치 A)
+
+감사표(TAURI-CONVERGENCE.md) SDK 승격 8종 중 1~3순위. 승격 = 웹 즉시 + 신 셸(044) 데스크톱 자동 획득.
+HwpWorkspace 영역 소유권: 045=키보드 이펙트·상단 바 / 046=좌측 사이드바·하단 상태바 컨테이너.
+
+| # | 제목 | 상태 | 단계 | 비고 |
+|---|------|------|------|------|
+| [045](045-find-replace-sdk.md) | 찾기/바꾸기 — ⌘F 바·하이라이트·스크롤-투-매치·run 보존 replace | open | R11-P0 | 엔진 기존 Find/Replace 재사용(신작 금지 원칙) |
+| [046](046-outline-statusbar-sdk.md) | 아웃라인 패널 + 상태바 (quick win S+S) | open | R11-P1 | wasm 파리티 실측(필요 시 additive 바인딩+게이트) |
+
 ## 로드맵 R10 — 라운드 10 (2026-07-04, Tauri 셸 수렴)
 
 방향(사용자 승인): 데스크톱 셸이 @tf-hwp/react HwpWorkspace를 소비 → UI 코드베이스 1개, R5~R8
