@@ -6,8 +6,12 @@ import {
   boundariesToRatios,
   boundariesToWidths,
   columnWidthMm,
+  DEFAULT_IMAGE_WIDTH_MM,
   equalizeColumns,
+  HWPUNIT_PER_MM,
   HWPUNIT_PER_PX,
+  imageInsertSize,
+  mmToHwpUnit,
   mmToPx,
   pxToMm,
   remapFragmentHeights,
@@ -86,6 +90,34 @@ describe("units — row-height override math (issue 031)", () => {
   it("remapFragmentHeights never overflows totalRows (fragment longer than the tail is truncated)", () => {
     // firstRow near the end: only the rows that fit are written, no out-of-range indices.
     expect(remapFragmentHeights([0, 40, 80, 120], 3, 4)).toEqual([0, 0, 0, 3000]);
+  });
+});
+
+describe("units — image insert size math (issue 050, §4.5 single point)", () => {
+  it("HWPUNIT_PER_MM is 7200/25.4 and mmToHwpUnit rounds to a whole unit", () => {
+    expect(HWPUNIT_PER_MM).toBeCloseTo(283.4645, 3);
+    // 120mm → 34016 HWPUNIT (the default display width).
+    expect(mmToHwpUnit(DEFAULT_IMAGE_WIDTH_MM)).toBe(34016);
+    expect(Number.isInteger(mmToHwpUnit(37.3))).toBe(true); // always whole units (no fractional HWPUNIT)
+  });
+
+  it("imageInsertSize preserves the natural ASPECT at the default display width", () => {
+    // A 2:1 (wide) image at 120mm → 60mm tall. In HWPUNIT: 34016 × 17008.
+    const box = imageInsertSize(1000, 500);
+    expect(box.width).toBe(mmToHwpUnit(120));
+    expect(box.height).toBe(mmToHwpUnit(60));
+    // aspect ratio is preserved (width:height == naturalW:naturalH).
+    expect(box.width / box.height).toBeCloseTo(2, 2);
+  });
+
+  it("imageInsertSize honours a custom display width + falls back to 4:3 on a degenerate natural size", () => {
+    const box = imageInsertSize(800, 800, 90); // square at 90mm → 90×90mm
+    expect(box.width).toBe(mmToHwpUnit(90));
+    expect(box.height).toBe(mmToHwpUnit(90));
+    // natural size 0 (couldn't read intrinsic dims) → 4:3 box at the default width (never 0×0).
+    const fallback = imageInsertSize(0, 0);
+    expect(fallback.width).toBe(mmToHwpUnit(120));
+    expect(fallback.height).toBe(mmToHwpUnit(90)); // 120 × 3/4
   });
 });
 
@@ -268,6 +300,27 @@ describe("EditController manual commands (issue 027) — each = ONE Intent = ONE
     const { core, adapter } = await openCore();
     await core.edit.insertRows(0, 1, 1, 0, 0);
     expect(adapter.applied[0]).toEqual({ intent: "TableInsertRows", section: 0, index: 1, at: 1, count: 1, cols: 1 });
+  });
+
+  it("이미지 삽입 (issue 050) commits ONE InsertImage intent (bytes-based) as one undo batch", async () => {
+    const { core, adapter } = await openCore();
+    const b64 = "iVBORw0KGgoAAAA=="; // a base64 blob — the ENGINE validates the magic bytes, not the core
+    const size = imageInsertSize(1000, 500); // 34016 × 17008 HWPUNIT
+    // Drop AFTER block 2 → the intent carries `block: 2`; the engine inserts after it.
+    await core.edit.insertImage(b64, 0, 2, size);
+    expect(adapter.applied).toEqual([
+      { intent: "InsertImage", section: 0, block: 2, data_b64: b64, width: size.width, height: size.height },
+    ]);
+    expect(core.session.canUndo()).toBe(true);
+    await core.session.undo();
+    expect(adapter.undos).toBe(1); // one op → one undo removes the image
+    expect(core.session.canUndo()).toBe(false);
+  });
+
+  it("이미지 삽입 with no anchor sends block:null (append at the section END — upload-with-no-selection)", async () => {
+    const { core, adapter } = await openCore();
+    await core.edit.insertImage("Zm9v", 0, null, { width: 1000, height: 750 });
+    expect(adapter.applied[0]).toEqual({ intent: "InsertImage", section: 0, block: null, data_b64: "Zm9v", width: 1000, height: 750 });
   });
 
   it("step3 setPageMargins passes mm through to SetPageMargins (document-wide)", async () => {

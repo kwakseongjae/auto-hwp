@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Box, CellDir, DocContext, EngineAdapter, Intent, MatchBox, OutlineItem, PageGeom, PointerInput, RunSpec, Selection, TableBox } from "@tf-hwp/editor-core";
-import { boundariesToRatios, remapFragmentHeights, appliedReflectsDrag, firstRunStyle, columnWidthMm, setColumnWidthMm, equalizeColumns } from "@tf-hwp/editor-core";
+import { boundariesToRatios, remapFragmentHeights, appliedReflectsDrag, firstRunStyle, columnWidthMm, setColumnWidthMm, equalizeColumns, imageInsertSize } from "@tf-hwp/editor-core";
 import { OutlinePanel } from "./OutlinePanel";
 import { StatusBar } from "./StatusBar";
 import { pageAtReference } from "../outline";
@@ -142,8 +142,20 @@ export interface HwpWorkspaceProps {
    *  A DESKTOP host supplies this to route the output to a native save dialog + atomic write instead of
    *  a browser download (the `<a download>` web convention must not leak into the Tauri shell). */
   onExport?: (data: Uint8Array | string, filename: string, mime: string) => void | Promise<void>;
+  /** Opt-in (issue 050): a DOCUMENT file (.hwp/.hwpx) was DROPPED onto the page area. The workspace opens
+   *  documents from `props.document` (host-controlled), so it does NOT open a dropped doc itself — it hands
+   *  the bytes to the host here (which sets `document`). When omitted, a document drop shows an honest
+   *  "상단에서 파일 열기" toast. An IMAGE drop (PNG/JPEG) is ALWAYS handled in place (inserted), independent
+   *  of this prop — the drop branch rule (문서=열기 / 이미지=삽입) lives in the workspace. */
+  onOpenFile?: (bytes: Uint8Array, name: string) => void | Promise<void>;
   className?: string;
 }
+
+/** Drop-branch classifiers (issue 050): an IMAGE file (PNG/JPEG) is inserted in place; a DOCUMENT file
+ *  (.hwp/.hwpx) is forwarded to the host as an OPEN; anything else is refused honestly. Matched on the
+ *  MIME type first (a Finder drag carries it) then the extension (a bare filename). */
+const isImageFile = (f: File): boolean => /^image\/(png|jpe?g)$/i.test(f.type) || /\.(png|jpe?g)$/i.test(f.name);
+const isDocFile = (f: File): boolean => /\.(hwpx?|HWPX?)$/i.test(f.name);
 
 /** Map a page-local click (client-px converted to page-px in HwpPageView) to the core's DOM-free pointer
  *  input. The client point rides along ONLY for the zoom-independent drag threshold (§함정). */
@@ -241,6 +253,12 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // A hidden native color input the context menu's 배경색 item triggers — so that item delegates to the
   // SAME shadeCellRange action as the 028 toolbar's 배경 swatch (신규 액션 0), just entered via a menu click.
   const shadeInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Issue 050: 이미지 삽입 (드롭 존 + 업로드 버튼) ────────────────────────────────────────────────────
+  // The hidden file input the 툴바 "이미지" button clicks (upload lane), and whether a file drag is
+  // hovering the page area (drives the drop affordance). Both only matter under `enableEditing`+`canEdit`.
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const [dragActive, setDragActive] = useState(false);
 
   // ── Issue 047: 열 너비 mm 다이얼로그 + 편집 중 셀음영 ────────────────────────────────────────────────────
   // The OPEN 열 너비 dialog (a small popover; only its anchor is state — its current mm / column span are
@@ -688,6 +706,132 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       }
     },
     [core, toast, onTrap],
+  );
+
+  // ── Issue 050: 이미지 삽입 (드롭 존 + 업로드) — the SDK insert lane both shells share ──────────────────
+  // Read an image File → its base64 payload (no `data:` prefix) + NATURAL pixel dims (for aspect sizing).
+  // The engine validates the actual magic bytes, so this only needs the bytes + intrinsic size (022 폰트
+  // 픽커의 파일 읽기와 동형; DOM-y so it lives in the React binding, not the core).
+  const readImageFile = useCallback(
+    (file: File) =>
+      new Promise<{ dataB64: string; w: number; h: number }>((resolve, reject) => {
+        const r = new FileReader();
+        r.onerror = () => reject(new Error("파일 읽기 실패"));
+        r.onload = () => {
+          const dataUrl = String(r.result ?? "");
+          const dataB64 = dataUrl.split(",")[1] ?? ""; // strip the "data:...;base64," prefix
+          const img = new Image();
+          img.onload = () => resolve({ dataB64, w: img.naturalWidth, h: img.naturalHeight });
+          img.onerror = () => resolve({ dataB64, w: 0, h: 0 }); // couldn't read intrinsic size → 4:3 fallback
+          img.src = dataUrl;
+        };
+        r.readAsDataURL(file);
+      }),
+    [],
+  );
+
+  // Insert an image File at a target block: AFTER `block`, or the section END when `block` is null. ONE
+  // undo unit via `core.edit.insertImage` (→ InsertImage Intent → InsertImageAt op). The engine validates
+  // the PNG/JPEG magic bytes + size cap, so a non-image / oversized drop REJECTS with an honest toast
+  // (거짓 성공 없음). The natural-px → HWPUNIT sizing is `units.ts::imageInsertSize` (§4.5 single point).
+  const insertImageFile = useCallback(
+    async (file: File, section: number, block: number | null) => {
+      if (!canEdit) {
+        toast("이미지를 넣으려면 먼저 문서를 여세요");
+        return;
+      }
+      try {
+        const { dataB64, w, h } = await readImageFile(file);
+        if (!dataB64) {
+          toast("이미지를 읽지 못했습니다");
+          return;
+        }
+        await core.edit.insertImage(dataB64, section, block, imageInsertSize(w, h));
+        toast("이미지를 삽입했습니다");
+      } catch (e) {
+        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`이미지 삽입 실패: ${e}`);
+      }
+    },
+    [canEdit, core, toast, onTrap, readImageFile],
+  );
+
+  // Upload lane: the 툴바 "이미지" button → file picker → insert at the CURRENT selection (after the marked
+  // block), else the doc END (block=null). Mirrors the desktop chat-attach anchor rule (현재 선택/문서 끝).
+  const onUploadImage = useCallback(
+    async (file: File) => {
+      const first = selectionRef.current[0]?.anchor;
+      await insertImageFile(file, first?.section ?? 0, first ? first.block : null);
+    },
+    [insertImageFile],
+  );
+
+  // Drop lane: map the drop point → the block under it (same page-coords → hitTest path as a click), so
+  // the image anchors AFTER the pointed block; a miss (empty page area) → section END (block=null), exactly
+  // like the desktop OS-drop. Read-only geometry — no selection change.
+  const resolveDropTarget = useCallback(
+    async (clientX: number, clientY: number): Promise<{ section: number; block: number | null }> => {
+      const host = (document.elementFromPoint(clientX, clientY) as Element | null)?.closest?.(".hw-sheet") as HTMLElement | null;
+      const svg = host?.querySelector("svg") as SVGSVGElement | null;
+      if (host && svg && host.dataset.page != null) {
+        const page = Number(host.dataset.page);
+        const pt = screenToPage(clientX, clientY, svg.getBoundingClientRect(), readViewBox(svg));
+        if (pt && Number.isFinite(page)) {
+          try {
+            const hit = await adapter.hitTest(page, pt.x, pt.y);
+            if (hit) return { section: hit.section, block: hit.block };
+          } catch {
+            /* hit-test miss / trap → fall through to the section-end append */
+          }
+        }
+      }
+      return { section: 0, block: null };
+    },
+    [adapter],
+  );
+
+  // A file drag entered the page area → allow the drop + show the affordance. Preventing the default here
+  // is what stops the browser from NAVIGATING to the dropped file (§함정: 웹 드롭이 파일 열기로 새지 않게).
+  const onCanvasDragOver = useCallback((e: React.DragEvent) => {
+    if (!Array.from(e.dataTransfer?.types ?? []).includes("Files")) return; // internal drag → native behavior
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    setDragActive((cur) => cur || true);
+  }, []);
+
+  const onCanvasDragLeave = useCallback((e: React.DragEvent) => {
+    // Ignore leaves into a CHILD of the canvas (dragover keeps firing); only clear when the pointer truly left.
+    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+    setDragActive(false);
+  }, []);
+
+  // The drop branch RULE (issue 050 §함정): IMAGE(png/jpg) → 삽입 · 문서(.hwp/.hwpx) → 열기(호스트로 전달) ·
+  // 그 외 → 정직한 거부. A non-file drag (types has no "Files") is left to the browser (early return).
+  const onCanvasDrop = useCallback(
+    async (e: React.DragEvent) => {
+      const files = Array.from(e.dataTransfer?.files ?? []);
+      if (files.length === 0) return; // not a file drop → let the browser handle it (no navigation risk)
+      e.preventDefault();
+      setDragActive(false);
+      const file = files[0];
+      if (isImageFile(file)) {
+        const { section, block } = await resolveDropTarget(e.clientX, e.clientY);
+        await insertImageFile(file, section, block);
+        if (files.length > 1) toast(`이미지 삽입됨 (나머지 ${files.length - 1}개는 건너뜀)`);
+        return;
+      }
+      if (isDocFile(file)) {
+        // A document = OPEN, which the HOST owns (props.document). Forward the bytes, or guide the user.
+        if (props.onOpenFile) {
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          await props.onOpenFile(bytes, file.name);
+        } else {
+          toast("문서 열기는 상단의 파일 열기를 사용하세요");
+        }
+        return;
+      }
+      toast("이미지(PNG·JPEG) 또는 .hwp/.hwpx 파일만 놓을 수 있습니다");
+    },
+    [insertImageFile, resolveDropTarget, props.onOpenFile, toast],
   );
 
   // 열 너비 커밋 (issue 031): apply SetTableColWidths, then RE-QUERY the boundaries and confirm the
@@ -1567,6 +1711,28 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           ↷
         </button>
         {editingOn && <TableInsertButton disabled={!canEdit} onPick={(r, c) => void onInsertTable(r, c)} />}
+        {/* issue 050: 이미지 업로드 — the toolbar twin of the drop zone (파일 픽커 → 현재 선택/문서 끝).
+            The hidden input carries `accept` so the OS picker pre-filters to PNG/JPEG; the ENGINE still
+            re-validates the magic bytes (a spoofed extension is refused). Shown with the editing chrome. */}
+        {editingOn && (
+          <>
+            <button className="hw-tool" onClick={() => imageInputRef.current?.click()} disabled={!canEdit} title="이미지 삽입">
+              이미지
+            </button>
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/png,image/jpeg"
+              data-testid="hw-image-input"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                e.target.value = ""; // allow re-selecting the same file
+                if (f) void onUploadImage(f);
+              }}
+            />
+          </>
+        )}
         {props.fontCatalog && (
           <FontPicker
             catalog={props.fontCatalog}
@@ -1669,7 +1835,19 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           }}
           // issue 039: right-click → context menu (only on a page sheet; §함정 시트 위에서만 기본 메뉴 차단).
           onContextMenu={(e) => void onSheetContextMenu(e)}
+          // issue 050: the image DROP ZONE. onDragOver.preventDefault stops the browser from navigating to
+          // a dropped file; onDrop branches 이미지=삽입 / 문서=열기 / 그 외=거부 (see onCanvasDrop).
+          onDragOver={onCanvasDragOver}
+          onDragLeave={onCanvasDragLeave}
+          onDrop={(e) => void onCanvasDrop(e)}
         >
+          {/* issue 050: the drop affordance — a non-interactive hint shown while a file drag hovers an
+              editable doc. pointer-events:none so it never eats the drop (§함정), like the selection overlay. */}
+          {dragActive && canEdit && (
+            <div className="hw-drop-overlay" data-testid="hw-drop-overlay">
+              <div className="hw-drop-hint">여기에 이미지를 놓아 삽입 (PNG·JPEG)</div>
+            </div>
+          )}
           {meta ? (
             <>
               {/* 상단 룰러 (issue 027 step 3): 페이지 폭·좌우 여백 표시 + (편집 모드) 여백 드래그.

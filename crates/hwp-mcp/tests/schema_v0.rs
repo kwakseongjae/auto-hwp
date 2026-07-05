@@ -100,6 +100,10 @@ fn examples() -> Vec<Example> {
         // ---- image overlay (live image gated) ----
         e("SetImageSize", r#"{"intent":"SetImageSize","section":0,"index":2,"width":12000,"height":9000}"#, DeserializeOnly),
         e("MoveImage", r#"{"intent":"MoveImage","section":0,"from":2,"to":0,"width":12000,"height":9000}"#, DeserializeOnly),
+        // ---- image insert (issue 050 — drop/upload; bytes-based, magic-byte validated) ----
+        // `data_b64` is the canonical 1×1 PNG; `block:null` appends at the section end (synthetic doc has
+        // a section 0, so it dispatches and bumps the revision — proving the base64→validate→embed lane).
+        e("InsertImage", r#"{"intent":"InsertImage","section":0,"block":null,"data_b64":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==","width":34016,"height":25512}"#, Synthetic),
         // ---- block / table structure (synthetic targets) ----
         e("MoveBlock", r#"{"intent":"MoveBlock","section":0,"from":0,"to":1}"#, Synthetic),
         e("TableInsertRows", r#"{"intent":"TableInsertRows","section":0,"index":1,"at":2,"count":1,"cols":3}"#, Synthetic),
@@ -139,7 +143,7 @@ fn de_err(v: Value) -> String {
 /// example trips the snapshot test). Keep in lockstep with the `Intent` enum count.
 #[test]
 fn every_intent_variant_has_a_documented_example() {
-    assert_eq!(examples().len(), 35, "one JSON example per Intent variant (see INTENT-SCHEMA.md)");
+    assert_eq!(examples().len(), 36, "one JSON example per Intent variant (see INTENT-SCHEMA.md)");
 }
 
 /// Drift guard: every documented example deserializes into the REAL `Intent` (deny_unknown_fields
@@ -204,6 +208,28 @@ fn unknown_field_is_rejected() {
         "runs":[{"text":"x","weight":900}]
     }));
     assert!(err.contains("unknown field") && err.contains("weight"), "nested run rejects unknown field: {err}");
+}
+
+/// Issue 050: `InsertImage` DESERIALIZES fine but the DISPATCH validates the payload — a base64 blob
+/// whose bytes are NOT a PNG/JPEG signature is REJECTED honestly (never a silent no-op that leaves the
+/// user thinking a non-image "inserted"). The synthetic doc's revision must NOT move on the rejected op.
+#[test]
+fn insert_image_rejects_a_non_image_payload() {
+    // A well-formed InsertImage envelope carrying base64 of plain text (not an image).
+    let not_an_image = "bm90IGFuIGltYWdl"; // base64("not an image")
+    let env = json!({"intent":"InsertImage","section":0,"block":null,"data_b64":not_an_image,"width":1000,"height":1000});
+    // It deserializes (shape is valid)…
+    deserialize_intent(&env).expect("InsertImage shape deserializes");
+    // …but dispatching it on a real doc errors with an honest format message and mutates nothing.
+    let mut s = Session::default();
+    apply_intent_json(&mut s, &json!({"intent":"Open","path": showcase()})).expect("open showcase");
+    let before = s.doc.as_ref().unwrap().revision();
+    let err = match apply_intent_json(&mut s, &env) {
+        Err(e) => e,
+        Ok(_) => panic!("non-image payload must be rejected"),
+    };
+    assert!(err.contains("PNG") || err.contains("형식") || err.contains("이미지"), "honest format error: {err}");
+    assert_eq!(s.doc.as_ref().unwrap().revision(), before, "a rejected insert does NOT mutate the doc");
 }
 
 /// A missing tag / missing required field are explicit errors (not defaulted).

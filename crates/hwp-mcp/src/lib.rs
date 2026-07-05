@@ -873,6 +873,54 @@ pub enum Intent {
     },
     /// Block delete — remove the block at `(section, index)` as ONE undo unit (`DeleteBlock`).
     DeleteBlock { section: usize, index: usize },
+    /// Image insert (issue 050 — drop / upload) — embed a base64 PNG/JPEG image as a new BinData and
+    /// anchor an image paragraph in `section` as ONE undo unit (`InsertImageAt`). A web drop/upload has
+    /// BYTES, not a file path, so the payload is `data_b64` (base64, no `data:` prefix); the true format
+    /// is DETECTED from the magic bytes (PNG/JPEG only) and cross-checked against the size cap, so a
+    /// non-image or an oversized drop is REJECTED honestly (surfaced as the op-bus error the UI toasts) —
+    /// the caller does NOT pass an extension. `block` is the anchor: `Some(b)` inserts AFTER block `b`
+    /// (clamped to the section end); `None` (absent/null) appends at the section END (the upload-with-no-
+    /// selection / drop-on-empty-area case). `width`/`height` are the display box in HWPUNIT (§4.5 — the
+    /// px/mm→HWPUNIT conversion lives in editor-core `units.ts`, a single point).
+    InsertImage { section: usize, block: Option<usize>, data_b64: String, width: i32, height: i32 },
+}
+
+/// Largest single embedded image we accept, in DECODED bytes (issue 050 — 014 hardening spirit: reject
+/// an abnormally large drop honestly instead of OOMing the layout). 24 MiB is generous for a photo yet
+/// bounded; the whole-document raw cap (`hwp_ingest::limits::MAX_RAW_FILE`) is 64 MiB, so one image at
+/// 24 MiB stays well inside a sane document budget.
+pub const MAX_IMAGE_BYTES: usize = 24 * 1024 * 1024;
+
+/// Decode an `InsertImage` base64 payload, then DETECT + VALIDATE its format (issue 050). Returns the
+/// canonical BinData `kind` ("png"/"jpg") derived from the ACTUAL magic bytes — never a caller-claimed
+/// extension (a spoofable field), so the HWPX media-type always matches the bytes. Rejects (honest error,
+/// no silent no-op): malformed base64, an empty image, an image over [`MAX_IMAGE_BYTES`], and any payload
+/// whose leading bytes are neither the PNG (`89 50 4E 47 0D 0A 1A 0A`) nor JPEG (`FF D8 FF`) signature.
+fn decode_and_validate_image(data_b64: &str) -> Result<(Vec<u8>, String), String> {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data_b64.as_bytes())
+        .map_err(|e| format!("이미지 base64 디코드 실패: {e}"))?;
+    if bytes.is_empty() {
+        return Err("빈 이미지입니다".into());
+    }
+    if bytes.len() > MAX_IMAGE_BYTES {
+        return Err(format!(
+            "이미지가 너무 큽니다 ({} bytes > 상한 {} bytes)",
+            bytes.len(),
+            MAX_IMAGE_BYTES
+        ));
+    }
+    const PNG: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+    const JPEG: &[u8] = &[0xFF, 0xD8, 0xFF];
+    let kind = if bytes.starts_with(PNG) {
+        "png"
+    } else if bytes.starts_with(JPEG) {
+        "jpg"
+    } else {
+        return Err("지원하지 않는 이미지 형식입니다 (PNG/JPEG 매직바이트 불일치 — png/jpg만)".into());
+    };
+    Ok((bytes, kind.to_string()))
 }
 
 /// The typed result of an [`Intent`].
@@ -1148,6 +1196,28 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
         }
         Intent::DeleteBlock { section, index } => {
             do_delete_block(session, section, index)?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::InsertImage { section, block, data_b64, width, height } => {
+            // Decode + validate the bytes (magic-byte format detect + size cap) BEFORE touching the doc,
+            // so a bad drop never leaves a half-applied state. `kind` is the detected format, not a claim.
+            let (bytes, kind) = decode_and_validate_image(&data_b64)?;
+            let sess = session.doc.as_mut().ok_or("no document open")?;
+            // Resolve the insert index from the anchor (same "after / section-end" semantics the desktop
+            // drop uses): `Some(b)` → after block b (clamped to the section end); `None` → the section end.
+            let sec_len = sess
+                .doc()
+                .sections
+                .get(section)
+                .map(|s| s.blocks.len())
+                .ok_or_else(|| format!("섹션 {section}이(가) 없습니다"))?;
+            let index = match block {
+                Some(b) => b.saturating_add(1).min(sec_len),
+                None => sec_len,
+            };
+            sess.do_op(&hwp_ops::Op::InsertImageAt { section, index, bytes, kind, width, height })
+                .map_err(|e| e.to_string())?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }
@@ -1930,5 +2000,95 @@ mod tests {
         )
         .unwrap();
         assert_eq!(r["result"]["isError"], true);
+    }
+
+    // ---- issue 050: image insert (InsertImage Intent) — format/size validation + HWPX round-trip ----
+
+    /// The canonical 1×1 PNG (valid signature + IHDR/IDAT/IEND) as base64 — a REAL image the op embeds
+    /// verbatim, so the export carries genuine PNG bytes a compliant reader (Hancom) renders.
+    const TINY_PNG_B64: &str =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+    #[test]
+    fn insert_image_detects_format_and_rejects_bad_input() {
+        use base64::Engine as _;
+        let b64 = |b: &[u8]| base64::engine::general_purpose::STANDARD.encode(b);
+        // valid PNG → detected as "png", bytes carry the signature (kind is from the magic, not a claim).
+        let (bytes, kind) = decode_and_validate_image(TINY_PNG_B64).expect("valid PNG accepted");
+        assert_eq!(kind, "png");
+        assert_eq!(&bytes[..4], &[0x89, 0x50, 0x4E, 0x47]);
+        // valid JPEG signature (FF D8 FF …) → detected as "jpg".
+        let (_, jk) = decode_and_validate_image(&b64(&[0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10])).expect("JPEG accepted");
+        assert_eq!(jk, "jpg");
+        // non-image bytes → rejected (magic-byte mismatch; NOT a silent no-op).
+        assert!(decode_and_validate_image(&b64(b"not an image at all")).is_err(), "non-image rejected");
+        // malformed base64 → rejected.
+        assert!(decode_and_validate_image("@@@not base64@@@").is_err(), "bad base64 rejected");
+        // empty payload → rejected.
+        assert!(decode_and_validate_image("").is_err(), "empty rejected");
+        // oversized → rejected by the size cap (PNG-prefixed so only the CAP trips, not the format check).
+        let mut big = vec![0u8; MAX_IMAGE_BYTES + 1];
+        big[..8].copy_from_slice(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+        assert!(decode_and_validate_image(&b64(&big)).is_err(), "oversized rejected");
+    }
+
+    /// The web round-trip the issue calls out (L): open an HWPX with NO image → insert one via the
+    /// `InsertImage` Intent (the SAME `apply_intent` lane wasm + Tauri dispatch) → export HWPX → the
+    /// package EMBEDS the image (BinData part whose bytes ARE the PNG + a section `binaryItemIDRef`) →
+    /// reopen the export (still a valid, openable HWPX) → re-export KEEPS the image (verbatim passthrough
+    /// survives our reopen). Runs through `open_bytes`/`apply_intent_json`/`export_bytes` — the exact
+    /// byte-in/byte-out functions the wasm shell calls (HwpDoc.open / applyIntent / toHwpx), so this IS
+    /// the web round-trip at the engine boundary.
+    #[test]
+    fn insert_image_round_trips_through_hwpx_export() {
+        use base64::Engine as _;
+        use hwp_hwpx::package::Package;
+        let png = base64::engine::general_purpose::STANDARD.decode(TINY_PNG_B64).unwrap();
+        let find_png_part = |pkg: &Package| -> Option<String> {
+            pkg.part_names
+                .iter()
+                .find(|n| {
+                    let l = n.to_ascii_lowercase();
+                    l.contains("bindata") && l.ends_with(".png")
+                })
+                .cloned()
+        };
+
+        let src = std::fs::read(showcase()).expect("read showcase");
+        let mut s = Session::default();
+        open_bytes(&mut s, &src, "showcase.hwpx").expect("open");
+
+        // Insert at the section END (block: null) — the drop-on-empty / upload-with-no-selection case.
+        let envelope = json!({
+            "intent": "InsertImage", "section": 0, "block": null,
+            "data_b64": TINY_PNG_B64, "width": 34016, "height": 25512,
+        });
+        apply_intent_json(&mut s, &envelope).expect("InsertImage applies");
+
+        // The LIVE model carries the image (bin_data bytes + an Inline::Image) — this is what own-render
+        // draws as an SVG <image> immediately (실반영), before any export.
+        let doc = s.doc.as_ref().unwrap().doc();
+        assert!(doc.bin_data.iter().any(|b| b.bytes == png), "live doc embeds the PNG bytes");
+
+        // The exported HWPX embeds the image as a BinData part whose bytes ARE the inserted PNG, and a
+        // section body references it (binaryItemIDRef → the manifest item id).
+        let exported = export_bytes(&s).expect("export HWPX");
+        let pkg = Package::open(&exported).expect("exported is a valid HWPX package");
+        let part = find_png_part(&pkg).expect("export has a BinData/*.png part");
+        assert_eq!(pkg.read_part(&part).expect("read image part"), png, "embedded bytes == inserted PNG");
+        let section_refs_image = pkg.section_part_names().iter().any(|sn| {
+            String::from_utf8_lossy(&pkg.read_part(sn).unwrap_or_default()).contains("binaryItemIDRef")
+        });
+        assert!(section_refs_image, "a section references the image (binaryItemIDRef)");
+
+        // Reopen the export (proves it isn't corrupt) → re-export → the image part SURVIVES. Our lossy
+        // parser doesn't re-model the image, but the bytes round-trip via verbatim passthrough and a
+        // compliant reader (Hancom) renders it — the acceptance is "HWPX 내보내기에 이미지 포함 + 왕복 재열기".
+        let mut s2 = Session::default();
+        open_bytes(&mut s2, &exported, "reopened.hwpx").expect("reopen export");
+        let exported2 = export_bytes(&s2).expect("re-export");
+        let pkg2 = Package::open(&exported2).expect("re-export is valid HWPX");
+        let part2 = find_png_part(&pkg2).expect("re-export STILL has the image part");
+        assert_eq!(pkg2.read_part(&part2).expect("read"), png, "image bytes survive reopen→re-export");
     }
 }

@@ -2081,9 +2081,11 @@ dependencies = [
 name = "hwp-mcp"
 version = "0.0.1"
 dependencies = [
+ "base64 0.21.7",
  "getrandom 0.3.4",
  "hwp-ai",
  "hwp-core",
+ "hwp-hwpx",
  "hwp-ingest",
  "hwp-model",
  "hwp-ops",

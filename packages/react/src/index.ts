@@ -149,6 +149,11 @@ export {
   columnWidthMm,
   setColumnWidthMm,
   equalizeColumns,
+  // issue 050 — the image-insert size conversion (natural px → HWPUNIT), the SINGLE point a host reuses.
+  HWPUNIT_PER_MM,
+  mmToHwpUnit,
+  DEFAULT_IMAGE_WIDTH_MM,
+  imageInsertSize,
   inheritRuns,
   firstRunStyle,
 } from "@tf-hwp/editor-core";

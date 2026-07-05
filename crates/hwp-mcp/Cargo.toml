@@ -45,6 +45,10 @@ hwp-ingest = { workspace = true }
 hwp-session = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# Issue 050 (image insert SDK): the `InsertImage` Intent carries the image as base64 (a web drop gives
+# BYTES, not a path). Decoded here in the shared apply_intent lane so BOTH shells (wasm + Tauri) validate
+# + embed identically. Pure Rust, wasm-safe (the crate compiles clean under wasm32 — issue 017).
+base64 = "0.21"
 # A3 loopback control server (pure std::net): constant-time token compare + CSPRNG token. Gated by
 # `http` so the wasm lib (no default features) drops both — neither is wasm-safe without extra cfg.
 subtle = { version = "2", optional = true }
@@ -57,3 +61,7 @@ getrandom = { version = "0.3", optional = true }
 serde_json = { workspace = true }
 hwp-ops = { workspace = true }
 hwp-model = { workspace = true }
+# Issue 050: the image-insert HWPX round-trip test inspects the exported package (BinData part + section
+# `binaryItemIDRef`) to PROVE the inserted image is embedded. Dev-only (no impact on the wasm lib / ship).
+hwp-hwpx = { workspace = true }
+base64 = "0.21"

@@ -14,6 +14,7 @@ const OP_META: Record<string, { label: string; icon: string }> = {
   DeleteBlock: { label: "블록 삭제", icon: "－" },
   SetImageSize: { label: "그림 크기", icon: "🖼" },
   MoveImage: { label: "그림 이동", icon: "🖼" },
+  InsertImage: { label: "그림 삽입", icon: "🖼" },
   Replace: { label: "찾아 바꾸기", icon: "⇄" },
   SetParagraphText: { label: "문단 수정", icon: "✎" },
   SetPageMargins: { label: "페이지 여백", icon: "▭" },

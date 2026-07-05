@@ -32,6 +32,10 @@ export { describeIntent } from "./describeIntent";
 export {
   PX_PER_MM,
   HWPUNIT_PER_PX,
+  HWPUNIT_PER_MM,
+  mmToHwpUnit,
+  DEFAULT_IMAGE_WIDTH_MM,
+  imageInsertSize,
   pxToMm,
   mmToPx,
   roundMm,

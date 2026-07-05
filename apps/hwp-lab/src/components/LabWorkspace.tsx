@@ -77,27 +77,22 @@ export default function LabWorkspace() {
     };
   }, []);
 
-  const onFile = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      e.target.value = ""; // 같은 파일 재선택 허용
-      if (!file) return;
-      const name = file.name;
+  // 바이트 → 문서 열기: 파일 픽커와 (HwpWorkspace 의) 문서 드롭이 공유하는 단일 경로. 손상/악성 파일이
+  // 현재 세션을 깨지 않도록 프로브 어댑터로 먼저 검증한다(이슈 050: 문서 드롭=열기 분기가 여기로 온다).
+  const openBytes = useCallback(
+    async (bytes: Uint8Array, name: string) => {
       if (!/\.(hwp|hwpx)$/i.test(name)) {
         setDoc(null);
         setLabError(`지원하지 않는 형식입니다: ${name}\n.hwp 또는 .hwpx 파일만 열 수 있습니다.`);
         return;
       }
-      setBusy("문서 여는 중…");
-      setLabError(null);
-      const bytes = new Uint8Array(await file.arrayBuffer());
       if (bytes.length === 0) {
-        setBusy(null);
         setDoc(null);
         setLabError(`빈 파일입니다: ${name}`);
         return;
       }
-      // 손상/악성 파일이 현재 열린 세션을 깨지 않도록 별도 프로브 어댑터로 먼저 검증한다.
+      setBusy("문서 여는 중…");
+      setLabError(null);
       const probe = new WasmAdapter(wasmUrl);
       try {
         await probe.open(bytes, name);
@@ -122,6 +117,16 @@ export default function LabWorkspace() {
       }
     },
     [wasmUrl],
+  );
+
+  const onFile = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = ""; // 같은 파일 재선택 허용
+      if (!file) return;
+      await openBytes(new Uint8Array(await file.arrayBuffer()), file.name);
+    },
+    [openBytes],
   );
 
   // 채팅 바이브편집 브리지(R6): 패키지는 LLM/키를 갖지 않는다. 서버 프록시(/api/hwp-edit)로 위임.
@@ -227,6 +232,8 @@ export default function LabWorkspace() {
             isMock={mode === "mock"}
             // 이슈 027: 수동 편집 UI(표 추가·룰러·열너비 드래그·더블클릭 텍스트·서식 툴바) 옵트인.
             enableEditing
+            // 이슈 050: 페이지 위에 이미지를 드롭하면 삽입, .hwp/.hwpx 를 드롭하면 이 콜백으로 열기.
+            onOpenFile={openBytes}
           />
         ) : (
           <div className="lab-empty">

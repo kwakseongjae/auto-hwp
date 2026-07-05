@@ -18,6 +18,35 @@ export const PX_PER_MM = 96 / 25.4;
  *  for a `SetTableRowHeights` override (heights are HWPUNIT, INTENT-SCHEMA §6.6) is the ONE factor here. */
 export const HWPUNIT_PER_PX = 7200 / 96;
 
+/** HWPUNIT per millimetre (= 7200 / 25.4). Because 1 inch = 7200 HWPUNIT = 25.4 mm. The image-insert
+ *  size (`InsertImage.width/height`, INTENT-SCHEMA §6.5) is HWPUNIT; the drop/upload flow sizes the image
+ *  in mm (display width) then converts here — the SINGLE px/mm→HWPUNIT point (§4.5, issue 050). */
+export const HWPUNIT_PER_MM = 7200 / 25.4;
+
+/** Millimetres → HWPUNIT, rounded to a whole unit (the `InsertImage` display box commit unit, §4.5). */
+export function mmToHwpUnit(mm: number): number {
+  return Math.round(mm * HWPUNIT_PER_MM);
+}
+
+/** Default on-page DISPLAY width (mm) for an inserted image — mirrors the desktop chat-attach default so
+ *  the web drop/upload sizes an image the same way. Wide enough to read, and the height rides the image's
+ *  natural aspect (issue 050). */
+export const DEFAULT_IMAGE_WIDTH_MM = 120;
+
+/** Compute an inserted image's display box in HWPUNIT (`InsertImage.width/height`) from its NATURAL pixel
+ *  dimensions, preserving aspect ratio at `widthMm` (default `DEFAULT_IMAGE_WIDTH_MM`). This is the ONE
+ *  px/mm→HWPUNIT conversion point for image insert (§4.5). A degenerate natural size (either dimension ≤ 0
+ *  — e.g. an image that failed to decode its intrinsic size) falls back to a 4:3 box so the insert still
+ *  lands at a sane size rather than 0×0. */
+export function imageInsertSize(
+  naturalW: number,
+  naturalH: number,
+  widthMm = DEFAULT_IMAGE_WIDTH_MM,
+): { width: number; height: number } {
+  const heightMm = naturalW > 0 && naturalH > 0 ? (widthMm * naturalH) / naturalW : (widthMm * 3) / 4;
+  return { width: mmToHwpUnit(widthMm), height: mmToHwpUnit(heightMm) };
+}
+
 /** Own-render PAGE px → millimetres. */
 export function pxToMm(px: number): number {
   return px / PX_PER_MM;

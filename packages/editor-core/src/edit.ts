@@ -110,6 +110,25 @@ export class EditController {
     return this.session.applyBatch([{ intent: "TableInsertRows", section, index, at, count: r, cols: c }]);
   }
 
+  /** 이미지 삽입 (issue 050): embed a dropped/uploaded image (base64 PNG/JPEG bytes, NO `data:` prefix) at
+   *  `(section, block)` — AFTER `block`, or at the section END when `block` is `null` — as ONE undo batch
+   *  (`InsertImage` → the engine's `InsertImageAt` op; layout logic untouched). `size` is the display box in
+   *  HWPUNIT (§4.5 commit unit; the natural-px/mm → HWPUNIT conversion lives in `units.ts::imageInsertSize`,
+   *  a single point). The ENGINE detects the format from the magic bytes and validates the size cap, so a
+   *  non-image / oversized payload REJECTS with a thrown op-bus error the UI toasts (거짓 성공 없음) — the
+   *  caller does NOT pass an extension. Same lane on both backends (WasmAdapter/TauriAdapter route
+   *  `applyIntent` → `apply_intent_json`), so the two shells insert identically (043 homomorphic parity). */
+  async insertImage(
+    dataB64: string,
+    section: number,
+    block: number | null,
+    size: { width: number; height: number },
+  ): Promise<number> {
+    return this.session.applyBatch([
+      { intent: "InsertImage", section, block, data_b64: dataB64, width: size.width, height: size.height },
+    ]);
+  }
+
   /** 룰러 (step 3): set the section's page margins (INTENT-SCHEMA `SetPageMargins`, mm). ⚠️ document-wide
    *  — the caller MUST have confirmed the whole-document effect. One undo batch (full re-flow). */
   async setPageMargins(section: number, mm: PageMarginsMm): Promise<number> {
