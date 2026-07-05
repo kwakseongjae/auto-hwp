@@ -1,6 +1,5 @@
 import type { EngineAdapter } from "../adapter";
-import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, Intent, OpenResult, Outcome, PageGeom, ReplaceResult, RunSpec, TableBox } from "../types";
-import type { BlockHit, CaretRect, CellHit, HitResult, Intent, OpenResult, Outcome, OutlineItem, PageGeom, RunSpec, TableBox } from "../types";
+import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "../types";
 
 /** A headless EngineAdapter for node tests: canned geometry resolvers + a spy-able applyIntent/undo.
  *  No wasm, no DOM — pure in-memory. Mirrors @tf-hwp/react's test MockAdapter so the same selection
@@ -65,12 +64,12 @@ export class MockAdapter implements EngineAdapter {
       (this as { find?: unknown }).find = undefined;
       (this as { replace?: unknown }).replace = undefined;
     }
+    if (!("outline" in this.opts)) (this as { outline?: unknown }).outline = undefined;
   }
 
   private matchesFor(query: string, opts: FindOptions): FindMatch[] {
     const f = this.opts.find;
     return (typeof f === "function" ? f(query, opts) : f) ?? [];
-    if (!("outline" in this.opts)) (this as { outline?: unknown }).outline = undefined;
   }
 
   async open(_bytes: Uint8Array, name?: string): Promise<OpenResult> {

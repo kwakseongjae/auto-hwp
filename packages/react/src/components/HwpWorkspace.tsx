@@ -4,7 +4,7 @@ import { boundariesToRatios, remapFragmentHeights, appliedReflectsDrag, firstRun
 import { OutlinePanel } from "./OutlinePanel";
 import { StatusBar } from "./StatusBar";
 import { pageAtReference } from "../outline";
-import { runsUnchanged } from "../richedit";
+import { runsUnchanged, applyLiveStyle, readCaretStyle } from "../richedit";
 import { modLabel } from "../platform";
 import { ZOOM_STEP, clampZoom, isEditableTarget, panBy, wheelToZoomFactor, zoomAt } from "../viewport";
 import { useHwpEditor } from "../useHwpEditor";
@@ -20,6 +20,7 @@ import { TableInsertButton } from "./TableInsertButton";
 import { Ruler } from "./Ruler";
 import { InPlaceCellEditor } from "./InPlaceCellEditor";
 import { FloatingToolbar } from "./FloatingToolbar";
+import { FormatRibbon, type RibbonFmt, type FormatRibbonPatch } from "./FormatRibbon";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { ColumnWidthDialog } from "./ColumnWidthDialog";
 import { CellShadePalette } from "./CellShadePalette";
@@ -100,7 +101,15 @@ interface EditTarget {
   rowBoundaries?: number[] | null;
   curBold: boolean;
   curItalic: boolean;
+  /** The marked cell/range first-run size (pt) + text color — reflected in the 048 format ribbon's size
+   *  box / 글자색 swatch when NOT editing (issue 048: 현재 상태 반영). Defaults when unstyled/unknown. */
+  curSizePt?: number;
+  curColor?: string | null;
 }
+
+// issue 048: the ribbon's size box shows an inherited (size unset) run at the doc default ~10pt — matching
+// richedit's DEFAULT_PT so the reflected size and applyLiveStyle's size wrap agree.
+const RIBBON_DEFAULT_PT = 10;
 
 export interface HwpWorkspaceProps {
   /** The backend seam (WasmAdapter for the web, or a host adapter). */
@@ -209,6 +218,13 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const [editor, setEditor] = useState<
     { page: number; box: Box; section: number; block: number; kind: string; rows?: [number, number]; cols?: [number, number]; text: string; runs: RunSpec[]; fontSizePt?: number } | null
   >(null);
+  // Issue 048: the PERSISTENT top format ribbon's reflected state (굵게 여부 등 토글). Two drivers: when NOT
+  // editing it mirrors the marked cell/range first-run format (editTarget.cur*); while EDITING a
+  // `selectionchange` listener reads the caret's live computed style (readCaretStyle) so the toggles track
+  // the cursor. `editorScaleRef` holds the OPEN editor's page scale (client px / own-render px) so the
+  // ribbon's applyLiveStyle uses the SAME size↔px conversion as the InPlaceCellEditor's own ⌘-formatting.
+  const [ribbonFmt, setRibbonFmt] = useState<RibbonFmt>({ bold: false, italic: false, underline: false, strike: false, sizePt: RIBBON_DEFAULT_PT, color: null });
+  const editorScaleRef = useRef(1);
   // Issue 039: the OPEN right-click context menu. `kind` branches the item set (셀/문단/바탕); `click`
   // carries the page-local point so 텍스트 편집 re-opens the in-place editor exactly where the user
   // right-clicked; `cell` carries the address + column count for 행 삽입 (existing TableInsertRows path).
@@ -617,7 +633,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           ]);
           if (cancelled) return;
           const style = firstRunStyle(runs);
-          setEditTarget({ ...base, tableBox: tableBox as TableBox | null, boundaries, rowBoundaries, curBold: !!style.bold, curItalic: !!style.italic });
+          setEditTarget({ ...base, tableBox: tableBox as TableBox | null, boundaries, rowBoundaries, curBold: !!style.bold, curItalic: !!style.italic, curSizePt: style.size_pt ?? RIBBON_DEFAULT_PT, curColor: style.color ?? null });
         } catch {
           if (!cancelled) setEditTarget(base);
         }
@@ -1163,6 +1179,74 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const fmtActions = useSelectionActions(core, editTarget, runFmt);
   const fmtRange = fmtActions.fmtRange;
 
+  // ── issue 048: persistent format ribbon — DUAL routing + reflected state ──────────────────────────────
+  // The ribbon's `onPatch` is routed HERE (the desktop `FormatControls` onPatch semantic): while the
+  // in-place editor is OPEN the delta styles the LIVE contentEditable selection via richedit.applyLiveStyle
+  // (commit path / latch UNTOUCHED — no SetCellRange* op, no refreshToken, the editor keeps focus); with NO
+  // editor open it drives the SAME shared `useSelectionActions` the 028 FloatingToolbar uses (공용 유틸 하나
+  // — identical SetCellRangeFmt/SetCellRangeShade op + toast). 밑줄/취소선 are live-run only and 배경/정렬 are
+  // cell ops, so the ribbon disables the non-applicable set per mode (below) — they never reach the wrong arm.
+  const applyRibbon = useCallback(
+    (p: FormatRibbonPatch) => {
+      if (editorRef.current) {
+        applyLiveStyle(
+          { bold: p.bold, italic: p.italic, underline: p.underline, strike: p.strike, sizePt: p.sizePt, color: p.color },
+          editorScaleRef.current,
+        );
+        // Reflect immediately in the ribbon toggles (the live path never re-reads the cell format).
+        setRibbonFmt((prev) => ({
+          bold: p.bold ?? prev.bold,
+          italic: p.italic ?? prev.italic,
+          underline: p.underline ?? prev.underline,
+          strike: p.strike ?? prev.strike,
+          sizePt: p.sizePt ?? prev.sizePt,
+          color: p.color ?? prev.color,
+        }));
+        return;
+      }
+      // NOT editing → the shared selection-format actions (039), applied to the marked cell/range.
+      if (p.bold !== undefined) fmtActions.bold();
+      if (p.italic !== undefined) fmtActions.italic();
+      if (p.sizePt !== undefined) fmtActions.setSize(p.sizePt);
+      if (p.color !== undefined) fmtActions.setColor(p.color);
+      if (p.shade !== undefined) fmtActions.setShade(p.shade);
+      if (p.align !== undefined) fmtActions.setAlign(p.align);
+    },
+    [fmtActions],
+  );
+
+  // Reflect the MARKED cell/range's first-run format in the ribbon when NOT editing (028 curBold 재사용 +
+  // size/color). While editing, the caret listener below owns `ribbonFmt`, so this defers to it.
+  useEffect(() => {
+    if (editor) return;
+    if (!editTarget) return;
+    setRibbonFmt({
+      bold: editTarget.curBold,
+      italic: editTarget.curItalic,
+      underline: false,
+      strike: false,
+      sizePt: editTarget.curSizePt ?? RIBBON_DEFAULT_PT,
+      color: editTarget.curColor ?? null,
+    });
+  }, [editor, editTarget]);
+
+  // Live-sync the ribbon to the caret while EDITING (desktop R11 selectionchange 패턴): read the effective
+  // computed style at the selection anchor inside the in-place editor so 굵게/기울임/밑줄/취소선/크기/색이
+  // 커서 위치를 실시간 반영. Torn down when the editor closes (the non-editing sync above resumes).
+  useEffect(() => {
+    if (!editor) return;
+    const onSel = () => {
+      const el = document.querySelector("[data-inline-edit]") as HTMLElement | null;
+      if (!el) return;
+      const s = readCaretStyle(el, editorScaleRef.current);
+      if (!s) return;
+      setRibbonFmt({ bold: s.bold, italic: s.italic, underline: s.underline, strike: s.strike, sizePt: s.size_pt, color: s.color });
+    };
+    document.addEventListener("selectionchange", onSel);
+    onSel(); // seed from the mount select-all
+    return () => document.removeEventListener("selectionchange", onSel);
+  }, [editor]);
+
   // "AI에게 전달" (issue 028): the marked selection is ALREADY the anchor chip (anchors = selection); this
   // only bumps the token that focuses the chat composer. No new prompt logic, and the selection is NOT
   // cleared so the chips ride along with the next message (the existing captureAnchor flow).
@@ -1252,6 +1336,14 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         ? undefined
         : "이 셀에는 서식을 적용할 수 없습니다"
       : "표 셀/범위를 선택하면 서식을 적용할 수 있습니다";
+
+  // ── issue 048: per-mode disabled reasons for the persistent ribbon ───────────────────────────────────
+  // 편집 중이면 라이브 선택에 항상 적용 가능(inline·live 활성), 배경/정렬은 셀 op라 비활성(사유). 비편집이면
+  // 셀/범위가 선택돼야 inline·cell op가 활성, 밑줄/취소선은 편집 상태에서만(사유). 조용한 무시 금지 (027 규칙).
+  const ribbonEditing = editingOn && editor != null;
+  const inlineDisabledReason = ribbonEditing ? undefined : formatDisabledReason;
+  const liveOnlyDisabledReason = ribbonEditing ? undefined : "밑줄·취소선은 칸을 더블클릭해 편집할 때 적용할 수 있습니다";
+  const cellOnlyDisabledReason = ribbonEditing ? "배경색·정렬은 편집을 마친 뒤 칸을 선택한 상태에서 적용됩니다" : formatDisabledReason;
 
   // pointer lifecycle → the core selection model (issues 021/023). React fires them fire-and-forget; the
   // core emits selection/marquee changes that useHwpEditor mirrors back into state.
@@ -1493,6 +1585,22 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         </button>
       </div>
 
+      {/* issue 048: the PERSISTENT format ribbon — a second toolbar row, shown whenever the editing chrome
+          is on and a document is open (like a normal editor's ribbon; it never floats over the content).
+          DUAL-MODE via `applyRibbon`: 편집 중이면 라이브 선택 스타일(applyLiveStyle), 아니면 선택 셀/범위의
+          서식 op(useSelectionActions — 028 툴바와 동일). The 028 FloatingToolbar STILL appears over a
+          selection (피그마식 이중); both share the one `fmtActions` util. */}
+      {editingOn && meta && (
+        <FormatRibbon
+          fmt={ribbonFmt}
+          editing={ribbonEditing}
+          onPatch={applyRibbon}
+          inlineDisabledReason={inlineDisabledReason}
+          liveOnlyDisabledReason={liveOnlyDisabledReason}
+          cellOnlyDisabledReason={cellOnlyDisabledReason}
+        />
+      )}
+
       {/* issue 045: the ⌘F 찾기/바꾸기 capsule — a top-right overlay over the document (keyboard-effect +
           top-area surface; it never touches the 046 sidebar/status-bar containers). Rendered only when a
           document is open AND the bar is toggled on (⌘F). */}
@@ -1646,7 +1754,11 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                         cell's own font size (no popover card). It renders the cell's styled RUNS so partial
                         formatting shows + round-trips; onCommit returns the serialized runs as a Promise so
                         the editor un-latches + stays open on failure; onCancel (Esc) just closes it. */}
-                    {editingOn && editor && editor.page === page && (
+                    {editingOn && editor && editor.page === page && (() => {
+                      // issue 048: capture the OPEN editor's page scale so the ribbon's applyLiveStyle uses the
+                      // SAME size↔px conversion as the editor's own ⌘-formatting (client px / own-render px).
+                      editorScaleRef.current = scale;
+                      return (
                       // `key` = the cell address so a Tab move REMOUNTS the editor at the next cell (fresh
                       // latch + focus/select-all) instead of reusing the committed instance (issue 036).
                       <InPlaceCellEditor
@@ -1659,7 +1771,8 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                         onCancel={() => setEditor(null)}
                         onCommitMove={editor.kind === "cell" ? onEditorCommitMove : undefined}
                       />
-                    )}
+                      );
+                    })()}
                     {/* issue 047 목표 3: 편집 중 셀음영 — while a CELL is being edited in place, a swatch bar
                         lets the user set that cell's background without leaving edit mode (desktop R7-Part1).
                         Its buttons preventDefault mousedown so they never blur→commit the editor; the apply is

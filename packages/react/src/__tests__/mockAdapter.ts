@@ -1,6 +1,5 @@
 import type { EngineAdapter } from "../EngineAdapter";
-import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, Intent, OpenResult, Outcome, PageGeom, ReplaceResult, RunSpec, TableBox } from "../types";
-import type { BlockHit, CellHit, Intent, OpenResult, Outcome, OutlineItem, PageGeom, RunSpec, TableBox } from "../types";
+import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "../types";
 
 /** A headless EngineAdapter for tests: canned SVG (optionally malicious, to exercise the R7 gate), a
  *  fixed table hit, and a spy-able applyIntent. No wasm — pure in-memory. */

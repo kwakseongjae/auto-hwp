@@ -91,6 +91,12 @@ export type { FloatingToolbarProps, ToolbarAlign } from "./components/FloatingTo
 export { computeFloatingPosition, unionPageBox } from "./floatingPosition";
 export type { FloatViewport, FloatOptions, FloatPlacement, FloatPosition } from "./floatingPosition";
 
+// Issue 048 — the PERSISTENT top format ribbon (선택+편집 겸용): 비편집이면 useSelectionActions(039)로 선택
+// 셀/범위 서식 op, 편집 중이면 richedit.applyLiveStyle로 라이브 선택 스타일. Presentational — the host routes
+// `onPatch`. HwpWorkspace mounts it in the editing chrome; a custom shell can compose it directly.
+export { FormatRibbon } from "./components/FormatRibbon";
+export type { FormatRibbonProps, FormatRibbonPatch, RibbonFmt } from "./components/FormatRibbon";
+
 // Issue 039 — the right-click CONTEXT MENU (셀/문단/바탕 3분기) + the shared selection-action set + the
 // pure viewport clamp. Every menu action delegates to an existing intent/EditController path (신규 op 0);
 // the shared `useSelectionActions` is what the 028 FloatingToolbar and the menu BOTH drive (중복 코드 금지).

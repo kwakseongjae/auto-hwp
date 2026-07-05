@@ -307,6 +307,37 @@
   top: -6px; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 6px solid #fff;
 }
 
+/* ================= issue 048 — persistent top format ribbon (선택+편집 겸용) ================= */
+/* A second toolbar row under .hw-toolbar. Position-free (never floats over the content), like a normal
+ * editor's ribbon; the 028 FloatingToolbar STILL floats over a selection (피그마식 이중). */
+.hw-format-ribbon {
+  display: flex; align-items: center; gap: 3px; flex-wrap: wrap;
+  padding: 5px 14px; background: var(--hw-panel); border-bottom: 1px solid var(--hw-border);
+  font-size: 12px;
+}
+.hw-ribbon-btn {
+  min-width: 26px; height: 26px; padding: 0 6px; border: 1px solid transparent; border-radius: 6px;
+  background: #fff; cursor: pointer; font-size: 13px; color: #111; line-height: 1;
+}
+.hw-ribbon-btn:hover:not(:disabled) { background: #f0f1f3; }
+.hw-ribbon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+/* an active toggle (굵게/기울임/밑줄/취소선 on at the caret) lights up like the desktop ribbon. */
+.hw-ribbon-btn-active { background: var(--hw-accent); border-color: var(--hw-accent); color: #fff; }
+.hw-ribbon-btn-active:hover:not(:disabled) { background: var(--hw-accent); filter: brightness(1.05); }
+.hw-ribbon-size {
+  width: 40px; height: 26px; border: 1px solid var(--hw-border); border-radius: 6px; font-size: 12px;
+  padding: 0 4px; text-align: center; background: #fff; color: #111;
+}
+.hw-ribbon-size:disabled { opacity: 0.4; cursor: not-allowed; }
+.hw-ribbon-sep { width: 1px; height: 20px; background: var(--hw-border); margin: 0 3px; }
+.hw-ribbon-color { display: inline-flex; align-items: center; gap: 2px; font-size: 10px; color: var(--hw-muted); cursor: pointer; }
+.hw-ribbon-color input[type="color"] {
+  width: 22px; height: 22px; padding: 0; border: 1px solid var(--hw-border); border-radius: 4px;
+  background: none; cursor: pointer;
+}
+.hw-ribbon-color input[type="color"]:disabled { opacity: 0.4; cursor: not-allowed; }
+.hw-ribbon-mode { margin-left: auto; font-size: 11px; color: var(--hw-muted); white-space: nowrap; }
+
 /* ================= issue 038 — hover pre-highlight (FG-09) + cursor system (FG-06) ================= */
 
 /* The pre-highlight outline under the cursor. Deliberately DISTINCT from a selection mark (.hw-mark is a
