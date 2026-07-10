@@ -361,6 +361,9 @@ impl<'a> Lifter<'a> {
                     has_border: self.cell_has_border(c.border_fill_id),
                     borders: self.cell_borders(c.border_fill_id),
                     diagonal: self.cell_diagonal(c.border_fill_id),
+                    // Cell-OWN padding ONLY when declared (list_attr bit 16) — matches rhwp's own
+                    // renderer/height_measurer, which use table.padding when the bit is off. (F2)
+                    padding: c.apply_inner_margin.then(|| lift_padding(&c.padding)),
                     ..Default::default()
                 }
             })
@@ -385,6 +388,13 @@ impl<'a> Lifter<'a> {
             // Outer vertical margins (바깥 여백) so consecutive tables keep HWP's real gap on render.
             outer_margin_top: t.outer_margin_top.max(0) as i32,
             outer_margin_bottom: t.outer_margin_bottom.max(0) as i32,
+            // F2 (issue 054): the remaining real values for faithful HWPX re-emission — outer L/R
+            // margins, the table-default cell padding (<hp:inMargin>), and the table's OWN borderFill
+            // edges (표 외곽 테두리; previously dropped — the serializer reused an arbitrary bf).
+            outer_margin_left: t.outer_margin_left.max(0) as i32,
+            outer_margin_right: t.outer_margin_right.max(0) as i32,
+            padding: Some(lift_padding(&t.padding)),
+            borders: self.cell_borders(t.border_fill_id),
             cells,
             provenance: Provenance { source: Some(SourceFormat::Hwp5), raw: None },
             ..Default::default()
@@ -585,6 +595,12 @@ fn derive_col_widths(cells: &[rhwp::model::table::Cell], cols: usize) -> Vec<i32
         }
     }
     w.into_iter().map(|x| x as i32).collect()
+}
+
+/// rhwp `Padding` (i16 per side) → our `[left, right, top, bottom]` HWPUNIT array, negatives
+/// clamped to 0 (a negative stored margin is a corrupt/edge value HWP treats as none).
+fn lift_padding(p: &rhwp::model::Padding) -> [i32; 4] {
+    [p.left.max(0) as i32, p.right.max(0) as i32, p.top.max(0) as i32, p.bottom.max(0) as i32]
 }
 
 /// Map rhwp's header/footer apply scope to ours.

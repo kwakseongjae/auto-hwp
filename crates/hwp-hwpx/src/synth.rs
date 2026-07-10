@@ -167,16 +167,127 @@ pub fn border_fill_by_id(header: &str, id: &str) -> Option<String> {
 /// Synthesize a shaded `<hh:borderFill>` by cloning `base` (a bordered cell fill) and inserting a
 /// `<hc:fillBrush>` with the requested face color — so a cell can have both borders and a background.
 pub fn synthesize_border_fill(base: &str, new_id: u64, shade: Color) -> String {
+    synthesize_border_fill_full(base, new_id, &[None; 4], Some(shade))
+}
+
+/// OWPML border `type` token for a renderable [`LineStyle`] — the inverse of the .hwp lift's
+/// collapse (`hwp-rhwp` `lift_line_style`). Exotic HWP strokes (wave/3D/dash-dot …) were already
+/// collapsed to `Solid` at lift, so they re-emit as `SOLID` — same honesty as the render.
+pub fn border_type_token(style: LineStyle) -> &'static str {
+    match style {
+        LineStyle::None => "NONE",
+        LineStyle::Solid => "SOLID",
+        LineStyle::Dashed => "DASH",
+        LineStyle::Dotted => "DOT",
+        // rhwp's HWPX parser accepts DOUBLE_SLIM|DOUBLE → Double; Hancom writes DOUBLE_SLIM.
+        LineStyle::Double => "DOUBLE_SLIM",
+    }
+}
+
+/// Nearest OWPML border `width` string for a lifted stroke width in device px. The 16 spec widths
+/// (표 28, mm) pair 1:1 with the px table the lift converts through (`border_width_to_px`), so this
+/// is its inverse — EXCEPT the lift's 0.5px hairline floor collapses index 0 (0.1 mm → 0.4px) into
+/// index 1 (0.12 mm → 0.5px): a 0.1 mm hairline re-emits as the visually identical 0.12 mm.
+pub fn border_width_token(width_px: f64) -> &'static str {
+    const WIDTHS: [(f64, &str); 16] = [
+        (0.4, "0.1 mm"),
+        (0.5, "0.12 mm"),
+        (0.6, "0.15 mm"),
+        (0.75, "0.2 mm"),
+        (1.0, "0.25 mm"),
+        (1.1, "0.3 mm"),
+        (1.5, "0.4 mm"),
+        (1.9, "0.5 mm"),
+        (2.3, "0.6 mm"),
+        (2.6, "0.7 mm"),
+        (3.8, "1.0 mm"),
+        (5.7, "1.5 mm"),
+        (7.6, "2.0 mm"),
+        (11.3, "3.0 mm"),
+        (15.1, "4.0 mm"),
+        (18.9, "5.0 mm"),
+    ];
+    let mut best = WIDTHS[0].1;
+    let mut best_d = f64::INFINITY;
+    for (px, tok) in WIDTHS {
+        let d = (px - width_px).abs();
+        if d < best_d {
+            best_d = d;
+            best = tok;
+        }
+    }
+    best
+}
+
+/// Synthesize a full `<hh:borderFill>` (issue 054, F2): clone `base` (a Hancom-authored bordered
+/// fill, so child order/required attrs are valid), patch each `Some` edge's
+/// `<hh:leftBorder|rightBorder|topBorder|bottomBorder type=".." width=".." color=".."/>`
+/// (edge order `[left, right, top, bottom]`, mirroring `Cell::borders`), and set the fill: `Some`
+/// shade → replace-or-insert a `<hc:fillBrush>`; `None` → leave the base's fill untouched. A `None`
+/// edge inherits the base's edge (unspecified ≠ 선없음 — 선없음 arrives as `LineStyle::None` → NONE).
+pub fn synthesize_border_fill_full(
+    base: &str,
+    new_id: u64,
+    edges: &[Option<CellEdge>; 4],
+    shade: Option<Color>,
+) -> String {
     let mut s = set_attr(base, "id", &new_id.to_string());
-    let brush = format!(
-        "<hc:fillBrush><hc:winBrush faceColor=\"{}\" hatchColor=\"#FF000000\" alpha=\"0\"/></hc:fillBrush>",
-        shade.to_hex()
-    );
-    // a borderFill with no existing fill: insert the brush just before the close tag.
-    if let Some(pos) = s.rfind("</hh:borderFill>") {
-        s.insert_str(pos, &brush);
+    const CHILD: [&str; 4] = ["leftBorder", "rightBorder", "topBorder", "bottomBorder"];
+    for (i, edge) in edges.iter().enumerate() {
+        let Some(e) = edge else { continue };
+        s = set_border_child(
+            &s,
+            CHILD[i],
+            border_type_token(e.style),
+            border_width_token(e.width_px),
+            &e.color.to_hex(),
+        );
+    }
+    if let Some(shade) = shade {
+        let brush = format!(
+            "<hc:fillBrush><hc:winBrush faceColor=\"{}\" hatchColor=\"#FF000000\" alpha=\"0\"/></hc:fillBrush>",
+            shade.to_hex()
+        );
+        // Replace an existing fillBrush (never emit two), else insert before the close tag.
+        if let (Some(a), Some(b)) = (s.find("<hc:fillBrush"), s.find("</hc:fillBrush>")) {
+            let end = b + "</hc:fillBrush>".len();
+            if a < end {
+                s.replace_range(a..end, &brush);
+            }
+        } else if let Some(pos) = s.rfind("</hh:borderFill>") {
+            s.insert_str(pos, &brush);
+        }
     }
     s
+}
+
+/// Set the 7 per-script attrs (hangul…user) on the `<hh:{child} …/>` element inside a charPr clone
+/// (ratio/spacing). No-op if the child is absent (we then inherit the base's values).
+fn set_per_script_child(s: &str, child: &str, vals: &[String; 7]) -> String {
+    const ATTRS: [&str; 7] = ["hangul", "latin", "hanja", "japanese", "other", "symbol", "user"];
+    let open = format!("<hh:{child}");
+    let Some(p) = s.find(&open) else { return s.to_string() };
+    let Some(rel) = s[p..].find("/>") else { return s.to_string() };
+    let end = p + rel + 2;
+    let mut tag = s[p..end].to_string();
+    for (i, attr) in ATTRS.iter().enumerate() {
+        tag = set_attr(&tag, attr, &vals[i]);
+    }
+    format!("{}{}{}", &s[..p], tag, &s[end..])
+}
+
+/// Set `type`/`width`/`color` on the `<hh:{child} …/>` element inside a borderFill clone. No-op if
+/// the child is absent (a malformed base — we then inherit whatever the base carries).
+fn set_border_child(s: &str, child: &str, ty: &str, width: &str, color: &str) -> String {
+    let open = format!("<hh:{child}");
+    let Some(p) = s.find(&open) else { return s.to_string() };
+    let Some(rel) = s[p..].find("/>") else { return s.to_string() };
+    let end = p + rel + 2;
+    let mut tag = s[p..end].to_string();
+    tag = set_attr(&tag, "type", ty);
+    tag = set_attr(&tag, "width", width);
+    tag = set_attr(&tag, "color", color);
+    format!("{}{}{}", &s[..p], tag, &s[end..])
 }
 
 fn element<'a>(s: &'a str, open: &str, close: &str) -> Option<&'a str> {
@@ -246,6 +357,19 @@ pub fn synthesize_char_pr(base: &str, new_id: u64, shape: &CharShape, fontref: O
     }
     if shape.height != 0 {
         s = set_attr(&s, "height", &shape.height.to_string());
+    }
+    // 장평/자간 (fidelity #8/#9's EMIT half — the .hwp lift already captures them; 054's round-trip
+    // page-preservation needs them re-emitted): dense gov-doc tables compress text to ratio 90–98 /
+    // spacing −5…−12, and dropping these over-wraps cell text on reopen → extra pages. A 0 ratio
+    // slot means "uncaptured" → the neutral 100 (base value); spacing 0 is itself neutral.
+    if shape.ratio.0.iter().any(|&r| r != 0) {
+        let vals: [String; 7] =
+            std::array::from_fn(|i| if shape.ratio.0[i] == 0 { "100".into() } else { shape.ratio.0[i].to_string() });
+        s = set_per_script_child(&s, "ratio", &vals);
+    }
+    if shape.spacing.0.iter().any(|&v| v != 0) {
+        let vals: [String; 7] = std::array::from_fn(|i| shape.spacing.0[i].to_string());
+        s = set_per_script_child(&s, "spacing", &vals);
     }
     if shape.text_color != Color::default() {
         s = set_attr(&s, "textColor", &shape.text_color.to_hex());

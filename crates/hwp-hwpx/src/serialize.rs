@@ -24,8 +24,10 @@ struct SynthPlan {
     char_ref: BTreeMap<usize, String>,
     /// para_shape index → synthesized `paraPrIDRef` (only NON-default shapes; default → base ref).
     para_ref: BTreeMap<usize, String>,
-    /// cell shade `#RRGGBB` → synthesized `borderFillIDRef` (shaded+bordered cell fill).
-    shade_ref: BTreeMap<String, String>,
+    /// Canonical borderFill key ([`bf_key`]: 4 edges + optional shade) → synthesized (or reused)
+    /// `borderFillIDRef`. Replaces the old shade-only map (issue 054, F2): a cell/table with real
+    /// lifted borders gets a faithful borderFill, not just a background clone.
+    bf_ref: BTreeMap<String, String>,
     /// style name/engName → existing `<hh:style>` (id + paraPr/charPr). Read-only; no synthesis.
     style_map: BTreeMap<String, synth::StyleRef>,
     /// The fully-synthesized header.xml to emit, or None if nothing needed synthesizing.
@@ -455,45 +457,123 @@ fn build_synth_plan(doc: &SemanticDoc, header_xml: Option<&str>, table_ref: Opti
     }
     header = synth::patch_pool(&header, "paraProperties", &para_fragments, para_count);
 
-    // Cell-shade borderFills: clone the table's bordered fill + add a fillBrush per distinct shade.
-    let mut shade_fragments = String::new();
-    let mut shade_count = 0;
-    let shades = collect_shade_colors(doc);
-    if !shades.is_empty() {
+    // Cell/table borderFills (F2): clone the table's bordered fill, patch the four real edges
+    // (style/width/color) + the fill per distinct combination. Shade-only combos degenerate to the
+    // old "clone + fillBrush" output, so pre-F2 documents synthesize byte-identically.
+    let mut bf_fragments = String::new();
+    let mut bf_count = 0;
+    let specs = collect_bf_specs(doc);
+    if !specs.is_empty() {
         if let Some(base) = table_ref.and_then(|id| synth::border_fill_by_id(header0, id)) {
             let mut next_id = synth::max_pool_id(header0, "borderFills") + 1;
-            for hex in shades {
-                if let Some(color) = hwp_model::types::Color::from_hex(&hex) {
-                    shade_fragments.push_str(&synth::synthesize_border_fill(&base, next_id, color));
-                    plan.shade_ref.insert(hex, next_id.to_string());
-                    shade_count += 1;
+            for (key, spec) in specs {
+                let frag =
+                    synth::synthesize_border_fill_full(&base, next_id, &spec.borders, spec.shade);
+                // Dedup (#003): reuse an existing pool borderFill identical modulo id.
+                if let Some(existing) =
+                    synth::existing_equivalent_id(header0, "<hh:borderFill ", "</hh:borderFill>", &frag)
+                {
+                    plan.bf_ref.insert(key, existing);
+                } else {
+                    bf_fragments.push_str(&frag);
+                    plan.bf_ref.insert(key, next_id.to_string());
+                    bf_count += 1;
                     next_id += 1;
                 }
             }
         }
     }
-    header = synth::patch_pool(&header, "borderFills", &shade_fragments, shade_count);
+    header = synth::patch_pool(&header, "borderFills", &bf_fragments, bf_count);
 
-    if char_count > 0 || para_count > 0 || shade_count > 0 {
+    if char_count > 0 || para_count > 0 || bf_count > 0 {
         plan.header_out = Some(header);
     }
     plan
 }
 
-/// Distinct cell shade colors (as `#RRGGBB`) used by dirty tables.
-fn collect_shade_colors(doc: &SemanticDoc) -> std::collections::BTreeSet<String> {
-    let mut out = std::collections::BTreeSet::new();
-    for sec in doc.sections.iter().filter(|s| s.dirty.is_dirty()) {
-        for b in &sec.blocks {
-            if let Block::Table(t) = b {
-                if t.dirty.is_dirty() || t.cells.iter().any(|c| c.dirty.is_dirty()) {
+/// A distinct borderFill the emitted content needs: real per-edge borders + optional background.
+#[derive(Clone)]
+struct BfSpec {
+    borders: [Option<CellEdge>; 4],
+    shade: Option<Color>,
+}
+
+/// The spec for a cell/table's border+fill combination, or `None` when it carries neither
+/// (→ the emitter references the document's default table borderFill, the pre-F2 behavior).
+fn bf_spec(borders: &[Option<CellEdge>; 4], shade: Option<Color>) -> Option<BfSpec> {
+    if borders.iter().all(Option::is_none) && shade.is_none() {
+        return None;
+    }
+    Some(BfSpec { borders: *borders, shade })
+}
+
+/// Canonical, deterministic key for a [`BfSpec`] — computed from the SAME OWPML tokens the
+/// synthesizer emits, so two specs that would synthesize identical XML share one pool entry.
+fn bf_key(spec: &BfSpec) -> String {
+    let edge = |e: &Option<CellEdge>| -> String {
+        match e {
+            None => "-".to_string(),
+            Some(e) => format!(
+                "{}:{}:{}",
+                synth::border_type_token(e.style),
+                synth::border_width_token(e.width_px),
+                e.color.to_hex()
+            ),
+        }
+    };
+    format!(
+        "L={}|R={}|T={}|B={}|F={}",
+        edge(&spec.borders[0]),
+        edge(&spec.borders[1]),
+        edge(&spec.borders[2]),
+        edge(&spec.borders[3]),
+        spec.shade.map(|c| c.to_hex()).unwrap_or_else(|| "-".to_string())
+    )
+}
+
+/// Distinct border+fill combinations used by EMITTED content: dirty top-level tables (recursing
+/// into nested tables and note bodies) + always-emitted decoration (header/footer) bodies —
+/// mirroring [`collect_used_shapes`]'s gating so every emitted `borderFillIDRef` resolves.
+fn collect_bf_specs(doc: &SemanticDoc) -> BTreeMap<String, BfSpec> {
+    fn walk(blocks: &[Block], out: &mut BTreeMap<String, BfSpec>) {
+        for b in blocks {
+            match b {
+                Block::Table(t) => {
+                    if let Some(spec) = bf_spec(&t.borders, None) {
+                        out.insert(bf_key(&spec), spec);
+                    }
                     for c in t.cells.iter().filter(|c| c.active) {
-                        if let Some(col) = c.shade_color {
-                            out.insert(col.to_hex());
+                        if let Some(spec) = bf_spec(&c.borders, c.shade_color) {
+                            out.insert(bf_key(&spec), spec);
+                        }
+                        walk(&c.blocks, out);
+                    }
+                }
+                Block::Paragraph(p) => {
+                    for r in &p.runs {
+                        for inl in &r.content {
+                            if let Inline::Note(nr) = inl {
+                                walk(&nr.body, out);
+                            }
                         }
                     }
                 }
             }
+        }
+    }
+    let mut out = BTreeMap::new();
+    for sec in doc.sections.iter().filter(|s| s.dirty.is_dirty()) {
+        for b in &sec.blocks {
+            let emit = match b {
+                Block::Paragraph(p) => p.dirty.is_dirty(),
+                Block::Table(t) => t.dirty.is_dirty() || t.cells.iter().any(|c| c.dirty.is_dirty()),
+            };
+            if emit {
+                walk(std::slice::from_ref(b), &mut out);
+            }
+        }
+        for d in &sec.decorations {
+            walk(&d.blocks, &mut out);
         }
     }
     out
@@ -559,14 +639,30 @@ fn patch_section_xml(orig: &[u8], sec: &Section, table_ref: Option<&str>, plan: 
     }
 
     // (3) APPENDED blocks (dirty, source=None) → emit + inject before the section close tag.
-    // Tables already re-emitted in place (1b) are excluded — appending them too would duplicate.
-    let dirty: Vec<EmitBlock> = sec
-        .blocks
-        .iter()
-        .enumerate()
-        .filter(|(bi, _)| !tables_in_place.contains(bi))
-        .filter_map(|(_, b)| dirty_emit(b))
-        .collect();
+    // Tables already re-emitted in place (1b) are excluded — appending them too would duplicate
+    // (issue 057). Sequence-aware (like emit_blocks): a pure table-anchor paragraph is elided and
+    // its forced page break rides on the next table's wrapper <hp:p> (issue 054).
+    let mut dirty: Vec<EmitBlock> = Vec::new();
+    let mut pending_pb = false;
+    for (bi, b) in sec.blocks.iter().enumerate() {
+        if tables_in_place.contains(&bi) {
+            continue;
+        }
+        if !dirty_appended(b) {
+            continue;
+        }
+        if let Block::Paragraph(p) = b {
+            if is_pure_table_anchor(p) {
+                pending_pb |= p.page_break_before;
+                continue;
+            }
+        }
+        let mut eb = project_block(b);
+        if let EmitBlock::Table(t) = &mut eb {
+            t.page_break = std::mem::take(&mut pending_pb);
+        }
+        dirty.push(eb);
+    }
     if dirty.is_empty() && sec.decorations.is_empty() {
         // Edits / page already applied (or nothing changed) — no append needed.
         return s.into_bytes();
@@ -578,6 +674,18 @@ fn patch_section_xml(orig: &[u8], sec: &Section, table_ref: Option<&str>, plan: 
     let plain_ref_owned = plain_ref.clone();
     // Resolve a run's interned char_shape index → charPrIDRef (synthesized id, or the plain ref).
     let cref = |idx: usize| plan.char_ref.get(&idx).cloned().unwrap_or_else(|| plain_ref_owned.clone());
+    // …and a paragraph's para_shape index → paraPrIDRef (synthesized id, or the base ref). Used by
+    // cell/note-body paragraphs so their real line-spacing/문단간격 survive (054).
+    let base_para_owned = base_para_ref.to_string();
+    let pref = |idx: usize| plan.para_ref.get(&idx).cloned().unwrap_or_else(|| base_para_owned.clone());
+    let body_ctx = BodyCtx {
+        cref: &cref,
+        pref: &pref,
+        base_para_ref,
+        plain_ref: &plain_ref,
+        bf: table_ref.unwrap_or("1"),
+        bf_ref: &plan.bf_ref,
+    };
     let mut next_id = max_id(&s) + 1;
 
     // (2.5) HEADERS/FOOTERS: splice each as a <hp:ctrl><hp:header|footer><hp:subList>body</…> right
@@ -595,13 +703,13 @@ fn patch_section_xml(orig: &[u8], sec: &Section, table_ref: Option<&str>, plan: 
                     ApplyPage::Even => "EVEN",
                     ApplyPage::Odd => "ODD",
                 };
-                let body: Vec<EmitBlock> = d.blocks.iter().map(project_block).collect();
+                let body: Vec<EmitBlock> = emit_blocks(&d.blocks);
                 let did = next_id;
                 next_id += 1;
                 deco.push_str(&format!(
                     "<hp:ctrl><hp:{tag} id=\"{did}\" applyPageType=\"{apply}\"><hp:subList id=\"\" textDirection=\"HORIZONTAL\" lineWrap=\"BREAK\" vertAlign=\"TOP\" linkListIDRef=\"0\" linkListNextIDRef=\"0\" textWidth=\"0\" textHeight=\"0\" hasTextRef=\"0\" hasNumRef=\"0\">"
                 ));
-                emit_cell_content(&mut deco, &body, base_para_ref, &plain_ref, &cref, table_ref.unwrap_or("1"), &plan.shade_ref, &mut next_id);
+                emit_cell_content(&mut deco, &body, &body_ctx, &mut next_id);
                 deco.push_str(&format!("</hp:subList></hp:{tag}></hp:ctrl>"));
             }
             let at = pos + "</hp:secPr>".len();
@@ -609,10 +717,20 @@ fn patch_section_xml(orig: &[u8], sec: &Section, table_ref: Option<&str>, plan: 
         }
     }
 
+    // FROM-SCRATCH stub merge (054): the Skeleton's section base is a lone EMPTY <hp:p> carrying
+    // the mandatory secPr. Appending ALL content after it leaves a spurious blank first LINE per
+    // section on reopen, and makes a leading forced page break — a no-op at section start in the
+    // original — fire AFTER the stub (+1 page). Hancom's own convention is that the first paragraph
+    // carries the secPr *and* the first real content, so we splice the first emitted block's body
+    // into the stub and transplant its open-tag attrs. Only for from-scratch sections (provenance
+    // Hwp5); an HWPX-in section's first paragraph is real content and stays byte-identical.
+    let merge_stub = sec.provenance.source == Some(SourceFormat::Hwp5);
+
     let mut inject = String::new();
-    for block in &dirty {
+    for (bi, block) in dirty.iter().enumerate() {
+        let mut piece = String::new();
         match block {
-            EmitBlock::Para { para_shape, style, runs } => {
+            EmitBlock::Para { para_shape, style, runs, page_break } => {
                 // Resolve a named style (if any): styleIDRef + the style's default para/char refs.
                 let style_ref = style.as_deref().and_then(|n| plan.style_map.get(n));
                 let style_id = style_ref.map(|s| s.id.as_str()).unwrap_or("0");
@@ -631,40 +749,45 @@ fn patch_section_xml(orig: &[u8], sec: &Section, table_ref: Option<&str>, plan: 
                 };
                 let ctx = BodyCtx {
                     cref: &resolve,
+                    pref: &pref,
                     base_para_ref,
                     plain_ref: &plain_ref,
                     bf: table_ref.unwrap_or("1"),
-                    shade_ref: &plan.shade_ref,
+                    bf_ref: &plan.bf_ref,
                 };
                 let pid = next_id;
                 next_id += 1;
-                emit_paragraph(&mut inject, pid, &para_ref, style_id, runs, &ctx, &mut next_id);
+                emit_paragraph(&mut piece, pid, &para_ref, style_id, runs, *page_break, &ctx, &mut next_id);
             }
-            EmitBlock::Table { rows, cols, cells, col_widths } => {
+            EmitBlock::Table(tbl) => {
                 // A table lives inside a wrapping <hp:p><hp:run>…</hp:run></hp:p>.
                 let pid = next_id;
                 let tid = next_id + 1;
                 next_id += 2;
-                let bf = table_ref.unwrap_or("1");
-                inject.push_str(&format!(
-                    "<hp:p id=\"{pid}\" paraPrIDRef=\"{base_para_ref}\" styleIDRef=\"0\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\"><hp:run charPrIDRef=\"{plain_ref}\">"
+                let pb = if tbl.page_break { "1" } else { "0" };
+                piece.push_str(&format!(
+                    "<hp:p id=\"{pid}\" paraPrIDRef=\"{base_para_ref}\" styleIDRef=\"0\" pageBreak=\"{pb}\" columnBreak=\"0\" merged=\"0\"><hp:run charPrIDRef=\"{plain_ref}\">"
                 ));
-                emit_table(&mut inject, tid, *rows, *cols, cells, col_widths, base_para_ref, &plain_ref, &cref, bf, &plan.shade_ref, &mut next_id);
-                inject.push_str("<hp:t></hp:t></hp:run></hp:p>");
+                emit_table(&mut piece, tid, tbl, &body_ctx, &mut next_id);
+                piece.push_str("<hp:t></hp:t></hp:run></hp:p>");
             }
             EmitBlock::Image { bin_ref, width, height } => {
                 let pid = next_id;
                 let picid = next_id + 1;
                 next_id += 2;
-                emit_pic(&mut inject, pid, picid, bin_ref, *width, *height, base_para_ref, &plain_ref);
+                emit_pic(&mut piece, pid, picid, bin_ref, *width, *height, base_para_ref, &plain_ref);
             }
             EmitBlock::Equation(eq) => {
                 let pid = next_id;
                 let eqid = next_id + 1;
                 next_id += 2;
-                emit_equation(&mut inject, pid, eqid, eq, base_para_ref, &plain_ref);
+                emit_equation(&mut piece, pid, eqid, eq, base_para_ref, &plain_ref);
             }
         }
+        if bi == 0 && merge_stub && merge_first_block_into_stub(&mut s, &piece) {
+            continue;
+        }
+        inject.push_str(&piece);
     }
 
     match s.rfind("</") {
@@ -806,24 +929,37 @@ fn build_table_patch(
     // WHOLE-TABLE re-emit at the original anchor. The table stays inside its original wrapper
     // `<hp:p><hp:run>` (only the `<hp:tbl>` span is replaced), so document order is preserved.
     let cref = |idx: usize| plan.char_ref.get(&idx).cloned().unwrap_or_else(|| sec_plain_ref.to_string());
-    let cells = placed_cells(t);
+    let pref = |idx: usize| plan.para_ref.get(&idx).cloned().unwrap_or_else(|| sec_para_ref.to_string());
+    let ctx = BodyCtx {
+        cref: &cref,
+        pref: &pref,
+        base_para_ref: sec_para_ref,
+        plain_ref: sec_plain_ref,
+        bf,
+        bf_ref: &plan.bf_ref,
+    };
+    // Same projection as project_block's Table arm (054) — kept inline because the in-place lane
+    // re-emits from a &Table, not a &Block.
+    let et = EmitTable {
+        rows: t.rows.max(1),
+        cols: t.cols.max(1),
+        cells: placed_cells(t),
+        col_widths: t.col_widths.clone(),
+        row_heights: t.row_heights.clone(),
+        padding: t.padding,
+        outer_margin: [
+            t.outer_margin_left,
+            t.outer_margin_right,
+            t.outer_margin_top,
+            t.outer_margin_bottom,
+        ],
+        bf_key: bf_spec(&t.borders, None).map(|s| bf_key(&s)),
+        page_break: false, // in-place re-emit stays inside the original wrapper <hp:p>
+    };
     let tid = *next_id;
     *next_id += 1;
     let mut xml = String::new();
-    emit_table(
-        &mut xml,
-        tid,
-        t.rows.max(1),
-        t.cols.max(1),
-        &cells,
-        &t.col_widths,
-        sec_para_ref,
-        sec_plain_ref,
-        &cref,
-        bf,
-        &plan.shade_ref,
-        next_id,
-    );
+    emit_table(&mut xml, tid, &et, &ctx, next_id);
     TablePatch::Whole(s0, e0, xml)
 }
 
@@ -878,9 +1014,18 @@ fn patch_cell_xml(
         let para_ref = last_attr(inner, "paraPrIDRef").unwrap_or(sec_para_ref).to_string();
         let plain_ref = last_attr(inner, "charPrIDRef").unwrap_or(sec_plain_ref).to_string();
         let cref = |idx: usize| plan.char_ref.get(&idx).cloned().unwrap_or_else(|| plain_ref.clone());
+        let pref = |idx: usize| plan.para_ref.get(&idx).cloned().unwrap_or_else(|| para_ref.clone());
+        let ctx = BodyCtx {
+            cref: &cref,
+            pref: &pref,
+            base_para_ref: &para_ref,
+            plain_ref: &plain_ref,
+            bf,
+            bf_ref: &plan.bf_ref,
+        };
         let blocks: Vec<EmitBlock> = cell.blocks.iter().map(project_block).collect();
         let mut body = String::new();
-        emit_cell_content(&mut body, &blocks, &para_ref, &plain_ref, &cref, bf, &plan.shade_ref, next_id);
+        emit_cell_content(&mut body, &blocks, &ctx, next_id);
 
         out = String::with_capacity(cell_orig.len() + body.len());
         out.push_str(&cell_orig[..open_end]);
@@ -895,12 +1040,75 @@ fn patch_cell_xml(
     // Shade edit (SetTableCellShade): re-point the verbatim tc open tag's borderFillIDRef at the
     // synthesized shaded fill. `shade_color` is only ever Some when an op set it (the parser
     // leaves it None), so untouched cells keep their original fill byte-verbatim.
-    if let Some(id) = cell.shade_color.map(|c| c.to_hex()).and_then(|hex| plan.shade_ref.get(&hex)) {
+    // (Post-054 the shade-only map is gone: the canonical borderFill key covers edges+shade. The
+    // shade_color gate is load-bearing — only op-set shades may re-point a verbatim cell's fill.)
+    if let Some(id) = cell
+        .shade_color
+        .and_then(|_| bf_spec(&cell.borders, cell.shade_color))
+        .map(|s| bf_key(&s))
+        .and_then(|k| plan.bf_ref.get(&k))
+    {
         let tc_open_end = out.find('>')? + 1;
         let patched = synth::set_attr(&out[..tc_open_end], "borderFillIDRef", id);
         out = format!("{patched}{}", &out[tc_open_end..]);
     }
     Some(out)
+}
+
+/// Splice the first emitted block's `<hp:p>` BODY into the section's stub paragraph (the Skeleton's
+/// lone secPr-carrying `<hp:p>`), transplanting the emitted open-tag attrs (paraPrIDRef/styleIDRef/
+/// pageBreak) onto the stub. Returns false (→ caller appends normally) if `piece` isn't a single
+/// `<hp:p …>…</hp:p>` or the stub can't be located. See the call site for why (054 stub blank line).
+fn merge_first_block_into_stub(s: &mut String, piece: &str) -> bool {
+    if !piece.starts_with("<hp:p ") || !piece.ends_with("</hp:p>") {
+        return false;
+    }
+    let Some(open_end) = piece.find('>').map(|i| i + 1) else { return false };
+    let body = &piece[open_end..piece.len() - "</hp:p>".len()];
+
+    // Patch the stub's open tag (the FIRST <hp:p in the section — the Skeleton base has exactly one).
+    let Some(stub_start) = s.find("<hp:p") else { return false };
+    let Some(stub_open_end) = s[stub_start..].find('>').map(|i| stub_start + i + 1) else {
+        return false;
+    };
+    let mut stub_tag = s[stub_start..stub_open_end].to_string();
+    for attr in ["paraPrIDRef", "styleIDRef", "pageBreak"] {
+        if let Some(v) = first_attr(&piece[..open_end], attr) {
+            stub_tag = synth::set_attr(&stub_tag, attr, v);
+        }
+    }
+    let new_open_end = stub_start + stub_tag.len();
+    s.replace_range(stub_start..stub_open_end, &stub_tag);
+
+    // Insert the body before the STUB's own close tag — found by DEPTH scan, because the stub can
+    // contain nested <hp:p> by then (a spliced header/footer ctrl carries a subList of paragraphs;
+    // naively taking the first </hp:p> would inject the body into that subList). The stub's own
+    // empty run stays (zero-width; contributes no text).
+    let Some(close) = paragraph_close_at(s, new_open_end) else { return false };
+    s.insert_str(close, body);
+    true
+}
+
+/// Byte offset of the `</hp:p>` closing the paragraph whose open tag ends at `from` — depth-scans
+/// nested `<hp:p`/`</hp:p>` pairs (subLists inside ctrl/table content). `None` if unbalanced.
+fn paragraph_close_at(s: &str, from: usize) -> Option<usize> {
+    let mut depth = 1usize;
+    let mut idx = from;
+    while depth > 0 {
+        let open = s[idx..].find("<hp:p ").map(|p| idx + p);
+        let close = s[idx..].find("</hp:p>").map(|p| idx + p)?;
+        if let Some(o) = open.filter(|&o| o < close) {
+            depth += 1;
+            idx = o + "<hp:p ".len();
+        } else {
+            depth -= 1;
+            if depth == 0 {
+                return Some(close);
+            }
+            idx = close + "</hp:p>".len();
+        }
+    }
+    None
 }
 
 /// Re-emit an EDITED simple paragraph in place: keep its original `<hp:p …>` open tag verbatim
@@ -969,7 +1177,7 @@ fn reemit_paragraph(orig_para: &str, p: &Paragraph, plan: &SynthPlan) -> String 
     out
 }
 
-/// A placed table cell ready to emit (origin position + span + content + optional shade hex).
+/// A placed table cell ready to emit (origin position + span + content + border/fill + padding).
 /// `content` holds the cell's FULL block sequence — paragraphs AND nested tables, recursively — so
 /// multi-paragraph cells and tables-within-cells (both common in real .hwp) survive in full.
 struct PlacedCell {
@@ -978,7 +1186,11 @@ struct PlacedCell {
     col_span: usize,
     row_span: usize,
     content: Vec<EmitBlock>,
-    shade: Option<String>,
+    /// Canonical [`bf_key`] of the cell's borders+shade, or `None` → the default table borderFill.
+    bf_key: Option<String>,
+    /// Cell-OWN padding `[l, r, t, b]` (HWPUNIT, → `hasMargin="1"` + `<hp:cellMargin>`); `None` →
+    /// inherit the table default.
+    padding: Option<[i32; 4]>,
 }
 
 /// One piece of a paragraph's run sequence, in document order. `Text` is a formatted text run;
@@ -995,12 +1207,41 @@ enum RunPiece {
     Note { kind: NoteKind, number: u16, prefix: u16, suffix: u16, inst: u32, body: Vec<EmitBlock> },
 }
 
+/// A table ready to emit, carrying every captured real value (issue 054, F2): per-column widths,
+/// per-row stored heights, table-default cell padding, outer margins, and the outline borderFill.
+/// Each `Vec`/`Option` empty/`None` ⇒ the emitter falls back to the legacy synthetic constants, so
+/// editor-inserted tables (which capture nothing) emit byte-identically to pre-F2.
+struct EmitTable {
+    rows: usize,
+    cols: usize,
+    cells: Vec<PlacedCell>,
+    /// Captured per-column widths (HWPUNIT, `cols` entries); empty ⇒ uniform columns.
+    col_widths: Vec<i32>,
+    /// Captured per-row stored heights (HWPUNIT, `rows` entries; a `0` slot = content-sized row);
+    /// empty/malformed ⇒ the legacy uniform `RH` per row.
+    row_heights: Vec<i32>,
+    /// Table-default cell padding `[l, r, t, b]` (→ `<hp:inMargin>`); `None` ⇒ legacy 510/141.
+    padding: Option<[i32; 4]>,
+    /// Outer margins `[l, r, t, b]` (→ `<hp:outMargin>`); all-zero is treated as "unknown" ⇒ the
+    /// legacy 283 box (an editor-inserted table has no captured margins — see `emit_table`).
+    outer_margin: [i32; 4],
+    /// Canonical [`bf_key`] of the table's OUTLINE borders (표 외곽), `None` ⇒ reuse the document's
+    /// existing table borderFill (pre-F2 behavior).
+    bf_key: Option<String>,
+    /// 쪽 나누기 앞에서 on the table's wrapper `<hp:p>` — inherited from an ELIDED pure table-anchor
+    /// paragraph (see [`emit_blocks`]) so a forced break on a table survives the round-trip.
+    page_break: bool,
+}
+
 /// A dirty block ready to serialize: a paragraph, a table, or an embedded image.
 enum EmitBlock {
-    Para { para_shape: usize, style: Option<String>, runs: Vec<RunPiece> },
-    /// `col_widths` (HWPUNIT, `cols` entries) are the captured per-column widths; empty ⇒ the emitter
-    /// falls back to uniform columns. Carrying them preserves a .hwp table's real column proportions.
-    Table { rows: usize, cols: usize, cells: Vec<PlacedCell>, col_widths: Vec<i32> },
+    /// `page_break` = the paragraph's 쪽 나누기 앞에서 (`hp:p pageBreak`): the lift captures it from
+    /// the .hwp (forced chapter-heading breaks — how gov templates paginate), and dropping it on
+    /// re-emission collapsed the reopened page count (054 measured: benchmark.hwp 8 breaks → 1).
+    /// Emitting it is the serializer half of fidelity gap #10 (the capture half already existed),
+    /// pulled forward because 054's round-trip page-preservation acceptance requires it.
+    Para { para_shape: usize, style: Option<String>, runs: Vec<RunPiece>, page_break: bool },
+    Table(EmitTable),
     /// An image, emitted as a `<hp:pic>` wrapped in its own paragraph. `bin_ref` is the manifest
     /// item id + `binaryItemIDRef`; width/height are the display size in HWPUNIT.
     Image { bin_ref: String, width: i32, height: i32 },
@@ -1008,15 +1249,12 @@ enum EmitBlock {
     Equation(EquationRef),
 }
 
-/// Project a dirty *APPENDED* `Block` to its `EmitBlock` (None if untouched OR if it is an
-/// in-place-edited existing paragraph — those carry `source` and are replaced surgically, not appended).
-fn dirty_emit(b: &Block) -> Option<EmitBlock> {
+/// Whether a block is a dirty *APPENDED* block (false if untouched OR if it is an in-place-edited
+/// existing paragraph — those carry `source` and are replaced surgically, not appended).
+fn dirty_appended(b: &Block) -> bool {
     match b {
-        Block::Paragraph(p) if p.dirty.is_dirty() && p.source.is_none() => Some(project_block(b)),
-        Block::Table(t) if t.dirty.is_dirty() || t.cells.iter().any(|c| c.dirty.is_dirty()) => {
-            Some(project_block(b))
-        }
-        _ => None,
+        Block::Paragraph(p) => p.dirty.is_dirty() && p.source.is_none(),
+        Block::Table(t) => t.dirty.is_dirty() || t.cells.iter().any(|c| c.dirty.is_dirty()),
     }
 }
 
@@ -1060,14 +1298,60 @@ fn project_block(b: &Block) -> EmitBlock {
             para_shape: p.para_shape,
             style: p.style_name.clone(),
             runs: para_runs(p),
+            page_break: p.page_break_before,
         },
-        Block::Table(t) => EmitBlock::Table {
+        Block::Table(t) => EmitBlock::Table(EmitTable {
             rows: t.rows.max(1),
             cols: t.cols.max(1),
             cells: placed_cells(t),
             col_widths: t.col_widths.clone(),
-        },
+            row_heights: t.row_heights.clone(),
+            padding: t.padding,
+            outer_margin: [
+                t.outer_margin_left,
+                t.outer_margin_right,
+                t.outer_margin_top,
+                t.outer_margin_bottom,
+            ],
+            bf_key: bf_spec(&t.borders, None).map(|s| bf_key(&s)),
+            page_break: false, // set by emit_blocks when an elided anchor carried a break
+        }),
     }
+}
+
+/// Project a block sequence to [`EmitBlock`]s, ELIDING pure table-anchor paragraphs. The .hwp lift
+/// emits `앵커 문단 + Block::Table` per table, and the table emission creates its OWN wrapper
+/// `<hp:p>` — so also emitting the (empty) anchor paragraph would grow a spurious blank LINE per
+/// table per round-trip (054 measured: benchmark1 +67 blocks → 18p ballooned past 20p). Skipping it
+/// keeps the reopened block stream 1:1 with the original lift's; a skipped anchor's forced page
+/// break rides on the next table's wrapper.
+fn emit_blocks(blocks: &[Block]) -> Vec<EmitBlock> {
+    let mut out = Vec::new();
+    let mut pending_pb = false;
+    for b in blocks {
+        if let Block::Paragraph(p) = b {
+            if is_pure_table_anchor(p) {
+                pending_pb |= p.page_break_before;
+                continue;
+            }
+        }
+        let mut eb = project_block(b);
+        if let EmitBlock::Table(t) = &mut eb {
+            t.page_break = std::mem::take(&mut pending_pb);
+        }
+        out.push(eb);
+    }
+    out
+}
+
+/// A paragraph that exists ONLY to anchor a table (the lift's `is_table_anchor` flag: hosts a table
+/// control, no visible text). Defensive: any non-text inline (field marker/note/image) keeps it.
+fn is_pure_table_anchor(p: &Paragraph) -> bool {
+    p.is_table_anchor
+        && !p.runs.iter().flat_map(|r| &r.content).any(|i| match i {
+            Inline::Text(t) => !t.trim().is_empty(),
+            _ => true,
+        })
 }
 
 /// Project a table's ACTIVE cells to [`PlacedCell`]s, recursively projecting each cell's content.
@@ -1080,8 +1364,9 @@ fn placed_cells(t: &Table) -> Vec<PlacedCell> {
             col: cell.col,
             col_span: cell.col_span.max(1),
             row_span: cell.row_span.max(1),
-            content: cell.blocks.iter().map(project_block).collect(),
-            shade: cell.shade_color.map(|c| c.to_hex()),
+            content: emit_blocks(&cell.blocks),
+            bf_key: bf_spec(&cell.borders, cell.shade_color).map(|s| bf_key(&s)),
+            padding: cell.padding,
         })
         .collect()
 }
@@ -1144,7 +1429,7 @@ fn para_runs(p: &Paragraph) -> Vec<RunPiece> {
                         prefix: nr.prefix_char,
                         suffix: nr.suffix_char,
                         inst: nr.inst_id,
-                        body: nr.body.iter().map(project_block).collect(),
+                        body: emit_blocks(&nr.body),
                     });
                 }
                 _ => {}
@@ -1177,17 +1462,8 @@ fn field_end_xml(begin_id: u32) -> String {
 /// Emit a sequence of cell blocks (paragraphs + nested tables, recursively) inside an open
 /// `<hp:subList>`. `next_id` is a monotonic counter giving every `<hp:p>`/`<hp:tbl>` a unique id.
 /// An empty cell gets one empty paragraph (a subList requires ≥1 `<hp:p>`).
-#[allow(clippy::too_many_arguments)]
-fn emit_cell_content(
-    out: &mut String,
-    blocks: &[EmitBlock],
-    base_para_ref: &str,
-    plain_ref: &str,
-    cref: &dyn Fn(usize) -> String,
-    bf: &str,
-    shade_ref: &BTreeMap<String, String>,
-    next_id: &mut u64,
-) {
+fn emit_cell_content(out: &mut String, blocks: &[EmitBlock], ctx: &BodyCtx, next_id: &mut u64) {
+    let base_para_ref = ctx.base_para_ref;
     if blocks.is_empty() {
         let pid = *next_id;
         *next_id += 1;
@@ -1198,34 +1474,38 @@ fn emit_cell_content(
     }
     for block in blocks {
         match block {
-            EmitBlock::Para { runs, .. } => {
+            EmitBlock::Para { para_shape, runs, page_break, .. } => {
                 let pid = *next_id;
                 *next_id += 1;
-                let ctx = BodyCtx { cref, base_para_ref, plain_ref, bf, shade_ref };
-                emit_paragraph(out, pid, base_para_ref, "0", runs, &ctx, next_id);
+                // The cell paragraph's REAL paraPr (synthesized), not the base ref — line spacing /
+                // 문단간격 drive the cell's measured height (054 round-trip stability).
+                let para_ref = (ctx.pref)(*para_shape);
+                emit_paragraph(out, pid, &para_ref, "0", runs, *page_break, ctx, next_id);
             }
-            EmitBlock::Table { rows, cols, cells, col_widths } => {
+            EmitBlock::Table(tbl) => {
                 // A nested table lives inside a wrapping <hp:p><hp:run>…</hp:run></hp:p>.
                 let pid = *next_id;
                 let tid = *next_id + 1;
                 *next_id += 2;
+                let pb = if tbl.page_break { "1" } else { "0" };
                 out.push_str(&format!(
-                    "<hp:p id=\"{pid}\" paraPrIDRef=\"{base_para_ref}\" styleIDRef=\"0\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\"><hp:run charPrIDRef=\"{plain_ref}\">"
+                    "<hp:p id=\"{pid}\" paraPrIDRef=\"{base_para_ref}\" styleIDRef=\"0\" pageBreak=\"{pb}\" columnBreak=\"0\" merged=\"0\"><hp:run charPrIDRef=\"{}\">",
+                    ctx.plain_ref
                 ));
-                emit_table(out, tid, *rows, *cols, cells, col_widths, base_para_ref, plain_ref, cref, bf, shade_ref, next_id);
+                emit_table(out, tid, tbl, ctx, next_id);
                 out.push_str("<hp:t></hp:t></hp:run></hp:p>");
             }
             EmitBlock::Image { bin_ref, width, height } => {
                 let pid = *next_id;
                 let picid = *next_id + 1;
                 *next_id += 2;
-                emit_pic(out, pid, picid, bin_ref, *width, *height, base_para_ref, plain_ref);
+                emit_pic(out, pid, picid, bin_ref, *width, *height, base_para_ref, ctx.plain_ref);
             }
             EmitBlock::Equation(eq) => {
                 let pid = *next_id;
                 let eqid = *next_id + 1;
                 *next_id += 2;
-                emit_equation(out, pid, eqid, eq, base_para_ref, plain_ref);
+                emit_equation(out, pid, eqid, eq, base_para_ref, ctx.plain_ref);
             }
         }
     }
@@ -1285,10 +1565,14 @@ fn emit_equation(out: &mut String, pid: u64, eqid: u64, eq: &EquationRef, base_p
 /// run's char_shape index → charPrIDRef, plus the default refs a note body needs to recurse.
 struct BodyCtx<'a> {
     cref: &'a dyn Fn(usize) -> String,
+    /// Resolve a paragraph's `para_shape` index → `paraPrIDRef` (synthesized id, else the base ref).
+    /// Load-bearing for CELL paragraphs (054): they used to hardcode the base ref, dropping the
+    /// cell text's real line-spacing/문단간격 → reopened tables measured taller → page drift.
+    pref: &'a dyn Fn(usize) -> String,
     base_para_ref: &'a str,
     plain_ref: &'a str,
     bf: &'a str,
-    shade_ref: &'a BTreeMap<String, String>,
+    bf_ref: &'a BTreeMap<String, String>,
 }
 
 /// Emit one `<hp:p>` from its [`RunPiece`] sequence: Text pieces resolve their char_shape via
@@ -1301,11 +1585,13 @@ fn emit_paragraph(
     para_ref: &str,
     style_ref: &str,
     pieces: &[RunPiece],
+    page_break: bool,
     ctx: &BodyCtx,
     next_id: &mut u64,
 ) {
+    let pb = if page_break { "1" } else { "0" };
     out.push_str(&format!(
-        "<hp:p id=\"{id}\" paraPrIDRef=\"{para_ref}\" styleIDRef=\"{style_ref}\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\">"
+        "<hp:p id=\"{id}\" paraPrIDRef=\"{para_ref}\" styleIDRef=\"{style_ref}\" pageBreak=\"{pb}\" columnBreak=\"0\" merged=\"0\">"
     ));
     if pieces.is_empty() {
         out.push_str("<hp:run charPrIDRef=\"0\"><hp:t></hp:t></hp:run>");
@@ -1329,7 +1615,7 @@ fn emit_paragraph(
                     "<hp:run charPrIDRef=\"0\"><hp:ctrl><hp:{tag} number=\"{number}\" prefixChar=\"{prefix}\" suffixChar=\"{suffix}\" instId=\"{inst}\">\
 <hp:subList id=\"\" textDirection=\"HORIZONTAL\" lineWrap=\"BREAK\" vertAlign=\"TOP\" linkListIDRef=\"0\" linkListNextIDRef=\"0\" textWidth=\"0\" textHeight=\"0\" hasTextRef=\"0\" hasNumRef=\"0\">"
                 ));
-                emit_cell_content(out, body, ctx.base_para_ref, ctx.plain_ref, ctx.cref, ctx.bf, ctx.shade_ref, next_id);
+                emit_cell_content(out, body, ctx, next_id);
                 out.push_str(&format!("</hp:subList></hp:{tag}></hp:ctrl></hp:run>"));
             }
         }
@@ -1337,52 +1623,76 @@ fn emit_paragraph(
     out.push_str("</hp:p>");
 }
 
-/// Emit a native `<hp:tbl>` honoring cell merge (colSpan/rowSpan) + per-cell shade. Covered
+/// Emit a native `<hp:tbl>` honoring cell merge (colSpan/rowSpan) + per-cell borders/shade. Covered
 /// positions are omitted and fully-covered `<hp:tr>` are suppressed (Hancom's convention).
-/// Geometry is synthetic — columns sum to the standard text width (42520 HWPUNIT); Hancom
-/// re-lays-out on open.
-#[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_arguments)]
-fn emit_table(
-    out: &mut String,
-    tid: u64,
-    rows: usize,
-    cols: usize,
-    cells: &[PlacedCell],
-    col_widths: &[i32],
-    para_ref: &str,
-    plain_ref: &str,
-    cref: &dyn Fn(usize) -> String,
-    bf: &str,
-    shade_ref: &BTreeMap<String, String>,
-    next_id: &mut u64,
-) {
+/// Geometry uses the CAPTURED real values when present (issue 054, F2 — col widths, per-row stored
+/// heights, in/out margins, outline borderFill); otherwise the legacy synthetic constants, so an
+/// editor-inserted table (nothing captured) emits byte-identically to pre-F2. Hancom re-lays-out
+/// on open either way — but OUR re-open (rhwp parse → lift) reads these values back as the
+/// row-height floors / paddings that keep pagination stable (the 8p→6p 왕복 증상).
+fn emit_table(out: &mut String, tid: u64, t: &EmitTable, ctx: &BodyCtx, next_id: &mut u64) {
+    let (bf, bf_ref) = (ctx.bf, ctx.bf_ref);
     const W_DEFAULT: u64 = 42520; // standard A4 text width in HWPUNIT (fallback when widths unknown)
-    const RH: u64 = 2200; // ~7.7mm per row
+    const RH: u64 = 2200; // ~7.7mm per row (fallback when stored heights unknown)
+    let (rows, cols) = (t.rows, t.cols);
     // Use the CAPTURED per-column widths when they're present and valid (one positive entry per
     // column) — this preserves a .hwp table's real proportions (e.g. a narrow label column + wide
     // value column). Otherwise fall back to uniform columns summing to the standard text width.
-    let widths_ok = col_widths.len() == cols && col_widths.iter().all(|&w| w > 0);
+    let widths_ok = t.col_widths.len() == cols && t.col_widths.iter().all(|&w| w > 0);
     let widths: Vec<u64> = if widths_ok {
-        col_widths.iter().map(|&w| w as u64).collect()
+        t.col_widths.iter().map(|&w| w as u64).collect()
     } else {
         let cw = W_DEFAULT / cols as u64;
         (0..cols).map(|c| if c + 1 == cols { W_DEFAULT - cw * (cols as u64 - 1) } else { cw }).collect()
     };
     let w_total: u64 = widths.iter().sum();
     let span_w = |c: usize, n: usize| widths[c..(c + n).min(cols)].iter().sum::<u64>();
-    let height = RH * rows as u64;
+    // Per-row STORED heights (F2): emitted verbatim into <hp:cellSz> so a re-open lifts back the
+    // SAME row-height floors (020) the original .hwp carried. A 0 slot stays 0 = content-sized/auto
+    // (never inflated to RH — that's what repaginated re-opened docs). Malformed/absent vec → the
+    // legacy uniform RH per row (editor-inserted tables; byte-stable with pre-F2).
+    let heights_ok = t.row_heights.len() == rows && t.row_heights.iter().any(|&h| h > 0);
+    let rh_of =
+        |r: usize| -> u64 { if heights_ok { t.row_heights[r].max(0) as u64 } else { RH } };
+    // A ROW-SPANNING cell's <hp:cellSz height> must round-trip idempotently: the lift distributes a
+    // spanning cell's height EVENLY (height/span) across its rows and takes the per-row max, so
+    // emitting the SUM of unequal row heights would re-lift as sum/span and INFLATE the shorter rows
+    // (measured: benchmark1 표 7/48 rows grew 7088→9804 on reopen). `span × min(row heights)` is the
+    // unique even-distributable value that (a) never raises any covered row (min ≤ each row) and
+    // (b) exactly reproduces rows the span itself determined (there min == the span's own per-row
+    // contribution) — recovering the original stored height in the common case.
+    let span_h = |r: usize, n: usize| -> u64 {
+        let end = (r + n).min(rows);
+        let n_eff = end.saturating_sub(r).max(1) as u64;
+        if n_eff == 1 {
+            return rh_of(r);
+        }
+        (r..end).map(rh_of).min().unwrap_or(0) * n_eff
+    };
+    let height = (0..rows).map(rh_of).sum::<u64>();
     let w = w_total; // table box width = sum of column widths
+    // Outer margins: all-zero means "nothing captured" (editor tables) → the legacy 283 box. (A
+    // lifted table with genuinely all-zero 바깥 여백 also gets 283 — a documented approximation;
+    // benchmark gov-docs carry non-zero margins.)
+    let [oml, omr, omt, omb] = if t.outer_margin.iter().all(|&m| m == 0) {
+        [283; 4]
+    } else {
+        t.outer_margin.map(|m| m.max(0))
+    };
+    let [iml, imr, imt, imb] = t.padding.unwrap_or([510, 510, 141, 141]);
+    // Table OUTLINE borderFill (표 외곽): the synthesized faithful entry, else the reused document bf.
+    let tbl_bf =
+        t.bf_key.as_deref().and_then(|k| bf_ref.get(k)).map(String::as_str).unwrap_or(bf);
     out.push_str(&format!(
-        "<hp:tbl id=\"{tid}\" zOrder=\"0\" numberingType=\"TABLE\" textWrap=\"TOP_AND_BOTTOM\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" pageBreak=\"CELL\" repeatHeader=\"1\" rowCnt=\"{rows}\" colCnt=\"{cols}\" cellSpacing=\"0\" borderFillIDRef=\"{bf}\" noAdjust=\"0\">\
+        "<hp:tbl id=\"{tid}\" zOrder=\"0\" numberingType=\"TABLE\" textWrap=\"TOP_AND_BOTTOM\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" pageBreak=\"CELL\" repeatHeader=\"1\" rowCnt=\"{rows}\" colCnt=\"{cols}\" cellSpacing=\"0\" borderFillIDRef=\"{tbl_bf}\" noAdjust=\"0\">\
 <hp:sz width=\"{w}\" widthRelTo=\"ABSOLUTE\" height=\"{height}\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/>\
 <hp:pos treatAsChar=\"1\" affectLSpacing=\"0\" flowWithText=\"1\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PARA\" horzRelTo=\"COLUMN\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"0\" horzOffset=\"0\"/>\
-<hp:outMargin left=\"283\" right=\"283\" top=\"283\" bottom=\"283\"/>\
-<hp:inMargin left=\"510\" right=\"510\" top=\"141\" bottom=\"141\"/>"
+<hp:outMargin left=\"{oml}\" right=\"{omr}\" top=\"{omt}\" bottom=\"{omb}\"/>\
+<hp:inMargin left=\"{iml}\" right=\"{imr}\" top=\"{imt}\" bottom=\"{imb}\"/>"
     ));
     for r in 0..rows {
         // Origin cells whose top-left lies in this row, left to right.
-        let mut row_cells: Vec<&PlacedCell> = cells.iter().filter(|c| c.row == r).collect();
+        let mut row_cells: Vec<&PlacedCell> = t.cells.iter().filter(|c| c.row == r).collect();
         row_cells.sort_by_key(|c| c.col);
         if row_cells.is_empty() {
             continue; // fully covered by row-spans from above — suppress the <hp:tr>
@@ -1390,29 +1700,32 @@ fn emit_table(
         out.push_str("<hp:tr>");
         for cell in row_cells {
             let cellbf = cell
-                .shade
+                .bf_key
                 .as_ref()
-                .and_then(|h| shade_ref.get(h))
+                .and_then(|k| bf_ref.get(k))
                 .map(String::as_str)
                 .unwrap_or(bf);
             let header = if r == 0 { "1" } else { "0" };
+            // Cell padding: its OWN margins when declared (hasMargin="1"), else the table default.
+            let has_margin = if cell.padding.is_some() { "1" } else { "0" };
+            let [cml, cmr, cmt, cmb] = cell.padding.unwrap_or([iml, imr, imt, imb]);
             out.push_str(&format!(
-                "<hp:tc name=\"\" header=\"{header}\" hasMargin=\"0\" protect=\"0\" editable=\"0\" dirty=\"0\" borderFillIDRef=\"{cellbf}\">\
+                "<hp:tc name=\"\" header=\"{header}\" hasMargin=\"{has_margin}\" protect=\"0\" editable=\"0\" dirty=\"0\" borderFillIDRef=\"{cellbf}\">\
 <hp:subList id=\"\" textDirection=\"HORIZONTAL\" lineWrap=\"BREAK\" vertAlign=\"CENTER\" linkListIDRef=\"0\" linkListNextIDRef=\"0\" textWidth=\"0\" textHeight=\"0\" hasTextRef=\"0\" hasNumRef=\"0\">"
             ));
             // The cell's full content — paragraphs AND nested tables, recursively.
-            emit_cell_content(out, &cell.content, para_ref, plain_ref, cref, bf, shade_ref, next_id);
+            emit_cell_content(out, &cell.content, ctx, next_id);
             out.push_str(&format!(
                 "</hp:subList>\
 <hp:cellAddr colAddr=\"{}\" rowAddr=\"{r}\"/>\
 <hp:cellSpan colSpan=\"{}\" rowSpan=\"{}\"/>\
 <hp:cellSz width=\"{}\" height=\"{}\"/>\
-<hp:cellMargin left=\"510\" right=\"510\" top=\"141\" bottom=\"141\"/></hp:tc>",
+<hp:cellMargin left=\"{cml}\" right=\"{cmr}\" top=\"{cmt}\" bottom=\"{cmb}\"/></hp:tc>",
                 cell.col,
                 cell.col_span,
                 cell.row_span,
                 span_w(cell.col, cell.col_span),
-                RH * cell.row_span as u64,
+                span_h(cell.row, cell.row_span),
             ));
         }
         out.push_str("</hp:tr>");
@@ -1546,6 +1859,98 @@ mod tests {
         // round-trips + opens safely
         let doc2 = parse_semantic(&out).unwrap();
         assert!(doc2.plain_text().contains("합성된 글자"));
+        assert!(crate::export::validate_open_safety(&out).ok);
+    }
+
+    /// 054 F2: a table carrying CAPTURED real geometry (row heights / paddings / outer margins /
+    /// per-edge borders) emits those actual values — no more RH·510/141·283 hardcodes — and the
+    /// bordered cell references a SYNTHESIZED faithful borderFill, not the reused table bf.
+    #[test]
+    fn table_emits_captured_real_geometry_and_borders() {
+        let mut doc = parse_semantic(&showcase()).unwrap();
+        let red = Color::from_hex("#FF0000").unwrap();
+        let mk = |row: usize, text: &str| Cell {
+            row,
+            col: 0,
+            blocks: vec![Block::Paragraph(Paragraph {
+                runs: vec![Run { char_shape: 0, content: vec![Inline::Text(text.into())], ..Default::default() }],
+                dirty: Dirty(true),
+                ..Default::default()
+            })],
+            dirty: Dirty(true),
+            ..Default::default()
+        };
+        let mut c0 = mk(0, "위");
+        c0.padding = Some([100, 200, 50, 60]); // 셀 고유 여백 → hasMargin="1"
+        c0.borders = [
+            Some(CellEdge { color: red, style: LineStyle::Solid, width_px: 1.0 }), // left: 0.25mm red
+            None,
+            None,
+            Some(CellEdge { color: Color { r: 0, g: 0, b: 0, a: 255 }, style: LineStyle::None, width_px: 0.5 }), // bottom: 선없음
+        ];
+        let c1 = mk(1, "아래");
+        let sec = doc.sections.get_mut(0).unwrap();
+        sec.blocks.push(Block::Table(Table {
+            rows: 2,
+            cols: 1,
+            cells: vec![c0, c1],
+            col_widths: vec![8000],
+            row_heights: vec![1500, 3000], // 저장 행높이 실값 (020 floor의 재방출 소스)
+            padding: Some([400, 401, 402, 403]), // 표 기본 안쪽 여백 (inMargin)
+            outer_margin_left: 10,
+            outer_margin_right: 20,
+            outer_margin_top: 30,
+            outer_margin_bottom: 40,
+            dirty: Dirty(true),
+            ..Default::default()
+        }));
+        sec.dirty.mark();
+        let out = serialize(&doc).unwrap();
+        let pkg = Package::open(&out).unwrap();
+        let sec0 = String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap();
+        // 실값 방출 (하드코딩 제거 증빙)
+        assert!(sec0.contains(r#"<hp:inMargin left="400" right="401" top="402" bottom="403"/>"#), "표 안쪽 여백 실값");
+        assert!(sec0.contains(r#"<hp:outMargin left="10" right="20" top="30" bottom="40"/>"#), "표 바깥 여백 실값");
+        assert!(sec0.contains(r#"<hp:cellSz width="8000" height="1500"/>"#), "행0 저장 높이");
+        assert!(sec0.contains(r#"<hp:cellSz width="8000" height="3000"/>"#), "행1 저장 높이");
+        assert!(sec0.contains(r#"height="4500""#), "표 전체 높이 = Σ행높이");
+        assert!(sec0.contains(r#"hasMargin="1""#) && sec0.contains(r#"<hp:cellMargin left="100" right="200" top="50" bottom="60"/>"#), "셀 고유 여백 실값");
+        // 헤더에 충실한 borderFill 합성 (좌: SOLID 0.25mm 빨강, 하: 선없음)
+        let header = String::from_utf8(pkg.read_header().unwrap()).unwrap();
+        assert!(header.contains(r##"<hh:leftBorder type="SOLID" width="0.25 mm" color="#FF0000"/>"##), "좌 테두리 실값 합성: {header}");
+        assert!(header.contains(r#"<hh:bottomBorder type="NONE""#), "하 테두리 선없음 합성");
+        assert_eq!(header.matches("<hh:borderFills").count(), 1, "container balanced");
+        assert!(crate::export::validate_open_safety(&out).ok);
+    }
+
+    /// 054: 표만 앵커하는 빈 문단은 방출에서 생략된다(표 래퍼 <hp:p>가 앵커 역할) — 왕복마다 표당
+    /// 빈 줄이 하나씩 자라는 증식을 막는다. 앵커의 쪽나누기는 래퍼로 이관된다.
+    #[test]
+    fn pure_table_anchor_paragraph_is_elided_and_break_rides_wrapper() {
+        let mut doc = parse_semantic(&showcase()).unwrap();
+        let sec = doc.sections.get_mut(0).unwrap();
+        sec.blocks.push(Block::Paragraph(Paragraph {
+            is_table_anchor: true,
+            page_break_before: true,
+            dirty: Dirty(true),
+            ..Default::default()
+        }));
+        sec.blocks.push(Block::Table(Table {
+            rows: 1,
+            cols: 1,
+            cells: vec![Cell { blocks: vec![], dirty: Dirty(true), ..Default::default() }],
+            dirty: Dirty(true),
+            ..Default::default()
+        }));
+        sec.dirty.mark();
+        let out = serialize(&doc).unwrap();
+        let pkg = Package::open(&out).unwrap();
+        let sec0 = String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap();
+        // 래퍼가 쪽나누기를 이어받고, 별도의 빈 앵커 <hp:p>는 추가되지 않는다. (showcase 원본에도
+        // 표가 있으므로 마지막 <hp:tbl> = 방금 append 된 표를 본다.)
+        let tbl_at = sec0.rfind("<hp:tbl").expect("table emitted");
+        let wrapper_open = sec0[..tbl_at].rfind("<hp:p ").expect("wrapper <hp:p>");
+        assert!(sec0[wrapper_open..tbl_at].contains(r#"pageBreak="1""#), "앵커의 쪽나누기가 래퍼로 이관");
         assert!(crate::export::validate_open_safety(&out).ok);
     }
 

@@ -830,6 +830,12 @@ fn parse_table(el: &JsxElement) -> Result<Table> {
         row_heights,
         outer_margin_top: el.attrs.get("data-omt").and_then(|v| v.parse().ok()).unwrap_or(0),
         outer_margin_bottom: el.attrs.get("data-omb").and_then(|v| v.parse().ok()).unwrap_or(0),
+        // F2 serialization-fidelity fields (054) are not projected into JSX yet (the JSX surface is
+        // render/edit-oriented): a JSX round-trip keeps pre-F2 semantics for them (defaults).
+        outer_margin_left: 0,
+        outer_margin_right: 0,
+        padding: None,
+        borders: [None; 4],
         provenance: el.attrs.get("data-prov").map(|s| decode_provenance(s)).unwrap_or_default(),
         passthrough: parse_pass_attr(el)?,
         // src_span is HWPX-export provenance (issue 057) — a JSX projection never carries it
@@ -854,6 +860,8 @@ fn parse_cell(el: &JsxElement) -> Result<Cell> {
         borders: el.attrs.get("data-borders").map(|s| decode_cell_borders(s)).unwrap_or([None; 4]),
         diagonal: el.attrs.get("data-diag").and_then(|s| decode_cell_diagonal(s)),
         src_span: None, // HWPX-export provenance (issue 057) — not part of the JSX projection
+        // Cell-own padding (054 F2) is serialization-fidelity data, not yet projected into JSX.
+        padding: None,
         dirty: Dirty(el.attrs.contains_key("data-dirty")),
     })
 }

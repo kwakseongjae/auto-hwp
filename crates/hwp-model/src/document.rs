@@ -283,8 +283,9 @@ pub struct Table {
     /// existing docs/layout/oracle are unaffected). A slot of `0` means "that row stays content-sized";
     /// a slot `> 0` is honored as a FLOOR (`max(content, override)`) in the typesetter
     /// (`hwp_typeset::apply_row_overrides`). Honored by the own-render surface, the PDF export (both go
-    /// through `place_doc`), and the HTML export (`data-rowh` → per-row `min-height`). NOT yet honored
-    /// by the HWPX serializer, which emits a uniform constant row height (a separate fidelity gap).
+    /// through `place_doc`), the HTML export (`data-rowh` → per-row `min-height`), AND the HWPX
+    /// serializer (issue 054, F2): `<hp:cellSz>` re-emits these stored heights so a reopened
+    /// conversion lifts back the SAME floors (round-trip pagination stability).
     pub row_heights: Vec<HwpUnit>,
     /// Outer vertical margins (바깥 여백, HWPUNIT) above/below the table object — the gap HWP keeps
     /// between a table and its neighbours. Lifted from the binary; 0 when unknown. Without these,
@@ -297,6 +298,19 @@ pub struct Table {
     /// (issue 057). `None` ⇒ synthesized/lifted table (no original XML to anchor to) → the
     /// legacy append path. Export provenance only — render/equality ignore it.
     pub src_span: Option<(usize, usize)>,
+    /// Outer horizontal margins (바깥 여백 좌/우, HWPUNIT) — captured for faithful HWPX re-emission
+    /// (`<hp:outMargin>`); the typesetter doesn't consume these yet (issue 054, F2). 0 when unknown.
+    pub outer_margin_left: HwpUnit,
+    pub outer_margin_right: HwpUnit,
+    /// Table-default cell inner padding `[left, right, top, bottom]` (안쪽 여백, HWPUNIT — HWPX
+    /// `<hp:inMargin>`). A cell WITHOUT its own [`Cell::padding`] uses this. `None` = unknown (an
+    /// editor-inserted table): the serializer emits the legacy 510/141 defaults, byte-stable with
+    /// pre-F2 output. (issue 054, F2 — replaces the hardcoded 510/141.)
+    pub padding: Option<[HwpUnit; 4]>,
+    /// Table OUTLINE borders `[left, right, top, bottom]` from the table's own borderFill (표 외곽
+    /// 테두리 — HWPX `<hp:tbl borderFillIDRef>`). Captured for faithful re-emission; `[None; 4]` =
+    /// unknown (serializer falls back to reusing an existing table borderFill, the pre-F2 behavior).
+    pub borders: [Option<CellEdge>; 4],
     pub provenance: Provenance,
     pub passthrough: Passthrough,
     pub dirty: Dirty,
@@ -404,6 +418,12 @@ pub struct Cell {
     /// synthesized/inserted cell (no original XML) → the enclosing table falls back to a
     /// whole-table re-emit (still anchored in place when the table carries a span).
     pub src_span: Option<(usize, usize)>,
+    /// Cell-OWN inner padding `[left, right, top, bottom]` (HWPUNIT) — `Some` ONLY when the cell
+    /// declares its own margins (HWP list_attr bit 16, `apply_inner_margin`; HWPX `hasMargin="1"`).
+    /// `None` = inherit the table default ([`Table::padding`], else the serializer's legacy 510/141).
+    /// Captured for faithful HWPX re-emission (issue 054, F2); the typesetter keeps its constant
+    /// `CELL_PAD` (the 020-calibrated reserve) and does not consume this yet.
+    pub padding: Option<[HwpUnit; 4]>,
     pub dirty: Dirty,
 }
 
@@ -472,6 +492,7 @@ impl Default for Cell {
             borders: [None; 4],
             diagonal: None,
             src_span: None,
+            padding: None,
             dirty: Dirty::default(),
         }
     }

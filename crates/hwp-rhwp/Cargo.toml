@@ -34,3 +34,6 @@ hwp-ingest = { workspace = true }
 # Issue 024 regression (tests/self_diag_no_loss.rs): render benchmark1 to the REAL own-render SVG and
 # assert the 자가진단표's "…이사장 귀하" survives AND sits inside the outer 상자 (no silent overflow drop).
 hwp-render = { workspace = true }
+# Issue 054 golden (tests/roundtrip_pages.rs): 무편집 .hwp → hwp-hwpx 재방출 HWPX → 재열기(재lift)
+# 페이지 수 보존. hwp-hwpx는 hwp-rhwp에 의존하지 않으므로 dev-dep 순환 없음.
+hwp-hwpx = { workspace = true }

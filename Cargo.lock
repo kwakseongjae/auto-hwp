@@ -2131,6 +2131,7 @@ dependencies = [
 name = "hwp-rhwp"
 version = "0.0.1"
 dependencies = [
+ "hwp-hwpx",
  "hwp-ingest",
  "hwp-model",
  "hwp-render",
