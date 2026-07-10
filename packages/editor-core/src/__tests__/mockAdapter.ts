@@ -1,5 +1,5 @@
 import type { EngineAdapter } from "../adapter";
-import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "../types";
+import type { BlockHit, CaretRect, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "../types";
 
 /** A headless EngineAdapter for node tests: canned geometry resolvers + a spy-able applyIntent/undo.
  *  No wasm, no DOM — pure in-memory. Mirrors @tf-hwp/react's test MockAdapter so the same selection
@@ -42,6 +42,12 @@ export class MockAdapter implements EngineAdapter {
       /** Canned caret rect for `caretRect` (issue 041), or a `(page, node, offset)` resolver (so a test
        *  can model past-end CLAMP + "not on this page" = null). Omit to OMIT the method. */
       caret?: CaretRect | null | ((page: number, node: number, offset: number) => CaretRect | null);
+      /** Canned CELL text hit for `hitTestCellText` (issue 053), or a coordinate-aware resolver. Present
+       *  makes the method answer; omit to OMIT it (a backend with no cell caret). */
+      cellText?: CellTextHit | null | ((page: number, x: number, y: number) => CellTextHit | null);
+      /** Canned cell caret rect for `caretRectCell` (issue 053), or an address-aware resolver (so a test
+       *  can model the paraLen clamp / an unresolvable address = null). Omit to OMIT the method. */
+      cellCaret?: CellCaretRect | null | ((section: number, block: number, row: number, col: number, para: number, offset: number) => CellCaretRect | null);
       /** Canned find matches (issue 045), or a `(query, opts)` resolver. Present makes `find`/`replace`
        *  answer; omit to OMIT both (a backend without find/replace). */
       find?: FindMatch[] | ((query: string, opts: FindOptions) => FindMatch[]);
@@ -68,6 +74,8 @@ export class MockAdapter implements EngineAdapter {
     if (!("runs" in this.opts)) (this as { blockRuns?: unknown }).blockRuns = undefined;
     if (!("hitText" in this.opts)) (this as { hitTestText?: unknown }).hitTestText = undefined;
     if (!("caret" in this.opts)) (this as { caretRect?: unknown }).caretRect = undefined;
+    if (!("cellText" in this.opts)) (this as { hitTestCellText?: unknown }).hitTestCellText = undefined;
+    if (!("cellCaret" in this.opts)) (this as { caretRectCell?: unknown }).caretRectCell = undefined;
     if (!("find" in this.opts)) {
       (this as { find?: unknown }).find = undefined;
       (this as { replace?: unknown }).replace = undefined;
@@ -136,6 +144,14 @@ export class MockAdapter implements EngineAdapter {
   async caretRect(page: number, node: number, offset: number): Promise<CaretRect | null> {
     const c = this.opts.caret;
     return (typeof c === "function" ? c(page, node, offset) : c) ?? null;
+  }
+  async hitTestCellText(page: number, x: number, y: number): Promise<CellTextHit | null> {
+    const h = this.opts.cellText;
+    return (typeof h === "function" ? h(page, x, y) : h) ?? null;
+  }
+  async caretRectCell(section: number, block: number, row: number, col: number, para: number, offset: number): Promise<CellCaretRect | null> {
+    const c = this.opts.cellCaret;
+    return (typeof c === "function" ? c(section, block, row, col, para, offset) : c) ?? null;
   }
   async find(query: string, opts: FindOptions): Promise<FindMatch[]> {
     this.finds.push({ query, opts });

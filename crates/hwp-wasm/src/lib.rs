@@ -334,6 +334,36 @@ impl HwpDoc {
         b.map(|b| serde_json::to_string(&b).map_err(|e| js_err("serialize", &e.to_string()))).transpose()
     }
 
+    /// Cell-addressed caret, hit half (issue 053): the TABLE-CELL text caret target under own-render
+    /// px `(x, y)` on `page` — a JSON **string** `{section, block, row, col, para, offset, para_len,
+    /// caret:{page,x,top,height}}`, or **JS `null`** off any cell text (an `Option<String>` → `null` —
+    /// policy 018). Served from the cached placement with THIS handle's injected fonts, so the caret
+    /// geometry agrees with the visible SVG exactly (the Intent lane's default-font dispatch would
+    /// drift once a font is registered — same reasoning as `tableRowBoundaries`).
+    #[wasm_bindgen(js_name = cellTextHit)]
+    pub fn cell_text_hit(&self, page: u32, x: f64, y: f64) -> Result<Option<String>, JsValue> {
+        let fonts = hwp_session::own_render_fonts_with(&self.fonts);
+        let h = self.with_placed(|doc, placed| {
+            hwp_session::cell_text_hit_placed(doc, placed, fonts.as_ref(), page, x, y)
+        })?;
+        h.map(|h| serde_json::to_string(&h).map_err(|e| js_err("serialize", &e.to_string()))).transpose()
+    }
+
+    /// Cell-addressed caret, geometry half (issue 053): the caret rect at char `offset` of the
+    /// `para`-th paragraph of cell `(row, col)` of the table block at `(section, block)` — a JSON
+    /// **string** `{page, x, top, height}` (own-render px + the owning fragment's 0-based page), or
+    /// **JS `null`** when the address doesn't resolve (policy 018). A PAST-END `offset` CLAMPS to the
+    /// paragraph end (a rect, never null — the `CaretRect` contract). Same injected-font placement as
+    /// `cellTextHit`, so hit → caret → typing all stay on one geometry.
+    #[wasm_bindgen(js_name = cellCaretRect)]
+    pub fn cell_caret_rect(&self, section: usize, block: usize, row: usize, col: usize, para: usize, offset: usize) -> Result<Option<String>, JsValue> {
+        let fonts = hwp_session::own_render_fonts_with(&self.fonts);
+        let c = self.with_placed(|doc, placed| {
+            hwp_session::cell_caret_rect_placed(doc, placed, fonts.as_ref(), section, block, row, col, para, offset)
+        })?;
+        c.map(|c| serde_json::to_string(&c).map_err(|e| js_err("serialize", &e.to_string()))).transpose()
+    }
+
     /// Page geometry in own-render px: the page box + printable-area margins of `page`, for the editor
     /// ruler (issue 027 룰러). A JSON **string** `{w,h,ml,mt,mr,mb}` (all px = HWPUNIT/75), or **JS
     /// `null`** when the page is out of range (an `Option<String>` → `null` — policy 018). Additive wasm
@@ -490,5 +520,11 @@ fn outcome_to_json(o: &hwp_mcp::Outcome) -> serde_json::Value {
             json!({ "kind": "caret", "caret": serde_json::to_value(caret).unwrap_or(serde_json::Value::Null) })
         }
         Edited { pages } => json!({ "kind": "edited", "pages": pages }),
+        HitCell(hit) => {
+            json!({ "kind": "hitCell", "hit": serde_json::to_value(hit).unwrap_or(serde_json::Value::Null) })
+        }
+        CaretCell(caret) => {
+            json!({ "kind": "caretCell", "caret": serde_json::to_value(caret).unwrap_or(serde_json::Value::Null) })
+        }
     }
 }

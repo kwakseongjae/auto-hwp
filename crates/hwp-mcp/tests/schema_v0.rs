@@ -128,6 +128,11 @@ fn examples() -> Vec<Example> {
         //      appends) or null/absent (section END — the InsertImage anchor precedent). ----
         e("InsertTableAt", r#"{"intent":"InsertTableAt","section":0,"index":1,"rows":[[{"text":"머리","bold":true},{"text":"칸"}],[{"text":"A2"},{"text":"B2"}]]}"#, Synthetic),
         e("InsertParagraphAt", r#"{"intent":"InsertParagraphAt","section":0,"index":0,"runs":[{"text":"새 문단","bold":true}],"para":{"align":"center"}}"#, Synthetic),
+        // ---- cell-addressed caret (issue 053 — own-render geometry, no rhwp gate). READ-ONLY
+        //      queries (no revision bump), so they are exercised by the dedicated round-trip test
+        //      `cell_caret_intents_dispatch_and_roundtrip` below instead of the Synthetic mutator lane. ----
+        e("HitTestCell", r#"{"intent":"HitTestCell","page":0,"x":120.0,"y":90.0}"#, DeserializeOnly),
+        e("CaretRectCell", r#"{"intent":"CaretRectCell","section":0,"block":1,"row":0,"col":0,"para":0,"offset":1}"#, DeserializeOnly),
     ]
 }
 
@@ -148,7 +153,64 @@ fn de_err(v: Value) -> String {
 /// example trips the snapshot test). Keep in lockstep with the `Intent` enum count.
 #[test]
 fn every_intent_variant_has_a_documented_example() {
-    assert_eq!(examples().len(), 38, "one JSON example per Intent variant (see INTENT-SCHEMA.md)");
+    assert_eq!(examples().len(), 40, "one JSON example per Intent variant (see INTENT-SCHEMA.md)");
+}
+
+/// Issue 053 — the cell-addressed caret intents are READ-ONLY queries, so the Synthetic mutator lane
+/// (which asserts a revision bump) can't cover them. Dispatch both against the deterministic 3×2-table
+/// doc and assert the real contract: a hit inside the table resolves to a cell caret target whose
+/// address round-trips through `CaretRectCell` to the SAME geometry; a miss and an unresolvable
+/// address are `null` (018), never an error; and neither query bumps the revision.
+#[test]
+fn cell_caret_intents_dispatch_and_roundtrip() {
+    use hwp_mcp::Outcome;
+    let mut s = synthetic_session();
+    let before = s.doc.as_ref().unwrap().revision();
+    // The synthetic table is block 1 of section 0; its placed box is discoverable via CaretRectCell
+    // itself (offset 0 of cell (0,0)'s first paragraph = the cell text origin).
+    let caret = match apply_intent_json(&mut s, &parse(r#"{"intent":"CaretRectCell","section":0,"block":1,"row":0,"col":0,"para":0,"offset":0}"#)) {
+        Ok(Outcome::CaretCell(Some(c))) => c,
+        Ok(Outcome::CaretCell(None)) => panic!("cell (0,0) must have caret geometry"),
+        Ok(_) => panic!("CaretRectCell returned a non-caret outcome"),
+        Err(e) => panic!("CaretRectCell errored: {e}"),
+    };
+    assert!(caret.height > 0.0, "caret has a line height");
+    // Hit exactly on the caret line → the same cell address + offset 0, same geometry.
+    let hit_json = format!(
+        r#"{{"intent":"HitTestCell","page":{},"x":{},"y":{}}}"#,
+        caret.page,
+        caret.x + 0.1,
+        caret.top + caret.height / 2.0
+    );
+    match apply_intent_json(&mut s, &parse(&hit_json)) {
+        Ok(Outcome::HitCell(Some(h))) => {
+            assert_eq!((h.section, h.block, h.row, h.col, h.para, h.offset), (0, 1, 0, 0, 0, 0));
+            assert!(h.para_len >= 2, "cell A1 has text");
+            assert!((h.caret.x - caret.x).abs() < 0.01, "hit caret x == addressed caret x");
+        }
+        Ok(Outcome::HitCell(None)) => panic!("hit on the caret line must resolve"),
+        Ok(_) => panic!("HitTestCell returned a non-hit outcome"),
+        Err(e) => panic!("HitTestCell errored: {e}"),
+    }
+    // 018 null policy: a click off any table and an unresolvable address are null, never an error.
+    match apply_intent_json(&mut s, &parse(r#"{"intent":"HitTestCell","page":0,"x":0.5,"y":0.5}"#)) {
+        Ok(Outcome::HitCell(hit)) => assert!(hit.is_none(), "top-left page corner is off the table"),
+        Ok(_) => panic!("HitTestCell returned a non-hit outcome"),
+        Err(e) => panic!("HitTestCell (miss) errored: {e}"),
+    }
+    match apply_intent_json(&mut s, &parse(r#"{"intent":"CaretRectCell","section":0,"block":1,"row":9,"col":9,"para":0,"offset":0}"#)) {
+        Ok(Outcome::CaretCell(c)) => assert!(c.is_none(), "unknown cell address is null"),
+        Ok(_) => panic!("CaretRectCell returned a non-caret outcome"),
+        Err(e) => panic!("CaretRectCell (unknown cell) errored: {e}"),
+    }
+    // Past-end offset CLAMPS to the paragraph end (a rect, never null) — the CaretRect contract.
+    match apply_intent_json(&mut s, &parse(r#"{"intent":"CaretRectCell","section":0,"block":1,"row":0,"col":0,"para":0,"offset":9999}"#)) {
+        Ok(Outcome::CaretCell(c)) => assert!(c.is_some(), "past-end offset clamps, never null"),
+        Ok(_) => panic!("CaretRectCell returned a non-caret outcome"),
+        Err(e) => panic!("CaretRectCell (past-end) errored: {e}"),
+    }
+    // Read-only: no revision bump.
+    assert_eq!(s.doc.as_ref().unwrap().revision(), before, "caret queries never mutate");
 }
 
 /// Drift guard: every documented example deserializes into the REAL `Intent` (deny_unknown_fields

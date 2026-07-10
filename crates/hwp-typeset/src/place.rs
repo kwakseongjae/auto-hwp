@@ -981,6 +981,291 @@ fn place_cell_content(
     }
 }
 
+// ---- Cell-addressed caret geometry (issue 053) ----------------------------------------------
+//
+// Read-only re-derivation of `place_cell_content`'s glyph math so a caret can be placed inside a
+// TABLE CELL at character precision, in the SAME own-render coordinates the visible SVG was drawn
+// from (V4: the caret layer never touches layout — these functions only re-run the identical
+// helpers `place_cell_content` used and report positions). This closes the CARET-GAP §5 P1 hole:
+// cell text has no NodeId, so the caret is addressed by `(section, block, row, col, para, offset)`
+// — the same address space `SetTableCellRuns` commits to.
+
+/// A caret rectangle inside a table cell, in own-render ABSOLUTE page coords (HWPUNIT). `page` is
+/// the 0-based page the owning table fragment (the one that draws the cell's text) landed on.
+#[derive(Clone, Debug)]
+pub struct CellCaretRect {
+    pub page: usize,
+    pub x: f64,
+    pub top: f64,
+    pub height: f64,
+}
+
+/// A page-space point resolved to a CELL TEXT caret target: the cell address `(section, block,
+/// row, col)` (row/col MODEL-GLOBAL, like [`PlacedCell`]), the paragraph ordinal `para`, the char
+/// `offset` within it, that paragraph's char count `para_len`, and the caret geometry at the
+/// resolved offset. All geometry HWPUNIT (the session facade converts to px).
+///
+/// ## `para`/`offset` address space — the EDITOR ("\n"-split) space, on purpose
+/// `para` counts the cell text's **"\n"-separated segments** in reading order — NOT raw model
+/// paragraph blocks. A model cell paragraph can contain a FORCED line break (`'\n'` inside a run,
+/// e.g. "라벨\n(Problem)"), and the WHOLE edit lane already treats every `'\n'` as a paragraph
+/// boundary: `block_runs` joins cell paragraphs with "\n" runs, and `SetTableCellRuns` splits the
+/// committed runs back on every `'\n'`. Addressing the caret in that same space means
+/// `global_offset = Σ(para_len_i + 1 for i < para) + offset` over the joined editor text is EXACT —
+/// no separator/forced-break ambiguity between what the caret points at and what a commit rewrites.
+/// `offset ∈ [0, para_len]` never counts a `'\n'` (it is the boundary itself).
+#[derive(Clone, Debug)]
+pub struct CellTextHit {
+    pub section: usize,
+    pub block: usize,
+    pub row: usize,
+    pub col: usize,
+    pub para: usize,
+    pub offset: usize,
+    pub para_len: usize,
+    pub caret: CellCaretRect,
+}
+
+/// One laid-out cell text line handed to [`walk_cell_lines`]'s callback, in the EDITOR address
+/// space (see [`CellTextHit`]): the "\n"-segment ordinal `para` (cell-global), the segment-local
+/// char offset of the line's first glyph `line_start`, the segment's char count `para_len`
+/// (excluding the `'\n'` separator), the absolute line geometry, and the per-glyph advances +
+/// chars for the line (a forced-break line INCLUDES its trailing `'\n'` glyph — callers cap at it).
+/// A line never spans two segments: a `'\n'` always ENDS its line (layout_paragraph's forced break).
+struct CellLineGeom<'a> {
+    para: usize,
+    line_start: usize,
+    x0: f64,
+    top: f64,
+    height: f64,
+    advances: &'a [f64],
+    chars: &'a [char],
+    para_len: usize,
+}
+
+/// Re-drive `place_cell_content`'s EXACT vertical/horizontal accounting over a cell's blocks —
+/// same vertical centering, same indent/align/slack, same per-glyph advances, same trailing-leading
+/// trim — but instead of pushing `PlacedGlyph`s, hand each LINE's geometry to `on_line`. Return
+/// `true` from the callback to stop early. Nested tables advance the cursor (their inner cells are
+/// not caret targets — mirrors "nested cells aren't edit targets").
+fn walk_cell_lines(
+    blocks: &[Block],
+    cx: f64,
+    cy: f64,
+    cw: f64,
+    ch: f64,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+    on_line: &mut dyn FnMut(&CellLineGeom) -> bool,
+) {
+    let textw = (cw - 2.0 * CELL_PAD_X).max(1.0);
+    let content_h: f64 = blocks.iter().map(|b| block_height_for_place(b, doc, textw, fonts)).sum();
+    let mut vy = cy + ((ch - content_h) / 2.0).max(0.0);
+    let plain = FontKey { family: String::new(), bold: false, italic: false };
+    let mut seg_base = 0usize; // cell-global ordinal of this model paragraph's FIRST "\n"-segment
+    for b in blocks {
+        let Block::Paragraph(p) = b else {
+            vy += block_height_for_place(b, doc, textw, fonts);
+            continue;
+        };
+        let glyphs = paragraph_glyphs(p, doc);
+        // "\n"-segment map (the EDITOR address space — see CellTextHit): positions of the forced
+        // breaks split the paragraph into nl_pos.len()+1 segments; a glyph at index i belongs to the
+        // segment holding it, with segment-local offset i - seg_start.
+        let nl_pos: Vec<usize> = glyphs.iter().enumerate().filter(|(_, g)| g.ch == '\n').map(|(i, _)| i).collect();
+        let seg_of = |i: usize| nl_pos.partition_point(|&pos| pos < i);
+        let seg_start = |s: usize| if s == 0 { 0 } else { nl_pos[s - 1] + 1 };
+        let seg_end = |s: usize| nl_pos.get(s).copied().unwrap_or(glyphs.len()); // exclusive of the '\n'
+        let align = doc.para_shapes.get(p.para_shape).map(|s| s.align).unwrap_or_default();
+        let ratio = line_spacing_ratio(p, doc);
+        let ind = indent_of(p, doc, textw);
+        let lines = layout_paragraph(p, doc, ind.wrap_w, fonts);
+        for (li, ls) in lines.iter().enumerate() {
+            let line_indent = ind.left + if li == 0 { ind.first_extra } else { 0.0 };
+            let slack = (ind.wrap_w - if li == 0 { ind.first_extra.max(0.0) } else { 0.0 } - ls.horz_size).max(0.0);
+            let x0 = cx + CELL_PAD_X + line_indent + match align {
+                HorizontalAlign::Right => slack,
+                HorizontalAlign::Center => slack / 2.0,
+                _ => 0.0,
+            };
+            let start = ls.text_pos as usize;
+            let end = lines.get(li + 1).map(|n| n.text_pos as usize).unwrap_or(glyphs.len()).min(glyphs.len());
+            let line_glyphs = glyphs.get(start..end).unwrap_or(&[]);
+            let advances: Vec<f64> = line_glyphs
+                .iter()
+                .map(|g| fonts.advance_width(&plain, g.ch, g.size as i32) * g.ratio + g.spacing_em * g.size)
+                .collect();
+            let chars: Vec<char> = line_glyphs.iter().map(|g| g.ch).collect();
+            let s = seg_of(start); // the line's segment (a '\n' ends its line, so lines never straddle)
+            let stop = on_line(&CellLineGeom {
+                para: seg_base + s,
+                line_start: start - seg_start(s),
+                x0,
+                top: vy,
+                height: ls.vert_size,
+                advances: &advances,
+                chars: &chars,
+                para_len: seg_end(s) - seg_start(s),
+            });
+            if stop {
+                return;
+            }
+            vy += ls.vert_size * ratio;
+        }
+        // Trailing-leading trim — LOCKSTEP with place_cell_content (see its comment).
+        if let Some(last) = lines.last() {
+            vy -= (last.vert_size * (ratio - 1.0)).max(0.0);
+        }
+        seg_base += nl_pos.len() + 1;
+    }
+}
+
+/// The `(page, PlacedCell)` whose fragment DRAWS the cell's text — the fragment that owns the
+/// cell's TOP row (`flush_fragment` draws cell text only there, so a split table's continuation
+/// rect never yields a duplicate/false caret).
+fn owning_cell_rect(placed: &PlacedDoc, section: usize, block: usize, row: usize, col: usize) -> Option<(usize, PlacedCell)> {
+    for (pi, pg) in placed.pages.iter().enumerate() {
+        for t in pg.tables.iter().filter(|t| t.section == section && t.block == block) {
+            if row < t.first_row || row >= t.last_row {
+                continue;
+            }
+            if let Some(c) = t.cells.iter().find(|c| c.row == row && c.col == col) {
+                return Some((pi, c.clone()));
+            }
+        }
+    }
+    None
+}
+
+/// The ACTIVE model cell at `(row, col)` of the table block at `(section, block)`, resolved through
+/// a 1×1 frame wrapper (자가진단표) via `edit_target` — the SAME resolution `block_runs`/
+/// `SetTableCellRuns` use, so the caret address space and the commit address space agree.
+fn model_cell<'a>(doc: &'a SemanticDoc, section: usize, block: usize, row: usize, col: usize) -> Option<&'a Cell> {
+    let Some(Block::Table(t)) = doc.sections.get(section).and_then(|s| s.blocks.get(block)) else {
+        return None;
+    };
+    let t = t.edit_target();
+    t.cells.iter().find(|c| c.active && c.row == row && c.col == col)
+}
+
+/// Cell-addressed caret rect (issue 053): the caret geometry at char `offset` of the `para`-th
+/// paragraph of cell `(row, col)` of the table at `(section, block)` — own-render ABSOLUTE page
+/// HWPUNIT, on the page the owning fragment landed on. A past-end `offset` CLAMPS to the paragraph
+/// end and returns a rect (never `None` for it — the same contract as the NodeId `CaretRect`).
+/// `None` when the address doesn't resolve (no such table/cell/paragraph, or the cell isn't placed).
+pub fn cell_caret_rect(
+    doc: &SemanticDoc,
+    placed: &PlacedDoc,
+    fonts: &dyn FontMetricsProvider,
+    section: usize,
+    block: usize,
+    row: usize,
+    col: usize,
+    para: usize,
+    offset: usize,
+) -> Option<CellCaretRect> {
+    let (page, pc) = owning_cell_rect(placed, section, block, row, col)?;
+    let cell = model_cell(doc, section, block, row, col)?;
+    let mut out: Option<CellCaretRect> = None;
+    walk_cell_lines(&cell.blocks, pc.x, pc.y, pc.w, pc.h, doc, fonts, &mut |lg| {
+        if lg.para > para {
+            return true; // past the target paragraph — the recorded candidate stands
+        }
+        if lg.para < para {
+            return false;
+        }
+        let o = offset.min(lg.para_len); // past-end clamps to the paragraph end (CaretRect contract)
+        if o < lg.line_start {
+            return false; // resolved on an earlier line already
+        }
+        // Chars of THIS line within the segment (a forced-break line's trailing '\n' is the
+        // separator itself — offset o == para_len sits BEFORE it, i.e. at most count-1 advances in).
+        let n = (o - lg.line_start).min(lg.advances.len());
+        // LAST line with `line_start <= o` wins: an offset on a wrap boundary belongs to the
+        // FOLLOWING line's start (typing continues there) — the loop's later overwrite does that.
+        if o <= lg.line_start + lg.advances.len() {
+            let x = lg.x0 + lg.advances[..n].iter().sum::<f64>();
+            out = Some(CellCaretRect { page, x, top: lg.top, height: lg.height });
+        }
+        false
+    });
+    out
+}
+
+/// Cell-addressed hit test (issue 053): resolve a page-space point (HWPUNIT) to the CELL TEXT caret
+/// target under it — the inverse of [`cell_caret_rect`]. Picks the topmost table fragment containing
+/// the point, the cell within it, then the vertically NEAREST text line and the char boundary
+/// nearest to `x` (a click in the padding still carets the closest position — 근접 스냅, mirroring
+/// `block_at`'s nearest-band rule). `None` off any table cell, on a continuation fragment of a
+/// row-spanning cell (its text lives on the owning page), or when the cell has no paragraph.
+pub fn cell_text_hit(
+    doc: &SemanticDoc,
+    placed: &PlacedDoc,
+    fonts: &dyn FontMetricsProvider,
+    page: usize,
+    x: f64,
+    y: f64,
+) -> Option<CellTextHit> {
+    let pg = placed.pages.get(page)?;
+    let t = pg
+        .tables
+        .iter()
+        .filter(|t| x >= t.x && x <= t.x + t.w && y >= t.y && y <= t.y + t.h)
+        .last()?;
+    let pc = t.cell_at(x, y)?;
+    if pc.row < t.first_row {
+        return None; // continuation fragment — the text (and its caret) lives on the owning page
+    }
+    let (section, block) = (t.section, t.block);
+    let cell = model_cell(doc, section, block, pc.row, pc.col)?;
+    let (row, col, cx, cy, cw, chh) = (pc.row, pc.col, pc.x, pc.y, pc.w, pc.h);
+    let mut best: Option<(f64, CellTextHit)> = None;
+    walk_cell_lines(&cell.blocks, cx, cy, cw, chh, doc, fonts, &mut |lg| {
+        // Vertical distance from the click to this line's band (0 inside it) — nearest line wins,
+        // first (upper) line on a tie.
+        let vd = if y < lg.top {
+            lg.top - y
+        } else if y > lg.top + lg.height {
+            y - (lg.top + lg.height)
+        } else {
+            0.0
+        };
+        if best.as_ref().map(|(d, _)| vd < *d).unwrap_or(true) {
+            // Nearest char boundary: advance while the click is past the glyph's midpoint. A forced
+            // line break ('\n') caps the walk — the caret never lands PAST it (that position IS the
+            // segment end; the next segment starts on the next line).
+            let mut cxp = lg.x0;
+            let mut off = lg.line_start;
+            for (i, &a) in lg.advances.iter().enumerate() {
+                if lg.chars[i] == '\n' {
+                    break;
+                }
+                if x > cxp + a / 2.0 {
+                    cxp += a;
+                    off += 1;
+                } else {
+                    break;
+                }
+            }
+            best = Some((
+                vd,
+                CellTextHit {
+                    section,
+                    block,
+                    row,
+                    col,
+                    para: lg.para,
+                    offset: off,
+                    para_len: lg.para_len,
+                    caret: CellCaretRect { page, x: cxp, top: lg.top, height: lg.height },
+                },
+            ));
+        }
+        false
+    });
+    best.map(|(_, h)| h)
+}
+
 /// Per-column LEFT offsets (len `cols + 1`, last = full width) from `col_widths` or an equal split.
 pub fn column_offsets(t: &Table, avail_w: f64) -> Vec<f64> {
     let mut xs = vec![0.0f64; t.cols + 1];
@@ -1727,6 +2012,133 @@ mod tests {
             !placed.pages[0].lines.iter().any(|l| l.color == red),
             "a diagonal over text is suppressed"
         );
+    }
+
+    // ---- Cell-addressed caret geometry (issue 053) ----
+
+    /// A 1×2 table: cell (0,0) holds "가나다", cell (0,1) holds two paragraphs "행1"/"행2".
+    fn caret_doc() -> SemanticDoc {
+        let t = Table {
+            rows: 1,
+            cols: 2,
+            cells: vec![
+                Cell { row: 0, col: 0, blocks: vec![Block::Paragraph(para("가나다"))], ..Default::default() },
+                Cell {
+                    row: 0,
+                    col: 1,
+                    blocks: vec![Block::Paragraph(para("행1")), Block::Paragraph(para("행2"))],
+                    ..Default::default()
+                },
+            ],
+            col_widths: vec![1, 1],
+            ..Default::default()
+        };
+        doc_with(vec![Block::Table(t)])
+    }
+
+    #[test]
+    fn cell_caret_rect_places_offset_zero_at_text_origin_and_is_monotonic() {
+        let doc = caret_doc();
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let pc = placed.pages[0].tables[0].cells.iter().find(|c| c.col == 0).unwrap().clone();
+        let r0 = cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 0, 0, 0).expect("caret at offset 0");
+        assert_eq!(r0.page, 0);
+        assert!((r0.x - (pc.x + CELL_PAD_X)).abs() < 1.0, "offset 0 sits at the cell text origin (left align): {} vs {}", r0.x, pc.x + CELL_PAD_X);
+        assert!(r0.top >= pc.y && r0.top + r0.height <= pc.y + pc.h + 1.0, "caret stays inside the cell box");
+        // Monotonic advance: each next char boundary sits strictly right of the previous.
+        let xs: Vec<f64> = (0..=3)
+            .map(|o| cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 0, 0, o).unwrap().x)
+            .collect();
+        assert!(xs.windows(2).all(|w| w[1] > w[0]), "boundaries advance: {xs:?}");
+        // Past-end clamps to the paragraph end (a rect, never None) — the CaretRect contract.
+        let past = cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 0, 0, 999).expect("past-end clamps");
+        assert_eq!(past.x, xs[3], "offset 999 == offset para_len");
+    }
+
+    #[test]
+    fn cell_text_hit_roundtrips_with_cell_caret_rect() {
+        let doc = caret_doc();
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        // Click just right of the 2nd char boundary of cell (0,0)'s text: expect offset 2 and the
+        // caret geometry to agree with the address-based query.
+        let b2 = cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 0, 0, 2).unwrap();
+        let hit = cell_text_hit(&doc, &placed, &ApproxFontMetrics, 0, b2.x + 1.0, b2.top + b2.height / 2.0)
+            .expect("hit inside the cell text");
+        assert_eq!((hit.section, hit.block, hit.row, hit.col, hit.para), (0, 0, 0, 0, 0));
+        assert_eq!(hit.offset, 2, "nearest boundary is the queried one");
+        assert_eq!(hit.para_len, 3);
+        assert!((hit.caret.x - b2.x).abs() < 0.01 && (hit.caret.top - b2.top).abs() < 0.01, "hit caret == addressed caret");
+    }
+
+    #[test]
+    fn cell_text_hit_addresses_second_paragraph() {
+        let doc = caret_doc();
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        // Cell (0,1) has two paragraphs; the caret for para 1 sits BELOW para 0's.
+        let p0 = cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 1, 0, 0).expect("para 0");
+        let p1 = cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 1, 1, 0).expect("para 1");
+        assert!(p1.top > p0.top, "para 1 line sits below para 0: {} vs {}", p1.top, p0.top);
+        // A click on para 1's line resolves to para 1.
+        let hit = cell_text_hit(&doc, &placed, &ApproxFontMetrics, 0, p1.x + 1.0, p1.top + p1.height / 2.0).unwrap();
+        assert_eq!((hit.para, hit.offset), (1, 0));
+        assert_eq!(hit.para_len, 2);
+    }
+
+    #[test]
+    fn cell_caret_forced_break_addresses_as_editor_segments() {
+        // ONE model paragraph "가\n나" (forced break inside a run) must address as TWO editor
+        // paragraphs — the same "\n"-split space block_runs/SetTableCellRuns speak — so a caret
+        // commit can never garble a forced-broken label cell.
+        let t = Table {
+            rows: 1,
+            cols: 1,
+            cells: vec![Cell { row: 0, col: 0, blocks: vec![Block::Paragraph(para("가\n나"))], ..Default::default() }],
+            col_widths: vec![1],
+            ..Default::default()
+        };
+        let doc = doc_with(vec![Block::Table(t)]);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let p0 = cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 0, 0, 0).expect("segment 0");
+        let p1 = cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 0, 1, 0).expect("segment 1 (after the forced break)");
+        assert!(p1.top > p0.top, "segment 1 renders on the next line: {} vs {}", p1.top, p0.top);
+        assert!(cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 0, 2, 0).is_none(), "only 2 segments");
+        // Hits on each line report segment-local addresses with para_len EXCLUDING the '\n'.
+        let h0 = cell_text_hit(&doc, &placed, &ApproxFontMetrics, 0, p0.x + 1.0, p0.top + p0.height / 2.0).unwrap();
+        assert_eq!((h0.para, h0.offset, h0.para_len), (0, 0, 1));
+        let h1 = cell_text_hit(&doc, &placed, &ApproxFontMetrics, 0, p1.x + 1.0, p1.top + p1.height / 2.0).unwrap();
+        assert_eq!((h1.para, h1.offset, h1.para_len), (1, 0, 1));
+        // A click right of the text end (still INSIDE the cell) stops AT the '\n' — the caret never
+        // lands past the separator (that position is the next segment's start).
+        let h_end = cell_text_hit(&doc, &placed, &ApproxFontMetrics, 0, p0.x + 20_000.0, p0.top + p0.height / 2.0).unwrap();
+        assert_eq!((h_end.para, h_end.offset), (0, 1), "caps at the segment end");
+    }
+
+    #[test]
+    fn cell_caret_null_policy_for_unresolvable_addresses() {
+        let doc = caret_doc();
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        // Unknown cell / paragraph / block → None (018 null policy), never a panic.
+        assert!(cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 5, 5, 0, 0).is_none(), "no such cell");
+        assert!(cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 0, 9, 0).is_none(), "no such paragraph");
+        assert!(cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 9, 0, 0, 0, 0).is_none(), "no such block");
+        // A point off any table → None.
+        assert!(cell_text_hit(&doc, &placed, &ApproxFontMetrics, 0, 59_000.0, 700_000.0).is_none(), "off-table click");
+        assert!(cell_text_hit(&doc, &placed, &ApproxFontMetrics, 7, 100.0, 100.0).is_none(), "page out of range");
+    }
+
+    #[test]
+    fn cell_caret_queries_do_not_change_pagination() {
+        // V4: the caret surface is read-only — placing carets never perturbs place_doc/NaiveLayout.
+        use crate::LayoutEngine;
+        let doc = caret_doc();
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let before = placed.pages.len();
+        let _ = cell_text_hit(&doc, &placed, &ApproxFontMetrics, 0, 10_000.0, 10_000.0);
+        let _ = cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 0, 0, 1);
+        let again = place_doc(&doc, &ApproxFontMetrics);
+        let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap().pages.len();
+        assert_eq!(again.pages.len(), before);
+        assert_eq!(again.pages.len(), naive, "LOCKSTEP holds after caret queries");
     }
 
     #[test]

@@ -69,6 +69,30 @@ export interface CellHit {
   h: number;
 }
 
+/** Cell-addressed caret rect (issue 053) — own-render px + the 0-based page the owning table fragment
+ *  landed on. Mirrors hwp-session `CellCaretDto`. */
+export interface CellCaretRect {
+  page: number;
+  x: number;
+  top: number;
+  height: number;
+}
+
+/** A click resolved to a TABLE-CELL text caret target (issue 053) — the cell-addressed twin of the
+ *  NodeId caret. `row`/`col` are MODEL-GLOBAL; `para`/`offset` live in the editor "\n"-split space
+ *  (the same space `blockRuns` joins and `SetTableCellRuns` splits). Mirrors hwp-session
+ *  `CellTextHitDto`. */
+export interface CellTextHit {
+  section: number;
+  block: number;
+  row: number;
+  col: number;
+  para: number;
+  offset: number;
+  para_len: number;
+  caret: CellCaretRect;
+}
+
 /** One heading in the document outline (issue 046): where it lives in the model (`section`/`block`), its
  *  `level` (1 = □/■ section label, 2 = numbered section-band table), the heading `text`, and the 0-based
  *  `page` it starts on. Mirrors hwp-session `OutlineItem`. */
@@ -123,7 +147,9 @@ export type Outcome =
   | { kind: 'replaced'; replaced: number; pages: number }
   | { kind: 'hit'; hit: BlockHit | null }
   | { kind: 'caret'; caret: unknown | null }
-  | { kind: 'edited'; pages: number };
+  | { kind: 'edited'; pages: number }
+  | { kind: 'hitCell'; hit: CellTextHit | null }
+  | { kind: 'caretCell'; caret: CellCaretRect | null };
 
 /** An engine error carries a machine-readable `code` alongside the message. */
 export interface EngineError extends Error {
@@ -164,6 +190,15 @@ export class HwpDoc {
   imageBbox(page: number, section: number, block: number): ImageBox | null;
   /** Table CELL under (x,y) in own-render px for cell-level marking (issue 023); null on a miss. */
   tableCellAt(page: number, x: number, y: number): CellHit | null;
+  /** Cell-addressed caret, hit half (issue 053): the TABLE-CELL text caret target under (x,y) in
+   *  own-render px, or `null` off any cell text (018). Geometry = the cached own-render placement (the
+   *  same the visible SVG drew), so it answers on binary .hwp too and never drifts from the screen. */
+  cellTextHit(page: number, x: number, y: number): CellTextHit | null;
+  /** Cell-addressed caret, geometry half (issue 053): the caret rect at char `offset` of the `para`-th
+   *  editor paragraph of cell `(row, col)` of the table block at `(section, block)` — own-render px +
+   *  the OWNING page, or `null` when the address doesn't resolve (018). A PAST-END `offset` CLAMPS to
+   *  the paragraph end (a rect, never null). */
+  cellCaretRect(section: number, block: number, row: number, col: number, para: number, offset: number): CellCaretRect | null;
   /** Marquee select: every top-level block whose band intersects the own-render px rect
    *  `(x0,y0)-(x1,y1)` (corners in any order). Empty array on a miss (never null). */
   blocksInRect(page: number, x0: number, y0: number, x1: number, y1: number): BlockHit[];

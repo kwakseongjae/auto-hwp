@@ -66,6 +66,11 @@ export { FindController } from "./find";
 // Glyph-caret model (issue 041, FG-12 前半) — pure HitResult→TextAnchor + the para_len clamp / null policy.
 export { clampOffset, hitResultToTextAnchor, isCaretGap } from "./caret";
 
+// Cell-addressed glyph caret (issue 053, FG-12 後半) — the headless controller (click → caret →
+// per-keystroke SetTableCellRuns commits) + its pure joined-offset/run-splice helpers.
+export { CellCaretController, cellGlobalOffset, cellParaOffsetAt, runsText, spliceRuns } from "./cellCaret";
+export type { CellCaretAnchor, CellCaretState } from "./cellCaret";
+
 // Event emitter primitive
 export { Emitter } from "./events";
 export type { Listener } from "./events";
@@ -76,7 +81,9 @@ export type {
   BlockHit,
   Box,
   CaretRect,
+  CellCaretRect,
   CellHit,
+  CellTextHit,
   DocContext,
   FindMatch,
   FindOptions,

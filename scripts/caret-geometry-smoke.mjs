@@ -42,6 +42,11 @@ const check = (cond, msg) => {
 
 const hitTest = (doc, page, x, y) => doc.applyIntent({ intent: "HitTest", page, x, y }).hit ?? null;
 const caretRect = (doc, page, node, offset) => doc.applyIntent({ intent: "CaretRect", page, node, offset }).caret ?? null;
+// issue 053 — the CELL-ADDRESSED caret surface (own-render placement, no rhwp gate). Direct engine
+// bindings (the placed-cache lane the WasmAdapter uses); the Intent lane (HitTestCell/CaretRectCell)
+// is exercised by crates/hwp-mcp/tests/schema_v0.rs.
+const cellTextHit = (doc, page, x, y) => doc.cellTextHit(page, x, y);
+const cellCaretRect = (doc, s, b, r, c, para, off) => doc.cellCaretRect(s, b, r, c, para, off);
 
 const isPageNotFound = (e) => !!e && typeof e.message === "string" && /찾을 수 없|not found|out of range/.test(e.message);
 
@@ -50,8 +55,21 @@ const isPageNotFound = (e) => !!e && typeof e.message === "string" && /찾을 �
  *  (a real own-render↔rhwp pagination divergence on some HWPX — see docs/CARET-GAP.md); when rhwp can't
  *  render a page we stop the scan there rather than crash, and report how many pages we actually scanned. */
 function scan(doc, pages, step) {
-  const b = { probes: 0, hits: 0, nulls: 0, inCell: 0, bodyAnchored: 0, bodyUnanchored: 0 };
+  const b = {
+    probes: 0,
+    hits: 0,
+    nulls: 0,
+    inCell: 0,
+    bodyAnchored: 0,
+    bodyUnanchored: 0,
+    // issue 053 — the cell-addressed caret closes the in_cell/unanchored gap. Per rhwp glyph hit:
+    //   cellResolved = the SAME point resolves through `cellTextHit` (own-render cell caret), and
+    //   editable     = bodyAnchored OR cellResolved — "a click here yields a WORKING caret".
+    cellResolved: 0,
+    editable: 0,
+  };
   let firstAnchored = null;
+  let firstCell = null; // first cell-resolved probe — the 053 round-trip witness
   let badShape = 0;
   let scanned = 0;
   pageLoop: for (let p = 0; p < pages; p++) {
@@ -78,6 +96,18 @@ function scan(doc, pages, step) {
         b.hits++;
         // Contract: a hit ALWAYS carries a numeric offset + para_len (para_len clamp target), never null.
         if (!Number.isInteger(h.offset) || !Number.isInteger(h.para_len)) badShape++;
+        const anchored = !h.in_cell && h.node != null;
+        // issue 053: only a NON-anchored glyph needs the cell-addressed fallback (an anchored body
+        // paragraph already has its NodeId caret); probing just those keeps the scan fast + honest.
+        let cell = null;
+        if (!anchored) {
+          cell = cellTextHit(doc, p, x, y);
+          if (cell) {
+            b.cellResolved++;
+            if (!firstCell) firstCell = { p, x, y, cell };
+          }
+        }
+        if (anchored || cell) b.editable++;
         if (h.in_cell) b.inCell++;
         else if (h.node != null) {
           b.bodyAnchored++;
@@ -92,7 +122,59 @@ function scan(doc, pages, step) {
     }
     scanned = p + 1;
   }
-  return { b, firstAnchored, badShape, scanned };
+  return { b, firstAnchored, firstCell, badShape, scanned };
+}
+
+/** issue 053 — the NATIVE own-render cell resolution: scan the SAME grid, but classify against the
+ *  OWN-RENDER surface (the one the user actually clicks): a point inside a placed table CELL that has
+ *  TEXT must resolve through `cellTextHit`. This is the honest resolution number for the display
+ *  surface — the rhwp-hit-based `cellResolved` above under-counts because it probes own-render
+ *  geometry with RHWP coordinates (two layout engines place tables at different y even at equal page
+ *  counts; on benchmark1.hwpx rhwp diverges to 14p vs own 25p). Own-render clicks are what the UI
+ *  sends, and they never leave the surface they were measured on. */
+function scanOwn(doc, pages, step) {
+  const o = { cellTextProbes: 0, cellTextResolved: 0 };
+  for (let p = 0; p < pages; p++) {
+    const g = doc.pageGeometry(p);
+    const W = g ? g.w : 794;
+    const H = g ? g.h : 1123;
+    for (let y = 0; y < H; y += step) {
+      for (let x = 0; x < W; x += step) {
+        const cell = doc.tableCellAt(p, x, y);
+        if (!cell || !(cell.text || "").trim()) continue; // only TEXT cells promise a caret
+        o.cellTextProbes++;
+        if (cellTextHit(doc, p, x, y)) o.cellTextResolved++;
+      }
+    }
+  }
+  return o;
+}
+
+/** issue 053 — the cell-addressed round-trip: a cellTextHit's `(section, block, row, col, para,
+ *  offset)` must re-resolve through CellCaretRect to the SAME geometry, a past-end offset must CLAMP
+ *  (a rect, never null), and an unresolvable address must be null (018). */
+function cellRoundTrip(doc, fixture) {
+  const { p, x, y, cell } = fixture;
+  console.log(
+    `  cell round-trip @p${p} (${x},${y}) → (s${cell.section} b${cell.block} r${cell.row} c${cell.col} para${cell.para} off${cell.offset}/${cell.para_len})`,
+  );
+  const rect = cellCaretRect(doc, cell.section, cell.block, cell.row, cell.col, cell.para, cell.offset);
+  check(rect != null, "CellCaretRect(address) returns a rect for a cellTextHit's own address");
+  if (rect) {
+    check(rect.page === cell.caret.page, `owning page round-trips (${rect.page} == ${cell.caret.page})`);
+    check(Math.abs(rect.x - cell.caret.x) < 0.01, `caret x round-trips (${rect.x} ≈ ${cell.caret.x})`);
+    check(Math.abs(rect.top - cell.caret.top) < 0.01, `caret top round-trips (${rect.top} ≈ ${cell.caret.top})`);
+    check(rect.height > 0, `cell caret height > 0 (got ${rect.height})`);
+  }
+  const clamped = cellCaretRect(doc, cell.section, cell.block, cell.row, cell.col, cell.para, cell.para_len + 50);
+  check(clamped != null, "CellCaretRect clamps a past-end offset to a rect (not null) — para_len contract");
+  let bogus = "threw";
+  try {
+    bogus = cellCaretRect(doc, cell.section, cell.block, 9999, 9999, 0, 0);
+  } catch (e) {
+    check(false, `CellCaretRect for an unknown cell should return null, threw: ${e && e.message}`);
+  }
+  check(bogus == null, "CellCaretRect for an unresolvable cell returns null (018 null policy — no throw)");
 }
 
 /** The CaretRect round-trip + para_len clamp + null-policy checks, run on a doc that HAS a body anchor. */
@@ -139,7 +221,7 @@ for (const { rel, step } of docs) {
   const doc = HwpDoc.open(bytes, rel);
   const pages = doc.pageCount();
   console.log(`\n=== ${rel} (${pages}p, grid step ${step}px) ===`);
-  const { b, firstAnchored, badShape, scanned } = scan(doc, pages, step);
+  const { b, firstAnchored, firstCell, badShape, scanned } = scan(doc, pages, step);
   if (scanned < pages) {
     console.log(`  ⚠ rhwp glyph render stops at p${scanned - 1} while own-render pageCount=${pages} (pagination divergence — scanned ${scanned}p)`);
   }
@@ -149,11 +231,22 @@ for (const { rel, step } of docs) {
       `  |  in_cell ${b.inCell} (${pct(b.inCell)}%)  bodyAnchored ${b.bodyAnchored} (${pct(b.bodyAnchored)}%)` +
       `  bodyUnanchored ${b.bodyUnanchored} (${pct(b.bodyUnanchored)}%)`,
   );
+  // issue 053 — the cell-addressed caret's effect on the SAME buckets: editable = a working caret.
+  console.log(
+    `  053 editable ${b.editable} (${pct(b.editable)}%)  =  bodyAnchored ${b.bodyAnchored} + cellResolved ${b.cellResolved}` +
+      `  (rhwp-coordinate denominator — see the own-render native line below)`,
+  );
+  // issue 053 — the NATIVE own-render denominator: the surface the UI actually clicks.
+  const o = scanOwn(doc, pages, step);
+  const opct = o.cellTextProbes ? ((100 * o.cellTextResolved) / o.cellTextProbes).toFixed(1) : "0.0";
+  console.log(`  053 own-render cell-text resolution ${o.cellTextResolved} / ${o.cellTextProbes} (${opct}%)`);
   check(b.hits > 0, "at least one glyph hit on the document");
   check(badShape === 0, `every hit carries integer offset + para_len (bad ${badShape})`);
+  check(b.editable > 0, "issue 053: at least one probe resolves to a WORKING caret on every benchmark");
   if (firstAnchored) roundTrip(doc, pages, firstAnchored);
-  else console.log("  (no body-anchored hit — every glyph is in_cell or unanchored: the caret gap; round-trip N/A)");
-  results.push({ rel, pages, scanned, ...b, anchored: !!firstAnchored });
+  else console.log("  (no body-anchored hit — every glyph is in_cell or unanchored: NodeId round-trip N/A)");
+  if (firstCell) cellRoundTrip(doc, firstCell);
+  results.push({ rel, pages, scanned, ...b, ...o, anchored: !!firstAnchored });
   doc.free();
 }
 

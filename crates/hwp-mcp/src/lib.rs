@@ -907,6 +907,20 @@ pub enum Intent {
         #[serde(default)]
         para: hwp_ops::ParaSpec,
     },
+    /// Cell-addressed caret, hit half (issue 053 — CARET-GAP §5 P1): resolve a PAGE-LOCAL own-render
+    /// px click to the TABLE-CELL text caret target under it — `{section, block, row, col, para,
+    /// offset, para_len, caret}` (row/col MODEL-GLOBAL; `para` = paragraph ordinal within the cell,
+    /// the order `block_runs` joins with "\n"). Covers the `in_cell → node:None` gap of `HitTest`:
+    /// geometry comes from OUR OWN placement (the same `place_doc` the SVG view draws from), NOT the
+    /// rhwp glyph boxes — so it answers on binary .hwp too and never diverges from the screen. `null`
+    /// off any cell text (018 null policy).
+    HitTestCell { page: u32, x: f64, y: f64 },
+    /// Cell-addressed caret, geometry half (issue 053): the caret rect at char `offset` of the
+    /// `para`-th paragraph of cell `(row, col)` of the table block at `(section, block)` — own-render
+    /// px + the 0-based page the owning fragment landed on. A PAST-END `offset` is CLAMPED to the
+    /// paragraph end and returns a rect (never null — the `CaretRect` contract); `null` when the
+    /// address doesn't resolve (018).
+    CaretRectCell { section: usize, block: usize, row: usize, col: usize, para: usize, offset: usize },
 }
 
 /// Largest single embedded image we accept, in DECODED bytes (issue 050 — 014 hardening spirit: reject
@@ -972,6 +986,12 @@ pub enum Outcome {
     /// In-place edit result (InsertText / DeleteBack): the new page count so the UI re-renders,
     /// mirroring `Replaced` (0 when no rhwp render is available).
     Edited { pages: u32 },
+    /// Cell text hit result (issue 053): the cell-addressed caret target, or `None` off any cell
+    /// text (018 null policy).
+    HitCell(Option<hwp_session::CellTextHitDto>),
+    /// Cell caret rect result (issue 053): the caret geometry + owning page, or `None` when the
+    /// cell address doesn't resolve (018).
+    CaretCell(Option<hwp_session::CellCaretDto>),
 }
 
 /// The highest `intent_version` this build understands (issue 008). The request envelope may carry
@@ -1094,6 +1114,19 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
         Intent::HitTest { page, x, y } => Ok(Outcome::Hit(hit_test_current(session, page, x, y)?)),
         Intent::CaretRect { page, node, offset } => {
             Ok(Outcome::Caret(caret_rect_current(session, page, node, offset)?))
+        }
+        // Cell-addressed caret (issue 053) — own-render geometry via the hwp-session facade (px).
+        // Read-only: no undo unit, no revision bump. Fonts: `own_render_fonts()` — the SAME provider
+        // this session's own-render SVG lane uses, so the caret agrees with the drawn glyphs. (The
+        // wasm shell answers these through its placed-cache bindings with its injected fonts instead;
+        // this dispatch is the Tauri/agent lane.)
+        Intent::HitTestCell { page, x, y } => {
+            let doc = session.doc.as_ref().ok_or("no document open (call open_document first)")?.doc();
+            Ok(Outcome::HitCell(hwp_session::cell_text_hit(doc, page, x, y)))
+        }
+        Intent::CaretRectCell { section, block, row, col, para, offset } => {
+            let doc = session.doc.as_ref().ok_or("no document open (call open_document first)")?.doc();
+            Ok(Outcome::CaretCell(hwp_session::cell_caret_rect(doc, section, block, row, col, para, offset)))
         }
         Intent::InsertText { node, offset, text } => {
             do_insert_text(session, node, offset, &text)?;

@@ -29,6 +29,8 @@ export type {
   PageMarginsMm,
   HitResult,
   CaretRect,
+  CellCaretRect,
+  CellTextHit,
   TextAnchor,
   FindMatch,
   FindOptions,

@@ -139,6 +139,34 @@ export interface CaretRect {
   height: number;
 }
 
+/** Cell-addressed caret rect (issue 053) — own-render PAGE px + the 0-based page the owning table
+ *  fragment landed on (a split table draws a cell's text on the fragment that owns its top row).
+ *  Geometry comes from the SAME own-render placement the visible SVG was drawn from, so the caret can
+ *  never drift from the screen. Mirrors hwp-session's `CellCaretDto` verbatim (both backends). */
+export interface CellCaretRect {
+  page: number;
+  x: number;
+  top: number;
+  height: number;
+}
+
+/** A click resolved to a TABLE-CELL text caret target (issue 053) — the cell-addressed twin of
+ *  `HitResult`, closing its `in_cell → node:null` gap (docs/CARET-GAP.md). `row`/`col` are
+ *  MODEL-GLOBAL. `para` is the paragraph ordinal in the EDITOR ("\n"-split) space — the same space
+ *  `blockRuns` joins and `SetTableCellRuns` splits, so the joined-text offset used for a commit is
+ *  exact (a forced line break inside a model paragraph is ALSO a boundary). `offset ∈ [0, para_len]`
+ *  never counts a "\n". Mirrors hwp-session's `CellTextHitDto` verbatim (043 homomorphic parity). */
+export interface CellTextHit {
+  section: number;
+  block: number;
+  row: number;
+  col: number;
+  para: number;
+  offset: number;
+  para_len: number;
+  caret: CellCaretRect;
+}
+
 /** A resolved TEXT caret position in the MODEL — the editable half of a glyph caret, derived from a
  *  `HitResult` via `hitResultToTextAnchor`. Unlike the pixel-space `HitResult`, this addresses the doc
  *  in STRUCTURE indices so an edit op (InsertText / DeleteBack) can target it. Only constructible when

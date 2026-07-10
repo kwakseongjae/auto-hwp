@@ -1,8 +1,9 @@
-# CARET-GAP — 셀 캐럿 갭 실측 보고서 (issue 041 / FG-12 前半)
+# CARET-GAP — 셀 캐럿 갭 실측 보고서 (issue 041 / FG-12 前半 → **053에서 P1 갭 닫힘**)
 
-> 상태: **측정 완료 · 042 승격 준비됨**. 이 문서는 글리프 캐럿을 실제 벤치마크 문서에 얹으려 할 때
-> 어디서 끊기는지(원인 체인)와 얼마나 끊기는지(클릭 분포 실측)를 고정하고, FG-12 後半(캐럿 UI, 042)이
-> 무엇을 엔진 경계에 추가해야 하는지를 난이도/리스크와 함께 승격안으로 남긴다.
+> 상태: **053 구현 완료 — §7 재실측 참조.** §0–§6은 041 시점의 측정/승격안 원문(역사 기록).
+> 053은 §5의 P0(좌표계)–P1(셀 주소형 캐럿)을 own-render `PlacedGlyph` 기반으로 구현했고,
+> 재실측 결과 **표시 표면(own-render) 기준 셀 텍스트 해상률은 3개 벤치마크 전부 99.8~100%**다.
+> 남은 갭은 §5 P2(바이너리 .hwp 본문 문단 stable_key)뿐이다.
 >
 > 근거는 전부 코드 라인 인용 + `scripts/caret-geometry-smoke.mjs`의 실측 수치다(재현법 §6).
 
@@ -203,3 +204,68 @@ node scripts/caret-geometry-smoke.mjs
 ```
 
 editor-core 모델/계약 테스트: `cd packages/editor-core && npm test` (`caret.test.ts` 포함).
+
+---
+
+## 7. 053 재실측 — 셀 주소형 캐럿 승격 후 (2026-07-11)
+
+053은 §5 승격안의 **P0+P1을 own-render로 통일**해 구현했다:
+- **P0 판정: own-render `PlacedGlyph` 기반 통일 가능(채택).** 캐럿 지오메트리는 rhwp 글리프 박스가
+  아니라 `hwp-typeset/src/place.rs`의 `cell_caret_rect`/`cell_text_hit`(=`place_cell_content`의 글리프
+  수학을 읽기 전용 재구동, 조판 무변경 V4)에서 나온다. 화면 SVG와 동일한 `place_doc` 산출이므로
+  §3†의 25-vs-14 페이지 발산이 **원천적으로 캐럿에 영향을 못 준다**(우회 성공). rhwp는 파싱 전용
+  원칙 그대로.
+- **P1 표면**: `Intent::HitTestCell{page,x,y}` + `Intent::CaretRectCell{section,block,row,col,para,offset}`
+  (hwp-session `cell_text_hit(_placed)`/`cell_caret_rect(_placed)` 경유, px, 018 null). `para`/`offset`은
+  **에디터("\n"-split) 공간** — `blockRuns` join/`SetTableCellRuns` split과 동일 공간이라 강제 줄바꿈
+  셀에서도 커밋 오프셋이 정확하다(`CellTextHit` doc 참조).
+
+### 7.1 클릭 분포 재실측 (동일 스모크, 동일 20px 격자)
+
+**(a) 기존 rhwp-좌표 분모(§3과 비교 가능):** editable = bodyAnchored ∪ cellResolved.
+
+| 문서 | 041 편집가능 | **053 편집가능** | 내역 |
+|------|------------|----------------|------|
+| `benchmark.hwp` (바이너리) | **0.0%** | **46.0%** (5,120/11,120) | 전부 셀 주소형 (bodyAnchored 0) |
+| `benchmark1.hwp` (바이너리) | **0.0%** | **46.8%** (15,084/32,240) | 전부 셀 주소형 |
+| `benchmark1.hwpx` (HWPX) | 48.2% | **67.1%** (16,790/25,040) | 12,080 anchored + 4,710 셀 |
+
+⚠️ 이 분모는 **rhwp 글리프 좌표로 own-render 지오메트리를 찌른** 수치라 하한선이다. 실측 진단
+(§7.2)으로 미해상분의 원인이 전부 두 렌더러의 좌표 오프셋(측정 아티팩트)임을 확인했다 — 실제 UI
+클릭은 own-render SVG 좌표로 들어오므로 이 오프셋이 존재하지 않는다.
+
+**(b) own-render 네이티브 분모(표시 표면 = 실제 클릭 공간):** 텍스트가 있는 placed 셀 위의 격자점이
+`cellTextHit`으로 해소되는 비율.
+
+| 문서 | 셀 텍스트 격자점 | 해소 | **해상률** |
+|------|---------------|------|-----------|
+| `benchmark.hwp` | 4,679 | 4,679 | **100.0%** |
+| `benchmark1.hwp` | 15,881 | 15,856 | **99.8%** † |
+| `benchmark1.hwpx` | 21,048 | 21,048 | **100.0%** |
+
+† 미해소 25점(0.16%)은 행 스팬 셀의 **연속 fragment**(텍스트는 top-row 소유 페이지에만 그려짐 —
+`cell_text_hit`이 의도적으로 null을 주는 지점)다.
+
+### 7.2 rhwp-분모 미해상 진단 (benchmark.hwp, 2,080점 전수)
+
+미해소된 rhwp in_cell 점의 분류: `offTable` 100% — own-render 좌표계에서 그 점은 **어떤 표 박스
+밖**이다(두 조판 엔진의 표 y-위치/행높이 오프셋). `offCell`/연속-fragment/오해소 0. 즉 캐럿 표면의
+버그가 아니라 rhwp↔own 좌표 오프셋이며, own-render 표면에서는 §7.1(b)대로 사실상 전량 해소된다.
+
+### 7.3 왕복/계약 검증 (스모크 어서션, 3문서 전부 그린)
+
+- `cellTextHit(p,x,y)` → 그 주소로 `cellCaretRect` 재조회 → **x/top/page 일치**(±0.01px).
+- past-end offset → 문단 끝으로 **클램프된 사각형**(null 아님 — `CaretRect`와 동일 계약).
+- 미해소 주소(없는 셀/문단) → **null**(018, throw 아님).
+- e2e(`apps/hwp-lab/e2e/cell-caret-053.spec.ts`): benchmark.hwp(=041에서 0.0%였던 문서)에서
+  셀 클릭→캐럿→타이핑(키당 SetTableCellRuns 1 undo)→SVG 반영→Escape→undo 왕복 그린.
+
+### 7.4 남은 갭
+
+- **P2 (§5)**: 바이너리 .hwp의 비셀 본문 문단(bodyUnanchored ≈ 35–40%) — stable_key 부재로 NodeId
+  캐럿 불가. 별도 이슈.
+- **중첩 표 셀**(place_nested_table): PlacedTable provenance가 없어 캐럿 대상 아님(§7.1(b) 분모에서
+  텍스트 없는 외부 셀로 걸러짐). 기존 "nested cells aren't edit targets" 제약과 동일.
+- **IME 인라인 조합**(FG-13): composition 가드만(조합 중 keydown 무시) — 인라인 조합 UI는 후속.
+- **폰트 주입 후 캐럿 x**: wasm 셸은 placed 캐시(주입 폰트)로 답하므로 화면과 항상 일치. Intent
+  레인(Tauri/에이전트)은 `own_render_fonts()`(그 셸의 렌더와 동일 폰트) 기준.

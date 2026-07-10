@@ -1,4 +1,4 @@
-import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "./types";
+import type { BlockHit, CaretRect, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "./types";
 
 /// EngineAdapter — the backend seam (SDK-LAYERS L1↔L2). It abstracts the ACTUAL surface a backend
 /// exposes (open / page SVG / hit-test·tableAt / applyIntent / undo·redo / export) so the SAME
@@ -97,6 +97,24 @@ export interface EngineAdapter {
    *  paragraph end and returns a rect — NEVER null — so the caller must not read a null rect as
    *  "end of paragraph" (see `HitResult.para_len`). Backends that can't answer OMIT this method. */
   caretRect?(page: number, node: number, offset: number): Promise<CaretRect | null>;
+
+  /** OPTIONAL — CELL-ADDRESSED caret, hit half (issue 053 — closes `hitTestText`'s `in_cell → node:null`
+   *  gap). Map a PAGE-LOCAL px click to the TABLE-CELL text caret target under it (`CellTextHit`: cell
+   *  address + editor-space `para`/`offset`/`para_len` + the caret rect), or `null` off any cell text
+   *  (018 null policy — never a throw). Geometry is OWN-RENDER placement (the same the SVG drew), so it
+   *  answers on binary .hwp too and never drifts from the screen. Backends that can't answer OMIT this —
+   *  the caller then has no cell caret (cell marking / the double-click editor still work). Reference
+   *  impls: `WasmAdapter` via the engine `cellTextHit` binding (placed cache + injected fonts);
+   *  `TauriAdapter` via the `HitTestCell` Intent (the general apply_intent_json command). */
+  hitTestCellText?(page: number, x: number, y: number): Promise<CellTextHit | null>;
+
+  /** OPTIONAL — CELL-ADDRESSED caret, geometry half (issue 053). The caret rect at char `offset` of the
+   *  `para`-th editor paragraph of cell `(row, col)` of the table block at `(section, block)` — own-render
+   *  PAGE px + the OWNING page (`CellCaretRect.page`), or `null` when the address doesn't resolve (018).
+   *  A PAST-END `offset` is CLAMPED to the paragraph end and returns a rect — NEVER null — so the caller
+   *  must not read a null rect as "end of paragraph" (same contract as `caretRect`). Backends that can't
+   *  answer OMIT this method (the cell caret feature is then off). */
+  caretRectCell?(section: number, block: number, row: number, col: number, para: number, offset: number): Promise<CellCaretRect | null>;
 
   /** OPTIONAL — read-only search of the doc's editable simple paragraphs (issue 045). Returns the matches
    *  in reading order (char coords over each paragraph's concatenated run text), or `[]` on no hit. No

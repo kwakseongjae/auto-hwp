@@ -1435,6 +1435,11 @@ fn outcome_to_json(o: &Outcome) -> Value {
         Outcome::Hit(hit) => json!({ "kind": "hit", "hit": serde_json::to_value(hit).unwrap_or(Value::Null) }),
         Outcome::Caret(caret) => json!({ "kind": "caret", "caret": serde_json::to_value(caret).unwrap_or(Value::Null) }),
         Outcome::Edited { pages } => json!({ "kind": "edited", "pages": pages }),
+        // Cell-addressed caret (issue 053) — same {kind, …} shape as hwp-wasm::outcome_to_json.
+        Outcome::HitCell(hit) => json!({ "kind": "hitCell", "hit": serde_json::to_value(hit).unwrap_or(Value::Null) }),
+        Outcome::CaretCell(caret) => {
+            json!({ "kind": "caretCell", "caret": serde_json::to_value(caret).unwrap_or(Value::Null) })
+        }
     }
 }
 

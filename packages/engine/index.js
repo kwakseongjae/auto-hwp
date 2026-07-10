@@ -187,6 +187,26 @@ export class HwpDoc {
       return s == null ? null : JSON.parse(s);
     });
   }
+  /** Cell-addressed caret, hit half (issue 053): the TABLE-CELL text caret target under (x,y) in
+   *  own-render px — `{section, block, row, col, para, offset, para_len, caret:{page,x,top,height}}`
+   *  (`para`/`offset` in the editor "\n"-split space), or `null` off any cell text (018). Served from
+   *  the cached placement with the registered fonts, so it agrees with the visible SVG exactly. */
+  cellTextHit(page, x, y) {
+    return this.#call((r) => {
+      const s = r.cellTextHit(page, x, y); // Option<String> → JS string | null/undefined on a miss
+      return s == null ? null : JSON.parse(s);
+    });
+  }
+  /** Cell-addressed caret, geometry half (issue 053): the caret rect `{page, x, top, height}` (own-render
+   *  px + the owning page) at char `offset` of the `para`-th editor paragraph of cell `(row, col)` of the
+   *  table block at `(section, block)`, or `null` when the address doesn't resolve (018). A PAST-END
+   *  `offset` CLAMPS to the paragraph end (a rect, never null). */
+  cellCaretRect(section, block, row, col, para, offset) {
+    return this.#call((r) => {
+      const s = r.cellCaretRect(section, block, row, col, para, offset); // Option<String> → string | null/undefined
+      return s == null ? null : JSON.parse(s);
+    });
+  }
   /** Marquee select: every top-level block whose band intersects the own-render px rect
    *  `(x0,y0)-(x1,y1)` (corners in any order). Returns a `BlockHit[]` — an EMPTY ARRAY on a miss. */
   blocksInRect(page, x0, y0, x1, y1) {

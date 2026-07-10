@@ -558,6 +558,98 @@ pub fn table_cell_box_placed(placed: &PlacedDoc, section: usize, block: usize, r
     None
 }
 
+// ---- Cell-addressed caret (issue 053 — CARET-GAP §5 P1) ----------------------------------------
+
+/// Cell-addressed caret rect DTO (own-render PX + the 0-based page the owning fragment landed on).
+/// Geometry comes from the SAME `place_doc` output the visible SVG was drawn from, so the caret can
+/// never drift from the screen (bypasses the own-render↔rhwp page divergence, CARET-GAP §3†).
+#[derive(serde::Serialize)]
+pub struct CellCaretDto {
+    pub page: u32,
+    pub x: f64,
+    pub top: f64,
+    pub height: f64,
+}
+
+/// A click resolved to a CELL TEXT caret target (own-render PX): the cell address `(section, block,
+/// row, col)` (row/col MODEL-GLOBAL), the paragraph ordinal `para` among the cell's paragraphs (the
+/// SAME order [`block_runs`] joins with "\n"), the char `offset` within it, `para_len` (the clamp
+/// bound), and the caret geometry at the resolved offset.
+#[derive(serde::Serialize)]
+pub struct CellTextHitDto {
+    pub section: usize,
+    pub block: usize,
+    pub row: usize,
+    pub col: usize,
+    pub para: usize,
+    pub offset: usize,
+    pub para_len: usize,
+    pub caret: CellCaretDto,
+}
+
+fn cell_caret_dto(r: hwp_typeset::CellCaretRect) -> CellCaretDto {
+    let k = HWPUNIT_PER_PX;
+    CellCaretDto { page: r.page as u32, x: r.x / k, top: r.top / k, height: r.height / k }
+}
+
+/// Cell-addressed caret rect (issue 053): the caret geometry at `(section, block, row, col, para,
+/// offset)` in own-render PX, or `None` when the address doesn't resolve (018 null policy). A
+/// past-end `offset` CLAMPS to the paragraph end and returns a rect — never `None` for it.
+pub fn cell_caret_rect(doc: &SemanticDoc, section: usize, block: usize, row: usize, col: usize, para: usize, offset: usize) -> Option<CellCaretDto> {
+    let fonts = own_render_fonts();
+    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    cell_caret_rect_placed(doc, &placed, fonts.as_ref(), section, block, row, col, para, offset)
+}
+
+/// [`cell_caret_rect`] against an already-placed document (issue 025 cache surface). Pass the SAME
+/// `fonts` provider `placed` was built with (advance re-derivation must match the drawn glyphs).
+#[allow(clippy::too_many_arguments)]
+pub fn cell_caret_rect_placed(
+    doc: &SemanticDoc,
+    placed: &PlacedDoc,
+    fonts: &dyn hwp_model::prelude::FontMetricsProvider,
+    section: usize,
+    block: usize,
+    row: usize,
+    col: usize,
+    para: usize,
+    offset: usize,
+) -> Option<CellCaretDto> {
+    hwp_typeset::cell_caret_rect(doc, placed, fonts, section, block, row, col, para, offset).map(cell_caret_dto)
+}
+
+/// Cell text hit (issue 053): resolve a PAGE-LOCAL px click to the cell-text caret target under it —
+/// the cell-addressed twin of the NodeId `HitTest`, covering the `in_cell → node:None` gap
+/// (docs/CARET-GAP.md §2). `None` off any table cell (018 null policy).
+pub fn cell_text_hit(doc: &SemanticDoc, page: u32, x: f64, y: f64) -> Option<CellTextHitDto> {
+    let fonts = own_render_fonts();
+    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    cell_text_hit_placed(doc, &placed, fonts.as_ref(), page, x, y)
+}
+
+/// [`cell_text_hit`] against an already-placed document (issue 025 cache surface). Pass the SAME
+/// `fonts` provider `placed` was built with.
+pub fn cell_text_hit_placed(
+    doc: &SemanticDoc,
+    placed: &PlacedDoc,
+    fonts: &dyn hwp_model::prelude::FontMetricsProvider,
+    page: u32,
+    x: f64,
+    y: f64,
+) -> Option<CellTextHitDto> {
+    let k = HWPUNIT_PER_PX;
+    hwp_typeset::cell_text_hit(doc, placed, fonts, page as usize, x * k, y * k).map(|h| CellTextHitDto {
+        section: h.section,
+        block: h.block,
+        row: h.row,
+        col: h.col,
+        para: h.para,
+        offset: h.offset,
+        para_len: h.para_len,
+        caret: cell_caret_dto(h.caret),
+    })
+}
+
 /// Column-boundary x-positions (PX, own SVG space) of the table at `(section, block)` on `page` — the
 /// x's the column-resize handles are drawn on. `cols + 1` absolute px boundaries from the table left to
 /// the table right, derived from `column_offsets` so they land exactly on the drawn grid. `None` if the

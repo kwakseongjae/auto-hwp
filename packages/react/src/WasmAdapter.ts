@@ -1,6 +1,6 @@
 import { HwpDoc, initEngine, resetEngine } from "@tf-hwp/engine";
 import type { EngineAdapter } from "./EngineAdapter";
-import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "./types";
+import type { BlockHit, CaretRect, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "./types";
 
 type WasmInput = string | URL | Request | BufferSource | WebAssembly.Module;
 
@@ -182,6 +182,21 @@ export class WasmAdapter implements EngineAdapter {
 
   tableCellAt(page: number, x: number, y: number): Promise<CellHit | null> {
     return this.guard((d) => d.tableCellAt(page, x, y) as CellHit | null);
+  }
+
+  /** Cell-addressed caret, hit half (issue 053) — the engine `cellTextHit` binding (the placed-cache
+   *  lane with THIS document's injected fonts, so the caret geometry agrees with the visible SVG even
+   *  after registerFont; the Intent lane would measure with default fonts). `null` off any cell text
+   *  (018 null policy — never a throw). */
+  hitTestCellText(page: number, x: number, y: number): Promise<CellTextHit | null> {
+    return this.guard((d) => d.cellTextHit(page, x, y) as CellTextHit | null);
+  }
+
+  /** Cell-addressed caret, geometry half (issue 053) — the engine `cellCaretRect` binding (same
+   *  injected-font placement as `hitTestCellText`, so hit → caret → typing stay on one geometry).
+   *  `null` when the address doesn't resolve; a PAST-END offset CLAMPS (a rect, never null). */
+  caretRectCell(section: number, block: number, row: number, col: number, para: number, offset: number): Promise<CellCaretRect | null> {
+    return this.guard((d) => d.cellCaretRect(section, block, row, col, para, offset) as CellCaretRect | null);
   }
 
   /** Image click-select (issue 049) — the engine `imageAt` binding (delegates to hwp-session's

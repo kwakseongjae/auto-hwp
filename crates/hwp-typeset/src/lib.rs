@@ -20,7 +20,7 @@ pub use shaper::RealFontMetrics;
 
 /// Positioned layout (glyphs/images/boxes per page) — the paint-IR bridge consumed by `hwp-render`.
 pub mod place;
-pub use place::{block_pages, column_offsets, place_doc, row_offsets, BlockKind, PlacedBlock, PlacedCell, PlacedDoc, PlacedGlyph, PlacedImage, PlacedPage, PlacedRect, PlacedTable};
+pub use place::{block_pages, cell_caret_rect, cell_text_hit, column_offsets, place_doc, row_offsets, BlockKind, CellCaretRect, CellTextHit, PlacedBlock, PlacedCell, PlacedDoc, PlacedGlyph, PlacedImage, PlacedPage, PlacedRect, PlacedTable};
 
 /// Half the EM for half-width glyphs.
 const HALF: f64 = 0.5;

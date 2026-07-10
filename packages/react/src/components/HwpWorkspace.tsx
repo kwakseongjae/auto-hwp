@@ -12,6 +12,7 @@ import { ChatPanel } from "./ChatPanel";
 import { HwpPageView, type PageClick } from "./HwpPageView";
 import { SelectionOverlay, type Mark } from "./SelectionOverlay";
 import { MarqueeLayer } from "./MarqueeLayer";
+import { CaretLayer } from "./CaretLayer";
 import { HoverLayer } from "./HoverLayer";
 import { useHover } from "../useHover";
 import { FontPicker } from "./FontPicker";
@@ -331,6 +332,14 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // Live boolean mirror for the hover suppression gate (issue 038) — true while the in-place editor is open.
   const editorOpenRef = useRef(false);
   editorOpenRef.current = editor != null;
+  // issue 053: live mirror of the cell caret (render-0 — the caret state NEVER enters workspace state;
+  // CaretLayer draws it by ref). Read by the typing keydown below + the 036 cell-nav yield guard, and
+  // by the click handler to know a caret is live without re-rendering anything.
+  const caretActiveRef = useRef(false);
+  useEffect(() => core.cellCaret.onChange((s) => (caretActiveRef.current = s != null)), [core]);
+  // Down-point of the current pointer gesture (client px) — a caret is placed only on a PLAIN CLICK
+  // (movement under the drag threshold), never at the end of a marquee/drag.
+  const caretDownRef = useRef<{ x: number; y: number } | null>(null);
 
   const toast = useCallback((s: string) => {
     setStatus(s);
@@ -536,11 +545,13 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     [toast, bumpRefresh],
   );
 
-  // Esc anywhere clears the whole selection + any in-progress marquee (issue 021) + an image selection (049).
+  // Esc anywhere clears the whole selection + any in-progress marquee (issue 021) + an image selection
+  // (049) + the cell caret (053).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         core.selection.clear();
+        core.cellCaret.clear();
         setImageSel((s) => (s ? null : s));
       }
     };
@@ -563,6 +574,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         const r = await core.session.open(props.document!.bytes, props.document!.name);
         if (cancelled) return;
         core.selection.clear();
+        core.cellCaret.clear(); // 053: a caret never survives a document swap
         toast(`열림: ${props.document!.name ?? "문서"} · ${r.pages}쪽`);
       } catch (e) {
         if (!cancelled) toast(`열기 실패: ${e}`);
@@ -1433,6 +1445,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       if (e.metaKey || e.ctrlKey || e.altKey) return; // ⌘/Ctrl combos belong to 035 (zoom) etc.
       // A text-entry surface (in-place editor / chat composer / size input) keeps its own arrows + Enter.
       if (isEditableTarget(e.target as Element | null) || isEditableTarget(document.activeElement)) return;
+      if (caretActiveRef.current) return; // 053: a LIVE cell caret owns 방향키/Enter (typing listener below)
       const sels = selectionRef.current;
       const single = sels.length === 1 && sels[0].anchor.kind === "cell" ? sels[0] : null;
       if (!single) return; // 비셀 선택 / 다중선택 / 무선택 → 방향키·Enter 는 문서 기본동작 유지
@@ -1450,6 +1463,75 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [editingOn, moveCellAndScroll, openCellEditor]);
+
+  // ── issue 053: cell caret TYPING — a separate window keydown that acts only while a caret is live
+  // (the 036 cell-nav listener yields via caretActiveRef, so 방향키/Enter never double-handle). Each
+  // printable key / Backspace / Enter is ONE SetTableCellRuns undo unit through the controller's
+  // ordered chain. IME: composition GUARD only (FG-13 inline 조합은 후속) — a composing keydown
+  // (`isComposing` / keyCode 229) is ignored, so a half-composed 한글 음절이 자모로 커밋되지 않는다.
+  useEffect(() => {
+    if (!editingOn || !canEdit) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!caretActiveRef.current) return;
+      if (e.isComposing || e.keyCode === 229) return; // IME composition guard (053 scope)
+      if (isEditableTarget(e.target as Element | null) || isEditableTarget(document.activeElement)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return; // ⌘Z/⌘F/zoom/… keep their owners
+      const run = (p: Promise<unknown>) =>
+        void p.catch((err) => {
+          if (!onTrap(err, "엔진 트랩 — 문서를 복구했습니다")) toast(`입력 실패: ${err}`);
+        });
+      // 한글식 boundary fall-through: an arrow INSIDE the text moves the caret; an arrow that would
+      // leave the text (offset 0 going left / paraLen going right, or any vertical arrow) CLEARS the
+      // caret and hands the SAME press to the 036 cell-nav (셀 선택 이동) — 방향키 UX가 글자 단위에서
+      // 셀 단위로 우아하게 강등되고, 036의 기존 방향키 회귀도 그대로 그린으로 남는다.
+      const fallThroughTo = (dir: CellDir) => {
+        core.cellCaret.clear();
+        void moveCellAndScroll(dir);
+      };
+      const anchor = core.cellCaret.get()?.anchor ?? null;
+      switch (e.key) {
+        case "ArrowLeft":
+          e.preventDefault();
+          if (anchor && anchor.offset <= 0) fallThroughTo("left");
+          else run(core.cellCaret.move(-1));
+          return;
+        case "ArrowRight":
+          e.preventDefault();
+          if (anchor && anchor.offset >= anchor.paraLen) fallThroughTo("right");
+          else run(core.cellCaret.move(1));
+          return;
+        case "ArrowUp":
+          e.preventDefault();
+          fallThroughTo("up"); // 줄 단위 캐럿 이동은 v1 스코프 밖 — 셀 이동으로 강등
+          return;
+        case "ArrowDown":
+          e.preventDefault();
+          fallThroughTo("down");
+          return;
+        case "Backspace":
+          e.preventDefault();
+          run(core.cellCaret.deleteBack());
+          return;
+        case "Enter":
+          e.preventDefault();
+          run(core.cellCaret.insertText("\n"));
+          return;
+        default:
+          if (e.key.length === 1) {
+            e.preventDefault();
+            run(core.cellCaret.insertText(e.key));
+          }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [editingOn, canEdit, core, onTrap, toast, moveCellAndScroll]);
+
+  // 053: the in-place editor and the caret are two text chromes — only one may be live. Opening the
+  // editor (double-click / Enter-on-selection) drops the caret; closing it does NOT restore one.
+  useEffect(() => {
+    if (editor) core.cellCaret.clear();
+  }, [editor, core]);
 
   // Format toolbar → SetCellRangeFmt / SetCellRangeShade over the selected cell/range.
   const runFmt = useCallback(
@@ -1643,6 +1725,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const onPointerDown = useCallback(
     (c: PageClick) => {
       setPointerActive(true); // a gesture began → hide the floating toolbar until it settles (028)
+      caretDownRef.current = { x: c.client.x, y: c.client.y }; // 053: measure click-vs-drag on release
       void core.selection.pointerDown(toPointerInput(c));
     },
     [core],
@@ -1662,6 +1745,20 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     },
     [openEditorAt],
   );
+  // issue 053: place the CELL TEXT CARET on a plain click (movement under the drag threshold). Runs
+  // AFTER the selection resolve so the caret and the cell mark coexist (클릭 = 셀 마크 + 글리프 캐럿).
+  // A miss (off any cell text) CLEARS the caret inside the controller (018 null policy) — clicking a
+  // body paragraph or empty space never leaves a stale caret behind. Fire-and-forget; a trap recovers.
+  const placeCaretAt = useCallback(
+    (c: PageClick) => {
+      if (!editingOn || !canEdit || editorRef.current || !core.cellCaret.supported) return;
+      const down = caretDownRef.current;
+      if (down && Math.hypot(c.client.x - down.x, c.client.y - down.y) >= 4) return; // a drag, not a click
+      void core.cellCaret.clickAt(c.page, c.x, c.y).catch((e) => onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요"));
+    },
+    [editingOn, canEdit, core, onTrap],
+  );
+
   const onPointerUp = useCallback(
     (c: PageClick) => {
       setPointerActive(false); // gesture ended → the toolbar re-appears once the new selection resolves
@@ -1679,6 +1776,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           }
           if (img) {
             core.selection.clear(); // block selection cleared + drag reset — the image overlay takes over
+            core.cellCaret.clear(); // 053: an image selection and a text caret never coexist
             setEditor(null);
             setImageSel({ page: c.page, box: img });
             lastUpRef.current = null; // never let an image click count toward a double-click
@@ -1686,15 +1784,17 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           }
           setImageSel((s) => (s ? null : s)); // clicked off any image → drop the image selection
           void core.selection.pointerUp(toPointerInput(c));
+          placeCaretAt(c); // 053: plain click → cell text caret (a miss clears it)
           detectDoubleClick(c);
         })();
         return;
       }
       void core.selection.pointerUp(toPointerInput(c));
       if (!editingOn) return;
+      placeCaretAt(c); // 053
       detectDoubleClick(c);
     },
-    [core, editingOn, adapter, onTrap, detectDoubleClick],
+    [core, editingOn, adapter, onTrap, detectDoubleClick, placeCaretAt],
   );
 
   // ── issue 038: hover pre-highlight + cursor system (FG-09 + FG-06) ────────────────────────────────
@@ -2070,6 +2170,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                     {/* issue 030: the marquee is an ISOLATED layer — it subscribes to the core itself, so a
                         drag re-renders neither this workspace nor the SVG sheets (only the rect moves). */}
                     <MarqueeLayer core={core} page={page} scale={scale} />
+                    {/* issue 053: the blinking cell text caret — an ISOLATED layer on the marquee pattern
+                        (presence = rare setState; every move = a ref DOM write, 0 workspace renders). */}
+                    {editingOn && canEdit && <CaretLayer core={core} page={page} scale={scale} />}
                     {editingOn && editTarget && editTarget.page === page && editTarget.boundaries && editTarget.tableBox && (
                       <ColumnResizeOverlay
                         boundaries={editTarget.boundaries}

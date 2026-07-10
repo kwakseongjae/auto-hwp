@@ -1,5 +1,5 @@
 import type { EngineAdapter } from "./EngineAdapter";
-import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "./types";
+import type { BlockHit, CaretRect, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "./types";
 
 /** The desktop `hit_test` command's DTO (camelCase, crates/hwp-viewer/src/lib.rs `HitDto`). Remapped
  *  into editor-core's snake_case `HitResult` below so both adapters return ONE shape. */
@@ -163,6 +163,25 @@ export class TauriAdapter implements EngineAdapter {
    *  clamped by the engine, never null). */
   caretRect(page: number, node: number, offset: number): Promise<CaretRect | null> {
     return this.invoke<CaretRect | null>("caret_rect", { page, node, offset });
+  }
+
+  /** Cell-addressed caret, hit half (issue 053) — the `HitTestCell` Intent through the GENERAL
+   *  `apply_intent_json` command (the same op-bus dispatch the wasm applyIntent lane runs). The
+   *  `{kind:"hitCell", hit}` outcome carries hwp-session's `CellTextHitDto` verbatim (snake_case —
+   *  no remap; 043 homomorphic parity with the wasm binding). `null` off any cell text (018). */
+  async hitTestCellText(page: number, x: number, y: number): Promise<CellTextHit | null> {
+    const out = (await this.applyIntent({ intent: "HitTestCell", page, x, y })) as { hit?: CellTextHit | null };
+    return out.hit ?? null;
+  }
+
+  /** Cell-addressed caret, geometry half (issue 053) — the `CaretRectCell` Intent via the same general
+   *  command; `{kind:"caretCell", caret}` matches `CellCaretRect` verbatim. `null` on an unresolvable
+   *  address; a PAST-END offset CLAMPS (a rect, never null). */
+  async caretRectCell(section: number, block: number, row: number, col: number, para: number, offset: number): Promise<CellCaretRect | null> {
+    const out = (await this.applyIntent({ intent: "CaretRectCell", section, block, row, col, para, offset })) as {
+      caret?: CellCaretRect | null;
+    };
+    return out.caret ?? null;
   }
 
   /** Find (issue 045) — the desktop `find_text` command (same op-bus `do_find` the wasm `Find` Intent

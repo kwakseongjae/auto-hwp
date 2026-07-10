@@ -31,7 +31,8 @@ rhwp = ["hwp-core/rhwp"]
 # Issue 013 (service container): the `export_pdf` control tool. Pulls hwp-session/pdf (krilla) — a
 # native-only, wasm-unsafe backend — so it is a SEPARATE opt-in feature the container build turns on;
 # the default/wasm lib never compiles it. Byte-identical to the CLI `export-pdf` (same emit_pdf path).
-pdf = ["dep:hwp-session", "hwp-session/pdf", "hwp-session/shaper"]
+# (hwp-session itself is now an unconditional dep — issue 053 — so this only turns its features on.)
+pdf = ["hwp-session/pdf", "hwp-session/shaper"]
 
 [dependencies]
 hwp-model = { workspace = true }
@@ -41,8 +42,10 @@ hwp-core = { workspace = true }
 # Issue 014/013: the post-parse layout guard (`check_layout_limits`) wired into the open path. Pure &
 # wasm-clean (only depends on hwp-model), so it does NOT jeopardise the wasm lib (issue 017).
 hwp-ingest = { workspace = true }
-# Issue 013: `export_pdf` control tool, behind the `pdf` feature only (krilla is native-only).
-hwp-session = { workspace = true, optional = true }
+# Issue 013: `export_pdf` control tool (behind `pdf`). Issue 053: now UNCONDITIONAL — the
+# cell-addressed caret Intents (HitTestCell / CaretRectCell) dispatch through the hwp-session
+# facade (own-render geometry, px boundary). Default features are pure + wasm-safe.
+hwp-session = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # Issue 050 (image insert SDK): the `InsertImage` Intent carries the image as base64 (a web drop gives

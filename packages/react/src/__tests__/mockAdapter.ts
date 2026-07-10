@@ -1,5 +1,5 @@
 import type { EngineAdapter } from "../EngineAdapter";
-import type { BlockHit, CaretRect, CellHit, FindMatch, FindOptions, FindReplaceOptions, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "../types";
+import type { BlockHit, CaretRect, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "../types";
 
 /** A headless EngineAdapter for tests: canned SVG (optionally malicious, to exercise the R7 gate), a
  *  fixed table hit, and a spy-able applyIntent. No wasm — pure in-memory. */
@@ -45,6 +45,12 @@ export class MockAdapter implements EngineAdapter {
       /** Canned caret rect for `caretRect` (issue 041/045 geometry), or a `(page, node, offset)` resolver.
        *  Omit to OMIT the method (a backend that can't locate matches → count/nav only). */
       caret?: CaretRect | null | ((page: number, node: number, offset: number) => CaretRect | null);
+      /** Canned CELL text hit for `hitTestCellText` (issue 053), or a coordinate-aware resolver. Present
+       *  makes the method answer; omit to OMIT it (a backend with no cell caret). */
+      cellText?: CellTextHit | null | ((page: number, x: number, y: number) => CellTextHit | null);
+      /** Canned cell caret rect for `caretRectCell` (issue 053), or an address-aware resolver. Omit to
+       *  OMIT the method. */
+      cellCaret?: CellCaretRect | null | ((section: number, block: number, row: number, col: number, para: number, offset: number) => CellCaretRect | null);
       /** Canned document outline for `outline` (issue 046). Omit to OMIT the method (page-list fallback). */
       outline?: OutlineItem[];
       /** Canned image hit for `imageAt` (issue 049), or a `(page, x, y)` resolver. Present makes `imageAt`
@@ -67,6 +73,8 @@ export class MockAdapter implements EngineAdapter {
     if (!("pageGeom" in this.opts)) (this as { pageGeometry?: unknown }).pageGeometry = undefined;
     if (!("runs" in this.opts)) (this as { blockRuns?: unknown }).blockRuns = undefined;
     if (!("caret" in this.opts)) (this as { caretRect?: unknown }).caretRect = undefined;
+    if (!("cellText" in this.opts)) (this as { hitTestCellText?: unknown }).hitTestCellText = undefined;
+    if (!("cellCaret" in this.opts)) (this as { caretRectCell?: unknown }).caretRectCell = undefined;
     if (!("find" in this.opts)) {
       (this as { find?: unknown }).find = undefined;
       (this as { replace?: unknown }).replace = undefined;
@@ -148,6 +156,14 @@ export class MockAdapter implements EngineAdapter {
   async caretRect(page: number, node: number, offset: number): Promise<CaretRect | null> {
     const c = this.opts.caret;
     return (typeof c === "function" ? c(page, node, offset) : c) ?? null;
+  }
+  async hitTestCellText(page: number, x: number, y: number): Promise<CellTextHit | null> {
+    const h = this.opts.cellText;
+    return (typeof h === "function" ? h(page, x, y) : h) ?? null;
+  }
+  async caretRectCell(section: number, block: number, row: number, col: number, para: number, offset: number): Promise<CellCaretRect | null> {
+    const c = this.opts.cellCaret;
+    return (typeof c === "function" ? c(section, block, row, col, para, offset) : c) ?? null;
   }
   async find(query: string, opts: FindOptions): Promise<FindMatch[]> {
     this.finds.push({ query, opts });

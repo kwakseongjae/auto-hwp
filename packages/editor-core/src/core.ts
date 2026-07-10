@@ -1,4 +1,5 @@
 import type { EngineAdapter } from "./adapter";
+import { CellCaretController } from "./cellCaret";
 import { EditController } from "./edit";
 import { FindController } from "./find";
 import { DocSession } from "./session";
@@ -14,12 +15,17 @@ export class EditorCore {
   readonly edit: EditController;
   /** 찾기/바꾸기 controller (issue 045) — needs the session so its replace records a coherent undo unit. */
   readonly find: FindController;
+  /** Cell-addressed glyph caret (issue 053) — click → caret → per-keystroke `SetTableCellRuns` commits
+   *  through the session (one undo unit per keystroke; layout invalidation stays coherent with every
+   *  other edit lane). Inert when the adapter lacks the cell caret queries (`cellCaret.supported`). */
+  readonly cellCaret: CellCaretController;
 
   constructor(readonly adapter: EngineAdapter) {
     this.session = new DocSession(adapter);
     this.selection = new SelectionModel(adapter);
     this.edit = new EditController(this.session, this.selection);
     this.find = new FindController(adapter, this.session);
+    this.cellCaret = new CellCaretController(adapter, this.session);
   }
 }
 

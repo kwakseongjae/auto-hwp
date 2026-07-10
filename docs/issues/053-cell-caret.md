@@ -1,6 +1,8 @@
 # 053 — R12-P1: 셀 주소형 캐럿 (042 승계 — CARET-GAP P0→P1 실행)
 
-- 상태: open · 우선순위: R12-P1 · 영역: crates/hwp-mcp(CaretRectCell)/hwp-session + packages(어댑터 노출 + 캐럿 오버레이)
+- 상태: **done** (2026-07-11 — P0: own-render PlacedGlyph 통일 채택, P1: HitTestCell/CaretRectCell +
+  캐럿 UI + 키당 SetTableCellRuns 커밋. 재실측/근거: docs/CARET-GAP.md §7)
+- 우선순위: R12-P1 · 영역: crates/hwp-mcp(CaretRectCell)/hwp-session + packages(어댑터 노출 + 캐럿 오버레이)
 - 병렬: 054(.hwp lift — hwp-rhwp/lift.rs 소유, disjoint). 총괄 근거 문서: **docs/CARET-GAP.md** (필독).
 
 ## 근거 (docs/CARET-GAP.md 실측)
@@ -28,10 +30,15 @@ own-render SVG에 얹는 모든 기능의 좌표 위험(P0 선행 과제).
    48.2%→90%+, 바이너리 .hwp 0%→셀 본문 커버), vitest 캐럿 렌더-0, e2e 1개(셀 클릭→캐럿→타이핑→커밋).
 
 ## 수용 기준
-- [ ] P0 실측 보고(own-render 통일 가부) — 구현 전 아키텍트 확인 지점
-- [ ] CaretRectCell + 셀 텍스트 hit — additive 증빙 + 게이트 v2(8==8·18==18) + wasm-safe
-- [ ] 해상률 개선 수치 보고(CARET-GAP.md 갱신), 캐럿 UI 렌더-0, e2e 그린
-- [ ] LOCKSTEP 무접촉(place_doc/NaiveLayout diff 0), 054 소유 영역 무접촉
+- [x] P0 실측 보고(own-render 통일 가부) — **가능·채택** (CARET-GAP §7: place_cell_content 재구동,
+      화면 SVG와 동일 place_doc 좌표 → 25-vs-14 발산 우회; place.rs diff는 순수 추가 2 hunk)
+- [x] CaretRectCell + 셀 텍스트 hit — additive (스키마 38→40, deny_unknown_fields 유지) + 게이트 v2
+      8==8(98.9%)·18==18(99.2%) + `cargo check -p hwp-wasm --target wasm32-unknown-unknown` 그린
+- [x] 해상률 개선 수치 보고(CARET-GAP.md §7): rhwp 분모 0%→46.0/46.8%, hwpx 48.2%→67.1%;
+      **own-render 네이티브(실 클릭 공간) 100/99.8/100%**. 캐럿 UI 렌더-0(vitest 카운터),
+      e2e 그린(cell-caret-053 + 기존 35스펙 전부)
+- [x] LOCKSTEP 무접촉(place_doc/NaiveLayout diff 0 — cell_caret_queries_do_not_change_pagination),
+      054 소유 영역(hwp-rhwp/hwp-hwpx) 무접촉
 
 ## 함정
 - **조판을 캐럿 때문에 고치지 마라**(V4) — 캐럿 x가 어긋나면 조판이 아니라 노출 계층을 고친다.
