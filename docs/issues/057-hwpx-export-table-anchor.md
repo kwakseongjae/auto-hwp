@@ -1,6 +1,11 @@
 # 057 — R12 버그: HWPX 익스포터 표 앵커링 (셀 편집 후 표가 문서 끝으로 오배치)
 
-- 상태: open · 우선순위: R12-P1(정확성 버그) · 영역: crates(HWPX 재방출 — hwp-hwpx serialize/dirty 재방출 계열)
+- 상태: **done** (8a28ce5) · 우선순위: R12-P1(정확성 버그) · 영역: crates(HWPX 재방출 — hwp-hwpx serialize/dirty 재방출 계열)
+- 결과 요약: 원인=표는 원본 XML 스팬을 캡처하지 않아 dirty 시 무조건 끝-append. 수리=Table/Cell `src_span`
+  캡처 + 구조 불변 시 per-cell 수술(형제 셀·지오메트리 byte-verbatim, shade-only는 본문 verbatim+fill만 패치)
+  + 구조 변경 시 원 위치 whole 재합성 + 스팬 부재/충돌 시 append 폴백. 레드→그린 증빙, verbatim 골든 불변,
+  goldenRecovery 케이스 pageSvg 동일로 승격. 부수 발견(후속 이슈감): 1×1 프레임 래퍼의 내부 표 편집은
+  외부 표가 dirty 마킹되지 않아 export에 반영 안 됨(기존 갭, 양 레인 공통).
 - 발견 경위: 052 golden 복구 테스트가 실측으로 격리(2026-07-10). 재현 절차:
   `apps/hwp-lab/src/lib/goldenRecovery.test.ts` 상단 매트릭스.
 

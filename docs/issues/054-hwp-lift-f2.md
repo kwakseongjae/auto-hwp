@@ -1,6 +1,10 @@
 # 054 — R12-P1: .hwp lift 충실도 F2 (행높이·셀패딩·셀테두리 실값)
 
-- 상태: open · 우선순위: R12-P1 · 영역: crates/hwp-rhwp(lift.rs/serialize.rs) — 엔진 전용, UI 무접촉
+- 상태: **done** (8cd4233) · 우선순위: R12-P1 · 영역: crates/hwp-rhwp + hwp-hwpx serialize/synth(재방출) + hwp-model(additive 필드)
+- 결과 요약: 무편집 왕복 재열기 페이지 수 8→8·18→18·25→25 복원(이전 6/20/23p), 행높이 floor 멱등(67표→0 변동),
+  게이트 불변(8==8·18==18). 왕복 손실 4종 수리(행높이 균일화·쪽나누기 드롭·앵커 문단 증식·셀 paraPr 하드코딩).
+  020 floor 판정=보완(재방출만, 조판 무접촉). Tier-2 #8/#9/#10 emit 절반 선반영(페이지 보존의 직접 필요조건 — 측정 근거).
+  보류: 셀 간격·대각선 재방출(F3), 두께 인덱스 0↔1 수렴(시각 동일, FIDELITY.md 명기). 골든: roundtrip_pages.rs.
 - 병렬: 053(캐럿 — hwp-mcp/hwp-session/packages 소유, disjoint). 총괄 근거: **docs/HWP-CONVERSION-FIDELITY.md**.
 
 ## 근거

@@ -52,11 +52,11 @@
 |---|------|------|------|------|
 | [051](051-chat-structural-edit.md) | 챗 구조 편집 브릿지 — Intent 2신설(InsertTableAt/InsertParagraphAt)+화이트리스트 14종+프리뷰 카드 | **done** (2dc92d3) | R12-P0 | 전제 정정: op 기존재. schema 36→38 additive, e2e 32/32, 게이트 8==8·18==18 |
 | [052](052-autosave-recovery.md) | 자동저장 + 세션 복구 — 2s 유휴 toHwpx 스냅샷·IndexedDB·트랩 우선 복구·배너 | **done** (d0f0a24) | R12-P0 | V3 무오염 잠금. golden이 기존 엔진 갭 2건 격리 → 057 신설 + 054 기록 |
-| [053](053-cell-caret.md) | 셀 주소형 캐럿 (042 승계) — CARET-GAP P0→P1 | open | R12-P1 | 해상률 0%→셀 커버; own-render 통일 실측 선행 |
-| [054](054-hwp-lift-f2.md) | .hwp lift 충실도 F2 — 행높이/패딩/테두리 실값 | open | R12-P1 | 게이트 v2가 1차 수용 기준, 020 floor 상호작용 주의 |
+| [053](053-cell-caret.md) | 셀 주소형 캐럿 (042 승계) — CARET-GAP P0→P1 | **in-progress** (v2 재가동) | R12-P1 | v1 진행부진 중단→병합 main 기준 재가동. P0=own-render 글리프 통일 판정 |
+| [054](054-hwp-lift-f2.md) | .hwp lift 충실도 F2 — 행높이/패딩/테두리 실값 | **done** (8cd4233) | R12-P1 | 무편집 왕복 8→8·18→18·25→25 복원(전엔 6/20/23p). 게이트 불변. Tier-2 #8/#9/#10 emit 선반영(측정 근거) |
 | [055](055-web-hardening.md) | 웹 하드닝 — 워커화(FG-14)/번들 실측/한도 UX | open | R12-P2 | 051·052 병합 후 |
 | [056](056-distribution-crypto.md) | 배포용 .hwp 복호화 | open(**수요 게이트**) | 조건부 | golden vector 없으면 착수 금지 |
-| [057](057-hwpx-export-table-anchor.md) | HWPX 익스포터 표 앵커링 버그 — 셀 편집 후 표가 문서 끝으로 오배치 | open | R12-P1 | 052 golden이 격리(hwpx 오리진 한정). 재현: goldenRecovery.test.ts 매트릭스 |
+| [057](057-hwpx-export-table-anchor.md) | HWPX 익스포터 표 앵커링 버그 — 셀 편집 후 표가 문서 끝으로 오배치 | **done** (8a28ce5) | R12-P1 | 원인=표 src_span 미캡처→무조건 끝-append. per-cell 수술+폴백, 레드→그린, verbatim 골든 불변. 부수 발견: 1×1 프레임 내부표 편집 미export(후속 이슈감) |
 
 ## 로드맵 R11 — 라운드 11 (2026-07-05, SDK 승격 배치 A)
 
