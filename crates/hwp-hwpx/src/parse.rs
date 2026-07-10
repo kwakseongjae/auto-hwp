@@ -114,6 +114,10 @@ fn assign_node_ids(doc: &mut SemanticDoc) {
 struct TblFrame {
     table: Table,
     cell: Option<Cell>,
+    /// Byte offset of this table's `<hp:tbl` within the section XML (span start, issue 057).
+    start: usize,
+    /// Byte offset of the in-progress cell's `<hp:tc` (span start, issue 057).
+    cell_start: usize,
 }
 
 /// Accumulator for one in-progress `<hp:p>` (runs + its source provenance).
@@ -172,12 +176,15 @@ fn parse_section(xml: &str, out: &mut Vec<Block>) -> std::result::Result<(), Doc
                         tbls.push(TblFrame {
                             table: Table { rows, cols, provenance: hwpx_prov(), ..Default::default() },
                             cell: None,
+                            start: pos_before,
+                            cell_start: 0,
                         });
                     }
                     b"tc" => {
                         blocks.push(Vec::new());
                         if let Some(f) = tbls.last_mut() {
                             f.cell = Some(Cell::default());
+                            f.cell_start = pos_before;
                         }
                     }
                     // Structural children (secPr/ctrl/pic/equation/container/…) make a paragraph
@@ -252,12 +259,21 @@ fn parse_section(xml: &str, out: &mut Vec<Block>) -> std::result::Result<(), Doc
                         if let Some(mut c) = f.cell.take() {
                             c.blocks = cell_blocks;
                             c.active = true;
+                            // `[<hp:tc … </hp:tc>)` span for surgical in-place cell re-emit (057).
+                            c.src_span = Some((f.cell_start, reader.buffer_position() as usize));
                             f.table.cells.push(c);
                         }
                     }
                 }
                 b"tbl" => {
-                    if let Some(f) = tbls.pop() {
+                    if let Some(mut f) = tbls.pop() {
+                        // TOP-LEVEL table (no enclosing table frame left): record its
+                        // `[<hp:tbl … </hp:tbl>)` span so a dirty table can be re-emitted at its
+                        // original anchor instead of appended at the section end (issue 057).
+                        // Nested tables ride inside their host cell's span — no own span needed.
+                        if tbls.is_empty() {
+                            f.table.src_span = Some((f.start, reader.buffer_position() as usize));
+                        }
                         if let Some(top) = blocks.last_mut() {
                             top.push(Block::Table(f.table));
                         }

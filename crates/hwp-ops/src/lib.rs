@@ -1175,6 +1175,7 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                     blocks,
                     shade_color: None, // fresh body row — don't copy a header tint
                     diagonal: None,    // …or a banner/N-A slash
+                    src_span: None,    // fresh cell — never inherit the template's original XML span (057)
                     dirty: Dirty(true),
                     ..tc
                 });

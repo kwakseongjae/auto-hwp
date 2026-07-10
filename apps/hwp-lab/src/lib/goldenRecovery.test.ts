@@ -5,12 +5,14 @@
 // ⚠️ 실측 fidelity 매트릭스(2026-07-10, 052 구현 중 실측 — 모두 crates 스코프 밖의 기존 갭):
 //  - hwpx 오리진 + 문단 텍스트 편집(Replace): 재오픈 전 페이지 픽셀 동일 ✓ → 이 파일의 golden.
 //  - hwpx 오리진 + 표 추가(ApplyContent): 기존 페이지 픽셀 동일, 새 표만 3.74px 상향 배치.
-//  - hwpx 오리진 + 표 셀 텍스트(SetTableCellRuns): 내보내기가 편집된 표를 문서 끝으로 오배치
-//    (원 위치 표는 원문 유지) — 익스포터 앵커링 버그, 별도 보고.
+//  - hwpx 오리진 + 표 셀 텍스트(SetTableCellRuns): ✅ 057에서 수정(익스포터가 dirty 표를 원본
+//    XML의 자기 스팬에서 제자리 재방출 — Rust 정본: crates/hwp-{hwpx,mcp}/tests/table_anchor_057.rs).
+//    이 파일의 두 번째 golden(전 페이지 pageSvg 동일)이 승격·잠금.
 //  - .hwp 오리진 전반: 무편집·동일 폰트 조건에서도 toHwpx 재오픈이 8p→6p 재조판(.hwp 파서 IR →
 //    HWPX 왕복 서식 손실, Track-A conversion fidelity 계열). 콘텐츠는 제자리 보존.
-// 따라서 golden(전 페이지 pageSvg 문자열 동일)은 성립이 확인된 hwpx 오리진 + 문단 편집 레인에서
-// 잠그고(복구본은 항상 HWPX — 복구 이후 왕복은 전부 이 레인), .hwp 오리진은 콘텐츠 보존으로 잠근다.
+// 따라서 golden(전 페이지 pageSvg 문자열 동일)은 성립이 확인된 hwpx 오리진 + 문단 편집 · 표 셀
+// 편집 레인에서 잠그고(복구본은 항상 HWPX — 복구 이후 왕복은 전부 이 레인), .hwp 오리진은 콘텐츠
+// 보존으로 잠근다.
 //
 // 실엔진(wasm) 테스트 — packages/engine/pkg 가 있어야 한다(015 레시피 빌드 산출물, copy-wasm.mjs 와
 // 같은 위치). 없으면 명확히 실패한다(조용한 스킵 금지 — 게이트가 가짜 그린이 되면 안 된다).
@@ -65,6 +67,67 @@ describe("issue 052 — 복구본 golden + V3 무오염 (실엔진)", () => {
           for (let p = 0; p < pages; p++) {
             expect(reopened.renderPageSvg(p), `page ${p} SVG must match the edited state`).toBe(editedSvgs[p]);
           }
+        } finally {
+          reopened.free();
+        }
+      } finally {
+        doc.free();
+      }
+    },
+    120_000,
+  );
+
+  it(
+    "golden(HWPX 오리진 + 표 셀 편집, 057 승격): SetTableCellRuns→toHwpx 스냅샷 재오픈 렌더 == 원 편집 상태 (전 페이지 pageSvg 동일)",
+    () => {
+      // 057 수정 전에는 이 레인이 "편집된 표를 문서 끝으로 오배치(원 위치 표는 원문 유지)"로
+      // 격리되어 콘텐츠 보존 잠금조차 불가했다. 수정 후 제자리 재방출이 성립하므로 문단 편집
+      // 레인과 같은 강도(전 페이지 pageSvg 동일)로 승격해 잠근다.
+      const doc = HwpDoc.open(hwpxOrigin(), "benchmark (복구본).hwpx");
+      try {
+        // 페이지 0의 표 블록들을 지오메트리로 찾는다(blocksInRect — 페이지 전체 AABB, px).
+        const tables = doc
+          .blocksInRect(0, 0, 0, 100_000, 100_000)
+          .filter((b) => b.kind === "table");
+        expect(tables.length).toBeGreaterThan(0); // benchmark에는 표가 있다
+        // 첫 번째로 편집이 성립하는 표의 (0,0) 셀 텍스트를 교체 — 에디터의 실제 커밋 레인
+        // (SetTableCellRuns; 평문 variant는 run 붕괴라 금지 — §4 불변식 5).
+        let edited: { section: number; block: number } | null = null;
+        for (const t of tables) {
+          try {
+            doc.applyIntent({
+              intent: "SetTableCellRuns",
+              section: t.section,
+              index: t.block,
+              row: 0,
+              col: 0,
+              runs: [{ text: MARKER }],
+            });
+            edited = { section: t.section, block: t.block };
+            break;
+          } catch {
+            // (0,0)이 비활성(병합 피복)인 표 → 다음 후보
+          }
+        }
+        expect(edited, "표 셀 편집이 실제로 일어났다").not.toBeNull();
+        // 편집 읽어보기: 셀 run에 마커가 박혔다.
+        const runs = doc.blockRuns(edited!.section, edited!.block, 0, 0);
+        expect(runs.map((r) => r.text).join("")).toContain(MARKER);
+
+        const pages = doc.pageCount();
+        const editedSvgs: string[] = [];
+        for (let p = 0; p < pages; p++) editedSvgs.push(doc.renderPageSvg(p));
+
+        const snap = doc.toHwpx();
+        const reopened = HwpDoc.open(snap, "benchmark (복구본).hwpx");
+        try {
+          expect(reopened.pageCount()).toBe(pages);
+          for (let p = 0; p < pages; p++) {
+            expect(reopened.renderPageSvg(p), `page ${p} SVG must match the edited state`).toBe(editedSvgs[p]);
+          }
+          // 앵커 회귀 가드: 편집된 표가 원 블록 인덱스에 그대로(문서 끝 복제 없음).
+          const rruns = reopened.blockRuns(edited!.section, edited!.block, 0, 0);
+          expect(rruns.map((r) => r.text).join("")).toContain(MARKER);
         } finally {
           reopened.free();
         }

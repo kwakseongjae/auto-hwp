@@ -832,6 +832,9 @@ fn parse_table(el: &JsxElement) -> Result<Table> {
         outer_margin_bottom: el.attrs.get("data-omb").and_then(|v| v.parse().ok()).unwrap_or(0),
         provenance: el.attrs.get("data-prov").map(|s| decode_provenance(s)).unwrap_or_default(),
         passthrough: parse_pass_attr(el)?,
+        // src_span is HWPX-export provenance (issue 057) — a JSX projection never carries it
+        // (equality is explicitly modulo source spans).
+        src_span: None,
         dirty: Dirty(el.attrs.contains_key("data-dirty")),
     })
 }
@@ -850,6 +853,7 @@ fn parse_cell(el: &JsxElement) -> Result<Cell> {
         has_border: !el.attrs.contains_key("data-noborder"),
         borders: el.attrs.get("data-borders").map(|s| decode_cell_borders(s)).unwrap_or([None; 4]),
         diagonal: el.attrs.get("data-diag").and_then(|s| decode_cell_diagonal(s)),
+        src_span: None, // HWPX-export provenance (issue 057) — not part of the JSX projection
         dirty: Dirty(el.attrs.contains_key("data-dirty")),
     })
 }

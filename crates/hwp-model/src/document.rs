@@ -291,6 +291,12 @@ pub struct Table {
     /// consecutive tables abut with no breathing room (the "tables stuck together" artifact).
     pub outer_margin_top: HwpUnit,
     pub outer_margin_bottom: HwpUnit,
+    /// `[start, end)` byte range of this TOP-LEVEL `<hp:tbl>…</hp:tbl>` within
+    /// `Section.provenance.raw` (set by the HWPX parser only) — lets the serializer re-emit a
+    /// dirty table IN PLACE at its original anchor instead of appending it at the section end
+    /// (issue 057). `None` ⇒ synthesized/lifted table (no original XML to anchor to) → the
+    /// legacy append path. Export provenance only — render/equality ignore it.
+    pub src_span: Option<(usize, usize)>,
     pub provenance: Provenance,
     pub passthrough: Passthrough,
     pub dirty: Dirty,
@@ -392,6 +398,12 @@ pub struct Cell {
     /// section-header banner's right cell — together with suppressed right edges — turns the 1×2 band
     /// into a pointed pentagon.
     pub diagonal: Option<CellDiagonal>,
+    /// `[start, end)` byte range of this cell's `<hp:tc>…</hp:tc>` within `Section.provenance.raw`
+    /// (set by the HWPX parser only) — lets the serializer patch ONLY a dirty cell's subList
+    /// content in place while the rest of the table stays byte-verbatim (issue 057). `None` ⇒
+    /// synthesized/inserted cell (no original XML) → the enclosing table falls back to a
+    /// whole-table re-emit (still anchored in place when the table carries a span).
+    pub src_span: Option<(usize, usize)>,
     pub dirty: Dirty,
 }
 
@@ -459,6 +471,7 @@ impl Default for Cell {
             has_border: true,
             borders: [None; 4],
             diagonal: None,
+            src_span: None,
             dirty: Dirty::default(),
         }
     }

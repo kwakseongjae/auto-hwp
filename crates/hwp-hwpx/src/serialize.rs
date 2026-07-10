@@ -306,8 +306,13 @@ fn mark_block_dirty(block: &mut Block) {
         Block::Paragraph(p) => p.dirty.mark(),
         Block::Table(t) => {
             t.dirty.mark();
+            // The from-scratch path re-seeds `provenance.raw` with the Skeleton section, so any
+            // original-XML span would point into the WRONG buffer — clear them so these tables
+            // take the append lane, never a bogus in-place splice (issue 057 safety).
+            t.src_span = None;
             for cell in &mut t.cells {
                 cell.dirty.mark();
+                cell.src_span = None;
                 for cb in &mut cell.blocks {
                     mark_block_dirty(cb);
                 }
@@ -535,6 +540,13 @@ fn patch_section_xml(orig: &[u8], sec: &Section, table_ref: Option<&str>, plan: 
             _ => None,
         })
         .collect();
+    // (1b) IN-PLACE TABLE EDITS (issue 057): a dirty table parsed from THIS section's XML carries
+    // its original `<hp:tbl>` byte span — re-emit it at that anchor (per-cell surgery when the
+    // structure is unchanged, whole-table replacement otherwise) instead of appending a copy at
+    // the section end while the stale original stayed in place.
+    let (tbl_edits, tables_in_place) = table_inplace_edits(&original, sec, &edits, table_ref, plan);
+    edits.extend(tbl_edits);
+
     edits.sort_by_key(|e| std::cmp::Reverse(e.0));
     let mut s = original;
     for (start, end, xml) in &edits {
@@ -547,7 +559,14 @@ fn patch_section_xml(orig: &[u8], sec: &Section, table_ref: Option<&str>, plan: 
     }
 
     // (3) APPENDED blocks (dirty, source=None) → emit + inject before the section close tag.
-    let dirty: Vec<EmitBlock> = sec.blocks.iter().filter_map(dirty_emit).collect();
+    // Tables already re-emitted in place (1b) are excluded — appending them too would duplicate.
+    let dirty: Vec<EmitBlock> = sec
+        .blocks
+        .iter()
+        .enumerate()
+        .filter(|(bi, _)| !tables_in_place.contains(bi))
+        .filter_map(|(_, b)| dirty_emit(b))
+        .collect();
     if dirty.is_empty() && sec.decorations.is_empty() {
         // Edits / page already applied (or nothing changed) — no append needed.
         return s.into_bytes();
@@ -658,6 +677,230 @@ fn patch_section_xml(orig: &[u8], sec: &Section, table_ref: Option<&str>, plan: 
         }
         None => orig.to_vec(),
     }
+}
+
+/// The in-place lane's decision for one dirty table (issue 057).
+enum TablePatch {
+    /// Structure unchanged → splice only the dirty cells' `<hp:tc>` spans (max fidelity: every
+    /// untouched cell + the table geometry stay byte-verbatim).
+    Cells(Vec<(usize, usize, String)>),
+    /// Structure changed (rows/cols/op-set widths/heights/fresh cells) → replace the whole
+    /// `<hp:tbl>` span with a re-synthesized table — still anchored at the original position.
+    Whole(usize, usize, String),
+}
+
+/// Build the in-place splices for every dirty table that carries an original-XML span (issue 057).
+/// Returns the splice list plus the block indices handled here (the append lane skips them).
+/// A table whose span is missing/stale, or which collides with a paragraph edit's span (the table
+/// XML lives INSIDE its wrapper `<hp:p>`), falls back to the legacy append — never a bad splice.
+fn table_inplace_edits(
+    original: &str,
+    sec: &Section,
+    para_edits: &[(usize, usize, String)],
+    table_ref: Option<&str>,
+    plan: &SynthPlan,
+) -> (Vec<(usize, usize, String)>, std::collections::BTreeSet<usize>) {
+    let mut edits = Vec::new();
+    let mut handled = std::collections::BTreeSet::new();
+    // Fallback refs when a cell has no original paragraph to copy from — the same
+    // reuse-a-valid-existing-ref strategy as the append lane, computed on the pristine XML.
+    let sec_para_ref = last_attr(original, "paraPrIDRef").unwrap_or("0").to_string();
+    let sec_plain_ref = last_attr(original, "charPrIDRef").unwrap_or("0").to_string();
+    // New <hp:p>/<hp:tbl> ids start above the section's current max. The append lane recomputes
+    // its own max AFTER these splices land, so the two lanes can never collide.
+    let mut next_id = max_id(original) + 1;
+
+    for (bi, block) in sec.blocks.iter().enumerate() {
+        let Block::Table(t) = block else { continue };
+        if !(t.dirty.is_dirty() || t.cells.iter().any(|c| c.dirty.is_dirty())) {
+            continue;
+        }
+        let Some((s0, e0)) = t.src_span else { continue };
+        // Stale/foreign span guard: the span must address a `<hp:tbl>…</hp:tbl>` in THIS XML
+        // (char-boundary checks first — a stale span must degrade to append, never panic).
+        if e0 > original.len()
+            || s0 >= e0
+            || !original.is_char_boundary(s0)
+            || !original.is_char_boundary(e0)
+            || !original[s0..].starts_with("<hp:tbl")
+            || !original[..e0].ends_with("</hp:tbl>")
+        {
+            continue;
+        }
+        // A dirty WRAPPER paragraph's re-emit span contains the table's span — splicing both
+        // would corrupt the XML. Yield to the paragraph edit; the table keeps the append lane.
+        if para_edits.iter().any(|(ps, pe, _)| *ps < e0 && s0 < *pe) {
+            continue;
+        }
+        match build_table_patch(original, (s0, e0), t, table_ref, plan, &sec_para_ref, &sec_plain_ref, &mut next_id) {
+            TablePatch::Cells(cell_edits) => edits.extend(cell_edits),
+            TablePatch::Whole(a, b, xml) => edits.push((a, b, xml)),
+        }
+        handled.insert(bi);
+    }
+    (edits, handled)
+}
+
+/// Decide + build the in-place patch for ONE dirty table whose original span checks out.
+#[allow(clippy::too_many_arguments)]
+fn build_table_patch(
+    original: &str,
+    (s0, e0): (usize, usize),
+    t: &Table,
+    table_ref: Option<&str>,
+    plan: &SynthPlan,
+    sec_para_ref: &str,
+    sec_plain_ref: &str,
+    next_id: &mut u64,
+) -> TablePatch {
+    let open_end = original[s0..].find('>').map(|i| s0 + i + 1).unwrap_or(e0);
+    let open_tag = &original[s0..open_end];
+    // Reuse the original table's own borderFill for freshly-emitted cells; fall back to the
+    // doc-level table ref, then "1" (the append lane's chain).
+    let bf_owned = first_attr(open_tag, "borderFillIDRef")
+        .map(str::to_string)
+        .or_else(|| table_ref.map(str::to_string))
+        .unwrap_or_else(|| "1".to_string());
+    let bf = bf_owned.as_str();
+
+    // STRUCTURE CHECK — per-cell surgery is only sound when the table's shape is untouched:
+    // row/col counts still match the original XML, no op-set widths/heights (the HWPX parser
+    // leaves both empty), at least one dirty cell, and every dirty cell still addressable by its
+    // original `<hp:tc>` span inside this table.
+    let same_rows =
+        first_attr(open_tag, "rowCnt").and_then(|v| v.trim().parse::<usize>().ok()) == Some(t.rows);
+    let same_cols =
+        first_attr(open_tag, "colCnt").and_then(|v| v.trim().parse::<usize>().ok()) == Some(t.cols);
+    let geometry_untouched = t.col_widths.is_empty() && t.row_heights.is_empty();
+    let dirty_cells: Vec<&Cell> = t.cells.iter().filter(|c| c.dirty.is_dirty()).collect();
+    let cell_spans_ok = !dirty_cells.is_empty()
+        && dirty_cells.iter().all(|c| {
+            c.src_span.is_some_and(|(cs, ce)| {
+                cs >= open_end
+                    && ce <= e0
+                    && cs < ce
+                    && original.is_char_boundary(cs)
+                    && original.is_char_boundary(ce)
+                    && original[cs..].starts_with("<hp:tc")
+            })
+        });
+
+    if same_rows && same_cols && geometry_untouched && cell_spans_ok {
+        let mut cell_edits = Vec::new();
+        let mut ok = true;
+        for cell in &dirty_cells {
+            let (cs, ce) = cell.src_span.expect("checked by cell_spans_ok");
+            match patch_cell_xml(&original[cs..ce], cell, plan, bf, sec_para_ref, sec_plain_ref, next_id) {
+                Some(xml) => cell_edits.push((cs, ce, xml)),
+                None => {
+                    ok = false; // malformed segment → don't half-patch; re-emit the whole table
+                    break;
+                }
+            }
+        }
+        if ok {
+            return TablePatch::Cells(cell_edits);
+        }
+    }
+
+    // WHOLE-TABLE re-emit at the original anchor. The table stays inside its original wrapper
+    // `<hp:p><hp:run>` (only the `<hp:tbl>` span is replaced), so document order is preserved.
+    let cref = |idx: usize| plan.char_ref.get(&idx).cloned().unwrap_or_else(|| sec_plain_ref.to_string());
+    let cells = placed_cells(t);
+    let tid = *next_id;
+    *next_id += 1;
+    let mut xml = String::new();
+    emit_table(
+        &mut xml,
+        tid,
+        t.rows.max(1),
+        t.cols.max(1),
+        &cells,
+        &t.col_widths,
+        sec_para_ref,
+        sec_plain_ref,
+        &cref,
+        bf,
+        &plan.shade_ref,
+        next_id,
+    );
+    TablePatch::Whole(s0, e0, xml)
+}
+
+/// True when any block in a cell's body tree is dirty — i.e. the cell's CONTENT was actually
+/// replaced/edited (SetTableCellRuns builds fresh `Dirty(true)` paragraphs). A cell that is dirty
+/// only at the CELL level (SetTableCellShade) keeps its body byte-verbatim — rebuilding it from
+/// the lossy parse AST would silently drop un-modeled objects (pic/equation/ctrl) living inside.
+fn cell_content_dirty(blocks: &[Block]) -> bool {
+    blocks.iter().any(|b| match b {
+        Block::Paragraph(p) => p.dirty.is_dirty(),
+        Block::Table(t) => {
+            t.dirty.is_dirty()
+                || t.cells.iter().any(|c| c.dirty.is_dirty() || cell_content_dirty(&c.blocks))
+        }
+    })
+}
+
+/// Surgically re-emit ONE dirty cell: the `<hp:tc …>` open tag, the `<hp:subList …>` open tag and
+/// everything AFTER `</hp:subList>` (cellAddr/cellSpan/cellSz/cellMargin) stay byte-verbatim; only
+/// the subList CHILDREN (the cell's paragraphs/nested tables) are rebuilt from the edited AST —
+/// and ONLY when the content itself was edited ([`cell_content_dirty`]); a cell-level-only edit
+/// (shade) keeps its whole body byte-verbatim and patches just the open tag's `borderFillIDRef`.
+/// Falls back to the cell's own original paraPr/charPr refs so a centered/styled cell keeps its
+/// look. Returns None when the segment doesn't parse as `<hp:tc>…<hp:subList>…</hp:subList>…` —
+/// the caller then re-emits the whole table instead (never a half-patch).
+fn patch_cell_xml(
+    cell_orig: &str,
+    cell: &Cell,
+    plan: &SynthPlan,
+    bf: &str,
+    sec_para_ref: &str,
+    sec_plain_ref: &str,
+    next_id: &mut u64,
+) -> Option<String> {
+    if !cell_orig.starts_with("<hp:tc") {
+        return None;
+    }
+    let sub = cell_orig.find("<hp:subList")?;
+    let open_end = sub + cell_orig[sub..].find('>')? + 1;
+    // The LAST close is the cell's own subList (a nested table's subLists all close earlier).
+    let close = cell_orig.rfind("</hp:subList>")?;
+    if close < open_end {
+        return None;
+    }
+
+    let mut out;
+    if cell_content_dirty(&cell.blocks) {
+        // Content edit (SetTableCellRuns): rebuild the subList children from the edited AST.
+        // Cell-local fallback refs: keep the cell's original paragraph/char refs when present (a
+        // centered gov-doc cell stays centered), else the section-level fallback.
+        let inner = &cell_orig[open_end..close];
+        let para_ref = last_attr(inner, "paraPrIDRef").unwrap_or(sec_para_ref).to_string();
+        let plain_ref = last_attr(inner, "charPrIDRef").unwrap_or(sec_plain_ref).to_string();
+        let cref = |idx: usize| plan.char_ref.get(&idx).cloned().unwrap_or_else(|| plain_ref.clone());
+        let blocks: Vec<EmitBlock> = cell.blocks.iter().map(project_block).collect();
+        let mut body = String::new();
+        emit_cell_content(&mut body, &blocks, &para_ref, &plain_ref, &cref, bf, &plan.shade_ref, next_id);
+
+        out = String::with_capacity(cell_orig.len() + body.len());
+        out.push_str(&cell_orig[..open_end]);
+        out.push_str(&body);
+        out.push_str(&cell_orig[close..]);
+    } else {
+        // Cell-level-only edit (shade): the body — including any un-modeled pic/equation/ctrl the
+        // parse AST can't represent — stays byte-verbatim ("사용자 콘텐츠 삭제 금지").
+        out = cell_orig.to_string();
+    }
+
+    // Shade edit (SetTableCellShade): re-point the verbatim tc open tag's borderFillIDRef at the
+    // synthesized shaded fill. `shade_color` is only ever Some when an op set it (the parser
+    // leaves it None), so untouched cells keep their original fill byte-verbatim.
+    if let Some(id) = cell.shade_color.map(|c| c.to_hex()).and_then(|hex| plan.shade_ref.get(&hex)) {
+        let tc_open_end = out.find('>')? + 1;
+        let patched = synth::set_attr(&out[..tc_open_end], "borderFillIDRef", id);
+        out = format!("{patched}{}", &out[tc_open_end..]);
+    }
+    Some(out)
 }
 
 /// Re-emit an EDITED simple paragraph in place: keep its original `<hp:p …>` open tag verbatim
