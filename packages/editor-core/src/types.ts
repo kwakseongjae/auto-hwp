@@ -200,7 +200,11 @@ export interface DocContext {
 export type OnAiRequest = (instruction: string, anchors: Anchor[], docContext: DocContext) => Promise<Intent[]>;
 
 /** Per-op-kind metadata for the proposal preview CARD (010식). A pure Intent→card mapping used by the
- *  UI layer to render a human summary + target chip. */
+ *  UI layer to render a human summary + target chip. Issue 051 adds two OPTIONAL fields (additive):
+ *  `destructive` marks a card that REMOVES user content (DeleteBlock) — the UI must render it as a
+ *  warning card and apply it only behind the explicit 적용 approval (never an auto-apply path); `detail`
+ *  carries the target block's ORIGINAL text (fetched by `EditController.previewCards`) so the user sees
+ *  exactly WHAT a delete would remove before approving. */
 export interface IntentCard {
   kind: string;
   icon: string;
@@ -208,6 +212,10 @@ export interface IntentCard {
   summary: string;
   section: number | null;
   block: number | null;
+  /** True for content-destroying intents (DeleteBlock) — explicit approval required (051). */
+  destructive?: boolean;
+  /** The target block's current text (원문), shown on a delete card (051). */
+  detail?: string;
 }
 
 /** A rectangle in own-render PAGE px (the space the adapter's hit-test/table queries speak). */

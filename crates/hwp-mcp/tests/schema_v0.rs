@@ -123,6 +123,11 @@ fn examples() -> Vec<Example> {
         e("SetCellRangeShade", r##"{"intent":"SetCellRangeShade","section":0,"index":1,"r0":0,"c0":0,"r1":1,"c1":2,"shade":"#EEEEEE"}"##, Synthetic),
         e("SetCellRangeFmt", r##"{"intent":"SetCellRangeFmt","section":0,"index":1,"r0":0,"c0":0,"r1":1,"c1":2,"bold":true,"italic":null,"size_pt":null,"font":null,"color":"#0000FF","align":"center"}"##, Synthetic),
         e("DeleteBlock", r#"{"intent":"DeleteBlock","section":0,"index":0}"#, Synthetic),
+        // ---- structural inserts (issue 051 — chat structural edit; Intent exposure of the EXISTING
+        //      InsertTableAt / InsertParagraphAt ops). `index` may be an int (at that block; == len
+        //      appends) or null/absent (section END — the InsertImage anchor precedent). ----
+        e("InsertTableAt", r#"{"intent":"InsertTableAt","section":0,"index":1,"rows":[[{"text":"머리","bold":true},{"text":"칸"}],[{"text":"A2"},{"text":"B2"}]]}"#, Synthetic),
+        e("InsertParagraphAt", r#"{"intent":"InsertParagraphAt","section":0,"index":0,"runs":[{"text":"새 문단","bold":true}],"para":{"align":"center"}}"#, Synthetic),
     ]
 }
 
@@ -143,7 +148,7 @@ fn de_err(v: Value) -> String {
 /// example trips the snapshot test). Keep in lockstep with the `Intent` enum count.
 #[test]
 fn every_intent_variant_has_a_documented_example() {
-    assert_eq!(examples().len(), 36, "one JSON example per Intent variant (see INTENT-SCHEMA.md)");
+    assert_eq!(examples().len(), 38, "one JSON example per Intent variant (see INTENT-SCHEMA.md)");
 }
 
 /// Drift guard: every documented example deserializes into the REAL `Intent` (deny_unknown_fields
@@ -230,6 +235,59 @@ fn insert_image_rejects_a_non_image_payload() {
     };
     assert!(err.contains("PNG") || err.contains("형식") || err.contains("이미지"), "honest format error: {err}");
     assert_eq!(s.doc.as_ref().unwrap().revision(), before, "a rejected insert does NOT mutate the doc");
+}
+
+/// Issue 051: the structural-insert Intents honor the `index: null`/absent anchor — the insert lands
+/// at the SECTION END (the `InsertImage` precedent), and a PAST-END explicit index is an honest
+/// op-bus error that mutates nothing (no clamp, no silent no-op).
+#[test]
+fn structural_insert_index_anchor_semantics() {
+    // null index → append at the section end (synthetic doc: [para@0, table@1] → table lands @2).
+    let mut s = synthetic_session();
+    apply_intent_json(
+        &mut s,
+        &json!({"intent":"InsertTableAt","section":0,"index":null,"rows":[[{"text":"끝"}]]}),
+    )
+    .expect("null index appends at the section end");
+
+    // absent index → same append semantics (Option field: omitted → None).
+    let mut s = synthetic_session();
+    apply_intent_json(
+        &mut s,
+        &json!({"intent":"InsertParagraphAt","section":0,"runs":[{"text":"끝 문단"}]}),
+    )
+    .expect("absent index appends at the section end");
+
+    // past-end explicit index → honest error, revision unchanged.
+    let mut s = synthetic_session();
+    let before = s.doc.as_ref().unwrap().revision();
+    let err = match apply_intent_json(
+        &mut s,
+        &json!({"intent":"InsertTableAt","section":0,"index":99,"rows":[[{"text":"x"}]]}),
+    ) {
+        Err(e) => e,
+        Ok(_) => panic!("a past-end insert index must be rejected"),
+    };
+    assert!(err.contains("out of range"), "honest past-end error: {err}");
+    assert_eq!(s.doc.as_ref().unwrap().revision(), before, "a rejected insert does NOT mutate the doc");
+}
+
+/// Issue 051: the nested `CellSpec` (InsertTableAt rows) and `ParaSpec` (InsertParagraphAt para)
+/// inherit the `deny_unknown_fields` contract — a misspelled key is a HARD error, never a silently
+/// dropped span/override.
+#[test]
+fn structural_insert_nested_specs_reject_unknown_fields() {
+    let err = de_err(json!({
+        "intent":"InsertTableAt","section":0,"index":0,
+        "rows":[[{"text":"x","colspan":2}]]
+    }));
+    assert!(err.contains("unknown field") && err.contains("colspan"), "nested CellSpec rejects unknown field: {err}");
+
+    let err = de_err(json!({
+        "intent":"InsertParagraphAt","section":0,"index":0,"runs":[],
+        "para":{"alignment":"center"}
+    }));
+    assert!(err.contains("unknown field") && err.contains("alignment"), "nested ParaSpec rejects unknown field: {err}");
 }
 
 /// A missing tag / missing required field are explicit errors (not defaulted).

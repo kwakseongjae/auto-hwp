@@ -173,7 +173,7 @@ describe("HwpWorkspace 우클릭 컨텍스트 메뉴 (issue 039)", () => {
     expect(within(menu).queryByTestId("hw-ctx-row-below")).toBeNull();
   });
 
-  it("바탕(비개체) 우클릭 → 표 추가 그리드(027 픽커) → 2×3 → ApplyContent 위임", async () => {
+  it("바탕(비개체) 우클릭 → 표 추가 그리드(027 픽커) → 2×3 → InsertTableAt 위임 (051 재배선)", async () => {
     const adapter = new MockAdapter({ pages: 1 }); // 아무 것도 히트 안 됨 → 바탕
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
@@ -182,9 +182,10 @@ describe("HwpWorkspace 우클릭 컨텍스트 메뉴 (issue 039)", () => {
     expect(within(menu).getByText("표 추가")).toBeTruthy();
     fireEvent.click(within(menu).getByTestId("hw-table-cell-2-3"));
     await waitFor(() => {
-      const applied = adapter.applied.find((i) => i.intent === "ApplyContent") as (Intent & { json: string }) | undefined;
+      const applied = adapter.applied.find((i) => i.intent === "InsertTableAt") as (Intent & { rows: unknown[][] }) | undefined;
       expect(applied).toBeTruthy();
-      expect(JSON.parse(applied!.json).blocks[0].rows).toHaveLength(2);
+      expect(applied!.index).toBeNull(); // null = 구역 끝 (엔진이 블록 수를 해석 — INTENT-SCHEMA §6.9)
+      expect(applied!.rows).toHaveLength(2);
     });
   });
 

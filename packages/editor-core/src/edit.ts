@@ -1,4 +1,4 @@
-import { describeIntent } from "./describeIntent";
+import { deleteBlockDetail, describeIntent } from "./describeIntent";
 import { inheritRuns } from "./runs";
 import type { DocSession } from "./session";
 import type { SelectionModel } from "./selection";
@@ -60,6 +60,29 @@ export class EditController {
     return intents.map(describeIntent);
   }
 
+  /** The ASYNC preview (issue 051): `preview` plus per-card enrichment — a `DeleteBlock` card is
+   *  populated with the target block's ORIGINAL text (`detail`, read via `session.runsAt`: paragraph
+   *  first, table (0,0) cell fallback, honest placeholder otherwise) so the user sees exactly what a
+   *  delete would remove BEFORE the explicit 적용 approval. Non-destructive intents pass through the
+   *  pure `describeIntent` unchanged. The chat panel uses THIS for its cards; applying still goes
+   *  through the same `apply` (one undo batch) — there is NO auto-apply path for a destructive card. */
+  async previewCards(intents: Intent[]): Promise<IntentCard[]> {
+    return Promise.all(
+      intents.map(async (intent) => {
+        const card = describeIntent(intent);
+        if (card.destructive && card.section !== null && card.block !== null) {
+          const detail = await deleteBlockDetail(
+            (s, b, r, c) => this.session.runsAt(s, b, r, c),
+            card.section,
+            card.block,
+          );
+          return { ...card, detail };
+        }
+        return card;
+      }),
+    );
+  }
+
   /** Apply a previewed proposal as ONE undo batch, then clear the consumed selection. Resolves to how
    *  many ops were applied. Rethrows on failure (the UI surfaces the error / trap-recovery message). */
   async apply(intents: Intent[]): Promise<number> {
@@ -103,15 +126,18 @@ export class EditController {
     return this.session.applyBatch([{ intent: "MoveImage", section, from, to, width, height }]);
   }
 
-  /** 표 추가 (step 2): append a fresh `rows × cols` empty table at the document END via `ApplyContent`
-   *  (the existing insert path — no `InsertTableAt` op exists; see the issue note). One undo batch. */
-  async insertTable(rows: number, cols: number, section = 0): Promise<number> {
+  /** 표 추가 (step 2, rewired in issue 051): insert a fresh `rows × cols` empty table via the
+   *  `InsertTableAt` Intent (NOTE — 051 정정: the `InsertTableAt` OP has always existed in hwp-ops;
+   *  what was missing was only its Intent exposure, so the old ApplyContent end-append fallback is
+   *  retired). `at` is the target BLOCK index (`at == len` appends); the default `null` means the
+   *  SECTION END — the engine resolves it to `len`, absorbing the end-append without the web shell
+   *  needing to know the block count (INTENT-SCHEMA §6.9, the `InsertImage.block` anchor precedent).
+   *  Each cell is `{}` (all `CellSpec` defaults — an empty plain cell). One undo batch. */
+  async insertTable(rows: number, cols: number, section = 0, at: number | null = null): Promise<number> {
     const r = Math.max(1, Math.floor(rows));
     const c = Math.max(1, Math.floor(cols));
-    const grid = Array.from({ length: r }, () => Array.from({ length: c }, () => ""));
-    const json = JSON.stringify({ blocks: [{ type: "table", header: [], rows: grid }] });
-    void section; // ApplyContent appends to the live doc; section kept for signature symmetry.
-    return this.session.applyBatch([{ intent: "ApplyContent", json }]);
+    const grid = Array.from({ length: r }, () => Array.from({ length: c }, () => ({})));
+    return this.session.applyBatch([{ intent: "InsertTableAt", section, index: at, rows: grid }]);
   }
 
   /** 행 삽입 (issue 039): insert `count` empty rows at logical row `at` (whole-table index, `0..=rowCount`)

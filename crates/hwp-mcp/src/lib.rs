@@ -647,9 +647,10 @@ fn do_set_image_size(
 }
 
 /// Move the image anchored at `(section, from)` to block index `to` as ONE undo unit: `DeleteBlock`
-/// + `InsertImageAt` batched via `do_ops` (no `MoveBlock` op exists; this is the smallest faithful
-/// relocation). `width`/`height` preserve the image's current size across the move. The bytes are
-/// re-embedded from the existing `BinData` the image references (so the moved copy is independent).
+/// + `InsertImageAt` batched via `do_ops`. NOTE (051 정정): a general `Op::MoveBlock` DOES exist (see
+/// [`do_move_block`]) — this image lane deliberately keeps the delete+insert pair because it
+/// RE-EMBEDS the bytes from the existing `BinData` (the moved copy is independent of the original
+/// reference). `width`/`height` preserve the image's current size across the move.
 fn do_move_image(
     session: &mut Session,
     section: usize,
@@ -883,6 +884,29 @@ pub enum Intent {
     /// selection / drop-on-empty-area case). `width`/`height` are the display box in HWPUNIT (§4.5 — the
     /// px/mm→HWPUNIT conversion lives in editor-core `units.ts`, a single point).
     InsertImage { section: usize, block: Option<usize>, data_b64: String, width: i32, height: i32 },
+    /// Structural insert (issue 051 — chat structural edit) — insert a rich table AT block `index` of
+    /// `section` as ONE undo unit (the existing `InsertTableAt` op; this variant only EXPOSES it to the
+    /// Intent lane). `rows` is the per-row `CellSpec` grid with `AppendRichTable`'s HTML-table coverage
+    /// semantics (each logical row lists only the uncovered cells; `col_span`/`row_span`/`bold`/`shade`
+    /// all optional, `{}` = an empty plain cell). `index` follows the `InsertImage.block` precedent for
+    /// a shell that cannot know the section's block count: `Some(i)` inserts AT block `i` (`i == len`
+    /// appends; PAST the end is an honest op-bus error, never a clamp), `None` (absent/null) appends at
+    /// the section END — the dispatcher resolves `None` to `len` so the op's own `index == len` append
+    /// semantics absorb the end-append (no separate append op).
+    InsertTableAt { section: usize, index: Option<usize>, rows: Vec<Vec<hwp_ops::CellSpec>> },
+    /// Structural insert (issue 051) — insert a rich paragraph AT block `index` of `section` as ONE undo
+    /// unit (the existing `InsertParagraphAt` op, exposed to the Intent lane). `runs` are styled
+    /// `RunSpec`s (same wire shape as `SetParagraphRuns`); `para` is the optional paragraph-shape
+    /// override (`ParaSpec`: align/line_spacing_pct/indent_pt/margins/spacing — omit = inherit the
+    /// document default). `index` anchors like `InsertTableAt`: `Some(i)` = at block `i` (`i == len`
+    /// appends, past-end errors), `None` = the section END.
+    InsertParagraphAt {
+        section: usize,
+        index: Option<usize>,
+        runs: Vec<hwp_ops::RunSpec>,
+        #[serde(default)]
+        para: hwp_ops::ParaSpec,
+    },
 }
 
 /// Largest single embedded image we accept, in DECODED bytes (issue 050 — 014 hardening spirit: reject
@@ -1221,7 +1245,40 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }
+        Intent::InsertTableAt { section, index, rows } => {
+            // `None` → the section END (resolved here so the op's `index == len` append semantics
+            // absorb the end-append); `Some(i)` passes through — past-end stays an honest op error.
+            let sess = session.doc.as_mut().ok_or("no document open")?;
+            let index = match index {
+                Some(i) => i,
+                None => resolve_section_end(sess, section)?,
+            };
+            sess.do_op(&hwp_ops::Op::InsertTableAt { section, index, rows }).map_err(|e| e.to_string())?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::InsertParagraphAt { section, index, runs, para } => {
+            let sess = session.doc.as_mut().ok_or("no document open")?;
+            let index = match index {
+                Some(i) => i,
+                None => resolve_section_end(sess, section)?,
+            };
+            sess.do_op(&hwp_ops::Op::InsertParagraphAt { section, index, runs, para })
+                .map_err(|e| e.to_string())?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
     }
+}
+
+/// The section-END insert index (= its block count) for the `index: None` anchor of the structural
+/// insert Intents (issue 051). A missing section is an honest error (mirrors `InsertImage`'s message).
+fn resolve_section_end(sess: &hwp_ops::EditSession, section: usize) -> Result<usize, String> {
+    sess.doc()
+        .sections
+        .get(section)
+        .map(|s| s.blocks.len())
+        .ok_or_else(|| format!("섹션 {section}이(가) 없습니다"))
 }
 
 /// Dispatch a tool call. Ok = result text, Err = error text (surfaced as MCP `isError`).

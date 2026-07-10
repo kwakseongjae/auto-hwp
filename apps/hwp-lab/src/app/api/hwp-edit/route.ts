@@ -23,9 +23,34 @@ function badRequest(error: string) {
   return NextResponse.json({ error }, { status: 400 });
 }
 
-/** 결정적 mock — anchors[0]을 겨냥해 "PoC ✔" 편집을 만든다(키 없이도 전체 플로우 완주). */
+/** 결정적 mock — anchors[0]을 겨냥해 "PoC ✔" 편집을 만든다(키 없이도 전체 플로우 완주).
+ *  이슈 051: 구조 편집 어휘가 열렸으므로 mock 도 결정적 구조 제안을 만든다 —
+ *  ① "N×M 표 …(삽입|넣|추가|만들)" → `InsertTableAt` (앵커 있으면 그 블록 위치, 없으면 구역 끝 = index:null),
+ *  ② "…삭제" + 앵커 → `DeleteBlock` (프리뷰 카드의 원문 표시 + 명시 승인 게이트를 mock 으로도 완주),
+ *  ③ "행 …추가" + 표/셀 앵커 → `TableAppendRow`. 나머지는 기존 채움 mock 그대로. */
 function mockIntents(instruction: string, anchors: Anchor[]): Intent[] {
   const a = anchors[0];
+  const text = instruction.trim();
+
+  // ② 블록 삭제 (구조 편집 — 반드시 앵커를 겨냥; 앵커 없으면 제안하지 않는다: 자의적 삭제 금지).
+  if (/삭제/.test(text) && a) {
+    return [{ intent: "DeleteBlock", section: a.section, index: a.block }];
+  }
+
+  // ① 표 삽입: "3x4 표 넣어줘" 류. 크기 미지정이면 2×2. 앵커가 있으면 그 블록 위치에, 없으면 구역 끝.
+  if (/표/.test(text) && /(삽입|넣|추가|만들)/.test(text) && !/행/.test(text)) {
+    const m = text.match(/(\d+)\s*[x×]\s*(\d+)/);
+    const rows = Math.max(1, Math.min(20, m ? parseInt(m[1], 10) : 2));
+    const cols = Math.max(1, Math.min(20, m ? parseInt(m[2], 10) : 2));
+    const grid = Array.from({ length: rows }, () => Array.from({ length: cols }, () => ({})));
+    return [{ intent: "InsertTableAt", section: a?.section ?? 0, index: a ? a.block : null, rows: grid }];
+  }
+
+  // ③ 행 추가: 표/셀 앵커의 표 블록에 merge-safe 빈 행 1개.
+  if (/행/.test(text) && /(추가|삽입|넣)/.test(text) && a && (a.kind === "table" || a.kind === "cell" || a.kind === "range")) {
+    return [{ intent: "TableAppendRow", section: a.section, index: a.block }];
+  }
+
   if (!a) return [];
   if (a.kind === "table" || a.kind === "range" || a.kind === "cell") {
     // 셀 앵커(023)면 클릭한 그 셀(rows/cols)을 겨냥한다 — row0/col0 고정 제거. 표/범위 앵커는 rows/cols
@@ -33,8 +58,7 @@ function mockIntents(instruction: string, anchors: Anchor[]): Intent[] {
     return [{ intent: "SetTableCell", section: a.section, index: a.block, row: a.rows?.[0] ?? 0, col: a.cols?.[0] ?? 0, text: "PoC ✔" }];
   }
   if (a.kind === "paragraph") {
-    const text = instruction.trim().slice(0, 60) || "PoC ✔";
-    return [{ intent: "SetParagraphText", section: a.section, block: a.block, text }];
+    return [{ intent: "SetParagraphText", section: a.section, block: a.block, text: text.slice(0, 60) || "PoC ✔" }];
   }
   return [];
 }

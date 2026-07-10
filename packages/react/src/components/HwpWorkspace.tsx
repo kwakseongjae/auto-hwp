@@ -2179,6 +2179,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           onJumpToPage={jumpToPage}
           isMock={props.isMock}
           focusToken={aiFocusToken}
+          // issue 051: async card enrichment — a DeleteBlock proposal shows the target block's 원문
+          // (EditController.previewCards reads it via session.runsAt) before the explicit 적용 approval.
+          previewCards={(intents) => core.edit.previewCards(intents)}
         />
       </div>
 

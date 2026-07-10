@@ -31,6 +31,11 @@ export interface ChatPanelProps {
    *  floating toolbar's "AI에게 전달" bumps it (issue 028) — the marked selection is already the anchor
    *  chip, so this just brings the user to the composer. No new prompt logic. */
   focusToken?: number;
+  /** OPTIONAL async card builder (issue 051): maps the proposed Intents → enriched preview cards —
+   *  the host wires `EditController.previewCards` so a DeleteBlock card carries the target block's
+   *  ORIGINAL text (`detail`) + the `destructive` flag. Omitted → the pure `describeIntent` mapping
+   *  (backward compatible). Applying is ALWAYS behind the explicit 적용 button either way. */
+  previewCards?: (intents: Intent[]) => Promise<IntentCard[]>;
 }
 
 // One assistant turn carries the previewed Intents (rendered as per-op CARDS); `state` tracks review.
@@ -42,13 +47,20 @@ type Msg =
 // Reusable prompt chips — the empty-state suggestions (fill the input so the user can tweak).
 const PROMPT_CHIPS = ["이 칸을 채워줘", "이 표에 행 하나 추가해줘", "이 문단을 다듬어줘"];
 
-/** A structured per-op preview CARD (010식): op icon + label + target chip + summary + jump link. */
+/** A structured per-op preview CARD (010식): op icon + label + target chip + summary + jump link.
+ *  Issue 051: a DESTRUCTIVE card (DeleteBlock) renders as a warning card and shows the target block's
+ *  ORIGINAL text (`detail`) so the user approves knowing exactly what would be removed. */
 function OpCard({ card, page, onJump }: { card: IntentCard; page: number | null; onJump?: (page: number) => void }) {
   return (
-    <div className="hw-card">
+    <div className={card.destructive ? "hw-card hw-card-danger" : "hw-card"}>
       <div className="hw-card-head">
         <span className="hw-card-icon">{card.icon}</span>
         <span className="hw-card-label">{card.label}</span>
+        {card.destructive && (
+          <span className="hw-card-danger-badge" title="이 편집은 문서 내용을 삭제합니다 — 명시 승인 후에만 적용됩니다">
+            삭제
+          </span>
+        )}
         {card.section !== null && (
           <span className="hw-card-target" title="편집 대상 위치 (섹션/블록)">
             s{card.section}
@@ -57,6 +69,11 @@ function OpCard({ card, page, onJump }: { card: IntentCard; page: number | null;
         )}
       </div>
       <p className="hw-card-summary">{card.summary}</p>
+      {card.detail !== undefined && (
+        <blockquote className="hw-card-detail" data-testid="hw-card-detail" title="삭제 대상 블록의 현재 원문">
+          {card.detail}
+        </blockquote>
+      )}
       {page !== null && onJump && (
         <button className="hw-card-jump" onClick={() => onJump(page)} title="이 편집이 적용되는 쪽으로 이동">
           ↪ p.{page + 1}로 이동
@@ -132,7 +149,9 @@ export function ChatPanel(props: ChatPanelProps) {
       if (!intents || intents.length === 0) {
         setMsgs((m) => [...m, { role: "assistant", state: "error", text: "제안된 편집이 없습니다." }]);
       } else {
-        const cards = intents.map(describeIntent);
+        // issue 051: the host's async builder enriches cards (e.g. DeleteBlock 원문); fall back to the
+        // pure describeIntent mapping when the host doesn't wire one (backward compatible).
+        const cards = props.previewCards ? await props.previewCards(intents) : intents.map(describeIntent);
         setMsgs((m) => [...m, { role: "assistant", state: "pending", intents, cards, page }]);
       }
     } catch (e) {
@@ -213,8 +232,10 @@ export function ChatPanel(props: ChatPanelProps) {
                 </div>
                 {m.state === "pending" && (
                   <div className="hw-review">
+                    {/* issue 051: a proposal containing a DESTRUCTIVE card names the deletion on the
+                        approval button — the user consents to the delete EXPLICITLY (no auto-apply). */}
                     <button className="hw-btn-primary" disabled={busy} onClick={() => apply(m.intents)}>
-                      ✓ 적용
+                      {m.cards.some((c) => c.destructive) ? "✓ 적용(삭제 포함)" : "✓ 적용"}
                     </button>
                     <button className="hw-btn-ghost" disabled={busy} onClick={reject}>
                       취소

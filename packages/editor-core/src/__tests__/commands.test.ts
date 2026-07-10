@@ -272,16 +272,27 @@ describe("EditController manual commands (issue 027) — each = ONE Intent = ONE
     expect(adapter.undos).toBe(1);
   });
 
-  it("step2 insertTable appends a rows×cols empty table via ApplyContent", async () => {
+  it("step2 insertTable (rewired in 051) commits ONE InsertTableAt intent — default = section END (index:null)", async () => {
     const { core, adapter } = await openCore();
     await core.edit.insertTable(2, 3);
     expect(adapter.applied).toHaveLength(1);
-    const intent = adapter.applied[0] as Intent & { json: string };
-    expect(intent.intent).toBe("ApplyContent");
-    const parsed = JSON.parse(intent.json);
-    expect(parsed.blocks[0].type).toBe("table");
-    expect(parsed.blocks[0].rows).toHaveLength(2);
-    expect(parsed.blocks[0].rows[0]).toEqual(["", "", ""]);
+    const intent = adapter.applied[0] as Intent & { rows: unknown[][] };
+    // The old ApplyContent end-append fallback is retired: the InsertTableAt OP always existed; 051
+    // exposed it as an Intent, so the manual toolbar and the chat share ONE structural insert lane.
+    expect(intent.intent).toBe("InsertTableAt");
+    expect(intent.section).toBe(0);
+    expect(intent.index).toBeNull(); // null = section END (the engine resolves len — INTENT-SCHEMA §6.9)
+    expect(intent.rows).toHaveLength(2);
+    expect(intent.rows[0]).toEqual([{}, {}, {}]); // {} = an empty plain CellSpec (all defaults)
+    expect(core.session.canUndo()).toBe(true);
+    await core.session.undo();
+    expect(adapter.undos).toBe(1); // one op → one undo removes the table
+  });
+
+  it("insertTable at an explicit block index passes it through (positioned insert)", async () => {
+    const { core, adapter } = await openCore();
+    await core.edit.insertTable(1, 2, 0, 4);
+    expect(adapter.applied[0]).toMatchObject({ intent: "InsertTableAt", section: 0, index: 4 });
   });
 
   it("행 삽입 (issue 039) delegates to the EXISTING TableInsertRows op — below = at row+1, above = at row", async () => {
@@ -406,5 +417,57 @@ describe("DocSession read helpers (issue 027) — optional adapter methods", () 
     expect(await bare.core.session.rowBoundaries(0, 0, 1)).toBeNull();
     expect(await bare.core.session.pageGeom(0)).toBeNull();
     expect(await bare.core.session.runsAt(0, 1, 0, 0)).toEqual([]);
+  });
+});
+
+describe("051 — structural preview cards (describeIntent + EditController.previewCards)", () => {
+  it("describeIntent summarizes structural inserts as POSITION + CONTENT", async () => {
+    const { core } = await openCore();
+    const [table] = core.edit.preview([{ intent: "InsertTableAt", section: 0, index: null, rows: [[{}, {}, {}], [{}, {}, {}]] }]);
+    expect(table.label).toBe("표 삽입");
+    expect(table.summary).toContain("2×3 표 삽입");
+    expect(table.summary).toContain("구역 끝");
+    expect(table.destructive).toBeUndefined();
+
+    const [para] = core.edit.preview([
+      { intent: "InsertParagraphAt", section: 0, index: 2, runs: [{ text: "회사 " }, { text: "약력", bold: true }] },
+    ]);
+    expect(para.label).toBe("문단 삽입");
+    expect(para.summary).toContain("블록 2 위치");
+    expect(para.summary).toContain("회사 약력");
+  });
+
+  it("DeleteBlock card is DESTRUCTIVE and previewCards fetches the target block's 원문 (paragraph)", async () => {
+    const { core } = await openCore({ runs: (s, b, row) => (row === undefined && s === 0 && b === 3 ? [{ text: "삭제될 " }, { text: "문단" }] : []) });
+    const cards = await core.edit.previewCards([{ intent: "DeleteBlock", section: 0, index: 3 }]);
+    expect(cards[0].destructive).toBe(true);
+    expect(cards[0].detail).toBe("삭제될 문단");
+    // The sync preview stays pure (no detail) — only the async lane reads the doc.
+    expect(core.edit.preview([{ intent: "DeleteBlock", section: 0, index: 3 }])[0].detail).toBeUndefined();
+  });
+
+  it("DeleteBlock 원문 falls back to the table's (0,0) cell, then to an HONEST placeholder", async () => {
+    // A table block: paragraph read is empty, cell (0,0) has text.
+    const table = await openCore({ runs: (_s, _b, row, col) => (row === 0 && col === 0 ? [{ text: "보유역량" }] : []) });
+    const [tableCard] = await table.core.edit.previewCards([{ intent: "DeleteBlock", section: 0, index: 1 }]);
+    expect(tableCard.detail).toContain("표 블록");
+    expect(tableCard.detail).toContain("보유역량");
+
+    // A backend that can't read runs at all → honest placeholder, never a fabricated 원문.
+    const bare = await openCore();
+    const [bareCard] = await bare.core.edit.previewCards([{ intent: "DeleteBlock", section: 0, index: 1 }]);
+    expect(bareCard.destructive).toBe(true);
+    expect(bareCard.detail).toContain("원문을 읽을 수 없는");
+  });
+
+  it("previewCards passes non-destructive intents through unchanged (no doc read)", async () => {
+    const { core } = await openCore({ runs: [{ text: "무관" }] });
+    const cards = await core.edit.previewCards([
+      { intent: "SetTableCell", section: 0, index: 1, row: 0, col: 0, text: "값" },
+      { intent: "TableAppendRow", section: 0, index: 1 },
+    ]);
+    expect(cards[0].detail).toBeUndefined();
+    expect(cards[1].label).toBe("행 추가");
+    expect(cards.every((c) => !c.destructive)).toBe(true);
   });
 });

@@ -32,8 +32,10 @@ export class MockAdapter implements EngineAdapter {
       rowBoundaries?: number[] | null | ((page: number, section: number, block: number) => number[] | null);
       /** Canned page geometry for `pageGeometry` (issue 027). Omit to OMIT the method. */
       pageGeom?: PageGeom | null;
-      /** Canned current runs for `blockRuns` (issue 027 run-preservation). Omit to OMIT the method. */
-      runs?: RunSpec[];
+      /** Canned current runs for `blockRuns` (issue 027 run-preservation), or a `(section, block, row,
+       *  col)` resolver (issue 051 — so a delete-preview test can model "paragraph vs table cell" reads).
+       *  Omit to OMIT the method. */
+      runs?: RunSpec[] | ((section: number, block: number, row?: number, col?: number) => RunSpec[]);
       /** Canned glyph-caret hit for `hitTestText` (issue 041), or a coordinate-aware resolver. Present
        *  makes `hitTestText` answer; omit to OMIT the method (a no-glyph-caret backend). */
       hitText?: HitResult | null | ((page: number, x: number, y: number) => HitResult | null);
@@ -123,8 +125,9 @@ export class MockAdapter implements EngineAdapter {
     const ib = this.opts.imageBox;
     return (typeof ib === "function" ? ib(page, section, block) : ib) ?? null;
   }
-  async blockRuns(): Promise<RunSpec[]> {
-    return this.opts.runs ?? [];
+  async blockRuns(section: number, block: number, row?: number, col?: number): Promise<RunSpec[]> {
+    const r = this.opts.runs;
+    return (typeof r === "function" ? r(section, block, row, col) : r) ?? [];
   }
   async hitTestText(page: number, x: number, y: number): Promise<HitResult | null> {
     const h = this.opts.hitText;

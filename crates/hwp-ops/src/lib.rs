@@ -201,7 +201,13 @@ pub struct PageMargins {
 }
 
 /// One cell of an `AppendRichTable`. `col_span`/`row_span` default to 1.
-#[derive(Clone, Debug)]
+///
+/// `Deserialize` (issue 051): the wire shape carried inside the `InsertTableAt` Intent's `rows`
+/// grid. `#[serde(default)]` lets a cell omit any field (`{}` = an empty plain cell);
+/// `deny_unknown_fields` rejects a misspelled cell key (e.g. `colspan`) instead of silently
+/// dropping a span — mirroring `RunSpec`'s contract.
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct CellSpec {
     pub text: String,
     pub col_span: usize,
@@ -261,7 +267,12 @@ impl RunSpec {
 
 /// Paragraph-shape overrides the AI content preprocessor emits. Maps to a synthesized
 /// `<hh:paraPr>` on export (alignment, line spacing, indents, spacing). Unset = inherit.
-#[derive(Clone, Debug, Default, PartialEq)]
+///
+/// `Deserialize` (issue 051): the wire shape carried inside the `InsertParagraphAt` Intent's
+/// `para` field. Every field is `Option` (omit = inherit); `deny_unknown_fields` rejects a
+/// misspelled key instead of silently dropping the override — mirroring `RunSpec`'s contract.
+#[derive(Clone, Debug, Default, PartialEq, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct ParaSpec {
     /// Named paragraph style to apply (e.g. "개요 1", "본문"); resolved to a styleIDRef on export.
     pub style: Option<String>,

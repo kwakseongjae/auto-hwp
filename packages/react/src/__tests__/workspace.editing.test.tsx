@@ -35,7 +35,7 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
     expect(screen.queryByTestId("hw-ruler")).toBeNull();
   });
 
-  it("enableEditing shows the ruler (mm) + 표 추가 button; picking a size appends a table via ApplyContent", async () => {
+  it("enableEditing shows the ruler (mm) + 표 추가 button; picking a size inserts a table via InsertTableAt (051 재배선)", async () => {
     const adapter = new MockAdapter({ table, pageGeom: { w: 794, h: 1123, ml: 90, mt: 90, mr: 90, mb: 90 }, pages: 1 });
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
     await sheetOf(container);
@@ -45,9 +45,13 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
     fireEvent.mouseEnter(screen.getByTestId("hw-table-cell-2-2"));
     fireEvent.click(screen.getByTestId("hw-table-cell-2-2"));
     await waitFor(() => expect(adapter.applied).toHaveLength(1));
-    const intent = adapter.applied[0] as Intent & { json: string };
-    expect(intent.intent).toBe("ApplyContent");
-    expect(JSON.parse(intent.json).blocks[0].rows).toHaveLength(2);
+    const intent = adapter.applied[0] as Intent & { rows: unknown[][] };
+    // 051: the ApplyContent end-append fallback is retired — the toolbar rides the same InsertTableAt
+    // Intent the chat lane uses (index: null = section END; the engine resolves the block count).
+    expect(intent.intent).toBe("InsertTableAt");
+    expect(intent.index).toBeNull();
+    expect(intent.rows).toHaveLength(2);
+    expect(intent.rows[0]).toEqual([{}, {}]);
   });
 
   it("marking a table shows column-resize grips; a drag MOVES the boundary + commits SetTableColWidths (issue 031)", async () => {
