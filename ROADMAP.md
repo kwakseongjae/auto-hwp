@@ -1,5 +1,10 @@
 # tf-hwp — 프로덕션 레디 로드맵 (상세)
 
+> ⚠️ **역사 문서 (M-마일스톤 시대, pre-피벗)** — 현행 로드맵은
+> [docs/PRODUCT-DIRECTION-V2.md](docs/PRODUCT-DIRECTION-V2.md)(R12)이고, 진행표는
+> [docs/issues/README.md](docs/issues/README.md), 현재 위치는 [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md)다.
+> 이 파일은 초기 계획의 기록으로만 보존한다(내용 갱신 중단).
+
 > 목표(Production DoD): 사용자가 **.hwp/.hwpx 업로드 → 원본 그대로 뷰 → 수정 → .hwpx 다운로드(export = HWPX only)**.
 > 본 로드맵은 [PLAN.md](./PLAN.md)·[CHECKLIST.md](./CHECKLIST.md)·[docs/DEPENDENCY-STRATEGY.md](./docs/DEPENDENCY-STRATEGY.md) 위에서 마일스톤을 정의한다. 검증은 루트의 `benchmark.hwp`로 한다([docs/FIDELITY.md](./docs/FIDELITY.md)).
 

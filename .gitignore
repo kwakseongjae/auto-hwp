@@ -33,8 +33,9 @@ apps/hwp-lab/test-results/
 apps/hwp-lab/playwright-report/
 apps/hwp-lab/playwright/.cache/
 
-# local agent runtime state
-.claude/
+# local agent runtime state (공유 훅 settings.json만 추적)
+.claude/*
+!.claude/settings.json
 
 # editor
 .idea/
