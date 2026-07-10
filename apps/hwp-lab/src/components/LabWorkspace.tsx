@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HwpWorkspace, WasmAdapter, FONT_CATALOG, type Anchor, type DocContext, type Intent } from "@tf-hwp/react";
 import { buildDocContext } from "@tf-hwp/ai-protocol";
 import { resetEngine } from "@tf-hwp/engine";
+import { AutosaveController, IdbSnapshotStore, findRecoverable, formatAge, recoveredName, type SnapshotRecord } from "@/lib/autosave";
 
 type Mode = "loading" | "mock" | "live";
 type Doc = { bytes: Uint8Array; name: string };
@@ -39,9 +40,103 @@ export default function LabWorkspace() {
   // 기본 폰트 바이트(NanumGothic) — 열기 직후 자동 등록되도록 HwpWorkspace 에 defaultFont 로 전달.
   const [defaultFont, setDefaultFont] = useState<{ family: string; bytes: Uint8Array } | null>(null);
 
+  // ── 이슈 052: 자동저장 + 세션 복구 상태 ─────────────────────────────────────────────────────────
+  // 열기 화면의 미복구 스냅샷(배너), 자동저장/복구 안내 문구, 마지막 자동저장 라벨(헤더 표시 + e2e 신호).
+  const [recovery, setRecovery] = useState<SnapshotRecord | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [savedLabel, setSavedLabel] = useState<string | null>(null);
+  // 복구 클릭으로 연 문서: 열기 성공 시 adoptRecovered(재귀속 + 옛 키 삭제)할 원본 레코드.
+  const pendingRecoveryRef = useRef<SnapshotRecord | null>(null);
+  // toHwpx 는 동기 메인스레드 — 포인터 제스처(드래그) 진행 중엔 flush 를 미룬다(렌더-0 규율).
+  const pointerDownRef = useRef(false);
+
   // ssr:false 로 로드되므로 window 존재. wasm은 public 정적 에셋을 명시적 URL로 fetch(번들러 마법 X).
   const wasmUrl = useMemo(() => new URL("/hwp/hwp_wasm_bg.wasm", window.location.origin), []);
   const adapter = useMemo(() => new WasmAdapter(wasmUrl), [wasmUrl]);
+
+  // 자동저장 파이프라인(052): 성공한 편집(onMutation) → 2s 유휴 디바운스 → adapter.toHwpx() →
+  // IndexedDB(문서당 최신 1개 · 전체 상한 · TTL 7일). IndexedDB 실패는 1회 안내 후 비활성 —
+  // 메모리 최신본으로 트랩 직후 복구는 계속 동작한다.
+  const store = useMemo(() => new IdbSnapshotStore(), []);
+  const autosave = useMemo(
+    () =>
+      new AutosaveController(store, adapter, {
+        canFlushNow: () => !pointerDownRef.current,
+        onSaved: (rec) => setSavedLabel(`자동저장됨 rev ${rec.rev} · ${new Date(rec.savedAt).toLocaleTimeString()}`),
+        onDisabled: () =>
+          setNotice(
+            "자동저장을 사용할 수 없습니다(시크릿 모드/저장공간 거부). 이 세션에서는 복구 스냅샷이 브라우저에 저장되지 않습니다 — 트랩 직후 복구만 동작합니다.",
+          ),
+      }),
+    [store, adapter],
+  );
+
+  // 어댑터 ↔ 자동저장 배선: 편집 신호(onMutation), 트랩 복구의 스냅샷 우선(setRecoverySource),
+  // 복구 결과의 정직한 안내(onRecovered — 스냅샷 복구 vs 원본 폴백+사유).
+  useEffect(() => {
+    adapter.onMutation = () => autosave.noteEdit();
+    adapter.setRecoverySource(() => autosave.getRecoverySnapshot());
+    adapter.onRecovered = (info) => {
+      if (info.source === "snapshot") {
+        setNotice(`엔진 트랩 복구: 마지막 자동저장 편집본(${info.label ?? "최신"})으로 복구했습니다. 스냅샷 이후의 편집은 소실되었을 수 있습니다.`);
+      } else if (info.reason) {
+        setNotice(`엔진 트랩 복구: 자동저장 편집본을 열지 못해(${info.reason}) 원본 파일로 복구했습니다 — 편집 내용이 소실되었습니다.`);
+      }
+      // reason 없는 original(스냅샷이 아예 없던 경우)은 기존 워크스페이스 토스트만으로 충분.
+    };
+    return () => {
+      adapter.onMutation = null;
+      adapter.setRecoverySource(null);
+      adapter.onRecovered = null;
+    };
+  }, [adapter, autosave]);
+
+  // 드래그 게이트 소스: 포인터가 눌린 동안 flush 금지(캡처 단계 — 워크스페이스 내부 제스처 모두 포착).
+  useEffect(() => {
+    const down = () => (pointerDownRef.current = true);
+    const up = () => (pointerDownRef.current = false);
+    window.addEventListener("pointerdown", down, true);
+    window.addEventListener("pointerup", up, true);
+    window.addEventListener("pointercancel", up, true);
+    return () => {
+      window.removeEventListener("pointerdown", down, true);
+      window.removeEventListener("pointerup", up, true);
+      window.removeEventListener("pointercancel", up, true);
+    };
+  }, []);
+
+  // 문서 수명 → 자동저장 세션: 열기 성공 시 세션 시작(+복구본이면 재귀속), 닫힘/언마운트 시 정리.
+  useEffect(() => {
+    if (doc) {
+      autosave.openSession(doc.name);
+      setSavedLabel(null);
+      const rec = pendingRecoveryRef.current;
+      if (rec) {
+        pendingRecoveryRef.current = null;
+        void autosave.adoptRecovered(rec).then(() => setRecovery(null));
+      }
+    } else {
+      autosave.closeSession();
+      setSavedLabel(null);
+    }
+  }, [doc, autosave]);
+  useEffect(() => () => autosave.dispose(), [autosave]);
+
+  // 열기 화면(문서 없음)에서 미복구 스냅샷을 조회해 배너를 띄운다(만료분은 이 자리에서 청소).
+  useEffect(() => {
+    if (doc) return;
+    let cancelled = false;
+    findRecoverable(store)
+      .then((rec) => {
+        if (!cancelled) setRecovery(rec);
+      })
+      .catch(() => {
+        if (!cancelled) setRecovery(null); // IndexedDB 접근 불가 — 배너 없음(저장도 곧 1회 안내 후 비활성)
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [doc, store]);
 
   // 프록시 모드(mock/live)를 조회해 배지에 표시. 키는 서버 전용이므로 여기서 알 수 있는 건 모드뿐.
   useEffect(() => {
@@ -79,17 +174,18 @@ export default function LabWorkspace() {
 
   // 바이트 → 문서 열기: 파일 픽커와 (HwpWorkspace 의) 문서 드롭이 공유하는 단일 경로. 손상/악성 파일이
   // 현재 세션을 깨지 않도록 프로브 어댑터로 먼저 검증한다(이슈 050: 문서 드롭=열기 분기가 여기로 온다).
+  // 열기 성공 여부를 돌려준다(이슈 052: 복구 배너가 성공/실패 분기를 정직하게 처리).
   const openBytes = useCallback(
-    async (bytes: Uint8Array, name: string) => {
+    async (bytes: Uint8Array, name: string): Promise<boolean> => {
       if (!/\.(hwp|hwpx)$/i.test(name)) {
         setDoc(null);
         setLabError(`지원하지 않는 형식입니다: ${name}\n.hwp 또는 .hwpx 파일만 열 수 있습니다.`);
-        return;
+        return false;
       }
       if (bytes.length === 0) {
         setDoc(null);
         setLabError(`빈 파일입니다: ${name}`);
-        return;
+        return false;
       }
       setBusy("문서 여는 중…");
       setLabError(null);
@@ -98,6 +194,7 @@ export default function LabWorkspace() {
         await probe.open(bytes, name);
         probe.dispose();
         setDoc({ bytes, name });
+        return true;
       } catch (err) {
         // 트랩이면 전역 wasm 인스턴스가 오염됨 → 다음 업로드를 위해 재생성(트랩 복구).
         if (isTrap(err)) {
@@ -112,6 +209,7 @@ export default function LabWorkspace() {
           `파일을 열 수 없습니다: ${name}\n${msg(err)}\n` +
             `손상되었거나 지원하지 않는 파일일 수 있습니다. 다른 파일을 시도하거나 원본을 다시 저장해 보세요.`,
         );
+        return false;
       } finally {
         setBusy(null);
       }
@@ -127,6 +225,49 @@ export default function LabWorkspace() {
       await openBytes(new Uint8Array(await file.arrayBuffer()), file.name);
     },
     [openBytes],
+  );
+
+  // ── 이슈 052: 복구 배너 액션 ─────────────────────────────────────────────────────────────────────
+  // 복구 = 스냅샷 바이트(편집된 HWPX본)를 " (복구본).hwpx" 이름으로 연다. 열기 성공 시(위 doc 이펙트)
+  // adoptRecovered 가 새 세션으로 재귀속 + 옛 키 삭제 — 콘텐츠는 절대 유실되지 않는다. 열기 실패 시
+  // 스냅샷을 지우지 않고 정직한 사유를 남긴다(배너 유지 — 다시 시도/무시는 사용자의 선택).
+  const onRestore = useCallback(async () => {
+    if (!recovery) return;
+    pendingRecoveryRef.current = recovery; // 열기 성공 시 [doc] 이펙트가 소비(adoptRecovered)한다
+    const ok = await openBytes(recovery.bytes, recoveredName(recovery.docName));
+    if (!ok) {
+      // 열기 실패 — 재귀속되지 않았다. 스냅샷은 보존하고 사유만 알린다(다시 시도/무시는 사용자의 선택).
+      pendingRecoveryRef.current = null;
+      setNotice("복구본을 여는 데 실패했습니다 — 스냅샷은 보존됩니다. 다시 시도하거나 무시를 눌러 삭제하세요.");
+    }
+  }, [recovery, openBytes]);
+
+  // 무시 = 스냅샷 삭제(설계 확정) — 배너도 내려간다.
+  const onDismissRecovery = useCallback(async () => {
+    if (!recovery) return;
+    await store.delete(recovery.key).catch(() => {});
+    setRecovery(null);
+  }, [recovery, store]);
+
+  // ── 이슈 052: 명시 내보내기 성공 시 스냅샷 정리 (v1 R13) ─────────────────────────────────────────
+  // HwpWorkspace 의 onExport 시임(이슈 044)을 받아 웹 기본 동작(브라우저 <a download>)을 그대로 수행한
+  // 뒤 markExported 로 이 세션의 스냅샷을 정리한다. 다운로드가 곧 "명시 저장"인 웹 셸의 규칙.
+  const onExport = useCallback(
+    async (data: Uint8Array | string, filename: string, mime: string) => {
+      const part = typeof data === "string" ? data : (() => {
+        const c = new Uint8Array(data.length);
+        c.set(data);
+        return c;
+      })();
+      const a = window.document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([part], { type: mime }));
+      a.download = filename;
+      a.click();
+      window.setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      await autosave.markExported();
+      setSavedLabel(null);
+    },
+    [autosave],
   );
 
   // 채팅 바이브편집 브리지(R6): 패키지는 LLM/키를 갖지 않는다. 서버 프록시(/api/hwp-edit)로 위임.
@@ -210,12 +351,26 @@ export default function LabWorkspace() {
             {busy}
           </span>
         )}
+        {savedLabel && (
+          <span className="lab-status" role="status" data-testid="autosave-status" title="자동저장: 편집 2초 유휴 후 편집본(HWPX)을 브라우저(IndexedDB)에 보관">
+            {savedLabel}
+          </span>
+        )}
         {badge}
       </header>
 
       {labError && (
         <div className="lab-error" role="alert" data-testid="lab-error">
           {labError}
+        </div>
+      )}
+
+      {notice && (
+        <div className="lab-error lab-notice" role="status" data-testid="autosave-notice">
+          {notice}
+          <button className="lab-btn lab-notice-close" onClick={() => setNotice(null)}>
+            닫기
+          </button>
         </div>
       )}
 
@@ -233,13 +388,37 @@ export default function LabWorkspace() {
             // 이슈 027: 수동 편집 UI(표 추가·룰러·열너비 드래그·더블클릭 텍스트·서식 툴바) 옵트인.
             enableEditing
             // 이슈 050: 페이지 위에 이미지를 드롭하면 삽입, .hwp/.hwpx 를 드롭하면 이 콜백으로 열기.
-            onOpenFile={openBytes}
+            onOpenFile={async (bytes, name) => {
+              await openBytes(bytes, name); // 성공 여부는 복구 배너 전용 — 드롭 열기는 결과 무시(050 동작 유지)
+            }}
+            // 이슈 052: 내보내기는 웹 기본(브라우저 다운로드)을 그대로 수행하고 스냅샷을 정리한다.
+            onExport={onExport}
           />
         ) : (
           <div className="lab-empty">
-            상단의 <b>&nbsp;파일 열기&nbsp;</b>로 <code>.hwp / .hwpx</code>를 업로드하세요.
-            <br />
-            데모 픽스처: 레포 루트의 <code>benchmark.hwp</code>(8쪽) · <code>benchmark1.hwp</code>(18쪽).
+            {recovery && !busy && (
+              // 이슈 052: 재방문 복구 배너 — 복구본은 "편집된 HWPX본"(원본 .hwp 아님)임을 명시한다.
+              <div className="lab-recovery" role="alert" data-testid="recovery-banner">
+                <div className="lab-recovery-text">
+                  <b>『{recovery.docName}』</b>의 {formatAge(Date.now() - recovery.savedAt)} 편집본이 있습니다 (편집 {recovery.rev}회).
+                  <br />
+                  <small>복구본은 편집 내용이 반영된 <b>HWPX본</b>이며 원본 .hwp 파일이 아닙니다. 무시를 누르면 스냅샷이 삭제됩니다.</small>
+                </div>
+                <div className="lab-recovery-actions">
+                  <button className="lab-btn lab-btn-accent" data-testid="recovery-restore" onClick={() => void onRestore()}>
+                    복구
+                  </button>
+                  <button className="lab-btn" data-testid="recovery-dismiss" onClick={() => void onDismissRecovery()}>
+                    무시
+                  </button>
+                </div>
+              </div>
+            )}
+            <div>
+              상단의 <b>&nbsp;파일 열기&nbsp;</b>로 <code>.hwp / .hwpx</code>를 업로드하세요.
+              <br />
+              데모 픽스처: 레포 루트의 <code>benchmark.hwp</code>(8쪽) · <code>benchmark1.hwp</code>(18쪽).
+            </div>
           </div>
         )}
         {busy && doc && <div className="lab-loading-overlay">{busy}</div>}

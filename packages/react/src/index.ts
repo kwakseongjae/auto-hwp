@@ -125,7 +125,11 @@ export type { FontCatalogEntry } from "./fonts";
 // Backend seam
 export type { EngineAdapter } from "./EngineAdapter";
 export { WasmAdapter } from "./WasmAdapter";
-export type { CodedError } from "./WasmAdapter";
+// issue 052 — autosave/recovery seam: the host wires a RecoverySnapshotSource (latest autosaved HWPX
+// bytes) so a wasm-trap recovery restores the last edit state instead of the original file, observes
+// content mutations via `onMutation` (the idle-debounce snapshot trigger), and gets the honest
+// recovery report via `onRecovered`.
+export type { CodedError, RecoverySnapshot, RecoverySnapshotSource, RecoveryInfo } from "./WasmAdapter";
 export { TauriAdapter } from "./TauriAdapter";
 export type { TauriAdapterOptions, Invoke } from "./TauriAdapter";
 

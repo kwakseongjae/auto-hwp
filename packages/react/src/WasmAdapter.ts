@@ -13,13 +13,36 @@ function isTrap(e: unknown): boolean {
   return !!e && typeof e === "object" && (e as CodedError).code === "wasm_trap";
 }
 
+/** issue 052 — a host-supplied autosave snapshot for trap recovery: serialized HWPX bytes of the last
+ *  autosaved edit state (NOT the original file). `label` is informational (e.g. "rev 7, 3s ago"). */
+export interface RecoverySnapshot {
+  bytes: Uint8Array;
+  label?: string;
+}
+
+/** issue 052 — resolves the LATEST recovery snapshot, or null when none exists. Called on every trap
+ *  recovery (never cached) so the adapter always restores the freshest autosaved state. */
+export type RecoverySnapshotSource = () => RecoverySnapshot | null | Promise<RecoverySnapshot | null>;
+
+/** issue 052 — how a trap recovery re-opened the document: from the autosave `snapshot` (edits up to the
+ *  last idle save survive) or from the `original` bytes (all edits lost). `reason` is the honest cause
+ *  when a snapshot existed but could not be opened (the host toasts it — no false "복구됨"). */
+export interface RecoveryInfo {
+  source: "snapshot" | "original";
+  label?: string;
+  reason?: string;
+}
+
 /// WasmAdapter — the browser backend: wraps @tf-hwp/engine so the components run 100% client-side.
 ///
 /// It owns the two things the raw engine wrapper leaves to the host (per @tf-hwp/engine README):
 ///  1. WASM TRAP RECOVERY. A Rust panic on wasm is a TRAP that poisons the whole instance. This adapter
 ///     holds the original bytes + name; on a `{code:"wasm_trap"}` it `resetEngine()`s and re-`open()`s
 ///     the document (so subsequent reads/render work again), then re-throws the trap so the workspace
-///     can tell the user the last edit was rolled back ("reopen this file" UX). Unsaved state is lost.
+///     can tell the user the last edit was rolled back ("reopen this file" UX). issue 052: when the host
+///     wired a `RecoverySnapshotSource` (autosave), recovery re-opens the LATEST SNAPSHOT first — edits
+///     up to the last idle save survive; only on snapshot failure does it fall back to the original
+///     bytes (and `onRecovered` carries the honest reason).
 ///  2. FONT TRACKING. `hasFont()` reflects whether a face was injected, so the PDF button can guide the
 ///     user before `exportPdf()` throws `{code:"font_missing"}`.
 export class WasmAdapter implements EngineAdapter {
@@ -29,6 +52,18 @@ export class WasmAdapter implements EngineAdapter {
   private fontRegistered = false;
   private wasmInput?: WasmInput;
   private ready: Promise<unknown> | null = null;
+  private recoverySource: RecoverySnapshotSource | null = null;
+
+  /** issue 052 — autosave trigger: called after every successful CONTENT mutation through this adapter
+   *  (`applyIntent`, an effective `undo`/`redo`, an effective `replace`). Read-only queries, `open`, and
+   *  `registerFont` never fire it, so a freshly-opened/un-edited document is never snapshotted (no
+   *  spurious recovery banner). Host-assigned; exceptions in the callback are swallowed (a broken
+   *  observer must not fail the edit itself). */
+  onMutation: (() => void) | null = null;
+
+  /** issue 052 — trap-recovery report: which bytes the document was re-opened from (see RecoveryInfo).
+   *  Host-assigned; called AFTER the document is live again, right before the trap is rethrown. */
+  onRecovered: ((info: RecoveryInfo) => void) | null = null;
 
   /** `wasmInput` is forwarded to initEngine/resetEngine (a wasm URL/Response/bytes). Omit to let the
    *  engine resolve its co-located `hwp_wasm_bg.wasm` (works under Vite/webpack). */
@@ -57,13 +92,63 @@ export class WasmAdapter implements EngineAdapter {
     }
   }
 
-  /** Re-instantiate the wasm module and re-open the last document (its handles were poisoned). */
+  /** issue 052 — wire the autosave snapshot lane into trap recovery. Pass `null` to unwire. The source
+   *  is queried on EVERY recovery (latest snapshot wins); it may be sync or async. */
+  setRecoverySource(source: RecoverySnapshotSource | null): void {
+    this.recoverySource = source;
+  }
+
+  // Notify the host about a completed recovery; a throwing host callback must not break recovery.
+  private notifyRecovered(info: RecoveryInfo): void {
+    try {
+      this.onRecovered?.(info);
+    } catch {
+      /* host observer error — recovery already succeeded */
+    }
+  }
+
+  // Notify the autosave observer after a successful mutation; a throwing observer must not fail the edit.
+  private notifyMutation(): void {
+    try {
+      this.onMutation?.();
+    } catch {
+      /* host observer error — the edit itself succeeded */
+    }
+  }
+
+  /** Re-instantiate the wasm module and re-open the last document (its handles were poisoned).
+   *  issue 052: SNAPSHOT-FIRST — when a RecoverySnapshotSource is wired and yields bytes, re-open those
+   *  (the last autosaved edit state) instead of the original file; the snapshot then BECOMES the current
+   *  document bytes (a second trap recovers from it too). A failing snapshot open poisons the fresh
+   *  instance again, so the engine is reset ONCE MORE before the honest original-bytes fallback. */
   private async recover(): Promise<void> {
     if (!this.bytes) return;
     this.ready = resetEngine(this.wasmInput);
     await this.ready;
-    this.doc = HwpDoc.open(this.bytes, this.name);
     this.fontRegistered = false; // a fresh instance has no injected face
+    let snapshot: RecoverySnapshot | null = null;
+    let reason: string | undefined;
+    try {
+      snapshot = (await this.recoverySource?.()) ?? null;
+    } catch (e) {
+      snapshot = null;
+      reason = `snapshot source failed: ${e}`;
+    }
+    if (snapshot && snapshot.bytes.length > 0) {
+      try {
+        this.doc = HwpDoc.open(snapshot.bytes, this.name);
+        this.bytes = snapshot.bytes;
+        this.notifyRecovered({ source: "snapshot", label: snapshot.label });
+        return;
+      } catch (e) {
+        // The snapshot itself failed to open — possibly ANOTHER trap, so reset again before the fallback.
+        reason = `snapshot open failed: ${e}`;
+        this.ready = resetEngine(this.wasmInput);
+        await this.ready;
+      }
+    }
+    this.doc = HwpDoc.open(this.bytes, this.name);
+    this.notifyRecovered({ source: "original", reason });
   }
 
   async open(bytes: Uint8Array, name?: string): Promise<OpenResult> {
@@ -192,8 +277,8 @@ export class WasmAdapter implements EngineAdapter {
   /** Replace (issue 045) — the `Replace` Intent via applyIntent JSON, ONE undo unit. The `{kind:"replaced"}`
    *  outcome gives the count + live page count. Run formatting is preserved by the op-bus (it rebuilds runs
    *  across the replaced range — never a plain-text collapse). */
-  replace(query: string, replacement: string, opts: FindReplaceOptions): Promise<ReplaceResult> {
-    return this.guard((d) => {
+  async replace(query: string, replacement: string, opts: FindReplaceOptions): Promise<ReplaceResult> {
+    const res = await this.guard((d) => {
       const out = d.applyIntent({
         intent: "Replace",
         query,
@@ -204,18 +289,26 @@ export class WasmAdapter implements EngineAdapter {
       }) as { replaced?: number; pages?: number };
       return { replaced: out.replaced ?? 0, pages: out.pages ?? 0 };
     });
+    if (res.replaced > 0) this.notifyMutation(); // issue 052: an effective replace is a content mutation
+    return res;
   }
 
-  applyIntent(intent: Intent): Promise<Outcome> {
-    return this.guard((d) => d.applyIntent(intent) as Outcome);
+  async applyIntent(intent: Intent): Promise<Outcome> {
+    const out = await this.guard((d) => d.applyIntent(intent) as Outcome);
+    this.notifyMutation(); // issue 052: the edit lane — every accepted Intent mutates the document
+    return out;
   }
 
-  undo(): Promise<boolean> {
-    return this.guard((d) => d.undo());
+  async undo(): Promise<boolean> {
+    const done = await this.guard((d) => d.undo());
+    if (done) this.notifyMutation(); // issue 052: an effective undo changes the content too
+    return done;
   }
 
-  redo(): Promise<boolean> {
-    return this.guard((d) => d.redo());
+  async redo(): Promise<boolean> {
+    const done = await this.guard((d) => d.redo());
+    if (done) this.notifyMutation();
+    return done;
   }
 
   async registerFont(family: string, bytes: Uint8Array): Promise<void> {

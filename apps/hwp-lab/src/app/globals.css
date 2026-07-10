@@ -134,6 +134,8 @@ body {
 
 .lab-empty {
   display: flex;
+  flex-direction: column;
+  gap: 18px;
   align-items: center;
   justify-content: center;
   height: 100%;
@@ -141,6 +143,53 @@ body {
   font-size: 14px;
   text-align: center;
   padding: 24px;
+}
+
+/* 이슈 052 — 자동저장/복구 안내(오류가 아닌 정보 톤) + 재방문 복구 배너. */
+.lab-notice {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1e40af;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: space-between;
+}
+.lab-notice-close {
+  flex: none;
+  font-size: 12px;
+  padding: 4px 10px;
+}
+.lab-recovery {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  max-width: 640px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
+  text-align: left;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.lab-recovery small {
+  color: #b45309;
+}
+.lab-recovery-actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+}
+.lab-btn-accent {
+  background: #d97706;
+  border-color: #d97706;
+  color: #fff;
+  font-weight: 600;
+}
+.lab-btn-accent:hover {
+  background: #b45309;
 }
 
 .lab-loading-overlay {
