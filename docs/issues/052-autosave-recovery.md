@@ -39,3 +39,20 @@ wasm32에서 `catch_unwind`는 무력 — 패닉은 트랩이고 인스턴스를
 - 스냅샷 복구본은 "편집된 HWPX"다 — .hwp 원본과 파일명/포맷 혼동 금지(배너에 명시).
 - IndexedDB는 시크릿 모드/용량 거부 가능 — 실패는 조용히 무시하지 말고 1회 안내 후 기능 비활성.
 - 서식 보존: 복구본 재오픈이 own-render 기준 원 편집 상태와 동일한지 golden 비교 테스트 1개.
+
+## 1단계 실측 결과 (2026-07-10 — 설계 확정 근거, Node+wasm pkg 07-05 빌드)
+
+| 픽스처 | toHwpx @open | @편집후 | HWPX 크기 | exportPdf(참고) |
+|---|---|---|---|---|
+| benchmark (8p) | 4.5ms | 4.1ms | 24KB | 11.8ms |
+| benchmark1 (18p) | 16.8ms | 16.7ms | 168KB | 52.1ms |
+| benchmark2 (25p) | 16.8ms | 16.6ms | 62KB | 47.9ms |
+
+- 비용은 쪽수가 아니라 **콘텐츠 볼륨** 스케일(18p==25p ~17ms). 예산(<50ms) 대비 2.8× 헤드룸 →
+  **설계 1의 디바운스 2s 그대로 확정, 빈도 조정 불필요.**
+- **V3 무오염 통과**: toHwpx 전후 placeBuilds/revision 불변(순수 읽기), 편집 1회 후 toHwpx 7회
+  호출해도 undo 1회==true·2회==false(스택에 유닛 미삽입), undo/redo 결과 바이트 동일, 동일 상태
+  출력 sha 동일(바이트 결정적).
+- **스냅샷 포맷 = HWPX 확정**: PDF는 48–52ms(예산 경계)+재오픈 불가+1.5~4× 크기.
+- 바인딩 실명: JS `HwpDoc.toHwpx()`(`packages/engine/index.js:258`) → wasm `hwpdoc_toHwpx` →
+  Rust `hwp_mcp::export_bytes`.
