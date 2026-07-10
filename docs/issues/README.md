@@ -50,12 +50,13 @@
 
 | # | 제목 | 상태 | 단계 | 비고 |
 |---|------|------|------|------|
-| [051](051-chat-structural-edit.md) | 챗 구조 편집 브릿지 — EditScript 어휘를 웹 Intent 화이트리스트로 | open | R12-P0 | 조사 표 선행(아키텍트 확인 지점), 프리뷰→적용 게이트 유지 |
-| [052](052-autosave-recovery.md) | 자동저장 + 세션 복구 — wasm 트랩 안전망(IndexedDB 스냅샷) | open | R12-P0 | 051과 병렬, toHwpx 비용 실측 선행 |
+| [051](051-chat-structural-edit.md) | 챗 구조 편집 브릿지 — Intent 2신설(InsertTableAt/InsertParagraphAt)+화이트리스트 14종+프리뷰 카드 | **done** (2dc92d3) | R12-P0 | 전제 정정: op 기존재. schema 36→38 additive, e2e 32/32, 게이트 8==8·18==18 |
+| [052](052-autosave-recovery.md) | 자동저장 + 세션 복구 — 2s 유휴 toHwpx 스냅샷·IndexedDB·트랩 우선 복구·배너 | **done** (d0f0a24) | R12-P0 | V3 무오염 잠금. golden이 기존 엔진 갭 2건 격리 → 057 신설 + 054 기록 |
 | [053](053-cell-caret.md) | 셀 주소형 캐럿 (042 승계) — CARET-GAP P0→P1 | open | R12-P1 | 해상률 0%→셀 커버; own-render 통일 실측 선행 |
 | [054](054-hwp-lift-f2.md) | .hwp lift 충실도 F2 — 행높이/패딩/테두리 실값 | open | R12-P1 | 게이트 v2가 1차 수용 기준, 020 floor 상호작용 주의 |
 | [055](055-web-hardening.md) | 웹 하드닝 — 워커화(FG-14)/번들 실측/한도 UX | open | R12-P2 | 051·052 병합 후 |
 | [056](056-distribution-crypto.md) | 배포용 .hwp 복호화 | open(**수요 게이트**) | 조건부 | golden vector 없으면 착수 금지 |
+| [057](057-hwpx-export-table-anchor.md) | HWPX 익스포터 표 앵커링 버그 — 셀 편집 후 표가 문서 끝으로 오배치 | open | R12-P1 | 052 golden이 격리(hwpx 오리진 한정). 재현: goldenRecovery.test.ts 매트릭스 |
 
 ## 로드맵 R11 — 라운드 11 (2026-07-05, SDK 승격 배치 A)
 

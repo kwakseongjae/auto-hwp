@@ -1,6 +1,6 @@
 # 052 — R12-P0: 자동저장 + 세션 복구 (wasm 트랩 안전망)
 
-- 상태: open · 우선순위: R12-P0 · 영역: apps/hwp-lab(persistence 신규) + packages/react(WasmAdapter recover 연동) + packages/editor-core(session 이벤트)
+- 상태: **done** (d0f0a24) · 우선순위: R12-P0 · 영역: apps/hwp-lab(persistence 신규) + packages/react(WasmAdapter recover 연동) — editor-core는 결과적으로 0 변경(어댑터 onMutation 신호로 비침습 달성)
 - 병렬: 051(챗 브릿지 — ai-protocol/프리뷰 소유). 이 이슈는 챗/프롬프트를 만지지 마라.
 
 ## 근거 (2026-07-10 감사)

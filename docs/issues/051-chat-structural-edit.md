@@ -1,6 +1,6 @@
 # 051 — R12-P0: 챗 구조 편집 브릿지 (EditScript 어휘 → 웹 Intent 화이트리스트)
 
-- 상태: open · 우선순위: R12-P0 · 영역: packages/ai-protocol + apps/hwp-lab/api + (필요 시) crates/hwp-mcp Intent additive
+- 상태: **done** (2dc92d3) · 우선순위: R12-P0 · 영역: packages/ai-protocol + apps/hwp-lab/api + (필요 시) crates/hwp-mcp Intent additive
 - 병렬: 052(자동저장 — persistence/복구 경로 소유). 이 이슈는 챗 어휘/프리뷰/프롬프트만 만지고
   WasmAdapter recover()/저장 경로를 만지지 마라.
 

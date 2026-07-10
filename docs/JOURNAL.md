@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-10 저녁 (Claude Fable 5) · R12 배치 A 완료
+- 한 일: 051 구현 병합(2dc92d3 — Intent 2신설·화이트리스트 14종·프리뷰 카드·e2e 32/32·게이트 그린) + 052 구현 병합(d0f0a24 — 2s 유휴 스냅샷·IndexedDB·트랩 우선 복구·배너·V3 잠금), 워크트리 병렬 → ff/cherry-pick 선형 병합
+- 발견: 052 golden이 엔진 갭 2건 격리 → 057 신설(hwpx 표 앵커링 오배치), 054에 .hwp 무편집 왕복 8p→6p 기록
+- 다음: 통합 검증(빌드+vitest 4종+e2e) 그린 확인 → 푸시 → 배치 B(053∥054, 057 편입 검토)
+
 ## 2026-07-10 오후 (Claude Fable 5) · R12 착수
 - 한 일: 커밋 4fc37fb + GitHub private 레포 생성/푸시(kwakseongjae/tf-hwp) + 051·052 1단계 완료(결과는 각 이슈 파일 하단 절) — 051 전제 정정: InsertTableAt op 기존재, Intent만 부재 / 052 toHwpx 17ms(25p), V3 무오염 통과
 - 사고: named 팀메이트 에이전트 2개 무음 정지(1시간 무작업) → 정지 후 무명 백그라운드로 재가동해 4~6분 완료. 교훈은 메모리(no-teammates-tmux)에

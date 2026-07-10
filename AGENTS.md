@@ -39,8 +39,12 @@ cargo run -q -p tf-hwp-cli --features "shaper rhwp" -- layout-check benchmarks/b
 # 엔진(crates) 접촉 시: 게이트 v2(benchmark1 18==18) + cargo check -p hwp-wasm --target wasm32-unknown-unknown
 ```
 
-## 함정 top 5 (전체는 각 이슈 파일의 "함정" 절)
+## 함정 top 6 (전체는 각 이슈 파일의 "함정" 절)
 - e2e 전 `rm -rf apps/hwp-lab/.next` — 웹팩 캐시가 dist 재빌드를 감지 못해 가짜 통과/실패.
+- **crates(Rust) 변경 후 wasm pkg 재빌드 필수**: `cargo build -p hwp-wasm --release --target
+  wasm32-unknown-unknown` → `wasm-bindgen --target web --out-dir packages/engine/pkg …` →
+  `node apps/hwp-lab/scripts/copy-wasm.mjs` → `.next` 삭제. 스테일 wasm은 신규 Intent를
+  "unknown variant"로 거부(2026-07-10 R12 배치 A 병합 검증에서 실측 — e2e 3건 가짜 실패).
 - px↔HWPUNIT 슬립은 클릭선택/이동/리사이즈를 **조용히** 죽인다 — own-render 지오메트리는 시각 검증까지.
 - 이슈 상태는 README 표가 아니라 **git log가 진실**(`scripts/context_restore.sh`가 대조) — 이중 기획 방지.
 - macOS 타이틀바/신호등 재작업 금지 — CSS `h-9` 확정 해법(ccb9d5a). config/objc 재시도 금지.
