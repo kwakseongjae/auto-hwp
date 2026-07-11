@@ -25,7 +25,10 @@ use std::io::{Cursor, Read};
 use crate::{emu_to_hwp, halfpt_to_hwp, twips_to_hwp};
 
 fn docx_prov() -> Provenance {
-    Provenance { source: Some(SourceFormat::Docx), raw: None }
+    Provenance {
+        source: Some(SourceFormat::Docx),
+        raw: None,
+    }
 }
 
 /// Parse a `.docx` byte buffer into a `SemanticDoc`.
@@ -59,7 +62,11 @@ pub fn read(bytes: &[u8]) -> Result<SemanticDoc> {
                     .next()
                     .map(|e| e.to_ascii_lowercase())
                     .unwrap_or_else(|| "bin".into());
-                doc.bin_data.push(BinData { bin_ref: base.clone(), bytes: data, kind });
+                doc.bin_data.push(BinData {
+                    bin_ref: base.clone(),
+                    bytes: data,
+                    kind,
+                });
                 for (rid, target) in &rel_map {
                     if target.rsplit('/').next().unwrap_or(target) == base {
                         rel_media.insert(rid.clone(), base.clone());
@@ -70,7 +77,9 @@ pub fn read(bytes: &[u8]) -> Result<SemanticDoc> {
     }
 
     let mut interner = ShapeInterner::new();
-    let ctx = DocxCtx { rel_media: &rel_media };
+    let ctx = DocxCtx {
+        rel_media: &rel_media,
+    };
 
     // Parse the body. DOCX is one body; we keep it as a single section and read its `w:sectPr` for
     // page setup + header/footer refs (inline multi-section splitting is a later refinement — see the
@@ -92,7 +101,11 @@ pub fn read(bytes: &[u8]) -> Result<SemanticDoc> {
                 let hxml = String::from_utf8_lossy(&data).into_owned();
                 let raw = parse_block_container(&hxml, &ctx);
                 let dblocks = intern_blocks(raw, &mut doc, &mut interner);
-                decorations.push(PageDecoration { kind: dref.kind, apply: ApplyPage::Both, blocks: dblocks });
+                decorations.push(PageDecoration {
+                    kind: dref.kind,
+                    apply: ApplyPage::Both,
+                    blocks: dblocks,
+                });
             }
         }
     }
@@ -112,7 +125,10 @@ pub fn read(bytes: &[u8]) -> Result<SemanticDoc> {
 }
 
 /// Resolve & read a part by name (case-sensitive; OOXML part names are stable).
-fn read_named<R: Read + std::io::Seek>(zip: &mut zip::ZipArchive<R>, name: &str) -> Option<Vec<u8>> {
+fn read_named<R: Read + std::io::Seek>(
+    zip: &mut zip::ZipArchive<R>,
+    name: &str,
+) -> Option<Vec<u8>> {
     let mut f = zip.by_name(name).ok()?;
     let mut buf = Vec::new();
     f.read_to_end(&mut buf).ok()?;
@@ -128,7 +144,8 @@ fn parse_rels(xml: &str) -> BTreeMap<String, String> {
         match ev {
             Ok(Event::Empty(e)) | Ok(Event::Start(e)) => {
                 if e.local_name().as_ref() == b"Relationship" {
-                    if let (Some(id), Some(target)) = (attr_str(&e, b"Id"), attr_str(&e, b"Target")) {
+                    if let (Some(id), Some(target)) = (attr_str(&e, b"Id"), attr_str(&e, b"Target"))
+                    {
                         map.insert(id, target);
                     }
                 }
@@ -194,12 +211,18 @@ fn parse_first_sectpr(xml: &str) -> (PageSetup, Vec<DecoRef>) {
                     }
                     b"headerReference" if in_sectpr => {
                         if let Some(rid) = attr_str(&e, b"id") {
-                            refs.push(DecoRef { kind: DecoKind::Header, rid });
+                            refs.push(DecoRef {
+                                kind: DecoKind::Header,
+                                rid,
+                            });
                         }
                     }
                     b"footerReference" if in_sectpr => {
                         if let Some(rid) = attr_str(&e, b"id") {
-                            refs.push(DecoRef { kind: DecoKind::Footer, rid });
+                            refs.push(DecoRef {
+                                kind: DecoKind::Footer,
+                                rid,
+                            });
                         }
                     }
                     _ => {}
@@ -270,12 +293,26 @@ fn intern_para(p: RawPara, doc: &mut SemanticDoc, it: &mut ShapeInterner) -> Par
         .runs
         .into_iter()
         .filter(|r| !r.content.is_empty())
-        .map(|r| Run { char_shape: it.char(&r.cs, doc), char_ref: None, content: r.content })
+        .map(|r| Run {
+            char_shape: it.char(&r.cs, doc),
+            char_ref: None,
+            content: r.content,
+        })
         .collect();
     if runs.is_empty() {
-        runs.push(Run { char_shape: 0, char_ref: None, content: vec![Inline::Text(String::new())] });
+        runs.push(Run {
+            char_shape: 0,
+            char_ref: None,
+            content: vec![Inline::Text(String::new())],
+        });
     }
-    Paragraph { para_shape, style_name: p.style_name, runs, provenance: docx_prov(), ..Default::default() }
+    Paragraph {
+        para_shape,
+        style_name: p.style_name,
+        runs,
+        provenance: docx_prov(),
+        ..Default::default()
+    }
 }
 
 fn intern_table(t: RawTable, doc: &mut SemanticDoc, it: &mut ShapeInterner) -> Table {
@@ -311,7 +348,10 @@ struct ShapeInterner {
 
 impl ShapeInterner {
     fn new() -> Self {
-        ShapeInterner { chars: BTreeMap::new(), paras: BTreeMap::new() }
+        ShapeInterner {
+            chars: BTreeMap::new(),
+            paras: BTreeMap::new(),
+        }
     }
     fn char(&mut self, cs: &CharShape, doc: &mut SemanticDoc) -> usize {
         if cs.is_default() {
@@ -537,7 +577,10 @@ fn handle_format(e: &BytesStart, paras: &mut [ParaAccum], tbls: &mut [TblFrame])
 /// Apply a run-property element (`w:b`, `w:i`, `w:sz`, `w:color`, …) to the open run accumulator.
 fn apply_run_format(e: &BytesStart, r: &mut RunAccum) {
     let on = |e: &BytesStart| -> bool {
-        !matches!(attr_str(e, b"val").as_deref(), Some("false") | Some("0") | Some("off"))
+        !matches!(
+            attr_str(e, b"val").as_deref(),
+            Some("false") | Some("0") | Some("off")
+        )
     };
     match e.local_name().as_ref() {
         b"b" => r.cs.bold = on(e),
@@ -589,7 +632,11 @@ fn handle_empty(e: &BytesStart, paras: &mut [ParaAccum], ctx: &DocxCtx) {
                     if let Some(p) = paras.last_mut() {
                         if let Some(r) = p.cur.as_mut() {
                             let (w, h) = r.pending_extent.take().unwrap_or((0, 0));
-                            r.content.push(Inline::Image(ImageRef { bin_ref: bin_ref.clone(), width: w, height: h }));
+                            r.content.push(Inline::Image(ImageRef {
+                                bin_ref: bin_ref.clone(),
+                                width: w,
+                                height: h,
+                            }));
                         }
                     }
                 }
@@ -625,7 +672,11 @@ impl ParaAccum {
     }
     fn into_para(mut self) -> RawPara {
         self.flush_run();
-        RawPara { para: self.para, style_name: self.style_name, runs: self.runs }
+        RawPara {
+            para: self.para,
+            style_name: self.style_name,
+            runs: self.runs,
+        }
     }
 }
 
@@ -674,7 +725,11 @@ impl TblFrame {
     fn close_row(&mut self) {
         self.col_cursor = 0;
         if let Some(row) = self.cur_row.take() {
-            let cols = row.iter().map(|c| c.col + c.col_span.max(1)).max().unwrap_or(0);
+            let cols = row
+                .iter()
+                .map(|c| c.col + c.col_span.max(1))
+                .max()
+                .unwrap_or(0);
             self.cols = self.cols.max(cols);
             self.cells.extend(row);
         }
@@ -742,8 +797,8 @@ mod tests {
         let mut buf = Vec::new();
         {
             let mut zw = zip::ZipWriter::new(Cursor::new(&mut buf));
-            let opts: zip::write::FileOptions<()> =
-                zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+            let opts: zip::write::FileOptions<()> = zip::write::FileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
 
             zw.start_file("[Content_Types].xml", opts).unwrap();
             zw.write_all(br#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#).unwrap();
@@ -795,8 +850,14 @@ mod tests {
         let blocks = &doc.sections[0].blocks;
 
         // 2 paragraphs + 1 table.
-        let paras: Vec<_> = blocks.iter().filter(|b| matches!(b, Block::Paragraph(_))).collect();
-        let tables: Vec<_> = blocks.iter().filter(|b| matches!(b, Block::Table(_))).collect();
+        let paras: Vec<_> = blocks
+            .iter()
+            .filter(|b| matches!(b, Block::Paragraph(_)))
+            .collect();
+        let tables: Vec<_> = blocks
+            .iter()
+            .filter(|b| matches!(b, Block::Table(_)))
+            .collect();
         assert_eq!(paras.len(), 2, "expected 2 paragraphs");
         assert_eq!(tables.len(), 1, "expected 1 table");
 

@@ -11,6 +11,12 @@ allow = [
     "Unicode-3.0",
     "Unicode-DFS-2016",
     "Zlib",
+    # 2026-07-11 추가 — 첫 CI 실행에서 발견된 기존 의존 트리의 미등록 라이선스 2종.
+    # BSL-1.0(Boost): 퍼미시브 (clipboard-win ← arboard ← hwp-viewer 클립보드).
+    # MPL-2.0: 파일 단위 약한 카피레프트 — crates.io 미수정 사용은 소스 공개 의무 없음
+    # (cssparser 계열 ← dom_query, HTML export 오라클 경로).
+    "BSL-1.0",
+    "MPL-2.0",
 ]
 # GPL/AGPL must NEVER be linked into the shipped core.
 # (LibreOffice + H2Orestart are GPL but run out-of-process only — not a cargo dep.)

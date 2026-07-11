@@ -38,7 +38,9 @@ fn each_element(s: &str, open: &str, close: &str, mut f: impl FnMut(&str)) {
     let mut idx = 0;
     while let Some(p) = s[idx..].find(open) {
         let start = idx + p;
-        let Some(rel) = s[start..].find(close) else { break };
+        let Some(rel) = s[start..].find(close) else {
+            break;
+        };
         let end = start + rel + close.len();
         f(&s[start..end]);
         idx = end;
@@ -134,20 +136,34 @@ pub struct StyleRef {
 /// (so "개요 1" and "Outline 1" both resolve). Applying a named style = referencing these ids.
 pub fn parse_styles(header: &str) -> std::collections::BTreeMap<String, StyleRef> {
     let mut map = std::collections::BTreeMap::new();
-    let Some(seg) = element(header, "<hh:styles", "</hh:styles>") else { return map };
+    let Some(seg) = element(header, "<hh:styles", "</hh:styles>") else {
+        return map;
+    };
     let mut idx = 0;
     while let Some(p) = seg[idx..].find("<hh:style ") {
         let start = idx + p;
-        let end = seg[start..].find("/>").map(|e| start + e + 2).unwrap_or(seg.len());
+        let end = seg[start..]
+            .find("/>")
+            .map(|e| start + e + 2)
+            .unwrap_or(seg.len());
         let tag = &seg[start..end];
         idx = end;
-        let (Some(id), Some(para), Some(chr)) =
-            (first_attr(tag, "id"), first_attr(tag, "paraPrIDRef"), first_attr(tag, "charPrIDRef"))
-        else {
+        let (Some(id), Some(para), Some(chr)) = (
+            first_attr(tag, "id"),
+            first_attr(tag, "paraPrIDRef"),
+            first_attr(tag, "charPrIDRef"),
+        ) else {
             continue;
         };
-        let sref = StyleRef { id: id.to_string(), para_pr: para.to_string(), char_pr: chr.to_string() };
-        for key in [first_attr(tag, "name"), first_attr(tag, "engName")].into_iter().flatten() {
+        let sref = StyleRef {
+            id: id.to_string(),
+            para_pr: para.to_string(),
+            char_pr: chr.to_string(),
+        };
+        for key in [first_attr(tag, "name"), first_attr(tag, "engName")]
+            .into_iter()
+            .flatten()
+        {
             if !key.is_empty() {
                 map.insert(key.to_string(), sref.clone());
             }
@@ -264,10 +280,16 @@ pub fn synthesize_border_fill_full(
 /// Set the 7 per-script attrs (hangul…user) on the `<hh:{child} …/>` element inside a charPr clone
 /// (ratio/spacing). No-op if the child is absent (we then inherit the base's values).
 fn set_per_script_child(s: &str, child: &str, vals: &[String; 7]) -> String {
-    const ATTRS: [&str; 7] = ["hangul", "latin", "hanja", "japanese", "other", "symbol", "user"];
+    const ATTRS: [&str; 7] = [
+        "hangul", "latin", "hanja", "japanese", "other", "symbol", "user",
+    ];
     let open = format!("<hh:{child}");
-    let Some(p) = s.find(&open) else { return s.to_string() };
-    let Some(rel) = s[p..].find("/>") else { return s.to_string() };
+    let Some(p) = s.find(&open) else {
+        return s.to_string();
+    };
+    let Some(rel) = s[p..].find("/>") else {
+        return s.to_string();
+    };
     let end = p + rel + 2;
     let mut tag = s[p..end].to_string();
     for (i, attr) in ATTRS.iter().enumerate() {
@@ -280,8 +302,12 @@ fn set_per_script_child(s: &str, child: &str, vals: &[String; 7]) -> String {
 /// the child is absent (a malformed base — we then inherit whatever the base carries).
 fn set_border_child(s: &str, child: &str, ty: &str, width: &str, color: &str) -> String {
     let open = format!("<hh:{child}");
-    let Some(p) = s.find(&open) else { return s.to_string() };
-    let Some(rel) = s[p..].find("/>") else { return s.to_string() };
+    let Some(p) = s.find(&open) else {
+        return s.to_string();
+    };
+    let Some(rel) = s[p..].find("/>") else {
+        return s.to_string();
+    };
     let end = p + rel + 2;
     let mut tag = s[p..end].to_string();
     tag = set_attr(&tag, "type", ty);
@@ -301,12 +327,19 @@ fn element<'a>(s: &'a str, open: &str, close: &str) -> Option<&'a str> {
 /// of appended (dedup, issue #003). Safe because we synthesize by cloning the same default element
 /// Hancom uses, so equal formatting ⇒ equal XML modulo id. `open` is the element open delimiter
 /// incl. trailing space (e.g. "<hh:charPr "); `close` e.g. "</hh:charPr>".
-pub fn existing_equivalent_id(header: &str, open: &str, close: &str, fragment: &str) -> Option<String> {
+pub fn existing_equivalent_id(
+    header: &str,
+    open: &str,
+    close: &str,
+    fragment: &str,
+) -> Option<String> {
     let target = set_attr(fragment, "id", "");
     let mut idx = 0;
     while let Some(p) = header[idx..].find(open) {
         let start = idx + p;
-        let Some(rel) = header[start..].find(close) else { break };
+        let Some(rel) = header[start..].find(close) else {
+            break;
+        };
         let end = start + rel + close.len();
         let elem = &header[start..end];
         idx = end;
@@ -322,7 +355,9 @@ pub fn existing_equivalent_id(header: &str, open: &str, close: &str, fragment: &
 pub fn max_pool_id(header: &str, container: &str) -> u64 {
     let open = format!("<hh:{container}");
     let close = format!("</hh:{container}>");
-    let Some(seg) = element(header, &open, &close) else { return 0 };
+    let Some(seg) = element(header, &open, &close) else {
+        return 0;
+    };
     let mut max = 0u64;
     let mut idx = 0;
     while let Some(p) = seg[idx..].find("id=\"") {
@@ -344,7 +379,12 @@ pub fn max_pool_id(header: &str, container: &str) -> u64 {
 /// Synthesize a `<hh:charPr>` for `shape` by cloning `base` (the default charPr) and patching only
 /// the overridden fields. Bold/italic are inserted as markers before `<hh:underline>` (their schema
 /// position). A `CharShape` that `is_default()` should never reach here (caller reuses the default).
-pub fn synthesize_char_pr(base: &str, new_id: u64, shape: &CharShape, fontref: Option<&str>) -> String {
+pub fn synthesize_char_pr(
+    base: &str,
+    new_id: u64,
+    shape: &CharShape,
+    fontref: Option<&str>,
+) -> String {
     let mut s = base.to_string();
     s = set_attr(&s, "id", &new_id.to_string());
     // Replace the cloned <hh:fontRef …/> with the interned font's reference, if a font was requested.
@@ -363,8 +403,13 @@ pub fn synthesize_char_pr(base: &str, new_id: u64, shape: &CharShape, fontref: O
     // spacing −5…−12, and dropping these over-wraps cell text on reopen → extra pages. A 0 ratio
     // slot means "uncaptured" → the neutral 100 (base value); spacing 0 is itself neutral.
     if shape.ratio.0.iter().any(|&r| r != 0) {
-        let vals: [String; 7] =
-            std::array::from_fn(|i| if shape.ratio.0[i] == 0 { "100".into() } else { shape.ratio.0[i].to_string() });
+        let vals: [String; 7] = std::array::from_fn(|i| {
+            if shape.ratio.0[i] == 0 {
+                "100".into()
+            } else {
+                shape.ratio.0[i].to_string()
+            }
+        });
         s = set_per_script_child(&s, "ratio", &vals);
     }
     if shape.spacing.0.iter().any(|&v| v != 0) {
@@ -390,10 +435,18 @@ pub fn synthesize_char_pr(base: &str, new_id: u64, shape: &CharShape, fontref: O
         s = s.replacen("<hh:underline", &format!("{markers}<hh:underline"), 1);
     }
     if shape.underline {
-        s = s.replacen("<hh:underline type=\"NONE\"", "<hh:underline type=\"BOTTOM\"", 1);
+        s = s.replacen(
+            "<hh:underline type=\"NONE\"",
+            "<hh:underline type=\"BOTTOM\"",
+            1,
+        );
     }
     if shape.strikeout {
-        s = s.replacen("<hh:strikeout shape=\"NONE\"", "<hh:strikeout shape=\"SOLID\"", 1);
+        s = s.replacen(
+            "<hh:strikeout shape=\"NONE\"",
+            "<hh:strikeout shape=\"SOLID\"",
+            1,
+        );
     }
     // sub/superscript markers sit AFTER <hh:strikeout>, before <hh:outline> (schema order; verified
     // against real Hancom charPrs). Mutually exclusive — superscript wins if both are set.
@@ -452,7 +505,9 @@ fn base_line_spacing(base: &str) -> (String, i32) {
     if let Some(p) = base.find("<hh:lineSpacing") {
         let seg = &base[p..];
         let t = first_attr(seg, "type").unwrap_or("PERCENT").to_string();
-        let v = first_attr(seg, "value").and_then(|v| v.parse().ok()).unwrap_or(130);
+        let v = first_attr(seg, "value")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(130);
         return (t, v);
     }
     ("PERCENT".to_string(), 130)
@@ -563,8 +618,12 @@ pub fn intern_fonts(header: &str, fonts: &[Option<String>], base_charpr: &str) -
 /// bump fontCnt, and return the new id. Returns id 0 (a safe fallback) if the pool is malformed.
 fn ensure_font_in_lang(header: &str, lang: &str, family: &str) -> (String, u64) {
     let open = format!("<hh:fontface lang=\"{lang}\"");
-    let Some(fstart) = header.find(&open) else { return (header.to_string(), 0) };
-    let Some(rel) = header[fstart..].find("</hh:fontface>") else { return (header.to_string(), 0) };
+    let Some(fstart) = header.find(&open) else {
+        return (header.to_string(), 0);
+    };
+    let Some(rel) = header[fstart..].find("</hh:fontface>") else {
+        return (header.to_string(), 0);
+    };
     let fend = fstart + rel; // position of </hh:fontface>
     let seg = &header[fstart..fend];
 
@@ -581,11 +640,21 @@ fn ensure_font_in_lang(header: &str, lang: &str, family: &str) -> (String, u64) 
     }
 
     // 2. clone the first <hh:font …>…</hh:font> as a template; patch its id + face.
-    let Some(ts) = seg.find("<hh:font ") else { return (header.to_string(), 0) };
-    let Some(te_rel) = seg[ts..].find("</hh:font>") else { return (header.to_string(), 0) };
+    let Some(ts) = seg.find("<hh:font ") else {
+        return (header.to_string(), 0);
+    };
+    let Some(te_rel) = seg[ts..].find("</hh:font>") else {
+        return (header.to_string(), 0);
+    };
     let template = &seg[ts..ts + te_rel + "</hh:font>".len()];
-    let new_id = first_attr(seg, "fontCnt").and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
-    let cloned = set_attr(&set_attr(template, "id", &new_id.to_string()), "face", family);
+    let new_id = first_attr(seg, "fontCnt")
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+    let cloned = set_attr(
+        &set_attr(template, "id", &new_id.to_string()),
+        "face",
+        family,
+    );
 
     // Build the new header: insert cloned font before </hh:fontface>, bump this pool's fontCnt.
     let mut new_seg = String::with_capacity(seg.len() + cloned.len());
@@ -627,8 +696,11 @@ pub fn patch_page(section_xml: &str, page: &PageSetup) -> String {
             let end = p + rel + 1;
             let tag = set_attr(&s[p..end], "width", &page.width.to_string());
             let tag = set_attr(&tag, "height", &page.height.to_string());
-            let tag =
-                set_attr(&tag, "landscape", if page.landscape { "WIDELY" } else { "NARROWLY" });
+            let tag = set_attr(
+                &tag,
+                "landscape",
+                if page.landscape { "WIDELY" } else { "NARROWLY" },
+            );
             s = format!("{}{}{}", &s[..p], tag, &s[end..]);
         }
     }
@@ -696,27 +768,54 @@ mod tests {
 
     #[test]
     fn bold_synthesis_is_pure_bold_not_colored() {
-        let shape = CharShape { bold: true, ..Default::default() };
+        let shape = CharShape {
+            bold: true,
+            ..Default::default()
+        };
         let out = synthesize_char_pr(BASE, 100, &shape, None);
         assert!(out.contains(r#"id="100""#), "new id assigned");
         assert!(out.contains("<hh:bold/>"), "bold marker present");
-        assert!(out.contains(r##"textColor="#000000""##), "stays black (not the blue id=7 charPr)");
+        assert!(
+            out.contains(r##"textColor="#000000""##),
+            "stays black (not the blue id=7 charPr)"
+        );
         // bold must sit immediately before underline (schema order)
-        assert!(out.contains("<hh:bold/><hh:underline"), "bold precedes underline");
+        assert!(
+            out.contains("<hh:bold/><hh:underline"),
+            "bold precedes underline"
+        );
     }
 
     #[test]
     fn superscript_synthesis_after_strikeout() {
-        let shape = CharShape { superscript: true, ..Default::default() };
+        let shape = CharShape {
+            superscript: true,
+            ..Default::default()
+        };
         let out = synthesize_char_pr(BASE, 50, &shape, None);
-        assert!(out.contains("<hh:supscript/>"), "supscript marker present: {out}");
+        assert!(
+            out.contains("<hh:supscript/>"),
+            "supscript marker present: {out}"
+        );
         // Schema order: it must sit between strikeout and outline.
         let strike = out.find("<hh:strikeout").unwrap();
         let sup = out.find("<hh:supscript/>").unwrap();
         let outline = out.find("<hh:outline").unwrap();
-        assert!(strike < sup && sup < outline, "supscript between strikeout and outline");
+        assert!(
+            strike < sup && sup < outline,
+            "supscript between strikeout and outline"
+        );
         // Subscript is mutually exclusive (superscript wins).
-        let both = synthesize_char_pr(BASE, 51, &CharShape { superscript: true, subscript: true, ..Default::default() }, None);
+        let both = synthesize_char_pr(
+            BASE,
+            51,
+            &CharShape {
+                superscript: true,
+                subscript: true,
+                ..Default::default()
+            },
+            None,
+        );
         assert!(both.contains("<hh:supscript/>") && !both.contains("<hh:subscript/>"));
     }
 
@@ -734,7 +833,10 @@ mod tests {
         let out = synthesize_char_pr(BASE, 7, &shape, None);
         assert!(out.contains(r#"height="1400""#));
         assert!(out.contains(r##"textColor="#FF0000""##));
-        assert!(out.contains("<hh:italic/><hh:bold/><hh:underline"), "italic,bold (schema order) before underline");
+        assert!(
+            out.contains("<hh:italic/><hh:bold/><hh:underline"),
+            "italic,bold (schema order) before underline"
+        );
         assert!(out.contains(r#"<hh:underline type="BOTTOM""#));
         assert!(out.contains(r#"<hh:strikeout shape="SOLID""#));
     }
@@ -744,7 +846,10 @@ mod tests {
         let header = r#"<hh:charProperties itemCnt="2"><hh:charPr id="0"/><hh:charPr id="1"/></hh:charProperties>"#;
         let out = patch_pool(header, "charProperties", "<hh:charPr id=\"2\"/>", 1);
         assert!(out.contains(r#"itemCnt="3""#), "itemCnt bumped 2→3");
-        assert!(out.contains(r#"<hh:charPr id="2"/></hh:charProperties>"#), "fragment before close tag");
+        assert!(
+            out.contains(r#"<hh:charPr id="2"/></hh:charProperties>"#),
+            "fragment before close tag"
+        );
     }
 
     #[test]
@@ -761,14 +866,26 @@ mod tests {
         assert!(back.bold && back.italic && back.underline);
         assert_eq!(back.text_color, Color::from_hex("#C00000").unwrap());
         assert_eq!(back.height, 1000, "height inherited from the base element");
-        assert!(!parse_char_pr(BASE).bold, "the plain base parses as non-bold");
+        assert!(
+            !parse_char_pr(BASE).bold,
+            "the plain base parses as non-bold"
+        );
     }
 
     #[test]
     fn parse_header_pools_reads_all_entries() {
         let header = format!(
             r#"<hh:charProperties itemCnt="2">{BASE}{}</hh:charProperties>"#,
-            synthesize_char_pr(BASE, 7, &CharShape { bold: true, text_color: Color::from_hex("#1F4E79").unwrap(), ..Default::default() }, None)
+            synthesize_char_pr(
+                BASE,
+                7,
+                &CharShape {
+                    bold: true,
+                    text_color: Color::from_hex("#1F4E79").unwrap(),
+                    ..Default::default()
+                },
+                None
+            )
         );
         let pools = parse_header_pools(&header);
         assert_eq!(pools.char.len(), 2);
@@ -789,11 +906,20 @@ mod tests {
         // reuse existing face by name → id 1 in HANGUL, and a NEW id appended in LATIN
         let (out, fref) = intern_font(header, "함초롬바탕");
         assert!(fref.contains(r#"hangul="1""#), "reused HANGUL id 1: {fref}");
-        assert!(out.contains(r#"<hh:fontface lang="HANGUL" fontCnt="2">"#), "HANGUL fontCnt unchanged (reused)");
+        assert!(
+            out.contains(r#"<hh:fontface lang="HANGUL" fontCnt="2">"#),
+            "HANGUL fontCnt unchanged (reused)"
+        );
         // LATIN lacked the face → clone+append at id 1, fontCnt 1→2
         assert!(fref.contains(r#"latin="1""#), "LATIN got new id 1");
-        assert!(out.contains(r#"<hh:fontface lang="LATIN" fontCnt="2">"#), "LATIN fontCnt bumped");
-        assert!(out.contains(r#"face="함초롬바탕"#), "new LATIN font has the requested face");
+        assert!(
+            out.contains(r#"<hh:fontface lang="LATIN" fontCnt="2">"#),
+            "LATIN fontCnt bumped"
+        );
+        assert!(
+            out.contains(r#"face="함초롬바탕"#),
+            "new LATIN font has the requested face"
+        );
     }
 
     #[test]
@@ -802,8 +928,14 @@ mod tests {
         // NOT grab it (doing so would clone a stray container open tag into every synthesized entry).
         let header = format!(r#"<hh:charProperties itemCnt="1">{BASE}</hh:charProperties>"#);
         let base = default_char_pr(&header).expect("found a charPr");
-        assert!(base.starts_with("<hh:charPr "), "must be the individual element: {base}");
-        assert!(!base.contains("charProperties"), "must NOT include the container tag");
+        assert!(
+            base.starts_with("<hh:charPr "),
+            "must be the individual element: {base}"
+        );
+        assert!(
+            !base.contains("charProperties"),
+            "must NOT include the container tag"
+        );
         assert!(base.ends_with("</hh:charPr>"));
     }
 
@@ -814,39 +946,83 @@ mod tests {
     /// fails LOUDLY instead. (Numbers measured directly from the file, not assumed.)
     #[test]
     fn skeleton_pin_invariants() {
-        let bytes =
-            std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/hwpx/Skeleton.hwpx"))
-                .expect("read corpus/hwpx/Skeleton.hwpx");
+        let bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/hwpx/Skeleton.hwpx"
+        ))
+        .expect("read corpus/hwpx/Skeleton.hwpx");
         let pkg = crate::package::Package::open(&bytes).expect("open Skeleton package");
 
         // header.xml — synth clones the DEFAULT charPr/paraPr (must be id=0) as the base for every
         // synthesized entry; appends new entries at max_pool_id+1 (so we pin the MAX id, not itemCnt).
         let header = String::from_utf8(pkg.read_header().expect("Skeleton has a header")).unwrap();
         let dc = default_char_pr(&header).expect("default charPr present");
-        assert!(dc.starts_with(r#"<hh:charPr id="0""#), "default charPr must be id=0: {}", &dc[..40.min(dc.len())]);
+        assert!(
+            dc.starts_with(r#"<hh:charPr id="0""#),
+            "default charPr must be id=0: {}",
+            &dc[..40.min(dc.len())]
+        );
         let dp = default_para_pr(&header).expect("default paraPr present");
-        assert!(dp.starts_with(r#"<hh:paraPr id="0""#), "default paraPr must be id=0");
+        assert!(
+            dp.starts_with(r#"<hh:paraPr id="0""#),
+            "default paraPr must be id=0"
+        );
 
         // Pool MAX ids (char/para are 0-based contiguous → max = itemCnt-1; borderFills are {1,2}).
-        assert_eq!(max_pool_id(&header, "charProperties"), 6, "charPr ids 0..=6 (itemCnt 7)");
-        assert_eq!(max_pool_id(&header, "paraProperties"), 19, "paraPr ids 0..=19 (itemCnt 20)");
-        assert_eq!(max_pool_id(&header, "borderFills"), 2, "borderFill ids {{1,2}}");
+        assert_eq!(
+            max_pool_id(&header, "charProperties"),
+            6,
+            "charPr ids 0..=6 (itemCnt 7)"
+        );
+        assert_eq!(
+            max_pool_id(&header, "paraProperties"),
+            19,
+            "paraPr ids 0..=19 (itemCnt 20)"
+        );
+        assert_eq!(
+            max_pool_id(&header, "borderFills"),
+            2,
+            "borderFill ids {{1,2}}"
+        );
 
         // itemCnt surface — patch_pool bumps these in lockstep; the Phase-4 validator asserts
         // itemCnt == childcount, so the starting values must be exact.
-        assert!(header.contains(r#"<hh:charProperties itemCnt="7""#), "charProperties itemCnt=7");
-        assert!(header.contains(r#"<hh:paraProperties itemCnt="20""#), "paraProperties itemCnt=20");
-        assert!(header.contains(r#"<hh:fontfaces itemCnt="7""#), "fontfaces itemCnt=7");
-        assert!(header.contains(r#"<hh:borderFills itemCnt="2""#), "borderFills itemCnt=2");
+        assert!(
+            header.contains(r#"<hh:charProperties itemCnt="7""#),
+            "charProperties itemCnt=7"
+        );
+        assert!(
+            header.contains(r#"<hh:paraProperties itemCnt="20""#),
+            "paraProperties itemCnt=20"
+        );
+        assert!(
+            header.contains(r#"<hh:fontfaces itemCnt="7""#),
+            "fontfaces itemCnt=7"
+        );
+        assert!(
+            header.contains(r#"<hh:borderFills itemCnt="2""#),
+            "borderFills itemCnt=2"
+        );
 
         // styles pool parses and carries the default 바탕글 (named-style application reads these).
         let styles = parse_styles(&header);
-        assert!(styles.contains_key("바탕글"), "styles pool parses + has 바탕글: {} keys", styles.len());
+        assert!(
+            styles.contains_key("바탕글"),
+            "styles pool parses + has 바탕글: {} keys",
+            styles.len()
+        );
 
         // section0.xml — the body patch appends before </hs:sec>; the lone stub <hp:p> carries the
         // MANDATORY <hp:secPr> (page geometry). Deleting the stub would drop the secPr → damaged file.
-        let sec0 = String::from_utf8(pkg.read_part("Contents/section0.xml").expect("section0")).unwrap();
-        assert!(sec0.trim_end().ends_with("</hs:sec>"), "section0 ends with </hs:sec>");
-        assert!(sec0.contains("<hp:secPr"), "section0 stub carries the mandatory secPr");
+        let sec0 =
+            String::from_utf8(pkg.read_part("Contents/section0.xml").expect("section0")).unwrap();
+        assert!(
+            sec0.trim_end().ends_with("</hs:sec>"),
+            "section0 ends with </hs:sec>"
+        );
+        assert!(
+            sec0.contains("<hp:secPr"),
+            "section0 stub carries the mandatory secPr"
+        );
     }
 }

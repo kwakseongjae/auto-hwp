@@ -1,8 +1,11 @@
 name: ci
 
+# 2026-07-11: 로컬 검증 우선으로 전환 — 정본은 `scripts/verify-local.sh` (fmt/clippy/test/게이트/wasm/deny
+# + --full에서 JS/e2e까지, CI보다 넓은 커버리지). GitHub Actions는 수동 트리거 전용으로 유지한다.
+# (push마다 돌던 시절 이 워크플로는 한 번도 그린인 적 없음 — 레포가 로컬 전용이던 때 작성돼 fmt 미준수
+#  1,332곳·cargo-deny 라이선스 설정이 방치돼 있었다. fmt는 정리됐고, 필요 시 수동 실행으로 재검증.)
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always

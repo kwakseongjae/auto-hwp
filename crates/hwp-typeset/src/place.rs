@@ -242,20 +242,52 @@ fn record_block_band(
 ) {
     if start_page == end_page {
         if let Some(pg) = pages.get_mut(start_page) {
-            pg.blocks.push(PlacedBlock { x: ml, y: start_y, w: body_w, h: (end_y - start_y).max(0.0), section, block, kind });
+            pg.blocks.push(PlacedBlock {
+                x: ml,
+                y: start_y,
+                w: body_w,
+                h: (end_y - start_y).max(0.0),
+                section,
+                block,
+                kind,
+            });
         }
         return;
     }
     if let Some(pg) = pages.get_mut(start_page) {
-        pg.blocks.push(PlacedBlock { x: ml, y: start_y, w: body_w, h: (mt + body_h - start_y).max(0.0), section, block, kind });
+        pg.blocks.push(PlacedBlock {
+            x: ml,
+            y: start_y,
+            w: body_w,
+            h: (mt + body_h - start_y).max(0.0),
+            section,
+            block,
+            kind,
+        });
     }
     for p in (start_page + 1)..end_page {
         if let Some(pg) = pages.get_mut(p) {
-            pg.blocks.push(PlacedBlock { x: ml, y: mt, w: body_w, h: body_h, section, block, kind });
+            pg.blocks.push(PlacedBlock {
+                x: ml,
+                y: mt,
+                w: body_w,
+                h: body_h,
+                section,
+                block,
+                kind,
+            });
         }
     }
     if let Some(pg) = pages.get_mut(end_page) {
-        pg.blocks.push(PlacedBlock { x: ml, y: mt, w: body_w, h: (end_y - mt).max(0.0), section, block, kind });
+        pg.blocks.push(PlacedBlock {
+            x: ml,
+            y: mt,
+            w: body_w,
+            h: (end_y - mt).max(0.0),
+            section,
+            block,
+            kind,
+        });
     }
 }
 
@@ -290,7 +322,9 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
             match block {
                 Block::Paragraph(p) => {
                     let ps = doc.para_shapes.get(p.para_shape);
-                    if (p.page_break_before || ps.map(|s| s.page_break_before).unwrap_or(false)) && vert > 0.0 {
+                    if (p.page_break_before || ps.map(|s| s.page_break_before).unwrap_or(false))
+                        && vert > 0.0
+                    {
                         new_page(&mut pages, page);
                         vert = 0.0;
                     }
@@ -305,13 +339,33 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                     }
                     let bstart_page = pages.len() - 1;
                     let bstart_y = mt + vert;
-                    place_paragraph(p, doc, fonts, ml, mt, body_w, body_h, &mut vert, &mut pages, page, sec_idx, blk_idx);
+                    place_paragraph(
+                        p, doc, fonts, ml, mt, body_w, body_h, &mut vert, &mut pages, page,
+                        sec_idx, blk_idx,
+                    );
                     // Provenance band for point-to-scope: the paragraph's row extent on each page it
                     // touched. Tag it IMAGE when it carries an anchored object so the UI can label it.
                     let bend_page = pages.len() - 1;
                     let bend_y = mt + vert;
-                    let kind = if paragraph_object(p).is_some() { BlockKind::Image } else { BlockKind::Paragraph };
-                    record_block_band(&mut pages, bstart_page, bstart_y, bend_page, bend_y, ml, body_w, mt, body_h, sec_idx, blk_idx, kind);
+                    let kind = if paragraph_object(p).is_some() {
+                        BlockKind::Image
+                    } else {
+                        BlockKind::Paragraph
+                    };
+                    record_block_band(
+                        &mut pages,
+                        bstart_page,
+                        bstart_y,
+                        bend_page,
+                        bend_y,
+                        ml,
+                        body_w,
+                        mt,
+                        body_h,
+                        sec_idx,
+                        blk_idx,
+                        kind,
+                    );
                     vert += ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;
                     started = true;
                 }
@@ -334,17 +388,31 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                     // place_table SPLITS the table across pages itself (한글식 row-level break): a
                     // first-row reserve, then a new page whenever the next row crosses the body bottom,
                     // emitting one bordered fragment per page. Returns the final page-relative cursor.
-                    vert = place_table(t, doc, fonts, ml, mt, body_h, vert, body_w, &mut pages, page, sec_idx, blk_idx, frame);
+                    vert = place_table(
+                        t, doc, fonts, ml, mt, body_h, vert, body_w, &mut pages, page, sec_idx,
+                        blk_idx, frame,
+                    );
                     let end_page = pages.len() - 1;
                     // Provenance bands for point-to-scope: one band per fragment page from its ACTUAL box,
                     // so own_hit_test resolves the table — and the scope pin hugs it — on EVERY page it
                     // touches. A degenerate 0×N table pushes no fragment, so the find simply yields none.
-                    for pi in start_page..=end_page {
-                        let band = pages[pi].tables.iter().rev()
+                    for pg in pages.iter_mut().take(end_page + 1).skip(start_page) {
+                        let band = pg
+                            .tables
+                            .iter()
+                            .rev()
                             .find(|pt| pt.section == sec_idx && pt.block == blk_idx)
-                            .map(|pt| PlacedBlock { x: pt.x, y: pt.y, w: pt.w, h: pt.h, section: sec_idx, block: blk_idx, kind: BlockKind::Table });
+                            .map(|pt| PlacedBlock {
+                                x: pt.x,
+                                y: pt.y,
+                                w: pt.w,
+                                h: pt.h,
+                                section: sec_idx,
+                                block: blk_idx,
+                                kind: BlockKind::Table,
+                            });
                         if let Some(b) = band {
-                            pages[pi].blocks.push(b);
+                            pg.blocks.push(b);
                         }
                     }
                     // Outer bottom margin so the next block doesn't abut the table. NO trailing
@@ -383,7 +451,9 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
             match block {
                 Block::Paragraph(p) => {
                     let ps = doc.para_shapes.get(p.para_shape);
-                    if (p.page_break_before || ps.map(|s| s.page_break_before).unwrap_or(false)) && vert > 0.0 {
+                    if (p.page_break_before || ps.map(|s| s.page_break_before).unwrap_or(false))
+                        && vert > 0.0
+                    {
                         page_idx += 1;
                         vert = 0.0;
                     }
@@ -432,7 +502,12 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
                     let row_h = crate::table_row_heights(t, body_w, doc, fonts);
                     // `rh <= body_h` on both checks: an over-tall row (taller than the whole body) never
                     // forces a page bump — mirrors place_table + NaiveLayout so the start pages stay aligned.
-                    if vert > 0.0 && row_h.first().map(|&rh| vert + rh > body_h && rh <= body_h).unwrap_or(false) {
+                    if vert > 0.0
+                        && row_h
+                            .first()
+                            .map(|&rh| vert + rh > body_h && rh <= body_h)
+                            .unwrap_or(false)
+                    {
                         page_idx += 1;
                         vert = 0.0;
                     }
@@ -484,7 +559,11 @@ fn indent_of(p: &Paragraph, doc: &SemanticDoc, avail_w: f64) -> Indent {
     let first_extra = indent.max(-left);
     // Wrap width shrinks by left+right block margins so line breaking respects the inset. Keep ≥1.
     let wrap_w = (avail_w - left - right).max(1.0);
-    Indent { left, first_extra, wrap_w }
+    Indent {
+        left,
+        first_extra,
+        wrap_w,
+    }
 }
 
 /// Place one paragraph's lines (glyphs + a line text-box), advancing `vert` and paginating exactly
@@ -507,7 +586,11 @@ fn place_paragraph(
     // Flat (char, size, color, underline) over the paragraph's text — same order layout_paragraph
     // breaks on, so line `text_pos` indexes straight into this.
     let glyphs = paragraph_glyphs(p, doc);
-    let align = doc.para_shapes.get(p.para_shape).map(|s| s.align).unwrap_or_default();
+    let align = doc
+        .para_shapes
+        .get(p.para_shape)
+        .map(|s| s.align)
+        .unwrap_or_default();
     let ratio = line_spacing_ratio(p, doc);
     // Paragraph indent: block left/right margins shrink the wrap width; first-line indent shifts line 0.
     let ind = indent_of(p, doc, body_w);
@@ -527,21 +610,38 @@ fn place_paragraph(
         // First-line indent only shifts (and narrows the usable slack of) line 0.
         let line_indent = ind.left + if li == 0 { ind.first_extra } else { 0.0 };
         // Alignment offset within the indented width (left/justify = 0, right = full slack, center = ½).
-        let slack = (ind.wrap_w - if li == 0 { ind.first_extra.max(0.0) } else { 0.0 } - line_w).max(0.0);
-        let x0 = ml + line_indent + match align {
-            HorizontalAlign::Right => slack,
-            HorizontalAlign::Center => slack / 2.0,
-            _ => 0.0,
-        };
+        let slack = (ind.wrap_w
+            - if li == 0 {
+                ind.first_extra.max(0.0)
+            } else {
+                0.0
+            }
+            - line_w)
+            .max(0.0);
+        let x0 = ml
+            + line_indent
+            + match align {
+                HorizontalAlign::Right => slack,
+                HorizontalAlign::Center => slack / 2.0,
+                _ => 0.0,
+            };
         let baseline = line_top + ls.baseline;
 
         // Walk this line's glyphs, accumulating x by real advances.
         let start = ls.text_pos as usize;
-        let end = lines.get(li + 1).map(|n| n.text_pos as usize).unwrap_or(glyphs.len());
+        let end = lines
+            .get(li + 1)
+            .map(|n| n.text_pos as usize)
+            .unwrap_or(glyphs.len());
         let mut x = x0;
-        let plain = FontKey { family: String::new(), bold: false, italic: false };
+        let plain = FontKey {
+            family: String::new(),
+            bold: false,
+            italic: false,
+        };
         for g in glyphs.get(start..end.min(glyphs.len())).unwrap_or(&[]) {
-            let adv = fonts.advance_width(&plain, g.ch, g.size as i32) * g.ratio + g.spacing_em * g.size;
+            let adv =
+                fonts.advance_width(&plain, g.ch, g.size as i32) * g.ratio + g.spacing_em * g.size;
             if g.ch != ' ' && g.ch != '\t' && g.ch != '\n' {
                 pg.glyphs.push(PlacedGlyph {
                     x,
@@ -635,7 +735,10 @@ fn place_table(
         // and never to give a row TALLER than the whole body its own page (it can't fit there either, so
         // the break would only waste the current page). `rh <= body_h` mirrors NaiveLayout/block_pages.
         if r > frag_first && (y - mt) + row_h[r] > body_h && row_h[r] <= body_h {
-            flush_fragment(pages, t, doc, fonts, ml, frag_top, &col_x, &row_h, frag_first, r, section, block, frame);
+            flush_fragment(
+                pages, t, doc, fonts, ml, frag_top, &col_x, &row_h, frag_first, r, section, block,
+                frame,
+            );
             new_page(pages, page);
             frag_first = r;
             frag_top = mt;
@@ -643,7 +746,10 @@ fn place_table(
         }
         y += row_h[r];
     }
-    flush_fragment(pages, t, doc, fonts, ml, frag_top, &col_x, &row_h, frag_first, t.rows, section, block, frame);
+    flush_fragment(
+        pages, t, doc, fonts, ml, frag_top, &col_x, &row_h, frag_first, t.rows, section, block,
+        frame,
+    );
     y - mt // final page-relative cursor (bottom of the last fragment)
 }
 
@@ -720,10 +826,23 @@ fn flush_fragment(
         let cy = top_of(r0);
         let ch = (top_of(r1) - cy).max(1.0);
         // Cell provenance rect (point→cell for double-click editing) — keyed to the real (row, col).
-        placed_cells.push(PlacedCell { row: c.row, col: c.col, x: cx, y: cy, w: cw, h: ch });
+        placed_cells.push(PlacedCell {
+            row: c.row,
+            col: c.col,
+            x: cx,
+            y: cy,
+            w: cw,
+            h: ch,
+        });
         // Cell shade (fill) UNDER its border so the border stays visible.
         if let Some(shade) = c.shade_color {
-            pg.rects.push(PlacedRect { x: cx, y: cy, w: cw, h: ch, fill: Some(shade) });
+            pg.rects.push(PlacedRect {
+                x: cx,
+                y: cy,
+                w: cw,
+                h: ch,
+                fill: Some(shade),
+            });
         }
         // Cell borders. Two paths:
         //  - PER-EDGE (lifted from the real borderFill): draw each visible edge as its own styled line,
@@ -733,7 +852,13 @@ fn flush_fragment(
         if c.has_edge_borders() {
             push_cell_edges(pg, &c.borders, cx, cy, cw, ch);
         } else if c.has_border {
-            pg.rects.push(PlacedRect { x: cx, y: cy, w: cw, h: ch, fill: None });
+            pg.rects.push(PlacedRect {
+                x: cx,
+                y: cy,
+                w: cw,
+                h: ch,
+                fill: None,
+            });
         }
         // Cell diagonal (HWP borderFill `diagonal`) — only on an EMPTY cell (forms a shape; a text cell's
         // diagonal is a shared-borderFill artifact Hancom doesn't draw through the words).
@@ -769,7 +894,15 @@ fn flush_fragment(
         let y1 = row_top[last - first];
         let w = f.width_px.max(HAIRLINE_MIN_PX);
         let mut edge = |x1_: f64, y1_: f64, x2_: f64, y2_: f64| {
-            pg.lines.push(PlacedLine { x1: x1_, y1: y1_, x2: x2_, y2: y2_, color: f.color, style: f.style, width: w });
+            pg.lines.push(PlacedLine {
+                x1: x1_,
+                y1: y1_,
+                x2: x2_,
+                y2: y2_,
+                color: f.color,
+                style: f.style,
+                width: w,
+            });
         };
         edge(x0, y0, x0, y1); // left
         edge(x1, y0, x1, y1); // right
@@ -791,7 +924,9 @@ fn flush_fragment(
 fn cell_has_text(blocks: &[Block]) -> bool {
     blocks.iter().any(|b| match b {
         Block::Paragraph(p) => p.runs.iter().any(|r| {
-            r.content.iter().any(|i| matches!(i, Inline::Text(s) if !s.trim().is_empty()))
+            r.content
+                .iter()
+                .any(|i| matches!(i, Inline::Text(s) if !s.trim().is_empty()))
         }),
         Block::Table(t) => t.cells.iter().any(|c| cell_has_text(&c.blocks)),
     })
@@ -801,13 +936,20 @@ fn cell_has_text(blocks: &[Block]) -> bool {
 /// (`[left, right, top, bottom]`). A `LineStyle::None` edge (선없음) emits NOTHING — that is how a
 /// per-edge cell suppresses a side (e.g. the section-header band's right/inner edges). A 0-px width
 /// is clamped to 1 so a hairline stays visible.
-fn push_cell_edges(pg: &mut PlacedPage, borders: &[Option<CellEdge>; 4], cx: f64, cy: f64, cw: f64, ch: f64) {
+fn push_cell_edges(
+    pg: &mut PlacedPage,
+    borders: &[Option<CellEdge>; 4],
+    cx: f64,
+    cy: f64,
+    cw: f64,
+    ch: f64,
+) {
     // (edge_index, x1, y1, x2, y2) — left, right, top, bottom.
     let segs = [
-        (0usize, cx, cy, cx, cy + ch),           // left
-        (1, cx + cw, cy, cx + cw, cy + ch),      // right
-        (2, cx, cy, cx + cw, cy),                // top
-        (3, cx, cy + ch, cx + cw, cy + ch),      // bottom
+        (0usize, cx, cy, cx, cy + ch),      // left
+        (1, cx + cw, cy, cx + cw, cy + ch), // right
+        (2, cx, cy, cx + cw, cy),           // top
+        (3, cx, cy + ch, cx + cw, cy + ch), // bottom
     ];
     for (i, x1, y1, x2, y2) in segs {
         let Some(edge) = borders[i] else { continue };
@@ -873,12 +1015,24 @@ fn place_nested_table(
         let r1 = (c.row + c.row_span.max(1)).min(t.rows);
         let ch = (row_top[r1] - cy).max(1.0);
         if let Some(shade) = c.shade_color {
-            pg.rects.push(PlacedRect { x: cx, y: cy, w: cw, h: ch, fill: Some(shade) });
+            pg.rects.push(PlacedRect {
+                x: cx,
+                y: cy,
+                w: cw,
+                h: ch,
+                fill: Some(shade),
+            });
         }
         if c.has_edge_borders() {
             push_cell_edges(pg, &c.borders, cx, cy, cw, ch);
         } else if c.has_border {
-            pg.rects.push(PlacedRect { x: cx, y: cy, w: cw, h: ch, fill: None });
+            pg.rects.push(PlacedRect {
+                x: cx,
+                y: cy,
+                w: cw,
+                h: ch,
+                fill: None,
+            });
         }
         if let Some(d) = c.diagonal.filter(|_| !cell_has_text(&c.blocks)) {
             let (y1, y2) = match d.kind {
@@ -901,6 +1055,7 @@ fn place_nested_table(
 
 /// Place a cell's block content (paragraph glyphs + nested tables) inside its box `(cx,cy,cw,ch)`,
 /// vertically centered. A nested table is drawn in place (see `place_nested_table`).
+#[allow(clippy::too_many_arguments)]
 fn place_cell_content(
     pg: &mut PlacedPage,
     blocks: &[Block],
@@ -913,9 +1068,16 @@ fn place_cell_content(
 ) {
     let textw = (cw - 2.0 * CELL_PAD_X).max(1.0);
     // Total content height → start offset for vertical centering within the cell box.
-    let content_h: f64 = blocks.iter().map(|b| block_height_for_place(b, doc, textw, fonts)).sum();
+    let content_h: f64 = blocks
+        .iter()
+        .map(|b| block_height_for_place(b, doc, textw, fonts))
+        .sum();
     let mut vy = cy + ((ch - content_h) / 2.0).max(0.0);
-    let plain = FontKey { family: String::new(), bold: false, italic: false };
+    let plain = FontKey {
+        family: String::new(),
+        bold: false,
+        italic: false,
+    };
     for b in blocks {
         let Block::Paragraph(p) = b else {
             // A NESTED table (a table inside this cell): DRAW it at the current cursor — its height is
@@ -930,25 +1092,43 @@ fn place_cell_content(
             continue;
         };
         let glyphs = paragraph_glyphs(p, doc);
-        let align = doc.para_shapes.get(p.para_shape).map(|s| s.align).unwrap_or_default();
+        let align = doc
+            .para_shapes
+            .get(p.para_shape)
+            .map(|s| s.align)
+            .unwrap_or_default();
         let ratio = line_spacing_ratio(p, doc);
         // Same paragraph indent as the body: block left/right margins shrink wrap; first line shifts.
         let ind = indent_of(p, doc, textw);
         let lines = layout_paragraph(p, doc, ind.wrap_w, fonts);
         for (li, ls) in lines.iter().enumerate() {
             let line_indent = ind.left + if li == 0 { ind.first_extra } else { 0.0 };
-            let slack = (ind.wrap_w - if li == 0 { ind.first_extra.max(0.0) } else { 0.0 } - ls.horz_size).max(0.0);
-            let x0 = cx + CELL_PAD_X + line_indent + match align {
-                HorizontalAlign::Right => slack,
-                HorizontalAlign::Center => slack / 2.0,
-                _ => 0.0,
-            };
+            let slack = (ind.wrap_w
+                - if li == 0 {
+                    ind.first_extra.max(0.0)
+                } else {
+                    0.0
+                }
+                - ls.horz_size)
+                .max(0.0);
+            let x0 = cx
+                + CELL_PAD_X
+                + line_indent
+                + match align {
+                    HorizontalAlign::Right => slack,
+                    HorizontalAlign::Center => slack / 2.0,
+                    _ => 0.0,
+                };
             let baseline = vy + ls.baseline;
             let start = ls.text_pos as usize;
-            let end = lines.get(li + 1).map(|n| n.text_pos as usize).unwrap_or(glyphs.len());
+            let end = lines
+                .get(li + 1)
+                .map(|n| n.text_pos as usize)
+                .unwrap_or(glyphs.len());
             let mut x = x0;
             for g in glyphs.get(start..end.min(glyphs.len())).unwrap_or(&[]) {
-                let adv = fonts.advance_width(&plain, g.ch, g.size as i32) * g.ratio + g.spacing_em * g.size;
+                let adv = fonts.advance_width(&plain, g.ch, g.size as i32) * g.ratio
+                    + g.spacing_em * g.size;
                 if g.ch != ' ' && g.ch != '\t' && g.ch != '\n' {
                     pg.glyphs.push(PlacedGlyph {
                         x,
@@ -1048,6 +1228,7 @@ struct CellLineGeom<'a> {
 /// trim — but instead of pushing `PlacedGlyph`s, hand each LINE's geometry to `on_line`. Return
 /// `true` from the callback to stop early. Nested tables advance the cursor (their inner cells are
 /// not caret targets — mirrors "nested cells aren't edit targets").
+#[allow(clippy::too_many_arguments)]
 fn walk_cell_lines(
     blocks: &[Block],
     cx: f64,
@@ -1059,9 +1240,16 @@ fn walk_cell_lines(
     on_line: &mut dyn FnMut(&CellLineGeom) -> bool,
 ) {
     let textw = (cw - 2.0 * CELL_PAD_X).max(1.0);
-    let content_h: f64 = blocks.iter().map(|b| block_height_for_place(b, doc, textw, fonts)).sum();
+    let content_h: f64 = blocks
+        .iter()
+        .map(|b| block_height_for_place(b, doc, textw, fonts))
+        .sum();
     let mut vy = cy + ((ch - content_h) / 2.0).max(0.0);
-    let plain = FontKey { family: String::new(), bold: false, italic: false };
+    let plain = FontKey {
+        family: String::new(),
+        bold: false,
+        italic: false,
+    };
     let mut seg_base = 0usize; // cell-global ordinal of this model paragraph's FIRST "\n"-segment
     for b in blocks {
         let Block::Paragraph(p) = b else {
@@ -1072,28 +1260,54 @@ fn walk_cell_lines(
         // "\n"-segment map (the EDITOR address space — see CellTextHit): positions of the forced
         // breaks split the paragraph into nl_pos.len()+1 segments; a glyph at index i belongs to the
         // segment holding it, with segment-local offset i - seg_start.
-        let nl_pos: Vec<usize> = glyphs.iter().enumerate().filter(|(_, g)| g.ch == '\n').map(|(i, _)| i).collect();
+        let nl_pos: Vec<usize> = glyphs
+            .iter()
+            .enumerate()
+            .filter(|(_, g)| g.ch == '\n')
+            .map(|(i, _)| i)
+            .collect();
         let seg_of = |i: usize| nl_pos.partition_point(|&pos| pos < i);
         let seg_start = |s: usize| if s == 0 { 0 } else { nl_pos[s - 1] + 1 };
         let seg_end = |s: usize| nl_pos.get(s).copied().unwrap_or(glyphs.len()); // exclusive of the '\n'
-        let align = doc.para_shapes.get(p.para_shape).map(|s| s.align).unwrap_or_default();
+        let align = doc
+            .para_shapes
+            .get(p.para_shape)
+            .map(|s| s.align)
+            .unwrap_or_default();
         let ratio = line_spacing_ratio(p, doc);
         let ind = indent_of(p, doc, textw);
         let lines = layout_paragraph(p, doc, ind.wrap_w, fonts);
         for (li, ls) in lines.iter().enumerate() {
             let line_indent = ind.left + if li == 0 { ind.first_extra } else { 0.0 };
-            let slack = (ind.wrap_w - if li == 0 { ind.first_extra.max(0.0) } else { 0.0 } - ls.horz_size).max(0.0);
-            let x0 = cx + CELL_PAD_X + line_indent + match align {
-                HorizontalAlign::Right => slack,
-                HorizontalAlign::Center => slack / 2.0,
-                _ => 0.0,
-            };
+            let slack = (ind.wrap_w
+                - if li == 0 {
+                    ind.first_extra.max(0.0)
+                } else {
+                    0.0
+                }
+                - ls.horz_size)
+                .max(0.0);
+            let x0 = cx
+                + CELL_PAD_X
+                + line_indent
+                + match align {
+                    HorizontalAlign::Right => slack,
+                    HorizontalAlign::Center => slack / 2.0,
+                    _ => 0.0,
+                };
             let start = ls.text_pos as usize;
-            let end = lines.get(li + 1).map(|n| n.text_pos as usize).unwrap_or(glyphs.len()).min(glyphs.len());
+            let end = lines
+                .get(li + 1)
+                .map(|n| n.text_pos as usize)
+                .unwrap_or(glyphs.len())
+                .min(glyphs.len());
             let line_glyphs = glyphs.get(start..end).unwrap_or(&[]);
             let advances: Vec<f64> = line_glyphs
                 .iter()
-                .map(|g| fonts.advance_width(&plain, g.ch, g.size as i32) * g.ratio + g.spacing_em * g.size)
+                .map(|g| {
+                    fonts.advance_width(&plain, g.ch, g.size as i32) * g.ratio
+                        + g.spacing_em * g.size
+                })
                 .collect();
             let chars: Vec<char> = line_glyphs.iter().map(|g| g.ch).collect();
             let s = seg_of(start); // the line's segment (a '\n' ends its line, so lines never straddle)
@@ -1123,9 +1337,19 @@ fn walk_cell_lines(
 /// The `(page, PlacedCell)` whose fragment DRAWS the cell's text — the fragment that owns the
 /// cell's TOP row (`flush_fragment` draws cell text only there, so a split table's continuation
 /// rect never yields a duplicate/false caret).
-fn owning_cell_rect(placed: &PlacedDoc, section: usize, block: usize, row: usize, col: usize) -> Option<(usize, PlacedCell)> {
+fn owning_cell_rect(
+    placed: &PlacedDoc,
+    section: usize,
+    block: usize,
+    row: usize,
+    col: usize,
+) -> Option<(usize, PlacedCell)> {
     for (pi, pg) in placed.pages.iter().enumerate() {
-        for t in pg.tables.iter().filter(|t| t.section == section && t.block == block) {
+        for t in pg
+            .tables
+            .iter()
+            .filter(|t| t.section == section && t.block == block)
+        {
             if row < t.first_row || row >= t.last_row {
                 continue;
             }
@@ -1140,12 +1364,20 @@ fn owning_cell_rect(placed: &PlacedDoc, section: usize, block: usize, row: usize
 /// The ACTIVE model cell at `(row, col)` of the table block at `(section, block)`, resolved through
 /// a 1×1 frame wrapper (자가진단표) via `edit_target` — the SAME resolution `block_runs`/
 /// `SetTableCellRuns` use, so the caret address space and the commit address space agree.
-fn model_cell<'a>(doc: &'a SemanticDoc, section: usize, block: usize, row: usize, col: usize) -> Option<&'a Cell> {
+fn model_cell(
+    doc: &SemanticDoc,
+    section: usize,
+    block: usize,
+    row: usize,
+    col: usize,
+) -> Option<&Cell> {
     let Some(Block::Table(t)) = doc.sections.get(section).and_then(|s| s.blocks.get(block)) else {
         return None;
     };
     let t = t.edit_target();
-    t.cells.iter().find(|c| c.active && c.row == row && c.col == col)
+    t.cells
+        .iter()
+        .find(|c| c.active && c.row == row && c.col == col)
 }
 
 /// Cell-addressed caret rect (issue 053): the caret geometry at char `offset` of the `para`-th
@@ -1153,6 +1385,7 @@ fn model_cell<'a>(doc: &'a SemanticDoc, section: usize, block: usize, row: usize
 /// HWPUNIT, on the page the owning fragment landed on. A past-end `offset` CLAMPS to the paragraph
 /// end and returns a rect (never `None` for it — the same contract as the NodeId `CaretRect`).
 /// `None` when the address doesn't resolve (no such table/cell/paragraph, or the cell isn't placed).
+#[allow(clippy::too_many_arguments)]
 pub fn cell_caret_rect(
     doc: &SemanticDoc,
     placed: &PlacedDoc,
@@ -1167,28 +1400,42 @@ pub fn cell_caret_rect(
     let (page, pc) = owning_cell_rect(placed, section, block, row, col)?;
     let cell = model_cell(doc, section, block, row, col)?;
     let mut out: Option<CellCaretRect> = None;
-    walk_cell_lines(&cell.blocks, pc.x, pc.y, pc.w, pc.h, doc, fonts, &mut |lg| {
-        if lg.para > para {
-            return true; // past the target paragraph — the recorded candidate stands
-        }
-        if lg.para < para {
-            return false;
-        }
-        let o = offset.min(lg.para_len); // past-end clamps to the paragraph end (CaretRect contract)
-        if o < lg.line_start {
-            return false; // resolved on an earlier line already
-        }
-        // Chars of THIS line within the segment (a forced-break line's trailing '\n' is the
-        // separator itself — offset o == para_len sits BEFORE it, i.e. at most count-1 advances in).
-        let n = (o - lg.line_start).min(lg.advances.len());
-        // LAST line with `line_start <= o` wins: an offset on a wrap boundary belongs to the
-        // FOLLOWING line's start (typing continues there) — the loop's later overwrite does that.
-        if o <= lg.line_start + lg.advances.len() {
-            let x = lg.x0 + lg.advances[..n].iter().sum::<f64>();
-            out = Some(CellCaretRect { page, x, top: lg.top, height: lg.height });
-        }
-        false
-    });
+    walk_cell_lines(
+        &cell.blocks,
+        pc.x,
+        pc.y,
+        pc.w,
+        pc.h,
+        doc,
+        fonts,
+        &mut |lg| {
+            if lg.para > para {
+                return true; // past the target paragraph — the recorded candidate stands
+            }
+            if lg.para < para {
+                return false;
+            }
+            let o = offset.min(lg.para_len); // past-end clamps to the paragraph end (CaretRect contract)
+            if o < lg.line_start {
+                return false; // resolved on an earlier line already
+            }
+            // Chars of THIS line within the segment (a forced-break line's trailing '\n' is the
+            // separator itself — offset o == para_len sits BEFORE it, i.e. at most count-1 advances in).
+            let n = (o - lg.line_start).min(lg.advances.len());
+            // LAST line with `line_start <= o` wins: an offset on a wrap boundary belongs to the
+            // FOLLOWING line's start (typing continues there) — the loop's later overwrite does that.
+            if o <= lg.line_start + lg.advances.len() {
+                let x = lg.x0 + lg.advances[..n].iter().sum::<f64>();
+                out = Some(CellCaretRect {
+                    page,
+                    x,
+                    top: lg.top,
+                    height: lg.height,
+                });
+            }
+            false
+        },
+    );
     out
 }
 
@@ -1210,8 +1457,7 @@ pub fn cell_text_hit(
     let t = pg
         .tables
         .iter()
-        .filter(|t| x >= t.x && x <= t.x + t.w && y >= t.y && y <= t.y + t.h)
-        .last()?;
+        .rfind(|t| x >= t.x && x <= t.x + t.w && y >= t.y && y <= t.y + t.h)?;
     let pc = t.cell_at(x, y)?;
     if pc.row < t.first_row {
         return None; // continuation fragment — the text (and its caret) lives on the owning page
@@ -1257,7 +1503,12 @@ pub fn cell_text_hit(
                     para: lg.para,
                     offset: off,
                     para_len: lg.para_len,
-                    caret: CellCaretRect { page, x: cxp, top: lg.top, height: lg.height },
+                    caret: CellCaretRect {
+                        page,
+                        x: cxp,
+                        top: lg.top,
+                        height: lg.height,
+                    },
                 },
             ));
         }
@@ -1277,15 +1528,20 @@ pub fn column_offsets(t: &Table, avail_w: f64) -> Vec<f64> {
         }
     } else {
         let cw = avail_w / t.cols as f64;
-        for i in 0..=t.cols {
-            xs[i] = cw * i as f64;
+        for (i, x) in xs.iter_mut().enumerate() {
+            *x = cw * i as f64;
         }
     }
     xs
 }
 
 /// Per-row heights — identical sizing to [`crate::table_height`] (a spanning cell distributes evenly).
-fn row_heights(t: &Table, avail_w: f64, doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<f64> {
+fn row_heights(
+    t: &Table,
+    avail_w: f64,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+) -> Vec<f64> {
     let col_x = column_offsets(t, avail_w);
     let mut row_h = vec![0.0f64; t.rows];
     for c in &t.cells {
@@ -1297,8 +1553,12 @@ fn row_heights(t: &Table, avail_w: f64, doc: &SemanticDoc, fonts: &dyn FontMetri
         // Reserve at the SAME padded text width the glyphs are drawn at (place_cell_content), so a row
         // never reserves fewer lines than get drawn (the 2-line-label-over-next-cell overlap).
         let tw = (cw - 2.0 * CELL_PAD_X).max(1.0);
-        let content: f64 =
-            c.blocks.iter().map(|b| block_height_for_place(b, doc, tw, fonts)).sum::<f64>() + crate::CELL_PAD;
+        let content: f64 = c
+            .blocks
+            .iter()
+            .map(|b| block_height_for_place(b, doc, tw, fonts))
+            .sum::<f64>()
+            + crate::CELL_PAD;
         let span = c.row_span.max(1);
         let per = content / span as f64;
         let end = (c.row + span).min(t.rows);
@@ -1314,7 +1574,12 @@ fn row_heights(t: &Table, avail_w: f64, doc: &SemanticDoc, fonts: &dyn FontMetri
 /// [`column_offsets`]. `row_offsets[r]` is the y of row r's top edge; `row_offsets[rows]` is the
 /// table's content height. Needs `doc`/`fonts` because row heights are content-measured (unlike the
 /// explicit column widths). Powers the `table_row_boundaries` resize-handle geometry.
-pub fn row_offsets(t: &Table, avail_w: f64, doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<f64> {
+pub fn row_offsets(
+    t: &Table,
+    avail_w: f64,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+) -> Vec<f64> {
     let row_h = row_heights(t, avail_w, doc, fonts);
     let mut tops = vec![0.0f64; t.rows + 1];
     for r in 0..t.rows {
@@ -1327,7 +1592,12 @@ pub fn row_offsets(t: &Table, avail_w: f64, doc: &SemanticDoc, fonts: &dyn FontM
 /// trimmed) or nested table. Delegates the paragraph arm to `crate::cell_paragraph_height` — the SAME
 /// helper `lib.rs::block_height` uses — so the drawn cell and the pagination reserve are LOCKSTEP by
 /// construction (no parallel formula to drift). See `cell_paragraph_height` for the last-line rationale.
-fn block_height_for_place(b: &Block, doc: &SemanticDoc, width: f64, fonts: &dyn FontMetricsProvider) -> f64 {
+fn block_height_for_place(
+    b: &Block,
+    doc: &SemanticDoc,
+    width: f64,
+    fonts: &dyn FontMetricsProvider,
+) -> f64 {
     match b {
         Block::Paragraph(p) => crate::cell_paragraph_height(p, doc, width, fonts),
         Block::Table(t) => table_height(t, width, doc, fonts),
@@ -1363,7 +1633,9 @@ fn paragraph_glyphs(p: &Paragraph, doc: &SemanticDoc) -> Vec<GlyphInfo> {
         let underline = cs.map(|c| c.underline).unwrap_or(false);
         let bold = cs.map(|c| c.bold).unwrap_or(false);
         let italic = cs.map(|c| c.italic).unwrap_or(false);
-        let font = cs.and_then(|c| c.font_family.clone()).filter(|s| !s.trim().is_empty());
+        let font = cs
+            .and_then(|c| c.font_family.clone())
+            .filter(|s| !s.trim().is_empty());
         for inl in &run.content {
             if let Inline::Text(t) = inl {
                 for ch in t.chars() {
@@ -1371,12 +1643,26 @@ fn paragraph_glyphs(p: &Paragraph, doc: &SemanticDoc) -> Vec<GlyphInfo> {
                     let (ratio, spacing_em) = cs
                         .map(|c| {
                             let slot = crate::script_slot(sch);
-                            let r = match *c.ratio.get(slot) { 0 => 100, r => r.clamp(50, 200) } as f64 / 100.0;
+                            let r = match *c.ratio.get(slot) {
+                                0 => 100,
+                                r => r.clamp(50, 200),
+                            } as f64
+                                / 100.0;
                             let s = (*c.spacing.get(slot)).clamp(-50, 50) as f64 / 100.0;
                             (r, s)
                         })
                         .unwrap_or((1.0, 0.0));
-                    out.push(GlyphInfo { ch: sch, size, color, underline, bold, italic, font: font.clone(), ratio, spacing_em });
+                    out.push(GlyphInfo {
+                        ch: sch,
+                        size,
+                        color,
+                        underline,
+                        bold,
+                        italic,
+                        font: font.clone(),
+                        ratio,
+                        spacing_em,
+                    });
                 }
             }
         }
@@ -1391,7 +1677,9 @@ fn paragraph_object(p: &Paragraph) -> Option<(f64, f64, String)> {
     for run in &p.runs {
         for inl in &run.content {
             let cand = match inl {
-                Inline::Image(img) => Some((img.width as f64, img.height as f64, img.bin_ref.clone())),
+                Inline::Image(img) => {
+                    Some((img.width as f64, img.height as f64, img.bin_ref.clone()))
+                }
                 Inline::Equation(eq) => Some((eq.width as f64, eq.height as f64, String::new())),
                 _ => None,
             };
@@ -1432,7 +1720,11 @@ mod tests {
 
     fn para(text: &str) -> Paragraph {
         Paragraph {
-            runs: vec![Run { char_shape: 0, content: vec![Inline::Text(text.into())], ..Default::default() }],
+            runs: vec![Run {
+                char_shape: 0,
+                content: vec![Inline::Text(text.into())],
+                ..Default::default()
+            }],
             ..Default::default()
         }
     }
@@ -1441,8 +1733,10 @@ mod tests {
         let mut doc = SemanticDoc::default();
         doc.char_shapes.push(CharShape::default()); // index 0 → size 1000
         doc.para_shapes.push(ParaShape::default());
-        let mut sec = Section::default();
-        sec.blocks = blocks;
+        let sec = Section {
+            blocks,
+            ..Default::default()
+        };
         doc.sections.push(sec);
         doc
     }
@@ -1451,7 +1745,12 @@ mod tests {
         Table {
             rows: 1,
             cols: 1,
-            cells: vec![Cell { row: 0, col: 0, blocks: vec![Block::Paragraph(para("가"))], ..Default::default() }],
+            cells: vec![Cell {
+                row: 0,
+                col: 0,
+                blocks: vec![Block::Paragraph(para("가"))],
+                ..Default::default()
+            }],
             col_widths: vec![1],
             outer_margin_top: margin,
             outer_margin_bottom: margin,
@@ -1460,18 +1759,35 @@ mod tests {
     }
 
     fn bottom_table_y(margin: i32) -> f64 {
-        let doc = doc_with(vec![Block::Table(one_cell_table(margin)), Block::Table(one_cell_table(margin))]);
+        let doc = doc_with(vec![
+            Block::Table(one_cell_table(margin)),
+            Block::Table(one_cell_table(margin)),
+        ]);
         let placed = place_doc(&doc, &ApproxFontMetrics);
         // The bottom-most rect's y is the 2nd table's border top.
-        placed.pages[0].rects.iter().map(|r| r.y).fold(0.0, f64::max)
+        placed.pages[0]
+            .rects
+            .iter()
+            .map(|r| r.y)
+            .fold(0.0, f64::max)
     }
 
     #[test]
     fn block_pages_agrees_with_place_doc_pagination() {
         // Two paragraphs + a table; block_pages must give one page index per block, all within the
         // page count place_doc produces, monotonically non-decreasing in reading order.
-        let mut t = Table { rows: 1, cols: 1, col_widths: vec![1], ..Default::default() };
-        t.cells.push(Cell { row: 0, col: 0, blocks: vec![Block::Paragraph(para("셀"))], ..Default::default() });
+        let mut t = Table {
+            rows: 1,
+            cols: 1,
+            col_widths: vec![1],
+            ..Default::default()
+        };
+        t.cells.push(Cell {
+            row: 0,
+            col: 0,
+            blocks: vec![Block::Paragraph(para("셀"))],
+            ..Default::default()
+        });
         let doc = doc_with(vec![
             Block::Paragraph(para("첫 문단")),
             Block::Table(t),
@@ -1482,10 +1798,20 @@ mod tests {
         assert_eq!(bp.len(), 1, "one section");
         assert_eq!(bp[0].len(), 3, "one page index per block");
         let npages = placed.pages.len();
-        assert!(bp[0].iter().all(|&p| p < npages), "every block page index is in range: {bp:?} of {npages}");
-        assert!(bp[0].windows(2).all(|w| w[0] <= w[1]), "block pages are non-decreasing in reading order");
+        assert!(
+            bp[0].iter().all(|&p| p < npages),
+            "every block page index is in range: {bp:?} of {npages}"
+        );
+        assert!(
+            bp[0].windows(2).all(|w| w[0] <= w[1]),
+            "block pages are non-decreasing in reading order"
+        );
         // The last block's start page never exceeds the last page.
-        assert_eq!(*bp[0].iter().max().unwrap(), npages - 1, "content reaches the last page");
+        assert_eq!(
+            *bp[0].iter().max().unwrap(),
+            npages - 1,
+            "content reaches the last page"
+        );
     }
 
     /// A doc with one section whose page is `height` tall (no margins, wide body) — lets a test force a
@@ -1508,9 +1834,20 @@ mod tests {
 
     fn n_row_table(n: usize) -> Table {
         let cells = (0..n)
-            .map(|r| Cell { row: r, col: 0, blocks: vec![Block::Paragraph(para("행"))], ..Default::default() })
+            .map(|r| Cell {
+                row: r,
+                col: 0,
+                blocks: vec![Block::Paragraph(para("행"))],
+                ..Default::default()
+            })
             .collect();
-        Table { rows: n, cols: 1, cells, col_widths: vec![1], ..Default::default() }
+        Table {
+            rows: n,
+            cols: 1,
+            cells,
+            col_widths: vec![1],
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -1519,14 +1856,36 @@ mod tests {
         // A pure table-anchor paragraph (empty, is_table_anchor) reserves NO vertical space: the table
         // starts at the page top, exactly as if the anchor weren't there. A normal empty paragraph would
         // push the table down by one line. Regression for the benchmark1 phantom-anchor over-reservation.
-        let anchor = Paragraph { is_table_anchor: true, ..Default::default() };
-        let doc = doc_with_page(vec![Block::Paragraph(anchor), Block::Table(n_row_table(2))], 800_000);
+        let anchor = Paragraph {
+            is_table_anchor: true,
+            ..Default::default()
+        };
+        let doc = doc_with_page(
+            vec![Block::Paragraph(anchor), Block::Table(n_row_table(2))],
+            800_000,
+        );
         let placed = place_doc(&doc, &ApproxFontMetrics);
-        let t = placed.pages[0].tables.first().expect("table placed on page 0");
-        assert!((t.y - 0.0).abs() < 1.0, "anchor reserves no line → table top at page-top (mt=0), got {}", t.y);
+        let t = placed.pages[0]
+            .tables
+            .first()
+            .expect("table placed on page 0");
+        assert!(
+            (t.y - 0.0).abs() < 1.0,
+            "anchor reserves no line → table top at page-top (mt=0), got {}",
+            t.y
+        );
         // Lockstep with the oracle.
-        let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap().pages.len();
-        assert_eq!(placed.pages.len(), naive, "place_doc {} == NaiveLayout {naive}", placed.pages.len());
+        let naive = crate::NaiveLayout
+            .layout(&doc, &ApproxFontMetrics)
+            .unwrap()
+            .pages
+            .len();
+        assert_eq!(
+            placed.pages.len(),
+            naive,
+            "place_doc {} == NaiveLayout {naive}",
+            placed.pages.len()
+        );
     }
 
     #[test]
@@ -1535,7 +1894,16 @@ mod tests {
         // 자가진단표 regression: a 1×1 table whose only cell wraps a 20-row nested table, preceded by a
         // heading paragraph (vert>0). The nested grid must be PROMOTED and SPLIT at row boundaries
         // (flowing from the heading's page) — NOT bumped whole to the next page as one atomic 1×1 row.
-        let frame = CellEdge { color: Color { r: 0, g: 0, b: 0, a: 255 }, style: LineStyle::Solid, width_px: 2.0 };
+        let frame = CellEdge {
+            color: Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
+            style: LineStyle::Solid,
+            width_px: 2.0,
+        };
         let outer = Table {
             rows: 1,
             cols: 1,
@@ -1549,20 +1917,45 @@ mod tests {
             }],
             ..Default::default()
         };
-        let doc = doc_with_page(vec![Block::Paragraph(para("Ⅰ. 자가진단표")), Block::Table(outer)], 8000);
+        let doc = doc_with_page(
+            vec![Block::Paragraph(para("Ⅰ. 자가진단표")), Block::Table(outer)],
+            8000,
+        );
         let placed = place_doc(&doc, &ApproxFontMetrics);
         // Promoted + split: ≥2 row fragments (the atomic 1×1 outer would have yielded exactly one).
         let frags: Vec<&PlacedTable> = placed.pages.iter().flat_map(|p| p.tables.iter()).collect();
-        assert!(frags.len() >= 2, "frame wrapper splits into ≥2 row fragments, got {}", frags.len());
+        assert!(
+            frags.len() >= 2,
+            "frame wrapper splits into ≥2 row fragments, got {}",
+            frags.len()
+        );
         // Promoted to the inner 20×1, not the 1×1 outer.
-        assert_eq!(frags[0].rows, 20, "fragments are keyed to the promoted inner table (20 rows)");
+        assert_eq!(
+            frags[0].rows, 20,
+            "fragments are keyed to the promoted inner table (20 rows)"
+        );
         // Flows from the heading's page (page 0), not bumped to a fresh page.
-        assert!(!placed.pages[0].tables.is_empty(), "the grid starts on the heading's page");
+        assert!(
+            !placed.pages[0].tables.is_empty(),
+            "the grid starts on the heading's page"
+        );
         // The outer frame is redrawn on the first fragment's page (a stroked box continues across the split).
-        assert!(!placed.pages[0].lines.is_empty(), "the frame box draws on the first fragment");
+        assert!(
+            !placed.pages[0].lines.is_empty(),
+            "the frame box draws on the first fragment"
+        );
         // Lockstep with the oracle.
-        let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap().pages.len();
-        assert_eq!(placed.pages.len(), naive, "place_doc {} == NaiveLayout {naive}", placed.pages.len());
+        let naive = crate::NaiveLayout
+            .layout(&doc, &ApproxFontMetrics)
+            .unwrap()
+            .pages
+            .len();
+        assert_eq!(
+            placed.pages.len(),
+            naive,
+            "place_doc {} == NaiveLayout {naive}",
+            placed.pages.len()
+        );
     }
 
     #[test]
@@ -1591,12 +1984,23 @@ mod tests {
                 frags.push((pi, pt));
             }
         }
-        assert!(frags.len() >= 2, "a too-tall table splits into ≥2 fragments, got {}", frags.len());
+        assert!(
+            frags.len() >= 2,
+            "a too-tall table splits into ≥2 fragments, got {}",
+            frags.len()
+        );
         // Contiguous, gap-free row coverage 0..rows, one page step per fragment.
         assert_eq!(frags.first().unwrap().1.first_row, 0, "starts at row 0");
-        assert_eq!(frags.last().unwrap().1.last_row, rows, "ends at the last row");
+        assert_eq!(
+            frags.last().unwrap().1.last_row,
+            rows,
+            "ends at the last row"
+        );
         for w in frags.windows(2) {
-            assert_eq!(w[0].1.last_row, w[1].1.first_row, "fragments are row-contiguous (no gap/overlap)");
+            assert_eq!(
+                w[0].1.last_row, w[1].1.first_row,
+                "fragments are row-contiguous (no gap/overlap)"
+            );
             assert!(w[1].0 > w[0].0, "each fragment is on a later page");
             assert!(w[0].1.last_row > w[0].1.first_row, "no empty fragment");
         }
@@ -1604,15 +2008,35 @@ mod tests {
         let body_w = 60000.0;
         let total_h: f64 = frags.iter().map(|(_, pt)| pt.h).sum();
         let table_h = crate::table_height(&n_row_table(rows), body_w, &doc, &ApproxFontMetrics);
-        assert!((total_h - table_h).abs() < 1.0, "fragment heights sum to table_height: {total_h} vs {table_h}");
+        assert!(
+            (total_h - table_h).abs() < 1.0,
+            "fragment heights sum to table_height: {total_h} vs {table_h}"
+        );
         // Every row's cell is placed in exactly one fragment (later-page rows stay clickable).
-        let mut seen_rows: Vec<usize> = placed.pages.iter().flat_map(|p| p.tables.iter()).flat_map(|t| t.cells.iter().map(|c| c.row)).collect();
+        let mut seen_rows: Vec<usize> = placed
+            .pages
+            .iter()
+            .flat_map(|p| p.tables.iter())
+            .flat_map(|t| t.cells.iter().map(|c| c.row))
+            .collect();
         seen_rows.sort_unstable();
         seen_rows.dedup();
-        assert_eq!(seen_rows, (0..rows).collect::<Vec<_>>(), "all rows have a placed cell across the fragments");
+        assert_eq!(
+            seen_rows,
+            (0..rows).collect::<Vec<_>>(),
+            "all rows have a placed cell across the fragments"
+        );
         // place_doc's page count agrees with the oracle's NaiveLayout accounting (lockstep → oracle-safe).
-        let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap().pages.len();
-        assert_eq!(placed.pages.len(), naive, "own-render pages == NaiveLayout pages (kept in lockstep)");
+        let naive = crate::NaiveLayout
+            .layout(&doc, &ApproxFontMetrics)
+            .unwrap()
+            .pages
+            .len();
+        assert_eq!(
+            placed.pages.len(),
+            naive,
+            "own-render pages == NaiveLayout pages (kept in lockstep)"
+        );
     }
 
     #[test]
@@ -1621,16 +2045,32 @@ mod tests {
         // A single row TALLER than the page body must NOT re-fragment in place_doc while NaiveLayout
         // leaves it whole (the over-tall row draws + clips; a following block breaks). Regression for the
         // page-drift blocker (place_doc 13 vs NaiveLayout 1).
-        let tall = (0..40).map(|_| Block::Paragraph(para("긴 내용"))).collect::<Vec<_>>();
+        let tall = (0..40)
+            .map(|_| Block::Paragraph(para("긴 내용")))
+            .collect::<Vec<_>>();
         let t = Table {
-            rows: 1, cols: 1, col_widths: vec![1],
-            cells: vec![Cell { row: 0, col: 0, blocks: tall, ..Default::default() }],
+            rows: 1,
+            cols: 1,
+            col_widths: vec![1],
+            cells: vec![Cell {
+                row: 0,
+                col: 0,
+                blocks: tall,
+                ..Default::default()
+            }],
             ..Default::default()
         };
         let doc = doc_with_page(vec![Block::Table(t)], 5000);
         let placed = place_doc(&doc, &ApproxFontMetrics).pages.len();
-        let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap().pages.len();
-        assert_eq!(placed, naive, "over-tall row: place_doc {placed} == NaiveLayout {naive} (no re-fragment drift)");
+        let naive = crate::NaiveLayout
+            .layout(&doc, &ApproxFontMetrics)
+            .unwrap()
+            .pages
+            .len();
+        assert_eq!(
+            placed, naive,
+            "over-tall row: place_doc {placed} == NaiveLayout {naive} (no re-fragment drift)"
+        );
     }
 
     #[test]
@@ -1639,20 +2079,45 @@ mod tests {
         // 자가진단표 regression: a heading paragraph (vert>0) followed by a 1×1 table whose single row is
         // TALLER than the body. The first-row reserve must NOT bump it to a fresh page (that left the
         // heading's page blank below the heading); the over-tall row draws on the heading's page instead.
-        let tall = (0..40).map(|_| Block::Paragraph(para("자가진단 항목 내용"))).collect::<Vec<_>>();
+        let tall = (0..40)
+            .map(|_| Block::Paragraph(para("자가진단 항목 내용")))
+            .collect::<Vec<_>>();
         let t = Table {
-            rows: 1, cols: 1, col_widths: vec![1],
-            cells: vec![Cell { row: 0, col: 0, blocks: tall, ..Default::default() }],
+            rows: 1,
+            cols: 1,
+            col_widths: vec![1],
+            cells: vec![Cell {
+                row: 0,
+                col: 0,
+                blocks: tall,
+                ..Default::default()
+            }],
             ..Default::default()
         };
-        let doc = doc_with_page(vec![Block::Paragraph(para("Ⅰ. 자가진단표")), Block::Table(t)], 5000);
+        let doc = doc_with_page(
+            vec![Block::Paragraph(para("Ⅰ. 자가진단표")), Block::Table(t)],
+            5000,
+        );
         let placed = place_doc(&doc, &ApproxFontMetrics);
         // The table fragment must land on page 0 — the same page as the heading (no blank-page bump).
         let table_page = placed.pages.iter().position(|p| !p.tables.is_empty());
-        assert_eq!(table_page, Some(0), "over-tall table starts on the heading's page, not a fresh one");
+        assert_eq!(
+            table_page,
+            Some(0),
+            "over-tall table starts on the heading's page, not a fresh one"
+        );
         // …and the two layout paths still agree (lockstep → oracle-safe).
-        let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap().pages.len();
-        assert_eq!(placed.pages.len(), naive, "place_doc {} == NaiveLayout {naive}", placed.pages.len());
+        let naive = crate::NaiveLayout
+            .layout(&doc, &ApproxFontMetrics)
+            .unwrap()
+            .pages
+            .len();
+        assert_eq!(
+            placed.pages.len(),
+            naive,
+            "place_doc {} == NaiveLayout {naive}",
+            placed.pages.len()
+        );
     }
 
     #[test]
@@ -1663,10 +2128,20 @@ mod tests {
         let mut tbl = n_row_table(15);
         tbl.outer_margin_top = 2000;
         tbl.outer_margin_bottom = 2000;
-        let doc = doc_with_page(vec![Block::Paragraph(para("앞 문단")), Block::Table(tbl)], 5000);
+        let doc = doc_with_page(
+            vec![Block::Paragraph(para("앞 문단")), Block::Table(tbl)],
+            5000,
+        );
         let placed = place_doc(&doc, &ApproxFontMetrics).pages.len();
-        let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap().pages.len();
-        assert_eq!(placed, naive, "table outer margins: place_doc {placed} == NaiveLayout {naive}");
+        let naive = crate::NaiveLayout
+            .layout(&doc, &ApproxFontMetrics)
+            .unwrap()
+            .pages
+            .len();
+        assert_eq!(
+            placed, naive,
+            "table outer margins: place_doc {placed} == NaiveLayout {naive}"
+        );
     }
 
     #[test]
@@ -1675,7 +2150,10 @@ mod tests {
         // With 500-unit top+bottom margins the gap adds ~1000 HWPUNIT vs no margins.
         let with = bottom_table_y(500);
         let without = bottom_table_y(0);
-        assert!(with > without + 900.0, "outer margins separate consecutive tables: {with} vs {without}");
+        assert!(
+            with > without + 900.0,
+            "outer margins separate consecutive tables: {with} vs {without}"
+        );
     }
 
     #[test]
@@ -1692,20 +2170,48 @@ mod tests {
         let pg = &placed.pages[0];
         assert_eq!(pg.blocks.len(), 3, "one band per top-level block");
         // Bands are in reading order, anchored to their real block index, and the table is tagged.
-        assert_eq!(pg.blocks.iter().map(|b| b.block).collect::<Vec<_>>(), vec![0, 1, 2]);
-        assert_eq!(pg.blocks[1].kind, BlockKind::Table, "the middle band is the table");
-        assert!(pg.blocks[0].kind == BlockKind::Paragraph && pg.blocks[2].kind == BlockKind::Paragraph);
+        assert_eq!(
+            pg.blocks.iter().map(|b| b.block).collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
+        assert_eq!(
+            pg.blocks[1].kind,
+            BlockKind::Table,
+            "the middle band is the table"
+        );
+        assert!(
+            pg.blocks[0].kind == BlockKind::Paragraph && pg.blocks[2].kind == BlockKind::Paragraph
+        );
         // Bands descend the page in order, no overlap of the paragraph rows with the table.
-        assert!(pg.blocks[0].y < pg.blocks[1].y && pg.blocks[1].y < pg.blocks[2].y, "bands flow downward");
+        assert!(
+            pg.blocks[0].y < pg.blocks[1].y && pg.blocks[1].y < pg.blocks[2].y,
+            "bands flow downward"
+        );
         // A point inside each band resolves to that exact block.
         let mid = |i: usize| pg.blocks[i].y + pg.blocks[i].h / 2.0;
-        assert_eq!(pg.block_at(8000.0, mid(0)).unwrap().block, 0, "point in para-0 → block 0");
+        assert_eq!(
+            pg.block_at(8000.0, mid(0)).unwrap().block,
+            0,
+            "point in para-0 → block 0"
+        );
         let tbl = pg.block_at(8000.0, mid(1)).unwrap();
-        assert_eq!((tbl.block, tbl.kind), (1, BlockKind::Table), "point in the table → block 1 (table)");
-        assert_eq!(pg.block_at(8000.0, mid(2)).unwrap().block, 2, "point in para-2 → block 2");
+        assert_eq!(
+            (tbl.block, tbl.kind),
+            (1, BlockKind::Table),
+            "point in the table → block 1 (table)"
+        );
+        assert_eq!(
+            pg.block_at(8000.0, mid(2)).unwrap().block,
+            2,
+            "point in para-2 → block 2"
+        );
         // A point far BELOW all content snaps to the nearest band (the last block) — a near-miss in the
         // bottom margin still scopes a real block instead of failing.
-        assert_eq!(pg.block_at(8000.0, 10_000_000.0).unwrap().block, 2, "below-everything snaps to last");
+        assert_eq!(
+            pg.block_at(8000.0, 10_000_000.0).unwrap().block,
+            2,
+            "below-everything snaps to last"
+        );
     }
 
     #[test]
@@ -1714,7 +2220,11 @@ mod tests {
         // band recorder's `tables.last()` would point at the PREVIOUS table. The anchor guard must keep
         // the empty table from stealing the real table's (section, block) band.
         let real = one_cell_table(0); // 1×1, block 0
-        let empty = Table { rows: 0, cols: 0, ..Default::default() }; // block 1, draws nothing
+        let empty = Table {
+            rows: 0,
+            cols: 0,
+            ..Default::default()
+        }; // block 1, draws nothing
         let doc = doc_with(vec![Block::Table(real), Block::Table(empty)]);
         let placed = place_doc(&doc, &ApproxFontMetrics);
         let pg = &placed.pages[0];
@@ -1735,9 +2245,16 @@ mod tests {
         assert_eq!(g.iter().map(|p| p.ch).collect::<String>(), "가나다");
         // x strictly increases (1 EM advance each), and all sit on the same baseline.
         assert!(g[0].x < g[1].x && g[1].x < g[2].x, "x increases left→right");
-        assert!((g[0].baseline - g[2].baseline).abs() < 1e-6, "same baseline");
+        assert!(
+            (g[0].baseline - g[2].baseline).abs() < 1e-6,
+            "same baseline"
+        );
         // First glyph starts at the left margin (default A4: 7200 HWPUNIT).
-        assert!((g[0].x - 7200.0).abs() < 1.0, "first glyph at the left margin, got {}", g[0].x);
+        assert!(
+            (g[0].x - 7200.0).abs() < 1.0,
+            "first glyph at the left margin, got {}",
+            g[0].x
+        );
     }
 
     #[test]
@@ -1748,13 +2265,20 @@ mod tests {
             p
         })]);
         // ParaShape index 1 = centered.
-        doc.para_shapes.push(ParaShape { align: HorizontalAlign::Center, ..Default::default() });
+        doc.para_shapes.push(ParaShape {
+            align: HorizontalAlign::Center,
+            ..Default::default()
+        });
         let placed = place_doc(&doc, &ApproxFontMetrics);
         let g = &placed.pages[0].glyphs;
         assert_eq!(g.len(), 1);
         // body_w = 59528 - 2*7200 = 45128; one 1000-wide glyph → slack/2 = (45128-1000)/2 = 22064;
         // x = ml(7200) + 22064 = 29264.
-        assert!((g[0].x - 29264.0).abs() < 2.0, "centered glyph offset, got {}", g[0].x);
+        assert!(
+            (g[0].x - 29264.0).abs() < 2.0,
+            "centered glyph offset, got {}",
+            g[0].x
+        );
     }
 
     #[test]
@@ -1765,13 +2289,20 @@ mod tests {
             p
         })]);
         // ParaShape 1 = left margin 3000 HWPUNIT (들여쓰기 block inset), left-aligned.
-        doc.para_shapes
-            .push(ParaShape { align: HorizontalAlign::Left, left_margin: 3000, ..Default::default() });
+        doc.para_shapes.push(ParaShape {
+            align: HorizontalAlign::Left,
+            left_margin: 3000,
+            ..Default::default()
+        });
         let placed = place_doc(&doc, &ApproxFontMetrics);
         let g = &placed.pages[0].glyphs;
         assert_eq!(g.len(), 1);
         // ml(7200) + left_margin(3000) = 10200.
-        assert!((g[0].x - 10200.0).abs() < 1.0, "left margin shifts the line in, got {}", g[0].x);
+        assert!(
+            (g[0].x - 10200.0).abs() < 1.0,
+            "left margin shifts the line in, got {}",
+            g[0].x
+        );
     }
 
     #[test]
@@ -1784,8 +2315,11 @@ mod tests {
             p
         })]);
         // First-line indent 2000, left-aligned, no block margin.
-        doc.para_shapes
-            .push(ParaShape { align: HorizontalAlign::Left, indent: 2000, ..Default::default() });
+        doc.para_shapes.push(ParaShape {
+            align: HorizontalAlign::Left,
+            indent: 2000,
+            ..Default::default()
+        });
         let placed = place_doc(&doc, &ApproxFontMetrics);
         let g = &placed.pages[0].glyphs;
         assert!(g.len() > 1, "wrapped to multiple glyphs");
@@ -1793,8 +2327,15 @@ mod tests {
         // Find the first glyph on a later line: its x should be back at the bare margin (7200), while
         // the first glyph sits indented by 2000 (→ 9200).
         let later = g.iter().find(|gl| (gl.x - 7200.0).abs() < 1.0);
-        assert!((first - 9200.0).abs() < 1.0, "first line indented by 2000, got {}", first);
-        assert!(later.is_some(), "a later line starts back at the left margin (no first-line indent)");
+        assert!(
+            (first - 9200.0).abs() < 1.0,
+            "first line indented by 2000, got {}",
+            first
+        );
+        assert!(
+            later.is_some(),
+            "a later line starts back at the left margin (no first-line indent)"
+        );
     }
 
     #[test]
@@ -1815,14 +2356,21 @@ mod tests {
         let placed = place_doc(&doc, &ApproxFontMetrics);
         let g = &placed.pages[0].glyphs;
         // first_extra clamps to -left(1000); line_indent = left(1000) + (-1000) = 0 → x = ml(7200).
-        assert!((g[0].x - 7200.0).abs() < 1.0, "hanging indent clamped to left margin, got {}", g[0].x);
+        assert!(
+            (g[0].x - 7200.0).abs() < 1.0,
+            "hanging indent clamped to left margin, got {}",
+            g[0].x
+        );
     }
 
     #[test]
     fn paragraph_text_color_carries_to_placed_glyph() {
         let blue = Color::from_hex("#0000FF").unwrap();
         let mut doc = doc_with(vec![Block::Paragraph(para("파"))]);
-        doc.char_shapes[0] = CharShape { text_color: blue, ..Default::default() };
+        doc.char_shapes[0] = CharShape {
+            text_color: blue,
+            ..Default::default()
+        };
         let placed = place_doc(&doc, &ApproxFontMetrics);
         let g = &placed.pages[0].glyphs;
         assert_eq!(g.len(), 1);
@@ -1832,32 +2380,70 @@ mod tests {
     #[test]
     fn cell_glyph_carries_run_text_color() {
         let blue = Color::from_hex("#0000FF").unwrap();
-        let mut t = Table { rows: 1, cols: 1, ..Default::default() };
-        t.cells.push(Cell { row: 0, col: 0, blocks: vec![Block::Paragraph(para("셀"))], ..Default::default() });
+        let mut t = Table {
+            rows: 1,
+            cols: 1,
+            ..Default::default()
+        };
+        t.cells.push(Cell {
+            row: 0,
+            col: 0,
+            blocks: vec![Block::Paragraph(para("셀"))],
+            ..Default::default()
+        });
         let mut doc = doc_with(vec![Block::Table(t)]);
-        doc.char_shapes[0] = CharShape { text_color: blue, ..Default::default() };
+        doc.char_shapes[0] = CharShape {
+            text_color: blue,
+            ..Default::default()
+        };
         let placed = place_doc(&doc, &ApproxFontMetrics);
-        let cell_glyph = placed.pages[0].glyphs.iter().find(|g| g.ch == '셀').unwrap();
-        assert_eq!(cell_glyph.color, blue, "cell run text color flows to the placed glyph");
+        let cell_glyph = placed.pages[0]
+            .glyphs
+            .iter()
+            .find(|g| g.ch == '셀')
+            .unwrap();
+        assert_eq!(
+            cell_glyph.color, blue,
+            "cell run text color flows to the placed glyph"
+        );
     }
 
     #[test]
     fn over_wide_row_does_not_overlap_or_escape() {
         // A 2-col table, but a row whose cells claim col indices 0,1,2,3 (LLM added extras). The
         // out-of-range cells (col >= 2) must be skipped, not stacked on the last column.
-        let mut t = Table { rows: 1, cols: 2, ..Default::default() };
+        let mut t = Table {
+            rows: 1,
+            cols: 2,
+            ..Default::default()
+        };
         for c in 0..4 {
-            t.cells.push(Cell { row: 0, col: c, blocks: vec![Block::Paragraph(para("x"))], ..Default::default() });
+            t.cells.push(Cell {
+                row: 0,
+                col: c,
+                blocks: vec![Block::Paragraph(para("x"))],
+                ..Default::default()
+            });
         }
         let doc = doc_with(vec![Block::Table(t)]);
         let placed = place_doc(&doc, &ApproxFontMetrics); // must not panic
-        // Exactly 2 cell borders (cols 0 and 1); the over-wide cells produced none.
-        let borders = placed.pages[0].rects.iter().filter(|r| r.fill.is_none()).count();
-        assert_eq!(borders, 2, "only in-range cells draw a border, got {borders}");
+                                                          // Exactly 2 cell borders (cols 0 and 1); the over-wide cells produced none.
+        let borders = placed.pages[0]
+            .rects
+            .iter()
+            .filter(|r| r.fill.is_none())
+            .count();
+        assert_eq!(
+            borders, 2,
+            "only in-range cells draw a border, got {borders}"
+        );
         // Every cell rect stays within the table box (page left margin .. right margin).
         let page_right = 59528.0 - 7200.0;
         for r in placed.pages[0].rects.iter().filter(|r| r.fill.is_none()) {
-            assert!(r.x + r.w <= page_right + 1.0, "cell stays inside the table box");
+            assert!(
+                r.x + r.w <= page_right + 1.0,
+                "cell stays inside the table box"
+            );
         }
     }
 
@@ -1865,7 +2451,11 @@ mod tests {
     fn cell_paragraph_center_align_offsets_within_cell_width() {
         // A single full-width-table cell with a centered short paragraph: the glyph should sit roughly
         // in the middle of the cell text width, not flush-left (gov-table numbers/headers center).
-        let mut t = Table { rows: 1, cols: 1, ..Default::default() };
+        let mut t = Table {
+            rows: 1,
+            cols: 1,
+            ..Default::default()
+        };
         t.cells.push(Cell {
             row: 0,
             col: 0,
@@ -1877,29 +2467,65 @@ mod tests {
             ..Default::default()
         });
         let mut doc = doc_with(vec![Block::Table(t)]);
-        doc.para_shapes.push(ParaShape { align: HorizontalAlign::Center, ..Default::default() });
+        doc.para_shapes.push(ParaShape {
+            align: HorizontalAlign::Center,
+            ..Default::default()
+        });
         let placed = place_doc(&doc, &ApproxFontMetrics);
-        let g = placed.pages[0].glyphs.iter().find(|g| g.ch == '중').unwrap();
+        let g = placed.pages[0]
+            .glyphs
+            .iter()
+            .find(|g| g.ch == '중')
+            .unwrap();
         // Cell spans the full body width (45128); text width = 45128 - 2*CELL_PAD_X = 44728; one
         // 1000-wide glyph centered → x ≈ ml(7200) + CELL_PAD_X(200) + (44728-1000)/2 = 29264.
         let left_flush = 7200.0 + CELL_PAD_X;
-        assert!(g.x > left_flush + 5000.0, "centered cell glyph is pushed right of flush-left, got {}", g.x);
+        assert!(
+            g.x > left_flush + 5000.0,
+            "centered cell glyph is pushed right of flush-left, got {}",
+            g.x
+        );
     }
 
     #[test]
     fn out_of_range_row_index_is_skipped() {
-        let mut t = Table { rows: 1, cols: 1, ..Default::default() };
-        t.cells.push(Cell { row: 0, col: 0, blocks: vec![Block::Paragraph(para("ok"))], ..Default::default() });
-        t.cells.push(Cell { row: 5, col: 0, blocks: vec![Block::Paragraph(para("bad"))], ..Default::default() });
+        let mut t = Table {
+            rows: 1,
+            cols: 1,
+            ..Default::default()
+        };
+        t.cells.push(Cell {
+            row: 0,
+            col: 0,
+            blocks: vec![Block::Paragraph(para("ok"))],
+            ..Default::default()
+        });
+        t.cells.push(Cell {
+            row: 5,
+            col: 0,
+            blocks: vec![Block::Paragraph(para("bad"))],
+            ..Default::default()
+        });
         let doc = doc_with(vec![Block::Table(t)]);
         let placed = place_doc(&doc, &ApproxFontMetrics); // must not panic
-        let borders = placed.pages[0].rects.iter().filter(|r| r.fill.is_none()).count();
-        assert_eq!(borders, 1, "the out-of-range row cell is skipped, got {borders}");
+        let borders = placed.pages[0]
+            .rects
+            .iter()
+            .filter(|r| r.fill.is_none())
+            .count();
+        assert_eq!(
+            borders, 1,
+            "the out-of-range row cell is skipped, got {borders}"
+        );
     }
 
     #[test]
     fn table_emits_cell_boxes() {
-        let mut t = Table { rows: 2, cols: 2, ..Default::default() };
+        let mut t = Table {
+            rows: 2,
+            cols: 2,
+            ..Default::default()
+        };
         for r in 0..2 {
             for c in 0..2 {
                 t.cells.push(Cell {
@@ -1912,9 +2538,16 @@ mod tests {
         }
         let doc = doc_with(vec![Block::Table(t)]);
         let placed = place_doc(&doc, &ApproxFontMetrics);
-        let cell_borders = placed.pages[0].rects.iter().filter(|r| r.fill.is_none()).count();
+        let cell_borders = placed.pages[0]
+            .rects
+            .iter()
+            .filter(|r| r.fill.is_none())
+            .count();
         // 4 cell borders + the line text-boxes inside each cell paragraph.
-        assert!(cell_borders >= 4, "at least 4 cell border boxes, got {cell_borders}");
+        assert!(
+            cell_borders >= 4,
+            "at least 4 cell border boxes, got {cell_borders}"
+        );
     }
 
     /// Build a 1-cell table whose single cell carries the given per-edge borders + diagonal.
@@ -1922,7 +2555,11 @@ mod tests {
         edge_table_text(borders, diagonal, "x")
     }
 
-    fn edge_table_text(borders: [Option<CellEdge>; 4], diagonal: Option<CellDiagonal>, text: &str) -> SemanticDoc {
+    fn edge_table_text(
+        borders: [Option<CellEdge>; 4],
+        diagonal: Option<CellDiagonal>,
+        text: &str,
+    ) -> SemanticDoc {
         let cell = Cell {
             row: 0,
             col: 0,
@@ -1942,12 +2579,29 @@ mod tests {
 
     #[test]
     fn per_edge_borders_skip_none_and_emit_styled_lines() {
-        let blue = Color { r: 0, g: 0, b: 255, a: 255 };
+        let blue = Color {
+            r: 0,
+            g: 0,
+            b: 255,
+            a: 255,
+        };
         // left = dashed blue, right = 선없음 (suppressed), top = solid black, bottom = unspecified.
         let borders = [
-            Some(CellEdge { color: blue, style: LineStyle::Dashed, width_px: 2.0 }),
-            Some(CellEdge { color: Color::default(), style: LineStyle::None, width_px: 1.0 }),
-            Some(CellEdge { color: Color::default(), style: LineStyle::Solid, width_px: 1.0 }),
+            Some(CellEdge {
+                color: blue,
+                style: LineStyle::Dashed,
+                width_px: 2.0,
+            }),
+            Some(CellEdge {
+                color: Color::default(),
+                style: LineStyle::None,
+                width_px: 1.0,
+            }),
+            Some(CellEdge {
+                color: Color::default(),
+                style: LineStyle::Solid,
+                width_px: 1.0,
+            }),
             None,
         ];
         let doc = edge_table(borders, None);
@@ -1955,19 +2609,37 @@ mod tests {
         let lines = &placed.pages[0].lines;
         // A per-edge cell does NOT emit the legacy uniform border rect.
         assert_eq!(
-            placed.pages[0].rects.iter().filter(|r| r.fill.is_none()).count(),
+            placed.pages[0]
+                .rects
+                .iter()
+                .filter(|r| r.fill.is_none())
+                .count(),
             0,
             "per-edge cell must not draw the legacy uniform box"
         );
         // Exactly two visible edges: the dashed-blue left and the solid-black top. The 선없음 right
         // emits NO line; the unspecified (None) bottom emits no line either.
-        assert_eq!(lines.len(), 2, "only the two visible edges emit lines, got {}", lines.len());
-        let dashed = lines.iter().find(|l| l.style == LineStyle::Dashed).expect("a dashed edge line");
+        assert_eq!(
+            lines.len(),
+            2,
+            "only the two visible edges emit lines, got {}",
+            lines.len()
+        );
+        let dashed = lines
+            .iter()
+            .find(|l| l.style == LineStyle::Dashed)
+            .expect("a dashed edge line");
         assert_eq!(dashed.color, blue, "dashed edge keeps its blue color");
         assert_eq!(dashed.width, 2.0, "dashed edge keeps its width px");
-        let solid = lines.iter().find(|l| l.style == LineStyle::Solid).expect("the solid top edge");
+        let solid = lines
+            .iter()
+            .find(|l| l.style == LineStyle::Solid)
+            .expect("the solid top edge");
         // A 1.0px (above-floor) edge keeps its width — placement only clamps the floor, never rounds.
-        assert_eq!(solid.width, 1.0, "an above-floor edge width is preserved verbatim");
+        assert_eq!(
+            solid.width, 1.0,
+            "an above-floor edge width is preserved verbatim"
+        );
         assert!(
             !lines.iter().any(|l| l.style == LineStyle::None),
             "a 선없음 edge never emits a Line"
@@ -1979,34 +2651,73 @@ mod tests {
         // A 0.3px hairline (below HAIRLINE_MIN_PX) must clamp UP to the floor so it stays visible —
         // not pass through at 0.3 (would anti-alias to nothing) nor round up to a heavier 1px.
         let borders = [
-            Some(CellEdge { color: Color::default(), style: LineStyle::Solid, width_px: 0.3 }),
+            Some(CellEdge {
+                color: Color::default(),
+                style: LineStyle::Solid,
+                width_px: 0.3,
+            }),
             None,
             None,
             None,
         ];
         let placed = place_doc(&edge_table(borders, None), &ApproxFontMetrics);
         let edge = placed.pages[0].lines.first().expect("the one visible edge");
-        assert_eq!(edge.width, HAIRLINE_MIN_PX, "sub-floor width clamps to the hairline floor");
+        assert_eq!(
+            edge.width, HAIRLINE_MIN_PX,
+            "sub-floor width clamps to the hairline floor"
+        );
     }
 
     #[test]
     fn cell_diagonal_emits_a_line_corner_to_corner_on_empty_cell() {
-        let red = Color { r: 255, g: 0, b: 0, a: 255 };
+        let red = Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255,
+        };
         // An EMPTY cell with a back-slash diagonal (top-left → bottom-right): the diagonal forms a
         // shape (the section-header band's pointed end / an N/A slash) so it IS drawn.
-        let doc = edge_table_text([None; 4], Some(CellDiagonal { kind: DiagonalKind::BackSlash, color: red, width_px: 1.0 }), "");
+        let doc = edge_table_text(
+            [None; 4],
+            Some(CellDiagonal {
+                kind: DiagonalKind::BackSlash,
+                color: red,
+                width_px: 1.0,
+            }),
+            "",
+        );
         let placed = place_doc(&doc, &ApproxFontMetrics);
         let lines = &placed.pages[0].lines;
-        let diag = lines.iter().find(|l| l.color == red).expect("a diagonal line on the empty cell");
-        assert!(diag.x2 > diag.x1 && diag.y2 > diag.y1, "back-slash runs top-left → bottom-right");
+        let diag = lines
+            .iter()
+            .find(|l| l.color == red)
+            .expect("a diagonal line on the empty cell");
+        assert!(
+            diag.x2 > diag.x1 && diag.y2 > diag.y1,
+            "back-slash runs top-left → bottom-right"
+        );
     }
 
     #[test]
     fn cell_diagonal_suppressed_when_cell_has_text() {
         // A diagonal on a TEXT cell (e.g. the wide banner cell sharing the band's borderFill) is NOT
         // drawn — Hancom doesn't slash through the words; only the empty point cell shows the line.
-        let red = Color { r: 255, g: 0, b: 0, a: 255 };
-        let doc = edge_table_text([None; 4], Some(CellDiagonal { kind: DiagonalKind::BackSlash, color: red, width_px: 1.0 }), "제목");
+        let red = Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255,
+        };
+        let doc = edge_table_text(
+            [None; 4],
+            Some(CellDiagonal {
+                kind: DiagonalKind::BackSlash,
+                color: red,
+                width_px: 1.0,
+            }),
+            "제목",
+        );
         let placed = place_doc(&doc, &ApproxFontMetrics);
         assert!(
             !placed.pages[0].lines.iter().any(|l| l.color == red),
@@ -2022,7 +2733,12 @@ mod tests {
             rows: 1,
             cols: 2,
             cells: vec![
-                Cell { row: 0, col: 0, blocks: vec![Block::Paragraph(para("가나다"))], ..Default::default() },
+                Cell {
+                    row: 0,
+                    col: 0,
+                    blocks: vec![Block::Paragraph(para("가나다"))],
+                    ..Default::default()
+                },
                 Cell {
                     row: 0,
                     col: 1,
@@ -2040,18 +2756,40 @@ mod tests {
     fn cell_caret_rect_places_offset_zero_at_text_origin_and_is_monotonic() {
         let doc = caret_doc();
         let placed = place_doc(&doc, &ApproxFontMetrics);
-        let pc = placed.pages[0].tables[0].cells.iter().find(|c| c.col == 0).unwrap().clone();
-        let r0 = cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 0, 0, 0).expect("caret at offset 0");
+        let pc = placed.pages[0].tables[0]
+            .cells
+            .iter()
+            .find(|c| c.col == 0)
+            .unwrap()
+            .clone();
+        let r0 = cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 0, 0, 0)
+            .expect("caret at offset 0");
         assert_eq!(r0.page, 0);
-        assert!((r0.x - (pc.x + CELL_PAD_X)).abs() < 1.0, "offset 0 sits at the cell text origin (left align): {} vs {}", r0.x, pc.x + CELL_PAD_X);
-        assert!(r0.top >= pc.y && r0.top + r0.height <= pc.y + pc.h + 1.0, "caret stays inside the cell box");
+        assert!(
+            (r0.x - (pc.x + CELL_PAD_X)).abs() < 1.0,
+            "offset 0 sits at the cell text origin (left align): {} vs {}",
+            r0.x,
+            pc.x + CELL_PAD_X
+        );
+        assert!(
+            r0.top >= pc.y && r0.top + r0.height <= pc.y + pc.h + 1.0,
+            "caret stays inside the cell box"
+        );
         // Monotonic advance: each next char boundary sits strictly right of the previous.
         let xs: Vec<f64> = (0..=3)
-            .map(|o| cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 0, 0, o).unwrap().x)
+            .map(|o| {
+                cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 0, 0, o)
+                    .unwrap()
+                    .x
+            })
             .collect();
-        assert!(xs.windows(2).all(|w| w[1] > w[0]), "boundaries advance: {xs:?}");
+        assert!(
+            xs.windows(2).all(|w| w[1] > w[0]),
+            "boundaries advance: {xs:?}"
+        );
         // Past-end clamps to the paragraph end (a rect, never None) — the CaretRect contract.
-        let past = cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 0, 0, 999).expect("past-end clamps");
+        let past = cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 0, 0, 999)
+            .expect("past-end clamps");
         assert_eq!(past.x, xs[3], "offset 999 == offset para_len");
     }
 
@@ -2062,12 +2800,25 @@ mod tests {
         // Click just right of the 2nd char boundary of cell (0,0)'s text: expect offset 2 and the
         // caret geometry to agree with the address-based query.
         let b2 = cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 0, 0, 2).unwrap();
-        let hit = cell_text_hit(&doc, &placed, &ApproxFontMetrics, 0, b2.x + 1.0, b2.top + b2.height / 2.0)
-            .expect("hit inside the cell text");
-        assert_eq!((hit.section, hit.block, hit.row, hit.col, hit.para), (0, 0, 0, 0, 0));
+        let hit = cell_text_hit(
+            &doc,
+            &placed,
+            &ApproxFontMetrics,
+            0,
+            b2.x + 1.0,
+            b2.top + b2.height / 2.0,
+        )
+        .expect("hit inside the cell text");
+        assert_eq!(
+            (hit.section, hit.block, hit.row, hit.col, hit.para),
+            (0, 0, 0, 0, 0)
+        );
         assert_eq!(hit.offset, 2, "nearest boundary is the queried one");
         assert_eq!(hit.para_len, 3);
-        assert!((hit.caret.x - b2.x).abs() < 0.01 && (hit.caret.top - b2.top).abs() < 0.01, "hit caret == addressed caret");
+        assert!(
+            (hit.caret.x - b2.x).abs() < 0.01 && (hit.caret.top - b2.top).abs() < 0.01,
+            "hit caret == addressed caret"
+        );
     }
 
     #[test]
@@ -2075,11 +2826,26 @@ mod tests {
         let doc = caret_doc();
         let placed = place_doc(&doc, &ApproxFontMetrics);
         // Cell (0,1) has two paragraphs; the caret for para 1 sits BELOW para 0's.
-        let p0 = cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 1, 0, 0).expect("para 0");
-        let p1 = cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 1, 1, 0).expect("para 1");
-        assert!(p1.top > p0.top, "para 1 line sits below para 0: {} vs {}", p1.top, p0.top);
+        let p0 =
+            cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 1, 0, 0).expect("para 0");
+        let p1 =
+            cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 1, 1, 0).expect("para 1");
+        assert!(
+            p1.top > p0.top,
+            "para 1 line sits below para 0: {} vs {}",
+            p1.top,
+            p0.top
+        );
         // A click on para 1's line resolves to para 1.
-        let hit = cell_text_hit(&doc, &placed, &ApproxFontMetrics, 0, p1.x + 1.0, p1.top + p1.height / 2.0).unwrap();
+        let hit = cell_text_hit(
+            &doc,
+            &placed,
+            &ApproxFontMetrics,
+            0,
+            p1.x + 1.0,
+            p1.top + p1.height / 2.0,
+        )
+        .unwrap();
         assert_eq!((hit.para, hit.offset), (1, 0));
         assert_eq!(hit.para_len, 2);
     }
@@ -2092,25 +2858,68 @@ mod tests {
         let t = Table {
             rows: 1,
             cols: 1,
-            cells: vec![Cell { row: 0, col: 0, blocks: vec![Block::Paragraph(para("가\n나"))], ..Default::default() }],
+            cells: vec![Cell {
+                row: 0,
+                col: 0,
+                blocks: vec![Block::Paragraph(para("가\n나"))],
+                ..Default::default()
+            }],
             col_widths: vec![1],
             ..Default::default()
         };
         let doc = doc_with(vec![Block::Table(t)]);
         let placed = place_doc(&doc, &ApproxFontMetrics);
-        let p0 = cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 0, 0, 0).expect("segment 0");
-        let p1 = cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 0, 1, 0).expect("segment 1 (after the forced break)");
-        assert!(p1.top > p0.top, "segment 1 renders on the next line: {} vs {}", p1.top, p0.top);
-        assert!(cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 0, 2, 0).is_none(), "only 2 segments");
+        let p0 = cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 0, 0, 0)
+            .expect("segment 0");
+        let p1 = cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 0, 1, 0)
+            .expect("segment 1 (after the forced break)");
+        assert!(
+            p1.top > p0.top,
+            "segment 1 renders on the next line: {} vs {}",
+            p1.top,
+            p0.top
+        );
+        assert!(
+            cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 0, 2, 0).is_none(),
+            "only 2 segments"
+        );
         // Hits on each line report segment-local addresses with para_len EXCLUDING the '\n'.
-        let h0 = cell_text_hit(&doc, &placed, &ApproxFontMetrics, 0, p0.x + 1.0, p0.top + p0.height / 2.0).unwrap();
+        let h0 = cell_text_hit(
+            &doc,
+            &placed,
+            &ApproxFontMetrics,
+            0,
+            p0.x + 1.0,
+            p0.top + p0.height / 2.0,
+        )
+        .unwrap();
         assert_eq!((h0.para, h0.offset, h0.para_len), (0, 0, 1));
-        let h1 = cell_text_hit(&doc, &placed, &ApproxFontMetrics, 0, p1.x + 1.0, p1.top + p1.height / 2.0).unwrap();
+        let h1 = cell_text_hit(
+            &doc,
+            &placed,
+            &ApproxFontMetrics,
+            0,
+            p1.x + 1.0,
+            p1.top + p1.height / 2.0,
+        )
+        .unwrap();
         assert_eq!((h1.para, h1.offset, h1.para_len), (1, 0, 1));
         // A click right of the text end (still INSIDE the cell) stops AT the '\n' — the caret never
         // lands past the separator (that position is the next segment's start).
-        let h_end = cell_text_hit(&doc, &placed, &ApproxFontMetrics, 0, p0.x + 20_000.0, p0.top + p0.height / 2.0).unwrap();
-        assert_eq!((h_end.para, h_end.offset), (0, 1), "caps at the segment end");
+        let h_end = cell_text_hit(
+            &doc,
+            &placed,
+            &ApproxFontMetrics,
+            0,
+            p0.x + 20_000.0,
+            p0.top + p0.height / 2.0,
+        )
+        .unwrap();
+        assert_eq!(
+            (h_end.para, h_end.offset),
+            (0, 1),
+            "caps at the segment end"
+        );
     }
 
     #[test]
@@ -2118,12 +2927,27 @@ mod tests {
         let doc = caret_doc();
         let placed = place_doc(&doc, &ApproxFontMetrics);
         // Unknown cell / paragraph / block → None (018 null policy), never a panic.
-        assert!(cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 5, 5, 0, 0).is_none(), "no such cell");
-        assert!(cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 0, 9, 0).is_none(), "no such paragraph");
-        assert!(cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 9, 0, 0, 0, 0).is_none(), "no such block");
+        assert!(
+            cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 5, 5, 0, 0).is_none(),
+            "no such cell"
+        );
+        assert!(
+            cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 0, 9, 0).is_none(),
+            "no such paragraph"
+        );
+        assert!(
+            cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 9, 0, 0, 0, 0).is_none(),
+            "no such block"
+        );
         // A point off any table → None.
-        assert!(cell_text_hit(&doc, &placed, &ApproxFontMetrics, 0, 59_000.0, 700_000.0).is_none(), "off-table click");
-        assert!(cell_text_hit(&doc, &placed, &ApproxFontMetrics, 7, 100.0, 100.0).is_none(), "page out of range");
+        assert!(
+            cell_text_hit(&doc, &placed, &ApproxFontMetrics, 0, 59_000.0, 700_000.0).is_none(),
+            "off-table click"
+        );
+        assert!(
+            cell_text_hit(&doc, &placed, &ApproxFontMetrics, 7, 100.0, 100.0).is_none(),
+            "page out of range"
+        );
     }
 
     #[test]
@@ -2136,9 +2960,17 @@ mod tests {
         let _ = cell_text_hit(&doc, &placed, &ApproxFontMetrics, 0, 10_000.0, 10_000.0);
         let _ = cell_caret_rect(&doc, &placed, &ApproxFontMetrics, 0, 0, 0, 0, 0, 1);
         let again = place_doc(&doc, &ApproxFontMetrics);
-        let naive = crate::NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap().pages.len();
+        let naive = crate::NaiveLayout
+            .layout(&doc, &ApproxFontMetrics)
+            .unwrap()
+            .pages
+            .len();
         assert_eq!(again.pages.len(), before);
-        assert_eq!(again.pages.len(), naive, "LOCKSTEP holds after caret queries");
+        assert_eq!(
+            again.pages.len(),
+            naive,
+            "LOCKSTEP holds after caret queries"
+        );
     }
 
     #[test]
@@ -2154,7 +2986,11 @@ mod tests {
             .unwrap()
             .pages
             .len();
-        assert_eq!(placed.pages.len(), naive, "placed pagination == NaiveLayout pagination");
+        assert_eq!(
+            placed.pages.len(),
+            naive,
+            "placed pagination == NaiveLayout pagination"
+        );
         assert!(placed.pages.len() >= 2, "100 lines paginate");
     }
 }

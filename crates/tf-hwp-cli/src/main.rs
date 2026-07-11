@@ -7,7 +7,11 @@ use clap::{Parser, Subcommand};
 use hwp_model::types::SourceFormat;
 
 #[derive(Parser)]
-#[command(name = "tf-hwp", version, about = "HWP/HWPX view·edit·export engine (CLI)")]
+#[command(
+    name = "tf-hwp",
+    version,
+    about = "HWP/HWPX view·edit·export engine (CLI)"
+)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -275,19 +279,42 @@ fn run() -> Result<(), String> {
         Cmd::OpenProject { file, out_dir } => open_project(&file, &out_dir)?,
         Cmd::ExportHtml { file, out } => export_html(&file, &out)?,
         Cmd::ExportPdf { file, out } => export_pdf(&file, &out)?,
-        Cmd::EditOp { proj, node, class, prop, value } => {
-            edit_op(&proj, node, class, &prop, &value)?
-        }
-        Cmd::Edit { file, append, out, verify } => edit(&file, &append, &out, verify)?,
-        Cmd::AiFill { file, instruction, provider, out, verify, dry_run } => {
-            ai_fill(&file, &instruction, &provider, &out, verify, dry_run)?
-        }
-        Cmd::AiEdit { file, instruction, provider, out, dry_run } => {
-            ai_edit(&file, &instruction, &provider, &out, dry_run)?
-        }
+        Cmd::EditOp {
+            proj,
+            node,
+            class,
+            prop,
+            value,
+        } => edit_op(&proj, node, class, &prop, &value)?,
+        Cmd::Edit {
+            file,
+            append,
+            out,
+            verify,
+        } => edit(&file, &append, &out, verify)?,
+        Cmd::AiFill {
+            file,
+            instruction,
+            provider,
+            out,
+            verify,
+            dry_run,
+        } => ai_fill(&file, &instruction, &provider, &out, verify, dry_run)?,
+        Cmd::AiEdit {
+            file,
+            instruction,
+            provider,
+            out,
+            dry_run,
+        } => ai_edit(&file, &instruction, &provider, &out, dry_run)?,
         Cmd::AiKey { action } => ai_key(&action)?,
         Cmd::AiContext { file } => ai_context(&file)?,
-        Cmd::AiApply { file, content, out, verify } => ai_apply(&file, &content, &out, verify)?,
+        Cmd::AiApply {
+            file,
+            content,
+            out,
+            verify,
+        } => ai_apply(&file, &content, &out, verify)?,
     }
     Ok(())
 }
@@ -301,13 +328,13 @@ fn ai_context(file: &PathBuf) -> Result<(), String> {
     Ok(())
 }
 
-fn ai_apply(file: &PathBuf, content: &PathBuf, out: &PathBuf, verify: bool) -> Result<(), String> {
+fn ai_apply(file: &PathBuf, content: &PathBuf, out: &Path, verify: bool) -> Result<(), String> {
     let bytes = read(file)?;
     if hwp_core::Engine::detect(&bytes) != SourceFormat::Hwpx {
         return Err("ai-apply operates on HWPX (.hwpx).".into());
     }
-    let json = std::fs::read_to_string(content)
-        .map_err(|e| format!("read {}: {e}", content.display()))?;
+    let json =
+        std::fs::read_to_string(content).map_err(|e| format!("read {}: {e}", content.display()))?;
     let ai = hwp_ai::content::parse_content(&json).map_err(|e| e.to_string())?;
     let ops = hwp_ai::content::compile_to_ops(&ai);
     let doc = hwp_core::Engine::open(&bytes).map_err(|e| e.to_string())?;
@@ -326,7 +353,10 @@ fn ai_apply(file: &PathBuf, content: &PathBuf, out: &PathBuf, verify: bool) -> R
         out.display(),
         out_bytes.len()
     );
-    println!("editor-open-safety (cheap gate): {}", if report.ok { "OK ✓" } else { "FAIL ✗" });
+    println!(
+        "editor-open-safety (cheap gate): {}",
+        if report.ok { "OK ✓" } else { "FAIL ✗" }
+    );
     if verify {
         if !hwp_oracle::soffice_available() {
             println!("verify: skipped (soffice not available)");
@@ -361,7 +391,9 @@ fn pick_provider(name: &str) -> Result<Box<dyn hwp_ai::LlmProvider>, String> {
                 Ok(Box::new(hwp_ai::MockProvider))
             }
         }
-        other => Err(format!("unknown provider '{other}' (use auto | mock | anthropic | openrouter | local)")),
+        other => Err(format!(
+            "unknown provider '{other}' (use auto | mock | anthropic | openrouter | local)"
+        )),
     }
 }
 
@@ -374,7 +406,10 @@ fn openrouter_provider() -> Result<Box<dyn hwp_ai::LlmProvider>, String> {
 
 #[cfg(not(feature = "ai"))]
 fn openrouter_provider() -> Result<Box<dyn hwp_ai::LlmProvider>, String> {
-    Err("the openrouter provider needs a build with `--features ai` (then set OPENROUTER_API_KEY)".into())
+    Err(
+        "the openrouter provider needs a build with `--features ai` (then set OPENROUTER_API_KEY)"
+            .into(),
+    )
 }
 
 #[cfg(feature = "ai")]
@@ -420,9 +455,13 @@ fn ai_key(action: &str) -> Result<(), String> {
         "set" => {
             eprintln!("Anthropic API 키를 입력하고 Ctrl-D (stdin → OS 키체인에 저장):");
             let mut buf = String::new();
-            std::io::stdin().read_to_string(&mut buf).map_err(|e| e.to_string())?;
+            std::io::stdin()
+                .read_to_string(&mut buf)
+                .map_err(|e| e.to_string())?;
             hwp_ai::secret::store_anthropic_key(buf.trim()).map_err(|e| e.to_string())?;
-            println!("키를 OS 키체인에 저장했습니다 (service=tf-hwp). 이후 ai-fill에서 자동 사용됩니다.");
+            println!(
+                "키를 OS 키체인에 저장했습니다 (service=tf-hwp). 이후 ai-fill에서 자동 사용됩니다."
+            );
             Ok(())
         }
         "clear" => {
@@ -430,7 +469,9 @@ fn ai_key(action: &str) -> Result<(), String> {
             println!("키체인에서 키를 제거했습니다.");
             Ok(())
         }
-        other => Err(format!("unknown ai-key action '{other}' (use set | clear | status)")),
+        other => Err(format!(
+            "unknown ai-key action '{other}' (use set | clear | status)"
+        )),
     }
 }
 
@@ -443,7 +484,7 @@ fn ai_fill(
     file: &PathBuf,
     instruction: &str,
     provider: &str,
-    out: &PathBuf,
+    out: &Path,
     verify: bool,
     dry_run: bool,
 ) -> Result<(), String> {
@@ -456,8 +497,16 @@ fn ai_fill(
 
     // PROPOSE: the provider authors rich content, validated on a scratch copy (doc untouched).
     let proposal = hwp_ai::propose(&doc, &*provider, instruction).map_err(|e| e.to_string())?;
-    println!("ai-fill via '{}' — 제안 (rationale):\n{}", provider.name(), proposal.rationale);
-    println!("\n변경 미리보기 ({} op):\n{}", proposal.ops.len(), proposal.preview());
+    println!(
+        "ai-fill via '{}' — 제안 (rationale):\n{}",
+        provider.name(),
+        proposal.rationale
+    );
+    println!(
+        "\n변경 미리보기 ({} op):\n{}",
+        proposal.ops.len(),
+        proposal.preview()
+    );
 
     if dry_run {
         println!("dry-run: 출력은 쓰지 않았습니다. 적용하려면 --dry-run 없이 다시 실행하세요.");
@@ -477,7 +526,10 @@ fn ai_fill(
         out.display(),
         out_bytes.len()
     );
-    println!("editor-open-safety (cheap gate): {}", if report.ok { "OK ✓" } else { "FAIL ✗" });
+    println!(
+        "editor-open-safety (cheap gate): {}",
+        if report.ok { "OK ✓" } else { "FAIL ✗" }
+    );
     if verify {
         if !hwp_oracle::soffice_available() {
             println!("verify: skipped (soffice not available)");
@@ -506,10 +558,22 @@ fn ai_edit(
 
     // PROPOSE: the provider sees the anchored [s/b] outline and authors an EditScript, compiled to
     // anchored ops + dry-run on a scratch clone (doc untouched until commit).
-    let proposal = hwp_ai::propose_edits(&doc, &*provider, instruction).map_err(|e| e.to_string())?;
-    println!("ai-edit via '{}' — 제안 (rationale):\n{}", provider.name(), proposal.rationale);
-    println!("\n[문서 개요]\n{}", hwp_ai::to_markdown(&doc).unwrap_or_default());
-    println!("변경 미리보기 ({} op):\n{}", proposal.ops.len(), proposal.preview());
+    let proposal =
+        hwp_ai::propose_edits(&doc, &*provider, instruction).map_err(|e| e.to_string())?;
+    println!(
+        "ai-edit via '{}' — 제안 (rationale):\n{}",
+        provider.name(),
+        proposal.rationale
+    );
+    println!(
+        "\n[문서 개요]\n{}",
+        hwp_ai::to_markdown(&doc).unwrap_or_default()
+    );
+    println!(
+        "변경 미리보기 ({} op):\n{}",
+        proposal.ops.len(),
+        proposal.preview()
+    );
 
     if dry_run {
         println!("dry-run: 출력은 쓰지 않았습니다. 적용하려면 --dry-run 없이 다시 실행하세요.");
@@ -522,7 +586,12 @@ fn ai_edit(
     let doc = session.into_doc();
 
     // Output format by extension: .html → vibe-docs standalone HTML; else round-trip-safe HWPX.
-    if out.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("html")) == Some(true) {
+    if out
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("html"))
+        == Some(true)
+    {
         let title = file.file_stem().map(|s| s.to_string_lossy().into_owned());
         let html = hwp_session::emit_html(&doc, title);
         std::fs::write(out, &html).map_err(|e| format!("write {}: {e}", out.display()))?;
@@ -542,7 +611,10 @@ fn ai_edit(
             out.display(),
             out_bytes.len()
         );
-        println!("editor-open-safety (cheap gate): {}", if report.ok { "OK ✓" } else { "FAIL ✗" });
+        println!(
+            "editor-open-safety (cheap gate): {}",
+            if report.ok { "OK ✓" } else { "FAIL ✗" }
+        );
     }
     Ok(())
 }
@@ -556,15 +628,26 @@ fn convert(file: &PathBuf, out: Option<PathBuf>, verify: bool) -> Result<(), Str
     let mut out_path = out.unwrap_or_else(|| file.with_extension("hwpx"));
     if out_path == *file {
         // Input was already .hwpx and no --out given: never overwrite the source.
-        let stem = file.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let stem = file
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
         out_path = file.with_file_name(format!("{stem}-converted.hwpx"));
     }
 
     let out_bytes = hwp_core::serialize_hwpx(&doc).map_err(|e| e.to_string())?;
     hwp_core::atomic_write(&out_path, &out_bytes).map_err(|e| e.to_string())?;
     let report = hwp_core::validate_hwpx(&out_bytes);
-    println!("{} → {} ({} bytes)", file.display(), out_path.display(), out_bytes.len());
-    println!("editor-open-safety: {}", if report.ok { "OK ✓" } else { "FAIL ✗" });
+    println!(
+        "{} → {} ({} bytes)",
+        file.display(),
+        out_path.display(),
+        out_bytes.len()
+    );
+    println!(
+        "editor-open-safety: {}",
+        if report.ok { "OK ✓" } else { "FAIL ✗" }
+    );
     for b in &report.blocking {
         println!("  blocking: {b}");
     }
@@ -678,8 +761,15 @@ fn edit_op(
         (None, Some(c)) => CssTarget::Class(c),
         (None, None) => return Err("provide --node <id> or --class <name>".into()),
     };
-    let sel = css_set_decl(&mut proj, &CssSetDecl { target, prop: prop.into(), value: value.into() })
-        .map_err(|e| e.to_string())?;
+    let sel = css_set_decl(
+        &mut proj,
+        &CssSetDecl {
+            target,
+            prop: prop.into(),
+            value: value.into(),
+        },
+    )
+    .map_err(|e| e.to_string())?;
     // Dirty-only re-emit: rewrite ONLY styles/document.css; .jsx files stay byte-identical on disk.
     let css = hwp_jsx::css::emit_css(&proj.styles);
     std::fs::write(proj_dir.join("styles/document.css"), &css)
@@ -691,15 +781,21 @@ fn edit_op(
     Ok(())
 }
 
-fn edit(file: &PathBuf, append: &[String], out: &PathBuf, verify: bool) -> Result<(), String> {
+fn edit(file: &PathBuf, append: &[String], out: &Path, verify: bool) -> Result<(), String> {
     let bytes = read(file)?;
     if hwp_core::Engine::detect(&bytes) != SourceFormat::Hwpx {
         return Err("edit/export operates on HWPX (.hwpx). Convert .hwp to HWPX first.".into());
     }
     let mut doc = hwp_core::Engine::open(&bytes).map_err(|e| e.to_string())?;
     for text in append {
-        hwp_ops::apply(&mut doc, &hwp_ops::Op::AppendParagraph { section: 0, text: text.clone() })
-            .map_err(|e| e.to_string())?;
+        hwp_ops::apply(
+            &mut doc,
+            &hwp_ops::Op::AppendParagraph {
+                section: 0,
+                text: text.clone(),
+            },
+        )
+        .map_err(|e| e.to_string())?;
     }
     let out_bytes = hwp_core::serialize_hwpx(&doc).map_err(|e| e.to_string())?;
     hwp_core::atomic_write(out, &out_bytes).map_err(|e| e.to_string())?;
@@ -710,7 +806,10 @@ fn edit(file: &PathBuf, append: &[String], out: &PathBuf, verify: bool) -> Resul
         out.display(),
         out_bytes.len()
     );
-    println!("editor-open-safety (cheap gate): {}", if report.ok { "OK ✓" } else { "FAIL ✗" });
+    println!(
+        "editor-open-safety (cheap gate): {}",
+        if report.ok { "OK ✓" } else { "FAIL ✗" }
+    );
     for b in &report.blocking {
         println!("  blocking: {b}");
     }
@@ -741,9 +840,11 @@ fn render(file: &PathBuf, page: u32, out: &PathBuf) -> Result<(), String> {
 
 #[cfg(not(feature = "rhwp"))]
 fn render(_file: &PathBuf, _page: u32, _out: &PathBuf) -> Result<(), String> {
-    Err("`render` needs the rhwp bootstrap: ./scripts/vendor-rhwp.sh then \
+    Err(
+        "`render` needs the rhwp bootstrap: ./scripts/vendor-rhwp.sh then \
          `cargo run -p tf-hwp-cli --features rhwp -- render <file>`"
-        .into())
+            .into(),
+    )
 }
 
 /// `own-render`: parse → OUR layout (`hwp-typeset`) → OUR paint IR (`hwp-render`) → SVG sink. No rhwp
@@ -758,17 +859,31 @@ fn own_render(file: &PathBuf, page: Option<usize>, out: &PathBuf) -> Result<(), 
     }
     match page {
         Some(p) => {
-            let svg = svgs.get(p).ok_or_else(|| format!("page {p} out of range (0..{})", svgs.len()))?;
+            let svg = svgs
+                .get(p)
+                .ok_or_else(|| format!("page {p} out of range (0..{})", svgs.len()))?;
             std::fs::write(out, svg).map_err(|e| e.to_string())?;
-            println!("own-render: {} page(s); wrote page {p} → {}", svgs.len(), out.display());
+            println!(
+                "own-render: {} page(s); wrote page {p} → {}",
+                svgs.len(),
+                out.display()
+            );
         }
         None => {
             // page.svg, page1.svg, page2.svg, … — page 0 keeps the bare `--out` name.
             for (i, svg) in svgs.iter().enumerate() {
-                let path = if i == 0 { out.clone() } else { suffix_path(out, i) };
+                let path = if i == 0 {
+                    out.clone()
+                } else {
+                    suffix_path(out, i)
+                };
                 std::fs::write(&path, svg).map_err(|e| e.to_string())?;
             }
-            println!("own-render: wrote {} page(s) → {} (+ siblings)", svgs.len(), out.display());
+            println!(
+                "own-render: wrote {} page(s) → {} (+ siblings)",
+                svgs.len(),
+                out.display()
+            );
         }
     }
     Ok(())
@@ -776,8 +891,14 @@ fn own_render(file: &PathBuf, page: Option<usize>, out: &PathBuf) -> Result<(), 
 
 /// Insert `<n>` before a path's extension: `page.svg` + 1 → `page1.svg`.
 fn suffix_path(out: &Path, n: usize) -> PathBuf {
-    let stem = out.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let ext = out.extension().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "svg".into());
+    let stem = out
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let ext = out
+        .extension()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "svg".into());
     let name = format!("{stem}{n}.{ext}");
     out.with_file_name(name)
 }
@@ -798,7 +919,12 @@ fn view(file: &PathBuf, out: &PathBuf) -> Result<(), String> {
             p + 1
         ));
     }
-    let title = esc_html(&file.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default());
+    let title = esc_html(
+        &file
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default(),
+    );
     let html = format!(
         "<!doctype html><html lang=\"ko\"><head><meta charset=\"utf-8\">\
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
@@ -821,14 +947,19 @@ color:#e8eaed;font-size:13px;border-bottom:1px solid rgba(255,255,255,.08)}}\
 <div class=\"doc\">{pages}</div></body></html>"
     );
     std::fs::write(out, html).map_err(|e| e.to_string())?;
-    println!("rendered {n} pages → {} (open in a browser — 한컴 독스처럼 보입니다)", out.display());
+    println!(
+        "rendered {n} pages → {} (open in a browser — 한컴 독스처럼 보입니다)",
+        out.display()
+    );
     Ok(())
 }
 
 /// HTML-escape text for the viewer chrome (filename/title).
 #[cfg(feature = "rhwp")]
 fn esc_html(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// Minimal SVG safety for the embedded page render: strip <script>…</script> and on* handlers so an
@@ -867,7 +998,10 @@ fn verify_convert(file: &PathBuf, out: &PathBuf) -> Result<(), String> {
             let svg = hwp_core::render_page_svg(b, p).map_err(|e| e.to_string())?;
             pages.push_str(&format!("<div class=\"page\">{svg}</div>"));
         }
-        Ok((n, format!("<div class=\"col\"><h2>{label} · {n}쪽</h2>{pages}</div>")))
+        Ok((
+            n,
+            format!("<div class=\"col\"><h2>{label} · {n}쪽</h2>{pages}</div>"),
+        ))
     };
 
     let (lpages, left) = column("원본 .hwp (rhwp)", &bytes)?;
@@ -901,7 +1035,10 @@ rhwp가 페이지를 못 끊고 reflow/overflow합니다(내용은 보존). 깨�
     // linesegarray needed), so it's the faithful clean render of our output. (Can't load
     // equation-dense docs, which Hancom's own files also can't in LibreOffice.)
     if hwp_oracle::soffice_available() {
-        let dir = out.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
+        let dir = out
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."));
         let hwpx_path = dir.join("verify-converted.hwpx");
         std::fs::write(&hwpx_path, &hwpx).map_err(|e| e.to_string())?;
         match hwp_oracle::convert_to_pdf(&hwpx_path, &dir) {
@@ -929,27 +1066,52 @@ fn layout_check(file: &PathBuf, rows: Option<&str>) -> Result<(), String> {
         return table_row_audit_print(&bytes, spec);
     }
     let f = hwp_core::layout_fidelity(&bytes).map_err(|e| e.to_string())?;
-    let pct = |n: usize| if f.paragraphs == 0 { 0.0 } else { 100.0 * n as f64 / f.paragraphs as f64 };
-    println!("레이아웃 엔진 대조 (vs 한컴 실제 레이아웃): {}", file.display());
+    let pct = |n: usize| {
+        if f.paragraphs == 0 {
+            0.0
+        } else {
+            100.0 * n as f64 / f.paragraphs as f64
+        }
+    };
+    println!(
+        "레이아웃 엔진 대조 (vs 한컴 실제 레이아웃): {}",
+        file.display()
+    );
     println!(
         "  쪽수      우리 {:>4}  ·  한컴(rhwp) {:>4}  ({})",
         f.our_pages,
         f.oracle_pages,
-        if f.our_pages as u32 == f.oracle_pages { "일치" } else { "차이" }
+        if f.our_pages as u32 == f.oracle_pages {
+            "일치"
+        } else {
+            "차이"
+        }
     );
     println!(
         "  총 줄수    우리 {:>6}  ·  한컴 {:>6}  (비율 {:.2})",
         f.our_lines,
         f.oracle_lines,
-        if f.oracle_lines == 0 { 0.0 } else { f.our_lines as f64 / f.oracle_lines as f64 }
+        if f.oracle_lines == 0 {
+            0.0
+        } else {
+            f.our_lines as f64 / f.oracle_lines as f64
+        }
     );
     println!(
         "  블록 구성   표 {} (행 {}) · 이미지 {} · 수식 {} · 본문높이 {} HWPUNIT",
         f.tables, f.table_rows, f.images, f.equations, f.body_height
     );
     println!("  문단       {} 개 대조", f.paragraphs);
-    println!("    줄수 정확 일치   {:>5} ({:.1}%)", f.line_exact, pct(f.line_exact));
-    println!("    줄수 ±1 이내     {:>5} ({:.1}%)", f.line_within1, pct(f.line_within1));
+    println!(
+        "    줄수 정확 일치   {:>5} ({:.1}%)",
+        f.line_exact,
+        pct(f.line_exact)
+    );
+    println!(
+        "    줄수 ±1 이내     {:>5} ({:.1}%)",
+        f.line_within1,
+        pct(f.line_within1)
+    );
     #[cfg(feature = "shaper")]
     println!(
         "  → 실제 셰이퍼(rustybuzz) 줄바꿈 충실도: 전각=EM 격자, 반각은 실제 폰트 advance. \
@@ -969,8 +1131,14 @@ fn table_row_audit_print(bytes: &[u8], spec: &str) -> Result<(), String> {
     let (s, b) = spec
         .split_once('/')
         .ok_or_else(|| format!("--rows expects <section>/<block>, got {spec:?}"))?;
-    let section: usize = s.trim().parse().map_err(|_| format!("bad section in {spec:?}"))?;
-    let block: usize = b.trim().parse().map_err(|_| format!("bad block in {spec:?}"))?;
+    let section: usize = s
+        .trim()
+        .parse()
+        .map_err(|_| format!("bad section in {spec:?}"))?;
+    let block: usize = b
+        .trim()
+        .parse()
+        .map_err(|_| format!("bad block in {spec:?}"))?;
     let r = hwp_core::table_row_audit(bytes, section, block).map_err(|e| e.to_string())?;
     println!(
         "표 행별 높이 대조 (우리 예약 vs 한컴 실측): 섹션 {}/블록 {} · 전역 표순번 {} · {}행×{}열 · 본문폭 {:.0} HWPUNIT",
@@ -1016,16 +1184,30 @@ fn fidelity(file: Option<PathBuf>) -> Result<(), String> {
     }
     println!("prerequisites for the \"원본 그대로\" gate:");
     println!("  {} soffice (LibreOffice)", mark(pre.soffice));
-    println!("  {} H2Orestart extension (modern HWP)   scripts/install-h2orestart.sh", mark(pre.h2orestart));
-    println!("  {} engine render path                  scripts/vendor-rhwp.sh + --features rhwp", mark(pre.engine_render));
+    println!(
+        "  {} H2Orestart extension (modern HWP)   scripts/install-h2orestart.sh",
+        mark(pre.h2orestart)
+    );
+    println!(
+        "  {} engine render path                  scripts/vendor-rhwp.sh + --features rhwp",
+        mark(pre.engine_render)
+    );
     let ground_truth = hwp_fidelity::reference_pdf_for(&path);
     if let Some(p) = &ground_truth {
         println!("  ✓ ground-truth PDF                    {}", p.display());
     }
     println!(
         "status: reference render {} · full fidelity compare {}",
-        if pre.can_reference() || ground_truth.is_some() { "READY" } else { "blocked" },
-        if pre.engine_render && (pre.can_reference() || ground_truth.is_some()) { "READY" } else { "blocked" },
+        if pre.can_reference() || ground_truth.is_some() {
+            "READY"
+        } else {
+            "blocked"
+        },
+        if pre.engine_render && (pre.can_reference() || ground_truth.is_some()) {
+            "READY"
+        } else {
+            "blocked"
+        },
     );
 
     #[cfg(feature = "rhwp")]
@@ -1039,21 +1221,35 @@ fn fidelity(file: Option<PathBuf>) -> Result<(), String> {
         match hwp_fidelity::compare(&path) {
             Ok(r) => {
                 let (refname, note) = match r.reference {
-                    hwp_fidelity::ReferenceKind::GroundTruthPdf => {
-                        ("ground-truth PDF", "ABSOLUTE fidelity vs the authoritative PDF")
-                    }
-                    hwp_fidelity::ReferenceKind::Oracle => {
-                        ("oracle (LibreOffice+H2Orestart)", "cross-renderer agreement; not Hancom ground-truth")
-                    }
+                    hwp_fidelity::ReferenceKind::GroundTruthPdf => (
+                        "ground-truth PDF",
+                        "ABSOLUTE fidelity vs the authoritative PDF",
+                    ),
+                    hwp_fidelity::ReferenceKind::Oracle => (
+                        "oracle (LibreOffice+H2Orestart)",
+                        "cross-renderer agreement; not Hancom ground-truth",
+                    ),
                 };
                 println!("  reference: {refname}");
                 if r.our_pages != r.ref_pages {
-                    println!("  ⚠ page-count divergence: ours={} vs ref={} (structural)", r.our_pages, r.ref_pages);
+                    println!(
+                        "  ⚠ page-count divergence: ours={} vs ref={} (structural)",
+                        r.our_pages, r.ref_pages
+                    );
                 }
                 for p in &r.pages {
                     match p.similarity {
-                        Some(s) => println!("  page {:>2}: {:>6}  ({:.1}% match)", p.index + 1, band(p.band), s * 100.0),
-                        None => println!("  page {:>2}: {:>6}  (page exists in only one render)", p.index + 1, band(p.band)),
+                        Some(s) => println!(
+                            "  page {:>2}: {:>6}  ({:.1}% match)",
+                            p.index + 1,
+                            band(p.band),
+                            s * 100.0
+                        ),
+                        None => println!(
+                            "  page {:>2}: {:>6}  (page exists in only one render)",
+                            p.index + 1,
+                            band(p.band)
+                        ),
                     }
                 }
                 println!("  overall: {}  ({note})", band(r.overall));
@@ -1095,7 +1291,12 @@ fn info(file: &PathBuf) -> Result<(), String> {
                     .filter(|b| matches!(b, hwp_model::document::Block::Paragraph(_)))
                     .count();
                 println!("origin: {}", doc.origin.map(|o| o.as_str()).unwrap_or("?"));
-                println!("sections: {}  paragraphs: {}  images: {}", doc.sections.len(), paras, doc.bin_data.len());
+                println!(
+                    "sections: {}  paragraphs: {}  images: {}",
+                    doc.sections.len(),
+                    paras,
+                    doc.bin_data.len()
+                );
             }
             Err(e) => println!("ingest: unavailable ({e}) — build with --features docx / pdfin"),
         }

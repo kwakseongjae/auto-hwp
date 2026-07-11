@@ -327,7 +327,10 @@ impl Table {
         if self.rows != 1 || self.cols != 1 {
             return None;
         }
-        let cell = self.cells.iter().find(|c| c.active && c.row == 0 && c.col == 0)?;
+        let cell = self
+            .cells
+            .iter()
+            .find(|c| c.active && c.row == 0 && c.col == 0)?;
         let mut inner: Option<&Table> = None;
         for b in &cell.blocks {
             match b {
@@ -338,10 +341,11 @@ impl Table {
                     inner = Some(t);
                 }
                 Block::Paragraph(p) => {
-                    let has_text = p
-                        .runs
-                        .iter()
-                        .any(|r| r.content.iter().any(|i| matches!(i, Inline::Text(s) if !s.trim().is_empty())));
+                    let has_text = p.runs.iter().any(|r| {
+                        r.content
+                            .iter()
+                            .any(|i| matches!(i, Inline::Text(s) if !s.trim().is_empty()))
+                    });
                     if has_text {
                         return None; // real text beside the table → keep the whole cell
                     }
@@ -353,11 +357,18 @@ impl Table {
 
     /// Mutable twin of [`frame_inner`] — the nested table to MUTATE when editing a frame-wrapper's cell.
     pub fn frame_inner_mut(&mut self) -> Option<&mut Table> {
-        if self.frame_inner().is_none() {
-            return None; // the immutable borrow ends here, so the mutable walk below is fine (NLL)
-        }
-        let cell = self.cells.iter_mut().find(|c| c.active && c.row == 0 && c.col == 0)?;
-        cell.blocks.iter_mut().find_map(|b| if let Block::Table(t) = b { Some(t) } else { None })
+        self.frame_inner()?; // the immutable borrow ends here, so the mutable walk below is fine (NLL)
+        let cell = self
+            .cells
+            .iter_mut()
+            .find(|c| c.active && c.row == 0 && c.col == 0)?;
+        cell.blocks.iter_mut().find_map(|b| {
+            if let Block::Table(t) = b {
+                Some(t)
+            } else {
+                None
+            }
+        })
     }
 
     /// The table a click/edit at `(row, col)` should target: the inner table for a frame wrapper, else
@@ -370,7 +381,8 @@ impl Table {
     /// borrow checker — returning `self` in a `match self.frame_inner_mut()` arm would overlap borrows.
     pub fn edit_target_mut(&mut self) -> &mut Table {
         if self.frame_inner().is_some() {
-            self.frame_inner_mut().expect("frame_inner_mut agrees with frame_inner")
+            self.frame_inner_mut()
+                .expect("frame_inner_mut agrees with frame_inner")
         } else {
             self
         }
@@ -543,7 +555,14 @@ mod frame_wrapper_tests {
         Table {
             rows,
             cols: 1,
-            cells: (0..rows).map(|r| Cell { row: r, col: 0, active: true, ..Default::default() }).collect(),
+            cells: (0..rows)
+                .map(|r| Cell {
+                    row: r,
+                    col: 0,
+                    active: true,
+                    ..Default::default()
+                })
+                .collect(),
             ..Default::default()
         }
     }
@@ -554,7 +573,13 @@ mod frame_wrapper_tests {
         let wrapper = Table {
             rows: 1,
             cols: 1,
-            cells: vec![Cell { row: 0, col: 0, active: true, blocks: vec![Block::Table(n_row_table(3))], ..Default::default() }],
+            cells: vec![Cell {
+                row: 0,
+                col: 0,
+                active: true,
+                blocks: vec![Block::Table(n_row_table(3))],
+                ..Default::default()
+            }],
             ..Default::default()
         };
         assert_eq!(wrapper.frame_inner().map(|t| t.rows), Some(3));
@@ -569,9 +594,15 @@ mod frame_wrapper_tests {
         // A 1×1 holding TEXT (not just a table) is NOT a frame wrapper — keep the whole cell.
         let mut with_text = wrapper.clone();
         with_text.cells[0].blocks.push(Block::Paragraph(Paragraph {
-            runs: vec![Run { content: vec![Inline::Text("내용".into())], ..Default::default() }],
+            runs: vec![Run {
+                content: vec![Inline::Text("내용".into())],
+                ..Default::default()
+            }],
             ..Default::default()
         }));
-        assert!(with_text.frame_inner().is_none(), "text beside the table → not a pure wrapper");
+        assert!(
+            with_text.frame_inner().is_none(),
+            "text beside the table → not a pure wrapper"
+        );
     }
 }

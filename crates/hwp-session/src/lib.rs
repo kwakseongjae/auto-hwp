@@ -63,14 +63,18 @@ pub fn own_render_fonts() -> Box<dyn hwp_model::prelude::FontMetricsProvider> {
 /// native discover/Approx paths are byte-unchanged (the golden regime). v1 uses the first injected
 /// face for every document font name (the "모든 문서 폰트명 → 현재 선택 폰트 1개" mapping, issue §3).
 #[cfg(feature = "shaper")]
-pub fn own_render_fonts_with(injected: &[(String, Vec<u8>)]) -> Box<dyn hwp_model::prelude::FontMetricsProvider> {
+pub fn own_render_fonts_with(
+    injected: &[(String, Vec<u8>)],
+) -> Box<dyn hwp_model::prelude::FontMetricsProvider> {
     match injected.iter().find(|(_, b)| !b.is_empty()) {
         Some((_family, bytes)) => Box::new(hwp_typeset::RealFontMetrics::from_bytes(bytes)),
         None => own_render_fonts(),
     }
 }
 #[cfg(not(feature = "shaper"))]
-pub fn own_render_fonts_with(_injected: &[(String, Vec<u8>)]) -> Box<dyn hwp_model::prelude::FontMetricsProvider> {
+pub fn own_render_fonts_with(
+    _injected: &[(String, Vec<u8>)],
+) -> Box<dyn hwp_model::prelude::FontMetricsProvider> {
     // No `shaper` feature → no rustybuzz to feed the injected bytes into; Approx is the deterministic
     // fallback (the injected face still drives the PDF embed via `emit_pdf_with_fonts`).
     own_render_fonts()
@@ -135,7 +139,13 @@ pub fn outline(doc: &SemanticDoc) -> Vec<OutlineItem> {
         for (bi, block) in sec.blocks.iter().enumerate() {
             if let Some((level, text)) = outline_heading(block) {
                 let page = pages.get(si).and_then(|p| p.get(bi)).copied().unwrap_or(0) as u32;
-                out.push(OutlineItem { section: si, block: bi, level, text, page });
+                out.push(OutlineItem {
+                    section: si,
+                    block: bi,
+                    level,
+                    text,
+                    page,
+                });
             }
         }
     }
@@ -149,7 +159,15 @@ fn outline_heading(block: &hwp_model::document::Block) -> Option<(u8, String)> {
     fn para_text(p: &hwp_model::document::Paragraph) -> String {
         p.runs
             .iter()
-            .flat_map(|r| r.content.iter().filter_map(|i| if let Inline::Text(s) = i { Some(s.as_str()) } else { None }))
+            .flat_map(|r| {
+                r.content.iter().filter_map(|i| {
+                    if let Inline::Text(s) = i {
+                        Some(s.as_str())
+                    } else {
+                        None
+                    }
+                })
+            })
             .collect()
     }
     match block {
@@ -167,12 +185,23 @@ fn outline_heading(block: &hwp_model::document::Block) -> Option<(u8, String)> {
                 let s: String = c
                     .blocks
                     .iter()
-                    .filter_map(|b| if let Block::Paragraph(p) = b { Some(para_text(p)) } else { None })
+                    .filter_map(|b| {
+                        if let Block::Paragraph(p) = b {
+                            Some(para_text(p))
+                        } else {
+                            None
+                        }
+                    })
                     .collect();
                 let s = s.trim().to_string();
                 (!s.is_empty()).then_some(s)
             })?;
-            let numbered = first.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) && first.contains('.');
+            let numbered = first
+                .chars()
+                .next()
+                .map(|c| c.is_ascii_digit())
+                .unwrap_or(false)
+                && first.contains('.');
             (numbered && first.chars().count() < 80).then_some((2, first))
         }
     }
@@ -196,19 +225,36 @@ pub struct ImageBoxDto {
 /// Re-drives `place_doc` over the LIVE IR with the SAME `own_render_fonts` as [`render_svg`], so the
 /// box matches the "자체 렌더" SVG exactly. `None` if that image doesn't fall on the queried page or
 /// the anchor holds no image.
-pub fn image_bbox(doc: &SemanticDoc, page: u32, section: usize, block: usize) -> Option<ImageBoxDto> {
+pub fn image_bbox(
+    doc: &SemanticDoc,
+    page: u32,
+    section: usize,
+    block: usize,
+) -> Option<ImageBoxDto> {
     image_bbox_placed(&place(doc, &[]), page, section, block)
 }
 
 /// [`image_bbox`] against an already-placed document (issue 025 cache surface). No typesetting here —
 /// pure geometry over `placed`.
-pub fn image_bbox_placed(placed: &PlacedDoc, page: u32, section: usize, block: usize) -> Option<ImageBoxDto> {
+pub fn image_bbox_placed(
+    placed: &PlacedDoc,
+    page: u32,
+    section: usize,
+    block: usize,
+) -> Option<ImageBoxDto> {
     let pg = placed.pages.get(page as usize)?;
     let k = HWPUNIT_PER_PX;
     pg.images
         .iter()
         .find(|im| im.section == section && im.block == block && !im.bin_ref.is_empty())
-        .map(|im| ImageBoxDto { x: im.x / k, y: im.y / k, w: im.w / k, h: im.h / k, section: im.section, block: im.block })
+        .map(|im| ImageBoxDto {
+            x: im.x / k,
+            y: im.y / k,
+            w: im.w / k,
+            h: im.h / k,
+            section: im.section,
+            block: im.block,
+        })
 }
 
 /// Click-to-select: the topmost image whose placed box contains page-space `(x, y)` on `page`, in
@@ -222,13 +268,19 @@ pub fn image_at_placed(placed: &PlacedDoc, page: u32, x: f64, y: f64) -> Option<
     let pg = placed.pages.get(page as usize)?;
     let k = HWPUNIT_PER_PX;
     let (x, y) = (x * k, y * k); // px click → HWPUNIT (place_doc space)
-    // Last match wins → topmost in paint order (later images draw over earlier ones).
+                                 // Last match wins → topmost in paint order (later images draw over earlier ones).
     pg.images
         .iter()
         .filter(|im| !im.bin_ref.is_empty())
-        .filter(|im| x >= im.x && x <= im.x + im.w && y >= im.y && y <= im.y + im.h)
-        .last()
-        .map(|im| ImageBoxDto { x: im.x / k, y: im.y / k, w: im.w / k, h: im.h / k, section: im.section, block: im.block })
+        .rfind(|im| x >= im.x && x <= im.x + im.w && y >= im.y && y <= im.y + im.h)
+        .map(|im| ImageBoxDto {
+            x: im.x / k,
+            y: im.y / k,
+            w: im.w / k,
+            h: im.h / k,
+            section: im.section,
+            block: im.block,
+        })
 }
 
 // ---- Table move/select/edit overlay geometry --------------------------------------------------
@@ -252,18 +304,38 @@ pub struct TableBoxDto {
 
 /// Locate the placed outer box of the table anchored at `(section, block)` on `page`, in own-render
 /// px. `None` if that table doesn't fall on the queried page.
-pub fn table_bbox(doc: &SemanticDoc, page: u32, section: usize, block: usize) -> Option<TableBoxDto> {
+pub fn table_bbox(
+    doc: &SemanticDoc,
+    page: u32,
+    section: usize,
+    block: usize,
+) -> Option<TableBoxDto> {
     table_bbox_placed(&place(doc, &[]), page, section, block)
 }
 
 /// [`table_bbox`] against an already-placed document (issue 025 cache surface).
-pub fn table_bbox_placed(placed: &PlacedDoc, page: u32, section: usize, block: usize) -> Option<TableBoxDto> {
+pub fn table_bbox_placed(
+    placed: &PlacedDoc,
+    page: u32,
+    section: usize,
+    block: usize,
+) -> Option<TableBoxDto> {
     let pg = placed.pages.get(page as usize)?;
     let k = HWPUNIT_PER_PX;
     pg.tables
         .iter()
         .find(|t| t.section == section && t.block == block)
-        .map(|t| TableBoxDto { x: t.x / k, y: t.y / k, w: t.w / k, h: t.h / k, section: t.section, block: t.block, rows: t.rows, cols: t.cols, first_row: t.first_row })
+        .map(|t| TableBoxDto {
+            x: t.x / k,
+            y: t.y / k,
+            w: t.w / k,
+            h: t.h / k,
+            section: t.section,
+            block: t.block,
+            rows: t.rows,
+            cols: t.cols,
+            first_row: t.first_row,
+        })
 }
 
 /// Click-to-select: the topmost table whose placed outer box contains page-space `(x, y)` on `page`,
@@ -275,7 +347,13 @@ pub fn table_at(doc: &SemanticDoc, page: u32, x: f64, y: f64) -> Option<TableBox
 /// [`table_at`] measured with CALLER-INJECTED font bytes (issue 022) — the wasm/web path where a
 /// registered font changed the pagination, so the geometry MUST agree with the injected-metric SVG or
 /// clicks miss. Empty slice → identical to [`table_at`].
-pub fn table_at_with(doc: &SemanticDoc, page: u32, x: f64, y: f64, injected: &[(String, Vec<u8>)]) -> Option<TableBoxDto> {
+pub fn table_at_with(
+    doc: &SemanticDoc,
+    page: u32,
+    x: f64,
+    y: f64,
+    injected: &[(String, Vec<u8>)],
+) -> Option<TableBoxDto> {
     table_at_placed(&place(doc, injected), page, x, y)
 }
 
@@ -285,12 +363,21 @@ pub fn table_at_placed(placed: &PlacedDoc, page: u32, x: f64, y: f64) -> Option<
     let pg = placed.pages.get(page as usize)?;
     let k = HWPUNIT_PER_PX;
     let (x, y) = (x * k, y * k); // px click → HWPUNIT (place_doc space)
-    // Last match wins → topmost in paint order (a nested table draws after its outer table).
+                                 // Last match wins → topmost in paint order (a nested table draws after its outer table).
     pg.tables
         .iter()
-        .filter(|t| x >= t.x && x <= t.x + t.w && y >= t.y && y <= t.y + t.h)
-        .last()
-        .map(|t| TableBoxDto { x: t.x / k, y: t.y / k, w: t.w / k, h: t.h / k, section: t.section, block: t.block, rows: t.rows, cols: t.cols, first_row: t.first_row })
+        .rfind(|t| x >= t.x && x <= t.x + t.w && y >= t.y && y <= t.y + t.h)
+        .map(|t| TableBoxDto {
+            x: t.x / k,
+            y: t.y / k,
+            w: t.w / k,
+            h: t.h / k,
+            section: t.section,
+            block: t.block,
+            rows: t.rows,
+            cols: t.cols,
+            first_row: t.first_row,
+        })
 }
 
 // ---- Own-render point-to-block ----------------------------------------------------------------
@@ -318,10 +405,17 @@ pub struct BlockHitDto {
 /// `source.simple` AND no non-text inline). False for tables/images/structural paragraphs.
 fn model_para_editable(doc: &SemanticDoc, section: usize, block: usize) -> bool {
     use hwp_model::prelude::{Block, Inline};
-    let Some(sec) = doc.sections.get(section) else { return false };
-    let Some(Block::Paragraph(p)) = sec.blocks.get(block) else { return false };
+    let Some(sec) = doc.sections.get(section) else {
+        return false;
+    };
+    let Some(Block::Paragraph(p)) = sec.blocks.get(block) else {
+        return false;
+    };
     let simple = p.source.as_ref().map(|s| s.simple).unwrap_or(true);
-    let all_text = p.runs.iter().all(|r| r.content.iter().all(|i| matches!(i, Inline::Text(_))));
+    let all_text = p
+        .runs
+        .iter()
+        .all(|r| r.content.iter().all(|i| matches!(i, Inline::Text(_))));
     simple && all_text
 }
 
@@ -329,8 +423,12 @@ fn model_para_editable(doc: &SemanticDoc, section: usize, block: usize) -> bool 
 /// paragraph). Used to pre-fill the inline paragraph editor.
 fn model_para_text(doc: &SemanticDoc, section: usize, block: usize) -> String {
     use hwp_model::prelude::{Block, Inline};
-    let Some(sec) = doc.sections.get(section) else { return String::new() };
-    let Some(Block::Paragraph(p)) = sec.blocks.get(block) else { return String::new() };
+    let Some(sec) = doc.sections.get(section) else {
+        return String::new();
+    };
+    let Some(Block::Paragraph(p)) = sec.blocks.get(block) else {
+        return String::new();
+    };
     let mut out = String::new();
     for r in &p.runs {
         for i in &r.content {
@@ -352,14 +450,26 @@ pub fn own_hit_test(doc: &SemanticDoc, page: u32, x: f64, y: f64) -> Option<Bloc
 /// [`own_hit_test`] measured with CALLER-INJECTED font bytes (issue 022) — the wasm/web path so the
 /// click-to-point geometry agrees with the injected-metric SVG. Empty slice → identical to
 /// [`own_hit_test`].
-pub fn own_hit_test_with(doc: &SemanticDoc, page: u32, x: f64, y: f64, injected: &[(String, Vec<u8>)]) -> Option<BlockHitDto> {
+pub fn own_hit_test_with(
+    doc: &SemanticDoc,
+    page: u32,
+    x: f64,
+    y: f64,
+    injected: &[(String, Vec<u8>)],
+) -> Option<BlockHitDto> {
     own_hit_test_placed(doc, &place(doc, injected), page, x, y)
 }
 
 /// [`own_hit_test`] against an already-placed document (issue 025 cache surface). Takes BOTH `placed`
 /// (geometry) and `doc` (the model text/editable read-back), so the wasm `HwpDoc` can serve every click
 /// from its cached `PlacedDoc` while still resolving the paragraph pre-fill text from the live model.
-pub fn own_hit_test_placed(doc: &SemanticDoc, placed: &PlacedDoc, page: u32, x: f64, y: f64) -> Option<BlockHitDto> {
+pub fn own_hit_test_placed(
+    doc: &SemanticDoc,
+    placed: &PlacedDoc,
+    page: u32,
+    x: f64,
+    y: f64,
+) -> Option<BlockHitDto> {
     let pg = placed.pages.get(page as usize)?;
     let k = HWPUNIT_PER_PX;
     pg.block_at(x * k, y * k).map(|b| BlockHitDto {
@@ -375,8 +485,13 @@ pub fn own_hit_test_placed(doc: &SemanticDoc, placed: &PlacedDoc, page: u32, x: 
         y: b.y / k,
         w: b.w / k,
         h: b.h / k,
-        text: if b.kind == hwp_typeset::BlockKind::Paragraph { model_para_text(doc, b.section, b.block) } else { String::new() },
-        editable: b.kind == hwp_typeset::BlockKind::Paragraph && model_para_editable(doc, b.section, b.block),
+        text: if b.kind == hwp_typeset::BlockKind::Paragraph {
+            model_para_text(doc, b.section, b.block)
+        } else {
+            String::new()
+        },
+        editable: b.kind == hwp_typeset::BlockKind::Paragraph
+            && model_para_editable(doc, b.section, b.block),
     })
 }
 
@@ -390,21 +505,46 @@ pub fn own_hit_test_placed(doc: &SemanticDoc, placed: &PlacedDoc, page: u32, x: 
 /// Units mirror [`own_hit_test`]: the rect is in own-render px (= HWPUNIT/75, page-local), converted to
 /// place_doc HWPUNIT at the boundary; the returned boxes are back in px. Multi-page marquee is out of
 /// scope — the caller clips the rect to the start page and queries that page only.
-pub fn blocks_in_rect(doc: &SemanticDoc, page: u32, x0: f64, y0: f64, x1: f64, y1: f64) -> Vec<BlockHitDto> {
+pub fn blocks_in_rect(
+    doc: &SemanticDoc,
+    page: u32,
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+) -> Vec<BlockHitDto> {
     blocks_in_rect_placed(doc, &place(doc, &[]), page, x0, y0, x1, y1)
 }
 
 /// [`blocks_in_rect`] measured with CALLER-INJECTED font bytes (issue 022) — the wasm/web path so the
 /// marquee geometry agrees with the injected-metric SVG. Empty slice → identical to [`blocks_in_rect`].
-pub fn blocks_in_rect_with(doc: &SemanticDoc, page: u32, x0: f64, y0: f64, x1: f64, y1: f64, injected: &[(String, Vec<u8>)]) -> Vec<BlockHitDto> {
+pub fn blocks_in_rect_with(
+    doc: &SemanticDoc,
+    page: u32,
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+    injected: &[(String, Vec<u8>)],
+) -> Vec<BlockHitDto> {
     blocks_in_rect_placed(doc, &place(doc, injected), page, x0, y0, x1, y1)
 }
 
 /// [`blocks_in_rect`] against an already-placed document (issue 025 cache surface) — the marquee path.
 /// The wasm `HwpDoc` calls this with its cached `PlacedDoc` on pointer-up so a rubber-band select does
 /// not re-typeset. `doc` is still needed for each block's model text/editable read-back.
-pub fn blocks_in_rect_placed(doc: &SemanticDoc, placed: &PlacedDoc, page: u32, x0: f64, y0: f64, x1: f64, y1: f64) -> Vec<BlockHitDto> {
-    let Some(pg) = placed.pages.get(page as usize) else { return Vec::new() };
+pub fn blocks_in_rect_placed(
+    doc: &SemanticDoc,
+    placed: &PlacedDoc,
+    page: u32,
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+) -> Vec<BlockHitDto> {
+    let Some(pg) = placed.pages.get(page as usize) else {
+        return Vec::new();
+    };
     let k = HWPUNIT_PER_PX;
     // Normalize the (possibly reversed) corners, then px → HWPUNIT (place_doc space).
     let (rx0, rx1) = (x0.min(x1) * k, x0.max(x1) * k);
@@ -433,8 +573,13 @@ pub fn blocks_in_rect_placed(doc: &SemanticDoc, placed: &PlacedDoc, page: u32, x
             y: b.y / k,
             w: b.w / k,
             h: b.h / k,
-            text: if b.kind == hwp_typeset::BlockKind::Paragraph { model_para_text(doc, b.section, b.block) } else { String::new() },
-            editable: b.kind == hwp_typeset::BlockKind::Paragraph && model_para_editable(doc, b.section, b.block),
+            text: if b.kind == hwp_typeset::BlockKind::Paragraph {
+                model_para_text(doc, b.section, b.block)
+            } else {
+                String::new()
+            },
+            editable: b.kind == hwp_typeset::BlockKind::Paragraph
+                && model_para_editable(doc, b.section, b.block),
         });
     }
     out
@@ -458,12 +603,24 @@ pub struct CellHitDto {
 }
 
 /// Concatenate the plain text of the model cell at `(row, col)` of the table at `(section, block)`.
-fn model_cell_text(doc: &SemanticDoc, section: usize, block: usize, row: usize, col: usize) -> String {
+fn model_cell_text(
+    doc: &SemanticDoc,
+    section: usize,
+    block: usize,
+    row: usize,
+    col: usize,
+) -> String {
     use hwp_model::prelude::{Block, Inline};
-    let Some(sec) = doc.sections.get(section) else { return String::new() };
-    let Some(Block::Table(t)) = sec.blocks.get(block) else { return String::new() };
+    let Some(sec) = doc.sections.get(section) else {
+        return String::new();
+    };
+    let Some(Block::Table(t)) = sec.blocks.get(block) else {
+        return String::new();
+    };
     let t = t.edit_target(); // frame wrapper (자가진단표) → inner table
-    let Some(cell) = t.cells.iter().find(|c| c.row == row && c.col == col) else { return String::new() };
+    let Some(cell) = t.cells.iter().find(|c| c.row == row && c.col == col) else {
+        return String::new();
+    };
     // Join multiple cell paragraphs with '\n' so a multi-line cell pre-fills readably; the layout
     // engine renders a '\n' inside a run as a forced line break, so the edit round-trips.
     let mut paras: Vec<String> = Vec::new();
@@ -492,16 +649,21 @@ pub fn table_cell_at(doc: &SemanticDoc, page: u32, x: f64, y: f64) -> Option<Cel
 /// [`table_cell_at`] against an already-placed document (issue 025 cache surface). Takes BOTH `placed`
 /// (geometry) and `doc` (the cell text read-back), so the wasm `HwpDoc` serves cell-marking clicks from
 /// its cached `PlacedDoc`. `row`/`col` stay MODEL-GLOBAL (do NOT re-add `first_row` on a split fragment).
-pub fn table_cell_at_placed(doc: &SemanticDoc, placed: &PlacedDoc, page: u32, x: f64, y: f64) -> Option<CellHitDto> {
+pub fn table_cell_at_placed(
+    doc: &SemanticDoc,
+    placed: &PlacedDoc,
+    page: u32,
+    x: f64,
+    y: f64,
+) -> Option<CellHitDto> {
     let pg = placed.pages.get(page as usize)?;
     let k = HWPUNIT_PER_PX;
     let (hx, hy) = (x * k, y * k); // px click → HWPUNIT
-    // Topmost table containing the point, then the cell within it.
+                                   // Topmost table containing the point, then the cell within it.
     let t = pg
         .tables
         .iter()
-        .filter(|t| hx >= t.x && hx <= t.x + t.w && hy >= t.y && hy <= t.y + t.h)
-        .last()?;
+        .rfind(|t| hx >= t.x && hx <= t.x + t.w && hy >= t.y && hy <= t.y + t.h)?;
     let cell = t.cell_at(hx, hy)?;
     Some(CellHitDto {
         section: t.section,
@@ -525,7 +687,13 @@ pub fn table_cell_at_placed(doc: &SemanticDoc, placed: &PlacedDoc, page: u32, x:
 /// cell hit; this is the missing member of that family (additive — no new geometry logic). Empty slice →
 /// byte-identical to [`table_cell_at`]. `row`/`col` remain MODEL-GLOBAL (PlacedCell.row is global even in
 /// a split fragment — do NOT re-add `first_row`, issue §좌표계).
-pub fn table_cell_at_with(doc: &SemanticDoc, page: u32, x: f64, y: f64, injected: &[(String, Vec<u8>)]) -> Option<CellHitDto> {
+pub fn table_cell_at_with(
+    doc: &SemanticDoc,
+    page: u32,
+    x: f64,
+    y: f64,
+    injected: &[(String, Vec<u8>)],
+) -> Option<CellHitDto> {
     table_cell_at_placed(doc, &place(doc, injected), page, x, y)
 }
 
@@ -541,17 +709,39 @@ pub struct CellBox {
     pub h: f64,
 }
 
-pub fn table_cell_box(doc: &SemanticDoc, section: usize, block: usize, row: usize, col: usize) -> Option<CellBox> {
+pub fn table_cell_box(
+    doc: &SemanticDoc,
+    section: usize,
+    block: usize,
+    row: usize,
+    col: usize,
+) -> Option<CellBox> {
     table_cell_box_placed(&place(doc, &[]), section, block, row, col)
 }
 
 /// [`table_cell_box`] against an already-placed document (issue 025 cache surface).
-pub fn table_cell_box_placed(placed: &PlacedDoc, section: usize, block: usize, row: usize, col: usize) -> Option<CellBox> {
+pub fn table_cell_box_placed(
+    placed: &PlacedDoc,
+    section: usize,
+    block: usize,
+    row: usize,
+    col: usize,
+) -> Option<CellBox> {
     let k = HWPUNIT_PER_PX;
     for (pi, pg) in placed.pages.iter().enumerate() {
-        for t in pg.tables.iter().filter(|t| t.section == section && t.block == block) {
+        for t in pg
+            .tables
+            .iter()
+            .filter(|t| t.section == section && t.block == block)
+        {
             if let Some(cell) = t.cells.iter().find(|c| c.row == row && c.col == col) {
-                return Some(CellBox { page: pi as u32, x: cell.x / k, y: cell.y / k, w: cell.w / k, h: cell.h / k });
+                return Some(CellBox {
+                    page: pi as u32,
+                    x: cell.x / k,
+                    y: cell.y / k,
+                    w: cell.w / k,
+                    h: cell.h / k,
+                });
             }
         }
     }
@@ -589,16 +779,39 @@ pub struct CellTextHitDto {
 
 fn cell_caret_dto(r: hwp_typeset::CellCaretRect) -> CellCaretDto {
     let k = HWPUNIT_PER_PX;
-    CellCaretDto { page: r.page as u32, x: r.x / k, top: r.top / k, height: r.height / k }
+    CellCaretDto {
+        page: r.page as u32,
+        x: r.x / k,
+        top: r.top / k,
+        height: r.height / k,
+    }
 }
 
 /// Cell-addressed caret rect (issue 053): the caret geometry at `(section, block, row, col, para,
 /// offset)` in own-render PX, or `None` when the address doesn't resolve (018 null policy). A
 /// past-end `offset` CLAMPS to the paragraph end and returns a rect — never `None` for it.
-pub fn cell_caret_rect(doc: &SemanticDoc, section: usize, block: usize, row: usize, col: usize, para: usize, offset: usize) -> Option<CellCaretDto> {
+pub fn cell_caret_rect(
+    doc: &SemanticDoc,
+    section: usize,
+    block: usize,
+    row: usize,
+    col: usize,
+    para: usize,
+    offset: usize,
+) -> Option<CellCaretDto> {
     let fonts = own_render_fonts();
     let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
-    cell_caret_rect_placed(doc, &placed, fonts.as_ref(), section, block, row, col, para, offset)
+    cell_caret_rect_placed(
+        doc,
+        &placed,
+        fonts.as_ref(),
+        section,
+        block,
+        row,
+        col,
+        para,
+        offset,
+    )
 }
 
 /// [`cell_caret_rect`] against an already-placed document (issue 025 cache surface). Pass the SAME
@@ -615,7 +828,8 @@ pub fn cell_caret_rect_placed(
     para: usize,
     offset: usize,
 ) -> Option<CellCaretDto> {
-    hwp_typeset::cell_caret_rect(doc, placed, fonts, section, block, row, col, para, offset).map(cell_caret_dto)
+    hwp_typeset::cell_caret_rect(doc, placed, fonts, section, block, row, col, para, offset)
+        .map(cell_caret_dto)
 }
 
 /// Cell text hit (issue 053): resolve a PAGE-LOCAL px click to the cell-text caret target under it —
@@ -638,15 +852,17 @@ pub fn cell_text_hit_placed(
     y: f64,
 ) -> Option<CellTextHitDto> {
     let k = HWPUNIT_PER_PX;
-    hwp_typeset::cell_text_hit(doc, placed, fonts, page as usize, x * k, y * k).map(|h| CellTextHitDto {
-        section: h.section,
-        block: h.block,
-        row: h.row,
-        col: h.col,
-        para: h.para,
-        offset: h.offset,
-        para_len: h.para_len,
-        caret: cell_caret_dto(h.caret),
+    hwp_typeset::cell_text_hit(doc, placed, fonts, page as usize, x * k, y * k).map(|h| {
+        CellTextHitDto {
+            section: h.section,
+            block: h.block,
+            row: h.row,
+            col: h.col,
+            para: h.para,
+            offset: h.offset,
+            para_len: h.para_len,
+            caret: cell_caret_dto(h.caret),
+        }
     })
 }
 
@@ -654,16 +870,34 @@ pub fn cell_text_hit_placed(
 /// x's the column-resize handles are drawn on. `cols + 1` absolute px boundaries from the table left to
 /// the table right, derived from `column_offsets` so they land exactly on the drawn grid. `None` if the
 /// table isn't on the page.
-pub fn table_col_boundaries(doc: &SemanticDoc, page: u32, section: usize, block: usize) -> Option<Vec<f64>> {
+pub fn table_col_boundaries(
+    doc: &SemanticDoc,
+    page: u32,
+    section: usize,
+    block: usize,
+) -> Option<Vec<f64>> {
     table_col_boundaries_placed(doc, &place(doc, &[]), page, section, block)
 }
 
 /// [`table_col_boundaries`] against an already-placed document (issue 025 cache surface). `doc` is still
 /// read for the model table's `column_offsets`.
-pub fn table_col_boundaries_placed(doc: &SemanticDoc, placed: &PlacedDoc, page: u32, section: usize, block: usize) -> Option<Vec<f64>> {
+pub fn table_col_boundaries_placed(
+    doc: &SemanticDoc,
+    placed: &PlacedDoc,
+    page: u32,
+    section: usize,
+    block: usize,
+) -> Option<Vec<f64>> {
     let pg = placed.pages.get(page as usize)?;
-    let pt = pg.tables.iter().find(|t| t.section == section && t.block == block)?;
-    let hwp_model::prelude::Block::Table(model) = doc.sections.get(section).and_then(|s| s.blocks.get(block))? else {
+    let pt = pg
+        .tables
+        .iter()
+        .find(|t| t.section == section && t.block == block)?;
+    let hwp_model::prelude::Block::Table(model) = doc
+        .sections
+        .get(section)
+        .and_then(|s| s.blocks.get(block))?
+    else {
         return None;
     };
     let model = model.edit_target(); // a frame wrapper (자가진단표) → the inner table the grid drew
@@ -676,7 +910,12 @@ pub fn table_col_boundaries_placed(doc: &SemanticDoc, placed: &PlacedDoc, page: 
 
 /// Row-resize geometry (own-render only) — `rows + 1` absolute px y-boundaries of the `block`-th table
 /// on `page`, top→bottom, for the row-height drag handles. `None` when the table isn't on the page.
-pub fn table_row_boundaries(doc: &SemanticDoc, page: u32, section: usize, block: usize) -> Option<Vec<f64>> {
+pub fn table_row_boundaries(
+    doc: &SemanticDoc,
+    page: u32,
+    section: usize,
+    block: usize,
+) -> Option<Vec<f64>> {
     let fonts = own_render_fonts();
     let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
     table_row_boundaries_placed(doc, &placed, fonts.as_ref(), page, section, block)
@@ -695,8 +934,15 @@ pub fn table_row_boundaries_placed(
     block: usize,
 ) -> Option<Vec<f64>> {
     let pg = placed.pages.get(page as usize)?;
-    let pt = pg.tables.iter().find(|t| t.section == section && t.block == block)?;
-    let hwp_model::prelude::Block::Table(model) = doc.sections.get(section).and_then(|s| s.blocks.get(block))? else {
+    let pt = pg
+        .tables
+        .iter()
+        .find(|t| t.section == section && t.block == block)?;
+    let hwp_model::prelude::Block::Table(model) = doc
+        .sections
+        .get(section)
+        .and_then(|s| s.blocks.get(block))?
+    else {
         return None;
     };
     let model = model.edit_target(); // frame wrapper (자가진단표) → the inner table the grid drew
@@ -713,8 +959,17 @@ pub fn table_row_boundaries_placed(
     }
     let base = row_y[f];
     let frag_total = row_y[l] - base;
-    let scale = if frag_total > 0.0 { pt.h / frag_total } else { 1.0 };
-    Some(row_y[f..=l].iter().map(|y| (pt.y + (y - base) * scale) / k).collect())
+    let scale = if frag_total > 0.0 {
+        pt.h / frag_total
+    } else {
+        1.0
+    };
+    Some(
+        row_y[f..=l]
+            .iter()
+            .map(|y| (pt.y + (y - base) * scale) / k)
+            .collect(),
+    )
 }
 
 /// Page geometry in CSS px (own-render only): the page box + the printable-area margins of `page`, for
@@ -763,18 +1018,29 @@ pub struct CharFmt {
 
 /// Read the first run's char format of the `block`-th paragraph (row/col `None`) or the `(row, col)`
 /// cell of that table. `None` if the target/run can't be resolved.
-pub fn char_fmt(doc: &SemanticDoc, section: usize, block: usize, row: Option<usize>, col: Option<usize>) -> Option<CharFmt> {
+pub fn char_fmt(
+    doc: &SemanticDoc,
+    section: usize,
+    block: usize,
+    row: Option<usize>,
+    col: Option<usize>,
+) -> Option<CharFmt> {
     use hwp_model::prelude::Block;
     let sec = doc.sections.get(section)?;
     let blk = sec.blocks.get(block)?;
     let first_run_shape = match (blk, row, col) {
         (Block::Paragraph(p), None, None) => p.runs.first().map(|r| r.char_shape),
-        (Block::Table(t), Some(r), Some(c)) => t.edit_target().cells.iter()
+        (Block::Table(t), Some(r), Some(c)) => t
+            .edit_target()
+            .cells
+            .iter()
             .find(|cell| cell.active && cell.row == r && cell.col == c)
-            .and_then(|cell| cell.blocks.iter().find_map(|b| match b {
-                Block::Paragraph(p) => p.runs.first().map(|run| run.char_shape),
-                _ => None,
-            })),
+            .and_then(|cell| {
+                cell.blocks.iter().find_map(|b| match b {
+                    Block::Paragraph(p) => p.runs.first().map(|run| run.char_shape),
+                    _ => None,
+                })
+            }),
         _ => None,
     };
     let idx = first_run_shape?;
@@ -783,9 +1049,17 @@ pub fn char_fmt(doc: &SemanticDoc, section: usize, block: usize, row: Option<usi
     Some(CharFmt {
         bold: sh.bold,
         italic: sh.italic,
-        size_pt: if sh.height > 0 { sh.height as f32 / 100.0 } else { 10.0 },
+        size_pt: if sh.height > 0 {
+            sh.height as f32 / 100.0
+        } else {
+            10.0
+        },
         font: sh.font_family.clone(),
-        color: if sh.text_color == default_color { None } else { Some(sh.text_color.to_hex()) },
+        color: if sh.text_color == default_color {
+            None
+        } else {
+            Some(sh.text_color.to_hex())
+        },
     })
 }
 
@@ -794,14 +1068,22 @@ pub fn char_fmt(doc: &SemanticDoc, section: usize, block: usize, row: Option<usi
 #[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
 pub struct RunDto {
     pub text: String,
-    #[serde(default)] pub bold: bool,
-    #[serde(default)] pub italic: bool,
-    #[serde(default)] pub underline: bool,
-    #[serde(default)] pub strike: bool,
-    #[serde(default)] pub size_pt: Option<f32>,
-    #[serde(default)] pub color: Option<String>,
-    #[serde(default)] pub highlight: Option<String>,
-    #[serde(default)] pub font: Option<String>,
+    #[serde(default)]
+    pub bold: bool,
+    #[serde(default)]
+    pub italic: bool,
+    #[serde(default)]
+    pub underline: bool,
+    #[serde(default)]
+    pub strike: bool,
+    #[serde(default)]
+    pub size_pt: Option<f32>,
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub highlight: Option<String>,
+    #[serde(default)]
+    pub font: Option<String>,
 }
 impl RunDto {
     pub fn to_run_spec(&self) -> hwp_ops::RunSpec {
@@ -828,14 +1110,32 @@ pub fn run_specs(runs: &[RunDto]) -> Vec<hwp_ops::RunSpec> {
 /// Read ALL styled runs of a target paragraph/cell (per-run shapes) so the WYSIWYG editor can render
 /// them as styled spans. Unlike [`char_fmt`] (first run only), this returns every run. A multi-paragraph
 /// cell's paragraphs are joined by a `\n` run (parity with the cell-text reader).
-pub fn block_runs(doc: &SemanticDoc, section: usize, block: usize, row: Option<usize>, col: Option<usize>) -> Vec<RunDto> {
+pub fn block_runs(
+    doc: &SemanticDoc,
+    section: usize,
+    block: usize,
+    row: Option<usize>,
+    col: Option<usize>,
+) -> Vec<RunDto> {
     use hwp_model::prelude::{Block, CharShape, Inline, Paragraph};
     let default_color = CharShape::default().text_color;
     let read_para = |p: &Paragraph, out: &mut Vec<RunDto>| {
         for run in &p.runs {
-            let sh = doc.char_shapes.get(run.char_shape).cloned().unwrap_or_default();
-            let text: String = run.content.iter()
-                .filter_map(|i| if let Inline::Text(t) = i { Some(t.as_str()) } else { None })
+            let sh = doc
+                .char_shapes
+                .get(run.char_shape)
+                .cloned()
+                .unwrap_or_default();
+            let text: String = run
+                .content
+                .iter()
+                .filter_map(|i| {
+                    if let Inline::Text(t) = i {
+                        Some(t.as_str())
+                    } else {
+                        None
+                    }
+                })
                 .collect();
             out.push(RunDto {
                 text,
@@ -843,15 +1143,27 @@ pub fn block_runs(doc: &SemanticDoc, section: usize, block: usize, row: Option<u
                 italic: sh.italic,
                 underline: sh.underline,
                 strike: sh.strikeout,
-                size_pt: if sh.height > 0 { Some(sh.height as f32 / 100.0) } else { None },
-                color: if sh.text_color == default_color { None } else { Some(sh.text_color.to_hex()) },
+                size_pt: if sh.height > 0 {
+                    Some(sh.height as f32 / 100.0)
+                } else {
+                    None
+                },
+                color: if sh.text_color == default_color {
+                    None
+                } else {
+                    Some(sh.text_color.to_hex())
+                },
                 highlight: None,
                 font: sh.font_family.clone(),
             });
         }
     };
-    let Some(sec) = doc.sections.get(section) else { return Vec::new() };
-    let Some(blk) = sec.blocks.get(block) else { return Vec::new() };
+    let Some(sec) = doc.sections.get(section) else {
+        return Vec::new();
+    };
+    let Some(blk) = sec.blocks.get(block) else {
+        return Vec::new();
+    };
     let mut out: Vec<RunDto> = Vec::new();
     match (blk, row, col) {
         (Block::Paragraph(p), None, None) => read_para(p, &mut out),
@@ -859,12 +1171,19 @@ pub fn block_runs(doc: &SemanticDoc, section: usize, block: usize, row: Option<u
             // Resolve through a 1×1 frame wrapper (자가진단표) to the inner table the user actually
             // clicked, so its nested cells are editable like any top-level cell.
             let t = t.edit_target();
-            if let Some(cell) = t.cells.iter().find(|cc| cc.active && cc.row == r && cc.col == c) {
+            if let Some(cell) = t
+                .cells
+                .iter()
+                .find(|cc| cc.active && cc.row == r && cc.col == c)
+            {
                 let mut first = true;
                 for b in &cell.blocks {
                     if let Block::Paragraph(p) = b {
                         if !first {
-                            out.push(RunDto { text: "\n".into(), ..Default::default() });
+                            out.push(RunDto {
+                                text: "\n".into(),
+                                ..Default::default()
+                            });
                         }
                         read_para(p, &mut out);
                         first = false;
@@ -904,10 +1223,21 @@ pub struct ParaStyleDto {
     pub align: String,
 }
 
-pub fn block_style(doc: &SemanticDoc, section: usize, block: usize, row: Option<usize>, col: Option<usize>) -> BlockStyleDto {
+pub fn block_style(
+    doc: &SemanticDoc,
+    section: usize,
+    block: usize,
+    row: Option<usize>,
+    col: Option<usize>,
+) -> BlockStyleDto {
     use hwp_model::prelude::{Block, HorizontalAlign, Paragraph};
     let align_of = |p: &Paragraph| -> String {
-        match doc.para_shapes.get(p.para_shape).map(|ps| ps.align).unwrap_or_default() {
+        match doc
+            .para_shapes
+            .get(p.para_shape)
+            .map(|ps| ps.align)
+            .unwrap_or_default()
+        {
             HorizontalAlign::Left => "left",
             HorizontalAlign::Right => "right",
             HorizontalAlign::Center => "center",
@@ -922,11 +1252,16 @@ pub fn block_style(doc: &SemanticDoc, section: usize, block: usize, row: Option<
         let right = ps.map(|s| s.right_margin).unwrap_or(0).max(0);
         let indent = ps.map(|s| s.indent).unwrap_or(0);
         let first = indent.max(-left); // 들여(+)/내어(−)쓰기, clamped so line 0 never crosses the inset
-        (left as i32, first as i32, right as i32)
+        (left, first, right)
     };
     let para_style = |p: &Paragraph| -> ParaStyleDto {
         let (l, f, r) = indent_of(p);
-        ParaStyleDto { indent_left: l, indent_first: f, indent_right: r, align: align_of(p) }
+        ParaStyleDto {
+            indent_left: l,
+            indent_first: f,
+            indent_right: r,
+            align: align_of(p),
+        }
     };
     let mut dto = BlockStyleDto {
         shade: None,
@@ -936,13 +1271,21 @@ pub fn block_style(doc: &SemanticDoc, section: usize, block: usize, row: Option<
         indent_right: 0,
         paragraphs: Vec::new(),
     };
-    let Some(sec) = doc.sections.get(section) else { return dto };
-    let Some(blk) = sec.blocks.get(block) else { return dto };
+    let Some(sec) = doc.sections.get(section) else {
+        return dto;
+    };
+    let Some(blk) = sec.blocks.get(block) else {
+        return dto;
+    };
     match (blk, row, col) {
         (Block::Paragraph(p), None, None) => dto.paragraphs.push(para_style(p)),
         (Block::Table(t), Some(r), Some(c)) => {
             let t = t.edit_target(); // frame wrapper (자가진단표) → inner table
-            if let Some(cell) = t.cells.iter().find(|cc| cc.active && cc.row == r && cc.col == c) {
+            if let Some(cell) = t
+                .cells
+                .iter()
+                .find(|cc| cc.active && cc.row == r && cc.col == c)
+            {
                 dto.shade = cell.shade_color.map(|c| c.to_hex());
                 // SAME paragraph iteration as `block_runs` so paragraphs[i] aligns with the i-th editor
                 // block (lockstep — an off-by-one would mis-indent every later line).
@@ -983,7 +1326,10 @@ pub fn emit_html(doc: &SemanticDoc, title: Option<String>) -> String {
 /// Native shells (viewer/CLI) call this — it forwards to [`emit_pdf_with_fonts`] with no injected
 /// fonts, so the discover path (and its bytes) are unchanged.
 #[cfg(feature = "pdf")]
-pub fn emit_pdf(doc: &SemanticDoc, title: Option<String>) -> Result<hwp_export::pdf::PdfExport, String> {
+pub fn emit_pdf(
+    doc: &SemanticDoc,
+    title: Option<String>,
+) -> Result<hwp_export::pdf::PdfExport, String> {
     emit_pdf_with_fonts(doc, title, &[])
 }
 
@@ -1079,7 +1425,13 @@ pub fn stash_image(
         .and_then(|s| s.to_str())
         .unwrap_or("image.png")
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     let dir = std::env::temp_dir().join("tfhwp_imgs");
     std::fs::create_dir_all(&dir).map_err(|e| format!("임시 폴더 생성 실패: {e}"))?;
@@ -1134,8 +1486,15 @@ pub fn anchor_directive(anchors_json: Option<&str>, instruction: &str) -> Option
                 coord.push_str(&format!(", col {c0}..={c1}"));
             }
         }
-        let label = if a.label.is_empty() { a.kind.as_str() } else { a.label.as_str() };
-        lines.push_str(&format!("- [s{}/b{}] {label} ({coord})\n", a.section, a.block));
+        let label = if a.label.is_empty() {
+            a.kind.as_str()
+        } else {
+            a.label.as_str()
+        };
+        lines.push_str(&format!(
+            "- [s{}/b{}] {label} ({coord})\n",
+            a.section, a.block
+        ));
     }
     Some(format!(
         "[편집 대상 앵커 — 사용자가 문서에서 직접 지정한 위치입니다. 아래 앵커가 가리키는 곳만 편집하고, \
@@ -1149,12 +1508,20 @@ pub fn anchor_directive(anchors_json: Option<&str>, instruction: &str) -> Option
 /// The set of rows that MUST NOT be overwritten by a "표 채우기" preset for the table at
 /// `(section, block)`: the header row (row 0) plus every row that carries a background shade in the
 /// live document. Detecting shade needs the doc, so this reads the model directly.
-fn protected_rows(doc: &SemanticDoc, section: usize, block: usize) -> std::collections::BTreeSet<usize> {
+fn protected_rows(
+    doc: &SemanticDoc,
+    section: usize,
+    block: usize,
+) -> std::collections::BTreeSet<usize> {
     use hwp_model::document::Block;
     let mut rows = std::collections::BTreeSet::new();
     rows.insert(0); // the header row is always protected
     if let Some(Block::Table(t)) = doc.sections.get(section).and_then(|s| s.blocks.get(block)) {
-        for cell in t.cells.iter().filter(|c| c.active && c.shade_color.is_some()) {
+        for cell in t
+            .cells
+            .iter()
+            .filter(|c| c.active && c.shade_color.is_some())
+        {
             rows.insert(cell.row);
         }
     }
@@ -1191,9 +1558,14 @@ pub fn protect_table_header_rows(
     }
     let before = ops.len();
     ops.retain(|op| match op {
-        hwp_ops::Op::SetTableCell { section, index, row, .. } => {
-            !guard.get(&(*section, *index)).is_some_and(|rows| rows.contains(row))
-        }
+        hwp_ops::Op::SetTableCell {
+            section,
+            index,
+            row,
+            ..
+        } => !guard
+            .get(&(*section, *index))
+            .is_some_and(|rows| rows.contains(row)),
         _ => true,
     });
     before - ops.len()
@@ -1216,7 +1588,10 @@ mod tests {
             blocks: vec![Block::Paragraph(Paragraph::default())],
             ..Default::default()
         });
-        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
+        let cell = |t: &str| CellSpec {
+            text: t.into(),
+            ..Default::default()
+        };
         hwp_ops::apply(
             &mut doc,
             &Op::InsertTableAt {
@@ -1239,7 +1614,10 @@ mod tests {
             index: 1,
             row,
             col,
-            runs: vec![RunSpec { text: "x".into(), ..Default::default() }],
+            runs: vec![RunSpec {
+                text: "x".into(),
+                ..Default::default()
+            }],
         }
     }
 
@@ -1249,11 +1627,17 @@ mod tests {
         // Shade the whole SECOND body row (model row 2) → it becomes protected alongside the header.
         hwp_ops::apply(
             &mut doc,
-            &Op::SetTableCellShade { section: 0, index: 1, sel: CellSel::Row(2), shade: Some("#FFF2CC".into()) },
+            &Op::SetTableCellShade {
+                section: 0,
+                index: 1,
+                sel: CellSel::Row(2),
+                shade: Some("#FFF2CC".into()),
+            },
         )
         .expect("shade row 2");
 
-        let anchors = r#"[{"kind":"range","section":0,"block":1,"rows":[0,2],"cols":[0,1],"label":"표"}]"#;
+        let anchors =
+            r#"[{"kind":"range","section":0,"block":1,"rows":[0,2],"cols":[0,1],"label":"표"}]"#;
         let mut ops = vec![
             fill(0, 0), // header → stripped
             fill(0, 1), // header → stripped
@@ -1264,7 +1648,9 @@ mod tests {
         let blocked = protect_table_header_rows(&doc, &mut ops, Some(anchors));
         assert_eq!(blocked, 3, "row 0 (header ×2) + row 2 (shaded ×1) stripped");
         assert_eq!(ops.len(), 2, "only the two unshaded body writes survive");
-        assert!(ops.iter().all(|o| matches!(o, Op::SetTableCell { row: 1, .. })));
+        assert!(ops
+            .iter()
+            .all(|o| matches!(o, Op::SetTableCell { row: 1, .. })));
     }
 
     #[test]
@@ -1291,23 +1677,45 @@ mod tests {
             ..Default::default()
         });
         // block 0 = header paragraph.
-        hwp_ops::apply(&mut doc, &Op::SetParagraphText { section: 0, block: 0, text: "머리말 문단입니다".into() })
-            .expect("header text");
+        hwp_ops::apply(
+            &mut doc,
+            &Op::SetParagraphText {
+                section: 0,
+                block: 0,
+                text: "머리말 문단입니다".into(),
+            },
+        )
+        .expect("header text");
         // block 1 = table.
-        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
+        let cell = |t: &str| CellSpec {
+            text: t.into(),
+            ..Default::default()
+        };
         hwp_ops::apply(
             &mut doc,
             &Op::InsertTableAt {
                 section: 0,
                 index: 1,
-                rows: vec![vec![cell("항목"), cell("내용")], vec![cell("A"), cell("B")], vec![cell("C"), cell("D")]],
+                rows: vec![
+                    vec![cell("항목"), cell("내용")],
+                    vec![cell("A"), cell("B")],
+                    vec![cell("C"), cell("D")],
+                ],
             },
         )
         .expect("seed table");
         // block 2 = footer paragraph (appended after the table).
         hwp_ops::apply(
             &mut doc,
-            &Op::InsertParagraphAt { section: 0, index: 2, runs: vec![RunSpec { text: "꼬리말 문단입니다".into(), ..Default::default() }], para: ParaSpec::default() },
+            &Op::InsertParagraphAt {
+                section: 0,
+                index: 2,
+                runs: vec![RunSpec {
+                    text: "꼬리말 문단입니다".into(),
+                    ..Default::default()
+                }],
+                para: ParaSpec::default(),
+            },
         )
         .expect("footer para");
         doc
@@ -1318,28 +1726,74 @@ mod tests {
         let doc = doc_with_stacked_blocks();
         // A generous rect covering the whole page (px units, page-local) hits every stacked block.
         let all = blocks_in_rect(&doc, 0, 0.0, 0.0, 100_000.0, 100_000.0);
-        let anchors: std::collections::BTreeSet<(usize, usize)> = all.iter().map(|b| (b.section, b.block)).collect();
-        assert!(anchors.contains(&(0, 0)), "header paragraph is in the full-page marquee");
-        assert!(anchors.contains(&(0, 1)), "table is in the full-page marquee");
-        assert!(anchors.contains(&(0, 2)), "footer paragraph is in the full-page marquee");
-        assert_eq!(anchors.len(), all.len(), "no duplicate (section, block) chips");
+        let anchors: std::collections::BTreeSet<(usize, usize)> =
+            all.iter().map(|b| (b.section, b.block)).collect();
+        assert!(
+            anchors.contains(&(0, 0)),
+            "header paragraph is in the full-page marquee"
+        );
+        assert!(
+            anchors.contains(&(0, 1)),
+            "table is in the full-page marquee"
+        );
+        assert!(
+            anchors.contains(&(0, 2)),
+            "footer paragraph is in the full-page marquee"
+        );
+        assert_eq!(
+            anchors.len(),
+            all.len(),
+            "no duplicate (section, block) chips"
+        );
 
         // Returned boxes are px (page-local): within the page's px extent, never HWPUNIT-scale.
         let geom = page_geometry(&doc, 0).expect("page 0 geometry");
         for b in &all {
-            assert!(b.x >= -0.5 && b.x + b.w <= geom.w + 1.0, "band x in page px [0,{}]: got {}..{}", geom.w, b.x, b.x + b.w);
-            assert!(b.y >= -0.5 && b.y + b.h <= geom.h + 1.0, "band y in page px [0,{}]: got {}..{}", geom.h, b.y, b.y + b.h);
+            assert!(
+                b.x >= -0.5 && b.x + b.w <= geom.w + 1.0,
+                "band x in page px [0,{}]: got {}..{}",
+                geom.w,
+                b.x,
+                b.x + b.w
+            );
+            assert!(
+                b.y >= -0.5 && b.y + b.h <= geom.h + 1.0,
+                "band y in page px [0,{}]: got {}..{}",
+                geom.h,
+                b.y,
+                b.y + b.h
+            );
         }
 
         // A narrow rect hugging ONLY the table band's vertical extent is a strict subset (excludes the
         // footer paragraph below it). Use the table's own returned box as the probe rect.
-        let table = all.iter().find(|b| b.kind == "table").expect("table block present");
+        let table = all
+            .iter()
+            .find(|b| b.kind == "table")
+            .expect("table block present");
         let mid_y = table.y + table.h / 2.0;
-        let narrow = blocks_in_rect(&doc, 0, table.x + 1.0, mid_y - 1.0, table.x + table.w - 1.0, mid_y + 1.0);
-        let narrow_anchors: std::collections::BTreeSet<(usize, usize)> = narrow.iter().map(|b| (b.section, b.block)).collect();
-        assert!(narrow_anchors.contains(&(0, 1)), "the narrow rect over the table still hits the table");
-        assert!(!narrow_anchors.contains(&(0, 2)), "the narrow rect does NOT reach the footer paragraph");
-        assert!(narrow.len() < all.len(), "narrow marquee is a strict subset of the full-page marquee");
+        let narrow = blocks_in_rect(
+            &doc,
+            0,
+            table.x + 1.0,
+            mid_y - 1.0,
+            table.x + table.w - 1.0,
+            mid_y + 1.0,
+        );
+        let narrow_anchors: std::collections::BTreeSet<(usize, usize)> =
+            narrow.iter().map(|b| (b.section, b.block)).collect();
+        assert!(
+            narrow_anchors.contains(&(0, 1)),
+            "the narrow rect over the table still hits the table"
+        );
+        assert!(
+            !narrow_anchors.contains(&(0, 2)),
+            "the narrow rect does NOT reach the footer paragraph"
+        );
+        assert!(
+            narrow.len() < all.len(),
+            "narrow marquee is a strict subset of the full-page marquee"
+        );
     }
 
     #[test]
@@ -1347,7 +1801,11 @@ mod tests {
         // The golden invariant (issue 022 §1): an EMPTY injection must be byte-identical to the
         // discover/Approx path — the injection is a NEW entry point, the old one is untouched.
         let doc = doc_with_stacked_blocks();
-        assert_eq!(render_svg_with(&doc, &[]), render_svg(&doc), "empty injection == render_svg");
+        assert_eq!(
+            render_svg_with(&doc, &[]),
+            render_svg(&doc),
+            "empty injection == render_svg"
+        );
         // Geometry `_with` variants likewise agree with their bare counterparts on an empty slice.
         assert_eq!(
             blocks_in_rect_with(&doc, 0, 0.0, 0.0, 1e5, 1e5, &[]).len(),
@@ -1358,7 +1816,10 @@ mod tests {
     #[test]
     fn blocks_in_rect_empty_on_out_of_range_page() {
         let doc = doc_with_stacked_blocks();
-        assert!(blocks_in_rect(&doc, 99, 0.0, 0.0, 100_000.0, 100_000.0).is_empty(), "off-page marquee → empty vec, not a panic");
+        assert!(
+            blocks_in_rect(&doc, 99, 0.0, 0.0, 100_000.0, 100_000.0).is_empty(),
+            "off-page marquee → empty vec, not a panic"
+        );
     }
 
     /// A section-0 doc that is ONE tall single-column table on a SHORT page, so `place_doc` splits it
@@ -1377,13 +1838,23 @@ mod tests {
                 col: 0,
                 active: true,
                 blocks: vec![Block::Paragraph(Paragraph {
-                    runs: vec![Run { char_shape: 0, content: vec![Inline::Text(format!("행{r}"))], ..Default::default() }],
+                    runs: vec![Run {
+                        char_shape: 0,
+                        content: vec![Inline::Text(format!("행{r}"))],
+                        ..Default::default()
+                    }],
                     ..Default::default()
                 })],
                 ..Default::default()
             })
             .collect();
-        let table = Table { rows, cols: 1, cells, col_widths: vec![1], ..Default::default() };
+        let table = Table {
+            rows,
+            cols: 1,
+            cells,
+            col_widths: vec![1],
+            ..Default::default()
+        };
         let mut sec = Section::default();
         sec.page.width = 60000;
         sec.page.height = page_height;
@@ -1407,15 +1878,28 @@ mod tests {
         let doc = tall_split_table_doc(rows, 5000);
         let target_row = rows - 3; // a high row → guaranteed onto a later fragment
         let bx = table_cell_box(&doc, 0, 0, target_row, 0).expect("target row is placed");
-        assert!(bx.page > 0, "row {target_row} must land on a later fragment (page>0), got page {}", bx.page);
-        let hit = table_cell_at(&doc, bx.page, bx.x + bx.w / 2.0, bx.y + bx.h / 2.0).expect("cell center hits a cell");
-        assert_eq!(hit.row, target_row, "split fragment reports the GLOBAL row (no first_row double-add)");
+        assert!(
+            bx.page > 0,
+            "row {target_row} must land on a later fragment (page>0), got page {}",
+            bx.page
+        );
+        let hit = table_cell_at(&doc, bx.page, bx.x + bx.w / 2.0, bx.y + bx.h / 2.0)
+            .expect("cell center hits a cell");
+        assert_eq!(
+            hit.row, target_row,
+            "split fragment reports the GLOBAL row (no first_row double-add)"
+        );
         assert_eq!(hit.col, 0);
         assert_eq!(hit.rows, rows, "the whole-table row count rides along");
-        assert_eq!(hit.text, format!("행{target_row}"), "the hit's snippet is that global cell's text");
+        assert_eq!(
+            hit.text,
+            format!("행{target_row}"),
+            "the hit's snippet is that global cell's text"
+        );
         // A low row still resolves to its own global index (round-trip on page 0 too).
         let b0 = table_cell_box(&doc, 0, 0, 1, 0).expect("row 1 placed");
-        let h0 = table_cell_at(&doc, b0.page, b0.x + b0.w / 2.0, b0.y + b0.h / 2.0).expect("row 1 hit");
+        let h0 =
+            table_cell_at(&doc, b0.page, b0.x + b0.w / 2.0, b0.y + b0.h / 2.0).expect("row 1 hit");
         assert_eq!(h0.row, 1, "row 1 → global row 1");
     }
 
@@ -1429,11 +1913,20 @@ mod tests {
         let (px, py) = (bx.x + bx.w / 2.0, bx.y + bx.h / 2.0);
         let bare = table_cell_at(&doc, bx.page, px, py).expect("bare hit");
         let with = table_cell_at_with(&doc, bx.page, px, py, &[]).expect("with-empty hit");
-        assert_eq!((with.section, with.block, with.row, with.col), (bare.section, bare.block, bare.row, bare.col));
+        assert_eq!(
+            (with.section, with.block, with.row, with.col),
+            (bare.section, bare.block, bare.row, bare.col)
+        );
         assert_eq!(with.text, bare.text);
         // A miss returns None (not a panic) on both paths (018 null policy).
-        assert!(table_cell_at(&doc, 999, 0.0, 0.0).is_none(), "off-page → None");
-        assert!(table_cell_at_with(&doc, 0, -1.0, -1.0, &[]).is_none(), "off-table → None");
+        assert!(
+            table_cell_at(&doc, 999, 0.0, 0.0).is_none(),
+            "off-page → None"
+        );
+        assert!(
+            table_cell_at_with(&doc, 0, -1.0, -1.0, &[]).is_none(),
+            "off-table → None"
+        );
     }
 
     #[test]
@@ -1457,7 +1950,8 @@ mod tests {
         // blocks_in_rect over the whole page.
         assert_eq!(
             serde_json::to_string(&blocks_in_rect(&doc, 0, 0.0, 0.0, 1e5, 1e5)).unwrap(),
-            serde_json::to_string(&blocks_in_rect_placed(&doc, &placed, 0, 0.0, 0.0, 1e5, 1e5)).unwrap(),
+            serde_json::to_string(&blocks_in_rect_placed(&doc, &placed, 0, 0.0, 0.0, 1e5, 1e5))
+                .unwrap(),
         );
         // page geometry.
         assert_eq!(
@@ -1495,7 +1989,14 @@ mod tests {
         let (px, py) = (bx.x + bx.w / 2.0, bx.y + bx.h / 2.0);
         assert_eq!(
             serde_json::to_string(&table_cell_at_with(&doc, bx.page, px, py, &[])).unwrap(),
-            serde_json::to_string(&table_cell_at_placed(&doc, &place(&doc, &[]), bx.page, px, py)).unwrap(),
+            serde_json::to_string(&table_cell_at_placed(
+                &doc,
+                &place(&doc, &[]),
+                bx.page,
+                px,
+                py
+            ))
+            .unwrap(),
         );
         // table_cell_box likewise round-trips through the placed surface.
         assert_eq!(
@@ -1511,12 +2012,20 @@ mod tests {
         let doc = doc_with_table();
         let anchors = r#"[{"kind":"table","section":0,"block":1,"label":"표"}]"#;
         let mut ops = vec![
-            Op::SetTableCellShade { section: 0, index: 1, sel: CellSel::Row(0), shade: Some("#D9E1F2".into()) },
+            Op::SetTableCellShade {
+                section: 0,
+                index: 1,
+                sel: CellSel::Row(0),
+                shade: Some("#D9E1F2".into()),
+            },
             fill(0, 0), // header text → stripped
         ];
         let blocked = protect_table_header_rows(&doc, &mut ops, Some(anchors));
         assert_eq!(blocked, 1);
         assert_eq!(ops.len(), 1);
-        assert!(matches!(ops[0], Op::SetTableCellShade { .. }), "shade op is preserved");
+        assert!(
+            matches!(ops[0], Op::SetTableCellShade { .. }),
+            "shade op is preserved"
+        );
     }
 }

@@ -88,7 +88,10 @@ pub const HWP5_CONVERSION_NOTICE: &str = "HWP5(.hwp) → HWPX 변환: 본문 텍
 /// rhwp`) and serializes through the from-scratch synthesis path; an HWPX parses normally.
 /// `was_converted` is true for `.hwp`/`.hwp3` so callers can surface [`HWP5_CONVERSION_NOTICE`].
 pub fn open_as_hwpx(bytes: &[u8]) -> Result<(SemanticDoc, bool)> {
-    let was_converted = matches!(Engine::detect(bytes), SourceFormat::Hwp5 | SourceFormat::Hwp3);
+    let was_converted = matches!(
+        Engine::detect(bytes),
+        SourceFormat::Hwp5 | SourceFormat::Hwp3
+    );
     Ok((Engine::open(bytes)?, was_converted))
 }
 
@@ -125,8 +128,14 @@ pub fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()>
     // itself. canonicalize fails for a not-yet-existing target (first save) — then write at `path`.
     let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
 
-    let dir = target.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| std::path::Path::new("."));
-    let stem = target.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let dir = target
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let stem = target
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let tmp = dir.join(format!(".{stem}.tmp.{}.{n}", std::process::id()));
 
@@ -186,7 +195,9 @@ pub fn render_page_svg(bytes: &[u8], page: u32) -> Result<String> {
 /// Score OUR layout engine (line-breaking + pagination) against Hancom's actual layout — the
 /// linesegs rhwp parses out of the original `.hwp`. The measurable oracle for the layout engine.
 #[cfg(feature = "rhwp")]
-pub use hwp_rhwp::{layout_fidelity, table_row_audit, LayoutFidelity, RowAudit, TableRowAuditReport};
+pub use hwp_rhwp::{
+    layout_fidelity, table_row_audit, LayoutFidelity, RowAudit, TableRowAuditReport,
+};
 
 /// Persistent layout/render cache (engine seam 1): reuse ONE parsed document across page renders
 /// so scrolling does not re-parse per page. Hold one per open document; it self-invalidates when
@@ -198,8 +209,9 @@ pub use hwp_rhwp::RenderCache;
 /// caret-rect over them, and the stable-key↔NodeId resolver. See `hwp_rhwp` for the model + caveats.
 #[cfg(feature = "rhwp")]
 pub use hwp_rhwp::{
-    caret_rect_in_page, hit_test_page, node_to_section_para_ord, page_glyph_boxes, page_text_anchors,
-    parse_stable_key, resolve_key_to_node, CaretRect, GlyphBox, HitTarget, ParsedKey, TextAnchor,
+    caret_rect_in_page, hit_test_page, node_to_section_para_ord, page_glyph_boxes,
+    page_text_anchors, parse_stable_key, resolve_key_to_node, CaretRect, GlyphBox, HitTarget,
+    ParsedKey, TextAnchor,
 };
 
 #[cfg(test)]
@@ -208,7 +220,10 @@ mod inplace_tests {
     use hwp_ops::{apply, EditSession, Op, Range};
 
     fn showcase() -> Vec<u8> {
-        let p = concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/hwpx/FormattingShowcase.hwpx");
+        let p = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/hwpx/FormattingShowcase.hwpx"
+        );
         std::fs::read(p).unwrap()
     }
 
@@ -248,23 +263,40 @@ mod inplace_tests {
             Block::Paragraph(p) => {
                 let id = p.id?;
                 let src = p.source.as_ref()?;
-                (src.simple && p.runs.len() == 1 && para_text(p).contains("표와 셀 병합")).then_some(id)
+                (src.simple && p.runs.len() == 1 && para_text(p).contains("표와 셀 병합"))
+                    .then_some(id)
             }
             _ => None,
         });
         let node = target.expect("found an editable single-run paragraph");
 
-        apply(&mut doc, &Op::SetCharPr {
-            range: Range { start: node, end: node },
-            shape: CharShape { bold: true, text_color: Color::from_hex("#C00000").unwrap(), ..Default::default() },
-        })
+        apply(
+            &mut doc,
+            &Op::SetCharPr {
+                range: Range {
+                    start: node,
+                    end: node,
+                },
+                shape: CharShape {
+                    bold: true,
+                    text_color: Color::from_hex("#C00000").unwrap(),
+                    ..Default::default()
+                },
+            },
+        )
         .unwrap();
 
         let out = serialize_hwpx(&doc).unwrap();
         assert!(validate_hwpx(&out).ok, "editor-open-safety");
         let doc2 = Engine::open(&out).unwrap();
-        assert!(doc2.plain_text().contains("표와 셀 병합"), "edited text preserved");
-        assert!(doc2.plain_text().contains("형식 테스트 문서"), "other content preserved");
+        assert!(
+            doc2.plain_text().contains("표와 셀 병합"),
+            "edited text preserved"
+        );
+        assert!(
+            doc2.plain_text().contains("형식 테스트 문서"),
+            "other content preserved"
+        );
         let _ = std::fs::write(std::env::temp_dir().join("setcharpr-op.hwpx"), &out);
     }
 
@@ -280,10 +312,19 @@ mod inplace_tests {
             _ => None,
         });
         if let Some(node) = structural {
-            let r = apply(&mut doc, &Op::SetCharPr {
-                range: Range { start: node, end: node },
-                shape: CharShape { bold: true, ..Default::default() },
-            });
+            let r = apply(
+                &mut doc,
+                &Op::SetCharPr {
+                    range: Range {
+                        start: node,
+                        end: node,
+                    },
+                    shape: CharShape {
+                        bold: true,
+                        ..Default::default()
+                    },
+                },
+            );
             assert!(r.is_err(), "structural paragraph edit is refused");
         }
     }
@@ -296,23 +337,38 @@ mod inplace_tests {
         let mut doc = Engine::open(&showcase()).unwrap();
         let node = first_simple_node(&doc);
         // Insert text (incl. XML-special chars) at the start of the paragraph.
-        apply(&mut doc, &Op::InsertText {
-            at: Caret { node, offset: 0 },
-            text: "A&B<C 삽입 ".into(),
-        })
+        apply(
+            &mut doc,
+            &Op::InsertText {
+                at: Caret { node, offset: 0 },
+                text: "A&B<C 삽입 ".into(),
+            },
+        )
         .unwrap();
         let out = serialize_hwpx(&doc).unwrap();
         assert!(validate_hwpx(&out).ok, "open-safety after insert");
         let doc2 = Engine::open(&out).unwrap();
-        assert!(doc2.plain_text().contains("A&B<C 삽입"), "inserted text (with &/< ) round-trips");
+        assert!(
+            doc2.plain_text().contains("A&B<C 삽입"),
+            "inserted text (with &/< ) round-trips"
+        );
 
         // Now delete the first 3 chars of that same paragraph and re-export.
         let node2 = first_simple_node(&doc2);
         let mut doc2 = doc2;
-        apply(&mut doc2, &Op::DeleteRange {
-            start: Caret { node: node2, offset: 0 },
-            end: Caret { node: node2, offset: 3 },
-        })
+        apply(
+            &mut doc2,
+            &Op::DeleteRange {
+                start: Caret {
+                    node: node2,
+                    offset: 0,
+                },
+                end: Caret {
+                    node: node2,
+                    offset: 3,
+                },
+            },
+        )
         .unwrap();
         let out2 = serialize_hwpx(&doc2).unwrap();
         assert!(validate_hwpx(&out2).ok, "open-safety after delete");
@@ -330,10 +386,15 @@ mod inplace_tests {
             Block::Paragraph(p) => {
                 let id = p.id?;
                 let src = p.source.as_ref()?;
-                let chars: usize = p.runs.iter().flat_map(|r| r.content.iter()).map(|i| match i {
-                    Inline::Text(t) => t.chars().count(),
-                    _ => 0,
-                }).sum();
+                let chars: usize = p
+                    .runs
+                    .iter()
+                    .flat_map(|r| r.content.iter())
+                    .map(|i| match i {
+                        Inline::Text(t) => t.chars().count(),
+                        _ => 0,
+                    })
+                    .sum();
                 (src.simple && chars >= 4).then_some((id, chars))
             }
             _ => None,
@@ -341,18 +402,29 @@ mod inplace_tests {
         let (node, chars) = target.expect("a simple paragraph with >=4 chars");
         let before_text = doc.plain_text();
 
-        apply(&mut doc, &Op::SetRunCharPr {
-            para: node,
-            start: 1,
-            end: (chars - 1).min(3),
-            shape: CharShape { bold: true, text_color: Color::from_hex("#1F4E79").unwrap(), ..Default::default() },
-        })
+        apply(
+            &mut doc,
+            &Op::SetRunCharPr {
+                para: node,
+                start: 1,
+                end: (chars - 1).min(3),
+                shape: CharShape {
+                    bold: true,
+                    text_color: Color::from_hex("#1F4E79").unwrap(),
+                    ..Default::default()
+                },
+            },
+        )
         .unwrap();
 
         let out = serialize_hwpx(&doc).unwrap();
         assert!(validate_hwpx(&out).ok, "editor-open-safety");
         let doc2 = Engine::open(&out).unwrap();
-        assert_eq!(doc2.plain_text(), before_text, "sub-range formatting preserves all text");
+        assert_eq!(
+            doc2.plain_text(),
+            before_text,
+            "sub-range formatting preserves all text"
+        );
         let _ = std::fs::write(std::env::temp_dir().join("setruncharpr-op.hwpx"), &out);
     }
 
@@ -363,8 +435,21 @@ mod inplace_tests {
         let mut doc = Engine::open(&showcase()).unwrap();
         let node = first_simple_node(&doc);
 
-        let shape = ParaShape { align: HorizontalAlign::Center, ..Default::default() };
-        apply(&mut doc, &Op::SetParaPr { range: Range { start: node, end: node }, shape }).unwrap();
+        let shape = ParaShape {
+            align: HorizontalAlign::Center,
+            ..Default::default()
+        };
+        apply(
+            &mut doc,
+            &Op::SetParaPr {
+                range: Range {
+                    start: node,
+                    end: node,
+                },
+                shape,
+            },
+        )
+        .unwrap();
 
         // A second simple paragraph gets a named style.
         let node2 = doc.sections[0].blocks.iter().find_map(|b| match b {
@@ -375,13 +460,23 @@ mod inplace_tests {
             _ => None,
         });
         if let Some(n2) = node2 {
-            apply(&mut doc, &Op::ApplyStyle { range: Range { start: n2, end: n2 }, style: "개요 1".into() }).unwrap();
+            apply(
+                &mut doc,
+                &Op::ApplyStyle {
+                    range: Range { start: n2, end: n2 },
+                    style: "개요 1".into(),
+                },
+            )
+            .unwrap();
         }
 
         let out = serialize_hwpx(&doc).unwrap();
         assert!(validate_hwpx(&out).ok, "editor-open-safety");
         let doc2 = Engine::open(&out).unwrap();
-        assert!(doc2.plain_text().contains("형식 테스트 문서"), "content preserved");
+        assert!(
+            doc2.plain_text().contains("형식 테스트 문서"),
+            "content preserved"
+        );
         let _ = std::fs::write(std::env::temp_dir().join("setparapr-op.hwpx"), &out);
     }
 
@@ -400,23 +495,88 @@ mod inplace_tests {
             _ => None,
         });
         let Some(node) = structural else { return };
-        let r = Range { start: node, end: node };
+        let r = Range {
+            start: node,
+            end: node,
+        };
 
         // Open-tag-only edits succeed.
-        apply(&mut doc, &Op::SetParaPr { range: r.clone(), shape: ParaShape { align: HorizontalAlign::Center, ..Default::default() } }).unwrap();
-        apply(&mut doc, &Op::ApplyStyle { range: r.clone(), style: "개요 1".into() }).unwrap();
+        apply(
+            &mut doc,
+            &Op::SetParaPr {
+                range: r.clone(),
+                shape: ParaShape {
+                    align: HorizontalAlign::Center,
+                    ..Default::default()
+                },
+            },
+        )
+        .unwrap();
+        apply(
+            &mut doc,
+            &Op::ApplyStyle {
+                range: r.clone(),
+                style: "개요 1".into(),
+            },
+        )
+        .unwrap();
 
         // Body-rebuilding edits are refused.
-        assert!(apply(&mut doc, &Op::SetCharPr { range: r.clone(), shape: CharShape { bold: true, ..Default::default() } }).is_err());
-        assert!(apply(&mut doc, &Op::SetRunCharPr { para: node, start: 0, end: 1, shape: CharShape { bold: true, ..Default::default() } }).is_err());
-        assert!(apply(&mut doc, &Op::InsertText { at: Caret { node, offset: 0 }, text: "X".into() }).is_err());
-        assert!(apply(&mut doc, &Op::DeleteRange { start: Caret { node, offset: 0 }, end: Caret { node, offset: 1 } }).is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::SetCharPr {
+                range: r.clone(),
+                shape: CharShape {
+                    bold: true,
+                    ..Default::default()
+                }
+            }
+        )
+        .is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::SetRunCharPr {
+                para: node,
+                start: 0,
+                end: 1,
+                shape: CharShape {
+                    bold: true,
+                    ..Default::default()
+                }
+            }
+        )
+        .is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::InsertText {
+                at: Caret { node, offset: 0 },
+                text: "X".into()
+            }
+        )
+        .is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::DeleteRange {
+                start: Caret { node, offset: 0 },
+                end: Caret { node, offset: 1 }
+            }
+        )
+        .is_err());
 
         // The open-tag edits round-trip + open, with structural content preserved.
         let out = serialize_hwpx(&doc).unwrap();
-        assert!(validate_hwpx(&out).ok, "structural-paragraph open-tag edit opens");
+        assert!(
+            validate_hwpx(&out).ok,
+            "structural-paragraph open-tag edit opens"
+        );
         let doc2 = Engine::open(&out).unwrap();
-        assert!(doc2.sections[0].blocks.iter().any(|b| matches!(b, Block::Paragraph(p) if p.source.as_ref().is_some_and(|s| !s.simple)) || matches!(b, Block::Table(_))), "structural content survived");
+        assert!(
+            doc2.sections[0].blocks.iter().any(
+                |b| matches!(b, Block::Paragraph(p) if p.source.as_ref().is_some_and(|s| !s.simple))
+                    || matches!(b, Block::Table(_))
+            ),
+            "structural content survived"
+        );
         let _ = std::fs::write(std::env::temp_dir().join("nonsimple-parapr.hwpx"), &out);
     }
 
@@ -426,9 +586,16 @@ mod inplace_tests {
     #[test]
     #[ignore = "diagnostic; run with --features rhwp --ignored --nocapture"]
     fn hwp5_to_hwpx_export_behavior() {
-        let p = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp");
+        let p = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../benchmarks/benchmark.hwp"
+        );
         let bytes = std::fs::read(p).unwrap();
-        assert_eq!(Engine::detect(&bytes), SourceFormat::Hwp5, "benchmark.hwp is HW5");
+        assert_eq!(
+            Engine::detect(&bytes),
+            SourceFormat::Hwp5,
+            "benchmark.hwp is HW5"
+        );
         let doc = Engine::open(&bytes).unwrap();
         let blocks: usize = doc.sections.iter().map(|s| s.blocks.len()).sum();
         let text_len = doc.plain_text().len();
@@ -452,7 +619,11 @@ mod inplace_tests {
     #[cfg(feature = "rhwp")]
     #[test]
     fn hwp5_converts_to_openable_hwpx_with_text_roundtrip() {
-        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp")).unwrap();
+        let bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../benchmarks/benchmark.hwp"
+        ))
+        .unwrap();
         let doc = Engine::open(&bytes).unwrap();
         let original = doc.plain_text();
         assert!(!original.trim().is_empty(), "lift must capture text");
@@ -466,7 +637,11 @@ mod inplace_tests {
         // tables nested inside cells (the benchmark has 10), which the cell emitter handles recursively.
         let reopened = Engine::open(&out).unwrap();
         let norm = |s: &str| s.split_whitespace().collect::<String>();
-        assert_eq!(norm(&reopened.plain_text()), norm(&original), "text must round-trip through conversion");
+        assert_eq!(
+            norm(&reopened.plain_text()),
+            norm(&original),
+            "text must round-trip through conversion"
+        );
 
         let _ = std::fs::write(std::env::temp_dir().join("benchmark-converted.hwpx"), &out);
     }
@@ -476,44 +651,89 @@ mod inplace_tests {
     #[cfg(feature = "rhwp")]
     #[test]
     fn hwp5_lift_captures_formatting_and_synthesizes_charpr() {
-        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp")).unwrap();
+        let bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../benchmarks/benchmark.hwp"
+        ))
+        .unwrap();
         let doc = Engine::open(&bytes).unwrap();
 
         // Pools translated (index 0 = default, then the document's real shapes).
-        assert!(doc.char_shapes.len() > 1, "char_shape pool translated: {}", doc.char_shapes.len());
-        assert!(doc.para_shapes.len() > 1, "para_shape pool translated: {}", doc.para_shapes.len());
-        assert!(!doc.header_pools.char.is_empty(), "header_pools mirrored for the editor");
+        assert!(
+            doc.char_shapes.len() > 1,
+            "char_shape pool translated: {}",
+            doc.char_shapes.len()
+        );
+        assert!(
+            doc.para_shapes.len() > 1,
+            "para_shape pool translated: {}",
+            doc.para_shapes.len()
+        );
+        assert!(
+            !doc.header_pools.char.is_empty(),
+            "header_pools mirrored for the editor"
+        );
 
         // Run splitting + non-default formatting captured.
-        let runs: usize = doc.sections.iter().flat_map(|s| &s.blocks).map(|b| match b {
-            Block::Paragraph(p) => p.runs.len(),
-            _ => 0,
-        }).sum();
+        let runs: usize = doc
+            .sections
+            .iter()
+            .flat_map(|s| &s.blocks)
+            .map(|b| match b {
+                Block::Paragraph(p) => p.runs.len(),
+                _ => 0,
+            })
+            .sum();
         let formatted_shapes = doc.char_shapes.iter().filter(|c| !c.is_default()).count();
         let bold = doc.char_shapes.iter().filter(|c| c.bold).count();
-        let colored = doc.char_shapes.iter().filter(|c| c.text_color != crate::Color::default()).count();
-        let aligned = doc.para_shapes.iter().filter(|p| p.align != HorizontalAlign::Justify).count();
+        let colored = doc
+            .char_shapes
+            .iter()
+            .filter(|c| c.text_color != crate::Color::default())
+            .count();
+        let aligned = doc
+            .para_shapes
+            .iter()
+            .filter(|p| p.align != HorizontalAlign::Justify)
+            .count();
         eprintln!(
             "Phase2: char_shapes={} para_shapes={} runs={} formatted={} bold={} colored={} non-justify-paras={}",
             doc.char_shapes.len(), doc.para_shapes.len(), runs, formatted_shapes, bold, colored, aligned
         );
-        assert!(formatted_shapes > 0, "at least one non-default char_shape (formatting captured)");
+        assert!(
+            formatted_shapes > 0,
+            "at least one non-default char_shape (formatting captured)"
+        );
 
         // The synthesized header gains charPr entries beyond the Skeleton's 7 (itemCnt grows), and
         // the open-safety gate still passes.
         let out = serialize_hwpx(&doc).unwrap();
-        assert!(validate_hwpx(&out).ok, "converted HWPX stays open-safe with synthesized shapes");
+        assert!(
+            validate_hwpx(&out).ok,
+            "converted HWPX stays open-safe with synthesized shapes"
+        );
         let pkg = hwp_hwpx::package::Package::open(&out).unwrap();
         let header = String::from_utf8(pkg.read_header().unwrap()).unwrap();
         let char_cnt = hwp_hwpx::synth::max_pool_id(&header, "charProperties");
-        eprintln!("Phase2: synthesized charProperties max id = {char_cnt} (Skeleton default max = 6)");
-        assert!(char_cnt > 6, "synthesized at least one charPr beyond the Skeleton's pool");
+        eprintln!(
+            "Phase2: synthesized charProperties max id = {char_cnt} (Skeleton default max = 6)"
+        );
+        assert!(
+            char_cnt > 6,
+            "synthesized at least one charPr beyond the Skeleton's pool"
+        );
         // The actual formatting reached the header (not just a bigger pool): bold + a real color.
-        assert!(header.contains("<hh:bold/>"), "a bold charPr was synthesized into the header");
+        assert!(
+            header.contains("<hh:bold/>"),
+            "a bold charPr was synthesized into the header"
+        );
         let has_color = header
             .match_indices("textColor=\"#")
             .any(|(i, _)| !header[i..].starts_with("textColor=\"#000000"));
-        assert!(has_color, "a non-black textColor was synthesized into the header");
+        assert!(
+            has_color,
+            "a non-black textColor was synthesized into the header"
+        );
     }
 
     /// Track A Phase 3: the converted HWPX carries the .hwp's OWN page geometry — orientation, size,
@@ -522,17 +742,30 @@ mod inplace_tests {
     #[cfg(feature = "rhwp")]
     #[test]
     fn hwp5_page_geometry_is_lifted_not_skeleton_landscape() {
-        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp")).unwrap();
+        let bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../benchmarks/benchmark.hwp"
+        ))
+        .unwrap();
         let doc = Engine::open(&bytes).unwrap();
         assert!(!doc.sections[0].page.landscape, "benchmark is portrait");
-        assert!(doc.sections[0].page_edited, "page marked edited so the secPr is patched");
+        assert!(
+            doc.sections[0].page_edited,
+            "page marked edited so the secPr is patched"
+        );
 
         let out = serialize_hwpx(&doc).unwrap();
         let pkg = hwp_hwpx::package::Package::open(&out).unwrap();
         let sec0 = String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap();
         let pagepr = &sec0[sec0.find("<hp:pagePr").expect("has pagePr")..][..120];
-        assert!(pagepr.contains(r#"landscape="NARROWLY""#), "portrait, not the Skeleton's WIDELY: {pagepr}");
-        assert!(pagepr.contains(r#"width="59528""#), "portrait A4 width (210mm), not landscape: {pagepr}");
+        assert!(
+            pagepr.contains(r#"landscape="NARROWLY""#),
+            "portrait, not the Skeleton's WIDELY: {pagepr}"
+        );
+        assert!(
+            pagepr.contains(r#"width="59528""#),
+            "portrait A4 width (210mm), not landscape: {pagepr}"
+        );
     }
 
     /// Track A Tier-3 (frontier safe-drop): a doc with draw shapes / OLE — features we do NOT yet
@@ -546,7 +779,10 @@ mod inplace_tests {
             let bytes = std::fs::read(&path).unwrap();
             let doc = Engine::open(&bytes).unwrap();
             let out = serialize_hwpx(&doc).unwrap_or_else(|e| panic!("{f} must convert: {e}"));
-            assert!(validate_hwpx(&out).ok, "{f} converts to an open-safe HWPX (shapes/OLE dropped)");
+            assert!(
+                validate_hwpx(&out).ok,
+                "{f} converts to an open-safe HWPX (shapes/OLE dropped)"
+            );
         }
     }
 
@@ -555,12 +791,26 @@ mod inplace_tests {
     #[cfg(feature = "rhwp")]
     #[test]
     fn hwp5_hyperlinks_convert_to_balanced_fields() {
-        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/hwp/tac-img-02.hwp")).unwrap();
+        let bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/hwp/tac-img-02.hwp"
+        ))
+        .unwrap();
         let doc = Engine::open(&bytes).unwrap();
-        let begins = doc.sections.iter().flat_map(|s| &s.blocks).map(|b| match b {
-            Block::Paragraph(p) => p.runs.iter().flat_map(|r| &r.content).filter(|i| matches!(i, Inline::FieldBegin(_))).count(),
-            _ => 0,
-        }).sum::<usize>();
+        let begins = doc
+            .sections
+            .iter()
+            .flat_map(|s| &s.blocks)
+            .map(|b| match b {
+                Block::Paragraph(p) => p
+                    .runs
+                    .iter()
+                    .flat_map(|r| &r.content)
+                    .filter(|i| matches!(i, Inline::FieldBegin(_)))
+                    .count(),
+                _ => 0,
+            })
+            .sum::<usize>();
         assert!(begins > 0, "lift captured hyperlink fields: {begins}");
 
         let out = serialize_hwpx(&doc).unwrap();
@@ -571,7 +821,10 @@ mod inplace_tests {
         let nb = sec0.matches("<hp:fieldBegin ").count();
         let ne = sec0.matches("<hp:fieldEnd ").count();
         assert!(nb > 0 && nb == ne, "balanced fields: {nb} begin / {ne} end");
-        assert!(sec0.contains(r#"type="HYPERLINK""#), "hyperlink field emitted");
+        assert!(
+            sec0.contains(r#"type="HYPERLINK""#),
+            "hyperlink field emitted"
+        );
     }
 
     /// Track A Tier-3: equations are lifted (Control::Equation → Inline::Equation) and emitted as
@@ -579,7 +832,11 @@ mod inplace_tests {
     #[cfg(feature = "rhwp")]
     #[test]
     fn hwp5_equations_convert_to_hp_equation() {
-        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/hwp/math-001.hwp")).unwrap();
+        let bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/hwp/math-001.hwp"
+        ))
+        .unwrap();
         let doc = Engine::open(&bytes).unwrap();
         let eqs = doc.sections.iter().flat_map(|s| &s.blocks).filter(|b| matches!(b,
             Block::Paragraph(p) if p.runs.iter().flat_map(|r| &r.content).any(|i| matches!(i, Inline::Equation(_))))).count();
@@ -589,8 +846,15 @@ mod inplace_tests {
         assert!(validate_hwpx(&out).ok, "equation output open-safe");
         let pkg = hwp_hwpx::package::Package::open(&out).unwrap();
         let sec0 = String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap();
-        assert_eq!(sec0.matches("<hp:equation ").count(), eqs, "every equation emitted");
-        assert!(sec0.contains("<hp:script>"), "equation script emitted verbatim");
+        assert_eq!(
+            sec0.matches("<hp:equation ").count(),
+            eqs,
+            "every equation emitted"
+        );
+        assert!(
+            sec0.contains("<hp:script>"),
+            "equation script emitted verbatim"
+        );
     }
 
     /// Track A v2-D: per-script fonts are lifted from the .hwp and interned into the HWPX fontfaces
@@ -598,13 +862,22 @@ mod inplace_tests {
     #[cfg(feature = "rhwp")]
     #[test]
     fn hwp5_fonts_are_lifted_into_fontfaces() {
-        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp")).unwrap();
+        let bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../benchmarks/benchmark.hwp"
+        ))
+        .unwrap();
         let doc = Engine::open(&bytes).unwrap();
         // The lift captured per-script font names on the char shapes.
-        let lifted_fonts: std::collections::BTreeSet<&str> = doc.char_shapes.iter()
+        let lifted_fonts: std::collections::BTreeSet<&str> = doc
+            .char_shapes
+            .iter()
             .flat_map(|c| c.fonts.iter().filter_map(|f| f.as_deref()))
             .collect();
-        assert!(lifted_fonts.len() > 1, "multiple distinct fonts lifted: {lifted_fonts:?}");
+        assert!(
+            lifted_fonts.len() > 1,
+            "multiple distinct fonts lifted: {lifted_fonts:?}"
+        );
 
         let out = serialize_hwpx(&doc).unwrap();
         assert!(validate_hwpx(&out).ok, "font output open-safe");
@@ -612,9 +885,18 @@ mod inplace_tests {
         let header = String::from_utf8(pkg.read_header().unwrap()).unwrap();
         // A real document font (not in the Skeleton's tiny default set) was interned into fontfaces,
         // and a synthesized charPr references it via a per-script fontRef.
-        let synth_fonts = lifted_fonts.iter().filter(|f| header.contains(&format!("face=\"{f}\""))).count();
-        assert!(synth_fonts > 0, "a lifted font was interned into the header fontfaces pool");
-        assert!(header.contains("<hh:fontRef "), "synthesized charPr carries a fontRef");
+        let synth_fonts = lifted_fonts
+            .iter()
+            .filter(|f| header.contains(&format!("face=\"{f}\"")))
+            .count();
+        assert!(
+            synth_fonts > 0,
+            "a lifted font was interned into the header fontfaces pool"
+        );
+        assert!(
+            header.contains("<hh:fontRef "),
+            "synthesized charPr carries a fontRef"
+        );
     }
 
     /// Track A v2: an IMAGE-bearing .hwp converts — Picture controls become BinData parts + <hp:pic>
@@ -623,9 +905,16 @@ mod inplace_tests {
     #[cfg(feature = "rhwp")]
     #[test]
     fn hwp5_images_convert_to_bindata_and_pic() {
-        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/hwp/test-image.hwp")).unwrap();
+        let bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/hwp/test-image.hwp"
+        ))
+        .unwrap();
         let doc = Engine::open(&bytes).unwrap();
-        assert!(!doc.bin_data.is_empty(), "lift captured embedded image bytes");
+        assert!(
+            !doc.bin_data.is_empty(),
+            "lift captured embedded image bytes"
+        );
         let has_image = doc.sections.iter().flat_map(|s| &s.blocks).any(|b| matches!(b,
             Block::Paragraph(p) if p.runs.iter().flat_map(|r| &r.content).any(|i| matches!(i, Inline::Image(_)))));
         assert!(has_image, "lift produced an Inline::Image");
@@ -634,33 +923,58 @@ mod inplace_tests {
         assert!(validate_hwpx(&out).ok, "image output open-safe");
         let pkg = hwp_hwpx::package::Package::open(&out).unwrap();
         // A BinData part + a manifest item + a <hp:pic> referencing it, all chained by bin_ref.
-        assert!(pkg.part_names.iter().any(|n| n.starts_with("BinData/")), "BinData part emitted: {:?}", pkg.part_names);
+        assert!(
+            pkg.part_names.iter().any(|n| n.starts_with("BinData/")),
+            "BinData part emitted: {:?}",
+            pkg.part_names
+        );
         let hpf = String::from_utf8(pkg.read_part("Contents/content.hpf").unwrap()).unwrap();
-        assert!(hpf.contains("isEmbeded=\"1\"") && hpf.contains("BinData/"), "image in manifest");
+        assert!(
+            hpf.contains("isEmbeded=\"1\"") && hpf.contains("BinData/"),
+            "image in manifest"
+        );
         let sec0 = String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap();
-        assert!(sec0.contains("<hp:pic ") && sec0.contains("binaryItemIDRef="), "hp:pic emitted");
+        assert!(
+            sec0.contains("<hp:pic ") && sec0.contains("binaryItemIDRef="),
+            "hp:pic emitted"
+        );
         let _ = std::fs::write(std::env::temp_dir().join("image-converted.hwpx"), &out);
     }
 
     /// Track A v2: a MULTI-SECTION .hwp converts — every section is emitted (Contents/section0..N)
     /// + registered in content.hpf, and all sections' text round-trips with NO duplication (the
-    /// whitespace-normalized equality would catch a doubled section).
+    ///   whitespace-normalized equality would catch a doubled section).
     #[cfg(feature = "rhwp")]
     #[test]
     fn hwp5_multi_section_converts_all_sections() {
-        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/hwp/hwp-multi-001.hwp")).unwrap();
+        let bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/hwp/hwp-multi-001.hwp"
+        ))
+        .unwrap();
         let doc = Engine::open(&bytes).unwrap();
-        assert!(doc.sections.len() >= 2, "fixture is multi-section: {}", doc.sections.len());
+        assert!(
+            doc.sections.len() >= 2,
+            "fixture is multi-section: {}",
+            doc.sections.len()
+        );
         let original = doc.plain_text();
 
         let out = serialize_hwpx(&doc).expect("multi-section converts");
         assert!(validate_hwpx(&out).ok, "multi-section output open-safe");
         let pkg = hwp_hwpx::package::Package::open(&out).unwrap();
-        assert!(pkg.section_part_names().len() >= 2, "≥2 section parts emitted");
+        assert!(
+            pkg.section_part_names().len() >= 2,
+            "≥2 section parts emitted"
+        );
 
         let reopened = Engine::open(&out).unwrap();
         let norm = |s: &str| s.split_whitespace().collect::<String>();
-        assert_eq!(norm(&reopened.plain_text()), norm(&original), "all sections round-trip, no duplication");
+        assert_eq!(
+            norm(&reopened.plain_text()),
+            norm(&original),
+            "all sections round-trip, no duplication"
+        );
         let _ = std::fs::write(std::env::temp_dir().join("multi-converted.hwpx"), &out);
     }
 
@@ -669,11 +983,24 @@ mod inplace_tests {
     #[cfg(feature = "rhwp")]
     #[test]
     fn open_as_hwpx_flags_conversion_and_serializes() {
-        let hwp = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp")).unwrap();
+        let hwp = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../benchmarks/benchmark.hwp"
+        ))
+        .unwrap();
         let (doc, was_converted) = open_as_hwpx(&hwp).unwrap();
-        assert!(was_converted, ".hwp must be flagged as a conversion (for the fidelity notice)");
-        assert!(!doc.plain_text().trim().is_empty(), "lifted content present");
-        assert!(validate_hwpx(&serialize_hwpx(&doc).unwrap()).ok, "converts to an open-safe HWPX");
+        assert!(
+            was_converted,
+            ".hwp must be flagged as a conversion (for the fidelity notice)"
+        );
+        assert!(
+            !doc.plain_text().trim().is_empty(),
+            "lifted content present"
+        );
+        assert!(
+            validate_hwpx(&serialize_hwpx(&doc).unwrap()).ok,
+            "converts to an open-safe HWPX"
+        );
         assert!(!HWP5_CONVERSION_NOTICE.is_empty());
     }
 
@@ -686,8 +1013,15 @@ mod inplace_tests {
 
         let mut s = EditSession::new(doc);
         s.do_op(&Op::SetCharPr {
-            range: Range { start: node, end: node },
-            shape: CharShape { bold: true, text_color: Color::from_hex("#C00000").unwrap(), ..Default::default() },
+            range: Range {
+                start: node,
+                end: node,
+            },
+            shape: CharShape {
+                bold: true,
+                text_color: Color::from_hex("#C00000").unwrap(),
+                ..Default::default()
+            },
         })
         .unwrap();
         let edited = serialize_hwpx(s.doc()).unwrap();
@@ -696,12 +1030,21 @@ mod inplace_tests {
 
         assert!(s.undo());
         let after_undo = serialize_hwpx(s.doc()).unwrap();
-        assert!(!s.doc().any_dirty(), "undo restores the pristine dirty state");
-        assert_eq!(after_undo, orig, "undo is byte-identical to the original parse");
+        assert!(
+            !s.doc().any_dirty(),
+            "undo restores the pristine dirty state"
+        );
+        assert_eq!(
+            after_undo, orig,
+            "undo is byte-identical to the original parse"
+        );
 
         assert!(s.redo());
         let after_redo = serialize_hwpx(s.doc()).unwrap();
-        assert_eq!(after_redo, edited, "redo is byte-identical to the edited output");
+        assert_eq!(
+            after_redo, edited,
+            "redo is byte-identical to the edited output"
+        );
     }
 
     /// Atomic save: `atomic_write` lands the FULL content at the target and leaves no temp file
@@ -718,7 +1061,11 @@ mod inplace_tests {
         let payload = vec![0xABu8; 64 * 1024];
         super::atomic_write(&target, &payload).unwrap();
 
-        assert_eq!(std::fs::read(&target).unwrap(), payload, "full new content present");
+        assert_eq!(
+            std::fs::read(&target).unwrap(),
+            payload,
+            "full new content present"
+        );
 
         // No `.doc.hwpx.tmp.*` sibling survives a successful write.
         let leftover = std::fs::read_dir(&dir)
@@ -746,7 +1093,10 @@ mod inplace_tests {
         super::atomic_write(&target, b"new content").unwrap();
 
         let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600, "owner-only mode is preserved across overwrite (got {mode:o})");
+        assert_eq!(
+            mode, 0o600,
+            "owner-only mode is preserved across overwrite (got {mode:o})"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -767,18 +1117,30 @@ mod inplace_tests {
             })
             .max()
             .unwrap();
-        let has_structural = doc.sections[0].blocks.iter().any(|b| matches!(b, Block::Paragraph(p) if p.source.as_ref().is_some_and(|s| !s.simple)));
+        let has_structural = doc.sections[0].blocks.iter().any(
+            |b| matches!(b, Block::Paragraph(p) if p.source.as_ref().is_some_and(|s| !s.simple)),
+        );
 
         let mut s = EditSession::new(doc);
         let r = s.do_op(&Op::SetCharPr {
-            range: Range { start: NodeId(1), end: NodeId(max_id) },
-            shape: CharShape { bold: true, ..Default::default() },
+            range: Range {
+                start: NodeId(1),
+                end: NodeId(max_id),
+            },
+            shape: CharShape {
+                bold: true,
+                ..Default::default()
+            },
         });
         if has_structural {
             assert!(r.is_err(), "a range covering a non-simple para must error");
             assert!(!s.can_undo(), "failed op pushes no snapshot");
             assert!(!s.doc().any_dirty(), "failed op leaves no dirty node");
-            assert_eq!(serialize_hwpx(s.doc()).unwrap(), orig, "failed op is byte-identical to original");
+            assert_eq!(
+                serialize_hwpx(s.doc()).unwrap(),
+                orig,
+                "failed op is byte-identical to original"
+            );
         }
     }
 
@@ -796,14 +1158,20 @@ mod inplace_tests {
     fn caret_resolver_aligns_on_note_bearing_doc() {
         use hwp_model::prelude::*;
         for fixture in ["footnote-01.hwpx", "form-01.hwpx"] {
-            let path = format!("{}/../../corpus/hwpx/{}", env!("CARGO_MANIFEST_DIR"), fixture);
+            let path = format!(
+                "{}/../../corpus/hwpx/{}",
+                env!("CARGO_MANIFEST_DIR"),
+                fixture
+            );
             let bytes = std::fs::read(&path).unwrap_or_else(|_| panic!("{fixture} in corpus/hwpx"));
             let doc = Engine::open(&bytes).expect("open fixture");
             let pages = page_count(&bytes).unwrap();
             let (mut matched, mut mismatched) = (0usize, 0usize);
             for page in 0..pages {
                 for a in page_text_anchors(&bytes, page).unwrap() {
-                    let Some(key) = a.stable_key.as_deref() else { continue };
+                    let Some(key) = a.stable_key.as_deref() else {
+                        continue;
+                    };
                     if a.text.trim().is_empty() {
                         continue;
                     }
@@ -819,7 +1187,8 @@ mod inplace_tests {
                         continue; // cell paragraphs are unaddressed in v1
                     }
                     // section:1 note sentinels in a 1-section doc safely resolve to None → skip.
-                    let Some((node, block_idx)) = resolve_key_to_node(&doc, pk.section, pk.para) else {
+                    let Some((node, block_idx)) = resolve_key_to_node(&doc, pk.section, pk.para)
+                    else {
                         continue;
                     };
                     let Block::Paragraph(p) = &doc.sections[pk.section].blocks[block_idx] else {
@@ -830,18 +1199,33 @@ mod inplace_tests {
                         .runs
                         .iter()
                         .flat_map(|r| &r.content)
-                        .filter_map(|i| if let Inline::Text(t) = i { Some(t.as_str()) } else { None })
+                        .filter_map(|i| {
+                            if let Inline::Text(t) = i {
+                                Some(t.as_str())
+                            } else {
+                                None
+                            }
+                        })
                         .collect();
                     if text.contains(a.text.trim()) {
                         matched += 1;
                     } else {
                         mismatched += 1;
-                        eprintln!("{fixture} key {key}: para {text:?} does NOT contain run {:?}", a.text);
+                        eprintln!(
+                            "{fixture} key {key}: para {text:?} does NOT contain run {:?}",
+                            a.text
+                        );
                     }
                 }
             }
-            assert_eq!(mismatched, 0, "{fixture}: {mismatched} anchors resolved to the WRONG paragraph (alignment drift)");
-            assert!(matched > 0, "{fixture}: at least one body anchor resolved + matched");
+            assert_eq!(
+                mismatched, 0,
+                "{fixture}: {mismatched} anchors resolved to the WRONG paragraph (alignment drift)"
+            );
+            assert!(
+                matched > 0,
+                "{fixture}: at least one body anchor resolved + matched"
+            );
         }
     }
 }

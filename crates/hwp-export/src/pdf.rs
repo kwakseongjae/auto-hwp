@@ -46,16 +46,28 @@ const FONT_CANDIDATES: &[(&str, u32)] = &[
     // Vendored FREE font (OFL) FIRST — the SAME face the shaper prefers, so the PDF embeds and draws
     // every glyph (Hangul AND Latin) in NanumGothic, matching our own metrics. This is what fixes the
     // Latin glyph SHAPES (no more AppleGothic-shaped Latin) on the PDF/own-render path.
-    (concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/NanumGothic-Regular.ttf"), 0),
+    (
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/NanumGothic-Regular.ttf"
+        ),
+        0,
+    ),
     ("/System/Library/Fonts/Supplemental/AppleGothic.ttf", 0),
     ("/System/Library/Fonts/Supplemental/AppleMyungjo.ttf", 0),
     ("/System/Library/Fonts/AppleSDGothicNeo.ttc", 0),
     ("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc", 0),
-    ("/usr/share/fonts/opentype/noto/NotoSansCJKkr-Regular.otf", 0),
+    (
+        "/usr/share/fonts/opentype/noto/NotoSansCJKkr-Regular.otf",
+        0,
+    ),
     ("/usr/share/fonts/truetype/nanum/NanumGothic.ttf", 0),
     // Vendored in hwp-typeset (drop a Noto Sans KR there to make CI deterministic).
     (
-        concat!(env!("CARGO_MANIFEST_DIR"), "/../hwp-typeset/assets/NotoSansKR-Regular.ttf"),
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../hwp-typeset/assets/NotoSansKR-Regular.ttf"
+        ),
         0,
     ),
 ];
@@ -64,7 +76,13 @@ const FONT_CANDIDATES: &[(&str, u32)] = &[
 /// bold runs fall back to the regular face (no synthetic bolding). macOS AppleGothic ships no separate
 /// bold file, so the bundled NanumGothic-Bold is what gives the gov-doc its visible bold weight.
 const BOLD_FONT_CANDIDATES: &[(&str, u32)] = &[
-    (concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/NanumGothic-Bold.ttf"), 0),
+    (
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/NanumGothic-Bold.ttf"
+        ),
+        0,
+    ),
     ("/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf", 0),
 ];
 
@@ -86,9 +104,16 @@ impl EmbedFont {
     /// (never panic).
     fn discover() -> Option<EmbedFont> {
         for &(path, index) in FONT_CANDIDATES {
-            let Ok(bytes) = std::fs::read(path) else { continue };
+            let Ok(bytes) = std::fs::read(path) else {
+                continue;
+            };
             if let Some(font) = Font::new(bytes.into(), index) {
-                return Some(EmbedFont { font, bold: Self::discover_bold(), path: path.to_string(), real: true });
+                return Some(EmbedFont {
+                    font,
+                    bold: Self::discover_bold(),
+                    path: path.to_string(),
+                    real: true,
+                });
             }
         }
         None
@@ -97,7 +122,9 @@ impl EmbedFont {
     /// Load the first parseable bold candidate, or `None` (bold runs then reuse the regular face).
     fn discover_bold() -> Option<Font> {
         for &(path, index) in BOLD_FONT_CANDIDATES {
-            let Ok(bytes) = std::fs::read(path) else { continue };
+            let Ok(bytes) = std::fs::read(path) else {
+                continue;
+            };
             if let Some(font) = Font::new(bytes.into(), index) {
                 return Some(font);
             }
@@ -205,7 +232,9 @@ pub fn export_pdf_with_fonts(
         lower_tree_to_page(&mut document, tree, doc, embed.as_ref());
     }
 
-    let bytes = document.finish().map_err(|e| format!("krilla finish: {e:?}"))?;
+    let bytes = document
+        .finish()
+        .map_err(|e| format!("krilla finish: {e:?}"))?;
     Ok(PdfExport {
         pages: trees.len(),
         bytes,
@@ -232,16 +261,49 @@ fn lower_tree_to_page(
             PaintOp::Rect { x, y, w, h, fill } => {
                 paint_rect(&mut surface, *x, *y, *w, *h, *fill);
             }
-            PaintOp::Line { x1, y1, x2, y2, color, style, width } => {
+            PaintOp::Line {
+                x1,
+                y1,
+                x2,
+                y2,
+                color,
+                style,
+                width,
+            } => {
                 paint_line(&mut surface, *x1, *y1, *x2, *y2, *color, *style, *width);
             }
-            PaintOp::Image { x, y, w, h, bin_ref } => {
+            PaintOp::Image {
+                x,
+                y,
+                w,
+                h,
+                bin_ref,
+            } => {
                 paint_image(&mut surface, *x, *y, *w, *h, bin_ref, doc);
             }
-            PaintOp::Glyph { x, y, ch, size, color, bold, italic, font: _ } => {
+            PaintOp::Glyph {
+                x,
+                y,
+                ch,
+                size,
+                color,
+                bold,
+                italic,
+                font: _,
+            } => {
                 // font_family is honored by the HWPX serializer + own SVG display; the PDF face stays
                 // the embedded default for now (krilla font-by-name selection is a separate task).
-                paint_glyph(&mut surface, *x, *y, *ch, *size, *color, *bold, *italic, embed);
+                paint_glyph(
+                    &mut surface,
+                    *x,
+                    *y,
+                    *ch,
+                    *size,
+                    *color,
+                    *bold,
+                    *italic,
+                    embed,
+                );
             }
         }
     }
@@ -263,7 +325,14 @@ fn rgb_of(c: Color) -> rgb::Color {
 /// Paint a `Rect`: `fill = Some` → a filled box (shading); `None` → a thin black stroked outline
 /// (cell/line border). Mirrors the SVG sink's stroke width — the SAME hairline weight as the per-edge
 /// lines (`BORDER_HAIRLINE_PX` px → pt) so legacy-box and per-edge cells read identically.
-fn paint_rect(surface: &mut krilla::surface::Surface, x: f64, y: f64, w: f64, h: f64, fill: Option<Color>) {
+fn paint_rect(
+    surface: &mut krilla::surface::Surface,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    fill: Option<Color>,
+) {
     let Some(rect) = Rect::from_xywh(pt(x), pt(y), pt(w).max(0.01), pt(h).max(0.01)) else {
         return;
     };
@@ -323,8 +392,14 @@ fn paint_line(
     // and the legacy box stroke print at the exact same weight.
     let w = (width as f32).max(BORDER_HAIRLINE_PX) * PT_PER_PX;
     let dash = match style {
-        LineStyle::Dashed => Some(StrokeDash { array: vec![w * 4.0, w * 3.0], offset: 0.0 }),
-        LineStyle::Dotted => Some(StrokeDash { array: vec![w, w * 2.0], offset: 0.0 }),
+        LineStyle::Dashed => Some(StrokeDash {
+            array: vec![w * 4.0, w * 3.0],
+            offset: 0.0,
+        }),
+        LineStyle::Dotted => Some(StrokeDash {
+            array: vec![w, w * 2.0],
+            offset: 0.0,
+        }),
         _ => None,
     };
     let mut pb = PathBuilder::new();
@@ -366,7 +441,19 @@ fn paint_image(
         surface.pop();
     } else {
         // Stub box: light fill + grey outline, same intent as the SVG `#F0F0F0` placeholder.
-        paint_rect(surface, x, y, w, h, Some(Color { r: 0xF0, g: 0xF0, b: 0xF0, a: 0xFF }));
+        paint_rect(
+            surface,
+            x,
+            y,
+            w,
+            h,
+            Some(Color {
+                r: 0xF0,
+                g: 0xF0,
+                b: 0xF0,
+                a: 0xFF,
+            }),
+        );
         paint_rect(surface, x, y, w, h, None);
     }
 }
@@ -412,6 +499,7 @@ fn sniff_image(bytes: &[u8]) -> Option<krilla::image::Image> {
 /// Paint ONE glyph as real text at its exact baseline position. We own the x (each glyph is drawn at
 /// its placed advance), so per-glyph drawing keeps the kerning faithful to our layout. When no font is
 /// available, fall back to a small stub box so the glyph slot stays visible. Whitespace draws nothing.
+#[allow(clippy::too_many_arguments)]
 fn paint_glyph(
     surface: &mut krilla::surface::Surface,
     x: f64,
@@ -438,14 +526,25 @@ fn paint_glyph(
             let s = ch.encode_utf8(&mut buf);
             // Bold runs use the embedded bold face when present; else the regular face (no synthetic
             // bolding). This is what renders the gov-doc's bold labels/headings as real bold weight.
-            let face = if bold { f.bold.as_ref().unwrap_or(&f.font) } else { &f.font };
+            let face = if bold {
+                f.bold.as_ref().unwrap_or(&f.font)
+            } else {
+                &f.font
+            };
             let (bx, by) = (pt(x), pt(y));
             // Italic: NanumGothic has no italic face, so synthesize an oblique by shearing the glyph
             // about its baseline (x' = x - SLANT*y + SLANT*baseline) — ascenders lean right, the
             // baseline origin stays put. Matches the webview's font-style:italic synthesis.
             if italic {
                 const SLANT: f32 = 0.21; // ≈ 12°, the conventional faux-italic angle
-                surface.push_transform(&krilla::geom::Transform::from_row(1.0, 0.0, -SLANT, 1.0, SLANT * by, 0.0));
+                surface.push_transform(&krilla::geom::Transform::from_row(
+                    1.0,
+                    0.0,
+                    -SLANT,
+                    1.0,
+                    SLANT * by,
+                    0.0,
+                ));
             }
             // y is the baseline in our IR; krilla's draw_text `start` is the text baseline too.
             surface.draw_text(
@@ -490,8 +589,10 @@ mod tests {
         let mut doc = SemanticDoc::default();
         doc.char_shapes.push(CharShape::default());
         doc.para_shapes.push(ParaShape::default());
-        let mut sec = Section::default();
-        sec.blocks = blocks;
+        let sec = Section {
+            blocks,
+            ..Default::default()
+        };
         doc.sections.push(sec);
         doc
     }
@@ -504,10 +605,16 @@ mod tests {
         ]);
         let out = export_pdf(&doc, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
         assert!(out.bytes.starts_with(b"%PDF-"), "valid PDF header");
-        assert!(out.bytes.ends_with(b"%%EOF") || out.bytes.windows(5).any(|w| w == b"%%EOF"),
-            "PDF has an EOF marker");
+        assert!(
+            out.bytes.ends_with(b"%%EOF") || out.bytes.windows(5).any(|w| w == b"%%EOF"),
+            "PDF has an EOF marker"
+        );
         assert!(out.pages >= 1, "at least one page");
-        assert!(out.bytes.len() > 400, "non-trivial PDF size, got {}", out.bytes.len());
+        assert!(
+            out.bytes.len() > 400,
+            "non-trivial PDF size, got {}",
+            out.bytes.len()
+        );
     }
 
     #[test]
@@ -521,7 +628,9 @@ mod tests {
     #[test]
     fn title_metadata_is_accepted() {
         let doc = doc_with(vec![Block::Paragraph(para("제목"))]);
-        let opts = PdfOptions { title: Some("My Doc".into()) };
+        let opts = PdfOptions {
+            title: Some("My Doc".into()),
+        };
         let out = export_pdf(&doc, &ApproxFontMetrics, &opts).unwrap();
         assert!(out.bytes.starts_with(b"%PDF-"));
     }
@@ -538,11 +647,24 @@ mod tests {
         // The PDF glyph path fills with `rgb_of(color)` — confirm a per-run color (not black) is what
         // flows to krilla. (krilla compresses the content stream, so we assert the conversion, which
         // is the load-bearing step: the run's CharShape.text_color reaches the fill paint.)
-        let blue = Color { r: 0, g: 0, b: 0xFF, a: 0xFF };
+        let blue = Color {
+            r: 0,
+            g: 0,
+            b: 0xFF,
+            a: 0xFF,
+        };
         let c = rgb_of(blue);
         // krilla rgb::Color is constructed from the same 8-bit channels — round-trip via a fresh ctor.
-        assert_eq!(c, rgb::Color::new(0, 0, 0xFF), "blue run maps to krilla blue, not black");
-        assert_ne!(c, rgb::Color::black(), "color is not forced to black on the PDF path");
+        assert_eq!(
+            c,
+            rgb::Color::new(0, 0, 0xFF),
+            "blue run maps to krilla blue, not black"
+        );
+        assert_ne!(
+            c,
+            rgb::Color::black(),
+            "color is not forced to black on the PDF path"
+        );
     }
 
     #[test]
@@ -556,7 +678,9 @@ mod tests {
         .expect("vendored NanumGothic present for the test");
         let doc = doc_with(vec![Block::Paragraph(para("한글 주입 폰트"))]);
         let injected = vec![("Nanum Gothic".to_string(), bytes)];
-        let out = export_pdf_with_fonts(&doc, &ApproxFontMetrics, &PdfOptions::default(), &injected).unwrap();
+        let out =
+            export_pdf_with_fonts(&doc, &ApproxFontMetrics, &PdfOptions::default(), &injected)
+                .unwrap();
         assert!(out.bytes.starts_with(b"%PDF-"));
         assert_eq!(
             out.font_path.as_deref(),
@@ -571,8 +695,12 @@ mod tests {
         // `export_pdf_with_fonts(.., &[])` must produce byte-identical output (native path unchanged).
         let doc = doc_with(vec![Block::Paragraph(para("동일성 확인"))]);
         let a = export_pdf(&doc, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
-        let b = export_pdf_with_fonts(&doc, &ApproxFontMetrics, &PdfOptions::default(), &[]).unwrap();
-        assert_eq!(a.bytes, b.bytes, "empty injection == discover, byte-identical");
+        let b =
+            export_pdf_with_fonts(&doc, &ApproxFontMetrics, &PdfOptions::default(), &[]).unwrap();
+        assert_eq!(
+            a.bytes, b.bytes,
+            "empty injection == discover, byte-identical"
+        );
         assert_eq!(a.font_path, b.font_path);
     }
 
@@ -581,7 +709,12 @@ mod tests {
         // End-to-end: a blue paragraph must export (glyph path is exercised with a non-black fill).
         let mut doc = doc_with(vec![Block::Paragraph(para("파란 글씨"))]);
         doc.char_shapes[0] = CharShape {
-            text_color: Color { r: 0, g: 0, b: 0xFF, a: 0xFF },
+            text_color: Color {
+                r: 0,
+                g: 0,
+                b: 0xFF,
+                a: 0xFF,
+            },
             ..Default::default()
         };
         let out = export_pdf(&doc, &ApproxFontMetrics, &PdfOptions::default()).unwrap();

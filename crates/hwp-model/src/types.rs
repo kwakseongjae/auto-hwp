@@ -65,7 +65,10 @@ impl Passthrough {
         self.parts.is_empty()
     }
     pub fn push(&mut self, tag: impl Into<String>, bytes: Vec<u8>) {
-        self.parts.push(RawPart { tag: tag.into(), bytes });
+        self.parts.push(RawPart {
+            tag: tag.into(),
+            bytes,
+        });
     }
 }
 

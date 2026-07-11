@@ -32,10 +32,12 @@ pub fn render_page(
     page: usize,
 ) -> Result<PageLayerTree> {
     let placed = place_doc(doc, fonts);
-    let pg = placed
-        .pages
-        .get(page)
-        .ok_or_else(|| Error::Other(format!("page {page} out of range ({} pages)", placed.pages.len())))?;
+    let pg = placed.pages.get(page).ok_or_else(|| {
+        Error::Other(format!(
+            "page {page} out of range ({} pages)",
+            placed.pages.len()
+        ))
+    })?;
     Ok(lower_page(pg))
 }
 
@@ -52,11 +54,23 @@ fn lower_page(pg: &PlacedPage) -> PageLayerTree {
 
     // 1) Fills (shading) first so borders/text sit above them.
     for r in pg.rects.iter().filter(|r| r.fill.is_some()) {
-        ops.push(PaintOp::Rect { x: r.x, y: r.y, w: r.w, h: r.h, fill: r.fill });
+        ops.push(PaintOp::Rect {
+            x: r.x,
+            y: r.y,
+            w: r.w,
+            h: r.h,
+            fill: r.fill,
+        });
     }
     // 2) Stroked boxes (LEGACY uniform cell borders for cells without per-edge data).
     for r in pg.rects.iter().filter(|r| r.fill.is_none()) {
-        ops.push(PaintOp::Rect { x: r.x, y: r.y, w: r.w, h: r.h, fill: None });
+        ops.push(PaintOp::Rect {
+            x: r.x,
+            y: r.y,
+            w: r.w,
+            h: r.h,
+            fill: None,
+        });
     }
     // 2b) Per-edge styled cell borders + cell diagonals (faithful per-side color/style/width).
     for l in &pg.lines {
@@ -72,14 +86,34 @@ fn lower_page(pg: &PlacedPage) -> PageLayerTree {
     }
     // 3) Images / object boxes.
     for im in &pg.images {
-        ops.push(PaintOp::Image { x: im.x, y: im.y, w: im.w, h: im.h, bin_ref: im.bin_ref.clone() });
+        ops.push(PaintOp::Image {
+            x: im.x,
+            y: im.y,
+            w: im.w,
+            h: im.h,
+            bin_ref: im.bin_ref.clone(),
+        });
     }
     // 4) Glyphs (y = baseline).
     for g in &pg.glyphs {
-        ops.push(PaintOp::Glyph { x: g.x, y: g.baseline, ch: g.ch, size: g.size, color: g.color, bold: g.bold, italic: g.italic, font: g.font.clone() });
+        ops.push(PaintOp::Glyph {
+            x: g.x,
+            y: g.baseline,
+            ch: g.ch,
+            size: g.size,
+            color: g.color,
+            bold: g.bold,
+            italic: g.italic,
+            font: g.font.clone(),
+        });
     }
 
-    PageLayerTree { schema_version: PAINT_SCHEMA_VERSION, width: pg.width, height: pg.height, ops }
+    PageLayerTree {
+        schema_version: PAINT_SCHEMA_VERSION,
+        width: pg.width,
+        height: pg.height,
+        ops,
+    }
 }
 
 /// Replay every page of `doc` through a [`PaintSink`], page by page. Convenience over the IR for a
@@ -114,7 +148,10 @@ pub struct NullRenderer;
 
 impl Renderer for NullRenderer {
     fn page_layer_tree(&self, layout: &LayoutResult, page: usize) -> Result<PageLayerTree> {
-        let p = layout.pages.get(page).ok_or(Error::Other("page out of range".into()))?;
+        let p = layout
+            .pages
+            .get(page)
+            .ok_or(Error::Other("page out of range".into()))?;
         let ops = p
             .lines
             .iter()
@@ -126,7 +163,12 @@ impl Renderer for NullRenderer {
                 fill: None,
             })
             .collect();
-        Ok(PageLayerTree { schema_version: PAINT_SCHEMA_VERSION, width: p.width, height: p.height, ops })
+        Ok(PageLayerTree {
+            schema_version: PAINT_SCHEMA_VERSION,
+            width: p.width,
+            height: p.height,
+            ops,
+        })
     }
 }
 
@@ -180,7 +222,10 @@ impl<'a> SvgSink<'a> {
     /// Build a sink that resolves `Image` ops against `bins` (`&doc.bin_data`) so real photos embed as
     /// `<image href="data:…">`. Slots with no matching/decodable bytes still fall back to a stub box.
     pub fn with_bins(bins: &'a [BinData]) -> Self {
-        SvgSink { bins: Some(bins), ..Default::default() }
+        SvgSink {
+            bins: Some(bins),
+            ..Default::default()
+        }
     }
 
     /// Render a whole [`PageLayerTree`] to a standalone `<svg>` string in one call (no image bytes —
@@ -417,7 +462,11 @@ mod tests {
 
     fn para(text: &str) -> Paragraph {
         Paragraph {
-            runs: vec![Run { char_shape: 0, content: vec![Inline::Text(text.into())], ..Default::default() }],
+            runs: vec![Run {
+                char_shape: 0,
+                content: vec![Inline::Text(text.into())],
+                ..Default::default()
+            }],
             ..Default::default()
         }
     }
@@ -426,8 +475,10 @@ mod tests {
         let mut doc = SemanticDoc::default();
         doc.char_shapes.push(CharShape::default());
         doc.para_shapes.push(ParaShape::default());
-        let mut sec = Section::default();
-        sec.blocks = blocks;
+        let sec = Section {
+            blocks,
+            ..Default::default()
+        };
         doc.sections.push(sec);
         doc
     }
@@ -436,7 +487,11 @@ mod tests {
     fn render_page_emits_glyph_ops() {
         let doc = doc_with(vec![Block::Paragraph(para("가나"))]);
         let tree = render_page(&doc, &ApproxFontMetrics, 0).unwrap();
-        let glyphs = tree.ops.iter().filter(|o| matches!(o, PaintOp::Glyph { .. })).count();
+        let glyphs = tree
+            .ops
+            .iter()
+            .filter(|o| matches!(o, PaintOp::Glyph { .. }))
+            .count();
         assert_eq!(glyphs, 2, "two glyph ops");
         assert_eq!(tree.schema_version, PAINT_SCHEMA_VERSION);
         assert!(tree.width > 0.0 && tree.height > 0.0);
@@ -454,10 +509,19 @@ mod tests {
         let svg = render_doc_svg(&doc, &ApproxFontMetrics);
         assert_eq!(svg.len(), 1, "one page");
         let s = &svg[0];
-        assert!(s.starts_with("<svg") && s.ends_with("</svg>"), "well-formed svg envelope");
+        assert!(
+            s.starts_with("<svg") && s.ends_with("</svg>"),
+            "well-formed svg envelope"
+        );
         assert!(s.contains("<text"), "glyphs become <text>");
-        assert!(s.contains('문') && s.contains('서'), "the actual text is present");
-        assert!(s.contains("<rect"), "line boxes / page background become <rect>");
+        assert!(
+            s.contains('문') && s.contains('서'),
+            "the actual text is present"
+        );
+        assert!(
+            s.contains("<rect"),
+            "line boxes / page background become <rect>"
+        );
         assert!(s.contains("viewBox="), "has a viewBox for vector scaling");
     }
 
@@ -466,7 +530,10 @@ mod tests {
         let doc = doc_with(vec![Block::Paragraph(para("a<b&c"))]);
         let svg = render_doc_svg(&doc, &ApproxFontMetrics);
         let s = &svg[0];
-        assert!(s.contains("&lt;") && s.contains("&amp;"), "XML-special glyphs are escaped");
+        assert!(
+            s.contains("&lt;") && s.contains("&amp;"),
+            "XML-special glyphs are escaped"
+        );
         assert!(!s.contains("<b&c"), "no raw < or & leaks into the document");
     }
 
@@ -474,9 +541,15 @@ mod tests {
     fn text_color_flows_to_svg_fill() {
         let mut doc = doc_with(vec![Block::Paragraph(para("색"))]);
         // Make the run red.
-        doc.char_shapes[0] = CharShape { text_color: Color::from_hex("#C00000").unwrap(), ..Default::default() };
+        doc.char_shapes[0] = CharShape {
+            text_color: Color::from_hex("#C00000").unwrap(),
+            ..Default::default()
+        };
         let svg = render_doc_svg(&doc, &ApproxFontMetrics);
-        assert!(svg[0].contains("fill=\"#C00000\""), "glyph fill carries the run's text color");
+        assert!(
+            svg[0].contains("fill=\"#C00000\""),
+            "glyph fill carries the run's text color"
+        );
     }
 
     #[test]
@@ -484,28 +557,59 @@ mod tests {
         // A bold+italic run must emit font-weight="700" and font-style="italic" on its <text> so the
         // webview selects NanumGothic-Bold / synthesizes an oblique (the gov-doc's example text).
         let mut doc = doc_with(vec![Block::Paragraph(para("기재"))]);
-        doc.char_shapes[0] = CharShape { bold: true, italic: true, ..Default::default() };
+        doc.char_shapes[0] = CharShape {
+            bold: true,
+            italic: true,
+            ..Default::default()
+        };
         let svg = render_doc_svg(&doc, &ApproxFontMetrics);
-        assert!(svg[0].contains("font-weight=\"700\""), "bold run emits font-weight 700");
-        assert!(svg[0].contains("font-style=\"italic\""), "italic run emits font-style italic");
+        assert!(
+            svg[0].contains("font-weight=\"700\""),
+            "bold run emits font-weight 700"
+        );
+        assert!(
+            svg[0].contains("font-style=\"italic\""),
+            "italic run emits font-style italic"
+        );
         // A plain run emits neither.
         let mut plain = doc_with(vec![Block::Paragraph(para("평문"))]);
         plain.char_shapes[0] = CharShape::default();
         let psvg = render_doc_svg(&plain, &ApproxFontMetrics);
-        assert!(!psvg[0].contains("font-weight"), "plain run has no font-weight");
-        assert!(!psvg[0].contains("font-style"), "plain run has no font-style");
+        assert!(
+            !psvg[0].contains("font-weight"),
+            "plain run has no font-weight"
+        );
+        assert!(
+            !psvg[0].contains("font-style"),
+            "plain run has no font-style"
+        );
     }
 
     #[test]
     fn cell_text_color_flows_to_svg_fill() {
         // The guide text in gov tables is BLUE — confirm a cell run's text color reaches the SVG fill
         // through the recursive cell-glyph build (not just body paragraphs).
-        let mut t = Table { rows: 1, cols: 1, ..Default::default() };
-        t.cells.push(Cell { row: 0, col: 0, blocks: vec![Block::Paragraph(para("안내"))], ..Default::default() });
+        let mut t = Table {
+            rows: 1,
+            cols: 1,
+            ..Default::default()
+        };
+        t.cells.push(Cell {
+            row: 0,
+            col: 0,
+            blocks: vec![Block::Paragraph(para("안내"))],
+            ..Default::default()
+        });
         let mut doc = doc_with(vec![Block::Table(t)]);
-        doc.char_shapes[0] = CharShape { text_color: Color::from_hex("#0000FF").unwrap(), ..Default::default() };
+        doc.char_shapes[0] = CharShape {
+            text_color: Color::from_hex("#0000FF").unwrap(),
+            ..Default::default()
+        };
         let svg = render_doc_svg(&doc, &ApproxFontMetrics);
-        assert!(svg[0].contains("fill=\"#0000FF\""), "cell glyph fill carries the run's blue text color");
+        assert!(
+            svg[0].contains("fill=\"#0000FF\""),
+            "cell glyph fill carries the run's blue text color"
+        );
     }
 
     #[test]
@@ -513,26 +617,42 @@ mod tests {
         let mut p = Paragraph::default();
         p.runs.push(Run {
             char_shape: 0,
-            content: vec![Inline::Image(ImageRef { bin_ref: "img1".into(), width: 10000, height: 8000 })],
+            content: vec![Inline::Image(ImageRef {
+                bin_ref: "img1".into(),
+                width: 10000,
+                height: 8000,
+            })],
             ..Default::default()
         });
         let doc = doc_with(vec![Block::Paragraph(p)]);
         let tree = render_page(&doc, &ApproxFontMetrics, 0).unwrap();
-        assert!(tree.ops.iter().any(|o| matches!(o, PaintOp::Image { bin_ref, .. } if bin_ref == "img1")));
+        assert!(tree
+            .ops
+            .iter()
+            .any(|o| matches!(o, PaintOp::Image { bin_ref, .. } if bin_ref == "img1")));
         // No bytes available → a tagged stub box (the slot is still visible + hit-testable).
         let svg = SvgSink::svg_for(&tree);
-        assert!(svg.contains("data-bin-ref=\"img1\""), "image box tagged with its bin_ref");
-        assert!(svg.contains("fill=\"#F0F0F0\""), "falls back to the stub when no bytes are threaded");
-        assert!(!svg.contains("<image "), "no <image> element without real bytes");
+        assert!(
+            svg.contains("data-bin-ref=\"img1\""),
+            "image box tagged with its bin_ref"
+        );
+        assert!(
+            svg.contains("fill=\"#F0F0F0\""),
+            "falls back to the stub when no bytes are threaded"
+        );
+        assert!(
+            !svg.contains("<image "),
+            "no <image> element without real bytes"
+        );
     }
 
     /// A 1x1 PNG (valid magic + minimal IHDR/IDAT/IEND) — enough to drive the data-URI embed path.
     const TINY_PNG: &[u8] = &[
-        0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, b'I', b'H', b'D', b'R',
-        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
-        0x89, 0x00, 0x00, 0x00, 0x0A, b'I', b'D', b'A', b'T', 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
-        0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, b'I', b'E', b'N', b'D', 0xAE,
-        0x42, 0x60, 0x82,
+        0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, b'I', b'H', b'D',
+        b'R', 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F,
+        0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, b'I', b'D', b'A', b'T', 0x78, 0x9C, 0x63, 0x00,
+        0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, b'I',
+        b'E', b'N', b'D', 0xAE, 0x42, 0x60, 0x82,
     ];
 
     #[test]
@@ -541,17 +661,37 @@ mod tests {
         let mut p = Paragraph::default();
         p.runs.push(Run {
             char_shape: 0,
-            content: vec![Inline::Image(ImageRef { bin_ref: "photo".into(), width: 10000, height: 8000 })],
+            content: vec![Inline::Image(ImageRef {
+                bin_ref: "photo".into(),
+                width: 10000,
+                height: 8000,
+            })],
             ..Default::default()
         });
         let mut doc = doc_with(vec![Block::Paragraph(p)]);
-        doc.bin_data.push(BinData { bin_ref: "photo".into(), bytes: TINY_PNG.to_vec(), kind: "png".into() });
+        doc.bin_data.push(BinData {
+            bin_ref: "photo".into(),
+            bytes: TINY_PNG.to_vec(),
+            kind: "png".into(),
+        });
         let svg = render_doc_svg(&doc, &ApproxFontMetrics);
         let s = &svg[0];
-        assert!(s.contains("<image "), "real bytes render as an <image> element");
-        assert!(s.contains("href=\"data:image/png;base64,"), "embedded as a base64 PNG data URI");
-        assert!(s.contains("data-bin-ref=\"photo\""), "still tagged with the bin_ref");
-        assert!(!s.contains("fill=\"#F0F0F0\""), "no stub box when real bytes embed");
+        assert!(
+            s.contains("<image "),
+            "real bytes render as an <image> element"
+        );
+        assert!(
+            s.contains("href=\"data:image/png;base64,"),
+            "embedded as a base64 PNG data URI"
+        );
+        assert!(
+            s.contains("data-bin-ref=\"photo\""),
+            "still tagged with the bin_ref"
+        );
+        assert!(
+            !s.contains("fill=\"#F0F0F0\""),
+            "no stub box when real bytes embed"
+        );
     }
 
     #[test]
@@ -560,11 +700,19 @@ mod tests {
         let mut p = Paragraph::default();
         p.runs.push(Run {
             char_shape: 0,
-            content: vec![Inline::Image(ImageRef { bin_ref: "eq".into(), width: 10000, height: 8000 })],
+            content: vec![Inline::Image(ImageRef {
+                bin_ref: "eq".into(),
+                width: 10000,
+                height: 8000,
+            })],
             ..Default::default()
         });
         let mut doc = doc_with(vec![Block::Paragraph(p)]);
-        doc.bin_data.push(BinData { bin_ref: "eq".into(), bytes: vec![0x01, 0x02, 0x03, 0x04], kind: "ole".into() });
+        doc.bin_data.push(BinData {
+            bin_ref: "eq".into(),
+            bytes: vec![0x01, 0x02, 0x03, 0x04],
+            kind: "ole".into(),
+        });
         let svg = render_doc_svg(&doc, &ApproxFontMetrics);
         let s = &svg[0];
         assert!(!s.contains("<image "), "non-raster bytes don't embed");
@@ -588,7 +736,10 @@ mod tests {
         let doc = doc_with(vec![Block::Paragraph(para("가나다"))]);
         let layout = NaiveLayoutShim::layout(&doc);
         let tree = NullRenderer.page_layer_tree(&layout, 0).unwrap();
-        assert!(tree.ops.iter().all(|o| matches!(o, PaintOp::Rect { fill: None, .. })));
+        assert!(tree
+            .ops
+            .iter()
+            .all(|o| matches!(o, PaintOp::Rect { fill: None, .. })));
         assert!(!tree.ops.is_empty(), "one rect per line");
     }
 
@@ -596,7 +747,9 @@ mod tests {
     struct NaiveLayoutShim;
     impl NaiveLayoutShim {
         fn layout(doc: &SemanticDoc) -> LayoutResult {
-            hwp_typeset::NaiveLayout.layout(doc, &ApproxFontMetrics).unwrap()
+            hwp_typeset::NaiveLayout
+                .layout(doc, &ApproxFontMetrics)
+                .unwrap()
         }
     }
 }

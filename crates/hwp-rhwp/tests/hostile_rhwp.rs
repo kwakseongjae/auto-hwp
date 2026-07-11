@@ -22,7 +22,10 @@ fn timed<T>(label: &str, max: Duration, f: impl FnOnce() -> T) -> T {
     let t0 = Instant::now();
     let out = f();
     let dt = t0.elapsed();
-    assert!(dt <= max, "{label}: took {dt:?}, expected <= {max:?} (must not hang)");
+    assert!(
+        dt <= max,
+        "{label}: took {dt:?}, expected <= {max:?} (must not hang)"
+    );
     out
 }
 
@@ -33,10 +36,15 @@ fn timed<T>(label: &str, max: Duration, f: impl FnOnce() -> T) -> T {
 fn corrupt_cfb_is_caught_not_crashing() {
     let mut bytes = CFB_MAGIC.to_vec();
     bytes.extend_from_slice(&[0xABu8; 1024]);
-    let err = timed("corrupt_cfb", Duration::from_secs(5), || parse_to_semantic_guarded(&bytes))
-        .expect_err("corrupt CFB must be rejected, not parsed");
+    let err = timed("corrupt_cfb", Duration::from_secs(5), || {
+        parse_to_semantic_guarded(&bytes)
+    })
+    .expect_err("corrupt CFB must be rejected, not parsed");
     assert!(
-        matches!(err, HardenedError::Limit(DocLimit::Panicked) | HardenedError::Malformed(_)),
+        matches!(
+            err,
+            HardenedError::Limit(DocLimit::Panicked) | HardenedError::Malformed(_)
+        ),
         "corrupt CFB → Panicked or Malformed, got {err:?}"
     );
 }
@@ -44,14 +52,21 @@ fn corrupt_cfb_is_caught_not_crashing() {
 /// Truncated valid HWP5: a real file cut to a few hundred bytes. Same guarantee.
 #[test]
 fn truncated_hwp5_is_caught_not_crashing() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../benchmarks/benchmark.hwp"
+    );
     let full = std::fs::read(path).expect("benchmark.hwp at repo root");
     let truncated = &full[..full.len().min(300)];
-    let err =
-        timed("truncated_hwp5", Duration::from_secs(5), || parse_to_semantic_guarded(truncated))
-            .expect_err("truncated HWP5 must be rejected");
+    let err = timed("truncated_hwp5", Duration::from_secs(5), || {
+        parse_to_semantic_guarded(truncated)
+    })
+    .expect_err("truncated HWP5 must be rejected");
     assert!(
-        matches!(err, HardenedError::Limit(DocLimit::Panicked) | HardenedError::Malformed(_)),
+        matches!(
+            err,
+            HardenedError::Limit(DocLimit::Panicked) | HardenedError::Malformed(_)
+        ),
         "truncated HWP5 → Panicked or Malformed, got {err:?}"
     );
 }
@@ -60,8 +75,10 @@ fn truncated_hwp5_is_caught_not_crashing() {
 #[test]
 fn oversize_raw_is_rejected_before_rhwp() {
     let huge = vec![0u8; (limits::MAX_RAW_FILE as usize) + 1];
-    let err = timed("oversize", Duration::from_secs(1), || parse_to_semantic_guarded(&huge))
-        .expect_err("oversize raw must be rejected");
+    let err = timed("oversize", Duration::from_secs(1), || {
+        parse_to_semantic_guarded(&huge)
+    })
+    .expect_err("oversize raw must be rejected");
     assert!(
         matches!(err, HardenedError::Limit(DocLimit::RawFileTooLarge { .. })),
         "oversize → RawFileTooLarge, got {err:?}"
@@ -72,7 +89,10 @@ fn oversize_raw_is_rejected_before_rhwp() {
 /// not reject legitimate input) and passes the layout guard.
 #[test]
 fn valid_hwp5_still_parses_through_guarded_boundary() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../benchmarks/benchmark.hwp"
+    );
     let bytes = std::fs::read(path).expect("benchmark.hwp");
     let doc = parse_to_semantic_guarded(&bytes).expect("benchmark.hwp parses through the boundary");
     assert!(!doc.sections.is_empty(), "benchmark.hwp has sections");

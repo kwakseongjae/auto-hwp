@@ -51,10 +51,14 @@ impl OpenRouterProvider {
             .send()
             .map_err(|e| Error::Other(format!("openrouter request failed: {e}")))?;
         let status = resp.status();
-        let val: serde_json::Value =
-            resp.json().map_err(|e| Error::Other(format!("openrouter response decode failed: {e}")))?;
+        let val: serde_json::Value = resp
+            .json()
+            .map_err(|e| Error::Other(format!("openrouter response decode failed: {e}")))?;
         if !status.is_success() {
-            let msg = val.pointer("/error/message").and_then(|m| m.as_str()).unwrap_or("unknown error");
+            let msg = val
+                .pointer("/error/message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("unknown error");
             return Err(Error::Other(format!("openrouter API {status}: {msg}")));
         }
         Ok(val
@@ -75,7 +79,11 @@ impl LlmProvider for OpenRouterProvider {
                       설명·머리말·번호 없이 출력하세요.";
         let user = format!("[문서 맥락]\n{context}\n\n[지시]\n{instruction}");
         let text = self.complete(system, &user)?;
-        Ok(text.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
+        Ok(text
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect())
     }
 
     /// Drive the RICH pipeline: prompt with the content template so the model emits one `AiContent`
@@ -91,7 +99,11 @@ impl LlmProvider for OpenRouterProvider {
 
     /// Anchored chat-editing: prompt with the edit brief + the document's `[s/b]` outline so the
     /// model emits one `EditScript` JSON, then parse it (no raw XML).
-    fn propose_edit_script(&self, outline: &str, instruction: &str) -> Result<super::edit::EditScript> {
+    fn propose_edit_script(
+        &self,
+        outline: &str,
+        instruction: &str,
+    ) -> Result<super::edit::EditScript> {
         let user = format!(
             "[문서 개요]\n{outline}\n\n[편집 지시]\n{instruction}\n\n위 지시를 편집 명령 JSON으로 출력하세요."
         );

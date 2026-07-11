@@ -48,7 +48,10 @@ pub fn doc_value_eq(a: &SemanticDoc, b: &SemanticDoc) -> bool {
         && bin_eq(&a.bin_data, &b.bin_data)
         && pass_eq(&a.passthrough, &b.passthrough)
         && a.sections.len() == b.sections.len()
-        && a.sections.iter().zip(&b.sections).all(|(x, y)| section_eq(x, y))
+        && a.sections
+            .iter()
+            .zip(&b.sections)
+            .all(|(x, y)| section_eq(x, y))
 }
 
 fn section_eq(a: &Section, b: &Section) -> bool {
@@ -58,7 +61,10 @@ fn section_eq(a: &Section, b: &Section) -> bool {
         && pass_eq(&a.passthrough, &b.passthrough)
         && a.dirty == b.dirty
         && a.decorations.len() == b.decorations.len()
-        && a.decorations.iter().zip(&b.decorations).all(|(x, y)| deco_eq(x, y))
+        && a.decorations
+            .iter()
+            .zip(&b.decorations)
+            .all(|(x, y)| deco_eq(x, y))
         && blocks_eq(&a.blocks, &b.blocks)
 }
 
@@ -105,7 +111,10 @@ fn run_eq(a: &Run, b: &Run) -> bool {
     a.char_shape == b.char_shape
         && a.char_ref == b.char_ref
         && a.content.len() == b.content.len()
-        && a.content.iter().zip(&b.content).all(|(x, y)| inline_eq(x, y))
+        && a.content
+            .iter()
+            .zip(&b.content)
+            .all(|(x, y)| inline_eq(x, y))
 }
 
 fn inline_eq(a: &Inline, b: &Inline) -> bool {
@@ -174,10 +183,15 @@ fn prov_eq(a: &Provenance, b: &Provenance) -> bool {
 
 fn pass_eq(a: &Passthrough, b: &Passthrough) -> bool {
     a.parts.len() == b.parts.len()
-        && a.parts.iter().zip(&b.parts).all(|(x, y)| x.tag == y.tag && x.bytes == y.bytes)
+        && a.parts
+            .iter()
+            .zip(&b.parts)
+            .all(|(x, y)| x.tag == y.tag && x.bytes == y.bytes)
 }
 
 fn bin_eq(a: &[BinData], b: &[BinData]) -> bool {
     a.len() == b.len()
-        && a.iter().zip(b).all(|(x, y)| x.bin_ref == y.bin_ref && x.kind == y.kind && x.bytes == y.bytes)
+        && a.iter()
+            .zip(b)
+            .all(|(x, y)| x.bin_ref == y.bin_ref && x.kind == y.kind && x.bytes == y.bytes)
 }

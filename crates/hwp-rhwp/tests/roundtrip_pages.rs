@@ -26,12 +26,18 @@ fn fonts() -> impl FontMetricsProvider {
 
 fn parse(bytes: &[u8]) -> SemanticDoc {
     use hwp_model::prelude::DocumentParser;
-    hwp_rhwp::RhwpEngine::new().parse(bytes, SourceFormat::Hwp5).expect("rhwp lift")
+    hwp_rhwp::RhwpEngine::new()
+        .parse(bytes, SourceFormat::Hwp5)
+        .expect("rhwp lift")
 }
 
 /// (NaiveLayout 페이지 수, place_doc 페이지 수) — 항상 일치해야 한다(LOCKSTEP).
 fn page_counts(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> (usize, usize) {
-    let naive = hwp_typeset::NaiveLayout.layout(doc, fonts).expect("NaiveLayout").pages.len();
+    let naive = hwp_typeset::NaiveLayout
+        .layout(doc, fonts)
+        .expect("NaiveLayout")
+        .pages
+        .len();
     let placed = hwp_typeset::place_doc(doc, fonts).pages.len();
     (naive, placed)
 }
@@ -43,12 +49,18 @@ fn roundtrip_preserves_pages(name: &str) {
 
     let orig = parse(&bytes);
     let (n0, p0) = page_counts(&orig, &fonts);
-    assert_eq!(n0, p0, "{name}: 원본 LOCKSTEP (NaiveLayout {n0} != place_doc {p0})");
+    assert_eq!(
+        n0, p0,
+        "{name}: 원본 LOCKSTEP (NaiveLayout {n0} != place_doc {p0})"
+    );
 
     let hwpx = hwp_hwpx::serialize::serialize(&orig).expect("serialize to HWPX");
     let reopened = parse(&hwpx);
     let (n1, p1) = page_counts(&reopened, &fonts);
-    assert_eq!(n1, p1, "{name}: 재열기 LOCKSTEP (NaiveLayout {n1} != place_doc {p1})");
+    assert_eq!(
+        n1, p1,
+        "{name}: 재열기 LOCKSTEP (NaiveLayout {n1} != place_doc {p1})"
+    );
 
     assert_eq!(
         n1, n0,
@@ -76,7 +88,10 @@ fn benchmark2_roundtrip_preserves_page_count() {
 /// 같은 floor 값이 복원되어야 한다(cellSz 실값 재방출 덕분). 이게 무너지면 재열기 페이지 수가 흔들린다.
 #[test]
 fn roundtrip_preserves_stored_row_height_floors() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark1.hwp");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../benchmarks/benchmark1.hwp"
+    );
     let bytes = std::fs::read(path).expect("read benchmark1.hwp");
     let orig = parse(&bytes);
     let hwpx = hwp_hwpx::serialize::serialize(&orig).expect("serialize to HWPX");
@@ -103,5 +118,8 @@ fn roundtrip_preserves_stored_row_height_floors() {
             eprintln!("표 {i}: 행높이 floor 변동\n  원본  {ra:?}\n  재열기 {rb:?}");
         }
     }
-    assert_eq!(mismatched, 0, "{mismatched}개 표의 저장 행높이 floor가 왕복에서 변동");
+    assert_eq!(
+        mismatched, 0,
+        "{mismatched}개 표의 저장 행높이 floor가 왕복에서 변동"
+    );
 }

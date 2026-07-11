@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-11 오후 (Claude Fable 5) · CI→로컬 검증 전환
+- 한 일: GitHub Actions 전패 원인 2종 해결 — ① fmt 미준수 1,332곳(CI가 로컬 시절 한 번도 안 돌았음) → 전체 포맷+clippy 부채 37건 정리(-D warnings 그린) ② cargo-deny 라이선스 미등록 2종(BSL-1.0/MPL-2.0) allow 추가. CI는 workflow_dispatch 수동 전용으로 전환, 정본은 신설 `scripts/verify-local.sh`(quick/--full). AGENTS.md 검증 절 갱신.
+- 검증: fmt/clippy exit 0, 테스트 374/0, 게이트 8==8·18==18, wasm 그린, deny licenses ok.
+- 다음: 사용자 웹 QA(apps/hwp-lab, QA.md) → 055 웹 하드닝.
+
 ## 2026-07-11 (Claude Fable 5) · R12 배치 B 완료 — 053 병합
 - 한 일: 053 v2 완주·병합(dbcc1bd) — P0 own-render 글리프 통일 채택(rhwp 발산 우회), HitTestCell/CaretRectCell(스키마 38→40), CellCaretController+CaretLayer(렌더-0), 해상률 실클릭 0%→100/99.8/100%. place.rs +412/−0 순수 추가로 V4 준수. 최종 통합 검증 후 푸시.
 - 사고 기록: v2도 API 연결 오류로 1회 중단 → SendMessage 트랜스크립트 재개로 컨텍스트 보존 완주(재개 패턴 유효 확인).

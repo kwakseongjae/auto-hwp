@@ -30,7 +30,11 @@ fn zero_table(doc: &mut SemanticDoc, t: &mut hwp_model::document::Table) {
         for b in &mut c.blocks {
             match b {
                 Block::Paragraph(p) => {
-                    let mut ps = doc.para_shapes.get(p.para_shape).cloned().unwrap_or_default();
+                    let mut ps = doc
+                        .para_shapes
+                        .get(p.para_shape)
+                        .cloned()
+                        .unwrap_or_default();
                     ps.space_before = 0;
                     ps.space_after = 0;
                     doc.para_shapes.push(ps);
@@ -44,7 +48,11 @@ fn zero_table(doc: &mut SemanticDoc, t: &mut hwp_model::document::Table) {
 
 #[test]
 fn probe_cell_spacing() {
-    let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark1.hwpx")).unwrap();
+    let bytes = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../benchmarks/benchmark1.hwpx"
+    ))
+    .unwrap();
     let doc = hwp_core::Engine::open(&bytes).unwrap();
     let fonts = ApproxFontMetrics;
 
@@ -57,19 +65,31 @@ fn probe_cell_spacing() {
     let mut cell_sa_total = 0i64;
     let mut cell_vals: std::collections::BTreeMap<(i64, i64), usize> = Default::default();
 
-    fn walk_cell(doc: &SemanticDoc, blocks: &[Block], cp: &mut usize, cnz: &mut usize,
-                 sb_t: &mut i64, sa_t: &mut i64, vals: &mut std::collections::BTreeMap<(i64,i64),usize>) {
+    fn walk_cell(
+        doc: &SemanticDoc,
+        blocks: &[Block],
+        cp: &mut usize,
+        cnz: &mut usize,
+        sb_t: &mut i64,
+        sa_t: &mut i64,
+        vals: &mut std::collections::BTreeMap<(i64, i64), usize>,
+    ) {
         for b in blocks {
             match b {
                 Block::Paragraph(p) => {
                     *cp += 1;
                     let (sb, sa) = para_sbsa(doc, p.para_shape);
-                    *sb_t += sb; *sa_t += sa;
-                    if sb != 0 || sa != 0 { *cnz += 1; }
+                    *sb_t += sb;
+                    *sa_t += sa;
+                    if sb != 0 || sa != 0 {
+                        *cnz += 1;
+                    }
                     *vals.entry((sb, sa)).or_default() += 1;
                 }
                 Block::Table(t) => {
-                    for c in &t.cells { walk_cell(doc, &c.blocks, cp, cnz, sb_t, sa_t, vals); }
+                    for c in &t.cells {
+                        walk_cell(doc, &c.blocks, cp, cnz, sb_t, sa_t, vals);
+                    }
                 }
             }
         }
@@ -81,12 +101,21 @@ fn probe_cell_spacing() {
                 Block::Paragraph(p) => {
                     body_paras += 1;
                     let (sb, sa) = para_sbsa(&doc, p.para_shape);
-                    if sb != 0 || sa != 0 { body_nonzero += 1; }
+                    if sb != 0 || sa != 0 {
+                        body_nonzero += 1;
+                    }
                 }
                 Block::Table(t) => {
                     for c in &t.cells {
-                        walk_cell(&doc, &c.blocks, &mut cell_paras, &mut cell_nonzero,
-                                  &mut cell_sb_total, &mut cell_sa_total, &mut cell_vals);
+                        walk_cell(
+                            &doc,
+                            &c.blocks,
+                            &mut cell_paras,
+                            &mut cell_nonzero,
+                            &mut cell_sb_total,
+                            &mut cell_sa_total,
+                            &mut cell_vals,
+                        );
                     }
                 }
             }
@@ -120,7 +149,11 @@ fn probe_cell_spacing() {
         for (bi, b) in sec.blocks.iter().enumerate() {
             if let Block::Table(t) = b {
                 let h_with = table_height(t, body_w, &doc, &fonts);
-                let zt = if let Block::Table(zt) = &zsec.blocks[bi] { zt } else { unreachable!() };
+                let zt = if let Block::Table(zt) = &zsec.blocks[bi] {
+                    zt
+                } else {
+                    unreachable!()
+                };
                 let h_without = table_height(zt, body_w, &zeroed, &fonts);
                 total_with += h_with;
                 total_without += h_without;

@@ -39,7 +39,9 @@ impl std::fmt::Display for OpError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             OpError::TargetNotFound(s) => write!(f, "css target not found: {s}"),
-            OpError::NodeHasNoStyleClass(s) => write!(f, "node {s} has no style class (default shape)"),
+            OpError::NodeHasNoStyleClass(s) => {
+                write!(f, "node {s} has no style class (default shape)")
+            }
         }
     }
 }
@@ -55,7 +57,10 @@ pub fn css_set_decl(proj: &mut JsxCssProject, op: &CssSetDecl) -> Result<Selecto
     } else {
         let mut decls = std::collections::BTreeMap::new();
         decls.insert(op.prop.clone(), value);
-        proj.styles.upsert(CssRule { selector: selector.clone(), decls });
+        proj.styles.upsert(CssRule {
+            selector: selector.clone(),
+            decls,
+        });
     }
     proj.dirty.document_css = true;
     // Crucially: document.jsx / sections / manifest are NOT touched (content/design split).
@@ -74,10 +79,12 @@ fn resolve_selector(proj: &JsxCssProject, target: &CssTarget) -> Result<Selector
             // (whose own class is `.pN`) a *character*-level edit lands on its first child Run's
             // `.cN` class — so a "node X font-size 14pt" instruction resolves correctly.
             node_style_class(el)
-                .or_else(|| el.children.iter().find_map(|c| match c {
-                    JsxNode::Element(child) => node_style_class(child),
-                    _ => None,
-                }))
+                .or_else(|| {
+                    el.children.iter().find_map(|c| match c {
+                        JsxNode::Element(child) => node_style_class(child),
+                        _ => None,
+                    })
+                })
                 .ok_or_else(|| OpError::NodeHasNoStyleClass(key.clone()))
         }
     }

@@ -64,7 +64,9 @@ impl Prerequisites {
 pub fn reference_pdf(input: &Path, out_dir: &Path) -> Result<PathBuf> {
     let pre = Prerequisites::detect();
     if !pre.soffice {
-        return Err(Error::CapabilityUnavailable("soffice (install LibreOffice)"));
+        return Err(Error::CapabilityUnavailable(
+            "soffice (install LibreOffice)",
+        ));
     }
     if !pre.h2orestart {
         return Err(Error::CapabilityUnavailable(
@@ -156,7 +158,10 @@ pub fn unexpected_divergences(report: &FidelityReport, allow: &[KnownDivergence]
     let aligned = report.our_pages.min(report.ref_pages);
     let mut out = Vec::new();
     if report.our_pages != report.ref_pages && !count_allowed {
-        out.push(format!("page-count mismatch: ours={} ref={}", report.our_pages, report.ref_pages));
+        out.push(format!(
+            "page-count mismatch: ours={} ref={}",
+            report.our_pages, report.ref_pages
+        ));
     }
     for p in &report.pages {
         if p.band != FidelityBand::Red {
@@ -170,7 +175,11 @@ pub fn unexpected_divergences(report: &FidelityReport, allow: &[KnownDivergence]
             .iter()
             .any(|d| d.reference == report.reference && d.kind == DivergenceKind::Page(p.index));
         if !page_allowed {
-            out.push(format!("page {} RED (similarity {:?})", p.index + 1, p.similarity));
+            out.push(format!(
+                "page {} RED (similarity {:?})",
+                p.index + 1,
+                p.similarity
+            ));
         }
     }
     out
@@ -239,7 +248,10 @@ pub fn compare(input: &Path) -> Result<FidelityReport> {
     let ref_dir = work.join("ref");
 
     let (ref_pngs, reference) = match reference_pdf_for(input) {
-        Some(pdf) => (hwp_oracle::pdf_to_pngs(&pdf, &ref_dir, 100)?, ReferenceKind::GroundTruthPdf),
+        Some(pdf) => (
+            hwp_oracle::pdf_to_pngs(&pdf, &ref_dir, 100)?,
+            ReferenceKind::GroundTruthPdf,
+        ),
         None => {
             let pre = Prerequisites::detect();
             if !pre.can_reference() {
@@ -248,7 +260,10 @@ pub fn compare(input: &Path) -> Result<FidelityReport> {
                 ));
             }
             let pdf = hwp_oracle::convert_to_pdf(input, &ref_dir)?;
-            (hwp_oracle::pdf_to_pngs(&pdf, &ref_dir, 100)?, ReferenceKind::Oracle)
+            (
+                hwp_oracle::pdf_to_pngs(&pdf, &ref_dir, 100)?,
+                ReferenceKind::Oracle,
+            )
         }
     };
 
@@ -259,9 +274,17 @@ pub fn compare(input: &Path) -> Result<FidelityReport> {
     for i in 0..max_n {
         if i < aligned {
             let sim = image_similarity(&our_pngs[i], &ref_pngs[i])?;
-            pages.push(PageScore { index: i, similarity: Some(sim), band: band_of(sim) });
+            pages.push(PageScore {
+                index: i,
+                similarity: Some(sim),
+                band: band_of(sim),
+            });
         } else {
-            pages.push(PageScore { index: i, similarity: None, band: FidelityBand::Red });
+            pages.push(PageScore {
+                index: i,
+                similarity: None,
+                band: FidelityBand::Red,
+            });
         }
     }
 
@@ -276,7 +299,13 @@ pub fn compare(input: &Path) -> Result<FidelityReport> {
         FidelityBand::Green
     };
 
-    Ok(FidelityReport { reference, our_pages: our_pngs.len(), ref_pages: ref_pngs.len(), pages, overall })
+    Ok(FidelityReport {
+        reference,
+        our_pages: our_pngs.len(),
+        ref_pages: ref_pngs.len(),
+        pages,
+        overall,
+    })
 }
 
 #[cfg(not(feature = "rhwp"))]
@@ -293,22 +322,46 @@ mod tests {
     use super::*;
 
     fn page(index: usize, band: FidelityBand) -> PageScore {
-        let similarity = Some(if band == FidelityBand::Green { 0.95 } else { 0.50 });
-        PageScore { index, similarity, band }
+        let similarity = Some(if band == FidelityBand::Green {
+            0.95
+        } else {
+            0.50
+        });
+        PageScore {
+            index,
+            similarity,
+            band,
+        }
     }
 
-    fn report(reference: ReferenceKind, our: usize, refp: usize, pages: Vec<PageScore>) -> FidelityReport {
+    fn report(
+        reference: ReferenceKind,
+        our: usize,
+        refp: usize,
+        pages: Vec<PageScore>,
+    ) -> FidelityReport {
         let overall = if pages.iter().any(|p| p.band == FidelityBand::Red) || our != refp {
             FidelityBand::Red
         } else {
             FidelityBand::Green
         };
-        FidelityReport { reference, our_pages: our, ref_pages: refp, pages, overall }
+        FidelityReport {
+            reference,
+            our_pages: our,
+            ref_pages: refp,
+            pages,
+            overall,
+        }
     }
 
     #[test]
     fn groundtruth_all_green_passes_the_gate() {
-        let r = report(ReferenceKind::GroundTruthPdf, 8, 8, (0..8).map(|i| page(i, FidelityBand::Green)).collect());
+        let r = report(
+            ReferenceKind::GroundTruthPdf,
+            8,
+            8,
+            (0..8).map(|i| page(i, FidelityBand::Green)).collect(),
+        );
         assert!(unexpected_divergences(&r, benchmark_allowlist()).is_empty());
     }
 
@@ -316,10 +369,21 @@ mod tests {
     fn oracle_pagination_divergence_is_allowlisted() {
         // 8 ours vs 10 oracle: aligned pages green, surplus pages 9 & 10 Red — exempt via PageCount.
         let mut pages: Vec<_> = (0..8).map(|i| page(i, FidelityBand::Green)).collect();
-        pages.push(PageScore { index: 8, similarity: None, band: FidelityBand::Red });
-        pages.push(PageScore { index: 9, similarity: None, band: FidelityBand::Red });
+        pages.push(PageScore {
+            index: 8,
+            similarity: None,
+            band: FidelityBand::Red,
+        });
+        pages.push(PageScore {
+            index: 9,
+            similarity: None,
+            band: FidelityBand::Red,
+        });
         let r = report(ReferenceKind::Oracle, 8, 10, pages);
-        assert!(unexpected_divergences(&r, benchmark_allowlist()).is_empty(), "pagination diff is known");
+        assert!(
+            unexpected_divergences(&r, benchmark_allowlist()).is_empty(),
+            "pagination diff is known"
+        );
     }
 
     #[test]
@@ -337,7 +401,11 @@ mod tests {
     fn groundtruth_pagecount_mismatch_fails() {
         // The allowlist is Oracle-only: a page-count mismatch vs the ground truth is a real failure.
         let mut pages: Vec<_> = (0..8).map(|i| page(i, FidelityBand::Green)).collect();
-        pages.push(PageScore { index: 8, similarity: None, band: FidelityBand::Red });
+        pages.push(PageScore {
+            index: 8,
+            similarity: None,
+            band: FidelityBand::Red,
+        });
         let r = report(ReferenceKind::GroundTruthPdf, 8, 9, pages);
         assert!(!unexpected_divergences(&r, benchmark_allowlist()).is_empty());
     }

@@ -63,8 +63,11 @@ border-radius:3px;padding:0 5px;font-size:.88em}\
 /// Render a [`JsxCssProject`] into one self-contained HTML document (semantic-reflow).
 pub fn emit_html(proj: &JsxCssProject, opts: &HtmlOptions) -> String {
     // bin_ref → asset, for resolving <img src="assets/{bin_ref}"> to a data: URI.
-    let assets: BTreeMap<&str, &Asset> =
-        proj.assets.iter().map(|a| (a.bin_ref.as_str(), a)).collect();
+    let assets: BTreeMap<&str, &Asset> = proj
+        .assets
+        .iter()
+        .map(|a| (a.bin_ref.as_str(), a))
+        .collect();
 
     let mut body = String::new();
     for section in &proj.sections {
@@ -98,7 +101,13 @@ fn render_children(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut S
 }
 
 /// Wrap the element's children in `<tag …attrs>`…`</tag>`.
-fn wrap(el: &JsxElement, tag: &str, extra: &str, assets: &BTreeMap<&str, &Asset>, out: &mut String) {
+fn wrap(
+    el: &JsxElement,
+    tag: &str,
+    extra: &str,
+    assets: &BTreeMap<&str, &Asset>,
+    out: &mut String,
+) {
     out.push('<');
     out.push_str(tag);
     out.push_str(&class_attr(&el.class_list));
@@ -139,14 +148,21 @@ fn render_element(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut St
         Some(Tag::Note) => out.push_str("<sup class=\"hwp-note\" title=\"주석\">※</sup>"),
         Some(Tag::Bookmark) => {
             if let Some(name) = el.attrs.get("data-name") {
-                out.push_str(&format!("<a id=\"{}\" class=\"hwp-bookmark\"></a>", esc_attr(name)));
+                out.push_str(&format!(
+                    "<a id=\"{}\" class=\"hwp-bookmark\"></a>",
+                    esc_attr(name)
+                ));
             }
         }
         Some(Tag::Header) => wrap(el, "header", "", assets, out),
         Some(Tag::Footer) => wrap(el, "footer", "", assets, out),
         Some(Tag::Page) => wrap(el, "div", " data-page", assets, out),
         Some(Tag::Raw) => {
-            let tag = el.attrs.get("data-tag").map(String::as_str).unwrap_or("object");
+            let tag = el
+                .attrs
+                .get("data-tag")
+                .map(String::as_str)
+                .unwrap_or("object");
             out.push_str(&format!(
                 "<span class=\"hwp-raw\" title=\"{}\">[{}]</span>",
                 esc_attr(tag),
@@ -168,7 +184,11 @@ fn render_table(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut Stri
     for child in &el.children {
         if let JsxNode::Element(cell) = child {
             if cell.tag() == Some(Tag::TableCell) {
-                let r = cell.attrs.get("data-row").and_then(|s| s.parse().ok()).unwrap_or(0usize);
+                let r = cell
+                    .attrs
+                    .get("data-row")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0usize);
                 rows.entry(r).or_default().push(cell);
             }
         }
@@ -180,7 +200,12 @@ fn render_table(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut Stri
     let cols_px: Vec<f64> = el
         .attrs
         .get("data-colw")
-        .map(|w| w.split(',').filter_map(|v| v.parse::<f64>().ok()).map(|h| h / 75.0).collect())
+        .map(|w| {
+            w.split(',')
+                .filter_map(|v| v.parse::<f64>().ok())
+                .map(|h| h / 75.0)
+                .collect()
+        })
         .unwrap_or_default();
 
     // Per-row MINIMUM heights (HWPUNIT) → px (÷75), the row twin of `data-colw`. A `<tr>` `height` acts
@@ -189,7 +214,12 @@ fn render_table(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut Stri
     let rows_px: Vec<f64> = el
         .attrs
         .get("data-rowh")
-        .map(|h| h.split(',').filter_map(|v| v.parse::<f64>().ok()).map(|x| x / 75.0).collect())
+        .map(|h| {
+            h.split(',')
+                .filter_map(|v| v.parse::<f64>().ok())
+                .map(|x| x / 75.0)
+                .collect()
+        })
         .unwrap_or_default();
 
     // Column PROPORTIONS as percentages (not absolute px): the table fills the container width
@@ -222,8 +252,16 @@ fn render_table(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut Stri
             // Position-derived design classes (Korean gov-doc convention): the top header row and the
             // left label column are shaded gray. Computed from structural indices at RENDER time —
             // never written into the JSX content — so content(JSX)/design(CSS) separation holds.
-            let r = cell.attrs.get("data-row").and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
-            let c0 = cell.attrs.get("data-col").and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+            let r = cell
+                .attrs
+                .get("data-row")
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(0);
+            let c0 = cell
+                .attrs
+                .get("data-col")
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(0);
             let mut cls = String::new();
             if r == 0 {
                 cls.push_str("hwp-th");
@@ -295,7 +333,11 @@ fn class_attr(classes: &[String]) -> String {
     if classes.is_empty() {
         return String::new();
     }
-    let joined = classes.iter().map(|c| esc_attr(c)).collect::<Vec<_>>().join(" ");
+    let joined = classes
+        .iter()
+        .map(|c| esc_attr(c))
+        .collect::<Vec<_>>()
+        .join(" ");
     format!(" class=\"{joined}\"")
 }
 
@@ -361,8 +403,15 @@ mod tests {
         let mut doc = SemanticDoc::default();
         doc.char_shapes.push(CharShape::default());
         doc.para_shapes.push(ParaShape::default());
-        let para = Paragraph { id: Some(NodeId(1)), runs, ..Default::default() };
-        doc.sections.push(Section { blocks: vec![Block::Paragraph(para)], ..Default::default() });
+        let para = Paragraph {
+            id: Some(NodeId(1)),
+            runs,
+            ..Default::default()
+        };
+        doc.sections.push(Section {
+            blocks: vec![Block::Paragraph(para)],
+            ..Default::default()
+        });
         doc
     }
 
@@ -390,7 +439,10 @@ mod tests {
             content: vec![Inline::Text("<script>alert(1)</script> & <b>x".into())],
         }]);
         let html = html_of(&doc);
-        assert!(!html.contains("<script>alert(1)</script>"), "raw script must not survive");
+        assert!(
+            !html.contains("<script>alert(1)</script>"),
+            "raw script must not survive"
+        );
         assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt; &amp; &lt;b&gt;x"));
     }
 
@@ -406,13 +458,24 @@ mod tests {
         doc.para_shapes.push(ParaShape::default());
         let para = Paragraph {
             id: Some(NodeId(1)),
-            runs: vec![Run { char_shape: 1, char_ref: None, content: vec![Inline::Text("x".into())] }],
+            runs: vec![Run {
+                char_shape: 1,
+                char_ref: None,
+                content: vec![Inline::Text("x".into())],
+            }],
             ..Default::default()
         };
-        doc.sections.push(Section { blocks: vec![Block::Paragraph(para)], ..Default::default() });
+        doc.sections.push(Section {
+            blocks: vec![Block::Paragraph(para)],
+            ..Default::default()
+        });
         let html = html_of(&doc);
         // The only legitimate </style> is the one we emit to close the block.
-        assert_eq!(html.matches("</style>").count(), 1, "no injected </style> breakout");
+        assert_eq!(
+            html.matches("</style>").count(),
+            1,
+            "no injected </style> breakout"
+        );
         assert!(!html.contains("<script>alert(1)</script>"));
     }
 
@@ -431,15 +494,43 @@ mod tests {
         let mut doc = SemanticDoc::default();
         doc.char_shapes.push(CharShape::default());
         doc.para_shapes.push(ParaShape::default());
-        let mut t = Table { rows: 1, cols: 2, ..Default::default() };
-        t.cells.push(Cell { row: 0, col: 0, col_span: 2, row_span: 1, active: true, ..Default::default() });
-        t.cells.push(Cell { row: 0, col: 1, col_span: 1, row_span: 1, active: false, ..Default::default() });
-        doc.sections.push(Section { blocks: vec![Block::Table(t)], ..Default::default() });
+        let mut t = Table {
+            rows: 1,
+            cols: 2,
+            ..Default::default()
+        };
+        t.cells.push(Cell {
+            row: 0,
+            col: 0,
+            col_span: 2,
+            row_span: 1,
+            active: true,
+            ..Default::default()
+        });
+        t.cells.push(Cell {
+            row: 0,
+            col: 1,
+            col_span: 1,
+            row_span: 1,
+            active: false,
+            ..Default::default()
+        });
+        doc.sections.push(Section {
+            blocks: vec![Block::Table(t)],
+            ..Default::default()
+        });
         let html = html_of(&doc);
         assert!(html.contains("<table"));
-        assert!(html.contains("colspan=\"2\""), "spanning cell keeps its colspan");
+        assert!(
+            html.contains("colspan=\"2\""),
+            "spanning cell keeps its colspan"
+        );
         // exactly ONE <td> (the inactive covered cell is omitted)
-        assert_eq!(html.matches("<td").count(), 1, "covered cell omitted from the HTML grid");
+        assert_eq!(
+            html.matches("<td").count(),
+            1,
+            "covered cell omitted from the HTML grid"
+        );
     }
 
     #[test]
@@ -448,15 +539,44 @@ mod tests {
         doc.char_shapes.push(CharShape::default());
         doc.para_shapes.push(ParaShape::default());
         // 2 rows × 1 col; row 0 floored to 3000 HWPUNIT (= 40px), row 1 left content-sized (0).
-        let mut t = Table { rows: 2, cols: 1, row_heights: vec![3000, 0], ..Default::default() };
-        t.cells.push(Cell { row: 0, col: 0, col_span: 1, row_span: 1, active: true, ..Default::default() });
-        t.cells.push(Cell { row: 1, col: 0, col_span: 1, row_span: 1, active: true, ..Default::default() });
-        doc.sections.push(Section { blocks: vec![Block::Table(t)], ..Default::default() });
+        let mut t = Table {
+            rows: 2,
+            cols: 1,
+            row_heights: vec![3000, 0],
+            ..Default::default()
+        };
+        t.cells.push(Cell {
+            row: 0,
+            col: 0,
+            col_span: 1,
+            row_span: 1,
+            active: true,
+            ..Default::default()
+        });
+        t.cells.push(Cell {
+            row: 1,
+            col: 0,
+            col_span: 1,
+            row_span: 1,
+            active: true,
+            ..Default::default()
+        });
+        doc.sections.push(Section {
+            blocks: vec![Block::Table(t)],
+            ..Default::default()
+        });
         let html = html_of(&doc);
         // 3000 / 75 = 40.0px on the first row; the 0-slot row stays a bare <tr>.
-        assert!(html.contains("<tr style=\"height:40.0px\">"), "row-0 height override reaches HTML: {html}");
+        assert!(
+            html.contains("<tr style=\"height:40.0px\">"),
+            "row-0 height override reaches HTML: {html}"
+        );
         assert_eq!(html.matches("<tr").count(), 2, "two rows emitted");
-        assert_eq!(html.matches("<tr style=").count(), 1, "only the overridden row carries a height");
+        assert_eq!(
+            html.matches("<tr style=").count(),
+            1,
+            "only the overridden row carries a height"
+        );
     }
 
     #[test]
@@ -480,14 +600,26 @@ mod tests {
                         height: 1000,
                         version: String::new(),
                     }),
-                    Inline::Raw(RawPart { tag: "shape".into(), bytes: vec![1, 2, 3] }),
+                    Inline::Raw(RawPart {
+                        tag: "shape".into(),
+                        bytes: vec![1, 2, 3],
+                    }),
                 ],
             }],
             ..Default::default()
         };
-        doc.sections.push(Section { blocks: vec![Block::Paragraph(para)], ..Default::default() });
+        doc.sections.push(Section {
+            blocks: vec![Block::Paragraph(para)],
+            ..Default::default()
+        });
         let html = html_of(&doc);
-        assert!(html.contains("hwp-eq"), "equation shows a visible placeholder");
-        assert!(html.contains("hwp-raw"), "raw object shows a visible placeholder");
+        assert!(
+            html.contains("hwp-eq"),
+            "equation shows a visible placeholder"
+        );
+        assert!(
+            html.contains("hwp-raw"),
+            "raw object shows a visible placeholder"
+        );
     }
 }

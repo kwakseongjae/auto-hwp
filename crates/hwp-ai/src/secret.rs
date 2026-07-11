@@ -81,7 +81,9 @@ pub fn store_anthropic_key(key: &str) -> Result<()> {
     }
     let entry = keyring::Entry::new(SERVICE, ACCOUNT)
         .map_err(|e| Error::Other(format!("keychain open: {e}")))?;
-    entry.set_password(key).map_err(|e| Error::Other(format!("keychain store: {e}")))
+    entry
+        .set_password(key)
+        .map_err(|e| Error::Other(format!("keychain store: {e}")))
 }
 
 /// Remove the stored Anthropic key from the OS keychain (Ok even if none was stored).
@@ -98,7 +100,10 @@ pub fn clear_anthropic_key() -> Result<()> {
 
 /// Where the key is currently coming from — for a `status` readout.
 pub fn key_source() -> KeySource {
-    if std::env::var("ANTHROPIC_API_KEY").map(|k| !k.trim().is_empty()).unwrap_or(false) {
+    if std::env::var("ANTHROPIC_API_KEY")
+        .map(|k| !k.trim().is_empty())
+        .unwrap_or(false)
+    {
         KeySource::Env
     } else if keychain_key().is_some() {
         KeySource::Keychain
@@ -135,12 +140,19 @@ mod tests {
         // SAFETY: single-threaded test; restore afterward.
         let prev = std::env::var("ANTHROPIC_API_KEY").ok();
         std::env::set_var("ANTHROPIC_API_KEY", "sk-test-controlled");
-        assert_eq!(resolve_anthropic_key().as_deref(), Some("sk-test-controlled"));
+        assert_eq!(
+            resolve_anthropic_key().as_deref(),
+            Some("sk-test-controlled")
+        );
         assert!(has_anthropic_key());
         assert_eq!(key_source(), KeySource::Env);
 
         std::env::set_var("ANTHROPIC_API_KEY", "   ");
-        assert_eq!(key_source(), KeySource::None, "blank env is treated as unset");
+        assert_eq!(
+            key_source(),
+            KeySource::None,
+            "blank env is treated as unset"
+        );
 
         match prev {
             Some(v) => std::env::set_var("ANTHROPIC_API_KEY", v),

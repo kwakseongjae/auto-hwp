@@ -31,13 +31,13 @@ HWP(한글) 자체 엔진: Rust 코어(파싱→IR→조판→렌더→export→
 6. 사용자 콘텐츠 삭제 금지 · 커밋/푸시는 명시 요청 시에만.
 7. Intent 스키마 v0: additive 확장만 + unknown field 명시적 거부.
 
-## 검증 스위트 (이슈에 명시 없어도 전부 실행)
+## 검증 스위트 — 정본은 `scripts/verify-local.sh` (CI는 수동 전용, 2026-07-11 전환)
 ```bash
-cargo test -p hwp-ops && cargo test -p hwp-typeset && cargo test -p hwp-mcp
-cargo run -q -p tf-hwp-cli --features "shaper rhwp" -- layout-check benchmarks/benchmark.hwp
-# UI 접촉 시: pnpm -C packages/editor-core build && pnpm -C packages/react build (+ vitest)
-# 엔진(crates) 접촉 시: 게이트 v2(benchmark1 18==18) + cargo check -p hwp-wasm --target wasm32-unknown-unknown
+scripts/verify-local.sh          # quick: fmt·clippy·전체 테스트·게이트 v2·wasm·(deny)
+scripts/verify-local.sh --full   # + wasm 재빌드·JS 빌드/vitest·e2e — crates/UI 접촉 시 필수
 ```
+푸시 전 quick은 최소, crates·packages 접촉 시 --full. fmt는 이제 강제(2026-07-11 전체 포맷 완료 —
+fmt-dirty 커밋은 다음 verify에서 걸린다). GitHub Actions는 `gh workflow run ci`로만 수동 실행.
 
 ## 함정 top 6 (전체는 각 이슈 파일의 "함정" 절)
 - e2e 전 `rm -rf apps/hwp-lab/.next` — 웹팩 캐시가 dist 재빌드를 감지 못해 가짜 통과/실패.

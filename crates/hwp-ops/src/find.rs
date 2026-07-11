@@ -122,7 +122,13 @@ pub fn find_matches(doc: &SemanticDoc, query: &str, opts: FindOptions) -> Vec<Ma
                         || (start.checked_sub(1).is_none_or(|i| !is_word_char(hay[i]))
                             && hay.get(start + qlen).is_none_or(|&c| !is_word_char(c))))
                 {
-                    out.push(Match { node, start, len: qlen, section: si, block: bi });
+                    out.push(Match {
+                        node,
+                        start,
+                        len: qlen,
+                        section: si,
+                        block: bi,
+                    });
                     start += qlen; // non-overlapping
                 } else {
                     start += 1;
@@ -145,10 +151,22 @@ pub fn find_count(doc: &SemanticDoc, query: &str, opts: FindOptions) -> usize {
 fn replace_pair(node: NodeId, start: usize, len: usize, replacement: &str) -> [Op; 2] {
     [
         Op::DeleteRange {
-            start: Caret { node, offset: start },
-            end: Caret { node, offset: start + len },
+            start: Caret {
+                node,
+                offset: start,
+            },
+            end: Caret {
+                node,
+                offset: start + len,
+            },
         },
-        Op::InsertText { at: Caret { node, offset: start }, text: replacement.to_string() },
+        Op::InsertText {
+            at: Caret {
+                node,
+                offset: start,
+            },
+            text: replacement.to_string(),
+        },
     ]
 }
 
@@ -224,7 +242,11 @@ mod tests {
                 content: vec![Inline::Text(text.into())],
                 ..Default::default()
             }],
-            source: Some(ParaSource { span: (0, 0), simple: true, ..Default::default() }),
+            source: Some(ParaSource {
+                span: (0, 0),
+                simple: true,
+                ..Default::default()
+            }),
             ..Default::default()
         }
     }
@@ -240,7 +262,11 @@ mod tests {
                     ..Default::default()
                 })
                 .collect(),
-            source: Some(ParaSource { span: (0, 0), simple: true, ..Default::default() }),
+            source: Some(ParaSource {
+                span: (0, 0),
+                simple: true,
+                ..Default::default()
+            }),
             ..Default::default()
         }
     }
@@ -248,8 +274,15 @@ mod tests {
     fn structural_para(id: u64, text: &str) -> Paragraph {
         Paragraph {
             id: Some(NodeId(id)),
-            runs: vec![Run { content: vec![Inline::Text(text.into())], ..Default::default() }],
-            source: Some(ParaSource { span: (0, 0), simple: false, ..Default::default() }),
+            runs: vec![Run {
+                content: vec![Inline::Text(text.into())],
+                ..Default::default()
+            }],
+            source: Some(ParaSource {
+                span: (0, 0),
+                simple: false,
+                ..Default::default()
+            }),
             ..Default::default()
         }
     }
@@ -260,8 +293,10 @@ mod tests {
             para_shapes: vec![ParaShape::default()],
             ..Default::default()
         };
-        doc.sections
-            .push(Section { blocks: paras.into_iter().map(Block::Paragraph).collect(), ..Default::default() });
+        doc.sections.push(Section {
+            blocks: paras.into_iter().map(Block::Paragraph).collect(),
+            ..Default::default()
+        });
         doc
     }
 
@@ -280,10 +315,16 @@ mod tests {
         FindOptions::default()
     }
     fn cs() -> FindOptions {
-        FindOptions { case_sensitive: true, whole_word: false }
+        FindOptions {
+            case_sensitive: true,
+            whole_word: false,
+        }
     }
     fn ww() -> FindOptions {
-        FindOptions { case_sensitive: false, whole_word: true }
+        FindOptions {
+            case_sensitive: false,
+            whole_word: true,
+        }
     }
 
     // ---- find_matches ----
@@ -293,14 +334,21 @@ mod tests {
         let doc = doc_with(vec![simple_para(1, "abc abc abc")]);
         let ms = find_matches(&doc, "abc", cs());
         assert_eq!(ms.len(), 3);
-        assert_eq!(ms.iter().map(|m| m.start).collect::<Vec<_>>(), vec![0, 4, 8]);
+        assert_eq!(
+            ms.iter().map(|m| m.start).collect::<Vec<_>>(),
+            vec![0, 4, 8]
+        );
         assert!(ms.iter().all(|m| m.len == 3 && m.node == NodeId(1)));
     }
 
     #[test]
     fn find_case_sensitivity() {
         let doc = doc_with(vec![simple_para(1, "Foo foo FOO")]);
-        assert_eq!(find_matches(&doc, "foo", ci()).len(), 3, "insensitive → all 3");
+        assert_eq!(
+            find_matches(&doc, "foo", ci()).len(),
+            3,
+            "insensitive → all 3"
+        );
         let sens = find_matches(&doc, "foo", cs());
         assert_eq!(sens.len(), 1, "sensitive → only the exact 'foo'");
         assert_eq!(sens[0].start, 4);
@@ -339,14 +387,20 @@ mod tests {
     #[test]
     fn find_empty_query_and_too_long_query() {
         let doc = doc_with(vec![simple_para(1, "short")]);
-        assert!(find_matches(&doc, "", cs()).is_empty(), "empty query → no matches");
+        assert!(
+            find_matches(&doc, "", cs()).is_empty(),
+            "empty query → no matches"
+        );
         assert!(find_matches(&doc, "this is longer than the paragraph", cs()).is_empty());
     }
 
     #[test]
     fn find_skips_non_simple_and_tables() {
         // simple para + structural para + a table, all containing the query → only the simple match.
-        let mut doc = doc_with(vec![simple_para(1, "needle here"), structural_para(2, "needle there")]);
+        let mut doc = doc_with(vec![
+            simple_para(1, "needle here"),
+            structural_para(2, "needle there"),
+        ]);
         doc.sections[0].blocks.push(Block::Table(Table {
             rows: 1,
             cols: 1,
@@ -357,7 +411,11 @@ mod tests {
             ..Default::default()
         }));
         let ms = find_matches(&doc, "needle", cs());
-        assert_eq!(ms.len(), 1, "only the top-level simple paragraph is searched");
+        assert_eq!(
+            ms.len(),
+            1,
+            "only the top-level simple paragraph is searched"
+        );
         assert_eq!(ms[0].node, NodeId(1));
     }
 
@@ -480,10 +538,22 @@ mod tests {
     fn replace_one_stale_match_returns_empty() {
         let doc = doc_with(vec![simple_para(1, "abc")]);
         // A Match whose span runs past the current paragraph text → stale → [].
-        let stale = Match { node: NodeId(1), start: 2, len: 10, section: 0, block: 0 };
+        let stale = Match {
+            node: NodeId(1),
+            start: 2,
+            len: 10,
+            section: 0,
+            block: 0,
+        };
         assert!(replace_one_ops(&doc, &stale, "Z").is_empty());
         // A Match on a node that doesn't exist → [].
-        let gone = Match { node: NodeId(99), start: 0, len: 1, section: 0, block: 0 };
+        let gone = Match {
+            node: NodeId(99),
+            start: 0,
+            len: 1,
+            section: 0,
+            block: 0,
+        };
         assert!(replace_one_ops(&doc, &gone, "Z").is_empty());
     }
 }

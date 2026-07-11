@@ -98,7 +98,10 @@ pub struct JsxElement {
 
 impl JsxElement {
     pub fn new(tag: Tag) -> Self {
-        JsxElement { tag_str: tag.as_str().to_string(), ..Default::default() }
+        JsxElement {
+            tag_str: tag.as_str().to_string(),
+            ..Default::default()
+        }
     }
     pub fn tag(&self) -> Option<Tag> {
         Tag::from_str(&self.tag_str)
@@ -197,7 +200,10 @@ fn emit_node(node: &JsxNode, depth: usize, out: &mut String) {
 // ---------------------------------------------------------------------------
 
 pub fn parse_jsx(src: &str) -> Result<JsxNode, String> {
-    let mut p = P { b: src.as_bytes(), i: 0 };
+    let mut p = P {
+        b: src.as_bytes(),
+        i: 0,
+    };
     p.ws();
     let n = p.node()?;
     p.ws();
@@ -297,7 +303,10 @@ impl<'a> P<'a> {
         if tag_str.is_empty() {
             return Err(format!("expected tag name at {}", self.i));
         }
-        let mut el = JsxElement { tag_str, ..Default::default() };
+        let mut el = JsxElement {
+            tag_str,
+            ..Default::default()
+        };
         // attributes
         loop {
             self.ws();
@@ -319,8 +328,7 @@ impl<'a> P<'a> {
             match name.as_str() {
                 "id" => el.id = Some(val),
                 "className" => {
-                    el.class_list =
-                        val.split_whitespace().map(|s| s.to_string()).collect();
+                    el.class_list = val.split_whitespace().map(|s| s.to_string()).collect();
                 }
                 _ => {
                     el.attrs.insert(name, val);
@@ -336,7 +344,7 @@ impl<'a> P<'a> {
             return Err(format!("expected > at {}", self.i));
         }
         self.i += 1; // >
-        // children until </tag>
+                     // children until </tag>
         loop {
             self.ws();
             if self.starts_with("</") {

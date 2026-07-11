@@ -28,7 +28,9 @@ pub fn origin_ok(origin: Option<&str>) -> bool {
     if o == "null" {
         return false;
     }
-    let rest = o.strip_prefix("http://").or_else(|| o.strip_prefix("https://"));
+    let rest = o
+        .strip_prefix("http://")
+        .or_else(|| o.strip_prefix("https://"));
     match rest {
         Some(r) => host_ok(r),
         None => false,
@@ -68,7 +70,11 @@ fn header<'a>(lines: &'a [&'a str], name: &str) -> Option<&'a str> {
 
 /// Process one raw HTTP request → raw HTTP response, enforcing the security order before dispatch.
 /// `dispatch` runs the JSON-RPC message (reuses `crate::handle` behind the caller's session).
-pub fn process_request(raw: &[u8], token: &str, dispatch: &dyn Fn(&Value) -> Option<Value>) -> Vec<u8> {
+pub fn process_request(
+    raw: &[u8],
+    token: &str,
+    dispatch: &dyn Fn(&Value) -> Option<Value>,
+) -> Vec<u8> {
     let text = String::from_utf8_lossy(raw);
     let Some((head, body)) = text.split_once("\r\n\r\n") else {
         return http("400 Bad Request", "text/plain", b"malformed request");
@@ -97,12 +103,23 @@ pub fn process_request(raw: &[u8], token: &str, dispatch: &dyn Fn(&Value) -> Opt
     }
     // (3) Bearer token present AND constant-time-equal (missing ⇒ 401).
     let bearer = header(&header_lines, "authorization").and_then(|a| a.strip_prefix("Bearer "));
-    if !bearer.map(|b| token_ok(b.as_bytes(), token.as_bytes())).unwrap_or(false) {
-        return http("401 Unauthorized", "text/plain", b"missing or invalid token");
+    if !bearer
+        .map(|b| token_ok(b.as_bytes(), token.as_bytes()))
+        .unwrap_or(false)
+    {
+        return http(
+            "401 Unauthorized",
+            "text/plain",
+            b"missing or invalid token",
+        );
     }
     // (4) parse JSON-RPC + dispatch.
     let Ok(req) = serde_json::from_str::<Value>(body.trim()) else {
-        return http("400 Bad Request", "application/json", br#"{"error":"parse error"}"#);
+        return http(
+            "400 Bad Request",
+            "application/json",
+            br#"{"error":"parse error"}"#,
+        );
     };
     match dispatch(&req) {
         Some(resp) => http("200 OK", "application/json", resp.to_string().as_bytes()),
@@ -121,7 +138,10 @@ fn handle_conn(mut stream: TcpStream, token: &str, dispatch: &dyn Fn(&Value) -> 
             let text = String::from_utf8_lossy(&buf[..head_len]);
             let clen = text
                 .lines()
-                .find_map(|l| l.split_once(':').filter(|(k, _)| k.trim().eq_ignore_ascii_case("content-length")))
+                .find_map(|l| {
+                    l.split_once(':')
+                        .filter(|(k, _)| k.trim().eq_ignore_ascii_case("content-length"))
+                })
                 .and_then(|(_, v)| v.trim().parse::<usize>().ok())
                 .unwrap_or(0);
             if buf.len() >= head_len + clen {
@@ -211,7 +231,10 @@ pub fn process_request_network(
         return http("405 Method Not Allowed", "text/plain", b"POST /mcp only");
     }
     // (1) Host allowlist (ALLOWED_HOSTS; empty ⇒ skip — private-net/reverse-proxy fronting per docs).
-    if !header(&header_lines, "host").map(|h| network_host_ok(h, allowed_hosts)).unwrap_or(true) {
+    if !header(&header_lines, "host")
+        .map(|h| network_host_ok(h, allowed_hosts))
+        .unwrap_or(true)
+    {
         return http("403 Forbidden", "text/plain", b"bad host");
     }
     // (2) Origin: a network API is not a browser endpoint — ANY Origin header ⇒ 403 (CSRF block).
@@ -220,12 +243,23 @@ pub fn process_request_network(
     }
     // (3) Bearer token present AND constant-time-equal (missing ⇒ 401).
     let bearer = header(&header_lines, "authorization").and_then(|a| a.strip_prefix("Bearer "));
-    if !bearer.map(|b| token_ok(b.as_bytes(), token.as_bytes())).unwrap_or(false) {
-        return http("401 Unauthorized", "text/plain", b"missing or invalid token");
+    if !bearer
+        .map(|b| token_ok(b.as_bytes(), token.as_bytes()))
+        .unwrap_or(false)
+    {
+        return http(
+            "401 Unauthorized",
+            "text/plain",
+            b"missing or invalid token",
+        );
     }
     // (4) parse JSON-RPC + dispatch (the guarded closure adds path confinement + reopen guard).
     let Ok(req) = serde_json::from_str::<Value>(body.trim()) else {
-        return http("400 Bad Request", "application/json", br#"{"error":"parse error"}"#);
+        return http(
+            "400 Bad Request",
+            "application/json",
+            br#"{"error":"parse error"}"#,
+        );
     };
     match dispatch(&req) {
         Some(resp) => http("200 OK", "application/json", resp.to_string().as_bytes()),
@@ -248,7 +282,10 @@ fn handle_conn_network(
             let text = String::from_utf8_lossy(&buf[..head_len]);
             let clen = text
                 .lines()
-                .find_map(|l| l.split_once(':').filter(|(k, _)| k.trim().eq_ignore_ascii_case("content-length")))
+                .find_map(|l| {
+                    l.split_once(':')
+                        .filter(|(k, _)| k.trim().eq_ignore_ascii_case("content-length"))
+                })
                 .and_then(|(_, v)| v.trim().parse::<usize>().ok())
                 .unwrap_or(0);
             if buf.len() >= head_len + clen {
@@ -300,7 +337,11 @@ mod tests {
     fn security_predicates() {
         assert!(host_ok("127.0.0.1:5000") && host_ok("localhost") && host_ok("[::1]:80"));
         assert!(!host_ok("evil.com") && !host_ok("10.0.0.5"));
-        assert!(origin_ok(None) && origin_ok(Some("http://127.0.0.1:5000")) && origin_ok(Some("http://localhost")));
+        assert!(
+            origin_ok(None)
+                && origin_ok(Some("http://127.0.0.1:5000"))
+                && origin_ok(Some("http://localhost"))
+        );
         assert!(!origin_ok(Some("null")) && !origin_ok(Some("http://evil.com")));
         assert!(token_ok(b"abc", b"abc") && !token_ok(b"abc", b"abd") && !token_ok(b"", b"abc"));
     }
@@ -322,10 +363,15 @@ mod tests {
         let sess = Mutex::new(Session::default());
         let d = dispatch(&sess);
         let body = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#;
-        let no_tok = String::from_utf8_lossy(&process_request(&req("", body), "secret", &d)).into_owned();
+        let no_tok =
+            String::from_utf8_lossy(&process_request(&req("", body), "secret", &d)).into_owned();
         assert!(no_tok.starts_with("HTTP/1.1 401"), "missing token → 401");
         let wrong = String::from_utf8_lossy(&process_request(
-            &req("Authorization: Bearer nope\r\n", body), "secret", &d)).into_owned();
+            &req("Authorization: Bearer nope\r\n", body),
+            "secret",
+            &d,
+        ))
+        .into_owned();
         assert!(wrong.starts_with("HTTP/1.1 401"), "wrong token → 401");
     }
 
@@ -335,10 +381,21 @@ mod tests {
         let d = dispatch(&sess);
         let body = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#;
         let bad_origin = String::from_utf8_lossy(&process_request(
-            &req("Authorization: Bearer t\r\nOrigin: http://evil.com\r\n", body), "t", &d)).into_owned();
+            &req(
+                "Authorization: Bearer t\r\nOrigin: http://evil.com\r\n",
+                body,
+            ),
+            "t",
+            &d,
+        ))
+        .into_owned();
         assert!(bad_origin.starts_with("HTTP/1.1 403"), "evil origin → 403");
         let get = String::from_utf8_lossy(&process_request(
-            b"GET /mcp HTTP/1.1\r\nHost: 127.0.0.1:1\r\n\r\n", "t", &d)).into_owned();
+            b"GET /mcp HTTP/1.1\r\nHost: 127.0.0.1:1\r\n\r\n",
+            "t",
+            &d,
+        ))
+        .into_owned();
         assert!(get.starts_with("HTTP/1.1 405"), "GET → 405");
     }
 
@@ -348,18 +405,30 @@ mod tests {
         let d = dispatch(&sess);
         let body = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#;
         let resp = String::from_utf8_lossy(&process_request(
-            &req("Authorization: Bearer t\r\n", body), "t", &d)).into_owned();
+            &req("Authorization: Bearer t\r\n", body),
+            "t",
+            &d,
+        ))
+        .into_owned();
         assert!(resp.starts_with("HTTP/1.1 200"), "authorized → 200");
-        assert!(resp.contains("open_document") && resp.contains("apply_content"), "tools dispatched");
+        assert!(
+            resp.contains("open_document") && resp.contains("apply_content"),
+            "tools dispatched"
+        );
     }
 
     // ---- Network (opt-in) mode header policy — issue 013 ----
 
     #[test]
     fn network_host_allowlist() {
-        assert!(network_host_ok("anything", &[]), "empty allowlist ⇒ skip (private-net contract)");
+        assert!(
+            network_host_ok("anything", &[]),
+            "empty allowlist ⇒ skip (private-net contract)"
+        );
         let allow = vec!["svc.internal".to_string()];
-        assert!(network_host_ok("svc.internal", &allow) && network_host_ok("svc.internal:8752", &allow));
+        assert!(
+            network_host_ok("svc.internal", &allow) && network_host_ok("svc.internal:8752", &allow)
+        );
         assert!(!network_host_ok("evil.com", &allow));
     }
 
@@ -370,8 +439,20 @@ mod tests {
         let body = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#;
         // Even a "loopback" Origin is rejected in network mode — a network API is not a browser API.
         let with_origin = String::from_utf8_lossy(&process_request_network(
-            &req("Authorization: Bearer t\r\nOrigin: http://127.0.0.1\r\n", body), "t", &[], &d)).into_owned();
-        assert!(with_origin.starts_with("HTTP/1.1 403"), "any Origin → 403: {}", &with_origin[..20]);
+            &req(
+                "Authorization: Bearer t\r\nOrigin: http://127.0.0.1\r\n",
+                body,
+            ),
+            "t",
+            &[],
+            &d,
+        ))
+        .into_owned();
+        assert!(
+            with_origin.starts_with("HTTP/1.1 403"),
+            "any Origin → 403: {}",
+            &with_origin[..20]
+        );
     }
 
     #[test]
@@ -379,12 +460,21 @@ mod tests {
         let sess = Mutex::new(Session::default());
         let d = dispatch(&sess);
         let body = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#;
-        let no_tok = String::from_utf8_lossy(&process_request_network(
-            &req("", body), "secret", &[], &d)).into_owned();
+        let no_tok =
+            String::from_utf8_lossy(&process_request_network(&req("", body), "secret", &[], &d))
+                .into_owned();
         assert!(no_tok.starts_with("HTTP/1.1 401"), "missing token → 401");
         let ok = String::from_utf8_lossy(&process_request_network(
-            &req("Authorization: Bearer secret\r\n", body), "secret", &[], &d)).into_owned();
-        assert!(ok.starts_with("HTTP/1.1 200") && ok.contains("open_document"), "authorized → 200");
+            &req("Authorization: Bearer secret\r\n", body),
+            "secret",
+            &[],
+            &d,
+        ))
+        .into_owned();
+        assert!(
+            ok.starts_with("HTTP/1.1 200") && ok.contains("open_document"),
+            "authorized → 200"
+        );
     }
 
     #[test]
@@ -395,7 +485,15 @@ mod tests {
         // req() hardcodes Host: 127.0.0.1:1 — not in the allowlist ⇒ 403.
         let allow = vec!["svc.internal".to_string()];
         let resp = String::from_utf8_lossy(&process_request_network(
-            &req("Authorization: Bearer t\r\n", body), "t", &allow, &d)).into_owned();
-        assert!(resp.starts_with("HTTP/1.1 403"), "host not in allowlist → 403");
+            &req("Authorization: Bearer t\r\n", body),
+            "t",
+            &allow,
+            &d,
+        ))
+        .into_owned();
+        assert!(
+            resp.starts_with("HTTP/1.1 403"),
+            "host not in allowlist → 403"
+        );
     }
 }

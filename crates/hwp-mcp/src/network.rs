@@ -71,13 +71,26 @@ impl NetworkConfig {
              are confined under it).",
         )?;
         // Canonicalize the root ONCE so containment checks compare real (symlink-resolved) paths.
-        let workspace_root = std::fs::canonicalize(&root_raw)
-            .map_err(|e| format!("HWP_WORKSPACE_ROOT {root_raw:?} is not an accessible directory: {e}"))?;
-        let bind_addr = get("BIND_ADDR").filter(|t| !t.is_empty()).unwrap_or_else(|| DEFAULT_BIND.into());
+        let workspace_root = std::fs::canonicalize(&root_raw).map_err(|e| {
+            format!("HWP_WORKSPACE_ROOT {root_raw:?} is not an accessible directory: {e}")
+        })?;
+        let bind_addr = get("BIND_ADDR")
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| DEFAULT_BIND.into());
         let allowed_hosts = get("ALLOWED_HOSTS")
-            .map(|s| s.split(',').map(|h| h.trim().to_string()).filter(|h| !h.is_empty()).collect())
+            .map(|s| {
+                s.split(',')
+                    .map(|h| h.trim().to_string())
+                    .filter(|h| !h.is_empty())
+                    .collect()
+            })
             .unwrap_or_default();
-        Ok(Self { bind_addr, token, workspace_root, allowed_hosts })
+        Ok(Self {
+            bind_addr,
+            token,
+            workspace_root,
+            allowed_hosts,
+        })
     }
 }
 
@@ -96,8 +109,9 @@ pub fn confine_path(root: &Path, requested: &str, must_exist: bool) -> Result<Pa
     } else {
         let parent = req.parent().filter(|p| !p.as_os_str().is_empty());
         let dir = match parent {
-            Some(p) => std::fs::canonicalize(p)
-                .map_err(|e| format!("output directory for {requested:?} is not accessible: {e}"))?,
+            Some(p) => std::fs::canonicalize(p).map_err(|e| {
+                format!("output directory for {requested:?} is not accessible: {e}")
+            })?,
             None => root.to_path_buf(), // a bare filename lands directly in the root
         };
         let file = req
@@ -195,7 +209,10 @@ pub fn guarded_dispatch(root: &Path, req: &Value, session: &mut Session) -> Opti
 pub fn run(cfg: NetworkConfig) {
     let listener = std::net::TcpListener::bind(&cfg.bind_addr)
         .unwrap_or_else(|e| panic!("network mode: cannot bind {}: {e}", cfg.bind_addr));
-    let bound = listener.local_addr().map(|a| a.to_string()).unwrap_or_else(|_| cfg.bind_addr.clone());
+    let bound = listener
+        .local_addr()
+        .map(|a| a.to_string())
+        .unwrap_or_else(|_| cfg.bind_addr.clone());
     eprintln!(
         "hwp-mcp http-network: bound {bound} — workspace {} — Host policy: {}",
         cfg.workspace_root.display(),
@@ -225,14 +242,21 @@ mod tests {
     #[test]
     fn missing_token_refuses_startup() {
         let err = NetworkConfig::from_getter(empty_env).unwrap_err();
-        assert!(err.contains("HWP_MCP_TOKEN"), "missing token must be named: {err}");
+        assert!(
+            err.contains("HWP_MCP_TOKEN"),
+            "missing token must be named: {err}"
+        );
     }
 
     #[test]
     fn missing_workspace_root_refuses_startup() {
-        let err = NetworkConfig::from_getter(|k| (k == "HWP_MCP_TOKEN").then(|| "secret".to_string()))
-            .unwrap_err();
-        assert!(err.contains("HWP_WORKSPACE_ROOT"), "missing root must be named: {err}");
+        let err =
+            NetworkConfig::from_getter(|k| (k == "HWP_MCP_TOKEN").then(|| "secret".to_string()))
+                .unwrap_err();
+        assert!(
+            err.contains("HWP_WORKSPACE_ROOT"),
+            "missing root must be named: {err}"
+        );
     }
 
     #[test]
@@ -262,7 +286,10 @@ mod tests {
         })
         .unwrap();
         assert_eq!(cfg.bind_addr, "127.0.0.1:9000");
-        assert_eq!(cfg.allowed_hosts, vec!["svc.internal".to_string(), "hwp.svc".to_string()]);
+        assert_eq!(
+            cfg.allowed_hosts,
+            vec!["svc.internal".to_string(), "hwp.svc".to_string()]
+        );
     }
 
     // ③ path confinement (incl. symlink escape).
@@ -297,7 +324,10 @@ mod tests {
         {
             std::os::unix::fs::symlink("/etc/hosts", &link).unwrap();
             let res = confine_path(&root, link.to_str().unwrap(), true);
-            assert!(res.is_err(), "symlink escaping the root must be refused: {res:?}");
+            assert!(
+                res.is_err(),
+                "symlink escaping the root must be refused: {res:?}"
+            );
             let _ = std::fs::remove_file(&link);
         }
     }
@@ -325,14 +355,33 @@ mod tests {
         assert_eq!(r["result"]["isError"], false, "first open: {r}");
         // second open WITHOUT force: tool error, doc unchanged
         let r = call("open_document", json!({ "path": p }), &root, &mut s);
-        assert_eq!(r["result"]["isError"], true, "reopen without force must error: {r}");
-        assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("force"));
+        assert_eq!(
+            r["result"]["isError"], true,
+            "reopen without force must error: {r}"
+        );
+        assert!(r["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("force"));
         // second open WITH force: ok
-        let r = call("open_document", json!({ "path": p, "force": true }), &root, &mut s);
+        let r = call(
+            "open_document",
+            json!({ "path": p, "force": true }),
+            &root,
+            &mut s,
+        );
         assert_eq!(r["result"]["isError"], false, "forced reopen: {r}");
         // opening a path OUTSIDE the root: tool error (confinement)
-        let r = call("open_document", json!({ "path": "/etc/hosts", "force": true }), &root, &mut s);
-        assert_eq!(r["result"]["isError"], true, "outside-root open must error: {r}");
+        let r = call(
+            "open_document",
+            json!({ "path": "/etc/hosts", "force": true }),
+            &root,
+            &mut s,
+        );
+        assert_eq!(
+            r["result"]["isError"], true,
+            "outside-root open must error: {r}"
+        );
         let _ = std::fs::remove_file(&doc);
     }
 }

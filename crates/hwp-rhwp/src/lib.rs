@@ -10,6 +10,7 @@
 //!   * `parse_to_semantic` / `DocumentParser::parse` — lift `.hwp`/`.hwpx` BYTES into our `SemanticDoc`;
 //!   * `page_count` / `render_page_svg` / glyph-box + layout-fidelity helpers — a faithful render of
 //!     the ORIGINAL uploaded bytes (the "원본 보기" read-only view).
+//!
 //! This crate re-exports **NO** rhwp serialize / edit / save API, and the app must NEVER feed it an
 //! HWPX synthesized from an EDITED `SemanticDoc`: that round-trips through rhwp incompatibly and can
 //! drop content (issue #196 — Hancom rejects rhwp's save). An EDITED document is displayed from the
@@ -72,7 +73,9 @@ pub fn parse_to_semantic_guarded(bytes: &[u8]) -> std::result::Result<SemanticDo
     limits::check_raw_size(bytes.len())?;
     // `guarded` maps a panic → Error::Parse("rhwp panicked …"); re-key that to the typed
     // DocLimit::Panicked here, and pass other parse failures through as Malformed.
-    match guarded("parse_to_semantic_guarded", || lift::parse_to_semantic(bytes)) {
+    match guarded("parse_to_semantic_guarded", || {
+        lift::parse_to_semantic(bytes)
+    }) {
         Ok(doc) => Ok(doc),
         Err(Error::Parse(msg)) if msg.contains("panicked (guarded)") => {
             Err(HardenedError::Limit(DocLimit::Panicked))
@@ -92,7 +95,8 @@ pub fn parse_to_semantic_guarded(_bytes: &[u8]) -> std::result::Result<SemanticD
 #[cfg(feature = "rhwp")]
 pub fn page_count(bytes: &[u8]) -> Result<u32> {
     guarded("page_count", || {
-        let core = rhwp::DocumentCore::from_bytes(bytes).map_err(|e| Error::Parse(e.to_string()))?;
+        let core =
+            rhwp::DocumentCore::from_bytes(bytes).map_err(|e| Error::Parse(e.to_string()))?;
         Ok(core.page_count())
     })
 }
@@ -101,7 +105,8 @@ pub fn page_count(bytes: &[u8]) -> Result<u32> {
 #[cfg(feature = "rhwp")]
 pub fn render_page_svg(bytes: &[u8], page: u32) -> Result<String> {
     guarded("render_page_svg", || {
-        let core = rhwp::DocumentCore::from_bytes(bytes).map_err(|e| Error::Parse(e.to_string()))?;
+        let core =
+            rhwp::DocumentCore::from_bytes(bytes).map_err(|e| Error::Parse(e.to_string()))?;
         let svg = core
             .render_page_svg_native(page)
             .map_err(|e| Error::Other(e.to_string()))?;
@@ -191,14 +196,17 @@ pub struct TextAnchor {
 #[cfg(feature = "rhwp")]
 pub fn page_text_anchors(bytes: &[u8], page: u32) -> Result<Vec<TextAnchor>> {
     guarded("page_text_anchors", || {
-        let core = rhwp::DocumentCore::from_bytes(bytes).map_err(|e| Error::Parse(e.to_string()))?;
+        let core =
+            rhwp::DocumentCore::from_bytes(bytes).map_err(|e| Error::Parse(e.to_string()))?;
         anchors_from_core(&core, page)
     })
 }
 
 #[cfg(feature = "rhwp")]
 fn anchors_from_core(core: &rhwp::DocumentCore, page: u32) -> Result<Vec<TextAnchor>> {
-    let tree = core.build_page_layer_tree(page).map_err(|e| Error::Other(e.to_string()))?;
+    let tree = core
+        .build_page_layer_tree(page)
+        .map_err(|e| Error::Other(e.to_string()))?;
     Ok(tree
         .text_sources
         .entries
@@ -354,10 +362,7 @@ pub fn resolve_key_to_node(
 /// The inverse of [`resolve_key_to_node`]: find a paragraph by `NodeId` and return its
 /// `(section, para_ord)` — used by `caret_rect` to turn an editable model target back into the
 /// geometry-side coordinates. `None` if no paragraph carries that id.
-pub fn node_to_section_para_ord(
-    doc: &SemanticDoc,
-    node: NodeId,
-) -> Option<(usize, usize)> {
+pub fn node_to_section_para_ord(doc: &SemanticDoc, node: NodeId) -> Option<(usize, usize)> {
     for (section, sec) in doc.sections.iter().enumerate() {
         let mut ord = 0usize;
         for b in &sec.blocks {
@@ -383,7 +388,8 @@ pub fn node_to_section_para_ord(
 #[cfg(feature = "rhwp")]
 pub fn page_glyph_boxes(bytes: &[u8], page: u32) -> Result<Vec<GlyphBox>> {
     guarded("page_glyph_boxes", || {
-        let core = rhwp::DocumentCore::from_bytes(bytes).map_err(|e| Error::Parse(e.to_string()))?;
+        let core =
+            rhwp::DocumentCore::from_bytes(bytes).map_err(|e| Error::Parse(e.to_string()))?;
         glyph_boxes_from_core(&core, page)
     })
 }
@@ -402,20 +408,21 @@ fn glyph_boxes_from_core(core: &rhwp::DocumentCore, page: u32) -> Result<Vec<Gly
     use rhwp::paint::layer_tree::{LayerNode, LayerNodeKind};
     use rhwp::paint::paint_op::PaintOp;
 
-    let tree = core.build_page_layer_tree(page).map_err(|e| Error::Other(e.to_string()))?;
+    let tree = core
+        .build_page_layer_tree(page)
+        .map_err(|e| Error::Other(e.to_string()))?;
     // entries[i] is built from the i-th TextRun in this exact walk order (TextSourceTable::
     // from_layer_node), so we zip by a running index for the stable key.
-    let keys: Vec<Option<String>> =
-        tree.text_sources.entries.iter().map(|e| e.stable_source_key.clone()).collect();
+    let keys: Vec<Option<String>> = tree
+        .text_sources
+        .entries
+        .iter()
+        .map(|e| e.stable_source_key.clone())
+        .collect();
 
     let mut out = Vec::new();
     let mut idx = 0usize;
-    fn walk(
-        node: &LayerNode,
-        keys: &[Option<String>],
-        idx: &mut usize,
-        out: &mut Vec<GlyphBox>,
-    ) {
+    fn walk(node: &LayerNode, keys: &[Option<String>], idx: &mut usize, out: &mut Vec<GlyphBox>) {
         match &node.kind {
             LayerNodeKind::Group { children, .. } => {
                 for c in children {
@@ -439,7 +446,11 @@ fn glyph_boxes_from_core(core: &rhwp::DocumentCore, page: u32) -> Result<Vec<Gly
                             x1: bbox.x + bbox.width,
                             top: bbox.y,
                             // Height: prefer the line box; fall back to the font size if degenerate.
-                            height: if bbox.height > 0.0 { bbox.height } else { run.style.font_size },
+                            height: if bbox.height > 0.0 {
+                                bbox.height
+                            } else {
+                                run.style.font_size
+                            },
                             baseline_y: bbox.y + run.baseline,
                             stable_key,
                         });
@@ -574,9 +585,7 @@ pub fn caret_rect_in_page(
     // leading edge so the caret sits at the start of the continuation/next line.
     let pick = runs
         .iter()
-        .find(|b| {
-            char_offset >= b.char_start && char_offset < b.char_start + b.char_len.max(1)
-        })
+        .find(|b| char_offset >= b.char_start && char_offset < b.char_start + b.char_len.max(1))
         .copied();
     let run = match pick {
         Some(r) => r,
@@ -585,9 +594,17 @@ pub fn caret_rect_in_page(
             let last = runs[runs.len() - 1];
             // If it's before the very first run, fall to the first run's leading edge.
             if char_offset < runs[0].char_start {
-                return Some(CaretRect { x: runs[0].x0, top: runs[0].top, height: runs[0].height });
+                return Some(CaretRect {
+                    x: runs[0].x0,
+                    top: runs[0].top,
+                    height: runs[0].height,
+                });
             }
-            return Some(CaretRect { x: last.x1, top: last.top, height: last.height });
+            return Some(CaretRect {
+                x: last.x1,
+                top: last.top,
+                height: last.height,
+            });
         }
     };
 
@@ -598,7 +615,11 @@ pub fn caret_rect_in_page(
     } else {
         run.x0 + (run.x1 - run.x0) * (k.min(n) as f64 / n as f64)
     };
-    Some(CaretRect { x, top: run.top, height: run.height })
+    Some(CaretRect {
+        x,
+        top: run.top,
+        height: run.height,
+    })
 }
 
 #[cfg(feature = "rhwp")]
@@ -674,7 +695,10 @@ mod unclip_tests {
             r#"<defs><clipPath id="c"><rect x="75.5" y="94.0" width="640.0" height="900.0"/></clipPath></defs>"#,
         );
         // left/top moved out by 1, size grew by 2 → boundary strokes no longer clipped
-        assert!(got.contains(r#"<rect x="74.5" y="93" width="642" height="902"/>"#), "{got}");
+        assert!(
+            got.contains(r#"<rect x="74.5" y="93" width="642" height="902"/>"#),
+            "{got}"
+        );
     }
 
     #[test]
@@ -696,7 +720,10 @@ mod spike_tests {
     use super::{page_count, page_text_anchors, render_page_svg, RenderCache};
 
     fn benchmark() -> Vec<u8> {
-        let p = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp");
+        let p = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../benchmarks/benchmark.hwp"
+        );
         std::fs::read(p).expect("benchmark.hwp at repo root")
     }
 
@@ -713,10 +740,17 @@ mod spike_tests {
         for p in 0..n {
             let stateless = render_page_svg(&bytes, p).unwrap();
             let cached = cache.render_page_svg(&bytes, p).unwrap();
-            assert_eq!(cached, stateless, "page {p}: cached SVG must equal the stateless render");
+            assert_eq!(
+                cached, stateless,
+                "page {p}: cached SVG must equal the stateless render"
+            );
         }
         // The whole document was parsed exactly ONCE for page_count + all N pages.
-        assert_eq!(cache.parses(), 1, "persistent layout cache parses the document once");
+        assert_eq!(
+            cache.parses(),
+            1,
+            "persistent layout cache parses the document once"
+        );
     }
 
     /// SEAM 2: the paint IR exposes per-run STABLE model keys (section/para/char) that survive a
@@ -729,7 +763,9 @@ mod spike_tests {
 
         let keyed: Vec<&str> = a1.iter().filter_map(|a| a.stable_key.as_deref()).collect();
         assert!(
-            keyed.iter().any(|k| k.contains("section:") && k.contains("para:") && k.contains("char:")),
+            keyed
+                .iter()
+                .any(|k| k.contains("section:") && k.contains("para:") && k.contains("char:")),
             "at least one run anchors to a model position; keys: {keyed:?}"
         );
 
@@ -765,7 +801,12 @@ mod caret_pure_tests {
     fn parses_body_and_cell_keys() {
         assert_eq!(
             parse_stable_key("section:0/para:2/char:6"),
-            Some(ParsedKey { section: 0, para: 2, char: 6, cell: None })
+            Some(ParsedKey {
+                section: 0,
+                para: 2,
+                char: 6,
+                cell: None
+            })
         );
         let c = parse_stable_key("section:1/para:0/char:0/cell:3:0:0:0:0").unwrap();
         assert_eq!((c.section, c.para, c.char), (1, 0, 0));
@@ -784,16 +825,26 @@ mod caret_pure_tests {
             // center of char k is at 10 + 10*(k+0.5); that is the RIGHT half of cell k → offset k+1.
             let center = 10.0 + cell * (k as f64 + 0.5);
             let hit = hit_test_page(&boxes, center, 105.0).unwrap();
-            assert_eq!(hit.char_offset, k + 1, "click at char {k} center lands after it");
+            assert_eq!(
+                hit.char_offset,
+                k + 1,
+                "click at char {k} center lands after it"
+            );
 
             // just LEFT of center → offset k (before char k)
             let left = center - 0.4 * cell;
             let hl = hit_test_page(&boxes, left, 105.0).unwrap();
-            assert_eq!(hl.char_offset, k, "click left-of-center of char {k} lands before it");
+            assert_eq!(
+                hl.char_offset, k,
+                "click left-of-center of char {k} lands before it"
+            );
 
             // caret_rect for offset k sits at x0 + 10*k
             let cr = caret_rect_in_page(&boxes, 0, 0, k).unwrap();
-            assert!((cr.x - (10.0 + cell * k as f64)).abs() < 1e-6, "caret x for offset {k}");
+            assert!(
+                (cr.x - (10.0 + cell * k as f64)).abs() < 1e-6,
+                "caret x for offset {k}"
+            );
             assert_eq!(cr.top, 100.0);
             assert_eq!(cr.height, 13.0);
         }
@@ -813,7 +864,11 @@ mod caret_pure_tests {
         // a click inside the SECOND run lands at the right paragraph offset (>=5).
         let hit = hit_test_page(&boxes, 85.0, 105.0).unwrap();
         assert_eq!(hit.para_ord, 2);
-        assert!(hit.char_offset >= 5 && hit.char_offset <= 10, "offset {} in 2nd run", hit.char_offset);
+        assert!(
+            hit.char_offset >= 5 && hit.char_offset <= 10,
+            "offset {} in 2nd run",
+            hit.char_offset
+        );
         // caret_rect for an offset in the second run uses the second run's box.
         let cr = caret_rect_in_page(&boxes, 0, 2, 7).unwrap();
         assert!(cr.x > 60.0 && cr.x <= 110.0, "caret x {} in 2nd run", cr.x);
@@ -826,7 +881,11 @@ mod caret_pure_tests {
         let mut prev = f64::NEG_INFINITY;
         for off in 0..=10 {
             let cr = caret_rect_in_page(&boxes, 0, 2, off).unwrap();
-            assert!(cr.x >= prev - 1e-9, "x non-decreasing at offset {off}: {} < {prev}", cr.x);
+            assert!(
+                cr.x >= prev - 1e-9,
+                "x non-decreasing at offset {off}: {} < {prev}",
+                cr.x
+            );
             prev = cr.x;
         }
     }
@@ -845,7 +904,10 @@ mod caret_pure_tests {
     #[test]
     fn click_off_any_line_returns_none() {
         let boxes = vec![gb(0, 0, 0, 5, 10.0, 60.0)];
-        assert!(hit_test_page(&boxes, 30.0, 900.0).is_none(), "far below all text → None");
+        assert!(
+            hit_test_page(&boxes, 30.0, 900.0).is_none(),
+            "far below all text → None"
+        );
         assert!(hit_test_page(&[], 0.0, 0.0).is_none(), "empty page → None");
     }
 
@@ -858,18 +920,39 @@ mod caret_pure_tests {
         let mut doc = SemanticDoc::default();
         let mut sec = Section::default();
         // block 0: unaddressed (id None) — a flattened note-body/cell paragraph; NOT in rhwp's para:N
-        sec.blocks.push(Block::Paragraph(Paragraph { id: None, ..Default::default() }));
+        sec.blocks.push(Block::Paragraph(Paragraph {
+            id: None,
+            ..Default::default()
+        }));
         // block 1: 1st BODY paragraph → rhwp para:0
-        sec.blocks.push(Block::Paragraph(Paragraph { id: Some(NodeId(7)), ..Default::default() }));
+        sec.blocks.push(Block::Paragraph(Paragraph {
+            id: Some(NodeId(7)),
+            ..Default::default()
+        }));
         // block 2: 2nd BODY paragraph → rhwp para:1
-        sec.blocks.push(Block::Paragraph(Paragraph { id: Some(NodeId(8)), ..Default::default() }));
+        sec.blocks.push(Block::Paragraph(Paragraph {
+            id: Some(NodeId(8)),
+            ..Default::default()
+        }));
         doc.sections.push(sec);
 
         // para_ord counts only id-bearing paragraphs (the id:None block is skipped, not counted):
-        assert_eq!(resolve_key_to_node(&doc, 0, 0), Some((NodeId(7), 1)), "para:0 → 1st body para");
+        assert_eq!(
+            resolve_key_to_node(&doc, 0, 0),
+            Some((NodeId(7), 1)),
+            "para:0 → 1st body para"
+        );
         assert_eq!(resolve_key_to_node(&doc, 0, 1), Some((NodeId(8), 2)));
-        assert_eq!(resolve_key_to_node(&doc, 0, 2), None, "ordinal out of range → None");
-        assert_eq!(resolve_key_to_node(&doc, 9, 0), None, "section out of range → None");
+        assert_eq!(
+            resolve_key_to_node(&doc, 0, 2),
+            None,
+            "ordinal out of range → None"
+        );
+        assert_eq!(
+            resolve_key_to_node(&doc, 9, 0),
+            None,
+            "section out of range → None"
+        );
 
         // inverse counts the same way: NodeId(7)=ord0, NodeId(8)=ord1.
         assert_eq!(node_to_section_para_ord(&doc, NodeId(7)), Some((0, 0)));
@@ -884,11 +967,18 @@ mod caret_rhwp_tests {
     use super::*;
 
     fn showcase() -> Vec<u8> {
-        std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/hwpx/FormattingShowcase.hwpx"))
-            .expect("FormattingShowcase.hwpx in corpus/hwpx")
+        std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/hwpx/FormattingShowcase.hwpx"
+        ))
+        .expect("FormattingShowcase.hwpx in corpus/hwpx")
     }
     fn benchmark() -> Vec<u8> {
-        std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp")).expect("benchmark.hwp")
+        std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../benchmarks/benchmark.hwp"
+        ))
+        .expect("benchmark.hwp")
     }
 
     /// Every GlyphBox sits inside the page, has a sane x-extent, and a positive line height.
@@ -905,8 +995,16 @@ mod caret_rhwp_tests {
             assert!(!boxes.is_empty(), "page {page} exposes glyph boxes");
             for b in &boxes {
                 assert!(b.x0 <= b.x1, "x0<=x1 for {b:?}");
-                assert!(b.x0 >= -0.5 && b.x1 <= pw + 0.5, "x in page [{},{}]: {b:?}", 0, pw);
-                assert!(b.top >= -0.5 && b.top + b.height <= ph + 0.5, "y in page: {b:?}");
+                assert!(
+                    b.x0 >= -0.5 && b.x1 <= pw + 0.5,
+                    "x in page [{},{}]: {b:?}",
+                    0,
+                    pw
+                );
+                assert!(
+                    b.top >= -0.5 && b.top + b.height <= ph + 0.5,
+                    "y in page: {b:?}"
+                );
                 assert!(b.height > 0.0, "positive line height: {b:?}");
             }
         }
@@ -932,7 +1030,10 @@ mod caret_rhwp_tests {
                     // `in_cell` and returns node:None — geometry is available, the editable target is
                     // not. (The pure resolver only sees (section, para_ord) and would index the
                     // body-prefix paragraph, so the gating lives at the call site, mirrored here.)
-                    assert!(key.contains("/cell:"), "in_cell box has a /cell: key: {key}");
+                    assert!(
+                        key.contains("/cell:"),
+                        "in_cell box has a /cell: key: {key}"
+                    );
                     let node = if b.in_cell {
                         None
                     } else {
@@ -956,7 +1057,13 @@ mod caret_rhwp_tests {
                     .runs
                     .iter()
                     .flat_map(|r| r.content.iter())
-                    .filter_map(|i| if let Inline::Text(t) = i { Some(t.as_str()) } else { None })
+                    .filter_map(|i| {
+                        if let Inline::Text(t) = i {
+                            Some(t.as_str())
+                        } else {
+                            None
+                        }
+                    })
                     .collect();
                 let run_text = run_text_for_key(&core, key);
                 assert!(
@@ -999,9 +1106,14 @@ mod caret_rhwp_tests {
                 hit.char_offset,
                 run.stable_key
             );
-            let cr = caret_rect_in_page(&boxes, run.section, run.para_ord, run.char_start + k).unwrap();
+            let cr =
+                caret_rect_in_page(&boxes, run.section, run.para_ord, run.char_start + k).unwrap();
             let want_x = run.x0 + w * k as f64;
-            assert!((cr.x - want_x).abs() < w + 1e-6, "caret x {} ~ {want_x}", cr.x);
+            assert!(
+                (cr.x - want_x).abs() < w + 1e-6,
+                "caret x {} ~ {want_x}",
+                cr.x
+            );
             assert!(cr.x >= prev_x - 1e-9, "monotonic x across the run");
             prev_x = cr.x;
             assert_eq!(cr.top, run.top);
@@ -1245,18 +1357,25 @@ pub fn table_row_audit(bytes: &[u8], section: usize, block: usize) -> Result<Tab
     })?;
     let our = guarded("table_row_audit/lift", || lift::parse_to_semantic(bytes))?;
 
-    let osec = our
-        .sections
-        .get(section)
-        .ok_or_else(|| Error::Parse(format!("section {section} out of range ({} sections)", our.sections.len())))?;
-    let blk = osec
-        .blocks
-        .get(block)
-        .ok_or_else(|| Error::Parse(format!("block {block} out of range ({} blocks)", osec.blocks.len())))?;
+    let osec = our.sections.get(section).ok_or_else(|| {
+        Error::Parse(format!(
+            "section {section} out of range ({} sections)",
+            our.sections.len()
+        ))
+    })?;
+    let blk = osec.blocks.get(block).ok_or_else(|| {
+        Error::Parse(format!(
+            "block {block} out of range ({} blocks)",
+            osec.blocks.len()
+        ))
+    })?;
     let Block::Table(ot) = blk else {
         return Err(Error::Parse(format!(
             "block {section}/{block} is not a table (it is a {})",
-            match blk { Block::Paragraph(_) => "paragraph", Block::Table(_) => "table" }
+            match blk {
+                Block::Paragraph(_) => "paragraph",
+                Block::Table(_) => "table",
+            }
         )));
     };
 
@@ -1341,8 +1460,11 @@ pub fn table_row_audit(bytes: &[u8], section: usize, block: usize) -> Result<Tab
             table_pad
         };
         // Flatten every lineseg of the cell (across its paragraphs) in document order.
-        let segs: Vec<&rhwp::model::paragraph::LineSeg> =
-            c.paragraphs.iter().flat_map(|p| p.line_segs.iter()).collect();
+        let segs: Vec<&rhwp::model::paragraph::LineSeg> = c
+            .paragraphs
+            .iter()
+            .flat_map(|p| p.line_segs.iter())
+            .collect();
         let ls_sum: f64 = segs.iter().map(|l| l.line_height as f64).sum();
         let ls_n = segs.len();
         // Real content span from vertical_pos (includes inter-line spacing). vertical_pos may be 0 on
@@ -1350,7 +1472,11 @@ pub fn table_row_audit(bytes: &[u8], section: usize, block: usize) -> Result<Tab
         let content = match (segs.first(), segs.last()) {
             (Some(f), Some(l)) => {
                 let span_h = (l.vertical_pos + l.line_height) as f64 - f.vertical_pos as f64;
-                if span_h > 0.0 && f.vertical_pos != 0 { span_h } else { ls_sum }
+                if span_h > 0.0 && f.vertical_pos != 0 {
+                    span_h
+                } else {
+                    ls_sum
+                }
             }
             _ => 0.0,
         };
@@ -1404,7 +1530,11 @@ pub fn table_row_audit(bytes: &[u8], section: usize, block: usize) -> Result<Tab
 }
 
 #[cfg(not(feature = "rhwp"))]
-pub fn table_row_audit(_bytes: &[u8], _section: usize, _block: usize) -> Result<TableRowAuditReport> {
+pub fn table_row_audit(
+    _bytes: &[u8],
+    _section: usize,
+    _block: usize,
+) -> Result<TableRowAuditReport> {
     Err(Error::CapabilityUnavailable(NOT_WIRED))
 }
 
@@ -1449,7 +1579,9 @@ impl LayoutEngine for RhwpEngine {
     fn layout(&self, _doc: &SemanticDoc, _fonts: &dyn FontMetricsProvider) -> Result<LayoutResult> {
         #[cfg(feature = "rhwp")]
         {
-            Err(Error::NotImplemented("rhwp LayoutEngine mapping (M1 cont.)"))
+            Err(Error::NotImplemented(
+                "rhwp LayoutEngine mapping (M1 cont.)",
+            ))
         }
         #[cfg(not(feature = "rhwp"))]
         {
@@ -1464,7 +1596,9 @@ impl Renderer for RhwpEngine {
         // mapping rhwp::paint::PageLayerTree → our PageLayerTree is the next render step.
         #[cfg(feature = "rhwp")]
         {
-            Err(Error::NotImplemented("rhwp PageLayerTree → ours mapping (M1 cont.)"))
+            Err(Error::NotImplemented(
+                "rhwp PageLayerTree → ours mapping (M1 cont.)",
+            ))
         }
         #[cfg(not(feature = "rhwp"))]
         {
@@ -1481,17 +1615,23 @@ mod spike_timing {
     #[test]
     #[ignore = "timing illustration; run with --ignored --nocapture"]
     fn seam1_speedup() {
-        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp")).unwrap();
+        let bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../benchmarks/benchmark.hwp"
+        ))
+        .unwrap();
         let n = super::page_count(&bytes).unwrap();
         let t0 = Instant::now();
-        for p in 0..n { let _ = render_page_svg(&bytes, p).unwrap(); }
+        for p in 0..n {
+            let _ = render_page_svg(&bytes, p).unwrap();
+        }
         let stateless = t0.elapsed();
         let mut cache = RenderCache::new();
         let t1 = Instant::now();
-        for p in 0..n { let _ = cache.render_page_svg(&bytes, p).unwrap(); }
+        for p in 0..n {
+            let _ = cache.render_page_svg(&bytes, p).unwrap();
+        }
         let cached = t1.elapsed();
         eprintln!("SEAM1 {n} pages: stateless(re-parse each)={stateless:?}  cached(parse once)={cached:?}  speedup={:.1}x", stateless.as_secs_f64()/cached.as_secs_f64().max(1e-9));
     }
 }
-
-

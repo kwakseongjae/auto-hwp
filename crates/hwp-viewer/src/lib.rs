@@ -25,7 +25,10 @@ pub fn mcp_call(session: &mut hwp_mcp::Session, name: &str, args: Value) -> Resu
         "params": { "name": name, "arguments": args }
     });
     let resp = hwp_mcp::handle(&req, session).ok_or("no response from op-bus")?;
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("").to_string();
+    let text = resp["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
     if resp["result"]["isError"].as_bool().unwrap_or(true) {
         Err(text)
     } else {
@@ -56,7 +59,9 @@ async fn open_doc(path: String, sess: tauri::State<'_, SharedSession>) -> Result
         let original = path.clone();
         // accepts .hwp (view) and .hwpx; surface the 2-tier capability (editable) + format for the chip.
         let (format, editable) = match apply_intent(&mut s, Intent::Open { path })? {
-            Outcome::Opened { format, editable, .. } => (format, editable),
+            Outcome::Opened {
+                format, editable, ..
+            } => (format, editable),
             _ => return Err("unexpected outcome".into()),
         };
 
@@ -68,8 +73,9 @@ async fn open_doc(path: String, sess: tauri::State<'_, SharedSession>) -> Result
             let hwpx = std::path::Path::new(&original).with_extension("hwpx");
             if hwpx.as_os_str() != std::path::Path::new(&original).as_os_str() {
                 let dest = hwpx.to_string_lossy().into_owned();
-                if let Ok(Outcome::Exported { open_safe: true, .. }) =
-                    apply_intent(&mut s, Intent::Export { path: dest.clone() })
+                if let Ok(Outcome::Exported {
+                    open_safe: true, ..
+                }) = apply_intent(&mut s, Intent::Export { path: dest.clone() })
                 {
                     converted_path = json!(dest);
                 }
@@ -124,7 +130,10 @@ async fn render_doc_html(sess: tauri::State<'_, SharedSession>) -> Result<String
 /// the rhwp "원본 보기" this regenerates from the live IR, so an EDITED doc renders faithfully too.
 /// Under `--features shaper` the glyph x-positions are real (rustybuzz advances).
 #[tauri::command]
-async fn render_own_page(page: u32, sess: tauri::State<'_, SharedSession>) -> Result<String, String> {
+async fn render_own_page(
+    page: u32,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<String, String> {
     let sess = sess.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let s = sess.lock().map_err(|_| "session poisoned")?;
@@ -159,7 +168,9 @@ async fn own_page_count(sess: tauri::State<'_, SharedSession>) -> Result<u32, St
 /// labels and numbered section bands ("1. 문제 인식 …") — each with the 0-based page it starts on.
 /// Delegates to [`hwp_session::outline`]; empty when no doc is open.
 #[tauri::command]
-async fn doc_outline(sess: tauri::State<'_, SharedSession>) -> Result<Vec<hwp_session::OutlineItem>, String> {
+async fn doc_outline(
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<Vec<hwp_session::OutlineItem>, String> {
     let sess = sess.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let s = sess.lock().map_err(|_| "session poisoned")?;
@@ -189,14 +200,18 @@ fn apply_content(content: String, sess: tauri::State<'_, SharedSession>) -> Resu
 }
 
 #[tauri::command]
-async fn export_hwpx(path: String, sess: tauri::State<'_, SharedSession>) -> Result<String, String> {
+async fn export_hwpx(
+    path: String,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<String, String> {
     let sess = sess.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut s = sess.lock().map_err(|_| "session poisoned")?;
         match apply_intent(&mut s, Intent::Export { path })? {
-            Outcome::Exported { bytes, open_safe } => {
-                Ok(format!("{bytes} bytes · editor-open-safety {}", if open_safe { "OK" } else { "FAIL" }))
-            }
+            Outcome::Exported { bytes, open_safe } => Ok(format!(
+                "{bytes} bytes · editor-open-safety {}",
+                if open_safe { "OK" } else { "FAIL" }
+            )),
             _ => Err("unexpected outcome".into()),
         }
     })
@@ -209,7 +224,10 @@ async fn export_hwpx(path: String, sess: tauri::State<'_, SharedSession>) -> Res
 /// and the CLI `export-html`, so the written file matches what the viewer shows byte-for-byte.
 /// Edits are reflected because we project the live SemanticDoc, not a stale copy.
 #[tauri::command]
-async fn export_doc_html(path: String, sess: tauri::State<'_, SharedSession>) -> Result<String, String> {
+async fn export_doc_html(
+    path: String,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<String, String> {
     let sess = sess.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let s = sess.lock().map_err(|_| "session poisoned")?;
@@ -232,7 +250,10 @@ async fn export_doc_html(path: String, sess: tauri::State<'_, SharedSession>) ->
 /// the in-app "자체 렌더" view. Needs `--features pdf`; without it returns a clear, actionable error.
 #[cfg(feature = "pdf")]
 #[tauri::command]
-async fn export_doc_pdf(path: String, sess: tauri::State<'_, SharedSession>) -> Result<String, String> {
+async fn export_doc_pdf(
+    path: String,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<String, String> {
     let sess = sess.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let s = sess.lock().map_err(|_| "session poisoned")?;
@@ -260,10 +281,15 @@ async fn export_doc_pdf(path: String, sess: tauri::State<'_, SharedSession>) -> 
 /// than silently writing a wrong/empty file (mirrors the CLI `export-pdf` interim message).
 #[cfg(not(feature = "pdf"))]
 #[tauri::command]
-async fn export_doc_pdf(_path: String, _sess: tauri::State<'_, SharedSession>) -> Result<String, String> {
-    Err("PDF 내보내기는 `--features pdf` 빌드가 필요합니다 (cargo tauri dev -f \"rhwp ai pdf\"). \
+async fn export_doc_pdf(
+    _path: String,
+    _sess: tauri::State<'_, SharedSession>,
+) -> Result<String, String> {
+    Err(
+        "PDF 내보내기는 `--features pdf` 빌드가 필요합니다 (cargo tauri dev -f \"rhwp ai pdf\"). \
          대안: HTML로 내보낸 뒤 브라우저에서 인쇄 ▸ PDF로 저장."
-        .into())
+            .into(),
+    )
 }
 
 /// Dry-run AI content into a preview (rationale + per-op diff) WITHOUT mutating the document.
@@ -355,12 +381,14 @@ fn ai_edit_propose(
             _ => instruction.clone(),
         },
     };
-    let mut proposal = hwp_ai::propose_edits(doc, &*provider, &scoped).map_err(|e| e.to_string())?;
+    let mut proposal =
+        hwp_ai::propose_edits(doc, &*provider, &scoped).map_err(|e| e.to_string())?;
     // Preset "표 채우기" (issue #011): the prompt already tells the model to preserve the header/음영
     // rows, but this makes it structural — drop any text-fill op that targets a protected row so a model
     // that ignores the prompt can never clobber them. All `doc` reads finish here (before s.pending).
     if guardTableHeader == Some(true) {
-        let blocked = hwp_session::protect_table_header_rows(doc, &mut proposal.ops, anchors.as_deref());
+        let blocked =
+            hwp_session::protect_table_header_rows(doc, &mut proposal.ops, anchors.as_deref());
         if blocked > 0 {
             proposal.rationale.push_str(&format!(
                 "\n※ 헤더/음영 행 보존: 보호된 행을 덮어쓰려는 편집 {blocked}건을 제외했습니다."
@@ -419,8 +447,14 @@ fn propose_insert_image(
     let (path, safe) = hwp_session::stash_image(&name, Some(&dataB64), None)?;
     let mut s = sess.lock().map_err(|_| "session poisoned")?;
     let doc = s.doc.as_ref().ok_or("no document open")?.doc();
-    let proposal =
-        hwp_session::build_insert_image_proposal(doc, &path, scopeSection, scopeBlock, widthMm, heightMm)?;
+    let proposal = hwp_session::build_insert_image_proposal(
+        doc,
+        &path,
+        scopeSection,
+        scopeBlock,
+        widthMm,
+        heightMm,
+    )?;
     // No provider on the deterministic image path — label the rationale with the filename so the
     // card reads "📎 <name>"; the structured op carries the anchored target like any other.
     let mut out = hwp_session::proposal_json("deterministic", &proposal);
@@ -435,7 +469,7 @@ fn propose_insert_image(
 /// the caret edits apply (no propose→review). Returns the new page count so the UI re-renders.
 /// `srcPath` is the dropped file; `dataB64` is an alternate in-memory payload (tests / non-native
 /// drops). `scopeSection`/`scopeBlock` = the hit-tested target (insert AFTER that block, else end).
-#[allow(non_snake_case)]
+#[allow(non_snake_case, clippy::too_many_arguments)]
 #[tauri::command]
 async fn apply_insert_image(
     name: String,
@@ -452,8 +486,14 @@ async fn apply_insert_image(
     tauri::async_runtime::spawn_blocking(move || {
         let mut s = sess.lock().map_err(|_| "session poisoned")?;
         let doc = s.doc.as_ref().ok_or("no document open")?.doc();
-        let proposal =
-            hwp_session::build_insert_image_proposal(doc, &path, scopeSection, scopeBlock, widthMm, heightMm)?;
+        let proposal = hwp_session::build_insert_image_proposal(
+            doc,
+            &path,
+            scopeSection,
+            scopeBlock,
+            widthMm,
+            heightMm,
+        )?;
         let edit = s.doc.as_mut().ok_or("no document open")?;
         edit.do_ops(&proposal.ops).map_err(|e| e.to_string())?; // ONE undo unit
         Ok::<u32, String>(pages(&mut s))
@@ -532,11 +572,21 @@ fn find_text(
     let mut s = sess.lock().map_err(|_| "session poisoned")?;
     match apply_intent(
         &mut s,
-        Intent::Find { query, case_sensitive: caseSensitive, whole_word: wholeWord },
+        Intent::Find {
+            query,
+            case_sensitive: caseSensitive,
+            whole_word: wholeWord,
+        },
     )? {
         Outcome::Found { matches } => Ok(matches
             .into_iter()
-            .map(|m| FindMatchDto { node: m.node, start: m.start, len: m.len, section: m.section, block: m.block })
+            .map(|m| FindMatchDto {
+                node: m.node,
+                start: m.start,
+                len: m.len,
+                section: m.section,
+                block: m.block,
+            })
             .collect()),
         _ => Err("unexpected outcome".into()),
     }
@@ -641,7 +691,11 @@ async fn caret_rect(
     tauri::async_runtime::spawn_blocking(move || {
         let mut s = sess.lock().map_err(|_| "session poisoned")?;
         match apply_intent(&mut s, Intent::CaretRect { page, node, offset })? {
-            Outcome::Caret(c) => Ok(c.map(|r| CaretDto { x: r.x, top: r.top, height: r.height })),
+            Outcome::Caret(c) => Ok(c.map(|r| CaretDto {
+                x: r.x,
+                top: r.top,
+                height: r.height,
+            })),
             _ => Err("unexpected outcome".into()),
         }
     })
@@ -708,7 +762,15 @@ async fn set_image_size(
     let sess = sess.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut s = sess.lock().map_err(|_| "session poisoned")?;
-        match apply_intent(&mut s, Intent::SetImageSize { section, index: block, width, height })? {
+        match apply_intent(
+            &mut s,
+            Intent::SetImageSize {
+                section,
+                index: block,
+                width,
+                height,
+            },
+        )? {
             Outcome::Edited { pages } => Ok(pages),
             _ => Err("unexpected outcome".into()),
         }
@@ -732,7 +794,16 @@ async fn move_image(
     let sess = sess.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut s = sess.lock().map_err(|_| "session poisoned")?;
-        match apply_intent(&mut s, Intent::MoveImage { section, from, to, width, height })? {
+        match apply_intent(
+            &mut s,
+            Intent::MoveImage {
+                section,
+                from,
+                to,
+                width,
+                height,
+            },
+        )? {
             Outcome::Edited { pages } => Ok(pages),
             _ => Err("unexpected outcome".into()),
         }
@@ -817,7 +888,16 @@ async fn table_add_rows(
     let sess = sess.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut s = sess.lock().map_err(|_| "session poisoned")?;
-        match apply_intent(&mut s, Intent::TableInsertRows { section, index, at, count, cols })? {
+        match apply_intent(
+            &mut s,
+            Intent::TableInsertRows {
+                section,
+                index,
+                at,
+                count,
+                cols,
+            },
+        )? {
             Outcome::Edited { pages } => Ok(pages),
             _ => Err("unexpected outcome".into()),
         }
@@ -859,7 +939,14 @@ async fn set_paragraph_text(
     let sess = sess.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut s = sess.lock().map_err(|_| "session poisoned")?;
-        match apply_intent(&mut s, Intent::SetParagraphText { section, block, text })? {
+        match apply_intent(
+            &mut s,
+            Intent::SetParagraphText {
+                section,
+                block,
+                text,
+            },
+        )? {
             Outcome::Edited { pages } => Ok(pages),
             _ => Err("unexpected outcome".into()),
         }
@@ -882,7 +969,16 @@ async fn set_table_cell(
     let sess = sess.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut s = sess.lock().map_err(|_| "session poisoned")?;
-        match apply_intent(&mut s, Intent::SetTableCell { section, index, row, col, text })? {
+        match apply_intent(
+            &mut s,
+            Intent::SetTableCell {
+                section,
+                index,
+                row,
+                col,
+                text,
+            },
+        )? {
             Outcome::Edited { pages } => Ok(pages),
             _ => Err("unexpected outcome".into()),
         }
@@ -903,7 +999,14 @@ async fn set_table_col_widths(
     let sess = sess.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut s = sess.lock().map_err(|_| "session poisoned")?;
-        match apply_intent(&mut s, Intent::SetTableColWidths { section, index, widths })? {
+        match apply_intent(
+            &mut s,
+            Intent::SetTableColWidths {
+                section,
+                index,
+                widths,
+            },
+        )? {
             Outcome::Edited { pages } => Ok(pages),
             _ => Err("unexpected outcome".into()),
         }
@@ -925,7 +1028,14 @@ async fn set_table_row_heights(
     let sess = sess.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut s = sess.lock().map_err(|_| "session poisoned")?;
-        match apply_intent(&mut s, Intent::SetTableRowHeights { section, index, heights })? {
+        match apply_intent(
+            &mut s,
+            Intent::SetTableRowHeights {
+                section,
+                index,
+                heights,
+            },
+        )? {
             Outcome::Edited { pages } => Ok(pages),
             _ => Err("unexpected outcome".into()),
         }
@@ -949,7 +1059,16 @@ async fn set_page_margins(
     let sess = sess.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut s = sess.lock().map_err(|_| "session poisoned")?;
-        match apply_intent(&mut s, Intent::SetPageMargins { section, left_mm, right_mm, top_mm, bottom_mm })? {
+        match apply_intent(
+            &mut s,
+            Intent::SetPageMargins {
+                section,
+                left_mm,
+                right_mm,
+                top_mm,
+                bottom_mm,
+            },
+        )? {
             Outcome::Edited { pages } => Ok(pages),
             _ => Err("unexpected outcome".into()),
         }
@@ -975,7 +1094,17 @@ async fn set_table_cell_shade(
     let sess = sess.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut s = sess.lock().map_err(|_| "session poisoned")?;
-        match apply_intent(&mut s, Intent::SetTableCellShade { section, index, sel, row, col, shade })? {
+        match apply_intent(
+            &mut s,
+            Intent::SetTableCellShade {
+                section,
+                index,
+                sel,
+                row,
+                col,
+                shade,
+            },
+        )? {
             Outcome::Edited { pages } => Ok(pages),
             _ => Err("unexpected outcome".into()),
         }
@@ -986,6 +1115,7 @@ async fn set_table_cell_shade(
 
 /// Multi-cell batch BACKGROUND — set/clear the shade of every cell overlapping the rectangle
 /// `[r0..=r1] × [c0..=c1]` of the `index`-th table as ONE undo unit. Returns the new page count.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 async fn set_cell_range_shade(
     section: usize,
@@ -1000,7 +1130,18 @@ async fn set_cell_range_shade(
     let sess = sess.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut s = sess.lock().map_err(|_| "session poisoned")?;
-        match apply_intent(&mut s, Intent::SetCellRangeShade { section, index, r0, c0, r1, c1, shade })? {
+        match apply_intent(
+            &mut s,
+            Intent::SetCellRangeShade {
+                section,
+                index,
+                r0,
+                c0,
+                r1,
+                c1,
+                shade,
+            },
+        )? {
             Outcome::Edited { pages } => Ok(pages),
             _ => Err("unexpected outcome".into()),
         }
@@ -1032,7 +1173,23 @@ async fn set_cell_range_fmt(
     let sess = sess.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut s = sess.lock().map_err(|_| "session poisoned")?;
-        match apply_intent(&mut s, Intent::SetCellRangeFmt { section, index, r0, c0, r1, c1, bold, italic, size_pt, font, color, align })? {
+        match apply_intent(
+            &mut s,
+            Intent::SetCellRangeFmt {
+                section,
+                index,
+                r0,
+                c0,
+                r1,
+                c1,
+                bold,
+                italic,
+                size_pt,
+                font,
+                color,
+                align,
+            },
+        )? {
             Outcome::Edited { pages } => Ok(pages),
             _ => Err("unexpected outcome".into()),
         }
@@ -1181,7 +1338,10 @@ async fn table_row_boundaries(
 /// the editor chrome (한글식 모서리 영역 표시 + 줄자). Delegates to [`hwp_session::page_geometry`];
 /// `None` when the page is out of range. NOT baked into the SVG, so the guides/ruler never leak into export.
 #[tauri::command]
-async fn page_geometry(page: u32, sess: tauri::State<'_, SharedSession>) -> Result<Option<hwp_session::PageGeom>, String> {
+async fn page_geometry(
+    page: u32,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<Option<hwp_session::PageGeom>, String> {
     let sess = sess.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let s = sess.lock().map_err(|_| "session poisoned")?;
@@ -1213,7 +1373,18 @@ async fn set_char_fmt(
     tauri::async_runtime::spawn_blocking(move || {
         let mut s = sess.lock().map_err(|_| "session poisoned")?;
         let cell = row.zip(col);
-        match apply_intent(&mut s, Intent::SetCharFmt { section, block, cell, bold, italic, size_pt, font })? {
+        match apply_intent(
+            &mut s,
+            Intent::SetCharFmt {
+                section,
+                block,
+                cell,
+                bold,
+                italic,
+                size_pt,
+                font,
+            },
+        )? {
             Outcome::Edited { pages } => Ok(pages),
             _ => Err("unexpected outcome".into()),
         }
@@ -1242,7 +1413,18 @@ async fn set_run_char_fmt(
     tauri::async_runtime::spawn_blocking(move || {
         let mut s = sess.lock().map_err(|_| "session poisoned")?;
         let cell = row.zip(col);
-        match apply_intent(&mut s, Intent::SetRunCharFmt { section, block, cell, start, end, bold, italic })? {
+        match apply_intent(
+            &mut s,
+            Intent::SetRunCharFmt {
+                section,
+                block,
+                cell,
+                start,
+                end,
+                bold,
+                italic,
+            },
+        )? {
             Outcome::Edited { pages } => Ok(pages),
             _ => Err("unexpected outcome".into()),
         }
@@ -1326,7 +1508,16 @@ async fn set_table_cell_runs(
     tauri::async_runtime::spawn_blocking(move || {
         let mut s = sess.lock().map_err(|_| "session poisoned")?;
         let rs = hwp_session::run_specs(&runs);
-        match apply_intent(&mut s, Intent::SetTableCellRuns { section, index, row, col, runs: rs })? {
+        match apply_intent(
+            &mut s,
+            Intent::SetTableCellRuns {
+                section,
+                index,
+                row,
+                col,
+                runs: rs,
+            },
+        )? {
             Outcome::Edited { pages } => Ok(pages),
             _ => Err("unexpected outcome".into()),
         }
@@ -1347,7 +1538,14 @@ async fn set_paragraph_runs(
     tauri::async_runtime::spawn_blocking(move || {
         let mut s = sess.lock().map_err(|_| "session poisoned")?;
         let rs = hwp_session::run_specs(&runs);
-        match apply_intent(&mut s, Intent::SetParagraphRuns { section, block, runs: rs })? {
+        match apply_intent(
+            &mut s,
+            Intent::SetParagraphRuns {
+                section,
+                block,
+                runs: rs,
+            },
+        )? {
             Outcome::Edited { pages } => Ok(pages),
             _ => Err("unexpected outcome".into()),
         }
@@ -1413,13 +1611,21 @@ async fn delete_back(
 /// (`hwp-wasm::outcome_to_json`), so both `EngineAdapter` backends hand editor-core one Outcome shape.
 fn outcome_to_json(o: &Outcome) -> Value {
     match o {
-        Outcome::Opened { format, editable, sections } => {
+        Outcome::Opened {
+            format,
+            editable,
+            sections,
+        } => {
             json!({ "kind": "opened", "format": format, "editable": editable, "sections": sections })
         }
         Outcome::PageCount(n) => json!({ "kind": "pageCount", "pages": n }),
         Outcome::Rendered(svg) => json!({ "kind": "rendered", "svg": svg }),
-        Outcome::Applied { blocks, ops } => json!({ "kind": "applied", "blocks": blocks, "ops": ops }),
-        Outcome::Exported { bytes, open_safe } => json!({ "kind": "exported", "bytes": bytes, "openSafe": open_safe }),
+        Outcome::Applied { blocks, ops } => {
+            json!({ "kind": "applied", "blocks": blocks, "ops": ops })
+        }
+        Outcome::Exported { bytes, open_safe } => {
+            json!({ "kind": "exported", "bytes": bytes, "openSafe": open_safe })
+        }
         Outcome::Undone(changed) => json!({ "kind": "undone", "changed": changed }),
         Outcome::Redone(changed) => json!({ "kind": "redone", "changed": changed }),
         Outcome::Text(text) => json!({ "kind": "text", "text": text }),
@@ -1431,12 +1637,20 @@ fn outcome_to_json(o: &Outcome) -> Value {
         Outcome::Found { matches } => {
             json!({ "kind": "found", "matches": serde_json::to_value(matches).unwrap_or(Value::Null) })
         }
-        Outcome::Replaced { replaced, pages } => json!({ "kind": "replaced", "replaced": replaced, "pages": pages }),
-        Outcome::Hit(hit) => json!({ "kind": "hit", "hit": serde_json::to_value(hit).unwrap_or(Value::Null) }),
-        Outcome::Caret(caret) => json!({ "kind": "caret", "caret": serde_json::to_value(caret).unwrap_or(Value::Null) }),
+        Outcome::Replaced { replaced, pages } => {
+            json!({ "kind": "replaced", "replaced": replaced, "pages": pages })
+        }
+        Outcome::Hit(hit) => {
+            json!({ "kind": "hit", "hit": serde_json::to_value(hit).unwrap_or(Value::Null) })
+        }
+        Outcome::Caret(caret) => {
+            json!({ "kind": "caret", "caret": serde_json::to_value(caret).unwrap_or(Value::Null) })
+        }
         Outcome::Edited { pages } => json!({ "kind": "edited", "pages": pages }),
         // Cell-addressed caret (issue 053) — same {kind, …} shape as hwp-wasm::outcome_to_json.
-        Outcome::HitCell(hit) => json!({ "kind": "hitCell", "hit": serde_json::to_value(hit).unwrap_or(Value::Null) }),
+        Outcome::HitCell(hit) => {
+            json!({ "kind": "hitCell", "hit": serde_json::to_value(hit).unwrap_or(Value::Null) })
+        }
         Outcome::CaretCell(caret) => {
             json!({ "kind": "caretCell", "caret": serde_json::to_value(caret).unwrap_or(Value::Null) })
         }
@@ -1449,7 +1663,10 @@ fn outcome_to_json(o: &Outcome) -> Value {
 /// covered without a per-Intent command. Returns the `{kind, …}` Outcome JSON (wasm-identical). A bad
 /// envelope / refused edit surfaces the typed op-bus error verbatim as `Err` (the UI toasts it).
 #[tauri::command]
-async fn apply_intent_json(intent: Value, sess: tauri::State<'_, SharedSession>) -> Result<Value, String> {
+async fn apply_intent_json(
+    intent: Value,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<Value, String> {
     let sess = sess.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut s = sess.lock().map_err(|_| "session poisoned")?;
@@ -1517,9 +1734,11 @@ async fn export_pdf_bytes(sess: tauri::State<'_, SharedSession>) -> Result<Vec<u
 #[cfg(not(feature = "pdf"))]
 #[tauri::command]
 async fn export_pdf_bytes(_sess: tauri::State<'_, SharedSession>) -> Result<Vec<u8>, String> {
-    Err("PDF 내보내기는 `--features pdf` 빌드가 필요합니다 (cargo tauri dev -f \"rhwp ai pdf\"). \
+    Err(
+        "PDF 내보내기는 `--features pdf` 빌드가 필요합니다 (cargo tauri dev -f \"rhwp ai pdf\"). \
          대안: HTML로 내보낸 뒤 브라우저에서 인쇄 ▸ PDF로 저장."
-        .into())
+            .into(),
+    )
 }
 
 /// Build + run the viewer window. Manages the shared session + cached bytes, registers commands,
@@ -1623,10 +1842,17 @@ mod tests {
     fn opens_and_renders_hwp5_benchmark() {
         // The core goal: open an uploaded .hwp (HW5) and render it faithfully (view-only).
         let mut sess = hwp_mcp::Session::default();
-        let bench = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp");
+        let bench = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../benchmarks/benchmark.hwp"
+        );
         let msg = mcp_call(&mut sess, "open_document", json!({ "path": bench })).unwrap();
         assert!(msg.contains("HWP5"), "opened as HW5 view: {msg}");
-        let count: u32 = mcp_call(&mut sess, "page_count", json!({})).unwrap().trim().parse().unwrap();
+        let count: u32 = mcp_call(&mut sess, "page_count", json!({}))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
         assert!(count >= 8, "benchmark has 8 pages, got {count}");
         let svg = mcp_call(&mut sess, "render_page", json!({ "page": 0 })).unwrap();
         assert!(svg.contains("<svg"), "HW5 page renders to SVG");
@@ -1639,26 +1865,48 @@ mod tests {
     #[test]
     fn hwp5_open_exports_open_safe_hwpx_beside() {
         let mut sess = hwp_mcp::Session::default();
-        let bench = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp");
+        let bench = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../benchmarks/benchmark.hwp"
+        );
         let msg = mcp_call(&mut sess, "open_document", json!({ "path": bench })).unwrap();
         assert!(msg.contains("HWP5"), "{msg}");
         let dest = std::env::temp_dir().join("viewer-autoconvert.hwpx");
-        let out = mcp_call(&mut sess, "export_hwpx", json!({ "path": dest.to_str().unwrap() })).unwrap();
-        assert!(out.contains("OK"), "auto-converted .hwpx must be open-safe: {out}");
+        let out = mcp_call(
+            &mut sess,
+            "export_hwpx",
+            json!({ "path": dest.to_str().unwrap() }),
+        )
+        .unwrap();
+        assert!(
+            out.contains("OK"),
+            "auto-converted .hwpx must be open-safe: {out}"
+        );
         let reopened = hwp_core::Engine::open(&std::fs::read(&dest).unwrap()).unwrap();
-        assert!(!reopened.plain_text().trim().is_empty(), "converted .hwpx reopens with text");
+        assert!(
+            !reopened.plain_text().trim().is_empty(),
+            "converted .hwpx reopens with text"
+        );
     }
 
     #[test]
     fn apply_and_export_via_op_bus() {
         // The command logic path: open → apply → export, all through hwp_mcp::handle.
         let mut sess = hwp_mcp::Session::default();
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/hwpx/FormattingShowcase.hwpx");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/hwpx/FormattingShowcase.hwpx"
+        );
         mcp_call(&mut sess, "open_document", json!({ "path": path })).unwrap();
         let content = r#"{"blocks":[{"type":"heading","text":"뷰어에서 추가","style":"개요 1"}]}"#;
         mcp_call(&mut sess, "apply_content", json!({ "content": content })).unwrap();
         let out = std::env::temp_dir().join("hwp_viewer_test.hwpx");
-        let msg = mcp_call(&mut sess, "export_hwpx", json!({ "path": out.to_str().unwrap() })).unwrap();
+        let msg = mcp_call(
+            &mut sess,
+            "export_hwpx",
+            json!({ "path": out.to_str().unwrap() }),
+        )
+        .unwrap();
         assert!(msg.contains("OK"), "editor-open-safety OK: {msg}");
         let doc = hwp_core::Engine::open(&std::fs::read(&out).unwrap()).unwrap();
         assert!(doc.plain_text().contains("뷰어에서 추가"));
@@ -1671,20 +1919,35 @@ mod tests {
     #[test]
     fn export_doc_html_writes_live_doc() {
         let mut sess = hwp_mcp::Session::default();
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/hwpx/FormattingShowcase.hwpx");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/hwpx/FormattingShowcase.hwpx"
+        );
         mcp_call(&mut sess, "open_document", json!({ "path": path })).unwrap();
-        let content = r#"{"blocks":[{"type":"heading","text":"HTML로 내보내기","style":"개요 1"}]}"#;
+        let content =
+            r#"{"blocks":[{"type":"heading","text":"HTML로 내보내기","style":"개요 1"}]}"#;
         mcp_call(&mut sess, "apply_content", json!({ "content": content })).unwrap();
 
         let doc = sess.doc.as_ref().expect("doc open").doc();
         let proj = hwp_jsx::emit(doc);
-        let html = hwp_export::emit_html(&proj, &hwp_export::HtmlOptions { title: Some("t".into()) });
+        let html = hwp_export::emit_html(
+            &proj,
+            &hwp_export::HtmlOptions {
+                title: Some("t".into()),
+            },
+        );
         let out = std::env::temp_dir().join("hwp_viewer_export.html");
         std::fs::write(&out, html.as_bytes()).unwrap();
 
         let written = std::fs::read_to_string(&out).unwrap();
-        assert!(written.starts_with("<!doctype html>"), "self-contained HTML document");
-        assert!(written.contains("HTML로 내보내기"), "the live edit is in the export");
+        assert!(
+            written.starts_with("<!doctype html>"),
+            "self-contained HTML document"
+        );
+        assert!(
+            written.contains("HTML로 내보내기"),
+            "the live edit is in the export"
+        );
     }
 
     /// M1 drag-drop: a native file DROP gives a PATH (not bytes), so the apply path must read the
@@ -1701,20 +1964,37 @@ mod tests {
         std::fs::write(&src, &png).unwrap();
 
         let mut sess = hwp_mcp::Session::default();
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/hwpx/FormattingShowcase.hwpx");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/hwpx/FormattingShowcase.hwpx"
+        );
         mcp_call(&mut sess, "open_document", json!({ "path": path })).unwrap();
 
         // Read bytes from the PATH (no base64) exactly as the drop lane does (now in hwp_session).
         let (stashed, safe) =
             hwp_session::stash_image("ignored.png", None, Some(src.to_str().unwrap())).unwrap();
-        assert!(safe.ends_with(".png"), "basename comes from the dropped path: {safe}");
-        assert_eq!(std::fs::read(&stashed).unwrap(), png, "stash copies the dropped bytes verbatim");
+        assert!(
+            safe.ends_with(".png"),
+            "basename comes from the dropped path: {safe}"
+        );
+        assert_eq!(
+            std::fs::read(&stashed).unwrap(),
+            png,
+            "stash copies the dropped bytes verbatim"
+        );
 
         let before_pages = pages(&mut sess);
         let proposal = {
             let doc = sess.doc.as_ref().unwrap().doc();
-            hwp_session::build_insert_image_proposal(doc, &stashed, Some(0), Some(0), Some(40.0), Some(30.0))
-                .unwrap()
+            hwp_session::build_insert_image_proposal(
+                doc,
+                &stashed,
+                Some(0),
+                Some(0),
+                Some(40.0),
+                Some(30.0),
+            )
+            .unwrap()
         };
         // Commit immediately as ONE undo unit (the direct-manipulation contract).
         let edit = sess.doc.as_mut().unwrap();
@@ -1722,23 +2002,37 @@ mod tests {
 
         // The dropped bytes are embedded in bin_data and referenced by an inserted Image inline.
         let doc = sess.doc.as_ref().unwrap().doc();
-        let bin = doc.bin_data.iter().find(|b| b.bytes == png).expect("dropped bytes embedded");
+        let bin = doc
+            .bin_data
+            .iter()
+            .find(|b| b.bytes == png)
+            .expect("dropped bytes embedded");
         let found = doc.sections[0].blocks.iter().any(|blk| {
             if let Block::Paragraph(p) = blk {
-                p.runs.iter().flat_map(|r| &r.content).any(|c| {
-                    matches!(c, Inline::Image(img) if img.bin_ref == bin.bin_ref)
-                })
+                p.runs
+                    .iter()
+                    .flat_map(|r| &r.content)
+                    .any(|c| matches!(c, Inline::Image(img) if img.bin_ref == bin.bin_ref))
             } else {
                 false
             }
         });
-        assert!(found, "an Image inline references the embedded dropped bytes");
+        assert!(
+            found,
+            "an Image inline references the embedded dropped bytes"
+        );
 
         // One undo reverts the whole drop (single undoable op), and pages recompute.
         let _ = before_pages;
-        assert!(sess.doc.as_mut().unwrap().undo(), "the drop is a single undoable op");
+        assert!(
+            sess.doc.as_mut().unwrap().undo(),
+            "the drop is a single undoable op"
+        );
         let doc = sess.doc.as_ref().unwrap().doc();
-        assert!(!doc.bin_data.iter().any(|b| b.bytes == png), "undo removes the embedded image");
+        assert!(
+            !doc.bin_data.iter().any(|b| b.bytes == png),
+            "undo removes the embedded image"
+        );
     }
 
     /// own_hit_test (point-to-block) speaks the own-render SVG's PX space: the clicks `screenToPage`
@@ -1749,7 +2043,10 @@ mod tests {
     #[cfg(feature = "rhwp")]
     #[test]
     fn own_hit_test_resolves_a_px_click_to_the_pointed_block() {
-        let bench = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp");
+        let bench = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../benchmarks/benchmark.hwp"
+        );
         let doc = hwp_core::Engine::open(&std::fs::read(bench).unwrap()).unwrap();
         let fonts = hwp_session::own_render_fonts();
         let placed = hwp_typeset::place_doc(&doc, fonts.as_ref());
@@ -1763,10 +2060,19 @@ mod tests {
             .expect("a placed block exists");
         let (px, py) = ((b.x + b.w / 2.0) / k, (b.y + b.h / 2.0) / k);
         // Mirror the command body: px click → HWPUNIT → block_at.
-        let hit = placed.pages[pi].block_at(px * k, py * k).expect("a px click resolves a block");
-        assert_eq!((hit.section, hit.block), (b.section, b.block), "px click resolves to the pointed block");
+        let hit = placed.pages[pi]
+            .block_at(px * k, py * k)
+            .expect("a px click resolves a block");
+        assert_eq!(
+            (hit.section, hit.block),
+            (b.section, b.block),
+            "px click resolves to the pointed block"
+        );
         // And a click far to the LEFT margin at the same row still snaps to a block (row-based pointing).
-        assert!(placed.pages[pi].block_at(1.0 * k, py * k).is_some(), "margin click still snaps to a block");
+        assert!(
+            placed.pages[pi].block_at(1.0 * k, py * k).is_some(),
+            "margin click still snaps to a block"
+        );
     }
 
     // ---- issue 043: the SDK convergence lane commands (the command bodies need a Tauri State, so these
@@ -1779,7 +2085,10 @@ mod tests {
     #[test]
     fn apply_intent_json_edits_via_op_bus_and_shapes_outcome() {
         let mut sess = hwp_mcp::Session::default();
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/hwpx/FormattingShowcase.hwpx");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/hwpx/FormattingShowcase.hwpx"
+        );
         mcp_call(&mut sess, "open_document", json!({ "path": path })).unwrap();
 
         // The exact JSON envelope the TauriAdapter forwards (schema v0 ApplyContent).
@@ -1787,13 +2096,22 @@ mod tests {
             "intent": "ApplyContent",
             "json": r#"{"blocks":[{"type":"heading","text":"043 수렴","style":"개요 1"}]}"#
         });
-        let outcome = hwp_mcp::apply_intent_json(&mut sess, &envelope).expect("apply_intent_json applies");
+        let outcome =
+            hwp_mcp::apply_intent_json(&mut sess, &envelope).expect("apply_intent_json applies");
         let shaped = outcome_to_json(&outcome);
-        assert_eq!(shaped["kind"], "applied", "ApplyContent → kind:applied (wasm-identical): {shaped}");
-        assert!(shaped["ops"].as_u64().unwrap() >= 1, "at least one op applied");
+        assert_eq!(
+            shaped["kind"], "applied",
+            "ApplyContent → kind:applied (wasm-identical): {shaped}"
+        );
+        assert!(
+            shaped["ops"].as_u64().unwrap() >= 1,
+            "at least one op applied"
+        );
 
         // Undo through the same lane shapes `kind:"undone"` with the changed flag (wasm parity).
-        let undone = outcome_to_json(&hwp_mcp::apply_intent_json(&mut sess, &json!({ "intent": "Undo" })).unwrap());
+        let undone = outcome_to_json(
+            &hwp_mcp::apply_intent_json(&mut sess, &json!({ "intent": "Undo" })).unwrap(),
+        );
         assert_eq!(undone["kind"], "undone");
         assert_eq!(undone["changed"], true, "the ApplyContent is undoable");
     }
@@ -1807,7 +2125,10 @@ mod tests {
         let err = hwp_mcp::apply_intent_json(&mut sess, &json!({ "intent": "Undo", "bogus": 1 }))
             .err()
             .expect("unknown field must be rejected, not silently accepted");
-        assert!(!err.is_empty(), "unknown field is rejected with a message: {err}");
+        assert!(
+            !err.is_empty(),
+            "unknown field is rejected with a message: {err}"
+        );
     }
 
     /// `blocks_in_rect` (marquee) delegates to hwp-session and returns an EMPTY vec on an out-of-range
@@ -1815,10 +2136,16 @@ mod tests {
     #[cfg(feature = "rhwp")]
     #[test]
     fn blocks_in_rect_covers_page_and_is_empty_off_page() {
-        let bench = concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark.hwp");
+        let bench = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../benchmarks/benchmark.hwp"
+        );
         let doc = hwp_core::Engine::open(&std::fs::read(bench).unwrap()).unwrap();
         let all = hwp_session::blocks_in_rect(&doc, 0, 0.0, 0.0, 1e5, 1e5);
-        assert!(!all.is_empty(), "a full-page marquee returns the page's blocks");
+        assert!(
+            !all.is_empty(),
+            "a full-page marquee returns the page's blocks"
+        );
         assert!(
             hwp_session::blocks_in_rect(&doc, 999, 0.0, 0.0, 1e5, 1e5).is_empty(),
             "off-page marquee → empty vec, not a panic"
@@ -1830,7 +2157,10 @@ mod tests {
     #[test]
     fn export_hwpx_bytes_returns_reopenable_bytes() {
         let mut sess = hwp_mcp::Session::default();
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/hwpx/FormattingShowcase.hwpx");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/hwpx/FormattingShowcase.hwpx"
+        );
         mcp_call(&mut sess, "open_document", json!({ "path": path })).unwrap();
         mcp_call(
             &mut sess,
@@ -1841,6 +2171,9 @@ mod tests {
         let bytes = hwp_mcp::export_bytes(&sess).expect("export_bytes");
         assert!(!bytes.is_empty(), "HWPX bytes are non-empty");
         let reopened = hwp_core::Engine::open(&bytes).expect("exported bytes reopen");
-        assert!(reopened.plain_text().contains("바이트 내보내기"), "the live edit is in the exported bytes");
+        assert!(
+            reopened.plain_text().contains("바이트 내보내기"),
+            "the live edit is in the exported bytes"
+        );
     }
 }

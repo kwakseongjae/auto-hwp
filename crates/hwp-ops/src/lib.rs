@@ -34,95 +34,219 @@ pub struct Caret {
 #[derive(Clone, Debug)]
 pub enum Op {
     // text (in-place, sub-paragraph): char-offset Caret addressing within a simple paragraph
-    InsertText { at: Caret, text: String },
-    DeleteRange { start: Caret, end: Caret },
+    InsertText {
+        at: Caret,
+        text: String,
+    },
+    DeleteRange {
+        start: Caret,
+        end: Caret,
+    },
     // formatting (property-set; serializer interns into header.xml pools)
-    SetCharPr { range: Range, shape: CharShape },
+    SetCharPr {
+        range: Range,
+        shape: CharShape,
+    },
     /// Run-level (sub-paragraph) char formatting: apply `shape` to the half-open CHARACTER range
     /// `start..end` over paragraph `para`'s concatenated run text, splitting runs at those exact
     /// (UTF-8-safe) boundaries so only the selection is re-formatted.
-    SetRunCharPr { para: NodeId, start: usize, end: usize, shape: CharShape },
-    SetParaPr { range: Range, shape: ParaShape },
+    SetRunCharPr {
+        para: NodeId,
+        start: usize,
+        end: usize,
+        shape: CharShape,
+    },
+    SetParaPr {
+        range: Range,
+        shape: ParaShape,
+    },
     /// Apply a named paragraph style (e.g. "개요 1", "본문") to the addressed paragraphs — the
     /// serializer resolves the name to a `styleIDRef` (+ the style's `paraPrIDRef`) via the pool.
-    ApplyStyle { range: Range, style: String },
+    ApplyStyle {
+        range: Range,
+        style: String,
+    },
     // structure
-    InsertSectionBreak { at: NodeId },
-    InsertTable { at: NodeId, rows: usize, cols: usize },
-    InsertImage { at: NodeId, bin_ref: String, width: HwpUnit, height: HwpUnit },
+    InsertSectionBreak {
+        at: NodeId,
+    },
+    InsertTable {
+        at: NodeId,
+        rows: usize,
+        cols: usize,
+    },
+    InsertImage {
+        at: NodeId,
+        bin_ref: String,
+        width: HwpUnit,
+        height: HwpUnit,
+    },
     // table edits
-    TableInsertRow { table: NodeId, at: usize },
-    TableInsertCol { table: NodeId, at: usize },
-    MergeCells { table: NodeId, top: usize, left: usize, bottom: usize, right: usize },
+    TableInsertRow {
+        table: NodeId,
+        at: usize,
+    },
+    TableInsertCol {
+        table: NodeId,
+        at: usize,
+    },
+    MergeCells {
+        table: NodeId,
+        top: usize,
+        left: usize,
+        bottom: usize,
+        right: usize,
+    },
     // section-addressed convenience op (MVP edit→export path)
-    AppendParagraph { section: usize, text: String },
+    AppendParagraph {
+        section: usize,
+        text: String,
+    },
     /// Append a paragraph with per-run formatting + paragraph shape (the preprocessor target
     /// for AI content). Both synthesize header.xml charPr/paraPr entries on export.
-    AppendRichParagraph { section: usize, runs: Vec<RunSpec>, para: ParaSpec },
+    AppendRichParagraph {
+        section: usize,
+        runs: Vec<RunSpec>,
+        para: ParaSpec,
+    },
     /// Append a simple grid table (header row + body rows) — the AI-content preprocessor
     /// target for native `<hp:tbl>` emission. Header cells render bold.
-    AppendTable { section: usize, header: Vec<String>, rows: Vec<Vec<String>> },
+    AppendTable {
+        section: usize,
+        header: Vec<String>,
+        rows: Vec<Vec<String>>,
+    },
     /// Append a table with per-cell merge spans, bold, and background shade. Each logical row
     /// lists only the *uncovered* cells (HTML-table semantics); covered positions are omitted.
-    AppendRichTable { section: usize, rows: Vec<Vec<CellSpec>> },
+    AppendRichTable {
+        section: usize,
+        rows: Vec<Vec<CellSpec>>,
+    },
     /// Set a section's page orientation and/or margins (patches the existing `secPr` on export).
-    SetPageLayout { section: usize, orientation: Option<String>, margins_mm: Option<PageMargins> },
+    SetPageLayout {
+        section: usize,
+        orientation: Option<String>,
+        margins_mm: Option<PageMargins>,
+    },
 
     // ---- vibe-docs: anchored, positional edits (anchor = (section, block index) == `[s/b]`) ----
     /// Insert a rich paragraph at block `index` (shifting later blocks down). `index == len` appends.
-    InsertParagraphAt { section: usize, index: usize, runs: Vec<RunSpec>, para: ParaSpec },
+    InsertParagraphAt {
+        section: usize,
+        index: usize,
+        runs: Vec<RunSpec>,
+        para: ParaSpec,
+    },
     /// Insert a rich table at block `index` (same coverage semantics as `AppendRichTable`).
-    InsertTableAt { section: usize, index: usize, rows: Vec<Vec<CellSpec>> },
+    InsertTableAt {
+        section: usize,
+        index: usize,
+        rows: Vec<Vec<CellSpec>>,
+    },
     /// Insert an embedded image at block `index`: `bytes`/`kind` (e.g. "png") become a `BinData`,
     /// referenced by a fresh paragraph holding an `Inline::Image`. `width`/`height` in HWPUNIT.
-    InsertImageAt { section: usize, index: usize, bytes: Vec<u8>, kind: String, width: HwpUnit, height: HwpUnit },
+    InsertImageAt {
+        section: usize,
+        index: usize,
+        bytes: Vec<u8>,
+        kind: String,
+        width: HwpUnit,
+        height: HwpUnit,
+    },
     /// Delete the block at `index` in `section`.
-    DeleteBlock { section: usize, index: usize },
+    DeleteBlock {
+        section: usize,
+        index: usize,
+    },
     /// Move the block at index `from` to index `to` within `section` (removing it, then reinserting at
     /// the post-removal index). Generalizes M4's "move = DeleteBlock + InsertImageAt" to ANY block
     /// (tables, paragraphs) in ONE op so a single undo restores the original order. `to == len` (the
     /// block-count BEFORE removal) moves it to the end; `from == to` is a no-op.
-    MoveBlock { section: usize, from: usize, to: usize },
+    MoveBlock {
+        section: usize,
+        from: usize,
+        to: usize,
+    },
     /// Resize the anchored image of the `index`-th block: set the `ImageRef`'s `width`/`height` (in
     /// HWPUNIT) on the first image inline of that paragraph. The direct-manipulation resize handle
     /// commits exactly this on pointerup (one undoable op); "move" is `DeleteBlock` + `InsertImageAt`.
-    SetImageSize { section: usize, index: usize, width: HwpUnit, height: HwpUnit },
+    SetImageSize {
+        section: usize,
+        index: usize,
+        width: HwpUnit,
+        height: HwpUnit,
+    },
     /// Recolor cells of an EXISTING table (the `index`-th block): set/clear background shade for the
     /// cells the selector picks (a whole column, a whole row, one cell, or all). `shade=None` clears.
-    SetTableCellShade { section: usize, index: usize, sel: CellSel, shade: Option<String> },
+    SetTableCellShade {
+        section: usize,
+        index: usize,
+        sel: CellSel,
+        shade: Option<String>,
+    },
     /// Replace the text of one EXISTING cell of the `index`-th table (the active cell anchored at
     /// `(row, col)` — same addressing as `SetTableCellShade`'s `CellSel::Cell`). The cell's blocks
     /// are rebuilt from `runs` (one paragraph), so this *fills* an existing cell rather than insert.
-    SetTableCell { section: usize, index: usize, row: usize, col: usize, runs: Vec<RunSpec> },
+    SetTableCell {
+        section: usize,
+        index: usize,
+        row: usize,
+        col: usize,
+        runs: Vec<RunSpec>,
+    },
     /// Insert one or more BODY rows into the EXISTING `index`-th table at logical row `at`
     /// (`at == t.rows` appends). Existing cells at row >= `at` shift down by `rows.len()`; the new
     /// cells take `col_span`/`shade`/`bold` from each `CellSpec` (HTML-table coverage per row).
-    TableInsertRows { section: usize, index: usize, at: usize, rows: Vec<Vec<CellSpec>> },
+    TableInsertRows {
+        section: usize,
+        index: usize,
+        at: usize,
+        rows: Vec<Vec<CellSpec>>,
+    },
     /// Append ONE empty BODY row to the `index`-th table that REPLICATES the column layout of the
     /// table's last active row (same per-cell `col`/`col_span` + borders, empty text). The interactive
     /// "+행" verb: a naive `cols`-single-cell row breaks tables with merged columns (the 보유역량-spans-3
     /// case → a misaligned grid), so we clone the existing column structure instead.
-    TableAppendEmptyRow { section: usize, index: usize },
+    TableAppendEmptyRow {
+        section: usize,
+        index: usize,
+    },
     /// Replace the text of a SIMPLE top-level paragraph (the `block`-th block of `section`) with one run
     /// of `text`, PRESERVING the paragraph's existing first-run char shape + para shape (so inline
     /// editing keeps the cell/paragraph's color/italic/alignment). Refuses a structural paragraph
     /// (image/field/multiple-inline) so we never silently flatten rich content — the UI falls back to chat.
-    SetParagraphText { section: usize, block: usize, text: String },
+    SetParagraphText {
+        section: usize,
+        block: usize,
+        text: String,
+    },
     /// Replace a SIMPLE top-level paragraph's content with STYLED runs (the WYSIWYG in-place editor's
     /// commit — preserves per-run bold/italic/size/color/font instead of collapsing to one plain run like
     /// `SetParagraphText`). Each `RunSpec` interns its char shape; a default (unstyled) run keeps the
     /// paragraph's existing first-run shape; the para shape (alignment) is preserved. Refuses a structural
     /// paragraph. ONE undo unit.
-    SetParagraphRuns { section: usize, block: usize, runs: Vec<RunSpec> },
+    SetParagraphRuns {
+        section: usize,
+        block: usize,
+        runs: Vec<RunSpec>,
+    },
     /// Set the COLUMN WIDTH proportions of the `index`-th table (the column-resize drag commit). `widths`
     /// must have exactly `t.cols` positive entries; the renderer rescales them to the body width, so only
     /// the ratios matter. ONE undo unit.
-    SetTableColWidths { section: usize, index: usize, widths: Vec<i32> },
+    SetTableColWidths {
+        section: usize,
+        index: usize,
+        widths: Vec<i32>,
+    },
     /// Set the per-row MINIMUM HEIGHT override (HWPUNIT) of the `index`-th table (the row-resize drag
     /// commit). `heights` must have exactly `t.rows` entries, each `>= 0` (`0` = that row stays
     /// content-sized; `> 0` = a floor so text never clips). The typesetter honors these as
     /// `max(content, override)`. ONE undo unit. See [`hwp_model::prelude::Table::row_heights`].
-    SetTableRowHeights { section: usize, index: usize, heights: Vec<i32> },
+    SetTableRowHeights {
+        section: usize,
+        index: usize,
+        heights: Vec<i32>,
+    },
     /// Patch the CHARACTER FORMAT of a target's runs (볼드/이태릭/크기/글꼴) PRESERVING every other
     /// attribute (color, underline, spacing, per-run variation). Target = the `block`-th block's
     /// paragraph when `cell` is `None`, else the `(row, col)` cell of that table. Each `Some` field is
@@ -186,7 +310,12 @@ pub enum CellSel {
     Cell(usize, usize),
     /// Every cell whose span overlaps the inclusive rectangle `[r0..=r1] × [c0..=c1]` — the
     /// multi-cell drag-selection (표 블록 선택). Bounds are normalized by the caller (r0≤r1, c0≤c1).
-    Rect { r0: usize, c0: usize, r1: usize, c1: usize },
+    Rect {
+        r0: usize,
+        c0: usize,
+        r1: usize,
+        c1: usize,
+    },
     /// Every cell in the table.
     All,
 }
@@ -219,7 +348,13 @@ pub struct CellSpec {
 
 impl Default for CellSpec {
     fn default() -> Self {
-        CellSpec { text: String::new(), col_span: 1, row_span: 1, bold: false, shade: None }
+        CellSpec {
+            text: String::new(),
+            col_span: 1,
+            row_span: 1,
+            bold: false,
+            shade: None,
+        }
     }
 }
 
@@ -256,9 +391,20 @@ impl RunSpec {
             italic: self.italic,
             underline: self.underline,
             strikeout: self.strike,
-            height: self.size_pt.map(|p| (p * 100.0).round() as i32).unwrap_or(0),
-            text_color: self.color.as_deref().and_then(Color::from_hex).unwrap_or_default(),
-            shade_color: self.highlight.as_deref().and_then(Color::from_hex).unwrap_or_default(),
+            height: self
+                .size_pt
+                .map(|p| (p * 100.0).round() as i32)
+                .unwrap_or(0),
+            text_color: self
+                .color
+                .as_deref()
+                .and_then(Color::from_hex)
+                .unwrap_or_default(),
+            shade_color: self
+                .highlight
+                .as_deref()
+                .and_then(Color::from_hex)
+                .unwrap_or_default(),
             font_family: self.font.clone().filter(|s| !s.trim().is_empty()),
             ..Default::default()
         }
@@ -364,7 +510,10 @@ fn section_mut(doc: &mut SemanticDoc, section: usize) -> Result<&mut Section> {
 /// `SetParagraphText` guard — such paragraphs are skipped (and the op errors if NONE are formattable).
 fn is_formattable_para(p: &Paragraph) -> bool {
     let simple = p.source.as_ref().map(|s| s.simple).unwrap_or(true);
-    let has_nontext = p.runs.iter().any(|r| r.content.iter().any(|i| !matches!(i, Inline::Text(_))));
+    let has_nontext = p
+        .runs
+        .iter()
+        .any(|r| r.content.iter().any(|i| !matches!(i, Inline::Text(_))));
     simple && !has_nontext
 }
 
@@ -375,31 +524,88 @@ fn char_fmt_target_paras(block: &Block, cell: Option<(usize, usize)>) -> Result<
     let paras: Vec<&Paragraph> = match (block, cell) {
         (Block::Paragraph(p), None) => vec![p],
         (Block::Table(t), Some((row, col))) => {
-            let c = t.edit_target().cells.iter().find(|c| c.active && c.row == row && c.col == col).ok_or_else(|| {
-                Error::Other(format!("SetCharFmt: no active cell at (row {row}, col {col})"))
-            })?;
-            c.blocks.iter().filter_map(|b| if let Block::Paragraph(p) = b { Some(p) } else { None }).collect()
+            let c = t
+                .edit_target()
+                .cells
+                .iter()
+                .find(|c| c.active && c.row == row && c.col == col)
+                .ok_or_else(|| {
+                    Error::Other(format!(
+                        "SetCharFmt: no active cell at (row {row}, col {col})"
+                    ))
+                })?;
+            c.blocks
+                .iter()
+                .filter_map(|b| {
+                    if let Block::Paragraph(p) = b {
+                        Some(p)
+                    } else {
+                        None
+                    }
+                })
+                .collect()
         }
-        (Block::Table(_), None) => return Err(Error::Other("SetCharFmt: target is a table — a cell (row, col) is required".into())),
-        (Block::Paragraph(_), Some(_)) => return Err(Error::Other("SetCharFmt: target is a paragraph — no cell expected".into())),
+        (Block::Table(_), None) => {
+            return Err(Error::Other(
+                "SetCharFmt: target is a table — a cell (row, col) is required".into(),
+            ))
+        }
+        (Block::Paragraph(_), Some(_)) => {
+            return Err(Error::Other(
+                "SetCharFmt: target is a paragraph — no cell expected".into(),
+            ))
+        }
     };
-    Ok(paras.into_iter().filter(|p| is_formattable_para(p)).collect())
+    Ok(paras
+        .into_iter()
+        .filter(|p| is_formattable_para(p))
+        .collect())
 }
 
 /// `&mut` twin of [`char_fmt_target_paras`] (same formattable filter).
-fn char_fmt_target_paras_mut(block: &mut Block, cell: Option<(usize, usize)>) -> Result<Vec<&mut Paragraph>> {
+fn char_fmt_target_paras_mut(
+    block: &mut Block,
+    cell: Option<(usize, usize)>,
+) -> Result<Vec<&mut Paragraph>> {
     let paras: Vec<&mut Paragraph> = match (block, cell) {
         (Block::Paragraph(p), None) => vec![p],
         (Block::Table(t), Some((row, col))) => {
-            let c = t.edit_target_mut().cells.iter_mut().find(|c| c.active && c.row == row && c.col == col).ok_or_else(|| {
-                Error::Other(format!("SetCharFmt: no active cell at (row {row}, col {col})"))
-            })?;
-            c.blocks.iter_mut().filter_map(|b| if let Block::Paragraph(p) = b { Some(p) } else { None }).collect()
+            let c = t
+                .edit_target_mut()
+                .cells
+                .iter_mut()
+                .find(|c| c.active && c.row == row && c.col == col)
+                .ok_or_else(|| {
+                    Error::Other(format!(
+                        "SetCharFmt: no active cell at (row {row}, col {col})"
+                    ))
+                })?;
+            c.blocks
+                .iter_mut()
+                .filter_map(|b| {
+                    if let Block::Paragraph(p) = b {
+                        Some(p)
+                    } else {
+                        None
+                    }
+                })
+                .collect()
         }
-        (Block::Table(_), None) => return Err(Error::Other("SetCharFmt: target is a table — a cell (row, col) is required".into())),
-        (Block::Paragraph(_), Some(_)) => return Err(Error::Other("SetCharFmt: target is a paragraph — no cell expected".into())),
+        (Block::Table(_), None) => {
+            return Err(Error::Other(
+                "SetCharFmt: target is a table — a cell (row, col) is required".into(),
+            ))
+        }
+        (Block::Paragraph(_), Some(_)) => {
+            return Err(Error::Other(
+                "SetCharFmt: target is a paragraph — no cell expected".into(),
+            ))
+        }
     };
-    Ok(paras.into_iter().filter(|p| is_formattable_para(p)).collect())
+    Ok(paras
+        .into_iter()
+        .filter(|p| is_formattable_para(p))
+        .collect())
 }
 
 /// Run `edit` on every addressed top-level paragraph whose `NodeId` is in `lo..=hi`, marking it
@@ -440,7 +646,9 @@ fn edit_paras_in_range(
         }
     }
     if edited == 0 {
-        return Err(Error::Other(format!("no editable paragraph in node range {lo}..={hi}")));
+        return Err(Error::Other(format!(
+            "no editable paragraph in node range {lo}..={hi}"
+        )));
     }
     Ok(())
 }
@@ -472,7 +680,8 @@ fn with_simple_para(
             }
         }
     }
-    let si = sec_idx.ok_or_else(|| Error::Other(format!("no editable paragraph with node id {}", node.0)))?;
+    let si = sec_idx
+        .ok_or_else(|| Error::Other(format!("no editable paragraph with node id {}", node.0)))?;
     let sec = &mut doc.sections[si];
     let mut changed = false;
     for b in &mut sec.blocks {
@@ -519,7 +728,11 @@ fn run_text(r: &Run) -> String {
 fn split_run_at(run: &Run, rel: usize) -> (Run, Run) {
     let t = run_text(run);
     let byte = t.char_indices().nth(rel).map(|(b, _)| b).unwrap_or(t.len());
-    let mk = |s: &str| Run { char_shape: run.char_shape, char_ref: run.char_ref.clone(), content: vec![Inline::Text(s.to_string())] };
+    let mk = |s: &str| Run {
+        char_shape: run.char_shape,
+        char_ref: run.char_ref.clone(),
+        content: vec![Inline::Text(s.to_string())],
+    };
     (mk(&t[..byte]), mk(&t[byte..]))
 }
 
@@ -555,7 +768,9 @@ fn split_runs_for_range(runs: &mut Vec<Run>, start: usize, end: usize) -> Result
         false
     };
     if boundary_in_nontext(start) || boundary_in_nontext(end) {
-        return Err(Error::Other("selection boundary falls inside a non-text run".into()));
+        return Err(Error::Other(
+            "selection boundary falls inside a non-text run".into(),
+        ));
     }
 
     if let Some((i, rel)) = locate_split(runs, end) {
@@ -593,7 +808,9 @@ fn split_runs_for_range(runs: &mut Vec<Run>, start: usize, end: usize) -> Result
 fn resolve_caret(p: &Paragraph, char_off: usize) -> Result<(usize, usize)> {
     let total: usize = p.runs.iter().map(run_char_len).sum();
     if char_off > total {
-        return Err(Error::Other(format!("caret offset {char_off} past paragraph end {total}")));
+        return Err(Error::Other(format!(
+            "caret offset {char_off} past paragraph end {total}"
+        )));
     }
     let mut cs = 0;
     for (i, r) in p.runs.iter().enumerate() {
@@ -601,7 +818,11 @@ fn resolve_caret(p: &Paragraph, char_off: usize) -> Result<(usize, usize)> {
         if char_off <= cs + len {
             let delta = char_off - cs;
             let t = run_text(r);
-            let byte = t.char_indices().nth(delta).map(|(b, _)| b).unwrap_or(t.len());
+            let byte = t
+                .char_indices()
+                .nth(delta)
+                .map(|(b, _)| b)
+                .unwrap_or(t.len());
             return Ok((i, byte));
         }
         cs += len;
@@ -615,7 +836,9 @@ fn resolve_caret(p: &Paragraph, char_off: usize) -> Result<(usize, usize)> {
 /// Strip characters illegal in XML 1.0 text — NUL and C0 controls except tab/newline/CR — so a
 /// user-supplied `InsertText` string can never produce malformed OWPML.
 fn sanitize_text(s: &str) -> String {
-    s.chars().filter(|&c| c == '\t' || c == '\n' || c == '\r' || c >= ' ').collect()
+    s.chars()
+        .filter(|&c| c == '\t' || c == '\n' || c == '\r' || c >= ' ')
+        .collect()
 }
 
 /// Delete the half-open char span between two resolved carets, rebuilding the affected runs (each
@@ -1183,8 +1406,8 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             // Fill any column NOT covered by the template — e.g. a vertical merge from an earlier row
             // crosses the last row, so that column has no origin cell at `last`. Without this the new
             // row would have a hole (the vertical analogue of the bug we're fixing).
-            for col in 0..ncols {
-                if !covered[col] {
+            for (col, &cov) in covered.iter().enumerate() {
+                if !cov {
                     new_cells.push(Cell { row: at, col, blocks: empty_para(0, 0), dirty: Dirty(true), ..Default::default() });
                 }
             }
@@ -1312,7 +1535,8 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                 return Err(Error::Other("SetCharFmt: no attribute specified (bold/italic/size_pt/font)".into()));
             }
             if let Some(s) = size_pt {
-                if !(*s > 0.0) {
+                // NOT `*s <= 0.0`: NaN must also be rejected (partial_cmp returns None for it).
+                if s.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
                     return Err(Error::Other("SetCharFmt: size_pt must be > 0".into()));
                 }
             }
@@ -1437,7 +1661,8 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                 return Err(Error::Other("SetCellRangeFmt: no attribute specified".into()));
             }
             if let Some(s) = size_pt {
-                if !(*s > 0.0) {
+                // NOT `*s <= 0.0`: NaN must also be rejected (partial_cmp returns None for it).
+                if s.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
                     return Err(Error::Other("SetCellRangeFmt: size_pt must be > 0".into()));
                 }
             }
@@ -1568,7 +1793,13 @@ fn build_rich_table(doc: &mut SemanticDoc, rows: &[Vec<CellSpec>]) -> Result<Tab
     if rows.is_empty() {
         return Err(Error::Other("rich table needs at least one row".into()));
     }
-    let bold = intern_char_shape(doc, CharShape { bold: true, ..Default::default() });
+    let bold = intern_char_shape(
+        doc,
+        CharShape {
+            bold: true,
+            ..Default::default()
+        },
+    );
     let plain = intern_char_shape(doc, CharShape::default());
     let mut covered: std::collections::BTreeSet<(usize, usize)> = Default::default();
     let mut cells = Vec::new();
@@ -1669,12 +1900,24 @@ pub struct EditSession {
 impl EditSession {
     /// Start a session over a freshly parsed (or built) document. Default history depth 100.
     pub fn new(doc: SemanticDoc) -> Self {
-        EditSession { doc, undo: Vec::new(), redo: Vec::new(), limit: 100, rev: 0 }
+        EditSession {
+            doc,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            limit: 100,
+            rev: 0,
+        }
     }
 
     /// Like [`EditSession::new`] but with an explicit history depth (`0` = unbounded).
     pub fn with_limit(doc: SemanticDoc, limit: usize) -> Self {
-        EditSession { doc, undo: Vec::new(), redo: Vec::new(), limit, rev: 0 }
+        EditSession {
+            doc,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            limit,
+            rev: 0,
+        }
     }
 
     /// The live document (read-only) — feed to the serializer / renderer.
@@ -1744,7 +1987,9 @@ impl EditSession {
 
     /// Undo the last committed op (in-memory swap; emits no XML). Returns false if nothing to undo.
     pub fn undo(&mut self) -> bool {
-        let Some(prev) = self.undo.pop() else { return false };
+        let Some(prev) = self.undo.pop() else {
+            return false;
+        };
         self.redo.push(std::mem::replace(&mut self.doc, prev));
         self.rev += 1;
         true
@@ -1752,7 +1997,9 @@ impl EditSession {
 
     /// Redo the last undone op. Returns false if nothing to redo.
     pub fn redo(&mut self) -> bool {
-        let Some(next) = self.redo.pop() else { return false };
+        let Some(next) = self.redo.pop() else {
+            return false;
+        };
         self.undo.push(std::mem::replace(&mut self.doc, next));
         self.rev += 1;
         true
@@ -1767,8 +2014,16 @@ mod tests {
     fn simple_para(id: u64, text: &str) -> Paragraph {
         Paragraph {
             id: Some(NodeId(id)),
-            runs: vec![Run { char_ref: Some("0".into()), content: vec![Inline::Text(text.into())], ..Default::default() }],
-            source: Some(ParaSource { span: (0, 0), simple: true, ..Default::default() }),
+            runs: vec![Run {
+                char_ref: Some("0".into()),
+                content: vec![Inline::Text(text.into())],
+                ..Default::default()
+            }],
+            source: Some(ParaSource {
+                span: (0, 0),
+                simple: true,
+                ..Default::default()
+            }),
             ..Default::default()
         }
     }
@@ -1777,21 +2032,38 @@ mod tests {
     fn structural_para(id: u64, text: &str) -> Paragraph {
         Paragraph {
             id: Some(NodeId(id)),
-            runs: vec![Run { content: vec![Inline::Text(text.into())], ..Default::default() }],
-            source: Some(ParaSource { span: (0, 0), simple: false, ..Default::default() }),
+            runs: vec![Run {
+                content: vec![Inline::Text(text.into())],
+                ..Default::default()
+            }],
+            source: Some(ParaSource {
+                span: (0, 0),
+                simple: false,
+                ..Default::default()
+            }),
             ..Default::default()
         }
     }
 
     fn doc_with(paras: Vec<Paragraph>) -> SemanticDoc {
         // Index 0 reserved as the default-shape sentinel, mirroring the real parser.
-        let mut doc = SemanticDoc { char_shapes: vec![CharShape::default()], para_shapes: vec![ParaShape::default()], ..Default::default() };
-        doc.sections.push(Section { blocks: paras.into_iter().map(Block::Paragraph).collect(), ..Default::default() });
+        let mut doc = SemanticDoc {
+            char_shapes: vec![CharShape::default()],
+            para_shapes: vec![ParaShape::default()],
+            ..Default::default()
+        };
+        doc.sections.push(Section {
+            blocks: paras.into_iter().map(Block::Paragraph).collect(),
+            ..Default::default()
+        });
         doc
     }
 
     fn bold() -> CharShape {
-        CharShape { bold: true, ..Default::default() }
+        CharShape {
+            bold: true,
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -1800,7 +2072,14 @@ mod tests {
         assert!(!s.doc().any_dirty());
         assert!(!s.can_undo());
 
-        s.do_op(&Op::SetCharPr { range: Range { start: NodeId(1), end: NodeId(1) }, shape: bold() }).unwrap();
+        s.do_op(&Op::SetCharPr {
+            range: Range {
+                start: NodeId(1),
+                end: NodeId(1),
+            },
+            shape: bold(),
+        })
+        .unwrap();
         assert!(s.doc().any_dirty());
         assert!(s.can_undo() && !s.can_redo());
 
@@ -1816,21 +2095,45 @@ mod tests {
     fn do_op_is_atomic_on_error() {
         // Range covers a simple para (1) AND a non-simple para (2). apply() marks para 1 dirty +
         // interns the shape BEFORE erroring on para 2 — do_op must roll the whole thing back.
-        let mut s = EditSession::new(doc_with(vec![simple_para(1, "가"), structural_para(2, "나")]));
+        let mut s = EditSession::new(doc_with(vec![
+            simple_para(1, "가"),
+            structural_para(2, "나"),
+        ]));
         let pools_before = s.doc().char_shapes.len();
 
-        let err = s.do_op(&Op::SetCharPr { range: Range { start: NodeId(1), end: NodeId(2) }, shape: bold() });
+        let err = s.do_op(&Op::SetCharPr {
+            range: Range {
+                start: NodeId(1),
+                end: NodeId(2),
+            },
+            shape: bold(),
+        });
         assert!(err.is_err());
         assert!(!s.doc().any_dirty(), "failed op must leave no dirty node");
         assert!(!s.can_undo(), "failed op must push no snapshot");
-        assert_eq!(s.doc().char_shapes.len(), pools_before, "failed op must not grow the pool");
+        assert_eq!(
+            s.doc().char_shapes.len(),
+            pools_before,
+            "failed op must not grow the pool"
+        );
     }
 
     #[test]
     fn multi_op_undo_redo_is_lifo() {
-        let mut s = EditSession::new(doc_with(vec![simple_para(1, "가"), simple_para(2, "나"), simple_para(3, "다")]));
+        let mut s = EditSession::new(doc_with(vec![
+            simple_para(1, "가"),
+            simple_para(2, "나"),
+            simple_para(3, "다"),
+        ]));
         for id in 1..=3u64 {
-            s.do_op(&Op::SetCharPr { range: Range { start: NodeId(id), end: NodeId(id) }, shape: bold() }).unwrap();
+            s.do_op(&Op::SetCharPr {
+                range: Range {
+                    start: NodeId(id),
+                    end: NodeId(id),
+                },
+                shape: bold(),
+            })
+            .unwrap();
         }
         // Undo all three → pristine; redo all three → fully applied.
         assert!(s.undo() && s.undo() && s.undo());
@@ -1842,18 +2145,41 @@ mod tests {
 
     #[test]
     fn revision_bumps_on_every_mutation_not_on_failure() {
-        let mut s = EditSession::new(doc_with(vec![simple_para(1, "가"), structural_para(2, "나")]));
+        let mut s = EditSession::new(doc_with(vec![
+            simple_para(1, "가"),
+            structural_para(2, "나"),
+        ]));
         assert_eq!(s.revision(), 0);
-        s.do_op(&Op::SetCharPr { range: Range { start: NodeId(1), end: NodeId(1) }, shape: bold() }).unwrap();
+        s.do_op(&Op::SetCharPr {
+            range: Range {
+                start: NodeId(1),
+                end: NodeId(1),
+            },
+            shape: bold(),
+        })
+        .unwrap();
         assert_eq!(s.revision(), 1);
-        s.do_ops(&[Op::SetCharPr { range: Range { start: NodeId(1), end: NodeId(1) }, shape: bold() }]).unwrap();
+        s.do_ops(&[Op::SetCharPr {
+            range: Range {
+                start: NodeId(1),
+                end: NodeId(1),
+            },
+            shape: bold(),
+        }])
+        .unwrap();
         assert_eq!(s.revision(), 2);
         assert!(s.undo());
         assert_eq!(s.revision(), 3, "undo is a revision change");
         assert!(s.redo());
         assert_eq!(s.revision(), 4);
         // A FAILED op must not bump the revision (doc unchanged).
-        let r = s.do_op(&Op::SetCharPr { range: Range { start: NodeId(2), end: NodeId(2) }, shape: bold() });
+        let r = s.do_op(&Op::SetCharPr {
+            range: Range {
+                start: NodeId(2),
+                end: NodeId(2),
+            },
+            shape: bold(),
+        });
         assert!(r.is_err());
         assert_eq!(s.revision(), 4, "failed op leaves the revision unchanged");
     }
@@ -1863,8 +2189,20 @@ mod tests {
         let mut s = EditSession::new(doc_with(vec![simple_para(1, "가"), simple_para(2, "나")]));
         // A batch of 2 ops commits as a SINGLE undo step.
         s.do_ops(&[
-            Op::SetCharPr { range: Range { start: NodeId(1), end: NodeId(1) }, shape: bold() },
-            Op::SetCharPr { range: Range { start: NodeId(2), end: NodeId(2) }, shape: bold() },
+            Op::SetCharPr {
+                range: Range {
+                    start: NodeId(1),
+                    end: NodeId(1),
+                },
+                shape: bold(),
+            },
+            Op::SetCharPr {
+                range: Range {
+                    start: NodeId(2),
+                    end: NodeId(2),
+                },
+                shape: bold(),
+            },
         ])
         .unwrap();
         assert!(s.doc().any_dirty());
@@ -1875,27 +2213,60 @@ mod tests {
 
     #[test]
     fn do_ops_rolls_back_the_whole_batch_on_error() {
-        let mut s = EditSession::new(doc_with(vec![simple_para(1, "가"), structural_para(2, "나")]));
+        let mut s = EditSession::new(doc_with(vec![
+            simple_para(1, "가"),
+            structural_para(2, "나"),
+        ]));
         let pools = s.doc().char_shapes.len();
         // Second op targets a non-simple para → the entire batch is rolled back.
         let r = s.do_ops(&[
-            Op::SetCharPr { range: Range { start: NodeId(1), end: NodeId(1) }, shape: bold() },
-            Op::SetCharPr { range: Range { start: NodeId(2), end: NodeId(2) }, shape: bold() },
+            Op::SetCharPr {
+                range: Range {
+                    start: NodeId(1),
+                    end: NodeId(1),
+                },
+                shape: bold(),
+            },
+            Op::SetCharPr {
+                range: Range {
+                    start: NodeId(2),
+                    end: NodeId(2),
+                },
+                shape: bold(),
+            },
         ]);
         assert!(r.is_err());
         assert!(!s.doc().any_dirty(), "failed batch leaves no dirty node");
         assert!(!s.can_undo(), "failed batch pushes no snapshot");
-        assert_eq!(s.doc().char_shapes.len(), pools, "failed batch does not grow the pool");
+        assert_eq!(
+            s.doc().char_shapes.len(),
+            pools,
+            "failed batch does not grow the pool"
+        );
     }
 
     #[test]
     fn new_op_after_undo_clears_redo() {
         let mut s = EditSession::new(doc_with(vec![simple_para(1, "가"), simple_para(2, "나")]));
-        s.do_op(&Op::SetCharPr { range: Range { start: NodeId(1), end: NodeId(1) }, shape: bold() }).unwrap();
+        s.do_op(&Op::SetCharPr {
+            range: Range {
+                start: NodeId(1),
+                end: NodeId(1),
+            },
+            shape: bold(),
+        })
+        .unwrap();
         assert!(s.undo());
         assert!(s.can_redo());
         // A fresh op invalidates the redo future.
-        s.do_op(&Op::SetCharPr { range: Range { start: NodeId(2), end: NodeId(2) }, shape: bold() }).unwrap();
+        s.do_op(&Op::SetCharPr {
+            range: Range {
+                start: NodeId(2),
+                end: NodeId(2),
+            },
+            shape: bold(),
+        })
+        .unwrap();
         assert!(!s.can_redo());
     }
 
@@ -1903,7 +2274,14 @@ mod tests {
     fn history_limit_bounds_undo_depth() {
         let mut s = EditSession::with_limit(doc_with(vec![simple_para(1, "가")]), 2);
         for _ in 0..5 {
-            s.do_op(&Op::SetCharPr { range: Range { start: NodeId(1), end: NodeId(1) }, shape: bold() }).unwrap();
+            s.do_op(&Op::SetCharPr {
+                range: Range {
+                    start: NodeId(1),
+                    end: NodeId(1),
+                },
+                shape: bold(),
+            })
+            .unwrap();
         }
         // Only the last 2 snapshots are retained.
         assert!(s.undo() && s.undo());
@@ -1918,9 +2296,17 @@ mod tests {
             id: Some(NodeId(id)),
             runs: parts
                 .iter()
-                .map(|t| Run { char_ref: Some("0".into()), content: vec![Inline::Text((*t).into())], ..Default::default() })
+                .map(|t| Run {
+                    char_ref: Some("0".into()),
+                    content: vec![Inline::Text((*t).into())],
+                    ..Default::default()
+                })
                 .collect(),
-            source: Some(ParaSource { span: (0, 0), simple: true, ..Default::default() }),
+            source: Some(ParaSource {
+                span: (0, 0),
+                simple: true,
+                ..Default::default()
+            }),
             ..Default::default()
         }
     }
@@ -1944,7 +2330,16 @@ mod tests {
     fn setruncharpr_splits_across_runs_on_codepoint_boundaries() {
         // '가나다'|'라마바' (chars 0..6); format [1,4) → '가' | '나다' | '라' | '마바'.
         let mut doc = doc_with(vec![multirun_para(1, &["가나다", "라마바"])]);
-        apply(&mut doc, &Op::SetRunCharPr { para: NodeId(1), start: 1, end: 4, shape: bold() }).unwrap();
+        apply(
+            &mut doc,
+            &Op::SetRunCharPr {
+                para: NodeId(1),
+                start: 1,
+                end: 4,
+                shape: bold(),
+            },
+        )
+        .unwrap();
         let p = para_of(&doc, 1);
         assert_eq!(run_texts(p), vec!["가", "나다", "라", "마바"]);
         // The two middle runs carry the interned bold shape; the outer two stay default + char_ref "0".
@@ -1964,14 +2359,32 @@ mod tests {
     #[test]
     fn setruncharpr_mid_single_run_makes_three_runs() {
         let mut doc = doc_with(vec![multirun_para(1, &["가나다"])]);
-        apply(&mut doc, &Op::SetRunCharPr { para: NodeId(1), start: 1, end: 2, shape: bold() }).unwrap();
+        apply(
+            &mut doc,
+            &Op::SetRunCharPr {
+                para: NodeId(1),
+                start: 1,
+                end: 2,
+                shape: bold(),
+            },
+        )
+        .unwrap();
         assert_eq!(run_texts(para_of(&doc, 1)), vec!["가", "나", "다"]);
     }
 
     #[test]
     fn setruncharpr_whole_run_keeps_run_count() {
         let mut doc = doc_with(vec![multirun_para(1, &["가나다", "라마바"])]);
-        apply(&mut doc, &Op::SetRunCharPr { para: NodeId(1), start: 0, end: 3, shape: bold() }).unwrap();
+        apply(
+            &mut doc,
+            &Op::SetRunCharPr {
+                para: NodeId(1),
+                start: 0,
+                end: 3,
+                shape: bold(),
+            },
+        )
+        .unwrap();
         let p = para_of(&doc, 1);
         assert_eq!(run_texts(p), vec!["가나다", "라마바"]);
         let bold_idx = doc.char_shapes.iter().position(|s| *s == bold()).unwrap();
@@ -1983,17 +2396,44 @@ mod tests {
     fn setruncharpr_empty_and_invalid_selections() {
         // start == end → Ok, no change, not dirty.
         let mut doc = doc_with(vec![multirun_para(1, &["가나"])]);
-        apply(&mut doc, &Op::SetRunCharPr { para: NodeId(1), start: 1, end: 1, shape: bold() }).unwrap();
+        apply(
+            &mut doc,
+            &Op::SetRunCharPr {
+                para: NodeId(1),
+                start: 1,
+                end: 1,
+                shape: bold(),
+            },
+        )
+        .unwrap();
         assert!(!para_of(&doc, 1).dirty.is_dirty());
         assert_eq!(run_texts(para_of(&doc, 1)), vec!["가나"]);
 
         // start > end → Err.
         let mut doc = doc_with(vec![multirun_para(1, &["가나"])]);
-        assert!(apply(&mut doc, &Op::SetRunCharPr { para: NodeId(1), start: 2, end: 1, shape: bold() }).is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::SetRunCharPr {
+                para: NodeId(1),
+                start: 2,
+                end: 1,
+                shape: bold()
+            }
+        )
+        .is_err());
 
         // end past text end → clamps to the run end (formats the tail).
         let mut doc = doc_with(vec![multirun_para(1, &["가나"])]);
-        apply(&mut doc, &Op::SetRunCharPr { para: NodeId(1), start: 0, end: 99, shape: bold() }).unwrap();
+        apply(
+            &mut doc,
+            &Op::SetRunCharPr {
+                para: NodeId(1),
+                start: 0,
+                end: 99,
+                shape: bold(),
+            },
+        )
+        .unwrap();
         assert_eq!(run_texts(para_of(&doc, 1)), vec!["가나"]);
     }
 
@@ -2001,34 +2441,77 @@ mod tests {
     fn setruncharpr_leading_empty_run_not_reformatted() {
         // ['', '가나'] format [0,1) → empty run stays default, '가' gets bold, '나' stays.
         let mut doc = doc_with(vec![multirun_para(1, &["", "가나"])]);
-        apply(&mut doc, &Op::SetRunCharPr { para: NodeId(1), start: 0, end: 1, shape: bold() }).unwrap();
+        apply(
+            &mut doc,
+            &Op::SetRunCharPr {
+                para: NodeId(1),
+                start: 0,
+                end: 1,
+                shape: bold(),
+            },
+        )
+        .unwrap();
         let bold_idx = doc.char_shapes.iter().position(|s| *s == bold()).unwrap();
         let p = para_of(&doc, 1);
         assert_eq!(run_texts(p).concat(), "가나");
         // The empty run (index 0) must NOT be reformatted.
-        assert_eq!(p.runs[0].char_shape, 0, "empty boundary run keeps its shape");
-        assert!(p.runs.iter().any(|r| r.char_shape == bold_idx), "the '가' got bold");
+        assert_eq!(
+            p.runs[0].char_shape, 0,
+            "empty boundary run keeps its shape"
+        );
+        assert!(
+            p.runs.iter().any(|r| r.char_shape == bold_idx),
+            "the '가' got bold"
+        );
     }
 
     #[test]
     fn setruncharpr_refuses_non_simple_and_missing() {
         let mut doc = doc_with(vec![structural_para(1, "가나")]);
-        assert!(apply(&mut doc, &Op::SetRunCharPr { para: NodeId(1), start: 0, end: 1, shape: bold() }).is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::SetRunCharPr {
+                para: NodeId(1),
+                start: 0,
+                end: 1,
+                shape: bold()
+            }
+        )
+        .is_err());
         let mut doc = doc_with(vec![simple_para(1, "가")]);
-        assert!(apply(&mut doc, &Op::SetRunCharPr { para: NodeId(99), start: 0, end: 1, shape: bold() }).is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::SetRunCharPr {
+                para: NodeId(99),
+                start: 0,
+                end: 1,
+                shape: bold()
+            }
+        )
+        .is_err());
     }
 
     // ---- Phase 5: InsertText / DeleteRange (Caret char-offset addressing) ----
 
     fn caret(node: u64, offset: usize) -> Caret {
-        Caret { node: NodeId(node), offset }
+        Caret {
+            node: NodeId(node),
+            offset,
+        }
     }
 
     #[test]
     fn inserttext_mid_run_inherits_formatting_and_keeps_codepoints() {
         // '가나다' insert '한글' at char offset 2 → '가나한글다' in one run.
         let mut doc = doc_with(vec![simple_para(1, "가나다")]);
-        apply(&mut doc, &Op::InsertText { at: caret(1, 2), text: "한글".into() }).unwrap();
+        apply(
+            &mut doc,
+            &Op::InsertText {
+                at: caret(1, 2),
+                text: "한글".into(),
+            },
+        )
+        .unwrap();
         assert_eq!(run_texts(para_of(&doc, 1)).concat(), "가나한글다");
         assert!(para_of(&doc, 1).dirty.is_dirty());
     }
@@ -2037,16 +2520,34 @@ mod tests {
     fn inserttext_across_run_boundary_attaches_left() {
         // ['가나','다라'] insert 'X' at offset 2 (the boundary) → attaches to the LEFT run.
         let mut doc = doc_with(vec![multirun_para(1, &["가나", "다라"])]);
-        apply(&mut doc, &Op::InsertText { at: caret(1, 2), text: "X".into() }).unwrap();
+        apply(
+            &mut doc,
+            &Op::InsertText {
+                at: caret(1, 2),
+                text: "X".into(),
+            },
+        )
+        .unwrap();
         let p = para_of(&doc, 1);
         assert_eq!(run_texts(p).concat(), "가나X다라");
-        assert_eq!(run_texts(p)[0], "가나X", "boundary insert lands in the left run");
+        assert_eq!(
+            run_texts(p)[0],
+            "가나X",
+            "boundary insert lands in the left run"
+        );
     }
 
     #[test]
     fn inserttext_strips_control_chars() {
         let mut doc = doc_with(vec![simple_para(1, "가")]);
-        apply(&mut doc, &Op::InsertText { at: caret(1, 1), text: "A\u{0}B\u{1}\tC".into() }).unwrap();
+        apply(
+            &mut doc,
+            &Op::InsertText {
+                at: caret(1, 1),
+                text: "A\u{0}B\u{1}\tC".into(),
+            },
+        )
+        .unwrap();
         // NUL and C0 (0x01) stripped; tab kept.
         assert_eq!(run_texts(para_of(&doc, 1)).concat(), "가AB\tC");
     }
@@ -2056,57 +2557,123 @@ mod tests {
         let mut doc = doc_with(vec![Paragraph {
             id: Some(NodeId(1)),
             runs: vec![],
-            source: Some(ParaSource { span: (0, 0), simple: true, ..Default::default() }),
+            source: Some(ParaSource {
+                span: (0, 0),
+                simple: true,
+                ..Default::default()
+            }),
             ..Default::default()
         }]);
-        apply(&mut doc, &Op::InsertText { at: caret(1, 0), text: "시작".into() }).unwrap();
+        apply(
+            &mut doc,
+            &Op::InsertText {
+                at: caret(1, 0),
+                text: "시작".into(),
+            },
+        )
+        .unwrap();
         assert_eq!(run_texts(para_of(&doc, 1)).concat(), "시작");
 
         // out-of-range offset errors (never clamps into another paragraph)
         let mut doc = doc_with(vec![simple_para(1, "가나")]);
-        assert!(apply(&mut doc, &Op::InsertText { at: caret(1, 5), text: "X".into() }).is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::InsertText {
+                at: caret(1, 5),
+                text: "X".into()
+            }
+        )
+        .is_err());
     }
 
     #[test]
     fn deleterange_within_and_across_runs() {
         // single run: '가나다라' delete [1,3) → '가라'
         let mut doc = doc_with(vec![simple_para(1, "가나다라")]);
-        apply(&mut doc, &Op::DeleteRange { start: caret(1, 1), end: caret(1, 3) }).unwrap();
+        apply(
+            &mut doc,
+            &Op::DeleteRange {
+                start: caret(1, 1),
+                end: caret(1, 3),
+            },
+        )
+        .unwrap();
         assert_eq!(run_texts(para_of(&doc, 1)).concat(), "가라");
 
         // across runs: ['가나','다라','마바'] delete [1,5) → '가' + '' + '바' = '가바'
         let mut doc = doc_with(vec![multirun_para(1, &["가나", "다라", "마바"])]);
-        apply(&mut doc, &Op::DeleteRange { start: caret(1, 1), end: caret(1, 5) }).unwrap();
+        apply(
+            &mut doc,
+            &Op::DeleteRange {
+                start: caret(1, 1),
+                end: caret(1, 5),
+            },
+        )
+        .unwrap();
         assert_eq!(run_texts(para_of(&doc, 1)).concat(), "가바");
     }
 
     #[test]
     fn deleterange_full_paragraph_leaves_empty_run() {
         let mut doc = doc_with(vec![simple_para(1, "가나다")]);
-        apply(&mut doc, &Op::DeleteRange { start: caret(1, 0), end: caret(1, 3) }).unwrap();
+        apply(
+            &mut doc,
+            &Op::DeleteRange {
+                start: caret(1, 0),
+                end: caret(1, 3),
+            },
+        )
+        .unwrap();
         let p = para_of(&doc, 1);
         assert_eq!(run_texts(p).concat(), "");
-        assert!(!p.runs.is_empty(), "a run remains (re-emittable empty paragraph)");
+        assert!(
+            !p.runs.is_empty(),
+            "a run remains (re-emittable empty paragraph)"
+        );
     }
 
     #[test]
     fn deleterange_invalid_inputs() {
         // start > end
         let mut doc = doc_with(vec![simple_para(1, "가나다")]);
-        assert!(apply(&mut doc, &Op::DeleteRange { start: caret(1, 2), end: caret(1, 1) }).is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::DeleteRange {
+                start: caret(1, 2),
+                end: caret(1, 1)
+            }
+        )
+        .is_err());
         // empty range = no-op (not dirty)
         let mut doc = doc_with(vec![simple_para(1, "가나다")]);
-        apply(&mut doc, &Op::DeleteRange { start: caret(1, 1), end: caret(1, 1) }).unwrap();
+        apply(
+            &mut doc,
+            &Op::DeleteRange {
+                start: caret(1, 1),
+                end: caret(1, 1),
+            },
+        )
+        .unwrap();
         assert!(!para_of(&doc, 1).dirty.is_dirty());
         // cross-paragraph delete refused
         let mut doc = doc_with(vec![simple_para(1, "가"), simple_para(2, "나")]);
-        assert!(apply(&mut doc, &Op::DeleteRange { start: caret(1, 0), end: caret(2, 1) }).is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::DeleteRange {
+                start: caret(1, 0),
+                end: caret(2, 1)
+            }
+        )
+        .is_err());
     }
 
     // ---- vibe-docs: anchored, positional edits ----
 
     fn run_spec(text: &str) -> RunSpec {
-        RunSpec { text: text.into(), ..Default::default() }
+        RunSpec {
+            text: text.into(),
+            ..Default::default()
+        }
     }
 
     /// Text of the i-th top-level paragraph block of section 0 (panics if it isn't a paragraph).
@@ -2121,36 +2688,67 @@ mod tests {
     fn insert_paragraph_at_shifts_later_blocks_and_appends_at_len() {
         let mut doc = doc_with(vec![simple_para(1, "첫"), simple_para(2, "끝")]);
         // insert "목차" between them (index 1)
-        apply(&mut doc, &Op::InsertParagraphAt {
-            section: 0, index: 1, runs: vec![run_spec("목차")], para: ParaSpec::default(),
-        }).unwrap();
+        apply(
+            &mut doc,
+            &Op::InsertParagraphAt {
+                section: 0,
+                index: 1,
+                runs: vec![run_spec("목차")],
+                para: ParaSpec::default(),
+            },
+        )
+        .unwrap();
         assert_eq!(block_para_text(&doc, 0), "첫");
         assert_eq!(block_para_text(&doc, 1), "목차");
         assert_eq!(block_para_text(&doc, 2), "끝");
         // index == len appends
         let n = doc.sections[0].blocks.len();
-        apply(&mut doc, &Op::InsertParagraphAt {
-            section: 0, index: n, runs: vec![run_spec("맨끝")], para: ParaSpec::default(),
-        }).unwrap();
+        apply(
+            &mut doc,
+            &Op::InsertParagraphAt {
+                section: 0,
+                index: n,
+                runs: vec![run_spec("맨끝")],
+                para: ParaSpec::default(),
+            },
+        )
+        .unwrap();
         assert_eq!(block_para_text(&doc, n), "맨끝");
         // past the end errors
-        assert!(apply(&mut doc, &Op::InsertParagraphAt {
-            section: 0, index: 999, runs: vec![run_spec("x")], para: ParaSpec::default(),
-        }).is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::InsertParagraphAt {
+                section: 0,
+                index: 999,
+                runs: vec![run_spec("x")],
+                para: ParaSpec::default(),
+            }
+        )
+        .is_err());
     }
 
     #[test]
     fn insert_table_at_anchor_after_table_of_contents() {
         // "목차 아래에 표 만들어줘": find the 목차 block, insert a table right after it.
         let mut doc = doc_with(vec![simple_para(1, "목차"), simple_para(2, "본문")]);
-        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
-        apply(&mut doc, &Op::InsertTableAt {
-            section: 0, index: 1,
-            rows: vec![vec![cell("항목"), cell("내용")], vec![cell("A"), cell("B")]],
-        }).unwrap();
+        let cell = |t: &str| CellSpec {
+            text: t.into(),
+            ..Default::default()
+        };
+        apply(
+            &mut doc,
+            &Op::InsertTableAt {
+                section: 0,
+                index: 1,
+                rows: vec![vec![cell("항목"), cell("내용")], vec![cell("A"), cell("B")]],
+            },
+        )
+        .unwrap();
         assert_eq!(block_para_text(&doc, 0), "목차");
         match &doc.sections[0].blocks[1] {
-            Block::Table(t) => { assert_eq!((t.rows, t.cols), (2, 2)); }
+            Block::Table(t) => {
+                assert_eq!((t.rows, t.cols), (2, 2));
+            }
             _ => panic!("expected a table after 목차"),
         }
         assert_eq!(block_para_text(&doc, 2), "본문");
@@ -2162,17 +2760,35 @@ mod tests {
         // different grid than the doc's parsed tables) and a small outer margin (so it doesn't abut
         // the neighbouring block). Regression for the "3 tables stuck together with weird borders".
         let mut doc = doc_with(vec![simple_para(1, "팀 구성")]);
-        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
-        apply(&mut doc, &Op::InsertTableAt {
-            section: 0, index: 1,
-            rows: vec![vec![cell("번호"), cell("이름"), cell("역할"), cell("비고")]],
-        }).unwrap();
+        let cell = |t: &str| CellSpec {
+            text: t.into(),
+            ..Default::default()
+        };
+        apply(
+            &mut doc,
+            &Op::InsertTableAt {
+                section: 0,
+                index: 1,
+                rows: vec![vec![cell("번호"), cell("이름"), cell("역할"), cell("비고")]],
+            },
+        )
+        .unwrap();
         match &doc.sections[0].blocks[1] {
             Block::Table(t) => {
                 assert_eq!(t.cols, 4);
-                assert_eq!(t.col_widths.len(), t.cols, "col_widths has one entry per column");
-                assert!(t.col_widths.iter().all(|&w| w > 0), "all column widths positive (no auto-layout fallback)");
-                assert!(t.outer_margin_top > 0 && t.outer_margin_bottom > 0, "outer gap so it doesn't abut");
+                assert_eq!(
+                    t.col_widths.len(),
+                    t.cols,
+                    "col_widths has one entry per column"
+                );
+                assert!(
+                    t.col_widths.iter().all(|&w| w > 0),
+                    "all column widths positive (no auto-layout fallback)"
+                );
+                assert!(
+                    t.outer_margin_top > 0 && t.outer_margin_bottom > 0,
+                    "outer gap so it doesn't abut"
+                );
             }
             _ => panic!("expected a table"),
         }
@@ -2182,9 +2798,18 @@ mod tests {
     fn insert_image_at_embeds_bindata_and_references_it() {
         let mut doc = doc_with(vec![simple_para(1, "여기")]);
         let png = vec![0x89, b'P', b'N', b'G', 1, 2, 3];
-        apply(&mut doc, &Op::InsertImageAt {
-            section: 0, index: 1, bytes: png.clone(), kind: "png".into(), width: 1000, height: 800,
-        }).unwrap();
+        apply(
+            &mut doc,
+            &Op::InsertImageAt {
+                section: 0,
+                index: 1,
+                bytes: png.clone(),
+                kind: "png".into(),
+                width: 1000,
+                height: 800,
+            },
+        )
+        .unwrap();
         assert_eq!(doc.bin_data.len(), 1);
         assert_eq!(doc.bin_data[0].bytes, png);
         let bin_ref = doc.bin_data[0].bin_ref.clone();
@@ -2199,59 +2824,150 @@ mod tests {
             _ => panic!("expected an image paragraph"),
         }
         // empty bytes refused
-        assert!(apply(&mut doc, &Op::InsertImageAt {
-            section: 0, index: 1, bytes: vec![], kind: "png".into(), width: 1, height: 1,
-        }).is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::InsertImageAt {
+                section: 0,
+                index: 1,
+                bytes: vec![],
+                kind: "png".into(),
+                width: 1,
+                height: 1,
+            }
+        )
+        .is_err());
     }
 
     #[test]
     fn delete_block_removes_and_bounds_check() {
-        let mut doc = doc_with(vec![simple_para(1, "가"), simple_para(2, "나"), simple_para(3, "다")]);
-        apply(&mut doc, &Op::DeleteBlock { section: 0, index: 1 }).unwrap();
+        let mut doc = doc_with(vec![
+            simple_para(1, "가"),
+            simple_para(2, "나"),
+            simple_para(3, "다"),
+        ]);
+        apply(
+            &mut doc,
+            &Op::DeleteBlock {
+                section: 0,
+                index: 1,
+            },
+        )
+        .unwrap();
         assert_eq!(doc.sections[0].blocks.len(), 2);
         assert_eq!(block_para_text(&doc, 0), "가");
         assert_eq!(block_para_text(&doc, 1), "다");
-        assert!(apply(&mut doc, &Op::DeleteBlock { section: 0, index: 9 }).is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::DeleteBlock {
+                section: 0,
+                index: 9
+            }
+        )
+        .is_err());
     }
 
     #[test]
     fn move_block_reorders_forward_and_backward() {
         // [가,나,다,라] move block 0 → slot 2 (over the ORIGINAL list, i.e. before original idx 2 "다").
         // Remove 가 → [나,다,라]; the target rebases past the removed slot → 가 lands before 다 → [나,가,다,라].
-        let mut doc = doc_with(vec![simple_para(1, "가"), simple_para(2, "나"), simple_para(3, "다"), simple_para(4, "라")]);
-        apply(&mut doc, &Op::MoveBlock { section: 0, from: 0, to: 2 }).unwrap();
+        let mut doc = doc_with(vec![
+            simple_para(1, "가"),
+            simple_para(2, "나"),
+            simple_para(3, "다"),
+            simple_para(4, "라"),
+        ]);
+        apply(
+            &mut doc,
+            &Op::MoveBlock {
+                section: 0,
+                from: 0,
+                to: 2,
+            },
+        )
+        .unwrap();
         assert_eq!(
             (0..4).map(|i| block_para_text(&doc, i)).collect::<Vec<_>>(),
             vec!["나", "가", "다", "라"],
         );
         // now [나,가,다,라]: move block 3 → slot 0 (backward) → 라 to the front → [라,나,가,다].
-        apply(&mut doc, &Op::MoveBlock { section: 0, from: 3, to: 0 }).unwrap();
+        apply(
+            &mut doc,
+            &Op::MoveBlock {
+                section: 0,
+                from: 3,
+                to: 0,
+            },
+        )
+        .unwrap();
         assert_eq!(
             (0..4).map(|i| block_para_text(&doc, i)).collect::<Vec<_>>(),
             vec!["라", "나", "가", "다"],
         );
         // to == len appends to the end: move block 0 (라) to slot 4 → [나,가,다,라].
-        apply(&mut doc, &Op::MoveBlock { section: 0, from: 0, to: 4 }).unwrap();
+        apply(
+            &mut doc,
+            &Op::MoveBlock {
+                section: 0,
+                from: 0,
+                to: 4,
+            },
+        )
+        .unwrap();
         assert_eq!(block_para_text(&doc, 3), "라");
         // bounds + no-op
-        assert!(apply(&mut doc, &Op::MoveBlock { section: 0, from: 9, to: 0 }).is_err());
-        assert!(apply(&mut doc, &Op::MoveBlock { section: 0, from: 0, to: 9 }).is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::MoveBlock {
+                section: 0,
+                from: 9,
+                to: 0
+            }
+        )
+        .is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::MoveBlock {
+                section: 0,
+                from: 0,
+                to: 9
+            }
+        )
+        .is_err());
     }
 
     #[test]
     fn move_block_is_one_undo_unit_and_restores_order() {
         // A table drag-to-move emits one MoveBlock; a single undo restores the original block order.
-        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
+        let cell = |t: &str| CellSpec {
+            text: t.into(),
+            ..Default::default()
+        };
         let mut s = EditSession::new(doc_with(vec![simple_para(1, "앞"), simple_para(2, "뒤")]));
         // Seed a table at the end (index 2), as its own undo step.
-        s.do_op(&Op::InsertTableAt { section: 0, index: 2, rows: vec![vec![cell("표")]] }).unwrap();
+        s.do_op(&Op::InsertTableAt {
+            section: 0,
+            index: 2,
+            rows: vec![vec![cell("표")]],
+        })
+        .unwrap();
         // Drag it to the front: MoveBlock 2 → 0 (one undo unit).
-        s.do_op(&Op::MoveBlock { section: 0, from: 2, to: 0 }).unwrap();
-        assert!(matches!(s.doc().sections[0].blocks[0], Block::Table(_)), "table moved to the front");
+        s.do_op(&Op::MoveBlock {
+            section: 0,
+            from: 2,
+            to: 0,
+        })
+        .unwrap();
+        assert!(
+            matches!(s.doc().sections[0].blocks[0], Block::Table(_)),
+            "table moved to the front"
+        );
         assert_eq!(block_para_text(s.doc(), 1), "앞");
         // One undo puts the table back at the end.
         assert!(s.undo());
-        assert!(matches!(s.doc().sections[0].blocks[2], Block::Table(_)), "undo restores the table at the end");
+        assert!(
+            matches!(s.doc().sections[0].blocks[2], Block::Table(_)),
+            "undo restores the table at the end"
+        );
         assert_eq!(block_para_text(s.doc(), 0), "앞");
     }
 
@@ -2260,10 +2976,28 @@ mod tests {
         // Insert an image, then resize it — the overlay's pointerup commit.
         let mut doc = doc_with(vec![simple_para(1, "여기")]);
         let png = vec![0x89, b'P', b'N', b'G', 1, 2, 3];
-        apply(&mut doc, &Op::InsertImageAt {
-            section: 0, index: 1, bytes: png, kind: "png".into(), width: 1000, height: 800,
-        }).unwrap();
-        apply(&mut doc, &Op::SetImageSize { section: 0, index: 1, width: 2500, height: 1600 }).unwrap();
+        apply(
+            &mut doc,
+            &Op::InsertImageAt {
+                section: 0,
+                index: 1,
+                bytes: png,
+                kind: "png".into(),
+                width: 1000,
+                height: 800,
+            },
+        )
+        .unwrap();
+        apply(
+            &mut doc,
+            &Op::SetImageSize {
+                section: 0,
+                index: 1,
+                width: 2500,
+                height: 1600,
+            },
+        )
+        .unwrap();
         match &doc.sections[0].blocks[1] {
             Block::Paragraph(p) => match &p.runs[0].content[0] {
                 Inline::Image(img) => assert_eq!((img.width, img.height), (2500, 1600)),
@@ -2272,9 +3006,36 @@ mod tests {
             _ => panic!("expected an image paragraph"),
         }
         // Non-positive dims refused; a non-image block refused; out-of-range refused.
-        assert!(apply(&mut doc, &Op::SetImageSize { section: 0, index: 1, width: 0, height: 10 }).is_err());
-        assert!(apply(&mut doc, &Op::SetImageSize { section: 0, index: 0, width: 10, height: 10 }).is_err());
-        assert!(apply(&mut doc, &Op::SetImageSize { section: 0, index: 9, width: 10, height: 10 }).is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::SetImageSize {
+                section: 0,
+                index: 1,
+                width: 0,
+                height: 10
+            }
+        )
+        .is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::SetImageSize {
+                section: 0,
+                index: 0,
+                width: 10,
+                height: 10
+            }
+        )
+        .is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::SetImageSize {
+                section: 0,
+                index: 9,
+                width: 10,
+                height: 10
+            }
+        )
+        .is_err());
     }
 
     #[test]
@@ -2284,14 +3045,29 @@ mod tests {
         let png = vec![0x89, b'P', b'N', b'G', 9];
         // Seed an image at index 1, as its own undo step.
         s.do_op(&Op::InsertImageAt {
-            section: 0, index: 1, bytes: png.clone(), kind: "png".into(), width: 900, height: 600,
+            section: 0,
+            index: 1,
+            bytes: png.clone(),
+            kind: "png".into(),
+            width: 900,
+            height: 600,
         })
         .unwrap();
         let bin_before = s.doc().bin_data.len();
         // Move it to the end: delete then re-insert under ONE batch.
         s.do_ops(&[
-            Op::DeleteBlock { section: 0, index: 1 },
-            Op::InsertImageAt { section: 0, index: 2, bytes: png, kind: "png".into(), width: 900, height: 600 },
+            Op::DeleteBlock {
+                section: 0,
+                index: 1,
+            },
+            Op::InsertImageAt {
+                section: 0,
+                index: 2,
+                bytes: png,
+                kind: "png".into(),
+                width: 900,
+                height: 600,
+            },
         ])
         .unwrap();
         // The image now sits at the new index.
@@ -2305,26 +3081,51 @@ mod tests {
             Block::Paragraph(p) => assert!(matches!(p.runs[0].content[0], Inline::Image(_))),
             _ => panic!("undo should restore the image at its original index"),
         }
-        assert!(s.doc().bin_data.len() >= bin_before, "move re-embeds bytes; undo keeps the store sane");
+        assert!(
+            s.doc().bin_data.len() >= bin_before,
+            "move re-embeds bytes; undo keeps the store sane"
+        );
     }
 
     #[test]
     fn set_table_column_shade_recolors_left_column_like_a_header() {
         // "표의 좌측열을 헤더 색상으로": shade column 0 of an existing table.
         let mut doc = doc_with(vec![simple_para(1, "앞")]);
-        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
-        apply(&mut doc, &Op::InsertTableAt {
-            section: 0, index: 1,
-            rows: vec![vec![cell("구분"), cell("값1")], vec![cell("항목"), cell("값2")]],
-        }).unwrap();
-        apply(&mut doc, &Op::SetTableCellShade {
-            section: 0, index: 1, sel: CellSel::Col(0), shade: Some("#D9E1F2".into()),
-        }).unwrap();
+        let cell = |t: &str| CellSpec {
+            text: t.into(),
+            ..Default::default()
+        };
+        apply(
+            &mut doc,
+            &Op::InsertTableAt {
+                section: 0,
+                index: 1,
+                rows: vec![
+                    vec![cell("구분"), cell("값1")],
+                    vec![cell("항목"), cell("값2")],
+                ],
+            },
+        )
+        .unwrap();
+        apply(
+            &mut doc,
+            &Op::SetTableCellShade {
+                section: 0,
+                index: 1,
+                sel: CellSel::Col(0),
+                shade: Some("#D9E1F2".into()),
+            },
+        )
+        .unwrap();
         let want = Color::from_hex("#D9E1F2");
         if let Block::Table(t) = &doc.sections[0].blocks[1] {
             for c in &t.cells {
                 if c.col == 0 {
-                    assert_eq!(c.shade_color, want, "left column cell ({},{}) shaded", c.row, c.col);
+                    assert_eq!(
+                        c.shade_color, want,
+                        "left column cell ({},{}) shaded",
+                        c.row, c.col
+                    );
                 } else {
                     assert_eq!(c.shade_color, None, "right column untouched");
                 }
@@ -2333,68 +3134,179 @@ mod tests {
             panic!("expected table");
         }
         // a selector that hits nothing errors; a non-table block errors
-        assert!(apply(&mut doc, &Op::SetTableCellShade {
-            section: 0, index: 1, sel: CellSel::Col(99), shade: None,
-        }).is_err());
-        assert!(apply(&mut doc, &Op::SetTableCellShade {
-            section: 0, index: 0, sel: CellSel::All, shade: None,
-        }).is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::SetTableCellShade {
+                section: 0,
+                index: 1,
+                sel: CellSel::Col(99),
+                shade: None,
+            }
+        )
+        .is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::SetTableCellShade {
+                section: 0,
+                index: 0,
+                sel: CellSel::All,
+                shade: None,
+            }
+        )
+        .is_err());
     }
 
     #[test]
     fn set_cell_range_fmt_restyles_only_the_selected_block() {
         // Build a 3×3 table; batch-format the TOP-LEFT 2×2 block (bold + center) and a shade Rect.
         let mut doc = doc_with(vec![simple_para(1, "앞")]);
-        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
+        let cell = |t: &str| CellSpec {
+            text: t.into(),
+            ..Default::default()
+        };
         let row = || vec![cell("a"), cell("b"), cell("c")];
-        apply(&mut doc, &Op::InsertTableAt { section: 0, index: 1, rows: vec![row(), row(), row()] }).unwrap();
+        apply(
+            &mut doc,
+            &Op::InsertTableAt {
+                section: 0,
+                index: 1,
+                rows: vec![row(), row(), row()],
+            },
+        )
+        .unwrap();
         // Helpers reading a cell's first run bold + first paragraph alignment.
         let probe = |doc: &SemanticDoc, r: usize, c: usize| -> (bool, HorizontalAlign) {
-            let Block::Table(t) = &doc.sections[0].blocks[1] else { panic!("not a table") };
-            let cell = t.cells.iter().find(|cc| cc.active && cc.row == r && cc.col == c).expect("active cell");
-            let p = cell.blocks.iter().find_map(|b| if let Block::Paragraph(p) = b { Some(p) } else { None }).expect("para");
+            let Block::Table(t) = &doc.sections[0].blocks[1] else {
+                panic!("not a table")
+            };
+            let cell = t
+                .cells
+                .iter()
+                .find(|cc| cc.active && cc.row == r && cc.col == c)
+                .expect("active cell");
+            let p = cell
+                .blocks
+                .iter()
+                .find_map(|b| {
+                    if let Block::Paragraph(p) = b {
+                        Some(p)
+                    } else {
+                        None
+                    }
+                })
+                .expect("para");
             let bold = doc.char_shapes[p.runs[0].char_shape].bold;
             let align = doc.para_shapes[p.para_shape].align;
             (bold, align)
         };
-        apply(&mut doc, &Op::SetCellRangeFmt {
-            section: 0, index: 1, r0: 0, c0: 0, r1: 1, c1: 1,
-            bold: Some(true), italic: None, size_pt: None, font: None, color: None, align: Some("center".into()),
-        }).unwrap();
+        apply(
+            &mut doc,
+            &Op::SetCellRangeFmt {
+                section: 0,
+                index: 1,
+                r0: 0,
+                c0: 0,
+                r1: 1,
+                c1: 1,
+                bold: Some(true),
+                italic: None,
+                size_pt: None,
+                font: None,
+                color: None,
+                align: Some("center".into()),
+            },
+        )
+        .unwrap();
         for r in 0..3 {
             for c in 0..3 {
                 let (bold, align) = probe(&doc, r, c);
                 let inside = r <= 1 && c <= 1;
                 assert_eq!(bold, inside, "bold @({r},{c}) inside={inside}");
-                assert_eq!(align == HorizontalAlign::Center, inside, "center @({r},{c}) inside={inside}");
+                assert_eq!(
+                    align == HorizontalAlign::Center,
+                    inside,
+                    "center @({r},{c}) inside={inside}"
+                );
             }
         }
         // A shade Rect over the same block tints exactly those 4 cells.
-        apply(&mut doc, &Op::SetTableCellShade {
-            section: 0, index: 1, sel: CellSel::Rect { r0: 0, c0: 0, r1: 1, c1: 1 }, shade: Some("#FFF9C4".into()),
-        }).unwrap();
+        apply(
+            &mut doc,
+            &Op::SetTableCellShade {
+                section: 0,
+                index: 1,
+                sel: CellSel::Rect {
+                    r0: 0,
+                    c0: 0,
+                    r1: 1,
+                    c1: 1,
+                },
+                shade: Some("#FFF9C4".into()),
+            },
+        )
+        .unwrap();
         let want = Color::from_hex("#FFF9C4");
         if let Block::Table(t) = &doc.sections[0].blocks[1] {
             for cc in &t.cells {
                 let inside = cc.row <= 1 && cc.col <= 1;
-                assert_eq!(cc.shade_color == want, inside, "shade @({},{}) inside={inside}", cc.row, cc.col);
+                assert_eq!(
+                    cc.shade_color == want,
+                    inside,
+                    "shade @({},{}) inside={inside}",
+                    cc.row,
+                    cc.col
+                );
             }
         }
         // A no-attribute call and a non-table target both error.
-        assert!(apply(&mut doc, &Op::SetCellRangeFmt {
-            section: 0, index: 1, r0: 0, c0: 0, r1: 0, c1: 0,
-            bold: None, italic: None, size_pt: None, font: None, color: None, align: None,
-        }).is_err());
-        assert!(apply(&mut doc, &Op::SetCellRangeFmt {
-            section: 0, index: 0, r0: 0, c0: 0, r1: 0, c1: 0,
-            bold: Some(true), italic: None, size_pt: None, font: None, color: None, align: None,
-        }).is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::SetCellRangeFmt {
+                section: 0,
+                index: 1,
+                r0: 0,
+                c0: 0,
+                r1: 0,
+                c1: 0,
+                bold: None,
+                italic: None,
+                size_pt: None,
+                font: None,
+                color: None,
+                align: None,
+            }
+        )
+        .is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::SetCellRangeFmt {
+                section: 0,
+                index: 0,
+                r0: 0,
+                c0: 0,
+                r1: 0,
+                c1: 0,
+                bold: Some(true),
+                italic: None,
+                size_pt: None,
+                font: None,
+                color: None,
+                align: None,
+            }
+        )
+        .is_err());
     }
 
     /// Text of the active cell anchored at (row, col) of the table at section-0 block `bi`.
     fn cell_text(doc: &SemanticDoc, bi: usize, row: usize, col: usize) -> String {
-        let Block::Table(t) = &doc.sections[0].blocks[bi] else { panic!("block {bi} is not a table") };
-        let cell = t.cells.iter().find(|c| c.active && c.row == row && c.col == col).expect("active cell");
+        let Block::Table(t) = &doc.sections[0].blocks[bi] else {
+            panic!("block {bi} is not a table")
+        };
+        let cell = t
+            .cells
+            .iter()
+            .find(|c| c.active && c.row == row && c.col == col)
+            .expect("active cell");
         cell.blocks
             .iter()
             .filter_map(|b| match b {
@@ -2408,28 +3320,68 @@ mod tests {
     fn set_table_cell_replaces_existing_cell_text() {
         // "마지막 표의 한 칸을 채워줘": fill an EXISTING cell rather than make a new table.
         let mut doc = doc_with(vec![simple_para(1, "앞")]);
-        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
-        apply(&mut doc, &Op::InsertTableAt {
-            section: 0, index: 1,
-            rows: vec![vec![cell("항목"), cell("내용")], vec![cell(""), cell("")]],
-        }).unwrap();
-        apply(&mut doc, &Op::SetTableCell {
-            section: 0, index: 1, row: 1, col: 0, runs: vec![run_spec("홍길동")],
-        }).unwrap();
-        apply(&mut doc, &Op::SetTableCell {
-            section: 0, index: 1, row: 1, col: 1, runs: vec![run_spec("대표")],
-        }).unwrap();
+        let cell = |t: &str| CellSpec {
+            text: t.into(),
+            ..Default::default()
+        };
+        apply(
+            &mut doc,
+            &Op::InsertTableAt {
+                section: 0,
+                index: 1,
+                rows: vec![vec![cell("항목"), cell("내용")], vec![cell(""), cell("")]],
+            },
+        )
+        .unwrap();
+        apply(
+            &mut doc,
+            &Op::SetTableCell {
+                section: 0,
+                index: 1,
+                row: 1,
+                col: 0,
+                runs: vec![run_spec("홍길동")],
+            },
+        )
+        .unwrap();
+        apply(
+            &mut doc,
+            &Op::SetTableCell {
+                section: 0,
+                index: 1,
+                row: 1,
+                col: 1,
+                runs: vec![run_spec("대표")],
+            },
+        )
+        .unwrap();
         assert_eq!(cell_text(&doc, 1, 1, 0), "홍길동");
         assert_eq!(cell_text(&doc, 1, 1, 1), "대표");
         // header row left untouched
         assert_eq!(cell_text(&doc, 1, 0, 0), "항목");
         // bad address / non-table errors
-        assert!(apply(&mut doc, &Op::SetTableCell {
-            section: 0, index: 1, row: 9, col: 9, runs: vec![run_spec("x")],
-        }).is_err());
-        assert!(apply(&mut doc, &Op::SetTableCell {
-            section: 0, index: 0, row: 0, col: 0, runs: vec![run_spec("x")],
-        }).is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::SetTableCell {
+                section: 0,
+                index: 1,
+                row: 9,
+                col: 9,
+                runs: vec![run_spec("x")],
+            }
+        )
+        .is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::SetTableCell {
+                section: 0,
+                index: 0,
+                row: 0,
+                col: 0,
+                runs: vec![run_spec("x")],
+            }
+        )
+        .is_err());
     }
 
     #[test]
@@ -2438,45 +3390,128 @@ mod tests {
         // one paragraph per line, preserving each ORIGINAL paragraph's para_shape (alignment/spacing) —
         // not collapse every line into one first-shaped paragraph (which silently lost 2nd+ alignment).
         let mut doc = doc_with(vec![simple_para(1, "앞")]);
-        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
-        apply(&mut doc, &Op::InsertTableAt {
-            section: 0, index: 1, rows: vec![vec![cell("a")]],
-        }).unwrap();
+        let cell = |t: &str| CellSpec {
+            text: t.into(),
+            ..Default::default()
+        };
+        apply(
+            &mut doc,
+            &Op::InsertTableAt {
+                section: 0,
+                index: 1,
+                rows: vec![vec![cell("a")]],
+            },
+        )
+        .unwrap();
         // Give the target cell two paragraphs with DISTINCT para_shapes (7 then 9).
         if let Block::Table(t) = &mut doc.sections[0].blocks[1] {
-            let c = t.cells.iter_mut().find(|c| c.active && c.row == 0 && c.col == 0).unwrap();
+            let c = t
+                .cells
+                .iter_mut()
+                .find(|c| c.active && c.row == 0 && c.col == 0)
+                .unwrap();
             c.blocks = vec![
-                Block::Paragraph(Paragraph { runs: vec![Run { content: vec![Inline::Text("첫".into())], ..Default::default() }], para_shape: 7, ..Default::default() }),
-                Block::Paragraph(Paragraph { runs: vec![Run { content: vec![Inline::Text("둘".into())], ..Default::default() }], para_shape: 9, ..Default::default() }),
+                Block::Paragraph(Paragraph {
+                    runs: vec![Run {
+                        content: vec![Inline::Text("첫".into())],
+                        ..Default::default()
+                    }],
+                    para_shape: 7,
+                    ..Default::default()
+                }),
+                Block::Paragraph(Paragraph {
+                    runs: vec![Run {
+                        content: vec![Inline::Text("둘".into())],
+                        ..Default::default()
+                    }],
+                    para_shape: 9,
+                    ..Default::default()
+                }),
             ];
-        } else { panic!("expected table"); }
+        } else {
+            panic!("expected table");
+        }
         // Re-fill via the editor's "\n"-joined form.
-        apply(&mut doc, &Op::SetTableCell {
-            section: 0, index: 1, row: 0, col: 0, runs: vec![run_spec("가나\n다라")],
-        }).unwrap();
+        apply(
+            &mut doc,
+            &Op::SetTableCell {
+                section: 0,
+                index: 1,
+                row: 0,
+                col: 0,
+                runs: vec![run_spec("가나\n다라")],
+            },
+        )
+        .unwrap();
         if let Block::Table(t) = &doc.sections[0].blocks[1] {
-            let c = t.cells.iter().find(|c| c.active && c.row == 0 && c.col == 0).unwrap();
-            let paras: Vec<(&str, usize)> = c.blocks.iter().filter_map(|b| match b {
-                Block::Paragraph(p) => Some((p.runs[0].content.iter().find_map(|i| if let Inline::Text(s) = i { Some(s.as_str()) } else { None }).unwrap_or(""), p.para_shape)),
-                _ => None,
-            }).collect();
-            assert_eq!(paras, vec![("가나", 7), ("다라", 9)], "split on \\n + preserved each para_shape");
-        } else { panic!("expected table"); }
+            let c = t
+                .cells
+                .iter()
+                .find(|c| c.active && c.row == 0 && c.col == 0)
+                .unwrap();
+            let paras: Vec<(&str, usize)> = c
+                .blocks
+                .iter()
+                .filter_map(|b| match b {
+                    Block::Paragraph(p) => Some((
+                        p.runs[0]
+                            .content
+                            .iter()
+                            .find_map(|i| {
+                                if let Inline::Text(s) = i {
+                                    Some(s.as_str())
+                                } else {
+                                    None
+                                }
+                            })
+                            .unwrap_or(""),
+                        p.para_shape,
+                    )),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                paras,
+                vec![("가나", 7), ("다라", 9)],
+                "split on \\n + preserved each para_shape"
+            );
+        } else {
+            panic!("expected table");
+        }
     }
 
     #[test]
     fn table_insert_rows_appends_three_body_rows() {
         // "마지막 표에 행 3개를 채워줘": append 3 rows to an existing 1-row table.
         let mut doc = doc_with(vec![simple_para(1, "앞")]);
-        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
-        apply(&mut doc, &Op::InsertTableAt {
-            section: 0, index: 1, rows: vec![vec![cell("번호"), cell("이름"), cell("역할")]],
-        }).unwrap();
+        let cell = |t: &str| CellSpec {
+            text: t.into(),
+            ..Default::default()
+        };
+        apply(
+            &mut doc,
+            &Op::InsertTableAt {
+                section: 0,
+                index: 1,
+                rows: vec![vec![cell("번호"), cell("이름"), cell("역할")]],
+            },
+        )
+        .unwrap();
         let team = |a: &str, b: &str, c: &str| vec![cell(a), cell(b), cell(c)];
-        apply(&mut doc, &Op::TableInsertRows {
-            section: 0, index: 1, at: 1,
-            rows: vec![team("1", "홍길동", "대표"), team("2", "김철수", "개발"), team("3", "이영희", "디자인")],
-        }).unwrap();
+        apply(
+            &mut doc,
+            &Op::TableInsertRows {
+                section: 0,
+                index: 1,
+                at: 1,
+                rows: vec![
+                    team("1", "홍길동", "대표"),
+                    team("2", "김철수", "개발"),
+                    team("3", "이영희", "디자인"),
+                ],
+            },
+        )
+        .unwrap();
         if let Block::Table(t) = &doc.sections[0].blocks[1] {
             assert_eq!(t.rows, 4, "1 header + 3 new body rows");
         } else {
@@ -2490,14 +3525,30 @@ mod tests {
     #[test]
     fn table_insert_rows_in_the_middle_shifts_later_rows_down() {
         let mut doc = doc_with(vec![simple_para(1, "앞")]);
-        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
-        apply(&mut doc, &Op::InsertTableAt {
-            section: 0, index: 1, rows: vec![vec![cell("머리")], vec![cell("끝")]],
-        }).unwrap();
+        let cell = |t: &str| CellSpec {
+            text: t.into(),
+            ..Default::default()
+        };
+        apply(
+            &mut doc,
+            &Op::InsertTableAt {
+                section: 0,
+                index: 1,
+                rows: vec![vec![cell("머리")], vec![cell("끝")]],
+            },
+        )
+        .unwrap();
         // insert one row at row 1, between header (row 0) and "끝" (was row 1 → now row 2).
-        apply(&mut doc, &Op::TableInsertRows {
-            section: 0, index: 1, at: 1, rows: vec![vec![cell("가운데")]],
-        }).unwrap();
+        apply(
+            &mut doc,
+            &Op::TableInsertRows {
+                section: 0,
+                index: 1,
+                at: 1,
+                rows: vec![vec![cell("가운데")]],
+            },
+        )
+        .unwrap();
         if let Block::Table(t) = &doc.sections[0].blocks[1] {
             assert_eq!(t.rows, 3);
         } else {
@@ -2507,15 +3558,36 @@ mod tests {
         assert_eq!(cell_text(&doc, 1, 1, 0), "가운데");
         assert_eq!(cell_text(&doc, 1, 2, 0), "끝");
         // out-of-range row / non-table / empty rows error
-        assert!(apply(&mut doc, &Op::TableInsertRows {
-            section: 0, index: 1, at: 99, rows: vec![vec![cell("x")]],
-        }).is_err());
-        assert!(apply(&mut doc, &Op::TableInsertRows {
-            section: 0, index: 0, at: 0, rows: vec![vec![cell("x")]],
-        }).is_err());
-        assert!(apply(&mut doc, &Op::TableInsertRows {
-            section: 0, index: 1, at: 0, rows: vec![],
-        }).is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::TableInsertRows {
+                section: 0,
+                index: 1,
+                at: 99,
+                rows: vec![vec![cell("x")]],
+            }
+        )
+        .is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::TableInsertRows {
+                section: 0,
+                index: 0,
+                at: 0,
+                rows: vec![vec![cell("x")]],
+            }
+        )
+        .is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::TableInsertRows {
+                section: 0,
+                index: 1,
+                at: 0,
+                rows: vec![],
+            }
+        )
+        .is_err());
     }
 
     #[test]
@@ -2523,19 +3595,49 @@ mod tests {
         // The "+행" bug: a naive cols-single-cell row breaks a merged-column table. TableAppendEmptyRow
         // must clone the LAST row's column structure (here a 2-col-span cell), not a flat grid.
         let mut doc = doc_with(vec![simple_para(1, "앞")]);
-        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
-        let wide = |t: &str| CellSpec { text: t.into(), col_span: 2, ..Default::default() };
+        let cell = |t: &str| CellSpec {
+            text: t.into(),
+            ..Default::default()
+        };
+        let wide = |t: &str| CellSpec {
+            text: t.into(),
+            col_span: 2,
+            ..Default::default()
+        };
         // Row 0: [A @col0 span1] [B @col1 span2] → 3 logical columns.
-        apply(&mut doc, &Op::InsertTableAt {
-            section: 0, index: 1, rows: vec![vec![cell("A"), wide("B")]],
-        }).unwrap();
-        apply(&mut doc, &Op::TableAppendEmptyRow { section: 0, index: 1 }).unwrap();
-        let Block::Table(t) = &doc.sections[0].blocks[1] else { panic!("expected table") };
+        apply(
+            &mut doc,
+            &Op::InsertTableAt {
+                section: 0,
+                index: 1,
+                rows: vec![vec![cell("A"), wide("B")]],
+            },
+        )
+        .unwrap();
+        apply(
+            &mut doc,
+            &Op::TableAppendEmptyRow {
+                section: 0,
+                index: 1,
+            },
+        )
+        .unwrap();
+        let Block::Table(t) = &doc.sections[0].blocks[1] else {
+            panic!("expected table")
+        };
         assert_eq!(t.rows, 2, "one appended row");
-        let new_row: Vec<(usize, usize)> = t.cells.iter().filter(|c| c.row == 1).map(|c| (c.col, c.col_span)).collect();
+        let new_row: Vec<(usize, usize)> = t
+            .cells
+            .iter()
+            .filter(|c| c.row == 1)
+            .map(|c| (c.col, c.col_span))
+            .collect();
         // The new row mirrors the template: a single cell at col0 and a 2-span cell at col1 — NOT three
         // single cells (which is what broke the rendered grid).
-        assert!(new_row.contains(&(0, 1)) && new_row.contains(&(1, 2)), "new row replicates merged layout, got {new_row:?}");
+        assert!(
+            new_row.contains(&(0, 1)) && new_row.contains(&(1, 2)),
+            "new row replicates merged layout, got {new_row:?}"
+        );
         assert_eq!(new_row.len(), 2, "two cells, not a flat 3-cell grid");
         assert_eq!(cell_text(&doc, 1, 1, 0), "", "appended cells are empty");
     }
@@ -2545,82 +3647,236 @@ mod tests {
         // A vertical merge from an earlier row crossing the LAST row leaves that column with no origin
         // cell at `last` — the appended row must still cover ALL columns (no hole).
         let mut doc = doc_with(vec![simple_para(1, "앞")]);
-        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
-        let tall = |t: &str| CellSpec { text: t.into(), row_span: 2, ..Default::default() };
+        let cell = |t: &str| CellSpec {
+            text: t.into(),
+            ..Default::default()
+        };
+        let tall = |t: &str| CellSpec {
+            text: t.into(),
+            row_span: 2,
+            ..Default::default()
+        };
         // Row 0: [L spans rows 0-1 @col0] [R0 @col1]; Row 1: [R1 @col1] (col0 covered by L's row_span).
-        apply(&mut doc, &Op::InsertTableAt {
-            section: 0, index: 1, rows: vec![vec![tall("L"), cell("R0")], vec![cell("R1")]],
-        }).unwrap();
-        apply(&mut doc, &Op::TableAppendEmptyRow { section: 0, index: 1 }).unwrap();
-        let Block::Table(t) = &doc.sections[0].blocks[1] else { panic!("expected table") };
+        apply(
+            &mut doc,
+            &Op::InsertTableAt {
+                section: 0,
+                index: 1,
+                rows: vec![vec![tall("L"), cell("R0")], vec![cell("R1")]],
+            },
+        )
+        .unwrap();
+        apply(
+            &mut doc,
+            &Op::TableAppendEmptyRow {
+                section: 0,
+                index: 1,
+            },
+        )
+        .unwrap();
+        let Block::Table(t) = &doc.sections[0].blocks[1] else {
+            panic!("expected table")
+        };
         assert_eq!(t.rows, 3);
-        let new_cols: std::collections::BTreeSet<usize> = t.cells.iter().filter(|c| c.active && c.row == 2).map(|c| c.col).collect();
-        assert!(new_cols.contains(&0) && new_cols.contains(&1), "appended row covers BOTH columns (no hole), got {new_cols:?}");
+        let new_cols: std::collections::BTreeSet<usize> = t
+            .cells
+            .iter()
+            .filter(|c| c.active && c.row == 2)
+            .map(|c| c.col)
+            .collect();
+        assert!(
+            new_cols.contains(&0) && new_cols.contains(&1),
+            "appended row covers BOTH columns (no hole), got {new_cols:?}"
+        );
     }
 
     #[test]
     fn set_table_col_widths_sets_widths_and_validates_length() {
         let mut doc = doc_with(vec![simple_para(1, "앞")]);
-        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
-        apply(&mut doc, &Op::InsertTableAt {
-            section: 0, index: 1, rows: vec![vec![cell("a"), cell("b"), cell("c")]],
-        }).unwrap();
+        let cell = |t: &str| CellSpec {
+            text: t.into(),
+            ..Default::default()
+        };
+        apply(
+            &mut doc,
+            &Op::InsertTableAt {
+                section: 0,
+                index: 1,
+                rows: vec![vec![cell("a"), cell("b"), cell("c")]],
+            },
+        )
+        .unwrap();
         // Correct length sets the proportions.
-        apply(&mut doc, &Op::SetTableColWidths { section: 0, index: 1, widths: vec![3, 1, 1] }).unwrap();
-        let Block::Table(t) = &doc.sections[0].blocks[1] else { panic!("table") };
+        apply(
+            &mut doc,
+            &Op::SetTableColWidths {
+                section: 0,
+                index: 1,
+                widths: vec![3, 1, 1],
+            },
+        )
+        .unwrap();
+        let Block::Table(t) = &doc.sections[0].blocks[1] else {
+            panic!("table")
+        };
         assert_eq!(t.col_widths, vec![3, 1, 1]);
         // Wrong length / non-positive is rejected (no partial mutation).
-        assert!(apply(&mut doc, &Op::SetTableColWidths { section: 0, index: 1, widths: vec![1, 1] }).is_err());
-        assert!(apply(&mut doc, &Op::SetTableColWidths { section: 0, index: 1, widths: vec![1, 0, 1] }).is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::SetTableColWidths {
+                section: 0,
+                index: 1,
+                widths: vec![1, 1]
+            }
+        )
+        .is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::SetTableColWidths {
+                section: 0,
+                index: 1,
+                widths: vec![1, 0, 1]
+            }
+        )
+        .is_err());
     }
 
     #[test]
     fn set_table_row_heights_sets_override_and_validates_length() {
         let mut doc = doc_with(vec![simple_para(1, "앞")]);
-        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
+        let cell = |t: &str| CellSpec {
+            text: t.into(),
+            ..Default::default()
+        };
         // A 2-row, 1-col table.
-        apply(&mut doc, &Op::InsertTableAt {
-            section: 0, index: 1, rows: vec![vec![cell("a")], vec![cell("b")]],
-        }).unwrap();
+        apply(
+            &mut doc,
+            &Op::InsertTableAt {
+                section: 0,
+                index: 1,
+                rows: vec![vec![cell("a")], vec![cell("b")]],
+            },
+        )
+        .unwrap();
         // Default: no override stored (every row content-sized) — the oracle-safe default.
-        let Block::Table(t0) = &doc.sections[0].blocks[1] else { panic!("table") };
-        assert!(t0.row_heights.is_empty(), "parser/insert never fills row_heights");
+        let Block::Table(t0) = &doc.sections[0].blocks[1] else {
+            panic!("table")
+        };
+        assert!(
+            t0.row_heights.is_empty(),
+            "parser/insert never fills row_heights"
+        );
         // Correct length sets the per-row floor; 0 = keep that row content-sized.
-        apply(&mut doc, &Op::SetTableRowHeights { section: 0, index: 1, heights: vec![4000, 0] }).unwrap();
-        let Block::Table(t) = &doc.sections[0].blocks[1] else { panic!("table") };
+        apply(
+            &mut doc,
+            &Op::SetTableRowHeights {
+                section: 0,
+                index: 1,
+                heights: vec![4000, 0],
+            },
+        )
+        .unwrap();
+        let Block::Table(t) = &doc.sections[0].blocks[1] else {
+            panic!("table")
+        };
         assert_eq!(t.row_heights, vec![4000, 0]);
         // Wrong length / negative is rejected (no partial mutation).
-        assert!(apply(&mut doc, &Op::SetTableRowHeights { section: 0, index: 1, heights: vec![1000] }).is_err());
-        assert!(apply(&mut doc, &Op::SetTableRowHeights { section: 0, index: 1, heights: vec![1000, -1] }).is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::SetTableRowHeights {
+                section: 0,
+                index: 1,
+                heights: vec![1000]
+            }
+        )
+        .is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::SetTableRowHeights {
+                section: 0,
+                index: 1,
+                heights: vec![1000, -1]
+            }
+        )
+        .is_err());
     }
 
     #[test]
     fn set_char_fmt_patches_targeted_attrs_preserving_the_rest() {
         // A paragraph whose run carries underline+italic — patching bold/size/font must PRESERVE those.
         let mut doc = doc_with(vec![simple_para(1, "제목")]);
-        let styled = intern_char_shape(&mut doc, CharShape { underline: true, italic: true, ..Default::default() });
-        if let Block::Paragraph(p) = &mut doc.sections[0].blocks[0] { p.runs[0].char_shape = styled; }
-        apply(&mut doc, &Op::SetCharFmt {
-            section: 0, block: 0, cell: None,
-            bold: Some(true), italic: None, size_pt: Some(14.0), font: Some("맑은 고딕".into()),
-        }).unwrap();
-        let Block::Paragraph(p) = &doc.sections[0].blocks[0] else { panic!("paragraph") };
+        let styled = intern_char_shape(
+            &mut doc,
+            CharShape {
+                underline: true,
+                italic: true,
+                ..Default::default()
+            },
+        );
+        if let Block::Paragraph(p) = &mut doc.sections[0].blocks[0] {
+            p.runs[0].char_shape = styled;
+        }
+        apply(
+            &mut doc,
+            &Op::SetCharFmt {
+                section: 0,
+                block: 0,
+                cell: None,
+                bold: Some(true),
+                italic: None,
+                size_pt: Some(14.0),
+                font: Some("맑은 고딕".into()),
+            },
+        )
+        .unwrap();
+        let Block::Paragraph(p) = &doc.sections[0].blocks[0] else {
+            panic!("paragraph")
+        };
         let sh = &doc.char_shapes[p.runs[0].char_shape];
         assert!(sh.bold, "bold applied");
         assert_eq!(sh.height, 1400, "14pt → height 1400");
-        assert_eq!(sh.font_family.as_deref(), Some("맑은 고딕"), "font_family set");
+        assert_eq!(
+            sh.font_family.as_deref(),
+            Some("맑은 고딕"),
+            "font_family set"
+        );
         assert!(sh.underline, "underline PRESERVED (not in the patch)");
         assert!(sh.italic, "italic PRESERVED (not in the patch)");
         // No attribute specified → rejected (no silent no-op edit).
-        assert!(apply(&mut doc, &Op::SetCharFmt {
-            section: 0, block: 0, cell: None, bold: None, italic: None, size_pt: None, font: None,
-        }).is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::SetCharFmt {
+                section: 0,
+                block: 0,
+                cell: None,
+                bold: None,
+                italic: None,
+                size_pt: None,
+                font: None,
+            }
+        )
+        .is_err());
         // Empty font string clears font_family.
-        apply(&mut doc, &Op::SetCharFmt {
-            section: 0, block: 0, cell: None, bold: None, italic: None, size_pt: None, font: Some(String::new()),
-        }).unwrap();
-        let Block::Paragraph(p) = &doc.sections[0].blocks[0] else { panic!() };
-        assert_eq!(doc.char_shapes[p.runs[0].char_shape].font_family, None, "empty font clears font_family");
+        apply(
+            &mut doc,
+            &Op::SetCharFmt {
+                section: 0,
+                block: 0,
+                cell: None,
+                bold: None,
+                italic: None,
+                size_pt: None,
+                font: Some(String::new()),
+            },
+        )
+        .unwrap();
+        let Block::Paragraph(p) = &doc.sections[0].blocks[0] else {
+            panic!()
+        };
+        assert_eq!(
+            doc.char_shapes[p.runs[0].char_shape].font_family, None,
+            "empty font clears font_family"
+        );
     }
 
     #[test]
@@ -2629,30 +3885,91 @@ mod tests {
         // middle run is bold and the surrounding runs keep their (non-bold) shape. Critically this targets
         // a CELL paragraph (cell=Some), which Op::SetRunCharPr can't reach (no NodeId on cell paragraphs).
         let mut doc = doc_with(vec![simple_para(1, "앞")]);
-        let cell = |t: &str| CellSpec { text: t.into(), ..Default::default() };
-        apply(&mut doc, &Op::InsertTableAt { section: 0, index: 1, rows: vec![vec![cell("ABCDEF")]] }).unwrap();
-        apply(&mut doc, &Op::SetRunCharFmt {
-            section: 0, block: 1, cell: Some((0, 0)), start: 2, end: 4, bold: Some(true), italic: None,
-        }).unwrap();
-        let Block::Table(t) = &doc.sections[0].blocks[1] else { panic!("table") };
-        let cell0 = t.cells.iter().find(|c| c.active && c.row == 0 && c.col == 0).unwrap();
-        let Block::Paragraph(p) = &cell0.blocks[0] else { panic!("cell paragraph") };
+        let cell = |t: &str| CellSpec {
+            text: t.into(),
+            ..Default::default()
+        };
+        apply(
+            &mut doc,
+            &Op::InsertTableAt {
+                section: 0,
+                index: 1,
+                rows: vec![vec![cell("ABCDEF")]],
+            },
+        )
+        .unwrap();
+        apply(
+            &mut doc,
+            &Op::SetRunCharFmt {
+                section: 0,
+                block: 1,
+                cell: Some((0, 0)),
+                start: 2,
+                end: 4,
+                bold: Some(true),
+                italic: None,
+            },
+        )
+        .unwrap();
+        let Block::Table(t) = &doc.sections[0].blocks[1] else {
+            panic!("table")
+        };
+        let cell0 = t
+            .cells
+            .iter()
+            .find(|c| c.active && c.row == 0 && c.col == 0)
+            .unwrap();
+        let Block::Paragraph(p) = &cell0.blocks[0] else {
+            panic!("cell paragraph")
+        };
         // Reconstruct text + bold per char to assert ONLY [2,4) is bold.
         let mut bolded = String::new();
         let mut plain = String::new();
         for r in &p.runs {
-            let b = doc.char_shapes.get(r.char_shape).map(|s| s.bold).unwrap_or(false);
+            let b = doc
+                .char_shapes
+                .get(r.char_shape)
+                .map(|s| s.bold)
+                .unwrap_or(false);
             for inl in &r.content {
                 if let Inline::Text(s) = inl {
-                    if b { bolded.push_str(s); } else { plain.push_str(s); }
+                    if b {
+                        bolded.push_str(s);
+                    } else {
+                        plain.push_str(s);
+                    }
                 }
             }
         }
         assert_eq!(bolded, "CD", "only chars [2,4) are bold");
         assert_eq!(plain, "ABEF", "the rest stays non-bold");
         // start==end no-op; start>end errors.
-        assert!(apply(&mut doc, &Op::SetRunCharFmt { section: 0, block: 1, cell: Some((0,0)), start: 1, end: 1, bold: Some(true), italic: None }).is_ok());
-        assert!(apply(&mut doc, &Op::SetRunCharFmt { section: 0, block: 1, cell: Some((0,0)), start: 3, end: 1, bold: Some(true), italic: None }).is_err());
+        assert!(apply(
+            &mut doc,
+            &Op::SetRunCharFmt {
+                section: 0,
+                block: 1,
+                cell: Some((0, 0)),
+                start: 1,
+                end: 1,
+                bold: Some(true),
+                italic: None
+            }
+        )
+        .is_ok());
+        assert!(apply(
+            &mut doc,
+            &Op::SetRunCharFmt {
+                section: 0,
+                block: 1,
+                cell: Some((0, 0)),
+                start: 3,
+                end: 1,
+                bold: Some(true),
+                italic: None
+            }
+        )
+        .is_err());
     }
 
     #[test]
@@ -2660,20 +3977,57 @@ mod tests {
         // The WYSIWYG commit: a paragraph → two runs, "보통"(plain) + "굵게"(bold). Both runs survive
         // with their own shape (no collapse), and the paragraph stays simple/re-emittable.
         let mut doc = doc_with(vec![simple_para(1, "원본")]);
-        let r = |t: &str, bold: bool| RunSpec { text: t.into(), bold, ..Default::default() };
-        apply(&mut doc, &Op::SetParagraphRuns {
-            section: 0, block: 0, runs: vec![r("보통", false), r("굵게", true)],
-        }).unwrap();
-        let Block::Paragraph(p) = &doc.sections[0].blocks[0] else { panic!("paragraph") };
+        let r = |t: &str, bold: bool| RunSpec {
+            text: t.into(),
+            bold,
+            ..Default::default()
+        };
+        apply(
+            &mut doc,
+            &Op::SetParagraphRuns {
+                section: 0,
+                block: 0,
+                runs: vec![r("보통", false), r("굵게", true)],
+            },
+        )
+        .unwrap();
+        let Block::Paragraph(p) = &doc.sections[0].blocks[0] else {
+            panic!("paragraph")
+        };
         assert_eq!(p.runs.len(), 2, "two styled runs, not collapsed to one");
-        let txt = |r: &Run| -> String { r.content.iter().filter_map(|i| if let Inline::Text(s) = i { Some(s.as_str()) } else { None }).collect() };
+        let txt = |r: &Run| -> String {
+            r.content
+                .iter()
+                .filter_map(|i| {
+                    if let Inline::Text(s) = i {
+                        Some(s.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        };
         assert_eq!(txt(&p.runs[0]), "보통");
         assert_eq!(txt(&p.runs[1]), "굵게");
-        assert!(!doc.char_shapes[p.runs[0].char_shape].bold, "first run plain");
-        assert!(doc.char_shapes[p.runs[1].char_shape].bold, "second run bold");
+        assert!(
+            !doc.char_shapes[p.runs[0].char_shape].bold,
+            "first run plain"
+        );
+        assert!(
+            doc.char_shapes[p.runs[1].char_shape].bold,
+            "second run bold"
+        );
         // Structural paragraph is refused.
         let mut d2 = doc_with(vec![structural_para(1, "구조적")]);
-        assert!(apply(&mut d2, &Op::SetParagraphRuns { section: 0, block: 0, runs: vec![r("x", false)] }).is_err());
+        assert!(apply(
+            &mut d2,
+            &Op::SetParagraphRuns {
+                section: 0,
+                block: 0,
+                runs: vec![r("x", false)]
+            }
+        )
+        .is_err());
     }
 
     #[test]
@@ -2682,28 +4036,84 @@ mod tests {
         // vanish on save — refuse it (mirrors SetParagraphText), so the UI can surface + fall back to chat.
         let mut doc = doc_with(vec![structural_para(1, "구조적")]);
         assert!(
-            apply(&mut doc, &Op::SetCharFmt {
-                section: 0, block: 0, cell: None, bold: Some(true), italic: None, size_pt: None, font: None,
-            }).is_err(),
+            apply(
+                &mut doc,
+                &Op::SetCharFmt {
+                    section: 0,
+                    block: 0,
+                    cell: None,
+                    bold: Some(true),
+                    italic: None,
+                    size_pt: None,
+                    font: None,
+                }
+            )
+            .is_err(),
             "structural paragraph must be refused (no silently-dropped format on export)"
         );
     }
 
     #[test]
     fn set_paragraph_text_preserves_shape_and_refuses_structural() {
-        let mut doc = doc_with(vec![simple_para(1, "원래 내용"), structural_para(2, "구조적")]);
+        let mut doc = doc_with(vec![
+            simple_para(1, "원래 내용"),
+            structural_para(2, "구조적"),
+        ]);
         // The simple paragraph keeps its first-run char shape + para shape, only the text changes.
-        let before_shape = if let Block::Paragraph(p) = &doc.sections[0].blocks[0] { p.runs[0].char_shape } else { panic!() };
-        apply(&mut doc, &Op::SetParagraphText { section: 0, block: 0, text: "새 내용".into() }).unwrap();
+        let before_shape = if let Block::Paragraph(p) = &doc.sections[0].blocks[0] {
+            p.runs[0].char_shape
+        } else {
+            panic!()
+        };
+        apply(
+            &mut doc,
+            &Op::SetParagraphText {
+                section: 0,
+                block: 0,
+                text: "새 내용".into(),
+            },
+        )
+        .unwrap();
         if let Block::Paragraph(p) = &doc.sections[0].blocks[0] {
             assert_eq!(p.runs.len(), 1);
             assert_eq!(p.runs[0].char_shape, before_shape, "char shape preserved");
-            let txt: String = p.runs[0].content.iter().filter_map(|i| if let Inline::Text(s) = i { Some(s.as_str()) } else { None }).collect();
+            let txt: String = p.runs[0]
+                .content
+                .iter()
+                .filter_map(|i| {
+                    if let Inline::Text(s) = i {
+                        Some(s.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
             assert_eq!(txt, "새 내용");
-        } else { panic!("expected paragraph") }
+        } else {
+            panic!("expected paragraph")
+        }
         // A structural paragraph is refused (never silently flattened).
-        assert!(apply(&mut doc, &Op::SetParagraphText { section: 0, block: 1, text: "x".into() }).is_err(), "structural paragraph refused");
+        assert!(
+            apply(
+                &mut doc,
+                &Op::SetParagraphText {
+                    section: 0,
+                    block: 1,
+                    text: "x".into()
+                }
+            )
+            .is_err(),
+            "structural paragraph refused"
+        );
         // Empty text is allowed (clears the paragraph) — "무에서" 시작점.
-        assert!(apply(&mut doc, &Op::SetParagraphText { section: 0, block: 0, text: String::new() }).is_ok());
+        assert!(apply(
+            &mut doc,
+            &Op::SetParagraphText {
+                section: 0,
+                block: 0,
+                text: String::new()
+            }
+        )
+        .is_ok());
     }
 }

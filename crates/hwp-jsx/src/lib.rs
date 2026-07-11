@@ -41,8 +41,16 @@ mod base64 {
             let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
             out.push(A[(n >> 18 & 63) as usize] as char);
             out.push(A[(n >> 12 & 63) as usize] as char);
-            out.push(if chunk.len() > 1 { A[(n >> 6 & 63) as usize] as char } else { '=' });
-            out.push(if chunk.len() > 2 { A[(n & 63) as usize] as char } else { '=' });
+            out.push(if chunk.len() > 1 {
+                A[(n >> 6 & 63) as usize] as char
+            } else {
+                '='
+            });
+            out.push(if chunk.len() > 2 {
+                A[(n & 63) as usize] as char
+            } else {
+                '='
+            });
         }
         out
     }
@@ -99,11 +107,17 @@ pub fn emit(doc: &SemanticDoc) -> JsxCssProject {
     // relies on this (it gates on rule presence), but the node-class gate still does — assert it so a
     // violation is loud, not a silently class-less non-default run.
     debug_assert!(
-        doc.char_shapes.first().map(CharShape::is_default).unwrap_or(true),
+        doc.char_shapes
+            .first()
+            .map(CharShape::is_default)
+            .unwrap_or(true),
         "char pool index 0 must be the default CharShape"
     );
     debug_assert!(
-        doc.para_shapes.first().map(ParaShape::is_default).unwrap_or(true),
+        doc.para_shapes
+            .first()
+            .map(ParaShape::is_default)
+            .unwrap_or(true),
         "para pool index 0 must be the default ParaShape"
     );
     // 1. Stylesheet: pool index i → `.cN`/`.pN` (default shapes omit their class).
@@ -171,14 +185,21 @@ pub fn emit(doc: &SemanticDoc) -> JsxCssProject {
         asset_meta: doc
             .bin_data
             .iter()
-            .map(|b| AssetMeta { bin_ref: b.bin_ref.clone(), kind: b.kind.clone() })
+            .map(|b| AssetMeta {
+                bin_ref: b.bin_ref.clone(),
+                kind: b.kind.clone(),
+            })
             .collect(),
     };
 
     let assets = doc
         .bin_data
         .iter()
-        .map(|b| Asset { bin_ref: b.bin_ref.clone(), kind: b.kind.clone(), b64: b64(&b.bytes) })
+        .map(|b| Asset {
+            bin_ref: b.bin_ref.clone(),
+            kind: b.kind.clone(),
+            b64: b64(&b.bytes),
+        })
         .collect();
 
     JsxCssProject {
@@ -192,7 +213,13 @@ pub fn emit(doc: &SemanticDoc) -> JsxCssProject {
 }
 
 fn emit_rawparts(parts: &[RawPart]) -> Vec<RawPartBlob> {
-    parts.iter().map(|p| RawPartBlob { tag: p.tag.clone(), b64: b64(&p.bytes) }).collect()
+    parts
+        .iter()
+        .map(|p| RawPartBlob {
+            tag: p.tag.clone(),
+            b64: b64(&p.bytes),
+        })
+        .collect()
 }
 
 fn emit_section_meta(sec: &Section) -> SectionMeta {
@@ -220,10 +247,8 @@ fn emit_decoration(d: &PageDecoration) -> DecorationBlob {
             ApplyPage::Odd => "odd",
         }
         .into(),
-        blocks_json: serde_json::to_string(
-            &d.blocks.iter().map(emit_block).collect::<Vec<_>>(),
-        )
-        .unwrap_or_default(),
+        blocks_json: serde_json::to_string(&d.blocks.iter().map(emit_block).collect::<Vec<_>>())
+            .unwrap_or_default(),
     }
 }
 
@@ -248,7 +273,8 @@ fn emit_para(p: &Paragraph) -> JsxNode {
     if let Some(src) = &p.source {
         el.attrs.insert("data-src".into(), encode_para_source(src));
     }
-    el.attrs.insert("data-prov".into(), encode_provenance(&p.provenance));
+    el.attrs
+        .insert("data-prov".into(), encode_provenance(&p.provenance));
     if !p.passthrough.is_empty() {
         el.attrs.insert(
             "data-pass".into(),
@@ -280,7 +306,10 @@ fn emit_run(r: &Run) -> JsxNode {
 
 fn emit_inline(inl: &Inline) -> JsxNode {
     match inl {
-        Inline::Text(t) => JsxNode::Text(JsxText { node_key: None, text: t.clone() }),
+        Inline::Text(t) => JsxNode::Text(JsxText {
+            node_key: None,
+            text: t.clone(),
+        }),
         Inline::Image(img) => JsxNode::Element(
             JsxElement::new(Tag::Image)
                 .with_attr("src", format!("assets/{}", img.bin_ref))
@@ -297,15 +326,15 @@ fn emit_inline(inl: &Inline) -> JsxNode {
                 .with_attr("data-type", f.field_type.clone())
                 .with_attr("data-cmd", f.command.clone()),
         ),
-        Inline::FieldEnd(id) => JsxNode::Element(
-            JsxElement::new(Tag::Field).with_attr("data-end", id.to_string()),
-        ),
+        Inline::FieldEnd(id) => {
+            JsxNode::Element(JsxElement::new(Tag::Field).with_attr("data-end", id.to_string()))
+        }
         Inline::Bookmark(name) => {
             JsxNode::Element(JsxElement::new(Tag::Bookmark).with_attr("data-name", name.clone()))
         }
-        Inline::Note(n) => JsxNode::Element(
-            JsxElement::new(Tag::Note).with_attr("data-b64", b64(&encode_note(n))),
-        ),
+        Inline::Note(n) => {
+            JsxNode::Element(JsxElement::new(Tag::Note).with_attr("data-b64", b64(&encode_note(n))))
+        }
         Inline::Raw(rp) => JsxNode::Element(
             JsxElement::new(Tag::Raw)
                 .with_attr("data-tag", rp.tag.clone())
@@ -319,14 +348,25 @@ fn emit_table(t: &Table) -> JsxNode {
         .with_attr("data-rows", t.rows.to_string())
         .with_attr("data-cols", t.cols.to_string());
     if !t.col_widths.is_empty() {
-        let w = t.col_widths.iter().map(|w| w.to_string()).collect::<Vec<_>>().join(",");
+        let w = t
+            .col_widths
+            .iter()
+            .map(|w| w.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
         el.attrs.insert("data-colw".into(), w);
     }
     if !t.row_heights.is_empty() {
-        let h = t.row_heights.iter().map(|h| h.to_string()).collect::<Vec<_>>().join(",");
+        let h = t
+            .row_heights
+            .iter()
+            .map(|h| h.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
         el.attrs.insert("data-rowh".into(), h);
     }
-    el.attrs.insert("data-prov".into(), encode_provenance(&t.provenance));
+    el.attrs
+        .insert("data-prov".into(), encode_provenance(&t.provenance));
     if !t.passthrough.is_empty() {
         el.attrs.insert(
             "data-pass".into(),
@@ -369,7 +409,8 @@ fn emit_cell(c: &Cell) -> JsxNode {
     // Per-edge borders (lifted from the real borderFill): "L|R|T|B" where each side is
     // "style,hex,width" or "-" for an unspecified edge. data-diag = "kind,hex,width".
     if c.has_edge_borders() {
-        el.attrs.insert("data-borders".into(), encode_cell_borders(&c.borders));
+        el.attrs
+            .insert("data-borders".into(), encode_cell_borders(&c.borders));
     }
     if let Some(d) = c.diagonal {
         el.attrs.insert("data-diag".into(), encode_cell_diagonal(d));
@@ -389,7 +430,12 @@ fn encode_cell_borders(borders: &[Option<CellEdge>; 4]) -> String {
     borders
         .iter()
         .map(|e| match e {
-            Some(edge) => format!("{},{},{}", line_style_str(edge.style), edge.color.to_hex(), edge.width_px),
+            Some(edge) => format!(
+                "{},{},{}",
+                line_style_str(edge.style),
+                edge.color.to_hex(),
+                edge.width_px
+            ),
             None => "-".to_string(),
         })
         .collect::<Vec<_>>()
@@ -403,10 +449,17 @@ fn decode_cell_borders(s: &str) -> [Option<CellEdge>; 4] {
             continue;
         }
         let mut it = side.split(',');
-        let style = it.next().map(line_style_from_str).unwrap_or(LineStyle::Solid);
+        let style = it
+            .next()
+            .map(line_style_from_str)
+            .unwrap_or(LineStyle::Solid);
         let color = it.next().and_then(Color::from_hex).unwrap_or_default();
         let width_px = it.next().and_then(|w| w.parse().ok()).unwrap_or(1.0);
-        out[i] = Some(CellEdge { color, style, width_px });
+        out[i] = Some(CellEdge {
+            color,
+            style,
+            width_px,
+        });
     }
     out
 }
@@ -428,7 +481,11 @@ fn decode_cell_diagonal(s: &str) -> Option<CellDiagonal> {
     };
     let color = it.next().and_then(Color::from_hex).unwrap_or_default();
     let width_px = it.next().and_then(|w| w.parse().ok()).unwrap_or(1.0);
-    Some(CellDiagonal { kind, color, width_px })
+    Some(CellDiagonal {
+        kind,
+        color,
+        width_px,
+    })
 }
 
 fn line_style_str(s: LineStyle) -> &'static str {
@@ -484,7 +541,10 @@ fn encode_provenance(p: &Provenance) -> String {
 }
 
 fn decode_provenance(s: &str) -> Provenance {
-    let b: ProvBlob = serde_json::from_str(s).unwrap_or(ProvBlob { source: None, raw_b64: None });
+    let b: ProvBlob = serde_json::from_str(s).unwrap_or(ProvBlob {
+        source: None,
+        raw_b64: None,
+    });
     Provenance {
         source: b.source.as_deref().and_then(parse_source_format),
         raw: b.raw_b64.as_deref().and_then(|x| unb64(x).ok()),
@@ -522,7 +582,12 @@ fn decode_equation(bytes: &[u8]) -> EquationRef {
         font: b.font,
         base_unit: b.base_unit,
         baseline: b.baseline,
-        color: Color { r: b.color[0], g: b.color[1], b: b.color[2], a: b.color[3] },
+        color: Color {
+            r: b.color[0],
+            g: b.color[1],
+            b: b.color[2],
+            a: b.color[3],
+        },
         width: b.width,
         height: b.height,
         version: b.version,
@@ -550,7 +615,11 @@ fn decode_note(bytes: &[u8]) -> std::result::Result<NoteRef, String> {
         .map(|n| parse_block(n).map_err(|e| e.to_string()))
         .collect::<std::result::Result<Vec<_>, String>>()?;
     Ok(NoteRef {
-        kind: if b.kind { NoteKind::End } else { NoteKind::Foot },
+        kind: if b.kind {
+            NoteKind::End
+        } else {
+            NoteKind::Foot
+        },
         number: b.number,
         prefix_char: b.prefix_char,
         suffix_char: b.suffix_char,
@@ -587,18 +656,30 @@ pub fn parse(proj: &JsxCssProject) -> Result<SemanticDoc> {
         .collect::<Result<_>>()?;
 
     for (k, v) in &proj.manifest.header_char {
-        doc.header_pools.char.insert(*k, map::shape_from_blob_char(v)?);
+        doc.header_pools
+            .char
+            .insert(*k, map::shape_from_blob_char(v)?);
     }
     for (k, v) in &proj.manifest.header_para {
-        doc.header_pools.para.insert(*k, map::shape_from_blob_para(v)?);
+        doc.header_pools
+            .para
+            .insert(*k, map::shape_from_blob_para(v)?);
     }
 
-    doc.passthrough = Passthrough { parts: parse_rawparts(&proj.manifest.doc_passthrough)? };
+    doc.passthrough = Passthrough {
+        parts: parse_rawparts(&proj.manifest.doc_passthrough)?,
+    };
 
     doc.bin_data = proj
         .assets
         .iter()
-        .map(|a| Ok(BinData { bin_ref: a.bin_ref.clone(), bytes: unb64(&a.b64).map_err(err)?, kind: a.kind.clone() }))
+        .map(|a| {
+            Ok(BinData {
+                bin_ref: a.bin_ref.clone(),
+                bytes: unb64(&a.b64).map_err(err)?,
+                kind: a.kind.clone(),
+            })
+        })
         .collect::<Result<_>>()?;
 
     for (si, sec_node) in proj.sections.iter().enumerate() {
@@ -615,12 +696,26 @@ pub fn parse(proj: &JsxCssProject) -> Result<SemanticDoc> {
             blocks,
             page: meta.page.into(),
             page_edited: meta.page_edited,
-            decorations: meta.decorations.iter().map(parse_decoration).collect::<Result<_>>()?,
+            decorations: meta
+                .decorations
+                .iter()
+                .map(parse_decoration)
+                .collect::<Result<_>>()?,
             provenance: Provenance {
-                source: meta.provenance_source.as_deref().and_then(parse_source_format),
-                raw: meta.provenance_raw_b64.as_deref().map(unb64).transpose().map_err(err)?,
+                source: meta
+                    .provenance_source
+                    .as_deref()
+                    .and_then(parse_source_format),
+                raw: meta
+                    .provenance_raw_b64
+                    .as_deref()
+                    .map(unb64)
+                    .transpose()
+                    .map_err(err)?,
             },
-            passthrough: Passthrough { parts: parse_rawparts(&meta.passthrough)? },
+            passthrough: Passthrough {
+                parts: parse_rawparts(&meta.passthrough)?,
+            },
             dirty: Dirty(meta.dirty),
         });
     }
@@ -671,14 +766,24 @@ fn overlay(
 fn parse_rawparts(blobs: &[RawPartBlob]) -> Result<Vec<RawPart>> {
     blobs
         .iter()
-        .map(|b| Ok(RawPart { tag: b.tag.clone(), bytes: unb64(&b.b64).map_err(err)? }))
+        .map(|b| {
+            Ok(RawPart {
+                tag: b.tag.clone(),
+                bytes: unb64(&b.b64).map_err(err)?,
+            })
+        })
         .collect()
 }
 
 fn parse_decoration(d: &DecorationBlob) -> Result<PageDecoration> {
-    let nodes: Vec<JsxNode> = serde_json::from_str(&d.blocks_json).map_err(|e| err(e.to_string()))?;
+    let nodes: Vec<JsxNode> =
+        serde_json::from_str(&d.blocks_json).map_err(|e| err(e.to_string()))?;
     Ok(PageDecoration {
-        kind: if d.kind == "footer" { DecoKind::Footer } else { DecoKind::Header },
+        kind: if d.kind == "footer" {
+            DecoKind::Footer
+        } else {
+            DecoKind::Header
+        },
         apply: match d.apply.as_str() {
             "even" => ApplyPage::Even,
             "odd" => ApplyPage::Odd,
@@ -726,7 +831,11 @@ fn parse_para(el: &JsxElement) -> Result<Paragraph> {
         style_name: el.attrs.get("data-style").cloned(),
         runs,
         source: el.attrs.get("data-src").and_then(|s| decode_para_source(s)),
-        provenance: el.attrs.get("data-prov").map(|s| decode_provenance(s)).unwrap_or_default(),
+        provenance: el
+            .attrs
+            .get("data-prov")
+            .map(|s| decode_provenance(s))
+            .unwrap_or_default(),
         passthrough: parse_pass_attr(el)?,
         dirty: Dirty(el.attrs.contains_key("data-dirty")),
         // Per-paragraph hard page break + table-anchor flag aren't carried through the HTML/JSX projection
@@ -739,8 +848,11 @@ fn parse_para(el: &JsxElement) -> Result<Paragraph> {
 fn parse_pass_attr(el: &JsxElement) -> Result<Passthrough> {
     match el.attrs.get("data-pass") {
         Some(s) => {
-            let blobs: Vec<RawPartBlob> = serde_json::from_str(s).map_err(|e| err(e.to_string()))?;
-            Ok(Passthrough { parts: parse_rawparts(&blobs)? })
+            let blobs: Vec<RawPartBlob> =
+                serde_json::from_str(s).map_err(|e| err(e.to_string()))?;
+            Ok(Passthrough {
+                parts: parse_rawparts(&blobs)?,
+            })
         }
         None => Ok(Passthrough::default()),
     }
@@ -752,8 +864,16 @@ fn parse_run(el: &JsxElement) -> Result<Run> {
         .iter()
         .find_map(|c| map::char_class_index(c))
         .unwrap_or(0);
-    let content = el.children.iter().map(parse_inline).collect::<Result<_>>()?;
-    Ok(Run { char_shape, char_ref: el.attrs.get("data-cref").cloned(), content })
+    let content = el
+        .children
+        .iter()
+        .map(parse_inline)
+        .collect::<Result<_>>()?;
+    Ok(Run {
+        char_shape,
+        char_ref: el.attrs.get("data-cref").cloned(),
+        content,
+    })
 }
 
 fn parse_inline(node: &JsxNode) -> Result<Inline> {
@@ -766,34 +886,51 @@ fn parse_inline(node: &JsxNode) -> Result<Inline> {
                     .get("src")
                     .map(|s| s.strip_prefix("assets/").unwrap_or(s).to_string())
                     .unwrap_or_default(),
-                width: e.attrs.get("data-w").and_then(|v| v.parse().ok()).unwrap_or(0),
-                height: e.attrs.get("data-h").and_then(|v| v.parse().ok()).unwrap_or(0),
+                width: e
+                    .attrs
+                    .get("data-w")
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0),
+                height: e
+                    .attrs
+                    .get("data-h")
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0),
             })),
             Some(Tag::Equation) => {
-                let bytes = unb64(e.attrs.get("data-b64").map(String::as_str).unwrap_or("")).map_err(err)?;
+                let bytes = unb64(e.attrs.get("data-b64").map(String::as_str).unwrap_or(""))
+                    .map_err(err)?;
                 Ok(Inline::Equation(decode_equation(&bytes)))
             }
             Some(Tag::Field) => {
                 if let Some(end) = e.attrs.get("data-end") {
-                    Ok(Inline::FieldEnd(end.parse().map_err(|_| err("bad field end".into()))?))
+                    Ok(Inline::FieldEnd(
+                        end.parse().map_err(|_| err("bad field end".into()))?,
+                    ))
                 } else {
                     Ok(Inline::FieldBegin(FieldMarker {
-                        id: e.attrs.get("data-id").and_then(|v| v.parse().ok()).unwrap_or(0),
+                        id: e
+                            .attrs
+                            .get("data-id")
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or(0),
                         field_type: e.attrs.get("data-type").cloned().unwrap_or_default(),
                         command: e.attrs.get("data-cmd").cloned().unwrap_or_default(),
                     }))
                 }
             }
-            Some(Tag::Bookmark) => {
-                Ok(Inline::Bookmark(e.attrs.get("data-name").cloned().unwrap_or_default()))
-            }
+            Some(Tag::Bookmark) => Ok(Inline::Bookmark(
+                e.attrs.get("data-name").cloned().unwrap_or_default(),
+            )),
             Some(Tag::Note) => {
-                let bytes = unb64(e.attrs.get("data-b64").map(String::as_str).unwrap_or("")).map_err(err)?;
+                let bytes = unb64(e.attrs.get("data-b64").map(String::as_str).unwrap_or(""))
+                    .map_err(err)?;
                 Ok(Inline::Note(decode_note(&bytes).map_err(err)?))
             }
             Some(Tag::Raw) => Ok(Inline::Raw(RawPart {
                 tag: e.attrs.get("data-tag").cloned().unwrap_or_default(),
-                bytes: unb64(e.attrs.get("data-b64").map(String::as_str).unwrap_or("")).map_err(err)?,
+                bytes: unb64(e.attrs.get("data-b64").map(String::as_str).unwrap_or(""))
+                    .map_err(err)?,
             })),
             // Out-of-grammar inline (only reachable from hand-/AI-authored JSX — emit never produces
             // it): a CLEAN typed Err, never a panic. The §3.3 "<Raw> fallback" (salvage unknown nodes
@@ -823,20 +960,40 @@ fn parse_table(el: &JsxElement) -> Result<Table> {
         .map(|s| s.split(',').filter_map(|h| h.parse().ok()).collect())
         .unwrap_or_default();
     Ok(Table {
-        rows: el.attrs.get("data-rows").and_then(|v| v.parse().ok()).unwrap_or(0),
-        cols: el.attrs.get("data-cols").and_then(|v| v.parse().ok()).unwrap_or(0),
+        rows: el
+            .attrs
+            .get("data-rows")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0),
+        cols: el
+            .attrs
+            .get("data-cols")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0),
         cells,
         col_widths,
         row_heights,
-        outer_margin_top: el.attrs.get("data-omt").and_then(|v| v.parse().ok()).unwrap_or(0),
-        outer_margin_bottom: el.attrs.get("data-omb").and_then(|v| v.parse().ok()).unwrap_or(0),
+        outer_margin_top: el
+            .attrs
+            .get("data-omt")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0),
+        outer_margin_bottom: el
+            .attrs
+            .get("data-omb")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0),
         // F2 serialization-fidelity fields (054) are not projected into JSX yet (the JSX surface is
         // render/edit-oriented): a JSX round-trip keeps pre-F2 semantics for them (defaults).
         outer_margin_left: 0,
         outer_margin_right: 0,
         padding: None,
         borders: [None; 4],
-        provenance: el.attrs.get("data-prov").map(|s| decode_provenance(s)).unwrap_or_default(),
+        provenance: el
+            .attrs
+            .get("data-prov")
+            .map(|s| decode_provenance(s))
+            .unwrap_or_default(),
         passthrough: parse_pass_attr(el)?,
         // src_span is HWPX-export provenance (issue 057) — a JSX projection never carries it
         // (equality is explicitly modulo source spans).
@@ -848,17 +1005,40 @@ fn parse_table(el: &JsxElement) -> Result<Table> {
 fn parse_cell(el: &JsxElement) -> Result<Cell> {
     let blocks = el.children.iter().map(parse_block).collect::<Result<_>>()?;
     Ok(Cell {
-        row: el.attrs.get("data-row").and_then(|v| v.parse().ok()).unwrap_or(0),
-        col: el.attrs.get("data-col").and_then(|v| v.parse().ok()).unwrap_or(0),
-        col_span: el.attrs.get("colSpan").and_then(|v| v.parse().ok()).unwrap_or(1),
-        row_span: el.attrs.get("rowSpan").and_then(|v| v.parse().ok()).unwrap_or(1),
+        row: el
+            .attrs
+            .get("data-row")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0),
+        col: el
+            .attrs
+            .get("data-col")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0),
+        col_span: el
+            .attrs
+            .get("colSpan")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1),
+        row_span: el
+            .attrs
+            .get("rowSpan")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1),
         blocks,
         active: !el.attrs.contains_key("data-inactive"),
         shade_color: el.attrs.get("data-shade").and_then(|s| Color::from_hex(s)),
         // Borderless cells carry data-noborder; absence keeps the default (bordered) cell.
         has_border: !el.attrs.contains_key("data-noborder"),
-        borders: el.attrs.get("data-borders").map(|s| decode_cell_borders(s)).unwrap_or([None; 4]),
-        diagonal: el.attrs.get("data-diag").and_then(|s| decode_cell_diagonal(s)),
+        borders: el
+            .attrs
+            .get("data-borders")
+            .map(|s| decode_cell_borders(s))
+            .unwrap_or([None; 4]),
+        diagonal: el
+            .attrs
+            .get("data-diag")
+            .and_then(|s| decode_cell_diagonal(s)),
         src_span: None, // HWPX-export provenance (issue 057) — not part of the JSX projection
         // Cell-own padding (054 F2) is serialization-fidelity data, not yet projected into JSX.
         padding: None,
@@ -886,13 +1066,19 @@ pub fn write_project_dir(proj: &JsxCssProject, dir: &std::path::Path) -> Result<
     .map_err(io)?;
     std::fs::write(dir.join("document.jsx"), jsx::emit_jsx(&proj.document)).map_err(io)?;
     for (i, sec) in proj.sections.iter().enumerate() {
-        std::fs::write(dir.join(format!("sections/section-{i}.jsx")), jsx::emit_jsx(sec))
-            .map_err(io)?;
+        std::fs::write(
+            dir.join(format!("sections/section-{i}.jsx")),
+            jsx::emit_jsx(sec),
+        )
+        .map_err(io)?;
     }
     std::fs::write(dir.join("styles/document.css"), css::emit_css(&proj.styles)).map_err(io)?;
     for a in &proj.assets {
-        std::fs::write(dir.join(format!("assets/{}", a.bin_ref)), unb64(&a.b64).map_err(err)?)
-            .map_err(io)?;
+        std::fs::write(
+            dir.join(format!("assets/{}", a.bin_ref)),
+            unb64(&a.b64).map_err(err)?,
+        )
+        .map_err(io)?;
     }
     Ok(())
 }
@@ -900,27 +1086,37 @@ pub fn write_project_dir(proj: &JsxCssProject, dir: &std::path::Path) -> Result<
 /// Read a project back from a directory written by [`write_project_dir`].
 pub fn read_project_dir(dir: &std::path::Path) -> Result<JsxCssProject> {
     let io = |e: std::io::Error| Error::Io(e.to_string());
-    let manifest: Manifest = serde_json::from_slice(
-        &std::fs::read(dir.join("project.json")).map_err(io)?,
-    )
-    .map_err(|e| err(e.to_string()))?;
-    let document =
-        jsx::parse_jsx(&std::fs::read_to_string(dir.join("document.jsx")).map_err(io)?)
-            .map_err(err)?;
+    let manifest: Manifest =
+        serde_json::from_slice(&std::fs::read(dir.join("project.json")).map_err(io)?)
+            .map_err(|e| err(e.to_string()))?;
+    let document = jsx::parse_jsx(&std::fs::read_to_string(dir.join("document.jsx")).map_err(io)?)
+        .map_err(err)?;
     let mut sections = Vec::with_capacity(manifest.sections.len());
     for i in 0..manifest.sections.len() {
-        let txt = std::fs::read_to_string(dir.join(format!("sections/section-{i}.jsx")))
-            .map_err(io)?;
+        let txt =
+            std::fs::read_to_string(dir.join(format!("sections/section-{i}.jsx"))).map_err(io)?;
         sections.push(jsx::parse_jsx(&txt).map_err(err)?);
     }
-    let styles = css::parse_css(&std::fs::read_to_string(dir.join("styles/document.css")).map_err(io)?)
-        .map_err(err)?;
+    let styles =
+        css::parse_css(&std::fs::read_to_string(dir.join("styles/document.css")).map_err(io)?)
+            .map_err(err)?;
     let mut assets = Vec::new();
     for am in &manifest.asset_meta {
         let bytes = std::fs::read(dir.join(format!("assets/{}", am.bin_ref))).map_err(io)?;
-        assets.push(Asset { bin_ref: am.bin_ref.clone(), kind: am.kind.clone(), b64: b64(&bytes) });
+        assets.push(Asset {
+            bin_ref: am.bin_ref.clone(),
+            kind: am.kind.clone(),
+            b64: b64(&bytes),
+        });
     }
-    Ok(JsxCssProject { manifest, document, sections, styles, assets, dirty: DirtySet::default() })
+    Ok(JsxCssProject {
+        manifest,
+        document,
+        sections,
+        styles,
+        assets,
+        dirty: DirtySet::default(),
+    })
 }
 
 // ---- serde blobs (compact) ----

@@ -171,9 +171,9 @@ impl<'de> Deserialize<'de> for AiCell {
             Value::Number(n) => Ok(AiCell::Text(n.to_string())),
             Value::Bool(b) => Ok(AiCell::Text(b.to_string())),
             Value::Null => Ok(AiCell::Text(String::new())),
-            v @ Value::Object(_) => {
-                serde_json::from_value(v).map(AiCell::Rich).map_err(serde::de::Error::custom)
-            }
+            v @ Value::Object(_) => serde_json::from_value(v)
+                .map(AiCell::Rich)
+                .map_err(serde::de::Error::custom),
             Value::Array(_) => Ok(AiCell::Text(String::new())),
         }
     }
@@ -197,7 +197,11 @@ pub struct AiCellObj {
 impl AiCell {
     pub(crate) fn to_cell_spec(&self, header: bool) -> CellSpec {
         match self {
-            AiCell::Text(t) => CellSpec { text: t.clone(), bold: header, ..Default::default() },
+            AiCell::Text(t) => CellSpec {
+                text: t.clone(),
+                bold: header,
+                ..Default::default()
+            },
             AiCell::Rich(o) => CellSpec {
                 text: o.text.clone(),
                 col_span: o.col_span.unwrap_or(1).max(1),
@@ -262,10 +266,16 @@ pub fn parse_content(json: &str) -> Result<AiContent> {
 #[cfg(any(feature = "anthropic", feature = "local", feature = "openrouter"))]
 pub(crate) fn strip_code_fence(s: &str) -> &str {
     let t = s.trim();
-    let Some(rest) = t.strip_prefix("```") else { return t };
+    let Some(rest) = t.strip_prefix("```") else {
+        return t;
+    };
     // Drop the optional language tag on the opening fence line, then the trailing fence.
     let after_lang = rest.find('\n').map(|i| &rest[i + 1..]).unwrap_or("");
-    after_lang.trim_end().strip_suffix("```").unwrap_or(after_lang).trim()
+    after_lang
+        .trim_end()
+        .strip_suffix("```")
+        .unwrap_or(after_lang)
+        .trim()
 }
 
 const DIVIDER: &str = "──────────────────────────────";
@@ -275,8 +285,15 @@ const DIVIDER: &str = "───────────────────
 fn list_item_op(text: &str) -> Op {
     Op::AppendRichParagraph {
         section: 0,
-        runs: vec![RunSpec { text: text.to_string(), ..Default::default() }],
-        para: ParaSpec { margin_left_pt: Some(18.0), indent_pt: Some(-18.0), ..Default::default() },
+        runs: vec![RunSpec {
+            text: text.to_string(),
+            ..Default::default()
+        }],
+        para: ParaSpec {
+            margin_left_pt: Some(18.0),
+            indent_pt: Some(-18.0),
+            ..Default::default()
+        },
     }
 }
 
@@ -284,7 +301,12 @@ fn list_item_op(text: &str) -> Op {
 pub fn compile_to_ops(content: &AiContent) -> Vec<Op> {
     let mut ops = Vec::new();
     if let Some(pg) = &content.page {
-        let margins = pg.margin_mm.map(|m| PageMargins { left: m, right: m, top: m, bottom: m });
+        let margins = pg.margin_mm.map(|m| PageMargins {
+            left: m,
+            right: m,
+            top: m,
+            bottom: m,
+        });
         if pg.orientation.is_some() || margins.is_some() {
             ops.push(Op::SetPageLayout {
                 section: 0,
@@ -297,8 +319,16 @@ pub fn compile_to_ops(content: &AiContent) -> Vec<Op> {
         match block {
             AiBlock::Heading { text, align, style } => ops.push(Op::AppendRichParagraph {
                 section: 0,
-                runs: vec![RunSpec { text: text.clone(), bold: true, ..Default::default() }],
-                para: ParaSpec { style: style.clone(), align: align.clone(), ..Default::default() },
+                runs: vec![RunSpec {
+                    text: text.clone(),
+                    bold: true,
+                    ..Default::default()
+                }],
+                para: ParaSpec {
+                    style: style.clone(),
+                    align: align.clone(),
+                    ..Default::default()
+                },
             }),
             AiBlock::Paragraph { runs, para } => ops.push(Op::AppendRichParagraph {
                 section: 0,
@@ -326,14 +356,21 @@ pub fn compile_to_ops(content: &AiContent) -> Vec<Op> {
                     spec_rows.push(
                         header
                             .iter()
-                            .map(|h| CellSpec { text: h.clone(), bold: true, ..Default::default() })
+                            .map(|h| CellSpec {
+                                text: h.clone(),
+                                bold: true,
+                                ..Default::default()
+                            })
                             .collect(),
                     );
                 }
                 for row in rows {
                     spec_rows.push(row.iter().map(|c| c.to_cell_spec(false)).collect());
                 }
-                ops.push(Op::AppendRichTable { section: 0, rows: spec_rows });
+                ops.push(Op::AppendRichTable {
+                    section: 0,
+                    rows: spec_rows,
+                });
             }
         }
     }

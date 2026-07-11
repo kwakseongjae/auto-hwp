@@ -41,7 +41,12 @@ pub fn serialize(doc: &SemanticDoc) -> Result<Vec<u8>> {
     // seeding the embedded Skeleton and re-entering this function. HWPX-in docs ALWAYS carry
     // SOURCE_PART_TAG (set at parse), so they never take this branch — the round-trip path below
     // runs byte-identically to before. This invariant is what makes the change non-regressing.
-    if doc.passthrough.parts.iter().all(|p| p.tag != SOURCE_PART_TAG) {
+    if doc
+        .passthrough
+        .parts
+        .iter()
+        .all(|p| p.tag != SOURCE_PART_TAG)
+    {
         return serialize_from_scratch(doc);
     }
     let src = doc
@@ -49,7 +54,9 @@ pub fn serialize(doc: &SemanticDoc) -> Result<Vec<u8>> {
         .parts
         .iter()
         .find(|p| p.tag == SOURCE_PART_TAG)
-        .ok_or_else(|| Error::Serialize("no original HWPX provenance (parse an HWPX first)".into()))?;
+        .ok_or_else(|| {
+            Error::Serialize("no original HWPX provenance (parse an HWPX first)".into())
+        })?;
 
     let pkg = Package::open(&src.bytes)?;
     let section_names = pkg.section_part_names();
@@ -58,7 +65,9 @@ pub fn serialize(doc: &SemanticDoc) -> Result<Vec<u8>> {
         .iter()
         .find(|n| n.to_ascii_lowercase().ends_with("header.xml"))
         .cloned();
-    let header_xml = pkg.read_header().map(|b| String::from_utf8_lossy(&b).into_owned());
+    let header_xml = pkg
+        .read_header()
+        .map(|b| String::from_utf8_lossy(&b).into_owned());
 
     let table_ref = find_table_borderfill(&pkg);
 
@@ -83,8 +92,10 @@ pub fn serialize(doc: &SemanticDoc) -> Result<Vec<u8>> {
         .map(|k| (format!("section{k}"), format!("Contents/section{k}.xml")))
         .collect();
     let image_items = collect_image_items(doc);
-    let content_hpf_name =
-        names.iter().find(|n| n.to_ascii_lowercase().ends_with("content.hpf")).cloned();
+    let content_hpf_name = names
+        .iter()
+        .find(|n| n.to_ascii_lowercase().ends_with("content.hpf"))
+        .cloned();
 
     let deflate = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
     let mut out = ZipWriter::new(Cursor::new(Vec::new()));
@@ -102,8 +113,10 @@ pub fn serialize(doc: &SemanticDoc) -> Result<Vec<u8>> {
         if is_header && plan.header_out.is_some() {
             // PASS 2a — emit the fully-synthesized header.xml (fonts + charPr + paraPr pools).
             let patched = plan.header_out.as_deref().unwrap_or_default();
-            out.start_file(name, deflate).map_err(|e| Error::Serialize(e.to_string()))?;
-            out.write_all(patched.as_bytes()).map_err(|e| Error::Io(e.to_string()))?;
+            out.start_file(name, deflate)
+                .map_err(|e| Error::Serialize(e.to_string()))?;
+            out.write_all(patched.as_bytes())
+                .map_err(|e| Error::Io(e.to_string()))?;
         } else if is_content_hpf {
             // PASS 2c — register the appended section/image parts in the package manifest + spine.
             let orig = pkg.read_part(name).unwrap_or_default();
@@ -112,18 +125,25 @@ pub fn serialize(doc: &SemanticDoc) -> Result<Vec<u8>> {
                 &new_section_items,
                 &image_items,
             );
-            out.start_file(name, deflate).map_err(|e| Error::Serialize(e.to_string()))?;
-            out.write_all(patched.as_bytes()).map_err(|e| Error::Io(e.to_string()))?;
+            out.start_file(name, deflate)
+                .map_err(|e| Error::Serialize(e.to_string()))?;
+            out.write_all(patched.as_bytes())
+                .map_err(|e| Error::Io(e.to_string()))?;
         } else if let Some(sec) = dirty_section {
             // PASS 2b — patch the section: append dirty blocks, referencing synthesized shapes.
             let orig = sec.provenance.raw.as_deref().unwrap_or(b"");
             let patched = patch_section_xml(orig, sec, table_ref.as_deref(), &plan);
-            out.start_file(name, deflate).map_err(|e| Error::Serialize(e.to_string()))?;
-            out.write_all(&patched).map_err(|e| Error::Io(e.to_string()))?;
+            out.start_file(name, deflate)
+                .map_err(|e| Error::Serialize(e.to_string()))?;
+            out.write_all(&patched)
+                .map_err(|e| Error::Io(e.to_string()))?;
         } else {
             // Verbatim copy: preserves compression, metadata, order (and STORED mimetype).
-            let raw = zin.by_index_raw(i).map_err(|e| Error::Serialize(e.to_string()))?;
-            out.raw_copy_file(raw).map_err(|e| Error::Serialize(e.to_string()))?;
+            let raw = zin
+                .by_index_raw(i)
+                .map_err(|e| Error::Serialize(e.to_string()))?;
+            out.raw_copy_file(raw)
+                .map_err(|e| Error::Serialize(e.to_string()))?;
         }
     }
 
@@ -135,12 +155,19 @@ pub fn serialize(doc: &SemanticDoc) -> Result<Vec<u8>> {
             let patched = patch_section_xml(orig, sec, table_ref.as_deref(), &plan);
             out.start_file(format!("Contents/section{k}.xml"), deflate)
                 .map_err(|e| Error::Serialize(e.to_string()))?;
-            out.write_all(&patched).map_err(|e| Error::Io(e.to_string()))?;
+            out.write_all(&patched)
+                .map_err(|e| Error::Io(e.to_string()))?;
         }
     }
     for img in &image_items {
-        if let Some(bytes) = doc.bin_data.iter().find(|b| b.bin_ref == img.bin_ref).map(|b| &b.bytes) {
-            out.start_file(&img.href, deflate).map_err(|e| Error::Serialize(e.to_string()))?;
+        if let Some(bytes) = doc
+            .bin_data
+            .iter()
+            .find(|b| b.bin_ref == img.bin_ref)
+            .map(|b| &b.bytes)
+        {
+            out.start_file(&img.href, deflate)
+                .map_err(|e| Error::Serialize(e.to_string()))?;
             out.write_all(bytes).map_err(|e| Error::Io(e.to_string()))?;
         }
     }
@@ -153,8 +180,10 @@ pub fn serialize(doc: &SemanticDoc) -> Result<Vec<u8>> {
 /// from-scratch synthesizer seeds it and re-enters the patch pipeline. Every invariant it relies on
 /// (default charPr/paraPr id=0, pool ids, the secPr-carrying section0 stub) is pinned by
 /// `synth::tests::skeleton_pin_invariants`, so a regeneration can't silently break synthesis.
-const SKELETON: &[u8] =
-    include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/hwpx/Skeleton.hwpx"));
+const SKELETON: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../corpus/hwpx/Skeleton.hwpx"
+));
 
 /// Synthesize a COMPLETE HWPX from a `SemanticDoc` with no original HWPX provenance (the HWP5→HWPX
 /// converter path). Strategy: clone the doc, seed the embedded [`SKELETON`] as its `SOURCE_PART_TAG`
@@ -373,9 +402,15 @@ fn collect_used_shapes(doc: &SemanticDoc, chars: &mut IdxSet, paras: &mut IdxSet
 /// PASS 1: synthesize every header pool entry the dirty content needs (fonts → charPr → paraPr →
 /// cell-shade borderFills), returning the fully-patched header.xml + the index→IDRef maps. All
 /// header mutation happens here so the patches compose on one header string.
-fn build_synth_plan(doc: &SemanticDoc, header_xml: Option<&str>, table_ref: Option<&str>) -> SynthPlan {
+fn build_synth_plan(
+    doc: &SemanticDoc,
+    header_xml: Option<&str>,
+    table_ref: Option<&str>,
+) -> SynthPlan {
     let mut plan = SynthPlan::default();
-    let Some(header0) = header_xml else { return plan };
+    let Some(header0) = header_xml else {
+        return plan;
+    };
 
     // Read-only: the existing styles pool (so paragraphs can reference 바탕글/본문/개요 N by name).
     plan.style_map = synth::parse_styles(header0);
@@ -470,9 +505,12 @@ fn build_synth_plan(doc: &SemanticDoc, header_xml: Option<&str>, table_ref: Opti
                 let frag =
                     synth::synthesize_border_fill_full(&base, next_id, &spec.borders, spec.shade);
                 // Dedup (#003): reuse an existing pool borderFill identical modulo id.
-                if let Some(existing) =
-                    synth::existing_equivalent_id(header0, "<hh:borderFill ", "</hh:borderFill>", &frag)
-                {
+                if let Some(existing) = synth::existing_equivalent_id(
+                    header0,
+                    "<hh:borderFill ",
+                    "</hh:borderFill>",
+                    &frag,
+                ) {
                     plan.bf_ref.insert(key, existing);
                 } else {
                     bf_fragments.push_str(&frag);
@@ -504,7 +542,10 @@ fn bf_spec(borders: &[Option<CellEdge>; 4], shade: Option<Color>) -> Option<BfSp
     if borders.iter().all(Option::is_none) && shade.is_none() {
         return None;
     }
-    Some(BfSpec { borders: *borders, shade })
+    Some(BfSpec {
+        borders: *borders,
+        shade,
+    })
 }
 
 /// Canonical, deterministic key for a [`BfSpec`] — computed from the SAME OWPML tokens the
@@ -527,7 +568,9 @@ fn bf_key(spec: &BfSpec) -> String {
         edge(&spec.borders[1]),
         edge(&spec.borders[2]),
         edge(&spec.borders[3]),
-        spec.shade.map(|c| c.to_hex()).unwrap_or_else(|| "-".to_string())
+        spec.shade
+            .map(|c| c.to_hex())
+            .unwrap_or_else(|| "-".to_string())
     )
 }
 
@@ -586,7 +629,12 @@ fn collect_bf_specs(doc: &SemanticDoc) -> BTreeMap<String, BfSpec> {
 /// `pageBreak/columnBreak/merged` attrs, and VALID `paraPrIDRef`/`charPrIDRef` that exist in
 /// the header pools — so we reuse the refs of the section's last existing paragraph/run rather
 /// than guess. (linesegarray is intentionally omitted; Hancom recomputes layout on open.)
-fn patch_section_xml(orig: &[u8], sec: &Section, table_ref: Option<&str>, plan: &SynthPlan) -> Vec<u8> {
+fn patch_section_xml(
+    orig: &[u8],
+    sec: &Section,
+    table_ref: Option<&str>,
+    plan: &SynthPlan,
+) -> Vec<u8> {
     let original = String::from_utf8_lossy(orig).into_owned();
 
     // (1) IN-PLACE EDITS: dirty *simple* paragraphs that carry a source byte-span → replace their
@@ -609,7 +657,11 @@ fn patch_section_xml(orig: &[u8], sec: &Section, table_ref: Option<&str>, plan: 
                 // `simple` flag is meant to exclude such paragraphs, but it's a parse-time proxy
                 // decoupled from the actual run content — so guard the rebuild on Raw directly and
                 // keep the body byte-verbatim (open-tag-only) when any Raw is present, never lose it.
-                let has_raw = p.runs.iter().flat_map(|r| &r.content).any(|i| matches!(i, Inline::Raw(_)));
+                let has_raw = p
+                    .runs
+                    .iter()
+                    .flat_map(|r| &r.content)
+                    .any(|i| matches!(i, Inline::Raw(_)));
                 let xml = if src.simple && !has_raw {
                     reemit_paragraph(orig, p, plan)
                 } else {
@@ -673,11 +725,21 @@ fn patch_section_xml(orig: &[u8], sec: &Section, table_ref: Option<&str>, plan: 
     let base_para_ref: &str = &base_para_ref;
     let plain_ref_owned = plain_ref.clone();
     // Resolve a run's interned char_shape index → charPrIDRef (synthesized id, or the plain ref).
-    let cref = |idx: usize| plan.char_ref.get(&idx).cloned().unwrap_or_else(|| plain_ref_owned.clone());
+    let cref = |idx: usize| {
+        plan.char_ref
+            .get(&idx)
+            .cloned()
+            .unwrap_or_else(|| plain_ref_owned.clone())
+    };
     // …and a paragraph's para_shape index → paraPrIDRef (synthesized id, or the base ref). Used by
     // cell/note-body paragraphs so their real line-spacing/문단간격 survive (054).
     let base_para_owned = base_para_ref.to_string();
-    let pref = |idx: usize| plan.para_ref.get(&idx).cloned().unwrap_or_else(|| base_para_owned.clone());
+    let pref = |idx: usize| {
+        plan.para_ref
+            .get(&idx)
+            .cloned()
+            .unwrap_or_else(|| base_para_owned.clone())
+    };
     let body_ctx = BodyCtx {
         cref: &cref,
         pref: &pref,
@@ -730,7 +792,12 @@ fn patch_section_xml(orig: &[u8], sec: &Section, table_ref: Option<&str>, plan: 
     for (bi, block) in dirty.iter().enumerate() {
         let mut piece = String::new();
         match block {
-            EmitBlock::Para { para_shape, style, runs, page_break } => {
+            EmitBlock::Para {
+                para_shape,
+                style,
+                runs,
+                page_break,
+            } => {
                 // Resolve a named style (if any): styleIDRef + the style's default para/char refs.
                 let style_ref = style.as_deref().and_then(|n| plan.style_map.get(n));
                 let style_id = style_ref.map(|s| s.id.as_str()).unwrap_or("0");
@@ -742,10 +809,14 @@ fn patch_section_xml(orig: &[u8], sec: &Section, table_ref: Option<&str>, plan: 
                     .or_else(|| style_ref.map(|s| s.para_pr.clone()))
                     .unwrap_or_else(|| base_para_ref.to_string());
                 // a run with no synthesized charPr falls back to the style's charPr, else plain.
-                let char_fallback =
-                    style_ref.map(|s| s.char_pr.clone()).unwrap_or_else(|| plain_ref.to_string());
+                let char_fallback = style_ref
+                    .map(|s| s.char_pr.clone())
+                    .unwrap_or_else(|| plain_ref.to_string());
                 let resolve = |idx: usize| {
-                    plan.char_ref.get(&idx).cloned().unwrap_or_else(|| char_fallback.clone())
+                    plan.char_ref
+                        .get(&idx)
+                        .cloned()
+                        .unwrap_or_else(|| char_fallback.clone())
                 };
                 let ctx = BodyCtx {
                     cref: &resolve,
@@ -757,7 +828,16 @@ fn patch_section_xml(orig: &[u8], sec: &Section, table_ref: Option<&str>, plan: 
                 };
                 let pid = next_id;
                 next_id += 1;
-                emit_paragraph(&mut piece, pid, &para_ref, style_id, runs, *page_break, &ctx, &mut next_id);
+                emit_paragraph(
+                    &mut piece,
+                    pid,
+                    &para_ref,
+                    style_id,
+                    runs,
+                    *page_break,
+                    &ctx,
+                    &mut next_id,
+                );
             }
             EmitBlock::Table(tbl) => {
                 // A table lives inside a wrapping <hp:p><hp:run>…</hp:run></hp:p>.
@@ -771,11 +851,24 @@ fn patch_section_xml(orig: &[u8], sec: &Section, table_ref: Option<&str>, plan: 
                 emit_table(&mut piece, tid, tbl, &body_ctx, &mut next_id);
                 piece.push_str("<hp:t></hp:t></hp:run></hp:p>");
             }
-            EmitBlock::Image { bin_ref, width, height } => {
+            EmitBlock::Image {
+                bin_ref,
+                width,
+                height,
+            } => {
                 let pid = next_id;
                 let picid = next_id + 1;
                 next_id += 2;
-                emit_pic(&mut piece, pid, picid, bin_ref, *width, *height, base_para_ref, &plain_ref);
+                emit_pic(
+                    &mut piece,
+                    pid,
+                    picid,
+                    bin_ref,
+                    *width,
+                    *height,
+                    base_para_ref,
+                    &plain_ref,
+                );
             }
             EmitBlock::Equation(eq) => {
                 let pid = next_id;
@@ -822,13 +915,20 @@ fn table_inplace_edits(
     para_edits: &[(usize, usize, String)],
     table_ref: Option<&str>,
     plan: &SynthPlan,
-) -> (Vec<(usize, usize, String)>, std::collections::BTreeSet<usize>) {
+) -> (
+    Vec<(usize, usize, String)>,
+    std::collections::BTreeSet<usize>,
+) {
     let mut edits = Vec::new();
     let mut handled = std::collections::BTreeSet::new();
     // Fallback refs when a cell has no original paragraph to copy from — the same
     // reuse-a-valid-existing-ref strategy as the append lane, computed on the pristine XML.
-    let sec_para_ref = last_attr(original, "paraPrIDRef").unwrap_or("0").to_string();
-    let sec_plain_ref = last_attr(original, "charPrIDRef").unwrap_or("0").to_string();
+    let sec_para_ref = last_attr(original, "paraPrIDRef")
+        .unwrap_or("0")
+        .to_string();
+    let sec_plain_ref = last_attr(original, "charPrIDRef")
+        .unwrap_or("0")
+        .to_string();
     // New <hp:p>/<hp:tbl> ids start above the section's current max. The append lane recomputes
     // its own max AFTER these splices land, so the two lanes can never collide.
     let mut next_id = max_id(original) + 1;
@@ -855,7 +955,16 @@ fn table_inplace_edits(
         if para_edits.iter().any(|(ps, pe, _)| *ps < e0 && s0 < *pe) {
             continue;
         }
-        match build_table_patch(original, (s0, e0), t, table_ref, plan, &sec_para_ref, &sec_plain_ref, &mut next_id) {
+        match build_table_patch(
+            original,
+            (s0, e0),
+            t,
+            table_ref,
+            plan,
+            &sec_para_ref,
+            &sec_plain_ref,
+            &mut next_id,
+        ) {
             TablePatch::Cells(cell_edits) => edits.extend(cell_edits),
             TablePatch::Whole(a, b, xml) => edits.push((a, b, xml)),
         }
@@ -913,7 +1022,15 @@ fn build_table_patch(
         let mut ok = true;
         for cell in &dirty_cells {
             let (cs, ce) = cell.src_span.expect("checked by cell_spans_ok");
-            match patch_cell_xml(&original[cs..ce], cell, plan, bf, sec_para_ref, sec_plain_ref, next_id) {
+            match patch_cell_xml(
+                &original[cs..ce],
+                cell,
+                plan,
+                bf,
+                sec_para_ref,
+                sec_plain_ref,
+                next_id,
+            ) {
                 Some(xml) => cell_edits.push((cs, ce, xml)),
                 None => {
                     ok = false; // malformed segment → don't half-patch; re-emit the whole table
@@ -928,8 +1045,18 @@ fn build_table_patch(
 
     // WHOLE-TABLE re-emit at the original anchor. The table stays inside its original wrapper
     // `<hp:p><hp:run>` (only the `<hp:tbl>` span is replaced), so document order is preserved.
-    let cref = |idx: usize| plan.char_ref.get(&idx).cloned().unwrap_or_else(|| sec_plain_ref.to_string());
-    let pref = |idx: usize| plan.para_ref.get(&idx).cloned().unwrap_or_else(|| sec_para_ref.to_string());
+    let cref = |idx: usize| {
+        plan.char_ref
+            .get(&idx)
+            .cloned()
+            .unwrap_or_else(|| sec_plain_ref.to_string())
+    };
+    let pref = |idx: usize| {
+        plan.para_ref
+            .get(&idx)
+            .cloned()
+            .unwrap_or_else(|| sec_para_ref.to_string())
+    };
     let ctx = BodyCtx {
         cref: &cref,
         pref: &pref,
@@ -972,7 +1099,9 @@ fn cell_content_dirty(blocks: &[Block]) -> bool {
         Block::Paragraph(p) => p.dirty.is_dirty(),
         Block::Table(t) => {
             t.dirty.is_dirty()
-                || t.cells.iter().any(|c| c.dirty.is_dirty() || cell_content_dirty(&c.blocks))
+                || t.cells
+                    .iter()
+                    .any(|c| c.dirty.is_dirty() || cell_content_dirty(&c.blocks))
         }
     })
 }
@@ -1011,10 +1140,24 @@ fn patch_cell_xml(
         // Cell-local fallback refs: keep the cell's original paragraph/char refs when present (a
         // centered gov-doc cell stays centered), else the section-level fallback.
         let inner = &cell_orig[open_end..close];
-        let para_ref = last_attr(inner, "paraPrIDRef").unwrap_or(sec_para_ref).to_string();
-        let plain_ref = last_attr(inner, "charPrIDRef").unwrap_or(sec_plain_ref).to_string();
-        let cref = |idx: usize| plan.char_ref.get(&idx).cloned().unwrap_or_else(|| plain_ref.clone());
-        let pref = |idx: usize| plan.para_ref.get(&idx).cloned().unwrap_or_else(|| para_ref.clone());
+        let para_ref = last_attr(inner, "paraPrIDRef")
+            .unwrap_or(sec_para_ref)
+            .to_string();
+        let plain_ref = last_attr(inner, "charPrIDRef")
+            .unwrap_or(sec_plain_ref)
+            .to_string();
+        let cref = |idx: usize| {
+            plan.char_ref
+                .get(&idx)
+                .cloned()
+                .unwrap_or_else(|| plain_ref.clone())
+        };
+        let pref = |idx: usize| {
+            plan.para_ref
+                .get(&idx)
+                .cloned()
+                .unwrap_or_else(|| para_ref.clone())
+        };
         let ctx = BodyCtx {
             cref: &cref,
             pref: &pref,
@@ -1063,11 +1206,15 @@ fn merge_first_block_into_stub(s: &mut String, piece: &str) -> bool {
     if !piece.starts_with("<hp:p ") || !piece.ends_with("</hp:p>") {
         return false;
     }
-    let Some(open_end) = piece.find('>').map(|i| i + 1) else { return false };
+    let Some(open_end) = piece.find('>').map(|i| i + 1) else {
+        return false;
+    };
     let body = &piece[open_end..piece.len() - "</hp:p>".len()];
 
     // Patch the stub's open tag (the FIRST <hp:p in the section — the Skeleton base has exactly one).
-    let Some(stub_start) = s.find("<hp:p") else { return false };
+    let Some(stub_start) = s.find("<hp:p") else {
+        return false;
+    };
     let Some(stub_open_end) = s[stub_start..].find('>').map(|i| stub_start + i + 1) else {
         return false;
     };
@@ -1084,7 +1231,9 @@ fn merge_first_block_into_stub(s: &mut String, piece: &str) -> bool {
     // contain nested <hp:p> by then (a spliced header/footer ctrl carries a subList of paragraphs;
     // naively taking the first </hp:p> would inject the body into that subList). The stub's own
     // empty run stays (zero-width; contributes no text).
-    let Some(close) = paragraph_close_at(s, new_open_end) else { return false };
+    let Some(close) = paragraph_close_at(s, new_open_end) else {
+        return false;
+    };
     s.insert_str(close, body);
     true
 }
@@ -1204,7 +1353,14 @@ enum RunPiece {
     Ctrl(String),
     /// A foot/endnote whose body is emitted (via `emit_cell_content`) into a `<hp:subList>` inside
     /// the note ctrl — needs the emit context, so it's rendered at emit time, not pre-rendered.
-    Note { kind: NoteKind, number: u16, prefix: u16, suffix: u16, inst: u32, body: Vec<EmitBlock> },
+    Note {
+        kind: NoteKind,
+        number: u16,
+        prefix: u16,
+        suffix: u16,
+        inst: u32,
+        body: Vec<EmitBlock>,
+    },
 }
 
 /// A table ready to emit, carrying every captured real value (issue 054, F2): per-column widths,
@@ -1240,11 +1396,20 @@ enum EmitBlock {
     /// re-emission collapsed the reopened page count (054 measured: benchmark.hwp 8 breaks → 1).
     /// Emitting it is the serializer half of fidelity gap #10 (the capture half already existed),
     /// pulled forward because 054's round-trip page-preservation acceptance requires it.
-    Para { para_shape: usize, style: Option<String>, runs: Vec<RunPiece>, page_break: bool },
+    Para {
+        para_shape: usize,
+        style: Option<String>,
+        runs: Vec<RunPiece>,
+        page_break: bool,
+    },
     Table(EmitTable),
     /// An image, emitted as a `<hp:pic>` wrapped in its own paragraph. `bin_ref` is the manifest
     /// item id + `binaryItemIDRef`; width/height are the display size in HWPUNIT.
-    Image { bin_ref: String, width: i32, height: i32 },
+    Image {
+        bin_ref: String,
+        width: i32,
+        height: i32,
+    },
     /// A 수식, emitted as `<hp:equation>` wrapped in its own paragraph (the script is verbatim).
     Equation(EquationRef),
 }
@@ -1266,7 +1431,10 @@ fn project_block(b: &Block) -> EmitBlock {
         // An image-bearing paragraph (the v2 lift emits each picture as its own paragraph) becomes
         // an EmitBlock::Image — checked BEFORE the text path, since para_runs() drops Inline::Image.
         Block::Paragraph(p)
-            if p.runs.iter().flat_map(|r| &r.content).any(|i| matches!(i, Inline::Image(_))) =>
+            if p.runs
+                .iter()
+                .flat_map(|r| &r.content)
+                .any(|i| matches!(i, Inline::Image(_))) =>
         {
             let im = p
                 .runs
@@ -1277,11 +1445,18 @@ fn project_block(b: &Block) -> EmitBlock {
                     _ => None,
                 })
                 .expect("guard guarantees an image");
-            EmitBlock::Image { bin_ref: im.bin_ref.clone(), width: im.width, height: im.height }
+            EmitBlock::Image {
+                bin_ref: im.bin_ref.clone(),
+                width: im.width,
+                height: im.height,
+            }
         }
         // An equation-bearing paragraph → EmitBlock::Equation (also before the text path).
         Block::Paragraph(p)
-            if p.runs.iter().flat_map(|r| &r.content).any(|i| matches!(i, Inline::Equation(_))) =>
+            if p.runs
+                .iter()
+                .flat_map(|r| &r.content)
+                .any(|i| matches!(i, Inline::Equation(_))) =>
         {
             let eq = p
                 .runs
@@ -1391,7 +1566,13 @@ fn para_runs(p: &Paragraph) -> Vec<RunPiece> {
             let text: String = r
                 .content
                 .iter()
-                .filter_map(|i| if let Inline::Text(t) = i { Some(t.as_str()) } else { None })
+                .filter_map(|i| {
+                    if let Inline::Text(t) = i {
+                        Some(t.as_str())
+                    } else {
+                        None
+                    }
+                })
                 .collect();
             out.push(RunPiece::Text(text, r.char_shape));
             continue;
@@ -1474,7 +1655,12 @@ fn emit_cell_content(out: &mut String, blocks: &[EmitBlock], ctx: &BodyCtx, next
     }
     for block in blocks {
         match block {
-            EmitBlock::Para { para_shape, runs, page_break, .. } => {
+            EmitBlock::Para {
+                para_shape,
+                runs,
+                page_break,
+                ..
+            } => {
                 let pid = *next_id;
                 *next_id += 1;
                 // The cell paragraph's REAL paraPr (synthesized), not the base ref — line spacing /
@@ -1495,11 +1681,24 @@ fn emit_cell_content(out: &mut String, blocks: &[EmitBlock], ctx: &BodyCtx, next
                 emit_table(out, tid, tbl, ctx, next_id);
                 out.push_str("<hp:t></hp:t></hp:run></hp:p>");
             }
-            EmitBlock::Image { bin_ref, width, height } => {
+            EmitBlock::Image {
+                bin_ref,
+                width,
+                height,
+            } => {
                 let pid = *next_id;
                 let picid = *next_id + 1;
                 *next_id += 2;
-                emit_pic(out, pid, picid, bin_ref, *width, *height, base_para_ref, ctx.plain_ref);
+                emit_pic(
+                    out,
+                    pid,
+                    picid,
+                    bin_ref,
+                    *width,
+                    *height,
+                    base_para_ref,
+                    ctx.plain_ref,
+                );
             }
             EmitBlock::Equation(eq) => {
                 let pid = *next_id;
@@ -1516,7 +1715,16 @@ fn emit_cell_content(out: &mut String, blocks: &[EmitBlock], ctx: &BodyCtx, next
 /// href is the `BinData/{bin_ref}.{kind}` part. orgSz=curSz=display size with identity scale, so the
 /// image renders at its stored display size; crop/wrap/anchor/rotation are v2.1+.
 #[allow(clippy::too_many_arguments)]
-fn emit_pic(out: &mut String, pid: u64, picid: u64, bin_ref: &str, w: i32, h: i32, base_para_ref: &str, plain_ref: &str) {
+fn emit_pic(
+    out: &mut String,
+    pid: u64,
+    picid: u64,
+    bin_ref: &str,
+    w: i32,
+    h: i32,
+    base_para_ref: &str,
+    plain_ref: &str,
+) {
     let w = w.max(1);
     let h = h.max(1);
     let (cx, cy) = (w / 2, h / 2);
@@ -1541,12 +1749,31 @@ fn emit_pic(out: &mut String, pid: u64, picid: u64, bin_ref: &str, w: i32, h: i3
 /// equation script is the SAME markup as OWPML's `<hp:script>`, so it round-trips verbatim (only
 /// XML-escaped). Child order is sz→pos→outMargin→script (verified against a real Hancom equation);
 /// empty font/version fall back to Hancom's defaults.
-fn emit_equation(out: &mut String, pid: u64, eqid: u64, eq: &EquationRef, base_para_ref: &str, plain_ref: &str) {
+fn emit_equation(
+    out: &mut String,
+    pid: u64,
+    eqid: u64,
+    eq: &EquationRef,
+    base_para_ref: &str,
+    plain_ref: &str,
+) {
     let w = eq.width.max(1);
     let h = eq.height.max(1);
-    let font = if eq.font.is_empty() { "HYhwpEQ" } else { eq.font.as_str() };
-    let version = if eq.version.is_empty() { "Equation Version 60" } else { eq.version.as_str() };
-    let base_unit = if eq.base_unit == 0 { 1000 } else { eq.base_unit };
+    let font = if eq.font.is_empty() {
+        "HYhwpEQ"
+    } else {
+        eq.font.as_str()
+    };
+    let version = if eq.version.is_empty() {
+        "Equation Version 60"
+    } else {
+        eq.version.as_str()
+    };
+    let base_unit = if eq.base_unit == 0 {
+        1000
+    } else {
+        eq.base_unit
+    };
     let baseline = eq.baseline;
     let color = eq.color.to_hex();
     let script = xml_escape(&eq.script);
@@ -1579,6 +1806,7 @@ struct BodyCtx<'a> {
 /// `ctx.cref` → `<hp:run><hp:t>`; Ctrl pieces emit verbatim run-body XML; Note pieces emit the
 /// foot/endnote ctrl with its body recursed through `emit_cell_content` (SEAM B). An empty piece
 /// list emits one empty run. (linesegarray omitted — Hancom recomputes layout on open.)
+#[allow(clippy::too_many_arguments)]
 fn emit_paragraph(
     out: &mut String,
     id: u64,
@@ -1606,7 +1834,14 @@ fn emit_paragraph(
             RunPiece::Ctrl(xml) => {
                 out.push_str(&format!("<hp:run charPrIDRef=\"0\">{xml}</hp:run>"));
             }
-            RunPiece::Note { kind, number, prefix, suffix, inst, body } => {
+            RunPiece::Note {
+                kind,
+                number,
+                prefix,
+                suffix,
+                inst,
+                body,
+            } => {
                 let tag = match kind {
                     NoteKind::Foot => "footNote",
                     NoteKind::End => "endNote",
@@ -1643,7 +1878,15 @@ fn emit_table(out: &mut String, tid: u64, t: &EmitTable, ctx: &BodyCtx, next_id:
         t.col_widths.iter().map(|&w| w as u64).collect()
     } else {
         let cw = W_DEFAULT / cols as u64;
-        (0..cols).map(|c| if c + 1 == cols { W_DEFAULT - cw * (cols as u64 - 1) } else { cw }).collect()
+        (0..cols)
+            .map(|c| {
+                if c + 1 == cols {
+                    W_DEFAULT - cw * (cols as u64 - 1)
+                } else {
+                    cw
+                }
+            })
+            .collect()
     };
     let w_total: u64 = widths.iter().sum();
     let span_w = |c: usize, n: usize| widths[c..(c + n).min(cols)].iter().sum::<u64>();
@@ -1652,8 +1895,13 @@ fn emit_table(out: &mut String, tid: u64, t: &EmitTable, ctx: &BodyCtx, next_id:
     // (never inflated to RH — that's what repaginated re-opened docs). Malformed/absent vec → the
     // legacy uniform RH per row (editor-inserted tables; byte-stable with pre-F2).
     let heights_ok = t.row_heights.len() == rows && t.row_heights.iter().any(|&h| h > 0);
-    let rh_of =
-        |r: usize| -> u64 { if heights_ok { t.row_heights[r].max(0) as u64 } else { RH } };
+    let rh_of = |r: usize| -> u64 {
+        if heights_ok {
+            t.row_heights[r].max(0) as u64
+        } else {
+            RH
+        }
+    };
     // A ROW-SPANNING cell's <hp:cellSz height> must round-trip idempotently: the lift distributes a
     // spanning cell's height EVENLY (height/span) across its rows and takes the per-row max, so
     // emitting the SUM of unequal row heights would re-lift as sum/span and INFLATE the shorter rows
@@ -1671,9 +1919,9 @@ fn emit_table(out: &mut String, tid: u64, t: &EmitTable, ctx: &BodyCtx, next_id:
     };
     let height = (0..rows).map(rh_of).sum::<u64>();
     let w = w_total; // table box width = sum of column widths
-    // Outer margins: all-zero means "nothing captured" (editor tables) → the legacy 283 box. (A
-    // lifted table with genuinely all-zero 바깥 여백 also gets 283 — a documented approximation;
-    // benchmark gov-docs carry non-zero margins.)
+                     // Outer margins: all-zero means "nothing captured" (editor tables) → the legacy 283 box. (A
+                     // lifted table with genuinely all-zero 바깥 여백 also gets 283 — a documented approximation;
+                     // benchmark gov-docs carry non-zero margins.)
     let [oml, omr, omt, omb] = if t.outer_margin.iter().all(|&m| m == 0) {
         [283; 4]
     } else {
@@ -1681,8 +1929,12 @@ fn emit_table(out: &mut String, tid: u64, t: &EmitTable, ctx: &BodyCtx, next_id:
     };
     let [iml, imr, imt, imb] = t.padding.unwrap_or([510, 510, 141, 141]);
     // Table OUTLINE borderFill (표 외곽): the synthesized faithful entry, else the reused document bf.
-    let tbl_bf =
-        t.bf_key.as_deref().and_then(|k| bf_ref.get(k)).map(String::as_str).unwrap_or(bf);
+    let tbl_bf = t
+        .bf_key
+        .as_deref()
+        .and_then(|k| bf_ref.get(k))
+        .map(String::as_str)
+        .unwrap_or(bf);
     out.push_str(&format!(
         "<hp:tbl id=\"{tid}\" zOrder=\"0\" numberingType=\"TABLE\" textWrap=\"TOP_AND_BOTTOM\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" pageBreak=\"CELL\" repeatHeader=\"1\" rowCnt=\"{rows}\" colCnt=\"{cols}\" cellSpacing=\"0\" borderFillIDRef=\"{tbl_bf}\" noAdjust=\"0\">\
 <hp:sz width=\"{w}\" widthRelTo=\"ABSOLUTE\" height=\"{height}\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/>\
@@ -1734,7 +1986,9 @@ fn emit_table(out: &mut String, tid: u64, t: &EmitTable, ctx: &BodyCtx, next_id:
 }
 
 fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// Find a valid `borderFillIDRef` for an emitted table: reuse an existing table's borderFill
@@ -1825,7 +2079,10 @@ mod tests {
 
     /// A real Hancom-produced HWPX (full header.xml pools) — needed to exercise synthesis.
     fn showcase() -> Vec<u8> {
-        let p = concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/hwpx/FormattingShowcase.hwpx");
+        let p = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/hwpx/FormattingShowcase.hwpx"
+        );
         std::fs::read(p).expect("read corpus/hwpx/FormattingShowcase.hwpx")
     }
 
@@ -1841,7 +2098,11 @@ mod tests {
         doc.char_shapes.push(red_bold);
         let sec = doc.sections.get_mut(0).unwrap();
         sec.blocks.push(Block::Paragraph(Paragraph {
-            runs: vec![Run { char_shape: 1, content: vec![Inline::Text("합성된 글자".into())], ..Default::default() }],
+            runs: vec![Run {
+                char_shape: 1,
+                content: vec![Inline::Text("합성된 글자".into())],
+                ..Default::default()
+            }],
             dirty: Dirty(true),
             ..Default::default()
         }));
@@ -1852,10 +2113,24 @@ mod tests {
         // charProperties container still balanced (the container-vs-element regression).
         let pkg = Package::open(&out).unwrap();
         let header = String::from_utf8(pkg.read_header().unwrap()).unwrap();
-        assert_eq!(header.matches("<hh:charProperties").count(), 1, "container not duplicated");
-        assert_eq!(header.matches("</hh:charProperties>").count(), 1, "container balanced");
-        assert!(header.contains("<hh:bold/>"), "a bold charPr was synthesized");
-        assert!(header.contains(r##"textColor="#FF0000""##), "red charPr synthesized");
+        assert_eq!(
+            header.matches("<hh:charProperties").count(),
+            1,
+            "container not duplicated"
+        );
+        assert_eq!(
+            header.matches("</hh:charProperties>").count(),
+            1,
+            "container balanced"
+        );
+        assert!(
+            header.contains("<hh:bold/>"),
+            "a bold charPr was synthesized"
+        );
+        assert!(
+            header.contains(r##"textColor="#FF0000""##),
+            "red charPr synthesized"
+        );
         // round-trips + opens safely
         let doc2 = parse_semantic(&out).unwrap();
         assert!(doc2.plain_text().contains("합성된 글자"));
@@ -1873,7 +2148,11 @@ mod tests {
             row,
             col: 0,
             blocks: vec![Block::Paragraph(Paragraph {
-                runs: vec![Run { char_shape: 0, content: vec![Inline::Text(text.into())], ..Default::default() }],
+                runs: vec![Run {
+                    char_shape: 0,
+                    content: vec![Inline::Text(text.into())],
+                    ..Default::default()
+                }],
                 dirty: Dirty(true),
                 ..Default::default()
             })],
@@ -1883,10 +2162,23 @@ mod tests {
         let mut c0 = mk(0, "위");
         c0.padding = Some([100, 200, 50, 60]); // 셀 고유 여백 → hasMargin="1"
         c0.borders = [
-            Some(CellEdge { color: red, style: LineStyle::Solid, width_px: 1.0 }), // left: 0.25mm red
+            Some(CellEdge {
+                color: red,
+                style: LineStyle::Solid,
+                width_px: 1.0,
+            }), // left: 0.25mm red
             None,
             None,
-            Some(CellEdge { color: Color { r: 0, g: 0, b: 0, a: 255 }, style: LineStyle::None, width_px: 0.5 }), // bottom: 선없음
+            Some(CellEdge {
+                color: Color {
+                    r: 0,
+                    g: 0,
+                    b: 0,
+                    a: 255,
+                },
+                style: LineStyle::None,
+                width_px: 0.5,
+            }), // bottom: 선없음
         ];
         let c1 = mk(1, "아래");
         let sec = doc.sections.get_mut(0).unwrap();
@@ -1909,17 +2201,43 @@ mod tests {
         let pkg = Package::open(&out).unwrap();
         let sec0 = String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap();
         // 실값 방출 (하드코딩 제거 증빙)
-        assert!(sec0.contains(r#"<hp:inMargin left="400" right="401" top="402" bottom="403"/>"#), "표 안쪽 여백 실값");
-        assert!(sec0.contains(r#"<hp:outMargin left="10" right="20" top="30" bottom="40"/>"#), "표 바깥 여백 실값");
-        assert!(sec0.contains(r#"<hp:cellSz width="8000" height="1500"/>"#), "행0 저장 높이");
-        assert!(sec0.contains(r#"<hp:cellSz width="8000" height="3000"/>"#), "행1 저장 높이");
+        assert!(
+            sec0.contains(r#"<hp:inMargin left="400" right="401" top="402" bottom="403"/>"#),
+            "표 안쪽 여백 실값"
+        );
+        assert!(
+            sec0.contains(r#"<hp:outMargin left="10" right="20" top="30" bottom="40"/>"#),
+            "표 바깥 여백 실값"
+        );
+        assert!(
+            sec0.contains(r#"<hp:cellSz width="8000" height="1500"/>"#),
+            "행0 저장 높이"
+        );
+        assert!(
+            sec0.contains(r#"<hp:cellSz width="8000" height="3000"/>"#),
+            "행1 저장 높이"
+        );
         assert!(sec0.contains(r#"height="4500""#), "표 전체 높이 = Σ행높이");
-        assert!(sec0.contains(r#"hasMargin="1""#) && sec0.contains(r#"<hp:cellMargin left="100" right="200" top="50" bottom="60"/>"#), "셀 고유 여백 실값");
+        assert!(
+            sec0.contains(r#"hasMargin="1""#)
+                && sec0.contains(r#"<hp:cellMargin left="100" right="200" top="50" bottom="60"/>"#),
+            "셀 고유 여백 실값"
+        );
         // 헤더에 충실한 borderFill 합성 (좌: SOLID 0.25mm 빨강, 하: 선없음)
         let header = String::from_utf8(pkg.read_header().unwrap()).unwrap();
-        assert!(header.contains(r##"<hh:leftBorder type="SOLID" width="0.25 mm" color="#FF0000"/>"##), "좌 테두리 실값 합성: {header}");
-        assert!(header.contains(r#"<hh:bottomBorder type="NONE""#), "하 테두리 선없음 합성");
-        assert_eq!(header.matches("<hh:borderFills").count(), 1, "container balanced");
+        assert!(
+            header.contains(r##"<hh:leftBorder type="SOLID" width="0.25 mm" color="#FF0000"/>"##),
+            "좌 테두리 실값 합성: {header}"
+        );
+        assert!(
+            header.contains(r#"<hh:bottomBorder type="NONE""#),
+            "하 테두리 선없음 합성"
+        );
+        assert_eq!(
+            header.matches("<hh:borderFills").count(),
+            1,
+            "container balanced"
+        );
         assert!(crate::export::validate_open_safety(&out).ok);
     }
 
@@ -1938,7 +2256,11 @@ mod tests {
         sec.blocks.push(Block::Table(Table {
             rows: 1,
             cols: 1,
-            cells: vec![Cell { blocks: vec![], dirty: Dirty(true), ..Default::default() }],
+            cells: vec![Cell {
+                blocks: vec![],
+                dirty: Dirty(true),
+                ..Default::default()
+            }],
             dirty: Dirty(true),
             ..Default::default()
         }));
@@ -1950,7 +2272,10 @@ mod tests {
         // 표가 있으므로 마지막 <hp:tbl> = 방금 append 된 표를 본다.)
         let tbl_at = sec0.rfind("<hp:tbl").expect("table emitted");
         let wrapper_open = sec0[..tbl_at].rfind("<hp:p ").expect("wrapper <hp:p>");
-        assert!(sec0[wrapper_open..tbl_at].contains(r#"pageBreak="1""#), "앵커의 쪽나누기가 래퍼로 이관");
+        assert!(
+            sec0[wrapper_open..tbl_at].contains(r#"pageBreak="1""#),
+            "앵커의 쪽나누기가 래퍼로 이관"
+        );
         assert!(crate::export::validate_open_safety(&out).ok);
     }
 
@@ -1965,7 +2290,11 @@ mod tests {
         });
         let sec = doc.sections.get_mut(0).unwrap();
         sec.blocks.push(Block::Paragraph(Paragraph {
-            runs: vec![Run { char_shape: 0, content: vec![Inline::Text("가운데".into())], ..Default::default() }],
+            runs: vec![Run {
+                char_shape: 0,
+                content: vec![Inline::Text("가운데".into())],
+                ..Default::default()
+            }],
             para_shape: 1,
             dirty: Dirty(true),
             ..Default::default()
@@ -1974,11 +2303,24 @@ mod tests {
         let out = serialize(&doc).unwrap();
         let pkg = Package::open(&out).unwrap();
         let header = String::from_utf8(pkg.read_header().unwrap()).unwrap();
-        assert_eq!(header.matches("<hh:paraProperties").count(), 1, "container not duplicated");
-        assert!(header.contains(r#"horizontal="CENTER""#), "center align synthesized");
+        assert_eq!(
+            header.matches("<hh:paraProperties").count(),
+            1,
+            "container not duplicated"
+        );
+        assert!(
+            header.contains(r#"horizontal="CENTER""#),
+            "center align synthesized"
+        );
         // hp:case intent=2000, hp:default intent=4000 (doubled)
-        assert!(header.contains(r#"<hc:intent value="2000""#), "case intent = V");
-        assert!(header.contains(r#"<hc:intent value="4000""#), "default intent = 2V (doubled)");
+        assert!(
+            header.contains(r#"<hc:intent value="2000""#),
+            "case intent = V"
+        );
+        assert!(
+            header.contains(r#"<hc:intent value="4000""#),
+            "default intent = 2V (doubled)"
+        );
         let doc2 = parse_semantic(&out).unwrap();
         assert!(doc2.plain_text().contains("가운데"));
         assert!(crate::export::validate_open_safety(&out).ok);
@@ -1996,7 +2338,11 @@ mod tests {
             row_span: 1,
             shade_color: sh,
             blocks: vec![Block::Paragraph(Paragraph {
-                runs: vec![Run { char_shape: 0, content: vec![Inline::Text(text.into())], ..Default::default() }],
+                runs: vec![Run {
+                    char_shape: 0,
+                    content: vec![Inline::Text(text.into())],
+                    ..Default::default()
+                }],
                 dirty: Dirty(true),
                 ..Default::default()
             })],
@@ -2021,16 +2367,27 @@ mod tests {
         let pkg = Package::open(&out).unwrap();
         let header = String::from_utf8(pkg.read_header().unwrap()).unwrap();
         // a shaded borderFill was synthesized with the requested face color
-        assert!(header.contains(r##"faceColor="#DDEBF7""##), "shade borderFill synthesized");
-        assert_eq!(header.matches("<hh:borderFills").count(), 1, "container balanced");
+        assert!(
+            header.contains(r##"faceColor="#DDEBF7""##),
+            "shade borderFill synthesized"
+        );
+        assert_eq!(
+            header.matches("<hh:borderFills").count(),
+            1,
+            "container balanced"
+        );
         let _ = xml;
         let doc2 = parse_semantic(&out).unwrap();
         assert!(doc2.plain_text().contains("머리(병합)") && doc2.plain_text().contains("A"));
         // the merged cell round-trips with colSpan 2
-        let merged = doc2.sections.iter().flat_map(|s| &s.blocks).find_map(|b| match b {
-            Block::Table(t) => t.cells.iter().find(|c| c.col_span == 2).cloned(),
-            _ => None,
-        });
+        let merged = doc2
+            .sections
+            .iter()
+            .flat_map(|s| &s.blocks)
+            .find_map(|b| match b {
+                Block::Table(t) => t.cells.iter().find(|c| c.col_span == 2).cloned(),
+                _ => None,
+            });
         assert!(merged.is_some(), "merged colSpan=2 cell round-trips");
         assert!(crate::export::validate_open_safety(&out).ok);
     }
@@ -2040,7 +2397,16 @@ mod tests {
         let mut doc = parse_semantic(&showcase()).unwrap();
         let sec = doc.sections.get_mut(0).unwrap();
         // landscape A4 + 30mm margins (8504 HWPUNIT)
-        sec.page = PageSetup { width: 84188, height: 59528, margin_left: 8504, margin_right: 8504, margin_top: 8504, margin_bottom: 8504, landscape: true, columns: 1 };
+        sec.page = PageSetup {
+            width: 84188,
+            height: 59528,
+            margin_left: 8504,
+            margin_right: 8504,
+            margin_top: 8504,
+            margin_bottom: 8504,
+            landscape: true,
+            columns: 1,
+        };
         sec.page_edited = true;
         sec.dirty.mark();
         let out = serialize(&doc).unwrap();
@@ -2048,10 +2414,16 @@ mod tests {
         let xml = String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap();
         let pp = &xml[xml.find("<hp:pagePr").unwrap()..];
         let pp = &pp[..pp.find('>').unwrap()];
-        assert!(pp.contains(r#"width="84188""#) && pp.contains(r#"height="59528""#), "landscape dims: {pp}");
+        assert!(
+            pp.contains(r#"width="84188""#) && pp.contains(r#"height="59528""#),
+            "landscape dims: {pp}"
+        );
         let m = &xml[xml.find("<hp:margin").unwrap()..];
         let m = &m[..m.find("/>").unwrap()];
-        assert!(m.contains(r#"left="8504""#) && m.contains(r#"top="8504""#), "margins patched: {m}");
+        assert!(
+            m.contains(r#"left="8504""#) && m.contains(r#"top="8504""#),
+            "margins patched: {m}"
+        );
         assert!(m.contains(r#"header="4252""#), "header margin preserved");
         assert!(crate::export::validate_open_safety(&out).ok);
     }
@@ -2079,7 +2451,9 @@ mod tests {
         let mut edited = false;
         for b in sec.blocks.iter_mut() {
             if let Block::Paragraph(p) = b {
-                let Some(src) = p.source.clone() else { continue };
+                let Some(src) = p.source.clone() else {
+                    continue;
+                };
                 if !src.simple {
                     continue;
                 }
@@ -2099,15 +2473,25 @@ mod tests {
         let out = serialize(&doc).unwrap();
         let pkg = Package::open(&out).unwrap();
         let header = String::from_utf8(pkg.read_header().unwrap()).unwrap();
-        let new_section = String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap();
+        let new_section =
+            String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap();
 
         // A bold+red charPr was synthesized; the edited run references it.
-        assert!(header.contains("<hh:bold/>") && header.contains(r##"textColor="#C00000""##), "bold+red charPr synthesized");
+        assert!(
+            header.contains("<hh:bold/>") && header.contains(r##"textColor="#C00000""##),
+            "bold+red charPr synthesized"
+        );
         // The UNEDITED paragraph's bytes survive verbatim (relocated but byte-identical).
-        assert!(new_section.contains(&untouched), "unedited paragraph is byte-preserved");
+        assert!(
+            new_section.contains(&untouched),
+            "unedited paragraph is byte-preserved"
+        );
         // Round-trips + text preserved + opens.
         let doc2 = parse_semantic(&out).unwrap();
-        assert!(doc2.plain_text().contains("이 문서는") && doc2.plain_text().contains("표와 셀 병합"), "text preserved");
+        assert!(
+            doc2.plain_text().contains("이 문서는") && doc2.plain_text().contains("표와 셀 병합"),
+            "text preserved"
+        );
         assert!(crate::export::validate_open_safety(&out).ok);
         // emit an artifact for oracle + visual cross-check (harmless side effect).
         let _ = std::fs::write(std::env::temp_dir().join("inplace-edit.hwpx"), &out);
@@ -2136,7 +2520,9 @@ mod tests {
         let mut raw_body: Option<String> = None;
         for b in sec.blocks.iter_mut() {
             if let Block::Paragraph(p) = b {
-                let Some(src) = p.source.as_ref() else { continue };
+                let Some(src) = p.source.as_ref() else {
+                    continue;
+                };
                 if !src.simple || p.runs.is_empty() {
                     continue;
                 }
@@ -2146,7 +2532,10 @@ mod tests {
                 p.runs = vec![Run {
                     char_shape: 0,
                     char_ref: None,
-                    content: vec![Inline::Raw(RawPart { tag: "hp:run".into(), bytes: body.as_bytes().to_vec() })],
+                    content: vec![Inline::Raw(RawPart {
+                        tag: "hp:run".into(),
+                        bytes: body.as_bytes().to_vec(),
+                    })],
                 }];
                 p.dirty.mark();
                 break;
@@ -2161,7 +2550,10 @@ mod tests {
             String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap()
         };
         // The Raw object's bytes survive verbatim — they were NOT silently dropped on re-emit.
-        assert!(new_section.contains(&raw_body), "Inline::Raw object preserved verbatim, not dropped");
+        assert!(
+            new_section.contains(&raw_body),
+            "Inline::Raw object preserved verbatim, not dropped"
+        );
         assert!(crate::export::validate_open_safety(&out).ok);
     }
 
@@ -2176,7 +2568,10 @@ mod tests {
             String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap()
         };
         // Index 0 reserved (default); add a center-align paraPr at index 1.
-        doc.para_shapes.push(ParaShape { align: HorizontalAlign::Center, ..Default::default() });
+        doc.para_shapes.push(ParaShape {
+            align: HorizontalAlign::Center,
+            ..Default::default()
+        });
         let center = 1usize;
 
         let sec = doc.sections.get_mut(0).unwrap();
@@ -2185,7 +2580,9 @@ mod tests {
         let mut para_edited = false;
         for b in sec.blocks.iter_mut() {
             if let Block::Paragraph(p) = b {
-                let Some(src) = p.source.clone() else { continue };
+                let Some(src) = p.source.clone() else {
+                    continue;
+                };
                 if !src.simple {
                     continue;
                 }
@@ -2196,7 +2593,10 @@ mod tests {
                 } else if runsonly_open.is_none() && !p.runs.is_empty() {
                     // A second simple para edited runs-only: its open tag must stay verbatim.
                     let open_end = orig_section[src.span.0..src.span.1].find('>').unwrap() + 1;
-                    runsonly_open = Some((orig_section[src.span.0..src.span.0 + open_end].to_string(), src.span));
+                    runsonly_open = Some((
+                        orig_section[src.span.0..src.span.0 + open_end].to_string(),
+                        src.span,
+                    ));
                     p.dirty.mark(); // runs-only "edit": para_shape stays 0, style_name None
                 } else if unedited_bytes.is_none() {
                     unedited_bytes = Some(orig_section[src.span.0..src.span.1].to_string());
@@ -2214,9 +2614,15 @@ mod tests {
             String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap()
         };
         // The unedited paragraph survives byte-verbatim.
-        assert!(new_section.contains(&untouched), "unedited paragraph byte-preserved");
+        assert!(
+            new_section.contains(&untouched),
+            "unedited paragraph byte-preserved"
+        );
         // The runs-only paragraph's open tag is unchanged (no spurious paraPrIDRef rewrite).
-        assert!(new_section.contains(&runsonly_open_tag), "runs-only edit keeps its open tag verbatim");
+        assert!(
+            new_section.contains(&runsonly_open_tag),
+            "runs-only edit keeps its open tag verbatim"
+        );
 
         // Parse-in (P1): the re-shaped paragraph now resolves to a center-align paraPr in the pool.
         let doc2 = parse_semantic(&out).unwrap();
@@ -2231,7 +2637,10 @@ mod tests {
                 .unwrap_or(false),
             _ => false,
         });
-        assert!(found_center, "edited paragraph resolves to a center-align paraPr");
+        assert!(
+            found_center,
+            "edited paragraph resolves to a center-align paraPr"
+        );
         assert!(crate::export::validate_open_safety(&out).ok);
         let _ = std::fs::write(std::env::temp_dir().join("setparapr-inplace.hwpx"), &out);
     }
@@ -2245,7 +2654,10 @@ mod tests {
             let pkg = Package::open(&showcase()).unwrap();
             String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap()
         };
-        doc.para_shapes.push(ParaShape { align: HorizontalAlign::Center, ..Default::default() });
+        doc.para_shapes.push(ParaShape {
+            align: HorizontalAlign::Center,
+            ..Default::default()
+        });
         let center = 1usize;
 
         // Capture a non-simple paragraph's original body bytes (everything after its open tag).
@@ -2254,7 +2666,9 @@ mod tests {
         let mut open_tag: Option<String> = None;
         for b in sec.blocks.iter_mut() {
             if let Block::Paragraph(p) = b {
-                let Some(src) = p.source.clone() else { continue };
+                let Some(src) = p.source.clone() else {
+                    continue;
+                };
                 if src.simple {
                     continue;
                 }
@@ -2269,7 +2683,10 @@ mod tests {
         }
         let body = body.expect("a non-simple paragraph (secPr/ctrl/tbl)");
         let open_tag = open_tag.unwrap();
-        assert!(body.contains("<hp:secPr") || body.contains("<hp:tbl") || body.contains("<hp:ctrl"), "captured a structural body");
+        assert!(
+            body.contains("<hp:secPr") || body.contains("<hp:tbl") || body.contains("<hp:ctrl"),
+            "captured a structural body"
+        );
         sec.dirty.mark();
 
         let out = serialize(&doc).unwrap();
@@ -2278,8 +2695,14 @@ mod tests {
             String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap()
         };
         // The structural BODY survives byte-verbatim; only the open tag's paraPrIDRef changed.
-        assert!(new_section.contains(&body), "structural body bytes preserved verbatim");
-        assert!(!new_section.contains(&open_tag), "the open tag's paraPrIDRef was patched (differs)");
+        assert!(
+            new_section.contains(&body),
+            "structural body bytes preserved verbatim"
+        );
+        assert!(
+            !new_section.contains(&open_tag),
+            "the open tag's paraPrIDRef was patched (differs)"
+        );
         assert!(crate::export::validate_open_safety(&out).ok);
         let _ = std::fs::write(std::env::temp_dir().join("setparapr-nonsimple.hwpx"), &out);
     }
@@ -2294,13 +2717,18 @@ mod tests {
             String::from_utf8(pkg.read_header().unwrap()).unwrap()
         };
         let style = synth::parse_styles(&header);
-        let target = style.get("개요 1").expect("showcase has a '개요 1' style").clone();
+        let target = style
+            .get("개요 1")
+            .expect("showcase has a '개요 1' style")
+            .clone();
 
         let sec = doc.sections.get_mut(0).unwrap();
         let mut edited = false;
         for b in sec.blocks.iter_mut() {
             if let Block::Paragraph(p) = b {
-                let Some(src) = p.source.clone() else { continue };
+                let Some(src) = p.source.clone() else {
+                    continue;
+                };
                 if src.simple && !edited {
                     p.style_name = Some("개요 1".into());
                     p.dirty.mark();
@@ -2318,11 +2746,17 @@ mod tests {
             Block::Paragraph(p) => p
                 .source
                 .as_ref()
-                .map(|s| s.style.as_deref() == Some(target.id.as_str()) && s.para_pr.as_deref() == Some(target.para_pr.as_str()))
+                .map(|s| {
+                    s.style.as_deref() == Some(target.id.as_str())
+                        && s.para_pr.as_deref() == Some(target.para_pr.as_str())
+                })
                 .unwrap_or(false),
             _ => false,
         });
-        assert!(restyled, "edited paragraph references the 개요 1 style + its paraPr");
+        assert!(
+            restyled,
+            "edited paragraph references the 개요 1 style + its paraPr"
+        );
         assert!(crate::export::validate_open_safety(&out).ok);
     }
 
@@ -2343,7 +2777,11 @@ mod tests {
         });
         let sec = doc.sections.get_mut(0).unwrap();
         sec.blocks.push(Block::Paragraph(Paragraph {
-            runs: vec![Run { char_shape: 1, content: vec![Inline::Text("기존 글자모양 재사용".into())], ..Default::default() }],
+            runs: vec![Run {
+                char_shape: 1,
+                content: vec![Inline::Text("기존 글자모양 재사용".into())],
+                ..Default::default()
+            }],
             dirty: Dirty(true),
             ..Default::default()
         }));
@@ -2358,7 +2796,10 @@ mod tests {
         let p = xml.rfind("기존 글자모양 재사용").unwrap();
         let run_start = xml[..p].rfind("<hp:run ").unwrap();
         let run_tag = &xml[run_start..xml[run_start..].find('>').unwrap() + run_start];
-        assert!(run_tag.contains(r#"charPrIDRef="7""#), "reused existing charPr 7: {run_tag}");
+        assert!(
+            run_tag.contains(r#"charPrIDRef="7""#),
+            "reused existing charPr 7: {run_tag}"
+        );
         assert!(crate::export::validate_open_safety(&out).ok);
     }
 
@@ -2367,7 +2808,11 @@ mod tests {
         let mut doc = parse_semantic(&showcase()).unwrap();
         let sec = doc.sections.get_mut(0).unwrap();
         sec.blocks.push(Block::Paragraph(Paragraph {
-            runs: vec![Run { char_shape: 0, content: vec![Inline::Text("개요 1 제목".into())], ..Default::default() }],
+            runs: vec![Run {
+                char_shape: 0,
+                content: vec![Inline::Text("개요 1 제목".into())],
+                ..Default::default()
+            }],
             style_name: Some("개요 1".into()),
             dirty: Dirty(true),
             ..Default::default()
@@ -2380,8 +2825,14 @@ mod tests {
         let p = xml.rfind("개요 1 제목").unwrap();
         let tag_start = xml[..p].rfind("<hp:p ").unwrap();
         let tag = &xml[tag_start..xml[tag_start..].find('>').unwrap() + tag_start];
-        assert!(tag.contains(r#"styleIDRef="2""#), "styleIDRef resolved to 개요 1: {tag}");
-        assert!(tag.contains(r#"paraPrIDRef="10""#), "adopts the style's paraPr: {tag}");
+        assert!(
+            tag.contains(r#"styleIDRef="2""#),
+            "styleIDRef resolved to 개요 1: {tag}"
+        );
+        assert!(
+            tag.contains(r#"paraPrIDRef="10""#),
+            "adopts the style's paraPr: {tag}"
+        );
         assert!(crate::export::validate_open_safety(&out).ok);
     }
 
@@ -2396,7 +2847,11 @@ mod tests {
         };
         let sec = doc.sections.get_mut(0).unwrap();
         sec.blocks.push(Block::Paragraph(Paragraph {
-            runs: vec![Run { char_shape: 0, content: vec![Inline::Text("기본 문단".into())], ..Default::default() }],
+            runs: vec![Run {
+                char_shape: 0,
+                content: vec![Inline::Text("기본 문단".into())],
+                ..Default::default()
+            }],
             dirty: Dirty(true),
             ..Default::default()
         }));
@@ -2407,7 +2862,10 @@ mod tests {
             &String::from_utf8(pkg.read_header().unwrap()).unwrap(),
             "charProperties",
         );
-        assert_eq!(before, after, "default shape must NOT synthesize a new charPr");
+        assert_eq!(
+            before, after,
+            "default shape must NOT synthesize a new charPr"
+        );
     }
 
     #[test]
@@ -2416,7 +2874,10 @@ mod tests {
         let out = serialize(&doc).unwrap();
         let doc2 = parse_semantic(&out).unwrap();
         assert_eq!(doc.plain_text(), doc2.plain_text());
-        assert!(crate::export::validate_open_safety(&out).ok, "safety gate must pass on our output");
+        assert!(
+            crate::export::validate_open_safety(&out).ok,
+            "safety gate must pass on our output"
+        );
     }
 
     #[test]
@@ -2424,15 +2885,25 @@ mod tests {
         let mut doc = parse_semantic(&sample()).unwrap();
         let sec = doc.sections.get_mut(0).unwrap();
         sec.blocks.push(Block::Paragraph(Paragraph {
-            runs: vec![Run { char_shape: 0, content: vec![Inline::Text("추가된 문단".into())], ..Default::default() }],
+            runs: vec![Run {
+                char_shape: 0,
+                content: vec![Inline::Text("추가된 문단".into())],
+                ..Default::default()
+            }],
             dirty: Dirty(true),
             ..Default::default()
         }));
         sec.dirty.mark();
         let out = serialize(&doc).unwrap();
         let doc2 = parse_semantic(&out).unwrap();
-        assert!(doc2.plain_text().contains("추가된 문단"), "appended paragraph must survive");
-        assert!(doc2.plain_text().contains("안녕하세요"), "original content must be preserved");
+        assert!(
+            doc2.plain_text().contains("추가된 문단"),
+            "appended paragraph must survive"
+        );
+        assert!(
+            doc2.plain_text().contains("안녕하세요"),
+            "original content must be preserved"
+        );
         assert!(crate::export::validate_open_safety(&out).ok);
     }
 
@@ -2473,12 +2944,20 @@ mod tests {
         let out = serialize(&doc).unwrap();
         let doc2 = parse_semantic(&out).unwrap();
         let text = doc2.plain_text();
-        assert!(text.contains("구분") && text.contains("승인"), "table cells must survive: {text}");
+        assert!(
+            text.contains("구분") && text.contains("승인"),
+            "table cells must survive: {text}"
+        );
         assert!(text.contains("안녕하세요"), "original content preserved");
-        assert!(crate::export::validate_open_safety(&out).ok, "open-safety gate must pass");
+        assert!(
+            crate::export::validate_open_safety(&out).ok,
+            "open-safety gate must pass"
+        );
         // round-trip must yield a real Table block (not flattened to text paragraphs)
         let has_table = doc2.sections.iter().any(|s| {
-            s.blocks.iter().any(|b| matches!(b, Block::Table(t) if t.cols >= 2 && t.rows >= 2))
+            s.blocks
+                .iter()
+                .any(|b| matches!(b, Block::Table(t) if t.cols >= 2 && t.rows >= 2))
         });
         assert!(has_table, "round-trip must yield a native Table block");
     }
@@ -2493,26 +2972,48 @@ mod tests {
         let mut sec = Section::default();
         for t in ["첫째 문단입니다.", "둘째 문단입니다."] {
             sec.blocks.push(Block::Paragraph(Paragraph {
-                runs: vec![Run { char_shape: 0, content: vec![Inline::Text(t.into())], ..Default::default() }],
+                runs: vec![Run {
+                    char_shape: 0,
+                    content: vec![Inline::Text(t.into())],
+                    ..Default::default()
+                }],
                 ..Default::default()
             }));
         }
         doc.sections.push(sec);
-        assert!(doc.passthrough.parts.is_empty(), "precondition: no HWPX provenance");
+        assert!(
+            doc.passthrough.parts.is_empty(),
+            "precondition: no HWPX provenance"
+        );
 
-        let out =
-            serialize(&doc).expect("from-scratch serialize must succeed without original provenance");
+        let out = serialize(&doc)
+            .expect("from-scratch serialize must succeed without original provenance");
         // A valid, openable HWPX (the synthesis path's correctness gate).
-        assert!(crate::export::validate_open_safety(&out).ok, "from-scratch output must be open-safe");
+        assert!(
+            crate::export::validate_open_safety(&out).ok,
+            "from-scratch output must be open-safe"
+        );
         // …that round-trips the text. (The Skeleton's secPr-carrier stub adds one leading empty
         // paragraph; the lifted text follows it in order.)
         let doc2 = parse_semantic(&out).unwrap();
         let text = doc2.plain_text();
-        assert!(text.contains("첫째 문단입니다."), "first paragraph survives: {text}");
-        assert!(text.contains("둘째 문단입니다."), "second paragraph survives: {text}");
+        assert!(
+            text.contains("첫째 문단입니다."),
+            "first paragraph survives: {text}"
+        );
+        assert!(
+            text.contains("둘째 문단입니다."),
+            "second paragraph survives: {text}"
+        );
         // serialize_from_scratch clones — the caller's doc is untouched (no provenance, no dirty).
-        assert!(doc.passthrough.parts.is_empty(), "input doc must not be mutated");
-        assert!(!doc.sections[0].dirty.is_dirty(), "input doc must not be dirtied");
+        assert!(
+            doc.passthrough.parts.is_empty(),
+            "input doc must not be mutated"
+        );
+        assert!(
+            !doc.sections[0].dirty.is_dirty(),
+            "input doc must not be dirtied"
+        );
     }
 
     #[test]
@@ -2520,28 +3021,42 @@ mod tests {
         let mut doc = SemanticDoc::default();
         let mut sec = Section::default();
         sec.blocks.push(Block::Paragraph(Paragraph {
-            runs: vec![Run { char_shape: 0, content: vec![Inline::Text("본문".into())], ..Default::default() }],
+            runs: vec![Run {
+                char_shape: 0,
+                content: vec![Inline::Text("본문".into())],
+                ..Default::default()
+            }],
             ..Default::default()
         }));
         sec.decorations.push(PageDecoration {
             kind: DecoKind::Header,
             apply: ApplyPage::Both,
             blocks: vec![Block::Paragraph(Paragraph {
-                runs: vec![Run { char_shape: 0, content: vec![Inline::Text("머리말텍스트".into())], ..Default::default() }],
+                runs: vec![Run {
+                    char_shape: 0,
+                    content: vec![Inline::Text("머리말텍스트".into())],
+                    ..Default::default()
+                }],
                 ..Default::default()
             })],
         });
         doc.sections.push(sec);
 
         let out = serialize(&doc).expect("header doc serializes");
-        assert!(crate::export::validate_synthesis_safety(&out).ok, "header output open-safe");
+        assert!(
+            crate::export::validate_synthesis_safety(&out).ok,
+            "header output open-safe"
+        );
         let pkg = Package::open(&out).unwrap();
         let sec0 = String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap();
         // The header ctrl is spliced AFTER </hp:secPr> (the secPr-carrier run) + carries its body.
         let secpr = sec0.find("</hp:secPr>").expect("secPr present");
         let header = sec0.find(r#"<hp:header id"#).expect("header present");
         assert!(header > secpr, "header spliced after secPr");
-        assert!(sec0.contains(r#"applyPageType="BOTH""#) && sec0.contains("머리말텍스트"), "header body text emitted");
+        assert!(
+            sec0.contains(r#"applyPageType="BOTH""#) && sec0.contains("머리말텍스트"),
+            "header body text emitted"
+        );
     }
 
     #[test]
@@ -2556,7 +3071,11 @@ mod tests {
             suffix_char: 41,
             inst_id: 7,
             body: vec![Block::Paragraph(Paragraph {
-                runs: vec![Run { char_shape: 0, content: vec![Inline::Text("미주 본문".into())], ..Default::default() }],
+                runs: vec![Run {
+                    char_shape: 0,
+                    content: vec![Inline::Text("미주 본문".into())],
+                    ..Default::default()
+                }],
                 ..Default::default()
             })],
         };
@@ -2571,15 +3090,24 @@ mod tests {
         doc.sections.push(sec);
 
         let out = serialize(&doc).expect("endnote doc serializes");
-        assert!(crate::export::validate_synthesis_safety(&out).ok, "endnote output open-safe");
+        assert!(
+            crate::export::validate_synthesis_safety(&out).ok,
+            "endnote output open-safe"
+        );
         let pkg = Package::open(&out).unwrap();
         let sec0 = String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap();
-        assert!(sec0.contains(r#"<hp:endNote number="1""#), "endNote ctrl emitted");
+        assert!(
+            sec0.contains(r#"<hp:endNote number="1""#),
+            "endNote ctrl emitted"
+        );
         assert!(sec0.contains("<hp:subList"), "note body subList emitted");
         // Both the referencing text and the note body text are present.
         let re = parse_semantic(&out).unwrap();
         let text = re.plain_text();
-        assert!(text.contains("본문") && text.contains("미주 본문"), "ref + note body text: {text}");
+        assert!(
+            text.contains("본문") && text.contains("미주 본문"),
+            "ref + note body text: {text}"
+        );
     }
 
     #[test]
@@ -2590,25 +3118,44 @@ mod tests {
         for t in ["첫 구역 본문.", "둘째 구역 본문."] {
             let mut sec = Section::default();
             sec.blocks.push(Block::Paragraph(Paragraph {
-                runs: vec![Run { char_shape: 0, content: vec![Inline::Text(t.into())], ..Default::default() }],
+                runs: vec![Run {
+                    char_shape: 0,
+                    content: vec![Inline::Text(t.into())],
+                    ..Default::default()
+                }],
                 ..Default::default()
             }));
             doc.sections.push(sec);
         }
         let out = serialize(&doc).expect("multi-section from-scratch must serialize");
-        assert!(crate::export::validate_synthesis_safety(&out).ok, "multi-section output open-safe");
+        assert!(
+            crate::export::validate_synthesis_safety(&out).ok,
+            "multi-section output open-safe"
+        );
 
         let pkg = Package::open(&out).unwrap();
         let secs = pkg.section_part_names();
-        assert!(secs.iter().any(|n| n.ends_with("section0.xml")), "section0 present: {secs:?}");
-        assert!(secs.iter().any(|n| n.ends_with("section1.xml")), "section1 appended: {secs:?}");
+        assert!(
+            secs.iter().any(|n| n.ends_with("section0.xml")),
+            "section0 present: {secs:?}"
+        );
+        assert!(
+            secs.iter().any(|n| n.ends_with("section1.xml")),
+            "section1 appended: {secs:?}"
+        );
         let hpf = String::from_utf8(pkg.read_part("Contents/content.hpf").unwrap()).unwrap();
-        assert!(hpf.contains(r#"href="Contents/section1.xml""#), "section1 in manifest");
+        assert!(
+            hpf.contains(r#"href="Contents/section1.xml""#),
+            "section1 in manifest"
+        );
         assert!(hpf.contains(r#"idref="section1""#), "section1 in spine");
 
         // Both sections' text round-trips.
         let re = parse_semantic(&out).unwrap();
         let text = re.plain_text();
-        assert!(text.contains("첫 구역 본문.") && text.contains("둘째 구역 본문."), "both sections: {text}");
+        assert!(
+            text.contains("첫 구역 본문.") && text.contains("둘째 구역 본문."),
+            "both sections: {text}"
+        );
     }
 }

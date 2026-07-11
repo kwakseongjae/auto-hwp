@@ -29,15 +29,25 @@ pub fn read(bytes: &[u8]) -> Result<SemanticDoc> {
     for page in &pages {
         let mut section = Section {
             page: page.page_setup(),
-            provenance: Provenance { source: Some(SourceFormat::Pdf), raw: None },
+            provenance: Provenance {
+                source: Some(SourceFormat::Pdf),
+                raw: None,
+            },
             ..Default::default()
         };
         // One paragraph per text line (grouped by y), so `plain_text` / search behave sanely.
         for line in page.lines() {
             let para = Paragraph {
                 para_shape: 0,
-                runs: vec![Run { char_shape: 0, char_ref: None, content: vec![Inline::Text(line)] }],
-                provenance: Provenance { source: Some(SourceFormat::Pdf), raw: None },
+                runs: vec![Run {
+                    char_shape: 0,
+                    char_ref: None,
+                    content: vec![Inline::Text(line)],
+                }],
+                provenance: Provenance {
+                    source: Some(SourceFormat::Pdf),
+                    raw: None,
+                },
                 ..Default::default()
             };
             section.blocks.push(Block::Paragraph(para));
@@ -45,8 +55,15 @@ pub fn read(bytes: &[u8]) -> Result<SemanticDoc> {
         if section.blocks.is_empty() {
             // Keep an empty paragraph so the page still occupies a section.
             section.blocks.push(Block::Paragraph(Paragraph {
-                runs: vec![Run { char_shape: 0, char_ref: None, content: vec![Inline::Text(String::new())] }],
-                provenance: Provenance { source: Some(SourceFormat::Pdf), raw: None },
+                runs: vec![Run {
+                    char_shape: 0,
+                    char_ref: None,
+                    content: vec![Inline::Text(String::new())],
+                }],
+                provenance: Provenance {
+                    source: Some(SourceFormat::Pdf),
+                    raw: None,
+                },
                 ..Default::default()
             }));
         }
@@ -116,7 +133,12 @@ impl Page {
                 font: None,
             })
             .collect();
-        PageLayerTree { schema_version: PAINT_SCHEMA_VERSION, width: w, height: h, ops }
+        PageLayerTree {
+            schema_version: PAINT_SCHEMA_VERSION,
+            width: w,
+            height: h,
+            ops,
+        }
     }
 
     /// Group glyphs into text lines (by rounded baseline y, top-to-bottom; left-to-right within).
@@ -141,8 +163,7 @@ impl Page {
 
 /// Extract every page's positioned glyphs from the PDF bytes.
 fn extract_pages(bytes: &[u8]) -> Result<Vec<Page>> {
-    let document =
-        Document::load_mem(bytes).map_err(|e| Error::Parse(format!("pdf load: {e}")))?;
+    let document = Document::load_mem(bytes).map_err(|e| Error::Parse(format!("pdf load: {e}")))?;
     let mut pages = Vec::new();
     for (_num, page_id) in document.get_pages() {
         let (w, h) = media_box(&document, page_id).unwrap_or((612.0, 792.0)); // US Letter fallback
@@ -152,7 +173,11 @@ fn extract_pages(bytes: &[u8]) -> Result<Vec<Page>> {
         let content = lopdf::content::Content::decode(&raw)
             .map_err(|e| Error::Parse(format!("pdf content decode: {e}")))?;
         let glyphs = walk_content(&content);
-        pages.push(Page { width_pt: w, height_pt: h, glyphs });
+        pages.push(Page {
+            width_pt: w,
+            height_pt: h,
+            glyphs,
+        });
     }
     Ok(pages)
 }
@@ -188,7 +213,10 @@ fn media_box(doc: &Document, page_id: (u32, u16)) -> Option<(f64, f64)> {
 fn resolve_array(doc: &Document, o: &Object) -> Option<Vec<Object>> {
     match o {
         Object::Array(a) => Some(a.clone()),
-        Object::Reference(r) => doc.get_object(*r).ok().and_then(|x| x.as_array().ok().cloned()),
+        Object::Reference(r) => doc
+            .get_object(*r)
+            .ok()
+            .and_then(|x| x.as_array().ok().cloned()),
         _ => None,
     }
 }
@@ -317,7 +345,12 @@ fn emit_string(bytes: &[u8], glyphs: &mut Vec<Glyph>, tx: &mut f64, ty: f64, siz
             // Map non-ASCII single bytes to their Latin-1 char so common Western text shows.
             b as char
         };
-        glyphs.push(Glyph { x: *tx, y: ty, ch, size });
+        glyphs.push(Glyph {
+            x: *tx,
+            y: ty,
+            ch,
+            size,
+        });
         // Coarse advance: spaces ~0.3em, others ~0.5em.
         let adv = if ch == ' ' { 0.3 } else { 0.5 };
         *tx += adv * size;

@@ -12,7 +12,10 @@ use quick_xml::events::{BytesStart, Event};
 use quick_xml::reader::Reader;
 
 fn hwpx_prov() -> Provenance {
-    Provenance { source: Some(SourceFormat::Hwpx), raw: None }
+    Provenance {
+        source: Some(SourceFormat::Hwpx),
+        raw: None,
+    }
 }
 
 /// Tag under which the whole original HWPX file is retained for verbatim round-trip.
@@ -123,12 +126,12 @@ struct TblFrame {
 /// Accumulator for one in-progress `<hp:p>` (runs + its source provenance).
 #[derive(Default)]
 struct ParaAccum {
-    start: usize,                            // byte offset of `<hp:p` in the section XML
-    para_pr: Option<String>,                 // paraPrIDRef
-    style: Option<String>,                   // styleIDRef
-    id: Option<String>,                      // XML id string
-    simple: bool,                            // only hp:run/hp:t children seen so far
-    runs: Vec<Run>,                          // flushed runs
+    start: usize,                              // byte offset of `<hp:p` in the section XML
+    para_pr: Option<String>,                   // paraPrIDRef
+    style: Option<String>,                     // styleIDRef
+    id: Option<String>,                        // XML id string
+    simple: bool,                              // only hp:run/hp:t children seen so far
+    runs: Vec<Run>,                            // flushed runs
     cur_run: Option<(Option<String>, String)>, // open run (charPrIDRef, text)
 }
 
@@ -174,7 +177,12 @@ fn parse_section(xml: &str, out: &mut Vec<Block>) -> std::result::Result<(), Doc
                         let rows = attr_usize(&e, b"rowCnt").unwrap_or(0);
                         let cols = attr_usize(&e, b"colCnt").unwrap_or(0);
                         tbls.push(TblFrame {
-                            table: Table { rows, cols, provenance: hwpx_prov(), ..Default::default() },
+                            table: Table {
+                                rows,
+                                cols,
+                                provenance: hwpx_prov(),
+                                ..Default::default()
+                            },
                             cell: None,
                             start: pos_before,
                             cell_start: 0,
@@ -234,7 +242,7 @@ fn parse_section(xml: &str, out: &mut Vec<Block>) -> std::result::Result<(), Doc
                     if let Some(mut p) = paras.pop() {
                         flush_run(&mut p);
                         let end = reader.buffer_position() as usize; // just past `</hp:p>`
-                        // Top-level iff no enclosing paragraph remains.
+                                                                     // Top-level iff no enclosing paragraph remains.
                         let top_level = paras.is_empty();
                         let source = top_level.then(|| ParaSource {
                             span: (p.start, end),
@@ -296,7 +304,11 @@ fn parse_section(xml: &str, out: &mut Vec<Block>) -> std::result::Result<(), Doc
 /// them would shift run indices and misaddress per-run edits).
 fn flush_run(p: &mut ParaAccum) {
     if let Some((char_ref, text)) = p.cur_run.take() {
-        p.runs.push(Run { char_shape: 0, char_ref, content: vec![Inline::Text(text)] });
+        p.runs.push(Run {
+            char_shape: 0,
+            char_ref,
+            content: vec![Inline::Text(text)],
+        });
     }
 }
 
@@ -356,7 +368,10 @@ mod tests {
         // cell text round-trips into the AST
         let doc_text = {
             let mut s = SemanticDoc::default();
-            s.sections.push(Section { blocks, ..Default::default() });
+            s.sections.push(Section {
+                blocks,
+                ..Default::default()
+            });
             s.plain_text()
         };
         assert!(doc_text.contains("첫 문단"));
@@ -366,7 +381,10 @@ mod tests {
     #[test]
     fn parse_in_makes_existing_formatting_readable() {
         // P1: parse_semantic fills header_pools; an existing bold/colored run is readable by value.
-        let p = concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/hwpx/FormattingShowcase.hwpx");
+        let p = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/hwpx/FormattingShowcase.hwpx"
+        );
         let doc = parse_semantic(&std::fs::read(p).unwrap()).unwrap();
         assert!(!doc.header_pools.char.is_empty(), "charPr pool parsed");
         assert!(!doc.header_pools.para.is_empty(), "paraPr pool parsed");
@@ -381,7 +399,10 @@ mod tests {
             _ => None,
         });
         let cr = bold_ref.expect("found a run whose original charPr is bold");
-        assert!(doc.char_shape_of_ref(&cr).unwrap().bold, "existing bold formatting is readable");
+        assert!(
+            doc.char_shape_of_ref(&cr).unwrap().bold,
+            "existing bold formatting is readable"
+        );
     }
 
     #[test]
@@ -389,10 +410,13 @@ mod tests {
         let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p id="100" paraPrIDRef="3" styleIDRef="0"><hp:run charPrIDRef="0"><hp:t>가</hp:t></hp:run><hp:run charPrIDRef="7"><hp:t>나</hp:t></hp:run></hp:p><hp:p id="200" paraPrIDRef="3"><hp:run charPrIDRef="0"><hp:tbl rowCnt="1" colCnt="1"><hp:tr><hp:tc><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:subList><hp:p><hp:run><hp:t>셀</hp:t></hp:run></hp:p></hp:subList></hp:tc></hp:tr></hp:tbl></hp:run></hp:p></hs:sec>"#;
         let mut blocks = Vec::new();
         parse_section(xml, &mut blocks).unwrap();
-        let paras: Vec<&Paragraph> = blocks.iter().filter_map(|b| match b {
-            Block::Paragraph(p) => Some(p),
-            _ => None,
-        }).collect();
+        let paras: Vec<&Paragraph> = blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Paragraph(p) => Some(p),
+                _ => None,
+            })
+            .collect();
 
         // First top-level paragraph: simple, 2 runs with their charPrIDRefs preserved, valid span.
         let p0 = paras[0];
@@ -401,13 +425,19 @@ mod tests {
         assert_eq!(src.para_pr.as_deref(), Some("3"));
         assert_eq!(src.id.as_deref(), Some("100"));
         let (s, e) = src.span;
-        assert!(xml[s..e].starts_with("<hp:p ") && xml[s..e].ends_with("</hp:p>"), "tight span: {:?}", &xml[s..e]);
+        assert!(
+            xml[s..e].starts_with("<hp:p ") && xml[s..e].ends_with("</hp:p>"),
+            "tight span: {:?}",
+            &xml[s..e]
+        );
         assert_eq!(p0.runs.len(), 2, "runs split per <hp:run>");
         assert_eq!(p0.runs[0].char_ref.as_deref(), Some("0"));
         assert_eq!(p0.runs[1].char_ref.as_deref(), Some("7"));
 
         // Second top-level paragraph WRAPS a table → NOT simple (must never be re-emitted in place).
-        let wrapper = paras.iter().find(|p| p.source.as_ref().is_some_and(|sc| !sc.simple));
+        let wrapper = paras
+            .iter()
+            .find(|p| p.source.as_ref().is_some_and(|sc| !sc.simple));
         assert!(wrapper.is_some(), "table-wrapping paragraph is non-simple");
     }
 }

@@ -31,8 +31,14 @@ pub const HWPML_COMPAT_ROOT_NAMESPACES: &[(&str, &str)] = &[
     ("hpf", "http://www.hancom.co.kr/schema/2011/hpf"),
     ("dc", "http://purl.org/dc/elements/1.1/"),
     ("opf", "http://www.idpf.org/2007/opf/"),
-    ("ooxmlchart", "http://www.hancom.co.kr/hwpml/2016/ooxmlchart"),
-    ("hwpunitchar", "http://www.hancom.co.kr/hwpml/2016/HwpUnitChar"),
+    (
+        "ooxmlchart",
+        "http://www.hancom.co.kr/hwpml/2016/ooxmlchart",
+    ),
+    (
+        "hwpunitchar",
+        "http://www.hancom.co.kr/hwpml/2016/HwpUnitChar",
+    ),
     ("epub", "http://www.idpf.org/2007/ops"),
     ("config", "urn:oasis:names:tc:opendocument:xmlns:config:1.0"),
 ];
@@ -72,7 +78,9 @@ pub fn validate_open_safety(bytes: &[u8]) -> SafetyReport {
                 if let Ok(b) = pkg.read_part(&name) {
                     let s = String::from_utf8_lossy(&b);
                     if !s.contains("standalone=\"yes\"") {
-                        blocking.push(format!("{name}: missing XML declaration with standalone=\"yes\""));
+                        blocking.push(format!(
+                            "{name}: missing XML declaration with standalone=\"yes\""
+                        ));
                     }
                     if !s.contains(":sec") {
                         blocking.push(format!("{name}: missing section root element"));
@@ -83,7 +91,11 @@ pub fn validate_open_safety(bytes: &[u8]) -> SafetyReport {
         Err(e) => blocking.push(format!("not a valid OPC package: {e}")),
     }
 
-    SafetyReport { ok: blocking.is_empty(), blocking, warnings }
+    SafetyReport {
+        ok: blocking.is_empty(),
+        blocking,
+        warnings,
+    }
 }
 
 /// STRICTER gate for the FROM-SCRATCH synthesis path (HWP5→HWPX). On top of [`validate_open_safety`]
@@ -115,7 +127,9 @@ pub fn validate_synthesis_safety(bytes: &[u8]) -> SafetyReport {
                     ("borderFills", "borderFill"),
                     ("styles", "style"),
                 ] {
-                    if let Some((declared, actual)) = pool_itemcnt_mismatch(&header, container, elem) {
+                    if let Some((declared, actual)) =
+                        pool_itemcnt_mismatch(&header, container, elem)
+                    {
                         blocking.push(format!(
                             "{container}: itemCnt={declared} but {actual} <hh:{elem}> children"
                         ));
@@ -153,7 +167,9 @@ pub fn validate_synthesis_safety(bytes: &[u8]) -> SafetyReport {
                 let is_section = name.starts_with("Contents/section") && name.ends_with(".xml");
                 let is_bindata = name.starts_with("BinData/");
                 if (is_section || is_bindata) && !item_hrefs.contains(name.as_str()) {
-                    blocking.push(format!("content.hpf manifest is missing an entry for '{name}'"));
+                    blocking.push(format!(
+                        "content.hpf manifest is missing an entry for '{name}'"
+                    ));
                 }
             }
             // Every image reference in a section resolves to a manifest item.
@@ -188,7 +204,11 @@ pub fn validate_synthesis_safety(bytes: &[u8]) -> SafetyReport {
         }
     }
 
-    SafetyReport { ok: blocking.is_empty(), blocking, warnings }
+    SafetyReport {
+        ok: blocking.is_empty(),
+        blocking,
+        warnings,
+    }
 }
 
 /// The set of `{attr}` values appearing in the open tag that starts at each `{tag}` occurrence
@@ -199,7 +219,10 @@ fn tagged_attr_set(xml: &str, tag: &str, attr: &str) -> std::collections::BTreeS
     let pat = format!("{attr}=\"");
     while let Some(p) = xml[idx..].find(tag) {
         let start = idx + p + tag.len();
-        let tag_end = xml[start..].find('>').map(|e| start + e).unwrap_or(xml.len());
+        let tag_end = xml[start..]
+            .find('>')
+            .map(|e| start + e)
+            .unwrap_or(xml.len());
         if let Some(a) = xml[start..tag_end].find(&pat) {
             let vs = start + a + pat.len();
             if let Some(ve) = xml[vs..tag_end].find('"') {
@@ -222,7 +245,10 @@ fn manifest_attr_set(hpf: &str, attr: &str) -> std::collections::BTreeSet<String
     let mut idx = 0;
     while let Some(p) = hpf[idx..].find("<opf:item ") {
         let start = idx + p;
-        let end = hpf[start..].find("/>").map(|e| start + e).unwrap_or(hpf.len());
+        let end = hpf[start..]
+            .find("/>")
+            .map(|e| start + e)
+            .unwrap_or(hpf.len());
         let tag = &hpf[start..end];
         let pat = format!("{attr}=\"");
         if let Some(a) = tag.find(&pat) {
@@ -243,7 +269,10 @@ fn attr_values(xml: &str, attr: &str) -> std::collections::BTreeSet<String> {
     let mut idx = 0;
     while let Some(p) = xml[idx..].find(&pat) {
         let start = idx + p + pat.len();
-        let end = xml[start..].find('"').map(|e| start + e).unwrap_or(xml.len());
+        let end = xml[start..]
+            .find('"')
+            .map(|e| start + e)
+            .unwrap_or(xml.len());
         out.insert(xml[start..end].to_string());
         idx = end;
     }
@@ -270,7 +299,10 @@ fn pool_ids(header: &str, container: &str, elem: &str) -> std::collections::BTre
     let mut idx = 0;
     while let Some(p) = seg[idx..].find(&needle) {
         let start = idx + p + needle.len();
-        let tag_end = seg[start..].find('>').map(|e| start + e).unwrap_or(seg.len());
+        let tag_end = seg[start..]
+            .find('>')
+            .map(|e| start + e)
+            .unwrap_or(seg.len());
         if let Some(id) = attr_u64(&seg[start..tag_end], "id") {
             ids.insert(id);
         }
@@ -286,7 +318,9 @@ fn pool_itemcnt_mismatch(header: &str, container: &str, elem: &str) -> Option<(u
     let tag_end = header[p..].find('>')? + p;
     let declared = attr_u64(&header[p..=tag_end], "itemCnt")?;
     let cstart = header[p..].find(&format!("</hh:{container}>"))? + p;
-    let actual = header[tag_end..cstart].matches(&format!("<hh:{elem} ")).count();
+    let actual = header[tag_end..cstart]
+        .matches(&format!("<hh:{elem} "))
+        .count();
     (declared as usize != actual).then_some((declared, actual))
 }
 
@@ -303,7 +337,10 @@ fn check_refs(
     let mut bad = std::collections::BTreeSet::new();
     while let Some(p) = xml[idx..].find(&needle) {
         let start = idx + p + needle.len();
-        let end = xml[start..].find('"').map(|e| start + e).unwrap_or(xml.len());
+        let end = xml[start..]
+            .find('"')
+            .map(|e| start + e)
+            .unwrap_or(xml.len());
         if let Ok(id) = xml[start..end].parse::<u64>() {
             if !valid.contains(&id) {
                 bad.insert(id);
@@ -312,7 +349,9 @@ fn check_refs(
         idx = end;
     }
     for id in bad {
-        out.push(format!("{part}: {attr}=\"{id}\" has no matching header pool entry"));
+        out.push(format!(
+            "{part}: {attr}=\"{id}\" has no matching header pool entry"
+        ));
     }
 }
 
@@ -338,7 +377,10 @@ mod tests {
         let ok = r#"<hh:charProperties itemCnt="2"><hh:charPr id="0"/><hh:charPr id="1"/></hh:charProperties>"#;
         assert_eq!(pool_itemcnt_mismatch(ok, "charProperties", "charPr"), None);
         let bad = r#"<hh:charProperties itemCnt="3"><hh:charPr id="0"/><hh:charPr id="1"/></hh:charProperties>"#;
-        assert_eq!(pool_itemcnt_mismatch(bad, "charProperties", "charPr"), Some((3, 2)));
+        assert_eq!(
+            pool_itemcnt_mismatch(bad, "charProperties", "charPr"),
+            Some((3, 2))
+        );
     }
 
     #[test]
@@ -351,7 +393,10 @@ mod tests {
 
         let sec = r#"<hp:run><hp:pic><hc:img binaryItemIDRef="image1"/></hp:pic></hp:run><hc:img binaryItemIDRef="image9"/>"#;
         let refs = attr_values(sec, "binaryItemIDRef");
-        assert_eq!(refs, BTreeSet::from(["image1".to_string(), "image9".to_string()]));
+        assert_eq!(
+            refs,
+            BTreeSet::from(["image1".to_string(), "image9".to_string()])
+        );
         // image9 is NOT in the manifest → the integrity check would flag it.
         assert!(!ids.contains("image9"));
     }

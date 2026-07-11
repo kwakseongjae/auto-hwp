@@ -14,7 +14,8 @@ const ANTHROPIC_VERSION: &str = "2023-06-01";
 /// Default model — quality-first for Korean 공문서 drafting (override via TF_HWP_MODEL).
 pub const DEFAULT_MODEL: &str = "claude-opus-4-8";
 
-const SYSTEM_PROMPT: &str = "당신은 한국 공문서 작성 보조자입니다. 주어진 문서 맥락과 지시에 따라, \
+const SYSTEM_PROMPT: &str =
+    "당신은 한국 공문서 작성 보조자입니다. 주어진 문서 맥락과 지시에 따라, \
 추가할 새 문단만 한국어 공문서체로 작성하세요. 머리말·설명·마크다운·번호 없이 본문 문단만, \
 한 줄에 한 문단씩 출력하세요.";
 
@@ -27,9 +28,10 @@ impl AnthropicProvider {
     /// BYOK: resolve the key from `ANTHROPIC_API_KEY` (env) or the OS keychain (feature `keyring`);
     /// model from `TF_HWP_MODEL` or the default.
     pub fn from_env() -> Result<Self> {
-        let api_key = super::secret::resolve_anthropic_key().ok_or(Error::CapabilityUnavailable(
-            "no Anthropic key — set ANTHROPIC_API_KEY or store one (tf-hwp ai-key set)",
-        ))?;
+        let api_key =
+            super::secret::resolve_anthropic_key().ok_or(Error::CapabilityUnavailable(
+                "no Anthropic key — set ANTHROPIC_API_KEY or store one (tf-hwp ai-key set)",
+            ))?;
         let model = std::env::var("TF_HWP_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
         Ok(Self { api_key, model })
     }
@@ -114,7 +116,11 @@ impl LlmProvider for AnthropicProvider {
 
     /// Anchored chat-editing: prompt with the edit brief + the document's `[s/b]` outline so the
     /// model emits a single `EditScript` JSON, then parse it (no raw XML ever).
-    fn propose_edit_script(&self, outline: &str, instruction: &str) -> Result<super::edit::EditScript> {
+    fn propose_edit_script(
+        &self,
+        outline: &str,
+        instruction: &str,
+    ) -> Result<super::edit::EditScript> {
         let user = format!(
             "[문서 개요]\n{outline}\n\n[편집 지시]\n{instruction}\n\n위 지시를 편집 명령 JSON으로 출력하세요."
         );

@@ -151,7 +151,11 @@ pub enum EditCommand {
     },
     /// Replace the text of SEVERAL EXISTING cells of the anchor table in one batch (the dominant
     /// "표를 채워줘" case). Each entry addresses a cell by `(row, col)` and sets its plain `text`.
-    SetCells { section: usize, block: usize, cells: Vec<CellEdit> },
+    SetCells {
+        section: usize,
+        block: usize,
+        cells: Vec<CellEdit>,
+    },
     /// Insert ONE body row into the EXISTING anchor table. `at` omitted = append at the end; each
     /// cell is a bare string or `{text,col_span,row_span,bold,shade}` object (lenient [`AiCell`]).
     InsertRow {
@@ -162,7 +166,11 @@ pub enum EditCommand {
         cells: Vec<AiCell>,
     },
     /// Append SEVERAL body rows to the EXISTING anchor table (the "행 N개 추가/채워줘" case).
-    AppendRows { section: usize, block: usize, rows: Vec<Vec<AiCell>> },
+    AppendRows {
+        section: usize,
+        block: usize,
+        rows: Vec<Vec<AiCell>>,
+    },
 }
 
 /// One cell address+text for [`EditCommand::SetCells`] (batch existing-cell fill).
@@ -181,9 +189,16 @@ fn mm_to_hwpunit(mm: f32) -> i32 {
 
 /// Detect an image `kind` ("png"/"jpg"/…) from a file path extension.
 fn image_kind(path: &str) -> String {
-    path.rsplit('.').next().map(|e| e.to_ascii_lowercase()).filter(|e| {
-        matches!(e.as_str(), "png" | "jpg" | "jpeg" | "gif" | "bmp" | "tif" | "tiff" | "wmf" | "emf")
-    }).unwrap_or_else(|| "png".into())
+    path.rsplit('.')
+        .next()
+        .map(|e| e.to_ascii_lowercase())
+        .filter(|e| {
+            matches!(
+                e.as_str(),
+                "png" | "jpg" | "jpeg" | "gif" | "bmp" | "tif" | "tiff" | "wmf" | "emf"
+            )
+        })
+        .unwrap_or_else(|| "png".into())
 }
 
 /// Per-section record of an emitted structural change, in **raw** (original-outline) coordinates,
@@ -223,16 +238,28 @@ struct RowDrift {
 
 /// Effective row count of the table at `(section, block)`: its original `rows` plus every row a
 /// prior same-table insert in this script added — the correct append point for a later row insert.
-fn effective_rows(doc: &hwp_model::document::SemanticDoc, rows: &[RowDrift], section: usize, block: usize) -> usize {
+fn effective_rows(
+    doc: &hwp_model::document::SemanticDoc,
+    rows: &[RowDrift],
+    section: usize,
+    block: usize,
+) -> usize {
     let base = table_rows(doc, section, block);
-    let added: usize = rows.iter().filter(|r| r.section == section && r.block == block).map(|r| r.count).sum();
+    let added: usize = rows
+        .iter()
+        .filter(|r| r.section == section && r.block == block)
+        .map(|r| r.count)
+        .sum();
     base + added
 }
 
 /// Adjust an explicit row index by prior same-table inserts (rows at-or-before it shift it down).
 fn adjust_row(rows: &[RowDrift], section: usize, block: usize, raw_at: usize) -> usize {
     let mut at = raw_at;
-    for r in rows.iter().filter(|r| r.section == section && r.block == block) {
+    for r in rows
+        .iter()
+        .filter(|r| r.section == section && r.block == block)
+    {
         if r.at <= raw_at {
             at += r.count;
         }
@@ -253,7 +280,10 @@ fn raw_insert_point(sec_len: usize, block: usize, position: Position) -> usize {
 /// Compile an [`EditScript`] into ordered [`Op`]s. Reads image files for `InsertImage`. The ops are
 /// addressed so that **sequential** application (the order returned) lands each edit correctly even
 /// when several edits touch the same section. Does NOT mutate the document.
-pub fn compile_edits(doc: &hwp_model::document::SemanticDoc, script: &EditScript) -> Result<Vec<Op>> {
+pub fn compile_edits(
+    doc: &hwp_model::document::SemanticDoc,
+    script: &EditScript,
+) -> Result<Vec<Op>> {
     let sec_len = |s: usize| doc.sections.get(s).map(|sec| sec.blocks.len()).unwrap_or(0);
     let mut ops = Vec::new();
     let mut changes: Vec<Drift> = Vec::new();
@@ -263,7 +293,13 @@ pub fn compile_edits(doc: &hwp_model::document::SemanticDoc, script: &EditScript
 
     for cmd in &script.edits {
         match cmd {
-            EditCommand::InsertParagraph { section, block, position, runs, para } => {
+            EditCommand::InsertParagraph {
+                section,
+                block,
+                position,
+                runs,
+                para,
+            } => {
                 let raw = raw_insert_point(sec_len(*section), *block, *position);
                 let index = adjust(&changes, *section, raw);
                 ops.push(Op::InsertParagraphAt {
@@ -272,15 +308,36 @@ pub fn compile_edits(doc: &hwp_model::document::SemanticDoc, script: &EditScript
                     runs: runs.iter().map(AiRun::to_run_spec).collect(),
                     para: para.to_para_spec(),
                 });
-                changes.push(Drift { section: *section, point: raw, delta: 1 });
+                changes.push(Drift {
+                    section: *section,
+                    point: raw,
+                    delta: 1,
+                });
             }
-            EditCommand::SetParagraph { section, block, text } => {
+            EditCommand::SetParagraph {
+                section,
+                block,
+                text,
+            } => {
                 // Fill an EXISTING paragraph (no block-count change → no Drift); adjust the anchor for any
                 // prior inserts in this same script.
                 let index = adjust(&changes, *section, *block);
-                ops.push(Op::SetParagraphText { section: *section, block: index, text: text.clone() });
+                ops.push(Op::SetParagraphText {
+                    section: *section,
+                    block: index,
+                    text: text.clone(),
+                });
             }
-            EditCommand::SetCharFmt { section, block, row, col, bold, italic, size_pt, font } => {
+            EditCommand::SetCharFmt {
+                section,
+                block,
+                row,
+                col,
+                bold,
+                italic,
+                size_pt,
+                font,
+            } => {
                 // Re-format an EXISTING paragraph/cell (no block-count change → no Drift); adjust the
                 // anchor for prior inserts in this script.
                 let index = adjust(&changes, *section, *block);
@@ -294,25 +351,48 @@ pub fn compile_edits(doc: &hwp_model::document::SemanticDoc, script: &EditScript
                     font: font.clone(),
                 });
             }
-            EditCommand::InsertHeading { section, block, position, text, para } => {
+            EditCommand::InsertHeading {
+                section,
+                block,
+                position,
+                text,
+                para,
+            } => {
                 let raw = raw_insert_point(sec_len(*section), *block, *position);
                 let index = adjust(&changes, *section, raw);
-                let run = AiRun { text: text.clone(), bold: true, ..Default::default() };
+                let run = AiRun {
+                    text: text.clone(),
+                    bold: true,
+                    ..Default::default()
+                };
                 ops.push(Op::InsertParagraphAt {
                     section: *section,
                     index,
                     runs: vec![run.to_run_spec()],
                     para: para.to_para_spec(),
                 });
-                changes.push(Drift { section: *section, point: raw, delta: 1 });
+                changes.push(Drift {
+                    section: *section,
+                    point: raw,
+                    delta: 1,
+                });
             }
-            EditCommand::InsertTable { section, block, position, header, rows } => {
+            EditCommand::InsertTable {
+                section,
+                block,
+                position,
+                header,
+                rows,
+            } => {
                 let raw = raw_insert_point(sec_len(*section), *block, *position);
                 let index = adjust(&changes, *section, raw);
                 let mut grid: Vec<Vec<hwp_ops::CellSpec>> = Vec::new();
                 if !header.is_empty() {
                     grid.push(
-                        header.iter().map(|h| AiCell::Text(h.clone()).to_cell_spec(true)).collect(),
+                        header
+                            .iter()
+                            .map(|h| AiCell::Text(h.clone()).to_cell_spec(true))
+                            .collect(),
                     );
                 }
                 for row in rows {
@@ -321,10 +401,25 @@ pub fn compile_edits(doc: &hwp_model::document::SemanticDoc, script: &EditScript
                 if grid.is_empty() {
                     return Err(Error::Other("insert_table: 표에 행이 없습니다".into()));
                 }
-                ops.push(Op::InsertTableAt { section: *section, index, rows: grid });
-                changes.push(Drift { section: *section, point: raw, delta: 1 });
+                ops.push(Op::InsertTableAt {
+                    section: *section,
+                    index,
+                    rows: grid,
+                });
+                changes.push(Drift {
+                    section: *section,
+                    point: raw,
+                    delta: 1,
+                });
             }
-            EditCommand::InsertImage { section, block, position, path, width_mm, height_mm } => {
+            EditCommand::InsertImage {
+                section,
+                block,
+                position,
+                path,
+                width_mm,
+                height_mm,
+            } => {
                 let bytes = std::fs::read(path)
                     .map_err(|e| Error::Other(format!("insert_image: {path} 읽기 실패: {e}")))?;
                 let raw = raw_insert_point(sec_len(*section), *block, *position);
@@ -337,14 +432,30 @@ pub fn compile_edits(doc: &hwp_model::document::SemanticDoc, script: &EditScript
                     width: mm_to_hwpunit(width_mm.unwrap_or(80.0)),
                     height: mm_to_hwpunit(height_mm.unwrap_or(60.0)),
                 });
-                changes.push(Drift { section: *section, point: raw, delta: 1 });
+                changes.push(Drift {
+                    section: *section,
+                    point: raw,
+                    delta: 1,
+                });
             }
             EditCommand::DeleteBlock { section, block } => {
                 let index = adjust(&changes, *section, *block);
-                ops.push(Op::DeleteBlock { section: *section, index });
-                changes.push(Drift { section: *section, point: *block, delta: -1 });
+                ops.push(Op::DeleteBlock {
+                    section: *section,
+                    index,
+                });
+                changes.push(Drift {
+                    section: *section,
+                    point: *block,
+                    delta: -1,
+                });
             }
-            EditCommand::ShadeColumn { section, block, col, shade } => {
+            EditCommand::ShadeColumn {
+                section,
+                block,
+                col,
+                shade,
+            } => {
                 let index = adjust(&changes, *section, *block);
                 ops.push(Op::SetTableCellShade {
                     section: *section,
@@ -353,7 +464,12 @@ pub fn compile_edits(doc: &hwp_model::document::SemanticDoc, script: &EditScript
                     shade: shade.clone(),
                 });
             }
-            EditCommand::ShadeRow { section, block, row, shade } => {
+            EditCommand::ShadeRow {
+                section,
+                block,
+                row,
+                shade,
+            } => {
                 let index = adjust(&changes, *section, *block);
                 ops.push(Op::SetTableCellShade {
                     section: *section,
@@ -362,7 +478,13 @@ pub fn compile_edits(doc: &hwp_model::document::SemanticDoc, script: &EditScript
                     shade: shade.clone(),
                 });
             }
-            EditCommand::ShadeCell { section, block, row, col, shade } => {
+            EditCommand::ShadeCell {
+                section,
+                block,
+                row,
+                col,
+                shade,
+            } => {
                 let index = adjust(&changes, *section, *block);
                 ops.push(Op::SetTableCellShade {
                     section: *section,
@@ -371,7 +493,13 @@ pub fn compile_edits(doc: &hwp_model::document::SemanticDoc, script: &EditScript
                     shade: shade.clone(),
                 });
             }
-            EditCommand::SetCell { section, block, row, col, runs } => {
+            EditCommand::SetCell {
+                section,
+                block,
+                row,
+                col,
+                runs,
+            } => {
                 let index = adjust(&changes, *section, *block);
                 ops.push(Op::SetTableCell {
                     section: *section,
@@ -381,7 +509,11 @@ pub fn compile_edits(doc: &hwp_model::document::SemanticDoc, script: &EditScript
                     runs: runs.iter().map(AiRun::to_run_spec).collect(),
                 });
             }
-            EditCommand::SetCells { section, block, cells } => {
+            EditCommand::SetCells {
+                section,
+                block,
+                cells,
+            } => {
                 let index = adjust(&changes, *section, *block);
                 for cell in cells {
                     ops.push(Op::SetTableCell {
@@ -389,11 +521,20 @@ pub fn compile_edits(doc: &hwp_model::document::SemanticDoc, script: &EditScript
                         index,
                         row: cell.row,
                         col: cell.col,
-                        runs: vec![AiRun { text: cell.text.clone(), ..Default::default() }.to_run_spec()],
+                        runs: vec![AiRun {
+                            text: cell.text.clone(),
+                            ..Default::default()
+                        }
+                        .to_run_spec()],
                     });
                 }
             }
-            EditCommand::InsertRow { section, block, at, cells } => {
+            EditCommand::InsertRow {
+                section,
+                block,
+                at,
+                cells,
+            } => {
                 let index = adjust(&changes, *section, *block);
                 // Explicit `at` is a raw row coordinate (shift it by prior same-table inserts);
                 // omitted = append at the *effective* end (original rows + earlier inserts).
@@ -407,9 +548,18 @@ pub fn compile_edits(doc: &hwp_model::document::SemanticDoc, script: &EditScript
                     at,
                     rows: vec![cells.iter().map(|c| c.to_cell_spec(false)).collect()],
                 });
-                row_changes.push(RowDrift { section: *section, block: index, at, count: 1 });
+                row_changes.push(RowDrift {
+                    section: *section,
+                    block: index,
+                    at,
+                    count: 1,
+                });
             }
-            EditCommand::AppendRows { section, block, rows } => {
+            EditCommand::AppendRows {
+                section,
+                block,
+                rows,
+            } => {
                 let index = adjust(&changes, *section, *block);
                 let at = effective_rows(doc, &row_changes, *section, index);
                 let grid: Vec<Vec<hwp_ops::CellSpec>> = rows
@@ -417,8 +567,18 @@ pub fn compile_edits(doc: &hwp_model::document::SemanticDoc, script: &EditScript
                     .map(|row| row.iter().map(|c| c.to_cell_spec(false)).collect())
                     .collect();
                 let count = grid.len();
-                ops.push(Op::TableInsertRows { section: *section, index, at, rows: grid });
-                row_changes.push(RowDrift { section: *section, block: index, at, count });
+                ops.push(Op::TableInsertRows {
+                    section: *section,
+                    index,
+                    at,
+                    rows: grid,
+                });
+                row_changes.push(RowDrift {
+                    section: *section,
+                    block: index,
+                    at,
+                    count,
+                });
             }
         }
     }
@@ -513,12 +673,18 @@ mod tests {
         let blocks = (0..n)
             .map(|i| {
                 Block::Paragraph(Paragraph {
-                    runs: vec![Run { content: vec![Inline::Text(format!("p{i}"))], ..Default::default() }],
+                    runs: vec![Run {
+                        content: vec![Inline::Text(format!("p{i}"))],
+                        ..Default::default()
+                    }],
                     ..Default::default()
                 })
             })
             .collect();
-        doc.sections.push(Section { blocks, ..Default::default() });
+        doc.sections.push(Section {
+            blocks,
+            ..Default::default()
+        });
         doc
     }
 
@@ -530,10 +696,15 @@ mod tests {
 
     fn para_text(doc: &SemanticDoc, i: usize) -> String {
         match &doc.sections[0].blocks[i] {
-            Block::Paragraph(p) => p.runs.iter().flat_map(|r| &r.content).filter_map(|c| match c {
-                Inline::Text(t) => Some(t.as_str()),
-                _ => None,
-            }).collect(),
+            Block::Paragraph(p) => p
+                .runs
+                .iter()
+                .flat_map(|r| &r.content)
+                .filter_map(|c| match c {
+                    Inline::Text(t) => Some(t.as_str()),
+                    _ => None,
+                })
+                .collect(),
             _ => String::new(),
         }
     }
@@ -556,13 +727,17 @@ mod tests {
         let script = parse_script(
             r#"{"edits":[{"op":"insert_table","section":0,"block":1,"position":"after",
                 "rows":[["x"]]}]}"#,
-        ).unwrap();
+        )
+        .unwrap();
         let ops = compile_edits(&doc, &script).unwrap();
         let mut doc = doc;
         apply_all(&mut doc, &ops);
         assert_eq!(para_text(&doc, 0), "p0");
         assert_eq!(para_text(&doc, 1), "p1");
-        assert!(matches!(doc.sections[0].blocks[2], Block::Table(_)), "table after 목차");
+        assert!(
+            matches!(doc.sections[0].blocks[2], Block::Table(_)),
+            "table after 목차"
+        );
         assert_eq!(para_text(&doc, 3), "p2");
     }
 
@@ -576,13 +751,16 @@ mod tests {
                 {"op":"insert_heading","section":0,"block":0,"position":"after","text":"H1"},
                 {"op":"insert_heading","section":0,"block":0,"position":"after","text":"H2"}
             ]}"#,
-        ).unwrap();
+        )
+        .unwrap();
         let ops = compile_edits(&doc, &script).unwrap();
         let mut doc = doc;
         apply_all(&mut doc, &ops); // must not panic / go out of range
         assert_eq!(para_text(&doc, 0), "p0");
         // both headings present between p0 and p1
-        let texts: Vec<String> = (0..doc.sections[0].blocks.len()).map(|i| para_text(&doc, i)).collect();
+        let texts: Vec<String> = (0..doc.sections[0].blocks.len())
+            .map(|i| para_text(&doc, i))
+            .collect();
         assert!(texts.contains(&"H1".to_string()) && texts.contains(&"H2".to_string()));
         assert_eq!(texts[0], "p0");
         assert_eq!(texts.last().unwrap(), "p2");
@@ -596,12 +774,15 @@ mod tests {
                 {"op":"delete_block","section":0,"block":1},
                 {"op":"insert_heading","section":0,"block":3,"position":"after","text":"END"}
             ]}"#,
-        ).unwrap();
+        )
+        .unwrap();
         let ops = compile_edits(&doc, &script).unwrap();
         let mut doc = doc;
         apply_all(&mut doc, &ops);
         // p1 gone; p0,p2,p3 remain then END
-        let texts: Vec<String> = (0..doc.sections[0].blocks.len()).map(|i| para_text(&doc, i)).collect();
+        let texts: Vec<String> = (0..doc.sections[0].blocks.len())
+            .map(|i| para_text(&doc, i))
+            .collect();
         assert_eq!(texts, vec!["p0", "p2", "p3", "END"]);
     }
 
@@ -609,7 +790,10 @@ mod tests {
     /// The single header row is `["번호","이름","역할"]` (built via the op-bus, like the real path).
     fn doc_with_table() -> SemanticDoc {
         let mut doc = doc_n(1); // p0
-        let cell = |t: &str| hwp_ops::CellSpec { text: t.into(), ..Default::default() };
+        let cell = |t: &str| hwp_ops::CellSpec {
+            text: t.into(),
+            ..Default::default()
+        };
         hwp_ops::apply(
             &mut doc,
             &Op::InsertTableAt {
@@ -623,8 +807,14 @@ mod tests {
     }
 
     fn table_cell_text(doc: &SemanticDoc, bi: usize, row: usize, col: usize) -> String {
-        let Block::Table(t) = &doc.sections[0].blocks[bi] else { panic!("block {bi} not a table") };
-        let cell = t.cells.iter().find(|c| c.active && c.row == row && c.col == col).expect("cell");
+        let Block::Table(t) = &doc.sections[0].blocks[bi] else {
+            panic!("block {bi} not a table")
+        };
+        let cell = t
+            .cells
+            .iter()
+            .find(|c| c.active && c.row == row && c.col == col)
+            .expect("cell");
         cell.blocks
             .iter()
             .filter_map(|b| match b {
@@ -674,16 +864,35 @@ mod tests {
     /// the fix for the AI inserting b42 instead of filling the pointed b41.
     #[test]
     fn set_paragraph_fills_the_anchor_block_in_place() {
-        let json = r##"{"edits":[{"op":"set_paragraph","section":0,"block":1,"text":"곽성재는 천재"}]}"##;
+        let json =
+            r##"{"edits":[{"op":"set_paragraph","section":0,"block":1,"text":"곽성재는 천재"}]}"##;
         let script = parse_script(json).expect("set_paragraph must parse");
         let mut doc = doc_n(3);
         let before = doc.sections[0].blocks.len();
         let ops = compile_edits(&doc, &script).expect("compiles");
         apply_all(&mut doc, &ops);
-        assert_eq!(doc.sections[0].blocks.len(), before, "fill must NOT add a block");
+        assert_eq!(
+            doc.sections[0].blocks.len(),
+            before,
+            "fill must NOT add a block"
+        );
         if let Block::Paragraph(p) = &doc.sections[0].blocks[1] {
-            let txt: String = p.runs.iter().flat_map(|r| &r.content).filter_map(|i| if let Inline::Text(s) = i { Some(s.as_str()) } else { None }).collect();
-            assert_eq!(txt, "곽성재는 천재", "the anchor paragraph's text is replaced in place");
+            let txt: String = p
+                .runs
+                .iter()
+                .flat_map(|r| &r.content)
+                .filter_map(|i| {
+                    if let Inline::Text(s) = i {
+                        Some(s.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            assert_eq!(
+                txt, "곽성재는 천재",
+                "the anchor paragraph's text is replaced in place"
+            );
         } else {
             panic!("block 1 must still be a paragraph");
         }
@@ -697,12 +906,20 @@ mod tests {
         let before = doc.sections[0].blocks.len();
         let ops = compile_edits(&doc, &script).expect("compiles");
         apply_all(&mut doc, &ops);
-        assert_eq!(doc.sections[0].blocks.len(), before, "format change must NOT add a block");
+        assert_eq!(
+            doc.sections[0].blocks.len(),
+            before,
+            "format change must NOT add a block"
+        );
         if let Block::Paragraph(p) = &doc.sections[0].blocks[1] {
             let sh = &doc.char_shapes[p.runs[0].char_shape];
             assert!(sh.bold, "bold applied");
             assert_eq!(sh.height, 1400, "14pt → height 1400");
-            assert_eq!(sh.font_family.as_deref(), Some("맑은 고딕"), "font_family set");
+            assert_eq!(
+                sh.font_family.as_deref(),
+                Some("맑은 고딕"),
+                "font_family set"
+            );
         } else {
             panic!("block 1 must still be a paragraph");
         }
@@ -738,6 +955,9 @@ mod tests {
         let proposal = crate::propose_edits(&doc, &prov, "결론 추가해줘").unwrap();
         assert_eq!(proposal.ops.len(), 1);
         let preview = proposal.preview();
-        assert!(preview.contains("[mock-ai] 결론 추가해줘"), "preview shows the edit: {preview}");
+        assert!(
+            preview.contains("[mock-ai] 결론 추가해줘"),
+            "preview shows the edit: {preview}"
+        );
     }
 }

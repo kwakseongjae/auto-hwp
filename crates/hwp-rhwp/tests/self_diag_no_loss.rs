@@ -16,8 +16,11 @@ use hwp_model::prelude::*;
 use hwp_typeset::{place_doc, PlacedPage, RealFontMetrics};
 
 fn benchmark1() -> SemanticDoc {
-    let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../benchmarks/benchmark1.hwp"))
-        .expect("benchmarks/benchmark1.hwp");
+    let bytes = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../benchmarks/benchmark1.hwp"
+    ))
+    .expect("benchmarks/benchmark1.hwp");
     hwp_rhwp::parse_to_semantic_guarded(&bytes).expect("lift benchmark1")
 }
 
@@ -26,7 +29,10 @@ fn benchmark1() -> SemanticDoc {
 fn page_text(pg: &PlacedPage) -> String {
     let mut lines: std::collections::BTreeMap<i64, Vec<(f64, char)>> = Default::default();
     for g in &pg.glyphs {
-        lines.entry((g.baseline / 60.0).round() as i64).or_default().push((g.x, g.ch));
+        lines
+            .entry((g.baseline / 60.0).round() as i64)
+            .or_default()
+            .push((g.x, g.ch));
     }
     let mut out = String::new();
     for (_, mut v) in lines {
@@ -43,11 +49,18 @@ fn baseline_of_sequence(pg: &PlacedPage, needle: &str) -> Option<f64> {
     // Group by line, sort by x, then scan each line for the (space-stripped) subsequence.
     let mut lines: std::collections::BTreeMap<i64, Vec<(f64, char)>> = Default::default();
     for g in &pg.glyphs {
-        lines.entry((g.baseline / 60.0).round() as i64).or_default().push((g.x, g.ch));
+        lines
+            .entry((g.baseline / 60.0).round() as i64)
+            .or_default()
+            .push((g.x, g.ch));
     }
     for (bl, mut v) in lines {
         v.sort_by(|a, b| a.0.total_cmp(&b.0));
-        let chars: Vec<char> = v.iter().map(|(_, c)| *c).filter(|c| !c.is_whitespace()).collect();
+        let chars: Vec<char> = v
+            .iter()
+            .map(|(_, c)| *c)
+            .filter(|c| !c.is_whitespace())
+            .collect();
         if chars.windows(want.len()).any(|w| w == want.as_slice()) {
             return Some(bl as f64 * 60.0);
         }
@@ -71,8 +84,8 @@ fn self_diag_guiha_is_not_dropped_and_stays_inside_the_frame_box() {
     let pg = &placed.pages[page_with_guiha];
 
     // (2) Containment: 귀하 must sit inside the outer 상자 — the block-11 frame wrapper's placed box.
-    let guiha_baseline = baseline_of_sequence(pg, "이사장 귀하")
-        .expect("귀하 glyph run present on its page");
+    let guiha_baseline =
+        baseline_of_sequence(pg, "이사장 귀하").expect("귀하 glyph run present on its page");
     let frame_box = pg
         .tables
         .iter()
@@ -107,7 +120,16 @@ fn self_diag_guiha_glyphs_present_in_own_render_svg() {
     let svgs = hwp_render::render_doc_svg(&doc, &fonts);
     let all: String = svgs.concat();
     // Each glyph is its own <text>…</text>; assert BOTH code points of "귀하" are emitted at least once.
-    assert!(all.contains(">귀<"), "own-render SVG must emit the 귀 glyph of '이사장 귀하' (issue 024)");
-    assert!(all.contains(">하<"), "own-render SVG must emit the 하 glyph of '이사장 귀하' (issue 024)");
-    assert!(all.contains(">이<") && all.contains(">사<") && all.contains(">장<"), "…and 이사장");
+    assert!(
+        all.contains(">귀<"),
+        "own-render SVG must emit the 귀 glyph of '이사장 귀하' (issue 024)"
+    );
+    assert!(
+        all.contains(">하<"),
+        "own-render SVG must emit the 하 glyph of '이사장 귀하' (issue 024)"
+    );
+    assert!(
+        all.contains(">이<") && all.contains(">사<") && all.contains(">장<"),
+        "…and 이사장"
+    );
 }

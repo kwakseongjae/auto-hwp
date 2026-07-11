@@ -39,7 +39,13 @@ pub struct FindMatch {
 
 impl From<&hwp_ops::find::Match> for FindMatch {
     fn from(m: &hwp_ops::find::Match) -> Self {
-        FindMatch { node: m.node.0, start: m.start, len: m.len, section: m.section, block: m.block }
+        FindMatch {
+            node: m.node.0,
+            start: m.start,
+            len: m.len,
+            section: m.section,
+            block: m.block,
+        }
     }
 }
 
@@ -122,7 +128,10 @@ fn renderable_bytes(session: &Session) -> Result<Vec<u8>, String> {
         );
     }
     // Unedited: render the faithful original. Both .hwp and .hwpx originals are rhwp-renderable.
-    session.source_bytes.clone().ok_or("no document open".into())
+    session
+        .source_bytes
+        .clone()
+        .ok_or("no document open".into())
 }
 
 /// The tools we expose. Kept in one place so `tools/list` and `tools/call` agree. `export_pdf` is
@@ -284,7 +293,9 @@ fn render_current(session: &mut Session, page: u32) -> Result<String, String> {
     ensure_render_bytes(session)?;
     let RenderState { bytes, cache } = &mut session.render;
     let bytes = &bytes.as_ref().expect("ensured above").1;
-    cache.render_page_svg(bytes, page).map_err(|e| e.to_string())
+    cache
+        .render_page_svg(bytes, page)
+        .map_err(|e| e.to_string())
 }
 #[cfg(not(feature = "rhwp"))]
 fn render_current(_session: &Session, _page: u32) -> Result<String, String> {
@@ -298,7 +309,10 @@ fn render_current(_session: &Session, _page: u32) -> Result<String, String> {
 /// UNEDITED original keeps rhwp's faithful page count (matches the "원본 보기" SVG). Without the
 /// `rhwp` feature there is no original render, so we always use the own-engine count.
 fn page_count_u32(session: &mut Session) -> Result<u32, String> {
-    let doc = session.doc.as_ref().ok_or("no document open (call open_document first)")?;
+    let doc = session
+        .doc
+        .as_ref()
+        .ok_or("no document open (call open_document first)")?;
     #[cfg(feature = "rhwp")]
     if !doc.doc().any_dirty() {
         // Unedited original → rhwp's faithful page count (same cached parse as the SVG view).
@@ -319,16 +333,25 @@ fn page_count_current(session: &mut Session) -> Result<String, String> {
 /// (`session.doc.doc()`); `node`/`block` are `None` for a cell run or a doc without NodeIds (an
 /// unedited binary .hwp), in which case geometry is available but the editable target is not.
 #[cfg(feature = "rhwp")]
-fn hit_test_current(session: &mut Session, page: u32, x: f64, y: f64) -> Result<Option<HitResult>, String> {
+fn hit_test_current(
+    session: &mut Session,
+    page: u32,
+    x: f64,
+    y: f64,
+) -> Result<Option<HitResult>, String> {
     ensure_render_bytes(session)?;
     // Glyph boxes from the cached parse (clone the small result so the session borrow is released
     // before we re-borrow `session.doc` for the resolver).
     let boxes = {
         let RenderState { bytes, cache } = &mut session.render;
         let bytes = &bytes.as_ref().expect("ensured above").1;
-        cache.page_glyph_boxes(bytes, page).map_err(|e| e.to_string())?
+        cache
+            .page_glyph_boxes(bytes, page)
+            .map_err(|e| e.to_string())?
     };
-    let Some(hit) = hwp_core::hit_test_page(&boxes, x, y) else { return Ok(None) };
+    let Some(hit) = hwp_core::hit_test_page(&boxes, x, y) else {
+        return Ok(None);
+    };
     // Resolve to a NodeId against the live editable doc. Gated: cell runs AND unanchored runs (no
     // stable_key — e.g. a note-body run with para_index=None) stay node:None in v1 so a click never
     // mis-targets the first body paragraph.
@@ -368,13 +391,24 @@ fn para_text_len(doc: &hwp_model::document::SemanticDoc, section: usize, block: 
             .runs
             .iter()
             .flat_map(|r| &r.content)
-            .filter_map(|i| if let Inline::Text(t) = i { Some(t.chars().count()) } else { None })
+            .filter_map(|i| {
+                if let Inline::Text(t) = i {
+                    Some(t.chars().count())
+                } else {
+                    None
+                }
+            })
             .sum(),
         _ => 0,
     }
 }
 #[cfg(not(feature = "rhwp"))]
-fn hit_test_current(_session: &mut Session, _page: u32, _x: f64, _y: f64) -> Result<Option<HitResult>, String> {
+fn hit_test_current(
+    _session: &mut Session,
+    _page: u32,
+    _x: f64,
+    _y: f64,
+) -> Result<Option<HitResult>, String> {
     Err("hit_test needs a build with --features rhwp".into())
 }
 
@@ -383,7 +417,12 @@ fn hit_test_current(_session: &mut Session, _page: u32, _x: f64, _y: f64) -> Res
 /// via a doc walk, then interpolate over the page's glyph boxes. `None` if that paragraph does not
 /// render on the queried page (the caller should query the page where it does).
 #[cfg(feature = "rhwp")]
-fn caret_rect_current(session: &mut Session, page: u32, node: u64, offset: usize) -> Result<Option<CaretRect>, String> {
+fn caret_rect_current(
+    session: &mut Session,
+    page: u32,
+    node: u64,
+    offset: usize,
+) -> Result<Option<CaretRect>, String> {
     // Resolve NodeId → (section, para_ord) on the live editable doc first (immutable borrow).
     let (section, para_ord) = {
         let doc = session.doc.as_ref().ok_or("no document open")?.doc();
@@ -396,13 +435,25 @@ fn caret_rect_current(session: &mut Session, page: u32, node: u64, offset: usize
     let boxes = {
         let RenderState { bytes, cache } = &mut session.render;
         let bytes = &bytes.as_ref().expect("ensured above").1;
-        cache.page_glyph_boxes(bytes, page).map_err(|e| e.to_string())?
+        cache
+            .page_glyph_boxes(bytes, page)
+            .map_err(|e| e.to_string())?
     };
-    Ok(hwp_core::caret_rect_in_page(&boxes, section, para_ord, offset)
-        .map(|r| CaretRect { x: r.x, top: r.top, height: r.height }))
+    Ok(
+        hwp_core::caret_rect_in_page(&boxes, section, para_ord, offset).map(|r| CaretRect {
+            x: r.x,
+            top: r.top,
+            height: r.height,
+        }),
+    )
 }
 #[cfg(not(feature = "rhwp"))]
-fn caret_rect_current(_session: &mut Session, _page: u32, _node: u64, _offset: usize) -> Result<Option<CaretRect>, String> {
+fn caret_rect_current(
+    _session: &mut Session,
+    _page: u32,
+    _node: u64,
+    _offset: usize,
+) -> Result<Option<CaretRect>, String> {
     Err("caret_rect needs a build with --features rhwp".into())
 }
 
@@ -501,12 +552,19 @@ pub fn open_bytes(session: &mut Session, bytes: &[u8], name: &str) -> Result<Ope
         // Revisions restart per EditSession, so a new doc must drop the render cache.
         session.render = RenderState::default();
     }
-    Ok(OpenInfo { format, editable, sections })
+    Ok(OpenInfo {
+        format,
+        editable,
+        sections,
+    })
 }
 
 /// Compile + apply template-conformant content as ONE undo unit. Returns `(blocks, ops)`.
 fn do_apply_content(session: &mut Session, json: &str) -> Result<(usize, usize), String> {
-    let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
+    let sess = session
+        .doc
+        .as_mut()
+        .ok_or("no document open (call open_document first)")?;
     let ai = hwp_ai::content::parse_content(json).map_err(|e| e.to_string())?;
     let ops = hwp_ai::content::compile_to_ops(&ai);
     sess.do_ops(&ops).map_err(|e| e.to_string())?;
@@ -517,7 +575,11 @@ fn do_apply_content(session: &mut Session, json: &str) -> Result<(usize, usize),
 /// wasm/service shells consume (issue 017; the browser hands these to a download). This is the
 /// serialize half of `do_export`, which adds the atomic file write around it.
 pub fn export_bytes(session: &Session) -> Result<Vec<u8>, String> {
-    let doc = session.doc.as_ref().ok_or("no document open (call open_document first)")?.doc();
+    let doc = session
+        .doc
+        .as_ref()
+        .ok_or("no document open (call open_document first)")?
+        .doc();
     hwp_core::serialize_hwpx(doc).map_err(|e| e.to_string())
 }
 
@@ -526,7 +588,8 @@ pub fn export_bytes(session: &Session) -> Result<Vec<u8>, String> {
 fn do_export(session: &Session, path: &str) -> Result<(usize, bool), String> {
     let bytes = export_bytes(session)?;
     // Crash-safe: temp+fsync+rename so a mid-write crash never corrupts the user's original file.
-    hwp_core::atomic_write(std::path::Path::new(path), &bytes).map_err(|e| format!("write {path}: {e}"))?;
+    hwp_core::atomic_write(std::path::Path::new(path), &bytes)
+        .map_err(|e| format!("write {path}: {e}"))?;
     Ok((bytes.len(), hwp_core::validate_hwpx(&bytes).ok))
 }
 
@@ -537,7 +600,11 @@ fn do_export(session: &Session, path: &str) -> Result<(usize, bool), String> {
 /// `(byte_len, page_count)`. Only compiled under the `pdf` feature (native-only krilla backend).
 #[cfg(feature = "pdf")]
 fn do_export_pdf(session: &Session, path: &str) -> Result<(usize, usize), String> {
-    let doc = session.doc.as_ref().ok_or("no document open (call open_document first)")?.doc();
+    let doc = session
+        .doc
+        .as_ref()
+        .ok_or("no document open (call open_document first)")?
+        .doc();
     let title = session
         .source_path
         .as_deref()
@@ -568,7 +635,11 @@ fn do_find(
     query: &str,
     opts: hwp_ops::find::FindOptions,
 ) -> Result<Vec<hwp_ops::find::Match>, String> {
-    let doc = session.doc.as_ref().ok_or("no document open (call open_document first)")?.doc();
+    let doc = session
+        .doc
+        .as_ref()
+        .ok_or("no document open (call open_document first)")?
+        .doc();
     Ok(hwp_ops::find::find_matches(doc, query, opts))
 }
 
@@ -581,7 +652,10 @@ fn do_replace(
     opts: hwp_ops::find::FindOptions,
     all: bool,
 ) -> Result<usize, String> {
-    let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
+    let sess = session
+        .doc
+        .as_mut()
+        .ok_or("no document open (call open_document first)")?;
     // Read matches/build ops against an immutable borrow first; ops own their data, so the mutable
     // `do_ops` borrow below is borrow-checker-safe.
     let ops = if all {
@@ -606,11 +680,25 @@ fn do_replace(
 /// interactive caret's per-keystroke / IME-commit edit. Surfaces the op-bus error string verbatim
 /// (e.g. "paragraph N has structural content and cannot be edited in place" on an image/equation
 /// paragraph, or "caret offset X past paragraph end Y") so the UI can toast it without crashing.
-fn do_insert_text(session: &mut Session, node: u64, offset: usize, text: &str) -> Result<(), String> {
+fn do_insert_text(
+    session: &mut Session,
+    node: u64,
+    offset: usize,
+    text: &str,
+) -> Result<(), String> {
     use hwp_model::types::NodeId;
     use hwp_ops::{Caret, Op};
-    let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
-    let op = Op::InsertText { at: Caret { node: NodeId(node), offset }, text: text.to_string() };
+    let sess = session
+        .doc
+        .as_mut()
+        .ok_or("no document open (call open_document first)")?;
+    let op = Op::InsertText {
+        at: Caret {
+            node: NodeId(node),
+            offset,
+        },
+        text: text.to_string(),
+    };
     sess.do_op(&op).map_err(|e| e.to_string()) // one undo unit
 }
 
@@ -623,10 +711,19 @@ fn do_delete_back(session: &mut Session, node: u64, offset: usize) -> Result<(),
     if offset == 0 {
         return Ok(()); // nothing before the caret — no-op, no rev bump
     }
-    let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
+    let sess = session
+        .doc
+        .as_mut()
+        .ok_or("no document open (call open_document first)")?;
     let op = Op::DeleteRange {
-        start: Caret { node: NodeId(node), offset: offset - 1 },
-        end: Caret { node: NodeId(node), offset },
+        start: Caret {
+            node: NodeId(node),
+            offset: offset - 1,
+        },
+        end: Caret {
+            node: NodeId(node),
+            offset,
+        },
     };
     sess.do_op(&op).map_err(|e| e.to_string()) // one undo unit
 }
@@ -641,16 +738,24 @@ fn do_set_image_size(
     height: i32,
 ) -> Result<(), String> {
     use hwp_ops::Op;
-    let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
-    sess.do_op(&Op::SetImageSize { section, index, width, height })
-        .map_err(|e| e.to_string()) // one undo unit
+    let sess = session
+        .doc
+        .as_mut()
+        .ok_or("no document open (call open_document first)")?;
+    sess.do_op(&Op::SetImageSize {
+        section,
+        index,
+        width,
+        height,
+    })
+    .map_err(|e| e.to_string()) // one undo unit
 }
 
 /// Move the image anchored at `(section, from)` to block index `to` as ONE undo unit: `DeleteBlock`
 /// + `InsertImageAt` batched via `do_ops`. NOTE (051 정정): a general `Op::MoveBlock` DOES exist (see
-/// [`do_move_block`]) — this image lane deliberately keeps the delete+insert pair because it
-/// RE-EMBEDS the bytes from the existing `BinData` (the moved copy is independent of the original
-/// reference). `width`/`height` preserve the image's current size across the move.
+///   [`do_move_block`]) — this image lane deliberately keeps the delete+insert pair because it
+///   RE-EMBEDS the bytes from the existing `BinData` (the moved copy is independent of the original
+///   reference). `width`/`height` preserve the image's current size across the move.
 fn do_move_image(
     session: &mut Session,
     section: usize,
@@ -661,7 +766,10 @@ fn do_move_image(
 ) -> Result<(), String> {
     use hwp_model::document::{Block, Inline};
     use hwp_ops::Op;
-    let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
+    let sess = session
+        .doc
+        .as_mut()
+        .ok_or("no document open (call open_document first)")?;
     // Resolve the source paragraph's image bytes/kind from the store BEFORE mutating.
     let (bytes, kind) = {
         let doc = sess.doc();
@@ -671,13 +779,21 @@ fn do_move_image(
             .and_then(|s| s.blocks.get(from))
             .ok_or_else(|| format!("move_image: block ({section},{from}) out of range"))?;
         let Block::Paragraph(p) = blk else {
-            return Err(format!("move_image: block ({section},{from}) is not a paragraph"));
+            return Err(format!(
+                "move_image: block ({section},{from}) is not a paragraph"
+            ));
         };
         let img = p
             .runs
             .iter()
             .flat_map(|r| &r.content)
-            .find_map(|i| if let Inline::Image(img) = i { Some(img) } else { None })
+            .find_map(|i| {
+                if let Inline::Image(img) = i {
+                    Some(img)
+                } else {
+                    None
+                }
+            })
             .ok_or_else(|| format!("move_image: block ({section},{from}) has no image"))?;
         let bin = doc
             .bin_data
@@ -690,8 +806,18 @@ fn do_move_image(
     // image lands where the user dropped it.
     let insert_at = if to > from { to - 1 } else { to };
     sess.do_ops(&[
-        Op::DeleteBlock { section, index: from },
-        Op::InsertImageAt { section, index: insert_at, bytes, kind, width, height },
+        Op::DeleteBlock {
+            section,
+            index: from,
+        },
+        Op::InsertImageAt {
+            section,
+            index: insert_at,
+            bytes,
+            kind,
+            width,
+            height,
+        },
     ])
     .map_err(|e| e.to_string()) // one undo unit
 }
@@ -700,10 +826,19 @@ fn do_move_image(
 /// general relocation for ANY block — tables (the drag-to-move overlay) and paragraphs alike. Unlike
 /// `do_move_image` this re-uses the existing node in place (no byte re-embed), so it is the faithful
 /// move for a table. Surfaces the op-bus refusal verbatim (out-of-range index, etc.).
-fn do_move_block(session: &mut Session, section: usize, from: usize, to: usize) -> Result<(), String> {
+fn do_move_block(
+    session: &mut Session,
+    section: usize,
+    from: usize,
+    to: usize,
+) -> Result<(), String> {
     use hwp_ops::Op;
-    let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
-    sess.do_op(&Op::MoveBlock { section, from, to }).map_err(|e| e.to_string()) // one undo unit
+    let sess = session
+        .doc
+        .as_mut()
+        .ok_or("no document open (call open_document first)")?;
+    sess.do_op(&Op::MoveBlock { section, from, to })
+        .map_err(|e| e.to_string()) // one undo unit
 }
 
 /// Append `count` empty BODY rows to the `index`-th table at logical row `at` as ONE undo unit
@@ -720,10 +855,19 @@ fn do_table_insert_rows(
     if count == 0 || cols == 0 {
         return Err("table_insert_rows: count and cols must be positive".into());
     }
-    let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
+    let sess = session
+        .doc
+        .as_mut()
+        .ok_or("no document open (call open_document first)")?;
     let row = || (0..cols).map(|_| CellSpec::default()).collect::<Vec<_>>();
     let rows = (0..count).map(|_| row()).collect::<Vec<_>>();
-    sess.do_op(&Op::TableInsertRows { section, index, at, rows }).map_err(|e| e.to_string())
+    sess.do_op(&Op::TableInsertRows {
+        section,
+        index,
+        at,
+        rows,
+    })
+    .map_err(|e| e.to_string())
 }
 
 /// Replace the text of the cell anchored at `(row, col)` of the `index`-th table as ONE undo unit
@@ -737,17 +881,38 @@ fn do_set_table_cell(
     text: &str,
 ) -> Result<(), String> {
     use hwp_ops::{Op, RunSpec};
-    let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
-    let runs = if text.is_empty() { vec![] } else { vec![RunSpec { text: text.to_string(), ..Default::default() }] };
-    sess.do_op(&Op::SetTableCell { section, index, row, col, runs }).map_err(|e| e.to_string())
+    let sess = session
+        .doc
+        .as_mut()
+        .ok_or("no document open (call open_document first)")?;
+    let runs = if text.is_empty() {
+        vec![]
+    } else {
+        vec![RunSpec {
+            text: text.to_string(),
+            ..Default::default()
+        }]
+    };
+    sess.do_op(&Op::SetTableCell {
+        section,
+        index,
+        row,
+        col,
+        runs,
+    })
+    .map_err(|e| e.to_string())
 }
 
 /// Delete the block at `(section, index)` as ONE undo unit (`DeleteBlock`). Used by the table
 /// hover toolbar's 행 삭제 / 표 삭제 verbs (delete-last-row is a table edit; here we delete the block).
 fn do_delete_block(session: &mut Session, section: usize, index: usize) -> Result<(), String> {
     use hwp_ops::Op;
-    let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
-    sess.do_op(&Op::DeleteBlock { section, index }).map_err(|e| e.to_string())
+    let sess = session
+        .doc
+        .as_mut()
+        .ok_or("no document open (call open_document first)")?;
+    sess.do_op(&Op::DeleteBlock { section, index })
+        .map_err(|e| e.to_string())
 }
 
 /// A typed editor command/query — the GUI's mutation+query surface (no prose round-trips). The
@@ -767,68 +932,151 @@ fn do_delete_block(session: &mut Session, section: usize, index: usize) -> Resul
 #[derive(Deserialize)]
 #[serde(tag = "intent", deny_unknown_fields)]
 pub enum Intent {
-    Open { path: String },
+    Open {
+        path: String,
+    },
     PageCount,
-    Render { page: u32 },
-    ApplyContent { json: String },
-    Export { path: String },
+    Render {
+        page: u32,
+    },
+    ApplyContent {
+        json: String,
+    },
+    Export {
+        path: String,
+    },
     Undo,
     Redo,
     ExtractText,
     /// Dry-run AI content into a previewable proposal WITHOUT mutating the doc (stashes it pending).
-    Propose { json: String },
+    Propose {
+        json: String,
+    },
     /// Commit the pending proposal as one undo unit. Errors if none is pending.
     Commit,
     /// Drop the pending proposal without applying it.
     DiscardProposal,
     /// Read-only search of the open document's editable simple paragraphs.
-    Find { query: String, case_sensitive: bool, whole_word: bool },
+    Find {
+        query: String,
+        case_sensitive: bool,
+        whole_word: bool,
+    },
     /// Replace `query` → `replacement` as ONE undo unit. `all: true` = replace-all; `all: false` =
     /// replace the FIRST match only.
-    Replace { query: String, replacement: String, case_sensitive: bool, whole_word: bool, all: bool },
+    Replace {
+        query: String,
+        replacement: String,
+        case_sensitive: bool,
+        whole_word: bool,
+        all: bool,
+    },
     /// WYSIWYG caret (engine half) — map a page-space click to an editable model target.
-    HitTest { page: u32, x: f64, y: f64 },
+    HitTest {
+        page: u32,
+        x: f64,
+        y: f64,
+    },
     /// WYSIWYG caret (engine half) — map a model target (NodeId + paragraph char offset) to a caret
     /// rectangle on `page`.
-    CaretRect { page: u32, node: u64, offset: usize },
+    CaretRect {
+        page: u32,
+        node: u64,
+        offset: usize,
+    },
     /// Interactive caret — insert `text` at a char-offset caret inside one simple paragraph as ONE
     /// undo unit (the per-keystroke / IME-commit edit). Surfaces the op-bus refusal verbatim (e.g. a
     /// structural paragraph or an out-of-range offset) so the UI can toast it.
-    InsertText { node: u64, offset: usize, text: String },
+    InsertText {
+        node: u64,
+        offset: usize,
+        text: String,
+    },
     /// Interactive caret — delete the single char ENDING at `offset` (Backspace) as ONE undo unit
     /// (`DeleteRange{offset-1, offset}`). `offset == 0` is a graceful no-op.
-    DeleteBack { node: u64, offset: usize },
+    DeleteBack {
+        node: u64,
+        offset: usize,
+    },
     /// Image overlay — resize the image anchored at `(section, index)` to `width`×`height` HWPUNIT as
     /// ONE undo unit (`SetImageSize`). The resize handle's pointerup commit.
-    SetImageSize { section: usize, index: usize, width: i32, height: i32 },
+    SetImageSize {
+        section: usize,
+        index: usize,
+        width: i32,
+        height: i32,
+    },
     /// Image overlay — move the image from block `from` to block `to` in `section` as ONE undo unit
     /// (`DeleteBlock` + `InsertImageAt`; preserving `width`/`height`).
-    MoveImage { section: usize, from: usize, to: usize, width: i32, height: i32 },
+    MoveImage {
+        section: usize,
+        from: usize,
+        to: usize,
+        width: i32,
+        height: i32,
+    },
     /// Block drag-to-move — relocate the block at `(section, from)` to index `to` as ONE undo unit
     /// (`MoveBlock`). The table/paragraph drag overlay's drop commit (the faithful in-place move).
-    MoveBlock { section: usize, from: usize, to: usize },
+    MoveBlock {
+        section: usize,
+        from: usize,
+        to: usize,
+    },
     /// Table quick-edit — append `count` empty BODY rows of `cols` cells at logical row `at` of the
     /// `index`-th table as ONE undo unit (`TableInsertRows`).
-    TableInsertRows { section: usize, index: usize, at: usize, count: usize, cols: usize },
+    TableInsertRows {
+        section: usize,
+        index: usize,
+        at: usize,
+        count: usize,
+        cols: usize,
+    },
     /// Table quick-edit — replace the text of the cell at `(row, col)` of the `index`-th table as ONE
     /// undo unit (`SetTableCell`).
-    SetTableCell { section: usize, index: usize, row: usize, col: usize, text: String },
+    SetTableCell {
+        section: usize,
+        index: usize,
+        row: usize,
+        col: usize,
+        text: String,
+    },
     /// Table quick-edit — append ONE empty body row to the `index`-th table that REPLICATES the last
     /// row's column layout as ONE undo unit (`TableAppendEmptyRow`). The "+행" verb (merge-safe).
-    TableAppendRow { section: usize, index: usize },
+    TableAppendRow {
+        section: usize,
+        index: usize,
+    },
     /// Inline edit — replace a SIMPLE paragraph's text (the `block`-th block of `section`), preserving
     /// its char/para shape, as ONE undo unit (`SetParagraphText`). Refuses a structural paragraph.
-    SetParagraphText { section: usize, block: usize, text: String },
+    SetParagraphText {
+        section: usize,
+        block: usize,
+        text: String,
+    },
     /// Column resize — set the `index`-th table's column-width proportions as ONE undo unit
     /// (`SetTableColWidths`). `widths.len()` must equal the table's column count.
-    SetTableColWidths { section: usize, index: usize, widths: Vec<i32> },
+    SetTableColWidths {
+        section: usize,
+        index: usize,
+        widths: Vec<i32>,
+    },
     /// Row resize — set the `index`-th table's per-row minimum-height override as ONE undo unit
     /// (`SetTableRowHeights`). `heights.len()` must equal the table's row count; `0` = content-sized.
-    SetTableRowHeights { section: usize, index: usize, heights: Vec<i32> },
+    SetTableRowHeights {
+        section: usize,
+        index: usize,
+        heights: Vec<i32>,
+    },
     /// Page margin change (the 한컴식 ruler's draggable margin markers) — set `section`'s page margins
     /// (mm) as ONE undo unit (`SetPageLayout`, margins only). All four are passed (the UI keeps the
     /// undragged edges at their current value); the whole document re-flows to the new printable width.
-    SetPageMargins { section: usize, left_mm: f32, right_mm: f32, top_mm: f32, bottom_mm: f32 },
+    SetPageMargins {
+        section: usize,
+        left_mm: f32,
+        right_mm: f32,
+        top_mm: f32,
+        bottom_mm: f32,
+    },
     /// Character format — patch 볼드/이태릭/크기/글꼴 of a target's runs as ONE undo unit (`SetCharFmt`),
     /// preserving other attrs. `cell` = `Some((row, col))` for a table cell, `None` for the block
     /// paragraph. Each `Some` field applies; `size_pt` in points; `font` sets the family ("" clears it).
@@ -854,26 +1102,63 @@ pub enum Intent {
     },
     /// The WYSIWYG commit — replace a cell with STYLED runs (`SetTableCell` with `Vec<RunSpec>`,
     /// preserving per-run bold/italic/size/color/font instead of collapsing to one plain run).
-    SetTableCellRuns { section: usize, index: usize, row: usize, col: usize, runs: Vec<hwp_ops::RunSpec> },
+    SetTableCellRuns {
+        section: usize,
+        index: usize,
+        row: usize,
+        col: usize,
+        runs: Vec<hwp_ops::RunSpec>,
+    },
     /// The WYSIWYG commit for a paragraph — replace it with STYLED runs (`SetParagraphRuns`).
-    SetParagraphRuns { section: usize, block: usize, runs: Vec<hwp_ops::RunSpec> },
+    SetParagraphRuns {
+        section: usize,
+        block: usize,
+        runs: Vec<hwp_ops::RunSpec>,
+    },
     /// Cell shading — set/clear the background color of cells in the `index`-th table as ONE undo unit
     /// (`SetTableCellShade`). `sel` ∈ {"row","col","cell","all"} keyed off `(row, col)`; `shade` is
     /// "#RRGGBB" or None to clear.
-    SetTableCellShade { section: usize, index: usize, sel: String, row: usize, col: usize, shade: Option<String> },
+    SetTableCellShade {
+        section: usize,
+        index: usize,
+        sel: String,
+        row: usize,
+        col: usize,
+        shade: Option<String>,
+    },
     /// Multi-cell batch background — set/clear the shade of every cell overlapping the rectangle
     /// `[r0..=r1] × [c0..=c1]` of the `index`-th table as ONE undo unit (`SetTableCellShade` +
     /// `CellSel::Rect`). `shade` is "#RRGGBB" or None to clear.
-    SetCellRangeShade { section: usize, index: usize, r0: usize, c0: usize, r1: usize, c1: usize, shade: Option<String> },
+    SetCellRangeShade {
+        section: usize,
+        index: usize,
+        r0: usize,
+        c0: usize,
+        r1: usize,
+        c1: usize,
+        shade: Option<String>,
+    },
     /// Multi-cell batch character/alignment format over the rectangle `[r0..=r1] × [c0..=c1]` of the
     /// `index`-th table as ONE undo unit (`SetCellRangeFmt`). Each `Some` field applies.
     SetCellRangeFmt {
-        section: usize, index: usize, r0: usize, c0: usize, r1: usize, c1: usize,
-        bold: Option<bool>, italic: Option<bool>, size_pt: Option<f32>, font: Option<String>,
-        color: Option<String>, align: Option<String>,
+        section: usize,
+        index: usize,
+        r0: usize,
+        c0: usize,
+        r1: usize,
+        c1: usize,
+        bold: Option<bool>,
+        italic: Option<bool>,
+        size_pt: Option<f32>,
+        font: Option<String>,
+        color: Option<String>,
+        align: Option<String>,
     },
     /// Block delete — remove the block at `(section, index)` as ONE undo unit (`DeleteBlock`).
-    DeleteBlock { section: usize, index: usize },
+    DeleteBlock {
+        section: usize,
+        index: usize,
+    },
     /// Image insert (issue 050 — drop / upload) — embed a base64 PNG/JPEG image as a new BinData and
     /// anchor an image paragraph in `section` as ONE undo unit (`InsertImageAt`). A web drop/upload has
     /// BYTES, not a file path, so the payload is `data_b64` (base64, no `data:` prefix); the true format
@@ -883,7 +1168,13 @@ pub enum Intent {
     /// (clamped to the section end); `None` (absent/null) appends at the section END (the upload-with-no-
     /// selection / drop-on-empty-area case). `width`/`height` are the display box in HWPUNIT (§4.5 — the
     /// px/mm→HWPUNIT conversion lives in editor-core `units.ts`, a single point).
-    InsertImage { section: usize, block: Option<usize>, data_b64: String, width: i32, height: i32 },
+    InsertImage {
+        section: usize,
+        block: Option<usize>,
+        data_b64: String,
+        width: i32,
+        height: i32,
+    },
     /// Structural insert (issue 051 — chat structural edit) — insert a rich table AT block `index` of
     /// `section` as ONE undo unit (the existing `InsertTableAt` op; this variant only EXPOSES it to the
     /// Intent lane). `rows` is the per-row `CellSpec` grid with `AppendRichTable`'s HTML-table coverage
@@ -893,7 +1184,11 @@ pub enum Intent {
     /// appends; PAST the end is an honest op-bus error, never a clamp), `None` (absent/null) appends at
     /// the section END — the dispatcher resolves `None` to `len` so the op's own `index == len` append
     /// semantics absorb the end-append (no separate append op).
-    InsertTableAt { section: usize, index: Option<usize>, rows: Vec<Vec<hwp_ops::CellSpec>> },
+    InsertTableAt {
+        section: usize,
+        index: Option<usize>,
+        rows: Vec<Vec<hwp_ops::CellSpec>>,
+    },
     /// Structural insert (issue 051) — insert a rich paragraph AT block `index` of `section` as ONE undo
     /// unit (the existing `InsertParagraphAt` op, exposed to the Intent lane). `runs` are styled
     /// `RunSpec`s (same wire shape as `SetParagraphRuns`); `para` is the optional paragraph-shape
@@ -914,13 +1209,24 @@ pub enum Intent {
     /// geometry comes from OUR OWN placement (the same `place_doc` the SVG view draws from), NOT the
     /// rhwp glyph boxes — so it answers on binary .hwp too and never diverges from the screen. `null`
     /// off any cell text (018 null policy).
-    HitTestCell { page: u32, x: f64, y: f64 },
+    HitTestCell {
+        page: u32,
+        x: f64,
+        y: f64,
+    },
     /// Cell-addressed caret, geometry half (issue 053): the caret rect at char `offset` of the
     /// `para`-th paragraph of cell `(row, col)` of the table block at `(section, block)` — own-render
     /// px + the 0-based page the owning fragment landed on. A PAST-END `offset` is CLAMPED to the
     /// paragraph end and returns a rect (never null — the `CaretRect` contract); `null` when the
     /// address doesn't resolve (018).
-    CaretRectCell { section: usize, block: usize, row: usize, col: usize, para: usize, offset: usize },
+    CaretRectCell {
+        section: usize,
+        block: usize,
+        row: usize,
+        col: usize,
+        para: usize,
+        offset: usize,
+    },
 }
 
 /// Largest single embedded image we accept, in DECODED bytes (issue 050 — 014 hardening spirit: reject
@@ -956,36 +1262,60 @@ fn decode_and_validate_image(data_b64: &str) -> Result<(Vec<u8>, String), String
     } else if bytes.starts_with(JPEG) {
         "jpg"
     } else {
-        return Err("지원하지 않는 이미지 형식입니다 (PNG/JPEG 매직바이트 불일치 — png/jpg만)".into());
+        return Err(
+            "지원하지 않는 이미지 형식입니다 (PNG/JPEG 매직바이트 불일치 — png/jpg만)".into(),
+        );
     };
     Ok((bytes, kind.to_string()))
 }
 
 /// The typed result of an [`Intent`].
 pub enum Outcome {
-    Opened { format: &'static str, editable: bool, sections: usize },
+    Opened {
+        format: &'static str,
+        editable: bool,
+        sections: usize,
+    },
     PageCount(u32),
     Rendered(String),
-    Applied { blocks: usize, ops: usize },
-    Exported { bytes: usize, open_safe: bool },
+    Applied {
+        blocks: usize,
+        ops: usize,
+    },
+    Exported {
+        bytes: usize,
+        open_safe: bool,
+    },
     Undone(bool),
     Redone(bool),
     Text(String),
     /// A validated, uncommitted proposal: human-readable rationale + per-op diff preview.
-    Proposed { rationale: String, preview: String },
-    Committed { ops: usize },
+    Proposed {
+        rationale: String,
+        preview: String,
+    },
+    Committed {
+        ops: usize,
+    },
     Discarded(bool),
     /// Search results (read-only).
-    Found { matches: Vec<FindMatch> },
+    Found {
+        matches: Vec<FindMatch>,
+    },
     /// Replace result: number of occurrences replaced + the new page count (0 if no rhwp render).
-    Replaced { replaced: usize, pages: u32 },
+    Replaced {
+        replaced: usize,
+        pages: u32,
+    },
     /// Hit-test result: the editable model target, or `None` for a click off any text line.
     Hit(Option<HitResult>),
     /// Caret-rect result: the caret geometry, or `None` if the target doesn't render on that page.
     Caret(Option<CaretRect>),
     /// In-place edit result (InsertText / DeleteBack): the new page count so the UI re-renders,
     /// mirroring `Replaced` (0 when no rhwp render is available).
-    Edited { pages: u32 },
+    Edited {
+        pages: u32,
+    },
     /// Cell text hit result (issue 053): the cell-addressed caret target, or `None` off any cell
     /// text (018 null policy).
     HitCell(Option<hwp_session::CellTextHitDto>),
@@ -1010,7 +1340,9 @@ pub const INTENT_VERSION: u32 = 0;
 /// non-object body, an unknown `intent` tag, or an unknown/mistyped field all surface here rather
 /// than being silently ignored.
 pub fn deserialize_intent(value: &Value) -> Result<Intent, String> {
-    let obj = value.as_object().ok_or("intent envelope must be a JSON object")?;
+    let obj = value
+        .as_object()
+        .ok_or("intent envelope must be a JSON object")?;
     // Optional version envelope. Absent → 0 (legacy). Present → must be an integer in range.
     if let Some(v) = obj.get("intent_version") {
         let n = v
@@ -1046,7 +1378,11 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
     match intent {
         Intent::Open { path } => {
             let i = do_open(session, &path)?;
-            Ok(Outcome::Opened { format: i.format, editable: i.editable, sections: i.sections })
+            Ok(Outcome::Opened {
+                format: i.format,
+                editable: i.editable,
+                sections: i.sections,
+            })
         }
         Intent::ApplyContent { json } => {
             let (blocks, ops) = do_apply_content(session, &json)?;
@@ -1057,20 +1393,34 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
             Ok(Outcome::Exported { bytes, open_safe })
         }
         Intent::Undo => {
-            let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
+            let sess = session
+                .doc
+                .as_mut()
+                .ok_or("no document open (call open_document first)")?;
             Ok(Outcome::Undone(sess.undo()))
         }
         Intent::Redo => {
-            let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
+            let sess = session
+                .doc
+                .as_mut()
+                .ok_or("no document open (call open_document first)")?;
             Ok(Outcome::Redone(sess.redo()))
         }
         Intent::ExtractText => {
-            let doc = session.doc.as_ref().ok_or("no document open (call open_document first)")?.doc();
+            let doc = session
+                .doc
+                .as_ref()
+                .ok_or("no document open (call open_document first)")?
+                .doc();
             Ok(Outcome::Text(doc.plain_text()))
         }
         Intent::Propose { json } => {
             let ai = hwp_ai::content::parse_content(&json).map_err(|e| e.to_string())?;
-            let doc = session.doc.as_ref().ok_or("no document open (call open_document first)")?.doc();
+            let doc = session
+                .doc
+                .as_ref()
+                .ok_or("no document open (call open_document first)")?
+                .doc();
             let proposal =
                 hwp_ai::propose_from_content(doc, &ai, "GUI 제안").map_err(|e| e.to_string())?;
             let rationale = proposal.rationale.clone();
@@ -1079,21 +1429,45 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
             Ok(Outcome::Proposed { rationale, preview })
         }
         Intent::Commit => {
-            let proposal =
-                session.pending.take().ok_or("대기 중인 제안이 없습니다 (propose first)")?;
-            let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
+            let proposal = session
+                .pending
+                .take()
+                .ok_or("대기 중인 제안이 없습니다 (propose first)")?;
+            let sess = session
+                .doc
+                .as_mut()
+                .ok_or("no document open (call open_document first)")?;
             let ops = proposal.ops.len();
             sess.do_ops(&proposal.ops).map_err(|e| e.to_string())?;
             Ok(Outcome::Committed { ops })
         }
         Intent::DiscardProposal => Ok(Outcome::Discarded(session.pending.take().is_some())),
-        Intent::Find { query, case_sensitive, whole_word } => {
-            let opts = hwp_ops::find::FindOptions { case_sensitive, whole_word };
-            let matches = do_find(session, &query, opts)?.iter().map(FindMatch::from).collect();
+        Intent::Find {
+            query,
+            case_sensitive,
+            whole_word,
+        } => {
+            let opts = hwp_ops::find::FindOptions {
+                case_sensitive,
+                whole_word,
+            };
+            let matches = do_find(session, &query, opts)?
+                .iter()
+                .map(FindMatch::from)
+                .collect();
             Ok(Outcome::Found { matches })
         }
-        Intent::Replace { query, replacement, case_sensitive, whole_word, all } => {
-            let opts = hwp_ops::find::FindOptions { case_sensitive, whole_word };
+        Intent::Replace {
+            query,
+            replacement,
+            case_sensitive,
+            whole_word,
+            all,
+        } => {
+            let opts = hwp_ops::find::FindOptions {
+                case_sensitive,
+                whole_word,
+            };
             let replaced = do_replace(session, &query, &replacement, opts, all)?;
             // Live page count via OUR engine after the edit (P1: edited docs count from the IR).
             let pages = page_count_u32(session).unwrap_or(0);
@@ -1112,21 +1486,40 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
             }
         }
         Intent::HitTest { page, x, y } => Ok(Outcome::Hit(hit_test_current(session, page, x, y)?)),
-        Intent::CaretRect { page, node, offset } => {
-            Ok(Outcome::Caret(caret_rect_current(session, page, node, offset)?))
-        }
+        Intent::CaretRect { page, node, offset } => Ok(Outcome::Caret(caret_rect_current(
+            session, page, node, offset,
+        )?)),
         // Cell-addressed caret (issue 053) — own-render geometry via the hwp-session facade (px).
         // Read-only: no undo unit, no revision bump. Fonts: `own_render_fonts()` — the SAME provider
         // this session's own-render SVG lane uses, so the caret agrees with the drawn glyphs. (The
         // wasm shell answers these through its placed-cache bindings with its injected fonts instead;
         // this dispatch is the Tauri/agent lane.)
         Intent::HitTestCell { page, x, y } => {
-            let doc = session.doc.as_ref().ok_or("no document open (call open_document first)")?.doc();
-            Ok(Outcome::HitCell(hwp_session::cell_text_hit(doc, page, x, y)))
+            let doc = session
+                .doc
+                .as_ref()
+                .ok_or("no document open (call open_document first)")?
+                .doc();
+            Ok(Outcome::HitCell(hwp_session::cell_text_hit(
+                doc, page, x, y,
+            )))
         }
-        Intent::CaretRectCell { section, block, row, col, para, offset } => {
-            let doc = session.doc.as_ref().ok_or("no document open (call open_document first)")?.doc();
-            Ok(Outcome::CaretCell(hwp_session::cell_caret_rect(doc, section, block, row, col, para, offset)))
+        Intent::CaretRectCell {
+            section,
+            block,
+            row,
+            col,
+            para,
+            offset,
+        } => {
+            let doc = session
+                .doc
+                .as_ref()
+                .ok_or("no document open (call open_document first)")?
+                .doc();
+            Ok(Outcome::CaretCell(hwp_session::cell_caret_rect(
+                doc, section, block, row, col, para, offset,
+            )))
         }
         Intent::InsertText { node, offset, text } => {
             do_insert_text(session, node, offset, &text)?;
@@ -1139,12 +1532,23 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }
-        Intent::SetImageSize { section, index, width, height } => {
+        Intent::SetImageSize {
+            section,
+            index,
+            width,
+            height,
+        } => {
             do_set_image_size(session, section, index, width, height)?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }
-        Intent::MoveImage { section, from, to, width, height } => {
+        Intent::MoveImage {
+            section,
+            from,
+            to,
+            width,
+            height,
+        } => {
             do_move_image(session, section, from, to, width, height)?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
@@ -1154,76 +1558,190 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }
-        Intent::TableInsertRows { section, index, at, count, cols } => {
+        Intent::TableInsertRows {
+            section,
+            index,
+            at,
+            count,
+            cols,
+        } => {
             do_table_insert_rows(session, section, index, at, count, cols)?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }
-        Intent::SetTableCell { section, index, row, col, text } => {
+        Intent::SetTableCell {
+            section,
+            index,
+            row,
+            col,
+            text,
+        } => {
             do_set_table_cell(session, section, index, row, col, &text)?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }
         Intent::TableAppendRow { section, index } => {
             let doc = session.doc.as_mut().ok_or("no document open")?;
-            doc.do_op(&hwp_ops::Op::TableAppendEmptyRow { section, index }).map_err(|e| e.to_string())?;
+            doc.do_op(&hwp_ops::Op::TableAppendEmptyRow { section, index })
+                .map_err(|e| e.to_string())?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }
-        Intent::SetParagraphText { section, block, text } => {
+        Intent::SetParagraphText {
+            section,
+            block,
+            text,
+        } => {
             let doc = session.doc.as_mut().ok_or("no document open")?;
-            doc.do_op(&hwp_ops::Op::SetParagraphText { section, block, text }).map_err(|e| e.to_string())?;
-            let pages = page_count_u32(session).unwrap_or(0);
-            Ok(Outcome::Edited { pages })
-        }
-        Intent::SetTableColWidths { section, index, widths } => {
-            let doc = session.doc.as_mut().ok_or("no document open")?;
-            doc.do_op(&hwp_ops::Op::SetTableColWidths { section, index, widths }).map_err(|e| e.to_string())?;
-            let pages = page_count_u32(session).unwrap_or(0);
-            Ok(Outcome::Edited { pages })
-        }
-        Intent::SetTableRowHeights { section, index, heights } => {
-            let doc = session.doc.as_mut().ok_or("no document open")?;
-            doc.do_op(&hwp_ops::Op::SetTableRowHeights { section, index, heights }).map_err(|e| e.to_string())?;
-            let pages = page_count_u32(session).unwrap_or(0);
-            Ok(Outcome::Edited { pages })
-        }
-        Intent::SetPageMargins { section, left_mm, right_mm, top_mm, bottom_mm } => {
-            let doc = session.doc.as_mut().ok_or("no document open")?;
-            doc.do_op(&hwp_ops::Op::SetPageLayout {
+            doc.do_op(&hwp_ops::Op::SetParagraphText {
                 section,
-                orientation: None,
-                margins_mm: Some(hwp_ops::PageMargins { left: left_mm, right: right_mm, top: top_mm, bottom: bottom_mm }),
+                block,
+                text,
             })
             .map_err(|e| e.to_string())?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }
-        Intent::SetCharFmt { section, block, cell, bold, italic, size_pt, font } => {
+        Intent::SetTableColWidths {
+            section,
+            index,
+            widths,
+        } => {
             let doc = session.doc.as_mut().ok_or("no document open")?;
-            doc.do_op(&hwp_ops::Op::SetCharFmt { section, block, cell, bold, italic, size_pt, font }).map_err(|e| e.to_string())?;
+            doc.do_op(&hwp_ops::Op::SetTableColWidths {
+                section,
+                index,
+                widths,
+            })
+            .map_err(|e| e.to_string())?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }
-        Intent::SetRunCharFmt { section, block, cell, start, end, bold, italic } => {
+        Intent::SetTableRowHeights {
+            section,
+            index,
+            heights,
+        } => {
             let doc = session.doc.as_mut().ok_or("no document open")?;
-            doc.do_op(&hwp_ops::Op::SetRunCharFmt { section, block, cell, start, end, bold, italic }).map_err(|e| e.to_string())?;
+            doc.do_op(&hwp_ops::Op::SetTableRowHeights {
+                section,
+                index,
+                heights,
+            })
+            .map_err(|e| e.to_string())?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }
-        Intent::SetTableCellRuns { section, index, row, col, runs } => {
+        Intent::SetPageMargins {
+            section,
+            left_mm,
+            right_mm,
+            top_mm,
+            bottom_mm,
+        } => {
             let doc = session.doc.as_mut().ok_or("no document open")?;
-            doc.do_op(&hwp_ops::Op::SetTableCell { section, index, row, col, runs }).map_err(|e| e.to_string())?;
+            doc.do_op(&hwp_ops::Op::SetPageLayout {
+                section,
+                orientation: None,
+                margins_mm: Some(hwp_ops::PageMargins {
+                    left: left_mm,
+                    right: right_mm,
+                    top: top_mm,
+                    bottom: bottom_mm,
+                }),
+            })
+            .map_err(|e| e.to_string())?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }
-        Intent::SetParagraphRuns { section, block, runs } => {
+        Intent::SetCharFmt {
+            section,
+            block,
+            cell,
+            bold,
+            italic,
+            size_pt,
+            font,
+        } => {
             let doc = session.doc.as_mut().ok_or("no document open")?;
-            doc.do_op(&hwp_ops::Op::SetParagraphRuns { section, block, runs }).map_err(|e| e.to_string())?;
+            doc.do_op(&hwp_ops::Op::SetCharFmt {
+                section,
+                block,
+                cell,
+                bold,
+                italic,
+                size_pt,
+                font,
+            })
+            .map_err(|e| e.to_string())?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }
-        Intent::SetTableCellShade { section, index, sel, row, col, shade } => {
+        Intent::SetRunCharFmt {
+            section,
+            block,
+            cell,
+            start,
+            end,
+            bold,
+            italic,
+        } => {
+            let doc = session.doc.as_mut().ok_or("no document open")?;
+            doc.do_op(&hwp_ops::Op::SetRunCharFmt {
+                section,
+                block,
+                cell,
+                start,
+                end,
+                bold,
+                italic,
+            })
+            .map_err(|e| e.to_string())?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::SetTableCellRuns {
+            section,
+            index,
+            row,
+            col,
+            runs,
+        } => {
+            let doc = session.doc.as_mut().ok_or("no document open")?;
+            doc.do_op(&hwp_ops::Op::SetTableCell {
+                section,
+                index,
+                row,
+                col,
+                runs,
+            })
+            .map_err(|e| e.to_string())?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::SetParagraphRuns {
+            section,
+            block,
+            runs,
+        } => {
+            let doc = session.doc.as_mut().ok_or("no document open")?;
+            doc.do_op(&hwp_ops::Op::SetParagraphRuns {
+                section,
+                block,
+                runs,
+            })
+            .map_err(|e| e.to_string())?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::SetTableCellShade {
+            section,
+            index,
+            sel,
+            row,
+            col,
+            shade,
+        } => {
             use hwp_ops::CellSel;
             let cellsel = match sel.as_str() {
                 "row" => CellSel::Row(row),
@@ -1232,22 +1750,67 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
                 _ => CellSel::Cell(row, col),
             };
             let doc = session.doc.as_mut().ok_or("no document open")?;
-            doc.do_op(&hwp_ops::Op::SetTableCellShade { section, index, sel: cellsel, shade }).map_err(|e| e.to_string())?;
+            doc.do_op(&hwp_ops::Op::SetTableCellShade {
+                section,
+                index,
+                sel: cellsel,
+                shade,
+            })
+            .map_err(|e| e.to_string())?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }
-        Intent::SetCellRangeShade { section, index, r0, c0, r1, c1, shade } => {
+        Intent::SetCellRangeShade {
+            section,
+            index,
+            r0,
+            c0,
+            r1,
+            c1,
+            shade,
+        } => {
             use hwp_ops::CellSel;
             let doc = session.doc.as_mut().ok_or("no document open")?;
-            doc.do_op(&hwp_ops::Op::SetTableCellShade { section, index, sel: CellSel::Rect { r0, c0, r1, c1 }, shade })
-                .map_err(|e| e.to_string())?;
+            doc.do_op(&hwp_ops::Op::SetTableCellShade {
+                section,
+                index,
+                sel: CellSel::Rect { r0, c0, r1, c1 },
+                shade,
+            })
+            .map_err(|e| e.to_string())?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }
-        Intent::SetCellRangeFmt { section, index, r0, c0, r1, c1, bold, italic, size_pt, font, color, align } => {
+        Intent::SetCellRangeFmt {
+            section,
+            index,
+            r0,
+            c0,
+            r1,
+            c1,
+            bold,
+            italic,
+            size_pt,
+            font,
+            color,
+            align,
+        } => {
             let doc = session.doc.as_mut().ok_or("no document open")?;
-            doc.do_op(&hwp_ops::Op::SetCellRangeFmt { section, index, r0, c0, r1, c1, bold, italic, size_pt, font, color, align })
-                .map_err(|e| e.to_string())?;
+            doc.do_op(&hwp_ops::Op::SetCellRangeFmt {
+                section,
+                index,
+                r0,
+                c0,
+                r1,
+                c1,
+                bold,
+                italic,
+                size_pt,
+                font,
+                color,
+                align,
+            })
+            .map_err(|e| e.to_string())?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }
@@ -1256,7 +1819,13 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }
-        Intent::InsertImage { section, block, data_b64, width, height } => {
+        Intent::InsertImage {
+            section,
+            block,
+            data_b64,
+            width,
+            height,
+        } => {
             // Decode + validate the bytes (magic-byte format detect + size cap) BEFORE touching the doc,
             // so a bad drop never leaves a half-applied state. `kind` is the detected format, not a claim.
             let (bytes, kind) = decode_and_validate_image(&data_b64)?;
@@ -1273,12 +1842,23 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
                 Some(b) => b.saturating_add(1).min(sec_len),
                 None => sec_len,
             };
-            sess.do_op(&hwp_ops::Op::InsertImageAt { section, index, bytes, kind, width, height })
-                .map_err(|e| e.to_string())?;
+            sess.do_op(&hwp_ops::Op::InsertImageAt {
+                section,
+                index,
+                bytes,
+                kind,
+                width,
+                height,
+            })
+            .map_err(|e| e.to_string())?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }
-        Intent::InsertTableAt { section, index, rows } => {
+        Intent::InsertTableAt {
+            section,
+            index,
+            rows,
+        } => {
             // `None` → the section END (resolved here so the op's `index == len` append semantics
             // absorb the end-append); `Some(i)` passes through — past-end stays an honest op error.
             let sess = session.doc.as_mut().ok_or("no document open")?;
@@ -1286,18 +1866,33 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
                 Some(i) => i,
                 None => resolve_section_end(sess, section)?,
             };
-            sess.do_op(&hwp_ops::Op::InsertTableAt { section, index, rows }).map_err(|e| e.to_string())?;
+            sess.do_op(&hwp_ops::Op::InsertTableAt {
+                section,
+                index,
+                rows,
+            })
+            .map_err(|e| e.to_string())?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }
-        Intent::InsertParagraphAt { section, index, runs, para } => {
+        Intent::InsertParagraphAt {
+            section,
+            index,
+            runs,
+            para,
+        } => {
             let sess = session.doc.as_mut().ok_or("no document open")?;
             let index = match index {
                 Some(i) => i,
                 None => resolve_section_end(sess, section)?,
             };
-            sess.do_op(&hwp_ops::Op::InsertParagraphAt { section, index, runs, para })
-                .map_err(|e| e.to_string())?;
+            sess.do_op(&hwp_ops::Op::InsertParagraphAt {
+                section,
+                index,
+                runs,
+                para,
+            })
+            .map_err(|e| e.to_string())?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }
@@ -1321,10 +1916,17 @@ fn call_tool(name: &str, args: &Value, session: &mut Session) -> Result<String, 
         "open_document" => {
             let path = arg_str("path").ok_or("missing `path`")?;
             let i = do_open(session, &path)?;
-            Ok(format!("opened {path} ({}, {} section(s))", i.format, i.sections))
+            Ok(format!(
+                "opened {path} ({}, {} section(s))",
+                i.format, i.sections
+            ))
         }
         "get_context" => {
-            let doc = session.doc.as_ref().ok_or("no document open (call open_document first)")?.doc();
+            let doc = session
+                .doc
+                .as_ref()
+                .ok_or("no document open (call open_document first)")?
+                .doc();
             let ctx = hwp_ai::to_markdown(doc).unwrap_or_default();
             // R5 prompt-injection fence (issue 011 → moved to 013 appendix A.4): the document text is
             // UNTRUSTED — an uploaded file could contain sentences that look like instructions. Wrap it
@@ -1359,35 +1961,67 @@ fn call_tool(name: &str, args: &Value, session: &mut Session) -> Result<String, 
         "close_document" => {
             let had = session.doc.is_some();
             do_close(session);
-            Ok(if had { "closed the document".into() } else { "nothing open".into() })
+            Ok(if had {
+                "closed the document".into()
+            } else {
+                "nothing open".into()
+            })
         }
         "extract_text" => {
-            let doc = session.doc.as_ref().ok_or("no document open (call open_document first)")?.doc();
+            let doc = session
+                .doc
+                .as_ref()
+                .ok_or("no document open (call open_document first)")?
+                .doc();
             Ok(doc.plain_text())
         }
         "undo" => {
-            let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
-            Ok(if sess.undo() { "undid the last edit".into() } else { "nothing to undo".into() })
+            let sess = session
+                .doc
+                .as_mut()
+                .ok_or("no document open (call open_document first)")?;
+            Ok(if sess.undo() {
+                "undid the last edit".into()
+            } else {
+                "nothing to undo".into()
+            })
         }
         "redo" => {
-            let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
-            Ok(if sess.redo() { "redid the last undone edit".into() } else { "nothing to redo".into() })
+            let sess = session
+                .doc
+                .as_mut()
+                .ok_or("no document open (call open_document first)")?;
+            Ok(if sess.redo() {
+                "redid the last undone edit".into()
+            } else {
+                "nothing to redo".into()
+            })
         }
         "propose_content" => {
             let content = arg_str("content").ok_or("missing `content`")?;
-            let sess = session.doc.as_ref().ok_or("no document open (call open_document first)")?;
+            let sess = session
+                .doc
+                .as_ref()
+                .ok_or("no document open (call open_document first)")?;
             let ai = hwp_ai::content::parse_content(&content).map_err(|e| e.to_string())?;
-            let proposal =
-                hwp_ai::propose_from_content(sess.doc(), &ai, "MCP 제안").map_err(|e| e.to_string())?;
+            let proposal = hwp_ai::propose_from_content(sess.doc(), &ai, "MCP 제안")
+                .map_err(|e| e.to_string())?;
             let n = proposal.ops.len();
             let preview = proposal.preview();
             session.pending = Some(proposal);
-            Ok(format!("제안 준비됨 ({n} op) — 적용하려면 commit_proposal.\n\n미리보기:\n{preview}"))
+            Ok(format!(
+                "제안 준비됨 ({n} op) — 적용하려면 commit_proposal.\n\n미리보기:\n{preview}"
+            ))
         }
         "commit_proposal" => {
-            let proposal =
-                session.pending.take().ok_or("대기 중인 제안이 없습니다 (call propose_content first)")?;
-            let sess = session.doc.as_mut().ok_or("no document open (call open_document first)")?;
+            let proposal = session
+                .pending
+                .take()
+                .ok_or("대기 중인 제안이 없습니다 (call propose_content first)")?;
+            let sess = session
+                .doc
+                .as_mut()
+                .ok_or("no document open (call open_document first)")?;
             let n = proposal.ops.len();
             sess.do_ops(&proposal.ops).map_err(|e| e.to_string())?;
             Ok(format!("적용 완료 ({n} op) — undo 로 되돌릴 수 있습니다"))
@@ -1454,26 +2088,50 @@ mod tests {
     use super::*;
 
     fn showcase() -> String {
-        concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/hwpx/FormattingShowcase.hwpx").into()
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/hwpx/FormattingShowcase.hwpx"
+        )
+        .into()
     }
 
     #[test]
     fn initialize_and_list_tools() {
         let mut s = Session::default();
-        let init = handle(&json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}), &mut s).unwrap();
+        let init = handle(
+            &json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
+            &mut s,
+        )
+        .unwrap();
         assert_eq!(init["result"]["protocolVersion"], PROTOCOL_VERSION);
         assert_eq!(init["result"]["serverInfo"]["name"], "hwp-mcp");
 
-        let list = handle(&json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}), &mut s).unwrap();
-        let names: Vec<&str> =
-            list["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
-        assert!(names.contains(&"open_document") && names.contains(&"apply_content") && names.contains(&"export_hwpx"));
+        let list = handle(
+            &json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}),
+            &mut s,
+        )
+        .unwrap();
+        let names: Vec<&str> = list["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert!(
+            names.contains(&"open_document")
+                && names.contains(&"apply_content")
+                && names.contains(&"export_hwpx")
+        );
     }
 
     #[test]
     fn notifications_get_no_response() {
         let mut s = Session::default();
-        assert!(handle(&json!({"jsonrpc":"2.0","method":"notifications/initialized"}), &mut s).is_none());
+        assert!(handle(
+            &json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            &mut s
+        )
+        .is_none());
     }
 
     #[test]
@@ -1488,20 +2146,35 @@ mod tests {
         assert_eq!(r["result"]["isError"], false, "open: {r}");
         // context includes the template
         let r = call("get_context", json!({}), &mut s);
-        assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("템플릿"));
+        assert!(r["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("템플릿"));
         // apply content (styled heading + a paragraph)
         let content = r#"{"blocks":[{"type":"heading","text":"MCP로 추가","style":"개요 1"},{"type":"paragraph","runs":[{"text":"에이전트가 작성","bold":true}]}]}"#;
         let r = call("apply_content", json!({"content": content}), &mut s);
         assert_eq!(r["result"]["isError"], false, "apply: {r}");
         // export to a temp path + open-safety OK
         let out = std::env::temp_dir().join("hwp_mcp_test.hwpx");
-        let r = call("export_hwpx", json!({"path": out.to_str().unwrap()}), &mut s);
+        let r = call(
+            "export_hwpx",
+            json!({"path": out.to_str().unwrap()}),
+            &mut s,
+        );
         assert_eq!(r["result"]["isError"], false, "export: {r}");
-        assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("OK"), "open-safety: {r}");
+        assert!(
+            r["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("OK"),
+            "open-safety: {r}"
+        );
         // the exported doc reparses with our added text
         let bytes = std::fs::read(&out).unwrap();
         let doc = hwp_core::Engine::open(&bytes).unwrap();
-        assert!(doc.plain_text().contains("MCP로 추가") && doc.plain_text().contains("에이전트가 작성"));
+        assert!(
+            doc.plain_text().contains("MCP로 추가") && doc.plain_text().contains("에이전트가 작성")
+        );
     }
 
     #[test]
@@ -1511,7 +2184,12 @@ mod tests {
             handle(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name,"arguments":args}}), s)
                 .unwrap()
         };
-        let text = |r: &Value| r["result"]["content"][0]["text"].as_str().unwrap().to_string();
+        let text = |r: &Value| {
+            r["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
 
         call("open_document", json!({"path": showcase()}), &mut s);
         let content = r#"{"blocks":[{"type":"paragraph","runs":[{"text":"되돌리기 테스트"}]}]}"#;
@@ -1538,7 +2216,9 @@ mod tests {
     fn apply_intent_typed_lane_open_edit_undo_redo() {
         let mut s = Session::default();
         match apply_intent(&mut s, Intent::Open { path: showcase() }).unwrap() {
-            Outcome::Opened { editable, sections, .. } => {
+            Outcome::Opened {
+                editable, sections, ..
+            } => {
                 assert!(editable, "showcase is HWPX (editable)");
                 assert!(sections >= 1);
             }
@@ -1550,7 +2230,8 @@ mod tests {
         };
         assert!(!text(&mut s).contains("인텐트 레인"));
 
-        let content = r#"{"blocks":[{"type":"paragraph","runs":[{"text":"인텐트 레인"}]}]}"#.to_string();
+        let content =
+            r#"{"blocks":[{"type":"paragraph","runs":[{"text":"인텐트 레인"}]}]}"#.to_string();
         match apply_intent(&mut s, Intent::ApplyContent { json: content }).unwrap() {
             Outcome::Applied { blocks, ops } => {
                 assert_eq!(blocks, 1);
@@ -1558,14 +2239,20 @@ mod tests {
             }
             _ => panic!("expected Applied"),
         }
-        assert!(text(&mut s).contains("인텐트 레인"), "typed apply mutates the doc");
+        assert!(
+            text(&mut s).contains("인텐트 레인"),
+            "typed apply mutates the doc"
+        );
 
         // ApplyContent is ONE undo unit (do_ops): a single undo reverts it.
         match apply_intent(&mut s, Intent::Undo).unwrap() {
             Outcome::Undone(c) => assert!(c),
             _ => panic!("expected Undone"),
         }
-        assert!(!text(&mut s).contains("인텐트 레인"), "one undo reverts the whole apply");
+        assert!(
+            !text(&mut s).contains("인텐트 레인"),
+            "one undo reverts the whole apply"
+        );
         match apply_intent(&mut s, Intent::Redo).unwrap() {
             Outcome::Redone(c) => assert!(c),
             _ => panic!("expected Redone"),
@@ -1583,12 +2270,16 @@ mod tests {
         };
 
         // Propose: returns a preview, does NOT mutate the document.
-        let content = r#"{"blocks":[{"type":"heading","text":"제안 미리보기","align":"center"}]}"#.to_string();
+        let content = r#"{"blocks":[{"type":"heading","text":"제안 미리보기","align":"center"}]}"#
+            .to_string();
         match apply_intent(&mut s, Intent::Propose { json: content }).unwrap() {
             Outcome::Proposed { preview, .. } => assert!(preview.contains("문단")),
             _ => panic!("expected Proposed"),
         }
-        assert!(!text(&mut s).contains("제안 미리보기"), "propose must not commit");
+        assert!(
+            !text(&mut s).contains("제안 미리보기"),
+            "propose must not commit"
+        );
 
         // Commit: applies the pending proposal as one undo unit.
         match apply_intent(&mut s, Intent::Commit).unwrap() {
@@ -1600,7 +2291,10 @@ mod tests {
             Outcome::Undone(c) => assert!(c),
             _ => panic!(),
         }
-        assert!(!text(&mut s).contains("제안 미리보기"), "one undo reverts the committed proposal");
+        assert!(
+            !text(&mut s).contains("제안 미리보기"),
+            "one undo reverts the committed proposal"
+        );
 
         // Commit with nothing pending errors.
         assert!(apply_intent(&mut s, Intent::Commit).is_err());
@@ -1613,7 +2307,12 @@ mod tests {
             handle(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name,"arguments":args}}), s)
                 .unwrap()
         };
-        let text = |r: &Value| r["result"]["content"][0]["text"].as_str().unwrap().to_string();
+        let text = |r: &Value| {
+            r["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
 
         call("open_document", json!({"path": showcase()}), &mut s);
         let content = r#"{"blocks":[{"type":"heading","text":"제안 제목","align":"center"},{"type":"paragraph","runs":[{"text":"검증","bold":true}]}]}"#;
@@ -1622,7 +2321,10 @@ mod tests {
         let p = call("propose_content", json!({"content": content}), &mut s);
         assert_eq!(p["result"]["isError"], false, "{p}");
         assert!(text(&p).contains("미리보기"), "{}", text(&p));
-        assert!(!text(&call("extract_text", json!({}), &mut s)).contains("제안 제목"), "propose must not commit");
+        assert!(
+            !text(&call("extract_text", json!({}), &mut s)).contains("제안 제목"),
+            "propose must not commit"
+        );
 
         // commit_proposal applies it.
         let c = call("commit_proposal", json!({}), &mut s);
@@ -1648,7 +2350,13 @@ mod tests {
         apply_intent(&mut s, Intent::Open { path: showcase() }).unwrap();
         let content = r#"{"blocks":[{"type":"paragraph","runs":[{"text":"상한"}]}]}"#;
         for _ in 0..(LIVE_UNDO_LIMIT + 5) {
-            apply_intent(&mut s, Intent::ApplyContent { json: content.into() }).unwrap();
+            apply_intent(
+                &mut s,
+                Intent::ApplyContent {
+                    json: content.into(),
+                },
+            )
+            .unwrap();
         }
         let mut undone = 0;
         loop {
@@ -1658,7 +2366,10 @@ mod tests {
                 _ => panic!("expected Undone"),
             }
         }
-        assert_eq!(undone, LIVE_UNDO_LIMIT, "undo history is capped at {LIVE_UNDO_LIMIT}");
+        assert_eq!(
+            undone, LIVE_UNDO_LIMIT,
+            "undo history is capped at {LIVE_UNDO_LIMIT}"
+        );
     }
 
     /// Acceptance (issue #010): "되돌리기 후 문서가 편집 전과 동일" — verified at the SESSION boundary by
@@ -1671,19 +2382,29 @@ mod tests {
     fn undo_after_commit_is_byte_identical_through_session() {
         let mut s = Session::default();
         apply_intent(&mut s, Intent::Open { path: showcase() }).unwrap();
-        let serialize = |s: &Session| hwp_core::serialize_hwpx(s.doc.as_ref().unwrap().doc()).unwrap();
+        let serialize =
+            |s: &Session| hwp_core::serialize_hwpx(s.doc.as_ref().unwrap().doc()).unwrap();
         let before = serialize(&s);
 
-        let content = r#"{"blocks":[{"type":"paragraph","runs":[{"text":"바이트 되돌리기"}]}]}"#.to_string();
+        let content =
+            r#"{"blocks":[{"type":"paragraph","runs":[{"text":"바이트 되돌리기"}]}]}"#.to_string();
         apply_intent(&mut s, Intent::Propose { json: content }).unwrap();
         apply_intent(&mut s, Intent::Commit).unwrap();
-        assert_ne!(serialize(&s), before, "commit must change the serialized bytes");
+        assert_ne!(
+            serialize(&s),
+            before,
+            "commit must change the serialized bytes"
+        );
 
         match apply_intent(&mut s, Intent::Undo).unwrap() {
             Outcome::Undone(c) => assert!(c),
             _ => panic!("expected Undone"),
         }
-        assert_eq!(serialize(&s), before, "undo restores the document byte-for-byte");
+        assert_eq!(
+            serialize(&s),
+            before,
+            "undo restores the document byte-for-byte"
+        );
     }
 
     /// P1 contract: the rhwp SVG render is the faithful "원본 보기" of the UNEDITED original — the
@@ -1698,16 +2419,27 @@ mod tests {
             handle(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name,"arguments":args}}), s)
                 .unwrap()
         };
-        let text = |r: &Value| r["result"]["content"][0]["text"].as_str().unwrap().to_string();
+        let text = |r: &Value| {
+            r["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
 
         let open = call("open_document", json!({"path": showcase()}), &mut s);
         assert_eq!(open["result"]["isError"], false, "{open}");
 
         // Two renders of page 0 (unedited original) return byte-identical SVG (cache hit).
         let a = call("render_page", json!({"page": 0}), &mut s);
-        assert_eq!(a["result"]["isError"], false, "render unedited original: {a}");
+        assert_eq!(
+            a["result"]["isError"], false,
+            "render unedited original: {a}"
+        );
         let first = text(&a);
-        assert!(!first.is_empty() && first.contains("<svg"), "non-empty original SVG");
+        assert!(
+            !first.is_empty() && first.contains("<svg"),
+            "non-empty original SVG"
+        );
         let b = call("render_page", json!({"page": 0}), &mut s);
         assert_eq!(text(&b), first, "second render is identical (cache hit)");
 
@@ -1715,13 +2447,27 @@ mod tests {
         let content = r#"{"blocks":[{"type":"paragraph","runs":[{"text":"렌더 캐시 편집"}]}]}"#;
         call("apply_content", json!({"content": content}), &mut s);
         let c = call("render_page", json!({"page": 0}), &mut s);
-        assert_eq!(c["result"]["isError"], true, "edited doc must NOT render via rhwp: {c}");
-        assert!(text(&c).contains("HTML"), "the refusal points the user to the HTML preview: {}", text(&c));
+        assert_eq!(
+            c["result"]["isError"], true,
+            "edited doc must NOT render via rhwp: {c}"
+        );
+        assert!(
+            text(&c).contains("HTML"),
+            "the refusal points the user to the HTML preview: {}",
+            text(&c)
+        );
 
         // …but page_count still works (via OUR engine over the edited IR), so the UI keeps a count.
         let pc = call("page_count", json!({}), &mut s);
-        assert_eq!(pc["result"]["isError"], false, "page_count works on an edited doc: {pc}");
-        assert!(text(&pc).trim().parse::<u32>().unwrap() >= 1, "edited page count ≥ 1: {}", text(&pc));
+        assert_eq!(
+            pc["result"]["isError"], false,
+            "page_count works on an edited doc: {pc}"
+        );
+        assert!(
+            text(&pc).trim().parse::<u32>().unwrap() >= 1,
+            "edited page count ≥ 1: {}",
+            text(&pc)
+        );
     }
 
     /// P1: `page_count` works on an EDITED doc even WITHOUT the rhwp feature (own-engine pagination),
@@ -1734,7 +2480,8 @@ mod tests {
         apply_intent(
             &mut s,
             Intent::ApplyContent {
-                json: r#"{"blocks":[{"type":"paragraph","runs":[{"text":"자체 엔진 페이지수"}]}]}"#.into(),
+                json: r#"{"blocks":[{"type":"paragraph","runs":[{"text":"자체 엔진 페이지수"}]}]}"#
+                    .into(),
             },
         )
         .unwrap();
@@ -1762,7 +2509,11 @@ mod tests {
         // Find: both occurrences, each len 2.
         match apply_intent(
             &mut s,
-            Intent::Find { query: "문서".into(), case_sensitive: false, whole_word: false },
+            Intent::Find {
+                query: "문서".into(),
+                case_sensitive: false,
+                whole_word: false,
+            },
         )
         .unwrap()
         {
@@ -1790,13 +2541,21 @@ mod tests {
             _ => panic!("expected Replaced"),
         };
         assert_eq!(replaced, 2);
-        assert_eq!(text(&mut s).matches("파일").count(), 2, "both '문서' became '파일'");
+        assert_eq!(
+            text(&mut s).matches("파일").count(),
+            2,
+            "both '문서' became '파일'"
+        );
         assert_eq!(text(&mut s).matches("문서").count(), 0);
         match apply_intent(&mut s, Intent::Undo).unwrap() {
             Outcome::Undone(c) => assert!(c),
             _ => panic!(),
         }
-        assert_eq!(text(&mut s).matches("문서").count(), 2, "one undo reverts the whole replace-all");
+        assert_eq!(
+            text(&mut s).matches("문서").count(),
+            2,
+            "one undo reverts the whole replace-all"
+        );
         assert_eq!(text(&mut s).matches("파일").count(), 0);
     }
 
@@ -1820,7 +2579,11 @@ mod tests {
             Outcome::Replaced { replaced, .. } => assert_eq!(replaced, 0),
             _ => panic!("expected Replaced"),
         }
-        assert_eq!(s.doc.as_ref().unwrap().revision(), rev, "empty replace pushes no undo unit");
+        assert_eq!(
+            s.doc.as_ref().unwrap().revision(),
+            rev,
+            "empty replace pushes no undo unit"
+        );
     }
 
     #[test]
@@ -1830,7 +2593,12 @@ mod tests {
             handle(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name,"arguments":args}}), s)
                 .unwrap()
         };
-        let text = |r: &Value| r["result"]["content"][0]["text"].as_str().unwrap().to_string();
+        let text = |r: &Value| {
+            r["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
 
         call("open_document", json!({"path": showcase()}), &mut s);
 
@@ -1839,7 +2607,11 @@ mod tests {
         assert_eq!(f["result"]["isError"], false, "{f}");
         assert!(text(&f).contains("2 match"), "{}", text(&f));
 
-        let r = call("replace_text", json!({"query": "문서", "replacement": "파일", "all": true}), &mut s);
+        let r = call(
+            "replace_text",
+            json!({"query": "문서", "replacement": "파일", "all": true}),
+            &mut s,
+        );
         assert_eq!(r["result"]["isError"], false, "{r}");
         assert!(text(&r).contains("replaced 2"), "{}", text(&r));
         let after = text(&call("extract_text", json!({}), &mut s));
@@ -1866,7 +2638,16 @@ mod tests {
         let click_x = (title.x0 + title.x1) / 2.0;
         let click_y = title.top + title.height / 2.0;
 
-        let hit = match apply_intent(&mut s, Intent::HitTest { page: 0, x: click_x, y: click_y }).unwrap() {
+        let hit = match apply_intent(
+            &mut s,
+            Intent::HitTest {
+                page: 0,
+                x: click_x,
+                y: click_y,
+            },
+        )
+        .unwrap()
+        {
             Outcome::Hit(h) => h.expect("a click on a glyph hits a target"),
             _ => panic!("expected Hit"),
         };
@@ -1878,14 +2659,27 @@ mod tests {
         assert!(hit.offset <= title.char_start + title.char_len);
 
         // Round-trip: NodeId + offset → caret rect on the same page, inside page bounds.
-        let caret = match apply_intent(&mut s, Intent::CaretRect { page: 0, node, offset: hit.offset }).unwrap() {
+        let caret = match apply_intent(
+            &mut s,
+            Intent::CaretRect {
+                page: 0,
+                node,
+                offset: hit.offset,
+            },
+        )
+        .unwrap()
+        {
             Outcome::Caret(c) => c.expect("the target renders on page 0"),
             _ => panic!("expected Caret"),
         };
         // The caret x equals the same interpolation hit_test used (within one char cell).
         let cell = (title.x1 - title.x0) / title.char_len.max(1) as f64;
         let want_x = title.x0 + cell * (hit.offset.saturating_sub(title.char_start)) as f64;
-        assert!((caret.x - want_x).abs() < cell + 1e-6, "caret x {} ~ {want_x}", caret.x);
+        assert!(
+            (caret.x - want_x).abs() < cell + 1e-6,
+            "caret x {} ~ {want_x}",
+            caret.x
+        );
         assert_eq!(caret.top, title.top);
         assert!(caret.height > 0.0);
     }
@@ -1896,7 +2690,14 @@ mod tests {
     fn caret_intents_gated_without_rhwp() {
         let mut s = Session::default();
         apply_intent(&mut s, Intent::Open { path: showcase() }).unwrap();
-        let r = apply_intent(&mut s, Intent::HitTest { page: 0, x: 0.0, y: 0.0 });
+        let r = apply_intent(
+            &mut s,
+            Intent::HitTest {
+                page: 0,
+                x: 0.0,
+                y: 0.0,
+            },
+        );
         #[cfg(not(feature = "rhwp"))]
         assert!(r.is_err(), "hit_test errors without rhwp");
         #[cfg(feature = "rhwp")]
@@ -1919,8 +2720,8 @@ mod tests {
             .find(|b| !b.in_cell && b.char_len > 0 && b.stable_key.is_some())
             .expect("a body run on page 0");
         let doc = s.doc.as_ref().unwrap().doc();
-        let (id, _bi) =
-            hwp_core::resolve_key_to_node(doc, title.section, title.para_ord).expect("body run → NodeId");
+        let (id, _bi) = hwp_core::resolve_key_to_node(doc, title.section, title.para_ord)
+            .expect("body run → NodeId");
         (id.0, title.char_start)
     }
 
@@ -1939,21 +2740,43 @@ mod tests {
         assert!(!text(&mut s).contains("끼움글자"));
 
         // Insert a multi-scalar Korean string at the run's start.
-        match apply_intent(&mut s, Intent::InsertText { node, offset, text: "끼움글자".into() }).unwrap() {
+        match apply_intent(
+            &mut s,
+            Intent::InsertText {
+                node,
+                offset,
+                text: "끼움글자".into(),
+            },
+        )
+        .unwrap()
+        {
             Outcome::Edited { pages } => assert!(pages >= 1, "page count after insert"),
             _ => panic!("expected Edited"),
         }
-        assert!(text(&mut s).contains("끼움글자"), "insert advances doc text");
+        assert!(
+            text(&mut s).contains("끼움글자"),
+            "insert advances doc text"
+        );
 
         // One keystroke = one undo unit: a single undo reverts it.
         match apply_intent(&mut s, Intent::Undo).unwrap() {
             Outcome::Undone(c) => assert!(c),
             _ => panic!("expected Undone"),
         }
-        assert!(!text(&mut s).contains("끼움글자"), "one undo reverts a single insert");
+        assert!(
+            !text(&mut s).contains("끼움글자"),
+            "one undo reverts a single insert"
+        );
 
         // Offset way past the paragraph end is an Err (surfaced to the UI), never a panic.
-        let r = apply_intent(&mut s, Intent::InsertText { node, offset: 100_000, text: "X".into() });
+        let r = apply_intent(
+            &mut s,
+            Intent::InsertText {
+                node,
+                offset: 100_000,
+                text: "X".into(),
+            },
+        );
         assert!(r.is_err(), "offset past paragraph end errors, not panics");
     }
 
@@ -1977,25 +2800,49 @@ mod tests {
             Outcome::Edited { .. } => {}
             _ => panic!("expected Edited"),
         }
-        assert_eq!(text(&mut s), before, "delete-back at offset 0 changes nothing");
-        assert_eq!(s.doc.as_ref().unwrap().revision(), rev0, "offset-0 delete pushes no undo unit");
+        assert_eq!(
+            text(&mut s),
+            before,
+            "delete-back at offset 0 changes nothing"
+        );
+        assert_eq!(
+            s.doc.as_ref().unwrap().revision(),
+            rev0,
+            "offset-0 delete pushes no undo unit"
+        );
 
         // Insert a sentinel char, then DeleteBack ending right after it removes exactly that scalar.
-        apply_intent(&mut s, Intent::InsertText { node, offset: 0, text: "Z".into() }).unwrap();
+        apply_intent(
+            &mut s,
+            Intent::InsertText {
+                node,
+                offset: 0,
+                text: "Z".into(),
+            },
+        )
+        .unwrap();
         assert!(text(&mut s).contains('Z'), "sentinel inserted");
         let count_before = text(&mut s).matches('Z').count();
         match apply_intent(&mut s, Intent::DeleteBack { node, offset: 1 }).unwrap() {
             Outcome::Edited { .. } => {}
             _ => panic!("expected Edited"),
         }
-        assert_eq!(text(&mut s).matches('Z').count(), count_before - 1, "delete-back removed the scalar");
+        assert_eq!(
+            text(&mut s).matches('Z').count(),
+            count_before - 1,
+            "delete-back removed the scalar"
+        );
 
         // One undo reverts the single deletion (the 'Z' comes back).
         match apply_intent(&mut s, Intent::Undo).unwrap() {
             Outcome::Undone(c) => assert!(c),
             _ => panic!("expected Undone"),
         }
-        assert_eq!(text(&mut s).matches('Z').count(), count_before, "one undo reverts the deletion");
+        assert_eq!(
+            text(&mut s).matches('Z').count(),
+            count_before,
+            "one undo reverts the deletion"
+        );
     }
 
     /// P0-3 contract: InsertText on a non-simple (structural: image/equation/ctrl/…) paragraph
@@ -2012,14 +2859,33 @@ mod tests {
         let mut doc = hwp_model::document::SemanticDoc::default();
         let para = Paragraph {
             id: Some(NodeId(7)),
-            source: Some(ParaSource { simple: false, ..Default::default() }),
-            runs: vec![Run { content: vec![Inline::Text("그림".into())], ..Default::default() }],
+            source: Some(ParaSource {
+                simple: false,
+                ..Default::default()
+            }),
+            runs: vec![Run {
+                content: vec![Inline::Text("그림".into())],
+                ..Default::default()
+            }],
             ..Default::default()
         };
-        doc.sections.push(Section { blocks: vec![Block::Paragraph(para)], ..Default::default() });
-        let mut s = Session { doc: Some(EditSession::new(doc)), ..Default::default() };
+        doc.sections.push(Section {
+            blocks: vec![Block::Paragraph(para)],
+            ..Default::default()
+        });
+        let mut s = Session {
+            doc: Some(EditSession::new(doc)),
+            ..Default::default()
+        };
 
-        let err = match apply_intent(&mut s, Intent::InsertText { node: 7, offset: 0, text: "X".into() }) {
+        let err = match apply_intent(
+            &mut s,
+            Intent::InsertText {
+                node: 7,
+                offset: 0,
+                text: "X".into(),
+            },
+        ) {
             Err(e) => e,
             Ok(_) => panic!("structural paragraph must refuse in-place edit"),
         };
@@ -2047,7 +2913,10 @@ mod tests {
         assert_eq!(ia.format, ib.format, "same format label");
         assert_eq!(ia.editable, ib.editable, "same editable flag");
         assert_eq!(ia.sections, ib.sections, "same section count");
-        assert_eq!(a.source_path, b.source_path, "name hint fills source_path like the path did");
+        assert_eq!(
+            a.source_path, b.source_path,
+            "name hint fills source_path like the path did"
+        );
         assert_eq!(
             a.doc.as_ref().unwrap().doc().plain_text(),
             b.doc.as_ref().unwrap().doc().plain_text(),
@@ -2068,16 +2937,26 @@ mod tests {
         let mut s = Session::default();
         do_open(&mut s, &showcase()).unwrap();
         // A real edit so the serialized bytes aren't just the pristine original.
-        do_apply_content(&mut s, r#"{"blocks":[{"type":"paragraph","runs":[{"text":"바이트 동등성"}]}]}"#)
-            .unwrap();
+        do_apply_content(
+            &mut s,
+            r#"{"blocks":[{"type":"paragraph","runs":[{"text":"바이트 동등성"}]}]}"#,
+        )
+        .unwrap();
 
         let in_memory = export_bytes(&s).unwrap();
         let out = std::env::temp_dir().join("hwp_mcp_export_bytes_eq.hwpx");
         let (len, _open_safe) = do_export(&s, out.to_str().unwrap()).unwrap();
         let on_disk = std::fs::read(&out).unwrap();
 
-        assert_eq!(in_memory, on_disk, "export_bytes == the bytes save writes to disk");
-        assert_eq!(in_memory.len(), len, "reported byte length matches export_bytes");
+        assert_eq!(
+            in_memory, on_disk,
+            "export_bytes == the bytes save writes to disk"
+        );
+        assert_eq!(
+            in_memory.len(),
+            len,
+            "reported byte length matches export_bytes"
+        );
     }
 
     #[test]
@@ -2108,18 +2987,28 @@ mod tests {
         assert_eq!(kind, "png");
         assert_eq!(&bytes[..4], &[0x89, 0x50, 0x4E, 0x47]);
         // valid JPEG signature (FF D8 FF …) → detected as "jpg".
-        let (_, jk) = decode_and_validate_image(&b64(&[0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10])).expect("JPEG accepted");
+        let (_, jk) = decode_and_validate_image(&b64(&[0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10]))
+            .expect("JPEG accepted");
         assert_eq!(jk, "jpg");
         // non-image bytes → rejected (magic-byte mismatch; NOT a silent no-op).
-        assert!(decode_and_validate_image(&b64(b"not an image at all")).is_err(), "non-image rejected");
+        assert!(
+            decode_and_validate_image(&b64(b"not an image at all")).is_err(),
+            "non-image rejected"
+        );
         // malformed base64 → rejected.
-        assert!(decode_and_validate_image("@@@not base64@@@").is_err(), "bad base64 rejected");
+        assert!(
+            decode_and_validate_image("@@@not base64@@@").is_err(),
+            "bad base64 rejected"
+        );
         // empty payload → rejected.
         assert!(decode_and_validate_image("").is_err(), "empty rejected");
         // oversized → rejected by the size cap (PNG-prefixed so only the CAP trips, not the format check).
         let mut big = vec![0u8; MAX_IMAGE_BYTES + 1];
         big[..8].copy_from_slice(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
-        assert!(decode_and_validate_image(&b64(&big)).is_err(), "oversized rejected");
+        assert!(
+            decode_and_validate_image(&b64(&big)).is_err(),
+            "oversized rejected"
+        );
     }
 
     /// The web round-trip the issue calls out (L): open an HWPX with NO image → insert one via the
@@ -2133,7 +3022,9 @@ mod tests {
     fn insert_image_round_trips_through_hwpx_export() {
         use base64::Engine as _;
         use hwp_hwpx::package::Package;
-        let png = base64::engine::general_purpose::STANDARD.decode(TINY_PNG_B64).unwrap();
+        let png = base64::engine::general_purpose::STANDARD
+            .decode(TINY_PNG_B64)
+            .unwrap();
         let find_png_part = |pkg: &Package| -> Option<String> {
             pkg.part_names
                 .iter()
@@ -2158,18 +3049,29 @@ mod tests {
         // The LIVE model carries the image (bin_data bytes + an Inline::Image) — this is what own-render
         // draws as an SVG <image> immediately (실반영), before any export.
         let doc = s.doc.as_ref().unwrap().doc();
-        assert!(doc.bin_data.iter().any(|b| b.bytes == png), "live doc embeds the PNG bytes");
+        assert!(
+            doc.bin_data.iter().any(|b| b.bytes == png),
+            "live doc embeds the PNG bytes"
+        );
 
         // The exported HWPX embeds the image as a BinData part whose bytes ARE the inserted PNG, and a
         // section body references it (binaryItemIDRef → the manifest item id).
         let exported = export_bytes(&s).expect("export HWPX");
         let pkg = Package::open(&exported).expect("exported is a valid HWPX package");
         let part = find_png_part(&pkg).expect("export has a BinData/*.png part");
-        assert_eq!(pkg.read_part(&part).expect("read image part"), png, "embedded bytes == inserted PNG");
+        assert_eq!(
+            pkg.read_part(&part).expect("read image part"),
+            png,
+            "embedded bytes == inserted PNG"
+        );
         let section_refs_image = pkg.section_part_names().iter().any(|sn| {
-            String::from_utf8_lossy(&pkg.read_part(sn).unwrap_or_default()).contains("binaryItemIDRef")
+            String::from_utf8_lossy(&pkg.read_part(sn).unwrap_or_default())
+                .contains("binaryItemIDRef")
         });
-        assert!(section_refs_image, "a section references the image (binaryItemIDRef)");
+        assert!(
+            section_refs_image,
+            "a section references the image (binaryItemIDRef)"
+        );
 
         // Reopen the export (proves it isn't corrupt) → re-export → the image part SURVIVES. Our lossy
         // parser doesn't re-model the image, but the bytes round-trip via verbatim passthrough and a
@@ -2179,6 +3081,10 @@ mod tests {
         let exported2 = export_bytes(&s2).expect("re-export");
         let pkg2 = Package::open(&exported2).expect("re-export is valid HWPX");
         let part2 = find_png_part(&pkg2).expect("re-export STILL has the image part");
-        assert_eq!(pkg2.read_part(&part2).expect("read"), png, "image bytes survive reopen→re-export");
+        assert_eq!(
+            pkg2.read_part(&part2).expect("read"),
+            png,
+            "image bytes survive reopen→re-export"
+        );
     }
 }

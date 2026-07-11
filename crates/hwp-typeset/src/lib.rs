@@ -20,7 +20,11 @@ pub use shaper::RealFontMetrics;
 
 /// Positioned layout (glyphs/images/boxes per page) — the paint-IR bridge consumed by `hwp-render`.
 pub mod place;
-pub use place::{block_pages, cell_caret_rect, cell_text_hit, column_offsets, place_doc, row_offsets, BlockKind, CellCaretRect, CellTextHit, PlacedBlock, PlacedCell, PlacedDoc, PlacedGlyph, PlacedImage, PlacedPage, PlacedRect, PlacedTable};
+pub use place::{
+    block_pages, cell_caret_rect, cell_text_hit, column_offsets, place_doc, row_offsets, BlockKind,
+    CellCaretRect, CellTextHit, PlacedBlock, PlacedCell, PlacedDoc, PlacedGlyph, PlacedImage,
+    PlacedPage, PlacedRect, PlacedTable,
+};
 
 /// Half the EM for half-width glyphs.
 const HALF: f64 = 0.5;
@@ -34,7 +38,11 @@ pub(crate) const BASELINE_RATIO: f64 = 0.85;
 
 /// A plain (no family/style) font key — metrics here are per-script, family-independent.
 fn plain_font() -> FontKey {
-    FontKey { family: String::new(), bold: false, italic: false }
+    FontKey {
+        family: String::new(),
+        bold: false,
+        italic: false,
+    }
 }
 
 /// True for full-width glyphs (Hangul, CJK, fullwidth forms) — ~1 EM advance; others are ~half EM.
@@ -102,7 +110,9 @@ impl LayoutEngine for NaiveLayout {
                         // "쪽 나누기 앞에서": force a page break before this paragraph (unless already
                         // at the top of a fresh page). The per-paragraph flag (HWP column_type Page/
                         // Section) OR the shared para_shape's attr1 bit19.
-                        if (p.page_break_before || ps.map(|s| s.page_break_before).unwrap_or(false)) && vert > 0.0 {
+                        if (p.page_break_before || ps.map(|s| s.page_break_before).unwrap_or(false))
+                            && vert > 0.0
+                        {
                             pages.push(new_page(page));
                             vert = 0.0;
                         }
@@ -122,7 +132,10 @@ impl LayoutEngine for NaiveLayout {
                                 vert = 0.0;
                             }
                             let adv = ls.vert_size * ratio;
-                            pages.last_mut().unwrap().lines.push(LineSeg { vert_pos: vert, ..ls });
+                            pages.last_mut().unwrap().lines.push(LineSeg {
+                                vert_pos: vert,
+                                ..ls
+                            });
                             vert += adv;
                         }
                         // 문단 아래 간격.
@@ -165,7 +178,11 @@ impl LayoutEngine for NaiveLayout {
 }
 
 fn new_page(page: &PageSetup) -> PageLayout {
-    PageLayout { width: page.width as f64, height: page.height as f64, lines: Vec::new() }
+    PageLayout {
+        width: page.width as f64,
+        height: page.height as f64,
+        lines: Vec::new(),
+    }
 }
 
 /// Vertical cell padding (HWPUNIT) — HWP's default top+bottom cell insets (~141 HWPUNIT ≈ 0.49 mm each
@@ -187,7 +204,10 @@ pub fn unwrap_frame_table(t: &Table) -> Option<(Table, Option<CellEdge>)> {
     if t.rows != 1 || t.cols != 1 {
         return None;
     }
-    let cell = t.cells.iter().find(|c| c.active && c.row == 0 && c.col == 0)?;
+    let cell = t
+        .cells
+        .iter()
+        .find(|c| c.active && c.row == 0 && c.col == 0)?;
     let mut inner: Option<&Table> = None;
     for b in &cell.blocks {
         match b {
@@ -200,7 +220,9 @@ pub fn unwrap_frame_table(t: &Table) -> Option<(Table, Option<CellEdge>)> {
             Block::Paragraph(p) => {
                 // real text beside the table means the cell has its own content → keep it whole
                 let has_text = p.runs.iter().any(|r| {
-                    r.content.iter().any(|i| matches!(i, Inline::Text(s) if !s.trim().is_empty()))
+                    r.content
+                        .iter()
+                        .any(|i| matches!(i, Inline::Text(s) if !s.trim().is_empty()))
                 });
                 if has_text {
                     return None;
@@ -230,7 +252,12 @@ pub fn unwrap_frame_table(t: &Table) -> Option<(Table, Option<CellEdge>)> {
         .copied()
         .or_else(|| {
             cell.has_border.then_some(CellEdge {
-                color: Color { r: 0, g: 0, b: 0, a: 255 },
+                color: Color {
+                    r: 0,
+                    g: 0,
+                    b: 0,
+                    a: 255,
+                },
                 style: LineStyle::Solid,
                 width_px: 1.0,
             })
@@ -249,14 +276,23 @@ pub fn unwrap_frame_table(t: &Table) -> Option<(Table, Option<CellEdge>)> {
 /// text the way 한글 does. Shared by both sizing twins ([`block_height`] + `place::block_height_for_place`)
 /// so the pagination reserve and the drawn cell stay in LOCKSTEP. Body pagination does NOT use this
 /// (NaiveLayout stacks body lines directly), so this change is scoped to table-cell content only.
-pub(crate) fn cell_paragraph_height(p: &Paragraph, doc: &SemanticDoc, width: f64, fonts: &dyn FontMetricsProvider) -> f64 {
+pub(crate) fn cell_paragraph_height(
+    p: &Paragraph,
+    doc: &SemanticDoc,
+    width: f64,
+    fonts: &dyn FontMetricsProvider,
+) -> f64 {
     let ps = doc.para_shapes.get(p.para_shape);
     let sb = ps.map(|s| s.space_before).unwrap_or(0).max(0) as f64;
     let sa = ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;
     let ratio = line_spacing_ratio(p, doc);
     let lines = layout_paragraph(p, doc, width, fonts);
     let text: f64 = lines.iter().map(|l| l.vert_size * ratio).sum();
-    let last_leading = lines.last().map(|l| l.vert_size * (ratio - 1.0)).unwrap_or(0.0).max(0.0);
+    let last_leading = lines
+        .last()
+        .map(|l| l.vert_size * (ratio - 1.0))
+        .unwrap_or(0.0)
+        .max(0.0);
     sb + (text - last_leading) + sa
 }
 
@@ -274,7 +310,12 @@ fn block_height(b: &Block, doc: &SemanticDoc, width: f64, fonts: &dyn FontMetric
 /// occupying it (a row-spanning cell distributes its height evenly across the rows it covers).
 /// Cells break lines at an equal-split column width (`avail / cols × col_span`) — no per-column
 /// widths yet, but enough for faithful page accounting.
-pub fn table_height(t: &Table, avail_w: f64, doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> f64 {
+pub fn table_height(
+    t: &Table,
+    avail_w: f64,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+) -> f64 {
     table_row_heights(t, avail_w, doc, fonts).iter().sum()
 }
 
@@ -285,7 +326,12 @@ pub fn table_height(t: &Table, avail_w: f64, doc: &SemanticDoc, fonts: &dyn Font
 /// as a floor. Column offsets honor the captured `col_widths` — the SAME widths place_table draws with,
 /// so the RESERVATION equals the DRAWN height (an equal-split estimate over-reserved a wide-then-narrow
 /// gov-doc table by ~1.5×, shoving it onto the next page with the rest empty).
-pub(crate) fn table_row_heights(t: &Table, avail_w: f64, doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<f64> {
+pub(crate) fn table_row_heights(
+    t: &Table,
+    avail_w: f64,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+) -> Vec<f64> {
     if t.rows == 0 {
         return Vec::new();
     }
@@ -300,8 +346,12 @@ pub(crate) fn table_row_heights(t: &Table, avail_w: f64, doc: &SemanticDoc, font
         // LOCKSTEP with place::row_heights: reserve at the padded text width (cw - 2*CELL_PAD_X) the cell
         // placer draws glyphs at, so the pagination reserve equals the drawn height (no row under-reserve).
         let tw = (cw - 2.0 * crate::place::CELL_PAD_X).max(1.0);
-        let content: f64 =
-            c.blocks.iter().map(|b| block_height(b, doc, tw, fonts)).sum::<f64>() + CELL_PAD;
+        let content: f64 = c
+            .blocks
+            .iter()
+            .map(|b| block_height(b, doc, tw, fonts))
+            .sum::<f64>()
+            + CELL_PAD;
         let span = c.row_span.max(1);
         let per = content / span as f64;
         let end = (c.row + span).min(t.rows);
@@ -356,8 +406,17 @@ pub struct RowTermBreakdown {
 /// One cell's content decomposition at a padded text width — the per-cell half of [`row_term_breakdown`].
 /// `spaced` is the ACTUAL reserved line advance (per-paragraph trailing leading trimmed, exactly like
 /// [`cell_paragraph_height`]), so `spaced + space_ba + cell_pad` reconciles with the reserved row height.
-fn cell_term_breakdown(c: &Cell, tw: f64, doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> RowTermBreakdown {
-    let mut b = RowTermBreakdown { cell_pad: CELL_PAD, row_span: c.row_span.max(1), ..Default::default() };
+fn cell_term_breakdown(
+    c: &Cell,
+    tw: f64,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+) -> RowTermBreakdown {
+    let mut b = RowTermBreakdown {
+        cell_pad: CELL_PAD,
+        row_span: c.row_span.max(1),
+        ..Default::default()
+    };
     let mut first_ratio: Option<f64> = None;
     for blk in &c.blocks {
         match blk {
@@ -372,7 +431,11 @@ fn cell_term_breakdown(c: &Cell, tw: f64, doc: &SemanticDoc, fonts: &dyn FontMet
                 let lines = layout_paragraph(p, doc, tw, fonts);
                 let raw: f64 = lines.iter().map(|l| l.vert_size).sum();
                 let spaced: f64 = lines.iter().map(|l| l.vert_size * ratio).sum();
-                let last_leading = lines.last().map(|l| l.vert_size * (ratio - 1.0)).unwrap_or(0.0).max(0.0);
+                let last_leading = lines
+                    .last()
+                    .map(|l| l.vert_size * (ratio - 1.0))
+                    .unwrap_or(0.0)
+                    .max(0.0);
                 b.lines += lines.len();
                 b.raw_em += raw;
                 b.spaced += spaced - last_leading;
@@ -394,13 +457,19 @@ fn cell_term_breakdown(c: &Cell, tw: f64, doc: &SemanticDoc, fonts: &dyn FontMet
 /// Per-row term breakdown for a table, LOCKSTEP with [`table_row_heights`]. The reserved height of
 /// each row is set by the cell whose `(content)/span` is largest; that cell's decomposition is what
 /// the audit reports for the row.
-pub fn row_term_breakdown(t: &Table, avail_w: f64, doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<RowTermBreakdown> {
+pub fn row_term_breakdown(
+    t: &Table,
+    avail_w: f64,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+) -> Vec<RowTermBreakdown> {
     if t.rows == 0 {
         return Vec::new();
     }
     let xs = crate::place::column_offsets(t, avail_w);
     let heights = table_row_heights(t, avail_w, doc, fonts);
-    let mut per_row: Vec<(f64, RowTermBreakdown)> = vec![(0.0, RowTermBreakdown::default()); t.rows];
+    let mut per_row: Vec<(f64, RowTermBreakdown)> =
+        vec![(0.0, RowTermBreakdown::default()); t.rows];
     for c in &t.cells {
         if !c.active {
             continue;
@@ -445,7 +514,12 @@ pub(crate) fn subst_glyph(ch: char) -> char {
 /// Lay out a single paragraph into [`LineSeg`]s (vert_pos left at 0 — the caller stacks them). Greedy
 /// break: fill the line, then for a Latin word that straddles the edge back up to the last space;
 /// Hangul/CJK break anywhere. Exposed for per-paragraph `linesegarray` emission.
-pub fn layout_paragraph(p: &Paragraph, doc: &SemanticDoc, line_width: f64, fonts: &dyn FontMetricsProvider) -> Vec<LineSeg> {
+pub fn layout_paragraph(
+    p: &Paragraph,
+    doc: &SemanticDoc,
+    line_width: f64,
+    fonts: &dyn FontMetricsProvider,
+) -> Vec<LineSeg> {
     // (char, size_hwpunit) for every text glyph, in order, plus its 장평/자간-scaled advance.
     let mut chars: Vec<(char, i32)> = Vec::new();
     let mut advs: Vec<f64> = Vec::new();
@@ -475,7 +549,11 @@ pub fn layout_paragraph(p: &Paragraph, doc: &SemanticDoc, line_width: f64, fonts
         // No glyph → use the default 1000-EM line height from the metrics provider. (Measured: Hancom
         // gives blank lines this full leading-based height too — the layout-check oracle drops 8→7
         // pages if we shrink it to the bare EM, so the leading is load-bearing for pagination.)
-        let lh = if obj_h > 0 { obj_h as f64 } else { fonts.line_height(1000) };
+        let lh = if obj_h > 0 {
+            obj_h as f64
+        } else {
+            fonts.line_height(1000)
+        };
         return vec![mk_line(0, lh, 0.0)];
     }
 
@@ -546,7 +624,11 @@ pub fn layout_paragraph(p: &Paragraph, doc: &SemanticDoc, line_width: f64, fonts
         lines.push(mk_line(start as u32, fonts.line_height(max_size), lw));
         // Consume the '\n' itself on a forced break so the next line starts after it (it draws
         // nothing — the place step skips '\n'). Otherwise advance to the computed break point.
-        start = if forced && line_end < n { line_end + 1 } else { line_end };
+        start = if forced && line_end < n {
+            line_end + 1
+        } else {
+            line_end
+        };
     }
     // An inline object taller than the text bumps the line it sits on (approximated as the first).
     if obj_h > 0 {
@@ -595,11 +677,21 @@ fn measure(chars: &[(char, i32)], advs: &[f64], a: usize, b: usize) -> (f64, i32
 /// `None` shape or the default 0/0 is an EXACT no-op, so paragraphs with no 장평/자간 break byte-for-byte
 /// as before. Mirrors `shaper::RealFontMetrics::advance_scaled` so the breaker, NaiveLayout and the
 /// placer share ONE width truth.
-fn scaled_advance(ch: char, size: i32, cs: Option<&CharShape>, font: &FontKey, fonts: &dyn FontMetricsProvider) -> f64 {
+fn scaled_advance(
+    ch: char,
+    size: i32,
+    cs: Option<&CharShape>,
+    font: &FontKey,
+    fonts: &dyn FontMetricsProvider,
+) -> f64 {
     let base = fonts.advance_width(font, ch, size);
     let Some(cs) = cs else { return base };
     let script = script_slot(ch);
-    let ratio = match *cs.ratio.get(script) { 0 => 100, r => r.clamp(50, 200) } as f64 / 100.0;
+    let ratio = match *cs.ratio.get(script) {
+        0 => 100,
+        r => r.clamp(50, 200),
+    } as f64
+        / 100.0;
     let spacing = (*cs.spacing.get(script)).clamp(-50, 50) as f64 / 100.0;
     base * ratio + spacing * size as f64
 }
@@ -609,7 +701,9 @@ fn scaled_advance(ch: char, size: i32, cs: Option<&CharShape>, font: &FontKey, f
 /// so the placer (place.rs) resolves the same slot when it scales the DRAWN glyph advance.
 pub(crate) fn script_slot(ch: char) -> ScriptClass {
     match ch as u32 {
-        0x1100..=0x11FF | 0x3130..=0x318F | 0xA960..=0xA97F | 0xAC00..=0xD7A3 | 0xD7B0..=0xD7FF => ScriptClass::Hangul,
+        0x1100..=0x11FF | 0x3130..=0x318F | 0xA960..=0xA97F | 0xAC00..=0xD7A3 | 0xD7B0..=0xD7FF => {
+            ScriptClass::Hangul
+        }
         0x2E80..=0x2FDF | 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF => ScriptClass::Hanja,
         0x3040..=0x30FF => ScriptClass::Japanese,
         0x0000..=0x024F => ScriptClass::Latin,
@@ -659,7 +753,11 @@ mod tests {
 
     fn para(text: &str) -> Paragraph {
         Paragraph {
-            runs: vec![Run { char_shape: 0, content: vec![Inline::Text(text.into())], ..Default::default() }],
+            runs: vec![Run {
+                char_shape: 0,
+                content: vec![Inline::Text(text.into())],
+                ..Default::default()
+            }],
             ..Default::default()
         }
     }
@@ -683,7 +781,7 @@ mod tests {
     fn hangul_breaks_to_expected_line_count() {
         let mut doc = SemanticDoc::default();
         doc.char_shapes.push(CharShape::default()); // index 0 default → size 1000
-        // 30 Hangul syllables at 1000 (1 EM each) → 30000 HWPUNIT of text.
+                                                    // 30 Hangul syllables at 1000 (1 EM each) → 30000 HWPUNIT of text.
         let p = para(&"가".repeat(30));
         // line width 10000 → 10 full-width glyphs/line → 3 lines.
         let lines = layout_paragraph(&p, &doc, 10000.0, &ApproxFontMetrics);
@@ -699,11 +797,18 @@ mod tests {
         // 500 (not 1000), so twice as many fit per line → fewer lines. Regression for the dense gov-doc
         // cell over-wrap (consent/자가진단 tables compress to ratio 90–98%). 자간 0 here isolates 장평.
         let mut doc = SemanticDoc::default();
-        doc.char_shapes.push(CharShape { ratio: PerScript::uniform(50), ..Default::default() }); // 50% 장평
+        doc.char_shapes.push(CharShape {
+            ratio: PerScript::uniform(50),
+            ..Default::default()
+        }); // 50% 장평
         let p = para(&"가".repeat(30));
         // width 10000: at 50% 장평, 20 glyphs/line → 2 lines (vs 3 lines at 100% — see hangul_breaks_*).
         let lines = layout_paragraph(&p, &doc, 10000.0, &ApproxFontMetrics);
-        assert_eq!(lines.len(), 2, "50% 장평 packs 20 glyphs/line → 2 lines (3 at full width)");
+        assert_eq!(
+            lines.len(),
+            2,
+            "50% 장평 packs 20 glyphs/line → 2 lines (3 at full width)"
+        );
         assert_eq!(lines[1].text_pos, 20);
     }
 
@@ -716,10 +821,17 @@ mod tests {
         // width-driven.
         let p = para("문제\n(Problem)");
         let lines = layout_paragraph(&p, &doc, 100000.0, &ApproxFontMetrics);
-        assert_eq!(lines.len(), 2, "'\\n' forces a second line even when everything fits one line");
+        assert_eq!(
+            lines.len(),
+            2,
+            "'\\n' forces a second line even when everything fits one line"
+        );
         assert_eq!(lines[0].text_pos, 0, "line 1 starts at the beginning");
         // chars: 문(0) 제(1) \n(2) ((3)... → line 2 starts AFTER the '\n', at index 3.
-        assert_eq!(lines[1].text_pos, 3, "line 2 starts after the consumed '\\n'");
+        assert_eq!(
+            lines[1].text_pos, 3,
+            "line 2 starts after the consumed '\\n'"
+        );
     }
 
     #[test]
@@ -728,7 +840,11 @@ mod tests {
         // separators ("제품·서비스") in gov forms. subst_glyph maps them to U+00B7 so they render.
         assert_eq!(subst_glyph('\u{2024}'), '·');
         assert_eq!(subst_glyph('\u{30FB}'), '·');
-        assert_eq!(subst_glyph('·'), '·', "an already-present middle dot is unchanged");
+        assert_eq!(
+            subst_glyph('·'),
+            '·',
+            "an already-present middle dot is unchanged"
+        );
         assert_eq!(subst_glyph('가'), '가', "ordinary glyphs pass through");
     }
 
@@ -741,7 +857,10 @@ mod tests {
         // width 5000: "aaaa "(2300) + "bbbb "(2300) = 4600 fits; "cccc"(2000)→6600 > 5000 → wrap.
         let lines = layout_paragraph(&p, &doc, 5000.0, &ApproxFontMetrics);
         assert_eq!(lines.len(), 2, "wraps at a space, not mid-word");
-        assert_eq!(lines[1].text_pos, 10, "line 2 starts at 'cccc' (after 'aaaa bbbb ')");
+        assert_eq!(
+            lines[1].text_pos, 10,
+            "line 2 starts at 'cccc' (after 'aaaa bbbb ')"
+        );
     }
 
     #[test]
@@ -774,8 +893,16 @@ mod tests {
         let tall = layout_paragraph(&p, &doc, 10000.0, &TallLines);
         assert_eq!(flat.len(), 1);
         assert_eq!(tall.len(), 1);
-        assert!((flat[0].vert_size - 1000.0).abs() < 1.0, "flat = 1 EM, got {}", flat[0].vert_size);
-        assert!((tall[0].vert_size - 1200.0).abs() < 1.0, "tall = 1.2 EM, got {}", tall[0].vert_size);
+        assert!(
+            (flat[0].vert_size - 1000.0).abs() < 1.0,
+            "flat = 1 EM, got {}",
+            flat[0].vert_size
+        );
+        assert!(
+            (tall[0].vert_size - 1200.0).abs() < 1.0,
+            "tall = 1.2 EM, got {}",
+            tall[0].vert_size
+        );
         // Line breaking (advances) is identical — only the box height changed.
         assert_eq!(flat[0].text_pos, tall[0].text_pos);
     }
@@ -784,10 +911,14 @@ mod tests {
     fn table_height_sums_row_content() {
         let mut doc = SemanticDoc::default();
         doc.char_shapes.push(CharShape::default()); // size 1000
-        // 3-row × 1-col table, one short line per cell. A SINGLE-line cell has no inter-line gap, so
-        // Hancom reserves just the bare EM + CELL_PAD — the line-spacing leading is NOT applied to a
-        // lone/last line (issue 020: `cell_paragraph_height` trims the trailing leading).
-        let mut t = Table { rows: 3, cols: 1, ..Default::default() };
+                                                    // 3-row × 1-col table, one short line per cell. A SINGLE-line cell has no inter-line gap, so
+                                                    // Hancom reserves just the bare EM + CELL_PAD — the line-spacing leading is NOT applied to a
+                                                    // lone/last line (issue 020: `cell_paragraph_height` trims the trailing leading).
+        let mut t = Table {
+            rows: 3,
+            cols: 1,
+            ..Default::default()
+        };
         for r in 0..3 {
             t.cells.push(Cell {
                 row: r,
@@ -801,7 +932,10 @@ mod tests {
         }
         let h = table_height(&t, 40000.0, &doc, &ApproxFontMetrics);
         let per_row = 1000.0 + CELL_PAD; // one bare EM (no trailing leading) + vertical padding
-        assert!((h - 3.0 * per_row).abs() < 1.0, "3 rows × (EM+pad): got {h}");
+        assert!(
+            (h - 3.0 * per_row).abs() < 1.0,
+            "3 rows × (EM+pad): got {h}"
+        );
     }
 
     #[test]
@@ -818,9 +952,15 @@ mod tests {
         let h = cell_paragraph_height(&p, &doc, two_line_w, &ApproxFontMetrics);
         let ratio = DEFAULT_LINESPACE; // 1.6 (no explicit percent spacing)
         let want = 1000.0 * ratio + 1000.0; // one gap at ratio + last bare box
-        assert!((h - want).abs() < 1.0, "2-line cell = EM×ratio + EM ({want}); got {h}");
+        assert!(
+            (h - want).abs() < 1.0,
+            "2-line cell = EM×ratio + EM ({want}); got {h}"
+        );
         // Sanity: strictly less than the old "ratio on every line" reserve.
-        assert!(h < 2.0 * 1000.0 * ratio, "trimmed height is below the untrimmed 2×EM×ratio");
+        assert!(
+            h < 2.0 * 1000.0 * ratio,
+            "trimmed height is below the untrimmed 2×EM×ratio"
+        );
     }
 
     #[test]
@@ -828,8 +968,11 @@ mod tests {
         let mut doc = SemanticDoc::default();
         doc.char_shapes.push(CharShape::default());
         doc.para_shapes.push(ParaShape::default()); // index 0 = plain default
-        // ParaShape index 1 carries 쪽-나누기-앞에서.
-        doc.para_shapes.push(ParaShape { page_break_before: true, ..Default::default() });
+                                                    // ParaShape index 1 carries 쪽-나누기-앞에서.
+        doc.para_shapes.push(ParaShape {
+            page_break_before: true,
+            ..Default::default()
+        });
         let mut sec = Section::default();
         sec.blocks.push(Block::Paragraph(para("first")));
         let mut second = para("second");
@@ -837,7 +980,11 @@ mod tests {
         sec.blocks.push(Block::Paragraph(second));
         doc.sections.push(sec);
         let res = NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap();
-        assert_eq!(res.pages.len(), 2, "page-break-before splits two short paragraphs onto 2 pages");
+        assert_eq!(
+            res.pages.len(),
+            2,
+            "page-break-before splits two short paragraphs onto 2 pages"
+        );
     }
 
     #[test]
@@ -851,10 +998,17 @@ mod tests {
         }
         doc.sections.push(sec);
         let res = NaiveLayout.layout(&doc, &ApproxFontMetrics).unwrap();
-        assert!(res.pages.len() >= 2, "100 lines must paginate: got {} pages", res.pages.len());
+        assert!(
+            res.pages.len() >= 2,
+            "100 lines must paginate: got {} pages",
+            res.pages.len()
+        );
         for pg in &res.pages {
             for ls in &pg.lines {
-                assert!(ls.vert_pos < pg.height, "every line sits within its page body");
+                assert!(
+                    ls.vert_pos < pg.height,
+                    "every line sits within its page body"
+                );
             }
         }
     }

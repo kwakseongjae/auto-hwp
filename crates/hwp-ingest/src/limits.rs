@@ -139,7 +139,10 @@ impl From<DocLimit> for HardenedError {
 pub fn check_raw_size(len: usize) -> Result<(), DocLimit> {
     let size = len as u64;
     if size > MAX_RAW_FILE {
-        return Err(DocLimit::RawFileTooLarge { size, limit: MAX_RAW_FILE });
+        return Err(DocLimit::RawFileTooLarge {
+            size,
+            limit: MAX_RAW_FILE,
+        });
     }
     Ok(())
 }
@@ -148,7 +151,10 @@ pub fn check_raw_size(len: usize) -> Result<(), DocLimit> {
 /// directory is read (the zip crate reads it eagerly at `ZipArchive::new`).
 pub fn check_entry_count(count: usize) -> Result<(), DocLimit> {
     if count > MAX_ENTRY_COUNT {
-        return Err(DocLimit::TooManyEntries { count, limit: MAX_ENTRY_COUNT });
+        return Err(DocLimit::TooManyEntries {
+            count,
+            limit: MAX_ENTRY_COUNT,
+        });
     }
     Ok(())
 }
@@ -157,7 +163,9 @@ pub fn check_entry_count(count: usize) -> Result<(), DocLimit> {
 /// **actual** number of bytes produced by inflation so far — never a declared entry size.
 pub fn check_decompressed_total(total: u64) -> Result<(), DocLimit> {
     if total > MAX_DECOMPRESSED_TOTAL {
-        return Err(DocLimit::DecompressedTooLarge { limit: MAX_DECOMPRESSED_TOTAL });
+        return Err(DocLimit::DecompressedTooLarge {
+            limit: MAX_DECOMPRESSED_TOTAL,
+        });
     }
     Ok(())
 }
@@ -209,7 +217,10 @@ pub fn check_layout_limits(doc: &SemanticDoc) -> Result<(), DocLimit> {
     }
     while let Some((b, depth)) = stack.pop() {
         if depth > MAX_TABLE_NESTING {
-            return Err(DocLimit::TableNestingTooDeep { depth, limit: MAX_TABLE_NESTING });
+            return Err(DocLimit::TableNestingTooDeep {
+                depth,
+                limit: MAX_TABLE_NESTING,
+            });
         }
         match b {
             Block::Paragraph(_) => {
@@ -244,7 +255,10 @@ mod tests {
         assert!(check_raw_size(MAX_RAW_FILE as usize).is_ok());
         assert_eq!(
             check_raw_size(MAX_RAW_FILE as usize + 1),
-            Err(DocLimit::RawFileTooLarge { size: MAX_RAW_FILE + 1, limit: MAX_RAW_FILE })
+            Err(DocLimit::RawFileTooLarge {
+                size: MAX_RAW_FILE + 1,
+                limit: MAX_RAW_FILE
+            })
         );
         assert!(check_entry_count(MAX_ENTRY_COUNT).is_ok());
         assert!(matches!(

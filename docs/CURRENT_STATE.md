@@ -3,8 +3,8 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
-- 기준 커밋: `dbcc1bd` (`main` — R12 051~054·057 전부 병합. GitHub: https://github.com/kwakseongjae/tf-hwp private)
-- 갱신: 2026-07-11 · Claude(Fable 5) — R12 배치 B 완료(053=dbcc1bd 병합, 최종 통합 검증 후 푸시)
+- 기준 커밋: `main` 최신 — R12 051~054·057 병합 + 로컬 검증 전환 커밋. GitHub: https://github.com/kwakseongjae/tf-hwp (private)
+- 갱신: 2026-07-11 · Claude(Fable 5) — CI→로컬 검증 전환(fmt 전체 정리·clippy 0·deny 그린·verify-local.sh 신설)
 
 ## 지금 (현재 위치)
 - 로드맵 기준: **R12 배치 B 완료** — 053(셀 캐럿, dbcc1bd)·054(lift F2, 8cd4233)·057(표 앵커링, 8a28ce5)
@@ -14,11 +14,15 @@
 - 제품 현 수준: 웹(`apps/hwp-lab`)에서 업로드→수동+챗 편집→PDF/HWPX export가 전부 클라이언트사이드로 동작. 판정 = "강한 내부 데모/프라이빗 베타, GA 아님"(격차 5개가 이슈 051~056).
 
 ## 다음 (즉시 착수 가능)
-1. **055 웹 하드닝**(워커화 FG-14·번들 실측·한도 UX) — 진입점: `docs/issues/055-web-hardening.md`
-   (선행 조건이던 051·052 병합 완료 → 착수 가능).
-2. 후속 이슈감 기획 대기: ① 1×1 프레임 내부표 편집 미export(057 발견) ② F3(다단·대각선 재방출·셀 간격)
-   ③ IME 인라인 조합(FG-13 — 캐럿 위에 얹는 후속).
-- 착수 전 필독: `docs/PRODUCT-DIRECTION.md` §4(빌더 공통 계약) + 해당 이슈 파일의 "함정" 절.
+1. **웹 QA(사용자)**: `pnpm -C packages/editor-core build && pnpm -C packages/react build` →
+   `cd apps/hwp-lab && npm run dev` → http://localhost:3000 (가이드: `apps/hwp-lab/QA.md`.
+   챗 실 LLM은 `ANTHROPIC_API_KEY` env, 없으면 mock). 알려진 한계는 QA 노트 참조(아래 2·3).
+2. **055 웹 하드닝**(워커화 FG-14·번들 실측·한도 UX) — R12 잔여 유일 이슈. QA에서 대형 문서
+   프리즈/업로드 한도가 걸리면 이 이슈가 갚는다.
+3. 후속 이슈감 기획 대기: ① 1×1 프레임 내부표 편집 미export(057 발견 — 자가진단표류 QA 시 주의)
+   ② F3(다단·대각선 재방출·셀 간격) ③ IME 인라인 조합(FG-13) ④ 폰트 충실도(전 문서 Nanum 단일
+   대체 — 알려진 v1 한계) ⑤ 웹 배포(호스팅) — QA가 로컬 아닌 URL이어야 하면 신설.
+- 검증 정본: `scripts/verify-local.sh` (--full 포함). CI는 수동 전용(`gh workflow run ci`).
 
 ## 막힘 / 대기 (없으면 "없음")
 - 없음. (056 배포용 crypto는 "수요 확인" 게이트 — 미착수가 정상 상태)

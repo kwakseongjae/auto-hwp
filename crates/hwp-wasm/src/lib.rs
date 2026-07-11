@@ -98,6 +98,7 @@ pub struct HwpDoc {
     ///   • `registerFont` → the font fingerprint changes → key miss → rebuild.
     /// The fingerprint is `(family, bytes.len())` per injected face (issue §2). See [`HwpDoc::placed_stats`]
     /// for the hit/build counters that PROVE "unchanged document ⇒ placed once".
+    #[allow(clippy::type_complexity)]
     placed_cache: RefCell<Option<(u64, Vec<(String, usize)>, hwp_session::PlacedDoc)>>,
     /// How many times the placed cache was actually (re)built — i.e. real `place_doc` runs (issue 025
     /// counter: an unchanged document over N geometry queries must show this at 1).
@@ -168,7 +169,10 @@ impl HwpDoc {
     /// The current injected-font fingerprint `(family, len)` — the second half of the placed-cache key
     /// (issue 025). A registered/replaced face changes it, invalidating the cached placement.
     fn font_fingerprint(&self) -> Vec<(String, usize)> {
-        self.fonts.iter().map(|(fam, b)| (fam.clone(), b.len())).collect()
+        self.fonts
+            .iter()
+            .map(|(fam, b)| (fam.clone(), b.len()))
+            .collect()
     }
 
     /// Run `f` against the document's placed geometry, TYPESETTING only when the cache is cold or the
@@ -227,9 +231,12 @@ impl HwpDoc {
     #[wasm_bindgen(js_name = renderPageSvg)]
     pub fn render_page_svg(&self, n: usize) -> Result<String, JsValue> {
         let svgs = self.render_all()?;
-        svgs.get(n)
-            .cloned()
-            .ok_or_else(|| js_err("out_of_range", &format!("page {n} out of range (0..{})", svgs.len())))
+        svgs.get(n).cloned().ok_or_else(|| {
+            js_err(
+                "out_of_range",
+                &format!("page {n} out of range (0..{})", svgs.len()),
+            )
+        })
     }
 
     /// Click-to-point hit test on `page` at own-render px `(x, y)` — a JSON **string** of the top-level
@@ -240,8 +247,10 @@ impl HwpDoc {
         // Served from the cached placement (issue 025) so a click never re-typesets. The `_placed`
         // query agrees with the injected-metric SVG because the cache is built with the SAME injected
         // fonts (a registered font re-paginates — Approx geometry over shaper layout would miss).
-        let hit = self.with_placed(|doc, placed| hwp_session::own_hit_test_placed(doc, placed, page, x, y))?;
-        hit.map(|h| serde_json::to_string(&h).map_err(|e| js_err("serialize", &e.to_string()))).transpose()
+        let hit = self
+            .with_placed(|doc, placed| hwp_session::own_hit_test_placed(doc, placed, page, x, y))?;
+        hit.map(|h| serde_json::to_string(&h).map_err(|e| js_err("serialize", &e.to_string())))
+            .transpose()
     }
 
     /// Click-to-mark table hit test on `page` at own-render px `(x, y)` — a JSON **string** of the
@@ -249,8 +258,10 @@ impl HwpDoc {
     /// on a miss (an `Option<String>` → `null`, never the literal string `"null"` — policy 018).
     #[wasm_bindgen(js_name = tableAt)]
     pub fn table_at(&self, page: u32, x: f64, y: f64) -> Result<Option<String>, JsValue> {
-        let t = self.with_placed(|_doc, placed| hwp_session::table_at_placed(placed, page, x, y))?;
-        t.map(|t| serde_json::to_string(&t).map_err(|e| js_err("serialize", &e.to_string()))).transpose()
+        let t =
+            self.with_placed(|_doc, placed| hwp_session::table_at_placed(placed, page, x, y))?;
+        t.map(|t| serde_json::to_string(&t).map_err(|e| js_err("serialize", &e.to_string())))
+            .transpose()
     }
 
     /// Click-to-select the ANCHORED IMAGE under `page` at own-render px `(x, y)` — a JSON **string** of the
@@ -262,8 +273,10 @@ impl HwpDoc {
     /// `hwp_session::image_at_placed` (the geometry the desktop `image_at` command already exposes).
     #[wasm_bindgen(js_name = imageAt)]
     pub fn image_at(&self, page: u32, x: f64, y: f64) -> Result<Option<String>, JsValue> {
-        let im = self.with_placed(|_doc, placed| hwp_session::image_at_placed(placed, page, x, y))?;
-        im.map(|im| serde_json::to_string(&im).map_err(|e| js_err("serialize", &e.to_string()))).transpose()
+        let im =
+            self.with_placed(|_doc, placed| hwp_session::image_at_placed(placed, page, x, y))?;
+        im.map(|im| serde_json::to_string(&im).map_err(|e| js_err("serialize", &e.to_string())))
+            .transpose()
     }
 
     /// The placed box of the image anchored at `(section, block)` on `page` — a JSON **string** of
@@ -273,9 +286,17 @@ impl HwpDoc {
     /// from the cached placement (issue 025). Additive wasm binding of `hwp_session::image_bbox_placed`
     /// (the `image_bbox` command's twin — the desktop had it, wasm didn't).
     #[wasm_bindgen(js_name = imageBbox)]
-    pub fn image_bbox(&self, page: u32, section: usize, block: usize) -> Result<Option<String>, JsValue> {
-        let b = self.with_placed(|_doc, placed| hwp_session::image_bbox_placed(placed, page, section, block))?;
-        b.map(|b| serde_json::to_string(&b).map_err(|e| js_err("serialize", &e.to_string()))).transpose()
+    pub fn image_bbox(
+        &self,
+        page: u32,
+        section: usize,
+        block: usize,
+    ) -> Result<Option<String>, JsValue> {
+        let b = self.with_placed(|_doc, placed| {
+            hwp_session::image_bbox_placed(placed, page, section, block)
+        })?;
+        b.map(|b| serde_json::to_string(&b).map_err(|e| js_err("serialize", &e.to_string())))
+            .transpose()
     }
 
     /// Cell-level marking hit test on `page` at own-render px `(x, y)` — a JSON **string** of the table
@@ -287,8 +308,11 @@ impl HwpDoc {
     /// would resolve the wrong cell / miss).
     #[wasm_bindgen(js_name = tableCellAt)]
     pub fn table_cell_at(&self, page: u32, x: f64, y: f64) -> Result<Option<String>, JsValue> {
-        let c = self.with_placed(|doc, placed| hwp_session::table_cell_at_placed(doc, placed, page, x, y))?;
-        c.map(|c| serde_json::to_string(&c).map_err(|e| js_err("serialize", &e.to_string()))).transpose()
+        let c = self.with_placed(|doc, placed| {
+            hwp_session::table_cell_at_placed(doc, placed, page, x, y)
+        })?;
+        c.map(|c| serde_json::to_string(&c).map_err(|e| js_err("serialize", &e.to_string())))
+            .transpose()
     }
 
     /// Marquee (rubber-band) select on `page`: every top-level block whose placed band intersects the
@@ -297,8 +321,17 @@ impl HwpDoc {
     /// caller always gets an iterable). Additive to `hitTest`: same `PlacedBlock` bands, but 2-D AABB
     /// overlap against the rect. Multi-page marquee is out of scope — clip the rect to the start page.
     #[wasm_bindgen(js_name = blocksInRect)]
-    pub fn blocks_in_rect(&self, page: u32, x0: f64, y0: f64, x1: f64, y1: f64) -> Result<String, JsValue> {
-        let hits = self.with_placed(|doc, placed| hwp_session::blocks_in_rect_placed(doc, placed, page, x0, y0, x1, y1))?;
+    pub fn blocks_in_rect(
+        &self,
+        page: u32,
+        x0: f64,
+        y0: f64,
+        x1: f64,
+        y1: f64,
+    ) -> Result<String, JsValue> {
+        let hits = self.with_placed(|doc, placed| {
+            hwp_session::blocks_in_rect_placed(doc, placed, page, x0, y0, x1, y1)
+        })?;
         serde_json::to_string(&hits).map_err(|e| js_err("serialize", &e.to_string()))
     }
 
@@ -310,9 +343,17 @@ impl HwpDoc {
     /// they derive from the SAME `column_offsets` the renderer used. Additive wasm binding of the
     /// existing `hwp_session::table_col_boundaries_placed` (geometry exposure gap — issue 027 §열 경계).
     #[wasm_bindgen(js_name = tableColBoundaries)]
-    pub fn table_col_boundaries(&self, page: u32, section: usize, block: usize) -> Result<Option<String>, JsValue> {
-        let b = self.with_placed(|doc, placed| hwp_session::table_col_boundaries_placed(doc, placed, page, section, block))?;
-        b.map(|b| serde_json::to_string(&b).map_err(|e| js_err("serialize", &e.to_string()))).transpose()
+    pub fn table_col_boundaries(
+        &self,
+        page: u32,
+        section: usize,
+        block: usize,
+    ) -> Result<Option<String>, JsValue> {
+        let b = self.with_placed(|doc, placed| {
+            hwp_session::table_col_boundaries_placed(doc, placed, page, section, block)
+        })?;
+        b.map(|b| serde_json::to_string(&b).map_err(|e| js_err("serialize", &e.to_string())))
+            .transpose()
     }
 
     /// Row-boundary y-positions (own-render px) of the table at `(section, block)` on `page` — the
@@ -326,12 +367,25 @@ impl HwpDoc {
     /// a SPLIT table `_placed` returns the per-page FRAGMENT's boundaries (already rebased to the fragment
     /// top — 023 규칙), which the host remaps to a whole-table `heights` vector before committing.
     #[wasm_bindgen(js_name = tableRowBoundaries)]
-    pub fn table_row_boundaries(&self, page: u32, section: usize, block: usize) -> Result<Option<String>, JsValue> {
+    pub fn table_row_boundaries(
+        &self,
+        page: u32,
+        section: usize,
+        block: usize,
+    ) -> Result<Option<String>, JsValue> {
         let fonts = hwp_session::own_render_fonts_with(&self.fonts);
         let b = self.with_placed(|doc, placed| {
-            hwp_session::table_row_boundaries_placed(doc, placed, fonts.as_ref(), page, section, block)
+            hwp_session::table_row_boundaries_placed(
+                doc,
+                placed,
+                fonts.as_ref(),
+                page,
+                section,
+                block,
+            )
         })?;
-        b.map(|b| serde_json::to_string(&b).map_err(|e| js_err("serialize", &e.to_string()))).transpose()
+        b.map(|b| serde_json::to_string(&b).map_err(|e| js_err("serialize", &e.to_string())))
+            .transpose()
     }
 
     /// Cell-addressed caret, hit half (issue 053): the TABLE-CELL text caret target under own-render
@@ -346,7 +400,8 @@ impl HwpDoc {
         let h = self.with_placed(|doc, placed| {
             hwp_session::cell_text_hit_placed(doc, placed, fonts.as_ref(), page, x, y)
         })?;
-        h.map(|h| serde_json::to_string(&h).map_err(|e| js_err("serialize", &e.to_string()))).transpose()
+        h.map(|h| serde_json::to_string(&h).map_err(|e| js_err("serialize", &e.to_string())))
+            .transpose()
     }
 
     /// Cell-addressed caret, geometry half (issue 053): the caret rect at char `offset` of the
@@ -356,12 +411,31 @@ impl HwpDoc {
     /// paragraph end (a rect, never null — the `CaretRect` contract). Same injected-font placement as
     /// `cellTextHit`, so hit → caret → typing all stay on one geometry.
     #[wasm_bindgen(js_name = cellCaretRect)]
-    pub fn cell_caret_rect(&self, section: usize, block: usize, row: usize, col: usize, para: usize, offset: usize) -> Result<Option<String>, JsValue> {
+    pub fn cell_caret_rect(
+        &self,
+        section: usize,
+        block: usize,
+        row: usize,
+        col: usize,
+        para: usize,
+        offset: usize,
+    ) -> Result<Option<String>, JsValue> {
         let fonts = hwp_session::own_render_fonts_with(&self.fonts);
         let c = self.with_placed(|doc, placed| {
-            hwp_session::cell_caret_rect_placed(doc, placed, fonts.as_ref(), section, block, row, col, para, offset)
+            hwp_session::cell_caret_rect_placed(
+                doc,
+                placed,
+                fonts.as_ref(),
+                section,
+                block,
+                row,
+                col,
+                para,
+                offset,
+            )
         })?;
-        c.map(|c| serde_json::to_string(&c).map_err(|e| js_err("serialize", &e.to_string()))).transpose()
+        c.map(|c| serde_json::to_string(&c).map_err(|e| js_err("serialize", &e.to_string())))
+            .transpose()
     }
 
     /// Page geometry in own-render px: the page box + printable-area margins of `page`, for the editor
@@ -371,7 +445,8 @@ impl HwpDoc {
     #[wasm_bindgen(js_name = pageGeometry)]
     pub fn page_geometry(&self, page: u32) -> Result<Option<String>, JsValue> {
         let g = self.with_placed(|_doc, placed| hwp_session::page_geometry_placed(placed, page))?;
-        g.map(|g| serde_json::to_string(&g).map_err(|e| js_err("serialize", &e.to_string()))).transpose()
+        g.map(|g| serde_json::to_string(&g).map_err(|e| js_err("serialize", &e.to_string())))
+            .transpose()
     }
 
     /// ALL styled runs of a target paragraph (`row`/`col` = `null`) or the `(row, col)` cell — a JSON
@@ -381,7 +456,13 @@ impl HwpDoc {
     /// 평문 variant 금지). Additive wasm binding of the existing `hwp_session::block_runs` (the run-preserve
     /// read the edit lane exposed on desktop but never on wasm).
     #[wasm_bindgen(js_name = blockRuns)]
-    pub fn block_runs(&self, section: usize, block: usize, row: Option<usize>, col: Option<usize>) -> Result<String, JsValue> {
+    pub fn block_runs(
+        &self,
+        section: usize,
+        block: usize,
+        row: Option<usize>,
+        col: Option<usize>,
+    ) -> Result<String, JsValue> {
         let runs = hwp_session::block_runs(self.doc()?, section, block, row, col);
         serde_json::to_string(&runs).map_err(|e| js_err("serialize", &e.to_string()))
     }
@@ -468,7 +549,8 @@ impl HwpDoc {
             ));
         }
         let doc = self.doc()?;
-        let out = hwp_session::emit_pdf_with_fonts(doc, self.title.clone(), &self.fonts).map_err(engine_err)?;
+        let out = hwp_session::emit_pdf_with_fonts(doc, self.title.clone(), &self.fonts)
+            .map_err(engine_err)?;
         Ok(out.bytes)
     }
 
@@ -496,13 +578,19 @@ fn outcome_to_json(o: &hwp_mcp::Outcome) -> serde_json::Value {
     use hwp_mcp::Outcome::*;
     use serde_json::json;
     match o {
-        Opened { format, editable, sections } => {
+        Opened {
+            format,
+            editable,
+            sections,
+        } => {
             json!({ "kind": "opened", "format": format, "editable": editable, "sections": sections })
         }
         PageCount(n) => json!({ "kind": "pageCount", "pages": n }),
         Rendered(svg) => json!({ "kind": "rendered", "svg": svg }),
         Applied { blocks, ops } => json!({ "kind": "applied", "blocks": blocks, "ops": ops }),
-        Exported { bytes, open_safe } => json!({ "kind": "exported", "bytes": bytes, "openSafe": open_safe }),
+        Exported { bytes, open_safe } => {
+            json!({ "kind": "exported", "bytes": bytes, "openSafe": open_safe })
+        }
         Undone(changed) => json!({ "kind": "undone", "changed": changed }),
         Redone(changed) => json!({ "kind": "redone", "changed": changed }),
         Text(text) => json!({ "kind": "text", "text": text }),
@@ -514,8 +602,12 @@ fn outcome_to_json(o: &hwp_mcp::Outcome) -> serde_json::Value {
         Found { matches } => {
             json!({ "kind": "found", "matches": serde_json::to_value(matches).unwrap_or(serde_json::Value::Null) })
         }
-        Replaced { replaced, pages } => json!({ "kind": "replaced", "replaced": replaced, "pages": pages }),
-        Hit(hit) => json!({ "kind": "hit", "hit": serde_json::to_value(hit).unwrap_or(serde_json::Value::Null) }),
+        Replaced { replaced, pages } => {
+            json!({ "kind": "replaced", "replaced": replaced, "pages": pages })
+        }
+        Hit(hit) => {
+            json!({ "kind": "hit", "hit": serde_json::to_value(hit).unwrap_or(serde_json::Value::Null) })
+        }
         Caret(caret) => {
             json!({ "kind": "caret", "caret": serde_json::to_value(caret).unwrap_or(serde_json::Value::Null) })
         }

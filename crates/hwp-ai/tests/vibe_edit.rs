@@ -17,12 +17,18 @@ fn doc_with_toc() -> SemanticDoc {
     };
     let para = |t: &str| {
         Block::Paragraph(Paragraph {
-            runs: vec![Run { content: vec![Inline::Text(t.into())], ..Default::default() }],
+            runs: vec![Run {
+                content: vec![Inline::Text(t.into())],
+                ..Default::default()
+            }],
             ..Default::default()
         })
     };
     // b0 제목, b1 목차, b2 본문
-    doc.sections.push(Section { blocks: vec![para("보고서"), para("목차"), para("본문 시작")], ..Default::default() });
+    doc.sections.push(Section {
+        blocks: vec![para("보고서"), para("목차"), para("본문 시작")],
+        ..Default::default()
+    });
     doc
 }
 
@@ -38,13 +44,21 @@ fn table_after_toc_then_shade_left_column_renders_to_html() {
     let mut doc = doc_with_toc();
 
     // "목차 아래에 표 만들어줘": insert a table after b1.
-    apply(&mut doc, &parse_script(
-        r#"{"edits":[{"op":"insert_table","section":0,"block":1,"position":"after",
+    apply(
+        &mut doc,
+        &parse_script(
+            r#"{"edits":[{"op":"insert_table","section":0,"block":1,"position":"after",
             "header":["구분","값"],"rows":[["매출","100"],["비용","40"]]}]}"#,
-    ).unwrap());
+        )
+        .unwrap(),
+    );
 
     // The table is now b2. "표의 좌측열을 헤더 색상으로": shade column 0.
-    let table_idx = doc.sections[0].blocks.iter().position(|b| matches!(b, Block::Table(_))).unwrap();
+    let table_idx = doc.sections[0]
+        .blocks
+        .iter()
+        .position(|b| matches!(b, Block::Table(_)))
+        .unwrap();
     assert_eq!(table_idx, 2, "table landed right after 목차");
     let script = format!(
         r##"{{"edits":[{{"op":"shade_column","section":0,"block":{table_idx},"col":0,"shade":"#D9E1F2"}}]}}"##
@@ -63,10 +77,21 @@ fn table_after_toc_then_shade_left_column_renders_to_html() {
 
     // Render through the vibe-docs deliverable: JSX/CSS project → standalone HTML.
     let proj = hwp_jsx::emit(&doc);
-    let html = hwp_export::emit_html(&proj, &hwp_export::HtmlOptions { title: Some("t".into()) });
+    let html = hwp_export::emit_html(
+        &proj,
+        &hwp_export::HtmlOptions {
+            title: Some("t".into()),
+        },
+    );
     assert!(html.contains("<table"), "table renders");
-    assert!(html.contains("구분") && html.contains("매출"), "table content renders");
-    assert!(html.to_lowercase().contains("d9e1f2"), "shade color present in HTML: not found");
+    assert!(
+        html.contains("구분") && html.contains("매출"),
+        "table content renders"
+    );
+    assert!(
+        html.to_lowercase().contains("d9e1f2"),
+        "shade color present in HTML: not found"
+    );
 }
 
 #[test]
@@ -87,5 +112,8 @@ fn inserted_image_embeds_as_data_uri_in_html() {
     assert_eq!(doc.bin_data.len(), 1, "image embedded as BinData");
     let proj = hwp_jsx::emit(&doc);
     let html = hwp_export::emit_html(&proj, &hwp_export::HtmlOptions { title: None });
-    assert!(html.contains("data:image"), "image renders as a data: URI in HTML");
+    assert!(
+        html.contains("data:image"),
+        "image renders as a data: URI in HTML"
+    );
 }

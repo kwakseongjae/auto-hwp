@@ -8,7 +8,10 @@ use hwp_model::prelude::*;
 use hwp_typeset::ApproxFontMetrics;
 
 fn showcase_doc() -> SemanticDoc {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/hwpx/FormattingShowcase.hwpx");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus/hwpx/FormattingShowcase.hwpx"
+    );
     let bytes = std::fs::read(path).expect("FormattingShowcase.hwpx in corpus/hwpx");
     HwpxParser::new()
         .parse(&bytes, SourceFormat::Hwpx)
@@ -34,16 +37,28 @@ fn showcase_renders_to_svg_with_text_and_rects() {
     // The document's REAL text reached the SVG as <text> glyph nodes.
     assert!(all.contains("<text"), "glyphs became <text> nodes");
     for needle in ["형", "식", "테", "스", "트", "문", "서"] {
-        assert!(all.contains(needle), "the title text glyph {needle:?} is present in the SVG");
+        assert!(
+            all.contains(needle),
+            "the title text glyph {needle:?} is present in the SVG"
+        );
     }
 
     // Structural boxes: line text-boxes + the table's cell borders are stroked <rect>s.
     let rects = all.matches("<rect").count();
-    assert!(rects > 5, "expected many structural rects (line boxes + table cells), got {rects}");
-    assert!(all.contains("stroke="), "stroked outlines (borders) emitted");
+    assert!(
+        rects > 5,
+        "expected many structural rects (line boxes + table cells), got {rects}"
+    );
+    assert!(
+        all.contains("stroke="),
+        "stroked outlines (borders) emitted"
+    );
 
     // The showcase has a table → its cell borders are stroked rects (fill=\"none\").
-    assert!(all.contains("fill=\"none\""), "stroked (un-filled) boxes present (cell/line borders)");
+    assert!(
+        all.contains("fill=\"none\""),
+        "stroked (un-filled) boxes present (cell/line borders)"
+    );
 }
 
 #[test]
@@ -52,7 +67,11 @@ fn showcase_page_count_is_stable_and_positive() {
     let n = hwp_render::page_count(&doc, &ApproxFontMetrics);
     assert!(n >= 1, "at least one page");
     // Page count is a pure function of (doc, fonts) — rendering it twice agrees.
-    assert_eq!(n, hwp_render::render_doc_svg(&doc, &ApproxFontMetrics).len(), "page_count == #SVGs");
+    assert_eq!(
+        n,
+        hwp_render::render_doc_svg(&doc, &ApproxFontMetrics).len(),
+        "page_count == #SVGs"
+    );
 }
 
 #[test]

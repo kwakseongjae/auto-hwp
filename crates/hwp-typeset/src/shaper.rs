@@ -27,17 +27,29 @@ const FONT_CANDIDATES: &[(&str, u32)] = &[
     // redistributable family for BOTH metrics and drawing (NanumGothic carries Hangul AND Latin, so
     // the drawn glyph shapes match these metrics exactly — no AppleGothic-shape fallback). Lives at
     // the workspace-root assets/fonts so every crate resolves the same file.
-    (concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/NanumGothic-Regular.ttf"), 0),
+    (
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/NanumGothic-Regular.ttf"
+        ),
+        0,
+    ),
     // macOS — Korean-capable system faces (the .ttc needs a face index).
     ("/System/Library/Fonts/Supplemental/AppleGothic.ttf", 0),
     ("/System/Library/Fonts/Supplemental/AppleMyungjo.ttf", 0),
     ("/System/Library/Fonts/AppleSDGothicNeo.ttc", 0),
     // Linux — Noto / Nanum, if installed or vendored.
     ("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc", 0),
-    ("/usr/share/fonts/opentype/noto/NotoSansCJKkr-Regular.otf", 0),
+    (
+        "/usr/share/fonts/opentype/noto/NotoSansCJKkr-Regular.otf",
+        0,
+    ),
     ("/usr/share/fonts/truetype/nanum/NanumGothic.ttf", 0),
     // Vendored fallback (drop a Noto Sans KR here to make CI deterministic).
-    (concat!(env!("CARGO_MANIFEST_DIR"), "/assets/NotoSansKR-Regular.ttf"), 0),
+    (
+        concat!(env!("CARGO_MANIFEST_DIR"), "/assets/NotoSansKR-Regular.ttf"),
+        0,
+    ),
 ];
 
 /// Proportional Latin/serif faces probed for Latin/digit/punctuation glyphs. The Korean system face
@@ -49,7 +61,13 @@ const LATIN_FONT_CANDIDATES: &[(&str, u32)] = &[
     // Same vendored NanumGothic — its Latin is PROPORTIONAL (tight 'i', wide 'W'), so Latin metrics
     // come from the SAME face we draw with (positions match the drawn glyphs, no Times/NanumGothic
     // split). This is the whole point of bundling one consistent free font for the own-render.
-    (concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/NanumGothic-Regular.ttf"), 0),
+    (
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/NanumGothic-Regular.ttf"
+        ),
+        0,
+    ),
     // macOS — Hancom's default Latin face in most gov-docs is a serif (Times-like); Helvetica is the
     // common sans fallback. Either is far tighter than AppleGothic's Latin.
     ("/System/Library/Fonts/Supplemental/Times New Roman.ttf", 0),
@@ -57,8 +75,14 @@ const LATIN_FONT_CANDIDATES: &[(&str, u32)] = &[
     ("/System/Library/Fonts/Supplemental/Arial.ttf", 0),
     ("/System/Library/Fonts/Helvetica.ttc", 0),
     // Linux — Liberation Serif/Sans (metric-compatible with Times/Arial), then DejaVu.
-    ("/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf", 0),
-    ("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", 0),
+    (
+        "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf",
+        0,
+    ),
+    (
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        0,
+    ),
     ("/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf", 0),
     ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 0),
 ];
@@ -85,8 +109,12 @@ impl LoadedFont {
     /// Load the first parseable candidate from `candidates` (shared by the Korean + Latin slots).
     fn discover_from(candidates: &[(&str, u32)]) -> Option<LoadedFont> {
         for &(path, index) in candidates {
-            let Ok(bytes) = std::fs::read(path) else { continue };
-            if let Some(f) = LoadedFont::from_bytes(bytes.into_boxed_slice(), index, path.to_string()) {
+            let Ok(bytes) = std::fs::read(path) else {
+                continue;
+            };
+            if let Some(f) =
+                LoadedFont::from_bytes(bytes.into_boxed_slice(), index, path.to_string())
+            {
                 return Some(f);
             }
         }
@@ -104,7 +132,13 @@ impl LoadedFont {
         if units_per_em <= 0.0 {
             return None;
         }
-        Some(LoadedFont { _data: data, face, shape_face, units_per_em, path })
+        Some(LoadedFont {
+            _data: data,
+            face,
+            shape_face,
+            units_per_em,
+            path,
+        })
     }
 
     /// Real advance of a single glyph in font units (HarfBuzz-shaped). Falls back to ttf-parser's
@@ -161,8 +195,16 @@ impl RealFontMetrics {
     /// same bytes → identical advances). Bytes that don't parse fall back to the per-script
     /// approximation (never panics). TTF/OTF single-face only (face index 0); a TTC isn't accepted.
     pub fn from_bytes(bytes: &[u8]) -> RealFontMetrics {
-        let font = LoadedFont::from_bytes(bytes.to_vec().into_boxed_slice(), 0, "<injected>".to_string());
-        RealFontMetrics { font, latin: None, cache: RefCell::new(HashMap::new()) }
+        let font = LoadedFont::from_bytes(
+            bytes.to_vec().into_boxed_slice(),
+            0,
+            "<injected>".to_string(),
+        );
+        RealFontMetrics {
+            font,
+            latin: None,
+            cache: RefCell::new(HashMap::new()),
+        }
     }
 
     /// True when a real font backs the metrics (a Korean-capable face was found). False = the
@@ -227,7 +269,11 @@ impl RealFontMetrics {
                 } else if self.latin.is_some() {
                     // Glyph absent in the Latin face — try the Korean face before approximating.
                     let kraw = kor.raw_advance(ch);
-                    if kraw > 0.0 { kraw / kor.units_per_em * em } else { approx_advance(ch, em) }
+                    if kraw > 0.0 {
+                        kraw / kor.units_per_em * em
+                    } else {
+                        approx_advance(ch, em)
+                    }
                 } else {
                     approx_advance(ch, em)
                 }
@@ -249,7 +295,8 @@ impl RealFontMetrics {
         let ratio = match *cs.ratio.get(script) {
             0 => 100,
             r => r.clamp(MIN_RATIO, MAX_RATIO),
-        } as f64 / 100.0;
+        } as f64
+            / 100.0;
         let spacing = (*cs.spacing.get(script)).clamp(MIN_SPACING, MAX_SPACING) as f64 / 100.0;
         let em = size_hwpunit.max(1) as f64;
         base * ratio + spacing * em
@@ -320,19 +367,43 @@ mod tests {
         let m = RealFontMetrics::new();
         // Whether a real font is found (dev mac) or not (bare CI), advances must be sane.
         for ch in ['가', '한', '漢', 'a', '1', '!', ' '] {
-            let a = m.advance_width(&FontKey { family: String::new(), bold: false, italic: false }, ch, 1000);
+            let a = m.advance_width(
+                &FontKey {
+                    family: String::new(),
+                    bold: false,
+                    italic: false,
+                },
+                ch,
+                1000,
+            );
             assert!(a >= 0.0, "advance for {ch:?} must be non-negative, got {a}");
         }
         // A non-space, in-font glyph always advances something.
-        let g = m.advance_width(&FontKey { family: String::new(), bold: false, italic: false }, '가', 1000);
+        let g = m.advance_width(
+            &FontKey {
+                family: String::new(),
+                bold: false,
+                italic: false,
+            },
+            '가',
+            1000,
+        );
         assert!(g > 0.0, "Hangul must advance, got {g}");
     }
 
     #[test]
     fn fallback_matches_approx_when_no_font() {
         // Force the no-font path by constructing a fallback-only provider.
-        let m = RealFontMetrics { font: None, latin: None, cache: RefCell::new(HashMap::new()) };
-        let f = FontKey { family: String::new(), bold: false, italic: false };
+        let m = RealFontMetrics {
+            font: None,
+            latin: None,
+            cache: RefCell::new(HashMap::new()),
+        };
+        let f = FontKey {
+            family: String::new(),
+            bold: false,
+            italic: false,
+        };
         assert_eq!(m.advance_width(&f, '가', 1000), 1000.0);
         assert_eq!(m.advance_width(&f, 'a', 1000), 500.0);
         assert_eq!(m.advance_width(&f, ' ', 1000), 300.0);
@@ -346,8 +417,19 @@ mod tests {
             return;
         }
         // Korean faces space Hangul on a full EM grid — the real advance must be ~1 EM (±2%).
-        let a = m.advance_width(&FontKey { family: String::new(), bold: false, italic: false }, '한', 1000);
-        assert!((a - 1000.0).abs() < 20.0, "Hangul advance should be ~1 EM, got {a}");
+        let a = m.advance_width(
+            &FontKey {
+                family: String::new(),
+                bold: false,
+                italic: false,
+            },
+            '한',
+            1000,
+        );
+        assert!(
+            (a - 1000.0).abs() < 20.0,
+            "Hangul advance should be ~1 EM, got {a}"
+        );
     }
 
     #[test]
@@ -360,7 +442,10 @@ mod tests {
             *s = 200;
         }
         let wide = m.advance_scaled('가', 1000, &cs);
-        assert!((wide - base * 2.0).abs() < 1.0, "장평200% should double advance: {base} → {wide}");
+        assert!(
+            (wide - base * 2.0).abs() < 1.0,
+            "장평200% should double advance: {base} → {wide}"
+        );
     }
 
     #[test]
@@ -372,7 +457,10 @@ mod tests {
             *s = 50; // +50% EM
         }
         let spaced = m.advance_scaled('가', 1000, &cs);
-        assert!((spaced - (base + 500.0)).abs() < 1.0, "자간+50% adds 0.5 EM: {base} → {spaced}");
+        assert!(
+            (spaced - (base + 500.0)).abs() < 1.0,
+            "자간+50% adds 0.5 EM: {base} → {spaced}"
+        );
     }
 
     #[test]
@@ -381,7 +469,10 @@ mod tests {
         let (asc, desc, gap) = m.vmetrics(1000);
         assert!(asc > 0.0 && desc >= 0.0 && gap >= 0.0);
         // ascent + descent should be near one EM (Korean faces run a touch over).
-        assert!(asc + desc >= 900.0 && asc + desc <= 1400.0, "asc {asc} + desc {desc} ~ EM");
+        assert!(
+            asc + desc >= 900.0 && asc + desc <= 1400.0,
+            "asc {asc} + desc {desc} ~ EM"
+        );
     }
 
     #[test]
@@ -391,7 +482,11 @@ mod tests {
         // Using the leading here double-counted it (~25% over-tall rows). vmetrics() is retained for a
         // future Fixed/Minimum-spacing floor but no longer drives the Percent-spacing line box.
         let m = RealFontMetrics::new();
-        assert_eq!(m.line_height(1000), 1000.0, "line height = bare EM (percent spacing scales the EM)");
+        assert_eq!(
+            m.line_height(1000),
+            1000.0,
+            "line height = bare EM (percent spacing scales the EM)"
+        );
         assert_eq!(m.line_height(1200), 1200.0);
     }
 
@@ -400,25 +495,43 @@ mod tests {
         // Inject the SAME vendored NanumGothic the native discover path finds. The metric injection
         // (wasm/web path) must produce byte-for-byte identical advances to `new()` — that equivalence
         // is what makes the cross-golden (wasm vs native --features shaper) hold.
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/NanumGothic-Regular.ttf");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/NanumGothic-Regular.ttf"
+        );
         let Ok(bytes) = std::fs::read(path) else {
             eprintln!("skip: vendored NanumGothic not present");
             return;
         };
         let injected = RealFontMetrics::from_bytes(&bytes);
-        assert!(injected.is_real(), "injected NanumGothic must back real metrics");
+        assert!(
+            injected.is_real(),
+            "injected NanumGothic must back real metrics"
+        );
         let native = RealFontMetrics::new();
-        if !(native.is_real() && native.font_path().map(|p| p.ends_with("NanumGothic-Regular.ttf")).unwrap_or(false)) {
+        if !(native.is_real()
+            && native
+                .font_path()
+                .map(|p| p.ends_with("NanumGothic-Regular.ttf"))
+                .unwrap_or(false))
+        {
             eprintln!("skip: native discover didn't resolve the vendored NanumGothic");
             return;
         }
-        let f = FontKey { family: String::new(), bold: false, italic: false };
+        let f = FontKey {
+            family: String::new(),
+            bold: false,
+            italic: false,
+        };
         // Hangul (EM-grid), Latin (proportional), digit, punctuation — the full advance surface.
         for ch in ['한', '가', 'A', 'i', 'W', '1', '.', '(', ')'] {
             for size in [1000, 1200, 900] {
                 let a = injected.advance_width(&f, ch, size);
                 let b = native.advance_width(&f, ch, size);
-                assert!((a - b).abs() < 1e-9, "injected vs native advance for {ch:?}@{size}: {a} vs {b}");
+                assert!(
+                    (a - b).abs() < 1e-9,
+                    "injected vs native advance for {ch:?}@{size}: {a} vs {b}"
+                );
             }
         }
     }
@@ -428,7 +541,11 @@ mod tests {
         // Unparseable bytes → approximate fallback (never panics), same numbers as ApproxFontMetrics.
         let m = RealFontMetrics::from_bytes(&[0, 1, 2, 3, 4]);
         assert!(!m.is_real(), "garbage bytes must NOT back a real font");
-        let f = FontKey { family: String::new(), bold: false, italic: false };
+        let f = FontKey {
+            family: String::new(),
+            bold: false,
+            italic: false,
+        };
         assert_eq!(m.advance_width(&f, '가', 1000), 1000.0);
         assert_eq!(m.advance_width(&f, 'a', 1000), 500.0);
     }
@@ -441,7 +558,11 @@ mod tests {
             eprintln!("skip: need both a Korean and a separate Latin font");
             return;
         }
-        let f = FontKey { family: String::new(), bold: false, italic: false };
+        let f = FontKey {
+            family: String::new(),
+            bold: false,
+            italic: false,
+        };
         // A proportional Latin 'i' is FAR narrower than an 'W' — a Korean face packing Latin
         // near-full-width would make them nearly equal. The proportional face keeps the ratio wide.
         let i = m.advance_width(&f, 'i', 1000);

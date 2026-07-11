@@ -10,7 +10,10 @@
 //! The allowlist LOGIC itself is unit-tested in `src/lib.rs` (no prerequisites), so the fidelity
 //! contract is enforced in CI even on machines where the render cannot run.
 
-use hwp_fidelity::{benchmark_allowlist, benchmark_path, reference_pdf_for, unexpected_divergences, FidelityBand, Prerequisites};
+use hwp_fidelity::{
+    benchmark_allowlist, benchmark_path, reference_pdf_for, unexpected_divergences, FidelityBand,
+    Prerequisites,
+};
 
 #[test]
 fn benchmark_present_and_hwp5() {
@@ -65,7 +68,12 @@ fn benchmark_engine_has_no_unexpected_divergence() {
         report.reference, report.our_pages, report.ref_pages
     );
     for p in &report.pages {
-        eprintln!("  page {:>2}: {:?} ({:?})", p.index + 1, p.band, p.similarity);
+        eprintln!(
+            "  page {:>2}: {:?} ({:?})",
+            p.index + 1,
+            p.band,
+            p.similarity
+        );
     }
 
     let unexpected = unexpected_divergences(&report, benchmark_allowlist());
@@ -78,7 +86,10 @@ fn benchmark_engine_has_no_unexpected_divergence() {
     // Belt-and-suspenders: with a ground-truth reference the gate is absolute — exact page count
     // and zero Red pages (no allowlist entry applies to ground truth).
     if has_ground_truth {
-        assert_eq!(report.our_pages, report.ref_pages, "ground-truth page count must match exactly");
+        assert_eq!(
+            report.our_pages, report.ref_pages,
+            "ground-truth page count must match exactly"
+        );
         assert!(
             report.pages.iter().all(|p| p.band != FidelityBand::Red),
             "ground-truth fidelity requires all pages Red 0"

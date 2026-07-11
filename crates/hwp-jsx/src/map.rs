@@ -147,7 +147,10 @@ pub fn para_shape_to_decls(s: &ParaShape) -> BTreeMap<String, String> {
     // SHAPE_BLOB, so this is render-only (decls_to_para_shape ignores line-height).
     match s.line_spacing_type {
         LineSpacingType::Percent if s.line_spacing_value > 0 => {
-            d.insert("line-height".into(), format!("{}", s.line_spacing_value as f64 / 100.0));
+            d.insert(
+                "line-height".into(),
+                format!("{}", s.line_spacing_value as f64 / 100.0),
+            );
         }
         LineSpacingType::Fixed | LineSpacingType::AtLeast if s.line_spacing_value > 0 => {
             d.insert("line-height".into(), format_pt(s.line_spacing_value));
@@ -188,7 +191,10 @@ pub fn decls_to_para_shape(d: &BTreeMap<String, String>) -> ParaShape {
     if let Some(v) = d.get("margin-bottom") {
         s.space_after = parse_pt(v);
     }
-    s.page_break_before = d.get("page-break-before").map(|v| v.trim() == "always").unwrap_or(s.page_break_before);
+    s.page_break_before = d
+        .get("page-break-before")
+        .map(|v| v.trim() == "always")
+        .unwrap_or(s.page_break_before);
     s
 }
 
@@ -208,7 +214,9 @@ fn format_pt(hwpunit: i32) -> String {
 fn parse_pt(v: &str) -> i32 {
     let t = v.trim();
     let num = t.trim_end_matches("pt").trim();
-    num.parse::<f64>().map(|f| (f * 100.0).round() as i32).unwrap_or(0)
+    num.parse::<f64>()
+        .map(|f| (f * 100.0).round() as i32)
+        .unwrap_or(0)
 }
 
 fn serde_json_shape(s: &CharShape) -> String {
@@ -258,12 +266,22 @@ mod shape_serde {
     }
     impl From<Color> for ColorS {
         fn from(c: Color) -> Self {
-            ColorS { r: c.r, g: c.g, b: c.b, a: c.a }
+            ColorS {
+                r: c.r,
+                g: c.g,
+                b: c.b,
+                a: c.a,
+            }
         }
     }
     impl From<ColorS> for Color {
         fn from(c: ColorS) -> Self {
-            Color { r: c.r, g: c.g, b: c.b, a: c.a }
+            Color {
+                r: c.r,
+                g: c.g,
+                b: c.b,
+                a: c.a,
+            }
         }
     }
 
@@ -468,8 +486,18 @@ mod tests {
 
     #[test]
     fn char_shape_roundtrips_exhaustively() {
-        let mut s = CharShape { height: 1400, bold: true, italic: true, ..Default::default() };
-        s.text_color = hwp_model::types::Color { r: 255, g: 0, b: 0, a: 255 };
+        let mut s = CharShape {
+            height: 1400,
+            bold: true,
+            italic: true,
+            ..Default::default()
+        };
+        s.text_color = hwp_model::types::Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255,
+        };
         s.font_family = Some("맑은 고딕".into());
         s.fonts = vec![Some("a".into()), None];
         s.underline = true;
@@ -494,7 +522,10 @@ mod tests {
 
     #[test]
     fn font_size_edit_changes_reparsed_height() {
-        let s = CharShape { height: 1000, ..Default::default() };
+        let s = CharShape {
+            height: 1000,
+            ..Default::default()
+        };
         let mut d = char_shape_to_decls(&s);
         d.insert("font-size".into(), "14pt".into());
         assert_eq!(decls_to_char_shape(&d).height, 1400);
