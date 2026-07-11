@@ -1654,6 +1654,15 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // 채팅 패널·회색 여백·그립·제자리 에디터 위에서는 기본 메뉴 유지). The right-click point updates the
   // selection with the SAME rule as a click (023/021 replace), then the resolved hit branches the menu
   // (셀/문단/바탕). Actions always target "현재 선택" (028과 같은 계약).
+  //
+  // issue 055 (async 위생): the hit queries are ASYNC — with the worker backend their latency is real,
+  // so rapid right-clicks can otherwise interleave (a LATE resolution replacing the menu the user —
+  // or an e2e scan — is about to click detaches its buttons mid-click, and the replacement's items at
+  // the same coordinates can swallow the click as a DIFFERENT action). Rule: THE LATEST right-click
+  // OWNS THE MENU — a new right-click closes any open menu synchronously and stale resolutions are
+  // dropped by sequence, never applied. (identical net behavior on the sync backend, where each
+  // resolution lands before the next click can happen.)
+  const ctxMenuSeqRef = useRef(0);
   const onSheetContextMenu = useCallback(
     async (e: React.MouseEvent) => {
       if (!editingOn) return; // read-only host → native menu (the editing chrome is opt-in)
@@ -1664,6 +1673,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       const svg = sheet.querySelector("svg") as SVGSVGElement | null;
       if (!svg) return; // a virtualized placeholder has no SVG → native menu
       e.preventDefault(); // 시트 위에서만 기본 메뉴 차단
+      const seq = ++ctxMenuSeqRef.current;
+      setContextMenu(null); // 이 우클릭이 메뉴의 주인 — 이전 메뉴는 즉시(동기) 닫는다
+      const stale = () => ctxMenuSeqRef.current !== seq;
       const page = Number(sheet.dataset.page);
       const rect = svg.getBoundingClientRect();
       const pt = screenToPage(e.clientX, e.clientY, rect, readViewBox(svg));
@@ -1681,12 +1693,14 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       // 2) Resolve what's under the point to branch the menu (cell > table/paragraph > 바탕).
       try {
         const cell = adapter.tableCellAt ? await adapter.tableCellAt(page, pt.x, pt.y) : null;
+        if (stale()) return; // a newer right-click owns the menu — drop this resolution
         if (cell) {
           setContextMenu({ x: clientX, y: clientY, kind: "cell", click, cell: { section: cell.section, block: cell.block, row: cell.row, cols: cell.cols } });
           return;
         }
         const table = await adapter.tableAt(page, pt.x, pt.y);
         const hit = table ? null : await adapter.hitTest(page, pt.x, pt.y);
+        if (stale()) return;
         const strictInside = !!hit && pt.x >= hit.x && pt.x <= hit.x + hit.w && pt.y >= hit.y && pt.y <= hit.y + hit.h;
         if (hit && hit.kind === "paragraph" && hit.editable && strictInside) {
           setContextMenu({ x: clientX, y: clientY, kind: "paragraph", click });
@@ -1695,7 +1709,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         // A whole-table border / image / empty page area → 바탕(비개체) menu (표 추가).
         setContextMenu({ x: clientX, y: clientY, kind: "background", click });
       } catch (err) {
-        if (!onTrap(err, "엔진을 복구했습니다 — 다시 시도하세요")) setContextMenu({ x: clientX, y: clientY, kind: "background", click });
+        if (!onTrap(err, "엔진을 복구했습니다 — 다시 시도하세요") && !stale()) setContextMenu({ x: clientX, y: clientY, kind: "background", click });
       }
     },
     [editingOn, adapter, core, onTrap],

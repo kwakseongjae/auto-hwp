@@ -8,6 +8,7 @@
 ## 2026-07-11 저녁 (Claude Fable 5) · 055 웹 하드닝 + 알려진 한계 리서치 5레인
 - 한 일: 055 웹 하드닝 구현·병합 — 엔진 워커화(FG-14 — @tf-hwp/engine worker.js+worker-client 수제 RPC, WasmAdapter 옵트인+052 재스폰 복구, hwp-lab 기본 ON·?engineWorker=off 롤백) + wasm-opt -Oz(raw −22%/gzip −6%, 골든 바이트동일) + 한도 UX(64MiB·DocLimit 문구·파싱 취소). 실측 458p·CPU4× JS 블로킹 11.5s→3.4s(−71%). 부수: 047 shield 레이스 수리, Cargo exclude ".claude". verify-local --full 그린(e2e 38/38, react 274, hwp-lab 36).
 - 알려진 한계 5종 병렬 리서치 → 이슈 승격: 058 폰트(FontKey에 family 이미 흐름), 059 IME(반전: 입력캡처 아키텍처), 060 프레임표(emit 게이트 4곳 비재귀), 061 웹배포(Vercel prebuilt), 056(crypto 착수가능·rhwp crypto.rs MIT).
+- 병합 사고: 055가 API 재시작으로 **두 워크트리에서 독립 완성**(7478b11 WasmAdapter통합 vs b5c330d 별도WorkerAdapter). 7478b11 정본 채택했으나 b5c330d만 고친 컨텍스트 메뉴 워커 레이스(늦은 우클릭 해석이 열린 메뉴 detach)가 main e2e 2건 실패로 표면화 → 지운 b5c330d를 객체로 되살려 시퀀스 가드(ctxMenuSeqRef)만 이식 → e2e 38/38 회복. 교훈: 중복 완성 시 각 워크트리가 서로 다른 버그를 고칠 수 있으니 병합 후 반드시 --full 재검증.
 - 다음: **R12 전 항목 완료.** R13 후보(058~061+056) 착수 순서 결정(아키텍트). 웹 QA는 로컬 또는 061. 후속 이슈감: 대형문서 SVG 문자열 전송 최적화(034 §함정), 수백p placeholder Layout 스파이크(~1.4s@4×, 워커 무관).
 
 ## 2026-07-11 오후 (Claude Fable 5) · CI→로컬 검증 전환

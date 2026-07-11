@@ -54,7 +54,7 @@
 | [052](052-autosave-recovery.md) | 자동저장 + 세션 복구 — 2s 유휴 toHwpx 스냅샷·IndexedDB·트랩 우선 복구·배너 | **done** (d0f0a24) | R12-P0 | V3 무오염 잠금. golden이 기존 엔진 갭 2건 격리 → 057 신설 + 054 기록 |
 | [053](053-cell-caret.md) | 셀 주소형 캐럿 (042 승계) — HitTestCell/CaretRectCell + 캐럿 UI | **done** (dbcc1bd) | R12-P1 | P0=own-render 글리프 통일 채택(25-vs-14 발산 우회). 해상률 실클릭 공간 0%→**100/99.8/100%**. 스키마 38→40, place.rs 순수 추가(+412/−0), 렌더-0 잠금 |
 | [054](054-hwp-lift-f2.md) | .hwp lift 충실도 F2 — 행높이/패딩/테두리 실값 | **done** (8cd4233) | R12-P1 | 무편집 왕복 8→8·18→18·25→25 복원(전엔 6/20/23p). 게이트 불변. Tier-2 #8/#9/#10 emit 선반영(측정 근거) |
-| [055](055-web-hardening.md) | 웹 하드닝 — 워커화(FG-14)/번들 실측/한도 UX | **in-progress** | R12-P2 | 051·052 병합 후 착수, 워크트리 구현 중 |
+| [055](055-web-hardening.md) | 웹 하드닝 — 워커화(FG-14)/번들 실측/한도 UX | **done** (67f4cc1) | R12-P2 | 엔진 워커화 JS 블로킹 −71%·최악 프리즈 −84%, wasm-opt raw −22%/gzip −6%, 64MiB 한도 UX. e2e 38/38, 게이트 불변. 두 워크트리 중복완성→컨텍스트메뉴 레이스 수정 이식 |
 | [056](056-distribution-crypto.md) | 배포용 .hwp 복호화 | open(**수요 게이트**) | 조건부 | 리서치 완료(알고리즘/라이선스/의존 해소, rhwp crypto.rs MIT in-repo) — 남은 블로커=실샘플 1건+배선. 배포용 한정 착수가능 |
 | [057](057-hwpx-export-table-anchor.md) | HWPX 익스포터 표 앵커링 버그 — 셀 편집 후 표가 문서 끝으로 오배치 | **done** (8a28ce5) | R12-P1 | 원인=표 src_span 미캡처→무조건 끝-append. per-cell 수술+폴백, 레드→그린, verbatim 골든 불변. 부수 발견→060 |
 
