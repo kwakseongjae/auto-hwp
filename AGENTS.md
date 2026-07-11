@@ -43,6 +43,7 @@ fmt-dirty 커밋은 다음 verify에서 걸린다). GitHub Actions는 `gh workfl
 - e2e 전 `rm -rf apps/hwp-lab/.next` — 웹팩 캐시가 dist 재빌드를 감지 못해 가짜 통과/실패.
 - **crates(Rust) 변경 후 wasm pkg 재빌드 필수**: `cargo build -p hwp-wasm --release --target
   wasm32-unknown-unknown` → `wasm-bindgen --target web --out-dir packages/engine/pkg …` →
+  (있으면) `wasm-opt -Oz` 다이어트(055 — verify-local --full이 자동 수행, 골든 바이트동일 검증됨) →
   `node apps/hwp-lab/scripts/copy-wasm.mjs` → `.next` 삭제. 스테일 wasm은 신규 Intent를
   "unknown variant"로 거부(2026-07-10 R12 배치 A 병합 검증에서 실측 — e2e 3건 가짜 실패).
 - px↔HWPUNIT 슬립은 클릭선택/이동/리사이즈를 **조용히** 죽인다 — own-render 지오메트리는 시각 검증까지.

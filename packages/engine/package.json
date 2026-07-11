@@ -12,6 +12,11 @@
       "types": "./index.d.ts",
       "import": "./index.js"
     },
+    "./worker-client": {
+      "types": "./worker-client.d.ts",
+      "import": "./worker-client.js"
+    },
+    "./worker.js": "./worker.js",
     "./pkg/hwp_wasm_bg.wasm": "./pkg/hwp_wasm_bg.wasm",
     "./package.json": "./package.json"
   },
@@ -21,6 +26,9 @@
   "files": [
     "index.js",
     "index.d.ts",
+    "worker.js",
+    "worker-client.js",
+    "worker-client.d.ts",
     "pkg/hwp_wasm.js",
     "pkg/hwp_wasm.d.ts",
     "pkg/hwp_wasm_bg.wasm",

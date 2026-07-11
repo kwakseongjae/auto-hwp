@@ -14,7 +14,8 @@ export default defineConfig({
       fileName: () => "index.js",
     },
     rollupOptions: {
-      external: ["react", "react-dom", "react/jsx-runtime", "@tf-hwp/engine"],
+      // The regex also externalizes subpaths (issue 055: "@tf-hwp/engine/worker-client").
+      external: ["react", "react-dom", "react/jsx-runtime", /^@tf-hwp\/engine(\/.*)?$/],
       output: {
         // Name the extracted stylesheet `styles.css` to match the package export map.
         assetFileNames: (info) => (info.name && info.name.endsWith(".css") ? "styles.css" : "[name][extname]"),

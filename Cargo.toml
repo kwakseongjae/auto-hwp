@@ -3,7 +3,11 @@ resolver = "2"
 members = ["crates/*"]
 # The vendored rhwp bootstrap is its own package — keep it out of our workspace
 # (it builds standalone; hwp-rhwp path-deps into it behind the `rhwp` feature).
-exclude = ["external/rhwp"]
+# `.claude` shields agent worktrees nested under the repo (.claude/worktrees/*): without it,
+# an excluded package inside a worktree (its rhwp copy) keeps walking UP and wrongly resolves
+# against THIS root workspace — `cargo fmt --all`/`cargo metadata` then fail in every worktree
+# (issue 055 실측; cargo excludes anything UNDER a listed directory).
+exclude = ["external/rhwp", ".claude"]
 
 [workspace.package]
 edition = "2021"

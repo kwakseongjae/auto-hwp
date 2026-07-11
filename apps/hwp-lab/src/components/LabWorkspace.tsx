@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { HwpWorkspace, WasmAdapter, FONT_CATALOG, type Anchor, type DocContext, type Intent } from "@tf-hwp/react";
+import { HwpWorkspace, WasmAdapter, FONT_CATALOG, type Anchor, type DocContext, type Intent, type WasmAdapterOptions } from "@tf-hwp/react";
 import { buildDocContext } from "@tf-hwp/ai-protocol";
 import { resetEngine } from "@tf-hwp/engine";
 import { AutosaveController, IdbSnapshotStore, findRecoverable, formatAge, recoveredName, type SnapshotRecord } from "@/lib/autosave";
+import { limitMessage, oversizeMessage } from "@/lib/limits";
 
 type Mode = "loading" | "mock" | "live";
 type Doc = { bytes: Uint8Array; name: string };
@@ -47,12 +48,23 @@ export default function LabWorkspace() {
   const [savedLabel, setSavedLabel] = useState<string | null>(null);
   // 복구 클릭으로 연 문서: 열기 성공 시 adoptRecovered(재귀속 + 옛 키 삭제)할 원본 레코드.
   const pendingRecoveryRef = useRef<SnapshotRecord | null>(null);
-  // toHwpx 는 동기 메인스레드 — 포인터 제스처(드래그) 진행 중엔 flush 를 미룬다(렌더-0 규율).
+  // 포인터 제스처(드래그) 진행 중엔 자동저장 flush 를 미룬다(렌더-0 규율). 이슈 055 워커화로 toHwpx
+  // 는 이제 비차단이지만, 제스처 중 불필요한 직렬화/RPC 왕복을 피하는 유휴 게이트는 그대로 유효하다.
   const pointerDownRef = useRef(false);
 
   // ssr:false 로 로드되므로 window 존재. wasm은 public 정적 에셋을 명시적 URL로 fetch(번들러 마법 X).
   const wasmUrl = useMemo(() => new URL("/hwp/hwp_wasm_bg.wasm", window.location.origin), []);
-  const adapter = useMemo(() => new WasmAdapter(wasmUrl), [wasmUrl]);
+  // 이슈 055(FG-14): 엔진은 기본적으로 Web Worker 에서 돈다(파싱/재조판/export/toHwpx 가 메인스레드를
+  // 멈추지 않는다). 워커 스크립트도 public 정적 에셋(모듈 워커 — copy-wasm.mjs 가 배치). 계측/롤백용
+  // 탈출구: `?engineWorker=off` 로 열면 기존 메인스레드 엔진으로 동작한다(BEFORE/AFTER 실측이 이 스위치).
+  const workerMode = useMemo(() => new URLSearchParams(window.location.search).get("engineWorker") !== "off", []);
+  const adapterOptions = useMemo<WasmAdapterOptions | undefined>(
+    () => (workerMode ? { worker: { url: new URL("/hwp/worker.js", window.location.origin) } } : undefined),
+    [workerMode],
+  );
+  const adapter = useMemo(() => new WasmAdapter(wasmUrl, adapterOptions), [wasmUrl, adapterOptions]);
+  // 열기(프로브) 진행 중 취소용 핸들 — 워커 모드에선 dispose()가 프로브 워커를 종료해 파싱을 즉시 중단한다.
+  const probeRef = useRef<WasmAdapter | null>(null);
 
   // 자동저장 파이프라인(052): 성공한 편집(onMutation) → 2s 유휴 디바운스 → adapter.toHwpx() →
   // IndexedDB(문서당 최신 1개 · 전체 상한 · TTL 7일). IndexedDB 실패는 1회 안내 후 비활성 —
@@ -187,17 +199,35 @@ export default function LabWorkspace() {
         setLabError(`빈 파일입니다: ${name}`);
         return false;
       }
+      // 이슈 055 한도 UX: 엔진(hwp-ingest limits.rs MAX_RAW_FILE=64MiB)이 어차피 거부할 파일은
+      // 파싱(워커 복사)을 시작하기 전에 정직한 사유로 거부한다.
+      const tooBig = oversizeMessage(bytes.length, name);
+      if (tooBig) {
+        setDoc(null);
+        setLabError(tooBig);
+        return false;
+      }
       setBusy("문서 여는 중…");
       setLabError(null);
-      const probe = new WasmAdapter(wasmUrl);
+      const probe = new WasmAdapter(wasmUrl, adapterOptions);
+      probeRef.current = probe; // 취소 버튼이 이 핸들의 dispose()로 파싱을 중단한다(워커 종료)
       try {
         await probe.open(bytes, name);
         probe.dispose();
         setDoc({ bytes, name });
         return true;
       } catch (err) {
-        // 트랩이면 전역 wasm 인스턴스가 오염됨 → 다음 업로드를 위해 재생성(트랩 복구).
-        if (isTrap(err)) {
+        // 이슈 055: 사용자가 취소(워커 종료)한 경우 — 오류가 아니다. 조용히 접는다.
+        if ((err as { code?: string })?.code === "worker_terminated") {
+          setDoc(null);
+          return false;
+        }
+        if (workerMode) {
+          // 워커 모드: 트랩이 나도 프로브 워커에 격리된다(어댑터가 자체 reset까지 수행). 프로브
+          // 워커를 종료해 자원만 회수하면 된다 — 메인 어댑터/엔진은 애초에 오염되지 않았다.
+          probe.dispose();
+        } else if (isTrap(err)) {
+          // 메인스레드 모드(폴백): 전역 wasm 인스턴스가 오염됨 → 다음 업로드를 위해 재생성(트랩 복구).
           try {
             await resetEngine(wasmUrl);
           } catch {
@@ -205,17 +235,27 @@ export default function LabWorkspace() {
           }
         }
         setDoc(null);
+        // 이슈 055 한도 UX: DocLimit/형식 계열 오류는 사람이 읽는 사유로 매핑, 모르는 오류는 기존 문구.
+        const friendly = limitMessage(msg(err));
         setLabError(
-          `파일을 열 수 없습니다: ${name}\n${msg(err)}\n` +
-            `손상되었거나 지원하지 않는 파일일 수 있습니다. 다른 파일을 시도하거나 원본을 다시 저장해 보세요.`,
+          friendly
+            ? `파일을 열 수 없습니다: ${name}\n${friendly}`
+            : `파일을 열 수 없습니다: ${name}\n${msg(err)}\n` +
+                `손상되었거나 지원하지 않는 파일일 수 있습니다. 다른 파일을 시도하거나 원본을 다시 저장해 보세요.`,
         );
         return false;
       } finally {
+        probeRef.current = null;
         setBusy(null);
       }
     },
-    [wasmUrl],
+    [wasmUrl, adapterOptions, workerMode],
   );
+
+  // 이슈 055: 파싱 취소 — 진행 중 프로브의 워커를 종료한다(위 catch 가 worker_terminated 로 접는다).
+  const cancelOpen = useCallback(() => {
+    probeRef.current?.dispose();
+  }, []);
 
   const onFile = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -349,6 +389,12 @@ export default function LabWorkspace() {
         {busy && (
           <span className="lab-status lab-status-busy" role="status">
             {busy}
+            {workerMode && (
+              // 이슈 055: 워커 모드에선 파싱이 비차단이라 취소가 실제로 가능하다(프로브 워커 종료).
+              <button className="lab-btn lab-cancel-open" data-testid="open-cancel" onClick={cancelOpen}>
+                취소
+              </button>
+            )}
           </span>
         )}
         {savedLabel && (

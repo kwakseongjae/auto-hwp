@@ -113,6 +113,12 @@ body {
 .lab-status-busy {
   color: #2563eb;
 }
+/* 이슈 055 — 파싱 진행 중 취소 버튼(워커 모드에선 파싱이 비차단이라 실제로 눌린다). */
+.lab-cancel-open {
+  margin-left: 8px;
+  font-size: 12px;
+  padding: 2px 8px;
+}
 
 .lab-error {
   margin: 10px 16px 0;

@@ -99,6 +99,31 @@ try {
 A `FinalizationRegistry` frees handles the host forgets to `free()`, but **explicit `free()` on document
 swap is the contract** (undo snapshots + original bytes are held per document — R13).
 
+## Run the engine in a Web Worker (issue 055, FG-14)
+
+Parsing / re-layout / `toHwpx` on a multi-MB document blocks the thread they run on. This package
+ships a **module-worker entry** (`worker.js`) plus a main-thread RPC client
+(`@tf-hwp/engine/worker-client`) so the whole engine can live off the main thread — no
+SharedArrayBuffer, no COOP/COEP headers, no bundler magic. Deploy `worker.js`, `index.js` and
+`pkg/hwp_wasm.js` as static assets **keeping their relative paths** (the worker imports `./index.js`
+which imports `./pkg/hwp_wasm.js`), then:
+
+```js
+import { EngineWorkerClient } from '@tf-hwp/engine/worker-client';
+
+const client = new EngineWorkerClient({ url: '/hwp/worker.js' });   // {type:"module"} worker
+await client.init('/hwp/hwp_wasm_bg.wasm');                          // instantiate wasm IN the worker
+const { pages } = await client.open(bytes, file.name);               // parse off-thread
+const svg = await client.call('renderPageSvg', [0]);                 // every HwpDoc method, awaited
+```
+
+Error codes across the boundary: `wasm_trap` (instance poisoned inside the worker → `client.reset()`
+then re-`open`), `worker_dead` (the worker itself died → the next `init()`/`reset()` respawns),
+`worker_terminated` (the host called `terminate()` — an intentional cancel, not a crash). Ordinary
+engine errors (`no_document`, `font_missing`, …) pass through unchanged. `@tf-hwp/react`'s
+`WasmAdapter` wires all of this (including 052 snapshot-first recovery) behind
+`new WasmAdapter(wasmUrl, { worker: { url: workerUrl } })`.
+
 ## ⚠️ Security — SVG is untrusted (R7)
 
 `renderPageSvg` returns a document-derived string. **Never** `innerHTML` it raw. Use

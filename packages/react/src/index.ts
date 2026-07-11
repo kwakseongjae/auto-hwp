@@ -133,6 +133,9 @@ export { WasmAdapter } from "./WasmAdapter";
 // content mutations via `onMutation` (the idle-debounce snapshot trigger), and gets the honest
 // recovery report via `onRecovered`.
 export type { CodedError, RecoverySnapshot, RecoverySnapshotSource, RecoveryInfo } from "./WasmAdapter";
+// issue 055 (FG-14) — worker mode: `new WasmAdapter(wasmUrl, { worker: { url } })` runs the engine in a
+// Web Worker (parse/layout/export/toHwpx off the main thread); the adapter surface is unchanged.
+export type { WasmAdapterOptions, WasmAdapterWorkerOptions } from "./WasmAdapter";
 export { TauriAdapter } from "./TauriAdapter";
 export type { TauriAdapterOptions, Invoke } from "./TauriAdapter";
 

@@ -70,7 +70,13 @@ interface EngineAdapter {
 
 - **`WasmAdapter`** wraps `@tf-hwp/engine`, incl. **wasm-trap recovery** (a Rust panic poisons the wasm
   instance — the adapter `resetEngine()`s + re-opens the document, then surfaces the trap so the UI can
-  tell the user the last edit was rolled back).
+  tell the user the last edit was rolled back). **Worker mode** (issue 055, FG-14):
+  `new WasmAdapter(wasmUrl, { worker: { url: workerUrl } })` runs the WHOLE engine in a Web Worker —
+  parse/re-layout/export/`toHwpx` leave the main thread; the adapter surface is unchanged. Deploy
+  `@tf-hwp/engine`'s `worker.js` + `index.js` + `pkg/hwp_wasm.js` as static assets (relative paths
+  kept — see the engine README) and pass that `worker.js` URL. The worker DYING is treated exactly
+  like a trap (respawn + snapshot-first recovery); `dispose()` terminates the worker (this is also
+  how a host cancels a long parse).
 - **`TauriAdapter`** is a dependency-free reference (inject your own `invoke`); wiring the shipping
   desktop app to it is a follow-up.
 

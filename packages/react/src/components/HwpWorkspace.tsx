@@ -715,9 +715,16 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // EXCEPTION (issue 036): a Tab commit-move re-flows too, but it re-opens the editor at the NEXT cell
   // itself — so skip the close while `tabMoving` is set, or it would clobber that re-entry.
   // EXCEPTION (issue 047): a 편집 중 셀음영 apply re-flows too, but the shade does NOT touch the cell's text
-  // or geometry — so keep the editor open (with its uncommitted text) while `shading` is set.
+  // or geometry — so keep the editor open (with its uncommitted text) while `shading` is set. The shield is
+  // CONSUMED here (issue 055): it guards exactly ONE re-flow — the shade's own — and a timer-based release
+  // raced this effect once the engine moved to a worker (RPC replies land in plain macrotasks, so a
+  // setTimeout(0) could fire before this effect's scheduled run and let the close slip through).
   useEffect(() => {
-    if (tabMovingRef.current || shadingRef.current) return;
+    if (tabMovingRef.current) return;
+    if (shadingRef.current) {
+      shadingRef.current = false; // the shade's own re-flow — skip the close, then disarm
+      return;
+    }
     setEditor(null);
   }, [refreshToken]);
 
@@ -941,12 +948,13 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       try {
         await core.edit.shadeCellRange(ed.section, ed.block, { r0: r, c0: c, r1: r, c1: c }, hex);
         toast(hex ? "배경색 적용" : "배경 지움");
+        // Success: the shade's own re-flow CONSUMES the shield inside the refreshToken close effect
+        // (issue 055 — a setTimeout(0) release raced that effect under worker-mode RPC timing).
       } catch (e) {
+        // Failure/trap: no shade re-flow will consume the shield — disarm NOW so it can't swallow the
+        // NEXT close (e.g. the trap-recovery refresh must still close the editor over stale geometry).
+        shadingRef.current = false;
         if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`배경색 변경 실패: ${e}`);
-      } finally {
-        // Release the shield only after this task's React flush (macrotask) so the refreshToken close from
-        // the shade apply can't slip through — mirrors the `tabMoving` release discipline (issue 036).
-        window.setTimeout(() => (shadingRef.current = false), 0);
       }
     },
     [core, toast, onTrap],

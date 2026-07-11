@@ -105,5 +105,12 @@ concern, not a 007 compile blocker, so nothing is changed in these files here.
 - Bundle size is unmeasured (needs the actual `wasm-pack` build in 015); krilla's font
   subsetting stack (skrifa/subsetter/write-fonts) is the likely heavyweight to watch with
   `twiggy`/`wasm-opt`.
+  - ✅ 실측 완료 (issue 055, 2026-07-11): wasm-bindgen 산출물 11,697,120 B → `wasm-opt -Oz
+    --all-features`(binaryen 130) 후 9,096,828 B (raw −22.2%). 전송 크기: gzip -9 3,728,108 →
+    3,490,953 B (−6.4%), brotli -q11 2,553,243 → 2,470,768 B (−3.2%). 최적화본은 benchmark/
+    benchmark1/benchmark2 3픽스처의 SVG·HTML·HWPX·PDF(폰트 주입 전후) 해시가 베이스라인과
+    바이트동일(골든 무회귀). wasm-opt 단계는 `scripts/verify-local.sh --full`의 wasm 재빌드에
+    상시 편입. feature 프루닝은 기각: `image`(코덱 묶음)는 vendored rhwp(.hwp 파싱 = 핵심)의
+    의존이고 krilla 는 PDF export(북극성 수용 기준)의 본체 — 어느 쪽도 떼면 기능 회귀다.
 - `cargo check` (no `--tests`) was used, matching the issue. Test-only `std::fs` /
   `std::time::Instant` in hwp-hwpx and hwp-rhwp are `#[cfg(test)]` and never compiled here.
