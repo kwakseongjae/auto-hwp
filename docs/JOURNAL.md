@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-07-11 저녁 (Claude Fable 5) · 055 착수 + 알려진 한계 리서치 5레인
+- 한 일: 055 웹 하드닝 구현 착수(워크트리). 알려진 한계 5종 병렬 리서치 → 이슈 승격: 058 폰트충실도(FontKey에 family 이미 흐름·RealFontMetrics 한 곳), 059 IME(반전: 입력캡처 아키텍처 이슈·hidden textarea), 060 프레임표(emit 게이트 4곳 비재귀 술어), 061 웹배포(Vercel prebuilt), 056 갱신(crypto 착수가능 판정·rhwp crypto.rs MIT).
+- 다음: 055 병합 → R13 후보 착수 순서 결정(아키텍트). 웹 QA는 로컬 또는 061.
+
 ## 2026-07-11 오후 (Claude Fable 5) · CI→로컬 검증 전환
 - 한 일: GitHub Actions 전패 원인 2종 해결 — ① fmt 미준수 1,332곳(CI가 로컬 시절 한 번도 안 돌았음) → 전체 포맷+clippy 부채 37건 정리(-D warnings 그린) ② cargo-deny 라이선스 미등록 2종(BSL-1.0/MPL-2.0) allow 추가. CI는 workflow_dispatch 수동 전용으로 전환, 정본은 신설 `scripts/verify-local.sh`(quick/--full). AGENTS.md 검증 절 갱신.
 - 검증: fmt/clippy exit 0, 테스트 374/0, 게이트 8==8·18==18, wasm 그린, deny licenses ok.

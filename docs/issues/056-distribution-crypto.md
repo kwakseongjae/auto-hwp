@@ -26,3 +26,11 @@
 ## 함정
 - 법적 검토: 복호는 사용자가 정당 열람 권한을 가진 문서에 한함 — 제품 문구/약관에 명시(코드 밖).
 - ECB 특성상 부분 손상 파일이 "그럴듯하게" 열릴 수 있음 — 무결성 검증(해시/구조 검사) 후 통과.
+
+## 리서치 결론 (2026-07-11 — 외부 교차검증 pyhwp/hwp-rs/Volexity + rhwp in-repo)
+**알고리즘·라이선스·의존 리스크는 이미 해소. 남은 블로커는 실샘플 1건 + 배선 결정뿐 — 배포용 한정이면 지금 착수 가능.**
+- **알고리즘 확정**: 배포용 체인(MSVC-rand 214013/2531011 → 256B XOR → offset `4+(seed&0xF)` 키 추출 → AES-128-ECB)이 pyhwp `distdoc.py`·hwp-rs `from_distributed`와 **바이트 단위 동일**. `external/rhwp/src/crypto.rs`에 **이미 작동 구현이 in-repo(MIT)**. 배포용 판정: `header.rs:82 distribution=(flags&0x04)`, tag `HWPTAG_BEGIN+12=0x1C`.
+- **표기 정정**: 배포용은 **복호 시점에 SHA-1을 계산하지 않음**(키가 레코드에 박힘 — `SHA-1(pw)` 40hex의 UTF-16LE 80B 중 앞 16B). 진짜 password 경로만 KDF를 돌고, 그건 **ECB 아니라 AES-128 위 1-bit CFB + 커스텀 KDF**(Volexity) — **056 스코프 밖, 상위 난이도**. 이슈 본문의 "SHA-1→AES-ECB" 표기를 이에 맞게 정밀화할 것.
+- **crate(라이선스 청정)**: `aes`+`cipher`(MIT OR Apache) 직접 ECB 구동, `sha1`(dual). `ecb` crate(MIT 단독) 회피. 순수 Rust·wasm·getrandom 불필요. **이식 베이스 = rhwp `crypto.rs`(MIT) 또는 hwp-rs(Apache)**. pyhwp=AGPL 코드복사 금지(알고리즘 참조만).
+- **fail-closed 보강(056 함정 충족)**: rhwp `extract_aes_key`는 무검증 → 이식 시 추가 — ① 80B가 40 ASCII hex의 UTF-16LE인지(홀수 바이트 0x00, 짝수 hex) ② 복호+inflate 후 첫 레코드 tag=`HWPTAG_PARA_HEADER 0x42` 검증. MAC 없는 스킴의 유일한 견고한 거부 근거.
+- **golden vector**: 어느 레포도 배포용 픽스처 미배포 → **encrypt 방향 합성**(XOR 자기역원+ECB 대칭: pw→sha1_hex→UTF-16LE(80B), seed 선택→offset→256B 레코드 조립→SRand XOR→유효 레코드 16정렬 ECB→합성)으로 CI 골든 확보. 실샘플 1건 확보가 최종 게이트로 여전히 유효.

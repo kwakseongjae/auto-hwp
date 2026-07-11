@@ -54,9 +54,21 @@
 | [052](052-autosave-recovery.md) | 자동저장 + 세션 복구 — 2s 유휴 toHwpx 스냅샷·IndexedDB·트랩 우선 복구·배너 | **done** (d0f0a24) | R12-P0 | V3 무오염 잠금. golden이 기존 엔진 갭 2건 격리 → 057 신설 + 054 기록 |
 | [053](053-cell-caret.md) | 셀 주소형 캐럿 (042 승계) — HitTestCell/CaretRectCell + 캐럿 UI | **done** (dbcc1bd) | R12-P1 | P0=own-render 글리프 통일 채택(25-vs-14 발산 우회). 해상률 실클릭 공간 0%→**100/99.8/100%**. 스키마 38→40, place.rs 순수 추가(+412/−0), 렌더-0 잠금 |
 | [054](054-hwp-lift-f2.md) | .hwp lift 충실도 F2 — 행높이/패딩/테두리 실값 | **done** (8cd4233) | R12-P1 | 무편집 왕복 8→8·18→18·25→25 복원(전엔 6/20/23p). 게이트 불변. Tier-2 #8/#9/#10 emit 선반영(측정 근거) |
-| [055](055-web-hardening.md) | 웹 하드닝 — 워커화(FG-14)/번들 실측/한도 UX | open | R12-P2 | 051·052 병합 후 |
-| [056](056-distribution-crypto.md) | 배포용 .hwp 복호화 | open(**수요 게이트**) | 조건부 | golden vector 없으면 착수 금지 |
-| [057](057-hwpx-export-table-anchor.md) | HWPX 익스포터 표 앵커링 버그 — 셀 편집 후 표가 문서 끝으로 오배치 | **done** (8a28ce5) | R12-P1 | 원인=표 src_span 미캡처→무조건 끝-append. per-cell 수술+폴백, 레드→그린, verbatim 골든 불변. 부수 발견: 1×1 프레임 내부표 편집 미export(후속 이슈감) |
+| [055](055-web-hardening.md) | 웹 하드닝 — 워커화(FG-14)/번들 실측/한도 UX | **in-progress** | R12-P2 | 051·052 병합 후 착수, 워크트리 구현 중 |
+| [056](056-distribution-crypto.md) | 배포용 .hwp 복호화 | open(**수요 게이트**) | 조건부 | 리서치 완료(알고리즘/라이선스/의존 해소, rhwp crypto.rs MIT in-repo) — 남은 블로커=실샘플 1건+배선. 배포용 한정 착수가능 |
+| [057](057-hwpx-export-table-anchor.md) | HWPX 익스포터 표 앵커링 버그 — 셀 편집 후 표가 문서 끝으로 오배치 | **done** (8a28ce5) | R12-P1 | 원인=표 src_span 미캡처→무조건 끝-append. per-cell 수술+폴백, 레드→그린, verbatim 골든 불변. 부수 발견→060 |
+
+## 로드맵 R13 후보 — 알려진 한계 해결 (2026-07-11 리서치 산출)
+
+R12 배치 B 완료 후 "알려진 한계" 5종을 리서치 4레인으로 조사 → 이슈 승격. 착수 순서 미정(아키텍트 판단).
+
+| # | 제목 | 상태 | 우선 | 리서치 핵심 |
+|---|------|------|------|------------|
+| [058](058-font-fidelity.md) | 폰트 충실도 — 문서 서체→OFL 대체 매핑 | open | R13-P1 | FontKey에 family 이미 흐름 → RealFontMetrics 한 곳 수정+글리프 x 소유로 화면·PDF 자동 추종. 명조=본명조/고딕=Pretendard |
+| [059](059-ime-composition.md) | IME 한글 인라인 조합(FG-13) | open | R13-P0 | **반전: 표시 아닌 입력캡처 이슈** — 캐럿에 hidden input 부재. xterm.js식 캐럿추종 textarea. 엔진 무변경 |
+| [060](060-frame-table-export.md) | 프레임 래퍼 내부표 편집 미export | open | R13-P1 | 원인=emit 게이트 4곳 비재귀 술어(serialize.rs). 재귀화+057 src_span 해소로 verbatim 정합 |
+| [061](061-web-deploy.md) | 웹 배포(Vercel prebuilt) — QA용 외부 URL | open | QA 인프라 | wasm은 호스팅 CI 밖에서 빌드→prebuilt 업로드. 최소경로 오늘 30분 |
+| (056) | 배포용 crypto | (위 R12 표) | 조건부 | 리서치로 착수가능 판정 — 실샘플 1건이 최종 게이트 |
 
 ## 로드맵 R11 — 라운드 11 (2026-07-05, SDK 승격 배치 A)
 

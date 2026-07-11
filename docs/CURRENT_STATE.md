@@ -14,14 +14,11 @@
 - 제품 현 수준: 웹(`apps/hwp-lab`)에서 업로드→수동+챗 편집→PDF/HWPX export가 전부 클라이언트사이드로 동작. 판정 = "강한 내부 데모/프라이빗 베타, GA 아님"(격차 5개가 이슈 051~056).
 
 ## 다음 (즉시 착수 가능)
-1. **웹 QA(사용자)**: `pnpm -C packages/editor-core build && pnpm -C packages/react build` →
-   `cd apps/hwp-lab && npm run dev` → http://localhost:3000 (가이드: `apps/hwp-lab/QA.md`.
-   챗 실 LLM은 `ANTHROPIC_API_KEY` env, 없으면 mock). 알려진 한계는 QA 노트 참조(아래 2·3).
-2. **055 웹 하드닝**(워커화 FG-14·번들 실측·한도 UX) — R12 잔여 유일 이슈. QA에서 대형 문서
-   프리즈/업로드 한도가 걸리면 이 이슈가 갚는다.
-3. 후속 이슈감 기획 대기: ① 1×1 프레임 내부표 편집 미export(057 발견 — 자가진단표류 QA 시 주의)
-   ② F3(다단·대각선 재방출·셀 간격) ③ IME 인라인 조합(FG-13) ④ 폰트 충실도(전 문서 Nanum 단일
-   대체 — 알려진 v1 한계) ⑤ 웹 배포(호스팅) — QA가 로컬 아닌 URL이어야 하면 신설.
+1. **055 웹 하드닝** — 워크트리 구현 중(워커화·번들·한도). verify-local --full 그린 보고 대기 → 병합.
+2. **웹 QA(사용자)**: 로컬 `pnpm -C packages/editor-core build && pnpm -C packages/react build` →
+   `cd apps/hwp-lab && npm run dev` → localhost:3000 (가이드 `apps/hwp-lab/QA.md`). 외부 URL QA는 **061**(Vercel prebuilt, 오늘 30분 최소경로).
+3. **R13 후보 4종 + 056** — 알려진 한계 리서치 완료, 이슈 승격됨: 058 폰트 / 059 IME(입력캡처) /
+   060 프레임표 / 061 배포 / 056 crypto(착수가능). 착수 순서는 아키텍트 판단.
 - 검증 정본: `scripts/verify-local.sh` (--full 포함). CI는 수동 전용(`gh workflow run ci`).
 
 ## 막힘 / 대기 (없으면 "없음")
@@ -30,4 +27,9 @@
 ## 진행 중 레인 (병렬 작업 시에만)
 | 레인/ID | owner | 상태 | 다음 체크포인트 |
 |---|---|---|---|
-| (없음 — R12 배치 B 병합 완료) | | | |
+| 055 웹 하드닝 | 구현 에이전트(워크트리) | **구현 중** — 워커화·번들·한도 UX. V6 async 선확인 | verify-local --full 그린 보고 → 병합 |
+| 리서치: 폰트 충실도 | deep-research | 조사 중 | 설계 옵션 → 058 이슈 승격 |
+| 리서치: IME 조합(FG-13) | deep-research | 조사 중 | 설계 → 059 이슈 승격 |
+| 리서치: 프레임표+056 crypto | general(코드 정독) | 조사 중 | A(프레임표 갭)·B(crypto) → 060/056 갱신 |
+| 리서치: 웹 배포 호스팅 | general | 조사 중 | 배포 설계 → 061 이슈 승격 |
+소유권: 055만 파일 수정(워크트리 격리). 리서치 4레인은 읽기 전용 → 결과는 아키텍트가 이슈로 정리.
