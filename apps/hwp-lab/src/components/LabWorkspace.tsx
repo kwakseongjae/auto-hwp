@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HwpWorkspace, WasmAdapter, FONT_CATALOG, type Anchor, type DocContext, type Intent, type WasmAdapterOptions } from "@tf-hwp/react";
 import { buildDocContext } from "@tf-hwp/ai-protocol";
-import { resetEngine } from "@tf-hwp/engine";
+import { isTrapError, resetEngine } from "@tf-hwp/engine";
 import { AutosaveController, IdbSnapshotStore, findRecoverable, formatAge, recoveredName, type SnapshotRecord } from "@/lib/autosave";
 import { limitMessage, oversizeMessage } from "@/lib/limits";
 
@@ -23,11 +23,9 @@ const msg = (e: unknown): string => {
 };
 
 // wasm 트랩(패닉)은 전역 인스턴스를 오염시킨다. 손상 파일 프로브 열기가 트랩나면 다음 업로드를 위해
-// 인스턴스를 재생성해야 한다(이슈 §QA ⑨ 트랩 복구 안내).
-const isTrap = (e: unknown): boolean => {
-  const code = (e as { code?: string })?.code;
-  return code === "wasm_trap" || /RuntimeError|unreachable|memory access out of bounds/i.test(msg(e));
-};
+// 인스턴스를 재생성해야 한다(이슈 §QA ⑨ 트랩 복구 안내). 분류기는 @tf-hwp/engine 의 `isTrapError`
+// 단일 소스를 소비한다(이슈 055 사후 #8 — 로컬 사본은 'table index is out of bounds' 패턴이 빠져
+// 메인스레드 폴백(?engineWorker=off)에서 트랩을 놓치고 resetEngine 을 건너뛰었다).
 
 // 마킹된 앵커/문서 메타를 프록시가 R5 펜스로 감쌀 "문서 콘텐츠" 문자열로 만드는 로직은 이제
 // @tf-hwp/ai-protocol 의 buildDocContext 가 소유한다(이슈 026) — 서버 route.ts 의 프롬프트/펜스
@@ -184,18 +182,24 @@ export default function LabWorkspace() {
     };
   }, []);
 
+  // 열기 시퀀스 번호(이슈 055 사후 #5): 두 파일을 연이어 열면 먼저 시작한 open 의 finally 가 나중
+  // open 의 probe/busy 를 지우고, 늦게 끝난 쪽 setDoc 이 이기는 경합이 있었다. 규칙은 ctxMenuSeqRef 와
+  // 동일 — "최신 open 만이 doc/busy/probe/에러 표면을 만진다". 새 open 은 이전 인플라이트 프로브를
+  // dispose 로 취소한다(그쪽 catch 는 worker_terminated 로 조용히 접힌다).
+  const openSeqRef = useRef(0);
+
   // 바이트 → 문서 열기: 파일 픽커와 (HwpWorkspace 의) 문서 드롭이 공유하는 단일 경로. 손상/악성 파일이
   // 현재 세션을 깨지 않도록 프로브 어댑터로 먼저 검증한다(이슈 050: 문서 드롭=열기 분기가 여기로 온다).
   // 열기 성공 여부를 돌려준다(이슈 052: 복구 배너가 성공/실패 분기를 정직하게 처리).
+  // 이슈 055 사후 #2: 거부/취소/실패 경로는 busy/probe 상태만 정리하고 **현재 doc 은 유지**한다 — 두
+  // 번째 파일 열기가 거부됐다고 이미 열린 문서를 언마운트하지 않는다(열린 문서가 없었다면 그대로 없음).
   const openBytes = useCallback(
     async (bytes: Uint8Array, name: string): Promise<boolean> => {
       if (!/\.(hwp|hwpx)$/i.test(name)) {
-        setDoc(null);
         setLabError(`지원하지 않는 형식입니다: ${name}\n.hwp 또는 .hwpx 파일만 열 수 있습니다.`);
         return false;
       }
       if (bytes.length === 0) {
-        setDoc(null);
         setLabError(`빈 파일입니다: ${name}`);
         return false;
       }
@@ -203,10 +207,12 @@ export default function LabWorkspace() {
       // 파싱(워커 복사)을 시작하기 전에 정직한 사유로 거부한다.
       const tooBig = oversizeMessage(bytes.length, name);
       if (tooBig) {
-        setDoc(null);
         setLabError(tooBig);
         return false;
       }
+      const seq = ++openSeqRef.current;
+      const latest = () => openSeqRef.current === seq;
+      probeRef.current?.dispose(); // 이 open 이 최신 — 이전 인플라이트 프로브는 취소(워커 종료)
       setBusy("문서 여는 중…");
       setLabError(null);
       const probe = new WasmAdapter(wasmUrl, adapterOptions);
@@ -214,19 +220,19 @@ export default function LabWorkspace() {
       try {
         await probe.open(bytes, name);
         probe.dispose();
+        if (!latest()) return false; // 더 새 open 이 시작됨 — 그쪽 결과가 이긴다
         setDoc({ bytes, name });
         return true;
       } catch (err) {
-        // 이슈 055: 사용자가 취소(워커 종료)한 경우 — 오류가 아니다. 조용히 접는다.
+        // 이슈 055: 사용자가 취소(워커 종료)한 경우 — 오류가 아니다. 조용히 접는다(현재 문서 유지).
         if ((err as { code?: string })?.code === "worker_terminated") {
-          setDoc(null);
           return false;
         }
         if (workerMode) {
           // 워커 모드: 트랩이 나도 프로브 워커에 격리된다(어댑터가 자체 reset까지 수행). 프로브
           // 워커를 종료해 자원만 회수하면 된다 — 메인 어댑터/엔진은 애초에 오염되지 않았다.
           probe.dispose();
-        } else if (isTrap(err)) {
+        } else if (isTrapError(err)) {
           // 메인스레드 모드(폴백): 전역 wasm 인스턴스가 오염됨 → 다음 업로드를 위해 재생성(트랩 복구).
           try {
             await resetEngine(wasmUrl);
@@ -234,7 +240,7 @@ export default function LabWorkspace() {
             /* 재생성 실패는 다음 상호작용에서 다시 시도됨 */
           }
         }
-        setDoc(null);
+        if (!latest()) return false; // 뒤에 새 open 이 시작됐다 — 그쪽 표면을 어지럽히지 않는다
         // 이슈 055 한도 UX: DocLimit/형식 계열 오류는 사람이 읽는 사유로 매핑, 모르는 오류는 기존 문구.
         const friendly = limitMessage(msg(err));
         setLabError(
@@ -245,8 +251,10 @@ export default function LabWorkspace() {
         );
         return false;
       } finally {
-        probeRef.current = null;
-        setBusy(null);
+        if (latest()) {
+          probeRef.current = null;
+          setBusy(null);
+        }
       }
     },
     [wasmUrl, adapterOptions, workerMode],

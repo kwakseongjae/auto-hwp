@@ -213,6 +213,31 @@ describe("HwpWorkspace 우클릭 컨텍스트 메뉴 (issue 039)", () => {
     expect(screen.queryByTestId("hw-context-menu")).toBeNull();
   });
 
+  it("해석이 느릴 때 Esc 로 넘어가면 늦은 해석이 메뉴를 띄우지 않는다 (issue 055 사후 #10)", async () => {
+    // 워커가 바쁘면 우클릭의 히트 질의가 늦게 끝난다 — 그 사이 사용자가 Esc(=dismiss)로 넘어갔으면
+    // 늦은 해석은 무효(시퀀스 불일치)여야 한다. 구 코드는 dismiss 가 시퀀스를 올리지 않아 메뉴가
+    // 사용자가 떠난 지점에 불쑥 떴다.
+    const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], pages: 1 });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let resolved = 0; // tableCellAt 완료 횟수: ① 우클릭의 선택 반영(023 resolve), ② 메뉴 분기 해석
+    const origCellAt = adapter.tableCellAt.bind(adapter);
+    adapter.tableCellAt = async (p, x, y) => {
+      await gate; // 느린 워커 시뮬레이션 — 해석이 게이트에 매달린다
+      resolved++;
+      return origCellAt(p, x, y);
+    };
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const sheet = await sheetOf(container);
+    fireEvent.contextMenu(sheet, { clientX: 160, clientY: 110 });
+    expect(screen.queryByTestId("hw-context-menu")).toBeNull(); // 아직 해석 중 — 메뉴 없음
+    fireEvent.keyDown(window, { key: "Escape" }); // 사용자는 이미 넘어갔다 (메뉴 미오픈 → 워크스페이스 Esc)
+    release(); // 이제야 해석이 끝난다
+    await waitFor(() => expect(resolved).toBe(2)); // 메뉴 분기 해석까지 완료
+    for (let i = 0; i < 3; i++) await new Promise((r) => setTimeout(r, 0)); // 늦은 setContextMenu 플러시 여유
+    expect(screen.queryByTestId("hw-context-menu")).toBeNull(); // 무효화됨 — 메뉴가 뜨지 않는다
+  });
+
   it("Esc 로 메뉴가 닫히고, 그 Esc 는 선택까지 지우지 않는다(메뉴가 Esc 를 소비)", async () => {
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);

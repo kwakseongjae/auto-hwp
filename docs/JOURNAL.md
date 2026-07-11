@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-11 밤 (Claude Fable 5) · 055 사후 리뷰 → 확정 결함 10건 수정
+- 한 일: code-review 워크플로(high, 24에이전트, 발견별 독립 검증)가 055 diff에서 확정 결함 10건 적발 — 기능 e2e가 전부 그린인데도 동시성/수명주기/에러 경로는 구멍(복구 토스트 사장, 취소가 열린 문서 파괴, recover 동시 비행 dead-handle, 실드 boolean 소실, open 중첩, 실패 open이 이전 문서 파괴, init 거부 영구 캐시, 트랩 분류기 3중 발산, setTimeout(0) 실드 잔존 2, ctxMenu dismiss 무반응). 10건 전부 수정 + 잠금 테스트 14개(각 수정을 구 코드로 되돌려 레드 확인 후 복원). react 283/150/15/41, e2e 38/38, tsc 클린.
+- 교훈: 워커화 같은 비동기화 diff는 기능 테스트 그린만으론 부족 — 병합 직후 동시성 특화 리뷰를 표준 절차로.
+- 다음: R13 착수(061→059∥058→060 — README R13 절 계획 확정).
+
 ## 2026-07-11 저녁 (Claude Fable 5) · 055 웹 하드닝 + 알려진 한계 리서치 5레인
 - 한 일: 055 웹 하드닝 구현·병합 — 엔진 워커화(FG-14 — @tf-hwp/engine worker.js+worker-client 수제 RPC, WasmAdapter 옵트인+052 재스폰 복구, hwp-lab 기본 ON·?engineWorker=off 롤백) + wasm-opt -Oz(raw −22%/gzip −6%, 골든 바이트동일) + 한도 UX(64MiB·DocLimit 문구·파싱 취소). 실측 458p·CPU4× JS 블로킹 11.5s→3.4s(−71%). 부수: 047 shield 레이스 수리, Cargo exclude ".claude". verify-local --full 그린(e2e 38/38, react 274, hwp-lab 36).
 - 알려진 한계 5종 병렬 리서치 → 이슈 승격: 058 폰트(FontKey에 family 이미 흐름), 059 IME(반전: 입력캡처 아키텍처), 060 프레임표(emit 게이트 4곳 비재귀), 061 웹배포(Vercel prebuilt), 056(crypto 착수가능·rhwp crypto.rs MIT).

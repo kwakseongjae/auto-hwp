@@ -58,6 +58,9 @@ export class MockAdapter implements EngineAdapter {
       image?: ImageBox | null | ((page: number, x: number, y: number) => ImageBox | null);
       /** Canned image box for `imageBbox` (issue 049), or a `(page, section, block)` resolver. Omit to OMIT. */
       imageBox?: ImageBox | null | ((page: number, section: number, block: number) => ImageBox | null);
+      /** issue 055 사후: awaited at the START of every applyIntent — lets a test PARK applies in flight
+       *  (worker-latency simulation) and release them one at a time (중첩 적용/실드 카운터 재현). */
+      applyGate?: () => Promise<void> | void;
       /** When set, applyIntent(SetImageSize/MoveImage) MUTATES the live image box so a `imageBbox` re-query
        *  reflects the commit (issue 049 apply-verify SUCCESS path). Omitted → the image box is FROZEN (a
        *  no-op engine) so the false-success guard test can observe an unchanged box. Needs `image`+`imageBox`. */
@@ -179,6 +182,7 @@ export class MockAdapter implements EngineAdapter {
     return this.opts.outline ?? [];
   }
   async applyIntent(intent: Intent): Promise<Outcome> {
+    if (this.opts.applyGate) await this.opts.applyGate(); // issue 055 사후: park this apply until released
     this.applied.push(intent);
     // liveResize: reflect a resize op back into the re-queried boundaries (issue 031 apply-verify). Frozen
     // otherwise (no-op engine) so the false-success guard test can observe an unchanged geometry.

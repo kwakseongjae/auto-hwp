@@ -14,11 +14,13 @@
 - 제품 현 수준: 웹(`apps/hwp-lab`)에서 업로드→수동+챗 편집→PDF/HWPX export가 전부 클라이언트사이드로 동작. 판정 = "강한 내부 데모/프라이빗 베타, GA 아님"(격차 5개가 이슈 051~056).
 
 ## 다음 (즉시 착수 가능)
-1. **055 웹 하드닝** — 워크트리 구현 중(워커화·번들·한도). verify-local --full 그린 보고 대기 → 병합.
-2. **웹 QA(사용자)**: 로컬 `pnpm -C packages/editor-core build && pnpm -C packages/react build` →
-   `cd apps/hwp-lab && npm run dev` → localhost:3000 (가이드 `apps/hwp-lab/QA.md`). 외부 URL QA는 **061**(Vercel prebuilt, 오늘 30분 최소경로).
-3. **R13 후보 4종 + 056** — 알려진 한계 리서치 완료, 이슈 승격됨: 058 폰트 / 059 IME(입력캡처) /
-   060 프레임표 / 061 배포 / 056 crypto(착수가능). 착수 순서는 아키텍트 판단.
+1. **R13 착수(계획 확정 — README R13 절)**: ① 061 웹배포(30분 최소경로, QA URL) → ② 059 IME ∥
+   058 폰트(disjoint) → ③ 060 프레임표. 056은 수요 게이트. 사용자 "ㄱㄱ"면 이 순서로 배치 가동.
+2. **055 사후 리뷰 완료**: 확정 결함 10건(전부 동시성/수명주기/에러 경로 — worker_dead 미인식·
+   취소가 현재 문서 파괴·recover 동시 비행·실드 boolean·open 중첩·실패 open이 이전 문서 파괴·
+   init 거부 캐시·트랩 분류기 3중 발산·setTimeout(0) 실드 2곳·ctxMenu dismiss 무반응) →
+   **전부 수정 + 잠금 테스트 14개 추가(레드체크 증명)**. react 283/hwp-lab 41/e2e 38/38 그린.
+3. **웹 QA(사용자)**: 로컬 `cd apps/hwp-lab && npm run dev` → localhost:3000 (QA.md). URL QA는 061 후.
 - 검증 정본: `scripts/verify-local.sh` (--full 포함). CI는 수동 전용(`gh workflow run ci`).
 
 ## 막힘 / 대기 (없으면 "없음")

@@ -36,6 +36,10 @@ const state = {
   opens: [] as { bytes: Uint8Array; name?: string }[],
   trapNextApply: false,
   rejectOpenBytes: null as Uint8Array | null,
+  /** Bytes whose `open` fails with a STRUCTURED (non-trap) error — a DocLimit-style rejection. Models
+   *  the fixed worker.js contract: the parse fails BEFORE the previous doc is swapped, so `hasDoc`
+   *  stays untouched ("failed open은 이전 문서 생존", issue 055 사후 #6). */
+  failOpenBytes: null as Uint8Array | null,
   /** Park the next `open` op without replying — models a long parse (the cancel/dispose window). */
   hangNextOpen: false,
   edits: 0,
@@ -93,6 +97,11 @@ class FakeWorker {
         const bytes = args.bytes as Uint8Array;
         state.opens.push({ bytes, name: args.name as string | undefined });
         if (state.rejectOpenBytes && bytes === state.rejectOpenBytes) throw trap();
+        // Parse-first contract (worker.js `open`): a structured failure throws BEFORE the previous doc
+        // is swapped — `hasDoc` stays as it was, so the previous document remains queryable.
+        if (state.failOpenBytes && bytes === state.failOpenBytes) {
+          throw Object.assign(new Error("document too large: 70000000 bytes"), { code: "doc_limit" });
+        }
         this.hasDoc = true;
         return { pages: 3 };
       }
@@ -147,6 +156,7 @@ beforeEach(() => {
   state.opens = [];
   state.trapNextApply = false;
   state.rejectOpenBytes = null;
+  state.failOpenBytes = null;
   state.hangNextOpen = false;
   state.edits = 0;
   state.workers = [];
@@ -216,6 +226,29 @@ describe("issue 055 — trap inside the worker (052 recovery parity)", () => {
   });
 });
 
+describe("issue 055 사후 #6 — 실패한 open 은 이전 문서를 파괴하지 않는다", () => {
+  it("구조화 실패(doc_limit) open 후: 이전 문서 질의 생존 + 이후 트랩 복구도 이전 bytes 기준", async () => {
+    const a = await openAdapter();
+    const BAD = new Uint8Array([66, 66]);
+    state.failOpenBytes = BAD; // DocLimit 계열 — 트랩이 아니므로 인스턴스는 멀쩡하다
+    await expect(a.open(BAD, "big.hwp")).rejects.toMatchObject({ code: "doc_limit" });
+
+    // "failed open은 이전 문서 생존": 워커의 기존 doc 도, 어댑터의 핸들/bytes 도 그대로다.
+    await expect(a.pageCount()).resolves.toBe(3);
+    await expect(a.pageSvg(0)).resolves.toContain("svg");
+
+    // 구 결함의 두 번째 얼굴: 실패한 파일의 bytes 가 어댑터에 남으면 다음 트랩 복구가 그걸 열려다
+    // 죽는다. 복구는 여전히 '이전 문서'의 원본 bytes 로 돌아가야 한다.
+    const infos: RecoveryInfo[] = [];
+    a.onRecovered = (i) => infos.push(i);
+    state.trapNextApply = true;
+    await expect(a.applyIntent({ intent: "X" } as never)).rejects.toMatchObject({ code: "wasm_trap" });
+    expect(state.opens[state.opens.length - 1].bytes).toBe(ORIGINAL);
+    expect(infos).toEqual([{ source: "original", reason: undefined }]);
+    await expect(a.pageCount()).resolves.toBe(3);
+  });
+});
+
 describe("issue 055 — worker DEATH = poisoned instance (재스폰 + 스냅샷 우선 복구)", () => {
   it("mid-call death → {code:worker_dead} rethrown + respawn + snapshot-first re-open", async () => {
     const a = await openAdapter();
@@ -231,6 +264,29 @@ describe("issue 055 — worker DEATH = poisoned instance (재스폰 + 스냅샷 
     expect(infos).toEqual([{ source: "snapshot", label: "rev 9" }]);
     await expect(a.pageCount()).resolves.toBe(3); // the adapter is functional on the new worker
     expect(mainEngine.reset).not.toHaveBeenCalled(); // recovery stayed in the worker lane
+  });
+
+  it("동시 다발 죽음(인플라이트 N개) → recover 는 단일 비행: 재스폰/재열기/onRecovered 1회 (issue 055 사후 #3)", async () => {
+    // 워커가 죽으면 인플라이트 콜 전부가 한꺼번에 {code:worker_dead} 로 거부된다 — 각자 recover 를
+    // 돌리면 reset/open 이 인터리브되어(새로 연 doc 을 다음 reset 이 무효화) dead_handle 이 영구화되고
+    // onRecovered 가 N번 발화한다. 첫 실패가 시작한 복구 하나를 나머지가 공유해야 한다.
+    const a = await openAdapter();
+    a.setRecoverySource(() => ({ bytes: SNAPSHOT, label: "rev 2" }));
+    const infos: RecoveryInfo[] = [];
+    a.onRecovered = (i) => infos.push(i);
+
+    state.workers[0].dieOnNextRequest = true;
+    const results = await Promise.allSettled([a.pageCount(), a.pageSvg(0), a.pageCount()]);
+    for (const r of results) {
+      expect(r.status).toBe("rejected");
+      expect((r as PromiseRejectedResult).reason).toMatchObject({ code: "worker_dead" });
+    }
+
+    expect(infos).toEqual([{ source: "snapshot", label: "rev 2" }]); // 정확히 1회
+    expect(state.spawns).toBe(2); // 재스폰 1회 (동시 복구가 워커를 여러 개 띄우지 않는다)
+    expect(state.opens.filter((o) => o.bytes === SNAPSHOT)).toHaveLength(1); // 재열기 1회
+    expect(state.inits).toBe(2); // 최초 1 + 재스폰 init 1 — 복구 N회면 여기가 부푼다
+    await expect(a.pageCount()).resolves.toBe(3); // 복구된 문서가 살아 있다 (dead_handle 없음)
   });
 });
 

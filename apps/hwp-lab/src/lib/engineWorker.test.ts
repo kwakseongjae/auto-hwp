@@ -10,8 +10,8 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
-import { HwpDoc, initEngine } from "@tf-hwp/engine";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+import { HwpDoc, initEngine, isTrapError } from "@tf-hwp/engine";
 
 const REPO = path.resolve(process.cwd(), "..", "..");
 const WASM = path.join(REPO, "packages", "engine", "pkg", "hwp_wasm_bg.wasm");
@@ -121,6 +121,73 @@ describe("issue 055 — 워커 프로토콜 golden (실엔진, 워커 경유 == 
     await expect(rpc("call", { method: "constructor", params: [] })).rejects.toThrow(/unknown engine method/);
     await rpc("free");
   });
+});
+
+describe("issue 055 사후 #6 — 실패한 open 은 이전 문서 생존 (실엔진 worker.js)", () => {
+  it("정상 문서 open 후 손상 바이트 open 실패 → 기존 문서가 그대로 질의된다", async () => {
+    const bytes = readFileSync(FIXTURE);
+    const opened = await rpc<{ pages: number }>("open", { bytes: new Uint8Array(bytes), name: "benchmark.hwp" });
+    expect(opened.pages).toBeGreaterThan(0);
+
+    // 손상/비형식 바이트 — 구조화 거부(트랩 아님)여야 하고, 파싱 성공 전엔 기존 doc 을 free 하지 않는다.
+    let refused: unknown;
+    try {
+      await rpc("open", { bytes: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]), name: "corrupt.hwp" });
+    } catch (e) {
+      refused = e;
+    }
+    expect(refused).toBeTruthy();
+    expect(isTrapError(refused)).toBe(false); // 트랩이면 이 테스트의 전제(인스턴스 생존)가 아니다
+
+    // "failed open은 이전 문서 생존": 구 코드는 파싱 전에 freeDoc() → no_document 지옥이었다.
+    await expect(rpc<number>("call", { method: "pageCount", params: [] })).resolves.toBe(opened.pages);
+    await rpc("free");
+  }, 120_000);
+});
+
+describe("issue 055 사후 #8 — 트랩 분류기 단일 소스 (isTrapError)", () => {
+  it("전체 트랩 패턴을 분류하고('table index …' 포함), 코드 있는 구조화 오류는 코드가 우선한다", () => {
+    expect(isTrapError(new WebAssembly.RuntimeError("unreachable"))).toBe(true);
+    expect(isTrapError(new Error("unreachable executed"))).toBe(true);
+    expect(isTrapError(new Error("table index is out of bounds"))).toBe(true); // LabWorkspace 사본에 빠져 있던 패턴
+    expect(isTrapError(new Error("memory access out of bounds"))).toBe(true);
+    expect(isTrapError(Object.assign(new Error("boom"), { code: "wasm_trap" }))).toBe(true);
+    expect(isTrapError(Object.assign(new Error("worker died"), { code: "worker_dead" }))).toBe(false); // 워커 죽음은 트랩과 다른 신호
+    expect(isTrapError(Object.assign(new Error("RuntimeError처럼 보이는 메시지"), { code: "doc_limit" }))).toBe(false); // 코드 우선
+    expect(isTrapError(new Error("plain failure"))).toBe(false);
+  });
+
+  it("LabWorkspace 는 단일 소스를 소비하고 로컬 정규식 사본을 갖지 않는다", () => {
+    const src = readFileSync(path.join(process.cwd(), "src", "components", "LabWorkspace.tsx"), "utf8");
+    expect(src).toContain("isTrapError"); // @tf-hwp/engine 단일 소스 소비
+    expect(src).not.toMatch(/memory access out of bounds/); // 사본(트랩 정규식) 삭제됨
+  });
+
+  it("worker.js 도 같은 단일 소스를 소비한다(사본 없음)", () => {
+    const src = readFileSync(WORKER, "utf8");
+    expect(src).toContain("isTrapError");
+    expect(src).not.toMatch(/memory access out of bounds/i);
+  });
+});
+
+// 첫 로드의 wasm 인스턴스화 실패(일시적 fetch 오류 등)가 영구화되지 않는지 잠근다. 주의: wasm-bindgen
+// glue 는 성공 후엔 재-init 을 단락시키므로(`if (wasm !== undefined) return wasm`), "거부된 첫 init"은
+// 반드시 신선한 모듈 인스턴스에서만 재현된다 — vi.resetModules() + 동적 import 로 격리한다(공유 엔진
+// 인스턴스/위 테스트들과 상호작용 없음).
+describe("issue 055 사후 #7 — 거부된 initEngine 은 캐시되지 않는다", () => {
+  it("첫 init 거부(손상 wasm 입력) 후 initEngine 재시도가 성공한다", async () => {
+    vi.resetModules();
+    const eng = await import("@tf-hwp/engine"); // 신선한 모듈 상태 (wasm === undefined)
+    await expect(eng.initEngine(new Uint8Array([0, 1, 2, 3]))).rejects.toBeTruthy();
+    // 구 코드: 거부된 프라미스가 _initPromise 에 영구 캐시 → 아래 재시도도 영원히 같은 거부를 재생했다.
+    await expect(eng.initEngine(readFileSync(WASM))).resolves.toBeTruthy();
+    const doc = eng.HwpDoc.open(new Uint8Array(readFileSync(FIXTURE)), "benchmark.hwp");
+    try {
+      expect(doc.pageCount()).toBeGreaterThan(0); // 엔진이 실제로 살아났다
+    } finally {
+      doc.free();
+    }
+  }, 120_000);
 });
 
 // Node 셤에선 postMessage transfer 가 없으므로 Uint8Array 가 그대로 온다 — 방어적으로만 감싼다.

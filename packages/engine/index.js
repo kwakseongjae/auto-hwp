@@ -18,25 +18,35 @@ let _initPromise = null;
 // stale generation (i.e. after a trap + resetEngine) is refused instead of touching freed memory.
 let _generation = 0;
 
+// Instantiate once and UNCACHE ON REJECTION (issue 055 사후): a transient failure (wasm fetch hiccup)
+// must not be cached forever — the next initEngine() retries. Only clear OUR OWN promise: a stale
+// rejection racing a newer init/reset must not null the newer one (worker-client와 같은 규칙).
+function instantiate(input) {
+  const p = init(input).then((m) => {
+    _generation++;
+    return m;
+  });
+  p.catch(() => {
+    if (_initPromise === p) _initPromise = null;
+  });
+  return p;
+}
+
 /** Instantiate the wasm module once. `input` is an optional wasm URL/Response/bytes (defaults to the
- *  co-located hwp_wasm_bg.wasm). Idempotent — repeated calls return the same promise. */
+ *  co-located hwp_wasm_bg.wasm). Idempotent while pending/fulfilled; a REJECTED init is not cached —
+ *  the next call retries. */
 export function initEngine(input) {
   if (!_initPromise) {
-    _initPromise = init(input).then((m) => {
-      _generation++;
-      return m;
-    });
+    _initPromise = instantiate(input);
   }
   return _initPromise;
 }
 
 /** Re-instantiate the module AFTER a wasm trap (panic). Every previously-opened HwpDoc becomes dead;
- *  the host must re-`open()` its documents. Returns the init promise for the fresh instance. */
+ *  the host must re-`open()` its documents. Returns the init promise for the fresh instance. A
+ *  REJECTED reset is not cached either (initEngine afterwards retries instead of replaying it). */
 export function resetEngine(input) {
-  _initPromise = init(input).then((m) => {
-    _generation++;
-    return m;
-  });
+  _initPromise = instantiate(input);
   return _initPromise;
 }
 
@@ -58,12 +68,18 @@ const FINALIZER =
       })
     : null;
 
-function isTrap(e) {
-  return (
-    (typeof WebAssembly !== 'undefined' && e instanceof WebAssembly.RuntimeError) ||
-    /unreachable|RuntimeError|table index is out of bounds|memory access out of bounds/i.test(
-      String((e && e.message) || e)
-    )
+/** issue 055 사후 — THE single trap classifier. worker.js and hosts (e.g. hwp-lab의 메인스레드 폴백)
+ *  consume THIS export; keeping private copies made the pattern lists diverge (one copy was missing
+ *  'table index is out of bounds' → a trap went unrecognized → resetEngine skipped → 다음 업로드도
+ *  실패). Classification: a structured error carrying `code` is judged by that code ALONE (structured
+ *  engine errors are never traps unless coded `wasm_trap`); otherwise a WebAssembly.RuntimeError
+ *  instance or a trap-shaped message means the instance is poisoned. */
+export function isTrapError(e) {
+  const code = e && typeof e === 'object' && typeof e.code === 'string' ? e.code : null;
+  if (code) return code === 'wasm_trap';
+  if (typeof WebAssembly !== 'undefined' && e instanceof WebAssembly.RuntimeError) return true;
+  return /unreachable|RuntimeError|table index is out of bounds|memory access out of bounds/i.test(
+    String((e && e.message) || e)
   );
 }
 
@@ -120,7 +136,7 @@ export class HwpDoc {
     try {
       return fn(this.#raw);
     } catch (e) {
-      if (isTrap(e)) {
+      if (isTrapError(e)) {
         this.#dead = true;
         const err = new Error(
           'wasm trap — the engine instance is poisoned. Call resetEngine() then re-open your document.'
@@ -299,4 +315,4 @@ function deadError() {
   return err;
 }
 
-export default { initEngine, resetEngine, initEngineSync, HwpDoc, sanitizeSvg };
+export default { initEngine, resetEngine, initEngineSync, HwpDoc, sanitizeSvg, isTrapError };

@@ -54,6 +54,24 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
     expect(intent.rows[0]).toEqual([{}, {}]);
   });
 
+  it("worker_dead 코드 에러 = 트랩과 같은 복구 레인: 복구 토스트, 실패 토스트 아님 (issue 055 사후 #1)", async () => {
+    // 워커 죽음은 {code:"worker_dead"} + "engine worker died: …" 메시지로 온다 — 구 onTrap 은
+    // "wasm_trap" 문자열만 매치해 이를 일반 실패로 오분류했다(복구 토스트/refresh 사장).
+    const adapter = new MockAdapter({ table, pageGeom: { w: 794, h: 1123, ml: 90, mt: 90, mr: 90, mb: 90 }, pages: 1 });
+    adapter.applyIntent = async () => {
+      throw Object.assign(new Error("engine worker died: out of memory"), { code: "worker_dead" });
+    };
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    await sheetOf(container);
+    fireEvent.click(screen.getByTestId("hw-table-insert"));
+    fireEvent.mouseEnter(screen.getByTestId("hw-table-cell-2-2"));
+    fireEvent.click(screen.getByTestId("hw-table-cell-2-2"));
+    // 복구 레인 토스트가 뜨고(어댑터가 재스폰+복구를 이미 마친 뒤이므로 사용자 안내 + refresh),
+    // 일반 실패 토스트("표 추가 실패")로 새지 않는다.
+    await waitFor(() => expect(screen.getByText("엔진 트랩 — 문서를 복구했습니다")).toBeTruthy());
+    expect(screen.queryByText(/표 추가 실패/)).toBeNull();
+  });
+
   it("marking a table shows column-resize grips; a drag MOVES the boundary + commits SetTableColWidths (issue 031)", async () => {
     // liveResize: the engine reflects the ratios back so apply-verify confirms movement (SUCCESS path).
     const adapter = new MockAdapter({ table, colBoundaries: [40, 140, 240, 340], liveResize: true, pageGeom: { w: 794, h: 1123, ml: 90, mt: 90, mr: 90, mb: 90 }, pages: 1 });

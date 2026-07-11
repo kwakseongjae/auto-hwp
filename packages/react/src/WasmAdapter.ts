@@ -111,6 +111,8 @@ export class WasmAdapter implements EngineAdapter {
   private recoverySource: RecoverySnapshotSource | null = null;
   /** issue 055 — the worker RPC bridge; null = classic in-thread engine. */
   private client: EngineWorkerClient | null = null;
+  /** issue 055 사후 — the IN-FLIGHT recovery, shared by every concurrent failure (single flight). */
+  private recovering: Promise<void> | null = null;
 
   /** issue 052 — autosave trigger: called after every successful CONTENT mutation through this adapter
    *  (`applyIntent`, an effective `undo`/`redo`, an effective `replace`). Read-only queries, `open`, and
@@ -231,12 +233,25 @@ export class WasmAdapter implements EngineAdapter {
   }
 
   /** Re-instantiate the engine and re-open the last document (its handles were poisoned).
-   *  issue 052: SNAPSHOT-FIRST — when a RecoverySnapshotSource is wired and yields bytes, re-open those
+   *  issue 055 사후 — SINGLE FLIGHT: when the worker dies, EVERY in-flight call rejects at once and each
+   *  lands here; letting N recoveries run concurrently interleaves reset/open (the freshly-opened doc is
+   *  invalidated by the next reset → permanent dead handles) and fires onRecovered N times. So the first
+   *  failure starts ONE recovery and the rest await that same promise. */
+  private recover(): Promise<void> {
+    if (!this.recovering) {
+      this.recovering = this.doRecover().finally(() => {
+        this.recovering = null;
+      });
+    }
+    return this.recovering;
+  }
+
+  /** issue 052: SNAPSHOT-FIRST — when a RecoverySnapshotSource is wired and yields bytes, re-open those
    *  (the last autosaved edit state) instead of the original file; the snapshot then BECOMES the current
    *  document bytes (a second trap recovers from it too). A failing snapshot open poisons the fresh
    *  instance again, so the engine is reset ONCE MORE before the honest original-bytes fallback.
    *  issue 055: the same lane serves WORKER DEATH — resetBackend respawns a fresh worker first. */
-  private async recover(): Promise<void> {
+  private async doRecover(): Promise<void> {
     if (!this.bytes) return;
     this.ready = this.resetBackend();
     await this.ready;
@@ -268,26 +283,38 @@ export class WasmAdapter implements EngineAdapter {
 
   async open(bytes: Uint8Array, name?: string): Promise<OpenResult> {
     await this.ensureInit();
-    // In-thread: free the previous handle. Worker: the worker-side `open` op frees its own previous
-    // doc — do NOT dispose() here (that would tear the worker down just to respawn it).
+    // In-thread: free the previous handle. Worker: the worker-side `open` op swaps its doc only AFTER a
+    // successful parse — do NOT dispose() here (that would tear the worker down just to respawn it).
     if (this.doc && !this.client) this.dispose();
-    this.bytes = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-    this.name = name;
-    this.fontRegistered = false;
+    const nextBytes = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    let doc: EngineDoc;
     try {
-      this.doc = await this.openDoc(this.bytes, name);
+      doc = await this.openDoc(nextBytes, name);
     } catch (e) {
-      // issue 055: a trap DURING OPEN (corrupt/hostile file) poisons the instance. Worker mode
-      // self-heals — reset in place so the NEXT open works without any host-side engine plumbing
-      // (the host cannot reach the worker's engine module the way it could call resetEngine()).
       if (this.client && isPoisoned(e)) {
+        // issue 055: a trap DURING OPEN (corrupt/hostile file) poisons the instance — the previous
+        // worker-side document died with it. Worker mode self-heals: reset in place so the NEXT open
+        // works without any host-side engine plumbing (the host cannot reach the worker's engine
+        // module the way it could call resetEngine()).
         this.doc = null;
+        this.bytes = null;
+        this.name = undefined;
+        this.fontRegistered = false;
         await this.resetBackend().catch(() => {
           /* respawn failed — the next ensureInit retries */
         });
       }
+      // issue 055 사후 — "failed open은 이전 문서 생존": a structured (non-poisoning) rejection such as
+      // DocLimit keeps the previous document open in the worker, so the adapter state (doc/bytes/name/
+      // font) stays UNTOUCHED here — queries keep answering from the previous document and a later trap
+      // recovery re-opens the PREVIOUS bytes, never the failed file's.
       throw e;
     }
+    // Commit the adapter state only now — an open that never succeeded must not replace anything.
+    this.doc = doc;
+    this.bytes = nextBytes;
+    this.name = name;
+    this.fontRegistered = false;
     const pages = await this.doc.pageCount();
     // @tf-hwp/engine has no standalone "opened" query; synthesize the OpenResult from what we know.
     return { format: name?.toLowerCase().endsWith(".hwp") ? "hwp" : "hwpx", editable: true, sections: 1, pages };

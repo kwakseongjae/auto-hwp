@@ -163,6 +163,25 @@ const isDocFile = (f: File): boolean => /\.(hwpx?|HWPX?)$/i.test(f.name);
  *  input. The client point rides along ONLY for the zoom-independent drag threshold (§함정). */
 const toPointerInput = (c: PageClick): PointerInput => ({ page: c.page, x: c.x, y: c.y, mod: c.meta, client: c.client });
 
+/** issue 055 사후 — COUNTED refreshToken shield. An action that causes its OWN re-flow (셀음영 적용,
+ *  Tab 커밋-이동, 이미지 이동/크기 커밋) arms the shield (+1) so the refreshToken effect skips exactly
+ *  that one close/clear; the effect CONSUMES counts here. Counted (not boolean) because two applies can
+ *  be in flight at once (worker latency) — a boolean is consumed by the first re-flow and the second one
+ *  then closes the editor (미커밋 텍스트 소실). `reflows` is the effect's TOKEN DELTA, not 1: React can
+ *  coalesce two bumps into a single effect run (worker replies land close together), and consuming one
+ *  count per RUN would leak the other. Returns how many re-flows remain UNSHIELDED (>0 ⇒ really close). */
+export function consumeShield(shield: { current: number }, reflows: number): number {
+  const used = Math.min(Math.max(0, shield.current), Math.max(0, reflows));
+  shield.current -= used;
+  return reflows - used;
+}
+
+/** issue 055 사후 — disarm one shield count after a FAILED apply (its re-flow will never come; leaving
+ *  the count armed would swallow the NEXT legitimate close, e.g. the trap-recovery refresh). */
+export function disarmShield(shield: { current: number }): void {
+  shield.current = Math.max(0, shield.current - 1);
+}
+
 /// HwpWorkspace — the one-line assembly (issue 016): page view + selection overlay + chat panel. Open a
 /// document, SELECT blocks (OS-style: click = replace, ⌘/Ctrl-click = toggle, drag over empty space =
 /// marquee — issue 021), say what to change, review the previewed Intents, apply, and download HTML/PDF.
@@ -222,12 +241,14 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // ── issue 049: image move/resize overlay (own-render only) ──────────────────────────────────────────
   // The selected image = its page + own-render px box + `(section, block)` anchor (from `imageAt`). The
   // 8-handle ImageOverlay draws over it; a drag lives in the OVERLAY's local state (workspace render 0),
-  // and a commit re-places it via `imageBbox` (적용-확인). `imageCommittingRef` shields the refreshToken
-  // clear during OUR OWN resize/move re-flow so the re-place isn't clobbered (mirrors `tabMoving`/`shading`).
+  // and a commit re-places it via `imageBbox` (적용-확인). `imageCommittingRef` is a COUNTED shield
+  // (issue 055 사후, consumeShield): each resize/move commit arms +1 and the refreshToken clear effect
+  // consumes its own re-flow, so overlapping commits (worker latency) never clobber the re-place — the
+  // old setTimeout(0) release raced the effect under worker macrotask timing (shadingRef와 같은 결함).
   const [imageSel, setImageSel] = useState<{ page: number; box: ImageBox } | null>(null);
   const imageSelRef = useRef<{ page: number; box: ImageBox } | null>(null);
   imageSelRef.current = imageSel;
-  const imageCommittingRef = useRef(false);
+  const imageCommittingRef = useRef(0);
   // Issue 028 floating toolbar surface: hide the toolbar while a pointer gesture (drag/marquee) is in
   // progress, and a monotonic token the "AI에게 전달" button bumps to focus the chat composer.
   const [pointerActive, setPointerActive] = useState(false);
@@ -264,6 +285,11 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // A hidden native color input the context menu's 배경색 item triggers — so that item delegates to the
   // SAME shadeCellRange action as the 028 toolbar's 배경 swatch (신규 액션 0), just entered via a menu click.
   const shadeInputRef = useRef<HTMLInputElement>(null);
+  // issue 039/055: the right-click → menu-resolution sequence guard (declared here so the dismiss paths
+  // below can bump it). THE LATEST right-click owns the menu; EVERY dismiss path (Escape, a new pointer
+  // gesture, menu close) bumps it too (issue 055 사후 #10), so a LATE resolution from an abandoned
+  // right-click — the worker can make the hit queries slow — can never raise a menu the user moved past.
+  const ctxMenuSeqRef = useRef(0);
 
   // ── Issue 050: 이미지 삽입 (드롭 존 + 업로드 버튼) ────────────────────────────────────────────────────
   // The hidden file input the 툴바 "이미지" button clicks (upload lane), and whether a file drag is
@@ -276,11 +302,13 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // derived LIVE from `editTarget`, so after an apply the re-resolved boundaries update the readout = 적용-
   // 확인). Opened from the cell context menu ("열 너비…"). Cleared when the selection/target goes away.
   const [colWidthDialog, setColWidthDialog] = useState<{ x: number; y: number } | null>(null);
-  // A shield (mirrors `tabMoving`): true WHILE a 편집 중 셀음영 apply is in flight, so the refreshToken close
-  // effect does NOT close the in-place editor when the shade op re-flows — the shade lands on the committed
-  // cell background while the uncommitted text stays in the editor (op-bus SetTableCell rebuilds only the
-  // cell's paragraphs, never `shade_color`, so a later text commit preserves the shade). 경합 금지.
-  const shadingRef = useRef(false);
+  // A COUNTED shield (issue 055 사후, consumeShield): +1 per in-flight 편집 중 셀음영 apply, so the
+  // refreshToken close effect does NOT close the in-place editor when the shade op re-flows — the shade
+  // lands on the committed cell background while the uncommitted text stays in the editor (op-bus
+  // SetTableCell rebuilds only the cell's paragraphs, never `shade_color`, so a later text commit
+  // preserves the shade). Counted, not boolean: 연속 스와치 2회(둘 다 인플라이트)의 두 번째 re-flow가
+  // 에디터를 닫아 미커밋 텍스트를 잃던 결함의 수정. 경합 금지.
+  const shadingRef = useRef(0);
 
   // ── Issue 045: 찾기/바꾸기 state ─────────────────────────────────────────────────────────────────────
   // The ⌘F bar drives the editor-core FindController (core.find). `findCount` is null until a search runs
@@ -328,7 +356,10 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   selectionRef.current = selection;
   const editorRef = useRef(editor);
   editorRef.current = editor;
-  const tabMovingRef = useRef(false);
+  // COUNTED shield (issue 055 사후, consumeShield): armed +1 for a Tab commit's OWN re-flow only (a bare
+  // Tab has no re-flow — arming would leak a count); the refreshToken close effect consumes it, replacing
+  // the old setTimeout(0) release that raced the effect under worker macrotask timing.
+  const tabMovingRef = useRef(0);
   // Live boolean mirror for the hover suppression gate (issue 038) — true while the in-place editor is open.
   const editorOpenRef = useRef(false);
   editorOpenRef.current = editor != null;
@@ -531,11 +562,17 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     setPanning(false);
   }, []);
 
-  // A wasm trap poisons the engine instance; the adapter recovers it (reopen). Surface a toast + force a
-  // page re-fetch (the recovered doc lost the last edit). Returns whether it handled a trap.
+  // A poisoned engine instance — a wasm TRAP, or the engine WORKER dying (issue 055) — is recovered by
+  // the adapter (respawn + reopen). Surface a toast + force a page re-fetch (the recovered doc lost the
+  // last edit). Returns whether it handled a poison signal. issue 055 사후 #1: match the machine `code`
+  // FIRST (`wasm_trap` | `worker_dead` — the worker-death errors say "engine worker died: …", which the
+  // old message match missed, leaving the recovery toast/refresh dead); the message match is only a
+  // fallback for stringified/legacy errors that lost their code.
   const onTrap = useCallback(
     (e: unknown, msg: string): boolean => {
-      if (String(e).includes("wasm_trap")) {
+      const code = (e as { code?: string } | null | undefined)?.code;
+      const poisoned = code ? code === "wasm_trap" || code === "worker_dead" : /wasm_trap|engine worker died/i.test(String(e));
+      if (poisoned) {
         toast(msg);
         bumpRefresh();
         return true;
@@ -546,10 +583,14 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   );
 
   // Esc anywhere clears the whole selection + any in-progress marquee (issue 021) + an image selection
-  // (049) + the cell caret (053).
+  // (049) + the cell caret (053). issue 055 사후 #10: it ALSO abandons any in-flight right-click menu
+  // resolution — with a busy worker the hit queries can outlive the user's attention, and the late
+  // resolution must not raise a menu after this dismiss. (An OPEN menu consumes Esc itself — capture +
+  // stopPropagation in ContextMenu — so this listener only sees Esc while no menu is up.)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        ctxMenuSeqRef.current++;
         core.selection.clear();
         core.cellCaret.clear();
         setImageSel((s) => (s ? null : s));
@@ -713,26 +754,33 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
 
   // Close the editor when the layout re-flows (an applied edit) so it never floats over stale geometry.
   // EXCEPTION (issue 036): a Tab commit-move re-flows too, but it re-opens the editor at the NEXT cell
-  // itself — so skip the close while `tabMoving` is set, or it would clobber that re-entry.
+  // itself — its commit arms `tabMoving` (+1) so the close skips that one re-flow.
   // EXCEPTION (issue 047): a 편집 중 셀음영 apply re-flows too, but the shade does NOT touch the cell's text
-  // or geometry — so keep the editor open (with its uncommitted text) while `shading` is set. The shield is
-  // CONSUMED here (issue 055): it guards exactly ONE re-flow — the shade's own — and a timer-based release
-  // raced this effect once the engine moved to a worker (RPC replies land in plain macrotasks, so a
-  // setTimeout(0) could fire before this effect's scheduled run and let the close slip through).
+  // or geometry — so keep the editor open (with its uncommitted text) for each armed `shading` count.
+  // The shields are CONSUMED here (issue 055 — a timer-based release raced this effect once the engine
+  // moved to a worker), COUNTED and by TOKEN DELTA (issue 055 사후 #4/#9): overlapping applies arm one
+  // count each, and React may coalesce their bumps into a single run — consuming per re-flow (delta), not
+  // per run, is what keeps a nested apply from closing the editor or leaking a stale count.
+  const editorCloseSeenRef = useRef(0);
   useEffect(() => {
-    if (tabMovingRef.current) return;
-    if (shadingRef.current) {
-      shadingRef.current = false; // the shade's own re-flow — skip the close, then disarm
-      return;
-    }
+    let unshielded = refreshToken - editorCloseSeenRef.current;
+    editorCloseSeenRef.current = refreshToken;
+    unshielded = consumeShield(tabMovingRef, unshielded);
+    unshielded = consumeShield(shadingRef, unshielded);
+    if (unshielded <= 0) return; // every re-flow in this batch was one of OUR OWN shielded ones
     setEditor(null);
   }, [refreshToken]);
 
   // issue 049: an edit re-flow (AI apply / manual commit) may move an image, so a stale imageSel box would
   // float over the wrong spot — clear it. EXCEPTION: OUR OWN resize/move commit re-flows too, but it
-  // re-places the overlay from the fresh `imageBbox` afterwards, so skip the clear while `imageCommitting`.
+  // re-places the overlay from the fresh `imageBbox` afterwards — each commit arms `imageCommitting` (+1)
+  // and this effect consumes it (same counted/delta shield discipline as the editor-close effect above).
+  const imageClearSeenRef = useRef(0);
   useEffect(() => {
-    if (imageCommittingRef.current) return;
+    let unshielded = refreshToken - imageClearSeenRef.current;
+    imageClearSeenRef.current = refreshToken;
+    unshielded = consumeShield(imageCommittingRef, unshielded);
+    if (unshielded <= 0) return;
     setImageSel((s) => (s ? null : s));
   }, [refreshToken]);
 
@@ -944,16 +992,16 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       if (!ed || ed.kind !== "cell") return;
       const r = ed.rows?.[0] ?? 0;
       const c = ed.cols?.[0] ?? 0;
-      shadingRef.current = true;
+      shadingRef.current++; // counted (issue 055 사후 #4): overlapping swatch applies arm one count each
       try {
         await core.edit.shadeCellRange(ed.section, ed.block, { r0: r, c0: c, r1: r, c1: c }, hex);
         toast(hex ? "배경색 적용" : "배경 지움");
-        // Success: the shade's own re-flow CONSUMES the shield inside the refreshToken close effect
+        // Success: the shade's own re-flow CONSUMES one shield count inside the refreshToken close effect
         // (issue 055 — a setTimeout(0) release raced that effect under worker-mode RPC timing).
       } catch (e) {
-        // Failure/trap: no shade re-flow will consume the shield — disarm NOW so it can't swallow the
+        // Failure/trap: no shade re-flow will consume this count — disarm NOW so it can't swallow the
         // NEXT close (e.g. the trap-recovery refresh must still close the editor over stale geometry).
-        shadingRef.current = false;
+        disarmShield(shadingRef);
         if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`배경색 변경 실패: ${e}`);
       }
     },
@@ -1155,7 +1203,10 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       const before = { w: sel.box.w, h: sel.box.h };
       const intended = { w: pageBox.w, h: pageBox.h };
       const { width, height } = imageSizeToHwpunit(pageBox.w, pageBox.h);
-      imageCommittingRef.current = true;
+      // Counted shield, effect-consumed (issue 055 사후 #9): +1 for THIS commit's own re-flow; the
+      // refreshToken clear effect consumes it — the old setTimeout(0) release raced that effect under
+      // worker macrotask timing (the same defect class shadingRef had) and dropped the handles.
+      imageCommittingRef.current++;
       void (async () => {
         try {
           await core.edit.resizeImage(sel.box.section, sel.box.block, width, height);
@@ -1172,9 +1223,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           }
           toast("이미지 크기를 변경했습니다");
         } catch (e) {
+          // Failure/trap: disarm so the recovery refresh still clears the (now stale) overlay.
+          disarmShield(imageCommittingRef);
           if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`크기 변경 실패: ${e}`);
-        } finally {
-          window.setTimeout(() => (imageCommittingRef.current = false), 0);
         }
       })();
     },
@@ -1189,17 +1240,22 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     (dropClientX: number, dropClientY: number) => {
       const sel = imageSelRef.current;
       if (!sel || !canEdit) return;
-      imageCommittingRef.current = true;
       void (async () => {
+        let armed = false;
         try {
           const from = sel.box.block;
           const to = await resolveDropBlock(dropClientX, dropClientY, sel.box.section);
           if (to === null || to === from) {
             const found = await findImageBbox(sel.box.section, from);
             if (found) setImageSel(found);
-            return; // no-op relocation (dropped on itself / off-page / cross-section)
+            return; // no-op relocation (dropped on itself / off-page / cross-section) — no re-flow, no shield
           }
           const { width, height } = imageSizeToHwpunit(sel.box.w, sel.box.h); // preserve size across the move
+          // Counted shield, effect-consumed (issue 055 사후 #9): armed only for a REAL move's re-flow (the
+          // no-op path above never bumps, so arming there would leak a count) — replaces the setTimeout(0)
+          // release that raced the refreshToken clear effect under worker macrotask timing.
+          armed = true;
+          imageCommittingRef.current++;
           await core.edit.moveImage(sel.box.section, from, to, width, height);
           // MoveImage removes at `from` then reinserts at the rebased `to`: the landed index is `to-1` when
           // moving down (the delete shifted it), else `to`.
@@ -1213,9 +1269,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           setImageSel(found);
           toast("이미지를 이동했습니다");
         } catch (e) {
+          // Failure/trap: disarm so the recovery refresh still clears the (now stale) overlay.
+          if (armed) disarmShield(imageCommittingRef);
           if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`이동 실패: ${e}`);
-        } finally {
-          window.setTimeout(() => (imageCommittingRef.current = false), 0);
         }
       })();
     },
@@ -1406,19 +1462,26 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
 
   // Tab / Shift+Tab inside a cell editor (issue 036): commit the current text, and ONLY on a successful
   // commit move one cell right/left and re-enter edit. A commit FAILURE rethrows so the InPlaceCellEditor
-  // un-latches and stays open with the move CANCELLED (031 apply-verify spirit). `tabMoving` shields the
-  // refreshToken close effect for the whole transition (the commit re-flows), so the re-entered editor
-  // isn't clobbered; it's reset one macrotask later, AFTER React has flushed that render.
+  // un-latches and stays open with the move CANCELLED (031 apply-verify spirit). `tabMoving` is a COUNTED
+  // shield (issue 055 사후 #9): armed +1 for the COMMIT's own re-flow only — a bare Tab (no edit) never
+  // re-flows, so arming it would leak a count — and CONSUMED by the refreshToken close effect, which
+  // replaces the old setTimeout(0) release that raced that effect under worker macrotask timing (the same
+  // defect class shadingRef had: RPC replies land in plain macrotasks).
   const onEditorCommitMove = useCallback(
     async (dir: "left" | "right", runs: RunSpec[]) => {
       const ed = editorRef.current;
       if (!ed) return;
-      tabMovingRef.current = true;
       try {
         // Commit run-preserving ONLY when the runs actually changed (a bare Tab through cells is a no-op —
         // no write, no undo unit); the move happens either way (issue 040 no-op guard + 036 Tab nav).
         if (!runsUnchanged(runs, ed.runs)) {
-          await applyEditorRuns(ed, runs);
+          tabMovingRef.current++;
+          try {
+            await applyEditorRuns(ed, runs);
+          } catch (e) {
+            disarmShield(tabMovingRef); // failed commit: no re-flow to shield; editor stays open on rethrow
+            throw e;
+          }
           toast("텍스트를 수정했습니다");
         }
         // Move + re-enter. moveCell probes from the just-committed cell's box (stable x/w for a text edit)
@@ -1431,11 +1494,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         } else {
           setEditor(null);
         }
-        // Release the shield only after this task's React flush (macrotask) so the refreshToken close from
-        // the commit can't reopen-then-close the re-entered editor.
-        window.setTimeout(() => (tabMovingRef.current = false), 0);
       } catch (e) {
-        tabMovingRef.current = false; // failed commit: no re-flow to shield; editor stays open on rethrow
         if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`텍스트 수정 실패: ${e}`);
         throw e;
       }
@@ -1661,8 +1720,8 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // the same coordinates can swallow the click as a DIFFERENT action). Rule: THE LATEST right-click
   // OWNS THE MENU — a new right-click closes any open menu synchronously and stale resolutions are
   // dropped by sequence, never applied. (identical net behavior on the sync backend, where each
-  // resolution lands before the next click can happen.)
-  const ctxMenuSeqRef = useRef(0);
+  // resolution lands before the next click can happen.) The sequence ref (`ctxMenuSeqRef`) is declared
+  // with the menu state above; every DISMISS path bumps it too (issue 055 사후 #10).
   const onSheetContextMenu = useCallback(
     async (e: React.MouseEvent) => {
       if (!editingOn) return; // read-only host → native menu (the editing chrome is opt-in)
@@ -1746,6 +1805,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // core emits selection/marquee changes that useHwpEditor mirrors back into state.
   const onPointerDown = useCallback(
     (c: PageClick) => {
+      ctxMenuSeqRef.current++; // 055 사후 #10: a new (left-click) gesture abandons an in-flight menu resolution
       setPointerActive(true); // a gesture began → hide the floating toolbar until it settles (028)
       caretDownRef.current = { x: c.client.x, y: c.client.y }; // 053: measure click-vs-drag on release
       void core.selection.pointerDown(toPointerInput(c));
@@ -2330,7 +2390,10 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           (onInsertTable). No new intent/action is introduced. */}
       {contextMenu && (() => {
         const cm = contextMenu;
-        const close = () => setContextMenu(null);
+        const close = () => {
+          ctxMenuSeqRef.current++; // 055 사후 #10: a dismiss (Esc/외부클릭/스크롤/액션) invalidates in-flight resolutions too
+          setContextMenu(null);
+        };
         if (cm.kind === "background") {
           // 바탕(비개체): 표 추가 — the SAME 027 grid picker (TableSizeGrid) the top toolbar uses.
           return (

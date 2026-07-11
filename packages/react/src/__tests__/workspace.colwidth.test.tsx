@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { HwpWorkspace } from "../components/HwpWorkspace";
+import { HwpWorkspace, consumeShield, disarmShield } from "../components/HwpWorkspace";
 import { ColumnWidthDialog } from "../components/ColumnWidthDialog";
 import { CellShadePalette } from "../components/CellShadePalette";
 import type { CellHit, Intent, TableBox } from "../types";
@@ -168,6 +168,33 @@ describe("HwpWorkspace 열 너비 mm 다이얼로그 (issue 047)", () => {
   });
 });
 
+// ── consumeShield/disarmShield — 카운티드 refreshToken 실드의 순수 계약 (issue 055 사후 #4/#9) ─────────
+describe("consumeShield/disarmShield (issue 055 사후) — 셀음영/Tab이동/이미지커밋 공용 실드", () => {
+  it("중첩 arm(2) + 코얼레스된 델타 2 → 전부 소비, 잔여 누수 0 (React 배칭 대응)", () => {
+    const shield = { current: 2 };
+    expect(consumeShield(shield, 2)).toBe(0); // 두 재플로우 모두 우리 것 — 닫지 않는다
+    expect(shield.current).toBe(0); // 다음 정상 닫힘을 삼킬 카운트가 남지 않는다
+  });
+  it("실드보다 많은 재플로우 → 초과분이 unshielded 로 남는다(진짜 닫힘 신호)", () => {
+    const shield = { current: 1 };
+    expect(consumeShield(shield, 2)).toBe(1);
+    expect(shield.current).toBe(0);
+  });
+  it("델타 0(마운트/무변화) → 소비도 닫힘도 없다", () => {
+    const shield = { current: 1 };
+    expect(consumeShield(shield, 0)).toBe(0);
+    expect(shield.current).toBe(1);
+  });
+  it("disarmShield 는 0 밑으로 내려가지 않는다(실패 경로 이중 해제 안전)", () => {
+    const shield = { current: 0 };
+    disarmShield(shield);
+    expect(shield.current).toBe(0);
+    shield.current = 2;
+    disarmShield(shield);
+    expect(shield.current).toBe(1);
+  });
+});
+
 // ── HwpWorkspace integration — 편집 중 셀음영 (에디터 유지 · 경합 금지) ─────────────────────────────────
 describe("HwpWorkspace 편집 중 셀음영 (issue 047 목표 3)", () => {
   const cellEdit: CellHit = { section: 0, block: 1, row: 0, col: 0, rows: 3, cols: 3, text: "칸", x: 40, y: 60, w: 100, h: 40 };
@@ -197,6 +224,40 @@ describe("HwpWorkspace 편집 중 셀음영 (issue 047 목표 3)", () => {
     expect(screen.queryByTestId("hw-inplace-editor")).toBe(editor);
     // and NO text commit was emitted by the shade (커밋/에디터 상태와 경합 금지).
     expect(adapter.applied.some((i) => i.intent === "SetTableCellRuns")).toBe(false);
+  });
+
+  it("중첩 셀음영(둘 다 인플라이트) — 실드 카운터가 두 재플로우를 모두 소비해 에디터가 유지된다 (issue 055 사후 #4)", async () => {
+    // 워커 지연 시뮬레이션: applyGate 로 두 스와치 적용을 동시에 인플라이트로 묶고 하나씩 놓아준다.
+    // 구 boolean 실드는 첫 재플로우가 소비하고 두 번째 재플로우가 에디터를 닫아 미커밋 텍스트를 잃었다.
+    const gates: (() => void)[] = [];
+    const adapter = new MockAdapter({
+      table,
+      cell: cellEdit,
+      runs: [{ text: "칸" }],
+      pages: 1,
+      applyGate: () => new Promise<void>((r) => gates.push(r)),
+    });
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const sheet = await sheetOf(container);
+    fireEvent.pointerDown(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
+    fireEvent.pointerUp(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
+    fireEvent.pointerDown(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
+    fireEvent.pointerUp(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
+    await screen.findByTestId("hw-inplace-editor");
+    await screen.findByTestId("hw-cell-shade-palette");
+    // 연속 스와치 2회 — 둘 다 커밋 전(인플라이트).
+    fireEvent.click(screen.getByTestId("hw-cell-shade-#E3F2FD"));
+    fireEvent.click(screen.getByTestId("hw-cell-shade-#D8D8D8"));
+    await waitFor(() => expect(gates.length).toBe(2));
+    // 첫 적용 완료 → 첫 재플로우가 실드 1개를 소비한다.
+    gates.shift()!();
+    await waitFor(() => expect(adapter.applied.filter((i) => i.intent === "SetCellRangeShade")).toHaveLength(1));
+    expect(screen.queryByTestId("hw-inplace-editor")).toBeTruthy();
+    // 두 번째 적용 완료 → 두 번째 재플로우도 실드가 소비해야 한다 (구 코드는 여기서 에디터가 닫혔다).
+    gates.shift()!();
+    await waitFor(() => expect(adapter.applied.filter((i) => i.intent === "SetCellRangeShade")).toHaveLength(2));
+    await waitFor(() => expect(screen.getByText("배경색 적용")).toBeTruthy());
+    expect(screen.queryByTestId("hw-inplace-editor")).toBeTruthy(); // 미커밋 텍스트가 살아 있다
   });
 
   it("셀음영 지움 → shade=null 1셀 SetCellRangeShade, 에디터 유지", async () => {

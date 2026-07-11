@@ -14,6 +14,11 @@ export function initEngineSync(moduleOrBytes: WebAssembly.Module | BufferSource)
 /** Strip <script>/on*/<foreignObject>/javascript: from an untrusted SVG string (R7). Minimal — see 016. */
 export function sanitizeSvg(svg: string): string;
 
+/** issue 055 사후 — THE single trap classifier (no host-side copies). A structured error carrying
+ *  `code` is judged by that code alone (`wasm_trap` → true, any other code → false); otherwise a
+ *  WebAssembly.RuntimeError instance or a trap-shaped message means the instance is poisoned. */
+export function isTrapError(e: unknown): boolean;
+
 /** A structural block hit (own-render px space); null on a miss. */
 export interface BlockHit {
   section: number;
@@ -242,5 +247,6 @@ declare const _default: {
   initEngineSync: typeof initEngineSync;
   HwpDoc: typeof HwpDoc;
   sanitizeSvg: typeof sanitizeSvg;
+  isTrapError: typeof isTrapError;
 };
 export default _default;

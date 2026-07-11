@@ -16,12 +16,13 @@
 //   response { id, ok: true, result }               (Uint8Array results are TRANSFERRED, not copied)
 //            { id, ok: false, error: { message, code } }
 //
-// ONE document per worker (the client owns exactly one) — `open` frees any previous handle. A wasm
+// ONE document per worker (the client owns exactly one) — a SUCCESSFUL `open` frees the previous
+// handle; a FAILED open keeps it (see the `open` op). A wasm
 // TRAP inside an op is caught by the wrapper and serialized as {code:"wasm_trap"}; the instance is
 // then poisoned and the CLIENT drives recovery (reset → re-open), exactly like the main-thread lane.
 // The worker process itself dying (OOM kill, load failure) is surfaced by the client as
 // {code:"worker_dead"} — the 052 recovery treats both as "instance poisoned".
-import { HwpDoc, initEngine, resetEngine } from './index.js';
+import { HwpDoc, initEngine, isTrapError, resetEngine } from './index.js';
 
 /** The one open document of this worker (see ONE-document contract above). */
 let doc = null;
@@ -67,16 +68,12 @@ function freeDoc() {
 
 /** Serialize an error into a structured-cloneable {message, code}. The wrapper already classifies
  *  traps into {code:"wasm_trap"}; a RAW trap (e.g. thrown by HwpDoc.open, which the wrapper does not
- *  guard) is classified HERE so the client never has to regex-match across the thread boundary. */
+ *  guard) is classified HERE — via the ONE shared `isTrapError` (issue 055 사후: no private pattern
+ *  copies) — so the client never has to regex-match across the thread boundary. */
 function encodeError(e) {
   const message = e && typeof e === 'object' && 'message' in e ? String(e.message) : String(e);
   let code = e && typeof e === 'object' && typeof e.code === 'string' ? e.code : undefined;
-  if (!code) {
-    const trap =
-      (typeof WebAssembly !== 'undefined' && e instanceof WebAssembly.RuntimeError) ||
-      /unreachable|RuntimeError|table index is out of bounds|memory access out of bounds/i.test(message);
-    if (trap) code = 'wasm_trap';
-  }
+  if (!code && isTrapError(e)) code = 'wasm_trap';
   return { message, code };
 }
 
@@ -91,8 +88,14 @@ async function handle(op, args) {
       await resetEngine(args?.wasmInput);
       return null;
     case 'open': {
+      // Parse FIRST; only a SUCCESSFUL parse replaces (and frees) the previous document. CONTRACT
+      // (issue 055 사후): "failed open은 이전 문서 생존" — a structured rejection (DocLimit / corrupt
+      // container) leaves the prior document open and queryable, mirroring the main thread where the
+      // adapter keeps its handle. (A TRAP during parse poisons the whole instance — the previous doc
+      // dies with it regardless; the client's reset lane owns that case.)
+      const next = HwpDoc.open(args.bytes, args.name ?? undefined);
       freeDoc();
-      doc = HwpDoc.open(args.bytes, args.name ?? undefined);
+      doc = next;
       return { pages: doc.pageCount() };
     }
     case 'call': {
