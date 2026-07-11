@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-11 (Claude Fable 5) · R12 배치 B 완료 — 053 병합
+- 한 일: 053 v2 완주·병합(dbcc1bd) — P0 own-render 글리프 통일 채택(rhwp 발산 우회), HitTestCell/CaretRectCell(스키마 38→40), CellCaretController+CaretLayer(렌더-0), 해상률 실클릭 0%→100/99.8/100%. place.rs +412/−0 순수 추가로 V4 준수. 최종 통합 검증 후 푸시.
+- 사고 기록: v2도 API 연결 오류로 1회 중단 → SendMessage 트랜스크립트 재개로 컨텍스트 보존 완주(재개 패턴 유효 확인).
+- 다음: 055(웹 하드닝) 착수 가능. 후속 기획: 1×1 프레임 내부표 미export / F3 / IME(FG-13).
+
 ## 2026-07-10 밤 (Claude Fable 5) · R12 배치 B — 054·057 병합, 053 재가동
 - 한 일: 057 병합(8a28ce5 — 표 앵커링: src_span+per-cell 수술, verbatim 불변) + 054 병합(8cd4233 — lift F2: 무편집 왕복 8/18/25p 복원, 왕복 손실 4종 수리). 054×057 충돌(document.rs 필드 union, serialize.rs 의미적 합성 — in-place 제외+시퀀스 append, 057 호출부를 054 신 API로 적응) 해소. 통합 검증 그린(Rust 367+30/0, 게이트, hwp-lab 22/22, e2e 34/34), 푸시.
 - 사고: 053 v1이 80분 진행부진(내구적 파일 변경 0) → 중단, v2를 병합 main에서 재가동(페이스 규율+서브모듈 .git 포인터 함정 반영).

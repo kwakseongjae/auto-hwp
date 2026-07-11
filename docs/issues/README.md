@@ -52,7 +52,7 @@
 |---|------|------|------|------|
 | [051](051-chat-structural-edit.md) | 챗 구조 편집 브릿지 — Intent 2신설(InsertTableAt/InsertParagraphAt)+화이트리스트 14종+프리뷰 카드 | **done** (2dc92d3) | R12-P0 | 전제 정정: op 기존재. schema 36→38 additive, e2e 32/32, 게이트 8==8·18==18 |
 | [052](052-autosave-recovery.md) | 자동저장 + 세션 복구 — 2s 유휴 toHwpx 스냅샷·IndexedDB·트랩 우선 복구·배너 | **done** (d0f0a24) | R12-P0 | V3 무오염 잠금. golden이 기존 엔진 갭 2건 격리 → 057 신설 + 054 기록 |
-| [053](053-cell-caret.md) | 셀 주소형 캐럿 (042 승계) — CARET-GAP P0→P1 | **in-progress** (v2 재가동) | R12-P1 | v1 진행부진 중단→병합 main 기준 재가동. P0=own-render 글리프 통일 판정 |
+| [053](053-cell-caret.md) | 셀 주소형 캐럿 (042 승계) — HitTestCell/CaretRectCell + 캐럿 UI | **done** (dbcc1bd) | R12-P1 | P0=own-render 글리프 통일 채택(25-vs-14 발산 우회). 해상률 실클릭 공간 0%→**100/99.8/100%**. 스키마 38→40, place.rs 순수 추가(+412/−0), 렌더-0 잠금 |
 | [054](054-hwp-lift-f2.md) | .hwp lift 충실도 F2 — 행높이/패딩/테두리 실값 | **done** (8cd4233) | R12-P1 | 무편집 왕복 8→8·18→18·25→25 복원(전엔 6/20/23p). 게이트 불변. Tier-2 #8/#9/#10 emit 선반영(측정 근거) |
 | [055](055-web-hardening.md) | 웹 하드닝 — 워커화(FG-14)/번들 실측/한도 UX | open | R12-P2 | 051·052 병합 후 |
 | [056](056-distribution-crypto.md) | 배포용 .hwp 복호화 | open(**수요 게이트**) | 조건부 | golden vector 없으면 착수 금지 |
