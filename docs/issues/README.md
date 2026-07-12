@@ -60,10 +60,11 @@
 
 ## 로드맵 R13 — 알려진 한계 해결 (2026-07-11 리서치 산출, 계획 확정)
 
-R12 완료 후 "알려진 한계" 5종을 리서치 4레인으로 조사 → 이슈 승격. **착수 순서(확정)**:
-**061**(QA 인프라, 30분 최소경로 — 로컬 산출물로 Vercel prebuilt) → **059 ∥ 058**(파일 disjoint:
-059=CaretLayer/HwpWorkspace 입력캡처 / 058=shaper·model typeInfo·fonts 카탈로그) → **060**(hwp-hwpx
-단독) → 056은 수요 게이트 유지. 각 이슈의 "함정" 절이 수용 기준을 겸한다.
+R12 완료 후 "알려진 한계" 5종을 리서치 4레인으로 조사 → 이슈 승격. **착수 순서(확정, 2026-07-12 사용자 승인)**:
+**059 ∥ 058**(파일 disjoint: 059=CaretLayer/HwpWorkspace 입력캡처 / 058=shaper·model typeInfo·fonts
+카탈로그) → **060**(hwp-hwpx 단독 — 058이 hwp-model document.rs를 건드리므로 058 병합 후 착수) →
+056은 수요 게이트 유지. **061(웹 배포)은 보류** — 사용자가 로컬 QA(`npm run dev`)로 진행 결정.
+각 이슈의 "함정" 절이 수용 기준을 겸한다.
 백로그 후보(이슈 미승격, 055 JOURNAL 발견): 대형문서 SVG 문자열 전송 최적화(034 §함정 — 변경 페이지
 목록을 워커가 계산), 수백p placeholder 일괄 Layout 스파이크(~1.4s@4×, FG-01 영역).
 
@@ -72,7 +73,7 @@ R12 완료 후 "알려진 한계" 5종을 리서치 4레인으로 조사 → 이
 | [058](058-font-fidelity.md) | 폰트 충실도 — 문서 서체→OFL 대체 매핑 | open | R13-P1 | FontKey에 family 이미 흐름 → RealFontMetrics 한 곳 수정+글리프 x 소유로 화면·PDF 자동 추종. 명조=본명조/고딕=Pretendard |
 | [059](059-ime-composition.md) | IME 한글 인라인 조합(FG-13) | open | R13-P0 | **반전: 표시 아닌 입력캡처 이슈** — 캐럿에 hidden input 부재. xterm.js식 캐럿추종 textarea. 엔진 무변경 |
 | [060](060-frame-table-export.md) | 프레임 래퍼 내부표 편집 미export | open | R13-P1 | 원인=emit 게이트 4곳 비재귀 술어(serialize.rs). 재귀화+057 src_span 해소로 verbatim 정합 |
-| [061](061-web-deploy.md) | 웹 배포(Vercel prebuilt) — QA용 외부 URL | open | QA 인프라 | wasm은 호스팅 CI 밖에서 빌드→prebuilt 업로드. 최소경로 오늘 30분 |
+| [061](061-web-deploy.md) | 웹 배포(Vercel prebuilt) — QA용 외부 URL | **deferred** | QA 인프라 | 2026-07-12 보류 — 사용자가 로컬 QA(`npm run dev`) 선택. 설계는 완료, 필요 시 30분 최소경로 |
 | (056) | 배포용 crypto | (위 R12 표) | 조건부 | 리서치로 착수가능 판정 — 실샘플 1건이 최종 게이트 |
 
 ## 로드맵 R11 — 라운드 11 (2026-07-05, SDK 승격 배치 A)
