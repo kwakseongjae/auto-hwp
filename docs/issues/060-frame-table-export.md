@@ -1,7 +1,11 @@
 # 060 — 1×1 프레임 래퍼 내부표 편집이 HWPX 저장에 반영 안 됨
 
-- 상태: open · 우선순위: R13-P1(정확성 버그 — 자가진단표류 문서 편집 소실) · 영역: crates/hwp-hwpx(serialize emit 게이트) + hwp-hwpx/parse(내부표 src_span)
+- 상태: **done** (1778690) · 우선순위: R13-P1(정확성 버그 — 자가진단표류 문서 편집 소실) · 영역: crates/hwp-hwpx(serialize emit 게이트) + hwp-hwpx/parse(내부표 src_span) + hwp-model(Block::any_dirty 재귀 술어)
 - 근거: 057이 발견, 2026-07-11 코드 정독으로 근본 원인 확정.
+- 결과 요약: 2단계 수정 — ① emit 게이트를 프레임 투명 재귀 술어 `Block::any_dirty`(document.rs:144)로 교체
+  ② 내부 표에 src_span 부여(parse.rs) + table_inplace_edits가 edit_target로 해소 → 내부 dirty 셀만
+  splice, 외부 래퍼·미편집 형제 byte-verbatim. 재현(frame_table_060 3개) 레드→그린, **057 골든 5개 무회귀**,
+  게이트 8==8·18==18. **R13 마지막 이슈 마감.**
 
 ## 근본 원인 (file:line)
 표 편집 op이 `edit_target_mut()`(`hwp-model/src/document.rs:382`)로 **내부 표**만 얻어 `cell.dirty`/내부 `t.dirty`/`sec.dirty`만 마킹(`hwp-ops/src/lib.rs:1255,1308-1310`) → **외부 1×1 래퍼 표와 그 셀의 dirty는 영원히 false**. 익스포터 emit 게이트 4곳(`hwp-hwpx/src/serialize.rs:389,612,938,1422`)이 외부 블록에서 **비재귀** `t.dirty || t.cells.any(c.dirty)`만 검사 → 프레임 래퍼가 전 게이트 스킵. `any_dirty()`(document.rs:48)는 `Cell::any_dirty`(:482) 재귀라 true → export는 돌지만 아무것도 안 내보내 **원본 그대로 저장 = 편집 소실**.
