@@ -38,6 +38,12 @@ pub struct PlacedGlyph {
     /// `font-family`); glyph advances still use the default metrics, so a font change re-displays
     /// without reflowing. `None` = the document default face.
     pub font: Option<String>,
+    /// Display substitution for a Hanyang-PUA 옛한글 음절 (issue 062-2): the KS X 1026-1 첫가끝 자모
+    /// 시퀀스 string to draw INSTEAD of `ch` (which is a full-width metric proxy '가', never drawn).
+    /// The renderer draws this as ONE `<text>`/`draw_text` run so an old-hangul-capable OFL face
+    /// (Noto Serif CJK KR / Source Han Serif K) shapes the conjoining jamo into a syllable. `None`
+    /// for every ordinary glyph → byte-identical to before (`ch` is drawn).
+    pub cluster: Option<String>,
 }
 
 /// A positioned image/equation box in absolute page coordinates.
@@ -653,6 +659,7 @@ fn place_paragraph(
                     bold: g.bold,
                     italic: g.italic,
                     font: g.font.clone(),
+                    cluster: g.cluster.clone(),
                 });
             }
             x += adv;
@@ -1140,6 +1147,7 @@ fn place_cell_content(
                         bold: g.bold,
                         italic: g.italic,
                         font: g.font.clone(),
+                        cluster: g.cluster.clone(),
                     });
                 }
                 x += adv;
@@ -1622,6 +1630,8 @@ struct GlyphInfo {
     /// ~10% too wide and overflows its column.
     ratio: f64,
     spacing_em: f64,
+    /// Old-hangul jamo cluster to draw instead of `ch` (issue 062-2), else `None`. See [`PlacedGlyph::cluster`].
+    cluster: Option<String>,
 }
 
 fn paragraph_glyphs(p: &Paragraph, doc: &SemanticDoc) -> Vec<GlyphInfo> {
@@ -1636,6 +1646,10 @@ fn paragraph_glyphs(p: &Paragraph, doc: &SemanticDoc) -> Vec<GlyphInfo> {
         for inl in &run.content {
             if let Inline::Text(t) = inl {
                 for ch in t.chars() {
+                    // Issue 062-2: a Hanyang-PUA 옛한글 음절 draws as its 첫가끝 자모 시퀀스 (an OFL-
+                    // coverable cluster) while `subst_glyph` swaps `ch` to the full-width metric proxy
+                    // — so advances/breaking (via layout_paragraph) stay in lockstep with the drawn cell.
+                    let cluster = crate::old_hangul_cluster(ch);
                     let sch = crate::subst_glyph(ch);
                     let slot = crate::script_slot(sch);
                     let (ratio, spacing_em) = cs
@@ -1659,6 +1673,7 @@ fn paragraph_glyphs(p: &Paragraph, doc: &SemanticDoc) -> Vec<GlyphInfo> {
                         font: display_font(cs, slot),
                         ratio,
                         spacing_em,
+                        cluster,
                     });
                 }
             }
@@ -1828,6 +1843,39 @@ mod tests {
             npages - 1,
             "content reaches the last page"
         );
+    }
+
+    #[test]
+    fn old_hangul_pua_is_full_width_and_draws_jamo_cluster() {
+        use crate::layout_paragraph;
+        // Empty doc just to supply char_shape[0]/para_shape[0] that `para()` references.
+        let doc = doc_with(vec![]);
+        // U+E1A7 (Hanyang-PUA 옛한글) → 첫가끝 ᄀᆞ (U+1100 U+119E) per the KTUG Public-Domain table.
+        let p_old = para("\u{E1A7}나");
+        let p_ref = para("가나");
+
+        // (1) Drawing: the PUA char becomes the full-width metric proxy '가' carrying the jamo cluster;
+        //     the following ordinary char is untouched (no cluster).
+        let g = paragraph_glyphs(&p_old, &doc);
+        assert_eq!(g.len(), 2);
+        assert_eq!(
+            g[0].ch, '\u{AC00}',
+            "ch is the metric proxy, not the raw PUA codepoint"
+        );
+        assert_eq!(
+            g[0].cluster.as_deref(),
+            Some("\u{1100}\u{119E}"),
+            "draws the 첫가끝 자모 시퀀스"
+        );
+        assert_eq!(g[1].ch, '나');
+        assert!(g[1].cluster.is_none(), "ordinary glyph carries no cluster");
+
+        // (2) Lockstep width: an old-hangul syllable measures as ONE full-width cell, so a line with
+        //     it is exactly as wide as the same line with a plain Hangul syllable — the gate-relevant
+        //     advance is unchanged for a full-width cell.
+        let w_old = layout_paragraph(&p_old, &doc, 1.0e9, &ApproxFontMetrics)[0].horz_size;
+        let w_ref = layout_paragraph(&p_ref, &doc, 1.0e9, &ApproxFontMetrics)[0].horz_size;
+        assert_eq!(w_old, w_ref, "옛한글 음절 = 전각 한 칸 (advance lockstep)");
     }
 
     /// A doc with one section whose page is `height` tall (no margins, wide body) — lets a test force a

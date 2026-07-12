@@ -131,6 +131,8 @@ impl Page {
                 bold: false,
                 italic: false,
                 font: None,
+                // PDF-ingest is Latin/plain text — no Hanyang-PUA 옛한글 cluster substitution.
+                cluster: None,
             })
             .collect();
         PageLayerTree {

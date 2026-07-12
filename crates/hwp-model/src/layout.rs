@@ -68,6 +68,11 @@ pub enum PaintOp {
     /// `bold` (the run's weight — backends pick a bold face / font-weight) and `italic` (slant —
     /// backends use an italic face or a synthetic oblique shear). Both are additive: older producers
     /// leave them `false`, so the schema stays v1-compatible.
+    ///
+    /// `cluster` (issue 062-2): when `Some`, the backend draws this STRING as one shaped run instead
+    /// of `ch` — used for Hanyang-PUA 옛한글, whose one full-width cell (`ch` = the metric proxy '가')
+    /// draws as a KS X 1026-1 첫가끝 자모 시퀀스 so an OFL font can shape the syllable. Additive:
+    /// `None` (every ordinary glyph) draws `ch` exactly as before.
     Glyph {
         x: f64,
         y: f64,
@@ -77,6 +82,7 @@ pub enum PaintOp {
         bold: bool,
         italic: bool,
         font: Option<String>,
+        cluster: Option<String>,
     },
     /// A box: `fill = Some(color)` paints a filled rect (shading); `None` strokes the outline
     /// (cell/line border).

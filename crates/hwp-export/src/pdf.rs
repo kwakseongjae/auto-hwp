@@ -335,10 +335,14 @@ fn lower_tree_to_page(
                 bold,
                 italic,
                 font,
+                cluster,
             } => {
                 // Issue 058: the IR `font` is the OFL substitute family the own-render resolved (Some(
                 // "Noto Serif KR") for 명조 glyphs, `None` for 고딕/기타). `paint_glyph` routes serif-
                 // classified glyphs to the embedded serif face so the PDF distinguishes 명조 from 고딕.
+                // Issue 062-2: `cluster` (Some) is an 옛한글 자모 시퀀스 drawn in place of `ch` (the
+                // metric proxy) — krilla shapes it with the embedded face (composes if that face carries
+                // conjoining jamo; else notdef, mirroring the on-screen limitation).
                 paint_glyph(
                     &mut surface,
                     *x,
@@ -349,6 +353,7 @@ fn lower_tree_to_page(
                     *bold,
                     *italic,
                     font.as_deref(),
+                    cluster.as_deref(),
                     embed,
                 );
             }
@@ -557,6 +562,7 @@ fn paint_glyph(
     bold: bool,
     italic: bool,
     font: Option<&str>,
+    cluster: Option<&str>,
     embed: Option<&EmbedFont>,
 ) {
     if ch.is_whitespace() {
@@ -570,8 +576,12 @@ fn paint_glyph(
                 opacity: NormalizedF32::ONE,
                 rule: Default::default(),
             }));
+            // Issue 062-2: draw the 옛한글 자모 cluster (Some) as one shaped run; else the single `ch`.
             let mut buf = [0u8; 4];
-            let s = ch.encode_utf8(&mut buf);
+            let s = match cluster {
+                Some(c) => c,
+                None => ch.encode_utf8(&mut buf),
+            };
             // Face selection (issue 058): a 명조/serif glyph (IR `font` classifies Serif) draws with the
             // embedded serif face when present; else it falls through to the bold/regular gothic body
             // (pre-058 behavior). Serif+bold uses the serif regular in v1 (no bundled serif-bold).

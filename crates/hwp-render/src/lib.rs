@@ -105,6 +105,7 @@ fn lower_page(pg: &PlacedPage) -> PageLayerTree {
             bold: g.bold,
             italic: g.italic,
             font: g.font.clone(),
+            cluster: g.cluster.clone(),
         });
     }
 
@@ -297,23 +298,41 @@ fn esc(s: &str) -> String {
 impl PaintSink for SvgSink<'_> {
     fn paint(&mut self, op: &PaintOp) {
         match op {
-            PaintOp::Glyph { x, y, ch, size, color, bold, italic, font } => {
+            PaintOp::Glyph { x, y, ch, size, color, bold, italic, font, cluster } => {
                 // One <text> per glyph: we own the x, so no font-kerning surprise. Skip whitespace.
                 if ch.is_whitespace() {
                     return;
                 }
                 let fill = color_hex(*color);
                 let mut buf = [0u8; 4];
-                let s = esc(ch.encode_utf8(&mut buf));
+                // Issue 062-2: an 옛한글 glyph draws its 첫가끝 자모 cluster (Some) as ONE <text> run so
+                // the webview shapes the conjoining jamo; an ordinary glyph draws its single `ch`.
+                let s = match cluster {
+                    Some(c) => esc(c),
+                    None => esc(ch.encode_utf8(&mut buf)),
+                };
                 // font-family: a requested family (CharShape.font_family, e.g. a 글꼴 change) is tried
                 // FIRST, then the bundled free face (NanumGothic, @font-face'd in styles.css) so the
                 // webview draws the SAME glyph shapes our metrics assume, then sans-serif. NOTE: a
                 // requested family changes the DISPLAY only — advances still use NanumGothic metrics, so
                 // a font swap re-renders without reflowing (close for same-size Korean faces).
                 // font-weight:700 (bold) selects NanumGothic-Bold; font-style:italic synthesizes oblique.
-                let fam = match font {
-                    Some(f) if !f.trim().is_empty() => format!("{}, NanumGothic, sans-serif", esc(f)),
-                    _ => "NanumGothic, sans-serif".to_string(),
+                // 옛한글 cluster: prepend OFL old-hangul-capable faces (Noto Serif CJK KR / Source Han
+                // Serif K) — Nanum faces DON'T compose conjoining jamo, so without an old-hangul face on
+                // the host these render as separate jamo forms (see issue 062-2 재현/한계 note).
+                let fam = match (cluster, font) {
+                    (Some(_), Some(f)) if !f.trim().is_empty() => format!(
+                        "{}, \"Noto Serif CJK KR\", \"Source Han Serif K\", \"Noto Serif KR\", NanumGothic, sans-serif",
+                        esc(f)
+                    ),
+                    (Some(_), _) => {
+                        "\"Noto Serif CJK KR\", \"Source Han Serif K\", \"Noto Serif KR\", NanumGothic, sans-serif"
+                            .to_string()
+                    }
+                    (None, Some(f)) if !f.trim().is_empty() => {
+                        format!("{}, NanumGothic, sans-serif", esc(f))
+                    }
+                    (None, _) => "NanumGothic, sans-serif".to_string(),
                 };
                 let weight = if *bold { " font-weight=\"700\"" } else { "" };
                 let style = if *italic { " font-style=\"italic\"" } else { "" };
@@ -495,6 +514,37 @@ mod tests {
         assert_eq!(glyphs, 2, "two glyph ops");
         assert_eq!(tree.schema_version, PAINT_SCHEMA_VERSION);
         assert!(tree.width > 0.0 && tree.height > 0.0);
+    }
+
+    #[test]
+    fn old_hangul_pua_svg_carries_jamo_cluster() {
+        // Issue 062-2: U+E1A7 (Hanyang-PUA) renders as its 첫가끝 자모 시퀀스 ᄀᆞ (U+1100 U+119E),
+        // NOT the raw PUA codepoint (needs 함초롬) and NOT the metric proxy '가'. The IR carries the
+        // cluster and the SVG draws it inside a <text> under an old-hangul-capable OFL font stack.
+        let doc = doc_with(vec![Block::Paragraph(para("\u{E1A7}"))]);
+        let tree = render_page(&doc, &ApproxFontMetrics, 0).unwrap();
+        let has_cluster = tree.ops.iter().any(|o| {
+            matches!(o, PaintOp::Glyph { cluster: Some(c), ch, .. }
+                if c == "\u{1100}\u{119E}" && *ch == '\u{AC00}')
+        });
+        assert!(
+            has_cluster,
+            "IR glyph op carries the jamo cluster + metric proxy ch"
+        );
+
+        let s = &render_doc_svg(&doc, &ApproxFontMetrics)[0];
+        assert!(
+            s.contains('\u{1100}') && s.contains('\u{119E}'),
+            "SVG has the jamo"
+        );
+        assert!(
+            !s.contains('\u{E1A7}'),
+            "no raw PUA codepoint (would need 함초롬)"
+        );
+        assert!(
+            s.contains("Noto Serif CJK KR") || s.contains("Source Han Serif K"),
+            "cluster uses an OFL old-hangul font stack"
+        );
     }
 
     #[test]

@@ -18,6 +18,10 @@ pub mod shaper;
 #[cfg(feature = "shaper")]
 pub use shaper::RealFontMetrics;
 
+/// Hanyang-PUA 옛한글 → 첫가끝 자모 매핑 (이슈 062-2, KTUG Public Domain 표). 텍스트 처리 지점
+/// (`subst_glyph` 측정 프록시 + `place::paragraph_glyphs` 그리기 확장)에서 소비된다.
+mod old_hangul;
+
 /// Positioned layout (glyphs/images/boxes per page) — the paint-IR bridge consumed by `hwp-render`.
 pub mod place;
 pub use place::{
@@ -498,17 +502,40 @@ pub fn row_term_breakdown(
         .collect()
 }
 
+/// A Hanyang-PUA 옛한글 음절은 HWP에서 전각 한 칸을 차지한다. 조판(줄바꿈/페이지네이션)에서는
+/// 이 대표 전각 음절('가')의 어드밴스로 측정한다 — ApproxFontMetrics도, 실 셰이퍼도(둘 다 PUA
+/// 글리프가 없어 직접 재면 notdef) 전각 한 칸으로 일치시키기 위함. 실제 그리기는 자모 시퀀스로
+/// 확장한다(`place::paragraph_glyphs`의 `cluster`). '가'가 화면에 그려지지는 않는다(프록시일 뿐).
+pub(crate) const OLD_HANGUL_METRIC_PROXY: char = '\u{AC00}';
+
 /// Substitute a few typographic chars that common free Korean faces (e.g. NanumGothic) lack with a
 /// present, visually-equivalent glyph, so a missing glyph renders as the intended mark instead of a
 /// blank .notdef gap. Applied at glyph-build time in BOTH the line-breaker and the placer so advances
 /// and drawing stay in lockstep. Currently: dot-leader / katakana middle dots → the middle dot (·),
-/// all used as separators (e.g. "제품·서비스") in gov-doc forms.
+/// all used as separators (e.g. "제품·서비스") in gov-doc forms; PLUS Hanyang-PUA 옛한글 → the
+/// full-width Hangul metric proxy (issue 062-2 — the drawer expands it to a jamo cluster).
 pub(crate) fn subst_glyph(ch: char) -> char {
     match ch {
         // U+2024 ONE DOT LEADER, U+30FB KATAKANA MIDDLE DOT, U+FF65 HALFWIDTH KATAKANA MIDDLE DOT.
         '\u{2024}' | '\u{30FB}' | '\u{FF65}' => '\u{00B7}',
+        // Hanyang-PUA 옛한글: cheap BMP-PUA range gate before the table binary-search so all normal
+        // text pays only a range compare. The exact table lookup runs solely for PUA-range chars.
+        _ if matches!(ch as u32, 0xE000..=0xF8FF) && old_hangul::is_pua_old_hangul(ch) => {
+            OLD_HANGUL_METRIC_PROXY
+        }
         _ => ch,
     }
+}
+
+/// The KS X 1026-1 첫가끝 자모 시퀀스 to DRAW for a Hanyang-PUA 옛한글 음절 (issue 062-2), or `None`
+/// for any ordinary char. The drawer substitutes this string for the glyph's metric-proxy `ch`; the
+/// range gate keeps normal text off the table binary-search. Mirrors `subst_glyph`'s gate so the two
+/// stay in step (a char returning `Some` here is exactly one `subst_glyph` maps to the proxy).
+pub(crate) fn old_hangul_cluster(ch: char) -> Option<String> {
+    if !matches!(ch as u32, 0xE000..=0xF8FF) {
+        return None;
+    }
+    old_hangul::map_pua_old_hangul(ch).map(|jamos| jamos.iter().collect())
 }
 
 /// Lay out a single paragraph into [`LineSeg`]s (vert_pos left at 0 — the caller stacks them). Greedy
