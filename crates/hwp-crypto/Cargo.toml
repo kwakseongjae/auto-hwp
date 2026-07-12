@@ -1,6 +1,6 @@
 [package]
 name = "hwp-crypto"
-description = "배포용/password decryption (MSVC-rand LCG → SHA-1 → AES-128-ECB). Phase 5+; golden-vector, fail-closed."
+description = "배포용(distribution) .hwp decryption: MSVC-rand LCG → 256B XOR → in-record UTF-16LE-hex key → AES-128-ECB. Golden-vector, fail-closed. (Password-protected docs remain out of scope.)"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
@@ -8,3 +8,14 @@ rust-version.workspace = true
 
 [dependencies]
 hwp-model = { workspace = true }
+# AES-128-ECB via RustCrypto: `aes` block cipher + the `cipher` traits it re-exports (KeyInit /
+# BlockDecrypt). Pure-Rust software backend → wasm-safe, deterministic, no getrandom.
+aes = { workspace = true }
+cipher = { workspace = true }
+# zlib/raw-deflate inflate of the decrypted ViewText body (miniz_oxide backend → wasm-safe).
+flate2 = { workspace = true }
+
+[dev-dependencies]
+# Golden-vector synthesis only (encrypt direction): password → SHA-1 hex → UTF-16LE key material.
+# NOT used by the runtime decrypt path (distribution docs carry the key in-record).
+sha1 = { workspace = true }
