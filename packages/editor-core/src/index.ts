@@ -68,7 +68,7 @@ export { clampOffset, hitResultToTextAnchor, isCaretGap } from "./caret";
 
 // Cell-addressed glyph caret (issue 053, FG-12 後半) — the headless controller (click → caret →
 // per-keystroke SetTableCellRuns commits) + its pure joined-offset/run-splice helpers.
-export { CellCaretController, cellGlobalOffset, cellParaOffsetAt, runsText, spliceRuns } from "./cellCaret";
+export { CellCaretController, cellGlobalOffset, cellParaOffsetAt, inheritStyleAt, runsText, spliceRuns } from "./cellCaret";
 export type { CellCaretAnchor, CellCaretState } from "./cellCaret";
 
 // Event emitter primitive

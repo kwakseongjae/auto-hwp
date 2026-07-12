@@ -116,4 +116,15 @@ describe("isEditableTarget — Space guard", () => {
     Object.defineProperty(ce, "isContentEditable", { value: true });
     expect(isEditableTarget(ce)).toBe(true);
   });
+
+  it("EXEMPTS the caret-tracking hidden IME textarea (059) so window keydown listeners keep the keys", () => {
+    // A plain textarea is a text-entry surface (blocks pan / makes typing yield); OUR IME capture textarea
+    // (data-hw-ime-input) must be treated as non-editable so 035 zoom/Space · 036 cell-nav · 053 typing ·
+    // ⌘F still own their keys while it holds focus (the crux that lets a live caret keep typing).
+    const plain = document.createElement("textarea");
+    expect(isEditableTarget(plain)).toBe(true);
+    const ime = document.createElement("textarea");
+    ime.setAttribute("data-hw-ime-input", "1");
+    expect(isEditableTarget(ime)).toBe(false);
+  });
 });

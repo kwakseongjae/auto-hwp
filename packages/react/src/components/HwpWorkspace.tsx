@@ -13,6 +13,8 @@ import { HwpPageView, type PageClick } from "./HwpPageView";
 import { SelectionOverlay, type Mark } from "./SelectionOverlay";
 import { MarqueeLayer } from "./MarqueeLayer";
 import { CaretLayer } from "./CaretLayer";
+import { ImeCompositionLayer } from "./ImeCompositionLayer";
+import { CompositionStore } from "../composition";
 import { HoverLayer } from "./HoverLayer";
 import { useHover } from "../useHover";
 import { FontPicker } from "./FontPicker";
@@ -368,6 +370,12 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // by the click handler to know a caret is live without re-rendering anything.
   const caretActiveRef = useRef(false);
   useEffect(() => core.cellCaret.onChange((s) => (caretActiveRef.current = s != null)), [core]);
+  // issue 059: the shared IME-composition signal — the caret-tracking hidden textarea (ImeCompositionLayer)
+  // drives it, the CaretLayer reads it to hide its bar while composing, and the Escape handler reads it to
+  // yield Escape to the IME (cancel) instead of clearing the caret. One stable instance for the session.
+  const compositionRef = useRef<CompositionStore | null>(null);
+  if (compositionRef.current == null) compositionRef.current = new CompositionStore();
+  const compositionStore = compositionRef.current;
   // Down-point of the current pointer gesture (client px) — a caret is placed only on a PLAIN CLICK
   // (movement under the drag threshold), never at the end of a marquee/drag.
   const caretDownRef = useRef<{ x: number; y: number } | null>(null);
@@ -582,14 +590,29 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     [toast, bumpRefresh],
   );
 
+  // issue 059: commit a completed IME composition as ONE SetTableCellRuns undo unit (the SAME lane as typed
+  // text) with the workspace's trap/toast recovery — so the ImeCompositionLayer stays free of engine-error
+  // policy (it just forwards compositionend.data).
+  const commitComposition = useCallback(
+    (text: string) => {
+      void core.cellCaret.insertText(text).catch((err) => {
+        if (!onTrap(err, "엔진 트랩 — 문서를 복구했습니다")) toast(`입력 실패: ${err}`);
+      });
+    },
+    [core, onTrap, toast],
+  );
+
   // Esc anywhere clears the whole selection + any in-progress marquee (issue 021) + an image selection
   // (049) + the cell caret (053). issue 055 사후 #10: it ALSO abandons any in-flight right-click menu
   // resolution — with a busy worker the hit queries can outlive the user's attention, and the late
   // resolution must not raise a menu after this dismiss. (An OPEN menu consumes Esc itself — capture +
   // stopPropagation in ContextMenu — so this listener only sees Esc while no menu is up.)
+  // issue 059: while an IME composition is live, Escape belongs to the IME (cancel → compositionend with
+  // empty data → no-op) — do NOT clear the caret/selection out from under it.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        if (compositionStore.get() != null) return; // composing → yield Escape to the IME cancel
         ctxMenuSeqRef.current++;
         core.selection.clear();
         core.cellCaret.clear();
@@ -598,7 +621,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [core]);
+  }, [core, compositionStore]);
 
   // A selection-model adapter query trapped (hit-test / marquee) → recover + toast.
   useEffect(() => core.selection.onError((e) => onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요")), [core, onTrap]);
@@ -2253,8 +2276,16 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                         drag re-renders neither this workspace nor the SVG sheets (only the rect moves). */}
                     <MarqueeLayer core={core} page={page} scale={scale} />
                     {/* issue 053: the blinking cell text caret — an ISOLATED layer on the marquee pattern
-                        (presence = rare setState; every move = a ref DOM write, 0 workspace renders). */}
-                    {editingOn && canEdit && <CaretLayer core={core} page={page} scale={scale} />}
+                        (presence = rare setState; every move = a ref DOM write, 0 workspace renders).
+                        issue 059: it takes the composition store so its bar HIDES while an IME composition is
+                        live (the ImeCompositionLayer draws the composition caret — no double bar). */}
+                    {editingOn && canEdit && <CaretLayer core={core} page={page} scale={scale} composition={compositionStore} />}
+                    {/* issue 059: IME inline composition — the caret-tracking hidden textarea (input capture)
+                        + the compositionView overlay. Same isolation as CaretLayer: a composition never
+                        re-renders the workspace/sheets (position + composing text are ref writes). */}
+                    {editingOn && canEdit && (
+                      <ImeCompositionLayer core={core} page={page} scale={scale} store={compositionStore} commit={commitComposition} />
+                    )}
                     {editingOn && editTarget && editTarget.page === page && editTarget.boundaries && editTarget.tableBox && (
                       <ColumnResizeOverlay
                         boundaries={editTarget.boundaries}

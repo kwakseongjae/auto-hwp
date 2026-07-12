@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CellCaretController, cellGlobalOffset, cellParaOffsetAt, runsText, spliceRuns } from "../cellCaret";
+import { CellCaretController, cellGlobalOffset, cellParaOffsetAt, inheritStyleAt, runsText, spliceRuns } from "../cellCaret";
 import { DocSession } from "../session";
 import type { CellCaretRect, CellTextHit, RunSpec } from "../types";
 import { MockAdapter } from "./mockAdapter";
@@ -107,6 +107,24 @@ describe("spliceRuns (style-preserving run splice)", () => {
   });
 });
 
+describe("inheritStyleAt (059 IME preview 스타일 소스 — the same inherit rule spliceRuns uses)", () => {
+  it("takes the char BEFORE the caret when it's not a separator", () => {
+    expect(inheritStyleAt([{ text: "AB", bold: true }], 1)).toEqual({ bold: true });
+    expect(inheritStyleAt([{ text: "AB", bold: true }], 2)).toEqual({ bold: true }); // at the very end
+  });
+  it("at offset 0 inherits the FOLLOWING char's style (matches spliceRuns at 0)", () => {
+    expect(inheritStyleAt([{ text: "AB", bold: true }], 0)).toEqual({ bold: true });
+  });
+  it("right after a separator inherits the next paragraph's style, not the bare \\n's", () => {
+    const runs = [{ text: "A", bold: true }, { text: "\n" }, { text: "b", italic: true }];
+    expect(inheritStyleAt(runs, 2)).toEqual({ italic: true });
+  });
+  it("an empty / fresh cell inherits nothing (unstyled)", () => {
+    expect(inheritStyleAt([], 0)).toEqual({});
+    expect(inheritStyleAt([{ text: "" }], 0)).toEqual({});
+  });
+});
+
 describe("CellCaretController (headless click → caret → commit)", () => {
   function makeController(opts: ConstructorParameters<typeof MockAdapter>[0] = {}) {
     const adapter = new MockAdapter(opts);
@@ -179,6 +197,23 @@ describe("CellCaretController (headless click → caret → commit)", () => {
     });
     expect(ctl.get()?.anchor).toMatchObject({ para: 0, offset: 2, paraLen: 3 });
     expect(session.canUndo()).toBe(true); // one keystroke = one undo unit
+  });
+
+  it("styleAtCaret returns the run style the composed/typed text will take (059) — no intent", async () => {
+    const { adapter, ctl } = makeController({
+      cellText: hit({ para: 0, offset: 0, para_len: 2 }),
+      cellCaret: cellRect,
+      runs: [{ text: "AB", bold: true }],
+    });
+    expect(await ctl.styleAtCaret()).toBeNull(); // no caret yet
+    await ctl.clickAt(0, 5, 5);
+    expect(await ctl.styleAtCaret()).toEqual({ bold: true }); // inherits the bold run at offset 0
+    expect(adapter.applied).toHaveLength(0); // read-only — never a commit
+  });
+
+  it("styleAtCaret is null on a backend without the cell caret queries (018 feature-off)", async () => {
+    const { ctl } = makeController({}); // no cellText/cellCaret → unsupported
+    expect(await ctl.styleAtCaret()).toBeNull();
   });
 
   it("Enter (insertText '\\n') splits the paragraph and lands at the next paragraph's start", async () => {

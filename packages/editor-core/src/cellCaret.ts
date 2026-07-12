@@ -93,6 +93,32 @@ function sameStyle(a: RunStyle, b: RunStyle): boolean {
   return STYLE_KEYS.every((k) => (a[k] ?? undefined) === (b[k] ?? undefined));
 }
 
+/** The style inserted text INHERITS between char positions `start..end` of an exploded char array:
+ *  nearest non-"\n" char before `start`, else the char at `end`, else scan back past separators, else
+ *  unstyled. The single source of the "typing continues the style you're in" rule (spliceRuns + the 059
+ *  IME preview both read it). */
+function inheritFromChars(chars: { ch: string; style: RunStyle }[], start: number, end: number): RunStyle {
+  const prev = chars[start - 1];
+  if (prev && prev.ch !== "\n") return prev.style;
+  const next = chars[end];
+  if (next && next.ch !== "\n") return next.style;
+  for (let i = start - 2; i >= 0; i--) if (chars[i].ch !== "\n") return chars[i].style;
+  return {};
+}
+
+/** The run style text typed/composed at joined-text offset `at` will take — the SAME inherit rule
+ *  `spliceRuns` applies (with del=0). Pure + read-only; exported so the 059 IME composition preview can
+ *  style its overlay exactly like the coming text (styleOf 재사용) without a commit. */
+export function inheritStyleAt(runs: RunSpec[], at: number): RunStyle {
+  const chars: { ch: string; style: RunStyle }[] = [];
+  for (const r of runs) {
+    const style = styleOf(r);
+    for (const ch of r.text) chars.push({ ch, style });
+  }
+  const end = Math.min(Math.max(0, at), chars.length);
+  return inheritFromChars(chars, end, end);
+}
+
 /** Splice a cell's runs at the joined-text offset `at`: delete `del` chars ENDING at `at`, then
  *  insert `insert` there — preserving every untouched run's style and INHERITING the style of the
  *  nearest non-"\n" char before the caret for the inserted text (typing continues the style you are
@@ -110,16 +136,8 @@ export function spliceRuns(runs: RunSpec[], at: number, del: number, insert: str
   const end = Math.min(Math.max(0, at), chars.length);
   const start = Math.max(0, end - Math.max(0, del));
   // Inherit for the insertion: nearest non-separator char before the caret; else the char after; else
-  // scan back past separators; else unstyled.
-  const inherit = (): RunStyle => {
-    const prev = chars[start - 1];
-    if (prev && prev.ch !== "\n") return prev.style;
-    const next = chars[end];
-    if (next && next.ch !== "\n") return next.style;
-    for (let i = start - 2; i >= 0; i--) if (chars[i].ch !== "\n") return chars[i].style;
-    return {};
-  };
-  const insStyle = inherit();
+  // scan back past separators; else unstyled (shared with the 059 IME preview via inheritFromChars).
+  const insStyle = inheritFromChars(chars, start, end);
   const next: Ch[] = [...chars.slice(0, start), ...[...insert].map((ch) => ({ ch, style: insStyle })), ...chars.slice(end)];
   // Re-group: consecutive same-style chars merge; every "\n" is its own bare run (separator parity).
   const out: RunSpec[] = [];
@@ -225,6 +243,18 @@ export class CellCaretController {
    *  A caret at the very start of the cell is a graceful no-op (resolves false). */
   deleteBack(): Promise<boolean> {
     return this.enqueue(() => this.splice("", 1));
+  }
+
+  /** The run style the composing/typed text will take at the current caret (059 — IME preview 스타일
+   *  소스). Read-only (no intent, no undo unit); `null` when no caret is live or the backend can't answer.
+   *  NOT enqueued — it's a pure read that never mutates the caret, so it can run alongside a key burst. */
+  async styleAtCaret(): Promise<RunStyle | null> {
+    const a = this.state?.anchor;
+    if (!a || !this.supported) return null;
+    const runs = await this.adapter.blockRuns!(a.section, a.block, a.row, a.col);
+    const joined = runsText(runs);
+    const global = cellGlobalOffset(joined, a.para, a.offset);
+    return inheritStyleAt(runs, global);
   }
 
   private set(hit: CellTextHit): void {

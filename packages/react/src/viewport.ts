@@ -108,6 +108,12 @@ export function wheelToZoomFactor(deltaY: number, sensitivity: number = 0.0015):
 /// Figma behaviour. Pure enough to unit-test with a jsdom element.
 export function isEditableTarget(el: Element | null | undefined): boolean {
   if (!el) return false;
+  // 059 EXCEPTION — the caret-tracking hidden IME textarea (ImeCompositionLayer) is a CAPTURE surface,
+  // not a user text field: while it holds focus the window keydown ecosystem (035 zoom/Space · 036
+  // cell-nav · 053 typing · ⌘F) must keep owning the keys exactly as it did when nothing was focused, so
+  // a live caret still types/navigates. Only the IME's own composition events (handled on the textarea)
+  // route through it. Marked with `data-hw-ime-input`; anything else here is a real editable surface.
+  if (el.getAttribute?.("data-hw-ime-input") === "1") return false;
   const he = el as HTMLElement;
   if (he.isContentEditable) return true;
   const tag = el.tagName;

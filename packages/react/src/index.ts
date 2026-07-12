@@ -16,6 +16,10 @@ export type { MarqueeLayerProps } from "./components/MarqueeLayer";
 // Issue 053 — the blinking CELL TEXT CARET layer (MarqueeLayer's render-0 twin over core.cellCaret).
 export { CaretLayer } from "./components/CaretLayer";
 export type { CaretLayerProps } from "./components/CaretLayer";
+export { ImeCompositionLayer } from "./components/ImeCompositionLayer";
+export type { ImeCompositionLayerProps } from "./components/ImeCompositionLayer";
+export { CompositionStore } from "./composition";
+export type { ImeComposition } from "./composition";
 // Issue 038 — the hover PRE-HIGHLIGHT layer (FG-09) + the cursor system (FG-06). HoverLayer is MarqueeLayer's
 // twin (subscribes to a HoverStore, draws by ref → 0 workspace/sheet renders); useHover owns the pointermove
 // → hit-test → store pipeline; cursorForContext is the single pure hit-kind → cursor mapping.

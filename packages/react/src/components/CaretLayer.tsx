@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { CellCaretState, EditorCore } from "@tf-hwp/editor-core";
+import type { CompositionStore } from "../composition";
 
 export interface CaretLayerProps {
   /** The headless editor core — CaretLayer subscribes to `core.cellCaret` DIRECTLY (030 isolation). */
@@ -8,6 +9,10 @@ export interface CaretLayerProps {
   page: number;
   /** rendered px / viewBox px for this page (page-px → client-px). Only zoom changes it. */
   scale: number;
+  /** issue 059 (optional): while an IME composition is live on THIS page the blinking bar is HIDDEN — the
+   *  ImeCompositionLayer draws the composition's own caret at the composing string's right edge, so
+   *  suppressing this one prevents a double caret. Omitted (e.g. a backend without IME) → always shown. */
+  composition?: CompositionStore;
 }
 
 /// CaretLayer — the blinking cell text caret (issue 053), ISOLATED from the workspace/sheet render
@@ -19,8 +24,9 @@ export interface CaretLayerProps {
 ///    DOM via a ref — the 2nd…Nth caret move re-renders NOTHING (React bails the same-value setState)
 ///    yet the bar tracks every offset change. The CSS blink animation is RESTARTED on each move (the
 ///    한글식 caret: solid at the moment it moves, then blinks).
-export function CaretLayer({ core, page, scale }: CaretLayerProps) {
+export function CaretLayer({ core, page, scale, composition }: CaretLayerProps) {
   const [active, setActive] = useState(false);
+  const [composing, setComposing] = useState(false); // 059: an IME composition is live on this page
   const activeRef = useRef(false); // live mirror so a same-value move NEVER calls setState at all
   const ref = useRef<HTMLDivElement | null>(null);
   const pendingRef = useRef<CellCaretState | null>(null);
@@ -58,12 +64,22 @@ export function CaretLayer({ core, page, scale }: CaretLayerProps) {
     return core.cellCaret.onChange(onCaret);
   }, [core, page, scale]);
 
-  // On first activation the div doesn't exist until the next commit; position it once mounted (and on
-  // a zoom change while the caret is live). Later moves position it via the flush above.
+  // 059: track the IME composition presence for THIS page so the bar hides while composing (the
+  // ImeCompositionLayer draws the composition caret instead — no double caret). A no-op when no store.
   useEffect(() => {
-    if (active) flushRef.current();
-  }, [active, scale]);
+    if (!composition) return;
+    const onComp = () => setComposing(composition.composingOn(page));
+    onComp(); // sync current state
+    return composition.onChange(onComp);
+  }, [composition, page]);
 
-  if (!active) return null;
+  // On first activation the div doesn't exist until the next commit; position it once mounted (and on
+  // a zoom change, or when composition ends and the bar re-appears, while the caret is live). Later
+  // moves position it via the flush above.
+  useEffect(() => {
+    if (active && !composing) flushRef.current();
+  }, [active, composing, scale]);
+
+  if (!active || composing) return null;
   return <div ref={ref} className="hw-caret" data-testid="hw-caret" aria-hidden />;
 }

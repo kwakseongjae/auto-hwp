@@ -28,3 +28,9 @@
 1. textarea focus가 기존 window keydown 생태계(035/036/045/⌘F)와 충돌 → `isEditableTarget` 가드 예외를 **모든 window 리스너**(HwpWorkspace 474/1321/1444/1477행)에 일관 적용. 최대 회귀 지점.
 2. WKWebView compositionend-후-229-keydown / Enter 이중발화 → **Tauri 실기 검증 없이 완료 선언 금지**.
 3. 도깨비불을 diff로 구현하면 필연 버그 → end.data 단일 신뢰 원칙.
+
+## 0단계 재현 사실 (2026-07-13, 헤드리스 실측 — 착수 근거)
+- **입력 표면 부재 확정**: `grep compositionstart|compositionend|compositionupdate packages/react/src` → 히트는 `InPlaceCellEditor`/`CellTextPopover`(제자리 에디터 전용, 라이브 캐럿 상태에선 언마운트) 뿐. 라이브 캐럿에는 focus된 편집요소가 **하나도 없다**(캐럿은 순수 오버레이 div, `CaretLayer.tsx`).
+- **현 keydown 경로의 반응**: `caretLayer.test.tsx:165-176`가 이미 현 동작을 고정 — 라이브 캐럿에서 `keydown{key:"ㄱ", isComposing:true, keyCode:229}` 합성 시 `HwpWorkspace.tsx:1543`의 `if (e.isComposing || e.keyCode === 229) return` 가드가 **그 keydown을 통째로 삼킨다** → `adapter.applied` 길이 0(무커밋), 캐럿 유지. 즉 **자모 낱자 커밋조차 아니고 완전 무입력**.
+- **실브라우저 함의**: 실제 macOS Chrome/WKWebView에선 focus된 editable이 없어 브라우저가 조합을 걸 표면이 없다 → compositionstart 자체가 어디에도 도달하지 못함(위 3개 이벤트 리스너 중 마운트된 것이 없음). 결론: 한글은 **시작 자체가 불가능**. "표시가 안 되는" 문제가 아니라 **입력 캡처 표면 부재** 문제라는 리서치 반전을 실측으로 재확인.
+- 이 재현을 vitest로 회귀 고정: 신규 `imeComposition.test.tsx`가 (a) 캡처 표면 도입 전 무입력을 대변하던 229 가드는 유지하면서 (b) 이제 textarea에서 발생한 compositionstart/update/end가 오버레이·커밋으로 이어짐을 검증.
