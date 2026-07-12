@@ -19,6 +19,7 @@
 //! `HWPUNIT_PER_PT` (1in = 7200 HWPUNIT = 72pt ⇒ 100 HWPUNIT/pt). No y-flip needed.
 
 use hwp_model::document::{LineStyle, SemanticDoc};
+use hwp_model::font_class::{classify, FontCategory};
 use hwp_model::layout::{PageLayerTree, PaintOp};
 use hwp_model::prelude::FontMetricsProvider;
 use hwp_model::types::Color;
@@ -86,12 +87,31 @@ const BOLD_FONT_CANDIDATES: &[(&str, u32)] = &[
     ("/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf", 0),
 ];
 
+/// SERIF (명조/바탕) faces for glyphs whose document face classifies as [`FontCategory::Serif`] (issue
+/// 058). No serif is bundled (the OFL serif substitute — Nanum Myeongjo — is host-injected, R8), so this
+/// is a best-effort SYSTEM discovery: macOS AppleMyungjo, then Linux Noto Serif CJK / Nanum Myeongjo. If
+/// none loads, the serif slot stays `None` and 명조 glyphs draw with the gothic body face (pre-058). On
+/// the wasm/web path the serif face is INJECTED by family name instead (see [`EmbedFont::from_injected`]).
+const SERIF_FONT_CANDIDATES: &[(&str, u32)] = &[
+    ("/System/Library/Fonts/Supplemental/AppleMyungjo.ttf", 0),
+    (
+        "/usr/share/fonts/opentype/noto/NotoSerifCJKkr-Regular.otf",
+        0,
+    ),
+    ("/usr/share/fonts/truetype/noto/NotoSerifCJK-Regular.ttc", 0),
+    ("/usr/share/fonts/truetype/nanum/NanumMyeongjo.ttf", 0),
+];
+
 /// A loaded text face for embedding, paired with the path it came from (diagnostics) and whether it
 /// is a real Korean-capable face vs. a last-resort fallback.
 struct EmbedFont {
     font: Font,
     /// Bold face for bold runs; `None` → bold runs draw with the regular face (no synthetic bolding).
     bold: Option<Font>,
+    /// SERIF (명조/바탕) face for glyphs whose document face classifies as [`FontCategory::Serif`] (issue
+    /// 058). `None` → 명조 glyphs draw with the gothic body face (pre-058 behavior). Discovered from the
+    /// system on native, or INJECTED by family name on wasm/web.
+    serif: Option<Font>,
     path: String,
     /// True when a candidate from [`FONT_CANDIDATES`] loaded (Korean-capable). False = no font found
     /// (glyphs become stub rects so the box stays visible).
@@ -110,7 +130,8 @@ impl EmbedFont {
             if let Some(font) = Font::new(bytes.into(), index) {
                 return Some(EmbedFont {
                     font,
-                    bold: Self::discover_bold(),
+                    bold: Self::discover_from(BOLD_FONT_CANDIDATES),
+                    serif: Self::discover_from(SERIF_FONT_CANDIDATES),
                     path: path.to_string(),
                     real: true,
                 });
@@ -119,9 +140,10 @@ impl EmbedFont {
         None
     }
 
-    /// Load the first parseable bold candidate, or `None` (bold runs then reuse the regular face).
-    fn discover_bold() -> Option<Font> {
-        for &(path, index) in BOLD_FONT_CANDIDATES {
+    /// Load the first parseable candidate from `candidates` as a krilla [`Font`], or `None`. Shared by
+    /// the bold ([`BOLD_FONT_CANDIDATES`]) and serif ([`SERIF_FONT_CANDIDATES`]) auxiliary slots.
+    fn discover_from(candidates: &[(&str, u32)]) -> Option<Font> {
+        for &(path, index) in candidates {
             let Ok(bytes) = std::fs::read(path) else {
                 continue;
             };
@@ -146,17 +168,40 @@ impl EmbedFont {
             .iter()
             .find(|(family, _)| family.to_ascii_lowercase().contains("bold"))
             .and_then(|(_, bytes)| Font::new(bytes.clone().into(), 0));
-        for (family, bytes) in injected {
-            if let Some(font) = Font::new(bytes.clone().into(), 0) {
-                return Some(EmbedFont {
-                    font,
-                    bold: bold.clone(),
-                    path: format!("injected:{family}"),
-                    real: true,
-                });
-            }
-        }
-        None
+        // Issue 058: an injected face whose family classifies 명조/serif (e.g. "Noto Serif KR") backs the
+        // serif slot, so 명조 glyphs (whose IR `font` is the serif substitute) draw with it. A "bold"
+        // serif is skipped here (it feeds the bold slot); serif+bold falls back to the serif regular.
+        let serif = injected
+            .iter()
+            .find(|(family, _)| {
+                !family.to_ascii_lowercase().contains("bold")
+                    && classify(family) == FontCategory::Serif
+            })
+            .and_then(|(_, bytes)| Font::new(bytes.clone().into(), 0));
+        // The BODY (default gothic) face: the first injected face that is NOT the serif/bold slot, so a
+        // host that injects [NanumGothic, Noto Serif KR] keeps NanumGothic as the body (and the metric
+        // path — `own_render_fonts_with` — picks the same first face). Falls back to the first parseable.
+        let body = injected
+            .iter()
+            .find(|(family, _)| {
+                !family.to_ascii_lowercase().contains("bold")
+                    && classify(family) != FontCategory::Serif
+            })
+            .or_else(|| {
+                injected
+                    .iter()
+                    .find(|(f, _)| !f.to_ascii_lowercase().contains("bold"))
+            })
+            .or_else(|| injected.first());
+        let (family, bytes) = body?;
+        let font = Font::new(bytes.clone().into(), 0)?;
+        Some(EmbedFont {
+            font,
+            bold,
+            serif,
+            path: format!("injected:{family}"),
+            real: true,
+        })
     }
 }
 
@@ -289,10 +334,11 @@ fn lower_tree_to_page(
                 color,
                 bold,
                 italic,
-                font: _,
+                font,
             } => {
-                // font_family is honored by the HWPX serializer + own SVG display; the PDF face stays
-                // the embedded default for now (krilla font-by-name selection is a separate task).
+                // Issue 058: the IR `font` is the OFL substitute family the own-render resolved (Some(
+                // "Noto Serif KR") for 명조 glyphs, `None` for 고딕/기타). `paint_glyph` routes serif-
+                // classified glyphs to the embedded serif face so the PDF distinguishes 명조 from 고딕.
                 paint_glyph(
                     &mut surface,
                     *x,
@@ -302,6 +348,7 @@ fn lower_tree_to_page(
                     *color,
                     *bold,
                     *italic,
+                    font.as_deref(),
                     embed,
                 );
             }
@@ -509,6 +556,7 @@ fn paint_glyph(
     color: Color,
     bold: bool,
     italic: bool,
+    font: Option<&str>,
     embed: Option<&EmbedFont>,
 ) {
     if ch.is_whitespace() {
@@ -524,9 +572,16 @@ fn paint_glyph(
             }));
             let mut buf = [0u8; 4];
             let s = ch.encode_utf8(&mut buf);
-            // Bold runs use the embedded bold face when present; else the regular face (no synthetic
-            // bolding). This is what renders the gov-doc's bold labels/headings as real bold weight.
-            let face = if bold {
+            // Face selection (issue 058): a 명조/serif glyph (IR `font` classifies Serif) draws with the
+            // embedded serif face when present; else it falls through to the bold/regular gothic body
+            // (pre-058 behavior). Serif+bold uses the serif regular in v1 (no bundled serif-bold).
+            let is_serif = font
+                .map(|n| classify(n) == FontCategory::Serif)
+                .unwrap_or(false)
+                && f.serif.is_some();
+            let face = if is_serif {
+                f.serif.as_ref().unwrap()
+            } else if bold {
                 f.bold.as_ref().unwrap_or(&f.font)
             } else {
                 &f.font
@@ -687,6 +742,36 @@ mod tests {
             Some("injected:Nanum Gothic"),
             "injected face is preferred over discover"
         );
+    }
+
+    #[test]
+    fn injected_serif_family_populates_the_serif_slot_and_keeps_gothic_body() {
+        // Issue 058: injecting a gothic body + a serif-named face must (1) keep the gothic as the BODY
+        // (first face → also backs metrics) and (2) load the serif-named face into the serif slot, so
+        // 명조 glyphs (IR font = the serif substitute) draw with it. Bytes are the vendored NanumGothic
+        // for both — routing is by family NAME (classify), not the bytes.
+        let bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/NanumGothic-Regular.ttf"
+        ))
+        .expect("vendored NanumGothic present for the test");
+        let injected = vec![
+            ("Nanum Gothic".to_string(), bytes.clone()),
+            ("Nanum Myeongjo".to_string(), bytes.clone()),
+        ];
+        let embed = EmbedFont::from_injected(&injected).expect("body face parses");
+        assert_eq!(
+            embed.path, "injected:Nanum Gothic",
+            "the gothic body is the first (metric-backing) face"
+        );
+        assert!(
+            embed.serif.is_some(),
+            "the serif-named injection populates the serif slot"
+        );
+        // A serif-only injection still yields a valid body (serif doubles as body).
+        let serif_only = vec![("Nanum Myeongjo".to_string(), bytes)];
+        let e2 = EmbedFont::from_injected(&serif_only).expect("serif-only still gives a body");
+        assert!(e2.serif.is_some());
     }
 
     #[test]

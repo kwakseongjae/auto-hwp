@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FONT_CATALOG, buildFontFaceCss, catalogUrl, isTtc, svgFontFamilies } from "../fonts";
+import { FONT_CATALOG, buildFontFaceCss, catalogUrl, classifyFont, isTtc, SERIF_SUBSTITUTE, substituteFamily, svgFontFamilies } from "../fonts";
 
 describe("fonts helpers (issue 022)", () => {
   it("catalog is non-empty and every entry is OFL (R8 hard gate)", () => {
@@ -46,5 +46,44 @@ describe("fonts helpers (issue 022)", () => {
     const svg = '<text font-family="함초롬바탕, NanumGothic, sans-serif">가</text><text font-family="NanumGothic, sans-serif">a</text>';
     const fams = svgFontFamilies(svg).sort();
     expect(fams).toEqual(["NanumGothic", "함초롬바탕"]);
+  });
+
+  // ---- Issue 058: font fidelity classification (mirror of crates/hwp-model/src/font_class.rs) --------
+
+  it("classifyFont routes 명조/바탕 → serif, 돋움/고딕 → gothic, unknown → other", () => {
+    for (const n of ["함초롬바탕", "바탕", "신명조", "HY명조", "Batang", "Nanum Myeongjo", "Times New Roman"]) {
+      expect(classifyFont(n)).toBe("serif");
+    }
+    for (const n of ["함초롬돋움", "돋움", "굴림체", "맑은 고딕", "Malgun Gothic", "Arial", "Pretendard", "NanumGothic"]) {
+      expect(classifyFont(n)).toBe("gothic");
+    }
+    for (const n of ["", "   ", "Wingdings"]) {
+      expect(classifyFont(n)).toBe("other");
+    }
+  });
+
+  it("substituteFamily maps serif faces to the OFL serif substitute, else null (default gothic)", () => {
+    expect(substituteFamily("함초롬바탕")).toBe(SERIF_SUBSTITUTE);
+    expect(SERIF_SUBSTITUTE).toBe("Nanum Myeongjo");
+    expect(substituteFamily("함초롬돋움")).toBeNull();
+    expect(substituteFamily("Arial")).toBeNull();
+  });
+
+  it("buildFontFaceCss(serifUrl) binds the serif substitute with an out-specifying override rule", () => {
+    const base = buildFontFaceCss("Nanum Gothic", "blob:g");
+    // Without serifUrl the output is byte-identical to the 2-arg form (backward compatible).
+    expect(buildFontFaceCss("Nanum Gothic", "blob:g", {})).toBe(base);
+    const css = buildFontFaceCss("Nanum Gothic", "blob:g", { serifUrl: "/fonts/NanumMyeongjo-Regular.ttf" });
+    expect(css).toContain('@font-face { font-family: "Nanum Myeongjo"; src: url("/fonts/NanumMyeongjo-Regular.ttf"); }');
+    // The serif rule is attribute-scoped (font-family^="Nanum Myeongjo") so it beats the blanket collapse.
+    expect(css).toContain('.hw-sheet svg text[font-family^="Nanum Myeongjo"]');
+    // The blanket collapse for the selected/default gothic body is still present (022 preserved).
+    expect(css).toContain('.hw-sheet svg text { font-family: "Nanum Gothic", "NanumGothic", sans-serif !important; }');
+  });
+
+  it("the catalog carries the OFL serif substitute (Nanum Myeongjo) the mapping routes 명조 to", () => {
+    const serif = FONT_CATALOG.find((e) => e.family === SERIF_SUBSTITUTE);
+    expect(serif).toBeTruthy();
+    expect(serif?.license).toBe("OFL");
   });
 });

@@ -11,6 +11,7 @@
 pub mod capability;
 pub mod document;
 pub mod error;
+pub mod font_class;
 pub mod layout;
 pub mod style;
 pub mod types;
@@ -19,6 +20,7 @@ pub mod prelude {
     pub use crate::capability::*;
     pub use crate::document::*;
     pub use crate::error::{Error, Result};
+    pub use crate::font_class::*;
     pub use crate::layout::*;
     pub use crate::style::*;
     pub use crate::types::*;

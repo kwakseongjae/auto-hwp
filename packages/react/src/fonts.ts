@@ -48,6 +48,43 @@ function quoteFamily(name: string): string {
   return `"${String(name).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
+// ---- Font fidelity: document face → category → OFL substitute (issue 058) ---------------------------
+//
+// MIRRORS `crates/hwp-model/src/font_class.rs` — the own-render (`place::paragraph_glyphs`) stamps the
+// SAME substitute family onto the SVG `<text font-family>`, so this maps each doc face name to the face
+// the screen must bind. KEEP IN SYNC with the Rust module (the substitute NAME is the screen↔PDF
+// contract token). 명조/serif → Nanum Myeongjo; 고딕/기타 → the default gothic (no explicit substitute).
+
+/** The OFL serif substitute family — MUST equal `font_class::SERIF_SUBSTITUTE` on the Rust side, since
+ *  the own-render SVG emits this exact string as the `<text>` `font-family` for 명조 runs. */
+export const SERIF_SUBSTITUTE = "Nanum Myeongjo";
+
+/** A document face's typographic category (mirror of `font_class::FontCategory`). */
+export type FontCategory = "serif" | "gothic" | "other";
+
+/** Classify a document font NAME by Korean/Latin naming convention (mirror of `font_class::classify`).
+ *  Conservative: an unrecognized name is `"other"` (→ the default gothic), never a wrong serif. */
+export function classifyFont(name: string): FontCategory {
+  const n = (name ?? "").trim();
+  if (!n) return "other";
+  const SERIF_KO = ["바탕", "명조", "궁서", "순명조", "신명"];
+  const GOTHIC_KO = ["돋움", "돋음", "고딕", "굴림", "돋보임", "그래픽", "안상수"];
+  if (SERIF_KO.some((k) => n.includes(k))) return "serif";
+  if (GOTHIC_KO.some((k) => n.includes(k))) return "gothic";
+  const l = n.toLowerCase();
+  const SERIF_EN = ["batang", "myeongjo", "myungjo", "gungsuh", "gungseo", "serif", "times", "georgia", "garamond", "minion"];
+  const GOTHIC_EN = ["dotum", "gulim", "gothic", "sans", "malgun", "arial", "helvetica", "verdana", "tahoma", "pretendard", "nanum gothic", "nanumgothic"];
+  if (SERIF_EN.some((k) => l.includes(k))) return "serif";
+  if (GOTHIC_EN.some((k) => l.includes(k))) return "gothic";
+  return "other";
+}
+
+/** Resolve a document face name to the OFL substitute family the renderer should draw with, or `null`
+ *  for 고딕/기타 (→ the default gothic; mirror of `font_class::substitute_family`). */
+export function substituteFamily(name: string): string | null {
+  return classifyFont(name) === "serif" ? SERIF_SUBSTITUTE : null;
+}
+
 /** True iff `bytes` begins with the TTC ("ttcf") magic — a collection krilla/our shaper reject (§함정). */
 export function isTtc(bytes: Uint8Array): boolean {
   return bytes.length >= 4 && bytes[0] === 0x74 && bytes[1] === 0x74 && bytes[2] === 0x63 && bytes[3] === 0x66;
@@ -57,16 +94,28 @@ export function isTtc(bytes: Uint8Array): boolean {
  *  for the SAME bytes fed to `registerFont` (metrics + PDF), so screen == PDF. The alias rule targets
  *  `<text>` inside `.hw-sheet` (where HwpPageView draws the SVG) so every document font name renders in
  *  the selected face; the `NanumGothic` re-definition covers the SVG's universal fallback name too. */
-export function buildFontFaceCss(family: string, url: string): string {
+export function buildFontFaceCss(family: string, url: string, opts?: { serifUrl?: string }): string {
   const fam = quoteFamily(family);
   const src = `url("${url}")`;
   // No font-weight/style descriptors → the one face matches any request; the browser synthesizes
   // bold/oblique for the SVG's font-weight="700"/font-style="italic" presentation attributes.
-  return [
+  const rules = [
     `@font-face { font-family: ${fam}; src: ${src}; }`,
     `@font-face { font-family: "NanumGothic"; src: ${src}; }`,
     `.hw-sheet svg text { font-family: ${fam}, "NanumGothic", sans-serif !important; }`,
-  ].join("\n");
+  ];
+  // Issue 058: bind the OFL SERIF substitute so 명조 runs render serif (the own-render SVG emits
+  // `font-family="Nanum Myeongjo, NanumGothic, sans-serif"` for them). The attribute-scoped rule is MORE
+  // specific than the blanket `.hw-sheet svg text` collapse above, so serif glyphs keep the serif face
+  // even when a gothic body face is the selected/applied font (preserving the doc's 명조↔고딕 distinction
+  // — the whole point of 058). When `serifUrl` is absent (or the fetched face 404s) the SVG's own
+  // fallback list drops to NanumGothic, so this is a safe, additive no-op offline.
+  if (opts?.serifUrl) {
+    const ser = quoteFamily(SERIF_SUBSTITUTE);
+    rules.push(`@font-face { font-family: ${ser}; src: url("${opts.serifUrl}"); }`);
+    rules.push(`.hw-sheet svg text[font-family^="${SERIF_SUBSTITUTE}"] { font-family: ${ser}, "NanumGothic", serif !important; }`);
+  }
+  return rules.join("\n");
 }
 
 /** Extract the distinct primary document font-family names the own-render SVG emits (the part before

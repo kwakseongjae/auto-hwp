@@ -438,6 +438,9 @@ export default function LabWorkspace() {
             fontCatalog={FONT_CATALOG}
             defaultFont={defaultFont}
             fontUrlBase={FONT_URL_BASE}
+            // 이슈 058: 명조(serif) 서체를 OFL 대체(Nanum Myeongjo)로 화면 @font-face + PDF 임베드까지 라우팅.
+            // fetch-fonts.mjs 가 public/fonts 에 Nanum Myeongjo 를 받아 두면 명조/고딕이 구분 렌더된다.
+            injectSerifSubstitute
             isMock={mode === "mock"}
             // 이슈 027: 수동 편집 UI(표 추가·룰러·열너비 드래그·더블클릭 텍스트·서식 툴바) 옵트인.
             enableEditing

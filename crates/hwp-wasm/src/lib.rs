@@ -509,11 +509,14 @@ impl HwpDoc {
     /// `{code:"ttc_unsupported"}` (krilla's simple-text can't subset a collection and our shaper takes
     /// face index 0 only) — no silent wrong-glyph fallback (issue §함정).
     ///
-    /// ## Contract: registering/replacing a font RE-LAYOUTS the document
-    /// v1 maps EVERY document font name to this ONE injected face (issue §3). Because real metrics
-    /// differ from the Approx fallback, registering (or replacing) a font can change the page count and
-    /// line breaks. This method therefore **invalidates the SVG cache**; the host MUST re-query
-    /// [`HwpDoc::page_count`] and re-render every page after calling it (the `@tf-hwp/react` workspace
+    /// ## Contract: registering a font RE-LAYOUTS the document; faces ACCUMULATE by family (issue 058)
+    /// The FIRST registered face is the body face — it backs the layout metrics (`own_render_fonts_with`
+    /// takes the first parseable face) and the PDF gothic body. Registering a DIFFERENT family ADDS it
+    /// (e.g. a "Noto Serif KR" serif substitute so 명조 runs draw serif — issue 058); registering the
+    /// SAME family again REPLACES its bytes. So a host injects the gothic body first, then optionally a
+    /// serif face. Because real metrics differ from the Approx fallback, the first registration can
+    /// change the page count and line breaks, so this **invalidates the SVG cache**; the host MUST
+    /// re-query [`HwpDoc::page_count`] and re-render after calling it (the `@tf-hwp/react` workspace
     /// bumps its refresh token on `registerFont`). Until a font is registered, render/layout use the
     /// deterministic Approx fallback (backward compatible) and `export_pdf` throws `font_missing`.
     #[wasm_bindgen(js_name = registerFont)]
@@ -524,10 +527,15 @@ impl HwpDoc {
                 "TTC(글꼴 컬렉션)는 지원하지 않습니다 — 단일 TTF/OTF 파일을 선택하세요 (krilla 서브셋 제약)",
             ));
         }
-        // v1 single active font: replace (not accumulate) so a picked face takes effect immediately for
-        // metrics AND PDF. Invalidate the revision-keyed SVG cache — the new metrics re-paginate, and a
-        // stale cache would make the screen disagree with the PDF (issue §함정: 캐시 무효화).
-        self.fonts = vec![(family, bytes)];
+        // Upsert by family (issue 058): replace this family's bytes in place if present (so re-picking a
+        // face takes effect immediately), else append (so a serif substitute coexists with the gothic
+        // body — the first-registered body still backs metrics). Invalidate the revision-keyed SVG cache
+        // — the new metrics re-paginate, and a stale cache would make the screen disagree with the PDF
+        // (issue §함정: 캐시 무효화).
+        match self.fonts.iter_mut().find(|(f, _)| *f == family) {
+            Some(slot) => slot.1 = bytes,
+            None => self.fonts.push((family, bytes)),
+        }
         *self.svg_cache.borrow_mut() = None;
         // The placed-cache key already carries the font fingerprint (so it would rebuild on the next
         // query anyway), but drop it explicitly here too — registerFont is one of the five documented

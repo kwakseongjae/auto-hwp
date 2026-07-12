@@ -33,7 +33,7 @@ import { FindBar } from "./FindBar";
 import { FindMatchOverlay } from "./FindMatchOverlay";
 import { useSelectionActions } from "../useSelectionActions";
 import { readViewBox, screenToPage } from "../coords";
-import { buildFontFaceCss, type FontCatalogEntry } from "../fonts";
+import { buildFontFaceCss, catalogUrl, SERIF_SUBSTITUTE, type FontCatalogEntry } from "../fonts";
 
 const A4_W = 794; // CSS px for 210mm @ 96dpi (mirrors HwpPageView) — the 100% page width.
 
@@ -136,6 +136,11 @@ export interface HwpWorkspaceProps {
   defaultFont?: { family: string; bytes: Uint8Array } | null;
   /** Base URL the catalog fonts are served from (default `/fonts`); forwarded to the FontPicker. */
   fontUrlBase?: string;
+  /** Opt-in (issue 058): also fetch + register the OFL SERIF substitute (Nanum Myeongjo, from the
+   *  `fontCatalog`) so the EXPORTED PDF renders 명조 runs serif (the screen already does via `@font-face`).
+   *  Best-effort — a 404/offline fetch is swallowed and 명조 falls back to the gothic body in the PDF
+   *  (pre-058). Off by default so the injected-font set (and hosts/tests that pin it) is unchanged. */
+  injectSerifSubstitute?: boolean;
   /** Opt-in: enable the issue-027 MANUAL editing chrome (표 추가 버튼 · 상단 룰러 · 열너비 드래그 ·
    *  더블클릭 텍스트 팝오버 · 선택 서식 툴바). Default OFF — the workspace behaves exactly as before
    *  (chat-only) when omitted, so existing hosts/tests are unaffected. */
@@ -684,6 +689,40 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     defaultFontAppliedFor.current = props.document.bytes;
     void applyFont(props.defaultFont.family, props.defaultFont.bytes);
   }, [meta, props.defaultFont, props.document, applyFont]);
+
+  // Issue 058: the served URL of the OFL SERIF substitute (Nanum Myeongjo) from the catalog — drives the
+  // screen serif `@font-face` (below) so 명조 runs render serif. `undefined` when the catalog omits it →
+  // no serif binding (the SVG falls back to NanumGothic — a safe no-op).
+  const serifUrl = useMemo(() => {
+    const e = props.fontCatalog?.find((c) => c.family === SERIF_SUBSTITUTE);
+    return e ? catalogUrl(e, props.fontUrlBase) : undefined;
+  }, [props.fontCatalog, props.fontUrlBase]);
+
+  // Issue 058 (opt-in): register the serif substitute into the ENGINE too, so the EXPORTED PDF embeds it
+  // for 명조 runs (the own-render already tags them; `emit_pdf_with_fonts` picks the serif-named face).
+  // Registered as an ADDITIONAL family (the gothic body stays first → still backs the layout metrics), and
+  // does NOT become `selectedFont` (no "apply to everything" collapse). Once per document; best-effort.
+  const serifRegisteredFor = useRef<Uint8Array | null>(null);
+  useEffect(() => {
+    if (!props.injectSerifSubstitute || !meta || !props.document || !serifUrl) return;
+    if (serifRegisteredFor.current === props.document.bytes) return;
+    serifRegisteredFor.current = props.document.bytes;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(serifUrl);
+        if (!res.ok || cancelled) return;
+        const bytes = new Uint8Array(await res.arrayBuffer());
+        if (cancelled) return;
+        await core.session.registerFont(SERIF_SUBSTITUTE, bytes);
+      } catch {
+        /* serif substitute is best-effort — 명조 falls back to the gothic body in the PDF (pre-058). */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [props.injectSerifSubstitute, meta, props.document, serifUrl, core]);
 
   // Revoke the blob URL when the component unmounts (avoid leaking the object URL).
   useEffect(
@@ -2074,8 +2113,10 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   return (
     <div className={`hw-workspace ${props.className ?? ""}`}>
       {/* Screen font-face + alias (issue 022 §3): map every document font name to the selected face so
-          the SVG on screen matches the exported PDF. Injected only when a font is selected. */}
-      {selectedFont && <style data-testid="hw-fontface">{buildFontFaceCss(selectedFont.family, selectedFont.url)}</style>}
+          the SVG on screen matches the exported PDF. Injected only when a font is selected. Issue 058:
+          also bind the OFL serif substitute (`serifUrl`) so 명조 runs render serif — the attribute-scoped
+          serif rule out-specifies the blanket collapse, preserving the doc's 명조↔고딕 distinction. */}
+      {selectedFont && <style data-testid="hw-fontface">{buildFontFaceCss(selectedFont.family, selectedFont.url, { serifUrl })}</style>}
       <div className="hw-toolbar">
         <span className="hw-brand">tf-hwp</span>
         <span className="hw-doc-meta">{meta ? `${meta.format.toUpperCase()} · ${meta.pages}쪽` : "문서 없음"}</span>

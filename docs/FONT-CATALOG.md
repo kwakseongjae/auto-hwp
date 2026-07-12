@@ -73,3 +73,31 @@
 
 → 화면·조판·PDF 가 **동일 폰트**로 일치한다. 미주입 상태에서는 결정적 근사 메트릭
 (`ApproxFontMetrics`)으로 레이아웃만 유지하고 PDF 는 `font_missing` 에러를 던진다(R8).
+
+## 서체 충실도 대체 매핑 (issue 058)
+
+issue 022 는 "전 문서 폰트명 → 현재 선택 폰트 1개"였다(전 문서가 단일 NanumGothic 렌더). issue 058 은
+문서의 **명조/고딕 구분**을 대체 face 로 라우팅해 화면·PDF 가 실서체 계열을 구분 렌더한다.
+
+- **분류 → 대체(단일 출처)**: `crates/hwp-model/src/font_class.rs` (`classify`/`substitute_family`).
+  이름 휴리스틱으로 문서 face 를 분류한다 — `바탕/명조/궁서/Batang/Myeongjo/Serif/Times…` → **명조(serif)**,
+  `돋움/고딕/굴림/Dotum/Gulim/Gothic/맑은 고딕/Arial/Pretendard…` → **고딕**, 그 외 → 기타(고딕 취급).
+  React 미러: `packages/react/src/fonts.ts::classifyFont`/`substituteFamily` (반드시 Rust 와 동기).
+- **대체 세트(OFL 만, 재배포 불가 폰트 0)**:
+  - 명조(serif) → **Nanum Myeongjo(나눔명조)** — 정적 OFL TTF(krilla 서브셋 친화, 번들 NanumGothic 과
+    한 가족). 위 카탈로그/`fetch-fonts.mjs` 에 이미 수록(sha256 고정).
+  - 고딕/기타 → **NanumGothic** — 이미 번들된 보편 폴백. 명시 대체 face 없음(058 전과 렌더 동일 →
+    골든 바이트 불변).
+  - **함초롬/한컴 계열 번들 0** 유지. 사용자가 자기 함초롬을 업로드하면(재배포 아님) 그 이름으로
+    등록되어 대체를 우회한다.
+- **적용 지점(글리프 x 소유 → 화면·PDF 자동 추종)**:
+  - own-render SVG: `place::paragraph_glyphs` 가 per-script 문서 face(`CharShape.fonts`)를 분류해
+    `PlacedGlyph.font` 에 대체 family 를 stamp → SVG `<text font-family>` 가 명조는 `Nanum Myeongjo`.
+  - PDF: `hwp-export/src/pdf.rs` 가 명조 글리프를 serif face(주입 `Nanum Myeongjo` / 네이티브
+    AppleMyungjo·Noto Serif CJK)로 그린다.
+  - 화면: `buildFontFaceCss(family, url, { serifUrl })` 가 `Nanum Myeongjo` `@font-face` 를 바인딩하고,
+    속성 셀렉터(`text[font-family^="Nanum Myeongjo"]`)로 022 의 일괄 collapse 를 이겨 명조↔고딕 구분을
+    보존한다. serifUrl 미배치/오프라인이면 SVG 폴백이 NanumGothic 으로 떨어지는 안전한 no-op.
+- **게이트 불변(V5)**: 대체는 **디스플레이 전용** — 조판 메트릭(advance)은 family-blind 그대로다
+  (전각 Hangul 은 face 무관 EM 격자). `layout-check` 쪽수 게이트(benchmark 8==8 · benchmark1 18==18)
+  는 영향 없음(SVG 는 `font-family` 속성만 바뀌고 글리프 x 는 바이트 동일).

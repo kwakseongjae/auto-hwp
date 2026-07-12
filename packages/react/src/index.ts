@@ -126,8 +126,8 @@ export { CellShadePalette } from "./components/CellShadePalette";
 export type { CellShadePaletteProps } from "./components/CellShadePalette";
 
 // Font system v1 (issue 022): the curated OFL catalog + screen @font-face/alias helpers.
-export { FONT_CATALOG, catalogUrl, buildFontFaceCss, svgFontFamilies, isTtc } from "./fonts";
-export type { FontCatalogEntry } from "./fonts";
+export { FONT_CATALOG, catalogUrl, buildFontFaceCss, svgFontFamilies, isTtc, classifyFont, substituteFamily, SERIF_SUBSTITUTE } from "./fonts";
+export type { FontCatalogEntry, FontCategory } from "./fonts";
 
 // Backend seam
 export type { EngineAdapter } from "./EngineAdapter";

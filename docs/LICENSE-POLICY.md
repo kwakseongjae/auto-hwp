@@ -30,6 +30,10 @@
 - **대체 메트릭 정책.** 폰트 미주입 상태의 own-render/PDF는 per-script 근사 메트릭
   (`ApproxFontMetrics`)으로 레이아웃만 유지한다(글리프는 스텁). 실제 글리프 형상은 주입된 OFL 폰트로만
   나온다.
+- **서체 충실도 대체(issue 058).** 문서의 명조/고딕 구분은 **OFL 대체 face** 로만 라우팅한다 —
+  명조(serif) → **Nanum Myeongjo(OFL)**, 고딕/기타 → **NanumGothic(OFL, 번들)**. 분류·대체는
+  `crates/hwp-model/src/font_class.rs` 단일 출처. 함초롬/한컴 계열은 여전히 **번들 0**(사용자 업로드만 —
+  재배포 아님). 대체는 디스플레이 전용이라 조판 메트릭/게이트에 영향 없음.
 
 ## 강제
 - `deny.toml` + `cargo deny check licenses` (CI). 새 의존 추가 시 분류(BORROW-STABLE/OWN/…)를 PR에 명시.

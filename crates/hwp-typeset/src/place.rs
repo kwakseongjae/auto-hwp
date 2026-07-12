@@ -1633,16 +1633,13 @@ fn paragraph_glyphs(p: &Paragraph, doc: &SemanticDoc) -> Vec<GlyphInfo> {
         let underline = cs.map(|c| c.underline).unwrap_or(false);
         let bold = cs.map(|c| c.bold).unwrap_or(false);
         let italic = cs.map(|c| c.italic).unwrap_or(false);
-        let font = cs
-            .and_then(|c| c.font_family.clone())
-            .filter(|s| !s.trim().is_empty());
         for inl in &run.content {
             if let Inline::Text(t) = inl {
                 for ch in t.chars() {
                     let sch = crate::subst_glyph(ch);
+                    let slot = crate::script_slot(sch);
                     let (ratio, spacing_em) = cs
                         .map(|c| {
-                            let slot = crate::script_slot(sch);
                             let r = match *c.ratio.get(slot) {
                                 0 => 100,
                                 r => r.clamp(50, 200),
@@ -1659,7 +1656,7 @@ fn paragraph_glyphs(p: &Paragraph, doc: &SemanticDoc) -> Vec<GlyphInfo> {
                         underline,
                         bold,
                         italic,
-                        font: font.clone(),
+                        font: display_font(cs, slot),
                         ratio,
                         spacing_em,
                     });
@@ -1668,6 +1665,25 @@ fn paragraph_glyphs(p: &Paragraph, doc: &SemanticDoc) -> Vec<GlyphInfo> {
         }
     }
     out
+}
+
+/// The OFL substitute display family for a glyph (issue 058): resolve the char shape's per-script font
+/// NAME (HWP docs carry 함초롬바탕(명조)/함초롬돋움(고딕) in `CharShape.fonts`, one per [`ScriptClass`]),
+/// falling back to the single `font_family` (an in-app 글꼴 change / HWPX), then classify it to a bundled
+/// substitute ([`hwp_model::font_class::substitute_family`]). `None` = the default gothic (NanumGothic,
+/// the SVG's universal fallback) — so 고딕/기타 runs keep their pre-058 rendering (and golden bytes).
+/// DISPLAY only: the metric provider stays family-blind, so advances/pagination (and the gate) are
+/// unchanged — only which face draws the glyph shape changes.
+fn display_font(cs: Option<&CharShape>, slot: ScriptClass) -> Option<String> {
+    let cs = cs?;
+    let name = cs
+        .fonts
+        .get(slot as usize)
+        .and_then(|o| o.as_deref())
+        .or(cs.font_family.as_deref())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())?;
+    hwp_model::font_class::substitute_family(name).map(str::to_string)
 }
 
 /// The tallest anchored image/equation on the paragraph as `(w, h, bin_ref)` — bin_ref empty for an
@@ -2375,6 +2391,40 @@ mod tests {
         let g = &placed.pages[0].glyphs;
         assert_eq!(g.len(), 1);
         assert_eq!(g[0].color, blue, "run text color flows to the placed glyph");
+    }
+
+    #[test]
+    fn myeongjo_hangul_font_routes_to_the_serif_substitute() {
+        // Issue 058: a per-script 명조 (함초롬바탕) Hangul face routes the placed glyph's DISPLAY font to
+        // the OFL serif substitute (Nanum Myeongjo); a 고딕 (함초롬돋움) face → None (the default gothic).
+        // DISPLAY only — advances are unchanged (metric-neutral), so a font routing never moves the glyph
+        // x or shifts pagination. `x` is captured to prove the position is face-independent.
+        let mut doc = doc_with(vec![Block::Paragraph(para("가"))]);
+        doc.char_shapes[0] = CharShape {
+            fonts: vec![Some("함초롬바탕".to_string())],
+            ..Default::default()
+        };
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        assert_eq!(placed.pages[0].glyphs.len(), 1);
+        let serif_x = placed.pages[0].glyphs[0].x;
+        assert_eq!(
+            placed.pages[0].glyphs[0].font.as_deref(),
+            Some("Nanum Myeongjo"),
+            "명조 Hangul face → serif substitute"
+        );
+
+        // 고딕 face → no explicit substitute (default gothic) AND the glyph x is byte-identical (metric-
+        // neutral: the face routing is display-only).
+        doc.char_shapes[0].fonts = vec![Some("함초롬돋움".to_string())];
+        let placed2 = place_doc(&doc, &ApproxFontMetrics);
+        assert_eq!(
+            placed2.pages[0].glyphs[0].font, None,
+            "고딕 Hangul face stays on the default gothic (None)"
+        );
+        assert_eq!(
+            placed2.pages[0].glyphs[0].x, serif_x,
+            "font routing is display-only — the glyph x is face-independent"
+        );
     }
 
     #[test]

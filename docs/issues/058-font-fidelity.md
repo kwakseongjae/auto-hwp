@@ -16,11 +16,31 @@
 4. **사용자 폰트 업로드**: 사용자가 자기 함초롬 폰트 업로드(재배포 아님) 또는 Local Font Access API(Chromium)로 시스템 폰트 read → registerFont. 브라우저 지원/권한 제약 문서화.
 
 ## 수용 기준
-- [ ] 문서가 명조/고딕을 섞어 쓰면 화면·PDF도 대응 대체 face로 구분 렌더(현재는 전부 Nanum)
-- [ ] 게이트 8==8·18==18 불변(메트릭 변경은 조판 입력 — 페이지 수 영향 측정·보고), wasm-safe
-- [ ] 라이선스: 번들 face 전부 OFL/무료(deny + LICENSE-POLICY.md 갱신), 함초롬 번들 0
+- [x] 문서가 명조/고딕을 섞어 쓰면 화면·PDF도 대응 대체 face로 구분 렌더(현재는 전부 Nanum)
+      — own-render SVG: benchmark 661 글리프·benchmark1 2356 글리프가 명조로 라우팅(나머지 고딕).
+      네이티브 PDF: AppleMyungjo(serif) + NanumGothic(gothic) 동시 임베드 확인.
+- [x] 게이트 8==8·18==18 불변 — **디스플레이 전용**이라 metric family-blind 유지(글리프 x 바이트 동일;
+      SVG는 `font-family` 속성만 변경). 측정 완료(§구현).
+- [x] 라이선스: 대체 face 전부 OFL(Nanum Myeongjo·NanumGothic), 함초롬 번들 0. deny licenses ok,
+      LICENSE-POLICY.md/FONT-CATALOG.md 갱신. (신규 커밋 폰트/crate 0 — Nanum Myeongjo는 기존 fetch 카탈로그.)
+
+## 구현 (v1, 2026-07-13)
+- **매핑 레이어(단일 출처)**: `crates/hwp-model/src/font_class.rs` — `classify(name)`(이름 휴리스틱) +
+  `substitute_family(name)`(명조 → `Nanum Myeongjo`, 고딕/기타 → None=기본 고딕). React 미러:
+  `packages/react/src/fonts.ts::classifyFont`/`substituteFamily`.
+- **적용(글리프 x 소유 → 화면·PDF 자동 추종)**:
+  - own-render: `place::paragraph_glyphs` 가 per-script `CharShape.fonts` 를 분류해 `PlacedGlyph.font`
+    에 대체 family stamp(디스플레이 전용, advance 불변).
+  - PDF: `hwp-export/src/pdf.rs` `EmbedFont.serif` 슬롯(네이티브 discover=AppleMyungjo/Noto Serif,
+    wasm=주입 `Nanum Myeongjo`) + `paint_glyph` 명조 라우팅. `HwpDoc.registerFont` 는 family 별
+    누적(첫 face=body=메트릭, 서프=추가).
+  - 화면: `buildFontFaceCss(.., { serifUrl })` 가 serif `@font-face` + 속성 셀렉터 override(022 collapse
+    보다 specificity 우위)로 명조↔고딕 보존. 랩은 `injectSerifSubstitute` 로 PDF용 serif 도 주입.
+- **v1 스코프 밖(후속)**: (a) advance 레벨 메트릭 보정(size-adjust) — 게이트 리스크(V5)라 v1은 metric
+  family-blind 유지; (b) FaceName PANOSE/typeInfo 파싱(현재 이름 휴리스틱만); (c) 사용자 폰트 업로드는
+  기존 FontPicker 업로드 경로로 커버(Local Font Access는 Chromium 한정 — 스코프 밖).
 
 ## 함정
-- 메트릭 변경은 게이트 리스크(V5류) — 대체 face 도입 후 benchmark 페이지 수 재확인 필수.
-- FaceName typeInfo 파싱은 rhwp 경유(vendored 수정 금지 — 어댑터에서).
+- 메트릭 변경은 게이트 리스크(V5류) — **v1은 디스플레이 전용**으로 회피(metric 무변경 → 게이트 무영향 증빙).
+- FaceName typeInfo 파싱은 rhwp 경유(vendored 수정 금지 — 어댑터에서). v1은 이름 휴리스틱만 사용.
 - 사용자 폰트 = 재배포 아님(약관 명시), 시스템 폰트 API는 Chromium 한정(폴백 필요).
