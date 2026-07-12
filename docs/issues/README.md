@@ -70,11 +70,21 @@ R12 완료 후 "알려진 한계" 5종을 리서치 4레인으로 조사 → 이
 
 | # | 제목 | 상태 | 우선 | 리서치 핵심 |
 |---|------|------|------|------------|
-| [058](058-font-fidelity.md) | 폰트 충실도 — 문서 서체→OFL 대체 매핑 | open | R13-P1 | FontKey에 family 이미 흐름 → RealFontMetrics 한 곳 수정+글리프 x 소유로 화면·PDF 자동 추종. 명조=본명조/고딕=Pretendard |
-| [059](059-ime-composition.md) | IME 한글 인라인 조합(FG-13) | open | R13-P0 | **반전: 표시 아닌 입력캡처 이슈** — 캐럿에 hidden input 부재. xterm.js식 캐럿추종 textarea. 엔진 무변경 |
-| [060](060-frame-table-export.md) | 프레임 래퍼 내부표 편집 미export | open | R13-P1 | 원인=emit 게이트 4곳 비재귀 술어(serialize.rs). 재귀화+057 src_span 해소로 verbatim 정합 |
+| [058](058-font-fidelity.md) | 폰트 충실도 — 문서 서체→OFL 대체 매핑 | **done** (43a7c48) | R13-P1 | **디스플레이 전용**으로 게이트 리스크 원천 차단(metric 불변, 글리프 x 바이트 동일). 명조→Nanum Myeongjo 라우팅(SVG+PDF), 고딕=기본. font_class.rs 단일출처. e2e 38 |
+| [059](059-ime-composition.md) | IME 한글 인라인 조합(FG-13) | **done** (1ea3365) | R13-P0 | 반전: 입력캡처 이슈였음(한글 완전 무입력 실측 확정). 캐럿추종 hidden textarea + compositionView, 엔진 무변경. e2e 39. WKWebView 실기 4항목 수동 큐 |
+| [060](060-frame-table-export.md) | 프레임 래퍼 내부표 편집 미export | **다음 착수** | R13-P1 | 원인=emit 게이트 4곳 비재귀 술어(serialize.rs). 재귀화+057 src_span 해소로 verbatim 정합. 058 병합 완료로 document.rs 안정 → 착수 가능 |
 | [061](061-web-deploy.md) | 웹 배포(Vercel prebuilt) — QA용 외부 URL | **deferred** | QA 인프라 | 2026-07-12 보류 — 사용자가 로컬 QA(`npm run dev`) 선택. 설계는 완료, 필요 시 30분 최소경로 |
-| (056) | 배포용 crypto | (위 R12 표) | 조건부 | 리서치로 착수가능 판정 — 실샘플 1건이 최종 게이트 |
+| (056) | 배포용 crypto | (위 R12 표) | 조건부→**062로 해소** | rhwp crypto.rs(MIT, NIST 벡터 테스트 보유)가 골든 벡터까지 해결 — 062-1로 승격 |
+| [062](062-rhwp-renderer-promotion.md) | rhwp 렌더러 계층 승격(배포용복호·금칙·정렬·다단·대각선·수식·옛한글·폰트메트릭) | open | R14 배치 | **헤드라인 발견**: 약점 상당수가 이미 트리 안 external/rhwp(MIT)에 완성 — 파스전용이라 미배선. 라이선스 리스크 0 "우리 코드 승격". quick win 5개 |
+
+## 웹 이식(외부 임베드) 준비도 (2026-07-13 SDK 감사)
+
+아키텍처 경계(어댑터·헤드리스·벤더중립·R7 sanitize)는 **이식 준비 우수**하나 패키징 "최종 1마일"이 비어 제3자 npm install 임베드는 아직 불가. 블로커 랭킹(이슈 미승격 — 필요 시 063으로):
+1. [치명] `@tf-hwp/react`의 `file:` 상호의존 → 실버전 + 레지스트리 발행 순서(engine→editor-core→ai-protocol→react)
+2. [치명] prepublish 빌드 훅 부재 → 빈 tarball 위험(engine=wasm-bindgen, react=vite+tsc)
+3. [높음] 발행 CI·publishConfig(access:public) 부재
+4. [높음] 비-Next 호스트용 wasm/워커 정적 서빙 레시피 부재(현 가이드 Next 편중)
+5. [중] Next16 Turbopack 회귀·프레임워크 독립 AI 프록시 템플릿·published-package 임베드 예제 부재
 
 ## 로드맵 R11 — 라운드 11 (2026-07-05, SDK 승격 배치 A)
 
