@@ -135,7 +135,13 @@ pub enum Block {
 }
 
 impl Block {
-    fn any_dirty(&self) -> bool {
+    /// True if this block — or, for a table, ANY of its cells RECURSIVELY (nested tables included)
+    /// — is dirty. This is the FRAME-TRANSPARENT dirty predicate: a table edit op marks only the
+    /// `edit_target` (the inner table of a 1×1 frame wrapper), never the outer wrapper table/cell,
+    /// so the HWPX emitter must gate on THIS (not a one-level `t.dirty || cells.any(c.dirty)`) or a
+    /// 자가진단표 edit is silently dropped on save (issue 060). Shared by `SemanticDoc::any_dirty`
+    /// and the serializer's emit gates.
+    pub fn any_dirty(&self) -> bool {
         match self {
             Block::Paragraph(p) => p.dirty.is_dirty(),
             Block::Table(t) => t.dirty.is_dirty() || t.cells.iter().any(|c| c.any_dirty()),

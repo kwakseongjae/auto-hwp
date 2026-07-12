@@ -275,13 +275,15 @@ fn parse_section(xml: &str, out: &mut Vec<Block>) -> std::result::Result<(), Doc
                 }
                 b"tbl" => {
                     if let Some(mut f) = tbls.pop() {
-                        // TOP-LEVEL table (no enclosing table frame left): record its
-                        // `[<hp:tbl … </hp:tbl>)` span so a dirty table can be re-emitted at its
-                        // original anchor instead of appended at the section end (issue 057).
-                        // Nested tables ride inside their host cell's span — no own span needed.
-                        if tbls.is_empty() {
-                            f.table.src_span = Some((f.start, reader.buffer_position() as usize));
-                        }
+                        // Record EVERY table's `[<hp:tbl … </hp:tbl>)` span — TOP-LEVEL and NESTED.
+                        // Top-level: re-emit a dirty table at its original anchor instead of the
+                        // section end (issue 057). Nested: a 1×1 frame wrapper's INNER table needs
+                        // its own span too, because a table edit op marks only the inner table/cell
+                        // dirty (never the outer wrapper) — so the serializer splices the inner
+                        // table's dirty `<hp:tc>` spans in place and leaves the wrapper verbatim
+                        // (issue 060). Nested spans index the SAME section XML buffer as top-level
+                        // ones. Export provenance only — render/equality ignore it.
+                        f.table.src_span = Some((f.start, reader.buffer_position() as usize));
                         if let Some(top) = blocks.last_mut() {
                             top.push(Block::Table(f.table));
                         }

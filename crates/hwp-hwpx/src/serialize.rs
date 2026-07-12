@@ -384,10 +384,10 @@ fn collect_used_shapes(doc: &SemanticDoc, chars: &mut IdxSet, paras: &mut IdxSet
     // Top-level: only DIRTY blocks are appended/emitted.
     for sec in doc.sections.iter().filter(|s| s.dirty.is_dirty()) {
         for b in &sec.blocks {
-            let emit = match b {
-                Block::Paragraph(p) => p.dirty.is_dirty(),
-                Block::Table(t) => t.dirty.is_dirty() || t.cells.iter().any(|c| c.dirty.is_dirty()),
-            };
+            // Frame-transparent (issue 060): a 1×1 wrapper's inner-table edit leaves the OUTER
+            // table/cell clean, so gate on the RECURSIVE dirty predicate — else the wrapper's
+            // emitted (spliced) inner cells reference shapes/borderFills we never collected.
+            let emit = b.any_dirty();
             if emit {
                 walk_all(std::slice::from_ref(b), chars, paras);
             }
@@ -607,10 +607,10 @@ fn collect_bf_specs(doc: &SemanticDoc) -> BTreeMap<String, BfSpec> {
     let mut out = BTreeMap::new();
     for sec in doc.sections.iter().filter(|s| s.dirty.is_dirty()) {
         for b in &sec.blocks {
-            let emit = match b {
-                Block::Paragraph(p) => p.dirty.is_dirty(),
-                Block::Table(t) => t.dirty.is_dirty() || t.cells.iter().any(|c| c.dirty.is_dirty()),
-            };
+            // Frame-transparent (issue 060): a 1×1 wrapper's inner-table edit leaves the OUTER
+            // table/cell clean, so gate on the RECURSIVE dirty predicate — else the wrapper's
+            // emitted (spliced) inner cells reference shapes/borderFills we never collected.
+            let emit = b.any_dirty();
             if emit {
                 walk(std::slice::from_ref(b), &mut out);
             }
@@ -934,7 +934,13 @@ fn table_inplace_edits(
     let mut next_id = max_id(original) + 1;
 
     for (bi, block) in sec.blocks.iter().enumerate() {
-        let Block::Table(t) = block else { continue };
+        let Block::Table(outer) = block else { continue };
+        // Frame-transparent (issue 060): resolve a 1×1 wrapper (자가진단표) to its INNER table — the
+        // edit op marks the inner table/cell dirty, never the outer wrapper, so we splice the inner
+        // table's own `<hp:tc>` spans in place (assigned by parse for nested tables too) and leave
+        // the outer wrapper + untouched siblings byte-verbatim. A normal table is its own edit
+        // target, so the 057 path is behavior-identical.
+        let t = outer.edit_target();
         if !(t.dirty.is_dirty() || t.cells.iter().any(|c| c.dirty.is_dirty())) {
             continue;
         }
@@ -1419,7 +1425,11 @@ enum EmitBlock {
 fn dirty_appended(b: &Block) -> bool {
     match b {
         Block::Paragraph(p) => p.dirty.is_dirty() && p.source.is_none(),
-        Block::Table(t) => t.dirty.is_dirty() || t.cells.iter().any(|c| c.dirty.is_dirty()),
+        // Frame-transparent (issue 060): recurse so a wrapper with only inner-table dirt is still
+        // considered dirty here. In practice such a wrapper is handled in place by
+        // `table_inplace_edits` and thus skipped before this is reached (it carries a src_span);
+        // recursing keeps the gate consistent and avoids a silent drop otherwise.
+        Block::Table(_) => b.any_dirty(),
     }
 }
 
