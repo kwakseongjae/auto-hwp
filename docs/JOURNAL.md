@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-13 저녁 (Claude) · R14 062 quick win 완결 → 063 착수
+- 한 일: 062 quick win 3종 병합·검증 — 062-1 배포용복호(c716e8f, **056 해소**; 발견: 배포용은 이미 rhwp가 복호 중, hwp-crypto를 NIST골든+fail-closed 정본으로 승격) · 062-2 옛한글(6b6d22d, KTUG PublicDomain 5,659매핑, 측정=전각프록시 LOCKSTEP+그리기만 자모확장 additive) · 062-3 금칙(c556114, rhwp 두 집합 verbatim→layout_paragraph kinsoku_adjust, 게이트·줄바꿈 before==after 하락0). 각 병합 후 워크트리에서 게이트 직접확인→cherry-pick, 배치 후 --full 그린(e2e 39/39).
+- 패턴 확립: rhwp 승격은 워크트리에서 핵심 Rust 증명(게이트/테스트) 직접 확인 후 cherry-pick, 그다음 main --full. leaf crate(hwp-crypto)는 quick로 충분, render/typeset 접촉(062-2/3)은 --full.
+- 다음: 063 웹 이식 패키징(file:→실버전+prepublish훅→npm 발행→Vite 임베드 예제).
+
 ## 2026-07-13 오후 (Claude) · R13 마감(060) + 062 착수
 - 한 일: 060 프레임표(1778690) 인수·병합 — 060 에이전트가 e2e를 42분 폴링하며 반환 반복(토큰 낭비) → 직접 인수: 워크트리에서 hwp-hwpx 테스트(frame_table_060 3 + 057 골든 5 무회귀)+게이트 확인 후 커밋·cherry-pick. main verify-local --full 그린(e2e 39/39, 게이트 8==8·18==18). ⚠️ e2e가 포트 오염으로 1회 실패 → 프로세스 정리(pkill next/playwright, lsof :3100/:3000 kill)+스모크 확인 후 재실행으로 39/39 회복.
 - 교훈: 에이전트가 느린 e2e를 폴링하며 반환 반복하면 직접 인수(핵심 Rust 증명만 확인하고 커밋+병합, e2e는 main에서). e2e 포트 오염 시 pkill+lsof 정리.
