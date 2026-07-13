@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-13 밤2 (Claude) · 062 잔여 계획(워크플로) + B1 대각선
+- 한 일: 062 잔여 4항목 조사·적대검증·계획 워크플로(wf_842c2cd1, 9에이전트) — 발견: 대각선=거의완성(순델타 X자), 차트=rhwp에 이미 있음(이슈 "소스없음" 오류), 폰트메트릭=디스코프(라이선스+V5+실익미미). 전항목 document.rs+lift.rs 공유→순차(B1→B2→B3). B1 062-4 대각선 X자(342b833): DiagonalKind::Cross, render-only, 게이트 8==8·18==18, e2e 39/39.
+- 함정: B1 에이전트가 커밋 전 external/rhwp 심링크 제거→워크트리 재검증 불가 → 코드-only 커밋이라 main cherry-pick+거기서 --full로 해소. 향후 rhwp 제거 금지. 하단 고아 에이전트 4개(058 폰트 리서치 하위)도 종료.
+- 다음: B2 062-5 수식 렌더 v1(rhwp bootstrap SVG) → B3 차트(tail).
+
 ## 2026-07-13 밤 (Claude) · 063 병합·검증 완료 — 승인 배치(060→062→063) 종료
 - 한 일: 063 cherry-pick 병합(50db8f0). main --full에서 react vitest 1건(workspace.editing "028 툴바 숨김") 실패 → 격리 재실행 296/296 그린 확인 = **flaky(테스트 순서/타이밍), 063 회귀 아님**. set -e로 e2e 미실행됐던 것 → e2e 별도 39/39 그린으로 검증 완료. 게이트 8==8·18==18, deny ok. flaky는 CURRENT_STATE에 추적 기록.
 - **승인 배치 전부 완료**: R13 060 + R14 062 quick win(배포용복호/옛한글/금칙) + 063 웹 이식 패키징. 외부 사이트 npm 임베드 준비 완료(실 publish는 사람이 workflow_dispatch).

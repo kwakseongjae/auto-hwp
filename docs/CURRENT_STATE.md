@@ -40,6 +40,8 @@
 ## 진행 중 레인 (병렬 작업 시에만)
 | 레인/ID | owner | 상태 | 다음 체크포인트 |
 |---|---|---|---|
-| B1 062-4 대각선 X-교차 | 구현 에이전트(워크트리) | **착수** — DiagonalKind Cross 추가(render-only) | verify --full → 병합 |
-소유권: 잔여 3종(대각선/수식/차트) 전부 document.rs+lift.rs 공유 → **순차 강제**(B1→B2→B3). 폰트메트릭 디스코프.
-계획 근거: docs/issues/062 §잔여 배치 계획(워크플로 wf_842c2cd1).
+| B1 062-4 대각선 X-교차 | — | **done** (342b833) — DiagonalKind::Cross, render-only, 게이트 8==8·18==18, cross 테스트 2 | 병합 완료 |
+| B2 062-5 수식 렌더 v1 | 구현 에이전트(워크트리) | **착수 예정** — rhwp bootstrap SVG 임베드 | verify --full → 병합 |
+소유권: 잔여(수식 B2/차트 B3) 전부 document.rs+lift.rs 공유 → **순차 강제**. 폰트메트릭 디스코프.
+계획 근거: docs/issues/062 §잔여 배치 계획(워크플로 wf_842c2cd1). ⚠️함정: B1 에이전트가 커밋 전 external/rhwp
+심링크 제거→워크트리 재검증 불가였음→코드-only 커밋이라 main cherry-pick+거기서 검증으로 해소. 앞으로 rhwp 제거 금지 지시.
