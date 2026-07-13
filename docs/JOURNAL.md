@@ -5,7 +5,12 @@
 
 ---
 
-## 2026-07-13 밤 (Claude) · R14 063 웹 이식 패키징 구현(워크트리, main 병합 대기)
+## 2026-07-13 밤 (Claude) · 063 병합·검증 완료 — 승인 배치(060→062→063) 종료
+- 한 일: 063 cherry-pick 병합(50db8f0). main --full에서 react vitest 1건(workspace.editing "028 툴바 숨김") 실패 → 격리 재실행 296/296 그린 확인 = **flaky(테스트 순서/타이밍), 063 회귀 아님**. set -e로 e2e 미실행됐던 것 → e2e 별도 39/39 그린으로 검증 완료. 게이트 8==8·18==18, deny ok. flaky는 CURRENT_STATE에 추적 기록.
+- **승인 배치 전부 완료**: R13 060 + R14 062 quick win(배포용복호/옛한글/금칙) + 063 웹 이식 패키징. 외부 사이트 npm 임베드 준비 완료(실 publish는 사람이 workflow_dispatch).
+- 다음: 062 잔여(대각선·수식·폰트메트릭·차트) R14 후속 / 사용자 웹 QA(로컬) / flaky 테스트 격리.
+
+## 2026-07-13 밤 (Claude) · R14 063 웹 이식 패키징 구현(워크트리)
 - 한 일: 063 전 스코프. ① **file:→실버전**: 루트 pnpm-workspace 대신 **prepack 치환 전략** 채택(레포가 npm+독립락, apps/hwp-lab도 npm+file: → `workspace:*`는 npm이 못 읽어 무회귀 위반). react `prepack`이 file:→^ver 텍스트 치환(포맷 보존)·`postpack`이 복원(on-disk는 file: 유지). ② **prepack 빌드 훅** 4패키지(engine=build-wasm.mjs cargo+wasm-bindgen+wasm-opt, react=vite+tsc, editor-core/ai-protocol=tsc) → `npm pack` 4종 tarball 전부 pkg/dist 포함·file:의존 0 실측. ③ **발행 CI**(.github/workflows/publish.yml, workflow_dispatch, engine→editor-core→ai-protocol→react, dry_run 기본, publishConfig access:public). ④ **Vite 임베드 예제**(examples/vite-embed — published tarball 설치→`<HwpWorkspace/>` 렌더, Playwright 스모크 그린: 업로드→8쪽 SVG→셀 마킹→mock 편집→undo). ⑤ **AI 프록시 Express 템플릿**(examples/ai-proxy-express, GET/POST/400 mock 실측). ⑥ 문서(docs/EMBED-GUIDE.md + INTEGRATION-HANDOVER 비-Next 포인터).
 - 발견/수정: **ai-protocol dist가 확장자 없는 상대 import**라 순수 Node ESM(Express 프록시)에서 ERR_MODULE_NOT_FOUND — src에 `.js` 확장자 추가로 수정(번들러/Node 양쪽 호환, vitest 15 무회귀). Vite 프로덕션 빌드는 엔진 글루 wasm을 정적에셋으로 1회 더 방출(런타임 미fetch, 무해 — 문서화).
 - 함정 준수: 실제 npm publish 안 함(npm pack까지만). Rust 무접촉(빌드만). 워크트리 커밋만, 푸시 금지.

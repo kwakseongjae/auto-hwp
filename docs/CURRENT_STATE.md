@@ -3,16 +3,16 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
-- 기준 커밋: `main` 최신(060=1778690 병합) — **R12(051~057) + R13(058·059·060) 완료**. GitHub: https://github.com/kwakseongjae/tf-hwp (private)
-- 갱신: 2026-07-13 · Claude — R13 마감(060 병합·검증: e2e 39/39, 게이트 8==8·18==18, 057 골든 무회귀) → 062 착수
+- 기준 커밋: `50db8f0`(063 병합) — **R12(051~057) + R13(058·059·060) + R14(062 quick win·063 패키징) 완료**. GitHub: https://github.com/kwakseongjae/tf-hwp (private)
+- 갱신: 2026-07-13 · Claude — 063 웹 이식 패키징 병합·검증 → 승인 배치(060→062→063) 전부 완료
 
 ## 지금 (현재 위치)
-- 로드맵 기준: **R12 + R13 완료, R14 062 quick win 완결 + 063 구현(워크트리, main 병합 대기)** —
-  R12(051~057), R13(058·059·060), R14 062-1 배포용복호(056해소)·062-2 옛한글·062-3 금칙 병합·검증.
-- **063 웹 이식 패키징 = 구현 완료(워크트리)**: file:→실버전(prepack 치환)·prepack 빌드훅 4패키지·발행 CI·
+- 로드맵 기준: **R12 + R13 완료, R14(062 quick win·063 패키징) 완료** — 승인 배치(060→062→063) 전부 병합·검증.
+  R12(051~057), R13(058·059·060), R14 062-1 배포용복호(056해소)·062-2 옛한글·062-3 금칙, **063 웹 이식 패키징(50db8f0)**.
+- **063 = 병합 완료**: file:→실버전(prepack 치환)·prepack 빌드훅 4패키지·발행 CI(publish.yml dry_run 기본)·
   Vite 임베드 예제(published tarball 설치→렌더 스모크 그린)·AI 프록시 Express 템플릿·EMBED-GUIDE. `npm pack`
-  4종 tarball 실측(pkg/dist 포함·file:의존 0). ai-protocol dist ESM `.js` 확장자 결함 수정. **실 npm publish는 안 함.**
-  다음 = 아키텍트 main 병합. 062 잔여(대각선·수식·폰트메트릭·차트)는 R14 후속.
+  4종 tarball 실측(pkg/dist 포함·file:의존 0). ai-protocol dist ESM `.js` 결함 수정. **실 npm publish는 미실행(pack까지).**
+  → 외부 사이트에 `npm i @tf-hwp/react @tf-hwp/engine` 임베드 준비 완료(발행은 사람이 workflow_dispatch로).
 - **오픈소스 조사 헤드라인(2026-07-13)**: 우리 약점 상당수(배포용복호·금칙·정렬·다단·대각선·수식·옛한글·
   폰트메트릭)가 이미 external/rhwp(MIT, 우리 소유)에 완성 — 파스전용이라 미배선. → **062 신설**(라이선스 0 승격).
   056 crypto는 062-1(배포용 복호화 quick win)로 해소 경로 확정. 웹 이식 갭 → 063 승격 대기(패키징 최종 1마일).
@@ -29,10 +29,15 @@
 - **웹 QA(사용자, 로컬)**: `cd apps/hwp-lab && npm run dev` → localhost:3000 (QA.md). WKWebView IME 4항목 수동 큐(059).
 - 검증 정본: `scripts/verify-local.sh` (--full 포함). CI는 수동 전용(`gh workflow run ci`).
 
+## 알려진 flaky (추적 — 실회귀 아님)
+- `packages/react/.../workspace.editing.test.tsx` "in-place 에디터 열림 중 028 툴바 숨김" — 전체 스위트에서
+  간헐 실패(063 --full에서 1회), **격리·재실행 시 296/296 그린**. 테스트 순서/타이밍 격리 결함(소스 회귀 아님).
+  후속: 이 테스트의 공유 상태(타이머/DOM leak) 격리. verify 실패 시 이 테스트면 재실행으로 판별.
+
 ## 막힘 / 대기 (없으면 "없음")
 - 없음. (056 배포용 crypto는 "수요 확인" 게이트 — 미착수가 정상 상태)
 
 ## 진행 중 레인 (병렬 작업 시에만)
 | 레인/ID | owner | 상태 | 다음 체크포인트 |
 |---|---|---|---|
-| 063 웹 이식 패키징 | 구현 에이전트(워크트리) | **착수 예정** — file:→실버전 + prepublish훅 → npm 발행 가능 | npm pack 그린 + Vite 임베드 스모크 → 병합 |
+| (없음 — 승인 배치 060→062→063 전부 병합 완료) | | | |
