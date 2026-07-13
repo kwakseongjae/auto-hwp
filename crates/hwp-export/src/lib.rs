@@ -139,6 +139,7 @@ fn render_element(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut St
         Some(Tag::TableRow) | Some(Tag::TableCell) => render_children(el, assets, out),
         Some(Tag::Image) => render_image(el, assets, out),
         Some(Tag::Equation) => render_equation(el, out),
+        Some(Tag::Chart) => render_chart(el, out),
         Some(Tag::Field) => {
             // FieldBegin/FieldEnd are inline MARKERS (no children); the linked text lives in the
             // sibling runs and renders normally. M1 does not yet pair markers into a clickable <a>
@@ -321,6 +322,35 @@ fn render_equation(el: &JsxElement, out: &mut String) {
     out.push_str(&format!(
         "<span style=\"display:inline-block;vertical-align:middle;line-height:0\" \
 title=\"수식\" role=\"img\" aria-label=\"수식\">\
+<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w:.2}\" height=\"{h:.2}\" \
+viewBox=\"0 0 {w:.2} {h:.2}\" overflow=\"visible\">{svg}</svg></span>"
+    ));
+}
+
+/// Render a 차트 (issue 062-7). Mirrors [`render_equation`]: when the codec carried a precomputed SVG
+/// fragment (`data-chart-svg`, present only when rhwp rendered the OOXML chart at lift time), inline it
+/// as a real `<svg>` sized to the reserved box (`data-w`/`data-h` HWPUNIT → px = ÷75). Otherwise the
+/// honest `[차트]` placeholder — never a wrong render. The fragment is rhwp's own OOXML chart renderer
+/// output (only `<g>/<rect>/<line>/<text>/<polyline>/<circle>`, text XML-escaped — no script/handlers),
+/// so it is safe to emit as markup, exactly as the own-render SvgSink already does.
+fn render_chart(el: &JsxElement, out: &mut String) {
+    let svg = el.attrs.get("data-chart-svg").filter(|s| !s.is_empty());
+    let Some(svg) = svg else {
+        out.push_str("<span class=\"hwp-raw\" title=\"차트\">[차트]</span>");
+        return;
+    };
+    let px = |k: &str| {
+        el.attrs
+            .get(k)
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(0.0)
+            / 75.0
+    };
+    let (w, h) = (px("data-w"), px("data-h"));
+    // Style is INLINE (not a BASE_CSS rule) so chart-free documents stay byte-identical.
+    out.push_str(&format!(
+        "<span style=\"display:inline-block;vertical-align:middle;line-height:0\" \
+title=\"차트\" role=\"img\" aria-label=\"차트\">\
 <svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w:.2}\" height=\"{h:.2}\" \
 viewBox=\"0 0 {w:.2} {h:.2}\" overflow=\"visible\">{svg}</svg></span>"
     ));
@@ -701,5 +731,49 @@ mod tests {
             !html.contains("[수식]"),
             "the placeholder is replaced by the rendered equation"
         );
+    }
+
+    /// Issue 062-7: a chart with a precomputed SVG fragment inlines a real `<svg>` sized to the box;
+    /// without one it shows the honest `[차트]` placeholder (rhwp-off / legacy OLE).
+    #[test]
+    fn chart_inlines_svg_or_falls_back_to_placeholder() {
+        let chart_doc = |svg: Option<&str>| {
+            let mut doc = SemanticDoc::default();
+            doc.char_shapes.push(CharShape::default());
+            doc.para_shapes.push(ParaShape::default());
+            doc.sections.push(Section {
+                blocks: vec![Block::Paragraph(Paragraph {
+                    id: Some(NodeId(1)),
+                    runs: vec![Run {
+                        char_shape: 0,
+                        char_ref: None,
+                        content: vec![Inline::Chart(ChartRef {
+                            width: 1500, // → 20px
+                            height: 750, // → 10px
+                            rendered_svg: svg.map(str::to_string),
+                        })],
+                    }],
+                    ..Default::default()
+                })],
+                ..Default::default()
+            });
+            doc
+        };
+        // Rendered: inline <svg> sized to the reserved box, fragment verbatim, no placeholder.
+        let html = html_of(&chart_doc(Some("<g class=\"hwp-ooxml-chart\"><rect/></g>")));
+        assert!(html.contains("<svg"), "inlines a real <svg>: {html}");
+        assert!(html.contains("hwp-ooxml-chart"), "embeds the fragment");
+        assert!(
+            html.contains("viewBox=\"0 0 20.00 10.00\""),
+            "viewBox sized to the box (HWPUNIT/75): {html}"
+        );
+        assert!(!html.contains("[차트]"), "no placeholder when rendered");
+        // Un-rendered: the honest [차트] placeholder, never a broken/empty element.
+        let html = html_of(&chart_doc(None));
+        assert!(
+            html.contains("[차트]"),
+            "placeholder when un-rendered: {html}"
+        );
+        assert!(!html.contains("<svg"), "no <svg> without a fragment");
     }
 }

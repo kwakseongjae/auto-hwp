@@ -330,6 +330,18 @@ fn emit_inline(inl: &Inline) -> JsxNode {
             }
             JsxNode::Element(el)
         }
+        Inline::Chart(c) => {
+            // Issue 062-7: render-only — no editable model, so the box dims + precomputed SVG ride as
+            // plain attrs (no binary blob). `data-chart-svg` absent → the HTML backend emits the honest
+            // [차트] placeholder (rhwp-off / legacy OLE / un-rendered).
+            let mut el = JsxElement::new(Tag::Chart)
+                .with_attr("data-w", c.width.to_string())
+                .with_attr("data-h", c.height.to_string());
+            if let Some(svg) = &c.rendered_svg {
+                el = el.with_attr("data-chart-svg", svg.clone());
+            }
+            JsxNode::Element(el)
+        }
         Inline::FieldBegin(f) => JsxNode::Element(
             JsxElement::new(Tag::Field)
                 .with_attr("data-begin", "1")
@@ -917,6 +929,23 @@ fn parse_inline(node: &JsxNode) -> Result<Inline> {
                     .map_err(err)?;
                 Ok(Inline::Equation(decode_equation(&bytes)))
             }
+            Some(Tag::Chart) => Ok(Inline::Chart(ChartRef {
+                width: e
+                    .attrs
+                    .get("data-w")
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0),
+                height: e
+                    .attrs
+                    .get("data-h")
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0),
+                rendered_svg: e
+                    .attrs
+                    .get("data-chart-svg")
+                    .filter(|s| !s.is_empty())
+                    .cloned(),
+            })),
             Some(Tag::Field) => {
                 if let Some(end) = e.attrs.get("data-end") {
                     Ok(Inline::FieldEnd(

@@ -339,6 +339,12 @@ fn t5_raw_and_passthrough_byte_identical() {
                 version: "Equation Version 60".into(),
                 rendered_svg: Some("<text>1</text>".into()),
             }),
+            // Issue 062-7: a chart round-trips its box dims + precomputed SVG through the JSX codec.
+            Inline::Chart(ChartRef {
+                width: 30000,
+                height: 20000,
+                rendered_svg: Some("<g class=\"hwp-ooxml-chart\"><rect/></g>".into()),
+            }),
             Inline::FieldBegin(FieldMarker {
                 id: 3,
                 field_type: "HYPERLINK".into(),

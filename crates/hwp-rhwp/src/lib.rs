@@ -21,6 +21,8 @@ use hwp_ingest::limits::HardenedError;
 use hwp_model::prelude::*;
 
 #[cfg(feature = "rhwp")]
+mod chart_render;
+#[cfg(feature = "rhwp")]
 mod eq_render;
 #[cfg(feature = "rhwp")]
 mod lift;

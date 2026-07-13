@@ -814,6 +814,9 @@ fn object_height(p: &Paragraph) -> i32 {
             match inl {
                 Inline::Image(img) => h = h.max(img.height),
                 Inline::Equation(eq) => h = h.max(eq.height),
+                // Issue 062-7: LOCKSTEP with place_doc's paragraph_object — a chart reserves the same
+                // stored-size box in the NaiveLayout twin, so pagination stays identical across both.
+                Inline::Chart(c) => h = h.max(c.height),
                 _ => {}
             }
         }

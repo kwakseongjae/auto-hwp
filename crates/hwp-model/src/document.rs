@@ -207,6 +207,9 @@ pub enum Inline {
     Image(ImageRef),
     /// A 수식 (equation) — its HWP/OWPML script + display attributes.
     Equation(EquationRef),
+    /// A 차트 (OOXML DrawingML chart) — render-only (issue 062-7). Carries just the reserved box
+    /// size + a precomputed SVG fragment (rhwp's native OOXML chart renderer).
+    Chart(ChartRef),
     /// Start of a field range (hyperlink / click-here / cross-ref …) — wraps the runs up to the
     /// matching [`Inline::FieldEnd`].
     FieldBegin(FieldMarker),
@@ -280,6 +283,21 @@ pub struct EquationRef {
     /// stub-box behavior byte-for-byte, so this is purely additive. Consumed by the own-render SvgSink
     /// (embedded as a `<g transform=translate(box)>`) and the HTML export (inline `<svg>`); the PDF
     /// backend ignores it (v1 stub deferred — no SVG→PDF path yet).
+    pub rendered_svg: Option<String>,
+}
+
+/// A 차트 (OOXML DrawingML chart), render-only (issue 062-7). v1 carries only the reserved box size
+/// (from the stored chart object — typeset input is unchanged, so pagination is gate-neutral, exactly
+/// like [`EquationRef`]) and a PRECOMPUTED SVG fragment produced by rhwp's native OOXML chart renderer
+/// at lift time (in the own-render px scale = HWPUNIT/75). The SVG is a DERIVED cache, never part of
+/// the chart's identity: `None` (no rhwp / legacy OLE VtChart / parse failure) keeps the stub box
+/// byte-for-byte, so this is purely additive. Consumed by the own-render SvgSink (rides the SHARED
+/// `PaintOp::Image.svg` channel — same as an equation) and the HTML export (inline `<svg>`); the PDF
+/// backend ignores it (v1 stub deferred — no SVG→PDF path yet).
+#[derive(Clone, Debug)]
+pub struct ChartRef {
+    pub width: HwpUnit,
+    pub height: HwpUnit,
     pub rendered_svg: Option<String>,
 }
 

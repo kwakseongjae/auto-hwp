@@ -757,6 +757,38 @@ mod tests {
         );
     }
 
+    /// Issue 062-7: a chart rides the SAME `PaintOp::Image.svg` channel as an equation, so a chart
+    /// paragraph with a rendered fragment embeds it (own-render surface) instead of the stub box.
+    #[test]
+    fn chart_with_rendered_svg_embeds_the_fragment() {
+        let mut p = Paragraph::default();
+        p.runs.push(Run {
+            char_shape: 0,
+            content: vec![Inline::Chart(ChartRef {
+                width: 30000,
+                height: 20000,
+                rendered_svg: Some("<g class=\"hwp-ooxml-chart\"><rect/></g>".into()),
+            })],
+            ..Default::default()
+        });
+        let doc = doc_with(vec![Block::Paragraph(p)]);
+        let tree = render_page(&doc, &ApproxFontMetrics, 0).unwrap();
+        assert!(tree
+            .ops
+            .iter()
+            .any(|o| matches!(o, PaintOp::Image { svg: Some(s), bin_ref, .. }
+                if s.contains("hwp-ooxml-chart") && bin_ref.is_empty())));
+        let svg = SvgSink::svg_for(&tree);
+        assert!(
+            svg.contains("<g transform=\"translate(") && svg.contains("hwp-ooxml-chart"),
+            "chart fragment nested in a translated <g>: {svg}"
+        );
+        assert!(
+            !svg.contains("fill=\"#F0F0F0\""),
+            "no stub box when the chart is rendered"
+        );
+    }
+
     /// rhwp-off / un-rendered: `rendered_svg = None` keeps the pre-062-5 stub box exactly.
     #[test]
     fn equation_without_rendered_svg_falls_back_to_stub() {

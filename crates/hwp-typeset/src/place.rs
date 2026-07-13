@@ -1717,10 +1717,10 @@ fn display_font(cs: Option<&CharShape>, slot: ScriptClass) -> Option<String> {
     hwp_model::font_class::substitute_family(name).map(str::to_string)
 }
 
-/// The tallest anchored image/equation on the paragraph as `(w, h, bin_ref, svg)` — `bin_ref` empty
-/// for an equation (the renderer draws a placeholder box unless `svg` is present), and `svg` is the
-/// equation's precomputed fragment (issue 062-5; `None` for images and un-rendered equations). `None`
-/// if the paragraph anchors no object.
+/// The tallest anchored image/equation/chart on the paragraph as `(w, h, bin_ref, svg)` — `bin_ref`
+/// empty for an equation/chart (the renderer draws a placeholder box unless `svg` is present), and
+/// `svg` is the precomputed fragment (equation: issue 062-5; chart: issue 062-7; `None` for images and
+/// un-rendered equations/charts). `None` if the paragraph anchors no object.
 fn paragraph_object(p: &Paragraph) -> Option<(f64, f64, String, Option<String>)> {
     let mut best: Option<(f64, f64, String, Option<String>)> = None;
     for run in &p.runs {
@@ -1737,6 +1737,14 @@ fn paragraph_object(p: &Paragraph) -> Option<(f64, f64, String, Option<String>)>
                     eq.height as f64,
                     String::new(),
                     eq.rendered_svg.clone(),
+                )),
+                // Issue 062-7: a chart rides the same object channel as an equation — empty bin_ref +
+                // its precomputed SVG fragment (`None` → stub box). Box from the stored chart size.
+                Inline::Chart(c) => Some((
+                    c.width as f64,
+                    c.height as f64,
+                    String::new(),
+                    c.rendered_svg.clone(),
                 )),
                 _ => None,
             };

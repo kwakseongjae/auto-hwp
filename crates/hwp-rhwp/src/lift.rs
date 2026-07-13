@@ -199,6 +199,13 @@ impl<'a> Lifter<'a> {
                 Control::Equation(eq) => {
                     blocks.push(object_paragraph(Inline::Equation(lift_equation(eq))));
                 }
+                // Issue 062-7: an OOXML (DrawingML) chart hosted in a drawing shape. Rendered (or a
+                // reserved stub box) only for the OOXML path; native/legacy charts stay dropped.
+                Control::Shape(shape) => {
+                    if let Some(chart) = self.lift_chart(shape) {
+                        blocks.push(object_paragraph(Inline::Chart(chart)));
+                    }
+                }
                 _ => {}
             }
         }
@@ -275,6 +282,67 @@ impl<'a> Lifter<'a> {
             width: pic.common.width as i32,
             height: pic.common.height as i32,
         })
+    }
+
+    /// Lift an OOXML (DrawingML) chart hosted in a drawing shape → `ChartRef` (issue 062-7). v1 handles
+    /// ONLY the OOXML path: an `Ole` shape whose bin data is either a directly-injected `Chart/*.xml`
+    /// (HWPX, extension "ooxml_chart") or a CFB OLE container carrying `OOXMLChartContents` (HWP5). The
+    /// legacy OLE VtChart (`Contents` stream) and native GSO `Chart` shapes are OUT of scope → `None`
+    /// (dropped, byte-identical to the pre-062-7 behavior). Once we've confirmed the shape carries OOXML
+    /// chart XML we reserve the box from the STORED object size (like `lift_equation`; typeset input is
+    /// unchanged → gate-neutral), rendering the SVG when possible and falling back to `None` (a stub
+    /// box) on a parse failure — we never guess a wrong chart.
+    fn lift_chart(&self, shape: &rhwp::model::shape::ShapeObject) -> Option<ChartRef> {
+        use rhwp::model::shape::ShapeObject;
+        let ShapeObject::Ole(ole) = shape else {
+            return None; // v1: only OLE-hosted OOXML charts (native GSO Chart / other shapes deferred)
+        };
+        // Reserve from the stored object size; fall back to the OLE extent when the common size is unset.
+        let mut w = ole.common.width as i32;
+        let mut h = ole.common.height as i32;
+        if w <= 0 {
+            w = ole.extent_x;
+        }
+        if h <= 0 {
+            h = ole.extent_y;
+        }
+        if w <= 0 || h <= 0 {
+            return None;
+        }
+        let content = self.find_bin(ole.bin_data_id)?;
+        // Extract the OOXML chart XML: HWPX injects it directly (extension "ooxml_chart"); HWP5 wraps it
+        // in the CFB OLE container's `OOXMLChartContents` stream. Anything else (legacy VtChart /
+        // non-chart OLE) yields no OOXML bytes → not our chart → drop.
+        let xml: std::borrow::Cow<'_, [u8]> = if content.extension == "ooxml_chart" {
+            std::borrow::Cow::Borrowed(&content.data)
+        } else {
+            let container = rhwp::parser::ole_container::parse_ole_container(&content.data)?;
+            std::borrow::Cow::Owned(container.ooxml_chart?)
+        };
+        Some(ChartRef {
+            width: w,
+            height: h,
+            rendered_svg: crate::chart_render::chart_svg(&xml, w, h),
+        })
+    }
+
+    /// Resolve an OLE/chart `bin_data_id` to its stored bytes — the SAME 1-based-else-sparse-id lookup
+    /// as rhwp's `find_bin_data` (HWPX charts use a sparse id like 60000+N that overflows the index).
+    /// `None` for id 0 / missing / empty.
+    fn find_bin(&self, bin_id: u32) -> Option<&rhwp::model::bin_data::BinDataContent> {
+        if bin_id == 0 {
+            return None;
+        }
+        self.doc
+            .bin_data_content
+            .get((bin_id - 1) as usize)
+            .filter(|c| !c.data.is_empty())
+            .or_else(|| {
+                self.doc
+                    .bin_data_content
+                    .iter()
+                    .find(|c| c.id as u32 == bin_id && !c.data.is_empty())
+            })
     }
 
     /// Split a paragraph's text into runs at its `CharShapeRef` boundaries, each run referencing the
@@ -1039,5 +1107,127 @@ mod tests {
         assert_eq!(utf16_to_char_idx(t, 4), 3, "end");
         // All-BMP Hangul: a UTF-16 offset equals the char index.
         assert_eq!(utf16_to_char_idx("가나다", 2), 2);
+    }
+
+    /// Issue 062-7: an OLE shape carrying directly-injected OOXML chart XML (the HWPX path) lifts to a
+    /// rendered `Inline::Chart`, with the box reserved from the stored object size.
+    #[test]
+    fn lifts_an_ooxml_chart_ole_to_a_rendered_chart_inline() {
+        use rhwp::model::bin_data::BinDataContent;
+        use rhwp::model::document::{Document, Section};
+        use rhwp::model::paragraph::Paragraph as RPara;
+        use rhwp::model::shape::{OleShape, ShapeObject};
+
+        const BAR_XML: &[u8] = br#"<?xml version="1.0"?>
+<c:chartSpace xmlns:c="x" xmlns:a="y"><c:chart><c:plotArea>
+<c:barChart><c:barDir val="col"/><c:ser>
+<c:val><c:numRef><c:numCache><c:pt idx="0"><c:v>10</c:v></c:pt><c:pt idx="1"><c:v>20</c:v></c:pt></c:numCache></c:numRef></c:val>
+</c:ser></c:barChart></c:plotArea></c:chart></c:chartSpace>"#;
+
+        let mut doc = Document::default();
+        // HWPX-style directly-injected chart XML at bin id 1 (extension "ooxml_chart").
+        doc.bin_data_content.push(BinDataContent {
+            id: 1,
+            data: BAR_XML.to_vec(),
+            extension: "ooxml_chart".to_string(),
+        });
+        let ole = OleShape {
+            bin_data_id: 1,
+            common: rhwp::model::shape::CommonObjAttr {
+                width: 30000,
+                height: 20000,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let para = RPara {
+            controls: vec![Control::Shape(Box::new(ShapeObject::Ole(Box::new(ole))))],
+            ..Default::default()
+        };
+        doc.sections.push(Section {
+            paragraphs: vec![para],
+            ..Default::default()
+        });
+
+        let semantic = Lifter::new(&doc).run();
+        let chart = semantic
+            .sections
+            .iter()
+            .flat_map(|s| &s.blocks)
+            .filter_map(|b| match b {
+                Block::Paragraph(p) => Some(p),
+                _ => None,
+            })
+            .flat_map(|p| &p.runs)
+            .flat_map(|r| &r.content)
+            .find_map(|i| match i {
+                Inline::Chart(c) => Some(c),
+                _ => None,
+            })
+            .expect("an OOXML chart OLE lifts to Inline::Chart");
+        assert_eq!(
+            chart.width, 30000,
+            "box reserved from the stored object width"
+        );
+        assert_eq!(
+            chart.height, 20000,
+            "box reserved from the stored object height"
+        );
+        let svg = chart
+            .rendered_svg
+            .as_ref()
+            .expect("the OOXML chart rendered to an SVG fragment");
+        assert!(
+            svg.contains("hwp-ooxml-chart"),
+            "rhwp's native chart fragment: {svg}"
+        );
+    }
+
+    /// A non-OOXML OLE (no injected chart XML, not a CFB OOXML container) is NOT our chart → dropped,
+    /// so pagination/flow stays exactly as before (legacy VtChart / spreadsheets are out of v1 scope).
+    #[test]
+    fn non_ooxml_ole_lifts_to_no_chart() {
+        use rhwp::model::bin_data::BinDataContent;
+        use rhwp::model::document::{Document, Section};
+        use rhwp::model::paragraph::Paragraph as RPara;
+        use rhwp::model::shape::{OleShape, ShapeObject};
+
+        let mut doc = Document::default();
+        doc.bin_data_content.push(BinDataContent {
+            id: 1,
+            data: b"not a cfb ole container".to_vec(),
+            extension: "ole".to_string(),
+        });
+        let ole = OleShape {
+            bin_data_id: 1,
+            common: rhwp::model::shape::CommonObjAttr {
+                width: 30000,
+                height: 20000,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let para = RPara {
+            controls: vec![Control::Shape(Box::new(ShapeObject::Ole(Box::new(ole))))],
+            ..Default::default()
+        };
+        doc.sections.push(Section {
+            paragraphs: vec![para],
+            ..Default::default()
+        });
+
+        let semantic = Lifter::new(&doc).run();
+        let has_chart = semantic
+            .sections
+            .iter()
+            .flat_map(|s| &s.blocks)
+            .filter_map(|b| match b {
+                Block::Paragraph(p) => Some(p),
+                _ => None,
+            })
+            .flat_map(|p| &p.runs)
+            .flat_map(|r| &r.content)
+            .any(|i| matches!(i, Inline::Chart(_)));
+        assert!(!has_chart, "a non-OOXML OLE must not produce a chart node");
     }
 }

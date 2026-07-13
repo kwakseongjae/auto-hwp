@@ -133,6 +133,9 @@ fn inline_eq(a: &Inline, b: &Inline) -> bool {
                 && x.height == y.height
                 && x.version == y.version
         }
+        // Issue 062-7: a chart's identity is its reserved box; the SVG is a derived cache (like the
+        // equation's rendered_svg, excluded above), so it doesn't gate value-equality.
+        (Inline::Chart(x), Inline::Chart(y)) => x.width == y.width && x.height == y.height,
         (Inline::FieldBegin(x), Inline::FieldBegin(y)) => {
             x.id == y.id && x.field_type == y.field_type && x.command == y.command
         }
