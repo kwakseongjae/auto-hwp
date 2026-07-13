@@ -631,17 +631,6 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // A selection-model adapter query trapped (hit-test / marquee) → recover + toast.
   useEffect(() => core.selection.onError((e) => onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요")), [core, onTrap]);
 
-  // issue 009 §함정: a click that resolves to a cell INSIDE a nested table is not an edit target (the engine
-  // keeps no cell provenance for it, so the hit falls to the containing OUTER cell). Rather than silently
-  // mark the wrong cell, warn honestly. Normal cell/table marks carry no `nestedCell` flag → no toast.
-  useEffect(
-    () =>
-      core.selection.onResult((r) => {
-        if (r.nestedCell) toast("중첩표 내부 셀은 편집할 수 없습니다");
-      }),
-    [core, toast],
-  );
-
   // Open the document whenever the bytes reference changes (delegated to the core session).
   useEffect(() => {
     let cancelled = false;

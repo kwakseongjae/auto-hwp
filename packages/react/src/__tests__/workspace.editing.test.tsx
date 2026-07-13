@@ -334,32 +334,3 @@ describe("HwpWorkspace issue-028 — floating toolbar show/hide + AI entry", () 
     expect(container.querySelector(".hw-anchor")).toBeTruthy();
   });
 });
-
-describe("HwpWorkspace 중첩표 셀 — 조용한 실패 대신 정직한 토스트 (issue 009 §함정)", () => {
-  const NESTED_MSG = "중첩표 내부 셀은 편집할 수 없습니다";
-  const cellFields = { section: 0, block: 1, row: 1, col: 1, rows: 3, cols: 3, text: "칸", x: 140, y: 100, w: 100, h: 40 };
-
-  it("중첩표 내부 셀(cell.nested) 클릭 → 정직한 토스트로 알린다", async () => {
-    // The engine keeps no cell provenance for a nested table, so a click there resolves to the containing
-    // OUTER cell flagged `nested`. We still mark it, but warn instead of leaving the mark unexplained.
-    const cell: CellHit = { ...cellFields, nested: true };
-    const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
-    const sheet = await sheetOf(container);
-    fireEvent.pointerDown(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
-    fireEvent.pointerUp(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
-    await waitFor(() => expect(screen.getByText(NESTED_MSG)).toBeTruthy());
-  });
-
-  it("일반 셀 클릭 → 무토스트 (정상 셀 마킹 무영향)", async () => {
-    const cell: CellHit = { ...cellFields }; // no `nested` flag
-    const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
-    const sheet = await sheetOf(container);
-    fireEvent.pointerDown(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
-    fireEvent.pointerUp(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
-    // The mark resolves (floating toolbar over the cell) — and NO nested warning is shown.
-    await screen.findByTestId("hw-floating-toolbar");
-    expect(screen.queryByText(NESTED_MSG)).toBeNull();
-  });
-});
