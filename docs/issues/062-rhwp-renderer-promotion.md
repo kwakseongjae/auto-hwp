@@ -79,6 +79,18 @@
   - v0.7.17: OOXML 차트 7종(3D 막대×4·3D 파이·ofPie×2) 2D 근사 렌더 + 막대 stacked 그룹핑 → **062-7 차트 채널이 어댑터 무수정으로 자동 확대**.
   - v0.7.18: 수식 TAC 라인흐름/커서/다행 보정 → **062-5 수식 채널 자동 개선**. + 거대표 O(n²) 제거(rhwp 자체 layout — 우리 typeset엔 인텔), Rc→Arc(Send 복원, caller 투명), 손상문서 폴백.
   - VtChart/영역/산점도 신규 지원은 **upstream에도 없음**(승격 대상 부재).
-  - 방법: `git checkout v0.7.18` 통째 재벤더링(cherry-pick보다 저비용, clean 태그라 충돌 0). 유일 리스크=3패치 model 필드 드리프트 → 재빌드+크레이트 테스트 4종+게이트로 즉시 표면화. **→ 별도 후속 레인(서브모듈 포인터 변경).**
+  - 방법: `git checkout v0.7.18` 통째 재벤더링(cherry-pick보다 저비용, clean 태그라 충돌 0). 유일 리스크=3패치 model 필드 드리프트 → 재빌드+크레이트 테스트 4종+게이트로 즉시 표면화.
+  - **⚠️ 현재 블로킹(2026-07-13 실측)**: 서브모듈 remote=`kwakseongjae/rhwp`(사용자 미러 포크)에 **v0.7.18 태그 없음**(ls-remote에 v0.7.15만). → **needsExternal**. 실행 스텝(사용자 승인/포크 갱신 후):
+    ```
+    cd external/rhwp
+    git remote add upstream https://github.com/edwardkim/rhwp.git   # 최초 1회
+    git fetch upstream --tags && git checkout v0.7.18
+    # (선택) 사용자 미러에 반영: git push origin v0.7.18
+    cd ../.. && cargo build -p hwp-rhwp --features rhwp              # 필드 드리프트 표면화
+    cargo test -p hwp-rhwp --features "rhwp shaper"                  # 4종 크레이트 테스트
+    scripts/verify-local.sh --full                                   # 게이트+전체
+    git add external/rhwp && git commit                              # 서브모듈 포인터 bump
+    ```
+    필드 드리프트 시 `crates/hwp-rhwp/src/lift.rs` 소폭 정정 예상(구조 변경 없음).
 - **kordoc** = `chrisryugj/kordoc`, MIT, TS/Node, rhwp 계보 형제(HWP→Markdown/JSON+MCP 갈래, ★1.4k 활발). 목표 상이(텍스트추출 vs 충실렌더)라 코드 이식 비현실적이나 **챗/AI 셸 제품·UX 레퍼런스로 중간 가치**(폼필·신구대조 diff·구조화 추출). 라이선스 안전(코드 열람/차용 허용).
 - 암호(password) 문서 복호화는 여전히 디스코프(AES 1-bit CFB+커스텀 KDF, pyhwp AGPL 접촉 금지, 상위 난이도).
