@@ -34,7 +34,33 @@
 
 ## 062 배치 현황 (2026-07-13)
 **quick win 3종 완료**: 062-1 배포용복호(056해소) · 062-2 옛한글 · 062-3 금칙 — 전부 병합·검증(게이트 불변).
-**잔여(R14 후속)**: 062-4 셀대각선(F3) · 062-5 수식렌더 · 폰트메트릭 실측화 · 차트(자체구현·rhwp upstream 미확인).
+
+## 잔여 배치 계획 (2026-07-13 조사·검증 워크플로 wf_842c2cd1 — 9에이전트, 적대적 검증 통과)
+전 항목 `document.rs`+`lift.rs` 공유 → **병렬 안전 조합 0개, 순차 강제**(054×057·059×058 교훈). 순서 B1→B2→(여유 시)B3.
+
+- **B1 · 062-4 셀 대각선 X-교차** (난이도 low, 게이트 low, verify=--full) — **다음 착수**.
+  발견: 공통 케이스(빈 셀 슬래시/백슬래시)는 모델(`CellDiagonal`/`DiagonalKind`)·lift(`lift.rs:421`)·조판
+  (`place.rs:872,1044` 본표+중첩표)·렌더(`PaintOp::Line`)·PDF·유닛테스트까지 **이미 전 계층 완성**. 순델타=X자
+  교차 하나(현재 slash+backslash 동시 시 backslash로 붕괴 `lift.rs:854`). v1=DiagonalKind에 Cross 추가 +
+  lift 붕괴중단 + place 2곳 match암 2선 emit + 테스트. render/pdf 무수정(render-only 증거). 0b011/0b110/0b111
+  뾰족-다중선은 희귀·수확체감→후속. **render-only=게이트 무영향**(diagonal은 NaiveLayout에 전무).
+- **B2 · 062-5 수식 렌더 v1** (난이도 M, 게이트 중립, verify=--full) — B1 뒤.
+  rhwp `equation/`(7,480줄, 전부 pub) **bootstrap SVG 임베드**: lift 시점에 rhwp 파이프라인 호출(편집 없음,
+  062-1 패턴)→`EquationRef.rendered_svg: Option<String>`(additive) 캐싱→SvgSink가 예약박스(저장된 width/height,
+  조판입력 불변)에 g 중첩→HTML inline SVG. ⚠️ `PaintOp::Image`가 bin_ref:String만 운반→SVG 채널용 신규
+  variant/필드 or data-URI 필요. krilla PDF는 v1 stub 유보(SVG→PDF 경로 부재). 자체 PaintOp 이식(Path/Bezier
+  프리미티브 추가)은 별도 XL 이슈(v2).
+- **B3 · 062-7 차트 v1 OOXML** (난이도 medium, 저우선 tail, verify=--full) — 여유 시.
+  **정정: 이슈의 "차트=소스 없음/자체구현" 판단은 사실오류** — rhwp v0.7.15에 `ooxml_chart/`+`ole_chart/`
+  파서·SVG 렌더러 완성(배선만 미완, 062 패턴). v1=OOXML(bar/line/pie/combo)만, SVG백엔드 한정 RawSvg 임베드,
+  PDF stub. ⚠️ 차트 현재 드롭(`lift.rs _=>{}`)→박스 미예약→신규 박스가 flow 밀 수 있음(착수 전 게이트 선확인).
+  RawSvg는 screen==export 불변식을 PDF/canvas에서 위배→SVG전용. 희소·render-only라 최후미.
+
+- **폰트 메트릭 실측화 = 디스코프**(착수 비권고). ① RealFontMetrics(rustybuzz)가 이미 런타임 실측 — rhwp
+  테이블은 precompute 캐시일 뿐. ② 라이선스가 가치있는 상용 face(Malgun/함초롬/HY, `ttfs/windows/` 추출) 차단;
+  합법 OFL 재생성분은 이미 live 측정 중이라 실익 미미. ③ 아키텍처 상충(advance_width family-blind·Hangul EM-격자
+  스냅·OFL 치환 draw==measure). ④ V5 최고 게이트 리스크 대비 ROI 낮음. 강행 시 SOLO+before==after gating 필수.
+- **차트 잔여**: 레거시 OLE VtChart(휴리스틱·chart_type=Unknown)는 v1 스코프 밖. rhwp upstream(>v0.7.15) 델타는 여전히 미확인.
 
 ## 함정
 - rhwp는 vendored 수정 금지(계약) — **읽어서 우리 crate에 재구현/이식**(어댑터 방식). rhwp 파일 자체 편집 아님.
