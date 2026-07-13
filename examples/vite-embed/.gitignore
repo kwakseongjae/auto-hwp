@@ -1,0 +1,9 @@
+node_modules/
+dist/
+vendor/*.tgz
+public/hwp/
+public/fonts/
+package-lock.json
+test-results/
+playwright-report/
+.vite/

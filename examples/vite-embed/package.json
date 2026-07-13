@@ -1,0 +1,41 @@
+{
+  "name": "tf-hwp-vite-embed",
+  "version": "0.0.0",
+  "private": true,
+  "description": "외부 호스트 이식 증명 (issue 063): PUBLISHED tarball(npm pack)을 설치해 비-Next Vite 앱에서 <HwpWorkspace/>를 렌더한다. 소스경로 import 0 — node_modules 의 발행본만 소비한다.",
+  "type": "module",
+  "scripts": {
+    "pack-deps": "node scripts/pack-deps.mjs",
+    "copy-assets": "node scripts/copy-assets.mjs",
+    "predev": "node scripts/copy-assets.mjs",
+    "dev": "vite",
+    "prebuild": "node scripts/copy-assets.mjs",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@tf-hwp/ai-protocol": "file:./vendor/tf-hwp-ai-protocol-0.0.1.tgz",
+    "@tf-hwp/editor-core": "file:./vendor/tf-hwp-editor-core-0.0.1.tgz",
+    "@tf-hwp/engine": "file:./vendor/tf-hwp-engine-0.0.1.tgz",
+    "@tf-hwp/react": "file:./vendor/tf-hwp-react-0.0.1.tgz",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "overrides": {
+    "@tf-hwp/ai-protocol": "file:./vendor/tf-hwp-ai-protocol-0.0.1.tgz",
+    "@tf-hwp/editor-core": "file:./vendor/tf-hwp-editor-core-0.0.1.tgz",
+    "@tf-hwp/engine": "file:./vendor/tf-hwp-engine-0.0.1.tgz"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.1",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -3,10 +3,10 @@
 // these shapes; the server proxy AND the browser client import the SAME module. See the README for the
 // "bring your own vendor" integration.
 
-export { INTENT_VERSION, DEFAULT_LIMITS } from "./types";
-export type { Anchor, DocMeta, EditRequest, EditResponse, Intent, RequestLimits } from "./types";
+export { INTENT_VERSION, DEFAULT_LIMITS } from "./types.js";
+export type { Anchor, DocMeta, EditRequest, EditResponse, Intent, RequestLimits } from "./types.js";
 
-export { buildDocContext, buildUserMessage } from "./context";
-export { buildSystemPrompt, DEFAULT_ALLOWED_INTENTS } from "./prompt";
-export { validateRequest, validateResponse, extractJsonArray } from "./validate";
-export type { RequestCheck, ValidateResponseOptions } from "./validate";
+export { buildDocContext, buildUserMessage } from "./context.js";
+export { buildSystemPrompt, DEFAULT_ALLOWED_INTENTS } from "./prompt.js";
+export { validateRequest, validateResponse, extractJsonArray } from "./validate.js";
+export type { RequestCheck, ValidateResponseOptions } from "./validate.js";

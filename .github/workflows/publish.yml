@@ -1,0 +1,77 @@
+name: publish
+
+# npm 발행 워크플로 (issue 063 블로커 3). **수동 전용**(workflow_dispatch) — 이 레포의 CI 원칙(2026-07-11
+# 로컬 검증 우선, Actions 는 수동 트리거)을 그대로 따른다. 자동 발행 없음.
+#
+# 발행 순서는 의존 위상 그대로: engine → editor-core → ai-protocol → react
+#   (react 만 engine/editor-core 에 실버전 의존을 갖는다 — prepack 이 file: → ^ver 로 치환한 tarball 을 낸다.)
+# 각 패키지의 prepack 훅이 빌드를 수행한다(engine=wasm-bindgen+wasm-opt, react=vite+tsc, 나머지=tsc)므로
+# 여기서 별도 build 스텝이 없어도 gitignore 된 pkg/dist 가 tarball 에 채워진다. publishConfig.access=public.
+#
+# 안전장치: dry_run 입력이 기본 true — 실제 레지스트리 반영 없이 `npm publish --dry-run` 으로 검증만 한다.
+# 실제 발행하려면 워크플로 실행 시 dry_run=false 로 명시해야 한다(npm unpublish 제약 — 되돌리기 어려움).
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "true면 --dry-run(레지스트리 미반영). 실제 발행은 false."
+        type: boolean
+        default: true
+
+# 동시 발행 방지(레이스 → 부분 발행 위험).
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      DRY: ${{ inputs.dry_run && '--dry-run' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive # external/rhwp — engine wasm 빌드에 필요(cargo resolve)
+
+      # engine prepack(build-wasm.mjs)이 쓰는 Rust 툴체인 + wasm-bindgen(=0.2.125, Cargo.toml 과 정확히 일치).
+      - uses: dtolnay/rust-toolchain@1.95
+        with:
+          targets: wasm32-unknown-unknown
+      - name: install wasm-bindgen-cli (=0.2.125)
+        run: cargo install wasm-bindgen-cli --version 0.2.125 --locked
+      - name: install binaryen (wasm-opt, 선택 — 다이어트)
+        run: sudo apt-get update && sudo apt-get install -y binaryen
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: "https://registry.npmjs.org"
+
+      # 발행 순서: engine → editor-core → ai-protocol → react. 각 패키지 install(파일: 심링크/devDeps) 후
+      # publish(prepack 이 빌드 + tarball 채움). react install 시점엔 engine/editor-core 의 dist/pkg 가 이미
+      # 앞 단계에서 디스크에 생성돼 있으므로 vite 빌드가 editor-core dist 를 resolve 한다.
+      - name: publish @tf-hwp/engine
+        working-directory: packages/engine
+        run: |
+          npm install --no-audit --no-fund
+          npm publish --access public $DRY
+
+      - name: publish @tf-hwp/editor-core
+        working-directory: packages/editor-core
+        run: |
+          npm install --no-audit --no-fund
+          npm publish --access public $DRY
+
+      - name: publish @tf-hwp/ai-protocol
+        working-directory: packages/ai-protocol
+        run: |
+          npm install --no-audit --no-fund
+          npm publish --access public $DRY
+
+      - name: publish @tf-hwp/react
+        working-directory: packages/react
+        run: |
+          npm install --no-audit --no-fund
+          npm publish --access public $DRY

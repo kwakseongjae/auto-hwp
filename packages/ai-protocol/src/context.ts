@@ -1,4 +1,4 @@
-import type { Anchor, DocMeta, EditRequest } from "./types";
+import type { Anchor, DocMeta, EditRequest } from "./types.js";
 
 /// Doc-context assembly (SDK-LAYERS: "buildDocContext(session, anchors) — R5 펜스 포함"). PROMOTED from
 /// apps/hwp-lab's LabWorkspace.buildDocContextString + the route handler's user-message assembly so the

@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-13 밤 (Claude) · R14 063 웹 이식 패키징 구현(워크트리, main 병합 대기)
+- 한 일: 063 전 스코프. ① **file:→실버전**: 루트 pnpm-workspace 대신 **prepack 치환 전략** 채택(레포가 npm+독립락, apps/hwp-lab도 npm+file: → `workspace:*`는 npm이 못 읽어 무회귀 위반). react `prepack`이 file:→^ver 텍스트 치환(포맷 보존)·`postpack`이 복원(on-disk는 file: 유지). ② **prepack 빌드 훅** 4패키지(engine=build-wasm.mjs cargo+wasm-bindgen+wasm-opt, react=vite+tsc, editor-core/ai-protocol=tsc) → `npm pack` 4종 tarball 전부 pkg/dist 포함·file:의존 0 실측. ③ **발행 CI**(.github/workflows/publish.yml, workflow_dispatch, engine→editor-core→ai-protocol→react, dry_run 기본, publishConfig access:public). ④ **Vite 임베드 예제**(examples/vite-embed — published tarball 설치→`<HwpWorkspace/>` 렌더, Playwright 스모크 그린: 업로드→8쪽 SVG→셀 마킹→mock 편집→undo). ⑤ **AI 프록시 Express 템플릿**(examples/ai-proxy-express, GET/POST/400 mock 실측). ⑥ 문서(docs/EMBED-GUIDE.md + INTEGRATION-HANDOVER 비-Next 포인터).
+- 발견/수정: **ai-protocol dist가 확장자 없는 상대 import**라 순수 Node ESM(Express 프록시)에서 ERR_MODULE_NOT_FOUND — src에 `.js` 확장자 추가로 수정(번들러/Node 양쪽 호환, vitest 15 무회귀). Vite 프로덕션 빌드는 엔진 글루 wasm을 정적에셋으로 1회 더 방출(런타임 미fetch, 무해 — 문서화).
+- 함정 준수: 실제 npm publish 안 함(npm pack까지만). Rust 무접촉(빌드만). 워크트리 커밋만, 푸시 금지.
+- 다음: 아키텍트가 main 병합 + verify-local --full 재확인 → 062 잔여(대각선·수식·폰트메트릭·차트).
+
 ## 2026-07-13 저녁 (Claude) · R14 062 quick win 완결 → 063 착수
 - 한 일: 062 quick win 3종 병합·검증 — 062-1 배포용복호(c716e8f, **056 해소**; 발견: 배포용은 이미 rhwp가 복호 중, hwp-crypto를 NIST골든+fail-closed 정본으로 승격) · 062-2 옛한글(6b6d22d, KTUG PublicDomain 5,659매핑, 측정=전각프록시 LOCKSTEP+그리기만 자모확장 additive) · 062-3 금칙(c556114, rhwp 두 집합 verbatim→layout_paragraph kinsoku_adjust, 게이트·줄바꿈 before==after 하락0). 각 병합 후 워크트리에서 게이트 직접확인→cherry-pick, 배치 후 --full 그린(e2e 39/39).
 - 패턴 확립: rhwp 승격은 워크트리에서 핵심 Rust 증명(게이트/테스트) 직접 확인 후 cherry-pick, 그다음 main --full. leaf crate(hwp-crypto)는 quick로 충분, render/typeset 접촉(062-2/3)은 --full.

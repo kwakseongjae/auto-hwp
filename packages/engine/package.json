@@ -35,8 +35,15 @@
     "pkg/hwp_wasm_bg.wasm.d.ts",
     "README.md"
   ],
+  "scripts": {
+    "build": "node scripts/build-wasm.mjs",
+    "prepack": "node scripts/build-wasm.mjs"
+  },
   "keywords": ["hwp", "hwpx", "hancom", "wasm", "webassembly", "svg", "pdf", "document"],
   "engines": {
     "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

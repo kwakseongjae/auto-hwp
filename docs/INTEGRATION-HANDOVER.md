@@ -9,6 +9,11 @@
 > - 참조 구현(그대로 복붙 가능): `apps/hwp-lab/` (Next.js 15.5.20, App Router).
 > - 자동 재현: `bash scripts/handover-verify.sh` (§2~§3 을 클린 상태에서 1회 재현, exit 0).
 > - `business_plan_k` 레포는 **읽기 전용 참고**다 — 이 통합으로 그 레포를 수정할 필요는 없다.
+>
+> **Next 가 아닌 호스트(Vite/CRA/정적)** 라면 → [`docs/EMBED-GUIDE.md`](EMBED-GUIDE.md)(프레임워크 독립
+> 임베드: wasm/워커 정적 서빙 · `"use client"`/`ssr:false` · CSP · npm 발행본 설치)와 실동작 예제
+> [`examples/vite-embed`](../examples/vite-embed)(published tarball 설치→렌더 스모크) ·
+> [`examples/ai-proxy-express`](../examples/ai-proxy-express)(비-Next AI 프록시)를 보라. 이 문서는 Next 편중이다.
 
 ---
 

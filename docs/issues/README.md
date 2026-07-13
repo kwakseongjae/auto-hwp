@@ -79,7 +79,7 @@ R12 완료 후 "알려진 한계" 5종을 리서치 4레인으로 조사 → 이
 
 ## 웹 이식(외부 임베드) 준비도 (2026-07-13 SDK 감사)
 
-아키텍처 경계(어댑터·헤드리스·벤더중립·R7 sanitize)는 **이식 준비 우수**하나 패키징 "최종 1마일"이 비어 제3자 npm install 임베드는 아직 불가. → **[063](063-npm-embed-packaging.md)** 승격(2026-07-13 사용자 승인, 060·062 후 착수). 블로커 랭킹:
+아키텍처 경계(어댑터·헤드리스·벤더중립·R7 sanitize)는 **이식 준비 우수**하나 패키징 "최종 1마일"이 비어 제3자 npm install 임베드는 아직 불가. → **[063](063-npm-embed-packaging.md)** 승격(2026-07-13 사용자 승인, 060·062 후 착수). **구현 완료(2026-07-13, 워크트리 — main 병합 대기)**: 블로커 1~7 전부 착수 — prepack 치환(file:→실버전, on-disk file: 유지)·prepack 빌드훅 4패키지·발행 CI(workflow_dispatch, dry_run 기본)·examples/vite-embed(published tarball 설치→렌더 스모크 그린)·examples/ai-proxy-express·docs/EMBED-GUIDE.md. `npm pack` 4종 tarball 실측(pkg/dist 포함·file:의존 0). **실 npm publish는 안 함**(npm pack 검증까지). 블로커 랭킹:
 1. [치명] `@tf-hwp/react`의 `file:` 상호의존 → 실버전 + 레지스트리 발행 순서(engine→editor-core→ai-protocol→react)
 2. [치명] prepublish 빌드 훅 부재 → 빈 tarball 위험(engine=wasm-bindgen, react=vite+tsc)
 3. [높음] 발행 CI·publishConfig(access:public) 부재

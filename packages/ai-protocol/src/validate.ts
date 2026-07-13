@@ -1,5 +1,5 @@
-import { DEFAULT_ALLOWED_INTENTS } from "./prompt";
-import { DEFAULT_LIMITS, type Anchor, type EditRequest, type Intent, type RequestLimits } from "./types";
+import { DEFAULT_ALLOWED_INTENTS } from "./prompt.js";
+import { DEFAULT_LIMITS, type Anchor, type EditRequest, type Intent, type RequestLimits } from "./types.js";
 
 /// Request + response validation (SDK-LAYERS: "validateResponse(json) — 화이트리스트+스키마 검증"). PROMOTED
 /// verbatim from apps/hwp-lab's route.ts (`validate`, `extractJsonArray`, `whitelist`) so the server proxy
