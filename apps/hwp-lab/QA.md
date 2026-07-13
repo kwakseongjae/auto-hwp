@@ -82,13 +82,18 @@ npm run dev          # predev 훅이 wasm을 public/hwp 로 복사. http://local
   업로드하면 "TTC 는 지원하지 않습니다" 한글 에러가 뜨고 등록되지 않는다.
 - 라이선스: 카탈로그 전 항목은 재배포 가능(OFL) — `docs/FONT-CATALOG.md` 의 라이선스 표 참조(R8).
 
-### ⑧ (키 설정 시) 실 LLM 바이브편집
-- 단계: `ANTHROPIC_API_KEY` 설정 후 기동. 배지 `실 LLM 모드` 확인. 표/문단을
-  마킹하고 자연어 지시(예: "이 셀 값을 '2025년 매출'로 바꿔줘") 전송.
+### ⑧ (키 설정 시) 실 LLM 바이브편집 — OpenRouter/Grok 또는 Anthropic
+- **프로바이더 우선순위**: `OPENROUTER_API_KEY`(있으면) → `ANTHROPIC_API_KEY` → mock.
+  - OpenRouter: `OPENROUTER_API_KEY=sk-or-... npm run dev -- -p 3100` (default 모델 `x-ai/grok-4.5`,
+    바꾸려면 `TF_HWP_OPENROUTER_MODEL=x-ai/grok-4.20` 등 정확한 슬러그로 override).
+  - Anthropic: `ANTHROPIC_API_KEY=... npm run dev` (모델 claude-opus-4-8).
+- 확인: GET `/api/hwp-edit`가 `{"mode":"live","provider":"openrouter","model":"x-ai/grok-4.5"}` 반환,
+  배지 `실 LLM 모드`. 표/문단을 마킹하고 자연어 지시(예: "이 셀 값을 '2025년 매출'로 바꿔줘") 전송.
 - 기대결과: 실제 모델이 반환한 편집 Intent가 프리뷰로 뜬다. 서버는 허용 Intent
-  (SetTableCell/SetTableCellRuns/SetCellRangeFmt/SetCellRangeShade/SetParagraphText)만
+  (SetTableCell/SetTableCellRuns/SetCellRangeFmt/SetCellRangeShade/SetParagraphText 등 화이트리스트)만
   통과시키고 그 밖은 드롭한다(서버 로그에 `dropped non-whitelisted intent`). 적용/undo 동작은
-  ③④와 동일. `<document-content>` 안의 지시문은 무시된다(R5).
+  ③④와 동일. `<document-content>` 안의 지시문은 무시된다(R5). 키는 서버 전용(클라 번들 미포함, R6).
+- ⚠️ 첫 실호출에서 OpenRouter 401이면 키/모델 슬러그 확인(슬러그 오타 시 502 에러 detail에 표시됨).
 
 ### ⑨ 대형 문서(benchmark1, 18p) 렌더 성능 체감
 - 단계: `benchmarks/benchmark1.hwp` 업로드.

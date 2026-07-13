@@ -90,9 +90,56 @@ async function liveIntents(
   return validateResponse(text, { onDrop: (reason) => console.warn(`[hwp-edit] ${reason}`) });
 }
 
+// OpenRouter default model(사용자 선택). env `TF_HWP_OPENROUTER_MODEL`로 언제든 override(정확한 슬러그).
+const OPENROUTER_MODEL = process.env.TF_HWP_OPENROUTER_MODEL || "x-ai/grok-4.5";
+
+/** OpenRouter(OpenAI 호환 Chat Completions) 경로. 키는 이 서버 핸들러 밖으로 나가지 않는다(R6).
+ *  system/user 프롬프트(R5 펜스·화이트리스트·doc-context)는 Anthropic 경로와 동일하게 ai-protocol이 조립. */
+async function openRouterIntents(
+  apiKey: string,
+  instruction: string,
+  anchors: Anchor[],
+  docContext: string,
+): Promise<Intent[]> {
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      // OpenRouter 권장(선택) — 랭킹/식별용, 키 노출 아님.
+      "HTTP-Referer": "https://github.com/kwakseongjae/tf-hwp",
+      "X-Title": "tf-hwp",
+    },
+    body: JSON.stringify({
+      model: OPENROUTER_MODEL,
+      max_tokens: 4096,
+      messages: [
+        { role: "system", content: buildSystemPrompt() },
+        { role: "user", content: buildUserMessage({ instruction, anchors, docContext }) },
+      ],
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`OpenRouter ${res.status} (model=${OPENROUTER_MODEL}): ${body.slice(0, 300)}`);
+  }
+  const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  const text = data.choices?.[0]?.message?.content ?? "";
+  // Anthropic 경로와 동일 검증(화이트리스트 + 구조). 드롭 사유는 서버 로그로.
+  return validateResponse(text, { onDrop: (reason) => console.warn(`[hwp-edit] ${reason}`) });
+}
+
+/** 프로바이더 우선순위: OpenRouter(있으면) → Anthropic → mock. */
+function activeProvider(): "openrouter" | "anthropic" | "mock" {
+  if (process.env.OPENROUTER_API_KEY) return "openrouter";
+  if (process.env.ANTHROPIC_API_KEY) return "anthropic";
+  return "mock";
+}
+
 export async function GET() {
-  const mode = process.env.ANTHROPIC_API_KEY ? "live" : "mock";
-  return NextResponse.json({ mode });
+  const provider = activeProvider();
+  const model = provider === "openrouter" ? OPENROUTER_MODEL : provider === "anthropic" ? "claude-opus-4-8" : null;
+  return NextResponse.json({ mode: provider === "mock" ? "mock" : "live", provider, model });
 }
 
 export async function POST(req: Request) {
@@ -106,14 +153,17 @@ export async function POST(req: Request) {
   if (!check.ok) return badRequest(check.error);
   const { instruction, anchors, docContext } = check.value;
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    // mock 모드 — 결정적 편집 제안(전체 플로우 완주 가능).
-    return NextResponse.json({ intents: mockIntents(instruction, anchors), mode: "mock" });
+  const provider = activeProvider();
+  if (provider === "mock") {
+    // mock 모드 — 결정적 편집 제안(키 없이 전체 플로우 완주 가능).
+    return NextResponse.json({ intents: mockIntents(instruction, anchors), mode: "mock", provider: "mock" });
   }
   try {
-    const intents = await liveIntents(apiKey, instruction, anchors, docContext);
-    return NextResponse.json({ intents, mode: "live" });
+    const intents =
+      provider === "openrouter"
+        ? await openRouterIntents(process.env.OPENROUTER_API_KEY!, instruction, anchors, docContext)
+        : await liveIntents(process.env.ANTHROPIC_API_KEY!, instruction, anchors, docContext);
+    return NextResponse.json({ intents, mode: "live", provider });
   } catch (e) {
     const detail = e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : String(e);
     console.error("[hwp-edit] live LLM call failed:", detail);
