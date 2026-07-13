@@ -40,8 +40,8 @@
 ## 진행 중 레인 (병렬 작업 시에만)
 | 레인/ID | owner | 상태 | 다음 체크포인트 |
 |---|---|---|---|
-| B1 062-4 대각선 X-교차 | — | **done** (342b833) — DiagonalKind::Cross, render-only, 게이트 8==8·18==18, cross 테스트 2 | 병합 완료 |
-| B2 062-5 수식 렌더 v1 | 구현 에이전트(워크트리) | **착수 예정** — rhwp bootstrap SVG 임베드 | verify --full → 병합 |
-소유권: 잔여(수식 B2/차트 B3) 전부 document.rs+lift.rs 공유 → **순차 강제**. 폰트메트릭 디스코프.
-계획 근거: docs/issues/062 §잔여 배치 계획(워크플로 wf_842c2cd1). ⚠️함정: B1 에이전트가 커밋 전 external/rhwp
-심링크 제거→워크트리 재검증 불가였음→코드-only 커밋이라 main cherry-pick+거기서 검증으로 해소. 앞으로 rhwp 제거 금지 지시.
+| B1 062-4 대각선 X-교차 | — | **done** (342b833) — render-only, 게이트 불변 | 병합 완료 |
+| B2 062-5 수식 렌더 v1 | — | **done** (805c447) — rhwp bootstrap SVG, PaintOp::Image.svg 채널(screen==export 유지), 게이트 불변, e2e 39/39 | 병합 완료 |
+| B3 062-7 차트 v1 | 구현 에이전트(워크트리) | **착수** — OOXML 차트, B2의 PaintOp.svg 채널 재사용 | verify --full → 병합 |
+소유권: 순차 강제(document.rs/lift.rs 공유). 폰트메트릭 디스코프.
+⚠️함정: 커밋 전 external/rhwp 제거 금지(B1 교훈). B3은 차트 박스 예약이 flow 밀지 않는지 게이트 선확인 필수.

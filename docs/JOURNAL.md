@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-13 밤3 (Claude) · B2 수식 렌더 v1 병합
+- 한 일: B2 062-5 수식(805c447) — 신규 eq_render.rs가 rhwp 수식 파이프라인 bootstrap(catch_unwind), EquationRef.rendered_svg additive 캐싱, **SVG 채널=PaintOp::Image.svg: Option<String> additive**(screen==export 유지: PDF/canvas는 svg 무시→stub, PDF 유보 공짜). rhwp px=우리 px=HWPUNIT/75 정합. own-render+HTML에 진짜 수식, PDF v1 stub. 게이트 8==8·18==18, 수식없는 문서 바이트동일, 실샘플 eq-002.hwp lift 실증. main --full 그린(e2e 39/39).
+- 통찰: B2의 PaintOp.svg 채널을 B3 차트가 재사용 가능 → 계획이 우려한 별도 RawSvg variant 불필요.
+- 다음: B3 062-7 차트 v1(OOXML, svg 채널 재사용) → 062 잔여 마감.
+
 ## 2026-07-13 밤2 (Claude) · 062 잔여 계획(워크플로) + B1 대각선
 - 한 일: 062 잔여 4항목 조사·적대검증·계획 워크플로(wf_842c2cd1, 9에이전트) — 발견: 대각선=거의완성(순델타 X자), 차트=rhwp에 이미 있음(이슈 "소스없음" 오류), 폰트메트릭=디스코프(라이선스+V5+실익미미). 전항목 document.rs+lift.rs 공유→순차(B1→B2→B3). B1 062-4 대각선 X자(342b833): DiagonalKind::Cross, render-only, 게이트 8==8·18==18, e2e 39/39.
 - 함정: B1 에이전트가 커밋 전 external/rhwp 심링크 제거→워크트리 재검증 불가 → 코드-only 커밋이라 main cherry-pick+거기서 --full로 해소. 향후 rhwp 제거 금지. 하단 고아 에이전트 4개(058 폰트 리서치 하위)도 종료.
