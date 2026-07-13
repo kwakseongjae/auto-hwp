@@ -75,7 +75,11 @@ R12 완료 후 "알려진 한계" 5종을 리서치 4레인으로 조사 → 이
 | [060](060-frame-table-export.md) | 프레임 래퍼 내부표 편집 미export | **done** (1778690) | R13-P1 | 2단계: emit 게이트 재귀화(Block::any_dirty) + 내부표 src_span → 자가진단표 편집 저장 반영. 재현 레드→그린, 057 골든 5개 무회귀, 게이트 불변. **R13 마감** |
 | [061](061-web-deploy.md) | 웹 배포(Vercel prebuilt) — QA용 외부 URL | **deferred** | QA 인프라 | 2026-07-12 보류 — 사용자가 로컬 QA(`npm run dev`) 선택. 설계는 완료, 필요 시 30분 최소경로 |
 | (056) | 배포용 crypto | (위 R12 표) | 조건부→**062로 해소** | rhwp crypto.rs(MIT, NIST 벡터 테스트 보유)가 골든 벡터까지 해결 — 062-1로 승격 |
-| [062](062-rhwp-renderer-promotion.md) | rhwp 렌더러 계층 승격 | **거의 완료** (062-1~5·7 done) | R14 배치 | 배포용복호(056해소)·옛한글·금칙·대각선X자·수식렌더v1·차트v1(15fc718) 병합·검증(전부 게이트 8==8·18==18, e2e 39/39). 잔여: 수식/차트 자체PaintOp v2(XL)·krilla PDF·레거시OLE·rhwp upstream델타. 폰트메트릭=디스코프 |
+| [062](062-rhwp-renderer-promotion.md) | rhwp 렌더러 계층 승격 | **거의 완료** (062-1~5·7 done) | R14 배치 | 배포용복호(056해소)·옛한글·금칙·대각선X자·수식렌더v1·차트v1(15fc718) 병합·검증. 잔여: 자체PaintOp v2(XL)·krilla PDF·레거시OLE·**rhwp재벤더 v0.7.18(needsExternal)**. 폰트메트릭=디스코프 |
+| [064](064-nested-cell-marking-toast.md) | 중첩표 셀 마킹 토스트 | open (revert) | R14 후속 | speculative dead-code(엔진 nested 미방출)로 revert. 엔진 선행 필요 |
+| [065](065-hwpx-compressed-mimetype.md) | 압축 mimetype HWPX 거부(실물 25% 안 열림) | **open (P0)** | R14 QA발견 | detector 앞512B 리터럴만→압축 mimetype Unknown 거부. fallback zip 디코드. **업로드→렌더 직결** |
+| [066](066-vibe-table-grid-context.md) | 바이브 표 편집 컨텍스트 blindness | **open (P0)** | R14 QA발견 | 웹 doc-context가 표 그리드 미제공→표채우기 intents 0/라벨 엉뚱셀. Grok A/B 실증(그리드 주면 완벽). to_markdown(004) 웹 배선 |
+| — | OpenRouter/Grok 웹 생성 연동 | **done** (561d65c) | — | route.ts OpenRouter 분기(default grok-4.5, env override), .env.local BYOK, 실 생성 확인 |
 
 ## 웹 이식(외부 임베드) 준비도 (2026-07-13 SDK 감사)
 

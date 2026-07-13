@@ -16,7 +16,17 @@
   남은 후속: **#7 npm 발행 자동화 = 063에서 이미 완료**(중복 계산이었음). **rhwp 재벤더링 v0.7.18 = 블로킹**
   (미러 포크에 태그 없음 → needsExternal, 062에 실행 스텝). → **지금 처리 가능한 후속 전부 완료.**
 
-## 다음 = 로컬 육안 QA (사용자)
+## 실물 QA 발견 (2026-07-13, ~/Desktop/archive 24개 실물 + Grok 4.5 실호출)
+OpenRouter/Grok 4.5 웹 생성 연동 완료(`.env.local` BYOK). 실물 스윕 발견:
+- **065 (P0, major)**: **압축 mimetype HWPX 거부 → 실물 6/24(25%, 작성완료본)가 안 열림.** detector가 앞 512B
+  리터럴 매칭만(무압축 mimetype 가정) → 압축 시 Unknown 거부. fallback zip 디코드 필요. **업로드→렌더 직결.**
+- **066 (P0, major)**: **바이브 표 편집이 컨텍스트 blindness로 실패.** 웹 doc-context가 표 그리드를 안 줌 →
+  "표 채워줘" intents 0, 라벨 지정 엉뚱한 셀. **Grok A/B 실증: 그리드 주면 완벽 동작**(모델 아닌 컨텍스트 문제).
+  to_markdown(004)을 웹에 배선하면 됨. 구조편집(행 추가)도 같은 뿌리(F3).
+- 정상 확인: .hwp 렌더/export/게이트(8==8~25==25, 99.4%) OK, 문단 편집 Grok 정상, PDF/HTML export OK(작성완료본 제외).
+- 스윕 도구: `scripts/`(임시 qa-sweep는 scratchpad), CLI own-render/export-html/export-pdf/layout-check.
+
+## 다음 = 로컬 육안 QA (사용자) + 위 발견 수정 배치
 `cd apps/hwp-lab && rm -rf .next && npm run dev` → Chrome. **QA.md 시나리오 ⑪~⑱**(이번 세션 신규 렌더:
 수식·차트·대각선·옛한글·IME·명조고딕·금칙·배포용복호/BMP)을 원본 PDF/한컴 뷰어와 대조. 기존 ①~⑩도 회귀 확인.
 QA 발견사항 → 이슈로 정리해 다음 배치. WKWebView IME 실기(059)는 데스크톱 Tauri에서 별도 수동.
