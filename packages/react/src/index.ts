@@ -207,6 +207,8 @@ export type {
   Anchor,
   BlockHit,
   TableBox,
+  TableGrid,
+  GridCell,
   CellHit,
   Intent,
   Outcome,

@@ -45,6 +45,7 @@ const METHODS = new Set([
   'tableRowBoundaries',
   'pageGeometry',
   'blockRuns',
+  'tableGrid',
   'outline',
   'applyIntent',
   'undo',

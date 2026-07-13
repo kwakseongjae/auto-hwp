@@ -320,14 +320,24 @@ export default function LabWorkspace() {
 
   // 채팅 바이브편집 브리지(R6): 패키지는 LLM/키를 갖지 않는다. 서버 프록시(/api/hwp-edit)로 위임.
   const onAiRequest = useCallback(async (instruction: string, anchors: Anchor[], ctx: DocContext): Promise<Intent[]> => {
+    // 066: 표/셀 앵커마다 엔진에서 그 표의 셀 그리드(행×열·각 셀 텍스트·빈칸)를 조회해 doc-context 에
+    // 첨부한다 — 그래야 모델이 "표 채워줘"·라벨 옆 값칸 지정·구조편집(행 N개)을 정확히 한다(얇은 앵커
+    // 컨텍스트에선 intents 0 이었음). 표가 아니거나 조회 실패면 null(첨부 없음 → 기존 동작, 회귀 방지).
+    const grids = await Promise.all(
+      anchors.map((a) =>
+        (a.kind === "table" || a.kind === "cell") && adapter.tableGrid
+          ? adapter.tableGrid(a.section, a.block).catch(() => null)
+          : Promise.resolve(null),
+      ),
+    );
     const res = await fetch("/api/hwp-edit", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         instruction,
         anchors,
-        // R5-펜스용 doc-context 문자열 — ai-protocol 이 서버와 공유하는 조립기(이슈 026).
-        docContext: buildDocContext({ format: ctx.format, pages: ctx.pages, editable: ctx.editable, sections: ctx.sections }, anchors),
+        // R5-펜스용 doc-context 문자열 — ai-protocol 이 서버와 공유하는 조립기(이슈 026). 066: 그리드 첨부.
+        docContext: buildDocContext({ format: ctx.format, pages: ctx.pages, editable: ctx.editable, sections: ctx.sections }, anchors, { grids }),
       }),
     });
     if (!res.ok) {
@@ -342,7 +352,7 @@ export default function LabWorkspace() {
     }
     const data = (await res.json()) as { intents?: Intent[] };
     return data.intents ?? [];
-  }, []);
+  }, [adapter]);
 
   // R8: 폰트는 번들하지 않는다. 기본 NanumGothic 이 자동 등록되므로 PDF 는 곧바로 활성화되지만,
   // (기본 폰트 fetch 실패 등으로) 미주입 상태에서 PDF 를 누르면 이 폴백이 호출된다: 기본 폰트를 다시

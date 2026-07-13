@@ -261,6 +261,17 @@ export class HwpDoc {
   blockRuns(section, block, row, col) {
     return this.#call((r) => JSON.parse(r.blockRuns(section, block, row ?? null, col ?? null)));
   }
+  /** The cell GRID of the table block at `(section, block)` — `{section, block, rows, cols, cells:[{row,
+   *  col, text}]}` (ACTIVE cells only), or `null` when the block isn't a table. The vibe-editing
+   *  doc-context source (issue 066): the AI reads each cell's MODEL address + current text so table
+   *  fill / label-based targeting is accurate. Coordinates are the SAME `(row, col)` `SetTableCell`
+   *  writes. */
+  tableGrid(section, block) {
+    return this.#call((r) => {
+      const s = r.tableGrid(section, block); // Option<String> → JSON string | null on a non-table block
+      return s == null ? null : JSON.parse(s);
+    });
+  }
   /** Document outline (issue 046) — the top-level headings each with `{section, block, level, text,
    *  page}` (0-based `page`), as an `OutlineItem[]`. Returns an EMPTY ARRAY when the document has no
    *  detected heading (the caller then falls back to a plain page list). The SAME heading source the

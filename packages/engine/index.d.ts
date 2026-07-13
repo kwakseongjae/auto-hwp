@@ -109,6 +109,25 @@ export interface OutlineItem {
   page: number;
 }
 
+/** One ACTIVE (uncovered) cell of a table's grid (issue 066): its MODEL-GLOBAL `(row, col)` + current
+ *  plain text. Mirrors hwp-session `GridCellDto`. */
+export interface GridCell {
+  row: number;
+  col: number;
+  text: string;
+}
+
+/** The cell grid of a table block (issue 066) — its `rows`×`cols` plus every ACTIVE cell's address +
+ *  text, the doc-context source for vibe table editing. Coordinates are the SAME `(row, col)`
+ *  `SetTableCell` writes (`edit_target` inner table). Mirrors hwp-session `TableGridDto`. */
+export interface TableGrid {
+  section: number;
+  block: number;
+  rows: number;
+  cols: number;
+  cells: GridCell[];
+}
+
 /** Page geometry in own-render px (= HWPUNIT/75): page box + printable-area margins, for the ruler
  *  (issue 027). Mirrors hwp-session `PageGeom`. */
 export interface PageGeom {
@@ -220,6 +239,10 @@ export class HwpDoc {
    *  paragraph at `(section,block)` when `row`/`col` are omitted — read to PRESERVE run styling on a
    *  plain-text edit (issue 027). Multi-paragraph cells join with a `{text:"\n"}` run. */
   blockRuns(section: number, block: number, row?: number | null, col?: number | null): RunSpec[];
+  /** The cell GRID of the table block at `(section, block)` (issue 066) — `{rows, cols, cells}` with
+   *  every ACTIVE cell's MODEL `(row, col)` + current text, or `null` when the block isn't a table.
+   *  The vibe-editing doc-context source; coordinates are the SAME `(row, col)` `SetTableCell` writes. */
+  tableGrid(section: number, block: number): TableGrid | null;
   /** Document outline (issue 046) — the top-level headings each with `{section, block, level, text,
    *  page}`. Returns an EMPTY ARRAY when the document has no detected heading (caller falls back to a
    *  page list). The SAME heading source the desktop `doc_outline` command uses. */

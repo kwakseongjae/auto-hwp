@@ -467,6 +467,20 @@ impl HwpDoc {
         serde_json::to_string(&runs).map_err(|e| js_err("serialize", &e.to_string()))
     }
 
+    /// The cell GRID of the table block at `(section, block)` — a JSON **string** of `{section, block,
+    /// rows, cols, cells:[{row, col, text}]}` (only ACTIVE/uncovered cells), or **JS `null`** when the
+    /// block isn't a table (an `Option<String>` → `null`, never the literal `"null"` — bindings policy
+    /// 018). The vibe-editing doc-context source (issue 066): the AI reads each cell's MODEL address +
+    /// current text so "표 채워줘"/라벨-기반 셀 지정이 정확해진다. Coordinates are the SAME `(row, col)`
+    /// `SetTableCell` writes (`edit_target` inner table — issue 066 §좌표계). Pure MODEL read (no
+    /// placement / no fonts), so it never re-typesets and agrees with the edit lane on binary .hwp too.
+    #[wasm_bindgen(js_name = tableGrid)]
+    pub fn table_grid(&self, section: usize, block: usize) -> Result<Option<String>, JsValue> {
+        hwp_session::table_grid(self.doc()?, section, block)
+            .map(|g| serde_json::to_string(&g).map_err(|e| js_err("serialize", &e.to_string())))
+            .transpose()
+    }
+
     /// Document outline for the left nav panel (issue 046) — the gov-doc's top-level headings (□/■-prefixed
     /// section labels + numbered section-band tables), each with the 0-based `page` it starts on, as a JSON
     /// **string** of an `OutlineItem[]` (`{section, block, level, text, page}`). Returns the JSON **`"[]"`**

@@ -88,6 +88,7 @@ export type {
   FindMatch,
   FindOptions,
   FindReplaceOptions,
+  GridCell,
   HitResult,
   ImageBox,
   Intent,
@@ -105,5 +106,6 @@ export type {
   SelMark,
   SelMarquee,
   TableBox,
+  TableGrid,
   TextAnchor,
 } from "./types";

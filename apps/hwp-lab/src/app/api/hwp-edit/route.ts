@@ -23,12 +23,27 @@ function badRequest(error: string) {
   return NextResponse.json({ error }, { status: 400 });
 }
 
+/** 그리드 문자열(066)에서 셀 주소 토큰 `(r{행}c{열})<값>` 을 파싱한다 — `buildDocContext` 의 그리드
+ *  렌더러가 넣은 형식. 각 셀의 (row, col) 과 빈칸(`_빈칸_`) 여부를 돌려준다. mock 이 "표 채워줘" 데모에서
+ *  라벨칸이 아니라 빈 값칸을 겨냥하도록 쓴다(그리드 인지 실증). */
+function parseGridCells(docContext: string): { row: number; col: number; empty: boolean }[] {
+  const out: { row: number; col: number; empty: boolean }[] = [];
+  const re = /\(r(\d+)c(\d+)\)([^|\n]*)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(docContext))) {
+    out.push({ row: parseInt(m[1], 10), col: parseInt(m[2], 10), empty: m[3].trim() === "_빈칸_" });
+  }
+  return out;
+}
+
 /** 결정적 mock — anchors[0]을 겨냥해 "PoC ✔" 편집을 만든다(키 없이도 전체 플로우 완주).
  *  이슈 051: 구조 편집 어휘가 열렸으므로 mock 도 결정적 구조 제안을 만든다 —
  *  ① "N×M 표 …(삽입|넣|추가|만들)" → `InsertTableAt` (앵커 있으면 그 블록 위치, 없으면 구역 끝 = index:null),
  *  ② "…삭제" + 앵커 → `DeleteBlock` (프리뷰 카드의 원문 표시 + 명시 승인 게이트를 mock 으로도 완주),
- *  ③ "행 …추가" + 표/셀 앵커 → `TableAppendRow`. 나머지는 기존 채움 mock 그대로. */
-function mockIntents(instruction: string, anchors: Anchor[]): Intent[] {
+ *  ③ "행 …추가" + 표/셀 앵커 → `TableAppendRow`. 나머지는 기존 채움 mock 그대로.
+ *  이슈 066: ④ "표 …채워" + 표(전체) 앵커 + doc-context 그리드 → 빈 값칸마다 `SetTableCell` (라벨칸
+ *  오타겟 방지를 그리드로 실증; 얇은 컨텍스트에서 intents 0 이던 증상 재현/해소). */
+function mockIntents(instruction: string, anchors: Anchor[], docContext: string): Intent[] {
   const a = anchors[0];
   const text = instruction.trim();
 
@@ -49,6 +64,17 @@ function mockIntents(instruction: string, anchors: Anchor[]): Intent[] {
   // ③ 행 추가: 표/셀 앵커의 표 블록에 merge-safe 빈 행 1개.
   if (/행/.test(text) && /(추가|삽입|넣)/.test(text) && a && (a.kind === "table" || a.kind === "cell" || a.kind === "range")) {
     return [{ intent: "TableAppendRow", section: a.section, index: a.block }];
+  }
+
+  // ④ 표 채우기(066): 표/셀 앵커 + "채워"류 지시 + doc-context 그리드가 있으면 빈(_빈칸_) 값칸마다
+  //    SetTableCell 을 만든다 — 그리드가 없던 얇은 컨텍스트에선 (0,0) 라벨칸을 겨냥하거나 intents 0
+  //    이던 증상을 그리드 인지로 교정(라벨칸은 건드리지 않는다). 실제 값 매핑은 라이브 모델의 몫이고,
+  //    mock 은 결정적 "PoC ✔" 로 빈칸 타겟팅이 그리드에서 나왔음을 실증한다. 빈칸이 없으면 아래 폴백.
+  if (/(채워|채우|입력|작성)/.test(text) && a && (a.kind === "table" || a.kind === "cell")) {
+    const blanks = parseGridCells(docContext).filter((c) => c.empty);
+    if (blanks.length) {
+      return blanks.map((c) => ({ intent: "SetTableCell", section: a.section, index: a.block, row: c.row, col: c.col, text: "PoC ✔" }));
+    }
   }
 
   if (!a) return [];
@@ -156,7 +182,7 @@ export async function POST(req: Request) {
   const provider = activeProvider();
   if (provider === "mock") {
     // mock 모드 — 결정적 편집 제안(키 없이 전체 플로우 완주 가능).
-    return NextResponse.json({ intents: mockIntents(instruction, anchors), mode: "mock", provider: "mock" });
+    return NextResponse.json({ intents: mockIntents(instruction, anchors, docContext), mode: "mock", provider: "mock" });
   }
   try {
     const intents =

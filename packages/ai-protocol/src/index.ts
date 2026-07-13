@@ -4,7 +4,7 @@
 // "bring your own vendor" integration.
 
 export { INTENT_VERSION, DEFAULT_LIMITS } from "./types.js";
-export type { Anchor, DocMeta, EditRequest, EditResponse, Intent, RequestLimits } from "./types.js";
+export type { Anchor, DocMeta, EditRequest, EditResponse, GridCell, Intent, RequestLimits, TableGrid } from "./types.js";
 
 export { buildDocContext, buildUserMessage } from "./context.js";
 export { buildSystemPrompt, DEFAULT_ALLOWED_INTENTS } from "./prompt.js";

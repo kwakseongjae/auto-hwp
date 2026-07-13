@@ -83,6 +83,27 @@ export interface RunSpec {
   font?: string;
 }
 
+/** One ACTIVE (uncovered) cell of a table's grid (issue 066) — its MODEL-GLOBAL `(row, col)` address +
+ *  current plain text. Mirrors @tf-hwp/engine `GridCell` / hwp-session `GridCellDto`. */
+export interface GridCell {
+  row: number;
+  col: number;
+  text: string;
+}
+
+/** The cell GRID of a marked table block (issue 066) — `rows`×`cols` plus every ACTIVE cell's address +
+ *  text, the doc-context source that lets the chat model fill a table / target a label's value cell
+ *  (the thin anchor-only context left it blind). Coordinates are the SAME `(row, col)` `SetTableCell`
+ *  writes (`edit_target` inner table — 좌표계 정합). Mirrors @tf-hwp/engine `TableGrid` / hwp-session
+ *  `TableGridDto` verbatim (both adapters pass it through untouched — 043 homomorphic parity). */
+export interface TableGrid {
+  section: number;
+  block: number;
+  rows: number;
+  cols: number;
+  cells: GridCell[];
+}
+
 /** One heading in the document outline (issue 046) — the left nav panel's item. `section`/`block` are the
  *  MODEL anchor (for a future jump-to-block); `level` is 1 (□/■ section label) or 2 (numbered section-band
  *  table); `text` is the heading label; `page` is the 0-based page it starts on (drives click-to-scroll +

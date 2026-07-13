@@ -1,4 +1,4 @@
-import type { BlockHit, CaretRect, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "./types";
+import type { BlockHit, CaretRect, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
 
 /// EngineAdapter — the backend seam (SDK-LAYERS L1↔L2). It abstracts the ACTUAL surface a backend
 /// exposes (open / page SVG / hit-test·tableAt / applyIntent / undo·redo / export) so the SAME
@@ -81,6 +81,15 @@ export interface EngineAdapter {
    *  flattening it. Resolves to `[]` when the target has no runs. Backends that omit it → the caller
    *  falls back to a single unstyled run (no preservation), never the plain-text `SetTableCell` variant. */
   blockRuns?(section: number, block: number, row?: number, col?: number): Promise<RunSpec[]>;
+
+  /** OPTIONAL — the cell GRID of the table block at `(section, block)` (issue 066): every ACTIVE cell's
+   *  MODEL `(row, col)` + current text, so the chat doc-context can show the model a table's structure
+   *  (which cells are labels, which are blank) — the fix for "표 채워줘 → intents 0" / 라벨 옆이 아닌 라벨
+   *  칸을 겨냥하던 버그. Resolves to `null` when the block isn't a table (018 null policy — the caller then
+   *  attaches no grid). Coordinates are the SAME `(row, col)` `SetTableCell` targets. Backends that can't
+   *  answer OMIT this (the chat then falls back to the thin anchor-only context). Reference impl:
+   *  `WasmAdapter` via the engine `tableGrid` binding. */
+  tableGrid?(section: number, block: number): Promise<TableGrid | null>;
 
   /** OPTIONAL — WYSIWYG GLYPH caret (engine half). Map a PAGE-LOCAL px click to the editable model
    *  target + CHARACTER offset (`HitResult`), or `null` off any glyph (018 null policy — a miss is null,

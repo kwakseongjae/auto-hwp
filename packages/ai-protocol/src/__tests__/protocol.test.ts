@@ -39,6 +39,61 @@ describe("buildDocContext (R5-fenceable doc-context string)", () => {
     const ctx = buildDocContext({ format: "hwpx", pages: 1, editable: true, sections: 1 }, [{ kind: "paragraph", section: 0, block: 0, text: big }]);
     expect(ctx.length).toBe(8000);
   });
+
+  // ── issue 066: table grid in the doc-context ────────────────────────────────────────────────────
+  const META = { format: "hwpx", pages: 1, editable: true, sections: 1 } as const;
+
+  it("attaches the cell grid for a table anchor: header + (rNcM) addresses + _빈칸_ for empties", () => {
+    const grid = {
+      section: 0,
+      block: 3,
+      rows: 2,
+      cols: 2,
+      cells: [
+        { row: 0, col: 0, text: "아이디어명" },
+        { row: 0, col: 1, text: "" }, // blank value cell
+        { row: 1, col: 0, text: "담당자" },
+        { row: 1, col: 1, text: "김철수" },
+      ],
+    };
+    const ctx = buildDocContext(META, [{ kind: "table", section: 0, block: 3, text: "" }], { grids: [grid] });
+    expect(ctx).toContain("#0 table section=0 block=3");
+    expect(ctx).toContain("표 그리드 (2행 2열, 셀주소 r=행 c=열, _빈칸_=빈 셀):");
+    expect(ctx).toContain("(r0c0)아이디어명");
+    expect(ctx).toContain("(r0c1)_빈칸_"); // the empty value cell is explicitly flagged
+    expect(ctx).toContain("(r1c1)김철수");
+  });
+
+  it("without grids the output is byte-identical to the pre-066 thin context (regression-safe)", () => {
+    const anchors = [{ kind: "table" as const, section: 0, block: 3, text: "" }];
+    const withUndef = buildDocContext(META, anchors);
+    const withNulls = buildDocContext(META, anchors, { grids: [null] });
+    const expected = "format=hwpx pages=1 editable=true sections=1\n#0 table section=0 block=3 text=\"\"";
+    expect(withUndef).toBe(expected);
+    expect(withNulls).toBe(expected); // a null grid attaches nothing
+  });
+
+  it("de-dupes the grid across multiple cell anchors of the SAME table (grid rendered once)", () => {
+    const grid = { section: 0, block: 3, rows: 1, cols: 2, cells: [{ row: 0, col: 0, text: "라벨" }, { row: 0, col: 1, text: "" }] };
+    const ctx = buildDocContext(
+      META,
+      [
+        { kind: "cell", section: 0, block: 3, rows: [0, 0], cols: [0, 0], text: "라벨" },
+        { kind: "cell", section: 0, block: 3, rows: [0, 1], cols: [1, 1], text: "" },
+      ],
+      { grids: [grid, grid] },
+    );
+    // The "표 그리드" header appears exactly once even though both anchors carry the same grid.
+    expect(ctx.match(/표 그리드/g) ?? []).toHaveLength(1);
+  });
+
+  it("elides each cell value to cellMaxLen (token budget for big tables)", () => {
+    const long = "가".repeat(200);
+    const grid = { section: 0, block: 3, rows: 1, cols: 1, cells: [{ row: 0, col: 0, text: long }] };
+    const ctx = buildDocContext(META, [{ kind: "table", section: 0, block: 3, text: "" }], { grids: [grid], cellMaxLen: 10 });
+    expect(ctx).toContain(`(r0c0)${"가".repeat(10)}…`);
+    expect(ctx).not.toContain("가".repeat(11));
+  });
 });
 
 describe("buildUserMessage (R5 fence)", () => {
@@ -78,6 +133,19 @@ describe("buildSystemPrompt (INTENT-SCHEMA excerpt, allowed-intent subset)", () 
     expect(p).toContain("DeleteBlock — delete the block at (section, index). DESTRUCTIVE");
     // InsertImage must never be hallucinated from text.
     expect(p).toContain("NEVER fabricate data_b64");
+  });
+
+  it("teaches how to READ the table grid and address cells + row-add params (issue 066)", () => {
+    const p = buildSystemPrompt();
+    // Grid-reading guidance: the (rNcM) address = the SetTableCell address; empties flagged _빈칸_.
+    expect(p).toContain("TABLE GRID (a marked table)");
+    expect(p).toContain("the grid address IS the SetTableCell address");
+    expect(p).toContain("_빈칸_");
+    expect(p).toContain("target the ADJACENT blank (_빈칸_) value cell");
+    // Structural-edit (F3) params for "행 N개 추가": at/count/cols with a worked example.
+    expect(p).toContain("ADDING ROWS:");
+    expect(p).toContain('"at":3, "count":2, "cols":4');
+    expect(p).toContain("For exactly one row prefer TableAppendRow");
   });
 
   it("a subset option emits ONLY the requested intents (host may allow fewer)", () => {

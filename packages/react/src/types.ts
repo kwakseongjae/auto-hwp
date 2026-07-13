@@ -8,6 +8,8 @@ export type {
   Anchor,
   BlockHit,
   TableBox,
+  TableGrid,
+  GridCell,
   CellHit,
   ImageBox,
   Intent,

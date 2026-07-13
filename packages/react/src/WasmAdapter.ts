@@ -1,7 +1,7 @@
 import { HwpDoc, initEngine, resetEngine } from "@tf-hwp/engine";
 import { EngineWorkerClient } from "@tf-hwp/engine/worker-client";
 import type { EngineAdapter } from "./EngineAdapter";
-import type { BlockHit, CaretRect, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "./types";
+import type { BlockHit, CaretRect, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
 
 type WasmInput = string | URL | Request | BufferSource | WebAssembly.Module;
 
@@ -73,6 +73,7 @@ interface EngineDoc {
   tableRowBoundaries(page: number, section: number, block: number): MaybePromise<number[] | null>;
   pageGeometry(page: number): MaybePromise<unknown>;
   blockRuns(section: number, block: number, row?: number | null, col?: number | null): MaybePromise<unknown>;
+  tableGrid(section: number, block: number): MaybePromise<unknown>;
   outline(): MaybePromise<unknown>;
   applyIntent(intent: object | string): MaybePromise<unknown>;
   undo(): MaybePromise<boolean>;
@@ -179,6 +180,7 @@ export class WasmAdapter implements EngineAdapter {
       tableRowBoundaries: call("tableRowBoundaries") as EngineDoc["tableRowBoundaries"],
       pageGeometry: call("pageGeometry"),
       blockRuns: call("blockRuns"),
+      tableGrid: call("tableGrid"),
       outline: call("outline"),
       applyIntent: call("applyIntent") as EngineDoc["applyIntent"],
       undo: call("undo") as EngineDoc["undo"],
@@ -388,6 +390,15 @@ export class WasmAdapter implements EngineAdapter {
 
   blockRuns(section: number, block: number, row?: number, col?: number): Promise<RunSpec[]> {
     return this.guard(async (d) => (await d.blockRuns(section, block, row ?? null, col ?? null)) as RunSpec[]);
+  }
+
+  /** Table cell GRID (issue 066) — the engine `tableGrid` binding (a pure MODEL read, so no re-typeset
+   *  and it agrees with the edit lane's `(row, col)` on binary .hwp too). Returns the table's grid, or
+   *  `null` when the block isn't a table (018 null policy — the chat then attaches no grid). The
+   *  vibe-editing doc-context source: the model sees each cell's address + current text so it fills the
+   *  table / targets a label's value cell instead of proposing nothing. */
+  tableGrid(section: number, block: number): Promise<TableGrid | null> {
+    return this.guard(async (d) => (await d.tableGrid(section, block)) as TableGrid | null);
   }
 
   /** Document outline (issue 046) — the engine `outline()` binding (delegates to hwp-session's outline,

@@ -602,27 +602,12 @@ pub struct CellHitDto {
     pub h: f64,
 }
 
-/// Concatenate the plain text of the model cell at `(row, col)` of the table at `(section, block)`.
-fn model_cell_text(
-    doc: &SemanticDoc,
-    section: usize,
-    block: usize,
-    row: usize,
-    col: usize,
-) -> String {
+/// Join a table cell's paragraphs into plain text — multiple paragraphs joined with '\n' so a
+/// multi-line cell reads back readably (the layout engine renders a '\n' inside a run as a forced line
+/// break, so an edit round-trips). The SHARED readback used by both the cell-hit chip
+/// ([`model_cell_text`]) and the AI grid ([`table_grid`]).
+fn cell_plain_text(cell: &hwp_model::prelude::Cell) -> String {
     use hwp_model::prelude::{Block, Inline};
-    let Some(sec) = doc.sections.get(section) else {
-        return String::new();
-    };
-    let Some(Block::Table(t)) = sec.blocks.get(block) else {
-        return String::new();
-    };
-    let t = t.edit_target(); // frame wrapper (자가진단표) → inner table
-    let Some(cell) = t.cells.iter().find(|c| c.row == row && c.col == col) else {
-        return String::new();
-    };
-    // Join multiple cell paragraphs with '\n' so a multi-line cell pre-fills readably; the layout
-    // engine renders a '\n' inside a run as a forced line break, so the edit round-trips.
     let mut paras: Vec<String> = Vec::new();
     for b in &cell.blocks {
         if let Block::Paragraph(p) = b {
@@ -638,6 +623,90 @@ fn model_cell_text(
         }
     }
     paras.join("\n")
+}
+
+/// Concatenate the plain text of the model cell at `(row, col)` of the table at `(section, block)`.
+fn model_cell_text(
+    doc: &SemanticDoc,
+    section: usize,
+    block: usize,
+    row: usize,
+    col: usize,
+) -> String {
+    use hwp_model::prelude::Block;
+    let Some(sec) = doc.sections.get(section) else {
+        return String::new();
+    };
+    let Some(Block::Table(t)) = sec.blocks.get(block) else {
+        return String::new();
+    };
+    let t = t.edit_target(); // frame wrapper (자가진단표) → inner table
+    let Some(cell) = t.cells.iter().find(|c| c.row == row && c.col == col) else {
+        return String::new();
+    };
+    cell_plain_text(cell)
+}
+
+/// One ACTIVE (uncovered) cell of a marked table's grid (issue 066): its MODEL-GLOBAL `(row, col)`
+/// address + current plain text. The address is the SAME space [`hwp_ops::Op::SetTableCell`] writes
+/// (see [`table_grid`] §좌표계), so an AI fill/target lands on the intended cell.
+#[derive(serde::Serialize)]
+pub struct GridCellDto {
+    pub row: usize,
+    pub col: usize,
+    pub text: String,
+}
+
+/// The full cell grid of the table BLOCK at `(section, block)` — its `rows`×`cols` plus every ACTIVE
+/// (uncovered) cell's `(row, col, text)`, read straight from the MODEL (no placement, no fonts). The
+/// doc-context source for vibe table editing (issue 066): the model needs to SEE each cell's address +
+/// current text (which are label cells, which are blank) to fill or target cells correctly — the thin
+/// anchor-only context (`text=""`) left it blind, so "표 채워줘" produced zero edits.
+///
+/// §좌표계 정합 (issue 066 §함정): unwraps via `edit_target()` (a 1×1 프레임 wrapper 자가진단표 → the
+/// inner table), the SAME unwrapping `SetTableCell` / `model_cell_text` / `table_col_boundaries` do, so
+/// the `(row, col)` the model READS here equals the address an edit WRITES. Rows/cols are MODEL-GLOBAL:
+/// split-table fragments are a placement concept and never enter here (the model table carries every
+/// row), so this is fragment-free by construction. Covered/merged slots are ABSENT — only their origin
+/// cell (which holds the text) is listed, exactly like the coverage the edit ops see. Returns `None`
+/// when `(section, block)` is out of range or the block is not a table.
+#[derive(serde::Serialize)]
+pub struct TableGridDto {
+    pub section: usize,
+    pub block: usize,
+    pub rows: usize,
+    pub cols: usize,
+    pub cells: Vec<GridCellDto>,
+}
+
+/// Read the cell grid of the table block at `(section, block)` for the AI doc-context (issue 066). See
+/// [`TableGridDto`] for the coordinate contract. Pure model read — no geometry, so it is cheap and
+/// works identically on binary `.hwp` and HWPX.
+pub fn table_grid(doc: &SemanticDoc, section: usize, block: usize) -> Option<TableGridDto> {
+    use hwp_model::prelude::Block;
+    let sec = doc.sections.get(section)?;
+    let Block::Table(t) = sec.blocks.get(block)? else {
+        return None;
+    };
+    let t = t.edit_target(); // frame wrapper (자가진단표) → the inner table SetTableCell edits
+    let (rows, cols) = (t.rows.max(1), t.cols.max(1));
+    let cells = t
+        .cells
+        .iter()
+        .filter(|c| c.active && c.row < rows && c.col < cols)
+        .map(|c| GridCellDto {
+            row: c.row,
+            col: c.col,
+            text: cell_plain_text(c),
+        })
+        .collect();
+    Some(TableGridDto {
+        section,
+        block,
+        rows,
+        cols,
+        cells,
+    })
 }
 
 /// Click-to-edit (own-render only): the table cell under a page-space double-click, in own-render px
@@ -1927,6 +1996,77 @@ mod tests {
             table_cell_at_with(&doc, 0, -1.0, -1.0, &[]).is_none(),
             "off-table → None"
         );
+    }
+
+    #[test]
+    fn table_grid_reports_active_cells_with_model_coords_and_none_for_non_table() {
+        // issue 066: the AI doc-context grid must report every ACTIVE cell at its MODEL-GLOBAL
+        // (row, col) — the SAME address SetTableCell writes — with the cell's current text, and a blank
+        // value cell as empty text. Build a 2×2 table: (0,0)="아이디어명", (0,1)="" (blank value cell),
+        // (1,0)="담당자", (1,1)="김철수", with a plain PARAGRAPH as block 0 so the non-table path is covered.
+        use hwp_model::document::{Block, Cell, Paragraph, Run, Section, Table};
+        use hwp_model::prelude::Inline;
+        let cell = |r: usize, c: usize, text: &str| Cell {
+            row: r,
+            col: c,
+            active: true,
+            blocks: vec![Block::Paragraph(Paragraph {
+                runs: if text.is_empty() {
+                    vec![]
+                } else {
+                    vec![Run {
+                        char_shape: 0,
+                        content: vec![Inline::Text(text.to_string())],
+                        ..Default::default()
+                    }]
+                },
+                ..Default::default()
+            })],
+            ..Default::default()
+        };
+        let table = Table {
+            rows: 2,
+            cols: 2,
+            cells: vec![
+                cell(0, 0, "아이디어명"),
+                cell(0, 1, ""),
+                cell(1, 0, "담당자"),
+                cell(1, 1, "김철수"),
+            ],
+            col_widths: vec![1, 1],
+            ..Default::default()
+        };
+        let mut doc = SemanticDoc {
+            char_shapes: vec![Default::default()],
+            para_shapes: vec![Default::default()],
+            ..Default::default()
+        };
+        let sec = Section {
+            blocks: vec![
+                Block::Paragraph(Paragraph::default()), // block 0 = a non-table paragraph
+                Block::Table(table),                    // block 1 = the marked table
+            ],
+            ..Default::default()
+        };
+        doc.sections.push(sec);
+
+        let grid = table_grid(&doc, 0, 1).expect("block 1 is a table");
+        assert_eq!((grid.rows, grid.cols), (2, 2));
+        assert_eq!(grid.cells.len(), 4, "every active cell is listed");
+        let at = |r: usize, c: usize| {
+            grid.cells
+                .iter()
+                .find(|g| g.row == r && g.col == c)
+                .map(|g| g.text.as_str())
+        };
+        assert_eq!(at(0, 0), Some("아이디어명"));
+        assert_eq!(at(0, 1), Some(""), "a blank value cell reports empty text");
+        assert_eq!(at(1, 0), Some("담당자"));
+        assert_eq!(at(1, 1), Some("김철수"));
+
+        // A non-table block → None (the caller then attaches no grid); out-of-range → None (no panic).
+        assert!(table_grid(&doc, 0, 0).is_none(), "paragraph block → None");
+        assert!(table_grid(&doc, 9, 9).is_none(), "out-of-range → None");
     }
 
     #[test]

@@ -132,6 +132,21 @@ const FOOTER = [
   "anchors' section/block indices. Intents apply IN ORDER within one proposal: an insert/delete SHIFTS",
   "every later block index, so prefer ONE structural insert/delete per proposal.",
   "",
+  // Table grid + cell addressing (066 — thin anchor-only context made "표 채워줘" emit 0 intents and
+  // aimed at the LABEL cell instead of its value cell; the grid fixes both). Guidance only — the field
+  // specs above are the record; this just teaches how to READ the grid and address cells.
+  "TABLE GRID (a marked table): its cell grid follows the anchor inside <document-content> — a",
+  "\"표 그리드 (N행 M열 …)\" header then one line per row, each cell shown as \"(r{row}c{col})<값>\" with",
+  "\"_빈칸_\" marking an EMPTY cell. To FILL a table, emit one SetTableCell per cell you set, using that",
+  "cell's EXACT (row, col) as \"row\"/\"col\" — the grid address IS the SetTableCell address. Put a value",
+  "next to its LABEL: locate the label cell, then target the ADJACENT blank (_빈칸_) value cell; NEVER",
+  "overwrite a label, and leave any cell you have no value for untouched (do not emit an empty cell).",
+  "",
+  "ADDING ROWS: to add N empty rows to an R-row table, use TableInsertRows with \"at\": R (== rows appends",
+  "at the end), \"count\": N, and \"cols\": the table's column count (the grid's \"M열\"). Example — \"행 2개",
+  "추가\" on a 3행 4열 표 at (section S, block B): { \"intent\":\"TableInsertRows\", \"section\":S, \"index\":B,",
+  "\"at\":3, \"count\":2, \"cols\":4 }. For exactly one row prefer TableAppendRow (section/index only).",
+  "",
   // 정직 제외 3종 (051 §3): row delete / column insert / column delete have NO engine op — name them as
   // unsupported so the model refuses instead of inventing a lookalike intent (which the server drops).
   "NOT SUPPORTED (no engine op — NEVER emit, the server drops them): deleting a table ROW, inserting a",

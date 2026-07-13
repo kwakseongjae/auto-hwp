@@ -24,6 +24,27 @@ export interface Anchor {
   text?: string;
 }
 
+/** One ACTIVE (uncovered) cell of a marked table's grid (issue 066) — its MODEL-GLOBAL `(row, col)`
+ *  address + current plain text. Structurally compatible with @tf-hwp/editor-core's `GridCell`. */
+export interface GridCell {
+  row: number;
+  col: number;
+  text: string;
+}
+
+/** The cell GRID of a marked table (issue 066) — `rows`×`cols` plus every ACTIVE cell's address + text.
+ *  Attached to the doc-context so the model sees each cell's structure (which are labels, which are
+ *  blank) and can fill a table / target a label's value cell. Coordinates are the SAME `(row, col)`
+ *  `SetTableCell` writes. Structurally compatible with @tf-hwp/editor-core's `TableGrid` so a host can
+ *  pass those straight through; kept independent here so ai-protocol stands alone. */
+export interface TableGrid {
+  section: number;
+  block: number;
+  rows: number;
+  cols: number;
+  cells: GridCell[];
+}
+
 /** Read-only document metadata used to ground the doc-context string (no bytes, no key). */
 export interface DocMeta {
   format: string;
