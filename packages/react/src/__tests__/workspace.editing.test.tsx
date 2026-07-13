@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { HwpWorkspace } from "../components/HwpWorkspace";
 import type { CellHit, Intent, TableBox } from "../types";
 import { MockAdapter } from "./mockAdapter";
@@ -12,6 +12,11 @@ beforeAll(() => {
 });
 afterAll(() => {
   Element.prototype.getBoundingClientRect = origRect;
+});
+// Isolation: never let a spied global (e.g. a frozen Date.now for the double-click detector below) leak
+// into a following test, even if a test throws before its own restore.
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 const noAi = async () => [] as Intent[];
@@ -246,6 +251,12 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
   it("while the in-place editor is open, the 028 floating toolbar is HIDDEN (two chromes must not fight)", async () => {
     const cell: CellHit = { section: 0, block: 1, row: 1, col: 1, rows: 3, cols: 3, text: "칸", x: 140, y: 100, w: 100, h: 40 };
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
+    // Freeze the wall-clock the double-click detector reads (HwpWorkspace uses Date.now with a 400ms
+    // window). Unlike the other double-click tests, this one AWAITS `findByTestId` BETWEEN the two clicks,
+    // so under full-suite load that real-time gap can exceed 400ms and the 2nd click is misread as a fresh
+    // single click — the editor never opens and the toolbar never hides (the flake). A frozen clock keeps
+    // the two clicks one gesture regardless of the await duration; the source detector is untouched.
+    vi.spyOn(Date, "now").mockReturnValue(Date.now());
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
     // Single click selects the cell → the floating toolbar appears.
