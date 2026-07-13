@@ -50,7 +50,12 @@
   조판입력 불변)에 g 중첩→HTML inline SVG. ⚠️ `PaintOp::Image`가 bin_ref:String만 운반→SVG 채널용 신규
   variant/필드 or data-URI 필요. krilla PDF는 v1 stub 유보(SVG→PDF 경로 부재). 자체 PaintOp 이식(Path/Bezier
   프리미티브 추가)은 별도 XL 이슈(v2).
-- **B3 · 062-7 차트 v1 OOXML** (난이도 medium, 저우선 tail, verify=--full) — 여유 시.
+- **B3 · 062-7 차트 v1 OOXML** ✅ **done** (5cdd5f4) — 신규 chart_render.rs가 rhwp `OoxmlChart::parse→render_svg`
+  bootstrap(catch_unwind), **B2의 PaintOp::Image.svg 채널 재사용**(별도 variant 불필요). lift Control::Shape arm이
+  OOXML Chart/*.xml만 처리(네이티브 GSO·레거시 VtChart·비차트 OLE→드롭=바이트동일). 박스=저장 크기 예약(place_doc ∥
+  NaiveLayout LOCKSTEP). 게이트 선확인: 두 벤치마크에 차트 없음→구조적 중립. 게이트 8==8·18==18, 차트없는 문서
+  바이트동일(SVG/HTML/HWPX). own-render+HTML에 rhwp 네이티브 차트 SVG, PDF stub. 레거시 OLE VtChart 유보(rhwp 자신도 미렌더).
+- ~~(구)B3 여유 시~~ — 아래는 원 계획(참고):
   **정정: 이슈의 "차트=소스 없음/자체구현" 판단은 사실오류** — rhwp v0.7.15에 `ooxml_chart/`+`ole_chart/`
   파서·SVG 렌더러 완성(배선만 미완, 062 패턴). v1=OOXML(bar/line/pie/combo)만, SVG백엔드 한정 RawSvg 임베드,
   PDF stub. ⚠️ 차트 현재 드롭(`lift.rs _=>{}`)→박스 미예약→신규 박스가 flow 밀 수 있음(착수 전 게이트 선확인).

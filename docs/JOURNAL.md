@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-13 밤4 (Claude) · B3 차트 v1 병합 → 062 잔여 배치 마감
+- 한 일: B3 062-7 차트(15fc718) — 신규 chart_render.rs가 rhwp OoxmlChart bootstrap, **B2의 PaintOp::Image.svg 채널 재사용**(별도 variant 불필요). lift Control::Shape arm이 OOXML Chart만 처리(GSO/레거시VtChart/비차트OLE→드롭=바이트동일). 박스=저장크기 예약(place_doc∥NaiveLayout LOCKSTEP). 게이트 선확인=두 벤치마크 차트 없음→구조적 중립. 게이트 8==8·18==18, 차트없는 문서 바이트동일(SVG/HTML/HWPX git-stash A/B), main --full 그린(e2e 39/39).
+- **062 잔여 배치 완료**: B1 대각선X자·B2 수식v1·B3 차트v1. 062 전체(배포용복호·옛한글·금칙·대각선·수식·차트) = rhwp 승격 완료. 잔여=자체PaintOp v2(XL)·krilla PDF·레거시OLE·rhwp upstream델타. 폰트메트릭=디스코프.
+- 다음: 사용자 로컬 QA(수식/차트/대각선 육안) 또는 잔여 v2 착수 결정.
+
 ## 2026-07-13 밤3 (Claude) · B2 수식 렌더 v1 병합
 - 한 일: B2 062-5 수식(805c447) — 신규 eq_render.rs가 rhwp 수식 파이프라인 bootstrap(catch_unwind), EquationRef.rendered_svg additive 캐싱, **SVG 채널=PaintOp::Image.svg: Option<String> additive**(screen==export 유지: PDF/canvas는 svg 무시→stub, PDF 유보 공짜). rhwp px=우리 px=HWPUNIT/75 정합. own-render+HTML에 진짜 수식, PDF v1 stub. 게이트 8==8·18==18, 수식없는 문서 바이트동일, 실샘플 eq-002.hwp lift 실증. main --full 그린(e2e 39/39).
 - 통찰: B2의 PaintOp.svg 채널을 B3 차트가 재사용 가능 → 계획이 우려한 별도 RawSvg variant 불필요.
