@@ -67,6 +67,133 @@ pub fn is_full_width(ch: char) -> bool {
     )
 }
 
+// ── 금칙 (kinsoku) line-break rules ──────────────────────────────────────────────────────────────
+// Character sets ported verbatim from external/rhwp (MIT)
+// `src/renderer/composer/line_breaking.rs::{is_line_start_forbidden, is_line_end_forbidden}`.
+// rhwp reimplements Hancom's 금칙 처리: a small closed set of glyphs that may not begin a line (줄머리
+// 금칙 — closing brackets, trailing punctuation, trailing marks) or end one (줄꼬리 금칙 — opening
+// brackets, leading currency signs). We re-derive the sets here rather than call across the vendored
+// crate (rhwp is parse-only + not modifiable), so `layout_paragraph` — the ONE break truth shared by
+// NaiveLayout (oracle) and place_doc (renderer) — stays in lockstep for both paths.
+
+/// 줄머리 금칙: this char may NOT start a line (닫는 괄호·구두점·후행 부호). rhwp set, verbatim.
+fn is_line_start_forbidden(ch: char) -> bool {
+    matches!(
+        ch,
+        ')' | ']'
+            | '}'
+            | ','
+            | '.'
+            | '!'
+            | '?'
+            | ';'
+            | ':'
+            | '\''
+            | '"'
+            | '\u{3001}' // 、
+            | '\u{3002}' // 。
+            | '\u{2026}' // …
+            | '\u{00B7}' // ·
+            | '\u{2015}' // ―
+            | '\u{30FC}' // ー
+            | '\u{300B}' // 》
+            | '\u{300D}' // 」
+            | '\u{300F}' // 』
+            | '\u{3011}' // 】
+            | '\u{FF09}' // ）
+            | '\u{FF5D}' // ｝
+            | '\u{3015}' // 〕
+            | '\u{3009}' // 〉
+            | '\u{FF1E}' // ＞
+            | '\u{226B}' // ≫
+            | '\u{FF3D}' // ］
+            | '\u{FE5E}' // ﹞
+            | '\u{301E}' // 〞
+            | '\u{2019}' // ’
+            | '\u{201D}' // ”
+            | '\u{FF0C}' // ，
+            | '\u{FF0E}' // ．
+            | '\u{FF01}' // ！
+            | '\u{FF1F}' // ？
+            | '\u{FF1B}' // ；
+            | '\u{FF1A}' // ：
+            | '%'
+            | '\u{2030}' // ‰
+            | '\u{2103}' // ℃
+            | '\u{00B0}' // °
+            | '\u{FF05}' // ％
+    )
+}
+
+/// 줄꼬리 금칙: this char may NOT end a line (여는 괄호·선행 통화기호). rhwp set, verbatim.
+fn is_line_end_forbidden(ch: char) -> bool {
+    matches!(
+        ch,
+        '(' | '['
+            | '{'
+            | '\''
+            | '"'
+            | '\u{300A}' // 《
+            | '\u{300C}' // 「
+            | '\u{300E}' // 『
+            | '\u{3010}' // 【
+            | '\u{FF08}' // （
+            | '\u{FF5B}' // ｛
+            | '\u{3014}' // 〔
+            | '\u{3008}' // 〈
+            | '\u{FF1C}' // ＜
+            | '\u{226A}' // ≪
+            | '\u{FF3B}' // ［
+            | '\u{301D}' // 〝
+            | '\u{2018}' // ‘
+            | '\u{201C}' // “
+            | '$'
+            | '\u{20A9}' // ₩
+            | '\u{00A3}' // £
+            | '\u{20AC}' // €
+            | '\u{00A5}' // ¥
+            | '\u{FF04}' // ＄
+            | '\u{FFE5}' // ￥
+    )
+}
+
+/// Cap on how many chars a 줄머리 금칙 hang may pull up past the greedy break, so a pathological run of
+/// forbidden glyphs can't collapse a whole paragraph onto one line. Real text hangs 1–2 (e.g. `.)`).
+const KINSOKU_MAX_HANG: usize = 8;
+
+/// Adjust a *width-driven* greedy break at `line_end` (the position the NEXT line would begin at) so it
+/// honors 금칙. rhwp glues a 줄머리 금칙 char as a suffix onto its preceding 어절 token, so the forbidden
+/// char rides with its word and is never isolated at a line head; our breaker shapes per-char, so we
+/// reproduce that by HANGING (끌어올리기) the forbidden char(s) up onto this line. Symmetrically, a 줄꼬리
+/// 금칙 char at this line's tail is PUSHED (밀어내기) down to the next line. 줄머리 takes precedence so the
+/// two straight-quote chars that live in BOTH sets can't ping-pong. Never empties the line, never runs
+/// off the paragraph — so a break with no forbidden char at either edge is returned unchanged (exact
+/// no-op, preserving byte-identical layout for text without kinsoku boundaries).
+fn kinsoku_adjust(chars: &[(char, i32)], start: usize, line_end: usize, n: usize) -> usize {
+    // No following line, or the line is already empty → nothing to move.
+    if line_end >= n || line_end <= start {
+        return line_end;
+    }
+    // 줄머리 금칙 — hang trailing forbidden char(s) UP onto this line (they follow their word).
+    if is_line_start_forbidden(chars[line_end].0) {
+        let mut e = line_end;
+        let cap = (line_end + KINSOKU_MAX_HANG).min(n);
+        while e < cap && is_line_start_forbidden(chars[e].0) {
+            e += 1;
+        }
+        return e;
+    }
+    // 줄꼬리 금칙 — push trailing forbidden char(s) DOWN to the next line (they lead their content).
+    if is_line_end_forbidden(chars[line_end - 1].0) {
+        let mut e = line_end;
+        while e > start + 1 && is_line_end_forbidden(chars[e - 1].0) {
+            e -= 1;
+        }
+        return e;
+    }
+    line_end
+}
+
 /// Per-script APPROXIMATE metrics so we can break lines + paginate before a real shaper lands:
 /// full-width glyph ≈ 1 EM, half-width (Latin/digit/punct) ≈ 0.5 EM, space ≈ 0.3 EM. Never fidelity.
 #[derive(Default)]
@@ -610,7 +737,7 @@ pub fn layout_paragraph(
             }
         }
         // Forced break: the line is [start, end); the '\n' at `end` is consumed (skipped) below.
-        let line_end = if forced {
+        let raw_end = if forced {
             end
         // Mid-word Latin break → back up to the last space (Hangul/CJK break anywhere).
         } else if end < n && !is_full_width(chars[end].0) {
@@ -637,6 +764,14 @@ pub fn layout_paragraph(
             }
         } else {
             end.max(start + 1)
+        };
+        // 금칙 (kinsoku): keep 줄머리 금칙 chars off the next line's head (hang them up) and 줄꼬리 금칙
+        // chars off this line's tail (push them down). Width-driven breaks only — a forced '\n'
+        // boundary is explicit, so it is left exactly where the author put it.
+        let line_end = if forced {
+            raw_end
+        } else {
+            kinsoku_adjust(&chars, start, raw_end, n)
         };
         let (lw, measured_size) = measure(&chars, &advs, start, line_end);
         // An empty line (a '\n' at the line start → blank line) has no glyph to size from; use the
@@ -859,6 +994,68 @@ mod tests {
             lines[1].text_pos, 3,
             "line 2 starts after the consumed '\\n'"
         );
+    }
+
+    #[test]
+    fn kinsoku_char_sets_match_rhwp() {
+        // 줄머리 금칙 (may NOT begin a line) — sampled from the rhwp set.
+        assert!(is_line_start_forbidden(')'));
+        assert!(is_line_start_forbidden('.'));
+        assert!(is_line_start_forbidden(','));
+        assert!(is_line_start_forbidden('!'));
+        assert!(is_line_start_forbidden('%'));
+        assert!(is_line_start_forbidden('\u{3002}')); // 。
+        assert!(is_line_start_forbidden('\u{FF09}')); // ）
+        assert!(!is_line_start_forbidden('가'));
+        assert!(!is_line_start_forbidden('A'));
+        // '(' is a TAIL rule, not a head rule.
+        assert!(!is_line_start_forbidden('('));
+        // 줄꼬리 금칙 (may NOT end a line) — sampled from the rhwp set.
+        assert!(is_line_end_forbidden('('));
+        assert!(is_line_end_forbidden('['));
+        assert!(is_line_end_forbidden('$'));
+        assert!(is_line_end_forbidden('\u{20A9}')); // ₩
+        assert!(is_line_end_forbidden('\u{300C}')); // 「
+        assert!(is_line_end_forbidden('\u{FF08}')); // （
+        assert!(!is_line_end_forbidden('가'));
+        assert!(!is_line_end_forbidden(')')); // closing bracket is a HEAD rule, not a tail rule
+    }
+
+    #[test]
+    fn kinsoku_is_a_noop_without_boundary_chars() {
+        // Plain Hangul: neither the next line's head nor this line's tail is a 금칙 char → unchanged.
+        let chars: Vec<(char, i32)> = "가나다라".chars().map(|c| (c, 1000)).collect();
+        assert_eq!(kinsoku_adjust(&chars, 0, 2, chars.len()), 2);
+        // A trailing break (no following line) is always left alone.
+        assert_eq!(kinsoku_adjust(&chars, 0, 4, chars.len()), 4);
+    }
+
+    #[test]
+    fn line_head_kinsoku_hangs_closing_paren_up() {
+        let mut doc = SemanticDoc::default();
+        // size 1000 → 1 EM per full-width glyph. 가나다 fills width 3000; the greedy break would put
+        // the fullwidth ） (U+FF09) at the head of the next line — 줄머리 금칙 hangs it UP with its word.
+        doc.char_shapes.push(CharShape::default());
+        let p = para("가나다）라");
+        let lines = layout_paragraph(&p, &doc, 3000.0, &ApproxFontMetrics);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].text_pos, 0);
+        // Without 금칙 the break is at index 3 (next line "）라"); 금칙 pulls ） up → line 2 starts at 라.
+        assert_eq!(lines[1].text_pos, 4);
+    }
+
+    #[test]
+    fn line_tail_kinsoku_pushes_opening_paren_down() {
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape::default());
+        // 가나（ fills width 3000; the greedy break would leave the fullwidth 여는 괄호 （ (U+FF08) at
+        // the tail of this line. 줄꼬리 금칙 pushes it DOWN so it leads the next line.
+        let p = para("가나（다라");
+        let lines = layout_paragraph(&p, &doc, 3000.0, &ApproxFontMetrics);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].text_pos, 0);
+        // Without 금칙 line 1 = "가나（"; 금칙 pushes （ down → line 2 starts at index 2 (the （).
+        assert_eq!(lines[1].text_pos, 2);
     }
 
     #[test]
