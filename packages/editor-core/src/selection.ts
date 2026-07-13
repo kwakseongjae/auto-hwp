@@ -136,6 +136,9 @@ export interface SelectResult {
   source: "click" | "marquee";
   selected: number;
   excluded: number;
+  /** The click resolved to a cell inside a nested table (CellHit.nested) — not an edit target. The UI warns
+   *  instead of leaving the (outer-cell) mark unexplained (issue 009 §함정). Unset on normal marks/marquees. */
+  nestedCell?: boolean;
 }
 
 type Resolved = { table: TableBox | null; cell: CellHit | null; hit: BlockHit | null };
@@ -333,7 +336,9 @@ export class SelectionModel {
         return;
       }
       this.setSelection(mergeSelection(this.sels, [sel], d.meta ? "toggle" : "replace"));
-      this.results.emit({ source: "click", selected: 1, excluded: 0 });
+      // A nested-table inner cell still marks (the containing outer cell), but is NOT an edit target — flag it
+      // so the UI can warn honestly (issue 009 §함정) rather than leave a misleading silent mark.
+      this.results.emit({ source: "click", selected: 1, excluded: 0, nestedCell: r.cell?.nested === true });
     } catch (e) {
       this.errors.emit(e);
     }

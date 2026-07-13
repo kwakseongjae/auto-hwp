@@ -60,6 +60,11 @@ export interface CellHit {
   y: number;
   w: number;
   h: number;
+  /** True when the point resolved to a cell that lives INSIDE a nested table (a table drawn within another
+   *  table's cell). Such cells are not edit targets — the engine keeps no cell provenance for them, so the
+   *  hit resolves to the containing OUTER cell — and the UI must warn honestly instead of silently marking
+   *  the wrong cell (issue 009 §함정). Optional + additive: a backend that never nests omits it (= false). */
+  nested?: boolean;
 }
 
 /** An Intent (schema v0) — an internally-tagged object discriminated by `intent`. Kept loose here so
