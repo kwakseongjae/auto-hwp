@@ -477,11 +477,13 @@ pub struct CellDiagonal {
     pub width_px: f64,
 }
 
-/// Slash = bottom-left→top-right (/); BackSlash = top-left→bottom-right (\\).
+/// Slash = bottom-left→top-right (/); BackSlash = top-left→bottom-right (\\);
+/// Cross = both drawn together (X) — HWP set BOTH the slash and backslash direction bits (062-4).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiagonalKind {
     Slash,
     BackSlash,
+    Cross,
 }
 
 impl Cell {

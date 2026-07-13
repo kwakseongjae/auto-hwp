@@ -851,17 +851,19 @@ fn lift_line_style(lt: rhwp::model::style::BorderLineType) -> LineStyle {
 ///     direction bits with NO `<diagonal>` line element (type 0), and Hancom then draws nothing (rhwp's
 ///     #1038 guard). Keying off the diagonal border's WIDTH instead drew a slash through nearly every cell.
 ///
-/// A backslash wins when both bits are set (the rare "X" is collapsed to one line).
+/// Both direction bits set → `Cross` (the X — slash + backslash drawn together, 062-4). Only one bit
+/// set → that single direction. (Sub-variants of the direction bits — 0b011/0b110/0b111 pointed/multi-
+/// line ends — are out of scope; any non-zero slash/backslash maps to the plain single line for now.)
 fn diagonal_kind(attr: u16, diagonal_type: u8) -> Option<DiagonalKind> {
     let slash = (attr >> 2) & 0b111;
     let backslash = (attr >> 5) & 0b111;
     if (slash == 0 && backslash == 0) || diagonal_type == 0 {
         return None;
     }
-    Some(if backslash != 0 {
-        DiagonalKind::BackSlash
-    } else {
-        DiagonalKind::Slash
+    Some(match (slash != 0, backslash != 0) {
+        (true, true) => DiagonalKind::Cross,
+        (false, true) => DiagonalKind::BackSlash,
+        _ => DiagonalKind::Slash, // (true, false) — (false, false) already returned None above
     })
 }
 
@@ -949,11 +951,11 @@ mod tests {
             Some(DiagonalKind::BackSlash),
             "backslash direction + solid line → BackSlash"
         );
-        // 둘 다 설정(X) → 단일 backslash 로 축약(렌더러가 단선만 그림).
+        // 둘 다 설정(X) → Cross (슬래시+백슬래시 2선을 겹쳐 X자로; 062-4, 붕괴 중단).
         assert_eq!(
             diagonal_kind(slash_attr | backslash_attr, 1),
-            Some(DiagonalKind::BackSlash),
-            "both set → single BackSlash"
+            Some(DiagonalKind::Cross),
+            "both set → Cross (X)"
         );
     }
 

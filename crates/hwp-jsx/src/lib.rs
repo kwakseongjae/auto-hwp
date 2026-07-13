@@ -468,6 +468,7 @@ fn encode_cell_diagonal(d: CellDiagonal) -> String {
     let kind = match d.kind {
         DiagonalKind::Slash => "slash",
         DiagonalKind::BackSlash => "backslash",
+        DiagonalKind::Cross => "cross",
     };
     format!("{},{},{}", kind, d.color.to_hex(), d.width_px)
 }
@@ -477,6 +478,7 @@ fn decode_cell_diagonal(s: &str) -> Option<CellDiagonal> {
     let kind = match it.next()? {
         "slash" => DiagonalKind::Slash,
         "backslash" => DiagonalKind::BackSlash,
+        "cross" => DiagonalKind::Cross,
         _ => return None,
     };
     let color = it.next().and_then(Color::from_hex).unwrap_or_default();

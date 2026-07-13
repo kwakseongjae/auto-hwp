@@ -870,19 +870,17 @@ fn flush_fragment(
         // Cell diagonal (HWP borderFill `diagonal`) — only on an EMPTY cell (forms a shape; a text cell's
         // diagonal is a shared-borderFill artifact Hancom doesn't draw through the words).
         if let Some(d) = c.diagonal.filter(|_| !cell_has_text(&c.blocks)) {
-            let (y1, y2) = match d.kind {
-                DiagonalKind::Slash => (cy + ch, cy), // bottom-left → top-right
-                DiagonalKind::BackSlash => (cy, cy + ch), // top-left → bottom-right
-            };
-            pg.lines.push(PlacedLine {
-                x1: cx,
-                y1,
-                x2: cx + cw,
-                y2,
-                color: d.color,
-                style: LineStyle::Solid,
-                width: d.width_px.max(HAIRLINE_MIN_PX),
-            });
+            for (y1, y2) in diagonal_segments(d.kind, cy, ch) {
+                pg.lines.push(PlacedLine {
+                    x1: cx,
+                    y1,
+                    x2: cx + cw,
+                    y2,
+                    color: d.color,
+                    style: LineStyle::Solid,
+                    width: d.width_px.max(HAIRLINE_MIN_PX),
+                });
+            }
         }
         // Cell TEXT: only in the fragment that OWNS the cell's TOP row (c.row >= first) so a cell whose
         // span crosses the page break doesn't draw its text twice. Vertically centered (gov-doc
@@ -923,6 +921,22 @@ fn flush_fragment(
     // Attach the per-cell rects to the fragment we pushed (point→cell for double-click editing).
     if let Some(pt) = pg.tables.last_mut() {
         pt.cells = placed_cells;
+    }
+}
+
+/// Vertical endpoint pairs `(y1, y2)` for a cell diagonal, each drawing one line from the cell's left
+/// (`x = cx`) to its right (`x = cx + cw`). `cy`/`ch` are the cell's top/height. Slash = bottom-left→
+/// top-right (one line); BackSlash = top-left→bottom-right (one line); Cross = BOTH, an X (two lines).
+/// The single-line endpoints are reused verbatim for the X so the crossing matches Hancom's rendering
+/// (mirrors rhwp `render_cell_diagonal`, which runs both the slash and backslash blocks when both
+/// direction bits are set — 062-4).
+fn diagonal_segments(kind: DiagonalKind, cy: f64, ch: f64) -> Vec<(f64, f64)> {
+    let slash = (cy + ch, cy); // bottom-left → top-right
+    let backslash = (cy, cy + ch); // top-left → bottom-right
+    match kind {
+        DiagonalKind::Slash => vec![slash],
+        DiagonalKind::BackSlash => vec![backslash],
+        DiagonalKind::Cross => vec![slash, backslash],
     }
 }
 
@@ -1042,19 +1056,17 @@ fn place_nested_table(
             });
         }
         if let Some(d) = c.diagonal.filter(|_| !cell_has_text(&c.blocks)) {
-            let (y1, y2) = match d.kind {
-                DiagonalKind::Slash => (cy + ch, cy),
-                DiagonalKind::BackSlash => (cy, cy + ch),
-            };
-            pg.lines.push(PlacedLine {
-                x1: cx,
-                y1,
-                x2: cx + cw,
-                y2,
-                color: d.color,
-                style: LineStyle::Solid,
-                width: d.width_px.max(HAIRLINE_MIN_PX),
-            });
+            for (y1, y2) in diagonal_segments(d.kind, cy, ch) {
+                pg.lines.push(PlacedLine {
+                    x1: cx,
+                    y1,
+                    x2: cx + cw,
+                    y2,
+                    color: d.color,
+                    style: LineStyle::Solid,
+                    width: d.width_px.max(HAIRLINE_MIN_PX),
+                });
+            }
         }
         place_cell_content(pg, &c.blocks, cx, cy, cw, ch, doc, fonts);
     }
@@ -2820,6 +2832,75 @@ mod tests {
         assert!(
             !placed.pages[0].lines.iter().any(|l| l.color == red),
             "a diagonal over text is suppressed"
+        );
+    }
+
+    #[test]
+    fn cell_diagonal_cross_emits_two_lines_on_empty_cell() {
+        let red = Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255,
+        };
+        // An EMPTY cell with an X-cross diagonal (HWP set BOTH direction bits) draws BOTH corner-to-
+        // corner lines — the slash AND the backslash, overlapping into an X (062-4).
+        let doc = edge_table_text(
+            [None; 4],
+            Some(CellDiagonal {
+                kind: DiagonalKind::Cross,
+                color: red,
+                width_px: 1.0,
+            }),
+            "",
+        );
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let diag: Vec<_> = placed.pages[0]
+            .lines
+            .iter()
+            .filter(|l| l.color == red)
+            .collect();
+        assert_eq!(
+            diag.len(),
+            2,
+            "X-cross pushes two diagonal lines, got {}",
+            diag.len()
+        );
+        // One slash (bottom-left → top-right: y2 < y1) AND one backslash (top-left → bottom-right:
+        // y2 > y1) — the same endpoints the single-direction kinds use, drawn together.
+        assert!(
+            diag.iter().any(|l| l.y2 < l.y1),
+            "a slash line (bottom-left → top-right)"
+        );
+        assert!(
+            diag.iter().any(|l| l.y2 > l.y1),
+            "a backslash line (top-left → bottom-right)"
+        );
+    }
+
+    #[test]
+    fn cell_diagonal_cross_suppressed_when_cell_has_text() {
+        // The empty-cell-only rule (cell_has_text) is kind-agnostic: an X-cross over a TEXT cell is
+        // suppressed exactly like the single-line kinds — Hancom doesn't slash through the words.
+        let red = Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255,
+        };
+        let doc = edge_table_text(
+            [None; 4],
+            Some(CellDiagonal {
+                kind: DiagonalKind::Cross,
+                color: red,
+                width_px: 1.0,
+            }),
+            "제목",
+        );
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        assert!(
+            !placed.pages[0].lines.iter().any(|l| l.color == red),
+            "an X-cross over text is suppressed"
         );
     }
 
