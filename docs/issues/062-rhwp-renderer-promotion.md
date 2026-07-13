@@ -19,11 +19,12 @@
 | 폰트 메트릭 근사→실측 | `src/tools/font_metric_gen.rs`(추출 도구) | ⚠️ 도구를 **OFL 폰트에 재실행**해 자산 재생성(상용폰트 추출분 재배포 회색지대 회피) |
 
 ## 착수 순서 (quick win 난이도순 — 각각 별도 커밋/검증)
-1. **배포용 복호화**(난이도 낮음) → **056을 이걸로 해소**. `.hwp`는 `rhwp::parse_document`가 이미 자동
-   복호 중이므로 SDK/HWPX 경로 배선 + rhwp crypto 테스트 벡터 재사용. ⚠️ 암호 문서(사용자 비번→SHA-1)는
-   rhwp에도 없음 — 별도 영역(장기).
-2. **옛한글 PUA 테이블**(난이도 낮음, Public Domain — 라이선스 가장 깨끗).
-3. **금칙 문자집합**(난이도 낮음~중) → 그리디 브레이커에 훅. benchmark 줄바꿈 98.9%↑ 여지.
+1. **배포용 복호화** ✅ **done** (c716e8f, 056 해소). 발견: 배포용은 이미 rhwp가 복호 중이었음 →
+   hwp-crypto를 NIST골든+fail-closed 정본으로 승격. AES=RustCrypto aes+cipher(MIT/Apache).
+2. **옛한글 PUA 테이블** ✅ **done** (6b6d22d). KTUG Public Domain 5,659 매핑 → hwp-typeset/old_hangul.rs.
+   측정=전각 프록시(LOCKSTEP 안전)+그리기만 자모확장(additive, cluster=None이면 바이트동일). 게이트 무영향.
+   한계: 번들 Nanum은 옛한글 조합 미합성 → Noto Serif CJK KR 필요(폰트 번들은 별도 스코프).
+3. **금칙 문자집합**(난이도 낮음~중) — **다음 착수**. 그리디 브레이커에 훅. ⚠️ 조판 입력 변경 → 게이트 V5 단독 검증.
 4. **셀 대각선**(난이도 중) → F3 렌더측(하위 하나로 060/F3와 정합).
 5. **수식 렌더 부트스트랩**(난이도 높음, 즉시 착수 가능 — 폴백부터).
 

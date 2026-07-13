@@ -1,8 +1,12 @@
 # 056 — 조건부: 배포용(암호화) .hwp 복호화
 
-- 상태: open(**착수 게이트: 수요 확인**) · 우선순위: 조건부 · 영역: crates/hwp-crypto
-- 착수 조건: 대상 사용자층에서 배포용 문서 비중이 실측으로 유의미할 때(샘플/문의 수 근거).
-  그 전까지는 fail-closed 스텁 유지가 정답이다(현재도 크래시 없이 정직하게 거부).
+- 상태: **done** (c716e8f, 062-1) · 우선순위: 조건부→해소 · 영역: crates/hwp-crypto
+- **핵심 발견(2026-07-13)**: 배포용(무암호) .hwp는 **이미 rhwp 경로로 열린다**(`.hwp` open → rhwp
+  `from_bytes`가 distribution 플래그 감지→내부 복호, wasm 포함). 즉 056의 사용자 가시 능력은 이미 동작 중이었음.
+  062-1은 우리 소유 `hwp-crypto`를 NIST 골든 벡터 + fail-closed 무결성(키재료 UTF-16LE hex 검증 +
+  첫 레코드 tag 검증)까지 갖춘 **정본 복호기로 승격**(rhwp 내부 크립토 은퇴 시 교체 가능). AES-128-ECB
+  = RustCrypto aes+cipher(MIT/Apache, deny ok). 잔여: 실배포용 샘플 1건(합성 골든으로 CI 확보), 암호(password)
+  문서는 스코프 밖(NotImplemented 정직 거부).
 
 ## 근거
 `crates/hwp-crypto/src/lib.rs` `decrypt_distribution()`이 NotImplemented 스텁 — 기관 배포
