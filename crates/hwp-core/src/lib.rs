@@ -1261,3 +1261,87 @@ mod docx_routing_tests {
         assert!(doc.plain_text().contains("Routed via Engine::open"));
     }
 }
+
+/// Issue #065 regression: an HWPX whose `mimetype` entry is DEFLATE-compressed (as 독스헌터 / Hancom
+/// 계열 tools write it — 6/24 real files) must still be detected as HWPX and open. The literal
+/// `application/hwp+zip` no longer appears in the clear, so detection falls back to the
+/// `Contents/header.xml` entry NAME (kept uncompressed in the ZIP central directory). Builds real
+/// in-memory ZIPs (dev-dep `zip`), so it drives the full detect → parse → open path — not merely a
+/// byte scan. Also pins no-regression on the STORED-`mimetype` case and on a plain non-HWPX zip.
+#[cfg(test)]
+mod hwpx_compressed_mimetype_tests {
+    use super::*;
+    use std::io::{Cursor, Write};
+
+    const HWPX_MIMETYPE: &[u8] = b"application/hwp+zip";
+    // Minimal valid parts: header (charPr/paraPr pools — may be empty) + one body section.
+    const HEADER_XML: &[u8] = br#"<hh:head xmlns:hh="h"><hh:refList/></hh:head>"#;
+    const SECTION0_XML: &[u8] = "<hs:sec xmlns:hs=\"s\" xmlns:hp=\"p\"><hp:p><hp:run><hp:t>압축 mimetype 본문</hp:t></hp:run></hp:p></hs:sec>".as_bytes();
+
+    /// Build a real in-memory HWPX. `mimetype_stored` toggles the STORED (fast-path) vs DEFLATE
+    /// (issue #065 fallback) encoding of the `mimetype` entry; all other parts are DEFLATE'd.
+    fn build_hwpx(mimetype_stored: bool) -> Vec<u8> {
+        let mut buf = Vec::new();
+        {
+            let mut zw = zip::ZipWriter::new(Cursor::new(&mut buf));
+            let deflate: zip::write::FileOptions<()> = zip::write::FileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            let mimetype_opts: zip::write::FileOptions<()> = if mimetype_stored {
+                zip::write::FileOptions::default()
+                    .compression_method(zip::CompressionMethod::Stored)
+            } else {
+                deflate
+            };
+            zw.start_file("mimetype", mimetype_opts).unwrap();
+            zw.write_all(HWPX_MIMETYPE).unwrap();
+            zw.start_file("Contents/header.xml", deflate).unwrap();
+            zw.write_all(HEADER_XML).unwrap();
+            zw.start_file("Contents/section0.xml", deflate).unwrap();
+            zw.write_all(SECTION0_XML).unwrap();
+            zw.finish().unwrap();
+        }
+        buf
+    }
+
+    #[test]
+    fn compressed_mimetype_hwpx_detects_and_opens() {
+        let bytes = build_hwpx(/* mimetype_stored = */ false);
+        // Prove we exercise the #065 fallback, not the literal fast path: the deflated mimetype
+        // content must not surface `application/hwp+zip` in the first 512 bytes.
+        let has_literal = bytes[..bytes.len().min(512)]
+            .windows(HWPX_MIMETYPE.len())
+            .any(|w| w == HWPX_MIMETYPE);
+        assert!(
+            !has_literal,
+            "setup: deflated mimetype must not leak the literal into the fast-path window"
+        );
+        assert_eq!(Engine::detect(&bytes), SourceFormat::Hwpx);
+        let doc = Engine::open(&bytes).expect("open compressed-mimetype HWPX");
+        assert_eq!(doc.origin, Some(SourceFormat::Hwpx));
+        assert!(doc.plain_text().contains("압축 mimetype 본문"));
+    }
+
+    #[test]
+    fn stored_mimetype_hwpx_still_detects_and_opens() {
+        let bytes = build_hwpx(/* mimetype_stored = */ true);
+        assert_eq!(Engine::detect(&bytes), SourceFormat::Hwpx);
+        let doc = Engine::open(&bytes).expect("open stored-mimetype HWPX");
+        assert_eq!(doc.origin, Some(SourceFormat::Hwpx));
+        assert!(doc.plain_text().contains("압축 mimetype 본문"));
+    }
+
+    #[test]
+    fn plain_non_hwpx_zip_stays_unknown() {
+        let mut buf = Vec::new();
+        {
+            let mut zw = zip::ZipWriter::new(Cursor::new(&mut buf));
+            let opts: zip::write::FileOptions<()> = zip::write::FileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            zw.start_file("data/readme.txt", opts).unwrap();
+            zw.write_all(b"just a normal zip, no HWPX or OOXML parts here")
+                .unwrap();
+            zw.finish().unwrap();
+        }
+        assert_eq!(Engine::detect(&buf), SourceFormat::Unknown);
+    }
+}
