@@ -527,12 +527,20 @@ fn decode_image(bin_ref: &str, doc: &SemanticDoc) -> Option<krilla::image::Image
         "jpg" | "jpeg" => krilla::image::Image::from_jpeg(data, false).ok(),
         "gif" => krilla::image::Image::from_gif(data, false).ok(),
         "webp" => krilla::image::Image::from_webp(data, false).ok(),
+        // krilla has no `from_bmp`, so we decode the common uncompressed BMP variants ourselves to
+        // rgba8 and embed via `from_rgba8` — closing the parity gap with the SVG sink (which embeds BMP
+        // as data:image/bmp for the WebView). Unsupported BMP variants fall through to the stub box.
+        "bmp" => decode_bmp_image(&bin.bytes),
         // Unknown kind: sniff the magic bytes so a mislabeled raster still embeds.
-        // NOTE: BMP isn't natively decodable by krilla (no `from_bmp`); a BMP draws a stub box in PDF
-        // even though the SVG sink embeds it as data:image/bmp (WebView renders BMP). Parity TODO:
-        // decode BMP → rgba8 and use `Image::from_rgba8` to close this gap.
         _ => sniff_image(&bin.bytes),
     }
+}
+
+/// Decode an uncompressed BMP to rgba8 and wrap it as a krilla [`Image`] (`from_rgba8`). `None` for
+/// RLE/exotic/corrupt BMPs → the caller keeps the honest stub box.
+fn decode_bmp_image(bytes: &[u8]) -> Option<krilla::image::Image> {
+    let (rgba, w, h) = crate::bmp::decode_bmp_to_rgba8(bytes)?;
+    Some(krilla::image::Image::from_rgba8(rgba, w, h))
 }
 
 /// Best-effort magic-byte sniff for a raster whose declared `kind` was unhelpful.
@@ -546,6 +554,8 @@ fn sniff_image(bytes: &[u8]) -> Option<krilla::image::Image> {
         krilla::image::Image::from_gif(data, false).ok()
     } else if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
         krilla::image::Image::from_webp(data, false).ok()
+    } else if bytes.starts_with(b"BM") {
+        decode_bmp_image(bytes)
     } else {
         None
     }
@@ -800,6 +810,74 @@ mod tests {
             "empty injection == discover, byte-identical"
         );
         assert_eq!(a.font_path, b.font_path);
+    }
+
+    /// A minimal 1x1 24bpp BMP (bottom-up, BI_RGB) with a single red pixel.
+    fn tiny_bmp() -> Vec<u8> {
+        let mut v = Vec::new();
+        v.extend_from_slice(b"BM");
+        v.extend_from_slice(&(54u32 + 4).to_le_bytes()); // file size (1px padded to 4 bytes)
+        v.extend_from_slice(&0u32.to_le_bytes()); // reserved
+        v.extend_from_slice(&54u32.to_le_bytes()); // pixel offset
+        v.extend_from_slice(&40u32.to_le_bytes()); // DIB header size
+        v.extend_from_slice(&1i32.to_le_bytes()); // width
+        v.extend_from_slice(&1i32.to_le_bytes()); // height
+        v.extend_from_slice(&1u16.to_le_bytes()); // planes
+        v.extend_from_slice(&24u16.to_le_bytes()); // bpp
+        v.extend_from_slice(&0u32.to_le_bytes()); // BI_RGB
+        v.extend_from_slice(&0u32.to_le_bytes()); // image size
+        v.extend_from_slice(&2835i32.to_le_bytes());
+        v.extend_from_slice(&2835i32.to_le_bytes());
+        v.extend_from_slice(&0u32.to_le_bytes()); // clr used
+        v.extend_from_slice(&0u32.to_le_bytes()); // clr important
+        v.extend_from_slice(&[0, 0, 255, 0]); // one BGR pixel (red) + 1 pad byte
+        v
+    }
+
+    #[test]
+    fn bmp_bin_decodes_to_a_real_image_not_stub() {
+        // Issue [5]: a BMP `BinData` must decode to a krilla Image via our own decoder (no `from_bmp`),
+        // so the PDF embeds a real XObject instead of the pre-fix empty stub box.
+        let mut doc = doc_with(vec![Block::Paragraph(para("bmp"))]);
+        doc.bin_data.push(BinData {
+            bin_ref: "image1".into(),
+            bytes: tiny_bmp(),
+            kind: "bmp".into(),
+        });
+        assert!(
+            decode_image("image1", &doc).is_some(),
+            "a BMP decodes to a real image (not a stub)"
+        );
+    }
+
+    #[test]
+    fn corrupt_bmp_falls_back_to_stub() {
+        // A truncated/garbage BMP declines decoding → `None`, so the caller keeps the honest stub box.
+        let mut doc = doc_with(vec![Block::Paragraph(para("bmp"))]);
+        doc.bin_data.push(BinData {
+            bin_ref: "image1".into(),
+            bytes: b"BMcorrupt".to_vec(),
+            kind: "bmp".into(),
+        });
+        assert!(
+            decode_image("image1", &doc).is_none(),
+            "a corrupt BMP declines → stub fallback"
+        );
+    }
+
+    #[test]
+    fn mislabeled_bmp_is_sniffed_and_embedded() {
+        // A BMP mislabeled with an unknown `kind` still embeds via magic-byte sniffing.
+        let mut doc = doc_with(vec![Block::Paragraph(para("bmp"))]);
+        doc.bin_data.push(BinData {
+            bin_ref: "image1".into(),
+            bytes: tiny_bmp(),
+            kind: "dat".into(),
+        });
+        assert!(
+            decode_image("image1", &doc).is_some(),
+            "a mislabeled BMP is sniffed and embedded"
+        );
     }
 
     #[test]

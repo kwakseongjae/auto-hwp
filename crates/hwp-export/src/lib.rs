@@ -23,6 +23,11 @@ use std::collections::BTreeMap;
 #[cfg(feature = "pdf")]
 pub mod pdf;
 
+/// Dependency-free BMP → RGBA8 decoder so the PDF path can embed BMP images (krilla has no
+/// `from_bmp`). Feature `pdf`.
+#[cfg(feature = "pdf")]
+mod bmp;
+
 use hwp_jsx::css::emit_css;
 use hwp_jsx::jsx::{JsxElement, JsxNode, Tag};
 use hwp_jsx::project::{Asset, JsxCssProject};
