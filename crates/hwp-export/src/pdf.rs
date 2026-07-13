@@ -323,6 +323,9 @@ fn lower_tree_to_page(
                 w,
                 h,
                 bin_ref,
+                // Equation SVG (issue 062-5) is ignored by the PDF backend — v1 defers SVG→PDF (no
+                // resvg), so an equation renders as the same stub box `paint_image` draws for it.
+                svg: _,
             } => {
                 paint_image(&mut surface, *x, *y, *w, *h, bin_ref, doc);
             }

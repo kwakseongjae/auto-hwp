@@ -316,9 +316,20 @@ fn emit_inline(inl: &Inline) -> JsxNode {
                 .with_attr("data-w", img.width.to_string())
                 .with_attr("data-h", img.height.to_string()),
         ),
-        Inline::Equation(e) => JsxNode::Element(
-            JsxElement::new(Tag::Equation).with_attr("data-b64", b64(&encode_equation(e))),
-        ),
+        Inline::Equation(e) => {
+            // The editable model rides in `data-b64` (round-trips every field incl. the cached SVG).
+            // Issue 062-5: ALSO surface the precomputed SVG + box dims as plain attrs so the HTML
+            // backend can inline the equation without decoding the blob (it emits the [수식] placeholder
+            // when `data-eq-svg` is absent — i.e. rhwp-off / un-rendered).
+            let mut el = JsxElement::new(Tag::Equation)
+                .with_attr("data-b64", b64(&encode_equation(e)))
+                .with_attr("data-w", e.width.to_string())
+                .with_attr("data-h", e.height.to_string());
+            if let Some(svg) = &e.rendered_svg {
+                el = el.with_attr("data-eq-svg", svg.clone());
+            }
+            JsxNode::Element(el)
+        }
         Inline::FieldBegin(f) => JsxNode::Element(
             JsxElement::new(Tag::Field)
                 .with_attr("data-begin", "1")
@@ -573,6 +584,7 @@ fn encode_equation(e: &EquationRef) -> Vec<u8> {
         width: e.width,
         height: e.height,
         version: e.version.clone(),
+        rendered_svg: e.rendered_svg.clone(),
     })
     .unwrap_or_default()
 }
@@ -593,6 +605,7 @@ fn decode_equation(bytes: &[u8]) -> EquationRef {
         width: b.width,
         height: b.height,
         version: b.version,
+        rendered_svg: b.rendered_svg,
     }
 }
 
@@ -1150,6 +1163,10 @@ struct EqBlob {
     width: i32,
     height: i32,
     version: String,
+    /// Precomputed equation SVG fragment (issue 062-5). `#[serde(default)]` keeps blobs written
+    /// before this field parseable (→ `None`), so the JSX round-trip stays backward-compatible.
+    #[serde(default)]
+    rendered_svg: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]

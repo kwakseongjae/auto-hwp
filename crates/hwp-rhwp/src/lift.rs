@@ -745,6 +745,10 @@ fn lift_equation(eq: &rhwp::model::control::Equation) -> EquationRef {
         width: eq.common.width as i32,
         height: eq.common.height as i32,
         version: eq.version_info.clone(),
+        // Issue 062-5: precompute the equation SVG via rhwp's own engine (raw `eq.color` is rhwp's
+        // ColorRef 0x00BBGGRR — pass it straight to `eq_color_to_svg`). `None` on empty/failed render
+        // → the own-render/HTML surfaces keep the stub box, byte-identical to before.
+        rendered_svg: crate::eq_render::equation_svg(&eq.script, eq.font_size, eq.color),
     }
 }
 

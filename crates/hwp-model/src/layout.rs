@@ -108,12 +108,19 @@ pub enum PaintOp {
     },
     /// An embedded image/object box referencing `bin_ref` into `SemanticDoc::bin_data` (empty for an
     /// equation/unknown-object placeholder, which a backend draws as a stub box).
+    ///
+    /// `svg` (issue 062-5): a PRECOMPUTED `<g>`-embeddable SVG fragment for an EQUATION, positioned in
+    /// the same page px scale as the box. When `Some`, the SVG backend nests it at the box origin
+    /// (`<g transform=translate(x,y)>{svg}</g>`) instead of the stub rect; the PDF/canvas backends
+    /// ignore it and draw the stub box (v1 defers SVG→PDF). Additive: `None` (every real image + every
+    /// un-rendered equation) is byte-identical to the pre-062-5 behavior.
     Image {
         x: f64,
         y: f64,
         w: f64,
         h: f64,
         bin_ref: String,
+        svg: Option<String>,
     },
 }
 

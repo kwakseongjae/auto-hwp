@@ -92,6 +92,7 @@ fn lower_page(pg: &PlacedPage) -> PageLayerTree {
             w: im.w,
             h: im.h,
             bin_ref: im.bin_ref.clone(),
+            svg: im.svg.clone(),
         });
     }
     // 4) Glyphs (y = baseline).
@@ -375,7 +376,19 @@ impl PaintSink for SvgSink<'_> {
                     c = color_hex(*color),
                 ));
             }
-            PaintOp::Image { x, y, w, h, bin_ref } => {
+            PaintOp::Image { x, y, w, h, bin_ref, svg } => {
+                // Equation (issue 062-5): a precomputed `<g>`-embeddable fragment rides in `svg`, in the
+                // SAME page px scale as this box (rhwp renders at font-size px = HWPUNIT/75, our px()).
+                // Nest it at the box origin — no scale needed, the scales coincide. `overflow:visible`
+                // via no clip; the reserved box (stored width/height) is authoritative for LAYOUT, so
+                // this is gate-neutral (the box was already reserved; we only fill it instead of a stub).
+                if let Some(frag) = svg {
+                    self.body.push_str(&format!(
+                        "<g transform=\"translate({x:.2},{y:.2})\" class=\"hwp-eq\">{frag}</g>",
+                        x = px(*x), y = px(*y),
+                    ));
+                    return;
+                }
                 // Resolve the bin_ref → real bytes (when a sink was built `with_bins`) → a data: URI so
                 // the actual photo renders. preserveAspectRatio="none" matches the placed box exactly,
                 // like an HWP image frame. Fall back to the light stub when the bytes are absent or the
@@ -693,6 +706,70 @@ mod tests {
         assert!(
             !svg.contains("<image "),
             "no <image> element without real bytes"
+        );
+    }
+
+    fn eq_paragraph(rendered_svg: Option<&str>) -> Paragraph {
+        let mut p = Paragraph::default();
+        p.runs.push(Run {
+            char_shape: 0,
+            content: vec![Inline::Equation(EquationRef {
+                script: "1 over 2".into(),
+                font: String::new(),
+                base_unit: 1000,
+                baseline: 0,
+                color: Color::default(),
+                width: 10000,
+                height: 8000,
+                version: String::new(),
+                rendered_svg: rendered_svg.map(str::to_string),
+            })],
+            ..Default::default()
+        });
+        p
+    }
+
+    /// Issue 062-5: a precomputed equation fragment is nested at the box origin (own-render surface).
+    #[test]
+    fn equation_with_rendered_svg_embeds_the_fragment() {
+        let doc = doc_with(vec![Block::Paragraph(eq_paragraph(Some(
+            "<text x=\"0\" y=\"10\">1</text>",
+        )))]);
+        let tree = render_page(&doc, &ApproxFontMetrics, 0).unwrap();
+        // The IR carries the fragment on the Image op (equations ride PaintOp::Image).
+        assert!(tree
+            .ops
+            .iter()
+            .any(|o| matches!(o, PaintOp::Image { svg: Some(s), .. } if s.contains("<text"))));
+        let svg = SvgSink::svg_for(&tree);
+        assert!(
+            svg.contains("<g transform=\"translate(") && svg.contains("class=\"hwp-eq\""),
+            "fragment nested in a translated <g>: {svg}"
+        );
+        assert!(
+            svg.contains("<text x=\"0\" y=\"10\">1</text>"),
+            "fragment embedded"
+        );
+        // The stub box is NOT drawn when a fragment is present.
+        assert!(
+            !svg.contains("fill=\"#F0F0F0\""),
+            "no stub rect when the equation is rendered"
+        );
+    }
+
+    /// rhwp-off / un-rendered: `rendered_svg = None` keeps the pre-062-5 stub box exactly.
+    #[test]
+    fn equation_without_rendered_svg_falls_back_to_stub() {
+        let doc = doc_with(vec![Block::Paragraph(eq_paragraph(None))]);
+        let tree = render_page(&doc, &ApproxFontMetrics, 0).unwrap();
+        let svg = SvgSink::svg_for(&tree);
+        assert!(
+            svg.contains("fill=\"#F0F0F0\""),
+            "un-rendered equation draws the stub box: {svg}"
+        );
+        assert!(
+            !svg.contains("class=\"hwp-eq\""),
+            "no <g> fragment when None"
         );
     }
 

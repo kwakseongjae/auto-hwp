@@ -274,6 +274,13 @@ pub struct EquationRef {
     pub height: HwpUnit,
     /// e.g. "Equation Version 60"; empty → the default on export.
     pub version: String,
+    /// PRECOMPUTED render (issue 062-5): the `<g>`-embeddable SVG fragment rhwp's equation engine
+    /// produces from `script` at lift time (in the own-render px scale = HWPUNIT/75). A DERIVED cache,
+    /// never part of the equation's semantic identity: `None` (no rhwp / un-rendered) keeps the old
+    /// stub-box behavior byte-for-byte, so this is purely additive. Consumed by the own-render SvgSink
+    /// (embedded as a `<g transform=translate(box)>`) and the HTML export (inline `<svg>`); the PDF
+    /// backend ignores it (v1 stub deferred — no SVG→PDF path yet).
+    pub rendered_svg: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]

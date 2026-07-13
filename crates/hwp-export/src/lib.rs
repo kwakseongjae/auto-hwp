@@ -138,7 +138,7 @@ fn render_element(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut St
         // with data-row/data-col); a stray one outside a Table just renders its children.
         Some(Tag::TableRow) | Some(Tag::TableCell) => render_children(el, assets, out),
         Some(Tag::Image) => render_image(el, assets, out),
-        Some(Tag::Equation) => out.push_str("<span class=\"hwp-eq\" title=\"수식\">[수식]</span>"),
+        Some(Tag::Equation) => render_equation(el, out),
         Some(Tag::Field) => {
             // FieldBegin/FieldEnd are inline MARKERS (no children); the linked text lives in the
             // sibling runs and renders normally. M1 does not yet pair markers into a clickable <a>
@@ -293,6 +293,37 @@ fn render_table(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut Stri
         out.push_str("</tr>");
     }
     out.push_str("</table>");
+}
+
+/// Render a 수식 (issue 062-5). When the codec carried a precomputed SVG fragment (`data-eq-svg`,
+/// present only when rhwp rendered the equation at lift time), inline it as a real `<svg>` sized to
+/// the reserved box (`data-w`/`data-h` are HWPUNIT → px = ÷75, the same px scale the fragment was
+/// laid out in, so a matching viewBox maps it 1:1). Otherwise fall back to the honest `[수식]`
+/// placeholder — never a wrong transcode. The fragment is our own renderer's output (rhwp escapes all
+/// text; it emits only `<text>/<line>/<path>/<circle>` — no script/handlers/foreignObject), so it is
+/// safe to emit as markup, exactly as the own-render SvgSink already does.
+fn render_equation(el: &JsxElement, out: &mut String) {
+    let svg = el.attrs.get("data-eq-svg").filter(|s| !s.is_empty());
+    let Some(svg) = svg else {
+        out.push_str("<span class=\"hwp-eq\" title=\"수식\">[수식]</span>");
+        return;
+    };
+    let px = |k: &str| {
+        el.attrs
+            .get(k)
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(0.0)
+            / 75.0
+    };
+    let (w, h) = (px("data-w"), px("data-h"));
+    // Style is INLINE (not a BASE_CSS rule) so equation-free documents stay byte-identical — the
+    // stylesheet is unchanged when no equation is rendered.
+    out.push_str(&format!(
+        "<span style=\"display:inline-block;vertical-align:middle;line-height:0\" \
+title=\"수식\" role=\"img\" aria-label=\"수식\">\
+<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w:.2}\" height=\"{h:.2}\" \
+viewBox=\"0 0 {w:.2} {h:.2}\" overflow=\"visible\">{svg}</svg></span>"
+    ));
 }
 
 fn render_image(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut String) {
@@ -599,6 +630,9 @@ mod tests {
                         width: 1000,
                         height: 1000,
                         version: String::new(),
+                        // No precomputed SVG → the honest [수식] placeholder (this test asserts exactly
+                        // that fallback; the rendered-SVG path is covered by a dedicated test below).
+                        rendered_svg: None,
                     }),
                     Inline::Raw(RawPart {
                         tag: "shape".into(),
@@ -620,6 +654,52 @@ mod tests {
         assert!(
             html.contains("hwp-raw"),
             "raw object shows a visible placeholder"
+        );
+    }
+
+    /// Issue 062-5: when the equation carries a precomputed SVG fragment, the HTML export inlines it
+    /// as a real `<svg>` sized to the reserved box — not the `[수식]` placeholder.
+    #[test]
+    fn equation_with_rendered_svg_emits_inline_svg() {
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape::default());
+        doc.para_shapes.push(ParaShape::default());
+        let para = Paragraph {
+            id: Some(NodeId(1)),
+            runs: vec![Run {
+                char_shape: 0,
+                char_ref: None,
+                content: vec![Inline::Equation(EquationRef {
+                    script: "1 over 2".into(),
+                    font: String::new(),
+                    base_unit: 1000,
+                    baseline: 0,
+                    color: Color::default(),
+                    width: 1500, // HWPUNIT → 1500/75 = 20px box width
+                    height: 750, // → 10px
+                    version: String::new(),
+                    rendered_svg: Some("<text x=\"0\" y=\"9\">1</text>".into()),
+                })],
+            }],
+            ..Default::default()
+        };
+        doc.sections.push(Section {
+            blocks: vec![Block::Paragraph(para)],
+            ..Default::default()
+        });
+        let html = html_of(&doc);
+        assert!(html.contains("<svg"), "inlines a real <svg>: {html}");
+        assert!(
+            html.contains("<text x=\"0\" y=\"9\">1</text>"),
+            "embeds the fragment verbatim"
+        );
+        assert!(
+            html.contains("viewBox=\"0 0 20.00 10.00\""),
+            "viewBox sized to the reserved box (HWPUNIT/75): {html}"
+        );
+        assert!(
+            !html.contains("[수식]"),
+            "the placeholder is replaced by the rendered equation"
         );
     }
 }

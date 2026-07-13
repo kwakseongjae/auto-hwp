@@ -55,6 +55,9 @@ pub struct PlacedImage {
     pub h: f64,
     /// `bin_ref` into [`SemanticDoc::bin_data`]; empty for an equation placeholder.
     pub bin_ref: String,
+    /// Precomputed equation SVG fragment (issue 062-5), carried straight to the SVG backend; `None`
+    /// for real images and un-rendered equations (→ the stub box, byte-identical to before).
+    pub svg: Option<String>,
     /// Source provenance: the `(section, block index)` anchor the image's paragraph occupies in the
     /// SemanticDoc — lets an overlay/edit map a placed box back to the editable model (the
     /// `image_bbox` query + a `SetImageSize` op). The renderer ignores these.
@@ -673,13 +676,14 @@ fn place_paragraph(
 
         // An anchored object sits on the first line of its paragraph.
         if li == 0 {
-            if let Some((w, h, bin_ref)) = &obj {
+            if let Some((w, h, bin_ref, svg)) = &obj {
                 pg.images.push(PlacedImage {
                     x: x0,
                     y: line_top,
                     w: *w,
                     h: *h,
                     bin_ref: bin_ref.clone(),
+                    svg: svg.clone(),
                     section,
                     block,
                 });
@@ -1713,22 +1717,32 @@ fn display_font(cs: Option<&CharShape>, slot: ScriptClass) -> Option<String> {
     hwp_model::font_class::substitute_family(name).map(str::to_string)
 }
 
-/// The tallest anchored image/equation on the paragraph as `(w, h, bin_ref)` — bin_ref empty for an
-/// equation (the renderer draws a placeholder box). `None` if the paragraph anchors no object.
-fn paragraph_object(p: &Paragraph) -> Option<(f64, f64, String)> {
-    let mut best: Option<(f64, f64, String)> = None;
+/// The tallest anchored image/equation on the paragraph as `(w, h, bin_ref, svg)` — `bin_ref` empty
+/// for an equation (the renderer draws a placeholder box unless `svg` is present), and `svg` is the
+/// equation's precomputed fragment (issue 062-5; `None` for images and un-rendered equations). `None`
+/// if the paragraph anchors no object.
+fn paragraph_object(p: &Paragraph) -> Option<(f64, f64, String, Option<String>)> {
+    let mut best: Option<(f64, f64, String, Option<String>)> = None;
     for run in &p.runs {
         for inl in &run.content {
             let cand = match inl {
-                Inline::Image(img) => {
-                    Some((img.width as f64, img.height as f64, img.bin_ref.clone()))
-                }
-                Inline::Equation(eq) => Some((eq.width as f64, eq.height as f64, String::new())),
+                Inline::Image(img) => Some((
+                    img.width as f64,
+                    img.height as f64,
+                    img.bin_ref.clone(),
+                    None,
+                )),
+                Inline::Equation(eq) => Some((
+                    eq.width as f64,
+                    eq.height as f64,
+                    String::new(),
+                    eq.rendered_svg.clone(),
+                )),
                 _ => None,
             };
-            if let Some((w, h, r)) = cand {
-                if best.as_ref().map(|(_, bh, _)| h > *bh).unwrap_or(true) {
-                    best = Some((w, h, r));
+            if let Some((w, h, r, svg)) = cand {
+                if best.as_ref().map(|(_, bh, _, _)| h > *bh).unwrap_or(true) {
+                    best = Some((w, h, r, svg));
                 }
             }
         }
