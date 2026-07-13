@@ -95,6 +95,25 @@ pub fn classify(name: &str) -> FontCategory {
     FontCategory::Other
 }
 
+/// Classify a face by its HWP5 FaceName PANOSE (`typeInfo`, 10 bytes) when it is DEFINITIVE. The two
+/// load-bearing bytes are PANOSE-1 `Family Kind` (byte 0) and `Serif Style` (byte 1): only the Latin
+/// Text family (kind 2) carries a meaningful serif style, where 2..=10 are serif designs (Cove … Triangle)
+/// and 11..=15 are the sans-serif designs (Normal/Obtuse/Perpendicular Sans, Flared, Rounded). Everything
+/// else — an `Any`/`No Fit` family (kind 0/1, the all-zero PANOSE that unset faces carry), a script /
+/// decorative / symbol family (3/4/5), or an `Any`/`No Fit` serif style — is indeterminate → `None`, so
+/// the caller falls back to the NAME heuristic. This never guesses serif vs sans from thin evidence.
+pub fn classify_panose(panose: &[u8; 10]) -> Option<FontCategory> {
+    // PANOSE-1: only Family Kind 2 (Latin Text) defines a serif style; other kinds leave byte 1 unused.
+    if panose[0] != 2 {
+        return None;
+    }
+    match panose[1] {
+        2..=10 => Some(FontCategory::Serif),
+        11..=15 => Some(FontCategory::Gothic),
+        _ => None, // 0 = Any, 1 = No Fit → indeterminate.
+    }
+}
+
 /// Resolve a document face name to the OFL substitute FAMILY the renderers should draw with, or `None`
 /// when the name already maps to the default gothic (고딕/기타 → NanumGothic, the universal fallback —
 /// returning `None` keeps those runs byte-identical to pre-058). Only 명조/serif faces get an explicit
@@ -104,6 +123,22 @@ pub fn substitute_family(name: &str) -> Option<&'static str> {
     match classify(name) {
         FontCategory::Serif => Some(SERIF_SUBSTITUTE),
         FontCategory::Gothic | FontCategory::Other => None,
+    }
+}
+
+/// Like [`substitute_family`], but prefers the face's PANOSE (`typeInfo`) hint over the name heuristic
+/// (issue 058 classified by name alone). A DEFINITIVE PANOSE wins — so a face whose NAME hides its style
+/// (a custom/vendor family the substring table doesn't recognize) still routes 명조→serif / 고딕→default
+/// correctly from its typographic metadata; an indeterminate or absent PANOSE falls back to the
+/// name-based [`substitute_family`]. Display only (058's metric invariant is untouched).
+pub fn substitute_family_with_panose(
+    name: &str,
+    panose: Option<&[u8; 10]>,
+) -> Option<&'static str> {
+    match panose.and_then(classify_panose) {
+        Some(FontCategory::Serif) => Some(SERIF_SUBSTITUTE),
+        Some(_) => None, // definitive gothic → default face (no explicit substitute).
+        None => substitute_family(name), // indeterminate/absent PANOSE → name heuristic.
     }
 }
 
@@ -160,5 +195,85 @@ mod tests {
         assert_eq!(substitute_family("맑은 고딕"), None);
         assert_eq!(substitute_family("Unknown"), None);
         assert_eq!(substitute_family(""), None);
+    }
+
+    #[test]
+    fn panose_latin_text_serif_style_classifies() {
+        // Family Kind 2 (Latin Text): serif styles 2..=10 → Serif.
+        for style in 2..=10u8 {
+            let mut p = [0u8; 10];
+            p[0] = 2;
+            p[1] = style;
+            assert_eq!(
+                classify_panose(&p),
+                Some(FontCategory::Serif),
+                "kind=2 serif_style={style} should be serif"
+            );
+        }
+        // 11..=15 (the sans designs) → Gothic.
+        for style in 11..=15u8 {
+            let mut p = [0u8; 10];
+            p[0] = 2;
+            p[1] = style;
+            assert_eq!(
+                classify_panose(&p),
+                Some(FontCategory::Gothic),
+                "kind=2 serif_style={style} should be gothic"
+            );
+        }
+    }
+
+    #[test]
+    fn panose_indeterminate_is_none() {
+        // All-zero PANOSE (the unset case) → None (name fallback).
+        assert_eq!(classify_panose(&[0; 10]), None);
+        // Any/No Fit serif style under Latin Text → None.
+        assert_eq!(classify_panose(&[2, 0, 0, 0, 0, 0, 0, 0, 0, 0]), None);
+        assert_eq!(classify_panose(&[2, 1, 0, 0, 0, 0, 0, 0, 0, 0]), None);
+        // Non-Latin-Text families (script/decorative/symbol) → None regardless of byte 1.
+        for kind in [0u8, 1, 3, 4, 5] {
+            assert_eq!(classify_panose(&[kind, 8, 0, 0, 0, 0, 0, 0, 0, 0]), None);
+        }
+        // The rhwp parser test's real sample: [2, 11, 6, ...] = Latin Text + Normal Sans → Gothic.
+        assert_eq!(
+            classify_panose(&[2, 11, 6, 0, 0, 1, 1, 1, 1, 1]),
+            Some(FontCategory::Gothic)
+        );
+    }
+
+    #[test]
+    fn panose_hint_overrides_name_heuristic() {
+        // A face the NAME table can't classify ("MyCustomFace" → Other → no substitute)…
+        assert_eq!(substitute_family("MyCustomFace"), None);
+        // …but whose PANOSE says serif (kind 2, style 3 = Obtuse Cove) → routes to the serif substitute.
+        let serif_panose = [2u8, 3, 0, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(
+            substitute_family_with_panose("MyCustomFace", Some(&serif_panose)),
+            Some(SERIF_SUBSTITUTE),
+            "definitive serif PANOSE beats an unrecognized name"
+        );
+        // A sans PANOSE (kind 2, style 11) keeps the default gothic even for an unknown name.
+        let sans_panose = [2u8, 11, 0, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(
+            substitute_family_with_panose("MyCustomFace", Some(&sans_panose)),
+            None
+        );
+        // An indeterminate/absent PANOSE falls back to the name heuristic (058 behavior preserved).
+        assert_eq!(
+            substitute_family_with_panose("함초롬바탕", Some(&[0; 10])),
+            Some(SERIF_SUBSTITUTE),
+            "all-zero PANOSE → name heuristic still classifies 바탕 as serif"
+        );
+        assert_eq!(
+            substitute_family_with_panose("함초롬바탕", None),
+            Some(SERIF_SUBSTITUTE)
+        );
+        // PANOSE can also CORRECT a name that would misclassify: a sans face oddly named "…명조" but with
+        // a definitive sans PANOSE draws with the default gothic, not the serif substitute.
+        assert_eq!(
+            substitute_family_with_panose("웹명조고딕", Some(&sans_panose)),
+            None,
+            "definitive sans PANOSE overrides a serif-looking name"
+        );
     }
 }

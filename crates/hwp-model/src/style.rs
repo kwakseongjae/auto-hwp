@@ -92,6 +92,14 @@ pub struct CharShape {
     /// its own `<hh:fontface lang>` pool so Hangul/Latin/Hanja keep distinct faces (not one family
     /// forced onto all scripts). Lifted from a binary `.hwp`'s per-script char-shape font ids.
     pub fonts: Vec<Option<String>>,
+
+    /// Per-script PANOSE (`typeInfo`) hints, parallel to [`Self::fonts`] (issue 058 follow-up). Populated
+    /// ONLY for faces whose PANOSE definitively classifies serif/sans (see
+    /// [`crate::font_class::classify_panose`]); an indeterminate/absent PANOSE stores `None` so the
+    /// renderer's font-substitution falls back to the NAME heuristic. **Empty Vec = no definitive PANOSE
+    /// on any slot (the common case)** — this keeps the IR (and its JSX manifest) byte-identical to
+    /// pre-typeInfo. DISPLAY only: metrics/pagination never read it (058's gate invariant holds).
+    pub font_panose: Vec<Option<[u8; 10]>>,
 }
 
 impl CharShape {

@@ -837,6 +837,7 @@ fn lift_char_shape(c: &RCharShape, doc: &RDoc) -> CharShape {
         subscript: c.subscript,
         text_color: lift_text_color(c.text_color),
         fonts: lift_fonts(c, doc),
+        font_panose: lift_font_panose(c, doc),
         ..Default::default()
     }
 }
@@ -856,6 +857,31 @@ fn lift_fonts(c: &RCharShape, doc: &RDoc) -> Vec<Option<String>> {
                 .filter(|n| !n.is_empty())
         })
         .collect()
+}
+
+/// Per-script PANOSE (`typeInfo`) hints, parallel to [`lift_fonts`] (issue 058 follow-up). rhwp DOES
+/// expose the HWP5 FaceName type-info as `Font.type_info: Option<[u8; 10]>` (the 10-byte PANOSE), so we
+/// forward it — but ONLY for a face whose PANOSE is DEFINITIVE (serif/sans per
+/// [`font_class::classify_panose`]); an indeterminate/absent PANOSE stores `None` so the renderer falls
+/// back to the name heuristic. When NO slot has a definitive PANOSE we return an EMPTY Vec, keeping the
+/// IR (and its JSX manifest) byte-identical to pre-typeInfo for the common case. DISPLAY only.
+fn lift_font_panose(c: &RCharShape, doc: &RDoc) -> Vec<Option<[u8; 10]>> {
+    let hints: Vec<Option<[u8; 10]>> = (0..7)
+        .map(|i| {
+            let fid = c.font_ids[i] as usize;
+            doc.doc_info
+                .font_faces
+                .get(i)
+                .and_then(|lang| lang.get(fid))
+                .and_then(|f| f.type_info)
+                .filter(|ti| hwp_model::font_class::classify_panose(ti).is_some())
+        })
+        .collect();
+    if hints.iter().all(Option::is_none) {
+        Vec::new()
+    } else {
+        hints
+    }
 }
 
 /// Translate an rhwp `PageDef` (구역 용지 설정) into our `PageSetup`: paper size, the four content

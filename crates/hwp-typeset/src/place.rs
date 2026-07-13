@@ -1714,7 +1714,10 @@ fn display_font(cs: Option<&CharShape>, slot: ScriptClass) -> Option<String> {
         .or(cs.font_family.as_deref())
         .map(str::trim)
         .filter(|s| !s.is_empty())?;
-    hwp_model::font_class::substitute_family(name).map(str::to_string)
+    // Issue 058 follow-up: a definitive PANOSE (typeInfo) hint for this slot wins over the name
+    // heuristic; an absent/indeterminate hint (the empty-Vec common case) falls back to the name.
+    let panose = cs.font_panose.get(slot as usize).and_then(Option::as_ref);
+    hwp_model::font_class::substitute_family_with_panose(name, panose).map(str::to_string)
 }
 
 /// The tallest anchored image/equation/chart on the paragraph as `(w, h, bin_ref, svg)` — `bin_ref`
@@ -2506,6 +2509,47 @@ mod tests {
         assert_eq!(
             placed2.pages[0].glyphs[0].x, serif_x,
             "font routing is display-only — the glyph x is face-independent"
+        );
+    }
+
+    #[test]
+    fn panose_hint_routes_font_when_name_is_ambiguous() {
+        // Issue 058 follow-up: a face whose NAME the heuristic can't classify ("사용자정의체" → Other →
+        // default gothic) still routes to the serif substitute when its PANOSE (typeInfo) says serif
+        // (Family Kind 2 Latin Text, Serif Style 3 = Obtuse Cove). Metric-neutral: the glyph x is
+        // captured from a bare (name-only) placement first and must be byte-identical with the hint.
+        let mut doc = doc_with(vec![Block::Paragraph(para("가"))]);
+        doc.char_shapes[0] = CharShape {
+            fonts: vec![Some("사용자정의체".to_string())],
+            ..Default::default()
+        };
+        let bare = place_doc(&doc, &ApproxFontMetrics);
+        let bare_x = bare.pages[0].glyphs[0].x;
+        assert_eq!(
+            bare.pages[0].glyphs[0].font, None,
+            "an unrecognized NAME alone → default gothic (no substitute)"
+        );
+
+        // Attach a definitive serif PANOSE for the Hangul slot → now routes to the serif substitute.
+        doc.char_shapes[0].font_panose = vec![Some([2, 3, 0, 0, 0, 0, 0, 0, 0, 0])];
+        let hinted = place_doc(&doc, &ApproxFontMetrics);
+        assert_eq!(
+            hinted.pages[0].glyphs[0].font.as_deref(),
+            Some("Nanum Myeongjo"),
+            "definitive serif PANOSE routes the ambiguous-named face to the serif substitute"
+        );
+        assert_eq!(
+            hinted.pages[0].glyphs[0].x, bare_x,
+            "PANOSE routing is display-only — the glyph x is unchanged (metric-neutral)"
+        );
+
+        // A definitive SANS PANOSE overrides a serif-looking name (함초롬바탕 → serif by name) → gothic.
+        doc.char_shapes[0].fonts = vec![Some("함초롬바탕".to_string())];
+        doc.char_shapes[0].font_panose = vec![Some([2, 11, 0, 0, 0, 0, 0, 0, 0, 0])];
+        let corrected = place_doc(&doc, &ApproxFontMetrics);
+        assert_eq!(
+            corrected.pages[0].glyphs[0].font, None,
+            "definitive sans PANOSE overrides the serif-looking name → default gothic"
         );
     }
 

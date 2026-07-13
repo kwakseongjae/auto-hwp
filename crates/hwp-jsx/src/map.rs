@@ -314,6 +314,11 @@ mod shape_serde {
         underline_color: ColorS,
         font_family: Option<String>,
         fonts: Vec<Option<String>>,
+        // Issue 058 follow-up: per-script PANOSE (typeInfo) hints. Omitted from the manifest when empty
+        // (the common case) via `skip_serializing_if`, so existing golden blobs stay byte-identical;
+        // `default` lets older manifests (no key) decode unchanged.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        font_panose: Vec<Option<[u8; 10]>>,
     }
 
     impl From<&CharShape> for CharShapeSerde {
@@ -342,6 +347,7 @@ mod shape_serde {
                 underline_color: s.underline_color.into(),
                 font_family: s.font_family.clone(),
                 fonts: s.fonts.clone(),
+                font_panose: s.font_panose.clone(),
             }
         }
     }
@@ -372,6 +378,7 @@ mod shape_serde {
                 underline_color: s.underline_color.into(),
                 font_family: s.font_family,
                 fonts: s.fonts,
+                font_panose: s.font_panose,
             }
         }
     }
