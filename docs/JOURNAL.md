@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-13 밤5 (Claude) · 후속 배치 트리아지 + 실행(flaky·IME·BMP·PANOSE, 토스트 revert)
+- 한 일: 미뤄둔 후속 트리아지 워크플로(90항목→actionable 7/외부6/XL多/디스코프). 3레인 병렬 실행:
+  Lane A(react/lab): flaky 028툴바 격리(근본=더블클릭 Date.now 400ms창 부하시 초과→Date.now 고정, 3회 296/296)·IME Chrome CDP e2e(main 통과)·토스트(엔진이 CellHit.nested 미방출=dead-code→**revert 8170566, 064 신설**). Lane B(Rust): BMP PDF 임베드(순수 Rust bmp.rs, from_rgba8, 26테스트)·FaceName PANOSE 분류(rhwp type_info 제공, 게이트 before==after 완전일치=metric누수0). 조사: rhwp upstream=v0.7.18(3패치 뒤, 재벤더링 저리스크로 차트/수식 자동개선)·kordoc(MIT/TS, 제품참고 중간가치).
+- 교훈: 후속도 실엔진 연동 확인 필수(토스트가 speculative dead-code였음 — mock만 통과, 프로덕션 미발화). 에이전트 2곳이 느린 e2e/브라우저 미설치로 반환 반복→직접 인수(IME는 브라우저 install 후 통과, flaky/BMP/PANOSE는 워크트리 게이트 직접확인).
+- 다음: #7 npm 발행 자동화 → rhwp 재벤더링 v0.7.18 → QA 핸드오프(QA.md 정식 절).
+
 ## 2026-07-13 밤4 (Claude) · B3 차트 v1 병합 → 062 잔여 배치 마감
 - 한 일: B3 062-7 차트(15fc718) — 신규 chart_render.rs가 rhwp OoxmlChart bootstrap, **B2의 PaintOp::Image.svg 채널 재사용**(별도 variant 불필요). lift Control::Shape arm이 OOXML Chart만 처리(GSO/레거시VtChart/비차트OLE→드롭=바이트동일). 박스=저장크기 예약(place_doc∥NaiveLayout LOCKSTEP). 게이트 선확인=두 벤치마크 차트 없음→구조적 중립. 게이트 8==8·18==18, 차트없는 문서 바이트동일(SVG/HTML/HWPX git-stash A/B), main --full 그린(e2e 39/39).
 - **062 잔여 배치 완료**: B1 대각선X자·B2 수식v1·B3 차트v1. 062 전체(배포용복호·옛한글·금칙·대각선·수식·차트) = rhwp 승격 완료. 잔여=자체PaintOp v2(XL)·krilla PDF·레거시OLE·rhwp upstream델타. 폰트메트릭=디스코프.

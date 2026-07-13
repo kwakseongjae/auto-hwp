@@ -74,7 +74,11 @@
 - LOCKSTEP: place_doc↔NaiveLayout — 조판 변경은 양쪽 동일 입력.
 - 차트 렌더는 **어느 소스도 미해결**(rhwp upstream 델타 미확인) → 자체 구현 확정, 이 이슈 밖.
 
-## 후속 확인 (미확인)
-- rhwp upstream(>v0.7.15) 델타(특히 차트) — 확인 후 반영.
-- kordoc 정체·라이선스 — 확인 후 참조 여부 판단.
-- 암호 문서(SHA-1) 복호화 클린룸(pyhwp AGPL 접촉 금지 — 산문/스펙 근거로 자체 구현).
+## 후속 확인 — 조사 완료 (2026-07-13, 전부 URL 확정)
+- **rhwp upstream 델타 = v0.7.15 → v0.7.18** (우리 vendored는 수정분 0인 clean 태그, remote=kwakseongjae/rhwp 미러, upstream=edwardkim/rhwp MIT). **재벤더링 권고(저리스크 고ROI)**:
+  - v0.7.17: OOXML 차트 7종(3D 막대×4·3D 파이·ofPie×2) 2D 근사 렌더 + 막대 stacked 그룹핑 → **062-7 차트 채널이 어댑터 무수정으로 자동 확대**.
+  - v0.7.18: 수식 TAC 라인흐름/커서/다행 보정 → **062-5 수식 채널 자동 개선**. + 거대표 O(n²) 제거(rhwp 자체 layout — 우리 typeset엔 인텔), Rc→Arc(Send 복원, caller 투명), 손상문서 폴백.
+  - VtChart/영역/산점도 신규 지원은 **upstream에도 없음**(승격 대상 부재).
+  - 방법: `git checkout v0.7.18` 통째 재벤더링(cherry-pick보다 저비용, clean 태그라 충돌 0). 유일 리스크=3패치 model 필드 드리프트 → 재빌드+크레이트 테스트 4종+게이트로 즉시 표면화. **→ 별도 후속 레인(서브모듈 포인터 변경).**
+- **kordoc** = `chrisryugj/kordoc`, MIT, TS/Node, rhwp 계보 형제(HWP→Markdown/JSON+MCP 갈래, ★1.4k 활발). 목표 상이(텍스트추출 vs 충실렌더)라 코드 이식 비현실적이나 **챗/AI 셸 제품·UX 레퍼런스로 중간 가치**(폼필·신구대조 diff·구조화 추출). 라이선스 안전(코드 열람/차용 허용).
+- 암호(password) 문서 복호화는 여전히 디스코프(AES 1-bit CFB+커스텀 KDF, pyhwp AGPL 접촉 금지, 상위 난이도).
