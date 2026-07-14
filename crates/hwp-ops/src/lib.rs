@@ -1245,6 +1245,38 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                 .collect();
             let plain = intern_char_shape(doc, CharShape::default());
             let (row, col) = (*row, *col);
+            // Preserve the cell's CURRENT run style for a PLAIN (unstyled) text edit — so replacing the
+            // text of a blue/italic template cell keeps its FONT/SIZE instead of resetting to black-plain.
+            // BUT reset the example text's `text_color` to default black: gov-doc templates ship blue/red
+            // placeholder text, and an AI fill (a single plain run) must NOT inherit that example color.
+            // We clone the cell's first-run CharShape, null its color, and re-intern → a NEUTRAL shape.
+            // This intern needs `&mut doc`, so it MUST happen before the `section_mut` borrow below —
+            // hence the immutable navigation to read the first-run shape index up front (mirrors how the
+            // run shapes are interned at the top of this arm). A run that carried explicit styling
+            // (interned to something other than the default `plain`) overrides as before; only
+            // default-styled runs (AI fills) adopt this neutral shape.
+            let neutral_shape: Option<usize> = {
+                let existing_idx = doc
+                    .sections
+                    .get(*section)
+                    .and_then(|s| s.blocks.get(*index))
+                    .and_then(|b| match b {
+                        Block::Table(t) => Some(t.edit_target()),
+                        _ => None,
+                    })
+                    .and_then(|t| t.cells.iter().find(|c| c.active && c.row == row && c.col == col))
+                    .and_then(|c| {
+                        c.blocks.iter().find_map(|b| match b {
+                            Block::Paragraph(p) => p.runs.first().map(|r| r.char_shape),
+                            _ => None,
+                        })
+                    });
+                existing_idx.map(|idx| {
+                    let mut sh = doc.char_shapes.get(idx).cloned().unwrap_or_default();
+                    sh.text_color = Color::default();
+                    intern_char_shape(doc, sh)
+                })
+            };
             let sec = section_mut(doc, *section)?;
             let block = sec.blocks.get_mut(*index).ok_or_else(|| {
                 Error::Other(format!("SetTableCell: block index {index} out of range"))
@@ -1257,14 +1289,6 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             let cell = t.cells.iter_mut().find(|c| c.active && c.row == row && c.col == col).ok_or_else(|| {
                 Error::Other(format!("SetTableCell: no active cell at (row {row}, col {col})"))
             })?;
-            // Preserve the cell's CURRENT run style for a PLAIN (unstyled) text edit — so replacing the
-            // text of a blue/italic template cell keeps its look instead of resetting to black-plain.
-            // A run that carried explicit styling (interned to something other than the default `plain`)
-            // overrides as before; only default-styled runs adopt the existing shape.
-            let existing_shape = cell.blocks.iter().find_map(|b| match b {
-                Block::Paragraph(p) => p.runs.first().map(|r| r.char_shape),
-                _ => None,
-            });
             // Preserve the cell's existing paragraph ALIGNMENT (para_shape) too — gov-doc cells are
             // center-aligned; without this a refilled cell reset to the default (left) and read as
             // "정렬 안 맞음" next to its centered siblings. A multi-paragraph cell is joined into the
@@ -1277,7 +1301,7 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             }).collect();
             let para_shape_for = |i: usize| orig_para_shapes.get(i).copied()
                 .or_else(|| orig_para_shapes.first().copied()).unwrap_or(0);
-            let resolve_shape = |cs: usize| match existing_shape {
+            let resolve_shape = |cs: usize| match neutral_shape {
                 Some(prev) if cs == plain => prev,
                 _ => cs,
             };
@@ -1297,7 +1321,7 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             cell.blocks = paras.into_iter().enumerate().map(|(i, group)| {
                 let runs = if group.is_empty() {
                     // An empty paragraph still needs one (empty) run so it round-trips/re-emits cleanly.
-                    vec![Run { char_shape: existing_shape.unwrap_or(plain), content: vec![Inline::Text(String::new())], ..Default::default() }]
+                    vec![Run { char_shape: neutral_shape.unwrap_or(plain), content: vec![Inline::Text(String::new())], ..Default::default() }]
                 } else {
                     group.into_iter()
                         .map(|(char_shape, text)| Run { char_shape: resolve_shape(char_shape), content: vec![Inline::Text(text)], ..Default::default() })
@@ -1453,6 +1477,27 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                 .map(|r| (intern_char_shape(doc, r.to_char_shape()), r.text.clone()))
                 .collect();
             let plain = intern_char_shape(doc, CharShape::default());
+            // A default (unstyled) run keeps the paragraph's existing first-run FONT/SIZE, exactly like
+            // SetTableCell — so untouched text doesn't reset to black-plain — but with `text_color` reset
+            // to default black so an AI paragraph fill doesn't inherit blue/red example-text color. Clone
+            // the first run's CharShape, null its color, and re-intern → a NEUTRAL shape. The intern needs
+            // `&mut doc`, so compute it here (immutable navigation to read the first-run shape index)
+            // BEFORE the `section_mut` borrow below.
+            let neutral_shape: Option<usize> = {
+                let existing_idx = doc
+                    .sections
+                    .get(*section)
+                    .and_then(|s| s.blocks.get(*block))
+                    .and_then(|b| match b {
+                        Block::Paragraph(p) => p.runs.first().map(|r| r.char_shape),
+                        _ => None,
+                    });
+                existing_idx.map(|idx| {
+                    let mut sh = doc.char_shapes.get(idx).cloned().unwrap_or_default();
+                    sh.text_color = Color::default();
+                    intern_char_shape(doc, sh)
+                })
+            };
             let sec = section_mut(doc, *section)?;
             let blk = sec.blocks.get_mut(*block).ok_or_else(|| {
                 Error::Other(format!("SetParagraphRuns: block {block} out of range"))
@@ -1467,15 +1512,12 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                     "이 문단은 인라인 편집 대상이 아닙니다 (이미지/필드/복합 구조) — 채팅으로 편집하세요".into(),
                 ));
             }
-            // A default (unstyled) run keeps the paragraph's existing first-run shape (color/etc.), exactly
-            // like SetTableCell — so untouched text doesn't reset to black-plain.
-            let existing_shape = p.runs.first().map(|r| r.char_shape);
-            let resolve_shape = |cs: usize| match existing_shape {
+            let resolve_shape = |cs: usize| match neutral_shape {
                 Some(prev) if cs == plain => prev,
                 _ => cs,
             };
             p.runs = if interned.is_empty() {
-                vec![Run { char_shape: existing_shape.unwrap_or(plain), content: vec![Inline::Text(String::new())], ..Default::default() }]
+                vec![Run { char_shape: neutral_shape.unwrap_or(plain), content: vec![Inline::Text(String::new())], ..Default::default() }]
             } else {
                 interned
                     .into_iter()
@@ -3382,6 +3424,172 @@ mod tests {
             }
         )
         .is_err());
+    }
+
+    /// The `CharShape` of the active cell's first run at (row, col) of the table at block `bi`.
+    fn cell_first_shape(doc: &SemanticDoc, bi: usize, row: usize, col: usize) -> CharShape {
+        let Block::Table(t) = &doc.sections[0].blocks[bi] else {
+            panic!("block {bi} is not a table")
+        };
+        let cell = t
+            .cells
+            .iter()
+            .find(|c| c.active && c.row == row && c.col == col)
+            .expect("active cell");
+        let idx = cell
+            .blocks
+            .iter()
+            .find_map(|b| match b {
+                Block::Paragraph(p) => p.runs.first().map(|r| r.char_shape),
+                _ => None,
+            })
+            .expect("first run");
+        doc.char_shapes[idx].clone()
+    }
+
+    #[test]
+    fn set_table_cell_ai_fill_neutralizes_placeholder_text_color() {
+        // Gov-doc templates ship blue/red EXAMPLE text. An AI fill (a single PLAIN run) must KEEP the
+        // placeholder cell's font/size but RESET the color to default black — not inherit the red.
+        let mut doc = doc_with(vec![simple_para(1, "앞")]);
+        let cell = |t: &str| CellSpec {
+            text: t.into(),
+            ..Default::default()
+        };
+        apply(
+            &mut doc,
+            &Op::InsertTableAt {
+                section: 0,
+                index: 1,
+                rows: vec![vec![cell("예시")]],
+            },
+        )
+        .unwrap();
+        // Stamp the placeholder cell's run with a RED, 14pt, "맑은 고딕" shape.
+        let red = CharShape {
+            height: 1400,
+            text_color: Color {
+                r: 255,
+                g: 0,
+                b: 0,
+                a: 0,
+            },
+            font_family: Some("맑은 고딕".into()),
+            ..Default::default()
+        };
+        let red_idx = intern_char_shape(&mut doc, red);
+        {
+            let Block::Table(t) = &mut doc.sections[0].blocks[1] else {
+                panic!("not a table")
+            };
+            let c = t
+                .cells
+                .iter_mut()
+                .find(|c| c.active && c.row == 0 && c.col == 0)
+                .unwrap();
+            for b in &mut c.blocks {
+                if let Block::Paragraph(p) = b {
+                    for r in &mut p.runs {
+                        r.char_shape = red_idx;
+                    }
+                }
+            }
+        }
+        // AI fill: a single PLAIN run.
+        apply(
+            &mut doc,
+            &Op::SetTableCell {
+                section: 0,
+                index: 1,
+                row: 0,
+                col: 0,
+                runs: vec![run_spec("홍길동")],
+            },
+        )
+        .unwrap();
+        assert_eq!(cell_text(&doc, 1, 0, 0), "홍길동");
+        let sh = cell_first_shape(&doc, 1, 0, 0);
+        assert_eq!(
+            sh.text_color,
+            Color::default(),
+            "AI fill must reset color to default black"
+        );
+        assert_eq!(sh.height, 1400, "font size preserved");
+        assert_eq!(
+            sh.font_family.as_deref(),
+            Some("맑은 고딕"),
+            "font family preserved"
+        );
+
+        // Scoping: a run carrying EXPLICIT color (a manual styled edit) is NOT reset — it keeps blue.
+        apply(
+            &mut doc,
+            &Op::SetTableCell {
+                section: 0,
+                index: 1,
+                row: 0,
+                col: 0,
+                runs: vec![RunSpec {
+                    text: "파랑".into(),
+                    color: Some("#0000FF".into()),
+                    ..Default::default()
+                }],
+            },
+        )
+        .unwrap();
+        let sh2 = cell_first_shape(&doc, 1, 0, 0);
+        assert_eq!(
+            sh2.text_color,
+            Color::from_hex("#0000FF").unwrap(),
+            "explicit manual color must be preserved (scoping)"
+        );
+    }
+
+    #[test]
+    fn set_paragraph_runs_ai_fill_neutralizes_text_color() {
+        // Paragraph twin of the cell test: an AI paragraph fill (a plain run) keeps the example
+        // paragraph's font/size but resets its blue/red color to default black.
+        let mut doc = doc_with(vec![simple_para(1, "예시문구")]);
+        let red = CharShape {
+            height: 1200,
+            text_color: Color {
+                r: 200,
+                g: 0,
+                b: 0,
+                a: 0,
+            },
+            font_family: Some("바탕".into()),
+            ..Default::default()
+        };
+        let red_idx = intern_char_shape(&mut doc, red);
+        if let Block::Paragraph(p) = &mut doc.sections[0].blocks[0] {
+            for r in &mut p.runs {
+                r.char_shape = red_idx;
+            }
+        }
+        apply(
+            &mut doc,
+            &Op::SetParagraphRuns {
+                section: 0,
+                block: 0,
+                runs: vec![run_spec("실제 내용")],
+            },
+        )
+        .unwrap();
+        let p = para_of(&doc, 1);
+        assert_eq!(run_texts(p).concat(), "실제 내용");
+        let sh = doc.char_shapes[p.runs[0].char_shape].clone();
+        assert_eq!(
+            sh.text_color,
+            Color::default(),
+            "AI paragraph fill must reset color to default black"
+        );
+        assert_eq!(sh.height, 1200, "font size preserved");
+        assert_eq!(
+            sh.font_family.as_deref(),
+            Some("바탕"),
+            "font family preserved"
+        );
     }
 
     #[test]
