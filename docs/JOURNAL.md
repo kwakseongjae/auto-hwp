@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-13 밤6 (Claude) · 실물QA P0 2건 병렬 수정 완료 — 065 압축mimetype ∥ 066 표그리드컨텍스트
+- 한 일: 실물 스윕 P0 둘 다 병렬 워크트리 수정→병합→검증. **065**(79ecd1a 푸시): detect가 압축 mimetype HWPX를 거부하던 것을 ZIP 중앙디렉토리 엔트리 NAME 스캔(DOCX식, inflate 0) fallback으로 해소 — 실물 6/24 회복. **066**(dab3e87): 웹 doc-context가 표 그리드에 눈멀어 "표 채워줘" intents:[] 이던 것을 hwp-session `table_grid`(edit_target 언랩·active셀) → wasm tableGrid → WasmAdapter → buildDocContext 그리드 첨부(dedup·truncate·회귀 바이트동일) + 프롬프트 FOOTER(TABLE GRID/ADDING ROWS)로 해소. 소스 선택 (b) 채택 사유=to_markdown은 hwp-ai deps 유입·전문서 덤프·edit_target 미사용으로 프레임표 좌표 틀어짐.
+- 검증: 통합 --full 그린(게이트 8==8·18==18, vitest 156/20/296/41, e2e 37 pass, wasm -Oz 재빌드). **실 Grok 4.5 실경로 실증**: 4행2열 라벨+빈값칸 그리드+"표 채워줘"→col1 값칸에만 4 SetTableCell(라벨 col0 미접촉), 066 이전 빈응답 완전 해소.
+- 다음: 로컬 육안 QA(사용자) — QA.md ⑪~⑱ + 이제 표채우기 바이브 플로우 포함. 미푸시=066(dab3e87)+본 문서 커밋.
+
 ## 2026-07-13 밤5 (Claude) · 후속 배치 트리아지 + 실행(flaky·IME·BMP·PANOSE, 토스트 revert)
 - 한 일: 미뤄둔 후속 트리아지 워크플로(90항목→actionable 7/외부6/XL多/디스코프). 3레인 병렬 실행:
   Lane A(react/lab): flaky 028툴바 격리(근본=더블클릭 Date.now 400ms창 부하시 초과→Date.now 고정, 3회 296/296)·IME Chrome CDP e2e(main 통과)·토스트(엔진이 CellHit.nested 미방출=dead-code→**revert 8170566, 064 신설**). Lane B(Rust): BMP PDF 임베드(순수 Rust bmp.rs, from_rgba8, 26테스트)·FaceName PANOSE 분류(rhwp type_info 제공, 게이트 before==after 완전일치=metric누수0). 조사: rhwp upstream=v0.7.18(3패치 뒤, 재벤더링 저리스크로 차트/수식 자동개선)·kordoc(MIT/TS, 제품참고 중간가치).

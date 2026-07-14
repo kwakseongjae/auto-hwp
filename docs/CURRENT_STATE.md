@@ -3,8 +3,9 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
-- 기준 커밋: `50db8f0`(063 병합) — **R12(051~057) + R13(058·059·060) + R14(062 quick win·063 패키징) 완료**. GitHub: https://github.com/kwakseongjae/tf-hwp (private)
-- 갱신: 2026-07-13 · Claude — 063 웹 이식 패키징 병합·검증 → 승인 배치(060→062→063) 전부 완료
+- 기준 커밋: `dab3e87`(066 병합) — **R12(051~057) + R13(058·059·060) + R14(062·063) + 실물QA 수정 065·066 완료**. GitHub: https://github.com/kwakseongjae/tf-hwp (private)
+- 갱신: 2026-07-13 · Claude — 065∥066 병렬 수정 배치 완료. **065 압축mimetype HWPX 감지**(실물 6/24 회복, 79ecd1a 푸시) +
+  **066 바이브 표 그리드 컨텍스트**(dab3e87, --full 그린, 실 Grok 4.5로 "표 채워줘"→값칸 SetTableCell 실증) 병합·검증.
 
 ## 지금 (현재 위치)
 - 로드맵 기준: **R12 + R13 + R14 완료 + 후속 배치 진행** — R12(051~057), R13(058·059·060),
@@ -16,13 +17,14 @@
   남은 후속: **#7 npm 발행 자동화 = 063에서 이미 완료**(중복 계산이었음). **rhwp 재벤더링 v0.7.18 = 블로킹**
   (미러 포크에 태그 없음 → needsExternal, 062에 실행 스텝). → **지금 처리 가능한 후속 전부 완료.**
 
-## 실물 QA 발견 (2026-07-13, ~/Desktop/archive 24개 실물 + Grok 4.5 실호출)
-OpenRouter/Grok 4.5 웹 생성 연동 완료(`.env.local` BYOK). 실물 스윕 발견:
-- **065 (P0, major)**: **압축 mimetype HWPX 거부 → 실물 6/24(25%, 작성완료본)가 안 열림.** detector가 앞 512B
-  리터럴 매칭만(무압축 mimetype 가정) → 압축 시 Unknown 거부. fallback zip 디코드 필요. **업로드→렌더 직결.**
-- **066 (P0, major)**: **바이브 표 편집이 컨텍스트 blindness로 실패.** 웹 doc-context가 표 그리드를 안 줌 →
-  "표 채워줘" intents 0, 라벨 지정 엉뚱한 셀. **Grok A/B 실증: 그리드 주면 완벽 동작**(모델 아닌 컨텍스트 문제).
-  to_markdown(004)을 웹에 배선하면 됨. 구조편집(행 추가)도 같은 뿌리(F3).
+## 실물 QA 발견 → 수정 완료 (2026-07-13, ~/Desktop/archive 24개 실물 + Grok 4.5 실호출)
+OpenRouter/Grok 4.5 웹 생성 연동 완료(`.env.local` BYOK). 실물 스윕 발견 P0 2건 = **둘 다 수정·병합·검증 완료**:
+- **065 ✅ done (79ecd1a 푸시)**: 압축 mimetype HWPX 거부 → 실물 6/24(25%, 작성완료본) 안 열림. detect fallback으로
+  ZIP 중앙디렉토리 엔트리 NAME(`Contents/header.xml`) 스캔(DOCX식, inflate 0 → wasm-clean·압축폭탄 0). 6개 전부 회복.
+- **066 ✅ done (dab3e87)**: 바이브 표 편집 컨텍스트 blindness. hwp-session `table_grid`(edit_target 언랩·active 셀만)
+  → wasm `tableGrid` → WasmAdapter → buildDocContext 그리드 첨부(`(rNcM)`+`_빈칸_`, dedup·truncate·회귀 바이트동일).
+  프롬프트 FOOTER에 TABLE GRID/ADDING ROWS 규약. **실 Grok 4.5 실경로 실증**: 그리드+"표 채워줘"→col1 값칸에만
+  SetTableCell(col0 라벨 미접촉), 066 이전 intents:[] 완전 해소. 구조편집(행 추가) 프롬프트도 동반 보강(F3).
 - 정상 확인: .hwp 렌더/export/게이트(8==8~25==25, 99.4%) OK, 문단 편집 Grok 정상, PDF/HTML export OK(작성완료본 제외).
 - 스윕 도구: `scripts/`(임시 qa-sweep는 scratchpad), CLI own-render/export-html/export-pdf/layout-check.
 

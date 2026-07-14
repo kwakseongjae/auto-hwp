@@ -1,6 +1,6 @@
 # 066 — 바이브 편집: 웹 doc-context가 표 구조에 눈이 멀어 표 채우기/구조편집 실패
 
-- 상태: open · 우선순위: **R14-P0 (바이브 편집 핵심 품질)** · 영역: packages/ai-protocol(buildDocContext) + wasm/adapter(표 그리드 노출) + apps/hwp-lab
+- 상태: **done** · 우선순위: **R14-P0 (바이브 편집 핵심 품질)** · 영역: packages/ai-protocol(buildDocContext) + hwp-session/wasm/adapter(표 그리드 노출) + apps/hwp-lab
 - 발견: 2026-07-13 실물 QA(사용자 스크린샷 + Grok 실호출 A/B). 모델(Grok 4.5)이 아니라 **컨텍스트가 문제**임을 실증.
 
 ## 증상 (사용자 스크린샷 + 재현)
@@ -32,11 +32,28 @@
    들어가면 "몇 행 표에 몇 개 추가"를 모델이 계산 가능.
 
 ## 수용 기준
-- [ ] 표 전체 마킹 + "채워줘" → 라벨 옆 빈 값 칸들에 sensible한 SetTableCell 생성(빈 그리드 재현 e2e, mock+실 provider)
-- [ ] "아이디어명은 X로" → 아이디어명 값 칸(라벨 칸 아님)에 적용
-- [ ] "행 N개 추가" → TableInsertRows/TableAppendRow 생성
-- [ ] 얇은 컨텍스트 회귀 방지(그리드 없으면 기존 동작), 토큰 예산(큰 표는 그리드 truncate maxLen)
-- [ ] R5 펜스·화이트리스트 유지, 게이트 무영향(JS/컨텍스트 변경)
+- [x] 표 전체 마킹 + "채워줘" → 라벨 옆 빈 값 칸들에 sensible한 SetTableCell 생성(빈 그리드 재현 e2e mock + **실 Grok 4.5**)
+- [x] "아이디어명은 X로" → 아이디어명 값 칸(라벨 칸 아님)에 적용 — 실 Grok이 col0(라벨) 안 건드리고 col1(값칸)만 겨냥
+- [x] "행 N개 추가" → TableInsertRows/TableAppendRow 생성(프롬프트 FOOTER "ADDING ROWS" + mock ③)
+- [x] 얇은 컨텍스트 회귀 방지(그리드 없으면 바이트동일), 토큰 예산(cellMaxLen 60 truncate + section:block dedup + maxLen)
+- [x] R5 펜스·화이트리스트 유지, 게이트 무영향(8==8·18==18, JS/컨텍스트 변경)
+
+## 해결 (2026-07-13, 커밋 dab3e87)
+그리드 소스로 **(b) hwp-session `table_grid(section, block)` 신설 → wasm `tableGrid` → WasmAdapter**를 택함.
+- **(a) `to_markdown` wasm 노출 기각**: hwp-wasm에 hwp-ai 의존 없음(LLM deps 유입) + 전 문서 덤프(토큰 비효율) +
+  `to_markdown`은 `edit_target()`을 안 써서 프레임 래퍼(자가진단표)에서 좌표가 틀어짐.
+- **(b) 채택**: 마킹된 표만, `t.edit_target()` 언랩 후 active 셀만 `(row,col,text)` — SetTableCell/model_cell_text와
+  **동일 언랩·주소 공간**. 분할표 fragment는 배치 개념이라 모델 read에 애초에 없음(fragment 함정 원천 차단).
+- `buildDocContext(meta, anchors, {grids})`: 표 앵커 첫 등장에만 그리드 첨부(같은 표 여러 셀 앵커는 `section:block` dedup),
+  각 셀값 `cellMaxLen`(기본 60) 절삭·개행 `/`로 접음. **grids 없으면 pre-066과 바이트동일**(회귀 안전).
+- 프롬프트 FOOTER에 "TABLE GRID"(`(rNcM)` 주소 규약 + `_빈칸_` 값칸 겨냥, 라벨 덮지 말 것) + "ADDING ROWS"
+  (TableInsertRows at/count/cols 예시) 추가. INTENT 필드 스펙 블록 미변경(발명 금지).
+- **검증**: hwp-session `table_grid` 유닛 · ai-protocol vitest 20/20(그리드·빈칸·dedup·truncate·회귀·프롬프트) ·
+  editor-core 156 · react 296 · hwp-lab 41 · e2e `chat-table-grid-066`(docContext에 `표 그리드`·`(rNcM)` 실림→적용
+  완주) + 051/smoke 무회귀 · 게이트 8==8·18==18 · wasm 재빌드(-Oz).
+- **실 Grok 4.5 실경로 실증(dab3e87 병합 후, dev 서버 `/api/hwp-edit`)**: 4행2열 라벨+빈값칸 그리드 + "표 채워줘" →
+  Grok이 **col1(값칸)에만** 4개 SetTableCell(아이디어명→"…순환고리", 대표자→"김민수", …) — **col0 라벨칸 미접촉**.
+  066 이전 `intents:[]` 증상 완전 해소. (실제 값 매핑은 라이브 모델 몫, mock은 결정적으로 빈칸 타겟팅 실증.)
 
 ## 함정
 - 큰 표(수백 셀)는 그리드가 토큰 폭증 → maxLen truncate + "마킹된 표만" 그리드(전 문서 아님).
