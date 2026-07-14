@@ -209,8 +209,10 @@ export {
 } from "./coords";
 export type { RectLike, VbLike, ScreenBox, PageBox } from "./coords";
 export type {
+  AiRequestOptions,
   Anchor,
   BlockHit,
+  Citation,
   TableBox,
   TableGrid,
   GridCell,

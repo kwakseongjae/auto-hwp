@@ -77,10 +77,12 @@ export type { Listener } from "./events";
 
 // Types
 export type {
+  AiRequestOptions,
   Anchor,
   BlockHit,
   Box,
   CaretRect,
+  Citation,
   CellCaretRect,
   CellHit,
   CellTextHit,

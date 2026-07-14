@@ -243,10 +243,37 @@ export interface DocContext {
   anchors: Anchor[];
 }
 
+/** One web-search source CITATION (web grounding) — a display-only `{title, url}` pair the host surfaces
+ *  on an assistant turn so the user can see WHERE a grounded answer came from. Structurally compatible with
+ *  @tf-hwp/ai-protocol's `Citation` (the server proxy parses OpenRouter's `url_citation` annotations into
+ *  this). Display data only — never fed back into an Intent (R5/R6 preserved). */
+export interface Citation {
+  url: string;
+  title: string;
+}
+
+/** OPTIONAL per-request knobs the CHAT surface passes to the host AI bridge (additive — the inline edit
+ *  surface omits them, so existing 3-arg callers are unaffected). `webSearch` asks the host to enable
+ *  server-side web-search grounding for THIS request only (opt-in — avoids searching/billing on every
+ *  edit); `onCitations` is a sink the host calls with any returned source citations so the chat can render
+ *  them. Kept a callback (NOT a return-type change) so the shared `Promise<Intent[]>` contract — used by
+ *  BOTH the chat and the inline panel — stays unchanged. */
+export interface AiRequestOptions {
+  webSearch?: boolean;
+  onCitations?: (citations: Citation[]) => void;
+}
+
 /** The host-supplied AI bridge (R6): the SDK NEVER calls an LLM or holds a key. Given the user's
  *  instruction, the marked anchors, and the doc context, the host (its own server) returns the Intents
- *  to preview → apply. Returning `[]` means "no change proposed". */
-export type OnAiRequest = (instruction: string, anchors: Anchor[], docContext: DocContext) => Promise<Intent[]>;
+ *  to preview → apply. Returning `[]` means "no change proposed". The optional `opts` (additive) carries
+ *  the chat's web-search toggle + a citations sink — omit it (as the inline panel does) for the exact
+ *  prior behavior. */
+export type OnAiRequest = (
+  instruction: string,
+  anchors: Anchor[],
+  docContext: DocContext,
+  opts?: AiRequestOptions,
+) => Promise<Intent[]>;
 
 /** Per-op-kind metadata for the proposal preview CARD (010식). A pure Intent→card mapping used by the
  *  UI layer to render a human summary + target chip. Issue 051 adds two OPTIONAL fields (additive):

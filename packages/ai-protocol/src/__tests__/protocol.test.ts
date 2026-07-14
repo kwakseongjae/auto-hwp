@@ -5,6 +5,7 @@ import {
   buildDocContext,
   buildSystemPrompt,
   buildUserMessage,
+  extractCitations,
   extractJsonArray,
   validateRequest,
   validateResponse,
@@ -285,5 +286,36 @@ describe("validateResponse (whitelist + structure)", () => {
   it("honors a custom allowedIntents subset", () => {
     const out = validateResponse([{ intent: "SetTableCell", section: 0, index: 0, row: 0, col: 0, text: "x" }], { allowedIntents: ["SetParagraphText"] });
     expect(out).toHaveLength(0); // SetTableCell not in the custom subset
+  });
+});
+
+describe("extractCitations (web-search grounding — Feature A)", () => {
+  it("parses OpenRouter `url_citation` annotations into display-only {title,url}", () => {
+    // The shape OpenRouter's web plugin returns on message.annotations.
+    const annotations = [
+      { type: "url_citation", url_citation: { url: "https://a.com/report", title: "2026 Market Report", content: "…" } },
+      { type: "url_citation", url_citation: { url: "https://b.com/news", title: "Sector News" } },
+    ];
+    expect(extractCitations(annotations)).toEqual([
+      { url: "https://a.com/report", title: "2026 Market Report" },
+      { url: "https://b.com/news", title: "Sector News" },
+    ]);
+  });
+
+  it("falls back to the url when a title is missing, and drops entries with no url", () => {
+    const annotations = [
+      { type: "url_citation", url_citation: { url: "https://c.com/x" } }, // no title → title = url
+      { type: "url_citation", url_citation: { title: "no url here" } }, // no url → dropped
+      { type: "file_citation", file_citation: { file_id: "f1" } }, // not a url_citation → ignored (no url)
+    ];
+    expect(extractCitations(annotations)).toEqual([{ url: "https://c.com/x", title: "https://c.com/x" }]);
+  });
+
+  it("accepts a flat {url,title} shape and returns [] for non-array / empty input", () => {
+    expect(extractCitations([{ url: "https://d.com", title: "D" }])).toEqual([{ url: "https://d.com", title: "D" }]);
+    expect(extractCitations(undefined)).toEqual([]);
+    expect(extractCitations(null)).toEqual([]);
+    expect(extractCitations("nope")).toEqual([]);
+    expect(extractCitations([])).toEqual([]);
   });
 });

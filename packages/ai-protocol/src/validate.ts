@@ -1,5 +1,5 @@
 import { DEFAULT_ALLOWED_INTENTS } from "./prompt.js";
-import { DEFAULT_LIMITS, type Anchor, type EditRequest, type Intent, type RequestLimits } from "./types.js";
+import { DEFAULT_LIMITS, type Anchor, type Citation, type EditRequest, type Intent, type RequestLimits } from "./types.js";
 
 /// Request + response validation (SDK-LAYERS: "validateResponse(json) — 화이트리스트+스키마 검증"). PROMOTED
 /// verbatim from apps/hwp-lab's route.ts (`validate`, `extractJsonArray`, `whitelist`) so the server proxy
@@ -74,6 +74,30 @@ export function validateResponse(input: unknown, opts: ValidateResponseOptions =
     } else {
       opts.onDrop?.("dropped malformed intent candidate");
     }
+  }
+  return out;
+}
+
+/** Sanitize a model message's `annotations` (OpenRouter web plugin) into display-only `{title, url}`
+ *  citations. Keeps only well-formed `url_citation` entries with a string `url` (the title falls back to
+ *  the url when missing). Pure + isomorphic — no fetch, no key. This is the citations "pass-through": the
+ *  intents lane (`validateResponse`) is UNCHANGED; citations are transparency DATA parsed alongside it and
+ *  NEVER fed back as Intents (R5/R6). Accepts either the OpenRouter nesting
+ *  `{ type:"url_citation", url_citation:{url,title,content?} }` or a flat `{url,title}`. */
+export function extractCitations(annotations: unknown): Citation[] {
+  if (!Array.isArray(annotations)) return [];
+  const out: Citation[] = [];
+  for (const a of annotations) {
+    if (!a || typeof a !== "object") continue;
+    const rec = a as { type?: unknown; url_citation?: unknown; url?: unknown; title?: unknown };
+    const nested =
+      rec.type === "url_citation" && rec.url_citation && typeof rec.url_citation === "object"
+        ? (rec.url_citation as { url?: unknown; title?: unknown })
+        : rec;
+    const url = typeof nested.url === "string" ? nested.url : null;
+    if (!url) continue;
+    const title = typeof nested.title === "string" && nested.title.trim() ? nested.title : url;
+    out.push({ url, title });
   }
   return out;
 }

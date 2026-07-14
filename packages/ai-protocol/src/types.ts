@@ -62,9 +62,21 @@ export interface EditRequest {
   docContext: string;
 }
 
-/** The proxy's response: the Intents to preview → apply (schema v0). `[]` = no change proposed. */
+/** One web-search source CITATION (web grounding) — a display-only `{title, url}` pair the proxy parses
+ *  from the model's `url_citation` annotations (OpenRouter web plugin) so the host can show WHERE a
+ *  grounded answer came from. Transparency data only — never fed back into an Intent (R5/R6 preserved).
+ *  Structurally compatible with @tf-hwp/editor-core's `Citation` so a host passes these straight through. */
+export interface Citation {
+  url: string;
+  title: string;
+}
+
+/** The proxy's response: the Intents to preview → apply (schema v0). `[]` = no change proposed. The
+ *  OPTIONAL `citations` (additive) carries web-search sources when the request enabled web grounding —
+ *  absent/`[]` on ordinary edits (the field only appears when the web plugin ran). */
 export interface EditResponse {
   intents: Intent[];
+  citations?: Citation[];
 }
 
 /** Length/count caps for input validation (defense-in-depth; the proxy enforces before calling a model). */

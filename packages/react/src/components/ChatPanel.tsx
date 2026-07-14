@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { describeIntent } from "../describeIntent";
 import { modLabel } from "../platform";
-import type { Anchor, DocContext, Intent, IntentCard, OnAiRequest } from "../types";
+import type { Anchor, Citation, DocContext, Intent, IntentCard, OnAiRequest } from "../types";
 
 export interface ChatPanelProps {
   /** Whether editing is possible (a document is open + editable). */
@@ -36,12 +36,38 @@ export interface ChatPanelProps {
    *  ORIGINAL text (`detail`) + the `destructive` flag. Omitted → the pure `describeIntent` mapping
    *  (backward compatible). Applying is ALWAYS behind the explicit 적용 button either way. */
   previewCards?: (intents: Intent[]) => Promise<IntentCard[]>;
+  /** PERSISTENT per-card 되돌리기 (Feature C): revert the TOP-of-stack applied batch (host wires
+   *  `core.session.undo()`), resolving `true` when a batch was reverted. Omitted → no per-card revert
+   *  button (backward compatible; the global ⌘Z / toolbar ↶ still exist). v1 is honest top-of-stack only:
+   *  the button is shown on every APPLIED turn but ENABLED only for the batch currently on top; earlier
+   *  batches are disabled with a tooltip until the ones above them are reverted (never silently reverts the
+   *  wrong batch). */
+  onRevert?: () => Promise<boolean>;
+  /** The LIVE undo-stack depth getter (Feature C): paired with `onRevert`. The panel records each applied
+   *  turn's depth-after-apply and compares it to this live value to know if that batch is still top-of-
+   *  stack. A getter (not a value) so it reflects the session even across a global undo/redo. */
+  undoDepth?: () => number;
+  /** OPTIONAL (Feature A): show the "🔎 웹 검색" grounding toggle. When on, `onAiRequest` is called with
+   *  `opts.webSearch = true` for THAT request (the host enables server-side web search + returns
+   *  `url_citation` sources via `opts.onCitations`). Omitted/false → the toggle is hidden (unchanged). */
+  enableWebSearch?: boolean;
 }
 
 // One assistant turn carries the previewed Intents (rendered as per-op CARDS); `state` tracks review.
+// `appliedDepth` (Feature C) is the undo-stack depth captured right after applying — the turn's batch is
+// still top-of-stack ⇔ this equals the live `undoDepth()`. `citations` (Feature A) are display-only
+// web-search sources returned for this turn. `reverted` = an applied turn the user later 되돌리기'd.
 type Msg =
   | { role: "user"; text: string }
-  | { role: "assistant"; state: "applied" | "discarded" | "pending"; intents: Intent[]; cards: IntentCard[]; page: number | null }
+  | {
+      role: "assistant";
+      state: "applied" | "discarded" | "pending" | "reverted";
+      intents: Intent[];
+      cards: IntentCard[];
+      page: number | null;
+      appliedDepth?: number;
+      citations?: Citation[];
+    }
   | { role: "assistant"; state: "error"; text: string };
 
 // Reusable prompt chips — the empty-state suggestions (fill the input so the user can tweak).
@@ -91,12 +117,17 @@ export function ChatPanel(props: ChatPanelProps) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  // Feature A: web-search grounding toggle (opt-in per request; avoids searching/billing on every edit).
+  const [webSearch, setWebSearch] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const last = msgs[msgs.length - 1];
   const awaiting = last?.role === "assistant" && last.state === "pending";
   const mod = props.modLabel ?? modLabel();
+  // Feature C: the LIVE undo-stack depth (read each render — reflects global undo/redo too). Each applied
+  // turn is top-of-stack ⇔ its recorded `appliedDepth` equals this. Undefined when the host wires no revert.
+  const currentDepth = props.undoDepth?.();
 
   useEffect(() => {
     const el = listRef.current;
@@ -119,13 +150,14 @@ export function ChatPanel(props: ChatPanelProps) {
     el.scrollIntoView?.({ block: "nearest" });
   }, [focusToken]);
 
-  function settleLast(state: "applied" | "discarded") {
+  function settleLast(state: "applied" | "discarded", appliedDepth?: number) {
     setMsgs((m) => {
       const copy = m.slice();
       for (let i = copy.length - 1; i >= 0; i--) {
         const c = copy[i];
         if (c.role === "assistant" && c.state === "pending") {
-          copy[i] = { ...c, state };
+          // Record the post-apply undo depth so this turn's per-card 되돌리기 knows when it's top-of-stack.
+          copy[i] = { ...c, state, ...(state === "applied" ? { appliedDepth } : {}) };
           break;
         }
       }
@@ -144,15 +176,25 @@ export function ChatPanel(props: ChatPanelProps) {
     setMsgs((m) => [...m, { role: "user", text: trimmed + where }]);
     setBusy(true);
     try {
-      const intents = await props.onAiRequest(trimmed, anchors, props.docContext);
+      // Feature A: pass the web-search toggle + a citations sink (additive `opts`). The host enables
+      // server-side web grounding for THIS request and reports back any `url_citation` sources here — the
+      // model still returns our JSON intents (no tool-calling refactor). Sink captured into the turn below.
+      let captured: Citation[] = [];
+      const intents = await props.onAiRequest(trimmed, anchors, props.docContext, {
+        webSearch,
+        onCitations: (c) => {
+          captured = c;
+        },
+      });
       props.onConsumeAnchors(); // the chips have ridden along — clear them (issue #009)
+      const citations = captured.length ? captured : undefined;
       if (!intents || intents.length === 0) {
         setMsgs((m) => [...m, { role: "assistant", state: "error", text: "제안된 편집이 없습니다." }]);
       } else {
         // issue 051: the host's async builder enriches cards (e.g. DeleteBlock 원문); fall back to the
         // pure describeIntent mapping when the host doesn't wire one (backward compatible).
         const cards = props.previewCards ? await props.previewCards(intents) : intents.map(describeIntent);
-        setMsgs((m) => [...m, { role: "assistant", state: "pending", intents, cards, page }]);
+        setMsgs((m) => [...m, { role: "assistant", state: "pending", intents, cards, page, citations }]);
       }
     } catch (e) {
       setMsgs((m) => [...m, { role: "assistant", state: "error", text: `${e}` }]);
@@ -165,7 +207,10 @@ export function ChatPanel(props: ChatPanelProps) {
     setBusy(true);
     try {
       const applied = await props.onApply(intents);
-      settleLast("applied");
+      // Capture the LIVE depth after applying — this batch is now top-of-stack at exactly this depth, so the
+      // per-card 되돌리기 can later tell whether it's still on top (Feature C). Read via the live getter (the
+      // captured `props` closure is stale, but `undoDepth` is a stable getter reading session state).
+      settleLast("applied", props.undoDepth?.());
       void applied;
     } catch (e) {
       setMsgs((m) => [...m, { role: "assistant", state: "error", text: `적용 실패: ${e}` }]);
@@ -175,6 +220,33 @@ export function ChatPanel(props: ChatPanelProps) {
   }
   function reject() {
     settleLast("discarded");
+  }
+
+  // Feature C — persistent per-card 되돌리기: revert the applied turn at index `i`. HONEST top-of-stack v1:
+  // only proceed when this turn's batch is STILL the top of the undo stack (re-checked here against the live
+  // depth) so we never pop the wrong batch; the button is already disabled off-top. On success the turn flips
+  // to a "reverted" state (its cards stay visible, greyed, labelled 되돌림).
+  async function revert(i: number) {
+    if (busy || !props.onRevert) return;
+    const c = msgs[i];
+    if (!c || c.role !== "assistant" || c.state !== "applied") return;
+    if (c.appliedDepth === undefined || props.undoDepth?.() !== c.appliedDepth) return; // not top → refuse
+    setBusy(true);
+    try {
+      const ok = await props.onRevert();
+      if (ok) {
+        setMsgs((m) => {
+          const copy = m.slice();
+          const t = copy[i];
+          if (t && t.role === "assistant" && t.state === "applied") copy[i] = { ...t, state: "reverted" };
+          return copy;
+        });
+      }
+    } catch (e) {
+      setMsgs((m) => [...m, { role: "assistant", state: "error", text: `되돌리기 실패: ${e}` }]);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -225,11 +297,29 @@ export function ChatPanel(props: ChatPanelProps) {
               </div>
             ) : (
               <div key={i} className="hw-msg-assistant">
-                <div className="hw-cards">
-                  {m.cards.map((card, j) => (
-                    <OpCard key={j} card={card} page={m.page} onJump={props.onJumpToPage} />
-                  ))}
-                </div>
+                {m.cards.length > 0 && (
+                  <div className="hw-cards">
+                    {m.cards.map((card, j) => (
+                      <OpCard key={j} card={card} page={m.page} onJump={props.onJumpToPage} />
+                    ))}
+                  </div>
+                )}
+                {/* Feature A: web-search 근거 — the source links behind a grounded proposal (transparency;
+                    display-only, target=_blank rel=noopener). Full step-by-step streaming is a later batch. */}
+                {m.citations && m.citations.length > 0 && (
+                  <div className="hw-citations" data-testid="hw-citations">
+                    <span className="hw-citations-head">🔎 근거</span>
+                    <ul className="hw-citations-list">
+                      {m.citations.map((c, k) => (
+                        <li key={k}>
+                          <a className="hw-citation-link" href={c.url} target="_blank" rel="noopener noreferrer" title={c.url}>
+                            {c.title}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 {m.state === "pending" && (
                   <div className="hw-review">
                     {/* issue 051: a proposal containing a DESTRUCTIVE card names the deletion on the
@@ -242,7 +332,34 @@ export function ChatPanel(props: ChatPanelProps) {
                     </button>
                   </div>
                 )}
-                {m.state === "applied" && <div className="hw-applied">✓ 적용됨</div>}
+                {m.state === "applied" && (
+                  <div className="hw-applied-row">
+                    <span className="hw-applied">✓ 적용됨</span>
+                    {/* Feature C: persistent 되돌리기 — always shown once applied; enabled only while this
+                        batch is the TOP of the undo stack (honest v1). Off-top edits are disabled with a
+                        tooltip until the batches above them are reverted. */}
+                    {props.onRevert &&
+                      (() => {
+                        const isTop = m.appliedDepth !== undefined && currentDepth !== undefined && currentDepth === m.appliedDepth;
+                        return (
+                          <button
+                            className="hw-btn-ghost hw-revert"
+                            data-testid="hw-revert"
+                            disabled={busy || !isTop}
+                            title={
+                              isTop
+                                ? "이 편집을 되돌립니다"
+                                : "이 편집 위에 다른 편집이 있어 개별 되돌리기는 다음 배치에서 지원됩니다 — 먼저 위 편집을 되돌리세요"
+                            }
+                            onClick={() => void revert(i)}
+                          >
+                            되돌리기
+                          </button>
+                        );
+                      })()}
+                  </div>
+                )}
+                {m.state === "reverted" && <div className="hw-discarded">↩ 되돌림</div>}
                 {m.state === "discarded" && <div className="hw-discarded">취소됨</div>}
               </div>
             ),
@@ -282,6 +399,21 @@ export function ChatPanel(props: ChatPanelProps) {
                 </span>
               ))}
             </div>
+          </div>
+        )}
+        {props.enableWebSearch && (
+          <div className="hw-composer-tools">
+            <button
+              type="button"
+              className={webSearch ? "hw-websearch-toggle hw-websearch-on" : "hw-websearch-toggle"}
+              aria-pressed={webSearch}
+              data-testid="hw-websearch-toggle"
+              disabled={!props.canEdit || busy || awaiting}
+              title="웹 검색 grounding: 켜면 이 요청에 한해 서버가 웹을 검색해 근거(출처)를 함께 반환합니다. (매 편집마다 검색/과금하지 않도록 옵트인)"
+              onClick={() => setWebSearch((v) => !v)}
+            >
+              🔎 웹 검색{webSearch ? " · 켬" : ""}
+            </button>
           </div>
         )}
         <div className="hw-composer-row">

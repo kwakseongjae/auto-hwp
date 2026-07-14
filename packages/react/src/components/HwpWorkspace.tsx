@@ -2267,6 +2267,23 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     if (await core.session.redo()) toast("다시 실행");
   }, [core, toast]);
 
+  // ── Feature C: persistent per-card 되돌리기 on applied chat turns ─────────────────────────────────────
+  // The chat records each applied turn's undo-stack depth (via `undoDepth`) and offers 되돌리기 only while
+  // that batch is still the TOP of the stack; `revertChatEdit` then pops exactly it (`session.undo` reverts
+  // the whole batch as one unit, same lane as the global ⌘Z). Stable getter so the chat can read the LIVE
+  // depth after an apply and re-derive top-of-stack across global undo/redo. Trap-safe like `onApply`.
+  const undoDepth = useCallback(() => core.session.undoDepth(), [core]);
+  const revertChatEdit = useCallback(async (): Promise<boolean> => {
+    try {
+      const ok = await core.session.undo();
+      if (ok) toast("되돌렸습니다");
+      return ok;
+    } catch (e) {
+      onTrap(e, "엔진 트랩 — 문서를 복구했습니다. 마지막 편집은 취소되었습니다");
+      return false;
+    }
+  }, [core, toast, onTrap]);
+
   const download = (bytes: Uint8Array | string, name: string, mime: string) => {
     // Copy into a fresh ArrayBuffer so the Blob part is a plain ArrayBuffer (not a wasm memory view).
     const part =
@@ -2762,6 +2779,11 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           // issue 051: async card enrichment — a DeleteBlock proposal shows the target block's 원문
           // (EditController.previewCards reads it via session.runsAt) before the explicit 적용 approval.
           previewCards={(intents) => core.edit.previewCards(intents)}
+          // Feature C: persistent per-card 되돌리기 (top-of-stack v1) — reverts the applied batch as one unit.
+          onRevert={revertChatEdit}
+          undoDepth={undoDepth}
+          // Feature A: web-search grounding toggle (opt-in per request) — the host's onAiRequest honors it.
+          enableWebSearch
         />
       </div>
 

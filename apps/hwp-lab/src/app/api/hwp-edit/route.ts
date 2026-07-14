@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import {
   type Anchor,
+  type Citation,
   type Intent,
   buildSystemPrompt,
   buildUserMessage,
+  extractCitations,
   validateRequest,
   validateResponse,
 } from "@tf-hwp/ai-protocol";
@@ -120,13 +122,28 @@ async function liveIntents(
 const OPENROUTER_MODEL = process.env.TF_HWP_OPENROUTER_MODEL || "x-ai/grok-4.5";
 
 /** OpenRouter(OpenAI 호환 Chat Completions) 경로. 키는 이 서버 핸들러 밖으로 나가지 않는다(R6).
- *  system/user 프롬프트(R5 펜스·화이트리스트·doc-context)는 Anthropic 경로와 동일하게 ai-protocol이 조립. */
+ *  system/user 프롬프트(R5 펜스·화이트리스트·doc-context)는 Anthropic 경로와 동일하게 ai-protocol이 조립.
+ *  Feature A: `webSearch`가 참이면 OpenRouter web 플러그인(`plugins:[{id:"web"}]`)을 켠다 — 서버가
+ *  서버사이드로 웹을 검색해 컨텍스트에 주입하고(별도 검색 API·tool-calling 리팩터 불필요), 모델은 여전히
+ *  우리 JSON intents를 반환한다. 응답 message.annotations의 `url_citation`을 근거(citations)로 파싱한다.
+ *  매 편집마다 검색/과금하지 않도록 `webSearch` 옵트인일 때만 플러그인을 켠다. */
 async function openRouterIntents(
   apiKey: string,
   instruction: string,
   anchors: Anchor[],
   docContext: string,
-): Promise<Intent[]> {
+  webSearch: boolean,
+): Promise<{ intents: Intent[]; citations: Citation[] }> {
+  const body: Record<string, unknown> = {
+    model: OPENROUTER_MODEL,
+    max_tokens: 4096,
+    messages: [
+      { role: "system", content: buildSystemPrompt() },
+      { role: "user", content: buildUserMessage({ instruction, anchors, docContext }) },
+    ],
+  };
+  // 검색이 요구될 때만 web 플러그인을 켠다(옵트인) — 클라이언트의 "🔎 웹 검색" 토글이 이 플래그를 보낸다.
+  if (webSearch) body.plugins = [{ id: "web" }];
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -136,23 +153,20 @@ async function openRouterIntents(
       "HTTP-Referer": "https://github.com/kwakseongjae/tf-hwp",
       "X-Title": "tf-hwp",
     },
-    body: JSON.stringify({
-      model: OPENROUTER_MODEL,
-      max_tokens: 4096,
-      messages: [
-        { role: "system", content: buildSystemPrompt() },
-        { role: "user", content: buildUserMessage({ instruction, anchors, docContext }) },
-      ],
-    }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`OpenRouter ${res.status} (model=${OPENROUTER_MODEL}): ${body.slice(0, 300)}`);
+    const errBody = await res.text().catch(() => "");
+    throw new Error(`OpenRouter ${res.status} (model=${OPENROUTER_MODEL}): ${errBody.slice(0, 300)}`);
   }
-  const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-  const text = data.choices?.[0]?.message?.content ?? "";
-  // Anthropic 경로와 동일 검증(화이트리스트 + 구조). 드롭 사유는 서버 로그로.
-  return validateResponse(text, { onDrop: (reason) => console.warn(`[hwp-edit] ${reason}`) });
+  const data = (await res.json()) as { choices?: Array<{ message?: { content?: string; annotations?: unknown } }> };
+  const message = data.choices?.[0]?.message;
+  const text = message?.content ?? "";
+  // Anthropic 경로와 동일 검증(화이트리스트 + 구조). 드롭 사유는 서버 로그로. intents 검증은 불변.
+  const intents = validateResponse(text, { onDrop: (reason) => console.warn(`[hwp-edit] ${reason}`) });
+  // Feature A: 근거(출처)는 intents 레인과 별개로 annotations에서 파싱(표시 전용, R5/R6 보존).
+  const citations = extractCitations(message?.annotations);
+  return { intents, citations };
 }
 
 /** 프로바이더 우선순위: OpenRouter(있으면) → Anthropic → mock. */
@@ -178,18 +192,23 @@ export async function POST(req: Request) {
   const check = validateRequest(body);
   if (!check.ok) return badRequest(check.error);
   const { instruction, anchors, docContext } = check.value;
+  // Feature A: 명시적 웹 검색 플래그(선택) — validateRequest 계약(instruction/anchors/docContext) 밖의
+  // 부가 필드라 raw body에서 직접 읽는다(boolean 아니면 false). intents 스키마와 무관(요청 부가 옵션).
+  const webSearch = typeof (body as { webSearch?: unknown }).webSearch === "boolean" ? (body as { webSearch: boolean }).webSearch : false;
 
   const provider = activeProvider();
   if (provider === "mock") {
-    // mock 모드 — 결정적 편집 제안(키 없이 전체 플로우 완주 가능).
-    return NextResponse.json({ intents: mockIntents(instruction, anchors, docContext), mode: "mock", provider: "mock" });
+    // mock 모드 — 결정적 편집 제안(키 없이 전체 플로우 완주 가능). mock은 웹 검색을 하지 않으므로 근거 없음.
+    return NextResponse.json({ intents: mockIntents(instruction, anchors, docContext), citations: [], mode: "mock", provider: "mock" });
   }
   try {
-    const intents =
-      provider === "openrouter"
-        ? await openRouterIntents(process.env.OPENROUTER_API_KEY!, instruction, anchors, docContext)
-        : await liveIntents(process.env.ANTHROPIC_API_KEY!, instruction, anchors, docContext);
-    return NextResponse.json({ intents, mode: "live", provider });
+    if (provider === "openrouter") {
+      const { intents, citations } = await openRouterIntents(process.env.OPENROUTER_API_KEY!, instruction, anchors, docContext, webSearch);
+      return NextResponse.json({ intents, citations, mode: "live", provider });
+    }
+    // Anthropic 경로는 내장 웹 검색이 없다(Grok과 달리) — 근거 없음(빈 배열)으로 형태만 additive 유지.
+    const intents = await liveIntents(process.env.ANTHROPIC_API_KEY!, instruction, anchors, docContext);
+    return NextResponse.json({ intents, citations: [], mode: "live", provider });
   } catch (e) {
     const detail = e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : String(e);
     console.error("[hwp-edit] live LLM call failed:", detail);

@@ -47,6 +47,14 @@ export class DocSession {
   canRedo(): boolean {
     return this.redoBatches.length > 0;
   }
+  /** The current undo-stack DEPTH (count of applied batches). The chat's per-card 되돌리기 reads this to
+   *  know whether a given applied turn's batch is STILL the top of the stack: `applyBatch` pushes a batch
+   *  atomically, so a batch is top-of-stack ⇔ the depth recorded right after applying it still equals the
+   *  live depth. Offering revert only for the top keeps it honest — a plain `undo()` then pops exactly it
+   *  (never the wrong batch). Non-top edits are shown disabled until the batches above them are undone. */
+  undoDepth(): number {
+    return this.undoBatches.length;
+  }
 
   // ── subscriptions ────────────────────────────────────────────────────────
   onDocChange(l: (meta: OpenResult | null) => void): () => void {

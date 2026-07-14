@@ -4,9 +4,9 @@
 // "bring your own vendor" integration.
 
 export { INTENT_VERSION, DEFAULT_LIMITS } from "./types.js";
-export type { Anchor, DocMeta, EditRequest, EditResponse, GridCell, Intent, RequestLimits, TableGrid } from "./types.js";
+export type { Anchor, Citation, DocMeta, EditRequest, EditResponse, GridCell, Intent, RequestLimits, TableGrid } from "./types.js";
 
 export { buildDocContext, buildUserMessage } from "./context.js";
 export { buildSystemPrompt, DEFAULT_ALLOWED_INTENTS } from "./prompt.js";
-export { validateRequest, validateResponse, extractJsonArray } from "./validate.js";
+export { validateRequest, validateResponse, extractJsonArray, extractCitations } from "./validate.js";
 export type { RequestCheck, ValidateResponseOptions } from "./validate.js";

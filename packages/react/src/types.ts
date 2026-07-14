@@ -5,8 +5,10 @@
 /// The selection VIEW types the components draw (Mark/Marquee/Sel) map 1:1 onto the core's
 /// SelMark/SelMarquee/Selection — aliased below so component code reads naturally.
 export type {
+  AiRequestOptions,
   Anchor,
   BlockHit,
+  Citation,
   TableBox,
   TableGrid,
   GridCell,

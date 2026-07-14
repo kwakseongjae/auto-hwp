@@ -566,8 +566,28 @@
 .hw-btn-ghost { background: none; border: none; color: #4b5563; font-size: 12px; padding: 5px 12px; border-radius: 6px; cursor: pointer; }
 .hw-btn-ghost:hover { background: rgba(0, 0, 0, 0.06); }
 .hw-btn-primary:disabled, .hw-btn-ghost:disabled { opacity: 0.4; cursor: default; }
-.hw-applied { margin-top: 4px; font-size: 11px; color: #059669; }
+.hw-applied { font-size: 11px; color: #059669; }
 .hw-discarded { margin-top: 4px; font-size: 11px; color: var(--hw-muted); }
+/* Feature C: persistent per-card 되돌리기 — the applied badge + a revert button on the same row. */
+.hw-applied-row { margin-top: 4px; display: flex; align-items: center; gap: 8px; }
+.hw-revert { font-size: 11px; color: #b45309; padding: 2px 8px; }
+.hw-revert:not(:disabled):hover { background: rgba(180, 83, 9, 0.1); }
+/* Feature A: web-search 근거 (source citations) under a grounded proposal — display-only links. */
+.hw-citations { margin-top: 6px; padding: 6px 8px; border: 1px solid rgba(37, 99, 235, 0.2); background: rgba(37, 99, 235, 0.05); border-radius: 8px; }
+.hw-citations-head { font-size: 11px; font-weight: 600; color: var(--hw-accent); }
+.hw-citations-list { margin: 4px 0 0; padding-left: 16px; display: flex; flex-direction: column; gap: 2px; }
+.hw-citations-list li { font-size: 11px; line-height: 1.4; }
+.hw-citation-link { color: var(--hw-accent); word-break: break-word; text-decoration: none; }
+.hw-citation-link:hover { text-decoration: underline; }
+/* Feature A: the composer web-search toggle. */
+.hw-composer-tools { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.hw-websearch-toggle {
+  font-size: 11px; color: #4b5563; background: none; border: 1px solid var(--hw-border);
+  padding: 3px 10px; border-radius: 999px; cursor: pointer;
+}
+.hw-websearch-toggle:not(:disabled):hover { background: rgba(0, 0, 0, 0.04); }
+.hw-websearch-toggle:disabled { opacity: 0.4; cursor: default; }
+.hw-websearch-on { color: #fff; background: var(--hw-accent); border-color: var(--hw-accent); }
 
 .hw-typing { align-self: flex-start; display: flex; gap: 4px; padding: 10px 12px; border: 1px solid rgba(124, 58, 237, 0.3); background: rgba(124, 58, 237, 0.05); border-radius: 14px 14px 14px 4px; }
 .hw-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--hw-ai); animation: hw-blink 1s infinite; }
