@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-14 밤 (Claude) · 웹 QA 3차 피드백 3건 — AI채우기 검정색·다중페이지드래그·챗revert+웹검색
+- 발단: 사용자 QA에서 #1(표 자동인식·채우기) 실 Grok 프레임표 작동 확인(고무적) + 신규 3건. 조사 4차원(색상속·마퀴·AI라우트/UI/revert + OpenRouter 웹검색 실현성) → 구현 계획 → 사용자 승인(범위 ①②③-C·A-v1, 색상=AI채우기 항상 검정) → 3 병렬 워크트리.
+- **① (32f521b)**: `Op::SetTableCell`/`SetParagraphRuns`가 빈칸 첫 run char_shape 전체(색)를 물려줘 예시 파랑/빨강이 채운 값에 반영되던 것을 plain-run 분기 char_shape clone→text_color=default 검정 reintern(폰트·크기 유지)으로 교정. 수동 명시색은 non-plain이라 자동 우회. hwp-ops 65·게이트 before==after·wasm 재빌드. **② (c6e5319)**: 마퀴 시작페이지 클립 해제 → pointerMoveMultipage(React가 캡처 하 교차페이지+sub-rect, core DOM-free)+auto-scroll+finishMarquee 페이지별 union. **③ (4aa1083)**: 챗카드 지속 되돌리기(undoDepth top-of-stack v1)+🔎 웹검색 토글(OnAiRequest additive opts, InlineEditPanel 무영향)+OpenRouter web plugin+citations(additive).
+- 교훈: OpenRouter web plugin은 툴콜링 없이 자동검색+url_citation → JSON-only 프롬프트 계약 안 깨고 웹검색 가능(스트리밍 투명성만 큰 리팩터). 3 워크트리 clean cherry-pick(영역 분리 좋음). 검증: vitest 23/163/305/44·게이트 8==8/18==18·챗/smoke e2e 11.
+- 다음: 사용자 로컬 QA(①색 검정·②교차페이지 드래그·③되돌리기/웹검색) → 잔여=always-revert 완전형(주소화/보상편집) + 스트리밍 투명성(③-v2).
+
 ## 2026-07-14 (Claude) · 웹 QA 2차 피드백 4건 — 스테일dist버그·deselect·Figma표선택·인라인편집
 - 발단: 사용자 실사용 스크린샷 — "아이디어명은 여명거리로"가 대표자명 라벨칸을 덮음(066이 안 먹힘). 병렬 조사(4차원)로 근본 매핑.
 - **#1 (0f09ac4)**: 라벨 덮어쓰기 근본 = **스테일 `ai-protocol/dist`**(066은 src만·앱은 dist 소비→grids 드롭). durable: hwp-lab predev/prebuild `build:deps` 선행 + verify-local.sh에 ai-protocol 빌드 + playwright webServer mock 고정. e2e로 docContext에 그리드 실림 확인. **#2 (0f09ac4)**: 빈바탕 클릭 미해제 = finishClick이 block_at nearest-band 폴백 신뢰 → strict-containment 재검사(+회귀 테스트).
