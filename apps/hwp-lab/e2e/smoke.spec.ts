@@ -17,9 +17,10 @@ test("업로드 → 8페이지 SVG → 셀 클릭 마킹 → mock 편집이 그 
   const svgCount = await page.locator(".hw-sheet svg").count();
   expect(svgCount).toBe(8);
 
-  // 셀 단위 마킹(이슈 023): 표 안을 클릭하면 그 셀이 앵커가 되고 칩 라벨에 "N행 M열"이 들어간다.
-  // 헤드리스에서 정확한 셀 좌표를 몰라도, 그리드로 스캔해 셀 앵커("행" 포함)가 뜰 때까지 클릭한다.
-  // 선택 모델(021): 클릭 = 교체 → 여러 번 클릭해도 선택은 하나로 갈아끼워진다.
+  // 셀 단위 마킹(06x Figma 드릴): 단일 클릭은 이제 표 '전체'를 마킹한다. 셀을 앵커로 만들려면 그 지점을
+  // 더블클릭해 셀로 드릴 인해야 한다("N행 M열" 라벨). 헤드리스에서 정확한 셀 좌표를 몰라도, 표 위 지점을
+  // 단일 클릭으로 찾고(.hw-mark-table) → Escape 로 드릴 초기화 → raw 좌표 더블클릭(행 그립 가로채기 우회)
+  // 으로 그 셀을 드릴한다. 선택 모델(021): 클릭 = 교체 → 선택은 하나로 갈아끼워진다.
   const anchor = page.locator(".hw-anchor");
   const pages = page.locator(".hw-pages");
   const firstSheet = page.locator('.hw-sheet[data-page="0"]');
@@ -29,7 +30,18 @@ test("업로드 → 8페이지 SVG → 셀 클릭 마킹 → mock 편집이 그 
   let cellLabel: string | null = null;
   outer: for (let ry = 0.12; ry <= 0.88 && !cellLabel; ry += 0.06) {
     for (let rx = 0.12; rx <= 0.88; rx += 0.1) {
-      await firstSheet.click({ position: { x: box.width * rx, y: box.height * ry } });
+      const px = box.x + box.width * rx;
+      const py = box.y + box.height * ry;
+      await page.mouse.click(px, py); // 단일 클릭 → 표 위면 전체 마킹
+      if ((await page.locator(".hw-mark-table").count()) === 0) continue; // 표가 아님 → 다음 지점
+      await page.keyboard.press("Escape"); // 드릴 레벨 초기화(직전 전체 마킹 해제)
+      await page.mouse.click(px, py); // 더블클릭 1
+      await page.mouse.click(px, py); // 더블클릭 2 → 셀로 드릴 인
+      try {
+        await page.locator(".hw-mark-cell").first().waitFor({ state: "visible", timeout: 4000 });
+      } catch {
+        continue; // 셀 경계/그립에 걸림 → 다음 지점
+      }
       if ((await anchor.count()) > 0) {
         const label = (await anchor.first().innerText()).trim();
         if (label.includes("행")) {

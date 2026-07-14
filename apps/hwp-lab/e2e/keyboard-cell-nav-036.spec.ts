@@ -13,6 +13,34 @@ async function open(page: Page) {
   await expect(page.locator(".hw-sheet svg").first()).toBeVisible({ timeout: 60_000 });
 }
 
+// 06x Figma 드릴: 단일 클릭은 표 '전체'를 마킹하므로, 셀 하나를 선택하려면 그 지점을 더블클릭해 드릴
+// 인한다. 표 위 지점을 단일 클릭으로 찾고(.hw-mark-table) → Escape 초기화 → 깨끗한 더블클릭(raw 좌표 →
+// 행 그립 가로채기 우회)으로 셀을 캐럿 없이 선택한다. 캐럿이 없어야 방향키가 036 셀 이동을 탄다.
+async function drillOneCell(page: Page): Promise<boolean> {
+  const sheet = page.locator('.hw-sheet[data-page="0"]');
+  const box = await sheet.boundingBox();
+  if (!box) throw new Error("첫 페이지 시트 박스를 찾지 못함");
+  for (let ry = 0.1; ry <= 0.9; ry += 0.04) {
+    for (let rx = 0.1; rx <= 0.9; rx += 0.06) {
+      const px = box.x + box.width * rx;
+      const py = box.y + box.height * ry;
+      await page.mouse.click(px, py);
+      if ((await page.locator(".hw-mark-table").count()) === 0) continue;
+      await page.keyboard.press("Escape");
+      await page.mouse.click(px, py);
+      await page.mouse.click(px, py);
+      try {
+        await page.locator(".hw-mark-cell").first().waitFor({ state: "visible", timeout: 4000 });
+      } catch {
+        continue; // 셀 경계/그립에 걸림 → 다음 지점
+      }
+      const labels = await page.locator(".hw-mark-label").allInnerTexts();
+      if (labels.some((l) => l.includes("행")) && (await page.locator(".hw-mark-cell").count()) === 1) return true;
+    }
+  }
+  return false;
+}
+
 // 현재 선택된 셀의 1-기반 (행,열)을 마크 라벨에서 읽는다.
 async function readCell(page: Page): Promise<{ row: number; col: number }> {
   const t = await page.locator(".hw-mark-label").first().innerText();
@@ -24,23 +52,9 @@ async function readCell(page: Page): Promise<{ row: number; col: number }> {
 test("방향키 셀 이동(열 증가) → Enter 편집 진입 → Tab 저장+오른쪽 셀 재진입", async ({ page }) => {
   await open(page);
 
-  // 1) 표의 한 셀을 클릭해 선택한다(셀 마크 하나 + "N행 M열" 라벨).
-  const sheet = page.locator('.hw-sheet[data-page="0"]');
-  const box = await sheet.boundingBox();
-  if (!box) throw new Error("첫 페이지 시트 박스를 찾지 못함");
-  let picked = false;
-  scan: for (let ry = 0.1; ry <= 0.9; ry += 0.04) {
-    for (let rx = 0.1; rx <= 0.9; rx += 0.06) {
-      await sheet.click({ position: { x: box.width * rx, y: box.height * ry } });
-      await page.waitForTimeout(50);
-      const labels = await page.locator(".hw-mark-label").allInnerTexts();
-      if (labels.some((l) => l.includes("행")) && (await page.locator(".hw-mark-cell").count()) === 1) {
-        picked = true;
-        break scan;
-      }
-    }
-  }
-  expect(picked, "표 셀을 클릭해 셀 선택 마크가 떠야 한다").toBeTruthy();
+  // 1) 표의 한 셀을 드릴(더블클릭)해 선택한다(셀 마크 하나 + "N행 M열" 라벨). 06x: 단일 클릭은 표 전체.
+  const picked = await drillOneCell(page);
+  expect(picked, "표 셀을 드릴해 셀 선택 마크가 떠야 한다").toBeTruthy();
   await page.waitForTimeout(150);
 
   // 2) 오른쪽 인접 셀이 있는 본문 행을 찾는다(맨 위 병합 헤더 행은 전폭 병합이라 오른쪽 이동이 올바르게
