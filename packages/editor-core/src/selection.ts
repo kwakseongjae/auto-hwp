@@ -1,6 +1,6 @@
 import type { EngineAdapter } from "./adapter";
 import { Emitter } from "./events";
-import type { Anchor, BlockHit, CellHit, PointerInput, Selection, SelMarquee, TableBox } from "./types";
+import type { Anchor, BlockHit, Box, CellHit, PointerInput, Selection, SelMarquee, TableBox } from "./types";
 
 /// SelectionModel — the OS-style selection engine (issues 021 + 023), DESCENDED from @tf-hwp/react's
 /// HwpWorkspace into framework-agnostic core. It owns the selection array (the single source of truth),
@@ -155,6 +155,11 @@ type Drag = {
   empty: boolean | null;
   marqueeing: boolean;
   resolved?: Resolved;
+  /// MULTI-PAGE marquee: the latest per-page sub-rects the UI computed for the current drag rect (each an
+  /// own-render PAGE-px box on its page, START page included). `finishMarquee` queries `blocksInRect` once
+  /// per slice and unions the hits. `undefined` = the single-page path (`pointerMove`) — finishMarquee then
+  /// falls back to the start-page rect from `startX/Y`..`curX/Y`.
+  slices?: { page: number; box: Box }[];
 };
 
 export class SelectionModel {
@@ -297,6 +302,33 @@ export class SelectionModel {
     this.setMarquee({ page: d.page, box: { x, y, w: Math.abs(d.curX - d.startX), h: Math.abs(d.curY - d.startY) } });
   }
 
+  /** pointermove for a MULTI-PAGE marquee: the UI supplies the per-page sub-rects it computed by
+   *  intersecting the client-space drag rectangle with each page's client rect (the DOM math stays in the
+   *  React layer — the core is DOM-free). A move that strays onto other pages is therefore NOT dropped
+   *  (superseding `pointerMove`'s single-page clip): every intersected page rides in `slices`.
+   *
+   *  `client` is the CURRENT raw screen point (the drag threshold is measured zoom-independently against
+   *  the press's client point). `slices` is every page the drag rect currently crosses, each with its OWN
+   *  own-render PAGE-px box (START page included). Runs the SAME threshold + empty-origin gating as
+   *  `pointerMove`, then publishes a marquee carrying all slices and records them for `finishMarquee`. */
+  pointerMoveMultipage(client: { x: number; y: number }, slices: { page: number; box: Box }[]): void {
+    const d = this.drag;
+    if (!d) return;
+    if (!d.marqueeing) {
+      const moved = Math.hypot(client.x - d.startClientX, client.y - d.startClientY) > DRAG_THRESHOLD_PX;
+      if (!moved) return;
+      if (d.empty !== true) return; // only empty-space drags marquee (null = still resolving → wait)
+      if (!this.adapter.blocksInRect) return; // backend can't answer a rect query → no marquee
+      d.marqueeing = true;
+    }
+    d.slices = slices;
+    // The START page's slice drives the back-compat `page`/`box`; every slice rides in `boxes` so each
+    // page's overlay can draw its own portion. An empty `slices` (rect off every page) clears to a 0-box.
+    const startSlice = slices.find((s) => s.page === d.page);
+    const box = startSlice ? startSlice.box : { x: 0, y: 0, w: 0, h: 0 };
+    this.setMarquee({ page: d.page, box, boxes: slices });
+  }
+
   /** pointerup: finish a marquee (query blocksInRect) or a click (resolve → anchor). */
   async pointerUp(_input?: PointerInput): Promise<void> {
     const d = this.drag;
@@ -309,18 +341,31 @@ export class SelectionModel {
 
   private async finishMarquee(d: Drag): Promise<void> {
     if (!this.adapter.blocksInRect) return;
-    const x0 = Math.min(d.startX, d.curX);
-    const y0 = Math.min(d.startY, d.curY);
-    const x1 = Math.max(d.startX, d.curX);
-    const y1 = Math.max(d.startY, d.curY);
+    // The per-page sub-rects to query: the UI-supplied `slices` (multi-page) or, on the single-page
+    // `pointerMove` path, the start-page rect derived from the drag origin/cursor. Each is queried
+    // independently and the hits are UNIONED across pages; `blockHitToSel(h, page)` stamps the RIGHT page.
+    const slices: { page: number; box: Box }[] =
+      d.slices && d.slices.length > 0
+        ? d.slices
+        : [{ page: d.page, box: { x: Math.min(d.startX, d.curX), y: Math.min(d.startY, d.curY), w: Math.abs(d.curX - d.startX), h: Math.abs(d.curY - d.startY) } }];
     try {
-      const hits = await this.adapter.blocksInRect(d.page, x0, y0, x1, y1);
       const sels: Selection[] = [];
+      const seen = new Set<string>(); // dedup across pages (e.g. a split table hit on two page slices)
       let excluded = 0;
-      for (const h of hits) {
-        const s = blockHitToSel(h, d.page);
-        if (s) sels.push(s);
-        else excluded++;
+      for (const sl of slices) {
+        const b = sl.box;
+        const hits = await this.adapter.blocksInRect(sl.page, b.x, b.y, b.x + b.w, b.y + b.h);
+        for (const h of hits) {
+          const s = blockHitToSel(h, sl.page);
+          if (!s) {
+            excluded++;
+            continue;
+          }
+          const k = selKey(s.anchor);
+          if (seen.has(k)) continue;
+          seen.add(k);
+          sels.push(s);
+        }
       }
       if (sels.length === 0 && !d.meta) this.setSelection([]);
       else this.setSelection(mergeSelection(this.sels, sels, d.meta ? "union" : "replace"));

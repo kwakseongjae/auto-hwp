@@ -76,6 +76,41 @@ describe("SelectionModel — replace/toggle/marquee (issue 021)", () => {
     expect(all).toContain("표 아래 둘");
   });
 
+  it("a MULTI-PAGE marquee unions blocks from EVERY intersected page (per-page sub-rects)", async () => {
+    // Empty everywhere (marquee-eligible); each page returns a DIFFERENT block for a rect query, so the
+    // union must contain a block from BOTH pages. The React layer computes the per-page sub-rects; here we
+    // feed them directly to `pointerMoveMultipage` (the DOM-free contract).
+    const perPage: Record<number, BlockHit[]> = {
+      0: [para(5, 800, 200, "1페이지 블록")],
+      1: [para(9, 40, 200, "2페이지 블록")],
+    };
+    const m = new SelectionModel(
+      new MockAdapter({
+        pages: 2,
+        hit: () => null, // empty → marquee eligible
+        blocks: (page) => perPage[page] ?? [],
+      }),
+    );
+    // Press on empty space on page 0, then drag down onto page 1. React supplies a slice per page.
+    await m.pointerDown({ page: 0, x: 80, y: 850, mod: false, client: { x: 80, y: 850 } });
+    m.pointerMoveMultipage({ x: 300, y: 300 }, [
+      { page: 0, box: { x: 80, y: 780, w: 220, h: 300 } }, // lower part of page 0
+      { page: 1, box: { x: 80, y: 0, w: 220, h: 240 } }, // upper part of page 1
+    ]);
+    const mq = m.getMarquee();
+    expect(mq).toBeTruthy();
+    expect(mq!.boxes?.length).toBe(2); // both pages carried in the marquee model
+    await m.pointerUp();
+    expect(chips(m)).toBe(2);
+    const all = labels(m).join(" ");
+    expect(all).toContain("1페이지 블록");
+    expect(all).toContain("2페이지 블록");
+    // The page-1 hit is stamped page 1 (blockHitToSel(h, page) per slice), not the start page.
+    const p1 = anchors(m).find((a) => (a.text ?? "").includes("2페이지"));
+    expect(p1?.page).toBe(1);
+    expect(m.getMarquee()).toBeNull(); // rect cleared on release
+  });
+
   it("a drag from a BLOCK (non-empty) does NOT marquee", async () => {
     const m = new SelectionModel(new MockAdapter({ pages: 1, hit: para(1, 0, 1123, "블록"), blocks: [para(9, 0, 100, "안됨")] }));
     await m.pointerDown(pd(0, 100, 100)); // press lands on a block → not empty

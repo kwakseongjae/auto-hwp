@@ -4,10 +4,21 @@ import type { EditorCore, SelMarquee } from "@tf-hwp/editor-core";
 export interface MarqueeLayerProps {
   /** The headless editor core — MarqueeLayer subscribes to its selection model DIRECTLY (issue 030). */
   core: EditorCore;
-  /** The page this layer belongs to (the marquee clips to its start page — v1). */
+  /** The page this layer belongs to. A multi-page marquee draws THIS page's own slice; a single-page
+   *  marquee draws only on its start page. */
   page: number;
   /** rendered px / viewBox px for this page (page-px → client-px). Stable during a drag; only zoom moves it. */
   scale: number;
+}
+
+/** The own-render PAGE-px box this page should draw for a marquee: its own entry in a MULTI-PAGE marquee
+ *  (`boxes`), else the single-page `box` iff the marquee lives on this page. `null` = draw nothing here. */
+function sliceBoxFor(m: SelMarquee, page: number): SelMarquee["box"] | null {
+  if (m.boxes && m.boxes.length > 0) {
+    const s = m.boxes.find((b) => b.page === page);
+    return s ? s.box : null;
+  }
+  return m.page === page ? m.box : null;
 }
 
 // rAF with a jsdom/SSR-safe fallback (jsdom under vitest ships rAF, but never assume it).
@@ -41,16 +52,17 @@ export function MarqueeLayer({ core, page, scale }: MarqueeLayerProps) {
     rafRef.current = null;
     const el = ref.current;
     const m = pendingRef.current;
-    if (!el || !m || m.page !== page) return;
-    el.style.left = `${m.box.x * scale}px`;
-    el.style.top = `${m.box.y * scale}px`;
-    el.style.width = `${m.box.w * scale}px`;
-    el.style.height = `${m.box.h * scale}px`;
+    const box = m ? sliceBoxFor(m, page) : null;
+    if (!el || !box) return;
+    el.style.left = `${box.x * scale}px`;
+    el.style.top = `${box.y * scale}px`;
+    el.style.width = `${box.w * scale}px`;
+    el.style.height = `${box.h * scale}px`;
   };
 
   useEffect(() => {
     const onMarquee = (m: SelMarquee | null) => {
-      const mine = !!m && m.page === page;
+      const mine = !!m && sliceBoxFor(m, page) != null;
       pendingRef.current = mine ? m : null;
       setActive(mine); // same-value flips bail out of a re-render (React), so moves 2…N cost nothing
       if (mine && rafRef.current == null) rafRef.current = raf(() => flushRef.current());

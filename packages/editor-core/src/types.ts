@@ -327,11 +327,18 @@ export interface SelMark {
   kind: "cell" | "range" | "paragraph" | "table" | "image" | string;
 }
 
-/** The in-progress marquee (rubber-band) rectangle, own-render PAGE px, on `page`. v1 clips a marquee to
- *  the page it started on. */
+/** The in-progress marquee (rubber-band) rectangle, own-render PAGE px. `page`/`box` are the START page's
+ *  slice (kept for the single-page fast path + back-compat). MULTI-PAGE marquee: when a drag spans more
+ *  than one page, `boxes` carries EVERY intersected page's own slice (own-render PAGE px, keyed by page,
+ *  START page included) — an overlay draws the slice whose `page` matches it. The React layer computes
+ *  each page's sub-rect from that page's client rect + viewBox (the core stays DOM-free). `boxes` absent
+ *  (or a single entry) = a plain single-page marquee. */
 export interface SelMarquee {
   page: number;
   box: Box;
+  /** Per-page sub-rects for a marquee that spans multiple pages (own-render PAGE px). Includes the START
+   *  page. Absent → the marquee lives entirely on `page`/`box`. */
+  boxes?: { page: number; box: Box }[];
 }
 
 /** One selected block = its structural Anchor (rides to the chat) + its visual Mark (drawn on the page).

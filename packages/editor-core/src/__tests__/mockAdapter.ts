@@ -23,8 +23,9 @@ export class MockAdapter implements EngineAdapter {
       /** A fixed cell hit, or a coordinate-aware resolver (cell-level marking, issue 023). Present opts
        *  make `tableCellAt` answer; omitting it entirely OMITS the method (whole-table fallback). */
       cell?: CellHit | null | ((page: number, x: number, y: number) => CellHit | null);
-      /** Canned marquee result for `blocksInRect` (issue 021). Omit to OMIT the method (no marquee). */
-      blocks?: BlockHit[];
+      /** Canned marquee result for `blocksInRect` (issue 021), or a page-aware resolver (so a MULTI-PAGE
+       *  marquee test can return DIFFERENT blocks per page). Omit to OMIT the method (no marquee). */
+      blocks?: BlockHit[] | ((page: number, x0: number, y0: number, x1: number, y1: number) => BlockHit[]);
       /** Canned column boundaries for `tableColBoundaries` (issue 027). Omit to OMIT the method. */
       colBoundaries?: number[] | null;
       /** Canned row boundaries for `tableRowBoundaries` (issue 031), or a page-aware resolver (so a split
@@ -112,8 +113,9 @@ export class MockAdapter implements EngineAdapter {
     const c = this.opts.cell;
     return (typeof c === "function" ? c(page, x, y) : c) ?? null;
   }
-  async blocksInRect(): Promise<BlockHit[]> {
-    return this.opts.blocks ?? [];
+  async blocksInRect(page: number, x0: number, y0: number, x1: number, y1: number): Promise<BlockHit[]> {
+    const b = this.opts.blocks;
+    return (typeof b === "function" ? b(page, x0, y0, x1, y1) : b) ?? [];
   }
   async tableColBoundaries(): Promise<number[] | null> {
     return this.opts.colBoundaries ?? null;

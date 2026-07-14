@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Anchor, Box, CellDir, DocContext, EngineAdapter, ImageBox, Intent, IntentCard, MatchBox, OutlineItem, PageGeom, PointerInput, RunSpec, Selection, TableBox, XYWH } from "@tf-hwp/editor-core";
-import { boundariesToRatios, remapFragmentHeights, appliedReflectsDrag, firstRunStyle, columnWidthMm, setColumnWidthMm, equalizeColumns, imageInsertSize, imageSizeToHwpunit, appliedReflectsResize } from "@tf-hwp/editor-core";
+import { boundariesToRatios, remapFragmentHeights, appliedReflectsDrag, firstRunStyle, columnWidthMm, setColumnWidthMm, equalizeColumns, imageInsertSize, imageSizeToHwpunit, appliedReflectsResize, DRAG_THRESHOLD_PX } from "@tf-hwp/editor-core";
 import { OutlinePanel } from "./OutlinePanel";
 import { StatusBar } from "./StatusBar";
 import { pageAtReference } from "../outline";
@@ -33,7 +33,7 @@ import { TableSizeGrid } from "./TableSizeGrid";
 import { FindBar } from "./FindBar";
 import { FindMatchOverlay } from "./FindMatchOverlay";
 import { useSelectionActions } from "../useSelectionActions";
-import { readViewBox, screenToPage } from "../coords";
+import { readViewBox, screenToPage, type PageBox } from "../coords";
 import { buildFontFaceCss, catalogUrl, SERIF_SUBSTITUTE, type FontCatalogEntry } from "../fonts";
 
 const A4_W = 794; // CSS px for 210mm @ 96dpi (mirrors HwpPageView) — the 100% page width.
@@ -183,6 +183,56 @@ const isDocFile = (f: File): boolean => /\.(hwpx?|HWPX?)$/i.test(f.name);
 /** Map a page-local click (client-px converted to page-px in HwpPageView) to the core's DOM-free pointer
  *  input. The client point rides along ONLY for the zoom-independent drag threshold (§함정). */
 const toPointerInput = (c: PageClick): PointerInput => ({ page: c.page, x: c.x, y: c.y, mod: c.meta, client: c.client });
+
+// ── MULTI-PAGE marquee (issue: cross-page drag select) ──────────────────────────────────────────────
+/** How close (client px) to the canvas's top/bottom edge the cursor must be during a marquee drag to
+ *  trigger edge auto-scroll, and how many px per rAF tick to scroll. */
+const AUTOSCROLL_EDGE = 48;
+const AUTOSCROLL_SPEED = 16;
+
+/** Compute the per-page sub-rects of a marquee that may span multiple pages. Intersects the client-space
+ *  drag rectangle (press point → current point) with EACH page sheet's on-screen box, then maps each
+ *  intersection into that page's OWN own-render PAGE px via `screenToPage`. Every page the rect touches
+ *  yields one slice (clamped to the page). The client-rect math lives HERE (the React layer) so the
+ *  editor-core SelectionModel stays DOM-free (SDK-LAYERS §함정). A rendered page maps against its <svg>
+ *  (exact viewBox); a virtualized placeholder (no <svg>) falls back to the first rendered page's viewBox
+ *  (pages in one section share a size), so a marquee that reaches off-screen pages still selects them. */
+function computeMarqueeSlices(canvas: HTMLElement, start: { x: number; y: number }, cur: { x: number; y: number }): { page: number; box: PageBox }[] {
+  const x0 = Math.min(start.x, cur.x);
+  const y0 = Math.min(start.y, cur.y);
+  const x1 = Math.max(start.x, cur.x);
+  const y1 = Math.max(start.y, cur.y);
+  const sheets = Array.from(canvas.querySelectorAll<HTMLElement>(".hw-sheet[data-page]"));
+  let fallbackVb: { width: number; height: number } | null = null;
+  for (const s of sheets) {
+    const svg = s.querySelector("svg") as SVGSVGElement | null;
+    if (svg) {
+      fallbackVb = readViewBox(svg);
+      break;
+    }
+  }
+  const slices: { page: number; box: PageBox }[] = [];
+  for (const sheet of sheets) {
+    const attr = sheet.getAttribute("data-page");
+    if (attr == null) continue;
+    const svg = sheet.querySelector("svg") as SVGSVGElement | null;
+    const el: Element = svg ?? sheet;
+    const rect = el.getBoundingClientRect();
+    const vb = svg ? readViewBox(svg) : fallbackVb;
+    if (!vb || vb.width === 0 || vb.height === 0 || rect.width === 0 || rect.height === 0) continue;
+    // Intersect the client drag rect with this page's on-screen box (this is what clamps the slice to the page).
+    const ix0 = Math.max(x0, rect.left);
+    const iy0 = Math.max(y0, rect.top);
+    const ix1 = Math.min(x1, rect.right);
+    const iy1 = Math.min(y1, rect.bottom);
+    if (ix1 <= ix0 || iy1 <= iy0) continue; // no overlap with this page
+    const p0 = screenToPage(ix0, iy0, rect, vb);
+    const p1 = screenToPage(ix1, iy1, rect, vb);
+    if (!p0 || !p1) continue;
+    slices.push({ page: Number(attr), box: { x: Math.min(p0.x, p1.x), y: Math.min(p0.y, p1.y), w: Math.abs(p1.x - p0.x), h: Math.abs(p1.y - p0.y) } });
+  }
+  return slices;
+}
 
 /** issue 055 사후 — COUNTED refreshToken shield. An action that causes its OWN re-flow (셀음영 적용,
  *  Tab 커밋-이동, 이미지 이동/크기 커밋) arms the shield (+1) so the refreshToken effect skips exactly
@@ -432,6 +482,13 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // Down-point of the current pointer gesture (client px) — a caret is placed only on a PLAIN CLICK
   // (movement under the drag threshold), never at the end of a marquee/drag.
   const caretDownRef = useRef<{ x: number; y: number } | null>(null);
+  // MULTI-PAGE marquee drag bookkeeping (issue: cross-page drag select). `dragStartClientRef` = the press
+  // client point (the anchor of the drag rectangle); `lastMarqueeClientRef` = the latest cursor client
+  // point (so the edge auto-scroll loop can re-slice at a fixed cursor while the pages scroll under it);
+  // `autoScrollRafRef` = the active rAF id (null when not auto-scrolling).
+  const dragStartClientRef = useRef<{ x: number; y: number } | null>(null);
+  const lastMarqueeClientRef = useRef<{ x: number; y: number } | null>(null);
+  const autoScrollRafRef = useRef<number | null>(null);
 
   const toast = useCallback((s: string) => {
     setStatus(s);
@@ -1943,11 +2000,78 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       if (inlineEditRef.current) setInlineEdit(null);
       setPointerActive(true); // a gesture began → hide the floating toolbar until it settles (028)
       caretDownRef.current = { x: c.client.x, y: c.client.y }; // 053: measure click-vs-drag on release
+      dragStartClientRef.current = { x: c.client.x, y: c.client.y }; // marquee: the drag-rect anchor
+      lastMarqueeClientRef.current = { x: c.client.x, y: c.client.y };
       void core.selection.pointerDown(toPointerInput(c));
     },
     [core],
   );
-  const onPointerMove = useCallback((c: PageClick) => core.selection.pointerMove(toPointerInput(c)), [core]);
+  // Recompute + publish the marquee slices for a cursor client point (shared by pointermove + the edge
+  // auto-scroll tick). Reads each page's client rect (DOM math) and hands per-page own-render PAGE-px
+  // sub-rects to the DOM-free core. Below the drag threshold → empty slices (the core waits to start).
+  const updateMarquee = useCallback(
+    (clientX: number, clientY: number) => {
+      const canvas = canvasRef.current;
+      const start = dragStartClientRef.current;
+      if (!canvas || !start) return;
+      const moved = Math.hypot(clientX - start.x, clientY - start.y) > DRAG_THRESHOLD_PX;
+      const slices = moved ? computeMarqueeSlices(canvas, start, { x: clientX, y: clientY }) : [];
+      core.selection.pointerMoveMultipage({ x: clientX, y: clientY }, slices);
+    },
+    [core],
+  );
+  // Edge AUTO-SCROLL: while a marquee is live and the cursor sits near the canvas's top/bottom edge, scroll
+  // the canvas so pages beyond the fold become reachable, then RE-SLICE at the (unchanged) cursor point over
+  // the newly-scrolled pages. Self-perpetuating via rAF; stops when the cursor leaves the edge zone, the
+  // scroll clamps, or the drag ends. Reads nothing that re-renders the workspace/sheets (issue 030 intact).
+  const autoScrollStep = useCallback(() => {
+    autoScrollRafRef.current = null;
+    const canvas = canvasRef.current;
+    const last = lastMarqueeClientRef.current;
+    const start = dragStartClientRef.current;
+    if (!canvas || !last || !start) return; // drag ended
+    const rect = canvas.getBoundingClientRect();
+    if (rect.height <= 0) return; // jsdom / not laid out → never auto-scroll
+    let dy = 0;
+    if (last.y < rect.top + AUTOSCROLL_EDGE) dy = -AUTOSCROLL_SPEED;
+    else if (last.y > rect.bottom - AUTOSCROLL_EDGE) dy = AUTOSCROLL_SPEED;
+    if (dy === 0) return; // cursor left the edge zone → stop the loop
+    const before = canvas.scrollTop;
+    canvas.scrollTop = before + dy;
+    if (canvas.scrollTop !== before) updateMarquee(last.x, last.y); // pages moved → re-slice at the same point
+    autoScrollRafRef.current = requestAnimationFrame(autoScrollStep);
+  }, [updateMarquee]);
+  // Kick off the auto-scroll loop iff the cursor is in an edge zone AND a marquee is actually live (never
+  // during a plain click / block drag / image-handle drag). Idempotent — a running loop is left alone.
+  const maybeAutoScroll = useCallback(
+    (clientY: number) => {
+      if (autoScrollRafRef.current != null) return; // already looping
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      if (rect.height <= 0) return;
+      const inEdge = clientY < rect.top + AUTOSCROLL_EDGE || clientY > rect.bottom - AUTOSCROLL_EDGE;
+      if (inEdge && core.selection.getMarquee() != null) autoScrollRafRef.current = requestAnimationFrame(autoScrollStep);
+    },
+    [autoScrollStep, core],
+  );
+  // Stop the auto-scroll loop + drop the drag-rect anchor (called on pointerup / gesture end).
+  const stopMarqueeDrag = useCallback(() => {
+    if (autoScrollRafRef.current != null) {
+      cancelAnimationFrame(autoScrollRafRef.current);
+      autoScrollRafRef.current = null;
+    }
+    dragStartClientRef.current = null;
+    lastMarqueeClientRef.current = null;
+  }, []);
+  const onPointerMove = useCallback(
+    (c: PageClick) => {
+      lastMarqueeClientRef.current = { x: c.client.x, y: c.client.y };
+      updateMarquee(c.client.x, c.client.y);
+      maybeAutoScroll(c.client.y);
+    },
+    [updateMarquee, maybeAutoScroll],
+  );
   // Figma progressive table selection (issue 06x): what a DOUBLE-CLICK does depends on where + what is
   // already selected. Over a paragraph (no table) → open its in-place editor directly (unchanged). Over a
   // table cell → DRILL: the first double-click selects the cell (no editor); a second double-click on the
@@ -2013,6 +2137,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const onPointerUp = useCallback(
     (c: PageClick) => {
       setPointerActive(false); // gesture ended → the toolbar re-appears once the new selection resolves
+      stopMarqueeDrag(); // multi-page marquee: end any edge auto-scroll + drop the drag-rect anchor
       // issue 049: an image click SELECTS the image (its own 8-handle overlay), NOT a block. Probe `imageAt`
       // FIRST (the image sits on top of its paragraph band); on a hit take over the selection + skip the
       // block-select/double-click. A miss falls through to the normal selection resolve. The overlay owns its
@@ -2045,7 +2170,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       placeCaretAt(c); // 053
       detectDoubleClick(c);
     },
-    [core, editingOn, adapter, onTrap, detectDoubleClick, placeCaretAt],
+    [core, editingOn, adapter, onTrap, detectDoubleClick, placeCaretAt, stopMarqueeDrag],
   );
 
   // ── issue 038: hover pre-highlight + cursor system (FG-09 + FG-06) ────────────────────────────────
