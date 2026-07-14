@@ -88,9 +88,10 @@ export async function runVanillaDemo(): Promise<{ log: string[]; html: string; u
   // 1) open
   await core.session.open(new Uint8Array([1, 2, 3]), "plan.hwpx");
 
-  // 2) select a cell with a pure page-local pointer input (no DOM event)
-  await core.selection.pointerDown({ page: 0, x: 100, y: 100, mod: false });
-  await core.selection.pointerUp();
+  // 2) DRILL into a cell with a pure page-local point (no DOM event). Figma progressive selection
+  //    (issue 06x): a plain click marks the WHOLE table; `drillInto` descends to the exact cell (the
+  //    UI wires it to a double-click / Enter).
+  await core.selection.drillInto(0, 100, 100);
 
   // 3) ask the host AI + apply the returned Intent as one undo batch
   const anchors = core.selection.getAnchors();

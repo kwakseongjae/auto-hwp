@@ -31,6 +31,23 @@ async function sheetOf(container: HTMLElement): Promise<HTMLElement> {
   });
 }
 
+// Figma drill (issue 06x): a single click marks the whole table, so SELECTING a cell = a DOUBLE-click
+// (two synchronous ups within the 400ms window → drillInto). Kept synchronous so no full-suite-load gap
+// pushes the 2nd click out of the window.
+function drillCell(sheet: HTMLElement, x: number, y: number) {
+  fireEvent.pointerDown(sheet, { clientX: x, clientY: y, button: 0, pointerId: 1 });
+  fireEvent.pointerUp(sheet, { clientX: x, clientY: y, button: 0, pointerId: 1 });
+  fireEvent.pointerDown(sheet, { clientX: x, clientY: y, button: 0, pointerId: 1 });
+  fireEvent.pointerUp(sheet, { clientX: x, clientY: y, button: 0, pointerId: 1 });
+}
+// Open the in-place editor over a cell: drill to select it, wait for the drill to settle, then Enter
+// (issue 036) — the robust editing entry (a 2nd double-click would race the drill).
+async function openCellEditorAt(sheet: HTMLElement, container: HTMLElement, x: number, y: number) {
+  drillCell(sheet, x, y);
+  await waitFor(() => expect(container.querySelector(".hw-anchor")?.textContent ?? "").toMatch(/행/));
+  fireEvent.keyDown(window, { key: "Enter" });
+}
+
 describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
   it("is OFF by default: no 표 추가 button, no ruler", async () => {
     const adapter = new MockAdapter({ table, pageGeom: { w: 794, h: 1123, ml: 90, mt: 90, mr: 90, mb: 90 }, pages: 1 });
@@ -185,12 +202,8 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "굵게", bold: true }], pages: 1 });
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
-    // Two quick pointer up/down pairs = a double-click (detected by the pointerup timing, since
-    // setPointerCapture suppresses the DOM dblclick).
-    fireEvent.pointerDown(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
-    fireEvent.pointerUp(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
-    fireEvent.pointerDown(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
-    fireEvent.pointerUp(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
+    // 06x: double-click DRILLS to the cell, then Enter opens the in-place editor (openCellEditorAt).
+    await openCellEditorAt(sheet, container, 60, 80);
     const ta = (await screen.findByTestId("hw-inplace-editor")) as HTMLElement;
     // The editor sits EXACTLY over the cell rect (page px × scale). The default zoom is 0.9, so scale = 0.9:
     // left/top/width = cell box × 0.9 — entering edit mode does not move/resize the cell (issue 032 <4px).
@@ -216,10 +229,7 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "굵게", bold: true }], pages: 1 });
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
-    fireEvent.pointerDown(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
-    fireEvent.pointerUp(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
-    fireEvent.pointerDown(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
-    fireEvent.pointerUp(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
+    await openCellEditorAt(sheet, container, 60, 80);
     const ta = await screen.findByTestId("hw-inplace-editor");
     fireEvent.keyDown(ta, { key: "Enter" }); // commit WITHOUT touching anything
     await waitFor(() => expect(screen.queryByTestId("hw-inplace-editor")).toBeNull()); // editor closed
@@ -233,10 +243,7 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "보통" }, { text: "굵게", bold: true }], pages: 1 });
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
-    fireEvent.pointerDown(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
-    fireEvent.pointerUp(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
-    fireEvent.pointerDown(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
-    fireEvent.pointerUp(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
+    await openCellEditorAt(sheet, container, 60, 80);
     const ta = (await screen.findByTestId("hw-inplace-editor")) as HTMLElement;
     // Change ONLY the plain run's text (the bold span is left exactly as it was).
     ta.innerHTML = `<div><span>새로운</span><span style="font-weight:700">굵게</span></div>`;
@@ -251,21 +258,13 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
   it("while the in-place editor is open, the 028 floating toolbar is HIDDEN (two chromes must not fight)", async () => {
     const cell: CellHit = { section: 0, block: 1, row: 1, col: 1, rows: 3, cols: 3, text: "칸", x: 140, y: 100, w: 100, h: 40 };
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
-    // Freeze the wall-clock the double-click detector reads (HwpWorkspace uses Date.now with a 400ms
-    // window). Unlike the other double-click tests, this one AWAITS `findByTestId` BETWEEN the two clicks,
-    // so under full-suite load that real-time gap can exceed 400ms and the 2nd click is misread as a fresh
-    // single click — the editor never opens and the toolbar never hides (the flake). A frozen clock keeps
-    // the two clicks one gesture regardless of the await duration; the source detector is untouched.
-    vi.spyOn(Date, "now").mockReturnValue(Date.now());
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
-    // Single click selects the cell → the floating toolbar appears.
-    fireEvent.pointerDown(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
-    fireEvent.pointerUp(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
+    // 06x drill: a double-click SELECTS the cell → the floating toolbar appears.
+    drillCell(sheet, 160, 110);
     await screen.findByTestId("hw-floating-toolbar");
-    // Now open the editor with a double-click → the toolbar must disappear.
-    fireEvent.pointerDown(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
-    fireEvent.pointerUp(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
+    // Now open the editor (Enter over the drilled cell) → the toolbar must disappear.
+    fireEvent.keyDown(window, { key: "Enter" });
     await screen.findByTestId("hw-inplace-editor");
     await waitFor(() => expect(screen.queryByTestId("hw-floating-toolbar")).toBeNull());
   });
@@ -275,8 +274,7 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
-    fireEvent.pointerDown(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
-    fireEvent.pointerUp(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
+    drillCell(sheet, 160, 110); // 06x: drill to select the cell (single click would mark the whole table)
     // the new capsule toolbar carries the same control testids (issue 028 surface redesign).
     await screen.findByTestId("hw-floating-toolbar");
     const bold = await screen.findByTestId("hw-fmt-bold");

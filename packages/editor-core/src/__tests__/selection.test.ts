@@ -118,49 +118,67 @@ const cellAt = (_p: number, x: number, y: number): CellHit => {
   return { section: 0, block: 1, row, col, rows: 3, cols: 2, text, x: col * 397, y: row * 260, w: 397, h: 260 };
 };
 
-describe("SelectionModel — cell-level marking (issue 023)", () => {
-  it("click inside a table anchors the exact CELL (snippet + 1-based N행 M열, global coords)", async () => {
+// Figma progressive table selection (issue 06x — SUPERSEDES the 023 single-click=cell model): a single
+// click on a table now marks the WHOLE TABLE (drill level-0); `drillInto` (the double-click / Enter path)
+// DESCENDS into the exact CELL and marks the table drilled, so subsequent plain clicks inside the SAME
+// table keep selecting cells until the drill is reset (a click on a DIFFERENT table / paragraph / clear).
+describe("SelectionModel — Figma table drill (issue 06x)", () => {
+  it("(a) a single click inside a table anchors the WHOLE TABLE, not a cell", async () => {
     const m = new SelectionModel(new MockAdapter({ pages: 1, table: CELL_TABLE, cell: cellAt }));
-    await click(m, 0, 100, 390); // row 1, col 0
+    await click(m, 0, 100, 390); // would be row 1, col 0 — but a fresh click marks the whole table
+    expect(chips(m)).toBe(1);
+    expect(m.getMarks()[0].kind).toBe("table"); // the whole-table mark, never a green cell mark
+    expect(anchors(m)[0].kind).toBe("table");
+    expect(labels(m)[0]).toBe("표 (p.1)");
+    expect(anchors(m)[0].rows).toBeUndefined();
+    expect(anchors(m)[0].cols).toBeUndefined();
+    expect(m.currentCell()).toBeNull();
+  });
+
+  it("(b) drillInto anchors the exact CELL (snippet + 1-based N행 M열, global coords)", async () => {
+    const m = new SelectionModel(new MockAdapter({ pages: 1, table: CELL_TABLE, cell: cellAt }));
+    const sel = await m.drillInto(0, 100, 390); // row 1, col 0
+    expect(sel).not.toBeNull();
     expect(chips(m)).toBe(1);
     const label = labels(m)[0];
     expect(label).toContain("2행 1열"); // row 1 → 2행, col 0 → 1열
     expect(label).toContain("제품");
-    expect(m.getMarks()[0].kind).toBe("cell"); // the green cell mark, not the whole-table mark
+    expect(m.getMarks()[0].kind).toBe("cell"); // now the green cell mark
     expect(anchors(m)[0].kind).toBe("cell");
     expect(anchors(m)[0].rows).toEqual([1, 1]);
     expect(anchors(m)[0].cols).toEqual([0, 0]);
   });
 
-  it("a plain click on ANOTHER cell replaces (still one chip, new address)", async () => {
+  it("(c) after drilling, a plain click inside the SAME table yields the clicked CELL (drill persists)", async () => {
     const m = new SelectionModel(new MockAdapter({ pages: 1, table: CELL_TABLE, cell: cellAt }));
-    await click(m, 0, 100, 100); // row 0 col 0
-    expect(labels(m)[0]).toContain("1행 1열");
-    await click(m, 0, 600, 650); // row 2 col 1
+    await m.drillInto(0, 100, 390); // drill into row 1 col 0
+    await click(m, 0, 600, 650); // a plain click on ANOTHER cell (row 2 col 1) of the SAME table
+    expect(chips(m)).toBe(1);
+    expect(anchors(m)[0].kind).toBe("cell");
     expect(labels(m)[0]).toContain("3행 2열");
-    expect(chips(m)).toBe(1);
+    expect(m.currentCell()).toEqual({ section: 0, block: 1, row: 2, col: 1 });
   });
 
-  it("⌘/Ctrl+click TOGGLES the exact clicked cell in and out", async () => {
-    const m = new SelectionModel(new MockAdapter({ pages: 1, table: CELL_TABLE, cell: cellAt }));
-    await click(m, 0, 100, 390, true);
+  it("(c) a plain click on a DIFFERENT table resets the drill to a whole-table anchor", async () => {
+    const OTHER: TableBox = { section: 0, block: 5, x: 0, y: 800, w: 794, h: 200, rows: 1, cols: 1, first_row: 0 };
+    const otherCell: CellHit = { section: 0, block: 5, row: 0, col: 0, rows: 1, cols: 1, text: "다른 표", x: 0, y: 800, w: 794, h: 200 };
+    const m = new SelectionModel(
+      new MockAdapter({
+        pages: 1,
+        table: (_p, _x, y) => (y < 780 ? CELL_TABLE : OTHER),
+        cell: (_p, x, y) => (y < 780 ? cellAt(_p, x, y) : otherCell),
+      }),
+    );
+    await m.drillInto(0, 100, 390); // drilled into block 1
+    expect(anchors(m)[0].kind).toBe("cell");
+    await click(m, 0, 100, 900); // click the OTHER table (block 5) → fresh table, drill reset
     expect(chips(m)).toBe(1);
-    await click(m, 0, 100, 390, true); // SAME cell
-    expect(chips(m)).toBe(0);
+    expect(anchors(m)[0].kind).toBe("table");
+    expect(anchors(m)[0].block).toBe(5);
+    expect(m.currentCell()).toBeNull();
   });
 
-  it("two DIFFERENT cells of the same table accumulate under ⌘/Ctrl (distinct identity)", async () => {
-    const m = new SelectionModel(new MockAdapter({ pages: 1, table: CELL_TABLE, cell: cellAt }));
-    await click(m, 0, 100, 100); // row 0 col 0
-    expect(chips(m)).toBe(1);
-    await click(m, 0, 100, 390, true); // row 1 col 0 — different cell, same table
-    expect(chips(m)).toBe(2);
-    const all = labels(m).join(" ");
-    expect(all).toContain("1행 1열");
-    expect(all).toContain("2행 1열");
-  });
-
-  it("cell + block MIXED selection: a cell anchor coexists with a ⌘-added paragraph", async () => {
+  it("(c) after drilling, a click on a PARAGRAPH resets the drill (next table click is whole-table)", async () => {
     const m = new SelectionModel(
       new MockAdapter({
         pages: 1,
@@ -169,7 +187,63 @@ describe("SelectionModel — cell-level marking (issue 023)", () => {
         hit: (_p, _x, y) => (y >= 500 ? para(7, 500, 400, "결론 문단") : null),
       }),
     );
-    await click(m, 0, 100, 100); // a cell
+    await m.drillInto(0, 100, 100); // drilled
+    await click(m, 0, 100, 700); // a paragraph → drill reset
+    expect(anchors(m)[0].kind).toBe("paragraph");
+    await click(m, 0, 100, 100); // back into the table → a FRESH table click (whole table)
+    expect(anchors(m)[0].kind).toBe("table");
+  });
+
+  it("(d) currentCell() returns the address only when exactly ONE cell is selected", async () => {
+    const m = new SelectionModel(new MockAdapter({ pages: 1, table: CELL_TABLE, cell: cellAt }));
+    await click(m, 0, 100, 390); // whole table
+    expect(m.currentCell()).toBeNull();
+    await m.drillInto(0, 100, 390); // now a lone cell
+    expect(m.currentCell()).toEqual({ section: 0, block: 1, row: 1, col: 0 });
+    await click(m, 0, 600, 650, true); // ⌘-add a second cell (drilled, same table)
+    expect(chips(m)).toBe(2);
+    expect(m.currentCell()).toBeNull(); // two cells → not a lone cell
+  });
+
+  it("(e) clear() resets the drill so the next table click is a whole-table anchor", async () => {
+    const m = new SelectionModel(new MockAdapter({ pages: 1, table: CELL_TABLE, cell: cellAt }));
+    await m.drillInto(0, 100, 390); // drilled
+    expect(anchors(m)[0].kind).toBe("cell");
+    m.clear();
+    await click(m, 0, 100, 390); // the next click is level-0 again
+    expect(anchors(m)[0].kind).toBe("table");
+  });
+
+  it("⌘/Ctrl+click TOGGLES the whole table in and out (fresh, un-drilled)", async () => {
+    const m = new SelectionModel(new MockAdapter({ pages: 1, table: CELL_TABLE, cell: cellAt }));
+    await click(m, 0, 100, 390, true);
+    expect(chips(m)).toBe(1);
+    expect(anchors(m)[0].kind).toBe("table");
+    await click(m, 0, 100, 390, true); // SAME table → toggled off
+    expect(chips(m)).toBe(0);
+  });
+
+  it("two DIFFERENT cells of the same table accumulate under ⌘/Ctrl once drilled (distinct identity)", async () => {
+    const m = new SelectionModel(new MockAdapter({ pages: 1, table: CELL_TABLE, cell: cellAt }));
+    await m.drillInto(0, 100, 100); // drill into row 0 col 0
+    expect(chips(m)).toBe(1);
+    await click(m, 0, 100, 390, true); // ⌘-click row 1 col 0 — different cell, same drilled table
+    expect(chips(m)).toBe(2);
+    const all = labels(m).join(" ");
+    expect(all).toContain("1행 1열");
+    expect(all).toContain("2행 1열");
+  });
+
+  it("cell + block MIXED selection: a drilled cell coexists with a ⌘-added paragraph", async () => {
+    const m = new SelectionModel(
+      new MockAdapter({
+        pages: 1,
+        table: (_p, _x, y) => (y < 500 ? CELL_TABLE : null),
+        cell: (_p, x, y) => (y < 500 ? cellAt(_p, x, y) : null),
+        hit: (_p, _x, y) => (y >= 500 ? para(7, 500, 400, "결론 문단") : null),
+      }),
+    );
+    await m.drillInto(0, 100, 100); // a cell
     expect(chips(m)).toBe(1);
     await click(m, 0, 100, 700, true); // ⌘-click the paragraph below the table
     expect(chips(m)).toBe(2);
@@ -178,21 +252,24 @@ describe("SelectionModel — cell-level marking (issue 023)", () => {
     expect(all).toContain("결론 문단");
   });
 
-  it("split-table fragment: the anchor keeps the GLOBAL row (no fragment-local reset)", async () => {
+  it("split-table fragment: a drilled anchor keeps the GLOBAL row (no fragment-local reset)", async () => {
     const splitCell: CellHit = { section: 0, block: 3, row: 15, col: 1, rows: 20, cols: 2, text: "분할표 하단 셀", x: 100, y: 40, w: 300, h: 44 };
     const m = new SelectionModel(new MockAdapter({ pages: 2, table: { section: 0, block: 3, x: 0, y: 0, w: 794, h: 900, rows: 20, cols: 2, first_row: 12 }, cell: () => splitCell }));
-    await click(m, 1, 200, 200);
+    await m.drillInto(1, 200, 200);
     expect(chips(m)).toBe(1);
     expect(labels(m)[0]).toContain("16행 2열"); // row 15 → 16행, col 1 → 2열 (global, 1-based)
     expect(anchors(m)[0].rows).toEqual([15, 15]);
   });
 
-  it("without tableCellAt (backend omits it) a table click falls back to the whole-table anchor", async () => {
-    // No `cell` opt → MockAdapter omits tableCellAt (reference TauriAdapter parity → 021 whole-table).
+  it("without tableCellAt (backend omits it) a table click is the whole-table anchor; drillInto too", async () => {
+    // No `cell` opt → MockAdapter omits tableCellAt (reference TauriAdapter parity → whole-table).
     const m = new SelectionModel(new MockAdapter({ pages: 1, table: CELL_TABLE }));
     await click(m, 0, 100, 100);
     expect(chips(m)).toBe(1);
     expect(m.getMarks()[0].kind).toBe("table");
+    expect(anchors(m)[0].kind).toBe("table");
+    const sel = await m.drillInto(0, 100, 100); // no cell query → falls back to the whole-table mark
+    expect(sel).not.toBeNull();
     expect(anchors(m)[0].kind).toBe("table");
   });
 });

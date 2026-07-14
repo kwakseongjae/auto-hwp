@@ -31,15 +31,20 @@ async function sheetOf(container: HTMLElement): Promise<HTMLElement> {
   });
 }
 
-/** Single-click the marked cell (140..240 × 100..140 in page px = client px under the A4 stub). */
+/** Figma drill (issue 06x): a single click marks the whole table, so SELECTING the cell (140..240 ×
+ *  100..140 page px) = a DOUBLE-click (drill). Two synchronous ups within the 400ms window. */
 function clickCell(sheet: HTMLElement) {
   fireEvent.pointerDown(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
   fireEvent.pointerUp(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
+  fireEvent.pointerDown(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
+  fireEvent.pointerUp(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
 }
-/** Double-click the marked cell → open the in-place editor. */
-function dblClickCell(sheet: HTMLElement) {
+/** Open the in-place editor over the cell: drill to select it, wait for the drill to settle, then Enter
+ *  (issue 036) — the robust editing entry over a drilled cell (a 2nd double-click would race the drill). */
+async function dblClickCell(sheet: HTMLElement, container: HTMLElement) {
   clickCell(sheet);
-  clickCell(sheet);
+  await waitFor(() => expect(container.querySelector(".hw-anchor")?.textContent ?? "").toMatch(/행/));
+  fireEvent.keyDown(window, { key: "Enter" });
 }
 
 describe("HwpWorkspace issue-048 — persistent format ribbon (선택+편집 겸용)", () => {
@@ -85,7 +90,7 @@ describe("HwpWorkspace issue-048 — persistent format ribbon (선택+편집 겸
     const exec = vi.spyOn(document, "execCommand").mockReturnValue(true); // jsdom lacks execCommand
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
-    dblClickCell(sheet);
+    await dblClickCell(sheet, container);
     await screen.findByTestId("hw-inplace-editor");
     // while editing, 밑줄/취소선 become enabled (live-run styles) and 배경/정렬 disable (cell ops).
     await waitFor(() => expect((screen.getByTestId("hw-ribbon-underline") as HTMLButtonElement).disabled).toBe(false));
@@ -126,7 +131,7 @@ describe("HwpWorkspace issue-048 — persistent format ribbon (선택+편집 겸
     const adapter = new MockAdapter({ table, cell: midCell, runs: [{ text: "가나다" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
-    dblClickCell(sheet);
+    await dblClickCell(sheet, container);
     const editorEl = (await screen.findByTestId("hw-inplace-editor")) as HTMLElement;
     // Select ONLY the middle glyph "나" (offset 1..2 of the rendered run's text node).
     const textNode = editorEl.querySelector("span")!.firstChild as Text;
@@ -177,7 +182,7 @@ describe("HwpWorkspace issue-048 — persistent format ribbon (선택+편집 겸
     const sheet = await sheetOf(container);
     clickCell(sheet);
     await screen.findByTestId("hw-floating-toolbar");
-    dblClickCell(sheet);
+    await dblClickCell(sheet, container);
     await screen.findByTestId("hw-inplace-editor");
     // the floating capsule hides (two chromes must not fight), but the persistent ribbon stays up.
     await waitFor(() => expect(screen.queryByTestId("hw-floating-toolbar")).toBeNull());

@@ -44,6 +44,13 @@ const clickAt = (sheet: HTMLElement, x: number, y: number) => {
   fireEvent.pointerDown(sheet, { clientX: x, clientY: y, button: 0, pointerId: 1 });
   fireEvent.pointerUp(sheet, { clientX: x, clientY: y, button: 0, pointerId: 1 });
 };
+// Figma drill (issue 06x): a single click marks the whole table, so a CELL is selected via a DOUBLE-click
+// (two synchronous ups within the 400ms window → handleDoubleClick → drillInto). Cell-nav then operates
+// on the selected cell. Kept synchronous so no full-suite-load gap pushes the 2nd click out of the window.
+const drillAt = (sheet: HTMLElement, x: number, y: number) => {
+  clickAt(sheet, x, y);
+  clickAt(sheet, x, y);
+};
 const anchorText = (container: HTMLElement) => container.querySelector(".hw-anchor")?.textContent ?? "";
 
 describe("issue 036 — arrow-key cell navigation binding", () => {
@@ -51,7 +58,7 @@ describe("issue 036 — arrow-key cell navigation binding", () => {
     const adapter = new MockAdapter({ table: GRID, cell: gridCell, runs: [{ text: "x" }], pages: 1 });
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
-    clickAt(sheet, 50, 20); // cell (0,0)
+    drillAt(sheet, 50, 20); // cell (0,0)
     await waitFor(() => expect(anchorText(container)).toContain("1행 1열"));
 
     fireEvent.keyDown(window, { key: "ArrowRight" });
@@ -66,7 +73,7 @@ describe("issue 036 — arrow-key cell navigation binding", () => {
     const adapter = new MockAdapter({ table: GRID, cell: gridCell, runs: [{ text: "x" }], pages: 1 });
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
-    clickAt(sheet, 50, 20); // (0,0)
+    drillAt(sheet, 50, 20); // (0,0)
     await waitFor(() => expect(anchorText(container)).toContain("1행 1열"));
     // Clamp at top/left — no movement off the table.
     fireEvent.keyDown(window, { key: "ArrowUp" });
@@ -92,7 +99,7 @@ describe("issue 036 — arrow-key cell navigation binding", () => {
     const adapter = new MockAdapter({ table: GRID, cell: gridCell, runs: [{ text: "x" }], pages: 1 });
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
-    clickAt(sheet, 50, 20); // cell (0,0)
+    drillAt(sheet, 50, 20); // cell (0,0)
     await waitFor(() => expect(anchorText(container)).toContain("1행 1열"));
     const composer = container.querySelector(".hw-textarea") as HTMLElement;
     composer.focus();
@@ -107,7 +114,7 @@ describe("issue 036 — Enter opens the editor, Tab commits + moves + re-enters"
     const adapter = new MockAdapter({ table: GRID, cell: gridCell, runs: [{ text: "x" }], pages: 1 });
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
-    clickAt(sheet, 50, 20); // cell (0,0)
+    drillAt(sheet, 50, 20); // cell (0,0)
     await waitFor(() => expect(anchorText(container)).toContain("1행 1열"));
     fireEvent.keyDown(window, { key: "Enter" });
     const ta = (await screen.findByTestId("hw-inplace-editor")) as HTMLElement;
@@ -121,7 +128,7 @@ describe("issue 036 — Enter opens the editor, Tab commits + moves + re-enters"
     const adapter = new MockAdapter({ table: GRID, cell: gridCell, runs: [{ text: "x" }], pages: 1 });
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
-    clickAt(sheet, 50, 20); // cell (0,0)
+    drillAt(sheet, 50, 20); // cell (0,0)
     await waitFor(() => expect(anchorText(container)).toContain("1행 1열"));
     fireEvent.keyDown(window, { key: "Enter" });
     const ta = (await screen.findByTestId("hw-inplace-editor")) as HTMLElement;
@@ -147,7 +154,7 @@ describe("issue 036 — Enter opens the editor, Tab commits + moves + re-enters"
     const adapter = new MockAdapter({ table: GRID, cell: gridCell, runs: [{ text: "x" }], pages: 1 });
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
-    clickAt(sheet, 150, 20); // cell (0,1)
+    drillAt(sheet, 150, 20); // cell (0,1)
     await waitFor(() => expect(anchorText(container)).toContain("1행 2열"));
     fireEvent.keyDown(window, { key: "Enter" });
     const ta = (await screen.findByTestId("hw-inplace-editor")) as HTMLElement;

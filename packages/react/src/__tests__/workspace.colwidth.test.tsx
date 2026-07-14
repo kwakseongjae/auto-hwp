@@ -31,6 +31,17 @@ async function sheetOf(container: HTMLElement): Promise<HTMLElement> {
   });
 }
 
+// Figma drill (issue 06x): a single click marks the whole table, so opening the in-place editor over a
+// cell = DRILL (double-click → select the cell), wait for the drill to settle, then Enter (issue 036).
+async function openCellEditorAt(sheet: HTMLElement, container: HTMLElement, x: number, y: number) {
+  fireEvent.pointerDown(sheet, { clientX: x, clientY: y, button: 0, pointerId: 1 });
+  fireEvent.pointerUp(sheet, { clientX: x, clientY: y, button: 0, pointerId: 1 });
+  fireEvent.pointerDown(sheet, { clientX: x, clientY: y, button: 0, pointerId: 1 });
+  fireEvent.pointerUp(sheet, { clientX: x, clientY: y, button: 0, pointerId: 1 });
+  await waitFor(() => expect(container.querySelector(".hw-anchor")?.textContent ?? "").toMatch(/행/));
+  fireEvent.keyDown(window, { key: "Enter" });
+}
+
 // ── ColumnWidthDialog — presentational unit (issue 047) ───────────────────────────────────────────────
 describe("ColumnWidthDialog (issue 047) — mm 표시/입력 + 균등 분배 버튼", () => {
   it("shows the current mm, applies a typed mm on Enter, and equalize fires with the column count", () => {
@@ -204,10 +215,7 @@ describe("HwpWorkspace 편집 중 셀음영 (issue 047 목표 3)", () => {
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
     // double-click a cell → the in-place editor opens.
-    fireEvent.pointerDown(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
-    fireEvent.pointerUp(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
-    fireEvent.pointerDown(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
-    fireEvent.pointerUp(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
+    await openCellEditorAt(sheet, container, 60, 80);
     const editor = (await screen.findByTestId("hw-inplace-editor")) as HTMLElement;
     // the 편집 중 셀음영 palette appears over the editing cell.
     const palette = await screen.findByTestId("hw-cell-shade-palette");
@@ -239,10 +247,7 @@ describe("HwpWorkspace 편집 중 셀음영 (issue 047 목표 3)", () => {
     });
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
-    fireEvent.pointerDown(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
-    fireEvent.pointerUp(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
-    fireEvent.pointerDown(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
-    fireEvent.pointerUp(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
+    await openCellEditorAt(sheet, container, 60, 80);
     await screen.findByTestId("hw-inplace-editor");
     await screen.findByTestId("hw-cell-shade-palette");
     // 연속 스와치 2회 — 둘 다 커밋 전(인플라이트).
@@ -264,10 +269,7 @@ describe("HwpWorkspace 편집 중 셀음영 (issue 047 목표 3)", () => {
     const adapter = new MockAdapter({ table, cell: cellEdit, runs: [{ text: "칸" }], pages: 1 });
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
-    fireEvent.pointerDown(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
-    fireEvent.pointerUp(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
-    fireEvent.pointerDown(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
-    fireEvent.pointerUp(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
+    await openCellEditorAt(sheet, container, 60, 80);
     await screen.findByTestId("hw-inplace-editor");
     fireEvent.click(await screen.findByTestId("hw-cell-shade-clear"));
     await waitFor(() => {

@@ -27,8 +27,8 @@ const para = (block: number, y: number, h: number, text: string): BlockHit => ({
   editable: true,
 });
 
-function openDoc(adapter: MockAdapter) {
-  const r = render(<HwpWorkspace adapter={adapter} document={{ bytes: new Uint8Array([1]), name: "t.hwpx" }} onAiRequest={async () => []} />);
+function openDoc(adapter: MockAdapter, opts: { editing?: boolean } = {}) {
+  const r = render(<HwpWorkspace adapter={adapter} document={{ bytes: new Uint8Array([1]), name: "t.hwpx" }} onAiRequest={async () => []} enableEditing={opts.editing} />);
   return r;
 }
 
@@ -134,10 +134,11 @@ describe("selection model (issue 021)", () => {
   });
 });
 
-// Cell-level marking (issue 023): a click inside a table anchors the exact CELL (chip = text snippet +
-// "N행 M열", 1-based; global row/col preserved), ⌘/Ctrl toggles the exact clicked cell, and cells mix
-// with block anchors. The 3×2 table fills the top of the page; a coordinate-aware `cell` resolver maps a
-// point to (row, col) so distinct cells are addressable.
+// Figma progressive table selection (issue 06x — SUPERSEDES the 023 single-click=cell model). A single
+// click on a table now marks the WHOLE table; a DOUBLE-CLICK drills into the exact CELL (chip = snippet +
+// "N행 M열", 1-based, global). Once drilled, a plain click inside the SAME table keeps selecting cells; a
+// click on a different table / paragraph resets to level-0. Drilling is an editing-chrome interaction
+// (the double-click detector only runs with `enableEditing`), so these render with editing on.
 const CELL_TABLE: TableBox = { section: 0, block: 1, x: 0, y: 0, w: 794, h: 780, rows: 3, cols: 2, first_row: 0 };
 // row bands: y<260 → 0, <520 → 1, else 2 (within the 0..780 table). col: x<397 → 0, else 1.
 const cellAt = (_p: number, x: number, y: number): CellHit => {
@@ -147,63 +148,78 @@ const cellAt = (_p: number, x: number, y: number): CellHit => {
   return { section: 0, block: 1, row, col, rows: 3, cols: 2, text, x: col * 397, y: row * 260, w: 397, h: 260 };
 };
 
-describe("cell-level marking (issue 023)", () => {
-  it("click inside a table anchors the exact CELL (snippet + 1-based N행 M열, global coords)", async () => {
+// A DRILL = two back-to-back ups (a double-click within the 400ms window — kept synchronous so no
+// full-suite-load gap pushes the 2nd click out of the window). Waits for the resulting green cell mark.
+async function drill(sheet: HTMLElement, container: HTMLElement, x: number, y: number) {
+  down(sheet, x, y);
+  up(sheet, x, y);
+  down(sheet, x, y);
+  up(sheet, x, y);
+  await waitFor(() => expect(container.querySelector(".hw-mark-cell")).toBeTruthy());
+}
+
+describe("Figma table drill (issue 06x — single-click=table, double-click=cell)", () => {
+  it("a SINGLE click marks the WHOLE TABLE (purple mark, chip '표', no 행/열)", async () => {
     const adapter = new MockAdapter({ pages: 1, table: CELL_TABLE, cell: cellAt });
-    const { container } = openDoc(adapter);
+    const { container } = openDoc(adapter, { editing: true });
     const sheet = await sheetOf(container);
 
-    // Click into row 1, col 0 (page y≈390, x≈100).
-    down(sheet, 100, 390);
+    down(sheet, 100, 390); // would be row 1 col 0 — but a fresh click marks the whole table
     up(sheet, 100, 390);
-    await waitFor(() => expect(chips(container)).toBe(1));
+    await waitFor(() => expect(container.querySelector(".hw-mark-table")).toBeTruthy());
+    expect(container.querySelector(".hw-mark-cell")).toBeNull();
+    expect(chipText(container)[0]).toContain("표");
+    expect(chipText(container)[0]).not.toContain("행");
+  });
+
+  it("a DOUBLE-CLICK drills into the exact CELL (snippet + 1-based N행 M열, global coords)", async () => {
+    const adapter = new MockAdapter({ pages: 1, table: CELL_TABLE, cell: cellAt });
+    const { container } = openDoc(adapter, { editing: true });
+    const sheet = await sheetOf(container);
+
+    await drill(sheet, container, 100, 390); // row 1, col 0
+    expect(container.querySelector(".hw-mark-table")).toBeNull();
     const label = chipText(container)[0];
     expect(label).toContain("2행 1열"); // row 1 → 2행, col 0 → 1열 (1-based, global)
     expect(label).toContain("제품"); // the cell text snippet rides along
-    // The green cell mark (not the purple whole-table mark) is drawn.
-    await waitFor(() => expect(container.querySelector(".hw-mark-cell")).toBeTruthy());
-    expect(container.querySelector(".hw-mark-table")).toBeNull();
   });
 
-  it("a plain click on ANOTHER cell replaces (still one chip, new address)", async () => {
+  it("once drilled, a plain click on ANOTHER cell replaces with that cell (drill persists)", async () => {
     const adapter = new MockAdapter({ pages: 1, table: CELL_TABLE, cell: cellAt });
-    const { container } = openDoc(adapter);
+    const { container } = openDoc(adapter, { editing: true });
     const sheet = await sheetOf(container);
 
-    down(sheet, 100, 100); // row 0 col 0
-    up(sheet, 100, 100);
+    await drill(sheet, container, 100, 100); // drill into row 0 col 0
     await waitFor(() => expect(chipText(container)[0]).toContain("1행 1열"));
-
-    down(sheet, 600, 650); // row 2 col 1
+    down(sheet, 600, 650); // a plain click on row 2 col 1 of the SAME table
     up(sheet, 600, 650);
     await waitFor(() => expect(chipText(container)[0]).toContain("3행 2열"));
     expect(chips(container)).toBe(1); // replace, never accumulate
   });
 
-  it("⌘/Ctrl+click TOGGLES the exact clicked cell in and out", async () => {
+  it("⌘/Ctrl+click TOGGLES the whole table in and out (fresh, un-drilled)", async () => {
     const adapter = new MockAdapter({ pages: 1, table: CELL_TABLE, cell: cellAt });
-    const { container } = openDoc(adapter);
+    const { container } = openDoc(adapter, { editing: true });
     const sheet = await sheetOf(container);
 
-    down(sheet, 100, 390, true); // row 1 col 0
+    down(sheet, 100, 390, true); // ⌘-click → whole table added
     up(sheet, 100, 390, true);
-    await waitFor(() => expect(chips(container)).toBe(1)); // absent → added
+    await waitFor(() => expect(chips(container)).toBe(1));
+    expect(chipText(container)[0]).toContain("표");
 
-    down(sheet, 100, 390, true); // SAME cell
+    down(sheet, 100, 390, true); // SAME table → toggled off
     up(sheet, 100, 390, true);
-    await waitFor(() => expect(chips(container)).toBe(0)); // present → removed
+    await waitFor(() => expect(chips(container)).toBe(0));
   });
 
-  it("two DIFFERENT cells of the same table accumulate under ⌘/Ctrl (distinct identity)", async () => {
+  it("two DIFFERENT cells of the same table accumulate under ⌘/Ctrl once drilled (distinct identity)", async () => {
     const adapter = new MockAdapter({ pages: 1, table: CELL_TABLE, cell: cellAt });
-    const { container } = openDoc(adapter);
+    const { container } = openDoc(adapter, { editing: true });
     const sheet = await sheetOf(container);
 
-    down(sheet, 100, 100); // row 0 col 0
-    up(sheet, 100, 100);
-    await waitFor(() => expect(chips(container)).toBe(1));
-
-    down(sheet, 100, 390, true); // row 1 col 0 — different cell, same table
+    await drill(sheet, container, 100, 100); // drill into row 0 col 0
+    await waitFor(() => expect(chipText(container)[0]).toContain("1행 1열"));
+    down(sheet, 100, 390, true); // ⌘-click row 1 col 0 — different cell, same drilled table
     up(sheet, 100, 390, true);
     await waitFor(() => expect(chips(container)).toBe(2)); // both kept (rows/cols make identity)
     const labels = chipText(container).join(" ");
@@ -211,7 +227,7 @@ describe("cell-level marking (issue 023)", () => {
     expect(labels).toContain("2행 1열");
   });
 
-  it("cell + block MIXED selection: a cell anchor coexists with a ⌘-added paragraph", async () => {
+  it("cell + block MIXED selection: a drilled cell coexists with a ⌘-added paragraph", async () => {
     // Top half (y<500) is the table; below that is a paragraph (no table, no cell there).
     const adapter = new MockAdapter({
       pages: 1,
@@ -219,13 +235,11 @@ describe("cell-level marking (issue 023)", () => {
       cell: (_p, x, y) => (y < 500 ? cellAt(_p, x, y) : null),
       hit: (_p, _x, y) => (y >= 500 ? para(7, 500, 400, "결론 문단") : null),
     });
-    const { container } = openDoc(adapter);
+    const { container } = openDoc(adapter, { editing: true });
     const sheet = await sheetOf(container);
 
-    down(sheet, 100, 100); // a cell
-    up(sheet, 100, 100);
-    await waitFor(() => expect(chips(container)).toBe(1));
-
+    await drill(sheet, container, 100, 100); // a cell
+    await waitFor(() => expect(chipText(container)[0]).toContain("1행 1열"));
     down(sheet, 100, 700, true); // ⌘-click the paragraph below the table
     up(sheet, 100, 700, true);
     await waitFor(() => expect(chips(container)).toBe(2));
@@ -234,7 +248,7 @@ describe("cell-level marking (issue 023)", () => {
     expect(labels).toContain("결론 문단"); // the paragraph block
   });
 
-  it("split-table fragment: the chip shows the GLOBAL row (no fragment-local reset)", async () => {
+  it("split-table fragment: a drilled chip shows the GLOBAL row (no fragment-local reset)", async () => {
     // A cell whose MODEL-GLOBAL address is row 15 / col 1 of a 20-row table — the UI must render "16행"
     // (1-based global), never a fragment-local index. Verified on a second page to mimic a split.
     const splitCell: CellHit = { section: 0, block: 3, row: 15, col: 1, rows: 20, cols: 2, text: "분할표 하단 셀", x: 100, y: 40, w: 300, h: 44 };
@@ -243,7 +257,7 @@ describe("cell-level marking (issue 023)", () => {
       table: { section: 0, block: 3, x: 0, y: 0, w: 794, h: 900, rows: 20, cols: 2, first_row: 12 },
       cell: () => splitCell,
     });
-    const { container } = openDoc(adapter);
+    const { container } = openDoc(adapter, { editing: true });
     await sheetOf(container); // page 0 ready
     const sheet1 = await waitFor(() => {
       const el = container.querySelector('.hw-sheet[data-page="1"]') as HTMLElement | null;
@@ -251,9 +265,7 @@ describe("cell-level marking (issue 023)", () => {
       return el as HTMLElement;
     });
 
-    down(sheet1, 200, 200);
-    up(sheet1, 200, 200);
-    await waitFor(() => expect(chips(container)).toBe(1));
+    await drill(sheet1, container, 200, 200);
     expect(chipText(container)[0]).toContain("16행 2열"); // row 15 → 16행, col 1 → 2열 (global, 1-based)
   });
 });

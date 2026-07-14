@@ -162,6 +162,12 @@ export class SelectionModel {
   private marquee: SelMarquee | null = null;
   private drag: Drag | null = null;
   private dragSeq = 0;
+  /// Figma-style progressive drill state (issue 06x): the table the user has DRILLED into (via a
+  /// double-click / `drillInto`). While set, a plain click INSIDE the same `(section, block)` selects the
+  /// exact CELL (stay drilled) instead of the whole table; a click on ANY other target (a different table,
+  /// a paragraph, an image, empty space) resets it to `null`, so the next click on a table re-selects the
+  /// WHOLE table (drill level-0). `null` = not drilled → a table click marks the whole table.
+  private drill: { section: number; block: number } | null = null;
 
   private changed = new Emitter<Selection[]>();
   private marqueeChanged = new Emitter<SelMarquee | null>();
@@ -212,9 +218,11 @@ export class SelectionModel {
     this.marqueeChanged.emit(m);
   }
 
-  /** Clear the whole selection + any in-progress marquee (Esc / document open / applied edit). */
+  /** Clear the whole selection + any in-progress marquee (Esc / document open / applied edit). Also
+   *  resets the Figma drill (issue 06x) so the next table click marks the whole table (drill level-0). */
   clear(): void {
     this.drag = null;
+    this.drill = null;
     if (this.marquee) this.setMarquee(null);
     this.setSelection([]);
   }
@@ -326,15 +334,28 @@ export class SelectionModel {
     try {
       // The async resolve didn't land before pointerup (a very fast click) → resolve now.
       const r = d.resolved ?? (await this.resolveHit(d.page, d.startX, d.startY));
-      // DESELECT on empty space: a click on the white area INSIDE a page must clear selection, not grab
-      // the nearest paragraph. `block_at` ignores x and falls back to the vertically-nearest band, so
-      // `r.hit` is non-null even in a gap — re-apply the SAME strict-containment test `pointerDown` uses
-      // (selection.ts:260) so a true empty-space click takes the clear branch below. (QA: clicking blank
-      // background didn't deselect — the loose nearest-band hit was turned into a real selection.)
-      const strictInside =
-        !!r.hit && d.startX >= r.hit.x && d.startX <= r.hit.x + r.hit.w && d.startY >= r.hit.y && d.startY <= r.hit.y + r.hit.h;
-      const empty = !r.table && !r.cell && !strictInside;
-      const sel = empty ? null : deriveSel(d.page, r.table, r.cell, r.hit);
+      // Figma progressive drill (issue 06x) ∩ empty-space deselect (QA #2), merged:
+      let sel: Selection | null;
+      if (r.table) {
+        // A table hit marks the WHOLE table unless the user has already DRILLED into this same table
+        // (then the exact CELL, drill persists). A table hit is always a selection (never a deselect).
+        const drilled = !!this.drill && this.drill.section === r.table.section && this.drill.block === r.table.block;
+        if (drilled) {
+          sel = deriveSel(d.page, r.table, r.cell, null); // stay drilled → the clicked cell
+        } else {
+          sel = deriveSel(d.page, r.table, null, null); // fresh table click → the whole table
+          this.drill = null; // a fresh table selection is level-0 (never inherits a stale drill)
+        }
+      } else {
+        // Non-table hit (paragraph / empty). DESELECT on empty space: `block_at` ignores x and falls back
+        // to the vertically-nearest band, so `r.hit` is non-null even in a gap — re-apply the SAME strict-
+        // containment test `pointerDown` uses (selection.ts:268) so a true empty-space click clears instead
+        // of grabbing the nearest paragraph. (`r.cell` is always null here per resolveHit's contract.)
+        const strictInside =
+          !!r.hit && d.startX >= r.hit.x && d.startX <= r.hit.x + r.hit.w && d.startY >= r.hit.y && d.startY <= r.hit.y + r.hit.h;
+        sel = strictInside ? deriveSel(d.page, null, r.cell, r.hit) : null;
+        this.drill = null; // leaving a table (paragraph / empty click) resets the drill
+      }
       if (!sel) {
         if (!d.meta) this.setSelection([]); // a plain click on nothing clears (deselect)
         this.results.emit({ source: "click", selected: 0, excluded: 0 });
@@ -345,6 +366,37 @@ export class SelectionModel {
     } catch (e) {
       this.errors.emit(e);
     }
+  }
+
+  /// drillInto — Figma DRILL-IN (issue 06x): the double-click / Enter path that descends from a whole-table
+  /// selection into the exact CELL under `(x, y)`. Marks `(section, block)` as drilled so subsequent plain
+  /// clicks inside the SAME table keep selecting cells (see `finishClick`), replaces the selection with the
+  /// cell mark/anchor, and returns it. Resolves `null` when the point is NOT over a table (the caller then
+  /// handles a paragraph double-click by opening its editor directly).
+  async drillInto(page: number, x: number, y: number): Promise<Selection | null> {
+    try {
+      const { table, cell } = await this.resolveHit(page, x, y);
+      if (!table) return null; // not a table → caller handles paragraph edit
+      this.drill = { section: table.section, block: table.block };
+      const sel = deriveSel(page, table, cell, null);
+      if (!sel) return null;
+      this.setSelection(mergeSelection(this.sels, [sel], "replace"));
+      this.results.emit({ source: "click", selected: 1, excluded: 0 });
+      return sel;
+    } catch (e) {
+      this.errors.emit(e);
+      return null;
+    }
+  }
+
+  /// currentCell — the address of the CURRENTLY-selected lone cell (issue 06x), or `null` when the selection
+  /// is not exactly ONE cell anchor. The React layer uses it to decide "a double-click on the ALREADY-drilled
+  /// cell opens the editor" vs "drill into a fresh cell": if this equals the clicked cell → open the editor.
+  currentCell(): { section: number; block: number; row: number; col: number } | null {
+    if (this.sels.length !== 1) return null;
+    const a = this.sels[0].anchor;
+    if (a.kind !== "cell" || !a.rows || !a.cols) return null;
+    return { section: a.section, block: a.block, row: a.rows[0], col: a.cols[0] };
   }
 
   /** Remove the i-th selection item (anchor chip ✕). */

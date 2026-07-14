@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { SelectionModel } from "../selection";
-import type { CellHit, PointerInput, TableBox } from "../types";
+import type { CellHit, TableBox } from "../types";
 import { MockAdapter } from "./mockAdapter";
 
 // Keyboard cell navigation (issue 036): SelectionModel.moveCell(dir) moves the active CELL selection one
 // cell in `dir` by RE-PROBING the adapter's `tableCellAt` a few px past the current cell's box edge (there
 // is no engine "cell box by address" query). 4-directional move + boundary clamp + split-table page
 // transition (전역 row). Pure node — no jsdom, page px fed directly (SDK-LAYERS §함정).
-
-const pd = (page: number, x: number, y: number, mod = false): PointerInput => ({ page, x, y, mod });
+//
+// Figma drill (issue 06x): a SINGLE click now marks the whole table, so a cell is selected via `drillInto`
+// (the double-click / Enter path). `click` here drills so moveCell has a live CELL to navigate from.
 async function click(m: SelectionModel, page: number, x: number, y: number) {
-  await m.pointerDown(pd(page, x, y));
-  await m.pointerUp();
+  await m.drillInto(page, x, y);
 }
 const addr = (m: SelectionModel) => {
   const a = m.getAnchors()[0];

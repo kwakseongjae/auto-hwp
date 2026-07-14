@@ -1804,10 +1804,15 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       const clientX = e.clientX;
       const clientY = e.clientY;
       const click: PageClick = { page, x: pt.x, y: pt.y, meta: false, client: { x: clientX, y: clientY } };
-      // 1) Update the selection exactly like a click here (so the marks show + actions target this spot).
+      // 1) Update the selection so the marks show + the cell actions (굵게/음영/행 삽입) target this spot.
+      //    06x drill: over a table cell we DRILL straight to the cell (a plain click would mark the whole
+      //    table, leaving the cell format actions disabled); off a table we resolve like a normal click.
       try {
-        await core.selection.pointerDown(toPointerInput(click));
-        await core.selection.pointerUp(toPointerInput(click));
+        const drilled = await core.selection.drillInto(page, pt.x, pt.y);
+        if (!drilled) {
+          await core.selection.pointerDown(toPointerInput(click));
+          await core.selection.pointerUp(toPointerInput(click));
+        }
       } catch (err) {
         onTrap(err, "엔진을 복구했습니다 — 다시 시도하세요");
       }
@@ -1875,19 +1880,45 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     [core],
   );
   const onPointerMove = useCallback((c: PageClick) => core.selection.pointerMove(toPointerInput(c)), [core]);
-  // Detect a double-click (two ups within 400ms, ~same client point) → open the in-place editor.
+  // Figma progressive table selection (issue 06x): what a DOUBLE-CLICK does depends on where + what is
+  // already selected. Over a paragraph (no table) → open its in-place editor directly (unchanged). Over a
+  // table cell → DRILL: the first double-click selects the cell (no editor); a second double-click on the
+  // SAME already-drilled cell opens the editor. Enter over a drilled cell also opens it (036 keydown).
+  const handleDoubleClick = useCallback(
+    async (c: PageClick) => {
+      try {
+        const table = await adapter.tableAt(c.page, c.x, c.y);
+        if (!table) {
+          void openEditorAt(c); // paragraph double-click → open the editor directly (unchanged)
+          return;
+        }
+        const cell = adapter.tableCellAt ? await adapter.tableCellAt(c.page, c.x, c.y) : null;
+        const cur = core.selection.currentCell();
+        const onDrilledCell = !!cell && !!cur && cur.section === cell.section && cur.block === cell.block && cur.row === cell.row && cur.col === cell.col;
+        if (onDrilledCell) {
+          void openEditorAt(c); // the cell is already drilled/selected → this double-click opens the editor
+        } else {
+          await core.selection.drillInto(c.page, c.x, c.y); // drill into the cell (select it, no editor yet)
+        }
+      } catch (e) {
+        onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
+      }
+    },
+    [adapter, core, openEditorAt, onTrap],
+  );
+  // Detect a double-click (two ups within 400ms, ~same client point) → the Figma drill/edit handler.
   const detectDoubleClick = useCallback(
     (c: PageClick) => {
       const now = Date.now();
       const prev = lastUpRef.current;
       if (prev && now - prev.t < 400 && Math.hypot(c.client.x - prev.x, c.client.y - prev.y) < 6) {
         lastUpRef.current = null;
-        void openEditorAt(c);
+        void handleDoubleClick(c);
       } else {
         lastUpRef.current = { t: now, x: c.client.x, y: c.client.y };
       }
     },
-    [openEditorAt],
+    [handleDoubleClick],
   );
   // issue 053: place the CELL TEXT CARET on a plain click (movement under the drag threshold). Runs
   // AFTER the selection resolve so the caret and the cell mark coexist (클릭 = 셀 마크 + 글리프 캐럿).
@@ -1898,6 +1929,14 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       if (!editingOn || !canEdit || editorRef.current || !core.cellCaret.supported) return;
       const down = caretDownRef.current;
       if (down && Math.hypot(c.client.x - down.x, c.client.y - down.y) >= 4) return; // a drag, not a click
+      // 06x drill model: a single WHOLE-TABLE click must not leave a stray text caret (the cell isn't
+      // drilled yet). When the click resolved to a lone table anchor, clear any prior caret and bail; a
+      // DRILLED cell (cell anchor) or a bare cell-text click (no table geometry) still places its caret.
+      const sels = core.selection.getSelection();
+      if (sels.length === 1 && sels[0].anchor.kind === "table") {
+        core.cellCaret.clear();
+        return;
+      }
       void core.cellCaret.clickAt(c.page, c.x, c.y).catch((e) => onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요"));
     },
     [editingOn, canEdit, core, onTrap],

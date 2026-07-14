@@ -152,11 +152,14 @@ describe("HwpWorkspace 찾기/바꾸기 (issue 045)", () => {
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "값" }], find: MATCHES, caret, pages: 1 });
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
-    // Double-click (two quick up/down pairs) opens the in-place editor over the cell.
+    // 06x drill: a double-click SELECTS the cell (single click marks the whole table); Enter over the
+    // drilled cell then opens the in-place editor (issue 036) — robust vs the drill race.
     fireEvent.pointerDown(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
     fireEvent.pointerUp(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
     fireEvent.pointerDown(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
     fireEvent.pointerUp(sheet, { clientX: 60, clientY: 80, button: 0, pointerId: 1 });
+    await waitFor(() => expect(container.querySelector(".hw-anchor")?.textContent ?? "").toMatch(/행/));
+    fireEvent.keyDown(window, { key: "Enter" });
     await screen.findByTestId("hw-inplace-editor");
     cmdF();
     // The find bar must NOT open while editing (the guard); the editor stays put.
