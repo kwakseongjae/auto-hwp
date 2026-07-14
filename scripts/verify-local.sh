@@ -58,6 +58,9 @@ if [ "$MODE" = "--full" ]; then
   node apps/hwp-lab/scripts/copy-wasm.mjs
   rm -rf apps/hwp-lab/.next
   echo "═══ JS 빌드 ═══"
+  # ⚠️ ai-protocol 먼저 — 앱/에디터가 그 dist(buildDocContext 등)를 소비한다. 이 빌드가 빠지면 소스는
+  # 최신인데 스테일 dist가 그대로 실려 나간다(066 표 그리드가 조용히 드롭돼 QA에서 라벨칸 오타겟 재현).
+  pnpm -C packages/ai-protocol build
   pnpm -C packages/editor-core build
   pnpm -C packages/react build
   echo "═══ vitest ═══"

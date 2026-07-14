@@ -92,6 +92,18 @@ describe("SelectionModel — replace/toggle/marquee (issue 021)", () => {
     m.clear();
     expect(chips(m)).toBe(0);
   });
+
+  it("a click on EMPTY space inside a page DESELECTS (nearest-band fallback must not grab a paragraph)", async () => {
+    // Engine `block_at` returns the vertically-NEAREST band even in a gap (ignores x), so hitTest is
+    // non-null in empty white space but its box does NOT contain the point. finishClick re-checks strict
+    // containment → a true empty-space click must CLEAR, not select the nearest paragraph. (QA regression.)
+    const band = para(1, 0, 200, "본문 한 줄"); // occupies y 0..200; MockAdapter returns it for ANY point
+    const m = new SelectionModel(new MockAdapter({ pages: 1, hit: band }));
+    await click(m, 0, 100, 100); // inside the band → selects
+    expect(chips(m)).toBe(1);
+    await click(m, 0, 100, 900); // deep in empty space (band still the "nearest" hit) → must deselect
+    expect(chips(m)).toBe(0);
+  });
 });
 
 // Cell-level marking (issue 023): a click inside a table anchors the exact CELL (chip = snippet + "N행

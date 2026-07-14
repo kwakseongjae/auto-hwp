@@ -22,5 +22,10 @@ export default defineConfig({
     url: `http://localhost:${PORT}`,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
+    // e2e 결정성: provider 키를 비워 hwp-edit 라우트를 mock 으로 고정한다. Next(@next/env)는 이미
+    // 정의된 process.env 키를 .env.local 로 덮어쓰지 않으므로 빈 문자열이 이겨 activeProvider()→mock.
+    // (개발자 로컬 .env.local 에 OPENROUTER_API_KEY 가 있으면 e2e 가 실 Grok 을 쳐서 비결정적으로
+    // 깨지던 것을 차단 — 라이브 프로바이더 검증은 수동 QA 몫. 066 스테일-dist 회귀 조사에서 발견.)
+    env: { OPENROUTER_API_KEY: "", ANTHROPIC_API_KEY: "" },
   },
 });

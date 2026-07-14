@@ -326,9 +326,17 @@ export class SelectionModel {
     try {
       // The async resolve didn't land before pointerup (a very fast click) → resolve now.
       const r = d.resolved ?? (await this.resolveHit(d.page, d.startX, d.startY));
-      const sel = deriveSel(d.page, r.table, r.cell, r.hit);
+      // DESELECT on empty space: a click on the white area INSIDE a page must clear selection, not grab
+      // the nearest paragraph. `block_at` ignores x and falls back to the vertically-nearest band, so
+      // `r.hit` is non-null even in a gap — re-apply the SAME strict-containment test `pointerDown` uses
+      // (selection.ts:260) so a true empty-space click takes the clear branch below. (QA: clicking blank
+      // background didn't deselect — the loose nearest-band hit was turned into a real selection.)
+      const strictInside =
+        !!r.hit && d.startX >= r.hit.x && d.startX <= r.hit.x + r.hit.w && d.startY >= r.hit.y && d.startY <= r.hit.y + r.hit.h;
+      const empty = !r.table && !r.cell && !strictInside;
+      const sel = empty ? null : deriveSel(d.page, r.table, r.cell, r.hit);
       if (!sel) {
-        if (!d.meta) this.setSelection([]); // a plain click on nothing clears
+        if (!d.meta) this.setSelection([]); // a plain click on nothing clears (deselect)
         this.results.emit({ source: "click", selected: 0, excluded: 0 });
         return;
       }
