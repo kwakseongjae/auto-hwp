@@ -250,6 +250,52 @@
 }
 .hw-img-delete:hover { background: rgba(239, 68, 68, 0.1); }
 
+/* ================= issue 06x — INLINE per-element edit (apply-then-revert) ================= */
+/* the "✨ 여기서 편집" affordance — a small pill hugging the bottom-right corner of the lone selection. */
+.hw-inline-open {
+  position: absolute; z-index: 24; transform: translate(-100%, 6px); white-space: nowrap;
+  font: inherit; font-size: 11px; font-weight: 500; line-height: 1;
+  color: #fff; background: var(--hw-ai); border: none; padding: 5px 9px; border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.35); cursor: pointer; pointer-events: auto;
+}
+.hw-inline-open:hover { opacity: 0.92; }
+
+/* the anchored inline panel (compose → applied), drawn BELOW the element (own-render px × scale + gap). */
+.hw-inline-edit {
+  position: absolute; z-index: 30; margin-top: 6px; width: 300px; max-width: 92vw;
+  display: flex; flex-direction: column; gap: 8px; padding: 10px;
+  background: var(--hw-panel); border: 1px solid var(--hw-border); border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18); pointer-events: auto;
+}
+.hw-inline-head { display: flex; align-items: center; gap: 6px; }
+.hw-inline-title { font-size: 12px; font-weight: 600; color: var(--hw-ai); }
+.hw-inline-target {
+  flex: 1; min-width: 0; font-size: 11px; color: var(--hw-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.hw-inline-x {
+  background: none; border: none; color: var(--hw-muted); cursor: pointer;
+  font-size: 12px; line-height: 1; padding: 2px 4px; border-radius: 4px;
+}
+.hw-inline-x:hover { background: rgba(0, 0, 0, 0.06); color: var(--hw-text); }
+.hw-inline-textarea {
+  width: 100%; box-sizing: border-box; height: 52px; resize: none; font: inherit; font-size: 13px;
+  border: 1px solid var(--hw-border); border-radius: 8px; padding: 7px 9px; outline: none; background: #fff;
+}
+.hw-inline-textarea:focus { border-color: var(--hw-accent); }
+.hw-inline-textarea:disabled { opacity: 0.5; }
+.hw-inline-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.hw-inline-hint { margin-right: auto; font-size: 11px; color: var(--hw-muted); cursor: help; }
+.hw-inline-send { height: 30px; padding: 0 12px; }
+.hw-inline-busy { margin-right: auto; display: inline-flex; gap: 4px; align-items: center; }
+.hw-inline-applied { display: flex; flex-direction: column; gap: 8px; }
+.hw-inline-summary { display: flex; flex-direction: column; gap: 4px; }
+.hw-inline-check { font-size: 11px; font-weight: 600; color: #059669; }
+.hw-inline-cards { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
+.hw-inline-card { font-size: 12px; line-height: 1.4; color: #374151; word-break: break-word; }
+.hw-inline-revert { color: #b45309; }
+.hw-inline-error-text { margin: 0; font-size: 12px; color: #dc2626; word-break: break-word; }
+
 /* step 2 — 표 추가 grid picker */
 .hw-tableins { position: relative; display: inline-flex; }
 .hw-tableins-pop {

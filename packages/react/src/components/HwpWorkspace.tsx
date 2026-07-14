@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { Box, CellDir, DocContext, EngineAdapter, ImageBox, Intent, MatchBox, OutlineItem, PageGeom, PointerInput, RunSpec, Selection, TableBox, XYWH } from "@tf-hwp/editor-core";
+import type { Anchor, Box, CellDir, DocContext, EngineAdapter, ImageBox, Intent, IntentCard, MatchBox, OutlineItem, PageGeom, PointerInput, RunSpec, Selection, TableBox, XYWH } from "@tf-hwp/editor-core";
 import { boundariesToRatios, remapFragmentHeights, appliedReflectsDrag, firstRunStyle, columnWidthMm, setColumnWidthMm, equalizeColumns, imageInsertSize, imageSizeToHwpunit, appliedReflectsResize } from "@tf-hwp/editor-core";
 import { OutlinePanel } from "./OutlinePanel";
 import { StatusBar } from "./StatusBar";
@@ -20,6 +20,7 @@ import { useHover } from "../useHover";
 import { FontPicker } from "./FontPicker";
 import { ColumnResizeOverlay, RowResizeOverlay } from "./ColumnResizeOverlay";
 import { ImageOverlay } from "./ImageOverlay";
+import { InlineEditPanel } from "./InlineEditPanel";
 import { TableInsertButton } from "./TableInsertButton";
 import { Ruler } from "./Ruler";
 import { InPlaceCellEditor } from "./InPlaceCellEditor";
@@ -109,6 +110,19 @@ interface EditTarget {
    *  box / 글자색 swatch when NOT editing (issue 048: 현재 상태 반영). Defaults when unstyled/unknown. */
   curSizePt?: number;
   curColor?: string | null;
+}
+
+/** The INLINE per-element edit target (issue 06x) — a SNAPSHOT captured when the user opens the inline
+ *  panel from a single selection (cell/paragraph/table) or a selected image. Decoupled from the live
+ *  selection so the panel stays anchored (and its applied summary stays visible) across the apply's own
+ *  re-flow. `box`/`page` position the panel BELOW the element (own-render px × scale); `anchor` rides to
+ *  `onAiRequest` as the sole anchor (identical grid/context to the chat); `label` is the chip caption. */
+interface InlineTarget {
+  page: number;
+  box: Box;
+  kind: string;
+  anchor: Anchor;
+  label: string;
 }
 
 // issue 048: the ribbon's size box shows an inherited (size unset) run at the doc default ~10pt — matching
@@ -256,6 +270,15 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const imageSelRef = useRef<{ page: number; box: ImageBox } | null>(null);
   imageSelRef.current = imageSel;
   const imageCommittingRef = useRef(0);
+  // ── issue 06x: INLINE per-element edit + apply/revert ────────────────────────────────────────────────
+  // The OPEN inline-edit panel's target (a SNAPSHOT — see `InlineTarget`), or null when closed. Its own
+  // apply arms `inlineEditShieldRef` (+1) so the resulting re-flow does NOT trip the external-edit guard
+  // below (which closes+keeps on any OTHER edit) — the same counted-shield discipline as the editor-close
+  // / image-clear effects. A click-away closes it via `onPointerDown` (a sheet press = an external gesture).
+  const [inlineEdit, setInlineEdit] = useState<InlineTarget | null>(null);
+  const inlineEditRef = useRef<InlineTarget | null>(null);
+  inlineEditRef.current = inlineEdit;
+  const inlineEditShieldRef = useRef(0);
   // Issue 028 floating toolbar surface: hide the toolbar while a pointer gesture (drag/marquee) is in
   // progress, and a monotonic token the "AI에게 전달" button bumps to focus the chat composer.
   const [pointerActive, setPointerActive] = useState(false);
@@ -355,6 +378,31 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const anchors = useMemo(() => selection.map((s) => s.anchor), [selection]);
   const marks = useMemo<Mark[]>(() => selection.map((s) => s.mark), [selection]);
   const mod = useMemo(() => modLabel(), []);
+
+  // issue 06x: the CURRENT single inline-edit target (drives the "✨ 여기서 편집" affordance + the snapshot
+  // captured when it opens). An image selection (own `imageSel` state — mutually exclusive with a block
+  // selection) takes priority; else a LONE block selection (cell/paragraph/table). null = 0 or 2+ targets,
+  // so the affordance is shown ONLY for exactly one element (per the issue). An image's structural anchor
+  // is a `paragraph` anchor at its `(section, block)` (mirroring `deriveSel`'s image→paragraph mapping) so
+  // `onAiRequest` can target it like any other block.
+  const inlineTarget = useMemo<InlineTarget | null>(() => {
+    if (imageSel) {
+      const b = imageSel.box;
+      const label = `이미지 (p.${imageSel.page + 1})`;
+      return {
+        page: imageSel.page,
+        box: { x: b.x, y: b.y, w: b.w, h: b.h },
+        kind: "image",
+        anchor: { kind: "paragraph", section: b.section, block: b.block, label, page: imageSel.page },
+        label,
+      };
+    }
+    if (selection.length === 1) {
+      const s = selection[0];
+      return { page: s.mark.page, box: s.mark.box, kind: s.mark.kind, anchor: s.anchor, label: s.anchor.label };
+    }
+    return null;
+  }, [imageSel, selection]);
 
   // Live mirrors so the (once-attached) cell-nav keydown listener reads the CURRENT selection/editor
   // without re-subscribing on every change (issue 036 — coexists with the 035 window keydown). `tabMoving`
@@ -844,6 +892,22 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     unshielded = consumeShield(imageCommittingRef, unshielded);
     if (unshielded <= 0) return;
     setImageSel((s) => (s ? null : s));
+  }, [refreshToken]);
+
+  // issue 06x — the INLINE-EDIT panel's revert GUARD: any EXTERNAL edit that re-flows the document while
+  // the panel is open (another apply, a chat edit, an in-place text commit, a font swap, a trap recovery)
+  // closes the panel KEEPING the applied change — never auto-reverting, and never leaving a 되돌리기 button
+  // that would pop the WRONG batch (the one just applied is only the undo-stack top RIGHT AFTER our apply).
+  // OUR OWN apply/revert arms `inlineEditShieldRef` (+1) so its re-flow is skipped here (same counted/delta
+  // shield discipline as the editor-close / image-clear effects). A pure click-away (no re-flow) is handled
+  // separately in `onPointerDown`.
+  const inlineEditSeenRef = useRef(0);
+  useEffect(() => {
+    let unshielded = refreshToken - inlineEditSeenRef.current;
+    inlineEditSeenRef.current = refreshToken;
+    unshielded = consumeShield(inlineEditShieldRef, unshielded);
+    if (unshielded <= 0) return; // the re-flow was our OWN apply/revert — keep the panel open
+    setInlineEdit((ie) => (ie ? null : ie)); // external edit → close (keep)
   }, [refreshToken]);
 
   const onInsertTable = useCallback(
@@ -1873,6 +1937,10 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const onPointerDown = useCallback(
     (c: PageClick) => {
       ctxMenuSeqRef.current++; // 055 사후 #10: a new (left-click) gesture abandons an in-flight menu resolution
+      // issue 06x: a press on the page SHEET is an EXTERNAL gesture (select elsewhere / deselect / drill) →
+      // close the inline-edit panel KEEPING its change. Panel/affordance clicks stopPropagation (they never
+      // reach this handler — the overlay is a sibling of the sheet), so this only fires on a real doc click.
+      if (inlineEditRef.current) setInlineEdit(null);
       setPointerActive(true); // a gesture began → hide the floating toolbar until it settles (028)
       caretDownRef.current = { x: c.client.x, y: c.client.y }; // 053: measure click-vs-drag on release
       void core.selection.pointerDown(toPointerInput(c));
@@ -2014,6 +2082,57 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     },
     [core, toast, onTrap],
   );
+
+  // ── issue 06x: INLINE per-element edit — apply/revert wiring ─────────────────────────────────────────
+  // Open the inline panel over the CURRENT single target (block selection or image). Snapshot so the panel
+  // stays put across the apply's re-flow. Guarded to a single target + an editable doc (mirrors the
+  // affordance render gate) so a stale gesture can't open it over nothing.
+  const openInlineEdit = useCallback(() => {
+    if (!editingOn || !canEdit) return;
+    const t = inlineTarget;
+    if (t) setInlineEdit(t);
+  }, [editingOn, canEdit, inlineTarget]);
+
+  const closeInlineEdit = useCallback(() => setInlineEdit(null), []);
+
+  // APPLY the inline proposal as ONE undo batch — the SAME commit the chat uses, minus the selection-clear
+  // (`session.applyBatch`, not `edit.apply`) so the selection/snapshot survive and the panel can show its
+  // applied summary + offer 되돌리기. Arms `inlineEditShieldRef` so this re-flow doesn't trip the guard that
+  // closes on EXTERNAL edits; an IMAGE target also arms `imageCommitting` so the image-clear effect keeps
+  // `imageSel` (the snapshot the affordance/overlay derive from) instead of dropping it on our own re-flow.
+  // Returns the applied cards (via the SAME `describeIntent` renderer the chat cards use) for the summary.
+  const onInlineApply = useCallback(
+    async (intents: Intent[]): Promise<IntentCard[]> => {
+      const isImage = inlineEditRef.current?.kind === "image";
+      inlineEditShieldRef.current++;
+      if (isImage) imageCommittingRef.current++;
+      try {
+        await core.session.applyBatch(intents);
+        toast(`적용됨: ${intents.length}개 편집`);
+        return core.edit.preview(intents);
+      } catch (e) {
+        disarmShield(inlineEditShieldRef);
+        if (isImage) disarmShield(imageCommittingRef);
+        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다. 마지막 편집은 취소되었습니다")) {
+          /* non-trap error: surfaced by the inline panel's own catch → error state */
+        }
+        throw e;
+      }
+    },
+    [core, toast, onTrap],
+  );
+
+  // REVERT the applied batch — it is the undo-stack top immediately after our apply, so ONE `session.undo()`
+  // pops exactly it. Arm the shield so the undo's re-flow doesn't re-trip the (already-closing) panel guard.
+  const onInlineRevert = useCallback(async () => {
+    inlineEditShieldRef.current++;
+    try {
+      if (await core.session.undo()) toast("되돌렸습니다");
+    } catch (e) {
+      disarmShield(inlineEditShieldRef);
+      onTrap(e, "엔진 트랩 — 문서를 복구했습니다");
+    }
+  }, [core, toast, onTrap]);
 
   const undo = useCallback(async () => {
     if (await core.session.undo()) toast("실행취소");
@@ -2389,7 +2508,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                         Move is an anchor reorder (resolveDropBlock → MoveImage), resize is SetImageSize with
                         corner aspect-lock. Only shown when a document is editable (canEdit) so the handles
                         never promise an edit the backend will refuse. */}
-                    {editingOn && canEdit && imageSel && imageSel.page === page && (
+                    {/* issue 06x: hide the 8-handle overlay while the inline-edit panel is open (one image
+                        surface at a time — the panel owns the interaction, the stale handles would confuse). */}
+                    {editingOn && canEdit && imageSel && imageSel.page === page && !inlineEdit && (
                       <ImageOverlay
                         box={imageSel.box}
                         scale={scale}
@@ -2403,8 +2524,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                         a marquee drag — the marquee state (now isolated, issue 030) is no longer needed here.
                         issue 032: also hide it while the in-place editor is open (two chromes must not fight).
                         issue 039: also hide it while the right-click context menu is open (one surface at a
-                        time). Both surfaces drive the SAME `fmtActions` handlers (공용 유틸). */}
-                    {editingOn && toolbarPage === page && marks.length > 0 && !pointerActive && !editor && !contextMenu && (
+                        time). Both surfaces drive the SAME `fmtActions` handlers (공용 유틸).
+                        issue 06x: also hide it while the inline-edit panel is open (one AI surface at a time). */}
+                    {editingOn && toolbarPage === page && marks.length > 0 && !pointerActive && !editor && !contextMenu && !inlineEdit && (
                       <FloatingToolbar
                         marks={marks.filter((m) => m.page === page).map((m) => m.box)}
                         scale={scale}
@@ -2452,6 +2574,43 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                         shielded so the editor stays open with its uncommitted text (커밋/에디터 경합 금지). */}
                     {editingOn && editor && editor.kind === "cell" && editor.page === page && (
                       <CellShadePalette box={editor.box} scale={scale} onPick={(hex) => void shadeEditorCell(hex)} />
+                    )}
+                    {/* issue 06x: the INLINE per-element edit AFFORDANCE — a small "✨ 여기서 편집" pill on the
+                        bottom-right of the LONE selection (or selected image). Shown ONLY for exactly one
+                        editable target, and NOT while the in-place editor / a gesture / the context menu / the
+                        panel itself is up (so it never fights the drill double-click, resize handles, marquee,
+                        or empty-space deselect). Clicking opens the inline panel BELOW the element. */}
+                    {editingOn && canEdit && inlineTarget && inlineTarget.page === page && !inlineEdit && !editor && !pointerActive && !contextMenu && (
+                      <button
+                        type="button"
+                        className="hw-inline-open"
+                        data-testid="hw-inline-open"
+                        title="이 요소를 여기서 바로 AI로 편집"
+                        style={{ left: (inlineTarget.box.x + inlineTarget.box.w) * scale, top: (inlineTarget.box.y + inlineTarget.box.h) * scale }}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openInlineEdit();
+                        }}
+                      >
+                        ✨ 여기서 편집
+                      </button>
+                    )}
+                    {/* issue 06x: the OPEN inline-edit panel, anchored BELOW the target. Reuses the chat's
+                        onAiRequest (anchors=[target]) + applies as one batch; apply-then-revert lives inside. */}
+                    {editingOn && inlineEdit && inlineEdit.page === page && (
+                      <InlineEditPanel
+                        box={inlineEdit.box}
+                        scale={scale}
+                        targetLabel={inlineEdit.label}
+                        anchor={inlineEdit.anchor}
+                        onAiRequest={props.onAiRequest}
+                        docContext={core.session.docContext([inlineEdit.anchor])}
+                        onApply={onInlineApply}
+                        onRevert={onInlineRevert}
+                        onClose={closeInlineEdit}
+                        modLabel={mod}
+                      />
                     )}
                   </>
                 )}

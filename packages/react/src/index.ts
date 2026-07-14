@@ -31,6 +31,11 @@ export { HoverStore, cursorForContext, pointInBox, sameHighlight } from "./hover
 export type { HoverHighlight, HoverCursor, CursorContext } from "./hover";
 export { ChatPanel } from "./components/ChatPanel";
 export type { ChatPanelProps } from "./components/ChatPanel";
+// Issue 06x — the INLINE per-element vibe-edit panel (apply-then-revert): an alternative to the chat that
+// happens directly ON the selected element. HwpWorkspace mounts it from the "✨ 여기서 편집" affordance;
+// a host can also compose it over the core (same onAiRequest bridge + one-batch apply + core.session.undo).
+export { InlineEditPanel } from "./components/InlineEditPanel";
+export type { InlineEditPanelProps } from "./components/InlineEditPanel";
 export { FontPicker } from "./components/FontPicker";
 export type { FontPickerProps } from "./components/FontPicker";
 // Issue 045 — 찾기/바꾸기: the ⌘F capsule (FindBar) + the per-page match highlight layer (FindMatchOverlay).
