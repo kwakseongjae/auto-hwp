@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-07-14 (Claude) · 웹 QA 2차 피드백 4건 — 스테일dist버그·deselect·Figma표선택·인라인편집
+- 발단: 사용자 실사용 스크린샷 — "아이디어명은 여명거리로"가 대표자명 라벨칸을 덮음(066이 안 먹힘). 병렬 조사(4차원)로 근본 매핑.
+- **#1 (0f09ac4)**: 라벨 덮어쓰기 근본 = **스테일 `ai-protocol/dist`**(066은 src만·앱은 dist 소비→grids 드롭). durable: hwp-lab predev/prebuild `build:deps` 선행 + verify-local.sh에 ai-protocol 빌드 + playwright webServer mock 고정. e2e로 docContext에 그리드 실림 확인. **#2 (0f09ac4)**: 빈바탕 클릭 미해제 = finishClick이 block_at nearest-band 폴백 신뢰 → strict-containment 재검사(+회귀 테스트).
+- **#4 (59fef4f)**: Figma식 클릭=표/더블클릭=셀/재더블클릭·Enter=편집. editor-core drill 상태+drillInto+currentCell, React handleDoubleClick. **#3 (c1a9476)**: 인라인 per-element 편집(✨ 여기서 편집→요소 아래 패널→onAiRequest 즉시apply→적용유지/되돌리기, 이중 가드). 둘 다 워크트리, cherry-pick 시 finishClick(#2∩#4)·HwpWorkspace(#4∩#3) 병합·테스트 드릴모델 갱신.
+- 교훈: **dist 소비 아티팩트는 소스만 고치면 안 됨**(066 회귀가 스테일 dist였음 — verify가 src로만 테스트해 그린으로 샜다). 워크트리는 분기 시점 주의(#3가 #4 이전서 분기→테스트 셋업 충돌). 검증: editor-core 162·react 301·게이트 8==8/18==18. 실포인터/프레임표 실Grok 육안은 로컬 QA 큐.
+- 다음: 사용자 로컬 QA(#1 프레임표 표채우기·#2 deselect·#4 드릴·#3 인라인) → 잔여 UX 판단(AI 진입점 통합/인라인 수동편집).
+
 ## 2026-07-13 밤6 (Claude) · 실물QA P0 2건 병렬 수정 완료 — 065 압축mimetype ∥ 066 표그리드컨텍스트
 - 한 일: 실물 스윕 P0 둘 다 병렬 워크트리 수정→병합→검증. **065**(79ecd1a 푸시): detect가 압축 mimetype HWPX를 거부하던 것을 ZIP 중앙디렉토리 엔트리 NAME 스캔(DOCX식, inflate 0) fallback으로 해소 — 실물 6/24 회복. **066**(dab3e87): 웹 doc-context가 표 그리드에 눈멀어 "표 채워줘" intents:[] 이던 것을 hwp-session `table_grid`(edit_target 언랩·active셀) → wasm tableGrid → WasmAdapter → buildDocContext 그리드 첨부(dedup·truncate·회귀 바이트동일) + 프롬프트 FOOTER(TABLE GRID/ADDING ROWS)로 해소. 소스 선택 (b) 채택 사유=to_markdown은 hwp-ai deps 유입·전문서 덤프·edit_target 미사용으로 프레임표 좌표 틀어짐.
 - 검증: 통합 --full 그린(게이트 8==8·18==18, vitest 156/20/296/41, e2e 37 pass, wasm -Oz 재빌드). **실 Grok 4.5 실경로 실증**: 4행2열 라벨+빈값칸 그리드+"표 채워줘"→col1 값칸에만 4 SetTableCell(라벨 col0 미접촉), 066 이전 빈응답 완전 해소.
