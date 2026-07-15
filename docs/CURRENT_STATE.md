@@ -56,6 +56,14 @@ QA에서 #1(표 자동인식·채우기) 실 Grok 프레임표 작동 확인 후
 - **③-C 챗카드 revert + ③-A 웹검색+인용 ✅ (4aa1083, JS)**: (C) `DocSession.undoDepth()` + ChatPanel 적용카드 지속 `되돌리기`(top-of-stack만 활성, off-top은 비활성+툴팁) → `revertChatEdit`→session.undo. (A) `🔎 웹 검색` **토글**(휴리스틱 대신) → `OnAiRequest` additive 4th param `opts?:{webSearch?,onCitations?}`(InlineEditPanel 무영향) → route.ts `plugins:[{id:"web"}]` when webSearch → `EditResponse.citations?`(additive)+`extractCitations`(url_citation) → 챗 "🔎 근거" 링크. 스트리밍 없음. ai-protocol 23·react 305·hwp-lab 44.
 - 통합 검증: 빌드 OK, vitest 23/163/305/44, 게이트 8==8/18==18, 챗/smoke/editing e2e 11 통과. **잔여(사용자 판단)**: always-revert 완전형(주소화 배치/보상편집=오래된 편집 개별 revert) + 스트리밍 투명성(③-v2, 검색어→결과→구성→반영 실시간)은 다음 배치.
 
+## 웹 QA 4차 피드백 — 대형 다배치 (2026-07-15, 설계 완료·사용자 승인) — 진행 중
+QA에서 8건 피드백. 6레인 병렬 설계조사(qa4-design-explore workflow) 완료. **엔진레벨 통일 원칙: 엔진은 항상 Intent를 낸다** — AI 사고/검색=스트리밍 AgentEvent 로그, 첨부=컨텍스트(새 Intent 아님), 표생성=기존 InsertTableAt, 선택주소=CellPath(중첩), 썸네일=기존 SVG 재사용. 사용자 승인: 권장 배치순서·중첩표 Tier2까지·멀티모달 이미지+문서 둘다.
+- **배치1 ✅ 완료 (fd473f0·dd3f0ff·13535fc, 미푸시→푸시예정)**: ⓐ **호버 빈배경 색변**(13535fc)=`useHover.ts` runQuery에 strict-containment(pointInBox) 가드 → 실제 객체 위에서만 hover(회귀 테스트). ⓑ **표 생성**(dd3f0ff, 프롬프트갭)=prompt.ts에 내용채움 예시(팀 4×2)+"데이터→표" 스탠자(엔진 InsertTableAt 완비). ⓒ **중첩표 Tier1 데이터손실**(fd473f0, Rust)=`Op::SetTableCell` **보존방식**(문단만 splice·중첩 Block::Table 보존)+CellHit.nested 엔진세팅+정직한 토스트("중첩표는 아직 편집할 수 없습니다", 064 Tier1). cargo workspace 444, 게이트 before==after, wasm 재빌드. 통합: vitest 25/163/307/44, 8==8/18==18.
+- **배치2 (가시, M~L)**: ⓓ **문서구조→페이지 썸네일**(M)=엔진 이미 전페이지 own-render SVG revision-캐시(viewBox 무손실 축소), UI만—OutlinePanel에 sanitized SVG 썸네일 레일+lazy(⚠️R7 sanitizeSvg). ⓔ **멀티모달 입력**(L)=`Attachment{kind,dataUrl?,text?}` 첨부UI(📎/붙여넣기)+이미지=OpenAI content-parts image_url(Grok 비전)+doc=텍스트추출→컨텍스트. buildUserMessage에 parts 변형. ⚠️R5 펜스.
+- **배치3 (대형, XL)**: ⓕ **에이전틱 AI**=route.ts를 SSE 스트리밍 에이전트 러너로(tools: web_search+emit_intents, tool_choice auto)+OnAiRequest 이벤트 계약+ChatPanel 스텝 타임라인(AgentEvent discriminated union)+대화 히스토리·컨텍스트 다이제스트(bounded). 크리티컬2(메모리)·3(사고과정)·B(동적 웹검색). **3차 배치의 토글+인용 v1 대체.** ⚠️R5/R6.
+- **배치4 (이연)**: ⓖ **중첩표 Tier2**(L)=CellPath 주소체계(descending)+place_nested_table provenance+드릴 스택→실제 중첩 편집. ⓗ **차트/도표 생성**(L/XL)=신규 Intent+PaintOp.
+- 설계 근거 전문: workflow wf_ec4aacad-4cf journal. 3차까지 완료=2fe44d3.
+
 ## 다음 = 로컬 육안 QA (사용자) + 위 발견 수정 배치
 `cd apps/hwp-lab && rm -rf .next && npm run dev` → Chrome. **QA.md 시나리오 ⑪~⑱**(이번 세션 신규 렌더:
 수식·차트·대각선·옛한글·IME·명조고딕·금칙·배포용복호/BMP)을 원본 PDF/한컴 뷰어와 대조. 기존 ①~⑩도 회귀 확인.
