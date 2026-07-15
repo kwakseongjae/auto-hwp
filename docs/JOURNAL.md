@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-07-15~16 (Claude) · 웹 QA 5차 3건 — 에이전틱버그·Figma툴바·HWPX렌더깨짐
+- **#1 (59101a6)**: 에이전틱 편집이 "제안된 편집 없음"으로 멈춤 = **Grok이 emit_intents 터미널 툴콜에서 degenerate**(인텐트명 'SetTableCell纺'·공백 폭주 → 화이트리스트 드롭). + 러너 핫리로드됐으나 프롬프트 dist 서버캐시 스테일. 수정: emit_intents 툴 제거→최종 편집 JSON 배열 텍스트 출력(비스트리밍과 동일)+웹검색 캡 3회. 실 Grok 실증.
+- **#2 (86ad5b9)**: 매 선택마다 뜨는 플로팅 툴바 짜증 → **조사서 지속 리본(FormatRibbon/048)이 이미 존재** 발견(플로팅은 중복). FloatingToolbar 렌더 제거+리본에 서체+컴팩트 AI pill.
+- **#3 (88e9d31, A+B)**: HWPX가 hwp 대비 많이 깨짐 = **통제실험 근본**: 렌더엔진 공유·정상, HWPX 얕은 파서가 run char_shape 0·문단 para_shape 0 하드코딩(전 텍스트 10pt 검정)이나 **풀은 이미 파싱돼 메모리에 있음=배선갭**. resolve_shape_pools로 char/para 풀 배선+secPr 페이지 지오메트리. 실측 폰트 1→4~16종·검정→파랑/빨강 회복. round-trip moat 보존. 남은 것 C(표)·D(이미지).
+- 교훈: 툴콜 강제(tool_choice force)는 Grok을 degenerate시킴 — 검증된 JSON-텍스트 출력이 안정적. 대형 피드백은 설계조사 workflow/agent 선행이 근본을 빠르게 잡음. HWPX는 rhwp 아니라 우리 hwp-hwpx 얕은 파서가 문제(배선만 하면 됨).
+- 다음: HWPX C/D 착수 결정 + 사용자 로컬 QA(에이전틱 편집·툴바·HWPX 스타일).
+
 ## 2026-07-15 (Claude) · 웹 QA 4차 대형 다배치 8건 — 설계조사→4배치 순차 구현
 - 발단: QA 8건 피드백(중첩표 사라짐·hover 오작동·문서구조 썸네일·웹검색 동적화·멀티모달·메모리·사고스트림·표생성). 6레인 설계조사 workflow(qa4-design-explore) → 엔진레벨 통일원칙(엔진=Intent, 나머지는 감싸는 층) → 사용자 승인 4배치.
 - **배치1(16898c1)**: 호버 strict-containment(빈배경 색변 제거)·표생성 프롬프트(엔진 InsertTableAt 완비, 갭=프롬프트)·중첩표 Tier1(Op::SetTableCell 비파괴화=데이터손실 차단+정직토스트). **배치2(4e239d5)**: 페이지 썸네일 레일(기존 SVG 래스터 재사용·lazy)·멀티모달 입력(이미지=grok 비전 content-parts·문서=TXT추출, HWP/PDF 미지원칩). **배치3(d890d37, XL)**: 에이전틱 스트리밍 AI(?stream=1 NDJSON·모델주도 web_search 툴콜링·사고 타임라인·대화메모리 6턴, 토글 v1 대체). **배치4(8afc6e3)**: 중첩표 Tier2(CellPath 전스택·중첩 편집 가능).
