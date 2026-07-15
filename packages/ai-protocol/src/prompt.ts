@@ -81,6 +81,9 @@ const INTENT_BLOCKS: Record<string, string[]> = {
     "  CellSpec (docs/INTENT-SCHEMA.md §6.9, L564-574) — all optional ({} = empty plain cell):",
     '    { "text": <string>, "col_span": <int≥1>, "row_span": <int≥1>, "bold": <bool>, "shade": "#RRGGBB" }',
     '  Each logical row lists only the UNCOVERED cells (HTML-table coverage). An N×M empty grid = N rows of M "{}" cells.',
+    "  CONTENT-FILLED example (a 4×2 team table — bold header row, then one row per person; PUT each item's",
+    '  text in its cell, do NOT emit empty cells for known data): "rows":',
+    '    [[{"text":"직책","bold":true},{"text":"이름","bold":true}],[{"text":"대표"},{"text":"홍길동"}],[{"text":"CTO"},{"text":"김철수"}],[{"text":"Dev Lead"},{"text":"이영희"}]]',
   ],
   InsertParagraphAt: [
     "# InsertParagraphAt — insert a rich paragraph AT a block index (docs/INTENT-SCHEMA.md §6.9, L578-601)",
@@ -146,6 +149,16 @@ const FOOTER = [
   "at the end), \"count\": N, and \"cols\": the table's column count (the grid's \"M열\"). Example — \"행 2개",
   "추가\" on a 3행 4열 표 at (section S, block B): { \"intent\":\"TableInsertRows\", \"section\":S, \"index\":B,",
   "\"at\":3, \"count\":2, \"cols\":4 }. For exactly one row prefer TableAppendRow (section/index only).",
+  "",
+  // 표 생성 (data→table): 엔진은 CellSpec.text로 셀을 CHANNEL로 채워 InsertTableAt를 만든다 — 모델이
+  // "표로 만들어" 요청에서 POPULATED 표를 못 내보내던 갭(프롬프트 전용 수정)을 메운다.
+  "표로 만들기 (MAKING A NEW TABLE FROM DATA): when the user gives a list / roster / key-value prose and",
+  "asks \"표로 만들어\" / \"표 만들어\" / \"정리해줘\" / \"표로 삽입\", emit ONE InsertTableAt whose \"rows\" carry",
+  "each item's text in its cells — make the FIRST (header) row bold and put one logical row per item. Place",
+  "it at the marked anchor block's \"index\" if an anchor is marked, else omit \"index\" (or \"index\":null) for",
+  "the section END. NEVER emit empty cells for data you were given. Example — \"팀: 대표 홍길동, CTO 김철수,",
+  "Dev Lead 이영희 → 표로 만들어줘\" becomes ONE InsertTableAt with \"rows\":",
+  '[[{"text":"직책","bold":true},{"text":"이름","bold":true}],[{"text":"대표"},{"text":"홍길동"}],[{"text":"CTO"},{"text":"김철수"}],[{"text":"Dev Lead"},{"text":"이영희"}]].',
   "",
   // 정직 제외 3종 (051 §3): row delete / column insert / column delete have NO engine op — name them as
   // unsupported so the model refuses instead of inventing a lookalike intent (which the server drops).

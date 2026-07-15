@@ -149,6 +149,23 @@ describe("buildSystemPrompt (INTENT-SCHEMA excerpt, allowed-intent subset)", () 
     expect(p).toContain("For exactly one row prefer TableAppendRow");
   });
 
+  it("teaches AI TABLE GENERATION from data: content-filled InsertTableAt example + a make-a-table-from-data stanza", () => {
+    const p = buildSystemPrompt();
+    // (1) The InsertTableAt block now carries a CONTENT-FILLED worked example (per-cell text + bold header),
+    // matching the exact CellSpec wire the engine accepts (crates/hwp-ops CellSpec: text/bold/…).
+    expect(p).toContain("CONTENT-FILLED example (a 4×2 team table");
+    expect(p).toContain(
+      '[[{"text":"직책","bold":true},{"text":"이름","bold":true}],[{"text":"대표"},{"text":"홍길동"}],[{"text":"CTO"},{"text":"김철수"}],[{"text":"Dev Lead"},{"text":"이영희"}]]',
+    );
+    // (2) A FOOTER stanza tells the model to turn a list/roster/prose into ONE populated InsertTableAt.
+    expect(p).toContain("표로 만들기 (MAKING A NEW TABLE FROM DATA)");
+    expect(p).toContain('emit ONE InsertTableAt whose "rows" carry');
+    expect(p).toContain("make the FIRST (header) row bold and put one logical row per item");
+    expect(p).toContain('else omit "index" (or "index":null) for');
+    // The example is anchored to the very "팀: 대표 홍길동 …" request from the issue.
+    expect(p).toContain("팀: 대표 홍길동, CTO 김철수,");
+  });
+
   it("a subset option emits ONLY the requested intents (host may allow fewer)", () => {
     const p = buildSystemPrompt({ allowedIntents: ["SetTableCell"] });
     expect(p).toContain("# SetTableCell —");
@@ -268,6 +285,23 @@ describe("validateResponse (whitelist + structure)", () => {
       "InsertImage",
       "ApplyContent",
     ]);
+  });
+
+  it("passes a CONTENT-FILLED InsertTableAt (the make-a-table-from-data example) through the whitelist intact", () => {
+    // The exact 4×2 team table the system prompt now teaches — CellSpec.text + bold header, index:null = END.
+    const rows = [
+      [{ text: "직책", bold: true }, { text: "이름", bold: true }],
+      [{ text: "대표" }, { text: "홍길동" }],
+      [{ text: "CTO" }, { text: "김철수" }],
+      [{ text: "Dev Lead" }, { text: "이영희" }],
+    ];
+    const dropped: string[] = [];
+    const out = validateResponse([{ intent: "InsertTableAt", section: 0, index: null, rows }], { onDrop: (r) => dropped.push(r) });
+    expect(dropped).toHaveLength(0);
+    expect(out).toHaveLength(1);
+    expect(out[0].intent).toBe("InsertTableAt");
+    // The populated grid survives verbatim (whitelist is structure-preserving — the engine fills cells from text).
+    expect((out[0] as unknown as { rows: unknown }).rows).toEqual(rows);
   });
 
   it("parses raw LLM text (prose around a JSON array) then whitelists — isomorphic", () => {
