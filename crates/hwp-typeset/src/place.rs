@@ -1237,6 +1237,7 @@ fn place_cell_content(
             vy += block_height_for_place(b, doc, textw, fonts);
             continue;
         };
+        let para_top = vy;
         let glyphs = paragraph_glyphs(p, doc);
         let align = doc
             .para_shapes
@@ -1247,6 +1248,21 @@ fn place_cell_content(
         // Same paragraph indent as the body: block left/right margins shrink wrap; first line shifts.
         let ind = indent_of(p, doc, textw);
         let lines = layout_paragraph(p, doc, ind.wrap_w, fonts);
+        // A cell-anchored image/equation/chart (issue #196 Batch D): draw it at the paragraph top.
+        // `layout_paragraph` already bumped the first line's height to the object, so the cell row
+        // reserved this space — drawing is pagination-neutral (the vy advance below is unchanged).
+        if let Some((w, h, bin_ref, svg)) = paragraph_object(p) {
+            pg.images.push(PlacedImage {
+                x: cx + CELL_PAD_X,
+                y: para_top,
+                w,
+                h,
+                bin_ref,
+                svg,
+                section: ctx.section,
+                block: ctx.outer_block,
+            });
+        }
         for (li, ls) in lines.iter().enumerate() {
             let line_indent = ind.left + if li == 0 { ind.first_extra } else { 0.0 };
             let slack = (ind.wrap_w

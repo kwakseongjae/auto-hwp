@@ -40,6 +40,10 @@ pub fn parse_semantic(bytes: &[u8]) -> Result<SemanticDoc> {
     if let Some(h) = pkg.read_header() {
         doc.header_pools = crate::synth::parse_header_pools(&String::from_utf8_lossy(&h));
     }
+    // Batch C (#196): resolve each table/cell against the borderFill pool DURING parse (it needs both
+    // the pool AND the section XML's cellSz/borderFillIDRef, only available here). Cloned so the
+    // `doc.sections.push` borrow below doesn't conflict with reading `doc.header_pools`.
+    let border_pool = doc.header_pools.border.clone();
     doc.passthrough.push(SOURCE_PART_TAG, bytes.to_vec());
     for name in pkg.section_part_names() {
         // `raw` MUST be the exact bytes the reader sees, so per-paragraph byte spans (captured in
@@ -54,7 +58,8 @@ pub fn parse_semantic(bytes: &[u8]) -> Result<SemanticDoc> {
         };
         // Table-nesting guard (#014): a pathologically nested table is rejected as a fast, explicit
         // error rather than building an unbounded structure. Legacy path folds it into Error::Parse.
-        parse_section(&text, &mut section.blocks).map_err(|l| Error::Parse(l.to_string()))?;
+        parse_section(&text, &mut section.blocks, &border_pool)
+            .map_err(|l| Error::Parse(l.to_string()))?;
         // Batch B (#196): the real page geometry (size/margins) drives body width/height → correct
         // pagination. Left un-edited (`page_edited` stays false) so the secPr round-trips verbatim.
         if let Some(pg) = parse_page_setup(&text) {
@@ -65,6 +70,9 @@ pub fn parse_semantic(bytes: &[u8]) -> Result<SemanticDoc> {
     // Batch A (#196): resolve each run's charPrIDRef / paragraph's paraPrIDRef against the parsed
     // header pools so layout/render read the real formatting (was: all default index 0).
     resolve_shape_pools(&mut doc);
+    // Batch D (#196): resolve `<hp:pic>` binary refs → doc.bin_data so the shared renderer embeds the
+    // real photos (before: HWPX images never rendered — only .hwp lift populated bin_data).
+    resolve_bin_data(&pkg, &mut doc);
     assign_node_ids(&mut doc);
     Ok(doc)
 }
@@ -87,6 +95,7 @@ pub fn parse_semantic_guarded(bytes: &[u8]) -> std::result::Result<SemanticDoc, 
             doc.header_pools = crate::synth::parse_header_pools(&String::from_utf8_lossy(&h));
         }
     }
+    let border_pool = doc.header_pools.border.clone();
     doc.passthrough.push(SOURCE_PART_TAG, bytes.to_vec());
     for name in pkg.section_part_names() {
         let raw = pkg.read_part_guarded(&name)?;
@@ -98,15 +107,112 @@ pub fn parse_semantic_guarded(bytes: &[u8]) -> std::result::Result<SemanticDoc, 
             },
             ..Default::default()
         };
-        parse_section(&text, &mut section.blocks).map_err(HardenedError::Limit)?;
+        parse_section(&text, &mut section.blocks, &border_pool).map_err(HardenedError::Limit)?;
         if let Some(pg) = parse_page_setup(&text) {
             section.page = pg;
         }
         doc.sections.push(section);
     }
     resolve_shape_pools(&mut doc);
+    resolve_bin_data(&pkg, &mut doc);
     assign_node_ids(&mut doc);
     Ok(doc)
+}
+
+/// Batch D (#196): resolve every `<hp:pic>`'s `binaryItemIDRef` → its embedded bytes in
+/// `doc.bin_data`, so the shared renderer/HTML export embed the real photo. The `binaryItemIDRef`
+/// (e.g. `"image1"`) maps to a package part via `content.hpf`'s `<opf:item id href>` manifest
+/// (Hancom writes the BinData parts at the package root, e.g. `BinData/image1.bmp`). Best-effort:
+/// an unresolved / unreadable / external image is simply skipped (the pic renders as its stub box).
+fn resolve_bin_data(pkg: &Package, doc: &mut SemanticDoc) {
+    let mut refs: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for sec in &doc.sections {
+        collect_image_refs(&sec.blocks, &mut refs);
+    }
+    if refs.is_empty() {
+        return;
+    }
+    // content.hpf `<opf:item id=".." href="..">` → id→href map.
+    let Some(hpf_name) = pkg
+        .part_names
+        .iter()
+        .find(|n| n.to_ascii_lowercase().ends_with("content.hpf"))
+    else {
+        return;
+    };
+    let Ok(hpf) = pkg.read_part(hpf_name) else {
+        return;
+    };
+    let hpf = String::from_utf8_lossy(&hpf);
+    let mut href_of: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    let mut idx = 0;
+    while let Some(p) = hpf[idx..].find("<opf:item ") {
+        let start = idx + p;
+        let Some(rel) = hpf[start..].find('>') else {
+            break;
+        };
+        let tag = &hpf[start..start + rel];
+        idx = start + rel + 1;
+        if let (Some(id), Some(href)) = (opf_attr(tag, "id"), opf_attr(tag, "href")) {
+            href_of.insert(id.to_string(), href.to_string());
+        }
+    }
+    for id in refs {
+        let Some(href) = href_of.get(&id) else {
+            continue;
+        };
+        let Ok(bytes) = pkg.read_part(href) else {
+            continue;
+        };
+        if bytes.is_empty() {
+            continue;
+        }
+        let kind = href
+            .rsplit('.')
+            .next()
+            .filter(|e| !e.is_empty() && e.len() <= 5)
+            .unwrap_or("png")
+            .to_ascii_lowercase();
+        doc.bin_data.push(BinData {
+            bin_ref: id,
+            bytes,
+            kind,
+        });
+    }
+}
+
+/// Collect the `bin_ref` of every `Inline::Image` (recursing into tables + note bodies).
+fn collect_image_refs(blocks: &[Block], out: &mut std::collections::BTreeSet<String>) {
+    for b in blocks {
+        match b {
+            Block::Paragraph(p) => {
+                for r in &p.runs {
+                    for inl in &r.content {
+                        match inl {
+                            Inline::Image(im) => {
+                                out.insert(im.bin_ref.clone());
+                            }
+                            Inline::Note(nr) => collect_image_refs(&nr.body, out),
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            Block::Table(t) => {
+                for c in &t.cells {
+                    collect_image_refs(&c.blocks, out);
+                }
+            }
+        }
+    }
+}
+
+/// First `{name}="…"` value in an `<opf:item …>` open tag.
+fn opf_attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+    let pat = format!("{name}=\"");
+    let s = tag.find(&pat)? + pat.len();
+    let e = tag[s..].find('"')? + s;
+    Some(&tag[s..e])
 }
 
 /// Assign stable in-memory `NodeId`s to top-level (editable) paragraphs — addressing for in-place
@@ -292,6 +398,54 @@ struct TblFrame {
     start: usize,
     /// Byte offset of the in-progress cell's `<hp:tc` (span start, issue 057).
     cell_start: usize,
+    /// Table's own `borderFillIDRef` (표 외곽 테두리) — resolved to `Table::borders` at `</hp:tbl>`.
+    border_ref: Option<u64>,
+    /// Per-cell geometry (cellAddr/cellSpan + `<hp:cellSz>`) → col_widths/row_heights at `</hp:tbl>`.
+    geoms: Vec<CellGeom>,
+    /// The in-progress cell's `borderFillIDRef` (Batch C) — reset at each `</hp:tc>`.
+    cur_cell_border: Option<u64>,
+    /// The in-progress cell's `<hp:cellSz width height>` (HWPUNIT) — reset at each `</hp:tc>`.
+    cur_cell_sz: Option<(i32, i32)>,
+    /// The in-progress cell's `hasMargin="1"` flag (its `<hp:cellMargin>` is its OWN padding).
+    cur_cell_has_margin: bool,
+    /// The in-progress cell's `<hp:cellMargin left right top bottom>` (HWPUNIT).
+    cur_cell_margin: Option<[i32; 4]>,
+}
+
+impl TblFrame {
+    fn new(table: Table, start: usize, border_ref: Option<u64>) -> Self {
+        TblFrame {
+            table,
+            cell: None,
+            start,
+            cell_start: 0,
+            border_ref,
+            geoms: Vec::new(),
+            cur_cell_border: None,
+            cur_cell_sz: None,
+            cur_cell_has_margin: false,
+            cur_cell_margin: None,
+        }
+    }
+}
+
+/// One cell's grid geometry, captured during parse → the table's `col_widths`/`row_heights`
+/// (issue #196 Batch C, mirroring the .hwp lift's `derive_col_widths`/`stored_row_heights`).
+struct CellGeom {
+    row: usize,
+    col: usize,
+    row_span: usize,
+    col_span: usize,
+    width: i32,
+    height: i32,
+}
+
+/// Accumulator for one in-progress `<hp:pic>` — its display size + the referenced binary (D1).
+#[derive(Default)]
+struct PicAccum {
+    bin_ref: Option<String>, // <hc:img binaryItemIDRef>
+    width: i32,              // <hp:sz width> (HWPUNIT)
+    height: i32,             // <hp:sz height>
 }
 
 /// Accumulator for one in-progress `<hp:p>` (runs + its source provenance).
@@ -304,13 +458,18 @@ struct ParaAccum {
     simple: bool,                              // only hp:run/hp:t children seen so far
     runs: Vec<Run>,                            // flushed runs
     cur_run: Option<(Option<String>, String)>, // open run (charPrIDRef, text)
+    pending_images: Vec<ImageRef>,             // <hp:pic>s parsed inside the open run (D1)
 }
 
 /// Parse one section's XML into `out`. Returns `Err(DocLimit::TableNestingTooDeep)` if table-in-
 /// table nesting exceeds [`limits::MAX_TABLE_NESTING`] — the concrete "XML depth counter" for the
 /// only nesting that grows unbounded structures. All other malformation is tolerated (best-effort
 /// parse); the reader stops at the first hard error/EOF as before.
-fn parse_section(xml: &str, out: &mut Vec<Block>) -> std::result::Result<(), DocLimit> {
+fn parse_section(
+    xml: &str,
+    out: &mut Vec<Block>,
+    borders: &std::collections::BTreeMap<u64, BorderFillDef>,
+) -> std::result::Result<(), DocLimit> {
     let mut reader = Reader::from_str(xml);
     // Stack of block containers (section, then nested table-cell sublists).
     let mut blocks: Vec<Vec<Block>> = vec![Vec::new()];
@@ -318,6 +477,8 @@ fn parse_section(xml: &str, out: &mut Vec<Block>) -> std::result::Result<(), Doc
     // Stack of in-progress paragraphs (a cell paragraph nests inside a table inside an outer para).
     let mut paras: Vec<ParaAccum> = Vec::new();
     let mut in_t = false;
+    // In-progress `<hp:pic>` (D1) — captures its display size + binary ref between pic open/close.
+    let mut pic: Option<PicAccum> = None;
 
     loop {
         let pos_before = reader.buffer_position() as usize; // lands on '<' of the upcoming tag (qxml 0.37)
@@ -347,34 +508,71 @@ fn parse_section(xml: &str, out: &mut Vec<Block>) -> std::result::Result<(), Doc
                         mark_not_simple(&mut paras);
                         let rows = attr_usize(&e, b"rowCnt").unwrap_or(0);
                         let cols = attr_usize(&e, b"colCnt").unwrap_or(0);
-                        tbls.push(TblFrame {
-                            table: Table {
+                        let border_ref = attr_u64(&e, b"borderFillIDRef");
+                        tbls.push(TblFrame::new(
+                            Table {
                                 rows,
                                 cols,
                                 provenance: hwpx_prov(),
                                 ..Default::default()
                             },
-                            cell: None,
-                            start: pos_before,
-                            cell_start: 0,
-                        });
+                            pos_before,
+                            border_ref,
+                        ));
                     }
                     b"tc" => {
                         blocks.push(Vec::new());
                         if let Some(f) = tbls.last_mut() {
                             f.cell = Some(Cell::default());
                             f.cell_start = pos_before;
+                            // Batch C: the cell's borderFill + its own-margin flag (its
+                            // `<hp:cellMargin>` is the cell's OWN padding only when hasMargin="1").
+                            f.cur_cell_border = attr_u64(&e, b"borderFillIDRef");
+                            f.cur_cell_has_margin = attr_usize(&e, b"hasMargin") == Some(1);
+                            f.cur_cell_sz = None;
+                            f.cur_cell_margin = None;
                         }
                     }
-                    // Structural children (secPr/ctrl/pic/equation/container/…) make a paragraph
-                    // NOT re-emittable from the lossy AST. `linesegarray`/`lineseg` are layout
-                    // CACHE — safely dropped + recomputed by Hancom — so they don't break `simple`.
+                    // D1: a `<hp:pic>` opens picture-capture mode (its `<hp:sz>` + `<hc:img>` fill a
+                    // PicAccum; `</hp:pic>` builds the `Inline::Image`). Still a structural child →
+                    // NOT re-emittable from the lossy AST, so the wrapping paragraph rides verbatim.
+                    b"pic" => {
+                        pic = Some(PicAccum::default());
+                        mark_not_simple(&mut paras);
+                    }
+                    // Structural children (secPr/ctrl/equation/container/…) make a paragraph NOT
+                    // re-emittable from the lossy AST. `linesegarray`/`lineseg` are layout CACHE —
+                    // safely dropped + recomputed by Hancom — so they don't break `simple`.
                     other => {
                         if !matches!(other, b"linesegarray" | b"lineseg") {
                             mark_not_simple(&mut paras);
                         }
                     }
                 }
+            }
+            Ok(Event::Empty(e)) if pic.is_some() => {
+                // D1: inside a `<hp:pic>`, capture the binary ref (`<hc:img binaryItemIDRef>`) and the
+                // final display size (`<hp:sz width height>`). All pic children keep the paragraph
+                // non-simple (verbatim re-emit) — never table geometry.
+                match e.local_name().as_ref() {
+                    b"img" => {
+                        if let Some(p) = pic.as_mut() {
+                            p.bin_ref = attr_str(&e, b"binaryItemIDRef");
+                        }
+                    }
+                    b"sz" => {
+                        if let Some(p) = pic.as_mut() {
+                            if let Some(w) = attr_i32(&e, b"width") {
+                                p.width = w;
+                            }
+                            if let Some(h) = attr_i32(&e, b"height") {
+                                p.height = h;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                mark_not_simple(&mut paras);
             }
             Ok(Event::Empty(e)) => match e.local_name().as_ref() {
                 b"t" => {} // empty `<hp:t/>` — keeps an empty run; not a simple-breaker
@@ -388,6 +586,40 @@ fn parse_section(xml: &str, out: &mut Vec<Block>) -> std::result::Result<(), Doc
                     if let Some(c) = tbls.last_mut().and_then(|f| f.cell.as_mut()) {
                         c.col_span = attr_usize(&e, b"colSpan").unwrap_or(1).max(1);
                         c.row_span = attr_usize(&e, b"rowSpan").unwrap_or(1).max(1);
+                    }
+                }
+                // Batch C: the cell's laid-out size → its column-width/row-height contribution.
+                b"cellSz" => {
+                    if let Some(f) = tbls.last_mut() {
+                        f.cur_cell_sz = Some((
+                            attr_i32(&e, b"width").unwrap_or(0),
+                            attr_i32(&e, b"height").unwrap_or(0),
+                        ));
+                    }
+                }
+                // Batch C: the cell's inner padding (applied at `</hp:tc>` only when hasMargin="1").
+                b"cellMargin" => {
+                    if let Some(f) = tbls.last_mut() {
+                        f.cur_cell_margin = Some([
+                            attr_i32(&e, b"left").unwrap_or(0),
+                            attr_i32(&e, b"right").unwrap_or(0),
+                            attr_i32(&e, b"top").unwrap_or(0),
+                            attr_i32(&e, b"bottom").unwrap_or(0),
+                        ]);
+                    }
+                }
+                // Batch C: the table-DEFAULT cell padding (`<hp:inMargin>` sits before the first row,
+                // so `f.cell` is None then; a picture's inMargin is handled by the pic arm above).
+                b"inMargin" => {
+                    if let Some(f) = tbls.last_mut() {
+                        if f.cell.is_none() {
+                            f.table.padding = Some([
+                                attr_i32(&e, b"left").unwrap_or(0),
+                                attr_i32(&e, b"right").unwrap_or(0),
+                                attr_i32(&e, b"top").unwrap_or(0),
+                                attr_i32(&e, b"bottom").unwrap_or(0),
+                            ]);
+                        }
                     }
                 }
                 // `<hp:lineseg/>` (inside linesegarray) is layout cache; everything else structural.
@@ -436,6 +668,22 @@ fn parse_section(xml: &str, out: &mut Vec<Block>) -> std::result::Result<(), Doc
                         }
                     }
                 }
+                b"pic" => {
+                    // D1: finish the picture → an `Inline::Image` on the current open run (its bytes
+                    // are resolved from the package's BinData in a later pass). A pic without a binary
+                    // ref (external/broken) is dropped.
+                    if let Some(pa) = pic.take() {
+                        if let Some(bin_ref) = pa.bin_ref.filter(|r| !r.is_empty()) {
+                            if let Some(p) = paras.last_mut() {
+                                p.pending_images.push(ImageRef {
+                                    bin_ref,
+                                    width: pa.width,
+                                    height: pa.height,
+                                });
+                            }
+                        }
+                    }
+                }
                 b"tc" => {
                     let cell_blocks = blocks.pop().unwrap_or_default();
                     if let Some(f) = tbls.last_mut() {
@@ -444,12 +692,49 @@ fn parse_section(xml: &str, out: &mut Vec<Block>) -> std::result::Result<(), Doc
                             c.active = true;
                             // `[<hp:tc … </hp:tc>)` span for surgical in-place cell re-emit (057).
                             c.src_span = Some((f.cell_start, reader.buffer_position() as usize));
+                            // Batch C: resolve the cell's borderFill → per-edge borders / shade /
+                            // diagonal (the SAME fields the .hwp lift fills, so the shared renderer
+                            // draws the cell identically). Own padding only when hasMargin="1".
+                            if let Some(bf) = f.cur_cell_border.and_then(|id| borders.get(&id)) {
+                                c.borders = bf.borders;
+                                c.shade_color = bf.shade;
+                                c.has_border = bf.has_border;
+                                c.diagonal = bf.diagonal;
+                            }
+                            if f.cur_cell_has_margin {
+                                c.padding = f.cur_cell_margin;
+                            }
+                            let (w, h) = f.cur_cell_sz.unwrap_or((0, 0));
+                            f.geoms.push(CellGeom {
+                                row: c.row,
+                                col: c.col,
+                                row_span: c.row_span.max(1),
+                                col_span: c.col_span.max(1),
+                                width: w,
+                                height: h,
+                            });
                             f.table.cells.push(c);
                         }
+                        f.cur_cell_border = None;
+                        f.cur_cell_sz = None;
+                        f.cur_cell_has_margin = false;
+                        f.cur_cell_margin = None;
                     }
                 }
                 b"tbl" => {
                     if let Some(mut f) = tbls.pop() {
+                        // Batch C: real column widths + row-height floors from the captured cell
+                        // geometry (equal-split was the wrong-proportion + mis-pagination culprit).
+                        if f.table.cols > 0 {
+                            f.table.col_widths = derive_col_widths_hwpx(&f.geoms, f.table.cols);
+                        }
+                        if f.table.rows > 0 {
+                            f.table.row_heights = stored_row_heights_hwpx(&f.geoms, f.table.rows);
+                        }
+                        // The table's OWN outline borderFill (표 외곽 테두리).
+                        if let Some(bf) = f.border_ref.and_then(|id| borders.get(&id)) {
+                            f.table.borders = bf.borders;
+                        }
                         // Record EVERY table's `[<hp:tbl … </hp:tbl>)` span — TOP-LEVEL and NESTED.
                         // Top-level: re-emit a dirty table at its original anchor instead of the
                         // section end (issue 057). Nested: a 1×1 frame wrapper's INNER table needs
@@ -478,15 +763,97 @@ fn parse_section(xml: &str, out: &mut Vec<Block>) -> std::result::Result<(), Doc
 }
 
 /// Push the open run (if any) into the paragraph's run list — empty-text runs are KEPT (dropping
-/// them would shift run indices and misaddress per-run edits).
+/// them would shift run indices and misaddress per-run edits). Any `<hp:pic>`s parsed inside the run
+/// (D1) ride along as `Inline::Image` after the text.
 fn flush_run(p: &mut ParaAccum) {
+    let images = std::mem::take(&mut p.pending_images);
     if let Some((char_ref, text)) = p.cur_run.take() {
+        let mut content: Vec<Inline> = vec![Inline::Text(text)];
+        content.extend(images.into_iter().map(Inline::Image));
         p.runs.push(Run {
             char_shape: 0,
             char_ref,
-            content: vec![Inline::Text(text)],
+            content,
+        });
+    } else if !images.is_empty() {
+        // A picture outside an explicit `<hp:run>` — emit it in its own run so it still renders.
+        p.runs.push(Run {
+            char_shape: 0,
+            char_ref: None,
+            content: images.into_iter().map(Inline::Image).collect(),
         });
     }
+}
+
+/// Per-column widths (HWPUNIT) from captured cell geometry (issue #196 Batch C). Single-column cells
+/// give exact widths; a column that appears ONLY under a span gets the leftover (fixpoint); anything
+/// still unresolved keeps the 1800 fallback. Mirrors the .hwp lift's `derive_col_widths`. Always
+/// returns `cols` POSITIVE entries so `place::column_offsets` uses them (its all-`>0` guard).
+fn derive_col_widths_hwpx(geoms: &[CellGeom], cols: usize) -> Vec<i32> {
+    if cols == 0 {
+        return Vec::new();
+    }
+    let mut w = vec![0i64; cols];
+    let mut known = vec![false; cols];
+    // 1) Single-column cells give exact column widths (max across rows).
+    for g in geoms {
+        if g.col_span <= 1 && g.col < cols && g.width > 0 {
+            w[g.col] = w[g.col].max(g.width as i64);
+            known[g.col] = true;
+        }
+    }
+    // 2) Resolve span-only columns: a span's width minus its known columns, split among the unknown.
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for g in geoms {
+            let span = g.col_span.max(1);
+            if span <= 1 || g.col >= cols {
+                continue;
+            }
+            let end = (g.col + span).min(cols);
+            let unknown: Vec<usize> = (g.col..end).filter(|&i| !known[i]).collect();
+            if unknown.is_empty() {
+                continue;
+            }
+            let known_sum: i64 = (g.col..end).filter(|&i| known[i]).map(|i| w[i]).sum();
+            if (g.width as i64) <= known_sum {
+                continue;
+            }
+            let each = (g.width as i64 - known_sum) / unknown.len() as i64;
+            if each <= 0 {
+                continue;
+            }
+            for &i in &unknown {
+                w[i] = each;
+                known[i] = true;
+            }
+            changed = true;
+        }
+    }
+    w.iter()
+        .map(|&x| if x <= 0 { 1800 } else { x as i32 })
+        .collect()
+}
+
+/// Per-row minimum-height floors (HWPUNIT) from stored cell heights (issue #196 Batch C). Each cell
+/// contributes `height / row_span` to every row it spans, max across cells — honored as a FLOOR by
+/// `hwp_typeset::apply_row_overrides`. Mirrors the .hwp lift's `stored_row_heights` (a 0 leaves the
+/// row content-sized).
+fn stored_row_heights_hwpx(geoms: &[CellGeom], rows: usize) -> Vec<i32> {
+    let mut row_h = vec![0i32; rows];
+    for g in geoms {
+        let span = g.row_span.max(1);
+        let per = g.height / span as i32;
+        if per <= 0 {
+            continue;
+        }
+        let end = (g.row + span).min(rows);
+        for slot in row_h.iter_mut().take(end).skip(g.row) {
+            *slot = (*slot).max(per);
+        }
+    }
+    row_h
 }
 
 /// Mark the innermost in-progress paragraph as non-re-emittable (it has structural children).
@@ -514,6 +881,24 @@ fn attr_str(e: &BytesStart, name: &[u8]) -> Option<String> {
     None
 }
 
+fn attr_i32(e: &BytesStart, name: &[u8]) -> Option<i32> {
+    for a in e.attributes().flatten() {
+        if a.key.local_name().as_ref() == name {
+            return std::str::from_utf8(&a.value).ok()?.trim().parse().ok();
+        }
+    }
+    None
+}
+
+fn attr_u64(e: &BytesStart, name: &[u8]) -> Option<u64> {
+    for a in e.attributes().flatten() {
+        if a.key.local_name().as_ref() == name {
+            return std::str::from_utf8(&a.value).ok()?.trim().parse().ok();
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -532,7 +917,7 @@ mod tests {
           </hp:tbl></hp:run></hp:p>
         </hs:sec>"#;
         let mut blocks = Vec::new();
-        parse_section(xml, &mut blocks).unwrap();
+        parse_section(xml, &mut blocks, &Default::default()).unwrap();
         // one paragraph + one table
         assert!(blocks.iter().any(|b| matches!(b, Block::Paragraph(_))));
         let tbl = blocks.iter().find_map(|b| match b {
@@ -586,7 +971,7 @@ mod tests {
     fn captures_source_spans_refs_and_simple_flag() {
         let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p id="100" paraPrIDRef="3" styleIDRef="0"><hp:run charPrIDRef="0"><hp:t>가</hp:t></hp:run><hp:run charPrIDRef="7"><hp:t>나</hp:t></hp:run></hp:p><hp:p id="200" paraPrIDRef="3"><hp:run charPrIDRef="0"><hp:tbl rowCnt="1" colCnt="1"><hp:tr><hp:tc><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:subList><hp:p><hp:run><hp:t>셀</hp:t></hp:run></hp:p></hp:subList></hp:tc></hp:tr></hp:tbl></hp:run></hp:p></hs:sec>"#;
         let mut blocks = Vec::new();
-        parse_section(xml, &mut blocks).unwrap();
+        parse_section(xml, &mut blocks, &Default::default()).unwrap();
         let paras: Vec<&Paragraph> = blocks
             .iter()
             .filter_map(|b| match b {
@@ -642,7 +1027,7 @@ mod tests {
         // A section: one top-level styled paragraph, and a 1×1 table whose cell paragraph is styled.
         let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p paraPrIDRef="3"><hp:run charPrIDRef="5"><hp:t>본문</hp:t></hp:run></hp:p><hp:p paraPrIDRef="0"><hp:run charPrIDRef="0"><hp:tbl rowCnt="1" colCnt="1"><hp:tr><hp:tc><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:subList><hp:p paraPrIDRef="3"><hp:run charPrIDRef="5"><hp:t>셀</hp:t></hp:run></hp:p></hp:subList></hp:tc></hp:tr></hp:tbl></hp:run></hp:p></hs:sec>"#;
         let mut blocks = Vec::new();
-        parse_section(xml, &mut blocks).unwrap();
+        parse_section(xml, &mut blocks, &Default::default()).unwrap();
 
         // The CELL paragraph must have CAPTURED its paraPrIDRef (not just top-level ones).
         let cell_para = blocks.iter().find_map(|b| match b {
@@ -770,5 +1155,132 @@ mod tests {
             distinct_heights.len() > 1,
             "multiple distinct font heights interned: {distinct_heights:?}"
         );
+    }
+
+    /// Batch C (#196): per-`<hp:cellSz>` widths build NON-EQUAL `col_widths` (was: equal split) — the
+    /// root cause of wrong column proportions on the HWPX render.
+    #[test]
+    fn table_col_widths_from_cellsz_are_nonequal() {
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run><hp:tbl rowCnt="1" colCnt="2"><hp:tr><hp:tc><hp:subList><hp:p><hp:run><hp:t>A</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="1000" height="500"/></hp:tc><hp:tc><hp:subList><hp:p><hp:run><hp:t>B</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="1" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="3000" height="800"/></hp:tc></hp:tr></hp:tbl></hp:run></hp:p></hs:sec>"#;
+        let mut blocks = Vec::new();
+        parse_section(xml, &mut blocks, &Default::default()).unwrap();
+        let t = blocks
+            .iter()
+            .find_map(|b| match b {
+                Block::Table(t) => Some(t),
+                _ => None,
+            })
+            .expect("table");
+        assert_eq!(t.col_widths, vec![1000, 3000], "real per-column widths");
+        assert_eq!(
+            t.row_heights,
+            vec![800],
+            "row-height floor from tallest cell"
+        );
+    }
+
+    /// Batch C: a cell resolves its `borderFillIDRef` against the border pool → per-edge borders,
+    /// background shade, and the `has_border` flag (the SAME fields the .hwp lift fills).
+    #[test]
+    fn cell_resolves_borders_and_shade_from_pool() {
+        let edge = CellEdge {
+            color: Color::from_hex("#000000").unwrap(),
+            style: LineStyle::Solid,
+            width_px: 0.5,
+        };
+        let mut borders = std::collections::BTreeMap::new();
+        borders.insert(
+            5u64,
+            BorderFillDef {
+                borders: [Some(edge); 4],
+                shade: Some(Color::from_hex("#D8D8D8").unwrap()),
+                diagonal: None,
+                has_border: true,
+            },
+        );
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run><hp:tbl rowCnt="1" colCnt="1" borderFillIDRef="2"><hp:tr><hp:tc borderFillIDRef="5"><hp:subList><hp:p><hp:run><hp:t>A</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="1000" height="500"/></hp:tc></hp:tr></hp:tbl></hp:run></hp:p></hs:sec>"#;
+        let mut blocks = Vec::new();
+        parse_section(xml, &mut blocks, &borders).unwrap();
+        let t = blocks
+            .iter()
+            .find_map(|b| match b {
+                Block::Table(t) => Some(t),
+                _ => None,
+            })
+            .expect("table");
+        let c = &t.cells[0];
+        assert!(
+            c.has_edge_borders(),
+            "per-edge borders lifted from the pool"
+        );
+        assert!(c.has_border);
+        assert_eq!(c.shade_color, Some(Color::from_hex("#D8D8D8").unwrap()));
+    }
+
+    /// Batch D: an `<hp:pic>` produces an `Inline::Image` carrying the binary ref + display size.
+    #[test]
+    fn pic_parses_into_inline_image() {
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run><hp:pic><hp:sz width="17340" height="12960"/><hc:img binaryItemIDRef="image1"/></hp:pic><hp:t></hp:t></hp:run></hp:p></hs:sec>"#;
+        let mut blocks = Vec::new();
+        parse_section(xml, &mut blocks, &Default::default()).unwrap();
+        let img = blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Paragraph(p) => Some(p),
+                _ => None,
+            })
+            .flat_map(|p| &p.runs)
+            .flat_map(|r| &r.content)
+            .find_map(|i| match i {
+                Inline::Image(im) => Some(im),
+                _ => None,
+            })
+            .expect("pic → Inline::Image");
+        assert_eq!(img.bin_ref, "image1");
+        assert_eq!((img.width, img.height), (17340, 12960));
+    }
+
+    /// Batch D end-to-end: parsing a package resolves a `<hp:pic>`'s `binaryItemIDRef` → its embedded
+    /// bytes in `doc.bin_data` (via the `content.hpf` `<opf:item>` manifest), so the renderer can
+    /// embed the real photo. Round-trip moat: serializing the UNEDITED doc re-injects NO duplicate
+    /// image part (the source part rides along verbatim).
+    #[test]
+    fn pic_resolves_bin_data_end_to_end() {
+        let png: &[u8] = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR";
+        let section = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p id="1" paraPrIDRef="0"><hp:run charPrIDRef="0"><hp:pic><hp:sz width="500" height="400"/><hc:img binaryItemIDRef="image1"/></hp:pic><hp:t></hp:t></hp:run></hp:p></hs:sec>"#;
+        let hpf = r#"<opf:package xmlns:opf="opf"><opf:manifest><opf:item id="header" href="Contents/header.xml" media-type="application/xml"/><opf:item id="image1" href="BinData/image1.png" media-type="image/png" isEmbeded="1"/></opf:manifest></opf:package>"#;
+        let bytes = build_test_hwpx(&[
+            ("mimetype", b"application/hwp+zip"),
+            ("Contents/header.xml", b"<hh:head></hh:head>"),
+            ("Contents/section0.xml", section.as_bytes()),
+            ("Contents/content.hpf", hpf.as_bytes()),
+            ("BinData/image1.png", png),
+        ]);
+        let doc = parse_semantic(&bytes).expect("parse test hwpx");
+        assert_eq!(doc.bin_data.len(), 1, "one embedded image resolved");
+        assert_eq!(doc.bin_data[0].bin_ref, "image1");
+        assert_eq!(doc.bin_data[0].kind, "png");
+        assert_eq!(doc.bin_data[0].bytes, png);
+
+        // Round-trip: an UNEDITED image doc re-serializes without duplicating the BinData part.
+        let out = crate::serialize::serialize(&doc).expect("serialize");
+        let mut z = zip::ZipArchive::new(std::io::Cursor::new(out)).unwrap();
+        let img_parts = (0..z.len())
+            .filter(|&i| z.by_index(i).unwrap().name().contains("image1.png"))
+            .count();
+        assert_eq!(img_parts, 1, "no duplicate BinData part on round-trip");
+    }
+
+    /// Build a minimal in-memory HWPX (ZIP) from `(name, bytes)` parts — a test fixture for the
+    /// package-level parse paths.
+    fn build_test_hwpx(parts: &[(&str, &[u8])]) -> Vec<u8> {
+        use zip::write::{SimpleFileOptions, ZipWriter};
+        let mut zw = ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let opts = SimpleFileOptions::default();
+        for (name, data) in parts {
+            zw.start_file(*name, opts).unwrap();
+            std::io::Write::write_all(&mut zw, data).unwrap();
+        }
+        zw.finish().unwrap().into_inner()
     }
 }

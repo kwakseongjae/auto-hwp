@@ -43,21 +43,24 @@ fn showcase_renders_to_svg_with_text_and_rects() {
         );
     }
 
-    // Structural boxes: line text-boxes + the table's cell borders are stroked <rect>s.
-    let rects = all.matches("<rect").count();
+    // Structural strokes: since issue #196 Batch C the HWPX parser resolves each cell's real
+    // borderFill, so the showcase table's cells (borderFill id=3, all-SOLID) render their borders
+    // PER-EDGE as stroked <line>s — the SAME faithful path the .hwp lift uses — rather than one
+    // uniform <rect> box per cell. Assert both the per-edge border strokes and the total structural
+    // stroke count (lines + any shading/legacy boxes).
+    let strokes = all.matches("<line").count() + all.matches("<rect").count();
     assert!(
-        rects > 5,
-        "expected many structural rects (line boxes + table cells), got {rects}"
+        strokes > 5,
+        "expected many structural strokes (per-edge cell borders + boxes), got {strokes}"
     );
     assert!(
         all.contains("stroke="),
         "stroked outlines (borders) emitted"
     );
-
-    // The showcase has a table → its cell borders are stroked rects (fill=\"none\").
+    // The showcase's table cells have visible borders → drawn per-edge as stroked <line>s.
     assert!(
-        all.contains("fill=\"none\""),
-        "stroked (un-filled) boxes present (cell/line borders)"
+        all.contains("<line"),
+        "per-edge cell borders emitted as stroked <line>s"
     );
 }
 

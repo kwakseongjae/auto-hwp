@@ -42,6 +42,27 @@ pub struct SemanticDoc {
 pub struct HeaderPools {
     pub char: BTreeMap<u64, CharShape>,
     pub para: BTreeMap<u64, ParaShape>,
+    /// `<hh:borderFill>` pool, keyed by XML id (issue #196 Batch C) — a table/cell's
+    /// `borderFillIDRef` resolves against this to its per-edge borders, background shade, and
+    /// diagonal (the HWPX twin of the .hwp lift's `cell_borders`/`cell_shade`/`cell_diagonal`).
+    pub border: BTreeMap<u64, BorderFillDef>,
+}
+
+/// A parsed `<hh:borderFill>` pool entry (issue #196 Batch C) — the resolved values a table/cell
+/// applies when it references this fill by `borderFillIDRef`. Mirrors what the .hwp lift derives from
+/// the binary borderFill so the SHARED renderer draws HWPX tables with the SAME fidelity as HWP.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BorderFillDef {
+    /// Per-edge borders `[left, right, top, bottom]`. All four are `Some` when the fill resolves
+    /// (a 선없음 edge is `Some(LineStyle::None)`), so a consuming cell's `has_edge_borders()` is true
+    /// and the renderer draws each edge individually (mirrors the .hwp lift's `cell_borders`).
+    pub borders: [Option<CellEdge>; 4],
+    /// Solid background shade, or `None` for an unfilled / white / black cell.
+    pub shade: Option<crate::types::Color>,
+    /// Diagonal line, or `None` when neither slash direction is set.
+    pub diagonal: Option<CellDiagonal>,
+    /// True if ANY edge draws a visible line (a `line_type` other than 선없음).
+    pub has_border: bool,
 }
 
 impl SemanticDoc {
@@ -340,6 +361,13 @@ pub struct Table {
     /// serializer (issue 054, F2): `<hp:cellSz>` re-emits these stored heights so a reopened
     /// conversion lifts back the SAME floors (round-trip pagination stability).
     pub row_heights: Vec<HwpUnit>,
+    /// True once an OP changed `col_widths`/`row_heights` (표 열너비/행높이 편집) — distinct from the
+    /// geometry the HWPX parser now fills from the original `<hp:cellSz>` (issue #196 Batch C). The
+    /// HWPX serializer gates its per-cell in-place surgery on `!geometry_edited`: a table whose geometry
+    /// is the ORIGINAL (parse-populated) still re-emits untouched sibling cells byte-verbatim, while a
+    /// genuinely resized table falls back to a whole-table re-emit (which applies the new geometry).
+    /// Parsed/lifted tables leave this false; only [`crate`]-level geometry ops set it.
+    pub geometry_edited: bool,
     /// Outer vertical margins (바깥 여백, HWPUNIT) above/below the table object — the gap HWP keeps
     /// between a table and its neighbours. Lifted from the binary; 0 when unknown. Without these,
     /// consecutive tables abut with no breathing room (the "tables stuck together" artifact).

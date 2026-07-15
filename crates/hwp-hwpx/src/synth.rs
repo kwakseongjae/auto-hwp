@@ -16,13 +16,22 @@ pub fn default_char_pr(header: &str) -> Option<&str> {
     element(header, "<hh:charPr ", "</hh:charPr>")
 }
 
-/// Parse the existing `charPr`/`paraPr` pools from header.xml into typed values keyed by XML id
-/// (issue #003 P1 — the inverse of synthesis; lets the editor read existing formatting).
+/// Parse the existing `charPr`/`paraPr`/`borderFill` pools from header.xml into typed values keyed by
+/// XML id (issue #003 P1 + #196 Batch C/D — the inverse of synthesis; lets the editor read existing
+/// formatting and layout/render resolve table borders/shading + char fonts).
 pub fn parse_header_pools(header: &str) -> HeaderPools {
     let mut pools = HeaderPools::default();
+    // D2 (#196): the Hangul `<hh:fontface>` pool (id → face name). A charPr's `<hh:fontRef hangul>`
+    // resolves against this to a family name so serif 명조 vs gothic renders correctly (at minimum,
+    // text no longer collapses to one family). Hangul is the primary script for Korean documents.
+    let hangul_fonts = parse_fontface_lang(header, "HANGUL");
     each_element(header, "<hh:charPr ", "</hh:charPr>", |elem| {
         if let Some(id) = first_attr(elem, "id").and_then(|v| v.parse().ok()) {
-            pools.char.insert(id, parse_char_pr(elem));
+            let mut cs = parse_char_pr(elem);
+            if let Some(fam) = fontref_family(elem, &hangul_fonts) {
+                cs.font_family = Some(fam);
+            }
+            pools.char.insert(id, cs);
         }
     });
     each_element(header, "<hh:paraPr ", "</hh:paraPr>", |elem| {
@@ -30,7 +39,206 @@ pub fn parse_header_pools(header: &str) -> HeaderPools {
             pools.para.insert(id, parse_para_pr(elem));
         }
     });
+    // C2 (#196): the borderFill pool — every table/cell's `borderFillIDRef` resolves here to its
+    // real per-edge borders, background shade, and diagonal. The trailing space in the open delimiter
+    // avoids matching the `<hh:borderFills>` container.
+    each_element(header, "<hh:borderFill ", "</hh:borderFill>", |elem| {
+        if let Some(id) = first_attr(elem, "id").and_then(|v| v.parse().ok()) {
+            pools.border.insert(id, parse_border_fill(elem));
+        }
+    });
     pools
+}
+
+/// Parse one `<hh:fontface lang="{lang}">` pool into `id → face name`. Reads each `<hh:font>`'s open
+/// tag (attrs live there regardless of a `<hh:typeInfo>` child or self-closing form).
+fn parse_fontface_lang(header: &str, lang: &str) -> std::collections::BTreeMap<u64, String> {
+    let mut map = std::collections::BTreeMap::new();
+    let open = format!("<hh:fontface lang=\"{lang}\"");
+    let Some(fs) = header.find(&open) else {
+        return map;
+    };
+    let Some(rel) = header[fs..].find("</hh:fontface>") else {
+        return map;
+    };
+    let seg = &header[fs..fs + rel];
+    let mut idx = 0;
+    while let Some(p) = seg[idx..].find("<hh:font ") {
+        let start = idx + p;
+        let Some(gt) = seg[start..].find('>') else {
+            break;
+        };
+        let tag = &seg[start..start + gt];
+        idx = start + gt + 1;
+        if let (Some(id), Some(face)) = (
+            first_attr(tag, "id").and_then(|v| v.parse().ok()),
+            first_attr(tag, "face"),
+        ) {
+            if !face.is_empty() {
+                map.insert(id, face.to_string());
+            }
+        }
+    }
+    map
+}
+
+/// Resolve a charPr's `<hh:fontRef hangul="N">` id → its face name via the Hangul fontface pool.
+fn fontref_family(
+    charpr: &str,
+    hangul_fonts: &std::collections::BTreeMap<u64, String>,
+) -> Option<String> {
+    let fr = charpr.find("<hh:fontRef")?;
+    let rel = charpr[fr..].find('>')?;
+    let seg = &charpr[fr..fr + rel];
+    let id: u64 = first_attr(seg, "hangul")?.parse().ok()?;
+    hangul_fonts.get(&id).cloned()
+}
+
+/// Inverse of the borderFill synthesizer: read a `<hh:borderFill>` element into a [`BorderFillDef`]
+/// (issue #196 Batch C). Mirrors the .hwp lift's `cell_borders`/`cell_shade`/`cell_diagonal` so a
+/// resolved HWPX table/cell renders the SAME as its HWP twin through the shared renderer.
+pub fn parse_border_fill(elem: &str) -> BorderFillDef {
+    let mut def = BorderFillDef::default();
+    const EDGES: [&str; 4] = ["leftBorder", "rightBorder", "topBorder", "bottomBorder"];
+    for (i, name) in EDGES.iter().enumerate() {
+        if let Some(edge) = parse_border_edge(elem, name) {
+            if edge.style != LineStyle::None {
+                def.has_border = true;
+            }
+            def.borders[i] = Some(edge);
+        }
+    }
+    def.shade = parse_fill_shade(elem);
+    def.diagonal = parse_diagonal(elem);
+    def
+}
+
+/// Read one `<hh:{child} type=.. width=.. color=..>` border edge → a [`CellEdge`]. Absent → `None`.
+fn parse_border_edge(elem: &str, child: &str) -> Option<CellEdge> {
+    let open = format!("<hh:{child}");
+    let p = elem.find(&open)?;
+    let rel = elem[p..].find("/>")?;
+    let seg = &elem[p..p + rel];
+    let ty = first_attr(seg, "type").unwrap_or("NONE");
+    let color = first_attr(seg, "color")
+        .and_then(Color::from_hex)
+        .unwrap_or_default();
+    Some(CellEdge {
+        color: Color { a: 255, ..color },
+        style: line_style_from_token(ty),
+        width_px: border_width_from_token(first_attr(seg, "width").unwrap_or("0.1 mm")),
+    })
+}
+
+/// The cell/table background from `<hc:fillBrush><hc:winBrush faceColor=..>`. `None` for an unfilled
+/// (`faceColor="none"`), white, or pure-black (unset) cell — mirrors the .hwp lift's `cell_shade`.
+fn parse_fill_shade(elem: &str) -> Option<Color> {
+    let p = elem.find("<hc:winBrush")?;
+    let rel = elem[p..].find("/>").or_else(|| elem[p..].find('>'))?;
+    let seg = &elem[p..p + rel];
+    let face = first_attr(seg, "faceColor")?;
+    if face.eq_ignore_ascii_case("none") {
+        return None;
+    }
+    let c = Color::from_hex(face)?;
+    // White = default background, pure black = unset → no signal (same skip as the .hwp lift).
+    if (c.r, c.g, c.b) == (255, 255, 255) || (c.r, c.g, c.b) == (0, 0, 0) {
+        return None;
+    }
+    Some(Color { a: 255, ..c })
+}
+
+/// The cell diagonal from the `<hh:slash>` / `<hh:backSlash>` directions + the `<hh:diagonal>` line
+/// style. A diagonal draws only when a direction is set AND the diagonal line type is non-NONE
+/// (mirrors the .hwp lift's `diagonal_kind` two-stage gate). Both directions → the X (`Cross`).
+fn parse_diagonal(elem: &str) -> Option<CellDiagonal> {
+    let slash = tag_type_non_none(elem, "<hh:slash");
+    let backslash = tag_type_non_none(elem, "<hh:backSlash");
+    if !slash && !backslash {
+        return None;
+    }
+    let p = elem.find("<hh:diagonal")?;
+    let rel = elem[p..].find("/>")?;
+    let seg = &elem[p..p + rel];
+    let ty = first_attr(seg, "type").unwrap_or("NONE");
+    if ty == "NONE" {
+        return None; // direction bit set but no diagonal line element → Hancom draws nothing
+    }
+    let color = first_attr(seg, "color")
+        .and_then(Color::from_hex)
+        .unwrap_or_default();
+    Some(CellDiagonal {
+        kind: match (slash, backslash) {
+            (true, true) => DiagonalKind::Cross,
+            (false, true) => DiagonalKind::BackSlash,
+            _ => DiagonalKind::Slash,
+        },
+        color: Color { a: 255, ..color },
+        width_px: border_width_from_token(first_attr(seg, "width").unwrap_or("0.1 mm")),
+    })
+}
+
+/// True if the `<hh:{child} type=..>` element exists with a non-`NONE` type (a set diagonal direction).
+fn tag_type_non_none(elem: &str, open: &str) -> bool {
+    let Some(p) = elem.find(open) else {
+        return false;
+    };
+    let Some(rel) = elem[p..].find('>') else {
+        return false;
+    };
+    first_attr(&elem[p..p + rel], "type").is_some_and(|t| t != "NONE")
+}
+
+/// OWPML border `type` token → renderable [`LineStyle`] (inverse of [`border_type_token`], widened to
+/// the full token set the .hwp lift's `lift_line_style` collapses: dash family → Dashed, dot/circle →
+/// Dotted, double/triple family → Double, everything else → Solid).
+fn line_style_from_token(ty: &str) -> LineStyle {
+    match ty {
+        "NONE" => LineStyle::None,
+        "DASH" | "LONG_DASH" | "DASH_DOT" | "DASH_DOT_DOT" => LineStyle::Dashed,
+        "DOT" | "CIRCLE" => LineStyle::Dotted,
+        "DOUBLE_SLIM" | "DOUBLE" | "SLIM_THICK" | "THICK_SLIM" | "SLIM_THICK_SLIM" => {
+            LineStyle::Double
+        }
+        _ => LineStyle::Solid,
+    }
+}
+
+/// OWPML border `width` mm-token → device px (inverse of [`border_width_token`]; same 표 28 table +
+/// 0.5px hairline floor the .hwp lift's `border_width_to_px` produces, so stroke weights match).
+fn border_width_from_token(mm: &str) -> f64 {
+    const HAIRLINE_MIN_PX: f64 = 0.5;
+    const WIDTHS: [(&str, f64); 16] = [
+        ("0.1 mm", 0.4),
+        ("0.12 mm", 0.5),
+        ("0.15 mm", 0.6),
+        ("0.2 mm", 0.75),
+        ("0.25 mm", 1.0),
+        ("0.3 mm", 1.1),
+        ("0.4 mm", 1.5),
+        ("0.5 mm", 1.9),
+        ("0.6 mm", 2.3),
+        ("0.7 mm", 2.6),
+        ("1.0 mm", 3.8),
+        ("1.5 mm", 5.7),
+        ("2.0 mm", 7.6),
+        ("3.0 mm", 11.3),
+        ("4.0 mm", 15.1),
+        ("5.0 mm", 18.9),
+    ];
+    let t = mm.trim();
+    for (tok, px) in WIDTHS {
+        if tok == t {
+            return px.max(HAIRLINE_MIN_PX);
+        }
+    }
+    // Unknown token → parse the mm number (~3.78 px/mm at 96dpi), floored to the hairline.
+    t.trim_end_matches("mm")
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .map(|v| (v * 3.78).max(HAIRLINE_MIN_PX))
+        .unwrap_or(HAIRLINE_MIN_PX)
 }
 
 /// Call `f` on each `open … close` element in `s` (non-nested pools).
@@ -1023,6 +1231,80 @@ mod tests {
         assert!(
             sec0.contains("<hp:secPr"),
             "section0 stub carries the mandatory secPr"
+        );
+    }
+
+    /// Batch C (#196): a shaded, all-solid-bordered borderFill parses into per-edge borders + the
+    /// background shade; its NONE-direction slashes yield no diagonal.
+    #[test]
+    fn parse_border_fill_reads_edges_shade_no_diagonal() {
+        let bf = r##"<hh:borderFill id="7" threeD="0" shadow="0"><hh:slash type="NONE" Crooked="0" isCounter="0"/><hh:backSlash type="NONE" Crooked="0" isCounter="0"/><hh:leftBorder type="SOLID" width="0.12 mm" color="#000000"/><hh:rightBorder type="SOLID" width="0.12 mm" color="#000000"/><hh:topBorder type="SOLID" width="0.12 mm" color="#000000"/><hh:bottomBorder type="SOLID" width="0.12 mm" color="#000000"/><hh:diagonal type="SOLID" width="0.1 mm" color="#000000"/><hc:fillBrush><hc:winBrush faceColor="#D8D8D8" hatchColor="#999999" alpha="0"/></hc:fillBrush></hh:borderFill>"##;
+        let def = parse_border_fill(bf);
+        assert!(def.borders.iter().all(Option::is_some), "all 4 edges set");
+        assert!(def.has_border, "solid edges → visible border");
+        assert_eq!(def.borders[0].unwrap().style, LineStyle::Solid);
+        assert_eq!(def.shade, Some(Color::from_hex("#D8D8D8").unwrap()));
+        assert!(
+            def.diagonal.is_none(),
+            "NONE-direction slashes → no diagonal"
+        );
+    }
+
+    /// Batch C: a borderless white borderFill → all edges `Some(LineStyle::None)`, no shade, no border.
+    #[test]
+    fn parse_border_fill_borderless_none() {
+        let bf = r##"<hh:borderFill id="1"><hh:slash type="NONE"/><hh:backSlash type="NONE"/><hh:leftBorder type="NONE" width="0.1 mm" color="#000000"/><hh:rightBorder type="NONE" width="0.1 mm" color="#000000"/><hh:topBorder type="NONE" width="0.1 mm" color="#000000"/><hh:bottomBorder type="NONE" width="0.1 mm" color="#000000"/><hh:diagonal type="NONE" width="0.1 mm" color="#000000"/><hc:fillBrush><hc:winBrush faceColor="none" hatchColor="#999999" alpha="0"/></hc:fillBrush></hh:borderFill>"##;
+        let def = parse_border_fill(bf);
+        assert!(def.borders.iter().all(Option::is_some));
+        assert_eq!(def.borders[0].unwrap().style, LineStyle::None);
+        assert!(!def.has_border, "all-NONE edges → no visible border");
+        assert!(def.shade.is_none(), "faceColor none → no shade");
+    }
+
+    /// Batch C: a set slash direction + a real diagonal line → a `Slash` diagonal.
+    #[test]
+    fn parse_border_fill_diagonal_slash() {
+        let bf = r##"<hh:borderFill id="9"><hh:slash type="SOLID" Crooked="0" isCounter="0"/><hh:backSlash type="NONE"/><hh:leftBorder type="SOLID" width="0.12 mm" color="#000000"/><hh:rightBorder type="SOLID" width="0.12 mm" color="#000000"/><hh:topBorder type="SOLID" width="0.12 mm" color="#000000"/><hh:bottomBorder type="SOLID" width="0.12 mm" color="#000000"/><hh:diagonal type="SOLID" width="0.1 mm" color="#FF0000"/></hh:borderFill>"##;
+        let d = parse_border_fill(bf).diagonal.expect("diagonal present");
+        assert_eq!(d.kind, DiagonalKind::Slash);
+        assert_eq!(d.color, Color::from_hex("#FF0000").unwrap());
+    }
+
+    /// Batch D (#196): a charPr's `<hh:fontRef hangul>` resolves to the Hangul fontface's face name,
+    /// so `CharShape::font_family` carries the real family (serif 명조 vs gothic).
+    #[test]
+    fn parse_header_pools_resolves_font_family() {
+        let header = concat!(
+            r#"<hh:fontfaces itemCnt="7"><hh:fontface lang="HANGUL" fontCnt="2">"#,
+            r#"<hh:font id="0" face="맑은 고딕" type="TTF" isEmbedded="0"><hh:typeInfo/></hh:font>"#,
+            r#"<hh:font id="1" face="한컴바탕" type="TTF" isEmbedded="0"><hh:typeInfo/></hh:font>"#,
+            r#"</hh:fontface></hh:fontfaces>"#,
+            r#"<hh:charProperties itemCnt="2">"#,
+            r##"<hh:charPr id="0" height="1000" textColor="#000000" shadeColor="none"><hh:fontRef hangul="0" latin="0" hanja="0" japanese="0" other="0" symbol="0" user="0"/></hh:charPr>"##,
+            r##"<hh:charPr id="1" height="1000" textColor="#000000" shadeColor="none"><hh:fontRef hangul="1" latin="0" hanja="0" japanese="0" other="0" symbol="0" user="0"/></hh:charPr>"##,
+            r#"</hh:charProperties>"#,
+        );
+        let pools = parse_header_pools(header);
+        assert_eq!(pools.char[&0].font_family.as_deref(), Some("맑은 고딕"));
+        assert_eq!(pools.char[&1].font_family.as_deref(), Some("한컴바탕"));
+    }
+
+    /// Batch C: the borderFill pool parses off a real header (dedup/id-keyed).
+    #[test]
+    fn parse_header_pools_reads_border_pool() {
+        let header = concat!(
+            r#"<hh:borderFills itemCnt="2">"#,
+            r##"<hh:borderFill id="1"><hh:slash type="NONE"/><hh:backSlash type="NONE"/><hh:leftBorder type="NONE" width="0.1 mm" color="#000000"/><hh:rightBorder type="NONE" width="0.1 mm" color="#000000"/><hh:topBorder type="NONE" width="0.1 mm" color="#000000"/><hh:bottomBorder type="NONE" width="0.1 mm" color="#000000"/><hh:diagonal type="NONE" width="0.1 mm" color="#000000"/></hh:borderFill>"##,
+            r##"<hh:borderFill id="2"><hh:slash type="NONE"/><hh:backSlash type="NONE"/><hh:leftBorder type="SOLID" width="0.12 mm" color="#000000"/><hh:rightBorder type="SOLID" width="0.12 mm" color="#000000"/><hh:topBorder type="SOLID" width="0.12 mm" color="#000000"/><hh:bottomBorder type="SOLID" width="0.12 mm" color="#000000"/><hh:diagonal type="NONE" width="0.1 mm" color="#000000"/><hc:fillBrush><hc:winBrush faceColor="#F2F2F2" hatchColor="#999999" alpha="0"/></hc:fillBrush></hh:borderFill>"##,
+            r#"</hh:borderFills>"#,
+        );
+        let pools = parse_header_pools(header);
+        assert_eq!(pools.border.len(), 2);
+        assert!(!pools.border[&1].has_border);
+        assert!(pools.border[&2].has_border);
+        assert_eq!(
+            pools.border[&2].shade,
+            Some(Color::from_hex("#F2F2F2").unwrap())
         );
     }
 }

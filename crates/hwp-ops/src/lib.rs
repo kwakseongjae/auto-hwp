@@ -1769,6 +1769,7 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                 return Err(Error::Other("SetTableColWidths: widths must be positive".into()));
             }
             t.col_widths = widths.clone();
+            t.geometry_edited = true;
             t.dirty.mark();
             sec.dirty.mark();
             Ok(())
@@ -1791,6 +1792,7 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                 return Err(Error::Other("SetTableRowHeights: heights must be non-negative".into()));
             }
             t.row_heights = heights.clone();
+            t.geometry_edited = true;
             t.dirty.mark();
             sec.dirty.mark();
             Ok(())

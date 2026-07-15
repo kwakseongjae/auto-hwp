@@ -91,7 +91,15 @@ pub fn serialize(doc: &SemanticDoc) -> Result<Vec<u8>> {
     let new_section_items: Vec<(String, String)> = (section_names.len()..doc.sections.len())
         .map(|k| (format!("section{k}"), format!("Contents/section{k}.xml")))
         .collect();
-    let image_items = collect_image_items(doc);
+    // Only inject images the seed package LACKS. HWPX-in pictures (Batch D #196) are now parsed into
+    // `doc.bin_data`, but their BinData parts already exist in the source zip and ride along verbatim
+    // — re-injecting them would duplicate the part + its `content.hpf` manifest entry. Filtering here
+    // keeps the HWPX-in round-trip byte-identical; a lifted .hwp's images (absent from the Skeleton)
+    // still get injected.
+    let image_items: Vec<ImageItem> = collect_image_items(doc)
+        .into_iter()
+        .filter(|img| !names.iter().any(|n| n.eq_ignore_ascii_case(&img.href)))
+        .collect();
     let content_hpf_name = names
         .iter()
         .find(|n| n.to_ascii_lowercase().ends_with("content.hpf"))
@@ -1013,14 +1021,15 @@ fn build_table_patch(
     let bf = bf_owned.as_str();
 
     // STRUCTURE CHECK — per-cell surgery is only sound when the table's shape is untouched:
-    // row/col counts still match the original XML, no op-set widths/heights (the HWPX parser
-    // leaves both empty), at least one dirty cell, and every dirty cell still addressable by its
-    // original `<hp:tc>` span inside this table.
+    // row/col counts still match the original XML, no op EDITED the widths/heights (issue #196 Batch
+    // C: the parser now fills geometry from the original `<hp:cellSz>`, so we gate on the explicit
+    // `geometry_edited` flag instead of "widths/heights empty"), at least one dirty cell, and every
+    // dirty cell still addressable by its original `<hp:tc>` span inside this table.
     let same_rows =
         first_attr(open_tag, "rowCnt").and_then(|v| v.trim().parse::<usize>().ok()) == Some(t.rows);
     let same_cols =
         first_attr(open_tag, "colCnt").and_then(|v| v.trim().parse::<usize>().ok()) == Some(t.cols);
-    let geometry_untouched = t.col_widths.is_empty() && t.row_heights.is_empty();
+    let geometry_untouched = !t.geometry_edited;
     let dirty_cells: Vec<&Cell> = t.cells.iter().filter(|c| c.dirty.is_dirty()).collect();
     let cell_spans_ok = !dirty_cells.is_empty()
         && dirty_cells.iter().all(|c| {
