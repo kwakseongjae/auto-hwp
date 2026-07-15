@@ -1209,6 +1209,18 @@ pub enum Intent {
         #[serde(default)]
         para: hwp_ops::ParaSpec,
     },
+    /// AI-generated data chart (issue 062-follow) — insert a bar/pie/line chart built from `chart`
+    /// (type + categories + series, optional title/size) AT block `index` of `section` as ONE undo unit
+    /// (the `InsertChartAt` op). The engine draws it to an `Inline::Chart` that rides the issue-062
+    /// `PaintOp::Image.svg` render channel (own-render + HTML), reserving a fixed box in place_doc /
+    /// NaiveLayout lockstep. `index` anchors like `InsertTableAt`: `Some(i)` = at block `i` (`i == len`
+    /// appends, past-end errors), `None` (absent/null) = the section END. `chart` is [`hwp_ops::ChartSpec`]
+    /// (`deny_unknown_fields` — unknown chart keys are rejected, invariant 7).
+    InsertChartAt {
+        section: usize,
+        index: Option<usize>,
+        chart: hwp_ops::ChartSpec,
+    },
     /// Cell-addressed caret, hit half (issue 053 — CARET-GAP §5 P1): resolve a PAGE-LOCAL own-render
     /// px click to the TABLE-CELL text caret target under it — `{section, block, row, col, para,
     /// offset, para_len, caret}` (row/col MODEL-GLOBAL; `para` = paragraph ordinal within the cell,
@@ -1914,6 +1926,26 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }
+        Intent::InsertChartAt {
+            section,
+            index,
+            chart,
+        } => {
+            // `None` → the section END (op's `index == len` append semantics); `Some(i)` passes through.
+            let sess = session.doc.as_mut().ok_or("no document open")?;
+            let index = match index {
+                Some(i) => i,
+                None => resolve_section_end(sess, section)?,
+            };
+            sess.do_op(&hwp_ops::Op::InsertChartAt {
+                section,
+                index,
+                chart,
+            })
+            .map_err(|e| e.to_string())?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
     }
 }
 
@@ -2276,6 +2308,83 @@ mod tests {
             _ => panic!("expected Redone"),
         }
         assert!(text(&mut s).contains("인텐트 레인"));
+    }
+
+    /// Issue 062-follow: the AI-generated chart lands through the SAME Intent-JSON lane the web/wasm
+    /// shell applies (`apply_intent_json`) — deserialize → `Op::InsertChartAt` → an `Inline::Chart`
+    /// block. Also pins the invariant-7 guards: an unknown chart field is a hard DESERIALIZE error
+    /// (`deny_unknown_fields`), and an unknown chart TYPE is an honest APPLY error (no mutation).
+    #[test]
+    fn insert_chart_at_intent_json_lane_inserts_a_chart_block() {
+        use hwp_model::document::{Block, Inline};
+        let mut s = Session::default();
+        apply_intent(&mut s, Intent::Open { path: showcase() }).unwrap();
+
+        let charts = |s: &Session| -> usize {
+            s.doc
+                .as_ref()
+                .unwrap()
+                .doc()
+                .sections
+                .iter()
+                .flat_map(|sec| &sec.blocks)
+                .filter_map(|b| match b {
+                    Block::Paragraph(p) => Some(p),
+                    _ => None,
+                })
+                .flat_map(|p| &p.runs)
+                .flat_map(|r| &r.content)
+                .filter(|i| matches!(i, Inline::Chart(_)))
+                .count()
+        };
+        let before = charts(&s);
+
+        // The exact Intent JSON envelope a shell applies (index:null = the section END).
+        let env = json!({
+            "intent": "InsertChartAt",
+            "section": 0,
+            "index": null,
+            "chart": {
+                "type": "bar",
+                "title": "연도별 매출",
+                "categories": ["2024", "2025", "2026"],
+                "series": [{ "name": "매출", "values": [10, 18, 30] }]
+            }
+        });
+        match apply_intent_json(&mut s, &env).unwrap() {
+            Outcome::Edited { .. } => {}
+            _ => panic!("expected Edited"),
+        }
+        assert_eq!(
+            charts(&s),
+            before + 1,
+            "one chart inserted via the Intent JSON lane"
+        );
+
+        // deny_unknown_fields on ChartSpec — a misspelled chart key is a hard deserialize error.
+        let bad = json!({
+            "intent": "InsertChartAt", "section": 0, "index": null,
+            "chart": { "type": "bar", "categories": ["A"], "series": [{"name":"s","values":[1]}], "colour": "red" }
+        });
+        assert!(
+            deserialize_intent(&bad).is_err(),
+            "unknown chart field rejected"
+        );
+
+        // Unknown chart type: deserialize OK, engine validation rejects on apply (no mutation).
+        let bad_type = json!({
+            "intent": "InsertChartAt", "section": 0, "index": null,
+            "chart": { "type": "donut", "categories": ["A"], "series": [{"name":"s","values":[1]}] }
+        });
+        assert!(
+            apply_intent_json(&mut s, &bad_type).is_err(),
+            "unknown chart type rejected on apply"
+        );
+        assert_eq!(
+            charts(&s),
+            before + 1,
+            "the rejected op did not add a chart"
+        );
     }
 
     #[test]

@@ -11,6 +11,12 @@ use hwp_model::prelude::*;
 /// caller hands to [`EditSession::do_ops`] (replace-all = one undo unit). See [`find`].
 pub mod find;
 
+/// AI-generated data charts (issue 062-follow): a PURE-Rust SVG builder for bar/pie/line charts.
+/// It emits the SAME `<g>`-embeddable fragment shape (own-render px scale) that rhwp's OOXML chart
+/// renderer produces, so an inserted chart rides the existing `ChartRef`/`PaintOp::Image.svg` render
+/// channel with no new render/PDF plumbing. Consumed by `Op::InsertChartAt`. See [`chart_gen`].
+pub mod chart_gen;
+
 /// Schema version of the op vocabulary (UI and AI/MCP must agree).
 pub const OP_SCHEMA_VERSION: u32 = 1;
 
@@ -152,6 +158,17 @@ pub enum Op {
         kind: String,
         width: HwpUnit,
         height: HwpUnit,
+    },
+    /// Insert an AI-GENERATED data chart (bar/pie/line) at block `index` (issue 062-follow). The
+    /// [`ChartSpec`] (type + categories + series, optional title/size) is drawn to a `<g>`-embeddable
+    /// SVG fragment ([`chart_gen`]) and stored as a fresh paragraph holding an `Inline::Chart` — the
+    /// SAME `ChartRef`/`PaintOp::Image.svg` channel a parsed OOXML chart uses (issue 062-7), so
+    /// place_doc/NaiveLayout reserve the fixed box in lockstep and the own-render/HTML surfaces draw it
+    /// with no new plumbing. `index == len` appends (past-end is an honest error).
+    InsertChartAt {
+        section: usize,
+        index: usize,
+        chart: ChartSpec,
     },
     /// Delete the block at `index` in `section`.
     DeleteBlock {
@@ -379,6 +396,43 @@ impl Default for CellSpec {
             shade: None,
         }
     }
+}
+
+/// The data + presentation spec carried inside the `InsertChartAt` Intent/Op (AI-generated data chart,
+/// issue 062-follow). The engine draws it to a `<g>` SVG fragment ([`chart_gen`]) reserved in a fixed
+/// box, riding the issue-062 `ChartRef`/`PaintOp::Image.svg` render channel.
+///
+/// `Deserialize`: mirrors `CellSpec`/`RunSpec` — the wire field is `type` (renamed to `kind`, a Rust
+/// keyword); `deny_unknown_fields` rejects a misspelled key (invariant 7 — additive + explicit unknown
+/// rejection). `title`/`width`/`height` are optional (`#[serde(default)]`); `categories`/`series` are
+/// required. `width`/`height` are OWN-RENDER PX (px = HWPUNIT/75); absent → a sensible default box.
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChartSpec {
+    /// Chart type: `"bar"` | `"pie"` | `"line"` (validated on apply — anything else is an honest error).
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Optional chart title drawn across the top.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Category (x-axis / pie-slice) labels — one per data point.
+    pub categories: Vec<String>,
+    /// One or more data series (bar/line are multi-series; pie uses the FIRST series over `categories`).
+    pub series: Vec<ChartSeries>,
+    /// Box width in own-render px (default 400). Converted to HWPUNIT (×75) for the reserved box.
+    #[serde(default)]
+    pub width: Option<f64>,
+    /// Box height in own-render px (default 260).
+    #[serde(default)]
+    pub height: Option<f64>,
+}
+
+/// One named data series of an [`ChartSpec`] — `values` align 1:1 with `ChartSpec::categories`.
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChartSeries {
+    pub name: String,
+    pub values: Vec<f64>,
 }
 
 /// A formatted text run for `AppendRichParagraph` (the portable representation the AI content
@@ -1341,6 +1395,27 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             sec.dirty.mark();
             Ok(())
         }
+        Op::InsertChartAt { section, index, chart } => {
+            // Validate + draw the chart to a ChartRef (empty bin_ref + precomputed SVG) BEFORE touching
+            // the doc, so a bad spec (unknown type / empty data / ragged series) is an honest no-op error.
+            let chart_ref = build_chart_ref(chart)?;
+            let plain = intern_char_shape(doc, CharShape::default());
+            let sec = section_mut(doc, *section)?;
+            let at = block_insert_index(sec, *index)?;
+            // A fresh paragraph anchoring the chart — the SAME object-paragraph shape a lifted
+            // `Inline::Chart` uses (issue 062-7), so place_doc/NaiveLayout reserve its box in lockstep.
+            sec.blocks.insert(at, Block::Paragraph(Paragraph {
+                runs: vec![Run {
+                    char_shape: plain,
+                    content: vec![Inline::Chart(chart_ref)],
+                    ..Default::default()
+                }],
+                dirty: Dirty(true),
+                ..Default::default()
+            }));
+            sec.dirty.mark();
+            Ok(())
+        }
         Op::DeleteBlock { section, index } => {
             let sec = section_mut(doc, *section)?;
             if *index >= sec.blocks.len() {
@@ -1958,6 +2033,69 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             "op apply (MVP: Append*/SetPageLayout/Set{Char,Run,Para}Pr/ApplyStyle/Insert-Delete text/anchored Insert*At/DeleteBlock/MoveBlock/SetImageSize/SetTableCellShade/SetTableCell/TableInsertRows)",
         )),
     }
+}
+
+/// Own-render px scale (1in = 7200 HWPUNIT = 96px ⇒ px = HWPUNIT/75) — the SAME constant
+/// `hwp_rhwp::chart_render` uses so a generated chart's box matches a lifted OOXML chart's.
+const HWPUNIT_PER_PX: f64 = 7200.0 / 96.0;
+/// Default chart box (own-render px) when the spec omits `width`/`height` (issue 062-follow).
+const DEFAULT_CHART_W_PX: f64 = 400.0;
+const DEFAULT_CHART_H_PX: f64 = 260.0;
+
+/// Validate a [`ChartSpec`] and draw it to an `Inline::Chart`-ready [`ChartRef`] (`InsertChartAt`).
+/// Rejects (honest op error — never a silent no-op or wrong render): an unknown chart type, no
+/// categories, no series, or a series whose value count doesn't match the categories. The box is sized
+/// from `width`/`height` (own-render px → HWPUNIT ×75; default 400×260), and the SVG is the precomputed
+/// fragment that rides the issue-062 `PaintOp::Image.svg` channel.
+fn build_chart_ref(spec: &ChartSpec) -> Result<ChartRef> {
+    let kind = spec.kind.trim().to_ascii_lowercase();
+    if !matches!(kind.as_str(), "bar" | "pie" | "line") {
+        return Err(Error::Other(format!(
+            "InsertChartAt: 알 수 없는 차트 종류 {:?} (bar|pie|line 만)",
+            spec.kind
+        )));
+    }
+    if spec.categories.is_empty() {
+        return Err(Error::Other(
+            "InsertChartAt: categories 가 비어 있습니다".into(),
+        ));
+    }
+    if spec.series.is_empty() {
+        return Err(Error::Other(
+            "InsertChartAt: series 가 비어 있습니다".into(),
+        ));
+    }
+    for s in &spec.series {
+        if s.values.len() != spec.categories.len() {
+            return Err(Error::Other(format!(
+                "InsertChartAt: series {:?} 의 값 개수({})가 categories 개수({})와 다릅니다",
+                s.name,
+                s.values.len(),
+                spec.categories.len()
+            )));
+        }
+    }
+    let w_px = spec
+        .width
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .unwrap_or(DEFAULT_CHART_W_PX);
+    let h_px = spec
+        .height
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .unwrap_or(DEFAULT_CHART_H_PX);
+    let svg = chart_gen::render_chart_svg(
+        &kind,
+        spec.title.as_deref(),
+        &spec.categories,
+        &spec.series,
+        w_px,
+        h_px,
+    );
+    Ok(ChartRef {
+        width: (w_px * HWPUNIT_PER_PX).round() as HwpUnit,
+        height: (h_px * HWPUNIT_PER_PX).round() as HwpUnit,
+        rendered_svg: Some(svg),
+    })
 }
 
 /// Build a rich table node from per-row cell specs (shared by `AppendRichTable`/`InsertTableAt`).
@@ -3009,6 +3147,119 @@ mod tests {
             }
         )
         .is_err());
+    }
+
+    fn chart_series(name: &str, values: &[f64]) -> ChartSeries {
+        ChartSeries {
+            name: name.into(),
+            values: values.to_vec(),
+        }
+    }
+
+    #[test]
+    fn insert_chart_at_inserts_a_chart_block_with_generated_svg() {
+        let mut doc = doc_with(vec![simple_para(1, "제목"), simple_para(2, "본문")]);
+        apply(
+            &mut doc,
+            &Op::InsertChartAt {
+                section: 0,
+                index: 1,
+                chart: ChartSpec {
+                    kind: "bar".into(),
+                    title: Some("연도별 매출".into()),
+                    categories: vec!["2024".into(), "2025".into(), "2026".into()],
+                    series: vec![chart_series("매출", &[10.0, 18.0, 30.0])],
+                    width: None,
+                    height: None,
+                },
+            },
+        )
+        .unwrap();
+        assert_eq!(doc.sections[0].blocks.len(), 3, "one new block inserted");
+        match &doc.sections[0].blocks[1] {
+            Block::Paragraph(p) => match &p.runs[0].content[0] {
+                Inline::Chart(c) => {
+                    // Default 400×260 px box → HWPUNIT (×75). Reserved in BOTH place_doc + NaiveLayout.
+                    assert_eq!((c.width, c.height), (30000, 19500));
+                    let svg = c.rendered_svg.as_deref().expect("a generated SVG fragment");
+                    assert!(
+                        svg.contains("hwp-gen-chart") && svg.contains("<rect"),
+                        "bar chart SVG rides the PaintOp::Image.svg channel: {svg}"
+                    );
+                    assert!(svg.contains("연도별 매출") && svg.contains("2025"));
+                }
+                other => panic!("expected an Inline::Chart, got {other:?}"),
+            },
+            _ => panic!("expected a chart paragraph"),
+        }
+        // The insert shifted the later block down.
+        assert_eq!(block_para_text(&doc, 2), "본문");
+    }
+
+    #[test]
+    fn insert_chart_at_honors_size_and_type() {
+        let mut doc = doc_with(vec![simple_para(1, "x")]);
+        apply(
+            &mut doc,
+            &Op::InsertChartAt {
+                section: 0,
+                index: 0,
+                chart: ChartSpec {
+                    kind: "pie".into(),
+                    title: None,
+                    categories: vec!["a".into(), "b".into()],
+                    series: vec![chart_series("s", &[3.0, 1.0])],
+                    width: Some(300.0),
+                    height: Some(300.0),
+                },
+            },
+        )
+        .unwrap();
+        match &doc.sections[0].blocks[0] {
+            Block::Paragraph(p) => match &p.runs[0].content[0] {
+                Inline::Chart(c) => {
+                    assert_eq!((c.width, c.height), (22500, 22500), "300px → 22500 HWPUNIT");
+                    assert!(
+                        c.rendered_svg.as_deref().unwrap().contains("<path"),
+                        "pie slices are arc paths"
+                    );
+                }
+                _ => panic!("expected a chart inline"),
+            },
+            _ => panic!("expected a chart paragraph"),
+        }
+    }
+
+    #[test]
+    fn insert_chart_at_rejects_bad_specs_without_mutating() {
+        let mut doc = doc_with(vec![simple_para(1, "x")]);
+        let op = |kind: &str, cats: &[&str], series: Vec<ChartSeries>| Op::InsertChartAt {
+            section: 0,
+            index: 1,
+            chart: ChartSpec {
+                kind: kind.into(),
+                title: None,
+                categories: cats.iter().map(|s| s.to_string()).collect(),
+                series,
+                width: None,
+                height: None,
+            },
+        };
+        // unknown type / empty categories / empty series / ragged series → honest error.
+        assert!(apply(
+            &mut doc,
+            &op("donut", &["a"], vec![chart_series("s", &[1.0])])
+        )
+        .is_err());
+        assert!(apply(&mut doc, &op("bar", &[], vec![chart_series("s", &[])])).is_err());
+        assert!(apply(&mut doc, &op("bar", &["a"], vec![])).is_err());
+        assert!(apply(
+            &mut doc,
+            &op("bar", &["a"], vec![chart_series("s", &[1.0, 2.0])])
+        )
+        .is_err());
+        // No rejected op inserted a block.
+        assert_eq!(doc.sections[0].blocks.len(), 1);
     }
 
     #[test]

@@ -271,6 +271,7 @@ fn op_target(op: &Op) -> (&'static str, Option<usize>, Option<usize>) {
         }
         Op::InsertTableAt { section, index, .. } => ("insert_table", Some(*section), Some(*index)),
         Op::InsertImageAt { section, index, .. } => ("insert_image", Some(*section), Some(*index)),
+        Op::InsertChartAt { section, index, .. } => ("insert_chart", Some(*section), Some(*index)),
         Op::DeleteBlock { section, index } => ("delete_block", Some(*section), Some(*index)),
         Op::SetImageSize { section, index, .. } => ("resize_image", Some(*section), Some(*index)),
         Op::SetTableCellShade { section, index, .. } => {

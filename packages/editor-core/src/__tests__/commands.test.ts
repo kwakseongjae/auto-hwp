@@ -435,6 +435,23 @@ describe("051 — structural preview cards (describeIntent + EditController.prev
     expect(para.label).toBe("문단 삽입");
     expect(para.summary).toContain("블록 2 위치");
     expect(para.summary).toContain("회사 약력");
+
+    // 062-follow: an AI-generated data chart previews as a chart card (type + data shape).
+    const [chart] = core.edit.preview([
+      {
+        intent: "InsertChartAt",
+        section: 0,
+        index: null,
+        chart: { type: "bar", title: "연도별 매출", categories: ["2024", "2025", "2026"], series: [{ name: "매출", values: [10, 18, 30] }] },
+      },
+    ]);
+    expect(chart.label).toBe("차트 삽입");
+    expect(chart.summary).toContain("막대 차트 삽입");
+    expect(chart.summary).toContain("연도별 매출");
+    expect(chart.summary).toContain("3개 항목");
+    expect(chart.summary).toContain("1개 계열");
+    expect(chart.summary).toContain("구역 끝");
+    expect(chart.destructive).toBeUndefined();
   });
 
   it("DeleteBlock card is DESTRUCTIVE and previewCards fetches the target block's 원문 (paragraph)", async () => {

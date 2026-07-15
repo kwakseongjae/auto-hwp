@@ -13,6 +13,7 @@ const OP_META: Record<string, { label: string; icon: string }> = {
   ApplyContent: { label: "콘텐츠 적용", icon: "¶" },
   InsertTableAt: { label: "표 삽입", icon: "▦" },
   InsertParagraphAt: { label: "문단 삽입", icon: "¶" },
+  InsertChartAt: { label: "차트 삽입", icon: "📊" },
   MoveBlock: { label: "블록 이동", icon: "↕" },
   DeleteBlock: { label: "블록 삭제", icon: "－" },
   SetImageSize: { label: "그림 크기", icon: "🖼" },
@@ -68,6 +69,17 @@ export function describeIntent(intent: Intent): IntentCard {
       const runs = Array.isArray(intent.runs) ? (intent.runs as { text?: unknown }[]) : [];
       const text = runs.map((r) => String(r?.text ?? "")).join("");
       summary = `문단 삽입 (${positionLabel(num(intent.index))}) → “${elide(text, 60)}”`;
+      break;
+    }
+    case "InsertChartAt": {
+      // AI-generated data chart (062-follow): summarize type + data shape (categories × series).
+      const chart = (intent.chart ?? {}) as { type?: unknown; title?: unknown; categories?: unknown; series?: unknown };
+      const kindWord =
+        chart.type === "pie" ? "원" : chart.type === "line" ? "선" : "막대";
+      const cats = Array.isArray(chart.categories) ? chart.categories.length : 0;
+      const sers = Array.isArray(chart.series) ? chart.series.length : 0;
+      const title = typeof chart.title === "string" && chart.title.trim() ? `“${elide(chart.title, 40)}” ` : "";
+      summary = `${title}${kindWord} 차트 삽입 (${positionLabel(num(intent.index))}) — ${cats}개 항목 · ${sers}개 계열`;
       break;
     }
     case "Replace":

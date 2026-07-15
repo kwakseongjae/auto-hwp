@@ -63,6 +63,26 @@ function mockIntents(instruction: string, anchors: Anchor[], docContext: string)
     return [{ intent: "DeleteBlock", section: a.section, index: a.block }];
   }
 
+  // ⑤ 데이터 차트(062-follow): "…를 막대/원/선 차트로 만들어" → 결정적 InsertChartAt. 엔진이 스펙을 SVG
+  //    차트로 그려(hwp_ops::chart_gen) 이슈 062의 PaintOp::Image.svg 렌더 채널로 심는다 — 키 없이도 데모 완주.
+  //    종류는 지시문 단어로 고른다(막대/원/선), 앵커 있으면 그 블록 위치, 없으면 구역 끝(index:null).
+  if (/(차트|그래프)/.test(text) && /(만들|삽입|넣|그려|생성|추가)/.test(text)) {
+    const type = /원|파이|pie/i.test(text) ? "pie" : /선|꺾은|라인|line/i.test(text) ? "line" : "bar";
+    return [
+      {
+        intent: "InsertChartAt",
+        section: a?.section ?? 0,
+        index: a ? a.block : null,
+        chart: {
+          type,
+          title: "연도별 매출",
+          categories: ["2024", "2025", "2026"],
+          series: [{ name: "매출", values: [10, 18, 30] }],
+        },
+      },
+    ];
+  }
+
   // ① 표 삽입: "3x4 표 넣어줘" 류. 크기 미지정이면 2×2. 앵커가 있으면 그 블록 위치에, 없으면 구역 끝.
   if (/표/.test(text) && /(삽입|넣|추가|만들)/.test(text) && !/행/.test(text)) {
     const m = text.match(/(\d+)\s*[x×]\s*(\d+)/);

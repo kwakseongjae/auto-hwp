@@ -635,6 +635,47 @@ para, offset, para_len, caret:{page,x,top,height}}` (row/col 모델-전역, `par
 | `space_before_pt` | number | **pt** | ○ |
 | `space_after_pt` | number | **pt** | ○ |
 
+### 6.10 AI 데이터 차트 삽입 (이슈 062-follow; additive)
+
+> AI가 데이터로부터 만드는 **막대/원/선 차트**를 블록 인덱스 위치에 삽입한다(1 undo 단위).
+> 엔진이 `chart` 스펙을 순수 Rust SVG(`hwp_ops::chart_gen`)로 그려 `Inline::Chart`로 심는데,
+> 이는 이슈 062의 **`ChartRef`/`PaintOp::Image.svg` 렌더 채널을 그대로 재사용**한다 — own-render
+> SVG + HTML export가 새 배관 없이 그리고, place_doc↔NaiveLayout이 고정 박스를 **락스텝**으로 예약한다
+> (PDF는 062처럼 v1에서 예약 박스만; SVG→PDF 벡터는 후속). `index` 앵커는 §6.9와 동일
+> (정수=그 블록, `==len`=끝-append, `null`/생략=구역 끝).
+
+#### `InsertChartAt` — 데이터 차트(막대/원/선)를 블록 인덱스 위치에 삽입(1 undo 단위)
+```json
+{ "intent": "InsertChartAt", "section": 0, "index": 1, "chart": { "type": "bar", "title": "연도별 매출", "categories": ["2024","2025","2026"], "series": [{ "name": "매출", "values": [10, 18, 30] }] } }
+```
+| 필드 | 타입 | 단위/값 | 필수 |
+|------|------|---------|------|
+| `section` | integer | 구역 인덱스 | ● |
+| `index` | integer\|null | 블록 인덱스(`==len`=끝-append, 범위 밖=에러), `null`/생략=구역 끝 | ○(없으면 구역 끝) |
+| `chart` | ChartSpec | 차트 스펙(아래) | ● |
+
+**`ChartSpec` (중첩 오브젝트)** — `#[serde(deny_unknown_fields)]`. 알 수 없는 키는 거부(불변식 7).
+와이어 필드는 `type`(Rust `kind`로 rename). `title`/`width`/`height`는 선택, `categories`/`series`는 필수.
+
+| 필드 | 타입 | 단위/값 | 필수 |
+|------|------|---------|------|
+| `type` | string | `bar`\|`pie`\|`line` | ● |
+| `title` | string | 차트 제목(상단) | ○ |
+| `categories` | string[] | 가로축/원 조각 라벨(데이터 포인트당 1개) | ● |
+| `series` | ChartSeries[] | 데이터 계열(막대/선=다중 계열; 원=**첫 계열**만 사용) | ● |
+| `width` | number | 박스 폭 **own-render px**(기본 400; ×75 → HWPUNIT) | ○ |
+| `height` | number | 박스 높이 **own-render px**(기본 260) | ○ |
+
+**`ChartSeries` (중첩 오브젝트)** — `#[serde(deny_unknown_fields)]`. `values`는 `categories`와 1:1 정렬.
+
+| 필드 | 타입 | 단위/값 | 필수 |
+|------|------|---------|------|
+| `name` | string | 계열 이름(범례에 표시) | ● |
+| `values` | number[] | 계열 값(개수 = `categories` 개수) | ● |
+
+실패(정직한 op 에러, 무변경): `알 수 없는 차트 종류 …`(type≠bar/pie/line), `categories 가 비어 있습니다`,
+`series 가 비어 있습니다`, `series … 의 값 개수(…)가 categories 개수(…)와 다릅니다`(계열 길이 불일치).
+
 ---
 
 ## 7. 드리프트 방지

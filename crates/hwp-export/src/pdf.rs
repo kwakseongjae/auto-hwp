@@ -703,6 +703,34 @@ mod tests {
         assert!(out.pages >= 1);
     }
 
+    /// Issue 062-follow (AI-generated charts): a generated chart is an `Inline::Chart` on the
+    /// `PaintOp::Image.svg` channel. The PDF backend ignores the SVG and draws its reserved box (v1 —
+    /// no SVG→PDF vector path yet, exactly like the 062 OOXML chart). Assert the export doesn't panic
+    /// and the chart page is present.
+    #[test]
+    fn exports_a_doc_with_a_generated_chart_without_panicking() {
+        let mut chart_para = Paragraph::default();
+        chart_para.runs.push(Run {
+            char_shape: 0,
+            content: vec![Inline::Chart(ChartRef {
+                width: 30000,
+                height: 19500,
+                rendered_svg: Some(
+                    "<g class=\"hwp-gen-chart\"><rect x=\"0\" y=\"0\" width=\"10\" height=\"10\"/></g>"
+                        .into(),
+                ),
+            })],
+            ..Default::default()
+        });
+        let doc = doc_with(vec![
+            Block::Paragraph(para("차트 문서")),
+            Block::Paragraph(chart_para),
+        ]);
+        let out = export_pdf(&doc, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
+        assert!(out.bytes.starts_with(b"%PDF-"), "valid PDF header");
+        assert!(out.pages >= 1, "the chart box is laid out on a page");
+    }
+
     #[test]
     fn title_metadata_is_accepted() {
         let doc = doc_with(vec![Block::Paragraph(para("제목"))]);

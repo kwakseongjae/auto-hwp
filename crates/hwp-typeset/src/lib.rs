@@ -1239,4 +1239,94 @@ mod tests {
             }
         }
     }
+
+    /// Issue 062-follow (AI-generated charts): an inserted `Inline::Chart` reserves its FIXED box in
+    /// BOTH `NaiveLayout` (the oracle, via `object_height`) and `place_doc` (via `paragraph_object`), so
+    /// their page counts stay in LOCKSTEP — the same fixed-box discipline a lifted OOXML chart (062-7)
+    /// gets. A tall chart sandwiched in body text must paginate identically in both engines, and the
+    /// chart must actually land on the own-render surface as a `PlacedImage` carrying its SVG.
+    #[test]
+    fn inserted_chart_box_keeps_place_doc_and_naive_layout_in_lockstep() {
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape::default());
+        doc.para_shapes.push(ParaShape::default());
+        let mut sec = Section::default();
+        for _ in 0..30 {
+            sec.blocks.push(Block::Paragraph(para("한 줄")));
+        }
+        // A tall chart box (40000 HWPUNIT) — the SAME shape a generated chart produces (empty bin_ref +
+        // precomputed SVG on the object channel).
+        let mut chart_para = Paragraph::default();
+        chart_para.runs.push(Run {
+            char_shape: 0,
+            content: vec![Inline::Chart(ChartRef {
+                width: 30000,
+                height: 40000,
+                rendered_svg: Some("<g class=\"hwp-gen-chart\"><rect/></g>".into()),
+            })],
+            ..Default::default()
+        });
+        sec.blocks.push(Block::Paragraph(chart_para));
+        for _ in 0..30 {
+            sec.blocks.push(Block::Paragraph(para("한 줄")));
+        }
+        doc.sections.push(sec);
+
+        let oracle = NaiveLayout
+            .layout(&doc, &ApproxFontMetrics)
+            .unwrap()
+            .pages
+            .len();
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        assert_eq!(
+            oracle,
+            placed.pages.len(),
+            "chart box reserved identically in NaiveLayout and place_doc (LOCKSTEP)"
+        );
+        assert!(
+            oracle >= 2,
+            "the tall chart forces pagination: {oracle} pages"
+        );
+
+        // The chart lands as a PlacedImage on the object channel (empty bin_ref) carrying its SVG.
+        let chart_img = placed
+            .pages
+            .iter()
+            .flat_map(|p| &p.images)
+            .find(|im| {
+                im.svg
+                    .as_deref()
+                    .map(|s| s.contains("hwp-gen-chart"))
+                    .unwrap_or(false)
+            })
+            .expect("chart placed as a PlacedImage carrying its precomputed SVG");
+        assert!(
+            chart_img.bin_ref.is_empty(),
+            "chart rides the empty-bin_ref object channel (like a 062 OOXML chart)"
+        );
+        assert!(
+            (chart_img.h - 40000.0).abs() < 1.0,
+            "the reserved box height is honored on the placed surface"
+        );
+    }
+
+    /// A doc with NO chart is byte-identical to before (the chart path is purely additive): the two
+    /// engines agree on the same page count as they did pre-062-follow.
+    #[test]
+    fn no_chart_doc_pagination_is_unchanged() {
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape::default());
+        let mut sec = Section::default();
+        for _ in 0..100 {
+            sec.blocks.push(Block::Paragraph(para("한 줄")));
+        }
+        doc.sections.push(sec);
+        let oracle = NaiveLayout
+            .layout(&doc, &ApproxFontMetrics)
+            .unwrap()
+            .pages
+            .len();
+        let placed = place_doc(&doc, &ApproxFontMetrics).pages.len();
+        assert_eq!(oracle, placed, "no-chart doc stays in lockstep");
+    }
 }

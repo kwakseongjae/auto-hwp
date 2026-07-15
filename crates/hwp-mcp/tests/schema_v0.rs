@@ -270,6 +270,13 @@ fn examples() -> Vec<Example> {
             r#"{"intent":"InsertParagraphAt","section":0,"index":0,"runs":[{"text":"새 문단","bold":true}],"para":{"align":"center"}}"#,
             Synthetic,
         ),
+        // ---- AI-generated data chart (issue 062-follow) — a bar/pie/line chart built from data,
+        //      inserted as an Inline::Chart on the issue-062 PaintOp::Image.svg render channel. ----
+        e(
+            "InsertChartAt",
+            r#"{"intent":"InsertChartAt","section":0,"index":1,"chart":{"type":"bar","title":"연도별 매출","categories":["2024","2025","2026"],"series":[{"name":"매출","values":[10,18,30]}]}}"#,
+            Synthetic,
+        ),
         // ---- cell-addressed caret (issue 053 — own-render geometry, no rhwp gate). READ-ONLY
         //      queries (no revision bump), so they are exercised by the dedicated round-trip test
         //      `cell_caret_intents_dispatch_and_roundtrip` below instead of the Synthetic mutator lane. ----
@@ -305,7 +312,7 @@ fn de_err(v: Value) -> String {
 fn every_intent_variant_has_a_documented_example() {
     assert_eq!(
         examples().len(),
-        40,
+        41,
         "one JSON example per Intent variant (see INTENT-SCHEMA.md)"
     );
 }

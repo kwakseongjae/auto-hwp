@@ -8,8 +8,9 @@
 /** Canonical order of the whitelisted edit Intents (also the order they appear in the prompt).
  *  Issue 051 (챗 구조 편집 브릿지): the original 5 fill/format intents + 9 STRUCTURAL intents
  *  (7 pre-existing engine intents newly whitelisted + the 2 additive `InsertTableAt`/
- *  `InsertParagraphAt` variants). Row DELETE / column INSERT / column DELETE are HONESTLY absent
- *  (no engine op) — the prompt names them as unsupported so the model never invents them. */
+ *  `InsertParagraphAt` variants). Issue 062-follow adds `InsertChartAt` (AI-generated data chart).
+ *  Row DELETE / column INSERT / column DELETE are HONESTLY absent (no engine op) — the prompt names
+ *  them as unsupported so the model never invents them. */
 export const DEFAULT_ALLOWED_INTENTS: readonly string[] = [
   "SetTableCell",
   "SetTableCellRuns",
@@ -20,6 +21,7 @@ export const DEFAULT_ALLOWED_INTENTS: readonly string[] = [
   "InsertTableAt",
   "InsertParagraphAt",
   "InsertImage",
+  "InsertChartAt",
   "TableInsertRows",
   "TableAppendRow",
   "DeleteBlock",
@@ -97,6 +99,16 @@ const INTENT_BLOCKS: Record<string, string[]> = {
     '    "data_b64": <string base64 PNG/JPEG, no "data:" prefix>, "width": <int HWPUNIT>, "height": <int HWPUNIT> }',
     "  ONLY usable when the host supplies real image bytes (an upload/drop). NEVER fabricate data_b64 from text.",
   ],
+  InsertChartAt: [
+    "# InsertChartAt — insert an AI-generated DATA CHART (bar/pie/line) built from data (docs/INTENT-SCHEMA.md §6.10, L647-679)",
+    '  { "intent": "InsertChartAt", "section": <int>, "index": <int block|null — null/omitted = section END>,',
+    '    "chart": { "type": "bar"|"pie"|"line", "title": <string?>, "categories": string[],',
+    '      "series": [{ "name": <string>, "values": number[] }], "width": <number? px>, "height": <number? px> } }',
+    "  categories = x-axis / pie-slice labels; each series.values aligns 1:1 with categories. bar/line take",
+    "  MULTIPLE series; pie uses the FIRST series only. The engine draws the chart itself — you supply DATA.",
+    "  Worked example — a bar chart of 연도별 매출: \"chart\":",
+    '    { "type": "bar", "title": "연도별 매출", "categories": ["2024","2025","2026"], "series": [{ "name": "매출", "values": [10,18,30] }] }',
+  ],
   TableInsertRows: [
     "# TableInsertRows — insert empty BODY rows into an existing table (docs/INTENT-SCHEMA.md §6.6, L346-356)",
     '  { "intent": "TableInsertRows", "section": <int>, "index": <int table-block>, "at": <int row, ==rows appends>, "count": <int ≥1>, "cols": <int ≥1 — the table\'s column count> }',
@@ -159,6 +171,16 @@ const FOOTER = [
   "the section END. NEVER emit empty cells for data you were given. Example — \"팀: 대표 홍길동, CTO 김철수,",
   "Dev Lead 이영희 → 표로 만들어줘\" becomes ONE InsertTableAt with \"rows\":",
   '[[{"text":"직책","bold":true},{"text":"이름","bold":true}],[{"text":"대표"},{"text":"홍길동"}],[{"text":"CTO"},{"text":"김철수"}],[{"text":"Dev Lead"},{"text":"이영희"}]].',
+  "",
+  // 차트 생성 (data→chart, 이슈 062-follow): 숫자 데이터를 "…를 막대/원/선 차트로 만들어줘" 하면 표가 아니라
+  // ONE InsertChartAt 를 낸다 — 엔진이 스펙을 SVG 차트로 그린다(모델은 데이터만 채운다).
+  "차트 만들기 (MAKING A DATA CHART): when the user asks to turn NUMERIC data into a chart — \"…를 막대/원/선",
+  "차트로 만들어줘\", \"막대그래프\", \"pie chart\", \"추세를 선 차트로\" — emit ONE InsertChartAt (NOT a table).",
+  "Pick \"type\" from the words: 막대/bar/column→\"bar\", 원/파이/pie→\"pie\", 선/꺾은선/line→\"line\". Put the",
+  "labels in \"categories\" and each metric in a \"series\" (bar/line may have several series; pie uses one).",
+  "Place it at the marked anchor's \"index\" if marked, else omit \"index\" (or \"index\":null) for the section END.",
+  "Example — \"연도별 매출 10, 18, 30을 막대차트로 만들어줘\" becomes ONE InsertChartAt with \"chart\":",
+  '{"type":"bar","title":"연도별 매출","categories":["2024","2025","2026"],"series":[{"name":"매출","values":[10,18,30]}]}.',
   "",
   // 정직 제외 3종 (051 §3): row delete / column insert / column delete have NO engine op — name them as
   // unsupported so the model refuses instead of inventing a lookalike intent (which the server drops).
