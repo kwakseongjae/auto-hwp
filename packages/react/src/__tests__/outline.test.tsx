@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { OutlinePanel } from "../components/OutlinePanel";
 import { StatusBar } from "../components/StatusBar";
+import type { EngineAdapter } from "../EngineAdapter";
 import { activeOutlineIndex, pageAtReference } from "../outline";
 import type { OutlineItem } from "../types";
 
@@ -92,6 +93,83 @@ describe("OutlinePanel (issue 046)", () => {
     expect(items[2].getAttribute("aria-current")).toBe("true"); // current page 2 → 3쪽 highlighted
     fireEvent.click(items[3]);
     expect(onJump).toHaveBeenCalledWith(3);
+  });
+});
+
+describe("OutlinePanel — page thumbnail rail (heading-less fallback)", () => {
+  // A raw page SVG carrying a hostile <script> (must be stripped) plus a viewBox (fixes the thumb ratio).
+  const RAW_SVG = (p: number) =>
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 794 1123"><script>alert(${p})</script>` +
+    `<rect width="794" height="1123" fill="#fff"/><text>page ${p + 1}</text></svg>`;
+
+  const mockAdapter = () => ({ pageSvg: vi.fn(async (p: number) => RAW_SVG(p)) }) as unknown as EngineAdapter;
+
+  const railBase = {
+    items: [] as OutlineItem[],
+    pageCount: 4,
+    currentPage: 0,
+    collapsed: false,
+    onToggleCollapse: () => {},
+    onJump: () => {},
+    refreshToken: 0,
+  };
+
+  const blobText = async (b: Blob) => new TextDecoder().decode(await b.arrayBuffer());
+
+  it("renders one live thumbnail per page as a rasterized <img> — sanitized, never raw-injected (R7)", async () => {
+    const createSpy = vi.spyOn(URL, "createObjectURL");
+    const adapter = mockAdapter();
+    const { container } = render(<OutlinePanel {...railBase} adapter={adapter} />);
+
+    // One clickable slot per page (skeleton shown until each rasterizes).
+    expect(screen.getAllByTestId("hw-outline-item")).toHaveLength(4);
+
+    // After the async fetch → sanitize → rasterize, every page is an <img> thumbnail (no IntersectionObserver
+    // in jsdom → eager load, so all four resolve).
+    const thumbs = await screen.findAllByTestId("hw-outline-thumb");
+    expect(thumbs).toHaveLength(4);
+    thumbs.forEach((t) => expect(t.tagName).toBe("IMG"));
+    expect(adapter.pageSvg).toHaveBeenCalledTimes(4);
+
+    // R7 — no raw injection: the rail contains NO <script> and NO inline <svg> (it uses <img> raster only).
+    expect(container.querySelector("script")).toBeNull();
+    expect(container.querySelector("svg")).toBeNull();
+
+    // sanitizeSvg WAS applied: the Blob handed to createObjectURL dropped the <script>, kept the <rect>.
+    const blob = createSpy.mock.calls[0][0] as Blob;
+    const text = await blobText(blob);
+    expect(text).not.toContain("<script");
+    expect(text).toContain("<rect");
+    createSpy.mockRestore();
+  });
+
+  it("clicking a thumbnail jumps to that page; the current page is highlighted (reuses currentPage)", async () => {
+    const onJump = vi.fn();
+    const adapter = mockAdapter();
+    const { rerender } = render(<OutlinePanel {...railBase} adapter={adapter} currentPage={2} onJump={onJump} />);
+    const items = await screen.findAllByTestId("hw-outline-item");
+    expect(items).toHaveLength(4);
+
+    // Active-page highlight rides currentPage (aria-current on the 3rd thumbnail only).
+    expect(items[2].getAttribute("aria-current")).toBe("true");
+    expect(items[0].getAttribute("aria-current")).toBeNull();
+
+    // Click reuses the host's scroll source with the RIGHT page.
+    fireEvent.click(items[3]);
+    expect(onJump).toHaveBeenCalledWith(3);
+
+    rerender(<OutlinePanel {...railBase} adapter={adapter} currentPage={0} onJump={onJump} />);
+    const after = screen.getAllByTestId("hw-outline-item");
+    expect(after[0].getAttribute("aria-current")).toBe("true");
+    expect(after[2].getAttribute("aria-current")).toBeNull();
+  });
+
+  it("with NO adapter (rendererless backend) page mode degrades to a plain page-number list", () => {
+    render(<OutlinePanel {...railBase} adapter={undefined} />);
+    expect(screen.queryAllByTestId("hw-outline-thumb")).toHaveLength(0);
+    const items = screen.getAllByTestId("hw-outline-item");
+    expect(items).toHaveLength(4);
+    expect(items[0].textContent).toContain("1쪽");
   });
 });
 

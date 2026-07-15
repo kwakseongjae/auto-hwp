@@ -109,6 +109,26 @@
 .hw-outline-page { font-size: 11px; color: var(--hw-muted); flex: 0 0 auto; }
 .hw-outline-active .hw-outline-page { color: var(--hw-accent); }
 
+/* ---- page-thumbnail rail — the heading-less fallback: live PDF-viewer-style per-page previews ---- */
+.hw-outline-thumbs { gap: 10px; align-items: center; padding: 10px 10px 16px; }
+/* a thumbnail item stacks the preview frame over its page number (overrides the row layout above) */
+.hw-outline-thumb-item {
+  flex-direction: column; align-items: stretch; gap: 5px; width: 100%; max-width: 160px; padding: 6px;
+}
+.hw-outline-thumb-item:hover { background: #f0f1f3; }
+.hw-thumb-frame {
+  display: block; width: 100%; background: #fff; border: 1px solid var(--hw-border);
+  border-radius: 3px; overflow: hidden; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.14);
+}
+.hw-thumb-img { display: block; width: 100%; height: auto; }
+/* skeleton shown until a thumbnail rasterizes (frame keeps its aspect-ratio height, so no layout shift) */
+.hw-thumb-skeleton { display: block; width: 100%; height: 100%; background: #eef0f3; }
+.hw-thumb-page { text-align: center; font-size: 11px; color: var(--hw-muted); font-variant-numeric: tabular-nums; }
+/* active page — a clear ring on the frame (the row-tint from .hw-outline-active still applies to the button) */
+.hw-outline-thumb-item.hw-outline-active { background: #e8effc; }
+.hw-outline-active .hw-thumb-frame { border-color: var(--hw-accent); box-shadow: 0 0 0 2px var(--hw-accent); }
+.hw-outline-active .hw-thumb-page { color: var(--hw-accent); font-weight: 600; }
+
 /* ---- status bar (issue 046) — thin bottom bar (page X/N · selection · edit badge; NO zoom) ---- */
 .hw-statusbar {
   display: flex; align-items: center; gap: 14px; height: 26px; padding: 0 14px; flex: 0 0 auto;

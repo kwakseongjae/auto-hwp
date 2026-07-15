@@ -2558,6 +2558,10 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
             collapsed={outlineCollapsed}
             onToggleCollapse={toggleOutlineCollapse}
             onJump={jumpToPage}
+            // The thumbnail rail (heading-less fallback) pulls each page's own-render SVG through the SAME
+            // adapter the page view uses; refreshToken re-rasters after an edit. SVG → sanitizeSvg → <img> (R7).
+            adapter={adapter}
+            refreshToken={refreshToken}
           />
         )}
         <div
