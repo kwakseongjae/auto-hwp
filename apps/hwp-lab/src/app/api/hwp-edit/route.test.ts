@@ -198,11 +198,11 @@ const SSE_SEARCH = [
   'data: {"choices":[{"finish_reason":"tool_calls"}]}\n\n',
   "data: [DONE]\n\n",
 ];
-// Turn 2: the model streams the terminal emit_intents tool_call carrying the final Intent[].
+// Turn 2: the model streams the FINAL Intent[] as a plain JSON-array message (the terminal action — NOT a
+// tool call; emit_intents was removed because Grok degenerated on it). finish_reason "stop" ends the loop.
 const SSE_EMIT = [
-  'data: {"choices":[{"delta":{"content":"근거를 반영합니다."}}]}\n\n',
-  'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_2","type":"function","function":{"name":"emit_intents","arguments":"{\\"intents\\":[{\\"intent\\":\\"SetParagraphText\\",\\"section\\":0,\\"block\\":2,\\"text\\":\\"근거 반영\\"}]}"}}]}}]}\n\n',
-  'data: {"choices":[{"finish_reason":"tool_calls"}]}\n\n',
+  'data: {"choices":[{"delta":{"content":"[{\\"intent\\":\\"SetParagraphText\\",\\"section\\":0,\\"block\\":2,\\"text\\":\\"근거 반영\\"}]"}}]}\n\n',
+  'data: {"choices":[{"finish_reason":"stop"}]}\n\n',
   "data: [DONE]\n\n",
 ];
 // The web_search sub-call (non-streaming, web plugin) → summary content + url_citation sources.
@@ -289,15 +289,16 @@ describe("hwp-edit route — agentic streaming (tool-calling loop + NDJSON Agent
     // The reasoning delta streamed as a thinking_delta (thinking transparency).
     expect(events.some((e) => e.type === "thinking_delta" && String(e.text).includes("최신 시장 규모"))).toBe(true);
 
-    // Two STREAMING turns (search → emit) + one web_search sub-call — the loop ran end-to-end.
+    // Two STREAMING turns (search → final JSON array) + one web_search sub-call — the loop ran end-to-end.
     expect(streamCalls).toHaveLength(2);
     expect(searchCalls).toHaveLength(1);
 
-    // The streaming turn requested the two tools with tool_choice:auto (MODEL decides when to search).
+    // The streaming turn exposes ONLY web_search with tool_choice:auto (MODEL decides when to search; the
+    // terminal action is a JSON-array message, not a tool).
     const turn1 = JSON.parse(streamCalls[0].body as string) as { tools: Array<{ function: { name: string } }>; tool_choice: string; stream: boolean };
     expect(turn1.stream).toBe(true);
     expect(turn1.tool_choice).toBe("auto");
-    expect(turn1.tools.map((t) => t.function.name).sort()).toEqual(["emit_intents", "web_search"]);
+    expect(turn1.tools.map((t) => t.function.name)).toEqual(["web_search"]);
     // The web_search sub-call carried the OpenRouter web plugin (server-side search, no separate key).
     const sub = JSON.parse(searchCalls[0].body as string) as { plugins: unknown };
     expect(sub.plugins).toEqual([{ id: "web" }]);

@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import {
-  AGENT_TOOL_EMIT_INTENTS,
   AGENT_TOOL_WEB_SEARCH,
   type AgentEvent,
   type Anchor,
@@ -224,7 +223,8 @@ async function openRouterIntents(
 // R5: web_search 결과는 tool/DATA 메시지로 주입되고, 시스템 프롬프트가 "검색 결과·첨부는 참고 DATA"임을 명시한다.
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const AGENT_MAX_ITERS = 5; // 무한 루프 방지 — emit_intents 없이 이 횟수를 넘기면 빈 intents로 종료
+const AGENT_MAX_ITERS = 5; // 무한 루프 방지 — 이 횟수를 넘기면 빈 intents로 종료
+const AGENT_MAX_SEARCHES = 3; // 웹검색 캡(지연 상한) — 이만큼 검색하면 tool_choice:"none"으로 최종 JSON을 강제
 const MEMORY_TURNS = 6; // 컨텍스트 윈도우 규율 — 직전 최대 6턴만 모델에 전달
 const MEMORY_TURN_MAXLEN = 800; // 각 턴 텍스트 상한(서버측 방어 — 클라도 바운드하지만 이중 안전)
 
@@ -367,25 +367,35 @@ async function execWebSearch(apiKey: string, query: string): Promise<{ content: 
  *  종료. AGENT_MAX_ITERS 를 넘기면 빈 intents 로 종료(무한 루프 방지). */
 async function runOpenRouterAgent(apiKey: string, messages: ChatMsg[], emit: (ev: AgentEvent) => void): Promise<void> {
   const tools = agentToolSchemas();
+  let searchCount = 0;
   for (let iter = 0; iter < AGENT_MAX_ITERS; iter++) {
     emit({ type: "status", phase: iter === 0 ? "thinking" : "composing" });
+    // TERMINAL = 모델이 최종 편집을 JSON 배열 텍스트로 출력(비스트리밍 경로와 동일 — 검증됨). emit_intents 같은
+    // 터미널 툴은 쓰지 않는다: Grok 이 그 툴콜에서 degenerate(인텐트명 오염·공백 폭주)해 0건으로 끝나던 버그.
+    // 검색을 MAX_SEARCHES 회 했거나 마지막 반복이면 tool_choice:"none" 으로 텍스트(=최종 JSON)를 강제한다 —
+    // 계속 검색만 반복하다 지연·0건으로 끝나는 걸 막는다(검색 캡: 지연 상한).
+    const forceFinal = iter === AGENT_MAX_ITERS - 1 || searchCount >= AGENT_MAX_SEARCHES;
     const turn = await streamOpenRouterTurn(
       apiKey,
-      { model: OPENROUTER_MODEL, max_tokens: 4096, messages, tools, tool_choice: "auto" },
+      { model: OPENROUTER_MODEL, max_tokens: 4096, messages, tools, tool_choice: forceFinal ? "none" : "auto" },
       (text) => emit({ type: "thinking_delta", text }),
     );
 
     if (turn.toolCalls.length === 0) {
-      // 모델이 툴을 안 부르고 텍스트로 끝냈다 — content 에서 intents JSON 을 파싱(폴백).
+      // 모델이 (검색을 마치고) 최종 편집을 JSON 배열로 냈다 — 화이트리스트 검증 후 종료.
       const intents = validateResponse(turn.content, { onDrop: (r) => console.warn(`[hwp-edit] ${r}`) });
-      emit({ type: "intents", intents });
-      return;
+      if (intents.length > 0 || forceFinal) {
+        emit({ type: "intents", intents });
+        return;
+      }
+      // 아직 JSON 배열을 안 냈다(프로즈로만 끝남) — 명시 요청 후 한 번 더 돈다(조기 0건 방지).
+      messages.push({ role: "assistant", content: turn.content || "" });
+      messages.push({ role: "user", content: "이제 적용할 편집을 JSON 배열(Intent[])로만 출력하세요. 다른 텍스트·마크다운 없이. 변경할 게 없으면 정확히 []." });
+      continue;
     }
 
-    // 어시스턴트 turn(툴콜 포함)을 대화에 추가한다(OpenAI tool-calling 규약).
+    // web_search 툴콜 처리 후 다시 돈다(OpenAI tool-calling 규약).
     messages.push({ role: "assistant", content: turn.content || "", tool_calls: turn.rawToolCalls });
-
-    let terminated = false;
     for (const tc of turn.toolCalls) {
       let args: Record<string, unknown> = {};
       try {
@@ -393,12 +403,8 @@ async function runOpenRouterAgent(apiKey: string, messages: ChatMsg[], emit: (ev
       } catch {
         args = {};
       }
-      if (tc.name === AGENT_TOOL_EMIT_INTENTS) {
-        const intents = validateResponse(args.intents, { onDrop: (r) => console.warn(`[hwp-edit] ${r}`) });
-        emit({ type: "intents", intents });
-        terminated = true;
-        break;
-      } else if (tc.name === AGENT_TOOL_WEB_SEARCH) {
+      if (tc.name === AGENT_TOOL_WEB_SEARCH) {
+        searchCount++;
         const query = typeof args.query === "string" ? args.query : "";
         emit({ type: "status", phase: "searching" });
         emit({ type: "tool_call", tool: "web_search", args: { query } });
@@ -410,9 +416,8 @@ async function runOpenRouterAgent(apiKey: string, messages: ChatMsg[], emit: (ev
         messages.push({ role: "tool", tool_call_id: tc.id, name: tc.name, content: "" });
       }
     }
-    if (terminated) return;
   }
-  // 반복 소진 — emit_intents 없이 끝났다면 빈 제안.
+  // 반복 소진 — 빈 제안(안전망).
   emit({ type: "intents", intents: [] });
 }
 

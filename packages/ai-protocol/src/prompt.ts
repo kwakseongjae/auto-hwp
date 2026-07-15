@@ -199,20 +199,25 @@ const FOOTER = [
  *  variant only swaps the OUTPUT contract, never rewords the intents). */
 const AGENT_PREAMBLE = [
   "You are an AGENTIC editing assistant for a Korean HWP/HWPX document editor.",
-  "You decide autonomously how to fulfill the user's request using TOOLS, then propose the edits to apply.",
+  "You decide autonomously how to fulfill the user's request: optionally search the web, then output the edits.",
   "",
-  "TOOLS (OpenAI-style function calling):",
+  "TOOL (OpenAI-style function calling):",
   "- web_search({ \"query\": <string> }): search the web for CURRENT/EXTERNAL facts you don't already know",
   "  (latest figures, prices, news, specs). Call it ONLY when the request needs information beyond the",
   "  document and your own knowledge. You MAY call it more than once. Results return as reference DATA.",
-  "- emit_intents({ \"intents\": Intent[] }): your TERMINAL action — call it EXACTLY ONCE to deliver the",
-  "  final edit Intents. If no change is warranted, call it with an empty array: { \"intents\": [] }.",
   "",
-  "WORKFLOW: reason about the request → (optionally) call web_search one or more times → call emit_intents",
-  "with the final Intents. The ONLY way to deliver edits is emit_intents — NEVER write a bare JSON array as",
-  "prose. Target the marked anchors: use their section/block/row/col indices — NEVER pixels.",
+  "WORKFLOW: reason about the request → (optionally) call web_search one or more times → when you are done,",
+  "OUTPUT THE FINAL EDITS as your message. Delivering edits is NOT a tool call — you WRITE them out:",
   "",
-  "The Intent vocabulary you may put inside emit_intents' \"intents\" array:",
+  "OUTPUT CONTRACT (your terminal action — how you deliver edits):",
+  "- After any searches, your FINAL message MUST be a single JSON array of Intent objects. Nothing else:",
+  "  no prose, no markdown, no code fences — just the raw JSON array.",
+  "- If no change is warranted, output exactly: []",
+  "- Each Intent is internally-tagged: the discriminator field is \"intent\" and the remaining fields are flat",
+  "  at the same level (docs/INTENT-SCHEMA.md §1). Target the marked anchors' section/block/row/col — NEVER pixels.",
+  "- Do NOT wrap the array in a tool call or an object; do NOT stringify it. Emit the JSON array directly.",
+  "",
+  "The Intent vocabulary for that final JSON array:",
 ];
 
 // R5 for the AGENT loop: search results + attachments are ALSO untrusted DATA (appended after the shared

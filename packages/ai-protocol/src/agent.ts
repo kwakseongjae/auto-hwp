@@ -22,10 +22,11 @@ export interface AgentToolSchema {
   };
 }
 
-/** The tool schemas for the agentic loop — `web_search({query})` + `emit_intents({intents})`. The runner
- *  passes these with `tool_choice:"auto"` so the MODEL decides whether to search before it proposes edits.
- *  `emit_intents` is the terminal action; its `intents` args are re-validated by `validateResponse` on the
- *  server (the schema here is guidance for the model, NOT the enforcement of record). */
+/** The tool schema(s) for the agentic loop — ONLY `web_search({query})`. The runner passes it with
+ *  `tool_choice:"auto"` so the MODEL decides whether to search. The TERMINAL action is NOT a tool: the model
+ *  outputs the final Intent[] as a plain JSON array in its message (the SAME contract as the non-streaming
+ *  path, `validateResponse`), which is far more reliable than a terminal `emit_intents` tool — Grok
+ *  degenerates on that tool call (corrupted intent names + whitespace spam), yielding 0 edits. */
 export function agentToolSchemas(): AgentToolSchema[] {
   return [
     {
@@ -42,32 +43,6 @@ export function agentToolSchemas(): AgentToolSchema[] {
             query: { type: "string", description: "The search query." },
           },
           required: ["query"],
-          additionalProperties: false,
-        },
-      },
-    },
-    {
-      type: "function",
-      function: {
-        name: AGENT_TOOL_EMIT_INTENTS,
-        description:
-          "Deliver the FINAL edit Intents to apply to the document. This is your TERMINAL action — call it " +
-          "exactly once when you are done. If no change is warranted, call it with an empty array: {\"intents\": []}.",
-        parameters: {
-          type: "object",
-          properties: {
-            intents: {
-              type: "array",
-              description: "The Intent objects (schema v0) to apply, in order. Each is internally-tagged by an \"intent\" field.",
-              items: {
-                type: "object",
-                properties: { intent: { type: "string" } },
-                required: ["intent"],
-                additionalProperties: true,
-              },
-            },
-          },
-          required: ["intents"],
           additionalProperties: false,
         },
       },
