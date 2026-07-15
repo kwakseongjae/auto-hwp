@@ -600,6 +600,12 @@ pub struct CellHitDto {
     pub y: f64,
     pub w: f64,
     pub h: f64,
+    /// True when the resolved cell contains a NESTED table (`Block::Table` among its blocks). Such a
+    /// cell is NOT an inline-edit target in Tier-1 (issue 064): opening the paragraph-only editor over
+    /// it would both cover the nested grid AND, on commit, historically drop the nested table (now
+    /// prevented in hwp-ops, but still visually wrong). The UI reads this to show an honest "중첩표는
+    /// 아직 편집할 수 없습니다" toast instead of the editor. `false` for ordinary (paragraph-only) cells.
+    pub nested: bool,
 }
 
 /// Join a table cell's paragraphs into plain text — multiple paragraphs joined with '\n' so a
@@ -645,6 +651,34 @@ fn model_cell_text(
         return String::new();
     };
     cell_plain_text(cell)
+}
+
+/// Whether the model cell at `(row, col)` of the table at `(section, block)` holds a NESTED table
+/// (a `Block::Table` among its blocks). Resolves through the SAME 1×1 frame wrapper (`edit_target`)
+/// as [`model_cell_text`], so a 자가진단표 frame (whose inner table is itself the edit target, not a
+/// nested table) reads `false` while a real table-in-a-cell reads `true`. Powers `CellHit.nested`
+/// (issue 064): a `true` cell is refused inline editing by the UI (honest toast) so its nested grid
+/// is neither covered by the paragraph-only editor nor lost on commit.
+fn model_cell_has_nested_table(
+    doc: &SemanticDoc,
+    section: usize,
+    block: usize,
+    row: usize,
+    col: usize,
+) -> bool {
+    use hwp_model::prelude::Block;
+    let Some(sec) = doc.sections.get(section) else {
+        return false;
+    };
+    let Some(Block::Table(t)) = sec.blocks.get(block) else {
+        return false;
+    };
+    let t = t.edit_target(); // frame wrapper (자가진단표) → inner table
+    t.cells
+        .iter()
+        .find(|c| c.row == row && c.col == col)
+        .map(|c| c.blocks.iter().any(|b| matches!(b, Block::Table(_))))
+        .unwrap_or(false)
 }
 
 /// One ACTIVE (uncovered) cell of a marked table's grid (issue 066): its MODEL-GLOBAL `(row, col)`
@@ -746,6 +780,7 @@ pub fn table_cell_at_placed(
         y: cell.y / k,
         w: cell.w / k,
         h: cell.h / k,
+        nested: model_cell_has_nested_table(doc, t.section, t.block, cell.row, cell.col),
     })
 }
 

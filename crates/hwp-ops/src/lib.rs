@@ -1318,7 +1318,7 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                     if !seg.is_empty() { paras.last_mut().unwrap().push((cs, seg.to_string())); }
                 }
             }
-            cell.blocks = paras.into_iter().enumerate().map(|(i, group)| {
+            let rebuilt: Vec<Block> = paras.into_iter().enumerate().map(|(i, group)| {
                 let runs = if group.is_empty() {
                     // An empty paragraph still needs one (empty) run so it round-trips/re-emits cleanly.
                     vec![Run { char_shape: neutral_shape.unwrap_or(plain), content: vec![Inline::Text(String::new())], ..Default::default() }]
@@ -1329,6 +1329,32 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                 };
                 Block::Paragraph(Paragraph { runs, para_shape: para_shape_for(i), dirty: Dirty(true), ..Default::default() })
             }).collect();
+            // NON-DESTRUCTIVE splice (issue 064 Tier-1, DATA-LOSS fix): replace only the cell's PARAGRAPH
+            // slots — in order — with the rebuilt paragraphs, leaving any `Block::Table` (a nested table)
+            // and every other non-paragraph block intact and in their original position. The old
+            // wholesale `cell.blocks = <rebuilt paragraphs>` DROPPED a nested table permanently. For a
+            // cell with NO non-paragraph blocks (the overwhelming common case — the layout gate's cells)
+            // this yields the byte-identical block list the wholesale replace did, so normal single-/
+            // multi-paragraph cells and pagination are unaffected (before == after).
+            let mut rebuilt = rebuilt.into_iter();
+            let mut new_blocks: Vec<Block> = Vec::with_capacity(cell.blocks.len());
+            for b in std::mem::take(&mut cell.blocks) {
+                match b {
+                    // A paragraph slot: consume the next rebuilt paragraph (or, if the edit reduced the
+                    // paragraph count, drop this now-removed slot — same as the old replace).
+                    Block::Paragraph(_) => {
+                        if let Some(p) = rebuilt.next() {
+                            new_blocks.push(p);
+                        }
+                    }
+                    // A nested table (or any non-paragraph block) survives verbatim, in place.
+                    other => new_blocks.push(other),
+                }
+            }
+            // Any extra rebuilt paragraphs (the edit ADDED paragraphs) trail the preserved blocks —
+            // identical to the old replace whenever the cell had only paragraphs.
+            new_blocks.extend(rebuilt);
+            cell.blocks = new_blocks;
             cell.dirty.mark();
             t.dirty.mark();
             sec.dirty.mark();
@@ -3424,6 +3450,116 @@ mod tests {
             }
         )
         .is_err());
+    }
+
+    #[test]
+    fn set_table_cell_preserves_nested_table() {
+        // DATA-LOSS regression (issue 064 Tier-1): a cell holding [Paragraph, Table, Paragraph] — a
+        // NESTED table between two paragraphs — must keep the nested table when SetTableCell rebuilds
+        // its paragraph text. The old wholesale `cell.blocks = <rebuilt paragraphs>` dropped it forever.
+        let mut doc = doc_with(vec![simple_para(1, "앞")]);
+        let cell = |t: &str| CellSpec {
+            text: t.into(),
+            ..Default::default()
+        };
+        apply(
+            &mut doc,
+            &Op::InsertTableAt {
+                section: 0,
+                index: 1,
+                rows: vec![vec![cell("원본1")]],
+            },
+        )
+        .unwrap();
+        // Inject a nested 1×1 table (holding "중첩셀") + a trailing paragraph into cell (0,0), so its
+        // blocks become [Paragraph("원본1"), Table(nested), Paragraph("원본2")].
+        let plain = intern_char_shape(&mut doc, CharShape::default());
+        let mk_para = |text: &str| {
+            Block::Paragraph(Paragraph {
+                runs: vec![Run {
+                    char_shape: plain,
+                    content: vec![Inline::Text(text.into())],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            })
+        };
+        let nested = Table {
+            rows: 1,
+            cols: 1,
+            col_widths: vec![1],
+            cells: vec![Cell {
+                row: 0,
+                col: 0,
+                row_span: 1,
+                col_span: 1,
+                active: true,
+                blocks: vec![mk_para("중첩셀")],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        {
+            let Block::Table(t) = &mut doc.sections[0].blocks[1] else {
+                panic!("not a table")
+            };
+            let c = t
+                .cells
+                .iter_mut()
+                .find(|c| c.active && c.row == 0 && c.col == 0)
+                .unwrap();
+            c.blocks.push(Block::Table(nested));
+            c.blocks.push(mk_para("원본2"));
+        }
+        // Edit the cell's text (two paragraphs via "\n"): rebuilds the paragraph slots in place.
+        apply(
+            &mut doc,
+            &Op::SetTableCell {
+                section: 0,
+                index: 1,
+                row: 0,
+                col: 0,
+                runs: vec![run_spec("수정1\n수정2")],
+            },
+        )
+        .unwrap();
+
+        let Block::Table(t) = &doc.sections[0].blocks[1] else {
+            panic!("not a table")
+        };
+        let c = t
+            .cells
+            .iter()
+            .find(|c| c.active && c.row == 0 && c.col == 0)
+            .expect("active cell");
+        // The nested table SURVIVES — exactly one, still in the middle, still holding "중첩셀".
+        let tables: Vec<&Table> = c
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Table(t) => Some(t),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(tables.len(), 1, "nested table must survive a cell edit");
+        assert_eq!(
+            run_texts(match &tables[0].cells[0].blocks[0] {
+                Block::Paragraph(p) => p,
+                _ => panic!("nested cell has no paragraph"),
+            })
+            .concat(),
+            "중첩셀",
+            "nested cell content must be intact"
+        );
+        // Block order preserved: Paragraph, Table, Paragraph.
+        assert!(
+            matches!(c.blocks[0], Block::Paragraph(_))
+                && matches!(c.blocks[1], Block::Table(_))
+                && matches!(c.blocks[2], Block::Paragraph(_)),
+            "block order [Paragraph, Table, Paragraph] must be preserved"
+        );
+        // The paragraph text is UPDATED (the two "\n"-split lines landed in the two paragraph slots).
+        assert_eq!(cell_text(&doc, 1, 0, 0), "수정1수정2");
     }
 
     /// The `CharShape` of the active cell's first run at (row, col) of the table at block `bi`.

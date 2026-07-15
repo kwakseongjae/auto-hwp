@@ -72,6 +72,9 @@ export interface CellHit {
   y: number;
   w: number;
   h: number;
+  /** True when the cell contains a NESTED table (issue 064). Such a cell is not an inline-edit target
+   *  in Tier-1 — the UI shows an honest toast instead of the paragraph-only editor. */
+  nested: boolean;
 }
 
 /** Cell-addressed caret rect (issue 053) — own-render px + the 0-based page the owning table fragment

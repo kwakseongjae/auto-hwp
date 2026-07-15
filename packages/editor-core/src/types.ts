@@ -60,6 +60,11 @@ export interface CellHit {
   y: number;
   w: number;
   h: number;
+  /** True when the cell holds a NESTED table — NOT an inline-edit target in Tier-1 (issue 064). The UI
+   *  refuses the editor and shows an honest toast (the engine now sets this; the paragraph-only editor
+   *  would otherwise cover the nested grid, and a commit historically dropped it). Optional for
+   *  back-compat with adapters/mocks that predate the flag (absent ⇒ treat as not nested). */
+  nested?: boolean;
 }
 
 /** An Intent (schema v0) — an internally-tagged object discriminated by `intent`. Kept loose here so

@@ -1247,6 +1247,13 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     async (c: PageClick) => {
       try {
         const cell = adapter.tableCellAt ? await adapter.tableCellAt(c.page, c.x, c.y) : null;
+        if (cell?.nested) {
+          // Tier-1 (issue 064): a cell holding a NESTED table is NOT editable inline. Refuse the editor
+          // — opening the paragraph-only overlay would cover the nested grid, and the commit would fire a
+          // SetTableCell on it. Honest toast; the nested table stays visible + intact.
+          toast("중첩표는 아직 편집할 수 없습니다");
+          return;
+        }
         if (cell) {
           const runs = await core.session.runsAt(cell.section, cell.block, cell.row, cell.col);
           setEditor({ page: c.page, box: { x: cell.x, y: cell.y, w: cell.w, h: cell.h }, section: cell.section, block: cell.block, kind: "cell", rows: [cell.row, cell.row], cols: [cell.col, cell.col], text: cell.text, runs, fontSizePt: firstRunStyle(runs).size_pt });
@@ -1262,7 +1269,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
       }
     },
-    [adapter, core, onTrap],
+    [adapter, core, onTrap, toast],
   );
 
   // Open the in-place editor directly over a SELECTED cell (issue 036 Enter/Tab entry). Unlike
@@ -2085,6 +2092,12 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           return;
         }
         const cell = adapter.tableCellAt ? await adapter.tableCellAt(c.page, c.x, c.y) : null;
+        if (cell?.nested) {
+          // Tier-1 (issue 064): a nested-table cell is not editable — don't drill/open an editor over it,
+          // just tell the user honestly. (openEditorAt guards too; this stops the pointless first-drill.)
+          toast("중첩표는 아직 편집할 수 없습니다");
+          return;
+        }
         const cur = core.selection.currentCell();
         const onDrilledCell = !!cell && !!cur && cur.section === cell.section && cur.block === cell.block && cur.row === cell.row && cur.col === cell.col;
         if (onDrilledCell) {
@@ -2096,7 +2109,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
       }
     },
-    [adapter, core, openEditorAt, onTrap],
+    [adapter, core, openEditorAt, onTrap, toast],
   );
   // Detect a double-click (two ups within 400ms, ~same client point) → the Figma drill/edit handler.
   const detectDoubleClick = useCallback(
