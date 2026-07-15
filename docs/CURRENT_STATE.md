@@ -65,7 +65,10 @@ QA에서 8건 피드백. 6레인 병렬 설계조사(qa4-design-explore workflow
 - **배치3 실 Grok 스트리밍 웹검색 검증됨**: `?stream=1`에 검색요청→status=thinking→thinking_delta→searching→tool_call(web_search)→tool_result(citations=4)→composing→intents. 모델주도 검색·사고스트림·출처 실작동(합성앵커라 intents=0이지만 파이프라인 정상).
 - 설계 근거 전문: workflow wf_ec4aacad-4cf journal. 3차까지=2fe44d3, QA4 배치1=16898c1·2=4e239d5·3=d890d37·4=8afc6e3.
 
-## 다음 = 로컬 육안 QA (사용자) + 위 발견 수정 배치
+## 웹 QA 5차 피드백 (2026-07-15) — #1 완료, #2·#3 조사 중
+- **#1 에이전틱 편집 "제안된 편집 없음" 멈춤 ✅ 수정·푸시(59101a6)**: 근본=Grok이 `emit_intents` 터미널 툴콜에서 degenerate(인텐트명 오염 'SetTableCell纺'·공백 폭주)→화이트리스트 드롭→intents 0. + 러너 핫리로드됐지만 프롬프트(ai-protocol dist)가 서버 캐시 스테일이라 모델이 없는 툴 시도. 수정: **emit_intents 툴 제거→최종 편집을 JSON 배열 텍스트로 출력**(비스트리밍과 동일 검증 경로)+AGENT_PREAMBLE JSON계약+웹검색 캡(AGENT_MAX_SEARCHES=3, tool_choice:"none" 강제). 실 Grok 실증: 명시 채우기→SetTableCell 1건, 검색+채우기→3검색후 1건. ai-protocol 42·hwp-lab 50·react 318·게이트 불변.
+- **#2 Figma식 컨트롤 ✅ 수정(86ad5b9, 푸시예정)**: 조사서 **지속 리본(FormatRibbon/048)이 이미 존재·마운트**됨을 발견 — 플로팅 툴바(028)는 중복이었음. FloatingToolbar 렌더 제거 → 서식은 지속 리본에만, 리본에 **서체 피커 추가**(applyRibbon 양 arm→setFont/applyLiveStyle), **컴팩트 ✨AI에게 전달 pill**(hw-ai-send, marks>0·union bbox 앵커, 여기서편집 pill과 stacked, aiFocusToken만 bump). react 316, 게이트 8==8/18==18. 테스트·e2e(editing-027/ribbon) 갱신.
+- **#3 HWPX 렌더 깨짐 (근본 확정, Batch A+B 구현 중)**: **통제실험 근본** = 렌더 엔진은 공유·정상(place_doc→SvgSink source-agnostic). HWP는 rhwp lift(풍부 IR), **HWPX는 얕은 자체 파서 `hwp-hwpx/parse.rs`가 run을 char_shape 0·문단 para_shape 0으로 하드코딩** → 전 텍스트 10pt 검정(볼드·크기·색·명조 소실)·페이지수 오류(청창사 PDF 18 vs 우리 25). **풀(header_pools)은 이미 파싱돼 메모리에 있으나 char_ref→char_shape 배선 누락** = 싼 수정. secPr 여백·표·이미지도 드롭. 계획: **A(풀 배선: char/para_shape 해석, 최대효과)+B(secPr 페이지 지오메트리=페이지수)** 먼저 → C(표 cellSz/borderFill)·D(이미지 hp:pic+bin_data) 후속. rhwp는 이미 HWPX 완전파싱(render 서브커맨드 15p) — 하이브리드가 폴백(단 round-trip moat는 hwp-hwpx 유지). ⚠️ 게이트는 .hwp(rhwp)라 hwp-hwpx 변경과 무관=before==after. 조사 SVG: scratchpad/out/*.
 `cd apps/hwp-lab && rm -rf .next && npm run dev` → Chrome. **QA.md 시나리오 ⑪~⑱**(이번 세션 신규 렌더:
 수식·차트·대각선·옛한글·IME·명조고딕·금칙·배포용복호/BMP)을 원본 PDF/한컴 뷰어와 대조. 기존 ①~⑩도 회귀 확인.
 QA 발견사항 → 이슈로 정리해 다음 배치. WKWebView IME 실기(059)는 데스크톱 Tauri에서 별도 수동.
