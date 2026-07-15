@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-15 (Claude) · 웹 QA 4차 대형 다배치 8건 — 설계조사→4배치 순차 구현
+- 발단: QA 8건 피드백(중첩표 사라짐·hover 오작동·문서구조 썸네일·웹검색 동적화·멀티모달·메모리·사고스트림·표생성). 6레인 설계조사 workflow(qa4-design-explore) → 엔진레벨 통일원칙(엔진=Intent, 나머지는 감싸는 층) → 사용자 승인 4배치.
+- **배치1(16898c1)**: 호버 strict-containment(빈배경 색변 제거)·표생성 프롬프트(엔진 InsertTableAt 완비, 갭=프롬프트)·중첩표 Tier1(Op::SetTableCell 비파괴화=데이터손실 차단+정직토스트). **배치2(4e239d5)**: 페이지 썸네일 레일(기존 SVG 래스터 재사용·lazy)·멀티모달 입력(이미지=grok 비전 content-parts·문서=TXT추출, HWP/PDF 미지원칩). **배치3(d890d37, XL)**: 에이전틱 스트리밍 AI(?stream=1 NDJSON·모델주도 web_search 툴콜링·사고 타임라인·대화메모리 6턴, 토글 v1 대체). **배치4(8afc6e3)**: 중첩표 Tier2(CellPath 전스택·중첩 편집 가능).
+- 교훈: 대형 피드백은 설계조사 workflow 선행이 효과적(6레인 병렬로 근본 매핑). 중첩표는 데이터손실 버그였음(SetTableCell이 cell.blocks 통째 교체→중첩표 영구드롭)—Tier1 우선 안전화 후 Tier2. 배치별 워크트리 병렬→순차 cherry-pick 전부 clean(파일 영역 분리). 실 Grok 스트리밍 웹검색 서버 스모크로 파이프라인 실증. 검증: 게이트 8==8/18==18 전배치 불변, vitest 40/168/318/50.
+- 다음: 사용자 로컬 QA(8건) + 차트/도표 생성(ⓗ) 착수 결정 + 실 스트리밍 웹검색 UI 육안.
+
 ## 2026-07-14 밤 (Claude) · 웹 QA 3차 피드백 3건 — AI채우기 검정색·다중페이지드래그·챗revert+웹검색
 - 발단: 사용자 QA에서 #1(표 자동인식·채우기) 실 Grok 프레임표 작동 확인(고무적) + 신규 3건. 조사 4차원(색상속·마퀴·AI라우트/UI/revert + OpenRouter 웹검색 실현성) → 구현 계획 → 사용자 승인(범위 ①②③-C·A-v1, 색상=AI채우기 항상 검정) → 3 병렬 워크트리.
 - **① (32f521b)**: `Op::SetTableCell`/`SetParagraphRuns`가 빈칸 첫 run char_shape 전체(색)를 물려줘 예시 파랑/빨강이 채운 값에 반영되던 것을 plain-run 분기 char_shape clone→text_color=default 검정 reintern(폰트·크기 유지)으로 교정. 수동 명시색은 non-plain이라 자동 우회. hwp-ops 65·게이트 before==after·wasm 재빌드. **② (c6e5319)**: 마퀴 시작페이지 클립 해제 → pointerMoveMultipage(React가 캡처 하 교차페이지+sub-rect, core DOM-free)+auto-scroll+finishMarquee 페이지별 union. **③ (4aa1083)**: 챗카드 지속 되돌리기(undoDepth top-of-stack v1)+🔎 웹검색 토글(OnAiRequest additive opts, InlineEditPanel 무영향)+OpenRouter web plugin+citations(additive).
