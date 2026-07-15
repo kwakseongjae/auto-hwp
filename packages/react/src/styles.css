@@ -609,6 +609,30 @@
 .hw-websearch-toggle:disabled { opacity: 0.4; cursor: default; }
 .hw-websearch-on { color: #fff; background: var(--hw-accent); border-color: var(--hw-accent); }
 
+/* ---- multimodal attachments ---- */
+.hw-attach-btn {
+  font-size: 11px; color: #4b5563; background: none; border: 1px solid var(--hw-border);
+  padding: 3px 10px; border-radius: 999px; cursor: pointer;
+}
+.hw-attach-btn:not(:disabled):hover { background: rgba(0, 0, 0, 0.04); }
+.hw-attach-btn:disabled { opacity: 0.4; cursor: default; }
+.hw-attachments-wrap { margin-bottom: 6px; }
+.hw-attachments-head { display: flex; align-items: center; margin-bottom: 4px; }
+.hw-attachments-hint { font-size: 11px; color: var(--hw-muted); cursor: help; }
+.hw-attachments { display: flex; flex-wrap: wrap; gap: 6px; }
+.hw-attachment {
+  display: inline-flex; align-items: center; gap: 4px; max-width: 100%; font-size: 11px; color: #374151;
+  border: 1px solid var(--hw-border); background: rgba(0, 0, 0, 0.03); padding: 2px 6px; border-radius: 8px;
+}
+.hw-attachment-unsupported { color: #92400e; border-color: rgba(217, 119, 6, 0.5); background: rgba(217, 119, 6, 0.08); }
+.hw-attachment-thumb { width: 22px; height: 22px; object-fit: cover; border-radius: 4px; display: block; }
+.hw-attachment-icon { font-size: 13px; }
+.hw-attachment-name { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hw-attachment-meta { color: var(--hw-muted); font-size: 10px; }
+.hw-attachment-x { background: none; border: none; color: inherit; cursor: pointer; padding: 0 2px; font-size: 10px; }
+.hw-attachment-x:hover { background: rgba(0, 0, 0, 0.1); border-radius: 3px; }
+.hw-attach-error { margin: 0 0 6px; padding: 0 4px; font-size: 11px; color: #b91c1c; }
+
 .hw-typing { align-self: flex-start; display: flex; gap: 4px; padding: 10px 12px; border: 1px solid rgba(124, 58, 237, 0.3); background: rgba(124, 58, 237, 0.05); border-radius: 14px 14px 14px 4px; }
 .hw-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--hw-ai); animation: hw-blink 1s infinite; }
 .hw-dot:nth-child(2) { animation-delay: 0.15s; }

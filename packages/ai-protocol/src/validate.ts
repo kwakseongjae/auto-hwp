@@ -1,5 +1,5 @@
 import { DEFAULT_ALLOWED_INTENTS } from "./prompt.js";
-import { DEFAULT_LIMITS, type Anchor, type Citation, type EditRequest, type Intent, type RequestLimits } from "./types.js";
+import { DEFAULT_LIMITS, type Anchor, type Attachment, type Citation, type EditRequest, type Intent, type RequestLimits } from "./types.js";
 
 /// Request + response validation (SDK-LAYERS: "validateResponse(json) — 화이트리스트+스키마 검증"). PROMOTED
 /// verbatim from apps/hwp-lab's route.ts (`validate`, `extractJsonArray`, `whitelist`) so the server proxy
@@ -24,7 +24,46 @@ export function validateRequest(body: unknown, limits: RequestLimits = DEFAULT_L
   // docContext 는 프록시 계약상 string. 없으면 빈 문자열로 관대 처리.
   const ctx = typeof docContext === "string" ? docContext : "";
   if (ctx.length > limits.maxDocContext) return { ok: false, error: `docContext가 너무 깁니다(>${limits.maxDocContext}).` };
-  return { ok: true, value: { instruction, anchors: anchors as Anchor[], docContext: ctx } };
+  // attachments(멀티모달)는 선택 필드 — 있으면 배열·개수·크기를 검증해 well-formed 항목만 통과시킨다.
+  const att = sanitizeAttachments(b.attachments, limits);
+  if (!att.ok) return { ok: false, error: att.error };
+  const value: EditRequest = { instruction, anchors: anchors as Anchor[], docContext: ctx };
+  if (att.value.length) value.attachments = att.value;
+  return { ok: true, value };
+}
+
+/** Validate + sanitize the OPTIONAL `attachments` array (multimodal chat input). Absent → `[]` (additive,
+ *  no error). Rejects a non-array or an over-count set; per item keeps only well-formed
+ *  `{ id, kind:'image'|'doc', name, mime }` and carries a size-checked `dataUrl` (image) / `text` (doc).
+ *  Malformed items and oversized payloads are dropped/rejected so untrusted attachment content can never
+ *  bloat the turn or smuggle a non-string field into the fence. Pure + isomorphic — no fetch, no I/O. */
+function sanitizeAttachments(raw: unknown, limits: RequestLimits): { ok: true; value: Attachment[] } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) return { ok: true, value: [] };
+  if (!Array.isArray(raw)) return { ok: false, error: "attachments(배열)가 아닙니다." };
+  const maxN = limits.maxAttachments ?? DEFAULT_LIMITS.maxAttachments ?? 8;
+  if (raw.length > maxN) return { ok: false, error: `attachments가 너무 많습니다(>${maxN}).` };
+  const maxText = limits.maxAttachmentText ?? DEFAULT_LIMITS.maxAttachmentText ?? 20000;
+  const maxUrl = limits.maxImageDataUrl ?? DEFAULT_LIMITS.maxImageDataUrl ?? 8_000_000;
+  const out: Attachment[] = [];
+  for (const c of raw) {
+    if (!c || typeof c !== "object") continue;
+    const r = c as Record<string, unknown>;
+    const kind = r.kind;
+    if (kind !== "image" && kind !== "doc") continue;
+    const id = typeof r.id === "string" ? r.id : "";
+    const name = typeof r.name === "string" ? r.name : "";
+    const mime = typeof r.mime === "string" ? r.mime : "";
+    if (kind === "image") {
+      if (typeof r.dataUrl !== "string" || !r.dataUrl.startsWith("data:")) continue; // image needs an inline data URL
+      if (r.dataUrl.length > maxUrl) return { ok: false, error: `첨부 이미지가 너무 큽니다(>${maxUrl}B).` };
+      out.push({ id, kind, name, mime, dataUrl: r.dataUrl });
+    } else {
+      if (typeof r.text !== "string" || r.text.length === 0) continue; // doc with no extracted text carries nothing
+      if (r.text.length > maxText) return { ok: false, error: `첨부 문서 텍스트가 너무 깁니다(>${maxText}).` };
+      out.push({ id, kind, name, mime, text: r.text });
+    }
+  }
+  return { ok: true, value: out };
 }
 
 /** Robustly extract the first JSON array from LLM text (tolerates prose/markdown around it). Returns the

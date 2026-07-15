@@ -1,7 +1,57 @@
 import { useEffect, useRef, useState } from "react";
 import { describeIntent } from "../describeIntent";
 import { modLabel } from "../platform";
-import type { Anchor, Citation, DocContext, Intent, IntentCard, OnAiRequest } from "../types";
+import type { Anchor, Attachment, Citation, DocContext, Intent, IntentCard, OnAiRequest } from "../types";
+
+// Multimodal chat input (attachments are CONTEXT, not a new Intent). Text-like documents are extracted
+// CLIENT-SIDE (FileReader.readAsText — no deps); binary formats (HWP/HWPX/PDF/DOCX) are NOT extracted here
+// (a clean extractor would need a wasm text export or a binary-parser dep — out of scope for this JS-only
+// change), so they attach with an honest UI note and carry no text (never sent as empty).
+const TEXT_EXT = /\.(txt|text|md|markdown|csv|tsv|json|log|xml|html?|rtf|yml|yaml)$/i;
+const UNSUPPORTED_NOTE = "이 형식은 아직 텍스트 추출 미지원 — 텍스트(.txt)·이미지로 첨부하세요";
+
+let attachSeq = 0;
+function nextAttachId(): string {
+  attachSeq += 1;
+  return `att-${Date.now().toString(36)}-${attachSeq}`;
+}
+
+function isTextLike(file: File): boolean {
+  return file.type.startsWith("text/") || TEXT_EXT.test(file.name);
+}
+
+function readAs(file: File, how: "dataURL" | "text"): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onerror = () => reject(fr.error ?? new Error("파일 읽기 실패"));
+    fr.onload = () => resolve(typeof fr.result === "string" ? fr.result : "");
+    if (how === "dataURL") fr.readAsDataURL(file);
+    else fr.readAsText(file);
+  });
+}
+
+/** Turn a picked/pasted File into an Attachment: IMAGE → base64 dataUrl (vision), text-like DOC → extracted
+ *  text, other binary DOC → an honest "미지원" note (no text; never sent as empty). Pure per-file — the
+ *  caller appends to state (respecting the count cap). */
+async function fileToAttachment(file: File): Promise<Attachment> {
+  const base = { id: nextAttachId(), name: file.name || "attachment", mime: file.type || "application/octet-stream", size: file.size };
+  if (file.type.startsWith("image/")) {
+    return { ...base, kind: "image", dataUrl: await readAs(file, "dataURL") };
+  }
+  if (isTextLike(file)) {
+    return { ...base, kind: "doc", text: await readAs(file, "text") };
+  }
+  return { ...base, kind: "doc", note: UNSUPPORTED_NOTE };
+}
+
+/** Human-readable byte size for a doc chip. */
+function fmtSize(bytes: number | undefined): string {
+  if (!bytes || bytes < 1024) return `${bytes ?? 0}B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+const MAX_ATTACHMENTS = 8;
 
 export interface ChatPanelProps {
   /** Whether editing is possible (a document is open + editable). */
@@ -119,8 +169,52 @@ export function ChatPanel(props: ChatPanelProps) {
   const [busy, setBusy] = useState(false);
   // Feature A: web-search grounding toggle (opt-in per request; avoids searching/billing on every edit).
   const [webSearch, setWebSearch] = useState(false);
+  // Multimodal: attachments riding along with the next prompt (images for vision + reference-doc text).
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [attachError, setAttachError] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  // Read picked/pasted files into attachments (append, honoring the count cap). Failures surface a note
+  // rather than throwing — a bad file never blocks the composer.
+  async function addFiles(files: File[]) {
+    if (!files.length) return;
+    setAttachError(null);
+    const room = MAX_ATTACHMENTS - attachments.length;
+    if (room <= 0) {
+      setAttachError(`첨부는 최대 ${MAX_ATTACHMENTS}개까지 가능합니다.`);
+      return;
+    }
+    const picked = files.slice(0, room);
+    try {
+      const next = await Promise.all(picked.map(fileToAttachment));
+      setAttachments((a) => [...a, ...next]);
+      if (files.length > room) setAttachError(`첨부는 최대 ${MAX_ATTACHMENTS}개까지 — 처음 ${room}개만 추가했습니다.`);
+    } catch (e) {
+      setAttachError(`첨부 읽기 실패: ${e}`);
+    }
+  }
+  function removeAttachment(id: string) {
+    setAttachments((a) => a.filter((x) => x.id !== id));
+  }
+  // Paste an image directly into the textarea (clipboard screenshot). Only image items are intercepted; a
+  // normal text paste falls through to the default behavior.
+  function onPasteAttach(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const imgs: File[] = [];
+    for (const it of Array.from(items)) {
+      if (it.kind === "file" && it.type.startsWith("image/")) {
+        const f = it.getAsFile();
+        if (f) imgs.push(f);
+      }
+    }
+    if (imgs.length) {
+      e.preventDefault(); // don't also paste the image's textual placeholder
+      void addFiles(imgs);
+    }
+  }
 
   const last = msgs[msgs.length - 1];
   const awaiting = last?.role === "assistant" && last.state === "pending";
@@ -168,23 +262,33 @@ export function ChatPanel(props: ChatPanelProps) {
   async function send(text: string) {
     if (busy || awaiting) return;
     const trimmed = text.trim();
-    if (!trimmed) return;
+    // Multimodal: only forward attachments that carry payload (an image dataUrl / doc text) — an
+    // unsupported-format chip (note only) rides along visually but is never sent. Strip UI-only note/size.
+    const sendable: Attachment[] = attachments
+      .filter((a) => (a.kind === "image" && a.dataUrl) || (a.kind === "doc" && a.text))
+      .map((a) => ({ id: a.id, kind: a.kind, name: a.name, mime: a.mime, ...(a.dataUrl ? { dataUrl: a.dataUrl } : {}), ...(a.text ? { text: a.text } : {}) }));
+    if (!trimmed && sendable.length === 0) return; // nothing to send
     const anchors = props.anchors;
     const page = anchors.length ? anchors[0].page : null;
     const where = anchors.length ? ` (대상: ${anchors.map((a) => a.label).join(", ")})` : "";
+    const attachTag = sendable.length ? ` 📎${sendable.length}` : "";
     setInput("");
-    setMsgs((m) => [...m, { role: "user", text: trimmed + where }]);
+    setAttachments([]); // the attachments have ridden along — clear them
+    setAttachError(null);
+    setMsgs((m) => [...m, { role: "user", text: trimmed + where + attachTag }]);
     setBusy(true);
     try {
       // Feature A: pass the web-search toggle + a citations sink (additive `opts`). The host enables
       // server-side web grounding for THIS request and reports back any `url_citation` sources here — the
       // model still returns our JSON intents (no tool-calling refactor). Sink captured into the turn below.
+      // Multimodal: `attachments` (additive) carries images (vision) + reference-doc text for THIS request.
       let captured: Citation[] = [];
       const intents = await props.onAiRequest(trimmed, anchors, props.docContext, {
         webSearch,
         onCitations: (c) => {
           captured = c;
         },
+        ...(sendable.length ? { attachments: sendable } : {}),
       });
       props.onConsumeAnchors(); // the chips have ridden along — clear them (issue #009)
       const citations = captured.length ? captured : undefined;
@@ -401,8 +505,62 @@ export function ChatPanel(props: ChatPanelProps) {
             </div>
           </div>
         )}
-        {props.enableWebSearch && (
-          <div className="hw-composer-tools">
+        {/* Multimodal: attachment CHIPS ride along with the next prompt (mirrors the anchor-chips block).
+            An image shows a thumbnail; a doc shows filename + size (or an honest "미지원" note). */}
+        {attachments.length > 0 && (
+          <div className="hw-attachments-wrap" data-testid="hw-attachments">
+            <div className="hw-attachments-head">
+              <span className="hw-attachments-hint" title="이 요청과 함께 AI에 전달됩니다 — 이미지는 이미지로, 문서는 참고 텍스트로. 첨부 내용은 지시가 아니라 참고 자료입니다.">
+                📎 첨부 {attachments.length}개
+              </span>
+            </div>
+            <div className="hw-attachments">
+              {attachments.map((a) => (
+                <span key={a.id} className={a.note ? "hw-attachment hw-attachment-unsupported" : "hw-attachment"} title={a.note ?? a.name} data-testid="hw-attachment">
+                  {a.kind === "image" && a.dataUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img className="hw-attachment-thumb" src={a.dataUrl} alt={a.name} />
+                  ) : (
+                    <span className="hw-attachment-icon" aria-hidden>
+                      📄
+                    </span>
+                  )}
+                  <span className="hw-attachment-name">{a.name}</span>
+                  <span className="hw-attachment-meta">{a.note ? "미지원" : a.kind === "image" ? fmtSize(a.size) : `${fmtSize(a.size)}`}</span>
+                  <button className="hw-attachment-x" onClick={() => removeAttachment(a.id)} title="이 첨부 제거">
+                    ✕
+                  </button>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+        {attachError && <p className="hw-attach-error" data-testid="hw-attach-error">{attachError}</p>}
+        <div className="hw-composer-tools">
+          {/* 📎 attachment picker — images + common documents. Always available while editing. */}
+          <input
+            ref={fileRef}
+            type="file"
+            multiple
+            accept="image/*,.txt,.md,.markdown,.csv,.tsv,.json,.log,.xml,.html,.htm,.rtf,.hwp,.hwpx,.pdf,.doc,.docx"
+            style={{ display: "none" }}
+            data-testid="hw-attach-input"
+            onChange={(e) => {
+              void addFiles(Array.from(e.currentTarget.files ?? []));
+              e.currentTarget.value = ""; // allow re-picking the same file
+            }}
+          />
+          <button
+            type="button"
+            className="hw-attach-btn"
+            data-testid="hw-attach-btn"
+            disabled={!props.canEdit || busy || awaiting}
+            title="이미지·문서 첨부: 표 사진/스크린샷을 붙여넣거나(⌘V) 참고 문서를 선택하세요. AI가 내용을 읽어 편집에 반영합니다."
+            onClick={() => fileRef.current?.click()}
+          >
+            📎 첨부
+          </button>
+          {props.enableWebSearch && (
             <button
               type="button"
               className={webSearch ? "hw-websearch-toggle hw-websearch-on" : "hw-websearch-toggle"}
@@ -414,8 +572,8 @@ export function ChatPanel(props: ChatPanelProps) {
             >
               🔎 웹 검색{webSearch ? " · 켬" : ""}
             </button>
-          </div>
-        )}
+          )}
+        </div>
         <div className="hw-composer-row">
           <textarea
             ref={inputRef}
@@ -423,8 +581,9 @@ export function ChatPanel(props: ChatPanelProps) {
             value={input}
             disabled={!props.canEdit || busy || awaiting}
             spellCheck={false}
-            placeholder={awaiting ? "위 제안을 적용/취소한 뒤 계속하세요" : props.anchors.length ? "이 위치를 어떻게 바꿀까요?" : "무엇을 바꿀까요? (문서를 클릭해 위치 지정)"}
+            placeholder={awaiting ? "위 제안을 적용/취소한 뒤 계속하세요" : props.anchors.length ? "이 위치를 어떻게 바꿀까요?" : "무엇을 바꿀까요? (문서를 클릭하거나 이미지를 붙여넣기)"}
             onChange={(e) => setInput(e.currentTarget.value)}
+            onPaste={onPasteAttach}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
@@ -432,7 +591,11 @@ export function ChatPanel(props: ChatPanelProps) {
               }
             }}
           />
-          <button className="hw-btn-send" disabled={!props.canEdit || busy || awaiting || !input.trim()} onClick={() => void send(input)}>
+          <button
+            className="hw-btn-send"
+            disabled={!props.canEdit || busy || awaiting || (!input.trim() && attachments.every((a) => !a.dataUrl && !a.text))}
+            onClick={() => void send(input)}
+          >
             {busy ? "…" : "보내기"}
           </button>
         </div>

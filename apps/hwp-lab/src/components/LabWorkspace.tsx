@@ -342,6 +342,9 @@ export default function LabWorkspace() {
         docContext: buildDocContext({ format: ctx.format, pages: ctx.pages, editable: ctx.editable, sections: ctx.sections }, anchors, { grids }),
         // Feature A: 웹 검색 grounding 옵트인(토글). 서버가 이 플래그일 때만 web 플러그인을 켠다.
         webSearch: opts?.webSearch ?? false,
+        // 멀티모달: 첨부(이미지=vision dataUrl, 문서=추출 텍스트)를 서버로 전달. 서버가 이미지 present면
+        // OpenAI content-parts로, 문서 텍스트는 R5 <attachment> 펜스로 조립한다. 키/모델은 서버사이드(R6).
+        ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
       }),
     });
     if (!res.ok) {

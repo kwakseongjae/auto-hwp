@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import {
   type Anchor,
+  type Attachment,
   type Citation,
   type Intent,
   buildSystemPrompt,
   buildUserMessage,
+  buildUserMessageParts,
   extractCitations,
   validateRequest,
   validateResponse,
@@ -96,6 +98,7 @@ async function liveIntents(
   instruction: string,
   anchors: Anchor[],
   docContext: string,
+  attachments: Attachment[],
 ): Promise<Intent[]> {
   // 서버 전용 동적 import — 클라이언트 번들 분석 경로에 절대 들어오지 않는다.
   const AnthropicMod = await import("@anthropic-ai/sdk");
@@ -107,8 +110,10 @@ async function liveIntents(
     max_tokens: 4096,
     thinking: { type: "adaptive" },
     // system 프롬프트/유저 메시지(R5 펜스 포함)는 ai-protocol 이 조립 — 클라와 동일 규격.
+    // 멀티모달: 문서 첨부의 추출 텍스트는 buildUserMessage 가 <attachment> R5 펜스로 포함한다(이미지 vision
+    // 은 OpenRouter content-parts 경로 — Anthropic 이미지 블록 규격은 다르므로 이 참조 경로에선 텍스트만).
     system: buildSystemPrompt(),
-    messages: [{ role: "user", content: buildUserMessage({ instruction, anchors, docContext }) }],
+    messages: [{ role: "user", content: buildUserMessage({ instruction, anchors, docContext, attachments }) }],
   });
 
   // content 블록 중 text 블록만 이어붙인다(adaptive thinking 사용 시 thinking 블록은 무시).
@@ -119,7 +124,12 @@ async function liveIntents(
 }
 
 // OpenRouter default model(사용자 선택). env `TF_HWP_OPENROUTER_MODEL`로 언제든 override(정확한 슬러그).
+// x-ai/grok-4.5 는 OpenRouter 상 input_modalities = ["text","image","file"] — vision 지원(2026-07 실측).
+// 그래서 이미지 첨부는 별도 vision 모델로 스왑하지 않고 이 모델로 곧장 content-parts 를 보낸다. 혹시
+// 비전 미지원 모델로 override 한 경우를 대비해 `TF_HWP_OPENROUTER_VISION_MODEL` 로 이미지 요청 전용
+// 모델을 지정할 수 있다(미지정이면 기본 모델 그대로 — 기본이 vision 이므로 안전).
 const OPENROUTER_MODEL = process.env.TF_HWP_OPENROUTER_MODEL || "x-ai/grok-4.5";
+const OPENROUTER_VISION_MODEL = process.env.TF_HWP_OPENROUTER_VISION_MODEL || OPENROUTER_MODEL;
 
 /** OpenRouter(OpenAI 호환 Chat Completions) 경로. 키는 이 서버 핸들러 밖으로 나가지 않는다(R6).
  *  system/user 프롬프트(R5 펜스·화이트리스트·doc-context)는 Anthropic 경로와 동일하게 ai-protocol이 조립.
@@ -133,13 +143,21 @@ async function openRouterIntents(
   anchors: Anchor[],
   docContext: string,
   webSearch: boolean,
+  attachments: Attachment[],
 ): Promise<{ intents: Intent[]; citations: Citation[] }> {
+  // 멀티모달: 이미지 첨부가 있으면 OpenAI content-PARTS 로 유저 메시지를 조립하고(vision), 이미지 지원
+  // 모델을 쓴다. 이미지가 없으면 기존 STRING content 그대로(back-compat). 문서 첨부의 텍스트는 두 경로
+  // 모두 buildUserMessage/Parts 가 <attachment> R5 펜스로 포함한다. 첨부는 참고 DATA — intents 레인 불변.
+  const hasImage = attachments.some((a) => a.kind === "image" && typeof a.dataUrl === "string" && a.dataUrl.length > 0);
+  const userContent = hasImage
+    ? buildUserMessageParts({ instruction, anchors, docContext, attachments })
+    : buildUserMessage({ instruction, anchors, docContext, attachments });
   const body: Record<string, unknown> = {
-    model: OPENROUTER_MODEL,
+    model: hasImage ? OPENROUTER_VISION_MODEL : OPENROUTER_MODEL,
     max_tokens: 4096,
     messages: [
       { role: "system", content: buildSystemPrompt() },
-      { role: "user", content: buildUserMessage({ instruction, anchors, docContext }) },
+      { role: "user", content: userContent },
     ],
   };
   // 검색이 요구될 때만 web 플러그인을 켠다(옵트인) — 클라이언트의 "🔎 웹 검색" 토글이 이 플래그를 보낸다.
@@ -157,7 +175,7 @@ async function openRouterIntents(
   });
   if (!res.ok) {
     const errBody = await res.text().catch(() => "");
-    throw new Error(`OpenRouter ${res.status} (model=${OPENROUTER_MODEL}): ${errBody.slice(0, 300)}`);
+    throw new Error(`OpenRouter ${res.status} (model=${body.model as string}): ${errBody.slice(0, 300)}`);
   }
   const data = (await res.json()) as { choices?: Array<{ message?: { content?: string; annotations?: unknown } }> };
   const message = data.choices?.[0]?.message;
@@ -192,6 +210,8 @@ export async function POST(req: Request) {
   const check = validateRequest(body);
   if (!check.ok) return badRequest(check.error);
   const { instruction, anchors, docContext } = check.value;
+  // 멀티모달: validateRequest 가 sanitize 한 첨부(이미지 dataUrl / 문서 text, well-formed 만). 없으면 [].
+  const attachments = check.value.attachments ?? [];
   // Feature A: 명시적 웹 검색 플래그(선택) — validateRequest 계약(instruction/anchors/docContext) 밖의
   // 부가 필드라 raw body에서 직접 읽는다(boolean 아니면 false). intents 스키마와 무관(요청 부가 옵션).
   const webSearch = typeof (body as { webSearch?: unknown }).webSearch === "boolean" ? (body as { webSearch: boolean }).webSearch : false;
@@ -203,11 +223,11 @@ export async function POST(req: Request) {
   }
   try {
     if (provider === "openrouter") {
-      const { intents, citations } = await openRouterIntents(process.env.OPENROUTER_API_KEY!, instruction, anchors, docContext, webSearch);
+      const { intents, citations } = await openRouterIntents(process.env.OPENROUTER_API_KEY!, instruction, anchors, docContext, webSearch, attachments);
       return NextResponse.json({ intents, citations, mode: "live", provider });
     }
     // Anthropic 경로는 내장 웹 검색이 없다(Grok과 달리) — 근거 없음(빈 배열)으로 형태만 additive 유지.
-    const intents = await liveIntents(process.env.ANTHROPIC_API_KEY!, instruction, anchors, docContext);
+    const intents = await liveIntents(process.env.ANTHROPIC_API_KEY!, instruction, anchors, docContext, attachments);
     return NextResponse.json({ intents, citations: [], mode: "live", provider });
   } catch (e) {
     const detail = e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : String(e);

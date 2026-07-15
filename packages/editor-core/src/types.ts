@@ -257,15 +257,33 @@ export interface Citation {
   title: string;
 }
 
+/** One chat ATTACHMENT (multimodal input) — an IMAGE (base64 `dataUrl`, sent to a vision model) or a
+ *  reference DOCUMENT (extracted `text`, folded into the R5 fence as untrusted DATA). Attachments are
+ *  CONTEXT, never a new Intent. Structurally compatible with @tf-hwp/ai-protocol's `Attachment` so a host
+ *  forwards these straight to its proxy. `note`/`size` are UI-only hints (an unsupported-format message,
+ *  the source byte size) — both optional and stripped by the chat before the request reaches the model. */
+export interface Attachment {
+  id: string;
+  kind: "image" | "doc";
+  name: string;
+  mime: string;
+  dataUrl?: string;
+  text?: string;
+  note?: string;
+  size?: number;
+}
+
 /** OPTIONAL per-request knobs the CHAT surface passes to the host AI bridge (additive — the inline edit
  *  surface omits them, so existing 3-arg callers are unaffected). `webSearch` asks the host to enable
  *  server-side web-search grounding for THIS request only (opt-in — avoids searching/billing on every
  *  edit); `onCitations` is a sink the host calls with any returned source citations so the chat can render
- *  them. Kept a callback (NOT a return-type change) so the shared `Promise<Intent[]>` contract — used by
- *  BOTH the chat and the inline panel — stays unchanged. */
+ *  them; `attachments` (multimodal) carries pasted/picked images + reference-doc text for THIS request.
+ *  Kept a callback + optional bag (NOT a return-type change) so the shared `Promise<Intent[]>` contract —
+ *  used by BOTH the chat and the inline panel — stays unchanged. */
 export interface AiRequestOptions {
   webSearch?: boolean;
   onCitations?: (citations: Citation[]) => void;
+  attachments?: Attachment[];
 }
 
 /** The host-supplied AI bridge (R6): the SDK NEVER calls an LLM or holds a key. Given the user's

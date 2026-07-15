@@ -211,6 +211,7 @@ export type { RectLike, VbLike, ScreenBox, PageBox } from "./coords";
 export type {
   AiRequestOptions,
   Anchor,
+  Attachment,
   BlockHit,
   Citation,
   TableBox,

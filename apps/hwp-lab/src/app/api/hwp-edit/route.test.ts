@@ -88,3 +88,68 @@ describe("hwp-edit route — web-search plugin + citations (Feature A)", () => {
     expect(data.citations).toEqual([]); // no web search in mock, but the field is present (shape stable)
   });
 });
+
+// ── Multimodal: image → content-parts user message (vision); doc → R5 <attachment> fenced text ─────────
+describe("hwp-edit route — multimodal attachments (image vision + doc text)", () => {
+  const prevOpenRouter = process.env.OPENROUTER_API_KEY;
+  const prevAnthropic = process.env.ANTHROPIC_API_KEY;
+  let calls: { url: unknown; init: RequestInit }[];
+  const IMG = "data:image/png;base64,iVBORw0KGgoAAAANSU=";
+
+  beforeEach(() => {
+    process.env.OPENROUTER_API_KEY = "test-key";
+    delete process.env.ANTHROPIC_API_KEY;
+    calls = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: unknown, init: RequestInit) => {
+        calls.push({ url, init });
+        return { ok: true, json: async () => OK_ANNOTATED, text: async () => "" } as unknown as Response;
+      }),
+    );
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    if (prevOpenRouter === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = prevOpenRouter;
+    if (prevAnthropic === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = prevAnthropic;
+  });
+
+  it("an IMAGE attachment makes the upstream user message a content-PARTS array (text + image_url)", async () => {
+    const attachments = [{ id: "a1", kind: "image", name: "table.png", mime: "image/png", dataUrl: IMG }];
+    const res = await POST(makeReq({ instruction: "이 표 사진을 그대로 채워줘", anchors: [{ kind: "table", section: 0, block: 3 }], docContext: "format=hwpx", attachments }));
+    expect(res.status).toBe(200);
+
+    const body = JSON.parse(calls[0].init.body as string) as { messages: { role: string; content: unknown }[] };
+    const userMsg = body.messages[1];
+    expect(userMsg.role).toBe("user");
+    // Content is PARTS (array), not a plain string — the vision channel.
+    expect(Array.isArray(userMsg.content)).toBe(true);
+    const parts = userMsg.content as Array<{ type: string; text?: string; image_url?: { url: string } }>;
+    // The text part still carries the R5-fenced instruction/doc-context…
+    const textPart = parts.find((p) => p.type === "text");
+    expect(textPart?.text).toContain("사용자 지시: 이 표 사진을 그대로 채워줘");
+    expect(textPart?.text).toContain("<document-content>");
+    // …and the image rides as an image_url part with the base64 dataUrl.
+    expect(parts).toContainEqual({ type: "image_url", image_url: { url: IMG } });
+  });
+
+  it("a DOC (text) attachment stays a STRING user message with the extracted text in an R5 <attachment> fence", async () => {
+    const attachments = [{ id: "d1", kind: "doc", name: "ref.txt", mime: "text/plain", text: "표 데이터: A=1 B=2" }];
+    await POST(makeReq({ instruction: "참고 문서대로 채워줘", anchors: [], docContext: "format=hwpx", attachments }));
+
+    const body = JSON.parse(calls[0].init.body as string) as { messages: { role: string; content: unknown }[] };
+    const content = body.messages[1].content;
+    // No image → back-compat STRING content (not parts).
+    expect(typeof content).toBe("string");
+    expect(content as string).toContain('<attachment name="ref.txt" mime="text/plain">');
+    expect(content as string).toContain("표 데이터: A=1 B=2");
+  });
+
+  it("no attachments → the upstream user message is a plain STRING (back-compat, unchanged wire)", async () => {
+    await POST(makeReq({ instruction: "이 문단 다듬어줘", anchors: [], docContext: "format=hwpx" }));
+    const body = JSON.parse(calls[0].init.body as string) as { messages: { content: unknown }[] };
+    expect(typeof body.messages[1].content).toBe("string");
+  });
+});

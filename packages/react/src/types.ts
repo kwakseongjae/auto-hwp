@@ -7,6 +7,7 @@
 export type {
   AiRequestOptions,
   Anchor,
+  Attachment,
   BlockHit,
   Citation,
   TableBox,

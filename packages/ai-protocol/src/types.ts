@@ -53,13 +53,40 @@ export interface DocMeta {
   sections: number;
 }
 
+/** One chat ATTACHMENT (multimodal input) — the user pastes/picks an IMAGE (a photo/screenshot of a table,
+ *  a reference figure) or a reference DOCUMENT. An `image` carries a base64 `dataUrl` (sent to a vision
+ *  model as an OpenAI-style `image_url` content part); a `doc` carries extracted `text` (folded into the
+ *  R5 fence as untrusted reference DATA — never instructions). Both are CONTEXT, never a new Intent: the
+ *  Intent lane/whitelist is untouched. Additive + unknown-field-safe per invariant 7. Structurally
+ *  compatible with @tf-hwp/editor-core's `Attachment` so a host passes these straight through. */
+export interface Attachment {
+  id: string;
+  kind: "image" | "doc";
+  name: string;
+  mime: string;
+  /** IMAGE only: a base64 `data:` URL (e.g. `data:image/png;base64,…`) sent as an `image_url` part. */
+  dataUrl?: string;
+  /** DOC only: the extracted plain text, R5-fenced as reference DATA. Absent when extraction is unsupported. */
+  text?: string;
+}
+
+/** One OpenAI-compatible USER content PART (multimodal) — either a text segment or an inline image URL.
+ *  `buildUserMessageParts` returns these when a request carries image attachments so a vision model
+ *  (e.g. OpenRouter's grok-4.5, whose input_modalities include "image") sees the picture; the string
+ *  `buildUserMessage` stays the back-compat path when there are no images. */
+export type UserContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
 /** The request a host POSTs to its own LLM proxy: the user's instruction, the marked anchors, and the
  *  R5-fenceable doc-context STRING (built by `buildDocContext`). No key, no model choice — those are the
- *  host's. */
+ *  host's. `attachments` (additive, optional) carries multimodal chat input — images for a vision model +
+ *  reference-doc text folded into the R5 fence. Absent → byte-identical to the pre-multimodal request. */
 export interface EditRequest {
   instruction: string;
   anchors: Anchor[];
   docContext: string;
+  attachments?: Attachment[];
 }
 
 /** One web-search source CITATION (web grounding) — a display-only `{title, url}` pair the proxy parses
@@ -79,16 +106,24 @@ export interface EditResponse {
   citations?: Citation[];
 }
 
-/** Length/count caps for input validation (defense-in-depth; the proxy enforces before calling a model). */
+/** Length/count caps for input validation (defense-in-depth; the proxy enforces before calling a model).
+ *  The attachment caps (additive, optional so a custom `RequestLimits` need not set them) bound the
+ *  multimodal channel — count, per-doc extracted-text length, and per-image `dataUrl` size. */
 export interface RequestLimits {
   maxInstruction: number;
   maxDocContext: number;
   maxAnchors: number;
+  maxAttachments?: number;
+  maxAttachmentText?: number;
+  maxImageDataUrl?: number;
 }
 
-/** Default caps (verbatim from the apps/hwp-lab reference proxy). */
+/** Default caps (verbatim from the apps/hwp-lab reference proxy; attachment caps added for multimodal). */
 export const DEFAULT_LIMITS: RequestLimits = {
   maxInstruction: 4000,
   maxDocContext: 20000,
   maxAnchors: 32,
+  maxAttachments: 8,
+  maxAttachmentText: 20000,
+  maxImageDataUrl: 8_000_000, // ~6 MB of base64 image bytes
 };

@@ -5,11 +5,13 @@ import {
   buildDocContext,
   buildSystemPrompt,
   buildUserMessage,
+  buildUserMessageParts,
   extractCitations,
   extractJsonArray,
   validateRequest,
   validateResponse,
 } from "../index";
+import type { Attachment } from "../index";
 
 describe("ai-protocol — types + version", () => {
   it("freezes the Intent schema version at v0 (docs/INTENT-SCHEMA.md)", () => {
@@ -103,6 +105,83 @@ describe("buildUserMessage (R5 fence)", () => {
     expect(msg).toContain("사용자 지시: 이 칸을 채워줘");
     expect(msg).toContain("<document-content>\nformat=hwpx\n</document-content>");
     expect(msg).toContain('"kind":"cell"');
+  });
+});
+
+describe("multimodal attachments (buildUserMessage / buildUserMessageParts / validateRequest)", () => {
+  const IMG = "data:image/png;base64,iVBORw0KGgoAAAANSU=";
+  const imgAtt: Attachment = { id: "a1", kind: "image", name: "table.png", mime: "image/png", dataUrl: IMG };
+  const docAtt: Attachment = { id: "a2", kind: "doc", name: "ref.txt", mime: "text/plain", text: "행1: 매출 100\n행2: 비용 40" };
+
+  it("buildUserMessageParts returns content PARTS with the R5-fenced text part + one image_url part per image", () => {
+    const parts = buildUserMessageParts({ instruction: "이 표를 사진처럼 채워줘", anchors: [{ kind: "table", section: 0, block: 3 }], docContext: "format=hwpx", attachments: [imgAtt] });
+    expect(Array.isArray(parts)).toBe(true);
+    // First part is the text turn — carries the SAME R5 fence as the string builder (untrusted DATA marked).
+    expect(parts[0]).toMatchObject({ type: "text" });
+    const textPart = parts[0] as { type: "text"; text: string };
+    expect(textPart.text).toContain("사용자 지시: 이 표를 사진처럼 채워줘");
+    expect(textPart.text).toContain("<document-content>\nformat=hwpx\n</document-content>");
+    // The image rides as an OpenAI-style image_url part carrying the base64 dataUrl (vision).
+    expect(parts).toContainEqual({ type: "image_url", image_url: { url: IMG } });
+    // Exactly one image part for one image attachment.
+    expect(parts.filter((p) => p.type === "image_url")).toHaveLength(1);
+  });
+
+  it("folds DOC attachment text into an R5 <attachment> fence in BOTH the string and parts builders", () => {
+    const req = { instruction: "참고 문서대로 정리해줘", anchors: [], docContext: "format=hwpx", attachments: [docAtt] };
+    const str = buildUserMessage(req);
+    expect(str).toContain('<attachment name="ref.txt" mime="text/plain">');
+    expect(str).toContain("행1: 매출 100");
+    expect(str).toContain("</attachment>");
+    // The parts variant's text part carries the same fenced reference-doc DATA.
+    const parts = buildUserMessageParts(req);
+    expect((parts[0] as { text: string }).text).toContain('<attachment name="ref.txt" mime="text/plain">');
+    // A doc-only request produces NO image parts.
+    expect(parts.filter((p) => p.type === "image_url")).toHaveLength(0);
+  });
+
+  it("buildUserMessage stays BYTE-IDENTICAL to the pre-multimodal output when there are no attachments", () => {
+    const req = { instruction: "이 칸을 채워줘", anchors: [{ kind: "cell", section: 0, block: 1 }], docContext: "format=hwpx" };
+    const expected = ["사용자 지시: 이 칸을 채워줘", "", "마킹된 앵커(편집 대상, 구조 인덱스 — 이 위치만 편집):", JSON.stringify(req.anchors), "", "<document-content>", "format=hwpx", "</document-content>"].join("\n");
+    expect(buildUserMessage(req)).toBe(expected);
+    // …and an empty attachments array is likewise a no-op (regression-safe).
+    expect(buildUserMessage({ ...req, attachments: [] })).toBe(expected);
+  });
+
+  it("validateRequest passes well-formed attachments through and drops malformed / payload-less ones", () => {
+    const r = validateRequest({
+      instruction: "채워줘",
+      anchors: [],
+      docContext: "",
+      attachments: [
+        imgAtt, // valid image
+        docAtt, // valid doc
+        { id: "x", kind: "image", name: "n", mime: "image/png" }, // image without dataUrl → dropped
+        { id: "y", kind: "doc", name: "n", mime: "text/plain" }, // doc without text → dropped
+        { id: "z", kind: "bogus", name: "n", mime: "x" }, // unknown kind → dropped
+        "not-an-object", // malformed → dropped
+      ],
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.attachments).toHaveLength(2);
+      expect(r.value.attachments?.map((a) => a.id)).toEqual(["a1", "a2"]);
+      // Image keeps dataUrl; doc keeps text — no cross-contamination.
+      expect(r.value.attachments?.[0]).toMatchObject({ kind: "image", dataUrl: IMG });
+      expect(r.value.attachments?.[1]).toMatchObject({ kind: "doc", text: docAtt.text });
+    }
+  });
+
+  it("validateRequest rejects a non-array attachments and over-cap payloads", () => {
+    expect(validateRequest({ instruction: "x", anchors: [], attachments: {} }).ok).toBe(false);
+    const bigText = { id: "b", kind: "doc", name: "big.txt", mime: "text/plain", text: "가".repeat(20001) };
+    expect(validateRequest({ instruction: "x", anchors: [], attachments: [bigText] }).ok).toBe(false);
+  });
+
+  it("a request with NO attachments key yields no attachments field (additive/absent)", () => {
+    const r = validateRequest({ instruction: "x", anchors: [] });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.attachments).toBeUndefined();
   });
 });
 

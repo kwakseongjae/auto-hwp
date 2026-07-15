@@ -1,4 +1,4 @@
-import type { Anchor, DocMeta, EditRequest, TableGrid } from "./types.js";
+import type { Anchor, Attachment, DocMeta, EditRequest, TableGrid, UserContentPart } from "./types.js";
 
 /// Doc-context assembly (SDK-LAYERS: "buildDocContext(session, anchors) — R5 펜스 포함"). PROMOTED from
 /// apps/hwp-lab's LabWorkspace.buildDocContextString + the route handler's user-message assembly so the
@@ -60,11 +60,17 @@ export function buildDocContext(meta: DocMeta, anchors: Anchor[], opts?: { maxLe
   return [head, ...lines].join("\n").slice(0, maxLen);
 }
 
-/** Assemble the LLM USER turn from an EditRequest, wrapping the doc-context in the R5 `<document-content>`
- *  fence (the fence marks it as untrusted DATA — never instructions). PROMOTED verbatim from the reference
- *  proxy's user-message assembly; the host pairs it with `buildSystemPrompt()` for the system turn. */
-export function buildUserMessage(req: EditRequest): string {
-  return [
+/** The DOC attachments carrying extracted text (image attachments have no `text`). */
+function docAttachments(req: EditRequest): Attachment[] {
+  return (req.attachments ?? []).filter((a): a is Attachment => a.kind === "doc" && typeof a.text === "string" && a.text.length > 0);
+}
+
+/** Assemble the TEXT body of the LLM USER turn: instruction + anchors + the R5-fenced `<document-content>`,
+ *  then (if any) each reference DOCUMENT's extracted text in its OWN R5 fence — an `<attachment …>` block is
+ *  DATA exactly like `<document-content>` (never instructions; the system prompt's R5 rule covers it). With
+ *  no doc attachments the output is byte-identical to the promoted reference-proxy assembly (regression-safe). */
+function buildUserText(req: EditRequest): string {
+  const lines = [
     `사용자 지시: ${req.instruction}`,
     "",
     "마킹된 앵커(편집 대상, 구조 인덱스 — 이 위치만 편집):",
@@ -73,5 +79,34 @@ export function buildUserMessage(req: EditRequest): string {
     "<document-content>",
     req.docContext,
     "</document-content>",
-  ].join("\n");
+  ];
+  for (const a of docAttachments(req)) {
+    lines.push("", `<attachment name=${JSON.stringify(a.name)} mime=${JSON.stringify(a.mime)}>`, a.text ?? "", "</attachment>");
+  }
+  return lines.join("\n");
+}
+
+/** Assemble the LLM USER turn from an EditRequest, wrapping the doc-context in the R5 `<document-content>`
+ *  fence (the fence marks it as untrusted DATA — never instructions). PROMOTED verbatim from the reference
+ *  proxy's user-message assembly; the host pairs it with `buildSystemPrompt()` for the system turn. Reference
+ *  DOCUMENT attachments (extracted text) are appended in their own R5 `<attachment>` fences; image
+ *  attachments do NOT appear here (they ride the content-PARTS variant `buildUserMessageParts`). */
+export function buildUserMessage(req: EditRequest): string {
+  return buildUserText(req);
+}
+
+/** The MULTIMODAL variant: the same R5-fenced TEXT (from `buildUserMessage`) as the first `text` part, then
+ *  one `image_url` part per IMAGE attachment carrying its base64 `dataUrl` — the OpenAI content-parts shape a
+ *  vision model reads. Use this instead of the string `buildUserMessage` when a request has image
+ *  attachments; with none it degrades to a single text part (equivalent to the string form). The images are
+ *  reference material only — the R5 system fence tells the model attachment content is DATA, not
+ *  instructions, and the Intent whitelist is unchanged (attachments never become an Intent). */
+export function buildUserMessageParts(req: EditRequest): UserContentPart[] {
+  const parts: UserContentPart[] = [{ type: "text", text: buildUserText(req) }];
+  for (const a of req.attachments ?? []) {
+    if (a.kind === "image" && typeof a.dataUrl === "string" && a.dataUrl.length > 0) {
+      parts.push({ type: "image_url", image_url: { url: a.dataUrl } });
+    }
+  }
+  return parts;
 }
