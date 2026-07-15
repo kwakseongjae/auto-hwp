@@ -261,6 +261,12 @@ export class HwpDoc {
   blockRuns(section, block, row, col) {
     return this.#call((r) => JSON.parse(r.blockRuns(section, block, row ?? null, col ?? null)));
   }
+  /** The CURRENT styled runs of a (possibly NESTED) cell addressed by its descending `CellPath` (issue
+   *  064 Tier-2) — the nested-cell twin of `blockRuns`, so the inline editor prefills a nested LEAF cell.
+   *  `path` is the `CellHit.path` array (`[{block,row,col}]`); a length-1 path is the flat cell. */
+  blockRunsPath(section, path) {
+    return this.#call((r) => JSON.parse(r.blockRunsPath(section, JSON.stringify(path ?? []))));
+  }
   /** The cell GRID of the table block at `(section, block)` — `{section, block, rows, cols, cells:[{row,
    *  col, text}]}` (ACTIVE cells only), or `null` when the block isn't a table. The vibe-editing
    *  doc-context source (issue 066): the AI reads each cell's MODEL address + current text so table

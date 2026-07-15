@@ -194,6 +194,17 @@ pub enum Op {
         col: usize,
         runs: Vec<RunSpec>,
     },
+    /// Replace the text of a (possibly NESTED) cell addressed by a DESCENDING `CellPath` (issue 064
+    /// Tier-2) — the nested-table twin of [`Op::SetTableCell`]. `path` walks from `section`'s blocks to
+    /// the LEAF cell (level 0 = the top-level table cell via `edit_target`; each deeper step indexes the
+    /// nested `Block::Table` inside the previous cell). The LEAF cell's paragraphs are rebuilt from `runs`
+    /// NON-DESTRUCTIVELY (nested tables / non-paragraph blocks preserved), sharing the SAME rebuild as
+    /// `SetTableCell` — so a length-1 `path` is byte-identical to it. ONE undo unit.
+    SetTableCellPath {
+        section: usize,
+        path: Vec<CellStep>,
+        runs: Vec<RunSpec>,
+    },
     /// Insert one or more BODY rows into the EXISTING `index`-th table at logical row `at`
     /// (`at == t.rows` appends). Existing cells at row >= `at` shift down by `rows.len()`; the new
     /// cells take `col_span`/`shade`/`bold` from each `CellSpec` (HTML-table coverage per row).
@@ -297,6 +308,18 @@ pub enum Op {
         /// "left"|"center"|"right"|"justify"|"distribute" (None = leave each paragraph's alignment).
         align: Option<String>,
     },
+}
+
+/// One step of a DESCENDING `CellPath` (issue 064 Tier-2) — which cell of which table for
+/// [`Op::SetTableCellPath`]. `block` is a block index: at level 0 the top-level table's `(section, block)`
+/// block index; at each deeper level the index of the `Block::Table` INSIDE the previous cell. `(row,
+/// col)` is that table's `edit_target` cell address. The wire twins are `hwp_typeset::CellAddr` /
+/// `hwp_session::CellAddrDto`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+pub struct CellStep {
+    pub block: usize,
+    pub row: usize,
+    pub col: usize,
 }
 
 /// Which cells of an existing table a [`Op::SetTableCellShade`] targets.
@@ -501,6 +524,196 @@ fn section_mut(doc: &mut SemanticDoc, section: usize) -> Result<&mut Section> {
     doc.sections
         .get_mut(section)
         .ok_or_else(|| Error::Other(format!("section {section} out of range")))
+}
+
+/// Walk a descending `CellPath` (issue 064 Tier-2) to the LEAF cell (immutable). Level 0 unwraps a 1×1
+/// frame wrapper via `edit_target`; each deeper level indexes the RAW `Block::Table` inside the previous
+/// cell (mirrors `place_nested_table` / `hwp_session::resolve_cell_path`). `None` if any step fails.
+fn resolve_cell<'a>(doc: &'a SemanticDoc, section: usize, path: &[CellStep]) -> Option<&'a Cell> {
+    let sec = doc.sections.get(section)?;
+    let (first, rest) = path.split_first()?;
+    let Block::Table(t) = sec.blocks.get(first.block)? else {
+        return None;
+    };
+    let t = t.edit_target();
+    let mut cell = t
+        .cells
+        .iter()
+        .find(|c| c.active && c.row == first.row && c.col == first.col)?;
+    for step in rest {
+        let Block::Table(nt) = cell.blocks.get(step.block)? else {
+            return None;
+        };
+        cell = nt
+            .cells
+            .iter()
+            .find(|c| c.active && c.row == step.row && c.col == step.col)?;
+    }
+    Some(cell)
+}
+
+/// Mutable twin of [`resolve_cell`] — walks the same descending `CellPath` to the LEAF cell for editing.
+fn resolve_cell_mut<'a>(
+    doc: &'a mut SemanticDoc,
+    section: usize,
+    path: &[CellStep],
+) -> Option<&'a mut Cell> {
+    let sec = doc.sections.get_mut(section)?;
+    let (first, rest) = path.split_first()?;
+    let Block::Table(t) = sec.blocks.get_mut(first.block)? else {
+        return None;
+    };
+    let t = t.edit_target_mut();
+    let mut cell = t
+        .cells
+        .iter_mut()
+        .find(|c| c.active && c.row == first.row && c.col == first.col)?;
+    for step in rest {
+        let Block::Table(nt) = cell.blocks.get_mut(step.block)? else {
+            return None;
+        };
+        cell = nt
+            .cells
+            .iter_mut()
+            .find(|c| c.active && c.row == step.row && c.col == step.col)?;
+    }
+    Some(cell)
+}
+
+/// Rebuild the (possibly NESTED) LEAF cell reached by `path` from `runs`, NON-DESTRUCTIVELY (issue 064
+/// Tier-2). Shared by [`Op::SetTableCell`] (length-1 path) and [`Op::SetTableCellPath`]. Preserves the
+/// cell's per-paragraph alignment (para_shape), its neutral first-run style (a plain edit keeps the
+/// template's font/size but drops the example text_color), and every nested `Block::Table` / non-paragraph
+/// block in place — so a length-1 path is byte-for-byte the Tier-1 flat SetTableCell (gate cells untouched).
+fn set_cell_runs_by_path(
+    doc: &mut SemanticDoc,
+    section: usize,
+    path: &[CellStep],
+    runs: &[RunSpec],
+) -> Result<()> {
+    if path.is_empty() {
+        return Err(Error::Other("SetTableCell: empty cell path".into()));
+    }
+    // Intern each run's CharShape + the default `plain` first (mut doc) — intern-then-build ordering.
+    let interned: Vec<(usize, String)> = runs
+        .iter()
+        .map(|r| (intern_char_shape(doc, r.to_char_shape()), r.text.clone()))
+        .collect();
+    let plain = intern_char_shape(doc, CharShape::default());
+    // Immutable pre-read of the LEAF cell: its first-run shape index (→ neutral) + per-paragraph shapes.
+    let (existing_idx, orig_para_shapes): (Option<usize>, Vec<usize>) =
+        match resolve_cell(doc, section, path) {
+            Some(cell) => {
+                let first = cell.blocks.iter().find_map(|b| match b {
+                    Block::Paragraph(p) => p.runs.first().map(|r| r.char_shape),
+                    _ => None,
+                });
+                let shapes = cell
+                    .blocks
+                    .iter()
+                    .filter_map(|b| match b {
+                        Block::Paragraph(p) => Some(p.para_shape),
+                        _ => None,
+                    })
+                    .collect();
+                (first, shapes)
+            }
+            None => (None, Vec::new()),
+        };
+    // A plain (unstyled) edit keeps the template cell's FONT/SIZE but resets the example `text_color` to
+    // black (gov-doc placeholders ship blue/red; an AI fill must not inherit that). Interned up front so
+    // the mutable borrow below is free.
+    let neutral_shape: Option<usize> = existing_idx.map(|idx| {
+        let mut sh = doc.char_shapes.get(idx).cloned().unwrap_or_default();
+        sh.text_color = Color::default();
+        intern_char_shape(doc, sh)
+    });
+    let para_shape_for = |i: usize| {
+        orig_para_shapes
+            .get(i)
+            .copied()
+            .or_else(|| orig_para_shapes.first().copied())
+            .unwrap_or(0)
+    };
+    let resolve_shape = |cs: usize| match neutral_shape {
+        Some(prev) if cs == plain => prev,
+        _ => cs,
+    };
+    // Split the interned runs at "\n" into one group per paragraph (a "\n" inside a run's text is a
+    // paragraph boundary, not a literal newline — HWP paragraphs are line-blocks).
+    let mut paras: Vec<Vec<(usize, String)>> = vec![Vec::new()];
+    for (cs, text) in interned {
+        let mut segs = text.split('\n');
+        if let Some(first) = segs.next() {
+            if !first.is_empty() {
+                paras.last_mut().unwrap().push((cs, first.to_string()));
+            }
+        }
+        for seg in segs {
+            paras.push(Vec::new());
+            if !seg.is_empty() {
+                paras.last_mut().unwrap().push((cs, seg.to_string()));
+            }
+        }
+    }
+    let rebuilt: Vec<Block> = paras
+        .into_iter()
+        .enumerate()
+        .map(|(i, group)| {
+            let runs = if group.is_empty() {
+                vec![Run {
+                    char_shape: neutral_shape.unwrap_or(plain),
+                    content: vec![Inline::Text(String::new())],
+                    ..Default::default()
+                }]
+            } else {
+                group
+                    .into_iter()
+                    .map(|(char_shape, text)| Run {
+                        char_shape: resolve_shape(char_shape),
+                        content: vec![Inline::Text(text)],
+                        ..Default::default()
+                    })
+                    .collect()
+            };
+            Block::Paragraph(Paragraph {
+                runs,
+                para_shape: para_shape_for(i),
+                dirty: Dirty(true),
+                ..Default::default()
+            })
+        })
+        .collect();
+    // Mutable walk to the LEAF cell → NON-DESTRUCTIVE splice: replace only the PARAGRAPH slots (in order)
+    // with the rebuilt paragraphs, leaving any `Block::Table` (a nested table) + every other non-paragraph
+    // block intact and in place. For a paragraph-only cell this is the byte-identical block list the
+    // wholesale replace produced (before == after — gate/pagination unaffected).
+    let cell = resolve_cell_mut(doc, section, path)
+        .ok_or_else(|| Error::Other(format!("SetTableCell: no active cell at path {path:?}")))?;
+    let mut rebuilt = rebuilt.into_iter();
+    let mut new_blocks: Vec<Block> = Vec::with_capacity(cell.blocks.len());
+    for b in std::mem::take(&mut cell.blocks) {
+        match b {
+            Block::Paragraph(_) => {
+                if let Some(p) = rebuilt.next() {
+                    new_blocks.push(p);
+                }
+            }
+            other => new_blocks.push(other),
+        }
+    }
+    new_blocks.extend(rebuilt);
+    cell.blocks = new_blocks;
+    cell.dirty.mark();
+    // Mark the section + top-level table dirty (layout/cache invalidation) — the leaf walk consumed the
+    // intermediate handles.
+    if let Some(sec) = doc.sections.get_mut(section) {
+        sec.dirty.mark();
+        if let Some(Block::Table(t)) = sec.blocks.get_mut(path[0].block) {
+            t.dirty.mark();
+        }
+    }
+    Ok(())
 }
 
 /// Whether a paragraph's runs can be RE-FORMATTED in place. A per-run char_shape change only takes
@@ -1237,128 +1450,20 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             Ok(())
         }
         Op::SetTableCell { section, index, row, col, runs } => {
-            // Intern each run's CharShape first (mutable borrow on `doc`), then rebuild the cell's
-            // body — mirrors AppendRichParagraph's intern-then-build ordering.
-            let interned: Vec<(usize, String)> = runs
-                .iter()
-                .map(|r| (intern_char_shape(doc, r.to_char_shape()), r.text.clone()))
-                .collect();
-            let plain = intern_char_shape(doc, CharShape::default());
-            let (row, col) = (*row, *col);
-            // Preserve the cell's CURRENT run style for a PLAIN (unstyled) text edit — so replacing the
-            // text of a blue/italic template cell keeps its FONT/SIZE instead of resetting to black-plain.
-            // BUT reset the example text's `text_color` to default black: gov-doc templates ship blue/red
-            // placeholder text, and an AI fill (a single plain run) must NOT inherit that example color.
-            // We clone the cell's first-run CharShape, null its color, and re-intern → a NEUTRAL shape.
-            // This intern needs `&mut doc`, so it MUST happen before the `section_mut` borrow below —
-            // hence the immutable navigation to read the first-run shape index up front (mirrors how the
-            // run shapes are interned at the top of this arm). A run that carried explicit styling
-            // (interned to something other than the default `plain`) overrides as before; only
-            // default-styled runs (AI fills) adopt this neutral shape.
-            let neutral_shape: Option<usize> = {
-                let existing_idx = doc
-                    .sections
-                    .get(*section)
-                    .and_then(|s| s.blocks.get(*index))
-                    .and_then(|b| match b {
-                        Block::Table(t) => Some(t.edit_target()),
-                        _ => None,
-                    })
-                    .and_then(|t| t.cells.iter().find(|c| c.active && c.row == row && c.col == col))
-                    .and_then(|c| {
-                        c.blocks.iter().find_map(|b| match b {
-                            Block::Paragraph(p) => p.runs.first().map(|r| r.char_shape),
-                            _ => None,
-                        })
-                    });
-                existing_idx.map(|idx| {
-                    let mut sh = doc.char_shapes.get(idx).cloned().unwrap_or_default();
-                    sh.text_color = Color::default();
-                    intern_char_shape(doc, sh)
-                })
-            };
-            let sec = section_mut(doc, *section)?;
-            let block = sec.blocks.get_mut(*index).ok_or_else(|| {
-                Error::Other(format!("SetTableCell: block index {index} out of range"))
-            })?;
-            let Block::Table(t) = block else {
-                return Err(Error::Other(format!("SetTableCell: block {index} is not a table")));
-            };
-            let t = t.edit_target_mut(); // a 1×1 frame wrapper (자가진단표) → edit the inner table
-            // The active cell anchored exactly at (row, col) — same as CellSel::Cell.
-            let cell = t.cells.iter_mut().find(|c| c.active && c.row == row && c.col == col).ok_or_else(|| {
-                Error::Other(format!("SetTableCell: no active cell at (row {row}, col {col})"))
-            })?;
-            // Preserve the cell's existing paragraph ALIGNMENT (para_shape) too — gov-doc cells are
-            // center-aligned; without this a refilled cell reset to the default (left) and read as
-            // "정렬 안 맞음" next to its centered siblings. A multi-paragraph cell is joined into the
-            // editor with "\n" between paragraphs; we split back on "\n" and map each rebuilt paragraph
-            // to the ORIGINAL paragraph at the same index (fallback: the first) so per-paragraph
-            // alignment/spacing survives instead of collapsing every line into one first-shaped paragraph.
-            let orig_para_shapes: Vec<usize> = cell.blocks.iter().filter_map(|b| match b {
-                Block::Paragraph(p) => Some(p.para_shape),
-                _ => None,
-            }).collect();
-            let para_shape_for = |i: usize| orig_para_shapes.get(i).copied()
-                .or_else(|| orig_para_shapes.first().copied()).unwrap_or(0);
-            let resolve_shape = |cs: usize| match neutral_shape {
-                Some(prev) if cs == plain => prev,
-                _ => cs,
-            };
-            // Split the interned runs at "\n" into one group per paragraph (a "\n" inside a run's text is a
-            // paragraph boundary, not a literal newline — HWP paragraphs are line-blocks).
-            let mut paras: Vec<Vec<(usize, String)>> = vec![Vec::new()];
-            for (cs, text) in interned {
-                let mut segs = text.split('\n');
-                if let Some(first) = segs.next() {
-                    if !first.is_empty() { paras.last_mut().unwrap().push((cs, first.to_string())); }
-                }
-                for seg in segs {
-                    paras.push(Vec::new());
-                    if !seg.is_empty() { paras.last_mut().unwrap().push((cs, seg.to_string())); }
-                }
-            }
-            let rebuilt: Vec<Block> = paras.into_iter().enumerate().map(|(i, group)| {
-                let runs = if group.is_empty() {
-                    // An empty paragraph still needs one (empty) run so it round-trips/re-emits cleanly.
-                    vec![Run { char_shape: neutral_shape.unwrap_or(plain), content: vec![Inline::Text(String::new())], ..Default::default() }]
-                } else {
-                    group.into_iter()
-                        .map(|(char_shape, text)| Run { char_shape: resolve_shape(char_shape), content: vec![Inline::Text(text)], ..Default::default() })
-                        .collect()
-                };
-                Block::Paragraph(Paragraph { runs, para_shape: para_shape_for(i), dirty: Dirty(true), ..Default::default() })
-            }).collect();
-            // NON-DESTRUCTIVE splice (issue 064 Tier-1, DATA-LOSS fix): replace only the cell's PARAGRAPH
-            // slots — in order — with the rebuilt paragraphs, leaving any `Block::Table` (a nested table)
-            // and every other non-paragraph block intact and in their original position. The old
-            // wholesale `cell.blocks = <rebuilt paragraphs>` DROPPED a nested table permanently. For a
-            // cell with NO non-paragraph blocks (the overwhelming common case — the layout gate's cells)
-            // this yields the byte-identical block list the wholesale replace did, so normal single-/
-            // multi-paragraph cells and pagination are unaffected (before == after).
-            let mut rebuilt = rebuilt.into_iter();
-            let mut new_blocks: Vec<Block> = Vec::with_capacity(cell.blocks.len());
-            for b in std::mem::take(&mut cell.blocks) {
-                match b {
-                    // A paragraph slot: consume the next rebuilt paragraph (or, if the edit reduced the
-                    // paragraph count, drop this now-removed slot — same as the old replace).
-                    Block::Paragraph(_) => {
-                        if let Some(p) = rebuilt.next() {
-                            new_blocks.push(p);
-                        }
-                    }
-                    // A nested table (or any non-paragraph block) survives verbatim, in place.
-                    other => new_blocks.push(other),
-                }
-            }
-            // Any extra rebuilt paragraphs (the edit ADDED paragraphs) trail the preserved blocks —
-            // identical to the old replace whenever the cell had only paragraphs.
-            new_blocks.extend(rebuilt);
-            cell.blocks = new_blocks;
-            cell.dirty.mark();
-            t.dirty.mark();
-            sec.dirty.mark();
-            Ok(())
+            // The flat quad is the LENGTH-1 fast case of the descending CellPath (issue 064 Tier-2):
+            // top-level table block `index`, leaf cell `(row, col)`. Delegates to the shared rebuild so
+            // a non-nested edit is byte-identical to before (gate cells untouched).
+            set_cell_runs_by_path(
+                doc,
+                *section,
+                &[CellStep { block: *index, row: *row, col: *col }],
+                runs,
+            )
+        }
+        Op::SetTableCellPath { section, path, runs } => {
+            // The nested-table twin (issue 064 Tier-2): walk `path` to the LEAF cell and rebuild it with
+            // the SAME non-destructive logic as SetTableCell (a length-1 path is identical to it).
+            set_cell_runs_by_path(doc, *section, path, runs)
         }
         Op::TableInsertRows { section, index, at, rows } => {
             if rows.is_empty() {
@@ -3560,6 +3665,172 @@ mod tests {
         );
         // The paragraph text is UPDATED (the two "\n"-split lines landed in the two paragraph slots).
         assert_eq!(cell_text(&doc, 1, 0, 0), "수정1수정2");
+    }
+
+    /// issue 064 Tier-2: `Op::SetTableCellPath` walks a LENGTH-2 CellPath to edit a nested LEAF cell,
+    /// leaving its siblings + the outer cell + the nesting structure intact.
+    #[test]
+    fn set_table_cell_path_edits_nested_leaf_preserving_siblings() {
+        // Outer 2×1 table; inject a nested 2×2 into cell (0,0) → its blocks become
+        // [Paragraph(""), Table(nested)] (the nested Block::Table at cell-block index 1).
+        let mut doc = doc_with(vec![simple_para(1, "앞")]);
+        let cell = |t: &str| CellSpec {
+            text: t.into(),
+            ..Default::default()
+        };
+        apply(
+            &mut doc,
+            &Op::InsertTableAt {
+                section: 0,
+                index: 1,
+                rows: vec![vec![cell("")], vec![cell("아래")]],
+            },
+        )
+        .unwrap();
+        let plain = intern_char_shape(&mut doc, CharShape::default());
+        let mk_para = |text: &str| {
+            Block::Paragraph(Paragraph {
+                runs: vec![Run {
+                    char_shape: plain,
+                    content: vec![Inline::Text(text.into())],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            })
+        };
+        let mk_cell = |r: usize, c: usize, s: &str| Cell {
+            row: r,
+            col: c,
+            row_span: 1,
+            col_span: 1,
+            active: true,
+            blocks: vec![mk_para(s)],
+            ..Default::default()
+        };
+        let nested = Table {
+            rows: 2,
+            cols: 2,
+            col_widths: vec![1, 1],
+            cells: vec![
+                mk_cell(0, 0, "A"),
+                mk_cell(0, 1, "B"),
+                mk_cell(1, 0, "C"),
+                mk_cell(1, 1, "D"),
+            ],
+            ..Default::default()
+        };
+        {
+            let Block::Table(t) = &mut doc.sections[0].blocks[1] else {
+                panic!("not a table")
+            };
+            let c00 = t
+                .cells
+                .iter_mut()
+                .find(|c| c.active && c.row == 0 && c.col == 0)
+                .unwrap();
+            c00.blocks.push(Block::Table(nested));
+        }
+        // Walk [outer (0,0)] → [nested (1,1)] and replace "D" with "수정".
+        apply(
+            &mut doc,
+            &Op::SetTableCellPath {
+                section: 0,
+                path: vec![
+                    CellStep {
+                        block: 1,
+                        row: 0,
+                        col: 0,
+                    },
+                    CellStep {
+                        block: 1,
+                        row: 1,
+                        col: 1,
+                    },
+                ],
+                runs: vec![run_spec("수정")],
+            },
+        )
+        .unwrap();
+        // Reach the nested table + assert only the (1,1) leaf changed.
+        let Block::Table(outer) = &doc.sections[0].blocks[1] else {
+            panic!("not a table")
+        };
+        let c00 = outer
+            .cells
+            .iter()
+            .find(|c| c.active && c.row == 0 && c.col == 0)
+            .unwrap();
+        let nested = c00
+            .blocks
+            .iter()
+            .find_map(|b| match b {
+                Block::Table(t) => Some(t),
+                _ => None,
+            })
+            .expect("nested table survives");
+        let leaf_text = |r: usize, cc: usize| -> String {
+            let cell = nested
+                .cells
+                .iter()
+                .find(|c| c.active && c.row == r && c.col == cc)
+                .unwrap();
+            cell.blocks
+                .iter()
+                .filter_map(|b| match b {
+                    Block::Paragraph(p) => Some(run_texts(p).concat()),
+                    _ => None,
+                })
+                .collect::<String>()
+        };
+        assert_eq!(leaf_text(1, 1), "수정", "nested leaf (1,1) is edited");
+        assert_eq!(leaf_text(0, 0), "A", "sibling (0,0) untouched");
+        assert_eq!(leaf_text(0, 1), "B", "sibling (0,1) untouched");
+        assert_eq!(leaf_text(1, 0), "C", "sibling (1,0) untouched");
+        assert_eq!(
+            cell_text(&doc, 1, 1, 0),
+            "아래",
+            "outer sibling cell (1,0) untouched"
+        );
+        // The outer (0,0) still holds its empty paragraph + the nested table (block order preserved).
+        assert!(
+            matches!(c00.blocks[0], Block::Paragraph(_))
+                && matches!(c00.blocks[1], Block::Table(_)),
+            "outer (0,0) keeps [Paragraph, Table]"
+        );
+    }
+
+    /// A LENGTH-1 `Op::SetTableCellPath` is equivalent to the flat `Op::SetTableCell` (back-compat).
+    #[test]
+    fn set_table_cell_path_length_1_equals_flat() {
+        let mut doc = doc_with(vec![simple_para(1, "앞")]);
+        let cell = |t: &str| CellSpec {
+            text: t.into(),
+            ..Default::default()
+        };
+        apply(
+            &mut doc,
+            &Op::InsertTableAt {
+                section: 0,
+                index: 1,
+                rows: vec![vec![cell("a"), cell("b")]],
+            },
+        )
+        .unwrap();
+        apply(
+            &mut doc,
+            &Op::SetTableCellPath {
+                section: 0,
+                path: vec![CellStep {
+                    block: 1,
+                    row: 0,
+                    col: 1,
+                }],
+                runs: vec![run_spec("채움")],
+            },
+        )
+        .unwrap();
+        assert_eq!(cell_text(&doc, 1, 0, 1), "채움");
+        assert_eq!(cell_text(&doc, 1, 0, 0), "a", "the other cell is untouched");
     }
 
     /// The `CharShape` of the active cell's first run at (row, col) of the table at block `bi`.

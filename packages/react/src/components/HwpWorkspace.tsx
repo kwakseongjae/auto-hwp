@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { Anchor, Box, CellDir, DocContext, EngineAdapter, ImageBox, Intent, IntentCard, MatchBox, OutlineItem, PageGeom, PointerInput, RunSpec, Selection, TableBox, XYWH } from "@tf-hwp/editor-core";
+import type { Anchor, Box, CellAddr, CellDir, DocContext, EngineAdapter, ImageBox, Intent, IntentCard, MatchBox, OutlineItem, PageGeom, PointerInput, RunSpec, Selection, TableBox, XYWH } from "@tf-hwp/editor-core";
 import { boundariesToRatios, remapFragmentHeights, appliedReflectsDrag, firstRunStyle, columnWidthMm, setColumnWidthMm, equalizeColumns, imageInsertSize, imageSizeToHwpunit, appliedReflectsResize, DRAG_THRESHOLD_PX } from "@tf-hwp/editor-core";
 import { OutlinePanel } from "./OutlinePanel";
 import { StatusBar } from "./StatusBar";
@@ -184,6 +184,12 @@ const isDocFile = (f: File): boolean => /\.(hwpx?|HWPX?)$/i.test(f.name);
  *  input. The client point rides along ONLY for the zoom-independent drag threshold (§함정). */
 const toPointerInput = (c: PageClick): PointerInput => ({ page: c.page, x: c.x, y: c.y, mod: c.meta, client: c.client });
 
+/** Deep-equal two descending CellPaths (issue 064 Tier-2) — used to decide "the double-clicked cell is
+ *  already the drilled/selected one → open its editor" precisely across nesting levels. */
+function samePath(a: CellAddr[], b: CellAddr[]): boolean {
+  return a.length === b.length && a.every((s, i) => s.block === b[i].block && s.row === b[i].row && s.col === b[i].col);
+}
+
 // ── MULTI-PAGE marquee (issue: cross-page drag select) ──────────────────────────────────────────────
 /** How close (client px) to the canvas's top/bottom edge the cursor must be during a marquee drag to
  *  trigger edge auto-scroll, and how many px per rAF tick to scroll. */
@@ -340,7 +346,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // contentEditable rich editor renders + round-trips per-run formatting, and the commit compares against
   // them for the no-op (미접촉 셀 재커밋 = no-op) check. `text` is kept for the anchor/label snippet.
   const [editor, setEditor] = useState<
-    { page: number; box: Box; section: number; block: number; kind: string; rows?: [number, number]; cols?: [number, number]; text: string; runs: RunSpec[]; fontSizePt?: number } | null
+    { page: number; box: Box; section: number; block: number; kind: string; rows?: [number, number]; cols?: [number, number]; text: string; runs: RunSpec[]; fontSizePt?: number; path?: CellAddr[] } | null
   >(null);
   // Issue 048: the PERSISTENT top format ribbon's reflected state (굵게 여부 등 토글). Two drivers: when NOT
   // editing it mirrors the marked cell/range first-run format (editTarget.cur*); while EDITING a
@@ -1247,16 +1253,13 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     async (c: PageClick) => {
       try {
         const cell = adapter.tableCellAt ? await adapter.tableCellAt(c.page, c.x, c.y) : null;
-        if (cell?.nested) {
-          // Tier-1 (issue 064): a cell holding a NESTED table is NOT editable inline. Refuse the editor
-          // — opening the paragraph-only overlay would cover the nested grid, and the commit would fire a
-          // SetTableCell on it. Honest toast; the nested table stays visible + intact.
-          toast("중첩표는 아직 편집할 수 없습니다");
-          return;
-        }
         if (cell) {
-          const runs = await core.session.runsAt(cell.section, cell.block, cell.row, cell.col);
-          setEditor({ page: c.page, box: { x: cell.x, y: cell.y, w: cell.w, h: cell.h }, section: cell.section, block: cell.block, kind: "cell", rows: [cell.row, cell.row], cols: [cell.col, cell.col], text: cell.text, runs, fontSizePt: firstRunStyle(runs).size_pt });
+          // issue 064 Tier-2: a NESTED cell is now EDITABLE. Resolve its descending CellPath (the engine's
+          // `cell.path`, or the length-1 flat quad on an older backend) and prefill the LEAF cell's runs
+          // through the path-aware read — no more "중첩표는 편집할 수 없습니다" toast.
+          const path: CellAddr[] = cell.path && cell.path.length > 0 ? cell.path : [{ block: cell.block, row: cell.row, col: cell.col }];
+          const runs = await core.session.runsAtPath(cell.section, path);
+          setEditor({ page: c.page, box: { x: cell.x, y: cell.y, w: cell.w, h: cell.h }, section: cell.section, block: cell.block, kind: "cell", rows: [cell.row, cell.row], cols: [cell.col, cell.col], text: cell.text, runs, fontSizePt: firstRunStyle(runs).size_pt, path });
           return;
         }
         if (await adapter.tableAt(c.page, c.x, c.y)) return; // on a table border but not a cell → no editor
@@ -1282,8 +1285,11 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       const row = anchor.rows?.[0] ?? 0;
       const col = anchor.cols?.[0] ?? 0;
       try {
-        const runs = await core.session.runsAt(anchor.section, anchor.block, row, col);
-        setEditor({ page: mark.page, box: mark.box, section: anchor.section, block: anchor.block, kind: "cell", rows: [row, row], cols: [col, col], text: anchor.text ?? "", runs, fontSizePt: firstRunStyle(runs).size_pt });
+        // issue 064 Tier-2: prefill via the anchor's descending CellPath so a NESTED selected cell edits
+        // its LEAF (a length-1 path falls back to the flat read).
+        const path: CellAddr[] = anchor.path && anchor.path.length > 0 ? anchor.path : [{ block: anchor.block, row, col }];
+        const runs = await core.session.runsAtPath(anchor.section, path);
+        setEditor({ page: mark.page, box: mark.box, section: anchor.section, block: anchor.block, kind: "cell", rows: [row, row], cols: [col, col], text: anchor.text ?? "", runs, fontSizePt: firstRunStyle(runs).size_pt, path });
       } catch (e) {
         onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
       }
@@ -1616,11 +1622,13 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // SetParagraphRuns (never a plain-text variant — 교훈 6), applied as ONE undo batch via the SAME
   // session.applyBatch path editCellText uses (page re-flow + layoutInvalidated → the refreshToken close).
   const applyEditorRuns = useCallback(
-    (ed: { kind: string; section: number; block: number; rows?: [number, number]; cols?: [number, number] }, runs: RunSpec[]) => {
+    (ed: { kind: string; section: number; block: number; rows?: [number, number]; cols?: [number, number]; path?: CellAddr[] }, runs: RunSpec[]) => {
       const intent: Intent =
         ed.kind === "paragraph"
           ? { intent: "SetParagraphRuns", section: ed.section, block: ed.block, runs }
-          : { intent: "SetTableCellRuns", section: ed.section, index: ed.block, row: ed.rows?.[0] ?? 0, col: ed.cols?.[0] ?? 0, runs };
+          // issue 064 Tier-2: carry the descending CellPath so a NESTED cell commit walks to the LEAF.
+          // A length-1 (or absent) path leaves the plain (index,row,col) route unchanged (back-compat).
+          : { intent: "SetTableCellRuns", section: ed.section, index: ed.block, row: ed.rows?.[0] ?? 0, col: ed.cols?.[0] ?? 0, runs, ...(ed.path && ed.path.length > 1 ? { path: ed.path } : {}) };
       return core.session.applyBatch([intent]);
     },
     [core],
@@ -2092,14 +2100,14 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           return;
         }
         const cell = adapter.tableCellAt ? await adapter.tableCellAt(c.page, c.x, c.y) : null;
-        if (cell?.nested) {
-          // Tier-1 (issue 064): a nested-table cell is not editable — don't drill/open an editor over it,
-          // just tell the user honestly. (openEditorAt guards too; this stops the pointless first-drill.)
-          toast("중첩표는 아직 편집할 수 없습니다");
-          return;
-        }
+        // issue 064 Tier-2: a NESTED cell drills + edits like any cell (no more refusal toast). The
+        // "already-drilled cell → open editor" test compares the DESCENDING CellPath so a nested leaf is
+        // matched precisely (its flat (block,row,col) alone can collide across nesting levels).
         const cur = core.selection.currentCell();
-        const onDrilledCell = !!cell && !!cur && cur.section === cell.section && cur.block === cell.block && cur.row === cell.row && cur.col === cell.col;
+        const cellPath = cell ? (cell.path && cell.path.length > 0 ? cell.path : [{ block: cell.block, row: cell.row, col: cell.col }]) : null;
+        const curPath = cur ? (cur.path && cur.path.length > 0 ? cur.path : [{ block: cur.block, row: cur.row, col: cur.col }]) : null;
+        const onDrilledCell =
+          !!cell && !!cur && !!cellPath && !!curPath && cur.section === cell.section && samePath(cellPath, curPath);
         if (onDrilledCell) {
           void openEditorAt(c); // the cell is already drilled/selected → this double-click opens the editor
         } else {

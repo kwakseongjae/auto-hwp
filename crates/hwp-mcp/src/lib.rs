@@ -1102,12 +1102,19 @@ pub enum Intent {
     },
     /// The WYSIWYG commit — replace a cell with STYLED runs (`SetTableCell` with `Vec<RunSpec>`,
     /// preserving per-run bold/italic/size/color/font instead of collapsing to one plain run).
+    ///
+    /// `path` (issue 064 Tier-2, ADDITIVE — absent ⇒ `None`) is the DESCENDING `CellPath` to a NESTED
+    /// leaf cell (the `CellHit.path` the engine returned). When it has ≥2 levels the commit routes to
+    /// `Op::SetTableCellPath` (walk the path); otherwise the flat `(index, row, col)` drives the plain
+    /// `Op::SetTableCell` — so a non-nested edit is 100% unchanged. New field is `Option` per schema v0.
     SetTableCellRuns {
         section: usize,
         index: usize,
         row: usize,
         col: usize,
         runs: Vec<hwp_ops::RunSpec>,
+        #[serde(default)]
+        path: Option<Vec<hwp_ops::CellStep>>,
     },
     /// The WYSIWYG commit for a paragraph — replace it with STYLED runs (`SetParagraphRuns`).
     SetParagraphRuns {
@@ -1706,16 +1713,27 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
             row,
             col,
             runs,
+            path,
         } => {
             let doc = session.doc.as_mut().ok_or("no document open")?;
-            doc.do_op(&hwp_ops::Op::SetTableCell {
-                section,
-                index,
-                row,
-                col,
-                runs,
-            })
-            .map_err(|e| e.to_string())?;
+            // A NESTED leaf (path ≥ 2 levels) → walk the CellPath; else the flat quad drives the plain
+            // op unchanged (issue 064 Tier-2). A length-1 path is equivalent to the flat quad, so it
+            // takes the same back-compat route.
+            let op = match path {
+                Some(p) if p.len() >= 2 => hwp_ops::Op::SetTableCellPath {
+                    section,
+                    path: p,
+                    runs,
+                },
+                _ => hwp_ops::Op::SetTableCell {
+                    section,
+                    index,
+                    row,
+                    col,
+                    runs,
+                },
+            };
+            doc.do_op(&op).map_err(|e| e.to_string())?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }

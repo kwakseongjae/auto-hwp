@@ -1,6 +1,6 @@
 import type { EngineAdapter } from "./adapter";
 import { Emitter } from "./events";
-import type { Anchor, DocContext, ImageBox, Intent, OpenResult, OutlineItem, PageGeom, RunSpec } from "./types";
+import type { Anchor, CellAddr, DocContext, ImageBox, Intent, OpenResult, OutlineItem, PageGeom, RunSpec } from "./types";
 
 /// DocSession — the document lifecycle facade over an EngineAdapter (SDK-LAYERS L2), DESCENDED from
 /// HwpWorkspace's document/undo/font state. It owns: the open-document metadata (`OpenResult`), the
@@ -188,6 +188,18 @@ export class DocSession {
    *  PRESERVE run styling (issue 027 §함정). `[]` when the backend can't answer / the target is empty. */
   async runsAt(section: number, block: number, row?: number, col?: number): Promise<RunSpec[]> {
     return (await this.adapter.blockRuns?.(section, block, row, col)) ?? [];
+  }
+
+  /** The CURRENT styled runs of a (possibly NESTED) cell addressed by its descending CellPath (issue 064
+   *  Tier-2) — the nested-cell twin of {@link runsAt}. The inline editor prefills a nested LEAF cell from
+   *  this. Falls back to the flat `blockRuns(section, path[0])` when the backend lacks `blockRunsPath`
+   *  (so a length-1 path still prefills on older adapters); `[]` when nothing answers. */
+  async runsAtPath(section: number, path: CellAddr[]): Promise<RunSpec[]> {
+    if (path.length === 0) return [];
+    if (this.adapter.blockRunsPath) return (await this.adapter.blockRunsPath(section, path)) ?? [];
+    // Fallback: only a length-1 (non-nested) path can be served by the flat reader.
+    const a = path[path.length - 1];
+    return (await this.adapter.blockRuns?.(section, a.block, a.row, a.col)) ?? [];
   }
 
   /** The document outline (issue 046) — the top-level headings for the left nav panel, or `[]` when the

@@ -1,7 +1,7 @@
 import { HwpDoc, initEngine, resetEngine } from "@tf-hwp/engine";
 import { EngineWorkerClient } from "@tf-hwp/engine/worker-client";
 import type { EngineAdapter } from "./EngineAdapter";
-import type { BlockHit, CaretRect, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
+import type { BlockHit, CaretRect, CellAddr, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
 
 type WasmInput = string | URL | Request | BufferSource | WebAssembly.Module;
 
@@ -73,6 +73,7 @@ interface EngineDoc {
   tableRowBoundaries(page: number, section: number, block: number): MaybePromise<number[] | null>;
   pageGeometry(page: number): MaybePromise<unknown>;
   blockRuns(section: number, block: number, row?: number | null, col?: number | null): MaybePromise<unknown>;
+  blockRunsPath(section: number, path: CellAddr[]): MaybePromise<unknown>;
   tableGrid(section: number, block: number): MaybePromise<unknown>;
   outline(): MaybePromise<unknown>;
   applyIntent(intent: object | string): MaybePromise<unknown>;
@@ -180,6 +181,7 @@ export class WasmAdapter implements EngineAdapter {
       tableRowBoundaries: call("tableRowBoundaries") as EngineDoc["tableRowBoundaries"],
       pageGeometry: call("pageGeometry"),
       blockRuns: call("blockRuns"),
+      blockRunsPath: call("blockRunsPath"),
       tableGrid: call("tableGrid"),
       outline: call("outline"),
       applyIntent: call("applyIntent") as EngineDoc["applyIntent"],
@@ -390,6 +392,12 @@ export class WasmAdapter implements EngineAdapter {
 
   blockRuns(section: number, block: number, row?: number, col?: number): Promise<RunSpec[]> {
     return this.guard(async (d) => (await d.blockRuns(section, block, row ?? null, col ?? null)) as RunSpec[]);
+  }
+
+  /** Styled runs of a NESTED cell by its descending CellPath (issue 064 Tier-2) — the engine
+   *  `blockRunsPath` binding, so the inline editor prefills a nested LEAF cell's runs. */
+  blockRunsPath(section: number, path: CellAddr[]): Promise<RunSpec[]> {
+    return this.guard(async (d) => (await d.blockRunsPath(section, path)) as RunSpec[]);
   }
 
   /** Table cell GRID (issue 066) — the engine `tableGrid` binding (a pure MODEL read, so no re-typeset

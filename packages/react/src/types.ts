@@ -16,6 +16,7 @@ export type {
   TableGrid,
   GridCell,
   CellHit,
+  CellAddr,
   ImageBox,
   Intent,
   Outcome,

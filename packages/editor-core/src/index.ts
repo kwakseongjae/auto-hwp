@@ -86,6 +86,7 @@ export type {
   CaretRect,
   ChatTurn,
   Citation,
+  CellAddr,
   CellCaretRect,
   CellHit,
   CellTextHit,

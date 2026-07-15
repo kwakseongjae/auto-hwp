@@ -585,6 +585,62 @@ pub fn blocks_in_rect_placed(
     out
 }
 
+/// One step of a descending `CellPath` (issue 064 Tier-2) — the FE↔Rust wire twin of
+/// `hwp_typeset::CellAddr`. `block` is a block index (top-level: the section block index; deeper: the
+/// `Block::Table`'s index INSIDE the previous cell); `(row, col)` is that table's `edit_target` cell
+/// address. `Deserialize` too (the `SetTableCell`/`SetTableCellRuns` write path carries a path back).
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct CellAddrDto {
+    pub block: usize,
+    pub row: usize,
+    pub col: usize,
+}
+
+impl From<&hwp_typeset::CellAddr> for CellAddrDto {
+    fn from(a: &hwp_typeset::CellAddr) -> Self {
+        CellAddrDto {
+            block: a.block,
+            row: a.row,
+            col: a.col,
+        }
+    }
+}
+
+/// Walk a descending `CellPath` from `section`'s blocks to the LEAF cell (issue 064 Tier-2). Level 0
+/// resolves `section.blocks[path[0].block].edit_target()` (unwrapping a 자가진단표 frame wrapper — the
+/// SAME unwrap the top-level render does); each deeper level indexes the RAW `Block::Table` at
+/// `blocks[addr.block]` inside the previous cell (mirroring `place_nested_table`, which draws nested
+/// tables un-unwrapped). A length-1 path is exactly the plain top-level cell → 100% back-compat. `None`
+/// when any step doesn't resolve (bad index / not-a-table / covered cell).
+fn resolve_cell_path<'a>(
+    doc: &'a SemanticDoc,
+    section: usize,
+    path: &[CellAddrDto],
+) -> Option<&'a hwp_model::prelude::Cell> {
+    use hwp_model::prelude::Block;
+    let sec = doc.sections.get(section)?;
+    let (first, rest) = path.split_first()?;
+    let Block::Table(t) = sec.blocks.get(first.block)? else {
+        return None;
+    };
+    let t = t.edit_target(); // level 0: unwrap a 1×1 frame wrapper, as place_doc did
+    let mut cell = t
+        .cells
+        .iter()
+        .find(|c| c.active && c.row == first.row && c.col == first.col)?;
+    for addr in rest {
+        let Block::Table(nt) = cell.blocks.get(addr.block)? else {
+            return None;
+        };
+        // Deeper levels: RAW nested table (no edit_target) — matches place_nested_table's drawn coords.
+        cell = nt
+            .cells
+            .iter()
+            .find(|c| c.active && c.row == addr.row && c.col == addr.col)?;
+    }
+    Some(cell)
+}
+
 /// The table CELL the user double-clicked: its table anchor `(section, block)`, the cell `(row, col)`,
 /// the table's `(rows, cols)`, the cell's CURRENT text, and its PX box (own SVG space).
 #[derive(serde::Serialize)]
@@ -600,18 +656,23 @@ pub struct CellHitDto {
     pub y: f64,
     pub w: f64,
     pub h: f64,
-    /// True when the resolved cell contains a NESTED table (`Block::Table` among its blocks). Such a
-    /// cell is NOT an inline-edit target in Tier-1 (issue 064): opening the paragraph-only editor over
-    /// it would both cover the nested grid AND, on commit, historically drop the nested table (now
-    /// prevented in hwp-ops, but still visually wrong). The UI reads this to show an honest "중첩표는
-    /// 아직 편집할 수 없습니다" toast instead of the editor. `false` for ordinary (paragraph-only) cells.
+    /// True when the resolved LEAF cell contains a NESTED table (`Block::Table` among its blocks). With
+    /// Tier-2 a nested cell is EDITABLE (via `path`), so the UI no longer refuses it — this flag now just
+    /// tells a consumer the cell has a further nested grid inside (the deepest reachable level reads
+    /// `false`). Retained for back-compat with Tier-1 consumers.
     pub nested: bool,
+    /// The DESCENDING `CellPath` to this (possibly nested) cell (issue 064 Tier-2). Level 0 is the
+    /// top-level table cell; each deeper entry indexes the nested `Block::Table` inside the previous
+    /// cell. A length-1 path equals the flat `(section, block, row, col)` above (the leaf) → 100%
+    /// back-compat for a non-nested doc. The write path (`SetTableCellRuns` + `Op::SetTableCell`) walks
+    /// this to reach the LEAF cell.
+    pub path: Vec<CellAddrDto>,
 }
 
 /// Join a table cell's paragraphs into plain text — multiple paragraphs joined with '\n' so a
 /// multi-line cell reads back readably (the layout engine renders a '\n' inside a run as a forced line
 /// break, so an edit round-trips). The SHARED readback used by both the cell-hit chip
-/// ([`model_cell_text`]) and the AI grid ([`table_grid`]).
+/// ([`table_cell_at_placed`], via the resolved leaf cell) and the AI grid ([`table_grid`]).
 fn cell_plain_text(cell: &hwp_model::prelude::Cell) -> String {
     use hwp_model::prelude::{Block, Inline};
     let mut paras: Vec<String> = Vec::new();
@@ -631,55 +692,9 @@ fn cell_plain_text(cell: &hwp_model::prelude::Cell) -> String {
     paras.join("\n")
 }
 
-/// Concatenate the plain text of the model cell at `(row, col)` of the table at `(section, block)`.
-fn model_cell_text(
-    doc: &SemanticDoc,
-    section: usize,
-    block: usize,
-    row: usize,
-    col: usize,
-) -> String {
-    use hwp_model::prelude::Block;
-    let Some(sec) = doc.sections.get(section) else {
-        return String::new();
-    };
-    let Some(Block::Table(t)) = sec.blocks.get(block) else {
-        return String::new();
-    };
-    let t = t.edit_target(); // frame wrapper (자가진단표) → inner table
-    let Some(cell) = t.cells.iter().find(|c| c.row == row && c.col == col) else {
-        return String::new();
-    };
-    cell_plain_text(cell)
-}
-
-/// Whether the model cell at `(row, col)` of the table at `(section, block)` holds a NESTED table
-/// (a `Block::Table` among its blocks). Resolves through the SAME 1×1 frame wrapper (`edit_target`)
-/// as [`model_cell_text`], so a 자가진단표 frame (whose inner table is itself the edit target, not a
-/// nested table) reads `false` while a real table-in-a-cell reads `true`. Powers `CellHit.nested`
-/// (issue 064): a `true` cell is refused inline editing by the UI (honest toast) so its nested grid
-/// is neither covered by the paragraph-only editor nor lost on commit.
-fn model_cell_has_nested_table(
-    doc: &SemanticDoc,
-    section: usize,
-    block: usize,
-    row: usize,
-    col: usize,
-) -> bool {
-    use hwp_model::prelude::Block;
-    let Some(sec) = doc.sections.get(section) else {
-        return false;
-    };
-    let Some(Block::Table(t)) = sec.blocks.get(block) else {
-        return false;
-    };
-    let t = t.edit_target(); // frame wrapper (자가진단표) → inner table
-    t.cells
-        .iter()
-        .find(|c| c.row == row && c.col == col)
-        .map(|c| c.blocks.iter().any(|b| matches!(b, Block::Table(_))))
-        .unwrap_or(false)
-}
+// (issue 064 Tier-2) The cell's text + nested-table flag are now read straight off the LEAF cell that
+// `resolve_cell_path` returns (see `table_cell_at_placed`), so the earlier level-0-only `model_cell_text`
+// / `model_cell_has_nested_table` helpers are gone — the path reaches nested cells the flat lookup missed.
 
 /// One ACTIVE (uncovered) cell of a marked table's grid (issue 066): its MODEL-GLOBAL `(row, col)`
 /// address + current plain text. The address is the SAME space [`hwp_ops::Op::SetTableCell`] writes
@@ -698,7 +713,7 @@ pub struct GridCellDto {
 /// anchor-only context (`text=""`) left it blind, so "표 채워줘" produced zero edits.
 ///
 /// §좌표계 정합 (issue 066 §함정): unwraps via `edit_target()` (a 1×1 프레임 wrapper 자가진단표 → the
-/// inner table), the SAME unwrapping `SetTableCell` / `model_cell_text` / `table_col_boundaries` do, so
+/// inner table), the SAME unwrapping `SetTableCell` / `resolve_cell_path` / `table_col_boundaries` do, so
 /// the `(row, col)` the model READS here equals the address an edit WRITES. Rows/cols are MODEL-GLOBAL:
 /// split-table fragments are a placement concept and never enter here (the model table carries every
 /// row), so this is fragment-free by construction. Covered/merged slots are ABSENT — only their origin
@@ -768,6 +783,28 @@ pub fn table_cell_at_placed(
         .iter()
         .rfind(|t| hx >= t.x && hx <= t.x + t.w && hy >= t.y && hy <= t.y + t.h)?;
     let cell = t.cell_at(hx, hy)?;
+    // The full DESCENDING CellPath to this (possibly nested) LEAF cell (issue 064 Tier-2): the placed
+    // table's ancestor cells + this table's own `(self_block, row, col)`. For a top-level table `ancestors`
+    // is empty and `self_block == block`, so the path is the length-1 `[{block, row, col}]` — 100%
+    // back-compat. The topmost `rfind` above already picks the INNERMOST table (its `PlacedTable` was
+    // pushed after the outer one), so a click in a nested grid lands on the nested leaf naturally.
+    let mut path: Vec<CellAddrDto> = t.ancestors.iter().map(CellAddrDto::from).collect();
+    path.push(CellAddrDto {
+        block: t.self_block,
+        row: cell.row,
+        col: cell.col,
+    });
+    // Read the LEAF cell's text + nested flag straight off the resolved cell (the path walks through
+    // nesting; the flat `model_cell_text` only reaches level 0). Fallback keeps the length-1 behavior.
+    let leaf = resolve_cell_path(doc, t.section, &path);
+    let text = leaf.map(cell_plain_text).unwrap_or_default();
+    let nested = leaf
+        .map(|c| {
+            c.blocks
+                .iter()
+                .any(|b| matches!(b, hwp_model::prelude::Block::Table(_)))
+        })
+        .unwrap_or(false);
     Some(CellHitDto {
         section: t.section,
         block: t.block,
@@ -775,12 +812,13 @@ pub fn table_cell_at_placed(
         col: cell.col,
         rows: t.rows,
         cols: t.cols,
-        text: model_cell_text(doc, t.section, t.block, cell.row, cell.col),
+        text,
         x: cell.x / k,
         y: cell.y / k,
         w: cell.w / k,
         h: cell.h / k,
-        nested: model_cell_has_nested_table(doc, t.section, t.block, cell.row, cell.col),
+        nested,
+        path,
     })
 }
 
@@ -1211,9 +1249,77 @@ pub fn run_specs(runs: &[RunDto]) -> Vec<hwp_ops::RunSpec> {
     runs.iter().map(RunDto::to_run_spec).collect()
 }
 
+/// Append one paragraph's styled runs (per-run char shapes) to `out` — the shared reader behind
+/// [`block_runs`]/[`block_runs_path`] so the WYSIWYG editor renders each run as a styled span.
+fn push_para_runs(doc: &SemanticDoc, p: &hwp_model::prelude::Paragraph, out: &mut Vec<RunDto>) {
+    use hwp_model::prelude::{CharShape, Inline};
+    let default_color = CharShape::default().text_color;
+    for run in &p.runs {
+        let sh = doc
+            .char_shapes
+            .get(run.char_shape)
+            .cloned()
+            .unwrap_or_default();
+        let text: String = run
+            .content
+            .iter()
+            .filter_map(|i| {
+                if let Inline::Text(t) = i {
+                    Some(t.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        out.push(RunDto {
+            text,
+            bold: sh.bold,
+            italic: sh.italic,
+            underline: sh.underline,
+            strike: sh.strikeout,
+            size_pt: if sh.height > 0 {
+                Some(sh.height as f32 / 100.0)
+            } else {
+                None
+            },
+            color: if sh.text_color == default_color {
+                None
+            } else {
+                Some(sh.text_color.to_hex())
+            },
+            highlight: None,
+            font: sh.font_family.clone(),
+        });
+    }
+}
+
+/// All styled runs of a resolved cell (its paragraphs joined by a `\n` run — parity with the cell-text
+/// reader). The nesting-agnostic core: `block_runs`/`block_runs_path` differ only in how they RESOLVE
+/// the cell (flat vs descending path).
+fn cell_runs(doc: &SemanticDoc, cell: &hwp_model::prelude::Cell) -> Vec<RunDto> {
+    use hwp_model::prelude::Block;
+    let mut out: Vec<RunDto> = Vec::new();
+    let mut first = true;
+    for b in &cell.blocks {
+        if let Block::Paragraph(p) = b {
+            if !first {
+                out.push(RunDto {
+                    text: "\n".into(),
+                    ..Default::default()
+                });
+            }
+            push_para_runs(doc, p, &mut out);
+            first = false;
+        }
+    }
+    out
+}
+
 /// Read ALL styled runs of a target paragraph/cell (per-run shapes) so the WYSIWYG editor can render
 /// them as styled spans. Unlike [`char_fmt`] (first run only), this returns every run. A multi-paragraph
-/// cell's paragraphs are joined by a `\n` run (parity with the cell-text reader).
+/// cell's paragraphs are joined by a `\n` run (parity with the cell-text reader). The `(row, col)` cell
+/// case is the length-1 fast path of [`block_runs_path`] (issue 064 Tier-2) — a nested LEAF cell prefills
+/// via `block_runs_path` with its full `CellPath`.
 pub fn block_runs(
     doc: &SemanticDoc,
     section: usize,
@@ -1221,83 +1327,41 @@ pub fn block_runs(
     row: Option<usize>,
     col: Option<usize>,
 ) -> Vec<RunDto> {
-    use hwp_model::prelude::{Block, CharShape, Inline, Paragraph};
-    let default_color = CharShape::default().text_color;
-    let read_para = |p: &Paragraph, out: &mut Vec<RunDto>| {
-        for run in &p.runs {
-            let sh = doc
-                .char_shapes
-                .get(run.char_shape)
-                .cloned()
-                .unwrap_or_default();
-            let text: String = run
-                .content
-                .iter()
-                .filter_map(|i| {
-                    if let Inline::Text(t) = i {
-                        Some(t.as_str())
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            out.push(RunDto {
-                text,
-                bold: sh.bold,
-                italic: sh.italic,
-                underline: sh.underline,
-                strike: sh.strikeout,
-                size_pt: if sh.height > 0 {
-                    Some(sh.height as f32 / 100.0)
-                } else {
-                    None
-                },
-                color: if sh.text_color == default_color {
-                    None
-                } else {
-                    Some(sh.text_color.to_hex())
-                },
-                highlight: None,
-                font: sh.font_family.clone(),
-            });
+    use hwp_model::prelude::Block;
+    match (row, col) {
+        // A cell target → the length-1 descending path (edit_target unwrap happens inside).
+        (Some(r), Some(c)) => block_runs_path(
+            doc,
+            section,
+            &[CellAddrDto {
+                block,
+                row: r,
+                col: c,
+            }],
+        ),
+        // A paragraph target (row/col omitted).
+        _ => {
+            let Some(Block::Paragraph(p)) =
+                doc.sections.get(section).and_then(|s| s.blocks.get(block))
+            else {
+                return Vec::new();
+            };
+            let mut out = Vec::new();
+            push_para_runs(doc, p, &mut out);
+            out
         }
-    };
-    let Some(sec) = doc.sections.get(section) else {
-        return Vec::new();
-    };
-    let Some(blk) = sec.blocks.get(block) else {
-        return Vec::new();
-    };
-    let mut out: Vec<RunDto> = Vec::new();
-    match (blk, row, col) {
-        (Block::Paragraph(p), None, None) => read_para(p, &mut out),
-        (Block::Table(t), Some(r), Some(c)) => {
-            // Resolve through a 1×1 frame wrapper (자가진단표) to the inner table the user actually
-            // clicked, so its nested cells are editable like any top-level cell.
-            let t = t.edit_target();
-            if let Some(cell) = t
-                .cells
-                .iter()
-                .find(|cc| cc.active && cc.row == r && cc.col == c)
-            {
-                let mut first = true;
-                for b in &cell.blocks {
-                    if let Block::Paragraph(p) = b {
-                        if !first {
-                            out.push(RunDto {
-                                text: "\n".into(),
-                                ..Default::default()
-                            });
-                        }
-                        read_para(p, &mut out);
-                        first = false;
-                    }
-                }
-            }
-        }
-        _ => {}
     }
-    out
+}
+
+/// [`block_runs`] for a (possibly NESTED) cell addressed by its descending `CellPath` (issue 064 Tier-2).
+/// Walks the path to the LEAF cell ([`resolve_cell_path`]) and reads its runs, so the inline editor
+/// prefills a nested cell's text/style. A length-1 path is exactly the flat `(section, block, row, col)`
+/// cell → back-compat with [`block_runs`]. Empty when the path doesn't resolve.
+pub fn block_runs_path(doc: &SemanticDoc, section: usize, path: &[CellAddrDto]) -> Vec<RunDto> {
+    match resolve_cell_path(doc, section, path) {
+        Some(cell) => cell_runs(doc, cell),
+        None => Vec::new(),
+    }
 }
 
 /// The target cell/paragraph's BACKGROUND fill + horizontal alignment + per-paragraph indent — the
@@ -1327,6 +1391,68 @@ pub struct ParaStyleDto {
     pub align: String,
 }
 
+/// One paragraph's [`ParaStyleDto`] (align + indent, HWPUNIT) — the shared unit behind
+/// [`block_style`]/[`block_style_path`]. Mirrors `hwp_typeset::place::indent_of`'s clamping so the
+/// editor's inset matches the placed glyphs.
+fn para_style_dto(doc: &SemanticDoc, p: &hwp_model::prelude::Paragraph) -> ParaStyleDto {
+    use hwp_model::prelude::HorizontalAlign;
+    let align = match doc
+        .para_shapes
+        .get(p.para_shape)
+        .map(|ps| ps.align)
+        .unwrap_or_default()
+    {
+        HorizontalAlign::Left => "left",
+        HorizontalAlign::Right => "right",
+        HorizontalAlign::Center => "center",
+        _ => "justify", // Justify (양쪽, default) / Distribute / DistributeSpace
+    }
+    .to_string();
+    let ps = doc.para_shapes.get(p.para_shape);
+    let left = ps.map(|s| s.left_margin).unwrap_or(0).max(0);
+    let right = ps.map(|s| s.right_margin).unwrap_or(0).max(0);
+    let indent = ps.map(|s| s.indent).unwrap_or(0);
+    let first = indent.max(-left); // 들여(+)/내어(−)쓰기, clamped so line 0 never crosses the inset
+    ParaStyleDto {
+        indent_left: left,
+        indent_first: first,
+        indent_right: right,
+        align,
+    }
+}
+
+/// The first paragraph drives the back-compat single-indent fields + the container alignment.
+fn finalize_block_style(dto: &mut BlockStyleDto) {
+    if let Some(first) = dto.paragraphs.first() {
+        dto.align = first.align.clone();
+        dto.indent_left = first.indent_left;
+        dto.indent_first = first.indent_first;
+        dto.indent_right = first.indent_right;
+    }
+}
+
+/// A resolved cell's [`BlockStyleDto`] (shade + per-paragraph style). SAME paragraph iteration as
+/// [`cell_runs`] so `paragraphs[i]` aligns with the i-th editor block (lockstep — an off-by-one would
+/// mis-indent every later line).
+fn cell_block_style(doc: &SemanticDoc, cell: &hwp_model::prelude::Cell) -> BlockStyleDto {
+    use hwp_model::prelude::Block;
+    let mut dto = BlockStyleDto {
+        shade: cell.shade_color.map(|c| c.to_hex()),
+        align: "justify".into(),
+        indent_left: 0,
+        indent_first: 0,
+        indent_right: 0,
+        paragraphs: Vec::new(),
+    };
+    for b in &cell.blocks {
+        if let Block::Paragraph(p) = b {
+            dto.paragraphs.push(para_style_dto(doc, p));
+        }
+    }
+    finalize_block_style(&mut dto);
+    dto
+}
+
 pub fn block_style(
     doc: &SemanticDoc,
     section: usize,
@@ -1334,82 +1460,58 @@ pub fn block_style(
     row: Option<usize>,
     col: Option<usize>,
 ) -> BlockStyleDto {
-    use hwp_model::prelude::{Block, HorizontalAlign, Paragraph};
-    let align_of = |p: &Paragraph| -> String {
-        match doc
-            .para_shapes
-            .get(p.para_shape)
-            .map(|ps| ps.align)
-            .unwrap_or_default()
-        {
-            HorizontalAlign::Left => "left",
-            HorizontalAlign::Right => "right",
-            HorizontalAlign::Center => "center",
-            _ => "justify", // Justify (양쪽, default) / Distribute / DistributeSpace
-        }
-        .to_string()
-    };
-    // Mirror hwp_typeset::place::indent_of's clamping so the editor's inset matches the placed glyphs.
-    let indent_of = |p: &Paragraph| -> (i32, i32, i32) {
-        let ps = doc.para_shapes.get(p.para_shape);
-        let left = ps.map(|s| s.left_margin).unwrap_or(0).max(0);
-        let right = ps.map(|s| s.right_margin).unwrap_or(0).max(0);
-        let indent = ps.map(|s| s.indent).unwrap_or(0);
-        let first = indent.max(-left); // 들여(+)/내어(−)쓰기, clamped so line 0 never crosses the inset
-        (left, first, right)
-    };
-    let para_style = |p: &Paragraph| -> ParaStyleDto {
-        let (l, f, r) = indent_of(p);
-        ParaStyleDto {
-            indent_left: l,
-            indent_first: f,
-            indent_right: r,
-            align: align_of(p),
-        }
-    };
-    let mut dto = BlockStyleDto {
-        shade: None,
-        align: "justify".into(),
-        indent_left: 0,
-        indent_first: 0,
-        indent_right: 0,
-        paragraphs: Vec::new(),
-    };
-    let Some(sec) = doc.sections.get(section) else {
-        return dto;
-    };
-    let Some(blk) = sec.blocks.get(block) else {
-        return dto;
-    };
-    match (blk, row, col) {
-        (Block::Paragraph(p), None, None) => dto.paragraphs.push(para_style(p)),
-        (Block::Table(t), Some(r), Some(c)) => {
-            let t = t.edit_target(); // frame wrapper (자가진단표) → inner table
-            if let Some(cell) = t
-                .cells
-                .iter()
-                .find(|cc| cc.active && cc.row == r && cc.col == c)
+    use hwp_model::prelude::Block;
+    match (row, col) {
+        // A cell target → the length-1 descending path (edit_target unwrap happens inside).
+        (Some(r), Some(c)) => block_style_path(
+            doc,
+            section,
+            &[CellAddrDto {
+                block,
+                row: r,
+                col: c,
+            }],
+        ),
+        // A paragraph target (row/col omitted).
+        _ => {
+            let mut dto = BlockStyleDto {
+                shade: None,
+                align: "justify".into(),
+                indent_left: 0,
+                indent_first: 0,
+                indent_right: 0,
+                paragraphs: Vec::new(),
+            };
+            if let Some(Block::Paragraph(p)) =
+                doc.sections.get(section).and_then(|s| s.blocks.get(block))
             {
-                dto.shade = cell.shade_color.map(|c| c.to_hex());
-                // SAME paragraph iteration as `block_runs` so paragraphs[i] aligns with the i-th editor
-                // block (lockstep — an off-by-one would mis-indent every later line).
-                for b in &cell.blocks {
-                    if let Block::Paragraph(p) = b {
-                        dto.paragraphs.push(para_style(p));
-                    }
-                }
+                dto.paragraphs.push(para_style_dto(doc, p));
             }
+            finalize_block_style(&mut dto);
+            dto
         }
-        _ => {}
     }
-    // The first paragraph drives the back-compat single-indent fields + the container alignment.
-    if let Some(first) = dto.paragraphs.first() {
-        dto.align = first.align.clone();
-        dto.indent_left = first.indent_left;
-        dto.indent_first = first.indent_first;
-        dto.indent_right = first.indent_right;
+}
+
+/// [`block_style`] for a (possibly NESTED) cell addressed by its descending `CellPath` (issue 064
+/// Tier-2). Walks to the LEAF cell ([`resolve_cell_path`]) so the inline editor paints a nested cell's
+/// shade/align/indent. A length-1 path is the flat `(section, block, row, col)` cell → back-compat.
+pub fn block_style_path(doc: &SemanticDoc, section: usize, path: &[CellAddrDto]) -> BlockStyleDto {
+    match resolve_cell_path(doc, section, path) {
+        Some(cell) => cell_block_style(doc, cell),
+        None => {
+            let mut dto = BlockStyleDto {
+                shade: None,
+                align: "justify".into(),
+                indent_left: 0,
+                indent_first: 0,
+                indent_right: 0,
+                paragraphs: Vec::new(),
+            };
+            finalize_block_style(&mut dto);
+            dto
+        }
     }
-    dto
 }
 
 // ---- Export (HTML / PDF) ----------------------------------------------------------------------
@@ -2202,5 +2304,170 @@ mod tests {
             matches!(ops[0], Op::SetTableCellShade { .. }),
             "shade op is preserved"
         );
+    }
+
+    // ── issue 064 Tier-2: descending CellPath ────────────────────────────────
+    /// A section-0 doc whose block 1 is a 2×1 OUTER table; its cell (0,0) holds a NESTED 2×2 table
+    /// (blocks `[Paragraph(""), Table(nested)]`, so the nested table is at cell-block index 1). The outer
+    /// table has 2 rows, so `unwrap_frame_table` does NOT promote it — the nested grid is drawn by
+    /// `place_nested_table` with its own provenance.
+    fn doc_with_nested_table() -> SemanticDoc {
+        use hwp_model::document::{Block, Cell, Paragraph, Run, Section, Table};
+        use hwp_model::prelude::Inline;
+        let mut doc = SemanticDoc {
+            char_shapes: vec![Default::default()],
+            para_shapes: vec![Default::default()],
+            ..Default::default()
+        };
+        doc.sections.push(Section {
+            blocks: vec![Block::Paragraph(Paragraph::default())],
+            ..Default::default()
+        });
+        hwp_ops::apply(
+            &mut doc,
+            &Op::InsertTableAt {
+                section: 0,
+                index: 1,
+                rows: vec![
+                    vec![CellSpec {
+                        text: "".into(),
+                        ..Default::default()
+                    }],
+                    vec![CellSpec {
+                        text: "아래".into(),
+                        ..Default::default()
+                    }],
+                ],
+            },
+        )
+        .expect("outer table");
+        let mk_para = |s: &str| {
+            Block::Paragraph(Paragraph {
+                runs: vec![Run {
+                    char_shape: 0,
+                    content: vec![Inline::Text(s.into())],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            })
+        };
+        let mk_cell = |r: usize, c: usize, s: &str| Cell {
+            row: r,
+            col: c,
+            row_span: 1,
+            col_span: 1,
+            active: true,
+            blocks: vec![mk_para(s)],
+            ..Default::default()
+        };
+        let nested = Table {
+            rows: 2,
+            cols: 2,
+            col_widths: vec![1, 1],
+            cells: vec![
+                mk_cell(0, 0, "A"),
+                mk_cell(0, 1, "B"),
+                mk_cell(1, 0, "C"),
+                mk_cell(1, 1, "D"),
+            ],
+            ..Default::default()
+        };
+        if let Block::Table(t) = &mut doc.sections[0].blocks[1] {
+            let cell00 = t
+                .cells
+                .iter_mut()
+                .find(|c| c.active && c.row == 0 && c.col == 0)
+                .unwrap();
+            cell00.blocks.push(Block::Table(nested)); // → [Paragraph(""), Table(nested)] (index 1)
+        }
+        doc
+    }
+
+    #[test]
+    fn table_cell_at_resolves_nested_leaf_path() {
+        let doc = doc_with_nested_table();
+        let placed = place(&doc, &[]);
+        // The nested table's PlacedTable is the one carrying ancestor provenance.
+        let (pi, nt) = placed
+            .pages
+            .iter()
+            .enumerate()
+            .find_map(|(pi, pg)| {
+                pg.tables
+                    .iter()
+                    .find(|t| !t.ancestors.is_empty())
+                    .map(|t| (pi, t))
+            })
+            .expect("a nested PlacedTable with descent provenance");
+        assert_eq!(nt.ancestors.len(), 1, "one ancestor cell (the outer (0,0))");
+        assert_eq!(
+            nt.self_block, 1,
+            "nested Block::Table sits at cell-block index 1"
+        );
+        let leaf = nt
+            .cells
+            .iter()
+            .find(|c| c.row == 1 && c.col == 1)
+            .expect("nested (1,1) placed");
+        let k = HWPUNIT_PER_PX;
+        let px = (leaf.x + leaf.w / 2.0) / k;
+        let py = (leaf.y + leaf.h / 2.0) / k;
+        let hit = table_cell_at_placed(&doc, &placed, pi as u32, px, py)
+            .expect("nested cell hit resolves");
+        // The DEEPER path wins (rfind picks the innermost table).
+        assert_eq!(hit.path.len(), 2, "1-deep nesting → length-2 CellPath");
+        assert_eq!(
+            hit.path[0],
+            CellAddrDto {
+                block: 1,
+                row: 0,
+                col: 0
+            },
+            "level 0 = outer table block, its (0,0) cell"
+        );
+        assert_eq!(
+            hit.path[1],
+            CellAddrDto {
+                block: 1,
+                row: 1,
+                col: 1
+            },
+            "level 1 = nested Block::Table (index 1), its (1,1) leaf"
+        );
+        // Flat row/col mirror the LEAF for back-compat; the leaf reads its own text "D".
+        assert_eq!((hit.row, hit.col), (1, 1));
+        assert_eq!(hit.text, "D");
+    }
+
+    #[test]
+    fn table_cell_at_non_nested_stays_length_1() {
+        // A plain top-level table (no nesting) resolves the flat quad as a length-1 path — 100% back-compat.
+        let doc = doc_with_table();
+        let placed = place(&doc, &[]);
+        let t = placed.pages[0]
+            .tables
+            .iter()
+            .find(|t| t.ancestors.is_empty())
+            .expect("top-level table");
+        let cell = t
+            .cells
+            .iter()
+            .find(|c| c.row == 1 && c.col == 0)
+            .expect("cell (1,0)");
+        let k = HWPUNIT_PER_PX;
+        let px = (cell.x + cell.w / 2.0) / k;
+        let py = (cell.y + cell.h / 2.0) / k;
+        let hit = table_cell_at_placed(&doc, &placed, 0, px, py).expect("cell hit");
+        assert_eq!(hit.path.len(), 1, "no nesting → length-1 path");
+        assert_eq!(
+            hit.path[0],
+            CellAddrDto {
+                block: 1,
+                row: 1,
+                col: 0
+            }
+        );
+        assert_eq!((hit.section, hit.block, hit.row, hit.col), (0, 1, 1, 0));
+        assert!(!hit.nested, "a plain cell is not nested");
     }
 }

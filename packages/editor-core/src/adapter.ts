@@ -1,4 +1,4 @@
-import type { BlockHit, CaretRect, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
+import type { BlockHit, CaretRect, CellAddr, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
 
 /// EngineAdapter — the backend seam (SDK-LAYERS L1↔L2). It abstracts the ACTUAL surface a backend
 /// exposes (open / page SVG / hit-test·tableAt / applyIntent / undo·redo / export) so the SAME
@@ -81,6 +81,13 @@ export interface EngineAdapter {
    *  flattening it. Resolves to `[]` when the target has no runs. Backends that omit it → the caller
    *  falls back to a single unstyled run (no preservation), never the plain-text `SetTableCell` variant. */
   blockRuns?(section: number, block: number, row?: number, col?: number): Promise<RunSpec[]>;
+
+  /** OPTIONAL — the CURRENT styled runs of a (possibly NESTED) cell addressed by its descending CellPath
+   *  (issue 064 Tier-2) — the nested-cell twin of `blockRuns`, so the inline editor prefills a nested LEAF
+   *  cell's runs. `path` is the `CellHit.path` the engine returned (a length-1 path is the flat cell).
+   *  Backends that omit it fall back to `blockRuns` for a length-1 path (no nested prefill). Reference
+   *  impl: `WasmAdapter` via the engine `blockRunsPath` binding. */
+  blockRunsPath?(section: number, path: CellAddr[]): Promise<RunSpec[]>;
 
   /** OPTIONAL — the cell GRID of the table block at `(section, block)` (issue 066): every ACTIVE cell's
    *  MODEL `(row, col)` + current text, so the chat doc-context can show the model a table's structure

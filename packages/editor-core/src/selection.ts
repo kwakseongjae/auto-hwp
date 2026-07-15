@@ -1,6 +1,23 @@
 import type { EngineAdapter } from "./adapter";
 import { Emitter } from "./events";
-import type { Anchor, BlockHit, Box, CellHit, PointerInput, Selection, SelMarquee, TableBox } from "./types";
+import type { Anchor, BlockHit, Box, CellAddr, CellHit, PointerInput, Selection, SelMarquee, TableBox } from "./types";
+
+/** The descending CellPath of a hit (issue 064 Tier-2): the engine's `cell.path`, or a synthesized
+ *  length-1 `[{block, row, col}]` for a backend/mock that predates it (so a non-nested cell is unchanged). */
+export function cellPathOf(cell: CellHit): CellAddr[] {
+  return cell.path && cell.path.length > 0 ? cell.path : [{ block: cell.block, row: cell.row, col: cell.col }];
+}
+
+/** Whether two CellPaths address a cell of the SAME table (issue 064 Tier-2): equal ancestor chain +
+ *  equal table block (the leaf `(row, col)` may differ). For length-1 paths this is "same top-level table
+ *  block" — exactly the pre-Tier-2 `(section, block)` drill match. */
+export function sameTable(a: CellAddr[], b: CellAddr[]): boolean {
+  if (a.length !== b.length || a.length === 0) return false;
+  for (let i = 0; i < a.length - 1; i++) {
+    if (a[i].block !== b[i].block || a[i].row !== b[i].row || a[i].col !== b[i].col) return false;
+  }
+  return a[a.length - 1].block === b[b.length - 1].block;
+}
 
 /// SelectionModel — the OS-style selection engine (issues 021 + 023), DESCENDED from @tf-hwp/react's
 /// HwpWorkspace into framework-agnostic core. It owns the selection array (the single source of truth),
@@ -32,7 +49,10 @@ const CELL_PROBE_PX = 3;
 export function selKey(a: Anchor): string {
   const r = a.rows ? `${a.rows[0]}-${a.rows[1]}` : "";
   const c = a.cols ? `${a.cols[0]}-${a.cols[1]}` : "";
-  return `${a.section}:${a.block}:${r}:${c}`;
+  // A NESTED cell (issue 064 Tier-2): fold the descending path so distinct nesting levels are DISTINCT
+  // selections. A length-1 (or absent) path adds nothing → identical key to before (back-compat).
+  const p = a.path && a.path.length > 1 ? ":" + a.path.map((s) => `${s.block}.${s.row}.${s.col}`).join(">") : "";
+  return `${a.section}:${a.block}:${r}:${c}${p}`;
 }
 
 /** Cell chip label = a short text snippet + a 1-based "N행 M열" (issue 023). Empty cell → "표 N행 M열".
@@ -51,6 +71,10 @@ export function cellLabel(cell: CellHit): string {
 export function deriveSel(page: number, table: TableBox | null, cell: CellHit | null, hit: BlockHit | null): Selection | null {
   if (cell) {
     const label = cellLabel(cell);
+    // Carry the descending CellPath (issue 064 Tier-2) so a NESTED cell anchor is a distinct selection
+    // (selKey) AND the commit can walk to the LEAF cell. `undefined` for a length-1 (non-nested) path
+    // keeps the anchor byte-compatible with the pre-Tier-2 shape.
+    const path = cell.path && cell.path.length > 1 ? cell.path : undefined;
     return {
       mark: { page, box: { x: cell.x, y: cell.y, w: cell.w, h: cell.h }, label, kind: "cell" },
       anchor: {
@@ -62,6 +86,7 @@ export function deriveSel(page: number, table: TableBox | null, cell: CellHit | 
         label,
         page,
         text: cell.text,
+        path,
       },
     };
   }
@@ -167,12 +192,13 @@ export class SelectionModel {
   private marquee: SelMarquee | null = null;
   private drag: Drag | null = null;
   private dragSeq = 0;
-  /// Figma-style progressive drill state (issue 06x): the table the user has DRILLED into (via a
-  /// double-click / `drillInto`). While set, a plain click INSIDE the same `(section, block)` selects the
-  /// exact CELL (stay drilled) instead of the whole table; a click on ANY other target (a different table,
-  /// a paragraph, an image, empty space) resets it to `null`, so the next click on a table re-selects the
-  /// WHOLE table (drill level-0). `null` = not drilled → a table click marks the whole table.
-  private drill: { section: number; block: number } | null = null;
+  /// Figma-style progressive drill state (issue 06x + 064 Tier-2): the CELL the user has DRILLED into (via
+  /// a double-click / `drillInto`), as its `section` + descending `CellPath` (a STACK of `CellAddr` —
+  /// length 1 for a top-level cell, ≥2 for a nested one). While set, a plain click on a cell of the SAME
+  /// table (same ancestor chain + table block — `sameTable`) selects that CELL (stay drilled) instead of
+  /// the whole table; a click on ANY other target (a different table/nesting level, a paragraph, empty
+  /// space) resets it to `null`. `null` = not drilled → a table click marks the whole (innermost) table.
+  private drill: { section: number; path: CellAddr[] } | null = null;
 
   private changed = new Emitter<Selection[]>();
   private marqueeChanged = new Emitter<SelMarquee | null>();
@@ -383,10 +409,15 @@ export class SelectionModel {
       let sel: Selection | null;
       if (r.table) {
         // A table hit marks the WHOLE table unless the user has already DRILLED into this same table
-        // (then the exact CELL, drill persists). A table hit is always a selection (never a deselect).
-        const drilled = !!this.drill && this.drill.section === r.table.section && this.drill.block === r.table.block;
-        if (drilled) {
+        // (then the exact CELL, drill persists). "Same table" now compares the clicked cell's descending
+        // CellPath (issue 064 Tier-2) so nested levels don't collide with the outer table's (section,
+        // block). A table hit is always a selection (never a deselect).
+        const clickPath = r.cell ? cellPathOf(r.cell) : null;
+        const drilled =
+          !!this.drill && !!clickPath && this.drill.section === r.table.section && sameTable(clickPath, this.drill.path);
+        if (drilled && clickPath) {
           sel = deriveSel(d.page, r.table, r.cell, null); // stay drilled → the clicked cell
+          this.drill = { section: r.table.section, path: clickPath }; // move within the drilled table
         } else {
           sel = deriveSel(d.page, r.table, null, null); // fresh table click → the whole table
           this.drill = null; // a fresh table selection is level-0 (never inherits a stale drill)
@@ -422,7 +453,11 @@ export class SelectionModel {
     try {
       const { table, cell } = await this.resolveHit(page, x, y);
       if (!table) return null; // not a table → caller handles paragraph edit
-      this.drill = { section: table.section, block: table.block };
+      // DESCEND to the cell under the point — its descending CellPath (issue 064 Tier-2) becomes the drill
+      // stack. Because `resolveHit`/`tableCellAt` resolve the INNERMOST (nested) cell (topmost provenance
+      // wins), a double-click over a nested grid drills straight to the nested LEAF; a subsequent
+      // double-click on that same cell opens the editor (the React layer's `currentCell` compare).
+      this.drill = { section: table.section, path: cell ? cellPathOf(cell) : [] };
       const sel = deriveSel(page, table, cell, null);
       if (!sel) return null;
       this.setSelection(mergeSelection(this.sels, [sel], "replace"));
@@ -437,11 +472,13 @@ export class SelectionModel {
   /// currentCell — the address of the CURRENTLY-selected lone cell (issue 06x), or `null` when the selection
   /// is not exactly ONE cell anchor. The React layer uses it to decide "a double-click on the ALREADY-drilled
   /// cell opens the editor" vs "drill into a fresh cell": if this equals the clicked cell → open the editor.
-  currentCell(): { section: number; block: number; row: number; col: number } | null {
+  currentCell(): { section: number; block: number; row: number; col: number; path?: CellAddr[] } | null {
     if (this.sels.length !== 1) return null;
     const a = this.sels[0].anchor;
     if (a.kind !== "cell" || !a.rows || !a.cols) return null;
-    return { section: a.section, block: a.block, row: a.rows[0], col: a.cols[0] };
+    // `path` is present only for a NESTED cell (issue 064 Tier-2); it is `undefined` for a plain
+    // top-level cell, so `toEqual({section,block,row,col})` (which ignores undefined) is unaffected.
+    return { section: a.section, block: a.block, row: a.rows[0], col: a.cols[0], path: a.path };
   }
 
   /** Remove the i-th selection item (anchor chip ✕). */

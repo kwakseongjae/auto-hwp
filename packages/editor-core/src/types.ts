@@ -45,9 +45,21 @@ export interface ImageBox {
   block: number;
 }
 
+/** One step of a descending CellPath (issue 064 Tier-2) — which cell of which table. `block` is a block
+ *  index: at level 0 the top-level table's block index; at each deeper level the index of the nested
+ *  `Block::Table` INSIDE the previous cell. `(row, col)` is that table's cell address. Mirrors
+ *  @tf-hwp/engine `CellAddr` / hwp-session `CellAddrDto`. A length-1 path is exactly the flat
+ *  `(section, block, row, col)` — 100% back-compat for a non-nested doc. */
+export interface CellAddr {
+  block: number;
+  row: number;
+  col: number;
+}
+
 /** A table CELL hit for cell-level marking in own-render px space (mirrors @tf-hwp/engine CellHit; issue
  *  023). `row`/`col` are MODEL-GLOBAL — already global on a split-table fragment, so NEVER re-add
- *  `first_row` (§좌표계). `text` is the cell's current plain text, used for the chip snippet label. */
+ *  `first_row` (§좌표계). For a NESTED cell they are the LEAF's (deepest) address; the full descent is in
+ *  `path`. `text` is the cell's current plain text, used for the chip snippet label. */
 export interface CellHit {
   section: number;
   block: number;
@@ -60,11 +72,15 @@ export interface CellHit {
   y: number;
   w: number;
   h: number;
-  /** True when the cell holds a NESTED table — NOT an inline-edit target in Tier-1 (issue 064). The UI
-   *  refuses the editor and shows an honest toast (the engine now sets this; the paragraph-only editor
-   *  would otherwise cover the nested grid, and a commit historically dropped it). Optional for
-   *  back-compat with adapters/mocks that predate the flag (absent ⇒ treat as not nested). */
+  /** True when the resolved LEAF cell itself holds a FURTHER nested table (issue 064). With Tier-2 a
+   *  nested cell IS editable (via `path`), so this no longer gates the editor — it just says "this cell
+   *  has another grid inside" (the deepest reachable level reads `false`). Optional for back-compat. */
   nested?: boolean;
+  /** The DESCENDING CellPath to this (possibly nested) cell (issue 064 Tier-2). Level 0 = the top-level
+   *  table cell; each deeper entry indexes the nested table inside the previous cell. A length-1 path
+   *  equals the flat `(section, block, row, col)` (the leaf). Optional for back-compat with adapters/
+   *  mocks that predate it (absent ⇒ treat as the length-1 `[{block, row, col}]`). */
+  path?: CellAddr[];
 }
 
 /** An Intent (schema v0) — an internally-tagged object discriminated by `intent`. Kept loose here so
@@ -235,6 +251,11 @@ export interface Anchor {
   label: string;
   page: number;
   text?: string;
+  /** The DESCENDING CellPath for a NESTED cell anchor (issue 064 Tier-2) — present only on a `kind:"cell"`
+   *  anchor whose cell is nested (length ≥ 2). Absent (or length 1) ⇒ a plain top-level cell = the flat
+   *  `(section, block, rows[0], cols[0])`. Threaded into the `SetTableCellRuns` commit so the edit walks
+   *  to the LEAF cell; also folded into `selKey` so distinct nesting levels are distinct selections. */
+  path?: CellAddr[];
 }
 
 /** The read-only document context handed to the host AI callback alongside the instruction + anchors,

@@ -467,6 +467,19 @@ impl HwpDoc {
         serde_json::to_string(&runs).map_err(|e| js_err("serialize", &e.to_string()))
     }
 
+    /// ALL styled runs of a (possibly NESTED) cell addressed by its descending `CellPath` (issue 064
+    /// Tier-2) — a JSON **string** of a `RunSpec[]`, the nested-cell twin of [`Self::block_runs`]. `path_json`
+    /// is the `CellHit.path` array (`[{block,row,col}]`) the editor prefills a nested LEAF cell from; a
+    /// length-1 path is exactly the flat `blockRuns(section, block, row, col)` cell → back-compat. Bad
+    /// JSON → an error; an unresolved path → `"[]"`.
+    #[wasm_bindgen(js_name = blockRunsPath)]
+    pub fn block_runs_path(&self, section: usize, path_json: &str) -> Result<String, JsValue> {
+        let path: Vec<hwp_session::CellAddrDto> =
+            serde_json::from_str(path_json).map_err(|e| js_err("parse path", &e.to_string()))?;
+        let runs = hwp_session::block_runs_path(self.doc()?, section, &path);
+        serde_json::to_string(&runs).map_err(|e| js_err("serialize", &e.to_string()))
+    }
+
     /// The cell GRID of the table block at `(section, block)` — a JSON **string** of `{section, block,
     /// rows, cols, cells:[{row, col, text}]}` (only ACTIVE/uncovered cells), or **JS `null`** when the
     /// block isn't a table (an `Option<String>` → `null`, never the literal `"null"` — bindings policy

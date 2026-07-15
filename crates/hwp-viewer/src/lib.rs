@@ -1516,6 +1516,9 @@ async fn set_table_cell_runs(
                 row,
                 col,
                 runs: rs,
+                // Desktop cell editing stays flat (length-1) for now — nested-cell editing is the web
+                // path (issue 064 Tier-2). Absent path ⇒ the plain `Op::SetTableCell` route.
+                path: None,
             },
         )? {
             Outcome::Edited { pages } => Ok(pages),

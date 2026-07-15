@@ -60,6 +60,13 @@ export interface ImageBox {
 /** A table CELL hit for cell-level marking (own-render px space; issue 023); null on a miss. `row`/`col`
  *  are MODEL-GLOBAL — already global on a split-table fragment (do NOT re-add first_row). `text` is the
  *  cell's current plain text (multi-paragraph cells joined by "\n"), used for the chip snippet label. */
+/** One step of a descending CellPath (issue 064 Tier-2) — mirrors hwp-session `CellAddrDto`. */
+export interface CellAddr {
+  block: number;
+  row: number;
+  col: number;
+}
+
 export interface CellHit {
   section: number;
   block: number;
@@ -72,9 +79,12 @@ export interface CellHit {
   y: number;
   w: number;
   h: number;
-  /** True when the cell contains a NESTED table (issue 064). Such a cell is not an inline-edit target
-   *  in Tier-1 — the UI shows an honest toast instead of the paragraph-only editor. */
+  /** True when the resolved LEAF cell holds a FURTHER nested table (issue 064). With Tier-2 a nested cell
+   *  is editable (via `path`), so this no longer gates the editor. */
   nested: boolean;
+  /** The DESCENDING CellPath to this (possibly nested) cell (issue 064 Tier-2). Length-1 = the flat
+   *  `(section, block, row, col)` leaf → back-compat for a non-nested doc. */
+  path: CellAddr[];
 }
 
 /** Cell-addressed caret rect (issue 053) — own-render px + the 0-based page the owning table fragment
@@ -242,6 +252,9 @@ export class HwpDoc {
    *  paragraph at `(section,block)` when `row`/`col` are omitted — read to PRESERVE run styling on a
    *  plain-text edit (issue 027). Multi-paragraph cells join with a `{text:"\n"}` run. */
   blockRuns(section: number, block: number, row?: number | null, col?: number | null): RunSpec[];
+  /** The CURRENT styled runs of a (possibly NESTED) cell by its descending CellPath (issue 064 Tier-2) —
+   *  the nested-cell twin of `blockRuns`, so the inline editor prefills a nested LEAF cell. */
+  blockRunsPath(section: number, path: CellAddr[]): RunSpec[];
   /** The cell GRID of the table block at `(section, block)` (issue 066) — `{rows, cols, cells}` with
    *  every ACTIVE cell's MODEL `(row, col)` + current text, or `null` when the block isn't a table.
    *  The vibe-editing doc-context source; coordinates are the SAME `(row, col)` `SetTableCell` writes. */

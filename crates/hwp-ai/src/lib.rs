@@ -476,6 +476,20 @@ fn op_summary(op: &Op) -> String {
                 truncate(&text, 40)
             )
         }
+        Op::SetTableCellPath {
+            section,
+            path,
+            runs,
+        } => {
+            let text: String = runs.iter().map(|r| r.text.as_str()).collect();
+            // Render the descending path as `b/(r,c)>(r,c)…` so a nested-cell edit reads clearly.
+            let where_: String = path
+                .iter()
+                .map(|s| format!("{}/({},{})", s.block, s.row, s.col))
+                .collect::<Vec<_>>()
+                .join(">");
+            format!("✎ 중첩 칸 @[s{section}] {where_}: {}", truncate(&text, 40))
+        }
         Op::SetTableColWidths { section, index, .. } => {
             format!("↔ 표 @[s{section}/b{index}] 열 너비 조정")
         }

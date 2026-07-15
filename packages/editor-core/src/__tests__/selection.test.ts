@@ -308,3 +308,94 @@ describe("SelectionModel — Figma table drill (issue 06x)", () => {
     expect(anchors(m)[0].kind).toBe("table");
   });
 });
+
+// issue 064 Tier-2: descending CellPath drill. `rfind` (topmost) makes a click over the nested grid
+// resolve the INNER table box + the nested LEAF cell (length-2 path); outside it resolves the OUTER
+// table + a length-1 cell. The drill stack matches by `sameTable`, so nested levels don't collide with
+// the outer table's `(section, block)`.
+const NESTED_INNER: TableBox = { section: 0, block: 1, x: 0, y: 0, w: 200, h: 200, rows: 2, cols: 2, first_row: 0 };
+const NESTED_OUTER: TableBox = { section: 0, block: 1, x: 0, y: 0, w: 400, h: 400, rows: 2, cols: 1, first_row: 0 };
+// The nested grid occupies the top-left quadrant (x<200 && y<200) — the OUTER cell (0,0). Elsewhere is a
+// plain outer cell (length-1 path).
+const nestedTableAt = (_p: number, x: number, y: number): TableBox => (x < 200 && y < 200 ? NESTED_INNER : NESTED_OUTER);
+const nestedCellAt = (_p: number, x: number, y: number): CellHit => {
+  if (x < 200 && y < 200) {
+    const r = y < 100 ? 0 : 1;
+    const c = x < 100 ? 0 : 1;
+    return {
+      section: 0,
+      block: 1,
+      row: r,
+      col: c,
+      rows: 2,
+      cols: 2,
+      text: `n${r}${c}`,
+      x: c * 100,
+      y: r * 100,
+      w: 100,
+      h: 100,
+      nested: false,
+      path: [
+        { block: 1, row: 0, col: 0 },
+        { block: 1, row: r, col: c },
+      ],
+    };
+  }
+  const r = y < 200 ? 0 : 1;
+  return { section: 0, block: 1, row: r, col: 0, rows: 2, cols: 1, text: `o${r}`, x: 0, y: r * 200, w: 400, h: 200, path: [{ block: 1, row: r, col: 0 }] };
+};
+
+describe("SelectionModel — nested table drill (issue 064 Tier-2)", () => {
+  const model = () => new SelectionModel(new MockAdapter({ pages: 1, table: nestedTableAt, cell: nestedCellAt }));
+
+  it("drillInto a nested cell descends → the anchor carries the length-2 CellPath", async () => {
+    const m = model();
+    const sel = await m.drillInto(0, 50, 50); // nested leaf (0,0)
+    expect(sel).not.toBeNull();
+    expect(anchors(m)[0].kind).toBe("cell");
+    expect(anchors(m)[0].path).toEqual([
+      { block: 1, row: 0, col: 0 },
+      { block: 1, row: 0, col: 0 },
+    ]);
+    expect(m.currentCell()).toEqual({ section: 0, block: 1, row: 0, col: 0, path: anchors(m)[0].path });
+  });
+
+  it("after drilling a nested cell, a plain click on ANOTHER cell of the SAME nested table stays drilled", async () => {
+    const m = model();
+    await m.drillInto(0, 50, 50); // nested (0,0)
+    await click(m, 0, 150, 50); // nested (0,1) — same nested table
+    expect(chips(m)).toBe(1);
+    expect(anchors(m)[0].kind).toBe("cell");
+    expect(anchors(m)[0].path).toEqual([
+      { block: 1, row: 0, col: 0 },
+      { block: 1, row: 0, col: 1 },
+    ]);
+  });
+
+  it("after drilling a nested cell, a click on an OUTER cell (length-1 path) resets to the whole table", async () => {
+    const m = model();
+    await m.drillInto(0, 50, 50); // nested (0,0)
+    await click(m, 0, 300, 300); // an OUTER cell — different table (path length differs) → reset
+    expect(chips(m)).toBe(1);
+    expect(anchors(m)[0].kind).toBe("table"); // whole (innermost=outer) table, drill reset
+  });
+
+  it("two nested cells are DISTINCT selections (⌘-add both — selKey folds the path)", async () => {
+    const m = model();
+    await m.drillInto(0, 50, 50); // nested (0,0)
+    await click(m, 0, 150, 150, true); // ⌘-add nested (1,1), same drilled nested table
+    expect(chips(m)).toBe(2);
+    expect(m.getAnchors().map((a) => a.path?.[1])).toEqual([
+      { block: 1, row: 0, col: 0 },
+      { block: 1, row: 1, col: 1 },
+    ]);
+  });
+
+  it("a NON-nested cell keeps a length-1 (undefined) anchor path — back-compat with pre-Tier-2", async () => {
+    const m = new SelectionModel(new MockAdapter({ pages: 1, table: CELL_TABLE, cell: cellAt }));
+    await m.drillInto(0, 100, 390); // top-level cell (1,0) — cellAt returns no `path`
+    expect(anchors(m)[0].kind).toBe("cell");
+    expect(anchors(m)[0].path).toBeUndefined(); // no nested path → identical to the pre-Tier-2 anchor
+    expect(m.currentCell()).toEqual({ section: 0, block: 1, row: 1, col: 0 });
+  });
+});

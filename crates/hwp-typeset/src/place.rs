@@ -65,6 +65,18 @@ pub struct PlacedImage {
     pub block: usize,
 }
 
+/// One STEP of a descending CELL PATH (issue 064 Tier-2): which cell of which table. `block` is a block
+/// index — at level 0 the top-level table's `(section, block)` block index; at each deeper level the
+/// index of the `Block::Table` INSIDE the previous cell's `blocks`. `(row, col)` is the cell address in
+/// that table's `edit_target` grid. A length-1 path is exactly today's flat `(section, block, row, col)`,
+/// so provenance stays 100% back-compat for a non-nested doc.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CellAddr {
+    pub block: usize,
+    pub row: usize,
+    pub col: usize,
+}
+
 /// A positioned table's OUTER box in absolute page coordinates + its model anchor. Provenance only
 /// (mirrors [`PlacedImage`]): lets a drag-to-move overlay map a table's placed box back to the
 /// editable `(section, block)` so it can emit a `MoveBlock`. The renderer ignores these (the visible
@@ -75,7 +87,10 @@ pub struct PlacedTable {
     pub y: f64,
     pub w: f64,
     pub h: f64,
-    /// The `(section, block index)` anchor the table occupies in the SemanticDoc.
+    /// The `(section, block index)` anchor the OUTERMOST table occupies in the SemanticDoc. A NESTED
+    /// table carries its outer table's `(section, block)` here (so `table_at` drag-to-move + the
+    /// active-cell ring's `table_cell_box` keep resolving a real top-level block); its own descent is in
+    /// `ancestors` + `self_block`.
     pub section: usize,
     pub block: usize,
     /// Logical row/column counts of the WHOLE table — so a quick-edit overlay can append a row
@@ -94,6 +109,15 @@ pub struct PlacedTable {
     /// basis for direct "표에 내용 작성" (point a cell → edit it). Empty for tables placed before this
     /// was added; populated by `place_table`. Holds only this fragment's rows when the table is split.
     pub cells: Vec<PlacedCell>,
+    /// Descending ANCESTOR-cell path (issue 064 Tier-2) — EMPTY for a top-level table. Each entry is an
+    /// enclosing cell, outermost first; combined with `self_block` + a `PlacedCell`'s `(row, col)` it
+    /// yields the full leaf `CellPath` (`table_cell_at` appends `{ self_block, row, col }`). A non-nested
+    /// doc never populates this, so its provenance is byte-for-byte what it was before Tier-2.
+    pub ancestors: Vec<CellAddr>,
+    /// This table's block index WITHIN ITS PARENT CELL's `blocks` (== `block`, the section block index,
+    /// for a top-level table; the position of the `Block::Table` inside its outer cell for a nested one).
+    /// The leaf `CellAddr.block` when `table_cell_at` closes the path.
+    pub self_block: usize,
 }
 
 /// One placed table cell's page rect + its `(row, col)` address (provenance only; not drawn). Powers
@@ -410,7 +434,14 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                             .tables
                             .iter()
                             .rev()
-                            .find(|pt| pt.section == sec_idx && pt.block == blk_idx)
+                            // The OUTER fragment only (`ancestors.is_empty()`): a NESTED table (issue 064
+                            // Tier-2) now shares this `(section, block)`, so without this guard `rev().find`
+                            // would grab the nested box and shrink the point-to-scope band.
+                            .find(|pt| {
+                                pt.section == sec_idx
+                                    && pt.block == blk_idx
+                                    && pt.ancestors.is_empty()
+                            })
                             .map(|pt| PlacedBlock {
                                 x: pt.x,
                                 y: pt.y,
@@ -801,6 +832,10 @@ fn flush_fragment(
     };
     // Outer-box provenance (anchor → page rect) for the drag-to-move overlay + point-to-scope. Drawn
     // from the actual placed extents so it matches the visible fragment exactly. Provenance only.
+    // `table_idx` PINS this fragment: `place_cell_content` (below) may push NESTED `PlacedTable`s (issue
+    // 064 Tier-2), so the old `pg.tables.last_mut()` would have attached our cells to the deepest nested
+    // table instead of this one.
+    let table_idx = pg.tables.len();
     pg.tables.push(PlacedTable {
         x: ml,
         y: frag_top,
@@ -812,7 +847,9 @@ fn flush_fragment(
         cols: t.cols,
         first_row: first,
         last_row: last,
-        cells: Vec::new(), // filled below, then attached
+        cells: Vec::new(),     // filled below, then attached
+        ancestors: Vec::new(), // top-level table → no nesting ancestors (length-1 leaf path)
+        self_block: block,     // top-level: block-within-parent == the section block index
     });
     let mut placed_cells: Vec<PlacedCell> = Vec::new();
     for c in &t.cells {
@@ -888,9 +925,19 @@ fn flush_fragment(
         }
         // Cell TEXT: only in the fragment that OWNS the cell's TOP row (c.row >= first) so a cell whose
         // span crosses the page break doesn't draw its text twice. Vertically centered (gov-doc
-        // vertAlign=CENTER), honoring each paragraph's horizontal align.
+        // vertAlign=CENTER), honoring each paragraph's horizontal align. The top-level `NestCtx` has NO
+        // ancestors and `self_block == block` (the section block index) → a nested table found inside this
+        // cell records a length-2 CellPath `[{block, c.row, c.col}, {bi, r, c}]` (issue 064 Tier-2).
         if c.row >= first {
-            place_cell_content(pg, &c.blocks, cx, cy, cw, ch, doc, fonts);
+            let ctx = NestCtx {
+                section,
+                outer_block: block,
+                ancestors: Vec::new(),
+                self_block: block,
+            };
+            place_cell_content(
+                pg, &c.blocks, cx, cy, cw, ch, doc, fonts, &ctx, c.row, c.col,
+            );
         }
     }
     // Outer frame (an unwrapped 1×1-wrapper's box, e.g. 자가진단표): the left/right sides draw on EVERY
@@ -922,10 +969,9 @@ fn flush_fragment(
             edge(x0, y1, x1, y1); // bottom — only the last fragment
         }
     }
-    // Attach the per-cell rects to the fragment we pushed (point→cell for double-click editing).
-    if let Some(pt) = pg.tables.last_mut() {
-        pt.cells = placed_cells;
-    }
+    // Attach the per-cell rects to the fragment we pushed — by its PINNED index (nested tables may have
+    // been appended after it during the cell loop), never `last_mut()`.
+    pg.tables[table_idx].cells = placed_cells;
 }
 
 /// Vertical endpoint pairs `(y1, y2)` for a cell diagonal, each drawing one line from the cell's left
@@ -1003,12 +1049,41 @@ pub(crate) const CELL_PAD_X: f64 = 80.0;
 /// gov-doc border still renders as a crisp ~0.5px hairline instead of vanishing at our scale.
 const HAIRLINE_MIN_PX: f64 = 0.5;
 
+/// Nesting-provenance context (issue 064 Tier-2) threaded down `place_cell_content`/`place_nested_table`
+/// so a nested table can record the full descending `CellPath` to each of its cells WITHOUT changing any
+/// geometry. Describes the CONTAINER table whose cell content is being placed: the outermost
+/// `(section, outer_block)` anchor (→ `PlacedTable.section/block`), the ancestor cells above the container
+/// (empty at the top level), and the container's own block-within-parent (`self_block`).
+struct NestCtx {
+    section: usize,
+    outer_block: usize,
+    ancestors: Vec<CellAddr>,
+    self_block: usize,
+}
+
+impl NestCtx {
+    /// The descending `CellPath` (ancestors + this container's `(self_block, row, col)`) to the cell at
+    /// `(row, col)` of the container table — the ancestor list a nested table INSIDE that cell inherits.
+    fn cell_path(&self, row: usize, col: usize) -> Vec<CellAddr> {
+        let mut path = self.ancestors.clone();
+        path.push(CellAddr {
+            block: self.self_block,
+            row,
+            col,
+        });
+        path
+    }
+}
+
 /// Draw a NESTED table (a table that lives inside a cell) at origin `(ox, oy)` within width `avail_w` on a
 /// SINGLE page. A nested table never paginates internally — its whole height is reserved as part of the
 /// outer cell's row — so this draws ALL rows at once (clipping if taller than the page, matching how an
 /// over-tall outer row already clips). Mirrors `flush_fragment`'s per-cell drawing (shade → border → diagonal
 /// → content) minus the page/fragment logic, and recurses through `place_cell_content` for deeper nesting.
-/// No `PlacedTable` provenance is pushed (nested cells aren't drag/edit targets yet).
+/// Pushes a `PlacedTable` (+ per-cell `PlacedCell`s) carrying `ctx`'s descending `CellPath` (issue 064
+/// Tier-2) so a click inside the nested grid resolves to the nested LEAF cell — ADDITIVE metadata only,
+/// drawn AFTER the outer cell so `table_at`/`table_cell_at`'s `rfind` (topmost wins) naturally picks it.
+#[allow(clippy::too_many_arguments)]
 fn place_nested_table(
     pg: &mut PlacedPage,
     t: &Table,
@@ -1017,6 +1092,7 @@ fn place_nested_table(
     avail_w: f64,
     doc: &SemanticDoc,
     fonts: &dyn FontMetricsProvider,
+    ctx: &NestCtx,
 ) {
     if t.rows == 0 || t.cols == 0 {
         return;
@@ -1029,6 +1105,28 @@ fn place_nested_table(
     for r in 0..t.rows {
         row_top[r + 1] = row_top[r] + row_h[r];
     }
+    // Provenance (issue 064 Tier-2): the nested table's outer box + descending CellPath so a click resolves
+    // the LEAF cell. Pushed FIRST (its `cells` filled below) — like `flush_fragment` — and, because it lands
+    // AFTER the outer table's own `PlacedTable` in `pg.tables`, `rfind` (topmost) picks the innermost hit.
+    // `table_idx` pins this exact fragment so the deeper `PlacedTable`s that the recursion below appends
+    // (yet-more-nested tables) don't get our `cells` mis-attached.
+    let table_idx = pg.tables.len();
+    pg.tables.push(PlacedTable {
+        x: ox,
+        y: oy,
+        w: col_x[t.cols],
+        h: row_top[t.rows] - oy,
+        section: ctx.section,
+        block: ctx.outer_block,
+        rows: t.rows,
+        cols: t.cols,
+        first_row: 0,
+        last_row: t.rows,
+        cells: Vec::new(),
+        ancestors: ctx.ancestors.clone(),
+        self_block: ctx.self_block,
+    });
+    let mut placed_cells: Vec<PlacedCell> = Vec::new();
     for c in &t.cells {
         if !c.active || c.col >= t.cols || c.row >= t.rows {
             continue;
@@ -1039,6 +1137,14 @@ fn place_nested_table(
         let cy = row_top[c.row];
         let r1 = (c.row + c.row_span.max(1)).min(t.rows);
         let ch = (row_top[r1] - cy).max(1.0);
+        placed_cells.push(PlacedCell {
+            row: c.row,
+            col: c.col,
+            x: cx,
+            y: cy,
+            w: cw,
+            h: ch,
+        });
         if let Some(shade) = c.shade_color {
             pg.rects.push(PlacedRect {
                 x: cx,
@@ -1072,12 +1178,17 @@ fn place_nested_table(
                 });
             }
         }
-        place_cell_content(pg, &c.blocks, cx, cy, cw, ch, doc, fonts);
+        place_cell_content(pg, &c.blocks, cx, cy, cw, ch, doc, fonts, ctx, c.row, c.col);
     }
+    // Attach the per-cell rects to the nested fragment we pushed (by its pinned index — the recursion may
+    // have appended deeper nested `PlacedTable`s after it).
+    pg.tables[table_idx].cells = placed_cells;
 }
 
 /// Place a cell's block content (paragraph glyphs + nested tables) inside its box `(cx,cy,cw,ch)`,
-/// vertically centered. A nested table is drawn in place (see `place_nested_table`).
+/// vertically centered. A nested table is drawn in place (see `place_nested_table`). `ctx` + `(cell_row,
+/// cell_col)` identify WHICH cell (of which container table) these blocks belong to, so a nested table
+/// found here can record its descending `CellPath` (issue 064 Tier-2) — provenance only, no geometry.
 #[allow(clippy::too_many_arguments)]
 fn place_cell_content(
     pg: &mut PlacedPage,
@@ -1088,6 +1199,9 @@ fn place_cell_content(
     ch: f64,
     doc: &SemanticDoc,
     fonts: &dyn FontMetricsProvider,
+    ctx: &NestCtx,
+    cell_row: usize,
+    cell_col: usize,
 ) {
     let textw = (cw - 2.0 * CELL_PAD_X).max(1.0);
     // Total content height → start offset for vertical centering within the cell box.
@@ -1101,7 +1215,7 @@ fn place_cell_content(
         bold: false,
         italic: false,
     };
-    for b in blocks {
+    for (bi, b) in blocks.iter().enumerate() {
         let Block::Paragraph(p) = b else {
             // A NESTED table (a table inside this cell): DRAW it at the current cursor — its height is
             // already reserved in `content_h` (block_height_for_place's Table arm), so the cursor advances
@@ -1109,7 +1223,16 @@ fn place_cell_content(
             // glyphs/borders were skipped entirely → the cell (e.g. the 자가진단표 wrapped in a 1×1 table)
             // rendered BLANK. Other block kinds just advance the cursor as before.
             if let Block::Table(nt) = b {
-                place_nested_table(pg, nt, cx + CELL_PAD_X, vy, textw, doc, fonts);
+                // The nested table's descent: its ancestors = this cell's full CellPath; its own
+                // block-within-parent = `bi` (this `Block::Table`'s index in the cell's blocks). The walk
+                // in hwp-ops/hwp-session mirrors this (edit_target at level 0, raw index deeper).
+                let child = NestCtx {
+                    section: ctx.section,
+                    outer_block: ctx.outer_block,
+                    ancestors: ctx.cell_path(cell_row, cell_col),
+                    self_block: bi,
+                };
+                place_nested_table(pg, nt, cx + CELL_PAD_X, vy, textw, doc, fonts, &child);
             }
             vy += block_height_for_place(b, doc, textw, fonts);
             continue;
@@ -1482,6 +1605,14 @@ pub fn cell_text_hit(
         .tables
         .iter()
         .rfind(|t| x >= t.x && x <= t.x + t.w && y >= t.y && y <= t.y + t.h)?;
+    // issue 064 Tier-2: the click-to-type CELL CARET lane is addressed by the FLAT `(section, block, row,
+    // col)` (no CellPath), so it cannot reach a NESTED leaf — `model_cell` below would resolve the OUTER
+    // block's cell at those coords (wrong cell). A nested cell is edited via the double-click inline editor
+    // (which threads the path). So DON'T place a text caret over a nested grid — return None; the inline
+    // editor still opens on double-click. (`ancestors` is empty for every top-level table → unchanged.)
+    if !t.ancestors.is_empty() {
+        return None;
+    }
     let pc = t.cell_at(x, y)?;
     if pc.row < t.first_row {
         return None; // continuation fragment — the text (and its caret) lives on the owning page
