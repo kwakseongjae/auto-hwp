@@ -4,7 +4,7 @@
 
 use crate::style::{CharShape, ParaShape};
 use crate::types::{Dirty, HwpUnit, NodeId, Passthrough, Provenance};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// A whole document.
 #[derive(Clone, Debug, Default)]
@@ -25,6 +25,16 @@ pub struct SemanticDoc {
     /// downstream (export, UI) can show the original kind and pick a save policy: HWPX round-trips,
     /// `.hwp`/`.docx` are conversions, `.pdf` is view-mostly. Set by `Engine::open`/the readers.
     pub origin: Option<crate::types::SourceFormat>,
+    /// `char_shapes`/`para_shapes` indices that the HWPX parser INTERNED FROM the original
+    /// `header.xml` pools (resolving each run's `charPrIDRef` / paragraph's `paraPrIDRef` so layout
+    /// reads the real size/color/bold/align/indent/spacing instead of the reserved index-0 default).
+    /// The serializer SKIPS re-synthesizing these: an UNEDITED run/paragraph re-emits its ORIGINAL
+    /// IDRef (via [`Run::char_ref`] / the byte-verbatim `<hp:p>` open tag) rather than a lossy
+    /// re-synthesized duplicate — preserving the round-trip moat even when a NEIGHBOURING run in the
+    /// same paragraph is edited. Empty for docs from other sources (HWP lift / synthesized) so their
+    /// behavior is unchanged.
+    pub hwpx_pool_char_shapes: BTreeSet<usize>,
+    pub hwpx_pool_para_shapes: BTreeSet<usize>,
 }
 
 /// The document's original `header.xml` shape pools, parsed to typed values (issue #003, P1).
@@ -40,6 +50,13 @@ impl SemanticDoc {
     pub fn char_shape_of_ref(&self, char_ref: &str) -> Option<&CharShape> {
         let id: u64 = char_ref.trim().parse().ok()?;
         self.header_pools.char.get(&id)
+    }
+
+    /// The `ParaShape` of a paragraph's original `paraPrIDRef` (if it was parsed from the header
+    /// pool). The paragraph twin of [`Self::char_shape_of_ref`].
+    pub fn para_shape_of_ref(&self, para_ref: &str) -> Option<&ParaShape> {
+        let id: u64 = para_ref.trim().parse().ok()?;
+        self.header_pools.para.get(&id)
     }
 }
 
@@ -154,6 +171,11 @@ pub struct Paragraph {
     pub id: Option<NodeId>,
     /// Index into `SemanticDoc::para_shapes`.
     pub para_shape: usize,
+    /// Original `paraPrIDRef` (parsed from HWPX, for EVERY paragraph incl. nested cell paragraphs) —
+    /// the fallback ref for re-emit when the paragraph's interned `para_shape` is still the default
+    /// (unedited). The paragraph twin of [`Run::char_ref`]; the HWPX resolve pass reads it to point
+    /// `para_shape` at the real align/indent/line-spacing pool entry.
+    pub para_ref: Option<String>,
     /// A hard 쪽 나누기 (page break) BEFORE this paragraph — per-INSTANCE, from HWP's paragraph
     /// `column_type == Page/Section` (NOT the shared para_shape's attr1 bit19, which can't carry a
     /// per-paragraph break). Pagination forces a fresh page when set, OR'd with the para_shape flag.

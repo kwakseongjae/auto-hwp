@@ -429,6 +429,12 @@ fn build_synth_plan(
     if let Some(base) = &base_char {
         let mut next_id = synth::max_pool_id(header0, "charProperties") + 1;
         for idx in chars {
+            // Pool-resolved (HWPX #196): this shape came from the ORIGINAL header pool, not an edit.
+            // Skip synthesis — the unedited run re-emits its original `charPrIDRef` (via
+            // `Run::char_ref`), so it keeps ALL its sub-attrs instead of a lossy re-synthesized copy.
+            if doc.hwpx_pool_char_shapes.contains(&idx) {
+                continue;
+            }
             match doc.char_shapes.get(idx) {
                 Some(s) if s.is_default() => {}
                 Some(shape) => {
@@ -470,6 +476,11 @@ fn build_synth_plan(
     if let Some(base) = &base_para {
         let mut next_id = synth::max_pool_id(header0, "paraProperties") + 1;
         for idx in paras {
+            // Pool-resolved (HWPX #196): keep the paragraph's byte-verbatim `<hp:p>` open tag (its
+            // original `paraPrIDRef`) instead of patching in a lossy re-synthesized paraPr.
+            if doc.hwpx_pool_para_shapes.contains(&idx) {
+                continue;
+            }
             match doc.para_shapes.get(idx) {
                 Some(s) if s.is_default() => {}
                 Some(shape) => {
@@ -2106,10 +2117,11 @@ mod tests {
             ..Default::default()
         };
         doc.char_shapes.push(red_bold);
+        let red_idx = doc.char_shapes.len() - 1;
         let sec = doc.sections.get_mut(0).unwrap();
         sec.blocks.push(Block::Paragraph(Paragraph {
             runs: vec![Run {
-                char_shape: 1,
+                char_shape: red_idx,
                 content: vec![Inline::Text("합성된 글자".into())],
                 ..Default::default()
             }],
@@ -2298,6 +2310,7 @@ mod tests {
             indent: 2000,
             ..Default::default()
         });
+        let center_idx = doc.para_shapes.len() - 1;
         let sec = doc.sections.get_mut(0).unwrap();
         sec.blocks.push(Block::Paragraph(Paragraph {
             runs: vec![Run {
@@ -2305,7 +2318,7 @@ mod tests {
                 content: vec![Inline::Text("가운데".into())],
                 ..Default::default()
             }],
-            para_shape: 1,
+            para_shape: center_idx,
             dirty: Dirty(true),
             ..Default::default()
         }));
@@ -2577,12 +2590,13 @@ mod tests {
             let pkg = Package::open(&showcase()).unwrap();
             String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap()
         };
-        // Index 0 reserved (default); add a center-align paraPr at index 1.
+        // Index 0 reserved (default); add a center-align paraPr (parser interns original pool
+        // paraShapes at indices ≥1, so the pushed one is at the tail).
         doc.para_shapes.push(ParaShape {
             align: HorizontalAlign::Center,
             ..Default::default()
         });
-        let center = 1usize;
+        let center = doc.para_shapes.len() - 1;
 
         let sec = doc.sections.get_mut(0).unwrap();
         let mut runsonly_open: Option<(String, (usize, usize))> = None;
@@ -2668,7 +2682,8 @@ mod tests {
             align: HorizontalAlign::Center,
             ..Default::default()
         });
-        let center = 1usize;
+        // Parser interns original pool paraShapes at indices ≥1; the pushed one is at the tail.
+        let center = doc.para_shapes.len() - 1;
 
         // Capture a non-simple paragraph's original body bytes (everything after its open tag).
         let sec = doc.sections.get_mut(0).unwrap();
@@ -2785,10 +2800,13 @@ mod tests {
             text_color: Color::from_hex("#1F4E79").unwrap(),
             ..Default::default()
         });
+        // The HWPX parser now interns the ORIGINAL pool shapes (indices ≥1), so the freshly-pushed
+        // shape lands at the tail, not index 1.
+        let reuse_idx = doc.char_shapes.len() - 1;
         let sec = doc.sections.get_mut(0).unwrap();
         sec.blocks.push(Block::Paragraph(Paragraph {
             runs: vec![Run {
-                char_shape: 1,
+                char_shape: reuse_idx,
                 content: vec![Inline::Text("기존 글자모양 재사용".into())],
                 ..Default::default()
             }],

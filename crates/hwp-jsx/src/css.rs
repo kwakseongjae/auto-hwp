@@ -174,7 +174,17 @@ pub fn parse_css(src: &str) -> Result<Stylesheet, String> {
         let sel_txt = src[sel_start..i].trim().to_string();
         i += 1; // {
         let body_start = i;
-        while i < bytes.len() && bytes[i] != b'}' {
+        // Scan to the MATCHING '}' at brace depth 0 — a declaration VALUE may itself contain a
+        // balanced `{...}` (the lossless `--shape: {json}` custom property), so a naive "first '}'"
+        // truncates the rule and derails the whole parse.
+        let mut depth = 0usize;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'{' => depth += 1,
+                b'}' if depth == 0 => break,
+                b'}' => depth -= 1,
+                _ => {}
+            }
             i += 1;
         }
         if i >= bytes.len() {

@@ -557,8 +557,19 @@ impl ParaSpec {
 
 /// Intern a `CharShape` into the doc's pool (dedup by value), returning its index. The HWPX
 /// serializer turns each distinct non-default shape into a synthesized `<hh:charPr>`.
+///
+/// An EDIT must NOT reuse a POOL-resolved index (one the HWPX parser interned from the original
+/// header pool): the serializer re-emits those as their original IDRef for UNEDITED content, so an
+/// edited run pointed there would silently re-emit its pre-edit formatting. Skipping them makes the
+/// edit intern a fresh, synthesizable entry — a harmless value-duplicate of the pool entry.
 fn intern_char_shape(doc: &mut SemanticDoc, shape: CharShape) -> usize {
-    if let Some(i) = doc.char_shapes.iter().position(|s| *s == shape) {
+    if let Some(i) = doc
+        .char_shapes
+        .iter()
+        .enumerate()
+        .find(|(i, s)| **s == shape && !doc.hwpx_pool_char_shapes.contains(i))
+        .map(|(i, _)| i)
+    {
         return i;
     }
     doc.char_shapes.push(shape);
@@ -567,7 +578,13 @@ fn intern_char_shape(doc: &mut SemanticDoc, shape: CharShape) -> usize {
 
 /// Intern a `ParaShape` (dedup by value) → index. Synthesized into `<hh:paraPr>` on export.
 fn intern_para_shape(doc: &mut SemanticDoc, shape: ParaShape) -> usize {
-    if let Some(i) = doc.para_shapes.iter().position(|s| *s == shape) {
+    if let Some(i) = doc
+        .para_shapes
+        .iter()
+        .enumerate()
+        .find(|(i, s)| **s == shape && !doc.hwpx_pool_para_shapes.contains(i))
+        .map(|(i, _)| i)
+    {
         return i;
     }
     doc.para_shapes.push(shape);

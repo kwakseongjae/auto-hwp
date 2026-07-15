@@ -55,8 +55,16 @@ pub fn parse_semantic(bytes: &[u8]) -> Result<SemanticDoc> {
         // Table-nesting guard (#014): a pathologically nested table is rejected as a fast, explicit
         // error rather than building an unbounded structure. Legacy path folds it into Error::Parse.
         parse_section(&text, &mut section.blocks).map_err(|l| Error::Parse(l.to_string()))?;
+        // Batch B (#196): the real page geometry (size/margins) drives body width/height → correct
+        // pagination. Left un-edited (`page_edited` stays false) so the secPr round-trips verbatim.
+        if let Some(pg) = parse_page_setup(&text) {
+            section.page = pg;
+        }
         doc.sections.push(section);
     }
+    // Batch A (#196): resolve each run's charPrIDRef / paragraph's paraPrIDRef against the parsed
+    // header pools so layout/render read the real formatting (was: all default index 0).
+    resolve_shape_pools(&mut doc);
     assign_node_ids(&mut doc);
     Ok(doc)
 }
@@ -91,8 +99,12 @@ pub fn parse_semantic_guarded(bytes: &[u8]) -> std::result::Result<SemanticDoc, 
             ..Default::default()
         };
         parse_section(&text, &mut section.blocks).map_err(HardenedError::Limit)?;
+        if let Some(pg) = parse_page_setup(&text) {
+            section.page = pg;
+        }
         doc.sections.push(section);
     }
+    resolve_shape_pools(&mut doc);
     assign_node_ids(&mut doc);
     Ok(doc)
 }
@@ -112,6 +124,165 @@ fn assign_node_ids(doc: &mut SemanticDoc) {
             }
         }
     }
+}
+
+/// Batch A (#196): wire the already-parsed `header.xml` charPr/paraPr POOLS into the IR. For every
+/// run (all sections + nested cells) resolve its `charPrIDRef` against `header_pools.char`, and for
+/// every paragraph resolve its `paraPrIDRef` against `header_pools.para`; intern the resolved shape
+/// into `doc.char_shapes`/`doc.para_shapes` (dedup by value) and point the run/paragraph at it, so
+/// layout/render read the REAL size/color/bold/align/indent/spacing (before: every run rendered
+/// 10pt black + every paragraph left-aligned/no-indent → wrong layout AND pagination).
+///
+/// Each interned index is recorded in `hwpx_pool_{char,para}_shapes`; the serializer consults these
+/// to re-emit an UNEDITED run/paragraph's ORIGINAL IDRef instead of a lossy re-synthesized copy
+/// (round-trip moat). A run/paragraph whose ref is absent from the pool keeps index 0 (the default).
+fn resolve_shape_pools(doc: &mut SemanticDoc) {
+    // Distinct-field borrows: the walk mutates blocks + the shape pools while READING header_pools.
+    let SemanticDoc {
+        sections,
+        char_shapes,
+        para_shapes,
+        header_pools,
+        hwpx_pool_char_shapes,
+        hwpx_pool_para_shapes,
+        ..
+    } = doc;
+    for sec in sections.iter_mut() {
+        resolve_blocks(
+            &mut sec.blocks,
+            char_shapes,
+            para_shapes,
+            &header_pools.char,
+            &header_pools.para,
+            hwpx_pool_char_shapes,
+            hwpx_pool_para_shapes,
+        );
+    }
+}
+
+/// Intern `shape` into `pool` (reusing an equal existing entry), returning its index.
+fn intern_shape<T: Clone + PartialEq>(pool: &mut Vec<T>, shape: T) -> usize {
+    if let Some(i) = pool.iter().position(|s| *s == shape) {
+        return i;
+    }
+    pool.push(shape);
+    pool.len() - 1
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_blocks(
+    blocks: &mut [Block],
+    char_shapes: &mut Vec<CharShape>,
+    para_shapes: &mut Vec<ParaShape>,
+    char_pool: &std::collections::BTreeMap<u64, CharShape>,
+    para_pool: &std::collections::BTreeMap<u64, ParaShape>,
+    pool_c: &mut std::collections::BTreeSet<usize>,
+    pool_p: &mut std::collections::BTreeSet<usize>,
+) {
+    for b in blocks.iter_mut() {
+        match b {
+            Block::Paragraph(p) => {
+                if let Some(shape) = p
+                    .para_ref
+                    .as_deref()
+                    .and_then(|r| r.trim().parse::<u64>().ok())
+                    .and_then(|id| para_pool.get(&id))
+                {
+                    let idx = intern_shape(para_shapes, shape.clone());
+                    p.para_shape = idx;
+                    pool_p.insert(idx);
+                }
+                for run in &mut p.runs {
+                    if let Some(shape) = run
+                        .char_ref
+                        .as_deref()
+                        .and_then(|r| r.trim().parse::<u64>().ok())
+                        .and_then(|id| char_pool.get(&id))
+                    {
+                        let idx = intern_shape(char_shapes, shape.clone());
+                        run.char_shape = idx;
+                        pool_c.insert(idx);
+                    }
+                    // Recurse into any note bodies (defensive — HWPX-in has none today).
+                    for inl in &mut run.content {
+                        if let Inline::Note(nr) = inl {
+                            resolve_blocks(
+                                &mut nr.body,
+                                char_shapes,
+                                para_shapes,
+                                char_pool,
+                                para_pool,
+                                pool_c,
+                                pool_p,
+                            );
+                        }
+                    }
+                }
+            }
+            Block::Table(t) => {
+                for c in &mut t.cells {
+                    resolve_blocks(
+                        &mut c.blocks,
+                        char_shapes,
+                        para_shapes,
+                        char_pool,
+                        para_pool,
+                        pool_c,
+                        pool_p,
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Batch B (#196): read a section's `<hp:secPr>` page geometry — `<hp:pagePr>` width/height +
+/// orientation and the page `<hp:margin>` left/right/top/bottom (HWPUNIT) — into a [`PageSetup`],
+/// so body width/height (and pagination) are correct. Columns are left at 1 (the default; the
+/// typesetter does not split columns yet). `None` when the section has no `<hp:pagePr>`.
+fn parse_page_setup(sec_xml: &str) -> Option<PageSetup> {
+    let pp = sec_xml.find("<hp:pagePr")?;
+    // Bound attr reads to the pagePr OPEN tag (up to its first '>').
+    let pp_end = sec_xml[pp..].find('>')? + pp;
+    let pp_tag = &sec_xml[pp..pp_end];
+    let mut page = PageSetup::default();
+    if let Some(w) = tag_attr_i32(pp_tag, "width") {
+        page.width = w;
+    }
+    if let Some(h) = tag_attr_i32(pp_tag, "height") {
+        page.height = h;
+    }
+    // `landscape` is unreliable across authoring tools (portrait docs are sometimes tagged WIDELY);
+    // derive the actual orientation from the dimensions, which is all layout consumes.
+    page.landscape = page.width > page.height;
+    // The page `<hp:margin …/>` lives inside `<hp:pagePr>`; take the first one AFTER the pagePr open.
+    if let Some(mrel) = sec_xml[pp_end..].find("<hp:margin") {
+        let mstart = pp_end + mrel;
+        if let Some(mend_rel) = sec_xml[mstart..].find("/>") {
+            let mtag = &sec_xml[mstart..mstart + mend_rel];
+            if let Some(v) = tag_attr_i32(mtag, "left") {
+                page.margin_left = v;
+            }
+            if let Some(v) = tag_attr_i32(mtag, "right") {
+                page.margin_right = v;
+            }
+            if let Some(v) = tag_attr_i32(mtag, "top") {
+                page.margin_top = v;
+            }
+            if let Some(v) = tag_attr_i32(mtag, "bottom") {
+                page.margin_bottom = v;
+            }
+        }
+    }
+    Some(page)
+}
+
+/// The `i32` value of attribute `name` (its first occurrence) within a single XML tag substring.
+fn tag_attr_i32(tag: &str, name: &str) -> Option<i32> {
+    let pat = format!("{name}=\"");
+    let s = tag.find(&pat)? + pat.len();
+    let e = tag[s..].find('"')? + s;
+    tag[s..e].trim().parse().ok()
 }
 
 struct TblFrame {
@@ -254,6 +425,10 @@ fn parse_section(xml: &str, out: &mut Vec<Block>) -> std::result::Result<(), Doc
                         if let Some(target) = blocks.last_mut() {
                             target.push(Block::Paragraph(Paragraph {
                                 runs: p.runs,
+                                // Capture paraPrIDRef for EVERY paragraph — not just top-level
+                                // `source` — so nested cell paragraphs' align/indent/line-spacing
+                                // resolve in the pool pass too.
+                                para_ref: p.para_pr.clone(),
                                 source,
                                 provenance: hwpx_prov(),
                                 ..Default::default()
@@ -441,5 +616,159 @@ mod tests {
             .iter()
             .find(|p| p.source.as_ref().is_some_and(|sc| !sc.simple));
         assert!(wrapper.is_some(), "table-wrapping paragraph is non-simple");
+    }
+
+    /// Batch B (#196): `<hp:secPr>` page geometry (pagePr width/height + the page margin) fills a
+    /// `PageSetup` — the body box (and pagination) is the real one, not the A4/1-inch default.
+    #[test]
+    fn parse_page_setup_reads_secpr_geometry() {
+        let sec = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run><hp:ctrl><hp:secPr><hp:pagePr landscape="WIDELY" width="59528" height="84186" gutterType="LEFT_ONLY"><hp:margin header="4252" footer="4252" gutter="0" left="5669" right="5670" top="4251" bottom="2834"/></hp:pagePr></hp:secPr></hp:ctrl></hp:run></hp:p></hs:sec>"#;
+        let pg = parse_page_setup(sec).expect("secPr parsed into a PageSetup");
+        assert_eq!((pg.width, pg.height), (59528, 84186));
+        assert_eq!(pg.margin_left, 5669);
+        assert_eq!(pg.margin_right, 5670);
+        assert_eq!(pg.margin_top, 4251);
+        assert_eq!(pg.margin_bottom, 2834);
+        assert!(!pg.landscape, "portrait derived from width<height");
+        // No secPr → None (the caller keeps PageSetup::default()).
+        assert!(parse_page_setup("<hs:sec><hp:p/></hs:sec>").is_none());
+    }
+
+    /// Batch A (#196): the resolve pass points a run at the REAL charPr and a paragraph at the REAL
+    /// paraPr from a two-entry pool (was: all index-0 default) — for TOP-LEVEL and NESTED CELL
+    /// paragraphs — and records the interned indices so the serializer re-emits the original IDRef.
+    #[test]
+    fn resolve_wires_char_and_para_pools_incl_cell() {
+        // A section: one top-level styled paragraph, and a 1×1 table whose cell paragraph is styled.
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p paraPrIDRef="3"><hp:run charPrIDRef="5"><hp:t>본문</hp:t></hp:run></hp:p><hp:p paraPrIDRef="0"><hp:run charPrIDRef="0"><hp:tbl rowCnt="1" colCnt="1"><hp:tr><hp:tc><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:subList><hp:p paraPrIDRef="3"><hp:run charPrIDRef="5"><hp:t>셀</hp:t></hp:run></hp:p></hp:subList></hp:tc></hp:tr></hp:tbl></hp:run></hp:p></hs:sec>"#;
+        let mut blocks = Vec::new();
+        parse_section(xml, &mut blocks).unwrap();
+
+        // The CELL paragraph must have CAPTURED its paraPrIDRef (not just top-level ones).
+        let cell_para = blocks.iter().find_map(|b| match b {
+            Block::Table(t) => t.cells[0].blocks.iter().find_map(|cb| match cb {
+                Block::Paragraph(p) => Some(p),
+                _ => None,
+            }),
+            _ => None,
+        });
+        assert_eq!(
+            cell_para.and_then(|p| p.para_ref.as_deref()),
+            Some("3"),
+            "nested cell paragraph captures its paraPrIDRef"
+        );
+
+        // Build a doc with a two-entry char pool + two-entry para pool (ids 0 default, 5/3 styled).
+        let styled_char = CharShape {
+            height: 1400,
+            bold: true,
+            text_color: Color::from_hex("#FF0000").unwrap(),
+            ..Default::default()
+        };
+        let styled_para = ParaShape {
+            align: HorizontalAlign::Center,
+            ..Default::default()
+        };
+        let mut doc = SemanticDoc {
+            char_shapes: vec![CharShape::default()],
+            para_shapes: vec![ParaShape::default()],
+            ..Default::default()
+        };
+        doc.header_pools.char.insert(0, CharShape::default());
+        doc.header_pools.char.insert(5, styled_char.clone());
+        doc.header_pools.para.insert(0, ParaShape::default());
+        doc.header_pools.para.insert(3, styled_para.clone());
+        doc.sections.push(Section {
+            blocks,
+            ..Default::default()
+        });
+
+        resolve_shape_pools(&mut doc);
+
+        // Top-level paragraph + run now point at the REAL (non-default) shapes.
+        let Block::Paragraph(top) = &doc.sections[0].blocks[0] else {
+            panic!("first block is a paragraph");
+        };
+        assert_ne!(top.para_shape, 0, "para resolved off the default");
+        assert_eq!(doc.para_shapes[top.para_shape], styled_para);
+        assert_ne!(top.runs[0].char_shape, 0, "char resolved off the default");
+        assert_eq!(doc.char_shapes[top.runs[0].char_shape], styled_char);
+        assert!(doc.hwpx_pool_char_shapes.contains(&top.runs[0].char_shape));
+        assert!(doc.hwpx_pool_para_shapes.contains(&top.para_shape));
+
+        // The NESTED CELL paragraph resolved too (dedups to the same interned indices).
+        let Block::Table(t) = &doc.sections[0].blocks[1] else {
+            panic!("second block is the table");
+        };
+        let Block::Paragraph(cp) = &t.cells[0].blocks[0] else {
+            panic!("cell holds a paragraph");
+        };
+        assert_eq!(doc.para_shapes[cp.para_shape], styled_para);
+        assert_eq!(doc.char_shapes[cp.runs[0].char_shape], styled_char);
+
+        // A run whose ref is ABSENT from the pool keeps the reserved default index 0.
+        let mut doc2 = SemanticDoc {
+            char_shapes: vec![CharShape::default()],
+            para_shapes: vec![ParaShape::default()],
+            ..Default::default()
+        };
+        doc2.sections.push(Section {
+            blocks: vec![Block::Paragraph(Paragraph {
+                para_ref: Some("99".into()),
+                runs: vec![Run {
+                    char_ref: Some("99".into()),
+                    content: vec![Inline::Text("x".into())],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            })],
+            ..Default::default()
+        });
+        resolve_shape_pools(&mut doc2);
+        let Block::Paragraph(p) = &doc2.sections[0].blocks[0] else {
+            unreachable!()
+        };
+        assert_eq!(p.para_shape, 0, "absent paraPrIDRef → default");
+        assert_eq!(p.runs[0].char_shape, 0, "absent charPrIDRef → default");
+    }
+
+    /// Batch A end-to-end (#196): opening a real HWPX now interns MULTIPLE distinct char shapes off
+    /// the pool (sizes/colors), and at least one run points at a non-default shape — the render-side
+    /// fix for "all text is 10pt black".
+    #[test]
+    fn resolve_end_to_end_interns_multiple_char_shapes() {
+        let p = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/hwpx/FormattingShowcase.hwpx"
+        );
+        let doc = parse_semantic(&std::fs::read(p).unwrap()).unwrap();
+        // Index 0 stays the reserved default; real pool shapes interned above it.
+        assert!(doc.char_shapes[0].is_default());
+        assert!(
+            doc.char_shapes.len() > 1,
+            "pool char shapes interned: {}",
+            doc.char_shapes.len()
+        );
+        let non_default_runs = doc.sections[0]
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Paragraph(pp) => Some(pp),
+                _ => None,
+            })
+            .flat_map(|pp| &pp.runs)
+            .filter(|r| r.char_shape != 0)
+            .count();
+        assert!(
+            non_default_runs > 0,
+            "at least one run resolved to a non-default char shape"
+        );
+        // The interned shapes carry real variety (more than one distinct non-default size/color).
+        let distinct_heights: std::collections::BTreeSet<i32> =
+            doc.char_shapes.iter().map(|c| c.height).collect();
+        assert!(
+            distinct_heights.len() > 1,
+            "multiple distinct font heights interned: {distinct_heights:?}"
+        );
     }
 }

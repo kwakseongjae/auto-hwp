@@ -8,7 +8,7 @@
 //! Canonical = `SemanticDoc`. JSX/CSS = a deterministic projection. `emit` maps the
 //! interned `CharShape`/`ParaShape` pool indices to `.cN`/`.pN` CSS classes (dedup
 //! inherited from `intern_*`), default shapes omit their class, and every un-modeled
-//! datum (run `char_ref`, `ParaSource`, `Provenance.raw`, `Passthrough`, `BinData`,
+//! datum (run `char_ref`, paragraph `para_ref`, `ParaSource`, `Provenance.raw`, `Passthrough`, `BinData`,
 //! per-section `PageSetup`) is carried losslessly so the round-trip is exact.
 
 pub mod css;
@@ -269,6 +269,9 @@ fn emit_para(p: &Paragraph) -> JsxNode {
     }
     if let Some(name) = &p.style_name {
         el.attrs.insert("data-style".into(), name.clone());
+    }
+    if let Some(pref) = &p.para_ref {
+        el.attrs.insert("data-pref".into(), pref.clone());
     }
     if let Some(src) = &p.source {
         el.attrs.insert("data-src".into(), encode_para_source(src));
@@ -869,6 +872,8 @@ fn parse_para(el: &JsxElement) -> Result<Paragraph> {
         // (own-render gets them from the rhwp lift); default false here.
         page_break_before: false,
         is_table_anchor: false,
+        // Original paraPrIDRef, carried losslessly (mirrors run `data-cref`) so the round-trip is exact.
+        para_ref: el.attrs.get("data-pref").cloned(),
     })
 }
 
