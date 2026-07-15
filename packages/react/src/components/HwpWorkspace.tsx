@@ -24,8 +24,8 @@ import { InlineEditPanel } from "./InlineEditPanel";
 import { TableInsertButton } from "./TableInsertButton";
 import { Ruler } from "./Ruler";
 import { InPlaceCellEditor } from "./InPlaceCellEditor";
-import { FloatingToolbar } from "./FloatingToolbar";
 import { FormatRibbon, type RibbonFmt, type FormatRibbonPatch } from "./FormatRibbon";
+import { unionPageBox } from "../floatingPosition";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { ColumnWidthDialog } from "./ColumnWidthDialog";
 import { CellShadePalette } from "./CellShadePalette";
@@ -1830,7 +1830,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     (p: FormatRibbonPatch) => {
       if (editorRef.current) {
         applyLiveStyle(
-          { bold: p.bold, italic: p.italic, underline: p.underline, strike: p.strike, sizePt: p.sizePt, color: p.color },
+          { bold: p.bold, italic: p.italic, underline: p.underline, strike: p.strike, sizePt: p.sizePt, font: p.font, color: p.color },
           editorScaleRef.current,
         );
         // Reflect immediately in the ribbon toggles (the live path never re-reads the cell format).
@@ -1848,6 +1848,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       if (p.bold !== undefined) fmtActions.bold();
       if (p.italic !== undefined) fmtActions.italic();
       if (p.sizePt !== undefined) fmtActions.setSize(p.sizePt);
+      if (p.font !== undefined) fmtActions.setFont(p.font);
       if (p.color !== undefined) fmtActions.setColor(p.color);
       if (p.shade !== undefined) fmtActions.setShade(p.shade);
       if (p.align !== undefined) fmtActions.setAlign(p.align);
@@ -1977,16 +1978,17 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     [editingOn, adapter, core, onTrap],
   );
 
-  // The 서체 catalog family names for the toolbar's font dropdown (reuses the existing fontCatalog prop);
+  // The 서체 catalog family names for the ribbon's 글꼴 dropdown (reuses the existing fontCatalog prop);
   // falls back to just the currently-applied face when no catalog is supplied.
   const fontFamilies = useMemo<readonly string[] | undefined>(() => {
     if (props.fontCatalog && props.fontCatalog.length > 0) return props.fontCatalog.map((f) => f.family);
     return selectedFont ? [selectedFont.family] : undefined;
   }, [props.fontCatalog, selectedFont]);
 
-  // The page the floating toolbar anchors to = the FIRST mark's page (multi-page selection → first mark's
-  // page, per the issue). Its format controls stay enabled only for a single cell/range target (027 scope);
-  // any other combination is disabled with a Korean reason tooltip (never a silent no-op).
+  // The page the compact "AI에게 전달" pill anchors to = the FIRST mark's page (multi-page selection → the
+  // first mark's page). The pill hugs the selection UNION bbox on that page (reused from `unionPageBox`), so
+  // it works for multi-select too (format now lives entirely in the persistent ribbon; the format controls'
+  // enablement is derived below and drives the ribbon, not a floating bar).
   const toolbarPage = marks.length ? marks[0].page : null;
   const formatDisabledReason: string | undefined = !editTarget
     ? "여러 곳을 함께 선택하면 서식은 한 번에 적용할 수 없습니다 — 표의 한 셀/범위를 선택하세요"
@@ -2498,16 +2500,18 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         </button>
       </div>
 
-      {/* issue 048: the PERSISTENT format ribbon — a second toolbar row, shown whenever the editing chrome
-          is on and a document is open (like a normal editor's ribbon; it never floats over the content).
-          DUAL-MODE via `applyRibbon`: 편집 중이면 라이브 선택 스타일(applyLiveStyle), 아니면 선택 셀/범위의
-          서식 op(useSelectionActions — 028 툴바와 동일). The 028 FloatingToolbar STILL appears over a
-          selection (피그마식 이중); both share the one `fmtActions` util. */}
+      {/* issue 048 → 06x: the PERSISTENT format ribbon is now the SOLE format surface (the 028 per-selection
+          floating toolbar was removed — 피그마식 상시 리본). Shown whenever the editing chrome is on and a
+          document is open (like a normal editor's ribbon; it never floats over the content). DUAL-MODE via
+          `applyRibbon`: 편집 중이면 라이브 선택 스타일(applyLiveStyle), 아니면 선택 셀/범위의 서식
+          op(useSelectionActions). 서체 catalog is passed through so 글꼴 lives here too (the only control the
+          old floating bar had that the ribbon lacked). */}
       {editingOn && meta && (
         <FormatRibbon
           fmt={ribbonFmt}
           editing={ribbonEditing}
           onPatch={applyRibbon}
+          fonts={fontFamilies}
           inlineDisabledReason={inlineDisabledReason}
           liveOnlyDisabledReason={liveOnlyDisabledReason}
           cellOnlyDisabledReason={cellOnlyDisabledReason}
@@ -2686,32 +2690,37 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                         onDismiss={() => setImageSel(null)}
                       />
                     )}
-                    {/* issue 028: hide the floating toolbar mid-gesture. `pointerActive` is true for the
-                        WHOLE press→release (set on pointerDown, cleared on pointerUp), so it already covers
-                        a marquee drag — the marquee state (now isolated, issue 030) is no longer needed here.
-                        issue 032: also hide it while the in-place editor is open (two chromes must not fight).
-                        issue 039: also hide it while the right-click context menu is open (one surface at a
-                        time). Both surfaces drive the SAME `fmtActions` handlers (공용 유틸).
-                        issue 06x: also hide it while the inline-edit panel is open (one AI surface at a time). */}
-                    {editingOn && toolbarPage === page && marks.length > 0 && !pointerActive && !editor && !contextMenu && !inlineEdit && (
-                      <FloatingToolbar
-                        marks={marks.filter((m) => m.page === page).map((m) => m.box)}
-                        scale={scale}
-                        viewportWidth={A4_W * zoom}
-                        kind={editTarget?.kind ?? "multi"}
-                        formatDisabledReason={formatDisabledReason}
-                        fonts={fontFamilies}
-                        aiEnabled={canEdit}
-                        onBold={fmtActions.bold}
-                        onItalic={fmtActions.italic}
-                        onSize={fmtActions.setSize}
-                        onFont={fmtActions.setFont}
-                        onColor={fmtActions.setColor}
-                        onShade={fmtActions.setShade}
-                        onAlign={fmtActions.setAlign}
-                        onSendToAi={onSendToAi}
-                      />
-                    )}
+                    {/* issue 06x: the compact "✨ AI에게 전달" pill — the ONLY remnant of the removed 028
+                        floating toolbar (formatting moved entirely to the persistent ribbon). It hugs the
+                        selection UNION bbox on this page (bottom-RIGHT, mirroring the 여기서 편집 pill), so it
+                        works for MULTI-select too (gate = marks.length > 0, not the lone `inlineTarget`).
+                        Clicking bumps `aiFocusToken` → focuses the chat composer (no new prompt logic, no
+                        selection churn — 028 render-isolation). `stopPropagation` on pointerDown so the click
+                        isn't read as an empty-space DESELECT gesture (같은 함정 as the 여기서 편집 pill).
+                        Hidden mid-gesture / while the in-place editor, context menu, or inline-edit panel is up
+                        (one surface at a time). When a LONE selection also shows the 여기서 편집 pill, this one
+                        STACKS one row below it (`--stacked`) so they never overlap. */}
+                    {editingOn && canEdit && toolbarPage === page && marks.length > 0 && !pointerActive && !editor && !contextMenu && !inlineEdit && (() => {
+                      const u = unionPageBox(marks.filter((m) => m.page === page).map((m) => m.box));
+                      if (!u) return null;
+                      const stacked = !!inlineTarget && inlineTarget.page === page; // 여기서 편집 pill also here → stack below it
+                      return (
+                        <button
+                          type="button"
+                          className={`hw-ai-send${stacked ? " hw-ai-send--stacked" : ""}`}
+                          data-testid="hw-ai-send"
+                          title="선택을 AI에게 전달 (채팅으로 편집)"
+                          style={{ left: (u.x + u.w) * scale, top: (u.y + u.h) * scale }}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSendToAi();
+                          }}
+                        >
+                          ✨ AI에게 전달
+                        </button>
+                      );
+                    })()}
                     {/* issue 032/040: the Figma-style IN-PLACE rich editor sits over the cell rect at the
                         cell's own font size (no popover card). It renders the cell's styled RUNS so partial
                         formatting shows + round-trips; onCommit returns the serialized runs as a Promise so

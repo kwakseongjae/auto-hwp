@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { HwpWorkspace } from "../components/HwpWorkspace";
+import { FONT_CATALOG } from "../fonts";
 import type { CellHit, Intent, TableBox } from "../types";
 import { MockAdapter } from "./mockAdapter";
 
@@ -72,16 +73,18 @@ describe("HwpWorkspace issue-048 — persistent format ribbon (선택+편집 겸
     });
   });
 
-  it("리본과 028 플로팅 툴바가 같은 op 을 낸다 (공용 유틸 하나 — useSelectionActions)", async () => {
+  it("피그마식 상시 리본: 선택 시 028 플로팅 서식 바는 렌더되지 않고 서식은 리본에만 있다", async () => {
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
     clickCell(sheet);
-    // both chromes are present over a selection (피그마식 이중), no visual conflict (ribbon in header, bar floats).
-    await screen.findByTestId("hw-floating-toolbar");
-    expect(screen.getByTestId("hw-format-ribbon")).toBeTruthy();
-    // the FLOATING toolbar's 굵게 → SetCellRangeFmt (same op the ribbon just proved).
-    fireEvent.click(screen.getByTestId("hw-fmt-bold"));
+    // the persistent ribbon owns formatting; the removed 028 floating bar never appears over a selection.
+    await waitFor(() => expect((screen.getByTestId("hw-ribbon-bold") as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.queryByTestId("hw-floating-toolbar")).toBeNull();
+    // …instead, a compact "AI에게 전달" pill anchors to the selection (the only floating remnant).
+    expect(screen.getByTestId("hw-ai-send")).toBeTruthy();
+    // the ribbon's 굵게 → SetCellRangeFmt (the 039 shared util — no floating bar needed).
+    fireEvent.click(screen.getByTestId("hw-ribbon-bold"));
     await waitFor(() => expect(adapter.applied.some((i) => i.intent === "SetCellRangeFmt")).toBe(true));
   });
 
@@ -175,17 +178,50 @@ describe("HwpWorkspace issue-048 — persistent format ribbon (선택+편집 겸
     expect((screen.getByTestId("hw-ribbon-align-center") as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("편집 중엔 028 플로팅 툴바는 숨고 리본은 유지 (두 크롬 시각 충돌 없음)", async () => {
+  it("리본은 선택·편집 두 모드에서 상시 유지되고 028 플로팅 서식 바는 어느 모드에서도 렌더되지 않는다", async () => {
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
     vi.spyOn(document, "execCommand").mockReturnValue(true);
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
     clickCell(sheet);
-    await screen.findByTestId("hw-floating-toolbar");
+    // idle-selection: ribbon present, floating bar absent.
+    expect(screen.getByTestId("hw-format-ribbon")).toBeTruthy();
+    expect(screen.queryByTestId("hw-floating-toolbar")).toBeNull();
     await dblClickCell(sheet, container);
     await screen.findByTestId("hw-inplace-editor");
-    // the floating capsule hides (two chromes must not fight), but the persistent ribbon stays up.
-    await waitFor(() => expect(screen.queryByTestId("hw-floating-toolbar")).toBeNull());
+    // editing: ribbon STILL present (dual-mode), floating bar STILL absent.
     expect(screen.getByTestId("hw-format-ribbon")).toBeTruthy();
+    expect(screen.queryByTestId("hw-floating-toolbar")).toBeNull();
+  });
+
+  it("서체: 리본 글꼴 드롭다운 → 비편집 시 SetCellRangeFmt(font) 을 적용 (applyRibbon 비편집 arm → fmtActions.setFont)", async () => {
+    const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
+    const { container } = render(
+      <HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing fontCatalog={FONT_CATALOG} />,
+    );
+    const sheet = await sheetOf(container);
+    // the 서체 select is part of the persistent ribbon whenever a catalog is supplied (편집 여부와 무관하게 상시).
+    const fontSel = screen.getByTestId("hw-ribbon-font") as HTMLSelectElement;
+    expect(fontSel).toBeTruthy();
+    clickCell(sheet);
+    await waitFor(() => expect((screen.getByTestId("hw-ribbon-font") as HTMLSelectElement).disabled).toBe(false));
+    fireEvent.change(fontSel, { target: { value: "Nanum Myeongjo" } });
+    await waitFor(() => {
+      const applied = adapter.applied.find((i) => i.intent === "SetCellRangeFmt" && (i as Intent & { font?: string }).font === "Nanum Myeongjo");
+      expect(applied).toBeTruthy();
+    });
+  });
+
+  it("✨ AI에게 전달 pill: 선택이 있으면 뜨고 클릭하면 채팅 작성창에 포커스 (aiFocusToken bump — 신규 프롬프트 0)", async () => {
+    const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const sheet = await sheetOf(container);
+    clickCell(sheet);
+    const pill = await screen.findByTestId("hw-ai-send");
+    expect(pill).toBeTruthy();
+    fireEvent.click(pill);
+    // the pill only bumps aiFocusToken → ChatPanel focuses its composer; NO format/edit op is emitted.
+    await waitFor(() => expect(document.activeElement).toBe(container.querySelector(".hw-textarea")));
+    expect(adapter.applied.some((i) => i.intent === "SetCellRangeFmt")).toBe(false);
   });
 });

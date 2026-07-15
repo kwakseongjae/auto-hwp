@@ -39,6 +39,9 @@ export interface FormatRibbonPatch {
   underline?: boolean;
   strike?: boolean;
   sizePt?: number;
+  /** 서체(글꼴). BOTH modes: 편집 중 → applyLiveStyle wraps the live selection; 비편집 → fmtActions.setFont
+   *  (SetCellRangeFmt font). Like 크기/글자색 it applies to the selection, so it is gated with inline (not cell). */
+  font?: string;
   color?: string;
   shade?: string | null;
   align?: ToolbarAlign;
@@ -52,6 +55,9 @@ export interface FormatRibbonProps {
   editing: boolean;
   /** Apply a format delta. HOST-routed: 편집 중 → richedit.applyLiveStyle; else → useSelectionActions. */
   onPatch: (patch: FormatRibbonPatch) => void;
+  /** Optional 서체 catalog (family names) for the 글꼴 dropdown; each option previews in its own family
+   *  (best-effort). Omitted/empty → the 서체 select is not rendered (opt-in, like the desktop FontPicker). */
+  fonts?: readonly string[];
   /** Reason the ALWAYS-controls (B/I/크기/글자색) are disabled — set when NOT editing AND no formattable
    *  cell/range is marked (미지원 조합은 조용한 무시 금지 — 비활성+사유, issue 027 rule). */
   inlineDisabledReason?: string;
@@ -66,7 +72,7 @@ export interface FormatRibbonProps {
 /// The persistent, position-free format ribbon. Presentational: it fires `onPatch` with the changed
 /// attribute; the host resolves the dual routing. Toggle buttons light up from `fmt`.
 export function FormatRibbon(props: FormatRibbonProps) {
-  const { fmt, editing, onPatch, inlineDisabledReason, liveOnlyDisabledReason, cellOnlyDisabledReason } = props;
+  const { fmt, editing, onPatch, fonts, inlineDisabledReason, liveOnlyDisabledReason, cellOnlyDisabledReason } = props;
 
   const size = Math.round(fmt.sizePt);
   // The size box is directly EDITABLE (type + Enter/blur applies). Kept in a local string so partial typing
@@ -96,6 +102,37 @@ export function FormatRibbon(props: FormatRibbonProps) {
 
   return (
     <div className="hw-format-ribbon" data-testid="hw-format-ribbon" role="toolbar" aria-label="글자 서식">
+      {/* 서체 — both modes (SetCellRangeFmt font ↔ applyLiveStyle wraps the live selection). A native <select>
+          can't preventDefault its focus, so it `snapshot`s the editor selection on mousedown (like the 크기/색
+          inputs) — applyLiveStyle then restores it so the font lands on the SELECTION, not the whole cell. It
+          resets to the "서체" placeholder each apply (uncontrolled), so it never claims to reflect the caret's
+          current face. Rendered only when a catalog is supplied (opt-in). */}
+      {fonts && fonts.length > 0 && (
+        <>
+          <select
+            className="hw-ribbon-font"
+            data-testid="hw-ribbon-font"
+            disabled={inlineOff}
+            title={inlineDisabledReason ?? "서체"}
+            value=""
+            onMouseDown={snapshot}
+            onChange={(e) => {
+              if (e.target.value) onPatch({ font: e.target.value });
+            }}
+          >
+            <option value="" disabled>
+              서체
+            </option>
+            {fonts.map((f) => (
+              <option key={f} value={f} style={{ fontFamily: `"${f}"` }}>
+                {f}
+              </option>
+            ))}
+          </select>
+          <span className="hw-ribbon-sep" aria-hidden />
+        </>
+      )}
+
       {/* 굵게 / 기울임 — both modes (SetCellRangeFmt bold/italic ↔ applyLiveStyle). */}
       <button
         type="button"

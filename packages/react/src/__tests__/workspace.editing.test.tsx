@@ -255,29 +255,34 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
     });
   });
 
-  it("while the in-place editor is open, the 028 floating toolbar is HIDDEN (two chromes must not fight)", async () => {
+  it("while the in-place editor is open, the AI 전달 pill is HIDDEN (one surface at a time)", async () => {
     const cell: CellHit = { section: 0, block: 1, row: 1, col: 1, rows: 3, cols: 3, text: "칸", x: 140, y: 100, w: 100, h: 40 };
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
-    // 06x drill: a double-click SELECTS the cell → the floating toolbar appears.
+    // 06x drill: a double-click SELECTS the cell → the AI 전달 pill appears (formatting lives in the ribbon).
     drillCell(sheet, 160, 110);
-    await screen.findByTestId("hw-floating-toolbar");
-    // Now open the editor (Enter over the drilled cell) → the toolbar must disappear.
+    await screen.findByTestId("hw-ai-send");
+    // Now open the editor (Enter over the drilled cell) → the pill must disappear.
     fireEvent.keyDown(window, { key: "Enter" });
     await screen.findByTestId("hw-inplace-editor");
-    await waitFor(() => expect(screen.queryByTestId("hw-floating-toolbar")).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId("hw-ai-send")).toBeNull());
+    // the floating format bar is gone entirely (never rendered).
+    expect(screen.queryByTestId("hw-floating-toolbar")).toBeNull();
   });
 
-  it("marking a cell shows the FLOATING toolbar; 굵게 applies SetCellRangeFmt", async () => {
+  it("marking a cell shows the AI 전달 pill; the ribbon 굵게 applies SetCellRangeFmt (no floating bar)", async () => {
     const cell: CellHit = { section: 0, block: 1, row: 1, col: 1, rows: 3, cols: 3, text: "칸", x: 140, y: 100, w: 100, h: 40 };
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
     drillCell(sheet, 160, 110); // 06x: drill to select the cell (single click would mark the whole table)
-    // the new capsule toolbar carries the same control testids (issue 028 surface redesign).
-    await screen.findByTestId("hw-floating-toolbar");
-    const bold = await screen.findByTestId("hw-fmt-bold");
+    // the AI 전달 pill anchors to the selection; the 028 floating format bar is never rendered.
+    await screen.findByTestId("hw-ai-send");
+    expect(screen.queryByTestId("hw-floating-toolbar")).toBeNull();
+    // formatting is on the persistent ribbon now: 굵게 → SetCellRangeFmt (same 039 shared util).
+    const bold = await screen.findByTestId("hw-ribbon-bold");
+    await waitFor(() => expect((bold as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(bold);
     await waitFor(() => {
       const applied = adapter.applied.find((i) => i.intent === "SetCellRangeFmt") as (Intent & { bold: unknown; r0: number }) | undefined;
@@ -288,44 +293,44 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
   });
 });
 
-describe("HwpWorkspace issue-028 — floating toolbar show/hide + AI entry", () => {
+describe("HwpWorkspace issue-06x — AI 전달 pill show/hide + AI entry (floating format bar removed)", () => {
   const cell: CellHit = { section: 0, block: 1, row: 1, col: 1, rows: 3, cols: 3, text: "칸", x: 140, y: 100, w: 100, h: 40 };
   const mkAdapter = () => new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
 
-  it("선택→표시, Esc→숨김", async () => {
+  it("선택→pill 표시, Esc→숨김", async () => {
     const { container } = render(<HwpWorkspace adapter={mkAdapter()} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
     fireEvent.pointerDown(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
     fireEvent.pointerUp(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
-    await screen.findByTestId("hw-floating-toolbar");
-    // Esc clears the selection → toolbar disappears.
+    await screen.findByTestId("hw-ai-send");
+    // Esc clears the selection → pill disappears.
     fireEvent.keyDown(window, { key: "Escape" });
-    await waitFor(() => expect(screen.queryByTestId("hw-floating-toolbar")).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId("hw-ai-send")).toBeNull());
   });
 
-  it("드래그(포인터 제스처) 중 숨김 → 놓으면 재등장", async () => {
+  it("드래그(포인터 제스처) 중 pill 숨김 → 놓으면 재등장", async () => {
     const { container } = render(<HwpWorkspace adapter={mkAdapter()} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
     fireEvent.pointerDown(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
     fireEvent.pointerUp(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
-    await screen.findByTestId("hw-floating-toolbar");
-    // a new gesture begins → the toolbar hides while dragging…
+    await screen.findByTestId("hw-ai-send");
+    // a new gesture begins → the pill hides while dragging…
     fireEvent.pointerDown(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 2 });
-    await waitFor(() => expect(screen.queryByTestId("hw-floating-toolbar")).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId("hw-ai-send")).toBeNull());
     // …and re-appears once the gesture settles.
     fireEvent.pointerUp(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 2 });
-    await screen.findByTestId("hw-floating-toolbar");
+    await screen.findByTestId("hw-ai-send");
   });
 
-  it("AI에게 전달 → 채팅 포커스 + 앵커 칩 유지 (신규 프롬프트 로직 0)", async () => {
+  it("AI에게 전달 pill → 채팅 포커스 + 앵커 칩 유지 (신규 프롬프트 로직 0)", async () => {
     const { container } = render(<HwpWorkspace adapter={mkAdapter()} document={doc} onAiRequest={noAi} enableEditing />);
     const sheet = await sheetOf(container);
     fireEvent.pointerDown(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
     fireEvent.pointerUp(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
-    await screen.findByTestId("hw-floating-toolbar");
+    await screen.findByTestId("hw-ai-send");
     // the marked cell is already an anchor chip.
     await waitFor(() => expect(container.querySelector(".hw-anchor")).toBeTruthy());
-    fireEvent.click(screen.getByTestId("hw-fmt-ai"));
+    fireEvent.click(screen.getByTestId("hw-ai-send"));
     const ta = container.querySelector(".hw-textarea") as HTMLTextAreaElement;
     await waitFor(() => expect(document.activeElement).toBe(ta));
     // the chip is NOT consumed — it rides along with the next message.

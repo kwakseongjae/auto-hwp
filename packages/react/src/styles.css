@@ -280,6 +280,19 @@
 }
 .hw-inline-open:hover { opacity: 0.92; }
 
+/* the "✨ AI에게 전달" pill — the sole remnant of the removed 028 floating toolbar. Mirrors .hw-inline-open
+ * (bottom-right of the selection union bbox). When a LONE selection also shows the 여기서 편집 pill, `--stacked`
+ * drops this one a row BELOW it so the two never overlap. Anchored to the selection UNION bbox → multi-select
+ * safe. */
+.hw-ai-send {
+  position: absolute; z-index: 24; transform: translate(-100%, 6px); white-space: nowrap;
+  font: inherit; font-size: 11px; font-weight: 500; line-height: 1;
+  color: #fff; background: var(--hw-ai); border: none; padding: 5px 9px; border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.35); cursor: pointer; pointer-events: auto;
+}
+.hw-ai-send:hover { opacity: 0.92; }
+.hw-ai-send--stacked { transform: translate(-100%, 34px); }
+
 /* the anchored inline panel (compose → applied), drawn BELOW the element (own-render px × scale + gap). */
 .hw-inline-edit {
   position: absolute; z-index: 30; margin-top: 6px; width: 300px; max-width: 92vw;
@@ -459,6 +472,11 @@
   padding: 0 4px; text-align: center; background: #fff; color: #111;
 }
 .hw-ribbon-size:disabled { opacity: 0.4; cursor: not-allowed; }
+.hw-ribbon-font {
+  height: 26px; max-width: 128px; border: 1px solid var(--hw-border); border-radius: 6px;
+  font-size: 12px; background: #fff; color: #111;
+}
+.hw-ribbon-font:disabled { opacity: 0.4; cursor: not-allowed; }
 .hw-ribbon-sep { width: 1px; height: 20px; background: var(--hw-border); margin: 0 3px; }
 .hw-ribbon-color { display: inline-flex; align-items: center; gap: 2px; font-size: 10px; color: var(--hw-muted); cursor: pointer; }
 .hw-ribbon-color input[type="color"] {

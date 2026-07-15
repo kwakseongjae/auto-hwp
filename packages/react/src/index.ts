@@ -91,13 +91,15 @@ export { CellTextPopover } from "./components/CellTextPopover";
 /** @deprecated Since issue 032 — see {@link CellTextPopover}. */
 export type { CellTextPopoverProps } from "./components/CellTextPopover";
 // FormatToolbar — the ORIGINAL fixed toolbar (issue 027). Kept for backward compatibility; HwpWorkspace's
-// enableEditing path now uses FloatingToolbar (issue 028). Still individually importable for hosts that
-// built their own chrome around it.
+// enableEditing path now uses the persistent FormatRibbon (issue 048). Still individually importable for
+// hosts that built their own chrome around it.
 export { FormatToolbar } from "./components/FormatToolbar";
 export type { FormatToolbarProps } from "./components/FormatToolbar";
 
-// Issue 028 — the opt-in capsule FLOATING selection toolbar (네이버 블로그 패턴) + its pure position engine.
-// It reuses the 027 core commands (formatCellRange/shadeCellRange) and adds the "AI에게 전달" vibe-edit entry.
+// Issue 028 — the (now legacy) capsule FLOATING selection toolbar (네이버 블로그 패턴) + its pure position
+// engine. HwpWorkspace NO LONGER renders it (issue 06x — format moved to the persistent FormatRibbon, the
+// per-selection floating bar was removed as redundant/annoying). Kept exported for hosts that want to build
+// their own floating chrome; `ToolbarAlign` + `unionPageBox` are reused by the ribbon + the AI-전달 pill.
 export { FloatingToolbar } from "./components/FloatingToolbar";
 export type { FloatingToolbarProps, ToolbarAlign } from "./components/FloatingToolbar";
 export { computeFloatingPosition, unionPageBox } from "./floatingPosition";
