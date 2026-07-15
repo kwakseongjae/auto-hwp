@@ -77,12 +77,14 @@ export type { Listener } from "./events";
 
 // Types
 export type {
+  AgentEvent,
   AiRequestOptions,
   Anchor,
   Attachment,
   BlockHit,
   Box,
   CaretRect,
+  ChatTurn,
   Citation,
   CellCaretRect,
   CellHit,

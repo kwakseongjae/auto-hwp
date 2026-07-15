@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HwpWorkspace, WasmAdapter, FONT_CATALOG, type AiRequestOptions, type Anchor, type Citation, type DocContext, type Intent, type WasmAdapterOptions } from "@tf-hwp/react";
-import { buildDocContext } from "@tf-hwp/ai-protocol";
+import { buildDocContext, createAgentEventParser, type AgentEvent } from "@tf-hwp/ai-protocol";
 import { isTrapError, resetEngine } from "@tf-hwp/engine";
 import { AutosaveController, IdbSnapshotStore, findRecoverable, formatAge, recoveredName, type SnapshotRecord } from "@/lib/autosave";
 import { limitMessage, oversizeMessage } from "@/lib/limits";
@@ -319,8 +319,10 @@ export default function LabWorkspace() {
   );
 
   // 채팅 바이브편집 브리지(R6): 패키지는 LLM/키를 갖지 않는다. 서버 프록시(/api/hwp-edit)로 위임.
-  // Feature A: opts.webSearch(있으면)를 본문에 실어 서버가 OpenRouter web 플러그인을 켜게 하고, 응답의
-  // citations(url_citation → {title,url})를 opts.onCitations로 채팅에 넘긴다. 키/검색은 서버사이드(R6).
+  // 에이전틱 스트리밍: opts.onEvent 가 있으면(=채팅 타임라인) `?stream=1` 경로로 POST 하고 NDJSON AgentEvent
+  // 를 읽어 각 이벤트를 onEvent 로 흘린 뒤 최종 intents 로 resolve 한다. onEvent 가 없으면(=InlineEditPanel)
+  // 기존 단발 res.json() 경로 그대로(back-compat). 대화 메모리(opts.history)는 본문에 실어 서버가 모델
+  // messages 에 접는다. 키/검색은 전부 서버사이드(R6).
   const onAiRequest = useCallback(async (instruction: string, anchors: Anchor[], ctx: DocContext, opts?: AiRequestOptions): Promise<Intent[]> => {
     // 066: 표/셀 앵커마다 엔진에서 그 표의 셀 그리드(행×열·각 셀 텍스트·빈칸)를 조회해 doc-context 에
     // 첨부한다 — 그래야 모델이 "표 채워줘"·라벨 옆 값칸 지정·구조편집(행 N개)을 정확히 한다(얇은 앵커
@@ -332,20 +334,66 @@ export default function LabWorkspace() {
           : Promise.resolve(null),
       ),
     );
+    const requestBody = {
+      instruction,
+      anchors,
+      // R5-펜스용 doc-context 문자열 — ai-protocol 이 서버와 공유하는 조립기(이슈 026). 066: 그리드 첨부.
+      docContext: buildDocContext({ format: ctx.format, pages: ctx.pages, editable: ctx.editable, sections: ctx.sections }, anchors, { grids }),
+      // Feature A(비스트리밍 경로 back-compat): 웹 검색 grounding 플래그. 스트리밍 에이전트는 검색을 스스로
+      // 결정하므로 채팅은 더 이상 이 값을 켜지 않는다(InlineEditPanel 등이 쓰면 서버가 web 플러그인을 켠다).
+      webSearch: opts?.webSearch ?? false,
+      // 멀티모달: 첨부(이미지=vision dataUrl, 문서=추출 텍스트)를 서버로 전달. 서버가 이미지 present면
+      // OpenAI content-parts로, 문서 텍스트는 R5 <attachment> 펜스로 조립한다. 키/모델은 서버사이드(R6).
+      ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
+      // 대화 메모리(에이전틱 스트리밍): 직전 채팅 턴(바운드). 서버가 모델 messages 에 접는다.
+      ...(opts?.history?.length ? { history: opts.history } : {}),
+    };
+
+    // ── 스트리밍 경로(채팅 타임라인) ──────────────────────────────────────────────────────────────
+    if (opts?.onEvent) {
+      const res = await fetch("/api/hwp-edit?stream=1", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(requestBody),
+      });
+      if (!res.ok || !res.body) {
+        let detail = `${res.status}`;
+        try {
+          const j = (await res.json()) as { error?: string };
+          if (j?.error) detail = j.error;
+        } catch {
+          /* 비-JSON 오류 본문 */
+        }
+        throw new Error(`AI 서버 오류: ${detail}`);
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      const parser = createAgentEventParser();
+      let finalIntents: Intent[] = [];
+      const citations: Citation[] = [];
+      let streamError: string | null = null;
+      const handle = (ev: AgentEvent) => {
+        opts.onEvent!(ev); // 각 이벤트를 채팅 타임라인으로 흘린다(THINKING TRANSPARENCY)
+        if (ev.type === "tool_result" && ev.citations?.length) citations.push(...ev.citations);
+        else if (ev.type === "intents") finalIntents = ev.intents;
+        else if (ev.type === "error") streamError = ev.message;
+      };
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        for (const ev of parser.push(decoder.decode(value, { stream: true }))) handle(ev);
+      }
+      for (const ev of parser.flush()) handle(ev);
+      if (opts.onCitations) opts.onCitations(citations); // 근거(출처)를 채팅으로(intents 반환 계약 불변)
+      if (streamError) throw new Error(streamError);
+      return finalIntents;
+    }
+
+    // ── 비스트리밍 경로(InlineEditPanel · back-compat) ───────────────────────────────────────────
     const res = await fetch("/api/hwp-edit", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        instruction,
-        anchors,
-        // R5-펜스용 doc-context 문자열 — ai-protocol 이 서버와 공유하는 조립기(이슈 026). 066: 그리드 첨부.
-        docContext: buildDocContext({ format: ctx.format, pages: ctx.pages, editable: ctx.editable, sections: ctx.sections }, anchors, { grids }),
-        // Feature A: 웹 검색 grounding 옵트인(토글). 서버가 이 플래그일 때만 web 플러그인을 켠다.
-        webSearch: opts?.webSearch ?? false,
-        // 멀티모달: 첨부(이미지=vision dataUrl, 문서=추출 텍스트)를 서버로 전달. 서버가 이미지 present면
-        // OpenAI content-parts로, 문서 텍스트는 R5 <attachment> 펜스로 조립한다. 키/모델은 서버사이드(R6).
-        ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
-      }),
+      body: JSON.stringify(requestBody),
     });
     if (!res.ok) {
       let detail = `${res.status}`;

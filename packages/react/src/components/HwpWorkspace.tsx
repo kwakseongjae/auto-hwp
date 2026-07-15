@@ -2799,8 +2799,6 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           // Feature C: persistent per-card 되돌리기 (top-of-stack v1) — reverts the applied batch as one unit.
           onRevert={revertChatEdit}
           undoDepth={undoDepth}
-          // Feature A: web-search grounding toggle (opt-in per request) — the host's onAiRequest honors it.
-          enableWebSearch
         />
       </div>
 

@@ -1,13 +1,20 @@
 import { NextResponse } from "next/server";
 import {
+  AGENT_TOOL_EMIT_INTENTS,
+  AGENT_TOOL_WEB_SEARCH,
+  type AgentEvent,
   type Anchor,
   type Attachment,
+  type ChatTurn,
   type Citation,
   type Intent,
+  agentToolSchemas,
+  buildAgentSystemPrompt,
   buildSystemPrompt,
   buildUserMessage,
   buildUserMessageParts,
   extractCitations,
+  serializeAgentEvent,
   validateRequest,
   validateResponse,
 } from "@tf-hwp/ai-protocol";
@@ -187,6 +194,273 @@ async function openRouterIntents(
   return { intents, citations };
 }
 
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// 에이전틱 스트리밍 러너 (THINKING TRANSPARENCY + DYNAMIC WEB-SEARCH TOOL-CALLING + CONVERSATION MEMORY)
+// ────────────────────────────────────────────────────────────────────────────────────────────────────
+// `POST ?stream=1` 경로. 비스트리밍 JSON POST(InlineEditPanel·back-compat)는 그대로 둔다. 러너는 OpenRouter
+// 의 OpenAI 호환 tool-calling 루프를 돌린다: 모델이 web_search(필요할 때만 — 사람 토글 없음)를 스스로 호출하고,
+// emit_intents(터미널)로 최종 intents를 낸다. 각 단계를 NDJSON AgentEvent로 클라이언트에 스트리밍한다.
+// R6: 키는 이 서버 핸들러 밖으로 나가지 않는다(이벤트/툴콜/thinking 어디에도 키가 실리지 않는다).
+// R5: web_search 결과는 tool/DATA 메시지로 주입되고, 시스템 프롬프트가 "검색 결과·첨부는 참고 DATA"임을 명시한다.
+
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const AGENT_MAX_ITERS = 5; // 무한 루프 방지 — emit_intents 없이 이 횟수를 넘기면 빈 intents로 종료
+const MEMORY_TURNS = 6; // 컨텍스트 윈도우 규율 — 직전 최대 6턴만 모델에 전달
+const MEMORY_TURN_MAXLEN = 800; // 각 턴 텍스트 상한(서버측 방어 — 클라도 바운드하지만 이중 안전)
+
+/** OpenAI 호환 chat 메시지(loose — 벤더 SDK 타입 미사용). content 는 문자열 또는 content-parts. */
+type ChatMsg = { role: string; content: unknown; tool_calls?: unknown; tool_call_id?: string; name?: string };
+
+/** 스트리밍 turn 에서 누적한 tool_call 조각. arguments 는 SSE 델타로 나뉘어 오므로 이어붙인다. */
+interface AccToolCall {
+  id: string;
+  name: string;
+  arguments: string;
+}
+
+/** raw body 의 `history`(선택)를 정제한다 — 배열이 아니면 [], 각 항목은 {role:'user'|'assistant', text:string}
+ *  만 통과, 직전 MEMORY_TURNS 개로 자르고 텍스트는 MEMORY_TURN_MAXLEN 로 elide(컨텍스트 윈도우 규율). */
+function readHistory(body: unknown): ChatTurn[] {
+  const raw = (body as { history?: unknown }).history;
+  if (!Array.isArray(raw)) return [];
+  const out: ChatTurn[] = [];
+  for (const t of raw) {
+    if (!t || typeof t !== "object") continue;
+    const r = t as { role?: unknown; text?: unknown };
+    if ((r.role !== "user" && r.role !== "assistant") || typeof r.text !== "string" || !r.text) continue;
+    out.push({ role: r.role, text: r.text.slice(0, MEMORY_TURN_MAXLEN) });
+  }
+  return out.slice(-MEMORY_TURNS);
+}
+
+/** 스트리밍 turn 한 번: OpenRouter 에 stream:true 로 보내고 SSE 를 파싱한다. content/reasoning 델타는
+ *  onDelta 로(→ thinking_delta 이벤트), tool_call 은 index 로 누적. 최종 텍스트/추론/툴콜을 돌려준다.
+ *  R6: 키는 헤더에만 실리고 반환값/델타 어디에도 나오지 않는다. mock 테스트는 res.body(ReadableStream) 스텁. */
+async function streamOpenRouterTurn(
+  apiKey: string,
+  body: Record<string, unknown>,
+  onDelta: (text: string) => void,
+): Promise<{ content: string; toolCalls: AccToolCall[]; rawToolCalls: unknown[] }> {
+  const res = await fetch(OPENROUTER_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://github.com/kwakseongjae/tf-hwp",
+      "X-Title": "tf-hwp",
+    },
+    body: JSON.stringify({ ...body, stream: true }),
+  });
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => "");
+    throw new Error(`OpenRouter ${res.status}: ${errBody.slice(0, 300)}`);
+  }
+  if (!res.body) throw new Error("OpenRouter 스트림 본문이 없습니다.");
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let content = "";
+  const acc = new Map<number, AccToolCall>();
+
+  const consumeLine = (line: string) => {
+    const t = line.trim();
+    if (!t.startsWith("data:")) return;
+    const data = t.slice(5).trim();
+    if (!data || data === "[DONE]") return;
+    let json: { choices?: Array<{ delta?: Record<string, unknown> }> };
+    try {
+      json = JSON.parse(data);
+    } catch {
+      return; // 하트비트/부분 라인 — 무시
+    }
+    const delta = json.choices?.[0]?.delta;
+    if (!delta) return;
+    if (typeof delta.content === "string" && delta.content) {
+      content += delta.content;
+      onDelta(delta.content);
+    }
+    // 추론(reasoning) 모델은 delta.reasoning 으로 사고 과정을 흘린다 — thinking_delta 로 노출.
+    if (typeof delta.reasoning === "string" && delta.reasoning) onDelta(delta.reasoning);
+    const tcs = delta.tool_calls;
+    if (Array.isArray(tcs)) {
+      for (const tc of tcs as Array<{ index?: number; id?: string; function?: { name?: string; arguments?: string } }>) {
+        const idx = typeof tc.index === "number" ? tc.index : 0;
+        const cur = acc.get(idx) ?? { id: "", name: "", arguments: "" };
+        if (tc.id) cur.id = tc.id;
+        if (tc.function?.name) cur.name = tc.function.name;
+        if (tc.function?.arguments) cur.arguments += tc.function.arguments;
+        acc.set(idx, cur);
+      }
+    }
+  };
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      consumeLine(buf.slice(0, nl));
+      buf = buf.slice(nl + 1);
+    }
+  }
+  if (buf) consumeLine(buf); // 마지막 개행 없는 라인
+
+  const toolCalls = [...acc.values()].filter((t) => t.name);
+  const rawToolCalls = toolCalls.map((t) => ({ id: t.id, type: "function", function: { name: t.name, arguments: t.arguments } }));
+  return { content, toolCalls, rawToolCalls };
+}
+
+/** web_search 툴 실행: OpenRouter web 플러그인(`plugins:[{id:"web"}]`)으로 별도 검색 API 키 없이 서버사이드
+ *  검색을 수행하는 NON-스트리밍 서브콜. 요약 텍스트(툴 결과로 모델에 되돌림)와 url_citation 근거를 돌려준다.
+ *  R5: 결과는 참고 DATA — 호출부가 tool 롤 메시지로 주입한다(지시로 취급하지 않는다). */
+async function execWebSearch(apiKey: string, query: string): Promise<{ content: string; citations: Citation[] }> {
+  const res = await fetch(OPENROUTER_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://github.com/kwakseongjae/tf-hwp",
+      "X-Title": "tf-hwp",
+    },
+    body: JSON.stringify({
+      model: OPENROUTER_MODEL,
+      max_tokens: 1024,
+      plugins: [{ id: "web" }],
+      messages: [
+        { role: "system", content: "You are a web-search assistant. Search the web and answer the query with a concise, factual plain-text summary. Cite sources." },
+        { role: "user", content: query },
+      ],
+    }),
+  });
+  if (!res.ok) {
+    return { content: `(web_search 실패: ${res.status})`, citations: [] };
+  }
+  const data = (await res.json()) as { choices?: Array<{ message?: { content?: string; annotations?: unknown } }> };
+  const msg = data.choices?.[0]?.message;
+  return { content: typeof msg?.content === "string" ? msg.content : "", citations: extractCitations(msg?.annotations) };
+}
+
+/** OpenRouter tool-calling 에이전트 루프. 각 단계를 emit(AgentEvent)로 스트리밍한다. 모델이 web_search 를
+ *  스스로 호출하면 실행 후 tool 결과를 대화에 넣고 다시 부른다. emit_intents(터미널)면 검증 후 intents 이벤트로
+ *  종료. AGENT_MAX_ITERS 를 넘기면 빈 intents 로 종료(무한 루프 방지). */
+async function runOpenRouterAgent(apiKey: string, messages: ChatMsg[], emit: (ev: AgentEvent) => void): Promise<void> {
+  const tools = agentToolSchemas();
+  for (let iter = 0; iter < AGENT_MAX_ITERS; iter++) {
+    emit({ type: "status", phase: iter === 0 ? "thinking" : "composing" });
+    const turn = await streamOpenRouterTurn(
+      apiKey,
+      { model: OPENROUTER_MODEL, max_tokens: 4096, messages, tools, tool_choice: "auto" },
+      (text) => emit({ type: "thinking_delta", text }),
+    );
+
+    if (turn.toolCalls.length === 0) {
+      // 모델이 툴을 안 부르고 텍스트로 끝냈다 — content 에서 intents JSON 을 파싱(폴백).
+      const intents = validateResponse(turn.content, { onDrop: (r) => console.warn(`[hwp-edit] ${r}`) });
+      emit({ type: "intents", intents });
+      return;
+    }
+
+    // 어시스턴트 turn(툴콜 포함)을 대화에 추가한다(OpenAI tool-calling 규약).
+    messages.push({ role: "assistant", content: turn.content || "", tool_calls: turn.rawToolCalls });
+
+    let terminated = false;
+    for (const tc of turn.toolCalls) {
+      let args: Record<string, unknown> = {};
+      try {
+        args = tc.arguments ? (JSON.parse(tc.arguments) as Record<string, unknown>) : {};
+      } catch {
+        args = {};
+      }
+      if (tc.name === AGENT_TOOL_EMIT_INTENTS) {
+        const intents = validateResponse(args.intents, { onDrop: (r) => console.warn(`[hwp-edit] ${r}`) });
+        emit({ type: "intents", intents });
+        terminated = true;
+        break;
+      } else if (tc.name === AGENT_TOOL_WEB_SEARCH) {
+        const query = typeof args.query === "string" ? args.query : "";
+        emit({ type: "status", phase: "searching" });
+        emit({ type: "tool_call", tool: "web_search", args: { query } });
+        const { content, citations } = await execWebSearch(apiKey, query);
+        emit({ type: "tool_result", tool: "web_search", citations });
+        messages.push({ role: "tool", tool_call_id: tc.id, name: "web_search", content });
+      } else {
+        // 미지 툴 — 빈 결과로 되돌려 루프가 진행되게 한다.
+        messages.push({ role: "tool", tool_call_id: tc.id, name: tc.name, content: "" });
+      }
+    }
+    if (terminated) return;
+  }
+  // 반복 소진 — emit_intents 없이 끝났다면 빈 제안.
+  emit({ type: "intents", intents: [] });
+}
+
+/** Anthropic 경로 스트리밍(내장 웹 검색 없음): 사고 상태 → 비스트리밍 liveIntents 호출 → intents 이벤트.
+ *  타임라인은 최소지만(1 status + intents) 계약은 동일하다(back-compat 우아한 격하). */
+async function runAnthropicAgent(
+  apiKey: string,
+  instruction: string,
+  anchors: Anchor[],
+  docContext: string,
+  attachments: Attachment[],
+  emit: (ev: AgentEvent) => void,
+): Promise<void> {
+  emit({ type: "status", phase: "thinking" });
+  const intents = await liveIntents(apiKey, instruction, anchors, docContext, attachments);
+  emit({ type: "intents", intents });
+}
+
+/** mock 경로 스트리밍(키 없음): 결정적 타임라인(thinking → composing → intents)으로 데모가 키 없이도 완주한다.
+ *  mockIntents 를 그대로 재사용해 비스트리밍 mock 과 제안이 일치한다(회귀 방지). 웹 검색 없음. */
+function runMockAgent(instruction: string, anchors: Anchor[], docContext: string, emit: (ev: AgentEvent) => void): void {
+  emit({ type: "status", phase: "thinking" });
+  emit({ type: "thinking_delta", text: "요청을 이해하고 편집을 구성합니다 (데모 모드 — 실제 이해 없음)." });
+  emit({ type: "status", phase: "composing" });
+  emit({ type: "intents", intents: mockIntents(instruction, anchors, docContext) });
+}
+
+/** 에이전틱 스트림 응답을 만든다: NDJSON(AgentEvent per line)의 ReadableStream. start 콜백이 러너를 돌리고
+ *  emit 은 각 이벤트를 컨트롤러에 enqueue 한다. 예외는 error 이벤트로 감싸 스트림을 정상 종료한다(500 대신). */
+function buildAgentStream(
+  provider: "openrouter" | "anthropic" | "mock",
+  instruction: string,
+  anchors: Anchor[],
+  docContext: string,
+  attachments: Attachment[],
+  history: ChatTurn[],
+): ReadableStream<Uint8Array> {
+  const enc = new TextEncoder();
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const emit = (ev: AgentEvent) => controller.enqueue(enc.encode(serializeAgentEvent(ev)));
+      try {
+        if (provider === "mock") {
+          runMockAgent(instruction, anchors, docContext, emit);
+        } else if (provider === "anthropic") {
+          await runAnthropicAgent(process.env.ANTHROPIC_API_KEY!, instruction, anchors, docContext, attachments, emit);
+        } else {
+          // OpenRouter tool-calling 루프. 시스템(에이전트 프롬프트) + 메모리(직전 턴) + 유저 turn 을 조립한다.
+          const hasImage = attachments.some((a) => a.kind === "image" && typeof a.dataUrl === "string" && a.dataUrl.length > 0);
+          const userContent = hasImage
+            ? buildUserMessageParts({ instruction, anchors, docContext, attachments })
+            : buildUserMessage({ instruction, anchors, docContext, attachments });
+          const messages: ChatMsg[] = [{ role: "system", content: buildAgentSystemPrompt() }];
+          for (const turn of history) messages.push({ role: turn.role, content: turn.text });
+          messages.push({ role: "user", content: userContent });
+          await runOpenRouterAgent(process.env.OPENROUTER_API_KEY!, messages, emit);
+        }
+      } catch (e) {
+        const detail = e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : String(e);
+        console.error("[hwp-edit] agent stream failed:", detail);
+        emit({ type: "error", message: `에이전트 실패: ${detail}` });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+}
+
 /** 프로바이더 우선순위: OpenRouter(있으면) → Anthropic → mock. */
 function activeProvider(): "openrouter" | "anthropic" | "mock" {
   if (process.env.OPENROUTER_API_KEY) return "openrouter";
@@ -217,6 +491,22 @@ export async function POST(req: Request) {
   const webSearch = typeof (body as { webSearch?: unknown }).webSearch === "boolean" ? (body as { webSearch: boolean }).webSearch : false;
 
   const provider = activeProvider();
+
+  // ── 에이전틱 스트리밍 경로(?stream=1): NDJSON AgentEvent 스트림 ────────────────────────────────────
+  // 채팅 타임라인(onEvent)이 이 경로를 탄다. 모델이 web_search 를 스스로 결정하고 emit_intents 로 마친다.
+  // 대화 메모리(history, 바운드)를 모델 messages 에 접는다. 비스트리밍 JSON POST(아래)는 그대로 둔다.
+  if (new URL(req.url).searchParams.get("stream") === "1") {
+    const history = readHistory(body);
+    const stream = buildAgentStream(provider, instruction, anchors, docContext, attachments, history);
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        "X-Accel-Buffering": "no", // 프록시 버퍼링 비활성(즉시 플러시)
+      },
+    });
+  }
+
   if (provider === "mock") {
     // mock 모드 — 결정적 편집 제안(키 없이 전체 플로우 완주 가능). mock은 웹 검색을 하지 않으므로 근거 없음.
     return NextResponse.json({ intents: mockIntents(instruction, anchors, docContext), citations: [], mode: "mock", provider: "mock" });

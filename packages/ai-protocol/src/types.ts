@@ -106,6 +106,36 @@ export interface EditResponse {
   citations?: Citation[];
 }
 
+/** One prior CHAT turn passed back to the model as CONVERSATION MEMORY (agentic streaming). The chat
+ *  surface accumulates a BOUNDED window of prior user requests + a compact digest of what the assistant
+ *  proposed, so a follow-up ("이제 그 표에 행 하나 더") is understood in context (today each request is
+ *  stateless). `role` mirrors the OpenAI chat roles; `text` is plain (an assistant turn is a compact
+ *  summary of its proposed edits, NOT raw Intent JSON — that lane stays the emit_intents tool). Untrusted
+ *  as far as the Intent whitelist is concerned; it only grounds the model, never bypasses validation. */
+export interface ChatTurn {
+  role: "user" | "assistant";
+  text: string;
+}
+
+/** A single wire EVENT streamed from the agentic runner to the chat, one per NDJSON line (THINKING
+ *  TRANSPARENCY). A discriminated union on `type`:
+ *   - `status`         — a phase change the UI shows as a step ("검색 중…", "작성 중…").
+ *   - `thinking_delta` — an incremental chunk of the model's reasoning/prose (streamed live).
+ *   - `tool_call`      — the model invoked a tool (e.g. `web_search` with `{query}`); `args` is the
+ *                        parsed tool arguments (UNTRUSTED — display only, never executed as instructions).
+ *   - `tool_result`    — a tool finished; for `web_search` it carries the source `citations` (R5 DATA).
+ *   - `intents`        — the TERMINAL event: the validated Intent[] to preview → apply.
+ *   - `error`          — the runner failed; `message` is a human-readable reason (never leaks the key).
+ *  Additive + unknown-field-safe (invariant 7). Structurally mirrored by @tf-hwp/editor-core's AgentEvent
+ *  so the SDK forwards these straight through without depending on this package. */
+export type AgentEvent =
+  | { type: "status"; phase: "thinking" | "searching" | "composing" }
+  | { type: "thinking_delta"; text: string }
+  | { type: "tool_call"; tool: string; args: unknown }
+  | { type: "tool_result"; tool: string; citations?: Citation[] }
+  | { type: "intents"; intents: Intent[] }
+  | { type: "error"; message: string };
+
 /** Length/count caps for input validation (defense-in-depth; the proxy enforces before calling a model).
  *  The attachment caps (additive, optional so a custom `RequestLimits` need not set them) bound the
  *  multimodal channel — count, per-doc extracted-text length, and per-image `dataUrl` size. */

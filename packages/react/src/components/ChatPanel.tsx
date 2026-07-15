@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { describeIntent } from "../describeIntent";
 import { modLabel } from "../platform";
-import type { Anchor, Attachment, Citation, DocContext, Intent, IntentCard, OnAiRequest } from "../types";
+import type { AgentEvent, Anchor, Attachment, ChatTurn, Citation, DocContext, Intent, IntentCard, OnAiRequest } from "../types";
 
 // Multimodal chat input (attachments are CONTEXT, not a new Intent). Text-like documents are extracted
 // CLIENT-SIDE (FileReader.readAsText — no deps); binary formats (HWP/HWPX/PDF/DOCX) are NOT extracted here
@@ -97,21 +97,100 @@ export interface ChatPanelProps {
    *  turn's depth-after-apply and compares it to this live value to know if that batch is still top-of-
    *  stack. A getter (not a value) so it reflects the session even across a global undo/redo. */
   undoDepth?: () => number;
-  /** OPTIONAL (Feature A): show the "🔎 웹 검색" grounding toggle. When on, `onAiRequest` is called with
-   *  `opts.webSearch = true` for THAT request (the host enables server-side web search + returns
-   *  `url_citation` sources via `opts.onCitations`). Omitted/false → the toggle is hidden (unchanged). */
-  enableWebSearch?: boolean;
 }
 
-// One assistant turn carries the previewed Intents (rendered as per-op CARDS); `state` tracks review.
-// `appliedDepth` (Feature C) is the undo-stack depth captured right after applying — the turn's batch is
-// still top-of-stack ⇔ this equals the live `undoDepth()`. `citations` (Feature A) are display-only
-// web-search sources returned for this turn. `reverted` = an applied turn the user later 되돌리기'd.
+/** How many prior chat turns ride along as CONVERSATION MEMORY (bounded — context-window discipline). Each
+ *  prior user prompt + a compact digest of the assistant's proposal is folded into the model's context so a
+ *  follow-up ("이제 그 표에 행 하나 더") is understood; the host bounds it again server-side. */
+const MEMORY_TURNS = 6;
+
+// One TIMELINE step in the live agentic process (THINKING TRANSPARENCY): a phase change, a growing chunk of
+// the model's reasoning, or a web search (its query + the sources it found). Derived from the AgentEvent
+// stream by `reduceStep`; rendered above the eventual op-cards.
+type AgentStep =
+  | { kind: "status"; phase: "thinking" | "searching" | "composing" }
+  | { kind: "reasoning"; text: string }
+  | { kind: "search"; query: string; done: boolean; citations?: Citation[] };
+
+/** Fold ONE AgentEvent into the running step list (pure). `thinking_delta` grows the trailing reasoning
+ *  step; `tool_call`(web_search) opens a search step; `tool_result` closes the latest open search + folds
+ *  its citations in; `status` appends a phase label (deduped). `intents`/`error` are terminal — handled by
+ *  send(), not here. */
+function reduceStep(steps: AgentStep[], ev: AgentEvent): AgentStep[] {
+  const next = steps.slice();
+  const last = next[next.length - 1];
+  switch (ev.type) {
+    case "status":
+      if (last && last.kind === "status" && last.phase === ev.phase) return steps; // dedupe consecutive
+      next.push({ kind: "status", phase: ev.phase });
+      return next;
+    case "thinking_delta":
+      if (last && last.kind === "reasoning") {
+        next[next.length - 1] = { kind: "reasoning", text: last.text + ev.text };
+        return next;
+      }
+      next.push({ kind: "reasoning", text: ev.text });
+      return next;
+    case "tool_call": {
+      if (ev.tool !== "web_search") return steps;
+      const a = ev.args as { query?: unknown } | undefined;
+      const query = a && typeof a.query === "string" ? a.query : "";
+      next.push({ kind: "search", query, done: false });
+      return next;
+    }
+    case "tool_result": {
+      if (ev.tool !== "web_search") return steps;
+      for (let i = next.length - 1; i >= 0; i--) {
+        const s = next[i];
+        if (s.kind === "search" && !s.done) {
+          next[i] = { ...s, done: true, citations: ev.citations };
+          return next;
+        }
+      }
+      return steps;
+    }
+    default:
+      return steps;
+  }
+}
+
+/** A human label for a status phase (Korean, shown as a timeline step). */
+function statusLabel(phase: "thinking" | "searching" | "composing"): string {
+  return phase === "searching" ? "웹 검색 중…" : phase === "composing" ? "편집 구성 중…" : "생각하는 중…";
+}
+
+/** Build the bounded CONVERSATION MEMORY window from prior chat messages (before the new user turn is
+ *  pushed). A user message rides as-is; a settled assistant turn rides as a compact digest of its proposed
+ *  edits (never raw Intent JSON — that lane stays the emit_intents tool). Thinking/error turns are skipped. */
+function turnsFromMsgs(msgs: Msg[], max: number): ChatTurn[] {
+  const turns: ChatTurn[] = [];
+  for (const m of msgs) {
+    if (m.role === "user") {
+      turns.push({ role: "user", text: m.text });
+    } else if (m.role === "assistant" && m.state !== "error" && m.state !== "thinking") {
+      const summary = m.cards.length ? m.cards.map((c) => c.summary).join("; ") : "제안된 편집 없음";
+      turns.push({ role: "assistant", text: `제안: ${summary}` });
+    }
+  }
+  return turns.slice(-max);
+}
+
+// One assistant turn. `state` tracks its lifecycle:
+//   - "thinking" — the live agentic process is streaming; `steps` is the growing TIMELINE (what it's
+//                  searching, what it found, its reasoning) shown above the eventual op-cards.
+//   - "pending"  — the process finished with proposed Intents (rendered as per-op CARDS) awaiting 적용/취소.
+//   - "empty"    — the process finished with NO proposed edits (timeline stays visible).
+//   - applied/discarded/reverted — the review outcomes.
+// `steps` (agentic streaming) is the AgentEvent-derived timeline (empty for a non-streaming host — then only
+// the cards render, back-compat). `appliedDepth` (Feature C) is the undo-stack depth captured right after
+// applying — the turn's batch is still top-of-stack ⇔ this equals the live `undoDepth()`. `citations`
+// (web grounding) are the sources folded into the timeline's search step.
 type Msg =
   | { role: "user"; text: string }
   | {
       role: "assistant";
-      state: "applied" | "discarded" | "pending" | "reverted";
+      state: "thinking" | "applied" | "discarded" | "pending" | "reverted" | "empty";
+      steps: AgentStep[];
       intents: Intent[];
       cards: IntentCard[];
       page: number | null;
@@ -119,6 +198,9 @@ type Msg =
       citations?: Citation[];
     }
   | { role: "assistant"; state: "error"; text: string };
+
+/** The steps-bearing assistant turn variant (everything except the `error` message variant). */
+type AssistantMsg = Extract<Msg, { role: "assistant"; steps: AgentStep[] }>;
 
 // Reusable prompt chips — the empty-state suggestions (fill the input so the user can tweak).
 const PROMPT_CHIPS = ["이 칸을 채워줘", "이 표에 행 하나 추가해줘", "이 문단을 다듬어줘"];
@@ -159,6 +241,54 @@ function OpCard({ card, page, onJump }: { card: IntentCard; page: number | null;
   );
 }
 
+/** The live agentic TIMELINE (THINKING TRANSPARENCY): the model's step-by-step process — status phases,
+ *  reasoning chunks, and web searches (query + the sources found, folded in from the tool_result) — rendered
+ *  ABOVE the eventual op-cards. `pending` shows the trailing step as still in-flight (a subtle pulse). */
+function StepTimeline({ steps, pending }: { steps: AgentStep[]; pending: boolean }) {
+  return (
+    <div className="hw-timeline" data-testid="hw-timeline">
+      {steps.map((s, i) => {
+        const live = pending && i === steps.length - 1;
+        if (s.kind === "status") {
+          return (
+            <div key={i} className={live ? "hw-step hw-step-status hw-step-live" : "hw-step hw-step-status"}>
+              <span className="hw-step-dot" aria-hidden />
+              {statusLabel(s.phase)}
+            </div>
+          );
+        }
+        if (s.kind === "reasoning") {
+          return (
+            <div key={i} className="hw-step hw-step-reasoning" data-testid="hw-step-reasoning">
+              {s.text}
+            </div>
+          );
+        }
+        // web search: the query it ran + (once done) the sources it found (R5 display-only, safe links).
+        return (
+          <div key={i} className={s.done ? "hw-step hw-step-search" : "hw-step hw-step-search hw-step-live"} data-testid="hw-step-search">
+            <span className="hw-step-search-q">
+              🔎 웹 검색: <span className="hw-step-search-query">{s.query}</span>
+              {!s.done && <span className="hw-step-search-running"> …</span>}
+            </span>
+            {s.citations && s.citations.length > 0 && (
+              <ul className="hw-citations-list" data-testid="hw-citations">
+                {s.citations.map((c, k) => (
+                  <li key={k}>
+                    <a className="hw-citation-link" href={c.url} target="_blank" rel="noopener noreferrer" title={c.url}>
+                      {c.title}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /// ChatPanel — the PRIMARY editing surface (issue 016 step 2). The user POINTS at the document (a click
 /// captures an anchor chip) and says what they want; the host's `onAiRequest` returns Intents, shown as
 /// reviewable per-op CARDS with 적용/취소. Applying commits through the adapter (via `onApply`). The AI
@@ -167,8 +297,6 @@ export function ChatPanel(props: ChatPanelProps) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  // Feature A: web-search grounding toggle (opt-in per request; avoids searching/billing on every edit).
-  const [webSearch, setWebSearch] = useState(false);
   // Multimodal: attachments riding along with the next prompt (images for vision + reference-doc text).
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
@@ -259,6 +387,24 @@ export function ChatPanel(props: ChatPanelProps) {
     });
   }
 
+  // Patch the LATEST in-flight "thinking" assistant turn (agentic streaming). `fn` maps that turn to its
+  // next shape — used both to fold in streamed AgentEvents (grow the timeline) and to settle it (→ pending /
+  // empty). No-op if there is no thinking turn (a non-streaming host never opened one). `AssistantMsg` is the
+  // steps-bearing assistant variant (the `error` variant carries no steps, so Extract selects the right one).
+  function patchThinking(fn: (c: AssistantMsg) => Msg) {
+    setMsgs((m) => {
+      const copy = m.slice();
+      for (let i = copy.length - 1; i >= 0; i--) {
+        const c = copy[i];
+        if (c.role === "assistant" && c.state === "thinking") {
+          copy[i] = fn(c);
+          break;
+        }
+      }
+      return copy;
+    });
+  }
+
   async function send(text: string) {
     if (busy || awaiting) return;
     const trimmed = text.trim();
@@ -272,36 +418,53 @@ export function ChatPanel(props: ChatPanelProps) {
     const page = anchors.length ? anchors[0].page : null;
     const where = anchors.length ? ` (대상: ${anchors.map((a) => a.label).join(", ")})` : "";
     const attachTag = sendable.length ? ` 📎${sendable.length}` : "";
+    // CONVERSATION MEMORY: snapshot prior turns (BEFORE the new user turn is pushed), bounded.
+    const history = turnsFromMsgs(msgs, MEMORY_TURNS);
     setInput("");
     setAttachments([]); // the attachments have ridden along — clear them
     setAttachError(null);
-    setMsgs((m) => [...m, { role: "user", text: trimmed + where + attachTag }]);
+    // Push the user turn + a fresh "thinking" assistant turn — the live timeline target (agentic streaming).
+    setMsgs((m) => [...m, { role: "user", text: trimmed + where + attachTag }, { role: "assistant", state: "thinking", steps: [], intents: [], cards: [], page }]);
     setBusy(true);
     try {
-      // Feature A: pass the web-search toggle + a citations sink (additive `opts`). The host enables
-      // server-side web grounding for THIS request and reports back any `url_citation` sources here — the
-      // model still returns our JSON intents (no tool-calling refactor). Sink captured into the turn below.
-      // Multimodal: `attachments` (additive) carries images (vision) + reference-doc text for THIS request.
+      // THINKING TRANSPARENCY: stream each AgentEvent into the thinking turn's timeline. The host resolves
+      // the SAME `Promise<Intent[]>` with the final intents (inline panel omits onEvent → single-shot). The
+      // model decides web-search itself (no toggle). Citations arrive folded into a tool_result step, and
+      // also via onCitations for the settled turn. Memory rides in `history` (bounded).
       let captured: Citation[] = [];
       const intents = await props.onAiRequest(trimmed, anchors, props.docContext, {
-        webSearch,
+        onEvent: (ev) => patchThinking((c) => ({ ...c, steps: reduceStep(c.steps, ev) })),
         onCitations: (c) => {
           captured = c;
         },
+        ...(history.length ? { history } : {}),
         ...(sendable.length ? { attachments: sendable } : {}),
       });
       props.onConsumeAnchors(); // the chips have ridden along — clear them (issue #009)
       const citations = captured.length ? captured : undefined;
       if (!intents || intents.length === 0) {
-        setMsgs((m) => [...m, { role: "assistant", state: "error", text: "제안된 편집이 없습니다." }]);
+        // No proposed edits — settle the thinking turn into "empty" (its timeline stays visible).
+        patchThinking((c) => ({ ...c, state: "empty", citations }));
       } else {
         // issue 051: the host's async builder enriches cards (e.g. DeleteBlock 원문); fall back to the
         // pure describeIntent mapping when the host doesn't wire one (backward compatible).
         const cards = props.previewCards ? await props.previewCards(intents) : intents.map(describeIntent);
-        setMsgs((m) => [...m, { role: "assistant", state: "pending", intents, cards, page, citations }]);
+        patchThinking((c) => ({ ...c, state: "pending", intents, cards, citations }));
       }
     } catch (e) {
-      setMsgs((m) => [...m, { role: "assistant", state: "error", text: `${e}` }]);
+      // Drop the in-flight thinking turn and surface the error as its own message.
+      setMsgs((m) => {
+        const copy = m.slice();
+        for (let i = copy.length - 1; i >= 0; i--) {
+          const c = copy[i];
+          if (c.role === "assistant" && c.state === "thinking") {
+            copy.splice(i, 1);
+            break;
+          }
+        }
+        copy.push({ role: "assistant", state: "error", text: `${e}` });
+        return copy;
+      });
     } finally {
       setBusy(false);
     }
@@ -401,27 +564,23 @@ export function ChatPanel(props: ChatPanelProps) {
               </div>
             ) : (
               <div key={i} className="hw-msg-assistant">
+                {/* THINKING TRANSPARENCY: the live agentic timeline (what it searched, what it found, its
+                    reasoning) — folded citations live inside the search step. Empty for a non-streaming host. */}
+                {m.steps.length > 0 && <StepTimeline steps={m.steps} pending={m.state === "thinking"} />}
+                {/* While the process is still streaming, show a subtle typing pulse under the timeline. */}
+                {m.state === "thinking" && (
+                  <div className="hw-typing" data-testid="hw-thinking">
+                    <span className="hw-dot" />
+                    <span className="hw-dot" />
+                    <span className="hw-dot" />
+                  </div>
+                )}
+                {m.state === "empty" && <div className="hw-empty-result" data-testid="hw-empty-result">제안된 편집이 없습니다.</div>}
                 {m.cards.length > 0 && (
                   <div className="hw-cards">
                     {m.cards.map((card, j) => (
                       <OpCard key={j} card={card} page={m.page} onJump={props.onJumpToPage} />
                     ))}
-                  </div>
-                )}
-                {/* Feature A: web-search 근거 — the source links behind a grounded proposal (transparency;
-                    display-only, target=_blank rel=noopener). Full step-by-step streaming is a later batch. */}
-                {m.citations && m.citations.length > 0 && (
-                  <div className="hw-citations" data-testid="hw-citations">
-                    <span className="hw-citations-head">🔎 근거</span>
-                    <ul className="hw-citations-list">
-                      {m.citations.map((c, k) => (
-                        <li key={k}>
-                          <a className="hw-citation-link" href={c.url} target="_blank" rel="noopener noreferrer" title={c.url}>
-                            {c.title}
-                          </a>
-                        </li>
-                      ))}
-                    </ul>
                   </div>
                 )}
                 {m.state === "pending" && (
@@ -468,7 +627,7 @@ export function ChatPanel(props: ChatPanelProps) {
               </div>
             ),
           )}
-          {busy && !awaiting && (
+          {busy && !awaiting && !(last?.role === "assistant" && last.state === "thinking") && (
             <div className="hw-typing">
               <span className="hw-dot" />
               <span className="hw-dot" />
@@ -560,19 +719,8 @@ export function ChatPanel(props: ChatPanelProps) {
           >
             📎 첨부
           </button>
-          {props.enableWebSearch && (
-            <button
-              type="button"
-              className={webSearch ? "hw-websearch-toggle hw-websearch-on" : "hw-websearch-toggle"}
-              aria-pressed={webSearch}
-              data-testid="hw-websearch-toggle"
-              disabled={!props.canEdit || busy || awaiting}
-              title="웹 검색 grounding: 켜면 이 요청에 한해 서버가 웹을 검색해 근거(출처)를 함께 반환합니다. (매 편집마다 검색/과금하지 않도록 옵트인)"
-              onClick={() => setWebSearch((v) => !v)}
-            >
-              🔎 웹 검색{webSearch ? " · 켬" : ""}
-            </button>
-          )}
+          {/* No web-search toggle: search is now MODEL-DRIVEN (the agent decides when to search based on the
+              request) and its sources stream into the timeline as a tool_result step. */}
         </div>
         <div className="hw-composer-row">
           <textarea

@@ -273,17 +273,45 @@ export interface Attachment {
   size?: number;
 }
 
+/** One prior CHAT turn passed to the host as CONVERSATION MEMORY (agentic streaming). `role` is the OpenAI
+ *  chat role; `text` is plain — a user turn is its prompt, an assistant turn is a COMPACT digest of what it
+ *  proposed (never raw Intent JSON). Structurally compatible with @tf-hwp/ai-protocol's `ChatTurn` so a host
+ *  forwards these straight to its proxy. Bounded by the chat (a small window) — context-window discipline. */
+export interface ChatTurn {
+  role: "user" | "assistant";
+  text: string;
+}
+
+/** A single wire EVENT streamed from the host's agentic runner to the chat (THINKING TRANSPARENCY). A
+ *  discriminated union on `type` — `status` (phase change), `thinking_delta` (a reasoning chunk),
+ *  `tool_call` (the model invoked a tool, e.g. web_search), `tool_result` (a tool finished; carries source
+ *  `citations` for web_search), `intents` (the TERMINAL validated Intent[]), and `error`. Structurally
+ *  mirrors @tf-hwp/ai-protocol's `AgentEvent` so the SDK forwards these through without depending on that
+ *  package. Untrusted DATA as far as the Intent whitelist is concerned — display only, never executed. */
+export type AgentEvent =
+  | { type: "status"; phase: "thinking" | "searching" | "composing" }
+  | { type: "thinking_delta"; text: string }
+  | { type: "tool_call"; tool: string; args: unknown }
+  | { type: "tool_result"; tool: string; citations?: Citation[] }
+  | { type: "intents"; intents: Intent[] }
+  | { type: "error"; message: string };
+
 /** OPTIONAL per-request knobs the CHAT surface passes to the host AI bridge (additive — the inline edit
- *  surface omits them, so existing 3-arg callers are unaffected). `webSearch` asks the host to enable
- *  server-side web-search grounding for THIS request only (opt-in — avoids searching/billing on every
- *  edit); `onCitations` is a sink the host calls with any returned source citations so the chat can render
- *  them; `attachments` (multimodal) carries pasted/picked images + reference-doc text for THIS request.
- *  Kept a callback + optional bag (NOT a return-type change) so the shared `Promise<Intent[]>` contract —
- *  used by BOTH the chat and the inline panel — stays unchanged. */
+ *  surface omits them, so existing 3-arg callers are unaffected). `onCitations` is a sink the host calls
+ *  with any returned source citations so the chat can render them; `attachments` (multimodal) carries
+ *  pasted/picked images + reference-doc text for THIS request. `onEvent` (agentic streaming) is a sink the
+ *  host streams `AgentEvent`s to — when present the host takes the STREAMING path (a live thinking timeline)
+ *  and STILL resolves the returned `Promise<Intent[]>` with the final intents, so the shared contract — used
+ *  by BOTH the chat and the inline panel — is unchanged (the inline panel omits `onEvent` → single-shot).
+ *  `history` is a BOUNDED window of prior chat turns folded into the model's context (conversation memory).
+ *  `webSearch` is RETAINED for back-compat with the non-streaming path (the streaming agent decides search
+ *  itself — the chat no longer sets this). Kept a callback + optional bag (NOT a return-type change). */
 export interface AiRequestOptions {
   webSearch?: boolean;
   onCitations?: (citations: Citation[]) => void;
   attachments?: Attachment[];
+  onEvent?: (ev: AgentEvent) => void;
+  history?: ChatTurn[];
 }
 
 /** The host-supplied AI bridge (R6): the SDK NEVER calls an LLM or holds a key. Given the user's

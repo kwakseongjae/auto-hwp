@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { HwpWorkspace } from "../components/HwpWorkspace";
 import type { AiRequestOptions, Anchor, DocContext, Intent } from "../types";
@@ -87,51 +87,76 @@ describe("HwpWorkspace chat — persistent per-card 되돌리기 (Feature C)", (
   });
 });
 
-// ── Feature A: web-search grounding + citations ────────────────────────────────────────────────────
-describe("HwpWorkspace chat — web-search grounding + citations (Feature A)", () => {
-  it("toggling 🔎 웹 검색 sends opts.webSearch=true and renders the returned 근거 source links", async () => {
+// ── Agentic streaming: thinking timeline (dynamic web-search) + conversation memory ────────────────────
+describe("HwpWorkspace chat — agentic streaming (thinking timeline + web-search + memory)", () => {
+  it("renders the step TIMELINE (search query → sources → reasoning) then the op-cards, and applies", async () => {
     const adapter = new MockAdapter({ hit: paraHit, pages: 1 });
-    const seen: (AiRequestOptions | undefined)[] = [];
+    // The host drives a MOCKED AgentEvent sequence into opts.onEvent (the model decided to search on its own —
+    // no toggle), reports the sources via the citations sink, then resolves with the terminal intents.
     const onAiRequest: HwpWorkspaceAi = async (_i, _a, _c, opts) => {
-      seen.push(opts);
-      // The host reports web-search sources through the citations sink (display-only), then returns intents.
+      opts?.onEvent?.({ type: "status", phase: "thinking" });
+      opts?.onEvent?.({ type: "thinking_delta", text: "최신 시장 규모를 확인해야겠다." });
+      opts?.onEvent?.({ type: "status", phase: "searching" });
+      opts?.onEvent?.({ type: "tool_call", tool: "web_search", args: { query: "2026 반도체 시장 규모" } });
+      opts?.onEvent?.({ type: "tool_result", tool: "web_search", citations: [{ url: "https://example.com/report", title: "Example 2026 Report" }] });
+      opts?.onEvent?.({ type: "status", phase: "composing" });
+      opts?.onEvent?.({ type: "intents", intents: [{ intent: "SetParagraphText", section: 0, block: 2, text: "근거 반영" }] });
       opts?.onCitations?.([{ url: "https://example.com/report", title: "Example 2026 Report" }]);
       return [{ intent: "SetParagraphText", section: 0, block: 2, text: "근거 반영" } as Intent];
     };
     const { container } = await openDoc(adapter, onAiRequest);
 
-    // Turn the web-search toggle on, then send.
-    const toggle = (await screen.findByTestId("hw-websearch-toggle")) as HTMLButtonElement;
-    expect(toggle.getAttribute("aria-pressed")).toBe("false");
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute("aria-pressed")).toBe("true");
-
     await sendPrompt(container, "최신 시장 규모를 찾아서 반영해줘");
 
-    // The 근거 list renders clickable, safe (target=_blank rel=noopener) source links.
-    const cites = await screen.findByTestId("hw-citations");
+    // The TIMELINE renders the model's process: the search query it ran + the reasoning chunk.
+    const timeline = await screen.findByTestId("hw-timeline");
+    const searchStep = timeline.querySelector('[data-testid="hw-step-search"]') as HTMLElement;
+    expect(searchStep.textContent).toContain("2026 반도체 시장 규모");
+    expect(screen.getByTestId("hw-step-reasoning").textContent).toContain("최신 시장 규모를 확인");
+
+    // Sources are FOLDED into the tool_result step as clickable, safe links.
+    const cites = within(timeline).getByTestId("hw-citations");
     const link = cites.querySelector("a.hw-citation-link") as HTMLAnchorElement;
     expect(link.getAttribute("href")).toBe("https://example.com/report");
-    expect(link.textContent).toContain("Example 2026 Report");
     expect(link.getAttribute("target")).toBe("_blank");
     expect(link.getAttribute("rel")).toContain("noopener");
 
-    // The toggle drove opts.webSearch = true for that request.
-    expect(seen.at(-1)?.webSearch).toBe(true);
+    // The op-card settles BELOW the timeline; applying commits through the adapter.
+    fireEvent.click(await screen.findByText("✓ 적용"));
+    await waitFor(() => expect(adapter.applied).toHaveLength(1));
+    // The timeline stays visible above the applied card (the process is a permanent part of the turn).
+    expect(screen.getByTestId("hw-timeline")).toBeTruthy();
   });
 
-  it("without toggling, opts.webSearch is false (no search/billing on ordinary edits)", async () => {
+  it("there is NO 🔎 web-search toggle anymore (search is model-driven)", async () => {
+    const adapter = new MockAdapter({ hit: paraHit, pages: 1 });
+    const onAiRequest: HwpWorkspaceAi = async () => [{ intent: "SetParagraphText", section: 0, block: 2, text: "x" } as Intent];
+    await openDoc(adapter, onAiRequest);
+    expect(screen.queryByTestId("hw-websearch-toggle")).toBeNull();
+  });
+
+  it("CONVERSATION MEMORY: a follow-up prompt carries the prior turns in opts.history (bounded)", async () => {
     const adapter = new MockAdapter({ hit: paraHit, pages: 1 });
     const seen: (AiRequestOptions | undefined)[] = [];
     const onAiRequest: HwpWorkspaceAi = async (_i, _a, _c, opts) => {
       seen.push(opts);
-      return [{ intent: "SetParagraphText", section: 0, block: 2, text: "일반 편집" } as Intent];
+      return [{ intent: "SetParagraphText", section: 0, block: 2, text: "값" } as Intent];
     };
     const { container } = await openDoc(adapter, onAiRequest);
-    await sendPrompt(container, "이 문단 다듬어줘");
+
+    // Turn 1: the very first request has NO prior history.
+    await sendPrompt(container, "첫 번째 편집");
+    fireEvent.click(await screen.findByText("✓ 적용"));
+    await waitFor(() => expect(adapter.applied).toHaveLength(1));
+    expect(seen[0]?.history).toBeUndefined();
+
+    // Turn 2: the follow-up carries the prior user turn + a compact assistant digest as memory.
+    await sendPrompt(container, "두 번째 편집");
     await screen.findByText("✓ 적용");
-    expect(seen.at(-1)?.webSearch).toBe(false);
-    // No citations were reported → no 근거 block.
-    expect(screen.queryByTestId("hw-citations")).toBeNull();
+    const hist = seen.at(-1)?.history ?? [];
+    expect(hist.length).toBeGreaterThanOrEqual(2);
+    expect(hist[0]).toMatchObject({ role: "user", text: "첫 번째 편집" });
+    // The assistant memory turn is a DIGEST of the proposal (never raw Intent JSON).
+    expect(hist.some((t) => t.role === "assistant" && t.text.startsWith("제안:"))).toBe(true);
   });
 });
