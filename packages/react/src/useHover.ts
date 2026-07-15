@@ -102,8 +102,14 @@ export function useHover(params: UseHoverParams): UseHoverResult {
       const cell = adapter.tableCellAt ? await adapter.tableCellAt(coord.page, coord.x, coord.y) : null;
       if (cell) hit = { page: coord.page, box: { x: cell.x, y: cell.y, w: cell.w, h: cell.h }, kind: "cell" };
       else {
+        // hitTest returns the vertically-NEAREST paragraph band even when the pointer is over EMPTY space
+        // (block_at ignores x and falls back to the nearest band), so accept it ONLY when the queried point
+        // is strictly inside the returned band's box — else leave `hit` null so applyHit(null) clears
+        // .hw-hover over gaps/margins/below-content. Same strict-containment guard the selection deselect
+        // fix already applied; the cell/table/image branches carry real bounds and need no guard.
         const bh = await adapter.hitTest(coord.page, coord.x, coord.y);
-        if (bh) hit = { page: coord.page, box: { x: bh.x, y: bh.y, w: bh.w, h: bh.h }, kind: bh.kind };
+        if (bh && pointInBox(coord.x, coord.y, { x: bh.x, y: bh.y, w: bh.w, h: bh.h }))
+          hit = { page: coord.page, box: { x: bh.x, y: bh.y, w: bh.w, h: bh.h }, kind: bh.kind };
       }
     } catch {
       hit = null; // a trapped hit-test just clears the highlight

@@ -140,6 +140,29 @@ describe("hover pre-highlight + cursor (issue 038)", () => {
     expect(__getHoverLayerRenderCount(), "HoverLayer moves by ref, no re-render across same-page blocks").toBe(0);
   });
 
+  it("empty space (nearest-band fallback) → NO highlight; a point inside the band → highlight", async () => {
+    // A backend whose hitTest ALWAYS returns the nearest band (box {0,100,794,200}) — even for points far
+    // outside it — reproducing block_at's nearest-band fallback over EMPTY space (gaps/margins/below content).
+    const nearestBand = (): BlockHit | null => para(1, 100, 200, "문단 A");
+    const adapter = new MockAdapter({ pages: 1, hit: nearestBand });
+    const { container } = renderWs(adapter, true);
+    const sheet = await sheetOf(container);
+    await flush();
+    const canvas = container.querySelector(".hw-canvas") as HTMLElement;
+
+    // Point INSIDE the band's box (y=150 ∈ [100,300)) → highlight shows + text cursor.
+    move(sheet, 100, 150);
+    await waitFor(() => expect(container.querySelector(".hw-hover")).toBeTruthy());
+    await waitFor(() => expect(canvas.dataset.hoverCursor).toBe("text"));
+
+    // Point in an EMPTY GAP below all content (y=800): hitTest still returns band A (nearest-band fallback),
+    // but the point is OUTSIDE its box {…,y:100,h:200} → strict containment leaves the hit null → the store
+    // is set to null so .hw-hover is removed and the cursor resets. No highlight over empty white space.
+    move(sheet, 100, 800);
+    await waitFor(() => expect(container.querySelector(".hw-hover")).toBeFalsy());
+    expect(canvas.dataset.hoverCursor ?? "").toBe("");
+  });
+
   it("target dedup: staying inside one block does NOT re-query; crossing does", async () => {
     let calls = 0;
     const adapter = new MockAdapter({
