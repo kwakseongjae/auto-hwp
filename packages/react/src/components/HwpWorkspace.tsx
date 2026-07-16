@@ -2690,35 +2690,51 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                         onDismiss={() => setImageSel(null)}
                       />
                     )}
-                    {/* issue 06x: the compact "✨ AI에게 전달" pill — the ONLY remnant of the removed 028
-                        floating toolbar (formatting moved entirely to the persistent ribbon). It hugs the
-                        selection UNION bbox on this page (bottom-RIGHT, mirroring the 여기서 편집 pill), so it
-                        works for MULTI-select too (gate = marks.length > 0, not the lone `inlineTarget`).
-                        Clicking bumps `aiFocusToken` → focuses the chat composer (no new prompt logic, no
-                        selection churn — 028 render-isolation). `stopPropagation` on pointerDown so the click
-                        isn't read as an empty-space DESELECT gesture (같은 함정 as the 여기서 편집 pill).
-                        Hidden mid-gesture / while the in-place editor, context menu, or inline-edit panel is up
-                        (one surface at a time). When a LONE selection also shows the 여기서 편집 pill, this one
-                        STACKS one row below it (`--stacked`) so they never overlap. */}
+                    {/* issue 06x': ONE Cursor-style compact ACTION BAR for the selection (the 028 floating
+                        format toolbar is gone — formatting lives in the persistent ribbon). A single horizontal
+                        row anchored at the selection UNION bbox's bottom-right, holding "여기서 편집" (inline edit,
+                        only for a LONE editable target) + "AI에게 전달" (chat, any selection) SIDE BY SIDE — never
+                        two stacked rows. Gate = marks.length > 0; hidden mid-gesture / while the in-place editor,
+                        context menu, or inline panel is up. `stopPropagation` on pointerDown so a click on the bar
+                        isn't read as an empty-space DESELECT. The buttons only bump `aiFocusToken` / open the
+                        inline panel — no selection churn (028 render-isolation). */}
                     {editingOn && canEdit && toolbarPage === page && marks.length > 0 && !pointerActive && !editor && !contextMenu && !inlineEdit && (() => {
                       const u = unionPageBox(marks.filter((m) => m.page === page).map((m) => m.box));
                       if (!u) return null;
-                      const stacked = !!inlineTarget && inlineTarget.page === page; // 여기서 편집 pill also here → stack below it
+                      const showEdit = !!inlineTarget && inlineTarget.page === page; // lone editable target → offer inline edit
                       return (
-                        <button
-                          type="button"
-                          className={`hw-ai-send${stacked ? " hw-ai-send--stacked" : ""}`}
-                          data-testid="hw-ai-send"
-                          title="선택을 AI에게 전달 (채팅으로 편집)"
+                        <div
+                          className="hw-sel-actions"
                           style={{ left: (u.x + u.w) * scale, top: (u.y + u.h) * scale }}
                           onPointerDown={(e) => e.stopPropagation()}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onSendToAi();
-                          }}
                         >
-                          ✨ AI에게 전달
-                        </button>
+                          {showEdit && (
+                            <button
+                              type="button"
+                              className="hw-sel-action"
+                              data-testid="hw-inline-open"
+                              title="이 요소를 여기서 바로 AI로 편집"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openInlineEdit();
+                              }}
+                            >
+                              ✨ 여기서 편집
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="hw-sel-action"
+                            data-testid="hw-ai-send"
+                            title="선택을 AI에게 전달 (채팅으로 편집)"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onSendToAi();
+                            }}
+                          >
+                            ✨ AI에게 전달
+                          </button>
+                        </div>
                       );
                     })()}
                     {/* issue 032/040: the Figma-style IN-PLACE rich editor sits over the cell rect at the
@@ -2751,27 +2767,8 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                     {editingOn && editor && editor.kind === "cell" && editor.page === page && (
                       <CellShadePalette box={editor.box} scale={scale} onPick={(hex) => void shadeEditorCell(hex)} />
                     )}
-                    {/* issue 06x: the INLINE per-element edit AFFORDANCE — a small "✨ 여기서 편집" pill on the
-                        bottom-right of the LONE selection (or selected image). Shown ONLY for exactly one
-                        editable target, and NOT while the in-place editor / a gesture / the context menu / the
-                        panel itself is up (so it never fights the drill double-click, resize handles, marquee,
-                        or empty-space deselect). Clicking opens the inline panel BELOW the element. */}
-                    {editingOn && canEdit && inlineTarget && inlineTarget.page === page && !inlineEdit && !editor && !pointerActive && !contextMenu && (
-                      <button
-                        type="button"
-                        className="hw-inline-open"
-                        data-testid="hw-inline-open"
-                        title="이 요소를 여기서 바로 AI로 편집"
-                        style={{ left: (inlineTarget.box.x + inlineTarget.box.w) * scale, top: (inlineTarget.box.y + inlineTarget.box.h) * scale }}
-                        onPointerDown={(e) => e.stopPropagation()}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openInlineEdit();
-                        }}
-                      >
-                        ✨ 여기서 편집
-                      </button>
-                    )}
+                    {/* (issue 06x': the "✨ 여기서 편집" affordance now lives INSIDE the unified .hw-sel-actions
+                        bar above, side-by-side with "AI에게 전달" — Cursor-style single row, no stacked pills.) */}
                     {/* issue 06x: the OPEN inline-edit panel, anchored BELOW the target. Reuses the chat's
                         onAiRequest (anchors=[target]) + applies as one batch; apply-then-revert lives inside. */}
                     {editingOn && inlineEdit && inlineEdit.page === page && (

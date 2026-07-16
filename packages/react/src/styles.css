@@ -271,27 +271,21 @@
 .hw-img-delete:hover { background: rgba(239, 68, 68, 0.1); }
 
 /* ================= issue 06x — INLINE per-element edit (apply-then-revert) ================= */
-/* the "✨ 여기서 편집" affordance — a small pill hugging the bottom-right corner of the lone selection. */
-.hw-inline-open {
+/* Cursor-style single ACTION BAR for the selection — one horizontal row anchored at the selection union
+ * bbox's bottom-right, holding "여기서 편집" + "AI에게 전달" SIDE BY SIDE (no stacked pills). A dark rounded
+ * pill-bar with a divider between actions, mirroring Cursor's "Add to Chat | Quick Edit" affordance. */
+.hw-sel-actions {
   position: absolute; z-index: 24; transform: translate(-100%, 6px); white-space: nowrap;
-  font: inherit; font-size: 11px; font-weight: 500; line-height: 1;
-  color: #fff; background: var(--hw-ai); border: none; padding: 5px 9px; border-radius: 999px;
-  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.35); cursor: pointer; pointer-events: auto;
+  display: inline-flex; align-items: stretch; gap: 0;
+  background: #1e1e24; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; overflow: hidden;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35); pointer-events: auto;
 }
-.hw-inline-open:hover { opacity: 0.92; }
-
-/* the "✨ AI에게 전달" pill — the sole remnant of the removed 028 floating toolbar. Mirrors .hw-inline-open
- * (bottom-right of the selection union bbox). When a LONE selection also shows the 여기서 편집 pill, `--stacked`
- * drops this one a row BELOW it so the two never overlap. Anchored to the selection UNION bbox → multi-select
- * safe. */
-.hw-ai-send {
-  position: absolute; z-index: 24; transform: translate(-100%, 6px); white-space: nowrap;
-  font: inherit; font-size: 11px; font-weight: 500; line-height: 1;
-  color: #fff; background: var(--hw-ai); border: none; padding: 5px 9px; border-radius: 999px;
-  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.35); cursor: pointer; pointer-events: auto;
+.hw-sel-action {
+  font: inherit; font-size: 11px; font-weight: 500; line-height: 1; white-space: nowrap;
+  color: #e6e6ea; background: transparent; border: none; padding: 6px 11px; cursor: pointer;
 }
-.hw-ai-send:hover { opacity: 0.92; }
-.hw-ai-send--stacked { transform: translate(-100%, 34px); }
+.hw-sel-action + .hw-sel-action { border-left: 1px solid rgba(255, 255, 255, 0.1); }
+.hw-sel-action:hover { background: rgba(124, 58, 237, 0.28); color: #fff; }
 
 /* the anchored inline panel (compose → applied), drawn BELOW the element (own-render px × scale + gap). */
 .hw-inline-edit {
