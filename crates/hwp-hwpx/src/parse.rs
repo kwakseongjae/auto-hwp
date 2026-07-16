@@ -461,6 +461,73 @@ struct ParaAccum {
     pending_images: Vec<ImageRef>,             // <hp:pic>s parsed inside the open run (D1)
 }
 
+/// 한글's default thin cell-border stroke width (device px), synthesized to RECOVER a table grid on a
+/// **border-stripped** HWPX. Some lossy hwp→hwpx converters (e.g. 독스헌터) rewrite EVERY cell's
+/// borderFill to all-NONE, dropping the table lines the source .hwp — and its reference PDF — still
+/// draw; our faithful parse then renders the table borderless. 0.12mm ≈ 0.5px is 한글's default 표
+/// (table) cell line weight (mirrors `synth::border_width_from_token`'s "0.12 mm" row). Tunable here.
+///
+/// This is a RENDER-ONLY recovery, NOT spec behavior: the synthesized border lives only in the render
+/// IR. The original all-NONE `borderFillIDRef` is never written back — an unedited table re-serializes
+/// byte-verbatim through the `src_span` round-trip moat, so no fabricated border is ever saved.
+const RECOVERED_BORDER_WIDTH_PX: f64 = 0.5;
+
+/// The default edge applied to every side of a stripped table's cells (see [`RECOVERED_BORDER_WIDTH_PX`]).
+fn recovered_default_edge() -> CellEdge {
+    CellEdge {
+        color: Color {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 255,
+        },
+        style: LineStyle::Solid,
+        width_px: RECOVERED_BORDER_WIDTH_PX,
+    }
+}
+
+/// The border-stripped-conversion fingerprint: EVERY active cell is borderless AND the table holds ≥2
+/// active cells (an actual grid). A single visible edge anywhere — a per-edge style other than 선없음,
+/// or the legacy `has_border` box — means the table carries a genuine design → left 100% UNTOUCHED.
+/// The ≥2-cell floor skips degenerate single-cell frames (including a 1×1 자가진단표 wrapper, whose
+/// borderless outer cell is intentional): there is no grid to recover in one cell, and firing there
+/// would fabricate an outer box the file never implied. Shade/diagonal are ignored here (a shaded or
+/// diagonal-decorated borderless cell still counts as "no border edge").
+fn table_is_border_stripped(cells: &[Cell]) -> bool {
+    let mut active = 0usize;
+    for c in cells {
+        if !c.active {
+            continue;
+        }
+        active += 1;
+        if c.has_border {
+            return false;
+        }
+        if c.borders
+            .iter()
+            .any(|e| matches!(e, Some(edge) if edge.style != LineStyle::None))
+        {
+            return false;
+        }
+    }
+    active >= 2
+}
+
+/// Synthesize 한글's default thin grid on a fingerprinted stripped table: set all four edges of every
+/// active cell to [`recovered_default_edge`] and flag `has_border`, so `place.rs` draws a full grid
+/// through the SAME per-edge path a real .hwp border flows through. Shade and diagonals are left
+/// untouched (they already resolved correctly). No `dirty`/`src_span` is touched → serialization is
+/// unaffected and the original NONE borderFills persist on save.
+fn recover_stripped_borders(cells: &mut [Cell]) {
+    let edge = recovered_default_edge();
+    for c in cells.iter_mut() {
+        if c.active {
+            c.borders = [Some(edge); 4];
+            c.has_border = true;
+        }
+    }
+}
+
 /// Parse one section's XML into `out`. Returns `Err(DocLimit::TableNestingTooDeep)` if table-in-
 /// table nesting exceeds [`limits::MAX_TABLE_NESTING`] — the concrete "XML depth counter" for the
 /// only nesting that grows unbounded structures. All other malformation is tolerated (best-effort
@@ -734,6 +801,16 @@ fn parse_section(
                         // The table's OWN outline borderFill (표 외곽 테두리).
                         if let Some(bf) = f.border_ref.and_then(|id| borders.get(&id)) {
                             f.table.borders = bf.borders;
+                        }
+                        // BORDER RECOVERY (lossy-conversion heuristic, HWPX-only): when EVERY active
+                        // cell is borderless — the all-NONE-borderFill fingerprint a lossy hwp→hwpx
+                        // converter leaves behind — synthesize 한글's default thin grid so the table
+                        // renders like its .hwp/PDF twin. Nested tables close first, so a 자가진단표's
+                        // inner grid is recovered before its 1×1 wrapper (which the ≥2-cell floor skips).
+                        // RENDER IR only: the original NONE borderFillIDRef re-serializes verbatim via
+                        // `src_span` (round-trip moat) — no fabricated border is ever saved.
+                        if table_is_border_stripped(&f.table.cells) {
+                            recover_stripped_borders(&mut f.table.cells);
                         }
                         // Record EVERY table's `[<hp:tbl … </hp:tbl>)` span — TOP-LEVEL and NESTED.
                         // Top-level: re-emit a dirty table at its original anchor instead of the
@@ -1215,6 +1292,145 @@ mod tests {
         );
         assert!(c.has_border);
         assert_eq!(c.shade_color, Some(Color::from_hex("#D8D8D8").unwrap()));
+    }
+
+    /// An all-NONE `BorderFillDef` (the border-stripped-conversion fingerprint) — every edge resolves
+    /// as `Some(LineStyle::None)`, `has_border=false` — exactly what `parse_border_fill` yields for a
+    /// 독스헌터-style stripped cell.
+    fn all_none_fill() -> BorderFillDef {
+        let none_edge = CellEdge {
+            color: Color::from_hex("#000000").unwrap(),
+            style: LineStyle::None,
+            width_px: 0.5,
+        };
+        BorderFillDef {
+            borders: [Some(none_edge); 4],
+            shade: None,
+            diagonal: None,
+            has_border: false,
+        }
+    }
+
+    fn find_table(blocks: &[Block]) -> &Table {
+        blocks
+            .iter()
+            .find_map(|b| match b {
+                Block::Table(t) => Some(t),
+                _ => None,
+            })
+            .expect("table")
+    }
+
+    /// BORDER RECOVERY: a table whose cells ALL reference an all-NONE borderFill (the stripped-
+    /// conversion fingerprint) gets 한글's default thin grid synthesized on every active cell.
+    #[test]
+    fn stripped_table_gets_recovered_default_borders() {
+        let mut borders = std::collections::BTreeMap::new();
+        borders.insert(1u64, all_none_fill());
+        // A 1×2 grid — both cells reference the all-NONE fill.
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run><hp:tbl rowCnt="1" colCnt="2" borderFillIDRef="1"><hp:tr><hp:tc borderFillIDRef="1"><hp:subList><hp:p><hp:run><hp:t>A</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="1000" height="500"/></hp:tc><hp:tc borderFillIDRef="1"><hp:subList><hp:p><hp:run><hp:t>B</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="1" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="1000" height="500"/></hp:tc></hp:tr></hp:tbl></hp:run></hp:p></hs:sec>"#;
+        let mut blocks = Vec::new();
+        parse_section(xml, &mut blocks, &borders).unwrap();
+        let t = find_table(&blocks);
+        assert_eq!(t.cells.len(), 2);
+        for c in &t.cells {
+            assert!(c.has_border, "recovered cell flags has_border");
+            assert!(c.has_edge_borders(), "recovered cell draws per-edge grid");
+            for e in c.borders.iter() {
+                let e = e.expect("all 4 edges set");
+                assert_eq!(e.style, LineStyle::Solid, "solid recovered edge");
+                assert_eq!(e.color, Color::from_hex("#000000").unwrap());
+                assert_eq!(e.width_px, RECOVERED_BORDER_WIDTH_PX);
+            }
+        }
+    }
+
+    /// BORDER RECOVERY negative case: a table with ANY real border edge (even one cell) is a genuine
+    /// design and is left 100% untouched — the borderless sibling KEEPS its all-NONE edges (no grid
+    /// fabricated). Also proves a lone borderless cell (a frame/spacer) is never "recovered".
+    #[test]
+    fn table_with_a_real_border_edge_is_left_untouched() {
+        let real_edge = CellEdge {
+            color: Color::from_hex("#000000").unwrap(),
+            style: LineStyle::Solid,
+            width_px: 0.5,
+        };
+        let mut borders = std::collections::BTreeMap::new();
+        borders.insert(1u64, all_none_fill()); // borderless
+        borders.insert(
+            2u64,
+            BorderFillDef {
+                borders: [Some(real_edge); 4],
+                shade: None,
+                diagonal: None,
+                has_border: true,
+            },
+        ); // genuine border
+           // Cell A = borderless (bf 1), cell B = real border (bf 2) → the table is a genuine design.
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run><hp:tbl rowCnt="1" colCnt="2" borderFillIDRef="1"><hp:tr><hp:tc borderFillIDRef="1"><hp:subList><hp:p><hp:run><hp:t>A</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="1000" height="500"/></hp:tc><hp:tc borderFillIDRef="2"><hp:subList><hp:p><hp:run><hp:t>B</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="1" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="1000" height="500"/></hp:tc></hp:tr></hp:tbl></hp:run></hp:p></hs:sec>"#;
+        let mut blocks = Vec::new();
+        parse_section(xml, &mut blocks, &borders).unwrap();
+        let t = find_table(&blocks);
+        // Cell A stays borderless — NOT synthesized to a solid grid.
+        let a = &t.cells[0];
+        assert!(!a.has_border, "borderless cell untouched");
+        assert_eq!(
+            a.borders[0].expect("edge resolved").style,
+            LineStyle::None,
+            "borderless sibling keeps its NONE edge (no fabricated grid)"
+        );
+        // Cell B keeps its genuine border.
+        assert!(t.cells[1].has_border);
+    }
+
+    /// ROUND-TRIP MOAT: an UNEDITED stripped table renders with recovered borders BUT re-serializes
+    /// with its ORIGINAL all-NONE borderFills — the synthesized border lives only in the render IR and
+    /// is NEVER written back (no fabricated borders on save).
+    #[test]
+    fn stripped_table_roundtrips_with_original_none_borders() {
+        // header.xml carries a single all-NONE borderFill (id=1) — the stripped fingerprint.
+        let header = concat!(
+            r#"<hh:head><hh:refList><hh:borderFills itemCnt="1">"#,
+            r##"<hh:borderFill id="1"><hh:slash type="NONE"/><hh:backSlash type="NONE"/><hh:leftBorder type="NONE" width="0.1 mm" color="#000000"/><hh:rightBorder type="NONE" width="0.1 mm" color="#000000"/><hh:topBorder type="NONE" width="0.1 mm" color="#000000"/><hh:bottomBorder type="NONE" width="0.1 mm" color="#000000"/><hh:diagonal type="NONE" width="0.1 mm" color="#000000"/></hh:borderFill>"##,
+            r#"</hh:borderFills></hh:refList></hh:head>"#,
+        );
+        let section = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p id="1" paraPrIDRef="0"><hp:run charPrIDRef="0"><hp:tbl rowCnt="1" colCnt="2" borderFillIDRef="1"><hp:tr><hp:tc borderFillIDRef="1"><hp:subList><hp:p><hp:run><hp:t>A</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="1000" height="500"/></hp:tc><hp:tc borderFillIDRef="1"><hp:subList><hp:p><hp:run><hp:t>B</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="1" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="1000" height="500"/></hp:tc></hp:tr></hp:tbl></hp:run></hp:p></hs:sec>"#;
+        let hpf = r#"<opf:package xmlns:opf="opf"><opf:manifest><opf:item id="header" href="Contents/header.xml" media-type="application/xml"/><opf:item id="section0" href="Contents/section0.xml" media-type="application/xml"/></opf:manifest></opf:package>"#;
+        let bytes = build_test_hwpx(&[
+            ("mimetype", b"application/hwp+zip"),
+            ("Contents/header.xml", header.as_bytes()),
+            ("Contents/section0.xml", section.as_bytes()),
+            ("Contents/content.hpf", hpf.as_bytes()),
+        ]);
+
+        // RENDER IR: recovery fired (the table draws a grid).
+        let doc = parse_semantic(&bytes).expect("parse stripped hwpx");
+        let t = find_table(&doc.sections[0].blocks);
+        assert!(t.cells.iter().all(|c| c.has_border), "recovered for render");
+        assert!(t.cells[0].borders[0].unwrap().style == LineStyle::Solid);
+        assert!(!doc.any_dirty(), "recovery does not dirty the doc");
+
+        // SAVE: the UNEDITED doc re-serializes with the ORIGINAL all-NONE borderFill — no fabrication.
+        let out = crate::serialize::serialize(&doc).expect("serialize");
+        let mut z = zip::ZipArchive::new(std::io::Cursor::new(out)).unwrap();
+        let read_part = |z: &mut zip::ZipArchive<std::io::Cursor<Vec<u8>>>, name: &str| -> String {
+            use std::io::Read;
+            let mut s = String::new();
+            z.by_name(name).unwrap().read_to_string(&mut s).unwrap();
+            s
+        };
+        let header_out = read_part(&mut z, "Contents/header.xml");
+        assert_eq!(header_out, header, "header.xml re-emitted byte-verbatim");
+        assert!(
+            header_out.contains(r#"type="NONE""#) && !header_out.contains(r#"type="SOLID""#),
+            "saved borderFill stays all-NONE — no fabricated border"
+        );
+        let section_out = read_part(&mut z, "Contents/section0.xml");
+        assert_eq!(section_out, section, "section re-emitted byte-verbatim");
+        assert!(
+            section_out.contains(r#"borderFillIDRef="1""#),
+            "cells still reference the original NONE borderFill"
+        );
     }
 
     /// Batch D: an `<hp:pic>` produces an `Inline::Image` carrying the binary ref + display size.

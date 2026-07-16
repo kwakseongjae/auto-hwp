@@ -1324,6 +1324,9 @@ mod tests {
             r#"</hh:borderFills>"#,
         );
         let pools = parse_header_pools(header);
-        assert_eq!(pools.border[&1].shade, Some(Color::from_hex("#D6D6D6").unwrap()));
+        assert_eq!(
+            pools.border[&1].shade,
+            Some(Color::from_hex("#D6D6D6").unwrap())
+        );
     }
 }
