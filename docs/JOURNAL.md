@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-17 (Claude) · 열화 자동감지→정규화 자동적용 — 업로드 기본=원본 근사 (ff4b3fa)
+- 사용자 재보고 "hwpx가 원본 PDF와 전혀 다름(간격·색·보더·쪽수·폰트)". 재진단: 사용자 기준=원본 archive PDF(.hwp, 18p, p1에 체크리스트 1~12행+서명란)인데, 직전 커밋이 충실(=한글 미러 20p, p1에 1~7행)을 **기본값**으로 삼아 업로드 기본 모습이 원본에서 가장 멀어져 있었음. 한글의 .hwpx 렌더 자체가 원본과 전혀 다름((1).pdf 실측: 회색 안내박스·플래그 소실·20p) — 파일 열화.
+- 해결: **wasm open이 열화 지문 감지 시 정규화 자동 적용**(줄간격+표 content-fit, normalize_active 보고), 정품은 충실 오픈. normalizeActive() 어댑터 체인 추가, HwpWorkspace 오픈 시 토글 동기화+열화 감지 토스트.
+- **브라우저 페이지 단위 시각검수(cc.hwpx vs 원본 PDF)**: 업로드 즉시 17p, p1 체크리스트 **1~12행 전부**(원본 동일), 본문 **serif 실렌더**(함초롬바탕→NanumMyeongjo, 원본 신명조 방향 일치), 파랑/빨강/회색·테두리·열비율·라디오(■/□)·중첩 사업비표(p2)·증빙서류 빨강(p12) 전부 원본과 일치.
+- 남은 갭(정직 보고): ①p1 하단 서명란이 p2로 밀림(17p vs 18p, 공유 조판기 메트릭 — .hwp 게이트가 잠가 조정 불가·열화파일 고유) ②▸플래그 배너(한글 hwpx 렌더도 소실=변환 손실) ③안내박스 빨간 테두리(.hwp 경로도 동일한 우리 렌더러 한계, 문단 테두리 미구현). 게이트·react316·editor-core168 그린. mode-aware 배치 full verify도 그린(✅ 전부 그린).
+
 ## 2026-07-17 (Claude) · mode-aware 표 행높이 옵션 구현 (5e18905)
 - 사용자 요청으로 "충실=한글 렌더에 맞춤" 옵션 구현. 재분석: 손실 hwp→hwpx의 auto-fit 표는 저장 cellSz가 균일 명목값(2200)인데 **한글은 max(내용,저장)로 플로어** → 벌어짐(체크리스트 7행/p, 20p). 우리는 7a06e9f로 content-fit(16p)이라 한글과 달랐음. 한글 .hwpx PDF가 page2에 체크리스트 8~12행으로 시작(=page1 1~7행)한 것이 플로어 증거.
 - 구현(round-trip 안전 우선): 파스는 auto-fit 표 cellSz 플로어를 **새 렌더-IR 필드 `Table::stored_row_heights`에만** 담고 `row_heights`는 content-driven 유지(054/020 왕복 테스트 무영향). JSX `table_eq` 미비교(src_span식). normalize 모듈 `apply_faithful_table_heights`⇄`content_fit_autofit_tables`(상호역·멱등, nested 표 순회, fixed 표 미접촉). wasm open이 기본 충실 플로어 적용, setNormalize가 baseline 복원+플로어 재적용→applied 시 content-fit.
