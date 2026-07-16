@@ -132,8 +132,13 @@ fn parse_border_edge(elem: &str, child: &str) -> Option<CellEdge> {
 
 /// The cell/table background from `<hc:fillBrush><hc:winBrush faceColor=..>`. `None` for an unfilled
 /// (`faceColor="none"`), white, or pure-black (unset) cell — mirrors the .hwp lift's `cell_shade`.
+///
+/// Uses the LAST `<hc:winBrush>`: Hancom-native HWPX encodes a shaded cell as TWO fillBrush children —
+/// the first `faceColor="none"`, the second the real color — and a streaming parser (rhwp) lets the last
+/// winBrush overwrite the fill (last-wins). `find` (the FIRST) would grab the "none" and drop the fill,
+/// rendering shaded form-label cells white. `rfind` is identical for the common single-winBrush case.
 fn parse_fill_shade(elem: &str) -> Option<Color> {
-    let p = elem.find("<hc:winBrush")?;
+    let p = elem.rfind("<hc:winBrush")?;
     let rel = elem[p..].find("/>").or_else(|| elem[p..].find('>'))?;
     let seg = &elem[p..p + rel];
     let face = first_attr(seg, "faceColor")?;
@@ -1306,5 +1311,19 @@ mod tests {
             pools.border[&2].shade,
             Some(Color::from_hex("#F2F2F2").unwrap())
         );
+    }
+
+    /// Batch C fix: a Hancom-native shaded cell encodes TWO `<hc:fillBrush>` — the first
+    /// `faceColor="none"`, the second the real color. `parse_fill_shade` must take the LAST winBrush
+    /// (rhwp last-wins), else the "none" wins and the cell renders white (was: 133 gray cells dropped).
+    #[test]
+    fn parse_fill_shade_takes_last_winbrush_of_double_fillbrush() {
+        let header = concat!(
+            r#"<hh:borderFills itemCnt="1">"#,
+            r##"<hh:borderFill id="1"><hh:slash type="NONE"/><hh:backSlash type="NONE"/><hh:leftBorder type="NONE" width="0.1 mm" color="#000000"/><hh:rightBorder type="NONE" width="0.1 mm" color="#000000"/><hh:topBorder type="NONE" width="0.1 mm" color="#000000"/><hh:bottomBorder type="NONE" width="0.1 mm" color="#000000"/><hh:diagonal type="NONE" width="0.1 mm" color="#000000"/><hc:fillBrush><hc:winBrush faceColor="none" hatchColor="#000000" alpha="0"/></hc:fillBrush><hc:fillBrush><hc:winBrush faceColor="#D6D6D6" hatchColor="#000000" alpha="0"/></hc:fillBrush></hh:borderFill>"##,
+            r#"</hh:borderFills>"#,
+        );
+        let pools = parse_header_pools(header);
+        assert_eq!(pools.border[&1].shade, Some(Color::from_hex("#D6D6D6").unwrap()));
     }
 }
