@@ -402,6 +402,10 @@ struct TblFrame {
     border_ref: Option<u64>,
     /// Per-cell geometry (cellAddr/cellSpan + `<hp:cellSz>`) → col_widths/row_heights at `</hp:tbl>`.
     geoms: Vec<CellGeom>,
+    /// `<hp:tbl noAdjust>`: 1 = FIXED row heights (apply the stored `<hp:cellSz height>` as a floor);
+    /// 0 (auto-fit, the common case) = Hancom re-lays-out rows to CONTENT and ignores the stored nominal
+    /// heights — so we must NOT floor them (else single-line rows inflate ~1.6× → +2 pages, #196 gap).
+    no_adjust: bool,
     /// The in-progress cell's `borderFillIDRef` (Batch C) — reset at each `</hp:tc>`.
     cur_cell_border: Option<u64>,
     /// The in-progress cell's `<hp:cellSz width height>` (HWPUNIT) — reset at each `</hp:tc>`.
@@ -413,7 +417,7 @@ struct TblFrame {
 }
 
 impl TblFrame {
-    fn new(table: Table, start: usize, border_ref: Option<u64>) -> Self {
+    fn new(table: Table, start: usize, border_ref: Option<u64>, no_adjust: bool) -> Self {
         TblFrame {
             table,
             cell: None,
@@ -421,6 +425,7 @@ impl TblFrame {
             cell_start: 0,
             border_ref,
             geoms: Vec::new(),
+            no_adjust,
             cur_cell_border: None,
             cur_cell_sz: None,
             cur_cell_has_margin: false,
@@ -576,6 +581,8 @@ fn parse_section(
                         let rows = attr_usize(&e, b"rowCnt").unwrap_or(0);
                         let cols = attr_usize(&e, b"colCnt").unwrap_or(0);
                         let border_ref = attr_u64(&e, b"borderFillIDRef");
+                        // noAdjust=1 → fixed row heights; 0/absent → auto-fit (content drives; don't floor).
+                        let no_adjust = attr_usize(&e, b"noAdjust") == Some(1);
                         tbls.push(TblFrame::new(
                             Table {
                                 rows,
@@ -585,6 +592,7 @@ fn parse_section(
                             },
                             pos_before,
                             border_ref,
+                            no_adjust,
                         ));
                     }
                     b"tc" => {
@@ -795,7 +803,11 @@ fn parse_section(
                         if f.table.cols > 0 {
                             f.table.col_widths = derive_col_widths_hwpx(&f.geoms, f.table.cols);
                         }
-                        if f.table.rows > 0 {
+                        // Row-height FLOOR only for FIXED tables (noAdjust=1). Auto-fit tables (noAdjust=0,
+                        // the common case) carry NOMINAL heights (uniformly ~2200) that Hancom itself ignores
+                        // and re-fits to content — flooring them inflates single-line rows ~1.6× (#196 gap:
+                        // 20 vs 18 pages, checklist 1–7 vs 1–12 on p.1). Leave empty → content drives.
+                        if f.table.rows > 0 && f.no_adjust {
                             f.table.row_heights = stored_row_heights_hwpx(&f.geoms, f.table.rows);
                         }
                         // The table's OWN outline borderFill (표 외곽 테두리).
@@ -1249,11 +1261,24 @@ mod tests {
             })
             .expect("table");
         assert_eq!(t.col_widths, vec![1000, 3000], "real per-column widths");
-        assert_eq!(
-            t.row_heights,
-            vec![800],
-            "row-height floor from tallest cell"
-        );
+        // No `noAdjust` → auto-fit: the stored cellSz heights are NOMINAL, so NO row-height floor
+        // (content drives). Flooring auto-fit tables is the #196 page-inflation bug.
+        assert!(t.row_heights.is_empty(), "auto-fit table → no row-height floor");
+    }
+
+    /// A FIXED table (`noAdjust="1"`) DOES apply the `<hp:cellSz height>` floor (row height is
+    /// author-set, not auto-fit) — the gate must keep that path working.
+    #[test]
+    fn table_noadjust_fixed_applies_row_height_floor() {
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run><hp:tbl rowCnt="1" colCnt="2" noAdjust="1"><hp:tr><hp:tc><hp:subList><hp:p><hp:run><hp:t>A</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="1000" height="500"/></hp:tc><hp:tc><hp:subList><hp:p><hp:run><hp:t>B</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="1" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="3000" height="800"/></hp:tc></hp:tr></hp:tbl></hp:run></hp:p></hs:sec>"#;
+        let mut blocks = Vec::new();
+        parse_section(xml, &mut blocks, &Default::default()).unwrap();
+        let t = blocks.iter().find_map(|b| match b {
+            Block::Table(t) => Some(t),
+            _ => None,
+        }).expect("table");
+        assert_eq!(t.col_widths, vec![1000, 3000]);
+        assert_eq!(t.row_heights, vec![800], "fixed table keeps the cellSz height floor");
     }
 
     /// Batch C: a cell resolves its `borderFillIDRef` against the border pool → per-edge borders,
