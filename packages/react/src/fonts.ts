@@ -32,7 +32,7 @@ export interface FontCatalogEntry {
  *  the license table + original-source links. A host maps each entry to a URL via `catalogUrl`. */
 export const FONT_CATALOG: readonly FontCatalogEntry[] = [
   { family: "Nanum Gothic", label: "나눔고딕", license: "OFL", file: "NanumGothic-Regular.ttf", source: "https://github.com/google/fonts/tree/main/ofl/nanumgothic", bundled: true, boldFile: "NanumGothic-Bold.ttf" },
-  { family: "Nanum Myeongjo", label: "나눔명조", license: "OFL", file: "NanumMyeongjo-Regular.ttf", source: "https://github.com/google/fonts/tree/main/ofl/nanummyeongjo" },
+  { family: "Nanum Myeongjo", label: "나눔명조", license: "OFL", file: "NanumMyeongjo-Regular.ttf", source: "https://github.com/google/fonts/tree/main/ofl/nanummyeongjo", boldFile: "NanumMyeongjo-Bold.ttf" },
   { family: "Noto Sans KR", label: "본고딕 (Noto Sans KR)", license: "OFL", file: "NotoSansKR-Regular.ttf", source: "https://github.com/notofonts/noto-cjk" },
   { family: "Noto Serif KR", label: "본명조 (Noto Serif KR)", license: "OFL", file: "NotoSerifKR-Regular.ttf", source: "https://github.com/notofonts/noto-cjk" },
   { family: "IBM Plex Sans KR", label: "IBM Plex Sans KR", license: "OFL", file: "IBMPlexSansKR-Regular.ttf", source: "https://github.com/IBM/plex" },
@@ -97,7 +97,7 @@ export function isTtc(bytes: Uint8Array): boolean {
  *  for the SAME bytes fed to `registerFont` (metrics + PDF), so screen == PDF. The alias rule targets
  *  `<text>` inside `.hw-sheet` (where HwpPageView draws the SVG) so every document font name renders in
  *  the selected face; the `NanumGothic` re-definition covers the SVG's universal fallback name too. */
-export function buildFontFaceCss(family: string, url: string, opts?: { serifUrl?: string; boldUrl?: string }): string {
+export function buildFontFaceCss(family: string, url: string, opts?: { serifUrl?: string; boldUrl?: string; serifBoldUrl?: string }): string {
   const fam = quoteFamily(family);
   const src = `url("${url}")`;
   const boldSrc = opts?.boldUrl ? `url("${opts.boldUrl}")` : null;
@@ -126,7 +126,12 @@ export function buildFontFaceCss(family: string, url: string, opts?: { serifUrl?
   // fallback list drops to NanumGothic, so this is a safe, additive no-op offline.
   if (opts?.serifUrl) {
     const ser = quoteFamily(SERIF_SUBSTITUTE);
-    rules.push(`@font-face { font-family: ${ser}; src: url("${opts.serifUrl}"); }`);
+    if (opts.serifBoldUrl) {
+      rules.push(`@font-face { font-family: ${ser}; src: url("${opts.serifUrl}"); font-weight: 400; }`);
+      rules.push(`@font-face { font-family: ${ser}; src: url("${opts.serifBoldUrl}"); font-weight: 700; }`);
+    } else {
+      rules.push(`@font-face { font-family: ${ser}; src: url("${opts.serifUrl}"); }`);
+    }
     rules.push(`.hw-sheet svg text[font-family^="${SERIF_SUBSTITUTE}"] { font-family: ${ser}, "NanumGothic", serif !important; }`);
   }
   return rules.join("\n");

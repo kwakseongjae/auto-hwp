@@ -808,6 +808,11 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     const e = props.fontCatalog?.find((c) => c.family === SERIF_SUBSTITUTE);
     return e ? catalogUrl(e, props.fontUrlBase) : undefined;
   }, [props.fontCatalog, props.fontUrlBase]);
+  // Serif BOLD variant (한양신명조 등 헤더가 serif+bold) → weight-700 serif @font-face.
+  const serifBoldUrl = useMemo(() => {
+    const e = props.fontCatalog?.find((c) => c.family === SERIF_SUBSTITUTE);
+    return e?.boldFile ? catalogUrl({ ...e, file: e.boldFile }, props.fontUrlBase) : undefined;
+  }, [props.fontCatalog, props.fontUrlBase]);
 
   // The served URL of the SELECTED font's BOLD variant (if the catalog entry declares `boldFile`) →
   // binds a weight-700 @font-face so bold headers render TRUE bold (issue: CJK synthetic bold is too weak).
@@ -2446,7 +2451,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           the SVG on screen matches the exported PDF. Injected only when a font is selected. Issue 058:
           also bind the OFL serif substitute (`serifUrl`) so 명조 runs render serif — the attribute-scoped
           serif rule out-specifies the blanket collapse, preserving the doc's 명조↔고딕 distinction. */}
-      {selectedFont && <style data-testid="hw-fontface">{buildFontFaceCss(selectedFont.family, selectedFont.url, { serifUrl, boldUrl })}</style>}
+      {selectedFont && <style data-testid="hw-fontface">{buildFontFaceCss(selectedFont.family, selectedFont.url, { serifUrl, boldUrl, serifBoldUrl })}</style>}
       <div className="hw-toolbar">
         <span className="hw-brand">tf-hwp</span>
         <span className="hw-doc-meta">{meta ? `${meta.format.toUpperCase()} · ${meta.pages}쪽` : "문서 없음"}</span>

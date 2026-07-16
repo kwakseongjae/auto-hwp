@@ -13,7 +13,10 @@ const repoRoot = path.join(appRoot, "..", "..");
 const srcDir = path.join(repoRoot, "assets", "fonts");
 const destDir = path.join(appRoot, "public", "fonts");
 
-const files = ["NanumGothic-Regular.ttf", "NanumGothic-Bold.ttf", "OFL.txt"];
+// NanumGothic (기본 고딕, Regular+Bold) + NanumMyeongjo (058 SERIF 대체, Regular+Bold) — 둘 다 레포 번들이라
+// 화면/PDF 폰트 시스템(볼드·명조 포함)이 네트워크 없이 완전 동작. Bold face 는 SVG font-weight=700 을 실제
+// 볼드로, Myeongjo 는 바탕/명조 run 을 serif 로 렌더한다(합성볼드/고딕치환의 열화 없이).
+const files = ["NanumGothic-Regular.ttf", "NanumGothic-Bold.ttf", "NanumMyeongjo-Regular.ttf", "NanumMyeongjo-Bold.ttf", "OFL.txt"];
 
 if (!existsSync(path.join(srcDir, files[0]))) {
   console.error(`\n[copy-fonts] 기본 폰트가 없습니다: ${path.join(srcDir, files[0])}\n레포 자산 assets/fonts/ 를 확인하세요.\n`);
