@@ -732,7 +732,11 @@ pub fn layout_paragraph(
             }
             w += a;
             end += 1;
-            if chars[end - 1].0 == ' ' {
+            // A break opportunity follows an ASCII space OR a 전각 공백 (U+3000, `<hp:fwSpace/>`) — the
+            // full-width space HWPX uses to separate a Korean label from its Latin gloss ("문제인식
+            // (Problem)"). Without U+3000 here the mid-word Latin backup below has no space to retreat
+            // to and wraps "(Proble"/"m)"; with it, the line breaks at the space like Hancom.
+            if matches!(chars[end - 1].0, ' ' | '\u{3000}') {
                 last_space = Some(end);
             }
         }

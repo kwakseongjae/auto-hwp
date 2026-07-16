@@ -697,6 +697,15 @@ fn parse_section(
                         }
                     }
                 }
+                // Inline whitespace/control chars carried INSIDE a run — emit them as TEXT so the
+                // line-breaker sees the same break opportunities Hancom does. `<hp:fwSpace/>` (전각
+                // 공백) is the load-bearing one: dropping it glued "라벨(Problem)" and forced a mid-word
+                // Latin break; as U+3000 the breaker wraps at the space. These are pure inline text, so
+                // (unlike the `other` arm) they do NOT mark the paragraph non-simple.
+                b"fwSpace" => push_inline_char(&mut paras, '\u{3000}'),
+                b"nbSpace" => push_inline_char(&mut paras, '\u{00A0}'),
+                b"tab" => push_inline_char(&mut paras, '\t'),
+                b"lineBreak" => push_inline_char(&mut paras, '\n'),
                 // `<hp:lineseg/>` (inside linesegarray) is layout cache; everything else structural.
                 other => {
                     if !matches!(other, b"lineseg" | b"linesegarray") {
@@ -864,6 +873,18 @@ fn parse_section(
 /// Push the open run (if any) into the paragraph's run list — empty-text runs are KEPT (dropping
 /// them would shift run indices and misaddress per-run edits). Any `<hp:pic>`s parsed inside the run
 /// (D1) ride along as `Inline::Image` after the text.
+/// Append an inline control character to the paragraph's OPEN run. Used for `<hp:fwSpace/>` (전각 공백,
+/// U+3000), `<hp:nbSpace/>` (묶음 빈칸, NBSP), `<hp:tab/>` and `<hp:lineBreak/>` — self-closing elements
+/// that carry TEXT content, not structure. Dropping them (the old `other` arm did) glued neighbours
+/// together and, worse, removed the LINE-BREAK OPPORTUNITY a full-width space provides: a label
+/// "1. 문제인식<fwSpace>(Problem)" wrapped mid-word ("(Proble"/"m)") instead of at the space like Hancom.
+/// A no-op when no run is open (a stray control char outside `<hp:run>`), which OWPML does not produce.
+fn push_inline_char(paras: &mut [ParaAccum], ch: char) {
+    if let Some((_, t)) = paras.last_mut().and_then(|p| p.cur_run.as_mut()) {
+        t.push(ch);
+    }
+}
+
 fn flush_run(p: &mut ParaAccum) {
     let images = std::mem::take(&mut p.pending_images);
     if let Some((char_ref, text)) = p.cur_run.take() {
@@ -1001,6 +1022,37 @@ fn attr_u64(e: &BytesStart, name: &[u8]) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inline_fwspace_tab_nbspace_carry_as_text_and_stay_simple() {
+        // `<hp:fwSpace/>` etc. are inline TEXT, not structure: they must become characters (so the
+        // line-breaker sees the space) AND keep the paragraph simple/editable — the old code dropped
+        // them and marked the paragraph non-simple, gluing "라벨(Problem)" into a mid-word wrap.
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run><hp:t>1. 문제인식</hp:t><hp:fwSpace/><hp:t>(Problem)</hp:t><hp:tab/><hp:nbSpace/></hp:run></hp:p></hs:sec>"#;
+        let mut blocks = Vec::new();
+        parse_section(xml, &mut blocks, &Default::default()).unwrap();
+        let p = blocks
+            .iter()
+            .find_map(|b| match b {
+                Block::Paragraph(p) => Some(p),
+                _ => None,
+            })
+            .expect("paragraph");
+        let text: String = p
+            .runs
+            .iter()
+            .flat_map(|r| r.content.iter())
+            .filter_map(|i| match i {
+                Inline::Text(t) => Some(t.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text, "1. 문제인식\u{3000}(Problem)\t\u{00A0}");
+        assert!(
+            p.source.as_ref().is_some_and(|s| s.simple),
+            "inline whitespace must NOT make the paragraph non-simple"
+        );
+    }
 
     #[test]
     fn parses_paragraphs_and_table() {
