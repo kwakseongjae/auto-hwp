@@ -241,4 +241,22 @@ mod tests {
         assert!(!r.applied);
         assert_eq!(d.para_shapes[1].line_spacing_value, 160);
     }
+
+    #[test]
+    fn genuine_mix_below_dominance_is_left_alone() {
+        // Regression from the real corpus (2026-07-17 validation): a GENUINE gov-form body is ~130%
+        // with a LARGE minority (~45%) at 160% (headers/spacers) AND a rich tight pool. This looks
+        // superficially "loose-heavy" but 160% covers < DOMINANCE(60%), so it must NOT normalize —
+        // else we'd wrongly tighten a legitimately-authored document (the .hwp twin renders it 130%
+        // body + 160% headers, faithfully mirrored by the .hwpx). Mirrors doc0/1/2/5/6/9 in the sweep.
+        let shapes = vec![ParaShape::default(), loose(130), loose(160)];
+        // 11/20 at 130% (shape 1), 9/20 at 160% (shape 2) → loose = 45% < 60%.
+        let mut uses = vec![1; 11];
+        uses.extend(vec![2; 9]);
+        let pool = vec![110, 120, 130, 130, 130, 100, 145]; // rich tight pool present
+        let mut d = doc_with(shapes, uses, pool);
+        let r = normalize_line_spacing(&mut d);
+        assert!(!r.applied, "45% loose is a genuine mix, not a collapse");
+        assert_eq!(d.para_shapes[2].line_spacing_value, 160); // legit 160% headers untouched
+    }
 }
