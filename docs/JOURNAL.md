@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-07-16 (Claude) · HWPX 줄간격 근본진단 + "레이아웃 정리" 토글 (4d74c11·d23ee43)
+- 사용자: "그냥 대응 말고 원인부터. hwp 동작방식이랑 다른게 있으니 이런 드라마틱한 차이가." → **통제실험**(archive의 동일문서 .hwp/.hwpx 둘 다 파싱): .hwp 줄간격 130%×501 다양 vs .hwpx 160%×1098(94%). 원인=한글 "hwpx 저장"이 본문 78%(916/1172)를 바탕글 기본 paraPr(id0=160%)로 리매핑→원본130% 파괴. version.xml=Hancom Office 13(우리변환 아님). **한글 자신도 이 hwpx를 20p(=.hwp 18p보다 벌어짐)로 렌더**(참조PDF 2p 직접비교로 확인)→우리 읽기는 파일에 충실. 즉 괴리=파일 열화지 렌더버그 아님.
+- 사용자 선택(AskUser): "충실 기본 + 정규화 토글 둘 다". 구현: hwp-model::normalize_line_spacing(열화지문=단일 loose>60%지배+풀에 미참조 tight다수 감지→collapsed 문단 160→풀중심130% 복원, 렌더-IR only·moat보존, 정품160%문서 미발동) → EditSession::doc_mut(리비전미범프) → wasm setNormalize/normalizeActive(baseline복원 가역+캐시클리어) → engine 래퍼(index.js/d.ts)+worker화이트리스트 → adapter/session → HwpWorkspace 툴바 토글.
+- **브라우저 실검증**(cc.hwpx): 충실18p 체크리스트1~10행 ↔ 정규화17p 1~12행(=.hwp일치), report "160%→130% 1098문단", 토글오프 복귀. 게이트8==8/18==18·react316·editor-core168·rust그린.
+- 함정: copy-wasm이 packages/engine/worker.js를 public로 복사(정본은 engine쪽) + index.js는 **수작업 래퍼 HwpDoc**이라 새 메서드 위임 수동추가 필수(안하면 "doc[args.method] is not a function") + 브라우저 모듈캐시로 하드리로드 필요. 7a06e9f가 fmt-dirty로 나갔던 것 이번에 정리(d23ee43).
+- 열린 것: 정규화는 줄간격만(테이블 행높이 축은 후속). 사용자 재검증 대기.
+
 ## 2026-07-16 (Claude) · HWPX-vs-HWP 시각 파리티 — 브라우저 실검증 3수정
 - 사용자 지시: "hwp랑 퀄리티 차이 거의 안나게 계속 고도화, PDF 바탕 시각검증". 참조 = 2026 청창사 신청서 PDF. 진단은 **export-pdf가 아니라 실제 브라우저(localhost:3000) 스크린샷**으로 함(CORS 서버 8899 + JS 업로드) — export가 못 잡는 폰트 이슈를 드러냄.
 - **①행높이(7a06e9f)**: noAdjust=0(auto-fit) 표에 저장 cellSz 행높이 플로어 적용 → 20p 팽창. 게이트: 플로어 미적용으로 18p 파리티 회복.
