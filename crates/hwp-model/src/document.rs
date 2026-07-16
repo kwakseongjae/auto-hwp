@@ -361,6 +361,16 @@ pub struct Table {
     /// serializer (issue 054, F2): `<hp:cellSz>` re-emits these stored heights so a reopened
     /// conversion lifts back the SAME floors (round-trip pagination stability).
     pub row_heights: Vec<HwpUnit>,
+    /// RENDER-IR ONLY (never serialized): the stored `<hp:cellSz height>` floor for an AUTO-FIT
+    /// (`noAdjust="0"`) HWPX table — `rows` entries, or EMPTY for fixed/lift/synth tables. The HWPX
+    /// parser records this SEPARATELY from `row_heights` (which stays content-driven for auto-fit so the
+    /// round-trip codec is unaffected) so the app can offer two faithful readings of a lossy hwp→hwpx
+    /// conversion WITHOUT touching the round-trip bytes: FAITHFUL (mirror Hancom — floor rows to these
+    /// stored heights, `hwp_model::normalize::apply_faithful_table_heights`) vs 레이아웃 정리 (recover
+    /// the .hwp look — content-fit, `content_fit_autofit_tables`). Non-empty ONLY for HWPX auto-fit
+    /// tables, so those helpers use its presence to target exactly them. Never round-trips: an unedited
+    /// table re-emits via `src_span` verbatim, so this never reaches saved bytes.
+    pub stored_row_heights: Vec<HwpUnit>,
     /// True once an OP changed `col_widths`/`row_heights` (표 열너비/행높이 편집) — distinct from the
     /// geometry the HWPX parser now fills from the original `<hp:cellSz>` (issue #196 Batch C). The
     /// HWPX serializer gates its per-cell in-place surgery on `!geometry_edited`: a table whose geometry

@@ -803,12 +803,22 @@ fn parse_section(
                         if f.table.cols > 0 {
                             f.table.col_widths = derive_col_widths_hwpx(&f.geoms, f.table.cols);
                         }
-                        // Row-height FLOOR only for FIXED tables (noAdjust=1). Auto-fit tables (noAdjust=0,
-                        // the common case) carry NOMINAL heights (uniformly ~2200) that Hancom itself ignores
-                        // and re-fits to content — flooring them inflates single-line rows ~1.6× (#196 gap:
-                        // 20 vs 18 pages, checklist 1–7 vs 1–12 on p.1). Leave empty → content drives.
-                        if f.table.rows > 0 && f.no_adjust {
-                            f.table.row_heights = stored_row_heights_hwpx(&f.geoms, f.table.rows);
+                        // Row-height handling splits on `noAdjust`:
+                        //  • FIXED (noAdjust=1): apply the stored `<hp:cellSz height>` as the `row_heights`
+                        //    floor (the codec round-trips it — issue 054/020).
+                        //  • AUTO-FIT (noAdjust=0, the common case): keep `row_heights` CONTENT-DRIVEN (so
+                        //    the round-trip codec is untouched) but RETAIN the stored floor in
+                        //    `stored_row_heights` — a RENDER-IR field the app uses to offer two faithful
+                        //    readings of a lossy conversion: FAITHFUL (floor to these = mirror Hancom's 20p,
+                        //    checklist 1–7/page) vs 레이아웃 정리 (content-fit = the .hwp look, 1–12/page).
+                        //    Both are toggled in the wasm layer; neither reaches saved bytes (src_span).
+                        if f.table.rows > 0 {
+                            let stored = stored_row_heights_hwpx(&f.geoms, f.table.rows);
+                            if f.no_adjust {
+                                f.table.row_heights = stored;
+                            } else {
+                                f.table.stored_row_heights = stored;
+                            }
                         }
                         // The table's OWN outline borderFill (표 외곽 테두리).
                         if let Some(bf) = f.border_ref.and_then(|id| borders.get(&id)) {
@@ -1261,11 +1271,17 @@ mod tests {
             })
             .expect("table");
         assert_eq!(t.col_widths, vec![1000, 3000], "real per-column widths");
-        // No `noAdjust` → auto-fit: the stored cellSz heights are NOMINAL, so NO row-height floor
-        // (content drives). Flooring auto-fit tables is the #196 page-inflation bug.
+        // No `noAdjust` → auto-fit: `row_heights` stays CONTENT-DRIVEN (empty) so the round-trip codec
+        // is untouched — but the stored cellSz floor is RETAINED in `stored_row_heights` (render-IR) so
+        // the app can offer the faithful(=floor)/레이아웃 정리(=content-fit) toggle.
         assert!(
             t.row_heights.is_empty(),
-            "auto-fit table → no row-height floor"
+            "auto-fit table → row_heights content-driven (round-trip codec unchanged)"
+        );
+        assert_eq!(
+            t.stored_row_heights,
+            vec![800],
+            "auto-fit table RETAINS the stored cellSz floor for the faithful-render toggle"
         );
     }
 

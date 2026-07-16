@@ -164,6 +164,67 @@ pub fn normalize_line_spacing(doc: &mut SemanticDoc) -> NormalizeReport {
     report
 }
 
+// ── Auto-fit table row-height mode (the row-height twin of the line-spacing recovery) ─────────────────
+//
+// A lossy hwp→hwpx save records AUTO-FIT (`noAdjust="0"`) table rows with a NOMINAL stored height (the
+// `<hp:cellSz height>`), which the HWPX parser keeps in `Table::stored_row_heights` (NON-empty ONLY for
+// those tables). Two faithful readings, toggled by the app:
+//   • FAITHFUL — floor rows to the stored heights → mirror how Hancom itself renders the .hwpx (rows
+//     spread, e.g. a 자가진단표 shows 1–7/page over ~20 pages).
+//   • 레이아웃 정리 — content-fit (drop the floor) → recover the .hwp look (1–12/page, denser).
+// Both mutate `row_heights` (render-IR); an unedited table re-emits via `src_span`, so neither reaches
+// saved bytes. `stored_row_heights` is the immutable source, so the toggle is fully reversible.
+
+fn tables_mut(b: &mut Block, f: &mut impl FnMut(&mut crate::document::Table)) {
+    if let Block::Table(t) = b {
+        // Recurse into nested tables FIRST (the `cells` borrow ends before `f(t)`), then the table.
+        for c in &mut t.cells {
+            for cb in &mut c.blocks {
+                tables_mut(cb, f);
+            }
+        }
+        f(t);
+    }
+}
+
+/// FAITHFUL table heights: floor every auto-fit table's rows to its stored `<hp:cellSz>` heights, so the
+/// render mirrors Hancom's own .hwpx layout. Targets exactly the HWPX auto-fit tables (non-empty
+/// `stored_row_heights`); fixed/lift/synth tables are untouched. Returns the number of tables floored.
+/// Idempotent. The inverse of [`content_fit_autofit_tables`].
+pub fn apply_faithful_table_heights(doc: &mut SemanticDoc) -> usize {
+    let mut n = 0;
+    for sec in &mut doc.sections {
+        for b in &mut sec.blocks {
+            tables_mut(b, &mut |t| {
+                if !t.stored_row_heights.is_empty() {
+                    t.row_heights = t.stored_row_heights.clone();
+                    n += 1;
+                }
+            });
+        }
+    }
+    n
+}
+
+/// 레이아웃 정리 table heights: content-fit every auto-fit table (clear the stored floor) so the render
+/// recovers the denser .hwp look. Targets exactly the HWPX auto-fit tables (non-empty
+/// `stored_row_heights`); fixed tables keep their explicit `row_heights`. Returns the count. Idempotent.
+/// The inverse of [`apply_faithful_table_heights`].
+pub fn content_fit_autofit_tables(doc: &mut SemanticDoc) -> usize {
+    let mut n = 0;
+    for sec in &mut doc.sections {
+        for b in &mut sec.blocks {
+            tables_mut(b, &mut |t| {
+                if !t.stored_row_heights.is_empty() {
+                    t.row_heights = Vec::new();
+                    n += 1;
+                }
+            });
+        }
+    }
+    n
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -258,5 +319,94 @@ mod tests {
         let r = normalize_line_spacing(&mut d);
         assert!(!r.applied, "45% loose is a genuine mix, not a collapse");
         assert_eq!(d.para_shapes[2].line_spacing_value, 160); // legit 160% headers untouched
+    }
+
+    // ── auto-fit table row-height toggle ──────────────────────────────────────────────────────────
+    use crate::document::{Cell, Table};
+
+    fn autofit_table(stored: Vec<i32>) -> Block {
+        Block::Table(Table {
+            rows: stored.len(),
+            cols: 1,
+            stored_row_heights: stored,
+            ..Default::default()
+        })
+    }
+    fn fixed_table(row_heights: Vec<i32>) -> Block {
+        // A fixed (noAdjust=1) table: heights live in `row_heights`, `stored_row_heights` stays empty.
+        Block::Table(Table {
+            rows: row_heights.len(),
+            cols: 1,
+            row_heights,
+            ..Default::default()
+        })
+    }
+    fn doc_with_blocks(blocks: Vec<Block>) -> SemanticDoc {
+        let mut d = SemanticDoc::default();
+        d.sections.push(Section {
+            blocks,
+            ..Default::default()
+        });
+        d
+    }
+
+    #[test]
+    fn faithful_and_contentfit_are_inverses_on_autofit_tables() {
+        let mut d = doc_with_blocks(vec![autofit_table(vec![2200, 2200, 3000])]);
+        // FAITHFUL: floor rows to the stored cellSz heights (mirror Hancom).
+        assert_eq!(apply_faithful_table_heights(&mut d), 1);
+        if let Block::Table(t) = &d.sections[0].blocks[0] {
+            assert_eq!(t.row_heights, vec![2200, 2200, 3000]);
+            assert_eq!(t.stored_row_heights, vec![2200, 2200, 3000]); // source retained
+        } else {
+            panic!("table");
+        }
+        // 레이아웃 정리: content-fit (drop the floor) — the .hwp look.
+        assert_eq!(content_fit_autofit_tables(&mut d), 1);
+        if let Block::Table(t) = &d.sections[0].blocks[0] {
+            assert!(t.row_heights.is_empty());
+            assert_eq!(t.stored_row_heights, vec![2200, 2200, 3000]); // still reversible
+        } else {
+            panic!("table");
+        }
+        // Reversible back to faithful.
+        apply_faithful_table_heights(&mut d);
+        if let Block::Table(t) = &d.sections[0].blocks[0] {
+            assert_eq!(t.row_heights, vec![2200, 2200, 3000]);
+        } else {
+            panic!("table");
+        }
+    }
+
+    #[test]
+    fn fixed_and_nested_tables_are_handled_correctly() {
+        // A fixed table (stored_row_heights empty) must be UNTOUCHED by both passes; a NESTED auto-fit
+        // table inside a cell must be reached.
+        let inner = autofit_table(vec![1500]);
+        let mut outer_cell = Cell::default();
+        outer_cell.blocks.push(inner);
+        let outer = Table {
+            rows: 1,
+            cols: 1,
+            cells: vec![outer_cell],
+            stored_row_heights: vec![9000],
+            ..Default::default()
+        };
+        let mut d = doc_with_blocks(vec![fixed_table(vec![500, 800]), Block::Table(outer)]);
+        // Both the outer auto-fit and the nested auto-fit get floored; the fixed table does not.
+        assert_eq!(apply_faithful_table_heights(&mut d), 2);
+        if let Block::Table(t) = &d.sections[0].blocks[0] {
+            assert_eq!(t.row_heights, vec![500, 800], "fixed table untouched");
+            assert!(t.stored_row_heights.is_empty());
+        }
+        // content-fit clears the two auto-fit tables (outer + nested), leaves the fixed one.
+        assert_eq!(content_fit_autofit_tables(&mut d), 2);
+        if let Block::Table(t) = &d.sections[0].blocks[0] {
+            assert_eq!(
+                t.row_heights,
+                vec![500, 800],
+                "fixed table STILL untouched by content-fit"
+            );
+        }
     }
 }

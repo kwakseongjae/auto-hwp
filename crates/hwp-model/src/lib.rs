@@ -23,7 +23,10 @@ pub mod prelude {
     pub use crate::error::{Error, Result};
     pub use crate::font_class::*;
     pub use crate::layout::*;
-    pub use crate::normalize::{normalize_line_spacing, NormalizeReport};
+    pub use crate::normalize::{
+        apply_faithful_table_heights, content_fit_autofit_tables, normalize_line_spacing,
+        NormalizeReport,
+    };
     pub use crate::style::*;
     pub use crate::types::*;
 }

@@ -150,6 +150,13 @@ impl HwpDoc {
         let mut session = hwp_mcp::Session::default();
         let display = name.clone().unwrap_or_else(|| "document".to_string());
         hwp_mcp::open_bytes(&mut session, bytes, &display).map_err(engine_err)?;
+        // FAITHFUL default (issue: lossy hwp→hwpx table rows): floor auto-fit tables to their stored
+        // `<hp:cellSz>` heights so the initial render mirrors how Hancom itself renders the .hwpx (rows
+        // spread). `set_normalize(true)` later content-fits them for the denser .hwp look. No-op unless
+        // the doc has HWPX auto-fit tables (non-empty `stored_row_heights`), so .hwp/.docx are unchanged.
+        if let Some(ed) = session.doc.as_mut() {
+            hwp_model::normalize::apply_faithful_table_heights(ed.doc_mut());
+        }
         let title = name.map(|n| {
             std::path::Path::new(&n)
                 .file_stem()
@@ -296,14 +303,23 @@ impl HwpDoc {
             .as_mut()
             .ok_or_else(|| js_err("no_document", "no document open (call open first)"))?;
         let doc = edit.doc_mut();
-        // Always start from the faithful baseline so the toggle is stateless w.r.t. the prior state.
+        // Always start from the FAITHFUL baseline so the toggle is stateless w.r.t. the prior state:
+        //  • line spacing → the captured per-shape baseline, and
+        //  • auto-fit table rows → floored to their stored `<hp:cellSz>` heights (mirror Hancom).
         for (i, &v) in baseline.iter().enumerate() {
             if let Some(s) = doc.para_shapes.get_mut(i) {
                 s.line_spacing_value = v;
             }
         }
+        hwp_model::normalize::apply_faithful_table_heights(doc);
         let report = if on {
-            hwp_model::normalize::normalize_line_spacing(doc)
+            let r = hwp_model::normalize::normalize_line_spacing(doc);
+            // Only recover the .hwp table density when the doc actually looked degraded — a genuine
+            // document keeps its faithful (Hancom-mirroring) row heights.
+            if r.applied {
+                hwp_model::normalize::content_fit_autofit_tables(doc);
+            }
+            r
         } else {
             hwp_model::normalize::NormalizeReport {
                 total_paragraphs: doc_paragraph_count(doc),
