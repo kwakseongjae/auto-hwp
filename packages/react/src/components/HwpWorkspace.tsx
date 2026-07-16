@@ -761,8 +761,17 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         if (cancelled) return;
         core.selection.clear();
         core.cellCaret.clear(); // 053: a caret never survives a document swap
-        setNormalizeOn(false); // a fresh HwpDoc opens FAITHFUL; keep the toggle in sync with the new doc
-        toast(`열림: ${props.document!.name ?? "문서"} · ${r.pages}쪽`);
+        // Sync the "레이아웃 정리" toggle with the engine's open-time decision: on a DEGRADED hwp→hwpx
+        // conversion the engine auto-enables normalization (the upload shows the original .hwp look);
+        // a genuine document opens faithful (off).
+        const norm = (await adapter.normalizeActive?.()) ?? false;
+        if (cancelled) return;
+        setNormalizeOn(norm);
+        toast(
+          norm
+            ? `열림: ${props.document!.name ?? "문서"} · ${r.pages}쪽 · 변환 열화 감지 → 레이아웃 자동 정리(원본 근사)`
+            : `열림: ${props.document!.name ?? "문서"} · ${r.pages}쪽`,
+        );
       } catch (e) {
         if (!cancelled) toast(`열기 실패: ${e}`);
       }
@@ -770,7 +779,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     return () => {
       cancelled = true;
     };
-  }, [core, props.document, toast]);
+  }, [core, adapter, props.document, toast]);
 
   // Apply a font to EVERYTHING (issue 022): the core registers it into the engine (metrics + PDF) and
   // re-paginates + invalidates layout; here we build the screen @font-face (blob URL of the SAME bytes →

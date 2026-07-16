@@ -150,22 +150,15 @@ impl HwpDoc {
         let mut session = hwp_mcp::Session::default();
         let display = name.clone().unwrap_or_else(|| "document".to_string());
         hwp_mcp::open_bytes(&mut session, bytes, &display).map_err(engine_err)?;
-        // FAITHFUL default (issue: lossy hwp→hwpx table rows): floor auto-fit tables to their stored
-        // `<hp:cellSz>` heights so the initial render mirrors how Hancom itself renders the .hwpx (rows
-        // spread). `set_normalize(true)` later content-fits them for the denser .hwp look. No-op unless
-        // the doc has HWPX auto-fit tables (non-empty `stored_row_heights`), so .hwp/.docx are unchanged.
-        if let Some(ed) = session.doc.as_mut() {
-            hwp_model::normalize::apply_faithful_table_heights(ed.doc_mut());
-        }
         let title = name.map(|n| {
             std::path::Path::new(&n)
                 .file_stem()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or(n)
         });
-        // Faithful baseline of every paragraph shape's line spacing, captured before any normalization
+        // Faithful baseline of every paragraph shape's line spacing, captured BEFORE any normalization
         // so the "레이아웃 정리" toggle is reversible (see `set_normalize`).
-        let ls_baseline = session
+        let ls_baseline: Vec<i32> = session
             .doc
             .as_ref()
             .map(|d| {
@@ -176,6 +169,24 @@ impl HwpDoc {
                     .collect()
             })
             .unwrap_or_default();
+        // OPEN-TIME layout mode. A Hancom "save as .hwpx" DEGRADES the document (body line spacing
+        // collapsed onto the 160% default; auto-fit table rows re-floored to nominal heights) — even
+        // Hancom renders such a file ~2 pages looser than its .hwp original. What the user expects on
+        // upload is the ORIGINAL's look, so when the degraded fingerprint matches we AUTO-APPLY 레이아웃
+        // 정리 (line-spacing recovery + content-fit tables ≈ the .hwp look) and report it via
+        // `normalize_active`; the faithful Hancom-mirror stays ONE TOGGLE away (`set_normalize(false)`).
+        // A genuine document (fingerprint miss) opens FAITHFUL: floors applied, nothing recovered.
+        let mut auto_norm = false;
+        if let Some(ed) = session.doc.as_mut() {
+            let doc = ed.doc_mut();
+            let r = hwp_model::normalize::normalize_line_spacing(doc);
+            if r.applied {
+                hwp_model::normalize::content_fit_autofit_tables(doc);
+                auto_norm = true;
+            } else {
+                hwp_model::normalize::apply_faithful_table_heights(doc);
+            }
+        }
         Ok(HwpDoc {
             session,
             title,
@@ -184,7 +195,7 @@ impl HwpDoc {
             placed_cache: RefCell::new(None),
             place_builds: Cell::new(0),
             place_hits: Cell::new(0),
-            normalize_on: Cell::new(false),
+            normalize_on: Cell::new(auto_norm),
             ls_baseline,
         })
     }

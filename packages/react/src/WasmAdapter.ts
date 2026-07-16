@@ -337,6 +337,12 @@ export class WasmAdapter implements EngineAdapter {
     return this.guard((d) => d.renderPageSvg(page));
   }
 
+  /** Whether "레이아웃 정리" is currently ON (the engine auto-enables it at open on a degraded
+   *  hwp→hwpx conversion — the workspace syncs its toggle from this). */
+  normalizeActive(): Promise<boolean> {
+    return this.guard((d) => d.normalizeActive());
+  }
+
   /** Toggle "레이아웃 정리" (layout normalization) — see the interface doc. Parses the engine's JSON
    *  report into a typed `NormalizeReport` for the caller. */
   setNormalize(on: boolean): Promise<NormalizeReport> {

@@ -25,14 +25,20 @@ export interface EngineAdapter {
   /** UNTRUSTED, document-derived SVG markup for page `n`. The UI sanitizes before injecting. */
   pageSvg(page: number): Promise<string>;
 
-  /** OPTIONAL — toggle "레이아웃 정리" (layout normalization). Default OFF = faithful render (exactly as
-   *  the file specifies, how Hancom renders it). ON recovers a LOSSY hwp→hwpx conversion's inflated
-   *  line-spacing (a Hancom "save as .hwpx" collapses body paragraphs onto the 160% default; this pulls
-   *  them back to ~130%, approximating the original .hwp). RENDER-IR only — the round-trip bytes are
-   *  untouched, so a save is verbatim either way. Resolves to a report so the UI can tell the user
-   *  whether this document actually looked degraded. Backends that can't answer OMIT this (toggle
+  /** OPTIONAL — toggle "레이아웃 정리" (layout normalization). ON recovers a LOSSY hwp→hwpx conversion's
+   *  inflated layout (a Hancom "save as .hwpx" collapses body line spacing onto the 160% default and
+   *  re-floors auto-fit table rows; this restores ~130% + content-fit ≈ the original .hwp look). OFF =
+   *  faithful render (exactly as the file specifies — how Hancom renders the .hwpx). The engine
+   *  AUTO-ENABLES this at open when the degraded fingerprint matches (what users expect on upload is the
+   *  original's look) — read the initial state via `normalizeActive`. RENDER-IR only — the round-trip
+   *  bytes are untouched, so a save is verbatim either way. Resolves to a report so the UI can tell the
+   *  user whether this document actually looked degraded. Backends that can't answer OMIT this (toggle
    *  hidden). Reference impl: `WasmAdapter` via the engine `setNormalize` binding. */
   setNormalize?(on: boolean): Promise<NormalizeReport>;
+
+  /** OPTIONAL — whether "레이아웃 정리" is currently ON (the engine may auto-enable it at open on a
+   *  degraded conversion; the UI syncs its toggle from this after each open). */
+  normalizeActive?(): Promise<boolean>;
 
   /** Structural block under a PAGE-LOCAL px point, or null on a miss. */
   hitTest(page: number, x: number, y: number): Promise<BlockHit | null>;
