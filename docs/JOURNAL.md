@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-07-17 (Claude) · <hp:fwSpace/> 드롭 → 영문 병기 단어중간 깨짐 수정 (8d9c360)
+- 사용자 전환: 청창사 hwpx는 완전 열화(타 툴도 못 엶)라 테스트 부적합 → 창도패(doc9)로. 새 문제: 목차표 좌측칸 "1. 문제인식(Problem)"이 "(Proble/m)"로 단어 중간에서 깨짐. 한컴독스는 "1. 문제인식 / (Problem)" 정상.
+- **근본원인 실측**(doc9 raw XML): 셀 텍스트 = "1. 문제인식**<hp:fwSpace/>**(Problem)", paraPr breakLatin=KEEP_WORD. 파서 Empty 핸들러가 `<hp:fwSpace/>`(전각공백)를 other 분기로 흘려 텍스트 드롭+mark_not_simple. 공백 소실 → "문제인식(Problem)" 접합 → KEEP_WORD 백업할 공백 없어 단어중간 깸.
+- 수정 2곳: ①파서 push_inline_char로 fwSpace→U+3000·nbSpace→U+00A0·tab→\t·lineBreak→\n 인라인 TEXT 복원(simple 유지=편집가능성도 회복). ②조판기 layout_paragraph break 기회를 U+3000에서도 기록(is_full_width(U+3000)=true라 폭1em·단어경계walk 이미 정합). benchmark U+3000 0개→게이트 무영향.
+- **브라우저 실검증(doc9)**: (Problem)/(Solution)/(Scale-up)/(Team) 전부 온전, 한컴독스 일치. doc9는 정품이라 자동정규화 미발동(9p 충실 오픈=정상). 게이트 8==8/18==18, hwp-hwpx 57·typeset 62 그린, 회귀테스트 1 추가.
+- 교훈: HWPX 인라인 제어문자(fwSpace/nbSpace/tab/lineBreak)를 텍스트로 안 살리면 줄바꿈·간격·편집이 조용히 깨진다. "충실 파싱=XML→IR 완전성"의 실체적 갭.
+
 ## 2026-07-17 (Claude) · 열화 자동감지→정규화 자동적용 — 업로드 기본=원본 근사 (ff4b3fa)
 - 사용자 재보고 "hwpx가 원본 PDF와 전혀 다름(간격·색·보더·쪽수·폰트)". 재진단: 사용자 기준=원본 archive PDF(.hwp, 18p, p1에 체크리스트 1~12행+서명란)인데, 직전 커밋이 충실(=한글 미러 20p, p1에 1~7행)을 **기본값**으로 삼아 업로드 기본 모습이 원본에서 가장 멀어져 있었음. 한글의 .hwpx 렌더 자체가 원본과 전혀 다름((1).pdf 실측: 회색 안내박스·플래그 소실·20p) — 파일 열화.
 - 해결: **wasm open이 열화 지문 감지 시 정규화 자동 적용**(줄간격+표 content-fit, normalize_active 보고), 정품은 충실 오픈. normalizeActive() 어댑터 체인 추가, HwpWorkspace 오픈 시 토글 동기화+열화 감지 토스트.
