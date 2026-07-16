@@ -307,6 +307,16 @@ describe("EditController manual commands (issue 027) — each = ONE Intent = ONE
     expect(adapter.applied.every((i) => i.intent === "TableInsertRows")).toBe(true);
   });
 
+  it("빈 줄 추가/삭제 — InsertParagraphAt(no runs) below the anchor / DeleteBlock at the anchor", async () => {
+    const { core, adapter } = await openCore();
+    // 빈 줄 추가: an empty paragraph inserted BELOW block 2 (→ index 3) with no runs = a blank spacer line.
+    await core.edit.insertBlankParagraph(0, 3);
+    expect(adapter.applied[0]).toEqual({ intent: "InsertParagraphAt", section: 0, index: 3, runs: [], para: {} });
+    // 빈 줄 삭제: DeleteBlock at the anchored block.
+    await core.edit.deleteBlock(0, 3);
+    expect(adapter.applied[1]).toEqual({ intent: "DeleteBlock", section: 0, index: 3 });
+  });
+
   it("행 삽입 clamps count/cols to ≥1 (never an illegal empty insert)", async () => {
     const { core, adapter } = await openCore();
     await core.edit.insertRows(0, 1, 1, 0, 0);

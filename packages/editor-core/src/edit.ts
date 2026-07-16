@@ -155,6 +155,22 @@ export class EditController {
     return this.session.applyBatch([{ intent: "TableInsertRows", section, index, at, count: r, cols: c }]);
   }
 
+  /** 빈 줄 추가 — insert an EMPTY paragraph at top-level block `index` of `section` (the existing
+   *  `InsertParagraphAt` op with no runs → a blank line that occupies one line height, so it pushes the
+   *  following blocks/table down; used to nudge content onto the next page). `index == block` inserts
+   *  ABOVE that block, `index == block + 1` BELOW it (`index == len` appends; past-end throws). One undo
+   *  batch. Same lane on both shells (043 parity). */
+  async insertBlankParagraph(section: number, index: number): Promise<number> {
+    return this.session.applyBatch([{ intent: "InsertParagraphAt", section, index, runs: [], para: {} }]);
+  }
+
+  /** 줄/블록 삭제 — remove the top-level block at `(section, index)` as ONE undo unit (`DeleteBlock`).
+   *  Used to delete a blank spacer paragraph (백스페이스 대체). Undoable, so a mistaken delete is one
+   *  ⌘Z away; the engine throws on an out-of-range index (거짓 성공 없음). */
+  async deleteBlock(section: number, index: number): Promise<number> {
+    return this.session.applyBatch([{ intent: "DeleteBlock", section, index }]);
+  }
+
   /** 이미지 삽입 (issue 050): embed a dropped/uploaded image (base64 PNG/JPEG bytes, NO `data:` prefix) at
    *  `(section, block)` — AFTER `block`, or at the section END when `block` is `null` — as ONE undo batch
    *  (`InsertImage` → the engine's `InsertImageAt` op; layout logic untouched). `size` is the display box in

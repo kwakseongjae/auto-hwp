@@ -288,7 +288,8 @@
   color: #e6e6ea; background: transparent; border: none; padding: 6px 11px; cursor: pointer;
 }
 .hw-sel-action + .hw-sel-action { border-left: 1px solid rgba(255, 255, 255, 0.1); }
-.hw-sel-action:hover { background: rgba(124, 58, 237, 0.28); color: #fff; }
+.hw-sel-action:hover:not(:disabled) { background: rgba(124, 58, 237, 0.28); color: #fff; }
+.hw-sel-action:disabled { opacity: 0.38; cursor: default; }
 
 /* the anchored inline panel (compose → applied), drawn BELOW the element (own-render px × scale + gap). */
 .hw-inline-edit {
