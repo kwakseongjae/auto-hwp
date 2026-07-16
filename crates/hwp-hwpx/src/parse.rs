@@ -1263,7 +1263,10 @@ mod tests {
         assert_eq!(t.col_widths, vec![1000, 3000], "real per-column widths");
         // No `noAdjust` → auto-fit: the stored cellSz heights are NOMINAL, so NO row-height floor
         // (content drives). Flooring auto-fit tables is the #196 page-inflation bug.
-        assert!(t.row_heights.is_empty(), "auto-fit table → no row-height floor");
+        assert!(
+            t.row_heights.is_empty(),
+            "auto-fit table → no row-height floor"
+        );
     }
 
     /// A FIXED table (`noAdjust="1"`) DOES apply the `<hp:cellSz height>` floor (row height is
@@ -1273,12 +1276,19 @@ mod tests {
         let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run><hp:tbl rowCnt="1" colCnt="2" noAdjust="1"><hp:tr><hp:tc><hp:subList><hp:p><hp:run><hp:t>A</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="1000" height="500"/></hp:tc><hp:tc><hp:subList><hp:p><hp:run><hp:t>B</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="1" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="3000" height="800"/></hp:tc></hp:tr></hp:tbl></hp:run></hp:p></hs:sec>"#;
         let mut blocks = Vec::new();
         parse_section(xml, &mut blocks, &Default::default()).unwrap();
-        let t = blocks.iter().find_map(|b| match b {
-            Block::Table(t) => Some(t),
-            _ => None,
-        }).expect("table");
+        let t = blocks
+            .iter()
+            .find_map(|b| match b {
+                Block::Table(t) => Some(t),
+                _ => None,
+            })
+            .expect("table");
         assert_eq!(t.col_widths, vec![1000, 3000]);
-        assert_eq!(t.row_heights, vec![800], "fixed table keeps the cellSz height floor");
+        assert_eq!(
+            t.row_heights,
+            vec![800],
+            "fixed table keeps the cellSz height floor"
+        );
     }
 
     /// Batch C: a cell resolves its `borderFillIDRef` against the border pool → per-edge borders,
