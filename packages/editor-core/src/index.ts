@@ -100,6 +100,7 @@ export type {
   Intent,
   IntentCard,
   MatchBox,
+  NormalizeReport,
   OnAiRequest,
   OpenResult,
   Outcome,

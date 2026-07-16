@@ -45,4 +45,5 @@ export type {
   FindReplaceOptions,
   ReplaceResult,
   MatchBox,
+  NormalizeReport,
 } from "@tf-hwp/editor-core";

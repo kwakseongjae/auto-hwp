@@ -33,6 +33,8 @@ const METHODS = new Set([
   'pageCount',
   'placedStats',
   'renderPageSvg',
+  'setNormalize',
+  'normalizeActive',
   'hitTest',
   'tableAt',
   'imageAt',

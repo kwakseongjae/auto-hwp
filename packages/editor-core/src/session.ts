@@ -1,6 +1,6 @@
 import type { EngineAdapter } from "./adapter";
 import { Emitter } from "./events";
-import type { Anchor, CellAddr, DocContext, ImageBox, Intent, OpenResult, OutlineItem, PageGeom, RunSpec } from "./types";
+import type { Anchor, CellAddr, DocContext, ImageBox, Intent, NormalizeReport, OpenResult, OutlineItem, PageGeom, RunSpec } from "./types";
 
 /// DocSession — the document lifecycle facade over an EngineAdapter (SDK-LAYERS L2), DESCENDED from
 /// HwpWorkspace's document/undo/font state. It owns: the open-document metadata (`OpenResult`), the
@@ -149,6 +149,18 @@ export class DocSession {
     this.fontFamily = family;
     await this.refreshPages();
     this.layoutInvalidated.emit();
+  }
+
+  /** Toggle "레이아웃 정리" (layout normalization) — recovers a lossy hwp→hwpx conversion's inflated
+   *  line-spacing (default OFF = faithful). Like `registerFont`, it re-paginates and re-renders. Returns
+   *  the engine report (whether the document actually looked degraded), or `null` when the backend
+   *  can't answer (the UI then hides the toggle). */
+  async setNormalize(on: boolean): Promise<NormalizeReport | null> {
+    if (!this.adapter.setNormalize) return null;
+    const report = await this.adapter.setNormalize(on);
+    await this.refreshPages();
+    this.layoutInvalidated.emit();
+    return report;
   }
 
   // ── read-only geometry / runs (issue 027 — optional adapter methods) ──────────────────────────────

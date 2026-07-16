@@ -216,6 +216,14 @@ export class HwpDoc {
   /** UNTRUSTED SVG string — never innerHTML raw; prefer renderPageSvgSanitized / sanitizeSvg (R7). */
   renderPageSvg(n: number): string;
   renderPageSvgSanitized(n: number): string;
+  /** Toggle "레이아웃 정리" (layout normalization). Default OFF = FAITHFUL render. ON recovers a lossy
+   *  hwp→hwpx conversion's inflated line-spacing (Hancom "save as .hwpx" collapses body paragraphs onto
+   *  the 160% default; this pulls them back to ~130%). RENDER-IR only — round-trip bytes untouched.
+   *  ⚠️ Re-paginates — re-query `pageCount()` and re-render every page after calling. Returns a JSON
+   *  report string `{on,applied,loosePct,targetPct,paragraphsTouched,total}`. */
+  setNormalize(on: boolean): string;
+  /** Whether "레이아웃 정리" is currently ON. */
+  normalizeActive(): boolean;
   hitTest(page: number, x: number, y: number): BlockHit | null;
   tableAt(page: number, x: number, y: number): TableBox | null;
   /** ANCHORED IMAGE under (x,y) in own-render px for click-select + the 8-handle overlay (issue 049) — the

@@ -237,6 +237,25 @@ export interface OpenResult {
   pages: number;
 }
 
+/** Result of a "레이아웃 정리" (layout normalization) toggle — see `EngineAdapter.setNormalize`. Tells
+ *  the UI whether the document actually matched the lossy-conversion fingerprint (`applied`) and, if so,
+ *  what spacing was recovered (`loosePct` → `targetPct`, e.g. 160 → 130) over how many paragraphs. When
+ *  `on` is false this is the faithful state; `applied` is then false. */
+export interface NormalizeReport {
+  /** Whether normalization is now ON (the requested toggle state). */
+  on: boolean;
+  /** Whether the degraded fingerprint matched and spacing was actually pulled in (false = faithful/no-op). */
+  applied: boolean;
+  /** The inflated line-spacing % that dominated (e.g. 160), or 0 if none. */
+  loosePct: number;
+  /** The tight % it was recovered to (e.g. 130), or 0 if not applied. */
+  targetPct: number;
+  /** Paragraphs whose effective spacing changed. */
+  paragraphsTouched: number;
+  /** Total paragraphs in the document (denominator for `paragraphsTouched`). */
+  total: number;
+}
+
 /** A structural edit ANCHOR the user marked (issue #009: cell/range/paragraph/table) that rides along
  *  with a chat prompt so the AI edits exactly that spot. Coordinates are STRUCTURE indices — NEVER
  *  pixels. `section`/`block` are the model anchor; `rows`/`cols` are inclusive GLOBAL bounds; `label`

@@ -41,6 +41,30 @@ fn js_err(code: &str, message: &str) -> JsValue {
     e.into()
 }
 
+/// Total paragraph count including table-cell paragraphs (for the normalize report's `total` when the
+/// transform is OFF, so the UI always has a denominator).
+fn doc_paragraph_count(doc: &hwp_model::prelude::SemanticDoc) -> usize {
+    fn walk(b: &hwp_model::prelude::Block, n: &mut usize) {
+        match b {
+            hwp_model::prelude::Block::Paragraph(_) => *n += 1,
+            hwp_model::prelude::Block::Table(t) => {
+                for c in &t.cells {
+                    for cb in &c.blocks {
+                        walk(cb, n);
+                    }
+                }
+            }
+        }
+    }
+    let mut n = 0;
+    for s in &doc.sections {
+        for b in &s.blocks {
+            walk(b, &mut n);
+        }
+    }
+    n
+}
+
 /// Classify an engine error string (the edit/render lanes return `String`, issue 008 §4) into a
 /// coarse `code` so the JS side can distinguish "re-open needed" from "bad request" without string
 /// matching. The raw message is preserved verbatim as `.message`.
@@ -105,6 +129,15 @@ pub struct HwpDoc {
     place_builds: Cell<u32>,
     /// How many geometry queries were served from the cached placement (no re-typeset).
     place_hits: Cell<u32>,
+    /// Opt-in "레이아웃 정리" state (default OFF = faithful render). When ON, the live doc's paragraph
+    /// line-spacing has been pulled in by [`hwp_model::normalize_line_spacing`] to recover a lossy
+    /// hwp→hwpx conversion's inflated spacing (a Hancom "save as .hwpx" collapses body paragraphs onto
+    /// the 160% default; this restores ~130%). See `set_normalize`.
+    normalize_on: Cell<bool>,
+    /// Snapshot of every `para_shape.line_spacing_value` at OPEN (faithful baseline). Toggling
+    /// normalization OFF restores these, so the transform is fully reversible without re-parsing —
+    /// and edit-interned shapes (indices ≥ baseline length) are left untouched by the restore.
+    ls_baseline: Vec<i32>,
 }
 
 #[wasm_bindgen]
@@ -123,6 +156,19 @@ impl HwpDoc {
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or(n)
         });
+        // Faithful baseline of every paragraph shape's line spacing, captured before any normalization
+        // so the "레이아웃 정리" toggle is reversible (see `set_normalize`).
+        let ls_baseline = session
+            .doc
+            .as_ref()
+            .map(|d| {
+                d.doc()
+                    .para_shapes
+                    .iter()
+                    .map(|s| s.line_spacing_value)
+                    .collect()
+            })
+            .unwrap_or_default();
         Ok(HwpDoc {
             session,
             title,
@@ -131,6 +177,8 @@ impl HwpDoc {
             placed_cache: RefCell::new(None),
             place_builds: Cell::new(0),
             place_hits: Cell::new(0),
+            normalize_on: Cell::new(false),
+            ls_baseline,
         })
     }
 
@@ -222,6 +270,65 @@ impl HwpDoc {
     #[wasm_bindgen(js_name = pageCount)]
     pub fn page_count(&self) -> Result<usize, JsValue> {
         Ok(self.render_all()?.len())
+    }
+
+    /// Toggle the opt-in "레이아웃 정리" (layout normalization). Default is OFF = FAITHFUL: the document
+    /// renders exactly as the file specifies (how Hancom itself renders it). Turning it ON recovers a
+    /// LOSSY hwp→hwpx conversion's inflated line-spacing — a Hancom "save as .hwpx" collapses most body
+    /// paragraphs onto the 160% default paragraph shape, so the same document renders ~1.6× looser than
+    /// its `.hwp` twin; this pulls those collapsed paragraphs back to the pool's central tight spacing
+    /// (~130%), approximating the original.
+    ///
+    /// Idempotent and reversible: it ALWAYS restores the faithful baseline first, then re-applies the
+    /// transform if `on`. It is a RENDER-IR mutation only — the round-trip bytes are untouched (an
+    /// unedited paragraph re-emits its original `paraPrIDRef`), so a save round-trips verbatim either
+    /// way. Returns a JSON report `{on, applied, loosePct, targetPct, paragraphsTouched, total}` so the
+    /// UI can show whether the current document actually looked degraded.
+    ///
+    /// The revision is deliberately NOT bumped (this is a view choice, not an undoable edit), so the
+    /// render/geometry caches are cleared explicitly here to avoid serving stale (pre-transform) layout.
+    #[wasm_bindgen(js_name = setNormalize)]
+    pub fn set_normalize(&mut self, on: bool) -> Result<String, JsValue> {
+        let baseline = self.ls_baseline.clone();
+        let edit = self
+            .session
+            .doc
+            .as_mut()
+            .ok_or_else(|| js_err("no_document", "no document open (call open first)"))?;
+        let doc = edit.doc_mut();
+        // Always start from the faithful baseline so the toggle is stateless w.r.t. the prior state.
+        for (i, &v) in baseline.iter().enumerate() {
+            if let Some(s) = doc.para_shapes.get_mut(i) {
+                s.line_spacing_value = v;
+            }
+        }
+        let report = if on {
+            hwp_model::normalize::normalize_line_spacing(doc)
+        } else {
+            hwp_model::normalize::NormalizeReport {
+                total_paragraphs: doc_paragraph_count(doc),
+                ..Default::default()
+            }
+        };
+        // View change, not an edit → revision unchanged → clear the layout caches by hand.
+        *self.svg_cache.borrow_mut() = None;
+        *self.placed_cache.borrow_mut() = None;
+        self.normalize_on.set(on);
+        Ok(format!(
+            "{{\"on\":{},\"applied\":{},\"loosePct\":{},\"targetPct\":{},\"paragraphsTouched\":{},\"total\":{}}}",
+            on,
+            report.applied,
+            report.loose_pct,
+            report.target_pct,
+            report.paragraphs_touched,
+            report.total_paragraphs
+        ))
+    }
+
+    /// Whether "레이아웃 정리" is currently ON.
+    #[wasm_bindgen(js_name = normalizeActive)]
+    pub fn normalize_active(&self) -> bool {
+        self.normalize_on.get()
     }
 
     /// Own-render SVG **string** for page `n` (0-based). The fidelity surface (issue 012 `render_svg`).

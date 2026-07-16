@@ -2255,6 +2255,16 @@ impl EditSession {
         &self.doc
     }
 
+    /// Mutable access to the live document for a NON-EDIT view transform (does NOT bump the revision
+    /// or push undo). Used only for the opt-in layout normalization (line-spacing recovery on lossy
+    /// hwpx conversions) — a render-IR mutation, never a content edit. A caller that changes the doc
+    /// through this MUST invalidate its own render/geometry caches manually (the revision is unchanged
+    /// by design, so those caches would otherwise serve stale layout). Do NOT route content edits here
+    /// — they must go through `do_op` so they are undoable and bump the revision.
+    pub fn doc_mut(&mut self) -> &mut SemanticDoc {
+        &mut self.doc
+    }
+
     /// Monotonic revision of the live document — bumps on every applied/undone/redone change.
     /// A render or serialize cache can key on this: equal revision ⇒ identical document.
     pub fn revision(&self) -> u64 {

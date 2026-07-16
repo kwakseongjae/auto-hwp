@@ -1,7 +1,7 @@
 import { HwpDoc, initEngine, resetEngine } from "@tf-hwp/engine";
 import { EngineWorkerClient } from "@tf-hwp/engine/worker-client";
 import type { EngineAdapter } from "./EngineAdapter";
-import type { BlockHit, CaretRect, CellAddr, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
+import type { BlockHit, CaretRect, CellAddr, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, NormalizeReport, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
 
 type WasmInput = string | URL | Request | BufferSource | WebAssembly.Module;
 
@@ -61,6 +61,8 @@ type MaybePromise<T> = T | Promise<T>;
 interface EngineDoc {
   pageCount(): MaybePromise<number>;
   renderPageSvg(page: number): MaybePromise<string>;
+  setNormalize(on: boolean): MaybePromise<string>;
+  normalizeActive(): MaybePromise<boolean>;
   hitTest(page: number, x: number, y: number): MaybePromise<unknown>;
   tableAt(page: number, x: number, y: number): MaybePromise<unknown>;
   tableCellAt(page: number, x: number, y: number): MaybePromise<unknown>;
@@ -169,6 +171,8 @@ export class WasmAdapter implements EngineAdapter {
     return {
       pageCount: call("pageCount") as EngineDoc["pageCount"],
       renderPageSvg: call("renderPageSvg") as EngineDoc["renderPageSvg"],
+      setNormalize: call("setNormalize") as EngineDoc["setNormalize"],
+      normalizeActive: call("normalizeActive") as EngineDoc["normalizeActive"],
       hitTest: call("hitTest"),
       tableAt: call("tableAt"),
       tableCellAt: call("tableCellAt"),
@@ -331,6 +335,23 @@ export class WasmAdapter implements EngineAdapter {
   /** Raw (engine-sanitized) SVG — HwpPageView sanitizes AGAIN through this package's gate (R7). */
   pageSvg(page: number): Promise<string> {
     return this.guard((d) => d.renderPageSvg(page));
+  }
+
+  /** Toggle "레이아웃 정리" (layout normalization) — see the interface doc. Parses the engine's JSON
+   *  report into a typed `NormalizeReport` for the caller. */
+  setNormalize(on: boolean): Promise<NormalizeReport> {
+    return this.guard(async (d) => {
+      const json = await d.setNormalize(on);
+      const r = JSON.parse(json) as Partial<NormalizeReport>;
+      return {
+        on: !!r.on,
+        applied: !!r.applied,
+        loosePct: r.loosePct ?? 0,
+        targetPct: r.targetPct ?? 0,
+        paragraphsTouched: r.paragraphsTouched ?? 0,
+        total: r.total ?? 0,
+      };
+    });
   }
 
   hitTest(page: number, x: number, y: number): Promise<BlockHit | null> {

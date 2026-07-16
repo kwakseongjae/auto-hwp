@@ -306,6 +306,12 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // re-pagination is owned by the core; this state is the DOM/@font-face half only.)
   const [selectedFont, setSelectedFont] = useState<{ family: string; url: string } | null>(null);
   const defaultFontAppliedFor = useRef<Uint8Array | null>(null);
+  // Opt-in "레이아웃 정리" (layout normalization): recovers a lossy hwp→hwpx conversion's inflated
+  // line-spacing (Hancom "save as .hwpx" collapses body paragraphs onto the 160% default). Default OFF =
+  // faithful render. `normalizeSupported` gates the toggle's visibility to backends that expose it.
+  const [normalizeOn, setNormalizeOn] = useState(false);
+  const [normalizeBusy, setNormalizeBusy] = useState(false);
+  const normalizeSupported = typeof (adapter as { setNormalize?: unknown }).setNormalize === "function";
   // Last pointer-up (time + client px) for the double-click detector. We can't use the DOM `dblclick`
   // event: HwpPageView `setPointerCapture`s on pointerdown, which redirects the pointerup so the browser
   // never synthesizes click/dblclick. So we detect "two quick ups at ~the same spot" ourselves.
@@ -755,6 +761,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         if (cancelled) return;
         core.selection.clear();
         core.cellCaret.clear(); // 053: a caret never survives a document swap
+        setNormalizeOn(false); // a fresh HwpDoc opens FAITHFUL; keep the toggle in sync with the new doc
         toast(`열림: ${props.document!.name ?? "문서"} · ${r.pages}쪽`);
       } catch (e) {
         if (!cancelled) toast(`열기 실패: ${e}`);
@@ -2342,6 +2349,27 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     }
   }, [adapter, props.document, props.onExport, toast]);
 
+  // Toggle "레이아웃 정리" (layout normalization). The core re-paginates + re-renders (the refreshToken
+  // effect re-fetches page SVGs). The engine report tells us whether THIS document actually looked
+  // degraded, so we can distinguish "정리됨" from "이미 정상 (변화 없음)".
+  const toggleNormalize = useCallback(async () => {
+    if (normalizeBusy) return;
+    const next = !normalizeOn;
+    setNormalizeBusy(true);
+    try {
+      const report = await core.session.setNormalize(next);
+      setNormalizeOn(next);
+      if (!next) toast("원본 그대로 렌더합니다.");
+      else if (report?.applied)
+        toast(`레이아웃 정리: 줄간격 ${report.loosePct}%→${report.targetPct}% (${report.paragraphsTouched}개 문단)`);
+      else toast("이미 원본이 정상이라 바뀐 것이 없습니다.");
+    } catch (e) {
+      toast(`레이아웃 정리 실패: ${e}`);
+    } finally {
+      setNormalizeBusy(false);
+    }
+  }, [core, normalizeOn, normalizeBusy, toast]);
+
   const exportPdf = useCallback(async () => {
     try {
       if (!adapter.hasFont()) {
@@ -2503,6 +2531,21 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
             onPick={({ family, bytes }) => void applyFont(family, bytes)}
             onError={(m) => toast(m)}
           />
+        )}
+        {normalizeSupported && (
+          <button
+            className={`hw-tool${normalizeOn ? " hw-tool-active" : ""}`}
+            onClick={() => void toggleNormalize()}
+            disabled={!meta || normalizeBusy}
+            aria-pressed={normalizeOn}
+            title={
+              normalizeOn
+                ? "레이아웃 정리 켜짐 — 눌러서 원본 그대로 보기 (hwpx 변환으로 벌어진 줄간격을 조여 원본에 가깝게)"
+                : "레이아웃 정리 — hwp→hwpx 변환으로 벌어진 줄간격을 원본에 가깝게 조입니다"
+            }
+          >
+            {normalizeBusy ? "정리 중…" : "레이아웃 정리"}
+          </button>
         )}
         <button className="hw-tool" onClick={exportHtml} disabled={!meta} title="HTML 다운로드">
           HTML

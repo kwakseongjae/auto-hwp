@@ -164,6 +164,16 @@ export class HwpDoc {
   renderPageSvgSanitized(n) {
     return sanitizeSvg(this.renderPageSvg(n));
   }
+  /** Toggle "레이아웃 정리" (layout normalization). Default OFF = FAITHFUL. ON recovers a lossy hwp→hwpx
+   *  conversion's inflated line-spacing. Re-paginates — re-query pageCount()/re-render after. Returns the
+   *  raw JSON report string (the caller parses it). */
+  setNormalize(on) {
+    return this.#call((r) => r.setNormalize(on));
+  }
+  /** Whether "레이아웃 정리" is currently ON. */
+  normalizeActive() {
+    return this.#call((r) => r.normalizeActive());
+  }
   /** Structural block under (x,y) in own-render px, or `null` on a miss. */
   hitTest(page, x, y) {
     return this.#call((r) => {

@@ -13,6 +13,7 @@ pub mod document;
 pub mod error;
 pub mod font_class;
 pub mod layout;
+pub mod normalize;
 pub mod style;
 pub mod types;
 
@@ -22,6 +23,7 @@ pub mod prelude {
     pub use crate::error::{Error, Result};
     pub use crate::font_class::*;
     pub use crate::layout::*;
+    pub use crate::normalize::{normalize_line_spacing, NormalizeReport};
     pub use crate::style::*;
     pub use crate::types::*;
 }

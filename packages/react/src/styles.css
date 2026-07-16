@@ -47,6 +47,9 @@
 .hw-tool:disabled { opacity: 0.4; cursor: default; }
 .hw-tool-accent { background: var(--hw-accent); color: #fff; border-color: var(--hw-accent); }
 .hw-tool-accent:hover { opacity: 0.9; background: var(--hw-accent); }
+/* toggle ON state (e.g. 레이아웃 정리) — a soft accent tint so it reads as "engaged" not "primary CTA". */
+.hw-tool-active { background: #e8effe; color: var(--hw-accent); border-color: var(--hw-accent); font-weight: 600; }
+.hw-tool-active:hover { background: #dbe7fd; }
 
 /* ---- font picker (issue 022) ---- */
 .hw-fontpicker { display: inline-flex; align-items: center; gap: 6px; }

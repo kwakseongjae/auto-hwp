@@ -1,4 +1,4 @@
-import type { BlockHit, CaretRect, CellAddr, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
+import type { BlockHit, CaretRect, CellAddr, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, NormalizeReport, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
 
 /// EngineAdapter — the backend seam (SDK-LAYERS L1↔L2). It abstracts the ACTUAL surface a backend
 /// exposes (open / page SVG / hit-test·tableAt / applyIntent / undo·redo / export) so the SAME
@@ -24,6 +24,15 @@ export interface EngineAdapter {
 
   /** UNTRUSTED, document-derived SVG markup for page `n`. The UI sanitizes before injecting. */
   pageSvg(page: number): Promise<string>;
+
+  /** OPTIONAL — toggle "레이아웃 정리" (layout normalization). Default OFF = faithful render (exactly as
+   *  the file specifies, how Hancom renders it). ON recovers a LOSSY hwp→hwpx conversion's inflated
+   *  line-spacing (a Hancom "save as .hwpx" collapses body paragraphs onto the 160% default; this pulls
+   *  them back to ~130%, approximating the original .hwp). RENDER-IR only — the round-trip bytes are
+   *  untouched, so a save is verbatim either way. Resolves to a report so the UI can tell the user
+   *  whether this document actually looked degraded. Backends that can't answer OMIT this (toggle
+   *  hidden). Reference impl: `WasmAdapter` via the engine `setNormalize` binding. */
+  setNormalize?(on: boolean): Promise<NormalizeReport>;
 
   /** Structural block under a PAGE-LOCAL px point, or null on a miss. */
   hitTest(page: number, x: number, y: number): Promise<BlockHit | null>;
