@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-07-16 (Claude) · HWPX-vs-HWP 시각 파리티 — 브라우저 실검증 3수정
+- 사용자 지시: "hwp랑 퀄리티 차이 거의 안나게 계속 고도화, PDF 바탕 시각검증". 참조 = 2026 청창사 신청서 PDF. 진단은 **export-pdf가 아니라 실제 브라우저(localhost:3000) 스크린샷**으로 함(CORS 서버 8899 + JS 업로드) — export가 못 잡는 폰트 이슈를 드러냄.
+- **①행높이(7a06e9f)**: noAdjust=0(auto-fit) 표에 저장 cellSz 행높이 플로어 적용 → 20p 팽창. 게이트: 플로어 미적용으로 18p 파리티 회복.
+- **②볼드(021a08f)**: @font-face에 weight 서술자 없음 + CJK 합성볼드 부실 → 헤더가 전부 regular로 보임(볼드 위계 상실). NanumGothic-Bold weight-700 실 face 로드. 브라우저 확대 검증(헤더 볼드 확인).
+- **③serif(c51e5ef)**: 명조/바탕 run이 NanumMyeongjo 404 → 고딕 폴백. NanumMyeongjo Reg+Bold 번들(assets/fonts)+serif 400/700 @font-face. 브라우저 JS 검증: `Nanum Myeongjo 400|loaded 700|loaded`, serif text 18곳 실렌더. react vitest 316 그린.
+- 열린 것: 자가진단표 ▸플래그 배너 형태(한글 네이티브 테두리 장식 — hwp/hwpx 양쪽 렌더 미구현, 저우선). 줄간격 밀도 미세차(파일 충실). 사용자 재업로드 시각확인 대기.
+
 ## 2026-07-15~16 (Claude) · 웹 QA 5차 3건 — 에이전틱버그·Figma툴바·HWPX렌더깨짐
 - **#1 (59101a6)**: 에이전틱 편집이 "제안된 편집 없음"으로 멈춤 = **Grok이 emit_intents 터미널 툴콜에서 degenerate**(인텐트명 'SetTableCell纺'·공백 폭주 → 화이트리스트 드롭). + 러너 핫리로드됐으나 프롬프트 dist 서버캐시 스테일. 수정: emit_intents 툴 제거→최종 편집 JSON 배열 텍스트 출력(비스트리밍과 동일)+웹검색 캡 3회. 실 Grok 실증.
 - **#2 (86ad5b9)**: 매 선택마다 뜨는 플로팅 툴바 짜증 → **조사서 지속 리본(FormatRibbon/048)이 이미 존재** 발견(플로팅은 중복). FloatingToolbar 렌더 제거+리본에 서체+컴팩트 AI pill.

@@ -3,9 +3,10 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
-- 기준 커밋: `7a06e9f`(웹 QA 4차 배치 = 차트) — **R12~R14 + 실물QA 065·066 + 웹QA 2차(#1~#4)·3차(①②③)·4차(8/8: 호버·표생성·중첩표Tier1+2·썸네일·멀티모달·에이전틱AI·차트) 완료**. GitHub: https://github.com/kwakseongjae/tf-hwp (private)
-- 갱신: 2026-07-14 · Claude — 웹 QA 3차 배치: ①AI채우기 검정색(32f521b)·②다중페이지 드래그(c6e5319)·③챗카드revert+웹검색인용(4aa1083).
-  전 검증 그린(게이트 8==8/18==18, vitest 23/163/305/44, e2e 챗/smoke 11). 미푸시분 있으면 이 배치. 2차=ace7657, 065=79ecd1a, 066=dab3e87.
+- 기준 커밋: `c51e5ef`(HWPX 시각 파리티 = serif 렌더) — **R12~R14 + 실물QA 065·066 + 웹QA 2~6차 + HWPX-vs-HWP 시각 파리티 배치 완료**. GitHub: https://github.com/kwakseongjae/tf-hwp (private)
+- 갱신: 2026-07-16 · Claude — HWPX 시각 파리티 배치(브라우저 실검증 기반, 참조 PDF: 2026 청창사 신청서):
+  ①행높이 noAdjust auto-fit 20→18p(7a06e9f) ②볼드 미렌더→실 weight-700 face(021a08f) ③serif(명조/바탕) NanumMyeongjo 번들+400/700(c51e5ef).
+  전 검증 그린(게이트 8==8/18==18, react vitest 316). 이전 배치: 웹QA 3차=4aa1083, 2차=ace7657, 065=79ecd1a, 066=dab3e87.
 
 ## 지금 (현재 위치)
 - 로드맵 기준: **R12 + R13 + R14 완료 + 후속 배치 진행** — R12(051~057), R13(058·059·060),
