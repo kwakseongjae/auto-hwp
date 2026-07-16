@@ -22,13 +22,16 @@ export interface FontCatalogEntry {
   source: string;
   /** True for the repo-bundled default (NanumGothic) — always available offline; others need fetch. */
   bundled?: boolean;
+  /** Basename of the BOLD variant (served alongside `file`), if any → binds a weight-700 `@font-face` so
+   *  font-weight="700" headers render TRUE bold instead of unreliable CJK synthetic bold. */
+  boldFile?: string;
 }
 
 /** The v1 curated catalog — **all OFL, redistribution-legal** (issue §카탈로그 v1 / R8). Download URLs
  *  are the app's concern (it serves these `file`s from its own font dir); `docs/FONT-CATALOG.md` carries
  *  the license table + original-source links. A host maps each entry to a URL via `catalogUrl`. */
 export const FONT_CATALOG: readonly FontCatalogEntry[] = [
-  { family: "Nanum Gothic", label: "나눔고딕", license: "OFL", file: "NanumGothic-Regular.ttf", source: "https://github.com/google/fonts/tree/main/ofl/nanumgothic", bundled: true },
+  { family: "Nanum Gothic", label: "나눔고딕", license: "OFL", file: "NanumGothic-Regular.ttf", source: "https://github.com/google/fonts/tree/main/ofl/nanumgothic", bundled: true, boldFile: "NanumGothic-Bold.ttf" },
   { family: "Nanum Myeongjo", label: "나눔명조", license: "OFL", file: "NanumMyeongjo-Regular.ttf", source: "https://github.com/google/fonts/tree/main/ofl/nanummyeongjo" },
   { family: "Noto Sans KR", label: "본고딕 (Noto Sans KR)", license: "OFL", file: "NotoSansKR-Regular.ttf", source: "https://github.com/notofonts/noto-cjk" },
   { family: "Noto Serif KR", label: "본명조 (Noto Serif KR)", license: "OFL", file: "NotoSerifKR-Regular.ttf", source: "https://github.com/notofonts/noto-cjk" },
@@ -94,16 +97,27 @@ export function isTtc(bytes: Uint8Array): boolean {
  *  for the SAME bytes fed to `registerFont` (metrics + PDF), so screen == PDF. The alias rule targets
  *  `<text>` inside `.hw-sheet` (where HwpPageView draws the SVG) so every document font name renders in
  *  the selected face; the `NanumGothic` re-definition covers the SVG's universal fallback name too. */
-export function buildFontFaceCss(family: string, url: string, opts?: { serifUrl?: string }): string {
+export function buildFontFaceCss(family: string, url: string, opts?: { serifUrl?: string; boldUrl?: string }): string {
   const fam = quoteFamily(family);
   const src = `url("${url}")`;
-  // No font-weight/style descriptors → the one face matches any request; the browser synthesizes
-  // bold/oblique for the SVG's font-weight="700"/font-style="italic" presentation attributes.
-  const rules = [
-    `@font-face { font-family: ${fam}; src: ${src}; }`,
-    `@font-face { font-family: "NanumGothic"; src: ${src}; }`,
-    `.hw-sheet svg text { font-family: ${fam}, "NanumGothic", sans-serif !important; }`,
-  ];
+  const boldSrc = opts?.boldUrl ? `url("${opts.boldUrl}")` : null;
+  // When a REAL bold face is available, register it at weight 700 (and the regular at 400) so the SVG's
+  // font-weight="700" headers render TRUE bold. Synthetic bold on a CJK Regular face is unreliable —
+  // browsers barely thicken Hangul glyphs — so the headers looked regular (the whole doc lost its 볼드
+  // hierarchy). Without a bold URL, fall back to the single-face v1 (synthetic bold, weight-agnostic).
+  const rules = boldSrc
+    ? [
+        `@font-face { font-family: ${fam}; src: ${src}; font-weight: 400; }`,
+        `@font-face { font-family: ${fam}; src: ${boldSrc}; font-weight: 700; }`,
+        `@font-face { font-family: "NanumGothic"; src: ${src}; font-weight: 400; }`,
+        `@font-face { font-family: "NanumGothic"; src: ${boldSrc}; font-weight: 700; }`,
+        `.hw-sheet svg text { font-family: ${fam}, "NanumGothic", sans-serif !important; }`,
+      ]
+    : [
+        `@font-face { font-family: ${fam}; src: ${src}; }`,
+        `@font-face { font-family: "NanumGothic"; src: ${src}; }`,
+        `.hw-sheet svg text { font-family: ${fam}, "NanumGothic", sans-serif !important; }`,
+      ];
   // Issue 058: bind the OFL SERIF substitute so 명조 runs render serif (the own-render SVG emits
   // `font-family="Nanum Myeongjo, NanumGothic, sans-serif"` for them). The attribute-scoped rule is MORE
   // specific than the blanket `.hw-sheet svg text` collapse above, so serif glyphs keep the serif face
