@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-17 (Claude) · 정규화 지문 코퍼스 검증(Task3) + 표 행높이 축 조사(Task2) (471adf1)
+- **Task3 지문 검증**: archive 실물 12개 .hwpx 스윕. **발동 3/3 = 전부 한글 hwpx저장 열화본**(doc3 예창패·doc7 초창패·doc11 청창사, loose 93~99%). doc3/doc7은 .hwp 쌍둥이 대조로 확정: .hwp 130%본문(loose44/41%) vs .hwpx 160%붕괴(99%) → 발동 정당(오탐0). **비발동 9/9 = 130% 본문 지배**(loose 31~48%, 쌍둥이도 동일=정품). 경계(발동93~99% vs 비발동31~48%)가 임계값0.60을 큰 여유로 통과. 그 경계(45% loose+rich pool→미발동)를 회귀테스트로 고정.
+- **Task2 표 행높이 축 결론 = 무변경(현행 content-fit이 정답)**: 실험(플로어 항상적용) 결과 열화doc 페이지가 .hwp에 근접(doc3 5→6, doc7 5→6, doc11 정규화17)하나, 저장 cellSz높이=균일 명목값(2200)이라 **단일행(체크리스트)을 강제로 늘려 페이지당 항목수 감소** → 사용자 검증한 "자가진단표 1~12행" 밀도 역행(7a06e9f "플로어→7항목 vs 무플로어→12항목"과 일치). 열화 .hwpx는 .hwp의 실제 per-row 높이를 잃었으므로 content-fit이 최선근사. 실측 doc11 정규화 브라우저17p≈.hwp18p로 이미 근접. → 플로어 미적용 유지.
+- 옵션(저우선·미실행): 충실 모드를 Hancom render(플로어=20p)에 맞추는 mode-aware 표높이 — 사용자 관심은 정규화(=.hwp)라 가치 낮음.
+
 ## 2026-07-16 (Claude) · HWPX 줄간격 근본진단 + "레이아웃 정리" 토글 (4d74c11·d23ee43)
 - 사용자: "그냥 대응 말고 원인부터. hwp 동작방식이랑 다른게 있으니 이런 드라마틱한 차이가." → **통제실험**(archive의 동일문서 .hwp/.hwpx 둘 다 파싱): .hwp 줄간격 130%×501 다양 vs .hwpx 160%×1098(94%). 원인=한글 "hwpx 저장"이 본문 78%(916/1172)를 바탕글 기본 paraPr(id0=160%)로 리매핑→원본130% 파괴. version.xml=Hancom Office 13(우리변환 아님). **한글 자신도 이 hwpx를 20p(=.hwp 18p보다 벌어짐)로 렌더**(참조PDF 2p 직접비교로 확인)→우리 읽기는 파일에 충실. 즉 괴리=파일 열화지 렌더버그 아님.
 - 사용자 선택(AskUser): "충실 기본 + 정규화 토글 둘 다". 구현: hwp-model::normalize_line_spacing(열화지문=단일 loose>60%지배+풀에 미참조 tight다수 감지→collapsed 문단 160→풀중심130% 복원, 렌더-IR only·moat보존, 정품160%문서 미발동) → EditSession::doc_mut(리비전미범프) → wasm setNormalize/normalizeActive(baseline복원 가역+캐시클리어) → engine 래퍼(index.js/d.ts)+worker화이트리스트 → adapter/session → HwpWorkspace 툴바 토글.
