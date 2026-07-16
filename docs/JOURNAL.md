@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-17 (Claude) · mode-aware 표 행높이 옵션 구현 (5e18905)
+- 사용자 요청으로 "충실=한글 렌더에 맞춤" 옵션 구현. 재분석: 손실 hwp→hwpx의 auto-fit 표는 저장 cellSz가 균일 명목값(2200)인데 **한글은 max(내용,저장)로 플로어** → 벌어짐(체크리스트 7행/p, 20p). 우리는 7a06e9f로 content-fit(16p)이라 한글과 달랐음. 한글 .hwpx PDF가 page2에 체크리스트 8~12행으로 시작(=page1 1~7행)한 것이 플로어 증거.
+- 구현(round-trip 안전 우선): 파스는 auto-fit 표 cellSz 플로어를 **새 렌더-IR 필드 `Table::stored_row_heights`에만** 담고 `row_heights`는 content-driven 유지(054/020 왕복 테스트 무영향). JSX `table_eq` 미비교(src_span식). normalize 모듈 `apply_faithful_table_heights`⇄`content_fit_autofit_tables`(상호역·멱등, nested 표 순회, fixed 표 미접촉). wasm open이 기본 충실 플로어 적용, setNormalize가 baseline 복원+플로어 재적용→applied 시 content-fit.
+- **브라우저 실검증(cc.hwpx)**: 충실 **20p = 한글 .hwpx 렌더 정확 일치**(체크리스트 벌어짐) ↔ 정규화 **17p**(≈.hwp 18p, 체크리스트 1~4행/p 조밀) ↔ 오프 20p 복귀. 게이트 8==8/18==18(.hwp 무영향), model 15·hwpx 56·jsx·ops 79·react 316 그린.
+- 이제 두 모드 모두 원칙적: 충실=한글 미러(20p), 정규화=.hwp 복원(17p). 사용자 검수 대기.
+
 ## 2026-07-17 (Claude) · 정규화 지문 코퍼스 검증(Task3) + 표 행높이 축 조사(Task2) (471adf1)
 - **Task3 지문 검증**: archive 실물 12개 .hwpx 스윕. **발동 3/3 = 전부 한글 hwpx저장 열화본**(doc3 예창패·doc7 초창패·doc11 청창사, loose 93~99%). doc3/doc7은 .hwp 쌍둥이 대조로 확정: .hwp 130%본문(loose44/41%) vs .hwpx 160%붕괴(99%) → 발동 정당(오탐0). **비발동 9/9 = 130% 본문 지배**(loose 31~48%, 쌍둥이도 동일=정품). 경계(발동93~99% vs 비발동31~48%)가 임계값0.60을 큰 여유로 통과. 그 경계(45% loose+rich pool→미발동)를 회귀테스트로 고정.
 - **Task2 표 행높이 축 결론 = 무변경(현행 content-fit이 정답)**: 실험(플로어 항상적용) 결과 열화doc 페이지가 .hwp에 근접(doc3 5→6, doc7 5→6, doc11 정규화17)하나, 저장 cellSz높이=균일 명목값(2200)이라 **단일행(체크리스트)을 강제로 늘려 페이지당 항목수 감소** → 사용자 검증한 "자가진단표 1~12행" 밀도 역행(7a06e9f "플로어→7항목 vs 무플로어→12항목"과 일치). 열화 .hwpx는 .hwp의 실제 per-row 높이를 잃었으므로 content-fit이 최선근사. 실측 doc11 정규화 브라우저17p≈.hwp18p로 이미 근접. → 플로어 미적용 유지.

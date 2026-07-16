@@ -3,7 +3,7 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
-- 기준 커밋: `471adf1`(정규화 코퍼스 검증) — **R12~R14 + 실물QA 065·066 + 웹QA 2~6차 + HWPX 시각 파리티 + 레이아웃 정리 토글 완료**. GitHub: https://github.com/kwakseongjae/tf-hwp (private)
+- 기준 커밋: `5e18905`(mode-aware 표 행높이) — **R12~R14 + 실물QA 065·066 + 웹QA 2~6차 + HWPX 시각 파리티 + 레이아웃 정리 토글 완료**. GitHub: https://github.com/kwakseongjae/tf-hwp (private)
 - 갱신: 2026-07-16 · Claude — **HWPX 줄간격 근본진단 + 레이아웃 정리 토글**(4d74c11). 통제실험(동일문서 .hwp/.hwpx)으로
   "hwp vs hwpx 괴리"=파일 열화(한글 hwpx저장이 본문 78%를 바탕글 160%로 리매핑, 한글도 20p로 벌어지게 렌더)임을 증명. 우리 읽기는
   충실. **정규화 옵트인 토글** 추가(hwp-model::normalize_line_spacing → wasm setNormalize → 툴바 "레이아웃 정리"): 열화지문
