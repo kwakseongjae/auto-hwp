@@ -5,11 +5,11 @@
 
 ---
 
-## 2026-07-17 (Claude) · 빈 줄 추가/삭제 편집 기능 (69a4208)
-- 사용자 요청: 표를 다음 페이지로 밀려고 빈 줄을 넣고 싶은데 추가 방법이 없음(엔터/＋로 추가, 백스페이스/－로 삭제).
-- 구현: editor-core insertBlankParagraph(InsertParagraphAt runs:[] — 빈 문단=조판기 한 줄 차지→아래 밀어냄)·deleteBlock(DeleteBlock), 기존 op/intent 재사용(신규 op 0)·각 1 undo. UI: top-level 문단(kind:paragraph) 단일선택 시 액션바에 ＋/－ 빈 줄. 삭제는 빈 문단만 활성(내용 문단 비활성=실수 방지). 표/셀/이미지 미표시.
-- 브라우저 실검증(doc9): 헤딩 선택→＋ 7회→9쪽→10쪽 밀림, 빈 문단 선택 시 － 활성·삭제 동작, 툴바 undo 10→9 원복. editor-core 169·react 316 그린. Rust 무변경(게이트 무영향).
-- 미구현(저우선): 엔터/백스페이스 단축키(텍스트편집·기존 핸들러와 충돌 위험 → 버튼 우선, 필요 시 추가). ⌘Z는 캔버스 포커스 필요(자동화 키press 미도달했으나 툴바 undo·실제 포커스 시 동작).
+## 2026-07-17 (Claude) · 빈 줄/블록 편집 — 버튼→키보드 단축키 전환 (69a4208→7ea8b94)
+- 사용자 요청: 표를 다음 페이지로 밀려고 빈 줄 넣기. 1차(69a4208)는 ＋/－ 빈 줄 버튼으로 구현했으나 "버튼 없어 보인다 → 단축키로" 피드백. 2차(7ea8b94): 버튼 제거+키보드.
+- 엔진: editor-core insertBlankParagraph(InsertParagraphAt runs:[] — 빈 문단=조판기 한 줄 차지→아래 밀어냄)·deleteBlock(DeleteBlock), 기존 op/intent 재사용(신규 op 0)·각 1 undo.
+- UX(최종): window keydown — LONE top-level 블록(문단 or 표) 선택 시 **Enter→빈 줄 아래 삽입**(연타=여러 줄), **Backspace/Delete→블록 삭제**(표 앵커도 삭제). 가드: ⌘/Ctrl/Alt 제외·editingOn+canEdit·in-place editor/inline panel 미개방·IME 미조합·isEditableTarget(챗·입력) 제외·단일 문단/표. refs로 현재 선택 읽어 1회 부착. 액션바는 여기서 편집/AI에게 전달만.
+- 브라우저 실검증(doc9): 헤딩 선택→Enter×5→9→10쪽 밀림(+/− 버튼 없음 확인), 표("표 p.4") Backspace→삭제 10→9, 툴바 undo→10 복원. react 316·editor-core 169 그린. Rust 무변경.
 
 ## 2026-07-17 (Claude) · <hp:fwSpace/> 드롭 → 영문 병기 단어중간 깨짐 수정 (8d9c360)
 - 사용자 전환: 청창사 hwpx는 완전 열화(타 툴도 못 엶)라 테스트 부적합 → 창도패(doc9)로. 새 문제: 목차표 좌측칸 "1. 문제인식(Problem)"이 "(Proble/m)"로 단어 중간에서 깨짐. 한컴독스는 "1. 문제인식 / (Problem)" 정상.
