@@ -1,0 +1,31 @@
+tf-hwp
+Copyright (c) 2026 kwakseongjae and tf-hwp contributors
+
+Licensed under either of Apache License, Version 2.0 (LICENSE-APACHE)
+or MIT license (LICENSE-MIT) at your option.
+
+────────────────────────────────────────────────────────────────────────
+
+This repository bundles or vendors the following third-party works:
+
+1. rhwp (external/rhwp, git submodule) — MIT License
+   Copyright (c) 2025-2026 Edward Kim
+   Used as a PARSE-ONLY bootstrap for the binary .hwp (HWP5) format and as
+   a layout reference; rendering always happens from tf-hwp's own IR.
+   https://github.com/kwakseongjae/rhwp (mirror fork)
+
+2. Nanum Gothic / Nanum Myeongjo fonts (assets/fonts/) — SIL Open Font
+   License 1.1 (assets/fonts/OFL.txt)
+   Copyright (c) NAVER Corporation. Bundled as the redistributable default
+   screen/PDF faces. Every font in the curated catalog (docs/FONT-CATALOG.md)
+   is OFL.
+
+3. hwp-oracle (crates/hwp-oracle) shells out to LibreOffice + the
+   H2Orestart import filter (GPL) strictly OUT-OF-PROCESS via the `soffice`
+   CLI as an optional, native-only fidelity *reference*. No GPL code is
+   linked into or distributed with tf-hwp binaries or npm packages.
+
+4. Sample/benchmark documents (benchmarks/, corpus/) are publicly
+   distributed Korean government application forms and format-conformance
+   test files (including files from the rhwp test corpus) used solely for
+   regression testing of the parser/typesetter.

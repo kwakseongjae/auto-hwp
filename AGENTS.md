@@ -20,7 +20,7 @@ HWP(한글) 자체 엔진: Rust 코어(파싱→IR→조판→렌더→export→
 | 공통 계약(불변식 전문) | `docs/PRODUCT-DIRECTION.md` §4 — **이슈 착수 전 필독** |
 | 이슈 진행표 | `docs/issues/README.md` (⚠️ 상태 진실은 git log — 복원 스크립트가 대조) |
 | 세션 로그 | `docs/JOURNAL.md` (append-only) |
-| 역사 문서(참고만) | `ROADMAP.md`/`PLAN.md`(M-마일스톤 시대), `docs/PRODUCTION-DIAGNOSIS.md`/`PRODUCTION-ROADMAP.md`(2026-06-18 — 대부분 R1~R11에서 해소) |
+| 역사 문서(참고만) | `docs/history/ROADMAP.md`/`docs/history/PLAN.md`(M-마일스톤 시대), `docs/PRODUCTION-DIAGNOSIS.md`/`PRODUCTION-ROADMAP.md`(2026-06-18 — 대부분 R1~R11에서 해소) |
 
 ## 불변식 다이제스트 (위반 = 작업 실패 — 전문은 PRODUCT-DIRECTION.md §4)
 1. 게이트: `layout-check` → benchmark **8==8** · benchmark1 **18==18** · 줄바꿈 98.9%+ 유지.
