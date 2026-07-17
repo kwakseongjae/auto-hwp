@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-07-17 (Claude) · 오픈소스화 준비 완료 (7a0fc99·941ea13)
+- 감사: 시크릿 클린(.env 미추적·키 패턴 0), 폰트 전부 OFL, rhwp MIT, oracle GPL 격리 문서화, npm 4패키지 발행 준비 완료(063). 부족분 = LICENSE 파일·README 스테일·정적 데모·CONTRIBUTING.
+- **1/2 문서(7a0fc99)**: LICENSE-MIT+LICENSE-APACHE+NOTICE, README 전면 재작성(한글 메인+README.en.md — headless-first: engine이 메인·react는 선택, SemanticDoc+Intent 정본·XML/CSS 원기획→hwp-jsx projection 피벗을 "설계 노트"로 정직 문서화), CONTRIBUTING(게이트·LOCKSTEP·wasm 함정), PLAN/CHECKLIST/ROADMAP→docs/history/. corpus 유지(복학원서=빈 양식 확인).
+- **2/2 정적 데모(941ea13)**: DEMO_STATIC=1→output:export(+basePath), build-demo.mjs(api/ 임시이동·복원), LabWorkspace "static" 모드(배지·AI 안내·BASE 접두), 랜딩 히어로(원클릭 샘플 2종·문서 미전송 문구·npm headless 안내), deploy-demo.yml(수동 Pages). **Playwright 실검증**: 정적 서빙에서 배지·히어로·샘플→8쪽 렌더·에러0. vitest 50·tsc 클린.
+- 결정(사용자): 모노레포 유지+npm 패키지 분리(Grok 권고 동의), 데모=hwp-lab 정적화, README 한글 메인, corpus 공개, npm 발행은 나중(0.0.1 유지).
+- 남은 사용자 액션: ①레포 public 전환 ②Settings→Pages→Source=GitHub Actions ③deploy-demo 수동 실행(base_path=/tf-hwp) ④(나중) npm publish. rhwp 포크 레포도 public이어야 서브모듈 클론 가능.
+
 ## 2026-07-17 (Claude) · 빈 줄/블록 편집 — 버튼→키보드 단축키 전환 (69a4208→7ea8b94)
 - 사용자 요청: 표를 다음 페이지로 밀려고 빈 줄 넣기. 1차(69a4208)는 ＋/－ 빈 줄 버튼으로 구현했으나 "버튼 없어 보인다 → 단축키로" 피드백. 2차(7ea8b94): 버튼 제거+키보드.
 - 엔진: editor-core insertBlankParagraph(InsertParagraphAt runs:[] — 빈 문단=조판기 한 줄 차지→아래 밀어냄)·deleteBlock(DeleteBlock), 기존 op/intent 재사용(신규 op 0)·각 1 undo.
