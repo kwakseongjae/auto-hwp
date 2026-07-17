@@ -56,11 +56,14 @@ jobs:
           npm install --no-audit --no-fund
           npm run build
 
-      # 2) JS 패키지 의존 설치(dist 는 hwp-lab prebuild 의 build:deps 가 빌드)
-      - name: install package deps
+      # 2) JS 패키지: install → build 를 의존 순서대로. ⚠️ pnpm 의 `file:` 의존은 심링크가 아니라
+      #    **설치 시점 스냅샷**(files 필드 반영) — react 를 editor-core dist 생성 전에 install 하면
+      #    빈 패키지가 복사되어 vite 가 "Failed to resolve entry" 로 죽는다(1차 배포 실패 실측;
+      #    publish.yml 의 "install 은 앞 단계 dist 생성 후" 원칙과 동일).
+      - name: build JS package deps (install after dist exists)
         run: |
-          pnpm -C packages/ai-protocol install
-          pnpm -C packages/editor-core install
+          pnpm -C packages/ai-protocol install && pnpm -C packages/ai-protocol build
+          pnpm -C packages/editor-core install && pnpm -C packages/editor-core build
           pnpm -C packages/react install
 
       # 3) 정적 데모 빌드 — prebuild(deps+wasm/fonts/samples 복사) → api/ 임시 제외 → output:"export"
