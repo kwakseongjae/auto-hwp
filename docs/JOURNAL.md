@@ -8,7 +8,8 @@
 ## 2026-07-17 (Claude) · 퍼블릭 전환 + 데모 UX v2 + Pages 배포 (6ebfbb2)
 - 데모 UX v2: ChatPanel `aiNotice` prop(정적 데모 "AI는 로컬 실행 시" 상시 배너), 랜딩 기능 카드 4종(게이트·round-trip·headless·AI)+문서 링크 5(GitHub/README/임베드/Intent/아키텍처), 헤더 데모 브랜딩("tf-hwp — 데모"+GitHub 링크, QA 모드는 hwp-lab 유지). Playwright 전항목 실검증.
 - **public 전환 전 히스토리 스캔**: 354커밋 전체 — .env 추적 이력 0·실키 0(유일 히트=문서 플레이스홀더 sk-or-...). → 19커밋 푸시 → **tf-hwp PUBLIC 전환**(rhwp는 이미 public) → Pages 활성화(build_type=workflow, https://kwakseongjae.github.io/tf-hwp/) → deploy-demo 실행(base_path=/tf-hwp, run 29551279758).
-- 라이브 검증은 배포 완료 후 (다음 항목 참조).
+- 1차 배포 실패(pnpm file:=설치시점 스냅샷 — react를 editor-core dist 전에 install→빈 패키지) → 워크플로 install 순서 수정 후 **2차 성공**. **라이브 실검증(Playwright)**: https://kwakseongjae.github.io/tf-hwp/ 에서 헤더·배지·기능4·링크5·샘플 원클릭→8쪽 렌더·채팅 aiNotice·에러0 (basePath /tf-hwp 하 wasm/샘플/폰트 전부 200).
+- 후속 노트(저우선): CI wasm 12MB vs 로컬 9.5MB — engine build-wasm.mjs의 wasm-opt가 CI에서 미적용 추정, 로딩 최적화 여지.
 
 ## 2026-07-17 (Claude) · 오픈소스화 준비 완료 (7a0fc99·941ea13)
 - 감사: 시크릿 클린(.env 미추적·키 패턴 0), 폰트 전부 OFL, rhwp MIT, oracle GPL 격리 문서화, npm 4패키지 발행 준비 완료(063). 부족분 = LICENSE 파일·README 스테일·정적 데모·CONTRIBUTING.
