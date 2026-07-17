@@ -229,3 +229,23 @@ body {
 .lab-hero-dev { font-size: 12px; margin-top: 10px; padding-top: 14px; border-top: 1px solid rgba(128,128,128,0.25); }
 .lab-hero-dev code { font-size: 12px; padding: 2px 6px; border-radius: 4px; background: rgba(128,128,128,0.12); }
 .lab-hero-dev a { color: inherit; text-decoration: underline; }
+
+/* 랜딩 v2 — 기능 그리드 + 문서 링크 + 헤더 GitHub */
+.lab-features {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;
+  width: 100%; margin-top: 8px; text-align: left;
+}
+@media (max-width: 640px) { .lab-features { grid-template-columns: 1fr; } }
+.lab-feature {
+  display: flex; flex-direction: column; gap: 4px; padding: 12px 14px;
+  border: 1px solid rgba(128,128,128,0.22); border-radius: 10px;
+  background: rgba(128,128,128,0.05); font-size: 12px; line-height: 1.55;
+}
+.lab-feature b { font-size: 13px; }
+.lab-feature code { font-size: 11px; padding: 1px 4px; border-radius: 3px; background: rgba(128,128,128,0.14); }
+.lab-hero-dev { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.lab-gh-link {
+  font-size: 12px; padding: 4px 10px; border: 1px solid rgba(128,128,128,0.3);
+  border-radius: 6px; color: inherit; text-decoration: none;
+}
+.lab-gh-link:hover { background: rgba(128,128,128,0.1); }

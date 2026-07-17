@@ -139,6 +139,9 @@ export interface HwpWorkspaceProps {
   onAiRequest: import("@tf-hwp/editor-core").OnAiRequest;
   /** Show the honest mock badge in the chat panel. */
   isMock?: boolean;
+  /** OPTIONAL informational banner for the chat panel (e.g. a static demo: "AI는 로컬 실행 시 사용
+   *  가능"). Passed through to ChatPanel verbatim. */
+  aiNotice?: string;
   /** Supply a TTF/OTF face for PDF export on demand (R8). Called when PDF is requested and no font is
    *  registered yet. Return null to cancel. The DEMO wires this to a local .ttf picker / Noto fetch. */
   requestFont?: () => Promise<{ family: string; bytes: Uint8Array } | null>;
@@ -2928,6 +2931,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           onApply={onApply}
           onJumpToPage={jumpToPage}
           isMock={props.isMock}
+          aiNotice={props.aiNotice}
           focusToken={aiFocusToken}
           // issue 051: async card enrichment — a DeleteBlock proposal shows the target block's 원문
           // (EditController.previewCards reads it via session.runsAt) before the explicit 적용 approval.

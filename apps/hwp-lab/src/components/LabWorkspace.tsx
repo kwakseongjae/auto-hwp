@@ -490,9 +490,14 @@ export default function LabWorkspace() {
     <div className="lab-root">
       <header className="lab-header">
         <span className="lab-title">
-          hwp-lab
-          <small>tf-hwp 통합 실험 앱 (QA)</small>
+          {IS_DEMO ? "tf-hwp" : "hwp-lab"}
+          <small>{IS_DEMO ? "브라우저에서 동작하는 HWP 엔진 — 데모" : "tf-hwp 통합 실험 앱 (QA)"}</small>
         </span>
+        {IS_DEMO && (
+          <a className="lab-gh-link" href="https://github.com/kwakseongjae/tf-hwp" target="_blank" rel="noreferrer" title="GitHub 저장소">
+            GitHub ↗
+          </a>
+        )}
 
         <label className="lab-btn">
           파일 열기 (.hwp/.hwpx)
@@ -543,6 +548,11 @@ export default function LabWorkspace() {
             adapter={adapter}
             document={doc}
             onAiRequest={onAiRequest}
+            aiNotice={
+              IS_DEMO
+                ? "정적 데모라 AI 편집은 꺼져 있습니다 — 클릭 선택·수동 편집·HTML/PDF 저장은 전부 동작합니다. AI 바이브 편집은 레포를 클론해 로컬 실행(BYOK)하면 켜집니다."
+                : undefined
+            }
             requestFont={requestFont}
             fontCatalog={FONT_CATALOG}
             defaultFont={defaultFont}
@@ -600,11 +610,36 @@ export default function LabWorkspace() {
               <p className="lab-hero-note">
                 파일을 창에 끌어다 놓아도 열립니다. 편집은 클릭 선택 → 리본/AI, 결과는 HTML·PDF·HWPX로 저장.
               </p>
+
+              <div className="lab-features">
+                <div className="lab-feature">
+                  <b>🎯 원본 정확도</b>
+                  <span>실물 정부 양식에서 한컴 렌더와 페이지 수 완전 일치(8==8·18==18), 줄바꿈 98.9%+ — CI 게이트로 잠금</span>
+                </div>
+                <div className="lab-feature">
+                  <b>🔒 Round-trip 안전</b>
+                  <span>편집하지 않은 내용은 바이트 그대로 재저장 — 열었다 저장해도 원본이 망가지지 않음</span>
+                </div>
+                <div className="lab-feature">
+                  <b>🧩 Headless 엔진</b>
+                  <span><code>npm i @tf-hwp/engine</code> — UI 없이 SVG·HTML·PDF만 받아 자체 에디터를 지을 수 있음</span>
+                </div>
+                <div className="lab-feature">
+                  <b>✨ AI 바이브 편집</b>
+                  <span>셀/문단을 가리키고 말하면 LLM이 검증된 Intent JSON으로 편집 — 로컬 실행(BYOK) 시</span>
+                </div>
+              </div>
+
               <div className="lab-hero-dev">
-                <code>npm i @tf-hwp/engine</code> — UI 없이 headless로 파싱·SVG·PDF만 쓸 수도 있습니다 ·{" "}
-                <a href="https://github.com/kwakseongjae/tf-hwp" target="_blank" rel="noreferrer">
-                  GitHub ↗
-                </a>
+                <a href="https://github.com/kwakseongjae/tf-hwp" target="_blank" rel="noreferrer">GitHub ↗</a>
+                <span aria-hidden>·</span>
+                <a href="https://github.com/kwakseongjae/tf-hwp#readme" target="_blank" rel="noreferrer">소개(README)</a>
+                <span aria-hidden>·</span>
+                <a href="https://github.com/kwakseongjae/tf-hwp/blob/main/docs/EMBED-GUIDE.md" target="_blank" rel="noreferrer">임베드 가이드</a>
+                <span aria-hidden>·</span>
+                <a href="https://github.com/kwakseongjae/tf-hwp/blob/main/docs/INTENT-SCHEMA.md" target="_blank" rel="noreferrer">Intent 스키마</a>
+                <span aria-hidden>·</span>
+                <a href="https://github.com/kwakseongjae/tf-hwp/blob/main/docs/SDK-LAYERS.md" target="_blank" rel="noreferrer">아키텍처</a>
               </div>
             </div>
           </div>

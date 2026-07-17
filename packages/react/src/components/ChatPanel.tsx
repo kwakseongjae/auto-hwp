@@ -77,6 +77,9 @@ export interface ChatPanelProps {
   onJumpToPage?: (page: number) => void;
   /** Show the honest "mock/demo" badge (host passes true when `onAiRequest` returns canned Intents). */
   isMock?: boolean;
+  /** OPTIONAL informational banner shown at the top of the panel — e.g. a static demo explaining that
+   *  AI editing needs a locally-run host (BYOK). Plain text; rendered like the mock badge. */
+  aiNotice?: string;
   /** A monotonically-bumped token; when it CHANGES the composer is focused + scrolled into view. The
    *  floating toolbar's "AI에게 전달" bumps it (issue 028) — the marked selection is already the anchor
    *  chip, so this just brings the user to the composer. No new prompt logic. */
@@ -526,6 +529,12 @@ export function ChatPanel(props: ChatPanelProps) {
       {props.isMock && (
         <div className="hw-mock-badge">
           ⚠️ 데모 모드(mock): 실제 이해 없이 예시 편집만 보여줍니다. 실제 편집은 호스트가 서버사이드 AI를 <code>onAiRequest</code>에 연결해야 합니다.
+        </div>
+      )}
+
+      {props.aiNotice && (
+        <div className="hw-mock-badge" data-testid="hw-ai-notice">
+          ℹ️ {props.aiNotice}
         </div>
       )}
 
