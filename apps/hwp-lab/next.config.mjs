@@ -17,7 +17,27 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
  *    모듈에 대해 webpack 의 `new URL()` 에셋 방출(parser.url)을 꺼서 11.5MB wasm 을 번들에
  *    끌어넣지 않도록 한다.
  */
+// 정적 데모 빌드 (OSS): DEMO_STATIC=1 이면 서버 없는 `output:"export"` 로 GitHub Pages 등에
+// 배포 가능한 정적 사이트를 만든다. AI 프록시(/api/hwp-edit)는 라우트 핸들러라 export 와 공존할
+// 수 없으므로 scripts/build-demo.mjs 가 빌드 동안 api/ 를 임시로 치워둔다(클라이언트는
+// NEXT_PUBLIC_DEMO=1 을 보고 프록시 프로브를 건너뛰고 "정적 데모" 모드로 동작).
+// DEMO_BASE_PATH 는 프로젝트 페이지(/tf-hwp) 배포용 — 코드의 절대경로 fetch(/hwp, /fonts,
+// /samples)는 NEXT_PUBLIC_BASE_PATH 를 접두해 같은 경로 체계를 유지한다.
+const isDemo = process.env.DEMO_STATIC === "1";
+const demoBasePath = isDemo ? (process.env.DEMO_BASE_PATH ?? "") : "";
+
 const nextConfig = {
+  ...(isDemo
+    ? {
+        output: "export",
+        ...(demoBasePath ? { basePath: demoBasePath } : {}),
+        images: { unoptimized: true },
+      }
+    : {}),
+  env: {
+    NEXT_PUBLIC_DEMO: isDemo ? "1" : "",
+    NEXT_PUBLIC_BASE_PATH: demoBasePath,
+  },
   // file: 심링크 패키지를 Next가 트랜스파일하도록 명시. (026: ai-protocol 은 route.ts·클라 양쪽에서
   // import, editor-core 는 react 가 re-export 하는 타입 소스 — 둘 다 심링크 스코프에 넣는다.)
   transpilePackages: ["@tf-hwp/react", "@tf-hwp/engine", "@tf-hwp/ai-protocol", "@tf-hwp/editor-core"],

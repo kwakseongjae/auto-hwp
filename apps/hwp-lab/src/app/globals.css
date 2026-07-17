@@ -214,3 +214,18 @@ body {
   font-size: 11px;
   color: var(--lab-muted);
 }
+
+/* ── OSS 데모 랜딩(히어로) — 파일 열기 전 첫 화면 ─────────────────────────────────────────── */
+.lab-hero {
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  max-width: 620px; text-align: center; padding: 28px;
+}
+.lab-hero-title { font-size: 28px; font-weight: 800; color: var(--lab-fg, #1a1a1a); margin: 0; letter-spacing: -0.5px; }
+.lab-hero-sub { font-size: 14px; line-height: 1.7; margin: 0; }
+.lab-hero-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 6px; }
+.lab-hero-open { font-size: 14px; padding: 10px 18px; }
+.lab-sample-btn { font-size: 13px; }
+.lab-hero-note { font-size: 12px; margin: 0; opacity: 0.85; }
+.lab-hero-dev { font-size: 12px; margin-top: 10px; padding-top: 14px; border-top: 1px solid rgba(128,128,128,0.25); }
+.lab-hero-dev code { font-size: 12px; padding: 2px 6px; border-radius: 4px; background: rgba(128,128,128,0.12); }
+.lab-hero-dev a { color: inherit; text-decoration: underline; }

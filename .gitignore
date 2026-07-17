@@ -26,6 +26,8 @@ apps/hwp-lab/.next/
 apps/hwp-lab/out/
 apps/hwp-lab/public/hwp/
 apps/hwp-lab/public/fonts/
+apps/hwp-lab/public/samples/
+apps/hwp-lab/.demo-api-hold/
 apps/hwp-lab/.turbo/
 apps/hwp-lab/tsconfig.tsbuildinfo
 apps/hwp-lab/next-env.d.ts

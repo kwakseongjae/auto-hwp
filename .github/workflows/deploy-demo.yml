@@ -1,0 +1,88 @@
+# 정적 데모(GitHub Pages) 배포 — **수동 전용**(workflow_dispatch, 이 레포 CI 원칙).
+#
+# apps/hwp-lab 을 서버 없는 정적 사이트로 빌드해 Pages 에 올린다:
+#   wasm 빌드(rust+wasm-bindgen) → JS 패키지 dist → build-demo.mjs(api/ 임시 제외 + output:"export")
+# 클라이언트는 NEXT_PUBLIC_DEMO=1 로 "정적 데모" 모드(AI 편집은 로컬 실행 안내, 나머지 전부 동작).
+#
+# 선행 1회 설정: 레포 Settings → Pages → Source = "GitHub Actions".
+name: deploy-demo
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_path:
+        description: "배포 basePath (프로젝트 페이지면 /tf-hwp, 커스텀 도메인이면 빈 값)"
+        type: string
+        default: "/tf-hwp"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: deploy-demo
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive # external/rhwp — engine wasm 빌드(cargo resolve)에 필요
+
+      # engine 의 build-wasm.mjs 가 쓰는 툴체인(publish.yml 과 동일 — wasm-bindgen 은 Cargo.lock 과 정확히 일치).
+      - uses: dtolnay/rust-toolchain@1.95
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: install wasm-bindgen-cli (=0.2.125)
+        run: cargo install wasm-bindgen-cli --version 0.2.125 --locked
+      - name: install binaryen (wasm-opt — 번들 다이어트)
+        run: sudo apt-get update && sudo apt-get install -y binaryen
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # hwp-lab 의 build:deps 는 pnpm -C 로 각 패키지를 빌드한다(레포 관례).
+      - name: install pnpm
+        run: npm i -g pnpm
+
+      # 1) 엔진 wasm → packages/engine/pkg (hwp-lab prebuild 의 copy-wasm.mjs 가 이걸 복사한다)
+      - name: build @tf-hwp/engine (wasm)
+        working-directory: packages/engine
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
+      # 2) JS 패키지 의존 설치(dist 는 hwp-lab prebuild 의 build:deps 가 빌드)
+      - name: install package deps
+        run: |
+          pnpm -C packages/ai-protocol install
+          pnpm -C packages/editor-core install
+          pnpm -C packages/react install
+
+      # 3) 정적 데모 빌드 — prebuild(deps+wasm/fonts/samples 복사) → api/ 임시 제외 → output:"export"
+      - name: build static demo
+        working-directory: apps/hwp-lab
+        env:
+          DEMO_BASE_PATH: ${{ inputs.base_path }}
+        run: |
+          npm install --no-audit --no-fund
+          npm run build:demo
+          touch out/.nojekyll   # _next/ 가 Jekyll 규칙에 걸리지 않도록
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/hwp-lab/out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

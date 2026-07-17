@@ -7,15 +7,27 @@ import { isTrapError, resetEngine } from "@tf-hwp/engine";
 import { AutosaveController, IdbSnapshotStore, findRecoverable, formatAge, recoveredName, type SnapshotRecord } from "@/lib/autosave";
 import { limitMessage, oversizeMessage } from "@/lib/limits";
 
-type Mode = "loading" | "mock" | "live";
+type Mode = "loading" | "mock" | "live" | "static";
 type Doc = { bytes: Uint8Array; name: string };
+
+// 정적 데모(OSS): DEMO_STATIC=1 빌드(next.config.mjs)는 서버가 없으므로 AI 프록시 프로브를 건너뛰고
+// "정적 데모" 모드로 동작한다. BASE 는 프로젝트 페이지(basePath) 배포 시 절대경로 fetch(/hwp, /fonts,
+// /samples)에 접두된다 — Next 정적 에셋은 basePath 아래에 서빙되지만 코드의 fetch 는 자동 접두되지 않는다.
+const IS_DEMO = process.env.NEXT_PUBLIC_DEMO === "1";
+const BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
 // 기본 폰트: 레포 자산 NanumGothic(OFL) — copy-fonts.mjs 가 public/fonts 로 복사하므로 오프라인에서도
 // 항상 존재한다. 열기 직후 자동 등록되어 화면·조판·PDF 가 즉시 이 폰트로 일치하고 PDF 버튼이 활성화된다.
 // 카탈로그의 나머지 폰트(scripts/fetch-fonts.mjs, git 제외)는 툴바 FontPicker 에서 선택/업로드한다.
-const DEFAULT_FONT_PATH = "/fonts/NanumGothic-Regular.ttf";
+const DEFAULT_FONT_PATH = `${BASE}/fonts/NanumGothic-Regular.ttf`;
 const DEFAULT_FONT_FAMILY = "Nanum Gothic";
-const FONT_URL_BASE = "/fonts";
+const FONT_URL_BASE = `${BASE}/fonts`;
+
+// 랜딩의 원클릭 샘플(scripts/copy-samples.mjs 가 public/samples 에 복사하는 레포 벤치마크 문서).
+const SAMPLES: { file: string; label: string; hint: string }[] = [
+  { file: "sample-8p.hwp", label: "정부 양식 샘플 (.hwp · 8쪽)", hint: "바이너리 HWP5 파싱 + 표/병합셀" },
+  { file: "sample-18p.hwpx", label: "신청서 샘플 (.hwpx · 18쪽)", hint: "손실 변환 자동 감지 → 레이아웃 정리" },
+];
 
 const msg = (e: unknown): string => {
   if (e && typeof e === "object" && "message" in e) return String((e as { message: unknown }).message);
@@ -51,13 +63,13 @@ export default function LabWorkspace() {
   const pointerDownRef = useRef(false);
 
   // ssr:false 로 로드되므로 window 존재. wasm은 public 정적 에셋을 명시적 URL로 fetch(번들러 마법 X).
-  const wasmUrl = useMemo(() => new URL("/hwp/hwp_wasm_bg.wasm", window.location.origin), []);
+  const wasmUrl = useMemo(() => new URL(`${BASE}/hwp/hwp_wasm_bg.wasm`, window.location.origin), []);
   // 이슈 055(FG-14): 엔진은 기본적으로 Web Worker 에서 돈다(파싱/재조판/export/toHwpx 가 메인스레드를
   // 멈추지 않는다). 워커 스크립트도 public 정적 에셋(모듈 워커 — copy-wasm.mjs 가 배치). 계측/롤백용
   // 탈출구: `?engineWorker=off` 로 열면 기존 메인스레드 엔진으로 동작한다(BEFORE/AFTER 실측이 이 스위치).
   const workerMode = useMemo(() => new URLSearchParams(window.location.search).get("engineWorker") !== "off", []);
   const adapterOptions = useMemo<WasmAdapterOptions | undefined>(
-    () => (workerMode ? { worker: { url: new URL("/hwp/worker.js", window.location.origin) } } : undefined),
+    () => (workerMode ? { worker: { url: new URL(`${BASE}/hwp/worker.js`, window.location.origin) } } : undefined),
     [workerMode],
   );
   const adapter = useMemo(() => new WasmAdapter(wasmUrl, adapterOptions), [wasmUrl, adapterOptions]);
@@ -149,9 +161,14 @@ export default function LabWorkspace() {
   }, [doc, store]);
 
   // 프록시 모드(mock/live)를 조회해 배지에 표시. 키는 서버 전용이므로 여기서 알 수 있는 건 모드뿐.
+  // 정적 데모 빌드에는 서버가 없으므로 프로브를 건너뛰고 "static"으로 확정한다(404 fetch 소음 방지).
   useEffect(() => {
+    if (IS_DEMO) {
+      setMode("static");
+      return;
+    }
     let cancelled = false;
-    fetch("/api/hwp-edit", { method: "GET" })
+    fetch(`${BASE}/api/hwp-edit`, { method: "GET" })
       .then((r) => r.json())
       .then((d: { mode?: Mode }) => {
         if (!cancelled) setMode(d.mode === "live" ? "live" : "mock");
@@ -275,6 +292,22 @@ export default function LabWorkspace() {
     [openBytes],
   );
 
+  // 랜딩 원클릭 샘플(OSS 데모): public/samples 의 레포 벤치마크 문서를 fetch 해 일반 열기 경로로 넘긴다.
+  // 미배치(404 — copy-samples.mjs 미실행)면 정직하게 안내한다.
+  const openSample = useCallback(
+    async (file: string) => {
+      setLabError(null);
+      try {
+        const r = await fetch(`${BASE}/samples/${file}`);
+        if (!r.ok) throw new Error(`샘플이 배치되지 않았습니다 (${r.status}) — apps/hwp-lab에서 npm run dev/build를 다시 실행하세요.`);
+        await openBytes(new Uint8Array(await r.arrayBuffer()), file);
+      } catch (e) {
+        setLabError(msg(e));
+      }
+    },
+    [openBytes],
+  );
+
   // ── 이슈 052: 복구 배너 액션 ─────────────────────────────────────────────────────────────────────
   // 복구 = 스냅샷 바이트(편집된 HWPX본)를 " (복구본).hwpx" 이름으로 연다. 열기 성공 시(위 doc 이펙트)
   // adoptRecovered 가 새 세션으로 재귀속 + 옛 키 삭제 — 콘텐츠는 절대 유실되지 않는다. 열기 실패 시
@@ -324,6 +357,10 @@ export default function LabWorkspace() {
   // 기존 단발 res.json() 경로 그대로(back-compat). 대화 메모리(opts.history)는 본문에 실어 서버가 모델
   // messages 에 접는다. 키/검색은 전부 서버사이드(R6).
   const onAiRequest = useCallback(async (instruction: string, anchors: Anchor[], ctx: DocContext, opts?: AiRequestOptions): Promise<Intent[]> => {
+    // 정적 데모: 서버 프록시가 없으므로 바이브 편집은 정직하게 안내하고 끝낸다(뷰/수동편집/export 는 전부 동작).
+    if (IS_DEMO) {
+      throw new Error("정적 데모에서는 AI 편집을 지원하지 않습니다 — 레포를 클론해 로컬 실행(.env.local에 OPENROUTER_API_KEY) 시 사용할 수 있습니다.");
+    }
     // 066: 표/셀 앵커마다 엔진에서 그 표의 셀 그리드(행×열·각 셀 텍스트·빈칸)를 조회해 doc-context 에
     // 첨부한다 — 그래야 모델이 "표 채워줘"·라벨 옆 값칸 지정·구조편집(행 N개)을 정확히 한다(얇은 앵커
     // 컨텍스트에선 intents 0 이었음). 표가 아니거나 조회 실패면 null(첨부 없음 → 기존 동작, 회귀 방지).
@@ -351,7 +388,7 @@ export default function LabWorkspace() {
 
     // ── 스트리밍 경로(채팅 타임라인) ──────────────────────────────────────────────────────────────
     if (opts?.onEvent) {
-      const res = await fetch("/api/hwp-edit?stream=1", {
+      const res = await fetch(`${BASE}/api/hwp-edit?stream=1`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(requestBody),
@@ -390,7 +427,7 @@ export default function LabWorkspace() {
     }
 
     // ── 비스트리밍 경로(InlineEditPanel · back-compat) ───────────────────────────────────────────
-    const res = await fetch("/api/hwp-edit", {
+    const res = await fetch(`${BASE}/api/hwp-edit`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(requestBody),
@@ -432,6 +469,11 @@ export default function LabWorkspace() {
   const badge =
     mode === "loading" ? (
       <span className="lab-badge lab-badge-loading">모드 확인 중…</span>
+    ) : mode === "static" ? (
+      // 정적 데모(OSS): 서버 없음 — 뷰/수동편집/export 는 전부 브라우저에서 동작, AI 만 로컬 실행 안내.
+      <span className="lab-badge lab-badge-mock" title="서버 없는 정적 데모 — 뷰·편집·HTML/PDF export는 전부 동작. AI 편집은 로컬 실행(BYOK) 시 사용 가능">
+        정적 데모
+      </span>
     ) : mode === "live" ? (
       // NOTE: 여기 클라이언트 배지 문구에는 키/모델 리터럴을 넣지 않는다(클라이언트 번들 grep 위생).
       // 실제 모델 ID(Opus 4.8)와 키 참조는 서버 전용 route.ts 에만 존재.
@@ -538,10 +580,32 @@ export default function LabWorkspace() {
                 </div>
               </div>
             )}
-            <div>
-              상단의 <b>&nbsp;파일 열기&nbsp;</b>로 <code>.hwp / .hwpx</code>를 업로드하세요.
-              <br />
-              데모 픽스처: 레포 루트의 <code>benchmark.hwp</code>(8쪽) · <code>benchmark1.hwp</code>(18쪽).
+            <div className="lab-hero" data-testid="lab-hero">
+              <h1 className="lab-hero-title">브라우저에서 열리는 HWP</h1>
+              <p className="lab-hero-sub">
+                <code>.hwp / .hwpx</code>를 업로드하면 서버 없이 이 브라우저에서 파싱·렌더·편집·PDF export까지 —
+                문서가 어디로도 전송되지 않습니다.
+              </p>
+              <div className="lab-hero-actions">
+                <label className="lab-btn lab-btn-accent lab-hero-open">
+                  파일 열기 (.hwp/.hwpx)
+                  <input type="file" accept=".hwp,.hwpx" hidden onChange={onFile} data-testid="file-input-hero" />
+                </label>
+                {SAMPLES.map((s) => (
+                  <button key={s.file} className="lab-btn lab-sample-btn" data-testid={`sample-${s.file}`} title={s.hint} onClick={() => void openSample(s.file)}>
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+              <p className="lab-hero-note">
+                파일을 창에 끌어다 놓아도 열립니다. 편집은 클릭 선택 → 리본/AI, 결과는 HTML·PDF·HWPX로 저장.
+              </p>
+              <div className="lab-hero-dev">
+                <code>npm i @tf-hwp/engine</code> — UI 없이 headless로 파싱·SVG·PDF만 쓸 수도 있습니다 ·{" "}
+                <a href="https://github.com/kwakseongjae/tf-hwp" target="_blank" rel="noreferrer">
+                  GitHub ↗
+                </a>
+              </div>
             </div>
           </div>
         )}
