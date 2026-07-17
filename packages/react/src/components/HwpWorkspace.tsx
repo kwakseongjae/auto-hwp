@@ -1921,33 +1921,63 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // cleared so the chips ride along with the next message (the existing captureAnchor flow).
   const onSendToAi = useCallback(() => setAiFocusToken((t) => t + 1), []);
 
-  // 빈 줄 추가/삭제 (사용자 요청): a top-level PARAGRAPH selection can gain a blank spacer line BELOW it
-  // (밀어내기 — nudge the following table/heading onto the next page) or, when itself blank, be removed.
-  // Both go through editor-core (InsertParagraphAt with no runs / DeleteBlock) as ONE undo unit; the op-bus
-  // throws on a bad target so a mistarget toasts rather than silently no-ops.
-  const onInsertBlankLine = useCallback(
+  // 키보드 블록 편집 (사용자 요청 — 버튼 대신 단축키): with a LONE top-level block (문단 or 표) selected
+  // and no text-entry surface focused, ENTER inserts a blank spacer paragraph BELOW it (엔터 연타 = 여러
+  // 줄; nudges the following table/heading onto the next page) and BACKSPACE/DELETE removes the whole
+  // block (표 선택 후 백스페이스 = 표 삭제). Both go through editor-core (InsertParagraphAt no-runs /
+  // DeleteBlock) as ONE undo unit each; the op-bus throws on a bad target so a mistarget toasts.
+  const onInsertBlankBelow = useCallback(
     async (section: number, block: number) => {
       try {
-        await core.edit.insertBlankParagraph(section, block + 1); // BELOW the anchored paragraph
-        toast("빈 줄을 추가했습니다");
+        await core.edit.insertBlankParagraph(section, block + 1); // BELOW the anchored block
+        toast("빈 줄을 추가했습니다 (Enter)");
       } catch (e) {
         if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`빈 줄 추가 실패: ${e}`);
       }
     },
     [core, toast, onTrap],
   );
-  const onDeleteBlankLine = useCallback(
+  const onDeleteSelectedBlock = useCallback(
     async (section: number, block: number) => {
       try {
         await core.edit.deleteBlock(section, block);
         core.selection.clear(); // the deleted block's mark is gone; drop the stale selection
-        toast("빈 줄을 삭제했습니다");
+        toast("선택한 항목을 삭제했습니다 (⌫)");
       } catch (e) {
-        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`빈 줄 삭제 실패: ${e}`);
+        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`삭제 실패: ${e}`);
       }
     },
     [core, toast, onTrap],
   );
+
+  // 키보드 블록 편집 (사용자 요청 — 버튼 대신 단축키): a LONE selected top-level block (문단 또는 표) responds
+  // to ENTER → insert a blank line BELOW it (엔터 연타 = 여러 줄, 다음 내용을 아래로 밀기) and BACKSPACE/DELETE
+  // → delete the whole block (표 선택 후 ⌫ = 표 삭제). GUARDS (load-bearing — these keys must never be stolen
+  // from real typing): no ⌘/Ctrl/Alt chord; editing on + doc editable; NOT while the in-place editor /
+  // inline-edit panel is up; NOT mid-IME (Enter commits the composition); and NOT when a text-entry surface
+  // (chat composer, size input, contentEditable) is the target/active element. Only `paragraph`/`table`
+  // anchors qualify — a cell/range/image selection keeps its own semantics. Reads the CURRENT
+  // selection/editor via refs so the listener attaches once.
+  useEffect(() => {
+    if (!editingOn) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Enter" && e.key !== "Backspace" && e.key !== "Delete") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (!canEdit) return;
+      if (editorRef.current || inlineEditRef.current) return;
+      if (compositionStore.get() != null) return;
+      if (isEditableTarget(e.target as Element | null) || isEditableTarget(document.activeElement)) return;
+      const sels = selectionRef.current;
+      if (sels.length !== 1) return;
+      const a = sels[0].anchor;
+      if (a.kind !== "paragraph" && a.kind !== "table") return;
+      e.preventDefault();
+      if (e.key === "Enter") void onInsertBlankBelow(a.section, a.block);
+      else void onDeleteSelectedBlock(a.section, a.block);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [editingOn, canEdit, compositionStore, onInsertBlankBelow, onDeleteSelectedBlock]);
 
   // 행 삽입 (issue 039): delegate to the EXISTING TableInsertRows op via editor-core (신규 op 0). The op-bus
   // refuses an out-of-range row / a non-table block, so a mistargeted insert surfaces an error toast rather
@@ -2794,47 +2824,12 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                       const u = unionPageBox(marks.filter((m) => m.page === page).map((m) => m.box));
                       if (!u) return null;
                       const showEdit = !!inlineTarget && inlineTarget.page === page; // lone editable target → offer inline edit
-                      // 빈 줄 추가/삭제 (사용자 요청): a LONE top-level paragraph selection can gain a blank
-                      // spacer below it, or — when itself blank — be deleted. Tables/cells/ranges/images
-                      // don't get these (blank-line spacing is a body-paragraph affordance).
-                      const paraSel =
-                        selection.length === 1 && selection[0].anchor.kind === "paragraph" ? selection[0].anchor : null;
-                      const paraIsBlank = !!paraSel && !(paraSel.text ?? "").trim();
                       return (
                         <div
                           className="hw-sel-actions"
                           style={{ left: (u.x + u.w) * scale, top: (u.y + u.h) * scale }}
                           onPointerDown={(e) => e.stopPropagation()}
                         >
-                          {paraSel && (
-                            <>
-                              <button
-                                type="button"
-                                className="hw-sel-action"
-                                data-testid="hw-blankline-add"
-                                title="이 줄 아래에 빈 줄 추가 (다음 내용을 아래로 밀기)"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  void onInsertBlankLine(paraSel.section, paraSel.block);
-                                }}
-                              >
-                                ＋ 빈 줄
-                              </button>
-                              <button
-                                type="button"
-                                className="hw-sel-action"
-                                data-testid="hw-blankline-del"
-                                disabled={!paraIsBlank}
-                                title={paraIsBlank ? "이 빈 줄 삭제" : "빈 줄만 삭제할 수 있어요 (내용이 있는 줄은 AI/편집으로)"}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (paraIsBlank) void onDeleteBlankLine(paraSel.section, paraSel.block);
-                                }}
-                              >
-                                － 빈 줄
-                              </button>
-                            </>
-                          )}
                           {showEdit && (
                             <button
                               type="button"
