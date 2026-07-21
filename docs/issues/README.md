@@ -88,6 +88,7 @@ R12 완료 후 "알려진 한계" 5종을 리서치 4레인으로 조사 → 이
 | [067](067-doc-profile-context.md) | 문서 프로필 자동 컨텍스트(결정론) | **done (미커밋)** | **P0 (진단 U1·U2·U5)** | LLM 0콜 — `doc_profile` 순수 모델 walk를 wasm→adapter→`DocMeta.profile`로 배관, 앵커-우선 예산 삽입. 마킹 0 실 Grok 실증(프로필 [s/b]로 TableAppendRow). 게이트·바이트동일 회귀 전부 그린 |
 | [068](068-real-corpus-benchmark.md) | 실물 벤치 코퍼스 + 스윕 게이트 | **부분 완료** | P1 (진단 U9·U10) | bench-local-2026(24) + bench-public(25, KOGL manifest) = **49/49 통과**, `scripts/bench-corpus.sh` 게이트. 잔여: 시각 파리티 축. corpus/private=비공개 규율 |
 | [069](069-e2e-preexisting-failures.md) | e2e 사전존재 실패 5건(052×2·048×2·050×1) | **done** | P1 (테스트 신뢰성) | 근본=드릴 모델(59fef4f) 미정렬 3스펙(그립 인터셉트는 표면화 경로). 제품 정상 → 테스트를 드릴로 정렬 → **전체 42/42 그린**. 039 간헐 플레이키만 추적 |
+| [070](070-large-doc-performance.md) | 대형 문서 성능 실측(U11/보강 F) | **done** | P1 (측정 스터디) | 실 wasm 사다리 8~130p: 편집→화면 ~1ms/쪽 선형 → **증분 조판 보류**(임계 150p+). 첫 병목=**undo 딥카피**(130p·50회 +403MB vs 직렬화 0.2MB → HWPX-바이트 스냅샷 후속 후보) |
 
 ## 웹 이식(외부 임베드) 준비도 (2026-07-13 SDK 감사)
 

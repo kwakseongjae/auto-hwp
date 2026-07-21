@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-22 (Claude) · 070 대형 문서 실측(보강 F) — 증분 조판 보류, 첫 병목=undo 메모리
+- `large-doc-bench.mjs`(실 wasm·Node) 신설, 사다리 8~130p(실물 벤치2+딥테크25p+혁신바우처41p+합성 70/130p): 편집→화면 ~1ms/쪽 선형(41p=16ms·130p=136ms) → **증분 조판(XL) 보류**, 재평가 임계 150p+ 실물.
+- **신규 발견**: undo 스냅샷 딥카피가 첫 병목 — 130p·50회 RSS +403MB(스냅샷 ~8MB) vs 직렬화 0.2MB/28ms → **HWPX-바이트 스냅샷 전환 = ~40배 절감** 후속 이슈 후보(hwp-ops/hwp-mcp 스냅샷 레인).
+- 열린 것: 100p+ 실물 미확보(합성으로 외삽 — 등장 시 재측정) · 후속 후보 = undo 직렬화 스냅샷(신규 P1) · G(로컬 폰트 주입) · rhwp 재벤더링(사용자 액션).
+
 ## 2026-07-22 (Claude) · 진단 보강 B+E — AI 화이트리스트 19종 + export 정직성
 - B(fb1268a): Replace·SetCharFmt·SetTableColWidths·SetPageMargins 개방(15→19, U4) — 어휘블록+FOOTER 스탠자+카드 3종+mock Replace. 실 Grok 마킹0 실증("전부 바꿔줘"→Replace{all:true} 카드). char오프셋/HWPUNIT 계열은 폐쇄 유지.
 - E: PDF 스텁 경고 토스트(docProfile 카운트 재사용, 차단 아닌 고지)+HWPX 다운로드 버튼(toHwpx 노출)+README 한/영 "알려진 제약" 절(U7·G2·G6 해소). vitest 47/170/320/50, e2e 42/42.

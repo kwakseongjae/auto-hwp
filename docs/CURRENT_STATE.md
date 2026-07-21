@@ -4,7 +4,11 @@
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
 - 기준 커밋: `6ebfbb2`+CI픽스 — **PUBLIC 전환 + 라이브 데모 배포 완료**(https://kwakseongjae.github.io/tf-hwp/) — **R12~R14 + 실물QA 065·066 + 웹QA 2~6차 + HWPX 시각 파리티 + 레이아웃 정리 토글 완료**. GitHub: https://github.com/kwakseongjae/tf-hwp (private)
-- 갱신: 2026-07-22(5) · Claude — **진단 보강 B+E 구현 완료**. B(fb1268a): AI 화이트리스트 **15→19**
+- 갱신: 2026-07-22(6) · Claude — **070 대형 문서 실측 완료(보강 F)**. 실 wasm 사다리(8~130p, 실물 4+합성 2):
+  편집→화면 **~1ms/쪽 선형**(41p 실물 16ms·130p 136ms, 워커 비차단) → **증분 조판 보류**(재평가 임계 150p+ 실물).
+  **첫 병목 = undo 스냅샷 딥카피**(130p·편집50회 RSS +403MB vs 직렬화 0.2MB) → HWPX-바이트 스냅샷 전환이
+  ~40배 절감 후속 후보. 벤치 재실행: `node packages/engine/bench/large-doc-bench.mjs`(--synth 지원).
+- 갱신(5): 2026-07-22 · Claude — **진단 보강 B+E 구현 완료**. B(fb1268a): AI 화이트리스트 **15→19**
   (Replace·SetCharFmt·SetTableColWidths·SetPageMargins — FOOTER 스탠자·describeIntent 구체 카드·mock Replace
   분기. SetRunCharFmt/SetTableRowHeights는 보수적 폐쇄 유지). **실 Grok 마킹0 실증**: "전부 바꿔줘"→
   Replace{all:true} 카드. E: PDF 스텁 경고 토스트(docProfile 수식/차트 카운트 재사용)+**HWPX 다운로드 버튼**
