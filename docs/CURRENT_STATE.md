@@ -4,7 +4,12 @@
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
 - 기준 커밋: `6ebfbb2`+CI픽스 — **PUBLIC 전환 + 라이브 데모 배포 완료**(https://kwakseongjae.github.io/tf-hwp/) — **R12~R14 + 실물QA 065·066 + 웹QA 2~6차 + HWPX 시각 파리티 + 레이아웃 정리 토글 완료**. GitHub: https://github.com/kwakseongjae/tf-hwp (private)
-- 갱신: 2026-07-22(4) · Claude — **069 해소 + 067/진단 커밋 완료**(87834a2 feat 067 · a6cfaf0 docs 진단/068/069).
+- 갱신: 2026-07-22(5) · Claude — **진단 보강 B+E 구현 완료**. B(fb1268a): AI 화이트리스트 **15→19**
+  (Replace·SetCharFmt·SetTableColWidths·SetPageMargins — FOOTER 스탠자·describeIntent 구체 카드·mock Replace
+  분기. SetRunCharFmt/SetTableRowHeights는 보수적 폐쇄 유지). **실 Grok 마킹0 실증**: "전부 바꿔줘"→
+  Replace{all:true} 카드. E: PDF 스텁 경고 토스트(docProfile 수식/차트 카운트 재사용)+**HWPX 다운로드 버튼**
+  (toHwpx 사용자 노출)+README 한/영 "알려진 제약" 절. vitest 47/170/320/50 · **e2e 42/42**.
+- 갱신(4): 2026-07-22 · Claude — **069 해소 + 067/진단 커밋 완료**(87834a2 feat 067 · a6cfaf0 docs 진단/068/069).
   069 근본 = **드릴 모델(59fef4f) 미정렬 e2e 3스펙**(048·050·052 — 당시 5스펙만 정렬, 이 3개 누락. 그립 인터셉트는
   표면화 경로). 제품 동작 정상 판정 → 테스트를 드릴로 정렬(표 마킹→500ms→더블클릭 드릴, page.mouse 절대좌표)
   → **전체 e2e 42/42 그린**. 039 간헐 플레이키 1회는 아래 "알려진 flaky"로 추적.

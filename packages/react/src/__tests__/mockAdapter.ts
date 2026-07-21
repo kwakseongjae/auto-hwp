@@ -1,5 +1,5 @@
 import type { EngineAdapter } from "../EngineAdapter";
-import type { BlockHit, CaretRect, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "../types";
+import type { BlockHit, CaretRect, CellCaretRect, CellHit, CellTextHit, DocProfile, FindMatch, FindOptions, FindReplaceOptions, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "../types";
 
 /** A headless EngineAdapter for tests: canned SVG (optionally malicious, to exercise the R7 gate), a
  *  fixed table hit, and a spy-able applyIntent. No wasm — pure in-memory. */
@@ -53,6 +53,9 @@ export class MockAdapter implements EngineAdapter {
       cellCaret?: CellCaretRect | null | ((section: number, block: number, row: number, col: number, para: number, offset: number) => CellCaretRect | null);
       /** Canned document outline for `outline` (issue 046). Omit to OMIT the method (page-list fallback). */
       outline?: OutlineItem[];
+      /** Canned document profile for `docProfile` (issue 067). Omit to OMIT the method (no profile in the
+       *  doc-context; the PDF stub warning is skipped). */
+      profile?: DocProfile;
       /** Canned image hit for `imageAt` (issue 049), or a `(page, x, y)` resolver. Present makes `imageAt`
        *  answer; omit to OMIT the method (a backend with no image overlay). */
       image?: ImageBox | null | ((page: number, x: number, y: number) => ImageBox | null);
@@ -83,6 +86,7 @@ export class MockAdapter implements EngineAdapter {
       (this as { replace?: unknown }).replace = undefined;
     }
     if (!("outline" in this.opts)) (this as { outline?: unknown }).outline = undefined;
+    if (!("profile" in this.opts)) (this as { docProfile?: unknown }).docProfile = undefined;
     if (!("image" in this.opts)) (this as { imageAt?: unknown }).imageAt = undefined;
     if (!("imageBox" in this.opts)) (this as { imageBbox?: unknown }).imageBbox = undefined;
     this.liveCol = this.opts.colBoundaries ? this.opts.colBoundaries.slice() : null;
@@ -230,6 +234,11 @@ export class MockAdapter implements EngineAdapter {
   }
   async toHwpx(): Promise<Uint8Array> {
     return new Uint8Array([0x50, 0x4b]); // "PK"
+  }
+  /** 067: the document profile — answers ONLY when the test supplies `opts.profile` (omit-parity: a
+   *  backend without the optional method attaches no profile / skips the PDF stub warning). */
+  async docProfile(): Promise<DocProfile> {
+    return this.opts.profile as DocProfile;
   }
   dispose(): void {}
 }

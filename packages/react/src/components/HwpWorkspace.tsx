@@ -2440,6 +2440,20 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     }
   }, [core, normalizeOn, normalizeBusy, toast]);
 
+  // 067-follow(진단 U7 정직성): 편집본을 HWPX 로 저장하는 버튼 — `toHwpx()`는 자동저장(052)이 이미
+  // 쓰는 동일 직렬화(무편집 HWPX 영역은 바이트 보존, .hwp 원본도 결과는 HWPX). 지금까지 내부용으로만
+  // 있었고 사용자 버튼이 없어 "한글로 다시 열 파일"을 받을 길이 없었다.
+  const exportHwpx = useCallback(async () => {
+    try {
+      const bytes = await adapter.toHwpx();
+      const name = `${props.document?.name ?? "document"}.hwpx`;
+      if (props.onExport) await props.onExport(bytes, name, "application/hwp+zip");
+      else download(bytes, name, "application/hwp+zip");
+    } catch (e) {
+      toast(`HWPX 내보내기 실패: ${e}`);
+    }
+  }, [adapter, props.document, props.onExport, toast]);
+
   const exportPdf = useCallback(async () => {
     try {
       if (!adapter.hasFont()) {
@@ -2451,6 +2465,16 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           toast("PDF를 내보내려면 폰트를 먼저 주입하세요 (registerFont) — 한컴/함초롬 폰트는 번들되지 않습니다");
           return;
         }
+      }
+      // 067-follow(진단 U7 정직성): 수식·차트는 PDF 백엔드가 아직 벡터로 못 그려 자리표시 상자로
+      // 나간다(062 §B2 — 화면/HTML 은 실제로 그려짐). 문서 프로필(067, 순수 모델 read)로 개수를 세어
+      // 미리 알린다 — 차단하지 않는다(모르고 제출하는 사고와 알고 내보내는 선택의 차이가 목적).
+      try {
+        const profile = await adapter.docProfile?.();
+        const stubs = (profile?.equation_count ?? 0) + (profile?.chart_count ?? 0);
+        if (stubs > 0) toast(`안내: 수식·차트 ${stubs}개는 현재 PDF에서 자리표시 상자로 출력됩니다 (화면·HTML 내보내기는 실제로 그려집니다)`);
+      } catch {
+        /* 프로필 조회 실패는 경고만 생략 — export 는 계속 */
       }
       const pdf = await adapter.exportPdf();
       const name = `${props.document?.name ?? "document"}.pdf`;
@@ -2619,6 +2643,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         )}
         <button className="hw-tool" onClick={exportHtml} disabled={!meta} title="HTML 다운로드">
           HTML
+        </button>
+        <button className="hw-tool" onClick={exportHwpx} disabled={!meta} title="HWPX 다운로드 — 편집본을 한글이 여는 HWPX로 저장합니다 (.hwp 원본도 결과는 HWPX)">
+          HWPX
         </button>
         <button className="hw-tool hw-tool-accent" onClick={exportPdf} disabled={!meta} title="PDF 다운로드">
           PDF

@@ -146,6 +146,15 @@ is typed Intents rather than XML/CSS text.
 (Hancom's own "save as .hwpx" collapses line spacing and row heights), a **layout-recovery**
 mode detects the degradation fingerprint and restores an approximation of the original.
 
+**Known limitations (honest disclosure)**
+- **Equations & charts in PDF**: rendered for real on screen/HTML, but the PDF backend
+  cannot vectorize them yet — they export as **placeholder boxes** (the app warns you
+  before exporting). SVG→PDF vectorization is on the roadmap.
+- **Password-protected `.hwp`**: not supported — refused honestly. (Distribution-DRM
+  documents ARE decrypted — `hwp-crypto`.)
+- **No binary `.hwp` re-save**: the save format is HWPX. Editing a `.hwp` also downloads
+  as HWPX (untouched HWPX regions stay byte-identical).
+
 ## Rust crates (engine internals)
 
 `hwp-model` (IR) · `hwp-hwpx` (HWPX codec) · `hwp-rhwp` (.hwp parse bootstrap,
