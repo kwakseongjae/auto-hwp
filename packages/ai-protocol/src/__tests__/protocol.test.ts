@@ -73,6 +73,56 @@ describe("buildDocContext (R5-fenceable doc-context string)", () => {
     expect(ctx).toContain("(r1c1)김철수");
   });
 
+  // ── issue 067: document profile in the doc-context ──────────────────────────────────────────────
+  const PROFILE = {
+    title: "□ 일반현황",
+    sections: 1,
+    paragraph_count: 12,
+    table_count: 2,
+    image_count: 1,
+    chart_count: 0,
+    equation_count: 0,
+    headings: [{ section: 0, block: 4, level: 1, text: "□ 일반현황" }],
+    tables: [{ section: 0, block: 5, rows: 4, cols: 2, header: ["성명", "생년월일"] }],
+    excerpt: "[s0/b0] 2026년 사업계획서\n[s0/b5] (표 4×2)",
+  };
+
+  it("renders the profile after the header: title/counts/목차/표 목록 with [s/b] addresses + excerpt (067)", () => {
+    const ctx = buildDocContext({ ...META, profile: PROFILE }, [{ kind: "paragraph", section: 0, block: 0, text: "제목" }]);
+    // Order: header line first, profile block second, anchor lines after.
+    const headerIdx = ctx.indexOf("format=hwpx");
+    const profileIdx = ctx.indexOf("문서 프로필");
+    const anchorIdx = ctx.indexOf("#0 paragraph");
+    expect(headerIdx).toBe(0);
+    expect(profileIdx).toBeGreaterThan(headerIdx);
+    expect(anchorIdx).toBeGreaterThan(profileIdx);
+    expect(ctx).toContain("제목(추정): □ 일반현황");
+    expect(ctx).toContain("구성: 구역 1 · 문단 12 · 표 2 · 이미지 1 · 차트 0 · 수식 0");
+    expect(ctx).toContain("목차: [s0/b4] □ 일반현황");
+    expect(ctx).toContain("표 목록: [s0/b5] 4×2 헤더:(성명|생년월일)");
+    expect(ctx).toContain("[s0/b0] 2026년 사업계획서");
+  });
+
+  it("profile works with ZERO anchors — the U2 no-marking grounding path (067)", () => {
+    const ctx = buildDocContext({ ...META, profile: PROFILE }, []);
+    expect(ctx).toContain("문서 프로필");
+    expect(ctx).toContain("표 목록: [s0/b5]");
+  });
+
+  it("anchors/grids always win the budget: an over-budget profile is DROPPED, never the anchors (067)", () => {
+    const bigAnchor = { kind: "paragraph" as const, section: 0, block: 0, text: "x".repeat(7900) };
+    const ctx = buildDocContext({ ...META, profile: PROFILE }, [bigAnchor]);
+    // Leftover < PROFILE_MIN_LEN → no profile block; the anchor line survives intact (pre-slice).
+    expect(ctx).not.toContain("문서 프로필");
+    expect(ctx).toContain("#0 paragraph section=0 block=0");
+    expect(ctx.length).toBeLessThanOrEqual(8000);
+  });
+
+  it("without meta.profile the output is byte-identical to the pre-067 builder (regression-safe)", () => {
+    const anchors = [{ kind: "paragraph" as const, section: 0, block: 0, text: "본문" }];
+    expect(buildDocContext(META, anchors)).toBe(buildDocContext({ ...META, profile: undefined }, anchors));
+  });
+
   it("without grids the output is byte-identical to the pre-066 thin context (regression-safe)", () => {
     const anchors = [{ kind: "table" as const, section: 0, block: 3, text: "" }];
     const withUndef = buildDocContext(META, anchors);

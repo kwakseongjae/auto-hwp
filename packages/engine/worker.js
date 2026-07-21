@@ -50,6 +50,7 @@ const METHODS = new Set([
   'blockRunsPath',
   'tableGrid',
   'outline',
+  'docProfile',
   'applyIntent',
   'undo',
   'redo',

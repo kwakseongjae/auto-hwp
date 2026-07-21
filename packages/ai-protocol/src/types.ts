@@ -45,12 +45,54 @@ export interface TableGrid {
   cells: GridCell[];
 }
 
+/** One detected heading of the document profile (issue 067). Structurally compatible with
+ *  @tf-hwp/editor-core's `ProfileHeading` so a host passes the adapter's value straight through. */
+export interface ProfileHeading {
+  section: number;
+  block: number;
+  level: number;
+  text: string;
+}
+
+/** One table's inventory line of the document profile (issue 067): model address + shape + first-row
+ *  (header) cell texts. `(section, block)` are the SAME addresses `SetTableCell` targets. */
+export interface ProfileTable {
+  section: number;
+  block: number;
+  rows: number;
+  cols: number;
+  header: string[];
+}
+
+/** The deterministic document profile (issue 067): title candidate + structure counts + headings +
+ *  table inventory + a structure-preserving body excerpt. Engine-computed by pure model walks (ZERO
+ *  LLM calls) — the "what IS this document" grounding that ends the user re-explaining the document
+ *  every session (U1). Document-derived, hence UNTRUSTED — it rides INSIDE the R5-fenced
+ *  `<document-content>` block (DATA, never instructions). Structurally compatible with
+ *  @tf-hwp/editor-core's `DocProfile` (a host passes the adapter's value straight through). */
+export interface DocProfile {
+  title: string | null;
+  sections: number;
+  paragraph_count: number;
+  table_count: number;
+  image_count: number;
+  chart_count: number;
+  equation_count: number;
+  headings: ProfileHeading[];
+  tables: ProfileTable[];
+  excerpt: string;
+}
+
 /** Read-only document metadata used to ground the doc-context string (no bytes, no key). */
 export interface DocMeta {
   format: string;
   pages: number;
   editable: boolean;
   sections: number;
+  /** OPTIONAL (issue 067, additive) — the engine's deterministic document profile. When present,
+   *  `buildDocContext` renders it right after the header line (within the anchors-first budget);
+   *  absent ⇒ the output is byte-identical to the pre-067 builder (regression-safe). */
+  profile?: DocProfile;
 }
 
 /** One chat ATTACHMENT (multimodal input) — the user pastes/picks an IMAGE (a photo/screenshot of a table,

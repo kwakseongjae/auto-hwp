@@ -1,7 +1,7 @@
 import { HwpDoc, initEngine, resetEngine } from "@tf-hwp/engine";
 import { EngineWorkerClient } from "@tf-hwp/engine/worker-client";
 import type { EngineAdapter } from "./EngineAdapter";
-import type { BlockHit, CaretRect, CellAddr, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, NormalizeReport, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
+import type { BlockHit, CaretRect, CellAddr, CellCaretRect, CellHit, CellTextHit, DocProfile, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, NormalizeReport, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
 
 type WasmInput = string | URL | Request | BufferSource | WebAssembly.Module;
 
@@ -78,6 +78,7 @@ interface EngineDoc {
   blockRunsPath(section: number, path: CellAddr[]): MaybePromise<unknown>;
   tableGrid(section: number, block: number): MaybePromise<unknown>;
   outline(): MaybePromise<unknown>;
+  docProfile(): MaybePromise<unknown>;
   applyIntent(intent: object | string): MaybePromise<unknown>;
   undo(): MaybePromise<boolean>;
   redo(): MaybePromise<boolean>;
@@ -188,6 +189,7 @@ export class WasmAdapter implements EngineAdapter {
       blockRunsPath: call("blockRunsPath"),
       tableGrid: call("tableGrid"),
       outline: call("outline"),
+      docProfile: call("docProfile"),
       applyIntent: call("applyIntent") as EngineDoc["applyIntent"],
       undo: call("undo") as EngineDoc["undo"],
       redo: call("redo") as EngineDoc["redo"],
@@ -442,6 +444,15 @@ export class WasmAdapter implements EngineAdapter {
    *  decision, not a null check. */
   outline(): Promise<OutlineItem[]> {
     return this.guard(async (d) => (await d.outline()) as OutlineItem[]);
+  }
+
+  /** Document profile (issue 067) — the engine `docProfile` binding (a pure MODEL read: no re-typeset,
+   *  ZERO LLM calls). The chat doc-context's "what IS this document" grounding: title candidate +
+   *  structure counts + heading list + table inventory (SAME `(section, block)` addresses the
+   *  `tableGrid`/`SetTableCell` lane targets) + a structure-preserving body excerpt. Cheap enough to
+   *  fetch per AI request, so it is never stale after an edit. */
+  docProfile(): Promise<DocProfile> {
+    return this.guard(async (d) => (await d.docProfile()) as DocProfile);
   }
 
   /** WYSIWYG GLYPH caret (engine half) — the rhwp glyph-box `HitTest` intent via the applyIntent JSON

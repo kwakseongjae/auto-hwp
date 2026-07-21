@@ -138,6 +138,45 @@ export interface OutlineItem {
   page: number;
 }
 
+/** One detected heading for the document profile (issue 067) — the outline WITHOUT the page number (the
+ *  profile is a pure model read; `[s/b]` anchors are the edit currency). Mirrors @tf-hwp/engine
+ *  `ProfileHeading` / hwp-session `ProfileHeading` verbatim (043 homomorphic parity). */
+export interface ProfileHeading {
+  section: number;
+  block: number;
+  level: number;
+  text: string;
+}
+
+/** One table's inventory line for the document profile (issue 067): model address + shape + first-row
+ *  (header) cell texts. `(section, block)` are the SAME addresses `tableGrid`/`SetTableCell` target.
+ *  Mirrors @tf-hwp/engine `ProfileTable` / hwp-session `ProfileTable` verbatim. */
+export interface ProfileTable {
+  section: number;
+  block: number;
+  rows: number;
+  cols: number;
+  header: string[];
+}
+
+/** The deterministic document profile (issue 067): title candidate + structure counts + headings + table
+ *  inventory + a structure-preserving body excerpt — the chat doc-context's "what IS this document"
+ *  grounding, computed by pure model walks (no typeset, ZERO LLM calls — U1's fix is plumbing, not AI).
+ *  Counts include NESTED content (cell blocks). Mirrors @tf-hwp/engine `DocProfile` / hwp-session
+ *  `DocProfileDto` verbatim (both adapters pass it through untouched — 043 homomorphic parity). */
+export interface DocProfile {
+  title: string | null;
+  sections: number;
+  paragraph_count: number;
+  table_count: number;
+  image_count: number;
+  chart_count: number;
+  equation_count: number;
+  headings: ProfileHeading[];
+  tables: ProfileTable[];
+  excerpt: string;
+}
+
 /** Page geometry in own-render PAGE px (= HWPUNIT/75) — the page box + printable-area margins, for the
  *  ruler (issue 027). Mirrors @tf-hwp/engine's `pageGeometry` / hwp-session `PageGeom`. */
 export interface PageGeom {

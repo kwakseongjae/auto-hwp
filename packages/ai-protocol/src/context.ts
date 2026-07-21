@@ -1,4 +1,4 @@
-import type { Anchor, Attachment, DocMeta, EditRequest, TableGrid, UserContentPart } from "./types.js";
+import type { Anchor, Attachment, DocMeta, DocProfile, EditRequest, TableGrid, UserContentPart } from "./types.js";
 
 /// Doc-context assembly (SDK-LAYERS: "buildDocContext(session, anchors) — R5 펜스 포함"). PROMOTED from
 /// apps/hwp-lab's LabWorkspace.buildDocContextString + the route handler's user-message assembly so the
@@ -31,6 +31,38 @@ function renderGrid(grid: TableGrid, cellMaxLen: number): string {
   return lines.join("\n");
 }
 
+/** Profile char budget (issue 067): the rendered profile block never exceeds this, and it is ONLY
+ *  inserted into the doc-context's LEFTOVER budget after the header + anchor/grid lines — anchors and
+ *  grids (the edit targets) always win over the profile (background grounding). */
+const DEFAULT_PROFILE_MAX_LEN = 2500;
+/** Below this leftover budget the profile is dropped entirely (a truncated stub would mislead). */
+const PROFILE_MIN_LEN = 200;
+
+/** Render the engine's document profile (issue 067) as a compact doc-context block: title candidate +
+ *  structure counts + heading list + table inventory (each with its `[s{sec}/b{blk}]` edit address +
+ *  header cells) + the structure-preserving body excerpt. Everything is document-derived DATA — it
+ *  rides inside the R5 `<document-content>` fence, and the system prompt's DOC PROFILE stanza teaches
+ *  the model to read (not obey) it. Elided to `maxLen` chars. */
+function renderProfile(p: DocProfile, maxLen: number): string {
+  const lines: string[] = ["문서 프로필 (엔진 자동 추출 — 문서 유래 데이터):"];
+  if (p.title) lines.push(`  제목(추정): ${p.title}`);
+  lines.push(
+    `  구성: 구역 ${p.sections} · 문단 ${p.paragraph_count} · 표 ${p.table_count} · 이미지 ${p.image_count} · 차트 ${p.chart_count} · 수식 ${p.equation_count}`,
+  );
+  if (p.headings.length) {
+    lines.push(`  목차: ${p.headings.map((h) => `[s${h.section}/b${h.block}] ${h.text}`).join(" · ")}`);
+  }
+  if (p.tables.length) {
+    const one = (t: ProfileTableLike) => `[s${t.section}/b${t.block}] ${t.rows}×${t.cols}${t.header.length ? ` 헤더:(${t.header.join("|")})` : ""}`;
+    lines.push(`  표 목록: ${p.tables.map(one).join(" · ")}`);
+  }
+  if (p.excerpt) {
+    lines.push("  본문 발췌([s/b]=블록 주소):", ...p.excerpt.split("\n").map((l) => `    ${l}`));
+  }
+  return lines.join("\n").slice(0, maxLen);
+}
+type ProfileTableLike = DocProfile["tables"][number];
+
 /** Build the doc-context STRING the client sends to its proxy: a compact header (format/pages/…) plus one
  *  line per marked anchor (structure indices + the anchor's current text). The anchor `text` is
  *  document-derived, hence UNTRUSTED — it is fenced as DATA on the server (see `buildUserMessage`).
@@ -40,7 +72,7 @@ function renderGrid(grid: TableGrid, cellMaxLen: number): string {
  *  gets its full cell grid appended (subsequent anchors of the SAME table are de-duped, so marking many
  *  cells never repeats the grid). Without `grids` the output is byte-identical to the pre-066 builder
  *  (thin anchor-only context — regression-safe). Elided to `maxLen` (default 8000) chars. */
-export function buildDocContext(meta: DocMeta, anchors: Anchor[], opts?: { maxLen?: number; grids?: (TableGrid | null | undefined)[]; cellMaxLen?: number }): string {
+export function buildDocContext(meta: DocMeta, anchors: Anchor[], opts?: { maxLen?: number; grids?: (TableGrid | null | undefined)[]; cellMaxLen?: number; profileMaxLen?: number }): string {
   const maxLen = opts?.maxLen ?? 8000;
   const cellMaxLen = opts?.cellMaxLen ?? DEFAULT_CELL_MAX_LEN;
   const head = `format=${meta.format} pages=${meta.pages} editable=${meta.editable} sections=${meta.sections}`;
@@ -57,7 +89,18 @@ export function buildDocContext(meta: DocMeta, anchors: Anchor[], opts?: { maxLe
     }
     return line;
   });
-  return [head, ...lines].join("\n").slice(0, maxLen);
+  // Issue 067 — DOC PROFILE: inserted right after the header, but ONLY into the budget the anchor/grid
+  // lines leave over (anchors/grids are the edit targets — they always win; the profile is background
+  // grounding). Without `meta.profile` the output is byte-identical to the pre-067 builder.
+  const base = [head, ...lines].join("\n");
+  if (meta.profile) {
+    const leftover = maxLen - base.length - 1; // -1: the "\n" joining the profile in
+    if (leftover >= PROFILE_MIN_LEN) {
+      const profile = renderProfile(meta.profile, Math.min(leftover, opts?.profileMaxLen ?? DEFAULT_PROFILE_MAX_LEN));
+      return [head, profile, ...lines].join("\n").slice(0, maxLen);
+    }
+  }
+  return base.slice(0, maxLen);
 }
 
 /** The DOC attachments carrying extracted text (image attachments have no `text`). */

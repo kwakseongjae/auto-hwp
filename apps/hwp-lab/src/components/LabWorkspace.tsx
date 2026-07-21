@@ -364,18 +364,25 @@ export default function LabWorkspace() {
     // 066: 표/셀 앵커마다 엔진에서 그 표의 셀 그리드(행×열·각 셀 텍스트·빈칸)를 조회해 doc-context 에
     // 첨부한다 — 그래야 모델이 "표 채워줘"·라벨 옆 값칸 지정·구조편집(행 N개)을 정확히 한다(얇은 앵커
     // 컨텍스트에선 intents 0 이었음). 표가 아니거나 조회 실패면 null(첨부 없음 → 기존 동작, 회귀 방지).
-    const grids = await Promise.all(
-      anchors.map((a) =>
-        (a.kind === "table" || a.kind === "cell") && adapter.tableGrid
-          ? adapter.tableGrid(a.section, a.block).catch(() => null)
-          : Promise.resolve(null),
+    // 067: 문서 프로필(제목·구성 카운트·목차·표 목록·본문 발췌)을 엔진에서 결정론으로 뽑아 매 요청의
+    // doc-context 에 상시 첨부한다 — 사용자가 "이 문서가 뭔지"를 설명하거나 앵커를 찍기 전에도 모델이
+    // 문서를 인지한다(U1·U2). 순수 모델 read 라 요청마다 조회해도 싸고, 편집 직후에도 스테일이 없다.
+    // 어댑터 미지원/실패면 undefined → 기존 얇은 컨텍스트 그대로(바이트 동일, 회귀 방지).
+    const [profile, grids] = await Promise.all([
+      adapter.docProfile ? adapter.docProfile().catch(() => undefined) : Promise.resolve(undefined),
+      Promise.all(
+        anchors.map((a) =>
+          (a.kind === "table" || a.kind === "cell") && adapter.tableGrid
+            ? adapter.tableGrid(a.section, a.block).catch(() => null)
+            : Promise.resolve(null),
+        ),
       ),
-    );
+    ]);
     const requestBody = {
       instruction,
       anchors,
       // R5-펜스용 doc-context 문자열 — ai-protocol 이 서버와 공유하는 조립기(이슈 026). 066: 그리드 첨부.
-      docContext: buildDocContext({ format: ctx.format, pages: ctx.pages, editable: ctx.editable, sections: ctx.sections }, anchors, { grids }),
+      docContext: buildDocContext({ format: ctx.format, pages: ctx.pages, editable: ctx.editable, sections: ctx.sections, profile }, anchors, { grids }),
       // Feature A(비스트리밍 경로 back-compat): 웹 검색 grounding 플래그. 스트리밍 에이전트는 검색을 스스로
       // 결정하므로 채팅은 더 이상 이 값을 켜지 않는다(InlineEditPanel 등이 쓰면 서버가 web 플러그인을 켠다).
       webSearch: opts?.webSearch ?? false,

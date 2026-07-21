@@ -641,6 +641,19 @@ impl HwpDoc {
         serde_json::to_string(&items).map_err(|e| js_err("serialize", &e.to_string()))
     }
 
+    /// The deterministic DOCUMENT PROFILE (issue 067) — a JSON **string** of `{title, sections,
+    /// paragraph_count, table_count, image_count, chart_count, equation_count, headings:[{section,
+    /// block, level, text}], tables:[{section, block, rows, cols, header:[…]}], excerpt}`. The chat
+    /// doc-context's "what IS this document" grounding: title candidate + structure counts + heading
+    /// list + table inventory + a `to_markdown` body excerpt, ALL computed by pure model walks (no
+    /// typeset, no fonts, ZERO LLM calls) so it is cheap per request and never stale after an edit.
+    /// Table addresses are the SAME `(section, block)` the `tableGrid`/`SetTableCell` lane targets.
+    #[wasm_bindgen(js_name = docProfile)]
+    pub fn doc_profile(&self) -> Result<String, JsValue> {
+        let p = hwp_session::doc_profile(self.doc()?);
+        serde_json::to_string(&p).map_err(|e| js_err("serialize", &e.to_string()))
+    }
+
     /// Apply one Intent-JSON envelope (schema v0, issue 008) via the SAME op-bus the desktop uses
     /// ([`hwp_mcp::apply_intent_json`]) — Propose/Commit/Undo/Redo and every edit variant included.
     /// Returns a JSON `Outcome` (`{kind, …}`). Throws a `{code, message}` error on a bad envelope or a

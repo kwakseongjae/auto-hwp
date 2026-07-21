@@ -207,6 +207,211 @@ fn outline_heading(block: &hwp_model::document::Block) -> Option<(u8, String)> {
     }
 }
 
+// ---- Document profile (issue 067 — AI doc-context grounding) ----------------------------------
+
+/// Char-budget caps for the profile — keep the WHOLE profile a small, bounded doc-context block so it
+/// can ride every AI request without threatening the anchors/grids budget (067 §예산).
+const PROFILE_EXCERPT_MAX: usize = 1200;
+const PROFILE_HEADINGS_MAX: usize = 20;
+const PROFILE_TABLES_MAX: usize = 20;
+const PROFILE_HEADER_CELLS_MAX: usize = 6;
+const PROFILE_HEADER_CELL_LEN: usize = 24;
+const PROFILE_TITLE_MAX: usize = 60;
+
+/// One detected heading for the profile — [`outline`] WITHOUT the page number, so building the
+/// profile stays a PURE MODEL read (`outline()` pays a `block_pages` typeset pass for the nav
+/// panel's page jump; the model doesn't need pages — `[s/b]` anchors are the edit currency).
+#[derive(serde::Serialize)]
+pub struct ProfileHeading {
+    pub section: usize,
+    pub block: usize,
+    pub level: u8,
+    pub text: String,
+}
+
+/// One table's inventory line for the profile: model address + shape + first-row (header) cell
+/// texts — so the model can tell WHICH table the user means without a marked anchor. `(section,
+/// block)` are the SAME addresses `tableGrid`/`SetTableCell` target (`edit_target` inner table).
+#[derive(serde::Serialize)]
+pub struct ProfileTable {
+    pub section: usize,
+    pub block: usize,
+    pub rows: usize,
+    pub cols: usize,
+    pub header: Vec<String>,
+}
+
+/// The deterministic document profile (issue 067): title candidate + structure counts + headings +
+/// table inventory + a `to_markdown` body excerpt — what the chat doc-context needs to ground
+/// "what IS this document" without the user marking anchors or re-explaining it each session, with
+/// ZERO LLM calls. Pure model read (no placement, no fonts) — cheap enough to compute per AI
+/// request, so it is never stale after an edit. Counts include NESTED content (cell blocks).
+#[derive(serde::Serialize)]
+pub struct DocProfileDto {
+    pub title: Option<String>,
+    pub sections: usize,
+    pub paragraph_count: usize,
+    pub table_count: usize,
+    pub image_count: usize,
+    pub chart_count: usize,
+    pub equation_count: usize,
+    pub headings: Vec<ProfileHeading>,
+    pub tables: Vec<ProfileTable>,
+    pub excerpt: String,
+}
+
+/// Truncate to `max` CHARS (not bytes — never splits a Hangul scalar), appending "…" when elided.
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let t: String = s.chars().take(max).collect();
+        format!("{t}…")
+    }
+}
+
+/// Build the document profile — see [`DocProfileDto`]. Every ingredient is an existing surface:
+/// heading detection = [`outline`]'s `outline_heading`, table shape/text = the [`table_grid`] lane
+/// (`edit_target` + active cells), excerpt = `hwp_ai::to_markdown` (the 004 structure-preserving
+/// projection). Nothing here re-typesets.
+pub fn doc_profile(doc: &SemanticDoc) -> DocProfileDto {
+    use hwp_model::document::{Block, Inline};
+
+    // Recursive structure counts — a nested table (a table inside a cell) counts like the visible
+    // content it is; Raw/field/bookmark inlines are ignored (un-modeled passthrough).
+    fn walk(
+        blocks: &[Block],
+        p: &mut usize,
+        t: &mut usize,
+        img: &mut usize,
+        ch: &mut usize,
+        eq: &mut usize,
+    ) {
+        for b in blocks {
+            match b {
+                Block::Paragraph(para) => {
+                    *p += 1;
+                    for run in &para.runs {
+                        for inl in &run.content {
+                            match inl {
+                                Inline::Image(_) => *img += 1,
+                                Inline::Chart(_) => *ch += 1,
+                                Inline::Equation(_) => *eq += 1,
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                Block::Table(table) => {
+                    *t += 1;
+                    for cell in &table.cells {
+                        walk(&cell.blocks, p, t, img, ch, eq);
+                    }
+                }
+            }
+        }
+    }
+
+    let (mut paragraphs, mut tables_n, mut images, mut charts, mut equations) = (0, 0, 0, 0, 0);
+    let mut headings = Vec::new();
+    let mut tables = Vec::new();
+    let mut first_para_text: Option<String> = None;
+    for (si, sec) in doc.sections.iter().enumerate() {
+        walk(
+            &sec.blocks,
+            &mut paragraphs,
+            &mut tables_n,
+            &mut images,
+            &mut charts,
+            &mut equations,
+        );
+        for (bi, block) in sec.blocks.iter().enumerate() {
+            if headings.len() < PROFILE_HEADINGS_MAX {
+                if let Some((level, text)) = outline_heading(block) {
+                    headings.push(ProfileHeading {
+                        section: si,
+                        block: bi,
+                        level,
+                        text,
+                    });
+                }
+            }
+            match block {
+                Block::Paragraph(p) => {
+                    if first_para_text.is_none() {
+                        let t: String = p
+                            .runs
+                            .iter()
+                            .flat_map(|r| &r.content)
+                            .filter_map(|i| match i {
+                                Inline::Text(s) => Some(s.as_str()),
+                                _ => None,
+                            })
+                            .collect();
+                        let t = t.trim().to_string();
+                        if !t.is_empty() {
+                            first_para_text = Some(t);
+                        }
+                    }
+                }
+                Block::Table(t) => {
+                    if tables.len() < PROFILE_TABLES_MAX {
+                        let t = t.edit_target(); // SAME coordinate frame as tableGrid/SetTableCell
+                        let (rows, cols) = (t.rows.max(1), t.cols.max(1));
+                        let mut first_row: Vec<_> = t
+                            .cells
+                            .iter()
+                            .filter(|c| c.active && c.row == 0 && c.col < cols)
+                            .collect();
+                        first_row.sort_by_key(|c| c.col);
+                        let header = first_row
+                            .into_iter()
+                            .take(PROFILE_HEADER_CELLS_MAX)
+                            .map(|c| {
+                                truncate_chars(cell_plain_text(c).trim(), PROFILE_HEADER_CELL_LEN)
+                            })
+                            .collect();
+                        tables.push(ProfileTable {
+                            section: si,
+                            block: bi,
+                            rows,
+                            cols,
+                            header,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // Title candidate: the first level-1 heading, else the first non-empty paragraph (a gov-doc's
+    // big centered title is normally the first text block). Honest `None` when neither exists.
+    let title = headings
+        .iter()
+        .find(|h| h.level == 1)
+        .map(|h| h.text.clone())
+        .or(first_para_text)
+        .map(|t| truncate_chars(&t, PROFILE_TITLE_MAX));
+
+    let excerpt = {
+        let md = hwp_ai::to_markdown(doc).unwrap_or_default();
+        truncate_chars(md.trim(), PROFILE_EXCERPT_MAX)
+    };
+
+    DocProfileDto {
+        title,
+        sections: doc.sections.len(),
+        paragraph_count: paragraphs,
+        table_count: tables_n,
+        image_count: images,
+        chart_count: charts,
+        equation_count: equations,
+        headings,
+        tables,
+        excerpt,
+    }
+}
+
 // ---- Image move/resize overlay geometry -------------------------------------------------------
 
 /// An anchored image's placed box in own-render PX (own SVG space) + its model anchor. The frontend
@@ -1812,6 +2017,78 @@ mod tests {
         )
         .expect("seed table");
         doc
+    }
+
+    // ---- doc_profile (issue 067) ----
+
+    /// The profile is a PURE MODEL read that sees the fixture's structure: 1 table (3×2, header
+    /// 항목/내용), its cell paragraphs counted, and a to_markdown excerpt carrying the table grid.
+    #[test]
+    fn doc_profile_reads_fixture_structure() {
+        let doc = doc_with_table();
+        let p = doc_profile(&doc);
+        assert_eq!(p.sections, 1);
+        assert_eq!(p.table_count, 1);
+        assert_eq!(p.tables.len(), 1);
+        let t = &p.tables[0];
+        assert_eq!((t.section, t.block, t.rows, t.cols), (0, 1, 3, 2));
+        assert_eq!(t.header, vec!["항목".to_string(), "내용".to_string()]);
+        // 1 top-level paragraph + 6 cell paragraphs (nested cell blocks ARE walked).
+        assert!(
+            p.paragraph_count >= 7,
+            "cell paragraphs must be counted, got {}",
+            p.paragraph_count
+        );
+        assert!(
+            p.excerpt.contains("표 3×2"),
+            "excerpt must carry the to_markdown table header: {}",
+            p.excerpt
+        );
+        assert_eq!((p.image_count, p.chart_count, p.equation_count), (0, 0, 0));
+    }
+
+    /// Title candidate: a □-heading wins; without one the first non-empty paragraph text is used.
+    #[test]
+    fn doc_profile_title_prefers_heading() {
+        use hwp_model::document::{Block, Inline, Paragraph, Run, Section};
+        let para = |text: &str| {
+            Block::Paragraph(Paragraph {
+                runs: vec![Run {
+                    content: vec![Inline::Text(text.to_string())],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            })
+        };
+        let mut doc = SemanticDoc {
+            char_shapes: vec![Default::default()],
+            para_shapes: vec![Default::default()],
+            ..Default::default()
+        };
+        doc.sections.push(Section {
+            blocks: vec![para("2026년 사업계획서"), para("□ 일반현황")],
+            ..Default::default()
+        });
+        let p = doc_profile(&doc);
+        assert_eq!(p.title.as_deref(), Some("□ 일반현황"));
+        assert_eq!(p.headings.len(), 1);
+        assert_eq!(p.headings[0].level, 1);
+
+        // Drop the heading → the first paragraph text becomes the candidate.
+        doc.sections[0].blocks.pop();
+        let p = doc_profile(&doc);
+        assert_eq!(p.title.as_deref(), Some("2026년 사업계획서"));
+        assert!(p.headings.is_empty());
+    }
+
+    /// Char-safe elision: a long header cell / title is cut at CHAR boundaries with "…" (never a
+    /// byte split through a Hangul scalar).
+    #[test]
+    fn doc_profile_truncates_char_safe() {
+        let long = "가".repeat(100);
+        let cut = truncate_chars(&long, 24);
+        assert_eq!(cut.chars().count(), 25); // 24 chars + '…'
+        assert!(cut.ends_with('…'));
     }
 
     fn fill(row: usize, col: usize) -> Op {

@@ -1,4 +1,4 @@
-import type { BlockHit, CaretRect, CellAddr, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, NormalizeReport, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
+import type { BlockHit, CaretRect, CellAddr, CellCaretRect, CellHit, CellTextHit, DocProfile, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, NormalizeReport, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
 
 /// EngineAdapter — the backend seam (SDK-LAYERS L1↔L2). It abstracts the ACTUAL surface a backend
 /// exposes (open / page SVG / hit-test·tableAt / applyIntent / undo·redo / export) so the SAME
@@ -166,6 +166,15 @@ export interface EngineAdapter {
    *  (WasmAdapter via the engine `outline()` binding; TauriAdapter via the `doc_outline` command) with the
    *  SAME shape; a backend that can't OMITS the method → the panel shows the page-list fallback. */
   outline?(): Promise<OutlineItem[]>;
+
+  /** OPTIONAL — the deterministic DOCUMENT PROFILE (issue 067): title candidate + structure counts +
+   *  heading list + table inventory + a body excerpt, the chat doc-context's "what IS this document"
+   *  grounding (U1 — the model used to see only format/pages + marked anchors, so the user had to
+   *  re-explain the document every session). A pure model read on the engine side (no typeset, ZERO
+   *  LLM calls) — cheap enough to fetch per AI request, so it is never stale after an edit. Backends
+   *  that can't answer OMIT this (the chat then falls back to the thin anchor-only context — the
+   *  pre-067 behavior). Reference impl: `WasmAdapter` via the engine `docProfile` binding. */
+  docProfile?(): Promise<DocProfile>;
 
   /** Apply an Intent (schema v0). One undo unit per accepted Intent. */
   applyIntent(intent: Intent): Promise<Outcome>;

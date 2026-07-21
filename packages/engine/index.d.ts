@@ -122,6 +122,44 @@ export interface OutlineItem {
   page: number;
 }
 
+/** One detected heading for the document profile (issue 067) — `outline` WITHOUT the page number
+ *  (the profile is a pure model read; `[s/b]` anchors are the edit currency). Mirrors hwp-session
+ *  `ProfileHeading`. */
+export interface ProfileHeading {
+  section: number;
+  block: number;
+  level: number;
+  text: string;
+}
+
+/** One table's inventory line for the document profile (issue 067): model address + shape + first-row
+ *  (header) cell texts. `(section, block)` are the SAME addresses `tableGrid`/`SetTableCell` target.
+ *  Mirrors hwp-session `ProfileTable`. */
+export interface ProfileTable {
+  section: number;
+  block: number;
+  rows: number;
+  cols: number;
+  header: string[];
+}
+
+/** The deterministic document profile (issue 067): title candidate + structure counts + headings +
+ *  table inventory + a structure-preserving body excerpt — the chat doc-context's "what IS this
+ *  document" grounding, computed by pure model walks (no typeset, ZERO LLM calls). Counts include
+ *  NESTED content (cell blocks). Mirrors hwp-session `DocProfileDto`. */
+export interface DocProfile {
+  title: string | null;
+  sections: number;
+  paragraph_count: number;
+  table_count: number;
+  image_count: number;
+  chart_count: number;
+  equation_count: number;
+  headings: ProfileHeading[];
+  tables: ProfileTable[];
+  excerpt: string;
+}
+
 /** One ACTIVE (uncovered) cell of a table's grid (issue 066): its MODEL-GLOBAL `(row, col)` + current
  *  plain text. Mirrors hwp-session `GridCellDto`. */
 export interface GridCell {
@@ -271,6 +309,9 @@ export class HwpDoc {
    *  page}`. Returns an EMPTY ARRAY when the document has no detected heading (caller falls back to a
    *  page list). The SAME heading source the desktop `doc_outline` command uses. */
   outline(): OutlineItem[];
+  /** The deterministic document profile (issue 067) — title candidate + structure counts + headings +
+   *  table inventory + body excerpt, for the chat doc-context. Pure model read (no typeset, no LLM). */
+  docProfile(): DocProfile;
   applyIntent(intent: object | string): Outcome;
   undo(): boolean;
   redo(): boolean;

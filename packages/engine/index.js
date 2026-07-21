@@ -295,6 +295,14 @@ export class HwpDoc {
   outline() {
     return this.#call((r) => JSON.parse(r.outline())); // wasm returns "[]" when there is no heading
   }
+  /** The deterministic DOCUMENT PROFILE (issue 067) — `{title, sections, paragraph_count, table_count,
+   *  image_count, chart_count, equation_count, headings, tables, excerpt}` as a `DocProfile`. The chat
+   *  doc-context's "what IS this document" grounding: title candidate + structure counts + heading list
+   *  + table inventory (SAME `(section, block)` addresses `tableGrid`/`SetTableCell` target) + a
+   *  structure-preserving body excerpt. Pure model walks — no typeset, no LLM; cheap per request. */
+  docProfile() {
+    return this.#call((r) => JSON.parse(r.docProfile()));
+  }
   /** Apply an Intent (schema v0). Accepts an object or a JSON string; returns the parsed Outcome. */
   applyIntent(intent) {
     const s = typeof intent === 'string' ? intent : JSON.stringify(intent);
