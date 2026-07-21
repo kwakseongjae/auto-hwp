@@ -4,7 +4,24 @@
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
 - 기준 커밋: `6ebfbb2`+CI픽스 — **PUBLIC 전환 + 라이브 데모 배포 완료**(https://kwakseongjae.github.io/tf-hwp/) — **R12~R14 + 실물QA 065·066 + 웹QA 2~6차 + HWPX 시각 파리티 + 레이아웃 정리 토글 완료**. GitHub: https://github.com/kwakseongjae/tf-hwp (private)
-- 갱신: 2026-07-16 · Claude — **HWPX 줄간격 근본진단 + 레이아웃 정리 토글**(4d74c11). 통제실험(동일문서 .hwp/.hwpx)으로
+- 갱신: 2026-07-22(3) · Claude — **067 문서 프로필 구현·검증 완료(미커밋)**. `hwp_session::doc_profile`(순수 모델
+  walk: 제목후보·구성카운트·헤딩·표 인벤토리[s/b]·to_markdown 발췌) → wasm `docProfile` → adapter optional →
+  `DocMeta.profile` → buildDocContext 앵커-우선 예산 삽입(2500자 캡) + 프롬프트 DOC PROFILE 스탠자. **LLM 0콜**.
+  검증: workspace 테스트·게이트 8==8/18==18(98.9/99.2%)·wasm 재빌드(9.79MB)+copy·vitest 169/46/316/50·
+  e2e 신규 doc-profile-067+066 통과·**실 Grok 마킹0 실증**(사고로그가 프로필 읽고 `TableAppendRow{s0,i1}` 제안).
+  ⚠️ 부수 발견: **e2e 사전존재 실패 5건**(052×2·048×2·050×1, HEAD 재현 확정 — hw-row-grip 클릭 인터셉트 의심)
+  → **069 신설**. 커밋은 사용자 요청 대기.
+- 갱신(2): 2026-07-22 · Claude — **진단 후속 확정**: ① **067 신설**(문서 프로필 = **LLM 0콜 결정론** 확정 — native
+  `to_markdown`/`outline` 완비, 병목은 wasm 노출뿐. 배관 5단계 additive 설계 고정) ② **068 실물 벤치 확보** —
+  bench-local-2026(archive 24건, must-pass=`2026_*` 8건) + bench-public(공공 25건, HWPX 17/HWP5 8, manifest·KOGL 기록)
+  = **49/49 ALL PASS**(detect·own-render·PDF·텍스트), 게이트 `scripts/bench-corpus.sh`(corpus/private=gitignore, 레포 public 주의).
+  ⚠️ 게이트는 파이프라인 통과 보증 — 시각 파리티는 별개(딥테크 쌍 25p vs 18p 실측). issues/README stale 표(064~066) 갱신.
+- 갱신(1): 2026-07-22 · Claude — **사용자 관점 병목 진단 발행**(`docs/USER-BOTTLENECK-DIAGNOSIS.md`, 분석-only·코드 무변경).
+  4축 조사(엔진·에디터/SDK·docs·외부 생태계) → U1~U12(최종 사용자)/D1~D6(임베드 개발자)/S1~S5(전략) + 보강 A~G.
+  헤드라인: **AI 문서이해 층 부재(U1)**·npm 미발행+온보딩 6단계(D1·D2)·**rhwp upstream v0.7.19 전면 경쟁 확인**(S1,
+  vendored 0.7.15 대비 4버전 갭 — 재벤더링은 여전히 needsExternal)·**정부 HWPX 의무화 2026-05-18 시행**(S3, 전략 순위 급등).
+  이후 관련 작업은 이 문서의 ID로 참조. 보강 우선순위는 사용자 승인 대기.
+- 갱신(직전): 2026-07-16 · Claude — **HWPX 줄간격 근본진단 + 레이아웃 정리 토글**(4d74c11). 통제실험(동일문서 .hwp/.hwpx)으로
   "hwp vs hwpx 괴리"=파일 열화(한글 hwpx저장이 본문 78%를 바탕글 160%로 리매핑, 한글도 20p로 벌어지게 렌더)임을 증명. 우리 읽기는
   충실. **정규화 옵트인 토글** 추가(hwp-model::normalize_line_spacing → wasm setNormalize → 툴바 "레이아웃 정리"): 열화지문
   감지 시 160%→130% 복원(렌더-IR only·가역·moat보존). 브라우저 실검증: 충실18p(1~10행)↔정규화17p(1~12행=.hwp). 게이트 8==8/18==18.

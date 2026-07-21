@@ -76,10 +76,18 @@ R12 완료 후 "알려진 한계" 5종을 리서치 4레인으로 조사 → 이
 | [061](061-web-deploy.md) | 웹 배포(Vercel prebuilt) — QA용 외부 URL | **deferred** | QA 인프라 | 2026-07-12 보류 — 사용자가 로컬 QA(`npm run dev`) 선택. 설계는 완료, 필요 시 30분 최소경로 |
 | (056) | 배포용 crypto | (위 R12 표) | 조건부→**062로 해소** | rhwp crypto.rs(MIT, NIST 벡터 테스트 보유)가 골든 벡터까지 해결 — 062-1로 승격 |
 | [062](062-rhwp-renderer-promotion.md) | rhwp 렌더러 계층 승격 | **거의 완료** (062-1~5·7 done) | R14 배치 | 배포용복호(056해소)·옛한글·금칙·대각선X자·수식렌더v1·차트v1(15fc718) 병합·검증. 잔여: 자체PaintOp v2(XL)·krilla PDF·레거시OLE·**rhwp재벤더 v0.7.18(needsExternal)**. 폰트메트릭=디스코프 |
-| [064](064-nested-cell-marking-toast.md) | 중첩표 셀 마킹 토스트 | open (revert) | R14 후속 | speculative dead-code(엔진 nested 미방출)로 revert. 엔진 선행 필요 |
-| [065](065-hwpx-compressed-mimetype.md) | 압축 mimetype HWPX 거부(실물 25% 안 열림) | **open (P0)** | R14 QA발견 | detector 앞512B 리터럴만→압축 mimetype Unknown 거부. fallback zip 디코드. **업로드→렌더 직결** |
-| [066](066-vibe-table-grid-context.md) | 바이브 표 편집 컨텍스트 blindness | **open (P0)** | R14 QA발견 | 웹 doc-context가 표 그리드 미제공→표채우기 intents 0/라벨 엉뚱셀. Grok A/B 실증(그리드 주면 완벽). to_markdown(004) 웹 배선 |
+| [064](064-nested-cell-marking-toast.md) | 중첩표 셀 선택·편집(CellPath Tier2) | **done** (8afc6e3) | R14 후속 | 토스트(Tier1)를 넘어 CellPath 전 스택 배선 — 중첩표 더블클릭 편집. 캐럿 레인은 flat 유지(잔여) |
+| [065](065-hwpx-compressed-mimetype.md) | 압축 mimetype HWPX 거부(실물 25% 안 열림) | **done** (79ecd1a) | R14 QA발견 | detect fallback = ZIP 중앙디렉토리 엔트리 NAME 스캔(inflate 0·wasm-clean). 실물 6/6 회복 |
+| [066](066-vibe-table-grid-context.md) | 바이브 표 편집 컨텍스트 blindness | **done** (dab3e87) | R14 QA발견 | table_grid→wasm→buildDocContext 그리드 첨부. 실 Grok 실증(값칸만 SetTableCell). 후속 067로 일반화 |
 | — | OpenRouter/Grok 웹 생성 연동 | **done** (561d65c) | — | route.ts OpenRouter 분기(default grok-4.5, env override), .env.local BYOK, 실 생성 확인 |
+
+## 진단 후속 (2026-07-22 — `docs/USER-BOTTLENECK-DIAGNOSIS.md` 기반)
+
+| # | 제목 | 상태 | 우선 | 리서치 핵심 |
+|---|------|------|------|------------|
+| [067](067-doc-profile-context.md) | 문서 프로필 자동 컨텍스트(결정론) | **done (미커밋)** | **P0 (진단 U1·U2·U5)** | LLM 0콜 — `doc_profile` 순수 모델 walk를 wasm→adapter→`DocMeta.profile`로 배관, 앵커-우선 예산 삽입. 마킹 0 실 Grok 실증(프로필 [s/b]로 TableAppendRow). 게이트·바이트동일 회귀 전부 그린 |
+| [068](068-real-corpus-benchmark.md) | 실물 벤치 코퍼스 + 스윕 게이트 | **부분 완료** | P1 (진단 U9·U10) | bench-local-2026(24) + bench-public(25, KOGL manifest) = **49/49 통과**, `scripts/bench-corpus.sh` 게이트. 잔여: 시각 파리티 축. corpus/private=비공개 규율 |
+| [069](069-e2e-preexisting-failures.md) | e2e 사전존재 실패 5건(052×2·048×2·050×1) | open | P1 (테스트 신뢰성) | HEAD 재실행으로 사전존재 확정(067 무관). hw-row-grip 클릭 인터셉트 의심 — 실앱 UX 버그인지 테스트 좌표 문제인지 먼저 판정 |
 
 ## 웹 이식(외부 임베드) 준비도 (2026-07-13 SDK 감사)
 

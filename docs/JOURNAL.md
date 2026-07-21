@@ -5,6 +5,21 @@
 
 ---
 
+## 2026-07-22 (Claude) · 067 문서 프로필 구현 완료 (미커밋)
+- 배관 전체: hwp-session `doc_profile`(순수 walk, LLM 0콜) → wasm/engine(worker METHODS) → adapter `docProfile?()` → `DocMeta.profile` → buildDocContext 앵커-우선 삽입 + FOOTER DOC PROFILE 스탠자 + LabWorkspace 요청당 조회.
+- 검증: cargo 전체·게이트 8==8/18==18·wasm 재빌드+copy·vitest 169/46/316/50·e2e doc-profile-067(마킹0→프로필 첨부 고정)+066 통과·**실 Grok 실증**("Looking at the document profile, the first table is at [s0/b1]"→TableAppendRow 카드).
+- 부수 발견: e2e 5건(052×2·048×2·050×1) **사전존재 실패**(stash로 HEAD 재현 확정, hw-row-grip 인터셉트 의심)→**069 신설**. 열린 것: 커밋(사용자 요청 시)·069 조사·067 후속(앵커 자동 후보 제시 UI).
+
+## 2026-07-22 (Claude) · 진단 후속 — 067/068 신설 + 실물 벤치 49건 확보
+- **067 문서 프로필**: 표면 검증으로 **LLM 0콜 결정론** 확정(native to_markdown/outline 완비 — 병목=wasm 노출). 배관 5단계 additive 설계를 이슈로 고정. 066 스테일 dist 함정 명기.
+- **068 벤치**: bench-local-2026(24건, must-pass 8) + bench-public(25건 신규 수집, HWPX 17·7유형·12발행처·manifest/KOGL) = **49/49 ALL PASS**(detect/own-render/PDF/text). 게이트 scripts/bench-corpus.sh 신설. 시각 파리티는 미보증(딥테크 쌍 25p vs 18p) — 후속 QA 축.
+- issues/README stale 표(064/065/066→done) 정정. 열린 것: 067 구현 착수 승인 · bench-public 공개 승격은 KOGL 재확인 후 사용자 판단 · 쌍 페이지수 비교 축.
+
+## 2026-07-22 (Claude) · 사용자 관점 병목 진단 (분석-only, 코드 무변경)
+- 4축 병렬 조사(엔진 crates·에디터/SDK·docs 자체진단·rhwp/kordoc 웹동향) → `docs/USER-BOTTLENECK-DIAGNOSIS.md` 발행(U1~U12·D1~D6·S1~S5 + 보강 A~G).
+- 헤드라인: AI 문서이해 층 부재(U1, buildDocContext=4필드+마킹앵커뿐)·AI 화이트리스트 15/41(U4)·npm 미발행+온보딩 6단계(D1·D2)·rhwp upstream v0.7.19 전면경쟁+4버전 갭(S1·S2)·정부 HWPX 의무화 5/18 시행(S3)·PDF 수식/차트 스텁 무경고(U7).
+- 열린 것: 보강 우선순위(A 문서프로필 자동화가 최우선 후보) 사용자 승인 대기 · rhwp 재벤더링 needsExternal(미러 포크에 upstream 태그 push 필요) · issues/README 표 stale(064/065/066) 정리.
+
 ## 2026-07-17 (Claude) · 퍼블릭 전환 + 데모 UX v2 + Pages 배포 (6ebfbb2)
 - 데모 UX v2: ChatPanel `aiNotice` prop(정적 데모 "AI는 로컬 실행 시" 상시 배너), 랜딩 기능 카드 4종(게이트·round-trip·headless·AI)+문서 링크 5(GitHub/README/임베드/Intent/아키텍처), 헤더 데모 브랜딩("tf-hwp — 데모"+GitHub 링크, QA 모드는 hwp-lab 유지). Playwright 전항목 실검증.
 - **public 전환 전 히스토리 스캔**: 354커밋 전체 — .env 추적 이력 0·실키 0(유일 히트=문서 플레이스홀더 sk-or-...). → 19커밋 푸시 → **tf-hwp PUBLIC 전환**(rhwp는 이미 public) → Pages 활성화(build_type=workflow, https://kwakseongjae.github.io/tf-hwp/) → deploy-demo 실행(base_path=/tf-hwp, run 29551279758).
