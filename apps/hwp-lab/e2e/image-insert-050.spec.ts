@@ -20,15 +20,26 @@ async function open(page: Page) {
 
 // 첫 페이지를 격자 스캔해 표 셀 앵커("N행 M열")가 뜨는 지점을 찾아 그 셀을 선택 상태로 만든다 — 업로드가
 // 그 블록 뒤(=보이는 첫 페이지)로 삽입되도록(문서 끝은 가상화로 언마운트일 수 있어 assert 가 불안정).
+// 드릴 모델(QA2 #4, 59fef4f) 정렬: 단일클릭 = 부모 표 마킹 → 같은 지점 더블클릭 = 셀 드릴(069).
+// 표 마킹과 함께 뜨는 행/열 그립(031)의 클릭 인터셉트를 피해 절대좌표 page.mouse 로 클릭한다.
 async function selectFirstCell(page: Page): Promise<boolean> {
   const sheet = page.locator('.hw-sheet[data-page="0"]');
   const box = await sheet.boundingBox();
   if (!box) throw new Error("첫 페이지 시트 박스를 찾지 못함");
+  const anchor = page.locator(".hw-anchor");
+  const label = async () => ((await anchor.count()) > 0 ? (await anchor.first().innerText()).trim() : "");
   for (let ry = 0.1; ry <= 0.6; ry += 0.04) {
     for (let rx = 0.1; rx <= 0.9; rx += 0.06) {
-      await sheet.click({ position: { x: box.width * rx, y: box.height * ry } });
-      const a = page.locator(".hw-anchor");
-      if ((await a.count()) > 0 && (await a.first().innerText()).includes("행")) return true;
+      const x = box.x + box.width * rx;
+      const y = box.y + box.height * ry;
+      await page.mouse.click(x, y);
+      const l = await label();
+      if (l.includes("행")) return true;
+      if (!l.includes("표")) continue;
+      await page.waitForTimeout(500); // 앱 더블클릭 감지 윈도 밖으로
+      await page.mouse.click(x, y);
+      await page.mouse.click(x, y); // 빠른 두 번 = 셀 드릴
+      if ((await label()).includes("행")) return true;
     }
   }
   return false;

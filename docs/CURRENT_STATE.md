@@ -4,7 +4,11 @@
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
 - 기준 커밋: `6ebfbb2`+CI픽스 — **PUBLIC 전환 + 라이브 데모 배포 완료**(https://kwakseongjae.github.io/tf-hwp/) — **R12~R14 + 실물QA 065·066 + 웹QA 2~6차 + HWPX 시각 파리티 + 레이아웃 정리 토글 완료**. GitHub: https://github.com/kwakseongjae/tf-hwp (private)
-- 갱신: 2026-07-22(3) · Claude — **067 문서 프로필 구현·검증 완료(미커밋)**. `hwp_session::doc_profile`(순수 모델
+- 갱신: 2026-07-22(4) · Claude — **069 해소 + 067/진단 커밋 완료**(87834a2 feat 067 · a6cfaf0 docs 진단/068/069).
+  069 근본 = **드릴 모델(59fef4f) 미정렬 e2e 3스펙**(048·050·052 — 당시 5스펙만 정렬, 이 3개 누락. 그립 인터셉트는
+  표면화 경로). 제품 동작 정상 판정 → 테스트를 드릴로 정렬(표 마킹→500ms→더블클릭 드릴, page.mouse 절대좌표)
+  → **전체 e2e 42/42 그린**. 039 간헐 플레이키 1회는 아래 "알려진 flaky"로 추적.
+- 갱신(3): 2026-07-22 · Claude — **067 문서 프로필 구현·검증 완료**. `hwp_session::doc_profile`(순수 모델
   walk: 제목후보·구성카운트·헤딩·표 인벤토리[s/b]·to_markdown 발췌) → wasm `docProfile` → adapter optional →
   `DocMeta.profile` → buildDocContext 앵커-우선 예산 삽입(2500자 캡) + 프롬프트 DOC PROFILE 스탠자. **LLM 0콜**.
   검증: workspace 테스트·게이트 8==8/18==18(98.9/99.2%)·wasm 재빌드(9.79MB)+copy·vitest 169/46/316/50·
@@ -120,6 +124,8 @@ QA 발견사항 → 이슈로 정리해 다음 배치. WKWebView IME 실기(059)
 - `packages/react/.../workspace.editing.test.tsx` "in-place 에디터 열림 중 028 툴바 숨김" — 전체 스위트에서
   간헐 실패(063 --full에서 1회), **격리·재실행 시 296/296 그린**. 테스트 순서/타이밍 격리 결함(소스 회귀 아님).
   후속: 이 테스트의 공유 상태(타이머/DOM leak) 격리. verify 실패 시 이 테스트면 재실행으로 판별.
+- e2e `context-menu-039` "셀 우클릭 → 굵게 → SetCellRangeFmt 토스트" — 전체 스위트에서 간헐 실패
+  (2026-07-22 1회), **격리 2회·풀스위트 재실행 그린(42/42)**. 순서/타이밍 계열(069 마감 시 확인).
 
 ## 막힘 / 대기 (없으면 "없음")
 - 없음. (056 배포용 crypto는 "수요 확인" 게이트 — 미착수가 정상 상태)

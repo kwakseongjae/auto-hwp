@@ -12,17 +12,27 @@ async function open(page: Page) {
   await expect(page.locator(".hw-sheet svg").first()).toBeVisible({ timeout: 60_000 });
 }
 
-// 표 셀 앵커("N행 M열" 라벨)가 뜨는 지점을 찾는다(editing-027과 동일한 격자 스캔).
+// 표 셀 앵커("N행 M열" 라벨)가 뜨는 지점을 찾는다. 드릴 모델(QA2 #4, 59fef4f) 정렬: 단일클릭 =
+// 부모 표 마킹 → 같은 지점 더블클릭 = 셀 드릴(069). 표 마킹과 함께 뜨는 행/열 그립(031)이 시트
+// 클릭을 가로채 액셔너빌리티 대기에 걸리는 것을 피해 절대좌표 page.mouse 로 클릭한다.
 async function scanForCell(page: Page): Promise<{ x: number; y: number } | null> {
   const sheet = page.locator('.hw-sheet[data-page="0"]');
   const box = await sheet.boundingBox();
   if (!box) throw new Error("첫 페이지 시트 박스를 찾지 못함");
+  const anchor = page.locator(".hw-anchor");
+  const label = async () => ((await anchor.count()) > 0 ? (await anchor.first().innerText()).trim() : "");
   for (let ry = 0.1; ry <= 0.9; ry += 0.04) {
     for (let rx = 0.1; rx <= 0.9; rx += 0.06) {
-      const pos = { x: box.width * rx, y: box.height * ry };
-      await sheet.click({ position: pos });
-      const a = page.locator(".hw-anchor");
-      if ((await a.count()) > 0 && (await a.first().innerText()).includes("행")) return pos;
+      const x = box.x + box.width * rx;
+      const y = box.y + box.height * ry;
+      await page.mouse.click(x, y);
+      const l = await label();
+      if (l.includes("행")) return { x, y };
+      if (!l.includes("표")) continue;
+      await page.waitForTimeout(500); // 앱 더블클릭 감지 윈도 밖으로
+      await page.mouse.click(x, y);
+      await page.mouse.click(x, y); // 빠른 두 번 = 셀 드릴
+      if ((await label()).includes("행")) return { x, y };
     }
   }
   return null;

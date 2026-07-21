@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-22 (Claude) · 069 해소 — e2e 5건 = 드릴 모델 미정렬 3스펙, 전체 42/42 그린
+- 근본: QA2 #4 드릴 전환(59fef4f) 때 5스펙만 정렬, 048·050·052 누락 — 단일클릭 셀 스캔이 표 앵커만 얻어 실패. 그립(031) 인터셉트는 표면화 경로(052 타임아웃). 제품 동작 = 전부 승인된 정상 UX.
+- 수정: 3스펙 헬퍼를 드릴 정렬(클릭=표 마킹→500ms→빠른 2클릭=셀 드릴, page.mouse 절대좌표) — 제품 코드 무변경. 3스펙 6/6 → **풀스위트 42/42 그린**(2회차).
+- 열린 것: 039 간헐 플레이키(1회, 격리 그린 — 알려진 flaky로 추적) · 다음 후보 = 진단 보강 B(AI 화이트리스트 확대) 또는 E(PDF 스텁 경고+HWPX 버튼).
+
 ## 2026-07-22 (Claude) · 067 문서 프로필 구현 완료 (미커밋)
 - 배관 전체: hwp-session `doc_profile`(순수 walk, LLM 0콜) → wasm/engine(worker METHODS) → adapter `docProfile?()` → `DocMeta.profile` → buildDocContext 앵커-우선 삽입 + FOOTER DOC PROFILE 스탠자 + LabWorkspace 요청당 조회.
 - 검증: cargo 전체·게이트 8==8/18==18·wasm 재빌드+copy·vitest 169/46/316/50·e2e doc-profile-067(마킹0→프로필 첨부 고정)+066 통과·**실 Grok 실증**("Looking at the document profile, the first table is at [s0/b1]"→TableAppendRow 카드).
