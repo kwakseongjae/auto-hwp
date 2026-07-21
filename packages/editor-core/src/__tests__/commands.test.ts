@@ -464,6 +464,29 @@ describe("051 — structural preview cards (describeIntent + EditController.prev
     expect(chart.destructive).toBeUndefined();
   });
 
+  it("067-follow: the 4 document-wide intents preview as SPECIFIC cards (never the generic '편집' fallback)", async () => {
+    const { core } = await openCore();
+    const [rep] = core.edit.preview([{ intent: "Replace", query: "갑", replacement: "을", case_sensitive: false, whole_word: false, all: true }]);
+    expect(rep.label).toBe("찾아 바꾸기");
+    expect(rep.summary).toContain("“갑” → “을”");
+    expect(rep.summary).toContain("(전체)");
+
+    const [fmt] = core.edit.preview([{ intent: "SetCharFmt", section: 0, block: 2, cell: [1, 0], bold: true, size_pt: 14 }]);
+    expect(fmt.label).toBe("글자 서식");
+    expect(fmt.summary).toContain("굵게");
+    expect(fmt.summary).toContain("크기 14pt");
+    expect(fmt.summary).toContain("셀 2행 1열"); // [1,0] → 사람 읽는 1-기반
+
+    const [cols] = core.edit.preview([{ intent: "SetTableColWidths", section: 0, index: 1, widths: [2, 1, 1] }]);
+    expect(cols.label).toBe("열 너비");
+    expect(cols.summary).toContain("2 : 1 : 1");
+
+    const [mg] = core.edit.preview([{ intent: "SetPageMargins", section: 0, left_mm: 20, right_mm: 20, top_mm: 20, bottom_mm: 15 }]);
+    expect(mg.label).toBe("페이지 여백");
+    expect(mg.summary).toContain("좌 20");
+    expect(mg.summary).toContain("하 15");
+  });
+
   it("DeleteBlock card is DESTRUCTIVE and previewCards fetches the target block's 원문 (paragraph)", async () => {
     const { core } = await openCore({ runs: (s, b, row) => (row === undefined && s === 0 && b === 3 ? [{ text: "삭제될 " }, { text: "문단" }] : []) });
     const cards = await core.edit.previewCards([{ intent: "DeleteBlock", section: 0, index: 3 }]);

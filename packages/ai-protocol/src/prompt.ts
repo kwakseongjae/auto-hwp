@@ -9,6 +9,11 @@
  *  Issue 051 (챗 구조 편집 브릿지): the original 5 fill/format intents + 9 STRUCTURAL intents
  *  (7 pre-existing engine intents newly whitelisted + the 2 additive `InsertTableAt`/
  *  `InsertParagraphAt` variants). Issue 062-follow adds `InsertChartAt` (AI-generated data chart).
+ *  067-follow (진단 U4 — AI 편집 커버리지 15/41): 4 DOCUMENT-WIDE intents opened — `Replace`
+ *  (찾아바꾸기), `SetCharFmt` (문단/셀 글자서식 패치), `SetTableColWidths` (열폭 비율),
+ *  `SetPageMargins` (여백 mm) — all engine-complete, model-friendly units (pt/mm/ratio), 1 undo
+ *  unit each, and previewed as cards before apply. `SetRunCharFmt` (char offsets the model can't
+ *  see) and `SetTableRowHeights` (raw HWPUNIT) stay CLOSED — conservative scoping.
  *  Row DELETE / column INSERT / column DELETE are HONESTLY absent (no engine op) — the prompt names
  *  them as unsupported so the model never invents them. */
 export const DEFAULT_ALLOWED_INTENTS: readonly string[] = [
@@ -27,6 +32,10 @@ export const DEFAULT_ALLOWED_INTENTS: readonly string[] = [
   "DeleteBlock",
   "MoveBlock",
   "MoveImage",
+  "Replace",
+  "SetCharFmt",
+  "SetTableColWidths",
+  "SetPageMargins",
 ];
 
 // The preamble (output contract) — identical to the reference proxy.
@@ -130,6 +139,29 @@ const INTENT_BLOCKS: Record<string, string[]> = {
     "# MoveImage — move an image block, preserving its size (docs/INTENT-SCHEMA.md §6.5, L303-313)",
     '  { "intent": "MoveImage", "section": <int>, "from": <int block>, "to": <int block>, "width": <int HWPUNIT>, "height": <int HWPUNIT> }',
   ],
+  // ── 067-follow (진단 U4): document-wide edits — find&replace / char format / col widths / margins ──
+  Replace: [
+    "# Replace — find & replace across the document's editable simple paragraphs (docs/INTENT-SCHEMA.md §6.3, L230-240)",
+    '  { "intent": "Replace", "query": <string>, "replacement": <string>, "case_sensitive": <bool>, "whole_word": <bool>, "all": <bool — true=every match, false=FIRST match only> }',
+    "  ALL five value fields are REQUIRED. Untouched run formatting is preserved (op-bus rebuild, never a plain-text collapse).",
+  ],
+  SetCharFmt: [
+    "# SetCharFmt — patch bold/italic/size/font of a paragraph's (or ONE cell's) runs; every other attribute is preserved (docs/INTENT-SCHEMA.md §6.7, L474-486)",
+    '  { "intent": "SetCharFmt", "section": <int>, "block": <int>, "cell": [<row>,<col>]|null, "bold": <bool|null>, "italic": <bool|null>, "size_pt": <number pt|null>, "font": <string|null> }',
+    '  "cell": [row, col] targets that table cell; null/omitted targets the paragraph BLOCK at "block".',
+    "  Patch ONLY the attributes the user asked for — leave the rest null/omitted (they are preserved).",
+  ],
+  SetTableColWidths: [
+    "# SetTableColWidths — set a table's column-width RATIOS (docs/INTENT-SCHEMA.md §6.6, L428-436)",
+    '  { "intent": "SetTableColWidths", "section": <int>, "index": <int table-block>, "widths": <int[] — positive RELATIVE ratios; length MUST equal the table\'s column count> }',
+    '  Example — "첫 열을 두 배 넓게" on a 3-column table: "widths": [2, 1, 1].',
+  ],
+  SetPageMargins: [
+    "# SetPageMargins — set a section's page margins in mm; the WHOLE document re-flows (docs/INTENT-SCHEMA.md §6.6, L448-458)",
+    '  { "intent": "SetPageMargins", "section": <int>, "left_mm": <number>, "right_mm": <number>, "top_mm": <number>, "bottom_mm": <number> }',
+    "  All FOUR sides are REQUIRED (this REPLACES the margins). When the user names only some sides, keep",
+    "  the standard defaults for the unnamed ones: left/right 20, top 20, bottom 15.",
+  ],
 };
 
 // The SetTableCellRuns spec spills its RunSpec detail onto a 5th line (kept out of the map above only to
@@ -181,6 +213,19 @@ const FOOTER = [
   "Place it at the marked anchor's \"index\" if marked, else omit \"index\" (or \"index\":null) for the section END.",
   "Example — \"연도별 매출 10, 18, 30을 막대차트로 만들어줘\" becomes ONE InsertChartAt with \"chart\":",
   '{"type":"bar","title":"연도별 매출","categories":["2024","2025","2026"],"series":[{"name":"매출","values":[10,18,30]}]}.',
+  "",
+  // 문서 전역 편집 4종 (067-follow, 진단 U4): 찾아바꾸기·글자서식·열폭·여백 — 사용법/단위 가이드.
+  'FIND & REPLACE: "모든 X를 Y로 바꿔줘" → ONE Replace with "all": true ("첫 번째만" → "all": false).',
+  "Replace scans the WHOLE document's editable paragraphs — no anchor needed. Set case_sensitive and",
+  "whole_word to false unless the user asks otherwise.",
+  "",
+  "CHAR FORMAT: to bold/resize/re-font a whole paragraph or ONE cell, emit SetCharFmt (\"cell\": [row, col]",
+  "from the grid, or null for a paragraph block). For a RECTANGULAR multi-cell range keep using",
+  "SetCellRangeFmt. Never guess character offsets — whole-paragraph/cell patches only.",
+  "",
+  "COLUMN WIDTHS / PAGE MARGINS: SetTableColWidths takes RELATIVE ratios whose length equals the table's",
+  'column count (the grid\'s "M열" / the profile\'s N×M). SetPageMargins is in mm and REPLACES all four',
+  "sides — fill unnamed sides with the 20/20/20/15 defaults.",
   "",
   // 정직 제외 3종 (051 §3): row delete / column insert / column delete have NO engine op — name them as
   // unsupported so the model refuses instead of inventing a lookalike intent (which the server drops).

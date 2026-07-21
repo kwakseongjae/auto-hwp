@@ -62,6 +62,13 @@ function mockIntents(instruction: string, anchors: Anchor[], docContext: string)
     return [{ intent: "DeleteBlock", section: a.section, index: a.block }];
   }
 
+  // ⑥ 찾아바꾸기 (067-follow, 진단 U4): "X를 Y로 (전부/모두) 바꿔/치환" → 전역 Replace 1건.
+  //    앵커 불필요(문서 전역). 따옴표는 있어도 없어도 잡는 보수적 패턴 — mock 은 결정적 데모/e2e 용.
+  const rep = text.match(/['"“”]?([^'"“”\s]+?)['"“”]?\s*(?:을|를)\s*['"“”]?([^'"“”\s]+?)['"“”]?\s*(?:로|으로)\s*(?:전부\s*|모두\s*)?(?:바꿔|바꾸|치환)/);
+  if (rep) {
+    return [{ intent: "Replace", query: rep[1], replacement: rep[2], case_sensitive: false, whole_word: false, all: true }];
+  }
+
   // ⑤ 데이터 차트(062-follow): "…를 막대/원/선 차트로 만들어" → 결정적 InsertChartAt. 엔진이 스펙을 SVG
   //    차트로 그려(hwp_ops::chart_gen) 이슈 062의 PaintOp::Image.svg 렌더 채널로 심는다 — 키 없이도 데모 완주.
   //    종류는 지시문 단어로 고른다(막대/원/선), 앵커 있으면 그 블록 위치, 없으면 구역 끝(index:null).

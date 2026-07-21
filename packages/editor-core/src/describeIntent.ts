@@ -22,6 +22,8 @@ const OP_META: Record<string, { label: string; icon: string }> = {
   Replace: { label: "찾아 바꾸기", icon: "⇄" },
   SetParagraphText: { label: "문단 수정", icon: "✎" },
   SetPageMargins: { label: "페이지 여백", icon: "▭" },
+  SetCharFmt: { label: "글자 서식", icon: "Ａ" },
+  SetTableColWidths: { label: "열 너비", icon: "↔" },
 };
 
 function num(v: unknown): number | null {
@@ -87,6 +89,26 @@ export function describeIntent(intent: Intent): IntentCard {
       break;
     case "SetParagraphText":
       summary = `문단 텍스트 → “${String(intent.text ?? "")}”`;
+      break;
+    // 067-follow (진단 U4): 문서 전역 편집 4종 — 카드가 바뀌는 값을 정확히 보여줘야 사용자가
+    // 프리뷰만으로 승인/거부를 판단할 수 있다 (generic "편집" 카드 금지).
+    case "SetCharFmt": {
+      const parts: string[] = [];
+      if (typeof intent.bold === "boolean") parts.push(intent.bold ? "굵게" : "굵게 해제");
+      if (typeof intent.italic === "boolean") parts.push(intent.italic ? "기울임" : "기울임 해제");
+      if (typeof intent.size_pt === "number") parts.push(`크기 ${intent.size_pt}pt`);
+      if (typeof intent.font === "string" && intent.font) parts.push(`글꼴 ${intent.font}`);
+      const cell = Array.isArray(intent.cell) && intent.cell.length === 2 ? ` (셀 ${Number(intent.cell[0]) + 1}행 ${Number(intent.cell[1]) + 1}열)` : "";
+      summary = `${parts.length ? parts.join(" · ") : "글자 서식 변경"}${cell}`;
+      break;
+    }
+    case "SetTableColWidths": {
+      const w = Array.isArray(intent.widths) ? (intent.widths as unknown[]).map(String).join(" : ") : "";
+      summary = w ? `열 너비 비율 → ${w}` : "열 너비 변경";
+      break;
+    }
+    case "SetPageMargins":
+      summary = `여백(mm) 좌 ${num(intent.left_mm) ?? "?"} · 우 ${num(intent.right_mm) ?? "?"} · 상 ${num(intent.top_mm) ?? "?"} · 하 ${num(intent.bottom_mm) ?? "?"}`;
       break;
     case "ApplyContent":
       summary = "AI 콘텐츠 블록 적용 (문서 끝)";

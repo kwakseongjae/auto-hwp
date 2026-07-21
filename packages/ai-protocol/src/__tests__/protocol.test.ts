@@ -242,9 +242,10 @@ describe("multimodal attachments (buildUserMessage / buildUserMessageParts / val
 });
 
 describe("buildSystemPrompt (INTENT-SCHEMA excerpt, allowed-intent subset)", () => {
-  it("default prompt lists all 15 whitelisted intents (051 + 062 chart), keeps INTENT-SCHEMA source lines, and R5", () => {
+  it("default prompt lists all 19 whitelisted intents (051 + 062 chart + 067-follow doc-wide 4), keeps INTENT-SCHEMA source lines, and R5", () => {
     const p = buildSystemPrompt();
-    expect(DEFAULT_ALLOWED_INTENTS).toHaveLength(15); // 5 fill/format + 9 structural (051) + InsertChartAt (062)
+    // 5 fill/format + 9 structural (051) + InsertChartAt (062) + Replace/SetCharFmt/SetTableColWidths/SetPageMargins (067-follow)
+    expect(DEFAULT_ALLOWED_INTENTS).toHaveLength(19);
     for (const name of DEFAULT_ALLOWED_INTENTS) expect(p).toContain(`# ${name} —`);
     // Source-line provenance comments are preserved (022 규율) — old and 051-new blocks alike.
     expect(p).toContain("(docs/INTENT-SCHEMA.md §6.6, L339-352)");
@@ -315,6 +316,30 @@ describe("buildSystemPrompt (INTENT-SCHEMA excerpt, allowed-intent subset)", () 
     expect(p).toContain(
       '{"type":"bar","title":"연도별 매출","categories":["2024","2025","2026"],"series":[{"name":"매출","values":[10,18,30]}]}',
     );
+  });
+
+  it("opens the 4 document-wide intents with usage stanzas, and validateResponse accepts them (067-follow, 진단 U4)", () => {
+    const p = buildSystemPrompt();
+    // (1) Vocabulary blocks with source-line provenance (022 규율).
+    expect(p).toContain("# Replace — find & replace across the document's editable simple paragraphs (docs/INTENT-SCHEMA.md §6.3, L230-240)");
+    expect(p).toContain("# SetCharFmt — patch bold/italic/size/font of a paragraph's (or ONE cell's) runs; every other attribute is preserved (docs/INTENT-SCHEMA.md §6.7, L474-486)");
+    expect(p).toContain("# SetTableColWidths — set a table's column-width RATIOS (docs/INTENT-SCHEMA.md §6.6, L428-436)");
+    expect(p).toContain("# SetPageMargins — set a section's page margins in mm; the WHOLE document re-flows (docs/INTENT-SCHEMA.md §6.6, L448-458)");
+    // (2) FOOTER usage stanzas: replace-all mapping, whole-paragraph/cell-only char patches, ratio/mm units.
+    expect(p).toContain('FIND & REPLACE: "모든 X를 Y로 바꿔줘" → ONE Replace with "all": true');
+    expect(p).toContain("Never guess character offsets — whole-paragraph/cell patches only.");
+    expect(p).toContain("SetTableColWidths takes RELATIVE ratios whose length equals the table's");
+    expect(p).toContain("fill unnamed sides with the 20/20/20/15 defaults.");
+    // (3) The whitelist actually passes the new intents; closed ones (char offsets / raw HWPUNIT) still drop.
+    const kept = validateResponse([
+      { intent: "Replace", query: "갑", replacement: "을", case_sensitive: false, whole_word: false, all: true },
+      { intent: "SetCharFmt", section: 0, block: 2, cell: null, bold: true },
+      { intent: "SetTableColWidths", section: 0, index: 3, widths: [2, 1, 1] },
+      { intent: "SetPageMargins", section: 0, left_mm: 20, right_mm: 20, top_mm: 20, bottom_mm: 15 },
+      { intent: "SetRunCharFmt", section: 0, block: 2, start: 0, end: 2, bold: true }, // 폐쇄 유지
+      { intent: "SetTableRowHeights", section: 0, index: 3, heights: [0, 0] }, // 폐쇄 유지
+    ]);
+    expect(kept.map((i) => i.intent)).toEqual(["Replace", "SetCharFmt", "SetTableColWidths", "SetPageMargins"]);
   });
 
   it("a subset option emits ONLY the requested intents (host may allow fewer)", () => {
