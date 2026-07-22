@@ -249,3 +249,82 @@ body {
   border-radius: 6px; color: inherit; text-decoration: none;
 }
 .lab-gh-link:hover { background: rgba(128,128,128,0.1); }
+
+/* ── 오토한글 데모 랜딩 브랜드 테마 (.lab-demo 스코프 — QA(hwp-lab) 모드/에디터 크롬 무접촉) ── */
+.lab-demo { background: #07090d; color: #e6e9ef; }
+.lab-demo .lab-body {
+  background: #07090d;
+  background-image: repeating-linear-gradient(0deg, transparent 0 43px, rgba(230,233,239,0.04) 43px 44px),
+    radial-gradient(900px 900px at 85% -10%, rgba(124,58,237,0.26), transparent 60%),
+    radial-gradient(640px 640px at -8% 110%, rgba(37,99,235,0.14), transparent 60%);
+}
+.lab-root.lab-demo .lab-header { background: #0a0d13; border-bottom: 1px solid rgba(124,58,237,0.22);
+  color: #e6e9ef; }
+.lab-root.lab-demo .lab-header .lab-title { color: #eef1f6; }
+.lab-root.lab-demo .lab-header .lab-btn { background: rgba(255,255,255,0.06); border-color: #2a3546; color: #dfe5ee; }
+.lab-demo .lab-header .lab-title small { color: #8b93a1; }
+.lab-demo .lab-gh-link { color: #c4b5fd; }
+.lab-demo .lab-hero { max-width: 1180px; text-align: left; gap: 0; }
+.lab-hero-grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: 24px; align-items: center; }
+.lab-kicker { font-size: 13.5px; letter-spacing: 5px; color: #8b93a1; }
+.lab-kicker b { color: #a78bfa; }
+.lab-demo .lab-hero-title { display: flex; align-items: center; margin: 14px 0 0; }
+.lab-mark { font-size: 74px; font-weight: 800; letter-spacing: -2px; line-height: 1.05;
+  background: linear-gradient(115deg, #ffffff 55%, #c4b5fd 90%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 4px 22px rgba(124,58,237,0.28)); }
+.lab-caret { width: 18px; height: 58px; margin-left: 12px; border-radius: 4px;
+  background: linear-gradient(180deg, #a78bfa, #6d28d9);
+  box-shadow: 0 0 28px rgba(124,58,237,0.8); animation: lab-blink 1.2s steps(2) infinite; }
+@keyframes lab-blink { 50% { opacity: 0.25; } }
+.lab-tagline { font-size: 22px; font-weight: 700; color: #eef1f6; margin: 18px 0 0; }
+.lab-demo .lab-hero-sub { color: #78818f; font-size: 14.5px; line-height: 1.75; margin-top: 10px; }
+.lab-demo .lab-hero-sub b { color: #b8c0cc; }
+.lab-demo .lab-hero-actions { justify-content: flex-start; margin-top: 18px; }
+.lab-demo .lab-btn-accent { background: #7c3aed; border-color: #7c3aed; color: #fff;
+  box-shadow: 0 6px 26px rgba(124,58,237,0.45); }
+.lab-demo .lab-sample-btn { background: rgba(255,255,255,0.05); border: 1px solid #2a3546; color: #dfe5ee; }
+.lab-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.lab-badges span { font-size: 12.5px; padding: 6px 12px; border-radius: 999px;
+  background: rgba(124,58,237,0.10); border: 1px solid rgba(124,58,237,0.35); color: #c4b5fd; }
+.lab-badges span.g { background: rgba(16,185,129,0.10); border-color: rgba(16,185,129,0.35); color: #6ee7b7; }
+.lab-demo .lab-hero-note { color: #5c6470; margin-top: 14px; }
+/* 제품 스테이지: 실렌더 페이지 + AI 대화 */
+.lab-stage { position: relative; min-height: 500px; perspective: 1300px; pointer-events: none; }
+.lab-page { position: absolute; right: 8px; top: 6px; width: min(370px, 92%); max-height: 560px; background: #fff;
+  border-radius: 6px; overflow: hidden; transform: rotateY(-13deg) rotateX(4deg) rotate(1.5deg);
+  box-shadow: -28px 38px 80px rgba(0,0,0,0.65), 0 0 0 1px rgba(255,255,255,0.06),
+    -8px 0 56px rgba(124,58,237,0.18); }
+.lab-page img { display: block; width: 100%; }
+.lab-shade { position: absolute; inset: 0; background:
+  linear-gradient(105deg, transparent 55%, rgba(12,15,20,0.5) 100%),
+  linear-gradient(180deg, transparent 72%, rgba(7,9,13,0.95) 100%); }
+.lab-hl { position: absolute; right: 128px; top: 196px; width: 178px; height: 42px; z-index: 3;
+  border: 2.5px solid #7c3aed; border-radius: 4px; background: rgba(124,58,237,0.16);
+  box-shadow: 0 0 24px rgba(124,58,237,0.5); transform: rotate(1.5deg); }
+.lab-bubble { position: absolute; z-index: 4; border-radius: 13px; padding: 11px 15px; font-size: 13.5px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5); }
+.lab-user { left: -6px; top: 44px; background: #1b2330; border: 1px solid #2a3546; color: #dfe5ee;
+  border-bottom-right-radius: 4px; }
+.lab-ai { left: 6px; bottom: 46px; width: 300px; background: #141925; border: 1px solid #262d3d;
+  border-bottom-left-radius: 4px; }
+.lab-ai .h { display: flex; align-items: center; gap: 7px; font-size: 13.5px; color: #cdd4de; }
+.lab-ai .ic { color: #a78bfa; }
+.lab-ai .loc { margin-left: auto; font-size: 10.5px; color: #a78bfa; background: rgba(124,58,237,0.16);
+  padding: 2px 8px; border-radius: 999px; }
+.lab-ai .b { margin-top: 7px; font-size: 12.5px; color: #8b93a1; line-height: 1.5; }
+.lab-ai .a { margin-top: 9px; display: flex; gap: 7px; }
+.lab-ai .a span { font-size: 11.5px; padding: 4px 12px; border-radius: 7px; }
+.lab-ai .ok { background: #7c3aed; color: #fff; }
+.lab-ai .no { background: #1c2230; color: #8b93a1; }
+/* 기능 카드/링크 — 다크 글래스 */
+.lab-demo .lab-features { margin-top: 34px; }
+.lab-demo .lab-feature { background: rgba(255,255,255,0.035); border: 1px solid #1e2532;
+  border-radius: 12px; }
+.lab-demo .lab-feature b { color: #dfe5ee; }
+.lab-demo .lab-feature span { color: #78818f; }
+.lab-demo .lab-feature code { background: rgba(124,58,237,0.14); color: #c4b5fd; }
+.lab-demo .lab-hero-dev { border-top-color: #1e2532; color: #5c6470; }
+.lab-demo .lab-hero-dev a { color: #8b93a1; }
+@media (max-width: 900px) { .lab-hero-grid { grid-template-columns: 1fr; } .lab-stage { display: none; } }

@@ -5,6 +5,9 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
+- 갱신: 2026-07-22(15) · Claude — **임팩트 배치**: README 한/영 why-서사 재작성(AI 인식 3성질) + 배너 v2(실렌더
+  합성) + 데모 랜딩 다크 브랜드 리디자인(.lab-demo 스코프 — 에디터 크롬 무접촉). tsc·vitest 50 그린, 데모 프리뷰
+  스크린샷 3회 반복 검증. 랜딩 프리뷰는 DEMO_STATIC=1 dev 기동(함정).
 - 갱신: 2026-07-22(14) · Claude — **CI wasm 다이어트 근본 해소**(77b2ae6): apt binaryen 108→공식 119 고정 —
   재배포 라이브 실측 **11.13→7.30MB(-34%)**, 로그 "wasm-opt 적용 7478KB". README "발행 전"→npm i 커맨드 반영.
   다음 발행(0.0.2)부터 레지스트리도 자동 적용. 잔여 사용자 액션: 노출 NPM 토큰 폐기·재발급.

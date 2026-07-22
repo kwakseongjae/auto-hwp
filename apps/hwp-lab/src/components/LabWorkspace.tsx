@@ -494,7 +494,7 @@ export default function LabWorkspace() {
     );
 
   return (
-    <div className="lab-root">
+    <div className={IS_DEMO ? "lab-root lab-demo" : "lab-root"}>
       <header className="lab-header">
         <span className="lab-title">
           {IS_DEMO ? "오토한글" : "hwp-lab"}
@@ -598,42 +598,60 @@ export default function LabWorkspace() {
               </div>
             )}
             <div className="lab-hero" data-testid="lab-hero">
-              <h1 className="lab-hero-title">브라우저에서 열리는 HWP</h1>
-              <p className="lab-hero-sub">
-                <code>.hwp / .hwpx</code>를 업로드하면 서버 없이 이 브라우저에서 파싱·렌더·편집·PDF export까지 —
-                문서가 어디로도 전송되지 않습니다.
-              </p>
-              <div className="lab-hero-actions">
-                <label className="lab-btn lab-btn-accent lab-hero-open">
-                  파일 열기 (.hwp/.hwpx)
-                  <input type="file" accept=".hwp,.hwpx" hidden onChange={onFile} data-testid="file-input-hero" />
-                </label>
-                {SAMPLES.map((s) => (
-                  <button key={s.file} className="lab-btn lab-sample-btn" data-testid={`sample-${s.file}`} title={s.hint} onClick={() => void openSample(s.file)}>
-                    {s.label}
-                  </button>
-                ))}
+              <div className="lab-hero-grid">
+                <div className="lab-hero-copy">
+                  <div className="lab-kicker"><b>AUTO-HWP</b> · SELF-OWNED HWP ENGINE</div>
+                  <h1 className="lab-hero-title"><span className="lab-mark">오토한글</span><span className="lab-caret" aria-hidden /></h1>
+                  <p className="lab-tagline">AI와 함께, 한 화면을 보면서 쓰는 한글</p>
+                  <p className="lab-hero-sub">
+                    AI가 <b>읽는 문서</b>와 <b>화면에 그려지는 문서</b>가 같은 엔진에서 나옵니다 — 그래서
+                    말로 고친 편집이 검증되고, 한글에서 그대로 열립니다. 문서는 이 브라우저를 떠나지 않습니다.
+                  </p>
+                  <div className="lab-hero-actions">
+                    <label className="lab-btn lab-btn-accent lab-hero-open">
+                      파일 열기 (.hwp/.hwpx)
+                      <input type="file" accept=".hwp,.hwpx" hidden onChange={onFile} data-testid="file-input-hero" />
+                    </label>
+                    {SAMPLES.map((s) => (
+                      <button key={s.file} className="lab-btn lab-sample-btn" data-testid={`sample-${s.file}`} title={s.hint} onClick={() => void openSample(s.file)}>
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="lab-badges">
+                    <span className="g">한컴 쪽수 일치 8==8 · 18==18</span><span>줄바꿈 98.9%</span>
+                    <span>실물 공공문서 49종</span><span className="g">100% 로컬 · 7.3MB wasm</span>
+                  </div>
+                  <p className="lab-hero-note">파일을 창에 끌어다 놓아도 열립니다 · 결과는 HTML·PDF·HWPX로 저장</p>
+                </div>
+                <div className="lab-stage" aria-hidden>
+                  <div className="lab-page"><img src={`${BASE}/brand/render-p0.svg`} alt="" /><div className="lab-shade" /></div>
+                  <div className="lab-hl" />
+                  <div className="lab-bubble lab-user">“사업 개요 표 채워줘”</div>
+                  <div className="lab-bubble lab-ai">
+                    <div className="h"><span className="ic">✦</span> 표 채우기 제안 <span className="loc">s0·b3 ⊙ 위치 보기</span></div>
+                    <div className="b">빈 값칸 6곳을 채웠습니다 — 라벨은 건드리지 않았어요.</div>
+                    <div className="a"><span className="ok">✓ 적용</span><span className="no">되돌리기</span></div>
+                  </div>
+                </div>
               </div>
-              <p className="lab-hero-note">
-                파일을 창에 끌어다 놓아도 열립니다. 편집은 클릭 선택 → 리본/AI, 결과는 HTML·PDF·HWPX로 저장.
-              </p>
 
               <div className="lab-features">
                 <div className="lab-feature">
-                  <b>🎯 원본 정확도</b>
-                  <span>실물 정부 양식에서 한컴 렌더와 페이지 수 완전 일치(8==8·18==18), 줄바꿈 98.9%+ — CI 게이트로 잠금</span>
+                  <b>🧭 같은 좌표계</b>
+                  <span>AI가 받는 문서 프로필의 주소 <code>[s0/b3]</code>은 화면 블록과 같은 IR — 마킹 없이 말해도 정확한 곳에 꽂힙니다</span>
                 </div>
                 <div className="lab-feature">
-                  <b>🔒 Round-trip 안전</b>
-                  <span>편집하지 않은 내용은 바이트 그대로 재저장 — 열었다 저장해도 원본이 망가지지 않음</span>
+                  <b>🛡️ 타입드 Intent</b>
+                  <span>모델의 손은 화이트리스트 19종 Intent JSON뿐 — 스키마 검증·카드 프리뷰·위치 보기·1클릭 undo</span>
                 </div>
                 <div className="lab-feature">
-                  <b>🧩 Headless 엔진</b>
-                  <span><code>npm i @auto-hwp/engine</code> — UI 없이 SVG·HTML·PDF만 받아 자체 에디터를 지을 수 있음</span>
+                  <b>🎯 게이트로 검증</b>
+                  <span>한컴 쪽수 완전 일치(8==8·18==18)·줄바꿈 98.9%·무편집 바이트 보존 — CI 불변식</span>
                 </div>
                 <div className="lab-feature">
-                  <b>✨ AI 바이브 편집</b>
-                  <span>셀/문단을 가리키고 말하면 LLM이 검증된 Intent JSON으로 편집 — 로컬 실행(BYOK) 시</span>
+                  <b>📦 4가지 표면</b>
+                  <span><code>npm i @auto-hwp/engine</code> · MCP(<code>claude mcp add</code>) · CLI · Claude 스킬 — 전부 로컬</span>
                 </div>
               </div>
 
@@ -644,7 +662,7 @@ export default function LabWorkspace() {
                 <span aria-hidden>·</span>
                 <a href="https://github.com/kwakseongjae/auto-hwp/blob/main/docs/EMBED-GUIDE.md" target="_blank" rel="noreferrer">임베드 가이드</a>
                 <span aria-hidden>·</span>
-                <a href="https://github.com/kwakseongjae/auto-hwp/blob/main/docs/INTENT-SCHEMA.md" target="_blank" rel="noreferrer">Intent 스키마</a>
+                <a href="https://github.com/kwakseongjae/auto-hwp/blob/main/docs/MCP-GUIDE.md" target="_blank" rel="noreferrer">MCP</a>
                 <span aria-hidden>·</span>
                 <a href="https://github.com/kwakseongjae/auto-hwp/blob/main/docs/SDK-LAYERS.md" target="_blank" rel="noreferrer">아키텍처</a>
               </div>

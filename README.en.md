@@ -2,36 +2,52 @@
 
 # auto-hwp (오토한글)
 
-**Writing HWP together with AI — on one shared screen.** A self-owned HWP/HWPX engine opens
-`.hwp`/`.hwpx` and renders it faithfully; point at a cell or just talk, the AI proposes edits,
-you approve, and it becomes the document. Editing and HTML/PDF/HWPX export run 100%
-client-side (WebAssembly), no server required.
+**Writing HWP together with AI — on one shared screen.** Open a `.hwp`/`.hwpx` and it renders
+faithfully; point at a block or just talk, the AI proposes edits, you see exactly where they land,
+approve — and it becomes the document. Everything runs 100% locally (WebAssembly · MCP · CLI).
 
 [한국어](./README.md) · [Live demo](https://kwakseongjae.github.io/auto-hwp/) ·
-[Embed guide](./docs/EMBED-GUIDE.md) · [Contributing](./CONTRIBUTING.md)
+[Embed guide](./docs/EMBED-GUIDE.md) · [MCP](./docs/MCP-GUIDE.md) · [Contributing](./CONTRIBUTING.md)
 
-> HWP (Hangul Word Processor) is the de-facto standard document format for Korean government
-> and enterprise paperwork — and notoriously hard to handle outside Hancom's own software.
+## To AI, HWP has been an invisible document
+
+The existing way to feed HWP to an LLM is text extraction. It works — and at that moment the
+document splits into two worlds: **what the AI read** (plain text) and **what a human sees**
+(the typeset page). The AI can't tell where "the blank cell in table 3" is on screen, and nobody
+can guarantee its edit didn't break the layout. For government forms — where **the layout IS the
+content** — that gap is fatal.
+
+So auto-hwp makes a structural choice: own the engine, not wrap a viewer. Parse → typeset →
+render → edit → save all run on **one IR (SemanticDoc)**:
 
 ```
 .hwp / .hwpx ──▶ SemanticDoc (IR) ──▶ typesetter ──▶ SVG pages (screen · hit-testing)
                       │                          ├▶ PDF (layout-preserving, krilla)
-                      │                          └▶ HTML (semantic reflow)
+                      │                          └▶ doc profile · Markdown (what the AI reads)
                       └── Intent JSON ──▶ Op ──▶ IR mutation (edit · undo/redo) ──▶ HWPX save
 ```
 
-## Why
+That one line of architecture buys three properties at the AI-perception level:
 
-auto-hwp **owns the whole pipeline** — parse → typeset → render → edit → save — instead of
-delegating rendering to external programs:
+**① What the AI reads = what gets drawn.** On upload the engine deterministically extracts a
+**document profile** (title, outline, table inventory, body excerpt — zero LLM calls) and attaches
+it to every request. A profile address like `[s0/b3]` shares the **same IR coordinates** as the
+block on screen, so "add a row to the first table" lands on the right block with nothing marked.
+Extraction-only pipelines have no such coordinate system to begin with.
 
-- **Accuracy locked by a gate** — page counts match Hancom's renderer exactly on real
-  government-form benchmarks (8==8, 18==18) and line-break positions match 98.9%+;
-  these are CI invariants, not aspirations.
-- **Round-trip safe** — untouched content re-serializes byte-for-byte. Opening and
-  saving a document never corrupts what you didn't edit.
-- **Headless-first** — the engine has no UI. It returns SVG strings and export bytes;
-  how you draw them is up to you. Build your own editor on top.
+**② The AI's hands are typed Intents, not free text.** The model can only emit whitelisted
+**Intent JSON** (19 kinds — find&replace, char format, tables, charts, margins…), and only what
+passes schema validation + unknown-field rejection reaches the document through the op-bus — one
+undo unit each. Proposals preview as cards with **"reveal target"** before you approve. There is
+structurally no path for model output to silently corrupt a document.
+
+**③ The result is verified in numbers.** Owning the renderer means "it worked" is measurable:
+page counts match Hancom's renderer exactly on real government forms (**8==8 · 18==18**),
+line-break positions match **98.9%+** as CI invariants, and untouched content re-serializes
+**byte-for-byte**. "The AI-edited file opens identically in Hancom" is a gate, not a slogan.
+
+None of the three holds without owning the renderer — which is why we rebuilt a typesetter
+instead of wrapping someone else's viewer.
 
 ## Packages (npm)
 
