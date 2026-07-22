@@ -14,8 +14,8 @@ edition = "2021"
 version = "0.0.1"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
-repository = "https://github.com/USER/tf-hwp"
-authors = ["tf-hwp contributors"]
+repository = "https://github.com/USER/auto-hwp"
+authors = ["auto-hwp contributors"]
 
 [workspace.dependencies]
 # --- BORROW-STABLE external deps (pure-Rust, wasm-ok where used in core) ---

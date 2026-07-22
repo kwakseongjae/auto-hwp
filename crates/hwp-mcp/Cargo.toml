@@ -1,6 +1,6 @@
 [package]
 name = "hwp-mcp"
-description = "Headless MCP (Model Context Protocol) stdio server: exposes the tf-hwp op-bus (open/context/apply-content/export) to coding agents over JSON-RPC. Self-contained (no rmcp dep)."
+description = "Headless MCP (Model Context Protocol) stdio server: exposes the auto-hwp op-bus (open/context/apply-content/export) to coding agents over JSON-RPC. Self-contained (no rmcp dep)."
 edition.workspace = true
 version.workspace = true
 license.workspace = true

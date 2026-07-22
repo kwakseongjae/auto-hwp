@@ -1,4 +1,4 @@
-// @tf-hwp/engine — main-thread RPC client for the worker entry (./worker.js; issue 055, FG-14).
+// @auto-hwp/engine — main-thread RPC client for the worker entry (./worker.js; issue 055, FG-14).
 //
 // Hand-rolled request/response bridge (no new dependency): each request gets a monotonically
 // increasing id; the worker answers {id, ok, result|error}. Errors arrive as {message, code} and are
@@ -55,7 +55,7 @@ export class EngineWorkerClient {
   }
 
   #spawn() {
-    const w = this.#factory ? this.#factory() : new Worker(this.#url, { type: 'module', name: 'tf-hwp-engine' });
+    const w = this.#factory ? this.#factory() : new Worker(this.#url, { type: 'module', name: 'auto-hwp-engine' });
     w.onmessage = (ev) => {
       const { id, ok, result, error } = ev.data ?? {};
       const p = this.#pending.get(id);

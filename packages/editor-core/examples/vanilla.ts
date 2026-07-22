@@ -1,9 +1,9 @@
 // examples/vanilla.ts — "custom freedom" proof (SDK-LAYERS): a COMPLETE editor flow with NO React and
 // NO DOM. It constructs the headless core over a mock EngineAdapter, opens a document, SELECTS a table
 // cell with a pure pointer input, APPLIES an AI-proposed Intent (as the host would, from its own model),
-// UNDOES it, and EXPORTS HTML — all by driving @tf-hwp/editor-core directly.
+// UNDOES it, and EXPORTS HTML — all by driving @auto-hwp/editor-core directly.
 //
-// A host embedding tf-hwp in a non-React app (Svelte, Vue, a Node service, a CLI) writes exactly this:
+// A host embedding auto-hwp in a non-React app (Svelte, Vue, a Node service, a CLI) writes exactly this:
 // bring your own EngineAdapter (WasmAdapter for the web, TauriAdapter for a desktop app, or your own),
 // bring your own AI bridge, and the core handles selection/edit/undo/session with zero UI assumptions.
 //

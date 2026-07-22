@@ -5,7 +5,7 @@
 ///
 /// Coordinate contract: every box here is own-render PAGE px (= HWPUNIT/75, §4.5) — the space the
 /// adapter's hitTest/tableCellAt speak. `HoverLayer` multiplies by `scale` to reach client px.
-import type { Box } from "@tf-hwp/editor-core";
+import type { Box } from "@auto-hwp/editor-core";
 
 /** The pre-highlight target under the cursor: a block/cell box in own-render PAGE px on `page`, tagged by
  *  `kind` (paragraph/cell/table/image/…). null ⇒ nothing under the cursor (highlight cleared). */

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Core + dialog permissions for the tf-hwp viewer window.",
+  "description": "Core + dialog permissions for the auto-hwp viewer window.",
   "windows": ["main"],
   "permissions": ["core:default", "core:window:allow-start-dragging", "dialog:default"]
 }

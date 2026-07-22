@@ -1,4 +1,4 @@
-//! wasm-bindgen bindings for the tf-hwp engine — **Shell C** (issue 015).
+//! wasm-bindgen bindings for the auto-hwp engine — **Shell C** (issue 015).
 //!
 //! This crate is a THIN consumer of two existing lanes and reimplements neither:
 //! - **edit lane** = `hwp-mcp` (issue 012 LEAF decision): [`hwp_mcp::Session`] +
@@ -690,7 +690,7 @@ impl HwpDoc {
     /// SAME family again REPLACES its bytes. So a host injects the gothic body first, then optionally a
     /// serif face. Because real metrics differ from the Approx fallback, the first registration can
     /// change the page count and line breaks, so this **invalidates the SVG cache**; the host MUST
-    /// re-query [`HwpDoc::page_count`] and re-render after calling it (the `@tf-hwp/react` workspace
+    /// re-query [`HwpDoc::page_count`] and re-render after calling it (the `@auto-hwp/react` workspace
     /// bumps its refresh token on `registerFont`). Until a font is registered, render/layout use the
     /// deterministic Approx fallback (backward compatible) and `export_pdf` throws `font_missing`.
     #[wasm_bindgen(js_name = registerFont)]

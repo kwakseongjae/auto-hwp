@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-07-22 (Claude) · 리브랜딩 — 오토한글 (auto-hwp) (e41efa0)
+- 레포/스코프/CLI/env 전면 치환(204파일, JOURNAL·history 제외)+GitHub 리네임+배너(assets/brand)+README 한/영 히어로+데모 카피. 게이트·vitest·e2e 42/42 그린.
+- 함정: 타 프로젝트 3100 선점→e2e 엉뚱한 앱 재사용(2m 타임아웃 연쇄)→PW_PORT 손잡이. 열린 것: push+Pages 재배포(base_path=/auto-hwp) 승인 대기 · npm은 @auto-hwp 스코프 발행(토큰 등록 후).
+
 ## 2026-07-22 (Claude) · 잔여 마감 — 신선 설치 실증·fetch 스크립트·README 정리
 - MCP 신선 설치(cargo install --git, 퍼블릭 레포) 완주 실증 · fetch-gov-corpus.mjs 7/7 · README 한/영+EMBED-GUIDE 이번 배치 기능 반영(프로필/19종/위치보기/서체/실물49·130p).
 - npm 실발행 = NPM_TOKEN 부재로 사용자 액션 확정(토큰 발급→시크릿 등록→dry_run=false). 로컬 13커밋 미푸시 — push 승인 대기.

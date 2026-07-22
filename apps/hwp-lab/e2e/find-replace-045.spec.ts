@@ -1,7 +1,7 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 
-// Issue 045 — 찾기/바꾸기 SDK 승격, end-to-end through the SAME wasm engine (@tf-hwp/engine) the web shell
+// Issue 045 — 찾기/바꾸기 SDK 승격, end-to-end through the SAME wasm engine (@auto-hwp/engine) the web shell
 // runs. Uses benchmark1.hwpx: a binary .hwp carries NO NodeIds so Find matches nothing, but HWPX carries
 // them, so Find returns matches AND caretRect resolves each match's box (the highlight + scroll geometry).
 const HWPX = path.resolve(process.cwd(), "..", "..", "benchmarks", "benchmark1.hwpx");

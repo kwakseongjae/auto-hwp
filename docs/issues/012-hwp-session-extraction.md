@@ -18,21 +18,21 @@ Tauri(A)/서비스(B)/wasm(C) 세 셸이 **같은 함수**를 감싸게 한다. 
 - `hwp-mcp/src/lib.rs`의 `Session`(문서 상태+undo)은 이미 셸-독립적이다. `hwp-session`은
   이를 감싸는 **렌더·지오메트리·DTO 레이어**가 된다 (Session을 흡수할지 감쌀지는 조사 후
   결정하고 근거를 보고 — 순환 의존이 안 생기는 쪽으로).
-- `tf-hwp-cli`도 일부 로직을 중복 보유 — 이동 후 CLI도 hwp-session을 소비하게 정리.
+- `auto-hwp-cli`도 일부 로직을 중복 보유 — 이동 후 CLI도 hwp-session을 소비하게 정리.
 
 ## 파일 지도
 - 신규: `crates/hwp-session/` (Cargo.toml + src/lib.rs)
 - 이동 원천: `crates/hwp-viewer/src/lib.rs` (DTO/지오메트리/커밋/export 로직)
 - 소비자: `crates/hwp-viewer/src/lib.rs`(Tauri 커맨드 → 얇은 위임),
-  `crates/tf-hwp-cli/src/main.rs`, (후속) `crates/hwp-mcp`
+  `crates/auto-hwp-cli/src/main.rs`, (후속) `crates/hwp-mcp`
 - 워크스페이스: 루트 `Cargo.toml` members/workspace.dependencies에 등록
 
 ## 구현 단계 (반드시 이 순서 — R10 방어)
 1. **golden 고정(이동 전)**: 스냅샷 스크립트 `scripts/golden.sh` 작성 —
    ```bash
-   cargo run -q -p tf-hwp-cli --features "shaper rhwp" -- layout-check benchmark.hwp
-   cargo run -q -p tf-hwp-cli --features "shaper rhwp" -- own-render benchmark.hwp  --out /tmp/g_b.svg
-   cargo run -q -p tf-hwp-cli --features "shaper rhwp" -- own-render benchmark1.hwp --out /tmp/g_b1.svg
+   cargo run -q -p auto-hwp-cli --features "shaper rhwp" -- layout-check benchmark.hwp
+   cargo run -q -p auto-hwp-cli --features "shaper rhwp" -- own-render benchmark.hwp  --out /tmp/g_b.svg
+   cargo run -q -p auto-hwp-cli --features "shaper rhwp" -- own-render benchmark1.hwp --out /tmp/g_b1.svg
    shasum /tmp/g_b*.svg   # 해시를 docs/issues/012 작업 로그에 기록
    ```
    layout-check 수치(페이지 수, 줄 정확도)와 SVG 해시가 이동 후에도 **바이트 동일**해야 한다.

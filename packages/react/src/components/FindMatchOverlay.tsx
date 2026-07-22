@@ -1,4 +1,4 @@
-import type { MatchBox } from "@tf-hwp/editor-core";
+import type { MatchBox } from "@auto-hwp/editor-core";
 
 export interface FindMatchOverlayProps {
   /** Located match boxes, index-aligned with the FindController's matches (null = geometry unavailable). */

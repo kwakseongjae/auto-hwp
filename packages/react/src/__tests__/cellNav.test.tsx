@@ -5,7 +5,7 @@ import type { BlockHit, CellHit, Intent, TableBox } from "../types";
 import { MockAdapter } from "./mockAdapter";
 
 // Issue 036 — keyboard cell navigation wiring (react side). editor-core owns moveCell (unit-tested in
-// @tf-hwp/editor-core); here we prove the KEYDOWN BINDING: 방향키 → moveCell (셀 선택일 때만),
+// @auto-hwp/editor-core); here we prove the KEYDOWN BINDING: 방향키 → moveCell (셀 선택일 때만),
 // Enter → 제자리 편집, 편집 중 Tab → 저장+오른쪽 셀 이동+재진입, 그리고 포커스/비셀 가드.
 
 // jsdom does no layout — a full-A4 getBoundingClientRect maps client px 1:1 to page px (scale via zoom

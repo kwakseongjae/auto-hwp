@@ -1,12 +1,12 @@
-# @tf-hwp/react
+# @auto-hwp/react
 
-React components for [tf-hwp](../../README.md): **open a `.hwp`/`.hwpx`, render every page to SVG, mark
+React components for [auto-hwp](../../README.md): **open a `.hwp`/`.hwpx`, render every page to SVG, mark
 cells/tables, chat-edit through your own server-side AI, and download HTML / PDF** — in one
 `<HwpWorkspace/>` line, 100% client-side.
 
 ```tsx
-import { HwpWorkspace, WasmAdapter } from "@tf-hwp/react";
-import "@tf-hwp/react/styles.css";
+import { HwpWorkspace, WasmAdapter } from "@auto-hwp/react";
+import "@auto-hwp/react/styles.css";
 
 const adapter = new WasmAdapter();
 
@@ -17,7 +17,7 @@ const adapter = new WasmAdapter();
 />
 ```
 
-- **Render / geometry / export** run in the browser via [`@tf-hwp/engine`](../engine) (wasm).
+- **Render / geometry / export** run in the browser via [`@auto-hwp/engine`](../engine) (wasm).
 - **AI is delegated to the host** (`onAiRequest`) — this package holds **no LLM client and no API key**.
 - **Every SVG is sanitized** before it touches the DOM (R7). There is no prop that injects raw SVG.
 - **Fonts are injected, never bundled** (R8) — supply a TTF/OTF for PDF export.
@@ -25,27 +25,27 @@ const adapter = new WasmAdapter();
 ## Install
 
 ```bash
-npm i @tf-hwp/react @tf-hwp/engine react react-dom
+npm i @auto-hwp/react @auto-hwp/engine react react-dom
 ```
 
-`react` / `react-dom` are peer deps. `@tf-hwp/engine` ships the wasm; your bundler (Vite/webpack) must
+`react` / `react-dom` are peer deps. `@auto-hwp/engine` ships the wasm; your bundler (Vite/webpack) must
 serve its co-located `hwp_wasm_bg.wasm` (both resolve `new URL(..., import.meta.url)` out of the box).
 
 ## Headless core — this is a thin binding (issue 026)
 
 All the editing *logic* — document lifecycle, undo, the OS-style selection model (click/⌘-toggle/marquee,
-cell vs table vs block), Intent apply — lives in the framework-agnostic **[`@tf-hwp/editor-core`](../editor-core)**
-(L2). `@tf-hwp/react` is a thin binding: `useHwpEditor(adapter)` mirrors the core's events into React
-state, and the components render it. Nothing here is required to use tf-hwp.
+cell vs table vs block), Intent apply — lives in the framework-agnostic **[`@auto-hwp/editor-core`](../editor-core)**
+(L2). `@auto-hwp/react` is a thin binding: `useHwpEditor(adapter)` mirrors the core's events into React
+state, and the components render it. Nothing here is required to use auto-hwp.
 
 - **Custom UI, still React:** call `useHwpEditor(adapter)` and draw your own toolbar/overlay/chat over
   `core.selection` / `core.session` / `core.edit`. `EngineAdapter`, `EditorCore`, `SelectionModel`,
-  `DocSession`, `EditController` and all model/geometry/edit types are re-exported from `@tf-hwp/react`
-  (or import them from `@tf-hwp/editor-core` directly).
-- **No React at all:** drive `@tf-hwp/editor-core` directly — see its
+  `DocSession`, `EditController` and all model/geometry/edit types are re-exported from `@auto-hwp/react`
+  (or import them from `@auto-hwp/editor-core` directly).
+- **No React at all:** drive `@auto-hwp/editor-core` directly — see its
   [`examples/vanilla.ts`](../editor-core/examples/vanilla.ts) (open → select → apply → undo → export,
   zero DOM).
-- **LLM protocol:** the doc-context/prompt/whitelist live in **[`@tf-hwp/ai-protocol`](../ai-protocol)**
+- **LLM protocol:** the doc-context/prompt/whitelist live in **[`@auto-hwp/ai-protocol`](../ai-protocol)**
   (vendor-neutral, isomorphic); your server proxy and your client import the same module.
 
 ## Architecture — the `EngineAdapter` seam
@@ -68,12 +68,12 @@ interface EngineAdapter {
 }
 ```
 
-- **`WasmAdapter`** wraps `@tf-hwp/engine`, incl. **wasm-trap recovery** (a Rust panic poisons the wasm
+- **`WasmAdapter`** wraps `@auto-hwp/engine`, incl. **wasm-trap recovery** (a Rust panic poisons the wasm
   instance — the adapter `resetEngine()`s + re-opens the document, then surfaces the trap so the UI can
   tell the user the last edit was rolled back). **Worker mode** (issue 055, FG-14):
   `new WasmAdapter(wasmUrl, { worker: { url: workerUrl } })` runs the WHOLE engine in a Web Worker —
   parse/re-layout/export/`toHwpx` leave the main thread; the adapter surface is unchanged. Deploy
-  `@tf-hwp/engine`'s `worker.js` + `index.js` + `pkg/hwp_wasm.js` as static assets (relative paths
+  `@auto-hwp/engine`'s `worker.js` + `index.js` + `pkg/hwp_wasm.js` as static assets (relative paths
   kept — see the engine README) and pass that `worker.js` URL. The worker DYING is treated exactly
   like a trap (respawn + snapshot-first recovery); `dispose()` terminates the worker (this is also
   how a host cancels a long parse).
@@ -110,13 +110,13 @@ Each feature is also an **individually importable** component driving a single
 | `CellTextPopover` | `core.edit.editCellText` / `editParagraphText` | `SetTableCellRuns` / `SetParagraphRuns` (run styling preserved) |
 | `FormatToolbar` | `core.edit.formatCellRange` / `shadeCellRange` | `SetCellRangeFmt` / `SetCellRangeShade` |
 
-All px↔mm↔ratio conversion is the single `@tf-hwp/editor-core` `units` module (`pxToMm`/`mmToPx`/
+All px↔mm↔ratio conversion is the single `@auto-hwp/editor-core` `units` module (`pxToMm`/`mmToPx`/
 `boundariesToRatios`/`resizeBoundary`); a text edit preserves the cell's run styling via `inheritRuns`.
 
 ```tsx
 // Assemble the column-resize handles over YOUR OWN page surface, no HwpWorkspace:
-import { ColumnResizeOverlay } from "@tf-hwp/react";
-import { createEditorCore, boundariesToRatios } from "@tf-hwp/editor-core";
+import { ColumnResizeOverlay } from "@auto-hwp/react";
+import { createEditorCore, boundariesToRatios } from "@auto-hwp/editor-core";
 
 const core = createEditorCore(adapter);
 const boundaries = await core.session.colBoundaries(page, section, block); // own-render px

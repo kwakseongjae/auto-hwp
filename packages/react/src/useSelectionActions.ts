@@ -6,7 +6,7 @@
 /// regress. It resolves against the CURRENT single-selection edit target (cell/range) — the same target
 /// the toolbar's format controls key off — so both surfaces act on "현재 선택" (028과 같은 계약).
 import { useMemo } from "react";
-import type { EditorCore } from "@tf-hwp/editor-core";
+import type { EditorCore } from "@auto-hwp/editor-core";
 import type { ToolbarAlign } from "./components/FloatingToolbar";
 
 /** The single-selection edit target the format actions need (a subset of HwpWorkspace's EditTarget). */

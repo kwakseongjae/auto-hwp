@@ -1,7 +1,7 @@
 {
-  "name": "@tf-hwp/engine",
+  "name": "@auto-hwp/engine",
   "version": "0.0.1",
-  "description": "tf-hwp engine as WebAssembly: open .hwp/.hwpx in the browser, render pages to SVG, edit via Intent JSON, export HTML/PDF/HWPX. No LLM, no filesystem, no bundled fonts.",
+  "description": "auto-hwp engine as WebAssembly: open .hwp/.hwpx in the browser, render pages to SVG, edit via Intent JSON, export HTML/PDF/HWPX. No LLM, no filesystem, no bundled fonts.",
   "license": "MIT OR Apache-2.0",
   "type": "module",
   "main": "./index.js",

@@ -1,4 +1,4 @@
-# tf-hwp SDK 레이어 설계 v1 (2026-07-03)
+# auto-hwp SDK 레이어 설계 v1 (2026-07-03)
 
 > 목표: **"라이브러리를 웹/앱에 이식하는 사람의 부담 최소화"** + **"우리 에디터 UI에 강제되지
 > 않는 커스텀 자유"**. TipTap/ProseMirror의 headless 패턴을 따른다 — 코어는 상태와 커맨드만,
@@ -11,17 +11,17 @@
 │ L4  호스트 앱 (창업지원도움e / apps/hwp-lab / Tauri 앱 / 커스텀)     │
 │      · LLM 서버 프록시 구현(키 보관) · 자체 UI 또는 L3 조립           │
 ├────────────────────────────────────────────────────────────────────┤
-│ L3  @tf-hwp/react  — 선택적 UI 바인딩 (전부 교체 가능)               │
+│ L3  @auto-hwp/react  — 선택적 UI 바인딩 (전부 교체 가능)               │
 │      · HwpPageView/SelectionOverlay/ChatPanel/FontPicker/룰러/툴바    │
 │      · L2의 상태를 구독해 그릴 뿐 — 로직 없음                         │
 ├────────────────────────────────────────────────────────────────────┤
-│ L2  @tf-hwp/editor-core (신규) — headless 에디터, 프레임워크 무관     │
+│ L2  @auto-hwp/editor-core (신규) — headless 에디터, 프레임워크 무관     │
 │      · DocSession: 열기/페이지/재조판 신호/undo/폰트                  │
 │      · SelectionModel: 셀·블록·마퀴·⌘토글 (021/023 로직 하강)        │
 │      · EditController: Intent 조립·적용·프리뷰 게이트                 │
 │      · 이벤트 구독(onChange/onSelection/onLayout) — React 불필요      │
 ├────────────────────────────────────────────────────────────────────┤
-│ L2' @tf-hwp/ai-protocol (신규) — LLM 통신 규격 (벤더 중립, 동형)      │
+│ L2' @auto-hwp/ai-protocol (신규) — LLM 통신 규격 (벤더 중립, 동형)      │
 │      · 타입: EditRequest{instruction,anchors,docContext} /            │
 │              EditResponse{intents} · intent_version                   │
 │      · buildDocContext(session, anchors) — R5 펜스 포함               │
@@ -29,7 +29,7 @@
 │      · validateResponse(json) — 화이트리스트+스키마 검증              │
 │      → 서버(프록시)와 클라 양쪽에서 import — LLM 벤더는 호스트 자유    │
 ├────────────────────────────────────────────────────────────────────┤
-│ L1  @tf-hwp/engine (wasm) / hwp-mcp lib (Tauri·서비스) — 헤드리스 엔진│
+│ L1  @auto-hwp/engine (wasm) / hwp-mcp lib (Tauri·서비스) — 헤드리스 엔진│
 │      · 파싱(IR)·조판(px)·렌더(SVG)·지오메트리·Intent 적용·undo·export │
 │      · UI 개념 없음. 상태는 문서뿐. EngineAdapter 계약으로 추상화      │
 └────────────────────────────────────────────────────────────────────┘
@@ -53,9 +53,9 @@
 - L3에 비즈니스 로직 넣지 않기 (전부 L2 호출로 표현)
 
 ## 이슈 매핑
-- 026 ✅: L2 `@tf-hwp/editor-core`(DocSession/SelectionModel/EditController/EngineAdapter — react·DOM 0,
-  node 단위테스트) + L2' `@tf-hwp/ai-protocol`(EditRequest/EditResponse·buildDocContext·buildSystemPrompt·
-  validateRequest/validateResponse — fetch·키·벤더 0, isomorphic) 신설. L3 `@tf-hwp/react`는
+- 026 ✅: L2 `@auto-hwp/editor-core`(DocSession/SelectionModel/EditController/EngineAdapter — react·DOM 0,
+  node 단위테스트) + L2' `@auto-hwp/ai-protocol`(EditRequest/EditResponse·buildDocContext·buildSystemPrompt·
+  validateRequest/validateResponse — fetch·키·벤더 0, isomorphic) 신설. L3 `@auto-hwp/react`는
   `useHwpEditor(core)` 훅으로 재배선(공개 API 하위호환, 기존 34 vitest·lab Playwright 2 그대로 통과).
   route.ts·LabWorkspace는 ai-protocol 을 공유 import(프롬프트/펜스/검증 단일 출처). vanilla 예제 =
   React 없이 open→선택→intent→undo→export 증명.

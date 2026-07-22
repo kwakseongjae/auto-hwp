@@ -1,9 +1,13 @@
-# tf-hwp
+<p align="center"><img src="./assets/brand/autohwp-banner.png" alt="오토한글 (auto-hwp) — writing HWP together with AI, on one shared screen" width="100%"></p>
 
-**A self-owned HWP/HWPX engine that runs in the browser** — open `.hwp`/`.hwpx`, render it
-faithfully, edit it, and export HTML/PDF/HWPX. 100% client-side (WebAssembly), no server required.
+# auto-hwp (오토한글)
 
-[한국어](./README.md) · [Live demo](https://kwakseongjae.github.io/tf-hwp/) ·
+**Writing HWP together with AI — on one shared screen.** A self-owned HWP/HWPX engine opens
+`.hwp`/`.hwpx` and renders it faithfully; point at a cell or just talk, the AI proposes edits,
+you approve, and it becomes the document. Editing and HTML/PDF/HWPX export run 100%
+client-side (WebAssembly), no server required.
+
+[한국어](./README.md) · [Live demo](https://kwakseongjae.github.io/auto-hwp/) ·
 [Embed guide](./docs/EMBED-GUIDE.md) · [Contributing](./CONTRIBUTING.md)
 
 > HWP (Hangul Word Processor) is the de-facto standard document format for Korean government
@@ -18,7 +22,7 @@ faithfully, edit it, and export HTML/PDF/HWPX. 100% client-side (WebAssembly), n
 
 ## Why
 
-tf-hwp **owns the whole pipeline** — parse → typeset → render → edit → save — instead of
+auto-hwp **owns the whole pipeline** — parse → typeset → render → edit → save — instead of
 delegating rendering to external programs:
 
 - **Accuracy locked by a gate** — page counts match Hancom's renderer exactly on real
@@ -33,10 +37,10 @@ delegating rendering to external programs:
 
 | Package | Layer | Role |
 |---|---|---|
-| **`@tf-hwp/engine`** | L1 | **headless engine (wasm)** — parse · typeset · SVG/HTML/PDF/HWPX · Intent edits · undo. No UI |
-| `@tf-hwp/editor-core` | L2 | headless editor state (selection/edit/session) — DOM-minimal, framework-free |
-| `@tf-hwp/ai-protocol` | L2′ | vendor-neutral LLM protocol for vibe-editing (prompt/context/validate) — no fetch, no keys |
-| `@tf-hwp/react` | L3 | **optional**: reference editor `<HwpWorkspace/>` + React bindings |
+| **`@auto-hwp/engine`** | L1 | **headless engine (wasm)** — parse · typeset · SVG/HTML/PDF/HWPX · Intent edits · undo. No UI |
+| `@auto-hwp/editor-core` | L2 | headless editor state (selection/edit/session) — DOM-minimal, framework-free |
+| `@auto-hwp/ai-protocol` | L2′ | vendor-neutral LLM protocol for vibe-editing (prompt/context/validate) — no fetch, no keys |
+| `@auto-hwp/react` | L3 | **optional**: reference editor `<HwpWorkspace/>` + React bindings |
 
 > Not yet published to the npm registry. Until then, consume `npm pack` tarballs following
 > the recipe in `examples/vite-embed` (all four packages are publish-ready).
@@ -46,7 +50,7 @@ delegating rendering to external programs:
 No React, no reference editor. The engine hands you SVG strings and bytes:
 
 ```js
-import { initEngine, HwpDoc } from '@tf-hwp/engine';
+import { initEngine, HwpDoc } from '@auto-hwp/engine';
 
 await initEngine();                          // instantiate the wasm module once
 const bytes = new Uint8Array(await file.arrayBuffer());
@@ -72,14 +76,14 @@ doc.free();
 Geometry queries (`hitTest`/`tableAt`/`blocksInRect`…) — 27 methods in total — are documented
 as the [`EngineAdapter` contract](./packages/editor-core/src/adapter.ts), enough to build a
 **fully custom editor** with click-selection, dragging and carets on top of the engine.
-If you want a middle layer, use `@tf-hwp/editor-core` (selection model + edit controller,
+If you want a middle layer, use `@auto-hwp/editor-core` (selection model + edit controller,
 framework-free).
 
 ## Quick start ② — reference editor (React)
 
 ```tsx
-import { HwpWorkspace, WasmAdapter } from '@tf-hwp/react';
-import '@tf-hwp/react/styles.css';
+import { HwpWorkspace, WasmAdapter } from '@auto-hwp/react';
+import '@auto-hwp/react/styles.css';
 
 <HwpWorkspace
   adapter={adapter}                 // WasmAdapter (web) or your own adapter
@@ -96,17 +100,17 @@ AI proxy example: [`examples/ai-proxy-express`](./examples/ai-proxy-express).
 ## Use it from AI tools / the terminal (no site, fully local)
 
 - **MCP server** — attach to Claude Code/Desktop or Cursor: `cargo install --git
-  https://github.com/kwakseongjae/tf-hwp hwp-mcp --features rhwp` → `claude mcp add tf-hwp -- hwp-mcp`.
+  https://github.com/kwakseongjae/auto-hwp hwp-mcp --features rhwp` → `claude mcp add auto-hwp -- hwp-mcp`.
   15 tools (open / structured context / preview→approve edits / find&replace / undo / HWPX·PDF export).
   Documents never leave your machine. → [docs/MCP-GUIDE.md](docs/MCP-GUIDE.md)
 - **Claude Code skill** — `cp -r skills/hwp ~/.claude/skills/`, then in any session: "convert this
-  hwp to pdf". Wraps the local `tf-hwp` CLI. → [skills/hwp/SKILL.md](skills/hwp/SKILL.md)
+  hwp to pdf". Wraps the local `auto-hwp` CLI. → [skills/hwp/SKILL.md](skills/hwp/SKILL.md)
 
 ## Run the demo locally
 
 ```bash
-git clone --recurse-submodules https://github.com/kwakseongjae/tf-hwp
-cd tf-hwp
+git clone --recurse-submodules https://github.com/kwakseongjae/auto-hwp
+cd auto-hwp
 
 # build the engine wasm (Rust + wasm-bindgen — see CONTRIBUTING.md)
 cargo build -p hwp-wasm --profile wasm-size --target wasm32-unknown-unknown
@@ -150,7 +154,7 @@ is typed Intents rather than XML/CSS text.
 
 ## Accuracy
 
-| Benchmark | Hancom render | tf-hwp | Verdict |
+| Benchmark | Hancom render | auto-hwp | Verdict |
 |---|---|---|---|
 | benchmark.hwp (gov form, 8pp) | 8 pages | 8 pages | ✅ match |
 | benchmark1.hwp (application form, 18pp) | 18 pages | 18 pages | ✅ match |
@@ -178,13 +182,13 @@ mode detects the degradation fingerprint and restores an approximation of the or
 [rhwp](https://github.com/kwakseongjae/rhwp) MIT) · `hwp-typeset` (kinsoku · width/letter
 spacing · old Hangul) · `hwp-render` (PaintOp→SVG) · `hwp-export` (PDF/HTML) · `hwp-ops`
 (op-bus · undo) · `hwp-mcp` (Intent schema) · `hwp-session` (geometry) · `hwp-wasm`
-(bindings) · `hwp-crypto` (distribution-copy decryption) · `tf-hwp-cli` (CLI)
+(bindings) · `hwp-crypto` (distribution-copy decryption) · `auto-hwp-cli` (CLI)
 
 The CLI works standalone:
 
 ```bash
-cargo run -p tf-hwp-cli --features rhwp -- own-render doc.hwp --out page.svg
-cargo run -p tf-hwp-cli --features rhwp -- export-pdf doc.hwpx -o out.pdf
+cargo run -p auto-hwp-cli --features rhwp -- own-render doc.hwp --out page.svg
+cargo run -p auto-hwp-cli --features rhwp -- export-pdf doc.hwpx -o out.pdf
 ```
 
 ## License

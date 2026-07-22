@@ -1,11 +1,11 @@
-/// Shared, framework-agnostic types for @tf-hwp/editor-core (SDK-LAYERS L2). These were previously in
-/// @tf-hwp/react/src/types.ts; they are DOM-free model/geometry/edit shapes, so they DESCEND here and
-/// @tf-hwp/react re-exports them verbatim (public API is unchanged for existing consumers).
+/// Shared, framework-agnostic types for @auto-hwp/editor-core (SDK-LAYERS L2). These were previously in
+/// @auto-hwp/react/src/types.ts; they are DOM-free model/geometry/edit shapes, so they DESCEND here and
+/// @auto-hwp/react re-exports them verbatim (public API is unchanged for existing consumers).
 ///
 /// Geometry types (BlockHit/TableBox/CellHit/Box) live in own-render PX space (= HWPUNIT/75). Edit types
 /// (Intent/Anchor) address the MODEL in structure indices (section/block/row/col), NEVER pixels.
 
-/** A structural block hit in own-render px space (mirrors @tf-hwp/engine BlockHit). null on a miss. */
+/** A structural block hit in own-render px space (mirrors @auto-hwp/engine BlockHit). null on a miss. */
 export interface BlockHit {
   section: number;
   block: number;
@@ -18,7 +18,7 @@ export interface BlockHit {
   editable: boolean;
 }
 
-/** A placed table box for marking in own-render px space (mirrors @tf-hwp/engine TableBox). */
+/** A placed table box for marking in own-render px space (mirrors @auto-hwp/engine TableBox). */
 export interface TableBox {
   section: number;
   block: number;
@@ -31,7 +31,7 @@ export interface TableBox {
   first_row: number;
 }
 
-/** An anchored image's placed box in own-render px space (mirrors @tf-hwp/engine ImageBox / hwp-session
+/** An anchored image's placed box in own-render px space (mirrors @auto-hwp/engine ImageBox / hwp-session
  *  `ImageBoxDto`; issue 049). `x/y/w/h` is the image's OWN placed rectangle (NOT the paragraph band that
  *  holds it — the 8-handle overlay draws over exactly this box), and `(section, block)` is the model anchor
  *  the resize (`SetImageSize`) / move (`MoveImage`) Intents target. Field order matches the DTO verbatim so
@@ -48,7 +48,7 @@ export interface ImageBox {
 /** One step of a descending CellPath (issue 064 Tier-2) — which cell of which table. `block` is a block
  *  index: at level 0 the top-level table's block index; at each deeper level the index of the nested
  *  `Block::Table` INSIDE the previous cell. `(row, col)` is that table's cell address. Mirrors
- *  @tf-hwp/engine `CellAddr` / hwp-session `CellAddrDto`. A length-1 path is exactly the flat
+ *  @auto-hwp/engine `CellAddr` / hwp-session `CellAddrDto`. A length-1 path is exactly the flat
  *  `(section, block, row, col)` — 100% back-compat for a non-nested doc. */
 export interface CellAddr {
   block: number;
@@ -56,7 +56,7 @@ export interface CellAddr {
   col: number;
 }
 
-/** A table CELL hit for cell-level marking in own-render px space (mirrors @tf-hwp/engine CellHit; issue
+/** A table CELL hit for cell-level marking in own-render px space (mirrors @auto-hwp/engine CellHit; issue
  *  023). `row`/`col` are MODEL-GLOBAL — already global on a split-table fragment, so NEVER re-add
  *  `first_row` (§좌표계). For a NESTED cell they are the LEAF's (deepest) address; the full descent is in
  *  `path`. `text` is the cell's current plain text, used for the chip snippet label. */
@@ -105,7 +105,7 @@ export interface RunSpec {
 }
 
 /** One ACTIVE (uncovered) cell of a table's grid (issue 066) — its MODEL-GLOBAL `(row, col)` address +
- *  current plain text. Mirrors @tf-hwp/engine `GridCell` / hwp-session `GridCellDto`. */
+ *  current plain text. Mirrors @auto-hwp/engine `GridCell` / hwp-session `GridCellDto`. */
 export interface GridCell {
   row: number;
   col: number;
@@ -115,7 +115,7 @@ export interface GridCell {
 /** The cell GRID of a marked table block (issue 066) — `rows`×`cols` plus every ACTIVE cell's address +
  *  text, the doc-context source that lets the chat model fill a table / target a label's value cell
  *  (the thin anchor-only context left it blind). Coordinates are the SAME `(row, col)` `SetTableCell`
- *  writes (`edit_target` inner table — 좌표계 정합). Mirrors @tf-hwp/engine `TableGrid` / hwp-session
+ *  writes (`edit_target` inner table — 좌표계 정합). Mirrors @auto-hwp/engine `TableGrid` / hwp-session
  *  `TableGridDto` verbatim (both adapters pass it through untouched — 043 homomorphic parity). */
 export interface TableGrid {
   section: number;
@@ -128,7 +128,7 @@ export interface TableGrid {
 /** One heading in the document outline (issue 046) — the left nav panel's item. `section`/`block` are the
  *  MODEL anchor (for a future jump-to-block); `level` is 1 (□/■ section label) or 2 (numbered section-band
  *  table); `text` is the heading label; `page` is the 0-based page it starts on (drives click-to-scroll +
- *  current-position highlight). Mirrors @tf-hwp/engine's `OutlineItem` / hwp-session `OutlineItem` verbatim
+ *  current-position highlight). Mirrors @auto-hwp/engine's `OutlineItem` / hwp-session `OutlineItem` verbatim
  *  (both adapters return this SAME shape — 043 homomorphic parity). */
 export interface OutlineItem {
   section: number;
@@ -139,7 +139,7 @@ export interface OutlineItem {
 }
 
 /** One detected heading for the document profile (issue 067) — the outline WITHOUT the page number (the
- *  profile is a pure model read; `[s/b]` anchors are the edit currency). Mirrors @tf-hwp/engine
+ *  profile is a pure model read; `[s/b]` anchors are the edit currency). Mirrors @auto-hwp/engine
  *  `ProfileHeading` / hwp-session `ProfileHeading` verbatim (043 homomorphic parity). */
 export interface ProfileHeading {
   section: number;
@@ -150,7 +150,7 @@ export interface ProfileHeading {
 
 /** One table's inventory line for the document profile (issue 067): model address + shape + first-row
  *  (header) cell texts. `(section, block)` are the SAME addresses `tableGrid`/`SetTableCell` target.
- *  Mirrors @tf-hwp/engine `ProfileTable` / hwp-session `ProfileTable` verbatim. */
+ *  Mirrors @auto-hwp/engine `ProfileTable` / hwp-session `ProfileTable` verbatim. */
 export interface ProfileTable {
   section: number;
   block: number;
@@ -162,7 +162,7 @@ export interface ProfileTable {
 /** The deterministic document profile (issue 067): title candidate + structure counts + headings + table
  *  inventory + a structure-preserving body excerpt — the chat doc-context's "what IS this document"
  *  grounding, computed by pure model walks (no typeset, ZERO LLM calls — U1's fix is plumbing, not AI).
- *  Counts include NESTED content (cell blocks). Mirrors @tf-hwp/engine `DocProfile` / hwp-session
+ *  Counts include NESTED content (cell blocks). Mirrors @auto-hwp/engine `DocProfile` / hwp-session
  *  `DocProfileDto` verbatim (both adapters pass it through untouched — 043 homomorphic parity). */
 export interface DocProfile {
   title: string | null;
@@ -178,7 +178,7 @@ export interface DocProfile {
 }
 
 /** Page geometry in own-render PAGE px (= HWPUNIT/75) — the page box + printable-area margins, for the
- *  ruler (issue 027). Mirrors @tf-hwp/engine's `pageGeometry` / hwp-session `PageGeom`. */
+ *  ruler (issue 027). Mirrors @auto-hwp/engine's `pageGeometry` / hwp-session `PageGeom`. */
 export interface PageGeom {
   /** Page width (px). */ w: number;
   /** Page height (px). */ h: number;
@@ -265,10 +265,10 @@ export interface TextAnchor {
   cell?: { row: number; col: number };
 }
 
-/** The tagged result of applyIntent (mirrors @tf-hwp/engine Outcome). */
+/** The tagged result of applyIntent (mirrors @auto-hwp/engine Outcome). */
 export type Outcome = { kind: string; [field: string]: unknown };
 
-/** Metadata for an open document (mirrors @tf-hwp/engine's `opened` Outcome + a page count). */
+/** Metadata for an open document (mirrors @auto-hwp/engine's `opened` Outcome + a page count). */
 export interface OpenResult {
   format: string;
   editable: boolean;
@@ -329,7 +329,7 @@ export interface DocContext {
 
 /** One web-search source CITATION (web grounding) — a display-only `{title, url}` pair the host surfaces
  *  on an assistant turn so the user can see WHERE a grounded answer came from. Structurally compatible with
- *  @tf-hwp/ai-protocol's `Citation` (the server proxy parses OpenRouter's `url_citation` annotations into
+ *  @auto-hwp/ai-protocol's `Citation` (the server proxy parses OpenRouter's `url_citation` annotations into
  *  this). Display data only — never fed back into an Intent (R5/R6 preserved). */
 export interface Citation {
   url: string;
@@ -338,7 +338,7 @@ export interface Citation {
 
 /** One chat ATTACHMENT (multimodal input) — an IMAGE (base64 `dataUrl`, sent to a vision model) or a
  *  reference DOCUMENT (extracted `text`, folded into the R5 fence as untrusted DATA). Attachments are
- *  CONTEXT, never a new Intent. Structurally compatible with @tf-hwp/ai-protocol's `Attachment` so a host
+ *  CONTEXT, never a new Intent. Structurally compatible with @auto-hwp/ai-protocol's `Attachment` so a host
  *  forwards these straight to its proxy. `note`/`size` are UI-only hints (an unsupported-format message,
  *  the source byte size) — both optional and stripped by the chat before the request reaches the model. */
 export interface Attachment {
@@ -354,7 +354,7 @@ export interface Attachment {
 
 /** One prior CHAT turn passed to the host as CONVERSATION MEMORY (agentic streaming). `role` is the OpenAI
  *  chat role; `text` is plain — a user turn is its prompt, an assistant turn is a COMPACT digest of what it
- *  proposed (never raw Intent JSON). Structurally compatible with @tf-hwp/ai-protocol's `ChatTurn` so a host
+ *  proposed (never raw Intent JSON). Structurally compatible with @auto-hwp/ai-protocol's `ChatTurn` so a host
  *  forwards these straight to its proxy. Bounded by the chat (a small window) — context-window discipline. */
 export interface ChatTurn {
   role: "user" | "assistant";
@@ -365,7 +365,7 @@ export interface ChatTurn {
  *  discriminated union on `type` — `status` (phase change), `thinking_delta` (a reasoning chunk),
  *  `tool_call` (the model invoked a tool, e.g. web_search), `tool_result` (a tool finished; carries source
  *  `citations` for web_search), `intents` (the TERMINAL validated Intent[]), and `error`. Structurally
- *  mirrors @tf-hwp/ai-protocol's `AgentEvent` so the SDK forwards these through without depending on that
+ *  mirrors @auto-hwp/ai-protocol's `AgentEvent` so the SDK forwards these through without depending on that
  *  package. Untrusted DATA as far as the Intent whitelist is concerned — display only, never executed. */
 export type AgentEvent =
   | { type: "status"; phase: "thinking" | "searching" | "composing" }

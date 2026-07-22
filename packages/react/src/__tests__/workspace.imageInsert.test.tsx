@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { HwpWorkspace } from "../components/HwpWorkspace";
-import { imageInsertSize } from "@tf-hwp/editor-core";
+import { imageInsertSize } from "@auto-hwp/editor-core";
 import type { BlockHit, Intent, TableBox } from "../types";
 import { MockAdapter } from "./mockAdapter";
 

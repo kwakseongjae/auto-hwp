@@ -1,4 +1,4 @@
-//! tf-hwp Tauri 2 viewer shell (milestone A2).
+//! auto-hwp Tauri 2 viewer shell (milestone A2).
 //!
 //! Opens an HWPX, renders pages faithfully (rhwp → SVG, behind `--features rhwp`), and runs
 //! AI content through the **same op-bus** the CLI/MCP use — by reusing [`hwp_mcp::handle`] so
@@ -126,7 +126,7 @@ async fn render_doc_html(sess: tauri::State<'_, SharedSession>) -> Result<String
 /// Render ONE page of the LIVE document through OUR OWN engine (the self-owned faithful render):
 /// `hwp_typeset::place_doc` paginates+places the SemanticDoc, `hwp_render` lowers each page to our
 /// paint IR, and `SvgSink` emits standalone SVG. This is the SAME path as the CLI `own-render`
-/// subcommand (`render_doc_svg`), so the in-app "자체 렌더" view matches `tf-hwp own-render`. Unlike
+/// subcommand (`render_doc_svg`), so the in-app "자체 렌더" view matches `auto-hwp own-render`. Unlike
 /// the rhwp "원본 보기" this regenerates from the live IR, so an EDITED doc renders faithfully too.
 /// Under `--features shaper` the glyph x-positions are real (rustybuzz advances).
 #[tauri::command]
@@ -1606,7 +1606,7 @@ async fn delete_back(
 }
 
 // ---- SDK convergence lane (issue 043): the GENERAL Intent-JSON + geometry + byte-export commands the
-// ---- `@tf-hwp/react` `TauriAdapter` consumes, so the shared HwpWorkspace runs against this shell. Each
+// ---- `@auto-hwp/react` `TauriAdapter` consumes, so the shared HwpWorkspace runs against this shell. Each
 // ---- is ADDITIVE (the existing per-op/path commands above are untouched) and routes through the SAME
 // ---- op-bus / hwp-session facade the wasm backend uses — identical semantics + identical null policy. ----
 
@@ -1817,14 +1817,14 @@ pub fn run() {
             clipboard_read,
             clipboard_write,
             delete_block,
-            // issue 043 — SDK convergence lane (additive; consumed by @tf-hwp/react TauriAdapter)
+            // issue 043 — SDK convergence lane (additive; consumed by @auto-hwp/react TauriAdapter)
             apply_intent_json,
             blocks_in_rect,
             export_hwpx_bytes,
             export_pdf_bytes
         ])
         .run(tauri::generate_context!())
-        .expect("error while running tf-hwp viewer");
+        .expect("error while running auto-hwp viewer");
 }
 
 /// Lock in the invariant the A3 server (and the `spawn_blocking` workers) rely on: the session is

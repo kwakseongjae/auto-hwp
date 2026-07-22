@@ -81,7 +81,7 @@
 
 | ID | 심각도 | 진단 | 상태 |
 |---|---|---|---|
-| D1 | **P0** | **npm 미발행** — README의 `npm i @tf-hwp/react @tf-hwp/engine`은 아직 레지스트리에 없음(tarball 경로만). 발행 준비는 완료(pack 실측·CI dry_run), 실행만 남음 | 063 "최종 1마일" |
+| D1 | **P0** | **npm 미발행** — README의 `npm i @auto-hwp/react @auto-hwp/engine`은 아직 레지스트리에 없음(tarball 경로만). 발행 준비는 완료(pack 실측·CI dry_run), 실행만 남음 | 063 "최종 1마일" |
 | D2 | **P0** | **온보딩 6단계 수동 배선** — ①4패키지 설치 ②wasm/워커 4파일 상대구조 수동 복사(+Vite `optimizeDeps.exclude`) ③styles.css 수동 import ④AI 프록시 서버 자가 구축 ⑤폰트 주입(없으면 PDF `font_missing` throw) ⑥CSP 5줄. "번들러 마법 아님"이 EMBED-GUIDE 자체 표현 | EMBED-GUIDE §2~§7 |
 | D3 | P1 | **프레임워크 함정** — SSR 반드시 off(엔진이 window/Worker/WebAssembly 사용), Next 16 Turbopack은 wasm 중복 방출 회귀로 **15.5.x 고정** 필요, Vite 프로덕션은 ~9MB wasm 사본 이중 방출 | EMBED-GUIDE §7 |
 | D4 | P1 | **AI를 쓰려면 서버가 필수** — "100% 클라이언트" 헤드라인과 달리 바이브 편집은 호스트가 프록시 서버(키 보관·스트리밍 중계)를 직접 세워야 함. Express 템플릿은 제공되나 운영 부담은 소비자 몫 | R6 설계 (트레이드오프) |

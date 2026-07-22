@@ -10,7 +10,7 @@
 /// overwritten, never queued). Suppression (drag/pan/in-place-editor/resize-grip) short-circuits before any
 /// query. The client-px → page-px conversion reuses coords.ts (screenToPage), the SAME map HwpPageView uses.
 import { useCallback, useEffect, useRef } from "react";
-import type { EngineAdapter } from "@tf-hwp/editor-core";
+import type { EngineAdapter } from "@auto-hwp/editor-core";
 import { readViewBox, screenToPage } from "./coords";
 import { HoverStore, cursorForContext, pointInBox, recordHoverQueryMs, type HoverCursor, type HoverHighlight } from "./hover";
 

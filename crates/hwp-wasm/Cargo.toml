@@ -1,6 +1,6 @@
 [package]
 name = "hwp-wasm"
-description = "wasm-bindgen bindings for the tf-hwp engine (issue 015, Shell C). A THIN consumer of hwp-session (render / geometry / HTML+PDF export) and hwp-mcp (the edit lane: Session + open_bytes + apply_intent_json + export_bytes). No LLM, no filesystem — the browser hands bytes in and gets SVG/HTML/PDF/HWPX bytes out."
+description = "wasm-bindgen bindings for the auto-hwp engine (issue 015, Shell C). A THIN consumer of hwp-session (render / geometry / HTML+PDF export) and hwp-mcp (the edit lane: Session + open_bytes + apply_intent_json + export_bytes). No LLM, no filesystem — the browser hands bytes in and gets SVG/HTML/PDF/HWPX bytes out."
 edition.workspace = true
 version.workspace = true
 license.workspace = true

@@ -1,4 +1,4 @@
-import { Emitter } from "@tf-hwp/editor-core";
+import { Emitter } from "@auto-hwp/editor-core";
 
 /// A live IME composition, as seen by the React overlay layer (issue 059). This is a DOM/React concern —
 /// composition events fire on the caret-tracking hidden textarea, NOT in the headless engine — so the

@@ -1,0 +1,55 @@
+<!doctype html><meta charset="utf-8">
+<!-- 오토한글(auto-hwp) 브랜드 배너 소스 — 렌더: node assets/brand/shot.mjs → autohwp-banner.png
+     타이포: 나눔고딕 Bold(레포 번들 OFL) · 컨셉: "AI와 함께 한 화면을 보면서 쓰는 한글"
+     모티프: 워드마크 끝의 AI 캐럿(▍보라 = 앱의 --hw-ai) + 제안 카드 칩 + 문서 괘선 배경 -->
+<style>
+@font-face { font-family: NG; src: url("../fonts/NanumGothic-Bold.ttf"); font-weight: 700; }
+@font-face { font-family: NG; src: url("../fonts/NanumGothic-Regular.ttf"); font-weight: 400; }
+@font-face { font-family: NM; src: url("../../apps/hwp-lab/public/fonts/NanumMyeongjo-Regular.ttf"); }
+* { margin: 0; box-sizing: border-box; }
+body { width: 1280px; height: 440px; overflow: hidden; font-family: NG, sans-serif;
+  background: #0c0f14; position: relative; color: #e6e9ef; }
+/* 문서 괘선(한글 편집지 모티프) — 아주 옅게 */
+.rules { position: absolute; inset: 0;
+  background-image: repeating-linear-gradient(0deg, transparent 0 43px, rgba(230,233,239,0.045) 43px 44px);
+}
+.glow { position: absolute; width: 720px; height: 720px; right: -160px; top: -260px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(124,58,237,0.22), transparent 62%); }
+.glow2 { position: absolute; width: 560px; height: 560px; left: -200px; bottom: -320px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(37,99,235,0.14), transparent 60%); }
+.wrap { position: absolute; left: 96px; top: 86px; }
+.kicker { font-size: 21px; letter-spacing: 6px; color: #8b93a1; }
+.kicker b { color: #a78bfa; font-weight: 700; }
+.mark { margin-top: 14px; font-size: 128px; font-weight: 700; letter-spacing: -2px; line-height: 1.05;
+  color: #f4f6f9; display: flex; align-items: baseline; }
+.caret { display: inline-block; width: 30px; height: 106px; margin-left: 18px; border-radius: 5px;
+  background: linear-gradient(180deg, #a78bfa, #7c3aed); align-self: center; margin-top: 10px;
+  box-shadow: 0 0 26px rgba(124, 58, 237, 0.55); }
+.tag { margin-top: 26px; font-size: 30px; font-weight: 400; color: #b8c0cc; letter-spacing: 0.5px; }
+.tag b { color: #e6e9ef; font-weight: 700; }
+/* AI 제안 카드 칩(제품 모티프) — 우하단 */
+.chip { position: absolute; right: 96px; bottom: 96px; background: #151a22; border: 1px solid #262d38;
+  border-radius: 12px; padding: 16px 20px; width: 330px; box-shadow: 0 12px 40px rgba(0,0,0,0.45); }
+.chip .h { display: flex; align-items: center; gap: 8px; font-size: 16px; color: #cdd4de; }
+.chip .h .ic { color: #a78bfa; }
+.chip .h .loc { margin-left: auto; font-size: 12px; color: #7c3aed; background: rgba(124,58,237,0.14);
+  padding: 2px 8px; border-radius: 999px; }
+.chip .b { margin-top: 9px; font-size: 14px; color: #8b93a1; font-family: NM, serif; }
+.chip .a { margin-top: 11px; display: flex; gap: 8px; }
+.chip .a span { font-size: 12.5px; padding: 4px 12px; border-radius: 7px; }
+.chip .ok { background: #7c3aed; color: #fff; }
+.chip .no { background: #1c222c; color: #8b93a1; }
+.foot { position: absolute; left: 96px; bottom: 46px; font-size: 16.5px; color: #5c6470; letter-spacing: 1.2px; }
+</style>
+<div class="rules"></div><div class="glow"></div><div class="glow2"></div>
+<div class="wrap">
+  <div class="kicker"><b>AUTO-HWP</b> · OPEN SOURCE HWP ENGINE</div>
+  <div class="mark">오토한글<span class="caret"></span></div>
+  <div class="tag"><b>AI와 함께, 한 화면을 보면서 쓰는 한글</b></div>
+</div>
+<div class="chip">
+  <div class="h"><span class="ic">✦</span> 표 채우기 제안 <span class="loc">s0·b3 ⊙ 위치</span></div>
+  <div class="b">“사업 개요 표의 빈칸을 채웠습니다 — 적용할까요?”</div>
+  <div class="a"><span class="ok">✓ 적용</span><span class="no">되돌리기</span></div>
+</div>
+<div class="foot">열고 · 말하고 · 승인하면 문서가 됩니다 — .hwp/.hwpx → 렌더 · 편집 · PDF, 100% 로컬 (wasm · MCP · CLI)</div>

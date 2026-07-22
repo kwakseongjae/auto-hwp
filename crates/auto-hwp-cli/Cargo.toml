@@ -1,13 +1,13 @@
 [package]
-name = "tf-hwp-cli"
-description = "tf-hwp CLI: detect / info / extract-text / oracle."
+name = "auto-hwp-cli"
+description = "auto-hwp CLI: detect / info / extract-text / oracle."
 edition.workspace = true
 version.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [[bin]]
-name = "tf-hwp"
+name = "auto-hwp"
 path = "src/main.rs"
 
 [features]

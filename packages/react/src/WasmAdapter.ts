@@ -1,11 +1,11 @@
-import { HwpDoc, initEngine, resetEngine } from "@tf-hwp/engine";
-import { EngineWorkerClient } from "@tf-hwp/engine/worker-client";
+import { HwpDoc, initEngine, resetEngine } from "@auto-hwp/engine";
+import { EngineWorkerClient } from "@auto-hwp/engine/worker-client";
 import type { EngineAdapter } from "./EngineAdapter";
 import type { BlockHit, CaretRect, CellAddr, CellCaretRect, CellHit, CellTextHit, DocProfile, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, NormalizeReport, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
 
 type WasmInput = string | URL | Request | BufferSource | WebAssembly.Module;
 
-/** Any error carrying a machine-readable engine `code` (@tf-hwp/engine EngineError). */
+/** Any error carrying a machine-readable engine `code` (@auto-hwp/engine EngineError). */
 export interface CodedError extends Error {
   code?: string;
 }
@@ -40,7 +40,7 @@ export interface RecoveryInfo {
 }
 
 /** issue 055 (FG-14) — run the engine inside a Web Worker instead of the main thread. `url` is the
- *  deployed @tf-hwp/engine/worker.js MODULE-worker script (served as a static asset next to index.js +
+ *  deployed @auto-hwp/engine/worker.js MODULE-worker script (served as a static asset next to index.js +
  *  pkg/, like the explicit wasm URL — no bundler magic); `factory` overrides worker creation (tests /
  *  bundler-specific recipes). When set, open/parse/re-layout/export/toHwpx all run off-thread — the
  *  Promise surface of this adapter is unchanged, so consumers need no code change. */
@@ -89,9 +89,9 @@ interface EngineDoc {
   free(): void;
 }
 
-/// WasmAdapter — the browser backend: wraps @tf-hwp/engine so the components run 100% client-side.
+/// WasmAdapter — the browser backend: wraps @auto-hwp/engine so the components run 100% client-side.
 ///
-/// It owns the two things the raw engine wrapper leaves to the host (per @tf-hwp/engine README):
+/// It owns the two things the raw engine wrapper leaves to the host (per @auto-hwp/engine README):
 ///  1. WASM TRAP RECOVERY. A Rust panic on wasm is a TRAP that poisons the whole instance. This adapter
 ///     holds the original bytes + name; on a `{code:"wasm_trap"}` it resets the engine and re-`open()`s
 ///     the document (so subsequent reads/render work again), then re-throws the trap so the workspace
@@ -326,7 +326,7 @@ export class WasmAdapter implements EngineAdapter {
     this.name = name;
     this.fontRegistered = false;
     const pages = await this.doc.pageCount();
-    // @tf-hwp/engine has no standalone "opened" query; synthesize the OpenResult from what we know.
+    // @auto-hwp/engine has no standalone "opened" query; synthesize the OpenResult from what we know.
     return { format: name?.toLowerCase().endsWith(".hwp") ? "hwp" : "hwpx", editable: true, sections: 1, pages };
   }
 

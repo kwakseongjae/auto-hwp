@@ -1,4 +1,4 @@
-//! `hwp-mcp` — headless MCP server for tf-hwp. Three transports:
+//! `hwp-mcp` — headless MCP server for auto-hwp. Three transports:
 //!   * default (stdio): newline-delimited JSON-RPC on stdin/stdout, for `claude mcp add --transport stdio`.
 //!   * `--http [--port N]`: loopback HTTP control server (A3) — writes a 0600 `{port}\n{token}\n`
 //!     file (path printed to stderr) and serves `POST /mcp`; for `claude mcp add --transport http`.

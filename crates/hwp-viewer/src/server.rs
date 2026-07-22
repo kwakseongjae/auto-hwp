@@ -13,7 +13,7 @@ pub fn spawn(app: AppHandle) {
     let listener = match TcpListener::bind(("127.0.0.1", 0)) {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("tf-hwp control server: bind failed ({e}); live control disabled");
+            eprintln!("auto-hwp control server: bind failed ({e}); live control disabled");
             return;
         }
     };
@@ -21,7 +21,7 @@ pub fn spawn(app: AppHandle) {
     let token = hwp_mcp::server::gen_token();
     let cred = write_cred(port, &token);
     // The agent reads {port,token} from the 0600 file — never from argv/env/log.
-    eprintln!("tf-hwp control server: http://127.0.0.1:{port}/mcp — credentials at {cred}");
+    eprintln!("auto-hwp control server: http://127.0.0.1:{port}/mcp — credentials at {cred}");
 
     std::thread::spawn(move || {
         hwp_mcp::server::serve(listener, token, move |req| {
@@ -41,7 +41,7 @@ pub fn spawn(app: AppHandle) {
 fn write_cred(port: u16, token: &str) -> String {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
-    let path = std::env::temp_dir().join(format!("tf-hwp-viewer-{port}.cred"));
+    let path = std::env::temp_dir().join(format!("auto-hwp-viewer-{port}.cred"));
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .write(true)
         .create(true)

@@ -1,9 +1,12 @@
-# tf-hwp
+<p align="center"><img src="./assets/brand/autohwp-banner.png" alt="오토한글 (auto-hwp) — AI와 함께, 한 화면을 보면서 쓰는 한글" width="100%"></p>
 
-**브라우저에서 동작하는 자체 HWP/HWPX 엔진** — `.hwp`/`.hwpx`를 열어 원본 그대로 렌더하고,
-편집하고, HTML/PDF/HWPX로 내보냅니다. 서버 없이 100% 클라이언트(WebAssembly)에서.
+# 오토한글 (auto-hwp)
 
-[English](./README.en.md) · [라이브 데모](https://kwakseongjae.github.io/tf-hwp/) ·
+**AI와 함께 한 화면을 보면서 작성하는 한글.** 자체 HWP/HWPX 엔진이 `.hwp`/`.hwpx`를 열어
+원본 그대로 렌더하고 — 셀을 가리키거나 그냥 말하면 AI가 편집을 제안하고, 승인하면 문서가
+됩니다. 편집·HTML/PDF/HWPX 내보내기까지 서버 없이 100% 클라이언트(WebAssembly)에서.
+
+[English](./README.en.md) · [라이브 데모](https://kwakseongjae.github.io/auto-hwp/) ·
 [임베드 가이드](./docs/EMBED-GUIDE.md) · [기여 가이드](./CONTRIBUTING.md)
 
 ```
@@ -15,7 +18,7 @@
 
 ## 왜 만들었나
 
-한국 공공·기업 문서의 표준인 HWP는 웹에서 다루기 어렵습니다. tf-hwp는 뷰어 렌더링을
+한국 공공·기업 문서의 표준인 HWP는 웹에서 다루기 어렵습니다. auto-hwp는 뷰어 렌더링을
 외부 프로그램에 위임하지 않고 **파싱 → 조판 → 렌더 → 편집 → 저장 전체를 소유하는 엔진**입니다:
 
 - **원본 정확도를 게이트로 잠급니다** — 실물 정부 양식 벤치마크에서 한컴 렌더와
@@ -29,10 +32,10 @@
 
 | 패키지 | 레이어 | 역할 |
 |---|---|---|
-| **`@tf-hwp/engine`** | L1 | **headless 엔진 (wasm)** — 파싱·조판·SVG/HTML/PDF/HWPX·Intent 편집·undo. UI 없음 |
-| `@tf-hwp/editor-core` | L2 | headless 에디터 상태 (선택·편집·세션) — DOM 최소, React 무관 |
-| `@tf-hwp/ai-protocol` | L2′ | 바이브 편집 LLM 프로토콜 (프롬프트/컨텍스트/검증) — fetch 없음, 키 없음 |
-| `@tf-hwp/react` | L3 | **선택** 레이어: 레퍼런스 에디터 `<HwpWorkspace/>` + React 바인딩 |
+| **`@auto-hwp/engine`** | L1 | **headless 엔진 (wasm)** — 파싱·조판·SVG/HTML/PDF/HWPX·Intent 편집·undo. UI 없음 |
+| `@auto-hwp/editor-core` | L2 | headless 에디터 상태 (선택·편집·세션) — DOM 최소, React 무관 |
+| `@auto-hwp/ai-protocol` | L2′ | 바이브 편집 LLM 프로토콜 (프롬프트/컨텍스트/검증) — fetch 없음, 키 없음 |
+| `@auto-hwp/react` | L3 | **선택** 레이어: 레퍼런스 에디터 `<HwpWorkspace/>` + React 바인딩 |
 
 > 아직 npm 레지스트리에 발행 전입니다. 지금은 `examples/vite-embed`의 레시피대로
 > `npm pack` tarball로 소비할 수 있습니다 (4패키지 모두 발행 준비 완료 상태).
@@ -42,7 +45,7 @@
 React도, 우리 에디터도 필요 없습니다. 엔진은 SVG 문자열과 바이트를 돌려줍니다:
 
 ```js
-import { initEngine, HwpDoc } from '@tf-hwp/engine';
+import { initEngine, HwpDoc } from '@auto-hwp/engine';
 
 await initEngine();                          // wasm 1회 인스턴스화
 const bytes = new Uint8Array(await file.arrayBuffer());
@@ -68,13 +71,13 @@ doc.free();
 지오메트리 질의(`hitTest`/`tableAt`/`blocksInRect`…)까지 27개 메서드가
 [`EngineAdapter` 계약](./packages/editor-core/src/adapter.ts)으로 문서화되어 있어,
 클릭 선택·드래그·캐럿이 있는 **완전한 자체 에디터**를 엔진 위에 지을 수 있습니다.
-중간층이 필요하면 `@tf-hwp/editor-core`(선택 모델·편집 컨트롤러, React 무관)를 쓰세요.
+중간층이 필요하면 `@auto-hwp/editor-core`(선택 모델·편집 컨트롤러, React 무관)를 쓰세요.
 
 ## 빠른 시작 ② — 레퍼런스 에디터 (React)
 
 ```tsx
-import { HwpWorkspace, WasmAdapter } from '@tf-hwp/react';
-import '@tf-hwp/react/styles.css';
+import { HwpWorkspace, WasmAdapter } from '@auto-hwp/react';
+import '@auto-hwp/react/styles.css';
 
 <HwpWorkspace
   adapter={adapter}                 // WasmAdapter (웹) 또는 자체 어댑터
@@ -91,17 +94,17 @@ AI 프록시 예제는 [`examples/ai-proxy-express`](./examples/ai-proxy-express
 ## AI 도구/터미널에서 바로 쓰기 (사이트 없이, 전부 로컬)
 
 - **MCP 서버** — Claude Code/Desktop·Cursor에 장착: `cargo install --git
-  https://github.com/kwakseongjae/tf-hwp hwp-mcp --features rhwp` → `claude mcp add tf-hwp -- hwp-mcp`.
+  https://github.com/kwakseongjae/auto-hwp hwp-mcp --features rhwp` → `claude mcp add auto-hwp -- hwp-mcp`.
   열기/구조 컨텍스트/편집(프리뷰→승인)/찾아바꾸기/undo/HWPX·PDF export 15종 도구. 문서는 로컬을
   떠나지 않는다. → [docs/MCP-GUIDE.md](docs/MCP-GUIDE.md)
 - **Claude Code 스킬** — `cp -r skills/hwp ~/.claude/skills/` 후 아무 세션에서 "이 hwp를 pdf로":
-  CLI(`tf-hwp`)를 감싸 변환·추출·미리보기·편집을 로컬로 수행. → [skills/hwp/SKILL.md](skills/hwp/SKILL.md)
+  CLI(`auto-hwp`)를 감싸 변환·추출·미리보기·편집을 로컬로 수행. → [skills/hwp/SKILL.md](skills/hwp/SKILL.md)
 
 ## 데모 실행 (로컬)
 
 ```bash
-git clone --recurse-submodules https://github.com/kwakseongjae/tf-hwp
-cd tf-hwp
+git clone --recurse-submodules https://github.com/kwakseongjae/auto-hwp
+cd auto-hwp
 
 # 엔진 wasm 빌드 (Rust + wasm-bindgen 필요 — CONTRIBUTING.md 참고)
 cargo build -p hwp-wasm --profile wasm-size --target wasm32-unknown-unknown
@@ -145,7 +148,7 @@ XML/CSS 텍스트가 아니라 **타입드 Intent**입니다.
 
 ## 정확도
 
-| 벤치마크 | 한컴 렌더 | tf-hwp | 판정 |
+| 벤치마크 | 한컴 렌더 | auto-hwp | 판정 |
 |---|---|---|---|
 | benchmark.hwp (정부 양식, 8쪽) | 8쪽 | 8쪽 | ✅ 일치 |
 | benchmark1.hwp (신청서, 18쪽) | 18쪽 | 18쪽 | ✅ 일치 |
@@ -179,13 +182,13 @@ OFL 대체로 렌더됩니다(직접 업로드하면 그 서체 사용). → [do
 `hwp-model`(IR) · `hwp-hwpx`(HWPX 코덱) · `hwp-rhwp`(.hwp 파싱 부트스트랩, [rhwp](https://github.com/kwakseongjae/rhwp) MIT) ·
 `hwp-typeset`(조판: 금칙·장평·자간·옛한글) · `hwp-render`(PaintOp→SVG) · `hwp-export`(PDF/HTML) ·
 `hwp-ops`(op-bus·undo) · `hwp-mcp`(Intent 스키마) · `hwp-session`(지오메트리) · `hwp-wasm`(바인딩) ·
-`hwp-crypto`(배포용 문서 복호) · `tf-hwp-cli`(CLI)
+`hwp-crypto`(배포용 문서 복호) · `auto-hwp-cli`(CLI)
 
 CLI만으로도 쓸 수 있습니다:
 
 ```bash
-cargo run -p tf-hwp-cli --features rhwp -- own-render 문서.hwp --out page.svg
-cargo run -p tf-hwp-cli --features rhwp -- export-pdf 문서.hwpx -o out.pdf
+cargo run -p auto-hwp-cli --features rhwp -- own-render 문서.hwp --out page.svg
+cargo run -p auto-hwp-cli --features rhwp -- export-pdf 문서.hwpx -o out.pdf
 ```
 
 ## 라이선스

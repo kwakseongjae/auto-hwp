@@ -19,7 +19,7 @@
 - 그 **코드는 참조 전용** — 동작을 Rust로 재구현(소스 복사 금지).
 
 ## 폰트 재배포 (R8 — wasm/npm 패키지)
-- **번들 금지·주입만.** `@tf-hwp/engine`(이슈 015, `crates/hwp-wasm` + `packages/engine`)은 폰트를
+- **번들 금지·주입만.** `@auto-hwp/engine`(이슈 015, `crates/hwp-wasm` + `packages/engine`)은 폰트를
   **하나도 번들하지 않는다**. PDF export에 필요한 폰트는 호스트가 런타임에 바이트로 주입한다
   (`HwpDoc.registerFont(family, bytes)`). `exportPdf`는 폰트 미주입 시 명시 에러(`{code:"font_missing"}`)를
   던진다 — silent 빈 글리프 금지.

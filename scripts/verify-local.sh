@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tf-hwp 로컬 검증 정본 — CI(GitHub Actions)는 workflow_dispatch 수동 전용으로 전환됨(2026-07-11).
+# auto-hwp 로컬 검증 정본 — CI(GitHub Actions)는 workflow_dispatch 수동 전용으로 전환됨(2026-07-11).
 # 머지/푸시 전 이 스크립트가 그린이어야 한다. CI가 검사하던 것(fmt/clippy/test/wasm/deny)을 전부 포함하고,
 # CI가 못 하던 것(게이트 v2, rhwp 피처 테스트, wasm 재빌드, JS/e2e)까지 --full에서 커버한다.
 #
@@ -20,7 +20,7 @@ cargo test -p hwp-rhwp --features "rhwp shaper"
 
 echo "═══ 게이트 v2 (benchmark 8==8 · benchmark1 18==18) ═══"
 for b in benchmark benchmark1; do
-  out=$(cargo run -q -p tf-hwp-cli --features "shaper rhwp" -- layout-check "benchmarks/${b}.hwp")
+  out=$(cargo run -q -p auto-hwp-cli --features "shaper rhwp" -- layout-check "benchmarks/${b}.hwp")
   echo "$out" | grep "쪽수"
   echo "$out" | grep "쪽수" | grep -q "일치" || { echo "❌ 게이트 실패: ${b}.hwp 페이지 수 불일치"; exit 1; }
 done

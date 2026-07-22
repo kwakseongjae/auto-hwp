@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { CellCaretState, EditorCore, RunStyle } from "@tf-hwp/editor-core";
+import type { CellCaretState, EditorCore, RunStyle } from "@auto-hwp/editor-core";
 import type { CompositionStore } from "../composition";
 import { isEditableTarget } from "../viewport";
 import { PAGE_PX_PER_PT } from "./InPlaceCellEditor";

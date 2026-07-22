@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tf-hwp 컨텍스트 복원 — 새 세션/compact 후 이 스크립트 하나로 현재 위치를 복원한다.
+# auto-hwp 컨텍스트 복원 — 새 세션/compact 후 이 스크립트 하나로 현재 위치를 복원한다.
 # (roadmap-continuity 킷. 로드맵 정본: docs/PRODUCT-DIRECTION-V2.md + docs/issues/README.md,
 #  이슈 상태의 진실은 git log — 아래에서 README 표 대신 git으로 미완료를 도출한다.)
 set -uo pipefail

@@ -23,14 +23,14 @@ content JSON (see `hwp_ai::content::template_brief`), then **적용 (op-bus)** �
 On launch the shell prints a line like:
 
 ```
-tf-hwp control server: http://127.0.0.1:54321/mcp — credentials at /…/tf-hwp-viewer-54321.cred
+auto-hwp control server: http://127.0.0.1:54321/mcp — credentials at /…/auto-hwp-viewer-54321.cred
 ```
 
 The cred file (mode `0600`) holds `port` then `token`. Register it with a coding agent:
 
 ```bash
-TOK=$(sed -n 2p /…/tf-hwp-viewer-54321.cred)
-claude mcp add --transport http tf-hwp-live http://127.0.0.1:54321/mcp \
+TOK=$(sed -n 2p /…/auto-hwp-viewer-54321.cred)
+claude mcp add --transport http auto-hwp-live http://127.0.0.1:54321/mcp \
   --header "Authorization: Bearer $TOK"
 ```
 

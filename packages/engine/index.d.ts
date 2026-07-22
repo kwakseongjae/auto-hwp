@@ -1,4 +1,4 @@
-// Type definitions for @tf-hwp/engine (the safety-wrapped surface in index.js).
+// Type definitions for @auto-hwp/engine (the safety-wrapped surface in index.js).
 // The raw wasm-bindgen types live in ./pkg/hwp_wasm.d.ts.
 
 /** Instantiate the wasm engine once. `input` is an optional wasm URL/Response/bytes (defaults to the

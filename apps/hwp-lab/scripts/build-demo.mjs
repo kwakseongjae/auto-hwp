@@ -6,7 +6,7 @@
 // (LabWorkspace.tsx — AI 편집은 로컬 실행 안내, 뷰/수동편집/export 는 전부 브라우저에서 동작).
 //
 // 사용:  node scripts/build-demo.mjs            → out/ (basePath 없음 — 커스텀 도메인/로컬 서빙)
-//        DEMO_BASE_PATH=/tf-hwp node scripts/build-demo.mjs  → 프로젝트 페이지(username.github.io/tf-hwp)
+//        DEMO_BASE_PATH=/auto-hwp node scripts/build-demo.mjs  → 프로젝트 페이지(username.github.io/auto-hwp)
 import { execSync } from "node:child_process";
 import { existsSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";

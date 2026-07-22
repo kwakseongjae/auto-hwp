@@ -1,5 +1,5 @@
-// @tf-hwp/react — public surface (issue 016). Import the stylesheet once in your app:
-//   import "@tf-hwp/react/styles.css";
+// @auto-hwp/react — public surface (issue 016). Import the stylesheet once in your app:
+//   import "@auto-hwp/react/styles.css";
 import "./styles.css";
 
 // Assembly + components
@@ -56,7 +56,7 @@ export type { StatusBarProps } from "./components/StatusBar";
 export { activeOutlineIndex, pageAtReference } from "./outline";
 
 // Issue 027 — editing-parity opt-in components. Each is individually importable and drives a single
-// @tf-hwp/editor-core command; a host can compose them WITHOUT HwpWorkspace (see the README recipe).
+// @auto-hwp/editor-core command; a host can compose them WITHOUT HwpWorkspace (see the README recipe).
 export { ColumnResizeOverlay, RowResizeOverlay } from "./components/ColumnResizeOverlay";
 export type { ColumnResizeOverlayProps, RowResizeOverlayProps } from "./components/ColumnResizeOverlay";
 export { TableInsertButton } from "./components/TableInsertButton";
@@ -150,12 +150,12 @@ export type { WasmAdapterOptions, WasmAdapterWorkerOptions } from "./WasmAdapter
 export { TauriAdapter } from "./TauriAdapter";
 export type { TauriAdapterOptions, Invoke } from "./TauriAdapter";
 
-// Headless core (issue 026) — the React binding hook + a re-export of @tf-hwp/editor-core so a host can
-// build a fully custom UI over the SAME core (no @tf-hwp/react components required). The heavy editing
+// Headless core (issue 026) — the React binding hook + a re-export of @auto-hwp/editor-core so a host can
+// build a fully custom UI over the SAME core (no @auto-hwp/react components required). The heavy editing
 // logic lives in editor-core; the components below are a thin, optional binding.
 export { useHwpEditor } from "./useHwpEditor";
 export type { HwpEditorState } from "./useHwpEditor";
-export { createEditorCore, EditorCore, DocSession, SelectionModel, EditController, FindController } from "@tf-hwp/editor-core";
+export { createEditorCore, EditorCore, DocSession, SelectionModel, EditController, FindController } from "@auto-hwp/editor-core";
 // Issue 027 — the single px↔mm↔ratio conversion utils + the run-preservation helper, re-exported so a
 // host composing the opt-in components by hand shares the SAME conversion point (never re-derives it).
 export {
@@ -177,7 +177,7 @@ export {
   imageInsertSize,
   inheritRuns,
   firstRunStyle,
-} from "@tf-hwp/editor-core";
+} from "@auto-hwp/editor-core";
 
 // R7: the sanitizer is exported so hosts can reuse it, but the components never expose an SVG-string
 // prop that bypasses it (all injection goes through HwpPageView → sanitizeSvg).

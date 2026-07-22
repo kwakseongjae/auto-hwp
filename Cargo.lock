@@ -296,6 +296,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
+name = "auto-hwp-cli"
+version = "0.0.1"
+dependencies = [
+ "clap",
+ "hwp-ai",
+ "hwp-core",
+ "hwp-export",
+ "hwp-fidelity",
+ "hwp-hwpx",
+ "hwp-ingest",
+ "hwp-jsx",
+ "hwp-model",
+ "hwp-ops",
+ "hwp-oracle",
+ "hwp-render",
+ "hwp-session",
+ "hwp-typeset",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5247,26 +5267,6 @@ checksum = "c4790fc369d5a530f4b544b094e31388b9b3a37c0f4652ade4505945f5660d24"
 dependencies = [
  "new_debug_unreachable",
  "utf-8",
-]
-
-[[package]]
-name = "tf-hwp-cli"
-version = "0.0.1"
-dependencies = [
- "clap",
- "hwp-ai",
- "hwp-core",
- "hwp-export",
- "hwp-fidelity",
- "hwp-hwpx",
- "hwp-ingest",
- "hwp-jsx",
- "hwp-model",
- "hwp-ops",
- "hwp-oracle",
- "hwp-render",
- "hwp-session",
- "hwp-typeset",
 ]
 
 [[package]]

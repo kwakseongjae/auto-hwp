@@ -1,5 +1,5 @@
-/* @tf-hwp/react — self-contained styles (no Tailwind dependency for consumers). Namespaced under
- * `hw-` so they don't collide with the host app. Import once: `import "@tf-hwp/react/styles.css"`. */
+/* @auto-hwp/react — self-contained styles (no Tailwind dependency for consumers). Namespaced under
+ * `hw-` so they don't collide with the host app. Import once: `import "@auto-hwp/react/styles.css"`. */
 
 .hw-workspace {
   --hw-accent: #2563eb;

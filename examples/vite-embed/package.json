@@ -1,5 +1,5 @@
 {
-  "name": "tf-hwp-vite-embed",
+  "name": "auto-hwp-vite-embed",
   "version": "0.0.0",
   "private": true,
   "description": "외부 호스트 이식 증명 (issue 063): PUBLISHED tarball(npm pack)을 설치해 비-Next Vite 앱에서 <HwpWorkspace/>를 렌더한다. 소스경로 import 0 — node_modules 의 발행본만 소비한다.",
@@ -15,17 +15,17 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@tf-hwp/ai-protocol": "file:./vendor/tf-hwp-ai-protocol-0.0.1.tgz",
-    "@tf-hwp/editor-core": "file:./vendor/tf-hwp-editor-core-0.0.1.tgz",
-    "@tf-hwp/engine": "file:./vendor/tf-hwp-engine-0.0.1.tgz",
-    "@tf-hwp/react": "file:./vendor/tf-hwp-react-0.0.1.tgz",
+    "@auto-hwp/ai-protocol": "file:./vendor/auto-hwp-ai-protocol-0.0.1.tgz",
+    "@auto-hwp/editor-core": "file:./vendor/auto-hwp-editor-core-0.0.1.tgz",
+    "@auto-hwp/engine": "file:./vendor/auto-hwp-engine-0.0.1.tgz",
+    "@auto-hwp/react": "file:./vendor/auto-hwp-react-0.0.1.tgz",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "overrides": {
-    "@tf-hwp/ai-protocol": "file:./vendor/tf-hwp-ai-protocol-0.0.1.tgz",
-    "@tf-hwp/editor-core": "file:./vendor/tf-hwp-editor-core-0.0.1.tgz",
-    "@tf-hwp/engine": "file:./vendor/tf-hwp-engine-0.0.1.tgz"
+    "@auto-hwp/ai-protocol": "file:./vendor/auto-hwp-ai-protocol-0.0.1.tgz",
+    "@auto-hwp/editor-core": "file:./vendor/auto-hwp-editor-core-0.0.1.tgz",
+    "@auto-hwp/engine": "file:./vendor/auto-hwp-engine-0.0.1.tgz"
   },
   "devDependencies": {
     "@playwright/test": "1.61.1",

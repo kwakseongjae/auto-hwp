@@ -15,7 +15,7 @@
 정직한 UX로 표면화된다.
 
 ## 설계
-1. **워커화(FG-14)**: `@tf-hwp/engine`을 Web Worker로 — Comlink류 브릿지 또는 수제 RPC.
+1. **워커화(FG-14)**: `@auto-hwp/engine`을 Web Worker로 — Comlink류 브릿지 또는 수제 RPC.
    EngineAdapter는 이미 Promise 표면이므로 소비처는 이론상 무변경(V6 — async 전수 확인 먼저).
    트랩 복구(052)와 정합: 워커 죽음=인스턴스 중독의 명시적 신호로 승격(재스폰+스냅샷 복구).
 2. **번들 실측+다이어트**: gzip/brotli 실측 보고 → wasm-opt/feature 프루닝(krilla가 heavyweight
@@ -31,8 +31,8 @@
 - [x] 게이트/골든/wasm-safe 전부 그린
 
 ## 구현 결과 (2026-07-11)
-- **워커화**: `@tf-hwp/engine`에 모듈 워커 엔트리(`worker.js`) + 수제 RPC 클라이언트
-  (`@tf-hwp/engine/worker-client` — 신규 의존 0, 정적 에셋 배포·번들러 마법 X·SAB/COOP-COEP 불요).
+- **워커화**: `@auto-hwp/engine`에 모듈 워커 엔트리(`worker.js`) + 수제 RPC 클라이언트
+  (`@auto-hwp/engine/worker-client` — 신규 의존 0, 정적 에셋 배포·번들러 마법 X·SAB/COOP-COEP 불요).
   `WasmAdapter(wasmUrl, { worker: { url } })` 옵트인 — hwp-lab 기본 ON, `?engineWorker=off` 롤백
   스위치. 052 정합: 워커 죽음 = `{code:"worker_dead"}` → 트랩과 동일 레인(재스폰+스냅샷 우선 복구).
   probe 워커 분리로 손상 파일 트랩이 본 세션을 오염시키지 않게 됨(+열기 취소 = probe 워커 종료).

@@ -1,5 +1,5 @@
 import { useCallback, useLayoutEffect, useRef } from "react";
-import type { RunSpec } from "@tf-hwp/editor-core";
+import type { RunSpec } from "@auto-hwp/editor-core";
 import type { PageBox } from "../coords";
 import { runsToHtml, serializeEditor, applyLiveStyle } from "../richedit";
 

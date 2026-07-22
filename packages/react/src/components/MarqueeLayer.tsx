@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { EditorCore, SelMarquee } from "@tf-hwp/editor-core";
+import type { EditorCore, SelMarquee } from "@auto-hwp/editor-core";
 
 export interface MarqueeLayerProps {
   /** The headless editor core — MarqueeLayer subscribes to its selection model DIRECTLY (issue 030). */

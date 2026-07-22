@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { Anchor, Box, CellAddr, CellDir, DocContext, EngineAdapter, ImageBox, Intent, IntentCard, MatchBox, OutlineItem, PageGeom, PointerInput, RunSpec, Selection, TableBox, XYWH } from "@tf-hwp/editor-core";
-import { boundariesToRatios, remapFragmentHeights, appliedReflectsDrag, firstRunStyle, columnWidthMm, setColumnWidthMm, equalizeColumns, imageInsertSize, imageSizeToHwpunit, appliedReflectsResize, DRAG_THRESHOLD_PX } from "@tf-hwp/editor-core";
+import type { Anchor, Box, CellAddr, CellDir, DocContext, EngineAdapter, ImageBox, Intent, IntentCard, MatchBox, OutlineItem, PageGeom, PointerInput, RunSpec, Selection, TableBox, XYWH } from "@auto-hwp/editor-core";
+import { boundariesToRatios, remapFragmentHeights, appliedReflectsDrag, firstRunStyle, columnWidthMm, setColumnWidthMm, equalizeColumns, imageInsertSize, imageSizeToHwpunit, appliedReflectsResize, DRAG_THRESHOLD_PX } from "@auto-hwp/editor-core";
 import { OutlinePanel } from "./OutlinePanel";
 import { StatusBar } from "./StatusBar";
 import { pageAtReference } from "../outline";
@@ -40,7 +40,7 @@ const A4_W = 794; // CSS px for 210mm @ 96dpi (mirrors HwpPageView) — the 100%
 
 // issue 046: the outline panel remembers its collapsed state across sessions (localStorage). Guarded so a
 // non-browser / private-mode environment (or a test without storage) degrades to "expanded" silently.
-const OUTLINE_COLLAPSED_KEY = "tf-hwp:outline-collapsed";
+const OUTLINE_COLLAPSED_KEY = "auto-hwp:outline-collapsed";
 function readOutlineCollapsed(): boolean {
   try {
     return globalThis.localStorage?.getItem(OUTLINE_COLLAPSED_KEY) === "1";
@@ -136,7 +136,7 @@ export interface HwpWorkspaceProps {
    *  omitted, the workspace shows an empty state (the host drives opening). */
   document?: { bytes: Uint8Array; name?: string } | null;
   /** The host AI bridge (R6): instruction + anchors + doc context → Intents. Never an LLM in-package. */
-  onAiRequest: import("@tf-hwp/editor-core").OnAiRequest;
+  onAiRequest: import("@auto-hwp/editor-core").OnAiRequest;
   /** Show the honest mock badge in the chat panel. */
   isMock?: boolean;
   /** OPTIONAL informational banner for the chat panel (e.g. a static demo: "AI는 로컬 실행 시 사용
@@ -267,7 +267,7 @@ export function disarmShield(shield: { current: number }): void {
 /// marquee — issue 021), say what to change, review the previewed Intents, apply, and download HTML/PDF.
 ///
 /// After issue 026 this is a THIN React binding: all editing state + logic (selection, undo, apply, doc
-/// lifecycle) live in @tf-hwp/editor-core (via `useHwpEditor`); this component only renders that state
+/// lifecycle) live in @auto-hwp/editor-core (via `useHwpEditor`); this component only renders that state
 /// and owns the genuinely DOM-y bits (toasts, the screen @font-face blob, file download, page scroll).
 /// The AI is delegated to `onAiRequest` (R6); SVG is sanitized in HwpPageView (R7); fonts are injected
 /// via `requestFont`/`defaultFont` (R8).
@@ -2672,7 +2672,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         </style>
       )}
       <div className="hw-toolbar">
-        <span className="hw-brand">tf-hwp</span>
+        <span className="hw-brand">auto-hwp</span>
         <span className="hw-doc-meta">{meta ? `${meta.format.toUpperCase()} · ${meta.pages}쪽` : "문서 없음"}</span>
         <span className="hw-spacer" />
         <button className="hw-tool" onClick={() => zoomAtCenter(1 / ZOOM_STEP)} title="축소 (⌘−)" disabled={!meta}>

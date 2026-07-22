@@ -604,7 +604,7 @@ pub fn parse_script(json: &str) -> Result<EditScript> {
 /// The system prompt the editing model follows — it explains the anchored outline it will be given
 /// and the exact command vocabulary it must emit (one JSON object, no prose).
 pub fn edit_brief() -> &'static str {
-    r##"## tf-hwp 문서 편집 (이 JSON 형식만 출력)
+    r##"## auto-hwp 문서 편집 (이 JSON 형식만 출력)
 당신은 한국어 문서 편집 보조자입니다. 사용자가 준 [문서 개요]의 각 줄은
 `[s{섹션}/b{블록}] 내용` 형태의 **앵커**입니다. 사용자의 편집 지시를 아래 명령으로 옮겨,
 설명·머리말·마크다운·코드펜스 없이 JSON 객체 하나만 출력하세요.

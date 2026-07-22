@@ -1,7 +1,7 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 
-// 이식 증명(issue 063): published tarball(@tf-hwp/react·engine·editor-core·ai-protocol)을 설치한
+// 이식 증명(issue 063): published tarball(@auto-hwp/react·engine·editor-core·ai-protocol)을 설치한
 // 비-Next Vite 앱에서 뷰어가 렌더되고 셀 편집이 왕복하는지 검증한다. 소스경로 import 0 — node_modules
 // 의 발행본만 소비한다. 데모 픽스처: 레포 benchmarks/benchmark.hwp(8쪽).
 const BENCHMARK = path.resolve(process.cwd(), "..", "..", "benchmarks", "benchmark.hwp");

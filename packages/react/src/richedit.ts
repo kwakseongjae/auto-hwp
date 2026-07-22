@@ -4,7 +4,7 @@
 // textarea (issue 032). Glyph layout is the browser's during edit (approximate); the own SVG re-renders the
 // exact layout on commit.
 //
-// The run shape is @tf-hwp/editor-core's `RunSpec` — the SAME type `blockRuns`/`runsAt` returns AND
+// The run shape is @auto-hwp/editor-core's `RunSpec` — the SAME type `blockRuns`/`runsAt` returns AND
 // `SetTableCellRuns`/`SetParagraphRuns` accept, so a text edit round-trips through one type (run-format
 // preservation, issue 027 §함정 / 040 교훈 6). Multi-paragraph blocks join paragraphs with a bare
 // `{ text: "\n" }` run — the same shape the commit ops split on.
@@ -19,7 +19,7 @@
 //   6. The commit is a run-preserving SetTableCellRuns/SetParagraphRuns path (wired in HwpWorkspace) — never
 //      a plain-text variant.
 
-import type { RunSpec } from "@tf-hwp/editor-core";
+import type { RunSpec } from "@auto-hwp/editor-core";
 
 const NANUM = "NanumGothic, sans-serif";
 const HWPUNIT_PER_PX = 7200 / 96; // 75 — matches the Rust HWPUNIT_PER_PX

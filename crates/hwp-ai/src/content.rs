@@ -216,7 +216,7 @@ impl AiCell {
 /// The template the AI must follow — passed to the model (or read by a Claude Code agent) so
 /// generation conforms to a portable shape instead of free-form text.
 pub fn template_brief() -> &'static str {
-    r##"## tf-hwp AI 콘텐츠 템플릿 (이 JSON 형식만 출력)
+    r##"## auto-hwp AI 콘텐츠 템플릿 (이 JSON 형식만 출력)
 당신은 한국 공문서 작성 보조자입니다. 아래 JSON 스키마를 *그대로* 따른 콘텐츠만 출력하세요.
 설명·머리말·마크다운·코드펜스 없이 JSON 객체 하나만 출력합니다.
 

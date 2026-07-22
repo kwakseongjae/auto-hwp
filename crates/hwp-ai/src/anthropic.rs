@@ -3,7 +3,7 @@
 //! No official Anthropic Rust SDK exists, so we call the REST API directly (reqwest blocking,
 //! non-streaming). BYOK: the key is read from `ANTHROPIC_API_KEY` (env). Default model is
 //! `claude-opus-4-8` (best quality for formal Korean government-document drafting); override
-//! with `TF_HWP_MODEL`. Sampling params (temperature/top_p/top_k) are intentionally omitted —
+//! with `AUTO_HWP_MODEL`. Sampling params (temperature/top_p/top_k) are intentionally omitted —
 //! they are removed on Opus 4.8 and would 400.
 
 use super::{content, LlmProvider};
@@ -11,7 +11,7 @@ use hwp_model::error::{Error, Result};
 
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
-/// Default model — quality-first for Korean 공문서 drafting (override via TF_HWP_MODEL).
+/// Default model — quality-first for Korean 공문서 drafting (override via AUTO_HWP_MODEL).
 pub const DEFAULT_MODEL: &str = "claude-opus-4-8";
 
 const SYSTEM_PROMPT: &str =
@@ -26,13 +26,13 @@ pub struct AnthropicProvider {
 
 impl AnthropicProvider {
     /// BYOK: resolve the key from `ANTHROPIC_API_KEY` (env) or the OS keychain (feature `keyring`);
-    /// model from `TF_HWP_MODEL` or the default.
+    /// model from `AUTO_HWP_MODEL` or the default.
     pub fn from_env() -> Result<Self> {
         let api_key =
             super::secret::resolve_anthropic_key().ok_or(Error::CapabilityUnavailable(
-                "no Anthropic key — set ANTHROPIC_API_KEY or store one (tf-hwp ai-key set)",
+                "no Anthropic key — set ANTHROPIC_API_KEY or store one (auto-hwp ai-key set)",
             ))?;
-        let model = std::env::var("TF_HWP_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+        let model = std::env::var("AUTO_HWP_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
         Ok(Self { api_key, model })
     }
 

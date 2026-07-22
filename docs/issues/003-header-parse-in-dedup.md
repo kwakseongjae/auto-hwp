@@ -6,7 +6,7 @@
 설계 워크플로(`inplace-edit-remaining-design`)가 적대적 검증으로 6단계 buildable 계획 산출 → smallest-safe-first 구현, 매 단계 오라클(LibreOffice+H2Orestart) + round-trip byte-stability 게이트.
 
 1. **undo/redo** — `hwp_ops::EditSession{doc,undo,redo,limit}` 스냅샷 기반(역연산 저널 아님; `SemanticDoc:Clone`은 Rc/RefCell 없는 deep copy라 dirty/풀/raw 바이트까지 정확 복원). `do_op`은 **원자적**(Err 시 복원 — apply가 Err 전에 shape intern + 일부 dirty 마킹하므로 필수). 죽은 `OpLog` 제거. **검증**: undo→serialize가 원본과 byte-identical, 실패 op는 pristine 유지.
-2. **caller 이행** — hwp-mcp `Session.doc: Option<EditSession>` 8곳 + MCP `undo`/`redo` 도구, tf-hwp-cli `ai_apply`. MCP 라운드트립 스모크 통과.
+2. **caller 이행** — hwp-mcp `Session.doc: Option<EditSession>` 8곳 + MCP `undo`/`redo` 도구, auto-hwp-cli `ai_apply`. MCP 라운드트립 스모크 통과.
 3. **SetParaPr + ApplyStyle** — 여는 태그 paraPrIDRef/styleIDRef를 **변경 시에만**(gated) 패치(`synth::set_attr` pub(crate), `patch_para_open_tag` 헬퍼). runs-only 편집은 여는 태그 byte-verbatim 유지(회귀 검증).
 4. **SetRunCharPr** — 문단 내 char-range run 분할. char 오프셋→byte는 항상 `char_indices().nth()`(한글 UTF-8 경계 안전). 경계-인접 빈 run은 `[lo,hi)` 밖(charPrIDRef churn 방지).
 5. **InsertText/DeleteRange** — `Caret{node,offset}`(char 오프셋, 경계 left-attach, 범위초과 Err). 제어문자(NUL+C0 except \t\n\r) sanitize. run 간 텍스트 변이. `&`/`<` 삽입 오라클 검증(xml_escape/unescape 비대칭이 valid OWPML 산출).

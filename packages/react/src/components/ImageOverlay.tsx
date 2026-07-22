@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { resizeImageBox, type Box, type ImageHandle, type XYWH } from "@tf-hwp/editor-core";
+import { resizeImageBox, type Box, type ImageHandle, type XYWH } from "@auto-hwp/editor-core";
 
 /// ImageOverlay — the 8-handle move/resize overlay drawn over a SELECTED image's placed box (issue 049,
 /// the SDK promotion of the desktop `ImageOverlay`). It is a pure, individually-importable layer over

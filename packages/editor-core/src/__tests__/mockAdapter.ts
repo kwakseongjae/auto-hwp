@@ -2,7 +2,7 @@ import type { EngineAdapter } from "../adapter";
 import type { BlockHit, CaretRect, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "../types";
 
 /** A headless EngineAdapter for node tests: canned geometry resolvers + a spy-able applyIntent/undo.
- *  No wasm, no DOM — pure in-memory. Mirrors @tf-hwp/react's test MockAdapter so the same selection
+ *  No wasm, no DOM — pure in-memory. Mirrors @auto-hwp/react's test MockAdapter so the same selection
  *  scenarios port 1:1 (issue 026: DOM events → pure `pointerDown({page,x,y,mod})` inputs). */
 export class MockAdapter implements EngineAdapter {
   applied: Intent[] = [];

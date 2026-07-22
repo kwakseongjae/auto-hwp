@@ -2,7 +2,7 @@
 //
 // 엔진은 "번들러 마법"이 아니라 **public 정적 에셋**으로 서빙한다(apps/hwp-lab/scripts/copy-wasm.mjs 와
 // 같은 철학). 다른 점: 여기서는 소스 트리(packages/engine)가 아니라 **설치된 발행본**
-// (node_modules/@tf-hwp/engine — npm pack tarball)에서 복사한다. 즉 이 스크립트가 성공한다는 것 자체가
+// (node_modules/@auto-hwp/engine — npm pack tarball)에서 복사한다. 즉 이 스크립트가 성공한다는 것 자체가
 // "발행 tarball 이 워커 자산(worker.js + index.js + pkg/hwp_wasm.js + wasm)을 실제로 담고 있다"는 증명이다.
 //
 // worker.js → ./index.js → ./pkg/hwp_wasm.js 의 상대 import 체인이 public/hwp/ 안에서 그대로 성립하도록
@@ -21,8 +21,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.join(__dirname, "..");
 const repoRoot = path.join(appRoot, "..", "..");
 
-// 설치된 @tf-hwp/engine 발행본의 루트를 안정적으로 찾는다(호이스팅 무관).
-const engineRoot = path.dirname(require.resolve("@tf-hwp/engine/package.json"));
+// 설치된 @auto-hwp/engine 발행본의 루트를 안정적으로 찾는다(호이스팅 무관).
+const engineRoot = path.dirname(require.resolve("@auto-hwp/engine/package.json"));
 
 const hwpDir = path.join(appRoot, "public", "hwp");
 mkdirSync(path.join(hwpDir, "pkg"), { recursive: true });
@@ -31,7 +31,7 @@ const wasm = path.join(engineRoot, "pkg", "hwp_wasm_bg.wasm");
 if (!existsSync(wasm)) {
   console.error(
     `\n[copy-assets] 발행본에 wasm 이 없습니다: ${wasm}\n` +
-      `@tf-hwp/engine tarball 이 pkg/hwp_wasm_bg.wasm 을 담지 않았습니다 — 'npm run pack-deps' 로 재생성 후 재설치하세요.\n`,
+      `@auto-hwp/engine tarball 이 pkg/hwp_wasm_bg.wasm 을 담지 않았습니다 — 'npm run pack-deps' 로 재생성 후 재설치하세요.\n`,
   );
   process.exit(1);
 }

@@ -8,7 +8,7 @@ use hwp_model::error::{Error, Result};
 
 /// Keychain service/account identifying the stored keys.
 #[cfg(feature = "keyring")]
-const SERVICE: &str = "tf-hwp";
+const SERVICE: &str = "auto-hwp";
 #[cfg(feature = "keyring")]
 const ACCOUNT: &str = "anthropic-api-key";
 #[cfg(feature = "keyring")]

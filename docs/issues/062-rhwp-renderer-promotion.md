@@ -2,7 +2,7 @@
 
 - 상태: open · 우선순위: R14 배치(quick win 순) · 영역: crates/hwp-crypto·hwp-typeset(+PaintOp) — vendored rhwp에서 이식
 - 근거: 2026-07-13 오픈소스 전수 조사. **헤드라인 발견**: 우리가 "미구현/스텁"으로 알던 약점 상당수가
-  `external/rhwp`(MIT, v0.7.15, **이미 우리 소유**)의 **렌더러 계층**에 완성돼 있다. tf-hwp는 rhwp를
+  `external/rhwp`(MIT, v0.7.15, **이미 우리 소유**)의 **렌더러 계층**에 완성돼 있다. auto-hwp는 rhwp를
   **파스 전용**으로만 쓰고 렌더는 자체 `hwp-typeset`으로 하기 때문에 배선이 안 됐을 뿐 —
   라이선스 리스크 0의 "우리 코드 승격"이다.
 

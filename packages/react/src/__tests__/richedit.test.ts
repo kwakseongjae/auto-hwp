@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { RunSpec } from "@tf-hwp/editor-core";
+import type { RunSpec } from "@auto-hwp/editor-core";
 import {
   runsToHtml,
   serializeEditor,

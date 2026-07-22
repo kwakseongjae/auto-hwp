@@ -16,7 +16,7 @@ import {
   serializeAgentEvent,
   validateRequest,
   validateResponse,
-} from "@tf-hwp/ai-protocol";
+} from "@auto-hwp/ai-protocol";
 
 // @anthropic-ai/sdk 는 route handler(Node.js 런타임)에서만 사용. edge 런타임 선언 금지(이슈 §함정).
 // API 키/LLM 코드는 이 서버 전용 모듈에만 존재 — 클라이언트 번들에 절대 포함되지 않는다(R6).
@@ -24,7 +24,7 @@ export const runtime = "nodejs";
 // GET 이 요청 시점의 env(키 유무)를 읽도록 정적 최적화를 끈다.
 export const dynamic = "force-dynamic";
 
-// ── 프로토콜은 @tf-hwp/ai-protocol 로 승격됨(이슈 026) ─────────────────────────
+// ── 프로토콜은 @auto-hwp/ai-protocol 로 승격됨(이슈 026) ─────────────────────────
 // SYSTEM_PROMPT/화이트리스트/입력검증/R5 펜스/doc-context 조립은 이제 벤더 중립 패키지가 소유하며,
 // 서버(이 프록시)와 클라이언트(LabWorkspace)가 같은 모듈을 import 한다(계약 드리프트 방지).
 // 이 파일에 남는 것은 "참조 프록시" — 벤더(Anthropic)·키·모델 선택뿐. 다른 벤더로 복사해 쓰면 된다.
@@ -156,13 +156,13 @@ async function liveIntents(
   return validateResponse(text, { onDrop: (reason) => console.warn(`[hwp-edit] ${reason}`) });
 }
 
-// OpenRouter default model(사용자 선택). env `TF_HWP_OPENROUTER_MODEL`로 언제든 override(정확한 슬러그).
+// OpenRouter default model(사용자 선택). env `AUTO_HWP_OPENROUTER_MODEL`로 언제든 override(정확한 슬러그).
 // x-ai/grok-4.5 는 OpenRouter 상 input_modalities = ["text","image","file"] — vision 지원(2026-07 실측).
 // 그래서 이미지 첨부는 별도 vision 모델로 스왑하지 않고 이 모델로 곧장 content-parts 를 보낸다. 혹시
-// 비전 미지원 모델로 override 한 경우를 대비해 `TF_HWP_OPENROUTER_VISION_MODEL` 로 이미지 요청 전용
+// 비전 미지원 모델로 override 한 경우를 대비해 `AUTO_HWP_OPENROUTER_VISION_MODEL` 로 이미지 요청 전용
 // 모델을 지정할 수 있다(미지정이면 기본 모델 그대로 — 기본이 vision 이므로 안전).
-const OPENROUTER_MODEL = process.env.TF_HWP_OPENROUTER_MODEL || "x-ai/grok-4.5";
-const OPENROUTER_VISION_MODEL = process.env.TF_HWP_OPENROUTER_VISION_MODEL || OPENROUTER_MODEL;
+const OPENROUTER_MODEL = process.env.AUTO_HWP_OPENROUTER_MODEL || "x-ai/grok-4.5";
+const OPENROUTER_VISION_MODEL = process.env.AUTO_HWP_OPENROUTER_VISION_MODEL || OPENROUTER_MODEL;
 
 /** OpenRouter(OpenAI 호환 Chat Completions) 경로. 키는 이 서버 핸들러 밖으로 나가지 않는다(R6).
  *  system/user 프롬프트(R5 펜스·화이트리스트·doc-context)는 Anthropic 경로와 동일하게 ai-protocol이 조립.
@@ -201,8 +201,8 @@ async function openRouterIntents(
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
       // OpenRouter 권장(선택) — 랭킹/식별용, 키 노출 아님.
-      "HTTP-Referer": "https://github.com/kwakseongjae/tf-hwp",
-      "X-Title": "tf-hwp",
+      "HTTP-Referer": "https://github.com/kwakseongjae/auto-hwp",
+      "X-Title": "auto-hwp",
     },
     body: JSON.stringify(body),
   });
@@ -273,8 +273,8 @@ async function streamOpenRouterTurn(
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
-      "HTTP-Referer": "https://github.com/kwakseongjae/tf-hwp",
-      "X-Title": "tf-hwp",
+      "HTTP-Referer": "https://github.com/kwakseongjae/auto-hwp",
+      "X-Title": "auto-hwp",
     },
     body: JSON.stringify({ ...body, stream: true }),
   });
@@ -348,8 +348,8 @@ async function execWebSearch(apiKey: string, query: string): Promise<{ content: 
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
-      "HTTP-Referer": "https://github.com/kwakseongjae/tf-hwp",
-      "X-Title": "tf-hwp",
+      "HTTP-Referer": "https://github.com/kwakseongjae/auto-hwp",
+      "X-Title": "auto-hwp",
     },
     body: JSON.stringify({
       model: OPENROUTER_MODEL,

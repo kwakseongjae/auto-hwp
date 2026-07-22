@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import type { EngineAdapter, OutlineItem } from "@tf-hwp/editor-core";
+import type { EngineAdapter, OutlineItem } from "@auto-hwp/editor-core";
 import { activeOutlineIndex } from "../outline";
 import { sanitizeSvg } from "../sanitize";
 

@@ -1,4 +1,4 @@
-// @tf-hwp/editor-core — headless, framework-agnostic editor core (SDK-LAYERS L2). No React, no DOM.
+// @auto-hwp/editor-core — headless, framework-agnostic editor core (SDK-LAYERS L2). No React, no DOM.
 // Drive any UI (or none) over an EngineAdapter; subscribe to events; apply Intents; undo. See the
 // README and examples/vanilla.ts for a React-free end-to-end flow.
 

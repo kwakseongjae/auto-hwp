@@ -64,7 +64,7 @@ async function measure(browser, query, label) {
   await page.goto(`${BASE}/${query}`);
   await page.waitForSelector('[data-testid="file-input"]', { state: "attached", timeout: 60_000 });
   await page.waitForTimeout(1500); // 하이드레이션 몫을 창에서 제외
-  const tracePath = path.join(os.tmpdir(), `tf-hwp-055-trace-${Date.now()}.json`);
+  const tracePath = path.join(os.tmpdir(), `auto-hwp-055-trace-${Date.now()}.json`);
   await browser.startTracing(page, { path: tracePath, categories: ["devtools.timeline", "v8", "disabled-by-default-devtools.timeline"] });
   await page.setInputFiles('[data-testid="file-input"]', FIXTURE);
   await page.waitForSelector(".hw-sheet svg", { timeout: 120_000 });

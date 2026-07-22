@@ -5,7 +5,7 @@ import { MockAdapter } from "./mockAdapter";
 
 // Issue 046 — the document-outline read query on DocSession. A read-only facade over the OPTIONAL
 // `adapter.outline` (both real backends answer with the SAME OutlineItem shape; a backend that can't OMITS
-// it). No wasm, no DOM — the panel/status-bar rendering is exercised in @tf-hwp/react.
+// it). No wasm, no DOM — the panel/status-bar rendering is exercised in @auto-hwp/react.
 describe("DocSession.outline (issue 046)", () => {
   const items: OutlineItem[] = [
     { section: 0, block: 0, level: 1, text: "□ 개요", page: 0 },

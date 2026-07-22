@@ -1,7 +1,7 @@
 {
-  "name": "@tf-hwp/editor-core",
+  "name": "@auto-hwp/editor-core",
   "version": "0.0.1",
-  "description": "Headless, framework-agnostic editor core for tf-hwp: DocSession (open/pages/undo/font), SelectionModel (cell/block/marquee/⌘-toggle), EditController (Intent assembly + apply). Zero React, zero DOM — unit-testable in plain node. Drive any UI (or none) over an EngineAdapter.",
+  "description": "Headless, framework-agnostic editor core for auto-hwp: DocSession (open/pages/undo/font), SelectionModel (cell/block/marquee/⌘-toggle), EditController (Intent assembly + apply). Zero React, zero DOM — unit-testable in plain node. Drive any UI (or none) over an EngineAdapter.",
   "license": "MIT OR Apache-2.0",
   "type": "module",
   "main": "./dist/index.js",

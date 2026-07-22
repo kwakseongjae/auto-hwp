@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { mmToPx, pxToMm, roundMm, type PageGeom, type PageMarginsMm } from "@tf-hwp/editor-core";
+import { mmToPx, pxToMm, roundMm, type PageGeom, type PageMarginsMm } from "@auto-hwp/editor-core";
 
 export interface RulerProps {
   /** Page geometry in own-render PAGE px (from `core.session.pageGeom`). */

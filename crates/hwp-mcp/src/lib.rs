@@ -1,4 +1,4 @@
-//! Headless **MCP stdio server** for tf-hwp (Topology A, milestone A1).
+//! Headless **MCP stdio server** for auto-hwp (Topology A, milestone A1).
 //!
 //! A coding agent (Claude Code, Cursor, …) speaks the Model Context Protocol — JSON-RPC 2.0 over
 //! newline-delimited stdin/stdout — to drive the engine: open an HWPX, read the template + document
@@ -606,7 +606,7 @@ fn do_export(session: &Session, path: &str) -> Result<(usize, bool), String> {
 /// Export the live doc to a PDF file at `path` via OUR OWN layout engine (`hwp_session::emit_pdf` —
 /// the SAME path the CLI `export-pdf` uses, so bytes match for the same doc + font environment).
 /// The document title comes from the open source's file stem, matching the CLI's `file_stem()` so a
-/// container export and a local `tf-hwp export-pdf <same-name>` produce byte-identical PDFs. Returns
+/// container export and a local `auto-hwp export-pdf <same-name>` produce byte-identical PDFs. Returns
 /// `(byte_len, page_count)`. Only compiled under the `pdf` feature (native-only krilla backend).
 #[cfg(feature = "pdf")]
 fn do_export_pdf(session: &Session, path: &str) -> Result<(usize, usize), String> {

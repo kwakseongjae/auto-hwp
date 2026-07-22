@@ -1,4 +1,4 @@
-# tf-hwp 제품 방향 v2 — "브라우저 프로덕션" (2026-07-10)
+# auto-hwp 제품 방향 v2 — "브라우저 프로덕션" (2026-07-10)
 
 > v1(`docs/PRODUCT-DIRECTION.md`, "코어 하나, 셸 셋")의 후속 총괄 지시서다. v1의 이슈
 > 007~016과 라운드 R2~R11이 전부 완료된 시점에서, 다음 목표(웹 프로덕션)까지의 잔여
@@ -55,7 +55,7 @@
 
 ```bash
 cargo test -p hwp-ops && cargo test -p hwp-typeset && cargo test -p hwp-mcp
-cargo run -q -p tf-hwp-cli --features "shaper rhwp" -- layout-check benchmarks/benchmark.hwp   # 8==8
+cargo run -q -p auto-hwp-cli --features "shaper rhwp" -- layout-check benchmarks/benchmark.hwp   # 8==8
 # UI 접촉 시:
 pnpm -C packages/editor-core build && pnpm -C packages/react build   # + vitest
 # e2e 전: rm -rf apps/hwp-lab/.next  (웹팩 캐시가 dist 재빌드 미감지)

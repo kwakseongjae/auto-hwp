@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { createEditorCore, type EditorCore, type EngineAdapter, type OpenResult, type Selection } from "@tf-hwp/editor-core";
+import { createEditorCore, type EditorCore, type EngineAdapter, type OpenResult, type Selection } from "@auto-hwp/editor-core";
 
-/// useHwpEditor — the thin React binding to @tf-hwp/editor-core (issue 026). It constructs the headless
+/// useHwpEditor — the thin React binding to @auto-hwp/editor-core (issue 026). It constructs the headless
 /// EditorCore over an EngineAdapter and mirrors its event streams into React state, so components render
 /// by SUBSCRIBING (no editing logic in React — that all descended to the core). A host that wants a fully
 /// custom UI uses this hook (or drives the core directly, see editor-core/examples/vanilla.ts).

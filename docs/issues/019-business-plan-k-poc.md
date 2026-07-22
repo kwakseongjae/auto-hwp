@@ -2,13 +2,13 @@
 
 - 상태: **open**
 - 우선순위: P5 (목표 2 최종 형태의 실증 + **사용자 QA 기준 앱**)
-- 영역: tf-hwp 레포 내 신규 Next.js 앱 (`apps/hwp-lab/`) — **business_plan_k는 건드리지 않는다**
+- 영역: auto-hwp 레포 내 신규 Next.js 앱 (`apps/hwp-lab/`) — **business_plan_k는 건드리지 않는다**
   (v1 방향 변경 2026-07-02: 운영 레포 통합은 이 랩에서 QA 통과 후 별도 결정)
 - 선행: 015, 016, 018 (전부 done). 참조: 008(INTENT-SCHEMA), 016 README(프록시 예제)
-- 레드팀: R5(프록시 문서 펜싱), R6(키 서버사이드 전용), R7(sanitize는 @tf-hwp/react가 강제)
+- 레드팀: R5(프록시 문서 펜싱), R6(키 서버사이드 전용), R7(sanitize는 @auto-hwp/react가 강제)
 
 ## 목표
-tf-hwp 레포 안에 독립 실행 Next.js 앱을 만들어, 창업지원도움e류 사이트가 겪을 통합을
+auto-hwp 레포 안에 독립 실행 Next.js 앱을 만들어, 창업지원도움e류 사이트가 겪을 통합을
 1:1로 시뮬레이션한다. **사용자가 이 앱으로 최종 QA를 수행한다** — 따라서 "돌아가는 데모"가
 아니라 "QA 가능한 앱"이 기준이다(명확한 상태 표시, 에러 메시지, QA 체크리스트 문서 포함).
 
@@ -17,7 +17,7 @@ tf-hwp 레포 안에 독립 실행 Next.js 앱을 만들어, 창업지원도움e
 
 ## 파일 지도 (전부 신규 — 기존 크레이트/패키지 수정 금지)
 - `apps/hwp-lab/` — Next.js(App Router, TS). `package.json`에
-  `"@tf-hwp/react": "file:../../packages/react"` (+ 필요 시 `"@tf-hwp/engine": "file:../../packages/engine"`),
+  `"@auto-hwp/react": "file:../../packages/react"` (+ 필요 시 `"@auto-hwp/engine": "file:../../packages/engine"`),
   `next.config`에 `transpilePackages` (file: 심링크 트랜스파일).
 - `apps/hwp-lab/src/app/page.tsx` — 메인 페이지 (`next/dynamic` ssr:false로 워크스페이스 로드)
 - `apps/hwp-lab/src/app/api/hwp-edit/route.ts` — LLM 프록시 (아래 §프록시)
@@ -38,8 +38,8 @@ tf-hwp 레포 안에 독립 실행 Next.js 앱을 만들어, 창업지원도움e
 - 키가 클라이언트 번들에 절대 노출되지 않음(route handler 서버 전용). 에러는 `{ error }` JSON + 4xx/5xx.
 
 ## 구현 단계
-1. **스캐폴드**: `apps/hwp-lab` Next.js 앱(버전 고정, 미니멀 — Tailwind 불필요, @tf-hwp/react가
-   자체 CSS 지참). 루트 워크스페이스 오염 금지(독립 package.json; tf-hwp 루트에 npm workspace를
+1. **스캐폴드**: `apps/hwp-lab` Next.js 앱(버전 고정, 미니멀 — Tailwind 불필요, @auto-hwp/react가
+   자체 CSS 지참). 루트 워크스페이스 오염 금지(독립 package.json; auto-hwp 루트에 npm workspace를
    만들지 마라).
 2. **선행 빌드 체인**: `packages/react`는 dist가 gitignore이므로 `npm install && npm run build`
    선행, 엔진 pkg는 015 레시피로 재생성 → copy-wasm 스크립트로 public/hwp에.
@@ -62,7 +62,7 @@ tf-hwp 레포 안에 독립 실행 Next.js 앱을 만들어, 창업지원도움e
 - `npm run dev` 기동 → `curl localhost:3000/` 200, `curl -X POST localhost:3000/api/hwp-edit`
   (mock) → 유효 Intent JSON (INTENT-SCHEMA 스냅샷 예제와 형태 일치).
 - 클라이언트 번들에 키/LLM 코드 부재: `.next` 클라이언트 청크에 `ANTHROPIC`/`sk-` grep 0건.
-- tf-hwp 기존 코드 무수정: 스테이지 범위 = `apps/hwp-lab/` + 루트 .gitignore만. 게이트 8==8 1회.
+- auto-hwp 기존 코드 무수정: 스테이지 범위 = `apps/hwp-lab/` + 루트 .gitignore만. 게이트 8==8 1회.
 - Playwright 돌았으면 그 결과, 아니면 스킵 사유.
 
 ## 수용 기준
@@ -76,10 +76,10 @@ tf-hwp 레포 안에 독립 실행 Next.js 앱을 만들어, 창업지원도움e
 
 ## 함정
 - `file:` 의존은 npm 심링크 — Next가 심링크 실제경로를 따라가며 워크스페이스 밖으로 나가서
-  모듈 해석이 깨질 수 있다. `transpilePackages: ["@tf-hwp/react", "@tf-hwp/engine"]` +
+  모듈 해석이 깨질 수 있다. `transpilePackages: ["@auto-hwp/react", "@auto-hwp/engine"]` +
   (필요 시) `outputFileTracingRoot`/webpack `resolve.symlinks=false`로 잡아라 — 전부
   apps/hwp-lab 자기 설정 안에서(기존 파일 수정 금지).
 - wasm 11.5MB: dev에서 public fetch는 문제없지만 `next build`가 public을 그대로 복사한다 —
   copy 스크립트를 prebuild에 걸고, pkg 부재 시 "015 레시피로 먼저 빌드하라"는 명확한 에러를 내라.
 - `@anthropic-ai/sdk`는 route handler(nodejs 런타임)에서 사용 — edge 런타임 선언 금지.
-- 데모 픽스처는 tf-hwp 루트의 benchmark.hwp / benchmark1.hwp (tracked) — QA.md에서 참조.
+- 데모 픽스처는 auto-hwp 루트의 benchmark.hwp / benchmark1.hwp (tracked) — QA.md에서 참조.

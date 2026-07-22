@@ -2,7 +2,7 @@
   "name": "hwp-lab",
   "version": "0.0.0",
   "private": true,
-  "description": "통합 실험 앱 (issue 019): HWP 업로드 → 전 페이지 SVG 렌더 → 표 마킹 + 채팅 바이브편집(서버 프록시) → 프리뷰/적용/undo → HTML/PDF. QA 전용, tf-hwp 레포 내 독립 Next.js 앱. 루트 워크스페이스 오염 없음(file: 의존 + transpilePackages).",
+  "description": "통합 실험 앱 (issue 019): HWP 업로드 → 전 페이지 SVG 렌더 → 표 마킹 + 채팅 바이브편집(서버 프록시) → 프리뷰/적용/undo → HTML/PDF. QA 전용, auto-hwp 레포 내 독립 Next.js 앱. 루트 워크스페이스 오염 없음(file: 의존 + transpilePackages).",
   "scripts": {
     "build:deps": "pnpm -C ../../packages/ai-protocol build && pnpm -C ../../packages/editor-core build && pnpm -C ../../packages/react build",
     "predev": "npm run build:deps && node scripts/copy-wasm.mjs && node scripts/copy-fonts.mjs && node scripts/copy-samples.mjs",
@@ -18,10 +18,10 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.109.1",
-    "@tf-hwp/ai-protocol": "file:../../packages/ai-protocol",
-    "@tf-hwp/editor-core": "file:../../packages/editor-core",
-    "@tf-hwp/engine": "file:../../packages/engine",
-    "@tf-hwp/react": "file:../../packages/react",
+    "@auto-hwp/ai-protocol": "file:../../packages/ai-protocol",
+    "@auto-hwp/editor-core": "file:../../packages/editor-core",
+    "@auto-hwp/engine": "file:../../packages/engine",
+    "@auto-hwp/react": "file:../../packages/react",
     "next": "15.5.20",
     "react": "18.3.1",
     "react-dom": "18.3.1"

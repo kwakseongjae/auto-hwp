@@ -1,6 +1,6 @@
-# @tf-hwp/ai-protocol
+# @auto-hwp/ai-protocol
 
-The **vendor-neutral, isomorphic** LLM protocol for tf-hwp chat-editing — the L2' of the
+The **vendor-neutral, isomorphic** LLM protocol for auto-hwp chat-editing — the L2' of the
 [SDK layers](../../docs/SDK-LAYERS.md). It is **types + pure transforms + validation only**: the doc-context
 builder, the system prompt (an excerpt of [INTENT-SCHEMA](../../docs/INTENT-SCHEMA.md)), and the
 request/response validators. The **server proxy and the browser client import the SAME module**, so the
@@ -11,7 +11,7 @@ wire contract can never drift between them.
 
 ```ts
 // ── server proxy (your key lives here) ──────────────────────────────
-import { buildSystemPrompt, buildUserMessage, validateRequest, validateResponse } from "@tf-hwp/ai-protocol";
+import { buildSystemPrompt, buildUserMessage, validateRequest, validateResponse } from "@auto-hwp/ai-protocol";
 
 const check = validateRequest(await req.json());
 if (!check.ok) return badRequest(check.error);
@@ -23,7 +23,7 @@ const text = await callYourModel({                 // ← YOUR vendor, YOUR key
 return json({ intents: validateResponse(text, { onDrop: console.warn }) }); // whitelist + structure
 
 // ── browser client (no key, no model) ───────────────────────────────
-import { buildDocContext } from "@tf-hwp/ai-protocol";
+import { buildDocContext } from "@auto-hwp/ai-protocol";
 const docContext = buildDocContext(meta, anchors); // the string POSTed to your proxy
 ```
 

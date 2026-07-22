@@ -1,4 +1,4 @@
-// @tf-hwp/engine — browser loader + safety wrapper around the wasm-bindgen bindings (issue 015).
+// @auto-hwp/engine — browser loader + safety wrapper around the wasm-bindgen bindings (issue 015).
 //
 // This wrapper adds THREE things the raw wasm-bindgen output lacks, per the issue's design:
 //   1. wasm PANIC RECOVERY (R4 web variant): a Rust panic on wasm is a TRAP that poisons the whole

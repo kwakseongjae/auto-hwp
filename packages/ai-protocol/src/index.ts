@@ -1,4 +1,4 @@
-// @tf-hwp/ai-protocol — vendor-neutral, ISOMORPHIC LLM protocol for tf-hwp chat-editing (SDK-LAYERS L2').
+// @auto-hwp/ai-protocol — vendor-neutral, ISOMORPHIC LLM protocol for auto-hwp chat-editing (SDK-LAYERS L2').
 // Pure data transforms + validation. NO fetch, NO LLM client, NO keys — a host wires its own model over
 // these shapes; the server proxy AND the browser client import the SAME module. See the README for the
 // "bring your own vendor" integration.

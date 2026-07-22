@@ -1,11 +1,11 @@
-// Type definitions for @tf-hwp/engine/worker-client (the main-thread RPC bridge to ./worker.js).
+// Type definitions for @auto-hwp/engine/worker-client (the main-thread RPC bridge to ./worker.js).
 
 /** Wasm input accepted across the worker boundary. `URL` is converted to its href string; a
  *  `Request` cannot cross threads and is rejected with an honest error. */
 export type WorkerWasmInput = string | URL | BufferSource | WebAssembly.Module;
 
 export interface EngineWorkerClientOptions {
-  /** URL of the deployed MODULE worker script (@tf-hwp/engine/worker.js served as a static asset). */
+  /** URL of the deployed MODULE worker script (@auto-hwp/engine/worker.js served as a static asset). */
   url?: string | URL;
   /** Custom Worker supplier (tests / bundler-specific worker recipes). Takes precedence over `url`. */
   factory?: () => Worker;

@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { RunSpec } from "@tf-hwp/editor-core";
+import type { RunSpec } from "@auto-hwp/editor-core";
 import { InPlaceCellEditor, PAGE_PX_PER_PT, computeInPlaceEditorStyle } from "../components/InPlaceCellEditor";
 import { applyLiveStyle } from "../richedit";
 

@@ -1,6 +1,6 @@
 [package]
 name = "hwp-viewer"
-description = "tf-hwp Tauri 2 viewer shell (A2): open an HWPX, render pages faithfully (rhwp SVG), and run AI content through the op-bus. Hosts the A3 embedded loopback control server."
+description = "auto-hwp Tauri 2 viewer shell (A2): open an HWPX, render pages faithfully (rhwp SVG), and run AI content through the op-bus. Hosts the A3 embedded loopback control server."
 edition.workspace = true
 version.workspace = true
 license.workspace = true

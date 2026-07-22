@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "tf-hwp viewer",
+  "productName": "auto-hwp viewer",
   "version": "0.0.1",
   "identifier": "dev.tfhwp.viewer",
   "build": {
@@ -19,7 +19,7 @@
     "withGlobalTauri": false,
     "windows": [
       {
-        "title": "tf-hwp viewer",
+        "title": "auto-hwp viewer",
         "width": 1100,
         "height": 800,
         "minWidth": 720,

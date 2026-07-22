@@ -23,7 +23,7 @@ test("한도 UX: 64MiB 초과 파일은 파싱 전에 정직한 사유로 거부
   await page.goto("/");
   // 65MiB 합성 파일(임시 디렉터리 — playwright 인메모리 버퍼는 50MB 상한이라 파일로 준다).
   // 확장자는 유효(.hwp)이므로 거부 사유는 오직 크기 한도여야 한다.
-  const dir = mkdtempSync(path.join(os.tmpdir(), "tf-hwp-055-"));
+  const dir = mkdtempSync(path.join(os.tmpdir(), "auto-hwp-055-"));
   const huge = path.join(dir, "huge.hwp");
   writeFileSync(huge, Buffer.alloc(65 * 1024 * 1024, 0x41));
   try {

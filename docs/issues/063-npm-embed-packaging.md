@@ -1,12 +1,12 @@
 # 063 — 웹 이식: npm 발행 + 외부 호스트 임베드 패키징
 
 - 상태: open · 우선순위: R14(웹 이식) · 영역: packages/*(패키징) + 발행 CI + 통합 예제/문서
-- 근거: 2026-07-13 SDK 이식 감사. 제3자가 `npm i @tf-hwp/react @tf-hwp/engine`으로 자기 페이지에
+- 근거: 2026-07-13 SDK 이식 감사. 제3자가 `npm i @auto-hwp/react @auto-hwp/engine`으로 자기 페이지에
   hwp 뷰어/에디터를 심는 시나리오. **아키텍처 경계(어댑터·헤드리스·벤더중립·R7 sanitize)는 이식 준비
   우수** — 막는 건 패키징 "최종 1마일".
 
 ## 블로커 랭킹 (감사 확정, file:line은 감사 보고 참조)
-1. **[치명] `@tf-hwp/react`의 `file:` 상호의존** (`packages/react/package.json:37-38` — `file:../engine`·
+1. **[치명] `@auto-hwp/react`의 `file:` 상호의존** (`packages/react/package.json:37-38` — `file:../engine`·
    `file:../editor-core`) → npm 레지스트리가 해석 불가. 실버전(`^0.0.1`)으로 바꾸고 발행 순서
    **engine → editor-core → ai-protocol → react**.
 2. **[치명] prepublish 빌드 훅 부재** (engine엔 scripts 키 자체 없음) → gitignore된 pkg/dist가 빈 채

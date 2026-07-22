@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { resizeBoundary } from "@tf-hwp/editor-core";
+import { resizeBoundary } from "@auto-hwp/editor-core";
 
 /** Which axis a boundary drag runs along: `"x"` = column boundaries (vertical grips, drag left↔right);
  *  `"y"` = row boundaries (horizontal grips, drag up↕down). */

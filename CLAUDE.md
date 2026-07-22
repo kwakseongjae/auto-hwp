@@ -1,4 +1,4 @@
-# tf-hwp — Claude Code 진입점
+# auto-hwp — Claude Code 진입점
 
 @AGENTS.md
 

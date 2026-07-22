@@ -6,11 +6,11 @@
 set -u
 cd "$(dirname "$0")/.." || exit 1
 BENCH_ROOT=corpus/private
-BIN=target/release/tf-hwp
+BIN=target/release/auto-hwp
 [ -d "$BENCH_ROOT" ] || { echo "bench-corpus: $BENCH_ROOT 없음 — skip (로컬 전용 게이트)"; exit 0; }
 if [ ! -x "$BIN" ]; then
   echo "bench-corpus: building CLI (release, rhwp+shaper+pdf)…"
-  cargo build --release -p tf-hwp-cli --features rhwp,shaper,pdf || exit 1
+  cargo build --release -p auto-hwp-cli --features rhwp,shaper,pdf || exit 1
 fi
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT

@@ -18,7 +18,7 @@
 - 선택 상태: `App.tsx`의 활성 셀(단일), `cellRange`(다중 r0/c0/r1/c1 + firstRow), 문단 스코프.
   즉 "무엇이 선택됐는지"는 이미 상태로 존재한다.
 - 채팅: `Chat.tsx` + `Composer.tsx`가 프롬프트를 `ai_edit`(Rust)로 보낸다. `hwp-ai::edit`는
-  EditScript 기반 앵커드 편집을 이미 지원(vibe-docs V2). CLI `tf-hwp ai-edit`가 헤드리스 증명.
+  EditScript 기반 앵커드 편집을 이미 지원(vibe-docs V2). CLI `auto-hwp ai-edit`가 헤드리스 증명.
 - 부족한 것: 선택 상태 → 채팅 프롬프트로 넘어가는 **다리**가 없다. 지금은 사용자가
   말로 "3행 2열을…"이라고 설명해야 한다.
 

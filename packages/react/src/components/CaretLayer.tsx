@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { CellCaretState, EditorCore } from "@tf-hwp/editor-core";
+import type { CellCaretState, EditorCore } from "@auto-hwp/editor-core";
 import type { CompositionStore } from "../composition";
 
 export interface CaretLayerProps {

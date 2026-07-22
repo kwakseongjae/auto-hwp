@@ -86,11 +86,11 @@ npm run dev          # predev 훅이 wasm을 public/hwp 로 복사. http://local
 - **키 넣는 곳**: `apps/hwp-lab/.env.local`(gitignore됨 — 절대 커밋 안 됨). Next.js가 자동 로드.
   ```bash
   cd apps/hwp-lab && cp .env.example .env.local   # 템플릿 복사
-  # .env.local 편집: OPENROUTER_API_KEY=sk-or-...  (필요 시 TF_HWP_OPENROUTER_MODEL 도)
+  # .env.local 편집: OPENROUTER_API_KEY=sk-or-...  (필요 시 AUTO_HWP_OPENROUTER_MODEL 도)
   npm run dev -- -p 3100
   ```
 - **프로바이더 우선순위**: `OPENROUTER_API_KEY`(있으면) → `ANTHROPIC_API_KEY` → mock.
-  - OpenRouter default 모델 `x-ai/grok-4.5`, 바꾸려면 `TF_HWP_OPENROUTER_MODEL=x-ai/grok-4.20` 등 정확한 슬러그.
+  - OpenRouter default 모델 `x-ai/grok-4.5`, 바꾸려면 `AUTO_HWP_OPENROUTER_MODEL=x-ai/grok-4.20` 등 정확한 슬러그.
   - Anthropic 폴백: `.env.local`에 `ANTHROPIC_API_KEY=`만(OpenRouter 키 없을 때, 모델 claude-opus-4-8).
 - 확인: GET `/api/hwp-edit`가 `{"mode":"live","provider":"openrouter","model":"x-ai/grok-4.5"}` 반환,
   배지 `실 LLM 모드`. 표/문단을 마킹하고 자연어 지시(예: "이 셀 값을 '2025년 매출'로 바꿔줘") 전송.

@@ -11,7 +11,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { HwpDoc, initEngine, isTrapError } from "@tf-hwp/engine";
+import { HwpDoc, initEngine, isTrapError } from "@auto-hwp/engine";
 
 const REPO = path.resolve(process.cwd(), "..", "..");
 const WASM = path.join(REPO, "packages", "engine", "pkg", "hwp_wasm_bg.wasm");
@@ -159,7 +159,7 @@ describe("issue 055 사후 #8 — 트랩 분류기 단일 소스 (isTrapError)",
 
   it("LabWorkspace 는 단일 소스를 소비하고 로컬 정규식 사본을 갖지 않는다", () => {
     const src = readFileSync(path.join(process.cwd(), "src", "components", "LabWorkspace.tsx"), "utf8");
-    expect(src).toContain("isTrapError"); // @tf-hwp/engine 단일 소스 소비
+    expect(src).toContain("isTrapError"); // @auto-hwp/engine 단일 소스 소비
     expect(src).not.toMatch(/memory access out of bounds/); // 사본(트랩 정규식) 삭제됨
   });
 
@@ -177,7 +177,7 @@ describe("issue 055 사후 #8 — 트랩 분류기 단일 소스 (isTrapError)",
 describe("issue 055 사후 #7 — 거부된 initEngine 은 캐시되지 않는다", () => {
   it("첫 init 거부(손상 wasm 입력) 후 initEngine 재시도가 성공한다", async () => {
     vi.resetModules();
-    const eng = await import("@tf-hwp/engine"); // 신선한 모듈 상태 (wasm === undefined)
+    const eng = await import("@auto-hwp/engine"); // 신선한 모듈 상태 (wasm === undefined)
     await expect(eng.initEngine(new Uint8Array([0, 1, 2, 3]))).rejects.toBeTruthy();
     // 구 코드: 거부된 프라미스가 _initPromise 에 영구 캐시 → 아래 재시도도 영원히 같은 거부를 재생했다.
     await expect(eng.initEngine(readFileSync(WASM))).resolves.toBeTruthy();

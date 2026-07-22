@@ -1,6 +1,6 @@
 // measure-engine.mjs — issue 033 (docs-only research) latency + SVG-DOM measurement harness.
 //
-// Measures, through the SAME wasm engine the web shell runs (@tf-hwp/engine), the numbers behind
+// Measures, through the SAME wasm engine the web shell runs (@auto-hwp/engine), the numbers behind
 // docs/FIGMA-GRADE-UX.md §1 (latency budget) and §2/§4 (render/open gaps):
 //   • document OPEN time (parse → IR)                          — §4 파싱/열기
 //   • registerFont RE-LAYOUT time (the lab auto-registers a face on open → re-typeset)
@@ -85,7 +85,7 @@ function measure(file, { withFont }) {
   return { file, pages, openMs, relayoutMs, totalNodes, maxNodes, maxPage, avgNodes: Math.round(totalNodes / pages), totalBytes, fullRenderMs, singlePageMs, hitMs, perPageNodes, hist };
 }
 
-console.log('=== issue 033 · figma-grade engine measurement (wasm @tf-hwp/engine, NanumGothic registered) ===\n');
+console.log('=== issue 033 · figma-grade engine measurement (wasm @auto-hwp/engine, NanumGothic registered) ===\n');
 const results = [];
 for (const f of ['benchmark.hwp', 'benchmark1.hwp', 'benchmark2.hwp']) {
   const r = measure(f, { withFont: true });

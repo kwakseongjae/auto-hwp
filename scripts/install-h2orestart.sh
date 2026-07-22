@@ -19,4 +19,4 @@ echo ">> registering with LibreOffice (unopkg add)"
 unopkg add "$DEST"
 echo ">> installed extensions:"
 unopkg list | grep -i -E "h2o|hwp|ebandal" || true
-echo ">> done. Verify:  cargo run -p tf-hwp-cli -- oracle benchmark.hwp --out /tmp"
+echo ">> done. Verify:  cargo run -p auto-hwp-cli -- oracle benchmark.hwp --out /tmp"

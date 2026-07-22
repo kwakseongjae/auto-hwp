@@ -1,7 +1,7 @@
-# tf-hwp Vite 임베드 예제 (issue 063 — 이식 증명)
+# auto-hwp Vite 임베드 예제 (issue 063 — 이식 증명)
 
 비-Next(Vite) 앱에서 **published tarball 을 설치**해 `<HwpWorkspace/>` 를 렌더한다. 소스경로 import 는
-0 — `node_modules` 의 발행본(`npm pack` tarball)만 소비한다. 이 예제가 그린이면 "제3자가 `npm i @tf-hwp/*`
+0 — `node_modules` 의 발행본(`npm pack` tarball)만 소비한다. 이 예제가 그린이면 "제3자가 `npm i @auto-hwp/*`
 로 자기 페이지에 hwp 뷰어/에디터를 심을 수 있다"가 증명된다.
 
 전체 임베드 레시피(wasm/워커 정적 서빙, `"use client"`/`ssr:false`, CSP, 폰트, AI 프록시)는
@@ -29,9 +29,9 @@ npm run test:e2e
 
 | 파일 | 역할 |
 |---|---|
-| `package.json` | `@tf-hwp/*` 를 `file:./vendor/*.tgz`(+overrides)로 설치 — **발행본** 소비. |
+| `package.json` | `@auto-hwp/*` 를 `file:./vendor/*.tgz`(+overrides)로 설치 — **발행본** 소비. |
 | `scripts/pack-deps.mjs` | 4개 패키지 `npm pack` → `vendor/` (발행 순서 engine→editor-core→ai-protocol→react). |
-| `scripts/copy-assets.mjs` | `node_modules/@tf-hwp/engine` 에서 wasm+worker+글루를 `public/hwp/` 로 복사(비-Next 정적 서빙 레시피). |
+| `scripts/copy-assets.mjs` | `node_modules/@auto-hwp/engine` 에서 wasm+worker+글루를 `public/hwp/` 로 복사(비-Next 정적 서빙 레시피). |
 | `src/App.tsx` | `WasmAdapter`(명시적 wasm/worker URL) + `<HwpWorkspace/>` + **로컬 mock** `onAiRequest`(서버 없이 셀 편집 왕복). |
 | `e2e/smoke.spec.ts` | 뷰어 렌더 + 셀 편집 이식 스모크. |
 

@@ -1,6 +1,6 @@
 //! A3 — **loopback HTTP control server** (pure `std::net`, no axum/rmcp).
 //!
-//! Lets an external terminal/agent drive a *running* tf-hwp instance over HTTP JSON-RPC, reusing
+//! Lets an external terminal/agent drive a *running* auto-hwp instance over HTTP JSON-RPC, reusing
 //! [`crate::handle`] (the same op-bus dispatch as stdio). Minimal HTTP/1.1: `POST /mcp` with a
 //! JSON-RPC body. The Tauri shell embeds this on a background thread; standalone it runs via
 //! `hwp-mcp --http`.

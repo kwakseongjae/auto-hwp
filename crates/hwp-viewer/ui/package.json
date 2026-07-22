@@ -1,5 +1,5 @@
 {
-  "name": "tf-hwp-viewer-ui",
+  "name": "auto-hwp-viewer-ui",
   "private": true,
   "version": "0.0.1",
   "type": "module",
@@ -12,9 +12,9 @@
     "@tanstack/react-virtual": "^3.10.8",
     "@tauri-apps/api": "^2.1.1",
     "@tauri-apps/plugin-dialog": "^2.0.1",
-    "@tf-hwp/editor-core": "file:../../../packages/editor-core",
-    "@tf-hwp/engine": "file:../../../packages/engine",
-    "@tf-hwp/react": "file:../../../packages/react",
+    "@auto-hwp/editor-core": "file:../../../packages/editor-core",
+    "@auto-hwp/engine": "file:../../../packages/engine",
+    "@auto-hwp/react": "file:../../../packages/react",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tinykeys": "^3.0.0"

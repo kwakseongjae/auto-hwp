@@ -6,12 +6,12 @@ import {
   type DocContext,
   type Intent,
   type WasmAdapterOptions,
-} from "@tf-hwp/react";
-import { buildDocContext } from "@tf-hwp/ai-protocol";
-import "@tf-hwp/react/styles.css";
+} from "@auto-hwp/react";
+import { buildDocContext } from "@auto-hwp/ai-protocol";
+import "@auto-hwp/react/styles.css";
 
 // ── 비-Next(Vite) 임베드 예제 (issue 063) ────────────────────────────────────────────────────────
-// 이 파일은 소스 트리가 아니라 **설치된 발행본**(node_modules/@tf-hwp/*, npm pack tarball)만 import 한다.
+// 이 파일은 소스 트리가 아니라 **설치된 발행본**(node_modules/@auto-hwp/*, npm pack tarball)만 import 한다.
 // wasm/worker 는 public 정적 에셋(/hwp/*)으로 서빙된다(scripts/copy-assets.mjs 가 설치본에서 복사).
 // LLM 은 이 예제에 없다(R6) — onAiRequest 는 **로컬 결정적 mock**(참조 프록시의 mock 과 동형)이라
 // 서버 없이도 "셀 편집" 왕복이 완주된다. 실제 호스트는 이 자리에 자신의 서버 프록시 fetch 를 꽂으면 된다
@@ -108,7 +108,7 @@ export default function App() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", fontFamily: "system-ui, sans-serif" }}>
       <header style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 16px", borderBottom: "1px solid #ddd" }}>
-        <strong>tf-hwp Vite 임베드 예제</strong>
+        <strong>auto-hwp Vite 임베드 예제</strong>
         <label style={{ cursor: "pointer", padding: "4px 12px", border: "1px solid #888", borderRadius: 6 }}>
           파일 열기 (.hwp/.hwpx)
           <input type="file" accept=".hwp,.hwpx" hidden onChange={onFile} data-testid="file-input" />

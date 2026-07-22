@@ -7,8 +7,8 @@
 // 스크립트로 file: → ^<실버전> 으로 바꿔 tarball 에 담은 뒤, `postpack` 이 다시 file: 로 되돌린다.
 // (npm 은 prepack 을 먼저 돌린 뒤 그 package.json 으로 tarball 을 만든다 → 발행본엔 file: 가 0.)
 //
-// 대상: @tf-hwp/react 의 dependencies 중 @tf-hwp/editor-core, @tf-hwp/engine (react 만 상호의존을 가짐 —
-// editor-core/ai-protocol/engine 은 @tf-hwp 상호의존이 없어 치환 대상이 없다). 실버전은 형제 패키지의
+// 대상: @auto-hwp/react 의 dependencies 중 @auto-hwp/editor-core, @auto-hwp/engine (react 만 상호의존을 가짐 —
+// editor-core/ai-protocol/engine 은 @auto-hwp 상호의존이 없어 치환 대상이 없다). 실버전은 형제 패키지의
 // package.json version 을 그때그때 읽어 `^<version>` 으로 쓴다(버전 범프에도 자동 동기).
 //
 // 파일 전체를 JSON.parse→stringify 하면 배열 포맷이 뭉개져 디프 노이즈가 크다 — 그래서 해당 dep 라인만
@@ -26,8 +26,8 @@ const pkgPath = path.join(reactRoot, "package.json");
 
 // dep 이름 → { file:(로컬 상대경로), dir:(형제 패키지 경로 — 버전 조회용) }
 const DEPS = {
-  "@tf-hwp/editor-core": { file: "file:../editor-core", dir: path.join(reactRoot, "..", "editor-core") },
-  "@tf-hwp/engine": { file: "file:../engine", dir: path.join(reactRoot, "..", "engine") },
+  "@auto-hwp/editor-core": { file: "file:../editor-core", dir: path.join(reactRoot, "..", "editor-core") },
+  "@auto-hwp/engine": { file: "file:../engine", dir: path.join(reactRoot, "..", "engine") },
 };
 
 const mode = process.argv[2];
@@ -41,7 +41,7 @@ let changed = 0;
 for (const [name, meta] of Object.entries(DEPS)) {
   const next =
     mode === "--publish" ? `^${JSON.parse(readFileSync(path.join(meta.dir, "package.json"), "utf8")).version}` : meta.file;
-  // "@tf-hwp/engine": "<현재값>"  →  "@tf-hwp/engine": "<next>"  (값만 치환, 앞뒤 공백/따옴표 보존)
+  // "@auto-hwp/engine": "<현재값>"  →  "@auto-hwp/engine": "<next>"  (값만 치환, 앞뒤 공백/따옴표 보존)
   const re = new RegExp(`("${name.replace(/[/\\]/g, "\\$&")}"\\s*:\\s*")([^"]*)(")`);
   const m = text.match(re);
   if (!m) continue;

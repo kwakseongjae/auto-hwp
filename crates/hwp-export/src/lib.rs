@@ -80,7 +80,7 @@ pub fn emit_html(proj: &JsxCssProject, opts: &HtmlOptions) -> String {
     }
 
     let css = sanitize_css(&emit_css(&proj.styles));
-    let title = esc_text(opts.title.as_deref().unwrap_or("tf-hwp 문서"));
+    let title = esc_text(opts.title.as_deref().unwrap_or("auto-hwp 문서"));
 
     format!(
         "<!doctype html>\n<html lang=\"ko\">\n<head>\n<meta charset=\"utf-8\">\n\

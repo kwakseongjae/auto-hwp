@@ -24,7 +24,7 @@
 
 ## 컨텍스트
 - `ai_fill`(표 채우기)은 CLI와 채팅에 이미 존재한다 — 이 이슈는 신규 능력이 아니라
-  **발견 가능성(discoverability)과 마감 품질**이다. `tf-hwp ai-fill`(CLI)과
+  **발견 가능성(discoverability)과 마감 품질**이다. `auto-hwp ai-fill`(CLI)과
   `hwp-ai`의 fill 경로, 이슈 004의 fill-from-source(`to_markdown` 구조 인용)를 재사용하라.
 - 불릿은 네이티브 numbering이 아니라 행잉 인덴트+마커 텍스트 방식이 검증돼 있다
   (이슈 001 참조 — 네이티브 풀은 long-term). 프리셋도 이 방식 위에서 동작해야 한다.

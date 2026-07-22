@@ -1,7 +1,7 @@
 {
-  "name": "@tf-hwp/ai-protocol",
+  "name": "@auto-hwp/ai-protocol",
   "version": "0.0.1",
-  "description": "Vendor-neutral LLM protocol for tf-hwp chat-editing: EditRequest/EditResponse types, buildDocContext (R5 fence), buildSystemPrompt (INTENT-SCHEMA excerpt, allowed-intent subset), validateRequest/validateResponse (whitelist + structure). Pure, isomorphic (node + browser) — ZERO fetch, ZERO LLM client, ZERO keys. The server proxy and the client import the SAME module.",
+  "description": "Vendor-neutral LLM protocol for auto-hwp chat-editing: EditRequest/EditResponse types, buildDocContext (R5 fence), buildSystemPrompt (INTENT-SCHEMA excerpt, allowed-intent subset), validateRequest/validateResponse (whitelist + structure). Pure, isomorphic (node + browser) — ZERO fetch, ZERO LLM client, ZERO keys. The server proxy and the client import the SAME module.",
   "license": "MIT OR Apache-2.0",
   "type": "module",
   "main": "./dist/index.js",

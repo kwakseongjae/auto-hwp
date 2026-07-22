@@ -48,8 +48,8 @@ undo/redo를 데스크톱과 동일 시맨틱으로 그대로 소비한다.
 ## 검증
 - `cargo check -p hwp-mcp --no-default-features --target wasm32-unknown-unknown` → exit 0
 - `cargo test -p hwp-mcp` (기본=http 피처 하에 기존 lib 20 + schema_v0 8 전부 통과 — 보안 술어 포함)
-- `cargo check -p hwp-viewer` + `cargo build -p tf-hwp-cli --features "shaper rhwp"` — 무변경 빌드
-- 게이트: `cargo run -q -p tf-hwp-cli --features "shaper rhwp" -- layout-check benchmark.hwp` → 8==8
+- `cargo check -p hwp-viewer` + `cargo build -p auto-hwp-cli --features "shaper rhwp"` — 무변경 빌드
+- 게이트: `cargo run -q -p auto-hwp-cli --features "shaper rhwp" -- layout-check benchmark.hwp` → 8==8
 - 신규 테스트: open_bytes로 연 문서가 do_open(path)과 동일 OpenInfo/페이지수; export_bytes == 기존 save 바이트
 
 ## 수용 기준

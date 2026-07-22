@@ -5,7 +5,7 @@
 
 ## 완료 (2026-07-22)
 - **bench-local-2026 확보**: `~/Desktop/archive` 전수 24건(.hwp 11 + .hwpx 13)을 `corpus/private/bench-local-2026/files/`에 스냅샷(집계 해시 `e2441b612201fc7f`). must-pass 부분집합 = `2026_*__` 접두 8건.
-- **기준선 24/24 전부 통과**: detect·own-render·export-pdf·extract-text (`RESULTS-2026-07-22.tsv`). CLI `tf-hwp` release, features `rhwp,shaper,pdf`.
+- **기준선 24/24 전부 통과**: detect·own-render·export-pdf·extract-text (`RESULTS-2026-07-22.tsv`). CLI `auto-hwp` release, features `rhwp,shaper,pdf`.
 - **게이트 스크립트**: `scripts/bench-corpus.sh` — corpus/private/bench-*를 전수 스윕, 기준선 대비 회귀 시 비제로 종료. corpus/private 부재 환경(CI)은 skip(로컬 전용). `--update-baseline`으로 기준선 갱신.
 
 ## 게이트의 의미 (보수적 해석 — 과대해석 금지)

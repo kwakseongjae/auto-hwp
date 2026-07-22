@@ -2,7 +2,7 @@
 //
 // 정적/비-Next 호스트(Vite/CRA/S3+CloudFront/…)는 Next route handler 가 없다. 이 얇은 Express 서버가
 // 그 자리를 대신한다 — 로직은 apps/hwp-lab 의 참조 route.ts 와 **동일**하며, 프롬프트/펜스/검증/화이트리스트는
-// 전부 @tf-hwp/ai-protocol 이 소유한다(서버·클라 단일 출처, 계약 드리프트 방지).
+// 전부 @auto-hwp/ai-protocol 이 소유한다(서버·클라 단일 출처, 계약 드리프트 방지).
 //
 // R6(키 서버 전용): API 키와 LLM 클라이언트는 이 서버 모듈에만 존재한다. 클라이언트 번들엔 절대 넣지 않는다.
 // 벤더 교체는 아래 liveIntents 의 `await import("@anthropic-ai/sdk")` 한 줄만 바꾸면 된다.
@@ -15,7 +15,7 @@ import {
   buildUserMessage,
   validateRequest,
   validateResponse,
-} from "@tf-hwp/ai-protocol";
+} from "@auto-hwp/ai-protocol";
 
 const PORT = process.env.PORT || 8787;
 // 교차 출처 임베드(정적 프론트가 다른 도메인)면 프론트 오리진을 지정한다. 기본 "*"는 개발 편의용 —

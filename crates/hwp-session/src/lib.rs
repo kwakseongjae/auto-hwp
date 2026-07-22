@@ -1,4 +1,4 @@
-//! tf-hwp **shell-independent document-session logic** (issue 012).
+//! auto-hwp **shell-independent document-session logic** (issue 012).
 //!
 //! This crate holds the document logic that used to live inside the Tauri viewer's command bodies
 //! (`hwp-viewer/src/lib.rs`): DTO assembly, own-engine geometry queries, styled-run reads, HTML/PDF
@@ -43,7 +43,7 @@ pub const HWPUNIT_PER_PX: f64 = 7200.0 / 96.0;
 
 /// Choose the font-metrics provider for the OWN renderer: the real rustybuzz shaper under
 /// `--features shaper` (real Latin advances + EM-grid Hangul), else the per-script approximation.
-/// Every own-render / geometry path uses this, so the in-app view, `tf-hwp own-render`, and the
+/// Every own-render / geometry path uses this, so the in-app view, `auto-hwp own-render`, and the
 /// geometry overlays all measure identically.
 #[cfg(feature = "shaper")]
 pub fn own_render_fonts() -> Box<dyn hwp_model::prelude::FontMetricsProvider> {

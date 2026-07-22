@@ -3,11 +3,11 @@ import type { Root } from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { HwpWorkspace, TauriAdapter, type OnAiRequest } from "@tf-hwp/react";
-import "@tf-hwp/react/styles.css";
+import { HwpWorkspace, TauriAdapter, type OnAiRequest } from "@auto-hwp/react";
+import "@auto-hwp/react/styles.css";
 
 /// WorkspaceShell — the issue-044 desktop shell. Behind the build-time flag `VITE_SHELL=workspace`, the
-/// Tauri app mounts THIS (the shared `@tf-hwp/react` `HwpWorkspace` over a `TauriAdapter`) instead of the
+/// Tauri app mounts THIS (the shared `@auto-hwp/react` `HwpWorkspace` over a `TauriAdapter`) instead of the
 /// legacy `App.tsx`. The legacy path is byte-for-byte unchanged when the flag is off (see `main.tsx`).
 ///
 /// The workspace's engine surface (open / render / hit-test / edit / export bytes) is 100% satisfied by

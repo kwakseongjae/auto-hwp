@@ -1,6 +1,6 @@
 // issue 055 (FG-14) — WasmAdapter WORKER MODE: the RPC bridge + the 052 recovery contract over it.
 //
-// A FAKE Worker (in-process, protocol-faithful to @tf-hwp/engine/worker.js) stands in for the real
+// A FAKE Worker (in-process, protocol-faithful to @auto-hwp/engine/worker.js) stands in for the real
 // module worker — jsdom has no Worker. It can be armed to (a) answer normally, (b) surface a
 // worker-side {code:"wasm_trap"} (what worker.js sends after a real wasm panic), or (c) DIE
 // (fire onerror), so this locks:
@@ -15,7 +15,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── main-thread engine mock: worker mode must never call it (assertion #5) ──────────────────────────
 const mainEngine = { init: vi.fn(async () => ({})), reset: vi.fn(async () => ({})) };
-vi.mock("@tf-hwp/engine", () => ({
+vi.mock("@auto-hwp/engine", () => ({
   HwpDoc: class {
     static open() {
       throw new Error("worker mode must not open on the main thread");

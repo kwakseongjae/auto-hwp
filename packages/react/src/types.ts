@@ -1,6 +1,6 @@
-/// The model/geometry/edit types DESCENDED to @tf-hwp/editor-core (issue 026) — they are DOM-free shapes,
-/// so they live in the headless core and @tf-hwp/react RE-EXPORTS them here verbatim. Existing hosts keep
-/// `import type { Anchor, Intent, ... } from "@tf-hwp/react"` working unchanged (backward compatible).
+/// The model/geometry/edit types DESCENDED to @auto-hwp/editor-core (issue 026) — they are DOM-free shapes,
+/// so they live in the headless core and @auto-hwp/react RE-EXPORTS them here verbatim. Existing hosts keep
+/// `import type { Anchor, Intent, ... } from "@auto-hwp/react"` working unchanged (backward compatible).
 ///
 /// The selection VIEW types the components draw (Mark/Marquee/Sel) map 1:1 onto the core's
 /// SelMark/SelMarquee/Selection — aliased below so component code reads naturally.
@@ -49,4 +49,4 @@ export type {
   ReplaceResult,
   MatchBox,
   NormalizeReport,
-} from "@tf-hwp/editor-core";
+} from "@auto-hwp/editor-core";

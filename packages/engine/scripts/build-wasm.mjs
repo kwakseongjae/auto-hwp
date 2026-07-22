@@ -1,4 +1,4 @@
-// build-wasm.mjs — @tf-hwp/engine 발행 빌드 훅 (issue 063 블로커 2).
+// build-wasm.mjs — @auto-hwp/engine 발행 빌드 훅 (issue 063 블로커 2).
 //
 // pkg/ 는 gitignore 이므로 `npm pack`/`npm publish` 직전 이 스크립트가 wasm 아티팩트를 재생성해야
 // tarball 이 "빈 채" 발행되지 않는다(빈 tarball 위험). 레시피는 AGENTS.md 함정 top6 + verify-local.sh

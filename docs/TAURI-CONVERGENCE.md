@@ -1,6 +1,6 @@
 # Tauri 셸 수렴 감사표 (issue 043)
 
-> 목표: 데스크톱 셸(`crates/hwp-viewer/ui`)을 **`@tf-hwp/react`의 `HwpWorkspace` 소비**로 수렴시키기
+> 목표: 데스크톱 셸(`crates/hwp-viewer/ui`)을 **`@auto-hwp/react`의 `HwpWorkspace` 소비**로 수렴시키기
 > 위한 **전제조건 감사**. 이 문서는 두 방향을 전수 실측한다 — ① SDK가 요구하는 `EngineAdapter`
 > 표면을 `TauriAdapter`가 얼마나 채우는가, ② 데스크톱이 이미 가진 기능을 어디로 보내는가(처분).
 > **실행(수렴)은 044** — 이 문서 말미의 실행 계획을 그대로 따른다. **여기서 UI는 만들지 않았다.**
@@ -16,7 +16,7 @@
 
 | 표면 | 단위(IN/OUT) | 근거 |
 |---|---|---|
-| `own_hit_test`/`table_at`/`table_cell_at`/`blocks_in_rect`/`table_col_boundaries`/`table_row_boundaries`/`page_geometry`/`caret_rect` | 페이지-로컬 **px** (own-render px) | `hwp-viewer` 커맨드가 `hwp_session`의 px↔HWPUNIT 경계를 **그대로** 통과(예: `own_hit_test` 테스트 `own_hit_test_resolves_a_px_click_to_the_pointed_block` — px→HWPUNIT→`block_at`, px로 반환). wasm 백엔드(`@tf-hwp/engine` `hitTest`/`tableAt`/…)도 **동일 px** 공간 → 어댑터는 px를 그대로 전달. |
+| `own_hit_test`/`table_at`/`table_cell_at`/`blocks_in_rect`/`table_col_boundaries`/`table_row_boundaries`/`page_geometry`/`caret_rect` | 페이지-로컬 **px** (own-render px) | `hwp-viewer` 커맨드가 `hwp_session`의 px↔HWPUNIT 경계를 **그대로** 통과(예: `own_hit_test` 테스트 `own_hit_test_resolves_a_px_click_to_the_pointed_block` — px→HWPUNIT→`block_at`, px로 반환). wasm 백엔드(`@auto-hwp/engine` `hitTest`/`tableAt`/…)도 **동일 px** 공간 → 어댑터는 px를 그대로 전달. |
 | 편집 Intent(`SetTableColWidths`/`SetTableRowHeights`/`SetImageSize` 등) | **HWPUNIT / 모델 인덱스** | op-bus(`hwp_mcp::apply_intent`)가 HWPUNIT을 받는다. px→HWPUNIT/px→ratio 변환은 **editor-core `units.ts`**(단일 지점)에서 하고 어댑터는 완성된 값을 전달. |
 
 ⇒ `TauriAdapter`의 지오메트리 메서드는 **입력 px를 그대로 invoke 인자로, 반환 px를 그대로** 넘긴다

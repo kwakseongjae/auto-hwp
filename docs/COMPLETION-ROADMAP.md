@@ -1,6 +1,6 @@
-# tf-hwp 완성형 로드맵 (design workflow 산출물, 17 agents)
+# auto-hwp 완성형 로드맵 (design workflow 산출물, 17 agents)
 
-> Hancom HWP/Hancom Docs 에디터 기능 → OWPML → tf-hwp 합성 아키텍처. 사실검증(adversarial verify) 통과 기준.
+> Hancom HWP/Hancom Docs 에디터 기능 → OWPML → auto-hwp 합성 아키텍처. 사실검증(adversarial verify) 통과 기준.
 
 ## Foundation
 

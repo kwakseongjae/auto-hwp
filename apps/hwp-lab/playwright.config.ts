@@ -3,7 +3,9 @@ import { defineConfig, devices } from "@playwright/test";
 // Playwright 스모크 (issue 019 §6). dev 서버를 3100 포트로 띄워(예약 훅 predev가 wasm을
 // public/hwp로 복사) 페이지 로드→업로드→렌더/편집/undo 를 검증한다. chromium 미설치 시
 // `npx playwright install chromium` 필요.
-const PORT = 3100;
+// 다른 로컬 프로젝트가 3100 을 선점하면 reuseExistingServer 가 엉뚱한 앱을 재사용해 전 스펙이
+// 타임아웃한다(2026-07-22 실측 — 타 앱 랜딩이 file-input 없이 응답). PW_PORT 로 우회한다.
+const PORT = Number(process.env.PW_PORT ?? 3100);
 
 export default defineConfig({
   // 알려진 순서/타이밍 플레이키(039·048 계열 — 격리 실행은 항상 그린, CURRENT_STATE §알려진 flaky)의

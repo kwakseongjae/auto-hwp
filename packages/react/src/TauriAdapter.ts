@@ -26,7 +26,7 @@ export interface TauriAdapterOptions {
   resolveOpenPath?: (bytes: Uint8Array, name?: string) => Promise<string>;
 }
 
-/// TauriAdapter — the DESKTOP backend for the shared @tf-hwp/react workspace (issue 043 convergence
+/// TauriAdapter — the DESKTOP backend for the shared @auto-hwp/react workspace (issue 043 convergence
 /// prerequisite). It maps the whole `EngineAdapter` surface onto the desktop app's Tauri commands
 /// (crates/hwp-viewer/src/lib.rs), routing through the SAME op-bus / hwp-session facade the `WasmAdapter`
 /// uses — so `HwpWorkspace` runs against either backend with identical semantics + null policy (018).

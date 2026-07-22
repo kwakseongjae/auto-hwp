@@ -1,5 +1,5 @@
 // caret-geometry-smoke.mjs — issue 041 (FG-12 前半) glyph-caret exposure smoke, through the SAME wasm
-// engine the web shell runs (@tf-hwp/engine).
+// engine the web shell runs (@auto-hwp/engine).
 //
 // WHAT IT PROVES (all via the applyIntent JSON seam — NO crate changes; the intents already exist):
 //   1) HitTest(page,x,y) returns a char-precise HitResult { offset, para_len, node?, in_cell, ... } at

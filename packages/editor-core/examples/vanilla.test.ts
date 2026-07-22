@@ -3,7 +3,7 @@ import { runVanillaDemo } from "./vanilla";
 
 // The "React-free" contract proof (issue 026 step 6): the vanilla example must drive the whole
 // open → select cell → apply intent → undo → export flow with NO React and NO DOM. If this passes in a
-// pure node environment, a host can embed tf-hwp in any framework (or none).
+// pure node environment, a host can embed auto-hwp in any framework (or none).
 describe("examples/vanilla.ts — headless end-to-end (no React/DOM)", () => {
   it("open → cell select → intent apply → export → undo, driving editor-core directly", async () => {
     const { log, html, undoHtml } = await runVanillaDemo();

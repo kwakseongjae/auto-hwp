@@ -1,13 +1,13 @@
-# @tf-hwp/editor-core
+# @auto-hwp/editor-core
 
-Headless, **framework-agnostic** editor core for [tf-hwp](../../README.md) — the L2 of the
+Headless, **framework-agnostic** editor core for [auto-hwp](../../README.md) — the L2 of the
 [SDK layers](../../docs/SDK-LAYERS.md). It owns the editor's *state and commands* (document lifecycle,
 selection, edit/apply, undo, font) and **nothing about the UI**: zero React, zero DOM, unit-testable in
 plain node. Bring your own rendering (or none). This is the TipTap/ProseMirror "headless" pattern for
 HWP/HWPX.
 
 ```ts
-import { createEditorCore } from "@tf-hwp/editor-core";
+import { createEditorCore } from "@auto-hwp/editor-core";
 
 const core = createEditorCore(adapter); // adapter = WasmAdapter (web) / TauriAdapter (app) / your own
 core.selection.onChange((sels) => console.log(sels.length, "selected"));
@@ -29,8 +29,8 @@ await core.session.undo();
 | `EditController` | assemble the read-only `DocContext`, `preview(intents)` cards, `apply(intents)` as one undo batch. |
 | `EngineAdapter` | the backend seam (open/pageSvg/geometry/applyIntent/undo/export/registerFont). |
 
-**Not here** (SDK-LAYERS "하지 않는 것"): React/DOM (that's `@tf-hwp/react`), the LLM/keys (that's your
-server + `@tf-hwp/ai-protocol`), the wasm engine (that's `@tf-hwp/engine`). The client-px → page-px
+**Not here** (SDK-LAYERS "하지 않는 것"): React/DOM (that's `@auto-hwp/react`), the LLM/keys (that's your
+server + `@auto-hwp/ai-protocol`), the wasm engine (that's `@auto-hwp/engine`). The client-px → page-px
 coordinate conversion stays in the UI layer; `SelectionModel` receives **page-local px only**
 (`pointerDown({page,x,y,mod})`), so it is testable without a layout engine.
 

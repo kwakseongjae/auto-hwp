@@ -39,7 +39,7 @@ wasm에서 한글 글리프가 실제 임베드된 PDF가 나온다. **네이티
    (015 실측: 미최적화 gzip 3.5MiB). 불가하면 스킵 사유 보고.
 
 ## 검증
-- **네이티브 골든**: 변경 전후 `tf-hwp export-pdf benchmark.hwp` 출력 **바이트 동일**
+- **네이티브 골든**: 변경 전후 `auto-hwp export-pdf benchmark.hwp` 출력 **바이트 동일**
   (discover 경로 무변경 증명). 게이트 8==8.
 - `cargo test -p hwp-export -p hwp-session -p hwp-mcp` + `cargo check -p hwp-wasm --target wasm32-unknown-unknown`.
 - **node 스모크**: 시스템에서 한글 포함 TTF(예: `/Library/Fonts/Arial Unicode.ttf` 또는

@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { HwpWorkspace, WasmAdapter, FONT_CATALOG, type AiRequestOptions, type Anchor, type Citation, type DocContext, type Intent, type WasmAdapterOptions } from "@tf-hwp/react";
-import { buildDocContext, createAgentEventParser, type AgentEvent } from "@tf-hwp/ai-protocol";
-import { isTrapError, resetEngine } from "@tf-hwp/engine";
+import { HwpWorkspace, WasmAdapter, FONT_CATALOG, type AiRequestOptions, type Anchor, type Citation, type DocContext, type Intent, type WasmAdapterOptions } from "@auto-hwp/react";
+import { buildDocContext, createAgentEventParser, type AgentEvent } from "@auto-hwp/ai-protocol";
+import { isTrapError, resetEngine } from "@auto-hwp/engine";
 import { AutosaveController, IdbSnapshotStore, findRecoverable, formatAge, recoveredName, type SnapshotRecord } from "@/lib/autosave";
 import { limitMessage, oversizeMessage } from "@/lib/limits";
 
@@ -35,12 +35,12 @@ const msg = (e: unknown): string => {
 };
 
 // wasm 트랩(패닉)은 전역 인스턴스를 오염시킨다. 손상 파일 프로브 열기가 트랩나면 다음 업로드를 위해
-// 인스턴스를 재생성해야 한다(이슈 §QA ⑨ 트랩 복구 안내). 분류기는 @tf-hwp/engine 의 `isTrapError`
+// 인스턴스를 재생성해야 한다(이슈 §QA ⑨ 트랩 복구 안내). 분류기는 @auto-hwp/engine 의 `isTrapError`
 // 단일 소스를 소비한다(이슈 055 사후 #8 — 로컬 사본은 'table index is out of bounds' 패턴이 빠져
 // 메인스레드 폴백(?engineWorker=off)에서 트랩을 놓치고 resetEngine 을 건너뛰었다).
 
 // 마킹된 앵커/문서 메타를 프록시가 R5 펜스로 감쌀 "문서 콘텐츠" 문자열로 만드는 로직은 이제
-// @tf-hwp/ai-protocol 의 buildDocContext 가 소유한다(이슈 026) — 서버 route.ts 의 프롬프트/펜스
+// @auto-hwp/ai-protocol 의 buildDocContext 가 소유한다(이슈 026) — 서버 route.ts 의 프롬프트/펜스
 // 조립과 같은 모듈에서 나와 계약이 어긋날 수 없다. 앵커의 `text`는 문서 파생 신뢰불가 데이터.
 
 export default function LabWorkspace() {
@@ -497,11 +497,11 @@ export default function LabWorkspace() {
     <div className="lab-root">
       <header className="lab-header">
         <span className="lab-title">
-          {IS_DEMO ? "tf-hwp" : "hwp-lab"}
-          <small>{IS_DEMO ? "브라우저에서 동작하는 HWP 엔진 — 데모" : "tf-hwp 통합 실험 앱 (QA)"}</small>
+          {IS_DEMO ? "오토한글" : "hwp-lab"}
+          <small>{IS_DEMO ? "AI와 함께 한 화면에서 쓰는 한글 — 데모" : "오토한글 통합 실험 앱 (QA)"}</small>
         </span>
         {IS_DEMO && (
-          <a className="lab-gh-link" href="https://github.com/kwakseongjae/tf-hwp" target="_blank" rel="noreferrer" title="GitHub 저장소">
+          <a className="lab-gh-link" href="https://github.com/kwakseongjae/auto-hwp" target="_blank" rel="noreferrer" title="GitHub 저장소">
             GitHub ↗
           </a>
         )}
@@ -629,7 +629,7 @@ export default function LabWorkspace() {
                 </div>
                 <div className="lab-feature">
                   <b>🧩 Headless 엔진</b>
-                  <span><code>npm i @tf-hwp/engine</code> — UI 없이 SVG·HTML·PDF만 받아 자체 에디터를 지을 수 있음</span>
+                  <span><code>npm i @auto-hwp/engine</code> — UI 없이 SVG·HTML·PDF만 받아 자체 에디터를 지을 수 있음</span>
                 </div>
                 <div className="lab-feature">
                   <b>✨ AI 바이브 편집</b>
@@ -638,15 +638,15 @@ export default function LabWorkspace() {
               </div>
 
               <div className="lab-hero-dev">
-                <a href="https://github.com/kwakseongjae/tf-hwp" target="_blank" rel="noreferrer">GitHub ↗</a>
+                <a href="https://github.com/kwakseongjae/auto-hwp" target="_blank" rel="noreferrer">GitHub ↗</a>
                 <span aria-hidden>·</span>
-                <a href="https://github.com/kwakseongjae/tf-hwp#readme" target="_blank" rel="noreferrer">소개(README)</a>
+                <a href="https://github.com/kwakseongjae/auto-hwp#readme" target="_blank" rel="noreferrer">소개(README)</a>
                 <span aria-hidden>·</span>
-                <a href="https://github.com/kwakseongjae/tf-hwp/blob/main/docs/EMBED-GUIDE.md" target="_blank" rel="noreferrer">임베드 가이드</a>
+                <a href="https://github.com/kwakseongjae/auto-hwp/blob/main/docs/EMBED-GUIDE.md" target="_blank" rel="noreferrer">임베드 가이드</a>
                 <span aria-hidden>·</span>
-                <a href="https://github.com/kwakseongjae/tf-hwp/blob/main/docs/INTENT-SCHEMA.md" target="_blank" rel="noreferrer">Intent 스키마</a>
+                <a href="https://github.com/kwakseongjae/auto-hwp/blob/main/docs/INTENT-SCHEMA.md" target="_blank" rel="noreferrer">Intent 스키마</a>
                 <span aria-hidden>·</span>
-                <a href="https://github.com/kwakseongjae/tf-hwp/blob/main/docs/SDK-LAYERS.md" target="_blank" rel="noreferrer">아키텍처</a>
+                <a href="https://github.com/kwakseongjae/auto-hwp/blob/main/docs/SDK-LAYERS.md" target="_blank" rel="noreferrer">아키텍처</a>
               </div>
             </div>
           </div>

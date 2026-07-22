@@ -1,6 +1,6 @@
 # hwp-mcp — 로컬 MCP 서버 가이드 (셀프호스팅, 우리 서버 0)
 
-`hwp-mcp`는 tf-hwp 엔진을 **Model Context Protocol** 로 노출하는 **로컬 stdio 바이너리**다.
+`hwp-mcp`는 auto-hwp 엔진을 **Model Context Protocol** 로 노출하는 **로컬 stdio 바이너리**다.
 사용자가 자기 컴퓨터에 설치해 자기 AI 도구(Claude Code/Desktop, Cursor 등)에 붙인다 —
 문서가 외부로 전송되지 않고, 프로젝트 쪽에 서버·트래픽·운영 부담이 전혀 없다.
 
@@ -8,10 +8,10 @@
 
 ```bash
 # 방법 1 — git에서 바로 (Rust 툴체인 필요; 서브모듈 포함 자동 클론)
-cargo install --git https://github.com/kwakseongjae/tf-hwp hwp-mcp --features rhwp
+cargo install --git https://github.com/kwakseongjae/auto-hwp hwp-mcp --features rhwp
 
 # 방법 2 — 클론 후 (방법 1이 서브모듈 문제로 실패할 때)
-git clone --recurse-submodules https://github.com/kwakseongjae/tf-hwp && cd tf-hwp
+git clone --recurse-submodules https://github.com/kwakseongjae/auto-hwp && cd auto-hwp
 cargo install --path crates/hwp-mcp --features rhwp
 ```
 
@@ -20,7 +20,7 @@ cargo install --path crates/hwp-mcp --features rhwp
 ## 연결
 
 ```bash
-claude mcp add tf-hwp -- hwp-mcp          # Claude Code
+claude mcp add auto-hwp -- hwp-mcp          # Claude Code
 # Claude Desktop / Cursor: MCP 설정에 command "hwp-mcp" (stdio) 등록
 ```
 

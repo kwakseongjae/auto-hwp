@@ -2,12 +2,12 @@ import type { BlockHit, CaretRect, CellAddr, CellCaretRect, CellHit, CellTextHit
 
 /// EngineAdapter — the backend seam (SDK-LAYERS L1↔L2). It abstracts the ACTUAL surface a backend
 /// exposes (open / page SVG / hit-test·tableAt / applyIntent / undo·redo / export) so the SAME
-/// editor-core (and any UI over it) runs against two backends: `WasmAdapter` (wraps @tf-hwp/engine, in
-/// @tf-hwp/react) and a host `TauriAdapter` (reference impl). Every method is async so a Promise-based
+/// editor-core (and any UI over it) runs against two backends: `WasmAdapter` (wraps @auto-hwp/engine, in
+/// @auto-hwp/react) and a host `TauriAdapter` (reference impl). Every method is async so a Promise-based
 /// Tauri `invoke` backend and the synchronous wasm backend both satisfy one interface.
 ///
-/// This interface DESCENDED from @tf-hwp/react (issue 026) so editor-core depends only on the adapter,
-/// not on React. @tf-hwp/react re-exports the type (hosts keep importing it from there).
+/// This interface DESCENDED from @auto-hwp/react (issue 026) so editor-core depends only on the adapter,
+/// not on React. @auto-hwp/react re-exports the type (hosts keep importing it from there).
 ///
 /// R7 boundary: `pageSvg` returns a document-derived string that the ADAPTER may or may not have
 /// sanitized. It is UNTRUSTED regardless — the UI layer ALWAYS routes it through `sanitizeSvg` before

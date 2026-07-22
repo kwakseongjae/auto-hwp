@@ -11,9 +11,9 @@ on:
   workflow_dispatch:
     inputs:
       base_path:
-        description: "배포 basePath (프로젝트 페이지면 /tf-hwp, 커스텀 도메인이면 빈 값)"
+        description: "배포 basePath (프로젝트 페이지면 /auto-hwp, 커스텀 도메인이면 빈 값)"
         type: string
-        default: "/tf-hwp"
+        default: "/auto-hwp"
 
 permissions:
   contents: read
@@ -50,7 +50,7 @@ jobs:
         run: npm i -g pnpm
 
       # 1) 엔진 wasm → packages/engine/pkg (hwp-lab prebuild 의 copy-wasm.mjs 가 이걸 복사한다)
-      - name: build @tf-hwp/engine (wasm)
+      - name: build @auto-hwp/engine (wasm)
         working-directory: packages/engine
         run: |
           npm install --no-audit --no-fund

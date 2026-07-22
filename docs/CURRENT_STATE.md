@@ -3,7 +3,13 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
-- 기준 커밋: `6ebfbb2`+CI픽스 — **PUBLIC 전환 + 라이브 데모 배포 완료**(https://kwakseongjae.github.io/tf-hwp/) — **R12~R14 + 실물QA 065·066 + 웹QA 2~6차 + HWPX 시각 파리티 + 레이아웃 정리 토글 완료**. GitHub: https://github.com/kwakseongjae/tf-hwp (private)
+- 기준 커밋: `6ebfbb2`+CI픽스 — **PUBLIC 전환 + 라이브 데모 배포 완료**(https://kwakseongjae.github.io/auto-hwp/) — **R12~R14 + 실물QA 065·066 + 웹QA 2~6차 + HWPX 시각 파리티 + 레이아웃 정리 토글 완료**. GitHub: https://github.com/kwakseongjae/auto-hwp (private)
+- 갱신: 2026-07-22(12) · Claude — **전면 리브랜딩: tf-hwp → auto-hwp (오토한글)**(e41efa0). 컨셉 정본 = "AI와
+  함께 한 화면을 보면서 작성하는 한글". ① GitHub 레포 `kwakseongjae/auto-hwp` 리네임(구 URL 리다이렉트)
+  ② 소스 204파일 치환(@auto-hwp 스코프·auto-hwp-cli/바이너리·AUTO_HWP_* — JOURNAL/history는 역사 보존)
+  ③ 배너 `assets/brand/autohwp-banner.png`(타이포+AI 캐럿, banner.html+shot.mjs 재생성) — README 한/영 히어로
+  ④ 데모 헤더/타이틀 오토한글. 검증: 게이트 8==8/18==18 · vitest 321/50 · **e2e 42/42**. ⚠️ 함정: 타 프로젝트가
+  3100 선점 시 reuseExistingServer 가 엉뚱한 앱 테스트 → `PW_PORT` 손잡이(구 타임아웃 전부 이 원인 — 리네임 무결).
 - 갱신: 2026-07-22(11) · Claude — **잔여 마감 + 문서 정리**(fbe7e0d). ① **MCP 신선 설치 실검증**: 퍼블릭 레포
   `cargo install --git` → 서브모듈 클론→빌드→핸드셰이크→.hwp 열기 완주(가이드 레시피 실증 — 단 원격 HEAD 기준).
   ② **fetch-gov-corpus.mjs**: GOV-SOURCES 재현 스크립트, 빈 디렉토리 실검증 7/7. ③ README 한/영 재정리(문서
@@ -140,7 +146,7 @@ QA 발견사항 → 이슈로 정리해 다음 배치. WKWebView IME 실기(059)
 - **063 = 병합 완료**: file:→실버전(prepack 치환)·prepack 빌드훅 4패키지·발행 CI(publish.yml dry_run 기본)·
   Vite 임베드 예제(published tarball 설치→렌더 스모크 그린)·AI 프록시 Express 템플릿·EMBED-GUIDE. `npm pack`
   4종 tarball 실측(pkg/dist 포함·file:의존 0). ai-protocol dist ESM `.js` 결함 수정. **실 npm publish는 미실행(pack까지).**
-  → 외부 사이트에 `npm i @tf-hwp/react @tf-hwp/engine` 임베드 준비 완료(발행은 사람이 workflow_dispatch로).
+  → 외부 사이트에 `npm i @auto-hwp/react @auto-hwp/engine` 임베드 준비 완료(발행은 사람이 workflow_dispatch로).
 - **오픈소스 조사 헤드라인(2026-07-13)**: 우리 약점 상당수(배포용복호·금칙·정렬·다단·대각선·수식·옛한글·
   폰트메트릭)가 이미 external/rhwp(MIT, 우리 소유)에 완성 — 파스전용이라 미배선. → **062 신설**(라이선스 0 승격).
   056 crypto는 062-1(배포용 복호화 quick win)로 해소 경로 확정. 웹 이식 갭 → 063 승격 대기(패키징 최종 1마일).

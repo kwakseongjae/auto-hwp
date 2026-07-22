@@ -1,5 +1,5 @@
 // image-geometry-smoke.mjs — issue 049 image move/resize SDK: prove the ADDITIVE wasm bindings
-// `imageAt` / `imageBbox` are LIVE at runtime on the SAME @tf-hwp/engine the web shell runs, and honour
+// `imageAt` / `imageBbox` are LIVE at runtime on the SAME @auto-hwp/engine the web shell runs, and honour
 // the 018 null policy (a miss is `null`, never a throw) — the exact contract the WasmAdapter + editor-core
 // + the react ImageOverlay vitest all assume. This is the real-engine cross-check that cargo-check-wasm32
 // (compile) can't give.

@@ -1,4 +1,4 @@
-# 026 — R3-3: 레이어드 SDK — @tf-hwp/editor-core + @tf-hwp/ai-protocol 신설
+# 026 — R3-3: 레이어드 SDK — @auto-hwp/editor-core + @auto-hwp/ai-protocol 신설
 
 - 상태: **open**
 - 우선순위: R3-P1
@@ -8,16 +8,16 @@
 
 ## 목표
 "우리 UI에 강제되지 않는" headless SDK로 재배치한다:
-- **@tf-hwp/editor-core (신규)**: 프레임워크 무관 에디터 코어 — React 0줄, jsdom 없이 node로
+- **@auto-hwp/editor-core (신규)**: 프레임워크 무관 에디터 코어 — React 0줄, jsdom 없이 node로
   테스트 가능. `DocSession`(어댑터 위 문서 수명/재조판 신호/undo/폰트), `SelectionModel`
   (021/023의 클릭=교체·⌘토글·셀앵커·마퀴 로직을 React state에서 **하강**), `EditController`
   (Intent 조립·적용·프리뷰), 이벤트 구독(onSelectionChange/onDocChange/onLayoutInvalidated).
-- **@tf-hwp/ai-protocol (신규)**: LLM 통신 규격 — 타입(EditRequest/EditResponse/intent_version),
+- **@auto-hwp/ai-protocol (신규)**: LLM 통신 규격 — 타입(EditRequest/EditResponse/intent_version),
   `buildDocContext`(R5 펜스), `buildSystemPrompt`(INTENT-SCHEMA 발췌, 허용 intent 서브셋 옵션),
   `validateResponse`(화이트리스트+구조 검증). **fetch/LLM 클라이언트/키 0줄** — 순수 변환.
   현재 apps/hwp-lab route.ts와 packages/react에 흩어진 이 로직들을 **여기로 승격**하고 양쪽이
   import (프록시 참조 구현은 lab에 유지 — "예시"로 문서화).
-- **@tf-hwp/react**: 로직을 editor-core 호출로 치환한 thin 바인딩으로 축소(`useHwpEditor(core)`
+- **@auto-hwp/react**: 로직을 editor-core 호출로 치환한 thin 바인딩으로 축소(`useHwpEditor(core)`
   훅 + 기존 컴포넌트). 공개 API 하위호환(기존 lab 데모가 최소 diff로 동작).
 
 ## 파일 지도

@@ -23,4 +23,4 @@ for (const p of pkgs) {
   console.log(`\n[pack-deps] npm pack ${p} → vendor/`);
   execFileSync("npm", ["pack", "--pack-destination", vendor], { cwd: dir, stdio: "inherit" });
 }
-console.log(`\n[pack-deps] 완료 → ${path.relative(appRoot, vendor)}/tf-hwp-*-*.tgz (다음: npm install)`);
+console.log(`\n[pack-deps] 완료 → ${path.relative(appRoot, vendor)}/auto-hwp-*-*.tgz (다음: npm install)`);

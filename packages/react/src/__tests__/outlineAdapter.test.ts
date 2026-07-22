@@ -12,9 +12,9 @@ const ITEMS: OutlineItem[] = [
 ];
 
 // ── WasmAdapter → engine.outline() ────────────────────────────────────────────────────────────────────
-// A minimal @tf-hwp/engine mock: HwpDoc.open returns a fake doc whose outline() yields the canned items
+// A minimal @auto-hwp/engine mock: HwpDoc.open returns a fake doc whose outline() yields the canned items
 // (mirroring the wasm binding's JSON→array unwrap). Proves the adapter forwards the engine result verbatim.
-vi.mock("@tf-hwp/engine", () => {
+vi.mock("@auto-hwp/engine", () => {
   class HwpDoc {
     static open() {
       return new HwpDoc();

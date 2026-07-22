@@ -34,12 +34,12 @@ mkdir -p "$OUT"
 echo "== golden ($MODE) — features: $FEATURES =="
 
 # --- 1. layout-check (the 8==8 gate + line accuracy) ---
-cargo run -q -p tf-hwp-cli --features "$FEATURES" -- layout-check benchmarks/benchmark.hwp \
+cargo run -q -p auto-hwp-cli --features "$FEATURES" -- layout-check benchmarks/benchmark.hwp \
   > "$OUT/layout_benchmark.txt" 2>&1
 echo "-- layout-check benchmarks/benchmark.hwp --"
 cat "$OUT/layout_benchmark.txt"
 
-cargo run -q -p tf-hwp-cli --features "$FEATURES" -- layout-check benchmarks/benchmark1.hwp \
+cargo run -q -p auto-hwp-cli --features "$FEATURES" -- layout-check benchmarks/benchmark1.hwp \
   > "$OUT/layout_benchmark1.txt" 2>&1
 echo "-- layout-check benchmarks/benchmark1.hwp --"
 cat "$OUT/layout_benchmark1.txt"
@@ -47,7 +47,7 @@ cat "$OUT/layout_benchmark1.txt"
 # --- 2. own-render SVG, TWICE, to prove determinism ---
 render_all () {
   local file="$1" tag="$2" run="$3"
-  cargo run -q -p tf-hwp-cli --features "$FEATURES" -- own-render "$file" \
+  cargo run -q -p auto-hwp-cli --features "$FEATURES" -- own-render "$file" \
     --out "$OUT/${tag}_r${run}.svg" >/dev/null 2>&1
 }
 

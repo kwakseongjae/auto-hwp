@@ -3,9 +3,9 @@ import { SelectionModel } from "../selection";
 import type { BlockHit, CellHit, PointerInput, TableBox } from "../types";
 import { MockAdapter } from "./mockAdapter";
 
-// The @tf-hwp/react selection.model.test.tsx scenarios (issues 021 + 023) PORTED to node: DOM pointer
+// The @auto-hwp/react selection.model.test.tsx scenarios (issues 021 + 023) PORTED to node: DOM pointer
 // events → pure `pointerDown({page,x,y,mod})` inputs. No jsdom, no getBoundingClientRect stub — the UI's
-// client-px → page-px conversion stays in @tf-hwp/react; here we feed page px directly (SDK-LAYERS §함정).
+// client-px → page-px conversion stays in @auto-hwp/react; here we feed page px directly (SDK-LAYERS §함정).
 
 const para = (block: number, y: number, h: number, text: string): BlockHit => ({
   section: 0,
@@ -144,7 +144,7 @@ describe("SelectionModel — replace/toggle/marquee (issue 021)", () => {
 // Cell-level marking (issue 023): a click inside a table anchors the exact CELL (chip = snippet + "N행
 // M열", 1-based, global row/col), ⌘/Ctrl toggles the exact clicked cell, and cells mix with block
 // anchors. A 3×2 table fills the top of the page; a coordinate-aware `cell` resolver maps a point to
-// (row,col). Mirrors the @tf-hwp/react cell scenarios.
+// (row,col). Mirrors the @auto-hwp/react cell scenarios.
 const CELL_TABLE: TableBox = { section: 0, block: 1, x: 0, y: 0, w: 794, h: 780, rows: 3, cols: 2, first_row: 0 };
 const cellAt = (_p: number, x: number, y: number): CellHit => {
   const row = y < 260 ? 0 : y < 520 ? 1 : 2;

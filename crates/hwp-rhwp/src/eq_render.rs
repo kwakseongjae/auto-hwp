@@ -1,7 +1,7 @@
 //! Equation render adapter (issue 062-5) — bootstrap the vendored rhwp equation engine.
 //!
 //! rhwp ships a complete 한컴 수식 engine (`external/rhwp/src/renderer/equation/`, ~7.5k LOC, all
-//! `pub`). tf-hwp uses rhwp PARSE-only and renders from its own IR, so the equation renderer was never
+//! `pub`). auto-hwp uses rhwp PARSE-only and renders from its own IR, so the equation renderer was never
 //! wired — the own-render/HTML surfaces drew a stub box. This adapter calls rhwp's exact
 //! `tokenize → EqParser → EqLayout → render_equation_svg` pipeline (the SAME sequence rhwp's own
 //! `shape_layout.rs` uses) to precompute a `<g>`-embeddable SVG fragment at lift time. No rhwp edit —

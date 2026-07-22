@@ -1,7 +1,7 @@
 {
-  "name": "@tf-hwp/react",
+  "name": "@auto-hwp/react",
   "version": "0.0.1",
-  "description": "React components for tf-hwp: open .hwp/.hwpx, render pages to SVG, mark cells/ranges, chat-edit via a host-supplied AI callback, and download HTML/PDF — one <HwpWorkspace/> line. No LLM, no keys, no bundled fonts.",
+  "description": "React components for auto-hwp: open .hwp/.hwpx, render pages to SVG, mark cells/ranges, chat-edit via a host-supplied AI callback, and download HTML/PDF — one <HwpWorkspace/> line. No LLM, no keys, no bundled fonts.",
   "license": "MIT OR Apache-2.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -36,8 +36,8 @@
     "react-dom": ">=18"
   },
   "dependencies": {
-    "@tf-hwp/editor-core": "file:../editor-core",
-    "@tf-hwp/engine": "file:../engine"
+    "@auto-hwp/editor-core": "file:../editor-core",
+    "@auto-hwp/engine": "file:../engine"
   },
   "devDependencies": {
     "@testing-library/react": "^16.1.0",

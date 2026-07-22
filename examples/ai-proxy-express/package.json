@@ -1,14 +1,14 @@
 {
-  "name": "tf-hwp-ai-proxy-express",
+  "name": "auto-hwp-ai-proxy-express",
   "version": "0.0.0",
   "private": true,
-  "description": "프레임워크 독립 AI 프록시 템플릿 (issue 063): 정적/비-Next 호스트용 얇은 Express 서버. @tf-hwp/ai-protocol 재사용, 키 서버 전용(R6).",
+  "description": "프레임워크 독립 AI 프록시 템플릿 (issue 063): 정적/비-Next 호스트용 얇은 Express 서버. @auto-hwp/ai-protocol 재사용, 키 서버 전용(R6).",
   "type": "module",
   "scripts": {
     "start": "node server.mjs"
   },
   "dependencies": {
-    "@tf-hwp/ai-protocol": "file:../../packages/ai-protocol",
+    "@auto-hwp/ai-protocol": "file:../../packages/ai-protocol",
     "express": "^4.21.2"
   },
   "optionalDependencies": {

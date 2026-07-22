@@ -20,7 +20,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
-import { HwpDoc, initEngine } from "@tf-hwp/engine";
+import { HwpDoc, initEngine } from "@auto-hwp/engine";
 
 const REPO = path.resolve(process.cwd(), "..", "..");
 const WASM = path.join(REPO, "packages", "engine", "pkg", "hwp_wasm_bg.wasm");

@@ -1,7 +1,7 @@
 //! Chart render adapter (issue 062-7) — bootstrap the vendored rhwp OOXML chart engine.
 //!
 //! rhwp ships a complete OOXML (DrawingML) chart parser + native SVG renderer
-//! (`external/rhwp/src/ooxml_chart/`, all `pub`): bar/column/line/pie + combo + dual-axis. tf-hwp uses
+//! (`external/rhwp/src/ooxml_chart/`, all `pub`): bar/column/line/pie + combo + dual-axis. auto-hwp uses
 //! rhwp PARSE-only and renders from its own IR, so the chart renderer was never wired — a chart was
 //! DROPPED at lift (`_ => {}`), leaving no box at all. This adapter calls rhwp's exact
 //! `OoxmlChart::parse → render_svg` pipeline to precompute a `<g>`-embeddable SVG fragment at lift time.

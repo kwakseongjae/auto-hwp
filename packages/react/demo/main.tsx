@@ -51,7 +51,7 @@ function App() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 14px", background: "#fff", borderBottom: "1px solid #e2e4e8" }}>
-        <strong style={{ fontSize: 14 }}>@tf-hwp/react 데모</strong>
+        <strong style={{ fontSize: 14 }}>@auto-hwp/react 데모</strong>
         <label style={{ font: "inherit", fontSize: 13, padding: "5px 10px", border: "1px solid #cdd0d6", borderRadius: 6, cursor: "pointer" }}>
           파일 열기 (.hwp/.hwpx)
           <input type="file" accept=".hwp,.hwpx" hidden onChange={onFile} />

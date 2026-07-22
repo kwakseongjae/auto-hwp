@@ -1,12 +1,12 @@
 //! Local model provider via **Ollama** (out-of-process HTTP) — our-controlled generation with no
-//! cloud key. Default model `qwen3` (override `TF_HWP_LOCAL_MODEL`); host from `OLLAMA_HOST` or
+//! cloud key. Default model `qwen3` (override `AUTO_HWP_LOCAL_MODEL`); host from `OLLAMA_HOST` or
 //! `http://localhost:11434`. License-clean: Ollama runs as a separate process; we only speak HTTP.
 
 use super::{content, LlmProvider};
 use hwp_model::error::{Error, Result};
 
 const DEFAULT_HOST: &str = "http://localhost:11434";
-/// Default local model — override via `TF_HWP_LOCAL_MODEL`.
+/// Default local model — override via `AUTO_HWP_LOCAL_MODEL`.
 pub const DEFAULT_MODEL: &str = "qwen3";
 
 fn host_from_env() -> String {
@@ -22,9 +22,9 @@ pub struct OllamaProvider {
 }
 
 impl OllamaProvider {
-    /// Host from `OLLAMA_HOST`, model from `TF_HWP_LOCAL_MODEL` (else the defaults).
+    /// Host from `OLLAMA_HOST`, model from `AUTO_HWP_LOCAL_MODEL` (else the defaults).
     pub fn from_env() -> Self {
-        let model = std::env::var("TF_HWP_LOCAL_MODEL")
+        let model = std::env::var("AUTO_HWP_LOCAL_MODEL")
             .ok()
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| DEFAULT_MODEL.to_string());

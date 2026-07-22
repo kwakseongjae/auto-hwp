@@ -20,8 +20,8 @@
 
 ## 상태 확인
 ```bash
-cargo run -p tf-hwp-cli -- fidelity            # benchmark.hwp 전제조건/상태
-cargo run -p tf-hwp-cli -- fidelity <file>     # 임의 파일
+cargo run -p auto-hwp-cli -- fidelity            # benchmark.hwp 전제조건/상태
+cargo run -p auto-hwp-cli -- fidelity <file>     # 임의 파일
 cargo test -p hwp-fidelity                      # 지금 실행되는 게이트
 cargo test -p hwp-fidelity -- --ignored         # 전제조건 충족 시 전체
 ```
@@ -33,7 +33,7 @@ cargo test -p hwp-fidelity -- --ignored         # 전제조건 충족 시 전체
    - H2Orestart: **LibreOffice GUI → 도구 → 확장 관리자 → 추가**로 `~/Downloads/H2Orestart.oxt` 설치(CLI `unopkg add`는 이 환경의 프로세스 제약으로 파이프 에러 → GUI로 우회). `scripts/install-h2orestart.sh`는 다운로드용.
 2. **엔진 렌더(ours)** — rhwp 부트스트랩:
    ```bash
-   cargo run -p tf-hwp-cli --features rhwp -- fidelity     # 교차렌더 compare 실행
+   cargo run -p auto-hwp-cli --features rhwp -- fidelity     # 교차렌더 compare 실행
    cargo test -p hwp-fidelity --features rhwp -- --ignored # benchmark_oracle_and_fidelity
    ```
 

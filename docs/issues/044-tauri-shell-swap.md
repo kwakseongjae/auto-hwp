@@ -5,13 +5,13 @@
 
 ## 목표
 `VITE_SHELL=workspace`(빌드타임 플래그)일 때 데스크톱 앱이 기존 App.tsx 대신
-**@tf-hwp/react HwpWorkspace + TauriAdapter**를 마운트한다. 플래그 없으면 기존 UI가
+**@auto-hwp/react HwpWorkspace + TauriAdapter**를 마운트한다. 플래그 없으면 기존 UI가
 **바이트 동일하게** 그대로 — 롤백은 플래그 off. 기본값 전환은 이 이슈가 아니다
 (SDK 승격 8종 + 회귀 0 체크리스트 후, 감사표 §4).
 
 ## 구현 단계 (TAURI-CONVERGENCE.md §4 그대로)
 1. 엔트리 분기: ui의 main 진입에서 플래그 분기 — 신규 WorkspaceShell.tsx가 HwpWorkspace를
-   TauriAdapter(invoke, resolveOpenPath)로 마운트. @tf-hwp/react·editor-core는 로컬 파일 의존으로
+   TauriAdapter(invoke, resolveOpenPath)로 마운트. @auto-hwp/react·editor-core는 로컬 파일 의존으로
    ui package.json에 추가(빌드 순서 문서화). 기존 App.tsx/의존은 한 줄도 수정 금지.
 2. host chrome (감사표의 6종 중 이번 스코프 4):
    - **타이틀바**: 기존 규율 그대로 — h-9(36px) CSS 타이틀바 + data-tauri-drag-region.
@@ -42,7 +42,7 @@
 
 ## 함정
 - 트래픽 라이트 재작업 금지(위). 타이틀바 높이가 h-9에서 벗어나면 신호등이 중앙을 벗어난다.
-- @tf-hwp/react dist 소비 시 빌드 순서(editor-core→ai-protocol→react→ui) + 낡은 번들 함정
+- @auto-hwp/react dist 소비 시 빌드 순서(editor-core→ai-protocol→react→ui) + 낡은 번들 함정
   (.next의 데스크톱 등가물: vite 캐시/dist 재빌드 확인).
 - HwpWorkspace의 파일 input/브라우저 다운로드 같은 웹 관례가 데스크톱에서 새지 않게 —
   chrome 프롭/어댑터로 대체하되 HwpWorkspace 자체 개조는 최소(필요 시 opt-in prop만 추가,

@@ -1,4 +1,4 @@
-# 015 — P4-A: wasm npm 패키지 (`@tf-hwp/engine`)
+# 015 — P4-A: wasm npm 패키지 (`@auto-hwp/engine`)
 
 - 상태: **open**
 - 우선순위: P4 (목표 2 후반부 — 사이트 내 엔진 이식)

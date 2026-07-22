@@ -1,12 +1,12 @@
 //! OpenRouter provider (BYOK, OpenAI-compatible Chat Completions). Key from `OPENROUTER_API_KEY`
-//! (env or keychain); model from `TF_HWP_OPENROUTER_MODEL` (any OpenRouter slug). Out-of-process
+//! (env or keychain); model from `AUTO_HWP_OPENROUTER_MODEL` (any OpenRouter slug). Out-of-process
 //! HTTP only — license-clean. Drives the SAME rich `propose_content` pipeline as the other providers.
 
 use super::{content, secret, LlmProvider};
 use hwp_model::error::{Error, Result};
 
 const API_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
-/// Default model — a Gemini Flash. Override with `TF_HWP_OPENROUTER_MODEL` (exact OpenRouter slug).
+/// Default model — a Gemini Flash. Override with `AUTO_HWP_OPENROUTER_MODEL` (exact OpenRouter slug).
 pub const DEFAULT_MODEL: &str = "google/gemini-2.5-flash";
 
 pub struct OpenRouterProvider {
@@ -15,12 +15,12 @@ pub struct OpenRouterProvider {
 }
 
 impl OpenRouterProvider {
-    /// Key from `OPENROUTER_API_KEY` (env/keychain); model from `TF_HWP_OPENROUTER_MODEL` or default.
+    /// Key from `OPENROUTER_API_KEY` (env/keychain); model from `AUTO_HWP_OPENROUTER_MODEL` or default.
     pub fn from_env() -> Result<Self> {
         let api_key = secret::resolve_openrouter_key().ok_or(Error::CapabilityUnavailable(
             "set OPENROUTER_API_KEY to use the OpenRouter provider",
         ))?;
-        let model = std::env::var("TF_HWP_OPENROUTER_MODEL")
+        let model = std::env::var("AUTO_HWP_OPENROUTER_MODEL")
             .ok()
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| DEFAULT_MODEL.to_string());
@@ -45,8 +45,8 @@ impl OpenRouterProvider {
             .header("authorization", format!("Bearer {}", self.api_key))
             .header("content-type", "application/json")
             // OpenRouter optional attribution headers (rankings / dashboard).
-            .header("http-referer", "https://github.com/kwakseongjae/tf-hwp")
-            .header("x-title", "tf-hwp")
+            .header("http-referer", "https://github.com/kwakseongjae/auto-hwp")
+            .header("x-title", "auto-hwp")
             .json(&body)
             .send()
             .map_err(|e| Error::Other(format!("openrouter request failed: {e}")))?;

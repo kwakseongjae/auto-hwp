@@ -60,7 +60,7 @@ export class MemorySnapshotStore implements SnapshotStore {
 }
 
 // ── IndexedDB store ──────────────────────────────────────────────────────────────────────────────────
-const DB_NAME = "tf-hwp-lab-autosave";
+const DB_NAME = "auto-hwp-lab-autosave";
 const DB_VERSION = 1;
 const STORE = "snapshots";
 

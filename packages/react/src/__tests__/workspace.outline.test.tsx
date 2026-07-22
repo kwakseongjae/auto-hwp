@@ -85,7 +85,7 @@ describe("HwpWorkspace outline + status bar (issue 046)", () => {
     await waitFor(() => {
       expect(within(first.getByTestId("hw-outline")).queryAllByTestId("hw-outline-item")).toHaveLength(0);
     });
-    expect(window.localStorage.getItem("tf-hwp:outline-collapsed")).toBe("1");
+    expect(window.localStorage.getItem("auto-hwp:outline-collapsed")).toBe("1");
     first.unmount();
 
     // A fresh mount reads the persisted "collapsed" → starts collapsed.

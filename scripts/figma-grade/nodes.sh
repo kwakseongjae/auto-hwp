@@ -13,7 +13,7 @@ OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT"' EXIT
 
 echo "=== issue 033 · SVG-DOM node census (native own-render) — $(basename "$DOC") ==="
-( cd "$ROOT" && cargo run -q -p tf-hwp-cli --features "shaper rhwp" --release -- \
+( cd "$ROOT" && cargo run -q -p auto-hwp-cli --features "shaper rhwp" --release -- \
     own-render "$DOC" --out "$OUT/p.svg" ) >/dev/null
 
 total=0 max=0 maxf="" n_pages=0

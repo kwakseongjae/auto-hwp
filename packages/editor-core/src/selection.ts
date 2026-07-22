@@ -19,7 +19,7 @@ export function sameTable(a: CellAddr[], b: CellAddr[]): boolean {
   return a[a.length - 1].block === b[b.length - 1].block;
 }
 
-/// SelectionModel — the OS-style selection engine (issues 021 + 023), DESCENDED from @tf-hwp/react's
+/// SelectionModel — the OS-style selection engine (issues 021 + 023), DESCENDED from @auto-hwp/react's
 /// HwpWorkspace into framework-agnostic core. It owns the selection array (the single source of truth),
 /// the pointer drag state machine (click = replace, ⌘/Ctrl-click = toggle, empty-space drag = marquee /
 /// rubber-band, ⌘-marquee = union), and cell/table/block anchoring priority. It depends ONLY on the

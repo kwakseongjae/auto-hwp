@@ -1,4 +1,4 @@
-// @tf-hwp/engine worker entry (issue 055, FG-14) — runs the WHOLE engine inside a Web Worker so a
+// @auto-hwp/engine worker entry (issue 055, FG-14) — runs the WHOLE engine inside a Web Worker so a
 // multi-MB parse / re-layout / toHwpx snapshot never blocks the host's main thread.
 //
 // This file is a self-contained MODULE worker: it imports the same safety wrapper (./index.js) the

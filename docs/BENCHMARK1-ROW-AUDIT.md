@@ -16,7 +16,7 @@ NaiveLayout 은 공유 헬퍼로 **동일하게** 바뀐다(LOCKSTEP).
 ## 1. 진단 도구 (tracked, 상비)
 
 ```
-cargo run -q -p tf-hwp-cli --features "shaper rhwp" -- layout-check <file> --rows <section>/<block>
+cargo run -q -p auto-hwp-cli --features "shaper rhwp" -- layout-check <file> --rows <section>/<block>
 ```
 
 지정 표(우리 lift SemanticDoc 의 section/block 인덱스; 오라클이 도는 그 블록 순번)에 대해 **행별

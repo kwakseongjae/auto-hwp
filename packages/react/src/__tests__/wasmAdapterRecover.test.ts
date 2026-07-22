@@ -1,7 +1,7 @@
 // issue 052 — WasmAdapter trap recovery: SNAPSHOT-FIRST re-open + the autosave mutation signal.
 //
 // The engine module is mocked (no wasm): a fake HwpDoc whose applyIntent can be armed to throw a
-// `{code:"wasm_trap"}` (what @tf-hwp/engine surfaces on a real wasm panic), and whose open() can be
+// `{code:"wasm_trap"}` (what @auto-hwp/engine surfaces on a real wasm panic), and whose open() can be
 // armed to REJECT specific bytes (a corrupt snapshot). This locks the recovery contract:
 //   1. trap → resetEngine → re-open from the LATEST RecoverySnapshotSource bytes (snapshot-first),
 //      onRecovered({source:"snapshot"}), and the trap is STILL rethrown (the UI toasts + re-fetches).
@@ -22,7 +22,7 @@ const engineState = {
   replaced: 0,
 };
 
-vi.mock("@tf-hwp/engine", () => {
+vi.mock("@auto-hwp/engine", () => {
   const trap = () => Object.assign(new Error("wasm trap — poisoned"), { code: "wasm_trap" });
   class FakeDoc {
     static open(bytes: Uint8Array, name?: string) {

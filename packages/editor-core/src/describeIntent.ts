@@ -2,7 +2,7 @@ import type { Intent, IntentCard } from "./types";
 
 // Per-op-kind label + glyph for the proposal preview CARD header (010식). Pure Intent→card mapping — no
 // DOM — so both the UI panel and headless callers describe an Intent identically. DESCENDED from
-// @tf-hwp/react (issue 026); @tf-hwp/react re-exports it (backward compatible). Unknown kinds fall back
+// @auto-hwp/react (issue 026); @auto-hwp/react re-exports it (backward compatible). Unknown kinds fall back
 // to a generic "편집" card.
 const OP_META: Record<string, { label: string; icon: string }> = {
   SetTableCell: { label: "칸 채우기", icon: "▣" },

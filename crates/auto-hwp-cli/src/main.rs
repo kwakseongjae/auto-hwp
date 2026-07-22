@@ -1,4 +1,4 @@
-//! tf-hwp CLI. Phase-0 runnable surface: `detect`, `info`, `extract-text`, `oracle`.
+//! auto-hwp CLI. Phase-0 runnable surface: `detect`, `info`, `extract-text`, `oracle`.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -8,7 +8,7 @@ use hwp_model::types::SourceFormat;
 
 #[derive(Parser)]
 #[command(
-    name = "tf-hwp",
+    name = "auto-hwp",
     version,
     about = "HWP/HWPX view·edit·export engine (CLI)"
 )]
@@ -460,7 +460,7 @@ fn ai_key(action: &str) -> Result<(), String> {
                 .map_err(|e| e.to_string())?;
             hwp_ai::secret::store_anthropic_key(buf.trim()).map_err(|e| e.to_string())?;
             println!(
-                "키를 OS 키체인에 저장했습니다 (service=tf-hwp). 이후 ai-fill에서 자동 사용됩니다."
+                "키를 OS 키체인에 저장했습니다 (service=auto-hwp). 이후 ai-fill에서 자동 사용됩니다."
             );
             Ok(())
         }
@@ -717,7 +717,7 @@ fn export_pdf(file: &PathBuf, out: &Path) -> Result<(), String> {
 fn export_pdf(file: &PathBuf, _out: &Path) -> Result<(), String> {
     let _ = file;
     Err("export-pdf needs a build with `--features pdf` (krilla PDF backend + Korean font embedding).\n\
-         Interim fallback without that feature: `tf-hwp export-html <doc> -o doc.html` then print the \
+         Interim fallback without that feature: `auto-hwp export-html <doc> -o doc.html` then print the \
          HTML to PDF from any browser (File ▸ Print ▸ Save as PDF) or a headless chrome \
          (`chrome --headless --print-to-pdf=doc.pdf doc.html`)."
         .into())
@@ -842,7 +842,7 @@ fn render(file: &PathBuf, page: u32, out: &PathBuf) -> Result<(), String> {
 fn render(_file: &PathBuf, _page: u32, _out: &PathBuf) -> Result<(), String> {
     Err(
         "`render` needs the rhwp bootstrap: ./scripts/vendor-rhwp.sh then \
-         `cargo run -p tf-hwp-cli --features rhwp -- render <file>`"
+         `cargo run -p auto-hwp-cli --features rhwp -- render <file>`"
             .into(),
     )
 }
@@ -928,7 +928,7 @@ fn view(file: &PathBuf, out: &PathBuf) -> Result<(), String> {
     let html = format!(
         "<!doctype html><html lang=\"ko\"><head><meta charset=\"utf-8\">\
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
-<title>{title} — tf-hwp 미리보기</title><style>\
+<title>{title} — auto-hwp 미리보기</title><style>\
 :root{{color-scheme:dark}}\
 *{{box-sizing:border-box}}\
 body{{margin:0;background:#5b5e63;font-family:-apple-system,'Apple SD Gothic Neo','Malgun Gothic',sans-serif}}\
@@ -1008,7 +1008,7 @@ fn verify_convert(file: &PathBuf, out: &PathBuf) -> Result<(), String> {
     let (rpages, right) = column("변환 .hwpx (rhwp)", &hwpx)?;
 
     let html = format!(
-        "<!doctype html><html lang=\"ko\"><head><meta charset=\"utf-8\"><title>verify-convert — tf-hwp</title>\
+        "<!doctype html><html lang=\"ko\"><head><meta charset=\"utf-8\"><title>verify-convert — auto-hwp</title>\
 <style>body{{background:#525659;margin:0;font-family:sans-serif;color:#eee}}\
 .cols{{display:flex;gap:24px;align-items:flex-start;padding:24px}}\
 .col{{flex:1;display:flex;flex-direction:column;gap:16px;align-items:center;min-width:0}}\

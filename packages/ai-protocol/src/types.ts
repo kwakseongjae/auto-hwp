@@ -1,4 +1,4 @@
-/// @tf-hwp/ai-protocol — the vendor-neutral wire contract for chat-editing (SDK-LAYERS L2'). Types only
+/// @auto-hwp/ai-protocol — the vendor-neutral wire contract for chat-editing (SDK-LAYERS L2'). Types only
 /// here; the transforms/validators live in context.ts / prompt.ts / validate.ts. NOTHING in this package
 /// fetches, holds a key, or talks to any LLM vendor — a host wires its own model over these shapes.
 
@@ -11,7 +11,7 @@ export const INTENT_VERSION = "v0";
 export type Intent = { intent: string; [field: string]: unknown };
 
 /** A marked edit anchor (structure indices, never pixels). Structurally compatible with
- *  @tf-hwp/editor-core's Anchor so a host can pass those directly; kept independent here so ai-protocol
+ *  @auto-hwp/editor-core's Anchor so a host can pass those directly; kept independent here so ai-protocol
  *  stands alone (a server proxy need not depend on editor-core). */
 export interface Anchor {
   kind: string;
@@ -25,7 +25,7 @@ export interface Anchor {
 }
 
 /** One ACTIVE (uncovered) cell of a marked table's grid (issue 066) — its MODEL-GLOBAL `(row, col)`
- *  address + current plain text. Structurally compatible with @tf-hwp/editor-core's `GridCell`. */
+ *  address + current plain text. Structurally compatible with @auto-hwp/editor-core's `GridCell`. */
 export interface GridCell {
   row: number;
   col: number;
@@ -35,7 +35,7 @@ export interface GridCell {
 /** The cell GRID of a marked table (issue 066) — `rows`×`cols` plus every ACTIVE cell's address + text.
  *  Attached to the doc-context so the model sees each cell's structure (which are labels, which are
  *  blank) and can fill a table / target a label's value cell. Coordinates are the SAME `(row, col)`
- *  `SetTableCell` writes. Structurally compatible with @tf-hwp/editor-core's `TableGrid` so a host can
+ *  `SetTableCell` writes. Structurally compatible with @auto-hwp/editor-core's `TableGrid` so a host can
  *  pass those straight through; kept independent here so ai-protocol stands alone. */
 export interface TableGrid {
   section: number;
@@ -46,7 +46,7 @@ export interface TableGrid {
 }
 
 /** One detected heading of the document profile (issue 067). Structurally compatible with
- *  @tf-hwp/editor-core's `ProfileHeading` so a host passes the adapter's value straight through. */
+ *  @auto-hwp/editor-core's `ProfileHeading` so a host passes the adapter's value straight through. */
 export interface ProfileHeading {
   section: number;
   block: number;
@@ -69,7 +69,7 @@ export interface ProfileTable {
  *  LLM calls) — the "what IS this document" grounding that ends the user re-explaining the document
  *  every session (U1). Document-derived, hence UNTRUSTED — it rides INSIDE the R5-fenced
  *  `<document-content>` block (DATA, never instructions). Structurally compatible with
- *  @tf-hwp/editor-core's `DocProfile` (a host passes the adapter's value straight through). */
+ *  @auto-hwp/editor-core's `DocProfile` (a host passes the adapter's value straight through). */
 export interface DocProfile {
   title: string | null;
   sections: number;
@@ -100,7 +100,7 @@ export interface DocMeta {
  *  model as an OpenAI-style `image_url` content part); a `doc` carries extracted `text` (folded into the
  *  R5 fence as untrusted reference DATA — never instructions). Both are CONTEXT, never a new Intent: the
  *  Intent lane/whitelist is untouched. Additive + unknown-field-safe per invariant 7. Structurally
- *  compatible with @tf-hwp/editor-core's `Attachment` so a host passes these straight through. */
+ *  compatible with @auto-hwp/editor-core's `Attachment` so a host passes these straight through. */
 export interface Attachment {
   id: string;
   kind: "image" | "doc";
@@ -134,7 +134,7 @@ export interface EditRequest {
 /** One web-search source CITATION (web grounding) — a display-only `{title, url}` pair the proxy parses
  *  from the model's `url_citation` annotations (OpenRouter web plugin) so the host can show WHERE a
  *  grounded answer came from. Transparency data only — never fed back into an Intent (R5/R6 preserved).
- *  Structurally compatible with @tf-hwp/editor-core's `Citation` so a host passes these straight through. */
+ *  Structurally compatible with @auto-hwp/editor-core's `Citation` so a host passes these straight through. */
 export interface Citation {
   url: string;
   title: string;
@@ -168,7 +168,7 @@ export interface ChatTurn {
  *   - `tool_result`    — a tool finished; for `web_search` it carries the source `citations` (R5 DATA).
  *   - `intents`        — the TERMINAL event: the validated Intent[] to preview → apply.
  *   - `error`          — the runner failed; `message` is a human-readable reason (never leaks the key).
- *  Additive + unknown-field-safe (invariant 7). Structurally mirrored by @tf-hwp/editor-core's AgentEvent
+ *  Additive + unknown-field-safe (invariant 7). Structurally mirrored by @auto-hwp/editor-core's AgentEvent
  *  so the SDK forwards these straight through without depending on this package. */
 export type AgentEvent =
   | { type: "status"; phase: "thinking" | "searching" | "composing" }
