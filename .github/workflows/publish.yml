@@ -41,13 +41,14 @@ jobs:
           targets: wasm32-unknown-unknown
       - name: install wasm-bindgen-cli (=0.2.125)
         run: cargo install wasm-bindgen-cli --version 0.2.125 --locked
-      - name: install binaryen (wasm-opt, 선택 — 다이어트)
-        run: sudo apt-get update && sudo apt-get install -y binaryen
 
-      # wasm 다이어트(055/리브랜딩 후속): build-wasm.mjs 가 wasm-opt 를 찾으면 -Oz 를 적용한다 —
-      # 러너에 binaryen 이 없으면 11.6MB 미적용본이 나가던 문제(로컬 8.07MB)의 CI측 해소.
-      - name: install binaryen (wasm-opt)
-        run: sudo apt-get update -q && sudo apt-get install -y -q binaryen && wasm-opt --version
+      # 최신 binaryen 공식 릴리스 사용 — apt 는 108(2022)이라 최신 rustc wasm 에서 wasm-opt 가 실패해
+      # 조용히 미적용됐다(2026-07-22 실측: 배포/발행본 11.4MB vs 로컬 8.07MB). 119 로 고정 설치.
+      - name: install binaryen (wasm-opt -Oz 다이어트)
+        run: |
+          curl -sL https://github.com/WebAssembly/binaryen/releases/download/version_119/binaryen-version_119-x86_64-linux.tar.gz | tar xz -C /tmp
+          echo "/tmp/binaryen-version_119/bin" >> "$GITHUB_PATH"
+          /tmp/binaryen-version_119/bin/wasm-opt --version
       - uses: actions/setup-node@v4
         with:
           node-version: 20
