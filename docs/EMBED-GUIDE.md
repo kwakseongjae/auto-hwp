@@ -53,7 +53,7 @@ public/hwp/pkg/hwp_wasm.js       ← node_modules/@tf-hwp/engine/pkg/hwp_wasm.js
 >
 > **Vite 프로덕션 빌드 사본 주의(무해):** `vite build` 는 엔진 글루의 기본 wasm 참조
 > (`new URL('..._bg.wasm', import.meta.url)`)를 정적 에셋으로 **한 번 더** 방출한다
-> (`dist/assets/hwp_wasm_bg-*.wasm`, ~9MB). 런타임엔 `WasmAdapter` 가 넘긴 `public/hwp` 의 명시적 URL 만
+> (`dist/assets/hwp_wasm_bg-*.wasm`, ~8.1MB). 런타임엔 `WasmAdapter` 가 넘긴 `public/hwp` 의 명시적 URL 만
 > fetch 되므로 이 사본은 **로드되지 않는다**(정상 동작). 배포 크기를 줄이려면 빌드 후 `dist/assets/*.wasm`
 > 를 삭제하거나, 글루의 `import.meta.url` 자산화를 끄는 rollup 플러그인을 붙이면 된다(선택 — 게이트 아님).
 
@@ -151,6 +151,13 @@ const onAiRequest = async (instruction, anchors, ctx) => {
 바이트**를 넣으면 ① 조판 메트릭 ② PDF 임베드 ③ 화면 `@font-face` 가 동시에 그 폰트로 맞춰진다. 미주입 상태의
 PDF 는 `{code:"font_missing"}` 를 던진다(silent 빈 글리프 금지). **재배포 가능 폰트(OFL)만** 서빙하라 —
 함초롬/한컴 계열은 재배포 라이선스가 없다([`docs/LICENSE-POLICY.md`](LICENSE-POLICY.md)).
+
+**카탈로그 온디맨드 (2026-07-22):** `fontCatalog={FONT_CATALOG}` + `fontUrlBase` 를 주고 카탈로그
+파일들(전부 OFL — Pretendard·Noto Sans/Serif KR 등 8종, `fetch-fonts.mjs`)을 정적 서빙하면, 리본
+서체 피커/AI 가 카탈로그 family 를 지정할 때 워크스페이스가 자동으로 fetch→`registerFont`→화면
+`@font-face` 까지 수행한다 — **그 서체가 화면과 PDF 에 실서체로 반영**된다(엔진의 explicit-family
+bypass: 등록된 이름과 일치하는 명시 지정은 명조/고딕 대체를 우회, [`docs/FONT-CATALOG.md`](FONT-CATALOG.md)).
+문서 고유 서체명(함초롬 등)은 종전대로 OFL 대체 렌더.
 
 ---
 

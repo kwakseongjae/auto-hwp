@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-07-22 (Claude) · 잔여 마감 — 신선 설치 실증·fetch 스크립트·README 정리
+- MCP 신선 설치(cargo install --git, 퍼블릭 레포) 완주 실증 · fetch-gov-corpus.mjs 7/7 · README 한/영+EMBED-GUIDE 이번 배치 기능 반영(프로필/19종/위치보기/서체/실물49·130p).
+- npm 실발행 = NPM_TOKEN 부재로 사용자 액션 확정(토큰 발급→시크릿 등록→dry_run=false). 로컬 13커밋 미푸시 — push 승인 대기.
+
 ## 2026-07-22 (Claude) · 배포 표면 마감 — MCP·스킬·npm dry_run·KOGL
 - MCP(승인분) 포장 done: 바이너리 이미 완동(핸드셰이크+15도구 실증) → MCP-GUIDE+README 레시피(cargo install --git → claude mcp add). 스킬: skills/hwp(CLI 래핑) 신설 — npm 임베드·MCP·스킬 3표면 완성.
 - npm publish dry_run 성공 — 실발행은 dry_run=false 사용자 승인 1클릭. KOGL 25건 실측: 확인 8·4유형 2·불명 15 → 재배포 대신 corpus/GOV-SOURCES.md(7건 URL+sha256) 방식 결정(이미지 리스크 회피).

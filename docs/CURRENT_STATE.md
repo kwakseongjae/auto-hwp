@@ -4,6 +4,13 @@
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
 - 기준 커밋: `6ebfbb2`+CI픽스 — **PUBLIC 전환 + 라이브 데모 배포 완료**(https://kwakseongjae.github.io/tf-hwp/) — **R12~R14 + 실물QA 065·066 + 웹QA 2~6차 + HWPX 시각 파리티 + 레이아웃 정리 토글 완료**. GitHub: https://github.com/kwakseongjae/tf-hwp (private)
+- 갱신: 2026-07-22(11) · Claude — **잔여 마감 + 문서 정리**(fbe7e0d). ① **MCP 신선 설치 실검증**: 퍼블릭 레포
+  `cargo install --git` → 서브모듈 클론→빌드→핸드셰이크→.hwp 열기 완주(가이드 레시피 실증 — 단 원격 HEAD 기준).
+  ② **fetch-gov-corpus.mjs**: GOV-SOURCES 재현 스크립트, 빈 디렉토리 실검증 7/7. ③ README 한/영 재정리(문서
+  프로필·19종·위치 보기·실물 49종+130p 실측·서체 절)+EMBED-GUIDE 카탈로그 온디맨드 절. ④ **npm 실발행 블로킹
+  = 사용자 액션**: NPM_TOKEN 시크릿 없음+로컬 npm 미인증 — npmjs 토큰 발급→`gh secret set NPM_TOKEN`→
+  publish.yml dry_run=false (또는 npm login 후 로컬 발행). ⚠️ **로컬 13커밋 미푸시**(원격=4568a39) — 데모/설치
+  레시피 반영엔 push 필요(명시 승인 대기).
 - 갱신: 2026-07-22(10) · Claude — **잔여 배포 표면 일괄 처리**. ① **MCP 포장 done(757a240, 승인분)**: hwp-mcp
   stdio 바이너리 완동 실증(initialize·15도구·open→8쪽→텍스트) + docs/MCP-GUIDE.md + README 한/영 절 — 공용 서버 0.
   ② **Claude Code 스킬 신설**: skills/hwp/SKILL.md(CLI 래핑 — 변환·추출·미리보기·편집 팔레트+정직 고지). ③ **npm

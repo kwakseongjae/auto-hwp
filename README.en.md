@@ -121,8 +121,13 @@ only in the server route and never reaches the client bundle.
 
 ## Vibe editing (AI)
 
-Click a cell/paragraph/table to anchor it, say "fill in this table", and the LLM returns
-**Intent JSON** (a whitelisted schema) that the engine validates and applies.
+Click a cell/paragraph/table to anchor it — or **just talk**: on upload the engine attaches a
+deterministic **document profile** (title, structure counts, outline, table inventory, body
+excerpt — zero LLM calls) to every request, so "add a row to the first table" targets the right
+block with nothing marked. The LLM returns **Intent JSON** (a 19-intent whitelist — including
+document-wide find&replace, char formatting, column widths, page margins) that the engine
+validates and applies. Proposals preview as cards with **"reveal target"** (scroll + flash the
+affected block) and per-card revert.
 
 - LLM calls always happen on **your server** (BYOK — no package in this repo ever sees an API key)
 - model output touches the document only after schema validation + unknown-field rejection
@@ -151,7 +156,10 @@ is typed Intents rather than XML/CSS text.
 | benchmark1.hwp (application form, 18pp) | 18 pages | 18 pages | ✅ match |
 | line-break position match | — | 98.9%+ | gate |
 
-`scripts/verify-local.sh` enforces the gate on every commit. For lossy `.hwpx` conversions
+`scripts/verify-local.sh` enforces the gate on every commit. Beyond the gate, **49 real
+government documents** (startup-program forms, notices, press releases — [sources](./corpus/GOV-SOURCES.md))
+pass the full open→render→PDF→text pipeline; measured at 130 pages, edit→screen is 136ms on a
+worker thread, and undo memory is capped by a size-aware budget (128MiB). For lossy `.hwpx` conversions
 (Hancom's own "save as .hwpx" collapses line spacing and row heights), a **layout-recovery**
 mode detects the degradation fingerprint and restores an approximation of the original.
 
