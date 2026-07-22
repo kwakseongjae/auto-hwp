@@ -42,6 +42,10 @@ jobs:
       - name: install binaryen (wasm-opt — 번들 다이어트)
         run: sudo apt-get update && sudo apt-get install -y binaryen
 
+      # wasm 다이어트(055/리브랜딩 후속): build-wasm.mjs 가 wasm-opt 를 찾으면 -Oz 를 적용한다 —
+      # 러너에 binaryen 이 없으면 11.6MB 미적용본이 나가던 문제(로컬 8.07MB)의 CI측 해소.
+      - name: install binaryen (wasm-opt)
+        run: sudo apt-get update -q && sudo apt-get install -y -q binaryen && wasm-opt --version
       - uses: actions/setup-node@v4
         with:
           node-version: 20

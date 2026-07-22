@@ -37,8 +37,13 @@
 | `@auto-hwp/ai-protocol` | L2′ | 바이브 편집 LLM 프로토콜 (프롬프트/컨텍스트/검증) — fetch 없음, 키 없음 |
 | `@auto-hwp/react` | L3 | **선택** 레이어: 레퍼런스 에디터 `<HwpWorkspace/>` + React 바인딩 |
 
-> 아직 npm 레지스트리에 발행 전입니다. 지금은 `examples/vite-embed`의 레시피대로
-> `npm pack` tarball로 소비할 수 있습니다 (4패키지 모두 발행 준비 완료 상태).
+```bash
+npm i @auto-hwp/engine            # headless만 쓸 때
+npm i @auto-hwp/react @auto-hwp/engine @auto-hwp/editor-core @auto-hwp/ai-protocol
+```
+
+임베드 전체 레시피(wasm 정적 서빙·CSP·폰트·AI 프록시)는 [docs/EMBED-GUIDE.md](./docs/EMBED-GUIDE.md),
+동작 예제는 [examples/vite-embed](./examples/vite-embed).
 
 ## 빠른 시작 ① — headless 엔진만 (자체 UI)
 

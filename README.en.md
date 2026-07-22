@@ -42,8 +42,13 @@ delegating rendering to external programs:
 | `@auto-hwp/ai-protocol` | L2′ | vendor-neutral LLM protocol for vibe-editing (prompt/context/validate) — no fetch, no keys |
 | `@auto-hwp/react` | L3 | **optional**: reference editor `<HwpWorkspace/>` + React bindings |
 
-> Not yet published to the npm registry. Until then, consume `npm pack` tarballs following
-> the recipe in `examples/vite-embed` (all four packages are publish-ready).
+```bash
+npm i @auto-hwp/engine            # headless only
+npm i @auto-hwp/react @auto-hwp/engine @auto-hwp/editor-core @auto-hwp/ai-protocol
+```
+
+Full embed recipe (static wasm serving, CSP, fonts, AI proxy): [docs/EMBED-GUIDE.md](./docs/EMBED-GUIDE.md) ·
+working example: [examples/vite-embed](./examples/vite-embed).
 
 ## Quick start ① — headless engine only (bring your own UI)
 
