@@ -3,7 +3,8 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
-- 기준 커밋: `6ebfbb2`+CI픽스 — **PUBLIC 전환 + 라이브 데모 배포 완료**(https://kwakseongjae.github.io/auto-hwp/) — **R12~R14 + 실물QA 065·066 + 웹QA 2~6차 + HWPX 시각 파리티 + 레이아웃 정리 토글 완료**. GitHub: https://github.com/kwakseongjae/auto-hwp (private)
+- 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
+  — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
 - 갱신: 2026-07-22(12) · Claude — **전면 리브랜딩: tf-hwp → auto-hwp (오토한글)**(e41efa0). 컨셉 정본 = "AI와
   함께 한 화면을 보면서 작성하는 한글". ① GitHub 레포 `kwakseongjae/auto-hwp` 리네임(구 URL 리다이렉트)
   ② 소스 204파일 치환(@auto-hwp 스코프·auto-hwp-cli/바이너리·AUTO_HWP_* — JOURNAL/history는 역사 보존)

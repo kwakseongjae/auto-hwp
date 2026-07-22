@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-07-22 (Claude) · push + Pages 재배포 — 오토한글 라이브
+- 15커밋 push(4568a39..aacd1a9) → deploy-demo(base_path=/auto-hwp) success → https://kwakseongjae.github.io/auto-hwp/ 실검증(200·오토한글 브랜딩·wasm 200). 구 URL 리다이렉트 확인.
+- 열린 것: npm 발행 = 사용자 토큰(npmjs org "auto-hwp"+automation 토큰→gh secret set NPM_TOKEN) 후 dry_run=false. 로컬 폴더명은 tf-hwp 유지(사용자 결정).
+
 ## 2026-07-22 (Claude) · 리브랜딩 — 오토한글 (auto-hwp) (e41efa0)
 - 레포/스코프/CLI/env 전면 치환(204파일, JOURNAL·history 제외)+GitHub 리네임+배너(assets/brand)+README 한/영 히어로+데모 카피. 게이트·vitest·e2e 42/42 그린.
 - 함정: 타 프로젝트 3100 선점→e2e 엉뚱한 앱 재사용(2m 타임아웃 연쇄)→PW_PORT 손잡이. 열린 것: push+Pages 재배포(base_path=/auto-hwp) 승인 대기 · npm은 @auto-hwp 스코프 발행(토큰 등록 후).
