@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-07-22 (Claude) · npm 첫 발행 — @auto-hwp/* 4종 라이브
+- 사용자 토큰 등록(gh secret) → publish.yml dry_run=false success → 레지스트리 실확인 4/4(0.0.1) + 신선 설치 스모크(npm i → buildDocContext 프로필 렌더·whitelist 19·engine wasm 동봉).
+- ⚠️ 발행 wasm=11.6MB(CI에 wasm-opt/binaryen 부재 — 로컬 8.07MB): 0.0.2 전에 publish.yml에 binaryen 설치 스텝 추가할 것. ⚠️ 토큰이 셸/세션에 노출됨 — 사용자에게 폐기·재발급 안내.
+
 ## 2026-07-22 (Claude) · push + Pages 재배포 — 오토한글 라이브
 - 15커밋 push(4568a39..aacd1a9) → deploy-demo(base_path=/auto-hwp) success → https://kwakseongjae.github.io/auto-hwp/ 실검증(200·오토한글 브랜딩·wasm 200). 구 URL 리다이렉트 확인.
 - 열린 것: npm 발행 = 사용자 토큰(npmjs org "auto-hwp"+automation 토큰→gh secret set NPM_TOKEN) 후 dry_run=false. 로컬 폴더명은 tf-hwp 유지(사용자 결정).

@@ -5,6 +5,10 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
+- 갱신: 2026-07-22(13) · Claude — **npm 첫 발행 완료**: `@auto-hwp/{engine,editor-core,ai-protocol,react}` 0.0.1
+  퍼블릭 레지스트리 라이브(발행 CI success + 신선 `npm i` 스모크: ai-protocol 프로필 렌더·whitelist 19·wasm 동봉).
+  잔여: ①발행 wasm 11.6MB(CI binaryen 부재 — 0.0.2 전 publish.yml에 설치 스텝) ②노출 토큰 폐기·재발급(사용자).
+  README의 "발행 전" 문구 → 발행됨으로 갱신 필요(다음 배치).
 - 갱신: 2026-07-22(12) · Claude — **전면 리브랜딩: tf-hwp → auto-hwp (오토한글)**(e41efa0). 컨셉 정본 = "AI와
   함께 한 화면을 보면서 작성하는 한글". ① GitHub 레포 `kwakseongjae/auto-hwp` 리네임(구 URL 리다이렉트)
   ② 소스 204파일 치환(@auto-hwp 스코프·auto-hwp-cli/바이너리·AUTO_HWP_* — JOURNAL/history는 역사 보존)
