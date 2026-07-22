@@ -93,6 +93,15 @@ Full embed recipe (static wasm/worker serving, CSP, fonts, AI proxy):
 [`docs/EMBED-GUIDE.md`](./docs/EMBED-GUIDE.md) · working example: [`examples/vite-embed`](./examples/vite-embed) ·
 AI proxy example: [`examples/ai-proxy-express`](./examples/ai-proxy-express).
 
+## Use it from AI tools / the terminal (no site, fully local)
+
+- **MCP server** — attach to Claude Code/Desktop or Cursor: `cargo install --git
+  https://github.com/kwakseongjae/tf-hwp hwp-mcp --features rhwp` → `claude mcp add tf-hwp -- hwp-mcp`.
+  15 tools (open / structured context / preview→approve edits / find&replace / undo / HWPX·PDF export).
+  Documents never leave your machine. → [docs/MCP-GUIDE.md](docs/MCP-GUIDE.md)
+- **Claude Code skill** — `cp -r skills/hwp ~/.claude/skills/`, then in any session: "convert this
+  hwp to pdf". Wraps the local `tf-hwp` CLI. → [skills/hwp/SKILL.md](skills/hwp/SKILL.md)
+
 ## Run the demo locally
 
 ```bash
@@ -100,8 +109,8 @@ git clone --recurse-submodules https://github.com/kwakseongjae/tf-hwp
 cd tf-hwp
 
 # build the engine wasm (Rust + wasm-bindgen — see CONTRIBUTING.md)
-cargo build -p hwp-wasm --release --target wasm32-unknown-unknown
-wasm-bindgen --target web --out-dir packages/engine/pkg target/wasm32-unknown-unknown/release/hwp_wasm.wasm
+cargo build -p hwp-wasm --profile wasm-size --target wasm32-unknown-unknown
+wasm-bindgen --target web --out-dir packages/engine/pkg target/wasm32-unknown-unknown/wasm-size/hwp_wasm.wasm
 
 # demo app
 cd apps/hwp-lab && npm install && npm run dev   # http://localhost:3000
