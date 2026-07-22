@@ -26,6 +26,10 @@ export interface SelectionOverlayProps {
   scale: number;
   /** The active marquee rectangle (or null). Drawn only when `marquee.page === page`. */
   marquee?: Marquee | null;
+  /** 072 — transient "위치 보기" flash: the AI card's target block box, drawn briefly (fade-out
+   *  animation) so the user SEES which block an edit targets before applying. Same page-px→client-px
+   *  scale as marks; null = no flash. */
+  flash?: Mark | null;
 }
 
 /// SelectionOverlay — the cell/range/paragraph/table MARKING layer (issue 016 step 2) + the marquee
@@ -34,10 +38,11 @@ export interface SelectionOverlayProps {
 /// and the marked spot rides along to the chat panel as an anchor. While dragging over empty space it
 /// also draws the dashed marquee rectangle. This layer is `pointer-events: none` — pointer handling
 /// lives on the page sheet (HwpPageView → HwpWorkspace); the overlay is purely visual.
-export function SelectionOverlay({ marks, page, scale, marquee }: SelectionOverlayProps) {
+export function SelectionOverlay({ marks, page, scale, marquee, flash }: SelectionOverlayProps) {
   const mine = marks.filter((m) => m.page === page);
   const rubber = marquee && marquee.page === page ? marquee : null;
-  if (mine.length === 0 && !rubber) return null;
+  const glow = flash && flash.page === page ? flash : null;
+  if (mine.length === 0 && !rubber && !glow) return null;
   return (
     <div className="hw-overlay" aria-hidden>
       {mine.map((m, i) => {
@@ -52,6 +57,15 @@ export function SelectionOverlay({ marks, page, scale, marquee }: SelectionOverl
           </div>
         );
       })}
+      {glow && (
+        <div
+          className="hw-reveal-flash"
+          data-testid="hw-reveal-flash"
+          style={{ left: glow.box.x * scale, top: glow.box.y * scale, width: glow.box.w * scale, height: glow.box.h * scale }}
+        >
+          <span className="hw-mark-label">{glow.label}</span>
+        </div>
+      )}
       {rubber && (
         <div
           className="hw-marquee"

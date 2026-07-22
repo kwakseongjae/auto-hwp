@@ -37,8 +37,8 @@ fi
 
 if [ "$MODE" = "--full" ]; then
   echo "═══ wasm 재빌드 (AGENTS.md 함정 top6 — 스테일 wasm 방지) ═══"
-  cargo build -p hwp-wasm --release --target wasm32-unknown-unknown
-  wasm-bindgen --target web --out-dir packages/engine/pkg target/wasm32-unknown-unknown/release/hwp_wasm.wasm
+  cargo build -p hwp-wasm --profile wasm-size --target wasm32-unknown-unknown
+  wasm-bindgen --target web --out-dir packages/engine/pkg target/wasm32-unknown-unknown/wasm-size/hwp_wasm.wasm
   # 이슈 055 번들 다이어트: wasm-opt -Oz (2026-07-11 실측 raw 11.2→8.7MiB -22%, gzip -6%; SVG/HTML/
   # PDF/HWPX 골든 바이트동일 검증 완료). 구버전 binaryen(예: cargo-bin의 116)은 최신 rustc 인코딩을
   # 못 읽으므로 "실제로 성공한" 후보만 채택하고, 전부 실패하면 미적용 경고만 남긴다(다이어트는

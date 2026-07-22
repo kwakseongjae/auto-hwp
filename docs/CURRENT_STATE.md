@@ -4,6 +4,10 @@
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
 - 기준 커밋: `6ebfbb2`+CI픽스 — **PUBLIC 전환 + 라이브 데모 배포 완료**(https://kwakseongjae.github.io/tf-hwp/) — **R12~R14 + 실물QA 065·066 + 웹QA 2~6차 + HWPX 시각 파리티 + 레이아웃 정리 토글 완료**. GitHub: https://github.com/kwakseongjae/tf-hwp (private)
+- 갱신: 2026-07-22(9) · Claude — **072 위치 보기 + wasm 다이어트 + 플레이키 격리 완료**(4adc541). ① 072: AI 카드
+  "⊙ 위치 보기"→blocksInRect 스캔→jumpToPage+1.8s 플래시. ② wasm **11.26→8.07MB**(-28%, 전용 [profile.wasm-size]
+  opt-z·fat LTO·cgu1 — 정본 3경로 전환. 트레이드오프: 편집 20→27ms@18p, 워커라 체감 무해). ③ 048/039 플레이키:
+  자동 기본폰트 등록 토스트 silent화(.hw-status 슬롯 경합 제거)+retries:1 안전망 → **전체 e2e 42/42**(재시도 0). react 321.
 - 갱신: 2026-07-22(8) · Claude — **rhwp v0.7.19 재벤더링(fa72e42) + 폰트 카탈로그 온디맨드 제공 구현**.
   ① 062 needsExternal 해소(미러에 upstream 태그 푸시, lift.rs BinDataBytes .load() 적응) — 게이트/벤치 49/49 불변,
   ⚠️ wasm 9.5→11.0MB(+1.5MB upstream 성장). ② 폰트 제공(진단 U8/보강 G): explicit-family bypass(has_family →

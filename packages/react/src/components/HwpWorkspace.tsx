@@ -788,7 +788,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // re-paginates + invalidates layout; here we build the screen @font-face (blob URL of the SAME bytes →
   // screen == PDF). Shared by the auto-registered defaultFont and the FontPicker.
   const applyFont = useCallback(
-    async (family: string, bytes: Uint8Array) => {
+    async (family: string, bytes: Uint8Array, opts?: { silent?: boolean }) => {
       try {
         await core.session.registerFont(family, bytes);
       } catch (e) {
@@ -806,7 +806,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         if (prev) URL.revokeObjectURL(prev.url);
         return { family, url };
       });
-      toast(`글꼴 적용: ${family}`);
+      // 048/039 플레이키 격리: 문서 열기마다 도는 AUTO 기본폰트 등록은 조용히 — 이 토스트가 뒤이은
+      // 사용자 액션 토스트("굵게 적용" 등)와 .hw-status 단일 슬롯을 놓고 경합하던 노이즈였다.
+      if (!opts?.silent) toast(`글꼴 적용: ${family}`);
     },
     [core, toast],
   );
@@ -817,7 +819,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     if (!meta || !props.defaultFont || !props.document) return;
     if (defaultFontAppliedFor.current === props.document.bytes) return;
     defaultFontAppliedFor.current = props.document.bytes;
-    void applyFont(props.defaultFont.family, props.defaultFont.bytes);
+    void applyFont(props.defaultFont.family, props.defaultFont.bytes, { silent: true });
   }, [meta, props.defaultFont, props.document, applyFont]);
 
   // Issue 058: the served URL of the OFL SERIF substitute (Nanum Myeongjo) from the catalog — drives the
@@ -2551,6 +2553,36 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     el?.scrollIntoView?.({ behavior: "smooth", block: "start" });
   }, []);
 
+  // ── 072 — AI 카드 "위치 보기": 대상 (section, block)의 화면 박스를 찾아 스크롤 + 1.8s 플래시 ──────
+  // 페이지를 앞에서부터 blocksInRect(전체영역)로 스캔해 매치를 찾는다 — 클릭 시 1회라 비용 무시 가능,
+  // 대상은 대개 앞쪽 페이지. blocksInRect 미지원 백엔드는 정직 토스트(기능 자체가 없다고 알림).
+  const [revealFlash, setRevealFlash] = useState<Mark | null>(null);
+  const revealTimer = useRef<number | null>(null);
+  const revealBlock = useCallback(
+    async (section: number, block: number) => {
+      if (!adapter.blocksInRect || !meta) {
+        toast("이 백엔드는 위치 보기를 지원하지 않습니다");
+        return;
+      }
+      try {
+        for (let pg = 0; pg < meta.pages; pg++) {
+          const hits = await adapter.blocksInRect(pg, 0, 0, 100000, 100000);
+          const hit = hits.find((h) => h.section === section && h.block === block);
+          if (!hit) continue;
+          jumpToPage(pg);
+          if (revealTimer.current !== null) window.clearTimeout(revealTimer.current);
+          setRevealFlash({ page: pg, box: { x: hit.x, y: hit.y, w: hit.w, h: hit.h }, label: "편집 대상", kind: "reveal" });
+          revealTimer.current = window.setTimeout(() => setRevealFlash(null), 1800);
+          return;
+        }
+        toast("대상 블록을 화면에서 찾지 못했습니다 (이미 삭제됐거나 주소가 바뀌었을 수 있습니다)");
+      } catch (e) {
+        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`위치 보기 실패: ${e}`);
+      }
+    },
+    [adapter, meta, jumpToPage, toast, onTrap],
+  );
+
   // ── issue 046: fetch the document outline (engine headings) whenever the doc / layout changes ─────────
   // Read-only query (no undo unit) through the SAME facade both backends share (`session.outline` →
   // `adapter.outline?`), so the web and the new-shell desktop get identical headings. A backend that omits
@@ -2855,7 +2887,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                     {/* issue 038: the hover pre-highlight sits UNDER the selection marks (rendered first) and
                         is pointer-events:none, so it never interferes with clicks/marks — it only points. */}
                     <HoverLayer store={hover.store} page={page} scale={scale} />
-                    <SelectionOverlay marks={marks} page={page} scale={scale} />
+                    <SelectionOverlay marks={marks} page={page} scale={scale} flash={revealFlash} />
                     {/* issue 045: the 찾기 match highlight (current 강조 / rest 옅게), visually distinct from
                         the selection marks. pointer-events:none — purely visual, like the selection overlay. */}
                     {findOpen && <FindMatchOverlay boxes={findBoxes} current={core.find.cursor} page={page} scale={scale} />}
@@ -3022,6 +3054,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           docContext={docContext}
           onApply={onApply}
           onJumpToPage={jumpToPage}
+          onRevealTarget={revealBlock}
           isMock={props.isMock}
           aiNotice={props.aiNotice}
           focusToken={aiFocusToken}

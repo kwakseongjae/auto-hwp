@@ -55,3 +55,11 @@ hwp-foreign = { path = "crates/hwp-foreign" }
 [profile.release]
 opt-level = 3
 lto = "thin"
+
+# wasm 번들 다이어트(055 후속, rhwp v0.7.19 성장 +1.5MB 상쇄): 릴리스와 분리된 wasm 전용 프로필 —
+# 크기 우선(opt-level z)·fat LTO·단일 codegen unit. 네이티브 릴리스(CLI/게이트) 빌드 시간엔 무영향.
+[profile.wasm-size]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1

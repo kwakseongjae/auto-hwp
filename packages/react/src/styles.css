@@ -169,6 +169,12 @@
 
 /* ---- selection overlay ---- */
 .hw-overlay { position: absolute; inset: 0; pointer-events: none; }
+.hw-reveal-flash {
+  position: absolute; pointer-events: none; box-sizing: border-box; z-index: 7;
+  border: 2px solid var(--hw-ai); background: rgba(124, 58, 237, 0.18); border-radius: 3px;
+  animation: hw-reveal-fade 1.8s ease-out forwards;
+}
+@keyframes hw-reveal-fade { 0% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0; } }
 .hw-mark {
   position: absolute; border: 2px solid var(--hw-accent);
   background: rgba(37, 99, 235, 0.12); border-radius: 2px;

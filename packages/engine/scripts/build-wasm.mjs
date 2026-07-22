@@ -3,7 +3,7 @@
 // pkg/ 는 gitignore 이므로 `npm pack`/`npm publish` 직전 이 스크립트가 wasm 아티팩트를 재생성해야
 // tarball 이 "빈 채" 발행되지 않는다(빈 tarball 위험). 레시피는 AGENTS.md 함정 top6 + verify-local.sh
 // --full 의 wasm 재빌드 블록을 **그대로** 재현한다:
-//   1) cargo build -p hwp-wasm --release --target wasm32-unknown-unknown
+//   1) cargo build -p hwp-wasm --profile wasm-size --target wasm32-unknown-unknown  (크기 전용 프로필)
 //   2) wasm-bindgen --target web --out-dir packages/engine/pkg  <release>/hwp_wasm.wasm
 //   3) wasm-opt -Oz (있으면; 다이어트는 게이트가 아니라 최적화 — 실패 시 미적용 경고만)
 //   4) pkg/hwp_wasm_bg.wasm 가 존재하고 자명하지 않은 크기(>1MiB)인지 검증(빈 tarball 방지)
@@ -59,9 +59,9 @@ if (!toolchain) {
   console.error(
     "\n[build-wasm] cargo 또는 wasm-bindgen 이 없고 유효한 pkg 도 없습니다. 레시피(레포 루트에서):\n" +
       '  export PATH="$HOME/.cargo/bin:$PATH"\n' +
-      "  cargo build -q -p hwp-wasm --release --target wasm32-unknown-unknown\n" +
+      "  cargo build -q -p hwp-wasm --profile wasm-size --target wasm32-unknown-unknown\n" +
       "  wasm-bindgen --target web --out-dir packages/engine/pkg \\\n" +
-      "    target/wasm32-unknown-unknown/release/hwp_wasm.wasm\n" +
+      "    target/wasm32-unknown-unknown/wasm-size/hwp_wasm.wasm\n" +
       "  # (선택) wasm-opt -Oz packages/engine/pkg/hwp_wasm_bg.wasm -o packages/engine/pkg/hwp_wasm_bg.wasm\n" +
       "  # wasm-bindgen CLI 버전은 crates/hwp-wasm/Cargo.toml 의 =0.2.125 와 정확히 일치해야 합니다.\n",
   );
@@ -69,14 +69,14 @@ if (!toolchain) {
 }
 
 // 1) release wasm
-run("cargo", ["build", "-q", "-p", "hwp-wasm", "--release", "--target", "wasm32-unknown-unknown"]);
+run("cargo", ["build", "-q", "-p", "hwp-wasm", "--profile", "wasm-size", "--target", "wasm32-unknown-unknown"]);
 // 2) wasm-bindgen glue (--target web)
 run("wasm-bindgen", [
   "--target",
   "web",
   "--out-dir",
   "packages/engine/pkg",
-  "target/wasm32-unknown-unknown/release/hwp_wasm.wasm",
+  "target/wasm32-unknown-unknown/wasm-size/hwp_wasm.wasm",
 ]);
 // 3) wasm-opt -Oz — 동작하는 binaryen 후보만 채택, 전부 실패하면 미적용(기능 동일).
 let opted = false;

@@ -6,6 +6,10 @@ import { defineConfig, devices } from "@playwright/test";
 const PORT = 3100;
 
 export default defineConfig({
+  // 알려진 순서/타이밍 플레이키(039·048 계열 — 격리 실행은 항상 그린, CURRENT_STATE §알려진 flaky)의
+  // 풀스위트 노이즈 완화: 1회 재시도. 일관 회귀는 여전히 실패하고, 플레이키는 리포트에 "flaky"로
+  // 표시되어 은폐되지 않는다(추적 유지).
+  retries: 1,
   testDir: "./e2e",
   timeout: 120_000,
   expect: { timeout: 30_000 },

@@ -41,7 +41,7 @@ fmt-dirty 커밋은 다음 verify에서 걸린다). GitHub Actions는 `gh workfl
 
 ## 함정 top 6 (전체는 각 이슈 파일의 "함정" 절)
 - e2e 전 `rm -rf apps/hwp-lab/.next` — 웹팩 캐시가 dist 재빌드를 감지 못해 가짜 통과/실패.
-- **crates(Rust) 변경 후 wasm pkg 재빌드 필수**: `cargo build -p hwp-wasm --release --target
+- **crates(Rust) 변경 후 wasm pkg 재빌드 필수**: `cargo build -p hwp-wasm --profile wasm-size --target
   wasm32-unknown-unknown` → `wasm-bindgen --target web --out-dir packages/engine/pkg …` →
   (있으면) `wasm-opt -Oz` 다이어트(055 — verify-local --full이 자동 수행, 골든 바이트동일 검증됨) →
   `node apps/hwp-lab/scripts/copy-wasm.mjs` → `.next` 삭제. 스테일 wasm은 신규 Intent를

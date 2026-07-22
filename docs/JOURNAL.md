@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-22 (Claude) · 072 위치 보기 + wasm 8.07MB + 플레이키 격리 (4adc541)
+- 072: 카드 "⊙ 위치 보기"(revealBlock: blocksInRect 스캔→점프+플래시) done. react 321·tsc 클린.
+- wasm: 전용 [profile.wasm-size]로 11.26→**8.07MB**(-28%), 정본 3경로 전환. 편집 +30%@18p(워커 비차단 — 수용). 벤치·e2e 스모크 그린.
+- 플레이키: 자동 폰트 토스트 silent화+retries:1 → 풀스위트 42/42. 열린 것: MCP 셀프호스팅 포장 여부(사용자 결정 대기).
+
 ## 2026-07-22 (Claude) · rhwp v0.7.19 재벤더링 + 폰트 카탈로그 온디맨드 제공
 - rhwp: upstream 태그를 미러에 직접 푸시해 needsExternal 해소 → v0.7.19 bump(fa72e42), lift.rs BinDataBytes 적응 3+2곳. 게이트·벤치 49/49 불변, wasm +1.5MB(upstream 성장 — 다이어트 후속).
 - 폰트: FONT-CATALOG 8종 전부 OFL 재확인(Pretendard/Noto 포함). explicit-family bypass(엔진 3층) + ensureCatalogFont(react)로 리본/AI 지정 서체가 화면·PDF에 실서체 반영. react 320·e2e 41~42/42(048=039계열 순서 플레이키, 격리 그린).
