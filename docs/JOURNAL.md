@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-07-22 (Claude) · CI wasm 다이어트 근본 해소 — 라이브 7.30MB
+- 근본 = apt binaryen 108(2022)이 최신 rustc wasm에서 실패→조용히 미적용. 공식 릴리스 119 고정 설치로 교체(배포·발행 공통, 중복 스텝 정리) → 재배포 실측 **11.13→7.30MB(-34%)**, CI 로그 "wasm-opt 적용 7478KB". README 발행됨 문구도 반영(56bc7a9).
+- 다음 npm 발행(0.0.2)부터 레지스트리 wasm도 자동 다이어트. 남은 사용자 액션: 노출 토큰 폐기·재발급.
+
 ## 2026-07-22 (Claude) · npm 첫 발행 — @auto-hwp/* 4종 라이브
 - 사용자 토큰 등록(gh secret) → publish.yml dry_run=false success → 레지스트리 실확인 4/4(0.0.1) + 신선 설치 스모크(npm i → buildDocContext 프로필 렌더·whitelist 19·engine wasm 동봉).
 - ⚠️ 발행 wasm=11.6MB(CI에 wasm-opt/binaryen 부재 — 로컬 8.07MB): 0.0.2 전에 publish.yml에 binaryen 설치 스텝 추가할 것. ⚠️ 토큰이 셸/세션에 노출됨 — 사용자에게 폐기·재발급 안내.
