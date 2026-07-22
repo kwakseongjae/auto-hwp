@@ -4,7 +4,12 @@
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
 - 기준 커밋: `6ebfbb2`+CI픽스 — **PUBLIC 전환 + 라이브 데모 배포 완료**(https://kwakseongjae.github.io/tf-hwp/) — **R12~R14 + 실물QA 065·066 + 웹QA 2~6차 + HWPX 시각 파리티 + 레이아웃 정리 토글 완료**. GitHub: https://github.com/kwakseongjae/tf-hwp (private)
-- 갱신: 2026-07-22(6) · Claude — **070 대형 문서 실측 완료(보강 F)**. 실 wasm 사다리(8~130p, 실물 4+합성 2):
+- 갱신: 2026-07-22(7) · Claude — **071 undo 메모리 버짓 구현 완료**. 070의 첫 병목(130p 스냅샷 딥카피 ~8MB×50
+  = RSS +403MB) 해소: 직렬화 스냅샷은 round-trip/rhwp 노드 훼손으로 **기각**, `SemanticDoc::approx_heap_bytes`
+  추정기 + `EditSession::with_budget`(단일 push 경로·바닥 4) + 라이브 레인 **128MiB 버짓**. 실측: 130p RSS
+  +403→**+0.1MB**·깊이 50→10 정직 축소, **18p 실물 깊이 50 무회귀**. 게이트 8==8/18==18 · workspace 56 스위트 ·
+  vitest 170/320/50 · e2e 42/42 · wasm 재빌드.
+- 갱신(6): 2026-07-22 · Claude — **070 대형 문서 실측 완료(보강 F)**. 실 wasm 사다리(8~130p, 실물 4+합성 2):
   편집→화면 **~1ms/쪽 선형**(41p 실물 16ms·130p 136ms, 워커 비차단) → **증분 조판 보류**(재평가 임계 150p+ 실물).
   **첫 병목 = undo 스냅샷 딥카피**(130p·편집50회 RSS +403MB vs 직렬화 0.2MB) → HWPX-바이트 스냅샷 전환이
   ~40배 절감 후속 후보. 벤치 재실행: `node packages/engine/bench/large-doc-bench.mjs`(--synth 지원).

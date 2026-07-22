@@ -2220,6 +2220,16 @@ pub struct EditSession {
     /// Max retained undo snapshots (`0` = unbounded). Bounds memory: a snapshot deep-copies the
     /// whole package incl. the original `.hwpx` bytes held under `SOURCE_PART_TAG`.
     limit: usize,
+    /// Approximate heap bytes of each `undo` snapshot, PARALLEL to `undo` (issue 071). Cached at
+    /// push time so budget trimming never re-walks the whole stack per edit.
+    undo_est: Vec<usize>,
+    /// Total estimated undo-stack byte BUDGET (`0` = unbounded — the library default, so plain
+    /// `new`/`with_limit` callers are unchanged). When exceeded, the OLDEST snapshots are evicted
+    /// (never below [`MIN_UNDO_KEPT`]) — 070 실측: 대형 문서(130p)에서 스냅샷당 ~8MB 딥카피 ×50 이
+    /// 브라우저 탭 OOM 경로였다. Depth degrades HONESTLY on huge docs instead of memory blowing up.
+    /// The `redo` stack is intentionally uncounted: it only ever holds docs the user just walked
+    /// back through (≤ undo depth, cleared on the next edit) — worst case a transient 2× budget.
+    mem_budget: usize,
     /// Monotonic mutation counter — bumped on every successful `do_op`/`do_ops`/`undo`/`redo`.
     /// Authoritative version signal for downstream caches (render/serialize): if `revision()` is
     /// unchanged, the document bytes are unchanged. Lives here because every mutation funnels
@@ -2227,26 +2237,52 @@ pub struct EditSession {
     rev: u64,
 }
 
+/// Budget eviction floor (issue 071): however large the document, at least this many undo steps
+/// stay available — predictable minimum UX instead of a budget-starved zero-undo session.
+const MIN_UNDO_KEPT: usize = 4;
+
 impl EditSession {
     /// Start a session over a freshly parsed (or built) document. Default history depth 100.
     pub fn new(doc: SemanticDoc) -> Self {
-        EditSession {
-            doc,
-            undo: Vec::new(),
-            redo: Vec::new(),
-            limit: 100,
-            rev: 0,
-        }
+        Self::with_budget(doc, 100, 0)
     }
 
     /// Like [`EditSession::new`] but with an explicit history depth (`0` = unbounded).
     pub fn with_limit(doc: SemanticDoc, limit: usize) -> Self {
+        Self::with_budget(doc, limit, 0)
+    }
+
+    /// Like [`EditSession::with_limit`] but ALSO bounding the undo stack's total estimated bytes
+    /// (issue 071; `mem_budget == 0` = unbounded). Eviction drops the OLDEST snapshots first and
+    /// never trims below [`MIN_UNDO_KEPT`] — see [`SemanticDoc::approx_heap_bytes`] for the
+    /// (approximate, eviction-only) size model.
+    pub fn with_budget(doc: SemanticDoc, limit: usize, mem_budget: usize) -> Self {
         EditSession {
             doc,
             undo: Vec::new(),
             redo: Vec::new(),
             limit,
+            undo_est: Vec::new(),
+            mem_budget,
             rev: 0,
+        }
+    }
+
+    /// Push a pre-mutation snapshot + trim by COUNT (`limit`) then by BYTES (`mem_budget`, 071).
+    /// The single push path for `do_op`/`do_ops`/`redo`, so the parallel `undo_est` can never skew.
+    fn push_undo(&mut self, snap: SemanticDoc) {
+        self.undo_est.push(snap.approx_heap_bytes());
+        self.undo.push(snap);
+        if self.limit != 0 && self.undo.len() > self.limit {
+            self.undo.remove(0);
+            self.undo_est.remove(0);
+        }
+        if self.mem_budget != 0 {
+            let mut total: usize = self.undo_est.iter().sum();
+            while total > self.mem_budget && self.undo.len() > MIN_UNDO_KEPT {
+                self.undo.remove(0);
+                total -= self.undo_est.remove(0);
+            }
         }
     }
 
@@ -2293,11 +2329,8 @@ impl EditSession {
             self.doc = snap; // restore-on-Err: discard the partial mutation
             return Err(e);
         }
-        self.undo.push(snap);
+        self.push_undo(snap);
         self.redo.clear(); // a new branch invalidates any redo future
-        if self.limit != 0 && self.undo.len() > self.limit {
-            self.undo.remove(0);
-        }
         self.rev += 1;
         Ok(())
     }
@@ -2316,11 +2349,8 @@ impl EditSession {
                 return Err(e);
             }
         }
-        self.undo.push(snap);
+        self.push_undo(snap);
         self.redo.clear();
-        if self.limit != 0 && self.undo.len() > self.limit {
-            self.undo.remove(0);
-        }
         self.rev += 1;
         Ok(())
     }
@@ -2330,6 +2360,7 @@ impl EditSession {
         let Some(prev) = self.undo.pop() else {
             return false;
         };
+        self.undo_est.pop(); // keep the 071 size cache parallel to `undo`
         self.redo.push(std::mem::replace(&mut self.doc, prev));
         self.rev += 1;
         true
@@ -2340,7 +2371,8 @@ impl EditSession {
         let Some(next) = self.redo.pop() else {
             return false;
         };
-        self.undo.push(std::mem::replace(&mut self.doc, next));
+        let prev = std::mem::replace(&mut self.doc, next);
+        self.push_undo(prev); // 071: redo re-enters the undo stack through the SAME budgeted path
         self.rev += 1;
         true
     }
@@ -2626,6 +2658,96 @@ mod tests {
         // Only the last 2 snapshots are retained.
         assert!(s.undo() && s.undo());
         assert!(!s.undo());
+    }
+
+    // ---- issue 071: undo snapshot MEMORY budget ----
+
+    /// ~1MB-per-snapshot doc: one simple paragraph carrying a 1MB ASCII run (the estimator counts
+    /// `Inline::Text` by byte length, so each snapshot's estimate is ≥ 1MB).
+    fn megabyte_doc() -> SemanticDoc {
+        doc_with(vec![simple_para(1, &"x".repeat(1024 * 1024))])
+    }
+
+    fn touch(s: &mut EditSession, i: usize) {
+        s.do_op(&Op::SetParagraphText {
+            section: 0,
+            block: 0,
+            text: format!("{}{}", "x".repeat(1024 * 1024), i),
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn budget_evicts_oldest_but_keeps_the_floor() {
+        // 3MB budget over ~1MB snapshots → eviction engages, but never below MIN_UNDO_KEPT.
+        let mut s = EditSession::with_budget(megabyte_doc(), 50, 3 * 1024 * 1024);
+        for i in 0..10 {
+            touch(&mut s, i);
+        }
+        assert_eq!(
+            s.undo.len(),
+            MIN_UNDO_KEPT,
+            "floor holds under a starving budget"
+        );
+        assert_eq!(s.undo_est.len(), s.undo.len(), "size cache stays parallel");
+        // Exactly the floor's worth of undos are available; the 5th honestly reports false.
+        for _ in 0..MIN_UNDO_KEPT {
+            assert!(s.undo());
+        }
+        assert!(!s.undo());
+    }
+
+    #[test]
+    fn budget_leaves_small_docs_at_full_depth() {
+        // A small doc's snapshots (~bytes) never reach the budget → depth = edit count (≤ limit).
+        let mut s =
+            EditSession::with_budget(doc_with(vec![simple_para(1, "가")]), 50, 3 * 1024 * 1024);
+        for i in 0..10 {
+            s.do_op(&Op::SetParagraphText {
+                section: 0,
+                block: 0,
+                text: format!("본문 {i}"),
+            })
+            .unwrap();
+        }
+        assert_eq!(s.undo.len(), 10, "small docs keep every snapshot");
+    }
+
+    #[test]
+    fn zero_budget_means_unbounded_bytes_count_limit_only() {
+        // `with_limit` (budget 0) must behave exactly as before 071 — count cap only.
+        let mut s = EditSession::with_limit(megabyte_doc(), 6);
+        for i in 0..10 {
+            touch(&mut s, i);
+        }
+        assert_eq!(s.undo.len(), 6, "no byte eviction without a budget");
+    }
+
+    #[test]
+    fn undo_redo_keep_the_size_cache_parallel_under_budget() {
+        let mut s = EditSession::with_budget(megabyte_doc(), 50, 3 * 1024 * 1024);
+        for i in 0..6 {
+            touch(&mut s, i);
+        }
+        assert!(s.undo() && s.undo());
+        assert_eq!(s.undo_est.len(), s.undo.len());
+        assert!(s.redo() && s.redo()); // redo re-enters through the budgeted push path
+        assert_eq!(s.undo_est.len(), s.undo.len());
+        assert!(
+            s.undo.len() >= MIN_UNDO_KEPT && s.undo.len() <= 4,
+            "budget still enforced after redo"
+        );
+    }
+
+    #[test]
+    fn estimator_tracks_dominant_text_heap() {
+        let small = doc_with(vec![simple_para(1, "가")]).approx_heap_bytes();
+        let big = megabyte_doc().approx_heap_bytes();
+        assert!(
+            big >= 1024 * 1024,
+            "1MB of run text must be counted, got {big}"
+        );
+        assert!(big > small * 100, "estimate must scale with content");
     }
 
     // ---- Phase 4: SetRunCharPr run-splitting (Korean / UTF-8 safety) ----

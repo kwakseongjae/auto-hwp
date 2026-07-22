@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-22 (Claude) · 071 undo 메모리 버짓 — 130p RSS +403MB→+0.1MB
+- 070 제안이던 직렬화 스냅샷은 **기각**(.hwp from-scratch 손실 실측 86→70p·rhwp 노드 재구성 불가·provenance 소실 — 딥카피만 bit-for-bit 복원). 대신 approx_heap_bytes 추정기(스파인+힙 계상, ±2×) + EditSession::with_budget(단일 push_undo·바닥 4) + 라이브 128MiB.
+- 실측: 130p 편집50회 RSS +0.1MB(축출·재사용 정상상태)·깊이 10 정직 축소, **18p 실물 깊이 50 무회귀**. 게이트/clippy/workspace 56스위트/vitest/e2e 42 전부 그린, wasm 재빌드.
+- 열린 것: 모델에 새 힙 캐리어 추가 시 추정기 동반 계상(071 함정 절) · XL 후속 옵션=구조 공유/IR-bincode 스냅샷 · 남은 후보 G(로컬 폰트)·rhwp 재벤더링(사용자 액션).
+
 ## 2026-07-22 (Claude) · 070 대형 문서 실측(보강 F) — 증분 조판 보류, 첫 병목=undo 메모리
 - `large-doc-bench.mjs`(실 wasm·Node) 신설, 사다리 8~130p(실물 벤치2+딥테크25p+혁신바우처41p+합성 70/130p): 편집→화면 ~1ms/쪽 선형(41p=16ms·130p=136ms) → **증분 조판(XL) 보류**, 재평가 임계 150p+ 실물.
 - **신규 발견**: undo 스냅샷 딥카피가 첫 병목 — 130p·50회 RSS +403MB(스냅샷 ~8MB) vs 직렬화 0.2MB/28ms → **HWPX-바이트 스냅샷 전환 = ~40배 절감** 후속 이슈 후보(hwp-ops/hwp-mcp 스냅샷 레인).

@@ -640,6 +640,117 @@ impl Default for PageSetup {
     }
 }
 
+// ---- Undo snapshot memory estimator (issue 071) -----------------------------------------------
+
+impl SemanticDoc {
+    /// APPROXIMATE heap bytes a deep copy ([`Clone`]) of this document retains — the estimator
+    /// behind the undo snapshot MEMORY BUDGET (issue 071; 070 실측: 130p 문서 스냅샷당 ~8MB 딥카피가
+    /// 편집 50회에 RSS +403MB). Counting rule: every `Vec<T>` contributes its SPINE
+    /// (`len × size_of::<T>()` — which already includes by-value struct/enum bodies), plus each
+    /// element's OWN heap (strings, raw buffers, nested vecs). `String`/`Vec<u8>` contribute `len`.
+    /// Used ONLY for snapshot eviction, never correctness — ±2× accuracy is acceptable; when
+    /// extending the model, count new heap carriers here but never double-count by-value fields.
+    pub fn approx_heap_bytes(&self) -> usize {
+        use std::mem::size_of;
+        fn os(x: &Option<String>) -> usize {
+            x.as_ref().map_or(0, |v| v.len())
+        }
+        fn prov(p: &Provenance) -> usize {
+            p.raw.as_ref().map_or(0, |r| r.len())
+        }
+        fn pass(p: &Passthrough) -> usize {
+            p.parts.len() * size_of::<crate::types::RawPart>()
+                + p.parts
+                    .iter()
+                    .map(|r| r.tag.len() + r.bytes.len())
+                    .sum::<usize>()
+        }
+        fn inline(i: &Inline) -> usize {
+            match i {
+                Inline::Text(t) => t.len(),
+                Inline::Image(img) => img.bin_ref.len(),
+                Inline::Equation(eq) => {
+                    eq.script.len()
+                        + eq.font.len()
+                        + eq.version.len()
+                        + eq.rendered_svg.as_ref().map_or(0, |v| v.len())
+                }
+                Inline::Chart(c) => c.rendered_svg.as_ref().map_or(0, |v| v.len()),
+                Inline::FieldBegin(f) => f.field_type.len() + f.command.len(),
+                Inline::FieldEnd(_) => 0,
+                Inline::Bookmark(b) => b.len(),
+                Inline::Note(n) => blocks(&n.body),
+                Inline::Raw(r) => r.tag.len() + r.bytes.len(),
+            }
+        }
+        fn para(p: &Paragraph) -> usize {
+            os(&p.style_name)
+                + p.source
+                    .as_ref()
+                    .map_or(0, |src| os(&src.para_pr) + os(&src.style) + os(&src.id))
+                + prov(&p.provenance)
+                + pass(&p.passthrough)
+                + p.runs.len() * size_of::<Run>()
+                + p.runs
+                    .iter()
+                    .map(|r| {
+                        os(&r.char_ref)
+                            + r.content.len() * size_of::<Inline>()
+                            + r.content.iter().map(inline).sum::<usize>()
+                    })
+                    .sum::<usize>()
+        }
+        fn table(t: &Table) -> usize {
+            (t.col_widths.len() + t.row_heights.len() + t.stored_row_heights.len())
+                * size_of::<HwpUnit>()
+                + t.cells.len() * size_of::<Cell>()
+                + t.cells.iter().map(|c| blocks(&c.blocks)).sum::<usize>()
+        }
+        fn blocks(bs: &[Block]) -> usize {
+            std::mem::size_of_val(bs)
+                + bs.iter()
+                    .map(|b| match b {
+                        Block::Paragraph(p) => para(p),
+                        Block::Table(t) => table(t),
+                    })
+                    .sum::<usize>()
+        }
+        let sections = self.sections.len() * size_of::<Section>()
+            + self
+                .sections
+                .iter()
+                .map(|sec| {
+                    blocks(&sec.blocks)
+                        + sec.decorations.len() * size_of::<PageDecoration>()
+                        + sec
+                            .decorations
+                            .iter()
+                            .map(|d| blocks(&d.blocks))
+                            .sum::<usize>()
+                        + prov(&sec.provenance)
+                        + pass(&sec.passthrough)
+                })
+                .sum::<usize>();
+        let pools = self.char_shapes.len() * size_of::<CharShape>()
+            + self.para_shapes.len() * size_of::<ParaShape>();
+        let bins = self.bin_data.len() * size_of::<BinData>()
+            + self
+                .bin_data
+                .iter()
+                .map(|b| b.bin_ref.len() + b.bytes.len() + b.kind.len())
+                .sum::<usize>();
+        // header_pools(파싱 원본 풀 값 맵)는 문서 크기에 비해 작고 형태가 맵이라 생략 — 과소추정 쪽
+        // 오차는 BTreeSet 노드 오버헤드 상수(×3)로 일부 상쇄한다.
+        sections
+            + pools
+            + bins
+            + pass(&self.passthrough)
+            + (self.hwpx_pool_char_shapes.len() + self.hwpx_pool_para_shapes.len())
+                * size_of::<usize>()
+                * 3
+    }
+}
+
 #[cfg(test)]
 mod frame_wrapper_tests {
     use super::*;

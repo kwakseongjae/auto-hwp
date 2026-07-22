@@ -504,6 +504,12 @@ pub struct OpenInfo {
 /// long-lived edit session (service/web). 50 keeps memory bounded while covering realistic undo depth.
 const LIVE_UNDO_LIMIT: usize = 50;
 
+/// Undo-stack BYTE budget for the LIVE session (issue 071 — 070 실측: 130p 문서에서 스냅샷당 ~8MB
+/// 딥카피 ×50 = RSS +403MB, 브라우저 탭 OOM 경로). 실물 공문서(≤41p, 스냅샷 ~1MB 이하)는 50 깊이
+/// 전부 유지되고, 대형 문서만 깊이가 정직하게 줄어든다(최소 [`hwp_ops`] MIN_UNDO_KEPT=4 보장).
+/// 추정치(±2×) 기반이므로 실제 상주 메모리는 최악 ~2×까지 볼 것.
+const LIVE_UNDO_MEM_BUDGET: usize = 128 * 1024 * 1024;
+
 /// Open `path` into the session (HWP5/HWPX both view; only HWPX round-trips to an edited export).
 /// Thin fs wrapper over [`open_bytes`]: read the file, then run the identical bytes-in open logic
 /// (the wasm edit lane, issue 017, calls `open_bytes` directly since it has no filesystem).
@@ -543,7 +549,11 @@ pub fn open_bytes(session: &mut Session, bytes: &[u8], name: &str) -> Result<Ope
     // change for real files; only hostile inputs are rejected with a typed limit error.
     hwp_ingest::limits::check_layout_limits(&doc).map_err(|e| e.to_string())?;
     let sections = doc.sections.len();
-    session.doc = Some(EditSession::with_limit(doc, LIVE_UNDO_LIMIT));
+    session.doc = Some(EditSession::with_budget(
+        doc,
+        LIVE_UNDO_LIMIT,
+        LIVE_UNDO_MEM_BUDGET,
+    ));
     session.source_path = Some(name.to_string());
     session.source_bytes = Some(bytes.to_vec());
     session.pending = None; // a fresh document drops any stale proposal
