@@ -112,6 +112,11 @@ struct EmbedFont {
     /// 058). `None` → 명조 glyphs draw with the gothic body face (pre-058 behavior). Discovered from the
     /// system on native, or INJECTED by family name on wasm/web.
     serif: Option<Font>,
+    /// EVERY parseable injected face by its EXACT family name (폰트 제공): a glyph whose IR `font`
+    /// names a registered family (the own-render explicit-family bypass stamps it verbatim) embeds
+    /// with THAT face — e.g. a run set to "Pretendard" ships real Pretendard, not the class
+    /// substitute. Empty on the discover/native path (no behavior change without injection).
+    extra: Vec<(String, Font)>,
     path: String,
     /// True when a candidate from [`FONT_CANDIDATES`] loaded (Korean-capable). False = no font found
     /// (glyphs become stub rects so the box stays visible).
@@ -132,6 +137,7 @@ impl EmbedFont {
                     font,
                     bold: Self::discover_from(BOLD_FONT_CANDIDATES),
                     serif: Self::discover_from(SERIF_FONT_CANDIDATES),
+                    extra: Vec::new(),
                     path: path.to_string(),
                     real: true,
                 });
@@ -195,10 +201,16 @@ impl EmbedFont {
             .or_else(|| injected.first());
         let (family, bytes) = body?;
         let font = Font::new(bytes.clone().into(), 0)?;
+        // 폰트 제공: keep EVERY parseable injected face by family for the per-glyph explicit match.
+        let extra = injected
+            .iter()
+            .filter_map(|(fam, b)| Font::new(b.clone().into(), 0).map(|f| (fam.clone(), f)))
+            .collect();
         Some(EmbedFont {
             font,
             bold,
             serif,
+            extra,
             path: format!("injected:{family}"),
             real: true,
         })
@@ -602,7 +614,17 @@ fn paint_glyph(
                 .map(|n| classify(n) == FontCategory::Serif)
                 .unwrap_or(false)
                 && f.serif.is_some();
-            let face = if is_serif {
+            // 폰트 제공 (explicit-family embed): the own-render bypass stamps a REGISTERED family
+            // verbatim — embed with exactly that face when we hold it; else the 058 serif/body route.
+            let explicit = font.and_then(|n| {
+                f.extra
+                    .iter()
+                    .find(|(fam, _)| fam.trim().eq_ignore_ascii_case(n.trim()))
+                    .map(|(_, face)| face)
+            });
+            let face = if let Some(face) = explicit {
+                face
+            } else if is_serif {
                 f.serif.as_ref().unwrap()
             } else if bold {
                 f.bold.as_ref().unwrap_or(&f.font)

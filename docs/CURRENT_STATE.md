@@ -4,6 +4,12 @@
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
 - 기준 커밋: `6ebfbb2`+CI픽스 — **PUBLIC 전환 + 라이브 데모 배포 완료**(https://kwakseongjae.github.io/tf-hwp/) — **R12~R14 + 실물QA 065·066 + 웹QA 2~6차 + HWPX 시각 파리티 + 레이아웃 정리 토글 완료**. GitHub: https://github.com/kwakseongjae/tf-hwp (private)
+- 갱신: 2026-07-22(8) · Claude — **rhwp v0.7.19 재벤더링(fa72e42) + 폰트 카탈로그 온디맨드 제공 구현**.
+  ① 062 needsExternal 해소(미러에 upstream 태그 푸시, lift.rs BinDataBytes .load() 적응) — 게이트/벤치 49/49 불변,
+  ⚠️ wasm 9.5→11.0MB(+1.5MB upstream 성장). ② 폰트 제공(진단 U8/보강 G): explicit-family bypass(has_family →
+  place.rs display_font → pdf.rs EmbedFont.extra per-family 임베드) + HwpWorkspace.ensureCatalogFont(리본/AI 지정 시
+  fetch→registerFont→@font-face) — **카탈로그 8종(전부 OFL: Pretendard·Noto Sans/Serif KR·나눔·IBM Plex·고운) 화면·PDF
+  실서체 반영**. e2e 41~42/42(048 순서 플레이키 — 격리 그린, 039 계열). 072(카드 위치 보기) 설계 이슈 신설.
 - 갱신: 2026-07-22(7) · Claude — **071 undo 메모리 버짓 구현 완료**. 070의 첫 병목(130p 스냅샷 딥카피 ~8MB×50
   = RSS +403MB) 해소: 직렬화 스냅샷은 round-trip/rhwp 노드 훼손으로 **기각**, `SemanticDoc::approx_heap_bytes`
   추정기 + `EditSession::with_budget`(단일 push 경로·바닥 4) + 라이브 레인 **128MiB 버짓**. 실측: 130p RSS

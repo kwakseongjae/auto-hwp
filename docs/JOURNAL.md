@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-22 (Claude) · rhwp v0.7.19 재벤더링 + 폰트 카탈로그 온디맨드 제공
+- rhwp: upstream 태그를 미러에 직접 푸시해 needsExternal 해소 → v0.7.19 bump(fa72e42), lift.rs BinDataBytes 적응 3+2곳. 게이트·벤치 49/49 불변, wasm +1.5MB(upstream 성장 — 다이어트 후속).
+- 폰트: FONT-CATALOG 8종 전부 OFL 재확인(Pretendard/Noto 포함). explicit-family bypass(엔진 3층) + ensureCatalogFont(react)로 리본/AI 지정 서체가 화면·PDF에 실서체 반영. react 320·e2e 41~42/42(048=039계열 순서 플레이키, 격리 그린).
+- 열린 것: 048/039 플레이키 격리 · wasm 다이어트(11MB) · 072(카드 위치 보기) 설계됨 · MCP 표면화는 셀프호스팅 형태 의견 전달 후 사용자 판단 대기.
+
 ## 2026-07-22 (Claude) · 071 undo 메모리 버짓 — 130p RSS +403MB→+0.1MB
 - 070 제안이던 직렬화 스냅샷은 **기각**(.hwp from-scratch 손실 실측 86→70p·rhwp 노드 재구성 불가·provenance 소실 — 딥카피만 bit-for-bit 복원). 대신 approx_heap_bytes 추정기(스파인+힙 계상, ±2×) + EditSession::with_budget(단일 push_undo·바닥 4) + 라이브 128MiB.
 - 실측: 130p 편집50회 RSS +0.1MB(축출·재사용 정상상태)·깊이 10 정직 축소, **18p 실물 깊이 50 무회귀**. 게이트/clippy/workspace 56스위트/vitest/e2e 42 전부 그린, wasm 재빌드.

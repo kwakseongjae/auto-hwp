@@ -625,7 +625,7 @@ fn place_paragraph(
 ) {
     // Flat (char, size, color, underline) over the paragraph's text — same order layout_paragraph
     // breaks on, so line `text_pos` indexes straight into this.
-    let glyphs = paragraph_glyphs(p, doc);
+    let glyphs = paragraph_glyphs(p, doc, fonts);
     let align = doc
         .para_shapes
         .get(p.para_shape)
@@ -1238,7 +1238,7 @@ fn place_cell_content(
             continue;
         };
         let para_top = vy;
-        let glyphs = paragraph_glyphs(p, doc);
+        let glyphs = paragraph_glyphs(p, doc, fonts);
         let align = doc
             .para_shapes
             .get(p.para_shape)
@@ -1419,7 +1419,7 @@ fn walk_cell_lines(
             vy += block_height_for_place(b, doc, textw, fonts);
             continue;
         };
-        let glyphs = paragraph_glyphs(p, doc);
+        let glyphs = paragraph_glyphs(p, doc, fonts);
         // "\n"-segment map (the EDITOR address space — see CellTextHit): positions of the forced
         // breaks split the paragraph into nl_pos.len()+1 segments; a glyph at index i belongs to the
         // segment holding it, with segment-local offset i - seg_start.
@@ -1797,7 +1797,11 @@ struct GlyphInfo {
     cluster: Option<String>,
 }
 
-fn paragraph_glyphs(p: &Paragraph, doc: &SemanticDoc) -> Vec<GlyphInfo> {
+fn paragraph_glyphs(
+    p: &Paragraph,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+) -> Vec<GlyphInfo> {
     let mut out = Vec::new();
     for run in &p.runs {
         let cs = doc.char_shapes.get(run.char_shape);
@@ -1833,7 +1837,7 @@ fn paragraph_glyphs(p: &Paragraph, doc: &SemanticDoc) -> Vec<GlyphInfo> {
                         underline,
                         bold,
                         italic,
-                        font: display_font(cs, slot),
+                        font: display_font(cs, slot, fonts),
                         ratio,
                         spacing_em,
                         cluster,
@@ -1852,7 +1856,11 @@ fn paragraph_glyphs(p: &Paragraph, doc: &SemanticDoc) -> Vec<GlyphInfo> {
 /// the SVG's universal fallback) — so 고딕/기타 runs keep their pre-058 rendering (and golden bytes).
 /// DISPLAY only: the metric provider stays family-blind, so advances/pagination (and the gate) are
 /// unchanged — only which face draws the glyph shape changes.
-fn display_font(cs: Option<&CharShape>, slot: ScriptClass) -> Option<String> {
+fn display_font(
+    cs: Option<&CharShape>,
+    slot: ScriptClass,
+    fonts: &dyn FontMetricsProvider,
+) -> Option<String> {
     let cs = cs?;
     let name = cs
         .fonts
@@ -1863,6 +1871,12 @@ fn display_font(cs: Option<&CharShape>, slot: ScriptClass) -> Option<String> {
         .filter(|s| !s.is_empty())?;
     // Issue 058 follow-up: a definitive PANOSE (typeInfo) hint for this slot wins over the name
     // heuristic; an absent/indeterminate hint (the empty-Vec common case) falls back to the name.
+    // 폰트 제공 (explicit-family bypass): a face name that matches a REGISTERED (injected) family
+    // keeps ITSELF — the user explicitly picked a catalog face (or uploaded their own 함초롬), so the
+    // 058 class substitute must not overwrite it. Doc-native names (함초롬…) never match → unchanged.
+    if fonts.has_family(name) {
+        return Some(name.to_string());
+    }
     let panose = cs.font_panose.get(slot as usize).and_then(Option::as_ref);
     hwp_model::font_class::substitute_family_with_panose(name, panose).map(str::to_string)
 }
@@ -2040,7 +2054,7 @@ mod tests {
 
         // (1) Drawing: the PUA char becomes the full-width metric proxy '가' carrying the jamo cluster;
         //     the following ordinary char is untouched (no cluster).
-        let g = paragraph_glyphs(&p_old, &doc);
+        let g = paragraph_glyphs(&p_old, &doc, &crate::ApproxFontMetrics);
         assert_eq!(g.len(), 2);
         assert_eq!(
             g[0].ch, '\u{AC00}',

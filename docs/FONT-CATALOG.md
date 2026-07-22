@@ -74,6 +74,17 @@
 → 화면·조판·PDF 가 **동일 폰트**로 일치한다. 미주입 상태에서는 결정적 근사 메트릭
 (`ApproxFontMetrics`)으로 레이아웃만 유지하고 PDF 는 `font_missing` 에러를 던진다(R8).
 
+## 카탈로그 온디맨드 제공 (2026-07-22 — "선호 폰트 미리 준비" 방향)
+
+리본 서체 피커/AI(SetCharFmt)가 **카탈로그 family 를 명시 지정**하면 앱이 그 face 를
+fetch→`registerFont`(추가 family — 본문 메트릭 face 유지)하고 화면 `@font-face` 를 바인딩한다
+(`HwpWorkspace.ensureCatalogFont`). 엔진의 **explicit-family bypass** 와 한 쌍: 등록된 이름과
+일치하는 명시 지정은 058 대체를 우회해 자기 이름 그대로 stamp 되고(`place.rs::display_font` +
+`FontMetricsProvider::has_family`), PDF 는 그 family 의 face 를 그대로 임베드한다
+(`pdf.rs EmbedFont.extra` per-family 매치). → **Pretendard/Noto Sans·Serif KR 등 카탈로그 8종
+(전부 OFL)이 화면·PDF 에 실서체로 반영**된다. 문서 고유 서체명(함초롬 등)은 등록되지 않는 한
+매치되지 않아 기존 대체 경로 그대로(게이트·골든 불변).
+
 ## 서체 충실도 대체 매핑 (issue 058)
 
 issue 022 는 "전 문서 폰트명 → 현재 선택 폰트 1개"였다(전 문서가 단일 NanumGothic 렌더). issue 058 은

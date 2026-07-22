@@ -52,6 +52,15 @@ pub trait FontMetricsProvider {
     fn line_height(&self, size_hwpunit: i32) -> f64 {
         size_hwpunit.max(1) as f64
     }
+
+    /// True when the provider carries an INJECTED face registered under exactly this family name
+    /// (폰트 제공 — explicit-family bypass): a run EXPLICITLY set to a registered catalog family
+    /// (e.g. "Pretendard", 전부 OFL) renders/embeds with that face instead of the 058 class
+    /// substitute. DISPLAY-only consumers ask this; metrics stay family-blind (V5 게이트 불변).
+    /// Default `false` keeps every no-injection provider (Approx/Null/test doubles) byte-identical.
+    fn has_family(&self, _family: &str) -> bool {
+        false
+    }
 }
 
 /// Result of the editor-open-safety acceptance gate.

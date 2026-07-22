@@ -67,17 +67,57 @@ pub fn own_render_fonts_with(
     injected: &[(String, Vec<u8>)],
 ) -> Box<dyn hwp_model::prelude::FontMetricsProvider> {
     match injected.iter().find(|(_, b)| !b.is_empty()) {
-        Some((_family, bytes)) => Box::new(hwp_typeset::RealFontMetrics::from_bytes(bytes)),
+        Some((_family, bytes)) => Box::new(WithFamilies {
+            inner: Box::new(hwp_typeset::RealFontMetrics::from_bytes(bytes)),
+            families: injected.iter().map(|(f, _)| f.clone()).collect(),
+        }),
         None => own_render_fonts(),
     }
 }
 #[cfg(not(feature = "shaper"))]
 pub fn own_render_fonts_with(
-    _injected: &[(String, Vec<u8>)],
+    injected: &[(String, Vec<u8>)],
 ) -> Box<dyn hwp_model::prelude::FontMetricsProvider> {
     // No `shaper` feature → no rustybuzz to feed the injected bytes into; Approx is the deterministic
-    // fallback (the injected face still drives the PDF embed via `emit_pdf_with_fonts`).
-    own_render_fonts()
+    // fallback (the injected face still drives the PDF embed via `emit_pdf_with_fonts`). The FAMILY
+    // names still ride along (폰트제공): the explicit-family display bypass works metrics-free.
+    if injected.iter().any(|(_, b)| !b.is_empty()) {
+        Box::new(WithFamilies {
+            inner: own_render_fonts(),
+            families: injected.iter().map(|(f, _)| f.clone()).collect(),
+        })
+    } else {
+        own_render_fonts()
+    }
+}
+
+/// Provider wrapper carrying the INJECTED family names (폰트 제공): display stamping asks
+/// [`hwp_model::prelude::FontMetricsProvider::has_family`] so an EXPLICITLY-set registered family
+/// (e.g. "Pretendard") bypasses the 058 class substitute and keeps its own name (the screen
+/// `@font-face` and the PDF per-family embed pick it up). Metrics delegate untouched (V5 게이트 불변); the
+/// zero-injection path never builds this, so golden bytes are unchanged.
+struct WithFamilies {
+    inner: Box<dyn hwp_model::prelude::FontMetricsProvider>,
+    families: Vec<String>,
+}
+
+impl hwp_model::prelude::FontMetricsProvider for WithFamilies {
+    fn advance_width(
+        &self,
+        font: &hwp_model::prelude::FontKey,
+        ch: char,
+        size_hwpunit: i32,
+    ) -> f64 {
+        self.inner.advance_width(font, ch, size_hwpunit)
+    }
+    fn line_height(&self, size_hwpunit: i32) -> f64 {
+        self.inner.line_height(size_hwpunit)
+    }
+    fn has_family(&self, family: &str) -> bool {
+        self.families
+            .iter()
+            .any(|f| f.trim().eq_ignore_ascii_case(family.trim()))
+    }
 }
 
 /// Render every page of `doc` through OUR OWN engine (`place_doc` → paint IR → `SvgSink`), one

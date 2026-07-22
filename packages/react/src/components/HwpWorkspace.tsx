@@ -866,6 +866,60 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     };
   }, [props.injectSerifSubstitute, meta, props.document, serifUrl, core]);
 
+  // ── 카탈로그 온디맨드 등록 (진단 U8/보강 G — "선호 폰트를 미리 준비해 제공") ────────────────────────
+  // 리본·AI(SetCharFmt 등)가 카탈로그 family 를 명시 지정하면 그 face 를 fetch→registerFont(추가
+  // family — 본문 메트릭 face 는 유지)하고 화면 @font-face 를 바인딩한다. 엔진의 explicit-family
+  // bypass(등록된 이름과 일치하는 명시 지정은 058 대체를 우회)와 한 쌍이 되어 화면·PDF 가 진짜 그
+  // 서체(Pretendard/Noto 등, 전부 OFL — FONT-CATALOG R8)로 일치한다. 카탈로그 밖 이름(문서 고유
+  // 서체)은 기존 대체 경로 그대로(no-op). 실패는 best-effort — 기존 렌더 유지.
+  const [extraFonts, setExtraFonts] = useState<{ family: string; url: string }[]>([]);
+  const extraFontDone = useRef<Set<string>>(new Set());
+  const ensureCatalogFont = useCallback(
+    async (family: string | undefined | null) => {
+      if (!family || family === selectedFont?.family || family === SERIF_SUBSTITUTE) return;
+      if (extraFontDone.current.has(family)) return;
+      const entry = props.fontCatalog?.find((c) => c.family === family);
+      if (!entry) return;
+      extraFontDone.current.add(family); // 실패해도 재시도 폭주 방지(문서 리오픈 시 리셋)
+      try {
+        const res = await fetch(catalogUrl(entry, props.fontUrlBase));
+        if (!res.ok) return;
+        const bytes = new Uint8Array(await res.arrayBuffer());
+        await core.session.registerFont(family, bytes);
+        const buf = new ArrayBuffer(bytes.byteLength);
+        new Uint8Array(buf).set(bytes);
+        const url = URL.createObjectURL(new Blob([buf], { type: "font/ttf" }));
+        setExtraFonts((prev) => (prev.some((f) => f.family === family) ? prev : [...prev, { family, url }]));
+      } catch {
+        /* 카탈로그 미배치/오프라인 — 화면·PDF 는 기존 대체(고딕/명조)로 정직 폴백 */
+      }
+    },
+    [selectedFont, props.fontCatalog, props.fontUrlBase, core],
+  );
+  // 문서가 바뀌면 엔진 세션의 등록도 새로 시작된다 — 추가 face 목록/재시도 가드를 리셋(blob 회수).
+  useEffect(() => {
+    extraFontDone.current = new Set();
+    setExtraFonts((prev) => {
+      prev.forEach((f) => URL.revokeObjectURL(f.url));
+      return [];
+    });
+  }, [props.document]);
+  /** AI 인텐트 배치에서 명시 font 지정을 긁어 카탈로그 face 를 선등록한다(적용과 병행, best-effort). */
+  const ensureIntentFonts = useCallback(
+    (intents: Intent[]) => {
+      for (const it of intents) {
+        const rec = it as Record<string, unknown>;
+        if (typeof rec.font === "string") void ensureCatalogFont(rec.font);
+        if (Array.isArray(rec.runs)) {
+          for (const r of rec.runs as { font?: unknown }[]) {
+            if (typeof r?.font === "string") void ensureCatalogFont(r.font);
+          }
+        }
+      }
+    },
+    [ensureCatalogFont],
+  );
+
   // Revoke the blob URL when the component unmounts (avoid leaking the object URL).
   useEffect(
     () => () => {
@@ -1879,12 +1933,15 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       if (p.bold !== undefined) fmtActions.bold();
       if (p.italic !== undefined) fmtActions.italic();
       if (p.sizePt !== undefined) fmtActions.setSize(p.sizePt);
-      if (p.font !== undefined) fmtActions.setFont(p.font);
+      if (p.font !== undefined) {
+        void ensureCatalogFont(p.font); // 카탈로그 face 온디맨드 등록(화면 @font-face + PDF 임베드)
+        fmtActions.setFont(p.font);
+      }
       if (p.color !== undefined) fmtActions.setColor(p.color);
       if (p.shade !== undefined) fmtActions.setShade(p.shade);
       if (p.align !== undefined) fmtActions.setAlign(p.align);
     },
-    [fmtActions],
+    [fmtActions, ensureCatalogFont],
   );
 
   // Reflect the MARKED cell/range's first-run format in the ribbon when NOT editing (028 curBold 재사용 +
@@ -2307,6 +2364,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const onApply = useCallback(
     async (intents: Intent[]): Promise<number> => {
       try {
+        ensureIntentFonts(intents); // 명시 font 지정 → 카탈로그 face 선등록(병행, best-effort)
         const applied = await core.edit.apply(intents);
         toast(`적용됨: ${applied}개 편집`);
         return applied;
@@ -2317,7 +2375,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         throw e;
       }
     },
-    [core, toast, onTrap],
+    [core, toast, onTrap, ensureIntentFonts],
   );
 
   // ── issue 06x: INLINE per-element edit — apply/revert wiring ─────────────────────────────────────────
@@ -2574,6 +2632,13 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           also bind the OFL serif substitute (`serifUrl`) so 명조 runs render serif — the attribute-scoped
           serif rule out-specifies the blanket collapse, preserving the doc's 명조↔고딕 distinction. */}
       {selectedFont && <style data-testid="hw-fontface">{buildFontFaceCss(selectedFont.family, selectedFont.url, { serifUrl, boldUrl, serifBoldUrl })}</style>}
+      {/* 카탈로그 온디맨드 face(들): 리본/AI 가 명시 지정한 family 의 플레인 @font-face — 별칭 규칙 없이
+          그 이름 그대로 바인딩(엔진이 같은 이름을 PlacedGlyph.font 로 stamp 하므로 SVG 가 즉시 집는다). */}
+      {extraFonts.length > 0 && (
+        <style data-testid="hw-fontface-extra">
+          {extraFonts.map((f) => `@font-face{font-family:"${f.family}";src:url("${f.url}");font-display:swap;}`).join("\n")}
+        </style>
+      )}
       <div className="hw-toolbar">
         <span className="hw-brand">tf-hwp</span>
         <span className="hw-doc-meta">{meta ? `${meta.format.toUpperCase()} · ${meta.pages}쪽` : "문서 없음"}</span>
