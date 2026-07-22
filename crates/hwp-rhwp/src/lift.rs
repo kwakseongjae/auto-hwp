@@ -270,7 +270,9 @@ impl<'a> Lifter<'a> {
             let r = format!("image{bin_id}");
             self.bin_data.borrow_mut().push(BinData {
                 bin_ref: r.clone(),
-                bytes: content.data.clone(),
+                // rhwp v0.7.18+ keeps bin data LAZY (BinDataBytes::Lazy resolves from the source
+                // container on demand — the 244→49MB memory fix); our IR owns its bytes, so load here.
+                bytes: content.data.load(),
                 kind,
             });
             self.bin_seen.borrow_mut().insert(bin_id, r.clone());
@@ -313,11 +315,13 @@ impl<'a> Lifter<'a> {
         // Extract the OOXML chart XML: HWPX injects it directly (extension "ooxml_chart"); HWP5 wraps it
         // in the CFB OLE container's `OOXMLChartContents` stream. Anything else (legacy VtChart /
         // non-chart OLE) yields no OOXML bytes → not our chart → drop.
-        let xml: std::borrow::Cow<'_, [u8]> = if content.extension == "ooxml_chart" {
-            std::borrow::Cow::Borrowed(&content.data)
+        // rhwp v0.7.18+ BinDataBytes is lazy — load() materializes (and decompresses) the bytes.
+        let xml: Vec<u8> = if content.extension == "ooxml_chart" {
+            content.data.load()
         } else {
-            let container = rhwp::parser::ole_container::parse_ole_container(&content.data)?;
-            std::borrow::Cow::Owned(container.ooxml_chart?)
+            let data = content.data.load();
+            let container = rhwp::parser::ole_container::parse_ole_container(&data)?;
+            container.ooxml_chart?
         };
         Some(ChartRef {
             width: w,
@@ -1154,7 +1158,7 @@ mod tests {
         // HWPX-style directly-injected chart XML at bin id 1 (extension "ooxml_chart").
         doc.bin_data_content.push(BinDataContent {
             id: 1,
-            data: BAR_XML.to_vec(),
+            data: rhwp::model::bin_data::BinDataBytes::Loaded(BAR_XML.to_vec()),
             extension: "ooxml_chart".to_string(),
         });
         let ole = OleShape {
@@ -1221,7 +1225,7 @@ mod tests {
         let mut doc = Document::default();
         doc.bin_data_content.push(BinDataContent {
             id: 1,
-            data: b"not a cfb ole container".to_vec(),
+            data: rhwp::model::bin_data::BinDataBytes::Loaded(b"not a cfb ole container".to_vec()),
             extension: "ole".to_string(),
         });
         let ole = OleShape {
