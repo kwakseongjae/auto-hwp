@@ -4,6 +4,12 @@
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
 - 기준 커밋: `6ebfbb2`+CI픽스 — **PUBLIC 전환 + 라이브 데모 배포 완료**(https://kwakseongjae.github.io/tf-hwp/) — **R12~R14 + 실물QA 065·066 + 웹QA 2~6차 + HWPX 시각 파리티 + 레이아웃 정리 토글 완료**. GitHub: https://github.com/kwakseongjae/tf-hwp (private)
+- 갱신: 2026-07-22(10) · Claude — **잔여 배포 표면 일괄 처리**. ① **MCP 포장 done(757a240, 승인분)**: hwp-mcp
+  stdio 바이너리 완동 실증(initialize·15도구·open→8쪽→텍스트) + docs/MCP-GUIDE.md + README 한/영 절 — 공용 서버 0.
+  ② **Claude Code 스킬 신설**: skills/hwp/SKILL.md(CLI 래핑 — 변환·추출·미리보기·편집 팔레트+정직 고지). ③ **npm
+  publish dry_run 성공**(run 29896883076) — 실발행은 dry_run=false 승인 대기. ④ **KOGL 25건 전수 실측**: 0/1유형
+  8건·4유형 2건·불명 15건 → 바이너리 재배포 대신 `corpus/GOV-SOURCES.md`(검증 7건 URL+sha256) 공개 — korea.kr
+  "텍스트 한정" 정책+전건 임베드 이미지라 제3자 이미지 리스크 회피. private manifest 판정 정정.
 - 갱신: 2026-07-22(9) · Claude — **072 위치 보기 + wasm 다이어트 + 플레이키 격리 완료**(4adc541). ① 072: AI 카드
   "⊙ 위치 보기"→blocksInRect 스캔→jumpToPage+1.8s 플래시. ② wasm **11.26→8.07MB**(-28%, 전용 [profile.wasm-size]
   opt-z·fat LTO·cgu1 — 정본 3경로 전환. 트레이드오프: 편집 20→27ms@18p, 워커라 체감 무해). ③ 048/039 플레이키:

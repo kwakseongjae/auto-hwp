@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-22 (Claude) · 배포 표면 마감 — MCP·스킬·npm dry_run·KOGL
+- MCP(승인분) 포장 done: 바이너리 이미 완동(핸드셰이크+15도구 실증) → MCP-GUIDE+README 레시피(cargo install --git → claude mcp add). 스킬: skills/hwp(CLI 래핑) 신설 — npm 임베드·MCP·스킬 3표면 완성.
+- npm publish dry_run 성공 — 실발행은 dry_run=false 사용자 승인 1클릭. KOGL 25건 실측: 확인 8·4유형 2·불명 15 → 재배포 대신 corpus/GOV-SOURCES.md(7건 URL+sha256) 방식 결정(이미지 리스크 회피).
+- 열린 것: npm 실발행 승인 · MCP/스킬 실사용 QA(외부 머신 cargo install 검증) · GOV-SOURCES fetch 스크립트화(후속).
+
 ## 2026-07-22 (Claude) · 072 위치 보기 + wasm 8.07MB + 플레이키 격리 (4adc541)
 - 072: 카드 "⊙ 위치 보기"(revealBlock: blocksInRect 스캔→점프+플래시) done. react 321·tsc 클린.
 - wasm: 전용 [profile.wasm-size]로 11.26→**8.07MB**(-28%), 정본 3경로 전환. 편집 +30%@18p(워커 비차단 — 수용). 벤치·e2e 스모크 그린.
