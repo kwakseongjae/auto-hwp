@@ -596,8 +596,8 @@ export default function BulkFillPage() {
       <header className="bulk-head">
         <div className="bulk-head-in">
           <a href={`${BASE}/`} className="bulk-back">←</a>
-          <span className="bulk-logo">오토한글 <b>벌크 채움</b></span>
-          <span className="bulk-sub">양식 1개 + 명단 N행 → 완성본 N부 zip</span>
+          <span className="bulk-logo">오토한글 <b>양식 일괄 작성</b></span>
+          <span className="bulk-sub">양식 하나 + 명단 → 사람 수만큼 완성본 zip</span>
           <span className="bulk-badge">결정론 · LLM 0콜 · 100% 로컬</span>
           <nav className="bulk-steps">
             {steps.map((s) => (

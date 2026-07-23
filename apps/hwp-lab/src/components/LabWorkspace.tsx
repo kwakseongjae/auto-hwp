@@ -495,10 +495,14 @@ export default function LabWorkspace() {
 
   return (
     <div className={IS_DEMO ? "lab-root lab-demo" : "lab-root"}>
+      {/* 데모 랜딩(문서 열기 전)은 히어로가 스스로 파일 열기·이동을 제공하므로 헤더를 띄우지 않는다.
+          문서를 열면(=편집 모드) 상태·파일 열기가 필요하므로 헤더가 돌아온다.
+          ⚠ `hidden` 속성은 .lab-header의 display:flex에 밀린다 — 조건부 렌더로 지운다. */}
+      {(!IS_DEMO || doc) && (
       <header className="lab-header">
         <span className="lab-title">
           {IS_DEMO ? "오토한글" : "hwp-lab"}
-          <small>{IS_DEMO ? "AI와 함께 한 화면에서 쓰는 한글 — 데모" : "오토한글 통합 실험 앱 (QA)"}</small>
+          <small>{IS_DEMO ? "AI와 함께 한 화면에서 쓰는 한글" : "오토한글 통합 실험 앱 (QA)"}</small>
         </span>
         {IS_DEMO && (
           <a className="lab-gh-link" href="https://github.com/kwakseongjae/auto-hwp" target="_blank" rel="noreferrer" title="GitHub 저장소">
@@ -533,6 +537,7 @@ export default function LabWorkspace() {
         )}
         {badge}
       </header>
+      )}
 
       {labError && (
         <div className="lab-error" role="alert" data-testid="lab-error">
@@ -607,23 +612,40 @@ export default function LabWorkspace() {
                     AI가 <b>읽는 문서</b>와 <b>화면에 그려지는 문서</b>가 같은 엔진에서 나옵니다 — 그래서
                     말로 고친 편집이 검증되고, 한글에서 그대로 열립니다. 문서는 이 브라우저를 떠나지 않습니다.
                   </p>
-                  <div className="lab-hero-actions">
-                    <a className="lab-btn lab-sample-btn" href={`${BASE}/bulk`} data-testid="bulk-link" title="양식 1개+명단 N행 → 완성본 N부 zip (전 과정 결정론·로컬)">📦 벌크 채움</a>
-                    <label className="lab-btn lab-btn-accent lab-hero-open">
-                      파일 열기 (.hwp/.hwpx)
-                      <input type="file" accept=".hwp,.hwpx" hidden onChange={onFile} data-testid="file-input-hero" />
-                    </label>
-                    {SAMPLES.map((s) => (
-                      <button key={s.file} className="lab-btn lab-sample-btn" data-testid={`sample-${s.file}`} title={s.hint} onClick={() => void openSample(s.file)}>
-                        {s.label}
-                      </button>
-                    ))}
+                  {/* 이 데모에서 할 수 있는 일 두 가지 — 문서 편집 / 양식 일괄 작성. */}
+                  <div className="lab-ways">
+                    <div className="lab-way">
+                      <span className="n">문서 편집</span>
+                      <p>내 한글 파일을 열어 화면에서 바로 고치고, HTML·PDF·HWPX로 저장합니다.</p>
+                      <div className="lab-way-actions">
+                        <label className="lab-btn lab-btn-accent lab-hero-open">
+                          한글 파일 열기 (.hwp)
+                          <input type="file" accept=".hwp" hidden onChange={onFile} data-testid="file-input-hero" />
+                        </label>
+                        {SAMPLES.filter((s) => s.file.endsWith(".hwp")).map((s) => (
+                          <button key={s.file} className="lab-btn lab-sample-btn" data-testid={`sample-${s.file}`} title={s.hint} onClick={() => void openSample(s.file)}>
+                            {s.label}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="lab-way-note">
+                        창에 끌어다 놓아도 열립니다. <b>.hwpx는 알파 테스트 중</b>이라 이 데모에서는 .hwp만 받습니다.
+                      </p>
+                    </div>
+                    <div className="lab-way">
+                      <span className="n">양식 일괄 작성</span>
+                      <p>양식 하나에 채울 자리를 정해 두고 명단을 넣으면, 사람 수만큼 완성본을 만들어 묶어 줍니다.</p>
+                      <div className="lab-way-actions">
+                        <a className="lab-btn lab-btn-accent" href={`${BASE}/bulk`} data-testid="bulk-link" title="양식 1개 + 명단 N행 → 완성본 N부 zip">
+                          일괄 작성 열기
+                        </a>
+                      </div>
+                      <p className="lab-way-note">채우는 과정은 전부 규칙 기반이라 AI 없이도 값이 정확히 들어갑니다.</p>
+                    </div>
                   </div>
-                  <div className="lab-badges">
-                    <span className="g">한컴 쪽수 일치 8==8 · 18==18</span><span>줄바꿈 98.9%</span>
-                    <span>실물 공공문서 49종</span><span className="g">100% 로컬 · 7.3MB wasm</span>
-                  </div>
-                  <p className="lab-hero-note">파일을 창에 끌어다 놓아도 열립니다 · 결과는 HTML·PDF·HWPX로 저장</p>
+                  <p className="lab-hero-note">
+                    문서는 브라우저 밖으로 나가지 않습니다 · AI로 고치는 기능은 곧 이 화면에서도 시연할 수 있게 붙일 예정입니다
+                  </p>
                 </div>
                 <div className="lab-stage" aria-hidden>
                   <div className="lab-page"><img src={`${BASE}/brand/render-p0.svg`} alt="" /><div className="lab-shade" /></div>
@@ -639,20 +661,20 @@ export default function LabWorkspace() {
 
               <div className="lab-features">
                 <div className="lab-feature">
-                  <b>🧭 같은 좌표계</b>
-                  <span>AI가 받는 문서 프로필의 주소 <code>[s0/b3]</code>은 화면 블록과 같은 IR — 마킹 없이 말해도 정확한 곳에 꽂힙니다</span>
+                  <b>AI가 문서를 실제로 읽습니다</b>
+                  <span>화면에 그려지는 문서와 AI가 받아 보는 문서가 같은 엔진에서 나옵니다. 어느 표의 어느 칸인지 사람이 짚어 주지 않아도 AI가 스스로 찾아갑니다.</span>
                 </div>
                 <div className="lab-feature">
-                  <b>🛡️ 타입드 Intent</b>
-                  <span>모델의 손은 화이트리스트 19종 Intent JSON뿐 — 스키마 검증·카드 프리뷰·위치 보기·1클릭 undo</span>
+                  <b>AI가 할 수 있는 일이 정해져 있습니다</b>
+                  <span>AI는 정해진 편집 명령만 낼 수 있고, 모든 제안은 적용 전에 카드로 보여 줍니다. 바뀔 위치를 미리 확인하고 한 번에 되돌릴 수 있습니다.</span>
                 </div>
                 <div className="lab-feature">
-                  <b>🎯 게이트로 검증</b>
-                  <span>한컴 쪽수 완전 일치(8==8·18==18)·줄바꿈 98.9%·무편집 바이트 보존 — CI 불변식</span>
+                  <b>한글에서 열었을 때가 기준입니다</b>
+                  <span>쪽 나눔과 줄바꿈을 한글이 계산한 결과와 대조해 검증하고, 손대지 않은 부분은 원본 그대로 보존합니다.</span>
                 </div>
                 <div className="lab-feature">
-                  <b>📦 4가지 표면</b>
-                  <span><code>npm i @auto-hwp/engine</code> · MCP(<code>claude mcp add</code>) · CLI · Claude 스킬 — 전부 로컬</span>
+                  <b>원하는 방식으로 가져다 씁니다</b>
+                  <span>웹에서 바로 쓰거나, <code>npm i @auto-hwp/engine</code>으로 서비스에 넣거나, 쓰던 AI 도구에 붙이거나, 터미널에서 실행할 수 있습니다. 어느 쪽이든 문서는 내 컴퓨터를 떠나지 않습니다.</span>
                 </div>
               </div>
 

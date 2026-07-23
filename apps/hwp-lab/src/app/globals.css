@@ -274,10 +274,17 @@ body {
   background: linear-gradient(115deg, #ffffff 55%, #c4b5fd 90%);
   -webkit-background-clip: text; background-clip: text; color: transparent;
   filter: drop-shadow(0 4px 22px rgba(124,58,237,0.28)); }
-.lab-caret { width: 18px; height: 58px; margin-left: 12px; border-radius: 4px;
+.lab-caret { width: 14px; height: 58px; margin-left: 12px; border-radius: 3px;
   background: linear-gradient(180deg, #a78bfa, #6d28d9);
-  box-shadow: 0 0 28px rgba(124,58,237,0.8); animation: lab-blink 1.2s steps(2) infinite; }
-@keyframes lab-blink { 50% { opacity: 0.25; } }
+  box-shadow: 0 0 28px rgba(124,58,237,0.8);
+  /* 딱딱한 2단 점멸(steps) 대신 부드럽게 숨쉬듯 — 켜짐이 길고 꺼짐이 짧다. */
+  animation: lab-blink 1.9s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+@keyframes lab-blink {
+  0%, 42% { opacity: 1; }
+  58%, 72% { opacity: 0.18; }
+  100% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) { .lab-caret { animation: none; opacity: 0.85; } }
 .lab-tagline { font-size: 22px; font-weight: 700; color: #eef1f6; margin: 18px 0 0; }
 .lab-demo .lab-hero-sub { color: #78818f; font-size: 14.5px; line-height: 1.75; margin-top: 10px; }
 .lab-demo .lab-hero-sub b { color: #b8c0cc; }
@@ -285,6 +292,16 @@ body {
 .lab-demo .lab-btn-accent { background: #7c3aed; border-color: #7c3aed; color: #fff;
   box-shadow: 0 6px 26px rgba(124,58,237,0.45); }
 .lab-demo .lab-sample-btn { background: rgba(255,255,255,0.05); border: 1px solid #2a3546; color: #dfe5ee; }
+/* 랜딩의 "할 수 있는 일" 두 갈래 — 문서 편집 / 양식 일괄 작성. */
+.lab-ways { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 22px; }
+@media (max-width: 780px) { .lab-ways { grid-template-columns: 1fr; } }
+.lab-demo .lab-way { background: rgba(255,255,255,0.035); border: 1px solid #1e2532;
+  border-radius: 14px; padding: 15px 17px; }
+.lab-demo .lab-way .n { font-size: 14px; font-weight: 700; color: #eef1f6; }
+.lab-demo .lab-way p { font-size: 13px; line-height: 1.7; color: #78818f; margin: 7px 0 12px; }
+.lab-way-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.lab-demo .lab-way-note { font-size: 12px; color: #5c6470; margin: 11px 0 0; line-height: 1.65; }
+.lab-demo .lab-way-note b { color: #c4b5fd; font-weight: 600; }
 .lab-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
 .lab-badges span { font-size: 12.5px; padding: 6px 12px; border-radius: 999px;
   background: rgba(124,58,237,0.10); border: 1px solid rgba(124,58,237,0.35); color: #c4b5fd; }

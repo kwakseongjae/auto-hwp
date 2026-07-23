@@ -5,6 +5,12 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
+- 갱신: 2026-07-23(9) · Claude — **정적 데모 로컬 작업 루프 + 홈 개선**: `npm run dev:demo`(DEMO_STATIC=1
+  핫리로드 :3311) / `npm run preview:demo`(실제 export 산출물 :3312) — **배포 없이 로컬에서 수정·확인**.
+  홈: 랜딩 헤더 제거(문서 열면 복귀 — ⚠ hidden 속성은 display:flex에 밀림, 조건부 렌더로), 캐럿 18→14px·
+  부드러운 점멸(+reduced-motion), 지표 배지 3종 제거, 할 수 있는 일 2갈래 카드(문서 편집 / 양식 일괄 작성),
+  랜딩 파일 입력 .hwp 전용(+.hwpx 알파 고지), 4개 소개 문구 자연어 재작성(이모지·비문 제거).
+  용어: "벌크 채움" → **"양식 일괄 작성"**(랜딩·/bulk 헤더 — URL은 /bulk 유지).
 - 갱신: 2026-07-23(8) · Claude — **.hwp 변환 리플로 원인 1호 수정**(사용자 실양식 모두의창업 .hwp):
   pagePr landscape 토큰 직관 매핑이 OWPML 실관례와 반전(세로=WIDELY가 옳음 — 실물 26/29 실측) →
   외부 리더(한글/LibreOffice)에서 가로 렌더·2쪽→6쪽. synth.rs 스왑+hwp-core 테스트 갱신. 오라클

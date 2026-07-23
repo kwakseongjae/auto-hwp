@@ -14,7 +14,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "build:demo": "node scripts/build-demo.mjs"
+    "build:demo": "node scripts/build-demo.mjs",
+    "dev:demo": "DEMO_STATIC=1 next dev -p 3311",
+    "preview:demo": "node scripts/build-demo.mjs && npx --yes serve -l 3312 out"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.109.1",
