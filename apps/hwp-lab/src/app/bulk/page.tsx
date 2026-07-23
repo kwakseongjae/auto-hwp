@@ -617,6 +617,17 @@ export default function BulkFillPage() {
             <input type="file" accept=".hwp,.hwpx" hidden data-testid="bulk-template" onChange={(e) => e.target.files?.[0] && void onTemplate(e.target.files[0])} />
           </label>
           {busy && !results.length && <span className="bulk-busy">{busy}</span>}
+          {tpl && (/\.hwp$/i.test(tpl.name) ? (
+            <div className="bulk-fmtnote warn" data-testid="bulk-fmt-note">
+              ⚠ <b>.hwp(바이너리) 양식</b> — 산출물은 HWPX <em>변환본</em>이라 쪽 나눔·표 너비 등 서식이 원본과 달라질 수 있습니다.
+              원본 서식을 그대로 보존하려면 <b>한글에서 이 양식을 &quot;.hwpx로 저장&quot; 한 파일</b>을 업로드하세요 — HWPX 양식은
+              편집하지 않은 영역이 <b>바이트 단위로 보존</b>됩니다. (.hwp로 되돌리기: 산출물을 한글에서 열어 .hwp로 저장)
+            </div>
+          ) : (
+            <div className="bulk-fmtnote ok" data-testid="bulk-fmt-note">
+              ✓ <b>HWPX 양식</b> — 편집하지 않은 영역은 바이트 단위로 그대로 보존됩니다(서식 무손실). 산출물도 .hwpx입니다.
+            </div>
+          ))}
         </section>
 
         {tpl && studio && (
@@ -724,7 +735,7 @@ export default function BulkFillPage() {
 
         {results.length > 0 && cur && (
           <section className="bulk-step">
-            <h2><span className="num">4</span> 검수 <small>기준선 {baseline}쪽 · {results.length}부 중 검토 필요 {review}건 — 한 명씩 넘겨 확인 후 zip</small></h2>
+            <h2><span className="num">4</span> 검수 <small>기준선 {baseline}쪽 · {results.length}부 중 검토 필요 {review}건 — 한 명씩 넘겨 확인 후 zip · 산출물 .hwpx(한글에서 바로 열림)</small></h2>
             <div className="bulk-nav review">
               <button onClick={() => setIdx((i) => Math.max(0, i - 1))} disabled={idx === 0}>‹ 이전</button>
               <span className="bulk-idx" data-testid="bulk-idx">{idx + 1} / {results.length} — <b>{cur.name}</b>{cur.reasons.length > 0 && <em className="warn"> ⚠ {cur.reasons.join(", ")}</em>}</span>
@@ -834,6 +845,10 @@ export default function BulkFillPage() {
         .bulk-selinfo { margin-top: 12px; font-size: 12.5px; color: #8b93a1; }
         .bulk-selinfo b { color: #6ee7b7; }
         .bulk-nextinfo { margin-top: 8px; font-size: 12.5px; color: #5c6470; }
+        .bulk-fmtnote { margin-top: 12px; padding: 10px 14px; border-radius: 10px; font-size: 12.5px; line-height: 1.7; max-width: 780px; }
+        .bulk-fmtnote.warn { background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.3); color: #d9b96a; }
+        .bulk-fmtnote.ok { background: rgba(16,185,129,0.07); border: 1px solid rgba(16,185,129,0.28); color: #6ee7b7; }
+        .bulk-fmtnote b { color: inherit; } .bulk-fmtnote em { font-style: normal; text-decoration: underline; }
         .bulk-howto { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
         .bulk-howto-card { border: 1px solid #232b3a; background: #12161f; border-radius: 14px; padding: 14px 16px; }
         .bulk-howto-card b { color: #fff; font-size: 13.5px; }
