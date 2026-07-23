@@ -5,6 +5,10 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
+- 갱신: 2026-07-23 · Claude — **073 벌크 채움 타당성 완료**(PoC+생태계 조사, `docs/issues/073-bulk-fill.md`).
+  실물 신청서 3인분 채움 60ms/부·zip·재검증 OK. **HWPX 템플릿=프로덕션급**(바이트동일·쪽수불변) /
+  .hwp 템플릿=변환 리플로 축 잔여. 생태계 공백지대 확인(무한컴+.hwp무훼손+벌크+MCP 완비물 없음).
+  권고=같은 레포 새 표면(`auto-hwp fill` v1) — **스코프 승인 대기**.
 - 갱신: 2026-07-22(15) · Claude — **임팩트 배치**: README 한/영 why-서사 재작성(AI 인식 3성질) + 배너 v2(실렌더
   합성) + 데모 랜딩 다크 브랜드 리디자인(.lab-demo 스코프 — 에디터 크롬 무접촉). tsc·vitest 50 그린, 데모 프리뷰
   스크린샷 3회 반복 검증. 랜딩 프리뷰는 DEMO_STATIC=1 dev 기동(함정).
