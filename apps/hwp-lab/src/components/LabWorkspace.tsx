@@ -25,7 +25,7 @@ const FONT_URL_BASE = `${BASE}/fonts`;
 
 // 랜딩의 원클릭 샘플(scripts/copy-samples.mjs 가 public/samples 에 복사하는 레포 벤치마크 문서).
 const SAMPLES: { file: string; label: string; hint: string }[] = [
-  { file: "sample-8p.hwp", label: "정부 양식 샘플 (.hwp · 8쪽)", hint: "바이너리 HWP5 파싱 + 표/병합셀" },
+  { file: "sample-8p.hwp", label: "예시 샘플", hint: "바이너리 HWP5 파싱 + 표/병합셀" },
   { file: "sample-18p.hwpx", label: "신청서 샘플 (.hwpx · 18쪽)", hint: "손실 변환 자동 감지 → 레이아웃 정리" },
 ];
 
@@ -623,7 +623,7 @@ export default function LabWorkspace() {
                       {/* 버튼은 카드 하단에 정렬(margin-top:auto) — 두 카드의 행동 지점이 같은 높이에 온다. */}
                       <div className="lab-way-actions">
                         <label className="lab-btn lab-btn-accent lab-hero-open">
-                          한글 파일 열기 (.hwp)
+                          한글 파일 열기
                           <input type="file" accept=".hwp" hidden onChange={onFile} data-testid="file-input-hero" />
                         </label>
                         {SAMPLES.filter((s) => s.file.endsWith(".hwp")).map((s) => (

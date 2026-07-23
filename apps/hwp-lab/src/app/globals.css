@@ -305,8 +305,11 @@ body {
   border: 1px solid #1e2532; border-radius: 14px; padding: 18px 20px 19px; }
 .lab-demo .lab-way .n { font-size: 19px; font-weight: 700; color: #ffffff; letter-spacing: -0.3px; }
 .lab-demo .lab-way p { font-size: 13.5px; line-height: 1.7; color: #8b93a1; margin: 9px 0 0; }
-/* 행동 버튼은 카드 맨 아래로 — 카드 높이가 달라도 두 버튼 줄이 나란히 선다. */
-.lab-way-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 16px; }
+/* 행동 버튼은 카드 맨 아래로 — 카드 높이가 달라도 두 버튼 줄이 나란히 선다.
+   한 줄 유지(nowrap): 라벨을 짧게 두고 줄바꿈을 막아 카드마다 버튼 줄이 하나다. */
+.lab-way-actions { display: flex; flex-wrap: nowrap; gap: 10px; margin-top: auto; padding-top: 18px; }
+.lab-demo .lab-way-actions .lab-btn { padding: 12px 22px; font-size: 15px; font-weight: 600;
+  white-space: nowrap; text-decoration: none; }
 .lab-demo .lab-way-note { font-size: 12px; color: #5c6470; margin: 10px 0 0; line-height: 1.65; }
 .lab-demo .lab-way-note b { color: #c4b5fd; font-weight: 600; }
 .lab-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
