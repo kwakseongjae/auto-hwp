@@ -5,6 +5,11 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
+- 갱신: 2026-07-23(3) · Claude — **073 웹 테스트 환경 /bulk 완성**: 업로드→자동 인스펙션(fill-map 검수 표 —
+  중복 배지·pin·예시값·필수 토글)→명단(CSV/JSON 붙여넣기)→생성+재개봉 검증→**검수 캐러셀**(실렌더+채운 셀
+  하이라이트+이전값 취소선)→STORE zip(+report.json, 의존성 0). **전 과정 결정론·LLM 0콜·100% 클라이언트**
+  (정적 데모에서도 동작). 실브라우저 드라이브 실증(7필드 유도·3명 채움·캐러셀·zip 다운로드·에러 0).
+  함정 수정: 프로필 표 캡(20)이 인스펙션·검증을 누락시킴 → blocksInRect 전 표 열거로 통일(거짓 value_not_found 해소).
 - 갱신: 2026-07-23(2) · Claude — **073 v1 구현 완료(커밋)**: `auto-hwp inspect`(fill-map 초안 유도) +
   `auto-hwp fill`(pin 결정론 적용 → 재개봉 검증(값+쪽수 기준선) → zip+report.json, --strict 분기).
   실물 E2E 5명·유닛 3·clippy·게이트 8==8. 리서치 확정: fillmap.v1(pin 2단·한글 키·3단 누락 정책)·검수

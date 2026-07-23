@@ -608,6 +608,7 @@ export default function LabWorkspace() {
                     말로 고친 편집이 검증되고, 한글에서 그대로 열립니다. 문서는 이 브라우저를 떠나지 않습니다.
                   </p>
                   <div className="lab-hero-actions">
+                    <a className="lab-btn lab-sample-btn" href={`${BASE}/bulk`} data-testid="bulk-link" title="양식 1개+명단 N행 → 완성본 N부 zip (전 과정 결정론·로컬)">📦 벌크 채움</a>
                     <label className="lab-btn lab-btn-accent lab-hero-open">
                       파일 열기 (.hwp/.hwpx)
                       <input type="file" accept=".hwp,.hwpx" hidden onChange={onFile} data-testid="file-input-hero" />
