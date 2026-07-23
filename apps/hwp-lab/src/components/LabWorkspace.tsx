@@ -494,7 +494,7 @@ export default function LabWorkspace() {
     );
 
   return (
-    <div className={IS_DEMO ? "lab-root lab-demo" : "lab-root"}>
+    <div className={IS_DEMO ? `lab-root lab-demo${doc ? "" : " lab-landing"}` : "lab-root"}>
       {/* 데모 랜딩(문서 열기 전)은 히어로가 스스로 파일 열기·이동을 제공하므로 헤더를 띄우지 않는다.
           문서를 열면(=편집 모드) 상태·파일 열기가 필요하므로 헤더가 돌아온다.
           ⚠ `hidden` 속성은 .lab-header의 display:flex에 밀린다 — 조건부 렌더로 지운다. */}
@@ -605,7 +605,7 @@ export default function LabWorkspace() {
             <div className="lab-hero" data-testid="lab-hero">
               <div className="lab-hero-grid">
                 <div className="lab-hero-copy">
-                  <div className="lab-kicker"><b>AUTO-HWP</b> · SELF-OWNED HWP ENGINE</div>
+                  <div className="lab-kicker"><b>오토한글</b> · 한글 문서를 직접 다루는 엔진</div>
                   <h1 className="lab-hero-title"><span className="lab-mark">오토한글</span><span className="lab-caret" aria-hidden /></h1>
                   <p className="lab-tagline">AI와 함께, 한 화면을 보면서 쓰는 한글</p>
                   <p className="lab-hero-sub">
@@ -617,6 +617,10 @@ export default function LabWorkspace() {
                     <div className="lab-way">
                       <span className="n">문서 편집</span>
                       <p>내 한글 파일을 열어 화면에서 바로 고치고, HTML·PDF·HWPX로 저장합니다.</p>
+                      <p className="lab-way-note">
+                        창에 끌어다 놓아도 열립니다. <b>.hwpx는 알파 테스트 중</b>이라 이 데모에서는 .hwp만 받습니다.
+                      </p>
+                      {/* 버튼은 카드 하단에 정렬(margin-top:auto) — 두 카드의 행동 지점이 같은 높이에 온다. */}
                       <div className="lab-way-actions">
                         <label className="lab-btn lab-btn-accent lab-hero-open">
                           한글 파일 열기 (.hwp)
@@ -628,19 +632,16 @@ export default function LabWorkspace() {
                           </button>
                         ))}
                       </div>
-                      <p className="lab-way-note">
-                        창에 끌어다 놓아도 열립니다. <b>.hwpx는 알파 테스트 중</b>이라 이 데모에서는 .hwp만 받습니다.
-                      </p>
                     </div>
                     <div className="lab-way">
                       <span className="n">양식 일괄 작성</span>
                       <p>양식 하나에 채울 자리를 정해 두고 명단을 넣으면, 사람 수만큼 완성본을 만들어 묶어 줍니다.</p>
+                      <p className="lab-way-note">채우는 과정은 전부 규칙 기반이라 AI 없이도 값이 정확히 들어갑니다.</p>
                       <div className="lab-way-actions">
                         <a className="lab-btn lab-btn-accent" href={`${BASE}/bulk`} data-testid="bulk-link" title="양식 1개 + 명단 N행 → 완성본 N부 zip">
                           일괄 작성 열기
                         </a>
                       </div>
-                      <p className="lab-way-note">채우는 과정은 전부 규칙 기반이라 AI 없이도 값이 정확히 들어갑니다.</p>
                     </div>
                   </div>
                   <p className="lab-hero-note">

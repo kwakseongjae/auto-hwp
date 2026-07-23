@@ -252,6 +252,12 @@ body {
 
 /* ── 오토한글 데모 랜딩 브랜드 테마 (.lab-demo 스코프 — QA(hwp-lab) 모드/에디터 크롬 무접촉) ── */
 .lab-demo { background: #07090d; color: #e6e9ef; }
+/* 랜딩은 앱 셸(height:100vh + 세로 중앙정렬)이 아니라 문서처럼 자연 스크롤한다 — 고정 높이면
+   좁은 화면에서 ① 콘텐츠가 넘쳐 위가 잘리고 ② 배경이 뷰포트 높이에서 끊겨 흰 바탕이 드러난다.
+   문서를 열면 lab-landing이 빠지고 원래의 앱 셸 규칙으로 되돌아간다. */
+.lab-root.lab-landing { height: auto; min-height: 100vh; }
+.lab-landing .lab-body { min-height: 100vh; }
+.lab-landing .lab-empty { height: auto; justify-content: flex-start; padding: 2vh 0 6vh; }
 .lab-demo .lab-body {
   background: #07090d;
   background-image: repeating-linear-gradient(0deg, transparent 0 43px, rgba(230,233,239,0.04) 43px 44px),
@@ -295,12 +301,13 @@ body {
 /* 랜딩의 "할 수 있는 일" 두 갈래 — 문서 편집 / 양식 일괄 작성. */
 .lab-ways { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 22px; }
 @media (max-width: 780px) { .lab-ways { grid-template-columns: 1fr; } }
-.lab-demo .lab-way { background: rgba(255,255,255,0.035); border: 1px solid #1e2532;
-  border-radius: 14px; padding: 15px 17px; }
-.lab-demo .lab-way .n { font-size: 14px; font-weight: 700; color: #eef1f6; }
-.lab-demo .lab-way p { font-size: 13px; line-height: 1.7; color: #78818f; margin: 7px 0 12px; }
-.lab-way-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.lab-demo .lab-way-note { font-size: 12px; color: #5c6470; margin: 11px 0 0; line-height: 1.65; }
+.lab-demo .lab-way { display: flex; flex-direction: column; background: rgba(255,255,255,0.035);
+  border: 1px solid #1e2532; border-radius: 14px; padding: 18px 20px 19px; }
+.lab-demo .lab-way .n { font-size: 19px; font-weight: 700; color: #ffffff; letter-spacing: -0.3px; }
+.lab-demo .lab-way p { font-size: 13.5px; line-height: 1.7; color: #8b93a1; margin: 9px 0 0; }
+/* 행동 버튼은 카드 맨 아래로 — 카드 높이가 달라도 두 버튼 줄이 나란히 선다. */
+.lab-way-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 16px; }
+.lab-demo .lab-way-note { font-size: 12px; color: #5c6470; margin: 10px 0 0; line-height: 1.65; }
 .lab-demo .lab-way-note b { color: #c4b5fd; font-weight: 600; }
 .lab-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
 .lab-badges span { font-size: 12.5px; padding: 6px 12px; border-radius: 999px;
@@ -344,4 +351,13 @@ body {
 .lab-demo .lab-feature code { background: rgba(124,58,237,0.14); color: #c4b5fd; }
 .lab-demo .lab-hero-dev { border-top-color: #1e2532; color: #5c6470; }
 .lab-demo .lab-hero-dev a { color: #8b93a1; }
-@media (max-width: 900px) { .lab-hero-grid { grid-template-columns: 1fr; } .lab-stage { display: none; } }
+/* 좁은 화면: 스테이지를 숨기지 않고 축소해 카피 아래에 둔다 — 폰으로 처음 들어온 사람도
+   "AI가 문서를 고치는 그림"을 보게 하는 게 이 랜딩의 전달력 대부분이다. */
+@media (max-width: 900px) {
+  .lab-hero-grid { grid-template-columns: 1fr; }
+  .lab-stage { min-height: 400px; margin-top: 26px; }
+  .lab-page { right: 50%; transform: translateX(50%) rotateY(-9deg) rotateX(3deg) rotate(1deg);
+    width: min(300px, 86%); max-height: 380px; }
+  .lab-bubble.lab-user { top: 0; left: 0; font-size: 12.5px; }
+  .lab-bubble.lab-ai { bottom: 0; left: 0; right: auto; width: min(300px, 88%); font-size: 12px; }
+}
