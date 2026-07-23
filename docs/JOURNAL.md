@@ -8,7 +8,7 @@
 ## 2026-07-23 (Claude) · 073 웹 /bulk — 결정론 벌크 채움 테스트 환경
 - hwp-lab /bulk 신설(클라이언트 온리): 인스펙션→검수 표→명단→생성+검증→캐러셀(실렌더+하이라이트)→zip. LLM 0콜 확정 — 전부 엔진 API(tableGrid/applyIntent/toHwpx/renderPageSvgSanitized/col·rowBoundaries).
 - 실브라우저 드라이브: 실물 신청서 7필드·3명·zip 실다운로드·pageerror 0. 함정: 프로필 표 캡 20 → blocksInRect 전 표 열거로 인스펙션·검증 통일(거짓 경고 해소). 랜딩에 벌크 링크.
-- 열린 것: 정적 데모 배포 검증 · pin 화면클릭 재지정 UI · XLSX · 실 100명 파일럿.
+- 라이브 배포 검증 통과(Pages /bulk 실드라이브 — zip 다운로드까지 에러 0). 열린 것: pin 화면클릭 재지정 UI · XLSX · 실 100명 파일럿.
 
 ## 2026-07-23 (Claude) · 073 v1 구현 — inspect/fill 서브커맨드 (스크래치 클론 경유)
 - 로컬 Desktop 접근이 세션 권한(TCC 추정)으로 막혀 퍼블릭 레포를 스크래치에 클론해 진행(push로 반영). 함정: 하네스가 매 명령 cwd를 차단 폴더로 리셋 — 전 명령에 cd 강제.
