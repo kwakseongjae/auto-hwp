@@ -738,7 +738,9 @@ mod inplace_tests {
 
     /// Track A Phase 3: the converted HWPX carries the .hwp's OWN page geometry — orientation, size,
     /// margins — instead of inheriting the Skeleton stub's hardcoded landscape A4. benchmark.hwp is
-    /// portrait A4, so its secPr must read landscape="NARROWLY" with portrait dimensions.
+    /// portrait A4, so its secPr must read landscape="WIDELY" with portrait dimensions — OWPML의
+    /// 토큰 의미는 직관과 반대다(실물 한컴 세로 문서 다수가 WIDELY, H2Orestart도 NARROWLY=가로로
+    /// 해석 — synth.rs pagePr 패치 주석의 실측 근거 참조).
     #[cfg(feature = "rhwp")]
     #[test]
     fn hwp5_page_geometry_is_lifted_not_skeleton_landscape() {
@@ -759,8 +761,8 @@ mod inplace_tests {
         let sec0 = String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap();
         let pagepr = &sec0[sec0.find("<hp:pagePr").expect("has pagePr")..][..120];
         assert!(
-            pagepr.contains(r#"landscape="NARROWLY""#),
-            "portrait, not the Skeleton's WIDELY: {pagepr}"
+            pagepr.contains(r#"landscape="WIDELY""#),
+            "portrait must serialize as WIDELY (OWPML inverted semantics): {pagepr}"
         );
         assert!(
             pagepr.contains(r#"width="59528""#),

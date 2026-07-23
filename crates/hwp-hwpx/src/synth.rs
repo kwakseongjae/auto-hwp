@@ -909,10 +909,15 @@ pub fn patch_page(section_xml: &str, page: &PageSetup) -> String {
             let end = p + rel + 1;
             let tag = set_attr(&s[p..end], "width", &page.width.to_string());
             let tag = set_attr(&tag, "height", &page.height.to_string());
+            // ⚠ OWPML 토큰 의미는 직관과 반대다: 실물 한컴 저작 HWPX 26/29건이 세로 문서에
+            // landscape="WIDELY"를 쓰고, H2Orestart(LibreOffice)도 NARROWLY를 가로로 해석한다 —
+            // 실측: 세로 A4 .hwp 변환본이 NARROWLY로 나가면 오라클에서 가로 렌더되어 2쪽→6쪽
+            // (모두의창업 양식, 2026-07-23). 파서는 토큰을 무시하고 치수로 방향을 유도하므로
+            // (parse.rs §pagePr) 자체 왕복에서는 보이지 않던 외부-리더 전용 결함이었다.
             let tag = set_attr(
                 &tag,
                 "landscape",
-                if page.landscape { "WIDELY" } else { "NARROWLY" },
+                if page.landscape { "NARROWLY" } else { "WIDELY" },
             );
             s = format!("{}{}{}", &s[..p], tag, &s[end..]);
         }

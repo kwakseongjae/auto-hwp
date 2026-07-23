@@ -5,6 +5,11 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
+- 갱신: 2026-07-23(8) · Claude — **.hwp 변환 리플로 원인 1호 수정**(사용자 실양식 모두의창업 .hwp):
+  pagePr landscape 토큰 직관 매핑이 OWPML 실관례와 반전(세로=WIDELY가 옳음 — 실물 26/29 실측) →
+  외부 리더(한글/LibreOffice)에서 가로 렌더·2쪽→6쪽. synth.rs 스왑+hwp-core 테스트 갱신. 오라클
+  실측 6→2쪽 복원. verify quick 그린·e2e bulk 통과. ⚠ npm 0.0.2 발행 시 반영 필요. 잔여: 문단번호
+  아티팩트·신청서 +1쪽 축·라틴 어간.
 - 갱신: 2026-07-23(7) · Claude — **073 실사용 피드백 반영**: .hwp 양식 업로드 시 변환 리플로(쪽나눔·너비)
   정직 고지 + ".hwpx로 저장한 양식 권장" 배너 / HWPX면 바이트 보존 배지. 포맷 답: hwpx→hwpx 지원·
   hwp→hwp 불가(저장은 HWPX 단일 — 우회: 한글에서 .hwp 재저장). 073에 실사용 리포트 절 추가.
