@@ -22,6 +22,11 @@ test("073: 업로드→스튜디오(필드·규격 저장)→명단→생성→�
   await page.locator('[data-testid="bulk-spec-save"]').click();
   expect((await specDl).suggestedFilename()).toContain(".fillmap.json");
 
+  // 명단 온보딩: "형식 예시 넣기" → 사용자가 정의한 키로 스켈레톤이 들어간다
+  await page.locator('[data-testid="bulk-roster-template"]').click();
+  await expect(page.locator('[data-testid="bulk-roster"]')).toHaveValue(new RegExp(`${key}:`));
+  await expect(page.locator('[data-testid="bulk-ai-prompt"]')).toBeVisible();
+
   // 명단(CSV, 헤더=필드 키) → 생성 → 캐러셀 2명
   await page.locator('[data-testid="bulk-roster"]').fill(`${key}\n선임연구원\n책임연구원`);
   await page.locator('[data-testid="bulk-generate"]').click();

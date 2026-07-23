@@ -180,15 +180,45 @@ async function sha256hex(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-const SAMPLE_ROSTER = `성명,기업명,연락처
-김하나,㈜하나테크,010-1111-1111
-이두리,두리소프트,010-2222-2222
-박세온,세온컴퍼니,010-3333-3333`;
+/** 사용자가 정의한 필드로 명단 "형식 예시"(키: 값 블록 — 콤마 걱정 없는 권장 형식)를 만든다. */
+function buildRosterTemplate(fields: Field[]): string {
+  const line = (f: Field) => `${f.key}: ${SPEC_TYPES[f.specType]?.hint.replace("예: ", "") ?? ""}`;
+  const person = fields.map(line).join("\n");
+  return `${person}\n\n${fields.map((f) => `${f.key}: `).join("\n")}`;
+}
+
+/** 사용자가 정의한 필드·규정 그대로를 담은 "AI에게 줄 프롬프트" — ChatGPT/Claude 등 아무 AI에
+ *  원본 자료와 함께 붙여넣으면 우리 파서가 읽는 "키: 값" 블록이 나온다. 채움 자체는 계속 결정론. */
+function buildAiPrompt(fields: Field[]): string {
+  const rules = fields
+    .map((f) => {
+      const spec = SPEC_TYPES[f.specType];
+      const parts = [spec?.label ?? "텍스트"];
+      if (spec?.hint) parts.push(spec.hint);
+      if (f.required) parts.push("필수");
+      return `- ${f.key}: ${parts.join(" · ")}`;
+    })
+    .join("\n");
+  const skeleton = fields.map((f) => `${f.key}: (값)`).join("\n");
+  return `아래 "원본 자료"에서 각 사람의 정보를 추출해, 다음 형식 그대로만 출력해줘(설명·코드블록·번호 없이 본문만):
+
+${skeleton}
+
+(다음 사람은 빈 줄 하나 띄우고 같은 형식 반복)
+
+규칙:
+${rules}
+- 원본에 없는 값은 지어내지 말고 "필드명:" 뒤를 빈칸으로 둬.
+- 필드 이름은 위와 한 글자도 다르지 않게.
+
+원본 자료:
+(여기에 엑셀 복사본·메모·기존 문서 등 원본을 붙여넣으세요)`;
+}
 
 export default function BulkFillPage() {
   const [tpl, setTpl] = useState<{ bytes: Uint8Array; name: string; sha: string; pages: number } | null>(null);
   const [fields, setFields] = useState<Field[]>([]);
-  const [rosterText, setRosterText] = useState(SAMPLE_ROSTER);
+  const [rosterText, setRosterText] = useState("");
   const [results, setResults] = useState<RowResult[]>([]);
   const [baseline, setBaseline] = useState(0);
   const [idx, setIdx] = useState(0);
@@ -652,19 +682,42 @@ export default function BulkFillPage() {
               </aside>
             </div>
             {selected && <div className="bulk-selinfo">선택: <b>{selected.key}</b> — 명단에서 같은 이름의 열/키 값이 이 영역에 들어갑니다.{SPEC_TYPES[selected.specType]?.re ? ` 형식 검증: ${SPEC_TYPES[selected.specType].label}.` : ""}</div>}
+            {fields.filter((f) => f.use).length > 0 && <div className="bulk-nextinfo">↓ 다음: 아래 3단계에 사람별 값을 붙여넣으면, 인원수만큼 완성본이 만들어집니다</div>}
           </section>
         )}
 
         {tpl && (
           <section className="bulk-step">
-            <h2><span className="num">3</span> 명단 <small>CSV · 탭(엑셀 붙여넣기) · &quot;키: 값&quot; 블록 · JSON — 자동 감지 · EUC-KR 파일 OK</small></h2>
-            <div className="bulk-roster-bar">
-              <label className="bulk-btn sm ghost">📂 파일 열기<input type="file" accept=".csv,.txt,.tsv,.json" hidden data-testid="bulk-roster-file" onChange={(e) => { const f = e.target.files?.[0]; if (f) void readTextFile(f).then(setRosterText).catch((err) => setError(`명단 파일 읽기 실패: ${err}`)); }} /></label>
-              <span className="bulk-hint">헤더/키 이름 = 2단계에서 정한 영역 이름</span>
+            <h2><span className="num">3</span> 채울 내용(명단) 붙여넣기 <small>한 사람 = 한 묶음 — 2단계에서 정한 영역 이름으로 값을 적으면 그 자리에 들어갑니다</small></h2>
+            <div className="bulk-howto">
+              <div className="bulk-howto-card">
+                <b>🤖 AI로 정리하기 (권장)</b>
+                <p>엑셀·메모·기존 문서 등 아무 형태의 원본이 있다면 — 프롬프트를 복사해 ChatGPT/Claude에 원본과 함께 붙여넣으세요. 나온 결과를 아래 칸에 그대로 붙여넣으면 됩니다.</p>
+                <button className="bulk-btn sm" data-testid="bulk-ai-prompt" onClick={() => {
+                  const prompt = buildAiPrompt(fields.filter((f) => f.use));
+                  void navigator.clipboard.writeText(prompt).then(
+                    () => setNotice("✓ AI 프롬프트가 복사됐습니다 — ChatGPT/Claude 등에 붙여넣고, 끝의 \"원본 자료\" 자리에 갖고 있는 자료를 이어 붙이세요. AI가 준 결과를 아래 칸에 붙여넣으면 됩니다."),
+                    () => { setRosterText(prompt); setNotice("클립보드를 못 써서 아래 칸에 프롬프트를 넣어뒀습니다 — 복사해 쓰신 뒤 지우세요."); },
+                  );
+                }}>📋 AI 프롬프트 복사</button>
+              </div>
+              <div className="bulk-howto-card">
+                <b>✍️ 직접 쓰기</b>
+                <p>형식 예시를 넣고 값만 바꿔도 됩니다. 엑셀 표를 복사해 그대로 붙여넣어도 인식합니다(탭 구분).</p>
+                <div className="bulk-howto-btns">
+                  <button className="bulk-btn sm ghost" data-testid="bulk-roster-template" onClick={() => { setRosterText(buildRosterTemplate(fields.filter((f) => f.use))); setNotice(null); }}>형식 예시 넣기</button>
+                  <label className="bulk-btn sm ghost">📂 파일 열기<input type="file" accept=".csv,.txt,.tsv,.json" hidden data-testid="bulk-roster-file" onChange={(e) => { const f = e.target.files?.[0]; if (f) void readTextFile(f).then(setRosterText).catch((err) => setError(`명단 파일 읽기 실패: ${err}`)); }} /></label>
+                </div>
+              </div>
             </div>
-            <textarea className="bulk-roster" data-testid="bulk-roster" value={rosterText} onChange={(e) => setRosterText(e.target.value)} rows={7} spellCheck={false} />
-            <button className="bulk-btn accent big" data-testid="bulk-generate" disabled={!!busy || fields.filter((f) => f.use).length === 0} onClick={() => void generate()}>
-              {busy ?? "⚡ 생성 + 검증"}
+            <div className="bulk-keys-strip">
+              <span className="bulk-hint">이 이름들이 값의 주소입니다:</span>
+              {fields.filter((f) => f.use).map((f) => (<code key={f.id} className="bulk-keychip">{f.key}{f.required ? " *" : ""}</code>))}
+            </div>
+            <textarea className="bulk-roster" data-testid="bulk-roster" value={rosterText} onChange={(e) => setRosterText(e.target.value)} rows={9} spellCheck={false}
+              placeholder={fields.filter((f) => f.use).slice(0, 3).map((f) => `${f.key}: 값`).join("\n") + "\n\n(빈 줄로 사람 구분 — CSV/엑셀 붙여넣기/JSON도 자동 인식)"} />
+            <button className="bulk-btn accent big" data-testid="bulk-generate" disabled={!!busy || fields.filter((f) => f.use).length === 0 || !rosterText.trim()} onClick={() => void generate()}>
+              {busy ?? `⚡ 완성본 만들기 + 검증`}
             </button>
           </section>
         )}
@@ -780,6 +833,14 @@ export default function BulkFillPage() {
         .bulk-field-card .row3 { margin-top: 6px; font-size: 11.5px; color: #5c6470; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .bulk-selinfo { margin-top: 12px; font-size: 12.5px; color: #8b93a1; }
         .bulk-selinfo b { color: #6ee7b7; }
+        .bulk-nextinfo { margin-top: 8px; font-size: 12.5px; color: #5c6470; }
+        .bulk-howto { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+        .bulk-howto-card { border: 1px solid #232b3a; background: #12161f; border-radius: 14px; padding: 14px 16px; }
+        .bulk-howto-card b { color: #fff; font-size: 13.5px; }
+        .bulk-howto-card p { margin: 7px 0 11px; font-size: 12.5px; color: #8b93a1; line-height: 1.65; }
+        .bulk-howto-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+        .bulk-keys-strip { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-bottom: 9px; }
+        .bulk-keychip { font-size: 11.5px; color: #c4b5fd; background: rgba(124,58,237,0.13); border: 1px solid rgba(124,58,237,0.35); border-radius: 999px; padding: 3px 10px; }
         .bulk-roster-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
         .bulk-roster { width: 100%; font: 12.5px/1.7 ui-monospace, SFMono-Regular, monospace; padding: 12px 14px; border-radius: 12px; border: 1px solid #232b3a; background: #0d1118; color: #dfe4ec; box-sizing: border-box; margin-bottom: 12px; transition: border-color 0.15s; }
         .bulk-roster:focus { outline: none; border-color: #7c3aed; }
