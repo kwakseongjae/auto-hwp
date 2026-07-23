@@ -5,6 +5,11 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
+- 갱신: 2026-07-23(2) · Claude — **073 v1 구현 완료(커밋)**: `auto-hwp inspect`(fill-map 초안 유도) +
+  `auto-hwp fill`(pin 결정론 적용 → 재개봉 검증(값+쪽수 기준선) → zip+report.json, --strict 분기).
+  실물 E2E 5명·유닛 3·clippy·게이트 8==8. 리서치 확정: fillmap.v1(pin 2단·한글 키·3단 누락 정책)·검수
+  3층 UI+인문서 하이라이트(목업 전달). ⚠️ 로컬 Desktop 세션 권한 차단 지속 — 스크래치 클론으로 작업,
+  로컬 레포는 사용자 권한 복구 후 `git pull` 필요. 잔여: 검수 UI(hwp-lab)·XLSX·실 100명 파일럿.
 - 갱신: 2026-07-23 · Claude — **073 벌크 채움 타당성 완료**(PoC+생태계 조사, `docs/issues/073-bulk-fill.md`).
   실물 신청서 3인분 채움 60ms/부·zip·재검증 OK. **HWPX 템플릿=프로덕션급**(바이트동일·쪽수불변) /
   .hwp 템플릿=변환 리플로 축 잔여. 생태계 공백지대 확인(무한컴+.hwp무훼손+벌크+MCP 완비물 없음).

@@ -43,3 +43,7 @@ hwp-typeset = { workspace = true }
 hwp-render = { workspace = true }
 hwp-fidelity = { path = "../hwp-fidelity" }
 clap = { workspace = true }
+# 벌크 채움(issue 073): 편집 레인은 웹과 동일한 hwp-mcp Intent 경로를 쓴다(검증·거부 규칙 한 벌).
+hwp-mcp = { workspace = true }
+serde_json = { workspace = true }
+zip = { workspace = true }

@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
+
+mod fill;
 use hwp_model::types::SourceFormat;
 
 #[derive(Parser)]
@@ -221,6 +223,35 @@ enum Cmd {
         #[arg(long)]
         verify: bool,
     },
+    /// 벌크 채움 1/2 (issue 073): 양식에서 라벨→값칸 fill-map **초안**(autohwp.fillmap.v1)을 유도.
+    /// 사람이 pin(명시 주소)을 검수·확정한 뒤 `fill`에 넘긴다.
+    Inspect {
+        file: PathBuf,
+        /// fill-map JSON 출력 경로 (생략 시 stdout).
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// 벌크 채움 2/2 (issue 073): 확정 fill-map + 명단(JSON/단순 CSV) → 인원별 HWPX + zip +
+    /// report.json(행별 검증: 값 존재·쪽수 기준선). 문제 행은 needsReview로 보고, --strict면 스킵.
+    Fill {
+        /// 원본 양식 (.hwp/.hwpx — 산출물은 HWPX).
+        template: PathBuf,
+        /// fill-map JSON (inspect 초안을 검수·pin 확정한 것).
+        #[arg(long)]
+        map: PathBuf,
+        /// 명단: .json(객체 배열, 권장) 또는 단순 .csv(헤더=키, 내장 콤마/따옴표 미지원).
+        #[arg(long)]
+        data: PathBuf,
+        /// 출력 디렉토리 (개별 파일 + output.zip + report.json).
+        #[arg(long, default_value = "fill-out")]
+        out: PathBuf,
+        /// 파일명 패턴 — {index}/{index:03d}/{키} 보간.
+        #[arg(long, default_value = "{index:03d}_{성명}.hwpx")]
+        pattern: String,
+        /// 검증 실패 행을 생성하지 않고 스킵(기본: 생성하되 needsReview 보고).
+        #[arg(long)]
+        strict: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -292,6 +323,22 @@ fn run() -> Result<(), String> {
             out,
             verify,
         } => edit(&file, &append, &out, verify)?,
+        Cmd::Inspect { file, out } => fill::run_inspect(&file, out.as_deref())?,
+        Cmd::Fill {
+            template,
+            map,
+            data,
+            out,
+            pattern,
+            strict,
+        } => fill::run_fill(fill::FillArgs {
+            template: &template,
+            map: &map,
+            data: &data,
+            out: &out,
+            pattern: &pattern,
+            strict,
+        })?,
         Cmd::AiFill {
             file,
             instruction,

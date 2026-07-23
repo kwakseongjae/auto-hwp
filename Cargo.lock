@@ -307,12 +307,15 @@ dependencies = [
  "hwp-hwpx",
  "hwp-ingest",
  "hwp-jsx",
+ "hwp-mcp",
  "hwp-model",
  "hwp-ops",
  "hwp-oracle",
  "hwp-render",
  "hwp-session",
  "hwp-typeset",
+ "serde_json",
+ "zip 2.4.2",
 ]
 
 [[package]]
