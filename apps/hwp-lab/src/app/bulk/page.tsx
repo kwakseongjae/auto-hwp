@@ -1,8 +1,9 @@
 "use client";
-// 벌크 채움 웹 테스트 환경 (issue 073 — CLI inspect/fill의 브라우저 판).
-// **전 과정 결정론 · LLM 0콜 · 100% 클라이언트**: 인스펙션(라벨→pin 초안)·채움(SetTableCell/Replace)·
-// 검증(값 존재+쪽수 기준선)·검수 캐러셀(실렌더+채운 셀 하이라이트)·zip까지 엔진 API만 쓴다.
-// 정적 데모(Pages)에서도 그대로 동작한다(서버 0). 규칙은 crates/auto-hwp-cli/src/fill.rs와 한 벌.
+// 벌크 채움 웹 테스트 환경 (issue 073 — CLI inspect/fill의 브라우저 판 + 필드 스튜디오).
+// **전 과정 결정론 · LLM 0콜 · 100% 클라이언트**: 인스펙션(라벨→pin 초안)·영역 지정(문서 클릭→셀
+// 결정론 매핑)·규정(타입/필수)·규격 저장(fillmap JSON 재사용)·채움(SetTableCell)·검증(값+쪽수+형식)·
+// 검수 캐러셀(실렌더+하이라이트)·zip까지 엔진 API만 쓴다. 정적 데모(Pages)에서도 그대로 동작(서버 0).
+// 규칙은 crates/auto-hwp-cli/src/fill.rs와 한 벌 — 스키마는 additive(autohwp.fillmap.v1 + spec).
 import { useCallback, useMemo, useRef, useState } from "react";
 import { HwpDoc, initEngine } from "@auto-hwp/engine";
 
@@ -12,14 +13,30 @@ const BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";
 const LEXICON = ["성명", "이름", "생년월일", "연락처", "전화번호", "휴대전화", "주소", "이메일", "기업명", "업체명", "회사명", "대표자", "사업자등록번호", "법인등록번호", "서명", "날짜", "작성일", "기간", "계약기간", "소속", "직위", "부서"];
 const norm = (s: string) => (s || "").replace(/[\s()·:：'"※]/g, "");
 
+/** 규정(spec) 타입 — 채움 시 형식 검증(위반 = format_mismatch로 보고, 조용히 넘기지 않음). */
+const SPEC_TYPES: Record<string, { label: string; re: RegExp | null; hint: string }> = {
+  text: { label: "텍스트", re: null, hint: "" },
+  date: { label: "날짜", re: /^\d{4}\s*[.\-/년]\s*\d{1,2}\s*[.\-/월]\s*\d{1,2}\s*[.일]?\s*$/, hint: "예: 2026.01.01" },
+  phone: { label: "전화번호", re: /^0\d{1,2}-?\d{3,4}-?\d{4}$/, hint: "예: 010-1234-5678" },
+  bizno: { label: "사업자번호", re: /^\d{3}-?\d{2}-?\d{5}$/, hint: "예: 123-45-67890" },
+  number: { label: "숫자/금액", re: /^[\d,]+원?$/, hint: "예: 1,000,000" },
+};
+
+interface Pin {
+  section: number;
+  index: number;
+  row: number;
+  col: number;
+}
 interface Field {
   key: string;
   label: string;
-  pin: { section: number; index: number; row: number; col: number };
+  pin: Pin;
   example: string;
   ambiguous: number;
   use: boolean;
   required: boolean;
+  specType: string; // SPEC_TYPES 키
 }
 interface RowResult {
   name: string;
@@ -28,6 +45,7 @@ interface RowResult {
   reasons: string[];
   svg: string; // 채운 셀이 있는 페이지의 sanitized SVG
   pageW: number;
+  pageH: number;
   highlights: { x: number; y: number; w: number; h: number; key: string; value: string }[];
   values: { key: string; value: string; addr: string; example: string }[];
 }
@@ -79,29 +97,84 @@ function allTables(doc: HwpDoc): { section: number; block: number }[] {
   const seen = new Set<string>();
   for (let pg = 0; pg < doc.pageCount(); pg++) {
     for (const h of doc.blocksInRect(pg, 0, 0, 100000, 100000) as { section: number; block: number; kind: string }[]) {
-      const k = h.section + ':' + h.block;
-      if (h.kind === 'table' && !seen.has(k)) { seen.add(k); out.push(h); }
+      const k = h.section + ":" + h.block;
+      if (h.kind === "table" && !seen.has(k)) {
+        seen.add(k);
+        out.push(h);
+      }
     }
   }
   return out;
 }
 
-/** 단순 CSV(따옴표 발견 시 정직 거부 — CLI와 동일 규칙) 또는 JSON 배열 파싱. */
+/** (section, block) → 그 블록이 처음 나타나는 페이지. 스튜디오 오버레이·클릭 매핑 공용. */
+function buildPageOfBlock(doc: HwpDoc): Map<string, number> {
+  const map = new Map<string, number>();
+  for (let pg = 0; pg < doc.pageCount(); pg++) {
+    for (const h of doc.blocksInRect(pg, 0, 0, 100000, 100000) as { section: number; block: number; kind: string }[]) {
+      const k = h.section + ":" + h.block;
+      if (h.kind === "table" && !map.has(k)) map.set(k, pg);
+    }
+  }
+  return map;
+}
+
+/** 명단 파싱 — 4형식 자동 감지(전부 결정론):
+ *  ① JSON 배열  ② "키: 값" 블록 txt(빈 줄로 인원 구분 — 손으로 쓰기 가장 쉬움)
+ *  ③ TSV(탭 — 엑셀 복사 붙여넣기)  ④ CSV(콤마 — 따옴표 발견 시 정직 거부, JSON 권장) */
 function parseRoster(text: string): Record<string, string>[] {
   const t = text.trim();
+  if (!t) throw new Error("명단이 비어 있습니다");
   if (t.startsWith("[")) {
     const arr = JSON.parse(t) as Record<string, string>[];
     if (!Array.isArray(arr)) throw new Error("JSON은 객체 배열이어야 합니다");
     return arr;
   }
-  if (t.includes('"')) throw new Error("CSV에 따옴표가 있습니다 — 내장 콤마/따옴표는 JSON으로 넣어주세요");
-  const lines = t.split(/\r?\n/).filter((l) => l.trim());
-  const header = lines[0].split(",").map((h) => h.trim());
-  return lines.slice(1).map((line, i) => {
-    const cells = line.split(",");
+  const lines = t.split(/\r?\n/);
+  const first = lines.find((l) => l.trim()) ?? "";
+  // ② 키: 값 블록 — 첫 유효 줄이 "키: 값" 꼴이고 구분자(콤마/탭)가 없을 때
+  if (/^[^,\t:]{1,20}:\s*\S/.test(first.trim())) {
+    const rows: Record<string, string>[] = [];
+    let cur: Record<string, string> = {};
+    for (const line of [...lines, ""]) {
+      const l = line.trim();
+      if (!l) {
+        if (Object.keys(cur).length) rows.push(cur);
+        cur = {};
+        continue;
+      }
+      const i = l.indexOf(":");
+      if (i <= 0) throw new Error(`"키: 값" 형식이 아닌 줄: "${l.slice(0, 30)}"`);
+      cur[l.slice(0, i).trim()] = l.slice(i + 1).trim();
+    }
+    if (!rows.length) throw new Error("빈 명단");
+    return rows;
+  }
+  // ③/④ 표 형식
+  const delim = first.includes("\t") ? "\t" : ",";
+  if (delim === "," && t.includes('"')) throw new Error("CSV에 따옴표가 있습니다 — 내장 콤마/따옴표는 JSON 또는 탭(TSV)으로 넣어주세요");
+  const rows = lines.filter((l) => l.trim());
+  const header = rows[0].split(delim).map((h) => h.trim());
+  return rows.slice(1).map((line, i) => {
+    const cells = line.split(delim);
     if (cells.length !== header.length) throw new Error(`${i + 2}행: 열 수 ${cells.length} ≠ 헤더 ${header.length}`);
-    return Object.fromEntries(header.map((h, j) => [h, cells[j].trim()]));
+    return Object.fromEntries(header.map((h, j) => [h, (cells[j] ?? "").trim()]));
   });
+}
+
+/** 파일 → 텍스트(한국 실무 CSV는 CP949가 흔함 — UTF-8 실패 시 EUC-KR 폴백). */
+async function readTextFile(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buf);
+  } catch {
+    return new TextDecoder("euc-kr").decode(buf);
+  }
+}
+
+async function sha256hex(bytes: Uint8Array): Promise<string> {
+  const h = await crypto.subtle.digest("SHA-256", bytes.slice().buffer);
+  return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 const SAMPLE_ROSTER = `성명,기업명,연락처
@@ -110,7 +183,7 @@ const SAMPLE_ROSTER = `성명,기업명,연락처
 박세온,세온컴퍼니,010-3333-3333`;
 
 export default function BulkFillPage() {
-  const [tpl, setTpl] = useState<{ bytes: Uint8Array; name: string } | null>(null);
+  const [tpl, setTpl] = useState<{ bytes: Uint8Array; name: string; sha: string; pages: number } | null>(null);
   const [fields, setFields] = useState<Field[]>([]);
   const [rosterText, setRosterText] = useState(SAMPLE_ROSTER);
   const [results, setResults] = useState<RowResult[]>([]);
@@ -118,7 +191,13 @@ export default function BulkFillPage() {
   const [idx, setIdx] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [studioPage, setStudioPage] = useState(0);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const inited = useRef(false);
+  // 스튜디오용으로 템플릿 문서를 열어둔다(렌더·클릭 매핑·오버레이 지오메트리) — 새 업로드 때 교체.
+  const tplDocRef = useRef<HwpDoc | null>(null);
+  const pageOfBlockRef = useRef<Map<string, number>>(new Map());
 
   const ensureEngine = useCallback(async () => {
     if (!inited.current) {
@@ -131,12 +210,17 @@ export default function BulkFillPage() {
   const onTemplate = useCallback(
     async (file: File) => {
       setError(null);
+      setNotice(null);
       setResults([]);
+      setSelectedKey(null);
       setBusy("양식 분석 중…");
       try {
         await ensureEngine();
         const bytes = new Uint8Array(await file.arrayBuffer());
+        tplDocRef.current?.free();
         const doc = HwpDoc.open(bytes, file.name);
+        tplDocRef.current = doc;
+        pageOfBlockRef.current = buildPageOfBlock(doc);
         const seen = new Map<string, number>();
         const drafted: Field[] = [];
         for (const t of allTables(doc)) {
@@ -159,14 +243,17 @@ export default function BulkFillPage() {
               ambiguous: 0,
               use: true,
               required: false,
+              specType: "text",
             });
           }
         }
         for (const f of drafted) f.ambiguous = (seen.get(f.key) ?? 1) - 1;
-        doc.free();
-        setTpl({ bytes, name: file.name });
+        setTpl({ bytes, name: file.name, sha: await sha256hex(bytes), pages: doc.pageCount() });
         setFields(drafted);
-        if (drafted.length === 0) setError("라벨→값칸을 유도하지 못했습니다 — 이 양식은 수동 pin 지정이 필요합니다(후속: 화면 클릭 지정).");
+        // 첫 필드가 있는 페이지로 스튜디오 이동(없으면 0)
+        const firstPage = drafted.length ? (pageOfBlockRef.current.get(`${drafted[0].pin.section}:${drafted[0].pin.index}`) ?? 0) : 0;
+        setStudioPage(firstPage);
+        if (drafted.length === 0) setNotice("자동 유도된 필드가 없습니다 — 아래 문서에서 채울 셀을 직접 클릭해 지정하세요.");
       } catch (e) {
         setError(`양식 분석 실패: ${e}`);
       } finally {
@@ -176,7 +263,121 @@ export default function BulkFillPage() {
     [ensureEngine],
   );
 
-  // ── 2) 생성: 인원별 채움 → 재개봉 검증 → 프리뷰 렌더+하이라이트 (전부 결정론) ────────────────
+  // ── 스튜디오: 페이지 렌더 + 필드 오버레이 + 클릭→셀 결정론 매핑 ──────────────────────────────
+  const studio = useMemo(() => {
+    const doc = tplDocRef.current;
+    if (!tpl || !doc) return null;
+    const svg = doc.renderPageSvgSanitized(studioPage);
+    const m = svg.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/);
+    const pageW = m ? parseFloat(m[1]) : 1;
+    const pageH = m ? parseFloat(m[2]) : 1;
+    // 이 페이지 표들의 셀 경계(클릭 매핑·오버레이 공용)
+    const tables: { section: number; block: number; cols: number[]; rows: number[] }[] = [];
+    for (const h of doc.blocksInRect(studioPage, 0, 0, 100000, 100000) as { section: number; block: number; kind: string }[]) {
+      if (h.kind !== "table") continue;
+      const cols = doc.tableColBoundaries(studioPage, h.section, h.block);
+      const rows = doc.tableRowBoundaries(studioPage, h.section, h.block);
+      if (cols && rows && cols.length > 1 && rows.length > 1) tables.push({ section: h.section, block: h.block, cols, rows });
+    }
+    // 현재 페이지에 보이는 필드 오버레이 rect
+    const overlays: { key: string; x: number; y: number; w: number; h: number; selected: boolean }[] = [];
+    for (const f of fields) {
+      if (!f.use) continue;
+      if ((pageOfBlockRef.current.get(`${f.pin.section}:${f.pin.index}`) ?? -1) !== studioPage) continue;
+      const t = tables.find((t) => t.section === f.pin.section && t.block === f.pin.index);
+      if (!t || f.pin.col + 1 >= t.cols.length || f.pin.row + 1 >= t.rows.length) continue;
+      overlays.push({
+        key: f.key,
+        x: t.cols[f.pin.col],
+        y: t.rows[f.pin.row],
+        w: t.cols[f.pin.col + 1] - t.cols[f.pin.col],
+        h: t.rows[f.pin.row + 1] - t.rows[f.pin.row],
+        selected: f.key === selectedKey,
+      });
+    }
+    return { svg, pageW, pageH, tables, overlays };
+  }, [tpl, studioPage, fields, selectedKey]);
+
+  /** 문서 클릭 → 셀 결정론 매핑: 기존 필드면 선택, 새 셀이면 필드 추가(좌측 라벨을 이름 초안으로). */
+  const onStudioClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      const doc = tplDocRef.current;
+      if (!studio || !doc) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const px = ((e.clientX - rect.left) / rect.width) * studio.pageW;
+      const py = ((e.clientY - rect.top) / rect.height) * studio.pageH;
+      for (const t of studio.tables) {
+        const ci = t.cols.findIndex((x, i) => i + 1 < t.cols.length && px >= x && px < t.cols[i + 1]);
+        const ri = t.rows.findIndex((y, i) => i + 1 < t.rows.length && py >= y && py < t.rows[i + 1]);
+        if (ci < 0 || ri < 0) continue;
+        const existing = fields.find((f) => f.pin.section === t.section && f.pin.index === t.block && f.pin.row === ri && f.pin.col === ci);
+        if (existing) {
+          setSelectedKey(existing.key);
+          return;
+        }
+        const grid = doc.tableGrid(t.section, t.block);
+        const cell = grid?.cells.find((c) => c.row === ri && c.col === ci);
+        if (!cell) {
+          setNotice("병합으로 덮인 셀입니다 — 병합의 좌상단(값이 표시되는) 셀을 클릭하세요.");
+          return;
+        }
+        // 이름 초안 = 같은 행 좌측 인접 셀의 라벨(있으면) — 없으면 필드N
+        const left = grid!.cells.filter((c) => c.row === ri && c.col < ci).sort((a, b) => b.col - a.col)[0];
+        const draftName = (left?.text || "").trim().replace(/\s+/g, " ").slice(0, 12);
+        let key = draftName || `필드${fields.length + 1}`;
+        let n = 2;
+        while (fields.some((f) => f.key === key)) key = `${draftName || "필드"}${n++}`;
+        setFields((fs) => [...fs, { key, label: draftName || "(직접 지정)", pin: { section: t.section, index: t.block, row: ri, col: ci }, example: (cell.text || "").trim(), ambiguous: 0, use: true, required: false, specType: "text" }]);
+        setSelectedKey(key);
+        setNotice(null);
+        return;
+      }
+      setNotice("표 셀 위를 클릭하세요 — 표 밖 영역은 v1에서 지정할 수 없습니다(본문 치환은 fill-map JSON의 replace 타깃으로).");
+    },
+    [studio, fields],
+  );
+
+  // ── 규격 저장/불러오기(fillmap v1 + spec — additive) ─────────────────────────────────────────
+  const saveSpec = useCallback(() => {
+    if (!tpl) return;
+    const map = {
+      schema: "autohwp.fillmap.v1",
+      template: { path: tpl.name, sha256: tpl.sha },
+      fields: fields.filter((f) => f.use).map((f) => ({ key: f.key, target: { kind: "label-right", label: f.label }, pin: f.pin, example: f.example, required: f.required, spec: { type: f.specType } })),
+    };
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(map, null, 2)], { type: "application/json" }));
+    a.download = `${tpl.name.replace(/\.(hwpx?|HWPX?)$/, "")}.fillmap.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  }, [tpl, fields]);
+
+  const loadSpec = useCallback(
+    async (file: File) => {
+      try {
+        const map = JSON.parse(await readTextFile(file));
+        if (map.schema !== "autohwp.fillmap.v1") throw new Error("schema가 autohwp.fillmap.v1이 아닙니다");
+        if (tpl && map.template?.sha256 && map.template.sha256 !== tpl.sha) setNotice("⚠ 규격의 템플릿 지문(sha256)이 현재 양식과 다릅니다 — 같은 양식인지 확인하세요.");
+        setFields(
+          (map.fields as Array<{ key: string; target?: { label?: string }; pin: Pin; example?: string; required?: boolean; spec?: { type?: string } }>).map((f) => ({
+            key: f.key,
+            label: f.target?.label ?? f.key,
+            pin: f.pin,
+            example: f.example ?? "",
+            ambiguous: 0,
+            use: true,
+            required: !!f.required,
+            specType: f.spec?.type && SPEC_TYPES[f.spec.type] ? f.spec.type : "text",
+          })),
+        );
+      } catch (e) {
+        setError(`규격 불러오기 실패: ${e}`);
+      }
+    },
+    [tpl],
+  );
+
+  // ── 2) 생성: 인원별 채움 → 재개봉 검증(값+쪽수+형식) → 프리뷰 렌더+하이라이트 ────────────────
   const generate = useCallback(async () => {
     if (!tpl) return;
     setError(null);
@@ -194,6 +395,7 @@ export default function BulkFillPage() {
       bl.free();
       setBaseline(basePages);
 
+      const nameKey = active.find((f) => f.key === "성명" || f.key === "이름")?.key ?? active[0]?.key;
       const out: RowResult[] = [];
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
@@ -206,6 +408,8 @@ export default function BulkFillPage() {
             if (f.required) reasons.push(`missing_required:${f.key}`);
             continue;
           }
+          const spec = SPEC_TYPES[f.specType];
+          if (spec?.re && !spec.re.test(value)) reasons.push(`format_mismatch:${f.key}(${spec.label} 형식 아님: "${value}")`);
           try {
             doc.applyIntent({ intent: "SetTableCell", section: f.pin.section, index: f.pin.index, row: f.pin.row, col: f.pin.col, text: value });
             filled.push({ key: f.key, value, addr: `s${f.pin.section}·b${f.pin.index}·r${f.pin.row}c${f.pin.col}`, example: f.example });
@@ -222,27 +426,21 @@ export default function BulkFillPage() {
         if (pages !== basePages) reasons.push(`overflow:pages_${pages}_vs_${basePages}`);
         let svg = "";
         let pageW = 1;
+        let pageH = 1;
         const highlights: RowResult["highlights"] = [];
         if (filled.length) {
           // 산출물에서 채운 값의 셀을 재탐색(왕복 후 블록 인덱스 재배열을 값 스캔으로 흡수 — 073 함정 ②)
           const checkTables = allTables(check);
-          let target: { section: number; block: number; row: number; col: number } | null = null;
+          let target: { section: number; block: number } | null = null;
           for (const t of checkTables) {
             const g = check.tableGrid(t.section, t.block);
-            const hit = g?.cells.find((c) => c.text === filled[0].value);
-            if (g && hit) {
-              target = { section: g.section, block: g.block, row: hit.row, col: hit.col };
+            if (g?.cells.some((c) => c.text === filled[0].value)) {
+              target = { section: g.section, block: g.block };
               break;
             }
           }
           for (const f of filled) {
-            const found = (() => {
-              for (const t of checkTables) {
-                const g = check.tableGrid(t.section, t.block);
-                if (g?.cells.some((c) => c.text === f.value)) return true;
-              }
-              return false;
-            })();
+            const found = checkTables.some((t) => check.tableGrid(t.section, t.block)?.cells.some((c) => c.text === f.value));
             if (!found) reasons.push(`value_not_found:${f.key}`);
           }
           if (target) {
@@ -252,10 +450,10 @@ export default function BulkFillPage() {
               svg = check.renderPageSvgSanitized(p);
               const m = svg.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/);
               pageW = m ? parseFloat(m[1]) : 1;
+              pageH = m ? parseFloat(m[2]) : 1;
               const cols = check.tableColBoundaries(p, target.section, target.block);
               const rowsB = check.tableRowBoundaries(p, target.section, target.block);
               if (cols && rowsB) {
-                // 같은 표에 pin된 활성 필드들의 셀 사각형(경계 배열 → 셀 rect)
                 const g = check.tableGrid(target.section, target.block);
                 for (const f of filled) {
                   const cell = g?.cells.find((c) => c.text === f.value);
@@ -268,7 +466,7 @@ export default function BulkFillPage() {
           }
         }
         check.free();
-        const person = row[active[0]?.key] ?? row[Object.keys(row)[0]] ?? `${i + 1}`;
+        const person = (nameKey && row[nameKey]) || row[Object.keys(row)[0]] || `${i + 1}`;
         out.push({
           name: String(person),
           fileName: `${String(i + 1).padStart(3, "0")}_${String(person).replace(/[/\\:*?"<>|\n]/g, "_")}.hwpx`,
@@ -276,6 +474,7 @@ export default function BulkFillPage() {
           reasons,
           svg,
           pageW,
+          pageH,
           highlights,
           values: filled,
         });
@@ -293,6 +492,7 @@ export default function BulkFillPage() {
   const downloadZip = useCallback(() => {
     const report = {
       template: tpl?.name,
+      templateSha256: tpl?.sha,
       baselinePages: baseline,
       rows: results.map((r) => ({ file: r.fileName, needsReview: r.reasons.length > 0, reasons: r.reasons })),
     };
@@ -309,7 +509,8 @@ export default function BulkFillPage() {
 
   const cur = results[idx];
   const review = results.filter((r) => r.reasons.length > 0).length;
-  const setField = (i: number, patch: Partial<Field>) => setFields((fs) => fs.map((f, j) => (j === i ? { ...f, ...patch } : f)));
+  const selected = fields.find((f) => f.key === selectedKey) ?? null;
+  const patchField = (key: string, patch: Partial<Field>) => setFields((fs) => fs.map((f) => (f.key === key ? { ...f, ...patch } : f)));
 
   return (
     <div className="bulk-root" data-testid="bulk-root">
@@ -319,40 +520,80 @@ export default function BulkFillPage() {
         <span className="bulk-sub">양식 1개 + 명단 N행 → 완성본 N부 zip · <em>전 과정 결정론(LLM 0콜) · 100% 로컬</em></span>
       </header>
       {error && <div className="bulk-error">{error}</div>}
+      {notice && <div className="bulk-notice">{notice}</div>}
 
       <section className="bulk-step">
-        <h2>1. 양식 업로드 <small>(.hwp/.hwpx — 자동 인스펙션으로 fill-map 초안 유도)</small></h2>
+        <h2>1. 양식 업로드 <small>(.hwp/.hwpx — 자동 인스펙션으로 채움 영역 초안 유도)</small></h2>
         <label className="bulk-btn">
-          {tpl ? `양식: ${tpl.name}` : "양식 선택"}
+          {tpl ? `양식: ${tpl.name} (${tpl.pages}쪽)` : "양식 선택"}
           <input type="file" accept=".hwp,.hwpx" hidden data-testid="bulk-template" onChange={(e) => e.target.files?.[0] && void onTemplate(e.target.files[0])} />
         </label>
       </section>
 
-      {fields.length > 0 && (
+      {tpl && studio && (
         <section className="bulk-step">
-          <h2>2. fill-map 검수 <small>(중복 라벨은 ⚠ — pin 주소를 확인하고 쓸 필드만 남기세요)</small></h2>
-          <table className="bulk-map" data-testid="bulk-map">
-            <thead><tr><th>사용</th><th>키(명단 헤더)</th><th>라벨</th><th>대상 주소(pin)</th><th>현재 값(예시)</th><th>필수</th></tr></thead>
-            <tbody>
-              {fields.map((f, i) => (
-                <tr key={f.key} className={f.use ? "" : "off"}>
-                  <td><input type="checkbox" checked={f.use} onChange={(e) => setField(i, { use: e.target.checked })} /></td>
-                  <td><b>{f.key}</b>{f.ambiguous > 0 && <span className="warn" title={`같은 라벨이 ${f.ambiguous + 1}곳 — 첫 후보에 pin됨. 위치 확인 필요`}>⚠ 중복 {f.ambiguous + 1}</span>}</td>
-                  <td>{f.label}</td>
-                  <td><code>s{f.pin.section}·b{f.pin.index}·r{f.pin.row}c{f.pin.col}</code></td>
-                  <td className="ex">{f.example || <i>빈칸</i>}</td>
-                  <td><input type="checkbox" checked={f.required} onChange={(e) => setField(i, { required: e.target.checked })} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <h2>2. 영역 지정 · 규격화 <small>(문서에서 채울 셀을 클릭 → 이름·형식 규정 → 규격 저장해 다음 배치에 재사용)</small></h2>
+          <div className="bulk-studio" data-testid="bulk-studio">
+            <div className="bulk-studio-doc">
+              <div className="bulk-nav">
+                <button onClick={() => setStudioPage((p) => Math.max(0, p - 1))} disabled={studioPage === 0}>‹</button>
+                <span>{studioPage + 1} / {tpl.pages}쪽</span>
+                <button onClick={() => setStudioPage((p) => Math.min(tpl.pages - 1, p + 1))} disabled={studioPage === tpl.pages - 1}>›</button>
+                <span className="bulk-hint">셀 클릭 = 영역 지정/선택</span>
+              </div>
+              <div className="bulk-pagewrap clickable" onClick={onStudioClick}>
+                {/* 엔진측 sanitize(renderPageSvgSanitized) 경유 — R7 */}
+                <div className="bulk-page" dangerouslySetInnerHTML={{ __html: studio.svg }} />
+                {studio.overlays.map((o) => (
+                  <div key={o.key} className={`bulk-hl${o.selected ? " sel" : ""}`} style={{ left: `${(o.x / studio.pageW) * 100}%`, top: `${(o.y / studio.pageH) * 100}%`, width: `${(o.w / studio.pageW) * 100}%`, height: `${(o.h / studio.pageH) * 100}%` }}>
+                    <span className="tag">{o.key}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <aside className="bulk-fields">
+              {fields.length === 0 && <div className="bulk-nopreview">지정된 영역이 없습니다 — 문서의 셀을 클릭하세요.</div>}
+              {fields.map((f) => {
+                const pg = pageOfBlockRef.current.get(`${f.pin.section}:${f.pin.index}`);
+                return (
+                  <div key={f.key} className={`bulk-field-card${f.key === selectedKey ? " sel" : ""}${f.use ? "" : " off"}`} data-testid="bulk-field-card"
+                    onClick={() => { setSelectedKey(f.key); if (pg !== undefined) setStudioPage(pg); }}>
+                    <div className="row1">
+                      <input type="checkbox" checked={f.use} onClick={(e) => e.stopPropagation()} onChange={(e) => patchField(f.key, { use: e.target.checked })} title="이 영역 사용" />
+                      <input className="key" value={f.key} onClick={(e) => e.stopPropagation()} onChange={(e) => patchField(f.key, { key: e.target.value })} spellCheck={false} title="이름(명단 헤더와 매칭)" />
+                      {f.ambiguous > 0 && <span className="warn" title={`같은 라벨이 ${f.ambiguous + 1}곳 — 문서에서 위치를 확인하세요`}>⚠</span>}
+                      <button className="del" onClick={(e) => { e.stopPropagation(); setFields((fs) => fs.filter((x) => x.key !== f.key)); }} title="영역 삭제">✕</button>
+                    </div>
+                    <div className="row2">
+                      <select value={f.specType} onClick={(e) => e.stopPropagation()} onChange={(e) => patchField(f.key, { specType: e.target.value })} title="형식 규정 — 위반 시 검수에 보고">
+                        {Object.entries(SPEC_TYPES).map(([k, v]) => (<option key={k} value={k}>{v.label}</option>))}
+                      </select>
+                      <label onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={f.required} onChange={(e) => patchField(f.key, { required: e.target.checked })} /> 필수</label>
+                      <code>{pg !== undefined ? `${pg + 1}쪽` : "?"} r{f.pin.row}c{f.pin.col}</code>
+                    </div>
+                    {f.example && <div className="row3">현재 값: {f.example}</div>}
+                    {SPEC_TYPES[f.specType]?.hint && <div className="row3 hint">{SPEC_TYPES[f.specType].hint}</div>}
+                  </div>
+                );
+              })}
+              <div className="bulk-spec-io">
+                <button className="bulk-btn sm" data-testid="bulk-spec-save" onClick={saveSpec} disabled={fields.filter((f) => f.use).length === 0}>규격 저장 (.fillmap.json)</button>
+                <label className="bulk-btn sm">규격 불러오기<input type="file" accept=".json" hidden data-testid="bulk-spec-load" onChange={(e) => e.target.files?.[0] && void loadSpec(e.target.files[0])} /></label>
+              </div>
+            </aside>
+          </div>
+          {selected && <div className="bulk-selinfo">선택: <b>{selected.key}</b> — 명단에서 같은 이름의 열/키 값이 이 영역에 들어갑니다. {SPEC_TYPES[selected.specType]?.re ? `형식 검증: ${SPEC_TYPES[selected.specType].label}.` : ""}</div>}
         </section>
       )}
 
       {tpl && (
         <section className="bulk-step">
-          <h2>3. 명단 <small>(CSV 헤더=키 또는 JSON 배열 — 붙여넣기)</small></h2>
-          <textarea className="bulk-roster" data-testid="bulk-roster" value={rosterText} onChange={(e) => setRosterText(e.target.value)} rows={6} spellCheck={false} />
+          <h2>3. 명단 <small>(CSV · 탭(TSV/엑셀 붙여넣기) · &quot;키: 값&quot; 블록 txt · JSON — 자동 감지, EUC-KR 파일 OK)</small></h2>
+          <div className="bulk-roster-bar">
+            <label className="bulk-btn sm">파일 열기 (.csv/.txt/.json)<input type="file" accept=".csv,.txt,.tsv,.json" hidden data-testid="bulk-roster-file" onChange={(e) => { const f = e.target.files?.[0]; if (f) void readTextFile(f).then(setRosterText).catch((err) => setError(`명단 파일 읽기 실패: ${err}`)); }} /></label>
+            <span className="bulk-hint">헤더/키 이름 = 2단계에서 정한 영역 이름</span>
+          </div>
+          <textarea className="bulk-roster" data-testid="bulk-roster" value={rosterText} onChange={(e) => setRosterText(e.target.value)} rows={7} spellCheck={false} />
           <button className="bulk-btn accent" data-testid="bulk-generate" disabled={!!busy || fields.filter((f) => f.use).length === 0} onClick={() => void generate()}>
             {busy ?? "생성 + 검증"}
           </button>
@@ -372,10 +613,9 @@ export default function BulkFillPage() {
             <div className="bulk-doc">
               {cur.svg ? (
                 <div className="bulk-pagewrap">
-                  {/* 엔진측 sanitize(renderPageSvgSanitized) 경유 — R7 */}
                   <div className="bulk-page" dangerouslySetInnerHTML={{ __html: cur.svg }} />
                   {cur.highlights.map((h, i) => (
-                    <div key={i} className="bulk-hl" style={{ left: `${(h.x / cur.pageW) * 100}%`, top: `${(h.y / cur.pageW) * 100 * 0.7071}%`, width: `${(h.w / cur.pageW) * 100}%`, height: `${(h.h / cur.pageW) * 100 * 0.7071}%` }} title={`${h.key}: ${h.value}`} />
+                    <div key={i} className="bulk-hl" style={{ left: `${(h.x / cur.pageW) * 100}%`, top: `${(h.y / cur.pageH) * 100}%`, width: `${(h.w / cur.pageW) * 100}%`, height: `${(h.h / cur.pageH) * 100}%` }} title={`${h.key}: ${h.value}`} />
                   ))}
                 </div>
               ) : (
@@ -397,33 +637,56 @@ export default function BulkFillPage() {
       )}
 
       <style>{`
-        .bulk-root { max-width: 1100px; margin: 0 auto; padding: 20px 18px 60px; font-size: 14px; }
+        .bulk-root { max-width: 1200px; margin: 0 auto; padding: 20px 18px 60px; font-size: 14px; }
         .bulk-head { display: flex; align-items: baseline; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid rgba(128,128,128,0.25); }
         .bulk-head b { font-size: 20px; } .bulk-sub { color: #777; font-size: 12.5px; } .bulk-sub em { color: #7c3aed; font-style: normal; font-weight: 700; }
         .bulk-back { text-decoration: none; color: inherit; opacity: 0.7; }
-        .bulk-step { margin-top: 22px; } .bulk-step h2 { font-size: 15px; margin: 0 0 10px; } .bulk-step small { color: #888; font-weight: 400; }
+        .bulk-step { margin-top: 24px; } .bulk-step h2 { font-size: 15px; margin: 0 0 10px; } .bulk-step small { color: #888; font-weight: 400; }
         .bulk-btn { display: inline-block; padding: 9px 16px; border-radius: 8px; border: 1px solid #bbb; cursor: pointer; background: #fff; font-size: 13.5px; }
+        .bulk-btn.sm { padding: 6px 12px; font-size: 12.5px; }
         .bulk-btn.accent { background: #7c3aed; border-color: #7c3aed; color: #fff; font-weight: 700; }
         .bulk-btn:disabled { opacity: 0.5; }
         .bulk-error { margin-top: 14px; padding: 10px 14px; border-radius: 8px; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.4); color: #b91c1c; }
-        .bulk-map { border-collapse: collapse; width: 100%; } .bulk-map th, .bulk-map td { border: 1px solid rgba(128,128,128,0.3); padding: 6px 10px; text-align: left; font-size: 13px; }
-        .bulk-map tr.off { opacity: 0.45; } .bulk-map .ex { color: #888; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .warn { color: #b45309; font-size: 11.5px; margin-left: 6px; }
-        .bulk-roster { width: 100%; font: 12.5px/1.6 ui-monospace, monospace; padding: 10px; border-radius: 8px; border: 1px solid #bbb; box-sizing: border-box; margin-bottom: 10px; }
-        .bulk-nav { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
-        .bulk-nav button { padding: 7px 13px; border-radius: 8px; border: 1px solid #bbb; background: #fff; cursor: pointer; }
+        .bulk-notice { margin-top: 14px; padding: 10px 14px; border-radius: 8px; background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.4); color: #92600a; }
+        .bulk-hint { color: #999; font-size: 12px; }
+        .bulk-studio { display: grid; grid-template-columns: 1fr 340px; gap: 16px; }
+        .bulk-studio-doc { min-width: 0; }
+        .bulk-nav { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+        .bulk-nav button { padding: 6px 12px; border-radius: 8px; border: 1px solid #bbb; background: #fff; cursor: pointer; }
         .bulk-idx { font-weight: 700; } .bulk-idx em.warn { font-weight: 400; }
-        .bulk-review { display: grid; grid-template-columns: 1fr 320px; gap: 16px; }
+        .warn { color: #b45309; font-size: 12px; }
         .bulk-pagewrap { position: relative; border: 1px solid rgba(128,128,128,0.35); border-radius: 4px; overflow: hidden; background: #fff; }
+        .bulk-pagewrap.clickable { cursor: crosshair; }
         .bulk-page svg { display: block; width: 100%; height: auto; }
-        .bulk-hl { position: absolute; border: 2px solid #7c3aed; background: rgba(124,58,237,0.14); border-radius: 2px; box-shadow: 0 0 10px rgba(124,58,237,0.35); pointer-events: none; }
+        .bulk-hl { position: absolute; border: 2px solid #7c3aed; background: rgba(124,58,237,0.12); border-radius: 2px; pointer-events: none; }
+        .bulk-hl.sel { border-color: #10b981; background: rgba(16,185,129,0.15); box-shadow: 0 0 12px rgba(16,185,129,0.4); }
+        .bulk-hl .tag { position: absolute; top: -20px; left: -2px; font-size: 10.5px; background: #7c3aed; color: #fff; padding: 1px 7px; border-radius: 4px; white-space: nowrap; }
+        .bulk-hl.sel .tag { background: #10b981; }
+        .bulk-fields { display: flex; flex-direction: column; gap: 8px; max-height: 640px; overflow: auto; }
+        .bulk-field-card { border: 1px solid rgba(128,128,128,0.3); border-radius: 10px; padding: 9px 11px; cursor: pointer; }
+        .bulk-field-card.sel { border-color: #10b981; box-shadow: 0 0 0 1px #10b981; }
+        .bulk-field-card.off { opacity: 0.45; }
+        .bulk-field-card .row1 { display: flex; align-items: center; gap: 7px; }
+        .bulk-field-card .key { flex: 1; min-width: 0; font-weight: 700; font-size: 13.5px; border: 1px solid transparent; border-radius: 6px; padding: 3px 6px; background: transparent; color: inherit; }
+        .bulk-field-card .key:hover, .bulk-field-card .key:focus { border-color: #bbb; background: #fff; }
+        .bulk-field-card .del { border: 0; background: none; cursor: pointer; color: #999; font-size: 13px; }
+        .bulk-field-card .row2 { display: flex; align-items: center; gap: 10px; margin-top: 6px; font-size: 12px; color: #777; }
+        .bulk-field-card .row2 select { font-size: 12px; padding: 2px 4px; border-radius: 6px; }
+        .bulk-field-card .row2 code { margin-left: auto; font-size: 10.5px; color: #7c3aed; }
+        .bulk-field-card .row3 { margin-top: 5px; font-size: 11.5px; color: #999; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .bulk-field-card .row3.hint { color: #b8a5e8; }
+        .bulk-spec-io { display: flex; gap: 8px; margin-top: 4px; }
+        .bulk-selinfo { margin-top: 10px; font-size: 12.5px; color: #777; }
+        .bulk-roster-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+        .bulk-roster { width: 100%; font: 12.5px/1.6 ui-monospace, monospace; padding: 10px; border-radius: 8px; border: 1px solid #bbb; box-sizing: border-box; margin-bottom: 10px; }
+        .bulk-review { display: grid; grid-template-columns: 1fr 320px; gap: 16px; }
         .bulk-values { display: flex; flex-direction: column; gap: 10px; }
         .bulk-val { border: 1px solid rgba(128,128,128,0.3); border-radius: 10px; padding: 10px 12px; }
         .bulk-val .k { font-size: 12px; color: #777; display: flex; justify-content: space-between; gap: 8px; }
         .bulk-val .k code { font-size: 10.5px; color: #7c3aed; }
         .bulk-val .v { font-weight: 700; margin-top: 4px; } .bulk-val .was { font-size: 11.5px; color: #999; text-decoration: line-through; margin-top: 3px; }
         .bulk-nopreview { color: #888; padding: 30px; text-align: center; }
-        @media (max-width: 800px) { .bulk-review { grid-template-columns: 1fr; } }
+        @media (max-width: 900px) { .bulk-studio, .bulk-review { grid-template-columns: 1fr; } }
       `}</style>
     </div>
   );

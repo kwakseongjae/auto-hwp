@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-07-23 (Claude) · 073 필드 스튜디오 — 영역 지정·네이밍·규정·규격화 UX
+- /bulk 2단계 재설계: 실렌더 위 셀 클릭=영역 지정(경계 히트테스트 결정론)·카드에서 이름/타입(정규식 검증)/필수 규정·규격 저장/불러오기(fillmap.json+sha 지문)·명단 4형식(CSV/TSV/kv-txt/JSON+EUC-KR).
+- 실드라이브: 신청서 7+1필드·형식 위반/필수 누락 정확 보고·zip·에러 0. e2e bulk-fill-073 추가(1 passed). LLM/BYOK는 보조 설계만 — 핵심 결정론 유지.
+
 ## 2026-07-23 (Claude) · 073 웹 /bulk — 결정론 벌크 채움 테스트 환경
 - hwp-lab /bulk 신설(클라이언트 온리): 인스펙션→검수 표→명단→생성+검증→캐러셀(실렌더+하이라이트)→zip. LLM 0콜 확정 — 전부 엔진 API(tableGrid/applyIntent/toHwpx/renderPageSvgSanitized/col·rowBoundaries).
 - 실브라우저 드라이브: 실물 신청서 7필드·3명·zip 실다운로드·pageerror 0. 함정: 프로필 표 캡 20 → blocksInRect 전 표 열거로 인스펙션·검증 통일(거짓 경고 해소). 랜딩에 벌크 링크.

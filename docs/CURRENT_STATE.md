@@ -5,6 +5,11 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
+- 갱신: 2026-07-23(4) · Claude — **073 필드 스튜디오**(사용자 방향 "영역 지정→네이밍→규정→규격화"):
+  /bulk 2단계 = 문서 클릭 영역 지정(결정론 히트테스트)·이름 편집·형식 규정(날짜/전화/사업자/금액+필수)·
+  규격 저장/불러오기(.fillmap.json + sha256 지문). 명단 4형식 자동 감지(CSV/TSV/"키: 값" txt/JSON +
+  EUC-KR 폴백). 형식 위반·필수 누락 = 검수 보고(조용한 통과 금지). e2e bulk-fill-073 잠금(43번째).
+  LLM/BYOK는 선택 보조 설계만(다음 배치 — 핵심 경로는 결정론 유지).
 - 갱신: 2026-07-23(3) · Claude — **073 웹 테스트 환경 /bulk 완성 — 라이브 검증 통과**(https://kwakseongjae.github.io/auto-hwp/bulk 실브라우저 드라이브: 업로드→7필드→생성→캐러셀→zip·에러 0. 로컬 레포 d3d8c91 동기화 완료): 업로드→자동 인스펙션(fill-map 검수 표 —
   중복 배지·pin·예시값·필수 토글)→명단(CSV/JSON 붙여넣기)→생성+재개봉 검증→**검수 캐러셀**(실렌더+채운 셀
   하이라이트+이전값 취소선)→STORE zip(+report.json, 의존성 0). **전 과정 결정론·LLM 0콜·100% 클라이언트**
