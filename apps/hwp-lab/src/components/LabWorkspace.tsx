@@ -612,11 +612,21 @@ export default function LabWorkspace() {
                     AI가 <b>읽는 문서</b>와 <b>화면에 그려지는 문서</b>가 같은 엔진에서 나옵니다 — 그래서
                     말로 고친 편집이 검증되고, 한글에서 그대로 열립니다. 문서는 이 브라우저를 떠나지 않습니다.
                   </p>
+                </div>
+                {/* 그리드 영역(copy/stage/ways)으로 배치 — 데스크톱은 좌: 카피+카드 / 우: 스테이지,
+                    좁은 화면은 카피 → 스테이지(제품 그림) → 카드 순서가 된다. */}
+                <div className="lab-ways-block">
                   {/* 이 데모에서 할 수 있는 일 두 가지 — 문서 편집 / 양식 일괄 작성. */}
                   <div className="lab-ways">
                     <div className="lab-way">
-                      <span className="n">문서 편집</span>
-                      <p>내 한글 파일을 열어 화면에서 바로 고치고, HTML·PDF·HWPX로 저장합니다.</p>
+                      {/* 제목+설명을 한 열로 묶는다 — 좁은 화면에서 카드가 가로로 접힐 때
+                          제목이 버튼과 나란히 놓여 글자가 쪼개지는 것을 막는다. */}
+                      <div className="lab-way-text">
+                        <span className="n">문서 편집</span>
+                        <p className="lab-way-long">내 한글 파일을 열어 화면에서 바로 고치고, HTML·PDF·HWPX로 저장합니다.</p>
+                        {/* 좁은 화면 전용 축약본 — 카드가 한 줄로 접힌다(미디어쿼리로 전환). */}
+                        <p className="lab-way-short">열고 고쳐서 저장</p>
+                      </div>
                       <p className="lab-way-note">
                         창에 끌어다 놓아도 열립니다. <b>.hwpx는 알파 테스트 중</b>이라 이 데모에서는 .hwp만 받습니다.
                       </p>
@@ -634,8 +644,11 @@ export default function LabWorkspace() {
                       </div>
                     </div>
                     <div className="lab-way">
-                      <span className="n">양식 일괄 작성</span>
-                      <p>양식 하나에 채울 자리를 정해 두고 명단을 넣으면, 사람 수만큼 완성본을 만들어 묶어 줍니다.</p>
+                      <div className="lab-way-text">
+                        <span className="n">양식 일괄 작성</span>
+                        <p className="lab-way-long">양식 하나에 채울 자리를 정해 두고 명단을 넣으면, 사람 수만큼 완성본을 만들어 묶어 줍니다.</p>
+                        <p className="lab-way-short">명단 수만큼 한 번에</p>
+                      </div>
                       <p className="lab-way-note">채우는 과정은 전부 규칙 기반이라 AI 없이도 값이 정확히 들어갑니다.</p>
                       <div className="lab-way-actions">
                         <a className="lab-btn lab-btn-accent" href={`${BASE}/bulk`} data-testid="bulk-link" title="양식 1개 + 명단 N행 → 완성본 N부 zip">

@@ -271,8 +271,13 @@ body {
 .lab-demo .lab-header .lab-title small { color: #8b93a1; }
 .lab-demo .lab-gh-link { color: #c4b5fd; }
 .lab-demo .lab-hero { max-width: 1180px; text-align: left; gap: 0; }
+/* 영역 배치: 데스크톱 = 좌(카피 위 / 카드 아래) + 우(스테이지, 두 행 span).
+   좁은 화면(아래 미디어쿼리)에서는 카피 → 스테이지 → 카드 한 줄 배치가 된다. */
 .lab-hero-grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
-  gap: 24px; align-items: center; }
+  grid-template-areas: "copy stage" "ways stage"; gap: 24px 24px; align-items: center; }
+.lab-hero-copy { grid-area: copy; }
+.lab-ways-block { grid-area: ways; min-width: 0; }
+.lab-stage { grid-area: stage; }
 .lab-kicker { font-size: 13.5px; letter-spacing: 5px; color: #8b93a1; }
 .lab-kicker b { color: #a78bfa; }
 .lab-demo .lab-hero-title { display: flex; align-items: center; margin: 14px 0 0; }
@@ -311,6 +316,7 @@ body {
 .lab-demo .lab-way-actions .lab-btn { padding: 12px 22px; font-size: 15px; font-weight: 600;
   white-space: nowrap; text-decoration: none; }
 .lab-demo .lab-way-note { font-size: 12px; color: #5c6470; margin: 10px 0 0; line-height: 1.65; }
+.lab-way-short { display: none; } /* 좁은 화면에서만 등장(아래 미디어쿼리) */
 .lab-demo .lab-way-note b { color: #c4b5fd; font-weight: 600; }
 .lab-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
 .lab-badges span { font-size: 12.5px; padding: 6px 12px; border-radius: 999px;
@@ -357,10 +363,25 @@ body {
 /* 좁은 화면: 스테이지를 숨기지 않고 축소해 카피 아래에 둔다 — 폰으로 처음 들어온 사람도
    "AI가 문서를 고치는 그림"을 보게 하는 게 이 랜딩의 전달력 대부분이다. */
 @media (max-width: 900px) {
-  .lab-hero-grid { grid-template-columns: 1fr; }
+  .lab-hero-grid { grid-template-columns: 1fr; grid-template-areas: "copy" "stage" "ways"; gap: 0; }
   .lab-stage { min-height: 400px; margin-top: 26px; }
   .lab-page { right: 50%; transform: translateX(50%) rotateY(-9deg) rotateX(3deg) rotate(1deg);
     width: min(300px, 86%); max-height: 380px; }
   .lab-bubble.lab-user { top: 0; left: 0; font-size: 12.5px; }
   .lab-bubble.lab-ai { bottom: 0; left: 0; right: auto; width: min(300px, 88%); font-size: 12px; }
+  /* 카드는 한 줄로 압축: 제목+축약 설명 왼쪽, 버튼 오른쪽. 긴 설명·주석은 감춘다. */
+  .lab-ways { grid-template-columns: 1fr; gap: 10px; margin-top: 20px; }
+  .lab-demo .lab-way { flex-direction: row; align-items: center; gap: 12px; padding: 13px 15px; }
+  .lab-way-text { flex: 1; min-width: 0; }
+  .lab-demo .lab-way .n { font-size: 16px; white-space: nowrap; }
+  .lab-demo .lab-way-short { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lab-way-long, .lab-way-note { display: none; }
+  .lab-way-short { display: block; }
+  .lab-demo .lab-way-short { font-size: 12px; color: #78818f; margin: 4px 0 0; }
+  .lab-way-actions { margin-top: 0; margin-left: auto; padding-top: 0; flex-shrink: 0; }
+  .lab-demo .lab-way-actions .lab-btn { padding: 9px 14px; font-size: 13px; }
+  /* 좁은 폭에서 두 버튼이 겹치지 않도록 보조(예시 샘플)는 아이콘 크기로 유지 */
+  .lab-demo .lab-way-actions .lab-sample-btn { padding: 9px 12px; }
 }
+@media (max-width: 380px) { .lab-demo .lab-way { flex-direction: column; align-items: flex-start; }
+  .lab-way-actions { margin-left: 0; padding-top: 12px; } }
