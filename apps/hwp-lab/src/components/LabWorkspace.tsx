@@ -15,6 +15,10 @@ type Doc = { bytes: Uint8Array; name: string };
 // /samples)에 접두된다 — Next 정적 에셋은 basePath 아래에 서빙되지만 코드의 fetch 는 자동 접두되지 않는다.
 const IS_DEMO = process.env.NEXT_PUBLIC_DEMO === "1";
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";
+// 정적 데모 AI: 서버가 없으므로 키를 쥔 외부 프록시(Cloudflare Worker — services/demo-ai-proxy)로 위임.
+// 이 값이 배포 시 주입되면(NEXT_PUBLIC_DEMO_AI_URL) 데모 AI 편집이 켜지고, 비면 기존 "로컬(BYOK)에서"
+// 안내만 뜬다(회귀 없음). 키는 워커 시크릿에만 있고 클라이언트 번들엔 절대 들어오지 않는다(R6).
+const DEMO_AI_URL = process.env.NEXT_PUBLIC_DEMO_AI_URL || "";
 
 // 기본 폰트: 레포 자산 NanumGothic(OFL) — copy-fonts.mjs 가 public/fonts 로 복사하므로 오프라인에서도
 // 항상 존재한다. 열기 직후 자동 등록되어 화면·조판·PDF 가 즉시 이 폰트로 일치하고 PDF 버튼이 활성화된다.
@@ -357,8 +361,8 @@ export default function LabWorkspace() {
   // 기존 단발 res.json() 경로 그대로(back-compat). 대화 메모리(opts.history)는 본문에 실어 서버가 모델
   // messages 에 접는다. 키/검색은 전부 서버사이드(R6).
   const onAiRequest = useCallback(async (instruction: string, anchors: Anchor[], ctx: DocContext, opts?: AiRequestOptions): Promise<Intent[]> => {
-    // 정적 데모: 서버 프록시가 없으므로 바이브 편집은 정직하게 안내하고 끝낸다(뷰/수동편집/export 는 전부 동작).
-    if (IS_DEMO) {
+    // 정적 데모: 프록시 URL이 설정돼 있으면 그리로 위임(아래 별도 블록), 없으면 정직하게 안내하고 끝낸다.
+    if (IS_DEMO && !DEMO_AI_URL) {
       throw new Error("정적 데모에서는 AI 편집을 지원하지 않습니다 — 레포를 클론해 로컬 실행(.env.local에 OPENROUTER_API_KEY) 시 사용할 수 있습니다.");
     }
     // 066: 표/셀 앵커마다 엔진에서 그 표의 셀 그리드(행×열·각 셀 텍스트·빈칸)를 조회해 doc-context 에
@@ -392,6 +396,29 @@ export default function LabWorkspace() {
       // 대화 메모리(에이전틱 스트리밍): 직전 채팅 턴(바운드). 서버가 모델 messages 에 접는다.
       ...(opts?.history?.length ? { history: opts.history } : {}),
     };
+
+    // ── 정적 데모 프록시 경로 ─────────────────────────────────────────────────────────────────────
+    // Cloudflare Worker(키 보관 + 일일 한도)로 단발 위임. 에이전틱 스트리밍/웹검색은 데모에서 끈다
+    // (비용·복잡도 최소화) — 채팅은 최종 intents 로 제안 카드를 그대로 만든다. 429(한도)는 정직 안내.
+    if (IS_DEMO) {
+      const res = await fetch(DEMO_AI_URL, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ instruction, anchors, docContext: requestBody.docContext }),
+      });
+      if (!res.ok) {
+        let detail = `${res.status}`;
+        try {
+          const j = (await res.json()) as { error?: string };
+          if (j?.error) detail = j.error;
+        } catch {
+          /* 비-JSON */
+        }
+        throw new Error(res.status === 429 ? detail : `AI 데모 오류: ${detail}`);
+      }
+      const data = (await res.json()) as { intents?: Intent[] };
+      return data.intents ?? [];
+    }
 
     // ── 스트리밍 경로(채팅 타임라인) ──────────────────────────────────────────────────────────────
     if (opts?.onEvent) {
@@ -562,7 +589,9 @@ export default function LabWorkspace() {
             onAiRequest={onAiRequest}
             aiNotice={
               IS_DEMO
-                ? "정적 데모라 AI 편집은 꺼져 있습니다 — 클릭 선택·수동 편집·HTML/PDF 저장은 전부 동작합니다. AI 바이브 편집은 레포를 클론해 로컬 실행(BYOK)하면 켜집니다."
+                ? DEMO_AI_URL
+                  ? "데모 AI 편집이 켜져 있습니다(Gemini Flash-Lite · 일일 사용 한도 있음). 제안은 적용 전에 카드로 보여 주고, 한 번에 되돌릴 수 있습니다."
+                  : "정적 데모라 AI 편집은 꺼져 있습니다 — 클릭 선택·수동 편집·HTML/PDF 저장은 전부 동작합니다. AI 바이브 편집은 레포를 클론해 로컬 실행(BYOK)하면 켜집니다."
                 : undefined
             }
             requestFont={requestFont}

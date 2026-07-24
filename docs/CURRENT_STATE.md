@@ -5,6 +5,13 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
+- 갱신: 2026-07-25 · Claude — **정적 데모 AI(OpenRouter) 붙임**: 정적 사이트는 키를 못 담으므로 키를 쥔
+  Cloudflare Worker 프록시(`services/demo-ai-proxy`) 경유. 모델 **Gemini 3.5 Flash-Lite**(입력 위주 작업
+  최저가·요청당 ~$0.002 → $5/일에 8배 여유) 서버 고정, IP별+전체 일일 한도로 비용 상한 강제, CORS 잠금,
+  프롬프트는 워커가 ai-protocol로 조립(앱과 한 계약·남용 저항). 클라 데모 분기가 `NEXT_PUBLIC_DEMO_AI_URL`
+  있으면 단발 위임(스트리밍/웹검색 off — 비용 최소). 워커 단위검증 10/10·브라우저 실증(채팅→제안 카드·429
+  정직 안내). ⚠ 배포는 사용자 액션: wrangler login→KV 생성→`secret put OPENROUTER_API_KEY`→deploy→URL을
+  데모 빌드 env(`NEXT_PUBLIC_DEMO_AI_URL`)로. 키 없이 진행(내 쪽 과금 0).
 - 갱신: 2026-07-23(9) · Claude — **정적 데모 로컬 작업 루프 + 홈 개선**: `npm run dev:demo`(DEMO_STATIC=1
   핫리로드 :3311) / `npm run preview:demo`(실제 export 산출물 :3312) — **배포 없이 로컬에서 수정·확인**.
   홈: 랜딩 헤더 제거(문서 열면 복귀 — ⚠ hidden 속성은 display:flex에 밀림, 조건부 렌더로), 캐럿 18→14px·

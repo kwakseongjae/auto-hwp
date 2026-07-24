@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-07-25 (Claude) · 정적 데모 AI = OpenRouter(Gemini Flash-Lite) via Cloudflare Worker
+- 정적 사이트는 키를 못 담음 → 키 보관+일일 한도 강제하는 Worker 프록시(services/demo-ai-proxy). 모델 Gemini 3.5 Flash-Lite 서버 고정(입력 위주 작업 최저가), IP별+전체 일일 캡으로 $5/일 상한, CORS 잠금, 프롬프트는 워커가 ai-protocol로 조립(드리프트0·남용저항).
+- 클라 데모 분기가 NEXT_PUBLIC_DEMO_AI_URL 있으면 프록시로 단발 위임(스트리밍/웹검색 off). 워커 단위검증 10/10, 브라우저 실증(채팅→Replace 제안 카드·에러0). 배포는 사용자(wrangler+secret) — README에 절차.
+
 ## 2026-07-23 (Claude) · 데모 로컬 루프 + 홈 화면 개선
 - 배포 없이 정적 데모를 만지도록 dev:demo(:3311 핫리로드)·preview:demo(:3312 실제 export) 스크립트 추가.
 - 홈: 랜딩 헤더 제거(문서 열면 복귀)·캐럿 14px 부드러운 점멸·지표 배지 제거·2갈래 카드(문서 편집/양식 일괄 작성)·.hwp 전용(+hwpx 알파 고지)·소개 4문구 자연어화. 용어 "벌크 채움"→"양식 일괄 작성".

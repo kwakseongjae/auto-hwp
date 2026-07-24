@@ -1,0 +1,21 @@
+name = "autohwp-demo-ai"
+main = "src/index.ts"
+compatibility_date = "2026-07-01"
+
+# 일일 카운터 저장소(IP별 + 전체). 배포 전 1회 생성 후 아래 id를 채운다:
+#   wrangler kv namespace create RATELIMIT
+[[kv_namespaces]]
+binding = "RATELIMIT"
+id = "REPLACE_WITH_KV_ID"
+
+[vars]
+# CORS 허용 오리진(정확히 일치, 콤마로 여러 개). Pages 프로젝트 페이지면 뒤에 경로 없이 오리진만.
+ALLOWED_ORIGIN = "https://kwakseongjae.github.io"
+MODEL = "google/gemini-3.5-flash-lite"
+# 비용 상한의 실질 강제: 요청당 ~$0.002(Flash-Lite, 입력 위주) → 2000건 ≈ $4. 예산에 맞춰 조절.
+DAILY_CAP = "2000"
+PER_IP_CAP = "20"
+MAX_TOKENS = "1024"
+
+# 키는 vars가 아니라 secret으로(레포/설정에 안 남는다):
+#   wrangler secret put OPENROUTER_API_KEY

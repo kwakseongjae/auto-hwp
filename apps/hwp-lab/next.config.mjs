@@ -37,6 +37,8 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_DEMO: isDemo ? "1" : "",
     NEXT_PUBLIC_BASE_PATH: demoBasePath,
+    // 정적 데모 AI 프록시(Cloudflare Worker) URL. 있으면 데모 AI 편집이 켜진다(services/demo-ai-proxy).
+    NEXT_PUBLIC_DEMO_AI_URL: process.env.NEXT_PUBLIC_DEMO_AI_URL ?? "",
   },
   // file: 심링크 패키지를 Next가 트랜스파일하도록 명시. (026: ai-protocol 은 route.ts·클라 양쪽에서
   // import, editor-core 는 react 가 re-export 하는 타입 소스 — 둘 다 심링크 스코프에 넣는다.)
