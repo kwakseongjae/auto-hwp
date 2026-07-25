@@ -36,7 +36,8 @@ export class MockAdapter implements EngineAdapter {
        *  FROZEN, i.e. a no-op engine — the apply-verify must then surface the false-success guard. */
       liveResize?: boolean;
       pageGeom?: PageGeom | null;
-      runs?: RunSpec[];
+      /** 고정 런, 또는 `(section, block, row?, col?)` 해석기(문단마다 다른 텍스트가 필요한 캐럿 테스트용). */
+      runs?: RunSpec[] | ((section: number, block: number, row?: number, col?: number) => RunSpec[]);
       /** Canned find matches (issue 045), or a `(query, opts)` resolver. Present makes `find`/`replace`
        *  answer; omit to OMIT both (a backend without find). */
       find?: FindMatch[] | ((query: string, opts: FindOptions) => FindMatch[]);
@@ -157,8 +158,9 @@ export class MockAdapter implements EngineAdapter {
     if (this.liveImg && this.liveImg.section === section && this.liveImg.block === block) return { ...this.liveImg };
     return null;
   }
-  async blockRuns(): Promise<RunSpec[]> {
-    return this.opts.runs ?? [];
+  async blockRuns(section: number, block: number, row?: number, col?: number): Promise<RunSpec[]> {
+    const r = this.opts.runs;
+    return (typeof r === "function" ? r(section, block, row, col) : r) ?? [];
   }
   async caretRect(page: number, node: number, offset: number): Promise<CaretRect | null> {
     const c = this.opts.caret;

@@ -21,10 +21,11 @@
 
 import type { EngineAdapter } from "./adapter";
 import { clampOffset } from "./caret";
+import { type RangeRect, rectsByProbe, selRange } from "./caretRange";
 import { Emitter } from "./events";
 import type { RunStyle } from "./runs";
 import type { DocSession } from "./session";
-import type { CellCaretRect, CellTextHit, RunSpec } from "./types";
+import type { CellCaretRect, RunSpec } from "./types";
 
 /** The MODEL half of a cell caret: the cell address + the editor-space (para, offset) within it. */
 export interface CellCaretAnchor {
@@ -36,6 +37,10 @@ export interface CellCaretAnchor {
   para: number;
   /** Char offset within that paragraph, `0..=paraLen` (never counts a "\n"). */
   offset: number;
+  /** 선택 범위의 **고정단**(shift 를 누르기 시작한 자리 — DOM Selection 의 anchor). `offset` 이 이동단
+   *  (focus)이라 캐럿 막대는 늘 `offset` 에 선다. 둘이 같으면 범위 없음 = 그냥 캐럿. 본문 캐럿과 **같은
+   *  규약**(caretRange.ts). */
+  selAnchor: number;
   /** The paragraph's char count — the clamp bound for caret moves. */
   paraLen: number;
 }
@@ -44,6 +49,8 @@ export interface CellCaretAnchor {
 export interface CellCaretState {
   anchor: CellCaretAnchor;
   rect: CellCaretRect;
+  /** 선택 범위의 줄별 하이라이트(범위가 없으면 빈 배열) — 오버레이가 그대로 그린다. */
+  rects: RangeRect[];
 }
 
 // ---- pure helpers (exported for node tests) ----------------------------------------------------
@@ -110,11 +117,7 @@ function inheritFromChars(chars: { ch: string; style: RunStyle }[], start: numbe
  *  `spliceRuns` applies (with del=0). Pure + read-only; exported so the 059 IME composition preview can
  *  style its overlay exactly like the coming text (styleOf 재사용) without a commit. */
 export function inheritStyleAt(runs: RunSpec[], at: number): RunStyle {
-  const chars: { ch: string; style: RunStyle }[] = [];
-  for (const r of runs) {
-    const style = styleOf(r);
-    for (const ch of r.text) chars.push({ ch, style });
-  }
+  const chars = explodeRuns(runs);
   const end = Math.min(Math.max(0, at), chars.length);
   return inheritFromChars(chars, end, end);
 }
@@ -127,21 +130,35 @@ export function inheritStyleAt(runs: RunSpec[], at: number): RunStyle {
  *  Pure + total: offsets are clamped, and a fully-cleared cell yields one empty run (the documented
  *  "clear, don't no-op" shape from `inheritRuns`). */
 export function spliceRuns(runs: RunSpec[], at: number, del: number, insert: string): RunSpec[] {
-  type Ch = { ch: string; style: RunStyle };
-  const chars: Ch[] = [];
-  for (const r of runs) {
-    const style = styleOf(r);
-    for (const ch of r.text) chars.push({ ch, style });
-  }
+  const chars = explodeRuns(runs);
   const end = Math.min(Math.max(0, at), chars.length);
   const start = Math.max(0, end - Math.max(0, del));
   // Inherit for the insertion: nearest non-separator char before the caret; else the char after; else
   // scan back past separators; else unstyled (shared with the 059 IME preview via inheritFromChars).
   const insStyle = inheritFromChars(chars, start, end);
-  const next: Ch[] = [...chars.slice(0, start), ...[...insert].map((ch) => ({ ch, style: insStyle })), ...chars.slice(end)];
-  // Re-group: consecutive same-style chars merge; every "\n" is its own bare run (separator parity).
+  return regroupRuns([...chars.slice(0, start), ...[...insert].map((ch) => ({ ch, style: insStyle })), ...chars.slice(end)]);
+}
+
+/** One char of a paragraph/cell text with the run style it carries — the intermediate form every
+ *  run-preserving edit works in (splice / range styling). */
+type Ch = { ch: string; style: RunStyle };
+
+/** Runs → per-char array (styles attached). The inverse of `regroupRuns`. */
+function explodeRuns(runs: RunSpec[]): Ch[] {
+  const chars: Ch[] = [];
+  for (const r of runs) {
+    const style = styleOf(r);
+    for (const ch of r.text) chars.push({ ch, style });
+  }
+  return chars;
+}
+
+/** Per-char array → runs: consecutive same-style chars merge; every "\n" is its own BARE separator run
+ *  (the exact shape `blockRuns` reads back and `SetTableCellRuns` splits on). A fully-cleared text
+ *  yields one empty run ("clear, don't no-op"). */
+function regroupRuns(chars: Ch[]): RunSpec[] {
   const out: RunSpec[] = [];
-  for (const c of next) {
+  for (const c of chars) {
     if (c.ch === "\n") {
       out.push({ text: "\n" });
       continue;
@@ -157,6 +174,38 @@ export function spliceRuns(runs: RunSpec[], at: number, del: number, insert: str
   return out;
 }
 
+/** The character style attributes a range toggle can flip (booleans only — 크기/색/글꼴 은 리본의 몫). */
+export type ToggleKey = "bold" | "italic" | "underline" | "strike";
+
+/** True when EVERY char of `[start, end)` already carries `key` (the toggle's "켜져 있다" test — 부분만
+ *  굵은 선택에 ⌘B 를 누르면 전체가 굵어지는 워드프로세서 관례). An empty range is `false`. */
+export function rangeHasStyle(runs: RunSpec[], start: number, end: number, key: ToggleKey): boolean {
+  const chars = explodeRuns(runs);
+  const s = Math.max(0, Math.min(start, chars.length));
+  const e = Math.max(0, Math.min(end, chars.length));
+  if (e <= s) return false;
+  for (let i = s; i < e; i++) if (chars[i].ch !== "\n" && chars[i].style[key] !== true) return false;
+  return true;
+}
+
+/** Set/clear ONE boolean char attribute over `[start, end)`, preserving every other attribute of every
+ *  run (색/크기/글꼴/이웃 런) — the run-preserving twin of `spliceRuns` for 부분 서식. Pure + total
+ *  (offsets clamp); the text is untouched, so a commit through `SetParagraphRuns`/`SetTableCellRuns`
+ *  changes formatting only. */
+export function styleRunRange(runs: RunSpec[], start: number, end: number, key: ToggleKey, on: boolean): RunSpec[] {
+  const chars = explodeRuns(runs);
+  const s = Math.max(0, Math.min(start, chars.length));
+  const e = Math.max(0, Math.min(end, chars.length));
+  const next = chars.map((c, i) => {
+    if (i < s || i >= e || c.ch === "\n") return c;
+    const style: RunStyle = { ...c.style };
+    if (on) style[key] = true;
+    else delete style[key];
+    return { ch: c.ch, style };
+  });
+  return regroupRuns(next);
+}
+
 // ---- controller ---------------------------------------------------------------------------------
 
 /// CellCaretController — the headless cell caret: click → anchor+rect, arrow moves, per-keystroke
@@ -167,11 +216,19 @@ export class CellCaretController {
   private state: CellCaretState | null = null;
   private changed = new Emitter<CellCaretState | null>();
   private chain: Promise<unknown> = Promise.resolve();
+  /** offset → caret rect 메모(현재 주소 한정 — `memoKey` 가 바뀌면 버린다). 범위 하이라이트가 오프셋을
+   *  훑어야 해서 생긴 캐시. */
+  private rectMemo = new Map<number, CellCaretRect | null>();
+  private memoKey = "";
 
   constructor(
     private adapter: EngineAdapter,
     private session: DocSession,
-  ) {}
+  ) {
+    // 기하 캐시는 **레이아웃이 바뀌면 전부 거짓말**이 된다 — 우리 커밋뿐 아니라 바깥의 ⌘Z/AI 적용/문서
+    // 교체도 마찬가지다. 세션의 무효화 신호 하나에 묶어 버린다(캐시가 캐럿을 엉뚱한 자리에 그리지 않게).
+    this.session.onLayoutInvalidated(() => this.rectMemo.clear());
+  }
 
   /** Whether this backend can answer cell caret queries at all (018: absent methods = feature off). */
   get supported(): boolean {
@@ -188,6 +245,7 @@ export class CellCaretController {
 
   /** Drop the caret (Escape / focus loss / document swap). Emits only when something was cleared. */
   clear(): void {
+    this.rectMemo.clear();
     if (this.state) {
       this.state = null;
       this.changed.emit(null);
@@ -201,8 +259,10 @@ export class CellCaretController {
     return p;
   }
 
-  /** Resolve a PAGE-LOCAL px click to a cell caret. `null` (and a cleared caret) off any cell text. */
-  clickAt(page: number, x: number, y: number): Promise<CellCaretState | null> {
+  /** Resolve a PAGE-LOCAL px click to a cell caret. `null` (and a cleared caret) off any cell text.
+   *  `extend` (Shift+클릭) keeps the CURRENT 고정단 when the click lands in the SAME cell paragraph —
+   *  otherwise it starts a fresh caret (다른 셀/문단으로의 범위는 v1 밖: 커밋 대상이 하나가 아니다). */
+  clickAt(page: number, x: number, y: number, extend = false): Promise<CellCaretState | null> {
     if (!this.supported) return Promise.resolve(null);
     return this.enqueue(async () => {
       const hit = (await this.adapter.hitTestCellText!(page, x, y)) ?? null;
@@ -210,39 +270,96 @@ export class CellCaretController {
         this.clear();
         return null;
       }
-      this.set(hit);
-      return this.state;
+      const prev = extend ? this.state?.anchor : undefined;
+      const same =
+        prev &&
+        prev.section === hit.section &&
+        prev.block === hit.block &&
+        prev.row === hit.row &&
+        prev.col === hit.col &&
+        prev.para === hit.para;
+      const offset = clampOffset(hit.offset, hit.para_len);
+      return this.publish(
+        {
+          section: hit.section,
+          block: hit.block,
+          row: hit.row,
+          col: hit.col,
+          para: hit.para,
+          offset,
+          selAnchor: same ? prev!.selAnchor : offset,
+          paraLen: hit.para_len,
+        },
+        hit.caret,
+      );
     });
   }
 
   /** Move the caret by `delta` chars within the current paragraph (arrow keys), clamped to
-   *  `[0, paraLen]`. Crossing into the previous/next paragraph is v1-out-of-scope (clamp instead). */
+   *  `[0, paraLen]`. Crossing into the previous/next paragraph is v1-out-of-scope (clamp instead).
+   *  A LIVE range COLLAPSES to its near edge instead of moving one char (워드프로세서 관례). */
   move(delta: number): Promise<CellCaretState | null> {
     return this.enqueue(async () => {
       const a = this.state?.anchor;
       if (!a || !this.adapter.caretRectCell) return null;
-      const offset = clampOffset(a.offset + delta, a.paraLen);
-      const rect = (await this.adapter.caretRectCell(a.section, a.block, a.row, a.col, a.para, offset)) ?? null;
-      if (!rect) {
-        this.clear();
-        return null;
-      }
-      this.state = { anchor: { ...a, offset }, rect };
-      this.changed.emit(this.state);
-      return this.state;
+      const { start, end } = selRange(a.selAnchor, a.offset);
+      const offset = end > start && delta !== 0 ? (delta < 0 ? start : end) : clampOffset(a.offset + delta, a.paraLen);
+      return this.publish({ ...a, offset, selAnchor: offset });
+    });
+  }
+
+  /** Shift+방향키 — 고정단은 그대로 두고 이동단(focus)만 옮겨 범위를 넓히거나 줄인다. */
+  extend(delta: number): Promise<CellCaretState | null> {
+    return this.enqueue(async () => {
+      const a = this.state?.anchor;
+      if (!a || !this.adapter.caretRectCell) return null;
+      return this.publish({ ...a, offset: clampOffset(a.offset + delta, a.paraLen) });
+    });
+  }
+
+  /** ⌘A — 이 셀 문단 전체를 선택한다(셀 하나가 편집 단위라 문서 전체가 아니다). */
+  selectAll(): Promise<CellCaretState | null> {
+    return this.enqueue(async () => {
+      const a = this.state?.anchor;
+      if (!a || !this.adapter.caretRectCell) return null;
+      return this.publish({ ...a, selAnchor: 0, offset: a.paraLen });
     });
   }
 
   /** Insert `text` at the caret as ONE `SetTableCellRuns` undo unit (per-keystroke commit lane).
-   *  A "\n" in `text` splits the paragraph (Enter). Resolves false when no caret is active. */
+   *  A "\n" in `text` splits the paragraph (Enter). 범위가 살아 있으면 그 범위를 **대체**한다.
+   *  Resolves false when no caret is active. */
   insertText(text: string): Promise<boolean> {
     return this.enqueue(() => this.splice(text, 0));
   }
 
-  /** Backspace: delete the char (or paragraph separator — merging paragraphs) ENDING at the caret.
-   *  A caret at the very start of the cell is a graceful no-op (resolves false). */
+  /** Backspace: 범위가 있으면 그 범위를 지우고, 없으면 캐럿 **앞** 한 글자(또는 문단 구분자 — 문단 병합)를
+   *  지운다. A caret at the very start of the cell with no range is a graceful no-op (resolves false). */
   deleteBack(): Promise<boolean> {
     return this.enqueue(() => this.splice("", 1));
+  }
+
+  /** ⌘B/⌘I 등 — 선택 **범위에만** 굵게/기울임/밑줄/취소선을 토글한다(범위 전체가 이미 켜져 있으면 끈다).
+   *  같은 `SetTableCellRuns` 커밋 레인이라 undo 하나. 범위가 없으면 조용한 false. */
+  toggleStyle(key: ToggleKey): Promise<boolean> {
+    return this.enqueue(async () => {
+      const a = this.state?.anchor;
+      if (!a || !this.supported) return false;
+      const { start, end } = selRange(a.selAnchor, a.offset);
+      if (end <= start) return false;
+      const runs = await this.adapter.blockRuns!(a.section, a.block, a.row, a.col);
+      const joined = runsText(runs);
+      const g0 = cellGlobalOffset(joined, a.para, start);
+      const g1 = cellGlobalOffset(joined, a.para, end);
+      const on = !rangeHasStyle(runs, g0, g1, key);
+      const nextRuns = styleRunRange(runs, g0, g1, key, on);
+      await this.session.applyBatch([
+        { intent: "SetTableCellRuns", section: a.section, index: a.block, row: a.row, col: a.col, runs: nextRuns },
+      ]);
+      this.rectMemo.clear(); // 서식은 글자 폭을 바꾼다 — 캐시된 기하는 버린다
+      await this.publish({ ...a });
+      return true;
+    });
   }
 
   /** The run style the composing/typed text will take at the current caret (059 — IME preview 스타일
@@ -257,50 +374,62 @@ export class CellCaretController {
     return inheritStyleAt(runs, global);
   }
 
-  private set(hit: CellTextHit): void {
-    this.state = {
-      anchor: {
-        section: hit.section,
-        block: hit.block,
-        row: hit.row,
-        col: hit.col,
-        para: hit.para,
-        offset: clampOffset(hit.offset, hit.para_len),
-        paraLen: hit.para_len,
-      },
-      rect: hit.caret,
-    };
-    this.changed.emit(this.state);
+  /** One `caretRectCell` probe, MEMOIZED per address — a Shift+방향키 하나가 범위 전체의 줄 하이라이트를
+   *  다시 물어보므로(엔진엔 "구간 기하" 표면이 없다) 같은 오프셋을 반복해서 왕복하지 않게 한다. 커밋/주소
+   *  변경/해제 때 버린다(기하가 달라지므로). */
+  private async probeRect(a: CellCaretAnchor, offset: number): Promise<CellCaretRect | null> {
+    const key = `${a.section}/${a.block}/${a.row}/${a.col}/${a.para}`;
+    if (this.memoKey !== key) {
+      this.memoKey = key;
+      this.rectMemo.clear();
+    }
+    if (this.rectMemo.has(offset)) return this.rectMemo.get(offset)!;
+    const r = (await this.adapter.caretRectCell!(a.section, a.block, a.row, a.col, a.para, offset)) ?? null;
+    this.rectMemo.set(offset, r);
+    return r;
   }
 
-  /** The shared read → splice → commit → re-anchor lane behind insertText/deleteBack. */
+  /** Resolve `anchor` to geometry (caret bar + 범위 하이라이트) and emit. Geometry 가 사라지면 018 대로
+   *  캐럿을 지운다. `rect` 를 넘기면 그 값을 쓴다(클릭이 이미 받아온 히트). */
+  private async publish(anchor: CellCaretAnchor, rect?: CellCaretRect): Promise<CellCaretState | null> {
+    const bar = rect ?? (await this.probeRect(anchor, anchor.offset));
+    if (!bar) {
+      this.clear();
+      return null;
+    }
+    const { start, end } = selRange(anchor.selAnchor, anchor.offset);
+    const rects = end > start ? await rectsByProbe((o) => this.probeRect(anchor, o), start, end) : [];
+    this.state = { anchor, rect: bar, rects };
+    this.changed.emit(this.state);
+    return this.state;
+  }
+
+  /** The shared read → splice → commit → re-anchor lane behind insertText/deleteBack. 범위가 살아 있으면
+   *  `del` 은 그 범위 길이로 갈음된다(범위 위 타이핑 = 대체 · Backspace = 범위 삭제). */
   private async splice(insert: string, del: number): Promise<boolean> {
     const a = this.state?.anchor;
     if (!a || !this.supported) return false;
     const runs = await this.adapter.blockRuns!(a.section, a.block, a.row, a.col);
     const joined = runsText(runs);
-    const global = cellGlobalOffset(joined, a.para, a.offset);
-    if (del > 0 && global === 0) return false; // Backspace at the cell start — graceful no-op
-    const nextRuns = spliceRuns(runs, global, del, insert);
+    const { start, end } = selRange(a.selAnchor, a.offset);
+    const ranged = end > start;
+    // 범위가 있으면 그 범위를 지운다(캐럿 앞 한 글자가 아니라). 커밋 좌표는 셀 전체 텍스트의 global 오프셋.
+    const global = cellGlobalOffset(joined, a.para, ranged ? end : a.offset);
+    const delChars = ranged ? cellGlobalOffset(joined, a.para, end) - cellGlobalOffset(joined, a.para, start) : del;
+    if (delChars > 0 && global === 0) return false; // Backspace at the cell start — graceful no-op
+    if (!ranged && delChars === 0 && insert.length === 0) return false;
+    const nextRuns = spliceRuns(runs, global, delChars, insert);
     await this.session.applyBatch([
       { intent: "SetTableCellRuns", section: a.section, index: a.block, row: a.row, col: a.col, runs: nextRuns },
     ]);
     // Re-anchor in the NEW text (the splice math is pure, so this needs no second read), then
     // re-resolve the rect against the post-edit geometry (the row may have grown/wrapped).
-    const nextJoined = joined.slice(0, Math.max(0, global - del)) + insert + joined.slice(global);
-    const at = cellParaOffsetAt(nextJoined, Math.max(0, global - del) + insert.length);
-    const anchor: CellCaretAnchor = { ...a, para: at.para, offset: at.offset, paraLen: at.paraLen };
-    const rect =
-      (await this.adapter.caretRectCell!(anchor.section, anchor.block, anchor.row, anchor.col, anchor.para, anchor.offset)) ??
-      null;
-    if (!rect) {
-      // Geometry vanished (e.g. the cell left the page) — the edit stands; the caret goes away (018).
-      this.state = null;
-      this.changed.emit(null);
-      return true;
-    }
-    this.state = { anchor, rect };
-    this.changed.emit(this.state);
+    const nextJoined = joined.slice(0, Math.max(0, global - delChars)) + insert + joined.slice(global);
+    const at = cellParaOffsetAt(nextJoined, Math.max(0, global - delChars) + insert.length);
+    this.rectMemo.clear(); // 편집으로 기하가 바뀌었다
+    const anchor: CellCaretAnchor = { ...a, para: at.para, offset: at.offset, selAnchor: at.offset, paraLen: at.paraLen };
+    // Geometry vanished (e.g. the cell left the page) → the edit stands; the caret goes away (018).
+    await this.publish(anchor);
     return true;
   }
 }

@@ -1132,6 +1132,21 @@ pub enum Intent {
         block: usize,
         runs: Vec<hwp_ops::RunSpec>,
     },
+    /// 캐럿의 **Enter** — 본문 문단을 char 오프셋 `at` 에서 둘로 나눈다 (`Op::SplitParagraph`). 꼬리는
+    /// 머리의 정렬/들여쓰기/스타일을 물려받은 새 문단으로 `block + 1` 에 들어간다. 수동 편집(캐럿) 전용
+    /// 이라 AI 화이트리스트(`DEFAULT_ALLOWED_INTENTS`)에는 **넣지 않는다** — 문서를 구조적으로 저작하는
+    /// AI 에게는 이미 `InsertParagraphAt`/`DeleteBlock` 이 있고, 캐럿 상대 좌표는 AI 가 알 수 없다.
+    SplitParagraph {
+        section: usize,
+        block: usize,
+        at: usize,
+    },
+    /// 캐럿의 **문단 첫머리 Backspace** — `block` 문단을 앞 문단(`block - 1`)에 붙이고 지운다
+    /// (`Op::MergeParagraph`, `SplitParagraph` 의 역연산). 위와 같은 이유로 AI 화이트리스트 밖.
+    MergeParagraph {
+        section: usize,
+        block: usize,
+    },
     /// Cell shading — set/clear the background color of cells in the `index`-th table as ONE undo unit
     /// (`SetTableCellShade`). `sel` ∈ {"row","col","cell","all"} keyed off `(row, col)`; `shade` is
     /// "#RRGGBB" or None to clear.
@@ -1771,6 +1786,20 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
                 runs,
             })
             .map_err(|e| e.to_string())?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::SplitParagraph { section, block, at } => {
+            let doc = session.doc.as_mut().ok_or("no document open")?;
+            doc.do_op(&hwp_ops::Op::SplitParagraph { section, block, at })
+                .map_err(|e| e.to_string())?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::MergeParagraph { section, block } => {
+            let doc = session.doc.as_mut().ok_or("no document open")?;
+            doc.do_op(&hwp_ops::Op::MergeParagraph { section, block })
+                .map_err(|e| e.to_string())?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }

@@ -14,6 +14,7 @@ import { HwpPageView, type PageClick } from "./HwpPageView";
 import { SelectionOverlay, type Mark } from "./SelectionOverlay";
 import { MarqueeLayer } from "./MarqueeLayer";
 import { CaretLayer } from "./CaretLayer";
+import { CaretRangeLayer } from "./CaretRangeLayer";
 import { ImeCompositionLayer } from "./ImeCompositionLayer";
 import { CompositionStore } from "../composition";
 import { HoverLayer } from "./HoverLayer";
@@ -1883,27 +1884,32 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       };
       const caret = core.caret.get();
       const body = caret?.kind === "body"; // 본문 캐럿엔 넘겨줄 "셀 이동"이 없다 — 경계에서 제자리/줄 이동
+      // Shift+방향키 = 범위 확장(고정단 유지). 셀·본문이 같은 규약이라 분기는 여기 한 곳뿐이고, 경계
+      // 강등(fallThroughTo)은 **하지 않는다** — 선택을 넓히다 셀이 바뀌면 선택이 통째로 사라진다.
+      const sel = e.shiftKey;
       switch (e.key) {
         case "ArrowLeft":
           e.preventDefault();
-          if (!body && caret && caret.offset <= 0) fallThroughTo("left");
+          if (sel) run(core.caret.extend(-1));
+          else if (!body && caret && caret.offset <= 0) fallThroughTo("left");
           else run(core.caret.move(-1));
           return;
         case "ArrowRight":
           e.preventDefault();
-          if (!body && caret && caret.offset >= caret.paraLen) fallThroughTo("right");
+          if (sel) run(core.caret.extend(1));
+          else if (!body && caret && caret.offset >= caret.paraLen) fallThroughTo("right");
           else run(core.caret.move(1));
           return;
         case "ArrowUp":
           e.preventDefault();
           // 본문 캐럿은 줄 단위로 올라가고(여러 줄 문단), 셀 캐럿은 기존대로 셀 이동으로 강등된다.
-          if (body) run(core.caret.moveLine(-1));
-          else fallThroughTo("up");
+          if (body) run(sel ? core.caret.extendLine(-1) : core.caret.moveLine(-1));
+          else if (!sel) fallThroughTo("up");
           return;
         case "ArrowDown":
           e.preventDefault();
-          if (body) run(core.caret.moveLine(1));
-          else fallThroughTo("down");
+          if (body) run(sel ? core.caret.extendLine(1) : core.caret.moveLine(1));
+          else if (!sel) fallThroughTo("down");
           return;
         case "Backspace":
           e.preventDefault();
@@ -1911,9 +1917,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           return;
         case "Enter":
           e.preventDefault();
-          // 셀은 "\n"이 문단 분리(SetTableCellRuns가 split)지만, 본문 문단에서 "\n"은 모델상 의미가
-          // 달라 문단 분리 op(InsertParagraphAt)가 필요하다 — v1은 정직하게 안 한다(무시).
-          if (!body) run(core.caret.insertText("\n"));
+          // 셀은 "\n"이 문단 분리(SetTableCellRuns 가 split — 다문단 셀 처리가 이미 있다). 본문 문단은
+          // 모델상 블록이 갈라져야 하므로 전용 op(`SplitParagraph`)로 나눈다.
+          run(body ? core.caret.splitParagraph() : core.caret.insertText("\n"));
           return;
         default:
           if (e.key.length === 1) {
@@ -2135,7 +2141,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       if (!pt) return;
       const clientX = e.clientX;
       const clientY = e.clientY;
-      const click: PageClick = { page, x: pt.x, y: pt.y, meta: false, client: { x: clientX, y: clientY } };
+      const click: PageClick = { page, x: pt.x, y: pt.y, meta: false, shift: false, client: { x: clientX, y: clientY } };
       // 1) Update the selection so the marks show + the cell actions (굵게/음영/행 삽입) target this spot.
       //    06x drill: over a table cell we DRILL straight to the cell (a plain click would mark the whole
       //    table, leaving the cell format actions disabled); off a table we resolve like a normal click.
@@ -2348,7 +2354,8 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         core.caret.clear();
         return;
       }
-      void core.caret.clickAt(c.page, c.x, c.y).catch((e) => onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요"));
+      // Shift+클릭 = 지금 캐럿에서 클릭 자리까지 **범위 선택**(같은 문단/셀 안에서만 — 컨트롤러가 판정).
+      void core.caret.clickAt(c.page, c.x, c.y, c.shift).catch((e) => onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요"));
     },
     [editingOn, canEdit, core, onTrap],
   );
@@ -2565,10 +2572,21 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
       const k = e.key.toLowerCase();
-      if (k !== "z" && k !== "y" && k !== "c") return;
+      if (k !== "z" && k !== "y" && k !== "c" && k !== "a" && k !== "b" && k !== "i") return;
       if (editorRef.current) return; // 제자리 에디터 열림 → 그 표면의 기본 동작이 주인
       if (isEditableTarget(e.target as Element | null) || isEditableTarget(document.activeElement)) return;
       if (compositionStore.get() != null) return; // 조합 중엔 IME 가 키의 주인
+      // ⌘A/⌘B/⌘I 는 **살아 있는 글자 캐럿 위에서만** 우리 것이다. 캐럿이 없으면 브라우저 기본동작(전체
+      // 선택 등)을 그대로 둔다 — 문서를 통째로 굵게 만드는 사고가 없도록 범위가 없으면 토글도 no-op.
+      if (k === "a" || k === "b" || k === "i") {
+        if (!caretActiveRef.current || e.shiftKey) return;
+        e.preventDefault();
+        const p = k === "a" ? core.caret.selectAll() : core.caret.toggleStyle(k === "b" ? "bold" : "italic");
+        void p.catch((err) => {
+          if (!onTrap(err, "엔진 트랩 — 문서를 복구했습니다")) toast(`서식 적용 실패: ${err}`);
+        });
+        return;
+      }
       if (k === "c") {
         if (e.shiftKey) return; // ⌘⇧C 는 우리 것이 아니다
         if (selectionRef.current.length === 0) return; // 선택 없음 = no-op → 브라우저 기본 복사 유지
@@ -2587,7 +2605,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo, copySelection, compositionStore, onTrap, toast]);
+  }, [core, undo, redo, copySelection, compositionStore, onTrap, toast]);
 
   // ── Feature C: persistent per-card 되돌리기 on applied chat turns ─────────────────────────────────────
   // The chat records each applied turn's undo-stack depth (via `undoDepth`) and offers 되돌리기 only while
@@ -3047,6 +3065,10 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                     {/* issue 030: the marquee is an ISOLATED layer — it subscribes to the core itself, so a
                         drag re-renders neither this workspace nor the SVG sheets (only the rect moves). */}
                     <MarqueeLayer core={core} page={page} scale={scale} />
+                    {/* 글자 범위 선택(Shift+방향키/Shift+클릭/⌘A) 하이라이트 — 캐럿 막대 **아래**(z 5 vs 7).
+                        CaretLayer 와 같은 store 를 구독하되 사각형을 자식 노드로 직접 만들어 넣어 마운트 이후
+                        리렌더가 0이다. */}
+                    {editingOn && canEdit && <CaretRangeLayer core={core} page={page} scale={scale} />}
                     {/* issue 053: the blinking cell text caret — an ISOLATED layer on the marquee pattern
                         (presence = rare setState; every move = a ref DOM write, 0 workspace renders).
                         issue 059: it takes the composition store so its bar HIDES while an IME composition is

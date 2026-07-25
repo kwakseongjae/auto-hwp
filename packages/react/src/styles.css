@@ -203,6 +203,11 @@
 }
 @keyframes hw-caret-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
 
+/* 글자 범위 선택(Shift+방향키/⌘A) 하이라이트 — 캐럿 막대(z 7)보다 아래에 깔린다. 컨테이너는 늘 마운트돼
+   있고 CaretRangeLayer 가 자식 사각형을 ref 로 직접 만들어 넣는다(리렌더 0). */
+.hw-selrange { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+.hw-selrange-box { position: absolute; background: rgba(37, 99, 235, 0.24); border-radius: 1px; }
+
 /* issue 059 — IME inline composition.
    .hw-ime-input: the caret-tracking hidden INPUT-CAPTURE textarea. Invisible + non-interactive but
    focusable, placed AT the caret px (never offscreen) so the OS candidate / 한자 변환 window anchors to it.

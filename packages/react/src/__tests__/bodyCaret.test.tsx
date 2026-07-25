@@ -34,6 +34,8 @@ const PAGE_SVG =
   `</svg>`;
 
 const BAND: BlockHit = { section: 0, block: 3, kind: "paragraph", x: 75, y: 40, w: 20, h: 20, text: "가나 다", editable: true };
+/** Enter 로 갓 생긴 **빈** 문단의 밴드(글리프 0개) — 캐럿은 밴드 왼쪽/높이로만 선다. */
+const NEXT_BAND: BlockHit = { ...BAND, block: 4, y: 60, text: "" };
 const RUNS: RunSpec[] = [{ text: "가나", bold: true }, { text: " 다" }];
 
 /** 본문 문단만 있는 백엔드(셀 캐럿 표면 없음) — 클릭은 문단 밴드(y 40..60)에서만 해소된다. */
@@ -174,6 +176,121 @@ describe("body paragraph caret", () => {
     await caretAt(container);
     fireEvent.keyDown(window, { key: "Escape" });
     await waitFor(() => expect(container.querySelector(".hw-caret")).toBeNull());
+  });
+
+  // ── 글자 범위 선택 (Shift+방향키 · Shift+클릭 · ⌘A · ⌘B) ───────────────────────────────────────
+
+  const rangeBoxes = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll('[data-testid="hw-selrange"] .hw-selrange-box')) as HTMLElement[];
+
+  it("Shift+방향키는 범위를 넓혀 하이라이트를 그린다 — 시트 0 렌더 · 워크스페이스 0 렌더 · 인텐트 0", async () => {
+    const adapter = bodyAdapter();
+    const { container } = workspace(adapter);
+    const caret = await caretAt(container, 101, 45); // offset 0
+    await flush();
+    expect(rangeBoxes(container)).toHaveLength(0); // 범위 없음 = 사각형 없음
+
+    __resetSheetRenderCount();
+    __resetWorkspaceRenderCount();
+    for (const _ of [0, 1]) {
+      fireEvent.keyDown(window, { key: "ArrowRight", shiftKey: true });
+      await flush();
+    }
+    const boxes = rangeBoxes(container);
+    expect(boxes).toHaveLength(1);
+    const s = parseFloat(caret.style.height) / 13; // 스케일 역산(셀 캐럿 스펙과 같은 기법)
+    expect(parseFloat(boxes[0].style.left)).toBeCloseTo(100 * s, 3); // '가'의 왼쪽부터
+    expect(parseFloat(boxes[0].style.width)).toBeCloseTo(26 * s, 3); // '가나' 두 글자 폭
+    expect(parseFloat(caret.style.left)).toBeCloseTo(126 * s, 3); // 막대는 이동단(offset 2 = 공백 앞)에
+    expect(__getSheetRenderCount()).toBe(0);
+    expect(__getWorkspaceRenderCount()).toBe(0);
+    expect(adapter.applied).toHaveLength(0);
+
+    // 되감으면 하이라이트가 사라진다(같은 ref 경로 — 여전히 리렌더 0).
+    fireEvent.keyDown(window, { key: "ArrowLeft", shiftKey: true });
+    fireEvent.keyDown(window, { key: "ArrowLeft", shiftKey: true });
+    await flush();
+    expect(rangeBoxes(container)).toHaveLength(0);
+    expect(__getSheetRenderCount()).toBe(0);
+    expect(__getWorkspaceRenderCount()).toBe(0);
+  });
+
+  it("Shift+클릭은 캐럿에서 클릭 자리까지 범위를 만든다", async () => {
+    const { container } = workspace(bodyAdapter());
+    await caretAt(container, 101, 45); // offset 0
+    const sheet = await sheetOf(container);
+    fireEvent.pointerDown(sheet, { clientX: 132, clientY: 45, button: 0, buttons: 1, pointerId: 1, shiftKey: true });
+    fireEvent.pointerUp(sheet, { clientX: 132, clientY: 45, button: 0, buttons: 0, pointerId: 1, shiftKey: true });
+    await waitFor(() => expect(rangeBoxes(container)).toHaveLength(1));
+  });
+
+  it("범위 위 타이핑은 범위를 대체하고, Backspace는 범위를 지운다", async () => {
+    const adapter = bodyAdapter();
+    const { container } = workspace(adapter);
+    await caretAt(container, 101, 45);
+    fireEvent.keyDown(window, { key: "ArrowRight", shiftKey: true });
+    fireEvent.keyDown(window, { key: "ArrowRight", shiftKey: true });
+    await flush();
+    fireEvent.keyDown(window, { key: "X" });
+    await waitFor(() => expect(adapter.applied).toHaveLength(1));
+    expect((adapter.applied[0] as Intent & { runs: RunSpec[] }).runs.map((r) => r.text).join("")).toBe("X 다");
+  });
+
+  it("⌘A는 문단 전체를 선택하고 ⌘B는 그 범위만 굵게 커밋한다(런 보존)", async () => {
+    const adapter = bodyAdapter({ runs: [{ text: "가나 다" }] });
+    const { container } = workspace(adapter);
+    await caretAt(container, 101, 45);
+    fireEvent.keyDown(window, { key: "a", metaKey: true });
+    await waitFor(() => expect(rangeBoxes(container)).toHaveLength(1));
+    expect(adapter.applied).toHaveLength(0); // 선택은 커밋이 아니다
+    fireEvent.keyDown(window, { key: "b", metaKey: true });
+    await waitFor(() => expect(adapter.applied).toHaveLength(1));
+    expect(adapter.applied[0]).toEqual({
+      intent: "SetParagraphRuns",
+      section: 0,
+      block: 3,
+      runs: [{ text: "가나 다", bold: true }],
+    } as Intent);
+  });
+
+  it("캐럿이 없으면 ⌘A/⌘B는 우리 것이 아니다(브라우저 기본동작 유지 · 인텐트 0)", async () => {
+    const adapter = bodyAdapter();
+    workspace(adapter);
+    fireEvent.keyDown(window, { key: "a", metaKey: true });
+    fireEvent.keyDown(window, { key: "b", metaKey: true });
+    await flush();
+    expect(adapter.applied).toHaveLength(0);
+  });
+
+  // ── Enter = 문단 분리 (SplitParagraph) ────────────────────────────────────────────────────────
+
+  it("Enter는 캐럿 자리에서 문단을 나눈다 — SplitParagraph 하나 = undo 하나", async () => {
+    const adapter = bodyAdapter({
+      hit: (_p, _x, y) => (y >= 40 && y <= 60 ? BAND : y >= 60 && y <= 80 ? NEXT_BAND : null),
+      blocks: [BAND, NEXT_BAND],
+      runs: (_s: number, b: number) => (b === 4 ? [{ text: "" }] : RUNS.map((r) => ({ ...r }))),
+    });
+    const { container } = workspace(adapter);
+    await caretAt(container); // offset 1
+    fireEvent.keyDown(window, { key: "Enter" });
+    await waitFor(() => expect(adapter.applied).toHaveLength(1));
+    expect(adapter.applied[0]).toEqual({ intent: "SplitParagraph", section: 0, block: 3, at: 1 } as Intent);
+    // 새 문단은 비어 있어도 캐럿이 남는다(밴드 기반 빈 줄 박스) — Enter 뒤 계속 칠 수 있어야 한다.
+    await waitFor(() => {
+      const caret = container.querySelector(".hw-caret") as HTMLElement | null;
+      expect(caret).toBeTruthy();
+      const s = parseFloat(caret!.style.height) / 20; // NEXT_BAND.h
+      expect(parseFloat(caret!.style.left)).toBeCloseTo(75 * s, 3); // 밴드 왼쪽
+    });
+  });
+
+  it("문단 맨 앞 Backspace는 앞 문단과 병합한다(MergeParagraph)", async () => {
+    const adapter = bodyAdapter();
+    const { container } = workspace(adapter);
+    await caretAt(container, 101, 45); // offset 0
+    fireEvent.keyDown(window, { key: "Backspace" });
+    await waitFor(() => expect(adapter.applied).toHaveLength(1));
+    expect(adapter.applied[0]).toEqual({ intent: "MergeParagraph", section: 0, block: 3 } as Intent);
   });
 
   it("페이지 SVG에 글리프가 없으면(정렬 불가) 캐럿을 만들지 않는다 — 틀린 자리보다 무캐럿", async () => {

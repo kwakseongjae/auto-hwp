@@ -258,6 +258,31 @@ pub enum Op {
         block: usize,
         runs: Vec<RunSpec>,
     },
+    /// SPLIT the `block`-th SIMPLE paragraph of `section` at char offset `at` — the caret's Enter. The
+    /// head keeps `[0, at)` **and its identity** (NodeId / source span / para_shape / style); a NEW
+    /// paragraph holding `[at, len)` is inserted at `block + 1` INHERITING the head's `para_shape` /
+    /// `para_ref` / `style_name` (정렬·들여쓰기·줄간격이 유지된다 — `InsertParagraphAt` 의 `ParaSpec`
+    /// 경로는 기본 ParaShape 를 합성하므로 분리에는 쓸 수 없다) but NOT its `id` (NodeId 는 문서 내
+    /// 유일해야 한다) nor its `source` span (합성 문단 = `InsertParagraphAt` 와 같은 취급). Per-run char
+    /// shapes are preserved across the cut; the run holding the cut is split in two (both halves kept
+    /// even when empty, so typing at either side continues that run's style). `at == 0` / `at == len`
+    /// are legal (앞/뒤에 빈 문단이 생긴다). Refuses a structural paragraph (image/field/복합) — the
+    /// SAME guard as [`Op::SetParagraphRuns`]. ONE undo unit.
+    SplitParagraph {
+        section: usize,
+        block: usize,
+        at: usize,
+    },
+    /// MERGE the `block`-th SIMPLE paragraph into the PREVIOUS one (`block - 1`) and delete it — the
+    /// caret's Backspace at a paragraph start, the exact inverse of [`Op::SplitParagraph`]. The
+    /// surviving paragraph keeps ITS OWN identity and shape (한글 규약: 뒤 문단이 앞 문단의 서식에
+    /// 흡수된다); the moved runs keep their per-run char shapes. Refuses `block == 0`, a non-paragraph
+    /// on either side, a structural paragraph, or a 표 앵커 문단 (그 문단은 표 컨트롤의 host 라 본문
+    /// 텍스트를 흡수하면 안 된다). ONE undo unit.
+    MergeParagraph {
+        section: usize,
+        block: usize,
+    },
     /// Set the COLUMN WIDTH proportions of the `index`-th table (the column-resize drag commit). `widths`
     /// must have exactly `t.cols` positive entries; the renderer rescales them to the body width, so only
     /// the ratios matter. ONE undo unit.
@@ -1086,6 +1111,25 @@ fn split_runs_for_range(runs: &mut Vec<Run>, start: usize, end: usize) -> Result
     })
 }
 
+/// The "이 문단은 제자리 편집 대상인가" guard shared by `SetParagraphText`/`SetParagraphRuns`/
+/// `SplitParagraph`/`MergeParagraph`: a paragraph the parser marked non-simple (raw/complex source) or
+/// carrying any non-text inline (image/field/marker) is REFUSED so we never silently flatten rich
+/// content. A paragraph with no source (freshly inserted) counts as simple.
+fn ensure_simple_para(p: &Paragraph) -> Result<()> {
+    let simple = p.source.as_ref().map(|s| s.simple).unwrap_or(true);
+    let has_nontext = p
+        .runs
+        .iter()
+        .any(|r| r.content.iter().any(|i| !matches!(i, Inline::Text(_))));
+    if !simple || has_nontext {
+        return Err(Error::Other(
+            "이 문단은 인라인 편집 대상이 아닙니다 (이미지/필드/복합 구조) — 채팅으로 편집하세요"
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
 /// Resolve a paragraph-scoped char offset to `(run_idx, byte_offset_within_run)`. A boundary
 /// attaches LEFT (to the run it ends). Errors if `char_off` is past the paragraph's text (never
 /// clamps into another paragraph). Assumes ≥1 run (callers ensure it for an empty paragraph).
@@ -1675,16 +1719,8 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                 return Err(Error::Other(format!("SetParagraphText: block {block} is not a paragraph")));
             };
             // Refuse a structural paragraph so we never silently flatten rich content — the UI surfaces
-            // this and falls back to chat. "Structural" = the parser marked it non-simple (raw/complex
-            // source) OR it carries any non-text inline (image/field/marker). A paragraph with no source
-            // (freshly inserted) is treated as simple/editable.
-            let simple = p.source.as_ref().map(|s| s.simple).unwrap_or(true);
-            let has_nontext = p.runs.iter().any(|r| r.content.iter().any(|i| !matches!(i, Inline::Text(_))));
-            if !simple || has_nontext {
-                return Err(Error::Other(
-                    "이 문단은 인라인 편집 대상이 아닙니다 (이미지/필드/복합 구조) — 채팅으로 편집하세요".into(),
-                ));
-            }
+            // this and falls back to chat (공용 가드: `ensure_simple_para`).
+            ensure_simple_para(p)?;
             // Preserve the first run's char shape + the paragraph's para shape (color/italic/alignment).
             let cs = p.runs.first().map(|r| r.char_shape).unwrap_or(0);
             p.runs = vec![Run { char_shape: cs, content: vec![Inline::Text(text.clone())], ..Default::default() }];
@@ -1728,13 +1764,7 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             let Block::Paragraph(p) = blk else {
                 return Err(Error::Other(format!("SetParagraphRuns: block {block} is not a paragraph")));
             };
-            let simple = p.source.as_ref().map(|s| s.simple).unwrap_or(true);
-            let has_nontext = p.runs.iter().any(|r| r.content.iter().any(|i| !matches!(i, Inline::Text(_))));
-            if !simple || has_nontext {
-                return Err(Error::Other(
-                    "이 문단은 인라인 편집 대상이 아닙니다 (이미지/필드/복합 구조) — 채팅으로 편집하세요".into(),
-                ));
-            }
+            ensure_simple_para(p)?;
             let resolve_shape = |cs: usize| match neutral_shape {
                 Some(prev) if cs == plain => prev,
                 _ => cs,
@@ -1748,6 +1778,102 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                     .collect()
             };
             p.dirty.mark();
+            sec.dirty.mark();
+            Ok(())
+        }
+        Op::SplitParagraph { section, block, at } => {
+            // 캐럿의 Enter. 머리 문단은 **자기 정체성을 그대로** 두고(NodeId·source 스팬·para_shape),
+            // 꼬리만 떼어 새 문단으로 만든다 — 그래야 편집되지 않은 앞부분이 바이트 보존 경로를 유지한다.
+            let sec = section_mut(doc, *section)?;
+            let blk = sec.blocks.get_mut(*block).ok_or_else(|| {
+                Error::Other(format!("SplitParagraph: block {block} out of range"))
+            })?;
+            let Block::Paragraph(p) = blk else {
+                return Err(Error::Other(format!(
+                    "SplitParagraph: block {block} is not a paragraph"
+                )));
+            };
+            ensure_simple_para(p)?;
+            if p.is_table_anchor {
+                return Err(Error::Other(
+                    "SplitParagraph: 표 앵커 문단은 나눌 수 없습니다".into(),
+                ));
+            }
+            let (ri, byte) = resolve_caret(p, *at)?;
+            // 자른 자리의 런을 두 쪽으로: 양쪽 모두(빈 쪽이라도) 남겨 두면 각 문단 끝/시작에서 이어 치는
+            // 글자가 그 런의 스타일을 그대로 물려받는다(delete_run_range 의 경계런 보존과 같은 규율).
+            let mut tail: Vec<Run> = Vec::new();
+            if p.runs.is_empty() {
+                p.runs.push(Run::default());
+            }
+            let full = run_text(&p.runs[ri]);
+            let mut tail_first = p.runs[ri].clone();
+            p.runs[ri].content = vec![Inline::Text(full[..byte].to_string())];
+            tail_first.content = vec![Inline::Text(full[byte..].to_string())];
+            tail.push(tail_first);
+            tail.extend(p.runs.drain(ri + 1..));
+            let new_para = Paragraph {
+                id: None, // NodeId 복제 금지 — 문서 내 유일해야 한다(find/앵커가 깨진다)
+                para_shape: p.para_shape,
+                para_ref: p.para_ref.clone(),
+                page_break_before: false, // 쪽나눔은 원 문단 **시작**의 속성 — 꼬리는 이어서 흐른다
+                is_table_anchor: false,
+                style_name: p.style_name.clone(),
+                runs: tail,
+                source: None, // 합성 문단(바이트 스팬 없음) — InsertParagraphAt 와 같은 취급
+                dirty: Dirty(true),
+                ..Default::default()
+            };
+            p.dirty.mark();
+            sec.blocks.insert(*block + 1, Block::Paragraph(new_para));
+            sec.dirty.mark();
+            Ok(())
+        }
+        Op::MergeParagraph { section, block } => {
+            // 캐럿의 문단-첫머리 Backspace. SplitParagraph 의 역연산이라 split→merge 는 텍스트가 원상복구된다.
+            if *block == 0 {
+                return Err(Error::Other(
+                    "MergeParagraph: block 0 has no previous paragraph".into(),
+                ));
+            }
+            let sec = section_mut(doc, *section)?;
+            if *block >= sec.blocks.len() {
+                return Err(Error::Other(format!(
+                    "MergeParagraph: block {block} out of range (section has {} blocks)",
+                    sec.blocks.len()
+                )));
+            }
+            // 양쪽 모두 "단순 본문 문단"일 때만 — 표/그림 블록이나 표 앵커와의 병합은 의미가 없다.
+            for idx in [*block - 1, *block] {
+                let Block::Paragraph(p) = &sec.blocks[idx] else {
+                    return Err(Error::Other(format!(
+                        "MergeParagraph: block {idx} is not a paragraph"
+                    )));
+                };
+                ensure_simple_para(p)?;
+                if p.is_table_anchor {
+                    return Err(Error::Other(
+                        "MergeParagraph: 표 앵커 문단과는 병합할 수 없습니다".into(),
+                    ));
+                }
+            }
+            let moved = match &mut sec.blocks[*block] {
+                Block::Paragraph(p) => std::mem::take(&mut p.runs),
+                _ => unreachable!("검사됨"),
+            };
+            sec.blocks.remove(*block);
+            let Block::Paragraph(prev) = &mut sec.blocks[*block - 1] else {
+                unreachable!("검사됨")
+            };
+            prev.runs.extend(moved);
+            // 빈 런은 내용이 없으니 정리한다(앞 문단이 빈 문단이었던 흔한 경우) — 단, 전부 비면 한 개는 남겨
+            // 문단이 런 0개가 되지 않게 한다(직렬화/조판이 첫 런의 char_shape 을 읽는다).
+            if prev.runs.iter().any(|r| run_char_len(r) > 0) {
+                prev.runs.retain(|r| run_char_len(r) > 0);
+            } else {
+                prev.runs.truncate(1);
+            }
+            prev.dirty.mark();
             sec.dirty.mark();
             Ok(())
         }
@@ -5132,5 +5258,228 @@ mod tests {
             }
         )
         .is_ok());
+    }
+
+    // ── SplitParagraph / MergeParagraph (캐럿의 Enter / 문단-첫머리 Backspace) ────────────────────
+
+    /// `doc_with` 은 para_shape 0(기본)만 쓰므로, 분리가 **정말** 상속하는지 보려면 서로 다른 shape 이 필요하다.
+    fn para_with_shape(id: u64, text: &str, shape: usize, style: Option<&str>) -> Paragraph {
+        Paragraph {
+            para_shape: shape,
+            para_ref: Some("7".into()),
+            style_name: style.map(str::to_string),
+            ..simple_para(id, text)
+        }
+    }
+
+    fn texts_of(doc: &SemanticDoc) -> Vec<String> {
+        doc.sections[0]
+            .blocks
+            .iter()
+            .map(|b| match b {
+                Block::Paragraph(p) => p.runs.iter().map(run_text).collect::<String>(),
+                _ => "<table>".into(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn split_paragraph_cuts_at_char_offset_and_inherits_shape() {
+        let mut doc = doc_with(vec![
+            para_with_shape(1, "가나다라", 3, Some("본문")),
+            simple_para(2, "뒤"),
+        ]);
+        apply(
+            &mut doc,
+            &Op::SplitParagraph {
+                section: 0,
+                block: 0,
+                at: 2,
+            },
+        )
+        .unwrap();
+        assert_eq!(texts_of(&doc), vec!["가나", "다라", "뒤"]);
+        let Block::Paragraph(head) = &doc.sections[0].blocks[0] else {
+            panic!()
+        };
+        let Block::Paragraph(tail) = &doc.sections[0].blocks[1] else {
+            panic!()
+        };
+        // 꼬리는 모양(정렬/들여쓰기/스타일)을 물려받되 **정체성은 물려받지 않는다**.
+        assert_eq!(tail.para_shape, 3);
+        assert_eq!(tail.para_ref.as_deref(), Some("7"));
+        assert_eq!(tail.style_name.as_deref(), Some("본문"));
+        assert_eq!(tail.id, None, "NodeId 복제 금지");
+        assert!(tail.source.is_none(), "새 문단은 바이트 스팬이 없다");
+        assert!(tail.dirty.0 && head.dirty.0);
+        // 머리는 자기 정체성을 그대로 유지한다(바이트 보존 경로).
+        assert_eq!(head.id, Some(NodeId(1)));
+        assert!(head.source.is_some());
+    }
+
+    #[test]
+    fn split_paragraph_preserves_per_run_char_shapes_across_the_cut() {
+        let mut doc = doc_with(vec![multirun_para(1, &["가나", "다라"])]);
+        // 두 번째 런만 볼드로 만들어 두고 첫 런 한가운데를 자른다.
+        let bold_idx = intern_char_shape(&mut doc, bold());
+        let Block::Paragraph(p) = &mut doc.sections[0].blocks[0] else {
+            panic!()
+        };
+        p.runs[1].char_shape = bold_idx;
+        apply(
+            &mut doc,
+            &Op::SplitParagraph {
+                section: 0,
+                block: 0,
+                at: 1,
+            },
+        )
+        .unwrap();
+        assert_eq!(texts_of(&doc), vec!["가", "나다라"]);
+        let Block::Paragraph(tail) = &doc.sections[0].blocks[1] else {
+            panic!()
+        };
+        // 잘린 런의 두 쪽 모두 원래 char_shape 을 유지하고, 뒤 런의 볼드도 살아 있다.
+        assert_eq!(run_texts(tail), vec!["나", "다라"]);
+        assert_eq!(tail.runs[1].char_shape, bold_idx);
+        assert_eq!(tail.runs[0].char_ref.as_deref(), Some("0"));
+    }
+
+    #[test]
+    fn split_paragraph_at_the_edges_makes_an_empty_neighbour() {
+        for (at, want) in [(0usize, vec!["", "가나"]), (2, vec!["가나", ""])] {
+            let mut doc = doc_with(vec![simple_para(1, "가나")]);
+            apply(
+                &mut doc,
+                &Op::SplitParagraph {
+                    section: 0,
+                    block: 0,
+                    at,
+                },
+            )
+            .unwrap();
+            assert_eq!(texts_of(&doc), want);
+        }
+    }
+
+    #[test]
+    fn split_paragraph_refuses_bad_targets() {
+        let mut doc = doc_with(vec![simple_para(1, "가나"), structural_para(2, "그림")]);
+        let bad = [
+            Op::SplitParagraph {
+                section: 0,
+                block: 0,
+                at: 99,
+            }, // 문단 끝을 넘어선 오프셋
+            Op::SplitParagraph {
+                section: 0,
+                block: 1,
+                at: 1,
+            }, // 구조 문단
+            Op::SplitParagraph {
+                section: 0,
+                block: 9,
+                at: 0,
+            }, // 범위 밖
+        ];
+        for op in &bad {
+            assert!(apply(&mut doc, op).is_err(), "{op:?} 는 거절되어야 한다");
+        }
+        assert_eq!(texts_of(&doc), vec!["가나", "그림"], "실패는 무변경");
+    }
+
+    #[test]
+    fn merge_paragraph_is_the_inverse_of_split() {
+        let mut doc = doc_with(vec![multirun_para(1, &["가나", "다라"])]);
+        apply(
+            &mut doc,
+            &Op::SplitParagraph {
+                section: 0,
+                block: 0,
+                at: 3,
+            },
+        )
+        .unwrap();
+        assert_eq!(texts_of(&doc), vec!["가나다", "라"]);
+        apply(
+            &mut doc,
+            &Op::MergeParagraph {
+                section: 0,
+                block: 1,
+            },
+        )
+        .unwrap();
+        assert_eq!(texts_of(&doc), vec!["가나다라"]);
+        let Block::Paragraph(p) = &doc.sections[0].blocks[0] else {
+            panic!()
+        };
+        assert_eq!(p.id, Some(NodeId(1)), "살아남는 쪽은 앞 문단");
+    }
+
+    #[test]
+    fn merge_paragraph_keeps_the_first_paragraphs_shape_and_drops_empty_runs() {
+        let mut doc = doc_with(vec![
+            para_with_shape(1, "", 3, Some("본문")), // 빈 문단(런 하나, 텍스트 없음)
+            para_with_shape(2, "뒤", 5, Some("개요 1")),
+        ]);
+        apply(
+            &mut doc,
+            &Op::MergeParagraph {
+                section: 0,
+                block: 1,
+            },
+        )
+        .unwrap();
+        assert_eq!(texts_of(&doc), vec!["뒤"]);
+        let Block::Paragraph(p) = &doc.sections[0].blocks[0] else {
+            panic!()
+        };
+        assert_eq!(p.para_shape, 3, "앞 문단의 서식이 이긴다(한글 규약)");
+        assert_eq!(p.style_name.as_deref(), Some("본문"));
+        assert_eq!(run_texts(p), vec!["뒤"], "빈 런은 정리된다");
+    }
+
+    #[test]
+    fn merge_paragraph_refuses_bad_targets() {
+        let mut doc = doc_with(vec![simple_para(1, "가"), structural_para(2, "그림")]);
+        // 표 앵커 문단은 표 컨트롤의 host — 본문 텍스트를 흡수하면 안 된다.
+        let mut anchored = doc_with(vec![
+            Paragraph {
+                is_table_anchor: true,
+                ..simple_para(1, "")
+            },
+            simple_para(2, "뒤"),
+        ]);
+        for block in [0usize, 1] {
+            // 0 = 앞 문단 없음, 1 = 구조 문단
+            let op = Op::MergeParagraph { section: 0, block };
+            assert!(apply(&mut doc, &op).is_err(), "{op:?} 는 거절되어야 한다");
+        }
+        assert!(apply(
+            &mut anchored,
+            &Op::MergeParagraph {
+                section: 0,
+                block: 1
+            }
+        )
+        .is_err());
+        assert_eq!(texts_of(&doc), vec!["가", "그림"]);
+        assert_eq!(texts_of(&anchored), vec!["", "뒤"]);
+    }
+
+    #[test]
+    fn split_then_undo_restores_the_document() {
+        let mut s = EditSession::new(doc_with(vec![simple_para(1, "가나다")]));
+        s.do_op(&Op::SplitParagraph {
+            section: 0,
+            block: 0,
+            at: 1,
+        })
+        .unwrap();
+        assert_eq!(texts_of(s.doc()), vec!["가", "나다"]);
+        assert!(s.undo());
+        assert_eq!(texts_of(s.doc()), vec!["가나다"], "스냅샷 undo 하나로 복원");
+        assert!(s.redo());
+        assert_eq!(texts_of(s.doc()), vec!["가", "나다"]);
     }
 }

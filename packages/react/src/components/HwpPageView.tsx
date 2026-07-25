@@ -7,7 +7,8 @@ import { sanitizeSvg } from "../sanitize";
  *  `meta` folds in the additive/toggle modifier (⌘ on macOS, Ctrl elsewhere) so the selection model can
  *  branch replace vs. toggle/union without re-reading the event; `client` carries the raw screen point
  *  so the workspace can measure the 4px drag threshold in true CSS px (independent of zoom). */
-export type PageClick = { page: number; x: number; y: number; meta: boolean; client: { x: number; y: number } };
+/** `shift` 는 글자 캐럿의 **Shift+클릭 범위 선택**용(선택 모델은 `meta` 만 본다 — 충돌 없음). */
+export type PageClick = { page: number; x: number; y: number; meta: boolean; shift: boolean; client: { x: number; y: number } };
 
 /** One rendered page: sanitized SVG + its parsed viewBox dimensions (own-render px). */
 type PageState = { svg: string; vbW: number; vbH: number };
@@ -336,7 +337,7 @@ export function HwpPageView(props: HwpPageViewProps) {
       const vb = st && st.vbW > 0 ? { width: st.vbW, height: st.vbH } : { width: rect.width, height: rect.height };
       const pt = screenToPage(ev.clientX, ev.clientY, rect, vb);
       if (!pt) return null;
-      return { page, x: pt.x, y: pt.y, meta: ev.metaKey || ev.ctrlKey, client: { x: ev.clientX, y: ev.clientY } };
+      return { page, x: pt.x, y: pt.y, meta: ev.metaKey || ev.ctrlKey, shift: ev.shiftKey, client: { x: ev.clientX, y: ev.clientY } };
     },
     [],
   );

@@ -26,11 +26,12 @@
 
 import type { EngineAdapter } from "./adapter";
 import { clampOffset } from "./caret";
-import { inheritStyleAt, runsText, spliceRuns } from "./cellCaret";
+import { type RangeRect, rectsFromCharBoxes, selRange } from "./caretRange";
+import { inheritStyleAt, rangeHasStyle, runsText, spliceRuns, styleRunRange, type ToggleKey } from "./cellCaret";
 import { Emitter } from "./events";
 import type { RunStyle } from "./runs";
 import type { DocSession } from "./session";
-import type { BlockHit, CellCaretRect, RunSpec } from "./types";
+import type { BlockHit, CellCaretRect, Intent, RunSpec } from "./types";
 
 /** hwp-typeset `BASELINE_RATIO` — 줄 높이에서 베이스라인이 차지하는 비율(한컴 850/1000 규약). */
 const BASELINE_RATIO = 0.85;
@@ -236,6 +237,18 @@ export function alignCharBoxes(text: string, glyphs: PageGlyph[]): CharBox[] | n
   return boxes;
 }
 
+/** 글리프가 **하나도 없는** 문단(빈 문단 / 공백만 있는 문단 / Enter 로 갓 생긴 문단)의 문자 박스.
+ *  근거는 밴드뿐이다: 줄 왼쪽 = `band.x`, 줄 높이 = `band.h`(그 문단이 차지한 한 줄). 실제 글자가 하나라도
+ *  생기면 다음 `resolve`에서 글리프 정렬(정확한 경로)로 자동 승격된다 — 이 박스는 "빈 줄에 캐럿을 세우는"
+ *  최소 근사일 뿐이고, 그래서 폭(adv)은 0이다. */
+export function emptyParaBoxes(band: { x: number; y: number; h: number }, count = 1): CharBox[] {
+  if (!(band.h > 0)) return [];
+  const box: CharBox = { x: band.x, adv: 0, baseline: band.y + band.h * BASELINE_RATIO, lineHeight: band.h, line: 0 };
+  // 모델 글자 수만큼(공백만 있는 문단) 같은 자리를 복제한다 — 오프셋 클램프와 커밋 좌표가 모델과 어긋나지
+  // 않게. 어차피 폭이 0이라 캐럿은 한 자리에 머문다(보이지 않는 공백 위에서 정직한 동작).
+  return Array.from({ length: Math.max(1, count) }, () => ({ ...box }));
+}
+
 /** 오프셋 → 캐럿 사각형. `offset == 길이`(문단 끝)는 마지막 글자의 오른쪽 끝. 셀 캐럿과 동일 규약:
  *  past-end는 **클램프**되어 사각형을 돌려준다(null 아님). 박스가 없으면 null. */
 export function bodyCaretRectAt(boxes: CharBox[], offset: number, page: number): CellCaretRect | null {
@@ -300,8 +313,10 @@ export function bodyLineMove(boxes: CharBox[], offset: number, delta: number): n
 export interface BodyCaretAnchor {
   section: number;
   block: number;
-  /** 문단 텍스트 안의 char 오프셋, `0..=paraLen`. */
+  /** 문단 텍스트 안의 char 오프셋, `0..=paraLen`. 선택의 **이동단**(focus). */
   offset: number;
+  /** 선택 범위의 **고정단**(anchor) — 셀 캐럿과 같은 규약(caretRange.ts). `offset` 과 같으면 범위 없음. */
+  selAnchor: number;
   /** 문단의 char 수 — 캐럿 이동의 클램프 한계. */
   paraLen: number;
 }
@@ -310,6 +325,8 @@ export interface BodyCaretAnchor {
 export interface BodyCaretState {
   anchor: BodyCaretAnchor;
   rect: CellCaretRect;
+  /** 선택 범위의 줄별 하이라이트(범위가 없으면 빈 배열). */
+  rects: RangeRect[];
 }
 
 /// BodyCaretController — 본문 문단 캐럿의 헤드리스 절반. 셀 캐럿(053)과 같은 계약:
@@ -360,11 +377,16 @@ export class BodyCaretController {
     return p;
   }
 
-  /** 문단 밴드 + 모델 텍스트 + 페이지 SVG를 읽어 문자 박스를 만든다. 정렬 실패 = null(018). */
+  /** 문단 밴드 + 모델 텍스트 + 페이지 SVG를 읽어 문자 박스를 만든다. 정렬 실패 = null(018).
+   *  **글리프가 없는 문단**(빈 문단 / Enter 로 갓 생긴 문단)은 밴드 하나로 빈 줄 박스를 만든다 — 그래야
+   *  Enter 뒤에도 캐럿이 남는다(글자가 생기는 순간 글리프 정렬로 승격). */
   private async resolve(page: number, band: BlockHit): Promise<{ boxes: CharBox[]; runs: RunSpec[]; text: string } | null> {
     const runs = await this.adapter.blockRuns!(band.section, band.block);
     const text = runsText(runs);
-    if (text.length === 0) return null; // 빈 문단은 글리프가 없어 기하를 만들 수 없다(v1 한계)
+    if (text.trim().length === 0) {
+      const boxes = emptyParaBoxes(band, text.length);
+      return boxes.length ? { boxes, runs, text } : null;
+    }
     const svg = await this.adapter.pageSvg(page);
     const boxes = alignCharBoxes(text, glyphsInBand(parsePageGlyphs(svg), band));
     if (!boxes) return null;
@@ -380,8 +402,10 @@ export class BodyCaretController {
     return hit;
   }
 
-  /** 페이지 로컬 px 클릭 → 본문 캐럿. 본문 텍스트가 아니면 `null`(+ 캐럿 해제). */
-  clickAt(page: number, x: number, y: number): Promise<BodyCaretState | null> {
+  /** 페이지 로컬 px 클릭 → 본문 캐럿. 본문 텍스트가 아니면 `null`(+ 캐럿 해제).
+   *  `extend`(Shift+클릭)는 **같은 문단** 안이면 고정단을 유지해 범위를 만든다(다른 문단이면 새 캐럿 —
+   *  문단을 넘는 범위는 커밋 대상이 하나가 아니라 v1 밖). */
+  clickAt(page: number, x: number, y: number, extend = false): Promise<BodyCaretState | null> {
     if (!this.supported) return Promise.resolve(null);
     return this.enqueue(async () => {
       const band = this.bandFor((await this.adapter.hitTest(page, x, y)) ?? null, y);
@@ -394,16 +418,48 @@ export class BodyCaretController {
         this.clear();
         return null;
       }
+      const prev = extend ? this.state?.anchor : undefined;
+      const same = prev && prev.section === band.section && prev.block === band.block;
       const offset = bodyOffsetAtPoint(geo.boxes, x, y);
       this.boxes = geo.boxes;
       this.page = page;
-      this.emit({ section: band.section, block: band.block, offset, paraLen: geo.text.length });
+      this.emit({
+        section: band.section,
+        block: band.block,
+        offset,
+        selAnchor: same ? clampOffset(prev!.selAnchor, geo.text.length) : offset,
+        paraLen: geo.text.length,
+      });
       return this.state;
     });
   }
 
-  /** 좌우 방향키: 문단 안에서 `delta`만큼. 기하는 캐시된 박스로 즉답(엔진 왕복 없음). */
+  /** 좌우 방향키: 문단 안에서 `delta`만큼. 기하는 캐시된 박스로 즉답(엔진 왕복 없음).
+   *  범위가 살아 있으면 한 칸 움직이는 대신 **가까운 끝으로 접힌다**(워드프로세서 관례). */
   move(delta: number): Promise<BodyCaretState | null> {
+    return this.enqueue(async () => {
+      const a = this.state?.anchor;
+      if (!a || !this.boxes) return null;
+      const { start, end } = selRange(a.selAnchor, a.offset);
+      const offset = end > start && delta !== 0 ? (delta < 0 ? start : end) : clampOffset(a.offset + delta, a.paraLen);
+      this.emit({ ...a, offset, selAnchor: offset });
+      return this.state;
+    });
+  }
+
+  /** 위/아래 방향키: 같은 x를 유지한 채 이웃 줄로(한 줄 문단이면 제자리). 범위는 접힌다. */
+  moveLine(delta: number): Promise<BodyCaretState | null> {
+    return this.enqueue(async () => {
+      const a = this.state?.anchor;
+      if (!a || !this.boxes) return null;
+      const offset = bodyLineMove(this.boxes, a.offset, delta);
+      this.emit({ ...a, offset, selAnchor: offset });
+      return this.state;
+    });
+  }
+
+  /** Shift+←/→ — 고정단은 두고 이동단만 옮긴다(범위 확장/축소). */
+  extend(delta: number): Promise<BodyCaretState | null> {
     return this.enqueue(async () => {
       const a = this.state?.anchor;
       if (!a || !this.boxes) return null;
@@ -412,8 +468,8 @@ export class BodyCaretController {
     });
   }
 
-  /** 위/아래 방향키: 같은 x를 유지한 채 이웃 줄로(한 줄 문단이면 제자리). */
-  moveLine(delta: number): Promise<BodyCaretState | null> {
+  /** Shift+↑/↓ — 줄 단위 범위 확장(같은 x 유지). */
+  extendLine(delta: number): Promise<BodyCaretState | null> {
     return this.enqueue(async () => {
       const a = this.state?.anchor;
       if (!a || !this.boxes) return null;
@@ -422,14 +478,72 @@ export class BodyCaretController {
     });
   }
 
-  /** 캐럿에 글자 삽입 — `SetParagraphRuns` 하나 = undo 하나(키 입력 커밋 레인). */
+  /** ⌘A — 이 문단 전체 선택(캐럿의 편집 단위가 문단 하나라 문서 전체가 아니다). */
+  selectAll(): Promise<BodyCaretState | null> {
+    return this.enqueue(async () => {
+      const a = this.state?.anchor;
+      if (!a || !this.boxes) return null;
+      this.emit({ ...a, selAnchor: 0, offset: a.paraLen });
+      return this.state;
+    });
+  }
+
+  /** 캐럿에 글자 삽입 — `SetParagraphRuns` 하나 = undo 하나(키 입력 커밋 레인).
+   *  범위가 있으면 그 범위를 **대체**한다. */
   insertText(text: string): Promise<boolean> {
     return this.enqueue(() => this.splice(text, 0));
   }
 
-  /** 백스페이스: 캐럿 **앞** 한 글자 삭제. 문단 맨 앞이면 우아한 no-op. */
+  /** 백스페이스: 범위가 있으면 범위 삭제, 없으면 캐럿 **앞** 한 글자 삭제.
+   *  문단 맨 앞이면 **앞 문단과 병합**(`MergeParagraph`) — 앞이 표/구조 문단이면 엔진이 거절하고 no-op. */
   deleteBack(): Promise<boolean> {
-    return this.enqueue(() => this.splice("", 1));
+    return this.enqueue(async () => {
+      const a = this.state?.anchor;
+      if (a && a.selAnchor === a.offset && a.offset === 0) return this.mergeBack();
+      return this.splice("", 1);
+    });
+  }
+
+  /** Enter — 캐럿 자리에서 문단을 둘로 나눈다(`SplitParagraph` 하나 = undo 하나). 범위가 있으면 먼저
+   *  그 범위를 지우고 나눈다(워드프로세서 관례)… 는 두 번의 커밋이 되므로 v1은 **범위를 지운 뒤 나누는
+   *  것을 한 배치**로 보낸다(undo 하나). 커밋 뒤 캐럿은 새 문단의 맨 앞으로 간다. */
+  splitParagraph(): Promise<boolean> {
+    return this.enqueue(async () => {
+      const a = this.state?.anchor;
+      if (!a || !this.supported) return false;
+      const runs = await this.adapter.blockRuns!(a.section, a.block);
+      const text = runsText(runs);
+      const { start, end } = selRange(a.selAnchor, a.offset);
+      const at = clampOffset(end > start ? start : a.offset, text.length);
+      const batch: Intent[] = [];
+      if (end > start) {
+        // 범위를 먼저 지운다 — 같은 배치라 undo 하나로 둘 다 되돌아간다.
+        batch.push({ intent: "SetParagraphRuns", section: a.section, block: a.block, runs: spliceRuns(runs, end, end - start, "") });
+      }
+      batch.push({ intent: "SplitParagraph", section: a.section, block: a.block, at });
+      await this.session.applyBatch(batch);
+      // 새 문단은 block + 1, 캐럿은 그 맨 앞. 밴드를 다시 찾아 기하를 잡는다(실패하면 캐럿만 사라진다).
+      await this.reanchor(a.section, a.block + 1, 0);
+      return true;
+    });
+  }
+
+  /** ⌘B/⌘I 등 — 선택 범위에만 굵게/기울임/밑줄/취소선 토글. 같은 `SetParagraphRuns` 레인(undo 하나). */
+  toggleStyle(key: ToggleKey): Promise<boolean> {
+    return this.enqueue(async () => {
+      const a = this.state?.anchor;
+      if (!a || !this.supported) return false;
+      const { start, end } = selRange(a.selAnchor, a.offset);
+      if (end <= start) return false;
+      const runs = await this.adapter.blockRuns!(a.section, a.block);
+      const on = !rangeHasStyle(runs, start, end, key);
+      await this.session.applyBatch([
+        { intent: "SetParagraphRuns", section: a.section, block: a.block, runs: styleRunRange(runs, start, end, key, on) },
+      ]);
+      // 서식은 글자 폭을 바꾼다 → 기하를 다시 잡되 **선택은 유지**한다(연속 ⌘B/⌘I 가 가능하게).
+      await this.reanchor(a.section, a.block, a.offset, a.selAnchor);
+      return true;
+    });
   }
 
   /** 캐럿 자리에서 입력/조합될 텍스트가 물려받을 런 스타일(059 IME 미리보기 소스). 읽기 전용. */
@@ -446,8 +560,52 @@ export class BodyCaretController {
       this.clear();
       return;
     }
-    this.state = { anchor, rect };
+    const { start, end } = selRange(anchor.selAnchor, anchor.offset);
+    const rects = this.boxes ? rectsFromCharBoxes(this.boxes, start, end, this.page) : [];
+    this.state = { anchor, rect, rects };
     this.changed.emit(this.state);
+  }
+
+  /** 커밋 뒤 공용 재앵커: 문단 밴드를 다시 찾고(페이지가 바뀌었을 수 있다) 기하를 새로 만든 뒤 캐럿을
+   *  `offset`(고정단은 `selAnchor` ?? offset)에 세운다. 못 찾으면 **편집은 서고 캐럿만 사라진다**(018). */
+  private async reanchor(section: number, block: number, offset: number, selAnchor?: number): Promise<void> {
+    const from = this.state?.rect ?? { page: this.page, x: 0, top: 0, height: 1 };
+    const found = await this.reband(section, block, this.page, from);
+    if (!found) {
+      this.clear();
+      return;
+    }
+    const geo = await this.resolve(found.page, found.band);
+    if (!geo) {
+      this.clear();
+      return;
+    }
+    this.boxes = geo.boxes;
+    this.page = found.page;
+    const at = clampOffset(offset, geo.text.length);
+    this.emit({ section, block, offset: at, selAnchor: clampOffset(selAnchor ?? at, geo.text.length), paraLen: geo.text.length });
+  }
+
+  /** 문단 첫머리 Backspace = 앞 문단과 병합(`MergeParagraph`). 앞 블록이 표/그림/구조 문단이면 엔진이
+   *  거절하므로 **조용한 no-op**(false) — 캐럿은 그대로 둔다. 병합 뒤 캐럿은 이어붙은 자리에 선다. */
+  private async mergeBack(): Promise<boolean> {
+    const a = this.state?.anchor;
+    if (!a || !this.supported || a.block === 0) return false;
+    // 앞 문단의 길이를 미리 읽어 둔다 — 병합 후 캐럿이 설 자리(이어붙은 이음매)다. 앞이 문단이 아니면
+    // 여기서 실패하거나 빈 배열이 오고, 어느 쪽이든 아래 커밋이 엔진에서 거절된다.
+    let prevLen = 0;
+    try {
+      prevLen = runsText(await this.adapter.blockRuns!(a.section, a.block - 1)).length;
+    } catch {
+      return false;
+    }
+    try {
+      await this.session.applyBatch([{ intent: "MergeParagraph", section: a.section, block: a.block }]);
+    } catch {
+      return false; // 엔진의 정직한 거절(표/구조 문단/표 앵커) — 사용자 콘텐츠는 그대로다
+    }
+    await this.reanchor(a.section, a.block - 1, prevLen);
+    return true;
   }
 
   /** 편집 후 문단 밴드를 다시 찾는다: 커밋으로 문단이 밀려 페이지를 옮겼을 수 있다(현재/다음/이전 순).
@@ -468,32 +626,23 @@ export class BodyCaretController {
     return null;
   }
 
-  /** 읽기 → splice → `SetParagraphRuns` 커밋 → 재앵커의 공용 레인(insertText/deleteBack). */
+  /** 읽기 → splice → `SetParagraphRuns` 커밋 → 재앵커의 공용 레인(insertText/deleteBack).
+   *  범위가 살아 있으면 `del` 대신 **그 범위**를 지운다(타이핑 = 대체, Backspace = 범위 삭제). */
   private async splice(insert: string, del: number): Promise<boolean> {
     const a = this.state?.anchor;
     if (!a || !this.supported) return false;
     const runs = await this.adapter.blockRuns!(a.section, a.block);
     const text = runsText(runs);
-    const at = clampOffset(a.offset, text.length);
-    if (del > 0 && at === 0) return false; // 문단 맨 앞 백스페이스 — 문단 병합은 v1 밖(우아한 no-op)
-    const nextRuns = spliceRuns(runs, at, del, insert);
+    const { start, end } = selRange(a.selAnchor, a.offset);
+    const ranged = end > start;
+    const at = clampOffset(ranged ? end : a.offset, text.length);
+    const delChars = ranged ? end - start : del;
+    if (delChars > 0 && at === 0) return false; // 지울 게 앞에 없다(문단 병합은 mergeBack 이 맡는다)
+    if (delChars === 0 && insert.length === 0) return false;
+    const nextRuns = spliceRuns(runs, at, delChars, insert);
     await this.session.applyBatch([{ intent: "SetParagraphRuns", section: a.section, block: a.block, runs: nextRuns }]);
     // 편집은 이미 섰다. 이제 기하만 다시 잡는다 — 실패하면 캐럿만 사라진다(018).
-    const nextOffset = Math.max(0, at - del) + insert.length;
-    const nextText = text.slice(0, Math.max(0, at - del)) + insert + text.slice(at);
-    const found = await this.reband(a.section, a.block, this.page, this.state!.rect);
-    if (!found) {
-      this.clear();
-      return true;
-    }
-    const geo = await this.resolve(found.page, found.band);
-    if (!geo) {
-      this.clear();
-      return true;
-    }
-    this.boxes = geo.boxes;
-    this.page = found.page;
-    this.emit({ section: a.section, block: a.block, offset: clampOffset(nextOffset, nextText.length), paraLen: geo.text.length });
+    await this.reanchor(a.section, a.block, Math.max(0, at - delChars) + insert.length);
     return true;
   }
 }

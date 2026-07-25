@@ -7,7 +7,8 @@
 // 불변식: 두 캐럿은 **동시에 살 수 없다**. 한쪽이 잡히면 다른 쪽은 즉시 해제된다(한 문서에 캐럿 하나).
 
 import type { BodyCaretController } from "./bodyCaret";
-import type { CellCaretController } from "./cellCaret";
+import type { RangeRect } from "./caretRange";
+import type { CellCaretController, ToggleKey } from "./cellCaret";
 import { Emitter } from "./events";
 import type { RunStyle } from "./runs";
 import type { CellCaretRect } from "./types";
@@ -21,6 +22,10 @@ export interface ActiveCaret {
   rect: CellCaretRect;
   offset: number;
   paraLen: number;
+  /** 선택 범위의 고정단(anchor) — `offset`(focus)과 같으면 범위 없음. 두 캐럿 공통 규약. */
+  selAnchor: number;
+  /** 선택 범위의 줄별 하이라이트(범위가 없으면 빈 배열) — 오버레이가 ref 로 그대로 그린다. */
+  rects: RangeRect[];
 }
 
 /// CaretRouter — 두 컨트롤러의 상태를 합쳐 하나의 `onChange` 스트림으로 내보내고, 명령(이동/입력/삭제)을
@@ -35,10 +40,30 @@ export class CaretRouter {
     private body: BodyCaretController,
   ) {
     this.cell.onChange((s) =>
-      this.absorb("cell", s && { kind: "cell" as const, rect: s.rect, offset: s.anchor.offset, paraLen: s.anchor.paraLen }),
+      this.absorb(
+        "cell",
+        s && {
+          kind: "cell" as const,
+          rect: s.rect,
+          offset: s.anchor.offset,
+          paraLen: s.anchor.paraLen,
+          selAnchor: s.anchor.selAnchor,
+          rects: s.rects,
+        },
+      ),
     );
     this.body.onChange((s) =>
-      this.absorb("body", s && { kind: "body" as const, rect: s.rect, offset: s.anchor.offset, paraLen: s.anchor.paraLen }),
+      this.absorb(
+        "body",
+        s && {
+          kind: "body" as const,
+          rect: s.rect,
+          offset: s.anchor.offset,
+          paraLen: s.anchor.paraLen,
+          selAnchor: s.anchor.selAnchor,
+          rects: s.rects,
+        },
+      ),
     );
   }
 
@@ -61,11 +86,12 @@ export class CaretRouter {
     this.body.clear();
   }
 
-  /** 클릭 해소 순서: **셀 먼저**(표 안이 우선 — 기존 053 동작 무회귀), 셀이 아니면 본문 문단. */
-  async clickAt(page: number, x: number, y: number): Promise<ActiveCaret | null> {
-    const inCell = await this.cell.clickAt(page, x, y);
+  /** 클릭 해소 순서: **셀 먼저**(표 안이 우선 — 기존 053 동작 무회귀), 셀이 아니면 본문 문단.
+   *  `extend`(Shift+클릭)는 같은 문단/셀 안에서만 범위가 되고, 그 밖이면 새 캐럿이다. */
+  async clickAt(page: number, x: number, y: number, extend = false): Promise<ActiveCaret | null> {
+    const inCell = await this.cell.clickAt(page, x, y, extend);
     if (inCell) return this.state;
-    const inBody = await this.body.clickAt(page, x, y);
+    const inBody = await this.body.clickAt(page, x, y, extend);
     return inBody ? this.state : null;
   }
 
@@ -73,6 +99,41 @@ export class CaretRouter {
   async move(delta: number): Promise<void> {
     if (this.active === "cell") await this.cell.move(delta);
     else if (this.active === "body") await this.body.move(delta);
+  }
+
+  /** Shift+←/→ — 두 캐럿 공통(같은 `{anchor, focus}` 규약). */
+  async extend(delta: number): Promise<void> {
+    if (this.active === "cell") await this.cell.extend(delta);
+    else if (this.active === "body") await this.body.extend(delta);
+  }
+
+  /** Shift+↑/↓ — 줄 단위 범위 확장. **본문 캐럿 전용**(셀은 줄 개념 대신 셀 이동으로 강등되는 기존 동작).
+   *  처리했으면 true. */
+  async extendLine(delta: number): Promise<boolean> {
+    if (this.active !== "body") return false;
+    await this.body.extendLine(delta);
+    return true;
+  }
+
+  /** ⌘A — 캐럿이 든 문단(셀 문단) 전체 선택. 캐럿이 없으면 false(호출자가 브라우저 기본동작에 양보). */
+  async selectAll(): Promise<boolean> {
+    if (this.active === "cell") return !!(await this.cell.selectAll());
+    if (this.active === "body") return !!(await this.body.selectAll());
+    return false;
+  }
+
+  /** ⌘B/⌘I — 선택 **범위에만** 서식 토글(범위 없으면 false). 셀=SetTableCellRuns / 본문=SetParagraphRuns. */
+  async toggleStyle(key: ToggleKey): Promise<boolean> {
+    if (this.active === "cell") return this.cell.toggleStyle(key);
+    if (this.active === "body") return this.body.toggleStyle(key);
+    return false;
+  }
+
+  /** Enter — **본문 캐럿 전용** 문단 분리(`SplitParagraph`). 셀의 Enter 는 기존대로 "\n" 삽입이라
+   *  호출자가 `insertText("\n")` 을 쓴다(다문단 셀 처리가 이미 있다). 처리했으면 true. */
+  async splitParagraph(): Promise<boolean> {
+    if (this.active !== "body") return false;
+    return this.body.splitParagraph();
   }
 
   /** 위/아래 줄 이동 — **본문 캐럿 전용**(셀은 036 셀 이동으로 강등되는 기존 동작을 지킨다).

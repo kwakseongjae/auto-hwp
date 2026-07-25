@@ -216,18 +216,26 @@ describe("BodyCaretController — 클릭/이동/커밋", () => {
     expect(core.session.undoDepth()).toBe(1);
   });
 
-  it("백스페이스는 캐럿 앞 글자를 지우고, 문단 맨 앞이면 우아한 no-op(인텐트 0)", async () => {
+  it("백스페이스는 캐럿 앞 글자를 지우고, 문단 맨 앞이면 앞 문단과 병합한다(MergeParagraph)", async () => {
     const adapter = bodyAdapter();
     const core = await coreWith(adapter);
     await core.bodyCaret.clickAt(0, 112, 45);
     expect(await core.bodyCaret.deleteBack()).toBe(true);
     expect((adapter.applied[0] as Intent & { runs: RunSpec[] }).runs.map((r) => r.text).join("")).toBe("나 다");
 
+    // 문단 맨 앞(offset 0) → 글자 삭제가 아니라 앞 문단 병합. 한 번의 인텐트 = undo 하나.
     const adapter2 = bodyAdapter();
     const core2 = await coreWith(adapter2);
     await core2.bodyCaret.clickAt(0, 100.1, 45); // offset 0
-    expect(await core2.bodyCaret.deleteBack()).toBe(false);
-    expect(adapter2.applied).toHaveLength(0);
+    expect(await core2.bodyCaret.deleteBack()).toBe(true);
+    expect(adapter2.applied).toEqual([{ intent: "MergeParagraph", section: 0, block: 3 }]);
+
+    // 섹션의 첫 블록이면 병합할 앞 문단이 없다 → 조용한 no-op(인텐트 0).
+    const adapter3 = bodyAdapter({ hit: () => ({ ...BAND, block: 0 }), blocks: [{ ...BAND, block: 0 }] });
+    const core3 = await coreWith(adapter3);
+    await core3.bodyCaret.clickAt(0, 100.1, 45);
+    expect(await core3.bodyCaret.deleteBack()).toBe(false);
+    expect(adapter3.applied).toHaveLength(0);
   });
 
   it("커밋 후 문단이 사라지면(밴드 미발견) 편집은 서고 캐럿만 사라진다(018)", async () => {
@@ -247,6 +255,124 @@ describe("BodyCaretController — 클릭/이동/커밋", () => {
     await core.bodyCaret.clickAt(0, 112, 45);
     expect(await core.bodyCaret.styleAtCaret()).toEqual({ bold: true });
     expect(adapter.applied).toHaveLength(0);
+  });
+
+  // ── 범위 선택 (Shift+방향키 / Shift+클릭 / ⌘A / 범위 위 타이핑·삭제·서식) ──────────────────────
+
+  it("Shift+←/→는 고정단을 두고 이동단만 옮겨 범위를 만들고, 하이라이트를 낸다", async () => {
+    const adapter = bodyAdapter();
+    const core = await coreWith(adapter);
+    await core.bodyCaret.clickAt(0, 112, 45); // offset 1 (가|나)
+    await core.bodyCaret.extend(2);
+    const st = core.bodyCaret.get()!;
+    expect(st.anchor).toMatchObject({ selAnchor: 1, offset: 3 });
+    expect(st.rect.x).toBe(130); // 캐럿 막대는 이동단(offset 3)에 선다
+    expect(st.rects).toHaveLength(1);
+    expect(st.rects[0]).toMatchObject({ page: 0, x: 113 }); // '나'의 왼쪽부터
+    expect(st.rects[0].width).toBeCloseTo(17, 6); // '나'+공백 = 130 − 113
+    await core.bodyCaret.extend(-2); // 되돌리면 범위가 접힌다
+    expect(core.bodyCaret.get()!.rects).toEqual([]);
+    expect(adapter.applied).toHaveLength(0); // 선택은 읽기 전용
+  });
+
+  it("범위가 살아 있을 때 방향키(무 shift)는 한 칸 이동이 아니라 가까운 끝으로 접힌다", async () => {
+    const core = await coreWith(bodyAdapter());
+    await core.bodyCaret.clickAt(0, 112, 45);
+    await core.bodyCaret.extend(2); // [1, 3)
+    await core.bodyCaret.move(-1);
+    expect(core.bodyCaret.get()!.anchor).toMatchObject({ offset: 1, selAnchor: 1 });
+    await core.bodyCaret.extend(2);
+    await core.bodyCaret.move(1);
+    expect(core.bodyCaret.get()!.anchor).toMatchObject({ offset: 3, selAnchor: 3 });
+  });
+
+  it("Shift+클릭은 같은 문단이면 범위를 잇고, 다른 문단이면 새 캐럿이다", async () => {
+    const other: BlockHit = { ...BAND, block: 9, y: 100, h: 20 };
+    const adapter = bodyAdapter({ hit: (_p, _x, y) => (y < 80 ? BAND : other) });
+    const core = await coreWith(adapter);
+    await core.bodyCaret.clickAt(0, 100.1, 45); // offset 0
+    await core.bodyCaret.clickAt(0, 500, 45, true); // shift+클릭 → 문단 끝
+    expect(core.bodyCaret.get()!.anchor).toMatchObject({ selAnchor: 0, offset: 4 });
+    // 다른 문단으로 shift+클릭 → 범위를 잇지 않는다(커밋 대상이 둘이 될 수 없다)
+    const away = await core.bodyCaret.clickAt(0, 112, 105, true);
+    expect(away).toBeNull(); // 이 목 어댑터에선 두 번째 문단 글리프가 없어 캐럿이 서지 않는다(018)
+  });
+
+  it("⌘A는 문단 전체를 선택한다", async () => {
+    const core = await coreWith(bodyAdapter());
+    await core.bodyCaret.clickAt(0, 112, 45);
+    await core.bodyCaret.selectAll();
+    expect(core.bodyCaret.get()!.anchor).toMatchObject({ selAnchor: 0, offset: 4 });
+    expect(core.bodyCaret.get()!.rects).toHaveLength(1);
+  });
+
+  it("범위 위 타이핑은 범위를 대체하고, Backspace는 범위를 지운다(각각 SetParagraphRuns 하나)", async () => {
+    const adapter = bodyAdapter();
+    const core = await coreWith(adapter);
+    await core.bodyCaret.clickAt(0, 100.1, 45); // offset 0
+    await core.bodyCaret.extend(2); // "가나" 선택
+    expect(await core.bodyCaret.insertText("X")).toBe(true);
+    expect(adapter.applied).toHaveLength(1);
+    expect((adapter.applied[0] as Intent & { runs: RunSpec[] }).runs.map((r) => r.text).join("")).toBe("X 다");
+
+    const adapter2 = bodyAdapter();
+    const core2 = await coreWith(adapter2);
+    await core2.bodyCaret.clickAt(0, 100.1, 45);
+    await core2.bodyCaret.extend(2);
+    expect(await core2.bodyCaret.deleteBack()).toBe(true);
+    expect((adapter2.applied[0] as Intent & { runs: RunSpec[] }).runs.map((r) => r.text).join("")).toBe(" 다");
+  });
+
+  it("범위에 ⌘B는 그 구간만 굵게 토글한다(런 보존 — 나머지 서식 그대로)", async () => {
+    const adapter = bodyAdapter({ runs: () => [{ text: "가나 다" }] });
+    const core = await coreWith(adapter);
+    await core.bodyCaret.clickAt(0, 100.1, 45);
+    await core.bodyCaret.extend(2);
+    expect(await core.bodyCaret.toggleStyle("bold")).toBe(true);
+    expect((adapter.applied[0] as Intent & { runs: RunSpec[] }).runs).toEqual([{ text: "가나", bold: true }, { text: " 다" }]);
+    // 선택은 유지된다(연속 토글이 가능해야 한다)
+    expect(core.bodyCaret.get()!.anchor).toMatchObject({ selAnchor: 0, offset: 2 });
+    // 이미 전부 굵으면 끈다
+    const adapter2 = bodyAdapter({ runs: () => [{ text: "가나", bold: true }, { text: " 다" }] });
+    const core2 = await coreWith(adapter2);
+    await core2.bodyCaret.clickAt(0, 100.1, 45);
+    await core2.bodyCaret.extend(2);
+    await core2.bodyCaret.toggleStyle("bold");
+    expect((adapter2.applied[0] as Intent & { runs: RunSpec[] }).runs).toEqual([{ text: "가나 다" }]);
+  });
+
+  it("범위가 없으면 ⌘B는 조용한 false — 문단 전체를 잘못 굵게 만들지 않는다", async () => {
+    const adapter = bodyAdapter();
+    const core = await coreWith(adapter);
+    await core.bodyCaret.clickAt(0, 112, 45);
+    expect(await core.bodyCaret.toggleStyle("bold")).toBe(false);
+    expect(adapter.applied).toHaveLength(0);
+  });
+
+  // ── Enter (문단 분리) ─────────────────────────────────────────────────────────────────────────
+
+  it("Enter는 캐럿 자리에서 SplitParagraph 하나를 커밋하고 캐럿을 새 문단 맨 앞으로 옮긴다", async () => {
+    // 분리 후 두 번째 문단은 빈 문단이라도 밴드가 있으면 캐럿이 선다(빈 줄 박스).
+    const adapter = bodyAdapter({ blocks: [BAND, { ...BAND, block: 4, text: "" }], runs: (_s, b) => (b === 4 ? [{ text: "" }] : RUNS.map((r) => ({ ...r }))) });
+    const core = await coreWith(adapter);
+    await core.bodyCaret.clickAt(0, 112, 45); // offset 1
+    expect(await core.bodyCaret.splitParagraph()).toBe(true);
+    expect(adapter.applied).toEqual([{ intent: "SplitParagraph", section: 0, block: 3, at: 1 }]);
+    expect(core.session.undoDepth()).toBe(1);
+    expect(core.bodyCaret.get()!.anchor).toMatchObject({ block: 4, offset: 0, paraLen: 0 });
+  });
+
+  it("범위 위 Enter는 범위 삭제 + 분리를 한 배치(undo 하나)로 보낸다", async () => {
+    const adapter = bodyAdapter({ blocks: [BAND, { ...BAND, block: 4, text: "" }], runs: (_s, b) => (b === 4 ? [{ text: "" }] : RUNS.map((r) => ({ ...r }))) });
+    const core = await coreWith(adapter);
+    await core.bodyCaret.clickAt(0, 100.1, 45);
+    await core.bodyCaret.extend(2); // "가나" 선택
+    await core.bodyCaret.splitParagraph();
+    expect(adapter.applied).toHaveLength(2);
+    expect(adapter.applied[0].intent).toBe("SetParagraphRuns");
+    expect((adapter.applied[0] as Intent & { runs: RunSpec[] }).runs.map((r) => r.text).join("")).toBe(" 다");
+    expect(adapter.applied[1]).toEqual({ intent: "SplitParagraph", section: 0, block: 3, at: 0 });
+    expect(core.session.undoDepth()).toBe(1); // 배치 하나 = undo 하나
   });
 
   it("clear()는 캐럿을 지우고 한 번만 알린다", async () => {

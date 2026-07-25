@@ -236,6 +236,18 @@ fn examples() -> Vec<Example> {
             r#"{"intent":"SetParagraphRuns","section":0,"block":0,"runs":[{"text":"굵게","bold":true}]}"#,
             Synthetic,
         ),
+        e(
+            "SplitParagraph",
+            r#"{"intent":"SplitParagraph","section":0,"block":0,"at":2}"#,
+            Synthetic,
+        ),
+        e(
+            // 합성 문서는 [문단, 표] 라 block 1 에는 붙일 **앞 문단**이 없다(표와의 병합은 거절이 옳다).
+            // 분리→병합 왕복 dispatch 는 `split_then_merge_round_trips_the_paragraph` 가 잠근다.
+            "MergeParagraph",
+            r#"{"intent":"MergeParagraph","section":0,"block":1}"#,
+            DeserializeOnly,
+        ),
         // ---- shading / range format (synthetic targets) ----
         e(
             "SetTableCellShade",
@@ -312,9 +324,52 @@ fn de_err(v: Value) -> String {
 fn every_intent_variant_has_a_documented_example() {
     assert_eq!(
         examples().len(),
-        41,
+        43,
         "one JSON example per Intent variant (see INTENT-SCHEMA.md)"
     );
+}
+
+/// 캐럿의 Enter/Backspace 쌍 — `SplitParagraph` 로 나눈 문단을 `MergeParagraph` 가 **원문 그대로** 되돌린다
+/// (두 op 는 서로의 역연산이라야 한다: 나눈 자리에서 Backspace 를 치면 친 적 없는 상태여야 한다). 표와의
+/// 병합은 정직한 거절이고, 거절은 문서를 건드리지 않는다.
+#[test]
+fn split_then_merge_round_trips_the_paragraph() {
+    use hwp_mcp::Outcome;
+    let mut s = synthetic_session();
+    let text = |s: &mut Session| match apply_intent_json(s, &parse(r#"{"intent":"ExtractText"}"#)) {
+        Ok(Outcome::Text(t)) => t,
+        other => panic!("ExtractText returned ok={}", other.is_ok()),
+    };
+    let before = text(&mut s);
+    assert!(before.contains("본문 문단"));
+    apply_intent_json(
+        &mut s,
+        &parse(r#"{"intent":"SplitParagraph","section":0,"block":0,"at":2}"#),
+    )
+    .expect("split");
+    let split = text(&mut s);
+    assert!(
+        split.contains("본문") && !split.contains("본문 문단"),
+        "문단이 둘로 나뉜다: {split:?}"
+    );
+    apply_intent_json(
+        &mut s,
+        &parse(r#"{"intent":"MergeParagraph","section":0,"block":1}"#),
+    )
+    .expect("merge");
+    assert_eq!(text(&mut s), before, "병합은 분리의 정확한 역연산");
+
+    // 표(block 2)를 앞 문단에 병합하려는 시도는 거절되고, 문서는 그대로다.
+    let rev = s.doc.as_ref().unwrap().revision();
+    assert!(
+        apply_intent_json(
+            &mut s,
+            &parse(r#"{"intent":"MergeParagraph","section":0,"block":1}"#)
+        )
+        .is_err(),
+        "표와의 병합은 거절"
+    );
+    assert_eq!(s.doc.as_ref().unwrap().revision(), rev, "거절은 무변경");
 }
 
 /// Issue 053 — the cell-addressed caret intents are READ-ONLY queries, so the Synthetic mutator lane

@@ -610,6 +610,40 @@ para, offset, para_len, caret:{page,x,top,height}}` (row/col 모델-전역, `par
 
 실패: `rich table needs at least one row`(빈 rows), `insert index {i} out of range ...`(범위 밖).
 
+#### `SplitParagraph` — 캐럿 위치에서 문단을 둘로 나눔(1 undo 단위)
+```json
+{ "intent": "SplitParagraph", "section": 0, "block": 3, "at": 12 }
+```
+| 필드 | 타입 | 단위/값 | 필수 |
+|------|------|---------|------|
+| `section` | integer | 구역 인덱스 | ● |
+| `block` | integer | 나눌 문단의 블록 인덱스 | ● |
+| `at` | integer | 문단 평문 기준 글자 오프셋(0=맨 앞, len=맨 끝) | ● |
+
+**머리는 정체성을 유지한다** — NodeId·원본 바이트 스팬·문단모양이 그대로다(그래야 무편집
+왕복의 바이트 보존이 살아 있다). 꼬리만 `block+1`에 새로 삽입되며 `para_shape`/`style`을
+**상속**하되 `id`/`source`는 비운다(NodeId 복제 금지, 합성 문단 취급 —`InsertParagraphAt`과 동일).
+자른 자리의 런은 양쪽 모두 보존한다(한쪽이 비어도 — 이어 치는 글자가 그 스타일을 물려받게).
+구조 문단(이미지/필드/복합)과 표 앵커 문단은 **거부**한다.
+
+⚠️ `InsertParagraphAt`으로는 분리를 대신할 수 없다 — 그쪽은 `ParaSpec`에서 문단모양을 새로
+합성하므로 정렬·들여쓰기·스타일이 날아간다.
+
+#### `MergeParagraph` — 문단을 앞 문단에 붙임(1 undo 단위, `SplitParagraph`의 역연산)
+```json
+{ "intent": "MergeParagraph", "section": 0, "block": 4 }
+```
+| 필드 | 타입 | 단위/값 | 필수 |
+|------|------|---------|------|
+| `section` | integer | 구역 인덱스 | ● |
+| `block` | integer | **없어질** 문단의 블록 인덱스(내용이 `block-1`로 이동) | ● |
+
+살아남는 쪽(`block-1`)이 서식을 갖는다(한글 규약). `block==0`·비문단·구조 문단·표 앵커는 거부.
+
+> 두 op 는 **AI 화이트리스트에 없다**(`DEFAULT_ALLOWED_INTENTS` 무변경). 캐럿 상대 오프셋은
+> 모델이 알 수 없고, 구조 저작에는 이미 `InsertParagraphAt`/`DeleteBlock`이 있다 —
+> **수동 편집(캐럿) 전용**으로 두는 편이 안전하다.
+
 #### `InsertParagraphAt` — 리치 문단을 블록 인덱스 위치에 삽입(1 undo 단위)
 ```json
 { "intent": "InsertParagraphAt", "section": 0, "index": 0, "runs": [{"text":"새 문단","bold":true}], "para": {"align":"center"} }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CellCaretController, cellGlobalOffset, cellParaOffsetAt, inheritStyleAt, runsText, spliceRuns } from "../cellCaret";
 import { DocSession } from "../session";
-import type { CellCaretRect, CellTextHit, RunSpec } from "../types";
+import type { CellCaretRect, CellTextHit, Intent, RunSpec } from "../types";
 import { MockAdapter } from "./mockAdapter";
 
 // Issue 053 (FG-12 後半) — the cell-addressed glyph caret MODEL: the editor ("\n"-split) offset math,
@@ -144,7 +144,9 @@ describe("CellCaretController (headless click → caret → commit)", () => {
     const seen: (ReturnType<typeof ctl.get>)[] = [];
     ctl.onChange((s) => seen.push(s));
     const s = await ctl.clickAt(0, 5, 5);
-    expect(s?.anchor).toEqual({ section: 0, block: 1, row: 0, col: 0, para: 0, offset: 2, paraLen: 2 });
+    // selAnchor === offset ⇒ 범위 없는 순수 캐럿(범위 선택의 기본 상태).
+    expect(s?.anchor).toEqual({ section: 0, block: 1, row: 0, col: 0, para: 0, offset: 2, selAnchor: 2, paraLen: 2 });
+    expect(s?.rects).toEqual([]);
     expect(s?.rect).toEqual(cellRect);
     expect(seen).toHaveLength(1);
   });
@@ -174,7 +176,8 @@ describe("CellCaretController (headless click → caret → commit)", () => {
     expect(clamped?.anchor.offset).toBe(2); // already at the end — clamped, no drift past paraLen
     const left = await ctl.move(-99);
     expect(left?.anchor.offset).toBe(0);
-    expect(asked).toEqual([2, 2, 0]);
+    // 같은 주소의 오프셋 기하는 메모된다(범위 하이라이트가 오프셋을 훑기 때문) — 두 번째 2는 캐시 히트.
+    expect(asked).toEqual([2, 0]);
     expect(left?.rect.x).toBe(100);
   });
 
@@ -224,7 +227,7 @@ describe("CellCaretController (headless click → caret → commit)", () => {
     });
     await ctl.clickAt(0, 5, 5);
     await ctl.insertText("\n");
-    expect((adapter.applied[0] as { runs: RunSpec[] }).runs).toEqual([
+    expect((adapter.applied[0] as Intent & { runs: RunSpec[] }).runs).toEqual([
       { text: "A", bold: true },
       { text: "\n" },
       { text: "B", bold: true },
@@ -240,7 +243,7 @@ describe("CellCaretController (headless click → caret → commit)", () => {
     });
     await ctl.clickAt(0, 5, 5);
     expect(await ctl.deleteBack()).toBe(true);
-    expect((adapter.applied[0] as { runs: RunSpec[] }).runs).toEqual([{ text: "AB", bold: true }, { text: "cd" }]);
+    expect((adapter.applied[0] as Intent & { runs: RunSpec[] }).runs).toEqual([{ text: "AB", bold: true }, { text: "cd" }]);
     expect(ctl.get()?.anchor).toMatchObject({ para: 0, offset: 2, paraLen: 4 }); // caret at the join
   });
 
@@ -269,6 +272,113 @@ describe("CellCaretController (headless click → caret → commit)", () => {
     expect(ctl.get()).toBeNull(); // the caret honestly went away
   });
 
+  // ── 범위 선택 — 본문 캐럿과 **같은 규약**({anchor, focus}), 기하만 엔진 probe 로 얻는다 ──────────
+
+  /** 폭 10짜리 글자가 3개마다 접히는 셀(엔진 계약: 줄바꿈 경계 오프셋은 다음 줄 시작). */
+  const wrappingCell = (_s: number, _b: number, _r: number, _c: number, _p: number, offset: number): CellCaretRect => ({
+    page: 0,
+    x: 100 + (offset % 3) * 10,
+    top: 200 + Math.floor(offset / 3) * 20,
+    height: 13,
+  });
+
+  it("Shift+←/→는 고정단을 두고 범위를 넓히며, 줄별 하이라이트를 낸다", async () => {
+    const { adapter, ctl } = makeController({
+      cellText: hit({ para: 0, offset: 0, para_len: 5 }),
+      cellCaret: wrappingCell,
+      runs: [{ text: "ABCDE" }],
+    });
+    await ctl.clickAt(0, 5, 5);
+    await ctl.extend(2);
+    expect(ctl.get()!.anchor).toMatchObject({ selAnchor: 0, offset: 2 });
+    expect(ctl.get()!.rects).toEqual([{ page: 0, x: 100, top: 200, width: 20, height: 13 }]);
+    await ctl.extend(2); // 줄을 넘겨 4까지 → 두 줄
+    expect(ctl.get()!.rects).toHaveLength(2);
+    expect(adapter.applied).toHaveLength(0); // 선택은 읽기 전용
+  });
+
+  it("바깥 편집(⌘Z 등)으로 레이아웃이 무효화되면 캐시된 기하를 버리고 다시 물어본다", async () => {
+    const asked: number[] = [];
+    const { session, ctl } = makeController({
+      cellText: hit({ para: 0, offset: 1, para_len: 5 }),
+      cellCaret: (_s, _b, _r, _c, _p, offset) => {
+        asked.push(offset);
+        return { ...cellRect, x: 100 + offset };
+      },
+      runs: [{ text: "ABCDE" }],
+    });
+    await ctl.clickAt(0, 5, 5); // offset 1 — 기하는 히트가 들고 온다(물어보지 않는다)
+    await ctl.move(1); // → 2 (물어봄)
+    await ctl.move(-1); // → 1 (물어봄)
+    const n = asked.length;
+    await ctl.move(1); // → 2 다시 (캐시 히트 — 엔진 왕복 0)
+    expect(asked).toHaveLength(n);
+    // 캐럿을 거치지 않은 바깥 편집(AI 적용/툴바/⌘Z) — 레이아웃 무효화 → 캐시된 기하는 거짓말이 된다.
+    await session.applyBatch([{ intent: "SetParagraphText", section: 0, block: 0, text: "바깥" }]);
+    await ctl.move(-1);
+    expect(asked.length).toBeGreaterThan(n); // 캐시를 버리고 다시 물어봤다
+  });
+
+  it("범위가 있으면 방향키는 가까운 끝으로 접히고, ⌘A는 셀 문단 전체를 잡는다", async () => {
+    const { ctl } = makeController({
+      cellText: hit({ para: 0, offset: 1, para_len: 5 }),
+      cellCaret: wrappingCell,
+      runs: [{ text: "ABCDE" }],
+    });
+    await ctl.clickAt(0, 5, 5);
+    await ctl.extend(2); // [1,3)
+    await ctl.move(-1);
+    expect(ctl.get()!.anchor).toMatchObject({ offset: 1, selAnchor: 1 });
+    await ctl.selectAll();
+    expect(ctl.get()!.anchor).toMatchObject({ selAnchor: 0, offset: 5 });
+  });
+
+  it("범위 위 타이핑은 대체, Backspace는 범위 삭제 — 각각 SetTableCellRuns 하나", async () => {
+    const base = { cellText: hit({ para: 0, offset: 0, para_len: 2 }), cellCaret: cellRect, runs: twoParaRuns() };
+    const typed = makeController(base);
+    await typed.ctl.clickAt(0, 5, 5);
+    await typed.ctl.extend(2); // "AB" 선택
+    expect(await typed.ctl.insertText("X")).toBe(true);
+    expect((typed.adapter.applied[0] as Intent & { runs: RunSpec[] }).runs).toEqual([{ text: "X" }, { text: "\n" }, { text: "cd" }]);
+
+    const erased = makeController(base);
+    await erased.ctl.clickAt(0, 5, 5);
+    await erased.ctl.extend(2);
+    expect(await erased.ctl.deleteBack()).toBe(true);
+    // 첫 문단이 비면 그 앞엔 아무 런도 남지 않는다(구분자 "\n" 이 곧 빈 문단의 경계 — blockRuns 왕복 규약).
+    expect((erased.adapter.applied[0] as Intent & { runs: RunSpec[] }).runs).toEqual([{ text: "\n" }, { text: "cd" }]);
+  });
+
+  it("범위 ⌘B는 셀 텍스트의 그 구간만 굵게 — 두 번째 문단은 건드리지 않는다", async () => {
+    const { adapter, ctl } = makeController({
+      cellText: hit({ para: 1, offset: 0, para_len: 2 }),
+      cellCaret: cellRect,
+      runs: () => [{ text: "AB", bold: true }, { text: "\n" }, { text: "cd" }],
+    });
+    await ctl.clickAt(0, 5, 5); // 두 번째 문단("cd")의 맨 앞
+    await ctl.extend(2);
+    expect(await ctl.toggleStyle("bold")).toBe(true);
+    expect((adapter.applied[0] as Intent & { runs: RunSpec[] }).runs).toEqual([
+      { text: "AB", bold: true },
+      { text: "\n" },
+      { text: "cd", bold: true },
+    ]);
+  });
+
+  it("Shift+클릭은 같은 셀 문단이면 범위를 잇고, 다른 셀이면 새 캐럿", async () => {
+    const { ctl } = makeController({
+      cellText: (_p, x) => (x < 10 ? hit({ para: 0, offset: 0, para_len: 5 }) : hit({ col: 1, para: 0, offset: 3, para_len: 5 })),
+      cellCaret: wrappingCell,
+      runs: [{ text: "ABCDE" }],
+    });
+    await ctl.clickAt(0, 5, 5);
+    await ctl.clickAt(0, 5, 5, true); // 같은 셀 — 고정단 유지
+    expect(ctl.get()!.anchor.selAnchor).toBe(0);
+    await ctl.clickAt(0, 50, 5, true); // 다른 셀 — 새 캐럿(범위 없음)
+    expect(ctl.get()!.anchor).toMatchObject({ col: 1, selAnchor: 3, offset: 3 });
+    expect(ctl.get()!.rects).toEqual([]);
+  });
+
   it("chains fast keystrokes strictly in order (each commit is its own undo unit)", async () => {
     const { adapter, session, ctl } = makeController({
       cellText: hit({ para: 0, offset: 2, para_len: 2 }),
@@ -283,8 +393,8 @@ describe("CellCaretController (headless click → caret → commit)", () => {
     expect(adapter.applied).toHaveLength(2);
     // The mock's blockRuns is a FROZEN read ("AB" both times), so the 2nd commit re-splices the
     // frozen text — order (not content accumulation) is what this pins.
-    expect((adapter.applied[0] as { runs: RunSpec[] }).runs).toEqual([{ text: "AB1", bold: true }]);
-    expect((adapter.applied[1] as { runs: RunSpec[] }).runs).toEqual([{ text: "AB2", bold: true }]);
+    expect((adapter.applied[0] as Intent & { runs: RunSpec[] }).runs).toEqual([{ text: "AB1", bold: true }]);
+    expect((adapter.applied[1] as Intent & { runs: RunSpec[] }).runs).toEqual([{ text: "AB2", bold: true }]);
     expect(session.canUndo()).toBe(true);
   });
 });

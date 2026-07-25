@@ -68,13 +68,35 @@ export { clampOffset, hitResultToTextAnchor, isCaretGap } from "./caret";
 
 // Cell-addressed glyph caret (issue 053, FG-12 後半) — the headless controller (click → caret →
 // per-keystroke SetTableCellRuns commits) + its pure joined-offset/run-splice helpers.
-export { CellCaretController, cellGlobalOffset, cellParaOffsetAt, inheritStyleAt, runsText, spliceRuns } from "./cellCaret";
-export type { CellCaretAnchor, CellCaretState } from "./cellCaret";
+export {
+  CellCaretController,
+  cellGlobalOffset,
+  cellParaOffsetAt,
+  inheritStyleAt,
+  rangeHasStyle,
+  runsText,
+  spliceRuns,
+  styleRunRange,
+} from "./cellCaret";
+export type { CellCaretAnchor, CellCaretState, ToggleKey } from "./cellCaret";
 
 // 본문 문단 캐럿 — 셀 밖 문단의 클릭/이동/타이핑(SetParagraphRuns 커밋) + 페이지 SVG 글리프 ↔ 모델 문자
 // 정렬의 순수 헬퍼(정렬 실패 = null, 018).
-export { alignCharBoxes, bodyCaretRectAt, bodyLineMove, bodyOffsetAtPoint, BodyCaretController, glyphsInBand, parsePageGlyphs } from "./bodyCaret";
+export {
+  alignCharBoxes,
+  bodyCaretRectAt,
+  bodyLineMove,
+  bodyOffsetAtPoint,
+  BodyCaretController,
+  emptyParaBoxes,
+  glyphsInBand,
+  parsePageGlyphs,
+} from "./bodyCaret";
 export type { BodyCaretAnchor, BodyCaretState, CharBox, PageGlyph } from "./bodyCaret";
+
+// 캐럿 **범위 선택**(셀∪본문 공통 규약) — {anchor, focus} 정규화 + 줄별 하이라이트 사각형 산출.
+export { rectsByProbe, rectsFromCharBoxes, selCollapsed, selRange } from "./caretRange";
+export type { RangeRect, RectProbe, SelRange } from "./caretRange";
 
 // 캐럿 라우터 — 셀/본문 캐럿을 하나의 표면으로(오버레이·타이핑이 구독하는 단일 store).
 export { CaretRouter } from "./caretRouter";
