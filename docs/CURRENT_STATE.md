@@ -5,6 +5,11 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
+- 갱신: 2026-07-25(2) · Claude — **정적 데모 AI 라이브 배포 완료**: 워커(autohwp-demo-ai.gkffhdnls13.workers.dev)
+  배포+시크릿+레포변수+Pages 재배포까지. ⚠ 모델은 **GLM 5.2로 확정**(Gemini Flash-Lite는 Cloudflare Worker
+  출구 리전을 구글이 지역 차단 "not available in your region" — 실배포에서 발견). GLM 요청당 ~$0.0038이라
+  DAILY_CAP 2000→**1200**(≈$4.6<$5)으로 하향. 워커 실호출 검증(Replace intent 반환). 사용자 액션 잔여:
+  OpenRouter 키에 월 지출한도 설정 권장(현재 limit null) + 노출 키 회전(선택).
 - 갱신: 2026-07-25 · Claude — **정적 데모 AI(OpenRouter) 붙임**: 정적 사이트는 키를 못 담으므로 키를 쥔
   Cloudflare Worker 프록시(`services/demo-ai-proxy`) 경유. 모델 **Gemini 3.5 Flash-Lite**(입력 위주 작업
   최저가·요청당 ~$0.002 → $5/일에 8배 여유) 서버 고정, IP별+전체 일일 한도로 비용 상한 강제, CORS 잠금,

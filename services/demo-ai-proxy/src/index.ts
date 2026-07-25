@@ -8,8 +8,9 @@
 // @auto-hwp/ai-protocol로 조립하므로(서버가 프롬프트를 통제) 출력은 우리 JSON Intent 형식으로 제한되고,
 // 프롬프트 계약이 앱과 드리프트하지 않는다(wrangler가 ai-protocol을 번들).
 //
-// 비용 상한: Gemini 3.5 Flash-Lite($0.30/$2.50 per M) + 입력 위주 작업 → 요청당 ~$0.002. DAILY_CAP를
-// 예산에서 역산해 설정한다(예: $5 / $0.002 ≈ 2500 → 여유 두고 2000). PER_IP_CAP로 한 명이 독식 못 하게.
+// 비용 상한: GLM 5.2($0.76/$2.42 per M) + 입력 위주 작업 → 요청당 ~$0.0038. DAILY_CAP를 예산에서
+// 역산해 설정한다(예: $5 / $0.0038 ≈ 1315 → 여유 두고 1200). PER_IP_CAP로 한 명이 독식 못 하게.
+// (Gemini Flash-Lite가 더 싸지만 Cloudflare Worker 출구 리전을 구글이 지역 차단 — DEFAULT_MODEL 주석 참조.)
 
 import { buildSystemPrompt, buildUserMessage, validateResponse, type Anchor, type Intent } from "@auto-hwp/ai-protocol";
 
@@ -17,7 +18,7 @@ interface Env {
   OPENROUTER_API_KEY: string; // wrangler secret
   RATELIMIT: KVNamespace; // 일일 카운터
   ALLOWED_ORIGIN: string; // 예: https://kwakseongjae.github.io (여러 개면 콤마)
-  MODEL?: string; // 기본 google/gemini-3.5-flash-lite
+  MODEL?: string; // 기본 z-ai/glm-5.2 (DEFAULT_MODEL)
   DAILY_CAP?: string; // 전체 일일 요청 상한(비용 상한의 실질 강제)
   PER_IP_CAP?: string; // IP별 일일 요청 상한
   MAX_TOKENS?: string; // 출력 상한(Intent JSON은 작다)
@@ -29,7 +30,9 @@ interface EditBody {
   anchors?: unknown;
 }
 
-const DEFAULT_MODEL = "google/gemini-3.5-flash-lite";
+// 기본 모델: GLM 5.2. Gemini Flash-Lite가 더 싸지만 Cloudflare Worker 출구 리전을 구글이 지역
+// 차단("not available in your region")해 GLM으로 전환. 모델은 wrangler.toml MODEL로 오버라이드.
+const DEFAULT_MODEL = "z-ai/glm-5.2";
 
 function corsHeaders(origin: string | null, allowed: string[]): Record<string, string> {
   // 허용 목록에 있으면 그 오리진을 반사, 아니면 첫 허용 오리진(프리플라이트에서 브라우저가 차단).

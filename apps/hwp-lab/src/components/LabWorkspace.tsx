@@ -590,7 +590,7 @@ export default function LabWorkspace() {
             aiNotice={
               IS_DEMO
                 ? DEMO_AI_URL
-                  ? "데모 AI 편집이 켜져 있습니다(Gemini Flash-Lite · 일일 사용 한도 있음). 제안은 적용 전에 카드로 보여 주고, 한 번에 되돌릴 수 있습니다."
+                  ? "데모 AI 편집이 켜져 있습니다(경량 AI 모델 · 일일 사용 한도 있음). 제안은 적용 전에 카드로 보여 주고, 한 번에 되돌릴 수 있습니다."
                   : "정적 데모라 AI 편집은 꺼져 있습니다 — 클릭 선택·수동 편집·HTML/PDF 저장은 전부 동작합니다. AI 바이브 편집은 레포를 클론해 로컬 실행(BYOK)하면 켜집니다."
                 : undefined
             }
