@@ -27,7 +27,7 @@ async function openDocAndSelectCell() {
   // The host AI bridge — a deterministic canned Intent (no LLM, no network). Mirrors the chat's onAiRequest.
   const onAiRequest = async () => [cannedIntent];
   const view = render(
-    <HwpWorkspace adapter={adapter} document={{ bytes: new Uint8Array([1]), name: "t.hwpx" }} onAiRequest={onAiRequest} sidePanel={chatSidePanel({ onAiRequest })} enableEditing sidePanel={chatSidePanel({ onAiRequest, isMock: true })} />,
+    <HwpWorkspace adapter={adapter} document={{ bytes: new Uint8Array([1]), name: "t.hwpx" }} onAiRequest={onAiRequest} enableEditing sidePanel={chatSidePanel({ onAiRequest, isMock: true })} />,
   );
   const container = view.container;
   const sheet = await waitFor(() => {

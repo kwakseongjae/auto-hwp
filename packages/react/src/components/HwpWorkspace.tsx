@@ -7,6 +7,7 @@ import { pageAtReference } from "../outline";
 import { runsUnchanged, applyLiveStyle, readCaretStyle } from "../richedit";
 import { modLabel } from "../platform";
 import { ZOOM_STEP, clampZoom, isEditableTarget, panBy, wheelToZoomFactor, zoomAt } from "../viewport";
+import { gridToTsv, joinSelectionText } from "../clipboard";
 import { useHwpEditor } from "../useHwpEditor";
 
 import { HwpPageView, type PageClick } from "./HwpPageView";
@@ -2477,6 +2478,108 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     if (await core.session.redo()) toast("다시 실행");
   }, [core, toast]);
 
+  // ⌘C — 현재 선택(문단/표/셀)의 **평문**을 클립보드로. 읽기 전용이라 op 도 undo 단위도 없다(붙여넣기는
+  // 대응 op 가 없어 스코프 밖 — 반쪽짜리 ⌘V 를 만들지 않는다).
+  //   · 셀/문단 → 앵커가 이미 들고 있는 `text`(히트 테스트가 채운 그 텍스트) — 엔진 왕복 0회.
+  //   · 표 → `tableGrid` 로 격자를 읽어 TSV(탭=열, 줄바꿈=행). 스프레드시트에 붙여넣으면 표가 표로 산다.
+  //     `tableGrid` 는 OPTIONAL 메서드다(TauriAdapter 엔 없음) — 없거나 실패하면 앵커 `text` 로 강등한다.
+  const selectionPlainText = useCallback(
+    async (sels: Selection[]): Promise<string> => {
+      const parts: string[] = [];
+      for (const s of sels) {
+        const a = s.anchor;
+        if ((a.kind === "table" || a.kind === "range") && adapter.tableGrid) {
+          try {
+            const grid = await adapter.tableGrid(a.section, a.block);
+            // 범위(range) 선택은 표 안의 부분 격자 — 전체 표 선택은 rows/cols 가 없어 표 전체가 된다.
+            if (grid) {
+              parts.push(gridToTsv(grid, a.rows, a.cols));
+              continue;
+            }
+          } catch {
+            /* 격자 읽기 실패(엔진 미지원/트랩)는 복사를 죽이지 않는다 — 아래 텍스트 강등으로 계속 */
+          }
+        }
+        parts.push(a.text ?? "");
+      }
+      return joinSelectionText(parts);
+    },
+    [adapter],
+  );
+
+  const copySelection = useCallback(async () => {
+    const sels = selectionRef.current;
+    if (sels.length === 0) return; // 선택 없음 = no-op
+    let text = "";
+    try {
+      text = await selectionPlainText(sels);
+    } catch (e) {
+      if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`복사 실패: ${e}`);
+      return;
+    }
+    if (!text) return; // 빈 선택(빈 셀 등) — 기존 클립보드를 빈 값으로 덮지 않는다
+    // navigator.clipboard 는 보안 컨텍스트(https/localhost)에서만 존재한다 — 없는 환경은 조용히 실패하지
+    // 말고 이유를 알린다(사용자는 ⌘C 가 먹었는지 아닌지를 알아야 한다).
+    const cb = navigator.clipboard;
+    if (!cb?.writeText) {
+      toast("이 브라우저에서는 복사를 지원하지 않습니다");
+      return;
+    }
+    try {
+      await cb.writeText(text);
+      toast(sels.length > 1 ? `${sels.length}개를 복사했습니다` : "복사했습니다");
+    } catch (e) {
+      toast(`복사 실패: ${e}`); // 권한 거부 등 — 엔진 트랩이 아니므로 복구 레인이 아니다
+    }
+  }, [selectionPlainText, onTrap, toast]);
+
+  // ── 키보드 기본기 (사용자 요청): ⌘Z / ⌘⇧Z(·⌘Y) 실행취소·재실행 + ⌘C 복사 ─────────────────────────────
+  // 배선은 이미 있다 — 툴바 ↶/↷ 버튼이 부르는 `undo`/`redo` 와 **같은 레인**(core.session)을 키보드로
+  // 노출할 뿐이라 새 op 도, 새 상태도 없다.
+  //
+  // ⚠️ 키 소유권 협상 (다음 사람이 알아야 할 것) — 이 창엔 이미 keydown 리스너가 5개다:
+  //   035 줌/Space(⌘+/-/0) · 021 Esc · 045 ⌘F · 036 셀 이동(방향키/Enter) · 053 캐럿 타이핑.
+  //   036/053/블록편집 리스너는 **⌘/Ctrl 조합이면 즉시 양보**하므로 여기와 절대 겹치지 않고,
+  //   035 가 가진 ⌘ 키는 `=`/`-`/`0` 뿐이라 z/y/c 와 충돌하지 않는다. 새 ⌘ 단축키를 붙일 땐 이 목록을
+  //   먼저 확인하라.
+  // ⚠️ 텍스트 입력 표면에서는 **절대 가로채지 않는다**(기존 `isEditableTarget` 가드 재사용):
+  //   제자리 셀 에디터(contentEditable) · 채팅 작성창 · 크기 입력 안에서는 브라우저 기본 실행취소/복사가
+  //   그 표면의 텍스트를 다뤄야 한다. 문서 undo 를 대신 실행하면 아직 커밋 안 된 편집을 리플로우로
+  //   날려버린다(규율 6 — 사용자 콘텐츠 삭제 금지). 제자리 에디터가 열려 있으면 포커스가 어디에 있든
+  //   `editorRef` 로 한 번 더 막는다(045 ⌘F 가 쓰는 것과 같은 규칙).
+  // ⚠️ 캐럿(053)은 양보 대상이 **아니다**: 캐럿 타이핑은 매 글자가 엔진 undo 단위라 ⌘Z 가 곧 그 취소이고,
+  //   캐럿을 좇는 숨은 IME textarea 는 애초에 `isEditableTarget` 예외(059)라 여기 걸리지 않는다.
+  //
+  // 키 매칭은 045 ⌘F 선례대로 `e.key` 만 본다(⌘ 조합에서는 한글 IME 여도 라틴 키가 온다). `e.code` 까지
+  // 보면 AZERTY/드보락에서 엉뚱한 물리키가 잡힌다.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k !== "z" && k !== "y" && k !== "c") return;
+      if (editorRef.current) return; // 제자리 에디터 열림 → 그 표면의 기본 동작이 주인
+      if (isEditableTarget(e.target as Element | null) || isEditableTarget(document.activeElement)) return;
+      if (compositionStore.get() != null) return; // 조합 중엔 IME 가 키의 주인
+      if (k === "c") {
+        if (e.shiftKey) return; // ⌘⇧C 는 우리 것이 아니다
+        if (selectionRef.current.length === 0) return; // 선택 없음 = no-op → 브라우저 기본 복사 유지
+        e.preventDefault();
+        void copySelection();
+        return;
+      }
+      if (!metaRef.current) return; // 문서 없음 → 브라우저 기본 실행취소를 건드리지 않는다 (⌘F 와 같은 정책)
+      e.preventDefault();
+      // ⌘⇧Z = 재실행(맥/한글 관례), ⌘Y = 윈도우 관례의 재실행. 나머지 ⌘Z = 실행취소.
+      const isRedo = k === "y" || (k === "z" && e.shiftKey);
+      // 키보드 경로엔 rejection 을 받아줄 곳이 없다(버튼은 disabled 로 방어) — 트랩/토스트로 흡수한다.
+      void (isRedo ? redo() : undo()).catch((err) => {
+        if (!onTrap(err, "엔진 트랩 — 문서를 복구했습니다")) toast(`${isRedo ? "다시 실행" : "실행취소"} 실패: ${err}`);
+      });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [undo, redo, copySelection, compositionStore, onTrap, toast]);
+
   // ── Feature C: persistent per-card 되돌리기 on applied chat turns ─────────────────────────────────────
   // The chat records each applied turn's undo-stack depth (via `undoDepth`) and offers 되돌리기 only while
   // that batch is still the TOP of the stack; `revertChatEdit` then pops exactly it (`session.undo` reverts
@@ -2722,10 +2825,13 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         <button className="hw-tool" onClick={() => zoomAtCenter(ZOOM_STEP)} title="확대 (⌘+)" disabled={!meta}>
           ＋
         </button>
-        <button className="hw-tool" onClick={undo} disabled={!meta} title="실행취소">
+        {/* 버튼과 키보드(⌘Z/⌘⇧Z)는 같은 레인. ⚠️ title 문자열은 그대로 둔다 — 테스트/e2e 가
+            `getByTitle("실행취소")` 로 정확히 이 문자열을 집는다(단축키를 덧붙이면 3건이 깨진다).
+            발견 가능성은 aria-keyshortcuts 로 준다(스크린리더 + 접근성 트리에만 노출). */}
+        <button className="hw-tool" onClick={undo} disabled={!meta} title="실행취소" aria-keyshortcuts="Meta+Z Control+Z">
           ↶
         </button>
-        <button className="hw-tool" onClick={redo} disabled={!meta} title="다시 실행">
+        <button className="hw-tool" onClick={redo} disabled={!meta} title="다시 실행" aria-keyshortcuts="Meta+Shift+Z Control+Y">
           ↷
         </button>
         {editingOn && <TableInsertButton disabled={!canEdit} onPick={(r, c) => void onInsertTable(r, c)} />}
