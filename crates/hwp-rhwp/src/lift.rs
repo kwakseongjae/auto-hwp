@@ -102,11 +102,14 @@ impl<'a> Lifter<'a> {
                             kind: DecoKind::Header,
                             apply: lift_apply(h.apply_to),
                             blocks: self.lift_body(&h.paragraphs),
+                            // .hwp 원본에는 대응하는 HWPX XML 이 없다 — 변환기가 반드시 새로 emit 한다.
+                            from_source: false,
                         }),
                         Control::Footer(f) => section.decorations.push(PageDecoration {
                             kind: DecoKind::Footer,
                             apply: lift_apply(f.apply_to),
                             blocks: self.lift_body(&f.paragraphs),
+                            from_source: false,
                         }),
                         _ => {}
                     }

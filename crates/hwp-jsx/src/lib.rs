@@ -247,6 +247,7 @@ fn emit_decoration(d: &PageDecoration) -> DecorationBlob {
             ApplyPage::Odd => "odd",
         }
         .into(),
+        from_source: d.from_source,
         blocks_json: serde_json::to_string(&d.blocks.iter().map(emit_block).collect::<Vec<_>>())
             .unwrap_or_default(),
     }
@@ -820,6 +821,9 @@ fn parse_decoration(d: &DecorationBlob) -> Result<PageDecoration> {
             _ => ApplyPage::Both,
         },
         blocks: nodes.iter().map(parse_block).collect::<Result<_>>()?,
+        // 원본 섹션 XML 에 이미 있던 머리말인지(HWPX-in) 그대로 복원한다 — 잃어버리면 저장할 때
+        // 중복 삽입된다. 프로젝트에서 새로 만든 머리말은 false 라 정상적으로 emit 된다.
+        from_source: d.from_source,
     })
 }
 

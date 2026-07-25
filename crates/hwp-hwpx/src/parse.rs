@@ -58,8 +58,10 @@ pub fn parse_semantic(bytes: &[u8]) -> Result<SemanticDoc> {
         };
         // Table-nesting guard (#014): a pathologically nested table is rejected as a fast, explicit
         // error rather than building an unbounded structure. Legacy path folds it into Error::Parse.
-        parse_section(&text, &mut section.blocks, &border_pool)
+        let mut decos = Vec::new();
+        parse_section(&text, &mut section.blocks, &mut decos, &border_pool)
             .map_err(|l| Error::Parse(l.to_string()))?;
+        section.decorations = decos;
         // Batch B (#196): the real page geometry (size/margins) drives body width/height → correct
         // pagination. Left un-edited (`page_edited` stays false) so the secPr round-trips verbatim.
         if let Some(pg) = parse_page_setup(&text) {
@@ -107,7 +109,10 @@ pub fn parse_semantic_guarded(bytes: &[u8]) -> std::result::Result<SemanticDoc, 
             },
             ..Default::default()
         };
-        parse_section(&text, &mut section.blocks, &border_pool).map_err(HardenedError::Limit)?;
+        let mut decos = Vec::new();
+        parse_section(&text, &mut section.blocks, &mut decos, &border_pool)
+            .map_err(HardenedError::Limit)?;
+        section.decorations = decos;
         if let Some(pg) = parse_page_setup(&text) {
             section.page = pg;
         }
@@ -132,31 +137,12 @@ fn resolve_bin_data(pkg: &Package, doc: &mut SemanticDoc) {
     if refs.is_empty() {
         return;
     }
-    // content.hpf `<opf:item id=".." href="..">` → id→href map.
-    let Some(hpf_name) = pkg
-        .part_names
-        .iter()
-        .find(|n| n.to_ascii_lowercase().ends_with("content.hpf"))
-    else {
+    // content.hpf `<opf:item id=".." href="..">` → id→href map (섹션 순서를 읽는 spine 파서와
+    // 같은 매니페스트 스캐너를 공유한다 — 표기 규칙이 갈리면 이미지/섹션 해석이 어긋난다).
+    let Some(hpf) = pkg.read_content_hpf() else {
         return;
     };
-    let Ok(hpf) = pkg.read_part(hpf_name) else {
-        return;
-    };
-    let hpf = String::from_utf8_lossy(&hpf);
-    let mut href_of: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
-    let mut idx = 0;
-    while let Some(p) = hpf[idx..].find("<opf:item ") {
-        let start = idx + p;
-        let Some(rel) = hpf[start..].find('>') else {
-            break;
-        };
-        let tag = &hpf[start..start + rel];
-        idx = start + rel + 1;
-        if let (Some(id), Some(href)) = (opf_attr(tag, "id"), opf_attr(tag, "href")) {
-            href_of.insert(id.to_string(), href.to_string());
-        }
-    }
+    let href_of = crate::package::manifest_hrefs(&hpf);
     for id in refs {
         let Some(href) = href_of.get(&id) else {
             continue;
@@ -205,14 +191,6 @@ fn collect_image_refs(blocks: &[Block], out: &mut std::collections::BTreeSet<Str
             }
         }
     }
-}
-
-/// First `{name}="…"` value in an `<opf:item …>` open tag.
-fn opf_attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
-    let pat = format!("{name}=\"");
-    let s = tag.find(&pat)? + pat.len();
-    let e = tag[s..].find('"')? + s;
-    Some(&tag[s..e])
 }
 
 /// Assign stable in-memory `NodeId`s to top-level (editable) paragraphs — addressing for in-place
@@ -464,6 +442,33 @@ struct ParaAccum {
     runs: Vec<Run>,                            // flushed runs
     cur_run: Option<(Option<String>, String)>, // open run (charPrIDRef, text)
     pending_images: Vec<ImageRef>,             // <hp:pic>s parsed inside the open run (D1)
+    pending_notes: Vec<NoteRef>,               // <hp:footNote>/<hp:endNote>s parsed inside the run
+    hosts_table: bool,                         // `<hp:tbl>` 를 품었다 → 표 앵커 후보
+}
+
+/// 본문이 아닌 서브바디 프레임(머리말/꼬리말/각주/미주). 여는 태그에서 `blocks` 스택에 프레임을
+/// 밀고 이 값을 함께 쌓아, 닫는 태그에서 어디로 보낼지를 결정한다 — `<hp:tc>` 와 같은 규율.
+enum SubFrame {
+    Deco {
+        kind: DecoKind,
+        apply: ApplyPage,
+    },
+    Note {
+        kind: NoteKind,
+        number: u16,
+        prefix_char: u16,
+        suffix_char: u16,
+        inst_id: u32,
+    },
+}
+
+/// `<hp:header applyPageType="BOTH|EVEN|ODD">` → [`ApplyPage`] (미지정/미상은 BOTH).
+fn apply_page(v: Option<&str>) -> ApplyPage {
+    match v.unwrap_or("").trim().to_ascii_uppercase().as_str() {
+        "EVEN" => ApplyPage::Even,
+        "ODD" => ApplyPage::Odd,
+        _ => ApplyPage::Both,
+    }
 }
 
 /// 한글's default thin cell-border stroke width (device px), synthesized to RECOVER a table grid on a
@@ -533,19 +538,23 @@ fn recover_stripped_borders(cells: &mut [Cell]) {
     }
 }
 
-/// Parse one section's XML into `out`. Returns `Err(DocLimit::TableNestingTooDeep)` if table-in-
-/// table nesting exceeds [`limits::MAX_TABLE_NESTING`] — the concrete "XML depth counter" for the
-/// only nesting that grows unbounded structures. All other malformation is tolerated (best-effort
-/// parse); the reader stops at the first hard error/EOF as before.
+/// Parse one section's XML into `out` (body blocks) and `decos` (머리말/꼬리말). Returns
+/// `Err(DocLimit::TableNestingTooDeep)` if table-in-table nesting exceeds
+/// [`limits::MAX_TABLE_NESTING`] — the concrete "XML depth counter" for the only nesting that grows
+/// unbounded structures. All other malformation is tolerated (best-effort parse); the reader stops
+/// at the first hard error/EOF as before.
 fn parse_section(
     xml: &str,
     out: &mut Vec<Block>,
+    decos: &mut Vec<PageDecoration>,
     borders: &std::collections::BTreeMap<u64, BorderFillDef>,
 ) -> std::result::Result<(), DocLimit> {
     let mut reader = Reader::from_str(xml);
-    // Stack of block containers (section, then nested table-cell sublists).
+    // Stack of block containers (section, then nested table-cell / header / note sublists).
     let mut blocks: Vec<Vec<Block>> = vec![Vec::new()];
     let mut tbls: Vec<TblFrame> = Vec::new();
+    // 머리말/꼬리말/각주 프레임 스택 — `<hp:tc>` 와 1:1 대응(열 때 blocks 프레임 push, 닫을 때 pop).
+    let mut subs: Vec<SubFrame> = Vec::new();
     // Stack of in-progress paragraphs (a cell paragraph nests inside a table inside an outer para).
     let mut paras: Vec<ParaAccum> = Vec::new();
     let mut in_t = false;
@@ -578,6 +587,10 @@ fn parse_section(
                         // Reject before pushing the level that would exceed the cap.
                         limits::check_table_nesting(tbls.len())?;
                         mark_not_simple(&mut paras);
+                        // 이 문단이 표를 품는다 = 표 앵커 후보(`</hp:p>` 에서 텍스트 유무로 확정).
+                        if let Some(p) = paras.last_mut() {
+                            p.hosts_table = true;
+                        }
                         let rows = attr_usize(&e, b"rowCnt").unwrap_or(0);
                         let cols = attr_usize(&e, b"colCnt").unwrap_or(0);
                         let border_ref = attr_u64(&e, b"borderFillIDRef");
@@ -614,6 +627,37 @@ fn parse_section(
                     b"pic" => {
                         pic = Some(PicAccum::default());
                         mark_not_simple(&mut paras);
+                    }
+                    // 머리말/꼬리말/각주/미주는 본문이 아니다 — `<hp:tc>` 와 **완전히 같은 패턴**으로
+                    // blocks 프레임을 밀어 넣어 그 안의 `<hp:p>` 가 섹션 루트로 새는 것을 막는다.
+                    // (프레임이 없으면 `</hp:p>` 가 머리말 문단을 본문 첫 줄에 일반 문단으로 조판했다.)
+                    // 구조적 자식이므로 호스트 문단은 계속 non-simple = verbatim 재출력 대상이다.
+                    b"header" | b"footer" => {
+                        mark_not_simple(&mut paras);
+                        blocks.push(Vec::new());
+                        subs.push(SubFrame::Deco {
+                            kind: if ln.as_ref() == b"header" {
+                                DecoKind::Header
+                            } else {
+                                DecoKind::Footer
+                            },
+                            apply: apply_page(attr_str(&e, b"applyPageType").as_deref()),
+                        });
+                    }
+                    b"footNote" | b"endNote" => {
+                        mark_not_simple(&mut paras);
+                        blocks.push(Vec::new());
+                        subs.push(SubFrame::Note {
+                            kind: if ln.as_ref() == b"footNote" {
+                                NoteKind::Foot
+                            } else {
+                                NoteKind::End
+                            },
+                            number: attr_usize(&e, b"number").unwrap_or(0) as u16,
+                            prefix_char: attr_wchar(&e, b"prefixChar"),
+                            suffix_char: attr_wchar(&e, b"suffixChar"),
+                            inst_id: attr_u64(&e, b"instId").unwrap_or(0) as u32,
+                        });
                     }
                     // Structural children (secPr/ctrl/equation/container/…) make a paragraph NOT
                     // re-emittable from the lossy AST. `linesegarray`/`lineseg` are layout CACHE —
@@ -683,6 +727,30 @@ fn parse_section(
                         ]);
                     }
                 }
+                // 표 바깥 여백(`<hp:outMargin>`) — 조판이 표 위/아래로 예약하는 세로 공간이다.
+                // 예전엔 `other` 폴백으로 버려져 `outer_margin_*` 이 전부 0 이었다(benchmark1.hwpx 는
+                // 표 74개 전부 top/bottom=283 ⇒ 표당 566 HWPUNIT 세로 누락). `<hp:inMargin>` 과 같은
+                // 위치 규칙: 첫 `<hp:tr>` 앞에 오므로 `f.cell` 이 None 일 때만 표의 값으로 읽는다
+                // (도형/그림의 outMargin 은 위쪽 `pic` 분기 또는 셀 컨텍스트에서 걸러진다).
+                //
+                // ⚠️ 상쇄 주의 — 이 수정은 아래 `is_table_anchor`(표 앵커 문단의 빈 줄 초과 예약)와
+                // **한 몸이다**. 둘 다 세로 회계 오차인데 부호가 반대라 오래 서로를 가리고 있었다:
+                // 앵커 빈 줄이 표당 ~1300 HWPUNIT 을 과다 예약하고, 이 바깥여백 누락이 표당 566 을
+                // 과소 예약했다. 실측(benchmark1.hwpx, ApproxFontMetrics · 행높이 바닥 고정 기준):
+                //   원래(둘 다 버그)      : 20쪽 / 368줄
+                //   앵커만 고침(이것 없이): 19쪽 / 301줄  ← 쪽수가 되레 깨진다
+                //   둘 다 고침            : 20쪽 / 301줄  ← rhwp lift 와 완전 일치
+                // 한쪽만 되돌리지 마라. 회귀 잠금은 `hwp-core/tests/hwpx_rhwp_parity.rs`.
+                b"outMargin" => {
+                    if let Some(f) = tbls.last_mut() {
+                        if f.cell.is_none() {
+                            f.table.outer_margin_left = attr_i32(&e, b"left").unwrap_or(0);
+                            f.table.outer_margin_right = attr_i32(&e, b"right").unwrap_or(0);
+                            f.table.outer_margin_top = attr_i32(&e, b"top").unwrap_or(0);
+                            f.table.outer_margin_bottom = attr_i32(&e, b"bottom").unwrap_or(0);
+                        }
+                    }
+                }
                 // Batch C: the table-DEFAULT cell padding (`<hp:inMargin>` sits before the first row,
                 // so `f.cell` is None then; a picture's inMargin is handled by the pic arm above).
                 b"inMargin" => {
@@ -738,8 +806,27 @@ fn parse_section(
                             id: p.id.clone(),
                             simple: p.simple,
                         });
+                        // 표 호스트 문단 = 표를 품고 보이는 텍스트가 없는 문단. 한컴은 여기에 줄을
+                        // 하나도 걸지 않는다(표가 그 자리를 차지한다) — 조판이 이 플래그를 보고
+                        // 줄 예약을 건너뛴다(`hwp-typeset` place.rs/lib.rs). 플래그가 없던 동안은
+                        // 표마다 빈 줄 1개가 초과 예약됐다(benchmark1.hwpx 실측 +67줄 = 표 개수).
+                        // .hwp lift 의 `is_table_anchor` 와 같은 판정식.
+                        //
+                        // ⚠️ 위 `<hp:outMargin>` 파싱과 **한 몸**이다(부호 반대의 상쇄 오차) — 자세한
+                        // 실측 수치는 그쪽 주석 참조. 한쪽만 되돌리면 쪽수가 깨진다.
+                        //
+                        // 블록 순서는 그대로 둔다: 우리는 `[Table, 호스트문단]`(`</hp:tbl>` 이 먼저
+                        // 닫힌다), lift 는 `[앵커문단, Table]`. 앵커는 어차피 줄을 예약하지 않으므로
+                        // 조판 결과는 같고, 순서를 바꾸면 직렬화의 `src_span` 오름차순 가정과 바이트
+                        // 보존 왕복에 닿는다 — 이득 없이 해자만 흔드는 변경이라 하지 않는다.
+                        let text_empty = !p.runs.iter().any(|r| {
+                            r.content
+                                .iter()
+                                .any(|i| matches!(i, Inline::Text(s) if !s.trim().is_empty()))
+                        });
                         if let Some(target) = blocks.last_mut() {
                             target.push(Block::Paragraph(Paragraph {
+                                is_table_anchor: p.hosts_table && text_empty,
                                 runs: p.runs,
                                 // Capture paraPrIDRef for EVERY paragraph — not just top-level
                                 // `source` — so nested cell paragraphs' align/indent/line-spacing
@@ -764,6 +851,47 @@ fn parse_section(
                                     width: pa.width,
                                     height: pa.height,
                                 });
+                            }
+                        }
+                    }
+                }
+                // 머리말/꼬리말/각주 프레임을 닫는다 — 본문(blocks[0])이 아니라 각자의 IR 자리로.
+                // 머리말/꼬리말 → `Section.decorations`, 각주/미주 → 호스트 문단 런의 `Inline::Note`
+                // (.hwp lift 와 같은 구조). 여는 태그를 못 본 채 닫는 태그만 온 깨진 XML 이면
+                // `subs.pop()` 이 None 이라 blocks 스택은 건드리지 않는다(루트 프레임 보호).
+                b"header" | b"footer" | b"footNote" | b"endNote" => {
+                    if let Some(fr) = subs.pop() {
+                        let body = blocks.pop().unwrap_or_default();
+                        match fr {
+                            SubFrame::Deco { kind, apply } => decos.push(PageDecoration {
+                                kind,
+                                apply,
+                                blocks: body,
+                                // 이 머리말/꼬리말은 섹션 XML 안에 그대로 있고 직렬화가 그 바이트를
+                                // 통째로 재출력한다 — 다시 합성해 끼워 넣으면 **중복**된다.
+                                from_source: true,
+                            }),
+                            SubFrame::Note {
+                                kind,
+                                number,
+                                prefix_char,
+                                suffix_char,
+                                inst_id,
+                            } => {
+                                if let Some(p) = paras.last_mut() {
+                                    p.pending_notes.push(NoteRef {
+                                        kind,
+                                        number,
+                                        prefix_char,
+                                        suffix_char,
+                                        inst_id,
+                                        body,
+                                    });
+                                } else if let Some(target) = blocks.last_mut() {
+                                    // OWPML 은 각주를 항상 문단 안에 넣으므로 도달 불가.
+                                    // 그래도 콘텐츠를 버리지는 않는다(현행 동작과 동일한 자리로).
+                                    target.extend(body);
+                                }
                             }
                         }
                     }
@@ -887,20 +1015,25 @@ fn push_inline_char(paras: &mut [ParaAccum], ch: char) {
 
 fn flush_run(p: &mut ParaAccum) {
     let images = std::mem::take(&mut p.pending_images);
+    // 각주/미주 참조는 런 끝에 붙인다 — .hwp lift 와 같은 v1 근사(정확한 런 중간 앵커는 후속).
+    let notes = std::mem::take(&mut p.pending_notes);
     if let Some((char_ref, text)) = p.cur_run.take() {
         let mut content: Vec<Inline> = vec![Inline::Text(text)];
         content.extend(images.into_iter().map(Inline::Image));
+        content.extend(notes.into_iter().map(Inline::Note));
         p.runs.push(Run {
             char_shape: 0,
             char_ref,
             content,
         });
-    } else if !images.is_empty() {
-        // A picture outside an explicit `<hp:run>` — emit it in its own run so it still renders.
+    } else if !images.is_empty() || !notes.is_empty() {
+        // A picture / note outside an explicit `<hp:run>` — emit it in its own run so it survives.
+        let mut content: Vec<Inline> = images.into_iter().map(Inline::Image).collect();
+        content.extend(notes.into_iter().map(Inline::Note));
         p.runs.push(Run {
             char_shape: 0,
             char_ref: None,
-            content: images.into_iter().map(Inline::Image).collect(),
+            content,
         });
     }
 }
@@ -1010,6 +1143,19 @@ fn attr_i32(e: &BytesStart, name: &[u8]) -> Option<i32> {
     None
 }
 
+/// 각주 장식 문자(`prefixChar`/`suffixChar`) → WChar 코드포인트. OWPML 은 보통 숫자 코드
+/// (`suffixChar="41"` = `)`)로 쓰지만 리터럴 문자를 쓰는 변환기도 있어 둘 다 받는다. 없으면 0.
+fn attr_wchar(e: &BytesStart, name: &[u8]) -> u16 {
+    let Some(v) = attr_str(e, name) else {
+        return 0;
+    };
+    let v = v.trim();
+    if let Ok(n) = v.parse::<u16>() {
+        return n;
+    }
+    v.chars().next().map(|c| c as u32 as u16).unwrap_or(0)
+}
+
 fn attr_u64(e: &BytesStart, name: &[u8]) -> Option<u64> {
     for a in e.attributes().flatten() {
         if a.key.local_name().as_ref() == name {
@@ -1020,7 +1166,7 @@ fn attr_u64(e: &BytesStart, name: &[u8]) -> Option<u64> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -1030,7 +1176,7 @@ mod tests {
         // them and marked the paragraph non-simple, gluing "라벨(Problem)" into a mid-word wrap.
         let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run><hp:t>1. 문제인식</hp:t><hp:fwSpace/><hp:t>(Problem)</hp:t><hp:tab/><hp:nbSpace/></hp:run></hp:p></hs:sec>"#;
         let mut blocks = Vec::new();
-        parse_section(xml, &mut blocks, &Default::default()).unwrap();
+        parse_section(xml, &mut blocks, &mut Vec::new(), &Default::default()).unwrap();
         let p = blocks
             .iter()
             .find_map(|b| match b {
@@ -1068,7 +1214,7 @@ mod tests {
           </hp:tbl></hp:run></hp:p>
         </hs:sec>"#;
         let mut blocks = Vec::new();
-        parse_section(xml, &mut blocks, &Default::default()).unwrap();
+        parse_section(xml, &mut blocks, &mut Vec::new(), &Default::default()).unwrap();
         // one paragraph + one table
         assert!(blocks.iter().any(|b| matches!(b, Block::Paragraph(_))));
         let tbl = blocks.iter().find_map(|b| match b {
@@ -1122,7 +1268,7 @@ mod tests {
     fn captures_source_spans_refs_and_simple_flag() {
         let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p id="100" paraPrIDRef="3" styleIDRef="0"><hp:run charPrIDRef="0"><hp:t>가</hp:t></hp:run><hp:run charPrIDRef="7"><hp:t>나</hp:t></hp:run></hp:p><hp:p id="200" paraPrIDRef="3"><hp:run charPrIDRef="0"><hp:tbl rowCnt="1" colCnt="1"><hp:tr><hp:tc><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:subList><hp:p><hp:run><hp:t>셀</hp:t></hp:run></hp:p></hp:subList></hp:tc></hp:tr></hp:tbl></hp:run></hp:p></hs:sec>"#;
         let mut blocks = Vec::new();
-        parse_section(xml, &mut blocks, &Default::default()).unwrap();
+        parse_section(xml, &mut blocks, &mut Vec::new(), &Default::default()).unwrap();
         let paras: Vec<&Paragraph> = blocks
             .iter()
             .filter_map(|b| match b {
@@ -1178,7 +1324,7 @@ mod tests {
         // A section: one top-level styled paragraph, and a 1×1 table whose cell paragraph is styled.
         let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p paraPrIDRef="3"><hp:run charPrIDRef="5"><hp:t>본문</hp:t></hp:run></hp:p><hp:p paraPrIDRef="0"><hp:run charPrIDRef="0"><hp:tbl rowCnt="1" colCnt="1"><hp:tr><hp:tc><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:subList><hp:p paraPrIDRef="3"><hp:run charPrIDRef="5"><hp:t>셀</hp:t></hp:run></hp:p></hp:subList></hp:tc></hp:tr></hp:tbl></hp:run></hp:p></hs:sec>"#;
         let mut blocks = Vec::new();
-        parse_section(xml, &mut blocks, &Default::default()).unwrap();
+        parse_section(xml, &mut blocks, &mut Vec::new(), &Default::default()).unwrap();
 
         // The CELL paragraph must have CAPTURED its paraPrIDRef (not just top-level ones).
         let cell_para = blocks.iter().find_map(|b| match b {
@@ -1314,7 +1460,7 @@ mod tests {
     fn table_col_widths_from_cellsz_are_nonequal() {
         let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run><hp:tbl rowCnt="1" colCnt="2"><hp:tr><hp:tc><hp:subList><hp:p><hp:run><hp:t>A</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="1000" height="500"/></hp:tc><hp:tc><hp:subList><hp:p><hp:run><hp:t>B</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="1" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="3000" height="800"/></hp:tc></hp:tr></hp:tbl></hp:run></hp:p></hs:sec>"#;
         let mut blocks = Vec::new();
-        parse_section(xml, &mut blocks, &Default::default()).unwrap();
+        parse_section(xml, &mut blocks, &mut Vec::new(), &Default::default()).unwrap();
         let t = blocks
             .iter()
             .find_map(|b| match b {
@@ -1343,7 +1489,7 @@ mod tests {
     fn table_noadjust_fixed_applies_row_height_floor() {
         let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run><hp:tbl rowCnt="1" colCnt="2" noAdjust="1"><hp:tr><hp:tc><hp:subList><hp:p><hp:run><hp:t>A</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="1000" height="500"/></hp:tc><hp:tc><hp:subList><hp:p><hp:run><hp:t>B</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="1" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="3000" height="800"/></hp:tc></hp:tr></hp:tbl></hp:run></hp:p></hs:sec>"#;
         let mut blocks = Vec::new();
-        parse_section(xml, &mut blocks, &Default::default()).unwrap();
+        parse_section(xml, &mut blocks, &mut Vec::new(), &Default::default()).unwrap();
         let t = blocks
             .iter()
             .find_map(|b| match b {
@@ -1380,7 +1526,7 @@ mod tests {
         );
         let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run><hp:tbl rowCnt="1" colCnt="1" borderFillIDRef="2"><hp:tr><hp:tc borderFillIDRef="5"><hp:subList><hp:p><hp:run><hp:t>A</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="1000" height="500"/></hp:tc></hp:tr></hp:tbl></hp:run></hp:p></hs:sec>"#;
         let mut blocks = Vec::new();
-        parse_section(xml, &mut blocks, &borders).unwrap();
+        parse_section(xml, &mut blocks, &mut Vec::new(), &borders).unwrap();
         let t = blocks
             .iter()
             .find_map(|b| match b {
@@ -1433,7 +1579,7 @@ mod tests {
         // A 1×2 grid — both cells reference the all-NONE fill.
         let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run><hp:tbl rowCnt="1" colCnt="2" borderFillIDRef="1"><hp:tr><hp:tc borderFillIDRef="1"><hp:subList><hp:p><hp:run><hp:t>A</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="1000" height="500"/></hp:tc><hp:tc borderFillIDRef="1"><hp:subList><hp:p><hp:run><hp:t>B</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="1" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="1000" height="500"/></hp:tc></hp:tr></hp:tbl></hp:run></hp:p></hs:sec>"#;
         let mut blocks = Vec::new();
-        parse_section(xml, &mut blocks, &borders).unwrap();
+        parse_section(xml, &mut blocks, &mut Vec::new(), &borders).unwrap();
         let t = find_table(&blocks);
         assert_eq!(t.cells.len(), 2);
         for c in &t.cells {
@@ -1472,7 +1618,7 @@ mod tests {
            // Cell A = borderless (bf 1), cell B = real border (bf 2) → the table is a genuine design.
         let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run><hp:tbl rowCnt="1" colCnt="2" borderFillIDRef="1"><hp:tr><hp:tc borderFillIDRef="1"><hp:subList><hp:p><hp:run><hp:t>A</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="1000" height="500"/></hp:tc><hp:tc borderFillIDRef="2"><hp:subList><hp:p><hp:run><hp:t>B</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="1" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="1000" height="500"/></hp:tc></hp:tr></hp:tbl></hp:run></hp:p></hs:sec>"#;
         let mut blocks = Vec::new();
-        parse_section(xml, &mut blocks, &borders).unwrap();
+        parse_section(xml, &mut blocks, &mut Vec::new(), &borders).unwrap();
         let t = find_table(&blocks);
         // Cell A stays borderless — NOT synthesized to a solid grid.
         let a = &t.cells[0];
@@ -1541,7 +1687,7 @@ mod tests {
     fn pic_parses_into_inline_image() {
         let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run><hp:pic><hp:sz width="17340" height="12960"/><hc:img binaryItemIDRef="image1"/></hp:pic><hp:t></hp:t></hp:run></hp:p></hs:sec>"#;
         let mut blocks = Vec::new();
-        parse_section(xml, &mut blocks, &Default::default()).unwrap();
+        parse_section(xml, &mut blocks, &mut Vec::new(), &Default::default()).unwrap();
         let img = blocks
             .iter()
             .filter_map(|b| match b {
@@ -1590,9 +1736,178 @@ mod tests {
         assert_eq!(img_parts, 1, "no duplicate BinData part on round-trip");
     }
 
+    /// 본문 텍스트(섹션 루트 블록만) — 머리말/각주가 새면 여기 나타난다.
+    fn body_text(blocks: &[Block]) -> String {
+        let mut s = SemanticDoc::default();
+        s.sections.push(Section {
+            blocks: blocks.to_vec(),
+            ..Default::default()
+        });
+        s.plain_text()
+    }
+
+    /// 회귀 잠금(3단계): 표의 세로 회계 두 축을 **함께** 잠근다 — `<hp:outMargin>` 이 표의
+    /// 바깥 여백으로 읽히고, 표만 품은 빈 호스트 문단이 `is_table_anchor` 로 표시되는 것.
+    /// 둘은 부호가 반대인 상쇄 오차라 한쪽만 되돌리면 쪽수가 깨진다(parse.rs 주석 참조).
+    #[test]
+    fn table_outer_margin_and_anchor_flag_are_both_read() {
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p id="1"><hp:run charPrIDRef="0"><hp:tbl rowCnt="1" colCnt="1"><hp:outMargin left="283" right="284" top="285" bottom="286"/><hp:inMargin left="510" right="510" top="141" bottom="141"/><hp:tr><hp:tc><hp:subList><hp:p><hp:run><hp:t>셀</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="1000" height="500"/></hp:tc></hp:tr></hp:tbl><hp:t></hp:t></hp:run></hp:p></hs:sec>"#;
+        let mut blocks = Vec::new();
+        parse_section(xml, &mut blocks, &mut Vec::new(), &Default::default()).unwrap();
+
+        let t = blocks
+            .iter()
+            .find_map(|b| match b {
+                Block::Table(t) => Some(t),
+                _ => None,
+            })
+            .expect("표");
+        assert_eq!(
+            (
+                t.outer_margin_left,
+                t.outer_margin_right,
+                t.outer_margin_top,
+                t.outer_margin_bottom
+            ),
+            (283, 284, 285, 286),
+            "<hp:outMargin> 이 버려졌다"
+        );
+        // 표 기본 셀 패딩(<hp:inMargin>)은 그대로 — outMargin 을 덮어쓰지 않았는지 확인.
+        assert_eq!(t.padding, Some([510, 510, 141, 141]));
+
+        let anchor = blocks
+            .iter()
+            .find_map(|b| match b {
+                Block::Paragraph(p) => Some(p),
+                _ => None,
+            })
+            .expect("호스트 문단");
+        assert!(
+            anchor.is_table_anchor,
+            "표만 품은 빈 문단은 표 앵커 = 줄을 예약하지 않는다"
+        );
+    }
+
+    /// 표를 품었어도 **보이는 텍스트가 있으면** 앵커가 아니다 — 그 줄은 실제로 조판돼야 한다.
+    #[test]
+    fn table_host_paragraph_with_text_is_not_an_anchor() {
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p id="1"><hp:run charPrIDRef="0"><hp:t>표 옆 글자</hp:t><hp:tbl rowCnt="1" colCnt="1"><hp:tr><hp:tc><hp:subList><hp:p><hp:run><hp:t>셀</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="1000" height="500"/></hp:tc></hp:tr></hp:tbl></hp:run></hp:p><hp:p id="2"><hp:run><hp:t>빈 줄 아님</hp:t></hp:run></hp:p></hs:sec>"#;
+        let mut blocks = Vec::new();
+        parse_section(xml, &mut blocks, &mut Vec::new(), &Default::default()).unwrap();
+        let hosts: Vec<&Paragraph> = blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Paragraph(p) => Some(p),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            !hosts[0].is_table_anchor,
+            "텍스트가 있는 표 호스트 문단은 앵커가 아니다"
+        );
+        assert!(
+            !hosts[1].is_table_anchor,
+            "표를 안 품은 문단은 앵커가 아니다"
+        );
+    }
+
+    /// 회귀 잠금(2단계): `<hp:header>`/`<hp:footer>` 안의 문단은 **본문 블록이 아니다**.
+    /// 예전엔 `<hp:tc>` 만 blocks 프레임을 밀었기 때문에 머리말의 `</hp:p>` 가 섹션 루트로
+    /// push 되어, 머리말 텍스트가 본문 첫 줄에 일반 문단으로 조판됐다(실측 확인됨).
+    #[test]
+    fn header_and_footer_bodies_never_leak_into_section_blocks() {
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p id="1"><hp:run charPrIDRef="0"><hp:ctrl><hp:header id="5" applyPageType="ODD"><hp:subList><hp:p><hp:run><hp:t>ZZHEADERZZ</hp:t></hp:run></hp:p></hp:subList></hp:header></hp:ctrl><hp:ctrl><hp:footer id="6" applyPageType="BOTH"><hp:subList><hp:p><hp:run><hp:t>ZZFOOTERZZ</hp:t></hp:run></hp:p></hp:subList></hp:footer></hp:ctrl></hp:run></hp:p><hp:p id="2"><hp:run><hp:t>본문 한 줄</hp:t></hp:run></hp:p></hs:sec>"#;
+        let mut blocks = Vec::new();
+        let mut decos = Vec::new();
+        parse_section(xml, &mut blocks, &mut decos, &Default::default()).unwrap();
+
+        let text = body_text(&blocks);
+        assert!(text.contains("본문 한 줄"), "본문은 그대로: {text}");
+        assert!(
+            !text.contains("ZZHEADERZZ") && !text.contains("ZZFOOTERZZ"),
+            "머리말/꼬리말이 본문으로 샜다: {text}"
+        );
+        // 호스트 문단 1개 + 본문 문단 1개 = 2개. (예전엔 머리말/꼬리말 문단까지 4개였다.)
+        assert_eq!(blocks.len(), 2, "본문 블록 수");
+
+        // 머리말/꼬리말은 IR 의 제자리(Section.decorations)로.
+        assert_eq!(decos.len(), 2);
+        assert_eq!(decos[0].kind, DecoKind::Header);
+        assert_eq!(decos[0].apply, ApplyPage::Odd);
+        assert!(body_text(&decos[0].blocks).contains("ZZHEADERZZ"));
+        assert_eq!(decos[1].kind, DecoKind::Footer);
+        assert_eq!(decos[1].apply, ApplyPage::Both);
+        assert!(body_text(&decos[1].blocks).contains("ZZFOOTERZZ"));
+    }
+
+    /// 회귀 잠금(2단계): 각주/미주 본문도 본문 블록이 아니라 호스트 런의 `Inline::Note` 로 간다
+    /// (.hwp lift 와 같은 구조). 각주가 새면 본문 페이지에 각주 텍스트가 한 줄씩 더 조판된다.
+    #[test]
+    fn footnote_and_endnote_bodies_become_inline_notes_not_body_blocks() {
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p id="1"><hp:run charPrIDRef="0"><hp:t>앞</hp:t><hp:ctrl><hp:footNote number="3" suffixChar="41" instId="16"><hp:subList><hp:p><hp:run><hp:t>ZZFOOTNOTEZZ</hp:t></hp:run></hp:p></hp:subList></hp:footNote></hp:ctrl><hp:t>뒤</hp:t></hp:run><hp:run><hp:ctrl><hp:endNote number="1" instId="99"><hp:subList><hp:p><hp:run><hp:t>ZZENDNOTEZZ</hp:t></hp:run></hp:p></hp:subList></hp:endNote></hp:ctrl></hp:run></hp:p></hs:sec>"#;
+        let mut blocks = Vec::new();
+        let mut decos = Vec::new();
+        parse_section(xml, &mut blocks, &mut decos, &Default::default()).unwrap();
+
+        assert!(decos.is_empty());
+        assert_eq!(blocks.len(), 1, "호스트 문단 하나뿐");
+        let text = body_text(&blocks);
+        assert_eq!(text.trim_end(), "앞뒤", "각주 본문이 본문으로 샜다: {text}");
+
+        let Block::Paragraph(p) = &blocks[0] else {
+            panic!("문단")
+        };
+        let notes: Vec<&NoteRef> = p
+            .runs
+            .iter()
+            .flat_map(|r| r.content.iter())
+            .filter_map(|i| match i {
+                Inline::Note(n) => Some(n),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(notes.len(), 2, "각주 + 미주");
+        assert_eq!(notes[0].kind, NoteKind::Foot);
+        assert_eq!((notes[0].number, notes[0].inst_id), (3, 16));
+        assert_eq!(notes[0].suffix_char, 41, "suffixChar 는 WChar 코드");
+        assert!(body_text(&notes[0].body).contains("ZZFOOTNOTEZZ"));
+        assert_eq!(notes[1].kind, NoteKind::End);
+        assert!(body_text(&notes[1].body).contains("ZZENDNOTEZZ"));
+    }
+
+    /// 실물 회귀: 머리말이 있는 코퍼스 문서(창도패)를 열었을 때 머리말 문단이 본문 블록에
+    /// 없어야 한다 — 합성 XML 이 아니라 한컴이 실제로 쓴 중첩 구조로 잠근다.
+    #[test]
+    fn real_corpus_header_is_not_a_body_block() {
+        let p = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/private/bench-local-2026/files/독스헌터_창도패__창업도약패키지(일반형)_2025.hwpx"
+        );
+        let Ok(bytes) = std::fs::read(p) else {
+            return; // private 코퍼스가 없는 체크아웃에서는 건너뛴다
+        };
+        let doc = parse_semantic(&bytes).expect("parse");
+        let decos: usize = doc.sections.iter().map(|s| s.decorations.len()).sum();
+        assert!(decos > 0, "머리말이 decorations 로 잡혀야 한다");
+        for sec in &doc.sections {
+            for d in &sec.decorations {
+                let deco_text = body_text(&d.blocks);
+                let t = deco_text.trim();
+                if t.is_empty() {
+                    continue;
+                }
+                assert!(
+                    !body_text(&sec.blocks).contains(t),
+                    "머리말 텍스트가 본문에도 있다: {t:?}"
+                );
+            }
+        }
+    }
+
     /// Build a minimal in-memory HWPX (ZIP) from `(name, bytes)` parts — a test fixture for the
-    /// package-level parse paths.
-    fn build_test_hwpx(parts: &[(&str, &[u8])]) -> Vec<u8> {
+    /// package-level parse paths. `pub(crate)` so the serializer's round-trip tests can seed the
+    /// SAME kind of package (parse → edit → serialize) instead of forking a second builder.
+    pub(crate) fn build_test_hwpx(parts: &[(&str, &[u8])]) -> Vec<u8> {
         use zip::write::{SimpleFileOptions, ZipWriter};
         let mut zw = ZipWriter::new(std::io::Cursor::new(Vec::new()));
         let opts = SimpleFileOptions::default();

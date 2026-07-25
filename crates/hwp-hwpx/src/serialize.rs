@@ -274,7 +274,8 @@ fn collect_image_items(doc: &SemanticDoc) -> Vec<ImageItem> {
     let mut used = std::collections::BTreeSet::new();
     for s in &doc.sections {
         walk(&s.blocks, &mut used);
-        for d in &s.decorations {
+        // HWPX 에서 파싱된(from_source) 머리말/꼬리말은 원본 XML 그대로 나가므로 여기서 세지 않는다.
+        for d in s.decorations.iter().filter(|d| !d.from_source) {
             walk(&d.blocks, &mut used); // SEAM D: images in headers/footers
         }
     }
@@ -400,8 +401,9 @@ fn collect_used_shapes(doc: &SemanticDoc, chars: &mut IdxSet, paras: &mut IdxSet
                 walk_all(std::slice::from_ref(b), chars, paras);
             }
         }
-        // SEAM D: header/footer bodies are always emitted into the secPr — collect their shapes.
-        for d in &sec.decorations {
+        // SEAM D: header/footer bodies we EMIT into the secPr — collect their shapes. HWPX 에서
+        // 파싱된(from_source) 머리말은 원본 XML 로 그대로 나가니 새 풀 항목이 필요 없다.
+        for d in sec.decorations.iter().filter(|d| !d.from_source) {
             walk_all(&d.blocks, chars, paras);
         }
     }
@@ -634,7 +636,7 @@ fn collect_bf_specs(doc: &SemanticDoc) -> BTreeMap<String, BfSpec> {
                 walk(std::slice::from_ref(b), &mut out);
             }
         }
-        for d in &sec.decorations {
+        for d in sec.decorations.iter().filter(|d| !d.from_source) {
             walk(&d.blocks, &mut out);
         }
     }
@@ -734,7 +736,7 @@ fn patch_section_xml(
         }
         dirty.push(eb);
     }
-    if dirty.is_empty() && sec.decorations.is_empty() {
+    if dirty.is_empty() && !sec.decorations.iter().any(|d| !d.from_source) {
         // Edits / page already applied (or nothing changed) — no append needed.
         return s.into_bytes();
     }
@@ -770,11 +772,14 @@ fn patch_section_xml(
     let mut next_id = max_id(&s) + 1;
 
     // (2.5) HEADERS/FOOTERS: splice each as a <hp:ctrl><hp:header|footer><hp:subList>body</…> right
-    // after </hp:secPr> (the secPr-carrier run) — additive, only when the section has decorations.
-    if !sec.decorations.is_empty() {
+    // after </hp:secPr> (the secPr-carrier run) — additive, only when the section has decorations
+    // WE must emit. ⚠️ `from_source` (HWPX 파서가 이 섹션 XML 에서 읽어온 것)은 건너뛴다 — 원본
+    // 바이트가 이미 그 `<hp:header>` 를 담고 있어서 다시 끼우면 머리말이 **중복**된다(편집으로
+    // 섹션이 dirty 가 되는 순간 터졌을 회귀).
+    if sec.decorations.iter().any(|d| !d.from_source) {
         if let Some(pos) = s.find("</hp:secPr>") {
             let mut deco = String::new();
-            for d in &sec.decorations {
+            for d in sec.decorations.iter().filter(|d| !d.from_source) {
                 let tag = match d.kind {
                     DecoKind::Header => "header",
                     DecoKind::Footer => "footer",
@@ -3068,6 +3073,7 @@ mod tests {
         sec.decorations.push(PageDecoration {
             kind: DecoKind::Header,
             apply: ApplyPage::Both,
+            from_source: false,
             blocks: vec![Block::Paragraph(Paragraph {
                 runs: vec![Run {
                     char_shape: 0,
@@ -3094,6 +3100,46 @@ mod tests {
             sec0.contains(r#"applyPageType="BOTH""#) && sec0.contains("머리말텍스트"),
             "header body text emitted"
         );
+    }
+
+    /// 회귀 잠금: HWPX 에서 **파싱된** 머리말(`from_source`)은 편집으로 섹션이 dirty 가 되어도
+    /// 다시 합성해 끼우지 않는다 — 원본 섹션 XML 이 이미 그 `<hp:header>` 를 담고 있어서
+    /// 끼우면 저장할 때마다 머리말이 하나씩 늘어난다.
+    #[test]
+    fn parsed_header_is_not_respliced_when_the_section_is_edited() {
+        let section = concat!(
+            r#"<?xml version="1.0" encoding="UTF-8"?><hs:sec xmlns:hs="s" xmlns:hp="p">"#,
+            r#"<hp:p id="1" paraPrIDRef="0"><hp:run charPrIDRef="0"><hp:secPr id=""><hp:pagePr width="59528" height="84188"><hp:margin header="0" footer="0" gutter="0" left="0" right="0" top="0" bottom="0"/></hp:pagePr></hp:secPr>"#,
+            r#"<hp:ctrl><hp:header id="5" applyPageType="ODD"><hp:subList><hp:p><hp:run><hp:t>ZZHEADERZZ</hp:t></hp:run></hp:p></hp:subList></hp:header></hp:ctrl></hp:run></hp:p>"#,
+            r#"<hp:p id="2" paraPrIDRef="0"><hp:run charPrIDRef="0"><hp:t>본문</hp:t></hp:run></hp:p></hs:sec>"#
+        );
+        let hpf = r#"<opf:package xmlns:opf="opf"><opf:manifest><opf:item id="header" href="Contents/header.xml" media-type="application/xml"/><opf:item id="section0" href="Contents/section0.xml" media-type="application/xml"/></opf:manifest><opf:spine><opf:itemref idref="section0"/></opf:spine></opf:package>"#;
+        let bytes = crate::parse::tests::build_test_hwpx(&[
+            ("mimetype", b"application/hwp+zip"),
+            ("Contents/header.xml", b"<hh:head></hh:head>"),
+            ("Contents/section0.xml", section.as_bytes()),
+            ("Contents/content.hpf", hpf.as_bytes()),
+        ]);
+
+        let mut doc = parse_semantic(&bytes).expect("parse");
+        assert_eq!(
+            doc.sections[0].decorations.len(),
+            1,
+            "머리말이 IR 에 들어옴"
+        );
+        assert!(doc.sections[0].decorations[0].from_source);
+
+        // 섹션을 dirty 로 만든다(편집 시뮬레이션) → patch_section_xml 경로가 돈다.
+        doc.sections[0].dirty.mark();
+        let out = serialize(&doc).expect("serialize");
+        let pkg = Package::open(&out).unwrap();
+        let sec0 = String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap();
+        assert_eq!(
+            sec0.matches("<hp:header").count(),
+            1,
+            "머리말이 중복 삽입됐다:\n{sec0}"
+        );
+        assert_eq!(sec0.matches("ZZHEADERZZ").count(), 1);
     }
 
     #[test]
@@ -3138,13 +3184,51 @@ mod tests {
             "endNote ctrl emitted"
         );
         assert!(sec0.contains("<hp:subList"), "note body subList emitted");
-        // Both the referencing text and the note body text are present.
+        // 왕복: 참조 문단은 본문에, 미주 본문은 **본문이 아니라** `Inline::Note` 안에 있어야 한다.
+        // (예전엔 파서가 미주 본문을 섹션 루트 블록으로 흘려서 plain_text 로 잡혔다 — 그게 버그였다.)
         let re = parse_semantic(&out).unwrap();
         let text = re.plain_text();
+        assert!(text.contains("본문"), "참조 텍스트: {text}");
         assert!(
-            text.contains("본문") && text.contains("미주 본문"),
-            "ref + note body text: {text}"
+            !text.contains("미주 본문"),
+            "미주 본문이 본문으로 샜다: {text}"
         );
+        let mut notes = Vec::new();
+        for sec in &re.sections {
+            collect_note_text(&sec.blocks, &mut notes);
+        }
+        assert!(
+            notes.iter().any(|t| t.contains("미주 본문")),
+            "미주 본문이 Inline::Note 로 보존되어야 한다: {notes:?}"
+        );
+    }
+
+    /// 블록 트리를 훑어 각주/미주 본문 텍스트를 모은다(테스트 헬퍼).
+    fn collect_note_text(blocks: &[Block], out: &mut Vec<String>) {
+        for b in blocks {
+            match b {
+                Block::Paragraph(p) => {
+                    for r in &p.runs {
+                        for inl in &r.content {
+                            if let Inline::Note(nr) = inl {
+                                let mut s = SemanticDoc::default();
+                                s.sections.push(Section {
+                                    blocks: nr.body.clone(),
+                                    ..Default::default()
+                                });
+                                out.push(s.plain_text());
+                                collect_note_text(&nr.body, out);
+                            }
+                        }
+                    }
+                }
+                Block::Table(t) => {
+                    for c in &t.cells {
+                        collect_note_text(&c.blocks, out);
+                    }
+                }
+            }
+        }
     }
 
     #[test]

@@ -105,6 +105,8 @@ pub fn read(bytes: &[u8]) -> Result<SemanticDoc> {
                     kind: dref.kind,
                     apply: ApplyPage::Both,
                     blocks: dblocks,
+                    // DOCX 유래 — HWPX XML 에는 없으니 emit 대상이다.
+                    from_source: false,
                 });
             }
         }

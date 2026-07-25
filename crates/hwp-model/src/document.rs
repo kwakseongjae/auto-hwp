@@ -144,6 +144,12 @@ pub struct PageDecoration {
     pub kind: DecoKind,
     pub apply: ApplyPage,
     pub blocks: Vec<Block>,
+    /// True when this decoration was PARSED from the section's own XML, which the serializer
+    /// re-emits byte-verbatim via `Section.provenance.raw` — so re-synthesizing it would splice a
+    /// **duplicate** `<hp:header>` into a section that already has one. Set by the HWPX parser;
+    /// false for decorations the lift/converter/JSX build (those must be emitted, since their
+    /// target XML has none). 왕복 바이트 보존 해자를 지키는 스위치다 — HWPX-in 은 항상 true.
+    pub from_source: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

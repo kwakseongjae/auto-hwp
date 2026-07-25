@@ -144,4 +144,9 @@ pub struct DecorationBlob {
     pub apply: String,
     /// JSON of the decoration's blocks (reuses the inline block encoder in `lib`).
     pub blocks_json: String,
+    /// [`PageDecoration::from_source`] — true when the decoration already lives in the section's
+    /// preserved raw XML (HWPX-in). MUST round-trip: dropping it turns a preserved header into a
+    /// re-emitted one and the next save splices a DUPLICATE. `default` keeps older projects readable.
+    #[serde(default)]
+    pub from_source: bool,
 }
