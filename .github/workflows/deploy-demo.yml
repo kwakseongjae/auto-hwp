@@ -76,6 +76,9 @@ jobs:
         working-directory: apps/hwp-lab
         env:
           DEMO_BASE_PATH: ${{ inputs.base_path }}
+          # 정적 데모 AI: Cloudflare Worker 프록시 URL(services/demo-ai-proxy). 레포 Variable
+          # `DEMO_AI_URL`을 설정하면 라이브 데모의 AI 편집이 켜지고, 비면 기존 안내만 뜬다(회귀 없음).
+          NEXT_PUBLIC_DEMO_AI_URL: ${{ vars.DEMO_AI_URL }}
         run: |
           npm install --no-audit --no-fund
           npm run build:demo
