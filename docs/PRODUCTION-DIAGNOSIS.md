@@ -1,5 +1,9 @@
 # auto-hwp — 프로덕션 진단 & 로드맵 (2026-06-18)
 
+> **역사 문서** — 여기 적힌 진단은 대부분 R1~R11에서 해소됐다(같은 날짜의
+> [`PRODUCTION-ROADMAP.md`](./PRODUCTION-ROADMAP.md)가 이 문서를 대체한다고 스스로 밝히고 있다).
+> 현재 상태는 [`docs/CURRENT_STATE.md`](./CURRENT_STATE.md)와 [`docs/issues/README.md`](./issues/README.md)를 보라.
+
 목표: **한글(Hancom Office) 데스크탑앱을 대체**하는 프로덕션 앱 + **AI가 모든 걸 하는** 서비스.
 이 문서는 현재 구현 상태에서 거기까지의 거리를 정직하게 진단한다.
 

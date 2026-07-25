@@ -30,7 +30,11 @@ which auto-hwp || cargo install --git https://github.com/kwakseongjae/auto-hwp a
 | HTML 변환 (시맨틱 리플로) | `auto-hwp export-html 문서.hwp -o 문서.html` |
 | 페이지 미리보기(SVG) | `auto-hwp own-render 문서.hwp --page 0 --out p.svg` (--page 생략=전체) |
 | LLM용 구조 컨텍스트 | `auto-hwp ai-context 문서.hwp` (표=그리드 + `[s/b]` 블록 주소) |
-| 편집(찾아바꾸기·표 채우기 등) | `auto-hwp edit` 계열 — `auto-hwp --help` 로 서브커맨드/인자 확인 후 사용 |
+| 문단 덧붙이기 | `auto-hwp edit 문서.hwpx --append "문단"` (⚠️ `edit` 는 덧붙이기 전용) |
+| 찾아바꾸기·표 채우기 | `auto-hwp ai-edit 문서.hwp --instruction "…"` (자연어) |
+| 양식 일괄 작성(명단 → 완성본 N부) | `auto-hwp inspect 양식 --out map.json` → 검수 → `auto-hwp fill 양식 --map map.json --data 명단.csv --out 폴더` |
+
+전체 명령 팔레트·기능 플래그는 **`docs/CLI-GUIDE.md`가 정본**이다(이 표는 자주 쓰는 것만).
 
 편집 워크플로: 먼저 `ai-context` 로 구조와 `[s/b]` 주소를 읽고 → 편집 커맨드로 반영 → `export-*` 로
 결과물. 여러 파일 배치 변환은 셸 루프로.

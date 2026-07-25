@@ -2,7 +2,7 @@
 ///
 /// `HwpWorkspace` deliberately ships no chat view (see `WorkspaceSidePanel`): the document surface is
 /// the SDK's, the panel is the host's. This helper exists so a host that *wants* our reference chat
-/// can mount it in one line instead of re-deriving the 12-value slot wiring:
+/// can mount it in one line instead of re-deriving the 13-value slot wiring:
 ///
 /// ```tsx
 /// <HwpWorkspace … sidePanel={chatSidePanel({ onAiRequest, notice: "…" })} />

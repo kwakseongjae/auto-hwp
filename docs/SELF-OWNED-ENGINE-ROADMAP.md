@@ -1,5 +1,9 @@
 # Self-owned document engine — architecture decision + roadmap
 
+> **Historical document (2026-06-23)** — the architecture decision here stands, but the P0–P5 phase
+> plan below has since shipped. For current status see [`docs/CURRENT_STATE.md`](./CURRENT_STATE.md);
+> for the live roadmap see [`docs/PRODUCT-DIRECTION-V2.md`](./PRODUCT-DIRECTION-V2.md).
+
 Decided 2026-06-23 from a hard research workflow (6 streams + synthesis).
 
 ## North star

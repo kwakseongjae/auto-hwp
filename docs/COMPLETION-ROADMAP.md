@@ -1,5 +1,9 @@
 # auto-hwp 완성형 로드맵 (design workflow 산출물, 17 agents)
 
+> **역사 문서 (2026-06-17)** — 이후 로드맵이 R1~R14로 여러 차례 갱신됐다. 현재 상태는
+> [`docs/CURRENT_STATE.md`](./CURRENT_STATE.md), 현행 로드맵은
+> [`docs/PRODUCT-DIRECTION-V2.md`](./PRODUCT-DIRECTION-V2.md)와 [`docs/issues/README.md`](./issues/README.md)다.
+
 > Hancom HWP/Hancom Docs 에디터 기능 → OWPML → auto-hwp 합성 아키텍처. 사실검증(adversarial verify) 통과 기준.
 
 ## Foundation

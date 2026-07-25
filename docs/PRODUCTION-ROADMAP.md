@@ -1,5 +1,9 @@
 # auto-hwp 프로덕션 로드맵 — "사용 가능한 수준"까지의 정직한 경로 (2026-06-18)
 
+> **역사 문서** — 여기서 P0로 잡은 항목들(타이핑 가능한 캐럿·비동기 open/render·원자적 저장·CSP)은
+> 이후 R1~R11에서 대부분 해소됐다. 현재 상태는 [`docs/CURRENT_STATE.md`](./CURRENT_STATE.md),
+> 현행 로드맵은 [`docs/PRODUCT-DIRECTION-V2.md`](./PRODUCT-DIRECTION-V2.md)를 보라.
+
 > 6개 차원(입력·export 충실도·레이아웃/렌더·편집/사용자플로우·맥 패키징·신뢰/AI)을 실제 코드 대비 진단 →
 > 완결성 비평 → 종합한 결과. 이전 `PRODUCTION-DIAGNOSIS.md`를 대체한다. 핵심 P0 주장은 코드에서 직접 검증함.
 

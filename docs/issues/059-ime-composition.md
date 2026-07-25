@@ -1,6 +1,8 @@
 # 059 — IME 한글 인라인 조합 (FG-13) — 실은 입력 캡처 아키텍처 이슈
 
-- 상태: open · 우선순위: R13-P0(캐럿 UX 완성의 필수 조각) · 영역: packages/react(CaretLayer/HwpWorkspace) — 엔진 무변경
+- 상태: **done**(구현 완료 — 이 헤더가 오래 open 으로 남아 있었다. 이슈 상태의 정본은
+  `docs/issues/README.md` 와 git log 다) · 우선순위: R13-P0(캐럿 UX 완성의 필수 조각) ·
+  영역: packages/react(CaretLayer/HwpWorkspace) — 엔진 무변경
 - 근거: 2026-07-11 리서치. **반전**: "조합이 안 보이는" 표시 문제가 아니라 **입력 표면 부재** 문제.
 
 ## 핵심 발견 (전제가 심각)

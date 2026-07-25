@@ -84,15 +84,50 @@ const adapter = new WasmAdapter(
   defaultFont={{ family: "Nanum Gothic", bytes: fontBytes }}  // R8 — 폰트는 주입(§6)
   fontUrlBase="/fonts"
   enableEditing                             // 옵트인: 수동 편집 크롬(룰러/열너비/서식 툴바)
+  sidePanel={(api) => <MyPanel {...api} />} // 오른쪽 패널은 호스트 것(아래 §3.1) — 생략하면 패널 없음
 />
 ```
 
 전체 배선(파일 열기·프로브·폰트 fetch·mock AI)은 [`examples/vite-embed/src/App.tsx`](../examples/vite-embed/src/App.tsx) 참조.
 
+### 3.1 `sidePanel` — 오른쪽 패널은 호스트가 조립한다
+
+`HwpWorkspace` 는 **문서 표면만** 소유한다: 페이지·선택·오버레이·수동 편집. **채팅 뷰는 들어 있지 않다.**
+오른쪽 패널은 슬롯이고, 호스트가 채팅·입력 폼·인스펙터를 넣거나 아무것도 안 넣는다. 슬롯 함수는
+`WorkspaceSidePanel` 을 받는다 — 편집 표면 전체가 여기로 넘어오므로 워크스페이스 내부를 건드릴 일이 없다:
+
+```tsx
+sidePanel={(api) => (
+  <MyPanel
+    canEdit={api.canEdit}            // 문서가 열려 있고 편집 가능한가
+    anchors={api.anchors}            // 사용자가 지정한 위치들([s/b] 주소 — docContext 와 동일 좌표)
+    modLabel={api.modLabel}          // "⌘" / "Ctrl"
+    onRemoveAnchor={api.removeAnchor}
+    onClearAnchors={api.clearAnchors}
+    docContext={api.docContext}      // AI 브릿지에 넘길 문서 컨텍스트(프로필+지정위치+표 그리드)
+    onApply={api.apply}              // 검증된 Intent[] 적용 → 반영 개수
+    onJumpToPage={api.jumpToPage}
+    onRevealTarget={api.revealTarget}// 블록으로 스크롤 + 깜빡임("위치 보기")
+    focusToken={api.focusToken}      // 증가하면 입력창에 포커스
+    previewCards={api.previewCards}  // 적용 전 미리보기 보강
+    onRevert={api.revert}            // 마지막 적용 묶음을 한 단위로 되돌리기
+    undoDepth={api.undoDepth}
+  />
+)}
+```
+
+정의: [`packages/react/src/components/HwpWorkspace.tsx`](../packages/react/src/components/HwpWorkspace.tsx) 의 `WorkspaceSidePanel`.
+
+우리 참조 채팅을 그대로 쓰려면 `chatSidePanel({ onAiRequest, notice })` 한 줄이면 된다
+([`packages/react/src/chatSlot.tsx`](../packages/react/src/chatSlot.tsx)). 단 **그건 데모 어포던스지 제품
+계약이 아니다** — 한국어 문구·카드 레이아웃·상호작용 모델이 전부 우리 것이다. 실제 제품은 자기 패널을
+`WorkspaceSidePanel` 에 대고 그리고, 이 패키지에서는 편집 표면만 가져가는 쪽을 권한다.
+
 ### `styles.css` 는 수동 import
 
-`@auto-hwp/react` 는 CSS-in-JS 가 아니다. `import "@auto-hwp/react/styles.css"` 를 **한 번** 넣어야 오버레이/
-채팅/툴바가 스타일된다. 클래스는 네임스페이스드(`hw-*`)라 호스트 스타일과 충돌하지 않고 오버라이드도 자유다.
+`@auto-hwp/react` 는 CSS-in-JS 가 아니다. `import "@auto-hwp/react/styles.css"` 를 **한 번** 넣어야 페이지/
+오버레이/툴바가 스타일된다. 클래스는 네임스페이스드(`hw-*`)라 호스트 스타일과 충돌하지 않고 오버라이드도 자유다.
+(`sidePanel` 에 넣는 패널은 당신 스타일이다 — 참조 채팅 `chatSidePanel` 을 쓸 때만 이 CSS 가 그 카드까지 그린다.)
 
 ### `"use client"` — 호스트가 클라이언트 경계를 친다
 

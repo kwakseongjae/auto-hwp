@@ -1,5 +1,9 @@
 # AI 레이어 + 로컬 실행 & 터미널→Tauri 제어 계획
 
+> **역사 문서 (2026-06-17)** — 여기서 계획한 로컬 AI 실행 모델은 이미 배송됐다(MCP 서버 · BYOK ·
+> `@auto-hwp/ai-protocol`). 현재 상태는 [`docs/CURRENT_STATE.md`](./CURRENT_STATE.md), 실제 사용법은
+> [`docs/MCP-GUIDE.md`](./MCP-GUIDE.md) · [`docs/CLI-GUIDE.md`](./CLI-GUIDE.md)를 보라.
+
 > 사용자 방향: ① hwp/hwpx 온전한 업로드·뷰 ② 편집기 심화 ③ **AI 레이어**(로컬: BYOK + "터미널에서 Tauri 제어") ④ 온전한 .hwpx export.
 > 본 문서는 14-에이전트 리서치(Tauri2 제어 표면 · 임베디드 MCP · BYOK/로컬LLM · 레퍼런스 아키텍처, 사실검증 10/10 통과)를 근거로 #3의 로컬 실행 모델을 구체화하고 4영역을 시퀀싱한다. (2026-06 기준)
 

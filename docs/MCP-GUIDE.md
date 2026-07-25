@@ -48,3 +48,10 @@ claude mcp add auto-hwp -- hwp-mcp          # Claude Code
 - `--http`: 루프백 전용 토큰 파일 방식(로컬 데스크톱 앱 연동).
 - `--http-network`: 컨테이너 서비스 모드(환경변수 fail-closed·workspace 감금 — 사설망 전용).
   프로젝트가 호스팅하는 공용 서버는 **없다** — 셋 다 사용자가 자기 인프라에서 돌리는 것이다.
+
+## 다른 표면
+
+- 터미널에서 직접: [CLI 가이드](./CLI-GUIDE.md) (`auto-hwp` 바이너리 — 같은 엔진)
+- Claude Code 세션에서 바로: [스킬 정의](../skills/hwp/SKILL.md) (CLI를 감싼다)
+- 웹앱에 임베드: [임베드 가이드](./EMBED-GUIDE.md)
+- 양식 N부 일괄 작성: [양식 일괄 작성 가이드](./BULK-GUIDE.md)

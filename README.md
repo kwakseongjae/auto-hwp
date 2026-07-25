@@ -1,69 +1,86 @@
-<p align="center"><img src="./assets/brand/autohwp-banner.png" alt="오토한글 (auto-hwp) — AI와 함께, 한 화면을 보면서 쓰는 한글" width="100%"></p>
+<p align="center"><img src="./assets/brand/autohwp-banner.png" alt="오토한글 (auto-hwp) — 한글 문서를 직접 다루는 엔진" width="100%"></p>
 
 # 오토한글 (auto-hwp)
 
-**AI와 함께 한 화면을 보면서 작성하는 한글.** `.hwp`/`.hwpx`를 열면 원본 그대로 그려지고 —
-가리키거나 그냥 말하면 AI가 편집을 제안하고, 위치를 눈으로 확인하고 승인하면 문서가 됩니다.
-전 과정이 서버 없이 100% 로컬(WebAssembly · MCP · CLI)에서 돕니다.
+**한글(HWP/HWPX) 문서를 직접 다루는 엔진.** 파일을 열고, 원본대로 그리고, 구조를 바꾸고,
+PDF·HTML·HWPX로 내보냅니다. 화면·AI·터미널이 전부 **같은 엔진** 위에서 돕니다.
+서버는 없습니다 — WebAssembly·MCP·CLI로 사용자의 컴퓨터에서 실행됩니다.
+
+이 저장소가 배포하는 것은 **엔진과 SDK**입니다. 아래 데모는 그 엔진으로 만든 참조 구현이지
+여러분이 써야 할 화면이 아닙니다 — **화면은 여러분이 조립합니다.**
 
 [English](./README.en.md) · [라이브 데모](https://kwakseongjae.github.io/auto-hwp/) ·
-[임베드 가이드](./docs/EMBED-GUIDE.md) · [MCP](./docs/MCP-GUIDE.md) · [기여](./CONTRIBUTING.md)
+[임베드](./docs/EMBED-GUIDE.md) · [CLI](./docs/CLI-GUIDE.md) · [MCP](./docs/MCP-GUIDE.md) ·
+[양식 일괄 작성](./docs/BULK-GUIDE.md) · [기여](./CONTRIBUTING.md)
 
-## AI에게 HWP는 "보이지 않는 문서"였습니다
+## 설치 없이 웹에서 써보기
 
-LLM에게 HWP를 주는 기존 방법은 결국 **텍스트 추출**입니다. 추출은 됩니다 — 그런데 그 순간
-문서는 두 세계로 갈라집니다. **AI가 읽은 것**(평문)과 **사람이 보는 것**(조판된 지면)이 서로 다른
-표현이라, AI는 "3번 표의 빈칸"이 화면 어디인지 모르고, 고친 결과가 레이아웃을 깨뜨렸는지
-아무도 보증하지 못합니다. 공문서·신청서처럼 **서식 자체가 내용인 문서**에서 이 간극은 치명적입니다.
+| 데모 | 하는 일 | 링크 |
+|---|---|---|
+| **문서 편집** | 한글 파일을 열어 화면에서 고치고 HTML·PDF·HWPX로 저장 | [열기](https://kwakseongjae.github.io/auto-hwp/) |
+| **양식 일괄 작성** | 양식 1개 + 명단 N행 → 완성본 N부 zip (규칙 기반, AI 없이 동작) | [열기](https://kwakseongjae.github.io/auto-hwp/bulk) · [가이드](./docs/BULK-GUIDE.md) |
 
-오토한글의 구조적 선택은 그래서 파서도 뷰어도 아닌 **엔진 소유**입니다 — 파싱 → 조판 → 렌더 →
-편집 → 저장이 **하나의 IR(SemanticDoc)** 위에서 돕니다:
+문서는 브라우저 밖으로 나가지 않습니다(전 과정 WebAssembly, 업로드 없음).
+데모는 현재 `.hwp`만 받습니다 — `.hwpx` 입력은 알파 단계입니다.
+
+## 왜 엔진을 직접 만들었나
+
+LLM에게 한글 문서를 주는 기존 방법은 결국 **텍스트 추출**입니다. 추출은 됩니다 — 그런데 그 순간
+문서가 둘로 갈라집니다. **AI가 읽은 것**(평문)과 **사람이 보는 것**(조판된 지면)이 서로 다른
+표현이라, AI는 "3번 표의 빈칸"이 화면 어디인지 모르고, 고친 결과가 레이아웃을 깨뜨렸는지 아무도
+보증하지 못합니다. 서식 자체가 내용인 공문서·신청서에서 이 간극은 치명적입니다.
+
+그래서 파서도 뷰어도 아닌 **엔진을 소유**합니다. 열기부터 저장까지 **하나의 문서 모델** 위에서 돕니다:
 
 ```
-.hwp / .hwpx ──▶ SemanticDoc(IR) ──▶ 조판(hwp-typeset) ──▶ SVG 페이지 (화면·hit-test)
-                     │                                  ├▶ PDF (레이아웃 보존, krilla)
-                     │                                  └▶ 문서 프로필·Markdown (AI가 읽는 창)
-                     └── Intent JSON ──▶ Op ──▶ IR 변이 (편집·undo/redo) ──▶ HWPX 저장
+.hwp / .hwpx ──▶ 문서 모델 ──▶ 조판 ──▶ 페이지 SVG (화면 · 좌표 질의)
+                    │                 ├▶ PDF (레이아웃 보존)
+                    │                 └▶ 문서 프로필 · Markdown (AI가 읽는 창)
+                    └── 편집 명령 ──▶ 문서 변경 (되돌리기 포함) ──▶ HWPX 저장
 ```
 
-이 한 줄의 구조가 AI 인식 레벨에서 세 가지를 성립시킵니다:
+여기서 세 가지가 따라 나옵니다. ① **AI가 읽는 것 = 화면에 그려지는 것** — 프로필의 주소 `[s0/b3]`은
+화면의 그 블록과 같은 좌표라, 마킹 없이 "첫 번째 표에 행 추가해줘"가 정확한 블록에 꽂힙니다.
+② **편집은 화이트리스트 명령만** — 모델은 자유 텍스트가 아니라 검증된 편집 명령만 낼 수 있습니다.
+③ **결과를 수치로 검증** — 쪽수·줄바꿈 일치율이 CI 게이트로 잠겨 있습니다(아래 [정확도](#정확도와-한계)).
 
-**① AI가 읽는 것 = 화면에 그려지는 것.** 업로드 즉시 엔진이 **문서 프로필**(제목·목차·표
-인벤토리·본문 발췌)을 결정론으로 추출해(LLM 호출 0회) 매 요청에 붙입니다. 프로필의 주소
-`[s0/b3]`은 화면의 그 블록과 **같은 IR 좌표**라, 마킹 없이 "첫 번째 표에 행 추가해줘"가 정확한
-블록에 꽂힙니다. 추출-전용 파이프라인에는 이 좌표계 자체가 없습니다.
+## 엔진이 할 수 있는 일
 
-**② AI의 손은 자유 텍스트가 아니라 타입드 Intent.** 모델은 화이트리스트 19종의
-**Intent JSON**만 낼 수 있고(찾아바꾸기·글자서식·표·차트·여백…), 스키마 검증 + unknown field
-거부를 통과한 것만 op-bus를 지나 문서에 닿습니다 — 각 1 undo 단위. 제안은 카드로 미리 보고
-**"⊙ 위치 보기"**로 바뀔 블록을 화면에서 확인한 뒤 승인합니다. 모델 출력이 문서를 조용히
-깨뜨릴 경로가 구조적으로 없습니다.
+| 능력 | 무엇을 주나 | 엔진 API · CLI |
+|---|---|---|
+| **열기** | `.hwp`(HWP5)·`.hwpx` 자동 감지 → 편집 가능한 문서 모델. 배포용(DRM) 문서 복호 | `HwpDoc.open` · `auto-hwp info` |
+| **조판** | 한글 조판 규칙 재구현(금칙 처리·장평·자간·옛한글), 쪽 나눔과 표의 행 단위 분할 포함 | `pageCount` · `auto-hwp layout-check` |
+| **렌더** | 페이지별 SVG 문자열. 어디에 어떻게 그릴지는 호스트 자유 | `renderPageSvgSanitized` · `auto-hwp own-render` |
+| **좌표 질의** | 점 → 블록·표·셀·글자 히트테스트, 표 열/행 경계, 커서 사각형, 사각형 안 블록 | `hitTest` · `tableCellAt` · `caretRectCell` · `blocksInRect` |
+| **구조화 편집** | 셀·문단 채우기, 표/문단/차트/이미지 삽입, 행 추가, 블록 이동·삭제, 찾아바꾸기, 글자서식, 표 열폭, 쪽 여백 — 전부 타입 있는 편집 명령(Intent)이고 각각 되돌리기 1단위 | `applyIntent` · `undo`/`redo` |
+| **문서 프로필** | 제목·목차·표 인벤토리·본문 발췌를 결정론으로 추출(LLM 호출 0회) — AI 컨텍스트의 정본 | `docProfile` · `auto-hwp ai-context` |
+| **표 그리드** | 표를 행·열·병합·텍스트가 담긴 격자로 노출 — 양식 채우기의 기반 | `tableGrid` |
+| **내보내기** | PDF(레이아웃 보존·한글 폰트 임베드) · HTML(시맨틱 리플로) · HWPX(고치지 않은 영역은 바이트 그대로) | `exportPdf`·`exportHtml`·`toHwpx` · `auto-hwp export-pdf`/`export-html` |
+| **서체 주입** | TTF/OTF 바이트를 등록하면 조판·화면·PDF가 **동시에** 그 서체로 | `registerFont` |
+| **양식 일괄 채움** | 양식 + 채울 자리 정의 + 명단 → 완성본 N부 + 행별 검증 리포트 | `auto-hwp inspect`/`fill` · [가이드](./docs/BULK-GUIDE.md) |
 
-**③ 결과가 수치로 검증됩니다.** 렌더를 소유하니 "잘 됐다"를 잴 수 있습니다 — 실물 정부 양식에서
-한컴 렌더와 **페이지 수 완전 일치(8==8 · 18==18)**, 줄바꿈 위치 **98.9%+** 를 CI 불변식으로
-잠그고, 편집하지 않은 콘텐츠는 **바이트 그대로** 재직렬화됩니다(round-trip). "AI가 고친 파일이
-한글에서 그대로 열린다"가 슬로건이 아니라 게이트입니다.
+없는 것도 분명합니다 — 표의 행 삭제·열 삽입·열 삭제 명령은 **없습니다**(정직하게 비워 둡니다).
+전체 명령 스펙은 [`docs/INTENT-SCHEMA.md`](./docs/INTENT-SCHEMA.md).
 
-세 성질 모두 렌더를 소유해야만 성립합니다 — 그것이 남의 뷰어를 감싸는 대신 조판기를 다시 만든 이유입니다.
+## 가져다 쓰는 네 가지 방법
 
-## 패키지 (npm)
+| 방법 | 이럴 때 | 시작 |
+|---|---|---|
+| **npm 임베드** | 내 웹앱 안에서 문서를 열고 그리고 고친다 | `npm i @auto-hwp/engine` → [임베드 가이드](./docs/EMBED-GUIDE.md) |
+| **CLI** | 터미널·스크립트·배치 변환, 양식 일괄 작성 | `cargo install --git https://github.com/kwakseongjae/auto-hwp auto-hwp-cli --features rhwp,shaper,pdf` → [CLI 가이드](./docs/CLI-GUIDE.md) |
+| **MCP 서버** | Claude Code/Desktop·Cursor에 상시 장착 | `cargo install --git https://github.com/kwakseongjae/auto-hwp hwp-mcp --features rhwp` → [MCP 가이드](./docs/MCP-GUIDE.md) |
+| **Claude Code 스킬** | 아무 세션에서 "이 hwp를 pdf로" | `cp -r skills/hwp ~/.claude/skills/` → [스킬 정의](./skills/hwp/SKILL.md) |
+
+CLI·MCP·스킬은 전부 로컬 실행입니다 — 문서가 컴퓨터를 떠나지 않습니다.
+
+## npm 패키지 — 엔진만 쓰기
 
 | 패키지 | 레이어 | 역할 |
 |---|---|---|
-| **`@auto-hwp/engine`** | L1 | **headless 엔진 (wasm)** — 파싱·조판·SVG/HTML/PDF/HWPX·Intent 편집·undo. UI 없음 |
-| `@auto-hwp/editor-core` | L2 | headless 에디터 상태 (선택·편집·세션) — DOM 최소, React 무관 |
-| `@auto-hwp/ai-protocol` | L2′ | 바이브 편집 LLM 프로토콜 (프롬프트/컨텍스트/검증) — fetch 없음, 키 없음 |
-| `@auto-hwp/react` | L3 | **선택** 레이어: 레퍼런스 에디터 `<HwpWorkspace/>` + React 바인딩 |
-
-```bash
-npm i @auto-hwp/engine            # headless만 쓸 때
-npm i @auto-hwp/react @auto-hwp/engine @auto-hwp/editor-core @auto-hwp/ai-protocol
-```
-
-임베드 전체 레시피(wasm 정적 서빙·CSP·폰트·AI 프록시)는 [docs/EMBED-GUIDE.md](./docs/EMBED-GUIDE.md),
-동작 예제는 [examples/vite-embed](./examples/vite-embed).
-
-## 빠른 시작 ① — headless 엔진만 (자체 UI)
+| **`@auto-hwp/engine`** | L1 | **엔진(wasm)** — 열기·조판·SVG/HTML/PDF/HWPX·편집·되돌리기. 화면 코드 없음 |
+| `@auto-hwp/editor-core` | L2 | 화면 없는 에디터 상태(선택·편집·세션) — DOM 최소, React 무관 |
+| `@auto-hwp/ai-protocol` | L2′ | AI 편집 프로토콜(프롬프트·컨텍스트·검증) — 네트워크 호출 없음, 키 없음 |
+| `@auto-hwp/react` | L3 | **선택** 레이어: 참조 에디터 `<HwpWorkspace/>` + React 바인딩 |
 
 React도, 우리 에디터도 필요 없습니다. 엔진은 SVG 문자열과 바이트를 돌려줍니다:
 
@@ -79,24 +96,28 @@ for (let p = 0; p < doc.pageCount(); p++) {
   container.insertAdjacentHTML('beforeend', doc.renderPageSvgSanitized(p));
 }
 
-// 편집 — Intent JSON (스키마 v0, docs/INTENT-SCHEMA.md)
+// 편집 — 편집 명령(Intent) JSON. 스키마는 docs/INTENT-SCHEMA.md
 doc.applyIntent({ intent: 'SetTableCell', section: 0, index: 1, row: 0, col: 0, text: '값' });
 doc.undo();
 
 // 내보내기
-const html = doc.exportHtml();               // 시맨틱 reflow HTML
+const html = doc.exportHtml();               // 시맨틱 리플로 HTML
 const pdf  = doc.exportPdf();                // 레이아웃 보존 PDF (Uint8Array)
-const hwpx = doc.toHwpx();                   // round-trip 안전 HWPX (Uint8Array)
+const hwpx = doc.toHwpx();                   // 고치지 않은 영역은 바이트 그대로 (Uint8Array)
 
 doc.free();
 ```
 
-지오메트리 질의(`hitTest`/`tableAt`/`blocksInRect`…)까지 27개 메서드가
-[`EngineAdapter` 계약](./packages/editor-core/src/adapter.ts)으로 문서화되어 있어,
-클릭 선택·드래그·캐럿이 있는 **완전한 자체 에디터**를 엔진 위에 지을 수 있습니다.
+좌표 질의까지 포함한 **34개 메서드**가 [`EngineAdapter` 계약](./packages/editor-core/src/adapter.ts)으로
+문서화되어 있어, 클릭 선택·드래그·커서가 있는 **완전한 자체 에디터**를 엔진 위에 지을 수 있습니다.
 중간층이 필요하면 `@auto-hwp/editor-core`(선택 모델·편집 컨트롤러, React 무관)를 쓰세요.
+전체 임베드 레시피(wasm 정적 서빙·CSP·폰트·AI 프록시)는 [`docs/EMBED-GUIDE.md`](./docs/EMBED-GUIDE.md),
+동작 예제는 [`examples/vite-embed`](./examples/vite-embed)입니다.
 
-## 빠른 시작 ② — 레퍼런스 에디터 (React)
+## 화면은 당신이 조립합니다
+
+참조 에디터 `<HwpWorkspace/>`도 **문서 표면만** 소유합니다 — 페이지·선택·오버레이·수동 편집.
+오른쪽 패널은 슬롯입니다. 채팅을 넣든, 입력 폼을 넣든, 인스펙터를 넣든, 아무것도 안 넣든 호스트 마음입니다.
 
 ```tsx
 import { HwpWorkspace, WasmAdapter } from '@auto-hwp/react';
@@ -106,24 +127,101 @@ import '@auto-hwp/react/styles.css';
   adapter={adapter}                 // WasmAdapter (웹) 또는 자체 어댑터
   document={{ bytes, name }}
   enableEditing
-  onAiRequest={myLlmBridge}         // 선택: 바이브 편집 — LLM은 당신 서버에서 (BYOK)
+  onAiRequest={myLlmBridge}         // LLM 호출은 당신 서버에서 (BYOK)
+  sidePanel={(api) => <MyPanel {...api} />}   // 화면은 당신 것
 />
 ```
 
-wasm/워커 정적 서빙, CSP, 폰트, AI 프록시까지 전체 임베드 레시피는
-[`docs/EMBED-GUIDE.md`](./docs/EMBED-GUIDE.md) · 동작 예제는 [`examples/vite-embed`](./examples/vite-embed) ·
-AI 프록시 예제는 [`examples/ai-proxy-express`](./examples/ai-proxy-express).
+`sidePanel`을 생략하면 패널 없는 순수 에디터입니다. 슬롯이 호스트에게 넘기는 값
+([`WorkspaceSidePanel`](./packages/react/src/components/HwpWorkspace.tsx)) 전부:
 
-## AI 도구/터미널에서 바로 쓰기 (사이트 없이, 전부 로컬)
+| 값 | 무엇 |
+|---|---|
+| `canEdit` | 문서가 열려 있고 편집 가능한가 (false면 입력을 잠그면 됩니다) |
+| `anchors` | 사용자가 지금 지정한 위치들 — 문서 컨텍스트와 **같은** `[s/b]` 주소 |
+| `modLabel` | 플랫폼 보조키 표기(`⌘` / `Ctrl`) |
+| `removeAnchor(i)` | 지정한 위치 하나 제거 |
+| `clearAnchors()` | 지정 위치 전체 해제 |
+| `docContext` | AI에 넘길 문서 컨텍스트(문서 프로필 + 지정 위치 + 표 그리드) |
+| `apply(intents)` | 검증된 편집 명령을 적용하고 반영된 개수를 돌려준다 |
+| `jumpToPage(p)` | 해당 쪽으로 스크롤(0부터) |
+| `revealTarget(s, b)` | 해당 블록으로 스크롤 + 깜빡임 ("위치 보기") |
+| `focusToken` | 호스트가 입력창에 포커스를 줘야 할 때 값이 증가 |
+| `previewCards(intents)` | 적용 전 미리보기용으로 제안을 보강(예: 삭제 대상의 원문) |
+| `revert()` | 마지막에 적용한 묶음을 한 단위로 되돌린다 |
+| `undoDepth()` | 현재 되돌리기 스택 깊이 |
 
-- **MCP 서버** — Claude Code/Desktop·Cursor에 장착: `cargo install --git
-  https://github.com/kwakseongjae/auto-hwp hwp-mcp --features rhwp` → `claude mcp add auto-hwp -- hwp-mcp`.
-  열기/구조 컨텍스트/편집(프리뷰→승인)/찾아바꾸기/undo/HWPX·PDF export 15종 도구. 문서는 로컬을
-  떠나지 않는다. → [docs/MCP-GUIDE.md](docs/MCP-GUIDE.md)
-- **Claude Code 스킬** — `cp -r skills/hwp ~/.claude/skills/` 후 아무 세션에서 "이 hwp를 pdf로":
-  CLI(`auto-hwp`)를 감싸 변환·추출·미리보기·편집을 로컬로 수행. → [skills/hwp/SKILL.md](skills/hwp/SKILL.md)
+우리 참조 채팅을 그대로 쓰고 싶다면 `chatSidePanel({ onAiRequest })` 한 줄이면 됩니다
+([`packages/react/src/chatSlot.tsx`](./packages/react/src/chatSlot.tsx)) — 다만 그 한국어 문구와
+카드 레이아웃은 **데모의 것이지 제품 계약이 아닙니다**. 실제 제품은 자기 패널을 그리는 쪽을 권합니다.
 
-## 데모 실행 (로컬)
+## AI로 고치기 (편집 명령)
+
+문서의 셀·문단·표를 클릭해 위치를 지정하거나 — **그냥 말해도 됩니다**. 파일을 열면 엔진이
+**문서 프로필**(제목·구성·목차·표 목록·본문 발췌)을 LLM 호출 0회로 뽑아 매 요청에 붙이므로,
+아무것도 지정하지 않고 "첫 번째 표에 행 추가해줘"라고 해도 정확한 블록을 겨냥합니다.
+
+- 모델은 **편집 명령(Intent) JSON**만 낼 수 있습니다 — 엔진의 Intent 41종(열기·질의·편집·내보내기
+  전부 포함) 가운데 AI에게 열려 있는 편집 명령은 **19종**입니다
+  (셀·문단 채우기, 표/문단/차트/이미지 삽입, 행 추가, 블록 이동·삭제, 찾아바꾸기, 글자서식,
+  표 열폭, 쪽 여백). 스키마 검증과 알 수 없는 필드 거부를 통과한 것만 문서에 닿습니다.
+- 제안은 카드로 미리 보고, **"위치 보기"** 로 바뀔 블록을 화면에서 확인한 뒤 승인합니다. 카드별 되돌리기.
+- LLM 호출은 항상 **호스트 서버**에서 일어납니다(BYOK — 이 저장소의 어떤 패키지도 API 키를 보지 않습니다).
+- 에이전틱 모드: 웹 검색 → 근거 인용 → 편집 제안 스트리밍.
+
+프로토콜 자체는 `@auto-hwp/ai-protocol`에 분리돼 있어, 우리 채팅 UI 없이도 같은 계약으로 붙일 수 있습니다.
+
+## 정확도와 한계
+
+| 벤치마크 | 한컴 렌더 | auto-hwp | 판정 |
+|---|---|---|---|
+| benchmark.hwp (정부 양식, 8쪽) | 8쪽 | 8쪽 | 일치 |
+| benchmark1.hwp (신청서, 18쪽) | 18쪽 | 18쪽 | 일치 |
+| 줄바꿈 위치 일치율 | — | 98.9%+ | 게이트 |
+
+`scripts/verify-local.sh`가 이 게이트를 매 커밋 강제합니다. 게이트 밖 실물 검증으로
+**공공기관 실물 49종**(창업지원 양식·공고문·보도자료·고시 등, [출처](./corpus/GOV-SOURCES.md))이
+열기 → 렌더 → PDF → 텍스트 전 파이프라인을 통과합니다. 성능 실측은 130쪽 문서에서 편집 → 화면 반영
+136ms(워커 스레드, 화면 비차단)이고, 되돌리기 메모리는 문서 크기 연동 버짓(128MiB)으로 상한이 잡혀
+있습니다. 한컴 "다른 이름으로 저장"이 줄간격·행높이를 뭉갠 손실 `.hwpx`는 열화를 자동 감지해
+원본 근사로 복원하는 **레이아웃 정리** 모드가 있습니다.
+
+**알려진 제약 (정직 고지)**
+- **PDF의 수식·차트**: 화면·HTML에서는 실제로 그려지지만, PDF 백엔드는 아직 벡터로 내보내지 못해
+  **자리표시 상자**로 출력됩니다(내보내기 전에 미리 경고합니다).
+- **암호(password) 걸린 `.hwp`**: 지원하지 않으며 정직하게 거부합니다.
+  (배포용(distribution) 문서의 복호는 지원합니다.)
+- **`.hwp`(바이너리)로 재저장 불가**: 저장 포맷은 HWPX입니다. `.hwp`를 열어 편집한 결과도 HWPX로
+  나옵니다. HWPX 입력은 고치지 않은 영역이 바이트 그대로 보존되지만, `.hwp` 입력의 산출물은
+  **변환본**이라 쪽 나눔·표 너비가 원본과 달라질 수 있습니다.
+- 페이지 수 게이트는 위 벤치마크 기준입니다 — 임의의 문서에 대한 완전 일치 보증이 아닙니다.
+
+## 서체 (전부 OFL — 재배포·PDF 임베딩 적법)
+
+기본은 나눔고딕/나눔명조(명조·고딕 자동 구분 렌더). 리본에서 **Pretendard·Noto Sans/Serif KR·
+IBM Plex Sans KR·고운돋움/바탕** 등 카탈로그 8종을 고르면 해당 서체가 자동 로드되어
+**화면과 PDF에 실서체로** 반영됩니다. 함초롬 등 상용 서체는 라이선스상 번들하지 않으며
+OFL 대체로 렌더됩니다(직접 업로드하면 그 서체를 씁니다). → [docs/FONT-CATALOG.md](./docs/FONT-CATALOG.md)
+
+## 기여자용 — 설계 노트 · 크레이트 · 로컬 빌드
+
+초기 기획은 "HWP → XML(구조) + CSS(디자인) → LLM이 어느 쪽을 고칠지 선택"이었습니다. 구현하며
+**포맷 중립 IR(SemanticDoc) + 타입드 Intent 편집**으로 피벗했습니다
+([`docs/PIVOT-DESIGN.md`](./docs/PIVOT-DESIGN.md) — 역사 문서):
+
+- 렌더 정본은 **SemanticDoc → 조판 → SVG**(HWP 원본과 픽셀 수준 대조 가능)
+- 편집 정본은 **Intent JSON → Op → IR 변이**(LLM 출력을 스키마로 잠금 — 자유 XML/CSS 패치보다
+  검증 가능하고 undo가 정확함)
+- XML+CSS 상은 [`hwp-jsx`](./crates/hwp-jsx) **선택 코덱**(JSX/CSS 투영·round-trip 검증됨)으로
+  남아 있으며, HTML export가 그 계보입니다
+
+**Rust 크레이트**: `hwp-model`(IR) · `hwp-hwpx`(HWPX 코덱) ·
+`hwp-rhwp`(.hwp 파싱 부트스트랩, [rhwp](https://github.com/kwakseongjae/rhwp) MIT) ·
+`hwp-typeset`(조판: 금칙·장평·자간·옛한글) · `hwp-render`(PaintOp→SVG) · `hwp-export`(PDF/HTML) ·
+`hwp-ops`(op-bus·undo) · `hwp-mcp`(Intent 스키마) · `hwp-session`(지오메트리) · `hwp-wasm`(바인딩) ·
+`hwp-crypto`(배포용 문서 복호) · `auto-hwp-cli`(CLI)
+
+**로컬 빌드** (엔진을 직접 고칠 때 — 그냥 써볼 거라면 위 [라이브 데모](https://kwakseongjae.github.io/auto-hwp/)로 충분합니다):
 
 ```bash
 git clone --recurse-submodules https://github.com/kwakseongjae/auto-hwp
@@ -137,82 +235,9 @@ wasm-bindgen --target web --out-dir packages/engine/pkg target/wasm32-unknown-un
 cd apps/hwp-lab && npm install && npm run dev   # http://localhost:3000
 ```
 
-바이브 편집(AI)을 쓰려면 `apps/hwp-lab/.env.local`에 `OPENROUTER_API_KEY`를 넣으세요
+AI 편집을 로컬에서 켜려면 `apps/hwp-lab/.env.local`에 `OPENROUTER_API_KEY`를 넣으세요
 (키는 서버 라우트에만 존재 — 클라이언트 번들에 절대 실리지 않습니다).
-
-## 바이브 편집 (AI)
-
-문서의 셀/문단/표를 클릭해 앵커로 지정하거나 — **그냥 말해도 됩니다**: 업로드 즉시 엔진이
-**문서 프로필**(제목·구성·목차·표 목록·본문 발췌, LLM 호출 0회의 결정론 추출)을 매 요청에
-첨부해, 마킹 없이 "첫 번째 표에 행 추가해줘"도 정확한 블록을 겨냥합니다. LLM은
-**Intent JSON**(화이트리스트 19종)을 돌려주고 엔진이 검증 후 적용합니다.
-
-- 편집 어휘 19종: 셀/문단 채우기·표/문단/차트 삽입·행 추가·블록 이동/삭제에 더해
-  **찾아바꾸기·글자서식·표 열폭·페이지 여백** 같은 문서 전역 편집까지
-- 제안은 카드로 프리뷰 — **"⊙ 위치 보기"**로 어느 블록이 바뀌는지 눈으로 확인 후 승인, 카드별 되돌리기
-- LLM 호출은 항상 **호스트 서버**에서 (BYOK — 이 레포의 어떤 패키지도 API 키를 보지 않음),
-  모델 출력은 스키마 검증 + unknown field 거부 후에만 문서에 닿음
-- 에이전틱 모드: 웹 검색 → 근거 인용 → 편집 제안 스트리밍
-
-## 설계 노트 — 무엇이 정본인가
-
-초기 기획은 "HWP → XML(구조) + CSS(디자인) → LLM이 어느 쪽을 고칠지 선택"이었습니다.
-구현하며 **포맷 중립 IR(SemanticDoc) + 타입드 Intent 편집**으로 피벗했습니다
-([`docs/PIVOT-DESIGN.md`](./docs/PIVOT-DESIGN.md)):
-
-- 렌더 정본은 **SemanticDoc → 조판 → SVG** (HWP 원본과 픽셀 수준 대조 가능)
-- 편집 정본은 **Intent JSON → Op → IR 변이** (LLM 출력을 스키마로 잠금 — 자유 XML/CSS 패치보다
-  검증 가능하고 undo가 정확함)
-- XML+CSS 상은 [`hwp-jsx`](./crates/hwp-jsx) **선택 코덱**(JSX/CSS 투영·round-trip 검증됨)으로
-  남아 있으며, HTML export가 그 계보입니다
-
-즉 "LLM이 구조/디자인 중 어디를 고칠지 감지한다"는 목표는 유지하되, 그 매체가
-XML/CSS 텍스트가 아니라 **타입드 Intent**입니다.
-
-## 정확도
-
-| 벤치마크 | 한컴 렌더 | auto-hwp | 판정 |
-|---|---|---|---|
-| benchmark.hwp (정부 양식, 8쪽) | 8쪽 | 8쪽 | ✅ 일치 |
-| benchmark1.hwp (신청서, 18쪽) | 18쪽 | 18쪽 | ✅ 일치 |
-| 줄바꿈 위치 일치율 | — | 98.9%+ | 게이트 |
-
-`scripts/verify-local.sh`가 이 게이트를 매 커밋 강제합니다. 게이트 밖 실물 검증으로
-**공공기관 실물 49종**(창업지원 양식·공고문·보도자료·고시 등, [출처](./corpus/GOV-SOURCES.md))이
-열기→렌더→PDF→텍스트 전 파이프라인을 통과하며, 성능 실측은 130쪽 문서에서 편집→화면 136ms
-(워커 스레드, UI 비차단) · undo 메모리는 문서 크기 연동 버짓(128MiB)으로 상한이 잡혀 있습니다. 손실 변환된 `.hwpx`
-(한컴 "다른 이름으로 저장"이 줄간격·행높이를 뭉갠 파일)는 열화를 자동 감지해
-원본 근사로 복원하는 **레이아웃 정리** 모드를 제공합니다.
-
-**알려진 제약 (정직 고지)**
-- **PDF의 수식·차트**: 화면·HTML에서는 실제로 그려지지만, PDF 백엔드는 아직
-  벡터로 내보내지 못해 **자리표시 상자**로 출력됩니다(내보내기 시 앱이 미리
-  경고합니다). SVG→PDF 벡터화는 후속 로드맵입니다.
-- **암호(password) 걸린 `.hwp`**: 지원하지 않으며 정직하게 거부합니다.
-  (배포용(distribution) 문서의 복호는 지원 — `hwp-crypto`.)
-- **`.hwp`(바이너리)로 재저장 불가**: 저장 포맷은 HWPX입니다. `.hwp`를 열어
-  편집한 결과도 HWPX로 내려받습니다(무편집 HWPX 영역은 바이트 그대로 보존).
-
-## 서체 (전부 OFL — 재배포·PDF 임베딩 적법)
-
-기본은 나눔고딕/나눔명조(명조·고딕 자동 구분 렌더). 리본에서 **Pretendard·Noto Sans/Serif KR·
-IBM Plex Sans KR·고운돋움/바탕** 등 카탈로그 8종을 고르면 해당 서체가 자동 로드되어
-**화면과 PDF에 실서체로** 반영됩니다. 함초롬 등 상용 서체는 라이선스상 번들하지 않으며
-OFL 대체로 렌더됩니다(직접 업로드하면 그 서체 사용). → [docs/FONT-CATALOG.md](./docs/FONT-CATALOG.md)
-
-## Rust 크레이트 (엔진 내부)
-
-`hwp-model`(IR) · `hwp-hwpx`(HWPX 코덱) · `hwp-rhwp`(.hwp 파싱 부트스트랩, [rhwp](https://github.com/kwakseongjae/rhwp) MIT) ·
-`hwp-typeset`(조판: 금칙·장평·자간·옛한글) · `hwp-render`(PaintOp→SVG) · `hwp-export`(PDF/HTML) ·
-`hwp-ops`(op-bus·undo) · `hwp-mcp`(Intent 스키마) · `hwp-session`(지오메트리) · `hwp-wasm`(바인딩) ·
-`hwp-crypto`(배포용 문서 복호) · `auto-hwp-cli`(CLI)
-
-CLI만으로도 쓸 수 있습니다:
-
-```bash
-cargo run -p auto-hwp-cli --features rhwp -- own-render 문서.hwp --out page.svg
-cargo run -p auto-hwp-cli --features rhwp -- export-pdf 문서.hwpx -o out.pdf
-```
+검증 스위트·불변식·기여 규칙은 [CONTRIBUTING.md](./CONTRIBUTING.md)와 [AGENTS.md](./AGENTS.md).
 
 ## 라이선스
 

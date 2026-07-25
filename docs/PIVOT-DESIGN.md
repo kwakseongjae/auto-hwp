@@ -1,5 +1,9 @@
 # auto-hwp 피벗 설계 (PIVOT DESIGN)
 
+> **역사 문서 (2026-06-20)** — 이 피벗의 결론(포맷 중립 IR + 타입드 Intent 편집)은 이미 구현됐고,
+> 여기 적힌 "앞으로 할 일"은 대부분 지난 일이다. 현재 상태는 [`docs/CURRENT_STATE.md`](./CURRENT_STATE.md),
+> 현행 로드맵은 [`docs/PRODUCT-DIRECTION-V2.md`](./PRODUCT-DIRECTION-V2.md)를 보라. 설계 배경 참고용으로만 읽을 것.
+
 > 상태: 확정 설계 (buildable). 작성 기준일 2026-06-20. 코드 그라운드 트루스로 검증 완료(아래 §11 부록 참조).
 
 ---
