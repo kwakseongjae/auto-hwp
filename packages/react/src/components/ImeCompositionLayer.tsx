@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import type { CellCaretState, EditorCore, RunStyle } from "@auto-hwp/editor-core";
+import type { ActiveCaret, EditorCore, RunStyle } from "@auto-hwp/editor-core";
 import type { CompositionStore } from "../composition";
 import { isEditableTarget } from "../viewport";
 import { PAGE_PX_PER_PT } from "./InPlaceCellEditor";
 
 export interface ImeCompositionLayerProps {
-  /** The headless editor core — the layer subscribes to `core.cellCaret` DIRECTLY (030 isolation). */
+  /** The headless editor core — the layer subscribes to `core.caret` DIRECTLY (030 isolation): 셀
+   *  캐럿이든 본문 문단 캐럿이든 조합 표면은 하나다. */
   core: EditorCore;
   /** The page this layer belongs to (a caret on another page → this layer renders nothing). */
   page: number;
@@ -46,7 +47,7 @@ export function ImeCompositionLayer({ core, page, scale, store, commit }: ImeCom
   const [composing, setComposing] = useState(false); // a composition is live → preview present
   const activeRef = useRef(false); // live mirror so a same-value caret move never calls setState
   const composingRef = useRef(false); // live mirror read by async style fetch / focus guard
-  const pendingRef = useRef<CellCaretState | null>(null); // latest caret state for this page
+  const pendingRef = useRef<ActiveCaret | null>(null); // latest caret state for this page
   const pendingTextRef = useRef(""); // latest composing string (applied to the preview by ref)
   const styleRef = useRef<RunStyle>({}); // run style at the caret (059 스타일 소스)
 
@@ -113,7 +114,7 @@ export function ImeCompositionLayer({ core, page, scale, store, commit }: ImeCom
 
   // Subscribe to the caret (mirrors CaretLayer): presence flips only when the caret enters/leaves THIS page.
   useEffect(() => {
-    const onCaret = (s: CellCaretState | null) => {
+    const onCaret = (s: ActiveCaret | null) => {
       const mine = !!s && s.rect.page === page;
       pendingRef.current = mine ? s : null;
       if (activeRef.current !== mine) {
@@ -125,8 +126,8 @@ export function ImeCompositionLayer({ core, page, scale, store, commit }: ImeCom
         ensureFocusRef.current();
       }
     };
-    onCaret(core.cellCaret.get()); // sync on mount / core|page|scale change
-    return core.cellCaret.onChange(onCaret);
+    onCaret(core.caret.get()); // sync on mount / core|page|scale change
+    return core.caret.onChange(onCaret);
   }, [core, page, scale]);
 
   // On the first activation the textarea doesn't exist until the next commit; focus + position it once
@@ -169,7 +170,7 @@ export function ImeCompositionLayer({ core, page, scale, store, commit }: ImeCom
     store.set({ page, text: "" }); // CaretLayer hides its bar while this is live
     // Fetch the run style at the caret ONCE per session (read-only; no undo unit). Ignore a late resolve
     // if the composition already ended.
-    void core.cellCaret
+    void core.caret
       .styleAtCaret()
       .then((st) => {
         if (!composingRef.current) return;

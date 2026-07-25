@@ -62,6 +62,8 @@ export class MockAdapter implements EngineAdapter {
       /** Canned image box for `imageBbox` (issue 049), or a `(page, section, block)` resolver (so a test can
        *  model a post-resize re-query = 적용-확인). Omit to OMIT the method. */
       imageBox?: ImageBox | null | ((page: number, section: number, block: number) => ImageBox | null);
+      /** 페이지 SVG(본문 캐럿의 글리프 기하 소스). 생략하면 글리프 없는 빈 페이지. */
+      svg?: (page: number) => string;
       pages?: number;
     } = {},
   ) {
@@ -98,8 +100,9 @@ export class MockAdapter implements EngineAdapter {
   async pageCount(): Promise<number> {
     return this.opts.pages ?? 1;
   }
-  async pageSvg(_page: number): Promise<string> {
-    return `<svg viewBox="0 0 794 1123" width="794" height="1123"></svg>`;
+  async pageSvg(page: number): Promise<string> {
+    // 본문 캐럿 테스트는 페이지 SVG의 <text> 글리프가 곧 기하 정본이라 페이지별 SVG를 주입할 수 있어야 한다.
+    return this.opts.svg?.(page) ?? `<svg viewBox="0 0 794 1123" width="794" height="1123"></svg>`;
   }
   async hitTest(page: number, x: number, y: number): Promise<BlockHit | null> {
     const h = this.opts.hit;

@@ -71,6 +71,15 @@ export { clampOffset, hitResultToTextAnchor, isCaretGap } from "./caret";
 export { CellCaretController, cellGlobalOffset, cellParaOffsetAt, inheritStyleAt, runsText, spliceRuns } from "./cellCaret";
 export type { CellCaretAnchor, CellCaretState } from "./cellCaret";
 
+// 본문 문단 캐럿 — 셀 밖 문단의 클릭/이동/타이핑(SetParagraphRuns 커밋) + 페이지 SVG 글리프 ↔ 모델 문자
+// 정렬의 순수 헬퍼(정렬 실패 = null, 018).
+export { alignCharBoxes, bodyCaretRectAt, bodyLineMove, bodyOffsetAtPoint, BodyCaretController, glyphsInBand, parsePageGlyphs } from "./bodyCaret";
+export type { BodyCaretAnchor, BodyCaretState, CharBox, PageGlyph } from "./bodyCaret";
+
+// 캐럿 라우터 — 셀/본문 캐럿을 하나의 표면으로(오버레이·타이핑이 구독하는 단일 store).
+export { CaretRouter } from "./caretRouter";
+export type { ActiveCaret, CaretKind } from "./caretRouter";
+
 // Event emitter primitive
 export { Emitter } from "./events";
 export type { Listener } from "./events";

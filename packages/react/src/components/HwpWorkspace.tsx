@@ -526,7 +526,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // CaretLayer draws it by ref). Read by the typing keydown below + the 036 cell-nav yield guard, and
   // by the click handler to know a caret is live without re-rendering anything.
   const caretActiveRef = useRef(false);
-  useEffect(() => core.cellCaret.onChange((s) => (caretActiveRef.current = s != null)), [core]);
+  // 본문 문단 캐럿이 붙으면서 구독 대상이 `core.caret`(셀 ∪ 본문 라우터)로 올라갔다 — 두 캐럿은 동시에
+  // 살지 않으므로 미러 하나로 충분하고, 아래 타이핑/셀이동 가드는 손대지 않아도 그대로 성립한다.
+  useEffect(() => core.caret.onChange((s) => (caretActiveRef.current = s != null)), [core]);
   // issue 059: the shared IME-composition signal — the caret-tracking hidden textarea (ImeCompositionLayer)
   // drives it, the CaretLayer reads it to hide its bar while composing, and the Escape handler reads it to
   // yield Escape to the IME (cancel) instead of clearing the caret. One stable instance for the session.
@@ -759,7 +761,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // policy (it just forwards compositionend.data).
   const commitComposition = useCallback(
     (text: string) => {
-      void core.cellCaret.insertText(text).catch((err) => {
+      void core.caret.insertText(text).catch((err) => {
         if (!onTrap(err, "엔진 트랩 — 문서를 복구했습니다")) toast(`입력 실패: ${err}`);
       });
     },
@@ -779,7 +781,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         if (compositionStore.get() != null) return; // composing → yield Escape to the IME cancel
         ctxMenuSeqRef.current++;
         core.selection.clear();
-        core.cellCaret.clear();
+        core.caret.clear();
         setImageSel((s) => (s ? null : s));
       }
     };
@@ -802,7 +804,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         const r = await core.session.open(props.document!.bytes, props.document!.name);
         if (cancelled) return;
         core.selection.clear();
-        core.cellCaret.clear(); // 053: a caret never survives a document swap
+        core.caret.clear(); // 053: a caret never survives a document swap
         // Sync the "레이아웃 정리" toggle with the engine's open-time decision: on a DEGRADED hwp→hwpx
         // conversion the engine auto-enables normalization (the upload shows the original .hwp look);
         // a genuine document opens faithful (off).
@@ -1876,41 +1878,47 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       // caret and hands the SAME press to the 036 cell-nav (셀 선택 이동) — 방향키 UX가 글자 단위에서
       // 셀 단위로 우아하게 강등되고, 036의 기존 방향키 회귀도 그대로 그린으로 남는다.
       const fallThroughTo = (dir: CellDir) => {
-        core.cellCaret.clear();
+        core.caret.clear();
         void moveCellAndScroll(dir);
       };
-      const anchor = core.cellCaret.get()?.anchor ?? null;
+      const caret = core.caret.get();
+      const body = caret?.kind === "body"; // 본문 캐럿엔 넘겨줄 "셀 이동"이 없다 — 경계에서 제자리/줄 이동
       switch (e.key) {
         case "ArrowLeft":
           e.preventDefault();
-          if (anchor && anchor.offset <= 0) fallThroughTo("left");
-          else run(core.cellCaret.move(-1));
+          if (!body && caret && caret.offset <= 0) fallThroughTo("left");
+          else run(core.caret.move(-1));
           return;
         case "ArrowRight":
           e.preventDefault();
-          if (anchor && anchor.offset >= anchor.paraLen) fallThroughTo("right");
-          else run(core.cellCaret.move(1));
+          if (!body && caret && caret.offset >= caret.paraLen) fallThroughTo("right");
+          else run(core.caret.move(1));
           return;
         case "ArrowUp":
           e.preventDefault();
-          fallThroughTo("up"); // 줄 단위 캐럿 이동은 v1 스코프 밖 — 셀 이동으로 강등
+          // 본문 캐럿은 줄 단위로 올라가고(여러 줄 문단), 셀 캐럿은 기존대로 셀 이동으로 강등된다.
+          if (body) run(core.caret.moveLine(-1));
+          else fallThroughTo("up");
           return;
         case "ArrowDown":
           e.preventDefault();
-          fallThroughTo("down");
+          if (body) run(core.caret.moveLine(1));
+          else fallThroughTo("down");
           return;
         case "Backspace":
           e.preventDefault();
-          run(core.cellCaret.deleteBack());
+          run(core.caret.deleteBack());
           return;
         case "Enter":
           e.preventDefault();
-          run(core.cellCaret.insertText("\n"));
+          // 셀은 "\n"이 문단 분리(SetTableCellRuns가 split)지만, 본문 문단에서 "\n"은 모델상 의미가
+          // 달라 문단 분리 op(InsertParagraphAt)가 필요하다 — v1은 정직하게 안 한다(무시).
+          if (!body) run(core.caret.insertText("\n"));
           return;
         default:
           if (e.key.length === 1) {
             e.preventDefault();
-            run(core.cellCaret.insertText(e.key));
+            run(core.caret.insertText(e.key));
           }
       }
     };
@@ -1921,7 +1929,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // 053: the in-place editor and the caret are two text chromes — only one may be live. Opening the
   // editor (double-click / Enter-on-selection) drops the caret; closing it does NOT restore one.
   useEffect(() => {
-    if (editor) core.cellCaret.clear();
+    if (editor) core.caret.clear();
   }, [editor, core]);
 
   // Format toolbar → SetCellRangeFmt / SetCellRangeShade over the selected cell/range.
@@ -2322,13 +2330,14 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     },
     [handleDoubleClick],
   );
-  // issue 053: place the CELL TEXT CARET on a plain click (movement under the drag threshold). Runs
+  // issue 053: place the TEXT CARET on a plain click (movement under the drag threshold). Runs
   // AFTER the selection resolve so the caret and the cell mark coexist (클릭 = 셀 마크 + 글리프 캐럿).
-  // A miss (off any cell text) CLEARS the caret inside the controller (018 null policy) — clicking a
-  // body paragraph or empty space never leaves a stale caret behind. Fire-and-forget; a trap recovers.
+  // 라우터가 **셀 먼저, 아니면 본문 문단** 순으로 해소한다 — 셀 밖 문단도 이제 캐럿 대상이다. 어디에도
+  // 안 걸리면 컨트롤러가 캐럿을 지운다(018 null 정책) — 빈 곳 클릭이 낡은 캐럿을 남기지 않는다.
+  // Fire-and-forget; a trap recovers.
   const placeCaretAt = useCallback(
     (c: PageClick) => {
-      if (!editingOn || !canEdit || editorRef.current || !core.cellCaret.supported) return;
+      if (!editingOn || !canEdit || editorRef.current || !core.caret.supported) return;
       const down = caretDownRef.current;
       if (down && Math.hypot(c.client.x - down.x, c.client.y - down.y) >= 4) return; // a drag, not a click
       // 06x drill model: a single WHOLE-TABLE click must not leave a stray text caret (the cell isn't
@@ -2336,10 +2345,10 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       // DRILLED cell (cell anchor) or a bare cell-text click (no table geometry) still places its caret.
       const sels = core.selection.getSelection();
       if (sels.length === 1 && sels[0].anchor.kind === "table") {
-        core.cellCaret.clear();
+        core.caret.clear();
         return;
       }
-      void core.cellCaret.clickAt(c.page, c.x, c.y).catch((e) => onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요"));
+      void core.caret.clickAt(c.page, c.x, c.y).catch((e) => onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요"));
     },
     [editingOn, canEdit, core, onTrap],
   );
@@ -2362,7 +2371,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           }
           if (img) {
             core.selection.clear(); // block selection cleared + drag reset — the image overlay takes over
-            core.cellCaret.clear(); // 053: an image selection and a text caret never coexist
+            core.caret.clear(); // 053: an image selection and a text caret never coexist
             setEditor(null);
             setImageSel({ page: c.page, box: img });
             lastUpRef.current = null; // never let an image click count toward a double-click

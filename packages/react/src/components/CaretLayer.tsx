@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import type { CellCaretState, EditorCore } from "@auto-hwp/editor-core";
+import type { ActiveCaret, EditorCore } from "@auto-hwp/editor-core";
 import type { CompositionStore } from "../composition";
 
 export interface CaretLayerProps {
-  /** The headless editor core — CaretLayer subscribes to `core.cellCaret` DIRECTLY (030 isolation). */
+  /** The headless editor core — CaretLayer subscribes to `core.caret` DIRECTLY (030 isolation). 라우터라
+   *  셀 캐럿·본문 문단 캐럿을 같은 코드로 그린다(둘은 동시에 살지 않는다). */
   core: EditorCore;
   /** The page this layer belongs to (a caret on another page renders nothing here). */
   page: number;
@@ -29,7 +30,7 @@ export function CaretLayer({ core, page, scale, composition }: CaretLayerProps) 
   const [composing, setComposing] = useState(false); // 059: an IME composition is live on this page
   const activeRef = useRef(false); // live mirror so a same-value move NEVER calls setState at all
   const ref = useRef<HTMLDivElement | null>(null);
-  const pendingRef = useRef<CellCaretState | null>(null);
+  const pendingRef = useRef<ActiveCaret | null>(null);
 
   // Write the pending caret straight to the div (no React re-render). Kept in a ref so the
   // subscription always sees the latest scale without re-subscribing.
@@ -48,7 +49,7 @@ export function CaretLayer({ core, page, scale, composition }: CaretLayerProps) 
   };
 
   useEffect(() => {
-    const onCaret = (s: CellCaretState | null) => {
+    const onCaret = (s: ActiveCaret | null) => {
       const mine = !!s && s.rect.page === page;
       pendingRef.current = mine ? s : null;
       // PRESENCE flips only when the caret appears on / leaves THIS page. A caret MOVE (same page)
@@ -60,8 +61,8 @@ export function CaretLayer({ core, page, scale, composition }: CaretLayerProps) 
       }
       if (mine) flushRef.current();
     };
-    onCaret(core.cellCaret.get()); // sync current state on mount / core|page|scale change
-    return core.cellCaret.onChange(onCaret);
+    onCaret(core.caret.get()); // sync current state on mount / core|page|scale change
+    return core.caret.onChange(onCaret);
   }, [core, page, scale]);
 
   // 059: track the IME composition presence for THIS page so the bar hides while composing (the
