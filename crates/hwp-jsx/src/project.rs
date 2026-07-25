@@ -96,6 +96,14 @@ pub struct PageSetupBlob {
     pub margin_right: i32,
     pub margin_top: i32,
     pub margin_bottom: i32,
+    /// 머리말/꼬리말/제본 여백 (이슈 074) — 본문 상자를 줄이는 값이라 프로젝트 라운드트립에도
+    /// 실려야 한다. `serde(default)` 라 074 이전에 쓰인 project.json 도 그대로 읽힌다(0 = 없음).
+    #[serde(default)]
+    pub margin_header: i32,
+    #[serde(default)]
+    pub margin_footer: i32,
+    #[serde(default)]
+    pub margin_gutter: i32,
     pub landscape: bool,
     pub columns: u8,
 }
@@ -116,6 +124,9 @@ impl From<&hwp_model::document::PageSetup> for PageSetupBlob {
             margin_right: p.margin_right,
             margin_top: p.margin_top,
             margin_bottom: p.margin_bottom,
+            margin_header: p.margin_header,
+            margin_footer: p.margin_footer,
+            margin_gutter: p.margin_gutter,
             landscape: p.landscape,
             columns: p.columns,
         }
@@ -131,6 +142,9 @@ impl From<PageSetupBlob> for hwp_model::document::PageSetup {
             margin_right: b.margin_right,
             margin_top: b.margin_top,
             margin_bottom: b.margin_bottom,
+            margin_header: b.margin_header,
+            margin_footer: b.margin_footer,
+            margin_gutter: b.margin_gutter,
             landscape: b.landscape,
             columns: b.columns,
         }

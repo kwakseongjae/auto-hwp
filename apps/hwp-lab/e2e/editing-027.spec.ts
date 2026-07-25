@@ -95,10 +95,17 @@ test("열너비 드래그: 표 선택 → 핸들 드래그 → 경계가 실제�
   const gb = await page.locator(gripSel).first().boundingBox();
   if (!gb) throw new Error("열 경계 핸들 박스를 찾지 못함");
   const xBefore = gb.x + gb.width / 2;
+  // 잡는 y 는 핸들의 **위쪽**(top+24px). 세로 중앙을 쓰면 안 되는 이유(⚠️ 이슈 074 회귀에서 배움):
+  // 핸들은 표 전체 높이를 덮으므로 긴 표에서는 중앙이 뷰포트 아래 상태바(.hw-statusbar) 뒤로 들어가
+  // 마우스다운이 상태바에 먹힌다(실측: elementFromPoint(중앙) = DIV.hw-statusbar → 드래그가 아예
+  // 시작되지 않아 토스트도 안 뜬다). 074 에서 본문 상자 원점이 `위 여백` → `위 여백 + 머리말 여백`
+  // 으로 바로잡히며(한컴 규칙 = rhwp `PageAreas::from_page_def_for_page`) 내용이 34px 내려간 것이
+  // 방아쇠였을 뿐, 원래도 표가 조금만 길면 깨지는 취약점이었다. 사람은 보이는 부분을 잡는다.
+  const yGrip = gb.y + Math.min(24, gb.height / 2);
   // 핸들을 오른쪽으로 48px 드래그(프리뷰 → 놓으면 비율 적용).
-  await page.mouse.move(xBefore, gb.y + gb.height / 2);
+  await page.mouse.move(xBefore, yGrip);
   await page.mouse.down();
-  await page.mouse.move(xBefore + 48, gb.y + gb.height / 2, { steps: 8 });
+  await page.mouse.move(xBefore + 48, yGrip, { steps: 8 });
   await page.mouse.up();
   // 성공 토스트(apply-verify 통과 — 무반영이면 에러 토스트가 뜬다).
   await expect(page.locator(".hw-status")).toContainText("열 너비를 변경했습니다", { timeout: 30_000 });

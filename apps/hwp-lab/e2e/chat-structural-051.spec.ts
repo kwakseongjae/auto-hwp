@@ -38,10 +38,21 @@ async function page0SvgElementCount(page: Page): Promise<number> {
   return page.locator('.hw-sheet[data-page="0"] svg *').count();
 }
 
+// 문서 전체(모든 쪽) SVG 요소 수 — **삽입처럼 리플로가 뒤따르는** 변화의 신호.
+// ⚠️ 삽입을 0쪽만 세어 판정하면 안 된다(이슈 074 회귀에서 배움): 표를 끼워 넣으면 아래 내용이
+// 다음 쪽으로 밀리므로 삽입이 더한 것보다 **더 많은 요소가 0쪽에서 빠져나갈 수 있다** — 실측:
+// 3×3 표 삽입에 0쪽 512→445(감소)인데 문서 전체는 4074→4084(+10, 새 표만큼)였다. 074 에서 본문
+// 높이가 한컴 실제값(용지 − (위+머리말) − (아래+꼬리말))으로 바로잡혀 쪽 여유가 줄면서 이 리플로가
+// 실제로 일어나게 됐을 뿐, 원래도 앵커가 쪽 끝 근처면 깨지는 신호였다. 모든 쪽의 SVG 는 DOM 에
+// 실재한다(실측 sheets=8 · 쪽별 [512,694,668,100,365,559,479,697]).
+async function docSvgElementCount(page: Page): Promise<number> {
+  return page.locator(".hw-sheet svg *").count();
+}
+
 test("챗 표 삽입: 앵커 → '3×3 표 삽입' → 프리뷰 카드 → 적용 → SVG 반영 → undo 1회 복원", async ({ page }) => {
   await open(page);
   await markAnchor(page);
-  const before = await page0SvgElementCount(page);
+  const before = await docSvgElementCount(page);
 
   // 프롬프트 → mock InsertTableAt(앵커 블록 위치) 제안.
   await page.locator(".hw-textarea").fill("여기에 3x3 표를 삽입해줘");
@@ -52,17 +63,17 @@ test("챗 표 삽입: 앵커 → '3×3 표 삽입' → 프리뷰 카드 → 적�
   await expect(card).toBeVisible({ timeout: 30_000 });
   await expect(card.locator(".hw-card-label")).toHaveText("표 삽입");
   await expect(card.locator(".hw-card-summary")).toContainText("3×3 표 삽입");
-  expect(await page0SvgElementCount(page)).toBe(before); // 프리뷰만으로는 무변경
+  expect(await docSvgElementCount(page)).toBe(before); // 프리뷰만으로는 무변경
 
-  // 적용 → 페이지 0 SVG 에 표가 실제로 반영된다(요소 수 증가 — id 비의존 시각 신호).
+  // 적용 → 문서 SVG 에 표가 실제로 반영된다(요소 수 증가 — id 비의존 시각 신호).
   await page.locator(".hw-review .hw-btn-primary").click();
   await expect(page.locator(".hw-applied").first()).toBeVisible({ timeout: 30_000 });
-  await expect.poll(() => page0SvgElementCount(page), { timeout: 30_000 }).toBeGreaterThan(before);
+  await expect.poll(() => docSvgElementCount(page), { timeout: 30_000 }).toBeGreaterThan(before);
 
   // undo 1회 = 1 undo 단위 전체 복원(요소 수가 원래대로).
   await page.locator('.hw-tool[title="실행취소"]').click();
   await expect(page.locator(".hw-status")).toContainText("실행취소", { timeout: 30_000 });
-  await expect.poll(() => page0SvgElementCount(page), { timeout: 30_000 }).toBe(before);
+  await expect.poll(() => docSvgElementCount(page), { timeout: 30_000 }).toBe(before);
 });
 
 test("챗 블록 삭제: 위험 카드(원문 표시) → 취소는 무변경 → 명시 승인 후에만 적용 → undo 복원", async ({ page }) => {

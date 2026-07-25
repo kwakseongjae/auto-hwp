@@ -1099,6 +1099,8 @@ fn parse_cell(el: &JsxElement) -> Result<Cell> {
         src_span: None, // HWPX-export provenance (issue 057) — not part of the JSX projection
         // Cell-own padding (054 F2) is serialization-fidelity data, not yet projected into JSX.
         padding: None,
+        // 저장된 셀 실폭(074)도 JSX 투영 대상이 아니다 — 없으면 조판기가 열 격자로 근사한다.
+        width: None,
         dirty: Dirty(el.attrs.contains_key("data-dirty")),
     })
 }

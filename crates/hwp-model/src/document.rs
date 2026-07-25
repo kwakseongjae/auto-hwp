@@ -533,6 +533,14 @@ pub struct Cell {
     /// Captured for faithful HWPX re-emission (issue 054, F2); the typesetter keeps its constant
     /// `CELL_PAD` (the 020-calibrated reserve) and does not consume this yet.
     pub padding: Option<[HwpUnit; 4]>,
+    /// 이 셀이 **실제로 저장하고 있는 가로 폭**(HWPUNIT, HWP `cell.width` / HWPX `<hp:cellSz width>`).
+    /// `None` = 알 수 없음(합성/삽입 셀) → 조판기가 열 격자([`Table::col_widths`])로 근사한다.
+    ///
+    /// 왜 필요한가(이슈 074): 한글 표는 **행마다 열 경계가 다를 수 있다**(ragged). benchmark1 의
+    /// 24행 표는 13열 격자로 환산하면 어떤 셀은 실폭 12528 을 6606 으로, 어떤 셀은 6373 을 13212 로
+    /// 잡는다. 폭이 절반이면 셀 글이 두 배로 줄바꿈되고 그만큼 행이 부풀어(+4285 HWPUNIT) 페이지가
+    /// 밀린다. 격자 근사는 폭 조절 UI 용으로 남기고, **조판/그리기는 저장된 실폭**을 쓴다.
+    pub width: Option<HwpUnit>,
     pub dirty: Dirty,
 }
 
@@ -604,6 +612,7 @@ impl Default for Cell {
             diagonal: None,
             src_span: None,
             padding: None,
+            width: None,
             dirty: Dirty::default(),
         }
     }
@@ -618,6 +627,15 @@ pub struct BinData {
 }
 
 /// 편집 용지 — section-scoped page setup.
+///
+/// ⚠️ 여백 6종은 **본문 상자를 서로 다른 방향으로** 줄인다(이슈 074, 한컴 도움말 + rhwp
+/// `PageAreas::from_page_def_for_page` 와 동일 규칙):
+/// - 본문 위 = `margin_top + margin_header` · 본문 아래 = `margin_bottom + margin_footer`
+/// - 본문 왼쪽 = `margin_left + margin_gutter`(제본 여백, 단면 인쇄 기준)
+///
+/// 즉 머리말/꼬리말 여백은 위/아래 여백에 **더해지는** 것이지 그 안에 포함되지 않는다. 이 셋을
+/// 무시하면 본문 높이를 과대평가해 쪽수를 과소 계산한다(benchmark1: 77103 vs 실제 71435 —
+/// +8%). 소비 지점은 [`hwp_typeset::body_box`] 하나로 모아 두었다.
 #[derive(Clone, Copy, Debug)]
 pub struct PageSetup {
     pub width: HwpUnit,
@@ -626,6 +644,12 @@ pub struct PageSetup {
     pub margin_right: HwpUnit,
     pub margin_top: HwpUnit,
     pub margin_bottom: HwpUnit,
+    /// 머리말 여백 — 위 여백 **아래**에 추가로 잡히는 띠(본문 시작 = top + header).
+    pub margin_header: HwpUnit,
+    /// 꼬리말 여백 — 아래 여백 **위**에 추가로 잡히는 띠(본문 끝 = height − bottom − footer).
+    pub margin_footer: HwpUnit,
+    /// 제본 여백 — 단면 인쇄에서 왼쪽 여백에 더해진다.
+    pub margin_gutter: HwpUnit,
     pub landscape: bool,
     pub columns: u8,
 }
@@ -640,6 +664,10 @@ impl Default for PageSetup {
             margin_right: 7200,
             margin_top: 7200,
             margin_bottom: 7200,
+            // 머리말/꼬리말/제본은 "없음"이 기본 — 파서가 실제 값을 채운다.
+            margin_header: 0,
+            margin_footer: 0,
+            margin_gutter: 0,
             landscape: false,
             columns: 1,
         }

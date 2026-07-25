@@ -25,7 +25,12 @@ use rhwp::model::table::Table as RTable;
 /// Parse HWP/HWPX bytes via rhwp and lift into our format-neutral `SemanticDoc`.
 pub fn parse_to_semantic(bytes: &[u8]) -> Result<SemanticDoc> {
     let doc = rhwp::parse_document(bytes).map_err(|e| Error::Parse(e.to_string()))?;
-    Ok(Lifter::new(&doc).run())
+    Ok(Lifter::new(&doc).with_hwpx_source(is_hwpx(bytes)).run())
+}
+
+/// HWPX(=ZIP) 입력인가 — 앞 4바이트가 ZIP 로컬 헤더면 HWPX 로 본다(`.hwp` 는 CFB `D0CF11E0`).
+fn is_hwpx(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"PK\x03\x04")
 }
 
 /// Stateful lift: translates rhwp's pools once, recording rhwp-id → our-index maps so every
@@ -45,6 +50,8 @@ struct Lifter<'a> {
     bin_seen: RefCell<HashMap<u16, String>>,
     /// Monotonic fallback id for fields lacking a stable `field_id` (so begin/end stay paired).
     field_seq: RefCell<u32>,
+    /// 입력이 HWPX 였는가 — 문단 여백 보정에 쓴다([`lift_para_shape`] 참조).
+    from_hwpx: bool,
 }
 
 impl<'a> Lifter<'a> {
@@ -56,7 +63,14 @@ impl<'a> Lifter<'a> {
             bin_data: RefCell::new(Vec::new()),
             bin_seen: RefCell::new(HashMap::new()),
             field_seq: RefCell::new(900_000_000),
+            from_hwpx: false,
         }
+    }
+
+    /// HWPX 입력 표시 — `lift_para_shape` 의 문단 여백 보정을 켠다.
+    fn with_hwpx_source(mut self, yes: bool) -> Self {
+        self.from_hwpx = yes;
+        self
     }
 
     fn run(mut self) -> SemanticDoc {
@@ -74,7 +88,7 @@ impl<'a> Lifter<'a> {
             out.char_shapes.push(cs);
         }
         for (i, rps) in self.doc.doc_info.para_shapes.iter().enumerate() {
-            let ps = lift_para_shape(rps);
+            let ps = lift_para_shape(rps, self.from_hwpx);
             let idx = out.para_shapes.len();
             self.para_id_to_idx.insert(i as u16, idx);
             out.header_pools.para.insert(i as u64, ps.clone());
@@ -359,7 +373,22 @@ impl<'a> Lifter<'a> {
     /// dropped.
     fn lift_runs(&self, p: &RParagraph) -> Vec<Run> {
         if p.text.is_empty() {
-            return Vec::new();
+            // 이슈 074: 빈 문단도 **글자 모양 참조는 살려서** 내보낸다(내용 없는 run 하나).
+            // 빈 줄의 높이는 그 문단의 글자 크기 × 줄간격인데(한컴 실측: 5pt 간격 문단 = 652
+            // HWPUNIT = 500×130%), 참조를 버리면 조판기가 10pt(1000) 기본값으로 두 배를 잡는다.
+            // HWPX 파서는 이미 빈 run 을 그대로 보존하므로 두 파서의 IR 도 이 쪽이 일치한다.
+            let idx = p
+                .char_shapes
+                .first()
+                .and_then(|r| self.char_id_to_idx.get(&r.char_shape_id).copied());
+            return match idx {
+                Some(i) => vec![Run {
+                    char_shape: i,
+                    content: Vec::new(),
+                    ..Default::default()
+                }],
+                None => Vec::new(),
+            };
         }
         let chars: Vec<char> = p.text.chars().collect();
         let total = chars.len();
@@ -497,6 +526,9 @@ impl<'a> Lifter<'a> {
                     // Cell-OWN padding ONLY when declared (list_attr bit 16) — matches rhwp's own
                     // renderer/height_measurer, which use table.padding when the bit is off. (F2)
                     padding: c.apply_inner_margin.then(|| lift_padding(&c.padding)),
+                    // 이슈 074: 저장된 셀 실폭 — 한글 표는 행마다 열 경계가 달라(ragged) 열 격자
+                    // 근사로는 폭이 최대 2배까지 틀린다. 0 은 "없음"으로 본다.
+                    width: (c.width > 0).then_some(c.width as i32),
                     ..Default::default()
                 }
             })
@@ -690,16 +722,33 @@ fn object_paragraph(inline: Inline) -> Block {
 /// with the trailing-leading trim to land benchmark1's 18 pages.
 fn stored_row_heights(cells: &[rhwp::model::table::Cell], rows: usize) -> Vec<i32> {
     let mut row_h = vec![0i32; rows];
+    // ① 한 행짜리 셀이 그 행의 저장 높이를 정한다.
     for c in cells {
-        let span = c.row_span.max(1) as usize;
-        let per = (c.height as i32) / span as i32;
-        if per <= 0 {
+        let r = c.row as usize;
+        if c.row_span.max(1) == 1 && r < rows && c.height > 0 {
+            row_h[r] = row_h[r].max(c.height as i32);
+        }
+    }
+    // ② 세로 병합 셀은 **덮는 행들의 합이 모자랄 때만** 부족분을 마지막 행에 더한다.
+    //    균등 분배(height/span 을 각 행에 max)는 짧은 행을 평균치까지 부풀린다 — benchmark.hwp
+    //    3쪽 표에서 한컴 실측(rhwp 레이아웃 트리)은 r6=11918 / r7=1845 인데 균등 분배는 둘 다
+    //    6884(=13768÷2)로 깔려 5042 HWPUNIT 과다 예약 → 한 행이 페이지를 넘고, 뒤이은 쪽 나누기
+    //    때문에 한 쪽이 통째로 낭비됐다(이슈 074).
+    let mut spans: Vec<&rhwp::model::table::Cell> = cells
+        .iter()
+        .filter(|c| c.row_span.max(1) > 1 && (c.row as usize) < rows && c.height > 0)
+        .collect();
+    spans.sort_by_key(|c| c.row_span);
+    for c in spans {
+        let start = c.row as usize;
+        let end = (start + c.row_span.max(1) as usize).min(rows);
+        if end <= start {
             continue;
         }
-        let start = c.row as usize;
-        let end = (start + span).min(rows);
-        for slot in row_h.iter_mut().take(end).skip(start) {
-            *slot = (*slot).max(per);
+        let sum: i32 = row_h[start..end].iter().sum();
+        let h = c.height as i32;
+        if h > sum {
+            row_h[end - 1] += h - sum;
         }
     }
     row_h
@@ -891,9 +940,13 @@ fn lift_font_panose(c: &RCharShape, doc: &RDoc) -> Vec<Option<[u8; 10]>> {
     }
 }
 
-/// Translate an rhwp `PageDef` (구역 용지 설정) into our `PageSetup`: paper size, the four content
-/// margins, and orientation. (HWPUNIT u32 → i32; header/footer/gutter margins and multi-column are
-/// not emitted by the page patcher yet, so they're dropped here.)
+/// Translate an rhwp `PageDef` (구역 용지 설정) into our `PageSetup`: paper size, the six margins
+/// (본문 여백 4종 + 머리말/꼬리말, 그리고 제본 여백), and orientation. (HWPUNIT u32 → i32;
+/// multi-column is not emitted by the page patcher yet.)
+///
+/// 머리말/꼬리말/제본 여백은 이슈 074 에서 추가됐다 — 본문 상자를 실제로 줄이는 값인데
+/// 버려지고 있었다(`crate::body_box` 참조). rhwp 자신이 `PageAreas::from_page_def_for_page`
+/// 에서 같은 규칙(`content_top = margin_header + margin_top`)을 쓴다.
 fn lift_page(pd: &PageDef) -> PageSetup {
     PageSetup {
         width: pd.width as i32,
@@ -902,6 +955,9 @@ fn lift_page(pd: &PageDef) -> PageSetup {
         margin_right: pd.margin_right as i32,
         margin_top: pd.margin_top as i32,
         margin_bottom: pd.margin_bottom as i32,
+        margin_header: pd.margin_header as i32,
+        margin_footer: pd.margin_footer as i32,
+        margin_gutter: pd.margin_gutter as i32,
         landscape: pd.landscape,
         columns: 1,
     }
@@ -997,7 +1053,17 @@ fn border_width_to_px(width: u8) -> f64 {
 /// the margin block (indent, left/right margin, space before/after). Line spacing is intentionally
 /// left to inherit the base paraPr (a fixed-unit value emitted as PERCENT would distort layout);
 /// numbering/border-fill/head-type are deferred (not emitted yet).
-fn lift_para_shape(p: &RParaShape) -> ParaShape {
+/// rhwp `ParaShape` → ours. `from_hwpx` 면 문단 여백(들여쓰기/좌우/위아래)을 **절반으로 되돌린다**.
+///
+/// 왜(이슈 074): vendored rhwp 의 HWPX 헤더 파서는 `<hp:case required-namespace=…HwpUnitChar>` 의
+/// 여백 값을 읽어 **2배**로 곱한다(`parser/hwpx/header.rs`: "HWP 바이너리와 동일한 2× 스케일로
+/// 변환"). 하지만 실측하면 case 값이 이미 이진 `.hwp` 와 같은 값이다 — benchmark1 의 같은 문단
+/// 들여쓰기가 이진 −3456 / HWPX case −3456 로 정확히 일치한다. 그래서 rhwp 경로로 HWPX 를 읽으면
+/// 문단 위/아래 간격이 400→800 으로 두 배가 되고, **무편집 왕복(.hwp → 우리 HWPX → 재열기)에서
+/// 쪽수가 늘어난다**(실측 18p→19p · benchmark2 24p→26p). rhwp 는 수정 금지(vendored)라 lift 에서
+/// 되돌린다. `.hwp` 이진 경로는 이 보정을 타지 않으므로 게이트(8==8·18==18)와 무관하다.
+fn lift_para_shape(p: &RParaShape, from_hwpx: bool) -> ParaShape {
+    let fix = |v: i32| if from_hwpx { v / 2 } else { v };
     use rhwp::model::style::LineSpacingType as RLst;
     ParaShape {
         align: match p.alignment {
@@ -1017,11 +1083,11 @@ fn lift_para_shape(p: &RParaShape) -> ParaShape {
             RLst::Minimum => LineSpacingType::AtLeast,
         },
         line_spacing_value: p.line_spacing,
-        left_margin: p.margin_left,
-        right_margin: p.margin_right,
-        indent: p.indent,
-        space_before: p.spacing_before,
-        space_after: p.spacing_after,
+        left_margin: fix(p.margin_left),
+        right_margin: fix(p.margin_right),
+        indent: fix(p.indent),
+        space_before: fix(p.spacing_before),
+        space_after: fix(p.spacing_after),
         // attr1 bit 19 = "쪽 나누기 앞에서" (page-break-before) — needed for faithful pagination.
         page_break_before: (p.attr1 >> 19) & 1 == 1,
         ..Default::default()

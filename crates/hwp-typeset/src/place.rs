@@ -339,10 +339,9 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
 
     for (sec_idx, sec) in doc.sections.iter().enumerate() {
         let page = &sec.page;
-        let ml = page.margin_left as f64;
-        let mt = page.margin_top as f64;
-        let body_w = (page.width - page.margin_left - page.margin_right).max(1) as f64;
-        let body_h = (page.height - page.margin_top - page.margin_bottom).max(1) as f64;
+        // 본문 상자는 crate::body_box 단일 지점에서 — 머리말/꼬리말/제본 여백까지 반영해야
+        // NaiveLayout 과 쪽수가 어긋나지 않는다(LOCKSTEP, 이슈 074).
+        let (ml, mt, body_w, body_h) = crate::body_box(page);
 
         // Each section starts on a fresh page (matches OWPML section→page + NaiveLayout).
         if started {
@@ -480,8 +479,7 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
     let mut started = false;
     for sec in &doc.sections {
         let page = &sec.page;
-        let body_w = (page.width - page.margin_left - page.margin_right).max(1) as f64;
-        let body_h = (page.height - page.margin_top - page.margin_bottom).max(1) as f64;
+        let (_, _, body_w, body_h) = crate::body_box(page);
         if started {
             page_idx += 1; // each section starts on a fresh page
         }
@@ -852,7 +850,9 @@ fn flush_fragment(
         self_block: block,     // top-level: block-within-parent == the section block index
     });
     let mut placed_cells: Vec<PlacedCell> = Vec::new();
-    for c in &t.cells {
+    // 셀 실폭 상자(이슈 074) — 예약(row_heights)과 **같은 폭**으로 그려야 글이 상자를 넘지 않는다.
+    let boxes = cell_boxes(t, col_x[t.cols]);
+    for (ci, c) in t.cells.iter().enumerate() {
         if !c.active {
             continue;
         }
@@ -868,9 +868,9 @@ fn flush_fragment(
         if r0 >= r1 {
             continue;
         }
-        let cx = ml + col_x[c.col];
-        let col_end = (c.col + c.col_span.max(1)).min(t.cols);
-        let cw = (col_x[col_end] - col_x[c.col]).max(1.0);
+        let (bx, bw) = cell_box_at(t, &boxes, col_x, ci);
+        let cx = ml + bx;
+        let cw = bw.max(1.0);
         let cy = top_of(r0);
         let ch = (top_of(r1) - cy).max(1.0);
         // Cell provenance rect (point→cell for double-click editing) — keyed to the real (row, col).
@@ -1127,13 +1127,15 @@ fn place_nested_table(
         self_block: ctx.self_block,
     });
     let mut placed_cells: Vec<PlacedCell> = Vec::new();
-    for c in &t.cells {
+    // 중첩 표도 셀 실폭 상자를 쓴다(이슈 074) — 예약(row_heights)과 같은 폭.
+    let boxes = cell_boxes(t, col_x[t.cols]);
+    for (ci, c) in t.cells.iter().enumerate() {
         if !c.active || c.col >= t.cols || c.row >= t.rows {
             continue;
         }
-        let cx = ox + col_x[c.col];
-        let col_end = (c.col + c.col_span.max(1)).min(t.cols);
-        let cw = (col_x[col_end] - col_x[c.col]).max(1.0);
+        let (bx, bw) = cell_box_at(t, &boxes, &col_x, ci);
+        let cx = ox + bx;
+        let cw = bw.max(1.0);
         let cy = row_top[c.row];
         let r1 = (c.row + c.row_span.max(1)).min(t.rows);
         let ch = (row_top[r1] - cy).max(1.0);
@@ -1706,39 +1708,101 @@ pub fn column_offsets(t: &Table, avail_w: f64) -> Vec<f64> {
     xs
 }
 
-/// Per-row heights — identical sizing to [`crate::table_height`] (a spanning cell distributes evenly).
+/// 셀별 `(x, 폭)` (표 좌상단 기준, 그려지는 단위) — **저장된 셀 실폭**(`Cell::width`)으로 행마다
+/// 따로 눕힌다. 반환은 `t.cells` 와 인덱스 정렬. 한 셀이라도 실폭이 없으면 `None` 을 돌려주고
+/// 호출자는 열 격자([`column_offsets`])로 되돌아간다.
+///
+/// 왜(이슈 074): 한글 표의 열 경계는 **행마다 다를 수 있다**. benchmark1 의 24×13 표는 13열 격자로
+/// 환산하면 어떤 셀이 실폭 12528 → 6606(절반)으로, 다른 셀은 6373 → 13212(두 배)로 어긋난다.
+/// 폭이 절반이면 셀 글이 두 배로 줄바꿈되고 행이 부풀어(+4285 HWPUNIT = 한 문단이 다음 쪽으로
+/// 밀리고, 그 다음 쪽 나누기 때문에 한 쪽이 통째로 버려졌다) 쪽수가 늘어난다.
+///
+/// 축척: 표 실폭(행별 합의 최대) → `avail_w`. `column_offsets` 와 같은 규칙이라 표 전체 폭은 동일.
+///
+/// ⚠️ **사용자가 열 너비를 편집했으면(`Table::geometry_edited`) 쓰지 않는다.** 그때는 op 이 갱신한
+/// `col_widths` 가 진실이고, 파싱 당시의 셀 실폭은 낡은 값이다 — 이걸 계속 쓰면 열 경계 드래그가
+/// 화면에 **전혀 반영되지 않는다**(036/031 e2e: 드래그 후 apply-verify 가 "경계가 안 움직였다"로
+/// 판정 → 성공 토스트가 안 뜬다). 편집 전에는 두 값이 같은 표를 가리키므로 이 분기는 무해하다.
+pub(crate) fn cell_boxes(t: &Table, avail_w: f64) -> Option<Vec<(f64, f64)>> {
+    if t.rows == 0 || t.cells.is_empty() || t.geometry_edited {
+        return None;
+    }
+    if t.cells
+        .iter()
+        .any(|c| c.active && c.width.unwrap_or(0) <= 0)
+    {
+        return None; // 실폭을 모르는 셀이 하나라도 있으면 격자 근사로
+    }
+    // 행 r 을 덮는 활성 셀(위 행에서 세로 병합돼 내려온 셀 포함)을 열 순으로 — 한 번만 버킷팅해
+    // 두고 재사용한다(행마다 전 셀을 훑으면 큰 표에서 O(행×셀)이 된다).
+    let mut covering: Vec<Vec<usize>> = vec![Vec::new(); t.rows];
+    for (i, c) in t.cells.iter().enumerate() {
+        if !c.active || c.row >= t.rows {
+            continue;
+        }
+        let end = (c.row + c.row_span.max(1)).min(t.rows);
+        for row in covering.iter_mut().take(end).skip(c.row) {
+            row.push(i);
+        }
+    }
+    for row in &mut covering {
+        row.sort_by_key(|&i| t.cells[i].col);
+    }
+    // 표 실폭 = 행별 덮개 폭 합의 최대(행마다 열 경계가 달라도 표 전체 폭은 같다).
+    let width_of = |i: usize| t.cells[i].width.unwrap_or(0) as f64;
+    let total = covering
+        .iter()
+        .map(|row| row.iter().copied().map(width_of).sum::<f64>())
+        .fold(0.0f64, f64::max);
+    if total <= 0.0 {
+        return None;
+    }
+    let scale = avail_w / total;
+    let mut out = vec![(0.0f64, 0.0f64); t.cells.len()];
+    for (r, row) in covering.iter().enumerate() {
+        let mut x = 0.0f64;
+        for &i in row {
+            let w = width_of(i) * scale;
+            // 세로 병합 셀은 시작 행에서 정한 상자를 유지한다(아래 행에서 다시 쓰지 않음).
+            if t.cells[i].row == r {
+                out[i] = (x, w);
+            }
+            x += w;
+        }
+    }
+    Some(out)
+}
+
+/// 셀 i 의 `(x, 폭)` — 저장 실폭 상자가 있으면 그것을, 없으면 열 격자 근사를.
+pub(crate) fn cell_box_at(
+    t: &Table,
+    boxes: &Option<Vec<(f64, f64)>>,
+    xs: &[f64],
+    i: usize,
+) -> (f64, f64) {
+    if let Some(b) = boxes {
+        let (x, w) = b[i];
+        if w > 0.0 {
+            return (x, w);
+        }
+    }
+    let c = &t.cells[i];
+    let col = c.col.min(t.cols.saturating_sub(1));
+    let col_end = (c.col + c.col_span.max(1)).min(t.cols);
+    let x = xs[col];
+    ((x), (xs[col_end] - x).max(1.0))
+}
+
+/// Per-row heights — **[`crate::table_row_heights`] 자체를 부른다**. 예전엔 같은 식을 여기에 한 벌
+/// 더 두었는데(표기만 다른 쌍둥이), 한쪽만 고치면 예약과 그리기가 어긋나 LOCKSTEP 이 깨진다.
+/// 이제 계산은 한 곳뿐이다(이슈 074).
 fn row_heights(
     t: &Table,
     avail_w: f64,
     doc: &SemanticDoc,
     fonts: &dyn FontMetricsProvider,
 ) -> Vec<f64> {
-    let col_x = column_offsets(t, avail_w);
-    let mut row_h = vec![0.0f64; t.rows];
-    for c in &t.cells {
-        if !c.active {
-            continue;
-        }
-        let col_end = (c.col + c.col_span.max(1)).min(t.cols);
-        let cw = (col_x[col_end] - col_x[c.col.min(t.cols - 1)]).max(1.0);
-        // Reserve at the SAME padded text width the glyphs are drawn at (place_cell_content), so a row
-        // never reserves fewer lines than get drawn (the 2-line-label-over-next-cell overlap).
-        let tw = (cw - 2.0 * CELL_PAD_X).max(1.0);
-        let content: f64 = c
-            .blocks
-            .iter()
-            .map(|b| block_height_for_place(b, doc, tw, fonts))
-            .sum::<f64>()
-            + crate::CELL_PAD;
-        let span = c.row_span.max(1);
-        let per = content / span as f64;
-        let end = (c.row + span).min(t.rows);
-        for slot in row_h.iter_mut().take(end).skip(c.row) {
-            *slot = slot.max(per);
-        }
-    }
-    crate::apply_row_overrides(&mut row_h, t);
-    row_h
+    crate::table_row_heights(t, avail_w, doc, fonts)
 }
 
 /// Cumulative row TOPS relative to the table's top edge, length `rows + 1` — the row twin of
@@ -1925,10 +1989,13 @@ fn paragraph_object(p: &Paragraph) -> Option<(f64, f64, String, Option<String>)>
 fn set_page_size(pg: &mut PlacedPage, page: &PageSetup) {
     pg.width = page.width as f64;
     pg.height = page.height as f64;
-    pg.margin_left = page.margin_left as f64;
-    pg.margin_top = page.margin_top as f64;
-    pg.margin_right = page.margin_right as f64;
-    pg.margin_bottom = page.margin_bottom as f64;
+    // 여백 안내선은 **글자가 실제로 놓이는 상자**(= crate::body_box)를 가리켜야 한다 — 제본/
+    // 머리말/꼬리말 여백을 빼먹으면 눈금자와 본문이 어긋난다(이슈 074).
+    let (ml, mt, bw, bh) = crate::body_box(page);
+    pg.margin_left = ml;
+    pg.margin_top = mt;
+    pg.margin_right = (page.width as f64 - ml - bw).max(0.0);
+    pg.margin_bottom = (page.height as f64 - mt - bh).max(0.0);
 }
 
 fn new_page(pages: &mut Vec<PlacedPage>, page: &PageSetup) {
@@ -1999,6 +2066,61 @@ mod tests {
             .iter()
             .map(|r| r.y)
             .fold(0.0, f64::max)
+    }
+
+    /// 이슈 074 회귀: 행마다 열 경계가 다른(ragged) 표는 **저장된 셀 실폭**으로 눕힌다.
+    /// 열 격자 근사를 쓰면 r1 의 두 칸이 5:5 로 잘려 실폭(8:2)과 어긋나고, 좁아진 칸의 글이
+    /// 두 배로 줄바꿈돼 행이 부푼다.
+    #[test]
+    fn ragged_rows_use_stored_cell_widths() {
+        let mut t = Table {
+            rows: 2,
+            cols: 2,
+            col_widths: vec![5000, 5000], // 격자 근사: 5:5
+            ..Default::default()
+        };
+        // r0 은 격자와 같은 5:5, r1 은 실제로 8:2 (한글 표는 이런 게 흔하다).
+        for (row, (w0, w1)) in [(0usize, (5000, 5000)), (1, (8000, 2000))] {
+            t.cells.push(Cell {
+                row,
+                col: 0,
+                blocks: vec![Block::Paragraph(para("가"))],
+                width: Some(w0),
+                ..Default::default()
+            });
+            t.cells.push(Cell {
+                row,
+                col: 1,
+                blocks: vec![Block::Paragraph(para("나"))],
+                width: Some(w1),
+                ..Default::default()
+            });
+        }
+        let boxes = cell_boxes(&t, 10000.0).expect("모든 셀에 실폭이 있으면 상자를 만든다");
+        let xs = column_offsets(&t, 10000.0);
+        // r1 의 첫 칸은 8000, 둘째 칸은 2000 이어야 한다(격자였다면 둘 다 5000).
+        let boxes = Some(boxes);
+        assert_eq!(cell_box_at(&t, &boxes, &xs, 2).1, 8000.0);
+        assert_eq!(cell_box_at(&t, &boxes, &xs, 3), (8000.0, 2000.0));
+        // 실폭이 하나라도 없으면 격자로 되돌아간다(합성/삽입 셀 안전망).
+        let mut partial = t.clone();
+        partial.cells[3].width = None;
+        assert!(cell_boxes(&partial, 10000.0).is_none());
+        let xs2 = column_offsets(&partial, 10000.0);
+        assert_eq!(cell_box_at(&partial, &None, &xs2, 3), (5000.0, 5000.0));
+
+        // 사용자가 열 너비를 드래그해 바꿨으면(`SetTableColWidths` → geometry_edited) **격자가 진실**이다.
+        // 파싱 당시의 셀 실폭을 계속 쓰면 열 경계 드래그가 화면에 반영되지 않는다(031 무반영 버그).
+        let mut resized = t.clone();
+        resized.geometry_edited = true;
+        resized.col_widths = vec![7000, 3000]; // 드래그 결과 = 7:3
+        assert!(
+            cell_boxes(&resized, 10000.0).is_none(),
+            "편집된 표는 격자를 쓴다"
+        );
+        let xs3 = column_offsets(&resized, 10000.0);
+        assert_eq!(cell_box_at(&resized, &None, &xs3, 0), (0.0, 7000.0));
+        assert_eq!(cell_box_at(&resized, &None, &xs3, 1), (7000.0, 3000.0));
     }
 
     #[test]

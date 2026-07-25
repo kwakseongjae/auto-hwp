@@ -40,6 +40,28 @@ const DEFAULT_LINESPACE: f64 = 1.6;
 /// Baseline as a fraction of the line height (matches Hancom's 850/1000 convention).
 pub(crate) const BASELINE_RATIO: f64 = 0.85;
 
+/// 본문 상자(HWPUNIT) — `(원점_x, 원점_y, 너비, 높이)`. **쪽수 계산의 단일 진실**이라
+/// `NaiveLayout`·`place_doc`·`block_pages` 셋이 전부 이걸 거쳐야 LOCKSTEP 이 깨지지 않는다.
+///
+/// 왜 별도 함수인가(이슈 074): 한컴의 본문 상자는 `여백 top/bottom` 만으로 정해지지 않는다.
+/// **머리말/꼬리말 여백은 위/아래 여백에 더해지고, 제본 여백은 왼쪽 여백에 더해진다**
+/// (한컴 도움말 = rhwp `PageAreas::from_page_def_for_page`: `content_top = margin_header +
+/// margin_top`, `content_bottom = height − margin_footer − margin_bottom`). 이 셋을 빼먹으면
+/// 본문이 실제보다 길어져 페이지를 덜 넘긴다 — benchmark1 기준 본문 높이 77103 vs 실제 71435
+/// (+7.9%), benchmark1.hwpx 는 77103 vs 68599 (+12.4%) 였고 그만큼 쪽수가 모자랐다.
+///
+/// 한컴 실측 대조(benchmark1.hwp): 한컴이 저장한 `<hp:lineseg>` 의 최대 세로 위치가 71891 로
+/// **71435 짜리 본문 상자에 맞고 77103 에는 한참 못 미친다** — 즉 71435 가 한컴이 실제로 쓴
+/// 본문 높이다.
+pub fn body_box(page: &PageSetup) -> (f64, f64, f64, f64) {
+    let left = page.margin_left + page.margin_gutter.max(0);
+    let top = page.margin_top + page.margin_header.max(0);
+    let bottom = page.margin_bottom + page.margin_footer.max(0);
+    let w = (page.width - left - page.margin_right).max(1) as f64;
+    let h = (page.height - top - bottom).max(1) as f64;
+    (left as f64, top as f64, w, h)
+}
+
 /// A plain (no family/style) font key — metrics here are per-script, family-independent.
 fn plain_font() -> FontKey {
     FontKey {
@@ -222,8 +244,7 @@ impl LayoutEngine for NaiveLayout {
         let mut pages = vec![PageLayout::default()];
         for sec in &doc.sections {
             let page = &sec.page;
-            let body_w = (page.width - page.margin_left - page.margin_right).max(1) as f64;
-            let body_h = (page.height - page.margin_top - page.margin_bottom).max(1) as f64;
+            let (_, _, body_w, body_h) = body_box(page);
             // Each section starts on a fresh page (matches OWPML section→page).
             if !pages.last().map(|p| p.lines.is_empty()).unwrap_or(true) {
                 pages.push(PageLayout::default());
@@ -457,6 +478,10 @@ pub fn table_height(
 /// as a floor. Column offsets honor the captured `col_widths` — the SAME widths place_table draws with,
 /// so the RESERVATION equals the DRAWN height (an equal-split estimate over-reserved a wide-then-narrow
 /// gov-doc table by ~1.5×, shoving it onto the next page with the rest empty).
+///
+/// 행 높이 결정은 **2단계**다(이슈 074): ① 한 행짜리 셀이 각 행을 정하고 ② 세로 병합 셀은 덮는
+/// 행들의 합이 모자랄 때만 부족분을 마지막 행에 더한다. 셀 폭은 저장된 실폭
+/// ([`crate::place::cell_boxes`])을 우선한다 — 열 격자는 ragged 표에서 폭을 최대 2배 틀리게 잡는다.
 pub(crate) fn table_row_heights(
     t: &Table,
     avail_w: f64,
@@ -467,27 +492,51 @@ pub(crate) fn table_row_heights(
         return Vec::new();
     }
     let xs = crate::place::column_offsets(t, avail_w);
+    // 셀 실폭 상자(이슈 074) — place::row_heights 와 **같은 함수**를 써야 LOCKSTEP 이 유지된다.
+    let boxes = crate::place::cell_boxes(t, avail_w);
     let mut row_h = vec![0.0f64; t.rows];
-    for c in &t.cells {
-        if !c.active {
-            continue;
-        }
-        let col_end = (c.col + c.col_span.max(1)).min(t.cols);
-        let cw = (xs[col_end] - xs[c.col.min(t.cols - 1)]).max(1.0);
+    // 셀 하나의 예약 높이 (내용 + 세로 안쪽 여백).
+    let need = |i: usize| -> f64 {
+        let c = &t.cells[i];
+        let cw = crate::place::cell_box_at(t, &boxes, &xs, i).1.max(1.0);
         // LOCKSTEP with place::row_heights: reserve at the padded text width (cw - 2*CELL_PAD_X) the cell
         // placer draws glyphs at, so the pagination reserve equals the drawn height (no row under-reserve).
         let tw = (cw - 2.0 * crate::place::CELL_PAD_X).max(1.0);
-        let content: f64 = c
-            .blocks
+        c.blocks
             .iter()
             .map(|b| block_height(b, doc, tw, fonts))
             .sum::<f64>()
-            + CELL_PAD;
-        let span = c.row_span.max(1);
-        let per = content / span as f64;
-        let end = (c.row + span).min(t.rows);
-        for slot in row_h.iter_mut().take(end).skip(c.row) {
-            *slot = slot.max(per);
+            + CELL_PAD
+    };
+    // ① 한 행짜리 셀만으로 각 행 높이를 정한다.
+    for (i, c) in t.cells.iter().enumerate() {
+        if c.active && c.row_span.max(1) == 1 && c.row < t.rows {
+            row_h[c.row] = row_h[c.row].max(need(i));
+        }
+    }
+    // ② 세로 병합 셀은 **덮는 행들의 합이 모자랄 때만** 부족분을 마지막 덮는 행에 더한다.
+    //
+    // 왜 균등 분배가 아닌가(이슈 074): 예전엔 병합 셀 높이를 span 으로 나눠 각 행에 `max` 로
+    // 깔았다. 그러면 짧은 행이 병합 셀의 평균치까지 억지로 부풀려진다 — benchmark.hwp 3쪽 표에서
+    // 한컴 실측(rhwp 레이아웃 트리)은 r6=11918 / r7=1845 인데 우리는 11921 / 6884(=13768÷2) 로
+    // 5042 HWPUNIT 을 과다 예약했고, 그 한 행이 페이지를 넘겨 뒤따르는 쪽 나누기 때문에 한 쪽이
+    // 통째로 낭비됐다. 실제 한글은 행을 제 셀로 먼저 재고, 병합 셀은 **전체 높이 하한**으로만
+    // 작용한다(CSS 표 알고리즘과 같은 규칙).
+    let mut spans: Vec<usize> = (0..t.cells.len())
+        .filter(|&i| t.cells[i].active && t.cells[i].row_span.max(1) > 1 && t.cells[i].row < t.rows)
+        .collect();
+    // 좁은 병합부터 처리해야 넓은 병합이 이미 채워진 높이를 보고 부족분만 더한다.
+    spans.sort_by_key(|&i| t.cells[i].row_span);
+    for i in spans {
+        let c = &t.cells[i];
+        let end = (c.row + c.row_span.max(1)).min(t.rows);
+        if end <= c.row {
+            continue;
+        }
+        let sum: f64 = row_h[c.row..end].iter().sum();
+        let want = need(i);
+        if want > sum {
+            row_h[end - 1] += want - sum;
         }
     }
     apply_row_overrides(&mut row_h, t);
@@ -501,10 +550,22 @@ pub(crate) fn table_row_heights(
 /// reservation (`table_height`) and the cell placer (`place::row_heights`) so they stay in lockstep.
 pub(crate) fn apply_row_overrides(row_h: &mut [f64], t: &Table) {
     for (r, slot) in row_h.iter_mut().enumerate() {
-        if let Some(&h) = t.row_heights.get(r) {
-            if h > 0 {
-                *slot = slot.max(h as f64);
-            }
+        // 명시 행 높이(드래그 리사이즈/noAdjust=1)가 우선, 없으면 **저장된 행 높이**를 바닥으로.
+        //
+        // 이슈 074 — #196 의 판단을 뒤집는다. 그때는 `stored_row_heights`(자동 맞춤 표의
+        // `<hp:cellSz height>`)를 바닥으로 깔면 benchmark1.hwpx 가 +2쪽이 된다고 회귀로 봤다.
+        // 근거: `.hwp` 경로(rhwp lift)는 **원래부터** 저장 높이를 무조건 바닥으로 깔고, 그 경로가
+        // 게이트(8==8·18==18·24==24)를 통과한다. 같은 문서를 포맷만 바꿔 읽었다고 표 높이가
+        // 달라질 이유가 없으므로 HWPX 경로도 같은 규칙으로 맞춘다 — 실제로 이걸 켜야 교차포맷
+        // 파리티(`hwpx_rhwp_parity`: 우리 파서 22쪽 == rhwp lift 22쪽)가 성립한다. 한컴 저작 hwpx
+        // 표본에서도 오라클 대비 맞아 들어간다(광화문 3==3, 추경 4==4, pps 4==4 — 전부 이전엔 −1).
+        // (`row_heights` 를 건드리지 않으므로 라운드트립 코덱은 그대로다.)
+        let h = match t.row_heights.get(r) {
+            Some(&h) if h > 0 => h,
+            _ => t.stored_row_heights.get(r).copied().unwrap_or(0),
+        };
+        if h > 0 {
+            *slot = slot.max(h as f64);
         }
     }
 }
@@ -700,13 +761,17 @@ pub fn layout_paragraph(
 
     if n == 0 {
         // An empty paragraph still occupies one line — height = the object's if it anchors one.
-        // No glyph → use the default 1000-EM line height from the metrics provider. (Measured: Hancom
-        // gives blank lines this full leading-based height too — the layout-check oracle drops 8→7
-        // pages if we shrink it to the bare EM, so the leading is load-bearing for pagination.)
+        // (Measured: Hancom gives blank lines this full leading-based height too — the layout-check
+        // oracle drops 8→7 pages if we shrink it to the bare EM, so the leading is load-bearing for
+        // pagination.)
+        //
+        // 이슈 074: 빈 줄의 EM 은 **그 문단의 글자 크기**다 — 1000(10pt) 고정이 아니다. 한컴 실측
+        // (benchmark1 page 2, 빈 문단): vpos 7665→8317 = 652 = 500(5pt) × 130%. 우리는 1000×130%
+        // = 1300 을 잡아 빈 줄마다 두 배로 부풀렸고, 표가 많은 양식에서 누적돼 페이지가 밀렸다.
         let lh = if obj_h > 0 {
             obj_h as f64
         } else {
-            fonts.line_height(1000)
+            fonts.line_height(empty_para_size(p, doc))
         };
         return vec![mk_line(0, lh, 0.0)];
     }
@@ -893,6 +958,20 @@ fn mk_line(text_pos: u32, height: f64, width: f64) -> LineSeg {
         horz_pos: 0.0,
         horz_size: width,
     }
+}
+
+/// 글자 없는 문단의 줄 높이 기준 EM (HWPUNIT) — 그 문단이 **가지고 있는** 글자 모양의 크기를
+/// 쓴다(빈 문단도 charPr 참조는 남는다). 런이 하나도 없으면 10pt(1000) 기본값.
+///
+/// 왜 필요한가(074): 빈 줄을 무조건 1000 으로 잡으면 5pt 짜리 간격 문단(정부 양식이 표 사이를
+/// 벌릴 때 흔히 쓴다)이 2배로 부풀어, 표가 많은 문서에서 페이지가 통째로 밀린다.
+fn empty_para_size(p: &Paragraph, doc: &SemanticDoc) -> i32 {
+    p.runs
+        .iter()
+        .filter_map(|r| doc.char_shapes.get(r.char_shape))
+        .map(|c| c.height)
+        .find(|&h| h > 0)
+        .unwrap_or(1000)
 }
 
 /// Line advance as a multiple of the glyph size, from the paragraph's percent line spacing
@@ -1166,6 +1245,156 @@ mod tests {
         assert!(
             (h - 3.0 * per_row).abs() < 1.0,
             "3 rows × (EM+pad): got {h}"
+        );
+    }
+
+    // ── 이슈 074 회귀 ────────────────────────────────────────────────────────────────────────
+    // 세 갈래를 잠근다: ① 본문 상자(머리말/꼬리말/제본 여백) ② 병합 셀 행 높이 ③ 저장 행높이 바닥
+    // ④ 빈 문단 EM. 넷 다 "쪽수를 조용히 줄이던" 과소 계산이었다.
+
+    #[test]
+    fn body_box_subtracts_header_footer_and_gutter() {
+        // 한컴 규칙: 본문 위 = top + header, 아래 = bottom + footer, 왼쪽 = left + gutter
+        // (rhwp `PageAreas::from_page_def_for_page` 와 동일). benchmark1 실측값으로 확인.
+        let page = PageSetup {
+            width: 59528,
+            height: 84188,
+            margin_left: 5669,
+            margin_right: 5669,
+            margin_top: 4251,
+            margin_bottom: 2834,
+            margin_header: 2834,
+            margin_footer: 2834,
+            margin_gutter: 0,
+            landscape: false,
+            columns: 1,
+        };
+        let (x, y, w, h) = body_box(&page);
+        assert_eq!(
+            (x, y),
+            (5669.0, 7085.0),
+            "본문 원점 = (left+gutter, top+header)"
+        );
+        assert_eq!(w, 48190.0);
+        assert_eq!(h, 71435.0, "84188 − (4251+2834) − (2834+2834)");
+        // 머리말/꼬리말이 0이면 예전(단순 위/아래 여백) 계산과 동일 — 기존 문서 회귀 없음.
+        let plain = PageSetup {
+            margin_header: 0,
+            margin_footer: 0,
+            ..page
+        };
+        assert_eq!(body_box(&plain).3, 77103.0);
+        // 제본 여백은 왼쪽으로 들어간다.
+        let bound = PageSetup {
+            margin_gutter: 1000,
+            ..page
+        };
+        assert_eq!((body_box(&bound).0, body_box(&bound).2), (6669.0, 47190.0));
+    }
+
+    /// 세로 병합 셀은 **덮는 행들의 합이 모자랄 때만** 부족분을 더한다 — 균등 분배 금지.
+    #[test]
+    fn row_span_cell_tops_up_instead_of_averaging() {
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape::default()); // 1000 EM
+        let mut t = Table {
+            rows: 2,
+            cols: 2,
+            ..Default::default()
+        };
+        // c0: 2행 병합, 저장 높이 20000(=한 줄 내용보다 훨씬 큼) → 두 행의 하한 총합만 만든다.
+        t.cells.push(Cell {
+            row: 0,
+            col: 0,
+            row_span: 2,
+            col_span: 1,
+            active: true,
+            blocks: vec![Block::Paragraph(para("병합"))],
+            ..Default::default()
+        });
+        // 각 행의 오른쪽 칸: 한 줄짜리.
+        for r in 0..2 {
+            t.cells.push(Cell {
+                row: r,
+                col: 1,
+                row_span: 1,
+                col_span: 1,
+                active: true,
+                blocks: vec![Block::Paragraph(para("한줄"))],
+                ..Default::default()
+            });
+        }
+        // 행 하한(저장 높이): r0 = 9000, r1 = 1500 (한컴이 실제로 이렇게 저장한다 — 균등하지 않다)
+        t.row_heights = vec![9000, 1500];
+        let rows = table_row_heights(&t, 40000.0, &doc, &ApproxFontMetrics);
+        assert_eq!(
+            (rows[0], rows[1]),
+            (9000.0, 1500.0),
+            "병합 셀이 짧은 행(1500)을 평균치로 부풀리면 안 된다 — 균등 분배 시 둘 다 5250이 된다"
+        );
+        // 병합 셀이 두 행 합보다 크면 그때만 마지막 행이 늘어난다.
+        let mut tall = t.clone();
+        tall.cells[0].blocks = vec![Block::Paragraph(para(&"가".repeat(60)))]; // 여러 줄
+        let rows2 = table_row_heights(&tall, 40000.0, &doc, &ApproxFontMetrics);
+        assert_eq!(rows2[0], 9000.0, "부족분은 마지막 덮는 행에만 더한다");
+        assert!(rows2[1] > 1500.0, "합이 모자라면 마지막 행이 늘어난다");
+    }
+
+    /// `row_heights` 가 비어 있어도 `stored_row_heights`(자동 맞춤 표의 저장 높이)가 바닥이 된다.
+    /// #196 은 이 바닥을 껐다가 HWPX 경로 쪽수를 20% 과소 계산했다(이슈 074).
+    #[test]
+    fn stored_row_heights_are_a_floor_when_row_heights_is_empty() {
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape::default());
+        let mut t = Table {
+            rows: 1,
+            cols: 1,
+            ..Default::default()
+        };
+        t.cells.push(Cell {
+            row: 0,
+            col: 0,
+            row_span: 1,
+            col_span: 1,
+            active: true,
+            blocks: vec![Block::Paragraph(para("짧음"))],
+            ..Default::default()
+        });
+        let bare = table_height(&t, 40000.0, &doc, &ApproxFontMetrics);
+        assert!(bare < 5000.0, "내용 기준 높이는 작다: {bare}");
+        t.stored_row_heights = vec![9000];
+        let floored = table_height(&t, 40000.0, &doc, &ApproxFontMetrics);
+        assert_eq!(floored, 9000.0, "저장 행높이가 바닥으로 걸려야 한다");
+        // 명시 row_heights 가 있으면 그쪽이 우선.
+        t.row_heights = vec![12000];
+        assert_eq!(table_height(&t, 40000.0, &doc, &ApproxFontMetrics), 12000.0);
+    }
+
+    /// 빈 문단의 줄 높이는 **그 문단의 글자 크기** × 줄간격 — 1000 고정이 아니다.
+    #[test]
+    fn empty_paragraph_uses_its_own_char_size() {
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape::default()); // 0: 1000
+        doc.char_shapes.push(CharShape {
+            height: 500,
+            ..Default::default()
+        }); // 1: 500 (5pt 간격 문단)
+        let small = Paragraph {
+            runs: vec![Run {
+                char_shape: 1,
+                content: Vec::new(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let lines = layout_paragraph(&small, &doc, 10000.0, &ApproxFontMetrics);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].vert_size, 500.0, "빈 줄 = 그 문단 글자 크기");
+        // 런이 아예 없으면 10pt 기본값(예전 동작) 유지.
+        let bare = Paragraph::default();
+        assert_eq!(
+            layout_paragraph(&bare, &doc, 10000.0, &ApproxFontMetrics)[0].vert_size,
+            1000.0
         );
     }
 

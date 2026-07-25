@@ -182,11 +182,11 @@ fn floor_rows_to_stored(blocks: &mut [Block]) {
 /// 잠그는 것:
 /// 1. **총 줄수 완전 일치** — 표 앵커 문단(`is_table_anchor`)을 안 세우면 표마다 빈 줄이 1개씩
 ///    초과 예약된다(측정: 368 vs 301, 정확히 표 67개만큼 초과). 구조 회귀의 가장 예민한 탐지기.
-/// 2. **행 높이 정책을 빼면 쪽수도 일치** — 남은 18 vs 20 은 버그가 아니라 의도된 차이다:
-///    rhwp lift 는 저장된 셀 높이를 무조건 행 높이 바닥으로 깔지만(→ 한컴의 20쪽 재현), 우리
-///    HWPX 파서는 `noAdjust=0`(자동 맞춤)이면 내용 기준으로 두고 저장 높이는 `stored_row_heights`
-///    (앱이 FAITHFUL/레이아웃정리로 토글하는 렌더 IR)로만 남긴다 — 이슈 020/054. 바닥을 깔면
-///    쪽수도 같아진다는 것을 여기서 증명해, 남은 갭이 **구조가 아니라 정책**임을 못 박는다.
+/// 2. **쪽수 완전 일치** — 이슈 074 전에는 18 vs 20 이었고 "행 높이 바닥 정책 차이"로 설명했다.
+///    이제는 그 차이가 없다: 조판기가 `row_heights` 가 비면 `stored_row_heights` 를 바닥으로
+///    쓰므로(`apply_row_overrides`, 074) 두 파서가 같은 표 높이를 얻는다. 실측 22쪽/301줄 ==
+///    22쪽/301줄. 바닥을 명시적으로 깔아도(아래 `floored`) 결과가 같아야 한다 — 바닥이 이미
+///    적용됐다는 뜻이고, 이게 깨지면 020/054 의 렌더 IR 이 조판에서 새는 것이다.
 #[test]
 fn hwpx_parser_typesets_like_the_rhwp_lift() {
     let bytes = bench();
@@ -209,7 +209,12 @@ fn hwpx_parser_typesets_like_the_rhwp_lift() {
 
     assert_eq!(ol, tl, "총 줄수 불일치: 우리 {ol} vs rhwp lift {tl}");
     assert_eq!(
-        fp, tp,
-        "행 높이 바닥을 맞춰도 쪽수가 다르다 = 정책이 아니라 구조 회귀: 우리 {fp} vs rhwp lift {tp}"
+        op, tp,
+        "쪽수 불일치: 우리 파서 {op} vs rhwp lift {tp} (074 이후 두 경로는 같은 표 높이를 얻는다)"
+    );
+    assert_eq!(
+        (fp, fl),
+        (op, ol),
+        "저장 행높이를 명시적으로 깔았더니 결과가 달라졌다 = 조판기가 이미 바닥을 쓰고 있지 않다"
     );
 }

@@ -801,6 +801,11 @@ fn base_line_spacing(base: &str) -> (String, i32) {
 }
 
 /// Build `<hp:switch>` with margins V in `hp:case` and 2V in `hp:default`, lineSpacing identical.
+///
+/// ⚠️ 실값은 `hp:case`(2016 HwpUnitChar) 쪽의 V 다 — 같은 문서의 이진 `.hwp` 와 대조하면 문단
+/// 들여쓰기가 −3456 로 **정확히 일치**한다(이슈 074 실측). `hp:default` 의 2V 는 한컴이 실물에
+/// 남기는 레거시 미러라 그대로 따라 쓴다. (vendored rhwp 의 HWPX 파서는 case 값을 다시 2배로
+/// 곱한다 — 그건 rhwp 쪽 결함이고, `hwp-rhwp` lift 에서 되돌린다.)
 fn build_switch(shape: &ParaShape, ls_type: &str, ls_val: i32) -> String {
     let (i, l, r, p, n) = (
         shape.indent,
@@ -970,8 +975,12 @@ fn bump_attr(s: &str, name: &str, delta: i64) -> String {
 }
 
 /// Patch a section's page setup in-place: `<hp:pagePr>` width/height + the page `<hp:margin>`
-/// left/right/top/bottom (header/footer/gutter left intact). Used for `Op::SetPageLayout`; the
+/// **여섯 여백 전부**(left/right/top/bottom + header/footer/gutter). Used for `Op::SetPageLayout`; the
 /// rest of the secPr (grid, footnote/endnote prefs, columns) is preserved verbatim.
+///
+/// 머리말/꼬리말/제본 여백까지 쓰는 이유(이슈 074): 본문 상자는 `height − (top+header) −
+/// (bottom+footer)` 라, 이 셋을 스켈레톤 기본값(header/footer=4252)으로 두면 원본이 2834 인 문서가
+/// 왕복 후 본문 2836 HWPUNIT 만큼 짧아져 **무편집 왕복에서 쪽수가 늘어난다**(실측 8p→11p).
 pub fn patch_page(section_xml: &str, page: &PageSetup) -> String {
     let mut s = section_xml.to_string();
     // <hp:pagePr … landscape=".." width=".." height="..">. The orientation attr is load-bearing for
@@ -1006,6 +1015,9 @@ pub fn patch_page(section_xml: &str, page: &PageSetup) -> String {
                 ("right", page.margin_right),
                 ("top", page.margin_top),
                 ("bottom", page.margin_bottom),
+                ("header", page.margin_header),
+                ("footer", page.margin_footer),
+                ("gutter", page.margin_gutter),
             ] {
                 tag = set_attr(&tag, name, &val.to_string());
             }

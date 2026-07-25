@@ -1385,6 +1385,8 @@ struct PlacedCell {
     /// Cell-OWN padding `[l, r, t, b]` (HWPUNIT, → `hasMargin="1"` + `<hp:cellMargin>`); `None` →
     /// inherit the table default.
     padding: Option<[i32; 4]>,
+    /// 저장된 셀 실폭(HWPUNIT). `None` = 모름 → 열 격자 합으로 대체 (이슈 074).
+    width: Option<i32>,
 }
 
 /// One piece of a paragraph's run sequence, in document order. `Text` is a formatted text run;
@@ -1606,6 +1608,14 @@ fn placed_cells(t: &Table) -> Vec<PlacedCell> {
             content: emit_blocks(&cell.blocks),
             bf_key: bf_spec(&cell.borders, cell.shade_color).map(|s| bf_key(&s)),
             padding: cell.padding,
+            // 이슈 074: 셀 실폭을 그대로 재방출한다 — 열 격자 합으로 바꿔 쓰면 행마다 열 경계가
+            // 다른 표(ragged)에서 폭이 최대 2배까지 틀어지고, 재열기 시 셀 글이 더 줄바꿈돼
+            // 무편집 왕복인데도 쪽수가 늘어난다.
+            //
+            // ⚠️ 단, 사용자가 열 너비를 편집했으면(`geometry_edited`) 실폭은 **낡은 값**이다 —
+            // 그때는 `None` 을 내보내 열 격자(`col_widths`) 합으로 방출한다. 조판기도 같은 규칙을
+            // 쓰므로(`place::cell_boxes`) 화면·저장 바이트가 어긋나지 않는다.
+            width: (!t.geometry_edited).then_some(cell.width).flatten(),
         })
         .collect()
 }
@@ -1993,20 +2003,17 @@ fn emit_table(out: &mut String, tid: u64, t: &EmitTable, ctx: &BodyCtx, next_id:
             RH
         }
     };
-    // A ROW-SPANNING cell's <hp:cellSz height> must round-trip idempotently: the lift distributes a
-    // spanning cell's height EVENLY (height/span) across its rows and takes the per-row max, so
-    // emitting the SUM of unequal row heights would re-lift as sum/span and INFLATE the shorter rows
-    // (measured: benchmark1 표 7/48 rows grew 7088→9804 on reopen). `span × min(row heights)` is the
-    // unique even-distributable value that (a) never raises any covered row (min ≤ each row) and
-    // (b) exactly reproduces rows the span itself determined (there min == the span's own per-row
-    // contribution) — recovering the original stored height in the common case.
+    // A ROW-SPANNING cell's <hp:cellSz height> = 덮는 행 높이의 **합**. 이게 왕복 항등원이다:
+    // 재열기 때 `stored_row_heights` 는 ① 한 행짜리 셀로 각 행을 정하고 ② 병합 셀은 덮는 행 합이
+    // 모자랄 때만 부족분을 더하므로(이슈 074), 합을 그대로 쓰면 부족분이 0 이라 어떤 행도 부풀지
+    // 않는다. (예전엔 lift 가 height/span 을 모든 행에 균등 분배해서 합을 쓰면 짧은 행이 부풀었고,
+    // 그래서 `span × min(행높이)` 라는 우회를 썼다 — 그 균등 분배 자체가 과다 예약의 원인이었다.)
     let span_h = |r: usize, n: usize| -> u64 {
         let end = (r + n).min(rows);
-        let n_eff = end.saturating_sub(r).max(1) as u64;
-        if n_eff == 1 {
+        if end <= r {
             return rh_of(r);
         }
-        (r..end).map(rh_of).min().unwrap_or(0) * n_eff
+        (r..end).map(rh_of).sum()
     };
     let height = (0..rows).map(rh_of).sum::<u64>();
     let w = w_total; // table box width = sum of column widths
@@ -2067,7 +2074,10 @@ fn emit_table(out: &mut String, tid: u64, t: &EmitTable, ctx: &BodyCtx, next_id:
                 cell.col,
                 cell.col_span,
                 cell.row_span,
-                span_w(cell.col, cell.col_span),
+                cell.width
+                    .filter(|&w| w > 0)
+                    .map(|w| w as u64)
+                    .unwrap_or_else(|| span_w(cell.col, cell.col_span)),
                 span_h(cell.row, cell.row_span),
             ));
         }
@@ -2586,6 +2596,11 @@ mod tests {
             margin_right: 8504,
             margin_top: 8504,
             margin_bottom: 8504,
+            // 머리말/꼬리말도 편집 대상이다(이슈 074): 본문 상자를 실제로 줄이는 값이라
+            // 스켈레톤 기본값(4252)을 남겨 두면 무편집 왕복에서 쪽수가 늘어난다.
+            margin_header: 1417,
+            margin_footer: 1417,
+            margin_gutter: 0,
             landscape: true,
             columns: 1,
         };
@@ -2606,7 +2621,12 @@ mod tests {
             m.contains(r#"left="8504""#) && m.contains(r#"top="8504""#),
             "margins patched: {m}"
         );
-        assert!(m.contains(r#"header="4252""#), "header margin preserved");
+        assert!(
+            m.contains(r#"header="1417""#)
+                && m.contains(r#"footer="1417""#)
+                && m.contains(r#"gutter="0""#),
+            "머리말/꼬리말/제본 여백까지 기록된다(074): {m}"
+        );
         assert!(crate::export::validate_open_safety(&out).ok);
     }
 

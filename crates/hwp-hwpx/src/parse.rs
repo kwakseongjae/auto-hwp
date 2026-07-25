@@ -356,6 +356,19 @@ fn parse_page_setup(sec_xml: &str) -> Option<PageSetup> {
             if let Some(v) = tag_attr_i32(mtag, "bottom") {
                 page.margin_bottom = v;
             }
+            // 이슈 074: 머리말/꼬리말/제본 여백도 본문 상자를 줄인다(본문 위 = top + header,
+            // 아래 = bottom + footer, 왼쪽 = left + gutter). 안 읽으면 본문이 실제보다 길어져
+            // 쪽수를 과소 계산한다 — benchmark1.hwpx 는 header/footer 가 각 4252 여서 본문
+            // 높이를 8504 HWPUNIT(=12.4%) 과대평가했다(본문 68599 를 77103 으로).
+            if let Some(v) = tag_attr_i32(mtag, "header") {
+                page.margin_header = v;
+            }
+            if let Some(v) = tag_attr_i32(mtag, "footer") {
+                page.margin_footer = v;
+            }
+            if let Some(v) = tag_attr_i32(mtag, "gutter") {
+                page.margin_gutter = v;
+            }
         }
     }
     Some(page)
@@ -1106,6 +1119,10 @@ fn parse_section(
                                 c.padding = f.cur_cell_margin;
                             }
                             let (w, h) = f.cur_cell_sz.unwrap_or((0, 0));
+                            // 이슈 074: 저장된 셀 실폭을 셀에 붙인다 — 열 격자(col_widths)는 행마다
+                            // 열 경계가 다른 한글 표에서 최대 2배까지 틀리고, 그만큼 셀 글이 더
+                            // 줄바꿈돼 행 높이가 부푼다.
+                            c.width = (w > 0).then_some(w);
                             f.geoms.push(CellGeom {
                                 row: c.row,
                                 col: c.col,
@@ -1289,15 +1306,28 @@ fn derive_col_widths_hwpx(geoms: &[CellGeom], cols: usize) -> Vec<i32> {
 /// row content-sized).
 fn stored_row_heights_hwpx(geoms: &[CellGeom], rows: usize) -> Vec<i32> {
     let mut row_h = vec![0i32; rows];
+    // ① 한 행짜리 셀이 그 행의 저장 높이를 정한다.
     for g in geoms {
-        let span = g.row_span.max(1);
-        let per = g.height / span as i32;
-        if per <= 0 {
+        if g.row_span.max(1) == 1 && g.row < rows && g.height > 0 {
+            row_h[g.row] = row_h[g.row].max(g.height);
+        }
+    }
+    // ② 세로 병합 셀은 덮는 행들의 합이 모자랄 때만 부족분을 마지막 행에 더한다 — 균등 분배
+    //    (height/span 를 모든 행에 max)는 짧은 행을 평균치까지 부풀린다(이슈 074, 실측: 한컴은
+    //    r6=11921/r7=1845 인데 균등 분배는 둘 다 6884 로 깔아 5042 HWPUNIT 과다).
+    let mut spans: Vec<&CellGeom> = geoms
+        .iter()
+        .filter(|g| g.row_span.max(1) > 1 && g.row < rows && g.height > 0)
+        .collect();
+    spans.sort_by_key(|g| g.row_span);
+    for g in spans {
+        let end = (g.row + g.row_span.max(1)).min(rows);
+        if end <= g.row {
             continue;
         }
-        let end = (g.row + span).min(rows);
-        for slot in row_h.iter_mut().take(end).skip(g.row) {
-            *slot = (*slot).max(per);
+        let sum: i32 = row_h[g.row..end].iter().sum();
+        if g.height > sum {
+            row_h[end - 1] += g.height - sum;
         }
     }
     row_h
@@ -1679,9 +1709,38 @@ pub(crate) mod tests {
         assert_eq!(pg.margin_right, 5670);
         assert_eq!(pg.margin_top, 4251);
         assert_eq!(pg.margin_bottom, 2834);
+        // 이슈 074: 머리말/꼬리말/제본 여백도 읽는다 — 본문 상자를 실제로 줄이는 값이라
+        // 안 읽으면 쪽수를 과소 계산한다(본문 높이가 8504 HWPUNIT = 12% 더 길어졌다).
+        assert_eq!(pg.margin_header, 4252);
+        assert_eq!(pg.margin_footer, 4252);
+        assert_eq!(pg.margin_gutter, 0);
+        // 본문 높이 = 용지 − (위+머리말) − (아래+꼬리말) = 68597 (hwp_typeset::body_box 규칙).
+        assert_eq!(
+            pg.height - (pg.margin_top + pg.margin_header) - (pg.margin_bottom + pg.margin_footer),
+            68597
+        );
         assert!(!pg.landscape, "portrait derived from width<height");
         // No secPr → None (the caller keeps PageSetup::default()).
         assert!(parse_page_setup("<hs:sec><hp:p/></hs:sec>").is_none());
+    }
+
+    /// 이슈 074: `<hp:cellSz width>` 는 셀에 **실폭**으로 실린다 — 한글 표는 행마다 열 경계가
+    /// 다를 수 있어(ragged) 열 격자 근사로는 폭이 최대 2배까지 틀리고, 그만큼 셀 글이 더
+    /// 줄바꿈돼 행 높이가 부푼다.
+    #[test]
+    fn cell_stores_its_own_width() {
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run><hp:tbl rowCnt="1" colCnt="2"><hp:tr><hp:tc><hp:subList><hp:p><hp:run><hp:t>A</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="1234" height="500"/></hp:tc><hp:tc><hp:subList><hp:p><hp:run><hp:t>B</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="1" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="5678" height="500"/></hp:tc></hp:tr></hp:tbl></hp:run></hp:p></hs:sec>"#;
+        let mut blocks = Vec::new();
+        parse_section(xml, &mut blocks, &mut Vec::new(), &Default::default()).unwrap();
+        let t = blocks
+            .iter()
+            .find_map(|b| match b {
+                Block::Table(t) => Some(t),
+                _ => None,
+            })
+            .expect("table");
+        let w: Vec<Option<i32>> = t.cells.iter().map(|c| c.width).collect();
+        assert_eq!(w, vec![Some(1234), Some(5678)], "셀 실폭이 그대로 실린다");
     }
 
     /// Batch A (#196): the resolve pass points a run at the REAL charPr and a paragraph at the REAL

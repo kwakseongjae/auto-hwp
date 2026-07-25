@@ -1,11 +1,16 @@
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
-// 이슈 037 페이지 가상화 e2e: 25쪽 문서를 열면 뷰포트 근처(±버퍼) 페이지만 SVG로 마운트되고, 멀리 있는
+// 이슈 037 페이지 가상화 e2e: 여러 쪽 문서를 열면 뷰포트 근처(±버퍼) 페이지만 SVG로 마운트되고, 멀리 있는
 // 페이지는 같은 크기의 빈 placeholder(.hw-sheet + data-page, svg 없음)로 남는다. 마지막 페이지로 스크롤하면
-// 그 페이지가 즉시 마운트되어 내용이 채워진다. 픽스처는 benchmarks/benchmark2.hwp(25쪽, 가장 큰 픽스처).
+// 그 페이지가 즉시 마운트되어 내용이 채워진다. 픽스처는 benchmarks/benchmark2.hwp(가장 큰 픽스처).
+//
+// ⚠️ PAGES 는 한때 25 였다. 그때 `place_doc`(앱 렌더)이 25, `NaiveLayout`(layout-check)이 24 로
+// 갈려 있었고 — LOCKSTEP 위반이다 — 이 스펙이 틀린 쪽(25)을 굳히고 있었다. 074 조판 수정에서
+// 두 경로를 한 함수로 합치며 24 로 정렬됐고, 24 는 한컴 실측과도 일치한다
+// (`layout-check benchmark2.hwp` = 우리 24 · 한컴 24). 그래서 기대값을 24 로 내린다.
 const BENCHMARK2 = path.resolve(process.cwd(), "..", "..", "benchmarks", "benchmark2.hwp");
-const PAGES = 25;
+const PAGES = 24;
 
 async function open(page: Page) {
   await page.goto("/");
