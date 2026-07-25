@@ -431,6 +431,95 @@ struct PicAccum {
     height: i32,             // <hp:sz height>
 }
 
+/// Accumulator for one in-progress `<hp:equation>` — its display attrs (open tag) + the `<hp:script>`
+/// body text. Mirrors [`PicAccum`]: the open tag arms it, the children fill it, `</hp:equation>`
+/// builds the [`EquationRef`].
+///
+/// The script is HWP's equation markup and OWPML's `<hp:script>` is the SAME language, so it rides
+/// through verbatim (no transcode) — exactly what the .hwp lift (`lift_equation`) does.
+#[derive(Default)]
+struct EqAccum {
+    script: String,
+    font: String,
+    base_unit: u32,
+    baseline: i16,
+    color: Color,
+    width: i32,  // <hp:sz width> (HWPUNIT)
+    height: i32, // <hp:sz height>
+    version: String,
+}
+
+impl EqAccum {
+    /// `<hp:equation version baseLine textColor baseUnit font …>` → the display attrs. Every one is
+    /// optional; the serializer (`emit_equation`) substitutes 한컴's defaults for the empty/zero ones,
+    /// so a sparsely-attributed equation still round-trips.
+    fn from_attrs(e: &BytesStart) -> EqAccum {
+        EqAccum {
+            font: attr_str(e, b"font").unwrap_or_default(),
+            base_unit: attr_i32(e, b"baseUnit").unwrap_or(0).max(0) as u32,
+            baseline: attr_i32(e, b"baseLine")
+                .unwrap_or(0)
+                .clamp(i16::MIN as i32, i16::MAX as i32) as i16,
+            // `Color::default()` 는 알파 0(투명)이라 수식 기본색으로는 틀리다 — 불투명 검정.
+            color: attr_str(e, b"textColor")
+                .and_then(|s| Color::from_hex(&s))
+                .unwrap_or(Color {
+                    r: 0,
+                    g: 0,
+                    b: 0,
+                    a: 255,
+                }),
+            version: attr_str(e, b"version").unwrap_or_default(),
+            ..Default::default()
+        }
+    }
+
+    fn into_ref(self) -> EquationRef {
+        EquationRef {
+            script: self.script,
+            font: self.font,
+            base_unit: self.base_unit,
+            baseline: self.baseline,
+            color: self.color,
+            width: self.width,
+            height: self.height,
+            version: self.version,
+            // 파생 캐시 — rhwp 의 수식 엔진이 필요하고 이 크레이트는 rhwp 를 모른다(wasm 대상).
+            // `None` = 예전과 바이트동일한 스텁 박스 폴백이라 순수 가산이다.
+            rendered_svg: None,
+        }
+    }
+}
+
+/// Accumulator for one in-progress `<hp:fieldBegin>` — its id/type plus the `Command` string param
+/// (a hyperlink's URL, a click-here's guide payload …). `</hp:fieldBegin>` builds the marker.
+#[derive(Default)]
+struct FieldAccum {
+    id: u32,
+    field_type: String,
+    command: String,
+}
+
+impl FieldAccum {
+    /// `<hp:fieldBegin id type …>`. `id` is what the matching `<hp:fieldEnd beginIDRef>` references,
+    /// so it must ride through unchanged (the pairing is what makes the range meaningful).
+    fn from_attrs(e: &BytesStart) -> FieldAccum {
+        FieldAccum {
+            id: attr_u64(e, b"id").unwrap_or(0) as u32,
+            field_type: attr_str(e, b"type").unwrap_or_default(),
+            command: String::new(),
+        }
+    }
+
+    fn into_marker(self) -> FieldMarker {
+        FieldMarker {
+            id: self.id,
+            field_type: self.field_type,
+            command: self.command,
+        }
+    }
+}
+
 /// Accumulator for one in-progress `<hp:p>` (runs + its source provenance).
 #[derive(Default)]
 struct ParaAccum {
@@ -441,9 +530,12 @@ struct ParaAccum {
     simple: bool,                              // only hp:run/hp:t children seen so far
     runs: Vec<Run>,                            // flushed runs
     cur_run: Option<(Option<String>, String)>, // open run (charPrIDRef, text)
-    pending_images: Vec<ImageRef>,             // <hp:pic>s parsed inside the open run (D1)
-    pending_notes: Vec<NoteRef>,               // <hp:footNote>/<hp:endNote>s parsed inside the run
-    hosts_table: bool,                         // `<hp:tbl>` 를 품었다 → 표 앵커 후보
+    /// Non-text inlines parsed inside the OPEN run, in DOCUMENT ORDER: `<hp:pic>` (D1),
+    /// `<hp:footNote>`/`<hp:endNote>`, `<hp:equation>`, `<hp:fieldBegin>`/`<hp:fieldEnd>`.
+    /// One ordered list (not per-kind lists) because field markers only mean anything in order —
+    /// a `FieldEnd` that floats ahead of its `FieldBegin` would invert a hyperlink range.
+    pending: Vec<Inline>,
+    hosts_table: bool, // `<hp:tbl>` 를 품었다 → 표 앵커 후보
 }
 
 /// 본문이 아닌 서브바디 프레임(머리말/꼬리말/각주/미주). 여는 태그에서 `blocks` 스택에 프레임을
@@ -560,6 +652,12 @@ fn parse_section(
     let mut in_t = false;
     // In-progress `<hp:pic>` (D1) — captures its display size + binary ref between pic open/close.
     let mut pic: Option<PicAccum> = None;
+    // In-progress `<hp:equation>` + whether we're inside its `<hp:script>` text.
+    let mut eq: Option<EqAccum> = None;
+    let mut in_script = false;
+    // In-progress `<hp:fieldBegin>` + whether we're inside its `Command` `<hp:stringParam>`.
+    let mut field: Option<FieldAccum> = None;
+    let mut in_field_cmd = false;
 
     loop {
         let pos_before = reader.buffer_position() as usize; // lands on '<' of the upcoming tag (qxml 0.37)
@@ -628,6 +726,32 @@ fn parse_section(
                         pic = Some(PicAccum::default());
                         mark_not_simple(&mut paras);
                     }
+                    // 수식 — `<hp:pic>` 와 **완전히 같은 패턴**: 여는 태그가 누산기를 열고,
+                    // 자식(`<hp:sz>`/`<hp:script>`)이 채우고, 닫는 태그가 `Inline::Equation` 을
+                    // 만든다. 예전엔 `other =>` 폴백이 `mark_not_simple` 만 찍고 **내용을 통째로
+                    // 버려서** 수식이 렌더/조판/export 어디에도 남지 않았다(스텁 박스조차 없음).
+                    // 구조적 자식이므로 호스트 문단은 계속 non-simple = 재출력 시 바이트 그대로.
+                    b"equation" => {
+                        eq = Some(EqAccum::from_attrs(&e));
+                        mark_not_simple(&mut paras);
+                    }
+                    // `<hp:script>` 는 수식 문맥에서만 텍스트 수집 대상이다(`in_t` 는 `<hp:t>` 전용).
+                    b"script" if eq.is_some() => {
+                        in_script = true;
+                        mark_not_simple(&mut paras);
+                    }
+                    // 필드(하이퍼링크/누름틀/상호참조) 시작 — `<hp:parameters>` 자식을 가지므로 Start.
+                    b"fieldBegin" => {
+                        field = Some(FieldAccum::from_attrs(&e));
+                        mark_not_simple(&mut paras);
+                    }
+                    // 필드의 `Command` 파라미터(하이퍼링크 URL 등)만 본문 텍스트로 모은다.
+                    b"stringParam" if field.is_some() => {
+                        if attr_str(&e, b"name").as_deref() == Some("Command") {
+                            in_field_cmd = true;
+                        }
+                        mark_not_simple(&mut paras);
+                    }
                     // 머리말/꼬리말/각주/미주는 본문이 아니다 — `<hp:tc>` 와 **완전히 같은 패턴**으로
                     // blocks 프레임을 밀어 넣어 그 안의 `<hp:p>` 가 섹션 루트로 새는 것을 막는다.
                     // (프레임이 없으면 `</hp:p>` 가 머리말 문단을 본문 첫 줄에 일반 문단으로 조판했다.)
@@ -690,6 +814,21 @@ fn parse_section(
                         }
                     }
                     _ => {}
+                }
+                mark_not_simple(&mut paras);
+            }
+            // Inside a `<hp:equation>`: only its `<hp:sz>` matters (the reserved box the typesetter
+            // and the own-render stub use). Everything else (pos/outMargin/…) is structural.
+            Ok(Event::Empty(e)) if eq.is_some() => {
+                if e.local_name().as_ref() == b"sz" {
+                    if let Some(a) = eq.as_mut() {
+                        if let Some(w) = attr_i32(&e, b"width") {
+                            a.width = w;
+                        }
+                        if let Some(h) = attr_i32(&e, b"height") {
+                            a.height = h;
+                        }
+                    }
                 }
                 mark_not_simple(&mut paras);
             }
@@ -774,6 +913,19 @@ fn parse_section(
                 b"nbSpace" => push_inline_char(&mut paras, '\u{00A0}'),
                 b"tab" => push_inline_char(&mut paras, '\t'),
                 b"lineBreak" => push_inline_char(&mut paras, '\n'),
+                // 필드 끝 마커 — 항상 self-closing. 짝(`beginIDRef`)을 그대로 들고 간다.
+                b"fieldEnd" => {
+                    let id = attr_u64(&e, b"beginIDRef").unwrap_or(0) as u32;
+                    push_pending(&mut paras, Inline::FieldEnd(id));
+                    mark_not_simple(&mut paras);
+                }
+                // 파라미터 없는 필드 시작(`<hp:fieldBegin …/>`)도 실물에 존재한다 — Start 경로와
+                // 같은 누산기를 즉시 확정한다.
+                b"fieldBegin" => {
+                    let fa = FieldAccum::from_attrs(&e);
+                    push_pending(&mut paras, Inline::FieldBegin(fa.into_marker()));
+                    mark_not_simple(&mut paras);
+                }
                 // `<hp:lineseg/>` (inside linesegarray) is layout cache; everything else structural.
                 other => {
                     if !matches!(other, b"lineseg" | b"linesegarray") {
@@ -781,6 +933,24 @@ fn parse_section(
                     }
                 }
             },
+            // 수식 스크립트 본문. `<hp:t>` 전용인 `in_t` 와 분리해야 한다 — 예전엔 `in_t` 만 있어
+            // 스크립트 텍스트가 어디에도 잡히지 않았다.
+            Ok(Event::Text(e)) if in_script => {
+                if let Some(a) = eq.as_mut() {
+                    a.script.push_str(&e.unescape().unwrap_or_default());
+                }
+            }
+            // 한컴/변환기에 따라 스크립트를 CDATA 로 쓰기도 한다(수식엔 `<`, `&` 가 흔하다).
+            Ok(Event::CData(e)) if in_script => {
+                if let Some(a) = eq.as_mut() {
+                    a.script.push_str(&String::from_utf8_lossy(&e.into_inner()));
+                }
+            }
+            Ok(Event::Text(e)) if in_field_cmd => {
+                if let Some(f) = field.as_mut() {
+                    f.command.push_str(&e.unescape().unwrap_or_default());
+                }
+            }
             Ok(Event::Text(e)) if in_t => {
                 if let Some((_, t)) = paras.last_mut().and_then(|p| p.cur_run.as_mut()) {
                     t.push_str(&e.unescape().unwrap_or_default());
@@ -788,6 +958,21 @@ fn parse_section(
             }
             Ok(Event::End(e)) => match e.local_name().as_ref() {
                 b"t" => in_t = false,
+                b"script" => in_script = false,
+                b"stringParam" => in_field_cmd = false,
+                // 수식 확정 → 현재 열린 런의 `Inline::Equation`. 파생 캐시 `rendered_svg` 는
+                // rhwp 의존(그리고 wasm 비대상)이라 여기선 항상 `None` — 렌더러가 스텁 박스로
+                // 폴백하므로 순수 가산이다(.hwp lift 의 렌더 실패 경로와 같은 상태).
+                b"equation" => {
+                    if let Some(a) = eq.take() {
+                        push_pending(&mut paras, Inline::Equation(a.into_ref()));
+                    }
+                }
+                b"fieldBegin" => {
+                    if let Some(f) = field.take() {
+                        push_pending(&mut paras, Inline::FieldBegin(f.into_marker()));
+                    }
+                }
                 b"run" => {
                     if let Some(p) = paras.last_mut() {
                         flush_run(p);
@@ -845,13 +1030,14 @@ fn parse_section(
                     // ref (external/broken) is dropped.
                     if let Some(pa) = pic.take() {
                         if let Some(bin_ref) = pa.bin_ref.filter(|r| !r.is_empty()) {
-                            if let Some(p) = paras.last_mut() {
-                                p.pending_images.push(ImageRef {
+                            push_pending(
+                                &mut paras,
+                                Inline::Image(ImageRef {
                                     bin_ref,
                                     width: pa.width,
                                     height: pa.height,
-                                });
-                            }
+                                }),
+                            );
                         }
                     }
                 }
@@ -878,15 +1064,18 @@ fn parse_section(
                                 suffix_char,
                                 inst_id,
                             } => {
-                                if let Some(p) = paras.last_mut() {
-                                    p.pending_notes.push(NoteRef {
-                                        kind,
-                                        number,
-                                        prefix_char,
-                                        suffix_char,
-                                        inst_id,
-                                        body,
-                                    });
+                                if !paras.is_empty() {
+                                    push_pending(
+                                        &mut paras,
+                                        Inline::Note(NoteRef {
+                                            kind,
+                                            number,
+                                            prefix_char,
+                                            suffix_char,
+                                            inst_id,
+                                            body,
+                                        }),
+                                    );
                                 } else if let Some(target) = blocks.last_mut() {
                                     // OWPML 은 각주를 항상 문단 안에 넣으므로 도달 불가.
                                     // 그래도 콘텐츠를 버리지는 않는다(현행 동작과 동일한 자리로).
@@ -1014,27 +1203,32 @@ fn push_inline_char(paras: &mut [ParaAccum], ch: char) {
 }
 
 fn flush_run(p: &mut ParaAccum) {
-    let images = std::mem::take(&mut p.pending_images);
-    // 각주/미주 참조는 런 끝에 붙인다 — .hwp lift 와 같은 v1 근사(정확한 런 중간 앵커는 후속).
-    let notes = std::mem::take(&mut p.pending_notes);
+    // 그림/각주/수식/필드 마커는 런 끝에 붙인다 — .hwp lift 와 같은 v1 근사(정확한 런 중간
+    // 앵커는 후속). 서로의 상대 순서는 문서 순서 그대로 보존된다(단일 `pending` 리스트).
+    let pending = std::mem::take(&mut p.pending);
     if let Some((char_ref, text)) = p.cur_run.take() {
         let mut content: Vec<Inline> = vec![Inline::Text(text)];
-        content.extend(images.into_iter().map(Inline::Image));
-        content.extend(notes.into_iter().map(Inline::Note));
+        content.extend(pending);
         p.runs.push(Run {
             char_shape: 0,
             char_ref,
             content,
         });
-    } else if !images.is_empty() || !notes.is_empty() {
-        // A picture / note outside an explicit `<hp:run>` — emit it in its own run so it survives.
-        let mut content: Vec<Inline> = images.into_iter().map(Inline::Image).collect();
-        content.extend(notes.into_iter().map(Inline::Note));
+    } else if !pending.is_empty() {
+        // 명시적 `<hp:run>` 바깥의 그림/각주/수식 — 자체 런으로 내보내 살려 둔다.
         p.runs.push(Run {
             char_shape: 0,
             char_ref: None,
-            content,
+            content: pending,
         });
+    }
+}
+
+/// Append a non-text inline to the innermost in-progress paragraph's OPEN-run pending list.
+/// A no-op when no paragraph is open (stray object outside `<hp:p>`, which OWPML does not produce).
+fn push_pending(paras: &mut [ParaAccum], inl: Inline) {
+    if let Some(p) = paras.last_mut() {
+        p.pending.push(inl);
     }
 }
 
@@ -1198,6 +1392,180 @@ pub(crate) mod tests {
             p.source.as_ref().is_some_and(|s| s.simple),
             "inline whitespace must NOT make the paragraph non-simple"
         );
+    }
+
+    /// Collect every inline of a parsed section, depth-first (paragraph runs + table cell bodies).
+    fn all_inlines(blocks: &[Block]) -> Vec<Inline> {
+        let mut out = Vec::new();
+        fn walk(bs: &[Block], out: &mut Vec<Inline>) {
+            for b in bs {
+                match b {
+                    Block::Paragraph(p) => {
+                        for r in &p.runs {
+                            out.extend(r.content.iter().cloned());
+                        }
+                    }
+                    Block::Table(t) => {
+                        for c in &t.cells {
+                            walk(&c.blocks, out);
+                        }
+                    }
+                }
+            }
+        }
+        walk(blocks, &mut out);
+        out
+    }
+
+    fn parse_sec(xml: &str) -> Vec<Block> {
+        let mut blocks = Vec::new();
+        parse_section(xml, &mut blocks, &mut Vec::new(), &Default::default()).unwrap();
+        blocks
+    }
+
+    /// 수식 회귀 잠금: `<hp:equation>` 은 예전에 `other =>` 폴백에서 **통째로 버려졌다**(렌더 SVG에
+    /// 글리프 0개 — 스텁 박스조차 없었다). 이제 스크립트/표시속성/예약 박스를 `Inline::Equation`
+    /// 으로 살린다. `<hp:script>` 텍스트는 `<hp:t>` 전용 `in_t` 와 분리된 경로로 잡아야 한다.
+    #[test]
+    fn equation_is_lifted_with_script_and_display_attrs() {
+        let xml = r##"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run charPrIDRef="7"><hp:t>앞</hp:t>
+          <hp:equation id="9" version="Equation Version 60" baseLine="70" textColor="#FF0000" baseUnit="1200" lineMode="CHAR" font="HYhwpEQ">
+            <hp:sz width="4300" height="2100" widthRelTo="ABSOLUTE" heightRelTo="ABSOLUTE" protect="0"/>
+            <hp:pos treatAsChar="1"/><hp:outMargin left="56" right="56" top="0" bottom="0"/>
+            <hp:script>1 over 2 + sqrt {a &lt; b}</hp:script>
+          </hp:equation><hp:t>뒤</hp:t></hp:run></hp:p></hs:sec>"##;
+        let blocks = parse_sec(xml);
+        let eq = all_inlines(&blocks)
+            .into_iter()
+            .find_map(|i| match i {
+                Inline::Equation(e) => Some(e),
+                _ => None,
+            })
+            .expect("`<hp:equation>` 은 Inline::Equation 이어야 한다");
+        assert_eq!(eq.script, "1 over 2 + sqrt {a < b}");
+        assert_eq!((eq.width, eq.height), (4300, 2100));
+        assert_eq!(eq.font, "HYhwpEQ");
+        assert_eq!(eq.base_unit, 1200);
+        assert_eq!(eq.baseline, 70);
+        assert_eq!(eq.color, Color::from_hex("#FF0000").unwrap());
+        assert_eq!(eq.version, "Equation Version 60");
+        // 파생 캐시는 rhwp 의존 → 항상 None(렌더러가 스텁 박스로 폴백).
+        assert!(eq.rendered_svg.is_none());
+        // 주변 텍스트는 그대로 살아 있어야 한다("사용자 콘텐츠 삭제 금지").
+        let text: String = all_inlines(&blocks)
+            .iter()
+            .filter_map(|i| match i {
+                Inline::Text(t) => Some(t.trim().to_string()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text, "앞뒤");
+        // 구조적 자식 → 재출력 시 바이트 그대로(직렬화 대칭의 축).
+        let Block::Paragraph(p) = &blocks[0] else {
+            panic!("문단")
+        };
+        assert!(!p.source.as_ref().unwrap().simple);
+    }
+
+    /// 수식 스크립트를 CDATA 로 쓰는 변환기도 있다(수식엔 `<`/`&` 가 흔하다).
+    #[test]
+    fn equation_script_accepts_cdata() {
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run>
+          <hp:equation><hp:sz width="10" height="10"/><hp:script><![CDATA[x^2 < y]]></hp:script></hp:equation>
+        </hp:run></hp:p></hs:sec>"#;
+        let eq = all_inlines(&parse_sec(xml))
+            .into_iter()
+            .find_map(|i| match i {
+                Inline::Equation(e) => Some(e),
+                _ => None,
+            })
+            .expect("CDATA 스크립트도 잡아야 한다");
+        assert_eq!(eq.script, "x^2 < y");
+    }
+
+    /// 필드(하이퍼링크) 범위 회귀 잠금: `<hp:fieldBegin>`/`<hp:fieldEnd>` 는 예전에 버려져
+    /// 하이퍼링크 범위가 통째로 소실됐다. id 짝과 Command(URL)까지 살린다.
+    #[test]
+    fn field_begin_end_are_lifted_with_command_and_pairing() {
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p>
+          <hp:run charPrIDRef="1"><hp:ctrl><hp:fieldBegin id="2110609883" type="HYPERLINK" name="" editable="1">
+            <hp:parameters cnt="2" name=""><hp:integerParam name="Prop">9</hp:integerParam>
+            <hp:stringParam name="Command" xml:space="preserve">http\://www.hometax.go.kr);1;0;0;</hp:stringParam></hp:parameters>
+          </hp:fieldBegin></hp:ctrl></hp:run>
+          <hp:run charPrIDRef="6"><hp:t>국세청</hp:t></hp:run>
+          <hp:run charPrIDRef="1"><hp:ctrl><hp:fieldEnd beginIDRef="2110609883" fieldid="627272811"/></hp:ctrl><hp:t/></hp:run>
+        </hp:p></hs:sec>"#;
+        let inls = all_inlines(&parse_sec(xml));
+        let begin = inls
+            .iter()
+            .find_map(|i| match i {
+                Inline::FieldBegin(m) => Some(m.clone()),
+                _ => None,
+            })
+            .expect("FieldBegin");
+        assert_eq!(begin.id, 2110609883);
+        assert_eq!(begin.field_type, "HYPERLINK");
+        assert_eq!(begin.command, "http\\://www.hometax.go.kr);1;0;0;");
+        assert!(
+            inls.iter()
+                .any(|i| matches!(i, Inline::FieldEnd(id) if *id == begin.id)),
+            "짝이 맞는 FieldEnd 가 있어야 한다"
+        );
+        // 문서 순서 보존: begin → 텍스트 → end.
+        let order: Vec<&str> = inls
+            .iter()
+            .filter_map(|i| match i {
+                Inline::FieldBegin(_) => Some("b"),
+                Inline::FieldEnd(_) => Some("e"),
+                Inline::Text(t) if !t.is_empty() => Some("t"),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(order, ["b", "t", "e"]);
+    }
+
+    /// benchmark1.hwpx 실물은 같은 문단에서 `fieldEnd` 가 `fieldBegin` **앞**에 온다(한컴이 실제로
+    /// 그렇게 쓴다). 순서를 그대로 보존해야 범위가 뒤집히지 않는다.
+    #[test]
+    fn field_markers_keep_document_order_even_when_end_precedes_begin() {
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p>
+          <hp:run charPrIDRef="0"><hp:ctrl><hp:fieldEnd beginIDRef="17" fieldid="17"/></hp:ctrl></hp:run>
+          <hp:run charPrIDRef="0"><hp:ctrl><hp:fieldBegin id="17" type="HYPERLINK"><hp:parameters cnt="1" name=""><hp:stringParam name="Command">u</hp:stringParam></hp:parameters></hp:fieldBegin></hp:ctrl></hp:run>
+        </hp:p></hs:sec>"#;
+        let order: Vec<&str> = all_inlines(&parse_sec(xml))
+            .iter()
+            .filter_map(|i| match i {
+                Inline::FieldBegin(_) => Some("b"),
+                Inline::FieldEnd(_) => Some("e"),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(order, ["e", "b"]);
+    }
+
+    /// 파라미터 없는 self-closing `<hp:fieldBegin/>` 도 실물에 있다.
+    #[test]
+    fn self_closing_field_begin_is_lifted() {
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run><hp:ctrl><hp:fieldBegin id="5" type="CLICK_HERE"/></hp:ctrl></hp:run></hp:p></hs:sec>"#;
+        assert!(all_inlines(&parse_sec(xml)).iter().any(
+            |i| matches!(i, Inline::FieldBegin(m) if m.id == 5 && m.field_type == "CLICK_HERE")
+        ));
+    }
+
+    /// 표 셀 안의 수식/필드도 살아야 한다(셀 본문은 별도 blocks 프레임을 탄다).
+    #[test]
+    fn equation_and_field_inside_table_cell_survive() {
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run><hp:tbl rowCnt="1" colCnt="1"><hp:tr>
+          <hp:tc><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:subList>
+            <hp:p><hp:run><hp:t>셀</hp:t><hp:equation><hp:sz width="900" height="600"/><hp:script>a over b</hp:script></hp:equation></hp:run></hp:p>
+          </hp:subList></hp:tc></hp:tr></hp:tbl></hp:run></hp:p></hs:sec>"#;
+        let inls = all_inlines(&parse_sec(xml));
+        assert!(inls.iter().any(
+            |i| matches!(i, Inline::Equation(e) if e.script == "a over b" && e.height == 600)
+        ));
+        assert!(inls
+            .iter()
+            .any(|i| matches!(i, Inline::Text(t) if t.trim() == "셀")));
     }
 
     #[test]

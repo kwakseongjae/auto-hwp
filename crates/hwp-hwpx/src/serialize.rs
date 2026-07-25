@@ -678,12 +678,26 @@ fn patch_section_xml(
                 // `simple` flag is meant to exclude such paragraphs, but it's a parse-time proxy
                 // decoupled from the actual run content — so guard the rebuild on Raw directly and
                 // keep the body byte-verbatim (open-tag-only) when any Raw is present, never lose it.
-                let has_raw = p
-                    .runs
-                    .iter()
-                    .flat_map(|r| &r.content)
-                    .any(|i| matches!(i, Inline::Raw(_)));
-                let xml = if src.simple && !has_raw {
+                //
+                // Widened with the objects the HWPX parser now reads (수식/필드/각주/그림): each is
+                // an inline `reemit_paragraph` would filter out, so a paragraph carrying one must
+                // keep its body byte-verbatim. `simple` already excludes them all (every one of those
+                // tags marks the paragraph non-simple at parse time) — this is the belt to that
+                // suspenders, since `simple` is a parse-time proxy an op could in principle desync.
+                let has_object = p.runs.iter().flat_map(|r| &r.content).any(|i| {
+                    matches!(
+                        i,
+                        Inline::Raw(_)
+                            | Inline::Equation(_)
+                            | Inline::Chart(_)
+                            | Inline::Image(_)
+                            | Inline::Note(_)
+                            | Inline::FieldBegin(_)
+                            | Inline::FieldEnd(_)
+                            | Inline::Bookmark(_)
+                    )
+                });
+                let xml = if src.simple && !has_object {
                     reemit_paragraph(orig, p, plan)
                 } else {
                     reemit_paragraph_open_only(orig, p, plan)
@@ -1382,6 +1396,9 @@ enum RunPiece {
     Text(String, usize),
     /// Verbatim run-body XML → `<hp:run charPrIDRef="0">{xml}</hp:run>`.
     Ctrl(String),
+    /// An INLINE 수식 (a run-level `<hp:equation>` beside text) — needs a unique element id, so it is
+    /// rendered at emit time like [`RunPiece::Note`], not pre-rendered.
+    Equation(EquationRef),
     /// A foot/endnote whose body is emitted (via `emit_cell_content`) into a `<hp:subList>` inside
     /// the note ctrl — needs the emit context, so it's rendered at emit time, not pre-rendered.
     Note {
@@ -1486,12 +1503,24 @@ fn project_block(b: &Block) -> EmitBlock {
                 height: im.height,
             }
         }
-        // An equation-bearing paragraph → EmitBlock::Equation (also before the text path).
+        // An equation-ONLY paragraph → EmitBlock::Equation (also before the text path). The .hwp lift
+        // emits every 수식 as its own object paragraph, so this is its shape.
+        //
+        // ⚠️ The "no visible text" guard is load-bearing since the HWPX parser started reading
+        // `<hp:equation>`: there a 수식 sits INSIDE a run next to real text, and this branch keeps only
+        // the equation — a mixed paragraph would silently lose its text ("사용자 콘텐츠 삭제 금지").
+        // Mixed paragraphs fall through to the Para path, where `para_runs` emits the equation as an
+        // inline ctrl piece in document order, so nothing is dropped either way.
         Block::Paragraph(p)
             if p.runs
                 .iter()
                 .flat_map(|r| &r.content)
-                .any(|i| matches!(i, Inline::Equation(_))) =>
+                .any(|i| matches!(i, Inline::Equation(_)))
+                && !p
+                    .runs
+                    .iter()
+                    .flat_map(|r| &r.content)
+                    .any(|i| matches!(i, Inline::Text(t) if !t.trim().is_empty())) =>
         {
             let eq = p
                 .runs
@@ -1590,7 +1619,11 @@ fn para_runs(p: &Paragraph) -> Vec<RunPiece> {
         r.content.iter().any(|i| {
             matches!(
                 i,
-                Inline::FieldBegin(_) | Inline::FieldEnd(_) | Inline::Bookmark(_) | Inline::Note(_)
+                Inline::FieldBegin(_)
+                    | Inline::FieldEnd(_)
+                    | Inline::Bookmark(_)
+                    | Inline::Note(_)
+                    | Inline::Equation(_)
             )
         })
     };
@@ -1629,6 +1662,13 @@ fn para_runs(p: &Paragraph) -> Vec<RunPiece> {
                 Inline::FieldEnd(id) => {
                     flush(&mut text, &mut out);
                     out.push(RunPiece::Ctrl(field_end_xml(*id)));
+                }
+                // A 수식 sitting INSIDE a run next to text (how OWPML — and now our HWPX parser —
+                // carries it). Emitted in document order as its own `<hp:run>` so the text around it
+                // survives; an equation-ONLY paragraph never reaches here (project_block's own arm).
+                Inline::Equation(eq) => {
+                    flush(&mut text, &mut out);
+                    out.push(RunPiece::Equation(eq.clone()));
                 }
                 Inline::Bookmark(name) => {
                     flush(&mut text, &mut out);
@@ -1792,6 +1832,15 @@ fn emit_equation(
     base_para_ref: &str,
     plain_ref: &str,
 ) {
+    out.push_str(&format!(
+        "<hp:p id=\"{pid}\" paraPrIDRef=\"{base_para_ref}\" styleIDRef=\"0\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\"><hp:run charPrIDRef=\"{plain_ref}\">{}<hp:t></hp:t></hp:run></hp:p>",
+        equation_xml(eqid, eq)
+    ));
+}
+
+/// The bare `<hp:equation …>…</hp:equation>` element (no paragraph/run wrapper) — shared by the
+/// own-paragraph emitter above and the INLINE run piece (a 수식 beside text, the HWPX shape).
+fn equation_xml(eqid: u64, eq: &EquationRef) -> String {
     let w = eq.width.max(1);
     let h = eq.height.max(1);
     let font = if eq.font.is_empty() {
@@ -1812,15 +1861,13 @@ fn emit_equation(
     let baseline = eq.baseline;
     let color = eq.color.to_hex();
     let script = xml_escape(&eq.script);
-    out.push_str(&format!(
-        "<hp:p id=\"{pid}\" paraPrIDRef=\"{base_para_ref}\" styleIDRef=\"0\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\"><hp:run charPrIDRef=\"{plain_ref}\">\
-<hp:equation id=\"{eqid}\" zOrder=\"0\" numberingType=\"EQUATION\" textWrap=\"TOP_AND_BOTTOM\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" version=\"{version}\" baseLine=\"{baseline}\" textColor=\"{color}\" baseUnit=\"{base_unit}\" lineMode=\"CHAR\" font=\"{font}\">\
+    format!(
+        "<hp:equation id=\"{eqid}\" zOrder=\"0\" numberingType=\"EQUATION\" textWrap=\"TOP_AND_BOTTOM\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" version=\"{version}\" baseLine=\"{baseline}\" textColor=\"{color}\" baseUnit=\"{base_unit}\" lineMode=\"CHAR\" font=\"{font}\">\
 <hp:sz width=\"{w}\" widthRelTo=\"ABSOLUTE\" height=\"{h}\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/>\
 <hp:pos treatAsChar=\"1\" affectLSpacing=\"0\" flowWithText=\"1\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PARA\" horzRelTo=\"PARA\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"0\" horzOffset=\"0\"/>\
 <hp:outMargin left=\"56\" right=\"56\" top=\"0\" bottom=\"0\"/>\
-<hp:script>{script}</hp:script></hp:equation>\
-<hp:t></hp:t></hp:run></hp:p>"
-    ));
+<hp:script>{script}</hp:script></hp:equation>"
+    )
 }
 
 /// The recurring emit context threaded through paragraph/cell/note-body emission: how to resolve a
@@ -1868,6 +1915,15 @@ fn emit_paragraph(
             )),
             RunPiece::Ctrl(xml) => {
                 out.push_str(&format!("<hp:run charPrIDRef=\"0\">{xml}</hp:run>"));
+            }
+            RunPiece::Equation(eq) => {
+                let eqid = *next_id;
+                *next_id += 1;
+                out.push_str(&format!(
+                    "<hp:run charPrIDRef=\"{}\">{}<hp:t></hp:t></hp:run>",
+                    ctx.plain_ref,
+                    equation_xml(eqid, eq)
+                ));
             }
             RunPiece::Note {
                 kind,
@@ -2119,6 +2175,95 @@ mod tests {
             "/../../corpus/hwpx/FormattingShowcase.hwpx"
         );
         std::fs::read(p).expect("read corpus/hwpx/FormattingShowcase.hwpx")
+    }
+
+    fn eq_ref(script: &str) -> EquationRef {
+        EquationRef {
+            script: script.into(),
+            font: String::new(),
+            base_unit: 1000,
+            baseline: 85,
+            color: Color::from_hex("#000000").unwrap(),
+            width: 3000,
+            height: 1500,
+            version: String::new(),
+            rendered_svg: None,
+        }
+    }
+
+    fn para_with(content: Vec<Inline>) -> Block {
+        Block::Paragraph(Paragraph {
+            runs: vec![Run {
+                char_shape: 0,
+                content,
+                ..Default::default()
+            }],
+            ..Default::default()
+        })
+    }
+
+    /// .hwp lift 의 수식은 **자기 문단 하나**(object_paragraph)라 `EmitBlock::Equation` 으로 나간다 —
+    /// 예전 그대로. 반면 HWPX 는 수식이 런 안에서 텍스트 **옆에** 산다: 그 문단까지 Equation 으로
+    /// 뭉개면 텍스트가 조용히 사라진다("사용자 콘텐츠 삭제 금지"). 두 모양을 모두 잠근다.
+    #[test]
+    fn equation_only_paragraph_emits_as_object_mixed_one_keeps_its_text() {
+        // (a) 수식만 있는 문단 → 전용 오브젝트 문단(.hwp 경로, 바이트동일 유지).
+        let only = para_with(vec![Inline::Equation(eq_ref("1 over 2"))]);
+        assert!(matches!(project_block(&only), EmitBlock::Equation(_)));
+
+        // (b) 텍스트 + 수식 섞인 문단(HWPX 모양) → 일반 문단 + 인라인 수식 조각.
+        let mixed = para_with(vec![
+            Inline::Text("앞".into()),
+            Inline::Equation(eq_ref("a over b")),
+            Inline::Text("뒤".into()),
+        ]);
+        let EmitBlock::Para { runs, .. } = project_block(&mixed) else {
+            panic!("섞인 문단은 Para 로 나가야 한다");
+        };
+        let texts: String = runs
+            .iter()
+            .filter_map(|p| match p {
+                RunPiece::Text(t, _) => Some(t.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(texts, "앞뒤", "수식 옆 텍스트가 살아 있어야 한다");
+        assert_eq!(
+            runs.iter()
+                .filter(|p| matches!(p, RunPiece::Equation(_)))
+                .count(),
+            1,
+            "수식도 인라인 조각으로 함께 나가야 한다"
+        );
+    }
+
+    /// 섞인 문단이 실제 XML 로 나갈 때 텍스트와 `<hp:equation>` 이 **둘 다** 있어야 한다
+    /// (표 구조 변경 시 셀 본문이 IR 에서 통째로 재작성되는 경로의 회귀 잠금).
+    #[test]
+    fn mixed_equation_paragraph_emits_both_text_and_equation_xml() {
+        let cref = |_: usize| "0".to_string();
+        let pref = |_: usize| "0".to_string();
+        let ctx = BodyCtx {
+            cref: &cref,
+            pref: &pref,
+            base_para_ref: "0",
+            plain_ref: "0",
+            bf: "1",
+            bf_ref: &BTreeMap::new(),
+        };
+        let mixed = para_with(vec![
+            Inline::Text("앞".into()),
+            Inline::Equation(eq_ref("x^2")),
+        ]);
+        let mut out = String::new();
+        let mut next_id = 100u64;
+        emit_cell_content(&mut out, &[project_block(&mixed)], &ctx, &mut next_id);
+        assert!(out.contains("앞"), "텍스트 유실: {out}");
+        assert!(out.contains("<hp:equation "), "수식 유실: {out}");
+        assert!(
+            out.contains("<hp:script>x^2</hp:script>"),
+            "스크립트: {out}"
+        );
     }
 
     #[test]

@@ -827,6 +827,52 @@ mod inplace_tests {
             sec0.contains(r#"type="HYPERLINK""#),
             "hyperlink field emitted"
         );
+
+        // ---- 교차포맷 왕복: 우리 HWPX 파서가 필드 범위를 되살린다 ----
+        // 예전엔 `<hp:fieldBegin>`/`<hp:fieldEnd>` 가 폴백에서 버려져 하이퍼링크 범위가 소실됐다.
+        let back = Engine::open(&out).unwrap();
+        let (mut b2, mut e2) = (0usize, 0usize);
+        for i in back
+            .sections
+            .iter()
+            .flat_map(|s| &s.blocks)
+            .filter_map(|b| match b {
+                Block::Paragraph(p) => Some(p),
+                _ => None,
+            })
+            .flat_map(|p| p.runs.iter().flat_map(|r| &r.content))
+        {
+            match i {
+                Inline::FieldBegin(m) => {
+                    assert_eq!(m.field_type, "HYPERLINK");
+                    assert!(!m.command.is_empty(), "Command(URL) 파라미터도 살아야 한다");
+                    b2 += 1;
+                }
+                Inline::FieldEnd(_) => e2 += 1,
+                _ => {}
+            }
+        }
+        assert_eq!(
+            (b2, e2),
+            (nb, ne),
+            "재파싱이 필드 짝을 그대로 복원해야 한다"
+        );
+
+        // ---- 직렬화 대칭: 편집해도 필드가 복제되지 않는다 ----
+        let mut edited = back;
+        mark_first_paragraph_dirty(&mut edited);
+        let out2 = serialize_hwpx(&edited).unwrap();
+        let pkg2 = hwp_hwpx::package::Package::open(&out2).unwrap();
+        let sec2 = String::from_utf8(pkg2.read_part("Contents/section0.xml").unwrap()).unwrap();
+        assert_eq!(
+            (
+                sec2.matches("<hp:fieldBegin ").count(),
+                sec2.matches("<hp:fieldEnd ").count()
+            ),
+            (nb, ne),
+            "편집 후 재직렬화가 필드를 복제하지 않아야 한다"
+        );
+        assert!(validate_hwpx(&out2).ok);
     }
 
     /// Track A Tier-3: equations are lifted (Control::Equation → Inline::Equation) and emitted as
@@ -857,6 +903,82 @@ mod inplace_tests {
             sec0.contains("<hp:script>"),
             "equation script emitted verbatim"
         );
+
+        // ---- 교차포맷 왕복: 그 HWPX 를 **우리 HWPX 파서**로 다시 읽는다 ----
+        // 예전엔 `<hp:equation>` 이 `parse_section` 의 `other =>` 폴백에서 통째로 버려져 수식이
+        // 재파싱에서 **전멸**했다(스텁 박스조차 없음). 이제 스크립트까지 살아 돌아와야 한다.
+        let back = Engine::open(&out).unwrap();
+        let eqs_back: Vec<_> = collect_equations(&back);
+        assert_eq!(
+            eqs_back.len(),
+            eqs,
+            "재파싱이 수식을 하나도 잃지 않아야 한다"
+        );
+        assert!(
+            eqs_back.iter().any(|e| !e.script.trim().is_empty()),
+            "수식 스크립트(<hp:script>)가 재파싱에서 살아야 한다"
+        );
+
+        // ---- 직렬화 대칭: 편집으로 섹션이 dirty 가 돼도 수식이 **중복 출력되지 않는다** ----
+        // (머리말이 밟았던 바로 그 함정 — 파서가 읽어온 것을 직렬화가 또 붙이면 두 벌이 된다.)
+        let mut edited = back;
+        mark_first_paragraph_dirty(&mut edited);
+        let out2 = serialize_hwpx(&edited).unwrap();
+        let pkg2 = hwp_hwpx::package::Package::open(&out2).unwrap();
+        let sec2 = String::from_utf8(pkg2.read_part("Contents/section0.xml").unwrap()).unwrap();
+        assert_eq!(
+            sec2.matches("<hp:equation ").count(),
+            eqs,
+            "편집 후 재직렬화가 수식을 복제하지 않아야 한다"
+        );
+        assert!(validate_hwpx(&out2).ok);
+    }
+
+    /// 문서 전체(셀/각주 본문 포함)의 `Inline::Equation` 을 모은다.
+    #[cfg(feature = "rhwp")]
+    fn collect_equations(doc: &SemanticDoc) -> Vec<hwp_model::document::EquationRef> {
+        fn walk(bs: &[Block], out: &mut Vec<hwp_model::document::EquationRef>) {
+            for b in bs {
+                match b {
+                    Block::Paragraph(p) => {
+                        for i in p.runs.iter().flat_map(|r| &r.content) {
+                            if let Inline::Equation(e) = i {
+                                out.push(e.clone());
+                            }
+                        }
+                    }
+                    Block::Table(t) => {
+                        for c in &t.cells {
+                            walk(&c.blocks, out);
+                        }
+                    }
+                }
+            }
+        }
+        let mut out = Vec::new();
+        for s in &doc.sections {
+            walk(&s.blocks, &mut out);
+        }
+        out
+    }
+
+    /// 첫 본문 문단을 dirty 로 표시해 "섹션이 편집됐다" 상태를 만든다(재직렬화 경로 진입).
+    #[cfg(feature = "rhwp")]
+    fn mark_first_paragraph_dirty(doc: &mut SemanticDoc) {
+        for s in doc.sections.iter_mut() {
+            let mut hit = false;
+            for b in s.blocks.iter_mut() {
+                if let Block::Paragraph(p) = b {
+                    p.dirty.mark();
+                    hit = true;
+                    break;
+                }
+            }
+            if hit {
+                s.dirty.mark();
+                return;
+            }
+        }
     }
 
     /// Track A v2-D: per-script fonts are lifted from the .hwp and interned into the HWPX fontfaces

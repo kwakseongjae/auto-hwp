@@ -100,6 +100,50 @@ fn hwpx_parser_parity_with_rhwp() {
     );
 }
 
+/// 필드(하이퍼링크) 범위가 실물에서 살아 오는지 — benchmark1.hwpx 는 표 셀 안에 `HYPERLINK`
+/// 한 쌍(`fieldEnd` 가 `fieldBegin` **앞**에 오는 한컴 실제 배치)을 담고 있다. 예전엔 파서가
+/// `<hp:fieldBegin>`/`<hp:fieldEnd>` 를 `other =>` 폴백에서 버려 범위가 통째로 소실됐다.
+#[test]
+fn hwpx_parser_recovers_the_hyperlink_field_pair() {
+    let doc = hwp_hwpx::HwpxParser::new()
+        .parse(&bench(), hwp_model::types::SourceFormat::Hwpx)
+        .expect("자체 파서");
+
+    fn walk(bs: &[Block], b: &mut usize, e: &mut usize, cmd: &mut Vec<String>) {
+        for blk in bs {
+            match blk {
+                Block::Paragraph(p) => {
+                    for i in p.runs.iter().flat_map(|r| &r.content) {
+                        match i {
+                            Inline::FieldBegin(m) => {
+                                *b += 1;
+                                cmd.push(m.command.clone());
+                            }
+                            Inline::FieldEnd(_) => *e += 1,
+                            _ => {}
+                        }
+                    }
+                }
+                Block::Table(t) => {
+                    for c in &t.cells {
+                        walk(&c.blocks, b, e, cmd);
+                    }
+                }
+            }
+        }
+    }
+    let (mut b, mut e, mut cmd) = (0usize, 0usize, Vec::new());
+    for s in &doc.sections {
+        walk(&s.blocks, &mut b, &mut e, &mut cmd);
+    }
+    assert_eq!((b, e), (1, 1), "benchmark1.hwpx 의 필드 1쌍이 살아야 한다");
+    assert!(
+        cmd[0].contains("hometax.go.kr"),
+        "하이퍼링크 URL(Command)까지 살아야 한다: {:?}",
+        cmd
+    );
+}
+
 /// 같은 IR 을 같은 엔진으로 조판했을 때의 (쪽수, 총 줄수).
 fn typeset(doc: &SemanticDoc) -> (usize, usize) {
     use hwp_model::capability::LayoutEngine;
