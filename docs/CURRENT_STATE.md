@@ -5,6 +5,18 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
+- 갱신: 2026-07-25(3) · Claude — **남은 축 3종 병렬 완료**(e0b38f5/9229604/80484b6).
+  ① **본문 글자 캐럿 열림**: rhwp 히트테스트 경로는 좌표계가 화면과 달라 못 쓴다고 판정 →
+  packages 표면 3개(hitTest 밴드 + pageSvg 글리프 + blockRuns)로 우회. 렌더 규약(글리프1=text1,
+  공백생략) 기반 1:1 정렬 **382밴드 중 379(99.2%)**, 클릭→오프셋 1516/1516 정확. 클릭·좌우·상하·
+  타이핑·백스페이스·IME 동작. ⚠️ 안 되는 것: Enter 문단분리(InsertParagraphAt 필요)·Shift 범위선택
+  (단일 오프셋 모델 — 셀도 동일)·빈문단·페이지경계 분할문단(캐럿 미제공=틀린자리 방지).
+  정본은 엔진의 body_text_hit/body_caret_rect(053 셀 함수 쌍둥이) — 그때 레이어 교체.
+  ② **수식·필드 회수**: 수식이 렌더에서 완전 소실이던 것 → 박스 0→44, 쪽수 2→3(=.hwp 쌍둥이).
+  하이퍼링크 필드쌍 0/0→1/1. ⚠️ 함정 잡음: project_block 이 수식 문단의 **텍스트를 버리던 것**
+  (HWPX 는 수식을 텍스트 옆 run 에 둔다). 차트는 근거 부재로 기각(코퍼스 0건·렌더러가 rhwp 안).
+  ③ **074 신설**: hwpx 입력 쪽수 **20~25% 과소 계산**을 오라클로 확정(benchmark1 .hwpx 25 vs 우리
+  20, 한컴저작 4 vs 3). IR 은 파리티가 rhwp 와 일치 확인 → **조판 축**. 가설 4종·재현법 기록.
 - 갱신: 2026-07-25(2) · Claude — **정적 데모 AI 라이브 배포 완료**: 워커(autohwp-demo-ai.gkffhdnls13.workers.dev)
   배포+시크릿+레포변수+Pages 재배포까지. ⚠ 모델은 **GLM 5.2로 확정**(Gemini Flash-Lite는 Cloudflare Worker
   출구 리전을 구글이 지역 차단 "not available in your region" — 실배포에서 발견). GLM 요청당 ~$0.0038이라
