@@ -25,11 +25,31 @@ pub fn parse_header_pools(header: &str) -> HeaderPools {
     // resolves against this to a family name so serif 명조 vs gothic renders correctly (at minimum,
     // text no longer collapses to one family). Hangul is the primary script for Korean documents.
     let hangul_fonts = parse_fontface_lang(header, "HANGUL");
+    // Per-script pools in [`ScriptClass`] order. The renderer prefers `fonts[slot]` over the single
+    // `font_family` (place.rs), so resolving only HANGUL forced Latin/Hanja runs onto the Korean
+    // face — the `.hwp` lift fills all seven, which is why the same document rendered differently.
+    const LANGS: [&str; 7] = [
+        "HANGUL", "LATIN", "HANJA", "JAPANESE", "OTHER", "SYMBOL", "USER",
+    ];
+    let script_fonts: Vec<_> = LANGS
+        .iter()
+        .map(|l| parse_fontface_lang(header, l))
+        .collect();
     each_element(header, "<hh:charPr ", "</hh:charPr>", |elem| {
         if let Some(id) = first_attr(elem, "id").and_then(|v| v.parse().ok()) {
             let mut cs = parse_char_pr(elem);
             if let Some(fam) = fontref_family(elem, &hangul_fonts) {
                 cs.font_family = Some(fam);
+            }
+            if let Some(ids) = per_script(elem, "fontRef") {
+                let names: Vec<Option<String>> = (0..7)
+                    .map(|i| script_fonts[i].get(&(ids[i] as u64)).cloned())
+                    .collect();
+                // Empty Vec = "no per-script fonts requested" (IR contract) — only store when at
+                // least one slot resolved, so documents without a fontface pool stay byte-identical.
+                if names.iter().any(Option::is_some) {
+                    cs.fonts = names;
+                }
             }
             pools.char.insert(id, cs);
         }
@@ -284,7 +304,45 @@ pub fn parse_char_pr(elem: &str) -> CharShape {
     if let Some(s) = elem.find("<hh:strikeout") {
         cs.strikeout = first_attr(&elem[s..], "shape").is_some_and(|sh| sh != "NONE");
     }
+    // 장평/자간 — the READ half of the codec (the writer above has always re-emitted these).
+    // Measured on benchmark1.hwpx: 213 of 214 `<hh:charPr>` carry `<hh:ratio>`; dropping it made
+    // every run render at a neutral 100% width, over-wrapping dense gov-doc tables (+15% lines,
+    // +1 page vs the same document opened as `.hwp`). `<hh:relSz>`/`<hh:offset>` come along for
+    // free — same per-script shape, and reading them keeps value-dedup (`intern_shape`) from
+    // collapsing charPrs that differ only in these fields (214 → 87 before this).
+    if let Some(v) = per_script(elem, "ratio") {
+        cs.ratio = PerScript(v.map(|x| x.clamp(0, 255) as u8));
+    }
+    if let Some(v) = per_script(elem, "spacing") {
+        cs.spacing = PerScript(v.map(|x| x.clamp(-128, 127) as i8));
+    }
+    if let Some(v) = per_script(elem, "relSz") {
+        cs.rel_size = PerScript(v.map(|x| x.clamp(0, 255) as u8));
+    }
+    if let Some(v) = per_script(elem, "offset") {
+        cs.offset = PerScript(v.map(|x| x.clamp(-128, 127) as i8));
+    }
+    // 위/아래 첨자 — mutually exclusive markers the writer emits before `<hh:outline>`.
+    cs.superscript = elem.contains("<hh:supscript/>");
+    cs.subscript = !cs.superscript && elem.contains("<hh:subscript/>");
     cs
+}
+
+/// Read a per-script child (`<hh:ratio hangul=".." latin=".." …/>`) into the 7 [`ScriptClass`]
+/// slots. Inverse of [`set_per_script_child`]; `None` if the child is absent (inherit).
+fn per_script(elem: &str, child: &str) -> Option<[i32; 7]> {
+    const ATTRS: [&str; 7] = [
+        "hangul", "latin", "hanja", "japanese", "other", "symbol", "user",
+    ];
+    let open = format!("<hh:{child}");
+    let p = elem.find(&open)?;
+    let rel = elem[p..].find("/>")?;
+    let tag = &elem[p..p + rel];
+    let mut out = [0i32; 7];
+    for (i, a) in ATTRS.iter().enumerate() {
+        out[i] = first_attr(tag, a).and_then(|v| v.parse().ok()).unwrap_or(0);
+    }
+    Some(out)
 }
 
 /// Inverse of [`synthesize_para_pr`]: read a `<hh:paraPr>` element into a `ParaShape` (the
@@ -303,9 +361,25 @@ pub fn parse_para_pr(elem: &str) -> ParaShape {
     }
     if let Some(ls) = elem.find("<hh:lineSpacing") {
         if let Some(v) = first_attr(&elem[ls..], "value").and_then(|v| v.parse().ok()) {
-            ps.line_spacing_type = LineSpacingType::Percent;
+            // `type` was hardcoded to Percent — a document authored with FIXED/AT_LEAST spacing
+            // (e.g. `value="1600" unit="HWPUNIT"`) was read as *1600 percent* line spacing. The
+            // repo corpus is all-PERCENT so it never fired, but any fixed-spacing form would.
+            ps.line_spacing_type = match first_attr(&elem[ls..], "type").unwrap_or("PERCENT") {
+                "FIXED" => LineSpacingType::Fixed,
+                "BETWEEN_LINES" => LineSpacingType::BetweenLines,
+                "AT_LEAST" => LineSpacingType::AtLeast,
+                _ => LineSpacingType::Percent,
+            };
             ps.line_spacing_value = v;
         }
+    }
+    // 문단 앞에서 쪽 나누기 — the .hwp lift reads this (attr1 bit19); the layout consumes it
+    // (`NaiveLayout`/`place_doc` both break the page), so dropping it silently mis-paginated.
+    if let Some(b) = elem.find("<hh:breakSetting") {
+        ps.page_break_before = matches!(
+            first_attr(&elem[b..], "pageBreakBefore"),
+            Some("1") | Some("true")
+        );
     }
     if let Some(m) = elem.find("<hh:margin>") {
         let seg = &elem[m..];
