@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-25 (Claude) · 세 축 병렬 — HWPX 파서·에디터 분리·문서 재구성
+- HWPX 갭 원인 확정: .hwp=rhwp / .hwpx=자체파서. 값기준 dedup으로 charPr 214→87 붕괴. 속성 읽기 복원 + 구조갭 3종 → 조판이 rhwp와 301줄 일치(전 368, 초과분=표 개수 67).
+- 채팅 UI를 SDK에서 분리(sidePanel 슬롯 13값) + ⌘Z/⌘⇧Z/⌘C. 문서를 능력 중심으로 재편 + CLI/BULK 가이드 신설.
+- 함정 재발: e2e 포트 3100을 타 프로젝트가 선점하면 엉뚱한 앱을 테스트해 무더기 타임아웃 → PW_PORT. layout-check hwpx는 우리 파서를 안 탄다(양쪽 rhwp).
+- 열린 것: 본문 캐럿·범위선택, 변환 hwpx 쪽수 과소계산, 수식/차트/필드.
+
 ## 2026-07-25 (Claude) · 정적 데모 AI = OpenRouter(Gemini Flash-Lite) via Cloudflare Worker
 - 정적 사이트는 키를 못 담음 → 키 보관+일일 한도 강제하는 Worker 프록시(services/demo-ai-proxy). 모델 Gemini 3.5 Flash-Lite 서버 고정(입력 위주 작업 최저가), IP별+전체 일일 캡으로 $5/일 상한, CORS 잠금, 프롬프트는 워커가 ai-protocol로 조립(드리프트0·남용저항).
 - 클라 데모 분기가 NEXT_PUBLIC_DEMO_AI_URL 있으면 프록시로 단발 위임(스트리밍/웹검색 off). 워커 단위검증 10/10, 브라우저 실증(채팅→Replace 제안 카드·에러0). 배포는 사용자(wrangler+secret) — README에 절차.

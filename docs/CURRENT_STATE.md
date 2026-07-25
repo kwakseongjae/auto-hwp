@@ -10,6 +10,18 @@
   출구 리전을 구글이 지역 차단 "not available in your region" — 실배포에서 발견). GLM 요청당 ~$0.0038이라
   DAILY_CAP 2000→**1200**(≈$4.6<$5)으로 하향. 워커 실호출 검증(Replace intent 반환). 사용자 액션 잔여:
   OpenRouter 키에 월 지출한도 설정 권장(현재 limit null) + 노출 키 회전(선택).
+- 갱신: 2026-07-25(2) · Claude — **세 축 병렬 완료**(59f784e/0844e4d/ca664af/79b81dd/8142b83).
+  ① **HWPX 파서**: .hwp는 rhwp(성숙), .hwpx는 자체 1,605줄 파서라 갈렸다. 값기준 dedup이라 안 읽는
+  속성이 많을수록 charPr이 뭉갠다(214→87). 장평·자간·스크립트별글꼴·줄간격종류·쪽나눔 읽기 복원 +
+  구조갭 3종(섹션 spine 순서·머리말/각주 본문 누출·표 세로 이중오차) → **조판이 rhwp와 301줄 완전
+  일치**(전 368). ⚠️ 트레이드오프: 코퍼스 한컴쪽수 대비 불일치 22→25(가려져 있던 기존 갭이 드러남 —
+  되돌리려면 outMargin+is_table_anchor 두 지점을 **함께**). `hwpx_rhwp_parity.rs` = 입력을 잠그는 오라클.
+  ⚠️ **`layout-check <f>.hwpx`는 우리 파서를 안 탄다**(양쪽 rhwp lift) — 이 축 지표로 쓰지 말 것.
+  ② **에디터**: 채팅 UI를 SDK에서 분리 — `WorkspaceSidePanel` 슬롯(13값), 호스트가 패널 조립.
+  `chatSidePanel()`은 참조 배선(제품 계약 아님). + ⌘Z/⌘⇧Z/⌘Y·⌘C(TSV) 키보드 기본기.
+  ③ **문서**: 능력 중심 재구성(README 한/영 11섹션 1:1) + CLI-GUIDE·BULK-GUIDE 신설 + FIGMA-GRADE-UX
+  스테일 경고(9종이 이미 구현됨 — 재기획 사고 방지) + 6월자 6종 격리.
+  잔여: 본문 글자 캐럿·범위선택(엔진 축)·⌘V·수식/차트/필드 노드화·변환 hwpx 쪽수 과소계산 갭.
 - 갱신: 2026-07-25 · Claude — **정적 데모 AI(OpenRouter) 붙임**: 정적 사이트는 키를 못 담으므로 키를 쥔
   Cloudflare Worker 프록시(`services/demo-ai-proxy`) 경유. 모델 **Gemini 3.5 Flash-Lite**(입력 위주 작업
   최저가·요청당 ~$0.002 → $5/일에 8배 여유) 서버 고정, IP별+전체 일일 한도로 비용 상한 강제, CORS 잠금,
