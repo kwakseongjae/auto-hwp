@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { HwpWorkspace, WasmAdapter, FONT_CATALOG, type AiRequestOptions, type Anchor, type Citation, type DocContext, type Intent, type WasmAdapterOptions } from "@auto-hwp/react";
+import { HwpWorkspace, WasmAdapter, FONT_CATALOG, chatSidePanel, type AiRequestOptions, type Anchor, type Citation, type DocContext, type Intent, type WasmAdapterOptions } from "@auto-hwp/react";
 import { buildDocContext, createAgentEventParser, type AgentEvent } from "@auto-hwp/ai-protocol";
 import { isTrapError, resetEngine } from "@auto-hwp/engine";
 import { AutosaveController, IdbSnapshotStore, findRecoverable, formatAge, recoveredName, type SnapshotRecord } from "@/lib/autosave";
@@ -521,7 +521,10 @@ export default function LabWorkspace() {
     );
 
   return (
-    <div className={IS_DEMO ? `lab-root lab-demo${doc ? "" : " lab-landing"}` : "lab-root"}>
+    // `lab-landing` = 문서 열기 전 화면을 앱 셸(height:100vh + 세로 중앙)이 아니라 문서처럼 자연
+    // 스크롤시킨다. 데모/QA 공통 — 고정 높이면 히어로가 커질 때 위쪽으로 오버플로해 상단 콘텐츠
+    // (복구 배너 등)가 화면 밖으로 밀려 클릭조차 안 된다(e2e 052 실패로 발현).
+    <div className={`lab-root${IS_DEMO ? " lab-demo" : ""}${doc ? "" : " lab-landing"}`}>
       {/* 데모 랜딩(문서 열기 전)은 히어로가 스스로 파일 열기·이동을 제공하므로 헤더를 띄우지 않는다.
           문서를 열면(=편집 모드) 상태·파일 열기가 필요하므로 헤더가 돌아온다.
           ⚠ `hidden` 속성은 .lab-header의 display:flex에 밀린다 — 조건부 렌더로 지운다. */}
@@ -587,13 +590,18 @@ export default function LabWorkspace() {
             adapter={adapter}
             document={doc}
             onAiRequest={onAiRequest}
-            aiNotice={
-              IS_DEMO
+            // 채팅 UI는 에디터(SDK)가 아니라 **이 앱**이 조립한다 — 워크스페이스는 편집 표면만
+            // 제공하고 오른쪽 패널은 호스트 몫이다(`WorkspaceSidePanel`). 우리 채팅은 데모용
+            // 참조 구현이라 제품 계약에 넣지 않는다.
+            sidePanel={chatSidePanel({
+              onAiRequest,
+              isMock: mode === "mock",
+              notice: IS_DEMO
                 ? DEMO_AI_URL
                   ? "데모 AI 편집이 켜져 있습니다(경량 AI 모델 · 일일 사용 한도 있음). 제안은 적용 전에 카드로 보여 주고, 한 번에 되돌릴 수 있습니다."
                   : "정적 데모라 AI 편집은 꺼져 있습니다 — 클릭 선택·수동 편집·HTML/PDF 저장은 전부 동작합니다. AI 바이브 편집은 레포를 클론해 로컬 실행(BYOK)하면 켜집니다."
-                : undefined
-            }
+                : undefined,
+            })}
             requestFont={requestFont}
             fontCatalog={FONT_CATALOG}
             defaultFont={defaultFont}
@@ -601,7 +609,6 @@ export default function LabWorkspace() {
             // 이슈 058: 명조(serif) 서체를 OFL 대체(Nanum Myeongjo)로 화면 @font-face + PDF 임베드까지 라우팅.
             // fetch-fonts.mjs 가 public/fonts 에 Nanum Myeongjo 를 받아 두면 명조/고딕이 구분 렌더된다.
             injectSerifSubstitute
-            isMock={mode === "mock"}
             // 이슈 027: 수동 편집 UI(표 추가·룰러·열너비 드래그·더블클릭 텍스트·서식 툴바) 옵트인.
             enableEditing
             // 이슈 050: 페이지 위에 이미지를 드롭하면 삽입, .hwp/.hwpx 를 드롭하면 이 콜백으로 열기.

@@ -1,3 +1,4 @@
+import { chatSidePanel } from "../chatSlot";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ChatPanel } from "../components/ChatPanel";
@@ -17,7 +18,7 @@ function renderPanel(onAiRequest: Ai, onApply = vi.fn(async () => 1)) {
       anchors={[]}
       onRemoveAnchor={() => {}}
       onConsumeAnchors={() => {}}
-      onAiRequest={onAiRequest}
+      onAiRequest={onAiRequest} sidePanel={chatSidePanel({ onAiRequest })}
       docContext={docContext}
       onApply={onApply}
     />,

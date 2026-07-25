@@ -1,3 +1,4 @@
+import { chatSidePanel } from "../chatSlot";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { HwpWorkspace } from "../components/HwpWorkspace";
@@ -26,7 +27,7 @@ async function openDocAndSelectCell() {
   // The host AI bridge — a deterministic canned Intent (no LLM, no network). Mirrors the chat's onAiRequest.
   const onAiRequest = async () => [cannedIntent];
   const view = render(
-    <HwpWorkspace adapter={adapter} document={{ bytes: new Uint8Array([1]), name: "t.hwpx" }} onAiRequest={onAiRequest} enableEditing isMock />,
+    <HwpWorkspace adapter={adapter} document={{ bytes: new Uint8Array([1]), name: "t.hwpx" }} onAiRequest={onAiRequest} sidePanel={chatSidePanel({ onAiRequest })} enableEditing sidePanel={chatSidePanel({ onAiRequest, isMock: true })} />,
   );
   const container = view.container;
   const sheet = await waitFor(() => {

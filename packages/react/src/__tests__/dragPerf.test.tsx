@@ -1,3 +1,4 @@
+import { chatSidePanel } from "../chatSlot";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { HwpWorkspace, __getWorkspaceRenderCount, __resetWorkspaceRenderCount } from "../components/HwpWorkspace";
@@ -57,7 +58,7 @@ describe("drag perf — sheets do not re-render during a marquee (issue 030)", (
       blocks: [para(5, 400, 200, "블록 하나"), para(6, 620, 200, "블록 둘")],
     });
     const { container } = render(
-      <HwpWorkspace adapter={adapter} document={{ bytes: new Uint8Array([1]), name: "t.hwpx" }} onAiRequest={async () => []} />,
+      <HwpWorkspace adapter={adapter} document={{ bytes: new Uint8Array([1]), name: "t.hwpx" }} onAiRequest={async () => []} sidePanel={chatSidePanel({ onAiRequest: async () => [] })} />,
     );
     const sheet = await sheetOf(container);
     await flush();

@@ -1,3 +1,4 @@
+import { chatSidePanel } from "../chatSlot";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ContextMenu, type ContextMenuItem } from "../components/ContextMenu";
@@ -120,7 +121,7 @@ async function sheetOf(container: HTMLElement): Promise<HTMLElement> {
 describe("HwpWorkspace 우클릭 컨텍스트 메뉴 (issue 039)", () => {
   it("셀 우클릭 → 셀 메뉴(텍스트 편집·굵게·배경색·행 삽입·AI); 굵게 → SetCellRangeFmt 위임", async () => {
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], rowBoundaries: [60, 100, 140, 180], pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     fireEvent.contextMenu(sheet, { clientX: 160, clientY: 110 });
     const menu = await screen.findByTestId("hw-context-menu");
@@ -146,7 +147,7 @@ describe("HwpWorkspace 우클릭 컨텍스트 메뉴 (issue 039)", () => {
 
   it("셀 우클릭 → 아래에 행 삽입 → 기존 TableInsertRows op 위임 (at = row+1, cols = 표 열수)", async () => {
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     fireEvent.contextMenu(sheet, { clientX: 160, clientY: 110 });
     await screen.findByTestId("hw-ctx-row-below");
@@ -163,7 +164,7 @@ describe("HwpWorkspace 우클릭 컨텍스트 메뉴 (issue 039)", () => {
   it("문단 우클릭 → 문단 메뉴(텍스트 편집 + AI만; 굵게·행 삽입 없음)", async () => {
     const para: BlockHit = { section: 0, block: 0, kind: "paragraph", x: 40, y: 400, w: 300, h: 30, text: "문단", editable: true };
     const adapter = new MockAdapter({ hit: para, pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     fireEvent.contextMenu(sheet, { clientX: 100, clientY: 410 });
     const menu = await screen.findByTestId("hw-context-menu");
@@ -175,7 +176,7 @@ describe("HwpWorkspace 우클릭 컨텍스트 메뉴 (issue 039)", () => {
 
   it("바탕(비개체) 우클릭 → 표 추가 그리드(027 픽커) → 2×3 → InsertTableAt 위임 (051 재배선)", async () => {
     const adapter = new MockAdapter({ pages: 1 }); // 아무 것도 히트 안 됨 → 바탕
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     fireEvent.contextMenu(sheet, { clientX: 500, clientY: 700 });
     const menu = await screen.findByTestId("hw-context-menu");
@@ -191,7 +192,7 @@ describe("HwpWorkspace 우클릭 컨텍스트 메뉴 (issue 039)", () => {
 
   it("시트 위에서만 메뉴가 뜬다 — 캔버스 회색 여백 우클릭은 메뉴를 열지 않는다(기본 메뉴 유지)", async () => {
     const adapter = new MockAdapter({ table, cell, pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     await sheetOf(container);
     const canvas = container.querySelector(".hw-canvas") as HTMLElement;
     // target = 캔버스 자체(시트 아님) → closest('.hw-sheet') 없음 → 메뉴 안 뜸.
@@ -204,7 +205,7 @@ describe("HwpWorkspace 우클릭 컨텍스트 메뉴 (issue 039)", () => {
 
   it("enableEditing 이 꺼져 있으면 우클릭이 메뉴를 열지 않는다(읽기 전용 호스트 무영향)", async () => {
     const adapter = new MockAdapter({ table, cell, pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} />);
     const sheet = await sheetOf(container);
     const ev = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
     Object.defineProperty(ev, "target", { value: sheet });
@@ -227,7 +228,7 @@ describe("HwpWorkspace 우클릭 컨텍스트 메뉴 (issue 039)", () => {
       resolved++;
       return origCellAt(p, x, y);
     };
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     fireEvent.contextMenu(sheet, { clientX: 160, clientY: 110 });
     expect(screen.queryByTestId("hw-context-menu")).toBeNull(); // 아직 해석 중 — 메뉴 없음
@@ -240,7 +241,7 @@ describe("HwpWorkspace 우클릭 컨텍스트 메뉴 (issue 039)", () => {
 
   it("Esc 로 메뉴가 닫히고, 그 Esc 는 선택까지 지우지 않는다(메뉴가 Esc 를 소비)", async () => {
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     fireEvent.contextMenu(sheet, { clientX: 160, clientY: 110 });
     await screen.findByTestId("hw-context-menu");

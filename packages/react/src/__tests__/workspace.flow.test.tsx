@@ -1,3 +1,4 @@
+import { chatSidePanel } from "../chatSlot";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { HwpWorkspace } from "../components/HwpWorkspace";
@@ -28,7 +29,7 @@ describe("HwpWorkspace mock flow", () => {
     const onAiRequest = async () => [cannedIntent];
 
     const { container } = render(
-      <HwpWorkspace adapter={adapter} document={{ bytes: new Uint8Array([1]), name: "t.hwpx" }} onAiRequest={onAiRequest} isMock />,
+      <HwpWorkspace adapter={adapter} document={{ bytes: new Uint8Array([1]), name: "t.hwpx" }} onAiRequest={onAiRequest} sidePanel={chatSidePanel({ onAiRequest })} sidePanel={chatSidePanel({ onAiRequest, isMock: true })} />,
     );
 
     // Page renders.
@@ -73,7 +74,7 @@ describe("HwpWorkspace mock flow", () => {
     const deleteIntent: Intent = { intent: "DeleteBlock", section: 0, index: 3 };
     const onAiRequest = async () => [deleteIntent];
     const { container } = render(
-      <HwpWorkspace adapter={adapter} document={{ bytes: new Uint8Array([1]), name: "t.hwpx" }} onAiRequest={onAiRequest} />,
+      <HwpWorkspace adapter={adapter} document={{ bytes: new Uint8Array([1]), name: "t.hwpx" }} onAiRequest={onAiRequest} sidePanel={chatSidePanel({ onAiRequest })} />,
     );
     await waitFor(() => expect(container.querySelector(".hw-sheet svg")).toBeTruthy());
     const textarea = container.querySelector(".hw-textarea") as HTMLTextAreaElement;
@@ -100,7 +101,7 @@ describe("HwpWorkspace mock flow", () => {
     const adapter = new MockAdapter({ runs: [{ text: "남아야 할 문단" }], pages: 1 });
     const onAiRequest = async () => [{ intent: "DeleteBlock", section: 0, index: 1 } as Intent];
     const { container } = render(
-      <HwpWorkspace adapter={adapter} document={{ bytes: new Uint8Array([1]), name: "t.hwpx" }} onAiRequest={onAiRequest} />,
+      <HwpWorkspace adapter={adapter} document={{ bytes: new Uint8Array([1]), name: "t.hwpx" }} onAiRequest={onAiRequest} sidePanel={chatSidePanel({ onAiRequest })} />,
     );
     await waitFor(() => expect(container.querySelector(".hw-sheet svg")).toBeTruthy());
     const textarea = container.querySelector(".hw-textarea") as HTMLTextAreaElement;
@@ -119,7 +120,7 @@ describe("HwpWorkspace mock flow", () => {
       { intent: "SetParagraphText", section: 0, block: 3, text: "또 하나" } as Intent,
     ];
     const { container } = render(
-      <HwpWorkspace adapter={adapter} document={{ bytes: new Uint8Array([1]), name: "t.hwpx" }} onAiRequest={onAiRequest} />,
+      <HwpWorkspace adapter={adapter} document={{ bytes: new Uint8Array([1]), name: "t.hwpx" }} onAiRequest={onAiRequest} sidePanel={chatSidePanel({ onAiRequest })} />,
     );
     await waitFor(() => expect(container.querySelector(".hw-sheet svg")).toBeTruthy());
     const textarea = container.querySelector(".hw-textarea") as HTMLTextAreaElement;

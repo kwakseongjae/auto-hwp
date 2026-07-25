@@ -8,7 +8,7 @@ import { runsUnchanged, applyLiveStyle, readCaretStyle } from "../richedit";
 import { modLabel } from "../platform";
 import { ZOOM_STEP, clampZoom, isEditableTarget, panBy, wheelToZoomFactor, zoomAt } from "../viewport";
 import { useHwpEditor } from "../useHwpEditor";
-import { ChatPanel } from "./ChatPanel";
+
 import { HwpPageView, type PageClick } from "./HwpPageView";
 import { SelectionOverlay, type Mark } from "./SelectionOverlay";
 import { MarqueeLayer } from "./MarqueeLayer";
@@ -129,19 +129,57 @@ interface InlineTarget {
 // richedit's DEFAULT_PT so the reflected size and applyLiveStyle's size wrap agree.
 const RIBBON_DEFAULT_PT = 10;
 
+/// What the workspace hands the host's right-hand panel. The SDK owns the DOCUMENT surface
+/// (pages, selection, overlays, manual editing); the panel VIEW is the host's — a chat, a form, an
+/// inspector, or nothing. Everything a conversation UI needs is here, so the host never reaches
+/// into workspace internals.
+///
+/// Why a slot instead of a built-in chat: our own chat is a demo affordance, not a product contract.
+/// Shipping it inside the editor would force every embedder to adopt its look, its Korean copy, and
+/// its interaction model. See `docs/EMBED-GUIDE.md`.
+export interface WorkspaceSidePanel {
+  /** A document is open and editable (false → the panel should disable composing). */
+  canEdit: boolean;
+  /** Live selection as AI anchors (the same `[s/b]` addresses the doc context uses). */
+  anchors: Anchor[];
+  /** Platform modifier caption for hints ("⌘" / "Ctrl"). */
+  modLabel: string;
+  /** Drop one anchor / clear the whole selection. */
+  removeAnchor: (index: number) => void;
+  clearAnchors: () => void;
+  /** R5-fenced document context string for the AI bridge (profile + anchors + table grids). */
+  docContext: DocContext;
+  /** Apply validated Intents through the op-bus; resolves with how many landed. */
+  apply: (intents: Intent[]) => Promise<number>;
+  /** Scroll the canvas to a page (0-based). */
+  jumpToPage: (page: number) => void;
+  /** Scroll to a block and flash it (the "⊙ 위치 보기" affordance). */
+  revealTarget: (section: number, block: number) => void;
+  /** Bumps when the host should focus its composer (e.g. the "AI에게 전달" action fired). */
+  focusToken: number;
+  /** Enrich proposals for preview (e.g. a DeleteBlock card showing the target's 원문). */
+  previewCards: (intents: Intent[]) => Promise<unknown>;
+  /** Revert the last applied batch as one unit (false = nothing to revert). */
+  revert: () => Promise<boolean>;
+  /** Current undo-stack depth (read at render time). */
+  undoDepth: () => number;
+}
+
 export interface HwpWorkspaceProps {
   /** The backend seam (WasmAdapter for the web, or a host adapter). */
   adapter: EngineAdapter;
   /** The document to open (bytes + optional name). Re-opens when the `bytes` reference changes. When
    *  omitted, the workspace shows an empty state (the host drives opening). */
   document?: { bytes: Uint8Array; name?: string } | null;
-  /** The host AI bridge (R6): instruction + anchors + doc context → Intents. Never an LLM in-package. */
+  /** The host AI bridge (R6): instruction + anchors + doc context → Intents. Never an LLM in-package.
+   *  The workspace itself never calls this — it hands it to the host's `sidePanel` (which owns the
+   *  conversation UI). Kept on the workspace props so a host can pass one bridge to both. */
   onAiRequest: import("@auto-hwp/editor-core").OnAiRequest;
-  /** Show the honest mock badge in the chat panel. */
-  isMock?: boolean;
-  /** OPTIONAL informational banner for the chat panel (e.g. a static demo: "AI는 로컬 실행 시 사용
-   *  가능"). Passed through to ChatPanel verbatim. */
-  aiNotice?: string;
+  /** RIGHT-HAND PANEL SLOT — the workspace deliberately ships NO chat/AI view. It renders whatever
+   *  the host returns here and passes the editing surface it needs (see [`WorkspaceSidePanel`]):
+   *  live selection anchors, the AI doc context, apply/revert, page + block navigation.
+   *  Omit for a bare editor (viewer/manual editing only). */
+  sidePanel?: (api: WorkspaceSidePanel) => React.ReactNode;
   /** Supply a TTF/OTF face for PDF export on demand (R8). Called when PDF is requested and no font is
    *  registered yet. Return null to cancel. The DEMO wires this to a local .ttf picker / Noto fetch. */
   requestFont?: () => Promise<{ family: string; bytes: Uint8Array } | null>;
@@ -3043,28 +3081,24 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
             <div className="hw-empty-canvas">문서를 열면 여기에 페이지가 표시됩니다.</div>
           )}
         </div>
-        <ChatPanel
-          canEdit={canEdit}
-          anchors={anchors}
-          modLabel={mod}
-          onRemoveAnchor={(i) => core.selection.removeAt(i)}
-          onClearAnchors={clearSelection}
-          onConsumeAnchors={clearSelection}
-          onAiRequest={props.onAiRequest}
-          docContext={docContext}
-          onApply={onApply}
-          onJumpToPage={jumpToPage}
-          onRevealTarget={revealBlock}
-          isMock={props.isMock}
-          aiNotice={props.aiNotice}
-          focusToken={aiFocusToken}
-          // issue 051: async card enrichment — a DeleteBlock proposal shows the target block's 원문
-          // (EditController.previewCards reads it via session.runsAt) before the explicit 적용 approval.
-          previewCards={(intents) => core.edit.previewCards(intents)}
-          // Feature C: persistent per-card 되돌리기 (top-of-stack v1) — reverts the applied batch as one unit.
-          onRevert={revertChatEdit}
-          undoDepth={undoDepth}
-        />
+        {/* SIDE PANEL SLOT — the workspace does not own a chat UI. It hands the host everything an
+            AI/side panel needs (selection anchors, doc context, apply/revert, navigation) and the
+            host composes its own view. See `WorkspaceSidePanel`. */}
+        {props.sidePanel?.({
+          canEdit,
+          anchors,
+          modLabel: mod,
+          removeAnchor: (i) => core.selection.removeAt(i),
+          clearAnchors: clearSelection,
+          docContext,
+          apply: onApply,
+          jumpToPage,
+          revealTarget: revealBlock,
+          focusToken: aiFocusToken,
+          previewCards: (intents) => core.edit.previewCards(intents),
+          revert: revertChatEdit,
+          undoDepth,
+        })}
       </div>
 
       {/* issue 046: the thin bottom status bar (hw-body BOTTOM slot). Current page/total = the scroll

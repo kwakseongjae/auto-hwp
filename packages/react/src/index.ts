@@ -4,7 +4,7 @@ import "./styles.css";
 
 // Assembly + components
 export { HwpWorkspace } from "./components/HwpWorkspace";
-export type { HwpWorkspaceProps } from "./components/HwpWorkspace";
+export type { HwpWorkspaceProps, WorkspaceSidePanel } from "./components/HwpWorkspace";
 export { HwpPageView } from "./components/HwpPageView";
 export type { HwpPageViewProps, PageClick } from "./components/HwpPageView";
 export { SelectionOverlay } from "./components/SelectionOverlay";
@@ -30,6 +30,8 @@ export type { UseHoverParams, UseHoverResult } from "./useHover";
 export { HoverStore, cursorForContext, pointInBox, sameHighlight } from "./hover";
 export type { HoverHighlight, HoverCursor, CursorContext } from "./hover";
 export { ChatPanel } from "./components/ChatPanel";
+export { chatSidePanel } from "./chatSlot";
+export type { ChatSlotOptions } from "./chatSlot";
 export type { ChatPanelProps } from "./components/ChatPanel";
 // Issue 06x — the INLINE per-element vibe-edit panel (apply-then-revert): an alternative to the chat that
 // happens directly ON the selected element. HwpWorkspace mounts it from the "✨ 여기서 편집" affordance;

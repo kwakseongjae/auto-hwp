@@ -1,3 +1,4 @@
+import { chatSidePanel } from "../chatSlot";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { HwpWorkspace, consumeShield, disarmShield } from "../components/HwpWorkspace";
@@ -115,7 +116,7 @@ describe("CellShadePalette (issue 047) — 편집 중 셀음영 스와치", () =
 describe("HwpWorkspace 열 너비 mm 다이얼로그 (issue 047)", () => {
   it("셀 우클릭 → '열 너비…' → 다이얼로그(현재 mm 표시); mm 입력·Enter → SetTableColWidths + 적용-확인 성공 토스트", async () => {
     const adapter = new MockAdapter({ table, cell: cellC1, runs: [{ text: "칸" }], colBoundaries: unevenCols, liveResize: true, pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     fireEvent.contextMenu(sheet, { clientX: 160, clientY: 110 });
     // the '열 너비…' item is present + enabled once editTarget (boundaries) resolves.
@@ -141,7 +142,7 @@ describe("HwpWorkspace 열 너비 mm 다이얼로그 (issue 047)", () => {
   it("FROZEN engine → 열 너비 다이얼로그 적용이 반영 안 되면 정직한 실패 토스트 (적용-확인)", async () => {
     // No liveResize → the boundaries stay frozen: the apply-verify must surface the honest failure.
     const adapter = new MockAdapter({ table, cell: cellC1, runs: [{ text: "칸" }], colBoundaries: unevenCols, pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     fireEvent.contextMenu(sheet, { clientX: 160, clientY: 110 });
     const item = await screen.findByTestId("hw-ctx-colwidth");
@@ -157,7 +158,7 @@ describe("HwpWorkspace 열 너비 mm 다이얼로그 (issue 047)", () => {
 
   it("균등 분배 → 전 열 등폭 SetTableColWidths (widths 모두 동일)", async () => {
     const adapter = new MockAdapter({ table, cell: cellC1, runs: [{ text: "칸" }], colBoundaries: unevenCols, liveResize: true, pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     fireEvent.contextMenu(sheet, { clientX: 160, clientY: 110 });
     const item = await screen.findByTestId("hw-ctx-colwidth");
@@ -212,7 +213,7 @@ describe("HwpWorkspace 편집 중 셀음영 (issue 047 목표 3)", () => {
 
   it("리치 에디터 열림 중 셀음영 스와치 → 1셀 SetCellRangeShade + 에디터 유지(uncommitted text 보존)", async () => {
     const adapter = new MockAdapter({ table, cell: cellEdit, runs: [{ text: "칸" }], pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     // double-click a cell → the in-place editor opens.
     await openCellEditorAt(sheet, container, 60, 80);
@@ -245,7 +246,7 @@ describe("HwpWorkspace 편집 중 셀음영 (issue 047 목표 3)", () => {
       pages: 1,
       applyGate: () => new Promise<void>((r) => gates.push(r)),
     });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     await openCellEditorAt(sheet, container, 60, 80);
     await screen.findByTestId("hw-inplace-editor");
@@ -267,7 +268,7 @@ describe("HwpWorkspace 편집 중 셀음영 (issue 047 목표 3)", () => {
 
   it("셀음영 지움 → shade=null 1셀 SetCellRangeShade, 에디터 유지", async () => {
     const adapter = new MockAdapter({ table, cell: cellEdit, runs: [{ text: "칸" }], pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     await openCellEditorAt(sheet, container, 60, 80);
     await screen.findByTestId("hw-inplace-editor");

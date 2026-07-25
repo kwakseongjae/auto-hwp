@@ -1,3 +1,4 @@
+import { chatSidePanel } from "../chatSlot";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { HwpWorkspace } from "../components/HwpWorkspace";
@@ -19,7 +20,7 @@ const paraHit = { section: 0, block: 2, kind: "paragraph", x: 10, y: 10, w: 100,
 const doc = { bytes: new Uint8Array([1]), name: "t.hwpx" };
 
 async function openDoc(adapter: MockAdapter, onAiRequest: HwpWorkspaceAi) {
-  const view = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={onAiRequest} enableEditing />);
+  const view = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={onAiRequest} sidePanel={chatSidePanel({ onAiRequest })} enableEditing />);
   await waitFor(() => expect(view.container.querySelector(".hw-sheet svg")).toBeTruthy());
   return view;
 }

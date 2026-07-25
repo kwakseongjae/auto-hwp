@@ -1,3 +1,4 @@
+import { chatSidePanel } from "../chatSlot";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { act } from "react";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -24,7 +25,7 @@ const flush = () => new Promise((r) => setTimeout(r, 0));
 async function mount() {
   const adapter = new MockAdapter({ pages: 3, hit: () => null });
   const { container } = render(
-    <HwpWorkspace adapter={adapter} document={{ bytes: new Uint8Array([1]), name: "t.hwpx" }} onAiRequest={async () => []} />,
+    <HwpWorkspace adapter={adapter} document={{ bytes: new Uint8Array([1]), name: "t.hwpx" }} onAiRequest={async () => []} sidePanel={chatSidePanel({ onAiRequest: async () => [] })} />,
   );
   await waitFor(() => {
     const el = container.querySelector('.hw-sheet[data-page="0"]') as HTMLElement | null;

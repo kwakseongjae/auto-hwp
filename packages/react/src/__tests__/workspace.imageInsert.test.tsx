@@ -1,3 +1,4 @@
+import { chatSidePanel } from "../chatSlot";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { HwpWorkspace } from "../components/HwpWorkspace";
@@ -59,16 +60,16 @@ function insertIntents(adapter: MockAdapter): (Intent & { block: number | null; 
 describe("HwpWorkspace image insert (issue 050) — upload button", () => {
   it("shows the 이미지 button only under enableEditing", async () => {
     const plain = new MockAdapter({ pages: 1 });
-    const { container, rerender } = render(<HwpWorkspace adapter={plain} document={doc} onAiRequest={noAi} />);
+    const { container, rerender } = render(<HwpWorkspace adapter={plain} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} />);
     await sheetOf(container);
     expect(screen.queryByTestId("hw-image-input")).toBeNull();
-    rerender(<HwpWorkspace adapter={plain} document={doc} onAiRequest={noAi} enableEditing />);
+    rerender(<HwpWorkspace adapter={plain} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     await waitFor(() => expect(screen.getByTestId("hw-image-input")).toBeTruthy());
   });
 
   it("upload with NO selection inserts InsertImage at the section end (block:null), sized from the image aspect", async () => {
     const adapter = new MockAdapter({ pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     await sheetOf(container);
 
     fireEvent.change(screen.getByTestId("hw-image-input"), { target: { files: [pngFile()] } });
@@ -86,7 +87,7 @@ describe("HwpWorkspace image insert (issue 050) — upload button", () => {
     // Select a TABLE (block 1) — a table click reliably yields a block-addressed selection anchor.
     const table: TableBox = { section: 0, block: 1, x: 40, y: 60, w: 300, h: 120, rows: 3, cols: 3, first_row: 0 };
     const adapter = new MockAdapter({ pages: 1, table });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     fireEvent.pointerDown(sheet, { clientX: 100, clientY: 100, button: 0, pointerId: 1 });
     fireEvent.pointerUp(sheet, { clientX: 100, clientY: 100, button: 0, pointerId: 1 });
@@ -102,7 +103,7 @@ describe("HwpWorkspace image insert (issue 050) — drop zone branch rules", () 
   it("dropping an IMAGE on a page inserts it AFTER the pointed block (drop→hitTest anchor)", async () => {
     const hit: BlockHit = { section: 0, block: 3, kind: "paragraph", x: 0, y: 0, w: 794, h: 100, text: "", editable: true };
     const adapter = new MockAdapter({ pages: 1, hit });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     const canvas = container.querySelector(".hw-canvas") as HTMLElement;
     // jsdom has no hit-testing — point the drop resolver at the sheet under the cursor.
@@ -117,7 +118,7 @@ describe("HwpWorkspace image insert (issue 050) — drop zone branch rules", () 
     const adapter = new MockAdapter({ pages: 1 });
     const onOpenFile = vi.fn();
     const { container } = render(
-      <HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing onOpenFile={onOpenFile} />,
+      <HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing onOpenFile={onOpenFile} />,
     );
     const canvas = container.querySelector(".hw-canvas") as HTMLElement;
     const hwpx = new File([new Uint8Array([0x50, 0x4b, 3, 4])], "report.hwpx");
@@ -130,7 +131,7 @@ describe("HwpWorkspace image insert (issue 050) — drop zone branch rules", () 
 
   it("dropping a NON-image, NON-document file is refused honestly (no InsertImage, no crash)", async () => {
     const adapter = new MockAdapter({ pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const canvas = container.querySelector(".hw-canvas") as HTMLElement;
     const txt = new File([new Uint8Array([1, 2, 3])], "notes.txt", { type: "text/plain" });
 
@@ -141,7 +142,7 @@ describe("HwpWorkspace image insert (issue 050) — drop zone branch rules", () 
 
   it("dropping a .hwp with NO onOpenFile shows honest guidance (not a silent no-op), no InsertImage", async () => {
     const adapter = new MockAdapter({ pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const canvas = container.querySelector(".hw-canvas") as HTMLElement;
     const hwp = new File([new Uint8Array([1, 2, 3])], "old.hwp");
 

@@ -1,3 +1,4 @@
+import { chatSidePanel } from "../chatSlot";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { HwpWorkspace } from "../components/HwpWorkspace";
@@ -38,7 +39,7 @@ const cmdF = () => fireEvent.keyDown(window, { key: "f", metaKey: true });
 describe("HwpWorkspace 찾기/바꾸기 (issue 045)", () => {
   it("⌘F opens the bar and focuses the query field; Esc closes it", async () => {
     const adapter = new MockAdapter({ find: MATCHES, caret, pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} />);
     await sheetOf(container);
     expect(screen.queryByTestId("hw-find")).toBeNull();
     cmdF();
@@ -50,7 +51,7 @@ describe("HwpWorkspace 찾기/바꾸기 (issue 045)", () => {
 
   it("Enter searches → n/m count + highlight overlay; Enter/Shift+Enter cycle the current match", async () => {
     const adapter = new MockAdapter({ find: MATCHES, caret, pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} />);
     await sheetOf(container);
     cmdF();
     const input = (await screen.findByTestId("hw-find-input")) as HTMLInputElement;
@@ -73,7 +74,7 @@ describe("HwpWorkspace 찾기/바꾸기 (issue 045)", () => {
 
   it("the ↑/↓ nav buttons step the current match", async () => {
     const adapter = new MockAdapter({ find: MATCHES, caret, pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} />);
     await sheetOf(container);
     cmdF();
     const input = (await screen.findByTestId("hw-find-input")) as HTMLInputElement;
@@ -92,7 +93,7 @@ describe("HwpWorkspace 찾기/바꾸기 (issue 045)", () => {
 
   it("a query with no matches shows 결과 없음 and no highlight", async () => {
     const adapter = new MockAdapter({ find: [], caret, pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} />);
     await sheetOf(container);
     cmdF();
     const input = (await screen.findByTestId("hw-find-input")) as HTMLInputElement;
@@ -104,7 +105,7 @@ describe("HwpWorkspace 찾기/바꾸기 (issue 045)", () => {
 
   it("바꾸기 replaces the first match (all:false); 모두 바꾸기 replaces every match (all:true)", async () => {
     const adapter = new MockAdapter({ find: MATCHES, caret, pages: 1 });
-    render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} />);
+    render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} />);
     await sheetOf(document.body as HTMLElement);
     cmdF();
     const input = (await screen.findByTestId("hw-find-input")) as HTMLInputElement;
@@ -127,7 +128,7 @@ describe("HwpWorkspace 찾기/바꾸기 (issue 045)", () => {
 
   it("a backend WITHOUT find shows the unsupported note (count/replace disabled)", async () => {
     const adapter = new MockAdapter({ pages: 1 }); // no `find` opt → find/replace omitted
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} />);
     await sheetOf(container);
     cmdF();
     await screen.findByTestId("hw-find");
@@ -136,7 +137,7 @@ describe("HwpWorkspace 찾기/바꾸기 (issue 045)", () => {
 
   it("a backend that can find but not locate shows count/nav but no highlight box", async () => {
     const adapter = new MockAdapter({ find: MATCHES, pages: 1 }); // no `caret` → canLocate false
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} />);
     await sheetOf(container);
     cmdF();
     const input = (await screen.findByTestId("hw-find-input")) as HTMLInputElement;
@@ -150,7 +151,7 @@ describe("HwpWorkspace 찾기/바꾸기 (issue 045)", () => {
     const table: TableBox = { section: 0, block: 1, x: 40, y: 60, w: 300, h: 120, rows: 3, cols: 3, first_row: 0 };
     const cell: CellHit = { section: 0, block: 1, row: 0, col: 0, rows: 3, cols: 3, text: "값", x: 40, y: 60, w: 100, h: 40 };
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "값" }], find: MATCHES, caret, pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     // 06x drill: a double-click SELECTS the cell (single click marks the whole table); Enter over the
     // drilled cell then opens the in-place editor (issue 036) — robust vs the drill race.

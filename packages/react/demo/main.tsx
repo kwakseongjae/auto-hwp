@@ -1,6 +1,6 @@
 import { StrictMode, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { HwpWorkspace, WasmAdapter, type Anchor, type DocContext, type Intent } from "../src/index";
+import { HwpWorkspace, WasmAdapter, chatSidePanel, type Anchor, type DocContext, type Intent } from "../src/index";
 
 // One WasmAdapter for the app's lifetime (it holds the wasm instance + open document).
 const adapter = new WasmAdapter();
@@ -63,7 +63,7 @@ function App() {
         <span style={{ fontSize: 12, color: "#6b7280" }}>업로드 → 표/문단 클릭(마킹) → 프롬프트 → 미리보기 → 적용 → PDF</span>
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
-        <HwpWorkspace adapter={adapter} document={doc} onAiRequest={mockAi} requestFont={requestFont} isMock />
+        <HwpWorkspace adapter={adapter} document={doc} onAiRequest={mockAi} requestFont={requestFont} sidePanel={chatSidePanel({ onAiRequest: mockAi, isMock: true })} />
       </div>
     </div>
   );

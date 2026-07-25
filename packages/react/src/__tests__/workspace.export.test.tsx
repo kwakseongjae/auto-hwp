@@ -1,3 +1,4 @@
+import { chatSidePanel } from "../chatSlot";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HwpWorkspace } from "../components/HwpWorkspace";
@@ -33,7 +34,7 @@ describe("HWPX 다운로드 버튼 (067-follow, U7)", () => {
     const adapter = new MockAdapter({ pages: 1 });
     const onExport = vi.fn(async () => {});
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} onExport={onExport} />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} onExport={onExport} />);
     await waitFor(() => expect(container.querySelector(".hw-sheet svg")).toBeTruthy());
 
     fireEvent.click(screen.getByTitle(/HWPX 다운로드/));
@@ -50,7 +51,7 @@ describe("HWPX 다운로드 버튼 (067-follow, U7)", () => {
     URL.revokeObjectURL = vi.fn();
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     try {
-      const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} />);
+      const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} />);
       await waitFor(() => expect(container.querySelector(".hw-sheet svg")).toBeTruthy());
       fireEvent.click(screen.getByTitle(/HWPX 다운로드/));
       await waitFor(() => expect(clickSpy).toHaveBeenCalledTimes(1));
@@ -66,7 +67,7 @@ describe("PDF 스텁 경고 (067-follow, U7)", () => {
     const adapter = new MockAdapter({ pages: 1, profile: PROFILE_WITH_STUBS });
     adapter.fontRegistered = true; // exportPdf 의 font_missing 게이트 통과
     const onExport = vi.fn(async () => {});
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} onExport={onExport} />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} onExport={onExport} />);
     await waitFor(() => expect(container.querySelector(".hw-sheet svg")).toBeTruthy());
 
     fireEvent.click(screen.getByTitle("PDF 다운로드"));
@@ -79,7 +80,7 @@ describe("PDF 스텁 경고 (067-follow, U7)", () => {
     const adapter = new MockAdapter({ pages: 1 }); // profile 생략 → docProfile 메서드 자체가 없음
     adapter.fontRegistered = true;
     const onExport = vi.fn(async () => {});
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} onExport={onExport} />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} onExport={onExport} />);
     await waitFor(() => expect(container.querySelector(".hw-sheet svg")).toBeTruthy());
 
     fireEvent.click(screen.getByTitle("PDF 다운로드"));

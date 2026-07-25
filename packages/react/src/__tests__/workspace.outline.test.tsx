@@ -1,3 +1,4 @@
+import { chatSidePanel } from "../chatSlot";
 import { fireEvent, render, waitFor, within } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { HwpWorkspace } from "../components/HwpWorkspace";
@@ -38,7 +39,7 @@ const noAi = async () => [];
 async function openWorkspace(opts: ConstructorParameters<typeof MockAdapter>[0]) {
   const adapter = new MockAdapter(opts);
   const utils = render(
-    <HwpWorkspace adapter={adapter} document={{ bytes: new Uint8Array([1]), name: "t.hwpx" }} onAiRequest={noAi} enableEditing />,
+    <HwpWorkspace adapter={adapter} document={{ bytes: new Uint8Array([1]), name: "t.hwpx" }} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />,
   );
   await waitFor(() => {
     expect(utils.container.querySelector('.hw-sheet[data-page="0"] svg')).toBeTruthy();

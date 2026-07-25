@@ -1,3 +1,4 @@
+import { chatSidePanel } from "../chatSlot";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { HwpWorkspace, __getWorkspaceRenderCount, __resetWorkspaceRenderCount } from "../components/HwpWorkspace";
@@ -90,7 +91,7 @@ describe("ImageOverlay (issue 049) — 8 handles, aspect-lock corners, render vi
 describe("HwpWorkspace image select + resize (issue 049)", () => {
   it("이미지 클릭 → 8핸들 오버레이 선택; 핸들 드래그 → SetImageSize(HWPUNIT) + 적용-확인 성공 토스트", async () => {
     const adapter = new MockAdapter({ image: imageResolver, imageBox: { ...IMG }, liveImage: true, pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     await selectImage(sheet);
     // SE handle drag +100/+10 → aspect-locked 300×150 page px → HWPUNIT ×75.
@@ -114,7 +115,7 @@ describe("HwpWorkspace image select + resize (issue 049)", () => {
   it("FROZEN engine → 리사이즈가 반영 안 되면 정직한 실패 토스트 (적용-확인, 거짓 성공 차단)", async () => {
     // No liveImage → the image box stays frozen: the apply-verify must surface the honest failure.
     const adapter = new MockAdapter({ image: imageResolver, imageBox: { ...IMG }, pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     await selectImage(sheet);
     wDown(screen.getByTestId("hw-image-handle-e"), 300, 150);
@@ -127,7 +128,7 @@ describe("HwpWorkspace image select + resize (issue 049)", () => {
 
   it("드래그 중 워크스페이스 렌더 0 (계측), 커밋 후 재렌더 (issue 030 정합)", async () => {
     const adapter = new MockAdapter({ image: imageResolver, imageBox: { ...IMG }, liveImage: true, pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     await selectImage(sheet);
     // Start a resize drag, THEN reset the counter (selection itself renders once).
@@ -145,7 +146,7 @@ describe("HwpWorkspace image select + resize (issue 049)", () => {
 
   it("이미지 밖 클릭 → 선택 해제(오버레이 사라짐)", async () => {
     const adapter = new MockAdapter({ image: imageResolver, imageBox: { ...IMG }, pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     await selectImage(sheet);
     // Click off the image (400,400 → imageResolver returns null) → the overlay clears.
@@ -157,7 +158,7 @@ describe("HwpWorkspace image select + resize (issue 049)", () => {
   it("imageAt를 지원하지 않는 백엔드(TauriAdapter식 생략) → 오버레이 없음 (동형 파리티)", async () => {
     const adapter = new MockAdapter({ pages: 1 }); // no image opt → imageAt omitted
     expect(adapter.imageAt).toBeUndefined();
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     fireEvent.pointerDown(sheet, { clientX: 150, clientY: 150, button: 0, pointerId: 1 });
     fireEvent.pointerUp(sheet, { clientX: 150, clientY: 150, button: 0, pointerId: 1 });
@@ -179,7 +180,7 @@ describe("HwpWorkspace image move (issue 049) — 앵커 이동(드롭 지점의
       hit: (_p, _x, y) => (y > 300 ? dropBlock : null),
       pages: 1,
     });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     const overlay = await selectImage(sheet);
     // jsdom has no layout → stub elementsFromPoint so resolveDropBlock finds the page sheet under the drop.
@@ -198,7 +199,7 @@ describe("HwpWorkspace image move (issue 049) — 앵커 이동(드롭 지점의
 
   it("제자리(같은 블록/미스) 드롭 → no-op (MoveImage 미발생)", async () => {
     const adapter = new MockAdapter({ image: imageResolver, imageBox: { ...IMG }, liveImage: true, hit: () => null, pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     const overlay = await selectImage(sheet);
     document.elementsFromPoint = () => [sheet];

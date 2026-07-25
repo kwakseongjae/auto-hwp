@@ -1,3 +1,4 @@
+import { chatSidePanel } from "../chatSlot";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { HwpWorkspace } from "../components/HwpWorkspace";
@@ -28,7 +29,7 @@ const para = (block: number, y: number, h: number, text: string): BlockHit => ({
 });
 
 function openDoc(adapter: MockAdapter, opts: { editing?: boolean } = {}) {
-  const r = render(<HwpWorkspace adapter={adapter} document={{ bytes: new Uint8Array([1]), name: "t.hwpx" }} onAiRequest={async () => []} enableEditing={opts.editing} />);
+  const r = render(<HwpWorkspace adapter={adapter} document={{ bytes: new Uint8Array([1]), name: "t.hwpx" }} onAiRequest={async () => []} sidePanel={chatSidePanel({ onAiRequest: async () => [] })} enableEditing={opts.editing} />);
   return r;
 }
 

@@ -1,3 +1,4 @@
+import { chatSidePanel } from "../chatSlot";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { HwpWorkspace } from "../components/HwpWorkspace";
@@ -56,7 +57,7 @@ const anchorText = (container: HTMLElement) => container.querySelector(".hw-anch
 describe("issue 036 — arrow-key cell navigation binding", () => {
   it("selecting a cell then ArrowRight ×2 moves the selection right (label column grows)", async () => {
     const adapter = new MockAdapter({ table: GRID, cell: gridCell, runs: [{ text: "x" }], pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     drillAt(sheet, 50, 20); // cell (0,0)
     await waitFor(() => expect(anchorText(container)).toContain("1행 1열"));
@@ -71,7 +72,7 @@ describe("issue 036 — arrow-key cell navigation binding", () => {
 
   it("ArrowDown then ArrowLeft navigates rows/cols; clamps at the boundary (no wrap)", async () => {
     const adapter = new MockAdapter({ table: GRID, cell: gridCell, runs: [{ text: "x" }], pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     drillAt(sheet, 50, 20); // (0,0)
     await waitFor(() => expect(anchorText(container)).toContain("1행 1열"));
@@ -85,7 +86,7 @@ describe("issue 036 — arrow-key cell navigation binding", () => {
 
   it("GUARD: a non-cell selection (paragraph) does NOT navigate", async () => {
     const adapter = new MockAdapter({ table: (_p, _x, y) => (y < 120 ? GRID : null), cell: (_p, x, y) => (y < 120 ? gridCell(_p, x, y) : null), hit: (_p, _x, y) => (y >= 120 ? para : null), pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     clickAt(sheet, 50, 430); // the paragraph, not a cell
     await waitFor(() => expect(anchorText(container)).toContain("문단"));
@@ -97,7 +98,7 @@ describe("issue 036 — arrow-key cell navigation binding", () => {
 
   it("GUARD: keys typed into a text-entry surface (chat composer) never move the cell", async () => {
     const adapter = new MockAdapter({ table: GRID, cell: gridCell, runs: [{ text: "x" }], pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     drillAt(sheet, 50, 20); // cell (0,0)
     await waitFor(() => expect(anchorText(container)).toContain("1행 1열"));
@@ -112,7 +113,7 @@ describe("issue 036 — arrow-key cell navigation binding", () => {
 describe("issue 036 — Enter opens the editor, Tab commits + moves + re-enters", () => {
   it("Enter over a selected cell opens the in-place editor at that cell", async () => {
     const adapter = new MockAdapter({ table: GRID, cell: gridCell, runs: [{ text: "x" }], pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     drillAt(sheet, 50, 20); // cell (0,0)
     await waitFor(() => expect(anchorText(container)).toContain("1행 1열"));
@@ -126,7 +127,7 @@ describe("issue 036 — Enter opens the editor, Tab commits + moves + re-enters"
 
   it("Tab commits (SetTableCellRuns) then moves to the right cell and re-enters edit", async () => {
     const adapter = new MockAdapter({ table: GRID, cell: gridCell, runs: [{ text: "x" }], pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     drillAt(sheet, 50, 20); // cell (0,0)
     await waitFor(() => expect(anchorText(container)).toContain("1행 1열"));
@@ -152,7 +153,7 @@ describe("issue 036 — Enter opens the editor, Tab commits + moves + re-enters"
 
   it("Shift+Tab moves LEFT after commit", async () => {
     const adapter = new MockAdapter({ table: GRID, cell: gridCell, runs: [{ text: "x" }], pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     drillAt(sheet, 150, 20); // cell (0,1)
     await waitFor(() => expect(anchorText(container)).toContain("1행 2열"));

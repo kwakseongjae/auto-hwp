@@ -1,3 +1,4 @@
+import { chatSidePanel } from "../chatSlot";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { HwpWorkspace } from "../components/HwpWorkspace";
@@ -51,14 +52,14 @@ async function dblClickCell(sheet: HTMLElement, container: HTMLElement) {
 describe("HwpWorkspace issue-048 — persistent format ribbon (선택+편집 겸용)", () => {
   it("is part of the editing chrome only: no ribbon without enableEditing", async () => {
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} />);
     await sheetOf(container);
     expect(screen.queryByTestId("hw-format-ribbon")).toBeNull();
   });
 
   it("비편집 + 셀 선택 → 리본 굵게가 SetCellRangeFmt 를 적용 (028 툴바와 동일 op)", async () => {
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     // the ribbon is persistent (present as soon as a doc is open in the editing chrome).
     expect(screen.getByTestId("hw-format-ribbon")).toBeTruthy();
@@ -75,7 +76,7 @@ describe("HwpWorkspace issue-048 — persistent format ribbon (선택+편집 겸
 
   it("피그마식 상시 리본: 선택 시 028 플로팅 서식 바는 렌더되지 않고 서식은 리본에만 있다", async () => {
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     clickCell(sheet);
     // the persistent ribbon owns formatting; the removed 028 floating bar never appears over a selection.
@@ -91,7 +92,7 @@ describe("HwpWorkspace issue-048 — persistent format ribbon (선택+편집 겸
   it("편집 중: 리본 굵게는 applyLiveStyle(execCommand) 로 라이브 선택만 스타일 — SetCellRange* 미커밋 (latch 무접촉), 에디터 유지", async () => {
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
     const exec = vi.spyOn(document, "execCommand").mockReturnValue(true); // jsdom lacks execCommand
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     await dblClickCell(sheet, container);
     await screen.findByTestId("hw-inplace-editor");
@@ -132,7 +133,7 @@ describe("HwpWorkspace issue-048 — persistent format ribbon (선택+편집 겸
     }) as typeof document.execCommand);
     const midCell: CellHit = { ...cell, text: "가나다" };
     const adapter = new MockAdapter({ table, cell: midCell, runs: [{ text: "가나다" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     await dblClickCell(sheet, container);
     const editorEl = (await screen.findByTestId("hw-inplace-editor")) as HTMLElement;
@@ -158,7 +159,7 @@ describe("HwpWorkspace issue-048 — persistent format ribbon (선택+편집 겸
   it("토글 상태 반영: 선택한 셀이 굵게면 리본 굵게가 눌린 상태 (028 curBold 재사용)", async () => {
     const boldCell: CellHit = { ...cell, text: "굵게" };
     const adapter = new MockAdapter({ table, cell: boldCell, runs: [{ text: "굵게", bold: true }], colBoundaries: [40, 140, 240, 340], pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     clickCell(sheet);
     await waitFor(() => expect(screen.getByTestId("hw-ribbon-bold").getAttribute("aria-pressed")).toBe("true"));
@@ -166,7 +167,7 @@ describe("HwpWorkspace issue-048 — persistent format ribbon (선택+편집 겸
 
   it("비편집: 밑줄/취소선은 편집 상태에서만 활성(사유), 배경/정렬은 선택 셀에 활성", async () => {
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     clickCell(sheet);
     await waitFor(() => expect((screen.getByTestId("hw-ribbon-bold") as HTMLButtonElement).disabled).toBe(false));
@@ -181,7 +182,7 @@ describe("HwpWorkspace issue-048 — persistent format ribbon (선택+편집 겸
   it("리본은 선택·편집 두 모드에서 상시 유지되고 028 플로팅 서식 바는 어느 모드에서도 렌더되지 않는다", async () => {
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
     vi.spyOn(document, "execCommand").mockReturnValue(true);
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     clickCell(sheet);
     // idle-selection: ribbon present, floating bar absent.
@@ -197,7 +198,7 @@ describe("HwpWorkspace issue-048 — persistent format ribbon (선택+편집 겸
   it("서체: 리본 글꼴 드롭다운 → 비편집 시 SetCellRangeFmt(font) 을 적용 (applyRibbon 비편집 arm → fmtActions.setFont)", async () => {
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
     const { container } = render(
-      <HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing fontCatalog={FONT_CATALOG} />,
+      <HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing fontCatalog={FONT_CATALOG} />,
     );
     const sheet = await sheetOf(container);
     // the 서체 select is part of the persistent ribbon whenever a catalog is supplied (편집 여부와 무관하게 상시).
@@ -214,7 +215,7 @@ describe("HwpWorkspace issue-048 — persistent format ribbon (선택+편집 겸
 
   it("✨ AI에게 전달 pill: 선택이 있으면 뜨고 클릭하면 채팅 작성창에 포커스 (aiFocusToken bump — 신규 프롬프트 0)", async () => {
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     clickCell(sheet);
     const pill = await screen.findByTestId("hw-ai-send");

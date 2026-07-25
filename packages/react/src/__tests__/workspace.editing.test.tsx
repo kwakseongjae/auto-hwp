@@ -1,3 +1,4 @@
+import { chatSidePanel } from "../chatSlot";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { HwpWorkspace } from "../components/HwpWorkspace";
@@ -51,7 +52,7 @@ async function openCellEditorAt(sheet: HTMLElement, container: HTMLElement, x: n
 describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
   it("is OFF by default: no 표 추가 button, no ruler", async () => {
     const adapter = new MockAdapter({ table, pageGeom: { w: 794, h: 1123, ml: 90, mt: 90, mr: 90, mb: 90 }, pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} />);
     await sheetOf(container);
     expect(screen.queryByTestId("hw-table-insert")).toBeNull();
     expect(screen.queryByTestId("hw-ruler")).toBeNull();
@@ -59,7 +60,7 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
 
   it("enableEditing shows the ruler (mm) + 표 추가 button; picking a size inserts a table via InsertTableAt (051 재배선)", async () => {
     const adapter = new MockAdapter({ table, pageGeom: { w: 794, h: 1123, ml: 90, mt: 90, mr: 90, mb: 90 }, pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     await sheetOf(container);
     await waitFor(() => expect(screen.getByTestId("hw-ruler")).toBeTruthy());
 
@@ -83,7 +84,7 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
     adapter.applyIntent = async () => {
       throw Object.assign(new Error("engine worker died: out of memory"), { code: "worker_dead" });
     };
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     await sheetOf(container);
     fireEvent.click(screen.getByTestId("hw-table-insert"));
     fireEvent.mouseEnter(screen.getByTestId("hw-table-cell-2-2"));
@@ -97,7 +98,7 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
   it("marking a table shows column-resize grips; a drag MOVES the boundary + commits SetTableColWidths (issue 031)", async () => {
     // liveResize: the engine reflects the ratios back so apply-verify confirms movement (SUCCESS path).
     const adapter = new MockAdapter({ table, colBoundaries: [40, 140, 240, 340], liveResize: true, pageGeom: { w: 794, h: 1123, ml: 90, mt: 90, mr: 90, mb: 90 }, pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     // click the table → whole-table mark.
     fireEvent.pointerDown(sheet, { clientX: 100, clientY: 100, button: 0, pointerId: 1 });
@@ -126,7 +127,7 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
   it("FROZEN engine (no geometry change) → apply-verify ERROR toast, NOT a false success (issue 031)", async () => {
     // No liveResize → tableColBoundaries stays frozen: the classic no-op that used to toast success.
     const adapter = new MockAdapter({ table, colBoundaries: [40, 140, 240, 340], pageGeom: { w: 794, h: 1123, ml: 90, mt: 90, mr: 90, mb: 90 }, pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     fireEvent.pointerDown(sheet, { clientX: 100, clientY: 100, button: 0, pointerId: 1 });
     fireEvent.pointerUp(sheet, { clientX: 100, clientY: 100, button: 0, pointerId: 1 });
@@ -143,7 +144,7 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
 
   it("marking a table shows ROW-resize grips; a drag commits SetTableRowHeights (whole-table heights, issue 031)", async () => {
     const adapter = new MockAdapter({ table, rowBoundaries: [60, 100, 140, 180], liveResize: true, pageGeom: { w: 794, h: 1123, ml: 90, mt: 90, mr: 90, mb: 90 }, pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     fireEvent.pointerDown(sheet, { clientX: 100, clientY: 100, button: 0, pointerId: 1 });
     fireEvent.pointerUp(sheet, { clientX: 100, clientY: 100, button: 0, pointerId: 1 });
@@ -173,7 +174,7 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
     // heights at indices 2,3 and 0 (content-sized) everywhere else — the v1 fail-safe this replaces.
     const split: TableBox = { section: 0, block: 1, x: 40, y: 200, w: 300, h: 80, rows: 5, cols: 3, first_row: 2 };
     const adapter = new MockAdapter({ table: split, rowBoundaries: [200, 240, 280], liveResize: true, pageGeom: { w: 794, h: 1123, ml: 90, mt: 90, mr: 90, mb: 90 }, pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     fireEvent.pointerDown(sheet, { clientX: 100, clientY: 210, button: 0, pointerId: 1 });
     fireEvent.pointerUp(sheet, { clientX: 100, clientY: 210, button: 0, pointerId: 1 });
@@ -200,7 +201,7 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
     // through the run-preserving SetTableCellRuns path, so per-run formatting survives (교훈 6).
     const cell: CellHit = { section: 0, block: 1, row: 0, col: 0, rows: 3, cols: 3, text: "굵게", x: 40, y: 60, w: 100, h: 40 };
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "굵게", bold: true }], pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     // 06x: double-click DRILLS to the cell, then Enter opens the in-place editor (openCellEditorAt).
     await openCellEditorAt(sheet, container, 60, 80);
@@ -227,7 +228,7 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
     // SetTableCellRuns write, no undo unit (opening a bold cell and clicking away must not pin a spurious run).
     const cell: CellHit = { section: 0, block: 1, row: 0, col: 0, rows: 3, cols: 3, text: "굵게", x: 40, y: 60, w: 100, h: 40 };
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "굵게", bold: true }], pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     await openCellEditorAt(sheet, container, 60, 80);
     const ta = await screen.findByTestId("hw-inplace-editor");
@@ -241,7 +242,7 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
     // intact — the whole point of the rich editor (per-run preservation, not a whole-cell flatten).
     const cell: CellHit = { section: 0, block: 1, row: 0, col: 0, rows: 3, cols: 3, text: "보통굵게", x: 40, y: 60, w: 100, h: 40 };
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "보통" }, { text: "굵게", bold: true }], pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     await openCellEditorAt(sheet, container, 60, 80);
     const ta = (await screen.findByTestId("hw-inplace-editor")) as HTMLElement;
@@ -258,7 +259,7 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
   it("while the in-place editor is open, the AI 전달 pill is HIDDEN (one surface at a time)", async () => {
     const cell: CellHit = { section: 0, block: 1, row: 1, col: 1, rows: 3, cols: 3, text: "칸", x: 140, y: 100, w: 100, h: 40 };
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     // 06x drill: a double-click SELECTS the cell → the AI 전달 pill appears (formatting lives in the ribbon).
     drillCell(sheet, 160, 110);
@@ -274,7 +275,7 @@ describe("HwpWorkspace issue-027 editing chrome — opt-in", () => {
   it("marking a cell shows the AI 전달 pill; the ribbon 굵게 applies SetCellRangeFmt (no floating bar)", async () => {
     const cell: CellHit = { section: 0, block: 1, row: 1, col: 1, rows: 3, cols: 3, text: "칸", x: 140, y: 100, w: 100, h: 40 };
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
-    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     drillCell(sheet, 160, 110); // 06x: drill to select the cell (single click would mark the whole table)
     // the AI 전달 pill anchors to the selection; the 028 floating format bar is never rendered.
@@ -298,7 +299,7 @@ describe("HwpWorkspace issue-06x — AI 전달 pill show/hide + AI entry (floati
   const mkAdapter = () => new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
 
   it("선택→pill 표시, Esc→숨김", async () => {
-    const { container } = render(<HwpWorkspace adapter={mkAdapter()} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={mkAdapter()} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     fireEvent.pointerDown(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
     fireEvent.pointerUp(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
@@ -309,7 +310,7 @@ describe("HwpWorkspace issue-06x — AI 전달 pill show/hide + AI entry (floati
   });
 
   it("드래그(포인터 제스처) 중 pill 숨김 → 놓으면 재등장", async () => {
-    const { container } = render(<HwpWorkspace adapter={mkAdapter()} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={mkAdapter()} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     fireEvent.pointerDown(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
     fireEvent.pointerUp(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
@@ -323,7 +324,7 @@ describe("HwpWorkspace issue-06x — AI 전달 pill show/hide + AI entry (floati
   });
 
   it("AI에게 전달 pill → 채팅 포커스 + 앵커 칩 유지 (신규 프롬프트 로직 0)", async () => {
-    const { container } = render(<HwpWorkspace adapter={mkAdapter()} document={doc} onAiRequest={noAi} enableEditing />);
+    const { container } = render(<HwpWorkspace adapter={mkAdapter()} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
     const sheet = await sheetOf(container);
     fireEvent.pointerDown(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });
     fireEvent.pointerUp(sheet, { clientX: 160, clientY: 110, button: 0, pointerId: 1 });

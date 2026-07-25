@@ -1,3 +1,4 @@
+import { chatSidePanel } from "../chatSlot";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { HwpWorkspace } from "../components/HwpWorkspace";
@@ -61,7 +62,7 @@ describe("WorkspaceShell assembly (HwpWorkspace over TauriAdapter, mock invoke)"
   it("mount smoke: open → pageSvg → cell click resolve through the TauriAdapter", async () => {
     const calls: string[] = [];
     const { container } = render(
-      <HwpWorkspace adapter={makeAdapter(calls)} document={docProp()} onAiRequest={noAi} enableEditing />,
+      <HwpWorkspace adapter={makeAdapter(calls)} document={docProp()} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />,
     );
 
     // Open + page render: open_doc bridged through resolveOpenPath, render_own_page paints the sheet.
@@ -85,7 +86,7 @@ describe("WorkspaceShell assembly (HwpWorkspace over TauriAdapter, mock invoke)"
     const onExport = vi.fn(async () => {});
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     const { container } = render(
-      <HwpWorkspace adapter={makeAdapter(calls)} document={docProp()} onAiRequest={noAi} onExport={onExport} />,
+      <HwpWorkspace adapter={makeAdapter(calls)} document={docProp()} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} onExport={onExport} />,
     );
     await waitFor(() => expect(container.querySelector(".hw-sheet svg")).toBeTruthy());
 
@@ -106,7 +107,7 @@ describe("WorkspaceShell assembly (HwpWorkspace over TauriAdapter, mock invoke)"
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     try {
       const { container } = render(
-        <HwpWorkspace adapter={makeAdapter(calls)} document={docProp()} onAiRequest={noAi} />,
+        <HwpWorkspace adapter={makeAdapter(calls)} document={docProp()} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} />,
       );
       await waitFor(() => expect(container.querySelector(".hw-sheet svg")).toBeTruthy());
       fireEvent.click(container.querySelector('button[title="HTML 다운로드"]') as HTMLButtonElement);
