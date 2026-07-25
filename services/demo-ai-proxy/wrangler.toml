@@ -6,7 +6,7 @@ compatibility_date = "2026-07-01"
 #   wrangler kv namespace create RATELIMIT
 [[kv_namespaces]]
 binding = "RATELIMIT"
-id = "REPLACE_WITH_KV_ID"
+id = "77e71126e0534967932807bd012bc39a"
 
 [vars]
 # CORS 허용 오리진(정확히 일치, 콤마로 여러 개). Pages 프로젝트 페이지면 뒤에 경로 없이 오리진만.
