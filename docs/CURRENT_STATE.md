@@ -5,6 +5,21 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
+- 갱신: 2026-07-26 · Claude — **074 done(047fc14) + 캐럿 심화(26c0de5)**.
+  ⚠️ **074 전제 정정**: 내가 근거로 삼은 "오라클 25쪽"은 인공물(H2Orestart 가 NARROWLY 를 가로로 읽어
+  본문 높이 반토막 — PDF MediaBox 841×595). 오라클 지표는 **세로 렌더 확인 후에만** 쓸 것.
+  그럼에도 과소계산은 실재: ①본문상자에서 머리말/꼬리말/제본여백 누락(한컴 규칙 top+header — lineseg
+  실측 71891 이 근거) ②세로 병합셀 높이 균등분배(짧은 행 부풀림 → 쪽 낭비) ③ragged 표를 균일격자로
+  가정(Cell::width 도입) ④stored_row_heights 바닥 미적용. **총량 오차 0.08%** — 높이 모델은 이미
+  정확했고 갭은 전부 패킹 낭비였다. pps 표본 3→4쪽=오라클 일치.
+  부수: 열너비 드래그가 Cell::width 때문에 화면 미반영이던 실버그 수정(geometry_edited 단일 판정).
+  LOCKSTEP 구조 보장(place::row_heights → table_row_heights 위임) → benchmark2 가 place_doc 25 vs
+  NaiveLayout 24 로 갈려 있던 것이 24 로 정렬(한컴도 24) → e2e PAGES=25 기대값을 근거와 함께 24 로.
+  캐럿: **범위선택({anchor,focus}·⌘B 부분서식)** + **Enter 문단분리/병합**(새 op SplitParagraph/
+  MergeParagraph — AI 화이트리스트 비공개, 수동 편집 전용). 빈 문단 캐럿도 열림.
+  검증: 게이트 8==8/18==18/24==24 불변 · 파리티 22==22 · vitest 219/352 · **e2e 43/43**.
+  남은 것: 셀 안 줄바꿈 게이트 부재(24×13 표 한컴2줄 vs 우리4줄) · bizinfo-mss 24 vs 28 ·
+  format-ribbon-048 flaky(베이스라인부터·커밋/리프레시 레이스) · 문단 넘는 범위선택 · 드래그 선택.
 - 갱신: 2026-07-25(3) · Claude — **남은 축 3종 병렬 완료**(e0b38f5/9229604/80484b6).
   ① **본문 글자 캐럿 열림**: rhwp 히트테스트 경로는 좌표계가 화면과 달라 못 쓴다고 판정 →
   packages 표면 3개(hitTest 밴드 + pageSvg 글리프 + blockRuns)로 우회. 렌더 규약(글리프1=text1,
