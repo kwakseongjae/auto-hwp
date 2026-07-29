@@ -274,7 +274,11 @@ with the design inspector; OG/Twitter cards and favicons; and a landing redesign
 `@auto-hwp` 스코프 **첫 npm 발행**. 4종 모두 같은 날 같은 분에 올라갔다
 (engine · editor-core · ai-protocol · react, `2026-07-22T10:01Z`). (`aacd1a9` 시점의 트리)
 
-*(EN — First npm publish of all four `@auto-hwp` packages, 2026-07-22.)*
+> **2026-07-29 deprecate 완료** — 아래 결함 때문에 4종 전부 레지스트리에서 deprecated 처리했다
+> (react: "broken file: deps", engine: "wasm-opt not applied"). `>=0.0.2`를 쓰라.
+
+*(EN — First npm publish of all four `@auto-hwp` packages, 2026-07-22. All four 0.0.1 releases were
+deprecated on 2026-07-29 in favor of >=0.0.2.)*
 
 ### 알려진 결함 (Known issues)
 
