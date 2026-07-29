@@ -814,7 +814,9 @@ pub fn layout_paragraph(
         } else {
             fonts.line_height(empty_para_size(p, doc))
         };
-        return vec![mk_line(0, lh, 0.0)];
+        let mut lines = vec![mk_line(0, lh, 0.0)];
+        apply_source_line_metrics(p, &mut lines);
+        return lines;
     }
 
     let mut lines = Vec::new();
@@ -914,6 +916,31 @@ pub fn layout_paragraph(
         }
     }
     lines
+}
+
+/// Reuse Hancom's stored line-box metrics for an empty paragraph while it is structurally safe. This
+/// helper is deliberately called only from the `n == 0` branch above: applying source line boxes to
+/// normal text would turn stored layout into a second typesetter and break HWP→HWPX page-count parity.
+/// Empty spacers have no glyph/char-shape evidence from which to reconstruct their authored height, so
+/// the cache is both necessary and unambiguous there.
+fn apply_source_line_metrics(p: &Paragraph, lines: &mut [LineSeg]) {
+    if p.dirty.is_dirty()
+        || p.source_line_metrics.is_empty()
+        || p.source_line_metrics.len() != lines.len()
+    {
+        return;
+    }
+    for (line, source) in lines.iter_mut().zip(&p.source_line_metrics) {
+        if source.height > 0 {
+            line.vert_size = source.height as f64;
+        }
+        if source.text_height > 0 {
+            line.text_height = source.text_height as f64;
+        }
+        if source.baseline > 0 {
+            line.baseline = source.baseline as f64;
+        }
+    }
 }
 
 /// Tallest anchored image/equation in the paragraph (HWPUNIT), or 0 if none.

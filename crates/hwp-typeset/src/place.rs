@@ -58,6 +58,9 @@ pub struct PlacedImage {
     /// Precomputed equation SVG fragment (issue 062-5), carried straight to the SVG backend; `None`
     /// for real images and un-rendered equations (→ the stub box, byte-identical to before).
     pub svg: Option<String>,
+    /// True for a table-cell image brush. Background images are painted before borders/text and are
+    /// excluded from image selection/move APIs; normal inline pictures leave this false.
+    pub is_background: bool,
     /// Source provenance: the `(section, block index)` anchor the image's paragraph occupies in the
     /// SemanticDoc — lets an overlay/edit map a placed box back to the editable model (the
     /// `image_bbox` query + a `SetImageSize` op). The renderer ignores these.
@@ -713,6 +716,7 @@ fn place_paragraph(
                     h: *h,
                     bin_ref: bin_ref.clone(),
                     svg: svg.clone(),
+                    is_background: false,
                     section,
                     block,
                 });
@@ -890,6 +894,19 @@ fn flush_fragment(
                 w: cw,
                 h: ch,
                 fill: Some(shade),
+            });
+        }
+        if let Some(image) = &c.fill_image {
+            pg.images.push(PlacedImage {
+                x: cx,
+                y: cy,
+                w: cw,
+                h: ch,
+                bin_ref: image.bin_ref.clone(),
+                svg: None,
+                is_background: true,
+                section,
+                block,
             });
         }
         // Cell borders. Two paths:
@@ -1157,6 +1174,19 @@ fn place_nested_table(
                 fill: Some(shade),
             });
         }
+        if let Some(image) = &c.fill_image {
+            pg.images.push(PlacedImage {
+                x: cx,
+                y: cy,
+                w: cw,
+                h: ch,
+                bin_ref: image.bin_ref.clone(),
+                svg: None,
+                is_background: true,
+                section: ctx.section,
+                block: ctx.outer_block,
+            });
+        }
         if c.has_edge_borders() {
             push_cell_edges(pg, &c.borders, cx, cy, cw, ch);
         } else if c.has_border {
@@ -1267,6 +1297,7 @@ fn place_cell_content(
                 h,
                 bin_ref,
                 svg,
+                is_background: false,
                 section: ctx.section,
                 block: ctx.outer_block,
             });

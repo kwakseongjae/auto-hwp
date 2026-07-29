@@ -18,12 +18,23 @@ cargo test --workspace
 echo "═══ tests (hwp-rhwp features) ═══"
 cargo test -p hwp-rhwp --features "rhwp shaper"
 
-echo "═══ 게이트 v2 (benchmark 8==8 · benchmark1 18==18) ═══"
-for b in benchmark benchmark1; do
+echo "═══ 게이트 v2 (benchmark 8==8 · benchmark1 18==18 · benchmark2 24==24 · modu-startup 6==6) ═══"
+for b in benchmark benchmark1 benchmark2; do
   out=$(cargo run -q -p auto-hwp-cli --features "shaper rhwp" -- layout-check "benchmarks/${b}.hwp")
   echo "$out" | grep "쪽수"
   echo "$out" | grep "쪽수" | grep -q "일치" || { echo "❌ 게이트 실패: ${b}.hwp 페이지 수 불일치"; exit 1; }
 done
+# modu-startup 실물 양식은 공개 재배포 금지 — corpus/private/(gitignore)에만 존재한다.
+# 있으면 기존과 동일하게 SHA + 6==6을 강제하고, 없으면 점수를 꾸며내지 않고 skip을 명시한다(068 규율).
+MODU=corpus/private/modu-startup/modu-startup.hwp
+if [ -f "$MODU" ]; then
+  shasum -a 256 -c corpus/private/modu-startup/modu-startup.sha256
+  out=$(cargo run -q -p auto-hwp-cli --features "shaper rhwp" -- layout-check "$MODU")
+  echo "$out" | grep "쪽수"
+  echo "$out" | grep "쪽수" | grep -q "일치" || { echo "❌ 게이트 실패: modu-startup.hwp 페이지 수 불일치"; exit 1; }
+else
+  echo "⚠️  modu-startup 게이트 skipped(corpus/private 부재 — 로컬 전용 실물 벤치, 공개 커밋 금지)"
+fi
 
 echo "═══ wasm 위생 ═══"
 cargo check -p hwp-wasm --target wasm32-unknown-unknown
@@ -63,6 +74,8 @@ if [ "$MODE" = "--full" ]; then
   pnpm -C packages/ai-protocol build
   pnpm -C packages/editor-core build
   pnpm -C packages/react build
+  echo "═══ 본문 캐럿 엔진 교차검증 ═══"
+  node packages/engine/bench/body-caret-crosscheck.mjs
   echo "═══ vitest ═══"
   pnpm -C packages/editor-core exec vitest run
   pnpm -C packages/ai-protocol exec vitest run

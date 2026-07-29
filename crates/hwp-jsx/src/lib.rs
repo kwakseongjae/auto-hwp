@@ -864,6 +864,7 @@ fn parse_para(el: &JsxElement) -> Result<Paragraph> {
         para_shape,
         style_name: el.attrs.get("data-style").cloned(),
         runs,
+        source_line_metrics: Vec::new(),
         source: el.attrs.get("data-src").and_then(|s| decode_para_source(s)),
         provenance: el
             .attrs
@@ -1085,6 +1086,7 @@ fn parse_cell(el: &JsxElement) -> Result<Cell> {
         blocks,
         active: !el.attrs.contains_key("data-inactive"),
         shade_color: el.attrs.get("data-shade").and_then(|s| Color::from_hex(s)),
+        fill_image: None,
         // Borderless cells carry data-noborder; absence keeps the default (bordered) cell.
         has_border: !el.attrs.contains_key("data-noborder"),
         borders: el

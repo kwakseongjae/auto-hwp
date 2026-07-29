@@ -215,6 +215,15 @@ pub struct Paragraph {
     /// Requested named style (e.g. "개요 1"); resolved to a `styleIDRef` by the serializer.
     pub style_name: Option<String>,
     pub runs: Vec<Run>,
+    /// Source-authored line boxes (HWPUNIT), captured from binary HWP `PARA_LINE_SEG` for true blank
+    /// spacer paragraphs in decorative image-fill forms.
+    ///
+    /// This is a render-only fidelity cache: when the paragraph is still clean and our reflow produces
+    /// the same number of lines, the typesetter reuses these height/text/baseline metrics. It does NOT
+    /// dictate line breaks and is ignored after an edit, so stale Hancom layout never overrides changed
+    /// content. Binary forms often use empty spacer paragraphs whose line box is 1500 HWPUNIT even when
+    /// no char-shape ref remains; dropping that fact pulled later inline tables hundreds of pixels upward.
+    pub source_line_metrics: Vec<SourceLineMetric>,
     /// Provenance for a TOP-LEVEL paragraph parsed from HWPX — enables in-place (non-verbatim)
     /// re-emit: if this paragraph is edited (dirty) the serializer replaces exactly its byte span;
     /// untouched paragraphs ride along byte-verbatim. `None` ⇒ synthesized/appended (legacy path).
@@ -222,6 +231,13 @@ pub struct Paragraph {
     pub provenance: Provenance,
     pub passthrough: Passthrough,
     pub dirty: Dirty,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SourceLineMetric {
+    pub height: HwpUnit,
+    pub text_height: HwpUnit,
+    pub baseline: HwpUnit,
 }
 
 /// Where a parsed top-level paragraph came from in the section XML, for surgical re-emit.
@@ -498,6 +514,11 @@ pub struct Cell {
     pub active: bool,
     /// Optional cell background shade (synthesized into a borderFill `fillBrush` on export).
     pub shade_color: Option<crate::types::Color>,
+    /// Optional raster image used as the cell's borderFill brush. Render-only for binary HWP input:
+    /// the image is fitted to the final cell box and painted behind borders/text. This is how Hancom
+    /// templates implement decorative bands (for example the blue title rules in `modu-startup.hwp`);
+    /// treating it as a normal inline image would reserve layout space and make it selectable.
+    pub fill_image: Option<ImageRef>,
     /// Whether this cell draws a visible border box. Lifted from the cell's borderFill (false when
     /// all four edges are "선없음"). Default `true` keeps the legacy behavior for inserted/test cells
     /// (which want a normal border). A `false` cell is skipped by the renderer — this removes the
@@ -608,6 +629,7 @@ impl Default for Cell {
             blocks: Vec::new(),
             active: true,
             shade_color: None,
+            fill_image: None,
             has_border: true,
             borders: [None; 4],
             diagonal: None,

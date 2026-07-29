@@ -181,6 +181,18 @@ impl<'a> Lifter<'a> {
                 .any(|i| matches!(i, Inline::Text(s) if !s.trim().is_empty()))
         });
         let is_table_anchor = hosts_table && text_empty;
+        // Stored line boxes are needed only for true blank spacers in decorative forms: their authored
+        // height has no glyph evidence, and dropping it pulls an image-filled title table upward. Do not
+        // carry the cache for ordinary documents or control-host paragraphs; that would make persisted
+        // layout a second typesetter and break HWP→HWPX page-count parity.
+        let preserve_blank_metrics = text_empty
+            && p.controls.is_empty()
+            && self
+                .doc
+                .doc_info
+                .border_fills
+                .iter()
+                .any(|fill| fill.fill.image.is_some());
         blocks.push(Block::Paragraph(Paragraph {
             para_shape: self
                 .para_id_to_idx
@@ -198,6 +210,19 @@ impl<'a> Lifter<'a> {
                     | rhwp::model::paragraph::ColumnBreakType::Section
             ),
             is_table_anchor,
+            source_line_metrics: if preserve_blank_metrics {
+                p.line_segs
+                    .iter()
+                    .filter(|line| line.line_height > 0)
+                    .map(|line| SourceLineMetric {
+                        height: line.line_height,
+                        text_height: line.text_height.max(0),
+                        baseline: line.baseline_distance.max(0),
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            },
             provenance: Provenance {
                 source: Some(SourceFormat::Hwp5),
                 raw: None,
@@ -254,10 +279,25 @@ impl<'a> Lifter<'a> {
     /// rhwp `bin_data_id`). Returns None for an unresolved / external (no embedded bytes) image.
     fn lift_picture(&self, pic: &rhwp::model::image::Picture) -> Option<ImageRef> {
         let bin_id = pic.image_attr.bin_data_id;
+        let bin_ref = self.register_bin(bin_id)?;
+
+        Some(ImageRef {
+            bin_ref,
+            width: pic.common.width as i32,
+            height: pic.common.height as i32,
+        })
+    }
+
+    /// Register one embedded raster by its 1-based HWP bin id and return the stable model reference.
+    /// Shared by normal Picture controls and borderFill image brushes so both paths dedupe bytes.
+    fn register_bin(&self, bin_id: u16) -> Option<String> {
         if bin_id == 0 {
             return None;
         }
-        // rhwp bin ids are 1-based; the binary is at bin_data_content[id-1], else by .id match.
+        if let Some(seen) = self.bin_seen.borrow().get(&bin_id).cloned() {
+            return Some(seen);
+        }
+        // rhwp bin ids are normally 1-based; sparse HWPX ids fall back to the explicit `id`.
         let content = self
             .doc
             .bin_data_content
@@ -269,38 +309,24 @@ impl<'a> Lifter<'a> {
                     .iter()
                     .find(|c| c.id == bin_id && !c.data.is_empty())
             })?;
-
-        let seen = self.bin_seen.borrow().get(&bin_id).cloned();
-        let bin_ref = if let Some(r) = seen {
-            r
+        let kind = content
+            .extension
+            .trim_start_matches('.')
+            .to_ascii_lowercase();
+        let kind = if kind.is_empty() {
+            "png".to_string()
         } else {
-            // Normalize the extension (drop a leading dot, lowercase): "PNG" / ".png" → "png".
-            let kind = content
-                .extension
-                .trim_start_matches('.')
-                .to_ascii_lowercase();
-            let kind = if kind.is_empty() {
-                "png".to_string()
-            } else {
-                kind
-            };
-            let r = format!("image{bin_id}");
-            self.bin_data.borrow_mut().push(BinData {
-                bin_ref: r.clone(),
-                // rhwp v0.7.18+ keeps bin data LAZY (BinDataBytes::Lazy resolves from the source
-                // container on demand — the 244→49MB memory fix); our IR owns its bytes, so load here.
-                bytes: content.data.load(),
-                kind,
-            });
-            self.bin_seen.borrow_mut().insert(bin_id, r.clone());
-            r
+            kind
         };
-
-        Some(ImageRef {
-            bin_ref,
-            width: pic.common.width as i32,
-            height: pic.common.height as i32,
-        })
+        let bin_ref = format!("image{bin_id}");
+        self.bin_data.borrow_mut().push(BinData {
+            bin_ref: bin_ref.clone(),
+            // rhwp keeps bin data lazy; our IR owns its bytes, so materialize exactly once here.
+            bytes: content.data.load(),
+            kind,
+        });
+        self.bin_seen.borrow_mut().insert(bin_id, bin_ref.clone());
+        Some(bin_ref)
     }
 
     /// Lift an OOXML (DrawingML) chart hosted in a drawing shape → `ChartRef` (issue 062-7). v1 handles
@@ -520,6 +546,7 @@ impl<'a> Lifter<'a> {
                     blocks,
                     active: true,
                     shade_color: self.cell_shade(c.border_fill_id),
+                    fill_image: self.cell_fill_image(c.border_fill_id),
                     has_border: self.cell_has_border(c.border_fill_id),
                     borders: self.cell_borders(c.border_fill_id),
                     diagonal: self.cell_diagonal(c.border_fill_id),
@@ -675,6 +702,26 @@ impl<'a> Lifter<'a> {
             return None;
         }
         Some(color)
+    }
+
+    /// Resolve an image brush from a cell borderFill. Its stored intrinsic dimensions are irrelevant:
+    /// Hancom's `FitToSize` brush is fitted to the final cell box by the placer.
+    fn cell_fill_image(&self, border_fill_id: u16) -> Option<ImageRef> {
+        let idx = (border_fill_id as usize).checked_sub(1)?;
+        let image = self
+            .doc
+            .doc_info
+            .border_fills
+            .get(idx)?
+            .fill
+            .image
+            .as_ref()?;
+        let bin_ref = self.register_bin(image.bin_data_id)?;
+        Some(ImageRef {
+            bin_ref,
+            width: 0,
+            height: 0,
+        })
     }
 }
 

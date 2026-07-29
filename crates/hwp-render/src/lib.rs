@@ -22,7 +22,7 @@ use hwp_typeset::{place_doc, PlacedPage};
 
 /// Render ONE page of `doc` to a [`PageLayerTree`] (paint IR), driving our own paginator/placer
 /// ([`hwp_typeset::place_doc`]) over the injected `fonts`. The returned tree's `ops` are, in paint
-/// order: cell/line border `Rect`s + shading fills, image boxes, then glyph runs on top.
+/// order: cell shades + image brushes, borders, normal image boxes, then glyph runs on top.
 ///
 /// `page` is 0-based; out-of-range yields `Err`. Under the `shaper` feature the glyph x-positions
 /// come from real (rustybuzz) advances; otherwise the per-script approximation.
@@ -46,8 +46,8 @@ pub fn page_count(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> usize {
     place_doc(doc, fonts).pages.len()
 }
 
-/// Lower one positioned page into the paint IR. Order matters for correct overdraw: shading fills
-/// and borders first (background), then images, then glyphs on top.
+/// Lower one positioned page into the paint IR. Order matters for correct overdraw: cell fills/image
+/// brushes first, borders next, then normal images and glyphs.
 fn lower_page(pg: &PlacedPage) -> PageLayerTree {
     let mut ops: Vec<PaintOp> =
         Vec::with_capacity(pg.rects.len() + pg.lines.len() + pg.images.len() + pg.glyphs.len());
@@ -60,6 +60,18 @@ fn lower_page(pg: &PlacedPage) -> PageLayerTree {
             w: r.w,
             h: r.h,
             fill: r.fill,
+        });
+    }
+    // 1b) Raster image brushes fitted to table cells. These are decorative backgrounds, so borders
+    // and text must remain above them.
+    for im in pg.images.iter().filter(|im| im.is_background) {
+        ops.push(PaintOp::Image {
+            x: im.x,
+            y: im.y,
+            w: im.w,
+            h: im.h,
+            bin_ref: im.bin_ref.clone(),
+            svg: im.svg.clone(),
         });
     }
     // 2) Stroked boxes (LEGACY uniform cell borders for cells without per-edge data).
@@ -85,7 +97,7 @@ fn lower_page(pg: &PlacedPage) -> PageLayerTree {
         });
     }
     // 3) Images / object boxes.
-    for im in &pg.images {
+    for im in pg.images.iter().filter(|im| !im.is_background) {
         ops.push(PaintOp::Image {
             x: im.x,
             y: im.y,
