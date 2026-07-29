@@ -105,7 +105,7 @@ soffice가 없으면 조용히 건너뛴다.
 
 | 명령 | 하는 일 |
 |---|---|
-| `layout-check <파일>` | 우리 조판 vs 한컴 실제 레이아웃 대조(쪽수·문단별 줄수 일치율). `--rows <섹션>/<블록>`은 표 행 높이 감사. `--features rhwp` 필요 |
+| `layout-check <파일>` | production parser+우리 조판 vs 한컴 stored lineseg 대조(쪽수·본문/셀 문단 줄수). `--rows <섹션>/<블록>`은 표 행 높이, `--cells <섹션>/<블록>\|all`은 셀 불일치 폭·padding을 감사. 한컴 저작 HWPX도 production parser를 타며, lineseg cache가 없으면 missing-oracle로 명시. `--features rhwp` 필요 |
 | `fidelity [파일]` | 충실도 게이트 전제조건 점검 + 가능하면 기준 렌더와 비교 |
 | `oracle <파일>` | LibreOffice + H2Orestart로 기준 PDF 생성 (`--out <디렉토리>`) |
 | `verify-convert <파일>` | 원본 `.hwp`와 변환 `.hwpx`를 나란히 렌더한 HTML로 육안 대조. `--features rhwp` 필요 |
@@ -119,7 +119,8 @@ soffice가 없으면 조용히 건너뛴다.
 - 저장 포맷은 **HWPX**다. `.hwp`로 다시 저장하는 경로는 없다. `.hwp`를 입력하면 산출물은 변환본이라
   쪽 나눔·표 너비가 원본과 달라질 수 있다(HWPX 입력은 고치지 않은 영역이 바이트 그대로 보존된다).
 - 함초롬 등 상용 서체는 번들하지 않으며 OFL 대체(나눔 계열)로 렌더된다.
-- 쪽수 게이트(8==8 · 18==18)는 벤치마크 기준이다 — 임의 문서의 완전 일치 보증이 아니다.
+- 쪽수 게이트(8==8 · 18==18 · 24==24)와 셀 lineseg 게이트는 벤치마크 기준이다 — 임의 문서의 완전
+  일치 보증이 아니다.
 
 ## 다른 표면
 

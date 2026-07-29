@@ -1190,10 +1190,11 @@ mod caret_rhwp_tests {
 
 // ---- Layout-engine oracle: our line-breaking + pagination vs Hancom's actual layout ----
 
-/// Per-document layout-fidelity score: OUR engine (`hwp-typeset`) vs **Hancom's actual layout** —
-/// the `<hp:lineseg>`s rhwp parses out of the original `.hwp`. This turns "is our line-breaking
-/// right?" into numbers we can iterate the approximate metrics against. Run it on an ORIGINAL `.hwp`
-/// (which carries Hancom-authored linesegs), not on our linesegarray-stripped conversion.
+/// Per-document layout-fidelity score: OUR engine (`hwp-typeset`) vs **Hancom's stored layout** —
+/// the `<hp:lineseg>`s rhwp parses from original HWP or Hancom-authored HWPX. This turns "is our
+/// line-breaking right?" into numbers we can iterate against. Normalized/converted HWPX commonly
+/// strips this cache; the cell gate reports those paragraphs as missing-oracle instead of silently
+/// inventing a one-line reference.
 #[derive(Clone, Debug, Default)]
 pub struct LayoutFidelity {
     /// Pages Hancom laid out (rhwp `page_count`).
@@ -1217,16 +1218,251 @@ pub struct LayoutFidelity {
     pub images: usize,
     pub equations: usize,
     pub body_height: i32,
+    /// Table-cell paragraphs encountered while walking Hancom's source table tree.
+    pub cell_paragraphs_seen: usize,
+    /// Cell paragraphs with a real Hancom-authored lineseg oracle. Converted/normalized HWPX files
+    /// commonly strip this cache; those paragraphs are counted in `cell_paragraphs_missing_oracle`
+    /// instead of being scored as a fabricated one-line match.
+    pub cell_paragraphs: usize,
+    pub cell_paragraphs_missing_oracle: usize,
+    /// Source/model structure pairs that could not be aligned (table count, cell, or paragraph count).
+    /// A non-zero value makes a percentage alone untrustworthy and is surfaced by the CLI.
+    pub cell_structure_mismatches: usize,
+    /// Recursively paired tables (outer + nested).
+    pub cell_tables: usize,
+    /// Paragraphs whose line count matches Hancom's cell linesegs exactly / within ±1.
+    pub cell_line_exact: usize,
+    pub cell_line_within1: usize,
+    /// Σ Hancom / own-render cell line counts over scored paragraphs.
+    pub oracle_cell_lines: usize,
+    pub our_cell_lines: usize,
+    /// Every non-exact cell paragraph, with enough width provenance to diagnose the cause.
+    pub cell_mismatches: Vec<CellLineMismatch>,
+}
+
+/// One non-exact table-cell paragraph in [`LayoutFidelity`].
+///
+/// Widths are HWPUNIT. `our_cell_text_width` is the cell box after the own renderer's horizontal
+/// inset; `our_wrap_width` further removes paragraph left/right margins. `oracle_segment_width` is
+/// Hancom's largest stored lineseg segment width (0 means that source path did not populate it).
+#[derive(Clone, Debug, Default)]
+pub struct CellLineMismatch {
+    pub section: usize,
+    /// Outermost `SemanticDoc` table block. Nested tables retain this stable owner.
+    pub block: usize,
+    /// `root` or a descending path such as `root/r0c0:t0`.
+    pub table_path: String,
+    pub row: usize,
+    pub col: usize,
+    pub paragraph: usize,
+    pub oracle_lines: usize,
+    pub our_lines: usize,
+    pub source_cell_width: f64,
+    pub source_pad_left: f64,
+    pub source_pad_right: f64,
+    pub our_cell_text_width: f64,
+    pub our_wrap_width: f64,
+    pub oracle_segment_width: f64,
+    pub text: String,
+}
+
+#[cfg(feature = "rhwp")]
+fn is_generated_object_paragraph(p: &Paragraph) -> bool {
+    p.runs
+        .iter()
+        .flat_map(|r| &r.content)
+        .any(|i| matches!(i, Inline::Image(_) | Inline::Equation(_) | Inline::Chart(_)))
+}
+
+#[cfg(feature = "rhwp")]
+fn text_preview(text: &str) -> String {
+    const CAP: usize = 96;
+    let mut out = String::new();
+    let mut truncated = false;
+    for ch in text.chars() {
+        if out.chars().count() >= CAP {
+            truncated = true;
+            break;
+        }
+        if ch.is_control() {
+            out.push(' ');
+        } else {
+            out.push(ch);
+        }
+    }
+    let out = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    if truncated {
+        format!("{out}…")
+    } else {
+        out
+    }
+}
+
+/// Recursively score one rhwp table against its lifted counterpart. The walk mirrors `lift_table`:
+/// cells are addressed by `(row,col)`, source paragraphs are the non-generated paragraph blocks,
+/// and nested table controls pair with nested `Block::Table`s in document order.
+#[cfg(feature = "rhwp")]
+#[allow(clippy::too_many_arguments)]
+fn score_cell_table(
+    rtable: &rhwp::model::table::Table,
+    otable: &Table,
+    our: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+    avail_w: f64,
+    section: usize,
+    block: usize,
+    path: &str,
+    f: &mut LayoutFidelity,
+) {
+    f.cell_tables += 1;
+    if rtable.cells.len() != otable.cells.len() {
+        f.cell_structure_mismatches += rtable.cells.len().abs_diff(otable.cells.len());
+    }
+
+    let promoted_frame = hwp_typeset::unwrap_frame_table(otable).is_some();
+    for rcell in &rtable.cells {
+        let Some((ocell_idx, ocell)) = otable
+            .cells
+            .iter()
+            .enumerate()
+            .find(|(_, c)| c.row == rcell.row as usize && c.col == rcell.col as usize)
+        else {
+            f.cell_structure_mismatches += 1;
+            continue;
+        };
+
+        let cell_text_w = hwp_typeset::table_cell_text_width(otable, avail_w, ocell_idx);
+        let oparas: Vec<&Paragraph> = ocell
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Paragraph(p) if !is_generated_object_paragraph(p) => Some(p),
+                _ => None,
+            })
+            .collect();
+        if rcell.paragraphs.len() != oparas.len() {
+            f.cell_structure_mismatches += rcell.paragraphs.len().abs_diff(oparas.len());
+            // Do NOT zip a shifted stream: generated object paragraphs are deliberately absent from
+            // `oparas`, and any unexpected lift asymmetry after that filtering would pair unrelated
+            // source/model paragraphs. Mark the cell structurally unscorable; nested tables below
+            // still recurse independently.
+        } else {
+            for (pi, (rp, op)) in rcell.paragraphs.iter().zip(oparas).enumerate() {
+                f.cell_paragraphs_seen += 1;
+                let oracle = rp
+                    .line_segs
+                    .iter()
+                    .filter(|ls| !ls.is_missing_lineseg_placeholder())
+                    .count();
+                if oracle == 0 {
+                    f.cell_paragraphs_missing_oracle += 1;
+                    continue;
+                }
+                let ours = hwp_typeset::layout_cell_paragraph(op, our, cell_text_w, fonts).len();
+                f.cell_paragraphs += 1;
+                f.oracle_cell_lines += oracle;
+                f.our_cell_lines += ours;
+                if ours == oracle {
+                    f.cell_line_exact += 1;
+                }
+                if ours.abs_diff(oracle) <= 1 {
+                    f.cell_line_within1 += 1;
+                }
+                if ours != oracle {
+                    let ps = our.para_shapes.get(op.para_shape);
+                    let left = ps.map(|s| s.left_margin).unwrap_or(0).max(0) as f64;
+                    let right = ps.map(|s| s.right_margin).unwrap_or(0).max(0) as f64;
+                    let padding = if rcell.apply_inner_margin {
+                        &rcell.padding
+                    } else {
+                        &rtable.padding
+                    };
+                    f.cell_mismatches.push(CellLineMismatch {
+                        section,
+                        block,
+                        table_path: path.to_owned(),
+                        row: rcell.row as usize,
+                        col: rcell.col as usize,
+                        paragraph: pi,
+                        oracle_lines: oracle,
+                        our_lines: ours,
+                        source_cell_width: rcell.width as f64,
+                        source_pad_left: padding.left as f64,
+                        source_pad_right: padding.right as f64,
+                        our_cell_text_width: cell_text_w,
+                        our_wrap_width: (cell_text_w - left - right).max(1.0),
+                        oracle_segment_width: rp
+                            .line_segs
+                            .iter()
+                            .map(|ls| ls.segment_width.max(0) as f64)
+                            .fold(0.0, f64::max),
+                        text: text_preview(&rp.text),
+                    });
+                }
+            }
+        }
+
+        let rtables: Vec<&rhwp::model::table::Table> = rcell
+            .paragraphs
+            .iter()
+            .flat_map(|p| p.controls.iter())
+            .filter_map(|ctrl| match ctrl {
+                rhwp::model::control::Control::Table(t) => Some(t.as_ref()),
+                _ => None,
+            })
+            .collect();
+        let otables: Vec<(usize, &Table)> = ocell
+            .blocks
+            .iter()
+            .enumerate()
+            .filter_map(|(bi, b)| match b {
+                Block::Table(t) => Some((bi, t)),
+                _ => None,
+            })
+            .collect();
+        if rtables.len() != otables.len() {
+            f.cell_structure_mismatches += rtables.len().abs_diff(otables.len());
+        } else {
+            for (ni, (rt, (obi, ot))) in rtables.into_iter().zip(otables).enumerate() {
+                let nested_path = format!("{path}/r{}c{}:t{ni}b{obi}", rcell.row, rcell.col);
+                // A 1×1 frame wrapper is promoted to body width by the real paginator. For ordinary
+                // nesting, the child gets its parent cell's padded text width.
+                let nested_w = if promoted_frame { avail_w } else { cell_text_w };
+                score_cell_table(
+                    rt,
+                    ot,
+                    our,
+                    fonts,
+                    nested_w,
+                    section,
+                    block,
+                    &nested_path,
+                    f,
+                );
+            }
+        }
+    }
 }
 
 #[cfg(feature = "rhwp")]
 pub fn layout_fidelity(bytes: &[u8]) -> Result<LayoutFidelity> {
+    let our = guarded("layout_fidelity/lift", || lift::parse_to_semantic(bytes))?;
+    layout_fidelity_for_doc(bytes, &our)
+}
+
+/// Score a caller-supplied [`SemanticDoc`] against the Hancom/rhwp linesegs in `bytes`.
+///
+/// This is the HWPX parser-seam counterpart of [`layout_fidelity`]: the CLI can parse HWPX through
+/// our production `hwp-hwpx` reader, then inject that IR here. Without this seam,
+/// `layout-check file.hwpx` silently lifted BOTH sides through rhwp and could not detect the exact
+/// own-input drift it claimed to measure.
+#[cfg(feature = "rhwp")]
+pub fn layout_fidelity_for_doc(bytes: &[u8], our: &SemanticDoc) -> Result<LayoutFidelity> {
     use hwp_typeset::{layout_paragraph, NaiveLayout};
 
-    let rdoc = guarded("layout_fidelity/parse_document", || {
+    let rdoc = guarded("layout_fidelity_for_doc/parse_document", || {
         rhwp::parse_document(bytes).map_err(|e| Error::Parse(e.to_string()))
     })?;
-    let our = guarded("layout_fidelity/lift", || lift::parse_to_semantic(bytes))?;
     // With the `shaper` feature, score against the REAL rustybuzz advances (real Latin widths +
     // EM-grid Hangul) — falling back to the per-script approximation when no system font is found.
     // Default build keeps the pure-Rust approximation (no rustybuzz/ttf-parser deps).
@@ -1237,7 +1473,7 @@ pub fn layout_fidelity(bytes: &[u8]) -> Result<LayoutFidelity> {
 
     let mut f = LayoutFidelity {
         oracle_pages: page_count(bytes).unwrap_or(0),
-        our_pages: NaiveLayout.layout(&our, &fonts)?.pages.len(),
+        our_pages: NaiveLayout.layout(our, &fonts)?.pages.len(),
         ..Default::default()
     };
 
@@ -1278,7 +1514,7 @@ pub fn layout_fidelity(bytes: &[u8]) -> Result<LayoutFidelity> {
         for rp in &rsec.paragraphs {
             let Some(op) = our_paras.next() else { break };
             let oracle = rp.line_segs.len().max(1); // an empty paragraph still occupies one line
-            let ours = layout_paragraph(op, &our, body_w, &fonts).len();
+            let ours = layout_paragraph(op, our, body_w, &fonts).len();
             f.paragraphs += 1;
             f.oracle_lines += oracle;
             f.our_lines += ours;
@@ -1287,6 +1523,39 @@ pub fn layout_fidelity(bytes: &[u8]) -> Result<LayoutFidelity> {
             }
             if ours.abs_diff(oracle) <= 1 {
                 f.line_within1 += 1;
+            }
+        }
+    }
+
+    // Cell-lineseg gate: top-level table controls pair with lifted `Block::Table`s in document
+    // order, then `score_cell_table` recurses through cell-nested tables. Unlike the legacy body
+    // score above, a paragraph with NO stored linesegs is reported as "oracle missing" rather than
+    // fabricated into one line — this makes converted HWPX cache stripping visible.
+    for (si, (rsec, osec)) in rdoc.sections.iter().zip(our.sections.iter()).enumerate() {
+        let (_, _, body_w, _) = hwp_typeset::body_box(&osec.page);
+        let rtables: Vec<&rhwp::model::table::Table> = rsec
+            .paragraphs
+            .iter()
+            .flat_map(|p| p.controls.iter())
+            .filter_map(|ctrl| match ctrl {
+                rhwp::model::control::Control::Table(t) => Some(t.as_ref()),
+                _ => None,
+            })
+            .collect();
+        let otables: Vec<(usize, &Table)> = osec
+            .blocks
+            .iter()
+            .enumerate()
+            .filter_map(|(bi, b)| match b {
+                Block::Table(t) => Some((bi, t)),
+                _ => None,
+            })
+            .collect();
+        if rtables.len() != otables.len() {
+            f.cell_structure_mismatches += rtables.len().abs_diff(otables.len());
+        } else {
+            for (rt, (bi, ot)) in rtables.into_iter().zip(otables) {
+                score_cell_table(rt, ot, our, &fonts, body_w, si, bi, "root", &mut f);
             }
         }
     }
@@ -1548,6 +1817,11 @@ pub fn layout_fidelity(_bytes: &[u8]) -> Result<LayoutFidelity> {
 }
 
 #[cfg(not(feature = "rhwp"))]
+pub fn layout_fidelity_for_doc(_bytes: &[u8], _our: &SemanticDoc) -> Result<LayoutFidelity> {
+    Err(Error::CapabilityUnavailable(NOT_WIRED))
+}
+
+#[cfg(not(feature = "rhwp"))]
 pub fn page_count(_bytes: &[u8]) -> Result<u32> {
     Err(Error::CapabilityUnavailable(NOT_WIRED))
 }
@@ -1555,6 +1829,43 @@ pub fn page_count(_bytes: &[u8]) -> Result<u32> {
 #[cfg(not(feature = "rhwp"))]
 pub fn render_page_svg(_bytes: &[u8], _page: u32) -> Result<String> {
     Err(Error::CapabilityUnavailable(NOT_WIRED))
+}
+
+/// Standing table-cell lineseg gate. The three canonical `.hwp` fixtures all carry Hancom-authored
+/// cell linesegs, so these exact baselines catch a regression that the legacy body-only 98.9% gate
+/// cannot see. Run via `cargo test -p hwp-rhwp --features "rhwp shaper"` (part of verify-local).
+#[cfg(all(test, feature = "rhwp", feature = "shaper"))]
+mod cell_lineseg_gate_tests {
+    use super::layout_fidelity;
+
+    fn check(name: &str, expected: (usize, usize, usize, usize, usize, usize)) {
+        let path = format!("{}/../../benchmarks/{name}.hwp", env!("CARGO_MANIFEST_DIR"));
+        let bytes = std::fs::read(path).expect("canonical benchmark");
+        let f = layout_fidelity(&bytes).expect("cell layout fidelity");
+        let got = (
+            f.cell_paragraphs,
+            f.cell_line_exact,
+            f.cell_line_within1,
+            f.our_cell_lines,
+            f.oracle_cell_lines,
+            f.cell_structure_mismatches,
+        );
+        assert_eq!(
+            got, expected,
+            "{name}: (scored, exact, within1, our_lines, oracle_lines, structure_mismatches)"
+        );
+        assert_eq!(
+            f.cell_paragraphs_missing_oracle, 0,
+            "{name}: canonical HWP must retain every cell lineseg oracle"
+        );
+    }
+
+    #[test]
+    fn canonical_hwp_cell_lineseg_baselines() {
+        check("benchmark", (261, 261, 261, 291, 291, 0));
+        check("benchmark1", (839, 826, 839, 969, 978, 0));
+        check("benchmark2", (1059, 1042, 1059, 1185, 1190, 0));
+    }
 }
 
 // ---- Capability traits ----

@@ -62,9 +62,10 @@ cargo build --release -p auto-hwp-cli --features rhwp,shaper,pdf
 ls /tmp/ours*.svg | wc -l   # = 20
 ```
 
-⚠️ **`layout-check <파일>.hwpx` 로는 측정할 수 없다** — `hwp_rhwp::layout_fidelity` 가 양쪽 모두
-rhwp lift 로 읽어서 우리 HWPX 파서를 타지 않는다. 이 축의 지표는 **오라클 PDF 쪽수**이거나
-`hwpx_rhwp_parity.rs` 의 조판 파리티다.
+> 2026-07-28 정정: 당시 `layout-check <파일>.hwpx`는 양쪽을 rhwp lift로 읽었지만, 현재 CLI는 입력을
+> production HWPX parser로 열고 rhwp의 stored lineseg와 대조한다. 따라서 parser drift도 측정한다.
+> 단, 정규화/변환 HWPX가 lineseg cache를 제거했다면 점수를 꾸며내지 않고 missing-oracle로 보고한다.
+> 독립적인 한컴 쪽수/페이지 이미지 판정은 여전히 075 네이티브 오라클 레인이 담당한다.
 
 ## 수용 기준 (안)
 

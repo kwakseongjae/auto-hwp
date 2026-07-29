@@ -153,10 +153,10 @@ enum Cmd {
         #[arg(long, default_value = "verify.html")]
         out: PathBuf,
     },
-    /// Score our own layout engine against Hancom's actual layout: parse <file.hwp>, then compare
-    /// our line-breaking + pagination to the `<hp:lineseg>`s Hancom authored (page count, per-
-    /// paragraph line-count match %). The measurable oracle for the layout engine. Needs
-    /// `--features rhwp`; run on an ORIGINAL .hwp (which carries Hancom's linesegs).
+    /// Score our own layout engine against Hancom's stored `<hp:lineseg>` layout (page count and
+    /// paragraph/cell line-count matches). Original HWP and Hancom-authored HWPX carry this oracle;
+    /// normalized/converted HWPX may not. HWPX enters through the production parser, so parser drift
+    /// is visible too. Needs `--features rhwp`.
     LayoutCheck {
         file: PathBuf,
         /// Diagnostic (issue 020): per-row height audit of ONE table — OUR reserved row heights
@@ -165,6 +165,11 @@ enum Cmd {
         /// SemanticDoc (the same block ordinal the oracle walks). E.g. `--rows 0/6`.
         #[arg(long, value_name = "SECTION/BLOCK")]
         rows: Option<String>,
+        /// Print every non-exact CELL paragraph for one outer table, including Hancom/our line
+        /// counts and both sides' width provenance. Format `<section>/<block>` (e.g. `--cells 0/18`)
+        /// or `all`. The normal summary always includes the document-wide cell-lineseg score.
+        #[arg(long, value_name = "SECTION/BLOCK")]
+        cells: Option<String>,
     },
     /// PIVOT M0: project an HWPX into a JSX(content)+CSS(design) project directory
     /// (project.json, document.jsx, sections/, styles/document.css, assets/). HWPX-only.
@@ -306,7 +311,9 @@ fn run() -> Result<(), String> {
         Cmd::View { file, out } => view(&file, &out)?,
         Cmd::Convert { file, out, verify } => convert(&file, out, verify)?,
         Cmd::VerifyConvert { file, out } => verify_convert(&file, &out)?,
-        Cmd::LayoutCheck { file, rows } => layout_check(&file, rows.as_deref())?,
+        Cmd::LayoutCheck { file, rows, cells } => {
+            layout_check(&file, rows.as_deref(), cells.as_deref())?
+        }
         Cmd::OpenProject { file, out_dir } => open_project(&file, &out_dir)?,
         Cmd::ExportHtml { file, out } => export_html(&file, &out)?,
         Cmd::ExportPdf { file, out } => export_pdf(&file, &out)?,
@@ -1107,12 +1114,24 @@ fn verify_convert(_file: &PathBuf, _out: &PathBuf) -> Result<(), String> {
 }
 
 #[cfg(feature = "rhwp")]
-fn layout_check(file: &PathBuf, rows: Option<&str>) -> Result<(), String> {
+fn layout_check(file: &PathBuf, rows: Option<&str>, cells: Option<&str>) -> Result<(), String> {
     let bytes = read(file)?;
+    if rows.is_some() && cells.is_some() {
+        return Err("use only one of --rows or --cells".into());
+    }
     if let Some(spec) = rows {
         return table_row_audit_print(&bytes, spec);
     }
-    let f = hwp_core::layout_fidelity(&bytes).map_err(|e| e.to_string())?;
+    // HWPX must enter through the SAME production parser as own-render/editor. The old command
+    // lifted both sides through rhwp, so it could report a perfect score while the actual HWPX IR
+    // paginated differently. Binary HWP still uses the ordinary rhwp lift.
+    let production_hwpx = hwp_core::Engine::detect(&bytes) == SourceFormat::Hwpx;
+    let f = if production_hwpx {
+        let doc = hwp_core::Engine::open(&bytes).map_err(|e| e.to_string())?;
+        hwp_rhwp::layout_fidelity_for_doc(&bytes, &doc).map_err(|e| e.to_string())?
+    } else {
+        hwp_core::layout_fidelity(&bytes).map_err(|e| e.to_string())?
+    };
     let pct = |n: usize| {
         if f.paragraphs == 0 {
             0.0
@@ -1121,8 +1140,13 @@ fn layout_check(file: &PathBuf, rows: Option<&str>) -> Result<(), String> {
         }
     };
     println!(
-        "레이아웃 엔진 대조 (vs 한컴 실제 레이아웃): {}",
-        file.display()
+        "레이아웃 엔진 대조 ({} vs 한컴 실제 레이아웃): {}",
+        if production_hwpx {
+            "HWPX 자체 파서+자체 조판"
+        } else {
+            "자체 조판"
+        },
+        file.display(),
     );
     println!(
         "  쪽수      우리 {:>4}  ·  한컴(rhwp) {:>4}  ({})",
@@ -1159,6 +1183,109 @@ fn layout_check(file: &PathBuf, rows: Option<&str>) -> Result<(), String> {
         f.line_within1,
         pct(f.line_within1)
     );
+    let cell_pct = |n: usize| {
+        if f.cell_paragraphs == 0 {
+            0.0
+        } else {
+            100.0 * n as f64 / f.cell_paragraphs as f64
+        }
+    };
+    println!(
+        "  셀 문단    {} 개 대조 (재귀 표 {} · oracle 없음 {} · 구조 불일치 {})",
+        f.cell_paragraphs,
+        f.cell_tables,
+        f.cell_paragraphs_missing_oracle,
+        f.cell_structure_mismatches
+    );
+    println!(
+        "    셀 줄수 정확 일치 {:>5} ({:.1}%) · ±1 이내 {:>5} ({:.1}%)",
+        f.cell_line_exact,
+        cell_pct(f.cell_line_exact),
+        f.cell_line_within1,
+        cell_pct(f.cell_line_within1)
+    );
+    println!(
+        "    셀 총 줄수       우리 {:>6} · 한컴 {:>6} (비율 {:.3})",
+        f.our_cell_lines,
+        f.oracle_cell_lines,
+        if f.oracle_cell_lines == 0 {
+            0.0
+        } else {
+            f.our_cell_lines as f64 / f.oracle_cell_lines as f64
+        }
+    );
+    if f.cell_paragraphs == 0 && f.cell_paragraphs_seen > 0 {
+        println!(
+            "    ⚠ 셀 lineseg oracle 없음: 변환/정규화 HWPX가 레이아웃 캐시를 제거했을 수 있음"
+        );
+    }
+    if let Some(spec) = cells {
+        let filter = if spec.eq_ignore_ascii_case("all") {
+            None
+        } else {
+            let (s, b) = spec
+                .split_once('/')
+                .ok_or_else(|| format!("--cells expects <section>/<block> or all, got {spec:?}"))?;
+            let section: usize = s
+                .trim()
+                .parse()
+                .map_err(|_| format!("bad section in {spec:?}"))?;
+            let block: usize = b
+                .trim()
+                .parse()
+                .map_err(|_| format!("bad block in {spec:?}"))?;
+            Some((section, block))
+        };
+        match filter {
+            Some((section, block)) => println!(
+                "  셀 줄수 불일치 상세: 섹션 {section}/블록 {block} (폭 HWPUNIT · root=바깥 표)"
+            ),
+            None => println!("  셀 줄수 불일치 상세: 전체 표 (폭 HWPUNIT · root=바깥 표)"),
+        }
+        println!(
+            "    {:>5} {:>5} {:>11} {:>4} {:>4} {:>4} | {:>4} {:>4} | {:>7} {:>7} {:>7} {:>7} {:>7} | 텍스트",
+            "구역",
+            "블록",
+            "표경로",
+            "행",
+            "열",
+            "문단",
+            "우리",
+            "한컴",
+            "셀폭",
+            "우리셀폭",
+            "우리wrap",
+            "한컴seg",
+            "L/R패딩"
+        );
+        let mut shown = 0usize;
+        for m in f
+            .cell_mismatches
+            .iter()
+            .filter(|m| filter.is_none_or(|(s, b)| m.section == s && m.block == b))
+        {
+            println!(
+                "    {:>5} {:>5} {:>11} {:>4} {:>4} {:>4} | {:>4} {:>4} | {:>7.0} {:>7.0} {:>7.0} {:>7.0} {:>3.0}/{:<3.0} | {}",
+                m.section,
+                m.block,
+                m.table_path,
+                m.row,
+                m.col,
+                m.paragraph,
+                m.our_lines,
+                m.oracle_lines,
+                m.source_cell_width,
+                m.our_cell_text_width,
+                m.our_wrap_width,
+                m.oracle_segment_width,
+                m.source_pad_left,
+                m.source_pad_right,
+                m.text
+            );
+            shown += 1;
+        }
+        println!("    → {shown}건");
+    }
     #[cfg(feature = "shaper")]
     println!(
         "  → 실제 셰이퍼(rustybuzz) 줄바꿈 충실도: 전각=EM 격자, 반각은 실제 폰트 advance. \
@@ -1217,7 +1344,7 @@ fn table_row_audit_print(bytes: &[u8], spec: &str) -> Result<(), String> {
 }
 
 #[cfg(not(feature = "rhwp"))]
-fn layout_check(_file: &PathBuf, _rows: Option<&str>) -> Result<(), String> {
+fn layout_check(_file: &PathBuf, _rows: Option<&str>, _cells: Option<&str>) -> Result<(), String> {
     Err("`layout-check` needs the rhwp bootstrap (한컴 linesegs 파싱): build with `--features rhwp`".into())
 }
 

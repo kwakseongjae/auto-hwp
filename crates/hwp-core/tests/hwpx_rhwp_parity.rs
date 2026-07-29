@@ -173,11 +173,10 @@ fn floor_rows_to_stored(blocks: &mut [Block]) {
 /// **조판 파리티** — 같은 `.hwpx` 를 우리 파서로 읽어 조판한 결과가 rhwp lift 로 읽어 조판한
 /// 결과와 (알려진 정책 차이 하나를 빼고) 같아야 한다.
 ///
-/// 왜 별도 오라클인가: `auto-hwp layout-check <파일>.hwpx` 는 우리 HWPX 파서를 **타지 않는다**
-/// — `layout_fidelity` 가 양쪽 모두 `hwp_rhwp::lift::parse_to_semantic` 으로 읽기 때문이다
-/// (게다가 변환된 hwpx 는 `<hp:linesegarray>` 를 잃어서 오라클 줄수가 "문단당 1줄"로 퇴화한다).
-/// 그래서 HWPX 파서의 조판 충실도는 저 CLI 수치로는 절대 측정되지 않는다. 이 테스트가 그 자리를
-/// 메운다: rhwp lift 를 정답지로 두고 **엔진을 고정한 채 파서만 바꿔** 차이를 본다.
+/// 왜 별도 오라클인가: CLI `layout-check <파일>.hwpx`도 이제 production HWPX parser를 타지만,
+/// 한컴-authored lineseg cache가 있어야 줄수 점수를 낼 수 있다. 이 테스트는 cache 유무와 무관하게
+/// 우리 HWPX parser와 rhwp lift의 구조/조판 파리티를 고정한다: rhwp lift를 정답지로 두고
+/// **엔진을 고정한 채 파서만 바꿔** 차이를 본다.
 ///
 /// 잠그는 것:
 /// 1. **총 줄수 완전 일치** — 표 앵커 문단(`is_table_anchor`)을 안 세우면 표마다 빈 줄이 1개씩

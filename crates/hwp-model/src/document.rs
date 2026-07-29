@@ -530,8 +530,9 @@ pub struct Cell {
     /// Cell-OWN inner padding `[left, right, top, bottom]` (HWPUNIT) — `Some` ONLY when the cell
     /// declares its own margins (HWP list_attr bit 16, `apply_inner_margin`; HWPX `hasMargin="1"`).
     /// `None` = inherit the table default ([`Table::padding`], else the serializer's legacy 510/141).
-    /// Captured for faithful HWPX re-emission (issue 054, F2); the typesetter keeps its constant
-    /// `CELL_PAD` (the 020-calibrated reserve) and does not consume this yet.
+    /// Captured for faithful HWPX re-emission (issue 054, F2). The typesetter consumes the horizontal
+    /// pair for line breaking, glyph placement, and caret geometry; vertical padding still follows
+    /// the calibrated row-height reserve.
     pub padding: Option<[HwpUnit; 4]>,
     /// 이 셀이 **실제로 저장하고 있는 가로 폭**(HWPUNIT, HWP `cell.width` / HWPX `<hp:cellSz width>`).
     /// `None` = 알 수 없음(합성/삽입 셀) → 조판기가 열 격자([`Table::col_widths`])로 근사한다.

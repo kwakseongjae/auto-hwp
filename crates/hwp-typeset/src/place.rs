@@ -935,8 +935,9 @@ fn flush_fragment(
                 ancestors: Vec::new(),
                 self_block: block,
             };
+            let (pad_left, pad_right) = crate::cell_horizontal_padding(t, c);
             place_cell_content(
-                pg, &c.blocks, cx, cy, cw, ch, doc, fonts, &ctx, c.row, c.col,
+                pg, &c.blocks, cx, cy, cw, ch, pad_left, pad_right, doc, fonts, &ctx, c.row, c.col,
             );
         }
     }
@@ -1180,7 +1181,10 @@ fn place_nested_table(
                 });
             }
         }
-        place_cell_content(pg, &c.blocks, cx, cy, cw, ch, doc, fonts, ctx, c.row, c.col);
+        let (pad_left, pad_right) = crate::cell_horizontal_padding(t, c);
+        place_cell_content(
+            pg, &c.blocks, cx, cy, cw, ch, pad_left, pad_right, doc, fonts, ctx, c.row, c.col,
+        );
     }
     // Attach the per-cell rects to the nested fragment we pushed (by its pinned index — the recursion may
     // have appended deeper nested `PlacedTable`s after it).
@@ -1199,13 +1203,15 @@ fn place_cell_content(
     cy: f64,
     cw: f64,
     ch: f64,
+    pad_left: f64,
+    pad_right: f64,
     doc: &SemanticDoc,
     fonts: &dyn FontMetricsProvider,
     ctx: &NestCtx,
     cell_row: usize,
     cell_col: usize,
 ) {
-    let textw = (cw - 2.0 * CELL_PAD_X).max(1.0);
+    let textw = (cw - pad_left - pad_right).max(1.0);
     // Total content height → start offset for vertical centering within the cell box.
     let content_h: f64 = blocks
         .iter()
@@ -1234,7 +1240,7 @@ fn place_cell_content(
                     ancestors: ctx.cell_path(cell_row, cell_col),
                     self_block: bi,
                 };
-                place_nested_table(pg, nt, cx + CELL_PAD_X, vy, textw, doc, fonts, &child);
+                place_nested_table(pg, nt, cx + pad_left, vy, textw, doc, fonts, &child);
             }
             vy += block_height_for_place(b, doc, textw, fonts);
             continue;
@@ -1255,7 +1261,7 @@ fn place_cell_content(
         // reserved this space — drawing is pagination-neutral (the vy advance below is unchanged).
         if let Some((w, h, bin_ref, svg)) = paragraph_object(p) {
             pg.images.push(PlacedImage {
-                x: cx + CELL_PAD_X,
+                x: cx + pad_left,
                 y: para_top,
                 w,
                 h,
@@ -1276,7 +1282,7 @@ fn place_cell_content(
                 - ls.horz_size)
                 .max(0.0);
             let x0 = cx
-                + CELL_PAD_X
+                + pad_left
                 + line_indent
                 + match align {
                     HorizontalAlign::Right => slack,
@@ -1400,11 +1406,13 @@ fn walk_cell_lines(
     cy: f64,
     cw: f64,
     ch: f64,
+    pad_left: f64,
+    pad_right: f64,
     doc: &SemanticDoc,
     fonts: &dyn FontMetricsProvider,
     on_line: &mut dyn FnMut(&CellLineGeom) -> bool,
 ) {
-    let textw = (cw - 2.0 * CELL_PAD_X).max(1.0);
+    let textw = (cw - pad_left - pad_right).max(1.0);
     let content_h: f64 = blocks
         .iter()
         .map(|b| block_height_for_place(b, doc, textw, fonts))
@@ -1453,7 +1461,7 @@ fn walk_cell_lines(
                 - ls.horz_size)
                 .max(0.0);
             let x0 = cx
-                + CELL_PAD_X
+                + pad_left
                 + line_indent
                 + match align {
                     HorizontalAlign::Right => slack,
@@ -1535,14 +1543,16 @@ fn model_cell(
     block: usize,
     row: usize,
     col: usize,
-) -> Option<&Cell> {
+) -> Option<(&Table, &Cell)> {
     let Some(Block::Table(t)) = doc.sections.get(section).and_then(|s| s.blocks.get(block)) else {
         return None;
     };
     let t = t.edit_target();
-    t.cells
+    let cell = t
+        .cells
         .iter()
-        .find(|c| c.active && c.row == row && c.col == col)
+        .find(|c| c.active && c.row == row && c.col == col)?;
+    Some((t, cell))
 }
 
 /// Cell-addressed caret rect (issue 053): the caret geometry at char `offset` of the `para`-th
@@ -1563,7 +1573,8 @@ pub fn cell_caret_rect(
     offset: usize,
 ) -> Option<CellCaretRect> {
     let (page, pc) = owning_cell_rect(placed, section, block, row, col)?;
-    let cell = model_cell(doc, section, block, row, col)?;
+    let (table, cell) = model_cell(doc, section, block, row, col)?;
+    let (pad_left, pad_right) = crate::cell_horizontal_padding(table, cell);
     let mut out: Option<CellCaretRect> = None;
     walk_cell_lines(
         &cell.blocks,
@@ -1571,6 +1582,8 @@ pub fn cell_caret_rect(
         pc.y,
         pc.w,
         pc.h,
+        pad_left,
+        pad_right,
         doc,
         fonts,
         &mut |lg| {
@@ -1636,57 +1649,69 @@ pub fn cell_text_hit(
         return None; // continuation fragment — the text (and its caret) lives on the owning page
     }
     let (section, block) = (t.section, t.block);
-    let cell = model_cell(doc, section, block, pc.row, pc.col)?;
+    let (table, cell) = model_cell(doc, section, block, pc.row, pc.col)?;
+    let (pad_left, pad_right) = crate::cell_horizontal_padding(table, cell);
     let (row, col, cx, cy, cw, chh) = (pc.row, pc.col, pc.x, pc.y, pc.w, pc.h);
     let mut best: Option<(f64, CellTextHit)> = None;
-    walk_cell_lines(&cell.blocks, cx, cy, cw, chh, doc, fonts, &mut |lg| {
-        // Vertical distance from the click to this line's band (0 inside it) — nearest line wins,
-        // first (upper) line on a tie.
-        let vd = if y < lg.top {
-            lg.top - y
-        } else if y > lg.top + lg.height {
-            y - (lg.top + lg.height)
-        } else {
-            0.0
-        };
-        if best.as_ref().map(|(d, _)| vd < *d).unwrap_or(true) {
-            // Nearest char boundary: advance while the click is past the glyph's midpoint. A forced
-            // line break ('\n') caps the walk — the caret never lands PAST it (that position IS the
-            // segment end; the next segment starts on the next line).
-            let mut cxp = lg.x0;
-            let mut off = lg.line_start;
-            for (i, &a) in lg.advances.iter().enumerate() {
-                if lg.chars[i] == '\n' {
-                    break;
+    walk_cell_lines(
+        &cell.blocks,
+        cx,
+        cy,
+        cw,
+        chh,
+        pad_left,
+        pad_right,
+        doc,
+        fonts,
+        &mut |lg| {
+            // Vertical distance from the click to this line's band (0 inside it) — nearest line wins,
+            // first (upper) line on a tie.
+            let vd = if y < lg.top {
+                lg.top - y
+            } else if y > lg.top + lg.height {
+                y - (lg.top + lg.height)
+            } else {
+                0.0
+            };
+            if best.as_ref().map(|(d, _)| vd < *d).unwrap_or(true) {
+                // Nearest char boundary: advance while the click is past the glyph's midpoint. A forced
+                // line break ('\n') caps the walk — the caret never lands PAST it (that position IS the
+                // segment end; the next segment starts on the next line).
+                let mut cxp = lg.x0;
+                let mut off = lg.line_start;
+                for (i, &a) in lg.advances.iter().enumerate() {
+                    if lg.chars[i] == '\n' {
+                        break;
+                    }
+                    if x > cxp + a / 2.0 {
+                        cxp += a;
+                        off += 1;
+                    } else {
+                        break;
+                    }
                 }
-                if x > cxp + a / 2.0 {
-                    cxp += a;
-                    off += 1;
-                } else {
-                    break;
-                }
-            }
-            best = Some((
-                vd,
-                CellTextHit {
-                    section,
-                    block,
-                    row,
-                    col,
-                    para: lg.para,
-                    offset: off,
-                    para_len: lg.para_len,
-                    caret: CellCaretRect {
-                        page,
-                        x: cxp,
-                        top: lg.top,
-                        height: lg.height,
+                best = Some((
+                    vd,
+                    CellTextHit {
+                        section,
+                        block,
+                        row,
+                        col,
+                        para: lg.para,
+                        offset: off,
+                        para_len: lg.para_len,
+                        caret: CellCaretRect {
+                            page,
+                            x: cxp,
+                            top: lg.top,
+                            height: lg.height,
+                        },
                     },
-                },
-            ));
-        }
-        false
-    });
+                ));
+            }
+            false
+        },
+    );
     best.map(|(_, h)| h)
 }
 

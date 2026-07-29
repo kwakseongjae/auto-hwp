@@ -438,7 +438,7 @@ pub(crate) fn cell_paragraph_height(
     let sb = ps.map(|s| s.space_before).unwrap_or(0).max(0) as f64;
     let sa = ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;
     let ratio = line_spacing_ratio(p, doc);
-    let lines = layout_paragraph(p, doc, width, fonts);
+    let lines = layout_cell_paragraph(p, doc, width, fonts);
     let text: f64 = lines.iter().map(|l| l.vert_size * ratio).sum();
     let last_leading = lines
         .last()
@@ -471,6 +471,53 @@ pub fn table_height(
     table_row_heights(t, avail_w, doc, fonts).iter().sum()
 }
 
+/// Effective left/right cell inset (HWPUNIT). A parsed cell with its own `padding` wins; otherwise
+/// the table-level `<hp:inMargin>` applies. Inserted/legacy tables with neither keep the calibrated
+/// fallback [`crate::place::CELL_PAD_X`] on each side.
+pub fn cell_horizontal_padding(t: &Table, c: &Cell) -> (f64, f64) {
+    match c.padding.as_ref().or(t.padding.as_ref()) {
+        Some(p) => (p[0].max(0) as f64, p[1].max(0) as f64),
+        None => (crate::place::CELL_PAD_X, crate::place::CELL_PAD_X),
+    }
+}
+
+/// The horizontal width at which cell `cell_idx` is actually line-broken (HWPUNIT).
+///
+/// This is intentionally a public diagnostic seam: the layout-fidelity oracle in `hwp-rhwp`
+/// must score cell paragraphs at the SAME width the own renderer uses. It therefore shares the
+/// ragged-row cell-box calculation from issue 074 and the effective horizontal inset from
+/// [`cell_horizontal_padding`], rather than rebuilding either rule in the oracle.
+pub fn table_cell_text_width(t: &Table, avail_w: f64, cell_idx: usize) -> f64 {
+    if cell_idx >= t.cells.len() || t.cols == 0 {
+        return 1.0;
+    }
+    let xs = crate::place::column_offsets(t, avail_w);
+    let boxes = crate::place::cell_boxes(t, avail_w);
+    let (_, cw) = crate::place::cell_box_at(t, &boxes, &xs, cell_idx);
+    let (left, right) = cell_horizontal_padding(t, &t.cells[cell_idx]);
+    (cw - left - right).max(1.0)
+}
+
+/// Line-break one paragraph inside a table cell at the same usable width as
+/// `place::place_cell_content`.
+///
+/// `cell_text_w` is the value returned by [`table_cell_text_width`]. Paragraph left/right margins
+/// further shrink the wrapping box; this mirrors `place::indent_of` (the positive first-line indent
+/// shifts the line origin but, for backward compatibility, does not change the greedy break width).
+/// Keeping this helper beside [`layout_paragraph`] gives the cell-lineseg oracle a single,
+/// renderer-identical width contract.
+pub fn layout_cell_paragraph(
+    p: &Paragraph,
+    doc: &SemanticDoc,
+    cell_text_w: f64,
+    fonts: &dyn FontMetricsProvider,
+) -> Vec<LineSeg> {
+    let ps = doc.para_shapes.get(p.para_shape);
+    let left = ps.map(|s| s.left_margin).unwrap_or(0).max(0) as f64;
+    let right = ps.map(|s| s.right_margin).unwrap_or(0).max(0) as f64;
+    layout_paragraph(p, doc, (cell_text_w - left - right).max(1.0), fonts)
+}
+
 /// Per-row heights (HWPUNIT) — the SINGLE sizing truth shared by the pagination reserve
 /// ([`table_height`] = their sum), the row-level page split in [`NaiveLayout`], and the cell placer
 /// ([`crate::place`] uses an identical computation). Each row = max content height of its cells
@@ -491,17 +538,14 @@ pub(crate) fn table_row_heights(
     if t.rows == 0 {
         return Vec::new();
     }
-    let xs = crate::place::column_offsets(t, avail_w);
-    // 셀 실폭 상자(이슈 074) — place::row_heights 와 **같은 함수**를 써야 LOCKSTEP 이 유지된다.
-    let boxes = crate::place::cell_boxes(t, avail_w);
     let mut row_h = vec![0.0f64; t.rows];
     // 셀 하나의 예약 높이 (내용 + 세로 안쪽 여백).
     let need = |i: usize| -> f64 {
         let c = &t.cells[i];
-        let cw = crate::place::cell_box_at(t, &boxes, &xs, i).1.max(1.0);
-        // LOCKSTEP with place::row_heights: reserve at the padded text width (cw - 2*CELL_PAD_X) the cell
-        // placer draws glyphs at, so the pagination reserve equals the drawn height (no row under-reserve).
-        let tw = (cw - 2.0 * crate::place::CELL_PAD_X).max(1.0);
+        // LOCKSTEP with the cell placer: stored cell/table inMargin and ragged-row geometry determine
+        // the exact text width. Using the old fixed 80+80 inset made 510+510-margin cells up to
+        // 860 HWPUNIT too wide, hiding Hancom-authored wraps from the row reservation.
+        let tw = table_cell_text_width(t, avail_w, i);
         c.blocks
             .iter()
             .map(|b| block_height(b, doc, tw, fonts))
@@ -620,7 +664,7 @@ fn cell_term_breakdown(
                 if first_ratio.is_none() {
                     first_ratio = Some(ratio);
                 }
-                let lines = layout_paragraph(p, doc, tw, fonts);
+                let lines = layout_cell_paragraph(p, doc, tw, fonts);
                 let raw: f64 = lines.iter().map(|l| l.vert_size).sum();
                 let spaced: f64 = lines.iter().map(|l| l.vert_size * ratio).sum();
                 let last_leading = lines
@@ -658,17 +702,14 @@ pub fn row_term_breakdown(
     if t.rows == 0 {
         return Vec::new();
     }
-    let xs = crate::place::column_offsets(t, avail_w);
     let heights = table_row_heights(t, avail_w, doc, fonts);
     let mut per_row: Vec<(f64, RowTermBreakdown)> =
         vec![(0.0, RowTermBreakdown::default()); t.rows];
-    for c in &t.cells {
+    for (i, c) in t.cells.iter().enumerate() {
         if !c.active {
             continue;
         }
-        let col_end = (c.col + c.col_span.max(1)).min(t.cols);
-        let cw = (xs[col_end] - xs[c.col.min(t.cols - 1)]).max(1.0);
-        let tw = (cw - 2.0 * crate::place::CELL_PAD_X).max(1.0);
+        let tw = table_cell_text_width(t, avail_w, i);
         let bd = cell_term_breakdown(c, tw, doc, fonts);
         let content = bd.spaced + bd.space_ba + bd.cell_pad;
         let span = c.row_span.max(1);
