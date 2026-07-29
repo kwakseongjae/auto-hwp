@@ -239,10 +239,11 @@ path traversal(호스트 파일 노출) 벡터이므로 **여기 나열된 필�
 | `whole_word` | bool | 온전한 단어 | ● |
 | `all` | bool | `true`=전체, `false`=첫 매치만 | ● |
 
-### 6.4 WYSIWYG 캐럿 지오메트리 (rhwp / 라이브 노드 필요)
+### 6.4 WYSIWYG 캐럿 지오메트리
 
-> ⚠️ 단위: `HitTest`의 `x`/`y`와 `CaretRect`의 `x`/`top`/`height`는 **페이지 공간 px
-> (미스케일)**. 프런트가 SVG를 확대하면 같은 배율로 스케일해야 한다(공통 계약 §4.5).
+> ⚠️ 단위: 모든 hit/caret 좌표는 **페이지 공간 px(미스케일)**. 프런트가 SVG를 확대하면 같은
+> 배율로 스케일해야 한다(공통 계약 §4.5). 레거시 `HitTest`/`CaretRect`는 rhwp 라이브 NodeId,
+> `*Cell`/`*Body` 쌍은 우리 `place_doc` 지오메트리를 정본으로 쓴다.
 
 #### `HitTest` — 클릭 좌표를 편집 대상으로 매핑
 ```json
@@ -297,6 +298,39 @@ para, offset, para_len, caret:{page,x,top,height}}` (row/col 모델-전역, `par
 페이지 — 분할 표는 셀의 top row를 그린 페이지). **past-end `offset`은 문단 끝으로 클램프**되어
 사각형을 돌려준다(`CaretRect` 계약과 동일 — null을 "문단 끝"으로 읽지 말 것). 주소 해소 불가(없는
 표/셀/문단)는 `caret:null`(018). 읽기 전용 — undo 단위/리비전 범프 없음.
+
+#### `HitTestBody` — 클릭 좌표를 **본문 문단 캐럿 대상**으로 매핑
+```json
+{ "intent": "HitTestBody", "page": 0, "x": 120.0, "y": 90.0 }
+```
+| 필드 | 타입 | 단위/값 | 필수 |
+|------|------|---------|------|
+| `page` | integer | 0-based 페이지 | ● |
+| `x` | number | 페이지 px | ● |
+| `y` | number | 페이지 px | ● |
+
+결과 `{kind:"hitBody", hit}` — `hit`은 `{section, block, offset, para_len,
+caret:{page,x,y,w,h}}`. 지오메트리는 화면과 같은 `PlacedGlyph`/`LineSeg`를 사용하며 SVG `<text>`
+markup이나 rhwp 좌표에 의존하지 않는다. 클릭은 편집 가능한 top-level simple paragraph의 실제 배치
+band 안에서만 해소되고, 여백·표·그림·구조 문단은 `hit:null`이다(018). wrap/page 경계의 같은
+주소에는 두 시각 위치가 있을 수 있으므로 **`hit.caret`은 클릭한 queried-page upstream 줄에 남는
+visual affinity**를 쓴다. 반면 아래 `CaretRectBody`는 주소의 canonical downstream 위치를 반환한다.
+
+#### `CaretRectBody` — 본문 주소(+offset)를 zero-width 캐럿으로
+```json
+{ "intent": "CaretRectBody", "page": 0, "section": 0, "block": 0, "offset": 1 }
+```
+| 필드 | 타입 | 단위/값 | 필수 |
+|------|------|---------|------|
+| `page` | integer | 캐럿이 소유해야 할 0-based 페이지 | ● |
+| `section` | integer | 구역 인덱스 | ● |
+| `block` | integer | top-level 문단 블록 인덱스 | ● |
+| `offset` | integer | Unicode scalar 기준 문단 내 문자 인덱스 | ● |
+
+결과 `{kind:"caretBody", caret}` — `caret`은 `{page,x,y,w:0,h}`. `w:0`은 문서 삽입 경계이며
+호스트가 실제 device-pixel stroke 폭을 정한다. **past-end는 문단 끝으로 클램프**한다. 한 문단이 여러
+페이지에 나뉘면 offset을 소유한 페이지에서만 rect를 돌려주며, 다른 `page`나 알 수 없는 주소는
+`caret:null`이다. 두 Body Intent 모두 읽기 전용이고 AI 편집 화이트리스트에는 없다.
 
 #### `InsertText` — 캐럿 위치에 문자 삽입(1 undo 단위)
 ```json

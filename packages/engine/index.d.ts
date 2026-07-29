@@ -111,6 +111,29 @@ export interface CellTextHit {
   caret: CellCaretRect;
 }
 
+/** Body-paragraph caret rect — own-render px. `w` is always 0 (a document insertion boundary); the
+ *  host chooses the visible device-pixel stroke. `page` disambiguates a paragraph split across pages.
+ *  Mirrors hwp-session `BodyCaretDto`. */
+export interface BodyCaretRect {
+  page: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** A click resolved to an editable top-level BODY paragraph. `offset`/`para_len` are Unicode-scalar
+ *  counts in the same model text space `SetParagraphRuns` edits. `caret` has PAGE-LOCAL visual
+ *  affinity, so a wrapped line-end click stays on the clicked upstream line; `bodyCaretRect` uses
+ *  canonical downstream affinity for that same address boundary. */
+export interface BodyTextHit {
+  section: number;
+  block: number;
+  offset: number;
+  para_len: number;
+  caret: BodyCaretRect;
+}
+
 /** One heading in the document outline (issue 046): where it lives in the model (`section`/`block`), its
  *  `level` (1 = □/■ section label, 2 = numbered section-band table), the heading `text`, and the 0-based
  *  `page` it starts on. Mirrors hwp-session `OutlineItem`. */
@@ -224,7 +247,9 @@ export type Outcome =
   | { kind: 'caret'; caret: unknown | null }
   | { kind: 'edited'; pages: number }
   | { kind: 'hitCell'; hit: CellTextHit | null }
-  | { kind: 'caretCell'; caret: CellCaretRect | null };
+  | { kind: 'caretCell'; caret: CellCaretRect | null }
+  | { kind: 'hitBody'; hit: BodyTextHit | null }
+  | { kind: 'caretBody'; caret: BodyCaretRect | null };
 
 /** An engine error carries a machine-readable `code` alongside the message. */
 export interface EngineError extends Error {
@@ -282,6 +307,14 @@ export class HwpDoc {
    *  the OWNING page, or `null` when the address doesn't resolve (018). A PAST-END `offset` CLAMPS to
    *  the paragraph end (a rect, never null). */
   cellCaretRect(section: number, block: number, row: number, col: number, para: number, offset: number): CellCaretRect | null;
+  /** Body-paragraph caret, hit half: resolves a page-local own-render px click to the editable
+   *  `(section, block, offset)` target, or `null` outside a body paragraph (018). Geometry consumes the
+   *  cached PlacedGlyph stream directly; it does not parse SVG markup or use rhwp coordinates. */
+  bodyTextHit(page: number, x: number, y: number): BodyTextHit | null;
+  /** Body-paragraph caret, geometry half: zero-width own-render px rect for `offset` in
+   *  `(section, block)` on `page`. Past-end clamps; a split paragraph queried on the wrong page is
+   *  `null` (018). */
+  bodyCaretRect(page: number, section: number, block: number, offset: number): BodyCaretRect | null;
   /** Marquee select: every top-level block whose band intersects the own-render px rect
    *  `(x0,y0)-(x1,y1)` (corners in any order). Empty array on a miss (never null). */
   blocksInRect(page: number, x0: number, y0: number, x1: number, y1: number): BlockHit[];

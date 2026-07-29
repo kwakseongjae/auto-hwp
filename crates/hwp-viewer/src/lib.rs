@@ -1657,6 +1657,14 @@ fn outcome_to_json(o: &Outcome) -> Value {
         Outcome::CaretCell(caret) => {
             json!({ "kind": "caretCell", "caret": serde_json::to_value(caret).unwrap_or(Value::Null) })
         }
+        // Body-paragraph caret (own-render PlacedGlyph authority) — keep the Tauri Outcome surface
+        // byte-shaped like hwp-wasm so editor-core/host adapters do not branch by shell.
+        Outcome::HitBody(hit) => {
+            json!({ "kind": "hitBody", "hit": serde_json::to_value(hit).unwrap_or(Value::Null) })
+        }
+        Outcome::CaretBody(caret) => {
+            json!({ "kind": "caretBody", "caret": serde_json::to_value(caret).unwrap_or(Value::Null) })
+        }
     }
 }
 

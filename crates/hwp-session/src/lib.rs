@@ -491,7 +491,12 @@ pub fn image_bbox_placed(
     let k = HWPUNIT_PER_PX;
     pg.images
         .iter()
-        .find(|im| im.section == section && im.block == block && !im.bin_ref.is_empty())
+        .find(|im| {
+            !im.is_background
+                && im.section == section
+                && im.block == block
+                && !im.bin_ref.is_empty()
+        })
         .map(|im| ImageBoxDto {
             x: im.x / k,
             y: im.y / k,
@@ -516,7 +521,7 @@ pub fn image_at_placed(placed: &PlacedDoc, page: u32, x: f64, y: f64) -> Option<
                                  // Last match wins → topmost in paint order (later images draw over earlier ones).
     pg.images
         .iter()
-        .filter(|im| !im.bin_ref.is_empty())
+        .filter(|im| !im.is_background && !im.bin_ref.is_empty())
         .rfind(|im| x >= im.x && x <= im.x + im.w && y >= im.y && y <= im.y + im.h)
         .map(|im| ImageBoxDto {
             x: im.x / k,
@@ -1250,6 +1255,451 @@ pub fn cell_text_hit_placed(
             para_len: h.para_len,
             caret: cell_caret_dto(h.caret),
         }
+    })
+}
+
+// ---- Body-paragraph caret (own-render PlacedGlyph authority) ----------------------------------
+
+/// Body-paragraph caret rect in own-render PX. `w == 0`: the engine defines the DOCUMENT caret as a
+/// zero-width insertion boundary; the host chooses its device-pixel stroke width. `page` is included
+/// because one top-level paragraph can split across pages. `y`/`h` are the line box (not the glyph
+/// ink box), matching the own typesetter's `LineSeg`.
+#[derive(serde::Serialize)]
+pub struct BodyCaretDto {
+    pub page: u32,
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+/// A PAGE-LOCAL click resolved to an editable top-level body paragraph. `offset` and `para_len` are
+/// Unicode-scalar counts in the SAME model text space `SetParagraphRuns` edits. `caret` is the
+/// PAGE-LOCAL visual-affinity result, included like [`CellTextHitDto`] so a click needs no second
+/// layout query. At a wrapped line end it remains on the clicked upstream line; the address-based
+/// [`body_caret_rect`] uses canonical downstream affinity for that same boundary.
+#[derive(serde::Serialize)]
+pub struct BodyTextHitDto {
+    pub section: usize,
+    pub block: usize,
+    pub offset: usize,
+    pub para_len: usize,
+    pub caret: BodyCaretDto,
+}
+
+#[derive(Clone, Debug)]
+struct BodyCharGeom {
+    offset: usize,
+    x: f64,
+    advance: f64,
+}
+
+#[derive(Clone, Debug)]
+struct BodyLineGeom {
+    page: usize,
+    start: usize,
+    end: usize,
+    x0: f64,
+    end_x: f64,
+    top: f64,
+    height: f64,
+    chars: Vec<BodyCharGeom>,
+}
+
+#[derive(Debug)]
+struct BodyParagraphGeom {
+    section: usize,
+    block: usize,
+    para_len: usize,
+    lines: Vec<BodyLineGeom>,
+}
+
+fn body_model_paragraph(
+    doc: &SemanticDoc,
+    section: usize,
+    block: usize,
+) -> Option<&hwp_model::prelude::Paragraph> {
+    use hwp_model::prelude::Block;
+    if !model_para_editable(doc, section, block) {
+        return None;
+    }
+    match doc.sections.get(section)?.blocks.get(block)? {
+        Block::Paragraph(p) if !p.is_table_anchor => Some(p),
+        _ => None,
+    }
+}
+
+/// Flatten a simple paragraph into the model chars the edit ops address, retaining each char's run
+/// shape so the fallback advance can be obtained from the PUBLIC `layout_paragraph` truth without
+/// copying its private script/old-Hangul/spacing rules into this facade.
+fn body_model_chars(p: &hwp_model::prelude::Paragraph) -> Vec<(char, usize)> {
+    use hwp_model::prelude::Inline;
+    let mut out = Vec::new();
+    for run in &p.runs {
+        for inline in &run.content {
+            if let Inline::Text(text) = inline {
+                out.extend(text.chars().map(|ch| (ch, run.char_shape)));
+            }
+        }
+    }
+    out
+}
+
+fn body_line_spacing_ratio(p: &hwp_model::prelude::Paragraph, doc: &SemanticDoc) -> f64 {
+    use hwp_model::prelude::LineSpacingType;
+    match doc.para_shapes.get(p.para_shape) {
+        Some(s) if s.line_spacing_type == LineSpacingType::Percent && s.line_spacing_value > 0 => {
+            s.line_spacing_value as f64 / 100.0
+        }
+        _ => 1.6,
+    }
+}
+
+/// Exact one-char advance from the existing public typesetter. This deliberately avoids a second
+/// width implementation in hwp-session: `layout_paragraph` already applies substitution, per-script
+/// 장평/자간 and the caller's font provider. Callers memoize by `(char_shape, char)`.
+fn body_char_advance(
+    doc: &SemanticDoc,
+    fonts: &dyn hwp_model::prelude::FontMetricsProvider,
+    para_shape: usize,
+    char_shape: usize,
+    ch: char,
+) -> f64 {
+    use hwp_model::prelude::{Inline, Paragraph, Run};
+    let probe = Paragraph {
+        para_shape,
+        runs: vec![Run {
+            char_shape,
+            content: vec![Inline::Text(ch.to_string())],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    hwp_typeset::layout_paragraph(&probe, doc, f64::MAX / 4.0, fonts)
+        .first()
+        .map(|l| l.horz_size.max(0.0))
+        .unwrap_or(0.0)
+}
+
+/// Build the body paragraph's addressable line/char geometry. The VISIBLE-char positions come from
+/// `PlacedGlyph` (the same cached placement the SVG lowers), while public `layout_paragraph` supplies
+/// line boundaries and the otherwise-unplaced ASCII space/tab/newline advances. A renderer backend
+/// may therefore change its SVG markup freely without changing this API.
+///
+/// A paragraph split across pages is aligned as ONE model stream: offsets remain global, and every
+/// line records its owning page. An empty paragraph still has the one zero-width line emitted by
+/// `layout_paragraph`, yielding a real caret at its placed block band. Any provenance/count mismatch
+/// returns `None` (018: no caret is safer than a wrong caret).
+fn body_paragraph_geom(
+    doc: &SemanticDoc,
+    placed: &PlacedDoc,
+    fonts: &dyn hwp_model::prelude::FontMetricsProvider,
+    section: usize,
+    block: usize,
+) -> Option<BodyParagraphGeom> {
+    use hwp_model::prelude::HorizontalAlign;
+    use std::collections::HashMap;
+
+    let p = body_model_paragraph(doc, section, block)?;
+    let chars = body_model_chars(p);
+
+    let mut bands = Vec::new();
+    for (page, pg) in placed.pages.iter().enumerate() {
+        for band in &pg.blocks {
+            if band.section == section
+                && band.block == block
+                && band.kind == hwp_typeset::BlockKind::Paragraph
+            {
+                bands.push((page, band));
+            }
+        }
+    }
+    let (first_page, first_band) = bands.first().copied()?;
+    // Contract lifted from the current JS workaround's `emptyParaBoxes`: a TRULY EMPTY paragraph
+    // gets one band-based line. Whitespace-only paragraphs must continue through layout_paragraph:
+    // spaces/tabs have real advances, '\n' creates lines/pages, and U+3000 has a PlacedGlyph.
+    if chars.is_empty() {
+        // place_doc may leave a zero-height page-bottom ghost band when it defers the whole paragraph
+        // to the next page. `emptyParaBoxes` rejects that band (`h <= 0`) and resolves the real
+        // positive-height fragment, so lift the same rule into the engine contract.
+        let (empty_page, empty_band) = bands.iter().copied().find(|(_, band)| band.h > 0.0)?;
+        return Some(BodyParagraphGeom {
+            section,
+            block,
+            para_len: chars.len(),
+            lines: vec![BodyLineGeom {
+                page: empty_page,
+                start: 0,
+                end: chars.len(),
+                x0: empty_band.x,
+                end_x: empty_band.x,
+                top: empty_band.y,
+                height: empty_band.h,
+                chars: chars
+                    .iter()
+                    .enumerate()
+                    .map(|(offset, _)| BodyCharGeom {
+                        offset,
+                        x: empty_band.x,
+                        advance: 0.0,
+                    })
+                    .collect(),
+            }],
+        });
+    }
+    let page_setup = &doc.sections.get(section)?.page;
+    let (_ml, mt, _setup_body_w, body_h) = hwp_typeset::body_box(page_setup);
+    // `PlacedBlock.w` is the exact body width used by place_paragraph. Prefer it so this remains tied
+    // to the consumed placement if PageSetup grows another body-box term later.
+    let body_w = first_band.w.max(1.0);
+    let ps = doc.para_shapes.get(p.para_shape);
+    let left = ps.map(|s| s.left_margin).unwrap_or(0).max(0) as f64;
+    let right = ps.map(|s| s.right_margin).unwrap_or(0).max(0) as f64;
+    let indent = ps.map(|s| s.indent).unwrap_or(0) as f64;
+    let first_extra = indent.max(-left);
+    let wrap_w = (body_w - left - right).max(1.0);
+    let align = ps.map(|s| s.align).unwrap_or_default();
+    let laid = hwp_typeset::layout_paragraph(p, doc, wrap_w, fonts);
+    if laid.is_empty() {
+        return None;
+    }
+
+    let mut page = first_page;
+    let mut vert = first_band.y - mt;
+    let ratio = body_line_spacing_ratio(p, doc);
+    let mut advance_cache: HashMap<(usize, char), f64> = HashMap::new();
+    let mut out = Vec::with_capacity(laid.len());
+
+    for (li, ls) in laid.iter().enumerate() {
+        if vert + ls.vert_size > body_h && vert > 0.0 {
+            page += 1;
+            vert = 0.0;
+        }
+        let pg = placed.pages.get(page)?;
+        let band = pg.blocks.iter().find(|band| {
+            band.section == section
+                && band.block == block
+                && band.kind == hwp_typeset::BlockKind::Paragraph
+        })?;
+        let start = ls.text_pos as usize;
+        let end = laid
+            .get(li + 1)
+            .map(|next| next.text_pos as usize)
+            .unwrap_or(chars.len())
+            .min(chars.len());
+        if start > end {
+            return None;
+        }
+
+        let line_indent = left + if li == 0 { first_extra } else { 0.0 };
+        let slack =
+            (wrap_w - if li == 0 { first_extra.max(0.0) } else { 0.0 } - ls.horz_size).max(0.0);
+        let x0 = first_band.x
+            + line_indent
+            + match align {
+                HorizontalAlign::Right => slack,
+                HorizontalAlign::Center => slack / 2.0,
+                _ => 0.0,
+            };
+        let expected_top = mt + vert;
+        let expected_baseline = expected_top + ls.baseline;
+        const EPS: f64 = 0.05;
+        let mut glyphs: Vec<&hwp_typeset::PlacedGlyph> = pg
+            .glyphs
+            .iter()
+            .filter(|g| {
+                (g.baseline - expected_baseline).abs() <= EPS
+                    && g.x >= band.x - EPS
+                    && g.x <= band.x + band.w + EPS
+            })
+            .collect();
+        glyphs.sort_by(|a, b| a.x.total_cmp(&b.x));
+        // place_paragraph omits exactly these three chars from PlacedGlyph. Other Unicode whitespace
+        // (notably U+3000 full-width space) IS placed and must stay in the one-to-one stream.
+        let expected_glyphs = chars[start..end]
+            .iter()
+            .filter(|(ch, _)| !matches!(*ch, ' ' | '\t' | '\n'))
+            .count();
+        if glyphs.len() != expected_glyphs {
+            return None;
+        }
+
+        let top = glyphs
+            .first()
+            .map(|g| g.baseline - ls.baseline)
+            .unwrap_or(expected_top);
+        let mut cursor = x0;
+        let mut gi = 0usize;
+        let mut line_chars = Vec::with_capacity(end - start);
+        for (offset, &(ch, shape)) in chars.iter().enumerate().take(end).skip(start) {
+            let advance = *advance_cache
+                .entry((shape, ch))
+                .or_insert_with(|| body_char_advance(doc, fonts, p.para_shape, shape, ch));
+            let x = if matches!(ch, ' ' | '\t' | '\n') {
+                cursor
+            } else {
+                let x = glyphs.get(gi)?.x;
+                gi += 1;
+                x
+            };
+            line_chars.push(BodyCharGeom { offset, x, advance });
+            cursor = x + advance;
+        }
+        out.push(BodyLineGeom {
+            page,
+            start,
+            end,
+            x0,
+            // `horz_size` is the exact sum used for alignment and excludes a forced newline. It is a
+            // more stable paragraph-end boundary than extrapolating the last rendered glyph.
+            end_x: x0 + ls.horz_size,
+            top,
+            height: ls.vert_size,
+            chars: line_chars,
+        });
+        vert += ls.vert_size * ratio;
+    }
+
+    Some(BodyParagraphGeom {
+        section,
+        block,
+        para_len: chars.len(),
+        lines: out,
+    })
+}
+
+fn body_caret_on_line(line: &BodyLineGeom, offset: usize) -> BodyCaretDto {
+    let x = line
+        .chars
+        .iter()
+        .find(|c| c.offset == offset)
+        .map(|c| c.x)
+        .unwrap_or_else(|| {
+            if offset <= line.start {
+                line.x0
+            } else {
+                line.end_x
+            }
+        });
+    BodyCaretDto {
+        page: line.page as u32,
+        x: x / HWPUNIT_PER_PX,
+        y: line.top / HWPUNIT_PER_PX,
+        w: 0.0,
+        h: line.height / HWPUNIT_PER_PX,
+    }
+}
+
+fn body_caret_from_geom(geom: &BodyParagraphGeom, offset: usize) -> Option<BodyCaretDto> {
+    let offset = offset.min(geom.para_len);
+    // The LAST line whose start is at/before the offset wins: an address queried on a wrap boundary
+    // has canonical DOWNSTREAM affinity, the same typing-continuation rule as cell_caret_rect.
+    let line = geom.lines.iter().rev().find(|line| line.start <= offset)?;
+    Some(body_caret_on_line(line, offset))
+}
+
+/// Body-paragraph caret rect at `(page, section, block, offset)` in own-render PX. A past-end offset
+/// CLAMPS to the paragraph end and still returns a rect. For a page-split paragraph the offset owns
+/// exactly one page; asking another page returns `None`. Unknown/non-editable/non-placed addresses
+/// also return `None` (018 null policy).
+pub fn body_caret_rect(
+    doc: &SemanticDoc,
+    page: u32,
+    section: usize,
+    block: usize,
+    offset: usize,
+) -> Option<BodyCaretDto> {
+    let fonts = own_render_fonts();
+    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    body_caret_rect_placed(doc, &placed, fonts.as_ref(), page, section, block, offset)
+}
+
+/// [`body_caret_rect`] against an already-placed document. Pass the SAME `fonts` provider used to
+/// build `placed`; the wasm handle does this with its injected-font cache.
+#[allow(clippy::too_many_arguments)]
+pub fn body_caret_rect_placed(
+    doc: &SemanticDoc,
+    placed: &PlacedDoc,
+    fonts: &dyn hwp_model::prelude::FontMetricsProvider,
+    page: u32,
+    section: usize,
+    block: usize,
+    offset: usize,
+) -> Option<BodyCaretDto> {
+    let geom = body_paragraph_geom(doc, placed, fonts, section, block)?;
+    let caret = body_caret_from_geom(&geom, offset)?;
+    (caret.page == page).then_some(caret)
+}
+
+/// Resolve a PAGE-LOCAL own-render px click to an editable BODY-paragraph target. The point must be
+/// vertically INSIDE the paragraph's placed band (unlike `own_hit_test`'s nearest-block fallback), so
+/// clicking a margin never leaves a caret in an unrelated paragraph. Within the band, y snaps to the
+/// nearest text line and x to the nearest char boundary. Returns `None` for table/image/non-simple
+/// paragraphs or an alignment miss (018).
+pub fn body_text_hit(doc: &SemanticDoc, page: u32, x: f64, y: f64) -> Option<BodyTextHitDto> {
+    let fonts = own_render_fonts();
+    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    body_text_hit_placed(doc, &placed, fonts.as_ref(), page, x, y)
+}
+
+/// [`body_text_hit`] against an already-placed document, using the same placement/font contract as
+/// [`body_caret_rect_placed`].
+pub fn body_text_hit_placed(
+    doc: &SemanticDoc,
+    placed: &PlacedDoc,
+    fonts: &dyn hwp_model::prelude::FontMetricsProvider,
+    page: u32,
+    x: f64,
+    y: f64,
+) -> Option<BodyTextHitDto> {
+    let pg = placed.pages.get(page as usize)?;
+    let (hx, hy) = (x * HWPUNIT_PER_PX, y * HWPUNIT_PER_PX);
+    let band = pg
+        .blocks
+        .iter()
+        .filter(|band| {
+            band.kind == hwp_typeset::BlockKind::Paragraph
+                && hy >= band.y
+                && hy <= band.y + band.h
+                && body_model_paragraph(doc, band.section, band.block).is_some()
+        })
+        .min_by(|a, b| a.h.total_cmp(&b.h))?;
+    let geom = body_paragraph_geom(doc, placed, fonts, band.section, band.block)?;
+    let line = geom
+        .lines
+        .iter()
+        .filter(|line| line.page == page as usize)
+        .min_by(|a, b| {
+            let dist = |line: &BodyLineGeom| {
+                if hy < line.top {
+                    line.top - hy
+                } else if hy > line.top + line.height {
+                    hy - (line.top + line.height)
+                } else {
+                    0.0
+                }
+            };
+            dist(a).total_cmp(&dist(b))
+        })?;
+    let mut offset = line.start;
+    for c in &line.chars {
+        if hx < c.x + c.advance / 2.0 {
+            offset = c.offset;
+            break;
+        }
+        offset = c.offset + 1;
+    }
+    offset = offset.min(line.end).min(geom.para_len);
+    // A hit is page-local. At the right edge of a line, `offset == line.end` can also be the next
+    // line's start (possibly on the next page); keep the embedded visual caret on the CLICKED
+    // upstream line. `body_caret_rect` intentionally retains canonical downstream affinity.
+    let caret = body_caret_on_line(line, offset);
+    Some(BodyTextHitDto {
+        section: geom.section,
+        block: geom.block,
+        offset,
+        para_len: geom.para_len,
+        caret,
     })
 }
 
@@ -2342,6 +2792,228 @@ mod tests {
         assert!(
             blocks_in_rect(&doc, 99, 0.0, 0.0, 100_000.0, 100_000.0).is_empty(),
             "off-page marquee → empty vec, not a panic"
+        );
+    }
+
+    fn body_para_doc(text: &str, page_height: i32) -> SemanticDoc {
+        use hwp_model::document::{Block, Inline, Paragraph, Run, Section};
+        let mut doc = SemanticDoc {
+            char_shapes: vec![Default::default()],
+            para_shapes: vec![Default::default()],
+            ..Default::default()
+        };
+        let mut section = Section::default();
+        section.page.width = 60_000;
+        section.page.height = page_height;
+        section.page.margin_left = 0;
+        section.page.margin_top = 0;
+        section.page.margin_right = 0;
+        section.page.margin_bottom = 0;
+        section.page.margin_header = 0;
+        section.page.margin_footer = 0;
+        section.blocks.push(Block::Paragraph(Paragraph {
+            runs: vec![Run {
+                char_shape: 0,
+                content: vec![Inline::Text(text.to_string())],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }));
+        doc.sections.push(section);
+        doc
+    }
+
+    #[test]
+    fn body_caret_empty_paragraph_uses_band_line_and_clamps() {
+        let doc = body_para_doc("", 20_000);
+        let c = body_caret_rect(&doc, 0, 0, 0, 999).expect("empty paragraph has a caret");
+        assert_eq!(c.page, 0);
+        assert_eq!(c.w, 0.0);
+        assert!(c.h > 0.0);
+        let h = body_text_hit(&doc, 0, c.x + 5.0, c.y + c.h / 2.0)
+            .expect("click in the empty paragraph band resolves");
+        assert_eq!((h.section, h.block, h.offset, h.para_len), (0, 0, 0, 0));
+        assert!((h.caret.x - c.x).abs() < 0.01);
+        assert!(
+            body_text_hit(&doc, 0, c.x, c.y + c.h * 3.0).is_none(),
+            "outside the strict paragraph band is null"
+        );
+    }
+
+    #[test]
+    fn body_caret_whitespace_keeps_forced_lines_and_real_advances() {
+        // Whitespace-only is NOT the empty-paragraph shortcut. Each forced break owns a real line;
+        // on this short page the second '\n' line lands on page 1 with global model offset 1.
+        let split = body_para_doc("\n\n", 1_700);
+        let placed = place(&split, &[]);
+        let fonts = own_render_fonts();
+        assert_eq!(placed.pages.len(), 2, "two forced blank lines split pages");
+        let p0 = body_caret_rect_placed(&split, &placed, fonts.as_ref(), 0, 0, 0, 0)
+            .expect("first blank line");
+        let p1 = body_caret_rect_placed(&split, &placed, fonts.as_ref(), 1, 0, 0, 1)
+            .expect("second blank line");
+        assert_eq!((p0.page, p1.page), (0, 1));
+        assert!(
+            body_caret_rect_placed(&split, &placed, fonts.as_ref(), 0, 0, 0, 1).is_none(),
+            "the second forced line is not owned by page 0"
+        );
+        let end = body_caret_rect_placed(&split, &placed, fonts.as_ref(), 1, 0, 0, 999)
+            .expect("past-end clamps on the final forced line");
+        assert_eq!(end.page, 1);
+
+        // Leading ASCII spaces get exact layout advances, while U+3000 consumes its real
+        // PlacedGlyph. No whitespace boundary collapses to the empty paragraph x.
+        let spaced = body_para_doc("  \u{3000}가", 20_000);
+        let xs: Vec<f64> = (0..=4)
+            .map(|offset| {
+                body_caret_rect(&spaced, 0, 0, 0, offset)
+                    .expect("whitespace boundary")
+                    .x
+            })
+            .collect();
+        assert!(
+            xs.windows(2).all(|pair| pair[1] > pair[0]),
+            "space/U+3000/visible advances stay monotonic: {xs:?}"
+        );
+        let pure = body_para_doc(" \u{3000}", 20_000);
+        let pure_xs: Vec<f64> = (0..=2)
+            .map(|offset| {
+                body_caret_rect(&pure, 0, 0, 0, offset)
+                    .expect("pure-whitespace boundary")
+                    .x
+            })
+            .collect();
+        assert!(
+            pure_xs.windows(2).all(|pair| pair[1] > pair[0]),
+            "pure ASCII/U+3000 whitespace must not collapse to empty-paragraph x: {pure_xs:?}"
+        );
+    }
+
+    #[test]
+    fn body_hit_wrap_boundary_keeps_page_local_visual_affinity() {
+        let text = "가".repeat(5_000);
+        let doc = body_para_doc(&text, 20_000);
+        let placed = place(&doc, &[]);
+        let fonts = own_render_fonts();
+        let geom = body_paragraph_geom(&doc, &placed, fonts.as_ref(), 0, 0)
+            .expect("long body paragraph geometry");
+        let pair = geom
+            .lines
+            .windows(2)
+            .find(|pair| pair[0].page != pair[1].page && pair[0].end == pair[1].start)
+            .expect("a wrap boundary crosses pages");
+        let (upstream, downstream) = (&pair[0], &pair[1]);
+
+        let hit = body_text_hit_placed(
+            &doc,
+            &placed,
+            fonts.as_ref(),
+            upstream.page as u32,
+            upstream.end_x / HWPUNIT_PER_PX + 10.0,
+            (upstream.top + upstream.height / 2.0) / HWPUNIT_PER_PX,
+        )
+        .expect("right-edge click on upstream page");
+        assert_eq!(hit.offset, upstream.end);
+        assert_eq!(
+            hit.caret.page, upstream.page as u32,
+            "a page-local hit never embeds a caret from the next page"
+        );
+        assert!(
+            (hit.caret.x - upstream.end_x / HWPUNIT_PER_PX).abs() < 0.01,
+            "visual-affinity caret stays at the clicked line end"
+        );
+
+        let canonical = body_caret_rect_placed(
+            &doc,
+            &placed,
+            fonts.as_ref(),
+            downstream.page as u32,
+            0,
+            0,
+            hit.offset,
+        )
+        .expect("address query has canonical downstream affinity");
+        assert_eq!(canonical.page, downstream.page as u32);
+        assert!(
+            body_caret_rect_placed(
+                &doc,
+                &placed,
+                fonts.as_ref(),
+                upstream.page as u32,
+                0,
+                0,
+                hit.offset,
+            )
+            .is_none(),
+            "canonical address ownership remains downstream"
+        );
+    }
+
+    #[test]
+    fn body_caret_page_split_has_global_offsets_and_page_local_rects() {
+        // One 1000-HWPUNIT line per 1700-HWPUNIT page under the default 160% advance. Forced line
+        // breaks make the model offsets deterministic: "가\\n나\\n다" starts on offsets 0, 2, 4.
+        let doc = body_para_doc("가\n나\n다", 1_700);
+        let placed = place(&doc, &[]);
+        assert_eq!(placed.pages.len(), 3, "the paragraph spans three pages");
+        let fonts = own_render_fonts();
+        let c0 = body_caret_rect_placed(&doc, &placed, fonts.as_ref(), 0, 0, 0, 0)
+            .expect("offset 0 is on page 0");
+        let c1 = body_caret_rect_placed(&doc, &placed, fonts.as_ref(), 1, 0, 0, 2)
+            .expect("offset 2 is on page 1");
+        let c2 = body_caret_rect_placed(&doc, &placed, fonts.as_ref(), 2, 0, 0, 4)
+            .expect("offset 4 is on page 2");
+        assert!(
+            body_caret_rect_placed(&doc, &placed, fonts.as_ref(), 0, 0, 0, 2).is_none(),
+            "an offset queried on the wrong fragment page is null"
+        );
+        let end = body_caret_rect_placed(&doc, &placed, fonts.as_ref(), 2, 0, 0, 999)
+            .expect("past-end clamps to the paragraph end on page 2");
+        assert!(end.x > c2.x, "paragraph-end caret follows the last glyph");
+
+        for (page, want, caret) in [(0, 0, c0), (1, 2, c1), (2, 4, c2)] {
+            let hit = body_text_hit_placed(
+                &doc,
+                &placed,
+                fonts.as_ref(),
+                page,
+                caret.x + 0.1,
+                caret.y + caret.h / 2.0,
+            )
+            .expect("caret-line click resolves");
+            assert_eq!(
+                hit.offset, want,
+                "page {page} keeps the global model offset"
+            );
+            assert_eq!(hit.para_len, 5);
+            assert_eq!(hit.caret.page, page);
+        }
+    }
+
+    #[test]
+    fn body_caret_placed_and_replacing_queries_match() {
+        let doc = body_para_doc("앞 글자와 뒤 글자", 20_000);
+        let placed = place(&doc, &[]);
+        let fonts = own_render_fonts();
+        let cached = body_caret_rect_placed(&doc, &placed, fonts.as_ref(), 0, 0, 0, 3);
+        let bare = body_caret_rect(&doc, 0, 0, 0, 3);
+        assert_eq!(
+            serde_json::to_string(&cached).unwrap(),
+            serde_json::to_string(&bare).unwrap(),
+            "cached placement is a pure factoring"
+        );
+        let c = bare.expect("body caret");
+        assert_eq!(
+            serde_json::to_string(&body_text_hit_placed(
+                &doc,
+                &placed,
+                fonts.as_ref(),
+                0,
+                c.x,
+                c.y + c.h / 2.0,
+            ))
+            .unwrap(),
+            serde_json::to_string(&body_text_hit(&doc, 0, c.x, c.y + c.h / 2.0)).unwrap(),
         );
     }
 

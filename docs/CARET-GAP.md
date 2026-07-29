@@ -1,9 +1,12 @@
-# CARET-GAP — 셀 캐럿 갭 실측 보고서 (issue 041 / FG-12 前半 → **053에서 P1 갭 닫힘**)
+# CARET-GAP — 캐럿 갭 실측 보고서 (041 → **053 셀 + 2026-07-28 본문 엔진 API로 닫힘**)
 
-> 상태: **053 구현 완료 — §7 재실측 참조.** §0–§6은 041 시점의 측정/승격안 원문(역사 기록).
+> 상태: **053 셀 API + 본문 `body_text_hit`/`body_caret_rect` 구현 완료 — §7·§8 참조.**
+> §0–§6은 041 시점의 측정/승격안 원문(역사 기록).
 > 053은 §5의 P0(좌표계)–P1(셀 주소형 캐럿)을 own-render `PlacedGlyph` 기반으로 구현했고,
 > 재실측 결과 **표시 표면(own-render) 기준 셀 텍스트 해상률은 3개 벤치마크 전부 99.8~100%**다.
-> 남은 갭은 §5 P2(바이너리 .hwp 본문 문단 stable_key)뿐이다.
+> 2026-07-28에는 NodeId/stable_key를 억지로 만들지 않고 `(section,block,offset)` 본문 주소와
+> `PlacedGlyph` 지오메트리를 직접 결합해 §5 P2를 우회했다. 현 React의 SVG 정렬 helper를 새 API로
+> 교체하는 작업만 후속이며, 엔진/wasm/Tauri 계약은 준비됐다.
 >
 > 근거는 전부 코드 라인 인용 + `scripts/caret-geometry-smoke.mjs`의 실측 수치다(재현법 §6).
 
@@ -262,10 +265,36 @@ editor-core 모델/계약 테스트: `cd packages/editor-core && npm test` (`car
 
 ### 7.4 남은 갭
 
-- **P2 (§5)**: 바이너리 .hwp의 비셀 본문 문단(bodyUnanchored ≈ 35–40%) — stable_key 부재로 NodeId
-  캐럿 불가. 별도 이슈.
+- ~~**P2 (§5)**: 바이너리 .hwp의 비셀 본문 문단~~ — §8의 주소형 본문 API로 해소(NodeId 불필요).
 - **중첩 표 셀**(place_nested_table): PlacedTable provenance가 없어 캐럿 대상 아님(§7.1(b) 분모에서
   텍스트 없는 외부 셀로 걸러짐). 기존 "nested cells aren't edit targets" 제약과 동일.
 - **IME 인라인 조합**(FG-13): composition 가드만(조합 중 keydown 무시) — 인라인 조합 UI는 후속.
 - **폰트 주입 후 캐럿 x**: wasm 셸은 placed 캐시(주입 폰트)로 답하므로 화면과 항상 일치. Intent
   레인(Tauri/에이전트)은 `own_render_fonts()`(그 셸의 렌더와 동일 폰트) 기준.
+
+---
+
+## 8. 본문 주소형 캐럿 API 승격 (2026-07-28)
+
+`hwp-session`에 `body_text_hit(_placed)` / `body_caret_rect(_placed)`를 추가했다. 편집 가능한 top-level
+simple paragraph를 `(section, block, offset)`으로 주소화하므로 바이너리 `.hwp`의 stable NodeId가
+필요 없다. visible 문자 위치는 화면과 같은 `PlacedGlyph`, line box와 공백 advance는 같은 typesetter
+`LineSeg`/font provider에서 얻는다.
+
+- MCP/셸: additive `HitTestBody`/`CaretRectBody`, read-only Outcome `hitBody`/`caretBody`.
+- wasm: cached `PlacedDoc`와 주입 폰트를 쓰는 direct `bodyTextHit`/`bodyCaretRect`.
+- 분할 문단: offset은 문단 전체 global scalar index, rect는 그 offset이 실제 배치된 page에서만 반환.
+- wrap/page 경계: 클릭 직후 `hit.caret`은 queried-page upstream visual affinity, 주소 재질의
+  `bodyCaretRect`는 canonical downstream affinity. 이 구분으로 줄 끝 클릭이 다음 쪽으로 순간 이동하지 않는다.
+- null 정책: 여백·표·그림·구조 문단·wrong page는 null, past-end는 문단 끝으로 clamp.
+- mutation/undo/revision 변화 0, AI 편집 화이트리스트 변화 0.
+
+교차검증(`packages/engine/bench/body-caret-crosscheck.mjs`)은 canonical 8/18/24쪽의 본문 band 563개를
+검사했다. 기존 SVG helper와 정렬 가능한 559개에서 non-whitespace `PlacedGlyph` x 431/431,
+glyph baseline이 engine line box 안 431/431, engine rect→hit 주소/offset 431/431이었다. 나머지 4개는
+페이지 바닥의 ghost band로 양쪽이 null이고 같은 문단의 다음 page fragment가 4/4 해소됐다. 모든
+non-null hit의 page-local caret는 1825/1825였고 주소 불일치는 0이다. 3,227 query 성능은
+median 0.054ms, p95 0.096ms, max 0.360ms였다.
+
+현 React `BodyCaretController`는 아직 SVG helper를 사용한다. 새 API로 교체할 때 이 스크립트의 hard
+gate를 유지하고, old helper/markup parser를 제거한다.

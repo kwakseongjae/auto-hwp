@@ -86,6 +86,11 @@ pub struct Session {
     pub source_bytes: Option<Vec<u8>>,
     /// A validated-but-uncommitted edit from `propose_content`, awaiting `commit_proposal`.
     pub pending: Option<hwp_ai::Proposal>,
+    /// Own-render placement cached by `EditSession::revision`. Shared by both cell and body caret
+    /// Intents so the native/Tauri lane has the same place-once query cost as the wasm handle.
+    own_placed: Option<(u64, hwp_session::PlacedDoc)>,
+    #[cfg(test)]
+    own_place_builds: usize,
     /// Persistent render state (engine seam 1): serialized bytes cached at a doc revision + a
     /// parse-once `RenderCache`, so repeated page renders (scrolling) do not re-serialize/re-parse.
     #[cfg(feature = "rhwp")]
@@ -100,6 +105,56 @@ struct RenderState {
     bytes: Option<(u64, Vec<u8>)>,
     /// Parse-once cache over those bytes (reuses one parsed `DocumentCore` across pages).
     cache: hwp_core::RenderCache,
+}
+
+/// Ensure the shared own-render placement represents the current edit revision. Mutations do not
+/// need to find and clear this cache: `EditSession` bumps the revision atomically with every undoable
+/// change, so the next geometry query rebuilds before exposing a result.
+fn ensure_own_placed(session: &mut Session) -> Result<(), String> {
+    let revision = session
+        .doc
+        .as_ref()
+        .ok_or("no document open (call open_document first)")?
+        .revision();
+    if !matches!(&session.own_placed, Some((cached, _)) if *cached == revision) {
+        let placed = {
+            let doc = session
+                .doc
+                .as_ref()
+                .ok_or("no document open (call open_document first)")?
+                .doc();
+            hwp_session::place(doc, &[])
+        };
+        session.own_placed = Some((revision, placed));
+        #[cfg(test)]
+        {
+            session.own_place_builds += 1;
+        }
+    }
+    Ok(())
+}
+
+fn with_own_placed<T>(
+    session: &mut Session,
+    query: impl FnOnce(
+        &hwp_model::prelude::SemanticDoc,
+        &hwp_session::PlacedDoc,
+        &dyn hwp_model::prelude::FontMetricsProvider,
+    ) -> T,
+) -> Result<T, String> {
+    ensure_own_placed(session)?;
+    let fonts = hwp_session::own_render_fonts();
+    let doc = session
+        .doc
+        .as_ref()
+        .ok_or("no document open (call open_document first)")?
+        .doc();
+    let placed = &session
+        .own_placed
+        .as_ref()
+        .expect("ensure_own_placed installed the current revision")
+        .1;
+    Ok(query(doc, placed, fonts.as_ref()))
 }
 
 /// True if the open document has been edited (any block marked dirty since the original parse).
@@ -557,6 +612,11 @@ pub fn open_bytes(session: &mut Session, bytes: &[u8], name: &str) -> Result<Ope
     session.source_path = Some(name.to_string());
     session.source_bytes = Some(bytes.to_vec());
     session.pending = None; // a fresh document drops any stale proposal
+    session.own_placed = None;
+    #[cfg(test)]
+    {
+        session.own_place_builds = 0;
+    }
     #[cfg(feature = "rhwp")]
     {
         // Revisions restart per EditSession, so a new doc must drop the render cache.
@@ -632,6 +692,11 @@ fn do_close(session: &mut Session) {
     session.source_path = None;
     session.source_bytes = None;
     session.pending = None;
+    session.own_placed = None;
+    #[cfg(test)]
+    {
+        session.own_place_builds = 0;
+    }
     #[cfg(feature = "rhwp")]
     {
         session.render = RenderState::default();
@@ -1271,6 +1336,25 @@ pub enum Intent {
         para: usize,
         offset: usize,
     },
+    /// Body-paragraph caret, hit half: resolve a PAGE-LOCAL own-render px click to an editable
+    /// top-level paragraph target `{section, block, offset, para_len, caret}`. Geometry consumes OUR
+    /// own `PlacedGlyph` stream, not rhwp boxes or SVG markup, so binary .hwp body paragraphs work and
+    /// renderer-markup changes cannot invalidate the address. `null` off a body paragraph (018).
+    HitTestBody {
+        page: u32,
+        x: f64,
+        y: f64,
+    },
+    /// Body-paragraph caret, geometry half: the zero-width insertion rect at char `offset` of the
+    /// top-level paragraph `(section, block)` on `page`, in own-render px. A PAST-END offset CLAMPS to
+    /// the paragraph end; a page-split paragraph returns `null` when the offset belongs to another
+    /// page. This is a read-only geometry query and intentionally stays outside the AI edit whitelist.
+    CaretRectBody {
+        page: u32,
+        section: usize,
+        block: usize,
+        offset: usize,
+    },
 }
 
 /// Largest single embedded image we accept, in DECODED bytes (issue 050 — 014 hardening spirit: reject
@@ -1366,6 +1450,10 @@ pub enum Outcome {
     /// Cell caret rect result (issue 053): the caret geometry + owning page, or `None` when the
     /// cell address doesn't resolve (018).
     CaretCell(Option<hwp_session::CellCaretDto>),
+    /// Body paragraph text hit result: model address + own-render caret, or `None` (018).
+    HitBody(Option<hwp_session::BodyTextHitDto>),
+    /// Body paragraph caret result: zero-width own-render px rect, or `None` (018).
+    CaretBody(Option<hwp_session::BodyCaretDto>),
 }
 
 /// The highest `intent_version` this build understands (issue 008). The request envelope may carry
@@ -1534,20 +1622,12 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
             session, page, node, offset,
         )?)),
         // Cell-addressed caret (issue 053) — own-render geometry via the hwp-session facade (px).
-        // Read-only: no undo unit, no revision bump. Fonts: `own_render_fonts()` — the SAME provider
-        // this session's own-render SVG lane uses, so the caret agrees with the drawn glyphs. (The
-        // wasm shell answers these through its placed-cache bindings with its injected fonts instead;
-        // this dispatch is the Tauri/agent lane.)
-        Intent::HitTestCell { page, x, y } => {
-            let doc = session
-                .doc
-                .as_ref()
-                .ok_or("no document open (call open_document first)")?
-                .doc();
-            Ok(Outcome::HitCell(hwp_session::cell_text_hit(
-                doc, page, x, y,
-            )))
-        }
+        // Read-only: no undo unit, no revision bump. Native/Tauri cell + body queries share one
+        // revision-keyed PlacedDoc, matching the wasm handle's place-once behavior.
+        Intent::HitTestCell { page, x, y } => Ok(Outcome::HitCell(with_own_placed(
+            session,
+            |doc, placed, fonts| hwp_session::cell_text_hit_placed(doc, placed, fonts, page, x, y),
+        )?)),
         Intent::CaretRectCell {
             section,
             block,
@@ -1555,16 +1635,35 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
             col,
             para,
             offset,
-        } => {
-            let doc = session
-                .doc
-                .as_ref()
-                .ok_or("no document open (call open_document first)")?
-                .doc();
-            Ok(Outcome::CaretCell(hwp_session::cell_caret_rect(
-                doc, section, block, row, col, para, offset,
-            )))
-        }
+        } => Ok(Outcome::CaretCell(with_own_placed(
+            session,
+            |doc, placed, fonts| {
+                hwp_session::cell_caret_rect_placed(
+                    doc, placed, fonts, section, block, row, col, para, offset,
+                )
+            },
+        )?)),
+        // Body-paragraph caret — the own-render counterpart of the cell-addressed lane above. These
+        // are read-only geometry queries: no undo unit, no revision bump, and no AI whitelist entry.
+        // The wasm shell has direct cached-placement bindings; this Intent dispatch is the
+        // Tauri/agent/default-font surface.
+        Intent::HitTestBody { page, x, y } => Ok(Outcome::HitBody(with_own_placed(
+            session,
+            |doc, placed, fonts| hwp_session::body_text_hit_placed(doc, placed, fonts, page, x, y),
+        )?)),
+        Intent::CaretRectBody {
+            page,
+            section,
+            block,
+            offset,
+        } => Ok(Outcome::CaretBody(with_own_placed(
+            session,
+            |doc, placed, fonts| {
+                hwp_session::body_caret_rect_placed(
+                    doc, placed, fonts, page, section, block, offset,
+                )
+            },
+        )?)),
         Intent::InsertText { node, offset, text } => {
             do_insert_text(session, node, offset, &text)?;
             // Live page count after the reflow, via OUR engine (P1: edited docs count from the IR).
@@ -2182,6 +2281,91 @@ mod tests {
             "/../../corpus/hwpx/FormattingShowcase.hwpx"
         )
         .into()
+    }
+
+    #[test]
+    fn own_caret_placement_cache_is_shared_and_revision_keyed() {
+        use hwp_model::prelude::{Section, SemanticDoc};
+        use hwp_ops::{EditSession, Op, ParaSpec, RunSpec};
+
+        let mut doc = SemanticDoc::default();
+        doc.sections.push(Section::default());
+        let mut edit = EditSession::new(doc);
+        edit.do_op(&Op::InsertParagraphAt {
+            section: 0,
+            index: 0,
+            runs: vec![RunSpec {
+                text: "캐시 본문".into(),
+                ..Default::default()
+            }],
+            para: ParaSpec::default(),
+        })
+        .unwrap();
+        let mut session = Session {
+            doc: Some(edit),
+            ..Default::default()
+        };
+
+        let _ = apply_intent(
+            &mut session,
+            Intent::CaretRectBody {
+                page: 0,
+                section: 0,
+                block: 0,
+                offset: 0,
+            },
+        )
+        .unwrap();
+        let _ = apply_intent(
+            &mut session,
+            Intent::HitTestCell {
+                page: 0,
+                x: 0.0,
+                y: 0.0,
+            },
+        )
+        .unwrap();
+        let _ = apply_intent(
+            &mut session,
+            Intent::HitTestBody {
+                page: 0,
+                x: 0.0,
+                y: 0.0,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            session.own_place_builds, 1,
+            "body + cell queries share one placement at one revision"
+        );
+
+        apply_intent(
+            &mut session,
+            Intent::SetParagraphText {
+                section: 0,
+                block: 0,
+                text: "수정된 캐시 본문".into(),
+            },
+        )
+        .unwrap();
+        let _ = apply_intent(
+            &mut session,
+            Intent::CaretRectBody {
+                page: 0,
+                section: 0,
+                block: 0,
+                offset: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            session.own_place_builds, 2,
+            "the first query after a revision bump rebuilds exactly once"
+        );
+
+        do_close(&mut session);
+        assert!(session.own_placed.is_none(), "close releases the placement");
+        assert_eq!(session.own_place_builds, 0, "close resets test accounting");
     }
 
     #[test]

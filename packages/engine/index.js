@@ -233,6 +233,25 @@ export class HwpDoc {
       return s == null ? null : JSON.parse(s);
     });
   }
+  /** Body-paragraph caret, hit half: the editable `(section, block, offset)` target under own-render
+   *  px `(x,y)`, plus `para_len` and its zero-width caret rect, or `null` outside a body paragraph
+   *  (018). The embedded caret stays on the queried page at a wrapped line end (visual affinity).
+   *  Served from the cached PlacedGlyph stream — independent of SVG markup/rhwp coordinates. */
+  bodyTextHit(page, x, y) {
+    return this.#call((r) => {
+      const s = r.bodyTextHit(page, x, y); // Option<String> → JS string | null/undefined
+      return s == null ? null : JSON.parse(s);
+    });
+  }
+  /** Body-paragraph caret, geometry half: `{page,x,y,w:0,h}` in own-render px for `offset` of
+   *  `(section,block)` on `page`, or `null` when unresolved / owned by another split page (018).
+   *  A past-end offset clamps to the paragraph end. */
+  bodyCaretRect(page, section, block, offset) {
+    return this.#call((r) => {
+      const s = r.bodyCaretRect(page, section, block, offset); // Option<String> → string | null/undefined
+      return s == null ? null : JSON.parse(s);
+    });
+  }
   /** Marquee select: every top-level block whose band intersects the own-render px rect
    *  `(x0,y0)-(x1,y1)` (corners in any order). Returns a `BlockHit[]` — an EMPTY ARRAY on a miss. */
   blocksInRect(page, x0, y0, x1, y1) {

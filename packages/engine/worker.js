@@ -42,6 +42,8 @@ const METHODS = new Set([
   'tableCellAt',
   'cellTextHit',
   'cellCaretRect',
+  'bodyTextHit',
+  'bodyCaretRect',
   'blocksInRect',
   'tableColBoundaries',
   'tableRowBoundaries',

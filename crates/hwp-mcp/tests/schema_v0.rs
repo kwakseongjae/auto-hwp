@@ -302,6 +302,17 @@ fn examples() -> Vec<Example> {
             r#"{"intent":"CaretRectCell","section":0,"block":1,"row":0,"col":0,"para":0,"offset":1}"#,
             DeserializeOnly,
         ),
+        // ---- body-paragraph caret (own-render PlacedGlyph geometry, no rhwp/SVG dependency). ----
+        e(
+            "HitTestBody",
+            r#"{"intent":"HitTestBody","page":0,"x":120.0,"y":90.0}"#,
+            DeserializeOnly,
+        ),
+        e(
+            "CaretRectBody",
+            r#"{"intent":"CaretRectBody","page":0,"section":0,"block":0,"offset":1}"#,
+            DeserializeOnly,
+        ),
     ]
 }
 
@@ -324,7 +335,7 @@ fn de_err(v: Value) -> String {
 fn every_intent_variant_has_a_documented_example() {
     assert_eq!(
         examples().len(),
-        43,
+        45,
         "one JSON example per Intent variant (see INTENT-SCHEMA.md)"
     );
 }
@@ -456,6 +467,75 @@ fn cell_caret_intents_dispatch_and_roundtrip() {
         s.doc.as_ref().unwrap().revision(),
         before,
         "caret queries never mutate"
+    );
+}
+
+/// Body-paragraph caret intents are the own-render twin of the cell lane: the synthetic paragraph at
+/// block 0 resolves without rhwp/stable NodeId, hit↔address round-trips, misses/unknown pages are null,
+/// past-end clamps, and both queries are read-only.
+#[test]
+fn body_caret_intents_dispatch_and_roundtrip() {
+    use hwp_mcp::Outcome;
+    let mut s = synthetic_session();
+    let before = s.doc.as_ref().unwrap().revision();
+    let caret = match apply_intent_json(
+        &mut s,
+        &parse(r#"{"intent":"CaretRectBody","page":0,"section":0,"block":0,"offset":0}"#),
+    ) {
+        Ok(Outcome::CaretBody(Some(c))) => c,
+        Ok(Outcome::CaretBody(None)) => panic!("body block 0 must have caret geometry"),
+        Ok(_) => panic!("CaretRectBody returned a non-caret outcome"),
+        Err(e) => panic!("CaretRectBody errored: {e}"),
+    };
+    assert!(caret.h > 0.0, "caret has a line height");
+    assert_eq!(caret.w, 0.0, "document caret is a zero-width boundary");
+
+    let hit_json = format!(
+        r#"{{"intent":"HitTestBody","page":{},"x":{},"y":{}}}"#,
+        caret.page,
+        caret.x + 0.1,
+        caret.y + caret.h / 2.0
+    );
+    match apply_intent_json(&mut s, &parse(&hit_json)) {
+        Ok(Outcome::HitBody(Some(h))) => {
+            assert_eq!((h.section, h.block, h.offset), (0, 0, 0));
+            assert_eq!(h.para_len, "본문 문단".chars().count());
+            assert!((h.caret.x - caret.x).abs() < 0.01);
+            assert!((h.caret.y - caret.y).abs() < 0.01);
+        }
+        Ok(Outcome::HitBody(None)) => panic!("hit on the body caret line must resolve"),
+        Ok(_) => panic!("HitTestBody returned a non-hit outcome"),
+        Err(e) => panic!("HitTestBody errored: {e}"),
+    }
+
+    match apply_intent_json(
+        &mut s,
+        &parse(r#"{"intent":"HitTestBody","page":0,"x":0.5,"y":0.5}"#),
+    ) {
+        Ok(Outcome::HitBody(hit)) => assert!(hit.is_none(), "page margin is a strict miss"),
+        Ok(_) => panic!("HitTestBody returned a non-hit outcome"),
+        Err(e) => panic!("HitTestBody (miss) errored: {e}"),
+    }
+    match apply_intent_json(
+        &mut s,
+        &parse(r#"{"intent":"CaretRectBody","page":9,"section":0,"block":0,"offset":0}"#),
+    ) {
+        Ok(Outcome::CaretBody(c)) => assert!(c.is_none(), "wrong page is null"),
+        Ok(_) => panic!("CaretRectBody returned a non-caret outcome"),
+        Err(e) => panic!("CaretRectBody (wrong page) errored: {e}"),
+    }
+    match apply_intent_json(
+        &mut s,
+        &parse(r#"{"intent":"CaretRectBody","page":0,"section":0,"block":0,"offset":9999}"#),
+    ) {
+        Ok(Outcome::CaretBody(c)) => assert!(c.is_some(), "past-end offset clamps, never null"),
+        Ok(_) => panic!("CaretRectBody returned a non-caret outcome"),
+        Err(e) => panic!("CaretRectBody (past-end) errored: {e}"),
+    }
+    assert_eq!(
+        s.doc.as_ref().unwrap().revision(),
+        before,
+        "body caret queries never mutate"
     );
 }
 

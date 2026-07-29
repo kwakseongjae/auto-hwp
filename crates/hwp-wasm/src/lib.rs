@@ -572,6 +572,49 @@ impl HwpDoc {
             .transpose()
     }
 
+    /// Body-paragraph caret, hit half: resolve PAGE-LOCAL own-render px `(x, y)` to a JSON **string**
+    /// `{section, block, offset, para_len, caret:{page,x,y,w,h}}`, or JS `null` off an editable body
+    /// paragraph (018). At a wrap boundary `caret` retains clicked-page visual affinity. Uses the
+    /// cached `PlacedDoc` + THIS handle's injected fonts, and consumes `PlacedGlyph` directly — no
+    /// rhwp coordinate space and no SVG `<text>` parsing/alignment.
+    #[wasm_bindgen(js_name = bodyTextHit)]
+    pub fn body_text_hit(&self, page: u32, x: f64, y: f64) -> Result<Option<String>, JsValue> {
+        let fonts = hwp_session::own_render_fonts_with(&self.fonts);
+        let h = self.with_placed(|doc, placed| {
+            hwp_session::body_text_hit_placed(doc, placed, fonts.as_ref(), page, x, y)
+        })?;
+        h.map(|h| serde_json::to_string(&h).map_err(|e| js_err("serialize", &e.to_string())))
+            .transpose()
+    }
+
+    /// Body-paragraph caret, geometry half: JSON **string** `{page,x,y,w,h}` for `offset` of
+    /// `(section, block)` on `page`, or JS `null` when the address doesn't resolve / the offset belongs
+    /// to another page (018). Past-end clamps to the paragraph end. `w == 0` is a document insertion
+    /// boundary; the host chooses the device-pixel stroke width.
+    #[wasm_bindgen(js_name = bodyCaretRect)]
+    pub fn body_caret_rect(
+        &self,
+        page: u32,
+        section: usize,
+        block: usize,
+        offset: usize,
+    ) -> Result<Option<String>, JsValue> {
+        let fonts = hwp_session::own_render_fonts_with(&self.fonts);
+        let c = self.with_placed(|doc, placed| {
+            hwp_session::body_caret_rect_placed(
+                doc,
+                placed,
+                fonts.as_ref(),
+                page,
+                section,
+                block,
+                offset,
+            )
+        })?;
+        c.map(|c| serde_json::to_string(&c).map_err(|e| js_err("serialize", &e.to_string())))
+            .transpose()
+    }
+
     /// Page geometry in own-render px: the page box + printable-area margins of `page`, for the editor
     /// ruler (issue 027 룰러). A JSON **string** `{w,h,ml,mt,mr,mb}` (all px = HWPUNIT/75), or **JS
     /// `null`** when the page is out of range (an `Option<String>` → `null` — policy 018). Additive wasm
@@ -799,6 +842,12 @@ fn outcome_to_json(o: &hwp_mcp::Outcome) -> serde_json::Value {
         }
         CaretCell(caret) => {
             json!({ "kind": "caretCell", "caret": serde_json::to_value(caret).unwrap_or(serde_json::Value::Null) })
+        }
+        HitBody(hit) => {
+            json!({ "kind": "hitBody", "hit": serde_json::to_value(hit).unwrap_or(serde_json::Value::Null) })
+        }
+        CaretBody(caret) => {
+            json!({ "kind": "caretBody", "caret": serde_json::to_value(caret).unwrap_or(serde_json::Value::Null) })
         }
     }
 }
