@@ -40,13 +40,14 @@ packages are released in lockstep.)*
 
 ---
 
-## [0.0.2] — 커밋 완료 · 레지스트리 미발행
+## [0.0.2] — 2026-07-29
 
-레지스트리에 **아직 없다.** 저장소 로컬에서 버전만 `0.0.2`로 올라간 상태다.
-발행 시점에 이 절의 제목에 날짜를 적는다.
+npm 4종 발행 완료(publish.yml dry_run→실발행, publish:safe 경유). 발행 직후 fresh 디렉토리에서
+`@auto-hwp/react` **단독** `npm i` → 형제 패키지 전이 해석 → import 성공을 실측했다(0.0.1의
+`file:` 의존 결함 재발 없음 — react@0.0.2 dependencies는 `^0.0.2` 실버전).
 
-*(EN — Committed but not published yet. Versions are bumped locally; add the date to this heading when
-it ships.)*
+*(EN — Published 2026-07-29. Verified post-publish: standalone `npm i @auto-hwp/react` in a fresh
+directory resolves sibling packages from the registry and imports cleanly.)*
 
 ### 파괴 변경 (Breaking)
 

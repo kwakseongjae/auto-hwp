@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-07-29 (Claude 오케스트레이터+Opus 워커) · W1 출시 완주 — 커밋 15·npm 0.0.2·Pages·Worker
+- 논리 커밋 C1~C15 push(8240acc~5fc40cd), modu-startup 실물은 corpus/private 사유화(부재-내성 게이트).
+- npm 4종 0.0.2 실발행+fresh 단독 설치 스모크 그린 — 0.0.1 file: 결함 종결. Pages/Worker 재배포 라이브 실측.
+- 배치 1(벌크 5건·CHANGELOG·OG·W4.1 HWPX 문단 앵커)은 --full 그린(게이트 4종·E2E 43/43)으로 선검증.
+- 멈춘 곳: 0.0.1 deprecate(사용자 npm login 필요)·키 회전(선택). 다음: W2 /bench·W4.2/4.3·W5.2·런치.
+- 교훈 재확인: named 팀메이트 무음 정지 재발 → 사용자 지시로 무명 Agent/Workflow만 사용 확정.
+
 ## 2026-07-29 (Claude) · 채택 격차 리서치+작업 계획 (Fable Workflow)
 - 워크플로 9에이전트(리서치 2∥감사 4→매트릭스 19행→W1~W6→완결성 검증)로 채택 병목을 확정 — 정본 `docs/ADOPTION-GAP-PLAN-2026-07-29.md`.
 - 판정: 최대 병목은 미출하(0.0.1 `file:` 결함·라이브 구버전 모순 카피·게이트 수치 비공개·벌크 체험 진입로 부재). rhwp 3,615★ 선점 실측 → 4공백 축 집중.

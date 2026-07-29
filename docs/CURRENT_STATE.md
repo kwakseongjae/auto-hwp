@@ -5,6 +5,17 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
+- 갱신: 2026-07-29 · Claude(오케스트레이터)+Opus 워커 — **🚀 W1 출시 절차 완주**. ① 논리 커밋
+  15개(C1 `8240acc`~C15 `5fc40cd`) push — Codex 대기분 전체+Opus 배치 1, MM 3파일 hunk 경계 보존,
+  modu-startup 실물은 corpus/private 사유화(게이트 6==6은 존재 시 강제·부재 시 정직 skip).
+  ② Pages 재배포 라이브 실측: 새 wasm(11:53, 7,718,539B — 구 7,657,643B 교체. ⚠️ 로컬 7,728,658B와
+  소폭 차이는 CI 툴체인 차이 추정, 후속 확인 항목), OG/twitter/favicon/가치제안 description 라이브,
+  구 모순 카피 부재, /bulk 200. ③ Worker 하드닝 배포(버전 82a1a8ca) + fail-closed 프로브 3/3
+  (무Origin 403·비허용 Origin 403·GET 405). ④ **npm 0.0.2 4종 실발행**(dry_run→실발행 그린) +
+  fresh 단독 설치 스모크 통과 — **0.0.1 `file:` 결함 공식 종결**. CHANGELOG 날짜 확정.
+  잔여 사용자 액션: **0.0.1 deprecate 4종**(로컬 npm E401 — `npm login` 후 deprecate) ·
+  OpenRouter 키 회전(선택 — 새 키 실검증 후 구 키 폐기). 다음 배치 후보: W2 /bench(수치만·확정),
+  W4.2/W4.3(HWPX 편집 개방·게이트 편입), W5.2 README GIF/비교표, W6(CDN·i18n), GeekNews 런치(W5.5).
 - 갱신: 2026-07-29 · Claude(오케스트레이터)+Opus 워커 — **배치 1(승인 불요분) 구현 완료·부분 검증
   그린·`--full` 통합 검증 대기**. 구현: ① W3 벌크 5건 — 샘플 체험 원클릭(`src/lib/bulkFill.ts` 신규,
   데모=인스펙션 위 키 필터라 하드코딩 pin 아님)·drag&drop·MessageChannel yield+행단위 try/catch
