@@ -4,10 +4,14 @@
 
 **An engine that works on Korean HWP/HWPX documents directly.** Open a file, render it faithfully,
 change its structure, export to PDF/HTML/HWPX. Screen, AI and terminal all run on the **same engine**.
-There is no server — it runs on the user's machine via WebAssembly, MCP and a CLI.
+The engine itself has no server — it runs on the user's machine via WebAssembly, MCP and a CLI.
+Only the live demo's optional AI editing calls a model provider through a separate proxy.
 
 What this repo ships is an **engine and an SDK**. The demos below are a reference implementation
 built on it, not the UI you are supposed to adopt — **you assemble the UI.**
+
+<p align="center"><img src="./docs/assets/composable-editor-shells.png" alt="One document engine composed with a right rail, bottom drawer, modal, or headless canvas" width="100%"></p>
+<p align="center"><sub>One document engine, any product shell — use the defaults or bring only the layers you need.</sub></p>
 
 [한국어](./README.md) · [Live demo](https://kwakseongjae.github.io/auto-hwp/) ·
 [Embed](./docs/EMBED-GUIDE.md) · [CLI](./docs/CLI-GUIDE.md) · [MCP](./docs/MCP-GUIDE.md) ·
@@ -20,7 +24,12 @@ built on it, not the UI you are supposed to adopt — **you assemble the UI.**
 | **Document editing** | Open a Korean document, edit it on screen, save as HTML/PDF/HWPX | [open](https://kwakseongjae.github.io/auto-hwp/) |
 | **Bulk form filling** | 1 form + an N-row roster → N finished documents as a zip (rule-based, works with no AI) | [open](https://kwakseongjae.github.io/auto-hwp/bulk) · [guide](./docs/BULK-GUIDE.md) |
 
-Documents never leave the browser (all WebAssembly, nothing is uploaded).
+<p align="center"><img src="./docs/assets/bulk-studio-home.png" alt="Bulk form filling screen that turns one template and a roster into multiple HWPX documents" width="100%"></p>
+
+The original file and all open/render/manual-edit/export operations stay in the browser (the file is
+not uploaded). If you opt into **AI editing** in the live demo, your instruction plus the document
+profile, body excerpt, table contents and selected context are sent through a Cloudflare Worker to
+OpenRouter (GLM 5.2). The demo asks for consent before the first request and never uploads the whole file.
 The demo currently accepts `.hwp` only — `.hwpx` input is in alpha.
 
 ## Why we built our own engine

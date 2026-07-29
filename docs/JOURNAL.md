@@ -5,6 +5,55 @@
 
 ---
 
+## 2026-07-29 (Claude) · 채택 격차 리서치+작업 계획 (Fable Workflow)
+- 워크플로 9에이전트(리서치 2∥감사 4→매트릭스 19행→W1~W6→완결성 검증)로 채택 병목을 확정 — 정본 `docs/ADOPTION-GAP-PLAN-2026-07-29.md`.
+- 판정: 최대 병목은 미출하(0.0.1 `file:` 결함·라이브 구버전 모순 카피·게이트 수치 비공개·벌크 체험 진입로 부재). rhwp 3,615★ 선점 실측 → 4공백 축 집중.
+- 엔진 critical 신규 확정: HWPX 문단 삽입/분리 저장 시 섹션 끝 append(순서 파손) → W4 계획.
+- 멈춘 곳: W1.1 사용자 일괄 승인(커밋→0.0.2→Worker→Pages) 대기. 승인 전 착수 가능분: W1.3·W3·W3.6·W5.1.
+- 재실행 워크플로 설치: `.claude/workflows/adoption-gap-research-plan.js`.
+
+## 2026-07-29 (Codex) · 컴포저블 SDK 셸 + 벌크 첫 화면
+- `workspacePanel`/`WorkspacePanelFrame`에 rail·bottom·modal·unstyled와 제어형 tab/open을 추가하고 기존 슬롯 호환을 유지했다.
+- `/bulk`를 4단계 로컬 자동화 랜딩으로 고치고 README에 구조 일러스트·실화면 캡처, EMBED에 portal 조립법을 보강했다.
+- Chrome 홈·벌크·8쪽 에디터 실검증, full verify 8/18/24/6·Vitest 225/51/369/53·E2E 42/42 PASS.
+- built-in imagegen 자산을 workspace에 저장했으며 commit/push/deploy는 하지 않았다.
+
+## 2026-07-28 (Codex) · 모두의창업 실물 충실도 + Figma식 스튜디오 완성
+- cell image brush·빈 spacer metrics를 복원해 파란 띠/세로 위치와 6쪽을 HWP+PDF benchmark로 고정했다.
+- 다크 홈·선택→디자인 자동전환·텍스트 무틴트 엔진캐럿·inspector/반응형 rail·커서고정 줌을 완성했다.
+- 정본 `verify-local --full`: 8/18/24/6, Vitest 225/51/368/53, E2E 42/42, diff-check·external 무변경 PASS.
+- 상용 한컴 폰트 미세 메트릭만 OFL 대체로 남으며 commit/push/deploy는 하지 않았다.
+
+## 2026-07-28 (Codex) · 원위치 캐럿 + Figma식 디자인 패널
+- hwp-lab 편집을 SVG 유지 엔진 캐럿으로 전환하고 편집 중 셀 색상 팔레트를 제거했다.
+- 우측 바이브/디자인 탭과 문단·셀 inspector를 추가해 run 보존/기존 셀 서식 op로 연결했다.
+- React 364·hwp-lab 53, 타입체크·양쪽 production build·diff-check PASS.
+- Chrome/CDP 연결 0이라 localhost 육안 QA·새 UX 기준 E2E 이행은 다음 재개점이다. 미커밋·미push.
+
+## 2026-07-28 (Codex) · React pack/publish 실패 원자성 보강
+- 실패 주입으로 기존 prepack/postpack이 npm 오류 뒤 source manifest를 publish 모드로 남김을 재현했다.
+- direct pack/publish는 fail-closed, safe wrapper는 build→치환→pack/publish→finally 복원으로 교체했다.
+- 성공·ENOENT 실패에서 package.json SHA 불변, tarball은 ^0.0.2, source는 file:, publish dry-run·pack-deps·E2E 1/1·actionlint PASS.
+- commit/push/외부 출시는 여전히 명시적 승인 대기이며 W1 staged 상태를 보존한다.
+
+## 2026-07-28 (Codex) · c49d829 로컬 완료, 외부 출시 승인 대기
+- Vite sidePanel을 복구하고 repo/fresh tarball 소비자 build·audit 0·E2E 1/1, 6개 workspace audit 0을 증명했다.
+- 단일 cargo job의 `verify-local --full`이 게이트 8/18/24·Vitest 225/51/358/53·E2E 44/44까지 전부 그린이다.
+- diff-check·external 무변경을 확인하고 Vite Node 계약을 >=20.19로 교정했다. W1은 staged됐지만 commit 승인이 없어 이력 변경은 멈췄다.
+- 외부는 아직 npm 0.0.1, 7/25 Worker/Pages, 구 wasm 7,657,643B다. 승인 후 commit/push→npm 0.0.2→Worker→Pages→검증된 키 회전.
+
+## 2026-07-28 (Codex) · sol medium 재개 준비 후 안전 중단
+- 의존성을 Vite 7/Vitest 4/Next 15.5.22/Wrangler 4로 고도화해 6개 audit 0, JS 테스트·빌드·Worker dry-run, 4패키지 pack과 fresh 소비자 install/build를 통과했다.
+- 중단점은 Vite 예제 E2E의 채팅 입력 부재이며 원인은 `App.tsx`가 `chatSidePanel()`을 주입하지 않은 것까지 확정했다.
+- tf-hwp Next 서버를 종료했고 워커 3개는 모두 완료 상태다. 미커밋 변경과 외부 Secret/키/배포 상태는 건드리지 않았다.
+- 다음 sol medium은 restore 후 Vite 예제 sidePanel 연결 → repo/fresh E2E → `PW_PORT=3288 scripts/verify-local.sh --full` 순서로 재개한다.
+
+## 2026-07-28 (Codex) · c49d829 핸드오프 구현 완료, 전체 검증 중 안전 중단
+- W1 셀 lineseg 게이트+실 inMargin 조판(8/18/24 유지, HWPX 5종 ±1쪽), W2 드래그 선택·paste·048 race 해소(225/358·repeat 10/10), W3 본문 캐럿 정본 API/cache/visual-affinity(1825/1825·p95 0.096ms)를 구현했다.
+- 리서치 075~080을 문서화하고 공개 데모 AI에 전송 동의·정확한 개인정보 문구·bounded sanitizer/body·fail-closed config·R5 escape·ZDR·Worker 5테스트를 추가했다.
+- npm 0.0.2 정합·fresh Vite pack·publish auth/preflight/부분재개까지 보완했으며, 아직 커밋·push·발행·배포·키 교체는 하나도 하지 않았다.
+- 사용자 요청으로 `verify-local --full`을 workspace test 컴파일 중 중단했다(fmt·clippy만 PASS). 다음 sol medium은 restore 후 `PW_PORT=3288 scripts/verify-local.sh --full`부터 재실행한다.
+
 ## 2026-07-26 (Claude) · 074 조판 갭 해소 + 캐럿 범위선택/Enter
 - 074: 오라클 25쪽 전제가 인공물이었음을 밝히고(NARROWLY→가로 오독) 진짜 원인 4갈래 수정 — 본문상자 여백·병합셀 균등분배·ragged 표·행높이 바닥. 총량 오차 0.08%, pps 3→4쪽=오라클 일치.
 - 열너비 드래그 미반영 실버그 수정. LOCKSTEP 구조 보장 → benchmark2 25→24 정렬(e2e 기대값 근거와 함께 갱신).

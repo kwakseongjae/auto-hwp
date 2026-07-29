@@ -4,10 +4,14 @@
 
 **한글(HWP/HWPX) 문서를 직접 다루는 엔진.** 파일을 열고, 원본대로 그리고, 구조를 바꾸고,
 PDF·HTML·HWPX로 내보냅니다. 화면·AI·터미널이 전부 **같은 엔진** 위에서 돕니다.
-서버는 없습니다 — WebAssembly·MCP·CLI로 사용자의 컴퓨터에서 실행됩니다.
+엔진 자체에는 서버가 없습니다 — WebAssembly·MCP·CLI로 사용자의 컴퓨터에서 실행됩니다.
+라이브 데모의 선택형 AI 편집만 별도 프록시를 거쳐 모델 제공자를 호출합니다.
 
 이 저장소가 배포하는 것은 **엔진과 SDK**입니다. 아래 데모는 그 엔진으로 만든 참조 구현이지
 여러분이 써야 할 화면이 아닙니다 — **화면은 여러분이 조립합니다.**
+
+<p align="center"><img src="./docs/assets/composable-editor-shells.png" alt="하나의 문서 엔진에 우측 패널, 하단 패널, 모달, 헤드리스 화면을 조립하는 구조" width="100%"></p>
+<p align="center"><sub>문서 엔진은 하나, 제품 셸은 자유롭게 — 기본 UI를 바로 쓰거나 필요한 부분만 가져갑니다.</sub></p>
 
 [English](./README.en.md) · [라이브 데모](https://kwakseongjae.github.io/auto-hwp/) ·
 [임베드](./docs/EMBED-GUIDE.md) · [CLI](./docs/CLI-GUIDE.md) · [MCP](./docs/MCP-GUIDE.md) ·
@@ -20,7 +24,12 @@ PDF·HTML·HWPX로 내보냅니다. 화면·AI·터미널이 전부 **같은 엔
 | **문서 편집** | 한글 파일을 열어 화면에서 고치고 HTML·PDF·HWPX로 저장 | [열기](https://kwakseongjae.github.io/auto-hwp/) |
 | **양식 일괄 작성** | 양식 1개 + 명단 N행 → 완성본 N부 zip (규칙 기반, AI 없이 동작) | [열기](https://kwakseongjae.github.io/auto-hwp/bulk) · [가이드](./docs/BULK-GUIDE.md) |
 
-문서는 브라우저 밖으로 나가지 않습니다(전 과정 WebAssembly, 업로드 없음).
+<p align="center"><img src="./docs/assets/bulk-studio-home.png" alt="양식 하나와 명단으로 여러 HWPX 문서를 만드는 양식 일괄 작성 화면" width="100%"></p>
+
+파일 원본과 열기·렌더·수동 편집·내보내기는 브라우저 안에서 처리됩니다(원본 업로드 없음).
+다만 라이브 데모에서 **AI 편집을 선택하면**, 사용자가 입력한 지시와 문서 프로필·본문 발췌·표/선택
+문맥이 Cloudflare Worker를 거쳐 OpenRouter(GLM 5.2)로 전송됩니다. 첫 요청 전에 동의를 받고,
+파일 원본 전체는 보내지 않습니다.
 데모는 현재 `.hwp`만 받습니다 — `.hwpx` 입력은 알파 단계입니다.
 
 ## 왜 엔진을 직접 만들었나
@@ -132,7 +141,25 @@ import '@auto-hwp/react/styles.css';
 />
 ```
 
-`sidePanel`을 생략하면 패널 없는 순수 에디터입니다. 슬롯이 호스트에게 넘기는 값
+처음부터 디자인할 필요는 없습니다. `workspacePanel()`은 바이브 편집+디자인 인스펙터가 담긴 기본 UI이고,
+배치만 `"rail"`(기본)·`"bottom"`·`"modal"`·`"unstyled"` 중에서 고릅니다.
+
+```tsx
+import { workspacePanel } from '@auto-hwp/react';
+
+<HwpWorkspace
+  {...props}
+  sidePanel={workspacePanel({ onAiRequest: myLlmBridge, presentation: 'bottom' })}
+/>
+```
+
+더 자유롭게 조립할 때는 `WorkspacePanelFrame` 안에 자신의 폼을 넣거나, 슬롯에서 React portal을 반환해
+워크스페이스 밖의 어느 DOM에든 패널을 마운트할 수 있습니다. `WorkspacePanel`의 `tab`·`open`은 제어형/
+비제어형을 모두 지원하므로 앱 라우터나 단축키 상태와 연결할 수 있습니다. `sidePanel`을 생략하면 패널 없는
+순수 에디터입니다. 즉 **엔진 → 헤드리스 editor-core → 문서 표면 → 선택형 기본 셸**을 필요한 깊이까지만
+가져갑니다.
+
+슬롯이 호스트에게 넘기는 값
 ([`WorkspaceSidePanel`](./packages/react/src/components/HwpWorkspace.tsx)) 전부:
 
 | 값 | 무엇 |
@@ -150,8 +177,12 @@ import '@auto-hwp/react/styles.css';
 | `previewCards(intents)` | 적용 전 미리보기용으로 제안을 보강(예: 삭제 대상의 원문) |
 | `revert()` | 마지막에 적용한 묶음을 한 단위로 되돌린다 |
 | `undoDepth()` | 현재 되돌리기 스택 깊이 |
+| `designSelection` | 현재 단일 선택의 종류·텍스트·쪽·X/Y/W/H·글자 서식 |
+| `applyDesign(patch)` | 선택 영역에 서식 변경분만 적용 |
+| `designFonts` | 호스트 인스펙터가 보여 줄 수 있는 폰트 목록 |
+| `textEditing` | 엔진 캐럿이 텍스트 입력을 소유한 상태 |
 
-우리 참조 채팅을 그대로 쓰고 싶다면 `chatSidePanel({ onAiRequest })` 한 줄이면 됩니다
+우리 참조 패널을 그대로 쓰고 싶다면 `workspacePanel({ onAiRequest })` 한 줄이면 됩니다
 ([`packages/react/src/chatSlot.tsx`](./packages/react/src/chatSlot.tsx)) — 다만 그 한국어 문구와
 카드 레이아웃은 **데모의 것이지 제품 계약이 아닙니다**. 실제 제품은 자기 패널을 그리는 쪽을 권합니다.
 

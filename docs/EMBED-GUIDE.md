@@ -25,7 +25,7 @@ npm i @auto-hwp/react @auto-hwp/engine @auto-hwp/editor-core @auto-hwp/ai-protoc
 | `@auto-hwp/ai-protocol` | L2' (isomorphic) | EditRequest/Response·buildDocContext(R5 펜스)·validate\*. fetch·키 0. 서버·클라 공유. |
 | `@auto-hwp/react` | L3 (UI) | `<HwpWorkspace/>` + 오버레이·채팅. 전부 교체 가능. `peerDependencies`: react/react-dom ≥18. |
 
-`@auto-hwp/react` 는 `@auto-hwp/engine`·`@auto-hwp/editor-core` 를 실버전(`^0.0.1`)으로 의존한다(모노레포
+`@auto-hwp/react` 는 `@auto-hwp/engine`·`@auto-hwp/editor-core` 를 실버전(`^0.0.2`)으로 의존한다(모노레포
 `file:` 아님 — 발행본은 레지스트리에서 정상 해석된다). `@auto-hwp/ai-protocol` 은 서버 프록시에서도 쓰므로
 독립 설치한다.
 
@@ -90,10 +90,10 @@ const adapter = new WasmAdapter(
 
 전체 배선(파일 열기·프로브·폰트 fetch·mock AI)은 [`examples/vite-embed/src/App.tsx`](../examples/vite-embed/src/App.tsx) 참조.
 
-### 3.1 `sidePanel` — 오른쪽 패널은 호스트가 조립한다
+### 3.1 `sidePanel` — 패널의 내용과 배치는 호스트가 조립한다
 
 `HwpWorkspace` 는 **문서 표면만** 소유한다: 페이지·선택·오버레이·수동 편집. **채팅 뷰는 들어 있지 않다.**
-오른쪽 패널은 슬롯이고, 호스트가 채팅·입력 폼·인스펙터를 넣거나 아무것도 안 넣는다. 슬롯 함수는
+패널은 슬롯이고, 호스트가 채팅·입력 폼·인스펙터를 넣거나 아무것도 안 넣는다. 슬롯 함수는
 `WorkspaceSidePanel` 을 받는다 — 편집 표면 전체가 여기로 넘어오므로 워크스페이스 내부를 건드릴 일이 없다:
 
 ```tsx
@@ -112,13 +112,49 @@ sidePanel={(api) => (
     previewCards={api.previewCards}  // 적용 전 미리보기 보강
     onRevert={api.revert}            // 마지막 적용 묶음을 한 단위로 되돌리기
     undoDepth={api.undoDepth}
+    selection={api.designSelection} // 종류·텍스트·페이지·X/Y/W/H·현재 서식
+    onDesign={api.applyDesign}      // 선택 영역에 서식 delta 적용
+    textEditing={api.textEditing}   // 엔진 캐럿 입력 중인지
   />
 )}
 ```
 
 정의: [`packages/react/src/components/HwpWorkspace.tsx`](../packages/react/src/components/HwpWorkspace.tsx) 의 `WorkspaceSidePanel`.
 
-우리 참조 채팅을 그대로 쓰려면 `chatSidePanel({ onAiRequest, notice })` 한 줄이면 된다
+#### 기본 UI는 쓰되 배치만 바꾸기
+
+참조 패널은 바이브 편집과 선택 디자인 인스펙터를 제공한다. 제품 셸을 처음부터 만들 필요 없이
+`presentation`만 고를 수 있다:
+
+```tsx
+import { workspacePanel } from "@auto-hwp/react";
+
+<HwpWorkspace
+  {...props}
+  sidePanel={workspacePanel({
+    onAiRequest,
+    presentation: "bottom", // "rail" | "bottom" | "modal" | "unstyled"
+  })}
+/>
+```
+
+`WorkspacePanel`을 직접 렌더하면 `tab`/`onTabChange`, `open`/`onOpenChange`를 앱 상태가 제어할 수 있다.
+내용은 자기 것으로 유지하고 기본 배치만 빌리려면 `WorkspacePanelFrame` 안에 임의의 children을 넣는다.
+
+#### 워크스페이스 밖에 마운트하기
+
+`sidePanel`은 React 노드를 반환하는 일반 render prop이다. 따라서 portal을 쓰면 하단 앱 셸이나 전역 모달
+루트처럼 워크스페이스 밖에도 같은 API를 연결할 수 있다:
+
+```tsx
+import { createPortal } from "react-dom";
+
+sidePanel={(api) =>
+  createPortal(<MyPanel api={api} />, document.querySelector("#product-tools")!)
+}
+```
+
+우리 참조 패널을 그대로 쓰려면 `workspacePanel({ onAiRequest, notice })` 한 줄이면 된다
 ([`packages/react/src/chatSlot.tsx`](../packages/react/src/chatSlot.tsx)). 단 **그건 데모 어포던스지 제품
 계약이 아니다** — 한국어 문구·카드 레이아웃·상호작용 모델이 전부 우리 것이다. 실제 제품은 자기 패널을
 `WorkspaceSidePanel` 에 대고 그리고, 이 패키지에서는 편집 표면만 가져가는 쪽을 권한다.
@@ -211,7 +247,7 @@ bypass: 등록된 이름과 일치하는 명시 지정은 명조/고딕 대체�
 ```bash
 # 발행본 tarball 을 만들고(examples/vite-embed 가 소비) 스모크:
 cd examples/vite-embed
-npm run pack-deps        # 4개 패키지 npm pack → vendor/*.tgz (prepack 이 pkg/dist 채움, file:→실버전)
+npm run pack-deps        # 4개 패키지 pack → vendor/*.tgz (React safe wrapper가 file: 치환을 finally 복원)
 npm install              # vendor tarball 설치 (레지스트리 없이 이식 재현)
 npm run test:e2e         # Playwright: 업로드 → 8쪽 SVG → 셀 마킹 → mock 편집 → undo
 ```

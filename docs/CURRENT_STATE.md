@@ -5,6 +5,133 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
+- 갱신: 2026-07-29 · Claude(오케스트레이터)+Opus 워커 — **배치 1(승인 불요분) 구현 완료·부분 검증
+  그린·`--full` 통합 검증 대기**. 구현: ① W3 벌크 5건 — 샘플 체험 원클릭(`src/lib/bulkFill.ts` 신규,
+  데모=인스펙션 위 키 필터라 하드코딩 pin 아님)·drag&drop·MessageChannel yield+행단위 try/catch
+  (row_failed·완성분 보존·wasm free 누수 방지)·명단 키↔필드 키 양방향 unmatched 진단(칩 ✓/✕)·PII
+  고지, ② W1.3a CHANGELOG.md 신설(0.x 정책+Intent 안정축 구분, 0.0.1 결함 2건 — **신발견: 0.0.1
+  wasm은 wasm-opt 미적용 12.29MB 발행**(binaryen 수정 3커밋이 발행 10분 뒤)), ③ W3.5a 073 헤더
+  'v1 done·후속 open' 정정+진행표 행, ④ W5.1 OG/twitter/favicon/description(가치제안형)+trailing
+  slash 수정, ⑤ **W4.1 HWPX 문단 삽입/분리 끝-append 수리**(serialize.rs 앵커 레인 — placeholder
+  2단 구조, 표 src_span 함정 회피, 레드→그린 5테스트+verbatim 골든 불변+파리티 3/3+clippy/fmt 클린).
+  검증자(Opus) 판정 yellow→ /bulk canonical 루트 상속 1건은 수리 워커 진행 중. 오케스트레이터가
+  serialize.rs·layout.tsx·CHANGELOG·bulk 로직 diff 직접 검수 완료(보고-실물 일치).
+  **종결(같은 날 후속): canonical 수리 완료(신규 bulk/layout.tsx — /bulk canonical·og:url 정상화
+  실측) 후 `CARGO_BUILD_JOBS=1 PW_PORT=3388 verify-local.sh --full` exit 0 — 게이트
+  8==8/18==18/24==24/6==6·파리티 3/3·E2E 43/43 재시도 없이 그린. 배치 1 전체 무회귀 확정.**
+  사용자 결정 3건: ① "ㄱㄱ" = W1 출시 절차 일괄 승인(커밋→push→0.0.2 발행→Pages 재배포),
+  ② benchmarks/modu-startup 실물은 **corpus/private로 사유화**(공개 커밋 불가 — 테스트/게이트를
+  부재-내성 skip으로 전환 작업 진행), ③ /bench 벤치 페이지는 **수치+재현 커맨드만**(원본 비교
+  이미지 비공개). + 무명 커밋 플래너가 워킹트리 135항목 → **논리 커밋 15개(C1~C15) 계획** 확정
+  (C1=기존 staged 인덱스 그대로, 혼합 파일 4개 식별, CHANGELOG (미커밋) 마커 8곳 치환 목록,
+  `__pycache__` gitignore, control-audit.rs 예제는 cfg 가드 부재로 미커밋 유지).
+  ⚠️ named 팀메이트 무음 정지 재발(2026-07-29) → 사용자 확정 지시: **tmux·named 팀메이트 금지,
+  무명 백그라운드 Agent/Workflow만**. **다음: modu 사유화 완료 → C1~C15 커밋 실행 → push →
+  publish dry_run → npm 0.0.2 실발행 → 0.0.1 deprecate → fresh 스모크 → Pages 재배포.**
+- 갱신: 2026-07-29 · Claude — **채택 격차 리서치+감사+작업 계획 확정** → 정본
+  `docs/ADOPTION-GAP-PLAN-2026-07-29.md` (Fable Workflow 9에이전트: 외부 리서치 2 ∥ 감사 4 →
+  매트릭스 19행 → W1~W6 → 완결성 검증 통과. 재실행 `.claude/workflows/adoption-gap-research-plan.js`).
+  핵심 판정: 격차는 엔진 부족이 아니라 **미출하** — ①레지스트리 0.0.1은 `file:` 의존 결함(실측)이고
+  문서는 미발행 API 안내, ②라이브는 동의 없는 AI 전송+모순 카피(수정본 로컬 완성·미배포),
+  ③충실도 게이트 수치가 내부 문서에만, ④벌크(차별화 1축)가 샘플 부재로 체험 불가.
+  경쟁 실측: rhwp 3,615★·@rhwp/editor 월 12,646 DL vs 우리 1★·월 116 DL → 정면승부 회피,
+  4공백 축(충실도 공개증명·일괄작성·바이브·React SDK) 집중. 엔진 critical 1건 신규 확정:
+  HWPX 원본 문단 삽입/Enter 분리 저장 시 섹션 끝 append(문서 순서 파손, serialize.rs 문단 레인 —
+  057 표 수리와 동형·미수리, .hwp 전용 게이트라 가려짐) → W4. **다음: W1.1 사용자 일괄 승인**
+  (커밋→0.0.2 발행→Worker→Pages) — 승인 전 착수 가능: W1.3 CHANGELOG·W3 벌크 전체·W3.6 PII 고지·W5.1 OG.
+- 갱신: 2026-07-29 · Codex — **컴포저블 오픈소스 에디터 셸 + 벌크 랜딩 고도화 로컬 완료
+  (미커밋·미push·미배포)**. 기존 `sidePanel(api)` 헤드리스 경계와 `chatSidePanel` 호환은 유지하면서,
+  공개 `workspacePanel()`·`WorkspacePanelFrame`을 추가했다. 기본 바이브/디자인 UI는
+  `rail | bottom | modal | unstyled` 배치, `tab/open` 제어형·비제어형 상태를 지원하고, 임의 children
+  또는 React portal로 워크스페이스 밖 제품 셸에도 같은 `WorkspaceSidePanel` API를 연결할 수 있다.
+  벌크 `/bulk` 업로드 전 화면은 4단계 흐름·로컬 처리 설명·양식→N개 HWPX→zip 비주얼·집중형 업로드
+  surface로 재설계했다. README/영문 README에는 생성형 구조 일러스트
+  `docs/assets/composable-editor-shells.png`와 실제 Browser Harness 캡처
+  `docs/assets/bulk-studio-home.png`를 추가했고, EMBED 가이드에 프리셋·제어 상태·portal 조립법을
+  문서화했다. 실제 Chrome에서 홈·벌크·8쪽 샘플 에디터(다크 캔버스, `hw-sidepanel-rail`,
+  바이브/디자인 탭, 개발 오류 없음)를 확인했다.
+  **최종 증거**: `CARGO_BUILD_JOBS=1 PW_PORT=3288 scripts/verify-local.sh --full` 전부 그린 —
+  fmt·clippy·전체 Rust/unit/doc/feature, 쪽수 **8==8/18==18/24==24/6==6**, wasm 7,728,658B
+  재빌드·cargo-deny, 캐럿 page-local 1825/1825·rect→hit 431/431·p95 0.106ms, Vitest
+  **225/51/369/53**, Chromium E2E **42/42 재시도 없이 PASS**. 이미지 생성은 built-in imagegen,
+  실제 UI 캡처는 Browser Harness를 사용했다. 마지막 커밋/배포 상태는 변경하지 않았다.
+- 갱신: 2026-07-28 · Codex — **모두의창업 실물 충실도 + Figma식 웹 편집 최종 로컬 완료
+  (미커밋·미push·미배포)**. hwp-lab은 다크 스튜디오 홈/편집 화면과 한 줄 전역 문서 도구를 쓰며,
+  우측은 기본 `바이브 편집` → 문단·셀·범위 선택 시 `디자인` inspector 자동 전환, 좁은 창에서는
+  overlay/collapse로 종이를 보존한다. 텍스트 편집은 own-render SVG 위치를 유지하는 엔진 캐럿이며
+  틴트·셀 팔레트를 제거했다. 단순 캐럿의 디자인 변경은 문단/셀 전체 run 보존, 실제 글자 범위는 그
+  범위만 토글한다. Escape는 캐럿→요소 선택 순서의 2단계 해제다. 중앙정렬 시트가 가로 overflow로
+  바뀌는 줌 경계도 실제 sheet anchor 재측정으로 커서 고정 ±2px를 복구했다.
+  `모두의창업` 원본은 CSS 그라데이션이 아니라 borderFill 10/11의 **1949×35 래스터 2장**이고,
+  제목 앞 빈 문단은 source line height 1500 + gap 900이다. HWP lift가 cell image brush와 이 빈
+  spacer metrics를 보존하고 render가 셀 배경 이미지를 테두리/글자 아래에 그리도록 수정했다. 적용은
+  image-fill 장식 양식의 진짜 빈 문단으로 한정해 기존 문서 회귀를 막았다. HWP/PDF를
+  `corpus/private/modu-startup/`(로컬 전용 — 공개 커밋 불가)에 두고 `scripts/compare-modu-startup.sh`와
+  `modu_startup_fidelity.rs`를 추가했다. 상용 H2hdrM/HYwulB/HCRDotum/Malgun Gothic 자체는
+  재배포하지 않으며 OFL 명조/고딕·실제 bold 대체라 글리프 메트릭의 미세 차이는 남는다.
+  **최종 증거**: `CARGO_BUILD_JOBS=1 PW_PORT=3288 scripts/verify-local.sh --full` 전부 그린 —
+  fmt·clippy·전체 Rust/unit/doc/feature, 쪽수 **8==8/18==18/24==24/6==6**, wasm 7,728,658B
+  재빌드·cargo-deny, 캐럿 page-local 1825/1825·rect→hit 431/431·p95 0.081ms, Vitest
+  **225/51/368/53**, Chromium E2E **42/42 재시도 없이 PASS**. `git diff --check` PASS,
+  `external/` 무변경, 비교 스크립트 HWP/PDF 체크섬·6쪽·page2 양쪽 산출 PASS.
+- 갱신: 2026-07-28 · Codex — **Figma식 수동 디자인/원위치 엔진 캐럿 로컬 구현 완료
+  (미커밋·미push·미배포)**. hwp-lab은 전체 박스를 덮는 좌측정렬 contentEditable 대신 own-render SVG를
+  유지하는 글리프 캐럿을 사용하며, 편집 중 셀 색상 팔레트는 숨긴다. 우측 레일에 `바이브 편집/디자인`
+  탭을 추가해 선택한 문단·셀·범위의 X/Y/W/H, 서체, 크기, 굵게/기울임, 글자색, 셀 배경·정렬을 표시·
+  수정한다. 문단 변경은 run 보존 `SetParagraphRuns`, 셀/범위는 기존 `SetCellRangeFmt/Shade` 계약을
+  재사용한다. SDK는 `preferEngineCaretEditing=false` 기본과 optional inspector API로 호환 유지.
+  React **47파일/364테스트**, hwp-lab **6파일/53테스트**, 양쪽 production build, `git diff --check`
+  PASS. Browser Harness는 Chrome 미실행·연결 0이라 localhost 육안 QA와 새 UX 기준 Playwright E2E
+  이행/`verify-local --full`은 대기한다. 재개 시 Chrome 실행+remote debugging 허용 후 실제 모두의창업
+  문서에서 제목 원위치 편집·디자인 탭·폰트/색/정렬·팔레트 미노출을 먼저 확인한다.
+- 갱신: 2026-07-28 · Codex — **sol medium 재개 · 로컬 구현/패키징 전체 검증 완료
+  (미커밋·미push·미릴리스, 외부 Secret/키/워크플로 무변경)**.
+  W1 완료: 셀 lineseg 재귀 게이트(benchmark 261/261, b1 826/839·±1 839/839, b2
+  1042/1059·±1 1059/1059) + 실제 좌우 cell/table inMargin을 조판·그리기·캐럿에 단일 적용.
+  페이지 게이트 8==8/18==18/24==24, 한컴저작 HWPX 5종 전부 ±1쪽. bizinfo 24↔25 잔여는
+  table-host `pageBreak` 보존 문제로 080 분리.
+  W2 완료: 같은 문단/셀 마우스 드래그 범위, plain-text paste(단일 Set*Runs·undo 1회), 048의
+  physical pointer-up/async stale-gesture race 수정. editor-core 225·React 358, 048 repeat 10/10,
+  cell paste E2E 2/2. 문단 넘는 선택은 076, 구조적 multiline paste는 atomic op 전까지 이연.
+  W3 완료: 본문 캐럿 정본 API·revision-keyed placed-doc cache·페이지 visual-affinity. 563 band,
+  page-local 1825/1825, rect→hit 431/431, p95 0.096ms; session 5·MCP 52·파리티 3/3·viewer check·wasm
+  재빌드 통과. 릴리스 보안 리뷰에서 공개 데모의 제3자 문맥 전송 무고지와 unbounded
+  anchor/config fail-open을 P0로 확인 → 첫 호출 동의·정확한 README, known-field/128KiB/8KiB caps,
+  fail-closed CORS/limits, R5 fence escape, OpenRouter `zdr:true`, Worker 단위 테스트를 추가함.
+  패키징 보완도 완료: consumer lock 0.0.2 정합, fresh `vendor/` 생성, publish auth fail-fast +
+  부분발행 resume, Worker `npm ci`·Vitest 5/5.
+  **전체 검증 증거**: `verify-local --full`의 fmt·clippy·workspace/unit/doc/feature tests·8==8/18==18/
+  24==24·wasm check/rebuild·cargo-deny·JS build·Vitest 225/51/358/53 전부 PASS. 캐럿 교차검증
+  page-local 1825/1825·rect→hit 431/431, p95 0.155ms. 첫 E2E에서 W2 최신-pointer-up 계약과 충돌한
+  구식 무대기 격자 스캐너 5실패·6 flaky를 발견해, 표 선택 settle→셀 드릴 settle→편집/캐럿을 공유하는
+  `e2e/cell-gesture.ts`로 8개 스펙을 통일했다. 실패 5파일 12/12, 잔여 flaky 3파일 repeat 14/14,
+  최종 전체 E2E **44/44 재시도 없이 PASS**. 최초 샌드박스 포트 EPERM과 고아 Next 재사용은 코드
+  실패가 아니며 정확히 식별한 검증 프로세스만 정리함.
+  그 뒤 의존성 보안 고도화도 적용했다: Vite 7.3.6·plugin-react 4.7.0, Vitest 4.1.10, Next
+  15.5.22, Wrangler 4.114.0으로 올렸고 6개 JS workspace audit 0, Vitest 225/51/358/53/5,
+  React Vite·Next production build, Worker typecheck/dry-run을 통과했다. 4패키지 0.0.2 pack과 fresh
+  Vite 소비자 install/build/audit 0도 통과. Vite 예제의 누락된 `chatSidePanel()`을 호스트
+  `App.tsx`에 명시적으로 연결해 published-tarball E2E **1/1 PASS**(8쪽 렌더→셀 마킹→mock
+  SetTableCell 적용→undo)로 복구했다. 4패키지를 재pack한 완전 새 temp 소비자에서도
+  install 79패키지·Vite production build·audit 0·동일 E2E **1/1 PASS**를 재현했다.
+  여섯 JS workspace audit도 모두 0. 최종 `CARGO_BUILD_JOBS=1 PW_PORT=3288
+  scripts/verify-local.sh --full`은 fmt·clippy·전체 Rust/unit/doc/feature·게이트 8/18/24·wasm
+  rebuild·cargo-deny·JS build·Vitest 225/51/358/53·E2E **44/44** 전부 PASS. 본문 캐럿은
+  page-local 1825/1825·rect→hit 431/431·p95 0.086ms. 최초 병렬 cargo는 hwp-viewer rustc 두 개가
+  CPU 0/linker 없음으로 5분 정지해 중단했으며 단일 job 동일 스크립트는 완주했다.
+  완료 감사에서 `git diff --check` PASS·`external/` 무변경을 확인했고, Vite 7 예제의 Node 선언도
+  `>=20.19`로 교정 후 build+E2E 1/1 PASS. W1 11파일은 첫 논리 커밋으로 **staged**했으나 commit은
+  명시적 사용자 승인 부재로 안전 심사에서 거부되어 우회하지 않았다. 따라서 HEAD/origin은 여전히
+  `c49d829`, npm 네 패키지는 모두 0.0.1뿐이고, Worker/Pages 마지막 배포는 2026-07-25다.
+  추가 패키징 실패 주입에서 기존 React prepack이 npm cache 오류 뒤 `postpack`을 못 타 source manifest를
+  `^0.0.2`로 남기는 결함을 발견했다. direct pack/publish는 fail-closed하고, 새 safe wrapper가
+  build→실버전 치환→`--ignore-scripts` pack/publish→`finally` file: 복원을 소유하도록 교체했다.
+  성공/의도적 ENOENT 실패 모두 manifest SHA 불변, `publish:safe --dry-run`, pack-deps, 소비자 E2E 1/1,
+  `actionlint` 전부 PASS. Vite 예제 lock은 최초 설계부터 의도적 ignore(재생성 tarball integrity)로 유지.
+  라이브 Pages는 구 문구("AI…곧")와 wasm **7,657,643 bytes**를 서빙(200)하며 새 wasm은
+  **7,725,724 bytes**다. 다음은 사용자에게 commit/push/외부 출시 승인을 받은 뒤 논리 커밋→push→
+  publish dry-run→npm 0.0.2 실제 발행→fresh registry smoke→hardened Worker→Pages 순으로 출시한다.
+  키 회전은 새 키 실검증 후에만 구 키를 폐기한다.
 - 갱신: 2026-07-26 · Claude — **074 done(047fc14) + 캐럿 심화(26c0de5)**.
   ⚠️ **074 전제 정정**: 내가 근거로 삼은 "오라클 25쪽"은 인공물(H2Orestart 가 NARROWLY 를 가로로 읽어
   본문 높이 반토막 — PDF MediaBox 841×595). 오라클 지표는 **세로 렌더 확인 후에만** 쓸 것.
@@ -43,7 +170,8 @@
   구조갭 3종(섹션 spine 순서·머리말/각주 본문 누출·표 세로 이중오차) → **조판이 rhwp와 301줄 완전
   일치**(전 368). ⚠️ 트레이드오프: 코퍼스 한컴쪽수 대비 불일치 22→25(가려져 있던 기존 갭이 드러남 —
   되돌리려면 outMargin+is_table_anchor 두 지점을 **함께**). `hwpx_rhwp_parity.rs` = 입력을 잠그는 오라클.
-  ⚠️ **`layout-check <f>.hwpx`는 우리 파서를 안 탄다**(양쪽 rhwp lift) — 이 축 지표로 쓰지 말 것.
+  ⚠️ 당시 **`layout-check <f>.hwpx`는 우리 파서를 안 탔다**. 2026-07-28 배치에서 production HWPX
+  parser→own layout vs rhwp lineseg 경로로 교정됨(정규화본 cache 부재는 missing-oracle로 별도 보고).
   ② **에디터**: 채팅 UI를 SDK에서 분리 — `WorkspaceSidePanel` 슬롯(13값), 호스트가 패널 조립.
   `chatSidePanel()`은 참조 배선(제품 계약 아님). + ⌘Z/⌘⇧Z/⌘Y·⌘C(TSV) 키보드 기본기.
   ③ **문서**: 능력 중심 재구성(README 한/영 11섹션 1:1) + CLI-GUIDE·BULK-GUIDE 신설 + FIGMA-GRADE-UX
