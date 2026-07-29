@@ -339,6 +339,10 @@ export class BodyCaretController {
   private state: BodyCaretState | null = null;
   private changed = new Emitter<BodyCaretState | null>();
   private chain: Promise<unknown> = Promise.resolve();
+  /** 마우스 글자 드래그가 이 문단을 소유하는 동안 true. 포인터 이동은 React state 없이 여기로 온다. */
+  private dragging = false;
+  /** `endDrag()` 뒤 늦게 돌아온 hit-test가 dragging=true를 부활시키지 못하게 하는 취소 세대. */
+  private dragGeneration = 0;
   /** 현재 문단의 문자 박스 캐시 — 방향키 이동은 이걸로 즉답(엔진 왕복 0). 커밋 때 갱신된다. */
   private boxes: CharBox[] | null = null;
   private page = 0;
@@ -364,6 +368,8 @@ export class BodyCaretController {
 
   /** 캐럿 제거(Escape / 포커스 상실 / 문서 교체). 실제로 지워질 때만 emit. */
   clear(): void {
+    this.dragGeneration++;
+    this.dragging = false;
     this.boxes = null;
     if (this.state) {
       this.state = null;
@@ -434,6 +440,44 @@ export class BodyCaretController {
     });
   }
 
+  /** 마우스 텍스트 드래그 시작. 현재 살아 있는 캐럿과 **같은 본문 문단 밴드**에서 시작할 때만
+   *  소유권을 얻는다. 시작점이 새 `{anchor, focus}`의 anchor가 되며 기존 범위는 접힌다. */
+  beginDragAt(page: number, x: number, y: number): Promise<boolean> {
+    if (!this.supported) return Promise.resolve(false);
+    const generation = ++this.dragGeneration;
+    this.dragging = false;
+    return this.enqueue(async () => {
+      const a = this.state?.anchor;
+      if (!a || !this.boxes || page !== this.page) return false;
+      const band = this.bandFor((await this.adapter.hitTest(page, x, y)) ?? null, y);
+      if (generation !== this.dragGeneration) return false;
+      if (!band || band.section !== a.section || band.block !== a.block) return false;
+      const offset = bodyOffsetAtPoint(this.boxes, x, y);
+      this.dragging = true;
+      this.emit({ ...a, offset, selAnchor: offset });
+      return true;
+    });
+  }
+
+  /** 소유한 마우스 드래그의 focus를 화면 점으로 옮긴다. 같은 문단의 문자 박스만 쓰므로 포인터가
+   *  밴드 밖/다른 페이지로 나가도 범위는 문단 경계 `[0, paraLen]` 안에 클램프된다. */
+  dragTo(page: number, x: number, y: number): Promise<boolean> {
+    return this.enqueue(async () => {
+      const a = this.state?.anchor;
+      if (!this.dragging || !a || !this.boxes) return false;
+      const offset =
+        page === this.page ? bodyOffsetAtPoint(this.boxes, x, y) : page < this.page ? 0 : a.paraLen;
+      this.emit({ ...a, offset: clampOffset(offset, a.paraLen) });
+      return true;
+    });
+  }
+
+  /** 포인터 종료/취소. 선택 범위는 남기고 드래그 소유권만 놓는다. */
+  endDrag(): void {
+    this.dragGeneration++;
+    this.dragging = false;
+  }
+
   /** 좌우 방향키: 문단 안에서 `delta`만큼. 기하는 캐시된 박스로 즉답(엔진 왕복 없음).
    *  범위가 살아 있으면 한 칸 움직이는 대신 **가까운 끝으로 접힌다**(워드프로세서 관례). */
   move(delta: number): Promise<BodyCaretState | null> {
@@ -492,6 +536,16 @@ export class BodyCaretController {
    *  범위가 있으면 그 범위를 **대체**한다. */
   insertText(text: string): Promise<boolean> {
     return this.enqueue(() => this.splice(text, 0));
+  }
+
+  /** 클립보드 평문 붙여넣기. 개행도 run text 안의 bare separator로 포함해 SetParagraphRuns **하나**로
+   *  보낸다. `DocSession.applyBatch`는 JS 장부만 한 배치일 뿐 엔진 호출은 N회라 SplitParagraph 연쇄는
+   *  중간 실패 시 부분 변경을 남긴다. native atomic multi-op API가 생기기 전에는 구조 분할보다
+   *  "붙여넣기 한 번 = engine undo 한 번"을 우선한다. 범위가 살아 있으면 그 범위를 대체한다. */
+  pasteText(text: string): Promise<boolean> {
+    const normalized = text.replace(/\r\n?/g, "\n");
+    if (normalized.length === 0) return Promise.resolve(false);
+    return this.enqueue(() => this.splice(normalized, 0));
   }
 
   /** 백스페이스: 범위가 있으면 범위 삭제, 없으면 캐럿 **앞** 한 글자 삭제.
@@ -645,4 +699,5 @@ export class BodyCaretController {
     await this.reanchor(a.section, a.block, Math.max(0, at - delChars) + insert.length);
     return true;
   }
+
 }

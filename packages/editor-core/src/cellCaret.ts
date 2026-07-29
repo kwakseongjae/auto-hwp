@@ -216,6 +216,10 @@ export class CellCaretController {
   private state: CellCaretState | null = null;
   private changed = new Emitter<CellCaretState | null>();
   private chain: Promise<unknown> = Promise.resolve();
+  /** 마우스 글자 드래그가 현재 셀 문단을 소유하는 동안의 고정 주소. */
+  private dragging: Pick<CellCaretAnchor, "section" | "block" | "row" | "col" | "para"> | null = null;
+  /** 포인터 종료 뒤 늦은 cell hit가 드래그 소유권을 되살리지 못하게 하는 취소 세대. */
+  private dragGeneration = 0;
   /** offset → caret rect 메모(현재 주소 한정 — `memoKey` 가 바뀌면 버린다). 범위 하이라이트가 오프셋을
    *  훑어야 해서 생긴 캐시. */
   private rectMemo = new Map<number, CellCaretRect | null>();
@@ -245,6 +249,8 @@ export class CellCaretController {
 
   /** Drop the caret (Escape / focus loss / document swap). Emits only when something was cleared. */
   clear(): void {
+    this.dragGeneration++;
+    this.dragging = null;
     this.rectMemo.clear();
     if (this.state) {
       this.state = null;
@@ -293,6 +299,66 @@ export class CellCaretController {
         hit.caret,
       );
     });
+  }
+
+  /** 마우스 텍스트 드래그 시작. 현재 캐럿과 **같은 셀 문단**의 글리프에서 시작할 때만 소유한다. */
+  beginDragAt(page: number, x: number, y: number): Promise<boolean> {
+    if (!this.supported) return Promise.resolve(false);
+    const generation = ++this.dragGeneration;
+    this.dragging = null;
+    return this.enqueue(async () => {
+      const a = this.state?.anchor;
+      if (!a) return false;
+      const hit = (await this.adapter.hitTestCellText!(page, x, y)) ?? null;
+      if (generation !== this.dragGeneration) return false;
+      if (
+        !hit ||
+        hit.section !== a.section ||
+        hit.block !== a.block ||
+        hit.row !== a.row ||
+        hit.col !== a.col ||
+        hit.para !== a.para
+      ) {
+        return false;
+      }
+      const offset = clampOffset(hit.offset, hit.para_len);
+      this.dragging = {
+        section: a.section,
+        block: a.block,
+        row: a.row,
+        col: a.col,
+        para: a.para,
+      };
+      await this.publish({ ...a, offset, selAnchor: offset, paraLen: hit.para_len }, hit.caret);
+      return true;
+    });
+  }
+
+  /** 소유한 드래그의 focus를 옮긴다. 다른 셀/문단으로 넘어가면 마지막 유효 focus를 유지하므로
+   *  커밋 주소는 언제나 시작 셀 문단 하나에 머문다(멀티 블록 범위는 v1 밖). */
+  dragTo(page: number, x: number, y: number): Promise<boolean> {
+    return this.enqueue(async () => {
+      const a = this.state?.anchor;
+      const d = this.dragging;
+      if (!a || !d) return false;
+      const hit = (await this.adapter.hitTestCellText!(page, x, y)) ?? null;
+      const same =
+        hit &&
+        hit.section === d.section &&
+        hit.block === d.block &&
+        hit.row === d.row &&
+        hit.col === d.col &&
+        hit.para === d.para;
+      if (!same) return true; // 소유권은 유지하되 범위는 마지막 유효 오프셋에 클램프
+      await this.publish({ ...a, offset: clampOffset(hit.offset, a.paraLen) }, hit.caret);
+      return true;
+    });
+  }
+
+  /** 포인터 종료/취소. 범위는 남기고 드래그 주소만 놓는다. */
+  endDrag(): void {
+    this.dragGeneration++;
+    this.dragging = null;
   }
 
   /** Move the caret by `delta` chars within the current paragraph (arrow keys), clamped to

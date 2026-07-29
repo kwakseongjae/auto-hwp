@@ -43,6 +43,38 @@ describe("SelectionModel — replace/toggle/marquee (issue 021)", () => {
     expect(labels(m)[0]).toContain("블록 둘");
   });
 
+  it("slow earlier and fast later pointer-ups settle in physical order", async () => {
+    let releaseSlow!: () => void;
+    let reportFast!: () => void;
+    const slowGate = new Promise<void>((resolve) => {
+      releaseSlow = resolve;
+    });
+    const fastSeen = new Promise<void>((resolve) => {
+      reportFast = resolve;
+    });
+    class DelayedHitAdapter extends MockAdapter {
+      override async hitTest(_page: number, x: number): Promise<BlockHit | null> {
+        if (x < 200) await slowGate;
+        else reportFast();
+        return x < 200 ? para(1, 0, 1123, "느린 첫 클릭") : para(2, 0, 1123, "빠른 마지막 클릭");
+      }
+    }
+    const m = new SelectionModel(new DelayedHitAdapter({ pages: 1 }));
+
+    // React calls pointerDown fire-and-forget. Each pointerUp must capture that gesture immediately even
+    // while the prior worker query is unresolved; final state follows physical release order, not latency.
+    void m.pointerDown(pd(0, 100, 100));
+    const first = m.pointerUp(pd(0, 100, 100));
+    void m.pointerDown(pd(0, 300, 100));
+    const second = m.pointerUp(pd(0, 300, 100));
+    await fastSeen; // the later worker reply is ready while the earlier one is still blocked
+    releaseSlow();
+    await Promise.all([first, second]);
+
+    expect(chips(m)).toBe(1);
+    expect(labels(m)[0]).toContain("빠른 마지막 클릭");
+  });
+
   it("⌘/Ctrl+click TOGGLES a block in and out of the selection", async () => {
     const m = new SelectionModel(new MockAdapter({ pages: 1, hit: para(3, 0, 1123, "토글 대상") }));
     await click(m, 0, 100, 100, true);

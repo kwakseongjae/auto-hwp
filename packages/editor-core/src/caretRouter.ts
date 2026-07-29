@@ -33,6 +33,10 @@ export interface ActiveCaret {
 export class CaretRouter {
   private active: CaretKind | null = null;
   private state: ActiveCaret | null = null;
+  /** 마우스 텍스트 드래그를 실제로 소유한 캐럿 종류. null이면 기존 블록/마퀴 레인 소유. */
+  private dragging: CaretKind | null = null;
+  /** controller hit-test가 늦게 끝나도 이미 끝난 포인터 세션을 다시 소유하지 못하게 한다. */
+  private dragGeneration = 0;
   private changed = new Emitter<ActiveCaret | null>();
 
   constructor(
@@ -82,6 +86,7 @@ export class CaretRouter {
 
   /** 두 캐럿 모두 해제(Escape / 문서 교체 / 이미지 선택 등). */
   clear(): void {
+    this.endDrag();
     this.cell.clear();
     this.body.clear();
   }
@@ -89,10 +94,41 @@ export class CaretRouter {
   /** 클릭 해소 순서: **셀 먼저**(표 안이 우선 — 기존 053 동작 무회귀), 셀이 아니면 본문 문단.
    *  `extend`(Shift+클릭)는 같은 문단/셀 안에서만 범위가 되고, 그 밖이면 새 캐럿이다. */
   async clickAt(page: number, x: number, y: number, extend = false): Promise<ActiveCaret | null> {
+    this.endDrag();
     const inCell = await this.cell.clickAt(page, x, y, extend);
     if (inCell) return this.state;
     const inBody = await this.body.clickAt(page, x, y, extend);
     return inBody ? this.state : null;
+  }
+
+  /** 현재 캐럿과 같은 문단에서 시작한 마우스 드래그만 텍스트 레인이 소유한다. */
+  async beginDragAt(page: number, x: number, y: number): Promise<boolean> {
+    this.endDrag();
+    const generation = this.dragGeneration;
+    const kind = this.active;
+    if (!kind) return false;
+    const owned =
+      kind === "cell"
+        ? await this.cell.beginDragAt(page, x, y)
+        : await this.body.beginDragAt(page, x, y);
+    if (generation !== this.dragGeneration) return false;
+    if (owned && this.active === kind) this.dragging = kind;
+    return owned && this.active === kind;
+  }
+
+  /** 텍스트 드래그 focus 이동. 컨트롤러가 시작 문단 경계 안으로 클램프한다. */
+  async dragTo(page: number, x: number, y: number): Promise<boolean> {
+    if (this.dragging === "cell") return this.cell.dragTo(page, x, y);
+    if (this.dragging === "body") return this.body.dragTo(page, x, y);
+    return false;
+  }
+
+  /** 드래그 소유권만 종료하고 만들어진 범위는 유지한다. */
+  endDrag(): void {
+    this.dragGeneration++;
+    this.cell.endDrag();
+    this.body.endDrag();
+    this.dragging = null;
   }
 
   /** 좌우 이동(문단/셀 문단 안). 살아 있는 캐럿이 없으면 no-op. */
@@ -147,6 +183,15 @@ export class CaretRouter {
   async insertText(text: string): Promise<boolean> {
     if (this.active === "cell") return this.cell.insertText(text);
     if (this.active === "body") return this.body.insertText(text);
+    return false;
+  }
+
+  /** 평문 붙여넣기. 셀/본문 모두 개행을 bare run separator로 보존하며, 각각
+   *  SetTableCellRuns / SetParagraphRuns 한 번으로 커밋된다(한 paste = 한 engine undo). */
+  async pasteText(text: string): Promise<boolean> {
+    const normalized = text.replace(/\r\n?/g, "\n");
+    if (this.active === "cell") return this.cell.insertText(normalized);
+    if (this.active === "body") return this.body.pasteText(normalized);
     return false;
   }
 

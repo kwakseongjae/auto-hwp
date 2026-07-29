@@ -192,6 +192,11 @@ export class SelectionModel {
   private marquee: SelMarquee | null = null;
   private drag: Drag | null = null;
   private dragSeq = 0;
+  // Worker hit-tests can finish out of order. `pointerUp()` captures its own Drag synchronously, then
+  // settles clicks/marquees on this chain so an older slow click can never overwrite a newer fast click.
+  // (The React shell must still CALL pointerUp at physical release time; deferring the call would let a
+  // later pointerDown replace `this.drag` before it is captured.)
+  private pointerUpChain: Promise<void> = Promise.resolve();
   /// Figma-style progressive drill state (issue 06x + 064 Tier-2): the CELL the user has DRILLED into (via
   /// a double-click / `drillInto`), as its `section` + descending `CellPath` (a STACK of `CellAddr` —
   /// length 1 for a top-level cell, ≥2 for a nested one). While set, a plain click on a cell of the SAME
@@ -355,14 +360,38 @@ export class SelectionModel {
     this.setMarquee({ page: d.page, box, boxes: slices });
   }
 
-  /** pointerup: finish a marquee (query blocksInRect) or a click (resolve → anchor). */
-  async pointerUp(_input?: PointerInput): Promise<void> {
+  /** pointerup: capture this exact gesture immediately, then finish it in physical release order.
+   *  `input` also closes the fast-drag gap: if pointermove happened before the async empty probe returned,
+   *  release can still promote an empty-origin gesture to a marquee after resolving its origin. */
+  async pointerUp(input?: PointerInput): Promise<void> {
     const d = this.drag;
     this.drag = null;
     if (this.marquee) this.setMarquee(null);
     if (!d) return;
-    if (d.marqueeing) await this.finishMarquee(d);
-    else await this.finishClick(d);
+    if (input) {
+      d.curX = input.x;
+      d.curY = input.y;
+    }
+    const settle = async () => {
+      if (!d.marqueeing && input && this.adapter.blocksInRect) {
+        const cx = input.client?.x ?? input.x;
+        const cy = input.client?.y ?? input.y;
+        const moved = Math.hypot(cx - d.startClientX, cy - d.startClientY) > DRAG_THRESHOLD_PX;
+        if (moved) {
+          const r = d.resolved ?? (await this.resolveHit(d.page, d.startX, d.startY));
+          d.resolved = r;
+          const strictInside =
+            !!r.hit && d.startX >= r.hit.x && d.startX <= r.hit.x + r.hit.w && d.startY >= r.hit.y && d.startY <= r.hit.y + r.hit.h;
+          d.marqueeing = !r.table && !strictInside;
+        }
+      }
+      if (d.marqueeing) await this.finishMarquee(d);
+      else await this.finishClick(d);
+    };
+    const queued = this.pointerUpChain.then(settle);
+    // Keep the ordering lane alive even if a future finish path starts throwing instead of emitting.
+    this.pointerUpChain = queued.catch((e) => this.errors.emit(e));
+    await queued;
   }
 
   private async finishMarquee(d: Drag): Promise<void> {

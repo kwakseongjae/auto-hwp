@@ -379,6 +379,29 @@ describe("CellCaretController (headless click → caret → commit)", () => {
     expect(ctl.get()!.rects).toEqual([]);
   });
 
+  it("마우스 드래그는 같은 셀 문단의 범위를 만들고 대체 입력은 SetTableCellRuns만 낸다", async () => {
+    const { adapter, ctl } = makeController({
+      cellText: (page, x) => {
+        const offset = x < 20 ? 0 : 2;
+        return hit({ offset, para_len: 2, caret: { page, x: 100 + offset * 10, top: 200, height: 13 } });
+      },
+      cellCaret: wrappingCell,
+      runs: [{ text: "AB", bold: true }],
+    });
+    await ctl.clickAt(0, 5, 5);
+    expect(await ctl.beginDragAt(0, 5, 5)).toBe(true);
+    expect(await ctl.dragTo(0, 50, 5)).toBe(true);
+    ctl.endDrag();
+    expect(ctl.get()!.anchor).toMatchObject({ selAnchor: 0, offset: 2, paraLen: 2 });
+    expect(ctl.get()!.rects).toHaveLength(1);
+
+    expect(await ctl.insertText("X")).toBe(true);
+    expect(adapter.applied).toHaveLength(1);
+    expect(adapter.applied.every((i) => i.intent === "SetTableCellRuns")).toBe(true); // mutation: 평문 variant 금지
+    // 전체 런을 지운 뒤의 삽입은 물려받을 이웃 글자가 없으므로 안전한 무서식 런이다.
+    expect((adapter.applied[0] as Intent & { runs: RunSpec[] }).runs).toEqual([{ text: "X" }]);
+  });
+
   it("chains fast keystrokes strictly in order (each commit is its own undo unit)", async () => {
     const { adapter, session, ctl } = makeController({
       cellText: hit({ para: 0, offset: 2, para_len: 2 }),

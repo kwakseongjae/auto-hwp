@@ -298,6 +298,31 @@ describe("BodyCaretController — 클릭/이동/커밋", () => {
     expect(away).toBeNull(); // 이 목 어댑터에선 두 번째 문단 글리프가 없어 캐럿이 서지 않는다(018)
   });
 
+  it("마우스 드래그는 같은 본문 문단 안에서 anchor→focus 범위를 만들고 범위 타이핑은 run-preserving op만 낸다", async () => {
+    const adapter = bodyAdapter();
+    const core = await coreWith(adapter);
+    await core.bodyCaret.clickAt(0, 112, 45); // 캐럿 활성(가|나)
+
+    expect(await core.bodyCaret.beginDragAt(0, 100.1, 45)).toBe(true); // 새 anchor = 문단 시작
+    expect(await core.bodyCaret.dragTo(0, 500, 45)).toBe(true); // focus = 문단 끝으로 clamp
+    core.bodyCaret.endDrag();
+    expect(core.bodyCaret.get()!.anchor).toMatchObject({ selAnchor: 0, offset: 4, paraLen: 4 });
+    expect(core.bodyCaret.get()!.rects).toHaveLength(1);
+
+    expect(await core.bodyCaret.insertText("X")).toBe(true);
+    expect(adapter.applied).toHaveLength(1);
+    expect(adapter.applied.every((i) => i.intent === "SetParagraphRuns")).toBe(true); // mutation: 평문 variant 금지
+    expect((adapter.applied[0] as Intent & { runs: RunSpec[] }).runs.map((r) => r.text).join("")).toBe("X");
+  });
+
+  it("캐럿 문단 밖에서 시작한 드래그는 텍스트 레인이 소유하지 않는다(기존 마퀴로 강등)", async () => {
+    const core = await coreWith(bodyAdapter());
+    await core.bodyCaret.clickAt(0, 112, 45);
+    expect(await core.bodyCaret.beginDragAt(0, 112, 300)).toBe(false);
+    expect(await core.bodyCaret.dragTo(0, 500, 45)).toBe(false);
+    expect(core.bodyCaret.get()!.anchor).toMatchObject({ selAnchor: 1, offset: 1 });
+  });
+
   it("⌘A는 문단 전체를 선택한다", async () => {
     const core = await coreWith(bodyAdapter());
     await core.bodyCaret.clickAt(0, 112, 45);
@@ -321,6 +346,22 @@ describe("BodyCaretController — 클릭/이동/커밋", () => {
     await core2.bodyCaret.extend(2);
     expect(await core2.bodyCaret.deleteBack()).toBe(true);
     expect((adapter2.applied[0] as Intent & { runs: RunSpec[] }).runs.map((r) => r.text).join("")).toBe(" 다");
+  });
+
+  it("여러 줄 붙여넣기는 범위를 대체한 SetParagraphRuns 단 한 번이다(부분 적용/다중 engine undo 금지)", async () => {
+    const adapter = bodyAdapter();
+    const core = await coreWith(adapter);
+    await core.bodyCaret.clickAt(0, 100.1, 45);
+    await core.bodyCaret.extend(2); // "가나" 선택
+
+    expect(await core.bodyCaret.pasteText("X\r\nY")).toBe(true);
+    expect(adapter.applied).toHaveLength(1); // engine 호출도 하나 — N번째 실패/앞 변경 잔존 자체가 없다
+    expect(adapter.applied[0].intent).toBe("SetParagraphRuns");
+    const runs = (adapter.applied[0] as Intent & { runs: RunSpec[] }).runs;
+    expect(runs.map((r) => r.text).join("")).toBe("X\nY 다");
+    expect(runs.find((r) => r.text === "\n")).toEqual({ text: "\n" }); // separator는 스타일 없는 bare run
+    expect(adapter.applied.every((i) => i.intent === "SetParagraphRuns")).toBe(true);
+    expect(core.session.undoDepth()).toBe(1); // 붙여넣기 한 번 = undo 한 번
   });
 
   it("범위에 ⌘B는 그 구간만 굵게 토글한다(런 보존 — 나머지 서식 그대로)", async () => {
@@ -448,6 +489,37 @@ describe("CaretRouter — 셀 캐럿과 본문 캐럿은 하나의 표면, 동�
     expect(await core.caret.insertText("X")).toBe(false);
     expect(await core.caret.deleteBack()).toBe(false);
     expect(await core.caret.styleAtCaret()).toBeNull();
+  });
+
+  it("pointerup 뒤 늦게 끝난 beginDragAt은 소유권을 되살리지 않는다", async () => {
+    let releaseHit!: () => void;
+    const hitGate = new Promise<void>((resolve) => {
+      releaseHit = resolve;
+    });
+    class DelayedBodyHitAdapter extends MockAdapter {
+      delay = false;
+      override async hitTest(page: number, x: number, y: number): Promise<BlockHit | null> {
+        if (this.delay) await hitGate;
+        return super.hitTest(page, x, y);
+      }
+    }
+    const adapter = new DelayedBodyHitAdapter({
+      svg: () => SVG_3,
+      hit: () => BAND,
+      blocks: [BAND],
+      runs: () => RUNS.map((r) => ({ ...r })),
+    });
+    const core = await coreWith(adapter);
+    await core.caret.clickAt(0, 112, 45);
+
+    adapter.delay = true;
+    const pending = core.caret.beginDragAt(0, 112, 45);
+    core.caret.endDrag(); // physical pointerup wins while the worker hit is pending
+    releaseHit();
+
+    expect(await pending).toBe(false);
+    expect(await core.caret.dragTo(0, 140, 45)).toBe(false);
+    expect(await core.bodyCaret.dragTo(0, 140, 45)).toBe(false); // controller 내부 소유권도 부활하지 않음
   });
 
   it("어느 쪽도 못 답하는 백엔드면 supported=false", async () => {
