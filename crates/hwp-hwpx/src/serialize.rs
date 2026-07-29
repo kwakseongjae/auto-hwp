@@ -714,22 +714,12 @@ fn patch_section_xml(
     let (tbl_edits, tables_in_place) = table_inplace_edits(&original, sec, &edits, table_ref, plan);
     edits.extend(tbl_edits);
 
-    edits.sort_by_key(|e| std::cmp::Reverse(e.0));
-    let mut s = original;
-    for (start, end, xml) in &edits {
-        s.replace_range(*start..*end, xml);
-    }
-
-    // (2) PAGE EDIT (#005): patch secPr in place (string-search → robust after the splices above).
-    if sec.page_edited {
-        s = synth::patch_page(&s, &sec.page);
-    }
-
-    // (3) APPENDED blocks (dirty, source=None) → emit + inject before the section close tag.
-    // Tables already re-emitted in place (1b) are excluded — appending them too would duplicate
-    // (issue 057). Sequence-aware (like emit_blocks): a pure table-anchor paragraph is elided and
-    // its forced page break rides on the next table's wrapper <hp:p> (issue 054).
-    let mut dirty: Vec<EmitBlock> = Vec::new();
+    // (3) APPENDED blocks (dirty, source=None) → emit + inject. Tables already re-emitted in place
+    // (1b) are excluded — appending them too would duplicate (issue 057). Sequence-aware (like
+    // emit_blocks): a pure table-anchor paragraph is elided and its forced page break rides on the
+    // next table's wrapper <hp:p> (issue 054). Collected BEFORE the splices below because the anchor
+    // plan (1c) needs the block list while the byte offsets are still ORIGINAL-relative.
+    let mut dirty: Vec<(usize, EmitBlock)> = Vec::new();
     let mut pending_pb = false;
     for (bi, b) in sec.blocks.iter().enumerate() {
         if tables_in_place.contains(&bi) {
@@ -748,8 +738,29 @@ fn patch_section_xml(
         if let EmitBlock::Table(t) = &mut eb {
             t.page_break = std::mem::take(&mut pending_pb);
         }
-        dirty.push(eb);
+        dirty.push((bi, eb));
     }
+
+    // (1c) NEW PARAGRAPHS AT THEIR DOCUMENT POSITION (W4.1 — 057 표 레인의 문단 판): a paragraph
+    // born mid-document (`Op::SplitParagraph` 의 꼬리 / `InsertParagraphAt`) carries no source span,
+    // so the append lane below used to inject it at the SECTION END — the saved .hwpx then read back
+    // in the wrong order. Anchor each such paragraph to its NEIGHBOUR's span instead and splice a
+    // placeholder there; the emit loop fills each placeholder with that paragraph's XML. Anchorless
+    // (from-scratch section) or unsafe anchors keep the legacy end-append fallback.
+    let anchors = anchor_new_paragraphs(&original, sec, &dirty, &edits);
+    edits.extend(anchors.splices.iter().map(|(at, m)| (*at, *at, m.clone())));
+
+    edits.sort_by_key(|e| std::cmp::Reverse(e.0));
+    let mut s = original;
+    for (start, end, xml) in &edits {
+        s.replace_range(*start..*end, xml);
+    }
+
+    // (2) PAGE EDIT (#005): patch secPr in place (string-search → robust after the splices above).
+    if sec.page_edited {
+        s = synth::patch_page(&s, &sec.page);
+    }
+
     if dirty.is_empty() && !sec.decorations.iter().any(|d| !d.from_source) {
         // Edits / page already applied (or nothing changed) — no append needed.
         return s.into_bytes();
@@ -827,7 +838,7 @@ fn patch_section_xml(
     let merge_stub = sec.provenance.source == Some(SourceFormat::Hwp5);
 
     let mut inject = String::new();
-    for (bi, block) in dirty.iter().enumerate() {
+    for (i, (bi, block)) in dirty.iter().enumerate() {
         let mut piece = String::new();
         match block {
             EmitBlock::Para {
@@ -915,10 +926,24 @@ fn patch_section_xml(
                 emit_equation(&mut piece, pid, eqid, eq, base_para_ref, &plain_ref);
             }
         }
-        if bi == 0 && merge_stub && merge_first_block_into_stub(&mut s, &piece) {
+        if i == 0 && merge_stub && merge_first_block_into_stub(&mut s, &piece) {
             continue;
         }
+        // (1c) 앵커가 잡힌 새 문단은 자기 자리(placeholder)로 — 섹션 끝 append 가 아니라.
+        if let Some(mark) = anchors.marks.get(bi) {
+            if let Some(pos) = s.find(mark.as_str()) {
+                s.replace_range(pos..pos + mark.len(), &piece);
+                continue;
+            }
+        }
         inject.push_str(&piece);
+    }
+    // 남은 placeholder 는 반드시 지운다 — 마커가 저장 바이트에 새면 한/글이 못 여는 XML 이 된다
+    // (스텁 병합 등 예외 경로에서만 남는다).
+    for mark in anchors.marks.values() {
+        if let Some(pos) = s.find(mark.as_str()) {
+            s.replace_range(pos..pos + mark.len(), "");
+        }
     }
 
     match s.rfind("</") {
@@ -931,6 +956,88 @@ fn patch_section_xml(
         }
         None => orig.to_vec(),
     }
+}
+
+/// Where each freshly-created paragraph must be spliced into the section's ORIGINAL XML (W4.1).
+///
+/// The append lane can only put a block at the section end, which reorders the document for any
+/// paragraph born in the MIDDLE of it (캐럿 Enter / `InsertParagraphAt`). We therefore reserve the
+/// paragraph's real position with a placeholder during the splice pass and swap the emitted XML in
+/// afterwards — the same "anchor to the original bytes" discipline the table lane uses (057/060),
+/// but a placeholder instead of a byte range, because the emitted XML can only be built later (its
+/// `id`s must not collide with the ids the table lane just spliced in).
+#[derive(Default)]
+struct AnchorPlan {
+    /// section block index → the placeholder reserved for that block.
+    marks: BTreeMap<usize, String>,
+    /// (original-XML byte offset, placeholders that anchor there, in document order).
+    splices: Vec<(usize, String)>,
+}
+
+/// A placeholder that can never occur in real OWPML: NUL is illegal in XML 1.0, so no document
+/// content, attribute value or entity can collide with it, and it carries neither `<`/`>` (the
+/// `rfind("</")` append point) nor `id="`/`paraPrIDRef="` (the `max_id`/`last_attr` probes).
+fn anchor_mark(bi: usize) -> String {
+    format!("\u{0}ahwp-anchor-{bi}\u{0}")
+}
+
+/// Resolve every NEW paragraph's insertion point in the original section XML (W4.1).
+///
+/// Anchor = the nearest PRECEDING source-backed top-level paragraph's span end, else the nearest
+/// FOLLOWING one's span start. Only `<hp:p>` spans qualify: a table's `src_span` addresses the
+/// `<hp:tbl>` INSIDE its wrapper paragraph, so anchoring there would bury the new paragraph in
+/// `<hp:p><hp:run>` — tables are skipped and their host paragraph (the very next block, since
+/// `</hp:tbl>` closes first) supplies the anchor instead.
+///
+/// Only paragraphs are anchored. A dirty TABLE that missed the in-place lane (stale/absent span)
+/// keeps the legacy end-append: its stale original is still sitting in the bytes, so moving the
+/// duplicate next to it would be a different bug, not a fix.
+fn anchor_new_paragraphs(
+    original: &str,
+    sec: &Section,
+    dirty: &[(usize, EmitBlock)],
+    edits: &[(usize, usize, String)],
+) -> AnchorPlan {
+    let span_of = |bi: usize| -> Option<(usize, usize)> {
+        let Some(Block::Paragraph(p)) = sec.blocks.get(bi) else {
+            return None;
+        };
+        let (a, b) = p.source.as_ref()?.span;
+        // Stale/foreign span guard — degrade to the append fallback, never a bad splice or a panic.
+        (a < b
+            && b <= original.len()
+            && original.is_char_boundary(a)
+            && original.is_char_boundary(b))
+        .then_some((a, b))
+    };
+
+    let mut plan = AnchorPlan::default();
+    let mut grouped: BTreeMap<usize, String> = BTreeMap::new();
+    for (bi, _) in dirty {
+        // Fresh paragraphs only (`source: None`); everything else keeps its existing lane.
+        if !matches!(sec.blocks.get(*bi), Some(Block::Paragraph(p)) if p.source.is_none()) {
+            continue;
+        }
+        let at = (0..*bi)
+            .rev()
+            .find_map(|j| span_of(j).map(|(_, end)| end))
+            .or_else(|| {
+                (*bi + 1..sec.blocks.len()).find_map(|j| span_of(j).map(|(start, _)| start))
+            });
+        let Some(at) = at else { continue };
+        // An anchor STRICTLY inside another edit's span would be swallowed by that splice. Spans are
+        // paragraph boundaries so this shouldn't happen — fall back to append rather than risk it.
+        if edits.iter().any(|(s0, e0, _)| *s0 < at && at < *e0) {
+            continue;
+        }
+        let mark = anchor_mark(*bi);
+        // Blocks sharing one anchor concatenate in DOCUMENT order (`dirty` is block-ordered), so a
+        // multi-paragraph insert at the same seam keeps its sequence.
+        grouped.entry(at).or_default().push_str(&mark);
+        plan.marks.insert(*bi, mark);
+    }
+    plan.splices = grouped.into_iter().collect();
+    plan
 }
 
 /// The in-place lane's decision for one dirty table (issue 057).
