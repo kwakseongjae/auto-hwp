@@ -4,9 +4,9 @@ name: publish
 # 로컬 검증 우선, Actions 는 수동 트리거)을 그대로 따른다. 자동 발행 없음.
 #
 # 발행 순서는 의존 위상 그대로: engine → editor-core → ai-protocol → react
-#   (react 만 engine/editor-core 에 실버전 의존을 갖는다 — prepack 이 file: → ^ver 로 치환한 tarball 을 낸다.)
-# 각 패키지의 prepack 훅이 빌드를 수행한다(engine=wasm-bindgen+wasm-opt, react=vite+tsc, 나머지=tsc)므로
-# 여기서 별도 build 스텝이 없어도 gitignore 된 pkg/dist 가 tarball 에 채워진다. publishConfig.access=public.
+#   (react만 engine/editor-core에 실버전 의존을 갖는다. publish:safe가 build→file: 치환→publish→finally
+#   복원을 소유해, npm 실패가 source manifest를 publish 모드로 남기지 않는다.)
+# engine/editor-core/ai-protocol의 prepack 훅과 react의 publish:safe가 pkg/dist를 채운다.
 #
 # 안전장치: dry_run 입력이 기본 true — 실제 레지스트리 반영 없이 `npm publish --dry-run` 으로 검증만 한다.
 # 실제 발행하려면 워크플로 실행 시 dry_run=false 로 명시해야 한다(npm unpublish 제약 — 되돌리기 어려움).
@@ -29,11 +29,20 @@ jobs:
     runs-on: ubuntu-latest
     env:
       NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      DRY: ${{ inputs.dry_run && '--dry-run' || '' }}
+      DRY_RUN: ${{ inputs.dry_run }}
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive # external/rhwp — engine wasm 빌드에 필요(cargo resolve)
+
+      # 빌드 툴체인을 설치하기 전에 토큰을 fail-fast 검증한다. `npm publish --dry-run`은
+      # 토큰이 없어도 경고만 내고 성공할 수 있으므로 whoami가 발행 인증의 정본이다.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.19
+          registry-url: "https://registry.npmjs.org"
+      - name: verify npm authentication
+        run: npm whoami --registry=https://registry.npmjs.org
 
       # engine prepack(build-wasm.mjs)이 쓰는 Rust 툴체인 + wasm-bindgen(=0.2.125, Cargo.toml 과 정확히 일치).
       - uses: dtolnay/rust-toolchain@1.95
@@ -49,34 +58,66 @@ jobs:
           curl -sL https://github.com/WebAssembly/binaryen/releases/download/version_119/binaryen-version_119-x86_64-linux.tar.gz | tar xz -C /tmp
           echo "/tmp/binaryen-version_119/bin" >> "$GITHUB_PATH"
           /tmp/binaryen-version_119/bin/wasm-opt --version
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          registry-url: "https://registry.npmjs.org"
 
       # 발행 순서: engine → editor-core → ai-protocol → react. 각 패키지 install(파일: 심링크/devDeps) 후
-      # publish(prepack 이 빌드 + tarball 채움). react install 시점엔 engine/editor-core 의 dist/pkg 가 이미
+      # publish(build + tarball 채움). react install 시점엔 engine/editor-core 의 dist/pkg 가 이미
       # 앞 단계에서 디스크에 생성돼 있으므로 vite 빌드가 editor-core dist 를 resolve 한다.
       - name: publish @auto-hwp/engine
         working-directory: packages/engine
         run: |
+          PACKAGE="@auto-hwp/engine"
+          VERSION="$(node -p "require('./package.json').version")"
           npm install --no-audit --no-fund
-          npm publish --access public $DRY
+          if npm view "$PACKAGE@$VERSION" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
+            # fresh runner 에는 react 가 file: 로 읽을 pkg/가 없으므로 publish 만 건너뛰고 로컬 산출물은 만든다.
+            npm run build
+            echo "$PACKAGE@$VERSION already published; skipping publish"
+            exit 0
+          fi
+          PUBLISH_ARGS=(--access public)
+          [ "$DRY_RUN" = "true" ] && PUBLISH_ARGS+=(--dry-run)
+          npm publish "${PUBLISH_ARGS[@]}"
 
       - name: publish @auto-hwp/editor-core
         working-directory: packages/editor-core
         run: |
+          PACKAGE="@auto-hwp/editor-core"
+          VERSION="$(node -p "require('./package.json').version")"
           npm install --no-audit --no-fund
-          npm publish --access public $DRY
+          if npm view "$PACKAGE@$VERSION" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
+            # react build가 file: dependency의 dist를 읽으므로 부분 재개에서도 로컬 build는 필요하다.
+            npm run build
+            echo "$PACKAGE@$VERSION already published; skipping publish"
+            exit 0
+          fi
+          PUBLISH_ARGS=(--access public)
+          [ "$DRY_RUN" = "true" ] && PUBLISH_ARGS+=(--dry-run)
+          npm publish "${PUBLISH_ARGS[@]}"
 
       - name: publish @auto-hwp/ai-protocol
         working-directory: packages/ai-protocol
         run: |
+          PACKAGE="@auto-hwp/ai-protocol"
+          VERSION="$(node -p "require('./package.json').version")"
+          if npm view "$PACKAGE@$VERSION" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
+            echo "$PACKAGE@$VERSION already published; skipping publish"
+            exit 0
+          fi
           npm install --no-audit --no-fund
-          npm publish --access public $DRY
+          PUBLISH_ARGS=(--access public)
+          [ "$DRY_RUN" = "true" ] && PUBLISH_ARGS+=(--dry-run)
+          npm publish "${PUBLISH_ARGS[@]}"
 
       - name: publish @auto-hwp/react
         working-directory: packages/react
         run: |
+          PACKAGE="@auto-hwp/react"
+          VERSION="$(node -p "require('./package.json').version")"
+          if npm view "$PACKAGE@$VERSION" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
+            echo "$PACKAGE@$VERSION already published; skipping publish"
+            exit 0
+          fi
           npm install --no-audit --no-fund
-          npm publish --access public $DRY
+          PUBLISH_ARGS=(--access public)
+          [ "$DRY_RUN" = "true" ] && PUBLISH_ARGS+=(--dry-run)
+          npm run publish:safe -- "${PUBLISH_ARGS[@]}"

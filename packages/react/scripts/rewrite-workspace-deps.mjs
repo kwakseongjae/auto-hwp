@@ -3,9 +3,10 @@
 // 전략: **로컬 개발은 file: 심링크로, 발행 tarball 만 실버전으로.** 이 레포는 루트 pnpm-workspace 가
 // 없고(패키지별 독립 package-lock.json = npm), apps/hwp-lab 도 npm+file: 로 소비한다 — pnpm 의
 // `workspace:*` 프로토콜을 도입하면 npm 이 이를 해석하지 못해 apps/hwp-lab 설치가 깨진다(무회귀 위반).
-// 그래서 on-disk package.json 은 file: 를 그대로 두어 로컬 개발/심링크를 보존하고, `prepack` 이 이
-// 스크립트로 file: → ^<실버전> 으로 바꿔 tarball 에 담은 뒤, `postpack` 이 다시 file: 로 되돌린다.
-// (npm 은 prepack 을 먼저 돌린 뒤 그 package.json 으로 tarball 을 만든다 → 발행본엔 file: 가 0.)
+// 그래서 on-disk package.json 은 file: 를 그대로 두어 로컬 개발/심링크를 보존하고,
+// `with-publish-deps.mjs`가 build → file:을 ^<실버전>으로 치환 → lifecycle을 끈 npm pack/publish →
+// finally 복원을 한 프로세스에서 소유한다. npm 자체 prepack/postpack에 복원을 맡기면 npm이 pack 도중
+// 실패할 때 postpack이 실행되지 않아 worktree가 publish 모드로 남는 것이 실측됐다.
 //
 // 대상: @auto-hwp/react 의 dependencies 중 @auto-hwp/editor-core, @auto-hwp/engine (react 만 상호의존을 가짐 —
 // editor-core/ai-protocol/engine 은 @auto-hwp 상호의존이 없어 치환 대상이 없다). 실버전은 형제 패키지의
@@ -14,8 +15,8 @@
 // 파일 전체를 JSON.parse→stringify 하면 배열 포맷이 뭉개져 디프 노이즈가 크다 — 그래서 해당 dep 라인만
 // **텍스트로 치환**해 나머지 포맷(단일 라인 배열 등)을 그대로 보존한다(멱등).
 //
-// 사용:  node scripts/rewrite-workspace-deps.mjs --publish   # file: → ^ver  (prepack)
-//        node scripts/rewrite-workspace-deps.mjs --dev       # ^ver  → file: (postpack, 되돌리기)
+// 사용:  node scripts/rewrite-workspace-deps.mjs --publish   # file: → ^ver
+//        node scripts/rewrite-workspace-deps.mjs --dev       # ^ver  → file: (finally 복원)
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

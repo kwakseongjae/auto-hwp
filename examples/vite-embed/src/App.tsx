@@ -2,6 +2,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import {
   HwpWorkspace,
   WasmAdapter,
+  chatSidePanel,
   type Anchor,
   type DocContext,
   type Intent,
@@ -129,6 +130,7 @@ export default function App() {
             adapter={adapter}
             document={doc}
             onAiRequest={onAiRequest}
+            sidePanel={chatSidePanel({ onAiRequest, isMock: true })}
             defaultFont={defaultFont}
             fontUrlBase="/fonts"
             enableEditing

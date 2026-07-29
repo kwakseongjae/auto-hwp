@@ -11,7 +11,7 @@
 
 ```bash
 # 1) 발행본 만들기 — 4개 패키지 npm pack → vendor/*.tgz
-#    prepack 훅이 빌드(engine=wasm 레시피, react=vite+tsc+file:→실버전 치환, 나머지=tsc)를 수행하므로
+#    패키징 훅이 빌드(engine=wasm 레시피, react=safe wrapper+vite+tsc+file:→실버전, 나머지=tsc)를 수행하므로
 #    tarball 은 pkg/dist 를 담고 file: 의존이 0이다(발행본과 동일).
 npm run pack-deps
 

@@ -9,6 +9,7 @@ export default defineConfig({
   use: {
     baseURL: "http://localhost:5180",
     trace: "on-first-retry",
+    viewport: { width: 1600, height: 1400 },
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {

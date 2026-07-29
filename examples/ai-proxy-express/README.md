@@ -46,7 +46,7 @@ const onAiRequest = async (instruction, anchors, ctx) => {
 
 ## 외부 호스트로 복사할 때
 
-- `package.json` 의 `"@auto-hwp/ai-protocol": "file:../../packages/ai-protocol"` 를 **`"^0.0.1"`**(npm 발행본)으로 바꾼다.
+- `package.json` 의 `"@auto-hwp/ai-protocol": "file:../../packages/ai-protocol"` 를 **`"^0.0.2"`**(npm 발행본)으로 바꾼다.
 - 교차 출처면 `ALLOW_ORIGIN` 을 프론트 오리진으로 좁힌다(기본 `*`는 개발 편의용).
 - 서버리스(Vercel/Cloudflare/Lambda)면 `app.post` 핸들러 본문을 그 런타임의 함수 시그니처로 옮기면 된다 —
   검증/프롬프트/벤더 호출 로직은 그대로 재사용.

@@ -1,10 +1,44 @@
 import path from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 // 이식 증명(issue 063): published tarball(@auto-hwp/react·engine·editor-core·ai-protocol)을 설치한
 // 비-Next Vite 앱에서 뷰어가 렌더되고 셀 편집이 왕복하는지 검증한다. 소스경로 import 0 — node_modules
 // 의 발행본만 소비한다. 데모 픽스처: 레포 benchmarks/benchmark.hwp(8쪽).
 const BENCHMARK = path.resolve(process.cwd(), "..", "..", "benchmarks", "benchmark.hwp");
+
+async function selectFirstCell(page: Page): Promise<string> {
+  const cell = page.locator(".hw-mark-cell").first();
+  const label = page.locator(".hw-mark-label").first();
+  const sheet = page.locator('.hw-sheet[data-page="0"]');
+  const box = await sheet.boundingBox();
+  if (!box) throw new Error("첫 페이지 시트 박스를 찾지 못함");
+
+  for (let ry = 0.1; ry <= 0.9; ry += 0.04) {
+    for (let rx = 0.1; rx <= 0.9; rx += 0.06) {
+      const x = box.x + box.width * rx;
+      const y = box.y + box.height * ry;
+      await page.mouse.click(x, y);
+      await page.waitForTimeout(150);
+      if ((await cell.count()) > 0) return (await label.innerText()).trim();
+      if ((await page.locator(".hw-mark-table").count()) === 0) continue;
+
+      await page.waitForTimeout(500);
+      await page.mouse.click(x, y);
+      await page.waitForTimeout(100);
+      await page.mouse.click(x, y);
+      try {
+        await expect(cell).toBeVisible({ timeout: 4_000 });
+        return (await label.innerText()).trim();
+      } catch {
+        continue;
+      }
+    }
+  }
+  const status = await page.locator(".hw-status").allInnerTexts();
+  throw new Error(
+    `표 셀을 드릴하지 못함 (스캔 실패: table=${await page.locator(".hw-mark-table").count()}, cell=${await cell.count()}, status=${JSON.stringify(status)})`,
+  );
+}
 
 test("published tarball → 뷰어 8쪽 렌더 → 셀 마킹 → mock 편집이 그 셀을 바꿈 → undo", async ({ page }) => {
   await page.goto("/");
@@ -16,27 +50,11 @@ test("published tarball → 뷰어 8쪽 렌더 → 셀 마킹 → mock 편집이
   await expect(page.locator(".hw-sheet svg").first()).toBeVisible({ timeout: 60_000 });
 
   // 셀 단위 마킹: 표 안을 클릭하면 셀 앵커("N행 M열")가 뜬다. 그리드로 스캔.
-  const anchor = page.locator(".hw-anchor");
+  const cellMark = page.locator(".hw-mark-cell");
   const pages = page.locator(".hw-pages");
-  const firstSheet = page.locator('.hw-sheet[data-page="0"]');
-  const box = await firstSheet.boundingBox();
-  if (!box) throw new Error("첫 페이지 시트 박스를 찾지 못함");
-
-  let cellLabel: string | null = null;
-  outer: for (let ry = 0.12; ry <= 0.88 && !cellLabel; ry += 0.06) {
-    for (let rx = 0.12; rx <= 0.88; rx += 0.1) {
-      await firstSheet.click({ position: { x: box.width * rx, y: box.height * ry } });
-      if ((await anchor.count()) > 0) {
-        const label = (await anchor.first().innerText()).trim();
-        if (label.includes("행")) {
-          cellLabel = label;
-          break outer;
-        }
-      }
-    }
-  }
-  expect(cellLabel, '표 안 클릭 → 셀 앵커(라벨에 "행")가 떠야 한다').toBeTruthy();
-  expect(await anchor.count()).toBe(1);
+  const cellLabel = await selectFirstCell(page);
+  expect(cellLabel, '표 안 클릭 → 셀 마킹(라벨에 "행")이 떠야 한다').toContain("행");
+  expect(await cellMark.count()).toBe(1);
 
   await expect(pages).not.toContainText("PoC");
 

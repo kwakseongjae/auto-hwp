@@ -15,27 +15,27 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@auto-hwp/ai-protocol": "file:./vendor/auto-hwp-ai-protocol-0.0.1.tgz",
-    "@auto-hwp/editor-core": "file:./vendor/auto-hwp-editor-core-0.0.1.tgz",
-    "@auto-hwp/engine": "file:./vendor/auto-hwp-engine-0.0.1.tgz",
-    "@auto-hwp/react": "file:./vendor/auto-hwp-react-0.0.1.tgz",
+    "@auto-hwp/ai-protocol": "file:./vendor/auto-hwp-ai-protocol-0.0.2.tgz",
+    "@auto-hwp/editor-core": "file:./vendor/auto-hwp-editor-core-0.0.2.tgz",
+    "@auto-hwp/engine": "file:./vendor/auto-hwp-engine-0.0.2.tgz",
+    "@auto-hwp/react": "file:./vendor/auto-hwp-react-0.0.2.tgz",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "overrides": {
-    "@auto-hwp/ai-protocol": "file:./vendor/auto-hwp-ai-protocol-0.0.1.tgz",
-    "@auto-hwp/editor-core": "file:./vendor/auto-hwp-editor-core-0.0.1.tgz",
-    "@auto-hwp/engine": "file:./vendor/auto-hwp-engine-0.0.1.tgz"
+    "@auto-hwp/ai-protocol": "file:./vendor/auto-hwp-ai-protocol-0.0.2.tgz",
+    "@auto-hwp/editor-core": "file:./vendor/auto-hwp-editor-core-0.0.2.tgz",
+    "@auto-hwp/engine": "file:./vendor/auto-hwp-engine-0.0.2.tgz"
   },
   "devDependencies": {
     "@playwright/test": "1.61.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
-    "@vitejs/plugin-react": "^4.3.4",
+    "@vitejs/plugin-react": "^4.7.0",
     "typescript": "^5.6.3",
-    "vite": "^5.4.11"
+    "vite": "^7.3.6"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20.19"
   }
 }
