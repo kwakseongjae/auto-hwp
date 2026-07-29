@@ -1,0 +1,335 @@
+/* /bench 전용 스코프 스타일 — globals.css 의 `.lab-demo` 다크 스튜디오 톤(#07090d 바탕 / #7c3aed
+   액센트 / #1e2532 테두리)을 그대로 따르되, 전역 CSS 는 건드리지 않는다(다른 스트림 소유 파일).
+   이 페이지는 wasm 도 클라이언트 상태도 없는 순수 서버 컴포넌트라 CSS 도 이 모듈 하나로 닫힌다. */
+
+.page {
+  --ink: #e6e9ef;
+  --ink-strong: #ffffff;
+  --muted: #8b93a1;
+  --dim: #5c6470;
+  --line: #1e2532;
+  --card: rgba(255, 255, 255, 0.035);
+  --accent: #7c3aed;
+  --accent-soft: #c4b5fd;
+
+  min-height: 100vh;
+  background: #07090d;
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.inner {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 22px 20px 72px;
+}
+
+/* ── 헤더 ── */
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.crumb a {
+  color: var(--accent-soft);
+  text-decoration: none;
+}
+
+.crumb a:hover {
+  text-decoration: underline;
+}
+
+.kicker {
+  margin: 34px 0 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--accent-soft);
+}
+
+.title {
+  margin: 10px 0 0;
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1.25;
+  letter-spacing: -0.6px;
+  color: var(--ink-strong);
+}
+
+.lede {
+  margin: 14px 0 0;
+  max-width: 68ch;
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--muted);
+}
+
+.lede b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.stamp {
+  margin: 18px 0 0;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--dim);
+}
+
+.stamp code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--accent-soft);
+  background: rgba(124, 58, 237, 0.14);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+/* ── 오라클 설명 카드 ── */
+.oracle {
+  margin: 26px 0 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.oracleCard {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px 17px;
+}
+
+.oracleCard b {
+  display: block;
+  font-size: 14px;
+  color: var(--ink);
+  letter-spacing: -0.2px;
+}
+
+.oracleCard p {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+/* ── 섹션 ── */
+.section {
+  margin: 44px 0 0;
+  border-top: 1px solid var(--line);
+  padding-top: 26px;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  color: var(--ink-strong);
+}
+
+.tag {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--accent-soft);
+  background: rgba(124, 58, 237, 0.14);
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+
+.note {
+  margin: 12px 0 0;
+  max-width: 74ch;
+  font-size: 13.5px;
+  line-height: 1.8;
+  color: var(--muted);
+}
+
+.note b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.note code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  color: var(--accent-soft);
+}
+
+/* ── 표 ── */
+.tableWrap {
+  margin: 16px 0 0;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.table {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: collapse;
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.table th,
+.table td {
+  padding: 10px 14px;
+  text-align: right;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.table th:first-child,
+.table td:first-child {
+  text-align: left;
+}
+
+.table thead th {
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.01em;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.table td {
+  color: var(--ink);
+}
+
+.doc {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  color: var(--accent-soft);
+}
+
+.ok {
+  color: #7ee2b8;
+  font-weight: 600;
+}
+
+.warn {
+  color: #f0b866;
+  font-weight: 600;
+}
+
+.sub {
+  color: var(--dim);
+  font-weight: 400;
+}
+
+/* ── 재현 커맨드 ── */
+.repro {
+  margin: 16px 0 0;
+}
+
+.reproLabel {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--dim);
+}
+
+.pre {
+  margin: 8px 0 0;
+  padding: 14px 16px;
+  background: #0b0e15;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.75;
+  color: #cfd6e2;
+  tab-size: 2;
+}
+
+.pre code {
+  font: inherit;
+  color: inherit;
+  white-space: pre;
+}
+
+/* ── 한계 고지 ── */
+.limits {
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.limits li {
+  position: relative;
+  margin: 0 0 12px;
+  padding-left: 18px;
+  max-width: 76ch;
+  font-size: 13.5px;
+  line-height: 1.8;
+  color: var(--muted);
+}
+
+.limits li::before {
+  content: "—";
+  position: absolute;
+  left: 0;
+  color: var(--dim);
+}
+
+.limits b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.limits code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  color: var(--accent-soft);
+}
+
+/* ── 푸터 ── */
+.footer {
+  margin: 46px 0 0;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--dim);
+}
+
+.footer a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.footer a:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+@media (max-width: 860px) {
+  .oracle {
+    grid-template-columns: 1fr;
+  }
+
+  .title {
+    font-size: 27px;
+  }
+}

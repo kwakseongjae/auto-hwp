@@ -755,6 +755,8 @@ export default function LabWorkspace() {
               </div>
 
               <div className="lab-hero-dev">
+                <a href={`${BASE}/bench/`} data-testid="bench-link" title="쪽수·줄바꿈·캐럿을 한컴 저장값과 대조한 수치 + 재현 커맨드">충실도 벤치마크</a>
+                <span aria-hidden>·</span>
                 <a href="https://github.com/kwakseongjae/auto-hwp" target="_blank" rel="noreferrer">GitHub ↗</a>
                 <span aria-hidden>·</span>
                 <a href="https://github.com/kwakseongjae/auto-hwp#readme" target="_blank" rel="noreferrer">소개(README)</a>
