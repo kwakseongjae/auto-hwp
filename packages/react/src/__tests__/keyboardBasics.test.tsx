@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { HwpWorkspace } from "../components/HwpWorkspace";
 import { gridToTsv, joinSelectionText } from "../clipboard";
-import type { CellHit, Intent, TableBox, TableGrid } from "../types";
+import type { CellHit, CellTextHit, Intent, RunSpec, TableBox, TableGrid } from "../types";
 import { MockAdapter } from "./mockAdapter";
 
 // jsdom does no layout — stub getBoundingClientRect to a full A4 box so coords.ts maps clicks to page px.
@@ -25,6 +25,17 @@ function stubClipboard(): ReturnType<typeof vi.fn> {
   const writeText = vi.fn(async () => {});
   Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true, writable: true });
   return writeText;
+}
+
+function dispatchPaste(text?: string, target: EventTarget = window): ClipboardEvent {
+  const e = new Event("paste", { cancelable: true, bubbles: true }) as ClipboardEvent;
+  if (text !== undefined) {
+    Object.defineProperty(e, "clipboardData", {
+      value: { getData: (type: string) => (type === "text/plain" ? text : "") },
+    });
+  }
+  target.dispatchEvent(e);
+  return e;
 }
 
 const noAi = async () => [] as Intent[];
@@ -236,6 +247,68 @@ describe("키보드 기본기 — ⌘C 복사", () => {
     composer.blur();
     fireEvent.keyDown(window, { key: "c", metaKey: true });
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("옛 값"));
+  });
+});
+
+describe("키보드 기본기 — ⌘V 평문 붙여넣기", () => {
+  const cellCaretAdapter = () =>
+    new MockAdapter({
+      hit: () => null,
+      cellText: (page, x): CellTextHit | null =>
+        x >= 100 && x <= 300
+          ? { section: 0, block: 1, row: 0, col: 0, para: 0, offset: 0, para_len: 2, caret: { page, x: 100, top: 40, height: 13 } }
+          : null,
+      cellCaret: (_s, _b, _r, _c, _p, offset) => ({ page: 0, x: 100 + offset * 10, top: 40, height: 13 }),
+      runs: [{ text: "AB", bold: true }],
+      pageGeom: geom,
+      pages: 1,
+    });
+
+  async function activateCellCaret(container: HTMLElement) {
+    const sheet = await sheetOf(container);
+    fireEvent.pointerDown(sheet, { clientX: 150, clientY: 50, button: 0, buttons: 1, pointerId: 11 });
+    fireEvent.pointerUp(sheet, { clientX: 150, clientY: 50, button: 0, buttons: 0, pointerId: 11 });
+    await waitFor(() => expect(container.querySelector(".hw-caret")).toBeTruthy());
+  }
+
+  it("셀 범위의 여러 줄 붙여넣기는 SetTableCellRuns 하나로 대체한다(개행·스타일 계약 유지)", async () => {
+    const adapter = cellCaretAdapter();
+    const { container } = mount(adapter);
+    await activateCellCaret(container);
+    fireEvent.keyDown(window, { key: "ArrowRight", shiftKey: true });
+    fireEvent.keyDown(window, { key: "ArrowRight", shiftKey: true }); // "AB" 범위
+    await new Promise((r) => setTimeout(r, 0));
+
+    const e = dispatchPaste("X\r\nY");
+    expect(e.defaultPrevented).toBe(true);
+    await waitFor(() => expect(adapter.applied).toHaveLength(1));
+    expect(adapter.applied.every((i) => i.intent === "SetTableCellRuns")).toBe(true); // mutation: 평문 variant 금지
+    const intent = adapter.applied[0] as Intent & { runs: RunSpec[] };
+    expect(intent).toMatchObject({ intent: "SetTableCellRuns", section: 0, index: 1, row: 0, col: 0 });
+    expect(intent.runs.map((r) => r.text).join("")).toBe("X\nY");
+    expect(intent.runs.find((r) => r.text === "\n")).toEqual({ text: "\n" }); // 문단 구분자는 bare run
+  });
+
+  it("paste 이벤트에 clipboardData가 없으면 정직한 토스트를 내고 문서를 쓰지 않는다", async () => {
+    const adapter = cellCaretAdapter();
+    const { container } = mount(adapter);
+    await activateCellCaret(container);
+
+    const e = dispatchPaste();
+    expect(e.defaultPrevented).toBe(true);
+    await waitFor(() => expect(screen.getByText(/클립보드 평문을 읽을 수 없습니다/)).toBeTruthy());
+    expect(adapter.applied).toHaveLength(0);
+  });
+
+  it("캐럿이 없으면 paste 이벤트를 가로채지 않는다", async () => {
+    const adapter = new MockAdapter({ hit: () => null, pageGeom: geom, pages: 1 });
+    const { container } = mount(adapter);
+    await sheetOf(container);
+
+    const e = dispatchPaste("X");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(e.defaultPrevented).toBe(false);
+    expect(adapter.applied).toHaveLength(0);
   });
 });
 

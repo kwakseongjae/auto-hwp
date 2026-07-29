@@ -67,6 +67,8 @@ const ARROW_DIR: Record<string, CellDir | undefined> = {
   ArrowDown: "down",
 };
 
+type CurrentCellSnapshot = { section: number; block: number; row: number; col: number; path?: CellAddr[] } | null;
+
 // ── dev-only render instrumentation (issue 030) ─────────────────────────────────────────────────────
 // Counts how many times HwpWorkspace itself commits. The marquee decoupling means a pointermove during a
 // drag no longer bumps a workspace `useState`, so this counter stays FLAT across a 30-move drag (only the
@@ -112,6 +114,7 @@ interface EditTarget {
    *  box / 글자색 swatch when NOT editing (issue 048: 현재 상태 반영). Defaults when unstyled/unknown. */
   curSizePt?: number;
   curColor?: string | null;
+  curFont?: string | null;
 }
 
 /** The INLINE per-element edit target (issue 06x) — a SNAPSHOT captured when the user opens the inline
@@ -130,6 +133,23 @@ interface InlineTarget {
 // issue 048: the ribbon's size box shows an inherited (size unset) run at the doc default ~10pt — matching
 // richedit's DEFAULT_PT so the reflected size and applyLiveStyle's size wrap agree.
 const RIBBON_DEFAULT_PT = 10;
+
+/** Apply character-only inspector fields while preserving text and every untouched run attribute. */
+function patchRuns(runs: RunSpec[], patch: FormatRibbonPatch): RunSpec[] {
+  return runs.map((run) => {
+    if (run.text === "\n") return run;
+    return {
+      ...run,
+      ...(patch.bold !== undefined ? { bold: patch.bold || undefined } : {}),
+      ...(patch.italic !== undefined ? { italic: patch.italic || undefined } : {}),
+      ...(patch.underline !== undefined ? { underline: patch.underline || undefined } : {}),
+      ...(patch.strike !== undefined ? { strike: patch.strike || undefined } : {}),
+      ...(patch.sizePt !== undefined ? { size_pt: patch.sizePt } : {}),
+      ...(patch.font !== undefined ? { font: patch.font } : {}),
+      ...(patch.color !== undefined ? { color: patch.color } : {}),
+    };
+  });
+}
 
 /// What the workspace hands the host's right-hand panel. The SDK owns the DOCUMENT surface
 /// (pages, selection, overlays, manual editing); the panel VIEW is the host's — a chat, a form, an
@@ -165,11 +185,44 @@ export interface WorkspaceSidePanel {
   revert: () => Promise<boolean>;
   /** Current undo-stack depth (read at render time). */
   undoDepth: () => number;
+  /** Figma-style inspector data for the current single selection. `null` for zero/multi selection. */
+  designSelection?: WorkspaceDesignSelection | null;
+  /** Apply a design delta to the current selection. Character fields work for a paragraph or cell/range;
+   *  cell background/alignment are enabled only for cell/range targets. */
+  applyDesign?: (patch: FormatRibbonPatch) => void;
+  /** Font families the inspector may offer. A host may ignore this and render its own picker. */
+  designFonts?: readonly string[];
+  /** True while the engine glyph caret owns keyboard input. Panels can collapse frame/cell controls
+   *  and keep the user focused on typography while the document itself stays visually unchanged. */
+  textEditing?: boolean;
+}
+
+/** Stable, reader-facing selection snapshot for a host-owned design inspector. Geometry is own-render
+ *  page px, so the panel can show Figma-like X/Y/W/H without reaching into the canvas DOM. */
+export interface WorkspaceDesignSelection {
+  kind: "paragraph" | "cell" | "range" | "table" | "image" | "other";
+  label: string;
+  page: number;
+  section: number;
+  block: number;
+  text: string;
+  box: Box;
+  format: {
+    font: string | null;
+    sizePt: number;
+    color: string | null;
+    bold: boolean;
+    italic: boolean;
+  };
+  canTextStyle: boolean;
+  canCellStyle: boolean;
 }
 
 export interface HwpWorkspaceProps {
   /** The backend seam (WasmAdapter for the web, or a host adapter). */
   adapter: EngineAdapter;
+  /** Optional product label in the global toolbar. Defaults to the neutral SDK name. */
+  brand?: string;
   /** The document to open (bytes + optional name). Re-opens when the `bytes` reference changes. When
    *  omitted, the workspace shows an empty state (the host drives opening). */
   document?: { bytes: Uint8Array; name?: string } | null;
@@ -202,6 +255,14 @@ export interface HwpWorkspaceProps {
    *  더블클릭 텍스트 팝오버 · 선택 서식 툴바). Default OFF — the workspace behaves exactly as before
    *  (chat-only) when omitted, so existing hosts/tests are unaffected. */
   enableEditing?: boolean;
+  /** Prefer the engine glyph-caret for double-click/Enter/context-menu text editing. The rendered SVG
+   *  remains visible, so alignment and typography do not jump while editing. Default false preserves
+   *  the legacy SDK contract; the reference app enables it for the Figma-style editing experience. */
+  preferEngineCaretEditing?: boolean;
+  /** Where manual character/cell formatting lives. `"ribbon"` preserves the SDK's existing second
+   *  toolbar row; `"inspector"` removes that duplicate surface and routes formatting through the
+   *  host-owned right design panel. Document/insert/export tools remain in the global top bar. */
+  formatSurface?: "ribbon" | "inspector";
   /** Opt-in (issue 044): intercept the HTML/PDF export buttons. Called with the export payload
    *  (`Uint8Array` for PDF, `string` for HTML), a suggested filename, and the MIME type. When omitted
    *  the workspace uses the WEB default — a browser `<a download>` — UNCHANGED (web vitest pins this).
@@ -341,9 +402,21 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const panningRef = useRef(false);
   // The in-flight continuous-zoom gesture (null between gestures). Cached at gesture start so every wheel
   // tick reuses the SAME transform-origin/scroll/baseZoom while only the accumulated `factor` grows.
-  const zoomGestureRef = useRef<{ originX: number; originY: number; scrollLeft: number; scrollTop: number; baseZoom: number; factor: number } | null>(null);
+  const zoomGestureRef = useRef<{
+    originX: number;
+    originY: number;
+    scrollLeft: number;
+    scrollTop: number;
+    baseZoom: number;
+    factor: number;
+    sheetAnchor?: { page: string; fracX: number; fracY: number; clientX: number; clientY: number };
+  } | null>(null);
   const zoomCommitTimerRef = useRef<number | null>(null);
-  const pendingScrollRef = useRef<{ left: number; top: number } | null>(null);
+  const pendingScrollRef = useRef<{
+    left: number;
+    top: number;
+    sheetAnchor?: { page: string; fracX: number; fracY: number; clientX: number; clientY: number };
+  } | null>(null);
   // Selected font for the SCREEN (issue 022): family + a blob URL of the SAME bytes registered for
   // metrics + PDF, so the @font-face'd SVG matches the exported PDF exactly. (The engine-side register +
   // re-pagination is owned by the core; this state is the DOM/@font-face half only.)
@@ -359,10 +432,19 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // event: HwpPageView `setPointerCapture`s on pointerdown, which redirects the pointerup so the browser
   // never synthesizes click/dblclick. So we detect "two quick ups at ~the same spot" ourselves.
   const lastUpRef = useRef<{ t: number; x: number; y: number } | null>(null);
+  // Pointer-up settlement contains worker-backed hit tests. Serialize gestures in their PHYSICAL order so
+  // a slow earlier click can never land after a newer click and reopen/reset the wrong selection (048).
+  const pointerUpChainRef = useRef<Promise<void>>(Promise.resolve());
+  // Ordered does not mean an obsolete gesture should still open UI chrome: a newer physical pointer-up
+  // invalidates late caret/editor side effects from older gestures (the core selection still settles).
+  const pointerUpSeqRef = useRef(0);
   // Issue 027 editing chrome (opt-in): the resolved single-selection edit target, the ruler geometry,
   // and the open text popover. All null/off when `enableEditing` is not set.
   const editingOn = !!props.enableEditing;
+  const engineCaretEditing = !!props.preferEngineCaretEditing;
+  const inspectorFormatting = props.formatSurface === "inspector";
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
+  const [textEditing, setTextEditing] = useState(false);
   const [pageGeom0, setPageGeom0] = useState<PageGeom | null>(null);
   // ── issue 049: image move/resize overlay (own-render only) ──────────────────────────────────────────
   // The selected image = its page + own-render px box + `(section, block)` anchor (from `imageAt`). The
@@ -432,17 +514,13 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
 
-  // ── Issue 047: 열 너비 mm 다이얼로그 + 편집 중 셀음영 ────────────────────────────────────────────────────
+  // ── Issue 047: 열 너비 mm 다이얼로그 ───────────────────────────────────────────────────────────────────
   // The OPEN 열 너비 dialog (a small popover; only its anchor is state — its current mm / column span are
   // derived LIVE from `editTarget`, so after an apply the re-resolved boundaries update the readout = 적용-
   // 확인). Opened from the cell context menu ("열 너비…"). Cleared when the selection/target goes away.
   const [colWidthDialog, setColWidthDialog] = useState<{ x: number; y: number } | null>(null);
-  // A COUNTED shield (issue 055 사후, consumeShield): +1 per in-flight 편집 중 셀음영 apply, so the
-  // refreshToken close effect does NOT close the in-place editor when the shade op re-flows — the shade
-  // lands on the committed cell background while the uncommitted text stays in the editor (op-bus
-  // SetTableCell rebuilds only the cell's paragraphs, never `shade_color`, so a later text commit
-  // preserves the shade). Counted, not boolean: 연속 스와치 2회(둘 다 인플라이트)의 두 번째 re-flow가
-  // 에디터를 닫아 미커밋 텍스트를 잃던 결함의 수정. 경합 금지.
+  // Legacy SDK in-place editor compatibility. The reference app's engine-caret mode keeps this surface
+  // off-page; older hosts may still use the palette and need its re-flow shield.
   const shadingRef = useRef(0);
 
   // ── Issue 045: 찾기/바꾸기 state ─────────────────────────────────────────────────────────────────────
@@ -529,7 +607,23 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const caretActiveRef = useRef(false);
   // 본문 문단 캐럿이 붙으면서 구독 대상이 `core.caret`(셀 ∪ 본문 라우터)로 올라갔다 — 두 캐럿은 동시에
   // 살지 않으므로 미러 하나로 충분하고, 아래 타이핑/셀이동 가드는 손대지 않아도 그대로 성립한다.
-  useEffect(() => core.caret.onChange((s) => (caretActiveRef.current = s != null)), [core]);
+  useEffect(
+    () =>
+      core.caret.onChange((s) => {
+        const active = s != null;
+        if (caretActiveRef.current !== active) {
+          caretActiveRef.current = active;
+          setTextEditing(active);
+        }
+        // Only entering/leaving a text target may affect the inspector. Offset moves stay render-0.
+        if (!s && engineCaretEditing) {
+          setEditTarget((prev) =>
+            prev?.kind === "paragraph" && selectionRef.current.length === 0 ? null : prev,
+          );
+        }
+      }),
+    [core, engineCaretEditing],
+  );
   // issue 059: the shared IME-composition signal — the caret-tracking hidden textarea (ImeCompositionLayer)
   // drives it, the CaretLayer reads it to hide its bar while composing, and the Escape handler reads it to
   // yield Escape to the IME (cancel) instead of clearing the caret. One stable instance for the session.
@@ -539,6 +633,16 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // Down-point of the current pointer gesture (client px) — a caret is placed only on a PLAIN CLICK
   // (movement under the drag threshold), never at the end of a marquee/drag.
   const caretDownRef = useRef<{ x: number; y: number } | null>(null);
+  // 마우스 글자 범위 선택의 소유권 협상. 살아 있는 캐럿과 같은 문단에서 시작했는지는 엔진/캐럿
+  // 컨트롤러의 비동기 hit-test가 판정한다. 판정 중 pointermove는 여기에만 쌓이고 React state를
+  // 건드리지 않는다(렌더 0); false면 기존 마퀴 레인으로 즉시 강등한다.
+  const textDragSeqRef = useRef(0);
+  const textDragRef = useRef<{
+    id: number;
+    start: { x: number; y: number };
+    owner: Promise<boolean>;
+    moved: boolean;
+  } | null>(null);
   // MULTI-PAGE marquee drag bookkeeping (issue: cross-page drag select). `dragStartClientRef` = the press
   // client point (the anchor of the drag rectangle); `lastMarqueeClientRef` = the latest cursor client
   // point (so the edge auto-scroll loop can re-slice at a fixed cursor while the pages scroll under it);
@@ -585,7 +689,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       canvas.scrollTop = res.scrollTop;
       return;
     }
-    pendingScrollRef.current = { left: res.scrollLeft, top: res.scrollTop };
+    pendingScrollRef.current = { left: res.scrollLeft, top: res.scrollTop, sheetAnchor: g.sheetAnchor };
     setZoom(res.zoom);
   }, []);
 
@@ -604,7 +708,28 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       let g = zoomGestureRef.current;
       if (!g) {
         const rect = layer.getBoundingClientRect(); // untransformed at gesture start → stable anchor
-        g = { originX: e.clientX - rect.left, originY: e.clientY - rect.top, scrollLeft: canvas.scrollLeft, scrollTop: canvas.scrollTop, baseZoom: zoomRef.current, factor: 1 };
+        const sheet = e.target instanceof Element ? e.target.closest<HTMLElement>(".hw-sheet") : null;
+        const sheetRect = sheet?.getBoundingClientRect();
+        const page = sheet?.dataset.page;
+        const sheetAnchor =
+          sheetRect && page != null && sheetRect.width > 0 && sheetRect.height > 0
+            ? {
+                page,
+                fracX: (e.clientX - sheetRect.left) / sheetRect.width,
+                fracY: (e.clientY - sheetRect.top) / sheetRect.height,
+                clientX: e.clientX,
+                clientY: e.clientY,
+              }
+            : undefined;
+        g = {
+          originX: e.clientX - rect.left,
+          originY: e.clientY - rect.top,
+          scrollLeft: canvas.scrollLeft,
+          scrollTop: canvas.scrollTop,
+          baseZoom: zoomRef.current,
+          factor: 1,
+          sheetAnchor,
+        };
         zoomGestureRef.current = g;
       }
       // Accumulate + clamp so baseZoom×factor stays in [25%,400%]; keep the transform-origin fixed.
@@ -639,6 +764,18 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     if (canvas) {
       canvas.scrollLeft = p.left;
       canvas.scrollTop = p.top;
+      // `.hw-pages` centers a sheet while it is narrower than the canvas. A zoom can cross that boundary,
+      // removing the centering gutter after the pure scroll algebra was computed. Re-measure the exact
+      // document point that was under the pointer and absorb that layout-only delta into scroll.
+      const anchor = p.sheetAnchor;
+      if (anchor) {
+        const sheet = canvas.querySelector<HTMLElement>(`.hw-sheet[data-page="${anchor.page}"]`);
+        const rect = sheet?.getBoundingClientRect();
+        if (rect) {
+          canvas.scrollLeft += rect.left + anchor.fracX * rect.width - anchor.clientX;
+          canvas.scrollTop += rect.top + anchor.fracY * rect.height - anchor.clientY;
+        }
+      }
     }
   }, [zoom]);
 
@@ -781,8 +918,13 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       if (e.key === "Escape") {
         if (compositionStore.get() != null) return; // composing → yield Escape to the IME cancel
         ctxMenuSeqRef.current++;
+        // Figma-style two-stage Escape: leave text editing first but keep the element selected so its
+        // frame/cell controls return in the Design inspector. A second Escape clears the selection.
+        if (core.caret.get() != null) {
+          core.caret.clear();
+          return;
+        }
         core.selection.clear();
-        core.caret.clear();
         setImageSel((s) => (s ? null : s));
       }
     };
@@ -990,6 +1132,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     const sel: Selection[] = selection;
     const one = sel.length === 1 ? sel[0] : null;
     if (!one) {
+      // Body glyph carets intentionally do not create block/AI anchors. Keep their inspector target while
+      // the caret is live; the caret subscription above clears it when the user leaves text.
+      if (engineCaretEditing && core.caret.get()?.kind === "body") return;
       setEditTarget(null);
       return;
     }
@@ -1019,7 +1164,33 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           ]);
           if (cancelled) return;
           const style = firstRunStyle(runs);
-          setEditTarget({ ...base, tableBox: tableBox as TableBox | null, boundaries, rowBoundaries, curBold: !!style.bold, curItalic: !!style.italic, curSizePt: style.size_pt ?? RIBBON_DEFAULT_PT, curColor: style.color ?? null });
+          setEditTarget({
+            ...base,
+            tableBox: tableBox as TableBox | null,
+            boundaries,
+            rowBoundaries,
+            curBold: !!style.bold,
+            curItalic: !!style.italic,
+            curSizePt: style.size_pt ?? RIBBON_DEFAULT_PT,
+            curColor: style.color ?? null,
+            curFont: style.font ?? null,
+          });
+        } catch {
+          if (!cancelled) setEditTarget(base);
+        }
+      } else if (mark.kind === "paragraph") {
+        try {
+          const runs = await core.session.runsAt(anchor.section, anchor.block);
+          if (cancelled) return;
+          const style = firstRunStyle(runs);
+          setEditTarget({
+            ...base,
+            curBold: !!style.bold,
+            curItalic: !!style.italic,
+            curSizePt: style.size_pt ?? RIBBON_DEFAULT_PT,
+            curColor: style.color ?? null,
+            curFont: style.font ?? null,
+          });
         } catch {
           if (!cancelled) setEditTarget(base);
         }
@@ -1032,7 +1203,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     };
     // `refreshToken` is a dep so the resize geometry (col/row boundaries + table box) RE-RESOLVES after an
     // applied edit — the handles then track the NEW layout instead of floating over stale px (issue 031).
-  }, [editingOn, selection, adapter, core, refreshToken]);
+  }, [editingOn, engineCaretEditing, selection, adapter, core, refreshToken]);
 
   // Fetch page-0 geometry for the top ruler (own-render px) whenever the doc / layout changes.
   useEffect(() => {
@@ -1057,8 +1228,6 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // Close the editor when the layout re-flows (an applied edit) so it never floats over stale geometry.
   // EXCEPTION (issue 036): a Tab commit-move re-flows too, but it re-opens the editor at the NEXT cell
   // itself — its commit arms `tabMoving` (+1) so the close skips that one re-flow.
-  // EXCEPTION (issue 047): a 편집 중 셀음영 apply re-flows too, but the shade does NOT touch the cell's text
-  // or geometry — so keep the editor open (with its uncommitted text) for each armed `shading` count.
   // The shields are CONSUMED here (issue 055 — a timer-based release raced this effect once the engine
   // moved to a worker), COUNTED and by TOKEN DELTA (issue 055 사후 #4/#9): overlapping applies arm one
   // count each, and React may coalesce their bumps into a single run — consuming per re-flow (delta), not
@@ -1298,32 +1467,22 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     void onColCommit(equalizeColumns(colWidthTarget.boundaries, colWidthTarget.e0, colWidthTarget.e1));
   }, [colWidthTarget, onColCommit]);
 
-  // ── Issue 047: 편집 중 셀음영 — set the CURRENTLY-edited cell's background WITHOUT leaving edit mode ──────
-  // Applies a 1-cell `SetCellRangeShade` on the editor's cell (desktop R7-Part1 parity). `shading` shields
-  // the refreshToken editor-close so the in-place editor stays open with its uncommitted text; the shade op
-  // rebuilds nothing in the cell's paragraphs (op-bus SetTableCell leaves `shade_color`), so a later text
-  // commit preserves the shade. The palette buttons `preventDefault` their mousedown so this never fires
-  // via a blur→commit race (커밋/에디터 상태와 경합 금지).
   const shadeEditorCell = useCallback(
     async (hex: string | null) => {
       const ed = editorRef.current;
       if (!ed || ed.kind !== "cell") return;
       const r = ed.rows?.[0] ?? 0;
       const c = ed.cols?.[0] ?? 0;
-      shadingRef.current++; // counted (issue 055 사후 #4): overlapping swatch applies arm one count each
+      shadingRef.current++;
       try {
         await core.edit.shadeCellRange(ed.section, ed.block, { r0: r, c0: c, r1: r, c1: c }, hex);
         toast(hex ? "배경색 적용" : "배경 지움");
-        // Success: the shade's own re-flow CONSUMES one shield count inside the refreshToken close effect
-        // (issue 055 — a setTimeout(0) release raced that effect under worker-mode RPC timing).
       } catch (e) {
-        // Failure/trap: no shade re-flow will consume this count — disarm NOW so it can't swallow the
-        // NEXT close (e.g. the trap-recovery refresh must still close the editor over stale geometry).
         disarmShield(shadingRef);
         if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`배경색 변경 실패: ${e}`);
       }
     },
-    [core, toast, onTrap],
+    [core, onTrap, toast],
   );
 
   // Close the 열 너비 dialog if its target evaporates (selection cleared / became a non-table), so a stale
@@ -1374,34 +1533,55 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     [core, toast, onTrap],
   );
 
-  // Open the in-place text editor for the point `c` by resolving the hit DIRECTLY (cell → paragraph). Used
-  // by the double-click detector below. Race-free: it re-hit-tests the (x,y) rather than reading the
-  // async selection. It ALSO reads the target's FIRST-run size (issue 032: the editor renders at the
-  // cell's own font size) via the SAME 027 runs path (`runsAt` → `firstRunStyle`) that preserves style.
+  // Back-compatible full-box rich editor. The reference app opts into the engine-caret lane, but the
+  // SDK keeps this entry path available for existing hosts and its run-preserving rich-edit contract.
   const openEditorAt = useCallback(
-    async (c: PageClick) => {
+    async (c: PageClick, isCurrent: () => boolean = () => true) => {
       try {
         const cell = adapter.tableCellAt ? await adapter.tableCellAt(c.page, c.x, c.y) : null;
+        if (!isCurrent()) return;
         if (cell) {
-          // issue 064 Tier-2: a NESTED cell is now EDITABLE. Resolve its descending CellPath (the engine's
-          // `cell.path`, or the length-1 flat quad on an older backend) and prefill the LEAF cell's runs
-          // through the path-aware read — no more "중첩표는 편집할 수 없습니다" toast.
           const path: CellAddr[] = cell.path && cell.path.length > 0 ? cell.path : [{ block: cell.block, row: cell.row, col: cell.col }];
           const runs = await core.session.runsAtPath(cell.section, path);
-          setEditor({ page: c.page, box: { x: cell.x, y: cell.y, w: cell.w, h: cell.h }, section: cell.section, block: cell.block, kind: "cell", rows: [cell.row, cell.row], cols: [cell.col, cell.col], text: cell.text, runs, fontSizePt: firstRunStyle(runs).size_pt, path });
+          if (!isCurrent()) return;
+          setEditor({
+            page: c.page,
+            box: { x: cell.x, y: cell.y, w: cell.w, h: cell.h },
+            section: cell.section,
+            block: cell.block,
+            kind: "cell",
+            rows: [cell.row, cell.row],
+            cols: [cell.col, cell.col],
+            text: cell.text,
+            runs,
+            fontSizePt: firstRunStyle(runs).size_pt,
+            path,
+          });
           return;
         }
-        if (await adapter.tableAt(c.page, c.x, c.y)) return; // on a table border but not a cell → no editor
+        if (await adapter.tableAt(c.page, c.x, c.y)) return;
+        if (!isCurrent()) return;
         const hit = await adapter.hitTest(c.page, c.x, c.y);
+        if (!isCurrent()) return;
         if (hit && hit.kind === "paragraph" && hit.editable) {
           const runs = await core.session.runsAt(hit.section, hit.block);
-          setEditor({ page: c.page, box: { x: hit.x, y: hit.y, w: hit.w, h: hit.h }, section: hit.section, block: hit.block, kind: "paragraph", text: hit.text, runs, fontSizePt: firstRunStyle(runs).size_pt });
+          if (!isCurrent()) return;
+          setEditor({
+            page: c.page,
+            box: { x: hit.x, y: hit.y, w: hit.w, h: hit.h },
+            section: hit.section,
+            block: hit.block,
+            kind: "paragraph",
+            text: hit.text,
+            runs,
+            fontSizePt: firstRunStyle(runs).size_pt,
+          });
         }
       } catch (e) {
         onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
       }
     },
-    [adapter, core, onTrap, toast],
+    [adapter, core, onTrap],
   );
 
   // Open the in-place editor directly over a SELECTED cell (issue 036 Enter/Tab entry). Unlike
@@ -1832,8 +2012,8 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // Cell-nav keydown (issue 036), a SEPARATE window listener that coexists with the 035 zoom/Space listener
   // and the 021 Esc listener. It only acts when a SINGLE cell is selected and the focus is NOT a text-entry
   // surface (reusing the 035 `isEditableTarget` guard — no new arithmetic): 방향키 → moveCell (셀 선택이
-  // 있을 때만 preventDefault, 페이지 스크롤과 경합 방지), Enter → 그 셀 제자리 편집. ⌘/Ctrl 조합은
-  // 035(줌)에 양보한다. Tab/Shift+Tab 은 편집 중일 때 InPlaceCellEditor 안에서 처리된다.
+  // 있을 때만 preventDefault, 페이지 스크롤과 경합 방지), Enter → 원본 SVG 위 엔진 캐럿 진입.
+  // ⌘/Ctrl 조합은 035(줌)에 양보한다.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return; // ⌘/Ctrl combos belong to 035 (zoom) etc.
@@ -1851,12 +2031,19 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       }
       if (e.key === "Enter" && editingOn && !editorRef.current) {
         e.preventDefault();
-        void openCellEditor(single);
+        if (engineCaretEditing) {
+          const b = single.mark.box;
+          void core.caret
+            .clickAt(single.mark.page, b.x + b.w / 2, b.y + b.h / 2, false)
+            .catch((err) => onTrap(err, "엔진을 복구했습니다 — 다시 시도하세요"));
+        } else {
+          void openCellEditor(single);
+        }
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [editingOn, moveCellAndScroll, openCellEditor]);
+  }, [core, editingOn, engineCaretEditing, moveCellAndScroll, onTrap, openCellEditor]);
 
   // ── issue 053: cell caret TYPING — a separate window keydown that acts only while a caret is live
   // (the 036 cell-nav listener yields via caretActiveRef, so 방향키/Enter never double-handle). Each
@@ -1997,6 +2184,57 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       if (p.align !== undefined) fmtActions.setAlign(p.align);
     },
     [fmtActions, ensureCatalogFont],
+  );
+
+  // Right-side design inspector: reuse the same cell/range actions as the ribbon. A paragraph has no
+  // SetCellRangeFmt address, so character fields are applied by preserving its runs and committing one
+  // SetParagraphRuns batch. This keeps the inspector additive and avoids the lossy plain-text variants.
+  const applyDesign = useCallback(
+    (patch: FormatRibbonPatch) => {
+      // The engine caret owns an actual text range. Bold/italic from the inspector must therefore format
+      // that range, not the surrounding cell/paragraph selection. This is the same run-preserving op lane
+      // as ⌘B/⌘I and keeps the SVG in place.
+      const activeCaret = core.caret.get();
+      if (
+        activeCaret != null &&
+        activeCaret.selAnchor !== activeCaret.offset &&
+        (patch.bold !== undefined || patch.italic !== undefined)
+      ) {
+        void (async () => {
+          try {
+            if (patch.bold !== undefined) await core.caret.toggleStyle("bold");
+            if (patch.italic !== undefined) await core.caret.toggleStyle("italic");
+            toast("선택한 글자 범위의 디자인을 적용했습니다");
+          } catch (e) {
+            if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`디자인 적용 실패: ${e}`);
+          }
+        })();
+        return;
+      }
+      const target = editTarget;
+      if (!target) return;
+      if (target.kind === "cell" || target.kind === "range") {
+        applyRibbon(patch);
+        return;
+      }
+      if (target.kind !== "paragraph") return;
+      if (patch.shade !== undefined || patch.align !== undefined) return;
+      void (async () => {
+        try {
+          if (patch.font) await ensureCatalogFont(patch.font);
+          const runs = await core.session.runsAt(target.section, target.block);
+          const next = patchRuns(runs, patch);
+          if (runsUnchanged(next, runs)) return;
+          await core.session.applyBatch([
+            { intent: "SetParagraphRuns", section: target.section, block: target.block, runs: next },
+          ]);
+          toast("선택한 문단의 디자인을 적용했습니다");
+        } catch (e) {
+          if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`디자인 적용 실패: ${e}`);
+        }
+      })();
+    },
+    [applyRibbon, core, editTarget, ensureCatalogFont, onTrap, toast],
   );
 
   // Reflect the MARKED cell/range's first-run format in the ribbon when NOT editing (028 curBold 재사용 +
@@ -2186,6 +2424,53 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     return selectedFont ? [selectedFont.family] : undefined;
   }, [props.fontCatalog, selectedFont]);
 
+  const designSelection = useMemo<WorkspaceDesignSelection | null>(() => {
+    if (imageSel) {
+      const b = imageSel.box;
+      return {
+        kind: "image",
+        label: `이미지 (p.${imageSel.page + 1})`,
+        page: imageSel.page,
+        section: b.section,
+        block: b.block,
+        text: "",
+        box: { x: b.x, y: b.y, w: b.w, h: b.h },
+        format: { font: null, sizePt: RIBBON_DEFAULT_PT, color: null, bold: false, italic: false },
+        canTextStyle: false,
+        canCellStyle: false,
+      };
+    }
+    if (!editTarget) return null;
+    const selected = selection.length === 1 ? selection[0] : null;
+    // A body caret intentionally has no AI/block anchor. It is still a valid design target; every other
+    // target must continue to come from one explicit selection.
+    if (!selected && editTarget.kind !== "paragraph") return null;
+    const kind: WorkspaceDesignSelection["kind"] =
+      editTarget.kind === "paragraph" || editTarget.kind === "cell" || editTarget.kind === "range" || editTarget.kind === "table"
+        ? editTarget.kind
+        : "other";
+    const canTextStyle = kind === "paragraph" || kind === "cell" || kind === "range";
+    const canCellStyle = kind === "cell" || kind === "range";
+    return {
+      kind,
+      label: selected?.anchor.label ?? `문단 ${editTarget.block + 1}`,
+      page: editTarget.page,
+      section: editTarget.section,
+      block: editTarget.block,
+      text: editTarget.text,
+      box: editTarget.box,
+      format: {
+        font: editTarget.curFont ?? null,
+        sizePt: editTarget.curSizePt ?? RIBBON_DEFAULT_PT,
+        color: editTarget.curColor ?? null,
+        bold: editTarget.curBold,
+        italic: editTarget.curItalic,
+      },
+      canTextStyle,
+      canCellStyle,
+    };
+  }, [editTarget, imageSel, selection]);
+
   // The page the compact "AI에게 전달" pill anchors to = the FIRST mark's page (multi-page selection → the
   // first mark's page). The pill hugs the selection UNION bbox on that page (reused from `unionPageBox`), so
   // it works for multi-select too (format now lives entirely in the persistent ribbon; the format controls'
@@ -2220,9 +2505,26 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       caretDownRef.current = { x: c.client.x, y: c.client.y }; // 053: measure click-vs-drag on release
       dragStartClientRef.current = { x: c.client.x, y: c.client.y }; // marquee: the drag-rect anchor
       lastMarqueeClientRef.current = { x: c.client.x, y: c.client.y };
+      // 텍스트 드래그 후보는 **이미 캐럿이 살아 있고 같은 페이지**일 때뿐이다. 컨트롤러가 시작점이
+      // 그 캐럿의 같은 문단 밴드인지 최종 확인한다. 실패하면 pointermove가 기존 마퀴로 강등한다.
+      const active = editingOn && canEdit && !editorRef.current ? core.caret.get() : null;
+      // Shift+클릭은 기존 clickAt(..., extend=true) 레인이 고정단을 보존한다. 여기서 drag anchor를
+      // 먼저 접으면 그 고정단을 잃으므로 Shift 제스처는 텍스트 드래그 후보로 잡지 않는다.
+      if (!c.shift && active && active.rect.page === c.page) {
+        const id = ++textDragSeqRef.current;
+        const owner = core.caret.beginDragAt(c.page, c.x, c.y).catch((e) => {
+          onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
+          return false;
+        });
+        textDragRef.current = { id, start: { x: c.client.x, y: c.client.y }, owner, moved: false };
+      } else {
+        textDragSeqRef.current++;
+        textDragRef.current = null;
+        core.caret.endDrag();
+      }
       void core.selection.pointerDown(toPointerInput(c));
     },
-    [core],
+    [core, editingOn, canEdit, onTrap],
   );
   // Recompute + publish the marquee slices for a cursor client point (shared by pointermove + the edge
   // auto-scroll tick). Reads each page's client rect (DOM math) and hands per-page own-render PAGE-px
@@ -2285,64 +2587,141 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const onPointerMove = useCallback(
     (c: PageClick) => {
       lastMarqueeClientRef.current = { x: c.client.x, y: c.client.y };
+      const td = textDragRef.current;
+      if (td) {
+        const moved = Math.hypot(c.client.x - td.start.x, c.client.y - td.start.y) > DRAG_THRESHOLD_PX;
+        if (!moved) return;
+        td.moved = true;
+        const id = td.id;
+        void td.owner.then((owned) => {
+          const live = textDragRef.current;
+          if (!live || live.id !== id) return; // pointerup/새 제스처가 이미 이 후보를 폐기함
+          if (owned) {
+            void core.caret.dragTo(c.page, c.x, c.y).catch((e) => onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요"));
+            return;
+          }
+          // 시작점이 같은 캐럿 문단이 아니었다 → 이번 제스처를 기존 블록 마퀴에 그대로 넘긴다.
+          textDragRef.current = null;
+          updateMarquee(c.client.x, c.client.y);
+          maybeAutoScroll(c.client.y);
+        });
+        return;
+      }
       updateMarquee(c.client.x, c.client.y);
       maybeAutoScroll(c.client.y);
     },
-    [updateMarquee, maybeAutoScroll],
+    [core, onTrap, updateMarquee, maybeAutoScroll],
   );
-  // Figma progressive table selection (issue 06x): what a DOUBLE-CLICK does depends on where + what is
-  // already selected. Over a paragraph (no table) → open its in-place editor directly (unchanged). Over a
-  // table cell → DRILL: the first double-click selects the cell (no editor); a second double-click on the
-  // SAME already-drilled cell opens the editor. Enter over a drilled cell also opens it (036 keydown).
-  const handleDoubleClick = useCallback(
-    async (c: PageClick) => {
+
+  // A body-text caret is an editable selection even though it deliberately does not create an AI/block
+  // anchor. Reflect that paragraph once when the caret enters it so the design inspector can address the
+  // same engine block. Subsequent glyph moves remain render-0: they never call this helper.
+  const reflectBodyDesignAt = useCallback(
+    async (c: PageClick, isCurrent: () => boolean = () => true): Promise<void> => {
+      const hit = await adapter.hitTest(c.page, c.x, c.y);
+      if (!isCurrent()) return;
+      // The body-caret controller has already validated the visible glyph hit. Some legacy BlockHit bands
+      // intentionally carry only reliable vertical geometry, so do not re-reject them by their coarse x/w.
+      const inBand = !!hit && c.y >= hit.y && c.y <= hit.y + hit.h;
+      if (!hit || hit.kind !== "paragraph" || !hit.editable || !inBand) return;
+      const runs = await core.session.runsAt(hit.section, hit.block);
+      if (!isCurrent()) return;
+      const style = firstRunStyle(runs);
+      setEditTarget({
+        page: c.page,
+        section: hit.section,
+        block: hit.block,
+        kind: "paragraph",
+        box: { x: hit.x, y: hit.y, w: hit.w, h: hit.h },
+        text: hit.text ?? runs.map((run) => run.text).join(""),
+        curBold: !!style.bold,
+        curItalic: !!style.italic,
+        curSizePt: style.size_pt ?? RIBBON_DEFAULT_PT,
+        curColor: style.color ?? null,
+        curFont: style.font ?? null,
+      });
+    },
+    [adapter, core],
+  );
+
+  // The production text-edit lane: keep the engine-rendered SVG untouched and place only the glyph
+  // caret/range overlay. Unlike the legacy full-box contentEditable, this preserves the document's
+  // alignment, line boxes, font metrics and absolute position while characters change.
+  const focusEngineCaretAt = useCallback(
+    async (c: PageClick, isCurrent: () => boolean = () => true): Promise<void> => {
+      if (!editingOn || !canEdit || !core.caret.supported || !isCurrent()) return;
       try {
+        const active = await core.caret.clickAt(c.page, c.x, c.y, false);
+        if (active?.kind === "body") await reflectBodyDesignAt(c, isCurrent);
+      } catch (e) {
+        onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
+      }
+    },
+    [canEdit, core, editingOn, onTrap, reflectBodyDesignAt],
+  );
+
+  // Figma progressive table selection (issue 06x): what a DOUBLE-CLICK does depends on where + what is
+  // already selected. Double-click now always converges on the engine glyph-caret lane: the original SVG
+  // remains visible and only the caret/range overlay appears. On a table, drill the cell first so the
+  // selection inspector and caret share the same address.
+  const handleDoubleClick = useCallback(
+    async (c: PageClick, cur: CurrentCellSnapshot, isCurrent: () => boolean) => {
+      try {
+        // `cur`는 실제 pointerup 순간(그 제스처의 selection settle **전**)의 드릴 상태다. worker
+        // hit-test 뒤에 currentCell()을 다시 읽으면 같은 pointerup이 표→셀로 바꾼 값을 보고 첫
+        // 더블클릭을 "이미 드릴됨"으로 오판한다(048의 늦은 에디터 오픈 레이스).
         const table = await adapter.tableAt(c.page, c.x, c.y);
+        if (!isCurrent()) return;
         if (!table) {
-          void openEditorAt(c); // paragraph double-click → open the editor directly (unchanged)
+          if (engineCaretEditing) await focusEngineCaretAt(c, isCurrent);
+          else await openEditorAt(c, isCurrent);
           return;
         }
         const cell = adapter.tableCellAt ? await adapter.tableCellAt(c.page, c.x, c.y) : null;
+        if (!isCurrent()) return;
         // issue 064 Tier-2: a NESTED cell drills + edits like any cell (no more refusal toast). The
         // "already-drilled cell → open editor" test compares the DESCENDING CellPath so a nested leaf is
         // matched precisely (its flat (block,row,col) alone can collide across nesting levels).
-        const cur = core.selection.currentCell();
         const cellPath = cell ? (cell.path && cell.path.length > 0 ? cell.path : [{ block: cell.block, row: cell.row, col: cell.col }]) : null;
         const curPath = cur ? (cur.path && cur.path.length > 0 ? cur.path : [{ block: cur.block, row: cur.row, col: cur.col }]) : null;
         const onDrilledCell =
           !!cell && !!cur && !!cellPath && !!curPath && cur.section === cell.section && samePath(cellPath, curPath);
         if (onDrilledCell) {
-          void openEditorAt(c); // the cell is already drilled/selected → this double-click opens the editor
+          if (engineCaretEditing) await focusEngineCaretAt(c, isCurrent);
+          else await openEditorAt(c, isCurrent);
         } else {
-          await core.selection.drillInto(c.page, c.x, c.y); // drill into the cell (select it, no editor yet)
+          await core.selection.drillInto(c.page, c.x, c.y);
+          if (engineCaretEditing && isCurrent()) await focusEngineCaretAt(c, isCurrent);
         }
       } catch (e) {
         onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
       }
     },
-    [adapter, core, openEditorAt, onTrap, toast],
+    [adapter, core, engineCaretEditing, focusEngineCaretAt, onTrap, openEditorAt],
   );
-  // Detect a double-click (two ups within 400ms, ~same client point) → the Figma drill/edit handler.
-  const detectDoubleClick = useCallback(
+  // Record a double-click at the PHYSICAL pointerup time. The old code timestamped only after async
+  // imageAt, so a 500ms-old scan click whose worker reply arrived late could be paired with a new click.
+  const registerPointerUp = useCallback(
     (c: PageClick) => {
       const now = Date.now();
       const prev = lastUpRef.current;
       if (prev && now - prev.t < 400 && Math.hypot(c.client.x - prev.x, c.client.y - prev.y) < 6) {
         lastUpRef.current = null;
-        void handleDoubleClick(c);
-      } else {
-        lastUpRef.current = { t: now, x: c.client.x, y: c.client.y };
+        return true;
       }
+      lastUpRef.current = { t: now, x: c.client.x, y: c.client.y };
+      return false;
     },
-    [handleDoubleClick],
+    [],
   );
   // issue 053: place the TEXT CARET on a plain click (movement under the drag threshold). Runs
   // AFTER the selection resolve so the caret and the cell mark coexist (클릭 = 셀 마크 + 글리프 캐럿).
   // 라우터가 **셀 먼저, 아니면 본문 문단** 순으로 해소한다 — 셀 밖 문단도 이제 캐럿 대상이다. 어디에도
   // 안 걸리면 컨트롤러가 캐럿을 지운다(018 null 정책) — 빈 곳 클릭이 낡은 캐럿을 남기지 않는다.
-  // Fire-and-forget; a trap recovers.
+  // Awaited by the ordered pointer-up lane: a late hidden-IME focus must not run after an editor opens and
+  // collapse its mount-time select-all (048's intermittent "old text + QWERTY" append).
   const placeCaretAt = useCallback(
-    (c: PageClick) => {
+    async (c: PageClick): Promise<void> => {
       if (!editingOn || !canEdit || editorRef.current || !core.caret.supported) return;
       const down = caretDownRef.current;
       if (down && Math.hypot(c.client.x - down.x, c.client.y - down.y) >= 4) return; // a drag, not a click
@@ -2355,28 +2734,58 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         return;
       }
       // Shift+클릭 = 지금 캐럿에서 클릭 자리까지 **범위 선택**(같은 문단/셀 안에서만 — 컨트롤러가 판정).
-      void core.caret.clickAt(c.page, c.x, c.y, c.shift).catch((e) => onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요"));
+      try {
+        const active = await core.caret.clickAt(c.page, c.x, c.y, c.shift);
+        if (active?.kind === "body") await reflectBodyDesignAt(c);
+      } catch (e) {
+        onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
+      }
     },
-    [editingOn, canEdit, core, onTrap],
+    [editingOn, canEdit, core, onTrap, reflectBodyDesignAt],
   );
 
-  const onPointerUp = useCallback(
-    (c: PageClick) => {
-      setPointerActive(false); // gesture ended → the toolbar re-appears once the new selection resolves
-      stopMarqueeDrag(); // multi-page marquee: end any edge auto-scroll + drop the drag-rect anchor
-      // issue 049: an image click SELECTS the image (its own 8-handle overlay), NOT a block. Probe `imageAt`
-      // FIRST (the image sits on top of its paragraph band); on a hit take over the selection + skip the
-      // block-select/double-click. A miss falls through to the normal selection resolve. The overlay owns its
-      // OWN drag (stopPropagation), so a pointerup reaching here is always a fresh click, never a handle drag.
-      if (editingOn && adapter.imageAt) {
-        void (async () => {
+  const enqueuePointerUp = useCallback(
+    (settle: () => Promise<void>) => {
+      const queued = pointerUpChainRef.current.then(settle);
+      pointerUpChainRef.current = queued.catch((e) => {
+        onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
+      });
+    },
+    [onTrap],
+  );
+
+  /** 텍스트 드래그 소유권 협상 뒤의 기존 pointerup 경로. `dragged`면 클릭 캐럿/더블클릭 감지는
+   *  생략한다(마퀴와 텍스트 드래그 모두 release를 더블클릭으로 오인하면 안 된다). */
+  const finishPointerUp = useCallback(
+    (
+      c: PageClick,
+      dragged: boolean,
+      doubleClick: boolean,
+      curBeforeUp: CurrentCellSnapshot,
+      selectionSettle: Promise<void>,
+      pointerSeq: number,
+    ) => {
+      const settle = async () => {
+        const isCurrent = () => pointerUpSeqRef.current === pointerSeq;
+        if (!isCurrent()) {
+          await selectionSettle;
+          return;
+        }
+        // issue 049: an image click SELECTS the image (its own 8-handle overlay), NOT a block. Probe
+        // `imageAt` first, but keep this whole settle in the ordered pointer-up chain.
+        if (editingOn && adapter.imageAt) {
           let img: ImageBox | null = null;
           try {
             img = (await adapter.imageAt!(c.page, c.x, c.y)) ?? null;
           } catch (e) {
             onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
           }
+          if (!isCurrent()) {
+            await selectionSettle;
+            return;
+          }
           if (img) {
+            await selectionSettle;
             core.selection.clear(); // block selection cleared + drag reset — the image overlay takes over
             core.caret.clear(); // 053: an image selection and a text caret never coexist
             setEditor(null);
@@ -2385,18 +2794,69 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
             return;
           }
           setImageSel((s) => (s ? null : s)); // clicked off any image → drop the image selection
-          void core.selection.pointerUp(toPointerInput(c));
-          placeCaretAt(c); // 053: plain click → cell text caret (a miss clears it)
-          detectDoubleClick(c);
-        })();
+        }
+
+        // Await the exact click's selection settle before drill/edit. This removes the old concurrent
+        // pointerUp ↔ drillInto race where the slower one overwrote the newer one's drill state.
+        await selectionSettle;
+        if (!editingOn || dragged || !isCurrent()) return;
+        if (doubleClick) await handleDoubleClick(c, curBeforeUp, isCurrent);
+        else await placeCaretAt(c); // 053: plain click → cell/body text caret (a miss clears it)
+      };
+
+      enqueuePointerUp(settle);
+    },
+    [core, editingOn, adapter, onTrap, handleDoubleClick, placeCaretAt, enqueuePointerUp],
+  );
+
+  const onPointerUp = useCallback(
+    (c: PageClick) => {
+      setPointerActive(false); // gesture ended → the toolbar re-appears once the new selection resolves
+      const td = textDragRef.current;
+      textDragRef.current = null;
+      const releaseSeq = ++textDragSeqRef.current;
+      const pointerSeq = ++pointerUpSeqRef.current;
+      const down = caretDownRef.current;
+      const movedByPoint = !!down && Math.hypot(c.client.x - down.x, c.client.y - down.y) > DRAG_THRESHOLD_PX;
+      const moved = td?.moved ?? movedByPoint;
+      // Both values are captured synchronously, before any worker await can mutate selection/time.
+      const curBeforeUp = core.selection.currentCell();
+      const doubleClick = moved ? false : registerPointerUp(c);
+      // Capture the SelectionModel drag NOW, at physical release. SelectionModel serializes the captured
+      // gestures internally; deferring this call until imageAt/drag ownership resolves lets a newer
+      // pointerDown overwrite the old drag and recreates the 048 worker-latency race.
+      if (td?.moved) updateMarquee(c.client.x, c.client.y);
+      const selectionSettle = core.selection.pointerUp(toPointerInput(c));
+      stopMarqueeDrag();
+
+      // 텍스트 드래그 후보의 비동기 소유권을 먼저 끝낸다. 소유 성공 + 실제 이동이면 마지막 점까지
+      // focus를 밀고 범위를 유지한다. 실패면 마지막 점을 기존 마퀴에 한 번 넘긴 뒤 정상 pointerup.
+      if (td?.moved) {
+        // This branch used to bypass pointerUpChain with a fire-and-forget selection.pointerUp. Keep it in
+        // the same physical-order lane as clicks; otherwise a slow drag release can overwrite a fast click.
+        enqueuePointerUp(async () => {
+          const owned = await td.owner;
+          const stillThisRelease = textDragSeqRef.current === releaseSeq;
+          if (owned && stillThisRelease) {
+            try {
+              await core.caret.dragTo(c.page, c.x, c.y);
+            } catch (e) {
+              onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
+            }
+          }
+          if (stillThisRelease) core.caret.endDrag();
+          // selection 모델은 pointerdown 장부를 정리하고 기존 블록/셀 마크를 유지한다. 텍스트
+          // 범위는 별도 caret store라 이 settle이 범위를 건드리지 않는다.
+          await selectionSettle;
+        });
         return;
       }
-      void core.selection.pointerUp(toPointerInput(c));
-      if (!editingOn) return;
-      placeCaretAt(c); // 053
-      detectDoubleClick(c);
+      // A caret-active plain click also creates a text-drag *candidate*, but without threshold movement it
+      // remains the ordinary click/double-click lane (caret placement and editor opening still apply).
+      core.caret.endDrag();
+      finishPointerUp(c, movedByPoint, doubleClick, curBeforeUp, selectionSettle, pointerSeq);
     },
-    [core, editingOn, adapter, onTrap, detectDoubleClick, placeCaretAt, stopMarqueeDrag],
+    [core, enqueuePointerUp, finishPointerUp, onTrap, registerPointerUp, stopMarqueeDrag, updateMarquee],
   );
 
   // ── issue 038: hover pre-highlight + cursor system (FG-09 + FG-06) ────────────────────────────────
@@ -2494,8 +2954,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     if (await core.session.redo()) toast("다시 실행");
   }, [core, toast]);
 
-  // ⌘C — 현재 선택(문단/표/셀)의 **평문**을 클립보드로. 읽기 전용이라 op 도 undo 단위도 없다(붙여넣기는
-  // 대응 op 가 없어 스코프 밖 — 반쪽짜리 ⌘V 를 만들지 않는다).
+  // ⌘C — 현재 선택(문단/표/셀)의 **평문**을 클립보드로. 읽기 전용이라 op 도 undo 단위도 없다.
   //   · 셀/문단 → 앵커가 이미 들고 있는 `text`(히트 테스트가 채운 그 텍스트) — 엔진 왕복 0회.
   //   · 표 → `tableGrid` 로 격자를 읽어 TSV(탭=열, 줄바꿈=행). 스프레드시트에 붙여넣으면 표가 표로 산다.
   //     `tableGrid` 는 OPTIONAL 메서드다(TauriAdapter 엔 없음) — 없거나 실패하면 앵커 `text` 로 강등한다.
@@ -2549,14 +3008,31 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     }
   }, [selectionPlainText, onTrap, toast]);
 
-  // ── 키보드 기본기 (사용자 요청): ⌘Z / ⌘⇧Z(·⌘Y) 실행취소·재실행 + ⌘C 복사 ─────────────────────────────
+  // paste 이벤트가 건넨 **동기 text/plain**을 살아 있는 글자 캐럿/범위에 붙인다. ⌘V keydown에서
+  // navigator.clipboard.readText()를 부르면 Safari/WKWebView 권한 정책에 막히고, 브라우저가 이미
+  // 승인해 paste 이벤트에 실어 준 clipboardData를 버리게 된다. 커밋은 셀=SetTableCellRuns,
+  // 본문=SetParagraphRuns 한 번(개행=bare run separator)이다.
+  const pastePlainText = useCallback(async (text: string) => {
+    if (text.length === 0) {
+      toast("클립보드에 붙여넣을 평문이 없습니다");
+      return;
+    }
+    try {
+      const applied = await core.caret.pasteText(text);
+      toast(applied ? "붙여넣었습니다" : "붙여넣을 글자 위치가 없습니다");
+    } catch (e) {
+      if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`붙여넣기 실패: ${e}`);
+    }
+  }, [core, onTrap, toast]);
+
+  // ── 키보드 기본기: ⌘Z / ⌘⇧Z(·⌘Y) 실행취소·재실행 + ⌘C 복사 + ⌘V 평문 붙여넣기 ────────────────
   // 배선은 이미 있다 — 툴바 ↶/↷ 버튼이 부르는 `undo`/`redo` 와 **같은 레인**(core.session)을 키보드로
   // 노출할 뿐이라 새 op 도, 새 상태도 없다.
   //
   // ⚠️ 키 소유권 협상 (다음 사람이 알아야 할 것) — 이 창엔 이미 keydown 리스너가 5개다:
   //   035 줌/Space(⌘+/-/0) · 021 Esc · 045 ⌘F · 036 셀 이동(방향키/Enter) · 053 캐럿 타이핑.
   //   036/053/블록편집 리스너는 **⌘/Ctrl 조합이면 즉시 양보**하므로 여기와 절대 겹치지 않고,
-  //   035 가 가진 ⌘ 키는 `=`/`-`/`0` 뿐이라 z/y/c 와 충돌하지 않는다. 새 ⌘ 단축키를 붙일 땐 이 목록을
+  //   035 가 가진 ⌘ 키는 `=`/`-`/`0` 뿐이라 z/y/c/v 와 충돌하지 않는다. 새 ⌘ 단축키를 붙일 땐 이 목록을
   //   먼저 확인하라.
   // ⚠️ 텍스트 입력 표면에서는 **절대 가로채지 않는다**(기존 `isEditableTarget` 가드 재사용):
   //   제자리 셀 에디터(contentEditable) · 채팅 작성창 · 크기 입력 안에서는 브라우저 기본 실행취소/복사가
@@ -2603,9 +3079,28 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         if (!onTrap(err, "엔진 트랩 — 문서를 복구했습니다")) toast(`${isRedo ? "다시 실행" : "실행취소"} 실패: ${err}`);
       });
     };
+    const onPaste = (e: ClipboardEvent) => {
+      if (!caretActiveRef.current || editorRef.current) return;
+      if (isEditableTarget(e.target as Element | null) || isEditableTarget(document.activeElement)) return;
+      if (compositionStore.get() != null) return; // 조합 확정 전에는 IME가 주인
+      // 일반 paste 이벤트는 권한 확인을 끝낸 text/plain을 동기로 준다. 없는/빈 payload를 문서에
+      // 조용히 쓰거나 hidden IME textarea에 흘리지 않고 정직하게 알린다.
+      const data = e.clipboardData;
+      const text = data?.getData("text/plain") ?? "";
+      e.preventDefault();
+      if (!data) {
+        toast("클립보드 평문을 읽을 수 없습니다");
+        return;
+      }
+      void pastePlainText(text.replace(/\r\n?/g, "\n"));
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [core, undo, redo, copySelection, compositionStore, onTrap, toast]);
+    window.addEventListener("paste", onPaste);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("paste", onPaste);
+    };
+  }, [core, undo, redo, copySelection, pastePlainText, compositionStore, onTrap, toast]);
 
   // ── Feature C: persistent per-card 되돌리기 on applied chat turns ─────────────────────────────────────
   // The chat records each applied turn's undo-stack depth (via `undoDepth`) and offers 되돌리기 only while
@@ -2826,7 +3321,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   }, [selection]);
 
   return (
-    <div className={`hw-workspace ${props.className ?? ""}`}>
+    <div className={`hw-workspace${textEditing ? " is-text-editing" : ""} ${props.className ?? ""}`}>
       {/* Screen font-face + alias (issue 022 §3): map every document font name to the selected face so
           the SVG on screen matches the exported PDF. Injected only when a font is selected. Issue 058:
           also bind the OFL serif substitute (`serifUrl`) so 명조 runs render serif — the attribute-scoped
@@ -2840,7 +3335,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         </style>
       )}
       <div className="hw-toolbar">
-        <span className="hw-brand">auto-hwp</span>
+        <span className="hw-brand">{props.brand ?? "auto-hwp"}</span>
         <span className="hw-doc-meta">{meta ? `${meta.format.toUpperCase()} · ${meta.pages}쪽` : "문서 없음"}</span>
         <span className="hw-spacer" />
         <button className="hw-tool" onClick={() => zoomAtCenter(1 / ZOOM_STEP)} title="축소 (⌘−)" disabled={!meta}>
@@ -2884,7 +3379,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
             />
           </>
         )}
-        {props.fontCatalog && (
+        {props.fontCatalog && !inspectorFormatting && (
           <FontPicker
             catalog={props.fontCatalog}
             selected={selectedFont?.family ?? null}
@@ -2926,7 +3421,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           `applyRibbon`: 편집 중이면 라이브 선택 스타일(applyLiveStyle), 아니면 선택 셀/범위의 서식
           op(useSelectionActions). 서체 catalog is passed through so 글꼴 lives here too (the only control the
           old floating bar had that the ribbon lacked). */}
-      {editingOn && meta && (
+      {editingOn && meta && !inspectorFormatting && (
         <FormatRibbon
           fmt={ribbonFmt}
           editing={ribbonEditing}
@@ -3184,11 +3679,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                       />
                       );
                     })()}
-                    {/* issue 047 목표 3: 편집 중 셀음영 — while a CELL is being edited in place, a swatch bar
-                        lets the user set that cell's background without leaving edit mode (desktop R7-Part1).
-                        Its buttons preventDefault mousedown so they never blur→commit the editor; the apply is
-                        shielded so the editor stays open with its uncommitted text (커밋/에디터 경합 금지). */}
-                    {editingOn && editor && editor.kind === "cell" && editor.page === page && (
+                    {/* Legacy SDK surface only. The reference app enables engine-caret editing, where cell
+                        background lives in the Design tab and no color palette covers the document. */}
+                    {!engineCaretEditing && editingOn && editor && editor.kind === "cell" && editor.page === page && (
                       <CellShadePalette box={editor.box} scale={scale} onPick={(hex) => void shadeEditorCell(hex)} />
                     )}
                     {/* (issue 06x': the "✨ 여기서 편집" affordance now lives INSIDE the unified .hw-sel-actions
@@ -3235,6 +3728,10 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           previewCards: (intents) => core.edit.previewCards(intents),
           revert: revertChatEdit,
           undoDepth,
+          designSelection,
+          applyDesign,
+          designFonts: fontFamilies,
+          textEditing,
         })}
       </div>
 
@@ -3271,7 +3768,13 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           );
         }
         const items: ContextMenuItem[] = [];
-        items.push({ type: "action", key: "edit", label: "텍스트 편집", icon: "✎", onSelect: () => void openEditorAt(cm.click) });
+        items.push({
+          type: "action",
+          key: "edit",
+          label: "텍스트 편집",
+          icon: "✎",
+          onSelect: () => void (engineCaretEditing ? focusEngineCaretAt(cm.click) : openEditorAt(cm.click)),
+        });
         if (cm.kind === "cell") {
           const fmtOk = !!fmtActions.fmtRange;
           const fmtWhy = fmtOk ? undefined : "이 셀에는 서식을 적용할 수 없습니다";

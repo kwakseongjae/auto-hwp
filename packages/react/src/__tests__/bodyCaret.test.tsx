@@ -63,6 +63,18 @@ function workspace(adapter: MockAdapter) {
   );
 }
 
+function engineCaretWorkspace(adapter: MockAdapter) {
+  return render(
+    <HwpWorkspace
+      adapter={adapter}
+      document={{ bytes: new Uint8Array([1]), name: "t.hwp" }}
+      onAiRequest={async () => []}
+      enableEditing
+      preferEngineCaretEditing
+    />,
+  );
+}
+
 /** 캐럿을 '가|나' 자리에 세우고 그 엘리먼트를 돌려준다. */
 async function caretAt(container: HTMLElement, x = 112, y = 45): Promise<HTMLElement> {
   const sheet = await sheetOf(container);
@@ -75,6 +87,91 @@ async function caretAt(container: HTMLElement, x = 112, y = 45): Promise<HTMLEle
 }
 
 describe("body paragraph caret", () => {
+  it("Figma 편집 옵션: 더블클릭도 원본 SVG를 덮는 contentEditable 없이 엔진 캐럿을 유지한다", async () => {
+    const { container } = engineCaretWorkspace(bodyAdapter());
+    const sheet = await sheetOf(container);
+    click(sheet, 112, 45);
+    await waitFor(() => expect(container.querySelector(".hw-caret")).toBeTruthy());
+    click(sheet, 112, 45);
+    await waitFor(() => expect(container.querySelector(".hw-caret")).toBeTruthy());
+    expect(container.querySelector('[data-testid="hw-inplace-editor"]')).toBeNull();
+    expect(sheet.querySelector("svg")).toBeTruthy();
+  });
+
+  it("디자인 inspector의 문단 굵게는 원문/런을 보존한 SetParagraphRuns 하나로 적용한다", async () => {
+    const adapter = bodyAdapter();
+    const { container } = render(
+      <HwpWorkspace
+        adapter={adapter}
+        document={{ bytes: new Uint8Array([1]), name: "t.hwp" }}
+        onAiRequest={async () => []}
+        enableEditing
+        preferEngineCaretEditing
+        sidePanel={(api) => (
+          <button
+            type="button"
+            data-testid="paragraph-design-bold"
+            disabled={!api.designSelection?.canTextStyle}
+            onClick={() => api.applyDesign?.({ bold: true })}
+          >
+            문단 굵게
+          </button>
+        )}
+      />,
+    );
+    const sheet = await sheetOf(container);
+    click(sheet, 112, 45);
+    const button = await waitFor(() => {
+      const el = container.querySelector('[data-testid="paragraph-design-bold"]') as HTMLButtonElement | null;
+      expect(el?.disabled).toBe(false);
+      return el!;
+    });
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(adapter.applied).toHaveLength(1);
+      expect(adapter.applied[0]).toMatchObject({
+        intent: "SetParagraphRuns",
+        section: 0,
+        block: 3,
+        runs: [{ text: "가나", bold: true }, { text: " 다", bold: true }],
+      });
+    });
+  });
+
+  it("디자인 inspector의 굵게는 실제 글자 범위가 있으면 문단 전체가 아닌 그 범위만 토글한다", async () => {
+    const adapter = bodyAdapter();
+    const { container } = render(
+      <HwpWorkspace
+        adapter={adapter}
+        document={{ bytes: new Uint8Array([1]), name: "t.hwp" }}
+        onAiRequest={async () => []}
+        enableEditing
+        preferEngineCaretEditing
+        sidePanel={(api) => (
+          <button type="button" data-testid="range-design-bold" onClick={() => api.applyDesign?.({ bold: true })}>
+            범위 굵게
+          </button>
+        )}
+      />,
+    );
+    await caretAt(container, 112, 45); // 가|나
+    fireEvent.keyDown(window, { key: "ArrowRight", shiftKey: true }); // "나" 선택
+    await waitFor(() => expect(container.querySelectorAll(".hw-selrange-box")).toHaveLength(1));
+    fireEvent.click(container.querySelector('[data-testid="range-design-bold"]')!);
+
+    await waitFor(() => {
+      expect(adapter.applied).toEqual([
+        {
+          intent: "SetParagraphRuns",
+          section: 0,
+          block: 3,
+          runs: [{ text: "가", bold: true }, { text: "나 다" }],
+        },
+      ]);
+    });
+  });
+
   it("본문 문단을 클릭하면 그 글자 자리에 캐럿이 선다(글리프 x에 스냅, top=baseline−0.85h)", async () => {
     const { container } = workspace(bodyAdapter());
     const caret = await caretAt(container);
@@ -224,6 +321,33 @@ describe("body paragraph caret", () => {
     await waitFor(() => expect(rangeBoxes(container)).toHaveLength(1));
   });
 
+  it("마우스 드래그는 같은 문단의 글자 범위를 ref로 만든다 — 이동 중 시트/워크스페이스 렌더 0", async () => {
+    const adapter = bodyAdapter();
+    const { container } = workspace(adapter);
+    await caretAt(container, 112, 45); // 먼저 캐럿 활성
+    const sheet = await sheetOf(container);
+
+    fireEvent.pointerDown(sheet, { clientX: 101, clientY: 45, button: 0, buttons: 1, pointerId: 7 });
+    await flush(); // 비동기 hit-test가 텍스트 레인 소유권을 얻고 pointerActive 렌더가 끝난 뒤 계측
+    __resetSheetRenderCount();
+    __resetWorkspaceRenderCount();
+    for (const x of [112, 124, 132, 500]) {
+      fireEvent.pointerMove(sheet, { clientX: x, clientY: 45, button: 0, buttons: 1, pointerId: 7 });
+      await flush();
+    }
+    await waitFor(() => expect(rangeBoxes(container)).toHaveLength(1));
+    expect(__getSheetRenderCount()).toBe(0);
+    expect(__getWorkspaceRenderCount()).toBe(0);
+    expect(adapter.applied).toHaveLength(0); // 드래그 자체는 읽기 전용
+
+    fireEvent.pointerUp(sheet, { clientX: 500, clientY: 45, button: 0, buttons: 0, pointerId: 7 });
+    await flush();
+    fireEvent.keyDown(window, { key: "X" });
+    await waitFor(() => expect(adapter.applied).toHaveLength(1));
+    expect(adapter.applied.every((i) => i.intent === "SetParagraphRuns")).toBe(true); // mutation: 평문 op 금지
+    expect((adapter.applied[0] as Intent & { runs: RunSpec[] }).runs.map((r) => r.text).join("")).toBe("X");
+  });
+
   it("범위 위 타이핑은 범위를 대체하고, Backspace는 범위를 지운다", async () => {
     const adapter = bodyAdapter();
     const { container } = workspace(adapter);
@@ -234,6 +358,25 @@ describe("body paragraph caret", () => {
     fireEvent.keyDown(window, { key: "X" });
     await waitFor(() => expect(adapter.applied).toHaveLength(1));
     expect((adapter.applied[0] as Intent & { runs: RunSpec[] }).runs.map((r) => r.text).join("")).toBe("X 다");
+  });
+
+  it("⌘V 여러 줄 평문은 범위를 대체하고 SetParagraphRuns 한 번만 커밋한다", async () => {
+    const adapter = bodyAdapter();
+    const { container } = workspace(adapter);
+    await caretAt(container, 101, 45);
+    fireEvent.keyDown(window, { key: "ArrowRight", shiftKey: true });
+    fireEvent.keyDown(window, { key: "ArrowRight", shiftKey: true }); // "가나" 범위
+    await flush();
+
+    const e = new Event("paste", { cancelable: true, bubbles: true }) as ClipboardEvent;
+    Object.defineProperty(e, "clipboardData", {
+      value: { getData: (type: string) => (type === "text/plain" ? "X\r\nY" : "") },
+    });
+    window.dispatchEvent(e);
+    expect(e.defaultPrevented).toBe(true);
+    await waitFor(() => expect(adapter.applied).toHaveLength(1));
+    expect(adapter.applied.map((i) => i.intent)).toEqual(["SetParagraphRuns"]);
+    expect((adapter.applied[0] as Intent & { runs: RunSpec[] }).runs.map((r) => r.text).join("")).toBe("X\nY 다");
   });
 
   it("⌘A는 문단 전체를 선택하고 ⌘B는 그 범위만 굵게 커밋한다(런 보존)", async () => {

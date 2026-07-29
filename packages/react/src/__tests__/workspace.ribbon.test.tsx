@@ -57,6 +57,24 @@ describe("HwpWorkspace issue-048 — persistent format ribbon (선택+편집 겸
     expect(screen.queryByTestId("hw-format-ribbon")).toBeNull();
   });
 
+  it("inspector 서식 모드는 중복 상단 리본·전역 글꼴 선택기를 숨긴다", async () => {
+    const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
+    const { container } = render(
+      <HwpWorkspace
+        adapter={adapter}
+        document={doc}
+        onAiRequest={noAi}
+        sidePanel={chatSidePanel({ onAiRequest: noAi })}
+        enableEditing
+        formatSurface="inspector"
+        fontCatalog={FONT_CATALOG}
+      />,
+    );
+    await sheetOf(container);
+    expect(screen.queryByTestId("hw-format-ribbon")).toBeNull();
+    expect(screen.queryByTestId("font-picker")).toBeNull();
+  });
+
   it("비편집 + 셀 선택 → 리본 굵게가 SetCellRangeFmt 를 적용 (028 툴바와 동일 op)", async () => {
     const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
     const { container } = render(<HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);
@@ -71,6 +89,36 @@ describe("HwpWorkspace issue-048 — persistent format ribbon (선택+편집 겸
       expect(applied).toBeTruthy();
       expect(applied!.bold).toBe(true);
       expect(applied!.r0).toBe(1); // the clicked cell's row
+    });
+  });
+
+  it("디자인 탭: 선택 셀의 inspector에서 굵게를 바꾸면 같은 SetCellRangeFmt 계약으로 적용한다", async () => {
+    const adapter = new MockAdapter({ table, cell, runs: [{ text: "칸" }], colBoundaries: [40, 140, 240, 340], pages: 1 });
+    const { container } = render(
+      <HwpWorkspace
+        adapter={adapter}
+        document={doc}
+        onAiRequest={noAi}
+        sidePanel={chatSidePanel({ onAiRequest: noAi })}
+        enableEditing
+      />,
+    );
+    const sheet = await sheetOf(container);
+    clickCell(sheet);
+    await waitFor(() => expect((screen.getByTestId("hw-ribbon-bold") as HTMLButtonElement).disabled).toBe(false));
+
+    fireEvent.click(screen.getByTestId("hw-design-tab"));
+    const designBold = await screen.findByTestId("hw-design-bold");
+    await waitFor(() => expect((designBold as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(designBold);
+
+    await waitFor(() => {
+      const applied = adapter.applied.find((i) => i.intent === "SetCellRangeFmt") as
+        | (Intent & { bold: unknown; r0: number; c0: number })
+        | undefined;
+      expect(applied).toBeTruthy();
+      expect(applied!.bold).toBe(true);
+      expect([applied!.r0, applied!.c0]).toEqual([1, 1]);
     });
   });
 

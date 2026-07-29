@@ -84,8 +84,10 @@ export interface ChatPanelProps {
   aiNotice?: string;
   /** A monotonically-bumped token; when it CHANGES the composer is focused + scrolled into view. The
    *  floating toolbar's "AI에게 전달" bumps it (issue 028) — the marked selection is already the anchor
-   *  chip, so this just brings the user to the composer. No new prompt logic. */
+  *  chip, so this just brings the user to the composer. No new prompt logic. */
   focusToken?: number;
+  /** Whether the host pane is visible. A hidden pane defers focus until the host reveals it. */
+  active?: boolean;
   /** OPTIONAL async card builder (issue 051): maps the proposed Intents → enriched preview cards —
    *  the host wires `EditController.previewCards` so a DeleteBlock card carries the target block's
    *  ORIGINAL text (`detail`) + the `destructive` flag. Omitted → the pure `describeIntent` mapping
@@ -374,13 +376,19 @@ export function ChatPanel(props: ChatPanelProps) {
   useEffect(() => {
     if (firstFocus.current) {
       firstFocus.current = false;
-      return;
+      if (!focusToken) return;
     }
-    const el = inputRef.current;
-    if (!el) return;
-    el.focus();
-    el.scrollIntoView?.({ block: "nearest" });
-  }, [focusToken]);
+    if (props.active === false) return;
+    // WorkspacePanel may reveal the previously display:none vibe pane in the same commit. Focus on the
+    // next frame, after that visibility change is painted; focusing a hidden textarea is ignored by Chrome.
+    const frame = requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      el.scrollIntoView?.({ block: "nearest" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focusToken, props.active]);
 
   function settleLast(state: "applied" | "discarded", appliedDepth?: number) {
     setMsgs((m) => {

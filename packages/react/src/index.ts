@@ -4,7 +4,7 @@ import "./styles.css";
 
 // Assembly + components
 export { HwpWorkspace } from "./components/HwpWorkspace";
-export type { HwpWorkspaceProps, WorkspaceSidePanel } from "./components/HwpWorkspace";
+export type { HwpWorkspaceProps, WorkspaceDesignSelection, WorkspaceSidePanel } from "./components/HwpWorkspace";
 export { HwpPageView } from "./components/HwpPageView";
 export type { HwpPageViewProps, PageClick } from "./components/HwpPageView";
 export { SelectionOverlay } from "./components/SelectionOverlay";
@@ -32,9 +32,18 @@ export type { UseHoverParams, UseHoverResult } from "./useHover";
 export { HoverStore, cursorForContext, pointInBox, sameHighlight } from "./hover";
 export type { HoverHighlight, HoverCursor, CursorContext } from "./hover";
 export { ChatPanel } from "./components/ChatPanel";
-export { chatSidePanel } from "./chatSlot";
-export type { ChatSlotOptions } from "./chatSlot";
+export { chatSidePanel, workspacePanel } from "./chatSlot";
+export type { ChatSlotOptions, WorkspacePanelSlotOptions } from "./chatSlot";
 export type { ChatPanelProps } from "./components/ChatPanel";
+export { DesignPanel } from "./components/DesignPanel";
+export type { DesignPanelProps } from "./components/DesignPanel";
+export { WorkspacePanel, WorkspacePanelFrame } from "./components/WorkspacePanel";
+export type {
+  WorkspacePanelFrameProps,
+  WorkspacePanelPresentation,
+  WorkspacePanelProps,
+  WorkspacePanelTab,
+} from "./components/WorkspacePanel";
 // Issue 06x — the INLINE per-element vibe-edit panel (apply-then-revert): an alternative to the chat that
 // happens directly ON the selected element. HwpWorkspace mounts it from the "✨ 여기서 편집" affordance;
 // a host can also compose it over the core (same onAiRequest bridge + one-batch apply + core.session.undo).
@@ -90,20 +99,15 @@ export {
 } from "./richedit";
 export type { ParaIndent } from "./richedit";
 /** @deprecated Since issue 032 — superseded by {@link InPlaceCellEditor} (in-place, no popover card).
- *  Kept as an export for backward compatibility; HwpWorkspace no longer uses it. */
+ *  Kept as an export for backward compatibility; HwpWorkspace no longer uses it. Remove only in a major. */
 export { CellTextPopover } from "./components/CellTextPopover";
 /** @deprecated Since issue 032 — see {@link CellTextPopover}. */
 export type { CellTextPopoverProps } from "./components/CellTextPopover";
-// FormatToolbar — the ORIGINAL fixed toolbar (issue 027). Kept for backward compatibility; HwpWorkspace's
-// enableEditing path now uses the persistent FormatRibbon (issue 048). Still individually importable for
-// hosts that built their own chrome around it.
+/** @deprecated HwpWorkspace uses the persistent FormatRibbon. Kept for patch-version SDK compatibility. */
 export { FormatToolbar } from "./components/FormatToolbar";
+/** @deprecated See {@link FormatToolbar}. */
 export type { FormatToolbarProps } from "./components/FormatToolbar";
-
-// Issue 028 — the (now legacy) capsule FLOATING selection toolbar (네이버 블로그 패턴) + its pure position
-// engine. HwpWorkspace NO LONGER renders it (issue 06x — format moved to the persistent FormatRibbon, the
-// per-selection floating bar was removed as redundant/annoying). Kept exported for hosts that want to build
-// their own floating chrome; `ToolbarAlign` + `unionPageBox` are reused by the ribbon + the AI-전달 pill.
+/** @deprecated HwpWorkspace no longer renders the floating format capsule. Kept for external hosts. */
 export { FloatingToolbar } from "./components/FloatingToolbar";
 export type { FloatingToolbarProps, ToolbarAlign } from "./components/FloatingToolbar";
 export { computeFloatingPosition, unionPageBox } from "./floatingPosition";

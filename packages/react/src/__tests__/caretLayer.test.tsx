@@ -59,6 +59,9 @@ function workspace(adapter: MockAdapter) {
   );
 }
 
+const rangeBoxes = (container: HTMLElement) =>
+  Array.from(container.querySelectorAll('[data-testid="hw-selrange"] .hw-selrange-box')) as HTMLElement[];
+
 describe("cell text caret (issue 053)", () => {
   it("a plain click on cell text shows the caret; a click off any cell text clears it", async () => {
     const adapter = caretAdapter();
@@ -160,6 +163,49 @@ describe("cell text caret (issue 053)", () => {
       col: 0,
       runs: [{ text: "XAB", bold: true }], // inherits the bold run's style — never a plain-text collapse
     } as Intent);
+  });
+
+  it("마우스 드래그는 같은 셀 문단 범위를 ref로 만든다 — 이동 중 렌더 0, 대체는 SetTableCellRuns만", async () => {
+    const adapter = caretAdapter({
+      cellText: (page, x): CellTextHit | null => {
+        if (x < 100 || x > 300) return null;
+        const offset = x < 110 ? 0 : x < 120 ? 1 : 2;
+        return {
+          section: 0,
+          block: 1,
+          row: 0,
+          col: 0,
+          para: 0,
+          offset,
+          para_len: 2,
+          caret: { page, x: 100 + offset * 10, top: 40, height: 13 },
+        };
+      },
+    });
+    const { container } = workspace(adapter);
+    const sheet = await sheetOf(container);
+    click(sheet, 110, 50); // 캐럿 활성
+    await waitFor(() => expect(container.querySelector(".hw-caret")).toBeTruthy());
+
+    fireEvent.pointerDown(sheet, { clientX: 100, clientY: 50, button: 0, buttons: 1, pointerId: 8 });
+    await flush();
+    __resetSheetRenderCount();
+    __resetWorkspaceRenderCount();
+    for (const x of [111, 120, 140]) {
+      fireEvent.pointerMove(sheet, { clientX: x, clientY: 50, button: 0, buttons: 1, pointerId: 8 });
+      await flush();
+    }
+    await waitFor(() => expect(rangeBoxes(container)).toHaveLength(1));
+    expect(__getSheetRenderCount()).toBe(0);
+    expect(__getWorkspaceRenderCount()).toBe(0);
+    expect(adapter.applied).toHaveLength(0);
+
+    fireEvent.pointerUp(sheet, { clientX: 140, clientY: 50, button: 0, buttons: 0, pointerId: 8 });
+    await flush();
+    fireEvent.keyDown(window, { key: "X" });
+    await waitFor(() => expect(adapter.applied).toHaveLength(1));
+    expect(adapter.applied.every((i) => i.intent === "SetTableCellRuns")).toBe(true); // mutation: 평문 op 금지
+    expect((adapter.applied[0] as Intent & { runs: RunSpec[] }).runs).toEqual([{ text: "X" }]);
   });
 
   it("a composing (IME) keydown is IGNORED — no half-composed jamo commit (FG-13 가드)", async () => {
