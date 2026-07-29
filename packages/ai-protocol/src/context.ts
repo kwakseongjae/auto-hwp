@@ -108,23 +108,35 @@ function docAttachments(req: EditRequest): Attachment[] {
   return (req.attachments ?? []).filter((a): a is Attachment => a.kind === "doc" && typeof a.text === "string" && a.text.length > 0);
 }
 
-/** Assemble the TEXT body of the LLM USER turn: instruction + anchors + the R5-fenced `<document-content>`,
- *  then (if any) each reference DOCUMENT's extracted text in its OWN R5 fence — an `<attachment …>` block is
- *  DATA exactly like `<document-content>` (never instructions; the system prompt's R5 rule covers it). With
- *  no doc attachments the output is byte-identical to the promoted reference-proxy assembly (regression-safe). */
+/** Prevent document-derived text from manufacturing one of our literal closing fence tags. The model
+ *  still sees the characters as escaped DATA, while only the builder can emit raw `<` / `>` delimiters. */
+function escapeFenceMarkup(value: string): string {
+  return value.replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
+}
+
+/** Assemble the TEXT body of the LLM USER turn. Only the user's explicit instruction is outside the
+ *  R5 fence: both structural anchors (including document-derived label/text) and docContext live inside
+ *  `<document-content>`. Reference documents use a second `<attachment>` fence whose metadata + text is
+ *  one escaped JSON value. This prevents anchor text, filenames, or document content from closing a DATA
+ *  fence and masquerading as a new instruction. */
 function buildUserText(req: EditRequest): string {
   const lines = [
     `사용자 지시: ${req.instruction}`,
     "",
-    "마킹된 앵커(편집 대상, 구조 인덱스 — 이 위치만 편집):",
-    JSON.stringify(req.anchors),
-    "",
     "<document-content>",
-    req.docContext,
+    escapeFenceMarkup(req.docContext),
+    "",
+    "마킹된 앵커(편집 대상, 구조 인덱스 — 이 위치만 편집):",
+    escapeFenceMarkup(JSON.stringify(req.anchors)),
     "</document-content>",
   ];
   for (const a of docAttachments(req)) {
-    lines.push("", `<attachment name=${JSON.stringify(a.name)} mime=${JSON.stringify(a.mime)}>`, a.text ?? "", "</attachment>");
+    lines.push(
+      "",
+      "<attachment>",
+      escapeFenceMarkup(JSON.stringify({ name: a.name, mime: a.mime, text: a.text ?? "" })),
+      "</attachment>",
+    );
   }
   return lines.join("\n");
 }

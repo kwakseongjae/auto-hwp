@@ -22,6 +22,9 @@ export interface Anchor {
   label?: string;
   page?: number;
   text?: string;
+  /** Optional descending path for a nested cell. Unknown object fields are never forwarded by
+   *  `validateRequest`; each step is rebuilt from these three non-negative integer fields. */
+  path?: Array<{ block: number; row: number; col: number }>;
 }
 
 /** One ACTIVE (uncovered) cell of a marked table's grid (issue 066) — its MODEL-GLOBAL `(row, col)`
@@ -185,6 +188,12 @@ export interface RequestLimits {
   maxInstruction: number;
   maxDocContext: number;
   maxAnchors: number;
+  /** Per-anchor human label and document-derived text caps. */
+  maxAnchorLabel?: number;
+  maxAnchorText?: number;
+  /** Maximum nested-cell path depth and total serialized anchor characters. */
+  maxAnchorPath?: number;
+  maxAnchorsJson?: number;
   maxAttachments?: number;
   maxAttachmentText?: number;
   maxImageDataUrl?: number;
@@ -195,6 +204,10 @@ export const DEFAULT_LIMITS: RequestLimits = {
   maxInstruction: 4000,
   maxDocContext: 20000,
   maxAnchors: 32,
+  maxAnchorLabel: 200,
+  maxAnchorText: 4000,
+  maxAnchorPath: 16,
+  maxAnchorsJson: 50_000,
   maxAttachments: 8,
   maxAttachmentText: 20000,
   maxImageDataUrl: 8_000_000, // ~6 MB of base64 image bytes

@@ -21,15 +21,124 @@ export function validateRequest(body: unknown, limits: RequestLimits = DEFAULT_L
   if (instruction.length > limits.maxInstruction) return { ok: false, error: `instruction이 너무 깁니다(>${limits.maxInstruction}).` };
   if (!Array.isArray(anchors)) return { ok: false, error: "anchors(배열)가 필요합니다." };
   if (anchors.length > limits.maxAnchors) return { ok: false, error: `anchors가 너무 많습니다(>${limits.maxAnchors}).` };
+  const checkedAnchors = sanitizeAnchors(anchors, limits);
+  if (!checkedAnchors.ok) return checkedAnchors;
   // docContext 는 프록시 계약상 string. 없으면 빈 문자열로 관대 처리.
   const ctx = typeof docContext === "string" ? docContext : "";
   if (ctx.length > limits.maxDocContext) return { ok: false, error: `docContext가 너무 깁니다(>${limits.maxDocContext}).` };
   // attachments(멀티모달)는 선택 필드 — 있으면 배열·개수·크기를 검증해 well-formed 항목만 통과시킨다.
   const att = sanitizeAttachments(b.attachments, limits);
   if (!att.ok) return { ok: false, error: att.error };
-  const value: EditRequest = { instruction, anchors: anchors as Anchor[], docContext: ctx };
+  const value: EditRequest = { instruction, anchors: checkedAnchors.value, docContext: ctx };
   if (att.value.length) value.attachments = att.value;
   return { ok: true, value };
+}
+
+const ANCHOR_KINDS = new Set(["cell", "range", "paragraph", "table"]);
+
+function nonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 1_000_000;
+}
+
+function indexPair(value: unknown): [number, number] | null {
+  if (
+    !Array.isArray(value) ||
+    value.length !== 2 ||
+    !nonNegativeInteger(value[0]) ||
+    !nonNegativeInteger(value[1]) ||
+    value[0] > value[1]
+  ) {
+    return null;
+  }
+  return [value[0], value[1]];
+}
+
+/** Rebuild untrusted anchors from known scalar fields. This deliberately does not spread/cast input:
+ *  an attacker cannot smuggle a large nested object through a harmless-looking anchor. */
+function sanitizeAnchors(
+  raw: unknown[],
+  limits: RequestLimits,
+): { ok: true; value: Anchor[] } | { ok: false; error: string } {
+  const maxLabel = limits.maxAnchorLabel ?? DEFAULT_LIMITS.maxAnchorLabel ?? 512;
+  const maxText = limits.maxAnchorText ?? DEFAULT_LIMITS.maxAnchorText ?? 4000;
+  const maxPath = limits.maxAnchorPath ?? DEFAULT_LIMITS.maxAnchorPath ?? 16;
+  const maxJson = limits.maxAnchorsJson ?? DEFAULT_LIMITS.maxAnchorsJson ?? 50_000;
+  const out: Anchor[] = [];
+
+  for (let i = 0; i < raw.length; i++) {
+    const candidate = raw[i];
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+      return { ok: false, error: `anchors[${i}]가 오브젝트가 아닙니다.` };
+    }
+    const r = candidate as Record<string, unknown>;
+    if (typeof r.kind !== "string" || !ANCHOR_KINDS.has(r.kind)) {
+      return { ok: false, error: `anchors[${i}].kind가 지원되지 않습니다.` };
+    }
+    if (!nonNegativeInteger(r.section) || !nonNegativeInteger(r.block)) {
+      return { ok: false, error: `anchors[${i}]의 section/block은 0 이상의 안전한 정수여야 합니다.` };
+    }
+
+    const anchor: Anchor = {
+      kind: r.kind,
+      section: r.section,
+      block: r.block,
+    };
+    if (r.rows !== undefined) {
+      const rows = indexPair(r.rows);
+      if (!rows) return { ok: false, error: `anchors[${i}].rows는 오름차순 정수 쌍이어야 합니다.` };
+      anchor.rows = rows;
+    }
+    if (r.cols !== undefined) {
+      const cols = indexPair(r.cols);
+      if (!cols) return { ok: false, error: `anchors[${i}].cols는 오름차순 정수 쌍이어야 합니다.` };
+      anchor.cols = cols;
+    }
+    if (r.label !== undefined) {
+      if (typeof r.label !== "string" || r.label.length > maxLabel) {
+        return { ok: false, error: `anchors[${i}].label이 문자열이 아니거나 너무 깁니다(>${maxLabel}).` };
+      }
+      anchor.label = r.label;
+    }
+    if (r.page !== undefined) {
+      if (!nonNegativeInteger(r.page)) {
+        return { ok: false, error: `anchors[${i}].page는 0 이상의 안전한 정수여야 합니다.` };
+      }
+      anchor.page = r.page;
+    }
+    if (r.text !== undefined) {
+      if (typeof r.text !== "string" || r.text.length > maxText) {
+        return { ok: false, error: `anchors[${i}].text가 문자열이 아니거나 너무 깁니다(>${maxText}).` };
+      }
+      anchor.text = r.text;
+    }
+    if (r.path !== undefined) {
+      if (anchor.kind !== "cell") {
+        return { ok: false, error: `anchors[${i}].path는 cell 앵커에만 허용됩니다.` };
+      }
+      if (!Array.isArray(r.path) || r.path.length === 0 || r.path.length > maxPath) {
+        return { ok: false, error: `anchors[${i}].path 깊이가 올바르지 않습니다(1..${maxPath}).` };
+      }
+      const path: Array<{ block: number; row: number; col: number }> = [];
+      for (let j = 0; j < r.path.length; j++) {
+        const step = r.path[j];
+        if (!step || typeof step !== "object" || Array.isArray(step)) {
+          return { ok: false, error: `anchors[${i}].path[${j}]가 오브젝트가 아닙니다.` };
+        }
+        const s = step as Record<string, unknown>;
+        if (!nonNegativeInteger(s.block) || !nonNegativeInteger(s.row) || !nonNegativeInteger(s.col)) {
+          return { ok: false, error: `anchors[${i}].path[${j}] 주소가 올바르지 않습니다.` };
+        }
+        path.push({ block: s.block, row: s.row, col: s.col });
+      }
+      anchor.path = path;
+    }
+    out.push(anchor);
+  }
+
+  if (JSON.stringify(out).length > maxJson) {
+    return { ok: false, error: `anchors 전체가 너무 큽니다(>${maxJson}자).` };
+  }
+  return { ok: true, value: out };
 }
 
 /** Validate + sanitize the OPTIONAL `attachments` array (multimodal chat input). Absent → `[]` (additive,

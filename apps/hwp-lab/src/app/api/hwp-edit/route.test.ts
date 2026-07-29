@@ -143,7 +143,8 @@ describe("hwp-edit route — multimodal attachments (image vision + doc text)", 
     const content = body.messages[1].content;
     // No image → back-compat STRING content (not parts).
     expect(typeof content).toBe("string");
-    expect(content as string).toContain('<attachment name="ref.txt" mime="text/plain">');
+    expect(content as string).toContain("<attachment>");
+    expect(content as string).toContain('"name":"ref.txt"');
     expect(content as string).toContain("표 데이터: A=1 B=2");
   });
 
