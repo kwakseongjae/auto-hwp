@@ -32,11 +32,18 @@ const nextConfig = {
         output: "export",
         ...(demoBasePath ? { basePath: demoBasePath } : {}),
         images: { unoptimized: true },
+        // 정적 호스팅(GitHub Pages)은 디렉터리 인덱스만 안다: trailingSlash 없이 export 하면
+        // /bulk 는 bulk.html 로 뜨지만 **/bulk/ 는 404** 다(링크/공유에서 흔한 형태).
+        // true 로 두면 out/bulk/index.html 이 나와 두 형태가 모두 산다.
+        trailingSlash: true,
       }
     : {}),
   env: {
     NEXT_PUBLIC_DEMO: isDemo ? "1" : "",
     NEXT_PUBLIC_BASE_PATH: demoBasePath,
+    // OG/twitter 카드는 절대 URL만 유효하다(스크래퍼가 상대경로를 못 푼다). 기본값은 layout.tsx 가
+    // github.io + basePath 로 조립하고, 커스텀 도메인으로 옮길 때만 DEMO_SITE_URL 로 통째로 덮어쓴다.
+    NEXT_PUBLIC_SITE_URL: process.env.DEMO_SITE_URL ?? "",
     // 정적 데모 AI 프록시(Cloudflare Worker) URL. 있으면 데모 AI 편집이 켜진다(services/demo-ai-proxy).
     NEXT_PUBLIC_DEMO_AI_URL: process.env.NEXT_PUBLIC_DEMO_AI_URL ?? "",
   },
