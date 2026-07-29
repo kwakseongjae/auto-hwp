@@ -699,6 +699,10 @@ fn patch_section_xml(
                 });
                 let xml = if src.simple && !has_object {
                     reemit_paragraph(orig, p, plan)
+                } else if let Some(xml) = reemit_paragraph_text_zone(orig, src, p, plan) {
+                    // W4.2: structural paragraph (secPr 호스트/개체 문단) — splice ONLY its text-run
+                    // byte range; secPr/ctrl/pic and every other byte around it ride verbatim.
+                    xml
                 } else {
                     reemit_paragraph_open_only(orig, p, plan)
                 };
@@ -1452,29 +1456,129 @@ fn reemit_paragraph(orig_para: &str, p: &Paragraph, plan: &SynthPlan) -> String 
     let mut out = String::with_capacity(orig_para.len() + 32);
     out.push_str(&patch_para_open_tag(&orig_para[..open_end], p, plan));
     if p.runs.is_empty() {
-        out.push_str("<hp:run charPrIDRef=\"0\"><hp:t></hp:t></hp:run>");
+        out.push_str(EMPTY_RUN_XML);
     }
     for run in &p.runs {
-        let cref = plan
-            .char_ref
-            .get(&run.char_shape)
-            .cloned()
-            .or_else(|| run.char_ref.clone())
-            .unwrap_or_else(|| "0".to_string());
-        let text: String = run
-            .content
-            .iter()
-            .filter_map(|i| match i {
-                Inline::Text(t) => Some(t.as_str()),
-                _ => None,
-            })
-            .collect();
-        out.push_str(&format!(
-            "<hp:run charPrIDRef=\"{cref}\"><hp:t>{}</hp:t></hp:run>",
-            xml_escape(&text)
-        ));
+        out.push_str(&emit_text_run(run, plan));
     }
     out.push_str("</hp:p>");
+    out
+}
+
+/// The placeholder run a paragraph gets when its run list came back empty — a `<hp:p>` with no
+/// `<hp:run>` is not something 한/글 accepts.
+const EMPTY_RUN_XML: &str = "<hp:run charPrIDRef=\"0\"><hp:t></hp:t></hp:run>";
+
+/// One AST run → `<hp:run charPrIDRef=…><hp:t>…</hp:t></hp:run>`. The ref is the synthesized charPr
+/// when the run was re-formatted, else its original `charPrIDRef`. Non-text inlines are FILTERED —
+/// callers must keep object-bearing runs off this path.
+fn emit_text_run(run: &Run, plan: &SynthPlan) -> String {
+    let cref = plan
+        .char_ref
+        .get(&run.char_shape)
+        .cloned()
+        .or_else(|| run.char_ref.clone())
+        .unwrap_or_else(|| "0".to_string());
+    let text: String = run
+        .content
+        .iter()
+        .filter_map(|i| match i {
+            Inline::Text(t) => Some(t.as_str()),
+            _ => None,
+        })
+        .collect();
+    format!(
+        "<hp:run charPrIDRef=\"{cref}\"><hp:t>{}</hp:t></hp:run>",
+        xml_escape(&text)
+    )
+}
+
+/// Re-emit an EDITED **structural** paragraph by splicing ONLY its text-run byte range (W4.2).
+///
+/// A section's first `<hp:p>` hosts `<hp:secPr>` (page geometry, footnote shape, page borders) so it
+/// is never `simple`; its title text used to be uneditable because the only alternative lane keeps
+/// the whole body verbatim. Here we keep the body verbatim EXCEPT the parser-computed
+/// [`TextZone`] — the contiguous, object-free `<hp:run>` sequence — which is rebuilt from the AST.
+/// Same discipline as the table lane splicing one `<hp:tc>` inside an otherwise verbatim `<hp:tbl>`.
+///
+/// Returns `None` (→ caller falls back to open-tag-only, i.e. the edit is refused at save time the
+/// way it used to be refused at op time) whenever the recorded zone does not check out against the
+/// actual bytes — a stale span must degrade, never corrupt.
+fn reemit_paragraph_text_zone(
+    orig_para: &str,
+    src: &ParaSource,
+    p: &Paragraph,
+    plan: &SynthPlan,
+) -> Option<String> {
+    let z = src.text_zone.filter(|z| z.text_edited)?;
+    let (lo, hi) = z.runs;
+    if lo > hi || hi > p.runs.len() {
+        return None;
+    }
+    // Only Text may be rebuilt here — an object that drifted into the window would be dropped.
+    if p.runs[lo..hi]
+        .iter()
+        .any(|r| r.content.iter().any(|i| !matches!(i, Inline::Text(_))))
+    {
+        return None;
+    }
+    // Zone span → paragraph-relative, then verify it really addresses `<hp:run>…</hp:run>` here.
+    let s0 = z.span.0.checked_sub(src.span.0)?;
+    let e0 = z.span.1.checked_sub(src.span.0)?;
+    let open_end = orig_para.find('>').map(|i| i + 1)?;
+    let addressable = open_end <= s0
+        && s0 < e0
+        && e0 <= orig_para.len()
+        && orig_para.is_char_boundary(s0)
+        && orig_para.is_char_boundary(e0)
+        && orig_para[s0..].starts_with("<hp:run")
+        && orig_para[..e0].ends_with("</hp:run>");
+    if !addressable {
+        return None;
+    }
+
+    let mut out = String::with_capacity(orig_para.len() + 32);
+    out.push_str(&patch_para_open_tag(&orig_para[..open_end], p, plan));
+    out.push_str(&orig_para[open_end..s0]); // secPr/ctrl/objects before the text — verbatim
+    if lo == hi {
+        out.push_str(EMPTY_RUN_XML);
+    }
+    for run in &p.runs[lo..hi] {
+        out.push_str(&emit_text_run(run, plan));
+    }
+    // The tail keeps its objects but DROPS `<hp:linesegarray>`: it is layout cache for the text we
+    // just replaced, and the `simple` lane omits it for exactly the same reason (한/글 recomputes).
+    out.push_str(&strip_linesegarray(&orig_para[e0..]));
+    Some(out)
+}
+
+/// Remove every `<hp:linesegarray>…</hp:linesegarray>` (stale layout cache) from a verbatim tail.
+fn strip_linesegarray(tail: &str) -> String {
+    const OPEN: &str = "<hp:linesegarray";
+    const CLOSE: &str = "</hp:linesegarray>";
+    let mut out = String::with_capacity(tail.len());
+    let mut rest = tail;
+    while let Some(i) = rest.find(OPEN) {
+        let after = &rest[i..];
+        // Exact tag name only (`<hp:linesegarrayX` must not match).
+        if !after[OPEN.len()..].starts_with(['>', '/', ' ', '\t', '\r', '\n']) {
+            out.push_str(&rest[..i + OPEN.len()]);
+            rest = &rest[i + OPEN.len()..];
+            continue;
+        }
+        let Some(gt) = after.find('>') else { break }; // truncated XML — leave the rest untouched
+        let end = if after[..gt].ends_with('/') {
+            i + gt + 1 // `<hp:linesegarray/>`
+        } else {
+            match after.find(CLOSE) {
+                Some(j) => i + j + CLOSE.len(),
+                None => break,
+            }
+        };
+        out.push_str(&rest[..i]);
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
     out
 }
 
@@ -2953,6 +3057,138 @@ mod tests {
         );
         assert!(crate::export::validate_open_safety(&out).ok);
         let _ = std::fs::write(std::env::temp_dir().join("setparapr-inplace.hwpx"), &out);
+    }
+
+    // ---- W4.2: 구조 문단의 텍스트 구역 splice -------------------------------------------------
+
+    /// `<hp:p>` bytes + the matching AST paragraph for the text-zone unit tests. `zone` is the
+    /// PARAGRAPH-relative byte range of the text runs (the fn takes section-relative, so the
+    /// helper offsets both by a non-zero `span.0` to prove the arithmetic).
+    fn zone_case(
+        para_xml: &str,
+        zone: (usize, usize),
+        runs: (usize, usize),
+        ast_runs: Vec<Run>,
+    ) -> (String, ParaSource, Paragraph) {
+        const BASE: usize = 1234; // pretend the paragraph starts here in the section XML
+        let src = ParaSource {
+            span: (BASE, BASE + para_xml.len()),
+            simple: false,
+            text_zone: Some(TextZone {
+                runs,
+                span: (BASE + zone.0, BASE + zone.1),
+                text_edited: true,
+            }),
+            ..Default::default()
+        };
+        let p = Paragraph {
+            runs: ast_runs,
+            source: Some(src.clone()),
+            ..Default::default()
+        };
+        (para_xml.to_string(), src, p)
+    }
+
+    fn text_run(text: &str, char_ref: &str) -> Run {
+        Run {
+            char_ref: Some(char_ref.into()),
+            content: vec![Inline::Text(text.into())],
+            ..Default::default()
+        }
+    }
+
+    /// secPr 호스트: 구조 런과 `<hp:linesegarray>` 를 뺀 **텍스트 런만** 새로 쓴다.
+    #[test]
+    fn text_zone_splice_keeps_secpr_and_replaces_only_the_text_run() {
+        const STRUCT: &str = r#"<hp:run charPrIDRef="0"><hp:secPr id="x"><hp:pagePr width="59528"/></hp:secPr><hp:ctrl><hp:colPr id=""/></hp:ctrl></hp:run>"#;
+        const TEXTRUN: &str = r#"<hp:run charPrIDRef="7"><hp:t>옛 제목</hp:t></hp:run>"#;
+        let para = format!(
+            "<hp:p id=\"1\" paraPrIDRef=\"0\">{STRUCT}{TEXTRUN}<hp:linesegarray><hp:lineseg textpos=\"0\"/></hp:linesegarray></hp:p>"
+        );
+        let zs = para.find(TEXTRUN).unwrap();
+        let (para, src, p) = zone_case(
+            &para,
+            (zs, zs + TEXTRUN.len()),
+            (1, 2),
+            vec![
+                Run::default(),           // 구조 런의 AST 그림자(텍스트 없음)
+                text_run("새 제목", "7"), // 편집된 텍스트
+            ],
+        );
+        let out = reemit_paragraph_text_zone(&para, &src, &p, &SynthPlan::default())
+            .expect("zone splice applies");
+        assert!(
+            out.contains(STRUCT),
+            "secPr/ctrl 런이 바이트 그대로 남아야 한다"
+        );
+        assert!(out.contains("<hp:t>새 제목</hp:t>"), "{out}");
+        assert!(!out.contains("옛 제목"), "옛 텍스트가 남았다: {out}");
+        assert!(
+            !out.contains("linesegarray"),
+            "텍스트가 바뀌었으니 조판 캐시는 버려야 한다: {out}"
+        );
+        assert!(out.contains(r#"charPrIDRef="7""#), "원 charPr 유지: {out}");
+        assert!(out.ends_with("</hp:p>"), "{out}");
+    }
+
+    /// 개체 문단: 텍스트 구역 **밖**의 `<hp:pic>` 런은 손대지 않는다.
+    #[test]
+    fn text_zone_splice_preserves_an_object_run_outside_the_window() {
+        const PIC: &str = r#"<hp:run charPrIDRef="0"><hp:pic><hc:img binaryItemIDRef="image1"/></hp:pic></hp:run>"#;
+        const TEXTRUN: &str = r#"<hp:run charPrIDRef="3"><hp:t>옛 캡션</hp:t></hp:run>"#;
+        let para = format!("<hp:p id=\"9\">{PIC}{TEXTRUN}</hp:p>");
+        let zs = para.find(TEXTRUN).unwrap();
+        let (para, src, p) = zone_case(
+            &para,
+            (zs, zs + TEXTRUN.len()),
+            (1, 2),
+            vec![Run::default(), text_run("새 캡션", "3")],
+        );
+        let out = reemit_paragraph_text_zone(&para, &src, &p, &SynthPlan::default()).unwrap();
+        assert!(out.contains(PIC), "그림 런이 사라졌다: {out}");
+        assert!(out.contains("새 캡션") && !out.contains("옛 캡션"), "{out}");
+    }
+
+    /// 스팬이 실제 바이트와 어긋나면(스테일) **거부** — 잘못 자르느니 편집을 포기한다.
+    #[test]
+    fn text_zone_splice_refuses_a_stale_span() {
+        let para = r#"<hp:p id="1"><hp:run charPrIDRef="0"><hp:secPr/></hp:run><hp:run charPrIDRef="7"><hp:t>제목</hp:t></hp:run></hp:p>"#;
+        for bad in [(5usize, 9usize), (0, para.len()), (12, 13)] {
+            let (para_s, src, p) =
+                zone_case(para, bad, (1, 2), vec![Run::default(), text_run("새", "7")]);
+            assert!(
+                reemit_paragraph_text_zone(&para_s, &src, &p, &SynthPlan::default()).is_none(),
+                "스테일 스팬 {bad:?} 은 거부돼야 한다"
+            );
+        }
+    }
+
+    /// 구역 안에 개체가 끼어들면 거부 — 재출력이 그 개체를 조용히 버리게 두지 않는다.
+    #[test]
+    fn text_zone_splice_refuses_an_object_inside_the_window() {
+        const TEXTRUN: &str = r#"<hp:run charPrIDRef="3"><hp:t>캡션</hp:t></hp:run>"#;
+        let para = format!("<hp:p id=\"9\">{TEXTRUN}</hp:p>");
+        let zs = para.find(TEXTRUN).unwrap();
+        let (para, src, p) = zone_case(
+            &para,
+            (zs, zs + TEXTRUN.len()),
+            (0, 1),
+            vec![Run {
+                content: vec![Inline::Text("캡션".into()), Inline::Bookmark("bm".into())],
+                ..Default::default()
+            }],
+        );
+        assert!(reemit_paragraph_text_zone(&para, &src, &p, &SynthPlan::default()).is_none());
+    }
+
+    #[test]
+    fn strip_linesegarray_removes_full_and_self_closing_forms() {
+        assert_eq!(
+            strip_linesegarray("<a/><hp:linesegarray><hp:lineseg x=\"1\"/></hp:linesegarray><b/>"),
+            "<a/><b/>"
+        );
+        assert_eq!(strip_linesegarray("<a/><hp:linesegarray/><b/>"), "<a/><b/>");
+        assert_eq!(strip_linesegarray("<a/><b/>"), "<a/><b/>");
     }
 
     /// Phase 6: SetParaPr on a STRUCTURAL (non-simple) paragraph patches only its open tag — the

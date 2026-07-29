@@ -1111,23 +1111,71 @@ fn split_runs_for_range(runs: &mut Vec<Run>, start: usize, end: usize) -> Result
     })
 }
 
-/// The "이 문단은 제자리 편집 대상인가" guard shared by `SetParagraphText`/`SetParagraphRuns`/
-/// `SplitParagraph`/`MergeParagraph`: a paragraph the parser marked non-simple (raw/complex source) or
-/// carrying any non-text inline (image/field/marker) is REFUSED so we never silently flatten rich
-/// content. A paragraph with no source (freshly inserted) counts as simple.
+/// The "이 문단은 STRUCTURE 까지 다시 쓸 수 있는가" guard used by `SplitParagraph`/`MergeParagraph`:
+/// a paragraph the parser marked non-simple (raw/complex source) or carrying any non-text inline
+/// (image/field/marker) is REFUSED so we never silently flatten rich content. A paragraph with no
+/// source (freshly inserted) counts as simple.
+///
+/// W4.2 staged opening: the pure TEXT commits (`SetParagraphText`/`SetParagraphRuns`) no longer use
+/// this — they take [`editable_run_window`], which also admits a structural paragraph's text zone.
+/// Split/Merge stay here on purpose: they move runs ACROSS paragraph boundaries, which the zone
+/// splice has no answer for yet (the structural runs would have to be re-homed).
 fn ensure_simple_para(p: &Paragraph) -> Result<()> {
+    if is_simple_para(p) {
+        return Ok(());
+    }
+    Err(Error::Other(
+        "이 문단은 인라인 편집 대상이 아닙니다 (이미지/필드/복합 구조) — 채팅으로 편집하세요"
+            .into(),
+    ))
+}
+
+/// A paragraph whose ENTIRE run list can be rebuilt from the AST (parser said `simple` and no
+/// non-text inline snuck in). The serializer's `reemit_paragraph` lane.
+fn is_simple_para(p: &Paragraph) -> bool {
     let simple = p.source.as_ref().map(|s| s.simple).unwrap_or(true);
     let has_nontext = p
         .runs
         .iter()
         .any(|r| r.content.iter().any(|i| !matches!(i, Inline::Text(_))));
-    if !simple || has_nontext {
-        return Err(Error::Other(
-            "이 문단은 인라인 편집 대상이 아닙니다 (이미지/필드/복합 구조) — 채팅으로 편집하세요"
-                .into(),
-        ));
+    simple && !has_nontext
+}
+
+/// W4.2 — the half-open run window `[lo, hi)` a TEXT edit is allowed to replace.
+///
+/// A `simple` paragraph opens its whole run list (legacy behaviour). A STRUCTURAL paragraph — the
+/// section's first one hosting `<hp:secPr>`, or one carrying an object — used to be refused
+/// wholesale; it is now editable inside its parser-computed [`TextZone`], the run window whose
+/// bytes the serializer can splice while every structural/object run around it stays byte-verbatim
+/// (the same discipline as `SetTableCell` splicing one `<hp:tc>` inside an otherwise verbatim table).
+/// Anything else still errors, so rich content is never silently flattened.
+fn editable_run_window(p: &Paragraph) -> Result<(usize, usize)> {
+    if is_simple_para(p) {
+        return Ok((0, p.runs.len()));
     }
-    Ok(())
+    if let Some(z) = p.source.as_ref().and_then(|s| s.text_zone) {
+        let (lo, hi) = z.runs;
+        if lo < hi && hi <= p.runs.len() {
+            return Ok((lo, hi));
+        }
+    }
+    Err(Error::Other(
+        "이 문단은 인라인 편집 대상이 아닙니다 (이미지/필드/복합 구조) — 채팅으로 편집하세요"
+            .into(),
+    ))
+}
+
+/// Replace `runs[lo..hi]` and keep the paragraph's [`TextZone`] pointing at the NEW window, so a
+/// second edit (and the serializer) still address the same byte range.
+fn splice_text_window(p: &mut Paragraph, lo: usize, hi: usize, new_runs: Vec<Run>) {
+    let n = new_runs.len();
+    p.runs.splice(lo..hi, new_runs);
+    if let Some(z) = p.source.as_mut().and_then(|s| s.text_zone.as_mut()) {
+        z.runs = (lo, lo + n);
+        // Tell the serializer the body may no longer be re-emitted verbatim (an open-tag-only edit
+        // on the same paragraph must still ride the verbatim lane).
+        z.text_edited = true;
+    }
 }
 
 /// Resolve a paragraph-scoped char offset to `(run_idx, byte_offset_within_run)`. A boundary
@@ -1718,19 +1766,22 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             let Block::Paragraph(p) = blk else {
                 return Err(Error::Other(format!("SetParagraphText: block {block} is not a paragraph")));
             };
-            // Refuse a structural paragraph so we never silently flatten rich content — the UI surfaces
-            // this and falls back to chat (공용 가드: `ensure_simple_para`).
-            ensure_simple_para(p)?;
-            // Preserve the first run's char shape + the paragraph's para shape (color/italic/alignment).
-            let cs = p.runs.first().map(|r| r.char_shape).unwrap_or(0);
-            p.runs = vec![Run { char_shape: cs, content: vec![Inline::Text(text.clone())], ..Default::default() }];
+            // Refuse a paragraph we could not splice back without flattening rich content — the UI
+            // surfaces this and falls back to chat (공용 가드: `editable_run_window`). A structural
+            // paragraph (섹션 첫 문단의 secPr 호스트 등) edits only inside its text zone (W4.2).
+            let (lo, hi) = editable_run_window(p)?;
+            // Preserve the window's first run char shape + the paragraph's para shape (color/italic/alignment).
+            let cs = p.runs.get(lo).map(|r| r.char_shape).unwrap_or(0);
+            let new = vec![Run { char_shape: cs, content: vec![Inline::Text(text.clone())], ..Default::default() }];
+            splice_text_window(p, lo, hi, new);
             p.dirty.mark();
             sec.dirty.mark();
             Ok(())
         }
         Op::SetParagraphRuns { section, block, runs } => {
-            // The WYSIWYG commit: replace a SIMPLE paragraph's body with STYLED runs (per-run shapes),
-            // keeping its source/para_shape/id. Intern shapes first (mutable doc), then rebuild.
+            // The WYSIWYG commit: replace a paragraph's TEXT with STYLED runs (per-run shapes), keeping
+            // its source/para_shape/id. A simple paragraph replaces every run; a structural one replaces
+            // only its text zone (W4.2). Intern shapes first (mutable doc), then rebuild.
             let interned: Vec<(usize, String)> = runs
                 .iter()
                 .map(|r| (intern_char_shape(doc, r.to_char_shape()), r.text.clone()))
@@ -1748,7 +1799,12 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                     .get(*section)
                     .and_then(|s| s.blocks.get(*block))
                     .and_then(|b| match b {
-                        Block::Paragraph(p) => p.runs.first().map(|r| r.char_shape),
+                        // The text zone's FIRST run (W4.2) — for a structural paragraph run 0 is the
+                        // secPr/object host, whose charPr says nothing about the visible text.
+                        Block::Paragraph(p) => {
+                            let lo = editable_run_window(p).map(|(lo, _)| lo).unwrap_or(0);
+                            p.runs.get(lo).map(|r| r.char_shape)
+                        }
                         _ => None,
                     });
                 existing_idx.map(|idx| {
@@ -1764,12 +1820,12 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             let Block::Paragraph(p) = blk else {
                 return Err(Error::Other(format!("SetParagraphRuns: block {block} is not a paragraph")));
             };
-            ensure_simple_para(p)?;
+            let (lo, hi) = editable_run_window(p)?;
             let resolve_shape = |cs: usize| match neutral_shape {
                 Some(prev) if cs == plain => prev,
                 _ => cs,
             };
-            p.runs = if interned.is_empty() {
+            let new = if interned.is_empty() {
                 vec![Run { char_shape: neutral_shape.unwrap_or(plain), content: vec![Inline::Text(String::new())], ..Default::default() }]
             } else {
                 interned
@@ -1777,6 +1833,7 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                     .map(|(cs, text)| Run { char_shape: resolve_shape(cs), content: vec![Inline::Text(text)], ..Default::default() })
                     .collect()
             };
+            splice_text_window(p, lo, hi, new);
             p.dirty.mark();
             sec.dirty.mark();
             Ok(())

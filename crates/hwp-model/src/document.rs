@@ -254,6 +254,31 @@ pub struct ParaSource {
     /// True iff the original `<hp:p>` contained ONLY `hp:run`/`hp:t` children (no secPr/ctrl/tbl/
     /// linesegarray/pic/equation). The replace-in-place path refuses non-simple paragraphs.
     pub simple: bool,
+    /// W4.2 — the TEXT-ONLY run window of a paragraph that is *not* `simple` but is still safe to
+    /// edit: its structural children (`<hp:secPr>`, `<hp:ctrl>`, `<hp:pic>` …) all live in runs that
+    /// carry no text, and the text-bearing runs are contiguous. `None` ⇒ text edits stay refused.
+    pub text_zone: Option<TextZone>,
+}
+
+/// The editable text window of a structural (non-`simple`) paragraph — W4.2.
+///
+/// A section's FIRST paragraph hosts `<hp:secPr>` (page geometry) and is therefore never `simple`,
+/// which used to make its title text uneditable. The zone lets the serializer splice ONLY the text
+/// runs' byte range and keep everything around it (secPr/ctrl/objects) byte-verbatim, exactly the
+/// way the table lane splices a single `<hp:tc>` and leaves the rest of the table alone (057).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TextZone {
+    /// Half-open `[lo, hi)` window into `Paragraph::runs` holding the editable text runs. Ops that
+    /// replace text splice into this window and update `hi`; runs outside it are structural and are
+    /// never emitted from the AST (their original XML is re-used verbatim).
+    pub runs: (usize, usize),
+    /// `[start, end)` byte range of the corresponding `<hp:run>…</hp:run>` sequence within
+    /// `Section.provenance.raw` (same coordinate space as [`ParaSource::span`]).
+    pub span: (usize, usize),
+    /// Set by the ops that replace text in this window. While it is `false` the serializer keeps the
+    /// paragraph's body BYTE-VERBATIM — a structural paragraph can also be marked dirty by an
+    /// open-tag-only edit (SetParaPr/ApplyStyle), and that must not rewrite its runs.
+    pub text_edited: bool,
 }
 
 #[derive(Clone, Debug, Default)]

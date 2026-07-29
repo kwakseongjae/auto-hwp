@@ -652,7 +652,9 @@ pub struct BlockHitDto {
 }
 
 /// Whether a top-level paragraph block is inline-editable (mirrors SetParagraphText's accept rule:
-/// `source.simple` AND no non-text inline). False for tables/images/structural paragraphs.
+/// `source.simple` AND no non-text inline, OR — W4.2 — a structural paragraph that carries an
+/// editable [`text_zone`](hwp_model::prelude::TextZone), e.g. the section's `<hp:secPr>`-hosting
+/// first paragraph). False for tables/images/other structural paragraphs.
 fn model_para_editable(doc: &SemanticDoc, section: usize, block: usize) -> bool {
     use hwp_model::prelude::{Block, Inline};
     let Some(sec) = doc.sections.get(section) else {
@@ -666,7 +668,13 @@ fn model_para_editable(doc: &SemanticDoc, section: usize, block: usize) -> bool 
         .runs
         .iter()
         .all(|r| r.content.iter().all(|i| matches!(i, Inline::Text(_))));
-    simple && all_text
+    if simple && all_text {
+        return true;
+    }
+    p.source
+        .as_ref()
+        .and_then(|s| s.text_zone)
+        .is_some_and(|z| z.runs.0 < z.runs.1 && z.runs.1 <= p.runs.len())
 }
 
 /// Concatenate the plain text of a top-level paragraph block `(section, block)` (empty if not a simple

@@ -543,12 +543,30 @@ struct ParaAccum {
     simple: bool,                              // only hp:run/hp:t children seen so far
     runs: Vec<Run>,                            // flushed runs
     cur_run: Option<(Option<String>, String)>, // open run (charPrIDRef, text)
+    /// Byte offset of the OPEN run's `<hp:run` in the section XML (W4.2 — text-zone addressing).
+    cur_run_start: usize,
+    /// The OPEN run holds a structural child (secPr/ctrl/pic/equation/…) → its XML can only be
+    /// re-emitted verbatim, so it must stay OUTSIDE the editable text zone (W4.2).
+    cur_run_structural: bool,
+    /// 1:1 with `runs` — each flushed run's XML span + structural flag (W4.2).
+    run_meta: Vec<RunMeta>,
     /// Non-text inlines parsed inside the OPEN run, in DOCUMENT ORDER: `<hp:pic>` (D1),
     /// `<hp:footNote>`/`<hp:endNote>`, `<hp:equation>`, `<hp:fieldBegin>`/`<hp:fieldEnd>`.
     /// One ordered list (not per-kind lists) because field markers only mean anything in order —
     /// a `FieldEnd` that floats ahead of its `FieldBegin` would invert a hyperlink range.
     pending: Vec<Inline>,
     hosts_table: bool, // `<hp:tbl>` 를 품었다 → 표 앵커 후보
+}
+
+/// One flushed run's provenance — where its XML lives and whether it is verbatim-only (W4.2).
+#[derive(Clone, Copy, Default)]
+struct RunMeta {
+    /// `[start, end)` of `<hp:run>…</hp:run>` in the section XML; `None` for a SYNTHETIC run (an
+    /// object parsed outside any `<hp:run>`) — such a run can never be addressed, so its presence
+    /// disqualifies the whole paragraph from the text-zone lane.
+    span: Option<(usize, usize)>,
+    /// The run carries a structural child → keep its bytes, never rebuild it from the AST.
+    structural: bool,
 }
 
 /// 본문이 아닌 서브바디 프레임(머리말/꼬리말/각주/미주). 여는 태그에서 `blocks` 스택에 프레임을
@@ -688,8 +706,10 @@ fn parse_section(
                     }),
                     b"run" => {
                         if let Some(p) = paras.last_mut() {
-                            flush_run(p);
+                            flush_run(p, None); // unclosed previous run → no addressable span
                             p.cur_run = Some((attr_str(&e, b"charPrIDRef"), String::new()));
+                            p.cur_run_start = pos_before;
+                            p.cur_run_structural = false;
                         }
                     }
                     b"t" => in_t = true,
@@ -988,12 +1008,13 @@ fn parse_section(
                 }
                 b"run" => {
                     if let Some(p) = paras.last_mut() {
-                        flush_run(p);
+                        let end = reader.buffer_position() as usize; // just past `</hp:run>`
+                        flush_run(p, Some(end));
                     }
                 }
                 b"p" => {
                     if let Some(mut p) = paras.pop() {
-                        flush_run(&mut p);
+                        flush_run(&mut p, None);
                         let end = reader.buffer_position() as usize; // just past `</hp:p>`
                                                                      // Top-level iff no enclosing paragraph remains.
                         let top_level = paras.is_empty();
@@ -1003,6 +1024,7 @@ fn parse_section(
                             style: p.style.clone(),
                             id: p.id.clone(),
                             simple: p.simple,
+                            text_zone: compute_text_zone(&p),
                         });
                         // 표 호스트 문단 = 표를 품고 보이는 텍스트가 없는 문단. 한컴은 여기에 줄을
                         // 하나도 걸지 않는다(표가 그 자리를 차지한다) — 조판이 이 플래그를 보고
@@ -1219,10 +1241,14 @@ fn push_inline_char(paras: &mut [ParaAccum], ch: char) {
     }
 }
 
-fn flush_run(p: &mut ParaAccum) {
+/// Close the open run. `end` = byte offset just past `</hp:run>` when the run closed normally
+/// (`None` when it is flushed from somewhere else, e.g. `</hp:p>` — then it has no addressable
+/// span and the paragraph falls out of the W4.2 text-zone lane).
+fn flush_run(p: &mut ParaAccum, end: Option<usize>) {
     // 그림/각주/수식/필드 마커는 런 끝에 붙인다 — .hwp lift 와 같은 v1 근사(정확한 런 중간
     // 앵커는 후속). 서로의 상대 순서는 문서 순서 그대로 보존된다(단일 `pending` 리스트).
     let pending = std::mem::take(&mut p.pending);
+    let structural = std::mem::take(&mut p.cur_run_structural) || !pending.is_empty();
     if let Some((char_ref, text)) = p.cur_run.take() {
         let mut content: Vec<Inline> = vec![Inline::Text(text)];
         content.extend(pending);
@@ -1231,6 +1257,10 @@ fn flush_run(p: &mut ParaAccum) {
             char_ref,
             content,
         });
+        p.run_meta.push(RunMeta {
+            span: end.map(|e| (p.cur_run_start, e)),
+            structural,
+        });
     } else if !pending.is_empty() {
         // 명시적 `<hp:run>` 바깥의 그림/각주/수식 — 자체 런으로 내보내 살려 둔다.
         p.runs.push(Run {
@@ -1238,7 +1268,68 @@ fn flush_run(p: &mut ParaAccum) {
             char_ref: None,
             content: pending,
         });
+        p.run_meta.push(RunMeta {
+            span: None,
+            structural: true,
+        });
     }
+}
+
+/// The paragraph's editable TEXT window (W4.2), or `None` when a text edit could not be spliced
+/// back without losing or duplicating something.
+///
+/// Accepted shape: every run that carries structural XML (secPr/ctrl/pic/equation/tbl/…) is
+/// TEXT-FREE, and the text-bearing runs are contiguous — both in the run list and in the section
+/// bytes (no stray sibling element wedged between them). Then the serializer can replace exactly
+/// those runs' byte range and leave the rest of the `<hp:p>` verbatim.
+///
+/// The common win is a section's FIRST paragraph: `<hp:run>` #0 holds `<hp:secPr>`+`<hp:ctrl>` with
+/// no text, `<hp:run>` #1 holds the title text. Rejected: an object run that also carries text (its
+/// text would appear both verbatim and in the spliced runs), an object between two text runs (we
+/// could not tell where the object belongs in the new text), a synthetic run with no span.
+fn compute_text_zone(p: &ParaAccum) -> Option<TextZone> {
+    if p.runs.len() != p.run_meta.len() {
+        return None; // defensive: meta desync ⇒ refuse rather than splice blind
+    }
+    let text_len = |r: &Run| -> usize {
+        r.content
+            .iter()
+            .map(|i| match i {
+                Inline::Text(t) => t.len(),
+                _ => 0,
+            })
+            .sum()
+    };
+    let mut lo: Option<usize> = None;
+    let mut hi = 0usize;
+    for (i, m) in p.run_meta.iter().enumerate() {
+        if m.structural || m.span.is_none() {
+            if text_len(&p.runs[i]) > 0 {
+                return None;
+            }
+            continue;
+        }
+        lo.get_or_insert(i);
+        hi = i + 1;
+    }
+    let lo = lo?;
+    // Contiguous in the run list …
+    if p.run_meta[lo..hi]
+        .iter()
+        .any(|m| m.structural || m.span.is_none())
+    {
+        return None;
+    }
+    // … and contiguous in the bytes (nothing but these runs inside the spliced range).
+    let spans: Vec<(usize, usize)> = p.run_meta[lo..hi].iter().filter_map(|m| m.span).collect();
+    if spans.len() != hi - lo || spans.windows(2).any(|w| w[0].1 != w[1].0) {
+        return None;
+    }
+    Some(TextZone {
+        runs: (lo, hi),
+        span: (spans[0].0, spans[spans.len() - 1].1),
+        text_edited: false, // 파싱 직후 = 원본 바이트와 일치
+    })
 }
 
 /// Append a non-text inline to the innermost in-progress paragraph's OPEN-run pending list.
@@ -1333,10 +1424,15 @@ fn stored_row_heights_hwpx(geoms: &[CellGeom], rows: usize) -> Vec<i32> {
     row_h
 }
 
-/// Mark the innermost in-progress paragraph as non-re-emittable (it has structural children).
+/// Mark the innermost in-progress paragraph as non-re-emittable (it has structural children), and
+/// the OPEN run with it — a run holding structural XML can only ever be re-emitted verbatim, so
+/// W4.2's text zone must exclude it (`compute_text_zone`).
 fn mark_not_simple(paras: &mut [ParaAccum]) {
     if let Some(p) = paras.last_mut() {
         p.simple = false;
+        if p.cur_run.is_some() {
+            p.cur_run_structural = true;
+        }
     }
 }
 
@@ -1422,6 +1518,113 @@ pub(crate) mod tests {
             p.source.as_ref().is_some_and(|s| s.simple),
             "inline whitespace must NOT make the paragraph non-simple"
         );
+    }
+
+    /// Parse one `<hs:sec>` and hand back its first top-level paragraph (W4.2 zone tests).
+    fn first_para(xml: &str) -> Paragraph {
+        let mut blocks = Vec::new();
+        parse_section(xml, &mut blocks, &mut Vec::new(), &Default::default()).unwrap();
+        blocks
+            .into_iter()
+            .find_map(|b| match b {
+                Block::Paragraph(p) => Some(p),
+                _ => None,
+            })
+            .expect("paragraph")
+    }
+
+    fn sec(body: &str) -> String {
+        format!(r#"<hs:sec xmlns:hs="s" xmlns:hp="p">{body}</hs:sec>"#)
+    }
+
+    /// W4.2 ① — a section's first paragraph (secPr host) is NON-simple but its title run is editable.
+    #[test]
+    fn secpr_host_paragraph_gets_a_text_zone_excluding_the_structural_run() {
+        let xml = sec(concat!(
+            "<hp:p>",
+            r#"<hp:run charPrIDRef="0"><hp:secPr id=""><hp:grid lineGrid="0"/></hp:secPr><hp:ctrl><hp:colPr id=""/></hp:ctrl></hp:run>"#,
+            r#"<hp:run charPrIDRef="7"><hp:t>제목</hp:t></hp:run>"#,
+            "<hp:linesegarray><hp:lineseg textpos=\"0\"/></hp:linesegarray>",
+            "</hp:p>",
+        ));
+        let p = first_para(&xml);
+        let src = p.source.as_ref().expect("top-level source");
+        assert!(!src.simple, "secPr host stays non-simple");
+        let z = src.text_zone.expect("text zone");
+        assert_eq!(z.runs, (1, 2), "구조 런 0 은 구역 밖, 텍스트 런 1 만 안");
+        assert!(!z.text_edited);
+        // The zone's bytes really are that `<hp:run>` element.
+        let s = &xml[z.span.0..z.span.1];
+        assert!(s.starts_with("<hp:run") && s.ends_with("</hp:run>"), "{s}");
+        assert!(s.contains("제목") && !s.contains("secPr"), "{s}");
+    }
+
+    /// W4.2 ② — an OBJECT paragraph opens too, as long as the object run carries no text of its own
+    /// (그림/수식 런이 텍스트 구역 밖에 있으면 그 바이트는 그대로 살아남는다).
+    #[test]
+    fn object_paragraph_with_textless_object_run_gets_a_text_zone() {
+        let xml = sec(concat!(
+            "<hp:p>",
+            r#"<hp:run charPrIDRef="0"><hp:pic><hp:sz width="100" height="50"/><hc:img binaryItemIDRef="image1"/></hp:pic></hp:run>"#,
+            r#"<hp:run charPrIDRef="1"><hp:t>캡션</hp:t></hp:run>"#,
+            "</hp:p>",
+        ))
+        .replace("xmlns:hp=\"p\"", "xmlns:hp=\"p\" xmlns:hc=\"c\"");
+        let p = first_para(&xml);
+        let z = p
+            .source
+            .as_ref()
+            .and_then(|s| s.text_zone)
+            .expect("object paragraph text zone");
+        assert_eq!(z.runs, (1, 2));
+    }
+
+    /// W4.2 거부 ① — 개체 런이 **자기 텍스트**를 들고 있으면 구역을 만들지 않는다. 만들었다면 그
+    /// 텍스트가 verbatim 바이트와 새로 쓴 런 양쪽에 나타나 **중복**된다.
+    #[test]
+    fn object_run_carrying_text_refuses_the_text_zone() {
+        let xml = sec(concat!(
+            "<hp:p>",
+            r#"<hp:run charPrIDRef="0"><hp:t>앞말</hp:t><hp:pic><hc:img binaryItemIDRef="image1"/></hp:pic></hp:run>"#,
+            r#"<hp:run charPrIDRef="1"><hp:t>뒷말</hp:t></hp:run>"#,
+            "</hp:p>",
+        ))
+        .replace("xmlns:hp=\"p\"", "xmlns:hp=\"p\" xmlns:hc=\"c\"");
+        let p = first_para(&xml);
+        assert!(
+            p.source.as_ref().and_then(|s| s.text_zone).is_none(),
+            "텍스트를 든 개체 런이 있으면 거부해야 한다"
+        );
+    }
+
+    /// W4.2 거부 ② — 개체 런이 텍스트 런 **사이**에 끼면 새 텍스트에서 개체 위치를 알 수 없다.
+    #[test]
+    fn object_run_between_text_runs_refuses_the_text_zone() {
+        let xml = sec(concat!(
+            "<hp:p>",
+            r#"<hp:run charPrIDRef="1"><hp:t>앞말</hp:t></hp:run>"#,
+            r#"<hp:run charPrIDRef="0"><hp:pic><hc:img binaryItemIDRef="image1"/></hp:pic></hp:run>"#,
+            r#"<hp:run charPrIDRef="1"><hp:t>뒷말</hp:t></hp:run>"#,
+            "</hp:p>",
+        ))
+        .replace("xmlns:hp=\"p\"", "xmlns:hp=\"p\" xmlns:hc=\"c\"");
+        let p = first_para(&xml);
+        assert!(
+            p.source.as_ref().and_then(|s| s.text_zone).is_none(),
+            "텍스트 런 사이의 개체는 거부해야 한다"
+        );
+    }
+
+    /// W4.2 거부 ③ — 텍스트 런이 하나도 없으면 붙일 자리가 없다(표 호스트 문단 등).
+    #[test]
+    fn structural_only_paragraph_has_no_text_zone() {
+        let xml = sec(concat!(
+            "<hp:p>",
+            r#"<hp:run charPrIDRef="0"><hp:tbl rowCnt="1" colCnt="1"><hp:tr><hp:tc><hp:subList><hp:p><hp:run><hp:t>셀</hp:t></hp:run></hp:p></hp:subList></hp:tc></hp:tr></hp:tbl></hp:run>"#,
+            "</hp:p>",
+        ));
+        let p = first_para(&xml);
+        assert!(p.source.as_ref().and_then(|s| s.text_zone).is_none());
     }
 
     /// Collect every inline of a parsed section, depth-first (paragraph runs + table cell bodies).

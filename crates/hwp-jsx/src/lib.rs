@@ -546,6 +546,15 @@ fn encode_para_source(src: &ParaSource) -> String {
         style: src.style.clone(),
         id: src.id.clone(),
         simple: src.simple,
+        text_zone: src.text_zone.map(|z| {
+            [
+                z.runs.0,
+                z.runs.1,
+                z.span.0,
+                z.span.1,
+                z.text_edited as usize,
+            ]
+        }),
     })
     .unwrap_or_default()
 }
@@ -558,6 +567,11 @@ fn decode_para_source(s: &str) -> Option<ParaSource> {
         style: b.style,
         id: b.id,
         simple: b.simple,
+        text_zone: b.text_zone.map(|z| TextZone {
+            runs: (z[0], z[1]),
+            span: (z[2], z[3]),
+            text_edited: z[4] != 0,
+        }),
     })
 }
 
@@ -1191,6 +1205,10 @@ struct ParaSourceBlob {
     style: Option<String>,
     id: Option<String>,
     simple: bool,
+    /// W4.2 편집 가능 텍스트 구역 — `[run_lo, run_hi, span_start, span_end, text_edited]`. 구버전
+    /// blob 호환을 위해 `default`(= 없음 = 구조 문단 텍스트 편집 거부, 종전 동작).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    text_zone: Option<[usize; 5]>,
 }
 
 #[derive(Serialize, Deserialize)]
