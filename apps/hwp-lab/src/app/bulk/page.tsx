@@ -8,6 +8,7 @@
 // 리마운트로 포커스가 날아가는 함정 — 이름을 React key로 쓰지 말 것).
 import { useCallback, useMemo, useRef, useState } from "react";
 import { HwpDoc, initEngine } from "@auto-hwp/engine";
+import { applyDemoSpec, buildDemoRoster, DEMO_TEMPLATE, diagnoseKeys, rosterColumns, unmatchedMessage, unmatchedReasons } from "@/lib/bulkFill";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
@@ -51,6 +52,7 @@ interface RowResult {
   pageH: number;
   highlights: { x: number; y: number; w: number; h: number; key: string; value: string }[];
   values: { key: string; value: string; addr: string; example: string }[];
+  failed?: boolean; // 이 행만 죽음 — zip에서 빼고 report에 created:false + row_failed 사유로 남긴다
 }
 
 /** 최소 STORE zip(무압축 — hwpx는 이미 zip이라 재압축 무익). 의존성 0. */
@@ -180,6 +182,25 @@ async function sha256hex(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/** 프레임 양보 — 인원별 루프가 메인스레드를 통째로 잡으면 진행률조차 다시 그려지지 않는다(100명
+ *  배치에서 탭 프리즈). setTimeout은 백그라운드 탭에서 1초 클램프가 걸려 배치를 세우므로
+ *  MessageChannel 매크로태스크로 양보한다(React 스케줄러가 같은 이유로 쓰는 수단).
+ *  워커 경유(2단계)는 후속 — 이건 즉효 1단계다. */
+function yieldToUi(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof MessageChannel === "undefined") {
+      setTimeout(resolve, 0);
+      return;
+    }
+    const ch = new MessageChannel();
+    ch.port1.onmessage = () => {
+      ch.port1.close();
+      resolve();
+    };
+    ch.port2.postMessage(0);
+  });
+}
+
 /** 사용자가 정의한 필드로 명단 "형식 예시"(키: 값 블록 — 콤마 걱정 없는 권장 형식)를 만든다. */
 function buildRosterTemplate(fields: Field[]): string {
   const line = (f: Field) => `${f.key}: ${SPEC_TYPES[f.specType]?.hint.replace("예: ", "") ?? ""}`;
@@ -225,6 +246,8 @@ export default function BulkFillPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<{ codes: string[]; message: string } | null>(null); // 배치 레벨 사유코드(unmatched_* — report.json 동행)
+  const [dragOver, setDragOver] = useState(false);
   const [studioPage, setStudioPage] = useState(0);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const inited = useRef(false);
@@ -242,11 +265,14 @@ export default function BulkFillPage() {
   }, []);
 
   // ── 1) 템플릿 업로드 → 결정론 인스펙션(fill-map 초안) ─────────────────────────────────────────
+  // 유도된 필드를 그대로 돌려준다 — "샘플로 체험"이 같은 인스펙션 결과 위에 데모 규격만 씌우기 위해서
+  // (하드코딩 pin을 두면 문서가 바뀔 때 조용히 어긋난다).
   const onTemplate = useCallback(
-    async (file: File) => {
+    async (file: File): Promise<Field[] | null> => {
       setError(null);
       setNotice(null);
       setResults([]);
+      setWarnings(null);
       setSelectedId(null);
       setBusy("양식 분석 중…");
       try {
@@ -289,14 +315,56 @@ export default function BulkFillPage() {
         const firstPage = drafted.length ? (pageOfBlockRef.current.get(`${drafted[0].pin.section}:${drafted[0].pin.index}`) ?? 0) : 0;
         setStudioPage(firstPage);
         if (drafted.length === 0) setNotice("자동 유도된 필드가 없습니다 — 아래 문서에서 채울 셀을 직접 클릭해 지정하세요.");
+        return drafted;
       } catch (e) {
         setError(`양식 분석 실패: ${e}`);
+        return null;
       } finally {
         setBusy(null);
       }
     },
     [ensureEngine],
   );
+
+  /** 드롭 파일 처리 — 클릭 업로드와 같은 경로. 확장자는 정직하게 거른다(엔진 오류로 알리지 않는다). */
+  const onDropTemplate = useCallback(
+    (e: React.DragEvent<HTMLElement>) => {
+      e.preventDefault(); // 브라우저가 파일을 그냥 열어버리는 기본 동작 차단 — 작업 중인 배치가 날아간다
+      setDragOver(false);
+      const file = e.dataTransfer?.files?.[0];
+      if (!file) return;
+      if (!/\.hwpx?$/i.test(file.name)) {
+        setError(`양식은 .hwp 또는 .hwpx만 됩니다 — 받은 파일: ${file.name}`);
+        return;
+      }
+      void onTemplate(file);
+    },
+    [onTemplate],
+  );
+
+  /** "샘플로 체험" — 파일 없는 방문자용 원클릭: 샘플 양식 fetch → 같은 결정론 인스펙션 → 데모 규격
+   *  (유도분 중 몇 개만 켜고 형식 규정) → 데모 명단 3행 프리필. 생성 버튼만 누르면 전 플로우가 돈다. */
+  const onSample = useCallback(async () => {
+    setError(null);
+    setBusy("샘플 양식 불러오는 중…");
+    try {
+      const r = await fetch(`${BASE}/samples/${DEMO_TEMPLATE.file}`);
+      if (!r.ok) throw new Error(`샘플이 배치되지 않았습니다 (${r.status}) — apps/hwp-lab에서 npm run dev/build를 다시 실행하세요.`);
+      const bytes = await r.arrayBuffer();
+      const drafted = await onTemplate(new File([bytes], DEMO_TEMPLATE.file, { type: "application/octet-stream" }));
+      if (!drafted) return; // onTemplate가 이미 사유를 표시했다
+      if (!drafted.length) return; // 유도 0(샘플 자산 교체 등) — onTemplate의 안내를 그대로 둔다
+      const demo = applyDemoSpec(drafted);
+      setFields(demo);
+      const keys = demo.filter((f) => f.use).map((f) => f.key);
+      setRosterText(buildDemoRoster(keys));
+      setNotice(`샘플 ${DEMO_TEMPLATE.label}과 데모 명단 3명을 넣어뒀습니다 — 아래 3단계의 “완성본 만들기”만 누르면 3부가 만들어집니다. 값·영역은 마음대로 고쳐도 됩니다.`);
+    } catch (e) {
+      setError(`샘플 불러오기 실패: ${e}`);
+    } finally {
+      setBusy(null);
+    }
+  }, [onTemplate]);
 
   // ── 스튜디오: 페이지 렌더 + 필드 오버레이 + 클릭→셀 결정론 매핑 ──────────────────────────────
   const studio = useMemo(() => {
@@ -452,13 +520,20 @@ export default function BulkFillPage() {
   const generate = useCallback(async () => {
     if (!tpl) return;
     setError(null);
+    setWarnings(null);
     setBusy("생성 중…");
+    const out: RowResult[] = []; // try 밖 — 중간에 접혀도 완성분은 보존한다
     try {
       await ensureEngine();
       const rows = parseRoster(rosterText);
       const active = fields.filter((f) => f.use);
       const dup = active.map((f) => f.key).filter((k, i, a) => a.indexOf(k) !== i);
       if (dup.length) throw new Error(`필드 이름이 중복됩니다: ${[...new Set(dup)].join(", ")} — 2단계에서 이름을 구분해 주세요`);
+      // 명단 열 ↔ 필드 키 양방향 대조 — 헤더 오타 한 글자가 "조용한 빈칸"으로 끝나지 않게 배너 +
+      // report.json 사유코드(unmatched_column/unmatched_field)로 남긴다. 생성 자체는 계속 진행.
+      const diag = diagnoseKeys(rosterColumns(rows), active.map((f) => f.key));
+      const diagMessage = unmatchedMessage(diag);
+      setWarnings(diagMessage ? { codes: unmatchedReasons(diag), message: diagMessage } : null);
       // 쪽수 기준선 = 무편집 왕복(CLI와 동일 — .hwp 템플릿의 변환 리플로를 정직 반영)
       const b0 = HwpDoc.open(tpl.bytes, tpl.name);
       const noEdit = b0.toHwpx();
@@ -469,11 +544,24 @@ export default function BulkFillPage() {
       setBaseline(basePages);
 
       const nameKey = active.find((f) => f.key === "성명" || f.key === "이름")?.key ?? active[0]?.key;
-      const out: RowResult[] = [];
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
+      const personOf = (row: Record<string, string>, i: number) => String((nameKey && row[nameKey]) || row[Object.keys(row)[0]] || `${i + 1}`);
+      const fileNameOf = (person: string, i: number) => `${String(i + 1).padStart(3, "0")}_${person.replace(/[/\\:*?"<>|\n]/g, "_")}.hwpx`;
+      // 열려 있는 wasm 문서 — 행이 중간에 죽으면 호출부 catch가 회수한다(누수 방지).
+      const live: HwpDoc[] = [];
+      const openDoc = (bytes: Uint8Array, name: string) => {
+        const d = HwpDoc.open(bytes, name);
+        live.push(d);
+        return d;
+      };
+      const closeDoc = (d: HwpDoc) => {
+        const j = live.indexOf(d);
+        if (j >= 0) live.splice(j, 1);
+        d.free();
+      };
+      /** 한 사람분 — 채움 → 산출 → 재개봉 검증 → 프리뷰. 여기서 던진 예외는 그 행만 실패로 접는다. */
+      const buildRow = (row: Record<string, string>, i: number): RowResult => {
         const reasons: string[] = [];
-        const doc = HwpDoc.open(tpl.bytes, tpl.name);
+        const doc = openDoc(tpl.bytes, tpl.name);
         const filled: { key: string; value: string; addr: string; example: string }[] = [];
         for (const f of active) {
           const value = (row[f.key] ?? "").trim();
@@ -491,10 +579,10 @@ export default function BulkFillPage() {
           }
         }
         const bytes = new Uint8Array(doc.toHwpx());
-        doc.free();
+        closeDoc(doc);
 
         // 재개봉 검증 + 프리뷰(첫 채움 셀이 있는 페이지 렌더 + 셀 경계 하이라이트 — 전부 지오메트리 API)
-        const check = HwpDoc.open(bytes, "check.hwpx");
+        const check = openDoc(bytes, "check.hwpx");
         const pages = check.pageCount();
         if (pages !== basePages) reasons.push(`overflow:pages_${pages}_vs_${basePages}`);
         let svg = "";
@@ -538,11 +626,11 @@ export default function BulkFillPage() {
             }
           }
         }
-        check.free();
-        const person = (nameKey && row[nameKey]) || row[Object.keys(row)[0]] || `${i + 1}`;
-        out.push({
-          name: String(person),
-          fileName: `${String(i + 1).padStart(3, "0")}_${String(person).replace(/[/\\:*?"<>|\n]/g, "_")}.hwpx`,
+        closeDoc(check);
+        const person = personOf(row, i);
+        return {
+          name: person,
+          fileName: fileNameOf(person, i),
           bytes,
           reasons,
           svg,
@@ -550,27 +638,59 @@ export default function BulkFillPage() {
           pageH,
           highlights,
           values: filled,
-        });
+        };
+      };
+
+      for (let i = 0; i < rows.length; i++) {
+        // 매 행 프레임 양보 — 진행률이 실제로 다시 그려지고 탭이 살아 있다(동기 루프 프리즈 해소 1단계).
+        // 순서 주의: 라벨을 먼저 올리고 양보해야 "지금 만드는 중인 행"이 화면에 뜬다.
         setBusy(`생성 중… ${i + 1}/${rows.length}`);
+        await yieldToUi();
+        try {
+          out.push(buildRow(rows[i], i));
+        } catch (e) {
+          // 한 행이 죽어도 배치를 접지 않는다 — 완성분은 그대로 두고 그 행만 사유코드로 보고.
+          for (const d of live.splice(0)) {
+            try {
+              d.free();
+            } catch {
+              /* 이미 회수됨 */
+            }
+          }
+          const person = personOf(rows[i], i);
+          out.push({ name: person, fileName: fileNameOf(person, i), bytes: new Uint8Array(0), reasons: [`row_failed:${e}`], svg: "", pageW: 1, pageH: 1, highlights: [], values: [], failed: true });
+        }
       }
       setResults(out);
       setIdx(0);
+      const failed = out.filter((r) => r.failed).length;
+      if (failed) setNotice(`${failed}건이 생성 중 실패했습니다 — 나머지 ${out.length - failed}부는 그대로 남아 있고, 실패 행은 report.json에 row_failed로 기록됩니다.`);
     } catch (e) {
-      setError(`생성 실패: ${e}`);
+      // 배치 전체가 접힌 경우에도 이미 만든 부수는 살린다(다시 처음부터 돌리지 않아도 되게).
+      if (out.length) {
+        setResults(out);
+        setIdx(0);
+      }
+      setError(`생성 실패${out.length ? ` (완성된 ${out.length}부는 보존)` : ""}: ${e}`);
     } finally {
       setBusy(null);
     }
   }, [tpl, fields, rosterText, ensureEngine]);
 
   const downloadZip = useCallback(() => {
+    const created = results.filter((r) => !r.failed);
     const report = {
       template: tpl?.name,
       templateSha256: tpl?.sha,
       baselinePages: baseline,
-      rows: results.map((r) => ({ file: r.fileName, needsReview: r.reasons.length > 0, reasons: r.reasons })),
+      // 배치 레벨 경고(명단 열 ↔ 필드 키 대조) — 행 사유코드와 같은 어휘를 쓴다.
+      warnings: warnings?.codes ?? [],
+      rows: results.map((r) => ({ file: r.fileName, created: !r.failed, needsReview: r.reasons.length > 0, reasons: r.reasons })),
+      created: created.length,
+      skipped: results.length - created.length,
     };
     const blob = storeZip([
-      ...results.map((r) => ({ name: r.fileName, bytes: r.bytes })),
+      ...created.map((r) => ({ name: r.fileName, bytes: r.bytes })),
       { name: "report.json", bytes: new TextEncoder().encode(JSON.stringify(report, null, 2)) },
     ]);
     const a = document.createElement("a");
@@ -578,11 +698,22 @@ export default function BulkFillPage() {
     a.download = "벌크채움_결과.zip";
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-  }, [results, tpl, baseline]);
+  }, [results, tpl, baseline, warnings]);
 
   const cur = results[idx];
   const review = results.filter((r) => r.reasons.length > 0).length;
+  const createdCount = results.filter((r) => !r.failed).length;
   const selected = fields.find((f) => f.id === selectedId) ?? null;
+  const activeKeys = useMemo(() => fields.filter((f) => f.use).map((f) => f.key), [fields]);
+  // 명단을 치는 동안의 라이브 매칭 진단 — 생성 전에 헤더 오타를 잡는다(파싱 실패면 판단 보류=null).
+  const keyMatch = useMemo(() => {
+    if (!rosterText.trim() || !activeKeys.length) return null;
+    try {
+      return diagnoseKeys(rosterColumns(parseRoster(rosterText)), activeKeys);
+    } catch {
+      return null;
+    }
+  }, [rosterText, activeKeys]);
   const patchField = (id: number, patch: Partial<Field>) => setFields((fs) => fs.map((f) => (f.id === id ? { ...f, ...patch } : f)));
   const steps = [
     { n: 1, t: "양식", on: true, done: !!tpl },
@@ -592,7 +723,9 @@ export default function BulkFillPage() {
   ];
 
   return (
-    <div className="bulk-root" data-testid="bulk-root">
+    // 페이지 어디에 떨어뜨려도 브라우저가 파일을 열어 배치를 날려버리지 않게 기본 동작만 차단한다
+    // (실제 처리는 아래 점선 드롭존에서만).
+    <div className="bulk-root" data-testid="bulk-root" onDragOver={(e) => e.preventDefault()} onDrop={(e) => e.preventDefault()}>
       <header className="bulk-head">
         <div className="bulk-head-in">
           <a href={`${BASE}/`} className="bulk-back">←</a>
@@ -610,12 +743,64 @@ export default function BulkFillPage() {
         {error && <div className="bulk-error">{error}</div>}
         {notice && <div className="bulk-notice">{notice}</div>}
 
-        <section className="bulk-step">
+        {!tpl && (
+          <section className="bulk-intro" aria-labelledby="bulk-title">
+            <div className="bulk-intro-copy">
+              <span className="bulk-eyebrow">LOCAL DOCUMENT AUTOMATION</span>
+              <h1 id="bulk-title">한 번 만든 양식을<br />사람 수만큼 완성합니다.</h1>
+              <p>
+                문서에서 값이 들어갈 셀을 직접 확인하고, 엑셀 명단을 붙여넣으세요.
+                생성·형식 검증·미리보기·zip 묶음까지 파일은 브라우저 안에서 처리됩니다.
+              </p>
+              <div className="bulk-trust">
+                <span><b>01</b> 양식 열기</span>
+                <i aria-hidden>→</i>
+                <span><b>02</b> 채울 곳 확인</span>
+                <i aria-hidden>→</i>
+                <span><b>03</b> 명단 붙여넣기</span>
+                <i aria-hidden>→</i>
+                <span><b>04</b> 검수·다운로드</span>
+              </div>
+            </div>
+            <div className="bulk-intro-visual" aria-hidden>
+              <div className="bulk-mini-doc">
+                <span className="bulk-mini-line wide" />
+                <span className="bulk-mini-line" />
+                <div className="bulk-mini-table">
+                  <span>이름</span><b>홍길동</b>
+                  <span>연락처</span><b>010-1234-5678</b>
+                  <span>기업명</span><b>오토한글</b>
+                </div>
+              </div>
+              <div className="bulk-stack-card one">김민지.hwpx</div>
+              <div className="bulk-stack-card two">박서준.hwpx</div>
+              <div className="bulk-stack-card three">결과 24부.zip</div>
+            </div>
+          </section>
+        )}
+
+        <section className={`bulk-step bulk-upload-step${tpl ? " compact" : ""}`}>
           <h2><span className="num">1</span> 양식 업로드 <small>.hwp/.hwpx — 업로드 즉시 채움 영역을 자동 유도합니다</small></h2>
-          <label className="bulk-btn big">
-            {tpl ? `📄 ${tpl.name} · ${tpl.pages}쪽` : "＋ 양식 선택"}
+          <label className={`bulk-upload${tpl ? " has-file" : ""}${dragOver ? " over" : ""}`} data-testid="bulk-dropzone"
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragEnter={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false); }}
+            onDrop={onDropTemplate}>
+            <span className="bulk-upload-icon">{tpl ? "✓" : "↑"}</span>
+            <span className="bulk-upload-copy">
+              <b>{tpl ? `${tpl.name} · ${tpl.pages}쪽` : dragOver ? "여기에 놓으세요" : "양식 파일을 끌어다 놓거나 선택하세요"}</b>
+              <small>{tpl ? "다른 파일로 바꾸거나 여기로 끌어다 놓기" : ".hwp 또는 .hwpx · 파일은 서버로 업로드되지 않습니다"}</small>
+            </span>
+            <span className="bulk-upload-action">{tpl ? "바꾸기" : "파일 선택"}</span>
             <input type="file" accept=".hwp,.hwpx" hidden data-testid="bulk-template" onChange={(e) => e.target.files?.[0] && void onTemplate(e.target.files[0])} />
           </label>
+          {!tpl && (
+            <div className="bulk-sample-row">
+              <span>양식 파일이 없나요?</span>
+              <button className="bulk-btn sm" data-testid="bulk-sample" disabled={!!busy} onClick={() => void onSample()}>▶ 샘플로 체험</button>
+              <small>{DEMO_TEMPLATE.label} + 데모 명단 3명이 자동으로 채워집니다</small>
+            </div>
+          )}
           {busy && !results.length && <span className="bulk-busy">{busy}</span>}
           {tpl && (/\.hwp$/i.test(tpl.name) ? (
             <div className="bulk-fmtnote warn" data-testid="bulk-fmt-note">
@@ -711,6 +896,8 @@ export default function BulkFillPage() {
                     () => { setRosterText(prompt); setNotice("클립보드를 못 써서 아래 칸에 프롬프트를 넣어뒀습니다 — 복사해 쓰신 뒤 지우세요."); },
                   );
                 }}>📋 AI 프롬프트 복사</button>
+                {/* 079 선행 고지: 이 경로만 유일하게 브라우저 밖으로 나간다 — 채움·검증은 계속 로컬. */}
+                <div className="bulk-pii" data-testid="bulk-pii-note">⚠ 이 방법을 쓰면 <b>명단의 개인정보가 외부 AI 서비스(ChatGPT 등)로 전송</b>됩니다 — 양식·채움·검증은 그대로 브라우저 안에서만 처리됩니다.</div>
               </div>
               <div className="bulk-howto-card">
                 <b>✍️ 직접 쓰기</b>
@@ -721,26 +908,44 @@ export default function BulkFillPage() {
                 </div>
               </div>
             </div>
-            <div className="bulk-keys-strip">
+            {/* 키 칩 = 매칭 상태 표시기. 명단이 파싱되는 동안 영역 이름과 열 이름을 실시간 대조한다. */}
+            <div className="bulk-keys-strip" data-testid="bulk-keys">
               <span className="bulk-hint">이 이름들이 값의 주소입니다:</span>
-              {fields.filter((f) => f.use).map((f) => (<code key={f.id} className="bulk-keychip">{f.key}{f.required ? " *" : ""}</code>))}
+              {fields.filter((f) => f.use).map((f) => {
+                const state = keyMatch ? (keyMatch.matched.includes(f.key) ? " ok" : " miss") : "";
+                return (
+                  <code key={f.id} className={`bulk-keychip${state}`} title={state === " ok" ? "명단에 같은 이름의 열이 있습니다" : state === " miss" ? "명단에 같은 이름의 열이 없습니다 — 이 영역은 빈칸으로 남습니다" : undefined}>
+                    {f.key}{f.required ? " *" : ""}{state === " ok" ? " ✓" : state === " miss" ? " ✕" : ""}
+                  </code>
+                );
+              })}
+              {keyMatch?.unmatchedColumns.map((c) => (
+                <code key={`x-${c}`} className="bulk-keychip extra" title="명단에만 있는 열 — 어느 영역에도 들어가지 않습니다">{c} ✕</code>
+              ))}
             </div>
             <textarea className="bulk-roster" data-testid="bulk-roster" value={rosterText} onChange={(e) => setRosterText(e.target.value)} rows={9} spellCheck={false}
               placeholder={fields.filter((f) => f.use).slice(0, 3).map((f) => `${f.key}: 값`).join("\n") + "\n\n(빈 줄로 사람 구분 — CSV/엑셀 붙여넣기/JSON도 자동 인식)"} />
             <button className="bulk-btn accent big" data-testid="bulk-generate" disabled={!!busy || fields.filter((f) => f.use).length === 0 || !rosterText.trim()} onClick={() => void generate()}>
               {busy ?? `⚡ 완성본 만들기 + 검증`}
             </button>
+            {warnings && (
+              <div className="bulk-fmtnote warn" data-testid="bulk-unmatched">
+                ⚠ <b>이름이 맞지 않는 항목이 있습니다</b> — {warnings.message}
+                <br />
+                <small>사유코드 {warnings.codes.join(" · ")} 는 report.json에도 남습니다.</small>
+              </div>
+            )}
           </section>
         )}
 
         {results.length > 0 && cur && (
           <section className="bulk-step">
-            <h2><span className="num">4</span> 검수 <small>기준선 {baseline}쪽 · {results.length}부 중 검토 필요 {review}건 — 한 명씩 넘겨 확인 후 zip · 산출물 .hwpx(한글에서 바로 열림)</small></h2>
+            <h2><span className="num">4</span> 검수 <small>기준선 {baseline}쪽 · {results.length}부 중 검토 필요 {review}건{createdCount < results.length ? ` (생성 실패 ${results.length - createdCount}건 — zip 제외)` : ""} — 한 명씩 넘겨 확인 후 zip · 산출물 .hwpx(한글에서 바로 열림)</small></h2>
             <div className="bulk-nav review">
               <button onClick={() => setIdx((i) => Math.max(0, i - 1))} disabled={idx === 0}>‹ 이전</button>
               <span className="bulk-idx" data-testid="bulk-idx">{idx + 1} / {results.length} — <b>{cur.name}</b>{cur.reasons.length > 0 && <em className="warn"> ⚠ {cur.reasons.join(", ")}</em>}</span>
               <button onClick={() => setIdx((i) => Math.min(results.length - 1, i + 1))} disabled={idx === results.length - 1}>다음 ›</button>
-              <button className="bulk-btn accent" data-testid="bulk-zip" onClick={downloadZip}>✓ zip 다운로드 ({results.length}부 + report.json)</button>
+              <button className="bulk-btn accent" data-testid="bulk-zip" onClick={downloadZip}>✓ zip 다운로드 ({createdCount}부 + report.json)</button>
             </div>
             <div className="bulk-review">
               <div className="bulk-doc">
@@ -752,7 +957,7 @@ export default function BulkFillPage() {
                     ))}
                   </div>
                 ) : (
-                  <div className="bulk-nopreview">미리보기 페이지를 찾지 못했습니다(값은 report로 검증됨)</div>
+                  <div className="bulk-nopreview">{cur.failed ? "이 행은 생성 도중 실패했습니다 — zip에서 제외되고 report.json에 row_failed로 남습니다(나머지 부수는 그대로)" : "미리보기 페이지를 찾지 못했습니다(값은 report로 검증됨)"}</div>
                 )}
               </div>
               <aside className="bulk-values" data-testid="bulk-values">
@@ -772,8 +977,8 @@ export default function BulkFillPage() {
 
       <style>{`
         body:has(.bulk-root) { background: #0a0d13; margin: 0; }
-        .bulk-root { min-height: 100vh; background: radial-gradient(1200px 500px at 50% -10%, rgba(124,58,237,0.13), transparent 60%), #0a0d13; color: #dfe4ec; font-size: 14px; }
-        .bulk-wrap { max-width: 1240px; margin: 0 auto; padding: 18px 20px 80px; }
+        .bulk-root { min-height: 100vh; background: radial-gradient(1100px 520px at 72% -8%, rgba(124,58,237,0.17), transparent 62%), radial-gradient(700px 420px at 8% 34%, rgba(29,78,216,0.08), transparent 70%), #0a0d13; color: #dfe4ec; font-size: 14px; }
+        .bulk-wrap { max-width: 1240px; margin: 0 auto; padding: 30px 20px 96px; }
         .bulk-head { position: sticky; top: 0; z-index: 20; backdrop-filter: blur(10px); background: rgba(10,13,19,0.82); border-bottom: 1px solid rgba(124,58,237,0.22); }
         .bulk-head-in { max-width: 1240px; margin: 0 auto; display: flex; align-items: center; gap: 13px; padding: 12px 20px; flex-wrap: wrap; }
         .bulk-back { text-decoration: none; color: #8b93a1; font-size: 16px; }
@@ -785,6 +990,28 @@ export default function BulkFillPage() {
         .bulk-chip { font-size: 11.5px; color: #5c6470; border: 1px solid #232b3a; border-radius: 999px; padding: 4px 11px; transition: all 0.2s; }
         .bulk-chip.on { color: #c9d0da; border-color: #3a4356; }
         .bulk-chip.done { color: #6ee7b7; border-color: rgba(16,185,129,0.45); }
+        .bulk-intro { min-height: 420px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, .82fr); gap: 58px; align-items: center; padding: 32px 34px 42px; border-bottom: 1px solid #1c2330; }
+        .bulk-eyebrow { display: block; color: #a78bfa; font-size: 11px; font-weight: 800; letter-spacing: .2em; margin-bottom: 17px; }
+        .bulk-intro h1 { margin: 0; color: #f8fafc; font-size: clamp(36px, 5vw, 62px); line-height: 1.08; letter-spacing: -0.045em; }
+        .bulk-intro-copy > p { max-width: 630px; margin: 22px 0 0; color: #8b93a1; font-size: 15px; line-height: 1.8; }
+        .bulk-trust { display: flex; align-items: center; gap: 10px; margin-top: 30px; flex-wrap: wrap; color: #9ca3af; font-size: 12px; }
+        .bulk-trust span { display: inline-flex; gap: 6px; align-items: center; }
+        .bulk-trust b { display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid #31394a; border-radius: 8px; color: #c4b5fd; font-size: 10px; }
+        .bulk-trust i { color: #3b4250; font-style: normal; }
+        .bulk-intro-visual { position: relative; min-height: 330px; }
+        .bulk-mini-doc { position: absolute; inset: 0 70px 16px 0; z-index: 3; padding: 44px 32px; border-radius: 12px; color: #172033; background: #f8fafc; transform: rotate(-2.5deg); box-shadow: 0 30px 80px rgba(0,0,0,.52), 0 0 0 1px rgba(255,255,255,.08); }
+        .bulk-mini-line { display: block; width: 52%; height: 9px; margin: 0 auto 11px; border-radius: 4px; background: #172033; opacity: .9; }
+        .bulk-mini-line.wide { width: 76%; height: 15px; background: linear-gradient(90deg,#7c3aed,#2563eb); }
+        .bulk-mini-table { display: grid; grid-template-columns: 92px 1fr; margin-top: 46px; border: 1px solid #cbd2de; border-width: 1px 0 0 1px; }
+        .bulk-mini-table > * { min-height: 36px; display: flex; align-items: center; padding: 0 9px; border: 1px solid #cbd2de; border-width: 0 1px 1px 0; font-size: 11px; }
+        .bulk-mini-table span { background: #e8edfb; font-weight: 700; }
+        .bulk-mini-table b { font-weight: 600; color: #38445a; }
+        .bulk-stack-card { position: absolute; right: 0; width: 178px; padding: 15px 18px; border: 1px solid #30384a; border-radius: 11px; background: #161b25; color: #cfd5df; font-size: 12px; box-shadow: 0 14px 34px rgba(0,0,0,.36); }
+        .bulk-stack-card::before { content: "HWPX"; margin-right: 10px; color: #a78bfa; font-size: 9px; font-weight: 800; }
+        .bulk-stack-card.one { top: 72px; z-index: 4; }
+        .bulk-stack-card.two { top: 132px; right: -10px; z-index: 5; }
+        .bulk-stack-card.three { top: 208px; right: 10px; z-index: 6; border-color: rgba(124,58,237,.62); background: linear-gradient(135deg,#272036,#171b25); color: #fff; }
+        .bulk-stack-card.three::before { content: "ZIP"; color: #6ee7b7; }
         .bulk-step { margin-top: 30px; }
         .bulk-step h2 { font-size: 16px; margin: 0 0 12px; display: flex; align-items: baseline; gap: 10px; color: #fff; flex-wrap: wrap; }
         .bulk-step h2 .num { display: inline-flex; width: 22px; height: 22px; align-items: center; justify-content: center; border-radius: 7px; background: linear-gradient(135deg, #7c3aed, #a78bfa); color: #fff; font-size: 12.5px; transform: translateY(-1px); }
@@ -797,6 +1024,20 @@ export default function BulkFillPage() {
         .bulk-btn.accent { background: linear-gradient(135deg, #7c3aed, #6d28d9); border-color: #7c3aed; color: #fff; font-weight: 700; box-shadow: 0 4px 20px rgba(124,58,237,0.35); }
         .bulk-btn.accent:hover:not(:disabled) { box-shadow: 0 6px 26px rgba(124,58,237,0.5); transform: translateY(-1px); }
         .bulk-btn:disabled { opacity: 0.45; cursor: default; }
+        .bulk-upload-step { max-width: 820px; margin: 34px auto 0; }
+        .bulk-upload-step.compact { max-width: none; margin-top: 20px; }
+        .bulk-upload { min-height: 108px; display: flex; align-items: center; gap: 16px; padding: 20px 22px; border: 1px dashed #3b455a; border-radius: 18px; cursor: pointer; background: linear-gradient(135deg,rgba(124,58,237,.09),rgba(255,255,255,.025)); transition: border-color .18s, transform .18s, background .18s; }
+        .bulk-upload:hover, .bulk-upload.over { border-color: #8b5cf6; background: linear-gradient(135deg,rgba(124,58,237,.15),rgba(255,255,255,.04)); transform: translateY(-1px); }
+        .bulk-upload.over { border-color: #a78bfa; box-shadow: 0 0 0 3px rgba(124,58,237,.22); }
+        .bulk-upload.has-file { min-height: 74px; border-style: solid; border-color: rgba(16,185,129,.35); background: rgba(16,185,129,.055); }
+        .bulk-upload-icon { display: grid; place-items: center; flex: 0 0 48px; height: 48px; border-radius: 14px; color: #ddd6fe; background: rgba(124,58,237,.2); font-size: 23px; }
+        .bulk-upload.has-file .bulk-upload-icon { color: #6ee7b7; background: rgba(16,185,129,.14); }
+        .bulk-upload-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 6px; }
+        .bulk-upload-copy b { overflow: hidden; color: #f2f4f8; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
+        .bulk-upload-copy small { color: #78828f; font-size: 12px; font-weight: 400; }
+        .bulk-upload-action { padding: 8px 13px; border: 1px solid #3b455a; border-radius: 9px; color: #c4b5fd; font-size: 12px; }
+        .bulk-sample-row { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; color: #8b93a1; font-size: 12.5px; }
+        .bulk-sample-row small { color: #5c6470; font-size: 11.5px; }
         .bulk-busy { margin-left: 12px; color: #a78bfa; font-size: 13px; }
         .bulk-error { margin-top: 16px; padding: 11px 15px; border-radius: 10px; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.4); color: #fca5a5; }
         .bulk-notice { margin-top: 16px; padding: 11px 15px; border-radius: 10px; background: rgba(245,158,11,0.09); border: 1px solid rgba(245,158,11,0.35); color: #fcd34d; }
@@ -856,6 +1097,11 @@ export default function BulkFillPage() {
         .bulk-howto-btns { display: flex; gap: 8px; flex-wrap: wrap; }
         .bulk-keys-strip { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-bottom: 9px; }
         .bulk-keychip { font-size: 11.5px; color: #c4b5fd; background: rgba(124,58,237,0.13); border: 1px solid rgba(124,58,237,0.35); border-radius: 999px; padding: 3px 10px; }
+        .bulk-keychip.ok { color: #6ee7b7; background: rgba(16,185,129,0.12); border-color: rgba(16,185,129,0.38); }
+        .bulk-keychip.miss { color: #fcd34d; background: rgba(245,158,11,0.1); border-color: rgba(245,158,11,0.38); }
+        .bulk-keychip.extra { color: #fca5a5; background: rgba(239,68,68,0.09); border-color: rgba(239,68,68,0.34); }
+        .bulk-pii { margin-top: 10px; font-size: 11.5px; line-height: 1.65; color: #d9b96a; background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.28); border-radius: 9px; padding: 8px 11px; }
+        .bulk-pii b { color: inherit; }
         .bulk-roster-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
         .bulk-roster { width: 100%; font: 12.5px/1.7 ui-monospace, SFMono-Regular, monospace; padding: 12px 14px; border-radius: 12px; border: 1px solid #232b3a; background: #0d1118; color: #dfe4ec; box-sizing: border-box; margin-bottom: 12px; transition: border-color 0.15s; }
         .bulk-roster:focus { outline: none; border-color: #7c3aed; }
@@ -867,7 +1113,8 @@ export default function BulkFillPage() {
         .bulk-val .v { font-weight: 700; margin-top: 5px; color: #fff; font-size: 14px; }
         .bulk-val .was { font-size: 11.5px; color: #4b5563; text-decoration: line-through; margin-top: 4px; }
         .bulk-nopreview { color: #5c6470; padding: 34px 14px; text-align: center; line-height: 1.7; border: 1px dashed #232b3a; border-radius: 12px; }
-        @media (max-width: 940px) { .bulk-studio, .bulk-review { grid-template-columns: 1fr; } .bulk-steps { display: none; } }
+        @media (max-width: 940px) { .bulk-studio, .bulk-review, .bulk-intro { grid-template-columns: 1fr; } .bulk-steps { display: none; } .bulk-intro { gap: 24px; padding-inline: 8px; } .bulk-intro-visual { min-height: 300px; } }
+        @media (max-width: 620px) { .bulk-wrap { padding-inline: 14px; } .bulk-sub, .bulk-badge { display: none; } .bulk-intro { min-height: auto; padding-top: 22px; } .bulk-intro h1 { font-size: 38px; } .bulk-intro-visual { min-height: 250px; } .bulk-mini-doc { right: 30px; padding: 30px 20px; } .bulk-stack-card { width: 145px; } .bulk-trust i { display: none; } .bulk-upload { padding: 16px; } .bulk-upload-action { display: none; } }
       `}</style>
     </div>
   );
