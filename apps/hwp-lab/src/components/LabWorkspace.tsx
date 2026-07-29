@@ -6,6 +6,7 @@ import { buildDocContext, createAgentEventParser, type AgentEvent } from "@auto-
 import { isTrapError, resetEngine } from "@auto-hwp/engine";
 import { AutosaveController, IdbSnapshotStore, findRecoverable, formatAge, recoveredName, type SnapshotRecord } from "@/lib/autosave";
 import { limitMessage, oversizeMessage } from "@/lib/limits";
+import { ensureDemoAiConsent, type DemoAiConsentState } from "@/lib/demoAiConsent";
 
 type Mode = "loading" | "mock" | "live" | "static";
 type Doc = { bytes: Uint8Array; name: string };
@@ -65,6 +66,9 @@ export default function LabWorkspace() {
   // 포인터 제스처(드래그) 진행 중엔 자동저장 flush 를 미룬다(렌더-0 규율). 이슈 055 워커화로 toHwpx
   // 는 이제 비차단이지만, 제스처 중 불필요한 직렬화/RPC 왕복을 피하는 유휴 게이트는 그대로 유효하다.
   const pointerDownRef = useRef(false);
+  // 공개 데모의 첫 AI 네트워크 호출 전에만 묻는다. 동의는 이 페이지 수명 동안만 보존하며,
+  // 새로고침하면 다시 확인한다(문서 문맥의 제3자 전송을 조용히 영구 승인하지 않음).
+  const demoAiConsentRef = useRef<DemoAiConsentState>({ granted: false });
 
   // ssr:false 로 로드되므로 window 존재. wasm은 public 정적 에셋을 명시적 URL로 fetch(번들러 마법 X).
   const wasmUrl = useMemo(() => new URL(`${BASE}/hwp/hwp_wasm_bg.wasm`, window.location.origin), []);
@@ -365,6 +369,11 @@ export default function LabWorkspace() {
     if (IS_DEMO && !DEMO_AI_URL) {
       throw new Error("정적 데모에서는 AI 편집을 지원하지 않습니다 — 레포를 클론해 로컬 실행(.env.local에 OPENROUTER_API_KEY) 시 사용할 수 있습니다.");
     }
+    if (IS_DEMO && DEMO_AI_URL) {
+      if (!ensureDemoAiConsent(demoAiConsentRef.current, (message) => window.confirm(message))) {
+        throw new Error("AI 전송에 동의하지 않아 요청을 보내지 않았습니다. 수동 편집과 내보내기는 계속 사용할 수 있습니다.");
+      }
+    }
     // 066: 표/셀 앵커마다 엔진에서 그 표의 셀 그리드(행×열·각 셀 텍스트·빈칸)를 조회해 doc-context 에
     // 첨부한다 — 그래야 모델이 "표 채워줘"·라벨 옆 값칸 지정·구조편집(행 N개)을 정확히 한다(얇은 앵커
     // 컨텍스트에선 intents 0 이었음). 표가 아니거나 조회 실패면 null(첨부 없음 → 기존 동작, 회귀 방지).
@@ -504,9 +513,15 @@ export default function LabWorkspace() {
     mode === "loading" ? (
       <span className="lab-badge lab-badge-loading">모드 확인 중…</span>
     ) : mode === "static" ? (
-      // 정적 데모(OSS): 서버 없음 — 뷰/수동편집/export 는 전부 브라우저에서 동작, AI 만 로컬 실행 안내.
-      <span className="lab-badge lab-badge-mock" title="서버 없는 정적 데모 — 뷰·편집·HTML/PDF export는 전부 동작. AI 편집은 로컬 실행(BYOK) 시 사용 가능">
-        정적 데모
+      <span
+        className="lab-badge lab-badge-mock"
+        title={
+          DEMO_AI_URL
+            ? "정적 데모 — 파일 처리는 브라우저에서, 동의한 AI 문맥만 외부 프록시로 전송"
+            : "서버 없는 정적 데모 — 뷰·편집·HTML/PDF export는 전부 동작. AI 편집은 로컬 실행(BYOK) 시 사용 가능"
+        }
+      >
+        {DEMO_AI_URL ? "정적 데모 · AI" : "정적 데모"}
       </span>
     ) : mode === "live" ? (
       // NOTE: 여기 클라이언트 배지 문구에는 키/모델 리터럴을 넣지 않는다(클라이언트 번들 grep 위생).
@@ -524,15 +539,15 @@ export default function LabWorkspace() {
     // `lab-landing` = 문서 열기 전 화면을 앱 셸(height:100vh + 세로 중앙)이 아니라 문서처럼 자연
     // 스크롤시킨다. 데모/QA 공통 — 고정 높이면 히어로가 커질 때 위쪽으로 오버플로해 상단 콘텐츠
     // (복구 배너 등)가 화면 밖으로 밀려 클릭조차 안 된다(e2e 052 실패로 발현).
-    <div className={`lab-root${IS_DEMO ? " lab-demo" : ""}${doc ? "" : " lab-landing"}`}>
+    <div className={`lab-root lab-demo${doc ? "" : " lab-landing"}`}>
       {/* 데모 랜딩(문서 열기 전)은 히어로가 스스로 파일 열기·이동을 제공하므로 헤더를 띄우지 않는다.
           문서를 열면(=편집 모드) 상태·파일 열기가 필요하므로 헤더가 돌아온다.
           ⚠ `hidden` 속성은 .lab-header의 display:flex에 밀린다 — 조건부 렌더로 지운다. */}
-      {(!IS_DEMO || doc) && (
+      {doc && (
       <header className="lab-header">
         <span className="lab-title">
-          {IS_DEMO ? "오토한글" : "hwp-lab"}
-          <small>{IS_DEMO ? "AI와 함께 한 화면에서 쓰는 한글" : "오토한글 통합 실험 앱 (QA)"}</small>
+          오토한글
+          <small>한글 문서 편집</small>
         </span>
         {IS_DEMO && (
           <a className="lab-gh-link" href="https://github.com/kwakseongjae/auto-hwp" target="_blank" rel="noreferrer" title="GitHub 저장소">
@@ -588,6 +603,7 @@ export default function LabWorkspace() {
         {doc ? (
           <HwpWorkspace
             adapter={adapter}
+            brand="오토한글"
             document={doc}
             onAiRequest={onAiRequest}
             // 채팅 UI는 에디터(SDK)가 아니라 **이 앱**이 조립한다 — 워크스페이스는 편집 표면만
@@ -598,7 +614,7 @@ export default function LabWorkspace() {
               isMock: mode === "mock",
               notice: IS_DEMO
                 ? DEMO_AI_URL
-                  ? "데모 AI 편집이 켜져 있습니다(경량 AI 모델 · 일일 사용 한도 있음). 제안은 적용 전에 카드로 보여 주고, 한 번에 되돌릴 수 있습니다."
+                  ? "데모 AI 편집을 사용하면 지시와 문서 프로필·본문 발췌·표/선택 문맥이 Cloudflare Worker를 거쳐 OpenRouter(GLM 5.2)로 전송됩니다. 파일 원본 전체는 업로드하지 않으며, 첫 요청 전에 동의를 받습니다. 제안은 적용 전에 카드로 보여 주고 한 번에 되돌릴 수 있습니다."
                   : "정적 데모라 AI 편집은 꺼져 있습니다 — 클릭 선택·수동 편집·HTML/PDF 저장은 전부 동작합니다. AI 바이브 편집은 레포를 클론해 로컬 실행(BYOK)하면 켜집니다."
                 : undefined,
             })}
@@ -611,6 +627,13 @@ export default function LabWorkspace() {
             injectSerifSubstitute
             // 이슈 027: 수동 편집 UI(표 추가·룰러·열너비 드래그·더블클릭 텍스트·서식 툴바) 옵트인.
             enableEditing
+            // 공개/QA 앱은 원본 SVG를 덮는 contentEditable 대신 엔진 글리프 캐럿을 쓴다. 편집 중에도
+            // 한컴 정렬·폰트·위치가 그대로 보이고, 색상/서식은 우측 디자인 탭에서 수정한다.
+            preferEngineCaretEditing
+            // 선택 서식은 우측 디자인 inspector 한 곳에만 둔다. 상단은 문서/삽입/내보내기 전역 도구,
+            // 우측은 현재 선택 요소라는 Figma식 역할 분리를 유지한다.
+            formatSurface="inspector"
+            className="hw-studio"
             // 이슈 050: 페이지 위에 이미지를 드롭하면 삽입, .hwp/.hwpx 를 드롭하면 이 콜백으로 열기.
             onOpenFile={async (bytes, name) => {
               await openBytes(bytes, name); // 성공 여부는 복구 배너 전용 — 드롭 열기는 결과 무시(050 동작 유지)
@@ -646,7 +669,8 @@ export default function LabWorkspace() {
                   <p className="lab-tagline">AI와 함께, 한 화면을 보면서 쓰는 한글</p>
                   <p className="lab-hero-sub">
                     AI가 <b>읽는 문서</b>와 <b>화면에 그려지는 문서</b>가 같은 엔진에서 나옵니다 — 그래서
-                    말로 고친 편집이 검증되고, 한글에서 그대로 열립니다. 문서는 이 브라우저를 떠나지 않습니다.
+                    말로 고친 편집이 검증되고, 한글에서 그대로 열립니다. 파일 열기·렌더·수동 편집·내보내기는
+                    이 브라우저에서 처리됩니다.
                   </p>
                 </div>
                 {/* 그리드 영역(copy/stage/ways)으로 배치 — 데스크톱은 좌: 카피+카드 / 우: 스테이지,
@@ -670,7 +694,7 @@ export default function LabWorkspace() {
                       <div className="lab-way-actions">
                         <label className="lab-btn lab-btn-accent lab-hero-open">
                           한글 파일 열기
-                          <input type="file" accept=".hwp" hidden onChange={onFile} data-testid="file-input-hero" />
+                          <input type="file" accept=".hwp" hidden onChange={onFile} data-testid="file-input" />
                         </label>
                         {SAMPLES.filter((s) => s.file.endsWith(".hwp")).map((s) => (
                           <button key={s.file} className="lab-btn lab-sample-btn" data-testid={`sample-${s.file}`} title={s.hint} onClick={() => void openSample(s.file)}>
@@ -694,7 +718,9 @@ export default function LabWorkspace() {
                     </div>
                   </div>
                   <p className="lab-hero-note">
-                    문서는 브라우저 밖으로 나가지 않습니다 · AI로 고치는 기능은 곧 이 화면에서도 시연할 수 있게 붙일 예정입니다
+                    {IS_DEMO && DEMO_AI_URL
+                      ? "파일 원본은 업로드하지 않습니다 · AI 사용 시 필요한 문서 문맥만 OpenRouter로 전송하며 첫 요청 전에 동의를 받습니다"
+                      : "파일 원본은 브라우저 밖으로 나가지 않습니다 · AI 연동 시 전송 범위와 제공자는 호스트가 결정합니다"}
                   </p>
                 </div>
                 <div className="lab-stage" aria-hidden>
@@ -724,7 +750,7 @@ export default function LabWorkspace() {
                 </div>
                 <div className="lab-feature">
                   <b>원하는 방식으로 가져다 씁니다</b>
-                  <span>웹에서 바로 쓰거나, <code>npm i @auto-hwp/engine</code>으로 서비스에 넣거나, 쓰던 AI 도구에 붙이거나, 터미널에서 실행할 수 있습니다. 어느 쪽이든 문서는 내 컴퓨터를 떠나지 않습니다.</span>
+                  <span>엔진만, 화면 없는 편집 상태만, 문서 캔버스만 가져갈 수 있습니다. 기본 바이브·디자인 패널도 우측 레일·하단·모달로 바꿔 쓸 수 있고, 서비스 UI를 직접 넣어도 됩니다. 엔진의 열기·렌더·편집·내보내기는 로컬에서 실행됩니다.</span>
                 </div>
               </div>
 

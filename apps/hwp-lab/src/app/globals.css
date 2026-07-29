@@ -269,6 +269,12 @@ body {
 .lab-root.lab-demo .lab-header .lab-title { color: #eef1f6; }
 .lab-root.lab-demo .lab-header .lab-btn { background: rgba(255,255,255,0.06); border-color: #2a3546; color: #dfe5ee; }
 .lab-demo .lab-header .lab-title small { color: #8b93a1; }
+.lab-root.lab-demo .lab-header {
+  min-height: 38px; flex-wrap: nowrap; padding: 6px 12px; gap: 9px;
+}
+.lab-root.lab-demo .lab-header .lab-title { white-space: nowrap; }
+.lab-root.lab-demo .lab-header .lab-btn { padding: 5px 10px; white-space: nowrap; }
+.lab-root.lab-demo .hw-studio .hw-brand { display: none; }
 .lab-demo .lab-gh-link { color: #c4b5fd; }
 .lab-demo .lab-hero { max-width: 1180px; text-align: left; gap: 0; }
 /* 영역 배치: 데스크톱 = 좌(카피 위 / 카드 아래) + 우(스테이지, 두 행 span).
