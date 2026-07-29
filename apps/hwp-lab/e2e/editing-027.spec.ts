@@ -1,5 +1,6 @@
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { selectFirstCell } from "./cell-gesture";
 
 // 이슈 027 편집 패리티 e2e: 열너비 드래그 · 표 추가 · 텍스트 수정 · 볼드+배경. 데모 픽스처는
 // benchmarks/benchmark.hwp(8쪽, 다열 표 포함). enableEditing 이 켜진 lab 에서 검증한다.
@@ -34,42 +35,7 @@ const scanForClick = (page: Page, testid: string) => scan(page, async () => (awa
 // 표 위 지점을 단일 클릭으로 찾고(.hw-mark-table) → Escape 로 초기화 → 깨끗한 더블클릭(raw 좌표 → 행
 // 그립 가로채기 우회)으로 셀을 캐럿 없이 선택한다. 선택된 셀의 클릭 좌표를 돌려준다(에디터 진입용).
 async function scanForCell(page: Page): Promise<{ cx: number; cy: number } | null> {
-  const sheet = page.locator('.hw-sheet[data-page="0"]');
-  const box = await sheet.boundingBox();
-  if (!box) throw new Error("첫 페이지 시트 박스를 찾지 못함");
-  const anchor = page.locator(".hw-anchor");
-  for (let ry = 0.1; ry <= 0.9; ry += 0.04) {
-    for (let rx = 0.1; rx <= 0.9; rx += 0.06) {
-      const px = box.x + box.width * rx;
-      const py = box.y + box.height * ry;
-      await page.mouse.click(px, py);
-      if ((await page.locator(".hw-mark-table").count()) === 0) continue;
-      await page.keyboard.press("Escape");
-      await page.mouse.click(px, py);
-      await page.mouse.click(px, py);
-      try {
-        await page.locator(".hw-mark-cell").first().waitFor({ state: "visible", timeout: 4000 });
-      } catch {
-        continue; // 셀 경계/그립에 걸림 → 다음 지점
-      }
-      if ((await anchor.count()) > 0 && (await anchor.first().innerText()).includes("행")) return { cx: px, cy: py };
-    }
-  }
-  return null;
-}
-
-// 드릴된 셀에서 제자리 에디터를 연다: Escape 초기화 → 더블클릭 A(표 전체 → 셀 드릴) → 그 드릴된 셀을
-// 더블클릭 B(handleDoubleClick 의 onDrilledCell 경로 → openEditorAt). 실제 앱에서 finishClick 이 비동기라
-// 드릴 시 셀-텍스트 캐럿(053)이 놓일 수 있어 Enter 는 053 타이핑에 가로채인다 — 재더블클릭 개봉은 캐럿
-// 유무와 무관하고, 에디터가 열릴 때 캐럿이 정리되므로 가장 결정적이다.
-async function openCellEditor(page: Page, cx: number, cy: number) {
-  await page.keyboard.press("Escape");
-  await page.mouse.click(cx, cy); // 더블클릭 A: 표 전체 →
-  await page.mouse.click(cx, cy); //            셀로 드릴 인
-  await expect(page.locator(".hw-mark-cell").first()).toBeVisible({ timeout: 15_000 });
-  await page.mouse.click(cx, cy); // 더블클릭 B: 드릴된 셀 재더블클릭 →
-  await page.mouse.click(cx, cy); //            제자리 에디터 개봉
-  await expect(page.locator('[data-testid="hw-inplace-editor"]')).toBeVisible({ timeout: 15_000 });
+  return selectFirstCell(page);
 }
 
 test("표 추가: 툴바 버튼 → 2×3 픽커 → ApplyContent 로 표 삽입 → undo", async ({ page }) => {
@@ -149,56 +115,6 @@ test("행높이 드래그: 표 선택 → 행 핸들 드래그 → 행 경계가
   await expect(page.locator(".hw-status")).toContainText("실행취소", { timeout: 30_000 });
 });
 
-test("텍스트 수정: 셀 드릴 → Enter 제자리 InPlace 에디터(셀 bbox<4px) → Enter(SetTableCellRuns) → 문서에 반영", async ({ page }) => {
-  await open(page);
-  // 06x: 셀 앵커("N행 M열")가 뜨는 지점을 찾아 드릴한다 — 텍스트 수정은 셀을 대상으로 한다.
-  const found = await scanForCell(page);
-  expect(found, "표 셀을 더블클릭해 드릴 → 셀 앵커가 떠야 한다").toBeTruthy();
-  // 이슈 032/06x: 드릴로 선택된 셀에서 Enter → 셀 그 자리를 덮는 InPlace 에디터가 뜬다(드릴+Enter =
-  // 가장 결정적, 더블클릭-재개봉의 400ms 창 flake 회피).
-  await openCellEditor(page, found!.cx, found!.cy);
-  const ta = page.locator('[data-testid="hw-inplace-editor"]');
-  // ★ 제자리 assert(032): 에디터 bbox 가 셀 마킹 bbox 와 근사(위치·폭 오차<4px). 편집 상태로 들어가도
-  //   셀의 위치·크기가 그대로여야 한다("피그마처럼 보이는 그 자리 그 크기"). 높이는 입력 오버플로 시
-  //   아래로 확장될 수 있으므로(step 3) 셀을 덮는지(top 정렬 + 셀 높이 이상)만 확인한다.
-  const eb = await ta.boundingBox();
-  const mb = await page.locator(".hw-mark-cell").first().boundingBox();
-  if (!eb || !mb) throw new Error("에디터/셀 마킹 박스를 찾지 못함");
-  expect(Math.abs(eb.x - mb.x), "left 오차<4px").toBeLessThan(4);
-  expect(Math.abs(eb.y - mb.y), "top 오차<4px").toBeLessThan(4);
-  expect(Math.abs(eb.width - mb.width), "width 오차<4px").toBeLessThan(4);
-  expect(eb.height, "에디터가 셀 높이를 덮어야 한다").toBeGreaterThanOrEqual(mb.height - 4);
-  // 타이핑 → Enter=저장(저장 버튼 없음). 커밋되면 문서 SVG 에 새 텍스트가 나타난다(run 보존 커밋 경로).
-  await ta.fill("ZZZ텍스트확인");
-  await ta.press("Enter");
-  await expect(page.locator(".hw-pages")).toContainText("ZZZ텍스트확인", { timeout: 30_000 });
-  await page.locator('.hw-tool[title="실행취소"]').click();
-  await expect(page.locator(".hw-pages")).not.toContainText("ZZZ텍스트확인", { timeout: 30_000 });
-});
-
-test("볼드+배경: 셀 선택 → 상시 리본 굵게 + 배경색 → SetCellRangeFmt/Shade", async ({ page }) => {
-  await open(page);
-  // 피그마식 상시 리본(048) — 셀을 선택하면 서식 컨트롤이 활성화된다(문단 선택은 비활성). 028 플로팅
-  // 서식 바는 제거됐고 서식은 이제 리본에만 있다.
-  const found = await scanForCell(page);
-  expect(found, "표 셀을 선택하면 리본 서식이 활성화된다").toBeTruthy();
-  await expect(page.locator('[data-testid="hw-format-ribbon"]')).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator('[data-testid="hw-floating-toolbar"]')).toHaveCount(0); // 플로팅 서식 바는 더 이상 없다
-  // 굵게 적용/해제(SetCellRangeFmt) — 셀의 현재 볼드 상태에 따라 토글.
-  await expect(page.locator('[data-testid="hw-ribbon-bold"]')).toBeEnabled({ timeout: 30_000 });
-  await page.locator('[data-testid="hw-ribbon-bold"]').click();
-  await expect(page.locator(".hw-status")).toContainText("굵게", { timeout: 30_000 });
-  // 배경색 적용(셀 op) — color input 값을 NATIVE setter 로 설정해야(React 의 value 추적기 우회) onChange 가
-  // 발생한다 — 인스턴스 setter 로 넣으면 추적값이 함께 갱신되어 이벤트가 무시된다.
-  await page.locator('[data-testid="hw-ribbon-shade"]').evaluate((el: HTMLInputElement) => {
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
-    setter.call(el, "#ffe08a");
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-    el.dispatchEvent(new Event("change", { bubbles: true }));
-  });
-  await expect(page.locator(".hw-status")).toContainText("배경색 적용", { timeout: 30_000 });
-});
-
 // 이슈 06x: 드래그로 셀을 선택 → 컴팩트 "✨ AI에게 전달" pill 이 선택 bbox 인접에 뜬다(거리 assert) →
 // 리본 B 적용 → pill 클릭이 채팅 포커스 + 앵커 칩을 확정한다(신규 프롬프트 로직 0). 서식은 리본, AI 전달은 pill.
 test("드래그 선택 → AI에게 전달 pill 인접 표시 → 리본 B → AI 전달 → 칩 확정", async ({ page }) => {
@@ -206,6 +122,9 @@ test("드래그 선택 → AI에게 전달 pill 인접 표시 → 리본 B → A
   // 표 셀 앵커가 뜨는 지점을 찾아 그 셀을 선택 상태로 만든다.
   const found = await scanForCell(page);
   expect(found, "표 셀을 선택해야 AI 전달 pill 이 뜬다").toBeTruthy();
+  if ((await page.locator(".hw-caret").count()) > 0) {
+    await page.keyboard.press("Escape"); // 캐럿만 해제해 선택 액션을 다시 표시
+  }
   const mark = await page.locator(".hw-mark-cell").first().boundingBox();
   if (!mark) throw new Error("셀 마킹 박스를 찾지 못함");
   // 셀 안에서 작은 드래그(마퀴 아님) — 선택은 그 셀로 유지되고, 놓으면 pill 이 등장한다.
@@ -223,8 +142,8 @@ test("드래그 선택 → AI에게 전달 pill 인접 표시 → 리본 B → A
   const gap = Math.abs(pb.y - (m2.y + m2.height));
   expect(gap, "pill 이 선택 bbox 아래에 인접해야 한다").toBeLessThan(60);
 
-  // 리본 B 적용(SetCellRangeFmt) — 선택은 유지된다(서식 커밋이 선택을 지우지 않음).
-  await page.locator('[data-testid="hw-ribbon-bold"]').click();
+  // 우측 디자인 B 적용(SetCellRangeFmt) — 선택은 유지된다.
+  await page.locator('[data-testid="hw-design-bold"]').click();
   await expect(page.locator(".hw-status")).toContainText("굵게", { timeout: 30_000 });
 
   // "AI에게 전달" pill → 채팅 입력 포커스 + 앵커 칩 유지(칩 확정, 기존 흐름 재사용).

@@ -1,5 +1,6 @@
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { showVibePanel } from "./cell-gesture";
 
 // 이슈 051 챗 구조 편집 e2e: 챗 "표 삽입" → 프리뷰 카드(위치+크기) → 적용 → SVG 반영 → undo 1회 복원,
 // 그리고 "블록 삭제" → 위험(원문 표시) 카드 → 명시 승인(✓ 적용(삭제 포함)) 게이트. mock 프로바이더
@@ -53,6 +54,7 @@ test("챗 표 삽입: 앵커 → '3×3 표 삽입' → 프리뷰 카드 → 적�
   await open(page);
   await markAnchor(page);
   const before = await docSvgElementCount(page);
+  await showVibePanel(page);
 
   // 프롬프트 → mock InsertTableAt(앵커 블록 위치) 제안.
   await page.locator(".hw-textarea").fill("여기에 3x3 표를 삽입해줘");
@@ -80,6 +82,7 @@ test("챗 블록 삭제: 위험 카드(원문 표시) → 취소는 무변경 �
   await open(page);
   await markAnchor(page, true); // 표/셀 앵커 — 표 블록 삭제는 SVG 변화가 결정적
   const before = await page0SvgElementCount(page);
+  await showVibePanel(page);
 
   // 1) 삭제 제안 → DESTRUCTIVE 카드: danger 스타일 + 대상 블록 원문(detail) + 승인 버튼이 삭제를 명명.
   await page.locator(".hw-textarea").fill("이 블록 삭제해줘");
@@ -96,6 +99,7 @@ test("챗 블록 삭제: 위험 카드(원문 표시) → 취소는 무변경 �
 
   // 3) 다시 제안 → 이번엔 명시 승인 → 블록이 실제로 삭제된다(SVG 요소 수 변화) → undo 복원.
   await markAnchor(page, true);
+  await showVibePanel(page);
   await page.locator(".hw-textarea").fill("이 블록 삭제해줘");
   await page.locator(".hw-btn-send").click();
   await expect(page.locator(".hw-card-danger").first()).toBeVisible({ timeout: 30_000 });

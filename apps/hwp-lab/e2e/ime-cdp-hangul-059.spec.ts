@@ -1,5 +1,6 @@
 import path from "node:path";
 import { expect, test, type CDPSession, type Page } from "@playwright/test";
+import { placeCellCaret } from "./cell-gesture";
 
 // 이슈 059 IME 한글 조합 — CHROME CDP e2e (059 회귀 잠금).
 //
@@ -33,17 +34,7 @@ async function open(page: Page) {
 
 /** 첫 페이지를 훑으며 셀 텍스트 위를 클릭해 캐럿을 세운다 (셀 밖 클릭은 캐럿을 지우므로 보일 때까지 스캔). */
 async function placeCaret(page: Page): Promise<void> {
-  const sheet = page.locator('.hw-sheet[data-page="0"]');
-  const box = await sheet.boundingBox();
-  if (!box) throw new Error("첫 페이지 시트 박스를 찾지 못함");
-  for (let ry = 0.15; ry <= 0.9; ry += 0.05) {
-    for (let rx = 0.15; rx <= 0.85; rx += 0.08) {
-      await sheet.click({ position: { x: box.width * rx, y: box.height * ry } });
-      await page.waitForTimeout(80);
-      if ((await page.locator(".hw-caret").count()) > 0) return;
-    }
-  }
-  throw new Error("셀 텍스트 캐럿을 세우지 못함 (스캔 실패)");
+  await placeCellCaret(page);
 }
 
 /** 캐럿 추종 hidden textarea 에 렌더러 포커스를 준다 — CDP 입력은 focused 엘리먼트로 전달되므로 필수. */

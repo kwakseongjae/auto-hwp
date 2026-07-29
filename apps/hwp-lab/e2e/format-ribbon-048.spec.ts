@@ -1,11 +1,9 @@
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { placeCellCaret, selectFirstCell } from "./cell-gesture";
 
-// 이슈 048 상단 서식 리본 e2e: 영속 리본이 "비편집=선택 대상 서식 op / 편집 중=라이브 선택 스타일"로 이중
-// 동작함을 실제 브라우저(Chromium)로 검증한다. ① 셀 선택 후 리본 굵게 → 셀 서식 op(토스트) + 토글 반영.
-// ② 셀 더블클릭 → 제자리 에디터 → 일부 선택 → 리본 굵게 버튼(⌘B 아님) → 부분 서식 성립 → Enter 커밋 →
-// SVG 반영. ③ 편집 중엔 밑줄/취소선 활성·배경/정렬 비활성(모드별 활성). 리본 클릭이 선택을 붕괴시키지
-// 않는 함정(preventDefault)도 함께 걸린다(부분 서식이 성립하면 선택이 유지됐다는 뜻).
+// 048의 제품 표면은 상단 영속 리본에서 우측 Figma식 inspector로 이동했다. 상단은 문서 전역 도구만,
+// 선택 서식은 디자인 탭만 소유하고, 엔진 캐럿 편집 중에는 문서를 가리는 셀 팔레트가 없어야 한다.
 const BENCHMARK = path.resolve(process.cwd(), "..", "..", "benchmarks", "benchmark.hwp");
 
 async function open(page: Page) {
@@ -14,107 +12,51 @@ async function open(page: Page) {
   await expect(page.locator(".hw-sheet svg").first()).toBeVisible({ timeout: 60_000 });
 }
 
-// 드릴 모델(QA2 #4, 59fef4f) 정렬: 단일클릭 = 부모 표 마킹("표 …" 앵커) → 같은 지점 더블클릭 = 셀
-// 드릴("N행 M열" 앵커). 표가 마킹되면 행/열 그립(031)이 시트 클릭을 가로챌 수 있어(069) 절대좌표
-// page.mouse 로 클릭한다(액셔너빌리티 인터셉트 대기 없음). 마킹 클릭과 드릴 더블클릭 사이에 잠깐
-// 쉬어 앱의 빠른-두-번-pointerup 더블클릭 감지 윈도에 섞이지 않게 한다.
-async function scanForCell(page: Page): Promise<void> {
-  const sheet = page.locator('.hw-sheet[data-page="0"]');
-  const box = await sheet.boundingBox();
-  if (!box) throw new Error("첫 페이지 시트 박스를 찾지 못함");
-  const anchor = page.locator(".hw-anchor");
-  const label = async () => ((await anchor.count()) > 0 ? (await anchor.first().innerText()).trim() : "");
-  for (let ry = 0.1; ry <= 0.9; ry += 0.04) {
-    for (let rx = 0.1; rx <= 0.9; rx += 0.06) {
-      const x = box.x + box.width * rx;
-      const y = box.y + box.height * ry;
-      await page.mouse.click(x, y); // 1차: 표(또는 문단) 마킹
-      const l = await label();
-      if (l.includes("행")) return; // 이미 셀 앵커(드릴 유지 재클릭 등)
-      if (!l.includes("표")) continue; // 문단/이미지/빈공간 — 다음 지점
-      await page.waitForTimeout(500); // 더블클릭 윈도 밖으로
-      await page.mouse.click(x, y); // 2·3차: 빠른 더블클릭 = 셀 드릴
-      await page.mouse.click(x, y);
-      if ((await label()).includes("행")) return;
-    }
-  }
-  throw new Error("표 셀 앵커를 찾지 못함");
-}
-
-async function doubleClickSelectedCell(page: Page) {
-  const markBox = await page.locator(".hw-mark-cell").first().boundingBox();
-  if (!markBox) throw new Error("셀 마킹 박스를 찾지 못함");
-  const cx = markBox.x + markBox.width / 2;
-  const cy = markBox.y + markBox.height / 2;
-  await page.mouse.click(cx, cy);
-  await page.mouse.click(cx, cy);
-  await expect(page.locator('[data-testid="hw-inplace-editor"]')).toBeVisible({ timeout: 15_000 });
-}
-
-// 리치 에디터 DOM 에서 주어진 글자를 담은 span 의 볼드 여부(computed font-weight ≥ 600).
-function editorBold(page: Page, ch: string): Promise<boolean> {
-  return page.evaluate((c) => {
-    const ed = document.querySelector("[data-inline-edit]");
-    if (!ed) return false;
-    for (const sp of Array.from(ed.querySelectorAll("span"))) {
-      if ((sp.textContent ?? "").includes(c)) {
-        const fw = getComputedStyle(sp).fontWeight;
-        return fw === "bold" || parseInt(fw, 10) >= 600;
-      }
-    }
-    return false;
-  }, ch);
-}
-
-test("리본 표시 + 비편집 굵게가 선택 셀 서식 op 을 낸다 (028과 동일 op·토스트)", async ({ page }) => {
+test("선택 전 바이브 기본 → 셀 선택 시 디자인 자동 전환 → inspector에서 굵게·배경 적용", async ({ page }) => {
   await open(page);
-  // 영속 리본은 편집 크롬(enableEditing)에 항상 떠 있다.
-  await expect(page.locator('[data-testid="hw-format-ribbon"]')).toBeVisible();
-  await scanForCell(page);
-  // 셀이 선택되면 리본 굵게가 활성화된다.
-  const bold = page.locator('[data-testid="hw-ribbon-bold"]');
-  await expect(bold).toBeEnabled({ timeout: 15_000 });
+  await expect(page.locator('[data-testid="hw-format-ribbon"]')).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "✦ 바이브 편집", exact: true })).toHaveAttribute("aria-selected", "true");
+
+  await selectFirstCell(page);
+  if ((await page.locator(".hw-caret").count()) > 0) {
+    await page.keyboard.press("Escape"); // 텍스트 편집 → 요소 선택 단계(셀 inspector 복귀)
+  }
+  await expect(page.getByRole("tab", { name: "디자인", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator('[data-testid="hw-design-panel"]')).toBeVisible();
+
+  const bold = page.locator('[data-testid="hw-design-bold"]');
+  await expect(bold).toBeEnabled();
   await bold.click();
-  // 비편집 경로 → SetCellRangeFmt(useSelectionActions) → 토스트("굵게 적용"/"굵게 해제").
   await expect(page.locator(".hw-status")).toContainText("굵게", { timeout: 30_000 });
+
+  await expect(page.locator('[data-testid="hw-design-shade"]')).toBeVisible();
+  await page.locator('[data-testid="hw-design-shade"]').evaluate((el: HTMLInputElement) => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+    setter.call(el, "#ffe08a");
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await expect(page.locator(".hw-status")).toContainText("배경색 적용", { timeout: 30_000 });
 });
 
-test("편집 중 리본 굵게 버튼이 라이브 선택만 스타일 → 부분 서식 성립 → Enter 커밋 → SVG 반영", async ({ page }) => {
+test("엔진 캐럿 편집은 SVG를 유지하고 선택 틴트·셀 팔레트 없이 텍스트 도구만 보인다", async ({ page }) => {
   await open(page);
-  await scanForCell(page);
-  await doubleClickSelectedCell(page);
-  await expect(page.locator('[data-testid="hw-inplace-editor"]')).toHaveAttribute("contenteditable", "true");
+  await placeCellCaret(page);
 
-  // 편집 중엔 밑줄/취소선 활성, 배경/정렬 비활성(라이브-run vs 셀 op).
-  await expect(page.locator('[data-testid="hw-ribbon-underline"]')).toBeEnabled();
-  await expect(page.locator('[data-testid="hw-ribbon-shade"]')).toBeDisabled();
+  await expect(page.locator(".hw-caret")).toBeVisible();
+  await expect(page.locator(".hw-workspace")).toHaveClass(/is-text-editing/);
+  await expect(page.getByRole("tab", { name: "디자인", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByText("텍스트 편집 중", { exact: true })).toBeVisible();
+  await expect(page.locator('[data-testid="hw-cell-shade-palette"]')).toHaveCount(0);
+  await expect(page.locator('[data-testid="hw-design-shade"]')).toHaveCount(0);
+  await expect(page.locator('[data-testid="hw-inplace-editor"]')).toHaveCount(0);
 
-  // 전체 선택 상태로 진입 → 알려진 라틴 문자열로 교체. 앞 3글자(QWE)만 선택.
-  await page.keyboard.type("QWERTY");
-  await page.keyboard.press("Home");
-  for (let i = 0; i < 3; i++) await page.keyboard.press("Shift+ArrowRight");
+  const fill = await page.locator(".hw-mark-cell").first().evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(fill).toBe("rgba(0, 0, 0, 0)");
 
-  // ★ 리본 굵게 버튼(⌘B 아님)을 클릭. mousedown preventDefault 덕에 선택이 유지되어 라이브로 부분 굵게.
-  await page.locator('[data-testid="hw-ribbon-bold"]').click();
-  const qLive = await editorBold(page, "Q");
-  const yLive = await editorBold(page, "Y");
-  expect(qLive, "선택 부분(Q)과 비선택 부분(Y)의 서식이 달라야 한다(부분 서식)").not.toBe(yLive);
-
-  // Enter=저장 → run 보존 커밋(SetTableCellRuns) → 자체렌더 SVG 에 새 텍스트 반영.
-  await page.keyboard.press("Enter");
-  await expect(page.locator('[data-testid="hw-inplace-editor"]')).toHaveCount(0, { timeout: 15_000 });
-  await expect(page.locator(".hw-pages")).toContainText("Q", { timeout: 30_000 });
-
-  // 재개봉 시 부분 서식 왕복(무접촉 런 불변).
-  await doubleClickSelectedCell(page);
-  const qRound = await editorBold(page, "Q");
-  const yRound = await editorBold(page, "Y");
-  expect(qRound, "재개봉 시에도 부분 서식이 보존돼야 한다").not.toBe(yRound);
-  expect(qRound, "커밋 전후 선택 부분 서식 일치").toBe(qLive);
-  await page.keyboard.press("Escape");
-  await expect(page.locator('[data-testid="hw-inplace-editor"]')).toHaveCount(0, { timeout: 15_000 });
-
-  // undo → 편집 복구(QWERTY 사라짐).
+  await page.keyboard.type("QX", { delay: 300 });
+  await expect(page.locator(".hw-pages")).toContainText("QX", { timeout: 30_000 });
   await page.locator('.hw-tool[title="실행취소"]').click();
-  await expect(page.locator(".hw-pages")).not.toContainText("QWERTY", { timeout: 30_000 });
+  await page.locator('.hw-tool[title="실행취소"]').click();
+  await expect(page.locator(".hw-pages")).not.toContainText("QX", { timeout: 30_000 });
 });

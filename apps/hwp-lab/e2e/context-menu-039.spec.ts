@@ -1,5 +1,6 @@
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { selectFirstCell, showVibePanel } from "./cell-gesture";
 
 // 이슈 039 컨텍스트 메뉴 e2e: 우클릭 → 셀/문단/바탕 분기 메뉴 + 액션 위임 + 닫힘 규칙. 데모 픽스처는
 // benchmark.hwp(8쪽, 다열 표 + 본문 문단). enableEditing 이 켜진 lab 에서 검증한다.
@@ -40,9 +41,8 @@ async function rightClickScan(page: Page, predicate: () => Promise<boolean>, pag
 
 test("셀 우클릭 → 셀 메뉴(굵게/행 삽입 포함) → 굵게 → SetCellRangeFmt 토스트", async ({ page }) => {
   await open(page);
-  // 셀 우클릭 시 '행 삽입' 항목이 뜨는(=셀 분기) 지점을 찾는다.
-  const found = await rightClickScan(page, async () => (await page.locator('[data-testid="hw-ctx-row-below"]').count()) > 0);
-  expect(found, "표 셀을 우클릭하면 셀 메뉴(행 삽입 포함)가 떠야 한다").toBeTruthy();
+  const cell = await selectFirstCell(page);
+  await page.mouse.click(cell.cx, cell.cy, { button: "right" });
   const menu = page.locator('[data-testid="hw-context-menu"]');
   await expect(menu).toBeVisible();
   await expect(page.locator('[data-testid="hw-ctx-edit"]')).toBeVisible();
@@ -58,8 +58,9 @@ test("셀 우클릭 → 셀 메뉴(굵게/행 삽입 포함) → 굵게 → SetC
 
 test("셀 우클릭 → 아래에 행 삽입 → 커밋(문서에 반영) → undo", async ({ page }) => {
   await open(page);
-  const found = await rightClickScan(page, async () => (await page.locator('[data-testid="hw-ctx-row-below"]').count()) > 0);
-  expect(found, "표 셀을 우클릭해 행 삽입 항목이 떠야 한다").toBeTruthy();
+  const cell = await selectFirstCell(page);
+  await page.mouse.click(cell.cx, cell.cy, { button: "right" });
+  await expect(page.locator('[data-testid="hw-ctx-row-below"]')).toBeEnabled();
   await page.locator('[data-testid="hw-ctx-row-below"]').click();
   // 기존 TableInsertRows op 위임 성공 → 토스트(무효 대상이면 실패 토스트가 뜨므로 성공 문구를 확인).
   await expect(page.locator(".hw-status")).toContainText("행을 삽입", { timeout: 30_000 });
@@ -96,6 +97,7 @@ test("메뉴 닫힘 규칙: 외부 클릭으로 닫히고, 채팅 패널 우클�
   await page.mouse.click(5, 5);
   await expect(page.locator('[data-testid="hw-context-menu"]')).toBeHidden();
   // 채팅 패널(시트 밖) 우클릭은 우리 메뉴를 열지 않는다(브라우저 기본 유지).
+  await showVibePanel(page);
   const composer = page.locator(".hw-textarea");
   await composer.click({ button: "right" });
   await expect(page.locator('[data-testid="hw-context-menu"]')).toHaveCount(0);

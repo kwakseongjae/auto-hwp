@@ -1,5 +1,6 @@
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { showVibePanel } from "./cell-gesture";
 
 // 이슈 066 e2e: 표(셀) 앵커를 마킹하고 "채워줘" 하면 (1) 클라가 엔진에서 그 표의 셀 그리드를 조회해
 // doc-context 에 첨부하고(요청 본문에 "표 그리드"·(rNcM) 주소가 실림 — 066 수정의 결정적 신호),
@@ -35,6 +36,7 @@ async function markTableAnchor(page: Page): Promise<void> {
 test("표 마킹 → '채워줘': doc-context 에 셀 그리드 첨부 → 그리드 기반 편집 제안 → 적용", async ({ page }) => {
   await open(page);
   await markTableAnchor(page);
+  await showVibePanel(page);
 
   // 전송 직전 /api/hwp-edit POST 를 가로채 요청 본문을 검사한다.
   const reqPromise = page.waitForRequest((r) => r.url().includes("/api/hwp-edit") && r.method() === "POST");
