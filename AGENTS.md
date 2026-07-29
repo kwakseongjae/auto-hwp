@@ -55,7 +55,7 @@ fmt-dirty 커밋은 다음 verify에서 걸린다). GitHub Actions는 `gh workfl
 ```
 React UI(packages/react: HwpWorkspace + 오버레이들)
  → editor-core(headless: selection/edit/session — packages/editor-core)
-  → EngineAdapter 27메서드(packages/editor-core/src/adapter.ts)
+  → EngineAdapter 34메서드(packages/editor-core/src/adapter.ts)
    → WasmAdapter(웹) | TauriAdapter(데스크톱) — 같은 계약
     → 공유 Rust 코어: hwp-session(지오메트리, px) + hwp-ops(op-bus, HWPUNIT)
       + hwp-typeset(place_doc 조판) + hwp-render(PaintOp→SvgSink) + hwp-export(krilla PDF)

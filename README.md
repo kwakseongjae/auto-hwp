@@ -10,12 +10,84 @@ PDF·HTML·HWPX로 내보냅니다. 화면·AI·터미널이 전부 **같은 엔
 이 저장소가 배포하는 것은 **엔진과 SDK**입니다. 아래 데모는 그 엔진으로 만든 참조 구현이지
 여러분이 써야 할 화면이 아닙니다 — **화면은 여러분이 조립합니다.**
 
-<p align="center"><img src="./docs/assets/composable-editor-shells.png" alt="하나의 문서 엔진에 우측 패널, 하단 패널, 모달, 헤드리스 화면을 조립하는 구조" width="100%"></p>
-<p align="center"><sub>문서 엔진은 하나, 제품 셸은 자유롭게 — 기본 UI를 바로 쓰거나 필요한 부분만 가져갑니다.</sub></p>
-
 [English](./README.en.md) · [라이브 데모](https://kwakseongjae.github.io/auto-hwp/) ·
-[임베드](./docs/EMBED-GUIDE.md) · [CLI](./docs/CLI-GUIDE.md) · [MCP](./docs/MCP-GUIDE.md) ·
+[벤치마크](https://kwakseongjae.github.io/auto-hwp/bench/) · [임베드](./docs/EMBED-GUIDE.md) ·
+[CLI](./docs/CLI-GUIDE.md) · [MCP](./docs/MCP-GUIDE.md) ·
 [양식 일괄 작성](./docs/BULK-GUIDE.md) · [기여](./CONTRIBUTING.md)
+
+<p align="center"><img src="./docs/assets/edit-loop.gif" alt="라이브 데모에서 샘플 문서를 열고, 표를 지정하고, 말로 고쳐 적용한 뒤 PDF 내보내기까지 가는 편집 루프" width="960"></p>
+<p align="center"><sub>라이브 데모 실제 화면(2026-07) — 샘플 열기 → 표 지정 → 말로 편집 → 제안 카드 확인 후 적용 → PDF 내보내기 직전까지.
+모델 응답을 기다리는 구간은 빨리 감았습니다.</sub></p>
+
+## 60초 만에 붙이기
+
+```bash
+npm i @auto-hwp/react                 # 엔진(@auto-hwp/engine)·헤드리스 코어가 함께 설치됩니다
+mkdir -p public/hwp && cp node_modules/@auto-hwp/engine/pkg/hwp_wasm_bg.wasm public/hwp/
+```
+
+```tsx
+import { useMemo, useState } from 'react';
+import { HwpWorkspace, WasmAdapter, workspacePanel, type HwpWorkspaceProps } from '@auto-hwp/react';
+import '@auto-hwp/react/styles.css';
+
+// LLM 호출은 당신 서버에서 — 이 저장소의 어떤 패키지도 API 키를 보지 않습니다(BYOK).
+const askAi: HwpWorkspaceProps['onAiRequest'] = async (instruction, anchors, docContext) => {
+  const res = await fetch('/api/hwp-edit', {
+    method: 'POST',
+    body: JSON.stringify({ instruction, anchors, docContext }),
+  });
+  return res.json();                  // 검증된 편집 명령(Intent) 배열
+};
+
+export function Editor() {
+  const adapter = useMemo(() => new WasmAdapter('/hwp/hwp_wasm_bg.wasm'), []);
+  const [doc, setDoc] = useState<{ bytes: Uint8Array; name: string } | null>(null);
+
+  return (
+    <>
+      <input type="file" accept=".hwp,.hwpx" onChange={async (e) => {
+        const f = e.currentTarget.files?.[0];
+        if (f) setDoc({ bytes: new Uint8Array(await f.arrayBuffer()), name: f.name });
+      }} />
+      <HwpWorkspace
+        adapter={adapter}
+        document={doc}
+        enableEditing
+        onAiRequest={askAi}
+        sidePanel={workspacePanel({ onAiRequest: askAi })}
+      />
+    </>
+  );
+}
+```
+
+이게 전부입니다 — 열기·조판·렌더·수동 편집·HTML/PDF/HWPX 내보내기가 이 컴포넌트 안에서 돕니다.
+`sidePanel`을 빼면 패널 없는 순수 에디터가 됩니다(그때 `onAiRequest`는 호출되지 않습니다).
+React 없이 엔진만 쓰는 예제는 [아래](#npm-패키지--엔진만-쓰기)에, 번들러별 wasm 서빙·워커·CSP·폰트·AI
+프록시 레시피는 [`docs/EMBED-GUIDE.md`](./docs/EMBED-GUIDE.md)에 있습니다.
+
+## 다른 오픈소스와 무엇이 다른가
+
+| | **auto-hwp** | rhwp | hwp.js |
+|---|---|---|---|
+| **라이선스** | MIT OR Apache-2.0 — 상용 임베드 무료, 동시접속 제한 없음 | MIT | Apache-2.0 |
+| React 네이티브 SDK | `@auto-hwp/react`의 `<HwpWorkspace/>` + 헤드리스 코어(`@auto-hwp/editor-core`) | iframe 임베드 웹 컴포넌트(`@rhwp/editor`) | 뷰어·파서 라이브러리(`hwp.js`) |
+| 양식 일괄 작성 완제품 | 웹 + CLI (양식 1개 + 명단 N행 → 완성본 N부 zip) | 확인되지 않음 | 확인되지 않음 |
+| 바이브(자연어) 편집 | 타입드 편집 명령 19종 · 적용 전 카드 미리보기 · 카드별 되돌리기 | 확인되지 않음 | 확인되지 않음 |
+| 충실도 자동 게이트 | 쪽수·줄바꿈 일치율을 커밋마다 검사 ([정확도](#정확도와-한계)) | 확인되지 않음 | 확인되지 않음 |
+| 배포 표면 | npm · CLI · MCP 서버 · Claude Code 스킬 · 웹 데모 | 브라우저 확장(Chrome/Edge/Firefox) · VS Code 확장 · npm · 웹 데모 | npm |
+| 최근 npm 릴리스 | `@auto-hwp/engine` 0.0.2 (2026-07) | `@rhwp/core` 0.8.2 (2026-07) | `hwp.js` 0.0.3 (2020-10) |
+
+<sub>2026-07 기준, 각 프로젝트의 공개 저장소와 npm 레지스트리 메타데이터에서 확인한 것만 적었습니다.
+"확인되지 않음"은 공개 자료에서 찾지 못했다는 뜻이지 불가능하다는 뜻이 아닙니다. rhwp는 auto-hwp가
+`.hwp` 파싱 부트스트랩으로 쓰는 상류이기도 합니다([NOTICE](./NOTICE)).</sub>
+
+**왜 지금인가** — 2026년 5월 18일부터 지방정부 온나라시스템에도 개방형 포맷(HWPX) 첨부 의무가
+확대됐습니다(중앙부처는 2022년부터,
+[ZDNet](https://zdnet.co.kr/view/?no=20260512173412)). auto-hwp는 `.hwp`와 `.hwpx`를 같은 문서 모델로
+열고 HWPX로 저장하며, AI가 읽는 창(문서 프로필)과 화면에 그려지는 지면이 같은 엔진에서 나옵니다 —
+다만 `.hwpx` **입력**은 아직 알파입니다(아래 [정확도와 한계](#정확도와-한계)).
 
 ## 설치 없이 웹에서 써보기
 
@@ -125,6 +197,9 @@ doc.free();
 
 ## 화면은 당신이 조립합니다
 
+<p align="center"><img src="./docs/assets/composable-editor-shells.png" alt="하나의 문서 엔진에 우측 패널, 하단 패널, 모달, 헤드리스 화면을 조립하는 구조" width="100%"></p>
+<p align="center"><sub>문서 엔진은 하나, 제품 셸은 자유롭게 — 기본 UI를 바로 쓰거나 필요한 부분만 가져갑니다.</sub></p>
+
 참조 에디터 `<HwpWorkspace/>`도 **문서 표면만** 소유합니다 — 페이지·선택·오버레이·수동 편집.
 오른쪽 패널은 슬롯입니다. 채팅을 넣든, 입력 폼을 넣든, 인스펙터를 넣든, 아무것도 안 넣든 호스트 마음입니다.
 
@@ -210,7 +285,9 @@ import { workspacePanel } from '@auto-hwp/react';
 | benchmark1.hwp (신청서, 18쪽) | 18쪽 | 18쪽 | 일치 |
 | 줄바꿈 위치 일치율 | — | 98.9%+ | 게이트 |
 
-`scripts/verify-local.sh`가 이 게이트를 매 커밋 강제합니다. 게이트 밖 실물 검증으로
+`scripts/verify-local.sh`가 이 게이트를 매 커밋 강제합니다. 게이트 수치 전체와 각 수치를 직접
+재현하는 명령을 정리한 공개 페이지는
+[벤치마크](https://kwakseongjae.github.io/auto-hwp/bench/)입니다. 게이트 밖 실물 검증으로
 **공공기관 실물 49종**(창업지원 양식·공고문·보도자료·고시 등, [출처](./corpus/GOV-SOURCES.md))이
 열기 → 렌더 → PDF → 텍스트 전 파이프라인을 통과합니다. 성능 실측은 130쪽 문서에서 편집 → 화면 반영
 136ms(워커 스레드, 화면 비차단)이고, 되돌리기 메모리는 문서 크기 연동 버짓(128MiB)으로 상한이 잡혀

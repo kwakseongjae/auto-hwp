@@ -10,12 +10,86 @@ Only the live demo's optional AI editing calls a model provider through a separa
 What this repo ships is an **engine and an SDK**. The demos below are a reference implementation
 built on it, not the UI you are supposed to adopt — **you assemble the UI.**
 
-<p align="center"><img src="./docs/assets/composable-editor-shells.png" alt="One document engine composed with a right rail, bottom drawer, modal, or headless canvas" width="100%"></p>
-<p align="center"><sub>One document engine, any product shell — use the defaults or bring only the layers you need.</sub></p>
-
 [한국어](./README.md) · [Live demo](https://kwakseongjae.github.io/auto-hwp/) ·
-[Embed](./docs/EMBED-GUIDE.md) · [CLI](./docs/CLI-GUIDE.md) · [MCP](./docs/MCP-GUIDE.md) ·
+[Benchmark](https://kwakseongjae.github.io/auto-hwp/bench/) · [Embed](./docs/EMBED-GUIDE.md) ·
+[CLI](./docs/CLI-GUIDE.md) · [MCP](./docs/MCP-GUIDE.md) ·
 [Bulk form filling](./docs/BULK-GUIDE.md) · [Contributing](./CONTRIBUTING.md)
+
+<p align="center"><img src="./docs/assets/edit-loop.gif" alt="The live demo opening a sample document, marking a table, editing it in plain language, applying the proposal and heading to PDF export" width="960"></p>
+<p align="center"><sub>The actual live demo (2026-07) — open a sample → mark a table → edit by talking → review the
+proposal card → apply → up to the PDF export. The wait on the model's response is fast-forwarded.</sub></p>
+
+## Wire it up in 60 seconds
+
+```bash
+npm i @auto-hwp/react                 # pulls in the engine (@auto-hwp/engine) + headless core
+mkdir -p public/hwp && cp node_modules/@auto-hwp/engine/pkg/hwp_wasm_bg.wasm public/hwp/
+```
+
+```tsx
+import { useMemo, useState } from 'react';
+import { HwpWorkspace, WasmAdapter, workspacePanel, type HwpWorkspaceProps } from '@auto-hwp/react';
+import '@auto-hwp/react/styles.css';
+
+// The LLM call happens on YOUR server — no package in this repo ever sees an API key (BYOK).
+const askAi: HwpWorkspaceProps['onAiRequest'] = async (instruction, anchors, docContext) => {
+  const res = await fetch('/api/hwp-edit', {
+    method: 'POST',
+    body: JSON.stringify({ instruction, anchors, docContext }),
+  });
+  return res.json();                  // an array of validated edit commands (Intents)
+};
+
+export function Editor() {
+  const adapter = useMemo(() => new WasmAdapter('/hwp/hwp_wasm_bg.wasm'), []);
+  const [doc, setDoc] = useState<{ bytes: Uint8Array; name: string } | null>(null);
+
+  return (
+    <>
+      <input type="file" accept=".hwp,.hwpx" onChange={async (e) => {
+        const f = e.currentTarget.files?.[0];
+        if (f) setDoc({ bytes: new Uint8Array(await f.arrayBuffer()), name: f.name });
+      }} />
+      <HwpWorkspace
+        adapter={adapter}
+        document={doc}
+        enableEditing
+        onAiRequest={askAi}
+        sidePanel={workspacePanel({ onAiRequest: askAi })}
+      />
+    </>
+  );
+}
+```
+
+That is the whole thing — open, typeset, render, manual editing and HTML/PDF/HWPX export all live
+inside that component. Drop `sidePanel` and you get a bare editor with no panel (`onAiRequest` is
+then never called). For the engine without React see [below](#npm-packages--engine-only); the full
+per-bundler recipe (wasm serving, worker, CSP, fonts, AI proxy) is in
+[`docs/EMBED-GUIDE.md`](./docs/EMBED-GUIDE.md).
+
+## How it differs from the other open-source options
+
+| | **auto-hwp** | rhwp | hwp.js |
+|---|---|---|---|
+| **License** | MIT OR Apache-2.0 — free for commercial embedding, no seat or concurrency limits | MIT | Apache-2.0 |
+| React-native SDK | `<HwpWorkspace/>` in `@auto-hwp/react` + a headless core (`@auto-hwp/editor-core`) | iframe-embedded web component (`@rhwp/editor`) | viewer/parser library (`hwp.js`) |
+| Bulk form filling, finished | web + CLI (1 form + an N-row roster → N documents as a zip) | not found | not found |
+| Chat-driven ("vibe") editing | 19 typed edit commands · preview cards before apply · per-card revert | not found | not found |
+| Automated fidelity gate | page count + line-break match rate checked on every commit ([accuracy](#accuracy-and-limits)) | not found | not found |
+| Distribution surface | npm · CLI · MCP server · Claude Code skill · web demo | browser extensions (Chrome/Edge/Firefox) · VS Code extension · npm · web demo | npm |
+| Latest npm release | `@auto-hwp/engine` 0.0.2 (2026-07) | `@rhwp/core` 0.8.2 (2026-07) | `hwp.js` 0.0.3 (2020-10) |
+
+<sub>As of 2026-07, from each project's public repository and npm registry metadata only. "Not found"
+means we could not find it in public material — not that it is impossible. rhwp is also the upstream
+auto-hwp bootstraps its `.hwp` parsing from ([NOTICE](./NOTICE)).</sub>
+
+**Why now** — since 2026-05-18 local-government On-nara systems must also attach documents in an open
+format (HWPX); central ministries have been on it since 2022
+([ZDNet, in Korean](https://zdnet.co.kr/view/?no=20260512173412)). auto-hwp opens `.hwp` and `.hwpx`
+into the same document model and saves as HWPX, and the window the AI reads (the doc profile) comes
+out of the same engine that draws the page — though `.hwpx` **input** is still alpha (see
+[Accuracy and limits](#accuracy-and-limits)).
 
 ## Try it on the web, no install
 
@@ -131,6 +205,9 @@ framework-free). The full embed recipe (static wasm serving, CSP, fonts, AI prox
 
 ## You assemble the UI
 
+<p align="center"><img src="./docs/assets/composable-editor-shells.png" alt="One document engine composed with a right rail, bottom drawer, modal, or headless canvas" width="100%"></p>
+<p align="center"><sub>One document engine, any product shell — use the defaults or bring only the layers you need.</sub></p>
+
 Even the reference editor `<HwpWorkspace/>` owns only the **document surface** — pages, selection,
 overlays, manual editing. The right-hand panel is a slot. Put a chat in it, a form, an inspector,
 or nothing at all; that is the host's call.
@@ -148,7 +225,26 @@ import '@auto-hwp/react/styles.css';
 />
 ```
 
-Omit `sidePanel` and you get a bare editor with no panel. Everything the slot hands the host
+You don't have to design one from scratch. `workspacePanel()` is our default UI — vibe editing plus a
+design inspector — and you only pick the placement: `"rail"` (default), `"bottom"`, `"modal"` or
+`"unstyled"`.
+
+```tsx
+import { workspacePanel } from '@auto-hwp/react';
+
+<HwpWorkspace
+  {...props}
+  sidePanel={workspacePanel({ onAiRequest: myLlmBridge, presentation: 'bottom' })}
+/>
+```
+
+To compose more freely, put your own form inside `WorkspacePanelFrame`, or return a React portal from
+the slot to mount the panel on any DOM node outside the workspace. `WorkspacePanel`'s `tab` and `open`
+work controlled or uncontrolled, so you can wire them to your router or shortcut state. Omit
+`sidePanel` and you get a bare editor with no panel. In short: **engine → headless editor-core →
+document surface → optional default shell**, taken only as deep as you need.
+
+Everything the slot hands the host
 ([`WorkspaceSidePanel`](./packages/react/src/components/HwpWorkspace.tsx)):
 
 | Value | What it is |
@@ -166,8 +262,12 @@ Omit `sidePanel` and you get a bare editor with no panel. Everything the slot ha
 | `previewCards(intents)` | Enrich proposals for preview (e.g. a delete card showing the original text) |
 | `revert()` | Revert the last applied batch as one unit |
 | `undoDepth()` | Current undo-stack depth |
+| `designSelection` | Kind, text, page, X/Y/W/H and character format of the current single selection |
+| `applyDesign(patch)` | Apply only the format delta to the selection |
+| `designFonts` | The font list a host inspector may offer |
+| `textEditing` | The engine caret currently owns text input |
 
-If you *do* want our reference chat, `chatSidePanel({ onAiRequest })` mounts it in one line
+If you *do* want our reference panel, `workspacePanel({ onAiRequest })` mounts it in one line
 ([`packages/react/src/chatSlot.tsx`](./packages/react/src/chatSlot.tsx)) — but its Korean copy and
 card layout are **a demo affordance, not a product contract**. Real products should render their own
 panel.
@@ -200,7 +300,9 @@ our chat UI.
 | benchmark1.hwp (application form, 18pp) | 18 pages | 18 pages | match |
 | line-break position match | — | 98.9%+ | gate |
 
-`scripts/verify-local.sh` enforces the gate on every commit. Beyond the gate, **49 real government
+`scripts/verify-local.sh` enforces the gate on every commit. The public
+[benchmark page](https://kwakseongjae.github.io/auto-hwp/bench/) lists every gate number and the
+exact command that reproduces each of them. Beyond the gate, **49 real government
 documents** (startup-program forms, notices, press releases — [sources](./corpus/GOV-SOURCES.md))
 pass the full open → render → PDF → text pipeline. Measured at 130 pages, edit → screen is 136ms on a
 worker thread (the UI never blocks), and undo memory is capped by a size-aware budget (128MiB). For
