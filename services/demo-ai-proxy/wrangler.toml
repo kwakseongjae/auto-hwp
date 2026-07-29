@@ -12,7 +12,8 @@ id = "77e71126e0534967932807bd012bc39a"
 # CORS 허용 오리진(정확히 일치, 콤마로 여러 개). Pages 프로젝트 페이지면 뒤에 경로 없이 오리진만.
 ALLOWED_ORIGIN = "https://kwakseongjae.github.io"
 MODEL = "z-ai/glm-5.2"
-# 비용 상한의 실질 강제: GLM 5.2 요청당 ~$0.0038 → 1200건 ≈ $4.6(<$5). (Gemini Flash-Lite는 더 싸지만
+# 비용 방어선: GLM 5.2 요청당 ~$0.0038 → 1200건 ≈ $4.6(<$5). KV는 eventual consistency라
+# 동시 요청의 절대 상한이 아니며, 운영 전 Durable Object 카운터로 승격한다. (Gemini Flash-Lite는 더 싸지만
 # Cloudflare Worker 출구 리전을 구글이 지역 차단 — GLM으로 전환. 모델 바꾸면 이 캡도 재계산할 것.)
 DAILY_CAP = "1200"
 PER_IP_CAP = "20"

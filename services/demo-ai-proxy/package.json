@@ -2,17 +2,23 @@
   "name": "autohwp-demo-ai-proxy",
   "private": true,
   "version": "0.0.1",
-  "description": "오토한글 정적 데모용 OpenRouter 프록시(Cloudflare Worker) — 키 보관 + 일일 한도 강제",
+  "description": "오토한글 정적 데모용 OpenRouter 프록시(Cloudflare Worker) — 키 보관 + 일일 한도 방어",
   "scripts": {
+    "build:protocol": "npm --prefix ../../packages/ai-protocol run build",
+    "predev": "npm run build:protocol",
     "dev": "wrangler dev",
+    "predeploy": "npm run build:protocol",
     "deploy": "wrangler deploy",
+    "pretest": "npm run build:protocol",
+    "test": "vitest run",
     "tail": "wrangler tail"
   },
   "dependencies": {
     "@auto-hwp/ai-protocol": "file:../../packages/ai-protocol"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260101.0",
-    "wrangler": "^3.90.0"
+    "@cloudflare/workers-types": "^5.20260722.1",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.114.0"
   }
 }

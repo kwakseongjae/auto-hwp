@@ -1,11 +1,15 @@
 # autohwp-demo-ai-proxy — 정적 데모용 OpenRouter 프록시
 
 정적 데모(GitHub Pages)는 서버가 없어 OpenRouter 키를 담을 데가 없다. 이 Cloudflare Worker가 키를
-쥐고 **모델 고정 · 일일 한도 · CORS 잠금**으로 하루 비용을 강제한다. 클라이언트는 키를 절대 보지 않는다.
+쥐고 **모델 고정 · 일일 한도 · CORS 잠금**으로 비용을 방어한다. 클라이언트는 키를 절대 보지 않는다.
 
-- 모델: `google/gemini-3.5-flash-lite`(입력 $0.30 / 출력 $2.50 per M). 입력 위주 작업이라 요청당 ~$0.002.
-- 비용 상한: `DAILY_CAP`(전체) + `PER_IP_CAP`(1인) 로 강제. 2000건 ≈ $4/일. 예산에 맞춰 조절.
+- 모델: `z-ai/glm-5.2`(Cloudflare 출구 리전에서 실동작 확인). 모델·단가를 바꾸면 한도도 함께 재산정한다.
+- 비용 방어선: `DAILY_CAP=1200`(전체) + `PER_IP_CAP=20`(1인). 유효한 요청만 차감한다.
 - 프롬프트는 워커가 `@auto-hwp/ai-protocol`로 조립(앱과 같은 계약) → 출력은 우리 JSON Intent로 제한.
+
+> `RATELIMIT`은 Workers KV라 **eventual consistency**이며, 동시 요청에 대한 절대 비용 상한은 아니다.
+> Cloudflare도 원자적 read-modify-write에는 Durable Objects를 권장한다. 현재 값은 소규모 공개 데모의
+> 방어선이고, 절대 상한이 필요한 운영 전에는 Durable Object 카운터로 승격한다.
 
 ## 배포 (Cloudflare 무료 계정, 1회)
 
@@ -21,11 +25,16 @@ npx wrangler kv namespace create RATELIMIT
 npx wrangler secret put OPENROUTER_API_KEY  # 프롬프트에 sk-or-... 붙여넣기
 
 # 3) wrangler.toml의 ALLOWED_ORIGIN을 실제 Pages 오리진으로 확인 후 배포
-npx wrangler deploy
+npm run deploy
 ```
 
 배포가 끝나면 `https://autohwp-demo-ai.<계정>.workers.dev` 같은 URL이 나온다. 이 URL을 데모 빌드에
 `NEXT_PUBLIC_DEMO_AI_URL`로 넣으면(아래) 정적 페이지의 AI 편집이 켜진다.
+
+`npm run deploy`는 먼저 공유 `@auto-hwp/ai-protocol` dist를 다시 빌드한다. 직접
+`npx wrangler deploy`만 실행하면 gitignore된 dist가 신선한 clone에서 없을 수 있으므로 쓰지 않는다.
+상류 요청은 `provider.zdr=true`를 강제하며, ZDR endpoint가 없으면 개인정보 정책을 조용히 완화하지
+않고 요청을 실패시킨다.
 
 ## 데모에 연결
 
@@ -41,7 +50,7 @@ NEXT_PUBLIC_DEMO_AI_URL="https://autohwp-demo-ai.<계정>.workers.dev" node apps
 
 ## 한도 조정
 
-`wrangler.toml`의 `DAILY_CAP`/`PER_IP_CAP`/`MAX_TOKENS`를 고치고 `npx wrangler deploy`. 실사용 비용은
+`wrangler.toml`의 `DAILY_CAP`/`PER_IP_CAP`/`MAX_TOKENS`를 고치고 `npm run deploy`. 실사용 비용은
 OpenRouter 대시보드에서 확인. 카운터는 UTC 자정에 자동 리셋(키에 날짜 + TTL 25h).
 
 ## 로그
