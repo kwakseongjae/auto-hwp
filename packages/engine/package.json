@@ -1,6 +1,6 @@
 {
   "name": "@auto-hwp/engine",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "auto-hwp engine as WebAssembly: open .hwp/.hwpx in the browser, render pages to SVG, edit via Intent JSON, export HTML/PDF/HWPX. No LLM, no filesystem, no bundled fonts.",
   "license": "Apache-2.0",
   "type": "module",

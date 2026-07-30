@@ -10,7 +10,7 @@
     "use-local": "node scripts/prepare-deps.mjs --force"
   },
   "dependencies": {
-    "@auto-hwp/ai-protocol": "^0.0.3",
+    "@auto-hwp/ai-protocol": "^0.0.4",
     "express": "^4.21.2"
   },
   "optionalDependencies": {
