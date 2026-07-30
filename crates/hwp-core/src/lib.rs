@@ -53,7 +53,11 @@ impl Engine {
     pub fn open(bytes: &[u8]) -> Result<SemanticDoc> {
         let fmt = hwp_ingest::detect(bytes);
         let mut doc = match fmt {
-            SourceFormat::Hwpx => HwpxParser::new().parse(bytes, fmt)?,
+            SourceFormat::Hwpx => {
+                let mut d = HwpxParser::new().parse(bytes, fmt)?;
+                enrich_equations(&mut d);
+                d
+            }
             SourceFormat::Hwp5 | SourceFormat::Hwp3 => {
                 // Bootstrap path: rhwp parses binary HWP (when wired).
                 RhwpEngine::new().parse(bytes, fmt)?
@@ -71,6 +75,50 @@ impl Engine {
     /// Detected source format for the given bytes.
     pub fn detect(bytes: &[u8]) -> SourceFormat {
         hwp_ingest::detect(bytes)
+    }
+}
+
+/// **W4.4 — HWPX 수식 enrichment.** HWPX 파서는 `<hp:equation>` 을 verbatim(script + 박스)으로만
+/// 잡아 `EquationRef::rendered_svg` 가 비어 있고, 그래서 own-render/HTML 이 스텁 박스를 그린다.
+/// `.hwp` lift 는 062-5 에서 이미 rhwp 수식 엔진을 부르고 있으므로, 같은 엔진을
+/// [`hwp_rhwp::equation_svg`] 로 **파스 직후 한 번** 더 돌려 캐시만 채운다 — 포맷만 바꿔 읽었다고
+/// 수식이 박스로 퇴화하지 않게 하는 쌍둥이 맞춤이다.
+///
+/// 불변식: ① `rendered_svg` 는 DERIVED 캐시라 `script`/박스/`src_span` 은 손대지 않는다 → 무편집
+/// HWPX 는 그대로 byte-verbatim 왕복한다. ② 이미 채워진 값은 덮지 않는다(멱등). ③ rhwp 미배선
+/// 빌드/렌더 실패는 `None` → 종전 스텁 박스와 바이트동일.
+fn enrich_equations(doc: &mut SemanticDoc) {
+    for sec in &mut doc.sections {
+        enrich_blocks(&mut sec.blocks);
+        for deco in &mut sec.decorations {
+            enrich_blocks(&mut deco.blocks);
+        }
+    }
+}
+
+/// [`enrich_equations`] 의 재귀 워커 — 표 셀(중첩 표 포함)과 각주/미주 본문까지 훑는다.
+fn enrich_blocks(blocks: &mut [Block]) {
+    for b in blocks {
+        match b {
+            Block::Paragraph(p) => {
+                for run in &mut p.runs {
+                    for inl in &mut run.content {
+                        match inl {
+                            Inline::Equation(eq) if eq.rendered_svg.is_none() => {
+                                eq.rendered_svg = hwp_rhwp::equation_svg(eq);
+                            }
+                            Inline::Note(n) => enrich_blocks(&mut n.body),
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            Block::Table(t) => {
+                for c in &mut t.cells {
+                    enrich_blocks(&mut c.blocks);
+                }
+            }
+        }
     }
 }
 
@@ -932,6 +980,73 @@ mod inplace_tests {
             "편집 후 재직렬화가 수식을 복제하지 않아야 한다"
         );
         assert!(validate_hwpx(&out2).ok);
+    }
+
+    /// **W4.4** — 같은 문서를 `.hwp` 로 읽든 그 HWPX 쌍둥이로 읽든 수식은 **실렌더**여야 한다.
+    /// 062-5 는 `.hwp` lift 에만 rhwp 수식 엔진을 배선해서, HWPX 경로는 script/박스만 살아남고
+    /// `rendered_svg` 가 비어 스텁 박스로 그려졌다. `Engine::open(Hwpx)` 후처리가 그 갭을 메운다.
+    #[cfg(feature = "rhwp")]
+    #[test]
+    fn hwpx_equations_render_like_their_hwp_twin() {
+        let bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/hwp/math-001.hwp"
+        ))
+        .unwrap();
+        // ① `.hwp` — lift 가 이미 렌더한다(062-5).
+        let doc = Engine::open(&bytes).unwrap();
+        let hwp_eqs = collect_equations(&doc);
+        let hwp_rendered = hwp_eqs.iter().filter(|e| e.rendered_svg.is_some()).count();
+        assert!(
+            hwp_rendered > 0,
+            ".hwp 쌍둥이가 이미 실렌더여야 대조가 성립한다"
+        );
+
+        // ② 같은 문서를 HWPX 로 저장했다가 다시 연다.
+        let out = serialize_hwpx(&doc).unwrap();
+        let twin_eqs = collect_equations(&Engine::open(&out).unwrap());
+        assert_eq!(
+            twin_eqs.len(),
+            hwp_eqs.len(),
+            "HWPX 재파싱이 수식을 잃지 않는다"
+        );
+        assert_eq!(
+            twin_eqs.iter().filter(|e| e.rendered_svg.is_some()).count(),
+            hwp_rendered,
+            "HWPX 쪽 수식도 .hwp 와 같은 수만큼 실렌더돼야 한다(스텁 박스 금지)"
+        );
+        assert!(
+            twin_eqs
+                .iter()
+                .filter_map(|e| e.rendered_svg.as_deref())
+                .all(|s| !s.trim().is_empty()),
+            "빈 프래그먼트는 실렌더가 아니다"
+        );
+    }
+
+    /// 수식 enrichment 는 DERIVED 캐시(`rendered_svg`)만 채운다 — 무편집 HWPX 의 섹션 XML 은
+    /// 여전히 byte-verbatim 으로 왕복해야 한다(왕복 해자 불변).
+    #[test]
+    fn equation_enrichment_keeps_the_noedit_roundtrip_verbatim() {
+        for name in [
+            "/../../corpus/hwpx/FormattingShowcase.hwpx",
+            "/../../benchmarks/benchmark1.hwpx",
+        ] {
+            let path = format!("{}{name}", env!("CARGO_MANIFEST_DIR"));
+            let Ok(bytes) = std::fs::read(&path) else {
+                continue;
+            };
+            let before = hwp_hwpx::package::Package::open(&bytes)
+                .unwrap()
+                .read_part("Contents/section0.xml")
+                .unwrap();
+            let out = serialize_hwpx(&Engine::open(&bytes).unwrap()).unwrap();
+            let after = hwp_hwpx::package::Package::open(&out)
+                .unwrap()
+                .read_part("Contents/section0.xml")
+                .unwrap();
+            assert_eq!(before, after, "{name}: 무편집 섹션 XML 이 바뀌었다");
+        }
     }
 
     /// 문서 전체(셀/각주 본문 포함)의 `Inline::Equation` 을 모은다.

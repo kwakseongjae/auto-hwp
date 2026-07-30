@@ -1826,6 +1826,25 @@ pub fn page_count(_bytes: &[u8]) -> Result<u32> {
     Err(Error::CapabilityUnavailable(NOT_WIRED))
 }
 
+/// **수식 렌더 v1 의 공개 진입점** (W4.4). 062-5 에서 `.hwp` lift 전용으로 배선했던 rhwp 수식
+/// 엔진(`eq_render`)을 IR 단위로도 부를 수 있게 연 것뿐이다 — 렌더 결과는 `EquationRef::rendered_svg`
+/// 하나를 채우는 DERIVED 캐시라 script/박스/소스 스팬은 건드리지 않는다(HWPX 왕복 바이트 보존 불변).
+///
+/// `None` 이면 호출자는 종전 스텁 박스를 그대로 그린다(빈 script · 0 baseUnit · 렌더 실패/패닉).
+/// 색은 우리 [`Color`] → rhwp `ColorRef`(`0x00BBGGRR`) 로 되돌려 넘긴다 — `lift_text_color` 의 역이다.
+#[cfg(feature = "rhwp")]
+pub fn equation_svg(eq: &EquationRef) -> Option<String> {
+    let c = &eq.color;
+    let bgr = (c.b as u32) << 16 | (c.g as u32) << 8 | c.r as u32;
+    eq_render::equation_svg(&eq.script, eq.base_unit, bgr)
+}
+
+/// rhwp 미배선 빌드: 수식은 종전대로 스텁 박스.
+#[cfg(not(feature = "rhwp"))]
+pub fn equation_svg(_eq: &EquationRef) -> Option<String> {
+    None
+}
+
 #[cfg(not(feature = "rhwp"))]
 pub fn render_page_svg(_bytes: &[u8], _page: u32) -> Result<String> {
     Err(Error::CapabilityUnavailable(NOT_WIRED))
