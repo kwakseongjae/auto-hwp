@@ -2,7 +2,7 @@
   "name": "auto-hwp-vite-embed",
   "version": "0.0.0",
   "private": true,
-  "description": "외부 호스트 이식 증명 (issue 063): 레지스트리 발행본(@auto-hwp/* ^0.0.2)을 설치해 비-Next Vite 앱에서 <HwpWorkspace/>를 렌더한다. 소스경로 import 0. REPO_DEV=1 이면 로컬 tarball 로 덮어쓴다.",
+  "description": "외부 호스트 이식 증명 (issue 063): 레지스트리 발행본(@auto-hwp/* ^0.0.3)을 설치해 비-Next Vite 앱에서 <HwpWorkspace/>를 렌더한다. 소스경로 import 0. REPO_DEV=1 이면 로컬 tarball 로 덮어쓴다.",
   "type": "module",
   "scripts": {
     "pack-deps": "node scripts/pack-deps.mjs",
@@ -16,10 +16,10 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@auto-hwp/ai-protocol": "^0.0.2",
-    "@auto-hwp/editor-core": "^0.0.2",
-    "@auto-hwp/engine": "^0.0.2",
-    "@auto-hwp/react": "^0.0.2",
+    "@auto-hwp/ai-protocol": "^0.0.3",
+    "@auto-hwp/editor-core": "^0.0.3",
+    "@auto-hwp/engine": "^0.0.3",
+    "@auto-hwp/react": "^0.0.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

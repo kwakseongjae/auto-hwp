@@ -34,9 +34,53 @@ packages are released in lockstep.)*
 
 ## [Unreleased]
 
-0.0.2 발행 이후의 변경을 여기에 쌓는다. 현재 비어 있다.
+0.0.3 발행 이후의 변경을 여기에 쌓는다. 현재 비어 있다.
 
-*(EN — Nothing yet; changes land here after 0.0.2 ships.)*
+*(EN — Nothing yet; changes land here after 0.0.3 ships.)*
+
+---
+
+## [0.0.3] — 2026-07-30
+
+파괴 변경 없음 — 전부 additive. 기존 마운트 코드는 무수정으로 동작한다.
+
+### 추가 (Added)
+
+- **`@auto-hwp/engine/cdn` 서브패스** — wasm/워커 기본 URL이 jsDelivr로, **설치된 패키지 자신의
+  버전에 pin**된다(`latest` 아님 — JS↔wasm 버전 불일치 차단). 이제 wasm 파일 복사·번들러 설정
+  없이 `npm i` 만으로 렌더가 뜬다. 명시 URL 지정은 오버라이드로 계속 동작. (`0756f32`)
+  *(EN — new `/cdn` subpath: wasm/worker default URLs point to jsDelivr, pinned to the installed
+  package's own version. Explicit URLs still override.)*
+- **다운로드 진행률** — `WasmAdapter`/engine 로더에 `onProgress` 콜백(수신 바이트 기반, 단조 증가
+  실측). 데모 랜딩은 idle prefetch로 샘플 클릭 시 컴파일 완료 상태. (`0756f32`)
+- **`@auto-hwp/react` i18n 주입 계약(이슈 077)** — `HwpWorkspaceProps.messages`에 typed catalog
+  `WorkspaceMessages`를 DeepPartial로 주입(미지정 키는 한국어 기본값 폴백). 하드코딩 한글 365건을
+  카탈로그로 이관(누락 0 독립 검증), 신규 bare literal은 AST 게이트가 차단. `@auto-hwp/editor-core`
+  의 사용자 노출 문구도 같은 계약. (`11bd3de`)
+  *(EN — inject a typed message catalog via `messages` prop; unspecified keys fall back to Korean.)*
+
+### 수정 (Fixed)
+
+- **HWPX 구조 문단 텍스트 편집 개방** — 섹션 첫 문단(대개 제목)·개체 품은 문단에서 타이핑이
+  거부되던 것. 파서가 문단별 편집 가능 텍스트 창(`text_zone`)을 산출하고 ops/직렬화가 그 창만
+  교체(secPr·개체 런 보존, 무편집 왕복 byte-verbatim 불변). (`c8d1ffb`)
+- **HWPX 명시적 쪽나누기 소실(이슈 080)** — `pageBreak` 문단·표 앞 강제 개쪽이 조판에 반영되지
+  않아 정부 양식류 쪽수가 어긋나던 것 + noAdjust 표 행높이 과다 예약. bizinfo-mss 붙임1이 한컴과
+  **25==25** 일치(게이트 신설). `.hwp` 경로는 구조적으로 무영향. (`1f18305`)
+- **HWPX 수식 실렌더** — HWPX로 저장/재개봉 시 수식이 회색 스텁 박스로 나오던 것 → `.hwp` 쌍둥이와
+  동일한 실렌더(표본 44/44). (`6b3b66f`)
+
+### 변경 (Changed)
+
+- **자기 호스팅 파일 목록 4→5개** — `/cdn` 도입으로 `cdn.js`가 추가됐다. 자기 호스팅(오프라인/CSP)
+  구성은 EMBED-GUIDE §2.2의 갱신된 5파일 목록을 따를 것(구 4파일 목록대로면 워커 로드 404).
+  *(EN — self-hosting now requires 5 files including `cdn.js`; see EMBED-GUIDE §2.2.)*
+
+### 데모 사이트 (npm 미포함)
+
+충실도 공개 벤치마크 `/bench`(수치+재현 커맨드, `989d03d`) · 벌크 생성 워커화(대량 배치 중 UI
+비블로킹·검수 lazy, `43a9463`) · 벌크 샘플 원클릭 체험·drag&drop·키 매칭 진단·PII 고지(`b60bde9`) ·
+OG/파비콘/공유 카드(`e8bc7ee`) · README 편집 루프 GIF·quickstart·비교표(`1daf003`).
 
 ---
 
