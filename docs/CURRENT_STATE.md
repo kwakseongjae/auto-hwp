@@ -5,6 +5,13 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
+- 갱신: 2026-07-30 · Claude(오케스트레이터)+Opus 워커 — **데모 라이트 모드 + chrome 정리 라이브
+  배포**(ce22e95, run 30547121457 success). 사용자 피드백 4건: "정적 데모·AI" 태그·상시 AI 인포
+  배너·"편집 모드" 태그 제거, 패널 빈 상태 중앙 정렬 — **첫 호출 동의 게이트는 무손상**(배너 고유
+  정보는 동의 문구에 흡수, 프라이버시 계약 유지). 라이트 모드: `--ah-*` 토큰 40여 개(다크=기본·
+  light=data-theme), prefers-color-scheme+토글+localStorage, FOUC 0 부트 스크립트, 라이트 에디터는
+  hw-studio 탈착으로 SDK 기본 테마 재사용(컴포넌트 무수정), 랜딩·/bulk·/bench 커버. 이미지는 전수
+  조사 결과 CSS 처리로 충분(codex 생성 불요). vitest 84/84·e2e 51+신규 테마 2본·라이브 실측 그린.
 - 갱신: 2026-07-30 · Claude(오케스트레이터)+Opus 워커 — **런치 준비 3종 완료: Apache-2.0
   단일화·README 전면 압축·npm 0.0.4 발행**. ① 라이선스 MIT OR Apache-2.0→**Apache-2.0 단일**
   (5905efd — LICENSE-MIT 삭제·루트 LICENSE·4패키지 필드·Cargo workspace·NOTICE. 발견: 0.0.1~0.0.3
