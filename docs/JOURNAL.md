@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-30 (Claude 오케스트레이터+Opus 워커) · 런치 준비 — Apache-2.0·README 압축·0.0.4
+- 라이선스 Apache-2.0 단일화(+tarball LICENSE 동봉 신설 — 기존 미동봉 발견). README 359→176줄, CDN quickstart 실검증, 프레임워크 정직 고지, 배지 flat-square.
+- 0.0.4 발행: 레지스트리 license=Apache-2.0·tarball LICENSE·jsDelivr 200 전부 실측. 데모 AI=GLM 5.2 고정 확인(배포 82a1a8ca).
+- 멈춘 곳: 런치 전 잔여 = 벌크 실물 100명(사용자)·런치 포스트 초안·(선택) GA4.
+
 ## 2026-07-30 (Claude 오케스트레이터) · npm 0.0.3 발행 — CDN 임베드 실물 성립
 - 4패키지 0.0.3 실발행+CHANGELOG 확정. fresh 스모크: react 단독 설치→cdn 서브패스 @0.0.3 자기 버전 pin 해석→jsDelivr wasm 200.
 - 첫 dry_run 실패 = W6.1 버전 핀 가드 정상 작동(cdn.js ENGINE_VERSION 누락 차단) → 정합 후 그린. 가드 실전 검증.

@@ -5,7 +5,17 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
-- 갱신: 2026-07-30 · Claude(오케스트레이터) — **🚀 npm 0.0.3 발행 완주 + 배치 3 라이브 반영**.
+- 갱신: 2026-07-30 · Claude(오케스트레이터)+Opus 워커 — **런치 준비 3종 완료: Apache-2.0
+  단일화·README 전면 압축·npm 0.0.4 발행**. ① 라이선스 MIT OR Apache-2.0→**Apache-2.0 단일**
+  (5905efd — LICENSE-MIT 삭제·루트 LICENSE·4패키지 필드·Cargo workspace·NOTICE. 발견: 0.0.1~0.0.3
+  tarball엔 라이선스 파일 미동봉이었음→동봉 체계 신설). ② README 359→**176줄**(da0a21b — 바로
+  써보기 3트랙 중심·flat-square 배지 3종·§프레임워크 정직 고지(React=완성 UI, 바닐라/Svelte/Vue=
+  엔진+헤드리스 가능, 웹컴포넌트=로드맵)·철학은 docs/WHY.md 무손실 이관. **quickstart가 CDN
+  기본값으로 wasm 복사 0** — fresh 소비자에서 바이트 동일 코드 실렌더 검증). ③ **0.0.4 발행**
+  (f27d185 — 라이선스 정리 릴리스·코드 무변경): 레지스트리 license=**Apache-2.0** 실측·tarball
+  내 package/LICENSE 동봉 실측·jsDelivr @0.0.4 200. ④ 데모 AI 모델 확인: 활성 워커 배포
+  82a1a8ca=GLM 5.2 고정(wrangler.toml MODEL) — 랜딩 고지와 정합. **런치 전 잔여: 벌크 실물
+  100명 1회(사용자)·런치 포스트 초안·(선택) GA4.** 런치 후: 웹컴포넌트 래퍼·075·076·xlsx.
   ① 4패키지 0.0.3 실발행(dry_run→실발행 그린, run 30517644781) — react 의존 `^0.0.3` 실버전,
   CHANGELOG [0.0.3] 확정(파괴 변경 0·Added 3·Fixed 3·자기호스팅 5파일 고지). ② **fresh 스모크**:
   react 단독 설치→전이 해석→import 115 exports→`@auto-hwp/engine/cdn` 기본 URL이
