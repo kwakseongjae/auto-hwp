@@ -5,6 +5,19 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
+- 갱신: 2026-07-30 · Claude(오케스트레이터)+Opus 워커 — **배치 2 완주(W2·W4.2/4.3·W5.2) —
+  커밋 c8d1ffb/989d03d/1daf003 push·Pages 재배포**. ① W4.2: 파서 run-provenance→`text_zone`으로
+  구조 문단(섹션 첫 문단=제목·개체 문단)의 텍스트 편집 개방 — ops는 창만 splice, 직렬화는
+  reemit_paragraph_text_zone(불안전 시 기존 레인 강등), verbatim 골든 불변. Split/Merge는 종전
+  거부 유지(경계 이동 미해결 — 후속). ② W4.3: verify에 HWPX 축 게이트 신설(benchmark1.hwpx 쪽수
+  22 **회귀 잠금**(참값 아님·075 몫)+줄수 바닥+셀 lineseg FormattingShowcase 5/5·footnote-01 9/9)
+  + hwpx 편집 e2e 4종. ③ W2: `/bench` 공개 벤치 페이지(정적 서버 컴포넌트·수치 전부 3cb5a7a 실측
+  +재현 커맨드·한계 6항 정직 고지) + docs/BENCHMARK.md 정본. ④ W5.2: README 한/영 GIF(라이브
+  실녹화)·quickstart(0.0.2 API 대조)·3열 비교표·HWPX 의무화 카피·AGENTS 34메서드 정정.
+  통합 검증 `--full` 그린(게이트 전종 포함 e2e 47/47 — 신규 스펙 어서션 리터럴 1건은 검증자 수정),
+  검증자 지적 2건(README /bench 소개 과장·p95 표기 불일치)은 오케스트레이터가 정정 후 커밋.
+  ⚠️ 수치 갱신 규율: /bench의 MEASURED_REV(3cb5a7a)와 BENCHMARK.md 기준 커밋은 조판 변경 머지 시
+  재실행 출력으로 **함께** 갱신. 다음 후보: W5.5 GeekNews 런치(재료 완성)·W6(CDN·i18n)·076/078/080.
 - 갱신: 2026-07-29 · Claude(오케스트레이터)+Opus 워커 — **🚀 W1 출시 절차 완주**. ① 논리 커밋
   15개(C1 `8240acc`~C15 `5fc40cd`) push — Codex 대기분 전체+Opus 배치 1, MM 3파일 hunk 경계 보존,
   modu-startup 실물은 corpus/private 사유화(게이트 6==6은 존재 시 강제·부재 시 정직 skip).

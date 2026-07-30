@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-30 (Claude 오케스트레이터+Opus 워크플로) · 배치 2 — /bench·HWPX 편집 개방·README 증명
+- W4.2 text_zone으로 섹션 첫 문단/개체 문단 텍스트 편집 개방(verbatim 불변), W4.3 HWPX 게이트 verify 편입+e2e 4종.
+- W2 /bench 공개 벤치(수치 전부 실측+재현 커맨드+한계 고지), W5.2 README GIF·quickstart·비교표·34메서드 정정.
+- --full 그린(e2e 47/47), 검증자 지적 2건 정정 후 3커밋 push(c8d1ffb~1daf003)·Pages 재배포.
+- 멈춘 곳: 없음. 다음: W5.5 GeekNews 런치·W6(CDN/i18n)·076/078/080. /bench 수치는 조판 머지 시 동반 갱신.
+
 ## 2026-07-29 (Claude 오케스트레이터+Opus 워커) · W1 출시 완주 — 커밋 15·npm 0.0.2·Pages·Worker
 - 논리 커밋 C1~C15 push(8240acc~5fc40cd), modu-startup 실물은 corpus/private 사유화(부재-내성 게이트).
 - npm 4종 0.0.2 실발행+fresh 단독 설치 스모크 그린 — 0.0.1 file: 결함 종결. Pages/Worker 재배포 라이브 실측.
