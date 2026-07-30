@@ -5,6 +5,7 @@
 // 그 상대 import 체인(index.js → pkg/hwp_wasm.js)도 함께 복사한다:
 //   public/hwp/worker.js          ← packages/engine/worker.js   (모듈 워커 엔트리)
 //   public/hwp/index.js           ← packages/engine/index.js    (안전 래퍼 — worker.js 가 import)
+//   public/hwp/cdn.js             ← packages/engine/cdn.js      (W6.1 기본 자산 위치 + 진행률 — index.js 가 import)
 //   public/hwp/pkg/hwp_wasm.js    ← packages/engine/pkg/hwp_wasm.js (wasm-bindgen 글루)
 //   public/hwp/hwp_wasm_bg.wasm   ← 런타임에 명시적 URL 로 fetch (워커 init 에 그대로 전달)
 // pkg 부재 시 "015 레시피로 먼저 빌드하라"는 명확한 에러로 종료한다(조용한 빈 번들 금지).
@@ -37,6 +38,8 @@ const copies = [
   [wasmSrc, path.join(destDir, "hwp_wasm_bg.wasm")],
   [path.join(engineRoot, "worker.js"), path.join(destDir, "worker.js")],
   [path.join(engineRoot, "index.js"), path.join(destDir, "index.js")],
+  // ⚠️ index.js 가 `./cdn.js` 를 import 한다(W6.1) — 빠지면 워커가 404 로 죽는다(모듈 로드 실패).
+  [path.join(engineRoot, "cdn.js"), path.join(destDir, "cdn.js")],
   [path.join(engineRoot, "pkg", "hwp_wasm.js"), path.join(destDir, "pkg", "hwp_wasm.js")],
 ];
 for (const [src, dest] of copies) {

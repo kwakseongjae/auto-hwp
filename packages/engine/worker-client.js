@@ -14,6 +14,8 @@
 //  * `terminate()` is the INTENTIONAL kill (dispose / user cancel): in-flight calls reject with
 //    {code:"worker_terminated"} — callers distinguish a cancel from a crash.
 
+import { defaultWorkerUrl, isSameOriginUrl } from './cdn.js';
+
 /** Structured-clone-safe wasm input: URL objects are NOT cloneable — send the href string. Bytes and
  *  compiled WebAssembly.Module values clone fine. `Request` (main-thread-only) is rejected honestly. */
 function normalizeWasmInput(input) {
@@ -31,6 +33,22 @@ function codedError(message, code) {
   return err;
 }
 
+/** W6.1 — spawn the MODULE worker. A CROSS-ORIGIN worker script (the jsDelivr default, or any CDN URL
+ *  a host passes) cannot go to `new Worker()` directly: the same-origin policy rejects it. The standard
+ *  workaround is a tiny SAME-ORIGIN blob shim that `import`s the cross-origin module — module imports
+ *  are CORS-checked, and jsDelivr answers `access-control-allow-origin: *`. The blob URL is kept alive
+ *  for the worker's lifetime and revoked on kill (revoking it immediately races the script fetch).
+ *  Hosts with a strict CSP need `worker-src blob:` — or they self-host worker.js and pass its URL. */
+function spawnModuleWorker(href) {
+  if (isSameOriginUrl(href)) {
+    return { worker: new Worker(href, { type: 'module', name: 'auto-hwp-engine' }), blobUrl: null };
+  }
+  const blobUrl = URL.createObjectURL(
+    new Blob([`import ${JSON.stringify(String(href))};\n`], { type: 'text/javascript' }),
+  );
+  return { worker: new Worker(blobUrl, { type: 'module', name: 'auto-hwp-engine' }), blobUrl };
+}
+
 export class EngineWorkerClient {
   #worker = null;
   #pending = new Map();
@@ -38,16 +56,19 @@ export class EngineWorkerClient {
   #url;
   #factory;
   #initPromise = null;
+  #blobUrl = null;
 
-  /** `{ url }` — a MODULE worker script URL (the deployed ./worker.js), or `{ factory }` — a custom
-   *  Worker supplier (tests / bundler-specific `new Worker(new URL(...))` recipes). */
+  /** `{ url }` — a MODULE worker script URL (a self-hosted ./worker.js), or `{ factory }` — a custom
+   *  Worker supplier (tests / bundler-specific `new Worker(new URL(...))` recipes). W6.1: BOTH may be
+   *  omitted — the client then loads this package's own version of worker.js from jsDelivr. */
   constructor(opts = {}) {
     this.#url = opts.url;
     this.#factory = opts.factory;
-    if (!this.#url && !this.#factory) {
-      throw new Error('EngineWorkerClient needs { url } or { factory }');
-    }
   }
+
+  /** W6.2 — download progress relayed from inside the worker (`{progress}` messages, no request id).
+   *  Host-assigned; a throwing observer is swallowed so it can never break the RPC lane. */
+  onProgress = null;
 
   /** Whether a worker is currently live (spawned and not dead/terminated). */
   get alive() {
@@ -55,9 +76,24 @@ export class EngineWorkerClient {
   }
 
   #spawn() {
-    const w = this.#factory ? this.#factory() : new Worker(this.#url, { type: 'module', name: 'auto-hwp-engine' });
+    let w;
+    if (this.#factory) {
+      w = this.#factory();
+    } else {
+      const spawned = spawnModuleWorker(this.#url ?? defaultWorkerUrl());
+      w = spawned.worker;
+      this.#blobUrl = spawned.blobUrl;
+    }
     w.onmessage = (ev) => {
-      const { id, ok, result, error } = ev.data ?? {};
+      const { id, ok, result, error, progress } = ev.data ?? {};
+      if (progress && id === undefined) {
+        try {
+          this.onProgress?.(progress);
+        } catch {
+          /* host observer error — never breaks the load */
+        }
+        return;
+      }
       const p = this.#pending.get(id);
       if (!p) return; // late reply after a kill — already rejected
       this.#pending.delete(id);
@@ -83,6 +119,14 @@ export class EngineWorkerClient {
       this.#worker?.terminate();
     } catch {
       /* already gone */
+    }
+    if (this.#blobUrl) {
+      try {
+        URL.revokeObjectURL(this.#blobUrl); // the shim outlives only its worker
+      } catch {
+        /* no URL API (tests) */
+      }
+      this.#blobUrl = null;
     }
     this.#worker = null;
     this.#initPromise = null;

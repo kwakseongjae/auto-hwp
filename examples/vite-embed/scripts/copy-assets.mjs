@@ -42,6 +42,10 @@ const copies = [
   [path.join(engineRoot, "index.js"), path.join(hwpDir, "index.js")],
   [path.join(engineRoot, "pkg", "hwp_wasm.js"), path.join(hwpDir, "pkg", "hwp_wasm.js")],
 ];
+// 0.0.3+ 의 index.js 는 `./cdn.js`(기본 자산 위치 + 진행률)를 import 한다 — 있으면 반드시 함께 복사한다
+// (빠지면 워커가 모듈 로드 404 로 죽는다). 0.0.2 발행본에는 없으므로 조건부다.
+const cdnJs = path.join(engineRoot, "cdn.js");
+if (existsSync(cdnJs)) copies.push([cdnJs, path.join(hwpDir, "cdn.js")]);
 for (const [src, dest] of copies) {
   cpSync(src, dest);
 }

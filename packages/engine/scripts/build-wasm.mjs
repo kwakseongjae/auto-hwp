@@ -11,7 +11,7 @@
 // 툴체인(cargo/wasm-bindgen)이 없는 JS 전용 환경에서는: 이미 유효한 pkg 가 있으면 그것을 쓰고(발행이
 // 아닌 로컬 pack 검증을 막지 않음), 없으면 레시피를 안내하며 하드 실패한다(조용한 빈 번들 금지).
 import { execFileSync } from "node:child_process";
-import { existsSync, rmSync, renameSync, statSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, renameSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -35,6 +35,44 @@ function run(cmd, args) {
   execFileSync(cmd, args, { cwd: repoRoot, stdio: "inherit" });
 }
 
+// W6.1 — the CDN default pins to cdn.js's ENGINE_VERSION. If that constant ever drifts from
+// package.json, a published build would fetch ANOTHER version's wasm: the glue/binary pair breaks
+// (link error, or new Intents rejected as "unknown variant" — the 스테일 wasm 함정 institutionalized).
+// So this is a HARD gate on every pack/publish, not a warning.
+function assertVersionPin() {
+  const declared = JSON.parse(readFileSync(path.join(engineRoot, "package.json"), "utf8")).version;
+  const src = readFileSync(path.join(engineRoot, "cdn.js"), "utf8");
+  const m = src.match(/export const ENGINE_VERSION = ['"]([^'"]+)['"]/);
+  if (!m) {
+    console.error("\n[build-wasm] cdn.js 에서 ENGINE_VERSION 을 찾지 못했습니다 — CDN 기본값 핀이 깨졌습니다.\n");
+    process.exit(1);
+  }
+  if (m[1] !== declared) {
+    console.error(
+      `\n[build-wasm] 버전 핀 불일치: cdn.js ENGINE_VERSION='${m[1]}' vs package.json version='${declared}'.\n` +
+        `발행하면 JS 는 @${m[1]} 의 wasm 을 받아옵니다(스테일 wasm). cdn.js 의 ENGINE_VERSION 을 '${declared}' 로 맞추세요.\n`,
+    );
+    process.exit(1);
+  }
+  console.log(`[build-wasm] CDN 버전 핀 OK (@auto-hwp/engine@${declared})`);
+}
+
+// W6.2 — WASM_BYTES 는 "이 버전으로 발행되는 wasm 의 비압축 크기"이며 압축 전송 시 진행률 분모로만
+// 쓰인다(오차는 진행바 기울기뿐 — 기능 게이트가 아니다). 그래서 경고만 하고 빌드는 막지 않는다.
+function checkWasmBytes() {
+  const actual = statSync(pkgWasm).size;
+  const m = readFileSync(path.join(engineRoot, "cdn.js"), "utf8").match(/export const WASM_BYTES = (\d+)/);
+  if (!m) return;
+  const declared = Number(m[1]);
+  const drift = Math.abs(actual - declared) / declared;
+  if (drift > 0.02) {
+    console.warn(
+      `[build-wasm] cdn.js WASM_BYTES=${declared} ≠ 실제 ${actual} (${(drift * 100).toFixed(1)}% 차이) — ` +
+        `진행률 분모 추정치가 어긋납니다. 발행 전 ${actual} 로 갱신하세요.`,
+    );
+  }
+}
+
 function assertWasm() {
   if (!existsSync(pkgWasm)) {
     console.error(`\n[build-wasm] 산출물이 없습니다: ${pkgWasm}\n빌드가 실패했거나 실행되지 않았습니다.\n`);
@@ -48,12 +86,15 @@ function assertWasm() {
   console.log(`[build-wasm] pkg/hwp_wasm_bg.wasm OK (${Math.round(bytes / 1024)} KB)`);
 }
 
+assertVersionPin(); // CDN 기본값 핀은 툴체인 유무와 무관하게 항상 검사한다
+
 const toolchain = have("cargo") && have("wasm-bindgen");
 
 if (!toolchain) {
   if (existsSync(pkgWasm) && statSync(pkgWasm).size >= MIN_WASM_BYTES) {
     console.warn("[build-wasm] cargo/wasm-bindgen 미설치 — 기존 pkg 로 진행합니다(재빌드 생략).");
     assertWasm();
+    checkWasmBytes();
     process.exit(0);
   }
   console.error(
@@ -97,5 +138,6 @@ for (const wo of ["wasm-opt", "/opt/homebrew/bin/wasm-opt", "/usr/local/bin/wasm
 }
 if (!opted) console.warn("[build-wasm] wasm-opt 미적용(동작하는 binaryen 없음) — 기능은 동일, 크기만 큼.");
 
-// 4) 빈 tarball 방지 검증
+// 4) 빈 tarball 방지 검증 + 진행률 분모 상수 점검
 assertWasm();
+checkWasmBytes();

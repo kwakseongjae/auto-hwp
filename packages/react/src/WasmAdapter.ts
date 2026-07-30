@@ -1,4 +1,5 @@
 import { HwpDoc, initEngine, resetEngine } from "@auto-hwp/engine";
+import type { EngineLoadProgress } from "@auto-hwp/engine";
 import { EngineWorkerClient } from "@auto-hwp/engine/worker-client";
 import type { EngineAdapter } from "./EngineAdapter";
 import type { BlockHit, CaretRect, CellAddr, CellCaretRect, CellHit, CellTextHit, DocProfile, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, NormalizeReport, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
@@ -39,19 +40,28 @@ export interface RecoveryInfo {
   reason?: string;
 }
 
-/** issue 055 (FG-14) — run the engine inside a Web Worker instead of the main thread. `url` is the
- *  deployed @auto-hwp/engine/worker.js MODULE-worker script (served as a static asset next to index.js +
- *  pkg/, like the explicit wasm URL — no bundler magic); `factory` overrides worker creation (tests /
- *  bundler-specific recipes). When set, open/parse/re-layout/export/toHwpx all run off-thread — the
- *  Promise surface of this adapter is unchanged, so consumers need no code change. */
+/** issue 055 (FG-14) — run the engine inside a Web Worker instead of the main thread. `url` is a
+ *  self-hosted @auto-hwp/engine/worker.js MODULE-worker script (served as a static asset next to
+ *  index.js + pkg/); `factory` overrides worker creation (tests / bundler-specific recipes). W6.1: BOTH
+ *  may be omitted — the client then loads this engine version's worker.js from jsDelivr (through a
+ *  same-origin blob shim, so a strict CSP needs `worker-src blob:`). When set, open/parse/re-layout/
+ *  export/toHwpx all run off-thread — the Promise surface of this adapter is unchanged, so consumers
+ *  need no code change. */
 export interface WasmAdapterWorkerOptions {
   url?: string | URL;
   factory?: () => Worker;
 }
 
 export interface WasmAdapterOptions {
-  /** Omit for the classic in-thread engine (default; e.g. jsdom tests). */
+  /** Omit for the classic in-thread engine (default; e.g. jsdom tests). `{}` = worker on CDN defaults. */
   worker?: WasmAdapterWorkerOptions;
+  /** W6.2 — wasm download progress (bytes + ratio), fired while the engine is being fetched. Works in
+   *  both lanes: in-thread it wraps the loader's own fetch, in worker mode the ticks are relayed out of
+   *  the worker. Ticks stop at the last byte — wasm COMPILATION afterwards is not measurable. */
+  onProgress?: (progress: EngineLoadProgress) => void;
+  /** W6.2 — override the progress denominator (uncompressed bytes) when self-hosting a custom build.
+   *  Only consulted when the transfer is content-encoded (then Content-Length counts compressed bytes). */
+  expectedBytes?: number;
 }
 
 type MaybePromise<T> = T | Promise<T>;
@@ -130,13 +140,21 @@ export class WasmAdapter implements EngineAdapter {
    *  Host-assigned; called AFTER the document is live again, right before the trap is rethrown. */
   onRecovered: ((info: RecoveryInfo) => void) | null = null;
 
-  /** `wasmInput` is forwarded to initEngine/resetEngine (a wasm URL/Response/bytes). Omit to let the
-   *  engine resolve its co-located `hwp_wasm_bg.wasm` (works under Vite/webpack). With `options.worker`
-   *  the input crosses into the worker (URL objects become href strings; `Request` is unsupported). */
+  /** W6.2 — the wasm download-progress observer (constructor option), kept so BOTH lanes can feed it. */
+  private onProgress?: (progress: EngineLoadProgress) => void;
+  private expectedBytes?: number;
+
+  /** `wasmInput` is forwarded to initEngine/resetEngine (a wasm URL/Response/bytes). W6.1: OMIT it and
+   *  the engine loads its OWN version's wasm from jsDelivr — `npm i` is the whole setup. Pass a URL to
+   *  self-host (the classic four-file copy). With `options.worker` the input crosses into the worker
+   *  (URL objects become href strings; `Request` is unsupported). */
   constructor(wasmInput?: WasmInput, options?: WasmAdapterOptions) {
     this.wasmInput = wasmInput;
+    this.onProgress = options?.onProgress;
+    this.expectedBytes = options?.expectedBytes;
     if (options?.worker) {
       this.client = new EngineWorkerClient({ url: options.worker.url, factory: options.worker.factory });
+      if (this.onProgress) this.client.onProgress = (p) => this.onProgress?.(p);
     }
   }
 
@@ -146,15 +164,34 @@ export class WasmAdapter implements EngineAdapter {
       await this.client.init(this.wasmInput as never);
       return;
     }
-    if (!this.ready) this.ready = initEngine(this.wasmInput);
+    if (!this.ready) this.ready = initEngine(this.wasmInput, this.loadOptions());
     await this.ready;
+  }
+
+  /** The loader options both lanes share (progress observer + its denominator override). */
+  private loadOptions(): { onProgress?: (p: EngineLoadProgress) => void; expectedBytes?: number } | undefined {
+    if (!this.onProgress && this.expectedBytes == null) return undefined;
+    return { onProgress: this.onProgress, expectedBytes: this.expectedBytes };
+  }
+
+  /** W6.2 — warm the engine WITHOUT a document: fetch + instantiate the wasm (spawning the worker in
+   *  worker mode) so the first `open()` is compute-only. Safe to call repeatedly (init is idempotent)
+   *  and safe to ignore — a failed prefetch is swallowed here and retried by the next real call.
+   *  Typical use: `requestIdleCallback` on a landing page, before the user picks a file. */
+  async prefetch(): Promise<boolean> {
+    try {
+      await this.ensureInit();
+      return true;
+    } catch {
+      return false; // offline / CDN blocked — the next open() surfaces the real error
+    }
   }
 
   /** Reset the poisoned engine: in-thread → `resetEngine`; worker → in-worker reset or a full respawn
    *  when the worker itself died. Either way every previously-open handle is dead afterwards. */
   private resetBackend(): Promise<unknown> {
     if (this.client) return this.client.reset(this.wasmInput as never);
-    return resetEngine(this.wasmInput);
+    return resetEngine(this.wasmInput, this.loadOptions());
   }
 
   /** Open bytes on the live backend and return the document handle (worker → RPC proxy). */

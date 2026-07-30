@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HwpWorkspace, WasmAdapter, FONT_CATALOG, chatSidePanel, type AiRequestOptions, type Anchor, type Citation, type DocContext, type Intent, type WasmAdapterOptions } from "@auto-hwp/react";
 import { buildDocContext, createAgentEventParser, type AgentEvent } from "@auto-hwp/ai-protocol";
-import { isTrapError, resetEngine } from "@auto-hwp/engine";
+import { isTrapError, resetEngine, type EngineLoadProgress } from "@auto-hwp/engine";
 import { AutosaveController, IdbSnapshotStore, findRecoverable, formatAge, recoveredName, type SnapshotRecord } from "@/lib/autosave";
 import { limitMessage, oversizeMessage } from "@/lib/limits";
 import { ensureDemoAiConsent, type DemoAiConsentState } from "@/lib/demoAiConsent";
@@ -80,7 +80,28 @@ export default function LabWorkspace() {
     () => (workerMode ? { worker: { url: new URL(`${BASE}/hwp/worker.js`, window.location.origin) } } : undefined),
     [workerMode],
   );
-  const adapter = useMemo(() => new WasmAdapter(wasmUrl, adapterOptions), [wasmUrl, adapterOptions]);
+
+  // ── W6.2: 엔진 내려받기 진행률 ────────────────────────────────────────────────────────────────────
+  // wasm 은 비압축 7.7MB(이 사이트 전송은 gzip 3.1MB — 실측)라 무정보 대기가 길다. 어댑터의 onProgress
+  // (Response body reader) 를 받아 랜딩에 진행률을 띄운다. 1%마다만 setState 한다(무의미한 리렌더 방지).
+  const [engineLoad, setEngineLoad] = useState<{ pct: number | null; loaded: number; done: boolean } | null>(null);
+  const enginePctRef = useRef(-1);
+  const onEngineProgress = useCallback((p: EngineLoadProgress) => {
+    const pct = p.ratio == null ? null : Math.round(p.ratio * 100);
+    // 리렌더 단위: %를 알면 1%, 모르면 0.5MB(음수 키라 % 값과 섞이지 않는다). 청크당 tick 은
+    // 수백 개라 그대로 setState 하면 랜딩이 로딩 중 수백 번 리렌더된다.
+    const key = pct ?? -1 - Math.floor(p.loaded / 524288);
+    if (!p.done && key === enginePctRef.current) return;
+    enginePctRef.current = key;
+    setEngineLoad({ pct, loaded: p.loaded, done: p.done });
+  }, []);
+  // 진행률은 **메인 어댑터**(화면 렌더 담당)에만 붙인다 — 열기 프로브(openBytes)는 매번 새 어댑터라
+  // 그쪽 진행률까지 받으면 표시가 뒤로 되감긴다.
+  const mainAdapterOptions = useMemo<WasmAdapterOptions>(
+    () => ({ ...(adapterOptions ?? {}), onProgress: onEngineProgress }),
+    [adapterOptions, onEngineProgress],
+  );
+  const adapter = useMemo(() => new WasmAdapter(wasmUrl, mainAdapterOptions), [wasmUrl, mainAdapterOptions]);
   // 열기(프로브) 진행 중 취소용 핸들 — 워커 모드에선 dispose()가 프로브 워커를 종료해 파싱을 즉시 중단한다.
   const probeRef = useRef<WasmAdapter | null>(null);
 
@@ -188,6 +209,29 @@ export default function LabWorkspace() {
       cancelled = true;
     };
   }, []);
+
+  // ── W6.2: 랜딩 유휴 시 엔진 프리페치 ─────────────────────────────────────────────────────────────
+  // 문서를 열기 전(랜딩)에 wasm 을 미리 받아 인스턴스화해 둔다 → 샘플/파일을 고르는 순간 다운로드+컴파일
+  // 대기가 없다. 유휴(requestIdleCallback)에서만 시작하므로 첫 화면 페인트를 밀어내지 않는다. 실패는
+  // 조용히 무시한다(오프라인/차단 — 실제 열기에서 정직한 오류로 다시 드러난다).
+  // ⚠️ 정직하게: 이건 **메인 어댑터**(문서 렌더 lane)를 데운다. 열기 프로브는 매번 새 워커라 컴파일을
+  // 공유하지 않지만, 같은 URL 이라 브라우저 HTTP 캐시 덕에 다운로드는 즉시 끝난다.
+  useEffect(() => {
+    if (doc) return; // 이미 문서가 열렸으면 엔진은 당연히 로드됨
+    let cancelled = false;
+    const start = () => {
+      if (!cancelled) void adapter.prefetch();
+    };
+    const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number })
+      .requestIdleCallback;
+    const cic = (window as unknown as { cancelIdleCallback?: (h: number) => void }).cancelIdleCallback;
+    const handle = ric ? ric(start, { timeout: 3000 }) : (setTimeout(start, 1200) as unknown as number);
+    return () => {
+      cancelled = true;
+      if (ric && cic) cic(handle);
+      else clearTimeout(handle as unknown as ReturnType<typeof setTimeout>);
+    };
+  }, [adapter, doc]);
 
   // 기본 폰트(NanumGothic)를 한 번 fetch 해 둔다 — HwpWorkspace 가 문서를 열면 이 바이트를 자동
   // registerFont 하여(메트릭+PDF) 화면/PDF 가 즉시 일치하고 PDF 버튼이 활성화된다. copy-fonts.mjs 가
@@ -722,6 +766,50 @@ export default function LabWorkspace() {
                       ? "파일 원본은 업로드하지 않습니다 · AI 사용 시 필요한 문서 문맥만 OpenRouter로 전송하며 첫 요청 전에 동의를 받습니다"
                       : "파일 원본은 브라우저 밖으로 나가지 않습니다 · AI 연동 시 전송 범위와 제공자는 호스트가 결정합니다"}
                   </p>
+                  {/* W6.2: 엔진(wasm) 내려받기 상태. 유휴 프리페치가 랜딩에서 미리 돌므로 대부분 파일을
+                      고르기 전에 "준비 완료"가 된다. 스타일은 인라인 — 이 배치에서 globals.css 는 다른
+                      스트림 소유라 건드리지 않는다. */}
+                  {engineLoad && (
+                    <p
+                      className="lab-hero-note"
+                      role="status"
+                      data-testid="engine-load"
+                      data-engine-done={engineLoad.done ? "1" : "0"}
+                      style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}
+                    >
+                      <span>
+                        {engineLoad.done
+                          ? "엔진 준비 완료 — 파일을 고르면 바로 렌더됩니다"
+                          : engineLoad.pct == null
+                            ? `엔진 내려받는 중 · ${(engineLoad.loaded / 1048576).toFixed(1)}MB`
+                            : `엔진 내려받는 중 · ${engineLoad.pct}% (압축 전송 약 3.1MB)`}
+                      </span>
+                      {!engineLoad.done && (
+                        <span
+                          aria-hidden
+                          style={{
+                            display: "inline-block",
+                            width: "7rem",
+                            height: "3px",
+                            borderRadius: "3px",
+                            background: "rgba(127,127,127,0.25)",
+                            overflow: "hidden",
+                          }}
+                        >
+                          <span
+                            style={{
+                              display: "block",
+                              height: "100%",
+                              width: engineLoad.pct == null ? "35%" : `${engineLoad.pct}%`,
+                              background: "currentColor",
+                              opacity: 0.6,
+                              transition: "width 120ms linear",
+                            }}
+                          />
+                        </span>
+                      )}
+                    </p>
+                  )}
                 </div>
                 <div className="lab-stage" aria-hidden>
                   <div className="lab-page"><img src={`${BASE}/brand/render-p0.svg`} alt="" /><div className="lab-shade" /></div>

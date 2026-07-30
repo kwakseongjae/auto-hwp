@@ -16,6 +16,10 @@
       "types": "./worker-client.d.ts",
       "import": "./worker-client.js"
     },
+    "./cdn": {
+      "types": "./cdn.d.ts",
+      "import": "./cdn.js"
+    },
     "./worker.js": "./worker.js",
     "./pkg/hwp_wasm_bg.wasm": "./pkg/hwp_wasm_bg.wasm",
     "./package.json": "./package.json"
@@ -26,6 +30,8 @@
   "files": [
     "index.js",
     "index.d.ts",
+    "cdn.js",
+    "cdn.d.ts",
     "worker.js",
     "worker-client.js",
     "worker-client.d.ts",

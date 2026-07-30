@@ -1,12 +1,25 @@
 // Type definitions for @auto-hwp/engine (the safety-wrapped surface in index.js).
 // The raw wasm-bindgen types live in ./pkg/hwp_wasm.d.ts.
 
-/** Instantiate the wasm engine once. `input` is an optional wasm URL/Response/bytes (defaults to the
- *  co-located hwp_wasm_bg.wasm). Idempotent. Await this before HwpDoc.open. */
-export function initEngine(input?: string | URL | Request | BufferSource | WebAssembly.Module): Promise<unknown>;
+import type { EngineLoadOptions } from "./cdn";
+
+export type { EngineLoadOptions, EngineLoadProgress, EngineProgressHandler } from "./cdn";
+/** W6.1 — default asset locations (this package's own version on jsDelivr; never `@latest`). */
+export { ENGINE_VERSION, WASM_BYTES, cdnBase, defaultWasmUrl, defaultWorkerUrl, fetchWasmResponse } from "./cdn";
+
+/** Instantiate the wasm engine once. OMIT `input` to load this package's own version from jsDelivr
+ *  (W6.1); pass a URL/Response/bytes to self-host. `options.onProgress` reports download ticks.
+ *  Idempotent. Await this before HwpDoc.open. */
+export function initEngine(
+  input?: string | URL | Request | BufferSource | WebAssembly.Module,
+  options?: EngineLoadOptions,
+): Promise<unknown>;
 
 /** Re-instantiate after a wasm trap. Every previously-opened HwpDoc becomes dead; re-open documents. */
-export function resetEngine(input?: string | URL | Request | BufferSource | WebAssembly.Module): Promise<unknown>;
+export function resetEngine(
+  input?: string | URL | Request | BufferSource | WebAssembly.Module,
+  options?: EngineLoadOptions,
+): Promise<unknown>;
 
 /** Synchronous init from an already-fetched module/bytes (advanced/bundler use). */
 export function initEngineSync(moduleOrBytes: WebAssembly.Module | BufferSource): unknown;

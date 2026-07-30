@@ -1,5 +1,7 @@
 # auto-hwp 웹 임베드 가이드 (비-Next 호스트 · npm 발행본)
 
+> English: [`EMBED-GUIDE.en.md`](EMBED-GUIDE.en.md) (임계 경로 전문 번역).
+
 > 대상: **Next 가 아닌 임의 호스트**(Vite/CRA/SvelteKit 정적/S3+CloudFront 등)에서 `npm i @auto-hwp/react
 > @auto-hwp/engine` 으로 hwp 뷰어/에디터를 자기 페이지에 심으려는 개발자. Next.js 통합은
 > [`INTEGRATION-HANDOVER.md`](INTEGRATION-HANDOVER.md)(참조 앱 `apps/hwp-lab`)를 보라 — 이 문서는 그
@@ -31,21 +33,59 @@ npm i @auto-hwp/react @auto-hwp/engine @auto-hwp/editor-core @auto-hwp/ai-protoc
 
 ---
 
-## 2. wasm / 워커 정적 서빙 (핵심 — 번들러 마법 아님)
+## 2. wasm / 워커 로딩 — 기본값은 CDN, 자기 호스팅은 오버라이드
 
-엔진은 기본적으로 **Web Worker** 안에서 돈다(파싱·재조판·export 가 메인스레드를 멈추지 않음). 워커와 wasm 은
-**public 정적 에셋**으로 배포하고, `WasmAdapter` 가 런타임에 **명시적 URL** 로 로드한다. 번들러 import 마법에
-기대지 않으므로 어떤 번들러/호스트에서도 동일하게 동작한다.
+> ⚠️ **버전 주의(2026-07-30):** 이 절의 **CDN 기본값·`onProgress`·`prefetch()` 는 다음 발행(0.0.3)부터**
+> 실린다. 현재 레지스트리 실물은 `0.0.2` 이며 거기서는 §2.2 의 **명시 URL(4파일 복사)** 만 동작한다.
+> 아래 §2.1 코드는 0.0.3 이후 기준이고, `examples/vite-embed` 는 아직 0.0.2 기준(명시 URL)이다.
 
-발행본(`node_modules/@auto-hwp/engine`)에서 아래 4파일을 **상대구조 그대로** 정적 루트로 복사한다
+### 2.1 기본값 — 아무것도 복사하지 않는다
+
+`WasmAdapter` 에 URL 을 주지 않으면 엔진은 **자기 패키지 버전으로 pin 된 jsDelivr** 에서 wasm/워커를 받는다:
+
+```
+https://cdn.jsdelivr.net/npm/@auto-hwp/engine@<설치된 버전>/pkg/hwp_wasm_bg.wasm
+https://cdn.jsdelivr.net/npm/@auto-hwp/engine@<설치된 버전>/worker.js
+```
+
+```tsx
+const adapter = new WasmAdapter();                 // 메인스레드 엔진 + CDN wasm
+const adapter = new WasmAdapter(undefined, { worker: {} });  // 워커 엔진 + CDN worker.js/wasm
+```
+
+- **`@latest` 는 절대 쓰지 않는다.** wasm-bindgen 글루(JS)와 wasm 바이너리는 함께 컴파일된 **한 벌**이라
+  버전이 어긋나면 링크에 실패하거나, 더 나쁘게는 링크된 뒤 신규 Intent 를 `unknown variant` 로 거부한다
+  (이 레포의 "스테일 wasm 함정"을 제도화하는 셈). 그래서 pin 은 **로딩을 수행하는 JS 자신의 버전**이다
+  (`ENGINE_VERSION`, `packages/engine/cdn.js` — 발행 훅이 package.json 과 하드 게이트로 대조).
+- 교차 출처 **워커 스크립트**는 `new Worker(url)` 에 그대로 못 넘긴다(동일 출처 정책) → 클라이언트가
+  같은 출처의 **blob 심**(`import "<cdn>/worker.js"`)으로 감싼다. 엄격 CSP 라면 `worker-src blob:` 필요(§4).
+- 오프라인/내부망·CDN 차단 환경은 §2.2 로 간다. **CDN 은 기본값일 뿐, 요구사항이 아니다.**
+
+실측(2026-07-30, `@auto-hwp/engine@0.0.2`):
+
+| 항목 | 값 |
+|---|---|
+| jsDelivr `content-type` / CORS | `application/wasm` / `access-control-allow-origin: *`, `expose-headers: *` |
+| 전송 크기 (brotli) | **2,962,776 B** (≈2.96 MB) |
+| 비압축 크기 | **7,718,539 B** (≈7.72 MB) |
+| GitHub Pages 자기 호스팅 (gzip) | 3,145,131 B / Vite 빌드 리포트 gzip 3,151,674 B |
+
+### 2.2 오버라이드 — 자기 호스팅(정적 파일 복사)
+
+CDN 을 못 쓰거나(폐쇄망·CSP·규정) 버전을 직접 고정하고 싶으면 **명시 URL** 을 준다. 그때만 발행본
+(`node_modules/@auto-hwp/engine`)에서 아래 파일들을 **상대구조 그대로** 정적 루트로 복사한다
 (`examples/vite-embed/scripts/copy-assets.mjs` 가 그 스크립트다):
 
 ```
 public/hwp/hwp_wasm_bg.wasm      ← node_modules/@auto-hwp/engine/pkg/hwp_wasm_bg.wasm  (런타임에 URL fetch)
 public/hwp/worker.js             ← node_modules/@auto-hwp/engine/worker.js             (모듈 워커 엔트리)
 public/hwp/index.js              ← node_modules/@auto-hwp/engine/index.js              (worker.js 가 import)
+public/hwp/cdn.js                ← node_modules/@auto-hwp/engine/cdn.js                (0.0.3~ — index.js 가 import)
 public/hwp/pkg/hwp_wasm.js       ← node_modules/@auto-hwp/engine/pkg/hwp_wasm.js       (wasm-bindgen 글루)
 ```
+
+> ⚠️ **0.0.3~ 는 `cdn.js` 가 필수다.** `index.js` 가 `./cdn.js` 를 import 하므로 빠지면 워커가 모듈
+> 로드 404 로 즉사한다(0.0.2 에는 이 파일이 없으니 4파일 그대로다).
 
 > `worker.js → ./index.js → ./pkg/hwp_wasm.js` 의 **상대 import 체인**이 `public/hwp/` 안에서 그대로
 > 성립하도록 디렉토리 구조를 보존해 복사해야 한다. Vite 라면 `vite.config` 에 `optimizeDeps.exclude:
@@ -64,6 +104,42 @@ public/hwp/pkg/hwp_wasm.js       ← node_modules/@auto-hwp/engine/pkg/hwp_wasm.
 "prebuild": "node scripts/copy-assets.mjs",
 ```
 
+번들러에게 wasm 을 자산으로 방출시키고 싶다면(복사 스크립트 없이) Vite 기준 한 줄이면 된다:
+
+```ts
+import wasmUrl from "@auto-hwp/engine/pkg/hwp_wasm_bg.wasm?url";
+const adapter = new WasmAdapter(wasmUrl);   // 워커를 쓰려면 worker.js 는 여전히 정적 서빙 필요
+```
+
+### 2.3 진행률 + 프리페치 (0.0.3~)
+
+wasm 은 비압축 ~7.7MB(압축 전송 ~3.0MB)라 첫 로드가 눈에 띈다. 어댑터가 두 가지를 준다:
+
+```tsx
+const adapter = new WasmAdapter(undefined, {
+  onProgress: (p) => setPct(p.ratio == null ? null : Math.round(p.ratio * 100)),
+});
+
+// 랜딩에서 유휴에 미리 받아 둔다 → 사용자가 파일을 고르는 순간 대기 0
+useEffect(() => { requestIdleCallback(() => void adapter.prefetch()); }, [adapter]);
+```
+
+- `onProgress` 는 **다운로드**만 측정한다(그 뒤의 wasm 컴파일은 측정 지점이 없다). 틱은
+  `{loaded, total, ratio, done, estimated, url}`.
+- ⚠️ **`estimated` 의 의미**: 응답이 brotli/gzip 이면 `Content-Length` 는 **압축 바이트**인데
+  `response.body` 는 **비압축 바이트**를 흘린다 — 그대로 나누면 200% 가 된다. 그래서 압축 응답에서는
+  발행 크기(`WASM_BYTES`)를 분모로 쓰고 `estimated:true` 를 세우며, 스트림이 실제로 끝나기 전에는
+  절대 100% 를 표시하지 않는다. 자기 빌드를 자기 호스팅한다면 `expectedBytes` 로 분모를 직접 준다.
+- `prefetch()` 는 실패를 삼키고 `false` 를 돌려준다(예열이 앱을 깨면 안 된다 — 진짜 오류는 실제 열기에서 난다).
+- 워커 모드에서도 같은 콜백이 온다(워커 안에서 측정해 id 없는 `{progress}` 메시지로 올려보낸다).
+
+### 2.4 아직 안 되는 것 (백로그)
+
+- **Cloudflare Workers / 엣지 런타임**: 그쪽은 `fetch`+`instantiateStreaming` 대신 **번들에 박힌
+  `WebAssembly.Module` 을 주입**하는 초기화가 필요하다. 지금은 `initEngineSync(module)` 로 수동
+  배선해야 하고, 전용 진입점(`@auto-hwp/engine/edge` 류)은 **후속 작업**이다(W6.1 스코프 밖).
+- CDN 기본값은 **브라우저 전용**이다(Node 에서는 URL 대신 바이트/모듈을 넘긴다).
+
 ---
 
 ## 3. 마운트 — `<HwpWorkspace/>`
@@ -72,6 +148,7 @@ public/hwp/pkg/hwp_wasm.js       ← node_modules/@auto-hwp/engine/pkg/hwp_wasm.
 import { HwpWorkspace, WasmAdapter } from "@auto-hwp/react";
 import "@auto-hwp/react/styles.css";               // ← 스타일은 수동 import (사이드이펙트 CSS)
 
+// 0.0.3~ : 인자 없이 = CDN 기본값(§2.1). 자기 호스팅이면 아래처럼 명시 URL 을 준다(§2.2).
 const adapter = new WasmAdapter(
   new URL("/hwp/hwp_wasm_bg.wasm", window.location.origin),
   { worker: { url: new URL("/hwp/worker.js", window.location.origin) } },
@@ -185,10 +262,17 @@ wasm 인스턴스화와 모듈 워커 때문에 CSP 를 쓰는 호스트는 아�
 
 ```
 script-src 'self' 'wasm-unsafe-eval';   # WebAssembly.instantiate (구형 브라우저 대응 시 'unsafe-eval')
-worker-src 'self' blob:;                # 모듈 워커
+worker-src 'self' blob:;                # 모듈 워커 (CDN 기본값은 blob 심을 쓰므로 blob: 필수)
 font-src   'self' data:;                # 주입 폰트 @font-face
 img-src    'self' data: blob:;          # 이미지 삽입/미리보기
 connect-src 'self' <AI 프록시 오리진>;   # onAiRequest 가 POST 하는 서버
+```
+
+**CDN 기본값(§2.1)을 쓴다면** 두 줄을 더 연다 — 자기 호스팅(§2.2)이면 필요 없다:
+
+```
+script-src  ... https://cdn.jsdelivr.net;   # 워커가 import 하는 index.js / pkg/hwp_wasm.js
+connect-src ... https://cdn.jsdelivr.net;   # wasm fetch
 ```
 
 SVG 는 문서 파생 **신뢰불가 문자열**이다 — L3 `HwpPageView` 가 삽입 전 항상 `sanitizeSvg`(R7) 를
@@ -244,10 +328,16 @@ bypass: 등록된 이름과 일치하는 명시 지정은 명조/고딕 대체�
 
 ## 8. 이식 검증 (이 레포에서 실검증)
 
+예제의 의존은 **레지스트리 발행본이 기본**이다(외부 사용자와 같은 경로). 레포 로컬 빌드본으로 바꾸려면
+`REPO_DEV=1` 만 붙인다 — `packages/*` 를 pack 해 `npm install --no-save` 로 얹으므로 `package.json` 선언은
+레지스트리 그대로 남고 원복은 `npm install` 한 번이다.
+
 ```bash
-# 발행본 tarball 을 만들고(examples/vite-embed 가 소비) 스모크:
 cd examples/vite-embed
-npm run pack-deps        # 4개 패키지 pack → vendor/*.tgz (React safe wrapper가 file: 치환을 finally 복원)
-npm install              # vendor tarball 설치 (레지스트리 없이 이식 재현)
+npm install              # 레지스트리 @auto-hwp/* ^0.0.2 (fresh clone 경로)
+npm run dev              # predev 훅이 wasm/워커/폰트를 public/ 로 복사(0.0.2 = 명시 URL 경로)
 npm run test:e2e         # Playwright: 업로드 → 8쪽 SVG → 셀 마킹 → mock 편집 → undo
+
+REPO_DEV=1 npm run dev   # 미발행 변경(예: 0.0.3 CDN 기본값)을 이 예제에서 미리 확인
+npm run use-local        # REPO_DEV 없이 강제로 로컬 tarball 얹기
 ```

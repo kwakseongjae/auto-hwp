@@ -3,13 +3,14 @@
 //
 // This file is a self-contained MODULE worker: it imports the same safety wrapper (./index.js) the
 // main thread would, so trap classification ({code:"wasm_trap"}), the generation guard and the
-// lifetime net behave identically — just one thread over. It is deployed as a STATIC asset next to
-// index.js + pkg/ (no bundler magic — the same philosophy as the explicit public wasm URL):
+// lifetime net behave identically — just one thread over. W6.1: it is served from jsDelivr by default
+// (the client wraps the cross-origin URL in a same-origin blob shim), and its relative import chain
+// resolves against wherever it was loaded from — so SELF-HOSTING is the same four files as before:
 //
 //   public/hwp/worker.js            ← this file
 //   public/hwp/index.js             ← ../engine/index.js (imported below as ./index.js)
 //   public/hwp/pkg/hwp_wasm.js      ← wasm-bindgen glue
-//   public/hwp/hwp_wasm_bg.wasm     ← passed in explicitly via the `init` op (never the default path)
+//   public/hwp/hwp_wasm_bg.wasm     ← passed in explicitly via the `init` op (else the CDN default)
 //
 // PROTOCOL (hand-rolled RPC — no new dependency, see EngineWorkerClient in ./worker-client.js):
 //   request  { id, op: "init"|"reset"|"open"|"call"|"free"|"ping", args? }
@@ -84,15 +85,21 @@ function encodeError(e) {
   return { message, code };
 }
 
+/** W6.2 — wasm download progress leaves the worker as an ID-LESS `{progress}` message; the client
+ *  routes those to its `onProgress` observer before the request/response demux (see worker-client.js). */
+function postProgress(progress) {
+  self.postMessage({ progress });
+}
+
 async function handle(op, args) {
   switch (op) {
     case 'init':
-      await initEngine(args?.wasmInput);
+      await initEngine(args?.wasmInput, { onProgress: postProgress });
       return null;
     case 'reset':
       // The previous instance is poisoned (or being replaced) — every handle in it is dead.
       doc = null;
-      await resetEngine(args?.wasmInput);
+      await resetEngine(args?.wasmInput, { onProgress: postProgress });
       return null;
     case 'open': {
       // Parse FIRST; only a SUCCESSFUL parse replaces (and frees) the previous document. CONTRACT

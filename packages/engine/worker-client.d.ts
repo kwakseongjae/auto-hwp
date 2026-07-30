@@ -5,7 +5,9 @@
 export type WorkerWasmInput = string | URL | BufferSource | WebAssembly.Module;
 
 export interface EngineWorkerClientOptions {
-  /** URL of the deployed MODULE worker script (@auto-hwp/engine/worker.js served as a static asset). */
+  /** URL of a self-hosted MODULE worker script (@auto-hwp/engine/worker.js served as a static asset).
+   *  W6.1: OMIT to load this package's own version from jsDelivr (a cross-origin URL is spawned through
+   *  a same-origin blob shim, so `worker-src blob:` is required under a strict CSP). */
   url?: string | URL;
   /** Custom Worker supplier (tests / bundler-specific worker recipes). Takes precedence over `url`. */
   factory?: () => Worker;
@@ -19,9 +21,11 @@ export interface EngineWorkerClientOptions {
  *  - `"worker_terminated"` — the host called `terminate()` (dispose / cancel); NOT a crash.
  *  - every other engine `{code, message}` (no_document, bad_intent, font_missing, …) passes through as-is. */
 export class EngineWorkerClient {
-  constructor(opts: EngineWorkerClientOptions);
+  constructor(opts?: EngineWorkerClientOptions);
   /** Whether a worker is currently live (spawned and not dead/terminated). */
   readonly alive: boolean;
+  /** W6.2 — wasm download progress relayed from inside the worker. Host-assigned; throwing is swallowed. */
+  onProgress: ((progress: import("./cdn").EngineLoadProgress) => void) | null;
   /** Ensure a live worker with an instantiated wasm module (idempotent; respawns after death/terminate). */
   init(wasmInput?: WorkerWasmInput): Promise<void>;
   /** Re-instantiate the wasm module (trap recovery), or respawn + init when the worker is dead. */

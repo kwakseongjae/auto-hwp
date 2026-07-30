@@ -1,35 +1,45 @@
 # auto-hwp Vite 임베드 예제 (issue 063 — 이식 증명)
 
-비-Next(Vite) 앱에서 **published tarball 을 설치**해 `<HwpWorkspace/>` 를 렌더한다. 소스경로 import 는
-0 — `node_modules` 의 발행본(`npm pack` tarball)만 소비한다. 이 예제가 그린이면 "제3자가 `npm i @auto-hwp/*`
-로 자기 페이지에 hwp 뷰어/에디터를 심을 수 있다"가 증명된다.
+비-Next(Vite) 앱에서 **레지스트리 발행본**(`@auto-hwp/* ^0.0.2`)을 설치해 `<HwpWorkspace/>` 를 렌더한다.
+소스경로 import 는 0 — `node_modules` 의 발행본만 소비한다. 이 예제가 그린이면 "제3자가
+`npm i @auto-hwp/*` 로 자기 페이지에 hwp 뷰어/에디터를 심을 수 있다"가 증명된다.
 
-전체 임베드 레시피(wasm/워커 정적 서빙, `"use client"`/`ssr:false`, CSP, 폰트, AI 프록시)는
-[`docs/EMBED-GUIDE.md`](../../docs/EMBED-GUIDE.md) 참조.
+전체 임베드 레시피(wasm/워커 로딩, `"use client"`/`ssr:false`, CSP, 폰트, AI 프록시)는
+[`docs/EMBED-GUIDE.md`](../../docs/EMBED-GUIDE.md) / [영문](../../docs/EMBED-GUIDE.en.md) 참조.
 
 ## 실행
 
 ```bash
-# 1) 발행본 만들기 — 4개 패키지 npm pack → vendor/*.tgz
-#    패키징 훅이 빌드(engine=wasm 레시피, react=safe wrapper+vite+tsc+file:→실버전, 나머지=tsc)를 수행하므로
-#    tarball 은 pkg/dist 를 담고 file: 의존이 0이다(발행본과 동일).
-npm run pack-deps
-
-# 2) 설치 — vendor tarball 을 소비(레지스트리 없이 이식 재현; package.json 의 file:./vendor + overrides)
+# 1) 설치 — 레지스트리에서 그대로 (fresh clone 이 겪는 경로와 동일)
 npm install
 
-# 3) 개발 서버 — predev 훅이 wasm/워커/폰트를 public/ 로 복사(설치된 발행본에서)
+# 2) 개발 서버 — predev 훅이 wasm/워커/폰트를 public/ 로 복사(설치된 발행본에서)
 npm run dev            # http://localhost:5180
 
-# 4) 스모크 — Playwright: 업로드 → 8쪽 SVG 렌더 → 셀 마킹 → mock 편집(서버 없음) → undo
+# 3) 스모크 — Playwright: 업로드 → 8쪽 SVG 렌더 → 셀 마킹 → mock 편집(서버 없음) → undo
 npm run test:e2e
 ```
+
+### 레포 로컬 빌드본으로 바꾸기 (미발행 변경 확인)
+
+```bash
+REPO_DEV=1 npm run dev   # packages/* 를 pack → npm install --no-save 로 덮어씀
+npm run use-local        # REPO_DEV 없이 강제 적용
+npm install              # 원복(레지스트리)
+```
+
+`--no-save` 라 `package.json` 의 선언은 **레지스트리 그대로**다. 즉 이 예제의 선언은 언제나 외부
+사용자가 보는 것과 같고, 로컬본은 `node_modules` 에만 얹힌다.
+
+> ⚠️ 이 예제는 아직 **0.0.2 기준**이라 wasm/워커를 명시 URL(§2.2 4파일 복사)로 로드한다. 0.0.3 의
+> **CDN 기본값**(`new WasmAdapter()` 한 줄)은 발행 후에 이 예제도 그쪽으로 옮긴다.
 
 ## 구성
 
 | 파일 | 역할 |
 |---|---|
-| `package.json` | `@auto-hwp/*` 를 `file:./vendor/*.tgz`(+overrides)로 설치 — **발행본** 소비. |
+| `package.json` | `@auto-hwp/*` 를 레지스트리 `^0.0.2` 로 설치 — **발행본** 소비. |
+| `scripts/prepare-deps.mjs` | REPO_DEV=1 일 때만 로컬 `packages/*` pack → `npm install --no-save` 오버라이드. |
 | `scripts/pack-deps.mjs` | 4개 패키지 `npm pack` → `vendor/` (발행 순서 engine→editor-core→ai-protocol→react). |
 | `scripts/copy-assets.mjs` | `node_modules/@auto-hwp/engine` 에서 wasm+worker+글루를 `public/hwp/` 로 복사(비-Next 정적 서빙 레시피). |
 | `src/App.tsx` | `WasmAdapter`(명시적 wasm/worker URL) + `<HwpWorkspace/>` + **로컬 mock** `onAiRequest`(서버 없이 셀 편집 왕복). |

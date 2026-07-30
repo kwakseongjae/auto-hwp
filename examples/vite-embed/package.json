@@ -2,30 +2,26 @@
   "name": "auto-hwp-vite-embed",
   "version": "0.0.0",
   "private": true,
-  "description": "외부 호스트 이식 증명 (issue 063): PUBLISHED tarball(npm pack)을 설치해 비-Next Vite 앱에서 <HwpWorkspace/>를 렌더한다. 소스경로 import 0 — node_modules 의 발행본만 소비한다.",
+  "description": "외부 호스트 이식 증명 (issue 063): 레지스트리 발행본(@auto-hwp/* ^0.0.2)을 설치해 비-Next Vite 앱에서 <HwpWorkspace/>를 렌더한다. 소스경로 import 0. REPO_DEV=1 이면 로컬 tarball 로 덮어쓴다.",
   "type": "module",
   "scripts": {
     "pack-deps": "node scripts/pack-deps.mjs",
+    "use-local": "node scripts/prepare-deps.mjs --force",
     "copy-assets": "node scripts/copy-assets.mjs",
-    "predev": "node scripts/copy-assets.mjs",
+    "predev": "node scripts/prepare-deps.mjs && node scripts/copy-assets.mjs",
     "dev": "vite",
-    "prebuild": "node scripts/copy-assets.mjs",
+    "prebuild": "node scripts/prepare-deps.mjs && node scripts/copy-assets.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@auto-hwp/ai-protocol": "file:./vendor/auto-hwp-ai-protocol-0.0.2.tgz",
-    "@auto-hwp/editor-core": "file:./vendor/auto-hwp-editor-core-0.0.2.tgz",
-    "@auto-hwp/engine": "file:./vendor/auto-hwp-engine-0.0.2.tgz",
-    "@auto-hwp/react": "file:./vendor/auto-hwp-react-0.0.2.tgz",
+    "@auto-hwp/ai-protocol": "^0.0.2",
+    "@auto-hwp/editor-core": "^0.0.2",
+    "@auto-hwp/engine": "^0.0.2",
+    "@auto-hwp/react": "^0.0.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
-  },
-  "overrides": {
-    "@auto-hwp/ai-protocol": "file:./vendor/auto-hwp-ai-protocol-0.0.2.tgz",
-    "@auto-hwp/editor-core": "file:./vendor/auto-hwp-editor-core-0.0.2.tgz",
-    "@auto-hwp/engine": "file:./vendor/auto-hwp-engine-0.0.2.tgz"
   },
   "devDependencies": {
     "@playwright/test": "1.61.1",

@@ -12,6 +12,12 @@
 //      in the DOM. Full hardening is issue 016; this is the minimum "never innerHTML raw" guard.
 
 import init, { initSync, HwpDoc as RawHwpDoc } from './pkg/hwp_wasm.js';
+import { resolveWasmInput } from './cdn.js';
+
+// W6.1 — the wasm location is now a DEFAULT, not a requirement: with no explicit URL the loader pulls
+// this package's OWN version from jsDelivr (see cdn.js). Self-hosting the four static files is still
+// fully supported — it just became the override.
+export { ENGINE_VERSION, WASM_BYTES, cdnBase, defaultWasmUrl, defaultWorkerUrl, fetchWasmResponse } from './cdn.js';
 
 let _initPromise = null;
 // Bumped on every (re)instantiation. Handles capture the generation they were born in; a call from a
@@ -21,23 +27,28 @@ let _generation = 0;
 // Instantiate once and UNCACHE ON REJECTION (issue 055 사후): a transient failure (wasm fetch hiccup)
 // must not be cached forever — the next initEngine() retries. Only clear OUR OWN promise: a stale
 // rejection racing a newer init/reset must not null the newer one (worker-client와 같은 규칙).
-function instantiate(input) {
-  const p = init(input).then((m) => {
-    _generation++;
-    return m;
-  });
+function instantiate(input, options) {
+  const p = Promise.resolve()
+    // The OBJECT form (`{module_or_path}`) is wasm-bindgen 0.2.12x's non-deprecated call shape — the
+    // bare-argument form logs "using deprecated parameters…" into every consumer's console.
+    .then(() => init({ module_or_path: resolveWasmInput(input, options) }))
+    .then((m) => {
+      _generation++;
+      return m;
+    });
   p.catch(() => {
     if (_initPromise === p) _initPromise = null;
   });
   return p;
 }
 
-/** Instantiate the wasm module once. `input` is an optional wasm URL/Response/bytes (defaults to the
- *  co-located hwp_wasm_bg.wasm). Idempotent while pending/fulfilled; a REJECTED init is not cached —
- *  the next call retries. */
-export function initEngine(input) {
+/** Instantiate the wasm module once. `input` is an optional wasm URL/Response/bytes — OMIT IT to load
+ *  this package's own version from jsDelivr (W6.1: `npm i` and you are done; pass a URL to self-host).
+ *  `options.onProgress` receives download ticks (W6.2). Idempotent while pending/fulfilled; a REJECTED
+ *  init is not cached — the next call retries. */
+export function initEngine(input, options) {
   if (!_initPromise) {
-    _initPromise = instantiate(input);
+    _initPromise = instantiate(input, options);
   }
   return _initPromise;
 }
@@ -45,8 +56,8 @@ export function initEngine(input) {
 /** Re-instantiate the module AFTER a wasm trap (panic). Every previously-opened HwpDoc becomes dead;
  *  the host must re-`open()` its documents. Returns the init promise for the fresh instance. A
  *  REJECTED reset is not cached either (initEngine afterwards retries instead of replaying it). */
-export function resetEngine(input) {
-  _initPromise = instantiate(input);
+export function resetEngine(input, options) {
+  _initPromise = instantiate(input, options);
   return _initPromise;
 }
 

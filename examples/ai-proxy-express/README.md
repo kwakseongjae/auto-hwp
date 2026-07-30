@@ -13,9 +13,11 @@ API 키/LLM 클라이언트는 `server.mjs` 에만 존재한다. 클라이언트
 ## 실행
 
 ```bash
-npm install
+npm install                           # 레지스트리 @auto-hwp/ai-protocol ^0.0.2
 node server.mjs                       # 키 없으면 mock 모드
 ANTHROPIC_API_KEY=sk-... node server.mjs   # 실 LLM 모드
+
+REPO_DEV=1 npm start                  # 레포 로컬 packages/ai-protocol 빌드본으로 덮어쓰기(원복: npm install)
 
 # 확인
 curl localhost:8787/api/hwp-edit                                   # → {"mode":"mock"}

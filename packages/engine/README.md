@@ -31,7 +31,7 @@ same editor-core drives the web (wasm) and a desktop app (Tauri) alike.
 ```js
 import { initEngine, HwpDoc } from '@auto-hwp/engine';
 
-await initEngine();                      // instantiate the wasm module once
+await initEngine();                      // instantiate the wasm module once (see "Where the wasm comes from")
 const bytes = new Uint8Array(await file.arrayBuffer());
 const doc = HwpDoc.open(bytes, file.name); // .hwp or .hwpx (auto-detected)
 
@@ -50,11 +50,45 @@ const hwpx = doc.toHwpx();                // Uint8Array — hand to a download
 doc.free();                              // free the wasm allocation on swap (R13)
 ```
 
+## Where the wasm comes from (0.0.3+)
+
+`initEngine()` with **no argument** fetches the binary from jsDelivr, pinned to *this package's own
+version* — so `npm i` is the whole setup:
+
+```
+https://cdn.jsdelivr.net/npm/@auto-hwp/engine@<this version>/pkg/hwp_wasm_bg.wasm
+```
+
+Never `@latest`: the wasm-bindgen glue and the binary are one artifact compiled together, and a
+mismatched pair fails to link (or links and then rejects newer Intents). `ENGINE_VERSION`,
+`defaultWasmUrl()` and `defaultWorkerUrl()` are exported from `@auto-hwp/engine` (and
+`@auto-hwp/engine/cdn`) if you want to inspect or re-pin them.
+
+Self-hosting is the **override**, not a requirement — pass a URL (or bytes / a compiled
+`WebAssembly.Module`):
+
+```js
+await initEngine('/hwp/hwp_wasm_bg.wasm');
+// or let your bundler emit it (Vite):
+import wasmUrl from '@auto-hwp/engine/pkg/hwp_wasm_bg.wasm?url';
+```
+
+Download progress (the binary is ~7.7 MB, ~3.0 MB over the wire):
+
+```js
+await initEngine(undefined, { onProgress: ({ ratio, loaded, estimated }) => … });
+```
+
+`ratio` is `null` when no denominator is known, and `estimated: true` means the transfer was
+content-encoded — `Content-Length` then counts *compressed* bytes while the body yields *decompressed*
+ones, so the published size is used as the denominator and the ratio never reaches 1 early. Pass
+`expectedBytes` when self-hosting a custom build.
+
 ## API
 
 | Method | Returns | Notes |
 |--------|---------|-------|
-| `initEngine(input?)` | `Promise` | Instantiate once (idempotent). |
+| `initEngine(input?, options?)` | `Promise` | Instantiate once (idempotent). No `input` = CDN default; `options.onProgress` reports download ticks. |
 | `HwpDoc.open(bytes, name?)` | `HwpDoc` | `.hwp` (needs the default rhwp build) or `.hwpx`. |
 | `pageCount()` | `number` | Own-render pagination. |
 | `renderPageSvg(n)` | `string` | **UNTRUSTED** — see Security. |
@@ -104,17 +138,26 @@ swap is the contract** (undo snapshots + original bytes are held per document �
 Parsing / re-layout / `toHwpx` on a multi-MB document blocks the thread they run on. This package
 ships a **module-worker entry** (`worker.js`) plus a main-thread RPC client
 (`@auto-hwp/engine/worker-client`) so the whole engine can live off the main thread — no
-SharedArrayBuffer, no COOP/COEP headers, no bundler magic. Deploy `worker.js`, `index.js` and
-`pkg/hwp_wasm.js` as static assets **keeping their relative paths** (the worker imports `./index.js`
-which imports `./pkg/hwp_wasm.js`), then:
+SharedArrayBuffer, no COOP/COEP headers, no bundler magic.
 
 ```js
 import { EngineWorkerClient } from '@auto-hwp/engine/worker-client';
 
-const client = new EngineWorkerClient({ url: '/hwp/worker.js' });   // {type:"module"} worker
-await client.init('/hwp/hwp_wasm_bg.wasm');                          // instantiate wasm IN the worker
+const client = new EngineWorkerClient();     // 0.0.3+: this version's worker.js from the CDN
+await client.init();                          // instantiate wasm IN the worker (CDN default)
 const { pages } = await client.open(bytes, file.name);               // parse off-thread
 const svg = await client.call('renderPageSvg', [0]);                 // every HwpDoc method, awaited
+```
+
+A cross-origin worker script cannot be handed to `new Worker()`, so the CDN default is spawned through
+a same-origin **blob shim** that `import`s it (`worker-src blob:` under a strict CSP). Self-hosting is
+the override: deploy `worker.js`, `index.js`, `cdn.js` and `pkg/hwp_wasm.js` as static assets **keeping
+their relative paths** (the worker imports `./index.js`, which imports `./cdn.js` and
+`./pkg/hwp_wasm.js` — omitting `cdn.js` kills the worker with a module-load 404) and pass the URLs:
+
+```js
+const client = new EngineWorkerClient({ url: '/hwp/worker.js' });
+await client.init('/hwp/hwp_wasm_bg.wasm');
 ```
 
 Error codes across the boundary: `wasm_trap` (instance poisoned inside the worker → `client.reset()`
