@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-30 (Claude 오케스트레이터) · npm 0.0.3 발행 — CDN 임베드 실물 성립
+- 4패키지 0.0.3 실발행+CHANGELOG 확정. fresh 스모크: react 단독 설치→cdn 서브패스 @0.0.3 자기 버전 pin 해석→jsDelivr wasm 200.
+- 첫 dry_run 실패 = W6.1 버전 핀 가드 정상 작동(cdn.js ENGINE_VERSION 누락 차단) → 정합 후 그린. 가드 실전 검증.
+- 배치 3 Pages 재배포 success(벌크 워커화·수식·080 라이브). 멈춘 곳: 없음.
+- 다음 후보: 런치(보류 중)·enUS e2e 배선·075·076·xlsx 리더. 범프 체크리스트를 CURRENT_STATE에 기록.
+
 ## 2026-07-30 (Claude 오케스트레이터+Opus 워크플로) · 배치 3 — 080·수식·CDN·i18n·벌크 워커화
 - 080 done: 3경로 공유 helper(LOCKSTEP 구조화)+발견 축②(noAdjust 고정 행높이) — bizinfo 25==25 게이트 신설. 수식 44/44 실렌더.
 - W6: wasm CDN 자기버전 pin+진행률+영문 가이드(fresh tarball→jsDelivr 실측). 077 done(구현): koKR 이관 누락 0+AST 게이트.

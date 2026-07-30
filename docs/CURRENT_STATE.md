@@ -5,6 +5,16 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
+- 갱신: 2026-07-30 · Claude(오케스트레이터) — **🚀 npm 0.0.3 발행 완주 + 배치 3 라이브 반영**.
+  ① 4패키지 0.0.3 실발행(dry_run→실발행 그린, run 30517644781) — react 의존 `^0.0.3` 실버전,
+  CHANGELOG [0.0.3] 확정(파괴 변경 0·Added 3·Fixed 3·자기호스팅 5파일 고지). ② **fresh 스모크**:
+  react 단독 설치→전이 해석→import 115 exports→`@auto-hwp/engine/cdn` 기본 URL이
+  jsDelivr **@0.0.3 자기 버전 pin**으로 해석 + jsDelivr @0.0.3 wasm 200 실측 — "npm i 한 줄"
+  임베드가 레지스트리 실물로 성립. ③ 첫 dry_run 실패는 **W6.1 버전 핀 가드의 정상 작동**
+  (cdn.js ENGINE_VERSION 범프 누락을 fail-closed 차단 — d8ff8fa로 정합. 가드 실전 검증됨.
+  범프 체크리스트: package.json 4 + cdn.js ENGINE_VERSION + 락 5곳 + examples ^버전).
+  ④ 배치 3 Pages 재배포 success(라이브 wasm 7,725,936B — 벌크 워커화·수식 실렌더·080 조판 반영).
+  잔여 선택: WASM_BYTES를 발행 실물 크기로 다음 범프 때 정합(경고 전용·현 편차 0.3%).
 - 갱신: 2026-07-30 · Claude(오케스트레이터)+Opus 워크플로 — **고도화 배치 3 완주(080+W4.4 ∥
   W6.1/6.2/6.4 ∥ 077 ∥ 073 워커화)**. ① **080 done**: `section_page_breaks` 단일 진실(3조판 경로
   공유 — LOCKSTEP이 규율→구조), 표 호스트 break는 스팬 포함 관계로 하이스트(lift 순서 함정 테스트
