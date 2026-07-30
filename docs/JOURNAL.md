@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-30 (Claude 오케스트레이터+Opus 워크플로) · 배치 3 — 080·수식·CDN·i18n·벌크 워커화
+- 080 done: 3경로 공유 helper(LOCKSTEP 구조화)+발견 축②(noAdjust 고정 행높이) — bizinfo 25==25 게이트 신설. 수식 44/44 실렌더.
+- W6: wasm CDN 자기버전 pin+진행률+영문 가이드(fresh tarball→jsDelivr 실측). 077 done(구현): koKR 이관 누락 0+AST 게이트.
+- 벌크 워커화 2단계(메인스레드 점유 제거·검수 lazy). 통합 verify green: --full·vitest 761·e2e 50/50+fixme 1.
+- 멈춘 곳: 0.0.3 발행 결정 대기(SDK 변경 도달성). 잔여: enUS e2e 배선·fonts 라벨 allowlist·075(흐름 높이 축).
+
 ## 2026-07-30 (Claude 오케스트레이터+Opus 워크플로) · 배치 2 — /bench·HWPX 편집 개방·README 증명
 - W4.2 text_zone으로 섹션 첫 문단/개체 문단 텍스트 편집 개방(verbatim 불변), W4.3 HWPX 게이트 verify 편입+e2e 4종.
 - W2 /bench 공개 벤치(수치 전부 실측+재현 커맨드+한계 고지), W5.2 README GIF·quickstart·비교표·34메서드 정정.

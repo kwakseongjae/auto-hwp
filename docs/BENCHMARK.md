@@ -232,11 +232,14 @@ scripts/verify-local.sh --full   # + wasm 재빌드 · 캐럿 교차검증 · JS
 2. **HWPX 입력의 절대 쪽수는 아직 정답이 아니다.** `layout-check benchmarks/benchmark1.hwpx` 는
    우리 22쪽 vs 한컴(rhwp) 25쪽으로 갈린다(같은 커맨드로 직접 확인 가능). §2.5 파리티와 HWPX 관련
    게이트는 **회귀를 잠그는 장치**이지 참값 주장이 아니다. 이슈 074 에서 네 갈래(본문 상자 여백·
-   세로 병합 셀 균등분배·ragged 표·`stored_row_heights` 바닥)를 해소했고, 남은 명시적 쪽 나누기
-   (`pageBreak`) 누락은 080 으로 추적 중이다.
+   세로 병합 셀 균등분배·ragged 표·`stored_row_heights` 바닥)를, 080 에서 두 갈래(명시적 쪽 나누기
+   `<hp:p pageBreak>` 누락·`noAdjust="1"` 표 행 높이 과다 예약)를 해소했다. `benchmark1.hwpx` 의
+   22 vs 25 는 그 뒤에도 남는 **줄/행 높이 참값 축**이라 075 로 넘어간다.
 3. **재현 불가 표본(레포 기록).** 한컴 저작 HWPX 5종을 production 파서로 재측정했을 때 4종은 한컴
-   쪽수와 정확히 같았고 `bizinfo-mss__붙임1` 하나만 우리 24 vs 한컴 25 였다(`docs/issues/080-hwpx-explicit-page-break.md`).
-   해당 문서들은 공개 코퍼스가 아니라 외부에서 재현할 수 없다 — 그래서 §2 의 표에 섞지 않는다.
+   쪽수와 정확히 같았고 `bizinfo-mss__붙임1` 하나만 우리 24 vs 한컴 25 였다. 080 해소 후
+   2026-07-30 재실측에서 **25 == 25 로 일치**한다(`docs/issues/080-hwpx-explicit-page-break.md` 의
+   실측 표 참조). 해당 문서들은 공개 코퍼스가 아니라 외부에서 재현할 수 없다 — 그래서 §2 의 표에
+   섞지 않는다.
 4. **modu-startup 6==6 은 로컬 전용이다.** 클론한 레포에서는 skip 으로 표시된다.
 5. **줄 개수 충실도다.** 어느 글자에서 끊겼는지·글자 x 좌표는 §2.2 가 아니라 §2.4 가 잰다.
 6. **벤치마크 밖 문서의 완전 일치는 보증하지 않는다.** 게이트가 도는 문서는 §2.1 의 4종이 전부다.
@@ -251,4 +254,5 @@ scripts/verify-local.sh --full   # + wasm 재빌드 · 캐럿 교차검증 · JS
 - CLI 사용법: [CLI-GUIDE.md](./CLI-GUIDE.md) — `layout-check` 인자 정본
 - 검증 스위트: `scripts/verify-local.sh` — 게이트 정본
 - 불변식 전문: [PRODUCT-DIRECTION.md](./PRODUCT-DIRECTION.md) §4
-- 미해결 이슈: [074](./issues/074-hwpx-page-undercount.md) · [075](./issues/075-hancom-native-oracle.md) · [080](./issues/080-hwpx-explicit-page-break.md)
+- 미해결 이슈: [075](./issues/075-hancom-native-oracle.md) — HWPX 참값 오라클(줄/행 높이 축)
+- 해소된 이슈(기록): [074](./issues/074-hwpx-page-undercount.md) · [080](./issues/080-hwpx-explicit-page-break.md)

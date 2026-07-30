@@ -5,7 +5,23 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
-- 갱신: 2026-07-30 · Claude(오케스트레이터)+Opus 워커 — **배치 2 완주(W2·W4.2/4.3·W5.2) —
+- 갱신: 2026-07-30 · Claude(오케스트레이터)+Opus 워크플로 — **고도화 배치 3 완주(080+W4.4 ∥
+  W6.1/6.2/6.4 ∥ 077 ∥ 073 워커화)**. ① **080 done**: `section_page_breaks` 단일 진실(3조판 경로
+  공유 — LOCKSTEP이 규율→구조), 표 호스트 break는 스팬 포함 관계로 하이스트(lift 순서 함정 테스트
+  잠금). **발견 축②**: bizinfo 24↔25는 누락 break(−1)×noAdjust 표 과다 예약(+1) 상쇄였음 →
+  `Table::fixed_row_heights`(HWPX 파서 전용·.hwp 무영향) 신설, bizinfo-mss 붙임1 **25==25** 게이트
+  ③ 추가. 되돌리기 레시피: apply_row_overrides 분기+파서 세팅 2곳(되돌리면 26). 잔여 오차는 흐름
+  높이 축=075 이관(최선명 표본 bizinfo-mss__2026-144호 흐름 break 한컴 3 vs 우리 7). ② **W4.4**:
+  HWPX 수식 스텁→실렌더 44/44(equation_svg 공개 진입점, verbatim 불변). ③ **W6.1/6.2**: wasm CDN
+  기본값(jsDelivr **자기 버전 pin** — latest 금지)+onProgress 702틱 실측+랜딩 prefetch, fresh 소비자
+  tarball→jsDelivr 실다운로드 검증(7,718,539B==선언, brotli 2.96MB). ⚠️ 신규 cdn.js는 자기호스팅
+  4→5파일(0.0.3+) — 가이드 3곳 정정됨. ④ **077 done(구현)**: WorkspaceMessages+koKR(이관 365건
+  누락 0 독립 검증)+DeepPartial 주입+AST 게이트 verify 배선. 잔여: enUS 실브라우저 e2e(랩 셸
+  ?lang=en 배선 후 fixme 해제)·fonts.ts 라벨 값단위 allowlist. ⑤ **073 워커화 2단계**: 생성이
+  engine worker.js 경유(메인스레드 점유 제거)·검수 SVG lazy·진행률 — e2e 60행 실증. **통합 verify
+  green**: --full exit 0·게이트 전종·vitest 761/761·e2e 50/50+skip 1(정직 fixme)·경계 오염 0.
+  080 문서의 재현 불가 집계 1문장은 verify 재실측(35건 |오차| 29·정확 19)으로 교정. **다음 결정:
+  0.0.3 발행 여부**(CDN 기본값·i18n·진행률이 SDK 변경 — 발행해야 npm 사용자에 도달).
   커밋 c8d1ffb/989d03d/1daf003 push·Pages 재배포**. ① W4.2: 파서 run-provenance→`text_zone`으로
   구조 문단(섹션 첫 문단=제목·개체 문단)의 텍스트 편집 개방 — ops는 창만 splice, 직렬화는
   reemit_paragraph_text_zone(불안전 시 기존 레인 강등), verbatim 골든 불변. Split/Merge는 종전

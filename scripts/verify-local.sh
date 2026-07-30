@@ -81,6 +81,19 @@ for spec in "corpus/hwpx/FormattingShowcase.hwpx:5:100.0:100.0" "corpus/hwpx/foo
   hwpx_ge "$w" "$w_min" || { echo "❌ HWPX 게이트: $f 셀 줄수 ±1 ${w}% < ${w_min}%"; exit 1; }
 done
 
+# ③ 한컴 저작 HWPX 쪽수 참값 축(이슈 080) — 명시적 쪽 나누기 + noAdjust 표 행 높이.
+#    ⚠️ 위 ①과 성격이 다르다: 여기서는 **우리 == 한컴** 을 요구한다(.hwp 게이트와 같은 강도).
+#    실물은 공개 재배포 금지라 corpus/private 에만 있다 — 부재 시 점수를 꾸며내지 않고 skip 한다.
+HWPX_GOV=corpus/private/bench-public/files/bizinfo-mss__붙임1_투자형_운영사_사업계획서_양식.hwpx
+if [ -f "$HWPX_GOV" ]; then
+  out=$(hwpx_check "$HWPX_GOV")
+  echo "$out" | grep -F '쪽수'
+  echo "$out" | grep -F '쪽수' | grep -q '일치' || {
+    echo "❌ HWPX 게이트: bizinfo-mss 붙임1 쪽수가 한컴과 불일치(이슈 080 회귀)"; exit 1; }
+else
+  echo "⚠️  HWPX 정부양식 쪽수 게이트 skipped(corpus/private 부재 — 로컬 전용 실물 벤치)"
+fi
+
 echo "═══ wasm 위생 ═══"
 cargo check -p hwp-wasm --target wasm32-unknown-unknown
 
@@ -121,6 +134,10 @@ if [ "$MODE" = "--full" ]; then
   pnpm -C packages/react build
   echo "═══ 본문 캐럿 엔진 교차검증 ═══"
   node packages/engine/bench/body-caret-crosscheck.mjs
+  echo "═══ i18n 게이트 (이슈 077 — SDK 문자열은 카탈로그 경유만) ═══"
+  # AST 스캔: packages/react/src + packages/editor-core/src 의 bare 한국어 literal 금지.
+  # 빌드 산출물이 아니라 소스를 읽으므로 JS 빌드 전후 어디서 돌려도 결과가 같다.
+  node packages/react/scripts/check-i18n-literals.mjs
   echo "═══ vitest ═══"
   pnpm -C packages/editor-core exec vitest run
   pnpm -C packages/ai-protocol exec vitest run

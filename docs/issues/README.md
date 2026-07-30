@@ -92,7 +92,7 @@ R12 완료 후 "알려진 한계" 5종을 리서치 4레인으로 조사 → 이
 | [070](070-large-doc-performance.md) | 대형 문서 성능 실측(U11/보강 F) | **done** | P1 (측정 스터디) | 실 wasm 사다리 8~130p: 편집→화면 ~1ms/쪽 선형 → **증분 조판 보류**(임계 150p+). 첫 병목=**undo 딥카피**(130p·50회 +403MB) → 071로 해소 |
 | [072](072-anchor-reveal.md) | AI 카드 위치 보기(앵커 자동 후보 v1) | **done** | P2 | "⊙ 위치 보기"→blocksInRect 스캔→점프+1.8s 플래시. 미지원 백엔드는 페이지 점프 폴백 |
 | [071](071-undo-memory-budget.md) | undo 스냅샷 메모리 버짓 | **done** | P1 (OOM 경로 차단) | 직렬화 스냅샷은 round-trip/rhwp 노드 훼손으로 기각 → 딥카피 유지+**추정기 기반 128MiB 버짓**(바닥 4). 실측 130p: RSS +403→**+0.1MB**, 깊이 50→10 정직 축소 · 18p 실물 50 무회귀 |
-| [073](073-bulk-fill.md) | 벌크 채움(메일머지) — 원본 양식 + 명단 → 완성본 N부 zip | **v1 done** (f94c4ed→2160b6c, 구현 6커밋) · 후속 open | P1 (신규 레인 — 최대 차별화 축) | 웹 `/bulk` 필드 스튜디오(영역 지정→네이밍→규정→규격화, 결정론 LLM 0콜) + CLI `inspect`/`fill`(fill-map v1·재개봉 검증·zip·사유코드 리포트). ⚠️ 이슈 헤더가 상태 정본(본문은 역사 기록) — 후속: xlsx 명단 리더·spec의 CLI 이식·검수 프리뷰 1p 한정·LLM 보조(079)·100명 파일럿 |
+| [073](073-bulk-fill.md) | 벌크 채움(메일머지) — 원본 양식 + 명단 → 완성본 N부 zip | **v1+워커화 done** · 후속 open | P1 (신규 레인 — 최대 차별화 축) | v1(f94c4ed→2160b6c) + 체험 깔때기·행 격리·unmatched 진단(b60bde9) + 워커화 2단계·검수 lazy·진행률(2026-07-30 배치 3, e2e bulk-worker-073). ⚠️ 헤더가 상태 정본 — 후속: xlsx 리더·spec CLI 이식·LLM 보조(079)·100명 CDP 계측 |
 
 ## 핸드오프 후속 고도화 (2026-07-28 리서치 확정)
 
@@ -100,10 +100,10 @@ R12 완료 후 "알려진 한계" 5종을 리서치 4레인으로 조사 → 이
 |---|------|------|------|------|
 | [075](075-hancom-native-oracle.md) | 한컴 네이티브 오라클 레인 | **research-complete / open** | **P0** | 사설 Windows+한글 OLE nightly/release → 장기 WebHWP Server. 방향·제품버전·페이지 PNG manifest |
 | [076](076-cross-paragraph-selection.md) | 문단을 넘는 범위 선택과 원자적 편집 | **design-complete / open** | P1 | top-level simple paragraph v1 + manual-only 단일 op. 현 JS 순차 `applyBatch`로 구현 금지 |
-| [077](077-sdk-i18n.md) | SDK i18n | **design-complete / open** | P1 | typed message catalog·한국어 기본값·host deep override·bare literal AST gate |
+| [077](077-sdk-i18n.md) | SDK i18n | **done(구현)** (2026-07-30 배치 3) · e2e ② 잔여 | P1 | WorkspaceMessages+koKR catalog(이관 365건 누락 0)+DeepPartial 주입+AST 게이트(verify 배선). 잔여: enUS 실브라우저 e2e(랩 셸 ?lang=en 배선 후 fixme 해제)·fonts.ts 라벨 값단위 allowlist |
 | [078](078-hwpx-chart-pipeline.md) | HWPX 차트 + PDF 벡터 객체 | **research-complete / open** | P1 | vendored HWP/HWPX 차트 쌍 28개 활용, parser는 part capture만, core enrichment, 공통 SVG lowering |
 | [079](079-llm-roster-assist.md) | 073 LLM 명단 보조 + 비용/PII 하드닝 | **design-complete / open** | P2 | fill-map JSON Schema·ZDR·근거행·로컬 검증; KV 상한은 Durable Object로 승격 |
-| [080](080-hwpx-explicit-page-break.md) | HWPX 명시적 쪽 나누기 보존 | **root-cause-complete / open** | P1 | 일반 문단 flag + `[Table, host anchor]` 표 앞 break를 3조판 경로 공유 helper로 LOCKSTEP |
+| [080](080-hwpx-explicit-page-break.md) | HWPX 명시적 쪽 나누기 보존 | **done** (2026-07-30 배치 3) | P1 | section_page_breaks 단일 진실(3경로 공유=LOCKSTEP 구조화) + 발견 축②(noAdjust 고정 행높이) — bizinfo-mss 붙임1 25==25 게이트 신설. 잔여 오차는 흐름 높이 축=075 이관 |
 
 ## 웹 이식(외부 임베드) 준비도 (2026-07-13 SDK 감사)
 
