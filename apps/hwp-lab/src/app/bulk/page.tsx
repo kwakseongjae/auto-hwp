@@ -6,9 +6,11 @@
 // 규칙은 crates/auto-hwp-cli/src/fill.rs와 한 벌 — 스키마는 additive(autohwp.fillmap.v1 + spec).
 // 호버 셀 하이라이트는 ref 직접 스타일(마우스무브당 리렌더 0). 필드 식별은 안정 id(이름 편집 중
 // 리마운트로 포커스가 날아가는 함정 — 이름을 React key로 쓰지 말 것).
-import { useCallback, useMemo, useRef, useState } from "react";
-import { HwpDoc, initEngine } from "@auto-hwp/engine";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { HwpDoc, initEngine, sanitizeSvg } from "@auto-hwp/engine";
 import { applyDemoSpec, buildDemoRoster, DEMO_TEMPLATE, diagnoseKeys, rosterColumns, unmatchedMessage, unmatchedReasons } from "@/lib/bulkFill";
+import { baselinePages, generateBatch, renderRowPreview, type FilledValue, type FillTarget, type RowCore, type RowPreview } from "@/lib/bulkEngine";
+import { createLock, MainThreadLane, WorkerLane, yieldToUi, type BulkLane } from "@/lib/bulkLane";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
@@ -47,13 +49,15 @@ interface RowResult {
   fileName: string;
   bytes: Uint8Array;
   reasons: string[];
-  svg: string; // 채운 셀이 있는 페이지의 sanitized SVG
-  pageW: number;
-  pageH: number;
-  highlights: { x: number; y: number; w: number; h: number; key: string; value: string }[];
-  values: { key: string; value: string; addr: string; example: string }[];
+  values: FilledValue[];
   failed?: boolean; // 이 행만 죽음 — zip에서 빼고 report에 created:false + row_failed 사유로 남긴다
 }
+
+/** 검수 프리뷰는 **캐러셀 진입 시 lazy 생성**한다(073 2단계 ②) — N부 SVG를 전부 state에 얹던 메모리
+ *  선형 증가를 없앤다. `null` = 만들어봤지만 표시할 페이지가 없음(값 없음/미발견). */
+type PreviewEntry = (RowPreview & { svg: string }) | null;
+/** 현재 인덱스에서 이만큼 떨어진 프리뷰만 남긴다(최대 5장) — 100부를 넘겨봐도 상수 메모리. */
+const PREVIEW_KEEP = 2;
 
 /** 최소 STORE zip(무압축 — hwpx는 이미 zip이라 재압축 무익). 의존성 0. */
 function storeZip(files: { name: string; bytes: Uint8Array }[]): Blob {
@@ -182,25 +186,6 @@ async function sha256hex(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** 프레임 양보 — 인원별 루프가 메인스레드를 통째로 잡으면 진행률조차 다시 그려지지 않는다(100명
- *  배치에서 탭 프리즈). setTimeout은 백그라운드 탭에서 1초 클램프가 걸려 배치를 세우므로
- *  MessageChannel 매크로태스크로 양보한다(React 스케줄러가 같은 이유로 쓰는 수단).
- *  워커 경유(2단계)는 후속 — 이건 즉효 1단계다. */
-function yieldToUi(): Promise<void> {
-  return new Promise((resolve) => {
-    if (typeof MessageChannel === "undefined") {
-      setTimeout(resolve, 0);
-      return;
-    }
-    const ch = new MessageChannel();
-    ch.port1.onmessage = () => {
-      ch.port1.close();
-      resolve();
-    };
-    ch.port2.postMessage(0);
-  });
-}
-
 /** 사용자가 정의한 필드로 명단 "형식 예시"(키: 값 블록 — 콤마 걱정 없는 권장 형식)를 만든다. */
 function buildRosterTemplate(fields: Field[]): string {
   const line = (f: Field) => `${f.key}: ${SPEC_TYPES[f.specType]?.hint.replace("예: ", "") ?? ""}`;
@@ -244,6 +229,8 @@ export default function BulkFillPage() {
   const [baseline, setBaseline] = useState(0);
   const [idx, setIdx] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [previews, setPreviews] = useState<Record<number, PreviewEntry>>({});
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<{ codes: string[]; message: string } | null>(null); // 배치 레벨 사유코드(unmatched_* — report.json 동행)
@@ -257,11 +244,35 @@ export default function BulkFillPage() {
   const pageOfBlockRef = useRef<Map<string, number>>(new Map());
   const hoverRef = useRef<HTMLDivElement | null>(null); // 호버 셀 박스 — ref 직접 스타일(리렌더 0)
 
+  // 생성/프리뷰 레인(073 2단계) — 기본은 워커. 스튜디오(2단계 화면)는 클릭·호버가 동기 지오메트리라
+  // 계속 메인스레드 엔진을 쓰고, **무거운 배치만** 워커로 나간다.
+  const laneRef = useRef<BulkLane | null>(null);
+  const runLocked = useRef(createLock()).current; // 레인은 문서 1개 계약 — 생성/프리뷰를 직렬화한다
+
   const ensureEngine = useCallback(async () => {
     if (!inited.current) {
       await initEngine(new URL(`${BASE}/hwp/hwp_wasm_bg.wasm`, window.location.origin));
       inited.current = true;
     }
+  }, []);
+
+  /** 벌크 레인 확보(멱등). `?bulkWorker=off` = 메인스레드 폴백(BEFORE/AFTER 실측 스위치). */
+  const ensureLane = useCallback(async (): Promise<BulkLane> => {
+    if (!laneRef.current) {
+      const wasmUrl = new URL(`${BASE}/hwp/hwp_wasm_bg.wasm`, window.location.origin);
+      const useWorker = typeof Worker !== "undefined" && new URLSearchParams(window.location.search).get("bulkWorker") !== "off";
+      laneRef.current = useWorker ? new WorkerLane(new URL(`${BASE}/hwp/worker.js`, window.location.origin), wasmUrl) : new MainThreadLane(wasmUrl);
+    }
+    await laneRef.current.ready();
+    return laneRef.current;
+  }, []);
+
+  // 페이지를 떠나면 레인을 종료한다(워커 프로세스 + 열린 wasm 문서 회수).
+  useEffect(() => {
+    return () => {
+      laneRef.current?.dispose();
+      laneRef.current = null;
+    };
   }, []);
 
   // ── 1) 템플릿 업로드 → 결정론 인스펙션(fill-map 초안) ─────────────────────────────────────────
@@ -272,6 +283,8 @@ export default function BulkFillPage() {
       setError(null);
       setNotice(null);
       setResults([]);
+      setPreviews({});
+      setProgress(null);
       setWarnings(null);
       setSelectedId(null);
       setBusy("양식 분석 중…");
@@ -516,15 +529,21 @@ export default function BulkFillPage() {
     [tpl],
   );
 
-  // ── 2) 생성: 인원별 채움 → 재개봉 검증(값+쪽수+형식) → 프리뷰 렌더+하이라이트 ────────────────
+  // ── 2) 생성: 인원별 채움 → 재개봉 검증(값+쪽수+형식) ───────────────────────────────────────────
+  // 073 2단계: 이 루프의 엔진 호출은 전부 **워커 레인**으로 나간다 — 메인스레드는 RPC 응답만 기다리므로
+  // 100명 배치에서도 프레임이 멈추지 않는다(1단계의 MessageChannel yield는 리페인트만 겨우 확보했다).
+  // 검수 SVG는 여기서 만들지 않는다 — 캐러셀 진입 시 lazy 렌더(아래 useEffect). 검증 3종은 그대로
+  // 생성 시점에 한다(미루면 report.json이 거짓이 된다).
   const generate = useCallback(async () => {
     if (!tpl) return;
     setError(null);
     setWarnings(null);
-    setBusy("생성 중…");
-    const out: RowResult[] = []; // try 밖 — 중간에 접혀도 완성분은 보존한다
+    setResults([]);
+    setPreviews({});
+    setProgress(null);
+    setBusy("엔진 준비 중…");
+    let partial: RowResult[] = []; // try 밖 — 중간에 접혀도 완성분은 보존한다
     try {
-      await ensureEngine();
       const rows = parseRoster(rosterText);
       const active = fields.filter((f) => f.use);
       const dup = active.map((f) => f.key).filter((k, i, a) => a.indexOf(k) !== i);
@@ -534,148 +553,108 @@ export default function BulkFillPage() {
       const diag = diagnoseKeys(rosterColumns(rows), active.map((f) => f.key));
       const diagMessage = unmatchedMessage(diag);
       setWarnings(diagMessage ? { codes: unmatchedReasons(diag), message: diagMessage } : null);
-      // 쪽수 기준선 = 무편집 왕복(CLI와 동일 — .hwp 템플릿의 변환 리플로를 정직 반영)
-      const b0 = HwpDoc.open(tpl.bytes, tpl.name);
-      const noEdit = b0.toHwpx();
-      b0.free();
-      const bl = HwpDoc.open(new Uint8Array(noEdit), "baseline.hwpx");
-      const basePages = bl.pageCount();
-      bl.free();
-      setBaseline(basePages);
 
+      const lane = await ensureLane();
+      // 형식 규정은 엔진과 무관한 순수 검사 — 레인 계약(FillTarget)에 클로저로 실어 보낸다.
+      const targets: FillTarget[] = active.map((f) => ({
+        key: f.key,
+        pin: f.pin,
+        required: f.required,
+        example: f.example,
+        formatError: (value: string) => {
+          const spec = SPEC_TYPES[f.specType];
+          return spec?.re && !spec.re.test(value) ? `${spec.label} 형식 아님: "${value}"` : null;
+        },
+      }));
       const nameKey = active.find((f) => f.key === "성명" || f.key === "이름")?.key ?? active[0]?.key;
       const personOf = (row: Record<string, string>, i: number) => String((nameKey && row[nameKey]) || row[Object.keys(row)[0]] || `${i + 1}`);
       const fileNameOf = (person: string, i: number) => `${String(i + 1).padStart(3, "0")}_${person.replace(/[/\\:*?"<>|\n]/g, "_")}.hwpx`;
-      // 열려 있는 wasm 문서 — 행이 중간에 죽으면 호출부 catch가 회수한다(누수 방지).
-      const live: HwpDoc[] = [];
-      const openDoc = (bytes: Uint8Array, name: string) => {
-        const d = HwpDoc.open(bytes, name);
-        live.push(d);
-        return d;
-      };
-      const closeDoc = (d: HwpDoc) => {
-        const j = live.indexOf(d);
-        if (j >= 0) live.splice(j, 1);
-        d.free();
-      };
-      /** 한 사람분 — 채움 → 산출 → 재개봉 검증 → 프리뷰. 여기서 던진 예외는 그 행만 실패로 접는다. */
-      const buildRow = (row: Record<string, string>, i: number): RowResult => {
-        const reasons: string[] = [];
-        const doc = openDoc(tpl.bytes, tpl.name);
-        const filled: { key: string; value: string; addr: string; example: string }[] = [];
-        for (const f of active) {
-          const value = (row[f.key] ?? "").trim();
-          if (!value) {
-            if (f.required) reasons.push(`missing_required:${f.key}`);
-            continue;
-          }
-          const spec = SPEC_TYPES[f.specType];
-          if (spec?.re && !spec.re.test(value)) reasons.push(`format_mismatch:${f.key}(${spec.label} 형식 아님: "${value}")`);
-          try {
-            doc.applyIntent({ intent: "SetTableCell", section: f.pin.section, index: f.pin.index, row: f.pin.row, col: f.pin.col, text: value });
-            filled.push({ key: f.key, value, addr: `s${f.pin.section}·b${f.pin.index}·r${f.pin.row}c${f.pin.col}`, example: f.example });
-          } catch (e) {
-            reasons.push(`apply_failed:${f.key}:${e}`);
-          }
-        }
-        const bytes = new Uint8Array(doc.toHwpx());
-        closeDoc(doc);
-
-        // 재개봉 검증 + 프리뷰(첫 채움 셀이 있는 페이지 렌더 + 셀 경계 하이라이트 — 전부 지오메트리 API)
-        const check = openDoc(bytes, "check.hwpx");
-        const pages = check.pageCount();
-        if (pages !== basePages) reasons.push(`overflow:pages_${pages}_vs_${basePages}`);
-        let svg = "";
-        let pageW = 1;
-        let pageH = 1;
-        const highlights: RowResult["highlights"] = [];
-        if (filled.length) {
-          // 산출물에서 채운 값의 셀을 재탐색(왕복 후 블록 인덱스 재배열을 값 스캔으로 흡수 — 073 함정 ②)
-          const checkTables = allTables(check);
-          let target: { section: number; block: number } | null = null;
-          for (const t of checkTables) {
-            const g = check.tableGrid(t.section, t.block);
-            if (g?.cells.some((c) => c.text === filled[0].value)) {
-              target = { section: g.section, block: g.block };
-              break;
-            }
-          }
-          for (const f of filled) {
-            const found = checkTables.some((t) => check.tableGrid(t.section, t.block)?.cells.some((c) => c.text === f.value));
-            if (!found) reasons.push(`value_not_found:${f.key}`);
-          }
-          if (target) {
-            for (let p = 0; p < pages; p++) {
-              const hits = check.blocksInRect(p, 0, 0, 100000, 100000) as { section: number; block: number }[];
-              if (!hits.some((h) => h.section === target!.section && h.block === target!.block)) continue;
-              svg = check.renderPageSvgSanitized(p);
-              const m = svg.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/);
-              pageW = m ? parseFloat(m[1]) : 1;
-              pageH = m ? parseFloat(m[2]) : 1;
-              const cols = check.tableColBoundaries(p, target.section, target.block);
-              const rowsB = check.tableRowBoundaries(p, target.section, target.block);
-              if (cols && rowsB) {
-                const g = check.tableGrid(target.section, target.block);
-                for (const f of filled) {
-                  const cell = g?.cells.find((c) => c.text === f.value);
-                  if (!cell || cell.col + 1 >= cols.length || cell.row + 1 >= rowsB.length) continue;
-                  highlights.push({ x: cols[cell.col], y: rowsB[cell.row], w: cols[cell.col + 1] - cols[cell.col], h: rowsB[cell.row + 1] - rowsB[cell.row], key: f.key, value: f.value });
-                }
-              }
-              break;
-            }
-          }
-        }
-        closeDoc(check);
-        const person = personOf(row, i);
-        return {
-          name: person,
-          fileName: fileNameOf(person, i),
-          bytes,
-          reasons,
-          svg,
-          pageW,
-          pageH,
-          highlights,
-          values: filled,
-        };
+      const toUi = (c: RowCore): RowResult => {
+        const person = personOf(rows[c.index] ?? {}, c.index);
+        return { name: person, fileName: fileNameOf(person, c.index), bytes: c.bytes, reasons: c.reasons, values: c.values, failed: c.failed };
       };
 
-      for (let i = 0; i < rows.length; i++) {
-        // 매 행 프레임 양보 — 진행률이 실제로 다시 그려지고 탭이 살아 있다(동기 루프 프리즈 해소 1단계).
-        // 순서 주의: 라벨을 먼저 올리고 양보해야 "지금 만드는 중인 행"이 화면에 뜬다.
-        setBusy(`생성 중… ${i + 1}/${rows.length}`);
-        await yieldToUi();
-        try {
-          out.push(buildRow(rows[i], i));
-        } catch (e) {
-          // 한 행이 죽어도 배치를 접지 않는다 — 완성분은 그대로 두고 그 행만 사유코드로 보고.
-          for (const d of live.splice(0)) {
-            try {
-              d.free();
-            } catch {
-              /* 이미 회수됨 */
-            }
-          }
-          const person = personOf(rows[i], i);
-          out.push({ name: person, fileName: fileNameOf(person, i), bytes: new Uint8Array(0), reasons: [`row_failed:${e}`], svg: "", pageW: 1, pageH: 1, highlights: [], values: [], failed: true });
-        }
-      }
+      // 쪽수 기준선 = 무편집 왕복(CLI와 동일 — .hwp 템플릿의 변환 리플로를 정직 반영)
+      setBusy("기준선 확인 중…");
+      const basePages = await runLocked(() => baselinePages(lane, tpl.bytes, tpl.name));
+      setBaseline(basePages);
+
+      setBusy("생성 중…");
+      setProgress({ done: 0, total: rows.length });
+      const batch = await runLocked(() =>
+        generateBatch(lane, {
+          templateBytes: tpl.bytes,
+          templateName: tpl.name,
+          targets,
+          rows,
+          basePages,
+          onProgress: (done, total) => setProgress({ done, total }),
+          // 청크 반영 — 완성분이 흘러들어오므로 배치가 중간에 접혀도 화면에 이미 남아 있다.
+          onChunk: (done) => {
+            partial = done.map(toUi);
+            setResults(partial);
+          },
+          recover: () => lane.reset(), // wasm 트랩/워커 사망 → 되살리고 다음 행 계속
+          beforeRow: yieldToUi,
+        }),
+      );
+      lane.release(); // 워커측 문서만 회수(워커·wasm 인스턴스는 프리뷰용으로 살려둔다)
+      const out = batch.rows.map(toUi);
       setResults(out);
       setIdx(0);
       const failed = out.filter((r) => r.failed).length;
-      if (failed) setNotice(`${failed}건이 생성 중 실패했습니다 — 나머지 ${out.length - failed}부는 그대로 남아 있고, 실패 행은 report.json에 row_failed로 기록됩니다.`);
+      if (batch.aborted) setNotice(`생성이 중단됐습니다 — 완성된 ${out.length}부는 그대로 남아 있습니다.`);
+      else if (failed) setNotice(`${failed}건이 생성 중 실패했습니다 — 나머지 ${out.length - failed}부는 그대로 남아 있고, 실패 행은 report.json에 row_failed로 기록됩니다.`);
     } catch (e) {
       // 배치 전체가 접힌 경우에도 이미 만든 부수는 살린다(다시 처음부터 돌리지 않아도 되게).
-      if (out.length) {
-        setResults(out);
+      if (partial.length) {
+        setResults(partial);
         setIdx(0);
       }
-      setError(`생성 실패${out.length ? ` (완성된 ${out.length}부는 보존)` : ""}: ${e}`);
+      setError(`생성 실패${partial.length ? ` (완성된 ${partial.length}부는 보존)` : ""}: ${e}`);
     } finally {
       setBusy(null);
+      setProgress(null);
     }
-  }, [tpl, fields, rosterText, ensureEngine]);
+  }, [tpl, fields, rosterText, ensureLane, runLocked]);
+
+  // ── 검수 프리뷰 lazy 로드(073 2단계 ②) ────────────────────────────────────────────────────────
+  // 캐러셀이 보고 있는 한 부만 산출물 바이트를 다시 열어 렌더한다. 생성 중에는 레인이 배치를 돌고
+  // 있으므로 건드리지 않는다(문서 1개 계약 — runLocked가 순서를 잡는다).
+  useEffect(() => {
+    if (busy) return;
+    const row = results[idx];
+    if (!row || row.failed || !row.values.length) return;
+    if (previews[idx] !== undefined) return;
+    let cancelled = false;
+    void runLocked(async () => {
+      const lane = laneRef.current;
+      if (!lane || cancelled) return;
+      let entry: PreviewEntry = null;
+      try {
+        const p = await renderRowPreview(lane, row.bytes, row.values);
+        // 엔진 SVG는 문서 유래 미신뢰 출력 — 메인스레드에서 sanitize 후에만 DOM에 넣는다(R7).
+        if (p) entry = { ...p, svg: sanitizeSvg(p.svg) };
+      } catch {
+        entry = null; // 프리뷰 실패는 산출물 품질과 무관 — 검증 결과(report)는 이미 확정돼 있다
+      } finally {
+        lane.release();
+      }
+      if (cancelled) return;
+      // 현재 인덱스 주변만 남긴다 — 100부를 넘겨봐도 SVG 보유량은 상수.
+      setPreviews((prev) => {
+        const next: Record<number, PreviewEntry> = { [idx]: entry };
+        for (const k of Object.keys(prev)) {
+          const n = Number(k);
+          if (n !== idx && Math.abs(n - idx) <= PREVIEW_KEEP) next[n] = prev[n];
+        }
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [busy, idx, results, previews, runLocked]);
 
   const downloadZip = useCallback(() => {
     const created = results.filter((r) => !r.failed);
@@ -701,6 +680,7 @@ export default function BulkFillPage() {
   }, [results, tpl, baseline, warnings]);
 
   const cur = results[idx];
+  const preview = previews[idx]; // undefined = 아직 안 만듦(lazy), null = 표시할 페이지 없음
   const review = results.filter((r) => r.reasons.length > 0).length;
   const createdCount = results.filter((r) => !r.failed).length;
   const selected = fields.find((f) => f.id === selectedId) ?? null;
@@ -926,8 +906,15 @@ export default function BulkFillPage() {
             <textarea className="bulk-roster" data-testid="bulk-roster" value={rosterText} onChange={(e) => setRosterText(e.target.value)} rows={9} spellCheck={false}
               placeholder={fields.filter((f) => f.use).slice(0, 3).map((f) => `${f.key}: 값`).join("\n") + "\n\n(빈 줄로 사람 구분 — CSV/엑셀 붙여넣기/JSON도 자동 인식)"} />
             <button className="bulk-btn accent big" data-testid="bulk-generate" disabled={!!busy || fields.filter((f) => f.use).length === 0 || !rosterText.trim()} onClick={() => void generate()}>
-              {busy ?? `⚡ 완성본 만들기 + 검증`}
+              {busy ? `${busy}${progress ? ` ${progress.done}/${progress.total}` : ""}` : `⚡ 완성본 만들기 + 검증`}
             </button>
+            {/* 진행률 — 워커 경유라 배치 중에도 이 막대가 계속 움직인다(메인스레드 점유 0). */}
+            {busy && progress && (
+              <div className="bulk-progress" data-testid="bulk-progress" role="progressbar" aria-valuenow={progress.done} aria-valuemin={0} aria-valuemax={progress.total}>
+                <div className="bar" style={{ width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%` }} />
+                <span>{progress.done} / {progress.total}부 — 생성은 워커 스레드에서 돕니다(이 화면은 계속 조작할 수 있습니다)</span>
+              </div>
+            )}
             {warnings && (
               <div className="bulk-fmtnote warn" data-testid="bulk-unmatched">
                 ⚠ <b>이름이 맞지 않는 항목이 있습니다</b> — {warnings.message}
@@ -949,15 +936,21 @@ export default function BulkFillPage() {
             </div>
             <div className="bulk-review">
               <div className="bulk-doc">
-                {cur.svg ? (
+                {preview ? (
                   <div className="bulk-pagewrap">
-                    <div className="bulk-page" dangerouslySetInnerHTML={{ __html: cur.svg }} />
-                    {cur.highlights.map((h, i) => (
-                      <div key={i} className="bulk-hl" style={{ left: `${(h.x / cur.pageW) * 100}%`, top: `${(h.y / cur.pageH) * 100}%`, width: `${(h.w / cur.pageW) * 100}%`, height: `${(h.h / cur.pageH) * 100}%` }} title={`${h.key}: ${h.value}`} />
+                    <div className="bulk-page" dangerouslySetInnerHTML={{ __html: preview.svg }} />
+                    {preview.highlights.map((h, i) => (
+                      <div key={i} className="bulk-hl" style={{ left: `${(h.x / preview.pageW) * 100}%`, top: `${(h.y / preview.pageH) * 100}%`, width: `${(h.w / preview.pageW) * 100}%`, height: `${(h.h / preview.pageH) * 100}%` }} title={`${h.key}: ${h.value}`} />
                     ))}
                   </div>
                 ) : (
-                  <div className="bulk-nopreview">{cur.failed ? "이 행은 생성 도중 실패했습니다 — zip에서 제외되고 report.json에 row_failed로 남습니다(나머지 부수는 그대로)" : "미리보기 페이지를 찾지 못했습니다(값은 report로 검증됨)"}</div>
+                  <div className="bulk-nopreview" data-testid="bulk-preview-state">
+                    {cur.failed
+                      ? "이 행은 생성 도중 실패했습니다 — zip에서 제외되고 report.json에 row_failed로 남습니다(나머지 부수는 그대로)"
+                      : preview === null
+                        ? "미리보기 페이지를 찾지 못했습니다(값은 report로 검증됨)"
+                        : "미리보기를 만드는 중… (검수 화면에 들어온 부수만 렌더합니다 — 산출물·검증은 이미 끝났습니다)"}
+                  </div>
                 )}
               </div>
               <aside className="bulk-values" data-testid="bulk-values">
@@ -1102,6 +1095,9 @@ export default function BulkFillPage() {
         .bulk-keychip.extra { color: #fca5a5; background: rgba(239,68,68,0.09); border-color: rgba(239,68,68,0.34); }
         .bulk-pii { margin-top: 10px; font-size: 11.5px; line-height: 1.65; color: #d9b96a; background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.28); border-radius: 9px; padding: 8px 11px; }
         .bulk-pii b { color: inherit; }
+        .bulk-progress { position: relative; margin-top: 12px; padding: 9px 13px; border: 1px solid #232b3a; border-radius: 10px; background: #0d1118; overflow: hidden; }
+        .bulk-progress .bar { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, rgba(124,58,237,0.34), rgba(109,40,217,0.2)); transition: width 0.2s linear; }
+        .bulk-progress span { position: relative; font-size: 12px; color: #c4b5fd; }
         .bulk-roster-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
         .bulk-roster { width: 100%; font: 12.5px/1.7 ui-monospace, SFMono-Regular, monospace; padding: 12px 14px; border-radius: 12px; border: 1px solid #232b3a; background: #0d1118; color: #dfe4ec; box-sizing: border-box; margin-bottom: 12px; transition: border-color 0.15s; }
         .bulk-roster:focus { outline: none; border-color: #7c3aed; }
