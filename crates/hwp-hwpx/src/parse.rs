@@ -556,6 +556,10 @@ struct ParaAccum {
     /// a `FieldEnd` that floats ahead of its `FieldBegin` would invert a hyperlink range.
     pending: Vec<Inline>,
     hosts_table: bool, // `<hp:tbl>` 를 품었다 → 표 앵커 후보
+    /// `<hp:p pageBreak="1">` — 이 문단 **앞에서** 쪽을 나눈다(한글 "쪽 나누기 앞에서"). 문단
+    /// PER-INSTANCE 속성이라 공유 `paraPr`(`pageBreakBefore`)로는 표현할 수 없다 — 정부 양식류가
+    /// 장/절을 새 쪽에서 시작시키는 주 수단이라 이걸 버리면 쪽수가 그만큼 모자란다(이슈 080).
+    page_break: bool,
 }
 
 /// One flushed run's provenance — where its XML lives and whether it is verbatim-only (W4.2).
@@ -583,6 +587,16 @@ enum SubFrame {
         suffix_char: u16,
         inst_id: u32,
     },
+}
+
+/// `<hp:p pageBreak="…">` 을 불리언으로 (이슈 080). OWPML 은 `0|1` 을 쓰지만 일부 변환기가
+/// `true` 를 쓰기도 한다. **`<hp:tbl pageBreak="CELL|TABLE|NONE">` 과는 다른 속성**이라
+/// (표가 쪽을 넘을 때 어떻게 쪼개는지) 이 helper 는 문단 태그에서만 부른다.
+fn is_page_break_attr(v: Option<&str>) -> bool {
+    matches!(
+        v.unwrap_or("").trim().to_ascii_lowercase().as_str(),
+        "1" | "true"
+    )
 }
 
 /// `<hp:header applyPageType="BOTH|EVEN|ODD">` → [`ApplyPage`] (미지정/미상은 BOTH).
@@ -702,6 +716,7 @@ fn parse_section(
                         style: attr_str(&e, b"styleIDRef"),
                         id: attr_str(&e, b"id"),
                         simple: true,
+                        page_break: is_page_break_attr(attr_str(&e, b"pageBreak").as_deref()),
                         ..Default::default()
                     }),
                     b"run" => {
@@ -1047,6 +1062,12 @@ fn parse_section(
                         if let Some(target) = blocks.last_mut() {
                             target.push(Block::Paragraph(Paragraph {
                                 is_table_anchor: p.hosts_table && text_empty,
+                                // `<hp:p pageBreak="1">` = 쪽 나누기 앞에서(이슈 080). 표 호스트
+                                // 앵커에도 그대로 싣는다 — 우리 블록 순서는 `[Table, 앵커]` 라
+                                // 앵커에서 그대로 실행하면 break 가 표 **뒤**에 걸린다. 그 보정은
+                                // 조판 3경로가 공유하는 `hwp_typeset::section_page_breaks` 한 곳에서
+                                // 한다(순서/직렬화 해자를 건드리지 않는 유일한 자리).
+                                page_break_before: p.page_break,
                                 runs: p.runs,
                                 // Capture paraPrIDRef for EVERY paragraph — not just top-level
                                 // `source` — so nested cell paragraphs' align/indent/line-spacing
@@ -1181,6 +1202,11 @@ fn parse_section(
                             let stored = stored_row_heights_hwpx(&f.geoms, f.table.rows);
                             if f.no_adjust {
                                 f.table.row_heights = stored;
+                                // 자동 맞춤 안 함 = 저장 높이가 **정확값**이다(바닥이 아니라). 한컴은
+                                // 넘치는 내용을 잘라내지 행을 늘리지 않는다 — 바닥으로만 쓰면 우리
+                                // 내용맞춤 높이가 이겨 표가 부풀고 쪽이 일찍 넘어간다(이슈 080 실측:
+                                // bizinfo-mss 붙임1 표지표 19×7 이 68040 vs 한컴 65356, +4.5%).
+                                f.table.fixed_row_heights = true;
                             } else {
                                 f.table.stored_row_heights = stored;
                             }
@@ -2133,6 +2159,49 @@ pub(crate) mod tests {
             vec![800],
             "fixed table keeps the cellSz height floor"
         );
+        // 이슈 080: 자동 맞춤 안 함 = 저장 높이가 **정확값**이라는 표시도 함께 선다
+        // (조판은 이걸 보고 바닥 대신 고정으로 쓴다 — `hwp_typeset::apply_row_overrides`).
+        assert!(t.fixed_row_heights, "noAdjust=1 → 고정 행 높이 표시");
+    }
+
+    /// 이슈 080 — `<hp:p pageBreak="1">`(쪽 나누기 앞에서)은 문단 PER-INSTANCE 속성이라 공유
+    /// `paraPr` 로는 표현할 수 없다. 안 읽으면 정부 양식류의 장/절 개쪽이 통째로 사라진다.
+    #[test]
+    fn paragraph_page_break_attribute_is_captured() {
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p id="1" pageBreak="0"><hp:run><hp:t>첫 쪽</hp:t></hp:run></hp:p><hp:p id="2" pageBreak="1"><hp:run><hp:t>새 쪽</hp:t></hp:run></hp:p><hp:p id="3"><hp:run><hp:t>속성 없음</hp:t></hp:run></hp:p></hs:sec>"#;
+        let mut blocks = Vec::new();
+        parse_section(xml, &mut blocks, &mut Vec::new(), &Default::default()).unwrap();
+        let flags: Vec<bool> = blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Paragraph(p) => Some(p.page_break_before),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(flags, vec![false, true, false]);
+    }
+
+    /// 표만 품은 호스트 문단의 `pageBreak="1"` 도 그대로 실린다. 우리 블록 순서는 `[Table, 앵커]`
+    /// 라 이 플래그를 표 **앞**으로 옮기는 보정은 조판 3경로가 공유하는
+    /// `hwp_typeset::section_page_breaks` 가 한다 — 파서는 순서/스팬을 건드리지 않는다(왕복 해자).
+    #[test]
+    fn table_host_anchor_carries_its_page_break() {
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p id="1"><hp:run><hp:t>앞</hp:t></hp:run></hp:p><hp:p id="2" pageBreak="1"><hp:run charPrIDRef="0"><hp:tbl rowCnt="1" colCnt="1"><hp:tr><hp:tc><hp:subList><hp:p><hp:run><hp:t>셀</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="1000" height="500"/></hp:tc></hp:tr></hp:tbl><hp:t></hp:t></hp:run></hp:p></hs:sec>"#;
+        let mut blocks = Vec::new();
+        parse_section(xml, &mut blocks, &mut Vec::new(), &Default::default()).unwrap();
+        // 순서 확인 — 표가 먼저, 호스트 앵커가 뒤(왕복 해자의 전제).
+        assert!(matches!(blocks[1], Block::Table(_)));
+        let Block::Paragraph(anchor) = &blocks[2] else {
+            panic!("호스트 앵커");
+        };
+        assert!(anchor.is_table_anchor && anchor.page_break_before);
+        // 앵커의 `<hp:p>` 스팬이 표의 `<hp:tbl>` 스팬을 감싼다 = 조판이 소유 관계를 판정하는 근거.
+        let Block::Table(t) = &blocks[1] else {
+            unreachable!()
+        };
+        let (ps, pe) = anchor.source.as_ref().expect("스팬").span;
+        let (ts, te) = t.src_span.expect("표 스팬");
+        assert!(ps < ts && te <= pe, "표 스팬이 호스트 문단 스팬 안에 있다");
     }
 
     /// Batch C: a cell resolves its `borderFillIDRef` against the border pool → per-edge borders,

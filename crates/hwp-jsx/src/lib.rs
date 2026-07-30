@@ -1043,6 +1043,8 @@ fn parse_table(el: &JsxElement) -> Result<Table> {
         row_heights,
         // Render-IR only (HWPX auto-fit floor) — the JSX surface never carries it (defaults empty).
         stored_row_heights: Vec::new(),
+        // Render-IR only (HWPX `noAdjust="1"`) — a JSX table's row heights stay FLOORS (이슈 080).
+        fixed_row_heights: false,
         // A JSX projection carries no op-edit history — geometry re-emit fidelity is the HWPX lane's.
         geometry_edited: false,
         outer_margin_top: el

@@ -351,15 +351,15 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
             pages.push(PlacedPage::default());
         }
         set_page_size(pages.last_mut().unwrap(), page);
+        // "쪽 나누기 앞에서" — NaiveLayout/block_pages 와 공유하는 단일 판정(이슈 080, LOCKSTEP).
+        let brk = crate::section_page_breaks(sec, doc);
         let mut vert = 0.0f64; // page-relative vertical cursor (within the body box)
 
         for (blk_idx, block) in sec.blocks.iter().enumerate() {
             match block {
                 Block::Paragraph(p) => {
                     let ps = doc.para_shapes.get(p.para_shape);
-                    if (p.page_break_before || ps.map(|s| s.page_break_before).unwrap_or(false))
-                        && vert > 0.0
-                    {
+                    if brk[blk_idx] && vert > 0.0 {
                         new_page(&mut pages, page);
                         vert = 0.0;
                     }
@@ -405,6 +405,11 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                     started = true;
                 }
                 Block::Table(t) => {
+                    // 표 앞 강제 개쪽(이슈 080) — 바깥 여백보다 먼저. NaiveLayout/block_pages 동일.
+                    if brk[blk_idx] && vert > 0.0 {
+                        new_page(&mut pages, page);
+                        vert = 0.0;
+                    }
                     // Promote a 1×1 frame-wrapper (자가진단표) to its inner table so a tall nested grid
                     // splits at row granularity instead of bumping whole; the outer box rides along as
                     // `frame` and is redrawn per page fragment. Identical predicate in NaiveLayout +
@@ -488,13 +493,13 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
         }
         let mut vert = 0.0f64;
         let mut sec_pages = Vec::with_capacity(sec.blocks.len());
-        for block in &sec.blocks {
+        // "쪽 나누기 앞에서" — NaiveLayout/place_doc 와 공유하는 단일 판정(이슈 080, LOCKSTEP).
+        let brk = crate::section_page_breaks(sec, doc);
+        for (blk_idx, block) in sec.blocks.iter().enumerate() {
             match block {
                 Block::Paragraph(p) => {
                     let ps = doc.para_shapes.get(p.para_shape);
-                    if (p.page_break_before || ps.map(|s| s.page_break_before).unwrap_or(false))
-                        && vert > 0.0
-                    {
+                    if brk[blk_idx] && vert > 0.0 {
                         page_idx += 1;
                         vert = 0.0;
                     }
@@ -530,6 +535,11 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
                     started = true;
                 }
                 Block::Table(t) => {
+                    // 표 앞 강제 개쪽(이슈 080) — 바깥 여백보다 먼저. NaiveLayout/place_doc 동일.
+                    if brk[blk_idx] && vert > 0.0 {
+                        page_idx += 1;
+                        vert = 0.0;
+                    }
                     // Promote a 1×1 frame-wrapper (자가진단표) to its inner table — identical to place_doc +
                     // NaiveLayout so the start pages stay lockstep.
                     let unwrapped = crate::unwrap_frame_table(t);
@@ -2288,6 +2298,114 @@ mod tests {
             col_widths: vec![1],
             ..Default::default()
         }
+    }
+
+    /// 이슈 080 — 표 호스트 앵커에 걸린 `<hp:p pageBreak="1">` 은 **표 앞**에서 쪽을 넘겨야 한다.
+    /// 우리 HWPX 블록 순서는 왕복 해자 때문에 `[Table, 앵커]` 라, 앵커 자리에서 실행하면 쪽이 표
+    /// **뒤**에서 넘어간다(표만 이전 쪽에 남는다). 판정은 세 조판 경로가 공유하는
+    /// [`crate::section_page_breaks`] 하나뿐이므로 LOCKSTEP 도 여기서 함께 잠근다.
+    #[test]
+    fn anchor_page_break_hoists_to_its_table_in_all_three_paginators() {
+        use crate::LayoutEngine;
+        // 앵커의 `<hp:p>` 스팬(100..900)이 표의 `<hp:tbl>` 스팬(200..800)을 감싼다 = 그 표의 주인.
+        let mut t = n_row_table(2);
+        t.src_span = Some((200, 800));
+        let anchor = Paragraph {
+            is_table_anchor: true,
+            page_break_before: true,
+            source: Some(ParaSource {
+                span: (100, 900),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let doc = doc_with_page(
+            vec![
+                Block::Paragraph(para("앞 문단")),
+                Block::Table(t),
+                Block::Paragraph(anchor),
+            ],
+            800_000, // 아주 긴 쪽 — 흐름 때문에 넘어갈 일은 없다(강제 개쪽만 검증).
+        );
+        assert_eq!(
+            crate::section_page_breaks(&doc.sections[0], &doc),
+            vec![false, true, false],
+            "break 는 앵커(2번)가 아니라 그 표(1번) 앞에 선다"
+        );
+        // ① block_pages
+        assert_eq!(
+            block_pages(&doc, &ApproxFontMetrics)[0],
+            vec![0, 1, 1],
+            "표와 앵커가 2쪽으로 함께 넘어간다"
+        );
+        // ② place_doc — 표는 2쪽에만 그려진다.
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        assert_eq!(placed.pages.len(), 2);
+        assert!(placed.pages[0].tables.is_empty(), "1쪽에는 표가 없다");
+        assert!(!placed.pages[1].tables.is_empty(), "표는 2쪽 맨 위");
+        // ③ NaiveLayout(오라클) — 쪽수 LOCKSTEP.
+        assert_eq!(
+            crate::NaiveLayout
+                .layout(&doc, &ApproxFontMetrics)
+                .unwrap()
+                .pages
+                .len(),
+            2
+        );
+    }
+
+    /// 같은 플래그라도 **.hwp lift 순서**(`[앵커, Table]`)에서는 끌어올릴 것이 없다 — 앵커가
+    /// 이미 표 앞이라 제자리에서 실행해야 한다. 소스 스팬이 없으면(lift/합성) 판정은 그대로 false.
+    #[test]
+    fn lift_order_anchor_keeps_its_break_in_place() {
+        let anchor = Paragraph {
+            is_table_anchor: true,
+            page_break_before: true,
+            ..Default::default()
+        };
+        let doc = doc_with_page(
+            vec![
+                Block::Paragraph(para("앞 문단")),
+                Block::Paragraph(anchor),
+                Block::Table(n_row_table(2)),
+            ],
+            800_000,
+        );
+        assert_eq!(
+            crate::section_page_breaks(&doc.sections[0], &doc),
+            vec![false, true, false],
+            "lift 순서에서는 앵커 자리가 곧 표 앞이다"
+        );
+        assert_eq!(block_pages(&doc, &ApproxFontMetrics)[0], vec![0, 1, 1]);
+    }
+
+    /// 이슈 080 — `<hp:tbl noAdjust="1">`(자동 맞춤 안 함) 표의 저장 행 높이는 **정확값**이다.
+    /// 바닥으로만 쓰면 우리 내용맞춤 높이가 이겨 표가 부풀고 쪽이 일찍 넘어간다.
+    #[test]
+    fn fixed_row_height_is_exact_not_a_floor() {
+        let placed_h = |t: Table| -> f64 {
+            let doc = doc_with_page(vec![Block::Table(t)], 800_000);
+            place_doc(&doc, &ApproxFontMetrics).pages[0]
+                .tables
+                .first()
+                .expect("표")
+                .h
+        };
+        let mut t = n_row_table(1);
+        // 한 줄짜리 저장 높이보다 확실히 큰 내용(5문단)을 넣는다.
+        t.cells[0].blocks = (0..5).map(|_| Block::Paragraph(para("행"))).collect();
+        t.row_heights = vec![500];
+        let content_h = placed_h(t.clone());
+        assert!(
+            content_h > 500.0,
+            "자동 맞춤(기본)은 저장 높이를 바닥으로만 쓴다 — 내용이 이긴다: {content_h}"
+        );
+        t.fixed_row_heights = true;
+        assert_eq!(
+            placed_h(t),
+            500.0,
+            "noAdjust=1 은 저장 높이가 정확값 — 넘치는 내용은 한컴처럼 잘린다"
+        );
     }
 
     #[test]

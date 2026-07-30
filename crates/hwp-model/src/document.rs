@@ -408,6 +408,14 @@ pub struct Table {
     /// serializer (issue 054, F2): `<hp:cellSz>` re-emits these stored heights so a reopened
     /// conversion lifts back the SAME floors (round-trip pagination stability).
     pub row_heights: Vec<HwpUnit>,
+    /// RENDER-IR ONLY (never serialized): this table declared `<hp:tbl noAdjust="1">` = **자동 맞춤 안
+    /// 함**, so its stored [`Table::row_heights`] are the EXACT row heights Hancom draws, not a floor —
+    /// content taller than a row is clipped by Hancom, not allowed to grow the row (이슈 080).
+    ///
+    /// Only the HWPX parser sets this. The `.hwp` lift/synth paths leave it `false` and keep the
+    /// historical FLOOR semantics, so the .hwp 게이트(8==8/18==18/24==24)는 구조적으로 무영향이다.
+    /// Never serialized (`noAdjust` rides the verbatim `src_span` round trip).
+    pub fixed_row_heights: bool,
     /// RENDER-IR ONLY (never serialized): the stored `<hp:cellSz height>` floor for an AUTO-FIT
     /// (`noAdjust="0"`) HWPX table — `rows` entries, or EMPTY for fixed/lift/synth tables. The HWPX
     /// parser records this SEPARATELY from `row_heights` (which stays content-driven for auto-fit so the

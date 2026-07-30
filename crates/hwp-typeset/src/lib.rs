@@ -62,6 +62,60 @@ pub fn body_box(page: &PageSetup) -> (f64, f64, f64, f64) {
     (left as f64, top as f64, w, h)
 }
 
+/// 강제 쪽 나누기("쪽 나누기 앞에서")의 **블록 단위 단일 진실** — `sec.blocks[i]` 앞에서 쪽을
+/// 넘겨야 하면 `out[i] == true`. `NaiveLayout`·[`place_doc`]·[`block_pages`] 셋이 전부 이 하나를
+/// 거쳐야 LOCKSTEP 이 구조적으로 보장된다(불변식 #2 — 세 경로에 같은 판정을 세 번 손으로 적으면
+/// 언젠가 갈린다).
+///
+/// 왜 단순히 `Paragraph::page_break_before` 를 보면 안 되나(이슈 080):
+/// HWPX 파서는 왕복 바이트 보존 해자 때문에 표 호스트 문단을 `[Table, 호스트문단]` 순서로 낸다
+/// (`</hp:tbl>` 이 `</hp:p>` 보다 먼저 닫힌다 — parse.rs 주석 참조). 그래서 `<hp:p pageBreak="1">`
+/// 이 표만 품은 호스트 문단에 걸려 있으면, 그 문단 자리에서 break 를 실행할 경우 쪽이 표 **뒤**에서
+/// 넘어간다(원본은 표 **앞**). 여기서 그 break 를 자기 표의 첫 블록으로 **끌어올린다**.
+///
+/// 판정은 추측이 아니라 소스 스팬 포함 관계다: 호스트 문단의 `<hp:p>` 스팬이 그 표의 `<hp:tbl>`
+/// 스팬을 감싸고 있으면 그 표는 이 문단의 소유다. 스팬이 없는 .hwp lift 경로는 애초에 순서가
+/// `[앵커, Table]` 라 끌어올릴 것이 없고, 이 판정도 자연히 false 가 된다(무해).
+pub fn section_page_breaks(sec: &Section, doc: &SemanticDoc) -> Vec<bool> {
+    let mut out = vec![false; sec.blocks.len()];
+    for (i, b) in sec.blocks.iter().enumerate() {
+        let Block::Paragraph(p) = b else { continue };
+        let ps = doc.para_shapes.get(p.para_shape);
+        // per-instance 플래그(HWP column_type Page/Section · HWPX `hp:p pageBreak`) OR
+        // 공유 para_shape 의 attr1 bit19.
+        if !(p.page_break_before || ps.map(|s| s.page_break_before).unwrap_or(false)) {
+            continue;
+        }
+        out[hoist_to_owned_table(sec, i, p)] = true;
+    }
+    out
+}
+
+/// [`section_page_breaks`] 의 보정 한 줄: 표만 품은 앵커 문단이면 **자기 표들의 첫 블록** 인덱스를,
+/// 아니면 자기 인덱스를 돌려준다. 앵커 자체에서는 같은 break 를 다시 실행하지 않는다(끌어올린
+/// 자리에만 표시된다).
+fn hoist_to_owned_table(sec: &Section, i: usize, p: &Paragraph) -> usize {
+    if !p.is_table_anchor {
+        return i;
+    }
+    let Some(span) = p.source.as_ref().map(|s| s.span) else {
+        return i;
+    };
+    let mut first = i;
+    while first > 0 {
+        // 바로 앞 블록이 이 문단의 XML 스팬 **안에** 있는 표인 동안 계속 끌어올린다
+        // (한 호스트 문단이 표를 여러 개 품을 수 있다).
+        match &sec.blocks[first - 1] {
+            Block::Table(t) => match t.src_span {
+                Some((ts, te)) if ts >= span.0 && te <= span.1 => first -= 1,
+                _ => break,
+            },
+            _ => break,
+        }
+    }
+    first
+}
+
 /// A plain (no family/style) font key — metrics here are per-script, family-independent.
 fn plain_font() -> FontKey {
     FontKey {
@@ -253,18 +307,16 @@ impl LayoutEngine for NaiveLayout {
                 p.width = page.width as f64;
                 p.height = page.height as f64;
             }
+            // "쪽 나누기 앞에서" — 블록별 강제 개쪽 플래그. place_doc/block_pages 와 **같은 함수**를
+            // 거쳐야 LOCKSTEP 이 유지된다(이슈 080).
+            let brk = crate::section_page_breaks(sec, doc);
             let mut vert = 0.0f64; // page-relative vertical cursor
 
-            for block in &sec.blocks {
+            for (blk_idx, block) in sec.blocks.iter().enumerate() {
                 match block {
                     Block::Paragraph(p) => {
                         let ps = doc.para_shapes.get(p.para_shape);
-                        // "쪽 나누기 앞에서": force a page break before this paragraph (unless already
-                        // at the top of a fresh page). The per-paragraph flag (HWP column_type Page/
-                        // Section) OR the shared para_shape's attr1 bit19.
-                        if (p.page_break_before || ps.map(|s| s.page_break_before).unwrap_or(false))
-                            && vert > 0.0
-                        {
+                        if brk[blk_idx] && vert > 0.0 {
                             pages.push(new_page(page));
                             vert = 0.0;
                         }
@@ -302,6 +354,12 @@ impl LayoutEngine for NaiveLayout {
                     // NO trailing page-slice), then the outer bottom margin — so this page count stays
                     // in LOCKSTEP with place_doc's fragment placement (oracle can't drift).
                     Block::Table(t) => {
+                        // 표 앞 강제 개쪽(이슈 080): HWPX 는 표를 품은 호스트 문단의 pageBreak 를 여기로
+                        // 끌어올린다. 바깥 여백보다 먼저 — 새 쪽 맨 위에는 여백을 두지 않는다.
+                        if brk[blk_idx] && vert > 0.0 {
+                            pages.push(new_page(page));
+                            vert = 0.0;
+                        }
                         // Promote a 1×1 frame-wrapper to its inner table so a tall nested grid splits at
                         // row granularity (자가진단표) instead of bumping whole. Identical in place_doc +
                         // block_pages → lockstep. (NaiveLayout only sizes, so the frame is discarded here.)
@@ -609,7 +667,14 @@ pub(crate) fn apply_row_overrides(row_h: &mut [f64], t: &Table) {
             _ => t.stored_row_heights.get(r).copied().unwrap_or(0),
         };
         if h > 0 {
-            *slot = slot.max(h as f64);
+            // 자동 맞춤 안 함(`<hp:tbl noAdjust="1">`, HWPX 파서만 세운다)이면 저장 높이가 **정확값**
+            // 이다 — 한컴은 넘치는 내용을 자르지 행을 늘리지 않는다(이슈 080). 그 외에는 종전대로
+            // 바닥(floor): 드래그 리사이즈 · 자동 맞춤 표의 저장 높이 · .hwp lift 전부 여기로 온다.
+            *slot = if t.fixed_row_heights && t.row_heights.get(r).is_some_and(|&v| v > 0) {
+                h as f64
+            } else {
+                slot.max(h as f64)
+            };
         }
     }
 }
