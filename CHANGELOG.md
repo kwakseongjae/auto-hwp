@@ -34,9 +34,17 @@ packages are released in lockstep.)*
 
 ## [Unreleased]
 
-0.0.3 발행 이후의 변경을 여기에 쌓는다. 현재 비어 있다.
+0.0.3 발행 이후의 변경을 여기에 쌓는다.
 
-*(EN — Nothing yet; changes land here after 0.0.3 ships.)*
+### 변경 (Changed)
+
+- **라이선스 `MIT OR Apache-2.0` → `Apache-2.0` 단일화.** 루트 `LICENSE-APACHE`가 `LICENSE`로
+  바뀌고 `LICENSE-MIT`은 삭제됐다. npm 패키지 4종의 `license` 필드도 `Apache-2.0`이며, 이제
+  tarball에 `LICENSE`를 동봉한다. **레지스트리 반영은 다음 발행부터** — 이미 발행된 0.0.1~0.0.3
+  tarball은 발행 시점 라이선스를 그대로 유지한다.
+  *(EN — License simplified from `MIT OR Apache-2.0` to `Apache-2.0`; the registry reflects it from
+  the next publish, while the already-published 0.0.1–0.0.3 tarballs keep the license they shipped
+  with.)*
 
 ---
 

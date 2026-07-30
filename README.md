@@ -1,5 +1,11 @@
 <p align="center"><img src="./assets/brand/autohwp-banner.png" alt="오토한글 (auto-hwp) — 한글 문서를 직접 다루는 엔진" width="100%"></p>
 
+<p align="center">
+  <a href="https://www.npmjs.com/package/@auto-hwp/react"><img src="https://img.shields.io/npm/v/@auto-hwp/react?logo=npm&label=%40auto-hwp%2Freact" alt="npm 버전"></a>
+  <a href="https://www.npmjs.com/package/@auto-hwp/react"><img src="https://img.shields.io/npm/dm/@auto-hwp/react?label=%EC%9B%94%20%EB%8B%A4%EC%9A%B4%EB%A1%9C%EB%93%9C" alt="월 다운로드"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/github/license/kwakseongjae/auto-hwp?label=%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4" alt="라이선스"></a>
+</p>
+
 # 오토한글 (auto-hwp)
 
 **한글(HWP/HWPX) 문서를 직접 다루는 엔진.** 파일을 열고, 원본대로 그리고, 구조를 바꾸고,
@@ -71,13 +77,13 @@ React 없이 엔진만 쓰는 예제는 [아래](#npm-패키지--엔진만-쓰�
 
 | | **auto-hwp** | rhwp | hwp.js |
 |---|---|---|---|
-| **라이선스** | MIT OR Apache-2.0 — 상용 임베드 무료, 동시접속 제한 없음 | MIT | Apache-2.0 |
+| **라이선스** | Apache-2.0 — 상용 임베드 무료, 동시접속 제한 없음 | MIT | Apache-2.0 |
 | React 네이티브 SDK | `@auto-hwp/react`의 `<HwpWorkspace/>` + 헤드리스 코어(`@auto-hwp/editor-core`) | iframe 임베드 웹 컴포넌트(`@rhwp/editor`) | 뷰어·파서 라이브러리(`hwp.js`) |
 | 양식 일괄 작성 완제품 | 웹 + CLI (양식 1개 + 명단 N행 → 완성본 N부 zip) | 확인되지 않음 | 확인되지 않음 |
 | 바이브(자연어) 편집 | 타입드 편집 명령 19종 · 적용 전 카드 미리보기 · 카드별 되돌리기 | 확인되지 않음 | 확인되지 않음 |
 | 충실도 자동 게이트 | 쪽수·줄바꿈 일치율을 커밋마다 검사 ([정확도](#정확도와-한계)) | 확인되지 않음 | 확인되지 않음 |
 | 배포 표면 | npm · CLI · MCP 서버 · Claude Code 스킬 · 웹 데모 | 브라우저 확장(Chrome/Edge/Firefox) · VS Code 확장 · npm · 웹 데모 | npm |
-| 최근 npm 릴리스 | `@auto-hwp/engine` 0.0.2 (2026-07) | `@rhwp/core` 0.8.2 (2026-07) | `hwp.js` 0.0.3 (2020-10) |
+| 최근 npm 릴리스 | `@auto-hwp/engine` 0.0.3 (2026-07) | `@rhwp/core` 0.8.2 (2026-07) | `hwp.js` 0.0.3 (2020-10) |
 
 <sub>2026-07 기준, 각 프로젝트의 공개 저장소와 npm 레지스트리 메타데이터에서 확인한 것만 적었습니다.
 "확인되지 않음"은 공개 자료에서 찾지 못했다는 뜻이지 불가능하다는 뜻이 아닙니다. rhwp는 auto-hwp가
@@ -349,5 +355,5 @@ AI 편집을 로컬에서 켜려면 `apps/hwp-lab/.env.local`에 `OPENROUTER_API
 
 ## 라이선스
 
-MIT OR Apache-2.0 ([LICENSE-MIT](./LICENSE-MIT) / [LICENSE-APACHE](./LICENSE-APACHE)).
+Apache-2.0 ([LICENSE](./LICENSE)).
 서드파티 고지는 [NOTICE](./NOTICE) — rhwp(MIT)·나눔 폰트(OFL)·oracle의 GPL 격리 방식 포함.

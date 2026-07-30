@@ -1,5 +1,11 @@
 <p align="center"><img src="./assets/brand/autohwp-banner.png" alt="auto-hwp (오토한글) — an engine that works on Korean HWP documents directly" width="100%"></p>
 
+<p align="center">
+  <a href="https://www.npmjs.com/package/@auto-hwp/react"><img src="https://img.shields.io/npm/v/@auto-hwp/react?logo=npm&label=%40auto-hwp%2Freact" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/@auto-hwp/react"><img src="https://img.shields.io/npm/dm/@auto-hwp/react?label=downloads%2Fmonth" alt="downloads per month"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/github/license/kwakseongjae/auto-hwp" alt="license"></a>
+</p>
+
 # auto-hwp (오토한글)
 
 **An engine that works on Korean HWP/HWPX documents directly.** Open a file, render it faithfully,
@@ -72,13 +78,13 @@ per-bundler recipe (wasm serving, worker, CSP, fonts, AI proxy) is in
 
 | | **auto-hwp** | rhwp | hwp.js |
 |---|---|---|---|
-| **License** | MIT OR Apache-2.0 — free for commercial embedding, no seat or concurrency limits | MIT | Apache-2.0 |
+| **License** | Apache-2.0 — free for commercial embedding, no seat or concurrency limits | MIT | Apache-2.0 |
 | React-native SDK | `<HwpWorkspace/>` in `@auto-hwp/react` + a headless core (`@auto-hwp/editor-core`) | iframe-embedded web component (`@rhwp/editor`) | viewer/parser library (`hwp.js`) |
 | Bulk form filling, finished | web + CLI (1 form + an N-row roster → N documents as a zip) | not found | not found |
 | Chat-driven ("vibe") editing | 19 typed edit commands · preview cards before apply · per-card revert | not found | not found |
 | Automated fidelity gate | page count + line-break match rate checked on every commit ([accuracy](#accuracy-and-limits)) | not found | not found |
 | Distribution surface | npm · CLI · MCP server · Claude Code skill · web demo | browser extensions (Chrome/Edge/Firefox) · VS Code extension · npm · web demo | npm |
-| Latest npm release | `@auto-hwp/engine` 0.0.2 (2026-07) | `@rhwp/core` 0.8.2 (2026-07) | `hwp.js` 0.0.3 (2020-10) |
+| Latest npm release | `@auto-hwp/engine` 0.0.3 (2026-07) | `@rhwp/core` 0.8.2 (2026-07) | `hwp.js` 0.0.3 (2020-10) |
 
 <sub>As of 2026-07, from each project's public repository and npm registry metadata only. "Not found"
 means we could not find it in public material — not that it is impossible. rhwp is also the upstream
@@ -368,6 +374,6 @@ contribution rules are in [CONTRIBUTING.md](./CONTRIBUTING.md) and [AGENTS.md](.
 
 ## License
 
-MIT OR Apache-2.0 ([LICENSE-MIT](./LICENSE-MIT) / [LICENSE-APACHE](./LICENSE-APACHE)).
+Apache-2.0 ([LICENSE](./LICENSE)).
 Third-party notices in [NOTICE](./NOTICE) — rhwp (MIT), Nanum fonts (OFL), and how the GPL oracle is
 kept out-of-process.

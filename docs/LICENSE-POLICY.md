@@ -4,7 +4,8 @@
 
 ## 허용 (링크 코드)
 **MIT / Apache-2.0 / BSD-2 / BSD-3 / ISC / Zlib / Unicode** 만.
-- 우리 코드: `MIT OR Apache-2.0` 듀얼.
+- 우리 코드: `Apache-2.0` 단일(루트 `LICENSE`). 의존성은 위 퍼미시브 목록 전부 허용 — `deny.toml`의
+  `MIT` 허용은 의존성용이므로 지우지 않는다.
 - rhwp(MIT), quick-xml/zip/flate2/clap/harfrust/rustybuzz/icu_segmenter(전부 퍼미시브) → OK.
 
 ## 금지 (링크 코드)

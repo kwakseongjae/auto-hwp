@@ -67,4 +67,4 @@ React UI (@auto-hwp/react: HwpWorkspace + overlays)          ← 선택 레이�
 
 ## 라이선스
 
-기여물은 MIT OR Apache-2.0 듀얼 라이선스로 제출됩니다 (LICENSE-MIT / LICENSE-APACHE).
+기여물은 Apache-2.0 라이선스로 제출됩니다 ([LICENSE](./LICENSE)).
