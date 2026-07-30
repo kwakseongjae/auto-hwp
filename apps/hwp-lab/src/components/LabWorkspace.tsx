@@ -7,6 +7,7 @@ import { isTrapError, resetEngine, type EngineLoadProgress } from "@auto-hwp/eng
 import { AutosaveController, IdbSnapshotStore, findRecoverable, formatAge, recoveredName, type SnapshotRecord } from "@/lib/autosave";
 import { limitMessage, oversizeMessage } from "@/lib/limits";
 import { ensureDemoAiConsent, type DemoAiConsentState } from "@/lib/demoAiConsent";
+import { ThemeToggle, useTheme } from "./ThemeToggle";
 
 type Mode = "loading" | "mock" | "live" | "static";
 type Doc = { bytes: Uint8Array; name: string };
@@ -49,6 +50,9 @@ const msg = (e: unknown): string => {
 // 조립과 같은 모듈에서 나와 계약이 어긋날 수 없다. 앵커의 `text`는 문서 파생 신뢰불가 데이터.
 
 export default function LabWorkspace() {
+  // 화면 테마(라이트/다크). CSS 로 풀 수 없는 단 한 곳 — 워크스페이스의 `hw-studio`(다크 스튜디오
+  // 팔레트) 클래스 — 을 위해서만 React 상태로 읽는다. 나머지 크롬은 `:root[data-theme]` 로 분기한다.
+  const theme = useTheme();
   const [mode, setMode] = useState<Mode>("loading");
   const [doc, setDoc] = useState<Doc | null>(null);
   const [labError, setLabError] = useState<string | null>(null);
@@ -553,21 +557,14 @@ export default function LabWorkspace() {
     return null;
   }, [defaultFont]);
 
+  // 배지는 **로컬(서버 있는) 실행의 QA 신호**다: 키가 꽂혔는지(live) 아닌지(mock)를 화면에 명시한다.
+  // 공개 정적 데모(static)에서는 배지를 띄우지 않는다 — 사용자가 고를 수 있는 모드가 아니라 배포
+  // 형태일 뿐이고, 우상단에 상시 붙은 "정적 데모 · AI" 라벨은 제품 화면에 잡음만 더한다.
+  // AI 전송 고지는 첫 요청 전 동의 게이트(lib/demoAiConsent.ts)가 계속 담당한다.
   const badge =
     mode === "loading" ? (
       <span className="lab-badge lab-badge-loading">모드 확인 중…</span>
-    ) : mode === "static" ? (
-      <span
-        className="lab-badge lab-badge-mock"
-        title={
-          DEMO_AI_URL
-            ? "정적 데모 — 파일 처리는 브라우저에서, 동의한 AI 문맥만 외부 프록시로 전송"
-            : "서버 없는 정적 데모 — 뷰·편집·HTML/PDF export는 전부 동작. AI 편집은 로컬 실행(BYOK) 시 사용 가능"
-        }
-      >
-        {DEMO_AI_URL ? "정적 데모 · AI" : "정적 데모"}
-      </span>
-    ) : mode === "live" ? (
+    ) : mode === "static" ? null : mode === "live" ? (
       // NOTE: 여기 클라이언트 배지 문구에는 키/모델 리터럴을 넣지 않는다(클라이언트 번들 grep 위생).
       // 실제 모델 ID(Opus 4.8)와 키 참조는 서버 전용 route.ts 에만 존재.
       <span className="lab-badge lab-badge-live" title="API 키 감지됨 — 서버가 실제 LLM 모델로 편집 제안">
@@ -625,6 +622,7 @@ export default function LabWorkspace() {
           </span>
         )}
         {badge}
+        <ThemeToggle />
       </header>
       )}
 
@@ -653,14 +651,17 @@ export default function LabWorkspace() {
             // 채팅 UI는 에디터(SDK)가 아니라 **이 앱**이 조립한다 — 워크스페이스는 편집 표면만
             // 제공하고 오른쪽 패널은 호스트 몫이다(`WorkspaceSidePanel`). 우리 채팅은 데모용
             // 참조 구현이라 제품 계약에 넣지 않는다.
+            // 패널 상단 notice 는 **기능이 꺼져 있을 때만** 띄운다(그건 사용자가 모르면 안 되는 사실).
+            // AI 가 켜진 데모의 전송 고지는 배너가 아니라 **첫 요청 전 동의 게이트**가 담당한다
+            // (lib/demoAiConsent.ts — 전송 대상·범위·되돌리기까지 그 문구가 싣는다). 상시 배너는
+            // 같은 말을 매 화면 반복하면서 정작 전송 시점에는 아무 것도 막지 못했다.
             sidePanel={chatSidePanel({
               onAiRequest,
               isMock: mode === "mock",
-              notice: IS_DEMO
-                ? DEMO_AI_URL
-                  ? "데모 AI 편집을 사용하면 지시와 문서 프로필·본문 발췌·표/선택 문맥이 Cloudflare Worker를 거쳐 OpenRouter(GLM 5.2)로 전송됩니다. 파일 원본 전체는 업로드하지 않으며, 첫 요청 전에 동의를 받습니다. 제안은 적용 전에 카드로 보여 주고 한 번에 되돌릴 수 있습니다."
-                  : "정적 데모라 AI 편집은 꺼져 있습니다 — 클릭 선택·수동 편집·HTML/PDF 저장은 전부 동작합니다. AI 바이브 편집은 레포를 클론해 로컬 실행(BYOK)하면 켜집니다."
-                : undefined,
+              notice:
+                IS_DEMO && !DEMO_AI_URL
+                  ? "정적 데모라 AI 편집은 꺼져 있습니다 — 클릭 선택·수동 편집·HTML/PDF 저장은 전부 동작합니다. AI 바이브 편집은 레포를 클론해 로컬 실행(BYOK)하면 켜집니다."
+                  : undefined,
             })}
             requestFont={requestFont}
             fontCatalog={FONT_CATALOG}
@@ -677,7 +678,10 @@ export default function LabWorkspace() {
             // 선택 서식은 우측 디자인 inspector 한 곳에만 둔다. 상단은 문서/삽입/내보내기 전역 도구,
             // 우측은 현재 선택 요소라는 Figma식 역할 분리를 유지한다.
             formatSurface="inspector"
-            className="hw-studio"
+            // 다크에서만 스튜디오 팔레트를 입힌다. 라이트에서는 클래스를 떼어 SDK 기본 테마(이미
+            // 라이트로 설계돼 있다)를 그대로 쓴다 — 컴포넌트 수정 없이 색을 되칠할 필요가 없다.
+            // (앱 CSS 의 미세 조정은 globals.css §라이트 에디터.)
+            className={theme === "light" ? undefined : "hw-studio"}
             // 이슈 050: 페이지 위에 이미지를 드롭하면 삽입, .hwp/.hwpx 를 드롭하면 이 콜백으로 열기.
             onOpenFile={async (bytes, name) => {
               await openBytes(bytes, name); // 성공 여부는 복구 배너 전용 — 드롭 열기는 결과 무시(050 동작 유지)
@@ -687,6 +691,8 @@ export default function LabWorkspace() {
           />
         ) : (
           <div className="lab-empty">
+            {/* 랜딩엔 헤더가 없으므로 테마 토글만 우상단에 떠 있는다(고정 위치 — 히어로 배치 무간섭). */}
+            <ThemeToggle className="lab-theme-float" />
             {recovery && !busy && (
               // 이슈 052: 재방문 복구 배너 — 복구본은 "편집된 HWPX본"(원본 .hwp 아님)임을 명시한다.
               <div className="lab-recovery" role="alert" data-testid="recovery-banner">

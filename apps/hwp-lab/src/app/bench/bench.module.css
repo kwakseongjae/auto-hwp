@@ -1,19 +1,20 @@
-/* /bench 전용 스코프 스타일 — globals.css 의 `.lab-demo` 다크 스튜디오 톤(#07090d 바탕 / #7c3aed
-   액센트 / #1e2532 테두리)을 그대로 따르되, 전역 CSS 는 건드리지 않는다(다른 스트림 소유 파일).
+/* /bench 전용 스코프 스타일 — 색은 전부 globals.css 의 테마 토큰(--ah-*)에서 온다. 이 파일은
+   그 토큰에 페이지 로컬 이름을 붙이기만 하므로 라이트/다크 전환이 여기서는 공짜다
+   (`<html data-theme>` 한 곳만 바뀌면 된다).
    이 페이지는 wasm 도 클라이언트 상태도 없는 순수 서버 컴포넌트라 CSS 도 이 모듈 하나로 닫힌다. */
 
 .page {
-  --ink: #e6e9ef;
-  --ink-strong: #ffffff;
-  --muted: #8b93a1;
-  --dim: #5c6470;
-  --line: #1e2532;
-  --card: rgba(255, 255, 255, 0.035);
-  --accent: #7c3aed;
-  --accent-soft: #c4b5fd;
+  --ink: var(--ah-fg);
+  --ink-strong: var(--ah-fg-strong);
+  --muted: var(--ah-muted);
+  --dim: var(--ah-dim);
+  --line: var(--ah-line);
+  --card: var(--ah-surface);
+  --accent: var(--ah-accent);
+  --accent-soft: var(--ah-accent-ink-2);
 
   min-height: 100vh;
-  background: #07090d;
+  background: var(--ah-bg);
   color: var(--ink);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -41,6 +42,11 @@
 
 .crumb a:hover {
   text-decoration: underline;
+}
+
+/* 토글은 빵부스러기 줄 오른쪽 끝에 조용히 붙는다(버튼 자체 스타일은 globals.css). */
+.themeToggle {
+  margin-left: auto;
 }
 
 .kicker {
@@ -84,7 +90,7 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
   color: var(--accent-soft);
-  background: rgba(124, 58, 237, 0.14);
+  background: var(--ah-accent-wash);
   border-radius: 4px;
   padding: 1px 5px;
 }
@@ -144,7 +150,7 @@
   font-size: 11.5px;
   font-weight: 600;
   color: var(--accent-soft);
-  background: rgba(124, 58, 237, 0.14);
+  background: var(--ah-accent-wash);
   border-radius: 999px;
   padding: 3px 9px;
 }
@@ -198,7 +204,7 @@
 }
 
 .table thead th {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--ah-surface-hover);
   font-size: 12px;
   font-weight: 600;
   color: var(--muted);
@@ -220,12 +226,12 @@
 }
 
 .ok {
-  color: #7ee2b8;
+  color: var(--ah-ok);
   font-weight: 600;
 }
 
 .warn {
-  color: #f0b866;
+  color: var(--ah-warn);
   font-weight: 600;
 }
 
@@ -249,14 +255,14 @@
 .pre {
   margin: 8px 0 0;
   padding: 14px 16px;
-  background: #0b0e15;
+  background: var(--ah-surface-3);
   border: 1px solid var(--line);
   border-radius: 12px;
   overflow-x: auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12.5px;
   line-height: 1.75;
-  color: #cfd6e2;
+  color: var(--ah-fg-soft);
   tab-size: 2;
 }
 

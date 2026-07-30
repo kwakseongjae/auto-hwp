@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 // @auto-hwp/react 는 자체 CSS를 지참한다(이슈: Tailwind 불필요). 한 번만 import.
 import "@auto-hwp/react/styles.css";
 import "./globals.css";
+import { THEME_BOOT_SCRIPT } from "@/lib/theme";
 
 // 정적 데모(GitHub Pages)는 basePath(/auto-hwp) 아래에 산다. OG/twitter 는 **절대 URL**만 유효하고
 // (스크래퍼가 상대경로를 못 푼다) favicon 링크는 basePath 접두가 필요하다 — 코드의 다른 절대경로
@@ -58,8 +59,15 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="ko">
-      <body>{children}</body>
+    // suppressHydrationWarning: 아래 부트 스크립트가 하이드레이션 **전에** <html data-theme> 를 세운다
+    // (서버 HTML 에는 없는 속성이므로 경고가 뜨는데, 그게 정확히 의도한 동작이다).
+    <html lang="ko" suppressHydrationWarning>
+      <body>
+        {/* 첫 페인트 전에 테마를 확정한다 — 동기 스크립트라 여기서 파싱이 잠깐 멈추고,
+            그 사이 data-theme 이 서므로 다크↔라이트 깜빡임이 없다(정적 export 에서도 동작). */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
+        {children}
+      </body>
     </html>
   );
 }

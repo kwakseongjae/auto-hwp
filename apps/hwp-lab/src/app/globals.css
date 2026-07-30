@@ -1,9 +1,107 @@
 /* hwp-lab 셸 크롬 — @auto-hwp/react 의 styles.css 위에 얹는 최소 스타일(QA 상태 표시 위주). */
+
+/* ── 테마 토큰 ────────────────────────────────────────────────────────────────────────────────
+   다크 스튜디오 팔레트를 커스텀 프로퍼티로 승격하고, 라이트는 같은 이름의 값만 갈아끼운다.
+   진실은 `<html data-theme>` 하나(=lib/theme.ts) — 기본값은 OS 설정이고, 부트 스크립트가 첫
+   페인트 전에 속성을 세운다. 랜딩·에디터 크롬·/bulk(인라인 style)·/bench(CSS 모듈)가 전부 이
+   토큰만 본다. 문서 종이(--ah-paper)는 양쪽 테마에서 항상 흰색이다 — 종이는 문서의 일부다. */
 :root {
-  --lab-bg: #f6f7f9;
-  --lab-border: #e2e4e8;
-  --lab-ink: #1f2430;
-  --lab-muted: #6b7280;
+  color-scheme: dark;
+
+  --ah-bg: #07090d;             /* 페이지 바탕 */
+  --ah-bg-elev: #0a0d13;        /* 헤더/스티키 크롬 */
+  --ah-bg-blur: rgba(10, 13, 19, 0.82); /* backdrop-filter 위 반투명 헤더 */
+  --ah-glow-1: rgba(124, 58, 237, 0.26); /* 보라 글로우 */
+  --ah-glow-2: rgba(37, 99, 235, 0.14);  /* 파랑 글로우 */
+  --ah-grid: rgba(230, 233, 239, 0.04);  /* 배경 괘선 */
+
+  --ah-surface: rgba(255, 255, 255, 0.035); /* 글래스 카드 */
+  --ah-surface-2: #12161f;                  /* 솔리드 카드 */
+  --ah-surface-3: #0d1118;                  /* 입력/우물 */
+  --ah-surface-btn: #151b26;                /* 버튼 면 */
+  --ah-surface-hover: rgba(255, 255, 255, 0.06);
+
+  --ah-line: #1e2532;
+  --ah-line-2: #232b3a;
+  --ah-line-3: #2b3446;
+  --ah-line-4: #3a4356;
+
+  --ah-fg: #e6e9ef;
+  --ah-fg-strong: #ffffff;
+  --ah-fg-soft: #dfe4ec;
+  --ah-muted: #8b93a1;
+  --ah-dim: #5c6470;
+
+  --ah-accent: #7c3aed;         /* 채움(버튼/테두리) */
+  --ah-accent-ink: #a78bfa;     /* 바탕 위 보라 글자 */
+  --ah-accent-ink-2: #c4b5fd;   /* 옅은 보라 글자 */
+  --ah-accent-wash: rgba(124, 58, 237, 0.14);
+  --ah-accent-line: rgba(124, 58, 237, 0.35);
+  --ah-accent-edge: rgba(124, 58, 237, 0.22);
+
+  --ah-ok: #6ee7b7;
+  --ah-warn: #fcd34d;
+  --ah-danger: #fca5a5;
+
+  --ah-paper: #ffffff;
+  --ah-shade-1: rgba(12, 15, 20, 0.5);  /* 종이 위 각도 그림자 */
+  --ah-shade-2: rgba(7, 9, 13, 0.95);   /* 종이 하단 페이드 */
+  --ah-shadow-page: -28px 38px 80px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.06),
+    -8px 0 56px rgba(124, 58, 237, 0.18);
+  --ah-shadow-card: 0 12px 40px rgba(0, 0, 0, 0.5);
+  --ah-shadow-doc: 0 30px 80px rgba(0, 0, 0, 0.52), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  --ah-panel-shadow: rgba(0, 0, 0, 0.38);
+  --ah-shadow-accent: 0 6px 26px rgba(124, 58, 237, 0.45);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --ah-bg: #f5f6fb;
+  --ah-bg-elev: #ffffff;
+  --ah-bg-blur: rgba(255, 255, 255, 0.86);
+  --ah-glow-1: rgba(124, 58, 237, 0.1);
+  --ah-glow-2: rgba(37, 99, 235, 0.07);
+  --ah-grid: rgba(15, 23, 42, 0.045);
+
+  --ah-surface: #ffffff;
+  --ah-surface-2: #ffffff;
+  --ah-surface-3: #f4f6fb;
+  --ah-surface-btn: #ffffff;
+  --ah-surface-hover: rgba(15, 23, 42, 0.05);
+
+  --ah-line: #e4e7f0;
+  --ah-line-2: #e4e7f0;
+  --ah-line-3: #d2d8e6;
+  --ah-line-4: #b9c1d4;
+
+  --ah-fg: #1c2130;
+  --ah-fg-strong: #0a0f1c;
+  --ah-fg-soft: #333b4d;
+  --ah-muted: #5a6274;
+  --ah-dim: #79819a;
+
+  --ah-accent: #6d28d9;
+  --ah-accent-ink: #6d28d9;
+  --ah-accent-ink-2: #7c3aed;
+  --ah-accent-wash: rgba(124, 58, 237, 0.09);
+  --ah-accent-line: rgba(124, 58, 237, 0.3);
+  --ah-accent-edge: rgba(124, 58, 237, 0.16);
+
+  --ah-ok: #047857;
+  --ah-warn: #92600a;
+  --ah-danger: #b91c1c;
+
+  --ah-paper: #ffffff;
+  --ah-shade-1: rgba(15, 23, 42, 0.12);
+  --ah-shade-2: rgba(15, 23, 42, 0.06);
+  /* 종이가 흰색이고 바탕도 밝으므로 대비는 **그림자와 얇은 테두리**가 만든다. */
+  --ah-shadow-page: -18px 26px 54px rgba(15, 23, 42, 0.18), 0 0 0 1px rgba(15, 23, 42, 0.08),
+    -8px 0 46px rgba(124, 58, 237, 0.1);
+  --ah-shadow-card: 0 10px 30px rgba(15, 23, 42, 0.12);
+  --ah-shadow-doc: 0 24px 60px rgba(15, 23, 42, 0.16), 0 0 0 1px rgba(15, 23, 42, 0.08);
+  --ah-panel-shadow: rgba(15, 23, 42, 0.18);
+  --ah-shadow-accent: 0 6px 22px rgba(124, 58, 237, 0.28);
 }
 
 * {
@@ -19,8 +117,8 @@ body {
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
-  color: var(--lab-ink);
-  background: var(--lab-bg);
+  color: var(--ah-fg);
+  background: var(--ah-bg);
 }
 
 .lab-root {
@@ -36,8 +134,8 @@ body {
   gap: 12px;
   flex-wrap: wrap;
   padding: 10px 16px;
-  background: #fff;
-  border-bottom: 1px solid var(--lab-border);
+  background: var(--ah-bg-elev);
+  border-bottom: 1px solid var(--ah-line);
 }
 
 .lab-title {
@@ -48,7 +146,7 @@ body {
 
 .lab-title small {
   font-weight: 500;
-  color: var(--lab-muted);
+  color: var(--ah-muted);
   margin-left: 6px;
   font-size: 12px;
 }
@@ -57,18 +155,61 @@ body {
   font: inherit;
   font-size: 13px;
   padding: 6px 12px;
-  border: 1px solid #cdd0d6;
+  border: 1px solid var(--ah-line-3);
   border-radius: 7px;
-  background: #fff;
-  color: var(--lab-ink);
+  background: var(--ah-surface-btn);
+  color: var(--ah-fg);
   cursor: pointer;
 }
 .lab-btn:hover {
-  background: #f3f4f6;
+  background: var(--ah-surface-hover);
 }
 
 .lab-spacer {
   flex: 1;
+}
+
+/* ── 테마 토글 ────────────────────────────────────────────────────────────────────────────────
+   랜딩·에디터 헤더·/bulk·/bench 가 공유하는 하나의 버튼. 마크업은 두 아이콘을 다 렌더하고
+   **어느 쪽을 보일지는 CSS 가 고른다**(components/ThemeToggle.tsx 참고 — 정적 export 하이드레이션
+   불일치 방지). 보이는 아이콘 = "누르면 갈 곳". */
+.ah-theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  border: 1px solid var(--ah-line-3);
+  border-radius: 8px;
+  background: var(--ah-surface-btn);
+  color: var(--ah-muted);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.ah-theme-toggle:hover {
+  color: var(--ah-accent-ink);
+  border-color: var(--ah-accent-line);
+  background: var(--ah-accent-wash);
+}
+.ah-theme-ic-moon {
+  display: none;
+}
+:root[data-theme="light"] .ah-theme-ic-sun {
+  display: none;
+}
+:root[data-theme="light"] .ah-theme-ic-moon {
+  display: inline;
+}
+/* 랜딩엔 헤더가 없다 — 토글만 우상단에 띄운다(히어로 그리드 무간섭). */
+.lab-theme-float {
+  position: fixed;
+  top: 14px;
+  right: 16px;
+  z-index: 30;
 }
 
 /* 모드/상태 배지 — 콘솔 전용 금지, 화면에 명시(이슈 §QA 친화). */
@@ -108,10 +249,10 @@ body {
 
 .lab-status {
   font-size: 12px;
-  color: var(--lab-muted);
+  color: var(--ah-muted);
 }
 .lab-status-busy {
-  color: #2563eb;
+  color: var(--ah-accent-ink);
 }
 /* 이슈 055 — 파싱 진행 중 취소 버튼(워커 모드에선 파싱이 비차단이라 실제로 눌린다). */
 .lab-cancel-open {
@@ -145,7 +286,7 @@ body {
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: var(--lab-muted);
+  color: var(--ah-muted);
   font-size: 14px;
   text-align: center;
   padding: 24px;
@@ -204,15 +345,15 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(246, 247, 249, 0.7);
+  background: color-mix(in srgb, var(--ah-bg) 78%, transparent);
   z-index: 5;
   font-size: 14px;
-  color: var(--lab-ink);
+  color: var(--ah-fg);
 }
 
 .lab-note {
   font-size: 11px;
-  color: var(--lab-muted);
+  color: var(--ah-muted);
 }
 
 /* ── OSS 데모 랜딩(히어로) — 파일 열기 전 첫 화면 ─────────────────────────────────────────── */
@@ -220,14 +361,14 @@ body {
   display: flex; flex-direction: column; align-items: center; gap: 14px;
   max-width: 620px; text-align: center; padding: 28px;
 }
-.lab-hero-title { font-size: 28px; font-weight: 800; color: var(--lab-fg, #1a1a1a); margin: 0; letter-spacing: -0.5px; }
+.lab-hero-title { font-size: 28px; font-weight: 800; color: var(--ah-fg-strong); margin: 0; letter-spacing: -0.5px; }
 .lab-hero-sub { font-size: 14px; line-height: 1.7; margin: 0; }
 .lab-hero-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 6px; }
 .lab-hero-open { font-size: 14px; padding: 10px 18px; }
 .lab-sample-btn { font-size: 13px; }
 .lab-hero-note { font-size: 12px; margin: 0; opacity: 0.85; }
-.lab-hero-dev { font-size: 12px; margin-top: 10px; padding-top: 14px; border-top: 1px solid rgba(128,128,128,0.25); }
-.lab-hero-dev code { font-size: 12px; padding: 2px 6px; border-radius: 4px; background: rgba(128,128,128,0.12); }
+.lab-hero-dev { font-size: 12px; margin-top: 10px; padding-top: 14px; border-top: 1px solid var(--ah-line); }
+.lab-hero-dev code { font-size: 12px; padding: 2px 6px; border-radius: 4px; background: var(--ah-surface-hover); }
 .lab-hero-dev a { color: inherit; text-decoration: underline; }
 
 /* 랜딩 v2 — 기능 그리드 + 문서 링크 + 헤더 GitHub */
@@ -238,20 +379,20 @@ body {
 @media (max-width: 640px) { .lab-features { grid-template-columns: 1fr; } }
 .lab-feature {
   display: flex; flex-direction: column; gap: 4px; padding: 12px 14px;
-  border: 1px solid rgba(128,128,128,0.22); border-radius: 10px;
-  background: rgba(128,128,128,0.05); font-size: 12px; line-height: 1.55;
+  border: 1px solid var(--ah-line); border-radius: 10px;
+  background: var(--ah-surface); font-size: 12px; line-height: 1.55;
 }
 .lab-feature b { font-size: 13px; }
-.lab-feature code { font-size: 11px; padding: 1px 4px; border-radius: 3px; background: rgba(128,128,128,0.14); }
+.lab-feature code { font-size: 11px; padding: 1px 4px; border-radius: 3px; background: var(--ah-accent-wash); }
 .lab-hero-dev { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
 .lab-gh-link {
-  font-size: 12px; padding: 4px 10px; border: 1px solid rgba(128,128,128,0.3);
+  font-size: 12px; padding: 4px 10px; border: 1px solid var(--ah-line-3);
   border-radius: 6px; color: inherit; text-decoration: none;
 }
-.lab-gh-link:hover { background: rgba(128,128,128,0.1); }
+.lab-gh-link:hover { background: var(--ah-surface-hover); }
 
 /* ── 오토한글 데모 랜딩 브랜드 테마 (.lab-demo 스코프 — QA(hwp-lab) 모드/에디터 크롬 무접촉) ── */
-.lab-demo { background: #07090d; color: #e6e9ef; }
+.lab-demo { background: var(--ah-bg); color: var(--ah-fg); }
 /* 랜딩은 앱 셸(height:100vh + 세로 중앙정렬)이 아니라 문서처럼 자연 스크롤한다 — 고정 높이면
    좁은 화면에서 ① 콘텐츠가 넘쳐 위가 잘리고 ② 배경이 뷰포트 높이에서 끊겨 흰 바탕이 드러난다.
    문서를 열면 lab-landing이 빠지고 원래의 앱 셸 규칙으로 되돌아간다. */
@@ -259,23 +400,26 @@ body {
 .lab-landing .lab-body { min-height: 100vh; }
 .lab-landing .lab-empty { height: auto; justify-content: flex-start; padding: 2vh 0 6vh; }
 .lab-demo .lab-body {
-  background: #07090d;
-  background-image: repeating-linear-gradient(0deg, transparent 0 43px, rgba(230,233,239,0.04) 43px 44px),
-    radial-gradient(900px 900px at 85% -10%, rgba(124,58,237,0.26), transparent 60%),
-    radial-gradient(640px 640px at -8% 110%, rgba(37,99,235,0.14), transparent 60%);
+  background: var(--ah-bg);
+  background-image: repeating-linear-gradient(0deg, transparent 0 43px, var(--ah-grid) 43px 44px),
+    radial-gradient(900px 900px at 85% -10%, var(--ah-glow-1), transparent 60%),
+    radial-gradient(640px 640px at -8% 110%, var(--ah-glow-2), transparent 60%);
 }
-.lab-root.lab-demo .lab-header { background: #0a0d13; border-bottom: 1px solid rgba(124,58,237,0.22);
-  color: #e6e9ef; }
-.lab-root.lab-demo .lab-header .lab-title { color: #eef1f6; }
-.lab-root.lab-demo .lab-header .lab-btn { background: rgba(255,255,255,0.06); border-color: #2a3546; color: #dfe5ee; }
-.lab-demo .lab-header .lab-title small { color: #8b93a1; }
+.lab-root.lab-demo .lab-header { background: var(--ah-bg-elev); border-bottom: 1px solid var(--ah-accent-edge);
+  color: var(--ah-fg); }
+.lab-root.lab-demo .lab-header .lab-title { color: var(--ah-fg-strong); }
+.lab-root.lab-demo .lab-header .lab-btn { background: var(--ah-surface-hover); border-color: var(--ah-line-3); color: var(--ah-fg-soft); }
+.lab-demo .lab-header .lab-title small { color: var(--ah-muted); }
 .lab-root.lab-demo .lab-header {
   min-height: 38px; flex-wrap: nowrap; padding: 6px 12px; gap: 9px;
 }
 .lab-root.lab-demo .lab-header .lab-title { white-space: nowrap; }
 .lab-root.lab-demo .lab-header .lab-btn { padding: 5px 10px; white-space: nowrap; }
-.lab-root.lab-demo .hw-studio .hw-brand { display: none; }
-.lab-demo .lab-gh-link { color: #c4b5fd; }
+/* 워크스페이스는 자체 브랜드 라벨을 갖지만 랩 헤더가 이미 "오토한글"을 띄운다(중복 제거).
+   ⚠️ `.hw-studio` 가 아니라 `.hw-workspace` 로 잡는다 — 라이트 테마에서는 스튜디오(다크) 클래스를
+   아예 붙이지 않기 때문이다(아래 §라이트 에디터). */
+.lab-root.lab-demo .hw-workspace .hw-brand { display: none; }
+.lab-demo .lab-gh-link { color: var(--ah-accent-ink); }
 .lab-demo .lab-hero { max-width: 1180px; text-align: left; gap: 0; }
 /* 영역 배치: 데스크톱 = 좌(카피 위 / 카드 아래) + 우(스테이지, 두 행 span).
    좁은 화면(아래 미디어쿼리)에서는 카피 → 스테이지 → 카드 한 줄 배치가 된다. */
@@ -284,15 +428,21 @@ body {
 .lab-hero-copy { grid-area: copy; }
 .lab-ways-block { grid-area: ways; min-width: 0; }
 .lab-stage { grid-area: stage; }
-.lab-kicker { font-size: 13.5px; letter-spacing: 5px; color: #8b93a1; }
-.lab-kicker b { color: #a78bfa; }
+.lab-kicker { font-size: 13.5px; letter-spacing: 5px; color: var(--ah-muted); }
+.lab-kicker b { color: var(--ah-accent-ink); }
 .lab-demo .lab-hero-title { display: flex; align-items: center; margin: 14px 0 0; }
 .lab-mark { font-size: 74px; font-weight: 800; letter-spacing: -2px; line-height: 1.05;
   background: linear-gradient(115deg, #ffffff 55%, #c4b5fd 90%);
   -webkit-background-clip: text; background-clip: text; color: transparent;
   filter: drop-shadow(0 4px 22px rgba(124,58,237,0.28)); }
+/* 라이트에선 흰→연보라 그라디언트가 배경에 묻는다 — 잉크색 → 브랜드 보라로 뒤집는다. */
+:root[data-theme="light"] .lab-mark {
+  background: linear-gradient(115deg, #0a0f1c 45%, #6d28d9 95%);
+  -webkit-background-clip: text; background-clip: text;
+  filter: drop-shadow(0 4px 18px rgba(124,58,237,0.16));
+}
 .lab-caret { width: 14px; height: 58px; margin-left: 12px; border-radius: 3px;
-  background: linear-gradient(180deg, #a78bfa, #6d28d9);
+  background: linear-gradient(180deg, var(--ah-accent-ink), #6d28d9);
   box-shadow: 0 0 28px rgba(124,58,237,0.8);
   /* 딱딱한 2단 점멸(steps) 대신 부드럽게 숨쉬듯 — 켜짐이 길고 꺼짐이 짧다. */
   animation: lab-blink 1.9s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
@@ -302,70 +452,74 @@ body {
   100% { opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) { .lab-caret { animation: none; opacity: 0.85; } }
-.lab-tagline { font-size: 22px; font-weight: 700; color: #eef1f6; margin: 18px 0 0; }
-.lab-demo .lab-hero-sub { color: #78818f; font-size: 14.5px; line-height: 1.75; margin-top: 10px; }
-.lab-demo .lab-hero-sub b { color: #b8c0cc; }
+.lab-tagline { font-size: 22px; font-weight: 700; color: var(--ah-fg-strong); margin: 18px 0 0; }
+.lab-demo .lab-hero-sub { color: var(--ah-muted); font-size: 14.5px; line-height: 1.75; margin-top: 10px; }
+.lab-demo .lab-hero-sub b { color: var(--ah-fg-soft); }
 .lab-demo .lab-hero-actions { justify-content: flex-start; margin-top: 18px; }
-.lab-demo .lab-btn-accent { background: #7c3aed; border-color: #7c3aed; color: #fff;
-  box-shadow: 0 6px 26px rgba(124,58,237,0.45); }
-.lab-demo .lab-sample-btn { background: rgba(255,255,255,0.05); border: 1px solid #2a3546; color: #dfe5ee; }
+.lab-demo .lab-btn-accent { background: var(--ah-accent); border-color: var(--ah-accent); color: #fff;
+  box-shadow: var(--ah-shadow-accent); }
+.lab-demo .lab-sample-btn { background: var(--ah-surface-btn); border: 1px solid var(--ah-line-3); color: var(--ah-fg-soft); }
 /* 랜딩의 "할 수 있는 일" 두 갈래 — 문서 편집 / 양식 일괄 작성. */
 .lab-ways { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 22px; }
 @media (max-width: 780px) { .lab-ways { grid-template-columns: 1fr; } }
-.lab-demo .lab-way { display: flex; flex-direction: column; background: rgba(255,255,255,0.035);
-  border: 1px solid #1e2532; border-radius: 14px; padding: 18px 20px 19px; }
-.lab-demo .lab-way .n { font-size: 19px; font-weight: 700; color: #ffffff; letter-spacing: -0.3px; }
-.lab-demo .lab-way p { font-size: 13.5px; line-height: 1.7; color: #8b93a1; margin: 9px 0 0; }
+.lab-demo .lab-way { display: flex; flex-direction: column; background: var(--ah-surface);
+  border: 1px solid var(--ah-line); border-radius: 14px; padding: 18px 20px 19px; }
+.lab-demo .lab-way .n { font-size: 19px; font-weight: 700; color: var(--ah-fg-strong); letter-spacing: -0.3px; }
+.lab-demo .lab-way p { font-size: 13.5px; line-height: 1.7; color: var(--ah-muted); margin: 9px 0 0; }
 /* 행동 버튼은 카드 맨 아래로 — 카드 높이가 달라도 두 버튼 줄이 나란히 선다.
    한 줄 유지(nowrap): 라벨을 짧게 두고 줄바꿈을 막아 카드마다 버튼 줄이 하나다. */
 .lab-way-actions { display: flex; flex-wrap: nowrap; gap: 10px; margin-top: auto; padding-top: 18px; }
 .lab-demo .lab-way-actions .lab-btn { padding: 12px 22px; font-size: 15px; font-weight: 600;
   white-space: nowrap; text-decoration: none; }
-.lab-demo .lab-way-note { font-size: 12px; color: #5c6470; margin: 10px 0 0; line-height: 1.65; }
+.lab-demo .lab-way-note { font-size: 12px; color: var(--ah-dim); margin: 10px 0 0; line-height: 1.65; }
 .lab-way-short { display: none; } /* 좁은 화면에서만 등장(아래 미디어쿼리) */
-.lab-demo .lab-way-note b { color: #c4b5fd; font-weight: 600; }
+.lab-demo .lab-way-note b { color: var(--ah-accent-ink); font-weight: 600; }
 .lab-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
 .lab-badges span { font-size: 12.5px; padding: 6px 12px; border-radius: 999px;
-  background: rgba(124,58,237,0.10); border: 1px solid rgba(124,58,237,0.35); color: #c4b5fd; }
-.lab-badges span.g { background: rgba(16,185,129,0.10); border-color: rgba(16,185,129,0.35); color: #6ee7b7; }
-.lab-demo .lab-hero-note { color: #5c6470; margin-top: 14px; }
+  background: var(--ah-accent-wash); border: 1px solid var(--ah-accent-line); color: var(--ah-accent-ink); }
+.lab-badges span.g { background: rgba(16,185,129,0.10); border-color: rgba(16,185,129,0.35); color: var(--ah-ok); }
+.lab-demo .lab-hero-note { color: var(--ah-dim); margin-top: 14px; }
 /* 제품 스테이지: 실렌더 페이지 + AI 대화 */
 .lab-stage { position: relative; min-height: 500px; perspective: 1300px; pointer-events: none; }
-.lab-page { position: absolute; right: 8px; top: 6px; width: min(370px, 92%); max-height: 560px; background: #fff;
+.lab-page { position: absolute; right: 8px; top: 6px; width: min(370px, 92%); max-height: 560px; background: var(--ah-paper);
   border-radius: 6px; overflow: hidden; transform: rotateY(-13deg) rotateX(4deg) rotate(1.5deg);
-  box-shadow: -28px 38px 80px rgba(0,0,0,0.65), 0 0 0 1px rgba(255,255,255,0.06),
-    -8px 0 56px rgba(124,58,237,0.18); }
+  box-shadow: var(--ah-shadow-page); }
 .lab-page img { display: block; width: 100%; }
+/* 종이 위 그림자막 — 다크에선 페이지를 배경으로 녹이고, 라이트에선 아주 옅게만 깔아
+   실렌더 SVG(흰 종이)가 바탕과 구분되게 둔다(대비는 그림자·테두리가 만든다). */
 .lab-shade { position: absolute; inset: 0; background:
-  linear-gradient(105deg, transparent 55%, rgba(12,15,20,0.5) 100%),
-  linear-gradient(180deg, transparent 72%, rgba(7,9,13,0.95) 100%); }
+  linear-gradient(105deg, transparent 55%, var(--ah-shade-1) 100%),
+  linear-gradient(180deg, transparent 72%, var(--ah-shade-2) 100%); }
 .lab-hl { position: absolute; right: 128px; top: 196px; width: 178px; height: 42px; z-index: 3;
   border: 2.5px solid #7c3aed; border-radius: 4px; background: rgba(124,58,237,0.16);
   box-shadow: 0 0 24px rgba(124,58,237,0.5); transform: rotate(1.5deg); }
 .lab-bubble { position: absolute; z-index: 4; border-radius: 13px; padding: 11px 15px; font-size: 13.5px;
-  box-shadow: 0 12px 40px rgba(0,0,0,0.5); }
-.lab-user { left: -6px; top: 44px; background: #1b2330; border: 1px solid #2a3546; color: #dfe5ee;
+  box-shadow: var(--ah-shadow-card); }
+.lab-user { left: -6px; top: 44px; background: var(--ah-surface-2); border: 1px solid var(--ah-line-3); color: var(--ah-fg-soft);
   border-bottom-right-radius: 4px; }
-.lab-ai { left: 6px; bottom: 46px; width: 300px; background: #141925; border: 1px solid #262d3d;
+.lab-ai { left: 6px; bottom: 46px; width: 300px; background: var(--ah-surface-2); border: 1px solid var(--ah-line-2);
   border-bottom-left-radius: 4px; }
-.lab-ai .h { display: flex; align-items: center; gap: 7px; font-size: 13.5px; color: #cdd4de; }
-.lab-ai .ic { color: #a78bfa; }
-.lab-ai .loc { margin-left: auto; font-size: 10.5px; color: #a78bfa; background: rgba(124,58,237,0.16);
+.lab-ai .h { display: flex; align-items: center; gap: 7px; font-size: 13.5px; color: var(--ah-fg-soft); }
+.lab-ai .ic { color: var(--ah-accent-ink); }
+.lab-ai .loc { margin-left: auto; font-size: 10.5px; color: var(--ah-accent-ink); background: var(--ah-accent-wash);
   padding: 2px 8px; border-radius: 999px; }
-.lab-ai .b { margin-top: 7px; font-size: 12.5px; color: #8b93a1; line-height: 1.5; }
+.lab-ai .b { margin-top: 7px; font-size: 12.5px; color: var(--ah-muted); line-height: 1.5; }
 .lab-ai .a { margin-top: 9px; display: flex; gap: 7px; }
 .lab-ai .a span { font-size: 11.5px; padding: 4px 12px; border-radius: 7px; }
-.lab-ai .ok { background: #7c3aed; color: #fff; }
-.lab-ai .no { background: #1c2230; color: #8b93a1; }
-/* 기능 카드/링크 — 다크 글래스 */
+.lab-ai .ok { background: var(--ah-accent); color: #fff; }
+.lab-ai .no { background: var(--ah-surface-3); color: var(--ah-muted); }
+/* 라이트에선 말풍선이 흰 카드라 바탕과 같은 색이 된다 — 테두리+그림자로 띄운다. */
+:root[data-theme="light"] .lab-user,
+:root[data-theme="light"] .lab-ai { box-shadow: 0 10px 26px rgba(15, 23, 42, 0.1); }
+/* 기능 카드/링크 — 글래스(다크) / 화이트 카드(라이트) */
 .lab-demo .lab-features { margin-top: 34px; }
-.lab-demo .lab-feature { background: rgba(255,255,255,0.035); border: 1px solid #1e2532;
+.lab-demo .lab-feature { background: var(--ah-surface); border: 1px solid var(--ah-line);
   border-radius: 12px; }
-.lab-demo .lab-feature b { color: #dfe5ee; }
-.lab-demo .lab-feature span { color: #78818f; }
-.lab-demo .lab-feature code { background: rgba(124,58,237,0.14); color: #c4b5fd; }
-.lab-demo .lab-hero-dev { border-top-color: #1e2532; color: #5c6470; }
-.lab-demo .lab-hero-dev a { color: #8b93a1; }
+.lab-demo .lab-feature b { color: var(--ah-fg-soft); }
+.lab-demo .lab-feature span { color: var(--ah-muted); }
+.lab-demo .lab-feature code { background: var(--ah-accent-wash); color: var(--ah-accent-ink); }
+.lab-demo .lab-hero-dev { border-top-color: var(--ah-line); color: var(--ah-dim); }
+.lab-demo .lab-hero-dev a { color: var(--ah-muted); }
 /* 좁은 화면: 스테이지를 숨기지 않고 축소해 카피 아래에 둔다 — 폰으로 처음 들어온 사람도
    "AI가 문서를 고치는 그림"을 보게 하는 게 이 랜딩의 전달력 대부분이다. */
 @media (max-width: 900px) {
@@ -383,7 +537,7 @@ body {
   .lab-demo .lab-way-short { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .lab-way-long, .lab-way-note { display: none; }
   .lab-way-short { display: block; }
-  .lab-demo .lab-way-short { font-size: 12px; color: #78818f; margin: 4px 0 0; }
+  .lab-demo .lab-way-short { font-size: 12px; color: var(--ah-muted); margin: 4px 0 0; }
   .lab-way-actions { margin-top: 0; margin-left: auto; padding-top: 0; flex-shrink: 0; }
   .lab-demo .lab-way-actions .lab-btn { padding: 9px 14px; font-size: 13px; }
   /* 좁은 폭에서 두 버튼이 겹치지 않도록 보조(예시 샘플)는 아이콘 크기로 유지 */
@@ -391,3 +545,57 @@ body {
 }
 @media (max-width: 380px) { .lab-demo .lab-way { flex-direction: column; align-items: flex-start; }
   .lab-way-actions { margin-left: 0; padding-top: 12px; } }
+
+/* ── 에디터(SDK) 크롬 정리 — 컴포넌트 수정 없이 CSS 로만 ─────────────────────────────────────
+   ① 하단 상태바의 "편집 모드/읽기 전용" 배지는 숨긴다: 이 앱은 항상 편집 모드로 열리므로 상시
+      켜져 있는 라벨이고, 페이지 표시·선택 요약만 남기면 상태바가 조용해진다. 아웃라인/선택
+      요약은 그대로 살아 있고, 배지 노드 자체는 DOM 에 남는다(SDK 계약·e2e 텍스트 검사 무손상).
+   ② 채팅 빈 상태(안내 문장 + 제안 칩)는 패널 가운데로 — 위쪽에 붙어 있으면 "빈 화면"으로 읽힌다. */
+.lab-demo .hw-statusbar-mode { display: none; }
+.lab-demo .hw-chat-list:has(> .hw-empty) {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+.lab-demo .hw-chat-list > .hw-empty {
+  margin-top: 0;
+  max-width: 260px;
+}
+.lab-demo .hw-chat-list > .hw-empty p { margin: 0; line-height: 1.65; }
+
+/* ── 라이트 에디터 ────────────────────────────────────────────────────────────────────────────
+   라이트에서는 워크스페이스에 `hw-studio`(다크 스튜디오 팔레트) 클래스를 **아예 붙이지 않는다**
+   (LabWorkspace.tsx) — SDK 기본 테마가 이미 라이트라 색을 다시 칠할 필요가 없다. 여기서는 종이
+   대비만 손본다: 캔버스를 종이보다 살짝 어둡게 깔고 시트에 테두리+그림자를 준다. */
+:root[data-theme="light"] .lab-demo .hw-canvas {
+  background: linear-gradient(180deg, #eef0f6, #e9ecf4);
+}
+:root[data-theme="light"] .lab-demo .hw-sheet {
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.14), 0 0 0 1px rgba(15, 23, 42, 0.07);
+}
+:root[data-theme="light"] .lab-demo .hw-chat,
+:root[data-theme="light"] .lab-demo .hw-design,
+:root[data-theme="light"] .lab-demo .hw-outline,
+:root[data-theme="light"] .lab-demo .hw-statusbar {
+  background: #ffffff;
+}
+:root[data-theme="light"] .lab-demo .hw-workspace {
+  --hw-border: #e4e7f0;
+  --hw-bg: #eef0f6;
+}
+
+/* 좁은 창 규칙은 SDK 에서 `.hw-studio` 안에만 있다 — 라이트에서 그 클래스를 떼면 아웃라인이 캔버스를
+   짓누른다. 값은 SDK 와 같은 것을 쓰되 셀렉터만 `.hw-workspace` 로 넓혀 **두 테마 모두**에 적용한다
+   (다크에서는 같은 값이라 무변화). 종이 캔버스가 주 표면이고, 인스펙터는 그 위에 떠서 40px 레일로
+   접힌다 — SDK 주석의 의도 그대로. */
+@media (max-width: 960px) {
+  .lab-demo .hw-workspace .hw-outline { display: none; }
+  .lab-demo .hw-workspace .hw-body { position: relative; }
+  .lab-demo .hw-workspace .hw-sidepanel {
+    position: absolute; z-index: 24; top: 0; right: 0; bottom: 0;
+    width: min(320px, calc(100% - 72px)); box-shadow: -14px 0 34px var(--ah-panel-shadow, rgba(0, 0, 0, 0.38));
+  }
+  .lab-demo .hw-workspace .hw-sidepanel-collapsed { width: 40px; box-shadow: none; }
+  .lab-demo .hw-workspace .hw-canvas { padding: 18px 48px 40px 18px; }
+}

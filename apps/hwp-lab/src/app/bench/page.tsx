@@ -1,4 +1,5 @@
 import styles from "./bench.module.css";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 // ⚠️ 이 페이지는 **서버 컴포넌트 · 정적 콘텐츠**다. "use client" 를 붙이지 마라 —
 // 크롤러/공유 스크래퍼가 JS 없이 수치를 읽을 수 있어야 하는 것이 이 페이지의 존재 이유다.
@@ -65,6 +66,9 @@ export default function BenchPage() {
           <a href={`${BASE}/`}>오토한글</a>
           <span aria-hidden>›</span>
           <span>충실도 벤치마크</span>
+          {/* 유일한 클라이언트 컴포넌트(테마 토글) — 이 페이지의 서버 렌더 계약은 그대로다.
+              색은 전부 :root[data-theme] 토큰이라 토글이 다시 그리는 것은 자기 자신뿐이다. */}
+          <ThemeToggle className={styles.themeToggle} />
         </nav>
 
         <p className={styles.kicker}>수동 육안이 아니라 자동 게이트</p>
