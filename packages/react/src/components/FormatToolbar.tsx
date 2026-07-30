@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { PageBox } from "../coords";
+import { useWorkspaceMessages } from "../i18n";
 
 export interface FormatToolbarProps {
   /** The selection box in own-render PAGE px (positions the floating toolbar above it). */
@@ -29,12 +30,14 @@ const SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32];
 
 /// FormatToolbar — the opt-in floating format toolbar over a marked cell/range (issue 027 step 5): 굵게
 /// / 기울임 / 글자 크기 / 서체 / 글자색 / 배경색. It maps to `SetCellRangeFmt` / `SetCellRangeShade`
-/// (table-cell scoped), so on a non-cell selection every control is disabled with a Korean tooltip rather
-/// than silently doing nothing. Individually importable; presentational; Korean copy. The host wires the
+/// (table-cell scoped), so on a non-cell selection every control is disabled with an explaining tooltip
+/// rather than silently doing nothing. Individually importable; presentational; copy from the injectable
+/// catalog (issue 077 — `messages.format`/`messages.formatToolbar`, Korean by default). The host wires the
 /// callbacks to `core.edit.formatCellRange` / `shadeCellRange`.
 export function FormatToolbar({ box, scale, kind, fonts, onBold, onItalic, onSize, onFont, onColor, onShade }: FormatToolbarProps) {
+  const msg = useWorkspaceMessages();
   const cellScoped = kind === "cell" || kind === "range";
-  const disabledTitle = cellScoped ? undefined : "표 셀을 선택하면 서식을 적용할 수 있습니다";
+  const disabledTitle = cellScoped ? undefined : msg.formatToolbar.cellOnlyHint;
   const [size, setSize] = useState(11);
 
   const left = box.x * scale;
@@ -47,16 +50,16 @@ export function FormatToolbar({ box, scale, kind, fonts, onBold, onItalic, onSiz
       style={{ left, top }}
       onPointerDown={(e) => e.stopPropagation()}
     >
-      <button className="hw-fmt-btn" disabled={!cellScoped} title={disabledTitle ?? "굵게"} data-testid="hw-fmt-bold" onClick={onBold}>
-        <b>가</b>
+      <button className="hw-fmt-btn" disabled={!cellScoped} title={disabledTitle ?? msg.format.bold} data-testid="hw-fmt-bold" onClick={onBold}>
+        <b>{msg.format.sampleGlyph}</b>
       </button>
-      <button className="hw-fmt-btn" disabled={!cellScoped} title={disabledTitle ?? "기울임"} data-testid="hw-fmt-italic" onClick={onItalic}>
-        <i>가</i>
+      <button className="hw-fmt-btn" disabled={!cellScoped} title={disabledTitle ?? msg.format.italic} data-testid="hw-fmt-italic" onClick={onItalic}>
+        <i>{msg.format.sampleGlyph}</i>
       </button>
       <select
         className="hw-fmt-size"
         disabled={!cellScoped}
-        title={disabledTitle ?? "글자 크기"}
+        title={disabledTitle ?? msg.format.fontSize}
         data-testid="hw-fmt-size"
         value={size}
         onChange={(e) => {
@@ -75,13 +78,13 @@ export function FormatToolbar({ box, scale, kind, fonts, onBold, onItalic, onSiz
         <select
           className="hw-fmt-font"
           disabled={!cellScoped}
-          title={disabledTitle ?? "서체"}
+          title={disabledTitle ?? msg.format.fontFamily}
           data-testid="hw-fmt-font"
           defaultValue=""
           onChange={(e) => e.target.value && onFont(e.target.value)}
         >
           <option value="" disabled>
-            서체
+            {msg.format.fontFamily}
           </option>
           {fonts.map((f) => (
             <option key={f} value={f}>
@@ -90,16 +93,16 @@ export function FormatToolbar({ box, scale, kind, fonts, onBold, onItalic, onSiz
           ))}
         </select>
       )}
-      <label className="hw-fmt-color" title={disabledTitle ?? "글자색"}>
-        <span aria-hidden>글자색</span>
+      <label className="hw-fmt-color" title={disabledTitle ?? msg.format.textColor}>
+        <span aria-hidden>{msg.format.textColor}</span>
         <input type="color" disabled={!cellScoped} data-testid="hw-fmt-color" defaultValue="#000000" onChange={(e) => onColor(e.target.value)} />
       </label>
-      <label className="hw-fmt-color" title={disabledTitle ?? "배경색"}>
-        <span aria-hidden>배경</span>
+      <label className="hw-fmt-color" title={disabledTitle ?? msg.format.backgroundColor}>
+        <span aria-hidden>{msg.format.background}</span>
         <input type="color" disabled={!cellScoped} data-testid="hw-fmt-shade" defaultValue="#ffff00" onChange={(e) => onShade(e.target.value)} />
       </label>
-      <button className="hw-fmt-btn" disabled={!cellScoped} title={disabledTitle ?? "배경 지움"} data-testid="hw-fmt-shade-clear" onClick={() => onShade(null)}>
-        배경 지움
+      <button className="hw-fmt-btn" disabled={!cellScoped} title={disabledTitle ?? msg.format.clearBackground} data-testid="hw-fmt-shade-clear" onClick={() => onShade(null)}>
+        {msg.format.clearBackground}
       </button>
     </div>
   );

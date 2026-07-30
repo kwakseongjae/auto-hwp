@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { resizeBoundary } from "@auto-hwp/editor-core";
+import { useWorkspaceMessages } from "../i18n";
 
 /** Which axis a boundary drag runs along: `"x"` = column boundaries (vertical grips, drag left↔right);
  *  `"y"` = row boundaries (horizontal grips, drag up↕down). */
@@ -79,6 +80,7 @@ export interface ColumnResizeOverlayProps {
 /// so a host can mount it WITHOUT HwpWorkspace. The px→ratio conversion is NOT done here — the core owns
 /// it (single conversion point). All chrome is presentational; the handle is `hw-col-grip`.
 export function ColumnResizeOverlay({ boundaries, top, height, scale, minPx = 8, onCommit }: ColumnResizeOverlayProps) {
+  const msg = useWorkspaceMessages();
   const { live, dragging, onDown, onMove, onUp } = useBoundaryDrag(boundaries, "x", scale, minPx, onCommit);
 
   if (live.length < 3) return null; // need at least one interior boundary (2 cols) to resize
@@ -94,8 +96,8 @@ export function ColumnResizeOverlay({ boundaries, top, height, scale, minPx = 8,
             data-testid={`hw-col-grip-${i}`}
             role="separator"
             aria-orientation="vertical"
-            aria-label={`${i}번째 열 경계 너비 조절`}
-            title="드래그하여 열 너비 조절"
+            aria-label={msg.table.colGripLabel(i)}
+            title={msg.table.colGripTitle}
             style={{ left: x * scale, top: top * scale, height: height * scale }}
             onPointerDown={onDown(i)}
           />
@@ -129,6 +131,7 @@ export interface RowResizeOverlayProps {
 /// px→HWPUNIT conversion + split-table fragment→whole-table remap live in the core (single point). The
 /// handle is `hw-row-grip`. Shares the axis-generic drag core (`.hw-sheet-wrap` coordinate frame).
 export function RowResizeOverlay({ boundaries, left, width, scale, minPx = 8, onCommit }: RowResizeOverlayProps) {
+  const msg = useWorkspaceMessages();
   const { live, dragging, onDown, onMove, onUp } = useBoundaryDrag(boundaries, "y", scale, minPx, onCommit);
 
   if (live.length < 3) return null; // need at least one interior boundary (2 rows) to resize
@@ -144,8 +147,8 @@ export function RowResizeOverlay({ boundaries, left, width, scale, minPx = 8, on
             data-testid={`hw-row-grip-${i}`}
             role="separator"
             aria-orientation="horizontal"
-            aria-label={`${i}번째 행 경계 높이 조절`}
-            title="드래그하여 행 높이 조절"
+            aria-label={msg.table.rowGripLabel(i)}
+            title={msg.table.rowGripTitle}
             style={{ top: y * scale, left: left * scale, width: width * scale }}
             onPointerDown={onDown(i)}
           />

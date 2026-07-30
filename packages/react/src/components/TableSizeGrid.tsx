@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useWorkspaceMessages } from "../i18n";
 
 export interface TableSizeGridProps {
   /** Max rows/cols the grid picker offers. Default 8×8. */
@@ -14,6 +15,7 @@ export interface TableSizeGridProps {
 /// highlight; the host wraps it in whatever popover chrome it needs and closes on pick. Every testid /
 /// class is byte-identical to the original so 027 tests/e2e stay green.
 export function TableSizeGrid({ maxRows = 8, maxCols = 8, onPick }: TableSizeGridProps) {
+  const msg = useWorkspaceMessages();
   const [hover, setHover] = useState<{ r: number; c: number }>({ r: 0, c: 0 });
 
   const choose = (r: number, c: number) => {
@@ -33,7 +35,7 @@ export function TableSizeGrid({ maxRows = 8, maxCols = 8, onPick }: TableSizeGri
                 type="button"
                 className={`hw-tableins-cell${on ? " hw-tableins-on" : ""}`}
                 data-testid={`hw-table-cell-${r + 1}-${c + 1}`}
-                aria-label={`${r + 1}행 ${c + 1}열`}
+                aria-label={msg.table.sizeCell(r + 1, c + 1)}
                 onMouseEnter={() => setHover({ r: r + 1, c: c + 1 })}
                 onFocus={() => setHover({ r: r + 1, c: c + 1 })}
                 onClick={() => choose(r + 1, c + 1)}
@@ -43,7 +45,7 @@ export function TableSizeGrid({ maxRows = 8, maxCols = 8, onPick }: TableSizeGri
         )}
       </div>
       <div className="hw-tableins-label" data-testid="hw-table-picker-label">
-        {hover.r > 0 ? `${hover.r} × ${hover.c} 표` : "행 × 열 선택"}
+        {hover.r > 0 ? msg.table.sizePicked(hover.r, hover.c) : msg.table.sizePlaceholder}
       </div>
     </>
   );

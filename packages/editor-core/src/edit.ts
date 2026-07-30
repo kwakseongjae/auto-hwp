@@ -1,4 +1,5 @@
 import { deleteBlockDetail, describeIntent } from "./describeIntent";
+import { coreMessagesKoKR, type CoreMessages } from "./messages";
 import { inheritRuns } from "./runs";
 import type { DocSession } from "./session";
 import type { SelectionModel } from "./selection";
@@ -45,6 +46,10 @@ export interface PageMarginsMm {
 /// undo contract). All logic lives HERE (React 0 lines) so node tests pin it; the react components are a
 /// thin opt-in binding that call these methods.
 export class EditController {
+  /** issue 077 — the injected string catalog for the preview cards. Defaults to Korean; the React
+   *  binding assigns the host-merged catalog through `EditorCore.messages`. */
+  messages: CoreMessages = coreMessagesKoKR;
+
   constructor(
     private session: DocSession,
     private selection: SelectionModel,
@@ -57,7 +62,7 @@ export class EditController {
 
   /** Map proposed Intents → preview cards (icon + label + human summary + target chip). */
   preview(intents: Intent[]): IntentCard[] {
-    return intents.map(describeIntent);
+    return intents.map((intent) => describeIntent(intent, this.messages.intent)); // NEVER `map(describeIntent)` — map's index would land on the catalog param
   }
 
   /** The ASYNC preview (issue 051): `preview` plus per-card enrichment — a `DeleteBlock` card is
@@ -69,12 +74,13 @@ export class EditController {
   async previewCards(intents: Intent[]): Promise<IntentCard[]> {
     return Promise.all(
       intents.map(async (intent) => {
-        const card = describeIntent(intent);
+        const card = describeIntent(intent, this.messages.intent);
         if (card.destructive && card.section !== null && card.block !== null) {
           const detail = await deleteBlockDetail(
             (s, b, r, c) => this.session.runsAt(s, b, r, c),
             card.section,
             card.block,
+            this.messages.intent,
           );
           return { ...card, detail };
         }

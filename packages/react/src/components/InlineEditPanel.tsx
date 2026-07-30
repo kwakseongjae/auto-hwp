@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { modLabel } from "../platform";
+import { useWorkspaceMessages } from "../i18n";
 import type { Anchor, Box, DocContext, Intent, IntentCard, OnAiRequest } from "../types";
 
 /// InlineEditPanel — the per-element INLINE vibe-edit surface (issue 06x): an alternative to the right-hand
@@ -52,6 +53,7 @@ type Phase =
   | { state: "error"; text: string };
 
 export function InlineEditPanel(props: InlineEditPanelProps) {
+  const msg = useWorkspaceMessages();
   const [input, setInput] = useState("");
   const [phase, setPhase] = useState<Phase>({ state: "compose" });
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -78,7 +80,7 @@ export function InlineEditPanel(props: InlineEditPanelProps) {
       // SAME bridge as the chat — anchors = [this selection's anchor] so the grid/context is identical.
       const intents = await props.onAiRequest(trimmed, [props.anchor], props.docContext);
       if (!intents || intents.length === 0) {
-        setPhase({ state: "error", text: "제안된 편집이 없습니다." });
+        setPhase({ state: "error", text: msg.inlineEdit.noEdits });
         return;
       }
       // APPLY IMMEDIATELY (apply-then-revert): the parent commits ONE undo batch and hands back the cards.
@@ -108,14 +110,14 @@ export function InlineEditPanel(props: InlineEditPanelProps) {
       // deselect / re-select and close the panel via the parent's click-away guard).
       onPointerDown={(e) => e.stopPropagation()}
       role="dialog"
-      aria-label="여기서 편집"
+      aria-label={msg.inlineEdit.label}
     >
       <div className="hw-inline-head">
-        <span className="hw-inline-title">✨ 여기서 편집</span>
-        <span className="hw-inline-target" title="이 위치만 편집됩니다">
+        <span className="hw-inline-title">{msg.inlineEdit.title}</span>
+        <span className="hw-inline-target" title={msg.inlineEdit.targetTitle}>
           {props.targetLabel}
         </span>
-        <button className="hw-inline-x" onClick={props.onClose} title="닫기 (Esc)" aria-label="닫기">
+        <button className="hw-inline-x" onClick={props.onClose} title={msg.inlineEdit.closeTitle} aria-label={msg.inlineEdit.closeLabel}>
           ✕
         </button>
       </div>
@@ -128,7 +130,7 @@ export function InlineEditPanel(props: InlineEditPanelProps) {
             value={input}
             disabled={busy}
             spellCheck={false}
-            placeholder="이 위치를 어떻게 바꿀까요?"
+            placeholder={msg.inlineEdit.placeholder}
             onChange={(e) => setInput(e.currentTarget.value)}
             onKeyDown={(e) => {
               if (e.key === "Escape") {
@@ -144,8 +146,8 @@ export function InlineEditPanel(props: InlineEditPanelProps) {
             }}
           />
           <div className="hw-inline-actions">
-            <span className="hw-inline-hint" title={`Enter 적용 · Shift+Enter 줄바꿈 · Esc 닫기 (${mod})`}>
-              Enter로 적용
+            <span className="hw-inline-hint" title={msg.inlineEdit.hintTitle(mod)}>
+              {msg.inlineEdit.hint}
             </span>
             {busy ? (
               <span className="hw-inline-busy" data-testid="hw-inline-busy" aria-live="polite">
@@ -155,7 +157,7 @@ export function InlineEditPanel(props: InlineEditPanelProps) {
               </span>
             ) : (
               <button className="hw-btn-send hw-inline-send" disabled={!input.trim()} onClick={() => void submit()}>
-                적용
+                {msg.inlineEdit.apply}
               </button>
             )}
           </div>
@@ -165,7 +167,7 @@ export function InlineEditPanel(props: InlineEditPanelProps) {
       {phase.state === "applied" && (
         <div className="hw-inline-applied" data-testid="hw-inline-applied">
           <div className="hw-inline-summary">
-            <span className="hw-inline-check">✓ 적용됨</span>
+            <span className="hw-inline-check">{msg.inlineEdit.applied}</span>
             <ul className="hw-inline-cards">
               {phase.cards.map((c, i) => (
                 <li key={i} className="hw-inline-card">
@@ -175,11 +177,11 @@ export function InlineEditPanel(props: InlineEditPanelProps) {
             </ul>
           </div>
           <div className="hw-inline-actions">
-            <button className="hw-btn-ghost hw-inline-revert" onClick={() => void revert()} title="이 편집을 취소하고 원래대로">
-              되돌리기
+            <button className="hw-btn-ghost hw-inline-revert" onClick={() => void revert()} title={msg.inlineEdit.revertTitle}>
+              {msg.inlineEdit.revert}
             </button>
             <button className="hw-btn-primary hw-inline-keep" onClick={props.onClose}>
-              적용 유지
+              {msg.inlineEdit.keep}
             </button>
           </div>
         </div>
@@ -190,10 +192,10 @@ export function InlineEditPanel(props: InlineEditPanelProps) {
           <p className="hw-inline-error-text">{phase.text}</p>
           <div className="hw-inline-actions">
             <button className="hw-btn-ghost" onClick={props.onClose}>
-              닫기
+              {msg.inlineEdit.close}
             </button>
             <button className="hw-btn-primary" onClick={() => setPhase({ state: "compose" })}>
-              다시 시도
+              {msg.inlineEdit.retry}
             </button>
           </div>
         </div>

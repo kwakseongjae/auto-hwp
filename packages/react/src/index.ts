@@ -244,3 +244,37 @@ export type {
   ReplaceResult,
   MatchBox,
 } from "./types";
+
+// i18n (issue 077) — the injectable message catalog. `HwpWorkspaceProps.messages` takes a DeepPartial of
+// `WorkspaceMessages`; anything omitted falls back to `koKR`. `WorkspaceMessagesProvider` is only needed
+// for components mounted OUTSIDE HwpWorkspace (a standalone ChatPanel, a host-composed toolbar).
+export {
+  koKR,
+  mergeMessages,
+  useMergedMessages,
+  useWorkspaceMessages,
+  WorkspaceMessagesContext,
+  WorkspaceMessagesProvider,
+} from "./i18n";
+export type {
+  ChatPanelMessages,
+  DeepPartial,
+  DesignPanelMessages,
+  FindBarMessages,
+  FloatingToolbarMessages,
+  FontPickerMessages,
+  FormatMessages,
+  FormatToolbarMessages,
+  ImageOverlayMessages,
+  InlineEditMessages,
+  OutlinePanelMessages,
+  RibbonMessages,
+  RulerMessages,
+  SelectionActionMessages,
+  StatusBarMessages,
+  TableMessages,
+  WorkspaceMessages,
+  WorkspaceMessagesProviderProps,
+  WorkspacePanelMessages,
+  WorkspaceShellMessages,
+} from "./i18n";

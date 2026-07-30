@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { resizeImageBox, type Box, type ImageHandle, type XYWH } from "@auto-hwp/editor-core";
+import { useWorkspaceMessages } from "../i18n";
 
 /// ImageOverlay — the 8-handle move/resize overlay drawn over a SELECTED image's placed box (issue 049,
 /// the SDK promotion of the desktop `ImageOverlay`). It is a pure, individually-importable layer over
@@ -67,6 +68,7 @@ export function ImageOverlay({ box, scale, minPx = 8, onCommitResize, onCommitMo
   // `live` is the PAGE-px box the overlay RENDERS while dragging (local-only, no parent repaint); null =
   // idle (render the committed `box`). Reset whenever the committed box changes (a fresh selection / a
   // post-commit re-place).
+  const msg = useWorkspaceMessages();
   const [live, setLive] = useState<XYWH | null>(null);
   const drag = useRef<Drag | null>(null);
   useEffect(() => setLive(null), [box.x, box.y, box.w, box.h]);
@@ -166,14 +168,14 @@ export function ImageOverlay({ box, scale, minPx = 8, onCommitResize, onCommitMo
           type="button"
           className="hw-img-delete"
           data-testid="hw-image-delete"
-          title="이미지 삭제 (Delete)"
+          title={msg.image.deleteTitle}
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
             onDelete();
           }}
         >
-          🗑 삭제
+          {msg.image.delete}
         </button>
       )}
       {RESIZE_HANDLES.map(({ h, cls, cursor }) => (

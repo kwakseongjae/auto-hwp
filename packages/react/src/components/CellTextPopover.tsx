@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useWorkspaceMessages } from "../i18n";
 import type { PageBox } from "../coords";
 
 export interface CellTextPopoverProps {
@@ -25,8 +26,10 @@ export interface CellTextPopoverProps {
 /// WYSIWYG gotchas (#000 rule etc.) are NOT ported. It is IME-SAFE: a commit is REFUSED while a Korean
 /// composition is in flight (compositionstart→end), so pressing Enter to CONFIRM an IME candidate never
 /// also commits the edit (issue 027 §함정: "compositionend 전 커밋 금지"). Commit = the 저장 button or
-/// ⌘/Ctrl+Enter; Enter alone inserts a newline (multi-paragraph cells). Esc cancels. Korean copy.
+/// ⌘/Ctrl+Enter; Enter alone inserts a newline (multi-paragraph cells). Esc cancels. Copy from the
+/// injectable catalog (issue 077 — `messages.table`, Korean by default).
 export function CellTextPopover({ box, scale, initialText, onCommit, onCancel }: CellTextPopoverProps) {
+  const msg = useWorkspaceMessages();
   const [text, setText] = useState(initialText);
   const composing = useRef(false);
   const ref = useRef<HTMLTextAreaElement | null>(null);
@@ -81,15 +84,15 @@ export function CellTextPopover({ box, scale, initialText, onCommit, onCancel }:
         onCompositionStart={() => (composing.current = true)}
         onCompositionEnd={() => (composing.current = false)}
         onKeyDown={onKeyDown}
-        aria-label="셀 텍스트 편집"
+        aria-label={msg.table.cellEditorLabel}
       />
       <div className="hw-cellpop-actions">
-        <span className="hw-cellpop-hint">⌘/Ctrl+Enter 저장 · Esc 취소</span>
+        <span className="hw-cellpop-hint">{msg.table.cellPopoverHint}</span>
         <button className="hw-cellpop-btn" data-testid="hw-cell-cancel" onClick={onCancel}>
-          취소
+          {msg.table.cellPopoverCancel}
         </button>
         <button className="hw-cellpop-btn hw-cellpop-btn-primary" data-testid="hw-cell-save" onClick={commit}>
-          저장
+          {msg.table.cellPopoverSave}
         </button>
       </div>
     </div>

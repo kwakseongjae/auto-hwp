@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { describeIntent } from "../describeIntent";
 import { modLabel } from "../platform";
+import { useWorkspaceMessages } from "../i18n";
+import type { ChatPanelMessages } from "../i18n";
 import type { AgentEvent, Anchor, Attachment, ChatTurn, Citation, DocContext, Intent, IntentCard, OnAiRequest } from "../types";
 
 // Multimodal chat input (attachments are CONTEXT, not a new Intent). Text-like documents are extracted
@@ -8,7 +10,6 @@ import type { AgentEvent, Anchor, Attachment, ChatTurn, Citation, DocContext, In
 // (a clean extractor would need a wasm text export or a binary-parser dep — out of scope for this JS-only
 // change), so they attach with an honest UI note and carry no text (never sent as empty).
 const TEXT_EXT = /\.(txt|text|md|markdown|csv|tsv|json|log|xml|html?|rtf|yml|yaml)$/i;
-const UNSUPPORTED_NOTE = "이 형식은 아직 텍스트 추출 미지원 — 텍스트(.txt)·이미지로 첨부하세요";
 
 let attachSeq = 0;
 function nextAttachId(): string {
@@ -20,10 +21,10 @@ function isTextLike(file: File): boolean {
   return file.type.startsWith("text/") || TEXT_EXT.test(file.name);
 }
 
-function readAs(file: File, how: "dataURL" | "text"): Promise<string> {
+function readAs(file: File, how: "dataURL" | "text", failedMessage: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const fr = new FileReader();
-    fr.onerror = () => reject(fr.error ?? new Error("파일 읽기 실패"));
+    fr.onerror = () => reject(fr.error ?? new Error(failedMessage));
     fr.onload = () => resolve(typeof fr.result === "string" ? fr.result : "");
     if (how === "dataURL") fr.readAsDataURL(file);
     else fr.readAsText(file);
@@ -33,15 +34,15 @@ function readAs(file: File, how: "dataURL" | "text"): Promise<string> {
 /** Turn a picked/pasted File into an Attachment: IMAGE → base64 dataUrl (vision), text-like DOC → extracted
  *  text, other binary DOC → an honest "미지원" note (no text; never sent as empty). Pure per-file — the
  *  caller appends to state (respecting the count cap). */
-async function fileToAttachment(file: File): Promise<Attachment> {
+async function fileToAttachment(file: File, msg: ChatPanelMessages): Promise<Attachment> {
   const base = { id: nextAttachId(), name: file.name || "attachment", mime: file.type || "application/octet-stream", size: file.size };
   if (file.type.startsWith("image/")) {
-    return { ...base, kind: "image", dataUrl: await readAs(file, "dataURL") };
+    return { ...base, kind: "image", dataUrl: await readAs(file, "dataURL", msg.fileReadFailed) };
   }
   if (isTextLike(file)) {
-    return { ...base, kind: "doc", text: await readAs(file, "text") };
+    return { ...base, kind: "doc", text: await readAs(file, "text", msg.fileReadFailed) };
   }
-  return { ...base, kind: "doc", note: UNSUPPORTED_NOTE };
+  return { ...base, kind: "doc", note: msg.unsupportedAttachment };
 }
 
 /** Human-readable byte size for a doc chip. */
@@ -162,21 +163,21 @@ function reduceStep(steps: AgentStep[], ev: AgentEvent): AgentStep[] {
 }
 
 /** A human label for a status phase (Korean, shown as a timeline step). */
-function statusLabel(phase: "thinking" | "searching" | "composing"): string {
-  return phase === "searching" ? "웹 검색 중…" : phase === "composing" ? "편집 구성 중…" : "생각하는 중…";
+function statusLabel(phase: "thinking" | "searching" | "composing", msg: ChatPanelMessages): string {
+  return phase === "searching" ? msg.statusSearching : phase === "composing" ? msg.statusComposing : msg.statusThinking;
 }
 
 /** Build the bounded CONVERSATION MEMORY window from prior chat messages (before the new user turn is
  *  pushed). A user message rides as-is; a settled assistant turn rides as a compact digest of its proposed
  *  edits (never raw Intent JSON — that lane stays the emit_intents tool). Thinking/error turns are skipped. */
-function turnsFromMsgs(msgs: Msg[], max: number): ChatTurn[] {
+function turnsFromMsgs(msgs: Msg[], max: number, msg: ChatPanelMessages): ChatTurn[] {
   const turns: ChatTurn[] = [];
   for (const m of msgs) {
     if (m.role === "user") {
       turns.push({ role: "user", text: m.text });
     } else if (m.role === "assistant" && m.state !== "error" && m.state !== "thinking") {
-      const summary = m.cards.length ? m.cards.map((c) => c.summary).join("; ") : "제안된 편집 없음";
-      turns.push({ role: "assistant", text: `제안: ${summary}` });
+      const summary = m.cards.length ? m.cards.map((c) => c.summary).join("; ") : msg.memoryNoEdits;
+      turns.push({ role: "assistant", text: msg.memoryProposal(summary) });
     }
   }
   return turns.slice(-max);
@@ -210,24 +211,23 @@ type Msg =
 type AssistantMsg = Extract<Msg, { role: "assistant"; steps: AgentStep[] }>;
 
 // Reusable prompt chips — the empty-state suggestions (fill the input so the user can tweak).
-const PROMPT_CHIPS = ["이 칸을 채워줘", "이 표에 행 하나 추가해줘", "이 문단을 다듬어줘"];
-
 /** A structured per-op preview CARD (010식): op icon + label + target chip + summary + jump link.
  *  Issue 051: a DESTRUCTIVE card (DeleteBlock) renders as a warning card and shows the target block's
  *  ORIGINAL text (`detail`) so the user approves knowing exactly what would be removed. */
 function OpCard({ card, page, onJump, onReveal }: { card: IntentCard; page: number | null; onJump?: (page: number) => void; onReveal?: (section: number, block: number) => void }) {
+  const msg = useWorkspaceMessages().chat;
   return (
     <div className={card.destructive ? "hw-card hw-card-danger" : "hw-card"}>
       <div className="hw-card-head">
         <span className="hw-card-icon">{card.icon}</span>
         <span className="hw-card-label">{card.label}</span>
         {card.destructive && (
-          <span className="hw-card-danger-badge" title="이 편집은 문서 내용을 삭제합니다 — 명시 승인 후에만 적용됩니다">
-            삭제
+          <span className="hw-card-danger-badge" title={msg.destructiveBadgeTitle}>
+            {msg.destructiveBadge}
           </span>
         )}
         {card.section !== null && (
-          <span className="hw-card-target" title="편집 대상 위치 (섹션/블록)">
+          <span className="hw-card-target" title={msg.targetTitle}>
             s{card.section}
             {card.block !== null ? `·b${card.block}` : ""}
           </span>
@@ -235,18 +235,18 @@ function OpCard({ card, page, onJump, onReveal }: { card: IntentCard; page: numb
       </div>
       <p className="hw-card-summary">{card.summary}</p>
       {card.detail !== undefined && (
-        <blockquote className="hw-card-detail" data-testid="hw-card-detail" title="삭제 대상 블록의 현재 원문">
+        <blockquote className="hw-card-detail" data-testid="hw-card-detail" title={msg.detailTitle}>
           {card.detail}
         </blockquote>
       )}
       {card.section !== null && card.block !== null && onReveal ? (
         // 072 — 블록 단위 "위치 보기": 대상 블록으로 스크롤 + 1.8s 플래시(적용 전 눈으로 확인).
-        <button className="hw-card-jump" data-testid="hw-card-reveal" onClick={() => onReveal(card.section as number, card.block as number)} title="이 편집이 적용되는 블록으로 이동해 잠시 표시합니다">
-          ⊙ 위치 보기
+        <button className="hw-card-jump" data-testid="hw-card-reveal" onClick={() => onReveal(card.section as number, card.block as number)} title={msg.revealTitle}>
+          {msg.reveal}
         </button>
       ) : page !== null && onJump ? (
-        <button className="hw-card-jump" onClick={() => onJump(page)} title="이 편집이 적용되는 쪽으로 이동">
-          ↪ p.{page + 1}로 이동
+        <button className="hw-card-jump" onClick={() => onJump(page)} title={msg.jumpTitle}>
+          {msg.jump(page + 1)}
         </button>
       ) : null}
     </div>
@@ -257,6 +257,7 @@ function OpCard({ card, page, onJump, onReveal }: { card: IntentCard; page: numb
  *  reasoning chunks, and web searches (query + the sources found, folded in from the tool_result) — rendered
  *  ABOVE the eventual op-cards. `pending` shows the trailing step as still in-flight (a subtle pulse). */
 function StepTimeline({ steps, pending }: { steps: AgentStep[]; pending: boolean }) {
+  const msg = useWorkspaceMessages().chat;
   return (
     <div className="hw-timeline" data-testid="hw-timeline">
       {steps.map((s, i) => {
@@ -265,7 +266,7 @@ function StepTimeline({ steps, pending }: { steps: AgentStep[]; pending: boolean
           return (
             <div key={i} className={live ? "hw-step hw-step-status hw-step-live" : "hw-step hw-step-status"}>
               <span className="hw-step-dot" aria-hidden />
-              {statusLabel(s.phase)}
+              {statusLabel(s.phase, msg)}
             </div>
           );
         }
@@ -280,7 +281,7 @@ function StepTimeline({ steps, pending }: { steps: AgentStep[]; pending: boolean
         return (
           <div key={i} className={s.done ? "hw-step hw-step-search" : "hw-step hw-step-search hw-step-live"} data-testid="hw-step-search">
             <span className="hw-step-search-q">
-              🔎 웹 검색: <span className="hw-step-search-query">{s.query}</span>
+              {msg.searchStep} <span className="hw-step-search-query">{s.query}</span>
               {!s.done && <span className="hw-step-search-running"> …</span>}
             </span>
             {s.citations && s.citations.length > 0 && (
@@ -306,6 +307,8 @@ function StepTimeline({ steps, pending }: { steps: AgentStep[]; pending: boolean
 /// reviewable per-op CARDS with 적용/취소. Applying commits through the adapter (via `onApply`). The AI
 /// is fully DELEGATED to the host callback — this package holds no LLM client and no key (R6).
 export function ChatPanel(props: ChatPanelProps) {
+  const all = useWorkspaceMessages();
+  const msg = all.chat;
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -323,16 +326,16 @@ export function ChatPanel(props: ChatPanelProps) {
     setAttachError(null);
     const room = MAX_ATTACHMENTS - attachments.length;
     if (room <= 0) {
-      setAttachError(`첨부는 최대 ${MAX_ATTACHMENTS}개까지 가능합니다.`);
+      setAttachError(msg.attachLimit(MAX_ATTACHMENTS));
       return;
     }
     const picked = files.slice(0, room);
     try {
-      const next = await Promise.all(picked.map(fileToAttachment));
+      const next = await Promise.all(picked.map((f) => fileToAttachment(f, msg)));
       setAttachments((a) => [...a, ...next]);
-      if (files.length > room) setAttachError(`첨부는 최대 ${MAX_ATTACHMENTS}개까지 — 처음 ${room}개만 추가했습니다.`);
+      if (files.length > room) setAttachError(msg.attachLimitPartial(MAX_ATTACHMENTS, room));
     } catch (e) {
-      setAttachError(`첨부 읽기 실패: ${e}`);
+      setAttachError(msg.attachReadFailed(String(e)));
     }
   }
   function removeAttachment(id: string) {
@@ -434,10 +437,10 @@ export function ChatPanel(props: ChatPanelProps) {
     if (!trimmed && sendable.length === 0) return; // nothing to send
     const anchors = props.anchors;
     const page = anchors.length ? anchors[0].page : null;
-    const where = anchors.length ? ` (대상: ${anchors.map((a) => a.label).join(", ")})` : "";
+    const where = anchors.length ? msg.targetSuffix(anchors.map((a) => a.label).join(", ")) : "";
     const attachTag = sendable.length ? ` 📎${sendable.length}` : "";
     // CONVERSATION MEMORY: snapshot prior turns (BEFORE the new user turn is pushed), bounded.
-    const history = turnsFromMsgs(msgs, MEMORY_TURNS);
+    const history = turnsFromMsgs(msgs, MEMORY_TURNS, msg);
     setInput("");
     setAttachments([]); // the attachments have ridden along — clear them
     setAttachError(null);
@@ -466,7 +469,8 @@ export function ChatPanel(props: ChatPanelProps) {
       } else {
         // issue 051: the host's async builder enriches cards (e.g. DeleteBlock 원문); fall back to the
         // pure describeIntent mapping when the host doesn't wire one (backward compatible).
-        const cards = props.previewCards ? await props.previewCards(intents) : intents.map(describeIntent);
+        // ⚠️ `map(describeIntent)` 금지 — map 이 넘기는 INDEX 가 카탈로그 인자 자리에 앉는다(077).
+        const cards = props.previewCards ? await props.previewCards(intents) : intents.map((i) => describeIntent(i, all.core.intent));
         patchThinking((c) => ({ ...c, state: "pending", intents, cards, citations }));
       }
     } catch (e) {
@@ -498,7 +502,7 @@ export function ChatPanel(props: ChatPanelProps) {
       settleLast("applied", props.undoDepth?.());
       void applied;
     } catch (e) {
-      setMsgs((m) => [...m, { role: "assistant", state: "error", text: `적용 실패: ${e}` }]);
+      setMsgs((m) => [...m, { role: "assistant", state: "error", text: msg.applyFailed(String(e)) }]);
     } finally {
       setBusy(false);
     }
@@ -528,7 +532,7 @@ export function ChatPanel(props: ChatPanelProps) {
         });
       }
     } catch (e) {
-      setMsgs((m) => [...m, { role: "assistant", state: "error", text: `되돌리기 실패: ${e}` }]);
+      setMsgs((m) => [...m, { role: "assistant", state: "error", text: msg.revertFailed(String(e)) }]);
     } finally {
       setBusy(false);
     }
@@ -537,13 +541,15 @@ export function ChatPanel(props: ChatPanelProps) {
   return (
     <aside className="hw-chat">
       <div className="hw-chat-head">
-        <span className="hw-chat-title">✦ 바이브 편집</span>
-        <span className="hw-chat-sub">· 가리키고 말하세요</span>
+        <span className="hw-chat-title">{msg.title}</span>
+        <span className="hw-chat-sub">{msg.subtitle}</span>
       </div>
 
       {props.isMock && (
         <div className="hw-mock-badge">
-          ⚠️ 데모 모드(mock): 실제 이해 없이 예시 편집만 보여줍니다. 실제 편집은 호스트가 서버사이드 AI를 <code>onAiRequest</code>에 연결해야 합니다.
+          {msg.mockBadgePrefix}
+          <code>onAiRequest</code>
+          {msg.mockBadgeSuffix}
         </div>
       )}
 
@@ -557,10 +563,12 @@ export function ChatPanel(props: ChatPanelProps) {
         {msgs.length === 0 && (
           <div className="hw-empty">
             <p>
-              문서의 한 곳을 <b>클릭해서 가리키고</b>, 무엇을 바꿀지 말하세요.
+              {msg.emptyPromptPrefix}
+              <b>{msg.emptyPromptStrong}</b>
+              {msg.emptyPromptSuffix}
             </p>
             <div className="hw-chip-row">
-              {PROMPT_CHIPS.map((c) => (
+              {msg.promptChips.map((c) => (
                 <button
                   key={c}
                   className="hw-chip"
@@ -599,7 +607,7 @@ export function ChatPanel(props: ChatPanelProps) {
                     <span className="hw-dot" />
                   </div>
                 )}
-                {m.state === "empty" && <div className="hw-empty-result" data-testid="hw-empty-result">제안된 편집이 없습니다.</div>}
+                {m.state === "empty" && <div className="hw-empty-result" data-testid="hw-empty-result">{msg.noEdits}</div>}
                 {m.cards.length > 0 && (
                   <div className="hw-cards">
                     {m.cards.map((card, j) => (
@@ -612,16 +620,16 @@ export function ChatPanel(props: ChatPanelProps) {
                     {/* issue 051: a proposal containing a DESTRUCTIVE card names the deletion on the
                         approval button — the user consents to the delete EXPLICITLY (no auto-apply). */}
                     <button className="hw-btn-primary" disabled={busy} onClick={() => apply(m.intents)}>
-                      {m.cards.some((c) => c.destructive) ? "✓ 적용(삭제 포함)" : "✓ 적용"}
+                      {m.cards.some((c) => c.destructive) ? msg.applyWithDelete : msg.apply}
                     </button>
                     <button className="hw-btn-ghost" disabled={busy} onClick={reject}>
-                      취소
+                      {msg.discard}
                     </button>
                   </div>
                 )}
                 {m.state === "applied" && (
                   <div className="hw-applied-row">
-                    <span className="hw-applied">✓ 적용됨</span>
+                    <span className="hw-applied">{msg.applied}</span>
                     {/* Feature C: persistent 되돌리기 — always shown once applied; enabled only while this
                         batch is the TOP of the undo stack (honest v1). Off-top edits are disabled with a
                         tooltip until the batches above them are reverted. */}
@@ -634,20 +642,18 @@ export function ChatPanel(props: ChatPanelProps) {
                             data-testid="hw-revert"
                             disabled={busy || !isTop}
                             title={
-                              isTop
-                                ? "이 편집을 되돌립니다"
-                                : "이 편집 위에 다른 편집이 있어 개별 되돌리기는 다음 배치에서 지원됩니다 — 먼저 위 편집을 되돌리세요"
+                              isTop ? msg.revertTitle : msg.revertBlockedTitle
                             }
                             onClick={() => void revert(i)}
                           >
-                            되돌리기
+                            {msg.revert}
                           </button>
                         );
                       })()}
                   </div>
                 )}
-                {m.state === "reverted" && <div className="hw-discarded">↩ 되돌림</div>}
-                {m.state === "discarded" && <div className="hw-discarded">취소됨</div>}
+                {m.state === "reverted" && <div className="hw-discarded">{msg.reverted}</div>}
+                {m.state === "discarded" && <div className="hw-discarded">{msg.discarded}</div>}
               </div>
             ),
           )}
@@ -662,25 +668,25 @@ export function ChatPanel(props: ChatPanelProps) {
       </div>
 
       <div className="hw-composer">
-        {!props.canEdit && <p className="hw-composer-hint">편집하려면 먼저 문서를 여세요.</p>}
+        {!props.canEdit && <p className="hw-composer-hint">{msg.openDocFirst}</p>}
         {props.anchors.length > 0 && (
           <div className="hw-anchors-wrap">
             <div className="hw-anchors-head">
-              <span className="hw-anchors-hint" title={`클릭: 선택 교체 · ${mod}+클릭: 선택 추가/토글 · 빈 곳 드래그: 영역 선택`}>
-                {props.anchors.length}개 선택됨
+              <span className="hw-anchors-hint" title={msg.anchorsHint(mod)}>
+                {msg.anchorsCount(props.anchors.length)}
               </span>
               {props.onClearAnchors && (
-                <button className="hw-anchors-clear" onClick={props.onClearAnchors} title="선택 모두 해제 (Esc)">
-                  모두 지우기
+                <button className="hw-anchors-clear" onClick={props.onClearAnchors} title={msg.clearAnchorsTitle}>
+                  {msg.clearAnchors}
                 </button>
               )}
             </div>
             <div className="hw-anchors">
               {props.anchors.map((a, i) => (
-                <span key={`${a.section}:${a.block}:${i}`} className="hw-anchor" title={`대상 [s${a.section}/b${a.block}] — 이 위치만 편집됩니다`}>
+                <span key={`${a.section}:${a.block}:${i}`} className="hw-anchor" title={msg.anchorTitle(a.section, a.block)}>
                   <span aria-hidden>◆</span>
                   {a.label}
-                  <button className="hw-anchor-x" onClick={() => props.onRemoveAnchor(i)} title="이 대상 제거">
+                  <button className="hw-anchor-x" onClick={() => props.onRemoveAnchor(i)} title={msg.removeAnchorTitle}>
                     ✕
                   </button>
                 </span>
@@ -693,8 +699,8 @@ export function ChatPanel(props: ChatPanelProps) {
         {attachments.length > 0 && (
           <div className="hw-attachments-wrap" data-testid="hw-attachments">
             <div className="hw-attachments-head">
-              <span className="hw-attachments-hint" title="이 요청과 함께 AI에 전달됩니다 — 이미지는 이미지로, 문서는 참고 텍스트로. 첨부 내용은 지시가 아니라 참고 자료입니다.">
-                📎 첨부 {attachments.length}개
+              <span className="hw-attachments-hint" title={msg.attachmentsHint}>
+                {msg.attachmentsCount(attachments.length)}
               </span>
             </div>
             <div className="hw-attachments">
@@ -709,8 +715,8 @@ export function ChatPanel(props: ChatPanelProps) {
                     </span>
                   )}
                   <span className="hw-attachment-name">{a.name}</span>
-                  <span className="hw-attachment-meta">{a.note ? "미지원" : a.kind === "image" ? fmtSize(a.size) : `${fmtSize(a.size)}`}</span>
-                  <button className="hw-attachment-x" onClick={() => removeAttachment(a.id)} title="이 첨부 제거">
+                  <span className="hw-attachment-meta">{a.note ? msg.attachmentUnsupported : a.kind === "image" ? fmtSize(a.size) : `${fmtSize(a.size)}`}</span>
+                  <button className="hw-attachment-x" onClick={() => removeAttachment(a.id)} title={msg.removeAttachmentTitle}>
                     ✕
                   </button>
                 </span>
@@ -738,10 +744,10 @@ export function ChatPanel(props: ChatPanelProps) {
             className="hw-attach-btn"
             data-testid="hw-attach-btn"
             disabled={!props.canEdit || busy || awaiting}
-            title="이미지·문서 첨부: 표 사진/스크린샷을 붙여넣거나(⌘V) 참고 문서를 선택하세요. AI가 내용을 읽어 편집에 반영합니다."
+            title={msg.attachTitle}
             onClick={() => fileRef.current?.click()}
           >
-            📎 첨부
+            {msg.attach}
           </button>
           {/* No web-search toggle: search is now MODEL-DRIVEN (the agent decides when to search based on the
               request) and its sources stream into the timeline as a tool_result step. */}
@@ -753,7 +759,7 @@ export function ChatPanel(props: ChatPanelProps) {
             value={input}
             disabled={!props.canEdit || busy || awaiting}
             spellCheck={false}
-            placeholder={awaiting ? "위 제안을 적용/취소한 뒤 계속하세요" : props.anchors.length ? "이 위치를 어떻게 바꿀까요?" : "무엇을 바꿀까요? (문서를 클릭하거나 이미지를 붙여넣기)"}
+            placeholder={awaiting ? msg.placeholderAwaiting : props.anchors.length ? msg.placeholderAnchored : msg.placeholder}
             onChange={(e) => setInput(e.currentTarget.value)}
             onPaste={onPasteAttach}
             onKeyDown={(e) => {
@@ -768,7 +774,7 @@ export function ChatPanel(props: ChatPanelProps) {
             disabled={!props.canEdit || busy || awaiting || (!input.trim() && attachments.every((a) => !a.dataUrl && !a.text))}
             onClick={() => void send(input)}
           >
-            {busy ? "…" : "보내기"}
+            {busy ? "…" : msg.send}
           </button>
         </div>
       </div>

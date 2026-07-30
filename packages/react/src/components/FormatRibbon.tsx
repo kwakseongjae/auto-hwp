@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { saveInlineSelection } from "../richedit";
 import type { ToolbarAlign } from "./FloatingToolbar";
+import { useWorkspaceMessages } from "../i18n";
 
 /// FormatRibbon — the PERSISTENT top format bar (issue 048, ported from the desktop R11 `FormatControls`).
 /// Unlike the 028 FloatingToolbar (which floats over the selection and hides while editing), this ribbon is
@@ -72,6 +73,7 @@ export interface FormatRibbonProps {
 /// The persistent, position-free format ribbon. Presentational: it fires `onPatch` with the changed
 /// attribute; the host resolves the dual routing. Toggle buttons light up from `fmt`.
 export function FormatRibbon(props: FormatRibbonProps) {
+  const msg = useWorkspaceMessages();
   const { fmt, editing, onPatch, fonts, inlineDisabledReason, liveOnlyDisabledReason, cellOnlyDisabledReason } = props;
 
   const size = Math.round(fmt.sizePt);
@@ -101,7 +103,7 @@ export function FormatRibbon(props: FormatRibbonProps) {
   const btnClass = (active: boolean) => `hw-ribbon-btn${active ? " hw-ribbon-btn-active" : ""}`;
 
   return (
-    <div className="hw-format-ribbon" data-testid="hw-format-ribbon" role="toolbar" aria-label="글자 서식">
+    <div className="hw-format-ribbon" data-testid="hw-format-ribbon" role="toolbar" aria-label={msg.ribbon.toolbarLabel}>
       {/* 서체 — both modes (SetCellRangeFmt font ↔ applyLiveStyle wraps the live selection). A native <select>
           can't preventDefault its focus, so it `snapshot`s the editor selection on mousedown (like the 크기/색
           inputs) — applyLiveStyle then restores it so the font lands on the SELECTION, not the whole cell. It
@@ -113,7 +115,7 @@ export function FormatRibbon(props: FormatRibbonProps) {
             className="hw-ribbon-font"
             data-testid="hw-ribbon-font"
             disabled={inlineOff}
-            title={inlineDisabledReason ?? "서체"}
+            title={inlineDisabledReason ?? msg.format.fontFamily}
             value=""
             onMouseDown={snapshot}
             onChange={(e) => {
@@ -121,7 +123,7 @@ export function FormatRibbon(props: FormatRibbonProps) {
             }}
           >
             <option value="" disabled>
-              서체
+              {msg.format.fontFamily}
             </option>
             {fonts.map((f) => (
               <option key={f} value={f} style={{ fontFamily: `"${f}"` }}>
@@ -140,11 +142,11 @@ export function FormatRibbon(props: FormatRibbonProps) {
         data-testid="hw-ribbon-bold"
         aria-pressed={fmt.bold}
         disabled={inlineOff}
-        title={inlineDisabledReason ?? "굵게"}
+        title={inlineDisabledReason ?? msg.format.bold}
         onMouseDown={keep}
         onClick={() => onPatch({ bold: !fmt.bold })}
       >
-        <b>가</b>
+        <b>{msg.format.sampleGlyph}</b>
       </button>
       <button
         type="button"
@@ -152,11 +154,11 @@ export function FormatRibbon(props: FormatRibbonProps) {
         data-testid="hw-ribbon-italic"
         aria-pressed={fmt.italic}
         disabled={inlineOff}
-        title={inlineDisabledReason ?? "기울임"}
+        title={inlineDisabledReason ?? msg.format.italic}
         onMouseDown={keep}
         onClick={() => onPatch({ italic: !fmt.italic })}
       >
-        <i>가</i>
+        <i>{msg.format.sampleGlyph}</i>
       </button>
       {/* 밑줄 / 취소선 — EDIT-ONLY live styles (no SetCellRangeFmt field → disabled 비편집, with a reason). */}
       <button
@@ -165,11 +167,11 @@ export function FormatRibbon(props: FormatRibbonProps) {
         data-testid="hw-ribbon-underline"
         aria-pressed={fmt.underline}
         disabled={liveOff}
-        title={liveOnlyDisabledReason ?? "밑줄"}
+        title={liveOnlyDisabledReason ?? msg.format.underline}
         onMouseDown={keep}
         onClick={() => onPatch({ underline: !fmt.underline })}
       >
-        <u>가</u>
+        <u>{msg.format.sampleGlyph}</u>
       </button>
       <button
         type="button"
@@ -177,11 +179,11 @@ export function FormatRibbon(props: FormatRibbonProps) {
         data-testid="hw-ribbon-strike"
         aria-pressed={fmt.strike}
         disabled={liveOff}
-        title={liveOnlyDisabledReason ?? "취소선"}
+        title={liveOnlyDisabledReason ?? msg.format.strike}
         onMouseDown={keep}
         onClick={() => onPatch({ strike: !fmt.strike })}
       >
-        <s>가</s>
+        <s>{msg.format.sampleGlyph}</s>
       </button>
 
       <span className="hw-ribbon-sep" aria-hidden />
@@ -192,7 +194,7 @@ export function FormatRibbon(props: FormatRibbonProps) {
         className="hw-ribbon-btn"
         data-testid="hw-ribbon-size-dec"
         disabled={inlineOff}
-        title={inlineDisabledReason ?? "작게"}
+        title={inlineDisabledReason ?? msg.format.sizeDecrease}
         onMouseDown={keep}
         onClick={() => onPatch({ sizePt: Math.max(4, size - 1) })}
       >
@@ -203,7 +205,7 @@ export function FormatRibbon(props: FormatRibbonProps) {
         data-testid="hw-ribbon-size"
         inputMode="numeric"
         disabled={inlineOff}
-        title={inlineDisabledReason ?? "글자 크기(pt) — 입력 후 Enter"}
+        title={inlineDisabledReason ?? msg.format.fontSizeHint}
         value={sizeText}
         onMouseDown={snapshot}
         onChange={(e) => setSizeText(e.currentTarget.value.replace(/[^0-9]/g, "").slice(0, 2))}
@@ -221,7 +223,7 @@ export function FormatRibbon(props: FormatRibbonProps) {
         className="hw-ribbon-btn"
         data-testid="hw-ribbon-size-inc"
         disabled={inlineOff}
-        title={inlineDisabledReason ?? "크게"}
+        title={inlineDisabledReason ?? msg.format.sizeIncrease}
         onMouseDown={keep}
         onClick={() => onPatch({ sizePt: Math.min(96, size + 1) })}
       >
@@ -231,8 +233,8 @@ export function FormatRibbon(props: FormatRibbonProps) {
       <span className="hw-ribbon-sep" aria-hidden />
 
       {/* 글자색 — 연속 스펙트럼(OS 색상 선택기). onChange ONLY (no onInput → no per-step op spam, R13d). */}
-      <label className="hw-ribbon-color" data-testid="hw-ribbon-color-label" title={inlineDisabledReason ?? "글자색"} onMouseDown={snapshot}>
-        <span aria-hidden>글자색</span>
+      <label className="hw-ribbon-color" data-testid="hw-ribbon-color-label" title={inlineDisabledReason ?? msg.format.textColor} onMouseDown={snapshot}>
+        <span aria-hidden>{msg.format.textColor}</span>
         <input
           type="color"
           data-testid="hw-ribbon-color"
@@ -243,8 +245,8 @@ export function FormatRibbon(props: FormatRibbonProps) {
       </label>
 
       {/* 배경색 — CELL op (SetCellRangeShade); no live-run equivalent → disabled 편집 중, with a reason. */}
-      <label className="hw-ribbon-color" data-testid="hw-ribbon-shade-label" title={cellOnlyDisabledReason ?? "배경색"} onMouseDown={snapshot}>
-        <span aria-hidden>배경</span>
+      <label className="hw-ribbon-color" data-testid="hw-ribbon-shade-label" title={cellOnlyDisabledReason ?? msg.format.backgroundColor} onMouseDown={snapshot}>
+        <span aria-hidden>{msg.format.background}</span>
         <input
           type="color"
           data-testid="hw-ribbon-shade"
@@ -258,32 +260,32 @@ export function FormatRibbon(props: FormatRibbonProps) {
         className="hw-ribbon-btn"
         data-testid="hw-ribbon-shade-clear"
         disabled={cellOff}
-        title={cellOnlyDisabledReason ?? "배경 지움"}
+        title={cellOnlyDisabledReason ?? msg.format.clearBackground}
         onMouseDown={keep}
         onClick={() => onPatch({ shade: null })}
       >
-        배경 지움
+        {msg.format.clearBackground}
       </button>
 
       <span className="hw-ribbon-sep" aria-hidden />
 
       {/* 정렬 — CELL op (SetCellRangeFmt align); disabled 편집 중 (align a whole cell, not a live run). */}
-      <button type="button" className="hw-ribbon-btn" data-testid="hw-ribbon-align-left" disabled={cellOff} title={cellOnlyDisabledReason ?? "왼쪽 정렬"} onMouseDown={keep} onClick={() => onPatch({ align: "left" })}>
+      <button type="button" className="hw-ribbon-btn" data-testid="hw-ribbon-align-left" disabled={cellOff} title={cellOnlyDisabledReason ?? msg.format.alignLeft} onMouseDown={keep} onClick={() => onPatch({ align: "left" })}>
         ≤
       </button>
-      <button type="button" className="hw-ribbon-btn" data-testid="hw-ribbon-align-center" disabled={cellOff} title={cellOnlyDisabledReason ?? "가운데 정렬"} onMouseDown={keep} onClick={() => onPatch({ align: "center" })}>
+      <button type="button" className="hw-ribbon-btn" data-testid="hw-ribbon-align-center" disabled={cellOff} title={cellOnlyDisabledReason ?? msg.format.alignCenter} onMouseDown={keep} onClick={() => onPatch({ align: "center" })}>
         ≡
       </button>
-      <button type="button" className="hw-ribbon-btn" data-testid="hw-ribbon-align-right" disabled={cellOff} title={cellOnlyDisabledReason ?? "오른쪽 정렬"} onMouseDown={keep} onClick={() => onPatch({ align: "right" })}>
+      <button type="button" className="hw-ribbon-btn" data-testid="hw-ribbon-align-right" disabled={cellOff} title={cellOnlyDisabledReason ?? msg.format.alignRight} onMouseDown={keep} onClick={() => onPatch({ align: "right" })}>
         ≥
       </button>
-      <button type="button" className="hw-ribbon-btn" data-testid="hw-ribbon-align-justify" disabled={cellOff} title={cellOnlyDisabledReason ?? "양쪽 정렬"} onMouseDown={keep} onClick={() => onPatch({ align: "justify" })}>
+      <button type="button" className="hw-ribbon-btn" data-testid="hw-ribbon-align-justify" disabled={cellOff} title={cellOnlyDisabledReason ?? msg.format.alignJustify} onMouseDown={keep} onClick={() => onPatch({ align: "justify" })}>
         ☰
       </button>
 
       {/* Mode hint — 편집 중이면 라이브 선택, 아니면 선택 셀/범위. */}
       <span className="hw-ribbon-mode" data-testid="hw-ribbon-mode">
-        {editing ? "✏️ 편집 중 · 선택한 글자에 적용" : "✦ 선택한 칸/범위에 적용"}
+        {editing ? msg.ribbon.modeEditing : msg.ribbon.modeSelection}
       </span>
     </div>
   );

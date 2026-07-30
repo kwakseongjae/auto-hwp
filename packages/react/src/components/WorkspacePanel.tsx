@@ -3,6 +3,7 @@ import type { OnAiRequest } from "@auto-hwp/editor-core";
 import type { WorkspaceSidePanel } from "./HwpWorkspace";
 import { ChatPanel } from "./ChatPanel";
 import { DesignPanel } from "./DesignPanel";
+import { useWorkspaceMessages } from "../i18n";
 
 const ignoreDesignPatch = () => {};
 
@@ -30,8 +31,9 @@ export function WorkspacePanelFrame({
   open = true,
   onOpenChange,
   className,
-  ariaLabel = "편집 패널",
+  ariaLabel,
 }: WorkspacePanelFrameProps) {
+  const msg = useWorkspaceMessages();
   const frameClass = ["hw-sidepanel", `hw-sidepanel-${presentation}`, className].filter(Boolean).join(" ");
 
   if (!open) {
@@ -42,8 +44,8 @@ export function WorkspacePanelFrame({
           <button
             type="button"
             className="hw-sidepanel-expand"
-            aria-label="편집 패널 열기"
-            title="편집 패널 열기"
+            aria-label={msg.panel.openLabel}
+            title={msg.panel.openLabel}
             onClick={() => onOpenChange?.(true)}
           >
             ‹
@@ -55,7 +57,7 @@ export function WorkspacePanelFrame({
       <button
         type="button"
         className={`hw-panel-launcher hw-panel-launcher-${presentation}`}
-        aria-label="편집 패널 열기"
+        aria-label={msg.panel.openLabel}
         onClick={() => onOpenChange?.(true)}
       >
         ✦
@@ -64,7 +66,7 @@ export function WorkspacePanelFrame({
   }
 
   const panel = (
-    <aside className={frameClass} data-testid="hw-sidepanel" aria-label={ariaLabel}>
+    <aside className={frameClass} data-testid="hw-sidepanel" aria-label={ariaLabel ?? msg.panel.label}>
       {children}
     </aside>
   );
@@ -75,7 +77,7 @@ export function WorkspacePanelFrame({
       <button
         type="button"
         className="hw-panel-backdrop"
-        aria-label="편집 패널 닫기"
+        aria-label={msg.panel.closeLabel}
         onClick={() => onOpenChange?.(false)}
       />
       {panel}
@@ -117,6 +119,7 @@ export function WorkspacePanel({
   onOpenChange,
   className,
 }: WorkspacePanelProps) {
+  const msg = useWorkspaceMessages();
   const [internalTab, setInternalTab] = useState<WorkspacePanelTab>(defaultTab);
   const [internalOpen, setInternalOpen] = useState(defaultOpen);
   const tab = controlledTab ?? internalTab;
@@ -161,7 +164,7 @@ export function WorkspacePanel({
       onOpenChange={setOpen}
       className={className}
     >
-      <div className="hw-sidepanel-tabs" role="tablist" aria-label="편집 패널">
+      <div className="hw-sidepanel-tabs" role="tablist" aria-label={msg.panel.label}>
         <button
           type="button"
           role="tab"
@@ -169,7 +172,7 @@ export function WorkspacePanel({
           className={tab === "vibe" ? "is-active" : ""}
           onClick={() => setTab("vibe")}
         >
-          ✦ 바이브 편집
+          {msg.panel.tabVibe}
         </button>
         <button
           type="button"
@@ -179,13 +182,13 @@ export function WorkspacePanel({
           data-testid="hw-design-tab"
           onClick={() => setTab("design")}
         >
-          디자인
+          {msg.panel.tabDesign}
         </button>
         <button
           type="button"
           className="hw-sidepanel-collapse"
-          aria-label={presentation === "rail" ? "편집 패널 접기" : "편집 패널 닫기"}
-          title={presentation === "rail" ? "편집 패널 접기" : "편집 패널 닫기"}
+          aria-label={presentation === "rail" ? msg.panel.collapseLabel : msg.panel.closeLabel}
+          title={presentation === "rail" ? msg.panel.collapseLabel : msg.panel.closeLabel}
           onClick={() => setOpen(false)}
         >
           {presentation === "rail" ? "›" : "×"}

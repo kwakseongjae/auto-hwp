@@ -28,6 +28,8 @@
     "publish:safe": "node scripts/with-publish-deps.mjs publish",
     "prepack": "node scripts/require-safe-pack.mjs",
     "typecheck": "tsc --noEmit",
+    "i18n:gate": "node scripts/check-i18n-literals.mjs",
+    "i18n:list": "node scripts/check-i18n-literals.mjs --list",
     "test": "vitest run",
     "demo": "vite --config demo/vite.config.ts",
     "demo:build": "vite build --config demo/vite.config.ts"

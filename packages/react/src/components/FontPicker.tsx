@@ -1,8 +1,10 @@
 import { useCallback, useMemo, useRef } from "react";
 import { catalogUrl, isTtc, type FontCatalogEntry } from "../fonts";
+import { useWorkspaceMessages } from "../i18n";
 
 /// FontPicker — the font-selection UI (issue 022 §4). A catalog dropdown (each option previewed in its
-/// own face), a ".ttf/.otf 업로드" button, and the current-font label. Korean labels throughout. Picking
+/// own face), a ".ttf/.otf 업로드" button, and the current-font label. Copy comes from the injectable
+/// catalog (issue 077 — `messages.fontPicker`), defaulting to Korean. Picking
 /// a font resolves its BYTES (fetch a catalog URL, or read the uploaded file) and hands them to `onPick`;
 /// the workspace then `registerFont`s them (metrics + PDF) and re-renders. A **TTC is rejected** with an
 /// explicit Korean error (krilla/our shaper can't subset a collection — issue §함정), before registration.
@@ -26,6 +28,7 @@ export interface FontPickerProps {
 }
 
 export function FontPicker(props: FontPickerProps) {
+  const msg = useWorkspaceMessages();
   const { catalog, selected, onPick, onError, urlBase, disabled } = props;
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -48,15 +51,15 @@ export function FontPicker(props: FontPickerProps) {
         if (!res.ok) throw new Error(String(res.status));
         const bytes = new Uint8Array(await res.arrayBuffer());
         if (isTtc(bytes)) {
-          onError?.(`${entry.label}는 TTC(글꼴 컬렉션)이라 사용할 수 없습니다 — 단일 TTF/OTF 폰트를 선택하세요.`);
+          onError?.(msg.fontPicker.ttcCatalogError(entry.label));
           return;
         }
         await onPick({ family: entry.family, bytes });
       } catch {
-        onError?.(`"${entry.label}" 폰트를 불러오지 못했습니다 — 먼저 폰트를 다운로드하거나(scripts/fetch-fonts) 파일을 업로드하세요.`);
+        onError?.(msg.fontPicker.loadError(entry.label));
       }
     },
-    [catalog, urlBase, onPick, onError],
+    [catalog, urlBase, onPick, onError, msg],
   );
 
   const onUpload = useCallback(
@@ -65,42 +68,42 @@ export function FontPicker(props: FontPickerProps) {
       e.target.value = ""; // allow re-selecting the same file
       if (!file) return;
       if (!/\.(ttf|otf)$/i.test(file.name)) {
-        onError?.(`지원하지 않는 형식입니다: ${file.name} — .ttf 또는 .otf 파일만 사용할 수 있습니다.`);
+        onError?.(msg.fontPicker.unsupportedFormat(file.name));
         return;
       }
       const bytes = new Uint8Array(await file.arrayBuffer());
       if (isTtc(bytes)) {
-        onError?.(`TTC(글꼴 컬렉션)는 지원하지 않습니다: ${file.name} — 단일 TTF/OTF 파일을 사용하세요.`);
+        onError?.(msg.fontPicker.ttcUploadError(file.name));
         return;
       }
       await onPick({ family: file.name.replace(/\.(ttf|otf)$/i, ""), bytes });
     },
-    [onPick, onError],
+    [onPick, onError, msg],
   );
 
   return (
     <span className={`hw-fontpicker ${props.className ?? ""}`} data-testid="font-picker">
       <style>{previewCss}</style>
       <label className="hw-fontpicker-label" htmlFor="hw-font-select">
-        글꼴
+        {msg.fontPicker.label}
       </label>
       <select
         id="hw-font-select"
         className="hw-fontpicker-select"
-        aria-label="글꼴 선택"
+        aria-label={msg.fontPicker.selectLabel}
         value={selected ?? ""}
         disabled={disabled}
         onChange={(e) => void pickCatalog(e.target.value)}
       >
         {selected && !catalog.some((c) => c.family === selected) && (
           // An uploaded font isn't in the catalog — show it as the current selection.
-          <option value={selected}>{selected} (업로드)</option>
+          <option value={selected}>{msg.fontPicker.uploadedOption(selected)}</option>
         )}
-        {!selected && <option value="">글꼴 선택…</option>}
+        {!selected && <option value="">{msg.fontPicker.placeholder}</option>}
         {catalog.map((e) => (
           <option key={e.family} value={e.family} style={{ fontFamily: `"tfhwp-preview-${e.file}", sans-serif` }}>
             {e.label}
-            {e.bundled ? " (기본)" : ""}
+            {e.bundled ? msg.fontPicker.bundledSuffix : ""}
           </option>
         ))}
       </select>
@@ -108,13 +111,13 @@ export function FontPicker(props: FontPickerProps) {
         type="button"
         className="hw-fontpicker-upload"
         disabled={disabled}
-        title="내 폰트 파일 업로드 (.ttf/.otf)"
+        title={msg.fontPicker.uploadTitle}
         onClick={() => fileRef.current?.click()}
       >
-        업로드
+        {msg.fontPicker.upload}
       </button>
       <input ref={fileRef} type="file" accept=".ttf,.otf" hidden onChange={onUpload} data-testid="font-upload-input" />
-      {selected && <span className="hw-fontpicker-current" title={`현재 글꼴: ${selected}`}>현재: {selected}</span>}
+      {selected && <span className="hw-fontpicker-current" title={msg.fontPicker.currentTitle(selected)}>{msg.fontPicker.current(selected)}</span>}
     </span>
   );
 }

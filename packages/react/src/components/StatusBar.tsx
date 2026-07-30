@@ -1,3 +1,5 @@
+import { useWorkspaceMessages } from "../i18n";
+
 export interface StatusBarProps {
   /** The page currently at the top of the viewport (0-based) — the SAME scroll-position value the outline
    *  panel highlights (issue 046). Rendered 1-based. */
@@ -18,13 +20,14 @@ export interface StatusBarProps {
 /// edit-mode badge. The ZOOM % is deliberately ABSENT — it is owned by the top toolbar (issue 046: 중복
 /// 금지). Pure presentational (SDK-LAYERS L3): the parent passes the resolved values.
 export function StatusBar(props: StatusBarProps) {
+  const msg = useWorkspaceMessages();
   const { currentPage, pageCount, selectionSummary, editing, canEdit } = props;
   const page = pageCount > 0 ? Math.min(currentPage, pageCount - 1) + 1 : 0;
-  const badge = !canEdit ? "읽기 전용" : editing ? "편집 모드" : "보기 모드";
+  const badge = !canEdit ? msg.statusBar.readOnly : editing ? msg.statusBar.editMode : msg.statusBar.viewMode;
   return (
     <div className="hw-statusbar" data-testid="hw-statusbar" role="status">
       <span className="hw-statusbar-page" data-testid="hw-statusbar-page">
-        {pageCount > 0 ? `${page} / ${pageCount}쪽` : "문서 없음"}
+        {pageCount > 0 ? msg.statusBar.pageOf(page, pageCount) : msg.statusBar.noDocument}
       </span>
       {selectionSummary && (
         <span className="hw-statusbar-sel" data-testid="hw-statusbar-selection">

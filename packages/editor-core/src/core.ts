@@ -6,6 +6,7 @@ import { EditController } from "./edit";
 import { FindController } from "./find";
 import { DocSession } from "./session";
 import { SelectionModel } from "./selection";
+import { coreMessagesKoKR, type CoreMessages } from "./messages";
 
 /// EditorCore — the one-object composition of the L2 pieces over a single EngineAdapter, so a host
 /// (React binding or a plain script) constructs the whole headless editor in one line and subscribes to
@@ -35,6 +36,15 @@ export class EditorCore {
     this.cellCaret = new CellCaretController(adapter, this.session);
     this.bodyCaret = new BodyCaretController(adapter, this.session);
     this.caret = new CaretRouter(this.cellCaret, this.bodyCaret);
+  }
+
+  /** issue 077 — swap the string catalog the headless layer produces (selection ANCHOR labels + Intent
+   *  preview CARDS). Defaults to Korean; `@auto-hwp/react` assigns the host-merged catalog. Idempotent,
+   *  so assigning the same object every render is free. */
+  setMessages(messages: CoreMessages = coreMessagesKoKR): void {
+    if (this.selection.messages === messages && this.edit.messages === messages) return;
+    this.selection.messages = messages;
+    this.edit.messages = messages;
   }
 }
 

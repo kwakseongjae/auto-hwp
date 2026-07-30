@@ -1,6 +1,7 @@
 import type { EngineAdapter } from "./adapter";
 import { Emitter } from "./events";
 import type { Anchor, BlockHit, Box, CellAddr, CellHit, PointerInput, Selection, SelMarquee, TableBox } from "./types";
+import { coreMessagesKoKR, type AnchorMessages, type CoreMessages } from "./messages";
 
 /** The descending CellPath of a hit (issue 064 Tier-2): the engine's `cell.path`, or a synthesized
  *  length-1 `[{block, row, col}]` for a backend/mock that predates it (so a non-nested cell is unchanged). */
@@ -57,10 +58,10 @@ export function selKey(a: Anchor): string {
 
 /** Cell chip label = a short text snippet + a 1-based "N행 M열" (issue 023). Empty cell → "표 N행 M열".
  *  The snippet is trimmed/whitespace-collapsed and elided to ~12 chars. */
-export function cellLabel(cell: CellHit): string {
+export function cellLabel(cell: CellHit, messages: AnchorMessages = coreMessagesKoKR.anchor): string {
   const snip = cell.text.trim().replace(/\s+/g, " ").slice(0, 12);
-  const where = `${cell.row + 1}행 ${cell.col + 1}열`;
-  return snip ? `“${snip}” (${where})` : `표 ${where}`;
+  const where = messages.cellWhere(cell.row + 1, cell.col + 1);
+  return snip ? messages.cellSnippet(snip, where) : messages.cellEmpty(where);
 }
 
 /** Derive a Selection from a resolved click hit. Priority: CELL > table > block band (issue 023 — a
@@ -68,9 +69,9 @@ export function cellLabel(cell: CellHit): string {
  *  the whole-table anchor, never an error). Coordinates are STRUCTURE indices, never px — a cell
  *  anchor's `rows`/`cols` are the MODEL-GLOBAL cell address `[r,r]`/`[c,c]` (CellHit.row is already
  *  global on a split fragment; NEVER re-add first_row). Returns null when the point resolved to nothing. */
-export function deriveSel(page: number, table: TableBox | null, cell: CellHit | null, hit: BlockHit | null): Selection | null {
+export function deriveSel(page: number, table: TableBox | null, cell: CellHit | null, hit: BlockHit | null, messages: AnchorMessages = coreMessagesKoKR.anchor): Selection | null {
   if (cell) {
-    const label = cellLabel(cell);
+    const label = cellLabel(cell, messages);
     // Carry the descending CellPath (issue 064 Tier-2) so a NESTED cell anchor is a distinct selection
     // (selKey) AND the commit can walk to the LEAF cell. `undefined` for a length-1 (non-nested) path
     // keeps the anchor byte-compatible with the pre-Tier-2 shape.
@@ -91,7 +92,7 @@ export function deriveSel(page: number, table: TableBox | null, cell: CellHit | 
     };
   }
   if (table) {
-    const label = `표 (p.${page + 1})`;
+    const label = messages.tableAt(page + 1);
     return {
       mark: { page, box: { x: table.x, y: table.y, w: table.w, h: table.h }, label, kind: "table" },
       anchor: { kind: "table", section: table.section, block: table.block, label, page },
@@ -100,7 +101,7 @@ export function deriveSel(page: number, table: TableBox | null, cell: CellHit | 
   if (hit) {
     const snip = hit.text.trim().replace(/\s+/g, " ").slice(0, 14);
     const kind = hit.kind === "table" ? "table" : hit.kind === "image" ? "image" : "paragraph";
-    const label = kind === "paragraph" ? (snip ? `“${snip}”` : `문단 (p.${page + 1})`) : `${kind} (p.${page + 1})`;
+    const label = kind === "paragraph" ? (snip ? messages.snippet(snip) : messages.paragraphAt(page + 1)) : messages.blockAt(kind, page + 1);
     return {
       mark: { page, box: { x: hit.x, y: hit.y, w: hit.w, h: hit.h }, label, kind },
       anchor: { kind: kind === "image" ? "paragraph" : (kind as Anchor["kind"]), section: hit.section, block: hit.block, label, page, text: hit.text },
@@ -111,11 +112,11 @@ export function deriveSel(page: number, table: TableBox | null, cell: CellHit | 
 
 /** Convert a marquee BlockHit to a Selection, EXCLUDING unsupported kinds (images can't be anchored —
  *  issue §함정). Returns null for an excluded hit so the caller can count what was dropped. */
-export function blockHitToSel(hit: BlockHit, page: number): Selection | null {
+export function blockHitToSel(hit: BlockHit, page: number, messages: AnchorMessages = coreMessagesKoKR.anchor): Selection | null {
   if (hit.kind === "image") return null; // not an editable anchor target
   const snip = hit.text.trim().replace(/\s+/g, " ").slice(0, 14);
   const kind = hit.kind === "table" ? "table" : "paragraph";
-  const label = kind === "paragraph" ? (snip ? `“${snip}”` : `문단 (p.${page + 1})`) : `표 (p.${page + 1})`;
+  const label = kind === "paragraph" ? (snip ? messages.snippet(snip) : messages.paragraphAt(page + 1)) : messages.tableAt(page + 1);
   return {
     mark: { page, box: { x: hit.x, y: hit.y, w: hit.w, h: hit.h }, label, kind },
     anchor: { kind, section: hit.section, block: hit.block, label, page, text: hit.text },
@@ -188,6 +189,9 @@ type Drag = {
 };
 
 export class SelectionModel {
+  /** issue 077 — the injected string catalog for anchor/mark labels. Defaults to Korean; the React
+   *  binding assigns the host-merged catalog through EditorCore.setMessages(). */
+  messages: CoreMessages = coreMessagesKoKR;
   private sels: Selection[] = [];
   private marquee: SelMarquee | null = null;
   private drag: Drag | null = null;
@@ -411,7 +415,7 @@ export class SelectionModel {
         const b = sl.box;
         const hits = await this.adapter.blocksInRect(sl.page, b.x, b.y, b.x + b.w, b.y + b.h);
         for (const h of hits) {
-          const s = blockHitToSel(h, sl.page);
+          const s = blockHitToSel(h, sl.page, this.messages.anchor);
           if (!s) {
             excluded++;
             continue;
@@ -445,10 +449,10 @@ export class SelectionModel {
         const drilled =
           !!this.drill && !!clickPath && this.drill.section === r.table.section && sameTable(clickPath, this.drill.path);
         if (drilled && clickPath) {
-          sel = deriveSel(d.page, r.table, r.cell, null); // stay drilled → the clicked cell
+          sel = deriveSel(d.page, r.table, r.cell, null, this.messages.anchor); // stay drilled → the clicked cell
           this.drill = { section: r.table.section, path: clickPath }; // move within the drilled table
         } else {
-          sel = deriveSel(d.page, r.table, null, null); // fresh table click → the whole table
+          sel = deriveSel(d.page, r.table, null, null, this.messages.anchor); // fresh table click → the whole table
           this.drill = null; // a fresh table selection is level-0 (never inherits a stale drill)
         }
       } else {
@@ -458,7 +462,7 @@ export class SelectionModel {
         // of grabbing the nearest paragraph. (`r.cell` is always null here per resolveHit's contract.)
         const strictInside =
           !!r.hit && d.startX >= r.hit.x && d.startX <= r.hit.x + r.hit.w && d.startY >= r.hit.y && d.startY <= r.hit.y + r.hit.h;
-        sel = strictInside ? deriveSel(d.page, null, r.cell, r.hit) : null;
+        sel = strictInside ? deriveSel(d.page, null, r.cell, r.hit, this.messages.anchor) : null;
         this.drill = null; // leaving a table (paragraph / empty click) resets the drill
       }
       if (!sel) {
@@ -487,7 +491,7 @@ export class SelectionModel {
       // wins), a double-click over a nested grid drills straight to the nested LEAF; a subsequent
       // double-click on that same cell opens the editor (the React layer's `currentCell` compare).
       this.drill = { section: table.section, path: cell ? cellPathOf(cell) : [] };
-      const sel = deriveSel(page, table, cell, null);
+      const sel = deriveSel(page, table, cell, null, this.messages.anchor);
       if (!sel) return null;
       this.setSelection(mergeSelection(this.sels, [sel], "replace"));
       this.results.emit({ source: "click", selected: 1, excluded: 0 });
@@ -593,7 +597,7 @@ export class SelectionModel {
   // Replace the selection with the moved-to cell (deriveSel gives the same cell mark/anchor/label as a
   // click), clearing any drag/marquee. Returns true (the caller reports "moved").
   private applyCellMove(page: number, cell: CellHit): boolean {
-    const sel = deriveSel(page, null, cell, null);
+    const sel = deriveSel(page, null, cell, null, this.messages.anchor);
     if (!sel) return false;
     this.drag = null;
     if (this.marquee) this.setMarquee(null);

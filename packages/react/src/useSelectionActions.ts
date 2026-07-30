@@ -8,6 +8,7 @@
 import { useMemo } from "react";
 import type { EditorCore } from "@auto-hwp/editor-core";
 import type { ToolbarAlign } from "./components/FloatingToolbar";
+import { useWorkspaceMessages } from "./i18n";
 
 /** The single-selection edit target the format actions need (a subset of HwpWorkspace's EditTarget). */
 export interface SelectionActionTarget {
@@ -51,6 +52,7 @@ export function useSelectionActions(
   target: SelectionActionTarget | null,
   runFmt: (fn: () => Promise<number>, ok: string) => void,
 ): SelectionActions {
+  const msg = useWorkspaceMessages();
   return useMemo(() => {
     const fmtRange: SelectionRange | null =
       target && target.rows && target.cols
@@ -65,24 +67,24 @@ export function useSelectionActions(
       fmtRange,
       canFormat,
       bold: guarded((t, range) =>
-        runFmt(() => core.edit.formatCellRange(t.section, t.block, range, { bold: !t.curBold }), t.curBold ? "굵게 해제" : "굵게 적용"),
+        runFmt(() => core.edit.formatCellRange(t.section, t.block, range, { bold: !t.curBold }), t.curBold ? msg.selectionActions.boldOff : msg.selectionActions.boldOn),
       ),
-      italic: guarded((t, range) => runFmt(() => core.edit.formatCellRange(t.section, t.block, range, { italic: !t.curItalic }), "기울임 적용")),
+      italic: guarded((t, range) => runFmt(() => core.edit.formatCellRange(t.section, t.block, range, { italic: !t.curItalic }), msg.selectionActions.italicOn)),
       setSize: (pt: number) => {
-        if (target && fmtRange) runFmt(() => core.edit.formatCellRange(target.section, target.block, fmtRange, { size_pt: pt }), `글자 크기 ${pt}pt`);
+        if (target && fmtRange) runFmt(() => core.edit.formatCellRange(target.section, target.block, fmtRange, { size_pt: pt }), msg.selectionActions.size(pt));
       },
       setFont: (f: string) => {
-        if (target && fmtRange) runFmt(() => core.edit.formatCellRange(target.section, target.block, fmtRange, { font: f }), `서체 ${f}`);
+        if (target && fmtRange) runFmt(() => core.edit.formatCellRange(target.section, target.block, fmtRange, { font: f }), msg.selectionActions.font(f));
       },
       setColor: (hex: string) => {
-        if (target && fmtRange) runFmt(() => core.edit.formatCellRange(target.section, target.block, fmtRange, { color: hex }), "글자색 적용");
+        if (target && fmtRange) runFmt(() => core.edit.formatCellRange(target.section, target.block, fmtRange, { color: hex }), msg.selectionActions.color);
       },
       setShade: (hex: string | null) => {
-        if (target && fmtRange) runFmt(() => core.edit.shadeCellRange(target.section, target.block, fmtRange, hex), hex ? "배경색 적용" : "배경 지움");
+        if (target && fmtRange) runFmt(() => core.edit.shadeCellRange(target.section, target.block, fmtRange, hex), hex ? msg.selectionActions.shadeOn : msg.selectionActions.shadeOff);
       },
       setAlign: (a: ToolbarAlign) => {
-        if (target && fmtRange) runFmt(() => core.edit.formatCellRange(target.section, target.block, fmtRange, { align: a }), "정렬 적용");
+        if (target && fmtRange) runFmt(() => core.edit.formatCellRange(target.section, target.block, fmtRange, { align: a }), msg.selectionActions.align);
       },
     };
-  }, [core, target, runFmt]);
+  }, [core, target, runFmt, msg]);
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { WorkspaceDesignSelection } from "./HwpWorkspace";
 import type { FormatRibbonPatch } from "./FormatRibbon";
+import { useWorkspaceMessages } from "../i18n";
 
 export interface DesignPanelProps {
   selection: WorkspaceDesignSelection | null;
@@ -9,15 +10,6 @@ export interface DesignPanelProps {
   textEditing?: boolean;
 }
 
-const KIND_LABEL: Record<WorkspaceDesignSelection["kind"], string> = {
-  paragraph: "텍스트",
-  cell: "표 셀",
-  range: "셀 범위",
-  table: "표",
-  image: "이미지",
-  other: "요소",
-};
-
 function n(value: number): string {
   return Number.isFinite(value) ? value.toFixed(1) : "0.0";
 }
@@ -25,6 +17,7 @@ function n(value: number): string {
 /** Reference Figma-style inspector. Controls apply immediately to the selected engine address; the page
  *  itself stays visually clean and owns only selection/caret overlays. */
 export function DesignPanel({ selection, fonts, onPatch, textEditing = false }: DesignPanelProps) {
+  const msg = useWorkspaceMessages();
   const reflectedSize = Math.round(selection?.format.sizePt ?? 10);
   const [size, setSize] = useState(String(reflectedSize));
   useEffect(() => setSize(String(reflectedSize)), [reflectedSize, selection?.section, selection?.block]);
@@ -33,8 +26,8 @@ export function DesignPanel({ selection, fonts, onPatch, textEditing = false }: 
     return (
       <section className="hw-design hw-design-empty" data-testid="hw-design-panel">
         <div className="hw-design-empty-icon" aria-hidden>◇</div>
-        <strong>선택한 요소가 없습니다</strong>
-        <p>문단이나 표 셀을 클릭하면 위치와 글자 디자인을 확인하고 수정할 수 있습니다.</p>
+        <strong>{msg.design.emptyTitle}</strong>
+        <p>{msg.design.emptyHint}</p>
       </section>
     );
   }
@@ -59,7 +52,7 @@ export function DesignPanel({ selection, fonts, onPatch, textEditing = false }: 
     <section className={`hw-design${textEditing ? " is-text-editing" : ""}`} data-testid="hw-design-panel">
       <div className="hw-design-selection">
         <div>
-          <span className="hw-design-kind">{KIND_LABEL[selection.kind]}</span>
+          <span className="hw-design-kind">{msg.design.kind[selection.kind]}</span>
           <strong title={selection.label}>{selection.label}</strong>
         </div>
         <span className="hw-design-page">p.{selection.page + 1}</span>
@@ -68,13 +61,13 @@ export function DesignPanel({ selection, fonts, onPatch, textEditing = false }: 
       {textEditing && (
         <div className="hw-design-editing-note" role="status">
           <span className="hw-design-editing-dot" aria-hidden />
-          <div><strong>텍스트 편집 중</strong><span>캔버스의 글자와 커서에 집중하세요.</span></div>
+          <div><strong>{msg.design.editingTitle}</strong><span>{msg.design.editingHint}</span></div>
         </div>
       )}
 
       {!textEditing && (
         <div className="hw-design-section">
-          <h3>프레임</h3>
+          <h3>{msg.design.frameSection}</h3>
           <div className="hw-design-grid hw-design-geometry">
             <label><span>X</span><output>{n(selection.box.x)}</output></label>
             <label><span>Y</span><output>{n(selection.box.y)}</output></label>
@@ -85,7 +78,7 @@ export function DesignPanel({ selection, fonts, onPatch, textEditing = false }: 
       )}
 
       <div className="hw-design-section">
-        <h3>텍스트</h3>
+        <h3>{msg.design.textSection}</h3>
         <select
           className="hw-design-select"
           data-testid="hw-design-font"
@@ -94,9 +87,9 @@ export function DesignPanel({ selection, fonts, onPatch, textEditing = false }: 
           onChange={(e) => {
             if (e.currentTarget.value) onPatch({ font: e.currentTarget.value });
           }}
-          aria-label="서체"
+          aria-label={msg.format.fontFamily}
         >
-          <option value="">{selection.format.font ?? "서체 선택"}</option>
+          <option value="">{selection.format.font ?? msg.format.fontFamilyPlaceholder}</option>
           {fontChoices.map((font) => (
             <option key={font} value={font} style={{ fontFamily: `"${font}"` }}>
               {font}
@@ -106,7 +99,7 @@ export function DesignPanel({ selection, fonts, onPatch, textEditing = false }: 
 
         <div className="hw-design-row">
           <div className="hw-design-stepper">
-            <button type="button" disabled={!selection.canTextStyle} onClick={() => onPatch({ sizePt: Math.max(4, reflectedSize - 1) })} aria-label="글자 작게">−</button>
+            <button type="button" disabled={!selection.canTextStyle} onClick={() => onPatch({ sizePt: Math.max(4, reflectedSize - 1) })} aria-label={msg.format.decreaseFontSize}>−</button>
             <input
               data-testid="hw-design-size"
               disabled={!selection.canTextStyle}
@@ -121,9 +114,9 @@ export function DesignPanel({ selection, fonts, onPatch, textEditing = false }: 
                 }
               }}
               onBlur={commitSize}
-              aria-label="글자 크기"
+              aria-label={msg.format.fontSize}
             />
-            <button type="button" disabled={!selection.canTextStyle} onClick={() => onPatch({ sizePt: Math.min(96, reflectedSize + 1) })} aria-label="글자 크게">+</button>
+            <button type="button" disabled={!selection.canTextStyle} onClick={() => onPatch({ sizePt: Math.min(96, reflectedSize + 1) })} aria-label={msg.format.increaseFontSize}>+</button>
           </div>
           <button
             type="button"
@@ -145,7 +138,7 @@ export function DesignPanel({ selection, fonts, onPatch, textEditing = false }: 
           >
             <i>I</i>
           </button>
-          <label className="hw-design-color" title="글자색">
+          <label className="hw-design-color" title={msg.format.textColor}>
             <input
               type="color"
               data-testid="hw-design-color"
@@ -158,10 +151,10 @@ export function DesignPanel({ selection, fonts, onPatch, textEditing = false }: 
       </div>
 
       {!textEditing && <div className="hw-design-section">
-        <h3>셀</h3>
+        <h3>{msg.design.cellSection}</h3>
         <div className="hw-design-row">
           <label className="hw-design-fill">
-            <span>배경</span>
+            <span>{msg.format.background}</span>
             <input
               type="color"
               data-testid="hw-design-shade"
@@ -170,15 +163,15 @@ export function DesignPanel({ selection, fonts, onPatch, textEditing = false }: 
               onChange={(e) => onPatch({ shade: e.currentTarget.value })}
             />
           </label>
-          <button type="button" disabled={!selection.canCellStyle} onClick={() => onPatch({ shade: null })}>지우기</button>
+          <button type="button" disabled={!selection.canCellStyle} onClick={() => onPatch({ shade: null })}>{msg.design.clear}</button>
         </div>
-        <div className="hw-design-align" role="group" aria-label="정렬">
-          <button type="button" disabled={!selection.canCellStyle} onClick={() => onPatch({ align: "left" })} title="왼쪽 정렬">≡</button>
-          <button type="button" disabled={!selection.canCellStyle} onClick={() => onPatch({ align: "center" })} title="가운데 정렬">≡</button>
-          <button type="button" disabled={!selection.canCellStyle} onClick={() => onPatch({ align: "right" })} title="오른쪽 정렬">≡</button>
-          <button type="button" disabled={!selection.canCellStyle} onClick={() => onPatch({ align: "justify" })} title="양쪽 정렬">☰</button>
+        <div className="hw-design-align" role="group" aria-label={msg.format.align}>
+          <button type="button" disabled={!selection.canCellStyle} onClick={() => onPatch({ align: "left" })} title={msg.format.alignLeft}>≡</button>
+          <button type="button" disabled={!selection.canCellStyle} onClick={() => onPatch({ align: "center" })} title={msg.format.alignCenter}>≡</button>
+          <button type="button" disabled={!selection.canCellStyle} onClick={() => onPatch({ align: "right" })} title={msg.format.alignRight}>≡</button>
+          <button type="button" disabled={!selection.canCellStyle} onClick={() => onPatch({ align: "justify" })} title={msg.format.alignJustify}>☰</button>
         </div>
-        {!selection.canCellStyle && <p className="hw-design-note">배경과 셀 정렬은 표 셀 또는 셀 범위를 선택하면 사용할 수 있습니다.</p>}
+        {!selection.canCellStyle && <p className="hw-design-note">{msg.design.cellOnlyNote}</p>}
       </div>}
     </section>
   );

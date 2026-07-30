@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { clampMenuPosition, type MenuViewport } from "../contextMenuPosition";
+import { useWorkspaceMessages } from "../i18n";
 
 export interface ColumnWidthDialogProps {
   /** Desired anchor (client px — where the menu item / toolbar button was clicked). Clamped to viewport. */
@@ -37,6 +38,7 @@ const MIN_MM = 2;
 /// conversion point). Presentational + individually importable — a host can mount it over the core without
 /// HwpWorkspace. Mirrors the desktop R13-5 "크기 ▾ → 열 너비 mm / 균등 분배" menu.
 export function ColumnWidthDialog({ x, y, currentMm, columnLabel, equalizeCount, onApplyMm, onEqualize, onClose, viewport }: ColumnWidthDialogProps) {
+  const msg = useWorkspaceMessages();
   const ref = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [size, setSize] = useState({ w: EST_W, h: EST_H });
@@ -90,7 +92,7 @@ export function ColumnWidthDialog({ x, y, currentMm, columnLabel, equalizeCount,
       className="hw-colwidth"
       data-testid="hw-colwidth-dialog"
       role="dialog"
-      aria-label="열 너비"
+      aria-label={msg.table.widthDialogLabel}
       style={{ left: pos.x, top: pos.y }}
       onPointerDown={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
@@ -101,9 +103,9 @@ export function ColumnWidthDialog({ x, y, currentMm, columnLabel, equalizeCount,
         }
       }}
     >
-      <div className="hw-colwidth-head">열 너비 · {columnLabel}</div>
+      <div className="hw-colwidth-head">{msg.table.widthDialogHead(columnLabel)}</div>
       <label className="hw-colwidth-row">
-        <span className="hw-colwidth-label">너비</span>
+        <span className="hw-colwidth-label">{msg.table.widthField}</span>
         <input
           // Key on the measured width so an APPLY (which re-measures the real boundaries → a new `currentMm`)
           // REMOUNTS the field showing the ACTUAL applied value — the visible 적용-확인 / 왕복 오차 반영.
@@ -133,20 +135,20 @@ export function ColumnWidthDialog({ x, y, currentMm, columnLabel, equalizeCount,
             if (inputRef.current) commitMm(inputRef.current.value);
           }}
         >
-          적용
+          {msg.table.widthApply}
         </button>
         <button
           type="button"
           className="hw-colwidth-equalize"
           data-testid="hw-colwidth-equalize"
           disabled={!canEqualize}
-          title={canEqualize ? undefined : "여러 열을 선택하면 균등 분배할 수 있습니다"}
+          title={canEqualize ? undefined : msg.table.equalizeDisabledTitle}
           onClick={onEqualize}
         >
-          균등 분배 ({equalizeCount}열)
+          {msg.table.equalize(equalizeCount)}
         </button>
       </div>
-      <p className="hw-colwidth-note">현재 {currentMm.toFixed(1)}mm · 적용 후 실제 경계를 다시 측정해 반영합니다.</p>
+      <p className="hw-colwidth-note">{msg.table.widthNote(currentMm.toFixed(1))}</p>
     </div>
   );
 }

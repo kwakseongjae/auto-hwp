@@ -37,6 +37,7 @@ import { FindMatchOverlay } from "./FindMatchOverlay";
 import { useSelectionActions } from "../useSelectionActions";
 import { readViewBox, screenToPage, type PageBox } from "../coords";
 import { buildFontFaceCss, catalogUrl, SERIF_SUBSTITUTE, type FontCatalogEntry } from "../fonts";
+import { useMergedMessages, WorkspaceMessagesContext, type DeepPartial, type WorkspaceMessages } from "../i18n";
 
 const A4_W = 794; // CSS px for 210mm @ 96dpi (mirrors HwpPageView) — the 100% page width.
 
@@ -275,6 +276,12 @@ export interface HwpWorkspaceProps {
    *  "상단에서 파일 열기" toast. An IMAGE drop (PNG/JPEG) is ALWAYS handled in place (inserted), independent
    *  of this prop — the drop branch rule (문서=열기 / 이미지=삽입) lives in the workspace. */
   onOpenFile?: (bytes: Uint8Array, name: string) => void | Promise<void>;
+  /** Opt-in (issue 077): override any user-visible string. Merged DEEPLY over the built-in `koKR`
+   *  catalog, so a host may replace a single key and everything else stays Korean. The merged catalog is
+   *  published to every nested component (toolbar, panels, overlays, context menu, toasts) — no
+   *  prop-drilling. Omit for the default Korean chrome (byte-identical to a workspace without this prop).
+   *  Keep the object REFERENCE stable (module const / `useMemo`): a new reference re-merges the catalog. */
+  messages?: DeepPartial<WorkspaceMessages>;
   className?: string;
 }
 
@@ -375,7 +382,14 @@ export function disarmShield(shield: { current: number }): void {
 export function HwpWorkspace(props: HwpWorkspaceProps) {
   bumpWorkspaceRenderCount(); // dev-only; folded out of production bundles (issue 030 render-count proof)
   const { adapter } = props;
+  // issue 077: the host's partial catalog merged over `koKR`, memoized on the prop REFERENCE (a gesture
+  // can never publish a new value). Consumed directly here and PROVIDED to the whole subtree below.
+  const msg = useMergedMessages(props.messages);
   const { core, meta, selection, refreshToken, bumpRefresh } = useHwpEditor(adapter);
+  // issue 077: the HEADLESS half of the catalog (anchor labels + Intent preview cards) is produced inside
+  // editor-core, which has no React context — hand it the merged catalog. useLayoutEffect (not render) so
+  // the assignment stays out of the render pass; labels are only produced later, on a click/proposal.
+  useLayoutEffect(() => core.setMessages(msg.core), [core, msg]);
   const [zoom, setZoom] = useState(0.9);
   const [status, setStatus] = useState<string>("");
   // ── issue 046: outline panel + status bar (leftbar/bottombar layout only — 045 owns keydown/toolbar) ──
@@ -571,7 +585,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const inlineTarget = useMemo<InlineTarget | null>(() => {
     if (imageSel) {
       const b = imageSel.box;
-      const label = `이미지 (p.${imageSel.page + 1})`;
+      const label = msg.workspace.imageLabel(imageSel.page + 1);
       return {
         page: imageSel.page,
         box: { x: b.x, y: b.y, w: b.w, h: b.h },
@@ -585,7 +599,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       return { page: s.mark.page, box: s.mark.box, kind: s.mark.kind, anchor: s.anchor, label: s.anchor.label };
     }
     return null;
-  }, [imageSel, selection]);
+  }, [imageSel, selection, msg]);
 
   // Live mirrors so the (once-attached) cell-nav keydown listener reads the CURRENT selection/editor
   // without re-subscribing on every change (issue 036 — coexists with the 035 window keydown). `tabMoving`
@@ -891,7 +905,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       }
       return false;
     },
-    [toast, bumpRefresh],
+    [toast, bumpRefresh, msg],
   );
 
   // issue 059: commit a completed IME composition as ONE SetTableCellRuns undo unit (the SAME lane as typed
@@ -900,10 +914,10 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const commitComposition = useCallback(
     (text: string) => {
       void core.caret.insertText(text).catch((err) => {
-        if (!onTrap(err, "엔진 트랩 — 문서를 복구했습니다")) toast(`입력 실패: ${err}`);
+        if (!onTrap(err, msg.workspace.trapRecovered)) toast(msg.workspace.inputFailed(String(err)));
       });
     },
-    [core, onTrap, toast],
+    [core, onTrap, toast, msg],
   );
 
   // Esc anywhere clears the whole selection + any in-progress marquee (issue 021) + an image selection
@@ -933,7 +947,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   }, [core, compositionStore]);
 
   // A selection-model adapter query trapped (hit-test / marquee) → recover + toast.
-  useEffect(() => core.selection.onError((e) => onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요")), [core, onTrap]);
+  useEffect(() => core.selection.onError((e) => onTrap(e, msg.workspace.recoveredRetry)), [core, onTrap, msg]);
 
   // Open the document whenever the bytes reference changes (delegated to the core session).
   useEffect(() => {
@@ -956,17 +970,17 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         setNormalizeOn(norm);
         toast(
           norm
-            ? `열림: ${props.document!.name ?? "문서"} · ${r.pages}쪽 · 변환 열화 감지 → 레이아웃 자동 정리(원본 근사)`
-            : `열림: ${props.document!.name ?? "문서"} · ${r.pages}쪽`,
+            ? msg.workspace.openedNormalized(props.document!.name ?? msg.workspace.untitledDocument, r.pages)
+            : msg.workspace.opened(props.document!.name ?? msg.workspace.untitledDocument, r.pages),
         );
       } catch (e) {
-        if (!cancelled) toast(`열기 실패: ${e}`);
+        if (!cancelled) toast(msg.workspace.openFailed(String(e)));
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [core, adapter, props.document, toast]);
+  }, [core, adapter, props.document, toast, msg]);
 
   // Apply a font to EVERYTHING (issue 022): the core registers it into the engine (metrics + PDF) and
   // re-paginates + invalidates layout; here we build the screen @font-face (blob URL of the SAME bytes →
@@ -977,8 +991,8 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         await core.session.registerFont(family, bytes);
       } catch (e) {
         const code = (e as { code?: string })?.code;
-        if (code === "ttc_unsupported") toast("TTC(글꼴 컬렉션)는 지원하지 않습니다 — 단일 TTF/OTF 폰트를 선택하세요");
-        else toast(`글꼴 적용 실패: ${e}`);
+        if (code === "ttc_unsupported") toast(msg.workspace.ttcUnsupported);
+        else toast(msg.workspace.fontFailed(String(e)));
         return;
       }
       // Copy into a fresh ArrayBuffer so the Blob part is a concrete ArrayBuffer (not a possibly-shared
@@ -992,9 +1006,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       });
       // 048/039 플레이키 격리: 문서 열기마다 도는 AUTO 기본폰트 등록은 조용히 — 이 토스트가 뒤이은
       // 사용자 액션 토스트("굵게 적용" 등)와 .hw-status 단일 슬롯을 놓고 경합하던 노이즈였다.
-      if (!opts?.silent) toast(`글꼴 적용: ${family}`);
+      if (!opts?.silent) toast(msg.workspace.fontApplied(family));
     },
-    [core, toast],
+    [core, toast, msg],
   );
 
   // Auto-register the default font once per opened document (issue 022 §5): the PDF button is usable
@@ -1275,12 +1289,12 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     async (rows: number, cols: number) => {
       try {
         await core.edit.insertTable(rows, cols);
-        toast(`${rows}×${cols} 표를 문서 끝에 추가했습니다`);
+        toast(msg.workspace.tableAppended(rows, cols));
       } catch (e) {
-        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`표 추가 실패: ${e}`);
+        if (!onTrap(e, msg.workspace.trapRecovered)) toast(msg.workspace.tableInsertFailed(String(e)));
       }
     },
-    [core, toast, onTrap],
+    [core, toast, onTrap, msg],
   );
 
   // ── Issue 050: 이미지 삽입 (드롭 존 + 업로드) — the SDK insert lane both shells share ──────────────────
@@ -1291,7 +1305,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     (file: File) =>
       new Promise<{ dataB64: string; w: number; h: number }>((resolve, reject) => {
         const r = new FileReader();
-        r.onerror = () => reject(new Error("파일 읽기 실패"));
+        r.onerror = () => reject(new Error(msg.workspace.fileReadFailed));
         r.onload = () => {
           const dataUrl = String(r.result ?? "");
           const dataB64 = dataUrl.split(",")[1] ?? ""; // strip the "data:...;base64," prefix
@@ -1302,7 +1316,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         };
         r.readAsDataURL(file);
       }),
-    [],
+    [msg],
   );
 
   // Insert an image File at a target block: AFTER `block`, or the section END when `block` is null. ONE
@@ -1312,22 +1326,22 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const insertImageFile = useCallback(
     async (file: File, section: number, block: number | null) => {
       if (!canEdit) {
-        toast("이미지를 넣으려면 먼저 문서를 여세요");
+        toast(msg.workspace.imageOpenDocFirst);
         return;
       }
       try {
         const { dataB64, w, h } = await readImageFile(file);
         if (!dataB64) {
-          toast("이미지를 읽지 못했습니다");
+          toast(msg.workspace.imageReadFailed);
           return;
         }
         await core.edit.insertImage(dataB64, section, block, imageInsertSize(w, h));
-        toast("이미지를 삽입했습니다");
+        toast(msg.workspace.imageInserted);
       } catch (e) {
-        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`이미지 삽입 실패: ${e}`);
+        if (!onTrap(e, msg.workspace.trapRecovered)) toast(msg.workspace.imageInsertFailed(String(e)));
       }
     },
-    [canEdit, core, toast, onTrap, readImageFile],
+    [canEdit, core, toast, onTrap, readImageFile, msg],
   );
 
   // Upload lane: the 툴바 "이미지" button → file picker → insert at the CURRENT selection (after the marked
@@ -1391,7 +1405,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       if (isImageFile(file)) {
         const { section, block } = await resolveDropTarget(e.clientX, e.clientY);
         await insertImageFile(file, section, block);
-        if (files.length > 1) toast(`이미지 삽입됨 (나머지 ${files.length - 1}개는 건너뜀)`);
+        if (files.length > 1) toast(msg.workspace.imageInsertedSkipped(files.length - 1));
         return;
       }
       if (isDocFile(file)) {
@@ -1400,13 +1414,13 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           const bytes = new Uint8Array(await file.arrayBuffer());
           await props.onOpenFile(bytes, file.name);
         } else {
-          toast("문서 열기는 상단의 파일 열기를 사용하세요");
+          toast(msg.workspace.useOpenButton);
         }
         return;
       }
-      toast("이미지(PNG·JPEG) 또는 .hwp/.hwpx 파일만 놓을 수 있습니다");
+      toast(msg.workspace.dropTypeUnsupported);
     },
-    [insertImageFile, resolveDropTarget, props.onOpenFile, toast],
+    [insertImageFile, resolveDropTarget, props.onOpenFile, toast, msg],
   );
 
   // 열 너비 커밋 (issue 031): apply SetTableColWidths, then RE-QUERY the boundaries and confirm the
@@ -1420,15 +1434,15 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         await core.edit.setColumnWidths(editTarget.section, editTarget.block, boundariesToRatios(newBoundaries));
         const after = await core.session.colBoundaries(editTarget.page, editTarget.section, editTarget.block);
         if (after && !appliedReflectsDrag(before, newBoundaries, after)) {
-          toast("열 너비 변경이 반영되지 않았습니다 — 다시 시도하세요");
+          toast(msg.workspace.colWidthNotApplied);
           return;
         }
-        toast("열 너비를 변경했습니다");
+        toast(msg.workspace.colWidthChanged);
       } catch (e) {
-        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`열 너비 변경 실패: ${e}`);
+        if (!onTrap(e, msg.workspace.trapRecovered)) toast(msg.workspace.colWidthFailed(String(e)));
       }
     },
-    [core, editTarget, toast, onTrap],
+    [core, editTarget, toast, onTrap, msg],
   );
 
   // ── Issue 047: 열 너비 mm 다이얼로그 — precise mm + 균등 분배 (both reuse `onColCommit`'s apply-verify) ──
@@ -1476,13 +1490,13 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       shadingRef.current++;
       try {
         await core.edit.shadeCellRange(ed.section, ed.block, { r0: r, c0: c, r1: r, c1: c }, hex);
-        toast(hex ? "배경색 적용" : "배경 지움");
+        toast(hex ? msg.selectionActions.shadeOn : msg.selectionActions.shadeOff);
       } catch (e) {
         disarmShield(shadingRef);
-        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`배경색 변경 실패: ${e}`);
+        if (!onTrap(e, msg.workspace.trapRecovered)) toast(msg.workspace.shadeFailed(String(e)));
       }
     },
-    [core, onTrap, toast],
+    [core, onTrap, toast, msg],
   );
 
   // Close the 열 너비 dialog if its target evaporates (selection cleared / became a non-table), so a stale
@@ -1504,33 +1518,32 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         await core.edit.setRowHeights(editTarget.section, editTarget.block, heights);
         const after = await core.session.rowBoundaries(editTarget.page, editTarget.section, editTarget.block);
         if (after && !appliedReflectsDrag(before, newBoundaries, after)) {
-          toast("행 높이 변경이 반영되지 않았습니다 — 다시 시도하세요");
+          toast(msg.workspace.rowHeightNotApplied);
           return;
         }
-        toast("행 높이를 변경했습니다");
+        toast(msg.workspace.rowHeightChanged);
       } catch (e) {
-        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`행 높이 변경 실패: ${e}`);
+        if (!onTrap(e, msg.workspace.trapRecovered)) toast(msg.workspace.rowHeightFailed(String(e)));
       }
     },
-    [core, editTarget, toast, onTrap],
+    [core, editTarget, toast, onTrap, msg],
   );
 
   const onMarginsCommit = useCallback(
     async (mm: { left: number; right: number; top: number; bottom: number }) => {
       // SetPageMargins is DOCUMENT-WIDE (all pages) — confirm before applying (issue 027 §함정).
       const ok = window.confirm(
-        `문서 전체의 페이지 여백을 바꿉니다 (모든 페이지에 적용):\n` +
-          `좌 ${mm.left}mm · 우 ${mm.right}mm · 상 ${mm.top}mm · 하 ${mm.bottom}mm\n\n계속할까요?`,
+        msg.workspace.marginsConfirm(mm.left, mm.right, mm.top, mm.bottom),
       );
       if (!ok) return;
       try {
         await core.edit.setPageMargins(0, mm);
-        toast("페이지 여백을 변경했습니다 (문서 전체)");
+        toast(msg.workspace.marginsChanged);
       } catch (e) {
-        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`여백 변경 실패: ${e}`);
+        if (!onTrap(e, msg.workspace.trapRecovered)) toast(msg.workspace.marginsFailed(String(e)));
       }
     },
-    [core, toast, onTrap],
+    [core, toast, onTrap, msg],
   );
 
   // Back-compatible full-box rich editor. The reference app opts into the engine-caret lane, but the
@@ -1578,10 +1591,10 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           });
         }
       } catch (e) {
-        onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
+        onTrap(e, msg.workspace.recoveredRetry);
       }
     },
-    [adapter, core, onTrap],
+    [adapter, core, onTrap, msg],
   );
 
   // Open the in-place editor directly over a SELECTED cell (issue 036 Enter/Tab entry). Unlike
@@ -1600,10 +1613,10 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         const runs = await core.session.runsAtPath(anchor.section, path);
         setEditor({ page: mark.page, box: mark.box, section: anchor.section, block: anchor.block, kind: "cell", rows: [row, row], cols: [col, col], text: anchor.text ?? "", runs, fontSizePt: firstRunStyle(runs).size_pt, path });
       } catch (e) {
-        onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
+        onTrap(e, msg.workspace.recoveredRetry);
       }
     },
-    [core, onTrap],
+    [core, onTrap, msg],
   );
 
   // Minimal scrollIntoView for a cell rect (own-render PAGE px on `page`): scroll the canvas ONLY enough to
@@ -1718,23 +1731,23 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           const found = await findImageBbox(sel.box.section, sel.box.block);
           if (!found) {
             setImageSel(null);
-            toast("이미지 크기 변경이 반영되지 않았습니다 — 다시 시도하세요");
+            toast(msg.workspace.imageResizeNotApplied);
             return;
           }
           setImageSel(found); // re-place the handles on the (possibly reflowed) image
           if (!appliedReflectsResize(before, intended, { w: found.box.w, h: found.box.h })) {
-            toast("이미지 크기 변경이 반영되지 않았습니다 — 다시 시도하세요");
+            toast(msg.workspace.imageResizeNotApplied);
             return;
           }
-          toast("이미지 크기를 변경했습니다");
+          toast(msg.workspace.imageResized);
         } catch (e) {
           // Failure/trap: disarm so the recovery refresh still clears the (now stale) overlay.
           disarmShield(imageCommittingRef);
-          if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`크기 변경 실패: ${e}`);
+          if (!onTrap(e, msg.workspace.trapRecovered)) toast(msg.workspace.imageResizeFailed(String(e)));
         }
       })();
     },
-    [core, canEdit, findImageBbox, toast, onTrap],
+    [core, canEdit, findImageBbox, toast, onTrap, msg],
   );
 
   // 이미지 이동 (issue 049): the engine move is an ANCHOR REORDER (실측) — resolve the DROP point to a block
@@ -1768,19 +1781,19 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           const found = await findImageBbox(sel.box.section, landed);
           if (!found) {
             setImageSel(null);
-            toast("이미지 이동이 반영되지 않았습니다 — 다시 시도하세요");
+            toast(msg.workspace.imageMoveNotApplied);
             return;
           }
           setImageSel(found);
-          toast("이미지를 이동했습니다");
+          toast(msg.workspace.imageMoved);
         } catch (e) {
           // Failure/trap: disarm so the recovery refresh still clears the (now stale) overlay.
           if (armed) disarmShield(imageCommittingRef);
-          if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`이동 실패: ${e}`);
+          if (!onTrap(e, msg.workspace.trapRecovered)) toast(msg.workspace.imageMoveFailed(String(e)));
         }
       })();
     },
-    [core, canEdit, resolveDropBlock, findImageBbox, toast, onTrap],
+    [core, canEdit, resolveDropBlock, findImageBbox, toast, onTrap, msg],
   );
 
   // ── Issue 045: 찾기/바꾸기 verbs ─────────────────────────────────────────────────────────────────────
@@ -1824,12 +1837,12 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           setFindOrdinal(core.find.ordinal);
           if (scrollToFirst) scrollToMatch(boxes, core.find.cursor);
         } catch (e) {
-          if (!onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요")) toast(`찾기 실패: ${e}`);
+          if (!onTrap(e, msg.workspace.recoveredRetry)) toast(msg.workspace.findFailed(String(e)));
         } finally {
           setFindBusy(false);
         }
       }),
-    [core, onTrap, toast, scrollToMatch, enqueueFind],
+    [core, onTrap, toast, scrollToMatch, enqueueFind, msg],
   );
 
   // Next / previous match: advance the FindController cursor, reflect the ordinal, scroll the new current
@@ -1854,15 +1867,15 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         setFindBusy(true);
         try {
           const res = all ? await core.find.replaceAll(findReplaceRef.current) : await core.find.replaceCurrent(findReplaceRef.current);
-          if (res.replaced > 0) toast(`${res.replaced}개 바꿈 — 실행취소는 ↶`);
-          else toast("바꿀 내용을 찾지 못했습니다");
+          if (res.replaced > 0) toast(msg.workspace.replaced(res.replaced));
+          else toast(msg.workspace.replaceNoMatch);
         } catch (e) {
-          if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`바꾸기 실패: ${e}`);
+          if (!onTrap(e, msg.workspace.trapRecovered)) toast(msg.workspace.replaceFailed(String(e)));
         } finally {
           setFindBusy(false);
         }
       }),
-    [core, canEdit, onTrap, toast, enqueueFind],
+    [core, canEdit, onTrap, toast, enqueueFind, msg],
   );
 
   // ⌘F opens the bar (or re-focuses it if already open, via the focus token). Decision (issue 045 §함정 —
@@ -1953,18 +1966,18 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       }
       try {
         await applyEditorRuns(editor, runs);
-        toast("텍스트를 수정했습니다");
+        toast(msg.workspace.textEdited);
         // Success: the applied edit bumps refreshToken which ALSO closes the editor; clearing here too keeps
         // it closed even when the layout didn't reflow (a no-op re-flow).
         setEditor(null);
       } catch (e) {
-        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`텍스트 수정 실패: ${e}`);
+        if (!onTrap(e, msg.workspace.trapRecovered)) toast(msg.workspace.textEditFailed(String(e)));
         // Re-raise WITHOUT clearing `editor`: the InPlaceCellEditor un-latches on rejection and STAYS open
         // so the user can retry (issue 032 step 2: 저장 실패 시 에디터 유지 + 에러 토스트).
         throw e;
       }
     },
-    [applyEditorRuns, editor, toast, onTrap],
+    [applyEditorRuns, editor, toast, onTrap, msg],
   );
 
   // Tab / Shift+Tab inside a cell editor (issue 036): commit the current text, and ONLY on a successful
@@ -1989,7 +2002,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
             disarmShield(tabMovingRef); // failed commit: no re-flow to shield; editor stays open on rethrow
             throw e;
           }
-          toast("텍스트를 수정했습니다");
+          toast(msg.workspace.textEdited);
         }
         // Move + re-enter. moveCell probes from the just-committed cell's box (stable x/w for a text edit)
         // and returns the NEIGHBOUR's fresh post-edit geometry; a clamp (table edge) just closes.
@@ -2002,11 +2015,11 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           setEditor(null);
         }
       } catch (e) {
-        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`텍스트 수정 실패: ${e}`);
+        if (!onTrap(e, msg.workspace.trapRecovered)) toast(msg.workspace.textEditFailed(String(e)));
         throw e;
       }
     },
-    [core, toast, onTrap, scrollCellIntoView, openCellEditor],
+    [core, toast, onTrap, scrollCellIntoView, openCellEditor, msg],
   );
 
   // Cell-nav keydown (issue 036), a SEPARATE window listener that coexists with the 035 zoom/Space listener
@@ -2035,7 +2048,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           const b = single.mark.box;
           void core.caret
             .clickAt(single.mark.page, b.x + b.w / 2, b.y + b.h / 2, false)
-            .catch((err) => onTrap(err, "엔진을 복구했습니다 — 다시 시도하세요"));
+            .catch((err) => onTrap(err, msg.workspace.recoveredRetry));
         } else {
           void openCellEditor(single);
         }
@@ -2043,7 +2056,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [core, editingOn, engineCaretEditing, moveCellAndScroll, onTrap, openCellEditor]);
+  }, [core, editingOn, engineCaretEditing, moveCellAndScroll, onTrap, openCellEditor, msg]);
 
   // ── issue 053: cell caret TYPING — a separate window keydown that acts only while a caret is live
   // (the 036 cell-nav listener yields via caretActiveRef, so 방향키/Enter never double-handle). Each
@@ -2059,7 +2072,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       if (e.metaKey || e.ctrlKey || e.altKey) return; // ⌘Z/⌘F/zoom/… keep their owners
       const run = (p: Promise<unknown>) =>
         void p.catch((err) => {
-          if (!onTrap(err, "엔진 트랩 — 문서를 복구했습니다")) toast(`입력 실패: ${err}`);
+          if (!onTrap(err, msg.workspace.trapRecovered)) toast(msg.workspace.inputFailed(String(err)));
         });
       // 한글식 boundary fall-through: an arrow INSIDE the text moves the caret; an arrow that would
       // leave the text (offset 0 going left / paraLen going right, or any vertical arrow) CLEARS the
@@ -2117,7 +2130,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [editingOn, canEdit, core, onTrap, toast, moveCellAndScroll]);
+  }, [editingOn, canEdit, core, onTrap, toast, moveCellAndScroll, msg]);
 
   // 053: the in-place editor and the caret are two text chromes — only one may be live. Opening the
   // editor (double-click / Enter-on-selection) drops the caret; closing it does NOT restore one.
@@ -2132,10 +2145,10 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         await fn();
         toast(ok);
       } catch (e) {
-        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`서식 적용 실패: ${e}`);
+        if (!onTrap(e, msg.workspace.trapRecovered)) toast(msg.workspace.formatFailed(String(e)));
       }
     },
-    [toast, onTrap],
+    [toast, onTrap, msg],
   );
 
   // The SHARED selection-format action set (issue 039): the 028 FloatingToolbar AND the 039 context menu
@@ -2204,9 +2217,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           try {
             if (patch.bold !== undefined) await core.caret.toggleStyle("bold");
             if (patch.italic !== undefined) await core.caret.toggleStyle("italic");
-            toast("선택한 글자 범위의 디자인을 적용했습니다");
+            toast(msg.workspace.runDesignApplied);
           } catch (e) {
-            if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`디자인 적용 실패: ${e}`);
+            if (!onTrap(e, msg.workspace.trapRecovered)) toast(msg.workspace.designFailed(String(e)));
           }
         })();
         return;
@@ -2228,13 +2241,13 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           await core.session.applyBatch([
             { intent: "SetParagraphRuns", section: target.section, block: target.block, runs: next },
           ]);
-          toast("선택한 문단의 디자인을 적용했습니다");
+          toast(msg.workspace.paragraphDesignApplied);
         } catch (e) {
-          if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`디자인 적용 실패: ${e}`);
+          if (!onTrap(e, msg.workspace.trapRecovered)) toast(msg.workspace.designFailed(String(e)));
         }
       })();
     },
-    [applyRibbon, core, editTarget, ensureCatalogFont, onTrap, toast],
+    [applyRibbon, core, editTarget, ensureCatalogFont, onTrap, toast, msg],
   );
 
   // Reflect the MARKED cell/range's first-run format in the ribbon when NOT editing (028 curBold 재사용 +
@@ -2283,24 +2296,24 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     async (section: number, block: number) => {
       try {
         await core.edit.insertBlankParagraph(section, block + 1); // BELOW the anchored block
-        toast("빈 줄을 추가했습니다 (Enter)");
+        toast(msg.workspace.emptyLineAdded);
       } catch (e) {
-        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`빈 줄 추가 실패: ${e}`);
+        if (!onTrap(e, msg.workspace.trapRecovered)) toast(msg.workspace.emptyLineFailed(String(e)));
       }
     },
-    [core, toast, onTrap],
+    [core, toast, onTrap, msg],
   );
   const onDeleteSelectedBlock = useCallback(
     async (section: number, block: number) => {
       try {
         await core.edit.deleteBlock(section, block);
         core.selection.clear(); // the deleted block's mark is gone; drop the stale selection
-        toast("선택한 항목을 삭제했습니다 (⌫)");
+        toast(msg.workspace.deleted);
       } catch (e) {
-        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`삭제 실패: ${e}`);
+        if (!onTrap(e, msg.workspace.trapRecovered)) toast(msg.workspace.deleteFailed(String(e)));
       }
     },
-    [core, toast, onTrap],
+    [core, toast, onTrap, msg],
   );
 
   // 키보드 블록 편집 (사용자 요청 — 버튼 대신 단축키): a LONE selected top-level block (문단 또는 표) responds
@@ -2339,12 +2352,12 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     async (section: number, block: number, at: number, cols: number) => {
       try {
         await core.edit.insertRows(section, block, at, cols);
-        toast("행을 삽입했습니다");
+        toast(msg.workspace.rowInserted);
       } catch (e) {
-        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`행 삽입 실패: ${e}`);
+        if (!onTrap(e, msg.workspace.trapRecovered)) toast(msg.workspace.rowInsertFailed(String(e)));
       }
     },
-    [core, toast, onTrap],
+    [core, toast, onTrap, msg],
   );
 
   // 우클릭 → 컨텍스트 메뉴 (issue 039). Only over a page sheet (시트 위에서만 브라우저 기본 메뉴 차단 —
@@ -2390,7 +2403,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           await core.selection.pointerUp(toPointerInput(click));
         }
       } catch (err) {
-        onTrap(err, "엔진을 복구했습니다 — 다시 시도하세요");
+        onTrap(err, msg.workspace.recoveredRetry);
       }
       // 2) Resolve what's under the point to branch the menu (cell > table/paragraph > 바탕).
       try {
@@ -2411,10 +2424,10 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         // A whole-table border / image / empty page area → 바탕(비개체) menu (표 추가).
         setContextMenu({ x: clientX, y: clientY, kind: "background", click });
       } catch (err) {
-        if (!onTrap(err, "엔진을 복구했습니다 — 다시 시도하세요") && !stale()) setContextMenu({ x: clientX, y: clientY, kind: "background", click });
+        if (!onTrap(err, msg.workspace.recoveredRetry) && !stale()) setContextMenu({ x: clientX, y: clientY, kind: "background", click });
       }
     },
-    [editingOn, adapter, core, onTrap],
+    [editingOn, adapter, core, onTrap, msg],
   );
 
   // The 서체 catalog family names for the ribbon's 글꼴 dropdown (reuses the existing fontCatalog prop);
@@ -2429,7 +2442,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       const b = imageSel.box;
       return {
         kind: "image",
-        label: `이미지 (p.${imageSel.page + 1})`,
+        label: msg.workspace.imageLabel(imageSel.page + 1),
         page: imageSel.page,
         section: b.section,
         block: b.block,
@@ -2453,7 +2466,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     const canCellStyle = kind === "cell" || kind === "range";
     return {
       kind,
-      label: selected?.anchor.label ?? `문단 ${editTarget.block + 1}`,
+      label: selected?.anchor.label ?? msg.workspace.paragraphLabel(editTarget.block + 1),
       page: editTarget.page,
       section: editTarget.section,
       block: editTarget.block,
@@ -2469,7 +2482,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       canTextStyle,
       canCellStyle,
     };
-  }, [editTarget, imageSel, selection]);
+  }, [editTarget, imageSel, selection, msg]);
 
   // The page the compact "AI에게 전달" pill anchors to = the FIRST mark's page (multi-page selection → the
   // first mark's page). The pill hugs the selection UNION bbox on that page (reused from `unionPageBox`), so
@@ -2477,20 +2490,20 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // enablement is derived below and drives the ribbon, not a floating bar).
   const toolbarPage = marks.length ? marks[0].page : null;
   const formatDisabledReason: string | undefined = !editTarget
-    ? "여러 곳을 함께 선택하면 서식은 한 번에 적용할 수 없습니다 — 표의 한 셀/범위를 선택하세요"
+    ? msg.workspace.formatMultiSelection
     : editTarget.kind === "cell" || editTarget.kind === "range"
       ? fmtRange
         ? undefined
-        : "이 셀에는 서식을 적용할 수 없습니다"
-      : "표 셀/범위를 선택하면 서식을 적용할 수 있습니다";
+        : msg.workspace.formatCellUnavailable
+      : msg.workspace.formatSelectCell;
 
   // ── issue 048: per-mode disabled reasons for the persistent ribbon ───────────────────────────────────
   // 편집 중이면 라이브 선택에 항상 적용 가능(inline·live 활성), 배경/정렬은 셀 op라 비활성(사유). 비편집이면
   // 셀/범위가 선택돼야 inline·cell op가 활성, 밑줄/취소선은 편집 상태에서만(사유). 조용한 무시 금지 (027 규칙).
   const ribbonEditing = editingOn && editor != null;
   const inlineDisabledReason = ribbonEditing ? undefined : formatDisabledReason;
-  const liveOnlyDisabledReason = ribbonEditing ? undefined : "밑줄·취소선은 칸을 더블클릭해 편집할 때 적용할 수 있습니다";
-  const cellOnlyDisabledReason = ribbonEditing ? "배경색·정렬은 편집을 마친 뒤 칸을 선택한 상태에서 적용됩니다" : formatDisabledReason;
+  const liveOnlyDisabledReason = ribbonEditing ? undefined : msg.workspace.formatLiveOnly;
+  const cellOnlyDisabledReason = ribbonEditing ? msg.workspace.formatCellOnly : formatDisabledReason;
 
   // pointer lifecycle → the core selection model (issues 021/023). React fires them fire-and-forget; the
   // core emits selection/marquee changes that useHwpEditor mirrors back into state.
@@ -2513,7 +2526,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       if (!c.shift && active && active.rect.page === c.page) {
         const id = ++textDragSeqRef.current;
         const owner = core.caret.beginDragAt(c.page, c.x, c.y).catch((e) => {
-          onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
+          onTrap(e, msg.workspace.recoveredRetry);
           return false;
         });
         textDragRef.current = { id, start: { x: c.client.x, y: c.client.y }, owner, moved: false };
@@ -2524,7 +2537,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       }
       void core.selection.pointerDown(toPointerInput(c));
     },
-    [core, editingOn, canEdit, onTrap],
+    [core, editingOn, canEdit, onTrap, msg],
   );
   // Recompute + publish the marquee slices for a cursor client point (shared by pointermove + the edge
   // auto-scroll tick). Reads each page's client rect (DOM math) and hands per-page own-render PAGE-px
@@ -2597,7 +2610,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           const live = textDragRef.current;
           if (!live || live.id !== id) return; // pointerup/새 제스처가 이미 이 후보를 폐기함
           if (owned) {
-            void core.caret.dragTo(c.page, c.x, c.y).catch((e) => onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요"));
+            void core.caret.dragTo(c.page, c.x, c.y).catch((e) => onTrap(e, msg.workspace.recoveredRetry));
             return;
           }
           // 시작점이 같은 캐럿 문단이 아니었다 → 이번 제스처를 기존 블록 마퀴에 그대로 넘긴다.
@@ -2610,7 +2623,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       updateMarquee(c.client.x, c.client.y);
       maybeAutoScroll(c.client.y);
     },
-    [core, onTrap, updateMarquee, maybeAutoScroll],
+    [core, onTrap, updateMarquee, maybeAutoScroll, msg],
   );
 
   // A body-text caret is an editable selection even though it deliberately does not create an AI/block
@@ -2654,10 +2667,10 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         const active = await core.caret.clickAt(c.page, c.x, c.y, false);
         if (active?.kind === "body") await reflectBodyDesignAt(c, isCurrent);
       } catch (e) {
-        onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
+        onTrap(e, msg.workspace.recoveredRetry);
       }
     },
-    [canEdit, core, editingOn, onTrap, reflectBodyDesignAt],
+    [canEdit, core, editingOn, onTrap, reflectBodyDesignAt, msg],
   );
 
   // Figma progressive table selection (issue 06x): what a DOUBLE-CLICK does depends on where + what is
@@ -2694,10 +2707,10 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           if (engineCaretEditing && isCurrent()) await focusEngineCaretAt(c, isCurrent);
         }
       } catch (e) {
-        onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
+        onTrap(e, msg.workspace.recoveredRetry);
       }
     },
-    [adapter, core, engineCaretEditing, focusEngineCaretAt, onTrap, openEditorAt],
+    [adapter, core, engineCaretEditing, focusEngineCaretAt, onTrap, openEditorAt, msg],
   );
   // Record a double-click at the PHYSICAL pointerup time. The old code timestamped only after async
   // imageAt, so a 500ms-old scan click whose worker reply arrived late could be paired with a new click.
@@ -2738,20 +2751,20 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         const active = await core.caret.clickAt(c.page, c.x, c.y, c.shift);
         if (active?.kind === "body") await reflectBodyDesignAt(c);
       } catch (e) {
-        onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
+        onTrap(e, msg.workspace.recoveredRetry);
       }
     },
-    [editingOn, canEdit, core, onTrap, reflectBodyDesignAt],
+    [editingOn, canEdit, core, onTrap, reflectBodyDesignAt, msg],
   );
 
   const enqueuePointerUp = useCallback(
     (settle: () => Promise<void>) => {
       const queued = pointerUpChainRef.current.then(settle);
       pointerUpChainRef.current = queued.catch((e) => {
-        onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
+        onTrap(e, msg.workspace.recoveredRetry);
       });
     },
-    [onTrap],
+    [onTrap, msg],
   );
 
   /** 텍스트 드래그 소유권 협상 뒤의 기존 pointerup 경로. `dragged`면 클릭 캐럿/더블클릭 감지는
@@ -2778,7 +2791,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           try {
             img = (await adapter.imageAt!(c.page, c.x, c.y)) ?? null;
           } catch (e) {
-            onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
+            onTrap(e, msg.workspace.recoveredRetry);
           }
           if (!isCurrent()) {
             await selectionSettle;
@@ -2806,7 +2819,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
 
       enqueuePointerUp(settle);
     },
-    [core, editingOn, adapter, onTrap, handleDoubleClick, placeCaretAt, enqueuePointerUp],
+    [core, editingOn, adapter, onTrap, handleDoubleClick, placeCaretAt, enqueuePointerUp, msg],
   );
 
   const onPointerUp = useCallback(
@@ -2841,7 +2854,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
             try {
               await core.caret.dragTo(c.page, c.x, c.y);
             } catch (e) {
-              onTrap(e, "엔진을 복구했습니다 — 다시 시도하세요");
+              onTrap(e, msg.workspace.recoveredRetry);
             }
           }
           if (stillThisRelease) core.caret.endDrag();
@@ -2856,7 +2869,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       core.caret.endDrag();
       finishPointerUp(c, movedByPoint, doubleClick, curBeforeUp, selectionSettle, pointerSeq);
     },
-    [core, enqueuePointerUp, finishPointerUp, onTrap, registerPointerUp, stopMarqueeDrag, updateMarquee],
+    [core, enqueuePointerUp, finishPointerUp, onTrap, registerPointerUp, stopMarqueeDrag, updateMarquee, msg],
   );
 
   // ── issue 038: hover pre-highlight + cursor system (FG-09 + FG-06) ────────────────────────────────
@@ -2883,16 +2896,16 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       try {
         ensureIntentFonts(intents); // 명시 font 지정 → 카탈로그 face 선등록(병행, best-effort)
         const applied = await core.edit.apply(intents);
-        toast(`적용됨: ${applied}개 편집`);
+        toast(msg.workspace.appliedEdits(applied));
         return applied;
       } catch (e) {
-        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다. 마지막 편집은 취소되었습니다")) {
+        if (!onTrap(e, msg.workspace.trapRecoveredLastUndone)) {
           /* non-trap error: surfaced by the chat panel's own catch */
         }
         throw e;
       }
     },
-    [core, toast, onTrap, ensureIntentFonts],
+    [core, toast, onTrap, ensureIntentFonts, msg],
   );
 
   // ── issue 06x: INLINE per-element edit — apply/revert wiring ─────────────────────────────────────────
@@ -2920,18 +2933,18 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       if (isImage) imageCommittingRef.current++;
       try {
         await core.session.applyBatch(intents);
-        toast(`적용됨: ${intents.length}개 편집`);
+        toast(msg.workspace.appliedEdits(intents.length));
         return core.edit.preview(intents);
       } catch (e) {
         disarmShield(inlineEditShieldRef);
         if (isImage) disarmShield(imageCommittingRef);
-        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다. 마지막 편집은 취소되었습니다")) {
+        if (!onTrap(e, msg.workspace.trapRecoveredLastUndone)) {
           /* non-trap error: surfaced by the inline panel's own catch → error state */
         }
         throw e;
       }
     },
-    [core, toast, onTrap],
+    [core, toast, onTrap, msg],
   );
 
   // REVERT the applied batch — it is the undo-stack top immediately after our apply, so ONE `session.undo()`
@@ -2939,20 +2952,20 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const onInlineRevert = useCallback(async () => {
     inlineEditShieldRef.current++;
     try {
-      if (await core.session.undo()) toast("되돌렸습니다");
+      if (await core.session.undo()) toast(msg.workspace.undone);
     } catch (e) {
       disarmShield(inlineEditShieldRef);
-      onTrap(e, "엔진 트랩 — 문서를 복구했습니다");
+      onTrap(e, msg.workspace.trapRecovered);
     }
-  }, [core, toast, onTrap]);
+  }, [core, toast, onTrap, msg]);
 
   const undo = useCallback(async () => {
-    if (await core.session.undo()) toast("실행취소");
-  }, [core, toast]);
+    if (await core.session.undo()) toast(msg.workspace.undoToast);
+  }, [core, toast, msg]);
 
   const redo = useCallback(async () => {
-    if (await core.session.redo()) toast("다시 실행");
-  }, [core, toast]);
+    if (await core.session.redo()) toast(msg.workspace.redoToast);
+  }, [core, toast, msg]);
 
   // ⌘C — 현재 선택(문단/표/셀)의 **평문**을 클립보드로. 읽기 전용이라 op 도 undo 단위도 없다.
   //   · 셀/문단 → 앵커가 이미 들고 있는 `text`(히트 테스트가 채운 그 텍스트) — 엔진 왕복 0회.
@@ -2989,7 +3002,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     try {
       text = await selectionPlainText(sels);
     } catch (e) {
-      if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`복사 실패: ${e}`);
+      if (!onTrap(e, msg.workspace.trapRecovered)) toast(msg.workspace.copyFailed(String(e)));
       return;
     }
     if (!text) return; // 빈 선택(빈 셀 등) — 기존 클립보드를 빈 값으로 덮지 않는다
@@ -2997,16 +3010,16 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     // 말고 이유를 알린다(사용자는 ⌘C 가 먹었는지 아닌지를 알아야 한다).
     const cb = navigator.clipboard;
     if (!cb?.writeText) {
-      toast("이 브라우저에서는 복사를 지원하지 않습니다");
+      toast(msg.workspace.copyUnsupported);
       return;
     }
     try {
       await cb.writeText(text);
-      toast(sels.length > 1 ? `${sels.length}개를 복사했습니다` : "복사했습니다");
+      toast(sels.length > 1 ? msg.workspace.copiedCount(sels.length) : msg.workspace.copied);
     } catch (e) {
-      toast(`복사 실패: ${e}`); // 권한 거부 등 — 엔진 트랩이 아니므로 복구 레인이 아니다
+      toast(msg.workspace.copyFailed(String(e))); // 권한 거부 등 — 엔진 트랩이 아니므로 복구 레인이 아니다
     }
-  }, [selectionPlainText, onTrap, toast]);
+  }, [selectionPlainText, onTrap, toast, msg]);
 
   // paste 이벤트가 건넨 **동기 text/plain**을 살아 있는 글자 캐럿/범위에 붙인다. ⌘V keydown에서
   // navigator.clipboard.readText()를 부르면 Safari/WKWebView 권한 정책에 막히고, 브라우저가 이미
@@ -3014,16 +3027,16 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // 본문=SetParagraphRuns 한 번(개행=bare run separator)이다.
   const pastePlainText = useCallback(async (text: string) => {
     if (text.length === 0) {
-      toast("클립보드에 붙여넣을 평문이 없습니다");
+      toast(msg.workspace.pasteEmpty);
       return;
     }
     try {
       const applied = await core.caret.pasteText(text);
-      toast(applied ? "붙여넣었습니다" : "붙여넣을 글자 위치가 없습니다");
+      toast(applied ? msg.workspace.pasted : msg.workspace.pasteNoCaret);
     } catch (e) {
-      if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`붙여넣기 실패: ${e}`);
+      if (!onTrap(e, msg.workspace.trapRecovered)) toast(msg.workspace.pasteFailed(String(e)));
     }
-  }, [core, onTrap, toast]);
+  }, [core, onTrap, toast, msg]);
 
   // ── 키보드 기본기: ⌘Z / ⌘⇧Z(·⌘Y) 실행취소·재실행 + ⌘C 복사 + ⌘V 평문 붙여넣기 ────────────────
   // 배선은 이미 있다 — 툴바 ↶/↷ 버튼이 부르는 `undo`/`redo` 와 **같은 레인**(core.session)을 키보드로
@@ -3059,7 +3072,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         e.preventDefault();
         const p = k === "a" ? core.caret.selectAll() : core.caret.toggleStyle(k === "b" ? "bold" : "italic");
         void p.catch((err) => {
-          if (!onTrap(err, "엔진 트랩 — 문서를 복구했습니다")) toast(`서식 적용 실패: ${err}`);
+          if (!onTrap(err, msg.workspace.trapRecovered)) toast(msg.workspace.formatFailed(String(err)));
         });
         return;
       }
@@ -3076,7 +3089,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       const isRedo = k === "y" || (k === "z" && e.shiftKey);
       // 키보드 경로엔 rejection 을 받아줄 곳이 없다(버튼은 disabled 로 방어) — 트랩/토스트로 흡수한다.
       void (isRedo ? redo() : undo()).catch((err) => {
-        if (!onTrap(err, "엔진 트랩 — 문서를 복구했습니다")) toast(`${isRedo ? "다시 실행" : "실행취소"} 실패: ${err}`);
+        if (!onTrap(err, msg.workspace.trapRecovered)) toast(msg.workspace.undoRedoFailed(isRedo, String(err)));
       });
     };
     const onPaste = (e: ClipboardEvent) => {
@@ -3089,7 +3102,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       const text = data?.getData("text/plain") ?? "";
       e.preventDefault();
       if (!data) {
-        toast("클립보드 평문을 읽을 수 없습니다");
+        toast(msg.workspace.clipboardReadFailed);
         return;
       }
       void pastePlainText(text.replace(/\r\n?/g, "\n"));
@@ -3100,7 +3113,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("paste", onPaste);
     };
-  }, [core, undo, redo, copySelection, pastePlainText, compositionStore, onTrap, toast]);
+  }, [core, undo, redo, copySelection, pastePlainText, compositionStore, onTrap, toast, msg]);
 
   // ── Feature C: persistent per-card 되돌리기 on applied chat turns ─────────────────────────────────────
   // The chat records each applied turn's undo-stack depth (via `undoDepth`) and offers 되돌리기 only while
@@ -3111,13 +3124,13 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const revertChatEdit = useCallback(async (): Promise<boolean> => {
     try {
       const ok = await core.session.undo();
-      if (ok) toast("되돌렸습니다");
+      if (ok) toast(msg.workspace.undone);
       return ok;
     } catch (e) {
-      onTrap(e, "엔진 트랩 — 문서를 복구했습니다. 마지막 편집은 취소되었습니다");
+      onTrap(e, msg.workspace.trapRecoveredLastUndone);
       return false;
     }
-  }, [core, toast, onTrap]);
+  }, [core, toast, onTrap, msg]);
 
   const download = (bytes: Uint8Array | string, name: string, mime: string) => {
     // Copy into a fresh ArrayBuffer so the Blob part is a plain ArrayBuffer (not a wasm memory view).
@@ -3138,9 +3151,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       if (props.onExport) await props.onExport(html, name, "text/html");
       else download(html, name, "text/html");
     } catch (e) {
-      toast(`HTML 내보내기 실패: ${e}`);
+      toast(msg.workspace.htmlExportFailed(String(e)));
     }
-  }, [adapter, props.document, props.onExport, toast]);
+  }, [adapter, props.document, props.onExport, toast, msg]);
 
   // Toggle "레이아웃 정리" (layout normalization). The core re-paginates + re-renders (the refreshToken
   // effect re-fetches page SVGs). The engine report tells us whether THIS document actually looked
@@ -3152,16 +3165,16 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     try {
       const report = await core.session.setNormalize(next);
       setNormalizeOn(next);
-      if (!next) toast("원본 그대로 렌더합니다.");
+      if (!next) toast(msg.workspace.normalizeOff);
       else if (report?.applied)
-        toast(`레이아웃 정리: 줄간격 ${report.loosePct}%→${report.targetPct}% (${report.paragraphsTouched}개 문단)`);
-      else toast("이미 원본이 정상이라 바뀐 것이 없습니다.");
+        toast(msg.workspace.normalizeReport(report.loosePct, report.targetPct, report.paragraphsTouched));
+      else toast(msg.workspace.normalizeNoop);
     } catch (e) {
-      toast(`레이아웃 정리 실패: ${e}`);
+      toast(msg.workspace.normalizeFailed(String(e)));
     } finally {
       setNormalizeBusy(false);
     }
-  }, [core, normalizeOn, normalizeBusy, toast]);
+  }, [core, normalizeOn, normalizeBusy, toast, msg]);
 
   // 067-follow(진단 U7 정직성): 편집본을 HWPX 로 저장하는 버튼 — `toHwpx()`는 자동저장(052)이 이미
   // 쓰는 동일 직렬화(무편집 HWPX 영역은 바이트 보존, .hwp 원본도 결과는 HWPX). 지금까지 내부용으로만
@@ -3173,9 +3186,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       if (props.onExport) await props.onExport(bytes, name, "application/hwp+zip");
       else download(bytes, name, "application/hwp+zip");
     } catch (e) {
-      toast(`HWPX 내보내기 실패: ${e}`);
+      toast(msg.workspace.hwpxExportFailed(String(e)));
     }
-  }, [adapter, props.document, props.onExport, toast]);
+  }, [adapter, props.document, props.onExport, toast, msg]);
 
   const exportPdf = useCallback(async () => {
     try {
@@ -3185,7 +3198,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           if (!f) return;
           await adapter.registerFont(f.family, f.bytes);
         } else {
-          toast("PDF를 내보내려면 폰트를 먼저 주입하세요 (registerFont) — 한컴/함초롬 폰트는 번들되지 않습니다");
+          toast(msg.workspace.pdfFontRequired);
           return;
         }
       }
@@ -3195,7 +3208,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       try {
         const profile = await adapter.docProfile?.();
         const stubs = (profile?.equation_count ?? 0) + (profile?.chart_count ?? 0);
-        if (stubs > 0) toast(`안내: 수식·차트 ${stubs}개는 현재 PDF에서 자리표시 상자로 출력됩니다 (화면·HTML 내보내기는 실제로 그려집니다)`);
+        if (stubs > 0) toast(msg.workspace.pdfPlaceholderNote(stubs));
       } catch {
         /* 프로필 조회 실패는 경고만 생략 — export 는 계속 */
       }
@@ -3206,10 +3219,10 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       else download(pdf, name, "application/pdf");
     } catch (e) {
       const code = (e as { code?: string })?.code;
-      if (code === "font_missing") toast("폰트가 주입되지 않았습니다 — .ttf/.otf 파일을 선택하세요");
-      else toast(`PDF 내보내기 실패: ${e}`);
+      if (code === "font_missing") toast(msg.workspace.pdfFontMissing);
+      else toast(msg.workspace.pdfExportFailed(String(e)));
     }
-  }, [adapter, props.requestFont, props.document, props.onExport, toast]);
+  }, [adapter, props.requestFont, props.document, props.onExport, toast, msg]);
 
   const jumpToPage = useCallback((page: number) => {
     const el = window.document.querySelector(`.hw-sheet[data-page="${page}"]`);
@@ -3224,7 +3237,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const revealBlock = useCallback(
     async (section: number, block: number) => {
       if (!adapter.blocksInRect || !meta) {
-        toast("이 백엔드는 위치 보기를 지원하지 않습니다");
+        toast(msg.workspace.revealUnsupported);
         return;
       }
       try {
@@ -3234,16 +3247,16 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           if (!hit) continue;
           jumpToPage(pg);
           if (revealTimer.current !== null) window.clearTimeout(revealTimer.current);
-          setRevealFlash({ page: pg, box: { x: hit.x, y: hit.y, w: hit.w, h: hit.h }, label: "편집 대상", kind: "reveal" });
+          setRevealFlash({ page: pg, box: { x: hit.x, y: hit.y, w: hit.w, h: hit.h }, label: msg.workspace.revealLabel, kind: "reveal" });
           revealTimer.current = window.setTimeout(() => setRevealFlash(null), 1800);
           return;
         }
-        toast("대상 블록을 화면에서 찾지 못했습니다 (이미 삭제됐거나 주소가 바뀌었을 수 있습니다)");
+        toast(msg.workspace.revealNotFound);
       } catch (e) {
-        if (!onTrap(e, "엔진 트랩 — 문서를 복구했습니다")) toast(`위치 보기 실패: ${e}`);
+        if (!onTrap(e, msg.workspace.trapRecovered)) toast(msg.workspace.revealFailed(String(e)));
       }
     },
-    [adapter, meta, jumpToPage, toast, onTrap],
+    [adapter, meta, jumpToPage, toast, onTrap, msg],
   );
 
   // ── issue 046: fetch the document outline (engine headings) whenever the doc / layout changes ─────────
@@ -3317,10 +3330,12 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   const selectionSummary = useMemo<string | null>(() => {
     if (selection.length === 0) return null;
     if (selection.length === 1) return selection[0].anchor.label;
-    return `${selection.length}개 선택`;
-  }, [selection]);
+    return msg.workspace.selectedCount(selection.length);
+  }, [selection, msg]);
 
-  return (
+  // issue 077: the tree is built first and PUBLISHED through the messages provider below — a wrapper that
+  // renders no DOM, so the markup (and every existing snapshot) is unchanged.
+  const tree = (
     <div className={`hw-workspace${textEditing ? " is-text-editing" : ""} ${props.className ?? ""}`}>
       {/* Screen font-face + alias (issue 022 §3): map every document font name to the selected face so
           the SVG on screen matches the exported PDF. Injected only when a font is selected. Issue 058:
@@ -3336,24 +3351,24 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       )}
       <div className="hw-toolbar">
         <span className="hw-brand">{props.brand ?? "auto-hwp"}</span>
-        <span className="hw-doc-meta">{meta ? `${meta.format.toUpperCase()} · ${meta.pages}쪽` : "문서 없음"}</span>
+        <span className="hw-doc-meta">{meta ? msg.workspace.docMeta(meta.format.toUpperCase(), meta.pages) : msg.workspace.noDocument}</span>
         <span className="hw-spacer" />
-        <button className="hw-tool" onClick={() => zoomAtCenter(1 / ZOOM_STEP)} title="축소 (⌘−)" disabled={!meta}>
+        <button className="hw-tool" onClick={() => zoomAtCenter(1 / ZOOM_STEP)} title={msg.workspace.zoomOut} disabled={!meta}>
           －
         </button>
         <button className="hw-zoom" onClick={zoomReset} title="100% (⌘0)" disabled={!meta}>
           {Math.round(zoom * 100)}%
         </button>
-        <button className="hw-tool" onClick={() => zoomAtCenter(ZOOM_STEP)} title="확대 (⌘+)" disabled={!meta}>
+        <button className="hw-tool" onClick={() => zoomAtCenter(ZOOM_STEP)} title={msg.workspace.zoomIn} disabled={!meta}>
           ＋
         </button>
         {/* 버튼과 키보드(⌘Z/⌘⇧Z)는 같은 레인. ⚠️ title 문자열은 그대로 둔다 — 테스트/e2e 가
             `getByTitle("실행취소")` 로 정확히 이 문자열을 집는다(단축키를 덧붙이면 3건이 깨진다).
             발견 가능성은 aria-keyshortcuts 로 준다(스크린리더 + 접근성 트리에만 노출). */}
-        <button className="hw-tool" onClick={undo} disabled={!meta} title="실행취소" aria-keyshortcuts="Meta+Z Control+Z">
+        <button className="hw-tool" onClick={undo} disabled={!meta} title={msg.workspace.undo} aria-keyshortcuts="Meta+Z Control+Z">
           ↶
         </button>
-        <button className="hw-tool" onClick={redo} disabled={!meta} title="다시 실행" aria-keyshortcuts="Meta+Shift+Z Control+Y">
+        <button className="hw-tool" onClick={redo} disabled={!meta} title={msg.workspace.redo} aria-keyshortcuts="Meta+Shift+Z Control+Y">
           ↷
         </button>
         {editingOn && <TableInsertButton disabled={!canEdit} onPick={(r, c) => void onInsertTable(r, c)} />}
@@ -3362,8 +3377,8 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
             re-validates the magic bytes (a spoofed extension is refused). Shown with the editing chrome. */}
         {editingOn && (
           <>
-            <button className="hw-tool" onClick={() => imageInputRef.current?.click()} disabled={!canEdit} title="이미지 삽입">
-              이미지
+            <button className="hw-tool" onClick={() => imageInputRef.current?.click()} disabled={!canEdit} title={msg.workspace.insertImageTitle}>
+              {msg.workspace.insertImage}
             </button>
             <input
               ref={imageInputRef}
@@ -3397,20 +3412,20 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
             aria-pressed={normalizeOn}
             title={
               normalizeOn
-                ? "레이아웃 정리 켜짐 — 눌러서 원본 그대로 보기 (hwpx 변환으로 벌어진 줄간격을 조여 원본에 가깝게)"
-                : "레이아웃 정리 — hwp→hwpx 변환으로 벌어진 줄간격을 원본에 가깝게 조입니다"
+                ? msg.workspace.normalizeOnTitle
+                : msg.workspace.normalizeOffTitle
             }
           >
-            {normalizeBusy ? "정리 중…" : "레이아웃 정리"}
+            {normalizeBusy ? msg.workspace.normalizeBusy : msg.workspace.normalize}
           </button>
         )}
-        <button className="hw-tool" onClick={exportHtml} disabled={!meta} title="HTML 다운로드">
+        <button className="hw-tool" onClick={exportHtml} disabled={!meta} title={msg.workspace.downloadHtml}>
           HTML
         </button>
-        <button className="hw-tool" onClick={exportHwpx} disabled={!meta} title="HWPX 다운로드 — 편집본을 한글이 여는 HWPX로 저장합니다 (.hwp 원본도 결과는 HWPX)">
+        <button className="hw-tool" onClick={exportHwpx} disabled={!meta} title={msg.workspace.downloadHwpx}>
           HWPX
         </button>
-        <button className="hw-tool hw-tool-accent" onClick={exportPdf} disabled={!meta} title="PDF 다운로드">
+        <button className="hw-tool hw-tool-accent" onClick={exportPdf} disabled={!meta} title={msg.workspace.downloadPdf}>
           PDF
         </button>
       </div>
@@ -3520,7 +3535,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
               editable doc. pointer-events:none so it never eats the drop (§함정), like the selection overlay. */}
           {dragActive && canEdit && (
             <div className="hw-drop-overlay" data-testid="hw-drop-overlay">
-              <div className="hw-drop-hint">여기에 이미지를 놓아 삽입 (PNG·JPEG)</div>
+              <div className="hw-drop-hint">{msg.workspace.dropImageHint}</div>
             </div>
           )}
           {meta ? (
@@ -3632,26 +3647,26 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                               type="button"
                               className="hw-sel-action"
                               data-testid="hw-inline-open"
-                              title="이 요소를 여기서 바로 AI로 편집"
+                              title={msg.workspace.inlineEditTitle}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 openInlineEdit();
                               }}
                             >
-                              ✨ 여기서 편집
+                              {msg.workspace.inlineEdit}
                             </button>
                           )}
                           <button
                             type="button"
                             className="hw-sel-action"
                             data-testid="hw-ai-send"
-                            title="선택을 AI에게 전달 (채팅으로 편집)"
+                            title={msg.workspace.sendToAiTitle}
                             onClick={(e) => {
                               e.stopPropagation();
                               onSendToAi();
                             }}
                           >
-                            ✨ AI에게 전달
+                            {msg.workspace.sendToAi}
                           </button>
                         </div>
                       );
@@ -3708,7 +3723,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
               </div>
             </>
           ) : (
-            <div className="hw-empty-canvas">문서를 열면 여기에 페이지가 표시됩니다.</div>
+            <div className="hw-empty-canvas">{msg.workspace.emptyCanvas}</div>
           )}
         </div>
         {/* SIDE PANEL SLOT — the workspace does not own a chat UI. It hands the host everything an
@@ -3762,7 +3777,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         if (cm.kind === "background") {
           // 바탕(비개체): 표 추가 — the SAME 027 grid picker (TableSizeGrid) the top toolbar uses.
           return (
-            <ContextMenu x={cm.x} y={cm.y} heading="표 추가" onClose={close}>
+            <ContextMenu x={cm.x} y={cm.y} heading={msg.workspace.ctxInsertTable} onClose={close}>
               <TableSizeGrid onPick={(r, c) => { close(); void onInsertTable(r, c); }} />
             </ContextMenu>
           );
@@ -3771,15 +3786,15 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         items.push({
           type: "action",
           key: "edit",
-          label: "텍스트 편집",
+          label: msg.workspace.ctxEditText,
           icon: "✎",
           onSelect: () => void (engineCaretEditing ? focusEngineCaretAt(cm.click) : openEditorAt(cm.click)),
         });
         if (cm.kind === "cell") {
           const fmtOk = !!fmtActions.fmtRange;
-          const fmtWhy = fmtOk ? undefined : "이 셀에는 서식을 적용할 수 없습니다";
-          items.push({ type: "action", key: "bold", label: editTarget?.curBold ? "굵게 해제" : "굵게", icon: "B", disabled: !fmtOk, title: fmtWhy, onSelect: fmtActions.bold });
-          items.push({ type: "action", key: "shade", label: "배경색", icon: "◧", disabled: !fmtOk, title: fmtWhy, onSelect: () => shadeInputRef.current?.click() });
+          const fmtWhy = fmtOk ? undefined : msg.workspace.formatCellUnavailable;
+          items.push({ type: "action", key: "bold", label: editTarget?.curBold ? msg.workspace.ctxBoldOff : msg.workspace.ctxBold, icon: "B", disabled: !fmtOk, title: fmtWhy, onSelect: fmtActions.bold });
+          items.push({ type: "action", key: "shade", label: msg.workspace.ctxShade, icon: "◧", disabled: !fmtOk, title: fmtWhy, onSelect: () => shadeInputRef.current?.click() });
           // issue 047: 열 너비… → the precise mm + 균등 분배 dialog (opened at the menu anchor). Needs a
           // table with ≥2 resolvable column boundaries; disabled with a reason otherwise (미지원은 조용한
           // 무시 금지). Delegates to the SAME `onColCommit` apply-verify the drag handles use.
@@ -3787,21 +3802,21 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           items.push({
             type: "action",
             key: "colwidth",
-            label: "열 너비…",
+            label: msg.workspace.ctxColumnWidth,
             icon: "↔",
             disabled: !colOk,
-            title: colOk ? undefined : "열이 2개 이상인 표에서 열 너비를 조정할 수 있습니다",
+            title: colOk ? undefined : msg.workspace.ctxColumnWidthDisabled,
             onSelect: () => setColWidthDialog({ x: cm.x, y: cm.y }),
           });
           if (cm.cell) {
             const { section, block, row, cols } = cm.cell;
             items.push({ type: "separator", key: "sep-row" });
-            items.push({ type: "action", key: "row-above", label: "위에 행 삽입", icon: "↥", onSelect: () => void onInsertRows(section, block, row, cols) });
-            items.push({ type: "action", key: "row-below", label: "아래에 행 삽입", icon: "↧", onSelect: () => void onInsertRows(section, block, row + 1, cols) });
+            items.push({ type: "action", key: "row-above", label: msg.workspace.ctxInsertRowAbove, icon: "↥", onSelect: () => void onInsertRows(section, block, row, cols) });
+            items.push({ type: "action", key: "row-below", label: msg.workspace.ctxInsertRowBelow, icon: "↧", onSelect: () => void onInsertRows(section, block, row + 1, cols) });
           }
         }
         items.push({ type: "separator", key: "sep-ai" });
-        items.push({ type: "action", key: "ai", label: "✨ AI에게 전달", disabled: !canEdit, title: canEdit ? undefined : "편집하려면 먼저 문서를 여세요", onSelect: onSendToAi });
+        items.push({ type: "action", key: "ai", label: msg.workspace.ctxSendToAi, disabled: !canEdit, title: canEdit ? undefined : msg.workspace.ctxOpenDocFirst, onSelect: onSendToAi });
         return <ContextMenu x={cm.x} y={cm.y} items={items} onClose={close} />;
       })()}
       {/* issue 047: the 열 너비 mm + 균등 분배 dialog. Its readouts (currentMm / column span) come LIVE from
@@ -3812,7 +3827,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           x={colWidthDialog.x}
           y={colWidthDialog.y}
           currentMm={colWidthTarget.currentMm}
-          columnLabel={`${colWidthTarget.col + 1}열`}
+          columnLabel={msg.table.columnLabel(colWidthTarget.col + 1)}
           equalizeCount={colWidthTarget.equalizeCount}
           onApplyMm={onApplyColMm}
           onEqualize={() => {
@@ -3838,4 +3853,6 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       {status && <div className="hw-status">{status}</div>}
     </div>
   );
+
+  return <WorkspaceMessagesContext.Provider value={msg}>{tree}</WorkspaceMessagesContext.Provider>;
 }

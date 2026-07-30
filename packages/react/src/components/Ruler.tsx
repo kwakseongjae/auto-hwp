@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { mmToPx, pxToMm, roundMm, type PageGeom, type PageMarginsMm } from "@auto-hwp/editor-core";
+import { useWorkspaceMessages } from "../i18n";
 
 export interface RulerProps {
   /** Page geometry in own-render PAGE px (from `core.session.pageGeom`). */
@@ -16,8 +17,10 @@ export interface RulerProps {
 /// the page width, and the left/right printable-margin markers in mm. When `onCommitMargins` is given,
 /// the left/right markers become drag handles; releasing one reports the FULL new margins (mm) so the
 /// host can confirm the DOCUMENT-WIDE effect before applying `SetPageMargins`. Display-only otherwise.
-/// Individually importable; presentational; Korean copy; px↔mm conversion is the core `units` util only.
+/// Individually importable; presentational; copy from the injectable catalog (issue 077 —
+/// `messages.ruler`, Korean by default); px↔mm conversion is the core `units` util only.
 export function Ruler({ geom, scale, onCommitMargins }: RulerProps) {
+  const msg = useWorkspaceMessages();
   const editable = !!onCommitMargins;
   // Live margin px (left/right) so a drag previews before commit; resets when the geom changes.
   const [ml, setMl] = useState(geom.ml);
@@ -81,19 +84,19 @@ export function Ruler({ geom, scale, onCommitMargins }: RulerProps) {
           className={`hw-ruler-margin hw-ruler-margin-l${editable ? " hw-ruler-margin-drag" : ""}`}
           data-testid="hw-ruler-margin-l"
           style={{ left: ml * scale }}
-          title={editable ? "왼쪽 여백 (드래그하여 조절 · 문서 전체 적용)" : "왼쪽 여백"}
+          title={editable ? msg.ruler.leftMarginDrag : msg.ruler.leftMargin}
           onPointerDown={onDown("l")}
         />
         <div
           className={`hw-ruler-margin hw-ruler-margin-r${editable ? " hw-ruler-margin-drag" : ""}`}
           data-testid="hw-ruler-margin-r"
           style={{ left: (geom.w - mr) * scale }}
-          title={editable ? "오른쪽 여백 (드래그하여 조절 · 문서 전체 적용)" : "오른쪽 여백"}
+          title={editable ? msg.ruler.rightMarginDrag : msg.ruler.rightMargin}
           onPointerDown={onDown("r")}
         />
       </div>
       <div className="hw-ruler-readout" data-testid="hw-ruler-readout">
-        여백 좌 {roundMm(pxToMm(ml))}mm · 우 {roundMm(pxToMm(mr))}mm · 폭 {roundMm(totalMm)}mm
+        {msg.ruler.readout(roundMm(pxToMm(ml)), roundMm(pxToMm(mr)), roundMm(totalMm))}
       </div>
     </div>
   );

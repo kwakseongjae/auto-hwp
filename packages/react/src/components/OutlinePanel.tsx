@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { EngineAdapter, OutlineItem } from "@auto-hwp/editor-core";
 import { activeOutlineIndex } from "../outline";
 import { sanitizeSvg } from "../sanitize";
+import { useWorkspaceMessages } from "../i18n";
 
 export interface OutlinePanelProps {
   /** The document outline (engine headings). When empty, the panel shows a PAGE THUMBNAIL rail (a live,
@@ -63,6 +64,7 @@ interface PageThumbProps {
 /// svg nodes inline injection would add. Memoized on its props so a scroll/hover/highlight tick elsewhere in
 /// the rail never re-rasterizes it; the object URL is revoked when superseded or on unmount (no leak).
 function PageThumbImpl({ adapter, page, refreshToken, load, active, onJump }: PageThumbProps) {
+  const msg = useWorkspaceMessages();
   const [thumb, setThumb] = useState<{ url: string; w: number; h: number } | null>(null);
   // Last RAW svg + last object URL — a 034-style compare skips re-rastering a page whose svg didn't change
   // on a refresh, and lets us revoke the SUPERSEDED blob only once the new one is ready (no img flicker).
@@ -118,7 +120,7 @@ function PageThumbImpl({ adapter, page, refreshToken, load, active, onJump }: Pa
       data-testid="hw-outline-item"
       data-page={page}
       aria-current={active ? "true" : undefined}
-      aria-label={`${page + 1}쪽`}
+      aria-label={msg.outline.pageLabel(page + 1)}
       onClick={() => onJump(page)}
     >
       <span className="hw-thumb-frame" style={{ aspectRatio: ratio }}>
@@ -129,7 +131,7 @@ function PageThumbImpl({ adapter, page, refreshToken, load, active, onJump }: Pa
           <span className="hw-thumb-skeleton" aria-hidden />
         )}
       </span>
-      <span className="hw-thumb-page">{page + 1}쪽</span>
+      <span className="hw-thumb-page">{msg.outline.pageLabel(page + 1)}</span>
     </button>
   );
 }
@@ -148,6 +150,7 @@ const PageThumb = memo(PageThumbImpl);
 /// The rail is self-contained (issue 030): its scroll/hover/load state re-renders only the rail, never the
 /// main page view.
 export function OutlinePanel(props: OutlinePanelProps) {
+  const msg = useWorkspaceMessages();
   const { items, pageCount, currentPage, collapsed, onToggleCollapse, onJump, adapter, refreshToken = 0 } = props;
 
   // The active heading = the last one whose start page is at/before the current page (pure, testable).
@@ -217,8 +220,8 @@ export function OutlinePanel(props: OutlinePanelProps) {
           className="hw-outline-expand"
           data-testid="hw-outline-toggle"
           onClick={onToggleCollapse}
-          title="문서 구조 펼치기"
-          aria-label="문서 구조 펼치기"
+          title={msg.outline.expandTitle}
+          aria-label={msg.outline.expandTitle}
           aria-expanded={false}
         >
           ☰
@@ -230,13 +233,13 @@ export function OutlinePanel(props: OutlinePanelProps) {
   return (
     <aside className="hw-outline" data-testid="hw-outline">
       <div className="hw-outline-head">
-        <span className="hw-outline-title">문서 구조</span>
+        <span className="hw-outline-title">{msg.outline.title}</span>
         <button
           className="hw-outline-collapse"
           data-testid="hw-outline-toggle"
           onClick={onToggleCollapse}
-          title="문서 구조 접기"
-          aria-label="문서 구조 접기"
+          title={msg.outline.collapseTitle}
+          aria-label={msg.outline.collapseTitle}
           aria-expanded={true}
         >
           ‹
@@ -246,7 +249,7 @@ export function OutlinePanel(props: OutlinePanelProps) {
         ref={railRef}
         className={`hw-outline-list${thumbnailMode ? " hw-outline-thumbs" : ""}`}
         data-testid="hw-outline-list"
-        aria-label="문서 구조"
+        aria-label={msg.outline.title}
       >
         {hasHeadings
           ? items.map((it, i) => (
@@ -286,7 +289,7 @@ export function OutlinePanel(props: OutlinePanelProps) {
                   aria-current={p === currentPage ? "true" : undefined}
                   onClick={() => onJump(p)}
                 >
-                  <span className="hw-outline-text">{p + 1}쪽</span>
+                  <span className="hw-outline-text">{msg.outline.pageLabel(p + 1)}</span>
                 </button>
               ))}
       </nav>

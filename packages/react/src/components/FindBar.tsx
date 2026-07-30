@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useWorkspaceMessages } from "../i18n";
 
 export interface FindBarProps {
   /** The current 찾을 내용 value (controlled by the workspace). */
@@ -43,6 +44,7 @@ export interface FindBarProps {
 /// state and forwards intent. Enter = 다음, Shift+Enter = 이전, Esc = 닫기; the "n/m" readout appears once a
 /// search has run for the current query.
 export function FindBar(props: FindBarProps) {
+  const msg = useWorkspaceMessages();
   const {
     query, replaceValue, caseSensitive, count, ordinal, busy, supported, canReplace, canLocate, focusToken,
     onQueryChange, onReplaceChange, onCaseToggle, onSearch, onNext, onPrev, onReplaceOne, onReplaceAll, onClose,
@@ -91,32 +93,32 @@ export function FindBar(props: FindBarProps) {
   };
 
   return (
-    <div className="hw-find" role="search" aria-label="찾기 및 바꾸기" data-testid="hw-find">
+    <div className="hw-find" role="search" aria-label={msg.find.label} data-testid="hw-find">
       <div className="hw-find-row">
         <input
           ref={inputRef}
           className="hw-find-input"
           data-testid="hw-find-input"
           value={query}
-          placeholder="찾을 내용"
-          aria-label="찾을 내용"
+          placeholder={msg.find.queryPlaceholder}
+          aria-label={msg.find.queryPlaceholder}
           onChange={(e) => onQueryChange(e.currentTarget.value)}
           onKeyDown={onFindKeyDown}
         />
         <span className="hw-find-count" data-testid="hw-find-count" aria-live="polite">
-          {busy ? "찾는 중…" : !searched ? "" : hasMatches ? `${ordinal}/${count}` : "결과 없음"}
+          {busy ? msg.find.searching : !searched ? "" : hasMatches ? `${ordinal}/${count}` : msg.find.noResults}
         </span>
-        <button className="hw-find-nav" data-testid="hw-find-prev" title="이전 (Shift+Enter)" disabled={!hasMatches} onClick={onPrev} aria-label="이전 일치">
+        <button className="hw-find-nav" data-testid="hw-find-prev" title={msg.find.prevTitle} disabled={!hasMatches} onClick={onPrev} aria-label={msg.find.prevLabel}>
           ↑
         </button>
-        <button className="hw-find-nav" data-testid="hw-find-next" title="다음 (Enter)" disabled={!hasMatches} onClick={onNext} aria-label="다음 일치">
+        <button className="hw-find-nav" data-testid="hw-find-next" title={msg.find.nextTitle} disabled={!hasMatches} onClick={onNext} aria-label={msg.find.nextLabel}>
           ↓
         </button>
-        <label className="hw-find-case" title="대소문자 구분">
+        <label className="hw-find-case" title={msg.find.caseSensitive}>
           <input type="checkbox" checked={caseSensitive} onChange={(e) => onCaseToggle(e.currentTarget.checked)} />
           Aa
         </label>
-        <button className="hw-find-close" data-testid="hw-find-close" title="닫기 (Esc)" onClick={onClose} aria-label="닫기">
+        <button className="hw-find-close" data-testid="hw-find-close" title={msg.find.closeTitle} onClick={onClose} aria-label={msg.find.closeLabel}>
           ✕
         </button>
       </div>
@@ -125,22 +127,22 @@ export function FindBar(props: FindBarProps) {
           className="hw-find-input"
           data-testid="hw-find-replace-input"
           value={replaceValue}
-          placeholder="바꿀 내용"
-          aria-label="바꿀 내용"
+          placeholder={msg.find.replacePlaceholder}
+          aria-label={msg.find.replacePlaceholder}
           disabled={!canReplace}
           onChange={(e) => onReplaceChange(e.currentTarget.value)}
           onKeyDown={onReplaceKeyDown}
         />
-        <button className="hw-find-btn" data-testid="hw-find-replace-one" disabled={!canReplace || !hasMatches || busy} title="문서의 첫 일치 항목을 바꿉니다" onClick={onReplaceOne}>
-          바꾸기
+        <button className="hw-find-btn" data-testid="hw-find-replace-one" disabled={!canReplace || !hasMatches || busy} title={msg.find.replaceOneTitle} onClick={onReplaceOne}>
+          {msg.find.replaceOne}
         </button>
         <button className="hw-find-btn" data-testid="hw-find-replace-all" disabled={!canReplace || !hasMatches || busy} onClick={onReplaceAll}>
-          모두 바꾸기
+          {msg.find.replaceAll}
         </button>
       </div>
-      {!supported && <p className="hw-find-note">이 문서에서는 찾기를 사용할 수 없습니다.</p>}
+      {!supported && <p className="hw-find-note">{msg.find.unsupported}</p>}
       {supported && searched && hasMatches && !canLocate && (
-        <p className="hw-find-note">일치 항목 위치 강조는 이 백엔드에서 지원되지 않습니다 (개수·이동은 동작).</p>
+        <p className="hw-find-note">{msg.find.locateUnsupported}</p>
       )}
     </div>
   );

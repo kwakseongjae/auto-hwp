@@ -1,3 +1,4 @@
+import { useWorkspaceMessages } from "../i18n";
 import type { PageBox } from "../coords";
 
 /** The preset background swatches (mirrors the desktop R7 배경색 palette / RANGE_BG). */
@@ -22,6 +23,7 @@ export interface CellShadePaletteProps {
 /// not touch the cell's text runs, so the uncommitted edit survives — see the op-bus SetTableCell note). It
 /// sits over the editor's cell rect at the same page `scale`, flipping below the cell when it's near the top.
 export function CellShadePalette({ box, scale, onPick }: CellShadePaletteProps) {
+  const msg = useWorkspaceMessages();
   const left = box.x * scale;
   const topOfCell = box.y * scale;
   // Place the bar ABOVE the cell; if there's no room (near the page top) flip it just BELOW the cell.
@@ -51,7 +53,7 @@ export function CellShadePalette({ box, scale, onPick }: CellShadePaletteProps) 
         />
       ))}
       {/* 사용자 지정 — OS color picker (continuous spectrum). */}
-      <label className="hw-cellshade-custom" title="사용자 지정 색" onMouseDown={keepFocus}>
+      <label className="hw-cellshade-custom" title={msg.table.shadeCustom} onMouseDown={keepFocus}>
         <input
           type="color"
           data-testid="hw-cell-shade-custom"
@@ -63,11 +65,11 @@ export function CellShadePalette({ box, scale, onPick }: CellShadePaletteProps) 
         type="button"
         className="hw-cellshade-clear"
         data-testid="hw-cell-shade-clear"
-        title="배경색 지움"
+        title={msg.table.shadeClearTitle}
         onMouseDown={keepFocus}
         onClick={() => onPick(null)}
       >
-        지움
+        {msg.table.shadeClear}
       </button>
     </div>
   );

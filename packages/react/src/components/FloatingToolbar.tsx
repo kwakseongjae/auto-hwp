@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import type { PageBox } from "../coords";
 import { computeFloatingPosition } from "../floatingPosition";
+import { useWorkspaceMessages } from "../i18n";
 
 /** Text alignment the toolbar can apply — maps straight onto `SetCellRangeFmt.align` (INTENT-SCHEMA §6.8,
  *  via editor-core `formatCellRange`). No new op is introduced (issue 028: surface redesign only). */
@@ -47,6 +48,7 @@ const EST_H = 38;
 /// no new op); on an unsupported selection they are DISABLED with a Korean reason tooltip (never silent).
 /// "AI에게 전달" reuses the anchor-chip + chat-focus path. Presentational + individually importable.
 export function FloatingToolbar(props: FloatingToolbarProps) {
+  const msg = useWorkspaceMessages();
   const {
     marks,
     scale,
@@ -107,12 +109,12 @@ export function FloatingToolbar(props: FloatingToolbarProps) {
           className="hw-floatbar-font"
           data-testid="hw-fmt-font"
           disabled={fmtDisabled}
-          title={fmtTitle("서체")}
+          title={fmtTitle(msg.format.fontFamily)}
           defaultValue=""
           onChange={(e) => e.target.value && onFont(e.target.value)}
         >
           <option value="" disabled>
-            서체
+            {msg.format.fontFamily}
           </option>
           {fonts.map((f) => (
             <option key={f} value={f} style={{ fontFamily: `"${f}"` }}>
@@ -131,7 +133,7 @@ export function FloatingToolbar(props: FloatingToolbarProps) {
         max={96}
         list="hw-fmt-size-presets"
         disabled={fmtDisabled}
-        title={fmtTitle("글자 크기")}
+        title={fmtTitle(msg.format.fontSize)}
         value={size}
         // onChange keeps the field controlled; the size is COMMITTED on Enter/blur so a partial number
         // never spams an Intent per keystroke.
@@ -153,41 +155,41 @@ export function FloatingToolbar(props: FloatingToolbarProps) {
       <span className="hw-floatbar-sep" aria-hidden />
 
       {/* B / I */}
-      <button className="hw-floatbar-btn" data-testid="hw-fmt-bold" disabled={fmtDisabled} title={fmtTitle("굵게")} onClick={onBold}>
-        <b>가</b>
+      <button className="hw-floatbar-btn" data-testid="hw-fmt-bold" disabled={fmtDisabled} title={fmtTitle(msg.format.bold)} onClick={onBold}>
+        <b>{msg.format.sampleGlyph}</b>
       </button>
-      <button className="hw-floatbar-btn" data-testid="hw-fmt-italic" disabled={fmtDisabled} title={fmtTitle("기울임")} onClick={onItalic}>
-        <i>가</i>
+      <button className="hw-floatbar-btn" data-testid="hw-fmt-italic" disabled={fmtDisabled} title={fmtTitle(msg.format.italic)} onClick={onItalic}>
+        <i>{msg.format.sampleGlyph}</i>
       </button>
 
       <span className="hw-floatbar-sep" aria-hidden />
 
       {/* 글자색 / 배경 / 배경 지움 */}
-      <label className="hw-floatbar-color" title={fmtTitle("글자색")}>
-        <span aria-hidden>글자색</span>
+      <label className="hw-floatbar-color" title={fmtTitle(msg.format.textColor)}>
+        <span aria-hidden>{msg.format.textColor}</span>
         <input type="color" data-testid="hw-fmt-color" disabled={fmtDisabled} defaultValue="#000000" onChange={(e) => onColor(e.target.value)} />
       </label>
-      <label className="hw-floatbar-color" title={fmtTitle("배경색")}>
-        <span aria-hidden>배경</span>
+      <label className="hw-floatbar-color" title={fmtTitle(msg.format.backgroundColor)}>
+        <span aria-hidden>{msg.format.background}</span>
         <input type="color" data-testid="hw-fmt-shade" disabled={fmtDisabled} defaultValue="#ffff00" onChange={(e) => onShade(e.target.value)} />
       </label>
-      <button className="hw-floatbar-btn" data-testid="hw-fmt-shade-clear" disabled={fmtDisabled} title={fmtTitle("배경 지움")} onClick={() => onShade(null)}>
-        배경 지움
+      <button className="hw-floatbar-btn" data-testid="hw-fmt-shade-clear" disabled={fmtDisabled} title={fmtTitle(msg.format.clearBackground)} onClick={() => onShade(null)}>
+        {msg.format.clearBackground}
       </button>
 
       <span className="hw-floatbar-sep" aria-hidden />
 
       {/* 정렬 */}
-      <button className="hw-floatbar-btn" data-testid="hw-fmt-align-left" disabled={fmtDisabled} title={fmtTitle("왼쪽 정렬")} onClick={() => onAlign("left")}>
+      <button className="hw-floatbar-btn" data-testid="hw-fmt-align-left" disabled={fmtDisabled} title={fmtTitle(msg.format.alignLeft)} onClick={() => onAlign("left")}>
         ≤
       </button>
-      <button className="hw-floatbar-btn" data-testid="hw-fmt-align-center" disabled={fmtDisabled} title={fmtTitle("가운데 정렬")} onClick={() => onAlign("center")}>
+      <button className="hw-floatbar-btn" data-testid="hw-fmt-align-center" disabled={fmtDisabled} title={fmtTitle(msg.format.alignCenter)} onClick={() => onAlign("center")}>
         ≡
       </button>
-      <button className="hw-floatbar-btn" data-testid="hw-fmt-align-right" disabled={fmtDisabled} title={fmtTitle("오른쪽 정렬")} onClick={() => onAlign("right")}>
+      <button className="hw-floatbar-btn" data-testid="hw-fmt-align-right" disabled={fmtDisabled} title={fmtTitle(msg.format.alignRight)} onClick={() => onAlign("right")}>
         ≥
       </button>
-      <button className="hw-floatbar-btn" data-testid="hw-fmt-align-justify" disabled={fmtDisabled} title={fmtTitle("양쪽 정렬")} onClick={() => onAlign("justify")}>
+      <button className="hw-floatbar-btn" data-testid="hw-fmt-align-justify" disabled={fmtDisabled} title={fmtTitle(msg.format.alignJustify)} onClick={() => onAlign("justify")}>
         ☰
       </button>
 
@@ -198,10 +200,10 @@ export function FloatingToolbar(props: FloatingToolbarProps) {
         className="hw-floatbar-ai"
         data-testid="hw-fmt-ai"
         disabled={!aiEnabled}
-        title={aiEnabled ? "선택을 AI에게 전달 (채팅으로 편집)" : "편집하려면 먼저 문서를 여세요"}
+        title={aiEnabled ? msg.floatingToolbar.aiSendTitle : msg.floatingToolbar.aiDisabledTitle}
         onClick={onSendToAi}
       >
-        ✨ AI에게 전달
+        {msg.floatingToolbar.aiSend}
       </button>
 
       {/* 아래/위 꼬리 — 선택 영역을 가리킨다 */}

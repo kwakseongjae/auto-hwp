@@ -2,6 +2,7 @@ import { useCallback, useLayoutEffect, useRef } from "react";
 import type { RunSpec } from "@auto-hwp/editor-core";
 import type { PageBox } from "../coords";
 import { runsToHtml, serializeEditor, applyLiveStyle } from "../richedit";
+import { useWorkspaceMessages } from "../i18n";
 
 /// InPlaceCellEditor — the Figma-style in-place text editor (issues 032 + 040). It sits EXACTLY over the cell
 /// rect at the cell's own font size, so entering edit mode does NOT change how the cell looks — only that it
@@ -74,6 +75,7 @@ export interface InPlaceCellEditorProps {
 }
 
 export function InPlaceCellEditor({ box, scale, initialRuns, fontSizePt, onCommit, onCancel, onCommitMove }: InPlaceCellEditorProps) {
+  const msg = useWorkspaceMessages();
   const composing = useRef(false);
   // Latched once a commit/cancel is in flight so the trailing blur (or a second Enter) can't double-fire.
   // A FAILED commit un-latches it (see `commit`) so the user can retry — the editor stays open on error.
@@ -185,7 +187,7 @@ export function InPlaceCellEditor({ box, scale, initialRuns, fontSizePt, onCommi
       suppressContentEditableWarning
       role="textbox"
       aria-multiline="true"
-      aria-label="셀 텍스트 편집"
+      aria-label={msg.table.cellEditorLabel}
       style={{ left: style.left, top: style.top, width: style.width, minHeight: style.minHeight, fontSize: style.fontSize }}
       onCompositionStart={() => (composing.current = true)}
       onCompositionEnd={() => (composing.current = false)}

@@ -27,6 +27,10 @@ export type { SelectResult, CellDir } from "./selection";
 export { EditController } from "./edit";
 export type { CellRange, CellFmt, PageMarginsMm } from "./edit";
 export { describeIntent } from "./describeIntent";
+// 077 — the headless string catalog (anchor labels + Intent preview cards). Every producer defaults to
+// `coreMessagesKoKR`; a host swaps it wholesale via `EditorCore.setMessages`.
+export { coreMessagesKoKR } from "./messages";
+export type { AnchorMessages, CoreMessages, IntentCardMessages } from "./messages";
 
 // Unit conversion (issue 027) — the SINGLE px↔mm↔ratio point the ruler + column-resize share.
 export {
