@@ -11,11 +11,14 @@ id = "77e71126e0534967932807bd012bc39a"
 [vars]
 # CORS 허용 오리진(정확히 일치, 콤마로 여러 개). Pages 프로젝트 페이지면 뒤에 경로 없이 오리진만.
 ALLOWED_ORIGIN = "https://kwakseongjae.github.io"
-MODEL = "z-ai/glm-5.2"
-# 비용 방어선: GLM 5.2 요청당 ~$0.0038 → 1200건 ≈ $4.6(<$5). KV는 eventual consistency라
-# 동시 요청의 절대 상한이 아니며, 운영 전 Durable Object 카운터로 승격한다. (Gemini Flash-Lite는 더 싸지만
-# Cloudflare Worker 출구 리전을 구글이 지역 차단 — GLM으로 전환. 모델 바꾸면 이 캡도 재계산할 것.)
-DAILY_CAP = "1200"
+MODEL = "openai/gpt-5.6-luna"
+# 비용 방어선: GPT-5.6 Luna($0.10/M 입력 · $0.60/M 출력) + 입력 위주 작업 → 요청당 ~$0.0005,
+# MAX_TOKENS 1024를 매번 다 써도 ~$0.001. 2000건 ≈ $1.0~2.1(<$5)이라 원 설계값 2000을 복원했다.
+# (GLM 5.2는 $1.19/$3.74로 요청당 ~$0.0038 — Luna가 약 1/7이라 같은 예산에서 캡을 올릴 수 있다.)
+# KV는 eventual consistency라 동시 요청의 절대 상한이 아니며, 운영 전 Durable Object 카운터로 승격한다.
+# (Gemini Flash-Lite는 더 싸지만 Cloudflare Worker 출구 리전을 구글이 지역 차단해 구글 계열은 제외.
+#  ⚠ 모델을 바꾸면 이 캡도 새 단가로 반드시 재계산할 것 — src/index.ts DEFAULT_MODEL 주석과 함께.)
+DAILY_CAP = "2000"
 PER_IP_CAP = "20"
 MAX_TOKENS = "1024"
 

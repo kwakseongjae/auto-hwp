@@ -26,7 +26,7 @@
 - **양식 일괄 작성**: 양식 1개 + 명단 N행 → 완성본 N부 zip (규칙 기반, AI 없이 동작) → [열기](https://kwakseongjae.github.io/auto-hwp/bulk) · [가이드](./docs/BULK-GUIDE.md)
 
 파일은 브라우저를 벗어나지 않습니다. 데모에서 **AI 편집을 선택할 때만** 지시문과 문서 프로필·본문 발췌·표
-문맥이 동의를 받은 뒤 Cloudflare Worker를 거쳐 OpenRouter(GLM 5.2)로 갑니다(파일 원본은 보내지 않습니다).
+문맥이 동의를 받은 뒤 Cloudflare Worker를 거쳐 OpenRouter(GPT-5.6 Luna)로 갑니다(파일 원본은 보내지 않습니다).
 데모는 현재 `.hwp`만 받습니다.
 
 ### npm — 60초

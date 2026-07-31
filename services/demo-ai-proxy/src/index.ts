@@ -8,8 +8,9 @@
 // @auto-hwp/ai-protocol로 조립하므로(서버가 프롬프트를 통제) 출력은 우리 JSON Intent 형식으로 제한되고,
 // 프롬프트 계약이 앱과 드리프트하지 않는다(wrangler가 ai-protocol을 번들).
 //
-// 비용 방어선: GLM 5.2($0.76/$2.42 per M) + 입력 위주 작업 → 요청당 ~$0.0038. DAILY_CAP를 예산에서
-// 역산해 설정한다(예: $5 / $0.0038 ≈ 1315 → 여유 두고 1200). PER_IP_CAP로 한 명이 독식 못 하게.
+// 비용 방어선: GPT-5.6 Luna($0.10/$0.60 per M) + 입력 위주 작업 → 요청당 ~$0.0005(MAX_TOKENS 1024를
+// 매번 다 써도 ~$0.001). DAILY_CAP를 예산에서 역산해 설정한다(예: $5 / $0.001 ≈ 5000 → 여유 두고 2000
+// = wrangler.toml 값). PER_IP_CAP로 한 명이 독식 못 하게. 모델을 바꾸면 캡을 새 단가로 재계산한다.
 // (Gemini Flash-Lite가 더 싸지만 Cloudflare Worker 출구 리전을 구글이 지역 차단 — DEFAULT_MODEL 주석 참조.)
 
 import { buildSystemPrompt, buildUserMessage, validateRequest, validateResponse, type Intent } from "@auto-hwp/ai-protocol";
@@ -18,15 +19,17 @@ interface Env {
   OPENROUTER_API_KEY: string; // wrangler secret
   RATELIMIT: KVNamespace; // 일일 카운터
   ALLOWED_ORIGIN: string; // 예: https://kwakseongjae.github.io (여러 개면 콤마)
-  MODEL?: string; // 기본 z-ai/glm-5.2 (DEFAULT_MODEL)
+  MODEL?: string; // 기본 openai/gpt-5.6-luna (DEFAULT_MODEL)
   DAILY_CAP?: string; // 전체 일일 요청 방어선(KV eventual consistency라 절대 상한은 아님)
   PER_IP_CAP?: string; // IP별 일일 요청 상한
   MAX_TOKENS?: string; // 출력 상한(Intent JSON은 작다)
 }
 
-// 기본 모델: GLM 5.2. Gemini Flash-Lite가 더 싸지만 Cloudflare Worker 출구 리전을 구글이 지역
-// 차단("not available in your region")해 GLM으로 전환. 모델은 wrangler.toml MODEL로 오버라이드.
-const DEFAULT_MODEL = "z-ai/glm-5.2";
+// 기본 모델: GPT-5.6 Luna(base — luna-pro 아님). 이전 GLM 5.2 대비 요청당 비용 약 1/7이라 같은
+// 예산에서 DAILY_CAP를 올릴 수 있다. Gemini Flash-Lite가 더 싸지만 Cloudflare Worker 출구 리전을
+// 구글이 지역 차단("not available in your region")해 구글 계열은 제외. 모델은 wrangler.toml MODEL로
+// 오버라이드하며, 바꾸면 거기 DAILY_CAP도 새 단가로 재계산한다.
+const DEFAULT_MODEL = "openai/gpt-5.6-luna";
 const MAX_REQUEST_BYTES = 128 * 1024;
 const MAX_UPSTREAM_TEXT_BYTES = 128 * 1024;
 const DEMO_REQUEST_LIMITS = {

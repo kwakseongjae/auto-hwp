@@ -27,7 +27,7 @@ There is no server: everything runs on the user's own machine.
 
 The file never leaves the browser. Only if you **opt into AI editing** does your instruction plus the document
 profile, body excerpt and table context go — after an explicit consent prompt — through a Cloudflare Worker
-to OpenRouter (GLM 5.2); the file itself is never uploaded. The demo takes `.hwp` only.
+to OpenRouter (GPT-5.6 Luna); the file itself is never uploaded. The demo takes `.hwp` only.
 
 ### npm — 60 seconds
 

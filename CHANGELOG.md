@@ -34,9 +34,15 @@ packages are released in lockstep.)*
 
 ## [Unreleased]
 
-0.0.4 발행 이후의 변경을 여기에 쌓는다. 현재 비어 있다.
+0.0.4 발행 이후의 변경을 여기에 쌓는다. 아래는 **공개 데모만** 해당하며 npm 패키지에는 포함되지 않는다.
 
-*(EN — Nothing yet; changes land here after 0.0.4 ships.)*
+### 변경 (Changed)
+
+- **공개 데모 AI 모델 GLM 5.2 → GPT-5.6 Luna(OpenRouter).** 요청당 비용이 ~$0.0038 → ~$0.0005로
+  약 1/7이라 일일 전체 한도를 `DAILY_CAP=1200 → 2000`으로 되돌렸다(1인 한도 20건·출력 1024토큰
+  상한은 그대로). 데모 동의 문구와 README의 전송 대상 표기도 새 모델명으로 갱신했다.
+  *(EN — public demo AI model switched to GPT-5.6 Luna on OpenRouter (~1/7 the per-request cost of
+  GLM 5.2); the demo's daily cap goes back to 2000. Demo-only — not part of the npm packages.)*
 
 ---
 

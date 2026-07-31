@@ -18,8 +18,8 @@ function env(kv: FakeKv, overrides: Record<string, unknown> = {}) {
     OPENROUTER_API_KEY: "test-only-key",
     RATELIMIT: kv,
     ALLOWED_ORIGIN: "https://kwakseongjae.github.io",
-    MODEL: "z-ai/glm-5.2",
-    DAILY_CAP: "1200",
+    MODEL: "openai/gpt-5.6-luna",
+    DAILY_CAP: "2000",
     PER_IP_CAP: "20",
     MAX_TOKENS: "1024",
     ...overrides,
@@ -127,7 +127,7 @@ describe("demo AI proxy request and cost guards", () => {
     expect((await worker.fetch(request(validBody()), env(ipFull) as never)).status).toBe(429);
     expect(upstream).not.toHaveBeenCalled();
 
-    const globalFull = fakeKv((key) => (key.startsWith("all:") ? "1200" : null));
+    const globalFull = fakeKv((key) => (key.startsWith("all:") ? "2000" : null));
     expect((await worker.fetch(request(validBody()), env(globalFull) as never)).status).toBe(429);
     expect(upstream).not.toHaveBeenCalled();
   });
@@ -157,10 +157,14 @@ describe("demo AI proxy request and cost guards", () => {
     expect(upstream).toHaveBeenCalledTimes(1);
     const init = upstream.mock.calls[0]?.[1] as RequestInit;
     const body = JSON.parse(String(init.body)) as {
+      model: string;
       provider: { zdr: boolean };
       max_tokens: number;
       messages: Array<{ content: string }>;
     };
+    // 서버가 모델을 고정한다 — 클라이언트는 모델을 고를 수 없고, 설정한 MODEL이 그대로 상류로 간다
+    // (모델을 바꾸면 wrangler.toml의 DAILY_CAP도 새 단가로 재계산해야 한다).
+    expect(body.model).toBe("openai/gpt-5.6-luna");
     expect(body.provider).toEqual({ zdr: true });
     expect(body.max_tokens).toBe(1024);
     expect(body.messages[1]?.content).not.toContain("attackerPayload");

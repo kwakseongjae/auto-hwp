@@ -3,8 +3,9 @@
 정적 데모(GitHub Pages)는 서버가 없어 OpenRouter 키를 담을 데가 없다. 이 Cloudflare Worker가 키를
 쥐고 **모델 고정 · 일일 한도 · CORS 잠금**으로 비용을 방어한다. 클라이언트는 키를 절대 보지 않는다.
 
-- 모델: `z-ai/glm-5.2`(Cloudflare 출구 리전에서 실동작 확인). 모델·단가를 바꾸면 한도도 함께 재산정한다.
-- 비용 방어선: `DAILY_CAP=1200`(전체) + `PER_IP_CAP=20`(1인). 유효한 요청만 차감한다.
+- 모델: `openai/gpt-5.6-luna`($0.10/M 입력 · $0.60/M 출력). 모델·단가를 바꾸면 한도도 함께 재산정한다.
+- 비용 방어선: `DAILY_CAP=2000`(전체) + `PER_IP_CAP=20`(1인). 유효한 요청만 차감한다.
+  요청당 ~$0.0005(출력 상한 1024토큰을 다 써도 ~$0.001)이라 하루 최대 $1.0~2.1(<$5).
 - 프롬프트는 워커가 `@auto-hwp/ai-protocol`로 조립(앱과 같은 계약) → 출력은 우리 JSON Intent로 제한.
 
 > `RATELIMIT`은 Workers KV라 **eventual consistency**이며, 동시 요청에 대한 절대 비용 상한은 아니다.
