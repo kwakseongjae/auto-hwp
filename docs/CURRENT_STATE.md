@@ -5,6 +5,13 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
+- 갱신: 2026-07-31 · Claude(오케스트레이터)+Opus 워커 — **/bulk 5단계 퍼널 재설계 라이브**
+  (f57c420, deploy success — 사용자 UX 피드백 "AI 왕복·export까지가 혼란"). 스테퍼(양식→채울 칸→
+  명단→생성·검수→내려받기, 현재만 펼침·완료=요약 칩 복귀·양식 교체 시 정직 무효화), ③ 이중 경로
+  분리(기본 붙여넣기→미리보기+매칭 칩 / "AI로 명단 정리하기" 번호 3단계 위저드 — PII 고지 이 자리로,
+  실패 정직 거부), ④→⑤ 단방향(진행률→자동 검수→하단 고정 CTA(집계=report 동수)→zip→⑤).
+  채움 로직 무변경(파서만 bulkRoster.ts 이동+동치 12테스트). vitest 96/96·e2e 6/6(신규 퍼널 스펙)·
+  testid 이동 5건 문서화. BULK-GUIDE 5단계 어휘 정합. 샘플 체험은 스테퍼 시각 전이로 퍼널 학습.
 - 갱신: 2026-07-31 · Claude(오케스트레이터)+Opus 워커 — **데모 AI 모델 GLM 5.2 → GPT-5.6 Luna
   교체·배포·실증**(워커 버전 fc416b33). OpenRouter 실측 단가 1/7(~$0.0005/건, 최악 $0.001) →
   DAILY_CAP 1200→**2000 복원**(일 $1.0~2.1 < $5). zdr:true·PER_IP 20·MAX_TOKENS 1024 불변.
