@@ -323,6 +323,10 @@
 .footer a {
   color: var(--muted);
   text-decoration: none;
+  /* 링크 = 텍스트 + lucide 아이콘 한 개 — 인라인 플렉스로 글자 중앙에 맞춘다. */
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .footer a:hover {

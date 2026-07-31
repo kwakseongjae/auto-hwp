@@ -1,5 +1,6 @@
 "use client";
 
+import { Check, Crosshair, ExternalLink, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HwpWorkspace, WasmAdapter, FONT_CATALOG, chatSidePanel, type AiRequestOptions, type Anchor, type Citation, type DocContext, type Intent, type WasmAdapterOptions } from "@auto-hwp/react";
 import { buildDocContext, createAgentEventParser, type AgentEvent } from "@auto-hwp/ai-protocol";
@@ -592,7 +593,7 @@ export default function LabWorkspace() {
         </span>
         {IS_DEMO && (
           <a className="lab-gh-link" href="https://github.com/kwakseongjae/auto-hwp" target="_blank" rel="noreferrer" title="GitHub 저장소">
-            GitHub ↗
+            GitHub <ExternalLink size={12} />
           </a>
         )}
 
@@ -822,9 +823,9 @@ export default function LabWorkspace() {
                   <div className="lab-hl" />
                   <div className="lab-bubble lab-user">“사업 개요 표 채워줘”</div>
                   <div className="lab-bubble lab-ai">
-                    <div className="h"><span className="ic">✦</span> 표 채우기 제안 <span className="loc">s0·b3 ⊙ 위치 보기</span></div>
+                    <div className="h"><span className="ic"><Sparkles size={12} /></span> 표 채우기 제안 <span className="loc"><Crosshair size={11} /> s0·b3 위치 보기</span></div>
                     <div className="b">빈 값칸 6곳을 채웠습니다 — 라벨은 건드리지 않았어요.</div>
-                    <div className="a"><span className="ok">✓ 적용</span><span className="no">되돌리기</span></div>
+                    <div className="a"><span className="ok"><Check size={12} /> 적용</span><span className="no">되돌리기</span></div>
                   </div>
                 </div>
               </div>
@@ -851,7 +852,7 @@ export default function LabWorkspace() {
               <div className="lab-hero-dev">
                 <a href={`${BASE}/bench/`} data-testid="bench-link" title="쪽수·줄바꿈·캐럿을 한컴 저장값과 대조한 수치 + 재현 커맨드">충실도 벤치마크</a>
                 <span aria-hidden>·</span>
-                <a href="https://github.com/kwakseongjae/auto-hwp" target="_blank" rel="noreferrer">GitHub ↗</a>
+                <a href="https://github.com/kwakseongjae/auto-hwp" target="_blank" rel="noreferrer">GitHub <ExternalLink size={12} /></a>
                 <span aria-hidden>·</span>
                 <a href="https://github.com/kwakseongjae/auto-hwp#readme" target="_blank" rel="noreferrer">소개(README)</a>
                 <span aria-hidden>·</span>

@@ -2,8 +2,8 @@
 
 /* ── 테마 토큰 ────────────────────────────────────────────────────────────────────────────────
    다크 스튜디오 팔레트를 커스텀 프로퍼티로 승격하고, 라이트는 같은 이름의 값만 갈아끼운다.
-   진실은 `<html data-theme>` 하나(=lib/theme.ts) — 기본값은 OS 설정이고, 부트 스크립트가 첫
-   페인트 전에 속성을 세운다. 랜딩·에디터 크롬·/bulk(인라인 style)·/bench(CSS 모듈)가 전부 이
+   진실은 `<html data-theme>` 하나(=lib/theme.ts) — 기본값은 **라이트**(OS 설정과 무관)이고,
+   부트 스크립트가 첫 페인트 전에 속성을 세운다. 랜딩·에디터 크롬·/bulk(인라인 style)·/bench(CSS 모듈)가 전부 이
    토큰만 본다. 문서 종이(--ah-paper)는 양쪽 테마에서 항상 흰색이다 — 종이는 문서의 일부다. */
 :root {
   color-scheme: dark;
@@ -169,6 +169,25 @@ body {
   flex: 1;
 }
 
+/* ── lucide 아이콘 정렬 ───────────────────────────────────────────────────────────────────────
+   앱 chrome(랜딩·/bulk·/bench·테마 토글)의 아이콘은 전부 lucide 다 — currentColor + 14~18px 라
+   글자와 같은 색·크기로 흐른다. 인라인 문맥(문장 안·flex 가 아닌 링크)에서는 vertical-align 로
+   글자 중앙에 맞추고, flex 문맥에서는 부모의 align-items 가 이겨서 이 값이 무시된다(양쪽 안전).
+   `.lucide` 클래스는 lucide-react 만 붙이므로 SDK(@auto-hwp/react) 내부 글리프는 여기 안 걸린다. */
+svg.lucide {
+  vertical-align: -0.16em;
+  flex: none;
+}
+/* 텍스트 + 아이콘을 함께 담는 앱 소유 인라인 요소들(버튼이 아니라 링크/칩이라 flex 가 아니었다). */
+.lab-gh-link,
+.lab-hero-dev a,
+.lab-ai .loc,
+.lab-ai .a span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 /* ── 테마 토글 ────────────────────────────────────────────────────────────────────────────────
    랜딩·에디터 헤더·/bulk·/bench 가 공유하는 하나의 버튼. 마크업은 두 아이콘을 다 렌더하고
    **어느 쪽을 보일지는 CSS 가 고른다**(components/ThemeToggle.tsx 참고 — 정적 export 하이드레이션
@@ -195,6 +214,9 @@ body {
   border-color: var(--ah-accent-line);
   background: var(--ah-accent-wash);
 }
+.ah-theme-ic {
+  display: inline-flex;
+}
 .ah-theme-ic-moon {
   display: none;
 }
@@ -202,7 +224,7 @@ body {
   display: none;
 }
 :root[data-theme="light"] .ah-theme-ic-moon {
-  display: inline;
+  display: inline-flex;
 }
 /* 랜딩엔 헤더가 없다 — 토글만 우상단에 띄운다(히어로 그리드 무간섭). */
 .lab-theme-float {

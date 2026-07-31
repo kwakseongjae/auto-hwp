@@ -1,9 +1,9 @@
 // 데모 전역 테마(라이트/다크) — 단일 소스.
 //
 // 규칙:
-//  ① 기본값은 OS 설정(prefers-color-scheme)이다. 사용자가 토글을 누른 뒤에만 localStorage 에
-//     명시 선택이 남고, 그때부터는 OS 설정보다 명시 선택이 이긴다(다시 OS 를 따르게 하는 UI 는 없다 —
-//     토글은 두 값 사이만 오간다).
+//  ① 기본값은 **라이트**다. 저장된 명시 선택이 있으면 그것이 이기고, 없으면 OS 가 다크여도 라이트로
+//     연다(문서/제품 사이트 관례 — 첫 방문의 첫인상을 OS 설정이 좌우하지 않게 한다). 사용자가 토글을
+//     누른 뒤에만 localStorage 에 선택이 남고, 그때부터는 그 선택만 본다(OS 는 더 이상 보지 않는다).
 //  ② 진실은 `<html data-theme>` 하나뿐이다. CSS 는 `:root[data-theme="light"]` 로만 분기하고,
 //     React 는 이 속성을 읽어(마운트 후) 자기 상태를 맞춘다 — 반대 방향(React → 속성)은 setTheme 뿐이다.
 //  ③ 첫 페인트 전에 속성이 서 있어야 깜빡임(FOUC)이 없다 → THEME_BOOT_SCRIPT 를 <body> 첫 줄에서
@@ -15,19 +15,16 @@ export const THEME_STORAGE_KEY = "auto-hwp:theme";
 /** 같은 탭 안에서 토글 → 구독자(React)로 알리는 커스텀 이벤트. */
 export const THEME_EVENT = "auto-hwp:themechange";
 
-/** 알 수 없는 값(옛 키·손상)은 "선택 없음"으로 접는다 — OS 설정으로 폴백한다. */
+/** 저장된 선택이 없을 때의 화면 — OS 설정과 무관하게 라이트. */
+export const DEFAULT_THEME: Theme = "light";
+
+/** 알 수 없는 값(옛 키·손상)은 "선택 없음"으로 접는다 — 기본값(라이트)으로 폴백한다. */
 export function normalizeTheme(value: unknown): Theme | null {
   return value === "light" || value === "dark" ? value : null;
 }
 
 export function otherTheme(theme: Theme): Theme {
   return theme === "light" ? "dark" : "light";
-}
-
-/** OS 설정. 매체 질의를 쓸 수 없으면 브랜드 기본(다크). */
-export function systemTheme(): Theme {
-  if (typeof window === "undefined" || !window.matchMedia) return "dark";
-  return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
 }
 
 /** 사용자가 명시 선택한 값(없으면 null). 시크릿 모드/저장 거부는 null 로 접는다. */
@@ -42,11 +39,11 @@ export function storedTheme(): Theme | null {
 
 /** 지금 화면에 적용된 테마 — `<html data-theme>` 이 정본. */
 export function currentTheme(): Theme {
-  if (typeof document === "undefined") return "dark";
-  return normalizeTheme(document.documentElement.dataset.theme) ?? storedTheme() ?? systemTheme();
+  if (typeof document === "undefined") return DEFAULT_THEME;
+  return normalizeTheme(document.documentElement.dataset.theme) ?? storedTheme() ?? DEFAULT_THEME;
 }
 
-/** 속성만 세운다(저장/알림 없음) — OS 변경 반영처럼 "명시 선택이 아닌" 경로가 쓴다. */
+/** 속성만 세운다(저장/알림 없음) — 다른 탭의 저장 변화를 되비추는 경로가 쓴다. */
 export function applyTheme(theme: Theme): void {
   if (typeof document === "undefined") return;
   document.documentElement.dataset.theme = theme;
@@ -68,30 +65,22 @@ export function toggleTheme(): Theme {
   return setTheme(otherTheme(currentTheme()));
 }
 
-/** 테마 변경 구독: 같은 탭 토글 + 다른 탭 저장(storage) + (명시 선택이 없을 때만) OS 설정 변경. */
+/** 테마 변경 구독: 같은 탭 토글 + 다른 탭 저장(storage). OS 설정은 구독하지 않는다(기본값이 고정이므로). */
 export function subscribeTheme(onChange: (theme: Theme) => void): () => void {
   const emit = () => onChange(currentTheme());
   const onEvent = () => emit();
   const onStorage = (e: StorageEvent) => {
     if (e.key !== null && e.key !== THEME_STORAGE_KEY) return;
-    applyTheme(normalizeTheme(e.newValue) ?? systemTheme());
-    emit();
-  };
-  const mq = window.matchMedia?.("(prefers-color-scheme: light)");
-  const onSystem = () => {
-    if (storedTheme()) return; // 명시 선택이 OS 를 이긴다
-    applyTheme(systemTheme());
+    applyTheme(normalizeTheme(e.newValue) ?? DEFAULT_THEME);
     emit();
   };
   window.addEventListener(THEME_EVENT, onEvent);
   window.addEventListener("storage", onStorage);
-  mq?.addEventListener?.("change", onSystem);
   return () => {
     window.removeEventListener(THEME_EVENT, onEvent);
     window.removeEventListener("storage", onStorage);
-    mq?.removeEventListener?.("change", onSystem);
   };
 }
 
 /** <body> 첫 줄에서 동기 실행되는 부트 스크립트(첫 페인트 전 data-theme 확정 — FOUC 0). */
-export const THEME_BOOT_SCRIPT = `(function(){try{var s=localStorage.getItem(${JSON.stringify(THEME_STORAGE_KEY)});var t=(s==="light"||s==="dark")?s:(window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark");document.documentElement.dataset.theme=t;}catch(e){document.documentElement.dataset.theme="dark";}})();`;
+export const THEME_BOOT_SCRIPT = `(function(){try{var s=localStorage.getItem(${JSON.stringify(THEME_STORAGE_KEY)});document.documentElement.dataset.theme=(s==="light"||s==="dark")?s:${JSON.stringify(DEFAULT_THEME)};}catch(e){document.documentElement.dataset.theme=${JSON.stringify(DEFAULT_THEME)};}})();`;

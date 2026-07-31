@@ -41,7 +41,7 @@ test("073: 업로드→스튜디오(필드·규격 저장)→명단→생성→�
   await page.locator('[data-testid="bulk-generate"]').click();
   await expect(page.locator('[data-testid="bulk-idx"]')).toContainText("1 / 2", { timeout: 120_000 });
   await expect(page.locator('[data-testid="bulk-values"]')).toContainText("선임연구원");
-  await page.getByText("다음 ›").click();
+  await page.getByRole("button", { name: "다음", exact: true }).click(); // 캐러셀 "다음 ›" → "다음 <ChevronRight/>"
   await expect(page.locator('[data-testid="bulk-idx"]')).toContainText("2 / 2");
 
   // zip 다운로드(개별 hwpx + report.json)

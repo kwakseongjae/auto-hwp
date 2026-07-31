@@ -1,7 +1,8 @@
 "use client";
 
+import { Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
-import { currentTheme, subscribeTheme, toggleTheme, type Theme } from "@/lib/theme";
+import { currentTheme, DEFAULT_THEME, subscribeTheme, toggleTheme, type Theme } from "@/lib/theme";
 
 /// 화면 테마 토글 — 랜딩/에디터 헤더/일괄 작성/벤치가 공유하는 하나의 버튼.
 ///
@@ -19,21 +20,21 @@ export function ThemeToggle({ className }: { className?: string }) {
       onClick={() => toggleTheme()}
     >
       <span className="ah-theme-ic ah-theme-ic-sun" aria-hidden>
-        ☀
+        <Sun size={15} strokeWidth={1.9} />
       </span>
       <span className="ah-theme-ic ah-theme-ic-moon" aria-hidden>
-        ☾
+        <Moon size={15} strokeWidth={1.9} />
       </span>
     </button>
   );
 }
 
 /// 현재 테마를 React 상태로 읽는다(SDK className 분기 등 CSS 로 못 푸는 곳 전용).
-/// 첫 렌더는 "dark"(브랜드 기본)에서 시작하고 마운트 직후 실제 `<html data-theme>` 로 맞춘다 —
+/// 첫 렌더는 DEFAULT_THEME(라이트)에서 시작하고 마운트 직후 실제 `<html data-theme>` 로 맞춘다 —
 /// ssr:false 로 로드되는 곳(LabWorkspace)에서는 그 첫 렌더조차 브라우저에서 일어나므로
 /// currentTheme() 이 바로 정확하다.
 export function useTheme(): Theme {
-  const [theme, setThemeState] = useState<Theme>(() => (typeof document === "undefined" ? "dark" : currentTheme()));
+  const [theme, setThemeState] = useState<Theme>(() => (typeof document === "undefined" ? DEFAULT_THEME : currentTheme()));
   useEffect(() => {
     setThemeState(currentTheme());
     return subscribeTheme(setThemeState);

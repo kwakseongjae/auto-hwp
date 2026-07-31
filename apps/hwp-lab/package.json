@@ -24,6 +24,7 @@
     "@auto-hwp/editor-core": "file:../../packages/editor-core",
     "@auto-hwp/engine": "file:../../packages/engine",
     "@auto-hwp/react": "file:../../packages/react",
+    "lucide-react": "^1.28.0",
     "next": "15.5.22",
     "react": "18.3.1",
     "react-dom": "18.3.1"

@@ -1,3 +1,4 @@
+import { ArrowLeft, ExternalLink } from "lucide-react";
 import styles from "./bench.module.css";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
@@ -350,18 +351,20 @@ scripts/verify-local.sh --full   # + wasm 재빌드 · 캐럿 교차검증 · JS
         </section>
 
         <div className={styles.footer}>
-          <a href={`${BASE}/`}>← 데모로 돌아가기</a>
+          <a href={`${BASE}/`}>
+            <ArrowLeft size={13} /> 데모로 돌아가기
+          </a>
           <span aria-hidden>·</span>
           <a href={`${REPO}/blob/main/docs/BENCHMARK.md`} target="_blank" rel="noreferrer">
-            방법론 전문 (BENCHMARK.md) ↗
+            방법론 전문 (BENCHMARK.md) <ExternalLink size={12} />
           </a>
           <span aria-hidden>·</span>
           <a href={`${REPO}/blob/main/docs/CLI-GUIDE.md`} target="_blank" rel="noreferrer">
-            CLI 가이드 ↗
+            CLI 가이드 <ExternalLink size={12} />
           </a>
           <span aria-hidden>·</span>
           <a href={REPO} target="_blank" rel="noreferrer">
-            GitHub ↗
+            GitHub <ExternalLink size={12} />
           </a>
         </div>
       </div>

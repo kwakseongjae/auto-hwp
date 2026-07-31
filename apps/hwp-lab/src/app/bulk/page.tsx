@@ -12,7 +12,13 @@
 // (칩 클릭 = 복귀, 이후 단계 상태는 보존). 바뀐 것은 **뷰 배치뿐** — 인스펙션·채움·검증·report
 // 계약(bulkFill/bulkEngine/bulkLane/워커 경로)은 한 줄도 건드리지 않았다. 명단 파서만 순수 로직이라
 // src/lib/bulkRoster.ts 로 옮겨 테스트를 붙였다(동치는 bulkRoster.test.ts 가 잠근다).
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+// 아이콘은 전부 lucide(currentColor · 14~18px) — 앱 chrome 전용이다. SDK(@auto-hwp/react) 안의
+// 글리프는 SDK 소유라 여기서 건드리지 않는다. 정렬 규칙은 globals.css 의 `svg.lucide`.
+import {
+  AlertTriangle, ArrowLeft, ArrowRight, ArrowUpToLine, Bot, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp,
+  Clipboard, Download, FileUp, FolderOpen, Pencil, Play, RotateCcw, X, Zap,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { HwpDoc, initEngine, sanitizeSvg } from "@auto-hwp/engine";
 import { applyDemoSpec, buildDemoRoster, DEMO_TEMPLATE, diagnoseKeys, rosterColumns, unmatchedMessage, unmatchedReasons } from "@/lib/bulkFill";
 import { parseRoster, readRoster, ROSTER_FORMAT_LABEL } from "@/lib/bulkRoster";
@@ -730,10 +736,10 @@ export default function BulkFillPage() {
   const stepDone = (n: number) => (n === 1 ? !!tpl : n === 2 ? activeFields.length > 0 : n === 3 ? rosterView.rows.length > 0 : n === 4 ? results.length > 0 : downloaded);
   const stepOpen = (n: number) => (n === step ? true : n === 1 ? true : n === 2 ? !!tpl : n === 3 ? !!tpl && activeFields.length > 0 : n === 4 ? results.length > 0 : downloaded);
   /** 접힌 단계가 스테퍼에서 대신 말해 주는 요약("양식: 이름.hwpx"·"필드 N개"·"명단 N행 ✓"). */
-  const stepSummary = (n: number): string | null => {
+  const stepSummary = (n: number): ReactNode => {
     if (n === 1) return tpl ? tpl.name : null;
     if (n === 2) return activeFields.length ? `필드 ${activeFields.length}개` : null;
-    if (n === 3) return rosterView.rows.length ? `${rosterView.rows.length}행 ✓` : null;
+    if (n === 3) return rosterView.rows.length ? <>{rosterView.rows.length}행 <Check size={11} /></> : null;
     if (n === 4) return results.length ? `${createdCount}부${failedCount ? ` · 실패 ${failedCount}` : ""}` : null;
     return downloaded ? "zip 받음" : null;
   };
@@ -780,7 +786,7 @@ export default function BulkFillPage() {
     <div className="bulk-root" data-testid="bulk-root" onDragOver={(e) => e.preventDefault()} onDrop={(e) => e.preventDefault()}>
       <header className="bulk-head">
         <div className="bulk-head-in">
-          <a href={`${BASE}/`} className="bulk-back">←</a>
+          <a href={`${BASE}/`} className="bulk-back" aria-label="데모 홈으로"><ArrowLeft size={17} /></a>
           <span className="bulk-logo">오토한글 <b>양식 일괄 작성</b></span>
           <span className="bulk-sub">양식 하나 + 명단 → 사람 수만큼 완성본 zip</span>
           <span className="bulk-badge">결정론 · LLM 0콜 · 100% 로컬</span>
@@ -797,7 +803,7 @@ export default function BulkFillPage() {
             const summary = stepSummary(s.n);
             return (
               <button key={s.n} type="button" className={`bulk-stepitem ${state}`} data-testid={`bulk-step-${s.n}`} aria-current={step === s.n ? "step" : undefined} disabled={!open || !!busy} onClick={() => goStep(s.n)} title={open ? `${s.n}단계로` : "이전 단계를 먼저 마쳐 주세요"}>
-                <span className="dot">{done && step !== s.n ? "✓" : s.n}</span>
+                <span className="dot">{done && step !== s.n ? <Check size={13} strokeWidth={2.6} /> : s.n}</span>
                 <span className="txt">
                   <b>{s.t}</b>
                   <small>{summary ?? s.hint}</small>
@@ -825,7 +831,7 @@ export default function BulkFillPage() {
                   <div className="bulk-trust">
                     {STEPS.map((s, i) => (
                       <span key={s.n} className="bulk-trust-item">
-                        {i > 0 && <i aria-hidden>→</i>}
+                        {i > 0 && <ChevronRight size={12} aria-hidden />}
                         <b>{String(s.n).padStart(2, "0")}</b> {s.t}
                       </span>
                     ))}
@@ -855,7 +861,7 @@ export default function BulkFillPage() {
                 onDragEnter={(e) => { e.preventDefault(); setDragOver(true); }}
                 onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false); }}
                 onDrop={onDropTemplate}>
-                <span className="bulk-upload-icon">{tpl ? "✓" : "↑"}</span>
+                <span className="bulk-upload-icon">{tpl ? <Check size={24} /> : <FileUp size={22} />}</span>
                 <span className="bulk-upload-copy">
                   <b>{tpl ? `${tpl.name} · ${tpl.pages}쪽` : dragOver ? "여기에 놓으세요" : "양식 파일을 끌어다 놓거나 선택하세요"}</b>
                   <small>{tpl ? "다른 파일로 바꾸거나 여기로 끌어다 놓기 — 바꾸면 이전 생성 결과는 무효가 됩니다" : ".hwp 또는 .hwpx · 파일은 서버로 업로드되지 않습니다"}</small>
@@ -866,25 +872,25 @@ export default function BulkFillPage() {
               {!tpl && (
                 <div className="bulk-sample-row">
                   <span>양식 파일이 없나요?</span>
-                  <button className="bulk-btn sm" data-testid="bulk-sample" disabled={!!busy} onClick={() => void onSample()}>▶ 샘플로 체험</button>
+                  <button className="bulk-btn sm" data-testid="bulk-sample" disabled={!!busy} onClick={() => void onSample()}><Play size={12} /> 샘플로 체험</button>
                   <small>{DEMO_TEMPLATE.label} + 데모 명단 3명으로 ①→②→③까지 대신 밟아 드립니다</small>
                 </div>
               )}
               {busy && <span className="bulk-busy">{busy}</span>}
               {tpl && (fmtNoteIsHwp ? (
                 <div className="bulk-fmtnote warn" data-testid="bulk-fmt-note">
-                  ⚠ <b>.hwp(바이너리) 양식</b> — 산출물은 HWPX <em>변환본</em>이라 쪽 나눔·표 너비 등 서식이 원본과 달라질 수 있습니다.
+                  <AlertTriangle size={14} /> <b>.hwp(바이너리) 양식</b> — 산출물은 HWPX <em>변환본</em>이라 쪽 나눔·표 너비 등 서식이 원본과 달라질 수 있습니다.
                   원본 서식을 그대로 보존하려면 <b>한글에서 이 양식을 &quot;.hwpx로 저장&quot; 한 파일</b>을 업로드하세요 — HWPX 양식은
                   편집하지 않은 영역이 <b>바이트 단위로 보존</b>됩니다. (.hwp로 되돌리기: 산출물을 한글에서 열어 .hwp로 저장)
                 </div>
               ) : (
                 <div className="bulk-fmtnote ok" data-testid="bulk-fmt-note">
-                  ✓ <b>HWPX 양식</b> — 편집하지 않은 영역은 바이트 단위로 그대로 보존됩니다(서식 무손실). 산출물도 .hwpx입니다.
+                  <Check size={14} /> <b>HWPX 양식</b> — 편집하지 않은 영역은 바이트 단위로 그대로 보존됩니다(서식 무손실). 산출물도 .hwpx입니다.
                 </div>
               ))}
               {tpl && (
                 <div className="bulk-stepnav">
-                  <button className="bulk-btn accent" data-testid="bulk-next" onClick={() => setStep(2)}>다음: 채울 칸 지정 →</button>
+                  <button className="bulk-btn accent" data-testid="bulk-next" onClick={() => setStep(2)}>다음: 채울 칸 지정 <ArrowRight size={15} /></button>
                 </div>
               )}
             </section>
@@ -900,9 +906,9 @@ export default function BulkFillPage() {
                 <div className="bulk-studio" data-testid="bulk-studio">
                   <div className="bulk-studio-doc">
                     <div className="bulk-nav">
-                      <button onClick={() => setStudioPage((p) => Math.max(0, p - 1))} disabled={studioPage === 0}>‹</button>
+                      <button onClick={() => setStudioPage((p) => Math.max(0, p - 1))} disabled={studioPage === 0} aria-label="이전 쪽"><ChevronLeft size={16} /></button>
                       <span className="pg">{studioPage + 1} <em>/ {tpl.pages}</em></span>
-                      <button onClick={() => setStudioPage((p) => Math.min(tpl.pages - 1, p + 1))} disabled={studioPage === tpl.pages - 1}>›</button>
+                      <button onClick={() => setStudioPage((p) => Math.min(tpl.pages - 1, p + 1))} disabled={studioPage === tpl.pages - 1} aria-label="다음 쪽"><ChevronRight size={16} /></button>
                       <span className="bulk-hint">셀에 마우스를 올리면 미리보기 · 클릭 = 지정/선택</span>
                     </div>
                     <div className="bulk-pagewrap clickable" onClick={onStudioClick} onMouseMove={onStudioMove} onMouseLeave={() => hoverRef.current && (hoverRef.current.style.opacity = "0")}>
@@ -935,10 +941,10 @@ export default function BulkFillPage() {
                               <input type="checkbox" checked={f.use} onClick={(e) => e.stopPropagation()} onChange={(e) => patchField(f.id, { use: e.target.checked })} title="이 영역 사용" />
                               <span className="editwrap" onClick={(e) => e.stopPropagation()}>
                                 <input className="key" value={f.key} onChange={(e) => patchField(f.id, { key: e.target.value })} spellCheck={false} placeholder="필드 이름" title="필드 이름(명단 헤더와 매칭) — 클릭해 수정" />
-                                <span className="pen">✎</span>
+                                <span className="pen"><Pencil size={11} /></span>
                               </span>
-                              {f.ambiguous > 0 && <span className="warn" title={`같은 라벨이 ${f.ambiguous + 1}곳 — 문서에서 위치를 확인하세요`}>⚠</span>}
-                              <button className="del" onClick={(e) => { e.stopPropagation(); setFields((fs) => fs.filter((x) => x.id !== f.id)); }} title="영역 삭제">✕</button>
+                              {f.ambiguous > 0 && <span className="warn" title={`같은 라벨이 ${f.ambiguous + 1}곳 — 문서에서 위치를 확인하세요`}><AlertTriangle size={13} /></span>}
+                              <button className="del" onClick={(e) => { e.stopPropagation(); setFields((fs) => fs.filter((x) => x.id !== f.id)); }} title="영역 삭제" aria-label="영역 삭제"><X size={14} /></button>
                             </div>
                             <div className="row2">
                               <select value={f.specType} onClick={(e) => e.stopPropagation()} onChange={(e) => patchField(f.id, { specType: e.target.value })} title="형식 규정 — 위반 시 검수에 보고">
@@ -962,9 +968,9 @@ export default function BulkFillPage() {
               <div className="bulk-nopreview">양식 페이지를 그리지 못했습니다 — ①단계에서 파일을 다시 열어 보세요.</div>
             )}
             <div className="bulk-stepnav">
-              <button className="bulk-btn ghost" onClick={() => setStep(1)}>← 양식 바꾸기</button>
+              <button className="bulk-btn ghost" onClick={() => setStep(1)}><ArrowLeft size={15} /> 양식 바꾸기</button>
               <button className="bulk-btn accent" data-testid="bulk-next" disabled={activeFields.length === 0} onClick={() => setStep(3)}>
-                다음: 명단 붙여넣기 → {activeFields.length > 0 && <em className="cnt">필드 {activeFields.length}개</em>}
+                다음: 명단 붙여넣기 <ArrowRight size={15} /> {activeFields.length > 0 && <em className="cnt">필드 {activeFields.length}개</em>}
               </button>
               {activeFields.length === 0 && <span className="bulk-hint">채울 칸을 하나 이상 지정해야 다음으로 갑니다</span>}
             </div>
@@ -980,7 +986,7 @@ export default function BulkFillPage() {
               <span className="bulk-hint">엑셀 표를 복사해 그대로 붙여넣어도 되고(탭 구분), CSV·JSON·“키: 값” 블록도 자동으로 알아봅니다.</span>
               <span className="spacer" />
               <button className="bulk-btn sm ghost" data-testid="bulk-roster-template" onClick={() => { setRosterText(buildRosterTemplate(activeFields)); setNotice(null); }}>형식 예시 넣기</button>
-              <label className="bulk-btn sm ghost">📂 파일 열기<input type="file" accept=".csv,.txt,.tsv,.json" hidden data-testid="bulk-roster-file" onChange={(e) => { const f = e.target.files?.[0]; if (f) void readTextFile(f).then(setRosterText).catch((err) => setError(`명단 파일 읽기 실패: ${err}`)); }} /></label>
+              <label className="bulk-btn sm ghost"><FolderOpen size={13} /> 파일 열기<input type="file" accept=".csv,.txt,.tsv,.json" hidden data-testid="bulk-roster-file" onChange={(e) => { const f = e.target.files?.[0]; if (f) void readTextFile(f).then(setRosterText).catch((err) => setError(`명단 파일 읽기 실패: ${err}`)); }} /></label>
             </div>
 
             <textarea className="bulk-roster" data-testid="bulk-roster" value={rosterText} onChange={(e) => setRosterText(e.target.value)} rows={9} spellCheck={false}
@@ -989,7 +995,7 @@ export default function BulkFillPage() {
             {/* 읽은 결과를 즉시 되비춘다 — 무엇이 몇 명으로 읽혔는지 생성 전에 눈으로 확인. */}
             {rosterView.error && (
               <div className="bulk-fmtnote warn" data-testid="bulk-roster-error">
-                ⚠ <b>명단을 읽지 못했습니다</b> — {rosterView.error}
+                <AlertTriangle size={14} /> <b>명단을 읽지 못했습니다</b> — {rosterView.error}
               </div>
             )}
             {rosterView.rows.length > 0 && (
@@ -1005,7 +1011,7 @@ export default function BulkFillPage() {
                       <tr>
                         <th className="n">#</th>
                         {rosterView.columns.map((c) => (
-                          <th key={c} className={activeKeys.includes(c) ? "ok" : "extra"} title={activeKeys.includes(c) ? "②의 채울 칸과 이름이 같습니다" : "어느 칸에도 들어가지 않습니다"}>{c}{activeKeys.includes(c) ? " ✓" : " ✕"}</th>
+                          <th key={c} className={activeKeys.includes(c) ? "ok" : "extra"} title={activeKeys.includes(c) ? "②의 채울 칸과 이름이 같습니다" : "어느 칸에도 들어가지 않습니다"}>{c} {activeKeys.includes(c) ? <Check size={11} /> : <X size={11} />}</th>
                         ))}
                       </tr>
                     </thead>
@@ -1029,24 +1035,24 @@ export default function BulkFillPage() {
                 const state = keyMatch ? (keyMatch.matched.includes(f.key) ? " ok" : " miss") : "";
                 return (
                   <code key={f.id} className={`bulk-keychip${state}`} title={state === " ok" ? "명단에 같은 이름의 열이 있습니다" : state === " miss" ? "명단에 같은 이름의 열이 없습니다 — 이 영역은 빈칸으로 남습니다" : undefined}>
-                    {f.key}{f.required ? " *" : ""}{state === " ok" ? " ✓" : state === " miss" ? " ✕" : ""}
+                    {f.key}{f.required ? " *" : ""}{state === " ok" ? <Check size={11} /> : state === " miss" ? <X size={11} /> : null}
                   </code>
                 );
               })}
               {keyMatch?.unmatchedColumns.map((c) => (
-                <code key={`x-${c}`} className="bulk-keychip extra" title="명단에만 있는 열 — 어느 영역에도 들어가지 않습니다">{c} ✕</code>
+                <code key={`x-${c}`} className="bulk-keychip extra" title="명단에만 있는 열 — 어느 영역에도 들어가지 않습니다">{c} <X size={11} /></code>
               ))}
             </div>
 
             {/* 보조 경로 — 기본(붙여넣기)을 밀어내지 않게 접어 두고, 열면 번호 붙은 3단계로 안내한다. */}
             <div className={`bulk-ai${aiOpen ? " open" : ""}`}>
               <button className="bulk-ai-head" data-testid="bulk-ai-toggle" aria-expanded={aiOpen} onClick={() => setAiOpen((o) => !o)}>
-                <span className="ico">🤖</span>
+                <span className="ico"><Bot size={17} /></span>
                 <span className="txt">
                   <b>AI로 명단 정리하기</b>
                   <small>원본이 엑셀·메모·기존 문서로 제각각일 때 — 외부 AI에게 형식만 맞춰 달라고 시키는 3단계(선택)</small>
                 </span>
-                <span className="caret" aria-hidden>{aiOpen ? "▲" : "▼"}</span>
+                <span className="caret" aria-hidden>{aiOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
               </button>
               {aiOpen && (
                 <div className="bulk-ai-body" data-testid="bulk-ai-wizard">
@@ -1056,10 +1062,10 @@ export default function BulkFillPage() {
                       <div className="c">
                         <b>프롬프트 복사</b>
                         <p>②에서 정한 칸 이름·형식이 그대로 담긴 지시문을 만듭니다.</p>
-                        <button className="bulk-btn sm" data-testid="bulk-ai-prompt" onClick={copyAiPrompt}>📋 AI 프롬프트 복사</button>
+                        <button className="bulk-btn sm" data-testid="bulk-ai-prompt" onClick={copyAiPrompt}><Clipboard size={13} /> AI 프롬프트 복사</button>
                         {aiPrompt && <textarea className="bulk-ai-prompt-text" data-testid="bulk-ai-prompt-text" readOnly rows={6} value={aiPrompt} onFocus={(e) => e.currentTarget.select()} />}
                         {/* 079 선행 고지: 이 경로만 유일하게 브라우저 밖으로 나간다 — 채움·검증은 계속 로컬. */}
-                        <div className="bulk-pii" data-testid="bulk-pii-note">⚠ 이 방법을 쓰면 <b>명단의 개인정보가 외부 AI 서비스(ChatGPT 등)로 전송</b>됩니다 — 양식·채움·검증은 그대로 브라우저 안에서만 처리됩니다.</div>
+                        <div className="bulk-pii" data-testid="bulk-pii-note"><AlertTriangle size={13} /> 이 방법을 쓰면 <b>명단의 개인정보가 외부 AI 서비스(ChatGPT 등)로 전송</b>됩니다 — 양식·채움·검증은 그대로 브라우저 안에서만 처리됩니다.</div>
                       </div>
                     </li>
                     <li>
@@ -1076,8 +1082,8 @@ export default function BulkFillPage() {
                         <b>결과 붙여넣기</b>
                         <p>여기 붙여넣으면 형식을 먼저 확인하고 위 명단 칸으로 합칩니다 — 이후는 붙여넣기 경로와 완전히 같습니다.</p>
                         <textarea className="bulk-ai-paste" data-testid="bulk-ai-result" rows={5} spellCheck={false} value={aiPaste} onChange={(e) => { setAiPaste(e.target.value); setAiError(null); }} placeholder="AI가 준 결과를 그대로 붙여넣으세요" />
-                        <button className="bulk-btn sm" data-testid="bulk-ai-apply" disabled={!aiPaste.trim()} onClick={applyAiPaste}>↑ 명단으로 넣기</button>
-                        {aiError && <div className="bulk-fmtnote warn" data-testid="bulk-ai-error">⚠ <b>명단으로 읽지 못했습니다</b> — {aiError}</div>}
+                        <button className="bulk-btn sm" data-testid="bulk-ai-apply" disabled={!aiPaste.trim()} onClick={applyAiPaste}><ArrowUpToLine size={13} /> 명단으로 넣기</button>
+                        {aiError && <div className="bulk-fmtnote warn" data-testid="bulk-ai-error"><AlertTriangle size={14} /> <b>명단으로 읽지 못했습니다</b> — {aiError}</div>}
                       </div>
                     </li>
                   </ol>
@@ -1086,9 +1092,9 @@ export default function BulkFillPage() {
             </div>
 
             <div className="bulk-stepnav">
-              <button className="bulk-btn ghost" onClick={() => setStep(2)}>← 채울 칸</button>
+              <button className="bulk-btn ghost" onClick={() => setStep(2)}><ArrowLeft size={15} /> 채울 칸</button>
               <button className="bulk-btn accent big" data-testid="bulk-generate" disabled={!!busy || activeFields.length === 0 || !rosterView.rows.length} onClick={() => void generate()}>
-                {busy ? `${busy}${progress ? ` ${progress.done}/${progress.total}` : ""}` : `⚡ 완성본 만들기 + 검증${rosterView.rows.length ? ` (${rosterView.rows.length}부)` : ""}`}
+                {busy ? `${busy}${progress ? ` ${progress.done}/${progress.total}` : ""}` : <><Zap size={16} /> 완성본 만들기 + 검증{rosterView.rows.length ? ` (${rosterView.rows.length}부)` : ""}</>}
               </button>
             </div>
           </section>
@@ -1110,23 +1116,23 @@ export default function BulkFillPage() {
 
             {warnings && (
               <div className="bulk-fmtnote warn" data-testid="bulk-unmatched">
-                ⚠ <b>이름이 맞지 않는 항목이 있습니다</b> — {warnings.message}
+                <AlertTriangle size={14} /> <b>이름이 맞지 않는 항목이 있습니다</b> — {warnings.message}
                 <br />
                 <small>사유코드 {warnings.codes.join(" · ")} 는 report.json에도 남습니다.</small>
               </div>
             )}
             {results.length > 0 && failedCount > 0 && (
               <div className="bulk-fmtnote warn">
-                ⚠ <b>{failedCount}건은 생성에 실패</b>했습니다 — 그 행만 격리되어 zip에서 빠지고 report.json에 <code>row_failed</code>로 남습니다. 나머지 {createdCount}부는 온전합니다.
+                <AlertTriangle size={14} /> <b>{failedCount}건은 생성에 실패</b>했습니다 — 그 행만 격리되어 zip에서 빠지고 report.json에 <code>row_failed</code>로 남습니다. 나머지 {createdCount}부는 온전합니다.
               </div>
             )}
 
             {results.length > 0 && cur && (
               <>
                 <div className="bulk-nav review">
-                  <button onClick={() => setIdx((i) => Math.max(0, i - 1))} disabled={idx === 0}>‹ 이전</button>
-                  <span className="bulk-idx" data-testid="bulk-idx">{idx + 1} / {results.length} — <b>{cur.name}</b>{cur.reasons.length > 0 && <em className="warn"> ⚠ {cur.reasons.join(", ")}</em>}</span>
-                  <button onClick={() => setIdx((i) => Math.min(results.length - 1, i + 1))} disabled={idx === results.length - 1}>다음 ›</button>
+                  <button onClick={() => setIdx((i) => Math.max(0, i - 1))} disabled={idx === 0}><ChevronLeft size={15} /> 이전</button>
+                  <span className="bulk-idx" data-testid="bulk-idx">{idx + 1} / {results.length} — <b>{cur.name}</b>{cur.reasons.length > 0 && <em className="warn"> <AlertTriangle size={12} /> {cur.reasons.join(", ")}</em>}</span>
+                  <button onClick={() => setIdx((i) => Math.min(results.length - 1, i + 1))} disabled={idx === results.length - 1}>다음 <ChevronRight size={15} /></button>
                 </div>
                 <div className="bulk-review">
                   <div className="bulk-doc">
@@ -1167,8 +1173,8 @@ export default function BulkFillPage() {
                     <b className={review ? "warn" : "zero"}>경고 {review}건</b>
                     <small>report.json과 같은 집계</small>
                   </span>
-                  <button className="bulk-btn ghost sm" onClick={() => setStep(3)} disabled={!!busy}>← 명단 고쳐 다시 만들기</button>
-                  <button className="bulk-btn accent" data-testid="bulk-zip" onClick={downloadZip} disabled={!!busy}>⬇ zip 내려받기 ({createdCount}부 + report.json)</button>
+                  <button className="bulk-btn ghost sm" onClick={() => setStep(3)} disabled={!!busy}><ArrowLeft size={14} /> 명단 고쳐 다시 만들기</button>
+                  <button className="bulk-btn accent" data-testid="bulk-zip" onClick={downloadZip} disabled={!!busy}><Download size={15} /> zip 내려받기 ({createdCount}부 + report.json)</button>
                 </div>
               </>
             )}
@@ -1183,7 +1189,7 @@ export default function BulkFillPage() {
           <section className="bulk-step">
             <h2><span className="num">5</span> 내려받기 <small>zip 안에 개별 .hwpx {createdCount}부 + report.json</small></h2>
             <div className="bulk-done" data-testid="bulk-done">
-              <span className="mark">✓</span>
+              <span className="mark"><Check size={22} strokeWidth={2.6} /></span>
               <span className="copy">
                 <b>벌크채움_결과.zip</b>
                 <small>브라우저 다운로드 폴더를 확인하세요 — 개별 파일은 <b>.hwpx</b>라 한글에서 바로 열립니다.</small>
@@ -1207,23 +1213,23 @@ export default function BulkFillPage() {
 
             {failedCount > 0 && (
               <div className="bulk-fmtnote warn">
-                ⚠ 실패 {failedCount}건은 zip에 없습니다 — 그 행만 격리되어 <code>row_failed</code>로 기록됐고, 나머지 {createdCount}부는 온전합니다.
+                <AlertTriangle size={14} /> 실패 {failedCount}건은 zip에 없습니다 — 그 행만 격리되어 <code>row_failed</code>로 기록됐고, 나머지 {createdCount}부는 온전합니다.
               </div>
             )}
             {tpl && (fmtNoteIsHwp ? (
               <div className="bulk-fmtnote warn">
-                ⚠ <b>.hwp 양식에서 만든 HWPX 변환본</b>입니다 — 쪽 나눔·표 너비 등 서식이 원본과 달라질 수 있습니다. 한글에서 열어 <b>.hwp로 저장</b>하면 원래 확장자로 되돌릴 수 있습니다.
+                <AlertTriangle size={14} /> <b>.hwp 양식에서 만든 HWPX 변환본</b>입니다 — 쪽 나눔·표 너비 등 서식이 원본과 달라질 수 있습니다. 한글에서 열어 <b>.hwp로 저장</b>하면 원래 확장자로 되돌릴 수 있습니다.
               </div>
             ) : (
               <div className="bulk-fmtnote ok">
-                ✓ <b>HWPX 양식</b>이라 편집하지 않은 영역은 바이트 단위로 그대로 보존됐습니다(서식 무손실).
+                <Check size={14} /> <b>HWPX 양식</b>이라 편집하지 않은 영역은 바이트 단위로 그대로 보존됐습니다(서식 무손실).
               </div>
             ))}
 
             <div className="bulk-stepnav">
-              <button className="bulk-btn accent" data-testid="bulk-zip-again" onClick={downloadZip}>⬇ 다시 내려받기 ({createdCount}부 + report.json)</button>
-              <button className="bulk-btn ghost" onClick={() => setStep(4)}>← 검수로 돌아가기</button>
-              <button className="bulk-btn ghost" data-testid="bulk-reset" onClick={resetAll}>↺ 처음부터</button>
+              <button className="bulk-btn accent" data-testid="bulk-zip-again" onClick={downloadZip}><Download size={15} /> 다시 내려받기 ({createdCount}부 + report.json)</button>
+              <button className="bulk-btn ghost" onClick={() => setStep(4)}><ArrowLeft size={15} /> 검수로 돌아가기</button>
+              <button className="bulk-btn ghost" data-testid="bulk-reset" onClick={resetAll}><RotateCcw size={15} /> 처음부터</button>
             </div>
           </section>
         )}
@@ -1237,6 +1243,12 @@ export default function BulkFillPage() {
         .bulk-head-in { max-width: 1240px; margin: 0 auto; display: flex; align-items: center; gap: 13px; padding: 12px 20px; flex-wrap: wrap; }
         .bulk-back { text-decoration: none; color: var(--ah-muted); font-size: 16px; }
         .bulk-back:hover { color: var(--ah-fg-strong); }
+        /* lucide 아이콘 슬롯 — 옛 글리프 자리를 svg 가 대신한다(공통 정렬은 globals.css 의 svg.lucide).
+           flex 가 아니던 인라인 요소만 여기서 inline-flex 로 올린다. */
+        .bulk-back, .bulk-nav button, .bulk-keychip, .bulk-ai-head .ico, .bulk-ai-head .caret,
+        .bulk-field-card .pen, .bulk-field-card .del, .bulk-field-card .row1 .warn { display: inline-flex; align-items: center; gap: 4px; }
+        .bulk-field-card .row1 .warn { color: var(--ah-warn); }
+        .bulk-trust-item > svg { color: var(--ah-dim); }
         .bulk-logo { font-size: 15.5px; color: var(--ah-accent-ink); } .bulk-logo b { color: var(--ah-fg-strong); margin-left: 2px; }
         .bulk-sub { color: var(--ah-muted); font-size: 12.5px; }
         .bulk-badge { font-size: 11px; color: var(--ah-accent-ink); border: 1px solid var(--ah-accent-line); border-radius: 999px; padding: 3px 10px; margin-right: auto; }

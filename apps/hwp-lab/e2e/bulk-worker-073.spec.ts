@@ -40,7 +40,7 @@ test("073: 워커 경유 배치 — 진행률 갱신 + 검수 프리뷰 lazy 렌
   await expect(page.locator(".bulk-review .bulk-hl").first()).toBeVisible();
 
   // 다음 부로 넘기면 그 부가 새로 렌더된다(N장 상주가 아니라 보고 있는 부만).
-  await page.getByText("다음 ›").click();
+  await page.getByRole("button", { name: "다음", exact: true }).click(); // 캐러셀 "다음 ›" → "다음 <ChevronRight/>"
   await expect(page.locator('[data-testid="bulk-idx"]')).toContainText(`2 / ${N}`);
   await expect(page.locator('[data-testid="bulk-values"]')).toContainText("테스트기업002");
   await expect(pageSvg.first()).toBeVisible({ timeout: 60_000 });
