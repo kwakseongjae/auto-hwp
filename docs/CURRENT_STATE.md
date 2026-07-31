@@ -5,6 +5,12 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
+- 갱신: 2026-07-31 · Claude(오케스트레이터)+Opus 워커 — **데모 AI 모델 GLM 5.2 → GPT-5.6 Luna
+  교체·배포·실증**(워커 버전 fc416b33). OpenRouter 실측 단가 1/7(~$0.0005/건, 최악 $0.001) →
+  DAILY_CAP 1200→**2000 복원**(일 $1.0~2.1 < $5). zdr:true·PER_IP 20·MAX_TOKENS 1024 불변.
+  배포 후 실호출 스모크: 200 + 정확한 SetTableCell Intent 반환 — **ZDR 라우팅·CF 출구 리전·Intent
+  형식 준수 실증**(Gemini류 리전 차단 없음). 동의 문구·README 한/영 표기 갱신, 단위 테스트에 상류
+  model assert 잠금. (이 항목이 07-30자 "82a1a8ca=GLM 5.2 고정" 상태 서술을 대체한다.)
 - 갱신: 2026-07-30 · Claude(오케스트레이터)+Opus 워커 — **데모 라이트 모드 + chrome 정리 라이브
   배포**(ce22e95, run 30547121457 success). 사용자 피드백 4건: "정적 데모·AI" 태그·상시 AI 인포
   배너·"편집 모드" 태그 제거, 패널 빈 상태 중앙 정렬 — **첫 호출 동의 게이트는 무손상**(배너 고유
