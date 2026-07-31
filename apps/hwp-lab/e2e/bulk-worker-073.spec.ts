@@ -5,6 +5,10 @@ import { expect, test } from "@playwright/test";
 // 워커가 아니면 이 갱신이 행 단위로 뭉개진다) ② 검수 프리뷰는 캐러셀에 들어온 부만 렌더되고, 다음 부로
 // 넘기면 그 부가 새로 렌더된다(N장 SVG 상주 없음) ③ 기존 계약(검증·zip)은 그대로.
 // 명단은 데모 규격(기업명/사업자등록번호/대표자/연락처)에 맞춰 형식 검증을 통과하는 값으로 만든다.
+//
+// 퍼널 재설계 정렬(2026-07-31): 샘플이 ③ 명단에서 멈추므로 스튜디오 대신 명단 칸을 기다린다.
+// 진행률·검수는 ④ 단계 화면이고, zip 클릭은 ⑤로 넘어간다(부수 표기는 ④의 CTA와 ⑤의 재다운로드
+// 버튼 양쪽에서 확인).
 const N = 60;
 const roster = Array.from({ length: N }, (_, i) => {
   const n = i + 1;
@@ -15,7 +19,7 @@ const roster = Array.from({ length: N }, (_, i) => {
 test("073: 워커 경유 배치 — 진행률 갱신 + 검수 프리뷰 lazy 렌더", async ({ page }) => {
   await page.goto("/bulk");
   await page.locator('[data-testid="bulk-sample"]').click();
-  await expect(page.locator('[data-testid="bulk-studio"]')).toBeVisible({ timeout: 60_000 });
+  await expect(page.locator('[data-testid="bulk-roster"]')).toHaveValue(/기업명: /, { timeout: 60_000 });
   await page.locator('[data-testid="bulk-roster"]').fill(roster);
   // 데모 규격 그대로라 미매칭 0 — 진단 배너가 뜨면 명단/규격이 어긋난 것이다.
   await expect(page.locator('[data-testid="bulk-keys"] .bulk-keychip.miss')).toHaveCount(0);
@@ -42,8 +46,9 @@ test("073: 워커 경유 배치 — 진행률 갱신 + 검수 프리뷰 lazy 렌
   await expect(pageSvg.first()).toBeVisible({ timeout: 60_000 });
 
   // 계약 유지: 전부 생성 + zip 다운로드
+  await expect(page.locator('[data-testid="bulk-zip"]')).toContainText(`${N}부`);
   const zipDl = page.waitForEvent("download");
   await page.locator('[data-testid="bulk-zip"]').click();
   expect((await zipDl).suggestedFilename()).toBe("벌크채움_결과.zip");
-  await expect(page.locator('[data-testid="bulk-zip"]')).toContainText(`${N}부`);
+  await expect(page.locator('[data-testid="bulk-zip-again"]')).toContainText(`${N}부`);
 });
