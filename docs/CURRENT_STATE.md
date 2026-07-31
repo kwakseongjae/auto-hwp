@@ -5,6 +5,10 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
+- 갱신: 2026-07-31 · Claude(오케스트레이터)+Opus 워커 — **라이트 디폴트 + lucide 아이콘 라이브**
+  (26883fc, deploy success). 기본 테마 규칙: 저장값 > 무조건 light(OS 무관 — matchMedia 구독 제거).
+  lucide-react@1.28.0 앱 전용, 이모지 글리프 24종 교체(SDK 무접촉), 번들 +11.5kB(+0.93%)·공유 청크
+  0 증가(트리셰이킹 실측). vitest 98/98·e2e 54/1skip·fresh 방문 light 실측(라이브 포함).
 - 갱신: 2026-07-31 · Claude(오케스트레이터)+Opus 워커 — **/bulk 5단계 퍼널 재설계 라이브**
   (f57c420, deploy success — 사용자 UX 피드백 "AI 왕복·export까지가 혼란"). 스테퍼(양식→채울 칸→
   명단→생성·검수→내려받기, 현재만 펼침·완료=요약 칩 복귀·양식 교체 시 정직 무효화), ③ 이중 경로
