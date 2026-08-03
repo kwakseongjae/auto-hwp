@@ -5,7 +5,18 @@ import { placeCellCaret } from "./cell-gesture";
 // 이슈 052 자동저장+세션 복구 e2e: 편집 → (2s 유휴) 자동저장 → 강제 reload → 복구 배너 →
 // 복구 → 편집 내용 유지. 무시(=스냅샷 삭제) 분기도 잠근다. 실브라우저 IndexedDB 경유 —
 // IdbSnapshotStore 실구현은 이 스펙이 검증한다(단위 테스트는 MemorySnapshotStore mock).
+//
+// ⚠️ 자동 재개(resumeSession.ts) 이후: **배너는 "고아 스냅샷"(= 탭 마커 없음) 시나리오다.**
+// 같은 탭 새로고침은 이제 배너 없이 자동 재개된다(session-resume.spec.ts 가 검증). 그래서 이 스펙은
+// reload 전에 마커를 지워 "새 탭/다른 날 재방문"을 재현한다 — 검증 대상(스냅샷 영속·배너·복구·무시)
+// 은 052 원본 그대로다.
 const BENCHMARK = path.resolve(process.cwd(), "..", "..", "benchmarks", "benchmark.hwp");
+
+/** 탭 마커를 지워 "새 탭에서 재방문"을 재현한다(스냅샷은 그대로 → 고아 → 배너). */
+async function reloadAsNewTab(page: Page) {
+  await page.evaluate(() => sessionStorage.removeItem("auto-hwp:live-doc"));
+  await page.reload();
+}
 
 async function open(page: Page) {
   await page.goto("/");
@@ -31,8 +42,8 @@ test("편집 → 자동저장 → 강제 reload → 복구 배너 → 복구 →
   const marker = "복구확인052";
   await editCellAndAutosave(page, marker);
 
-  // 강제 reload = 탭 종료/트랩 후 재방문 시나리오. 문서 상태는 통째로 날아간다.
-  await page.reload();
+  // 탭 종료 후 재방문 시나리오(마커 없음). 문서 상태는 통째로 날아간다.
+  await reloadAsNewTab(page);
 
   // 열기 화면에 복구 배너: 파일명 + "편집된 HWPX본" 명시(원본 .hwp와 혼동 금지).
   const banner = page.locator('[data-testid="recovery-banner"]');
@@ -50,14 +61,14 @@ test("무시 = 스냅샷 삭제: 배너가 내려가고 재방문에도 다시 �
   await open(page);
   await editCellAndAutosave(page, "무시확인052");
 
-  await page.reload();
+  await reloadAsNewTab(page);
   const banner = page.locator('[data-testid="recovery-banner"]');
   await expect(banner).toBeVisible({ timeout: 30_000 });
   await page.locator('[data-testid="recovery-dismiss"]').click();
   await expect(banner).toHaveCount(0, { timeout: 15_000 });
 
   // 스냅샷이 지워졌으므로 재방문에도 배너가 없다.
-  await page.reload();
+  await reloadAsNewTab(page);
   await expect(page.locator(".lab-empty")).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('[data-testid="recovery-banner"]')).toHaveCount(0);
 });

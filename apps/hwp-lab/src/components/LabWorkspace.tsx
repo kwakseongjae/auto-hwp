@@ -6,6 +6,7 @@ import { HwpWorkspace, WasmAdapter, FONT_CATALOG, chatSidePanel, type AiRequestO
 import { buildDocContext, createAgentEventParser, type AgentEvent } from "@auto-hwp/ai-protocol";
 import { isTrapError, resetEngine, type EngineLoadProgress } from "@auto-hwp/engine";
 import { AutosaveController, IdbSnapshotStore, findRecoverable, formatAge, recoveredName, type SnapshotRecord } from "@/lib/autosave";
+import { clearLiveDoc, decideResume, readLiveDoc, resumeToastMessage, writeLiveDoc } from "@/lib/resumeSession";
 import { limitMessage, oversizeMessage } from "@/lib/limits";
 import { ensureDemoAiConsent, type DemoAiConsentState } from "@/lib/demoAiConsent";
 import { ThemeToggle, useTheme } from "./ThemeToggle";
@@ -66,6 +67,11 @@ export default function LabWorkspace() {
   const [recovery, setRecovery] = useState<SnapshotRecord | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [savedLabel, setSavedLabel] = useState<string | null>(null);
+  // ── 새로고침 자동 재개(052 위의 재개 규칙 레이어 — lib/resumeSession.ts) ────────────────────────
+  // 같은 탭 새로고침이면 배너를 묻지 않고 즉시 그 스냅샷으로 돌아간다. 진행 표시(resuming)와 결과
+  // 토스트(resumeToast — **마지막 자동저장 시각을 반드시 표기**)는 이 두 상태가 그린다.
+  const [resuming, setResuming] = useState(false);
+  const [resumeToast, setResumeToast] = useState<string | null>(null);
   // 복구 클릭으로 연 문서: 열기 성공 시 adoptRecovered(재귀속 + 옛 키 삭제)할 원본 레코드.
   const pendingRecoveryRef = useRef<SnapshotRecord | null>(null);
   // 포인터 제스처(드래그) 진행 중엔 자동저장 flush 를 미룬다(렌더-0 규율). 이슈 055 워커화로 toHwpx
@@ -162,9 +168,16 @@ export default function LabWorkspace() {
   }, []);
 
   // 문서 수명 → 자동저장 세션: 열기 성공 시 세션 시작(+복구본이면 재귀속), 닫힘/언마운트 시 정리.
+  // 재개 마커: 세션이 열리는 **바로 이 자리**가 유일한 세팅 지점이다(문서 교체·복구본 열기·자동
+  // 재개가 전부 이 경로를 지나므로 마커는 항상 "지금 열려 있는 문서"의 스냅샷 키를 가리킨다).
+  // ⚠️ doc 이 null 인 분기에서는 마커를 지우지 **않는다** — 이 이펙트는 마운트 직후(문서 없음)에도
+  // 돌기 때문에, 여기서 지우면 새로고침 직후 마커를 스스로 태워 자동 재개가 영영 성립하지 않는다.
+  // 마커 제거는 "명시적 닫기 / 재개 실패 강등 / 스냅샷 소멸 / 복구 무시" 네 곳에서만 한다.
   useEffect(() => {
     if (doc) {
       autosave.openSession(doc.name);
+      const key = autosave.sessionKey();
+      if (key) writeLiveDoc(key);
       setSavedLabel(null);
       const rec = pendingRecoveryRef.current;
       if (rec) {
@@ -178,21 +191,28 @@ export default function LabWorkspace() {
   }, [doc, autosave]);
   useEffect(() => () => autosave.dispose(), [autosave]);
 
-  // 열기 화면(문서 없음)에서 미복구 스냅샷을 조회해 배너를 띄운다(만료분은 이 자리에서 청소).
+  // ── pagehide best-effort flush ──────────────────────────────────────────────────────────────────
+  // 탭이 사라지기 직전(새로고침·이동·닫기) 미저장 편집이 있으면 스냅샷을 한 번 더 시도한다.
+  // ⚠️ **보장이 아니다** — toHwpx 는 워커 왕복(비동기)이라 브라우저가 페이지를 회수하는 쪽이 빠르면
+  // 그대로 잘린다. unload 를 await 로 붙잡으려 들지 않는다(그건 앱을 막고 브라우저가 무시한다).
+  // 그래서 재개 토스트가 "마지막 자동저장 HH:MM"을 표기한다 — 사용자는 어디까지 살아남았는지 본다.
+  // 제스처 게이트(canFlushNow)와의 관계: 페이지가 사라지는 마당에 드래그 유휴를 기다릴 이유가 없으니
+  // 포인터 플래그만 내려 게이트를 통과시킨다(컨트롤러의 지연 규율 자체는 손대지 않는다).
   useEffect(() => {
-    if (doc) return;
-    let cancelled = false;
-    findRecoverable(store)
-      .then((rec) => {
-        if (!cancelled) setRecovery(rec);
-      })
-      .catch(() => {
-        if (!cancelled) setRecovery(null); // IndexedDB 접근 불가 — 배너 없음(저장도 곧 1회 안내 후 비활성)
-      });
-    return () => {
-      cancelled = true;
+    const flush = () => {
+      pointerDownRef.current = false;
+      void autosave.flush();
     };
-  }, [doc, store]);
+    const onHidden = () => {
+      if (window.document.visibilityState === "hidden") flush();
+    };
+    window.addEventListener("pagehide", flush);
+    window.document.addEventListener("visibilitychange", onHidden);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      window.document.removeEventListener("visibilitychange", onHidden);
+    };
+  }, [autosave]);
 
   // 프록시 모드(mock/live)를 조회해 배지에 표시. 키는 서버 전용이므로 여기서 알 수 있는 건 모드뿐.
   // 정적 데모 빌드에는 서버가 없으므로 프로브를 건너뛰고 "static"으로 확정한다(404 fetch 소음 방지).
@@ -365,6 +385,64 @@ export default function LabWorkspace() {
     [openBytes],
   );
 
+  // ── 열기 화면 진입 규칙: ① 새로고침이면 자동 재개 → ② 아니면 고아 스냅샷 배너 ──────────────────
+  // ① 마커(sessionStorage · 탭 수명)가 있으면 = 같은 탭에서 새로고침한 것 = 사용자는 "하던 문서"를
+  //    기대한다 → 묻지 않고 그 스냅샷을 즉시 연다(+ 마지막 자동저장 시각 토스트).
+  // ② 마커가 없으면(새 탭·다른 날·명시적 닫기 뒤) = 고아 스냅샷 → **현행 배너 그대로**(opt-in).
+  // 실패는 전부 ②로 강등한다: 손상된 스냅샷도, IndexedDB 거부(시크릿)도 앱을 막지 않는다.
+  //
+  // ⚠️ "마운트당 1회" 플래그(useRef)로 재시도를 막지 마라 — StrictMode 는 이펙트를 mount→cleanup→
+  //    mount 로 두 번 돌리므로, 첫(취소된) 실행이 플래그를 태워 자동 재개가 통째로 사라진다(실측:
+  //    e2e 가 배너로 떨어졌다). **마커 자체가 유일한 가드**다: 모든 랜딩 경로가 마커를 지우므로
+  //    이 이펙트는 몇 번 돌아도 같은 결론에 수렴한다(멱등).
+  useEffect(() => {
+    if (doc) return;
+    let cancelled = false;
+    void (async () => {
+      // ① 자동 재개
+      const marker = readLiveDoc();
+      if (marker) {
+        let decision = decideResume(marker, [], Date.now());
+        try {
+          decision = decideResume(marker, await store.list(), Date.now());
+        } catch {
+          /* IndexedDB 접근 불가(시크릿/거부) — 재개 불가. 아래에서 마커만 정리하고 조용히 랜딩. */
+        }
+        if (cancelled) return;
+        if (decision.action === "resume") {
+          const rec = decision.record;
+          pendingRecoveryRef.current = rec; // 열기 성공 시 [doc] 이펙트가 adoptRecovered 로 재귀속
+          setResuming(true);
+          const ok = await openBytes(rec.bytes, recoveredName(rec.docName));
+          if (cancelled) return;
+          setResuming(false);
+          if (ok) {
+            setResumeToast(resumeToastMessage(rec.savedAt, Date.now()));
+            return; // doc 세팅 → 이 이펙트는 재실행되고 곧바로 early-return 한다
+          }
+          // 열기 실패(손상 등) — 정직한 사유를 남기고 배너 경로로 강등한다. 스냅샷은 보존한다.
+          pendingRecoveryRef.current = null;
+          clearLiveDoc();
+          setNotice("새로고침 전 문서를 자동으로 열지 못했습니다 — 아래 복구 배너에서 다시 시도하거나 무시할 수 있습니다.");
+        } else {
+          // 마커는 있는데 스냅샷이 없다(편집 전 새로고침 · 명시 내보내기로 정리됨 · 만료 · 시크릿).
+          // 되살릴 것이 없으므로 조용히 랜딩한다(빈 배너·거짓 안내 금지). 마커만 정리.
+          clearLiveDoc();
+        }
+      }
+      // ② 미복구(고아) 스냅샷 배너 — 만료분은 findRecoverable 이 이 자리에서 청소한다.
+      try {
+        const rec = await findRecoverable(store);
+        if (!cancelled) setRecovery(rec);
+      } catch {
+        if (!cancelled) setRecovery(null); // IndexedDB 접근 불가 — 배너 없음(저장도 곧 1회 안내 후 비활성)
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [doc, store, openBytes]);
+
   // ── 이슈 052: 복구 배너 액션 ─────────────────────────────────────────────────────────────────────
   // 복구 = 스냅샷 바이트(편집된 HWPX본)를 " (복구본).hwpx" 이름으로 연다. 열기 성공 시(위 doc 이펙트)
   // adoptRecovered 가 새 세션으로 재귀속 + 옛 키 삭제 — 콘텐츠는 절대 유실되지 않는다. 열기 실패 시
@@ -380,12 +458,26 @@ export default function LabWorkspace() {
     }
   }, [recovery, openBytes]);
 
-  // 무시 = 스냅샷 삭제(설계 확정) — 배너도 내려간다.
+  // 무시 = 스냅샷 삭제(설계 확정) — 배너도 내려간다. 지운 스냅샷을 가리키는 마커가 남아 있으면
+  // 같이 정리한다(존재하지 않는 문서로 자동 재개를 시도하지 않게 — 마커 제거 지점 ①).
   const onDismissRecovery = useCallback(async () => {
     if (!recovery) return;
     await store.delete(recovery.key).catch(() => {});
+    if (readLiveDoc() === recovery.key) clearLiveDoc();
     setRecovery(null);
   }, [recovery, store]);
+
+  // ── 명시적 닫기 ─────────────────────────────────────────────────────────────────────────────────
+  // 자동 재개가 생기면서 **필요해진** 출구다: 재개가 없던 시절엔 새로고침이 곧 "닫기"였지만, 이제
+  // 새로고침은 문서를 되살린다. 그래서 "이 문서 그만 보기"를 사용자가 명시할 수 있어야 한다.
+  // 규칙(마커 제거 지점 ②): **마커만 지우고 스냅샷은 남긴다** — 사용자 콘텐츠 삭제 금지. 닫은
+  // 편집본은 고아 스냅샷이 되어 곧바로 현행 복구 배너로 다시 제안된다(원하면 되살릴 수 있다).
+  const onCloseDoc = useCallback(() => {
+    clearLiveDoc();
+    setDoc(null);
+    setLabError(null);
+    setResumeToast(null);
+  }, []);
 
   // ── 이슈 052: 명시 내보내기 성공 시 스냅샷 정리 (v1 R13) ─────────────────────────────────────────
   // HwpWorkspace 의 onExport 시임(이슈 044)을 받아 웹 기본 동작(브라우저 <a download>)을 그대로 수행한
@@ -602,6 +694,12 @@ export default function LabWorkspace() {
           <input type="file" accept=".hwp,.hwpx" hidden onChange={onFile} data-testid="file-input" />
         </label>
 
+        {/* 명시적 닫기 — 새로고침 자동 재개의 출구(마커 제거). 편집본 스냅샷은 지우지 않으므로
+            닫은 뒤에도 열기 화면의 복구 배너로 되살릴 수 있다. */}
+        <button className="lab-btn" data-testid="doc-close" onClick={onCloseDoc} title="문서를 닫고 열기 화면으로 — 편집본은 복구 배너로 남습니다">
+          문서 닫기
+        </button>
+
         {/* 글꼴 선택은 문서 툴바의 FontPicker(카탈로그+업로드)가 담당한다 — 화면·조판·PDF 일치. */}
 
         <span className="lab-spacer" />
@@ -637,6 +735,17 @@ export default function LabWorkspace() {
         <div className="lab-error lab-notice" role="status" data-testid="autosave-notice">
           {notice}
           <button className="lab-btn lab-notice-close" onClick={() => setNotice(null)}>
+            닫기
+          </button>
+        </div>
+      )}
+
+      {/* 자동 재개 토스트: 배너 대신 "이미 되돌려 놨다 + 어디까지 살아 있다(시각)"를 사후 통지한다.
+          pagehide flush 는 보장이 아니므로 시각 표기가 이 토스트의 핵심 정보다. */}
+      {resumeToast && (
+        <div className="lab-error lab-notice" role="status" data-testid="resume-toast">
+          {resumeToast}
+          <button className="lab-btn lab-notice-close" onClick={() => setResumeToast(null)}>
             닫기
           </button>
         </div>
@@ -694,7 +803,13 @@ export default function LabWorkspace() {
           <div className="lab-empty">
             {/* 랜딩엔 헤더가 없으므로 테마 토글만 우상단에 떠 있는다(고정 위치 — 히어로 배치 무간섭). */}
             <ThemeToggle className="lab-theme-float" />
-            {recovery && !busy && (
+            {resuming && (
+              // 자동 재개 중 — 랜딩 히어로가 잠깐 보이는 동안 "왜 아무 일도 없는가"를 설명한다.
+              <div className="lab-recovery" role="status" data-testid="resume-progress">
+                <div className="lab-recovery-text">새로고침 전 문서를 다시 여는 중…</div>
+              </div>
+            )}
+            {recovery && !busy && !resuming && (
               // 이슈 052: 재방문 복구 배너 — 복구본은 "편집된 HWPX본"(원본 .hwp 아님)임을 명시한다.
               <div className="lab-recovery" role="alert" data-testid="recovery-banner">
                 <div className="lab-recovery-text">

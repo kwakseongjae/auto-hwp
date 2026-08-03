@@ -226,6 +226,12 @@ export class AutosaveController {
     this.last = null;
   }
 
+  /** 현재 세션의 스냅샷 키(없으면 null). 재개 레이어(resumeSession.ts)가 "이 탭이 보고 있는
+   *  스냅샷"을 sessionStorage 마커에 적기 위해 읽는다 — 읽기 전용이라 저장 계약은 불변. */
+  sessionKey(): string | null {
+    return this.session?.key ?? null;
+  }
+
   /** 문서 닫힘 — 대기 중 스냅샷 취소(닫힌 문서를 뒤늦게 직렬화하지 않는다). */
   closeSession(): void {
     this.cancelTimer();
