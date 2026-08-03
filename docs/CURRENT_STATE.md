@@ -5,6 +5,13 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
+- 갱신: 2026-08-04 · Claude(오케스트레이터)+Opus 워커 — **새로고침 자동 재개 라이브**(8b358da,
+  deploy success — 라이브 dynamic 청크에서 마커 코드 실측). 052 위 재개 레이어: sessionStorage
+  마커("auto-hwp:live-doc") 있고 스냅샷 살아 있으면 배너 없이 즉시 재개+시각 토스트 / 명시적
+  "문서 닫기"(신설 버튼 — 재개 도입으로 설계상 필수)·새 탭·다른 날은 현행 배너. 마커 제거 4경로
+  전수 문서화, pagehide best-effort flush(보장 아님 — 토스트 시각 표기). 함정 실측: StrictMode
+  이중 실행이 useRef 1회 가드 태움 → 마커 자체가 유일한 가드(멱등). autosave.ts는 getter +6줄뿐
+  (052 계약 무변경). vitest 111/111·e2e 57/1skip(신규 재개 3본). 후속 후보: /bulk 퍼널 지속화.
 - 갱신: 2026-07-31 · Claude(오케스트레이터)+Opus 워커 — **라이트 디폴트 + lucide 아이콘 라이브**
   (26883fc, deploy success). 기본 테마 규칙: 저장값 > 무조건 light(OS 무관 — matchMedia 구독 제거).
   lucide-react@1.28.0 앱 전용, 이모지 글리프 24종 교체(SDK 무접촉), 번들 +11.5kB(+0.93%)·공유 청크
