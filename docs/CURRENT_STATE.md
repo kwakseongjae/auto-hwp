@@ -5,6 +5,19 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
+- 갱신: 2026-08-05 · Claude(오케스트레이터)+Opus 워크플로 — **데모 품질 배치(피드백 8건) 커밋
+  45ad7fd push·Pages 재배포 중 · ⚠️ Worker 배포만 CF 토큰 만료로 대기**. ① 바이브 다중 셀 실패
+  실측 규명: Luna 추론 토큰이 max_tokens 합산 — 1024에서 **간헐** length 절단→전량 드롭+침묵
+  (검증자 교차 실측: 구코드도 4/4 성공하는 런 존재 = 간헐성 확정). 수리: 2048+reasoning
+  effort=low(env 롤백)+salvage(deny_unknown 유지)+reason/message additive. **워커 미배포 상태 —
+  wrangler login 후 deploy 필요.** ② 채팅 소실 실원인=탭 아닌 **접기 언마운트** → display 토글
+  보존. ③ 시드 스냅샷(편집 전 새로고침 재개)+"처음부터" — 시드가 편집본 밀어내는 버그 e2e 발견·
+  수리. ④ SDK 아이콘 26종 인라인(의존 0)+정렬 4버튼 전부 ≡이던 실버그+찾기 캡슐 겹침 수리.
+  ⑤ 데모 툴바 간소화(줌·undo·HTML·PDF — ?toolbar=full 탈출구)+기본 툴바 회귀 e2e+verify에 워커
+  vitest 편입. ⑥ README 문구 4건(산출=HTML/PDF/HWPX·hwp 재저장 없음 명시 등). 검증: vitest
+  402/235/120·워커 11·e2e 62+2/1skip. 잔여: **wrangler login→worker deploy→다중 셀 실호출 스모크**
+  (오늘 이 IP는 재현 테스트로 PER_IP 20 소진 — 429 정상), 빈 제안 reason/message 클라 표시([ui]
+  미배선 — 후속), SDK 0.0.5 발행 여부.
 - 갱신: 2026-08-05 · Claude(오케스트레이터)+Opus 워크플로 — **README 대개편 배치 출하**(48fd14a
   4커밋 push·deploy success·라이브 /llms.txt 200). 사용자 피드백 10건: ① 라이트 톤 히어로
   (codex 장면+실폰트 워드마크 합성 — 후보 4안 candidates/ 보존) ② 가이드 GIF 3종(엔진·바이브·벌크
