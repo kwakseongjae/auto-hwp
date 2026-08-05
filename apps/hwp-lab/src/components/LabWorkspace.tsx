@@ -1,8 +1,8 @@
 "use client";
 
-import { Check, Crosshair, ExternalLink, Sparkles } from "lucide-react";
+import { Check, Crosshair, ExternalLink, FolderOpen, RotateCcw, Sparkles, X as XIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { HwpWorkspace, WasmAdapter, FONT_CATALOG, chatSidePanel, type AiRequestOptions, type Anchor, type Citation, type DocContext, type Intent, type WasmAdapterOptions } from "@auto-hwp/react";
+import { HwpWorkspace, WasmAdapter, FONT_CATALOG, chatSidePanel, type AiRequestOptions, type Anchor, type Citation, type DocContext, type Intent, type WasmAdapterOptions, type WorkspaceToolbarItem } from "@auto-hwp/react";
 import { buildDocContext, createAgentEventParser, type AgentEvent } from "@auto-hwp/ai-protocol";
 import { isTrapError, resetEngine, type EngineLoadProgress } from "@auto-hwp/engine";
 import { AutosaveController, IdbSnapshotStore, findRecoverable, formatAge, recoveredName, type SnapshotRecord } from "@/lib/autosave";
@@ -36,6 +36,10 @@ const SAMPLES: { file: string; label: string; hint: string }[] = [
   { file: "sample-8p.hwp", label: "예시 샘플", hint: "바이너리 HWP5 파싱 + 표/병합셀" },
   { file: "sample-18p.hwpx", label: "신청서 샘플 (.hwpx · 18쪽)", hint: "손실 변환 자동 감지 → 레이아웃 정리" },
 ];
+
+// 데모 문서 툴바에 남길 항목(이슈 4). 나머지는 화면에서만 접는다 — 기능은 우클릭 메뉴·디자인 탭·
+// 단축키에 그대로 있고, SDK 기본값(prop 미지정)은 여전히 전 항목 노출이다.
+const DEMO_TOOLBAR_ITEMS: readonly WorkspaceToolbarItem[] = ["zoom", "undo", "redo", "exportHtml", "exportPdf"];
 
 const msg = (e: unknown): string => {
   if (e && typeof e === "object" && "message" in e) return String((e as { message: unknown }).message);
@@ -87,6 +91,10 @@ export default function LabWorkspace() {
   // 멈추지 않는다). 워커 스크립트도 public 정적 에셋(모듈 워커 — copy-wasm.mjs 가 배치). 계측/롤백용
   // 탈출구: `?engineWorker=off` 로 열면 기존 메인스레드 엔진으로 동작한다(BEFORE/AFTER 실측이 이 스위치).
   const workerMode = useMemo(() => new URLSearchParams(window.location.search).get("engineWorker") !== "off", []);
+  // QA/e2e 탈출구(`?engineWorker=off` 와 같은 계열): 데모 화면은 간소화된 툴바를 쓰지만, SDK 전 항목을
+  // 실브라우저로 검증해야 하는 스펙(이미지 삽입·HWPX 저장·표 추가 버튼 i18n)은 `?toolbar=full` 로 원래
+  // 툴바를 그대로 받는다. 기능이 아니라 **노출**만 바뀌는 스위치라는 사실이 이 파라미터로 드러난다.
+  const fullToolbar = useMemo(() => new URLSearchParams(window.location.search).get("toolbar") === "full", []);
   const adapterOptions = useMemo<WasmAdapterOptions | undefined>(
     () => (workerMode ? { worker: { url: new URL(`${BASE}/hwp/worker.js`, window.location.origin) } } : undefined),
     [workerMode],
@@ -183,6 +191,11 @@ export default function LabWorkspace() {
       if (rec) {
         pendingRecoveryRef.current = null;
         void autosave.adoptRecovered(rec).then(() => setRecovery(null));
+      } else {
+        // U2 — 열기 직후 **시드 스냅샷 1회**(원본 바이트 그대로, toHwpx 호출 없음). 이게 없으면
+        // "샘플만 열고 편집 없이 새로고침"은 마커만 있고 스냅샷이 없어 랜딩으로 떨어졌다.
+        // 복구본/자동 재개로 연 경우(rec)는 adoptRecovered 가 이미 rev0 재귀속을 하므로 건너뛴다.
+        void autosave.seedSession(doc.bytes, doc.name);
       }
     } else {
       autosave.closeSession();
@@ -413,11 +426,15 @@ export default function LabWorkspace() {
           const rec = decision.record;
           pendingRecoveryRef.current = rec; // 열기 성공 시 [doc] 이펙트가 adoptRecovered 로 재귀속
           setResuming(true);
-          const ok = await openBytes(rec.bytes, recoveredName(rec.docName));
+          // 시드(편집 전 원본)는 원래 파일명 그대로 연다 — 바이트가 .hwp 인데 " (복구본).hwpx" 로
+          // 열면 확장자와 내용이 어긋난다. 편집본 스냅샷은 진짜 HWPX 라 기존 이름 규칙 유지.
+          const ok = await openBytes(rec.bytes, rec.seed && rec.sourceName ? rec.sourceName : recoveredName(rec.docName));
           if (cancelled) return;
           setResuming(false);
           if (ok) {
-            setResumeToast(resumeToastMessage(rec.savedAt, Date.now()));
+            // 편집 전 시드면 "복구했다"가 아니라 "이어서 본다"가 정직하다(되살릴 편집이 없었다).
+            if (rec.seed) setResumeToast("새로고침 전 보던 문서를 다시 열었습니다 — 아직 편집한 내용은 없습니다.");
+            else setResumeToast(resumeToastMessage(rec.savedAt, Date.now()));
             return; // doc 세팅 → 이 이펙트는 재실행되고 곧바로 early-return 한다
           }
           // 열기 실패(손상 등) — 정직한 사유를 남기고 배너 경로로 강등한다. 스냅샷은 보존한다.
@@ -478,6 +495,22 @@ export default function LabWorkspace() {
     setLabError(null);
     setResumeToast(null);
   }, []);
+
+  // ── "처음부터"(초기화) ───────────────────────────────────────────────────────────────────────────
+  // 닫기와의 차이는 **스냅샷까지 지운다**는 것 하나다. 닫기는 "그만 보기"(편집본은 배너로 남는다),
+  // 이건 "이 문서 흔적을 치우고 첫 화면으로"다. 사용자 콘텐츠를 지우므로 **확인을 1회 받는다**(배너의
+  // "무시"와 같은 등급의 명시적 삭제). 다른 문서의 스냅샷은 건드리지 않는다.
+  const onResetAll = useCallback(async () => {
+    if (!window.confirm("처음부터 다시 시작할까요?\n\n지금 열린 문서를 닫고 이 문서의 자동저장 스냅샷을 삭제합니다. 되돌릴 수 없습니다.\n(내려받은 파일은 그대로 남습니다.)")) return;
+    await autosave.discardSession();
+    clearLiveDoc();
+    setDoc(null);
+    setRecovery(null);
+    setLabError(null);
+    setNotice(null);
+    setResumeToast(null);
+    setSavedLabel(null);
+  }, [autosave]);
 
   // ── 이슈 052: 명시 내보내기 성공 시 스냅샷 정리 (v1 R13) ─────────────────────────────────────────
   // HwpWorkspace 의 onExport 시임(이슈 044)을 받아 웹 기본 동작(브라우저 <a download>)을 그대로 수행한
@@ -689,15 +722,25 @@ export default function LabWorkspace() {
           </a>
         )}
 
-        <label className="lab-btn">
-          파일 열기 (.hwp/.hwpx)
+        {/* 헤더 액션은 앱 디자인 토큰(lab-hbtn)으로 통일한다 — 이전엔 브라우저 기본 버튼처럼 보여
+            "시스템 UI가 문서 위에 끼어 있다"는 인상을 줬다(사용자 피드백 이슈 4). */}
+        <label className="lab-btn lab-hbtn" title="내 컴퓨터의 .hwp/.hwpx 파일을 엽니다">
+          <FolderOpen size={14} />
+          파일 열기
           <input type="file" accept=".hwp,.hwpx" hidden onChange={onFile} data-testid="file-input" />
         </label>
 
         {/* 명시적 닫기 — 새로고침 자동 재개의 출구(마커 제거). 편집본 스냅샷은 지우지 않으므로
             닫은 뒤에도 열기 화면의 복구 배너로 되살릴 수 있다. */}
-        <button className="lab-btn" data-testid="doc-close" onClick={onCloseDoc} title="문서를 닫고 열기 화면으로 — 편집본은 복구 배너로 남습니다">
+        <button className="lab-btn lab-hbtn" data-testid="doc-close" onClick={onCloseDoc} title="문서를 닫고 열기 화면으로 — 편집본은 복구 배너로 남습니다">
+          <XIcon size={14} />
           문서 닫기
+        </button>
+
+        {/* 처음부터 — 닫기와 달리 이 문서의 스냅샷까지 지우고 첫 화면으로 돌아간다(확인 1회). */}
+        <button className="lab-btn lab-hbtn" data-testid="doc-reset" onClick={() => void onResetAll()} title="이 문서를 닫고 자동저장 스냅샷도 삭제한 뒤 첫 화면으로 (확인 후 실행)">
+          <RotateCcw size={14} />
+          처음부터
         </button>
 
         {/* 글꼴 선택은 문서 툴바의 FontPicker(카탈로그+업로드)가 담당한다 — 화면·조판·PDF 일치. */}
@@ -788,6 +831,11 @@ export default function LabWorkspace() {
             // 선택 서식은 우측 디자인 inspector 한 곳에만 둔다. 상단은 문서/삽입/내보내기 전역 도구,
             // 우측은 현재 선택 요소라는 Figma식 역할 분리를 유지한다.
             formatSurface="inspector"
+            // 이슈 4(툴바 정리): 데모 문서 툴바는 **읽고 고치고 내보내는 최소 세트**만 노출한다.
+            // 숨긴 것(HWPX 내려받기·표 추가·이미지·레이아웃 정리)은 SDK 에서 제거된 게 아니라 이
+            // 화면에서만 접는 것이다 — 표 추가/이미지/서식은 우클릭 메뉴와 디자인 탭에 그대로 있고,
+            // toolbarItems 를 넘기지 않는 다른 호스트는 전 항목을 그대로 받는다(기본값 = 현행).
+            toolbarItems={fullToolbar ? undefined : DEMO_TOOLBAR_ITEMS}
             // 다크에서만 스튜디오 팔레트를 입힌다. 라이트에서는 클래스를 떼어 SDK 기본 테마(이미
             // 라이트로 설계돼 있다)를 그대로 쓴다 — 컴포넌트 수정 없이 색을 되칠할 필요가 없다.
             // (앱 CSS 의 미세 조정은 globals.css §라이트 에디터.)

@@ -437,6 +437,22 @@ svg.lucide {
 }
 .lab-root.lab-demo .lab-header .lab-title { white-space: nowrap; }
 .lab-root.lab-demo .lab-header .lab-btn { padding: 5px 10px; white-space: nowrap; }
+
+/* ── 헤더 액션(파일 열기 · 문서 닫기 · 처음부터) ───────────────────────────────────────────
+   피드백 4: 시스템 기본 버튼처럼 보였다. 앱 토큰(투명 배경 + 얇은 선 + hover 만 채움)으로
+   낮춰 문서 크롬의 일부로 읽히게 하고, lucide 아이콘 + 라벨을 한 줄로 정렬한다. */
+.lab-hbtn {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; line-height: 1; color: var(--ah-fg-soft);
+  background: transparent; border-color: transparent; border-radius: 8px;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.lab-hbtn:hover { color: var(--ah-fg-strong); background: var(--ah-surface-hover); border-color: var(--ah-line-3); }
+.lab-hbtn svg { flex: 0 0 auto; opacity: 0.8; }
+.lab-hbtn:hover svg { opacity: 1; }
+/* 데모 헤더 안에서는 위 일반 .lab-btn 채움 규칙보다 이 쪽이 이겨야 한다. */
+.lab-root.lab-demo .lab-header .lab-btn.lab-hbtn { background: transparent; border-color: transparent; color: var(--ah-fg-soft); }
+.lab-root.lab-demo .lab-header .lab-btn.lab-hbtn:hover { background: var(--ah-surface-hover); border-color: var(--ah-line-3); color: var(--ah-fg-strong); }
 /* 워크스페이스는 자체 브랜드 라벨을 갖지만 랩 헤더가 이미 "오토한글"을 띄운다(중복 제거).
    ⚠️ `.hw-studio` 가 아니라 `.hw-workspace` 로 잡는다 — 라이트 테마에서는 스튜디오(다크) 클래스를
    아예 붙이지 않기 때문이다(아래 §라이트 에디터). */

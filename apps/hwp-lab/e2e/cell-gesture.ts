@@ -9,7 +9,7 @@ const anchorLabel = async (page: Page): Promise<string> => {
 
 /** 선택 시 자동으로 열린 디자인 inspector에서 사용자가 챗을 계속하려는 동작을 재현한다. */
 export async function showVibePanel(page: Page): Promise<void> {
-  const tab = page.getByRole("tab", { name: "✦ 바이브 편집", exact: true });
+  const tab = page.getByRole("tab", { name: "바이브 편집", exact: true });
   const textarea = page.locator(".hw-textarea");
   await expect
     .poll(

@@ -15,7 +15,7 @@ async function open(page: Page) {
 test("선택 전 바이브 기본 → 셀 선택 시 디자인 자동 전환 → inspector에서 굵게·배경 적용", async ({ page }) => {
   await open(page);
   await expect(page.locator('[data-testid="hw-format-ribbon"]')).toHaveCount(0);
-  await expect(page.getByRole("tab", { name: "✦ 바이브 편집", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "바이브 편집", exact: true })).toHaveAttribute("aria-selected", "true");
 
   await selectFirstCell(page);
   if ((await page.locator(".hw-caret").count()) > 0) {

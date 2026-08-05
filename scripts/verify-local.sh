@@ -143,6 +143,13 @@ if [ "$MODE" = "--full" ]; then
   pnpm -C packages/ai-protocol exec vitest run
   pnpm -C packages/react exec vitest run
   (cd apps/hwp-lab && npx vitest run)
+  # 데모 AI 워커도 게이트에 편입(2026-08-05 — 다중 셀 절단 수리가 무성 회귀하지 않게).
+  # node_modules 부재(fresh clone)면 점수를 꾸며내지 않고 skip을 명시한다.
+  if [ -d services/demo-ai-proxy/node_modules ]; then
+    (cd services/demo-ai-proxy && npm test --silent)
+  else
+    echo "⚠️  demo-ai-proxy vitest skipped(node_modules 부재 — services에서 npm ci 후 재실행)"
+  fi
   echo "═══ e2e (playwright) ═══"
   (cd apps/hwp-lab && npx playwright test)
 fi

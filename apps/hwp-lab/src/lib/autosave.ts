@@ -27,6 +27,15 @@ export interface SnapshotRecord {
   rev: number;
   /** toHwpx() 직렬화 바이트 — 재열기 가능한 HWPX. */
   bytes: Uint8Array;
+  /** U2(열기 직후 시드): 아직 **편집이 없는** 원본 바이트 스냅샷. 존재 이유는 하나 —
+   *  "샘플만 열고 아무것도 안 고친 채 새로고침"도 같은 탭에서 되살리기 위해서다.
+   *  ⚠️ 시드는 **자동 재개 전용**이다: 편집이 0회이므로 다른 탭/다른 날 "편집본이 있습니다" 배너로
+   *  올리면 거짓말이 된다 → `findRecoverable` 이 시드를 건너뛴다. 첫 편집의 flush 가 같은 키를
+   *  덮어쓰면서 시드 표시는 자연히 사라진다(그때부터 진짜 편집본). */
+  seed?: boolean;
+  /** 시드가 담은 바이트의 **원래 파일명**(`.hwp` 포함). 시드는 toHwpx 산출물이 아니라 원본 그대로라
+   *  " (복구본).hwpx" 로 열면 확장자가 내용과 어긋난다 — 재개할 때 이 이름으로 연다. */
+  sourceName?: string;
 }
 
 /** 영속 계층 시임 — 실구현은 IndexedDB(IdbSnapshotStore), 테스트/폴백은 MemorySnapshotStore. */
@@ -147,7 +156,9 @@ export function pruneKeys(
 }
 
 // ── 복구 배너 질의 ───────────────────────────────────────────────────────────────────────────────────
-/** 미복구 스냅샷 중 가장 최근 것(만료분은 이 자리에서 청소). 배너 하나(v1)만 띄우므로 최신 1건. */
+/** 미복구 스냅샷 중 가장 최근 것(만료분은 이 자리에서 청소). 배너 하나(v1)만 띄우므로 최신 1건.
+ *  ⚠️ **시드(편집 0회 원본)는 제외한다** — "편집본이 있습니다" 배너는 편집이 있을 때만 정직하다.
+ *  시드는 같은 탭 자동 재개(marker → decideResume)에서만 쓰이고, 만료 전까지 조용히 남는다. */
 export async function findRecoverable(store: SnapshotStore, now: number = Date.now(), ttlMs: number = SNAPSHOT_TTL_MS): Promise<SnapshotRecord | null> {
   const all = await store.list();
   let latest: SnapshotRecord | null = null;
@@ -156,6 +167,7 @@ export async function findRecoverable(store: SnapshotStore, now: number = Date.n
       await store.delete(r.key).catch(() => {});
       continue;
     }
+    if (r.seed) continue; // 편집 전 시드 — 배너로 제안하지 않는다(스냅샷 자체는 보존)
     if (!latest || r.savedAt > latest.savedAt) latest = r;
   }
   return latest;
@@ -232,6 +244,76 @@ export class AutosaveController {
     return this.session?.key ?? null;
   }
 
+  /**
+   * U2 — 문서 열기 성공 **직후 1회** 시드 스냅샷. 편집이 없으므로 `toHwpx()` 를 부르지 않고 **연 파일의
+   * 원본 바이트를 그대로** 적재한다(직렬화 0 → 큰 문서를 열자마자 메인/워커를 잡아먹지 않는다).
+   *
+   * 이걸 넣기 전에는 "샘플 열고 아무 편집 없이 새로고침"이 재개되지 않았다 — 마커는 있는데 그 키의
+   * 스냅샷이 없어서 `decideResume` 이 landing 으로 떨어졌기 때문이다(정상 동작이었지만, 사용자에겐
+   * 그냥 "문서가 사라짐"으로 보인다).
+   *
+   * 계약 무변경 규율: rev/savedRev/디바운스 타이머를 **건드리지 않는다**. 첫 편집이 오면 기존 flush 가
+   * 같은 키를 편집본으로 덮어쓴다(그 레코드에는 seed 가 없다 → 그때부터 배너 대상).
+   *
+   * ⚠️ **시드는 절대 편집본을 밀어내지 않는다.** flush 가 쓰는 `pruneKeys`("문서당 최신 1개")를 그대로
+   * 썼더니, 같은 문서를 닫았다 다시 열자 편집본 스냅샷이 시드로 교체됐다(e2e 실측 — 복구 배너가 사라짐
+   * = 사용자 콘텐츠 유실). 그래서 여기서는 ① 같은 문서의 편집본이 이미 있으면 **아무것도 쓰지 않고**
+   * (배너 경로가 그 편집본을 계속 제안한다) ② 정리 대상도 "같은 문서의 옛 시드 · TTL 만료 · 상한 초과분
+   * 중 시드"로만 좁힌다. 편집본은 어떤 경우에도 시드 때문에 지워지지 않는다.
+   */
+  async seedSession(bytes: Uint8Array, sourceName: string): Promise<void> {
+    const session = this.session;
+    if (!session || this.storeDisabled || bytes.length === 0) return;
+    const at = this.now();
+    // 메모리 최신본으로도 세워 둔다 — 시드 직후 엔진 트랩이 나도 원본으로 되살아난다.
+    this.last = { bytes, savedAt: at, rev: 0 };
+    const ttlMs = this.opts.ttlMs ?? SNAPSHOT_TTL_MS;
+    const maxCount = this.opts.maxCount ?? MAX_SNAPSHOT_COUNT;
+    try {
+      const before = await this.store.list();
+      // ① 같은 문서의 살아 있는 편집본이 있으면 시드를 만들지 않는다(덮어쓰기 = 유실).
+      if (before.some((r) => r.key !== session.key && r.docName === session.docName && !r.seed && at - r.savedAt <= ttlMs)) return;
+      await this.store.put({
+        key: session.key,
+        docName: session.docName,
+        openedAt: session.openedAt,
+        savedAt: at,
+        rev: 0,
+        bytes,
+        seed: true,
+        sourceName,
+      });
+      // ② 좁은 정리: 같은 문서의 옛 시드 + 만료분. 그 다음에도 상한을 넘으면 **오래된 시드부터만** 뺀다.
+      const doomed = new Set<string>();
+      for (const r of before) {
+        if (r.key === session.key) continue;
+        if (r.docName === session.docName && r.seed) doomed.add(r.key);
+        else if (at - r.savedAt > ttlMs) doomed.add(r.key);
+      }
+      const survivors = before.filter((r) => r.key !== session.key && !doomed.has(r.key)).sort((a, b) => a.savedAt - b.savedAt);
+      let remaining = survivors.length + 1; // +1 = 방금 넣은 시드 자신
+      for (const r of survivors) {
+        if (remaining <= maxCount) break;
+        if (!r.seed) continue; // 편집본은 시드에 밀려나지 않는다
+        doomed.add(r.key);
+        remaining--;
+      }
+      for (const key of doomed) await this.store.delete(key);
+    } catch (e) {
+      this.disableStore(e);
+    }
+  }
+
+  /** U2 — "처음부터"(명시적 초기화). 이 세션의 스냅샷을 **사용자가 확인한 뒤에만** 지운다(배너의
+   *  "무시"와 같은 등급의 명시적 삭제). 대기 타이머/메모리 최신본도 함께 비워 뒤늦은 재저장을 막는다. */
+  async discardSession(): Promise<void> {
+    this.cancelTimer();
+    const key = this.session?.key;
+    this.last = null;
+    this.savedRev = this.rev;
+    if (key && !this.storeDisabled) await this.store.delete(key).catch(() => {});
+  }
+
   /** 문서 닫힘 — 대기 중 스냅샷 취소(닫힌 문서를 뒤늦게 직렬화하지 않는다). */
   closeSession(): void {
     this.cancelTimer();
@@ -267,7 +349,9 @@ export class AutosaveController {
     if (!this.session) return;
     this.last = { bytes: rec.bytes, savedAt: this.now(), rev: 0 };
     if (!this.storeDisabled) {
-      const mine: SnapshotRecord = { key: this.session.key, docName: this.session.docName, openedAt: this.session.openedAt, savedAt: this.now(), rev: 0, bytes: rec.bytes };
+      // seed/sourceName 은 그대로 물려받는다 — 편집 0회 시드를 재개했을 뿐인데 "편집본"으로 승격시켜
+      // 다음 탭에서 복구 배너로 올리면 거짓말이 된다(U2 정직성). 첫 편집의 flush 가 자연히 지운다.
+      const mine: SnapshotRecord = { key: this.session.key, docName: this.session.docName, openedAt: this.session.openedAt, savedAt: this.now(), rev: 0, bytes: rec.bytes, ...(rec.seed ? { seed: true, sourceName: rec.sourceName } : {}) };
       try {
         await this.store.put(mine);
         if (rec.key !== mine.key) await this.store.delete(rec.key);

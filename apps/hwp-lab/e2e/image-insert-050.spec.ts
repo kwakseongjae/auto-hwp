@@ -13,7 +13,7 @@ const TINY_PNG = Buffer.from(
 );
 
 async function open(page: Page) {
-  await page.goto("/");
+  await page.goto("/?toolbar=full"); // 툴바 "이미지" 업로드 진입점이 필요하다(데모 기본 툴바는 접는다)
   await page.locator('[data-testid="file-input"]').setInputFiles(BENCHMARK);
   await expect(page.locator(".hw-sheet svg").first()).toBeVisible({ timeout: 60_000 });
 }

@@ -26,7 +26,7 @@ const PAGE0_SVG = '.hw-sheet[data-page="0"] svg';
 const page0Svg = (page: Page) => page.locator(PAGE0_SVG).first();
 
 async function open(page: Page, file: string = SAMPLE): Promise<number> {
-  await page.goto("/");
+  await page.goto("/?toolbar=full"); // 툴바 "HWPX 다운로드" 버튼이 필요하다(데모 기본 툴바는 접는다)
   await page.locator('[data-testid="file-input"]').setInputFiles(file);
   await expect(page.locator(".hw-sheet svg").first()).toBeVisible({ timeout: 90_000 });
   await page.waitForTimeout(1200); // 폰트 재배치 + 가상화 settle

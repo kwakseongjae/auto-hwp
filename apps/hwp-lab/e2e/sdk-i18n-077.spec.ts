@@ -18,7 +18,7 @@ import { expect, test, type Page } from "@playwright/test";
 const BENCHMARK = path.resolve(process.cwd(), "..", "..", "benchmarks", "benchmark.hwp");
 
 async function open(page: Page) {
-  await page.goto("/");
+  await page.goto("/?toolbar=full"); // 툴바 전 항목의 문구를 검사한다(데모 기본 툴바는 일부를 접는다)
   await page.locator('[data-testid="file-input"]').setInputFiles(BENCHMARK);
 }
 

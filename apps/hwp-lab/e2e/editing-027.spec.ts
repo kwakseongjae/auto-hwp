@@ -6,8 +6,8 @@ import { selectFirstCell } from "./cell-gesture";
 // benchmarks/benchmark.hwp(8쪽, 다열 표 포함). enableEditing 이 켜진 lab 에서 검증한다.
 const BENCHMARK = path.resolve(process.cwd(), "..", "..", "benchmarks", "benchmark.hwp");
 
-async function open(page: Page) {
-  await page.goto("/");
+async function open(page: Page, query = "") {
+  await page.goto(`/${query}`);
   await page.locator('[data-testid="file-input"]').setInputFiles(BENCHMARK);
   await expect(page.locator(".hw-sheet svg").first()).toBeVisible({ timeout: 60_000 });
 }
@@ -38,8 +38,11 @@ async function scanForCell(page: Page): Promise<{ cx: number; cy: number } | nul
   return selectFirstCell(page);
 }
 
+// ⚠️ 스펙 정렬(이슈 4 툴바 정리): 데모 화면은 이제 `toolbarItems` 로 표 추가 버튼을 접는다. 기능이
+// 사라진 게 아니라 **노출**만 바뀐 것이므로, SDK 툴바 전 항목을 실브라우저로 검증하는 이 스펙은
+// QA 탈출구 `?toolbar=full` 로 원래 툴바를 받는다(엔진 스위치 `?engineWorker=off` 와 같은 계열).
 test("표 추가: 툴바 버튼 → 2×3 픽커 → ApplyContent 로 표 삽입 → undo", async ({ page }) => {
-  await open(page);
+  await open(page, "?toolbar=full");
   await page.locator('[data-testid="hw-table-insert"]').click();
   await expect(page.locator('[data-testid="hw-table-picker"]')).toBeVisible();
   await page.locator('[data-testid="hw-table-cell-2-3"]').hover();

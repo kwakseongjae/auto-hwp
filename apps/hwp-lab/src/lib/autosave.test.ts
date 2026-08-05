@@ -302,3 +302,129 @@ describe("표시 헬퍼", () => {
     expect(recoveredName("양식.hwpx")).toBe("양식 (복구본).hwpx");
   });
 });
+
+// ── U2: 열기 직후 시드 스냅샷 + "처음부터" 초기화 ────────────────────────────────────────────────
+describe("시드 스냅샷 (U2 — 편집 전 새로고침도 재개)", () => {
+  it("seedSession: toHwpx 를 부르지 않고 원본 바이트를 rev0 · seed 로 적재한다", async () => {
+    const store = new MemorySnapshotStore();
+    const source = makeSource();
+    const c = new AutosaveController(store, source, { now: () => 5000 });
+    c.openSession("보고서.hwp");
+    await c.seedSession(new Uint8Array([9, 9]), "보고서.hwp");
+
+    const all = await store.list();
+    expect(all).toHaveLength(1);
+    expect(all[0]).toMatchObject({ key: "보고서.hwp::5000", rev: 0, seed: true, sourceName: "보고서.hwp" });
+    expect(all[0].bytes).toEqual(new Uint8Array([9, 9]));
+    // 편집이 없으므로 직렬화도 없다 — 큰 문서를 열자마자 엔진을 붙잡지 않는다.
+    expect(source.toHwpx).not.toHaveBeenCalled();
+    // 시드 직후에도 트랩 복구 소스는 살아 있다.
+    expect(c.getRecoverySnapshot()?.bytes).toEqual(new Uint8Array([9, 9]));
+  });
+
+  it("시드는 복구 배너에 뜨지 않는다 (편집 0회를 '편집본이 있습니다'로 제안하지 않는다)", async () => {
+    const store = new MemorySnapshotStore();
+    const c = new AutosaveController(store, makeSource(), { now: () => 5000 });
+    c.openSession("보고서.hwp");
+    await c.seedSession(new Uint8Array([9]), "보고서.hwp");
+    expect(await findRecoverable(store, 6000)).toBeNull();
+    // 그래도 스냅샷 자체는 남아 있다 — 같은 탭 자동 재개(decideResume)가 이걸 쓴다.
+    expect(await store.list()).toHaveLength(1);
+  });
+
+  it("첫 편집의 flush 가 같은 키를 편집본으로 덮어써 seed 표시가 사라진다 → 그때부터 배너 대상", async () => {
+    const store = new MemorySnapshotStore();
+    const c = new AutosaveController(store, makeSource(new Uint8Array([7])), { now: () => 5000 });
+    c.openSession("보고서.hwp");
+    await c.seedSession(new Uint8Array([9]), "보고서.hwp");
+    c.noteEdit();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS);
+
+    const all = await store.list();
+    expect(all).toHaveLength(1);
+    expect(all[0].seed).toBeUndefined();
+    expect(all[0].bytes).toEqual(new Uint8Array([7]));
+    expect((await findRecoverable(store, 6000))?.key).toBe("보고서.hwp::5000");
+  });
+
+  it("adoptRecovered 는 시드 표시를 물려받는다 (재개했다고 편집본으로 승격시키지 않는다)", async () => {
+    const store = new MemorySnapshotStore();
+    const seed: SnapshotRecord = { key: "a.hwp::1", docName: "a.hwp", openedAt: 0, savedAt: 1000, rev: 0, bytes: new Uint8Array([5]), seed: true, sourceName: "a.hwp" };
+    await store.put(seed);
+    const c = new AutosaveController(store, makeSource(), { now: () => 5000 });
+    c.openSession("a.hwp");
+    await c.adoptRecovered(seed);
+    const all = await store.list();
+    expect(all).toHaveLength(1);
+    expect(all[0].seed).toBe(true);
+    expect(await findRecoverable(store, 6000)).toBeNull();
+  });
+});
+
+describe("처음부터 (U2 — 명시적 초기화)", () => {
+  it("discardSession: 현재 세션 스냅샷을 지우고 대기 타이머/메모리 최신본까지 비운다", async () => {
+    const store = new MemorySnapshotStore();
+    const c = new AutosaveController(store, makeSource(), { now: () => 5000 });
+    c.openSession("보고서.hwp");
+    await c.seedSession(new Uint8Array([9]), "보고서.hwp");
+    c.noteEdit(); // 타이머 무장
+
+    await c.discardSession();
+    expect(await store.list()).toHaveLength(0);
+    expect(c.getRecoverySnapshot()).toBeNull();
+
+    // 무장돼 있던 디바운스가 뒤늦게 발화해도 지운 스냅샷이 되살아나지 않는다.
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS * 2);
+    expect(await store.list()).toHaveLength(0);
+  });
+
+  it("다른 문서의 스냅샷은 건드리지 않는다", async () => {
+    const store = new MemorySnapshotStore();
+    await store.put(rec("other.hwp::1", "other.hwp", 1000));
+    const c = new AutosaveController(store, makeSource(), { now: () => 5000 });
+    c.openSession("보고서.hwp");
+    await c.seedSession(new Uint8Array([9]), "보고서.hwp");
+    await c.discardSession();
+    expect((await store.list()).map((r) => r.key)).toEqual(["other.hwp::1"]);
+  });
+});
+
+// e2e 실측 회귀(시드가 편집본을 밀어냈다): 같은 문서를 닫았다 다시 열면 flush 의 "문서당 최신 1개"
+// prune 이 편집본 스냅샷을 시드로 교체해 복구 배너가 사라졌다 = 사용자 콘텐츠 유실. 아래가 그 잠금.
+describe("시드는 편집본을 밀어내지 않는다 (U2 회귀 잠금)", () => {
+  it("같은 문서의 편집본이 이미 있으면 시드를 쓰지 않는다 (배너 경로 보존)", async () => {
+    const store = new MemorySnapshotStore();
+    await store.put(rec("보고서.hwp::1", "보고서.hwp", 1000, 4)); // 이전 세션의 편집본
+    const c = new AutosaveController(store, makeSource(), { now: () => 5000 });
+    c.openSession("보고서.hwp"); // 새 세션 키 = 보고서.hwp::5000
+    await c.seedSession(new Uint8Array([9]), "보고서.hwp");
+
+    const all = await store.list();
+    expect(all).toHaveLength(1);
+    expect(all[0].key).toBe("보고서.hwp::1"); // 편집본 그대로
+    expect((await findRecoverable(store, 6000))?.key).toBe("보고서.hwp::1");
+  });
+
+  it("다른 문서의 편집본도 상한 때문에 밀려나지 않는다 (시드만 양보한다)", async () => {
+    const store = new MemorySnapshotStore();
+    for (let i = 1; i <= 4; i++) await store.put(rec(`edited${i}.hwp::${i}`, `edited${i}.hwp`, 1000 + i, i));
+    await store.put({ ...rec("old-seed.hwp::9", "old-seed.hwp", 900), seed: true });
+    const c = new AutosaveController(store, makeSource(), { now: () => 5000 });
+    c.openSession("새문서.hwp");
+    await c.seedSession(new Uint8Array([9]), "새문서.hwp");
+
+    const keys = (await store.list()).map((r) => r.key).sort();
+    expect(keys).toContain("새문서.hwp::5000");
+    expect(keys).not.toContain("old-seed.hwp::9"); // 상한 양보는 시드가 한다
+    for (let i = 1; i <= 4; i++) expect(keys).toContain(`edited${i}.hwp::${i}`);
+  });
+
+  it("같은 문서의 옛 시드는 새 시드가 대체한다 (시드는 문서당 1개)", async () => {
+    const store = new MemorySnapshotStore();
+    await store.put({ ...rec("보고서.hwp::1", "보고서.hwp", 1000), seed: true, sourceName: "보고서.hwp" });
+    const c = new AutosaveController(store, makeSource(), { now: () => 5000 });
+    c.openSession("보고서.hwp");
+    await c.seedSession(new Uint8Array([9]), "보고서.hwp");
+    expect((await store.list()).map((r) => r.key)).toEqual(["보고서.hwp::5000"]);
+  });
+});
