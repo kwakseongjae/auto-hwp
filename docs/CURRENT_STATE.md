@@ -5,6 +5,14 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
+- 갱신: 2026-08-05 · Claude(오케스트레이터)+Opus 워크플로 — **README 대개편 배치 출하**(48fd14a
+  4커밋 push·deploy success·라이브 /llms.txt 200). 사용자 피드백 10건: ① 라이트 톤 히어로
+  (codex 장면+실폰트 워드마크 합성 — 후보 4안 candidates/ 보존) ② 가이드 GIF 3종(엔진·바이브·벌크
+  — 라이브 실촬영·자기검증) ③ README 전면(엔진+에디터 구도·자체 서버 뉘앙스·데모/BYOK 분리·React
+  포지셔닝 명문화·능력 표 윤문·철학 산문·Apache-2.0+크레딧 — rhwp 귀속은 검증자 지적으로 원저자
+  edwardkim 상류 정정) ④ llms.txt+LLM-GUIDE(레시피·함정·0.0.4 대조) ⑤ SELF-HOST(013 Docker 실측·
+  Node 스모크 독립 재현·Bun) — 통합 검증 yellow→지적 2건 정정 후 출하. 다음 후보: 히어로 후보
+  교체 여부(사용자)·guide-bulk 중간 빈 프레임 개선·B1 줄 델타 오라클 착수·런치.
 - 갱신: 2026-08-05 · Claude(오케스트레이터)+Opus 워커 — **로컬 벤치 기여 퍼널 + rhwp 지형 리서치**
   (커밋 없음 — 워킹트리). ① `scripts/bench-local.sh` 신설: `benchmarks/local/`(신규 gitignore,
   README만 추적)에 기여자가 자기 공문서를 넣으면 `layout-check` 전수 스윕 → 판정 5종(일치/줄격차/
