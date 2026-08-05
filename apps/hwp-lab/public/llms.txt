@@ -1,0 +1,56 @@
+# auto-hwp (오토한글)
+
+> 한글(HWP/HWPX) 문서를 브라우저·Node·터미널에서 **열고 · 조판하고 · 고치고 · PDF/HTML/HWPX로 내보내는**
+> 자체 엔진. 한컴 오피스도, 우리 서버도 필요 없다 — 파싱→조판→렌더→export 전부 Rust 코어(wasm/네이티브)에서
+> 돈다. 저장소가 호스팅하는 공용 서버는 **없다**(모든 실행은 사용자 기기·사용자 인프라).
+
+이 파일은 LLM 에이전트용 진입점이다. **레포를 통째로 받아 "이거 붙여줘"를 수행하는 에이전트는
+[docs/LLM-GUIDE.md](docs/LLM-GUIDE.md)부터 읽어라** — 과업별 레시피·함정·검증 커맨드가 거기 있다.
+저장소: https://github.com/kwakseongjae/auto-hwp · 라이브 데모: https://kwakseongjae.github.io/auto-hwp/
+
+## 임베드 작업 시 읽을 순서 (이 순서를 지켜라)
+
+0. [README.md](README.md) — 60초 개요·바로 써보기·알려진 제약. (영문: [README.en.md](README.en.md))
+1. [docs/LLM-GUIDE.md](docs/LLM-GUIDE.md) — 과업별 레시피(임베드 / 변환 파이프라인 / AI 프록시 / 벌크),
+   함정 목록, 설치 후 스모크 코드. **먼저 읽는다.**
+2. [docs/EMBED-GUIDE.md](docs/EMBED-GUIDE.md) — 웹 임베드 정본. wasm/워커 로딩, CSP, sidePanel 계약, 폰트 주입.
+   (영문 임계경로: [docs/EMBED-GUIDE.en.md](docs/EMBED-GUIDE.en.md))
+3. [docs/INTENT-SCHEMA.md](docs/INTENT-SCHEMA.md) — 편집 명령 JSON(Intent v0) 동결 스펙. 편집을 만든다면 필독.
+4. [docs/SELF-HOST.md](docs/SELF-HOST.md) — Docker 헤드리스 서비스 + Node/Bun에서 엔진 돌리기 + wasm 자기 호스팅.
+5. [docs/CLI-GUIDE.md](docs/CLI-GUIDE.md) / [docs/MCP-GUIDE.md](docs/MCP-GUIDE.md) — 터미널 바이너리 / 로컬 MCP 서버.
+6. [docs/BULK-GUIDE.md](docs/BULK-GUIDE.md) — 양식 1개 + 명단 N행 → 완성본 N부(규칙 기반, LLM 호출 0회).
+
+## npm 패키지 4종 (전부 0.0.4, Apache-2.0)
+
+- `@auto-hwp/engine` — L1. wasm 엔진. 열기·조판(px)·페이지 SVG·Intent 적용·undo·export(PDF/HTML/HWPX).
+  폰트 0개 번들, LLM 0, 키 0. 브라우저 **및 Node/Bun**에서 동작.
+  진입점: `initEngine` / `HwpDoc.open` / `sanitizeSvg` / `EngineWorkerClient`(브라우저 전용).
+- `@auto-hwp/editor-core` — L2. 헤드리스 코어(DocSession·SelectionModel·EditController). React·DOM 0.
+- `@auto-hwp/ai-protocol` — L2'. 벤더 중립 LLM 프로토콜(buildDocContext R5 펜스 · buildSystemPrompt ·
+  validateRequest/validateResponse). fetch 0, 키 0 — **서버 프록시와 클라이언트가 같은 모듈을 import**.
+- `@auto-hwp/react` — L3. `<HwpWorkspace/>` + 오버레이·리본·패널 슬롯. peer: react/react-dom ≥18.
+
+레이어 경계의 정본은 [docs/SDK-LAYERS.md](docs/SDK-LAYERS.md).
+
+## 그 밖의 표면
+
+- Rust CLI `auto-hwp` (crate `auto-hwp-cli`) — detect/extract-text/export-pdf/export-html/own-render/
+  convert/inspect/fill/ai-edit. → [docs/CLI-GUIDE.md](docs/CLI-GUIDE.md)
+- `hwp-mcp` — 로컬 stdio MCP 서버(15 툴) 및 컨테이너 서비스 모드(`--http-network`).
+  → [docs/MCP-GUIDE.md](docs/MCP-GUIDE.md), [docs/SERVICE-DEPLOY.md](docs/SERVICE-DEPLOY.md), [Dockerfile.service](Dockerfile.service)
+- 실동작 예제: [examples/vite-embed](examples/vite-embed)(발행본 설치 + Playwright 스모크),
+  [examples/ai-proxy-express](examples/ai-proxy-express)(BYOK 프록시 템플릿),
+  [apps/hwp-lab](apps/hwp-lab)(Next 참조 앱 = 라이브 데모의 소스)
+
+## 설계·한계 (에이전트가 사용자에게 반드시 전달할 것)
+
+- [docs/WHY.md](docs/WHY.md) — 왜 자체 엔진인가.
+- [docs/LICENSE-POLICY.md](docs/LICENSE-POLICY.md) — 함초롬/한컴 서체는 **재배포 불가**. OFL 서체만 서빙하라.
+- [docs/FIDELITY.md](docs/FIDELITY.md) · [docs/BENCHMARK.md](docs/BENCHMARK.md) — 충실도 실측과 게이트(쪽수 8==8 / 18==18).
+- 알려진 제약: 암호 걸린 `.hwp` 미지원(정직 거부) · PDF의 수식·차트는 자리표시 상자 · 저장 포맷은 HWPX
+  (`.hwp` 재저장 경로 없음) · 폰트는 번들하지 않고 호스트가 주입.
+
+## 기여 · 검증
+
+- [AGENTS.md](AGENTS.md) — 레포에서 **코드를 고칠 때** 읽는 온보딩(불변식·게이트·함정). 임베드만 할 거면 불필요.
+- [CONTRIBUTING.md](CONTRIBUTING.md) — 검증 스위트(`scripts/verify-local.sh`)와 벤치 재현.
