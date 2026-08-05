@@ -1,0 +1,96 @@
+<!doctype html>
+<meta charset="utf-8" />
+<style>
+  /* 라이브 랜딩(라이트) 토큰 그대로 — apps/hwp-lab/src/app/globals.css :root[data-theme="light"] */
+  :root {
+    --ah-bg: #f5f6fb;
+    --ah-fg-strong: #0a0f1c;
+    --ah-muted: #5a6274;
+    --ah-accent-ink: #6d28d9;
+    --ah-accent-ink-2: #7c3aed;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1280px; height: 420px; }
+  body {
+    background: var(--ah-bg);
+    font-family: "Apple SD Gothic Neo", -apple-system, system-ui, "Segoe UI", "Malgun Gothic", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  .hero { position: relative; width: 1280px; height: 420px; overflow: hidden; }
+
+  /* 라이브 배경 공식: 은은한 보라/파랑 글로우 (--ah-glow-1/2).
+     ⚠️ 장면(.scene)이 불투명 #f5f6fb 사각형이라 그 아래에 깔면 사각 이음매가 보인다 —
+     반드시 장면 '위'에 얹어 화면 전체를 균일하게 물들인다. */
+  .glow {
+    position: absolute; inset: 0; pointer-events: none; z-index: 3;
+    background:
+      radial-gradient(760px 420px at 88% 6%, rgba(124, 58, 237, 0.10), transparent 66%),
+      radial-gradient(620px 380px at 99% 78%, rgba(37, 99, 235, 0.07), transparent 70%);
+  }
+  /* 라이브 배경의 아주 흐린 수평 그리드(--ah-grid, 4.5%) — 장면에 겹치지 않게 왼쪽에서 끊는다 */
+  .grid {
+    position: absolute; inset: 0; pointer-events: none; z-index: 1;
+    background-image: repeating-linear-gradient(
+      to bottom,
+      rgba(15, 23, 42, 0.045) 0 1px,
+      transparent 1px 34px
+    );
+    -webkit-mask-image: linear-gradient(to right, #000 0%, #000 38%, transparent 54%);
+            mask-image: linear-gradient(to right, #000 0%, #000 38%, transparent 54%);
+  }
+
+  /* codex(gpt-image) 생성 장면 — 배경이 정확히 #f5f6fb 단색이라 이음매 없이 얹힌다 */
+  .scene {
+    position: absolute;
+    right: 46px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 486px;      /* 945x696 비율 유지(1.3578) */
+    height: 358px;
+    background: url("hero-scene.png") center/contain no-repeat;
+    z-index: 2;
+  }
+
+  .copy {
+    position: absolute; left: 68px; top: 50%; transform: translateY(-50%);
+    display: flex; flex-direction: column; align-items: flex-start;
+    z-index: 4;
+  }
+  .kicker {
+    font-size: 13px; font-weight: 600; letter-spacing: 4.6px;
+    color: var(--ah-muted); white-space: nowrap;
+  }
+  .kicker b { color: var(--ah-accent-ink); font-weight: 800; }
+
+  .titleRow { display: flex; align-items: center; margin-top: 15px; }
+  .mark {
+    font-size: 82px; font-weight: 800; letter-spacing: -2.2px; line-height: 1.05;
+    background: linear-gradient(115deg, #0a0f1c 45%, #6d28d9 95%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(0 4px 18px rgba(124, 58, 237, 0.16));
+  }
+  .caret {
+    width: 15px; height: 64px; margin-left: 13px; border-radius: 3px;
+    background: linear-gradient(180deg, #7c3aed, #6d28d9);
+    box-shadow: 0 0 28px rgba(124, 58, 237, 0.55);
+  }
+
+  .tagline {
+    margin-top: 19px;
+    font-size: 23px; font-weight: 700; letter-spacing: -0.4px;
+    color: var(--ah-fg-strong); white-space: nowrap;
+  }
+</style>
+<div class="hero">
+  <div class="glow"></div>
+  <div class="grid"></div>
+  <div class="scene"></div>
+  <div class="copy">
+    <div class="kicker">한글 문서를 직접 다루는 엔진</div>
+    <div class="titleRow">
+      <span class="mark">오토한글</span><span class="caret"></span>
+    </div>
+    <div class="tagline">AI와 함께, 한 화면을 보면서 쓰는 한글</div>
+  </div>
+</div>
