@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { describeIntent } from "../describeIntent";
 import { modLabel } from "../platform";
 import { useWorkspaceMessages } from "../i18n";
+import { Crosshair, FileText, X } from "../icons";
 import type { ChatPanelMessages } from "../i18n";
 import type { AgentEvent, Anchor, Attachment, ChatTurn, Citation, DocContext, Intent, IntentCard, OnAiRequest } from "../types";
 
@@ -684,10 +685,10 @@ export function ChatPanel(props: ChatPanelProps) {
             <div className="hw-anchors">
               {props.anchors.map((a, i) => (
                 <span key={`${a.section}:${a.block}:${i}`} className="hw-anchor" title={msg.anchorTitle(a.section, a.block)}>
-                  <span aria-hidden>◆</span>
+                  <Crosshair size={11} />
                   {a.label}
                   <button className="hw-anchor-x" onClick={() => props.onRemoveAnchor(i)} title={msg.removeAnchorTitle}>
-                    ✕
+                    <X size={12} />
                   </button>
                 </span>
               ))}
@@ -711,13 +712,13 @@ export function ChatPanel(props: ChatPanelProps) {
                     <img className="hw-attachment-thumb" src={a.dataUrl} alt={a.name} />
                   ) : (
                     <span className="hw-attachment-icon" aria-hidden>
-                      📄
+                      <FileText size={16} />
                     </span>
                   )}
                   <span className="hw-attachment-name">{a.name}</span>
                   <span className="hw-attachment-meta">{a.note ? msg.attachmentUnsupported : a.kind === "image" ? fmtSize(a.size) : `${fmtSize(a.size)}`}</span>
                   <button className="hw-attachment-x" onClick={() => removeAttachment(a.id)} title={msg.removeAttachmentTitle}>
-                    ✕
+                    <X size={12} />
                   </button>
                 </span>
               ))}

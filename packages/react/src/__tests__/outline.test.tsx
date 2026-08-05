@@ -131,9 +131,12 @@ describe("OutlinePanel — page thumbnail rail (heading-less fallback)", () => {
     thumbs.forEach((t) => expect(t.tagName).toBe("IMG"));
     expect(adapter.pageSvg).toHaveBeenCalledTimes(4);
 
-    // R7 — no raw injection: the rail contains NO <script> and NO inline <svg> (it uses <img> raster only).
+    // R7 — no raw injection: NO <script> anywhere, and the DOCUMENT-derived rail carries no inline <svg>
+    // (page previews are <img> rasters only). 스코프를 리스트로 좁힌 이유: 패널 헤더의 접기 버튼은
+    // 이제 SDK 자체 아이콘(정적 path — icons.tsx)을 그린다. 위험한 것은 "문서에서 온 SVG"이지
+    // "우리가 쓴 chrome 아이콘"이 아니므로, 주장의 대상을 문서 콘텐츠 영역으로 정확히 맞춘다.
     expect(container.querySelector("script")).toBeNull();
-    expect(container.querySelector("svg")).toBeNull();
+    expect(container.querySelector('[data-testid="hw-outline-list"] svg')).toBeNull();
 
     // sanitizeSvg WAS applied: the Blob handed to createObjectURL dropped the <script>, kept the <rect>.
     const blob = createSpy.mock.calls[0][0] as Blob;

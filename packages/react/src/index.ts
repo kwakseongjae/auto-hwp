@@ -4,7 +4,11 @@ import "./styles.css";
 
 // Assembly + components
 export { HwpWorkspace } from "./components/HwpWorkspace";
-export type { HwpWorkspaceProps, WorkspaceDesignSelection, WorkspaceSidePanel } from "./components/HwpWorkspace";
+export type { HwpWorkspaceProps, WorkspaceDesignSelection, WorkspaceSidePanel, WorkspaceToolbarItem } from "./components/HwpWorkspace";
+// 인라인 아이콘 세트(lucide path 사본 — 의존성 0, ISC 표기는 icons.tsx 상단). 호스트가 자기 툴바를
+// 조립할 때 SDK와 같은 글리프를 쓸 수 있도록 공개한다.
+export * as icons from "./icons";
+export type { IconProps } from "./icons";
 export { HwpPageView } from "./components/HwpPageView";
 export type { HwpPageViewProps, PageClick } from "./components/HwpPageView";
 export { SelectionOverlay } from "./components/SelectionOverlay";

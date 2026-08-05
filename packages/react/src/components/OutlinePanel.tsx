@@ -3,6 +3,7 @@ import type { EngineAdapter, OutlineItem } from "@auto-hwp/editor-core";
 import { activeOutlineIndex } from "../outline";
 import { sanitizeSvg } from "../sanitize";
 import { useWorkspaceMessages } from "../i18n";
+import { PanelLeftClose, PanelLeftOpen } from "../icons";
 
 export interface OutlinePanelProps {
   /** The document outline (engine headings). When empty, the panel shows a PAGE THUMBNAIL rail (a live,
@@ -224,7 +225,7 @@ export function OutlinePanel(props: OutlinePanelProps) {
           aria-label={msg.outline.expandTitle}
           aria-expanded={false}
         >
-          ☰
+          <PanelLeftOpen size={16} />
         </button>
       </aside>
     );
@@ -242,7 +243,7 @@ export function OutlinePanel(props: OutlinePanelProps) {
           aria-label={msg.outline.collapseTitle}
           aria-expanded={true}
         >
-          ‹
+          <PanelLeftClose size={16} />
         </button>
       </div>
       <nav

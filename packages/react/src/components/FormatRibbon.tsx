@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { saveInlineSelection } from "../richedit";
 import type { ToolbarAlign } from "./FloatingToolbar";
 import { useWorkspaceMessages } from "../i18n";
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight } from "../icons";
 
 /// FormatRibbon — the PERSISTENT top format bar (issue 048, ported from the desktop R11 `FormatControls`).
 /// Unlike the 028 FloatingToolbar (which floats over the selection and hides while editing), this ribbon is
@@ -271,16 +272,16 @@ export function FormatRibbon(props: FormatRibbonProps) {
 
       {/* 정렬 — CELL op (SetCellRangeFmt align); disabled 편집 중 (align a whole cell, not a live run). */}
       <button type="button" className="hw-ribbon-btn" data-testid="hw-ribbon-align-left" disabled={cellOff} title={cellOnlyDisabledReason ?? msg.format.alignLeft} onMouseDown={keep} onClick={() => onPatch({ align: "left" })}>
-        ≤
+        <AlignLeft />
       </button>
       <button type="button" className="hw-ribbon-btn" data-testid="hw-ribbon-align-center" disabled={cellOff} title={cellOnlyDisabledReason ?? msg.format.alignCenter} onMouseDown={keep} onClick={() => onPatch({ align: "center" })}>
-        ≡
+        <AlignCenter />
       </button>
       <button type="button" className="hw-ribbon-btn" data-testid="hw-ribbon-align-right" disabled={cellOff} title={cellOnlyDisabledReason ?? msg.format.alignRight} onMouseDown={keep} onClick={() => onPatch({ align: "right" })}>
-        ≥
+        <AlignRight />
       </button>
       <button type="button" className="hw-ribbon-btn" data-testid="hw-ribbon-align-justify" disabled={cellOff} title={cellOnlyDisabledReason ?? msg.format.alignJustify} onMouseDown={keep} onClick={() => onPatch({ align: "justify" })}>
-        ☰
+        <AlignJustify />
       </button>
 
       {/* Mode hint — 편집 중이면 라이브 선택, 아니면 선택 셀/범위. */}

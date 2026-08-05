@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { modLabel } from "../platform";
 import { useWorkspaceMessages } from "../i18n";
+import { X } from "../icons";
 import type { Anchor, Box, DocContext, Intent, IntentCard, OnAiRequest } from "../types";
 
 /// InlineEditPanel — the per-element INLINE vibe-edit surface (issue 06x): an alternative to the right-hand
@@ -118,7 +119,7 @@ export function InlineEditPanel(props: InlineEditPanelProps) {
           {props.targetLabel}
         </span>
         <button className="hw-inline-x" onClick={props.onClose} title={msg.inlineEdit.closeTitle} aria-label={msg.inlineEdit.closeLabel}>
-          ✕
+          <X />
         </button>
       </div>
 

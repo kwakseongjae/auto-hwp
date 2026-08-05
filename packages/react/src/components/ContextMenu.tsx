@@ -8,8 +8,9 @@ export type ContextMenuItem =
       /** Stable key + testid suffix (`hw-ctx-<key>`). */
       key: string;
       label: string;
-      /** Optional leading glyph. */
-      icon?: string;
+      /** Optional leading icon. A node (SDK `icons.tsx`) or any host-supplied element; a plain string
+       *  still works for backwards compatibility. */
+      icon?: React.ReactNode;
       /** Disabled rows are skipped by keyboard nav and show a reason tooltip (미지원은 조용한 무시 금지). */
       disabled?: boolean;
       title?: string;

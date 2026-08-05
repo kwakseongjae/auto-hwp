@@ -116,7 +116,7 @@ export const koKR: WorkspaceMessages = {
     openLabel: "편집 패널 열기",
     closeLabel: "편집 패널 닫기",
     collapseLabel: "편집 패널 접기",
-    tabVibe: "✦ 바이브 편집",
+    tabVibe: "바이브 편집",
     tabDesign: "디자인",
   },
 

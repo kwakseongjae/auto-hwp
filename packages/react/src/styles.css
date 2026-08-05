@@ -1,6 +1,12 @@
 /* @auto-hwp/react — self-contained styles (no Tailwind dependency for consumers). Namespaced under
  * `hw-` so they don't collide with the host app. Import once: `import "@auto-hwp/react/styles.css"`. */
 
+/* 인라인 아이콘(src/icons.tsx — lucide path 사본, 의존성 0). 버튼의 color 를 그대로 상속하고
+ * 텍스트 라인박스에 끌려가지 않도록 block + shrink 고정한다(글리프 시절의 베이스라인 어긋남 근절). */
+.hw-icon { display: block; flex: 0 0 auto; }
+/* 아이콘만 든 버튼은 광학 중앙 정렬 — 개별 규칙이 없어도 기본으로 맞는다. */
+button > .hw-icon:only-child { margin: 0 auto; }
+
 .hw-workspace {
   --hw-accent: #2563eb;
   --hw-ai: #7c3aed;
@@ -44,6 +50,12 @@
   border: 1px solid #cdd0d6; border-radius: 6px; background: #fff; cursor: pointer;
 }
 .hw-tool:hover { background: #f0f1f3; }
+/* 아이콘 전용 툴바 버튼(줌 −/+, 실행취소/다시실행): 텍스트 버튼과 같은 높이의 정사각 히트영역. */
+.hw-tool-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0; color: var(--hw-muted);
+}
+.hw-tool-icon:hover:not(:disabled) { color: var(--hw-text); }
 .hw-tool:disabled { opacity: 0.4; cursor: default; }
 .hw-tool-accent { background: var(--hw-accent); color: #fff; border-color: var(--hw-accent); }
 .hw-tool-accent:hover { opacity: 0.9; background: var(--hw-accent); }
@@ -93,8 +105,10 @@
 }
 .hw-outline-title { font-size: 12px; font-weight: 600; color: var(--hw-muted); flex: 1; }
 .hw-outline-collapse, .hw-outline-expand {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0;
   font: inherit; font-size: 14px; line-height: 1; color: var(--hw-muted); cursor: pointer;
-  border: 1px solid transparent; border-radius: 6px; background: none; padding: 4px 7px;
+  border: 1px solid transparent; border-radius: 7px; background: none;
 }
 .hw-outline-collapse:hover, .hw-outline-expand:hover { background: #f0f1f3; border-color: #cdd0d6; }
 .hw-outline-expand { margin-top: 8px; }
@@ -334,8 +348,9 @@
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .hw-inline-x {
+  display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0;
   background: none; border: none; color: var(--hw-muted); cursor: pointer;
-  font-size: 12px; line-height: 1; padding: 2px 4px; border-radius: 4px;
+  font-size: 12px; line-height: 1; border-radius: 5px;
 }
 .hw-inline-x:hover { background: rgba(0, 0, 0, 0.06); color: var(--hw-text); }
 .hw-inline-textarea {
@@ -554,7 +569,7 @@
 }
 .hw-ctxmenu-item:hover:not(:disabled), .hw-ctxmenu-item.hw-ctxmenu-active:not(:disabled) { background: #f0f1f3; }
 .hw-ctxmenu-item:disabled { opacity: 0.4; cursor: not-allowed; }
-.hw-ctxmenu-icon { display: inline-flex; width: 16px; justify-content: center; font-size: 12px; color: var(--hw-muted); }
+.hw-ctxmenu-icon { display: inline-flex; align-items: center; width: 16px; justify-content: center; font-size: 12px; color: var(--hw-muted); }
 .hw-ctxmenu-label { flex: 1; }
 .hw-ctxmenu-sep { height: 1px; margin: 4px 6px; background: var(--hw-border); }
 
@@ -592,11 +607,12 @@
 .hw-panel-launcher-bottom { right: 18px; bottom: 18px; }
 .hw-panel-launcher-modal { right: 18px; top: 18px; }
 .hw-sidepanel-tabs {
-  display: grid; grid-template-columns: 1fr 1fr 28px; flex: 0 0 42px;
+  display: grid; grid-template-columns: 1fr 1fr 32px; flex: 0 0 42px;
   padding: 5px 6px 0; background: var(--hw-panel); border-bottom: 1px solid var(--hw-border);
 }
 .hw-sidepanel-tabs button {
-  position: relative; border: 0; background: transparent; color: var(--hw-muted);
+  position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  border: 0; background: transparent; color: var(--hw-muted);
   font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; border-radius: 7px 7px 0 0;
 }
 .hw-sidepanel-tabs button:hover { color: var(--hw-text); background: #f5f5f6; }
@@ -605,17 +621,23 @@
   content: ""; position: absolute; left: 14px; right: 14px; bottom: -1px; height: 2px;
   border-radius: 2px 2px 0 0; background: var(--hw-ai);
 }
+/* 접기 버튼: 28×28 히트영역 + 아이콘 광학 중앙(스크린샷 지적 — 작고 글리프가 베이스라인에 걸렸다). */
 .hw-sidepanel-tabs .hw-sidepanel-collapse {
-  align-self: center; width: 24px; height: 26px; padding: 0; border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  align-self: center; width: 28px; height: 28px; padding: 0; border-radius: 7px;
   color: var(--hw-muted);
 }
 .hw-sidepanel-tabs .hw-sidepanel-collapse::after { display: none; }
 .hw-sidepanel-collapsed { width: 40px; align-items: center; }
 .hw-sidepanel-expand {
-  width: 28px; height: 28px; margin-top: 7px; padding: 0; border: 1px solid var(--hw-border);
-  border-radius: 7px; background: var(--hw-panel); color: var(--hw-muted); font: inherit; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; margin-top: 7px; padding: 0; border: 1px solid var(--hw-border);
+  border-radius: 8px; background: var(--hw-panel); color: var(--hw-muted); font: inherit; cursor: pointer;
 }
 .hw-sidepanel-expand:hover { color: var(--hw-text); background: #f0f1f3; }
+/* 접힘/펼침에서 트리 모양을 고정하기 위한 본문 래퍼(WorkspacePanelFrame 주석 참조).
+   접히면 이 div 만 display:none 이 되고 children 은 계속 마운트된 채 상태를 유지한다. */
+.hw-sidepanel-body { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
 .hw-sidepanel-pane { display: none; flex: 1; min-height: 0; }
 .hw-sidepanel-pane.is-active { display: flex; }
 .hw-sidepanel .hw-chat { width: 100%; height: 100%; border-left: 0; }
@@ -640,7 +662,7 @@
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   padding: 36px 26px; text-align: center; color: var(--hw-muted);
 }
-.hw-design-empty-icon { font-size: 28px; color: #b7bbc4; margin-bottom: 10px; }
+.hw-design-empty-icon { display: flex; color: #b7bbc4; margin-bottom: 10px; }
 .hw-design-empty strong { font-size: 13px; color: #4b5563; }
 .hw-design-empty p { max-width: 250px; font-size: 12px; line-height: 1.55; }
 .hw-design-selection {
@@ -692,9 +714,7 @@
 }
 .hw-design-fill { font-size: 11px; color: var(--hw-muted); }
 .hw-design-align { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-top: 8px; }
-.hw-design-align button:nth-child(1) { text-align: left; }
-.hw-design-align button:nth-child(2) { text-align: center; }
-.hw-design-align button:nth-child(3) { text-align: right; }
+.hw-design-align button { display: inline-flex; align-items: center; justify-content: center; padding: 0; }
 .hw-design-note { margin: 9px 0 0; color: var(--hw-muted); font-size: 10.5px; line-height: 1.45; }
 .hw-design-editing-note {
   display: flex; align-items: center; gap: 9px; margin: 12px 14px 0; padding: 10px 11px;
@@ -930,10 +950,10 @@
 }
 .hw-attachment-unsupported { color: #92400e; border-color: rgba(217, 119, 6, 0.5); background: rgba(217, 119, 6, 0.08); }
 .hw-attachment-thumb { width: 22px; height: 22px; object-fit: cover; border-radius: 4px; display: block; }
-.hw-attachment-icon { font-size: 13px; }
+.hw-attachment-icon { display: inline-flex; align-items: center; color: var(--hw-muted); }
 .hw-attachment-name { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hw-attachment-meta { color: var(--hw-muted); font-size: 10px; }
-.hw-attachment-x { background: none; border: none; color: inherit; cursor: pointer; padding: 0 2px; font-size: 10px; }
+.hw-attachment-x { display: inline-flex; align-items: center; background: none; border: none; color: inherit; cursor: pointer; padding: 1px; border-radius: 3px; }
 .hw-attachment-x:hover { background: rgba(0, 0, 0, 0.1); border-radius: 3px; }
 .hw-attach-error { margin: 0 0 6px; padding: 0 4px; font-size: 11px; color: #b91c1c; }
 
@@ -960,7 +980,7 @@
   border: 1px solid rgba(124, 58, 237, 0.4); background: rgba(124, 58, 237, 0.1);
   padding: 2px 8px; border-radius: 999px;
 }
-.hw-anchor-x { background: none; border: none; color: inherit; cursor: pointer; padding: 0 2px; font-size: 10px; }
+.hw-anchor-x { display: inline-flex; align-items: center; background: none; border: none; color: inherit; cursor: pointer; padding: 1px; border-radius: 3px; }
 .hw-anchor-x:hover { background: rgba(124, 58, 237, 0.25); border-radius: 3px; }
 .hw-composer-row { display: flex; align-items: flex-end; gap: 8px; }
 .hw-textarea {
@@ -987,12 +1007,18 @@
 
 /* the ⌘F capsule: a floating card pinned to the top-right of the workspace, over the document. */
 .hw-find {
-  position: absolute; top: 8px; right: 16px; z-index: 40;
+  /* 툴바 **아래**에 앉힌다. top:8px 이던 시절 캡슐이 툴바 우측 버튼 위를 덮고 있었다 — 툴바가
+     짧아지자(데모 toolbarItems) 실행취소까지 가려져 클릭이 캡슐에 먹혔다(e2e 실측). 캡슐은
+     문서 위 오버레이지 툴바 위 오버레이가 아니다. */
+  position: absolute; top: 52px; right: 16px; z-index: 40;
   display: flex; flex-direction: column; gap: 6px;
   padding: 8px 10px; background: var(--hw-panel);
   border: 1px solid var(--hw-border); border-radius: 10px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
 }
+/* 리본(formatSurface="ribbon")이 켜진 호스트는 툴바 아래 한 줄이 더 있다. FindBar 는 DOM 상 리본
+   다음 형제라 일반 형제 결합자로 정확히 그 경우만 한 줄 더 내린다(JS/클래스 추가 없음). */
+.hw-format-ribbon ~ .hw-find { top: 92px; }
 .hw-find-row { display: flex; align-items: center; gap: 6px; }
 .hw-find-input {
   font: inherit; font-size: 13px; padding: 5px 8px; width: 168px;
@@ -1005,7 +1031,8 @@
   font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 .hw-find-nav, .hw-find-close {
-  font: inherit; font-size: 12px; line-height: 1; padding: 4px 7px;
+  display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0;
+  font: inherit; font-size: 12px; line-height: 1;
   border: 1px solid transparent; border-radius: 6px; background: none; color: var(--hw-muted); cursor: pointer;
 }
 .hw-find-nav:hover:not(:disabled), .hw-find-close:hover { background: #f0f1f3; color: var(--hw-text); }

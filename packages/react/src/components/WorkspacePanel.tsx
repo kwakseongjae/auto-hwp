@@ -3,6 +3,7 @@ import type { OnAiRequest } from "@auto-hwp/editor-core";
 import type { WorkspaceSidePanel } from "./HwpWorkspace";
 import { ChatPanel } from "./ChatPanel";
 import { DesignPanel } from "./DesignPanel";
+import { ChevronLeft, ChevronRight, Sparkles, X } from "../icons";
 import { useWorkspaceMessages } from "../i18n";
 
 const ignoreDesignPatch = () => {};
@@ -36,52 +37,70 @@ export function WorkspacePanelFrame({
   const msg = useWorkspaceMessages();
   const frameClass = ["hw-sidepanel", `hw-sidepanel-${presentation}`, className].filter(Boolean).join(" ");
 
-  if (!open) {
-    if (presentation === "unstyled") return null;
-    if (presentation === "rail") {
-      return (
-        <aside className={`${frameClass} hw-sidepanel-collapsed`} data-testid="hw-sidepanel">
-          <button
-            type="button"
-            className="hw-sidepanel-expand"
-            aria-label={msg.panel.openLabel}
-            title={msg.panel.openLabel}
-            onClick={() => onOpenChange?.(true)}
-          >
-            ‹
-          </button>
-        </aside>
-      );
-    }
-    return (
-      <button
-        type="button"
-        className={`hw-panel-launcher hw-panel-launcher-${presentation}`}
-        aria-label={msg.panel.openLabel}
-        onClick={() => onOpenChange?.(true)}
-      >
-        ✦
-      </button>
-    );
-  }
-
+  // ⚠️ 접기/열기는 **표시**만 바꾼다. children 을 언마운트하면 대화·작성 중이던 초안·검토 대기 중인
+  // 제안이 통째로 날아간다(사용자 피드백: "패널을 접었다 펴면 채팅이 초기화된다"). 그래서 트리 모양은
+  // 열림/닫힘에서 **동일하게 유지**하고 class/inline display 만 갈아 끼운다 — children 이 같은 위치에
+  // 머물러야 리액트가 같은 인스턴스로 재조정하고 상태가 살아남는다.
+  //   · rail  닫힘 → 40px 스트립 + 펼치기 버튼(본문만 숨김)
+  //   · bottom/modal 닫힘 → 런처 버튼 + 레이어 통째 display:none
+  // children 슬롯을 조건부 형제(`{cond && …}`)로 감싸지 마라 — false 도 자리를 차지하는 정적 JSX
+  // 자식 배열이라 위치는 유지되지만, 래퍼 엘리먼트가 바뀌면 그 순간 언마운트다.
+  const hidden = { display: "none" } as const;
+  const railCollapsed = !open && presentation === "rail";
   const panel = (
-    <aside className={frameClass} data-testid="hw-sidepanel" aria-label={ariaLabel ?? msg.panel.label}>
-      {children}
+    <aside
+      className={railCollapsed ? `${frameClass} hw-sidepanel-collapsed` : frameClass}
+      data-testid="hw-sidepanel"
+      aria-label={ariaLabel ?? msg.panel.label}
+      style={!open && presentation !== "rail" ? hidden : undefined}
+    >
+      {railCollapsed && (
+        <button
+          type="button"
+          className="hw-sidepanel-expand"
+          aria-label={msg.panel.openLabel}
+          title={msg.panel.openLabel}
+          onClick={() => onOpenChange?.(true)}
+        >
+          <ChevronLeft size={16} />
+        </button>
+      )}
+      <div className="hw-sidepanel-body" style={open ? undefined : hidden} aria-hidden={open ? undefined : true}>
+        {children}
+      </div>
     </aside>
   );
 
   if (presentation === "rail" || presentation === "unstyled") return panel;
   return (
-    <div className={`hw-panel-layer hw-panel-layer-${presentation}`} data-testid="hw-panel-layer">
-      <button
-        type="button"
-        className="hw-panel-backdrop"
-        aria-label={msg.panel.closeLabel}
-        onClick={() => onOpenChange?.(false)}
-      />
-      {panel}
-    </div>
+    <>
+      {!open && (
+        <button
+          type="button"
+          className={`hw-panel-launcher hw-panel-launcher-${presentation}`}
+          aria-label={msg.panel.openLabel}
+          title={msg.panel.openLabel}
+          onClick={() => onOpenChange?.(true)}
+        >
+          <Sparkles size={16} />
+        </button>
+      )}
+      <div
+        className={`hw-panel-layer hw-panel-layer-${presentation}`}
+        data-testid="hw-panel-layer"
+        style={open ? undefined : hidden}
+      >
+        {open && (
+          <button
+            type="button"
+            className="hw-panel-backdrop"
+            aria-label={msg.panel.closeLabel}
+            onClick={() => onOpenChange?.(false)}
+          />
+        )}
+        {panel}
+      </div>
+    </>
   );
 }
 
@@ -172,6 +191,9 @@ export function WorkspacePanel({
           className={tab === "vibe" ? "is-active" : ""}
           onClick={() => setTab("vibe")}
         >
+          {/* 장식 글리프(✦)는 라벨에서 뺐다 — 폰트마다 다르게 그려지는 문자 대신 벡터 아이콘 하나로.
+              라벨 문자열은 카탈로그(i18n)에 그대로 남아 호스트가 통째로 갈아끼울 수 있다. */}
+          <Sparkles size={13} />
           {msg.panel.tabVibe}
         </button>
         <button
@@ -191,7 +213,7 @@ export function WorkspacePanel({
           title={presentation === "rail" ? msg.panel.collapseLabel : msg.panel.closeLabel}
           onClick={() => setOpen(false)}
         >
-          {presentation === "rail" ? "›" : "×"}
+          {presentation === "rail" ? <ChevronRight size={16} /> : <X size={16} />}
         </button>
       </div>
 
@@ -211,7 +233,8 @@ export function WorkspacePanel({
           isMock={isMock}
           aiNotice={notice}
           focusToken={api.focusToken}
-          active={tab === "vibe"}
+          // 접혀 있으면 보이지 않는다 — 숨은 textarea 에 포커스를 주지 않는다(펼치는 순간 다시 잡는다).
+          active={tab === "vibe" && open}
           previewCards={api.previewCards as never}
           onRevert={api.revert as never}
           undoDepth={api.undoDepth}

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useWorkspaceMessages } from "../i18n";
+import { ChevronDown, ChevronUp, X } from "../icons";
 
 export interface FindBarProps {
   /** The current 찾을 내용 value (controlled by the workspace). */
@@ -109,17 +110,17 @@ export function FindBar(props: FindBarProps) {
           {busy ? msg.find.searching : !searched ? "" : hasMatches ? `${ordinal}/${count}` : msg.find.noResults}
         </span>
         <button className="hw-find-nav" data-testid="hw-find-prev" title={msg.find.prevTitle} disabled={!hasMatches} onClick={onPrev} aria-label={msg.find.prevLabel}>
-          ↑
+          <ChevronUp />
         </button>
         <button className="hw-find-nav" data-testid="hw-find-next" title={msg.find.nextTitle} disabled={!hasMatches} onClick={onNext} aria-label={msg.find.nextLabel}>
-          ↓
+          <ChevronDown />
         </button>
         <label className="hw-find-case" title={msg.find.caseSensitive}>
           <input type="checkbox" checked={caseSensitive} onChange={(e) => onCaseToggle(e.currentTarget.checked)} />
           Aa
         </label>
         <button className="hw-find-close" data-testid="hw-find-close" title={msg.find.closeTitle} onClick={onClose} aria-label={msg.find.closeLabel}>
-          ✕
+          <X />
         </button>
       </div>
       <div className="hw-find-row">

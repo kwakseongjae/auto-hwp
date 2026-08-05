@@ -80,7 +80,9 @@ describe("WorkspacePanel", () => {
         <div>내 디자인</div>
       </WorkspacePanelFrame>,
     );
-    expect(screen.getByText("내 디자인").parentElement?.className).toContain("hw-sidepanel-unstyled");
+    // U1 구조 변경: children 은 이제 접힘/펼침에서 위치가 고정된 `.hw-sidepanel-body` 안에 산다
+    // (언마운트=상태 소실을 막기 위한 래퍼). 프리셋 클래스는 여전히 바깥 aside 가 갖는다.
+    expect(screen.getByText("내 디자인").closest(".hw-sidepanel")?.className).toContain("hw-sidepanel-unstyled");
   });
 
   it("기본은 바이브이고, 선택이 생기면 디자인으로 자동 전환한다", async () => {

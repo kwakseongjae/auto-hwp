@@ -3,6 +3,7 @@ import type { Anchor, Box, CellAddr, CellDir, DocContext, EngineAdapter, ImageBo
 import { boundariesToRatios, remapFragmentHeights, appliedReflectsDrag, firstRunStyle, columnWidthMm, setColumnWidthMm, equalizeColumns, imageInsertSize, imageSizeToHwpunit, appliedReflectsResize, DRAG_THRESHOLD_PX } from "@auto-hwp/editor-core";
 import { OutlinePanel } from "./OutlinePanel";
 import { StatusBar } from "./StatusBar";
+import { ArrowDownToLine, ArrowUpToLine, Bold, Minus, MoveHorizontal, PaintBucket, Pencil, Plus, Redo2, Sparkles, Undo2 } from "../icons";
 import { pageAtReference } from "../outline";
 import { runsUnchanged, applyLiveStyle, readCaretStyle } from "../richedit";
 import { modLabel } from "../platform";
@@ -219,6 +220,20 @@ export interface WorkspaceDesignSelection {
   canCellStyle: boolean;
 }
 
+/** One switchable control in the global top toolbar (see `HwpWorkspaceProps.toolbarItems`).
+ *  `"zoom"` covers the −/%/+ trio, which only makes sense as a group. */
+export type WorkspaceToolbarItem =
+  | "zoom"
+  | "undo"
+  | "redo"
+  | "insertTable"
+  | "insertImage"
+  | "font"
+  | "normalize"
+  | "exportHtml"
+  | "exportHwpx"
+  | "exportPdf";
+
 export interface HwpWorkspaceProps {
   /** The backend seam (WasmAdapter for the web, or a host adapter). */
   adapter: EngineAdapter;
@@ -264,6 +279,12 @@ export interface HwpWorkspaceProps {
    *  toolbar row; `"inspector"` removes that duplicate surface and routes formatting through the
    *  host-owned right design panel. Document/insert/export tools remain in the global top bar. */
   formatSurface?: "ribbon" | "inspector";
+  /** Opt-in allowlist for the GLOBAL top toolbar (additive — omit for the full bar, which is what every
+   *  existing host keeps getting). Pass the subset you want and the rest of the bar is hidden — the
+   *  FEATURES are untouched (context menu, keyboard shortcuts and the ops behind them keep working);
+   *  this only controls what the top bar advertises. A product demo that wants a calm bar can ship
+   *  `["zoom", "undo", "redo", "exportHtml", "exportPdf"]`. */
+  toolbarItems?: readonly WorkspaceToolbarItem[];
   /** Opt-in (issue 044): intercept the HTML/PDF export buttons. Called with the export payload
    *  (`Uint8Array` for PDF, `string` for HTML), a suggested filename, and the MIME type. When omitted
    *  the workspace uses the WEB default — a browser `<a download>` — UNCHANGED (web vitest pins this).
@@ -3333,6 +3354,11 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     return msg.workspace.selectedCount(selection.length);
   }, [selection, msg]);
 
+  // 툴바 노출 필터(additive): `toolbarItems` 를 넘기지 않으면 **전부 노출**이라 기존 소비자는 무영향.
+  // 숨김은 표시 계약일 뿐 기능 제거가 아니다 — 컨텍스트 메뉴/단축키/ops 는 그대로 동작한다.
+  const toolbarItems = props.toolbarItems;
+  const showTool = (key: WorkspaceToolbarItem): boolean => !toolbarItems || toolbarItems.includes(key);
+
   // issue 077: the tree is built first and PUBLISHED through the messages provider below — a wrapper that
   // renders no DOM, so the markup (and every existing snapshot) is unchanged.
   const tree = (
@@ -3353,29 +3379,37 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         <span className="hw-brand">{props.brand ?? "auto-hwp"}</span>
         <span className="hw-doc-meta">{meta ? msg.workspace.docMeta(meta.format.toUpperCase(), meta.pages) : msg.workspace.noDocument}</span>
         <span className="hw-spacer" />
-        <button className="hw-tool" onClick={() => zoomAtCenter(1 / ZOOM_STEP)} title={msg.workspace.zoomOut} disabled={!meta}>
-          －
-        </button>
-        <button className="hw-zoom" onClick={zoomReset} title="100% (⌘0)" disabled={!meta}>
-          {Math.round(zoom * 100)}%
-        </button>
-        <button className="hw-tool" onClick={() => zoomAtCenter(ZOOM_STEP)} title={msg.workspace.zoomIn} disabled={!meta}>
-          ＋
-        </button>
+        {showTool("zoom") && (
+          <>
+            <button className="hw-tool hw-tool-icon" onClick={() => zoomAtCenter(1 / ZOOM_STEP)} title={msg.workspace.zoomOut} aria-label={msg.workspace.zoomOut} disabled={!meta}>
+              <Minus />
+            </button>
+            <button className="hw-zoom" onClick={zoomReset} title="100% (⌘0)" disabled={!meta}>
+              {Math.round(zoom * 100)}%
+            </button>
+            <button className="hw-tool hw-tool-icon" onClick={() => zoomAtCenter(ZOOM_STEP)} title={msg.workspace.zoomIn} aria-label={msg.workspace.zoomIn} disabled={!meta}>
+              <Plus />
+            </button>
+          </>
+        )}
         {/* 버튼과 키보드(⌘Z/⌘⇧Z)는 같은 레인. ⚠️ title 문자열은 그대로 둔다 — 테스트/e2e 가
             `getByTitle("실행취소")` 로 정확히 이 문자열을 집는다(단축키를 덧붙이면 3건이 깨진다).
             발견 가능성은 aria-keyshortcuts 로 준다(스크린리더 + 접근성 트리에만 노출). */}
-        <button className="hw-tool" onClick={undo} disabled={!meta} title={msg.workspace.undo} aria-keyshortcuts="Meta+Z Control+Z">
-          ↶
-        </button>
-        <button className="hw-tool" onClick={redo} disabled={!meta} title={msg.workspace.redo} aria-keyshortcuts="Meta+Shift+Z Control+Y">
-          ↷
-        </button>
-        {editingOn && <TableInsertButton disabled={!canEdit} onPick={(r, c) => void onInsertTable(r, c)} />}
+        {showTool("undo") && (
+          <button className="hw-tool hw-tool-icon" onClick={undo} disabled={!meta} title={msg.workspace.undo} aria-label={msg.workspace.undo} aria-keyshortcuts="Meta+Z Control+Z">
+            <Undo2 />
+          </button>
+        )}
+        {showTool("redo") && (
+          <button className="hw-tool hw-tool-icon" onClick={redo} disabled={!meta} title={msg.workspace.redo} aria-label={msg.workspace.redo} aria-keyshortcuts="Meta+Shift+Z Control+Y">
+            <Redo2 />
+          </button>
+        )}
+        {editingOn && showTool("insertTable") && <TableInsertButton disabled={!canEdit} onPick={(r, c) => void onInsertTable(r, c)} />}
         {/* issue 050: 이미지 업로드 — the toolbar twin of the drop zone (파일 픽커 → 현재 선택/문서 끝).
             The hidden input carries `accept` so the OS picker pre-filters to PNG/JPEG; the ENGINE still
             re-validates the magic bytes (a spoofed extension is refused). Shown with the editing chrome. */}
-        {editingOn && (
+        {editingOn && showTool("insertImage") && (
           <>
             <button className="hw-tool" onClick={() => imageInputRef.current?.click()} disabled={!canEdit} title={msg.workspace.insertImageTitle}>
               {msg.workspace.insertImage}
@@ -3394,7 +3428,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
             />
           </>
         )}
-        {props.fontCatalog && !inspectorFormatting && (
+        {props.fontCatalog && !inspectorFormatting && showTool("font") && (
           <FontPicker
             catalog={props.fontCatalog}
             selected={selectedFont?.family ?? null}
@@ -3404,7 +3438,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
             onError={(m) => toast(m)}
           />
         )}
-        {normalizeSupported && (
+        {normalizeSupported && showTool("normalize") && (
           <button
             className={`hw-tool${normalizeOn ? " hw-tool-active" : ""}`}
             onClick={() => void toggleNormalize()}
@@ -3419,15 +3453,21 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
             {normalizeBusy ? msg.workspace.normalizeBusy : msg.workspace.normalize}
           </button>
         )}
-        <button className="hw-tool" onClick={exportHtml} disabled={!meta} title={msg.workspace.downloadHtml}>
-          HTML
-        </button>
-        <button className="hw-tool" onClick={exportHwpx} disabled={!meta} title={msg.workspace.downloadHwpx}>
-          HWPX
-        </button>
-        <button className="hw-tool hw-tool-accent" onClick={exportPdf} disabled={!meta} title={msg.workspace.downloadPdf}>
-          PDF
-        </button>
+        {showTool("exportHtml") && (
+          <button className="hw-tool" onClick={exportHtml} disabled={!meta} title={msg.workspace.downloadHtml}>
+            HTML
+          </button>
+        )}
+        {showTool("exportHwpx") && (
+          <button className="hw-tool" onClick={exportHwpx} disabled={!meta} title={msg.workspace.downloadHwpx}>
+            HWPX
+          </button>
+        )}
+        {showTool("exportPdf") && (
+          <button className="hw-tool hw-tool-accent" onClick={exportPdf} disabled={!meta} title={msg.workspace.downloadPdf}>
+            PDF
+          </button>
+        )}
       </div>
 
       {/* issue 048 → 06x: the PERSISTENT format ribbon is now the SOLE format surface (the 028 per-selection
@@ -3787,14 +3827,14 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           type: "action",
           key: "edit",
           label: msg.workspace.ctxEditText,
-          icon: "✎",
+          icon: <Pencil />,
           onSelect: () => void (engineCaretEditing ? focusEngineCaretAt(cm.click) : openEditorAt(cm.click)),
         });
         if (cm.kind === "cell") {
           const fmtOk = !!fmtActions.fmtRange;
           const fmtWhy = fmtOk ? undefined : msg.workspace.formatCellUnavailable;
-          items.push({ type: "action", key: "bold", label: editTarget?.curBold ? msg.workspace.ctxBoldOff : msg.workspace.ctxBold, icon: "B", disabled: !fmtOk, title: fmtWhy, onSelect: fmtActions.bold });
-          items.push({ type: "action", key: "shade", label: msg.workspace.ctxShade, icon: "◧", disabled: !fmtOk, title: fmtWhy, onSelect: () => shadeInputRef.current?.click() });
+          items.push({ type: "action", key: "bold", label: editTarget?.curBold ? msg.workspace.ctxBoldOff : msg.workspace.ctxBold, icon: <Bold />, disabled: !fmtOk, title: fmtWhy, onSelect: fmtActions.bold });
+          items.push({ type: "action", key: "shade", label: msg.workspace.ctxShade, icon: <PaintBucket />, disabled: !fmtOk, title: fmtWhy, onSelect: () => shadeInputRef.current?.click() });
           // issue 047: 열 너비… → the precise mm + 균등 분배 dialog (opened at the menu anchor). Needs a
           // table with ≥2 resolvable column boundaries; disabled with a reason otherwise (미지원은 조용한
           // 무시 금지). Delegates to the SAME `onColCommit` apply-verify the drag handles use.
@@ -3803,7 +3843,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
             type: "action",
             key: "colwidth",
             label: msg.workspace.ctxColumnWidth,
-            icon: "↔",
+            icon: <MoveHorizontal />,
             disabled: !colOk,
             title: colOk ? undefined : msg.workspace.ctxColumnWidthDisabled,
             onSelect: () => setColWidthDialog({ x: cm.x, y: cm.y }),
@@ -3811,12 +3851,12 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           if (cm.cell) {
             const { section, block, row, cols } = cm.cell;
             items.push({ type: "separator", key: "sep-row" });
-            items.push({ type: "action", key: "row-above", label: msg.workspace.ctxInsertRowAbove, icon: "↥", onSelect: () => void onInsertRows(section, block, row, cols) });
-            items.push({ type: "action", key: "row-below", label: msg.workspace.ctxInsertRowBelow, icon: "↧", onSelect: () => void onInsertRows(section, block, row + 1, cols) });
+            items.push({ type: "action", key: "row-above", label: msg.workspace.ctxInsertRowAbove, icon: <ArrowUpToLine />, onSelect: () => void onInsertRows(section, block, row, cols) });
+            items.push({ type: "action", key: "row-below", label: msg.workspace.ctxInsertRowBelow, icon: <ArrowDownToLine />, onSelect: () => void onInsertRows(section, block, row + 1, cols) });
           }
         }
         items.push({ type: "separator", key: "sep-ai" });
-        items.push({ type: "action", key: "ai", label: msg.workspace.ctxSendToAi, disabled: !canEdit, title: canEdit ? undefined : msg.workspace.ctxOpenDocFirst, onSelect: onSendToAi });
+        items.push({ type: "action", key: "ai", label: msg.workspace.ctxSendToAi, icon: <Sparkles />, disabled: !canEdit, title: canEdit ? undefined : msg.workspace.ctxOpenDocFirst, onSelect: onSendToAi });
         return <ContextMenu x={cm.x} y={cm.y} items={items} onClose={close} />;
       })()}
       {/* issue 047: the 열 너비 mm + 균등 분배 dialog. Its readouts (currentMm / column span) come LIVE from

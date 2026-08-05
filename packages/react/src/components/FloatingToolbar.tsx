@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import type { PageBox } from "../coords";
 import { computeFloatingPosition } from "../floatingPosition";
 import { useWorkspaceMessages } from "../i18n";
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight } from "../icons";
 
 /** Text alignment the toolbar can apply — maps straight onto `SetCellRangeFmt.align` (INTENT-SCHEMA §6.8,
  *  via editor-core `formatCellRange`). No new op is introduced (issue 028: surface redesign only). */
@@ -181,16 +182,16 @@ export function FloatingToolbar(props: FloatingToolbarProps) {
 
       {/* 정렬 */}
       <button className="hw-floatbar-btn" data-testid="hw-fmt-align-left" disabled={fmtDisabled} title={fmtTitle(msg.format.alignLeft)} onClick={() => onAlign("left")}>
-        ≤
+        <AlignLeft />
       </button>
       <button className="hw-floatbar-btn" data-testid="hw-fmt-align-center" disabled={fmtDisabled} title={fmtTitle(msg.format.alignCenter)} onClick={() => onAlign("center")}>
-        ≡
+        <AlignCenter />
       </button>
       <button className="hw-floatbar-btn" data-testid="hw-fmt-align-right" disabled={fmtDisabled} title={fmtTitle(msg.format.alignRight)} onClick={() => onAlign("right")}>
-        ≥
+        <AlignRight />
       </button>
       <button className="hw-floatbar-btn" data-testid="hw-fmt-align-justify" disabled={fmtDisabled} title={fmtTitle(msg.format.alignJustify)} onClick={() => onAlign("justify")}>
-        ☰
+        <AlignJustify />
       </button>
 
       <span className="hw-floatbar-sep" aria-hidden />

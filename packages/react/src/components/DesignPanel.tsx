@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { WorkspaceDesignSelection } from "./HwpWorkspace";
 import type { FormatRibbonPatch } from "./FormatRibbon";
 import { useWorkspaceMessages } from "../i18n";
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, MousePointerClick } from "../icons";
 
 export interface DesignPanelProps {
   selection: WorkspaceDesignSelection | null;
@@ -25,7 +26,7 @@ export function DesignPanel({ selection, fonts, onPatch, textEditing = false }: 
   if (!selection) {
     return (
       <section className="hw-design hw-design-empty" data-testid="hw-design-panel">
-        <div className="hw-design-empty-icon" aria-hidden>◇</div>
+        <div className="hw-design-empty-icon" aria-hidden><MousePointerClick size={22} /></div>
         <strong>{msg.design.emptyTitle}</strong>
         <p>{msg.design.emptyHint}</p>
       </section>
@@ -166,10 +167,10 @@ export function DesignPanel({ selection, fonts, onPatch, textEditing = false }: 
           <button type="button" disabled={!selection.canCellStyle} onClick={() => onPatch({ shade: null })}>{msg.design.clear}</button>
         </div>
         <div className="hw-design-align" role="group" aria-label={msg.format.align}>
-          <button type="button" disabled={!selection.canCellStyle} onClick={() => onPatch({ align: "left" })} title={msg.format.alignLeft}>≡</button>
-          <button type="button" disabled={!selection.canCellStyle} onClick={() => onPatch({ align: "center" })} title={msg.format.alignCenter}>≡</button>
-          <button type="button" disabled={!selection.canCellStyle} onClick={() => onPatch({ align: "right" })} title={msg.format.alignRight}>≡</button>
-          <button type="button" disabled={!selection.canCellStyle} onClick={() => onPatch({ align: "justify" })} title={msg.format.alignJustify}>☰</button>
+          <button type="button" disabled={!selection.canCellStyle} onClick={() => onPatch({ align: "left" })} title={msg.format.alignLeft} aria-label={msg.format.alignLeft}><AlignLeft /></button>
+          <button type="button" disabled={!selection.canCellStyle} onClick={() => onPatch({ align: "center" })} title={msg.format.alignCenter} aria-label={msg.format.alignCenter}><AlignCenter /></button>
+          <button type="button" disabled={!selection.canCellStyle} onClick={() => onPatch({ align: "right" })} title={msg.format.alignRight} aria-label={msg.format.alignRight}><AlignRight /></button>
+          <button type="button" disabled={!selection.canCellStyle} onClick={() => onPatch({ align: "justify" })} title={msg.format.alignJustify} aria-label={msg.format.alignJustify}><AlignJustify /></button>
         </div>
         {!selection.canCellStyle && <p className="hw-design-note">{msg.design.cellOnlyNote}</p>}
       </div>}
