@@ -5,8 +5,24 @@
 
 - 모델: `openai/gpt-5.6-luna`($0.10/M 입력 · $0.60/M 출력). 모델·단가를 바꾸면 한도도 함께 재산정한다.
 - 비용 방어선: `DAILY_CAP=2000`(전체) + `PER_IP_CAP=20`(1인). 유효한 요청만 차감한다.
-  요청당 ~$0.0005(출력 상한 1024토큰을 다 써도 ~$0.001)이라 하루 최대 $1.0~2.1(<$5).
+  요청당 최악 ≈ $0.00248(입력·출력 상한 동시) → 하루 최대 **$4.95(<$5)**. 실측 기준 $1~2/일.
+  수치 유도는 `wrangler.toml`의 주석과 `src/index.ts`의 `MAX_TOKENS_CEILING` 주석에 있다.
 - 프롬프트는 워커가 `@auto-hwp/ai-protocol`로 조립(앱과 같은 계약) → 출력은 우리 JSON Intent로 제한.
+- 출력 예산 `MAX_TOKENS=2048` + `REASONING_EFFORT=low`: gpt-5.6-luna는 **추론 토큰이 `max_tokens`에
+  함께 계산**돼, 1024에서는 다중 셀 채움(SetTableCell 약 10건) JSON이 잘리고 전량 드롭됐다(이슈 1-(1)).
+
+## 응답 계약 (사유 코드 — additive)
+
+`200 {"intents": [...]}`가 기본이고, 제안이 비었거나 일부만 살아남았을 때만 필드가 **추가로** 붙는다
+(모르는 필드를 무시하는 기존 클라이언트는 그대로 동작 — 불변식 7):
+
+| `reason` | 언제 | `intents` |
+|---|---|---|
+| `truncated` | 상류가 `finish_reason: "length"` — 응답 JSON이 배열 중간에서 잘림 | 온전히 닫힌 Intent만 구제(반쪽은 폐기) |
+| `no_valid_intents` | 모델이 답했으나 화이트리스트/구조 검증을 통과한 게 없음(또는 진짜 변경 없음) | `[]` |
+| `upstream_error` | 프로바이더 호출 자체 실패 — 이때만 HTTP 502 + `error` | 없음 |
+
+`message`는 바로 노출 가능한 한국어 문장(폴백)이다. 자체 i18n이 있는 호스트는 `reason`으로 분기하라.
 
 > `RATELIMIT`은 Workers KV라 **eventual consistency**이며, 동시 요청에 대한 절대 비용 상한은 아니다.
 > Cloudflare도 원자적 read-modify-write에는 Durable Objects를 권장한다. 현재 값은 소규모 공개 데모의
@@ -54,8 +70,18 @@ NEXT_PUBLIC_DEMO_AI_URL="https://autohwp-demo-ai.<계정>.workers.dev" node apps
 `wrangler.toml`의 `DAILY_CAP`/`PER_IP_CAP`/`MAX_TOKENS`를 고치고 `npm run deploy`. 실사용 비용은
 OpenRouter 대시보드에서 확인. 카운터는 UTC 자정에 자동 리셋(키에 날짜 + TTL 25h).
 
+⚠ `MAX_TOKENS`는 코드 상한(`MAX_TOKENS_CEILING`)이기도 하다 — 예산을 다시 계산하지 않고는 못 올린다
+(상한 초과 설정은 부팅 시 503으로 **실패시킨다**). `REASONING_EFFORT`는 `minimal|low|medium|high`
+중 하나이며, 빈 문자열이면 상류에 필드를 보내지 않는다(즉시 롤백 스위치).
+
 ## 로그
 
 ```bash
 npx wrangler tail   # 실시간 요청 로그(429 한도 도달 등)
 ```
+
+빈/절단 응답에는 워커가 `{"event":"empty_or_truncated", finish_reason, completion_tokens, intents,
+salvaged, drops}` 한 줄을 `console.warn`으로 남긴다(**요청 본문은 로그하지 않는다** — 카운트/사유만).
+`wrangler tail`은 워커가 배포된 **그 Cloudflare 계정**으로 로그인돼 있어야 한다. 다른 계정으로
+로그인돼 있으면 `Authentication error [code: 10000]` 또는 `This Worker does not exist on your
+account [code: 10007]`가 뜨고 로그를 전혀 볼 수 없다.

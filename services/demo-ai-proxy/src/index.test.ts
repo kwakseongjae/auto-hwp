@@ -21,7 +21,8 @@ function env(kv: FakeKv, overrides: Record<string, unknown> = {}) {
     MODEL: "openai/gpt-5.6-luna",
     DAILY_CAP: "2000",
     PER_IP_CAP: "20",
-    MAX_TOKENS: "1024",
+    MAX_TOKENS: "2048",
+    REASONING_EFFORT: "low",
     ...overrides,
   };
 }
@@ -48,9 +49,9 @@ function validBody(extra: Record<string, unknown> = {}) {
   };
 }
 
-function mockUpstream() {
+function mockUpstream(choice: Record<string, unknown> = { message: { content: "[]" } }) {
   const upstream = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) =>
-    new Response(JSON.stringify({ choices: [{ message: { content: "[]" } }] }), {
+    new Response(JSON.stringify({ choices: [choice] }), {
       status: 200,
       headers: { "content-type": "application/json" },
     }),
@@ -58,6 +59,13 @@ function mockUpstream() {
   vi.stubGlobal("fetch", upstream);
   return upstream;
 }
+
+/** 이슈 1-(1) 실측 실패의 상류 모습: 다중 SetTableCell JSON이 배열 중간에서 끊긴 채
+ *  `finish_reason: "length"`로 돌아온다(온전한 2건 + 반쪽 1건). */
+const TRUNCATED_CONTENT =
+  '[{"intent":"SetTableCell","section":0,"index":10,"row":0,"col":3,"text":"오토케"},' +
+  '{"intent":"SetTableCell","section":0,"index":10,"row":1,"col":3,"text":"모바일 앱(1개)"},' +
+  '{"intent":"SetTableCell","section":0,"index":10,"row":5,"col":1,"tex';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -82,7 +90,8 @@ describe("demo AI proxy request and cost guards", () => {
       { ALLOWED_ORIGIN: "" },
       { DAILY_CAP: "NaN" },
       { PER_IP_CAP: "0" },
-      { MAX_TOKENS: "1025" },
+      { MAX_TOKENS: "2049" },
+      { REASONING_EFFORT: "ultra" },
       { DAILY_CAP: "10", PER_IP_CAP: "20" },
     ]) {
       const kv = fakeKv();
@@ -166,8 +175,78 @@ describe("demo AI proxy request and cost guards", () => {
     // (모델을 바꾸면 wrangler.toml의 DAILY_CAP도 새 단가로 재계산해야 한다).
     expect(body.model).toBe("openai/gpt-5.6-luna");
     expect(body.provider).toEqual({ zdr: true });
-    expect(body.max_tokens).toBe(1024);
+    // 1-(1): 출력 예산은 2048(추론 토큰 포함) — wrangler.toml 비용 재계산과 한 벌이다.
+    expect(body.max_tokens).toBe(2048);
+    expect((body as unknown as { reasoning?: unknown }).reasoning).toEqual({ effort: "low" });
     expect(body.messages[1]?.content).not.toContain("attackerPayload");
     expect(body.messages[1]?.content).not.toContain("never forward me");
+  });
+
+  it("omits the reasoning field when REASONING_EFFORT is blank (rollback switch)", async () => {
+    const upstream = mockUpstream();
+    const res = await worker.fetch(request(validBody()), env(fakeKv(), { REASONING_EFFORT: "" }) as never);
+    expect(res.status).toBe(200);
+    const body = JSON.parse(String((upstream.mock.calls[0]?.[1] as RequestInit).body)) as Record<string, unknown>;
+    expect(body.reasoning).toBeUndefined();
+  });
+});
+
+// ── 이슈 1-(1): 빈 제안에 침묵하지 않는다 (사유코드 + 절단 구제) ────────────────────────────────
+describe("empty-proposal honesty", () => {
+  it("salvages the COMPLETE intents from a truncated response and says why", async () => {
+    mockUpstream({ message: { content: TRUNCATED_CONTENT }, finish_reason: "length" });
+    const res = await worker.fetch(request(validBody()), env(fakeKv()) as never);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { intents: unknown[]; reason?: string; message?: string };
+    // 온전한 2건만 회수하고 반쪽 1건은 버린다(deny_unknown 규율).
+    expect(body.intents).toHaveLength(2);
+    expect(body.intents[1]).toMatchObject({ intent: "SetTableCell", row: 1, col: 3 });
+    expect(body.reason).toBe("truncated");
+    expect(body.message).toContain("잘렸");
+  });
+
+  it("reports `truncated` (not silence) when nothing at all survives the cut", async () => {
+    mockUpstream({ message: { content: '[{"intent":"SetTableCell","sect' }, finish_reason: "length" });
+    const res = await worker.fetch(request(validBody()), env(fakeKv()) as never);
+    const body = (await res.json()) as { intents: unknown[]; reason?: string };
+    expect(body.intents).toEqual([]);
+    expect(body.reason).toBe("truncated");
+  });
+
+  it("reports `no_valid_intents` for an empty or non-whitelisted answer", async () => {
+    mockUpstream();
+    const empty = (await (await worker.fetch(request(validBody()), env(fakeKv()) as never)).json()) as { reason?: string };
+    expect(empty.reason).toBe("no_valid_intents");
+
+    vi.unstubAllGlobals();
+    mockUpstream({ message: { content: '[{"intent":"DropTableColumn","section":0,"index":1}]' } });
+    const dropped = (await (await worker.fetch(request(validBody()), env(fakeKv()) as never)).json()) as {
+      intents: unknown[];
+      reason?: string;
+    };
+    expect(dropped.intents).toEqual([]);
+    expect(dropped.reason).toBe("no_valid_intents");
+  });
+
+  it("carries NO reason when the proposal is good (additive — old clients unaffected)", async () => {
+    mockUpstream({
+      message: { content: '[{"intent":"SetTableCell","section":0,"index":10,"row":0,"col":3,"text":"오토케"}]' },
+      finish_reason: "stop",
+    });
+    const body = (await (await worker.fetch(request(validBody()), env(fakeKv()) as never)).json()) as {
+      intents: unknown[];
+      reason?: string;
+      message?: string;
+    };
+    expect(body.intents).toHaveLength(1);
+    expect(body.reason).toBeUndefined();
+    expect(body.message).toBeUndefined();
+  });
+
+  it("tags an upstream failure with `upstream_error`", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("nope", { status: 500 })));
+    const res = await worker.fetch(request(validBody()), env(fakeKv()) as never);
+    expect(res.status).toBe(502);
+    expect((await res.json() as { reason?: string }).reason).toBe("upstream_error");
   });
 });

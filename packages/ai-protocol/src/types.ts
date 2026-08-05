@@ -143,12 +143,28 @@ export interface Citation {
   title: string;
 }
 
+/** Why a proposal came back EMPTY (or only partial) — additive diagnosis so the host never has to show a
+ *  silent "제안 0건" (이슈 1-(1) 실사용 실패: 다중 셀 채움이 상류 절단으로 전량 드롭됐는데 클라는 이유를
+ *  알 수 없었다). Codes, not prose, so a host can localize/branch:
+ *  - `truncated`        — the model hit its output-token ceiling (`finish_reason: "length"`); the JSON was
+ *                         cut mid-array. Any Intent recovered from the complete prefix still rides in
+ *                         `intents` (반쪽 Intent는 버린다 — deny_unknown 규율).
+ *  - `no_valid_intents` — the model answered, but nothing survived the whitelist/structure check (or it
+ *                         legitimately proposed no change).
+ *  - `upstream_error`   — the provider call itself failed (network/HTTP). */
+export type EditFailureReason = "truncated" | "no_valid_intents" | "upstream_error";
+
 /** The proxy's response: the Intents to preview → apply (schema v0). `[]` = no change proposed. The
  *  OPTIONAL `citations` (additive) carries web-search sources when the request enabled web grounding —
- *  absent/`[]` on ordinary edits (the field only appears when the web plugin ran). */
+ *  absent/`[]` on ordinary edits (the field only appears when the web plugin ran). `reason`/`message` are
+ *  ADDITIVE (invariant 7): present only when the proposal is empty or partial, so an older client that
+ *  ignores them behaves exactly as before while a newer one can explain the outcome. `message` is a
+ *  ready-to-display Korean fallback; hosts with their own i18n should branch on `reason`. */
 export interface EditResponse {
   intents: Intent[];
   citations?: Citation[];
+  reason?: EditFailureReason;
+  message?: string;
 }
 
 /** One prior CHAT turn passed back to the model as CONVERSATION MEMORY (agentic streaming). The chat

@@ -14,6 +14,7 @@ import {
   extractCitations,
   extractJsonArray,
   parseAgentEvent,
+  salvageJsonArrayItems,
   serializeAgentEvent,
   validateRequest,
   validateResponse,
@@ -607,6 +608,41 @@ describe("validateResponse (whitelist + structure)", () => {
   it("honors a custom allowedIntents subset", () => {
     const out = validateResponse([{ intent: "SetTableCell", section: 0, index: 0, row: 0, col: 0, text: "x" }], { allowedIntents: ["SetParagraphText"] });
     expect(out).toHaveLength(0); // SetTableCell not in the custom subset
+  });
+});
+
+// ── 이슈 1-(1): 절단된 다중 Intent 응답 구제 (반쪽은 버린다) ────────────────────────────────────
+describe("salvageJsonArrayItems (truncated multi-intent response)", () => {
+  const cell = (row: number, col: number, text: string) =>
+    `{"intent":"SetTableCell","section":0,"index":10,"row":${row},"col":${col},"text":"${text}"}`;
+
+  it("recovers every CLOSED item and drops the half-written trailing one", () => {
+    const truncated = `[${cell(0, 3, "오토케")},${cell(1, 3, "모바일 앱(1개)")},{"intent":"SetTableCell","section":0,"index":10,"row":5,"col":1,"tex`;
+    const items = salvageJsonArrayItems(truncated);
+    expect(items).toHaveLength(2);
+    // 구제 경로도 화이트리스트 검증을 그대로 통과한다 — 우회 아님.
+    const kept = validateResponse(items);
+    expect(kept).toHaveLength(2);
+    expect(kept[1]).toMatchObject({ intent: "SetTableCell", row: 1, col: 3 });
+  });
+
+  it("is a no-op equivalent on well-formed JSON (same items as extractJsonArray)", () => {
+    const whole = `[${cell(0, 3, "오토케")},${cell(1, 3, "웹사이트(1개)")}]`;
+    expect(salvageJsonArrayItems(whole)).toEqual(extractJsonArray(whole));
+  });
+
+  it("survives braces/brackets inside strings and nested objects", () => {
+    const tricky = `[{"intent":"SetTableCell","section":0,"index":1,"row":0,"col":0,"text":"a]}\\"b"},{"intent":"InsertChartAt","section":0,"index":null,"chart":{"type":"bar","categories":["x"],"series":[{"name":"s","values":[1]}]}},{"intent":"SetTab`;
+    const items = salvageJsonArrayItems(tricky);
+    expect(items).toHaveLength(2);
+    expect((items[0] as { text: string }).text).toBe('a]}"b');
+    expect(validateResponse(items)).toHaveLength(2);
+  });
+
+  it("returns [] when there is no array at all, and never invents an item", () => {
+    expect(salvageJsonArrayItems("죄송합니다, 편집할 내용을 찾지 못했습니다.")).toEqual([]);
+    expect(salvageJsonArrayItems("[")).toEqual([]);
+    expect(salvageJsonArrayItems("[{")).toEqual([]);
   });
 });
 

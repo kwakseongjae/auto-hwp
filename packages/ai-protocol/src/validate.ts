@@ -196,6 +196,56 @@ export function extractJsonArray(text: string): unknown {
   return null;
 }
 
+/** SALVAGE a TRUNCATED Intent array (이슈 1-(1)): when the model hits its output-token ceiling the JSON
+ *  array is cut mid-object, so `extractJsonArray` fails and EVERY intent — including the complete ones
+ *  already written — is lost. This scans the array body with a string-aware bracket-depth counter and
+ *  returns only the items that CLOSED. The half-written trailing item is DROPPED, never repaired or
+ *  guessed (deny_unknown 규율: a partial Intent would be an invented edit). The caller still runs the
+ *  result through `validateResponse`, so the whitelist + structure check are unchanged.
+ *
+ *  Use this ONLY as a fallback after `extractJsonArray`/`validateResponse` came back empty on a response
+ *  the transport flagged as truncated — on well-formed JSON both paths agree, so it changes nothing. */
+export function salvageJsonArrayItems(text: string): unknown[] {
+  const start = text.indexOf("[");
+  if (start < 0) return [];
+  const out: unknown[] = [];
+  let depth = 0;
+  let itemStart = -1;
+  let inString = false;
+  let escaped = false;
+  for (let i = start + 1; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "{" || ch === "[") {
+      if (depth === 0) itemStart = i;
+      depth++;
+      continue;
+    }
+    if (ch === "}" || ch === "]") {
+      if (depth === 0) break; // the ARRAY's own closing bracket → the array ended, nothing more to salvage
+      depth--;
+      if (depth === 0 && itemStart >= 0) {
+        try {
+          out.push(JSON.parse(text.slice(itemStart, i + 1)));
+        } catch {
+          /* 닫혔지만 파싱 불가 → 버린다(반쪽 Intent 금지) */
+        }
+        itemStart = -1;
+      }
+    }
+  }
+  return out;
+}
+
 /** Options for `validateResponse`. `allowedIntents` defaults to the frozen whitelist; `onDrop` observes
  *  each rejected candidate (the reference proxy passes `console.warn`). */
 export interface ValidateResponseOptions {

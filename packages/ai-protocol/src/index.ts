@@ -4,11 +4,11 @@
 // "bring your own vendor" integration.
 
 export { INTENT_VERSION, DEFAULT_LIMITS } from "./types.js";
-export type { AgentEvent, Anchor, Attachment, ChatTurn, Citation, DocMeta, EditRequest, EditResponse, GridCell, Intent, RequestLimits, TableGrid, UserContentPart } from "./types.js";
+export type { AgentEvent, Anchor, Attachment, ChatTurn, Citation, DocMeta, EditFailureReason, EditRequest, EditResponse, GridCell, Intent, RequestLimits, TableGrid, UserContentPart } from "./types.js";
 
 export { buildDocContext, buildUserMessage, buildUserMessageParts } from "./context.js";
 export { buildSystemPrompt, buildAgentSystemPrompt, DEFAULT_ALLOWED_INTENTS } from "./prompt.js";
-export { validateRequest, validateResponse, extractJsonArray, extractCitations } from "./validate.js";
+export { validateRequest, validateResponse, extractJsonArray, extractCitations, salvageJsonArrayItems } from "./validate.js";
 export type { RequestCheck, ValidateResponseOptions } from "./validate.js";
 export {
   AGENT_TOOL_WEB_SEARCH,
