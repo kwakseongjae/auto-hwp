@@ -5,6 +5,22 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
+- 갱신: 2026-08-05 · Claude(오케스트레이터)+Opus 워커 — **로컬 벤치 기여 퍼널 + rhwp 지형 리서치**
+  (커밋 없음 — 워킹트리). ① `scripts/bench-local.sh` 신설: `benchmarks/local/`(신규 gitignore,
+  README만 추적)에 기여자가 자기 공문서를 넣으면 `layout-check` 전수 스윕 → 판정 5종(일치/줄격차/
+  쪽격차/오라클없음/실패) 표 + **이슈 붙여넣기용 마크다운**(수치·구조만, 파일명·본문 제외) 출력.
+  `--pipeline`은 `bench-corpus.sh`에 위임(BENCH_ROOT env 신설 + `find -L` — 기존 동작 무변경,
+  49건 ALL PASS 재확인). ② CONTRIBUTING "조판 이슈 기여" 절 + `.github/ISSUE_TEMPLATE/layout-gap.md`.
+  ③ 실측(오늘): bench-public 25건 = 일치9/줄격차8/쪽격차8, bench-local-2026 24건 = 6/6/12,
+  **실패 0**. 포맷별로 갈리는 게 핵심 — `.hwpx` 12건 중 쪽격차 10·셀오라클없음 9 vs `.hwp` 12건 중
+  2·1. ④ `docs/research/rhwp-landscape-2026-08.md`: rhwp 최근 고민(각주 예약 #4054·트림 한도 #3798·
+  중첩표 #4042/4069·HWPX왕복 #4056·native↔wasm #4046·에이전트 로드맵 #3907) + 메인테이너 공표
+  ("조판 축 국소 레버 소진, 상한 +1.8pp — 다음은 세로 공간 계산 재설계", discussions/3582) +
+  breakthrough 후보 5(B1 줄 델타 오라클 ★ / B2 HWPX 오라클 공백 지도 / B3 각주 per-page /
+  B4 3-way 판정 / B5 격차 지문). **핵심 발견: rhwp가 "저장 줄 좌표 대조가 필요하다"고 이슈에 적어
+  둔 도구가 우리 `layout_fidelity`다**(그들 PI 오라클은 문단 시작 쪽만 봐서 줄 어긋남이 침묵).
+  위생 후속: `external/rhwp` v0.7.19 → v0.8.x(저장 왕복 대공사) 승급 검토 · native↔wasm SVG
+  바이트 게이트 부재.
 - 갱신: 2026-08-04 · Claude(오케스트레이터)+Opus 워커 — **새로고침 자동 재개 라이브**(8b358da,
   deploy success — 라이브 dynamic 청크에서 마커 코드 실측). 052 위 재개 레이어: sessionStorage
   마커("auto-hwp:live-doc") 있고 스냅샷 살아 있으면 배너 없이 즉시 재개+시각 토스트 / 명시적

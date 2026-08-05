@@ -17,6 +17,11 @@ __pycache__/
 /corpus/private/
 /out
 
+# 로컬 벤치 반입구(scripts/bench-local.sh) — 기여자가 자기 공문서를 넣는 곳.
+# 문서도 리포트도 절대 커밋되지 않는다. 안내 README 만 추적한다.
+/benchmarks/local/*
+!/benchmarks/local/README.md
+
 # secrets — BYOK keys (OpenRouter/Anthropic). NEVER commit. .env.example is the committed template.
 .env
 .env.local

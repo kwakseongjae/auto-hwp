@@ -3,9 +3,10 @@
 # 검증 축: detect / own-render(페이지수) / export-pdf / extract-text (= "크래시 없이 파이프라인 통과").
 # 시각 충실도는 검증하지 않는다(별도 QA.md 육안 트랙). corpus/private 부재 시(CI 등) skip 종료.
 # 사용: scripts/bench-corpus.sh [--update-baseline]
+#       BENCH_ROOT=<경로> scripts/bench-corpus.sh   # 다른 루트를 스윕(scripts/bench-local.sh --pipeline 이 이렇게 위임)
 set -u
 cd "$(dirname "$0")/.." || exit 1
-BENCH_ROOT=corpus/private
+BENCH_ROOT="${BENCH_ROOT:-corpus/private}"
 BIN=target/release/auto-hwp
 [ -d "$BENCH_ROOT" ] || { echo "bench-corpus: $BENCH_ROOT 없음 — skip (로컬 전용 게이트)"; exit 0; }
 if [ ! -x "$BIN" ]; then
@@ -20,7 +21,8 @@ for set_dir in "$BENCH_ROOT"/bench-*/; do
   set_name=$(basename "$set_dir")
   out="$TMP/$set_name.tsv"
   printf "file\tfmt\trender\tpages\tpdf\ttext_chars\n" > "$out"
-  find "$set_dir/files" -type f \( -iname "*.hwp" -o -iname "*.hwpx" \) | sort | while IFS= read -r f; do
+  # -L: files 가 심볼릭 링크일 수 있다(bench-local.sh --pipeline 이 임시 스테이징으로 링크를 건다).
+  find -L "$set_dir/files" -type f \( -iname "*.hwp" -o -iname "*.hwpx" \) | sort | while IFS= read -r f; do
     name=$(basename "$f")
     fmt=$("$BIN" detect "$f" 2>&1 | head -1 | tr -d '\n')
     rout=$("$BIN" own-render "$f" --out "$TMP/p.svg" 2>&1)
