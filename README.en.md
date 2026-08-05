@@ -34,7 +34,7 @@ excerpt and table context go — after an explicit consent prompt — through ou
 the file itself is never uploaded. That AI is **a trial we pay for**, so it has per-day and per-IP caps, and the demo takes
 `.hwp` only. In a product, put your own proxy there — see below.
 
-## Putting it in your app
+## Adding it to your own product
 
 ### npm — 60 seconds
 
@@ -83,12 +83,14 @@ Open, typeset, render, manual editing and HTML/PDF/HWPX export all live inside t
 get a bare editor with no panel (`onAiRequest` is then never called). Offline, on an intranet or behind a strict CSP,
 serve the wasm yourself — [EMBED-GUIDE §2.2](./docs/EMBED-GUIDE.en.md#22-override--self-host-the-static-files). A working app: [`examples/vite-embed`](./examples/vite-embed).
 
-### The AI goes through your proxy (BYOK)
+### The AI call goes through your own server (BYOK)
 
-The `/api/hwp-edit` that `askAi` calls above is **your server**. The model, the API key, the log-retention policy and the rate
-limits are all yours — our trial proxy is not involved in that path at all. A thin server you can copy as-is lives in
-[`examples/ai-proxy-express`](./examples/ai-proxy-express), and the prompt, validation and command whitelist are owned by
-`@auto-hwp/ai-protocol` as a single source shared with the client. To run the engine on your own infrastructure: [SELF-HOST](./docs/SELF-HOST.md) (Docker · Node/Bun).
+The `/api/hwp-edit` that `askAi` calls above is not ours — it is a server you run. Which model it reaches for, where the key
+sits and how logs and rate limits are handled are all settled inside it, and our trial proxy never appears on that path.
+Nothing here has to be written from scratch: [`examples/ai-proxy-express`](./examples/ai-proxy-express) is a thin server you
+can copy as-is, and the prompt, the validation rules and the allowed-command list live in one place inside
+`@auto-hwp/ai-protocol`, shared with the client — so the server and the screen can never drift onto different rules. If the
+engine itself has to sit on your own infrastructure, [SELF-HOST](./docs/SELF-HOST.md) walks through both routes, Docker and Node/Bun.
 
 ### CLI
 
@@ -117,25 +119,25 @@ There are four packages — `@auto-hwp/engine` (the wasm engine) · `@auto-hwp/e
 `HwpDoc.open` → `renderPageSvgSanitized` → `applyIntent` → `exportPdf`, and the **34 methods** including geometry queries
 are specified as the [`EngineAdapter` contract](./packages/editor-core/src/adapter.ts) — enough to build a custom editor.
 
-## What it can do
+## What you can do with auto-hwp
 
-| Capability | What you get | API · CLI |
+| Task | What you get | API · CLI |
 |---|---|---|
 | **Open** | `.hwp` (HWP5) and `.hwpx` are detected automatically and turned into an editable document model. Distribution (DRM) copies are decrypted too | `HwpDoc.open` · `auto-hwp info` |
 | **Typeset** | Korean typesetting rules reimplemented — kinsoku, glyph width and letter spacing, old Hangul. When a page fills up, tables are split at row granularity and continued | `pageCount` · `auto-hwp layout-check` |
-| **Render · geometry** | One SVG per page, and a way back: which block, table, cell or glyph a point on screen belongs to (caret rects included) | `renderPageSvgSanitized` · `hitTest` · `tableCellAt` |
-| **Structured editing** | Fill cells and paragraphs, insert tables, paragraphs, charts and images, append rows, move and delete blocks, find and replace, character format, column widths, page margins — every one a typed edit command (Intent) and one undo step | `applyIntent` · `undo`/`redo` |
-| **Document profile** | Title, outline, table inventory and body excerpt extracted deterministically with zero LLM calls — the canonical context the AI reads | `docProfile` · `auto-hwp ai-context` |
+| **Render** | One SVG per page, and a way back: which block, table, cell or glyph a point on screen belongs to (caret rects included) | `renderPageSvgSanitized` · `hitTest` · `tableCellAt` |
+| **Edit** | Fill cells and paragraphs, insert tables, paragraphs, charts and images, append rows, move and delete blocks, find and replace, character format, column widths, page margins — every one a typed edit command (Intent) and one undo step | `applyIntent` · `undo`/`redo` |
+| **Doc&nbsp;profile** | Title, outline, table inventory and body excerpt extracted deterministically with zero LLM calls — the canonical context the AI reads | `docProfile` · `auto-hwp ai-context` |
 | **Export** | PDF preserves the layout and embeds Korean faces, HTML reflows as semantic markup, and HWPX keeps untouched regions byte-identical | `exportPdf`·`exportHtml`·`toHwpx` |
 | **Fonts** | Register a TTF/OTF and typesetting, screen and PDF all switch to that face at once. The 8 catalog faces are OFL, so redistribution and PDF embedding are legal | `registerFont` · [font catalog](./docs/FONT-CATALOG.md) |
-| **Bulk form filling** | A form, its field definitions and a roster produce N finished documents plus a per-row validation report | `auto-hwp inspect`/`fill` · [guide](./docs/BULK-GUIDE.md) |
+| **Bulk&nbsp;fill** | A form, its field definitions and a roster produce N finished documents plus a per-row validation report | `auto-hwp inspect`/`fill` · [guide](./docs/BULK-GUIDE.md) |
 
 Only **19** of those edit commands are open to the AI, and only what passes schema validation reaches the document — proposals
 preview as cards, "reveal target" shows the block before you approve, and each card reverts on its own (an agentic mode adds web
 search with cited evidence). The protocol is `@auto-hwp/ai-protocol`; the full spec is [INTENT-SCHEMA](./docs/INTENT-SCHEMA.md).
 We are equally explicit about what is missing — there are still **no commands for deleting table rows or inserting/deleting columns**.
 
-## Why we built it this way
+## The philosophy behind auto-hwp
 
 The existing way to hand a Korean document to an LLM is **text extraction**. It works — and at that moment the document splits
 in two: what the AI read (plain text) and what a human sees (the typeset page) become different representations. The AI cannot
@@ -196,12 +198,17 @@ have been on it since 2022 ([ZDNet, in Korean](https://zdnet.co.kr/view/?no=2026
 published on the **[benchmark page](https://kwakseongjae.github.io/auto-hwp/bench/)**. Measured at 130 pages, edit → screen
 is 136ms on a worker thread (the UI never blocks); undo memory is capped by a 128MiB budget.
 
+**What comes out** — the outputs are **HTML, PDF and HWPX**; nothing is ever written back into `.hwp`. The loop is
+`.hwp → (edit) → HTML/PDF/HWPX`, not `.hwp → .hwp`. Verifying what a plain-language instruction actually changed means
+everything from open to export has to sit on one document model, and writing that model back into a closed binary is where
+that verification holds up worst — so we left it out from the start.
+
 **Known limitations**
 - **Equations & charts in PDF**: drawn for real on screen and in HTML, but exported as **placeholder boxes** (you are warned before exporting).
 - **Password-protected `.hwp`**: not supported — refused honestly (distribution-DRM decryption IS supported).
-- **No binary `.hwp` re-save**: the save format is HWPX. With HWPX input, untouched regions stay byte-identical; with
-  `.hwp` input the output is a **conversion**, so pagination and table widths can differ. (For lossy `.hwpx` — Hancom's own
-  "save as" collapses line spacing and row heights — a **layout-recovery** mode detects it and restores an approximation.)
+- **Output from `.hwp` input is a conversion**: with HWPX input, untouched regions stay byte-identical; a document that came
+  from `.hwp` can differ in pagination and table widths. (For lossy `.hwpx` — Hancom's own "save as" collapses line spacing
+  and row heights — a **layout-recovery** mode detects it and restores an approximation.)
 - The page-count gate is measured on the benchmarks above — not a guarantee for arbitrary documents.
 
 ## Documentation
