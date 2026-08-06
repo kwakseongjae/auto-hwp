@@ -1,0 +1,8 @@
+# GitHub Linguist 오버라이드 — 제품 코어는 Rust 엔진이다. 데모 앱·참조 구현·스크립트는
+# 언어 통계에서 제외한다(코드 자체는 first-party지만 "이 프로젝트가 무엇으로 만들어졌나"의
+# 답은 crates/ + packages/이므로). SDK(packages/)는 정직하게 카운트에 남긴다.
+apps/** linguist-vendored
+examples/** linguist-vendored
+services/** linguist-vendored
+scripts/** linguist-vendored
+assets/** linguist-vendored

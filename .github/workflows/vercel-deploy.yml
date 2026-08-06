@@ -106,9 +106,13 @@ jobs:
       #    번들러가 "Failed to resolve entry" 로 죽는다(deploy-demo.yml 1차 배포 실패 실측).
       - name: build JS package deps (install after dist exists)
         run: |
-          pnpm -C packages/ai-protocol install && pnpm -C packages/ai-protocol build
-          pnpm -C packages/editor-core install && pnpm -C packages/editor-core build
-          pnpm -C packages/react install
+          # --config.dangerouslyAllowAllBuilds=true — pnpm 11이 CI=true에서 미승인 빌드 스크립트
+          # (esbuild)를 하드 에러(exit 1)로 승격한다. package.json pnpm 필드·글로벌 설정은 11에서
+          # 안 먹히는 것을 로컬 CI=true 재현으로 확정(2026-08-06, 5차까지의 삽질 로그 참조).
+          PNPM_FLAGS=--config.dangerouslyAllowAllBuilds=true
+          pnpm -C packages/ai-protocol install $PNPM_FLAGS && pnpm -C packages/ai-protocol build
+          pnpm -C packages/editor-core install $PNPM_FLAGS && pnpm -C packages/editor-core build
+          pnpm -C packages/react install $PNPM_FLAGS
 
       # 3) Vercel CLI — 버전 고정(빌더 출력 포맷이 바뀌면 prebuilt 계약이 흔들린다).
       - name: install vercel CLI (=54.2.0)
