@@ -115,8 +115,10 @@ jobs:
           pnpm -C packages/react install $PNPM_FLAGS
 
       # 3) Vercel CLI — 버전 고정(빌더 출력 포맷이 바뀌면 prebuilt 계약이 흔들린다).
-      - name: install vercel CLI (=54.2.0)
-        run: npm i -g vercel@54.2.0
+      - name: install vercel CLI (=58.7.1)
+        # 54.2.0은 신형 토큰(vcp_ 접두)을 인증 못 한다 — 9차까지의 "User not found" 전부가 이것
+        # (사용자 로컬에서 같은 토큰이 58.7.1 whoami로 정상 판별됨, 2026-08-06 실측).
+        run: npm i -g vercel@58.7.1
 
       # 4) 프로젝트 설정 + 환경변수(DEMO_SITE_URL / NEXT_PUBLIC_DEMO_AI / DEMO_AI_MODE …)를 내려받는다.
       #    ⚠️ 레포 루트에서 실행한다 — rootDirectory=apps/hwp-lab 는 project.json 이 들고 있고,
