@@ -6,6 +6,21 @@
 - 정본 배포: **https://autohwp.com** (Vercel full Next — 2026-08-06 컷오버, Actions vercel-deploy.yml).
   GitHub Pages(kwakseongjae.github.io/auto-hwp)는 병행 유지 중 — 리다이렉트 스텁 전환 예정.
   GitHub: https://github.com/kwakseongjae/auto-hwp (public, 홈페이지·description=autohwp.com)
+- 갱신: 2026-08-06 · Claude(Opus 5) — **실도메인 디테일 6건(사용자 스크린샷 피드백) — 커밋 없음(워킹트리)**.
+  ① **문서 세션 URL `/d/<불투명 12자>`**(신규 `apps/hwp-lab/src/lib/docUrl.ts`): 열면 pushState,
+  새로고침/직접 방문이면 이 브라우저 매핑(localStorage)→스냅샷으로 **기존 재개 레이어 그대로** 복원.
+  주소가 마커보다 우선이고, 매핑이 없으면(다른 기기) 정직한 안내 후 홈. 닫기/처음부터/뒤로가기 → `/`.
+  두 빌드 경로가 다르다: **Vercel=rewrite `/d/:key`→`/`**, **Pages=404.html 폴백(app/not-found.tsx가
+  문서 주소면 앱을 태운다)** — Pages mock 서버로 실검증(안내·재개·닫기·평범한 404 4케이스).
+  ② 에디터 로고=홈 앵커(확인 없이 이동 — 자동저장 근거) ③ 재개 배너→**플로팅 토스트**(12s 자동 소멸,
+  pointer-events:none·닫기 버튼 없음 — 닫기 버튼이 채팅 보내기 클릭을 가로챈 것을 e2e로 실측)
+  ④ 바이브 탭 Sparkles 제거(두 탭 대칭) ⑤ 배지 "실 LLM 모드"→**"AI 켜짐" + 모델 툴팁**(모델명은
+  서버 `GET /api/hwp-edit`의 `model`, 폴백 `NEXT_PUBLIC_AI_MODEL`; 데모/BYOK 문구 분기) ⑥ 랜딩 헤더
+  "데모" 네비 제거(로고가 홈). robots에 `/d/` disallow. 검증: tsc·vitest 183(+11 docUrl)·**e2e 75/1skip
+  전부 그린**·next build·build:demo 그린. ⚠️ 기존 e2e 2건 정합: "새 탭 재방문"은 이제 `goto("/")`
+  (문서 주소 새로고침은 재개가 정답). ⚠️ 선재 결함 2건 발견: docs-site 스펙의 `/docs/embed` 셀렉터가
+  trailingSlash와 어긋나 항상 0건(테스트만 수정), `packages/react` vitest는 pnpm 재설치(오늘 15:57)로
+  editor-core dist 해석이 깨져 35파일 로드 실패(별칭 주입 시 402 전부 통과 — 환경 문제, 미수정).
 - 갱신: 2026-08-06 · Claude(오케스트레이터)+Opus 워크플로 — **🚀 autohwp.com 프로덕션 컷오버 완주**
   (11차 파이프라인 success — /docs 200·sitemap 200·**AI 실호출 SetTableCell 정상 반환**). 배치:
   ① 도메인 attach·www 308·가비아 DNS(사용자)·Git 연동(main 자동배포 가드) ② 일일 캡 기본 비활성·

@@ -50,7 +50,22 @@ const nextConfig = {
     // 를 데모 계약(동의 게이트 + 단발 + 한도)으로 부른다. 서버 쪽 짝은 `DEMO_AI_MODE=1`(하드닝 경로).
     // 비어 있으면 기존 동작 그대로(정적 데모는 워커, 로컬은 BYOK).
     NEXT_PUBLIC_DEMO_AI: process.env.NEXT_PUBLIC_DEMO_AI ?? "",
+    // 배지 툴팁의 모델명 **폴백**(1순위는 서버 상태 응답 GET /api/hwp-edit 의 `model`). 서버가 없는
+    // 정적 데모에서만 의미가 있고, 비어 있으면 툴팁은 모델명을 지어내지 않는다.
+    NEXT_PUBLIC_AI_MODEL: process.env.NEXT_PUBLIC_AI_MODEL ?? "",
   },
+  // 문서 세션 URL(/d/<불투명 키>)은 **클라이언트 전용 라우트**다: 서버가 아는 것은 아무 것도 없고
+  // (키는 이 브라우저 안에서만 스냅샷으로 환원된다) 화면도 랜딩과 같은 앱 하나다. 그래서 별도 페이지를
+  // 만들지 않고 루트로 rewrite 해 같은 앱을 태우고, 앱이 주소를 읽어 재개한다.
+  // ⚠️ 정적 export(Pages)에는 rewrite 가 존재하지 않는다 — 그쪽은 호스팅의 404 폴백(out/404.html =
+  // app/not-found.tsx)이 같은 앱을 태워 동일하게 동작한다. 두 빌드가 같은 화면에 도달하는 서로 다른 길.
+  ...(isDemo
+    ? {}
+    : {
+        async rewrites() {
+          return [{ source: "/d/:key", destination: "/" }];
+        },
+      }),
   // file: 심링크 패키지를 Next가 트랜스파일하도록 명시. (026: ai-protocol 은 route.ts·클라 양쪽에서
   // import, editor-core 는 react 가 re-export 하는 타입 소스 — 둘 다 심링크 스코프에 넣는다.)
   transpilePackages: ["@auto-hwp/react", "@auto-hwp/engine", "@auto-hwp/ai-protocol", "@auto-hwp/editor-core"],

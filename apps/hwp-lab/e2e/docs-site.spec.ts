@@ -54,7 +54,9 @@ test("문서 안의 상대 링크가 사이트 라우트로 매핑된다", async
   await page.goto("/docs/why");
   const body = page.locator('[data-testid="doc-body"]');
   // WHY.md 는 ./EMBED-GUIDE.md·./CLI-GUIDE.md·./INTENT-SCHEMA.md 를 건다 — 전부 사이트에 실린 문서다.
-  const embed = body.locator('a[href$="/docs/embed"]');
+  // ⚠️ 본문 링크는 **슬래시로 끝난다**(Pages 정적 export 의 디렉터리 인덱스 — rewriteDocLink 참조).
+  // `$="/docs/embed"` 로 잡으면 영원히 0건이다(2026-08-06 실측). 양쪽 형태를 다 인정한다.
+  const embed = body.locator('a[href="/docs/embed/"], a[href="/docs/embed"]');
   await expect(embed.first()).toBeVisible();
   await embed.first().click();
   await expect(page.locator('[data-testid="doc-title"]')).toHaveText("임베드 가이드 (React SDK)");

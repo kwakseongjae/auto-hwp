@@ -44,13 +44,15 @@ test("새로고침 → 배너 없이 자동 재개 + 편집 내용 유지 + 자�
   // 배너를 거치지 않고 에디터가 곧바로 돌아온다.
   await expect(page.locator(".hw-sheet svg").first()).toBeVisible({ timeout: 60_000 });
   await expect(page.locator('[data-testid="recovery-banner"]')).toHaveCount(0);
-  await expect(page.locator(".hw-pages")).toContainText(marker, { timeout: 30_000 });
 
   // 토스트는 "언제까지의 편집이 살아 있는지"를 시각으로 말한다(pagehide flush 는 보장이 아니므로).
+  // ⚠️ 이제 **자동 소멸하는 플로팅 토스트**라 먼저 확인한다(전폭 배너였을 때는 레이아웃을 밀어냈다).
   const toast = page.locator('[data-testid="resume-toast"]');
   await expect(toast).toBeVisible({ timeout: 30_000 });
   await expect(toast).toContainText("새로고침 전 상태로 복구했습니다");
   await expect(toast).toContainText(/마지막 자동저장 \d{1,2}:\d{2}/);
+
+  await expect(page.locator(".hw-pages")).toContainText(marker, { timeout: 30_000 });
 
   // 재개 후에도 마커는 살아 있다(새 세션 키로 갱신) — 연속 새로고침도 재개된다.
   expect(await liveMarker(page)).not.toBeNull();
@@ -85,8 +87,10 @@ test("마커만 없으면(새 탭 재방문) 현행 배너 경로 — 052 동작
   await openSample(page);
   await editCellAndAutosave(page, "고아확인081");
 
+  // 새 탭 재방문 = 마커 없음 + **홈 주소로 진입**. (문서 주소 `/d/<키>` 를 그대로 새로고침하면 그건
+  // "이 문서를 다시 열어라"는 명시적 요청이라 재개가 맞다 — doc-url.spec.ts 가 그쪽을 잠근다.)
   await page.evaluate((k) => sessionStorage.removeItem(k), MARKER);
-  await page.reload();
+  await page.goto("/");
 
   await expect(page.locator('[data-testid="recovery-banner"]')).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('[data-testid="resume-toast"]')).toHaveCount(0);
@@ -108,10 +112,12 @@ test("샘플을 열고 아무것도 고치지 않은 채 새로고침해도 그 
   const toast = page.locator('[data-testid="resume-toast"]');
   await expect(toast).toBeVisible({ timeout: 30_000 });
   await expect(toast).toContainText("아직 편집한 내용은 없습니다");
+  // 사용자가 할 일이 없는 알림이므로 스스로 사라진다(레이아웃을 밀어내는 전폭 배너였던 것을 교정).
+  await expect(toast).toHaveCount(0, { timeout: 30_000 });
 
-  // 시드는 자동 재개 전용이다: 새 탭(마커 없음)에서는 "편집본이 있습니다" 배너를 띄우지 않는다.
+  // 시드는 자동 재개 전용이다: 새 탭(마커 없음 + 홈 진입)에서는 "편집본이 있습니다" 배너를 띄우지 않는다.
   await page.evaluate((k) => sessionStorage.removeItem(k), MARKER);
-  await page.reload();
+  await page.goto("/");
   await expect(page.locator(".lab-empty")).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('[data-testid="recovery-banner"]')).toHaveCount(0);
 });

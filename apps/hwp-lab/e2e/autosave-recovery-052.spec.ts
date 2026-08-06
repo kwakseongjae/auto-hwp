@@ -12,10 +12,13 @@ import { placeCellCaret } from "./cell-gesture";
 // 은 052 원본 그대로다.
 const BENCHMARK = path.resolve(process.cwd(), "..", "..", "benchmarks", "benchmark.hwp");
 
-/** 탭 마커를 지워 "새 탭에서 재방문"을 재현한다(스냅샷은 그대로 → 고아 → 배너). */
+/** "새 탭에서 재방문"을 재현한다(스냅샷은 그대로 → 고아 → 배너): 탭 마커를 지우고 **사이트 첫 주소로
+ *  들어온다**. ⚠️ `reload()` 로는 재현되지 않는다 — 문서를 열면 주소가 `/d/<키>` 라서 새로고침은
+ *  "그 문서를 다시 열어라"는 명시적 요청이 된다(주소가 마커보다 우선 — lib/docUrl.ts). 새 탭 사용자는
+ *  문서 주소가 아니라 홈으로 들어오므로 goto("/") 가 이 시나리오의 정확한 재현이다. */
 async function reloadAsNewTab(page: Page) {
   await page.evaluate(() => sessionStorage.removeItem("auto-hwp:live-doc"));
-  await page.reload();
+  await page.goto("/");
 }
 
 async function open(page: Page) {

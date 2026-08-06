@@ -7,6 +7,7 @@ import { buildDocContext, createAgentEventParser, type AgentEvent } from "@auto-
 import { isTrapError, resetEngine, type EngineLoadProgress } from "@auto-hwp/engine";
 import { AutosaveController, IdbSnapshotStore, findRecoverable, formatAge, recoveredName, type SnapshotRecord } from "@/lib/autosave";
 import { clearLiveDoc, decideResume, readLiveDoc, resumeToastMessage, writeLiveDoc } from "@/lib/resumeSession";
+import { DOC_URL_MISSING_MESSAGE, docUrlPath, homePath, lookupDocUrl, parseDocUrl, rememberDocUrl, shortDocKey } from "@/lib/docUrl";
 import { limitMessage, oversizeMessage } from "@/lib/limits";
 import { ensureDemoAiConsent, splitConsentMessage, type DemoAiConsentState, type DemoAiTransport } from "@/lib/demoAiConsent";
 import { demoAiHttpError, readDemoAiResponse } from "@/lib/demoAiResponse";
@@ -40,6 +41,12 @@ const DEMO_AI_ROUTE = !IS_DEMO && !DEMO_AI_URL && process.env.NEXT_PUBLIC_DEMO_A
 // 데모 AI 가 켜져 있는가 = (정적 데모 + 워커) 또는 (라우트 모드). 정적/동적 배포를 통틀어 이 한 값이
 // "동의 게이트를 세우고 단발 데모 계약으로 보낸다"를 결정한다.
 const DEMO_AI_ON = (IS_DEMO && !!DEMO_AI_URL) || DEMO_AI_ROUTE;
+// 배지 툴팁의 모델명 **폴백**. 1순위는 언제나 서버 상태 응답(GET /api/hwp-edit 의 `model`)이고,
+// 서버가 알려 주지 않는 배포(정적 데모 등)에서만 이 빌드타임 값이 쓰인다. 둘 다 없으면 모델명을
+// 지어내지 않고 성격만 설명한다(거짓말 금지).
+const AI_MODEL_FALLBACK = process.env.NEXT_PUBLIC_AI_MODEL || null;
+/** 재개 토스트 자동 소멸(ms). 큰 문서의 첫 렌더가 끝난 뒤에도 한동안 보이도록 넉넉히 잡는다. */
+const RESUME_TOAST_MS = 12_000;
 // 중계 경로(동의 문구가 말하는 대상)는 컴포넌트 안에서 정한다 — QA 스위치(`?demoAi=1`)가 런타임에
 // 라우트 모드를 켤 수 있기 때문(아래 demoAiTransport).
 
@@ -79,6 +86,11 @@ export default function LabWorkspace() {
   // 팔레트) 클래스 — 을 위해서만 React 상태로 읽는다. 나머지 크롬은 `:root[data-theme]` 로 분기한다.
   const theme = useTheme();
   const [mode, setMode] = useState<Mode>("loading");
+  // 배지 툴팁이 말할 "지금 이 데모가 도는 모델". 서버 프로브(GET /api/hwp-edit)가 알려 주면 그 값,
+  // 아니면 빌드타임 env 폴백, 그것도 없으면 null(모델명 없이 성격만 설명한다). 하드코딩 금지.
+  const [aiModel, setAiModel] = useState<string | null>(AI_MODEL_FALLBACK);
+  const [aiProvider, setAiProvider] = useState<string | null>(null);
+  const [badgeTip, setBadgeTip] = useState(false);
   const [doc, setDoc] = useState<Doc | null>(null);
   const [labError, setLabError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -95,6 +107,36 @@ export default function LabWorkspace() {
   // 토스트(resumeToast — **마지막 자동저장 시각을 반드시 표기**)는 이 두 상태가 그린다.
   const [resuming, setResuming] = useState(false);
   const [resumeToast, setResumeToast] = useState<string | null>(null);
+  // ── 문서 세션 URL(/d/<불투명 키> — lib/docUrl.ts) ────────────────────────────────────────────────
+  // 열린 문서 ↔ 그 문서를 가리키는 URL 키. `doc` 객체 동일성으로 묶어 둔다: StrictMode 이중 실행에서는
+  // 같은 `doc` 이라 키를 재사용하고(주소가 흔들리지 않는다), **다른 문서를 열면** 객체가 바뀌므로 새
+  // 키를 만든다(옛 주소가 새 문서를 가리키는 사고 방지).
+  const docUrlRef = useRef<{ doc: Doc; urlKey: string } | null>(null);
+  // 이 주소로 들어와 재개하는 중 — 재개는 새 세션 키를 만들지만 **사용자가 들고 있는 주소는 유지**한다.
+  const pendingUrlKeyRef = useRef<string | null>(null);
+  // 주소가 가리키는 문서를 이 브라우저에서 찾지 못했다 = 안내 후 홈. 이때는 마커 자동 재개도 하지
+  // 않는다(주소가 이긴다 — 엉뚱한 다른 문서를 대신 열어 주는 것이 가장 나쁜 답이다).
+  const urlMissRef = useRef(false);
+
+  // ⚠️ 경로만 바꾸고 **쿼리·해시는 그대로 들고 간다**: `?toolbar=full`·`?engineWorker=off`·`?demoAi=1`
+  // 같은 스위치가 주소를 갈아끼우는 순간 조용히 사라지면, 새로고침 한 번에 앱이 다른 앱이 된다
+  // (e2e 실측: `?demoAi=1` 이 날아가 데모 계약이 꺼졌다).
+  const keepSearch = () => window.location.search + window.location.hash;
+
+  /** 주소를 이 문서로 바꾼다. 홈에서 열었으면 새 히스토리 항목(뒤로가기=홈), 이미 문서 주소면 교체. */
+  const applyDocUrl = useCallback((urlKey: string) => {
+    const path = docUrlPath(urlKey, BASE);
+    if (window.location.pathname === path) return;
+    const atDoc = parseDocUrl(window.location.pathname, BASE) !== null;
+    window.history[atDoc ? "replaceState" : "pushState"]({ docUrl: urlKey }, "", path + keepSearch());
+  }, []);
+
+  /** 주소를 홈으로 되돌린다(문서 닫기·처음부터·죽은 주소). */
+  const restoreHomeUrl = useCallback(() => {
+    const path = homePath(BASE);
+    if (window.location.pathname === path) return;
+    window.history.pushState({ docUrl: null }, "", path + keepSearch());
+  }, []);
   // 복구 클릭으로 연 문서: 열기 성공 시 adoptRecovered(재귀속 + 옛 키 삭제)할 원본 레코드.
   const pendingRecoveryRef = useRef<SnapshotRecord | null>(null);
   // 포인터 제스처(드래그) 진행 중엔 자동저장 flush 를 미룬다(렌더-0 규율). 이슈 055 워커화로 toHwpx
@@ -238,7 +280,17 @@ export default function LabWorkspace() {
     if (doc) {
       autosave.openSession(doc.name);
       const key = autosave.sessionKey();
-      if (key) writeLiveDoc(key);
+      if (key) {
+        writeLiveDoc(key);
+        // 문서 세션 URL: 키는 **스냅샷 키의 해시**(불투명 — 파일명·내용은 주소로 나가지 않는다).
+        // 이 주소로 들어와 재개 중이면(pendingUrlKeyRef) 그 키를 그대로 쓴다.
+        const urlKey = (docUrlRef.current?.doc === doc ? docUrlRef.current.urlKey : null) ?? pendingUrlKeyRef.current ?? shortDocKey(key);
+        pendingUrlKeyRef.current = null;
+        urlMissRef.current = false;
+        docUrlRef.current = { doc, urlKey };
+        rememberDocUrl(urlKey, key); // 주소 → 스냅샷 매핑(이 브라우저 안에만 산다)
+        applyDocUrl(urlKey);
+      }
       setSavedLabel(null);
       const rec = pendingRecoveryRef.current;
       if (rec) {
@@ -253,9 +305,36 @@ export default function LabWorkspace() {
     } else {
       autosave.closeSession();
       setSavedLabel(null);
+      docUrlRef.current = null;
     }
-  }, [doc, autosave]);
+  }, [doc, autosave, applyDocUrl]);
   useEffect(() => () => autosave.dispose(), [autosave]);
+
+  // ── 뒤로/앞으로 가기 ────────────────────────────────────────────────────────────────────────────
+  // 문서를 열면 히스토리 항목이 하나 쌓이므로(홈 → /d/<키>) 뒤로가기는 "문서 닫기"여야 정직하다.
+  // 다른 문서 주소로 이동하면(앞으로가기·주소 붙여넣기) 재개 경로를 그대로 타도록 새로 읽는다.
+  useEffect(() => {
+    const onPop = () => {
+      const key = parseDocUrl(window.location.pathname, BASE);
+      const current = docUrlRef.current;
+      if (key && current && key === current.urlKey) return; // 같은 문서 — 할 일 없음
+      if (!key) {
+        // 홈으로 돌아왔다 = 닫기(마커만 제거, 스냅샷은 보존). 주소는 이미 브라우저가 되돌렸다.
+        if (current) {
+          docUrlRef.current = null;
+          clearLiveDoc();
+          setDoc(null);
+          setLabError(null);
+          setResumeToast(null);
+        }
+        return;
+      }
+      // 다른 문서 주소 — 재개 판정을 처음부터 다시 하는 것이 가장 정직하다(부분 상태 이월 금지).
+      window.location.reload();
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   // ── pagehide best-effort flush ──────────────────────────────────────────────────────────────────
   // 탭이 사라지기 직전(새로고침·이동·닫기) 미저장 편집이 있으면 스냅샷을 한 번 더 시도한다.
@@ -280,7 +359,8 @@ export default function LabWorkspace() {
     };
   }, [autosave]);
 
-  // 프록시 모드(mock/live)를 조회해 배지에 표시. 키는 서버 전용이므로 여기서 알 수 있는 건 모드뿐.
+  // 프록시 모드(mock/live)를 조회해 배지에 표시. 키는 서버 전용이므로 여기서 알 수 있는 건 모드와
+  // (서버가 알려 주면) **모델 이름**뿐이다 — 배지 툴팁이 "지금 뭘로 도는지"를 말할 근거가 그것이다.
   // 정적 데모 빌드에는 서버가 없으므로 프로브를 건너뛰고 "static"으로 확정한다(404 fetch 소음 방지).
   useEffect(() => {
     if (IS_DEMO) {
@@ -290,10 +370,15 @@ export default function LabWorkspace() {
     let cancelled = false;
     fetch(`${BASE}/api/hwp-edit`, { method: "GET" })
       .then((r) => r.json())
-      .then((d: { mode?: Mode }) => {
+      .then((d: { mode?: Mode; provider?: string; model?: string | null }) => {
         // 데모 라우트 모드에서 서버 키가 없으면 프로브가 "static"(=AI 없음)을 답한다 — mock 배지를
         // 띄우면 "가짜 편집이라도 동작한다"는 거짓말이 되므로 그 값을 그대로 살린다.
-        if (!cancelled) setMode(d.mode === "live" ? "live" : d.mode === "static" ? "static" : "mock");
+        if (cancelled) return;
+        setMode(d.mode === "live" ? "live" : d.mode === "static" ? "static" : "mock");
+        // 모델명은 **서버가 말한 것만** 쓴다(하드코딩 금지 — env 를 바꾸면 툴팁도 따라온다).
+        // 서버가 안 알려 주면 빌드타임 env 폴백, 그것도 없으면 모델명 없이 성격만 설명한다.
+        if (typeof d.model === "string" && d.model.trim()) setAiModel(d.model.trim());
+        if (typeof d.provider === "string" && d.provider.trim()) setAiProvider(d.provider.trim());
       })
       .catch(() => {
         if (!cancelled) setMode("mock");
@@ -453,7 +538,10 @@ export default function LabWorkspace() {
     [openBytes],
   );
 
-  // ── 열기 화면 진입 규칙: ① 새로고침이면 자동 재개 → ② 아니면 고아 스냅샷 배너 ──────────────────
+  // ── 열기 화면 진입 규칙: ⓪ 주소(/d/<키>) → ① 새로고침 마커 → ② 고아 스냅샷 배너 ────────────────
+  // ⓪ 주소가 문서를 가리키면 **주소가 이긴다**(즐겨찾기·새 탭·주소 공유). 주소는 스냅샷 키를 직접
+  //    싣지 않고 이 브라우저의 매핑(localStorage)을 거치므로, 다른 기기/브라우저에서 열면 매핑이
+  //    없어 정직하게 안내하고 홈으로 돌린다 — 이때 마커 재개도 하지 않는다(엉뚱한 문서 금지).
   // ① 마커(sessionStorage · 탭 수명)가 있으면 = 같은 탭에서 새로고침한 것 = 사용자는 "하던 문서"를
   //    기대한다 → 묻지 않고 그 스냅샷을 즉시 연다(+ 마지막 자동저장 시각 토스트).
   // ② 마커가 없으면(새 탭·다른 날·명시적 닫기 뒤) = 고아 스냅샷 → **현행 배너 그대로**(opt-in).
@@ -462,13 +550,43 @@ export default function LabWorkspace() {
   // ⚠️ "마운트당 1회" 플래그(useRef)로 재시도를 막지 마라 — StrictMode 는 이펙트를 mount→cleanup→
   //    mount 로 두 번 돌리므로, 첫(취소된) 실행이 플래그를 태워 자동 재개가 통째로 사라진다(실측:
   //    e2e 가 배너로 떨어졌다). **마커 자체가 유일한 가드**다: 모든 랜딩 경로가 마커를 지우므로
-  //    이 이펙트는 몇 번 돌아도 같은 결론에 수렴한다(멱등).
+  //    이 이펙트는 몇 번 돌아도 같은 결론에 수렴한다(멱등). 주소 경로도 같은 규율이다 — 죽은 주소는
+  //    urlMissRef 하나로만 기억하고(그 뒤엔 평범한 랜딩), 살아 있는 주소는 스냅샷 키로 환원된다.
   useEffect(() => {
     if (doc) return;
     let cancelled = false;
     void (async () => {
+      // ⓪ 주소 우선: /d/<키> → (이 브라우저 매핑) → 스냅샷 키. 마커보다 앞선다.
+      const urlKey = parseDocUrl(window.location.pathname, BASE);
+      let marker = readLiveDoc();
+      let fromUrl = false;
+      if (urlKey) {
+        const mapped = lookupDocUrl(urlKey);
+        if (mapped) {
+          fromUrl = true;
+          marker = mapped;
+          pendingUrlKeyRef.current = urlKey; // 재개 후에도 이 주소를 유지한다
+        } else {
+          if (cancelled) return;
+          urlMissRef.current = true;
+          marker = null;
+          setNotice(DOC_URL_MISSING_MESSAGE);
+          restoreHomeUrl();
+        }
+      } else if (urlMissRef.current) {
+        // 죽은 주소를 방금 홈으로 되돌린 직후(이펙트 재실행) — 다른 문서를 대신 열지 않는다.
+        marker = null;
+      }
+      /** 주소로 들어왔는데 되살릴 수 없을 때: 같은 안내 + 홈 복귀(추측해서 다른 문서를 열지 않는다). */
+      const failUrl = () => {
+        if (!fromUrl) return false;
+        urlMissRef.current = true;
+        pendingUrlKeyRef.current = null;
+        setNotice(DOC_URL_MISSING_MESSAGE);
+        restoreHomeUrl();
+        return true;
+      };
       // ① 자동 재개
-      const marker = readLiveDoc();
       if (marker) {
         let decision = decideResume(marker, [], Date.now());
         try {
@@ -495,11 +613,12 @@ export default function LabWorkspace() {
           // 열기 실패(손상 등) — 정직한 사유를 남기고 배너 경로로 강등한다. 스냅샷은 보존한다.
           pendingRecoveryRef.current = null;
           clearLiveDoc();
-          setNotice("새로고침 전 문서를 자동으로 열지 못했습니다 — 아래 복구 배너에서 다시 시도하거나 무시할 수 있습니다.");
+          if (!failUrl()) setNotice("새로고침 전 문서를 자동으로 열지 못했습니다 — 아래 복구 배너에서 다시 시도하거나 무시할 수 있습니다.");
         } else {
           // 마커는 있는데 스냅샷이 없다(편집 전 새로고침 · 명시 내보내기로 정리됨 · 만료 · 시크릿).
           // 되살릴 것이 없으므로 조용히 랜딩한다(빈 배너·거짓 안내 금지). 마커만 정리.
           clearLiveDoc();
+          failUrl(); // 주소로 들어온 경우만 안내 — 평소 새로고침은 지금처럼 조용히 랜딩.
         }
       }
       // ② 미복구(고아) 스냅샷 배너 — 만료분은 findRecoverable 이 이 자리에서 청소한다.
@@ -513,7 +632,7 @@ export default function LabWorkspace() {
     return () => {
       cancelled = true;
     };
-  }, [doc, store, openBytes]);
+  }, [doc, store, openBytes, restoreHomeUrl]);
 
   // ── 이슈 052: 복구 배너 액션 ─────────────────────────────────────────────────────────────────────
   // 복구 = 스냅샷 바이트(편집된 HWPX본)를 " (복구본).hwpx" 이름으로 연다. 열기 성공 시(위 doc 이펙트)
@@ -544,12 +663,25 @@ export default function LabWorkspace() {
   // 새로고침은 문서를 되살린다. 그래서 "이 문서 그만 보기"를 사용자가 명시할 수 있어야 한다.
   // 규칙(마커 제거 지점 ②): **마커만 지우고 스냅샷은 남긴다** — 사용자 콘텐츠 삭제 금지. 닫은
   // 편집본은 고아 스냅샷이 되어 곧바로 현행 복구 배너로 다시 제안된다(원하면 되살릴 수 있다).
+  // 주소도 함께 홈으로 되돌린다 — 문서를 닫았는데 주소창에만 문서가 남아 있으면 거짓말이 된다.
   const onCloseDoc = useCallback(() => {
     clearLiveDoc();
+    restoreHomeUrl();
+    docUrlRef.current = null;
+    pendingUrlKeyRef.current = null;
     setDoc(null);
     setLabError(null);
     setResumeToast(null);
-  }, []);
+  }, [restoreHomeUrl]);
+
+  // ── 로고(홈) ────────────────────────────────────────────────────────────────────────────────────
+  // 편집 화면의 좌상단 로고 = 홈 앵커. **확인을 묻지 않는다**: 자동저장이 이미 스냅샷을 남기고 있고
+  // (헤더의 "자동저장됨" 라벨이 그 근거다) 닫기는 스냅샷을 지우지 않으므로, 홈으로 나가도 잃는 것이
+  // 없다 — 되돌아오면 복구 배너가 그 편집본을 그대로 제안한다. 지우는 출구는 "처음부터" 하나뿐이다.
+  const onGoHome = useCallback(() => {
+    void autosave.flush(); // 나가기 전 마지막 편집을 한 번 더 남긴다(best-effort — 실패해도 진행)
+    onCloseDoc();
+  }, [autosave, onCloseDoc]);
 
   // ── "처음부터"(초기화) ───────────────────────────────────────────────────────────────────────────
   // 닫기와의 차이는 **스냅샷까지 지운다**는 것 하나다. 닫기는 "그만 보기"(편집본은 배너로 남는다),
@@ -559,13 +691,16 @@ export default function LabWorkspace() {
     if (!window.confirm("처음부터 다시 시작할까요?\n\n지금 열린 문서를 닫고 이 문서의 자동저장 스냅샷을 삭제합니다. 되돌릴 수 없습니다.\n(내려받은 파일은 그대로 남습니다.)")) return;
     await autosave.discardSession();
     clearLiveDoc();
+    restoreHomeUrl();
+    docUrlRef.current = null;
+    pendingUrlKeyRef.current = null;
     setDoc(null);
     setRecovery(null);
     setLabError(null);
     setNotice(null);
     setResumeToast(null);
     setSavedLabel(null);
-  }, [autosave]);
+  }, [autosave, restoreHomeUrl]);
 
   // ── 이슈 052: 명시 내보내기 성공 시 스냅샷 정리 (v1 R13) ─────────────────────────────────────────
   // HwpWorkspace 의 onExport 시임(이슈 044)을 받아 웹 기본 동작(브라우저 <a download>)을 그대로 수행한
@@ -746,22 +881,76 @@ export default function LabWorkspace() {
     return null;
   }, [defaultFont]);
 
+  // 재개 토스트는 사용자 액션이 필요 없는 정보성 알림 — 몇 초 뒤 스스로 사라진다(수동 닫기도 가능).
+  // 문서 렌더가 끝나기 전에 사라지면 "복구됐다"는 사실 자체를 못 보므로 넉넉히 잡는다.
+  useEffect(() => {
+    if (!resumeToast) return;
+    const t = setTimeout(() => setResumeToast(null), RESUME_TOAST_MS);
+    return () => clearTimeout(t);
+  }, [resumeToast]);
+
+  // 배지 툴팁을 클릭으로 열어 두면 바깥 클릭·Esc 로 닫는다(호버 표시는 CSS 가 담당 — 터치 기기에는
+  // 호버가 없으므로 클릭 토글이 유일한 진입점이다).
+  useEffect(() => {
+    if (!badgeTip) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest(".lab-badge-wrap")) return; // 배지 자신의 클릭은 토글에 맡긴다
+      setBadgeTip(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setBadgeTip(false);
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [badgeTip]);
+
   // 배지는 **로컬(서버 있는) 실행의 QA 신호**다: 키가 꽂혔는지(live) 아닌지(mock)를 화면에 명시한다.
   // 공개 정적 데모(static)에서는 배지를 띄우지 않는다 — 사용자가 고를 수 있는 모드가 아니라 배포
   // 형태일 뿐이고, 우상단에 상시 붙은 "정적 데모 · AI" 라벨은 제품 화면에 잡음만 더한다.
   // AI 전송 고지는 첫 요청 전 동의 게이트(lib/demoAiConsent.ts)가 계속 담당한다.
+  //
+  // 문구는 개발자 톤("실 LLM 모드")에서 사용자 톤("AI 켜짐")으로 바꾸고, **어떤 모델로 도는지**는
+  // 배지가 아니라 툴팁이 말한다(호버/클릭). 모델명은 서버 상태 응답에서 오고(하드코딩 금지 —
+  // 클라이언트 번들에 모델 리터럴을 박지 않는다), 없으면 성격만 설명한다.
+  // 공개 데모(우리가 비용을 내는 중계)와 셀프호스트(BYOK — 이 배포 소유자의 키)는 **사실이 다르다**.
+  // 한 문구로 뭉뚱그리면 둘 중 하나에는 거짓말이 되므로 갈라서 말한다.
+  const isPublicDemoAi = demoAiOn || aiProvider === "demo";
+  const modelLine = aiModel
+    ? `${aiModel} 모델로 동작합니다${aiProvider === "demo" || aiProvider === "openrouter" ? " (OpenRouter 경유)" : ""}.`
+    : "서버에 설정된 모델로 동작합니다.";
+  const badgeTipText =
+    mode === "live"
+      ? [
+          `${isPublicDemoAi ? "지금 이 데모는 " : "이 배포는 "}${modelLine}`,
+          isPublicDemoAi
+            ? "체험용이라 우리 서버가 중계하고 사용량 한도가 있습니다. 직접 임베드하면 모델과 API 키는 호스트가 소유합니다(BYOK)."
+            : "이 서버에 설정된 키로 직접 호출합니다 — 모델과 키는 이 배포의 소유자 몫입니다(BYOK).",
+        ]
+      : ["서버에 API 키가 없어 결정적 mock 제안으로 동작합니다.", "제안 카드·적용·되돌리기까지 전체 흐름은 그대로 체험할 수 있습니다."];
   const badge =
     mode === "loading" ? (
       <span className="lab-badge lab-badge-loading">모드 확인 중…</span>
-    ) : mode === "static" ? null : mode === "live" ? (
-      // NOTE: 여기 클라이언트 배지 문구에는 키/모델 리터럴을 넣지 않는다(클라이언트 번들 grep 위생).
-      // 실제 모델 ID(Opus 4.8)와 키 참조는 서버 전용 route.ts 에만 존재.
-      <span className="lab-badge lab-badge-live" title="API 키 감지됨 — 서버가 실제 LLM 모델로 편집 제안">
-        실 LLM 모드
-      </span>
-    ) : (
-      <span className="lab-badge lab-badge-mock" title="키 없음 — 결정적 mock 편집(전체 플로우 완주 가능)">
-        mock 모드
+    ) : mode === "static" ? null : (
+      <span className="lab-badge-wrap">
+        <button
+          type="button"
+          className={`lab-badge ${mode === "live" ? "lab-badge-live" : "lab-badge-mock"}`}
+          data-testid="ai-badge"
+          aria-expanded={badgeTip}
+          onClick={() => setBadgeTip((v) => !v)}
+        >
+          {mode === "live" ? "AI 켜짐" : "mock 모드"}
+        </button>
+        <span className={`lab-tip${badgeTip ? " is-open" : ""}`} role="tooltip" data-testid="ai-badge-tip">
+          {badgeTipText.map((t) => (
+            <span key={t}>{t}</span>
+          ))}
+        </span>
       </span>
     );
 
@@ -779,10 +968,24 @@ export default function LabWorkspace() {
       {!doc && <SiteHeader current="home" />}
       {doc && (
       <header className="lab-header">
-        <span className="lab-title">
+        {/* 로고 = 홈 앵커(사용자 피드백). 자동저장이 스냅샷을 남기고 닫기는 그것을 지우지 않으므로
+            **확인 없이** 홈으로 간다 — 되돌아오면 복구 배너가 그 편집본을 그대로 제안한다. 진짜
+            링크(<a href="/">)로 두어 새 탭/가운데 클릭도 자연스럽게 동작하되, 좌클릭은 앱 안에서
+            상태를 정리하며 홈으로 간다(전체 새로고침 없이 = 엔진 재로딩 없이). */}
+        <a
+          className="lab-title lab-title-link"
+          href={homePath(BASE)}
+          data-testid="doc-home"
+          title="첫 화면으로 — 편집본은 자동저장되어 남습니다"
+          onClick={(e) => {
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return; // 새 탭/새 창은 브라우저에 맡긴다
+            e.preventDefault();
+            onGoHome();
+          }}
+        >
           오토한글
           <small>한글 문서 편집</small>
-        </span>
+        </a>
         {/* 공개 데모 크롬(레포 링크)은 정적 데모(Pages)와 라우트 데모(Vercel) 양쪽에 붙는다 —
             full Next 배포에는 NEXT_PUBLIC_DEMO=1 이 없으므로 IS_DEMO 만으로는 사라진다. */}
         {(IS_DEMO || DEMO_AI_ROUTE) && (
@@ -852,14 +1055,18 @@ export default function LabWorkspace() {
         </div>
       )}
 
-      {/* 자동 재개 토스트: 배너 대신 "이미 되돌려 놨다 + 어디까지 살아 있다(시각)"를 사후 통지한다.
-          pagehide flush 는 보장이 아니므로 시각 표기가 이 토스트의 핵심 정보다. */}
+      {/* 자동 재개 토스트: "이미 되돌려 놨다 + 어디까지 살아 있다(시각)"를 사후 통지한다.
+          pagehide flush 는 보장이 아니므로 시각 표기가 이 토스트의 핵심 정보다.
+          ⚠️ 전폭 배너였을 때는 이 정보성 문구가 **레이아웃을 밀어내** 문서가 아래로 내려갔다(사용자
+          피드백). 사용자가 할 일이 없는 알림이므로 문서 위에 떠 있다가 스스로 사라지는 토스트가 맞다
+          (RESUME_TOAST_MS). 계약(testid)은 그대로 — e2e 는 같은 이름으로 계속 검증한다. */}
       {resumeToast && (
-        <div className="lab-error lab-notice" role="status" data-testid="resume-toast">
+        // ⚠️ 닫기 버튼이 없다(그리고 토스트 전체가 pointer-events:none 이다). 우하단은 채팅 입력창의
+        // 보내기 버튼 자리라, 닫기 버튼을 달았더니 그 위를 덮어 **전송 클릭을 가로챘다**(e2e 실측:
+        // elementFromPoint(보내기 중앙) = .lab-toast-close). 사용자 액션이 필요 없는 알림이므로
+        // 클릭을 통과시키고 스스로 사라지는 쪽이 옳다.
+        <div className="lab-toast" role="status" data-testid="resume-toast">
           {resumeToast}
-          <button className="lab-btn lab-notice-close" onClick={() => setResumeToast(null)}>
-            닫기
-          </button>
         </div>
       )}
 

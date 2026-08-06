@@ -151,6 +151,34 @@ body {
   font-size: 12px;
 }
 
+/* 로고 = 홈 앵커(사용자 피드백). 링크라는 사실이 커서·호버로 보여야 한다. */
+.lab-title-link {
+  display: inline-flex;
+  align-items: baseline;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  padding: 4px 8px;
+  margin: -4px -2px;
+  border-radius: 8px;
+  transition: background 0.15s, color 0.15s;
+}
+/* ⚠️ 색 규칙은 아래 §데모 크롬의 `.lab-root.lab-demo .lab-header .lab-title`(클래스 4개)에 밀린다 —
+   호버 색을 같은 무게로 다시 선언해야 실제로 보인다(실측: 배경만 바뀌고 글자색은 그대로였다). */
+.lab-title-link:hover,
+.lab-root.lab-demo .lab-header .lab-title-link:hover {
+  background: var(--ah-surface-hover);
+  color: var(--ah-accent-ink);
+}
+.lab-title-link:hover small,
+.lab-root.lab-demo .lab-header .lab-title-link:hover small {
+  color: var(--ah-accent-ink-2);
+}
+.lab-title-link:focus-visible {
+  outline: 2px solid var(--ah-accent-line);
+  outline-offset: 1px;
+}
+
 .lab-btn {
   font: inherit;
   font-size: 13px;
@@ -268,6 +296,62 @@ svg.lucide {
   background: #dcfce7;
   border-color: #bbf7d0;
 }
+/* 배지는 이제 버튼(툴팁 토글)이다 — 기본 버튼 크롬을 지우고 칩 모양을 유지한다. */
+button.lab-badge {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* ── 배지 툴팁 ────────────────────────────────────────────────────────────────────────────────
+   "AI 켜짐"이 어떤 모델을 말하는지 호버(데스크톱)·클릭(터치)으로 설명한다. 모델명은 서버 상태
+   응답에서 오므로 이 CSS 는 폭만 잡는다. */
+.lab-badge-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.lab-tip {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 32px));
+  padding: 11px 13px;
+  border-radius: 10px;
+  border: 1px solid var(--ah-line-3);
+  background: var(--ah-bg-elev);
+  box-shadow: var(--ah-shadow-card);
+  color: var(--ah-fg);
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 1.6;
+  text-align: left;
+  white-space: normal;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: opacity 0.14s, transform 0.14s, visibility 0.14s;
+  pointer-events: none;
+}
+.lab-tip span:first-child {
+  color: var(--ah-fg-strong);
+  font-weight: 600;
+}
+/* ⚠️ 포커스 기반 노출(`:focus-within`·`:has(:focus-visible)`)은 쓰지 않는다 — 클릭·Esc 로 닫아도
+   포커스가 버튼에 남아 툴팁이 **다시 눌러앉는다**(Chromium 은 키 입력 후 포커스를 keyboard 모드로
+   승격시켜 `:focus-visible` 까지 매칭시킨다 — e2e 실측). 노출 경로는 둘뿐이다: 호버(CSS)와
+   버튼 토글(is-open). 키보드 사용자는 Enter/Space 로 같은 토글을 쓴다(aria-expanded 로 상태 공지). */
+.lab-badge-wrap:hover .lab-tip,
+.lab-tip.is-open {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
 
 .lab-status {
   font-size: 12px;
@@ -328,6 +412,58 @@ svg.lucide {
   flex: none;
   font-size: 12px;
   padding: 4px 10px;
+}
+
+/* ── 플로팅 토스트(자동 재개 알림) ───────────────────────────────────────────────────────────────
+   전폭 배너였을 때는 이 정보성 문구가 레이아웃을 밀어내 문서가 아래로 내려갔다(사용자 피드백).
+   사용자가 할 일이 없는 알림이므로 문서 위에 떠 있다가 스스로 사라진다. 색은 테마 토큰만 쓴다. */
+.lab-toast {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 80;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: min(420px, calc(100vw - 40px));
+  padding: 12px 12px 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--ah-line-3);
+  background: var(--ah-bg-elev);
+  box-shadow: var(--ah-shadow-card);
+  color: var(--ah-fg);
+  font-size: 13px;
+  line-height: 1.55;
+  text-align: left;
+  animation: lab-toast-in 0.22s ease-out;
+  /* 사라지기를 기다리는 동안에도 아래 UI(채팅 보내기 버튼 등)를 그대로 쓸 수 있어야 한다 — 알림은
+     시야만 잠깐 빌린다. 그래서 **클릭을 전부 통과시키고 닫기 버튼도 두지 않는다**(닫기 버튼을 달았을
+     때 실제로 보내기 클릭을 가로챘다 — e2e 실측). */
+  pointer-events: none;
+}
+.lab-toast::before {
+  content: "";
+  flex: none;
+  width: 3px;
+  align-self: stretch;
+  margin: 1px 2px 1px 0;
+  border-radius: 3px;
+  background: var(--ah-accent);
+}
+@keyframes lab-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lab-toast {
+    animation: none;
+  }
 }
 .lab-recovery {
   display: flex;
