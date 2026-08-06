@@ -16,7 +16,8 @@
 //     계약이 앱과 드리프트하지 않는다).
 //  ② known-field 검증(validateRequest + 데모 상한) · 본문 바이트 상한 · 상류 텍스트 상한.
 //  ③ 모델·max_tokens·reasoning effort·zdr 은 **서버 고정**(env 로만 오버라이드).
-//  ④ 일일 전체 캡 + IP 캡. Upstash(REST)가 있으면 durable, 없으면 인메모리 best-effort.
+//  ④ IP 캡(상시) + 일일 전체 캡(**기본 비활성** — `DEMO_AI_DAILY_CAP` 을 넣었을 때만).
+//     Upstash(REST)가 있으면 durable, 없으면 인메모리 best-effort.
 //  ⑤ Origin same-origin 검증(브라우저 교차 출처 사용 차단).
 
 import {
@@ -43,13 +44,13 @@ const MAX_UPSTREAM_TEXT_BYTES = 128 * 1024;
  *  Worker 는 2048 이었다(추론 토큰이 max_tokens 에 합산돼 1024 에서 다중 셀 채움이 절단 → 전량 드롭).
  *  라우트는 4096 으로 올린다(BYOK 경로와 같은 값 — 8쪽 표 다중 채움에서 절단 여유).
  *
- *  ⚠️ 예산 재계산(단가 $0.10/M 입력 · $0.60/M 출력):
+ *  ⚠️ 예산 계산(단가 $0.10/M 입력 · $0.60/M 출력):
  *    출력 4,096 tok × $0.60/M                    = $0.00246
  *    입력 ≈12,483 tok × $0.10/M (아래 상한 역산)  = $0.00125
- *    요청당 최악 ≈ $0.0037 → × DAILY 2000 = **$7.4/일**.
- *  즉 Worker 시절의 "$5/일" 방어선은 4096 에서 그대로는 성립하지 않는다. 실사용은 출력 상한을 거의
- *  다 쓰지 않아(2필드 요청 수백 토큰) 실제 일예산은 $1~2 수준이지만, **최악을 $5 아래로 잠그고 싶으면
- *  `DEMO_AI_DAILY_CAP=1300`** 으로 내려라(1300 × $0.0037 ≈ $4.8). 기본값은 태스크 지시대로 2000. */
+ *    요청당 최악 ≈ **$0.0037**(실사용은 출력 상한을 거의 안 써 요청당 $0.0005 수준).
+ *  일일 전역 캡이 꺼진 기본 구성에서 비용은 IP 캡으로만 잡힌다: IP 하나당 하루 최악 20 × $0.0037
+ *  ≈ **$0.074**. 즉 서로 다른 IP 100개가 한도를 다 태우면 최악 ≈ $7.4/일이다(실사용 기준으론 $1 내외).
+ *  비용이 실제로 커지면 `DEMO_AI_DAILY_CAP` 으로 전역 상한을 되켠다 — 예: 1300 ≈ 최악 $4.8/일. */
 const MAX_TOKENS_CEILING = 4096;
 
 /** 추론 노력 기본값. 구조화 추출 작업이라 깊은 추론이 필요 없고, 추론 토큰이 출력 예산을 먹어 절단을
@@ -74,7 +75,15 @@ const DEMO_REQUEST_LIMITS = {
   maxImageDataUrl: 0,
 } as const;
 
-const DEFAULT_DAILY_CAP = 2000;
+/** IP 캡(기본 20/일). 일일 전역 캡을 끈 뒤로는 **남용 방어선이 사실상 이것 하나**다.
+ *
+ *  20 을 그대로 둔 근거: (a) Worker 시절부터 쓰던 값이고 이 값이 막았다는 사용자 신고나 실사용 분포
+ *  측정치가 **아직 없다** — 근거 없이 올리면 방어선만 헐거워진다. (b) 비용 산식이 선명하다: IP 하나가
+ *  태울 수 있는 최악이 20 × $0.0037 ≈ $0.074/일이라 "동시 방문 IP 수"만 보면 일예산이 계산된다.
+ *  올릴 때는 반드시 실사용 분포(요청/세션 p95)를 먼저 재고, "IP 수 × 캡 × $0.0037 = 최악 일예산"을
+ *  다시 계산한 뒤 `DEMO_AI_PER_IP_CAP` 로 올려라(코드 기본값을 바꾸는 것보다 env 가 되돌리기 쉽다).
+ *  ⚠️ 정직하게: IP 캡은 NAT/공유망(회사·학교·모바일 캐리어)에서는 **여러 사람이 한 몫을 나눠 쓰고**,
+ *  반대로 IPv6·모바일 로밍처럼 주소가 자주 바뀌는 환경에서는 우회된다. 인증이 아니라 저지선이다. */
 const DEFAULT_PER_IP_CAP = 20;
 /** 카운터 TTL — 키에 UTC 날짜가 박혀 있어 25시간이면 자연 소멸(별도 청소 불필요). */
 const COUNTER_TTL_SECONDS = 90_000;
@@ -92,6 +101,15 @@ function positiveConfigInt(raw: string | undefined, fallback: number, max: numbe
   if (raw === undefined || raw === "") return fallback;
   const value = Number(raw);
   return Number.isSafeInteger(value) && value > 0 && value <= max ? value : null;
+}
+
+/** 일일 전역 캡 — **기본 비활성**(사용자 결정 2026-07-30: 캡에 막혀 데모가 죽는 것보다 열어 두는 쪽).
+ *  미설정/빈 값 = `null`(무제한), 설정 = 그 값, 잘못된 값 = `undefined`(설정 오류 → 503).
+ *  ⚠️ 비용이 커지면 여기를 고치지 말고 **env 로 재활성**하라(`DEMO_AI_DAILY_CAP=1300` ≈ 최악 $4.8/일). */
+function readDailyCap(raw: string | undefined): number | null | undefined {
+  if (raw === undefined || raw.trim() === "") return null;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value > 0 && value <= 1_000_000 ? value : undefined;
 }
 
 function jsonRes(body: unknown, status: number): Response {
@@ -263,7 +281,8 @@ function clientIp(req: Request): string {
 export interface DemoConfig {
   model: string;
   maxTokens: number;
-  dailyCap: number;
+  /** `null` = 일일 전역 캡 없음(기본). 숫자면 그 값이 하루 전체 상한. */
+  dailyCap: number | null;
   perIpCap: number;
   effort: string;
 }
@@ -271,10 +290,11 @@ export interface DemoConfig {
 type ConfigRead = { ok: true; value: DemoConfig } | { ok: false; error: string };
 
 export function readDemoConfig(): ConfigRead {
-  const dailyCap = positiveConfigInt(process.env.DEMO_AI_DAILY_CAP, DEFAULT_DAILY_CAP, 1_000_000);
+  const dailyCap = readDailyCap(process.env.DEMO_AI_DAILY_CAP); // null = 무제한(기본)
   const perIpCap = positiveConfigInt(process.env.DEMO_AI_PER_IP_CAP, DEFAULT_PER_IP_CAP, 100_000);
   const maxTokens = positiveConfigInt(process.env.DEMO_AI_MAX_TOKENS, MAX_TOKENS_CEILING, MAX_TOKENS_CEILING);
-  if (dailyCap === null || perIpCap === null || maxTokens === null || perIpCap > dailyCap) {
+  // 모순 검사는 **일일 캡이 켜져 있을 때만** 의미가 있다(무제한이면 IP 캡이 그보다 클 수 없다).
+  if (dailyCap === undefined || perIpCap === null || maxTokens === null || (dailyCap !== null && perIpCap > dailyCap)) {
     return { ok: false, error: "데모 AI 한도 설정이 잘못되었습니다(서버 env 확인 필요)." };
   }
   // 설정 오타로 예산 계산 밖의 추론 노력이 나가지 않게 화이트리스트로 잠근다(빈 값 = 미전송).
@@ -320,17 +340,31 @@ export async function handleDemoEdit(req: Request): Promise<Response> {
   }
 
   // ── 한도 ──────────────────────────────────────────────────────────────────────────────────────
+  // IP 캡은 항상 돈다(기본 구성에서 유일한 방어선). 일일 전역 캡은 env 로 켰을 때만 — 무제한이면
+  // 카운터조차 굴리지 않는다(Upstash 왕복 1회를 매 요청 아끼고, 의미 없는 키를 만들지 않는다).
   const day = dayKey();
   const ipCount = await bumpCounter(`ah:demo:ip:${day}:${clientIp(req)}`);
   if (ipCount > perIpCap) {
+    // 정직하게: 이건 브라우저가 아니라 **IP(네트워크) 단위** 한도다 — 같은 공유망을 쓰는 다른 사람과
+    // 몫을 나눠 쓰고, 시크릿 창이나 다른 브라우저로 바꿔도 리셋되지 않는다. 리셋 시점(UTC 자정 =
+    // 한국시간 오전 9시)도 "내일"로 얼버무리지 않고 그대로 적는다.
     return jsonRes(
-      { error: "오늘 이 브라우저의 데모 사용 한도를 다 썼습니다. 내일 다시 시도하거나, 레포를 클론해 로컬(BYOK)에서 무제한으로 쓰세요." },
+      {
+        error:
+          `오늘 이 네트워크(IP)에서 쓸 수 있는 데모 AI 편집 횟수(${perIpCap}회)를 다 썼습니다. ` +
+          "한국시간 매일 오전 9시(UTC 0시)에 초기화되며, 레포를 클론해 로컬(BYOK)에서 실행하면 한도 없이 쓸 수 있습니다.",
+      },
       429,
     );
   }
-  const dayCount = await bumpCounter(`ah:demo:all:${day}`);
-  if (dayCount > dailyCap) {
-    return jsonRes({ error: "오늘 데모 전체 사용 한도를 다 썼습니다(예산 보호). 내일 다시 열립니다." }, 429);
+  if (dailyCap !== null) {
+    const dayCount = await bumpCounter(`ah:demo:all:${day}`);
+    if (dayCount > dailyCap) {
+      return jsonRes(
+        { error: "오늘 데모 전체 사용 한도를 다 썼습니다(예산 보호). 한국시간 매일 오전 9시(UTC 0시)에 다시 열립니다." },
+        429,
+      );
+    }
   }
 
   // ── 상류 호출(모델·상한·zdr 전부 서버 고정) ────────────────────────────────────────────────────

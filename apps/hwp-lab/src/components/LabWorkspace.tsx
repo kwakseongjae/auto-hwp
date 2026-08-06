@@ -8,9 +8,15 @@ import { isTrapError, resetEngine, type EngineLoadProgress } from "@auto-hwp/eng
 import { AutosaveController, IdbSnapshotStore, findRecoverable, formatAge, recoveredName, type SnapshotRecord } from "@/lib/autosave";
 import { clearLiveDoc, decideResume, readLiveDoc, resumeToastMessage, writeLiveDoc } from "@/lib/resumeSession";
 import { limitMessage, oversizeMessage } from "@/lib/limits";
-import { ensureDemoAiConsent, type DemoAiConsentState, type DemoAiTransport } from "@/lib/demoAiConsent";
+import { ensureDemoAiConsent, splitConsentMessage, type DemoAiConsentState, type DemoAiTransport } from "@/lib/demoAiConsent";
 import { demoAiHttpError, readDemoAiResponse } from "@/lib/demoAiResponse";
+import DemoAiConsentDialog from "./DemoAiConsentDialog";
 import { ThemeToggle, useTheme } from "./ThemeToggle";
+// 사이트 크롬([site] 스트림). 랜딩(=문서 열기 전)에만 붙는다 — 문서를 열면 기존 앱 헤더가 돌아온다.
+import { SiteHeader } from "./site/SiteHeader";
+import { SiteFooter } from "./site/SiteFooter";
+import { LandingShowcase } from "./site/LandingShowcase";
+import { docHref, siteHref } from "./site/paths";
 
 type Mode = "loading" | "mock" | "live" | "static";
 type Doc = { bytes: Uint8Array; name: string };
@@ -34,7 +40,8 @@ const DEMO_AI_ROUTE = !IS_DEMO && !DEMO_AI_URL && process.env.NEXT_PUBLIC_DEMO_A
 // 데모 AI 가 켜져 있는가 = (정적 데모 + 워커) 또는 (라우트 모드). 정적/동적 배포를 통틀어 이 한 값이
 // "동의 게이트를 세우고 단발 데모 계약으로 보낸다"를 결정한다.
 const DEMO_AI_ON = (IS_DEMO && !!DEMO_AI_URL) || DEMO_AI_ROUTE;
-const DEMO_AI_TRANSPORT: DemoAiTransport = DEMO_AI_ROUTE ? "route" : "worker";
+// 중계 경로(동의 문구가 말하는 대상)는 컴포넌트 안에서 정한다 — QA 스위치(`?demoAi=1`)가 런타임에
+// 라우트 모드를 켤 수 있기 때문(아래 demoAiTransport).
 
 // 기본 폰트: 레포 자산 NanumGothic(OFL) — copy-fonts.mjs 가 public/fonts 로 복사하므로 오프라인에서도
 // 항상 존재한다. 열기 직후 자동 등록되어 화면·조판·PDF 가 즉시 이 폰트로 일치하고 PDF 버튼이 활성화된다.
@@ -93,9 +100,33 @@ export default function LabWorkspace() {
   // 포인터 제스처(드래그) 진행 중엔 자동저장 flush 를 미룬다(렌더-0 규율). 이슈 055 워커화로 toHwpx
   // 는 이제 비차단이지만, 제스처 중 불필요한 직렬화/RPC 왕복을 피하는 유휴 게이트는 그대로 유효하다.
   const pointerDownRef = useRef(false);
-  // 공개 데모의 첫 AI 네트워크 호출 전에만 묻는다. 동의는 이 페이지 수명 동안만 보존하며,
-  // 새로고침하면 다시 확인한다(문서 문맥의 제3자 전송을 조용히 영구 승인하지 않음).
+  // 공개 데모의 첫 AI 네트워크 호출 전에만 묻는다. 사용자 결정(2026-07-30): 동의는 **최초 1회**만
+  // 받고 이 브라우저에 기억한다(localStorage — lib/demoAiConsent.ts). 이 ref 는 그 위의 페이지-로컬
+  // 캐시라 저장소를 매 요청 읽지 않는다. 거부는 아무 것도 기록하지 않으므로 다음 요청에 다시 묻는다.
   const demoAiConsentRef = useRef<DemoAiConsentState>({ granted: false });
+  // 인앱 동의 모달(네이티브 confirm 대체): 열려 있는 동안 요청은 이 promise 에 매달려 대기한다.
+  const [consentParagraphs, setConsentParagraphs] = useState<readonly string[] | null>(null);
+  const consentResolveRef = useRef<((granted: boolean) => void) | null>(null);
+  // 대기 중인 동의를 한 방향으로만 끝낸다(중복 resolve·유실 방지). 새 요청이 겹치면 앞의 것은 거부로
+  // 마감한다 — 모달이 하나이므로 "누가 이 대답의 주인인가"가 모호해선 안 된다.
+  const settleConsent = useCallback((granted: boolean) => {
+    const resolve = consentResolveRef.current;
+    consentResolveRef.current = null;
+    setConsentParagraphs(null);
+    resolve?.(granted);
+  }, []);
+  const askDemoAiConsent = useCallback(
+    (message: string) =>
+      new Promise<boolean>((resolve) => {
+        consentResolveRef.current?.(false); // 겹친 앞 요청 마감
+        consentResolveRef.current = resolve;
+        // 모달은 게이트가 만든 **그 문구**를 문단으로 쪼개 그대로 렌더한다(계약 드리프트 없음).
+        setConsentParagraphs(splitConsentMessage(message));
+      }),
+    [],
+  );
+  // 언마운트(라우팅/닫기)로 모달이 사라지면 대기 중인 요청이 영원히 매달린다 — 거부로 끝낸다.
+  useEffect(() => () => consentResolveRef.current?.(false), []);
 
   // ssr:false 로 로드되므로 window 존재. wasm은 public 정적 에셋을 명시적 URL로 fetch(번들러 마법 X).
   const wasmUrl = useMemo(() => new URL(`${BASE}/hwp/hwp_wasm_bg.wasm`, window.location.origin), []);
@@ -107,6 +138,16 @@ export default function LabWorkspace() {
   // 실브라우저로 검증해야 하는 스펙(이미지 삽입·HWPX 저장·표 추가 버튼 i18n)은 `?toolbar=full` 로 원래
   // 툴바를 그대로 받는다. 기능이 아니라 **노출**만 바뀌는 스위치라는 사실이 이 파라미터로 드러난다.
   const fullToolbar = useMemo(() => new URLSearchParams(window.location.search).get("toolbar") === "full", []);
+  // QA/e2e 탈출구(`?demoAi=1`): 데모 AI 계약(동의 게이트 + 단발 위임)을 **빌드 env 없이** 켠다.
+  // 왜 필요한가: NEXT_PUBLIC_DEMO_AI 는 빌드 타임에 번들로 인라인되므로, e2e 서버 전체를 데모 모드로
+  // 띄우지 않고는 동의 모달을 실브라우저로 검증할 수 없다(그러면 다른 챗 스펙이 전부 모달에 걸린다).
+  // ⚠️ 이 스위치는 **없던 AI 를 켜 주지 않는다**: 정적 export(IS_DEMO)에는 `/api/hwp-edit` 자체가
+  // 없으므로 그 빌드에서는 무시한다(DEMO_AI_ROUTE 와 같은 안전장치). 켜 봐야 우리 서버로 가는 경로가
+  // 하나 열릴 뿐이고, 키가 없으면 라우트가 기존대로 mock/503 으로 정직하게 답한다.
+  const qaDemoAi = useMemo(() => !IS_DEMO && new URLSearchParams(window.location.search).get("demoAi") === "1", []);
+  const demoAiOn = DEMO_AI_ON || qaDemoAi;
+  // 중계 경로(동의 문구가 말하는 대상): QA 스위치도 same-origin 라우트를 부르므로 "route" 다.
+  const demoAiTransport: DemoAiTransport = DEMO_AI_ROUTE || qaDemoAi ? "route" : "worker";
   const adapterOptions = useMemo<WasmAdapterOptions | undefined>(
     () => (workerMode ? { worker: { url: new URL(`${BASE}/hwp/worker.js`, window.location.origin) } } : undefined),
     [workerMode],
@@ -554,12 +595,13 @@ export default function LabWorkspace() {
   // messages 에 접는다. 키/검색은 전부 서버사이드(R6).
   const onAiRequest = useCallback(async (instruction: string, anchors: Anchor[], ctx: DocContext, opts?: AiRequestOptions): Promise<Intent[]> => {
     // 정적 데모: 프록시 URL이 설정돼 있으면 그리로 위임(아래 별도 블록), 없으면 정직하게 안내하고 끝낸다.
-    if (IS_DEMO && !DEMO_AI_ON) {
+    if (IS_DEMO && !demoAiOn) {
       throw new Error("정적 데모에서는 AI 편집을 지원하지 않습니다 — 레포를 클론해 로컬 실행(.env.local에 OPENROUTER_API_KEY) 시 사용할 수 있습니다.");
     }
-    if (DEMO_AI_ON) {
+    if (demoAiOn) {
       // 동의 문구는 **실제 중계 경로**를 말한다(worker=Cloudflare Worker / route=우리 서버(Vercel)).
-      if (!ensureDemoAiConsent(demoAiConsentRef.current, (message) => window.confirm(message), DEMO_AI_TRANSPORT)) {
+      // 게이트는 인앱 모달로 묻고(askDemoAiConsent), 동의는 이 브라우저에 1회만 기억된다.
+      if (!(await ensureDemoAiConsent(demoAiConsentRef.current, askDemoAiConsent, demoAiTransport))) {
         throw new Error("AI 전송에 동의하지 않아 요청을 보내지 않았습니다. 수동 편집과 내보내기는 계속 사용할 수 있습니다.");
       }
     }
@@ -601,7 +643,7 @@ export default function LabWorkspace() {
     //   route  : full Next 배포(Vercel) — same-origin `/api/hwp-edit`(DEMO_AI_MODE=1).
     // 둘 다 **같은 요청·응답 계약**이라 분기는 URL 하나뿐이다. 에이전틱 스트리밍/웹검색은 데모에서
     // 끈다(비용·복잡도 최소화) — 채팅은 최종 intents 로 제안 카드를 그대로 만든다.
-    if (DEMO_AI_ON) {
+    if (demoAiOn) {
       const res = await fetch(DEMO_AI_URL || `${BASE}/api/hwp-edit`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -684,7 +726,7 @@ export default function LabWorkspace() {
     // Feature A: 근거(출처)를 채팅으로 전달 — intents 반환 계약(Promise<Intent[]>)은 불변(InlineEditPanel 안전).
     if (opts?.onCitations) opts.onCitations(data.citations ?? []);
     return data.intents ?? [];
-  }, [adapter]);
+  }, [adapter, askDemoAiConsent, demoAiOn, demoAiTransport]);
 
   // R8: 폰트는 번들하지 않는다. 기본 NanumGothic 이 자동 등록되므로 PDF 는 곧바로 활성화되지만,
   // (기본 폰트 fetch 실패 등으로) 미주입 상태에서 PDF 를 누르면 이 폴백이 호출된다: 기본 폰트를 다시
@@ -728,9 +770,13 @@ export default function LabWorkspace() {
     // 스크롤시킨다. 데모/QA 공통 — 고정 높이면 히어로가 커질 때 위쪽으로 오버플로해 상단 콘텐츠
     // (복구 배너 등)가 화면 밖으로 밀려 클릭조차 안 된다(e2e 052 실패로 발현).
     <div className={`lab-root lab-demo${doc ? "" : " lab-landing"}`}>
-      {/* 데모 랜딩(문서 열기 전)은 히어로가 스스로 파일 열기·이동을 제공하므로 헤더를 띄우지 않는다.
-          문서를 열면(=편집 모드) 상태·파일 열기가 필요하므로 헤더가 돌아온다.
+      {/* 헤더는 두 벌이다.
+          · 랜딩(문서 열기 전) = **사이트 크롬**(SiteHeader): 로고·데모·양식 일괄 작성·벤치마크·Docs·GitHub.
+            /docs, /bench 와 같은 헤더를 써서 랜딩도 사이트의 한 페이지로 읽히게 한다.
+          · 문서를 연 뒤(=편집 모드) = 기존 앱 헤더(.lab-header): 파일 열기·닫기·자동저장 상태·모드 배지.
+            편집 화면의 크롬은 건드리지 않는다(사이트 네비가 편집 중에 끼어들지 않게).
           ⚠ `hidden` 속성은 .lab-header의 display:flex에 밀린다 — 조건부 렌더로 지운다. */}
+      {!doc && <SiteHeader current="home" />}
       {doc && (
       <header className="lab-header">
         <span className="lab-title">
@@ -874,8 +920,8 @@ export default function LabWorkspace() {
           />
         ) : (
           <div className="lab-empty">
-            {/* 랜딩엔 헤더가 없으므로 테마 토글만 우상단에 떠 있는다(고정 위치 — 히어로 배치 무간섭). */}
-            <ThemeToggle className="lab-theme-float" />
+            {/* 테마 토글은 이제 사이트 헤더(SiteHeader) 안에 산다 — 떠 있는 토글은 헤더와 겹쳐
+                두 개로 보였다. `ThemeToggle` 은 여전히 이 파일에서 import 되어 편집 모드 헤더가 쓴다. */}
             {resuming && (
               // 자동 재개 중 — 랜딩 히어로가 잠깐 보이는 동안 "왜 아무 일도 없는가"를 설명한다.
               <div className="lab-recovery" role="status" data-testid="resume-progress">
@@ -1037,24 +1083,41 @@ export default function LabWorkspace() {
                 </div>
               </div>
 
+              {/* 사이트화: 기능 GIF 3종 + /docs·/bench 진입 동선. 히어로 아래(첫 화면 밖)에 두고
+                  GIF 는 전부 lazy — 랜딩 첫 페인트와 엔진 프리페치를 방해하지 않는다. */}
+              <LandingShowcase />
+
               <div className="lab-hero-dev">
+                {/* 문서 링크는 이제 GitHub blob 이 아니라 **사이트 라우트**로 간다(/docs/[slug]).
+                    레포 원문 링크는 각 문서 페이지 상단의 "원문:" 줄이 그대로 제공한다. */}
+                <a href={siteHref("/docs")} data-testid="docs-hub-link" title="임베드·CLI·MCP·Intent 스키마 — 레포 마크다운 원문">문서</a>
+                <span aria-hidden>·</span>
                 <a href={`${BASE}/bench/`} data-testid="bench-link" title="쪽수·줄바꿈·캐럿을 한컴 저장값과 대조한 수치 + 재현 커맨드">충실도 벤치마크</a>
                 <span aria-hidden>·</span>
+                <a href={docHref("embed")}>임베드 가이드</a>
+                <span aria-hidden>·</span>
+                <a href={docHref("mcp")}>MCP</a>
+                <span aria-hidden>·</span>
+                <a href={docHref("why")}>왜 만들었나</a>
+                <span aria-hidden>·</span>
                 <a href="https://github.com/kwakseongjae/auto-hwp" target="_blank" rel="noreferrer">GitHub <ExternalLink size={12} /></a>
-                <span aria-hidden>·</span>
-                <a href="https://github.com/kwakseongjae/auto-hwp#readme" target="_blank" rel="noreferrer">소개(README)</a>
-                <span aria-hidden>·</span>
-                <a href="https://github.com/kwakseongjae/auto-hwp/blob/main/docs/EMBED-GUIDE.md" target="_blank" rel="noreferrer">임베드 가이드</a>
-                <span aria-hidden>·</span>
-                <a href="https://github.com/kwakseongjae/auto-hwp/blob/main/docs/MCP-GUIDE.md" target="_blank" rel="noreferrer">MCP</a>
-                <span aria-hidden>·</span>
-                <a href="https://github.com/kwakseongjae/auto-hwp/blob/main/docs/SDK-LAYERS.md" target="_blank" rel="noreferrer">아키텍처</a>
               </div>
             </div>
           </div>
         )}
         {busy && doc && <div className="lab-loading-overlay">{busy}</div>}
       </div>
+      {/* 사이트 푸터 — 랜딩(사이트 화면)에만. 편집 모드는 앱 셸(100vh)이라 푸터가 붙을 자리가 없다. */}
+      {!doc && <SiteFooter />}
+
+      {/* 데모 AI 전송 동의 — 첫 요청 전 **1회**. 네이티브 confirm 을 대체하는 인앱 모달이라 메인스레드를
+          멈추지 않고(엔진 워커·자동저장 계속), 문구는 lib/demoAiConsent.ts 원문 그대로다. */}
+      <DemoAiConsentDialog
+        open={consentParagraphs !== null}
+        paragraphs={consentParagraphs ?? []}
+        onAccept={() => settleConsent(true)}
+        onDecline={() => settleConsent(false)}
+      />
     </div>
   );
 }

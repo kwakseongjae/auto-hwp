@@ -1,0 +1,161 @@
+/* 데모 AI 전송 동의 모달 — 네이티브 window.confirm 을 대체한다(라이트/다크 토큰 사용).
+   globals.css 가 아니라 CSS 모듈인 이유: 이 화면 하나에서만 쓰는 스타일이고, 공용 시트를 건드리지
+   않아야 다른 작업 스트림과 충돌하지 않는다. 색은 전부 :root 토큰(--ah-*)이라 테마 토글이 그대로 먹는다. */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60; /* 워크스페이스 오버레이(패널/툴바)보다 위 — 동의 전에는 아무 것도 나가지 않는다 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(4, 6, 10, 0.62);
+  backdrop-filter: blur(2px);
+  animation: fade 120ms ease-out;
+}
+
+:root[data-theme="light"] .backdrop {
+  background: rgba(15, 23, 42, 0.38);
+}
+
+.dialog {
+  width: min(30rem, 100%);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  border: 1px solid var(--ah-line-3);
+  border-radius: 14px;
+  background: var(--ah-surface-2);
+  color: var(--ah-fg);
+  box-shadow: var(--ah-shadow-card);
+  padding: 20px 20px 16px;
+  animation: rise 140ms ease-out;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 12px;
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 8px;
+  background: var(--ah-accent-wash);
+  border: 1px solid var(--ah-accent-line);
+  color: var(--ah-accent-ink);
+}
+
+.title {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--ah-fg-strong);
+  margin: 0;
+  flex: 1;
+}
+
+.close {
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ah-muted);
+  cursor: pointer;
+}
+
+.close:hover {
+  background: var(--ah-surface-hover);
+  color: var(--ah-fg);
+}
+
+.body p {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.62;
+  color: var(--ah-fg-soft);
+  white-space: pre-wrap; /* 문구의 줄바꿈은 원문 그대로 */
+}
+
+/* 마지막 문단은 질문("전송하고 AI 편집을 사용할까요?") — 본문보다 또렷하게. */
+.body p:last-child {
+  margin-bottom: 0;
+  color: var(--ah-fg);
+  font-weight: 600;
+}
+
+.note {
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ah-muted);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.btn {
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 14px;
+  border: 1px solid var(--ah-line-3);
+  border-radius: 8px;
+  background: var(--ah-surface-btn);
+  color: var(--ah-fg);
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: var(--ah-surface-hover);
+}
+
+.primary {
+  background: #d97706; /* 랜딩 accent 버튼과 같은 값(.lab-btn-accent) */
+  border-color: #d97706;
+  color: #fff;
+  font-weight: 600;
+}
+
+.primary:hover {
+  background: #b45309;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--ah-accent-ink);
+  outline-offset: 2px;
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .backdrop,
+  .dialog {
+    animation: none;
+  }
+}

@@ -4,7 +4,8 @@
 // "데모 모드가 실제로 가로채는가"(배선)까지 같이 잠긴다.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET, POST } from "./route";
-import { resetMemoryCounters } from "./demo";
+import { readDemoConfig, resetMemoryCounters } from "./demo";
+import { demoAiHttpError } from "../../../lib/demoAiResponse";
 
 const ORIGIN = "https://demo.test";
 
@@ -184,7 +185,26 @@ describe("hwp-edit — 공개 데모 모드", () => {
     expect(res.status).toBe(200);
   });
 
-  // ── ④ 한도(일일·IP) ───────────────────────────────────────────────────────────────────────────
+  // ── ④ 한도(IP 상시 · 일일 전역은 기본 비활성) ─────────────────────────────────────────────────
+  it("기본값: 일일 전역 캡은 꺼져 있다(IP 캡만 적용 — 전역 카운터를 굴리지도 않는다)", async () => {
+    // 사용자 결정(2026-07-30): 일일 전역 캡 기본 비활성. 같은 IP 로 IP 캡까지 쓰고, 서로 다른 IP 로는
+    // 전역 한도 없이 계속 통과해야 한다(예전 기본값 2000 이 살아 있으면 이 테스트는 무의미해지지 않지만,
+    // readDemoConfig().dailyCap === null 로 "정말 무제한인지"를 직접 잠근다).
+    expect(readDemoConfig()).toMatchObject({ ok: true, value: { dailyCap: null, perIpCap: 20 } });
+    process.env.DEMO_AI_PER_IP_CAP = "1";
+    stubUpstream();
+    for (let i = 0; i < 5; i += 1) {
+      expect((await POST(req(validBody(), {}, `198.51.100.${i}`))).status).toBe(200);
+    }
+  });
+
+  it("잘못된 DEMO_AI_DAILY_CAP 값은 무제한으로 넘어가지 않고 503 으로 막는다", async () => {
+    process.env.DEMO_AI_DAILY_CAP = "많이";
+    const upstream = stubUpstream();
+    expect((await POST(req(validBody()))).status).toBe(503);
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
   it("IP 캡을 넘으면 429 이고 상류를 부르지 않는다", async () => {
     process.env.DEMO_AI_PER_IP_CAP = "2";
     process.env.DEMO_AI_DAILY_CAP = "100";
@@ -194,6 +214,11 @@ describe("hwp-edit — 공개 데모 모드", () => {
     const third = await POST(req(validBody()));
     expect(third.status).toBe(429);
     expect(upstream).toHaveBeenCalledTimes(2);
+    // 문구 정직성: "브라우저"가 아니라 IP(네트워크) 단위임 + 실제 한도 수치 + 리셋 시점.
+    const detail = ((await third.json()) as { error: string }).error;
+    expect(detail).toContain("네트워크(IP)");
+    expect(detail).toContain("2회");
+    expect(detail).toContain("오전 9시");
     // 다른 IP 는 자기 몫이 남아 있다.
     expect((await POST(req(validBody(), {}, "198.51.100.9"))).status).toBe(200);
   });
@@ -207,6 +232,19 @@ describe("hwp-edit — 공개 데모 모드", () => {
     const over = await POST(req(validBody(), {}, "3.3.3.3"));
     expect(over.status).toBe(429);
     expect((await over.json()) as { error: string }).toHaveProperty("error", expect.stringContaining("데모 전체"));
+  });
+
+  it("IP 429 문구는 클라 표시기(demoAiResponse)를 통과해도 그대로 보인다(접두/치환 없음)", async () => {
+    // 일일 캡이 꺼진 기본 구성에서 사용자가 실제로 보게 되는 유일한 한도 안내다 — 서버 문구와 화면
+    // 문구가 어긋나면 "왜 막혔는지"가 다시 미궁이 된다(demoAiResponse 의 429 그대로 통과 계약).
+    process.env.DEMO_AI_PER_IP_CAP = "1";
+    stubUpstream();
+    expect((await POST(req(validBody()))).status).toBe(200);
+    const over = await POST(req(validBody()));
+    expect(over.status).toBe(429);
+    const payload = (await over.json()) as { error: string };
+    expect(demoAiHttpError(429, payload)).toBe(payload.error);
+    expect(payload.error).toContain("네트워크(IP)");
   });
 
   it("PER_IP > DAILY 같은 모순 설정은 503 으로 막는다", async () => {
@@ -240,9 +278,15 @@ describe("hwp-edit — 공개 데모 모드", () => {
         return new Response(JSON.stringify({ choices: [{ message: { content: "[]" } }] }), { status: 200 });
       }),
     );
-    const res = await POST(req(validBody()));
-    expect(res.status).toBe(200);
-    expect(calls.filter((u) => u === "https://redis.example/pipeline")).toHaveLength(2); // ip + 전체
+    // 기본(일일 캡 off) — IP 카운터 하나만 굴린다.
+    expect((await POST(req(validBody()))).status).toBe(200);
+    expect(calls.filter((u) => u === "https://redis.example/pipeline")).toHaveLength(1);
+
+    // 일일 캡을 켜면 전역 카운터가 하나 더 붙는다(ip + 전체).
+    process.env.DEMO_AI_DAILY_CAP = "100";
+    calls.length = 0;
+    expect((await POST(req(validBody()))).status).toBe(200);
+    expect(calls.filter((u) => u === "https://redis.example/pipeline")).toHaveLength(2);
   });
 
   // ── ⑤ reason/message 계약 ─────────────────────────────────────────────────────────────────────
