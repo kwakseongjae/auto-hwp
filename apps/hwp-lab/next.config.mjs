@@ -46,6 +46,10 @@ const nextConfig = {
     NEXT_PUBLIC_SITE_URL: process.env.DEMO_SITE_URL ?? "",
     // 정적 데모 AI 프록시(Cloudflare Worker) URL. 있으면 데모 AI 편집이 켜진다(services/demo-ai-proxy).
     NEXT_PUBLIC_DEMO_AI_URL: process.env.NEXT_PUBLIC_DEMO_AI_URL ?? "",
+    // full Next 배포(Vercel)용 데모 AI 스위치. `route` 면 워커 URL 없이 same-origin `/api/hwp-edit`
+    // 를 데모 계약(동의 게이트 + 단발 + 한도)으로 부른다. 서버 쪽 짝은 `DEMO_AI_MODE=1`(하드닝 경로).
+    // 비어 있으면 기존 동작 그대로(정적 데모는 워커, 로컬은 BYOK).
+    NEXT_PUBLIC_DEMO_AI: process.env.NEXT_PUBLIC_DEMO_AI ?? "",
   },
   // file: 심링크 패키지를 Next가 트랜스파일하도록 명시. (026: ai-protocol 은 route.ts·클라 양쪽에서
   // import, editor-core 는 react 가 re-export 하는 타입 소스 — 둘 다 심링크 스코프에 넣는다.)

@@ -17,6 +17,7 @@ import {
   validateRequest,
   validateResponse,
 } from "@auto-hwp/ai-protocol";
+import { demoProbe, handleDemoEdit, isDemoAiMode } from "./demo";
 
 // @anthropic-ai/sdk 는 route handler(Node.js 런타임)에서만 사용. edge 런타임 선언 금지(이슈 §함정).
 // API 키/LLM 코드는 이 서버 전용 모듈에만 존재 — 클라이언트 번들에 절대 포함되지 않는다(R6).
@@ -501,12 +502,20 @@ function activeProvider(): "openrouter" | "anthropic" | "mock" {
 }
 
 export async function GET() {
+  // 공개 데모 모드(DEMO_AI_MODE=1): 프로바이더/모델을 서버가 고정하므로 프로브도 데모 계약으로 답한다.
+  if (isDemoAiMode()) return demoProbe();
   const provider = activeProvider();
   const model = provider === "openrouter" ? OPENROUTER_MODEL : provider === "anthropic" ? "claude-opus-4-8" : null;
   return NextResponse.json({ mode: provider === "mock" ? "mock" : "live", provider, model });
 }
 
 export async function POST(req: Request) {
+  // ── 공개 데모 모드(DEMO_AI_MODE=1) ────────────────────────────────────────────────────────────────
+  // 하드닝된 단발 경로(./demo.ts)로 **가장 먼저** 위임한다. 본문을 여기서 읽기 전에 넘겨야 데모가
+  // 바이트 상한과 함께 스트림을 직접 읽을 수 있다. 데모 모드가 꺼져 있으면(기본) 아래 BYOK 경로는
+  // 한 줄도 달라지지 않는다 — 로컬 개발/셀프호스트 계약 불변.
+  if (isDemoAiMode()) return handleDemoEdit(req);
+
   let body: unknown;
   try {
     body = await req.json();

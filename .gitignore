@@ -41,6 +41,10 @@ apps/hwp-lab/test-results/
 apps/hwp-lab/playwright-report/
 apps/hwp-lab/playwright/.cache/
 
+# Vercel CLI 로컬 상태 — 링크된 프로젝트 id + `vercel pull` 이 받아 온 env(.env.*.local)와
+# `vercel build` 산출물(output/). 전부 머신 로컬이고 env 사본에는 시크릿이 들어온다 — 절대 커밋 금지.
+.vercel/
+
 # local agent runtime state (공유 훅 settings.json만 추적)
 .claude/*
 !.claude/settings.json

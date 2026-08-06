@@ -8,7 +8,8 @@ import { isTrapError, resetEngine, type EngineLoadProgress } from "@auto-hwp/eng
 import { AutosaveController, IdbSnapshotStore, findRecoverable, formatAge, recoveredName, type SnapshotRecord } from "@/lib/autosave";
 import { clearLiveDoc, decideResume, readLiveDoc, resumeToastMessage, writeLiveDoc } from "@/lib/resumeSession";
 import { limitMessage, oversizeMessage } from "@/lib/limits";
-import { ensureDemoAiConsent, type DemoAiConsentState } from "@/lib/demoAiConsent";
+import { ensureDemoAiConsent, type DemoAiConsentState, type DemoAiTransport } from "@/lib/demoAiConsent";
+import { demoAiHttpError, readDemoAiResponse } from "@/lib/demoAiResponse";
 import { ThemeToggle, useTheme } from "./ThemeToggle";
 
 type Mode = "loading" | "mock" | "live" | "static";
@@ -23,6 +24,17 @@ const BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";
 // 이 값이 배포 시 주입되면(NEXT_PUBLIC_DEMO_AI_URL) 데모 AI 편집이 켜지고, 비면 기존 "로컬(BYOK)에서"
 // 안내만 뜬다(회귀 없음). 키는 워커 시크릿에만 있고 클라이언트 번들엔 절대 들어오지 않는다(R6).
 const DEMO_AI_URL = process.env.NEXT_PUBLIC_DEMO_AI_URL || "";
+// full Next 배포(Vercel)로 옮기면 중계자가 **우리 서버 자신**이 된다: 워커 URL 없이
+// `NEXT_PUBLIC_DEMO_AI=route` 만 켜면 same-origin `/api/hwp-edit`(DEMO_AI_MODE=1 로 하드닝된
+// 데모 경로 — src/app/api/hwp-edit/demo.ts)를 같은 단발 계약으로 부른다. 워커 URL 이 있으면 그쪽이
+// 이긴다(Pages 병행 기간 동안 기존 배포 무변경).
+// ⚠️ `!IS_DEMO` 는 안전장치다: DEMO_STATIC=1 정적 export 에는 `/api/hwp-edit` 자체가 없다(빌드에서
+// 들어낸다). 그 조합으로 잘못 배포돼도 채팅이 404 를 치는 대신 "AI 꺼짐" 안내로 정직하게 격하된다.
+const DEMO_AI_ROUTE = !IS_DEMO && !DEMO_AI_URL && process.env.NEXT_PUBLIC_DEMO_AI === "route";
+// 데모 AI 가 켜져 있는가 = (정적 데모 + 워커) 또는 (라우트 모드). 정적/동적 배포를 통틀어 이 한 값이
+// "동의 게이트를 세우고 단발 데모 계약으로 보낸다"를 결정한다.
+const DEMO_AI_ON = (IS_DEMO && !!DEMO_AI_URL) || DEMO_AI_ROUTE;
+const DEMO_AI_TRANSPORT: DemoAiTransport = DEMO_AI_ROUTE ? "route" : "worker";
 
 // 기본 폰트: 레포 자산 NanumGothic(OFL) — copy-fonts.mjs 가 public/fonts 로 복사하므로 오프라인에서도
 // 항상 존재한다. 열기 직후 자동 등록되어 화면·조판·PDF 가 즉시 이 폰트로 일치하고 PDF 버튼이 활성화된다.
@@ -238,7 +250,9 @@ export default function LabWorkspace() {
     fetch(`${BASE}/api/hwp-edit`, { method: "GET" })
       .then((r) => r.json())
       .then((d: { mode?: Mode }) => {
-        if (!cancelled) setMode(d.mode === "live" ? "live" : "mock");
+        // 데모 라우트 모드에서 서버 키가 없으면 프로브가 "static"(=AI 없음)을 답한다 — mock 배지를
+        // 띄우면 "가짜 편집이라도 동작한다"는 거짓말이 되므로 그 값을 그대로 살린다.
+        if (!cancelled) setMode(d.mode === "live" ? "live" : d.mode === "static" ? "static" : "mock");
       })
       .catch(() => {
         if (!cancelled) setMode("mock");
@@ -540,11 +554,12 @@ export default function LabWorkspace() {
   // messages 에 접는다. 키/검색은 전부 서버사이드(R6).
   const onAiRequest = useCallback(async (instruction: string, anchors: Anchor[], ctx: DocContext, opts?: AiRequestOptions): Promise<Intent[]> => {
     // 정적 데모: 프록시 URL이 설정돼 있으면 그리로 위임(아래 별도 블록), 없으면 정직하게 안내하고 끝낸다.
-    if (IS_DEMO && !DEMO_AI_URL) {
+    if (IS_DEMO && !DEMO_AI_ON) {
       throw new Error("정적 데모에서는 AI 편집을 지원하지 않습니다 — 레포를 클론해 로컬 실행(.env.local에 OPENROUTER_API_KEY) 시 사용할 수 있습니다.");
     }
-    if (IS_DEMO && DEMO_AI_URL) {
-      if (!ensureDemoAiConsent(demoAiConsentRef.current, (message) => window.confirm(message))) {
+    if (DEMO_AI_ON) {
+      // 동의 문구는 **실제 중계 경로**를 말한다(worker=Cloudflare Worker / route=우리 서버(Vercel)).
+      if (!ensureDemoAiConsent(demoAiConsentRef.current, (message) => window.confirm(message), DEMO_AI_TRANSPORT)) {
         throw new Error("AI 전송에 동의하지 않아 요청을 보내지 않았습니다. 수동 편집과 내보내기는 계속 사용할 수 있습니다.");
       }
     }
@@ -580,27 +595,33 @@ export default function LabWorkspace() {
       ...(opts?.history?.length ? { history: opts.history } : {}),
     };
 
-    // ── 정적 데모 프록시 경로 ─────────────────────────────────────────────────────────────────────
-    // Cloudflare Worker(키 보관 + 일일 한도)로 단발 위임. 에이전틱 스트리밍/웹검색은 데모에서 끈다
-    // (비용·복잡도 최소화) — 채팅은 최종 intents 로 제안 카드를 그대로 만든다. 429(한도)는 정직 안내.
-    if (IS_DEMO) {
-      const res = await fetch(DEMO_AI_URL, {
+    // ── 데모 프록시 경로 ──────────────────────────────────────────────────────────────────────────
+    // 키 보관 + 일일/IP 한도를 쥔 하드닝 엔드포인트로 단발 위임한다. 전송 대상은 두 가지:
+    //   worker : 정적 데모(Pages) — 별도 Cloudflare Worker(services/demo-ai-proxy).
+    //   route  : full Next 배포(Vercel) — same-origin `/api/hwp-edit`(DEMO_AI_MODE=1).
+    // 둘 다 **같은 요청·응답 계약**이라 분기는 URL 하나뿐이다. 에이전틱 스트리밍/웹검색은 데모에서
+    // 끈다(비용·복잡도 최소화) — 채팅은 최종 intents 로 제안 카드를 그대로 만든다.
+    if (DEMO_AI_ON) {
+      const res = await fetch(DEMO_AI_URL || `${BASE}/api/hwp-edit`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ instruction, anchors, docContext: requestBody.docContext }),
       });
-      if (!res.ok) {
-        let detail = `${res.status}`;
-        try {
-          const j = (await res.json()) as { error?: string };
-          if (j?.error) detail = j.error;
-        } catch {
-          /* 비-JSON */
-        }
-        throw new Error(res.status === 429 ? detail : `AI 데모 오류: ${detail}`);
+      let payload: Record<string, unknown> | null = null;
+      try {
+        payload = (await res.json()) as Record<string, unknown>;
+      } catch {
+        /* 비-JSON(프록시 장애/게이트웨이 오류) */
       }
-      const data = (await res.json()) as { intents?: Intent[] };
-      return data.intents ?? [];
+      // 429(한도)·503(미구성)은 서버 문구가 그대로 완성된 안내다 — 접두 없이 그대로 띄운다.
+      if (!res.ok) throw new Error(demoAiHttpError(res.status, payload));
+      // 빈/부분 제안의 **이유**를 반드시 표시한다(어제까지는 조용히 "제안 0건"으로 끝났다):
+      //  · 0건 → 오류 말풍선으로 이유를 말하고 끝낸다.
+      //  · 부분(절단 구제) → 카드는 살리되 타임라인에 "일부만 반영" 경고를 남긴다.
+      const outcome = readDemoAiResponse<Intent>(payload);
+      if (outcome.error) throw new Error(outcome.error);
+      if (outcome.warning) opts?.onEvent?.({ type: "thinking_delta", text: `⚠️ ${outcome.warning}` });
+      return outcome.intents;
     }
 
     // ── 스트리밍 경로(채팅 타임라인) ──────────────────────────────────────────────────────────────
@@ -716,7 +737,9 @@ export default function LabWorkspace() {
           오토한글
           <small>한글 문서 편집</small>
         </span>
-        {IS_DEMO && (
+        {/* 공개 데모 크롬(레포 링크)은 정적 데모(Pages)와 라우트 데모(Vercel) 양쪽에 붙는다 —
+            full Next 배포에는 NEXT_PUBLIC_DEMO=1 이 없으므로 IS_DEMO 만으로는 사라진다. */}
+        {(IS_DEMO || DEMO_AI_ROUTE) && (
           <a className="lab-gh-link" href="https://github.com/kwakseongjae/auto-hwp" target="_blank" rel="noreferrer" title="GitHub 저장소">
             GitHub <ExternalLink size={12} />
           </a>
@@ -812,9 +835,11 @@ export default function LabWorkspace() {
               onAiRequest,
               isMock: mode === "mock",
               notice:
-                IS_DEMO && !DEMO_AI_URL
+                IS_DEMO && !DEMO_AI_ON
                   ? "정적 데모라 AI 편집은 꺼져 있습니다 — 클릭 선택·수동 편집·HTML/PDF 저장은 전부 동작합니다. AI 바이브 편집은 레포를 클론해 로컬 실행(BYOK)하면 켜집니다."
-                  : undefined,
+                  : DEMO_AI_ROUTE && mode === "static"
+                    ? "데모 AI가 아직 구성되지 않았습니다(서버 키 미설정) — 문서 열기·수동 편집·HTML/PDF 저장은 전부 동작합니다."
+                    : undefined,
             })}
             requestFont={requestFont}
             fontCatalog={FONT_CATALOG}
@@ -932,7 +957,7 @@ export default function LabWorkspace() {
                     </div>
                   </div>
                   <p className="lab-hero-note">
-                    {IS_DEMO && DEMO_AI_URL
+                    {DEMO_AI_ON
                       ? "파일 원본은 업로드하지 않습니다 · AI 사용 시 필요한 문서 문맥만 OpenRouter로 전송하며 첫 요청 전에 동의를 받습니다"
                       : "파일 원본은 브라우저 밖으로 나가지 않습니다 · AI 연동 시 전송 범위와 제공자는 호스트가 결정합니다"}
                   </p>
