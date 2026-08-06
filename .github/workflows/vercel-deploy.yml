@@ -122,7 +122,10 @@ jobs:
       #    ⚠️ 레포 루트에서 실행한다 — rootDirectory=apps/hwp-lab 는 project.json 이 들고 있고,
       #    build:deps 가 ../../packages/* 를 필요로 하므로 체크아웃 전체가 있어야 한다.
       - name: vercel pull (${{ inputs.target }} env)
-        run: vercel pull --yes --environment=${{ inputs.target }} --token="$VERCEL_TOKEN"
+        run: |
+          # 토큰 유효성·스코프를 먼저 정직하게 판별한다(6차 실측 — pull 실패의 남은 용의자가 토큰뿐).
+          vercel whoami --token="$VERCEL_TOKEN" || { echo "::error::VERCEL_TOKEN 이 무효합니다 — vercel.com/account/tokens 에서 재발급 후 시크릿 갱신"; exit 1; }
+          vercel pull --yes --environment=${{ inputs.target }} --scope="$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
 
       # 5) 빌드 — 여기서 apps/hwp-lab 의 installCommand/buildCommand(prebuild→build:deps→
       #    copy-wasm/fonts/samples→next build)가 돌아 .vercel/output 이 만들어진다.
@@ -130,7 +133,7 @@ jobs:
         run: |
           # PROD_FLAG 는 의도적으로 단어 분해한다(빈 값 = 플래그 없음).
           # shellcheck disable=SC2086
-          vercel build $PROD_FLAG --token="$VERCEL_TOKEN"
+          vercel build $PROD_FLAG --scope="$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
 
       # 6) 산출물만 업로드. 클라우드 빌드 없음 → Rust 툴체인 부재 문제를 원천 회피.
       - name: vercel deploy (--prebuilt)
