@@ -1,0 +1,156 @@
+/* 랜딩 기능 쇼케이스(GIF 3종) + 문서 진입 동선. 색은 globals.css 의 --ah-* 토큰만 쓴다.
+   ⚠️ 이 파일은 [site] 스트림 소유의 **신규** 스타일이다 — globals.css 의 랜딩 규칙(.lab-hero 등)을
+   건드리지 않는다(다른 스트림과 같은 셀렉터를 놓고 싸우지 않기 위함). */
+
+.showcase {
+  width: 100%;
+  max-width: 1180px;
+  margin: 56px auto 0;
+  padding: 0 4px;
+  text-align: left;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+}
+
+.head {
+  margin-bottom: 20px;
+}
+
+.kicker {
+  margin: 0;
+  color: var(--ah-accent-ink-2);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.title {
+  margin: 8px 0 0;
+  font-size: clamp(20px, 2.6vw, 26px);
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+  color: var(--ah-fg-strong);
+  font-weight: 750;
+}
+
+.sub {
+  margin: 9px 0 0;
+  max-width: 62ch;
+  color: var(--ah-muted);
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--ah-line);
+  border-radius: 14px;
+  background: var(--ah-surface);
+  overflow: hidden;
+}
+
+.shot {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  object-position: top center;
+  background: var(--ah-surface-3);
+  border-bottom: 1px solid var(--ah-line);
+}
+
+.cardBody {
+  padding: 14px 15px 16px;
+}
+
+.cardBody b {
+  display: block;
+  color: var(--ah-fg-strong);
+  font-size: 14.5px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.cardBody p {
+  margin: 0;
+  color: var(--ah-muted);
+  font-size: 12.8px;
+  line-height: 1.65;
+}
+
+.cardBody a {
+  display: inline-block;
+  margin-top: 11px;
+  color: var(--ah-accent-ink);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.cardBody a:hover {
+  text-decoration: underline;
+}
+
+/* ── 문서/벤치마크 진입 동선 ── */
+.paths {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 40px;
+}
+
+@media (max-width: 760px) {
+  .paths {
+    grid-template-columns: 1fr;
+  }
+}
+
+.path {
+  display: block;
+  padding: 17px 18px 18px;
+  border: 1px solid var(--ah-line);
+  border-radius: 14px;
+  background: var(--ah-surface);
+  text-decoration: none;
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+
+.path:hover {
+  border-color: var(--ah-accent-line);
+  transform: translateY(-1px);
+}
+
+.path b {
+  display: block;
+  color: var(--ah-fg-strong);
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.path p {
+  margin: 0;
+  color: var(--ah-muted);
+  font-size: 12.8px;
+  line-height: 1.65;
+}
+
+.path span {
+  display: inline-block;
+  margin-top: 10px;
+  color: var(--ah-accent-ink);
+  font-size: 12.5px;
+  font-weight: 600;
+}
