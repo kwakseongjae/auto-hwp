@@ -90,7 +90,7 @@ LLM에게 한글 문서를 주는 기존 방법은 결국 **텍스트 추출**�
 ## 로컬 빌드
 
 엔진을 직접 고칠 때만 필요합니다 — 그냥 써볼 거라면
-[라이브 데모](https://kwakseongjae.github.io/auto-hwp/)로 충분합니다.
+[라이브 데모](https://autohwp.com/)로 충분합니다.
 
 ```bash
 git clone --recurse-submodules https://github.com/kwakseongjae/auto-hwp
@@ -202,7 +202,7 @@ old Hangul) · `hwp-render` (PaintOp→SVG) · `hwp-export` (PDF/HTML) · `hwp-o
 ## Local build
 
 Only needed if you are changing the engine — to just try it, the
-[live demo](https://kwakseongjae.github.io/auto-hwp/) is enough.
+[live demo](https://autohwp.com/) is enough.
 
 ```bash
 git clone --recurse-submodules https://github.com/kwakseongjae/auto-hwp

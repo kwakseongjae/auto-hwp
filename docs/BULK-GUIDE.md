@@ -16,7 +16,7 @@
 
 두 표면 모두 규격 파일(`autohwp.fillmap.v1`)을 공유하므로, 웹에서 규격을 잡고 CLI로 돌려도 된다.
 
-## 웹으로 하기 — [/bulk](https://kwakseongjae.github.io/auto-hwp/bulk)
+## 웹으로 하기 — [/bulk](https://autohwp.com/bulk)
 
 전 과정이 브라우저 안에서 끝난다. 양식도 명단도 업로드되지 않는다.
 

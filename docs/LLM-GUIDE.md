@@ -223,7 +223,7 @@ curl -X POST localhost:8787/api/hwp-edit -H 'content-type: application/json' \
 
 **① 읽을 문서** — [BULK-GUIDE](BULK-GUIDE.md)(웹 5단계 퍼널 / CLI `inspect`→검수→`fill`).
 
-**② 설치** — 웹은 설치 0(라이브: https://kwakseongjae.github.io/auto-hwp/bulk ). 자동화는 CLI:
+**② 설치** — 웹은 설치 0(라이브: https://autohwp.com/bulk ). 자동화는 CLI:
 
 ```bash
 cargo install --git https://github.com/kwakseongjae/auto-hwp auto-hwp-cli --features rhwp,shaper,pdf

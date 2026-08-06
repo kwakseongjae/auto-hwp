@@ -12,7 +12,7 @@
 문서를 남의 서비스에 맡기지 않고 직접 구축합니다 — 브라우저에서 wasm으로 돌리든,
 당신의 서버(개인 PC·사내망)에 올리든 같은 코어가 돕니다.
 
-**체험** — [데모](https://kwakseongjae.github.io/auto-hwp/) · [양식 일괄 작성](https://kwakseongjae.github.io/auto-hwp/bulk) · [벤치마크](https://kwakseongjae.github.io/auto-hwp/bench/)<br>
+**체험** — [데모](https://autohwp.com/) · [양식 일괄 작성](https://autohwp.com/bulk) · [벤치마크](https://autohwp.com/bench)<br>
 **통합** — [임베드](./docs/EMBED-GUIDE.md) · [셀프호스팅](./docs/SELF-HOST.md) · [CLI](./docs/CLI-GUIDE.md) · [MCP](./docs/MCP-GUIDE.md)<br>
 **문서** — [설계 배경](./docs/WHY.md) · [LLM에게 맡길 때](./docs/LLM-GUIDE.md) · [기여](./CONTRIBUTING.md) · [English](./README.en.md)
 
@@ -24,13 +24,13 @@
 | <img src="./docs/assets/guide-vibe.gif" alt="표를 지정하고 말로 편집을 지시해 카드로 확인한 뒤 적용하는 장면" width="380"> | **바이브 편집** — 고칠 자리를 지정하고 말로 지시하면 제안이 카드로 먼저 뜹니다. 승인한 카드만 문서에 닿고, 카드 단위로 되돌립니다. |
 | <img src="./docs/assets/guide-bulk.gif" alt="양식과 명단을 넣어 완성본 여러 부를 한 번에 만드는 장면" width="380"> | **양식 일괄 작성** — 양식 1개와 명단 N행을 넣으면 완성본 N부가 zip으로 나옵니다. 규칙 기반이라 AI 없이 돕니다. |
 
-### 체험 — 우리가 배포한 정적 데모
+### 체험 — 우리가 배포한 데모 (autohwp.com)
 
-- **문서 편집**: 한글 파일을 열어 고치고 HTML·PDF·HWPX로 저장 → [열기](https://kwakseongjae.github.io/auto-hwp/)
-- **양식 일괄 작성**: 양식 1개 + 명단 N행 → 완성본 N부 zip → [열기](https://kwakseongjae.github.io/auto-hwp/bulk) · [가이드](./docs/BULK-GUIDE.md)
+- **문서 편집**: 한글 파일을 열어 고치고 HTML·PDF·HWPX로 저장 → [열기](https://autohwp.com/)
+- **양식 일괄 작성**: 양식 1개 + 명단 N행 → 완성본 N부 zip → [열기](https://autohwp.com/bulk) · [가이드](./docs/BULK-GUIDE.md)
 
 파일은 브라우저를 벗어나지 않습니다. 데모에서 **AI 편집을 선택할 때만** 지시문과 문서 프로필·본문 발췌·표 문맥이 동의를 받은 뒤
-우리 Cloudflare Worker를 거쳐 OpenRouter(GPT-5.6 Luna)로 갑니다(파일 원본은 보내지 않습니다). 이 AI는 **우리가 비용을 내는
+우리 데모 서버를 거쳐 OpenRouter(GPT-5.6 Luna)로 갑니다(파일 원본은 보내지 않습니다). 이 AI는 **우리가 비용을 내는
 체험용**이라 일·IP 단위 한도가 걸려 있고, 데모는 현재 `.hwp`만 받습니다. 제품에 넣을 때는 아래처럼 당신 몫의 프록시를 두세요.
 
 ## 내 서비스에 붙이기
@@ -193,7 +193,7 @@ AI가 읽은 것(평문)과 사람이 보는 것(조판된 지면)이 서로 다
 | 공공기관 실물 49종 ([출처](./corpus/GOV-SOURCES.md)) | — | 열기→렌더→PDF→텍스트 전 구간 통과 |
 
 `scripts/verify-local.sh`가 매 커밋 이 게이트를 강제하고, 수치 전체와 각각을 직접 재현하는 명령은 **[벤치마크
-페이지](https://kwakseongjae.github.io/auto-hwp/bench/)** 에 공개돼 있습니다. 130쪽 문서에서 편집 → 화면 반영 136ms(워커
+페이지](https://autohwp.com/bench)** 에 공개돼 있습니다. 130쪽 문서에서 편집 → 화면 반영 136ms(워커
 스레드, 화면 비차단), 되돌리기 메모리는 128MiB 버짓으로 상한이 잡혀 있습니다.
 
 **산출 형태** — 결과물은 **HTML · PDF · HWPX** 세 가지이고, `.hwp`로 되돌려 저장하지는 않습니다. 즉 `.hwp → .hwp` 왕복이

@@ -6,7 +6,7 @@
 
 이 파일은 LLM 에이전트용 진입점이다. **레포를 통째로 받아 "이거 붙여줘"를 수행하는 에이전트는
 [docs/LLM-GUIDE.md](docs/LLM-GUIDE.md)부터 읽어라** — 과업별 레시피·함정·검증 커맨드가 거기 있다.
-저장소: https://github.com/kwakseongjae/auto-hwp · 라이브 데모: https://kwakseongjae.github.io/auto-hwp/
+저장소: https://github.com/kwakseongjae/auto-hwp · 라이브 데모: https://autohwp.com/
 
 ## 임베드 작업 시 읽을 순서 (이 순서를 지켜라)
 

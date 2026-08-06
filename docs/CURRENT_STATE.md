@@ -3,8 +3,9 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
-- 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
-  — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
+- 정본 배포: **https://autohwp.com** (Vercel full Next — 2026-08-06 컷오버, Actions vercel-deploy.yml).
+  GitHub Pages(kwakseongjae.github.io/auto-hwp)는 병행 유지 중 — 리다이렉트 스텁 전환 예정.
+  GitHub: https://github.com/kwakseongjae/auto-hwp (public, 홈페이지·description=autohwp.com)
 - 갱신: 2026-08-06 · Claude(오케스트레이터)+Opus 워크플로 — **🚀 autohwp.com 프로덕션 컷오버 완주**
   (11차 파이프라인 success — /docs 200·sitemap 200·**AI 실호출 SetTableCell 정상 반환**). 배치:
   ① 도메인 attach·www 308·가비아 DNS(사용자)·Git 연동(main 자동배포 가드) ② 일일 캡 기본 비활성·

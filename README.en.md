@@ -12,7 +12,7 @@ An **engine** that opens Korean HWP/HWPX documents, and a **web editor** built o
 You build it yourself instead of handing documents to somebody else's service — the same core runs
 as wasm in the browser or on your own server (a laptop, an intranet box).
 
-**Try** — [demo](https://kwakseongjae.github.io/auto-hwp/) · [bulk form filling](https://kwakseongjae.github.io/auto-hwp/bulk) · [benchmark](https://kwakseongjae.github.io/auto-hwp/bench/)<br>
+**Try** — [demo](https://autohwp.com/) · [bulk form filling](https://autohwp.com/bulk) · [benchmark](https://autohwp.com/bench)<br>
 **Integrate** — [embed](./docs/EMBED-GUIDE.en.md) · [self-host](./docs/SELF-HOST.md) · [CLI](./docs/CLI-GUIDE.md) · [MCP](./docs/MCP-GUIDE.md)<br>
 **Read** — [why](./docs/WHY.md#english) · [handing this repo to an LLM](./docs/LLM-GUIDE.md) · [contributing](./CONTRIBUTING.md) · [한국어](./README.md)
 
@@ -24,13 +24,13 @@ as wasm in the browser or on your own server (a laptop, an intranet box).
 | <img src="./docs/assets/guide-vibe.gif" alt="Marking a table, editing it in plain language, reviewing the card and applying" width="380"> | **Vibe editing** — mark what to change, say it in plain language, and the proposal shows up as a card first. Only approved cards touch the document, and each reverts on its own. |
 | <img src="./docs/assets/guide-bulk.gif" alt="Feeding one form and a roster to produce many finished documents at once" width="380"> | **Bulk form filling** — one form plus an N-row roster produces N finished documents as a zip. It is rule-based, so it works with no AI. |
 
-### Our hosted demo — zero install
+### Our hosted demo — zero install (autohwp.com)
 
-- **Document editing**: open a Korean document, edit it, save as HTML/PDF/HWPX → [open](https://kwakseongjae.github.io/auto-hwp/)
-- **Bulk form filling**: 1 form + an N-row roster → N documents as a zip → [open](https://kwakseongjae.github.io/auto-hwp/bulk) · [guide](./docs/BULK-GUIDE.md)
+- **Document editing**: open a Korean document, edit it, save as HTML/PDF/HWPX → [open](https://autohwp.com/)
+- **Bulk form filling**: 1 form + an N-row roster → N documents as a zip → [open](https://autohwp.com/bulk) · [guide](./docs/BULK-GUIDE.md)
 
 The file never leaves the browser. Only if you **opt into AI editing** does your instruction plus the document profile, body
-excerpt and table context go — after an explicit consent prompt — through our Cloudflare Worker to OpenRouter (GPT-5.6 Luna);
+excerpt and table context go — after an explicit consent prompt — through our demo server to OpenRouter (GPT-5.6 Luna);
 the file itself is never uploaded. That AI is **a trial we pay for**, so it has per-day and per-IP caps, and the demo takes
 `.hwp` only. In a product, put your own proxy there — see below.
 
@@ -195,7 +195,7 @@ have been on it since 2022 ([ZDNet, in Korean](https://zdnet.co.kr/view/?no=2026
 | 49 real government documents ([sources](./corpus/GOV-SOURCES.md)) | — | full open → render → PDF → text pipeline passes |
 
 `scripts/verify-local.sh` enforces the gate on every commit, and every number plus the exact command that reproduces it is
-published on the **[benchmark page](https://kwakseongjae.github.io/auto-hwp/bench/)**. Measured at 130 pages, edit → screen
+published on the **[benchmark page](https://autohwp.com/bench)**. Measured at 130 pages, edit → screen
 is 136ms on a worker thread (the UI never blocks); undo memory is capped by a 128MiB budget.
 
 **What comes out** — the outputs are **HTML, PDF and HWPX**; nothing is ever written back into `.hwp`. The loop is
