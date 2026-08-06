@@ -1,0 +1,170 @@
+# Vercel(autohwp.com) 배포 — **수동 전용**(workflow_dispatch, 이 레포 CI 원칙 2026-07-11).
+#
+# GitHub Pages 정적 데모(deploy-demo.yml)와 **병행**한다. 이쪽은 서버가 있는 full Next 배포다:
+#   /api/hwp-edit(데모 AI 라우트) + 절대 URL 메타(OG/canonical) + 커스텀 도메인 autohwp.com.
+#
+# 왜 prebuilt 인가: Vercel 클라우드 빌드 컨테이너에는 Rust/wasm-bindgen/binaryen 이 없어서
+# packages/engine 의 wasm 을 만들 수 없다(copy-wasm.mjs 가 pkg 부재로 즉시 실패한다).
+# 그래서 툴체인이 있는 러너에서 wasm→JS dist→`vercel build` 까지 끝내고, 결과물(.vercel/output)만
+# `vercel deploy --prebuilt` 로 올린다. 빌드 순서는 deploy-demo.yml 과 동일한 함정 회피 규칙을 따른다.
+#
+# 선행 1회 설정(레포 Settings → Secrets and variables → Actions):
+#   VERCEL_TOKEN       — 사용자가 발급/등록해야 하는 **유일한 비밀**
+#                        (vercel.com/account/tokens, Scope = kwakseongjaes-projects)
+#   VERCEL_ORG_ID      — team_4X1lyulthUiBtmklmjAUsXLv   (비밀 아님. .vercel/project.json 의 orgId)
+#   VERCEL_PROJECT_ID  — prj_5ps7tZkirpzDXEaGzLD1Acob6ctR (비밀 아님. .vercel/project.json 의 projectId)
+#
+# autohwp.com 은 2026-08-06 부터 **라이브**다(가비아 DNS 반영 완료, TLS 발급됨). 그래도 기본 target 은
+# preview — 프로덕션 배포는 실행 시 target=production 을 **명시**해야 한다(오배포 방지).
+# 되돌리기: `vercel rollback <이전 배포 URL> --scope kwakseongjaes-projects` 또는 대시보드 Instant Rollback.
+name: vercel-deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "배포 대상. preview=미리보기 URL만, production=autohwp.com 반영"
+        type: choice
+        options:
+          - preview
+          - production
+        default: preview
+  # 컷오버 확정 후에만 주석을 푼다(그 전에는 자동 프로덕션 배포 금지 — 이 레포 CI 원칙).
+  # push:
+  #   branches: [main]
+  #   paths:
+  #     - "apps/hwp-lab/**"
+  #     - "packages/**"
+  #     - "crates/**"
+  #     - ".github/workflows/vercel-deploy.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vercel-deploy-${{ inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: vercel-${{ inputs.target }}
+      url: ${{ steps.deploy.outputs.url }}
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      # preview 면 빈 문자열, production 이면 "--prod" — build/deploy 양쪽에 같은 값을 준다
+      # (한쪽만 --prod 면 프로덕션 env 로 빌드한 산출물을 프리뷰에 올리는 등 조용히 어긋난다).
+      PROD_FLAG: ${{ inputs.target == 'production' && '--prod' || '' }}
+    steps:
+      # 토큰 없이 툴체인 20분을 태우지 않도록 fail-fast.
+      - name: verify secrets are present
+        run: |
+          test -n "$VERCEL_TOKEN" || { echo "::error::secret VERCEL_TOKEN 이 없습니다 (vercel.com/account/tokens 에서 발급 후 레포 Secrets 에 등록)"; exit 1; }
+          test -n "$VERCEL_ORG_ID" || { echo "::error::secret VERCEL_ORG_ID 이 없습니다"; exit 1; }
+          test -n "$VERCEL_PROJECT_ID" || { echo "::error::secret VERCEL_PROJECT_ID 이 없습니다"; exit 1; }
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive # external/rhwp — engine wasm 빌드(cargo resolve)에 필요
+
+      # ── 툴체인: deploy-demo.yml / publish.yml 과 **버전 고정까지 동일**하게 유지한다.
+      - uses: dtolnay/rust-toolchain@1.95
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: install wasm-bindgen-cli (=0.2.125)
+        run: cargo install wasm-bindgen-cli --version 0.2.125 --locked
+
+      # 최신 binaryen 공식 릴리스 사용 — apt 는 108(2022)이라 최신 rustc wasm 에서 wasm-opt 가 실패해
+      # 조용히 미적용됐다(2026-07-22 실측: 배포본 11.4MB vs 로컬 8.07MB). 119 로 고정 설치.
+      - name: install binaryen (wasm-opt -Oz 다이어트)
+        run: |
+          curl -sL https://github.com/WebAssembly/binaryen/releases/download/version_119/binaryen-version_119-x86_64-linux.tar.gz | tar xz -C /tmp
+          echo "/tmp/binaryen-version_119/bin" >> "$GITHUB_PATH"
+          /tmp/binaryen-version_119/bin/wasm-opt --version
+
+      # Node 24 — Vercel 프로젝트 설정(nodeVersion 24.x)과 맞춘다. prebuilt 는 러너에서 빌드한
+      # 산출물이 그대로 함수가 되므로, 여기 Node 가 런타임 Node 와 어긋나면 안 된다.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+      - name: install pnpm (packages/* 빌드 관례)
+        run: npm i -g pnpm
+
+      # 1) 엔진 wasm → packages/engine/pkg. hwp-lab 의 prebuild(copy-wasm.mjs)가 이걸 public/hwp 로 옮긴다.
+      - name: build @auto-hwp/engine (wasm)
+        working-directory: packages/engine
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
+      # 2) JS 패키지: install → build 를 의존 순서대로. ⚠️ pnpm 의 `file:` 의존은 심링크가 아니라
+      #    **설치 시점 스냅샷** — react 를 editor-core dist 생성 전에 install 하면 빈 패키지가 복사돼
+      #    번들러가 "Failed to resolve entry" 로 죽는다(deploy-demo.yml 1차 배포 실패 실측).
+      - name: build JS package deps (install after dist exists)
+        run: |
+          pnpm -C packages/ai-protocol install && pnpm -C packages/ai-protocol build
+          pnpm -C packages/editor-core install && pnpm -C packages/editor-core build
+          pnpm -C packages/react install
+
+      # 3) Vercel CLI — 버전 고정(빌더 출력 포맷이 바뀌면 prebuilt 계약이 흔들린다).
+      - name: install vercel CLI (=54.2.0)
+        run: npm i -g vercel@54.2.0
+
+      # 4) 프로젝트 설정 + 환경변수(DEMO_SITE_URL / NEXT_PUBLIC_DEMO_AI / DEMO_AI_MODE …)를 내려받는다.
+      #    ⚠️ 레포 루트에서 실행한다 — rootDirectory=apps/hwp-lab 는 project.json 이 들고 있고,
+      #    build:deps 가 ../../packages/* 를 필요로 하므로 체크아웃 전체가 있어야 한다.
+      - name: vercel pull (${{ inputs.target }} env)
+        run: vercel pull --yes --environment=${{ inputs.target }} --token="$VERCEL_TOKEN"
+
+      # 5) 빌드 — 여기서 apps/hwp-lab 의 installCommand/buildCommand(prebuild→build:deps→
+      #    copy-wasm/fonts/samples→next build)가 돌아 .vercel/output 이 만들어진다.
+      - name: vercel build
+        run: |
+          # PROD_FLAG 는 의도적으로 단어 분해한다(빈 값 = 플래그 없음).
+          # shellcheck disable=SC2086
+          vercel build $PROD_FLAG --token="$VERCEL_TOKEN"
+
+      # 6) 산출물만 업로드. 클라우드 빌드 없음 → Rust 툴체인 부재 문제를 원천 회피.
+      - name: vercel deploy (--prebuilt)
+        id: deploy
+        run: |
+          set -euo pipefail
+          # ⚠️ CLI 54 는 비대화형/에이전트 환경에서 **JSON**을 뱉는다(2026-08-06 로컬 실측) — 출력을
+          #    그대로 URL 로 쓰면 안 된다. 전체 출력을 남기고 마지막 vercel.app URL 만 뽑아낸다.
+          # shellcheck disable=SC2086
+          vercel deploy --prebuilt --yes $PROD_FLAG --token="$VERCEL_TOKEN" 2>&1 | tee deploy.out
+          url=$(grep -oE 'https://[a-z0-9.-]+\.vercel\.app' deploy.out | tail -1)
+          test -n "$url" || { echo "::error::배포 URL 을 출력에서 찾지 못했습니다"; cat deploy.out; exit 1; }
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "배포 URL: $url"
+
+      # 7) 최소 스모크 — 홈 200 + OG 이미지 실경로 200 + canonical 이 커스텀 도메인인지.
+      #    ⚠️ 배포 보호(Vercel Authentication, "all_except_custom_domains")는 **생성 URL 전부**를 막는다
+      #       — 프로덕션 생성 URL 조차 `302 → vercel.com/sso-api` 다(2026-08-06 실측). 공개인 건 프로덕션
+      #       별칭뿐이므로 스모크는 별칭을 때린다. 프리뷰는 공개 URL 이 없어 검사를 생략한다.
+      - name: smoke check (production alias)
+        if: ${{ inputs.target == 'production' }}
+        env:
+          # 2026-08-06 가비아 DNS 반영 완료(A @ → 216.150.1.1, CNAME www → vercel-dns-016) —
+          # autohwp.com 이 이미 공개 200 이라 여기를 정본으로 때린다.
+          ALIAS: https://autohwp.com
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5; do
+            home=$(curl -s -o /dev/null -w '%{http_code}' "$ALIAS/") || home=000
+            [ "$home" = "200" ] && break
+            echo "별칭 전파 대기 ($i/5): $home"; sleep 6
+          done
+          og=$(curl -s -o /dev/null -w '%{http_code}' "$ALIAS/og.png")
+          canonical=$(curl -s "$ALIAS/" | grep -oE '<link rel="canonical" href="[^"]*"' || true)
+          echo "GET / → $home ; GET /og.png → $og ; $canonical"
+          test "$home" = "200" || { echo "::error::home 이 200 이 아닙니다 ($home)"; exit 1; }
+          test "$og" = "200" || { echo "::error::/og.png 이 200 이 아닙니다 ($og)"; exit 1; }
+          case "$canonical" in
+            *autohwp.com*) : ;;
+            *) echo "::error::canonical 이 autohwp.com 이 아닙니다 — Vercel env DEMO_SITE_URL 확인: $canonical"; exit 1 ;;
+          esac
