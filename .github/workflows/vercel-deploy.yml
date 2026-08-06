@@ -92,11 +92,7 @@ jobs:
         with:
           node-version: 24.x
       - name: install pnpm (packages/* 빌드 관례)
-        run: |
-          npm i -g pnpm
-          # pnpm 11이 postinstall 빌드 스크립트(esbuild)를 기본 차단하며 install이 exit 1로
-          # 죽는다(2026-08-06 vercel-deploy 1차 실행 실측 ERR_PNPM_IGNORED_BUILDS). CI 한정 허용.
-          echo "dangerously-allow-all-builds=true" >> "$HOME/.npmrc"  # config set -g는 PNPM_HOME 부재로 실패(3차 실측)
+        run: npm i -g pnpm  # esbuild 빌드 허용은 packages/*/package.json pnpm.onlyBuiltDependencies가 소유(커밋 설정 — 러너 env 무의존)
 
       # 1) 엔진 wasm → packages/engine/pkg. hwp-lab 의 prebuild(copy-wasm.mjs)가 이걸 public/hwp 로 옮긴다.
       - name: build @auto-hwp/engine (wasm)

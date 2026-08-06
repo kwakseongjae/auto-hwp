@@ -29,11 +29,24 @@
     "typescript": "^5.6.3",
     "vitest": "^4.1.10"
   },
-  "keywords": ["hwp", "hwpx", "llm", "intent", "protocol", "isomorphic", "prompt"],
+  "keywords": [
+    "hwp",
+    "hwpx",
+    "llm",
+    "intent",
+    "protocol",
+    "isomorphic",
+    "prompt"
+  ],
   "engines": {
     "node": ">=18"
   },
   "publishConfig": {
     "access": "public"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }

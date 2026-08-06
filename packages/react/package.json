@@ -55,11 +55,26 @@
     "vite": "^7.3.6",
     "vitest": "^4.1.10"
   },
-  "keywords": ["hwp", "hwpx", "hancom", "react", "svg", "pdf", "viewer", "chat", "document"],
+  "keywords": [
+    "hwp",
+    "hwpx",
+    "hancom",
+    "react",
+    "svg",
+    "pdf",
+    "viewer",
+    "chat",
+    "document"
+  ],
   "engines": {
     "node": ">=18"
   },
   "publishConfig": {
     "access": "public"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }
