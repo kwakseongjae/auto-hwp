@@ -56,7 +56,7 @@ jobs:
           npm i -g pnpm
           # pnpm 11이 postinstall 빌드 스크립트(esbuild)를 기본 차단하며 install이 exit 1로
           # 죽는다(2026-08-06 vercel-deploy 1차 실행 실측 ERR_PNPM_IGNORED_BUILDS). CI 한정 허용.
-          pnpm config set -g dangerouslyAllowAllBuilds true
+          echo "dangerously-allow-all-builds=true" >> "$HOME/.npmrc"  # config set -g는 PNPM_HOME 부재로 실패(3차 실측)
 
       # 1) 엔진 wasm → packages/engine/pkg (hwp-lab prebuild 의 copy-wasm.mjs 가 이걸 복사한다)
       - name: build @auto-hwp/engine (wasm)
