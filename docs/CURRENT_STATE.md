@@ -5,6 +5,19 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
+- 갱신: 2026-08-06 · Claude(오케스트레이터)+Opus 워커 — **Vercel 이전 준비 완료(f17b511) +
+  BYOK 확장성 진단**. ① 데모 AI를 Worker→`/api/hwp-edit` 데모 모드로 포팅(하드닝 전량·max_tokens
+  4096=절단 구조 소멸·reason/message 클라 배선 완료). 프리뷰
+  https://auto-afprbfull-kwakseongjaes-projects.vercel.app (Vercel Auth 보호, 프로덕션 미승격).
+  BYOK 경로 무변경. Pages·build:demo 병행 유지. **컷오버 최대 블로커: Vercel Git 빌드는 wasm
+  불가(pkg gitignore+Rust 툴체인) → 권장 = GH Actions prebuilt 배포(deploy-demo 툴체인 재사용)**.
+  ⚠️ 비용: 4096 기준 최악 $7.4/일(캡 2000) — $5선 원하면 DAILY_CAP 1300. ⚠️ 키만 넣고
+  DEMO_AI_MODE=1 누락 시 BYOK 무인증 공개(.env.example 경고). 사용자 env 목록은 f17b511 보고 참조.
+  ② BYOK 진단(읽기 전용): **부분 성립 — 구조 70%·문서 35%**. 텍스트 단발은 provider 무한 실증
+  (Anthropic/OpenRouter 동일 조립기·Rust Ollama 기존재), 갭 P0=공식 스니펫이 buildDocContext
+  2인자(프로필·그리드 누락 — 문서대로 붙인 호스트가 067 이전 품질로 회귀)·BASE_URL env 부재·
+  RAG 슬롯 부재·에이전틱 레퍼런스 Next 전용·reason이 SDK까지 안 옴(onOutcome additive 필요)·
+  ai-protocol README 절반 미문서화. 갭 배치는 사용자 승인 대기.
 - 갱신: 2026-08-05 · Claude(오케스트레이터)+Opus 워크플로 — **데모 품질 배치(피드백 8건) 커밋
   45ad7fd push·Pages 재배포 중 · ⚠️ Worker 배포만 CF 토큰 만료로 대기**. ① 바이브 다중 셀 실패
   실측 규명: Luna 추론 토큰이 max_tokens 합산 — 1024에서 **간헐** length 절단→전량 드롭+침묵

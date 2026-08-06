@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-06 (Claude 오케스트레이터+Opus 워커) · Vercel 이전 준비 + BYOK 확장성 진단
+- 데모 AI Worker→라우트 포팅(4096·사유 표시 배선), 프리뷰 배포·실측 9/9. 컷오버 블로커=wasm 빌드→GH Actions prebuilt 권장.
+- BYOK 진단: 구조 70%/문서 35% — P0 갭은 공식 스니펫 오류(프로필 누락)·BASE_URL env·RAG 슬롯. 배치 승인 대기.
+- 멈춘 곳: 사용자 env 설정(OPENROUTER_API_KEY 등)·컷오버 방식 결정·갭 배치 승인.
+
 ## 2026-08-05 (Claude 오케스트레이터+Opus 워크플로) · README 대개편 — 히어로·GIF3·가이드·벤치 퍼널
 - 피드백 10건을 5스트림 워크플로로: 라이트 히어로·가이드 GIF 3종·README 전면(데모/BYOK 분리·React 명문화·철학)·llms.txt/LLM-GUIDE/SELF-HOST·벤치 기여 퍼널+rhwp 리서치(breakthrough 후보 5).
 - 검증 yellow→rhwp 귀속·LLM-GUIDE 키 오류 정정 후 4커밋 push·배포. 로컬 49건 스윕: .hwpx 쪽격차 집중(10/12) 실측.
