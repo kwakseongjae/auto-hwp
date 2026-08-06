@@ -123,8 +123,9 @@ jobs:
       #    build:deps 가 ../../packages/* 를 필요로 하므로 체크아웃 전체가 있어야 한다.
       - name: vercel pull (${{ inputs.target }} env)
         run: |
-          # 토큰 유효성·스코프를 먼저 정직하게 판별한다(6차 실측 — pull 실패의 남은 용의자가 토큰뿐).
-          vercel whoami --token="$VERCEL_TOKEN" || { echo "::error::VERCEL_TOKEN 이 무효합니다 — vercel.com/account/tokens 에서 재발급 후 시크릿 갱신"; exit 1; }
+          # whoami는 정보성만 — 팀 스코프 토큰은 user 엔드포인트가 막혀 "User not found"가 나도
+          # 유효할 수 있다(7차 오탐 실측). 판정은 아래 --scope pull이 한다.
+          vercel whoami --token="$VERCEL_TOKEN" || echo "whoami 실패(팀 스코프 토큰이면 정상) — pull로 판정"
           vercel pull --yes --environment=${{ inputs.target }} --scope="$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
 
       # 5) 빌드 — 여기서 apps/hwp-lab 의 installCommand/buildCommand(prebuild→build:deps→
