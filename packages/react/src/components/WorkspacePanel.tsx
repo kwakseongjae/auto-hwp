@@ -191,9 +191,9 @@ export function WorkspacePanel({
           className={tab === "vibe" ? "is-active" : ""}
           onClick={() => setTab("vibe")}
         >
-          {/* 장식 글리프(✦)는 라벨에서 뺐다 — 폰트마다 다르게 그려지는 문자 대신 벡터 아이콘 하나로.
-              라벨 문자열은 카탈로그(i18n)에 그대로 남아 호스트가 통째로 갈아끼울 수 있다. */}
-          <Sparkles size={13} />
+          {/* 아이콘 없이 라벨만 — 두 탭이 각자의 칸에서 같은 방식으로 가운데 정렬된다(아이콘이 있는
+              쪽만 텍스트가 오른쪽으로 밀려 비대칭이었다. 사용자 피드백). 라벨 문자열은 카탈로그
+              (i18n)에 그대로 남아 호스트가 통째로 갈아끼울 수 있다. */}
           {msg.panel.tabVibe}
         </button>
         <button
