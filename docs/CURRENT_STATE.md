@@ -5,6 +5,16 @@
 
 - 기준 커밋: `aacd1a9` — **오토한글(auto-hwp) 리브랜딩 push + Pages 재배포 완료**(https://kwakseongjae.github.io/auto-hwp/
   — 라이브 실검증: 200·오토한글 헤더·wasm 200. 구 /tf-hwp URL은 GitHub 리다이렉트). GitHub: https://github.com/kwakseongjae/auto-hwp (public)
+- 갱신: 2026-08-06 · Claude(오케스트레이터)+Opus 워크플로 — **🚀 autohwp.com 프로덕션 컷오버 완주**
+  (11차 파이프라인 success — /docs 200·sitemap 200·**AI 실호출 SetTableCell 정상 반환**). 배치:
+  ① 도메인 attach·www 308·가비아 DNS(사용자)·Git 연동(main 자동배포 가드) ② 일일 캡 기본 비활성·
+  IP 캡 유지·동의 인앱 모달 최초 1회 ③ /docs 허브(마크다운 10종 SSG·네비·TOC)+랜딩 보강+sitemap/
+  robots ④ Actions prebuilt 파이프라인(vercel-deploy.yml). **파이프라인 정착 11차 삽질 로그**(전부
+  실측 규명): pnpm 11 CI 하드에러→--config 플래그(로컬 CI=true A/B 재현), vercel pull 실패→신형
+  vcp_ 토큰을 CLI 54가 인증 불가(사용자 로컬 58.7.1 실증)→CLI 58.7.1 + Secret 재등록으로 해소.
+  Linguist 오버라이드(.gitattributes — 데모·예제 vendored)로 레포 주 언어 Rust 전환. ⚠️ 잔여:
+  VERCEL_TOKEN 재발급 권장(채팅 노출분 폐기 — 사용자), Upstash(IP 캡 durable화 — 권장), Pages
+  리다이렉트 스텁(설계 완료·컷오버 안정 후), OG/README의 GitHub Pages URL 참조 정리.
 - 갱신: 2026-08-06 · Claude(오케스트레이터)+Opus 워커 — **Vercel 이전 준비 완료(f17b511) +
   BYOK 확장성 진단**. ① 데모 AI를 Worker→`/api/hwp-edit` 데모 모드로 포팅(하드닝 전량·max_tokens
   4096=절단 구조 소멸·reason/message 클라 배선 완료). 프리뷰

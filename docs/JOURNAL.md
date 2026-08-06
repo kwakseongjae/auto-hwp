@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-06 (Claude 오케스트레이터+Opus 워크플로) · autohwp.com 컷오버 완주 — 11차 파이프라인 그린
+- 도메인·Git 연동·캡 완화·동의 모달 1회·/docs 허브·prebuilt 파이프라인. AI 실호출 정상(새 키 탑재).
+- 삽질 규명: pnpm 11 CI 하드에러·vcp_ 토큰↔CLI 54 비호환 — 전부 로컬 재현으로 확정 후 수리.
+- 잔여: 토큰 재발급(노출분)·Upstash·Pages 리다이렉트 스텁.
+
 ## 2026-08-06 (Claude 오케스트레이터+Opus 워커) · Vercel 이전 준비 + BYOK 확장성 진단
 - 데모 AI Worker→라우트 포팅(4096·사유 표시 배선), 프리뷰 배포·실측 9/9. 컷오버 블로커=wasm 빌드→GH Actions prebuilt 권장.
 - BYOK 진단: 구조 70%/문서 35% — P0 갭은 공식 스니펫 오류(프로필 누락)·BASE_URL env·RAG 슬롯. 배치 승인 대기.
