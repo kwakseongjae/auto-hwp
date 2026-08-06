@@ -21,6 +21,14 @@
   (문서 주소 새로고침은 재개가 정답). ⚠️ 선재 결함 2건 발견: docs-site 스펙의 `/docs/embed` 셀렉터가
   trailingSlash와 어긋나 항상 0건(테스트만 수정), `packages/react` vitest는 pnpm 재설치(오늘 15:57)로
   editor-core dist 해석이 깨져 35파일 로드 실패(별칭 주입 시 402 전부 통과 — 환경 문제, 미수정).
+- 갱신: 2026-08-06 · Claude(오케스트레이터)+Opus 워커 — **실도메인 디테일 배치 라이브**(364e167,
+  12차 배포 success — /d rewrite 200·llms.txt 신 URL 실측). ① 문서 URL `/d/<불투명 해시>`:
+  pushState(쿼리 보존)·이 기기 스냅샷 복원(URL>마커)·타 기기 정직 안내·Vercel rewrite/Pages 404
+  폴백 이원화·robots disallow. ② 로고=홈(confirm 없음 — 자동저장 근거) ③ 복구 배너→우하단 12s
+  토스트(pointer-events:none — 클릭 삼킴 e2e 자가 발견) ④ 패널 탭 대칭(아이콘 제거) ⑤ "AI 켜짐"
+  배지+모델 툴팁(서버 응답 기반·BYOK 안내) ⑥ 랜딩 데모 태그 제거. + 문서 URL 스윕(7파일 18링크
+  autohwp.com·전송 경로 서술 정합·레포 description/homepage). e2e 75/1skip·양쪽 빌드 그린.
+  잔여 동일: VERCEL_TOKEN 재발급(노출분)·Upstash·Pages 리다이렉트 스텁·GIF 재촬영 대상 URL.
 - 갱신: 2026-08-06 · Claude(오케스트레이터)+Opus 워크플로 — **🚀 autohwp.com 프로덕션 컷오버 완주**
   (11차 파이프라인 success — /docs 200·sitemap 200·**AI 실호출 SetTableCell 정상 반환**). 배치:
   ① 도메인 attach·www 308·가비아 DNS(사용자)·Git 연동(main 자동배포 가드) ② 일일 캡 기본 비활성·
