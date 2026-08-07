@@ -787,7 +787,11 @@ export default function BulkFillPage() {
       <header className="bulk-head">
         <div className="bulk-head-in">
           <a href={`${BASE}/`} className="bulk-back" aria-label="데모 홈으로"><ArrowLeft size={17} /></a>
-          <span className="bulk-logo">오토한글 <b>양식 일괄 작성</b></span>
+          {/* 낙관은 장식(alt="") — 옆의 "오토한글" 글자가 이미 이름을 말한다. 홈 링크는 왼쪽
+              화살표(.bulk-back)가 계속 담당한다. */}
+          <span className="bulk-logo">
+            <img className="bulk-seal" src={`${BASE}/brand/seal.png`} alt="" width={19} height={19} />오토한글 <b>양식 일괄 작성</b>
+          </span>
           <span className="bulk-sub">양식 하나 + 명단 → 사람 수만큼 완성본 zip</span>
           <span className="bulk-badge">결정론 · LLM 0콜 · 100% 로컬</span>
           <ThemeToggle />
@@ -1250,6 +1254,9 @@ export default function BulkFillPage() {
         .bulk-field-card .row1 .warn { color: var(--ah-warn); }
         .bulk-trust-item > svg { color: var(--ah-dim); }
         .bulk-logo { font-size: 15.5px; color: var(--ah-accent-ink); } .bulk-logo b { color: var(--ah-fg-strong); margin-left: 2px; }
+        /* ⚠️ inline-flex 로 만들지 마라 — "오토한글 <b>양식…</b>" 사이의 공백이 flex 아이템
+           경계에서 사라져 글자가 붙는다(실측). 인라인 흐름 그대로 두고 도장만 세로 정렬한다. */
+        .bulk-seal { width: 19px; height: 19px; vertical-align: -4px; margin-right: 6px; opacity: 0.92; }
         .bulk-sub { color: var(--ah-muted); font-size: 12.5px; }
         .bulk-badge { font-size: 11px; color: var(--ah-accent-ink); border: 1px solid var(--ah-accent-line); border-radius: 999px; padding: 3px 10px; margin-right: auto; }
 

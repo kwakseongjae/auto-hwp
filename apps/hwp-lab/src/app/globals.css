@@ -151,6 +151,23 @@ body {
   font-size: 12px;
 }
 
+/* 편집기 헤더의 낙관 — 사이트 헤더(.site.module.css .seal)와 같은 체계, 크기만 한 단계 작다.
+   ⚠️ 부모(.lab-title-link)가 align-items:baseline 이라 그대로 두면 네모 도장이 베이스라인에
+      앉아 아래로 처진다. align-self 로 글자 상자 중앙에 맞춘다. */
+.lab-title-seal {
+  align-self: center;
+  width: 19px;
+  height: 19px;
+  flex: 0 0 auto;
+  margin-right: 7px;
+  opacity: 0.92;
+  transition: opacity 0.15s;
+}
+
+.lab-title-link:hover .lab-title-seal {
+  opacity: 1;
+}
+
 /* 로고 = 홈 앵커(사용자 피드백). 링크라는 사실이 커서·호버로 보여야 한다. */
 .lab-title-link {
   display: inline-flex;
@@ -605,17 +622,32 @@ button.lab-badge {
 .lab-kicker { font-size: 13.5px; letter-spacing: 5px; color: var(--ah-muted); }
 .lab-kicker b { color: var(--ah-accent-ink); }
 .lab-demo .lab-hero-title { display: flex; align-items: center; margin: 14px 0 0; }
-.lab-mark { font-size: 74px; font-weight: 800; letter-spacing: -2px; line-height: 1.05;
-  background: linear-gradient(115deg, #ffffff 55%, #c4b5fd 90%);
-  -webkit-background-clip: text; background-clip: text; color: transparent;
-  filter: drop-shadow(0 4px 22px rgba(124,58,237,0.28)); }
-/* 라이트에선 흰→연보라 그라디언트가 배경에 묻는다 — 잉크색 → 브랜드 보라로 뒤집는다. */
-:root[data-theme="light"] .lab-mark {
-  background: linear-gradient(115deg, #0a0f1c 45%, #6d28d9 95%);
-  -webkit-background-clip: text; background-clip: text;
-  filter: drop-shadow(0 4px 18px rgba(124,58,237,0.16));
+/* ── 워드마크(붓글씨 A) ────────────────────────────────────────────────────────────────
+   CSS 텍스트(font-weight:800 + 그라디언트 클립)를 실제 캘리그래피 이미지로 바꿨다.
+   ⚠️ <img> 두 장(라이트/다크)을 CSS 로 토글하면 **둘 다** 내려받는다. 배경 이미지로 두면
+      선택된 규칙의 URL 하나만 요청된다 — URL 은 basePath 때문에 인라인 변수(--wm-*)로 온다.
+   ⚠️ 잉크가 이미 검정/흰색이라 filter:invert 로 돌리면 보라 갈필이 노랑으로 뒤집힌다.
+      그래서 다크용은 별도 파생본(wordmark-dark.png: 먹→백지색, 보라→연보라)을 쓴다. */
+.lab-mark {
+  display: block;
+  width: min(430px, 82%);
+  aspect-ratio: 960 / 266; /* 파생본 실측 — 이게 있어야 로드 전에도 자리가 잡혀 CLS 가 없다 */
+  background: var(--wm-dark) left center / contain no-repeat;
+  filter: drop-shadow(0 6px 26px rgba(124, 58, 237, 0.30));
 }
-.lab-caret { width: 14px; height: 58px; margin-left: 12px; border-radius: 3px;
+:root[data-theme="light"] .lab-mark {
+  background-image: var(--wm-light);
+  filter: drop-shadow(0 6px 20px rgba(124, 58, 237, 0.18));
+}
+/* 화면에는 안 보이지만 DOM 에는 남는 제목 글자 — 이미지 alt 로 대신하지 않는다(h1 의 실제
+   텍스트가 있어야 스크린리더 목차와 검색엔진이 같은 것을 읽는다). */
+.lab-sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+/* 워드마크가 이미지가 되면서 제목 높이가 78px → 119px 로 커졌다 — 커서도 같이 키우지 않으면
+   붓글씨 옆에 홀로 떠 있는 작은 눈금처럼 보인다(실측 스크린샷). */
+.lab-caret { width: 15px; height: 74px; margin-left: 14px; border-radius: 3px;
   background: linear-gradient(180deg, var(--ah-accent-ink), #6d28d9);
   box-shadow: 0 0 28px rgba(124,58,237,0.8);
   /* 딱딱한 2단 점멸(steps) 대신 부드럽게 숨쉬듯 — 켜짐이 길고 꺼짐이 짧다. */

@@ -63,23 +63,28 @@
   }
   .kicker b { color: var(--ah-accent-ink); font-weight: 800; }
 
-  .titleRow { display: flex; align-items: center; margin-top: 15px; }
+  .titleRow { display: flex; align-items: center; margin-top: 12px; }
+  /* 워드마크는 실폰트 합성이 아니라 **붓글씨 원본**(wordmark.png)이다 — 라이브 랜딩의
+     .lab-mark 와 같은 자산이라 배너와 사이트의 톤이 어긋나지 않는다. */
   .mark {
-    font-size: 82px; font-weight: 800; letter-spacing: -2.2px; line-height: 1.05;
-    background: linear-gradient(115deg, #0a0f1c 45%, #6d28d9 95%);
-    -webkit-background-clip: text; background-clip: text; color: transparent;
-    filter: drop-shadow(0 4px 18px rgba(124, 58, 237, 0.16));
+    width: 404px; height: 112px;      /* 960x266 비율(3.609) 유지 */
+    background: url("wordmark.png") left center / contain no-repeat;
+    filter: drop-shadow(0 5px 20px rgba(124, 58, 237, 0.18));
   }
-  .caret {
-    width: 15px; height: 64px; margin-left: 13px; border-radius: 3px;
-    background: linear-gradient(180deg, #7c3aed, #6d28d9);
-    box-shadow: 0 0 28px rgba(124, 58, 237, 0.55);
-  }
+  /* ⚠️ 예전 배너의 점멸 커서(.caret) 블록은 뺐다 — 붓획 옆에 붙은 직각 막대가 이물감을 주고,
+     "편집기"라는 신호는 오른쪽 장면 일러스트와 낙관이 이미 하고 있다. 라이브 랜딩에서는
+     커서가 **애니메이션**으로 제 역할을 하므로 거기서는 그대로 둔다. */
 
+  /* 낙관은 글 끝에 찍는다 — 태그라인 오른쪽에 붙여 '서명 + 도장'으로 읽히게 한다.
+     (캔버스 우하단은 장면 일러스트가 차지하고 있어 거기에는 놓을 수 없다.) */
+  .taglineRow { display: flex; align-items: center; gap: 24px; margin-top: 21px; }
   .tagline {
-    margin-top: 19px;
     font-size: 23px; font-weight: 700; letter-spacing: -0.4px;
     color: var(--ah-fg-strong); white-space: nowrap;
+  }
+  .seal {
+    width: 50px; height: 51px; flex: 0 0 auto; transform: translateY(5px);
+    background: url("seal.png") center / contain no-repeat;
   }
 </style>
 <div class="hero">
@@ -89,8 +94,11 @@
   <div class="copy">
     <div class="kicker">한글 문서를 직접 다루는 엔진</div>
     <div class="titleRow">
-      <span class="mark">오토한글</span><span class="caret"></span>
+      <span class="mark"></span>
     </div>
-    <div class="tagline">AI와 함께, 한 화면을 보면서 쓰는 한글</div>
+    <div class="taglineRow">
+      <div class="tagline">AI와 함께, 한 화면을 보면서 쓰는 한글</div>
+      <div class="seal"></div>
+    </div>
   </div>
 </div>

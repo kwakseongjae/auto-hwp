@@ -1,7 +1,7 @@
 import { ExternalLink } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { REPO } from "@/app/docs/docsRegistry";
-import { siteHref } from "./paths";
+import { BASE, siteHref } from "./paths";
 import styles from "./site.module.css";
 
 // 공통 사이트 헤더 — **서버 컴포넌트**다("use client" 금지). 유일한 클라이언트 조각은 ThemeToggle.
@@ -21,8 +21,13 @@ const NAV: { key: SiteNavKey; href: string; label: string; title: string }[] = [
 export function SiteHeader({ current }: { current?: SiteNavKey }) {
   return (
     <header className={styles.header}>
+      {/* 로고 = 낙관(도장) + 워드텍스트. 도장은 장식이라 alt 를 비운다 — 바로 옆에 같은 뜻의
+          글자가 있고, 스크린리더가 "오토한글 오토한글"로 두 번 읽으면 안 된다.
+          next/image 가 아니라 <img> 인 이유: 이 앱은 정적 export(Pages)도 나가고, 20px 짜리
+          한 장에 최적화 파이프라인을 태울 이유가 없다. */}
       <a className={styles.brand} href={siteHref("/")}>
-        오토한글
+        <img className={styles.seal} src={`${BASE}/brand/seal.png`} alt="" width={20} height={20} />
+        <span className={styles.brandName}>오토한글</span>
         <small>auto-hwp</small>
       </a>
       <nav className={styles.nav} aria-label="사이트">

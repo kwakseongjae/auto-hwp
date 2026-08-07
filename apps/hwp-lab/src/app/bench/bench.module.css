@@ -36,12 +36,23 @@
 }
 
 .crumb a {
+  display: inline-flex;
+  align-items: center;
   color: var(--accent-soft);
   text-decoration: none;
 }
 
 .crumb a:hover {
   text-decoration: underline;
+}
+
+/* 낙관 — 빵부스러기 글자(13px)보다 살짝 크게 두어야 도장으로 읽힌다. */
+.crumbSeal {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  margin-right: 6px;
+  opacity: 0.92;
 }
 
 /* 토글은 빵부스러기 줄 오른쪽 끝에 조용히 붙는다(버튼 자체 스타일은 globals.css). */

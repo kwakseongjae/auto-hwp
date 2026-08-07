@@ -983,6 +983,9 @@ export default function LabWorkspace() {
             onGoHome();
           }}
         >
+          {/* 낙관(도장)은 장식 — alt 를 비워 두면 링크 이름은 옆 글자("오토한글 한글 문서 편집")
+              그대로다. 이 앵커의 e2e 계약(data-testid="doc-home" 클릭 → 홈)은 바뀌지 않는다. */}
+          <img className="lab-title-seal" src={`${BASE}/brand/seal.png`} alt="" width={19} height={19} />
           오토한글
           <small>한글 문서 편집</small>
         </a>
@@ -1157,7 +1160,26 @@ export default function LabWorkspace() {
               <div className="lab-hero-grid">
                 <div className="lab-hero-copy">
                   <div className="lab-kicker"><b>오토한글</b> · 한글 문서를 직접 다루는 엔진</div>
-                  <h1 className="lab-hero-title"><span className="lab-mark">오토한글</span><span className="lab-caret" aria-hidden /></h1>
+                  {/* 워드마크는 붓글씨 이미지다. 라이트/다크에서 잉크색이 반대라 두 장이 필요한데,
+                      <img> 두 장을 넣고 CSS 로 하나를 숨기면 **둘 다** 내려받는다 — 그래서 배경
+                      이미지 + CSS 변수로 둔다(테마에 맞는 한 장만 요청된다). basePath 접두가
+                      필요해 URL 은 인라인 변수로 넘긴다(CSS 파일은 env 를 못 읽는다).
+                      h1 안의 텍스트는 시각적으로만 숨긴다 — 제목의 실제 글자가 DOM 에 남아야
+                      스크린리더와 검색엔진이 읽는다(이미지 alt 로 대신하지 않는다). */}
+                  <h1 className="lab-hero-title">
+                    <span
+                      className="lab-mark"
+                      aria-hidden
+                      style={
+                        {
+                          "--wm-light": `url(${BASE}/brand/wordmark.png)`,
+                          "--wm-dark": `url(${BASE}/brand/wordmark-dark.png)`,
+                        } as React.CSSProperties
+                      }
+                    />
+                    <span className="lab-sr-only">오토한글</span>
+                    <span className="lab-caret" aria-hidden />
+                  </h1>
                   <p className="lab-tagline">AI와 함께, 한 화면을 보면서 쓰는 한글</p>
                   <p className="lab-hero-sub">
                     AI가 <b>읽는 문서</b>와 <b>화면에 그려지는 문서</b>가 같은 엔진에서 나옵니다 — 그래서

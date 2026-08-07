@@ -42,6 +42,26 @@
   letter-spacing: 0;
 }
 
+/* 낙관은 글자와 베이스라인을 맞추지 않는다 — 도장은 네모 덩어리라 베이스라인에 앉히면
+   아래로 처져 보인다. 글자 상자 중앙에 맞춘다(align-self 가 컨테이너의 baseline 을 이긴다). */
+.seal {
+  align-self: center;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  /* 헤더에서는 도장이 주인공이 아니다 — 살짝 낮춰 두고 호버(=홈 링크)에서 또렷해진다. */
+  opacity: 0.92;
+  transition: opacity 0.15s;
+}
+
+.brand:hover .seal {
+  opacity: 1;
+}
+
+.brandName {
+  font-weight: 700;
+}
+
 /* 로고는 홈 앵커다 — 누를 수 있다는 사실이 커서·호버로 드러나야 한다(사용자 피드백). */
 .brand:hover {
   background: var(--ah-surface-hover);

@@ -64,7 +64,12 @@ export default function BenchPage() {
     <main className={styles.page}>
       <div className={styles.inner}>
         <nav className={styles.crumb}>
-          <a href={`${BASE}/`}>오토한글</a>
+          {/* 사이트 헤더가 없는 페이지라 빵부스러기의 홈 링크가 로고 자리다 — 낙관을 앞에 붙여
+              /docs·/bulk·랜딩과 같은 체계로 맞춘다(도장은 장식이므로 alt=""). */}
+          <a href={`${BASE}/`}>
+            <img className={styles.crumbSeal} src={`${BASE}/brand/seal.png`} alt="" width={17} height={17} />
+            오토한글
+          </a>
           <span aria-hidden>›</span>
           <span>충실도 벤치마크</span>
           {/* 유일한 클라이언트 컴포넌트(테마 토글) — 이 페이지의 서버 렌더 계약은 그대로다.
