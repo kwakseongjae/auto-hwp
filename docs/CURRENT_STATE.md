@@ -21,6 +21,12 @@
   (문서 주소 새로고침은 재개가 정답). ⚠️ 선재 결함 2건 발견: docs-site 스펙의 `/docs/embed` 셀렉터가
   trailingSlash와 어긋나 항상 0건(테스트만 수정), `packages/react` vitest는 pnpm 재설치(오늘 15:57)로
   editor-core dist 해석이 깨져 35파일 로드 실패(별칭 주입 시 402 전부 통과 — 환경 문제, 미수정).
+- 갱신: 2026-08-08 · Claude(오케스트레이터)+Opus 워커 — **캘리그래피 로고 시스템 라이브**(a585ce4,
+  13차 배포 success — favicon 8,423B·brand/wordmark·seal·새 OG 131KB 전부 200 실측). codex
+  gpt-image 5안 생성→사용자 선택: **A "오토한글" 붓글씨 워드마크(히어로)+C 보라 낙관(파비콘·헤더)**.
+  파생 규율: 알파 언매트(갈필 보존)·낙관 팔레트 PNG 226KB·파비콘 크기별 타일(16px 침식·안쪽
+  블록 — "오·토" 식별 실검증)·다크 재채색 파생+배경이미지 토글(단일 요청)·README 배너 A+C 재합성.
+  후보 4안(B 한 모노그램·D 획 심볼·E 엔소 등) assets/brand/logo-candidates/ 보존.
 - 갱신: 2026-08-06 · Claude(오케스트레이터)+Opus 워커 — **실도메인 디테일 배치 라이브**(364e167,
   12차 배포 success — /d rewrite 200·llms.txt 신 URL 실측). ① 문서 URL `/d/<불투명 해시>`:
   pushState(쿼리 보존)·이 기기 스냅샷 복원(URL>마커)·타 기기 정직 안내·Vercel rewrite/Pages 404
