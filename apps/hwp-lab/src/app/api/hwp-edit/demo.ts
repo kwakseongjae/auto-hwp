@@ -23,6 +23,7 @@
 import {
   buildSystemPrompt,
   buildUserMessage,
+  extractJsonArray,
   salvageJsonArrayItems,
   validateRequest,
   validateResponse,
@@ -87,6 +88,40 @@ const DEMO_REQUEST_LIMITS = {
 const DEFAULT_PER_IP_CAP = 20;
 /** 카운터 TTL — 키에 UTC 날짜가 박혀 있어 25시간이면 자연 소멸(별도 청소 불필요). */
 const COUNTER_TTL_SECONDS = 90_000;
+
+/** 상류 재시도 정책 (2026-08-08 프로덕션 장애 실측 — "다중 셀 채움이 조용히 0건").
+ *
+ *  무슨 일이 있었나: OpenRouter 는 프로바이더가 혼잡하면 **HTTP 200 본문에**
+ *  `{"error":{"code":429,"message":"… is temporarily rate-limited upstream …"}}` 를 실어 보낸다.
+ *  `res.ok` 가 true 라 오류 분기를 그냥 통과했고, `choices` 가 없어 content 가 `""` 가 되었으며,
+ *  빈 문자열은 파싱되지 않아 intents 0 · drops 0 → **`no_valid_intents`**("이 요청에서 적용할 편집을
+ *  찾지 못했습니다")로 둔갑했다. 즉 상류 장애가 사용자에게는 "당신 지시가 잘못됐다"로 보였다.
+ *  실측(동일 payload): 1회차 = 위 429 봉투, **2회차 = 16건 정상 반환**(finish_reason=stop).
+ *
+ *  그래서 두 가지를 한다: ① 200-본문-오류를 **오류로 판정**하고(침묵 금지) ② 일시적 실패에 한해
+ *  서버가 **1회만** 자동 재시도한다(사용자에게 두 번 클릭시키지 않는다).
+ *
+ *  ⚠️ 비용: 재시도는 실패한 요청에서만 일어나므로 정상 경로 단가는 그대로고, 최악만 2배
+ *  ($0.0037 → $0.0074/요청). IP 캡은 **재시도를 세지 않는다**(상류 호출 전에 1회만 증가 —
+ *  사용자 체감 1회 = 쿼터 1회). 재시도 횟수를 늘리려면 비용 산식(위 MAX_TOKENS_CEILING 주석)을
+ *  다시 계산하라 — 여기 상수만 올리면 조용히 예산이 배로 뛴다. */
+const MAX_UPSTREAM_ATTEMPTS = 4;
+/** **과금된** 시도(모델이 실제로 답을 생성한 호출)의 상한. 위 4회는 혼잡 실패를 넘기기 위한 것이고,
+ *  이 2회가 비용의 실제 상한이다 — 혼잡(429) 응답은 토큰을 생성하지 않아 **$0** 이기 때문이다
+ *  (실측: 429 봉투는 usage 없이 ~300ms 에 돌아온다). 그래서 "혼잡은 넉넉히, 과금은 딱 한 번 더". */
+const MAX_BILLED_ATTEMPTS = 2;
+/** 재시도 백오프 기반값 — n회차 실패 후 `기반값 × n` 만큼 쉰다(1s → 2s → 3s, 합계 6초).
+ *  실측 근거(2026-08-08 로컬): 600ms 고정도, 800ms×n(합 2.4초)도 같은 혼잡 창에 다시 걸렸다.
+ *  혼잡 재시도는 공짜라 시간만 있으면 더 기다리는 편이 사용자에게 이득이다(아래 DEADLINE 이 상한). */
+const DEFAULT_RETRY_DELAY_MS = 1000;
+/** 백오프 기반값을 env 로 조정한다(운영 튜닝 + 테스트에서 0 으로 낮추기). 잘못된 값이면 기본값. */
+function retryDelayMs(): number {
+  const raw = Number(process.env.DEMO_AI_RETRY_DELAY_MS);
+  return Number.isSafeInteger(raw) && raw >= 0 && raw <= 5000 ? raw : DEFAULT_RETRY_DELAY_MS;
+}
+/** 이 시각을 넘겨서는 2회차를 **시작하지 않는다**. 함수 실행 시간(route.ts `maxDuration`) 안에서
+ *  끝나지 못할 재시도는 사용자에게 504(무응답)로 보이므로, 차라리 1회차의 정직한 오류를 돌려준다. */
+const RETRY_DEADLINE_MS = 15_000;
 
 /** `DEMO_AI_MODE=1` 일 때만 데모 경로가 POST 를 가로챈다(BYOK 계약 보호 — 기본값은 항상 꺼짐). */
 export function isDemoAiMode(): boolean {
@@ -276,6 +311,128 @@ function clientIp(req: Request): string {
   return req.headers.get("x-real-ip")?.trim() || "unknown";
 }
 
+// ── 상류 호출(1회) ──────────────────────────────────────────────────────────────────────────────────
+
+/** 상류 1회 호출의 결과. `retryable` 은 "같은 요청을 그대로 다시 보내면 달라질 수 있는가"다
+ *  (혼잡/일시 장애 = true, 잘못된 모델명·인증 실패 = false — 재시도해 봐야 돈만 쓴다). */
+type UpstreamResult =
+  | { ok: true; text: string; truncated: boolean; completionTokens: number | null }
+  | { ok: false; status: 502; error: string; retryable: boolean };
+
+/** OpenRouter 가 **HTTP 200 본문에** 실어 보내는 오류 봉투를 읽는다(2026-08-08 실측 — 프로바이더 혼잡 시
+ *  `{"error":{"code":429,…}}` 가 200 으로 온다). 오류가 아니면 null. */
+function readUpstreamErrorEnvelope(data: unknown): { message: string; retryable: boolean } | null {
+  const err = (data as { error?: unknown } | null)?.error;
+  if (!err || typeof err !== "object") return null;
+  const rec = err as { message?: unknown; code?: unknown };
+  const codeNum = typeof rec.code === "number" ? rec.code : Number(rec.code);
+  const code = Number.isFinite(codeNum) ? codeNum : null;
+  const message = typeof rec.message === "string" && rec.message.trim() ? rec.message.slice(0, 200) : "알 수 없는 상류 오류";
+  // 알 수 없는 코드는 **재시도 가능**으로 본다: 이 경로의 재시도는 토큰을 생성하지 않아 공짜고
+  // (MAX_BILLED_ATTEMPTS 가 과금 상한을 따로 쥔다), 조용한 0건보다 한 번 더 물어보는 쪽이 낫다.
+  const retryable = code === null || code === 429 || code === 408 || code >= 500;
+  return { message: `OpenRouter ${code ?? "오류"}: ${message}`, retryable };
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/** 상류를 **한 번** 부른다(모델·상한·zdr 전부 서버 고정). 재시도 판단은 호출부가 한다. */
+async function callUpstream(
+  apiKey: string,
+  cfg: DemoConfig,
+  systemPrompt: string,
+  userPrompt: string,
+): Promise<UpstreamResult> {
+  let orRes: Response;
+  try {
+    orRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/kwakseongjae/auto-hwp",
+        "X-Title": "auto-hwp demo",
+      },
+      body: JSON.stringify({
+        model: cfg.model,
+        max_tokens: cfg.maxTokens,
+        temperature: 0.2, // 결정성 우선(구조화 Intent 추출)
+        ...(cfg.effort ? { reasoning: { effort: cfg.effort } } : {}),
+        // 문서 프로필/본문 발췌/표에는 PII 가 있을 수 있다. ZDR endpoint 가 없는 모델/route 는
+        // OpenRouter 가 오류로 거부하게 해 조용한 개인정보 정책 완화를 막는다(079 계약).
+        provider: { zdr: true },
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+      }),
+    });
+  } catch (e) {
+    return { ok: false, status: 502, error: `upstream fetch 실패: ${String(e).slice(0, 200)}`, retryable: true };
+  }
+  if (!orRes.ok) {
+    const t = await orRes.text().catch(() => "");
+    // 429(한도)·5xx(장애)는 일시적일 수 있다. 4xx(잘못된 요청/인증)는 다시 보내도 같다.
+    const retryable = orRes.status === 429 || orRes.status === 408 || orRes.status >= 500;
+    return { ok: false, status: 502, error: `OpenRouter ${orRes.status}: ${t.slice(0, 200)}`, retryable };
+  }
+
+  let data: {
+    error?: unknown;
+    choices?: Array<{ message?: { content?: string }; finish_reason?: string; native_finish_reason?: string }>;
+    usage?: { completion_tokens?: number };
+  };
+  try {
+    data = (await orRes.json()) as typeof data;
+  } catch {
+    return { ok: false, status: 502, error: "OpenRouter 응답을 JSON 으로 읽지 못했습니다.", retryable: true };
+  }
+  // ⚠️ 200 인데 본문이 오류 봉투인 경우 — 여기서 끊지 않으면 content 가 "" 가 되어 "모델이 편집을
+  // 못 찾았다"로 둔갑한다(위 MAX_UPSTREAM_ATTEMPTS 주석의 실제 프로덕션 장애).
+  const envelope = readUpstreamErrorEnvelope(data);
+  if (envelope) return { ok: false, status: 502, error: envelope.message, retryable: envelope.retryable };
+  const choice = data.choices?.[0];
+  if (!choice) return { ok: false, status: 502, error: "OpenRouter 응답에 choices 가 없습니다.", retryable: true };
+
+  return {
+    ok: true,
+    text: choice.message?.content ?? "",
+    // 절단 판정: OpenRouter 표준 finish_reason("length") 또는 프로바이더 원본 값. 절단이면 JSON 이
+    // 배열 중간에서 끊겨 파싱이 통째로 실패한다 — 그래서 "왜 0건인지"를 반드시 실어 보낸다.
+    truncated: choice.finish_reason === "length" || choice.native_finish_reason === "length",
+    completionTokens: data.usage?.completion_tokens ?? null,
+  };
+}
+
+/** 모델 텍스트 → Intent 들. `arrayShaped` = 모델이 **JSON 배열 자체는** 냈는가(빈 배열 `[]` 포함).
+ *  이 구분이 재시도 정책의 핵심이다: 모델이 의도적으로 `[]`(바꿀 것 없음)를 낸 것과, 아예 배열을
+ *  못 낸 것(빈 본문·산문·코드펜스 깨짐)은 전혀 다른 사건이다. */
+function parseIntents(text: string, truncated: boolean): { intents: Intent[]; drops: string[]; salvaged: number; arrayShaped: boolean } {
+  const drops: string[] = [];
+  const onDrop = (r: string) => drops.push(r);
+  const parsed = extractJsonArray(text);
+  const arrayShaped = Array.isArray(parsed);
+  let intents = validateResponse(parsed, { onDrop });
+  let salvaged = 0;
+  if (intents.length === 0 && truncated) {
+    // 절단 응답 구제: 이미 닫힌 Intent 만 회수하고 반쪽은 버린다(deny_unknown 규율 유지). 화이트리스트
+    // 검증은 그대로 통과시킨다 — 구제 경로가 검증을 우회하지 않는다.
+    intents = validateResponse(salvageJsonArrayItems(text), { onDrop });
+    salvaged = intents.length;
+  }
+  return { intents, drops, salvaged, arrayShaped };
+}
+
+/** 모델이 응답은 했지만 **쓸 게 하나도 없을 때** 한 번 더 물어볼 가치가 있는가.
+ *  - 배열 자체를 못 냄(빈 본문·산문) → 재시도(확률적 형식 이탈).
+ *  - 배열은 냈는데 전부 드롭됨(없는 intent 이름 등) → 재시도.
+ *  - 의도적으로 `[]` → **재시도 안 함**("바꿀 것 없음"은 정답이다 — 다시 물어도 같고 돈만 든다).
+ *  - 절단 → 재시도 안 함(더 짧게 나눠 달라고 안내하는 게 맞다. 같은 요청은 또 잘린다). */
+function worthRetrying(parsed: { intents: Intent[]; drops: string[]; arrayShaped: boolean }, truncated: boolean): boolean {
+  if (truncated || parsed.intents.length > 0) return false;
+  return !parsed.arrayShaped || parsed.drops.length > 0;
+}
+
 // ── 핸들러 ──────────────────────────────────────────────────────────────────────────────────────────
 
 export interface DemoConfig {
@@ -319,7 +476,8 @@ export async function handleDemoEdit(req: Request): Promise<Response> {
 
   const cfg = readDemoConfig();
   if (!cfg.ok) return jsonRes({ error: cfg.error }, 503);
-  const { model, maxTokens, dailyCap, perIpCap, effort } = cfg.value;
+  // 모델·상한·effort 는 상류 호출부(callUpstream)가 cfg 째로 받는다 — 여기서는 캡만 꺼내 쓴다.
+  const { dailyCap, perIpCap } = cfg.value;
 
   // ── 요청 파싱·검증 ────────────────────────────────────────────────────────────────────────────
   // 잘못된 요청이 유효 사용자의 일일 쿼터를 태우지 않도록 비용 카운터보다 **먼저** 검증한다.
@@ -367,67 +525,59 @@ export async function handleDemoEdit(req: Request): Promise<Response> {
     }
   }
 
-  // ── 상류 호출(모델·상한·zdr 전부 서버 고정) ────────────────────────────────────────────────────
-  let orRes: Response;
-  try {
-    orRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://github.com/kwakseongjae/auto-hwp",
-        "X-Title": "auto-hwp demo",
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: maxTokens,
-        temperature: 0.2, // 결정성 우선(구조화 Intent 추출)
-        ...(effort ? { reasoning: { effort } } : {}),
-        // 문서 프로필/본문 발췌/표에는 PII 가 있을 수 있다. ZDR endpoint 가 없는 모델/route 는
-        // OpenRouter 가 오류로 거부하게 해 조용한 개인정보 정책 완화를 막는다(079 계약).
-        provider: { zdr: true },
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-      }),
-    });
-  } catch (e) {
-    return jsonRes({ error: `upstream fetch 실패: ${String(e).slice(0, 200)}`, reason: "upstream_error" as EditFailureReason }, 502);
-  }
-  if (!orRes.ok) {
-    const t = await orRes.text().catch(() => "");
-    return jsonRes({ error: `OpenRouter ${orRes.status}: ${t.slice(0, 200)}`, reason: "upstream_error" as EditFailureReason }, 502);
+  // ── 상류 호출 + **자동 재시도**(혼잡 최대 3회 · 과금 최대 2회) ─────────────────────────────────
+  // 재시도가 도는 두 경우(둘 다 "같은 요청을 다시 보내면 달라질 수 있다"):
+  //   ① 상류가 일시 실패(200-본문-오류 봉투 · 429/5xx · 네트워크) — 프로덕션 장애의 실제 원인.
+  //      토큰이 생성되지 않아 **공짜**라 넉넉히 재시도한다(MAX_UPSTREAM_ATTEMPTS).
+  //   ② 모델이 응답은 했으나 배열을 아예 못 냈거나 전부 드롭됨(확률적 형식 이탈).
+  //      이건 **과금된** 호출이므로 딱 한 번만 더 묻는다(MAX_BILLED_ATTEMPTS).
+  // IP 쿼터는 위에서 이미 1회만 증가했다 — 재시도는 사용자 몫을 두 번 먹지 않는다.
+  const startedAt = Date.now();
+  const cfgForCall: DemoConfig = cfg.value;
+  let attempts = 0;
+  let billed = 0; // 모델이 실제로 답을 생성한(=토큰이 나간) 호출 수
+  let up: UpstreamResult;
+  let parsed = { intents: [] as Intent[], drops: [] as string[], salvaged: 0, arrayShaped: false };
+  let retryReason: "upstream" | "empty" | null = null;
+  for (;;) {
+    attempts += 1;
+    up = await callUpstream(apiKey, cfgForCall, systemPrompt, userPrompt);
+    // 남은 시간이 없으면 시작하지 않는다 — 끝내지 못할 재시도는 사용자에게 504(무응답)다.
+    const timeLeft = Date.now() - startedAt < RETRY_DEADLINE_MS && attempts < MAX_UPSTREAM_ATTEMPTS;
+    if (up.ok) {
+      billed += 1;
+      parsed = parseIntents(up.text, up.truncated);
+      if (!timeLeft || billed >= MAX_BILLED_ATTEMPTS || !worthRetrying(parsed, up.truncated)) break;
+      retryReason = "empty";
+    } else {
+      if (!timeLeft || !up.retryable) break;
+      retryReason = "upstream";
+    }
+    console.warn(JSON.stringify({ event: "demo_retry", why: retryReason, attempt: attempts, detail: up.ok ? null : up.error }));
+    await sleep(retryDelayMs() * attempts); // 1s → 2s → 3s (같은 혼잡 창에 다시 걸리지 않게)
   }
 
-  const data = (await orRes.json()) as {
-    choices?: Array<{ message?: { content?: string }; finish_reason?: string; native_finish_reason?: string }>;
-    usage?: { completion_tokens?: number };
-  };
-  const choice = data.choices?.[0];
-  const text = choice?.message?.content ?? "";
-  // 절단 판정: OpenRouter 표준 finish_reason("length") 또는 프로바이더 원본 값. 절단이면 JSON 이
-  // 배열 중간에서 끊겨 파싱이 통째로 실패한다 — 그래서 "왜 0건인지"를 반드시 실어 보낸다.
-  const truncated = choice?.finish_reason === "length" || choice?.native_finish_reason === "length";
-  const drops: string[] = [];
-  const onDrop = (r: string) => drops.push(r);
-  let intents: Intent[] = validateResponse(text, { onDrop });
-  let salvaged = 0;
-  if (intents.length === 0 && truncated) {
-    // 절단 응답 구제: 이미 닫힌 Intent 만 회수하고 반쪽은 버린다(deny_unknown 규율 유지). 화이트리스트
-    // 검증은 그대로 통과시킨다 — 구제 경로가 검증을 우회하지 않는다.
-    intents = validateResponse(salvageJsonArrayItems(text), { onDrop });
-    salvaged = intents.length;
+  if (!up.ok) {
+    // 침묵 금지: 상류 장애를 "편집을 찾지 못했습니다"로 둔갑시키지 않는다(그 둔갑이 이 버그였다).
+    console.warn(JSON.stringify({ event: "demo_upstream_error", attempts, retryable: up.retryable, detail: up.error }));
+    const hint = up.retryable
+      ? " (자동 재시도도 실패했습니다 — 모델 제공자가 일시적으로 혼잡합니다. 잠시 후 다시 시도해 주세요.)"
+      : "";
+    return jsonRes({ error: `${up.error}${hint}`, reason: "upstream_error" as EditFailureReason }, up.status);
   }
+
+  const { text, truncated } = up;
+  const { intents, drops, salvaged, arrayShaped } = parsed;
   // 관측(요청 내용은 로그하지 않는다 — 카운트/사유만).
   if (truncated || intents.length === 0) {
     console.warn(
       JSON.stringify({
         event: "demo_empty_or_truncated",
-        finish_reason: choice?.finish_reason ?? null,
         truncated,
-        completion_tokens: data.usage?.completion_tokens ?? null,
+        attempts,
+        completion_tokens: up.completionTokens,
         content_len: text.length,
+        array_shaped: arrayShaped,
         intents: intents.length,
         salvaged,
         drops: drops.length,
@@ -447,10 +597,16 @@ export async function handleDemoEdit(req: Request): Promise<Response> {
       ? `모델 응답이 길이 제한에 걸려 잘렸습니다 — 온전한 ${salvaged}건만 제안합니다. 나머지는 요청을 나눠서 다시 시도해 주세요.`
       : "모델 응답이 길이 제한에 걸려 잘렸습니다(제안 0건). 한 번에 채울 항목 수를 줄여 다시 시도해 주세요.";
   } else if (intents.length === 0) {
+    // 0건의 **이유를 갈라서** 말한다(같은 문구로 뭉뚱그리면 사용자는 자기 지시를 의심한다):
+    //  · drops>0        → 모델이 없는 intent 이름을 냈다(서버가 드롭).
+    //  · 배열 자체 없음  → 형식 이탈/빈 응답 — 재시도까지 했는데도 실패했음을 밝힌다.
+    //  · 온전한 `[]`     → 모델이 "바꿀 것 없음"이라고 답한 것(진짜 no-op).
     payload.reason = "no_valid_intents";
     payload.message = drops.length
       ? "모델이 지원하지 않는 형식으로 답해 적용할 편집을 만들지 못했습니다. 다시 시도하거나 지시를 더 구체적으로 적어 주세요."
-      : "이 요청에서 적용할 편집을 찾지 못했습니다. 편집할 표/문단을 선택하고 지시를 더 구체적으로 적어 주세요.";
+      : !arrayShaped
+        ? `모델이 형식에 맞는 응답을 내지 못했습니다(자동 재시도 ${attempts}회 포함). 잠시 후 다시 시도해 주세요.`
+        : "이 요청에서 적용할 편집을 찾지 못했습니다. 편집할 표/문단을 선택하고 지시를 더 구체적으로 적어 주세요.";
   }
   return jsonRes(payload, 200);
 }

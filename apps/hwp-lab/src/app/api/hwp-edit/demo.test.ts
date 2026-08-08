@@ -65,6 +65,9 @@ describe("hwp-edit — 공개 데모 모드", () => {
     delete process.env.DEMO_AI_ALLOWED_ORIGIN;
     delete process.env.UPSTASH_REDIS_REST_URL;
     delete process.env.UPSTASH_REDIS_REST_TOKEN;
+    // 재시도 백오프는 테스트에서 0 으로(실제 기본값 1s×n 을 그대로 자면 스위트가 느려진다).
+    // 이 env 를 읽는다는 사실 자체도 여기서 함께 잠긴다(운영 튜닝 노브).
+    process.env.DEMO_AI_RETRY_DELAY_MS = "0";
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -320,6 +323,117 @@ describe("hwp-edit — 공개 데모 모드", () => {
     const res = await POST(req(validBody()));
     expect(res.status).toBe(502);
     expect((await res.json()) as { reason: string }).toHaveProperty("reason", "upstream_error");
+  });
+
+  // ── ⑦ 상류 일시 실패 + 1회 자동 재시도 (2026-08-08 프로덕션 장애 회귀) ────────────────────────────
+  // 실제 사건: OpenRouter 가 **HTTP 200 본문에** `{"error":{"code":429,…}}` 를 실어 보냈고, choices 가
+  // 없어 content=""→ intents 0 · drops 0 → "이 요청에서 적용할 편집을 찾지 못했습니다"(사용자 지시
+  // 탓처럼 보이는 문구)로 둔갑했다. 같은 요청의 2회차는 16건을 정상 반환했다.
+  it("200 인데 본문이 오류 봉투(429)면 → 1회 재시도하고, 2회차가 성공하면 그 결과를 돌려준다", async () => {
+    const upstream = vi.fn(async (_url: unknown, _init?: RequestInit) => {
+      const n = upstream.mock.calls.length;
+      return n === 1
+        ? new Response(JSON.stringify({ error: { message: "temporarily rate-limited upstream", code: 429 } }), { status: 200 })
+        : new Response(JSON.stringify({ choices: [{ message: { content: INTENT_JSON }, finish_reason: "stop" }] }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", upstream);
+    const res = await POST(req(validBody()));
+    expect(res.status).toBe(200);
+    expect(upstream).toHaveBeenCalledTimes(2);
+    const data = (await res.json()) as { intents: unknown[]; reason?: string };
+    expect(data.intents).toHaveLength(1);
+    expect(data.reason).toBeUndefined();
+  });
+
+  it("200-오류-봉투가 재시도 뒤에도 계속되면 502 + upstream_error 로 정직하게 말한다(0건으로 둔갑 금지)", async () => {
+    const upstream = vi.fn(
+      async () => new Response(JSON.stringify({ error: { message: "temporarily rate-limited upstream", code: 429 } }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", upstream);
+    const res = await POST(req(validBody()));
+    expect(res.status).toBe(502);
+    expect(upstream).toHaveBeenCalledTimes(4); // 혼잡은 토큰을 안 먹는다 → 최대 4회까지 넘겨 본다
+    const data = (await res.json()) as { error: string; reason: string };
+    expect(data.reason).toBe("upstream_error");
+    expect(data.error).toContain("429");
+    expect(data.error).toContain("혼잡"); // 사용자가 뭘 해야 하는지 말한다
+    // 클라 표시기를 통과해도 "편집을 찾지 못했습니다"가 되지 않는다.
+    expect(demoAiHttpError(502, data)).toContain("AI 제공자 호출이 실패했습니다");
+  });
+
+  it("choices 가 없는 응답도 상류 오류로 본다(빈 content 를 '편집 0건'으로 읽지 않는다)", async () => {
+    const upstream = vi.fn(async () => new Response(JSON.stringify({ id: "x" }), { status: 200 }));
+    vi.stubGlobal("fetch", upstream);
+    const res = await POST(req(validBody()));
+    expect(res.status).toBe(502);
+    expect(upstream).toHaveBeenCalledTimes(4); // 일시 이상으로 보고 재시도
+    expect((await res.json()) as { reason: string }).toHaveProperty("reason", "upstream_error");
+  });
+
+  it("재시도해도 소용없는 상류 오류(4xx)는 재시도하지 않는다(비용)", async () => {
+    const upstream = vi.fn(async () => new Response(JSON.stringify({ error: { message: "no such model", code: 400 } }), { status: 200 }));
+    vi.stubGlobal("fetch", upstream);
+    const res = await POST(req(validBody()));
+    expect(res.status).toBe(502);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it("모델이 배열을 아예 못 내면(산문/빈 응답) 1회 재시도한다 — 2회차 성공이면 정상 결과", async () => {
+    const upstream = vi.fn(async () => {
+      const n = upstream.mock.calls.length;
+      const content = n === 1 ? "죄송합니다. 무엇을 채울지 모르겠습니다." : INTENT_JSON;
+      return new Response(JSON.stringify({ choices: [{ message: { content }, finish_reason: "stop" }] }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", upstream);
+    const res = await POST(req(validBody()));
+    expect(upstream).toHaveBeenCalledTimes(2);
+    expect(((await res.json()) as { intents: unknown[] }).intents).toHaveLength(1);
+  });
+
+  it("과금된 시도는 2회를 넘지 않는다(형식 이탈이 계속돼도 3회차는 없다 — 비용 상한)", async () => {
+    // 혼잡(429)은 토큰을 안 먹어 3회까지 넘겨 보지만, 모델이 **답을 생성한** 호출은 최대 2회다.
+    const upstream = vi.fn(
+      async () => new Response(JSON.stringify({ choices: [{ message: { content: "무엇을 채울지 모르겠습니다." } }] }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", upstream);
+    const res = await POST(req(validBody()));
+    expect(upstream).toHaveBeenCalledTimes(2);
+    const data = (await res.json()) as { intents: unknown[]; reason: string; message: string };
+    expect(data.intents).toEqual([]);
+    expect(data.reason).toBe("no_valid_intents");
+    // "당신 지시가 잘못됐다"가 아니라 "모델이 형식을 못 지켰다 + 재시도했다"라고 말한다.
+    expect(data.message).toContain("형식에 맞는 응답");
+    expect(data.message).toContain("2회");
+  });
+
+  it("의도적인 빈 배열 `[]` 는 재시도하지 않는다(‘바꿀 것 없음’은 정답 — 돈만 든다)", async () => {
+    const upstream = stubUpstream({ message: { content: "[]" }, finish_reason: "stop" });
+    const res = await POST(req(validBody()));
+    expect(upstream).toHaveBeenCalledTimes(1);
+    expect(((await res.json()) as { reason: string }).reason).toBe("no_valid_intents");
+  });
+
+  it("절단(truncated)은 재시도하지 않는다(같은 요청은 또 잘린다 — 나눠 달라고 안내한다)", async () => {
+    const upstream = stubUpstream({ message: { content: '[{"intent":"SetTable' }, finish_reason: "length" });
+    const res = await POST(req(validBody()));
+    expect(upstream).toHaveBeenCalledTimes(1);
+    expect(((await res.json()) as { reason: string }).reason).toBe("truncated");
+  });
+
+  it("재시도는 사용자의 IP 쿼터를 두 번 먹지 않는다(체감 1회 = 쿼터 1회)", async () => {
+    process.env.DEMO_AI_PER_IP_CAP = "2";
+    const upstream = vi.fn(async () => {
+      const n = upstream.mock.calls.length;
+      return n % 2 === 1
+        ? new Response(JSON.stringify({ error: { message: "rate-limited", code: 429 } }), { status: 200 })
+        : new Response(JSON.stringify({ choices: [{ message: { content: INTENT_JSON } }] }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", upstream);
+    // 상류를 4번(=2요청 × 재시도) 부르지만 쿼터는 2회만 쓴다 → 3번째 요청에서 비로소 429.
+    expect((await POST(req(validBody()))).status).toBe(200);
+    expect((await POST(req(validBody()))).status).toBe(200);
+    expect(upstream).toHaveBeenCalledTimes(4);
+    expect((await POST(req(validBody()))).status).toBe(429);
   });
 
   it("키가 없으면 500 이 아니라 정직한 503(미구성) 을 돌려준다", async () => {

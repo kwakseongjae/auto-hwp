@@ -24,6 +24,11 @@ import { demoProbe, handleDemoEdit, isDemoAiMode } from "./demo";
 export const runtime = "nodejs";
 // GET 이 요청 시점의 env(키 유무)를 읽도록 정적 최적화를 끈다.
 export const dynamic = "force-dynamic";
+// 함수 실행 시간 상한(초). Vercel 기본값은 10초인데 **정상 응답 1회가 이미 ~9초**(실측: 8쪽 표 다중
+// 셀 채움 = prompt 6k tok · completion 794 tok)라 여유가 없었고, 데모 경로의 1회 자동 재시도
+// (demo.ts MAX_UPSTREAM_ATTEMPTS)까지 더하면 기본값으로는 504(무응답)가 난다. 30초면 재시도 포함
+// 최악(≈9s + 0.6s + 9s)에도 여유가 있고 Hobby/Pro 양쪽 상한(60s/300s) 안이다.
+export const maxDuration = 30;
 
 // ── 프로토콜은 @auto-hwp/ai-protocol 로 승격됨(이슈 026) ─────────────────────────
 // SYSTEM_PROMPT/화이트리스트/입력검증/R5 펜스/doc-context 조립은 이제 벤더 중립 패키지가 소유하며,
