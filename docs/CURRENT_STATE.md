@@ -6,6 +6,25 @@
 - 정본 배포: **https://autohwp.com** (Vercel full Next — 2026-08-06 컷오버, Actions vercel-deploy.yml).
   GitHub Pages(kwakseongjae.github.io/auto-hwp)는 병행 유지 중 — 리다이렉트 스텁 전환 예정.
   GitHub: https://github.com/kwakseongjae/auto-hwp (public, 홈페이지·description=autohwp.com)
+- 갱신: 2026-08-10 · Claude(Fable 오케스트레이터)+Opus 워커 4+검증 1 — **편집 품질 6건 진단·수리
+  (wf_2fbcd88a): 5.5건 수리 + 1건 엔진 갭 명시**. 레벨 진단 확정: ①셀 안 안내 문구 삭제 불가=
+  **engine**(place.rs:1682 `cell_text_hit`가 중첩 표 캐럿 차단 — 그 문구는 셀 안 1×1 중첩 표에 있다.
+  **미수리**, 수리 설계는 `apps/hwp-lab/e2e/nested-cell-caret-gap.spec.ts` test.fixme에 CellPath 관통
+  설계로 보존) ②행/칸 정밀 선택=editor(앵커 계약은 있었고 생산자·어포던스 0 — RowHeadOverlay 행 머리
+  +Shift 칸/행 범위+`rangeLabel` 칩+ANCHOR SCOPE 프롬프트 신설) ③적용 전 프리뷰=editor(ghost.ts+
+  GhostPreviewOverlay: hover=단건·토글=고정, 덮어쓰기만 그리고 삽입/삭제는 정직 안내) ④되돌리기 실패=
+  editor(**진범: applyBatch 부분 실패 시 고아 op** — session.ts 원자적 롤백+실패 시에도 refresh+빈 배치
+  유령 제거, ⌘Z 빈 스택은 침묵 대신 토스트) ⑤불릿 채움 크기·위치 이상=**protocol 주범**(모델이 6~8pt
+  스페이서 문단을 타겟 — paraRuns 문맥+`문단서식=[불릿/스페이서]` 라벨+프롬프트 규칙)+**engine 부수**
+  (InsertParagraphAt height-0 합성 — hwp-ops `neighbour_shapes` 이웃 서식 상속, INTENT-SCHEMA §6.9)
+  ⑥PDF 상이=**engine**(emit_pdf_with_fonts가 화면과 다른 provider로 재조판 — wasm에서 Approx 강등.
+  `own_render_fonts_with(injected)`로 통일+serif_bold 슬롯+`<family> Bold` 라우팅)+editor(058 명조 등록이
+  useEffect cleanup 레이스로 매번 취소+PdfPreviewDialog 신설 — 즉시 다운로드→미리보기 모달).
+  검증(통합): verify-local --full EXIT=0 (게이트 8/18/24/6·HWPX축·LOCKSTEP 불변·external clean),
+  vitest 944 전건·e2e **79 passed/2 skip**(신규: batch-atomicity 2·precision-select-preview 2)·라이브
+  실크롬 시나리오 ②~⑥ green. 잔여: ①의 엔진 수리(CellPath 캐럿 관통), 중첩 캐럿 Backspace가 은닉
+  undo 단위를 만드는 관찰(미확인 위험, fixme에 기록), 실 LLM 종단 ⑤ 확증, react vitest가 editor-core를
+  src 별칭으로 봐 dist 트립와이어 한 레인 상실(주석 명시). ⚠️ wasm 재빌드 필수였고 --full이 수행함.
 - 갱신: 2026-08-06 · Claude(Opus 5) — **실도메인 디테일 6건(사용자 스크린샷 피드백) — 커밋 없음(워킹트리)**.
   ① **문서 세션 URL `/d/<불투명 12자>`**(신규 `apps/hwp-lab/src/lib/docUrl.ts`): 열면 pushState,
   새로고침/직접 방문이면 이 브라우저 매핑(localStorage)→스냅샷으로 **기존 재개 레이어 그대로** 복원.

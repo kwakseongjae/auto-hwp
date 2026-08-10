@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-10 (Fable 오케스트레이터+Opus 워커 4+검증 1) · 편집 품질 6건 — 5.5건 수리·레벨 진단 확정
+- 원자적 applyBatch(고아 op 근절)·행/칸 정밀 앵커+고스트 프리뷰·불릿 서식 상속(protocol+engine)·PDF 화면동일 provider+미리보기.
+- --full EXIT=0·vitest 944·e2e 79/2skip·라이브 ②~⑥ green. 멈춘 곳: ① 중첩 셀 캐럿(engine 갭 — nested-cell-caret-gap.spec fixme에 설계 보존).
+
 ## 2026-08-08 (Claude 오케스트레이터+Opus 워커) · 캘리그래피 로고 시스템 — A 워드마크+C 낙관 라이브
 - codex 5안→사용자 선택 A+C, 파생(투명화·파비콘 타일·다크 재채색·OG·README 배너) 후 13차 배포 success.
 - 라이브 실측: favicon 8.4KB·wordmark·seal·OG 200. 후보 4안 보존. 멈춘 곳: 없음.
