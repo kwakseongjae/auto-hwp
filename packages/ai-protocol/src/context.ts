@@ -1,4 +1,4 @@
-import type { Anchor, Attachment, DocMeta, DocProfile, EditRequest, TableGrid, UserContentPart } from "./types.js";
+import type { Anchor, Attachment, DocMeta, DocProfile, EditRequest, ParaRun, TableGrid, UserContentPart } from "./types.js";
 
 /// Doc-context assembly (SDK-LAYERS: "buildDocContext(session, anchors) — R5 펜스 포함"). PROMOTED from
 /// apps/hwp-lab's LabWorkspace.buildDocContextString + the route handler's user-message assembly so the
@@ -29,6 +29,48 @@ function renderGrid(grid: TableGrid, cellMaxLen: number): string {
     if (cols.length) lines.push(`    ${cols.join(" | ")}`);
   }
   return lines.join("\n");
+}
+
+/** Leading markers a Korean 개요/불릿 문단 opens with. A paragraph whose text is ONLY one of these (plus
+ *  whitespace) is a bullet line WAITING for its content — the fill belongs on that same line, after the
+ *  marker. All single scalars, so a plain `startsWith` scan is unambiguous. */
+const BULLET_MARKERS = ["◦", "○", "●", "・", "·", "□", "■", "◇", "◆", "▪", "▫", "▶", "‣", "※", "-", "–", "—", "*"];
+
+/** Below this authored size a BLANK paragraph is a layout GAP, not a slot: Korean body text runs
+ *  10–14pt, while a form's spacer lines are the 4–8pt blank paragraphs that open vertical space.
+ *  A heuristic on a stated fact — the size itself is always printed, so the model can judge too. */
+const SPACER_PT_MAX = 10;
+
+/** The marker a paragraph's text opens with, or `null`. */
+function leadingMarker(text: string): string | null {
+  const t = text.trim();
+  return BULLET_MARKERS.find((m) => t.startsWith(m)) ?? null;
+}
+
+/** Render the SHAPE hint of a marked PARAGRAPH anchor from the engine's runs (불릿 채움): the authored
+ *  point size(s) plus a role the model can act on —
+ *    · `불릿 "◦" 줄 14.0pt — 내용 없음`      the item's content belongs on THIS line, after the marker,
+ *    · `빈 문단 6.0pt — 줄간격 스페이서`     a blank line far below body size: a GAP, not an empty slot,
+ *    · `빈 문단 12.0pt — 내용 없는 줄`       a blank line at body size (an ordinary writable empty line),
+ *    · `본문 12.0pt`                        an ordinary text paragraph.
+ *  Returns `""` when there is nothing worth saying (no runs), so the anchor line stays as-is. */
+function renderParaShape(runs: ParaRun[]): string {
+  if (!runs.length) return "";
+  const text = runs.map((r) => r.text).join("");
+  // Prefer the TEXT-bearing runs' sizes; a wholly blank paragraph falls back to its (blank) runs —
+  // that size IS the fact we need to expose, since it is what any fill would render at.
+  const sizesOf = (rs: ParaRun[]): number[] => [...new Set(rs.map((r) => r.size_pt).filter((s): s is number => typeof s === "number" && s > 0))];
+  const withText = runs.filter((r) => r.text.trim() !== "");
+  const sizes = withText.length ? sizesOf(withText) : sizesOf(runs);
+  const size = sizes.length ? `${sizes.map((s) => s.toFixed(1)).join("/")}pt` : "크기 미지정";
+  const marker = leadingMarker(text);
+  if (text.trim() === "") {
+    const small = sizes.length > 0 && Math.max(...sizes) < SPACER_PT_MAX;
+    return ` 문단서식=[빈 문단 ${size} — ${small ? "줄간격 스페이서" : "내용 없는 줄"}]`;
+  }
+  if (marker && text.trim() === marker) return ` 문단서식=[불릿 "${marker}" 줄 ${size} — 내용 없음]`;
+  if (marker) return ` 문단서식=[불릿 "${marker}" 줄 ${size}]`;
+  return ` 문단서식=[본문 ${size}]`;
 }
 
 /** Profile char budget (issue 067): the rendered profile block never exceeds this, and it is ONLY
@@ -71,8 +113,15 @@ type ProfileTableLike = DocProfile["tables"][number];
  *  `TableGrid` for a table/cell anchor, `null`/undefined otherwise), the FIRST anchor of each table block
  *  gets its full cell grid appended (subsequent anchors of the SAME table are de-duped, so marking many
  *  cells never repeats the grid). Without `grids` the output is byte-identical to the pre-066 builder
- *  (thin anchor-only context — regression-safe). Elided to `maxLen` (default 8000) chars. */
-export function buildDocContext(meta: DocMeta, anchors: Anchor[], opts?: { maxLen?: number; grids?: (TableGrid | null | undefined)[]; cellMaxLen?: number; profileMaxLen?: number }): string {
+ *  (thin anchor-only context — regression-safe). Elided to `maxLen` (default 8000) chars.
+ *
+ *  불릿 채움 — PARAGRAPH SHAPE: when the host supplies `opts.paraRuns` (aligned to `anchors` by index —
+ *  the engine's `blockRuns` for a paragraph anchor, `null`/undefined otherwise), each paragraph anchor
+ *  line gains a `문단서식=[…]` hint naming its authored point size and its role (불릿 줄 / 빈 문단
+ *  스페이서 / 본문). Without it a 6pt blank spacer and a 14pt bullet line look identical (`text=""` vs
+ *  `text="◦"`) and the model fills the spacer — the text then renders far smaller than the form's body,
+ *  detached from its bullet. Absent `paraRuns` ⇒ byte-identical to the previous builder. */
+export function buildDocContext(meta: DocMeta, anchors: Anchor[], opts?: { maxLen?: number; grids?: (TableGrid | null | undefined)[]; cellMaxLen?: number; profileMaxLen?: number; paraRuns?: (ParaRun[] | null | undefined)[] }): string {
   const maxLen = opts?.maxLen ?? 8000;
   const cellMaxLen = opts?.cellMaxLen ?? DEFAULT_CELL_MAX_LEN;
   const head = `format=${meta.format} pages=${meta.pages} editable=${meta.editable} sections=${meta.sections}`;
@@ -80,7 +129,9 @@ export function buildDocContext(meta: DocMeta, anchors: Anchor[], opts?: { maxLe
   const lines = anchors.map((a, i) => {
     const rows = a.rows ? ` rows=[${a.rows[0]},${a.rows[1]}]` : "";
     const cols = a.cols ? ` cols=[${a.cols[0]},${a.cols[1]}]` : "";
-    const line = `#${i} ${a.kind} section=${a.section} block=${a.block}${rows}${cols} text=${JSON.stringify(a.text ?? "")}`;
+    const runs = opts?.paraRuns?.[i];
+    const shape = runs && runs.length ? renderParaShape(runs) : "";
+    const line = `#${i} ${a.kind} section=${a.section} block=${a.block}${rows}${cols} text=${JSON.stringify(a.text ?? "")}${shape}`;
     const grid = opts?.grids?.[i];
     const key = `${a.section}:${a.block}`;
     if (grid && grid.rows > 0 && !gridded.has(key)) {

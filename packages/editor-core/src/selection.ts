@@ -1,6 +1,6 @@
 import type { EngineAdapter } from "./adapter";
 import { Emitter } from "./events";
-import type { Anchor, BlockHit, Box, CellAddr, CellHit, PointerInput, Selection, SelMarquee, TableBox } from "./types";
+import type { Anchor, BlockHit, Box, CellAddr, CellHit, PointerInput, Selection, SelMarquee, TableBox, TableGrid } from "./types";
 import { coreMessagesKoKR, type AnchorMessages, type CoreMessages } from "./messages";
 
 /** The descending CellPath of a hit (issue 064 Tier-2): the engine's `cell.path`, or a synthesized
@@ -62,6 +62,42 @@ export function cellLabel(cell: CellHit, messages: AnchorMessages = coreMessages
   const snip = cell.text.trim().replace(/\s+/g, " ").slice(0, 12);
   const where = messages.cellWhere(cell.row + 1, cell.col + 1);
   return snip ? messages.cellSnippet(snip, where) : messages.cellEmpty(where);
+}
+
+/** 정밀 선택(이슈 2) — the human label of a rectangular cell RANGE anchor. `rows`/`cols` are MODEL-GLOBAL
+ *  0-based inclusive bounds; `tableCols` is the table's column count. A range that spans EVERY column is a
+ *  whole-ROW selection ("표 8행 전체" / "표 6~8행 전체"); anything narrower names both axes
+ *  ("표 2~4행 1~3열"). Pure — the React layer never re-derives chip text. */
+export function rangeLabel(
+  rows: [number, number],
+  cols: [number, number],
+  tableCols: number,
+  messages: AnchorMessages = coreMessagesKoKR.anchor,
+): string {
+  const r = messages.rowsWhere(rows[0] + 1, rows[1] + 1);
+  const wholeRow = tableCols > 0 && cols[0] === 0 && cols[1] >= tableCols - 1;
+  return wholeRow ? messages.rangeWholeRows(r) : messages.rangeCells(r, messages.colsWhere(cols[0] + 1, cols[1] + 1));
+}
+
+/** 정밀 선택(이슈 2) — the anchor `text` of a cell RANGE: the covered cells of `grid`, one line per row,
+ *  cells joined by " | ". Only ACTIVE cells inside the range appear (a merged/covered slot is simply
+ *  absent, exactly like the doc-context grid). Elided to `maxLen` so a wide range can't blow the request
+ *  budget. Returns "" when no grid is available (the anchor then rides text-less, as a table anchor does). */
+export function rangeText(grid: TableGrid | null | undefined, rows: [number, number], cols: [number, number], maxLen = 1200): string {
+  if (!grid) return "";
+  const lines: string[] = [];
+  for (let r = rows[0]; r <= rows[1]; r++) {
+    const line = grid.cells
+      .filter((c) => c.row === r && c.col >= cols[0] && c.col <= cols[1])
+      .sort((a, b) => a.col - b.col)
+      // 빈 셀은 지우지 않고 `_빈칸_` 로 남긴다 — doc-context 그리드와 같은 관례라, 좁은 앵커만 보내도
+      // 모델이 "여기가 채워야 할 값칸"임을 안다(라벨칸 오타겟 방지, 066 규율).
+      .map((c) => c.text.replace(/\s*\n\s*/g, " / ").trim() || "_빈칸_")
+      .join(" | ");
+    if (line) lines.push(line);
+  }
+  const out = lines.join("\n");
+  return out.length > maxLen ? `${out.slice(0, maxLen)}…` : out;
 }
 
 /** Derive a Selection from a resolved click hit. Priority: CELL > table > block band (issue 023 — a
@@ -263,6 +299,7 @@ export class SelectionModel {
   clear(): void {
     this.drag = null;
     this.drill = null;
+    this.rangeOrigin = null;
     if (this.marquee) this.setMarquee(null);
     this.setSelection([]);
   }
@@ -471,6 +508,8 @@ export class SelectionModel {
         return;
       }
       this.setSelection(mergeSelection(this.sels, [sel], d.meta ? "toggle" : "replace"));
+      // 정밀 선택(이슈 2): a LONE-cell click becomes the shift-extend origin; anything else clears it.
+      this.setRangeOrigin(d.page, this.sels.length === 1 ? this.sels[0] : null);
       this.results.emit({ source: "click", selected: 1, excluded: 0 });
     } catch (e) {
       this.errors.emit(e);
@@ -494,6 +533,177 @@ export class SelectionModel {
       const sel = deriveSel(page, table, cell, null, this.messages.anchor);
       if (!sel) return null;
       this.setSelection(mergeSelection(this.sels, [sel], "replace"));
+      this.setRangeOrigin(page, sel); // 정밀 선택(이슈 2): the drilled cell is the shift-extend origin
+      this.results.emit({ source: "click", selected: 1, excluded: 0 });
+      return sel;
+    } catch (e) {
+      this.errors.emit(e);
+      return null;
+    }
+  }
+
+  // ── 정밀 선택: 행 / 셀 범위 (이슈 2) ───────────────────────────────────────
+  /// WHY: before this, the ONLY anchors a table could produce were "표 전체"(click) and ONE cell(drill) —
+  /// `kind:"range"` existed in the Anchor type and in ai-protocol's `ANCHOR_KINDS` but NOTHING ever produced
+  /// one (grep: zero producers). A user who wanted "이 행만 고쳐줘" had to hand the model the whole table.
+  /// These two commands are the missing producers. They are pure ADDRESS commands (no new schema, no new
+  /// Intent): a range anchor is `kind:"range"` + MODEL-GLOBAL inclusive `rows`/`cols` — exactly the shape
+  /// `validateRequest`/`sanitizeAnchors` already accept (invariant 7 untouched: additive, nothing new).
+
+  /** The cell a RANGE extends from (shift-click 원점). Set by every LONE-cell selection; cleared by a
+   *  non-cell selection. Kept in the model (not the UI) so both shells extend identically. */
+  private rangeOrigin: { section: number; block: number; page: number; row: number; col: number; box: Box } | null = null;
+
+  /** Remember/forget the shift-extend origin. `null` = the current selection is not a lone cell. */
+  private setRangeOrigin(page: number, sel: Selection | null): void {
+    const a = sel?.anchor;
+    if (a && a.kind === "cell" && a.rows && a.cols) {
+      this.rangeOrigin = { section: a.section, block: a.block, page, row: a.rows[0], col: a.cols[0], box: sel!.mark.box };
+    } else {
+      this.rangeOrigin = null;
+    }
+  }
+
+  /** The shift-extend origin (test/inspection seam). */
+  getRangeOrigin(): { section: number; block: number; page: number; row: number; col: number } | null {
+    const o = this.rangeOrigin;
+    return o ? { section: o.section, block: o.block, page: o.page, row: o.row, col: o.col } : null;
+  }
+
+  /// Resolve a table's ON-PAGE fragment geometry: its column boundaries, its row boundaries, and the
+  /// fragment's `first_row` + column count (from `tableAt`, probed at a cell centre so a mis-hit on a
+  /// border can't decide it). Returns null when the backend can't answer (TauriAdapter parity: the caller
+  /// then simply does nothing rather than inventing a box).
+  private async fragmentGeometry(
+    page: number,
+    section: number,
+    block: number,
+  ): Promise<{ rowsB: number[]; colsB: number[]; firstRow: number; cols: number } | null> {
+    if (!this.adapter.tableRowBoundaries || !this.adapter.tableColBoundaries) return null;
+    const [rowsB, colsB] = await Promise.all([
+      this.adapter.tableRowBoundaries(page, section, block),
+      this.adapter.tableColBoundaries(page, section, block),
+    ]);
+    if (!rowsB || rowsB.length < 2 || !colsB || colsB.length < 2) return null;
+    // `first_row` (split tables carry a per-fragment offset) comes from the placed TableBox. Probe cell
+    // centres until one resolves to THIS table — a nested grid under the first probe must not decide it.
+    let firstRow = 0;
+    let cols = colsB.length - 1;
+    for (let r = 0; r + 1 < rowsB.length; r++) {
+      const y = (rowsB[r] + rowsB[r + 1]) / 2;
+      const x = (colsB[0] + colsB[1]) / 2;
+      const tb = await this.adapter.tableAt(page, x, y);
+      if (tb && tb.section === section && tb.block === block) {
+        firstRow = tb.first_row;
+        cols = tb.cols || cols;
+        break;
+      }
+    }
+    return { rowsB, colsB, firstRow, cols };
+  }
+
+  /// cellBoxAt — 고스트 프리뷰(이슈 3)의 기하 절반: MODEL 주소 `(section, block, row, col)` → 그 페이지
+  /// 조각에서의 셀 박스(own-render PAGE px). 엔진에 "주소로 셀 박스" 질의가 없으므로 행/열 경계 +
+  /// `first_row` 로 조립한다(병합 셀은 그 원점 칸 크기로 근사 — 프리뷰 용도에선 정직한 근사).
+  /// 그 행이 이 페이지 조각에 없으면 null → 호출자가 다음 페이지를 본다(분할표).
+  async cellBoxAt(page: number, section: number, block: number, row: number, col: number): Promise<Box | null> {
+    try {
+      const geo = await this.fragmentGeometry(page, section, block);
+      if (!geo) return null;
+      const { rowsB, colsB, firstRow } = geo;
+      const i = row - firstRow;
+      if (i < 0 || i + 1 >= rowsB.length) return null;
+      if (col < 0 || col + 1 >= colsB.length) return null;
+      return { x: colsB[col], y: rowsB[i], w: colsB[col + 1] - colsB[col], h: rowsB[i + 1] - rowsB[i] };
+    } catch (e) {
+      this.errors.emit(e);
+      return null;
+    }
+  }
+
+  /// selectRows — mark WHOLE ROW(S) of a table as ONE `range` anchor (이슈 2). `row` is the MODEL-GLOBAL row
+  /// index (the same space `SetTableCell.row` writes); `extend` grows the span from the current range/cell
+  /// origin (shift-click on a row head) instead of replacing it. The mark box spans the full table width of
+  /// the ON-PAGE fragment, so a split table marks only the rows visible on that page while the ANCHOR still
+  /// names the global rows. Resolves the new Selection, or null when the geometry/backend can't answer.
+  async selectRows(page: number, section: number, block: number, row: number, extend = false): Promise<Selection | null> {
+    try {
+      const geo = await this.fragmentGeometry(page, section, block);
+      if (!geo) return null;
+      const { rowsB, colsB, firstRow, cols } = geo;
+      const lastGlobal = firstRow + rowsB.length - 2;
+      const clamp = (r: number) => Math.min(Math.max(r, firstRow), lastGlobal);
+      const target = clamp(row);
+      // Extend from the previous ROW range (or lone-cell origin) when the user shift-clicks a second head.
+      const prev = this.sels[this.sels.length - 1]?.anchor;
+      const prevRow =
+        extend && prev && (prev.kind === "range" || prev.kind === "cell") && prev.section === section && prev.block === block && prev.rows
+          ? prev.rows[0]
+          : null;
+      const from = prevRow === null ? target : clamp(prevRow);
+      const rows: [number, number] = [Math.min(from, target), Math.max(from, target)];
+      const colRange: [number, number] = [0, Math.max(0, cols - 1)];
+      const y0 = rowsB[rows[0] - firstRow];
+      const y1 = rowsB[rows[1] - firstRow + 1];
+      const box: Box = { x: colsB[0], y: y0, w: colsB[colsB.length - 1] - colsB[0], h: y1 - y0 };
+      const label = rangeLabel(rows, colRange, cols, this.messages.anchor);
+      const grid = this.adapter.tableGrid ? await this.adapter.tableGrid(section, block).catch(() => null) : null;
+      const text = rangeText(grid, rows, colRange);
+      const sel: Selection = {
+        mark: { page, box, label, kind: "range" },
+        anchor: { kind: "range", section, block, rows, cols: colRange, label, page, ...(text ? { text } : {}) },
+      };
+      this.drag = null;
+      if (this.marquee) this.setMarquee(null);
+      this.drill = null; // a row selection is its own level — a later plain click re-marks the table
+      this.rangeOrigin = null;
+      this.setSelection([sel]);
+      this.results.emit({ source: "click", selected: 1, excluded: 0 });
+      return sel;
+    } catch (e) {
+      this.errors.emit(e);
+      return null;
+    }
+  }
+
+  /// extendToCell — SHIFT-click inside a drilled table: grow the selection from the remembered origin cell
+  /// to the clicked cell as ONE rectangular `range` anchor (이슈 2 — 셀 범위). With no origin (or a click in
+  /// a DIFFERENT table) it degrades to a plain single-cell selection, never an error. The mark box is the
+  /// union of the two cell rects — exactly the range rectangle for an unmerged grid.
+  async extendToCell(page: number, x: number, y: number): Promise<Selection | null> {
+    try {
+      if (!this.adapter.tableCellAt) return null;
+      const cell = await this.adapter.tableCellAt(page, x, y);
+      if (!cell) return null;
+      const o = this.rangeOrigin;
+      if (!o || o.section !== cell.section || o.block !== cell.block || o.page !== page) {
+        const sel = deriveSel(page, null, cell, null, this.messages.anchor);
+        if (!sel) return null;
+        this.setSelection(mergeSelection(this.sels, [sel], "replace"));
+        this.setRangeOrigin(page, sel);
+        this.results.emit({ source: "click", selected: 1, excluded: 0 });
+        return sel;
+      }
+      const rows: [number, number] = [Math.min(o.row, cell.row), Math.max(o.row, cell.row)];
+      const cols: [number, number] = [Math.min(o.col, cell.col), Math.max(o.col, cell.col)];
+      const x0 = Math.min(o.box.x, cell.x);
+      const y0 = Math.min(o.box.y, cell.y);
+      const box: Box = {
+        x: x0,
+        y: y0,
+        w: Math.max(o.box.x + o.box.w, cell.x + cell.w) - x0,
+        h: Math.max(o.box.y + o.box.h, cell.y + cell.h) - y0,
+      };
+      const label = rangeLabel(rows, cols, cell.cols, this.messages.anchor);
+      const grid = this.adapter.tableGrid ? await this.adapter.tableGrid(cell.section, cell.block).catch(() => null) : null;
+      const text = rangeText(grid, rows, cols);
+      const sel: Selection = {
+        mark: { page, box, label, kind: "range" },
+        anchor: { kind: "range", section: cell.section, block: cell.block, rows, cols, label, page, ...(text ? { text } : {}) },
+      };
+      this.drag = null;
+      if (this.marquee) this.setMarquee(null);
+      this.setSelection([sel]); // the range REPLACES the anchor cell (origin is kept for further extends)
       this.results.emit({ source: "click", selected: 1, excluded: 0 });
       return sel;
     } catch (e) {
@@ -602,6 +812,7 @@ export class SelectionModel {
     this.drag = null;
     if (this.marquee) this.setMarquee(null);
     this.setSelection([sel]);
+    this.setRangeOrigin(page, sel); // 정밀 선택(이슈 2): keyboard nav also re-seeds the shift-extend origin
     return true;
   }
 }

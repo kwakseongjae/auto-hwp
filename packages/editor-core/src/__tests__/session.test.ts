@@ -50,6 +50,64 @@ describe("DocSession — lifecycle / undo / font (issue 026)", () => {
     expect(adapter.redos).toBe(2);
   });
 
+  // ── caret-undo 증상 4: 배치 원자성 ────────────────────────────────────────────────────────────────
+  // 실측(sample-8p, 표 채우기): 2건 중 2번째가 병합 셀에 걸려 엔진이 거절 → 1번째는 이미 커밋됐는데
+  // undo 장부에는 아무 배치도 안 남아, "적용 실패"라고 안내하면서 문서는 바뀌고, 이후 ⌘Z 는 그 고아
+  // op 를 앞선 배치 몫으로 벗겨낸다. 실패한 배치는 스스로 롤백해 문서를 원상으로 남겨야 한다.
+  /** 지정한 순번의 intent 에서 던지는 어댑터 — 부분 실패를 결정적으로 만든다. */
+  class FailingAdapter extends MockAdapter {
+    constructor(private failAt: number, opts: { pages?: number } = {}) {
+      super(opts);
+    }
+    override async applyIntent(intent: Intent) {
+      if (this.applied.length === this.failAt) throw new Error("SetTableCell: no active cell");
+      return super.applyIntent(intent);
+    }
+  }
+
+  it("a batch that fails PART WAY rolls back the ops that already landed (문서 원상)", async () => {
+    const adapter = new FailingAdapter(2, { pages: 2 });
+    const s = new DocSession(adapter);
+    await s.open(new Uint8Array([1]), "t.hwpx");
+    const intents: Intent[] = [
+      { intent: "SetParagraphText", section: 0, block: 1, text: "a" },
+      { intent: "SetParagraphText", section: 0, block: 2, text: "b" },
+      { intent: "SetParagraphText", section: 0, block: 3, text: "c" },
+    ];
+    await expect(s.applyBatch(intents)).rejects.toThrow(/no active cell/);
+    expect(adapter.applied).toHaveLength(2); // 2건은 엔진에 커밋됐고
+    expect(adapter.undos).toBe(2); // 그 2건이 되돌려졌다
+    expect(s.canUndo()).toBe(false); // 남은 고아 배치 없음 = ⌘Z 가 엉뚱한 편집을 벗기지 않는다
+  });
+
+  it("a failed batch never leaves an edit outside the undo bookkeeping (롤백 불가 시 배치로 기록)", async () => {
+    class NoUndoAdapter extends FailingAdapter {
+      override async undo(): Promise<boolean> {
+        this.undos++;
+        return false; // 엔진이 더 되돌릴 수 없다고 답한다
+      }
+    }
+    const adapter = new NoUndoAdapter(1, { pages: 2 });
+    const s = new DocSession(adapter);
+    await s.open(new Uint8Array([1]), "t.hwpx");
+    await expect(
+      s.applyBatch([
+        { intent: "SetParagraphText", section: 0, block: 1, text: "a" },
+        { intent: "SetParagraphText", section: 0, block: 2, text: "b" },
+      ]),
+    ).rejects.toThrow();
+    expect(adapter.applied).toHaveLength(1);
+    expect(s.canUndo()).toBe(true); // 살아남은 1건은 한 번의 undo 로 닿을 수 있어야 한다
+  });
+
+  it("an EMPTY proposal records no phantom batch (⌘Z 가 '아무것도 안 함'으로 소모되지 않게)", async () => {
+    const adapter = new MockAdapter({ pages: 1 });
+    const s = new DocSession(adapter);
+    await s.open(new Uint8Array([1]), "t.hwpx");
+    expect(await s.applyBatch([])).toBe(0);
+    expect(s.canUndo()).toBe(false);
+  });
+
   it("registerFont registers the face, tracks the family, and invalidates layout", async () => {
     const adapter = new MockAdapter({ pages: 1 });
     const s = new DocSession(adapter);

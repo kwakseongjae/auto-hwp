@@ -88,3 +88,58 @@ describe("PDF 스텁 경고 (067-follow, U7)", () => {
     expect(container.textContent ?? "").not.toContain("자리표시 상자");
   });
 });
+
+// 이슈 6 — PDF 미리보기(opt-in `pdfPreview`): export 버튼이 곧장 다운로드하지 않고 방금 만든 바이트를
+// 모달(iframe)로 보여준다. "다운로드"가 그 **같은 바이트**를 호스트 레인(onExport/브라우저)으로 보낸다.
+describe("PDF 미리보기 모달 (이슈 6)", () => {
+  it("pdfPreview 켜면: 클릭 → 모달이 열리고 즉시 다운로드는 없다 → 다운로드 버튼이 그 바이트를 저장", async () => {
+    const adapter = new MockAdapter({ pages: 3 });
+    adapter.fontRegistered = true;
+    const onExport = vi.fn(async () => {});
+    const origCreate = URL.createObjectURL;
+    const origRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn(() => "blob:pdf-preview");
+    URL.revokeObjectURL = vi.fn();
+    try {
+      const { container } = render(
+        <HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} onExport={onExport} pdfPreview />,
+      );
+      await waitFor(() => expect(container.querySelector(".hw-sheet svg")).toBeTruthy());
+
+      fireEvent.click(screen.getByTitle("PDF 다운로드"));
+      // 모달이 열린다 — 그리고 이 시점에는 아직 아무것도 저장되지 않았다(미리보기가 먼저).
+      await waitFor(() => expect(screen.getByTestId("pdf-preview")).toBeTruthy());
+      expect(onExport).not.toHaveBeenCalled();
+      const frame = screen.getByTestId("pdf-preview-frame") as HTMLIFrameElement;
+      expect(frame.getAttribute("src")).toBe("blob:pdf-preview");
+      // 파일명 + 쪽수가 정직하게 표시된다.
+      expect(screen.getByTestId("pdf-preview").textContent).toContain("t.hwpx.pdf");
+      expect(screen.getByTestId("pdf-preview").textContent).toContain("3쪽");
+
+      // 다운로드 → 미리 본 그 바이트가 호스트 레인으로 나간다.
+      fireEvent.click(screen.getByTestId("pdf-preview-download"));
+      await waitFor(() => expect(onExport).toHaveBeenCalledWith(expect.any(Uint8Array), "t.hwpx.pdf", "application/pdf"));
+
+      // 닫기 → 모달이 사라지고 blob 이 회수된다(누수 금지).
+      fireEvent.click(screen.getByTestId("pdf-preview-close"));
+      await waitFor(() => expect(screen.queryByTestId("pdf-preview")).toBeNull());
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:pdf-preview");
+    } finally {
+      URL.createObjectURL = origCreate;
+      URL.revokeObjectURL = origRevoke;
+    }
+  });
+
+  it("pdfPreview 를 안 켠 호스트는 예전 그대로 즉시 내보낸다(회귀 안전)", async () => {
+    const adapter = new MockAdapter({ pages: 1 });
+    adapter.fontRegistered = true;
+    const onExport = vi.fn(async () => {});
+    const { container } = render(
+      <HwpWorkspace adapter={adapter} document={doc} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} onExport={onExport} />,
+    );
+    await waitFor(() => expect(container.querySelector(".hw-sheet svg")).toBeTruthy());
+    fireEvent.click(screen.getByTitle("PDF 다운로드"));
+    await waitFor(() => expect(onExport).toHaveBeenCalledWith(expect.any(Uint8Array), "t.hwpx.pdf", "application/pdf"));
+    expect(screen.queryByTestId("pdf-preview")).toBeNull();
+  });
+});

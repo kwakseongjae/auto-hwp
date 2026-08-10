@@ -36,6 +36,11 @@ const ALLOWLIST = [
   // 글꼴 이름 + 한글 서체 분류 토큰(명조/고딕 …)은 시스템·문서·엔진이 쓰는 실제 식별자다.
   // 번역하면 substitute_family 매칭과 @font-face 별칭이 깨진다(077 드리프트 방지 §allowlist).
   { file: 'packages/react/src/fonts.ts' },
+  // `_빈칸_` 는 UI 문구가 아니라 **프로토콜 토큰**이다: doc-context 그리드(ai-protocol
+  // `renderGrid`)가 빈 셀을 이 리터럴로 적고, 시스템 프롬프트가 그 이름으로 규칙을 가르치며,
+  // 라우트의 그리드 파서(`apps/hwp-lab/src/app/api/hwp-edit/route.ts`)가 같은 문자열로 되읽는다.
+  // 호스트 카탈로그가 이걸 번역하면 세 지점이 조용히 어긋난다 — 그래서 번역 대상이 아니다.
+  { file: 'packages/editor-core/src/selection.ts', text: '_빈칸_' },
 ];
 
 function isAllowed(relPath, text) {

@@ -87,7 +87,24 @@ export class DocSession {
 
   /** Apply a batch of Intents as ONE undo unit. Applies each in order, records the batch size, clears
    *  the redo stack, re-queries the page count (edits re-paginate), and signals. Rethrows on failure so
-   *  the UI can surface the error / trap-recovery message. Resolves to how many ops were applied. */
+   *  the UI can surface the error / trap-recovery message. Resolves to how many ops were applied.
+   *
+   *  ⚠️ ATOMIC (이슈 caret-undo 증상 4 실측): a batch that fails PART WAY THROUGH used to leave the ops
+   *  that already succeeded committed in the ENGINE while pushing NO batch here — orphan engine undo
+   *  units the bookkeeping knew nothing about. Consequences measured live (sample-8p, 표 채우기 2건 중
+   *  2번째가 병합 셀에 걸려 `no active cell` 로 거절):
+   *   · the chat says "적용 실패" while the document IS changed (거짓 안내 + 승인 없는 콘텐츠 변경),
+   *   · the applied turn never becomes "applied", so no per-card 되돌리기 exists,
+   *   · a later ⌘Z pops the PREVIOUS batch's N units, which now peel off the orphans instead — the
+   *     document walks backwards through edits the user never asked to undo.
+   *  So a failing batch now ROLLS ITSELF BACK (one `adapter.undo()` per already-applied op) before
+   *  rethrowing: "적용 실패" once again means "문서는 그대로다". If the rollback itself can't complete
+   *  (an adapter that refuses/returns false), whatever survived is RECORDED as a batch so it stays
+   *  reachable by a single undo — we never leave a mutation outside the undo bookkeeping (규율 6).
+   *  ⚠️ WASM TRAP 케이스: the adapter has ALREADY reset+reopened the document by the time it rethrows,
+   *  so the engine's undo stack is empty and the rollback records a batch that undoes nothing. That is
+   *  deliberately the safe side of the trade (a no-op undo entry vs. an untracked mutation); the UI's
+   *  trap lane (`onTrap`) is what tells the user their last edit was rolled back. */
   async applyBatch(intents: Intent[]): Promise<number> {
     let applied = 0;
     try {
@@ -95,12 +112,29 @@ export class DocSession {
         await this.adapter.applyIntent(intent);
         applied++;
       }
+    } catch (e) {
+      if (applied > 0) {
+        let rolledBack = 0;
+        for (let i = 0; i < applied; i++) {
+          const ok = await this.adapter.undo().catch(() => false);
+          if (!ok) break; // the engine stopped undoing — stop asking and record the remainder
+          rolledBack++;
+        }
+        const survived = applied - rolledBack;
+        if (survived > 0) this.undoBatches.push(survived); // still one-click undoable
+        this.redoBatches = [];
+        await this.refreshPages();
+        this.layoutInvalidated.emit();
+      }
+      throw e;
+    }
+    // An EMPTY proposal changed nothing — pushing a size-0 batch would leave a phantom the next `undo()`
+    // pops and reports as "아무것도 되돌리지 않음"(⌘Z 무반응의 한 갈래). Record only real work.
+    if (applied > 0) {
       this.undoBatches.push(applied);
       this.redoBatches = [];
       await this.refreshPages();
       this.layoutInvalidated.emit();
-    } catch (e) {
-      throw e;
     }
     return applied;
   }

@@ -189,6 +189,32 @@ const FOOTER = [
   "next to its LABEL: locate the label cell, then target the ADJACENT blank (_빈칸_) value cell; NEVER",
   "overwrite a label, and leave any cell you have no value for untouched (do not emit an empty cell).",
   "",
+  // 이슈 2 — 좁은 앵커(행/칸 범위)의 존중. 앵커에 rows/cols 가 실려 오면 그것이 편집 대상의 경계다:
+  // 표 전체 그리드는 여전히 문맥으로 붙지만, 편집은 그 사각형 안에서만 나가야 한다.
+  "ANCHOR SCOPE (a NARROW anchor — 행/칸 범위): an anchor may carry \"rows\": [r0, r1] and \"cols\": [c0, c1]",
+  "— INCLUSIVE, 0-based MODEL-GLOBAL bounds in the SAME (row, col) space the grid and SetTableCell use.",
+  "That rectangle IS the edit target: emit edits ONLY for cells with r0 <= row <= r1 AND c0 <= col <= c1,",
+  "even though the FULL table grid is attached as context (the grid is there to be READ, not to widen the",
+  "target). A \"range\" anchor covering every column is the user pointing at WHOLE ROW(S); a \"cell\" anchor",
+  "is one cell (rows/cols collapse to a single index). If the instruction cannot be satisfied inside the",
+  "marked rectangle, say so by proposing NOTHING for the cells outside it — never silently widen the scope.",
+  "",
+  // 불릿/개요 문단 채움 (실사고 재현: 4쪽 "문제 인식" 절을 채우라고 하자 모델이 마커 문단 사이의
+  // 6~8pt 빈 스페이서 문단에 본문을 써서 글자가 아주 작게, 불릿과 분리된 줄로 렌더됐다. 위 표 규칙의
+  // "빈칸을 찾아 채워라"를 문단에까지 일반화한 것이 원인이라, 문단 레인의 반대 규칙을 명시한다.)
+  "불릿/개요 문단 채우기 (BULLETED OUTLINE PARAGRAPHS — the table rule above does NOT generalize here):",
+  "A Korean form's 개요 list interleaves MARKER paragraphs (\"◦\", \"○\", \"-\", \"·\", \"□\", \"※\" …) with",
+  "BLANK paragraphs that exist only as vertical GAPS. A paragraph anchor may carry a \"문단서식=[…]\" hint",
+  "naming its authored point size and role — read it before writing:",
+  "- \"불릿 \\\"◦\\\" 줄\": THIS is where the item's content goes. Emit SetParagraphText for that same block",
+  "  with the marker KEPT and your sentence appended after it (e.g. \"text\": \" ◦ 창업 아이템의 필요성 …\").",
+  "  Never drop the marker, and never move the content to a different block.",
+  "- \"빈 문단 … 줄간격 스페이서\": a GAP, not an empty slot. NEVER write into it — its size is 6–8pt, so",
+  "  any text put there renders far smaller than the body and detached from its bullet. Leave it alone.",
+  "- Need MORE items than the form has bullet lines? Emit InsertParagraphAt next to an existing bullet",
+  "  line with runs carrying the marker text; omit \"para\"/size and the engine inherits that neighbour's",
+  "  size and hanging indent. (Remember: one structural insert per proposal — inserts shift later blocks.)",
+  "",
   "ADDING ROWS: to add N empty rows to an R-row table, use TableInsertRows with \"at\": R (== rows appends",
   "at the end), \"count\": N, and \"cols\": the table's column count (the grid's \"M열\"). Example — \"행 2개",
   "추가\" on a 3행 4열 표 at (section S, block B): { \"intent\":\"TableInsertRows\", \"section\":S, \"index\":B,",

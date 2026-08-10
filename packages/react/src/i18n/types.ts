@@ -209,6 +209,9 @@ export interface TableMessages {
   colGripTitle: string;
   rowGripLabel: (index: number) => string;
   rowGripTitle: string;
+  /** 정밀 선택(이슈 2) — the ROW HEAD click target's accessible name; `row` is 1-based. */
+  rowHeadLabel: (row: number) => string;
+  rowHeadTitle: string;
   widthDialogLabel: string;
   widthDialogHead: (columnLabel: string) => string;
   /** The column chip the dialog head interpolates — `col` is 1-based. */
@@ -262,6 +265,12 @@ export interface ChatPanelMessages {
   revealTitle: string;
   reveal: string;
   jumpTitle: string;
+  /** 고스트 프리뷰(이슈 3) — the per-turn "preview every card" toggle + its tooltip. */
+  ghostPreviewOn: string;
+  ghostPreviewOff: string;
+  ghostPreviewTitle: string;
+  /** Honest note when NONE of the proposed ops can be drawn before applying (insert/delete only). */
+  ghostPreviewNone: string;
   /** `page` is 1-based. */
   jump: (page: number) => string;
   noEdits: string;
@@ -455,6 +464,10 @@ export interface WorkspaceShellMessages {
   undone: string;
   undoToast: string;
   redoToast: string;
+  /** ⌘Z/↶ 를 눌렀는데 되돌릴 편집이 없을 때 — 침묵하면 "⌘Z 가 고장났다"로 읽힌다(caret-undo 증상 1). */
+  undoEmpty: string;
+  /** ⌘⇧Z/↷ 를 눌렀는데 다시 실행할 편집이 없을 때. */
+  redoEmpty: string;
   undoRedoFailed: (isRedo: boolean, error: string) => string;
   copyUnsupported: string;
   copiedCount: (count: number) => string;
@@ -476,6 +489,16 @@ export interface WorkspaceShellMessages {
   pdfPlaceholderNote: (count: number) => string;
   pdfFontMissing: string;
   pdfExportFailed: (error: string) => string;
+  /** Progress label while the worker is generating the PDF (issue 6 — 큰 문서는 수 초 걸린다). */
+  pdfGenerating: string;
+  /** Heading of the PDF preview modal (issue 6). */
+  pdfPreviewTitle: string;
+  /** Page-count suffix in the preview header. */
+  pdfPreviewPages: (pages: number) => string;
+  /** Save-the-previewed-bytes button. */
+  pdfPreviewDownload: string;
+  /** Close-the-preview button. */
+  pdfPreviewClose: string;
   revealUnsupported: string;
   revealNotFound: string;
   revealFailed: (error: string) => string;

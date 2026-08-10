@@ -747,12 +747,27 @@ export default function LabWorkspace() {
     // doc-context 에 상시 첨부한다 — 사용자가 "이 문서가 뭔지"를 설명하거나 앵커를 찍기 전에도 모델이
     // 문서를 인지한다(U1·U2). 순수 모델 read 라 요청마다 조회해도 싸고, 편집 직후에도 스테일이 없다.
     // 어댑터 미지원/실패면 undefined → 기존 얇은 컨텍스트 그대로(바이트 동일, 회귀 방지).
-    const [profile, grids] = await Promise.all([
+    // 불릿 채움: 문단 앵커마다 엔진의 `blockRuns`(런 텍스트 + 저작 pt)를 조회해 doc-context 의 그 앵커
+    // 줄에 "문단서식=[…]" 힌트로 붙인다. 한국 양식의 개요 목록은 12~14pt 마커 문단("◦"/"-") 사이에
+    // 6~8pt **빈 스페이서 문단**이 끼어 있는데, 앵커만 보면 둘 다 그냥 text="" / text="◦" 라 구분이
+    // 불가능하다 — 실사고에서 모델이 스페이서(6pt)에 본문을 써서 글자가 아주 작게, 불릿과 분리된
+    // 줄로 렌더됐다. 크기는 엔진만 아는 사실이라 여기서 실어 보낸다. 어댑터 미지원/실패 → null
+    // (힌트 없음 = 기존 컨텍스트 바이트 동일, 회귀 방지).
+    const [profile, grids, paraRuns] = await Promise.all([
       adapter.docProfile ? adapter.docProfile().catch(() => undefined) : Promise.resolve(undefined),
       Promise.all(
         anchors.map((a) =>
-          (a.kind === "table" || a.kind === "cell") && adapter.tableGrid
+          // 이슈 2: `range`(행/칸 범위) 앵커도 표 앵커다 — 그리드를 빼면 좁게 가리킬수록 모델이
+          // 더 못 보는 역설이 생긴다(앵커는 좁히되 표 문맥은 유지).
+          (a.kind === "table" || a.kind === "cell" || a.kind === "range") && adapter.tableGrid
             ? adapter.tableGrid(a.section, a.block).catch(() => null)
+            : Promise.resolve(null),
+        ),
+      ),
+      Promise.all(
+        anchors.map((a) =>
+          a.kind === "paragraph" && adapter.blockRuns
+            ? adapter.blockRuns(a.section, a.block).catch(() => null)
             : Promise.resolve(null),
         ),
       ),
@@ -761,7 +776,7 @@ export default function LabWorkspace() {
       instruction,
       anchors,
       // R5-펜스용 doc-context 문자열 — ai-protocol 이 서버와 공유하는 조립기(이슈 026). 066: 그리드 첨부.
-      docContext: buildDocContext({ format: ctx.format, pages: ctx.pages, editable: ctx.editable, sections: ctx.sections, profile }, anchors, { grids }),
+      docContext: buildDocContext({ format: ctx.format, pages: ctx.pages, editable: ctx.editable, sections: ctx.sections, profile }, anchors, { grids, paraRuns }),
       // Feature A(비스트리밍 경로 back-compat): 웹 검색 grounding 플래그. 스트리밍 에이전트는 검색을 스스로
       // 결정하므로 채팅은 더 이상 이 값을 켜지 않는다(InlineEditPanel 등이 쓰면 서버가 web 플러그인을 켠다).
       webSearch: opts?.webSearch ?? false,
@@ -1127,6 +1142,9 @@ export default function LabWorkspace() {
             }}
             // 이슈 052: 내보내기는 웹 기본(브라우저 다운로드)을 그대로 수행하고 스냅샷을 정리한다.
             onExport={onExport}
+            // 이슈 6: PDF 는 곧장 내려받지 않고 **방금 만든 그 바이트**를 미리보기로 먼저 보여준다.
+            // "다운로드"를 눌러야 위 onExport(다운로드 + 스냅샷 정리)가 돈다 — 화면과 대조한 뒤 저장.
+            pdfPreview
           />
         ) : (
           <div className="lab-empty">

@@ -76,6 +76,12 @@ export { activeOutlineIndex, pageAtReference } from "./outline";
 // @auto-hwp/editor-core command; a host can compose them WITHOUT HwpWorkspace (see the README recipe).
 export { ColumnResizeOverlay, RowResizeOverlay } from "./components/ColumnResizeOverlay";
 export type { ColumnResizeOverlayProps, RowResizeOverlayProps } from "./components/ColumnResizeOverlay";
+// 이슈 2 — 행 머리(스프레드시트식 행 선택 타깃). 클릭=그 행 전체를 `range` 앵커로, Shift+클릭=행 범위.
+export { RowHeadOverlay } from "./components/RowHeadOverlay";
+export type { RowHeadOverlayProps } from "./components/RowHeadOverlay";
+// 이슈 3 — 고스트 프리뷰(적용 전 결과를 대상 자리에 반투명하게). pointer-events:none.
+export { GhostPreviewOverlay } from "./components/GhostPreviewOverlay";
+export type { GhostPreviewOverlayProps, GhostBox } from "./components/GhostPreviewOverlay";
 export { TableInsertButton } from "./components/TableInsertButton";
 export type { TableInsertButtonProps } from "./components/TableInsertButton";
 export { Ruler } from "./components/Ruler";
@@ -141,6 +147,8 @@ export type { MenuViewport, MenuPosition } from "./contextMenuPosition";
 // lives in editor-core units.ts (single conversion point: columnWidthMm/setColumnWidthMm/equalizeColumns).
 export { ColumnWidthDialog } from "./components/ColumnWidthDialog";
 export type { ColumnWidthDialogProps } from "./components/ColumnWidthDialog";
+export { PdfPreviewDialog } from "./components/PdfPreviewDialog";
+export type { PdfPreviewDialogProps } from "./components/PdfPreviewDialog";
 export { CellShadePalette } from "./components/CellShadePalette";
 export type { CellShadePaletteProps } from "./components/CellShadePalette";
 

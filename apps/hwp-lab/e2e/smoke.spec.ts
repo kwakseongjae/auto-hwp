@@ -69,12 +69,21 @@ test("기본 폰트 자동 적용 → 전역 FontPicker 없음 + @font-face 주�
   await expect(fontFace).toHaveCount(1);
   expect(await fontFace.textContent()).toContain("Nanum Gothic");
 
-  // PDF 버튼 활성 + 클릭 시 실제 다운로드(기본 폰트가 등록되어 font_missing 없이 성공).
+  // PDF 버튼 활성 + 클릭 시 **미리보기 모달**(이슈 6) → 그 안의 "다운로드"가 실제 파일을 준다.
+  // (기본 폰트가 등록되어 font_missing 없이 성공한다.)
   const pdfBtn = page.locator('.hw-tool[title="PDF 다운로드"]');
   await expect(pdfBtn).toBeEnabled();
+  await pdfBtn.click();
+  const preview = page.getByTestId("pdf-preview");
+  await expect(preview).toBeVisible({ timeout: 90_000 });
+  // 미리보기 프레임이 생성된 blob 을 가리킨다(브라우저 PDF 뷰어가 그린다).
+  await expect(page.getByTestId("pdf-preview-frame")).toHaveAttribute("src", /^blob:/);
   const [download] = await Promise.all([
     page.waitForEvent("download", { timeout: 90_000 }),
-    pdfBtn.click(),
+    page.getByTestId("pdf-preview-download").click(),
   ]);
   expect(download.suggestedFilename()).toMatch(/\.pdf$/i);
+  // 닫기 → 모달이 사라진다.
+  await page.getByTestId("pdf-preview-close").click();
+  await expect(preview).toHaveCount(0);
 });

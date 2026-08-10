@@ -86,6 +86,21 @@ export interface DocProfile {
   excerpt: string;
 }
 
+/** ONE run of a marked PARAGRAPH anchor — its text plus the engine's authored point size. Structurally
+ *  a subset of @auto-hwp/editor-core's `RunSpec` (what `EngineAdapter.blockRuns` already returns), so a
+ *  host passes those straight through with no new engine surface.
+ *
+ *  Why the doc-context needs it (불릿 채움 사고): a Korean form's 개요/불릿 list interleaves 12–14pt
+ *  MARKER paragraphs ("◦", "-") with 6–8pt EMPTY SPACER paragraphs that exist only to open a vertical
+ *  gap. Both arrive as anchors, and a blank spacer is indistinguishable from "an empty slot to fill" —
+ *  so the model wrote body text into the 6pt spacers and it rendered microscopically. The authored size
+ *  is the only signal that separates them, and it is the engine that knows it. */
+export interface ParaRun {
+  text: string;
+  /** Authored point size (CharShape.height / 100). `null`/absent = the run carries no explicit size. */
+  size_pt?: number | null;
+}
+
 /** Read-only document metadata used to ground the doc-context string (no bytes, no key). */
 export interface DocMeta {
   format: string;

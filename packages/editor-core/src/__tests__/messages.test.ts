@@ -26,6 +26,10 @@ const EN: CoreMessages = {
     tableAt: (p) => `Table (p.${p})`,
     paragraphAt: (p) => `Paragraph (p.${p})`,
     blockAt: (k, p) => `${k} (p.${p})`,
+    rowsWhere: (a, b) => (a === b ? `row ${a}` : `rows ${a}-${b}`),
+    colsWhere: (a, b) => (a === b ? `col ${a}` : `cols ${a}-${b}`),
+    rangeWholeRows: (rows) => `Table ${rows} (whole)`,
+    rangeCells: (rows, cols) => `Table ${rows} ${cols}`,
   },
   intent: { ...coreMessagesKoKR.intent, op: { ...coreMessagesKoKR.intent.op, SetTableCell: "Fill cell" }, unknownOp: "Edit" },
 };

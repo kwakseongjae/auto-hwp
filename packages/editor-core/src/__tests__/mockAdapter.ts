@@ -1,5 +1,5 @@
 import type { EngineAdapter } from "../adapter";
-import type { BlockHit, CaretRect, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "../types";
+import type { BlockHit, CaretRect, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox, TableGrid } from "../types";
 
 /** A headless EngineAdapter for node tests: canned geometry resolvers + a spy-able applyIntent/undo.
  *  No wasm, no DOM — pure in-memory. Mirrors @auto-hwp/react's test MockAdapter so the same selection
@@ -62,6 +62,9 @@ export class MockAdapter implements EngineAdapter {
       /** Canned image box for `imageBbox` (issue 049), or a `(page, section, block)` resolver (so a test can
        *  model a post-resize re-query = 적용-확인). Omit to OMIT the method. */
       imageBox?: ImageBox | null | ((page: number, section: number, block: number) => ImageBox | null);
+      /** Canned cell GRID for `tableGrid` (issue 066), or a `(section, block)` resolver. Omit to OMIT the
+       *  method (a backend without the grid query — the range anchor then rides text-less). */
+      grid?: TableGrid | null | ((section: number, block: number) => TableGrid | null);
       /** 페이지 SVG(본문 캐럿의 글리프 기하 소스). 생략하면 글리프 없는 빈 페이지. */
       svg?: (page: number) => string;
       pages?: number;
@@ -86,6 +89,7 @@ export class MockAdapter implements EngineAdapter {
     if (!("outline" in this.opts)) (this as { outline?: unknown }).outline = undefined;
     if (!("image" in this.opts)) (this as { imageAt?: unknown }).imageAt = undefined;
     if (!("imageBox" in this.opts)) (this as { imageBbox?: unknown }).imageBbox = undefined;
+    if (!("grid" in this.opts)) (this as { tableGrid?: unknown }).tableGrid = undefined;
   }
 
   private matchesFor(query: string, opts: FindOptions): FindMatch[] {
@@ -137,6 +141,10 @@ export class MockAdapter implements EngineAdapter {
   async imageBbox(page: number, section: number, block: number): Promise<ImageBox | null> {
     const ib = this.opts.imageBox;
     return (typeof ib === "function" ? ib(page, section, block) : ib) ?? null;
+  }
+  async tableGrid(section: number, block: number): Promise<TableGrid | null> {
+    const g = this.opts.grid;
+    return (typeof g === "function" ? g(section, block) : g) ?? null;
   }
   async blockRuns(section: number, block: number, row?: number, col?: number): Promise<RunSpec[]> {
     const r = this.opts.runs;

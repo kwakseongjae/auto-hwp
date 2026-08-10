@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ghostablePct } from "@auto-hwp/editor-core";
 import { describeIntent } from "../describeIntent";
 import { modLabel } from "../platform";
 import { useWorkspaceMessages } from "../i18n";
@@ -102,6 +103,11 @@ export interface ChatPanelProps {
    *  batches are disabled with a tooltip until the ones above them are reverted (never silently reverts the
    *  wrong batch). */
   onRevert?: () => Promise<boolean>;
+  /** 고스트 프리뷰(이슈 3) — hand the host the Intents to draw as a translucent ghost on the DOCUMENT
+   *  (card hover, or the per-turn 미리 보기 toggle); `null` clears it. The host resolves each Intent's
+   *  address to on-page geometry and draws the overlay — the chat never touches the canvas. Omitted →
+   *  no preview affordance at all (backward compatible; 위치 보기 stays). */
+  onPreviewIntents?: (intents: Intent[] | null) => void;
   /** The LIVE undo-stack depth getter (Feature C): paired with `onRevert`. The panel records each applied
    *  turn's depth-after-apply and compares it to this live value to know if that batch is still top-of-
    *  stack. A getter (not a value) so it reflects the session even across a global undo/redo. */
@@ -215,10 +221,28 @@ type AssistantMsg = Extract<Msg, { role: "assistant"; steps: AgentStep[] }>;
 /** A structured per-op preview CARD (010식): op icon + label + target chip + summary + jump link.
  *  Issue 051: a DESTRUCTIVE card (DeleteBlock) renders as a warning card and shows the target block's
  *  ORIGINAL text (`detail`) so the user approves knowing exactly what would be removed. */
-function OpCard({ card, page, onJump, onReveal }: { card: IntentCard; page: number | null; onJump?: (page: number) => void; onReveal?: (section: number, block: number) => void }) {
+function OpCard({
+  card,
+  page,
+  onJump,
+  onReveal,
+  onHoverPreview,
+}: {
+  card: IntentCard;
+  page: number | null;
+  onJump?: (page: number) => void;
+  onReveal?: (section: number, block: number) => void;
+  /** 고스트 프리뷰(이슈 3): hovering THIS card previews just its own edit; leaving clears it. */
+  onHoverPreview?: (on: boolean) => void;
+}) {
   const msg = useWorkspaceMessages().chat;
   return (
-    <div className={card.destructive ? "hw-card hw-card-danger" : "hw-card"}>
+    <div
+      className={card.destructive ? "hw-card hw-card-danger" : "hw-card"}
+      data-testid="hw-card"
+      onPointerEnter={onHoverPreview ? () => onHoverPreview(true) : undefined}
+      onPointerLeave={onHoverPreview ? () => onHoverPreview(false) : undefined}
+    >
       <div className="hw-card-head">
         <span className="hw-card-icon">{card.icon}</span>
         <span className="hw-card-label">{card.label}</span>
@@ -319,6 +343,23 @@ export function ChatPanel(props: ChatPanelProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // 고스트 프리뷰(이슈 3): the turn index whose WHOLE proposal is pinned as a preview (null = none).
+  // A card hover previews just that one card and restores the pinned set on leave.
+  const [pinnedPreview, setPinnedPreview] = useState<number | null>(null);
+  const pinnedRef = useRef<{ turn: number; intents: Intent[] } | null>(null);
+  const previewSink = props.onPreviewIntents;
+  const showPreview = useCallback(
+    (intents: Intent[] | null) => {
+      previewSink?.(intents && intents.length ? intents : null);
+    },
+    [previewSink],
+  );
+  // Leaving a card restores the pinned whole-turn preview (or clears when nothing is pinned).
+  const restorePreview = useCallback(() => {
+    showPreview(pinnedRef.current ? pinnedRef.current.intents : null);
+  }, [showPreview]);
+  // Never leave a ghost behind when the panel unmounts.
+  useEffect(() => () => previewSink?.(null), [previewSink]);
 
   // Read picked/pasted files into attachments (append, honoring the count cap). Failures surface a note
   // rather than throwing — a bad file never blocks the composer.
@@ -493,7 +534,15 @@ export function ChatPanel(props: ChatPanelProps) {
     }
   }
 
+  /** 고스트 프리뷰(이슈 3): drop any pinned/hover ghost — the turn is settling (적용/취소). */
+  function clearPreview() {
+    pinnedRef.current = null;
+    setPinnedPreview(null);
+    showPreview(null);
+  }
+
   async function apply(intents: Intent[]) {
+    clearPreview();
     setBusy(true);
     try {
       const applied = await props.onApply(intents);
@@ -509,6 +558,7 @@ export function ChatPanel(props: ChatPanelProps) {
     }
   }
   function reject() {
+    clearPreview();
     settleLast("discarded");
   }
 
@@ -612,10 +662,59 @@ export function ChatPanel(props: ChatPanelProps) {
                 {m.cards.length > 0 && (
                   <div className="hw-cards">
                     {m.cards.map((card, j) => (
-                      <OpCard key={j} card={card} page={m.page} onJump={props.onJumpToPage} onReveal={props.onRevealTarget} />
+                      <OpCard
+                        key={j}
+                        card={card}
+                        page={m.page}
+                        onJump={props.onJumpToPage}
+                        onReveal={props.onRevealTarget}
+                        // 고스트 프리뷰(이슈 3): hover = 이 카드 하나만 미리 보기, leave = 고정된 것으로 복귀.
+                        onHoverPreview={
+                          previewSink && m.state === "pending" && m.intents[j]
+                            ? (on) => (on ? showPreview([m.intents[j]]) : restorePreview())
+                            : undefined
+                        }
+                      />
                     ))}
                   </div>
                 )}
+                {/* 고스트 프리뷰(이슈 3) — 제안 전체를 문서 위에 겹쳐 보는 토글. 그릴 수 있는 편집이
+                    하나도 없으면(삽입/삭제 전용 제안) 토글 대신 정직한 안내를 보여 준다. */}
+                {previewSink && m.state === "pending" && (() => {
+                  const g = ghostablePct(m.intents);
+                  if (g.previewable === 0) {
+                    return (
+                      <p className="hw-ghost-none" data-testid="hw-ghost-none">
+                        {msg.ghostPreviewNone}
+                      </p>
+                    );
+                  }
+                  const on = pinnedPreview === i;
+                  return (
+                    <div className="hw-ghost-toggle-row">
+                      <button
+                        type="button"
+                        className={on ? "hw-ghost-toggle hw-ghost-toggle-on" : "hw-ghost-toggle"}
+                        data-testid="hw-ghost-toggle"
+                        aria-pressed={on}
+                        title={msg.ghostPreviewTitle}
+                        onClick={() => {
+                          if (on) {
+                            pinnedRef.current = null;
+                            setPinnedPreview(null);
+                            showPreview(null);
+                          } else {
+                            pinnedRef.current = { turn: i, intents: m.intents };
+                            setPinnedPreview(i);
+                            showPreview(m.intents);
+                          }
+                        }}
+                      >
+                        {on ? msg.ghostPreviewOff : msg.ghostPreviewOn}
+                      </button>
+                    </div>
+                  );
+                })()}
                 {m.state === "pending" && (
                   <div className="hw-review">
                     {/* issue 051: a proposal containing a DESTRUCTIVE card names the deletion on the

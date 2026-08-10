@@ -236,6 +236,7 @@ export function WorkspacePanel({
           // 접혀 있으면 보이지 않는다 — 숨은 textarea 에 포커스를 주지 않는다(펼치는 순간 다시 잡는다).
           active={tab === "vibe" && open}
           previewCards={api.previewCards as never}
+          onPreviewIntents={api.previewIntents}
           onRevert={api.revert as never}
           undoDepth={api.undoDepth}
         />

@@ -24,6 +24,14 @@ export interface AnchorMessages {
   paragraphAt: (page: number) => string;
   /** Any other block kind, keyed by the engine's own kind token ("image"/"table") — `page` is 1-based. */
   blockAt: (kind: string, page: number) => string;
+  /** 정밀 선택(이슈 2) — a ROW span of a table, both bounds 1-based inclusive (`8행` / `6~8행`). */
+  rowsWhere: (from: number, to: number) => string;
+  /** 정밀 선택(이슈 2) — a COLUMN span of a table, both bounds 1-based inclusive (`2열` / `2~4열`). */
+  colsWhere: (from: number, to: number) => string;
+  /** A WHOLE-row(s) `range` anchor: every column of the row span is included (`표 8행 전체`). */
+  rangeWholeRows: (rows: string) => string;
+  /** A rectangular cell `range` anchor (`표 2~4행 1~3열`). */
+  rangeCells: (rows: string, cols: string) => string;
 }
 
 /** Labels + summaries for the Intent preview cards shown before an AI edit is applied. */
@@ -81,6 +89,10 @@ export const coreMessagesKoKR: CoreMessages = {
     tableAt: (page) => `표 (p.${page})`,
     paragraphAt: (page) => `문단 (p.${page})`,
     blockAt: (kind, page) => `${kind} (p.${page})`,
+    rowsWhere: (from, to) => (from === to ? `${from}행` : `${from}~${to}행`),
+    colsWhere: (from, to) => (from === to ? `${from}열` : `${from}~${to}열`),
+    rangeWholeRows: (rows) => `표 ${rows} 전체`,
+    rangeCells: (rows, cols) => `표 ${rows} ${cols}`,
   },
 
   intent: {

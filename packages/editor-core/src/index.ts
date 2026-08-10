@@ -20,8 +20,15 @@ export {
   deriveSel,
   blockHitToSel,
   mergeSelection,
+  // 정밀 선택(이슈 2) — the `range` anchor label/text builders (row + cell-range chips).
+  rangeLabel,
+  rangeText,
 } from "./selection";
 export type { SelectResult, CellDir } from "./selection";
+
+// 고스트 프리뷰(이슈 3) — Intent[] → "어디에 무엇을 쓸지" 목록. 픽셀 없음(UI 가 주소를 기하로 푼다).
+export { intentGhost, intentGhosts, ghostablePct } from "./ghost";
+export type { GhostTarget } from "./ghost";
 
 // Edit assembly / preview / apply + the issue-027 manual edit command types
 export { EditController } from "./edit";

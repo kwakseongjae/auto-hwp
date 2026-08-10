@@ -162,6 +162,18 @@ describe("키보드 기본기 — ⌘Z / ⌘⇧Z 실행취소·재실행", () =>
     expect(screen.queryByTestId("hw-inplace-editor")).toBeTruthy();
   });
 
+  // caret-undo 증상 1: "지웠는데 안 지워지고 ⌘Z 도 무반응"의 절반은 실은 "커밋된 편집이 없어 되돌릴 게
+  // 없다"였다. 침묵하면 사용자는 ⌘Z 가 고장났다고 읽는다 — 빈 스택을 정직하게 알린다.
+  it("되돌릴 편집이 없으면 ⌘Z 는 침묵하지 않고 그 사실을 알린다", async () => {
+    const adapter = new MockAdapter({ table, pageGeom: geom, pages: 1 });
+    const { container } = mount(adapter);
+    await sheetOf(container);
+
+    fireEvent.keyDown(window, { key: "z", metaKey: true });
+    await waitFor(() => expect(screen.getByText("되돌릴 편집이 없습니다")).toBeTruthy());
+    expect(adapter.undos).toBe(0); // 엔진은 건드리지 않는다
+  });
+
   it("문서가 없으면 ⌘Z 는 브라우저 기본 실행취소에 양보한다", async () => {
     const adapter = new MockAdapter({ table, pageGeom: geom, pages: 1 });
     render(<HwpWorkspace adapter={adapter} document={null} onAiRequest={noAi} sidePanel={chatSidePanel({ onAiRequest: noAi })} enableEditing />);

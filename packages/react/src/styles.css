@@ -291,6 +291,41 @@ button > .hw-icon:only-child { margin: 0 auto; }
 .hw-row-grip:hover::before, .hw-row-grip-active::before { opacity: 0.95; }
 .hw-row-grip-active::before { height: 2px; box-shadow: 0 0 0 0.5px rgba(37, 99, 235, 0.35); }
 
+/* 이슈 2 — ROW HEADS: 표 왼쪽 바깥의 행 선택 타깃(스프레드시트식). 클릭=그 행 전체 앵커,
+   Shift+클릭=행 범위. 종전엔 행을 가리킬 방법 자체가 없었다(표 전체 / 셀 하나 뿐). */
+.hw-row-heads { position: absolute; inset: 0; pointer-events: none; }
+.hw-row-head {
+  position: absolute; pointer-events: auto; cursor: pointer; z-index: 7;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0; border: 1px solid rgba(37, 99, 235, 0.35); border-right: none;
+  border-radius: 3px 0 0 3px; background: rgba(37, 99, 235, 0.08);
+  color: var(--hw-accent); font-size: 9px; line-height: 1; transition: background 0.1s;
+}
+.hw-row-head:hover { background: rgba(37, 99, 235, 0.28); }
+.hw-row-head-active { background: rgba(5, 150, 105, 0.3); border-color: #059669; color: #047857; }
+.hw-row-head-n { pointer-events: none; }
+/* range mark (이슈 2) — 행/칸 범위는 셀(에메랄드)과 표(보라) 사이의 자기 색을 갖는다 */
+.hw-mark-range { border-color: #0891b2; background: rgba(8, 145, 178, 0.12); }
+.hw-mark-range .hw-mark-label { background: #0891b2; }
+
+/* 이슈 3 — GHOST PREVIEW: 적용 전 결과를 대상 자리에 반투명하게 겹친다. pointer-events:none —
+   선택/클릭을 절대 가로채지 않는다(SelectionOverlay 규율). */
+.hw-ghosts { position: absolute; inset: 0; pointer-events: none; z-index: 8; }
+.hw-ghost {
+  position: absolute; box-sizing: border-box; display: flex; align-items: center;
+  border: 1.5px dashed var(--hw-ai); border-radius: 2px; overflow: hidden;
+  /* 이 자리는 "적용 후 모습"이다 — 원래 글자가 비쳐 두 값이 겹쳐 보이면 프리뷰가 아니라 노이즈다.
+     종이(항상 흰 배경) 위에 거의 불투명한 연보라를 깔아 새 값만 읽히게 한다. */
+  background: rgba(243, 240, 255, 0.94);
+  box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.25);
+  animation: hw-ghost-in 0.12s ease-out;
+}
+@keyframes hw-ghost-in { from { opacity: 0; } to { opacity: 1; } }
+.hw-ghost-text {
+  padding: 0 4px; font-size: 11px; line-height: 1.25; color: #4c1d95; font-weight: 500;
+  white-space: pre-wrap; overflow: hidden; text-overflow: ellipsis;
+}
+
 /* issue 049 — image move/resize overlay (8-handle, Figma-style) over a selected image */
 .hw-img-overlay {
   position: absolute; pointer-events: auto; cursor: move; z-index: 20;
@@ -881,6 +916,15 @@ button > .hw-icon:only-child { margin: 0 auto; }
 }
 .hw-card-summary { margin: 4px 0 0; font-size: 12px; line-height: 1.4; color: #4b5563; word-break: break-word; }
 .hw-card-jump { margin-top: 4px; font-size: 11px; color: var(--hw-accent); background: none; border: none; cursor: pointer; padding: 0; }
+/* 이슈 3 — 제안 전체 고스트 프리뷰 토글 + 그릴 수 없을 때의 정직한 안내 */
+.hw-ghost-toggle-row { margin: 6px 0 2px; }
+.hw-ghost-toggle {
+  font-size: 11px; padding: 3px 8px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--hw-border); background: var(--hw-panel); color: var(--hw-text);
+}
+.hw-ghost-toggle:hover { border-color: var(--hw-ai); }
+.hw-ghost-toggle-on { background: rgba(124, 58, 237, 0.14); border-color: var(--hw-ai); color: var(--hw-ai); }
+.hw-ghost-none { margin: 6px 0 2px; font-size: 11px; color: var(--hw-muted); }
 .hw-card-jump:hover { text-decoration: underline; }
 /* issue 051: a DESTRUCTIVE card (DeleteBlock) — red warning frame + 삭제 badge + 원문 quote so the user
    approves knowing exactly WHAT would be removed (명시 승인 게이트의 시각 절반). */
@@ -1109,3 +1153,37 @@ button > .hw-icon:only-child { margin: 0 auto; }
   border: 1px solid #cdd0d6; border-radius: 4px; background: #fff; color: var(--hw-muted);
 }
 .hw-cellshade-clear:hover { background: #f0f1f3; color: var(--hw-text); }
+
+/* 이슈 6 — PDF 미리보기 모달. export 버튼이 곧장 다운로드하지 않고 "방금 만든 그 바이트"를 브라우저
+ * PDF 뷰어(iframe)로 먼저 보여준다. 워크스페이스 안이 아니라 뷰포트 전체에 뜨는 모달이므로 position:
+ * fixed + 높은 z-index(컨텍스트메뉴 70, 셀편집 40 위). */
+.hw-pdfpreview-backdrop {
+  position: fixed; inset: 0; z-index: 90; display: flex; align-items: center; justify-content: center;
+  padding: 24px; background: rgba(15, 17, 21, 0.55);
+}
+.hw-pdfpreview {
+  display: flex; flex-direction: column; width: min(1000px, 100%); height: min(88vh, 100%);
+  background: var(--hw-panel, #fff); border-radius: 10px; overflow: hidden;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+  font-family: -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; color: var(--hw-text, #1a1a1a);
+}
+.hw-pdfpreview-head {
+  display: flex; align-items: center; gap: 10px; padding: 10px 14px; flex: 0 0 auto;
+  border-bottom: 1px solid var(--hw-border, #e2e4e8); background: var(--hw-panel, #fff);
+}
+.hw-pdfpreview-title { font-size: 13px; font-weight: 700; flex: 0 0 auto; }
+.hw-pdfpreview-name {
+  font-size: 12px; color: var(--hw-muted, #6b7280); min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.hw-pdfpreview-download {
+  font: inherit; font-size: 12px; padding: 5px 12px; cursor: pointer; flex: 0 0 auto;
+  border: 1px solid var(--hw-accent, #2563eb); border-radius: 6px; background: var(--hw-accent, #2563eb); color: #fff;
+}
+.hw-pdfpreview-download:hover { opacity: 0.9; }
+.hw-pdfpreview-close {
+  font: inherit; font-size: 12px; padding: 5px 10px; cursor: pointer; flex: 0 0 auto;
+  border: 1px solid #cdd0d6; border-radius: 6px; background: #fff; color: var(--hw-text, #1a1a1a);
+}
+.hw-pdfpreview-close:hover { background: #f0f1f3; }
+.hw-pdfpreview-frame { flex: 1 1 auto; width: 100%; min-height: 0; border: 0; background: #525659; }

@@ -125,6 +125,65 @@ describe("buildDocContext (R5-fenceable doc-context string)", () => {
     expect(buildDocContext(META, anchors)).toBe(buildDocContext({ ...META, profile: undefined }, anchors));
   });
 
+  // ── 불릿 채움: paragraph SHAPE hints on anchor lines ────────────────────────────────────────────
+  // The real page-4 개요 list of samples/sample-8p.hwp: 8pt/6pt BLANK spacer paragraphs interleaved
+  // with the 14pt "◦" and 12pt "-" marker lines. Without the hint the model cannot tell them apart
+  // and writes body text into the 6pt spacer (renders microscopically, detached from the bullet).
+  it("labels a bullet MARKER line, a blank SPACER, and ordinary body text on the anchor line", () => {
+    const ctx = buildDocContext(
+      META,
+      [
+        { kind: "paragraph", section: 0, block: 18, text: "" },
+        { kind: "paragraph", section: 0, block: 19, text: " ◦ " },
+        { kind: "paragraph", section: 0, block: 21, text: "   - " },
+        { kind: "paragraph", section: 0, block: 46, text: "< 사업추진 일정 >" },
+      ],
+      {
+        paraRuns: [
+          [{ text: "", size_pt: 8 }],
+          [{ text: " ◦ ", size_pt: 14 }],
+          [{ text: "   - ", size_pt: 12 }],
+          [{ text: "< 사업추진 일정 >", size_pt: 13 }],
+        ],
+      },
+    );
+    expect(ctx).toContain("#0 paragraph section=0 block=18 text=\"\" 문단서식=[빈 문단 8.0pt — 줄간격 스페이서]");
+    expect(ctx).toContain("문단서식=[불릿 \"◦\" 줄 14.0pt — 내용 없음]");
+    expect(ctx).toContain("문단서식=[불릿 \"-\" 줄 12.0pt — 내용 없음]");
+    expect(ctx).toContain("문단서식=[본문 13.0pt]");
+  });
+
+  it("a BLANK line at body size is not called a spacer (the 스페이서 label is size-gated)", () => {
+    const ctx = buildDocContext(META, [{ kind: "paragraph", section: 0, block: 30, text: "" }], {
+      paraRuns: [[{ text: "", size_pt: 12 }]],
+    });
+    expect(ctx).toContain("문단서식=[빈 문단 12.0pt — 내용 없는 줄]");
+    expect(ctx).not.toContain("줄간격 스페이서");
+  });
+
+  it("a bullet line that ALREADY has content is labelled as a bullet, not as 내용 없음", () => {
+    const ctx = buildDocContext(META, [{ kind: "paragraph", section: 0, block: 19, text: " ◦ 창업 아이템의 필요성" }], {
+      paraRuns: [[{ text: " ◦ 창업 아이템의 필요성", size_pt: 14 }]],
+    });
+    expect(ctx).toContain("문단서식=[불릿 \"◦\" 줄 14.0pt]");
+    expect(ctx).not.toContain("내용 없음");
+  });
+
+  it("without paraRuns the output is byte-identical to the pre-hint builder (regression-safe)", () => {
+    const anchors = [{ kind: "paragraph" as const, section: 0, block: 18, text: "" }];
+    const expected = "format=hwpx pages=1 editable=true sections=1\n#0 paragraph section=0 block=18 text=\"\"";
+    expect(buildDocContext(META, anchors)).toBe(expected);
+    expect(buildDocContext(META, anchors, { paraRuns: [null] })).toBe(expected);
+    expect(buildDocContext(META, anchors, { paraRuns: [[]] })).toBe(expected);
+  });
+
+  it("the system prompt teaches the bullet rule: keep the marker, never write into the spacer", () => {
+    const p = buildSystemPrompt();
+    expect(p).toContain("불릿/개요 문단 채우기");
+    expect(p).toContain("줄간격 스페이서");
+    expect(p).toContain("NEVER write into it");
+  });
+
   it("without grids the output is byte-identical to the pre-066 thin context (regression-safe)", () => {
     const anchors = [{ kind: "table" as const, section: 0, block: 3, text: "" }];
     const withUndef = buildDocContext(META, anchors);
@@ -512,6 +571,38 @@ describe("validateRequest (input guard)", () => {
         { ...DEFAULT_LIMITS, maxAnchorsJson: 20 },
       ).ok,
     ).toBe(false);
+  });
+});
+
+describe("정밀 선택 앵커 — range/rows/cols (이슈 2, 스키마 무변경)", () => {
+  // 이슈 2 는 새 스키마를 만들지 않는다: `range` 는 이미 ANCHOR_KINDS 에 있고 rows/cols 도 이미 통과한다.
+  // 여기서 잠그는 것 — ① 행 범위 앵커가 그대로 살아 온다(불변식 7: additive-only, 신규 필드 0)
+  // ② doc-context 한 줄에 rows/cols 가 실린다 ③ 시스템 프롬프트가 그 사각형을 편집 경계로 가르친다.
+  it("행/칸 범위 앵커가 sanitize 를 통과하고 필드가 보존된다", () => {
+    const anchor = { kind: "range", section: 0, block: 10, rows: [5, 7], cols: [0, 3], label: "표 6~8행 전체", page: 3, text: "가 | 나" };
+    const r = validateRequest({ instruction: "이 행만 채워줘", anchors: [anchor], docContext: "" });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.anchors[0]).toEqual(anchor);
+  });
+
+  it("역순 범위는 거부한다(거짓 주소 금지)", () => {
+    const r = validateRequest({ instruction: "x", anchors: [{ kind: "range", section: 0, block: 1, rows: [7, 5] }], docContext: "" });
+    expect(r.ok).toBe(false);
+  });
+
+  it("doc-context 줄에 rows/cols 가 실린다", () => {
+    const ctx = buildDocContext(
+      { format: "hwp", pages: 8, editable: true, sections: 1 },
+      [{ kind: "range", section: 0, block: 10, rows: [5, 7], cols: [0, 3], label: "표 6~8행 전체", page: 3 }],
+    );
+    expect(ctx).toContain("range section=0 block=10 rows=[5,7] cols=[0,3]");
+  });
+
+  it("시스템 프롬프트가 좁은 앵커를 편집 경계로 가르친다", () => {
+    const p = buildSystemPrompt();
+    expect(p).toContain("ANCHOR SCOPE");
+    expect(p).toContain("r0 <= row <= r1");
   });
 });
 
