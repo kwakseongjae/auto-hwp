@@ -6,7 +6,15 @@
 - 정본 배포: **https://autohwp.com** (Vercel full Next — 2026-08-06 컷오버, Actions vercel-deploy.yml).
   GitHub Pages(kwakseongjae.github.io/auto-hwp)는 병행 유지 중 — 리다이렉트 스텁 전환 예정.
   GitHub: https://github.com/kwakseongjae/auto-hwp (public, 홈페이지·description=autohwp.com)
-- 갱신: 2026-08-10(b) · Claude(Fable)+리서치 워커 2 — **이슈 081 기획 확정(중첩 셀 캐럿 CellPath 관통)**.
+- 갱신: 2026-08-10(c) · Claude(Fable) — **에이전트 퍼널 축 로드맵화 + 이슈 082·083 기획 확정(작업 미착수)**.
+  `docs/AGENT-FUNNEL-ROADMAP.md`: 에이전트→호스팅 서버(.hwp 첨부)→중간 사용자 검토→최종 .hwp/PDF
+  export 퍼널. 실사 결과 뼈대 기존재(hwp-mcp `--http-network` 서비스 모드+Docker 178MB+제안 흐름
+  propose/commit+export_pdf/hwpx) — 갭 4개: F1 render_page가 P1 잔재(rhwp 원본 전용, 편집 문서 거부
+  → own-render 교체, 반나절급) / F2 검토 링크 서버측 세션(/d/는 localStorage 전용) / F3=**082**
+  `.hwp` 재저장 v1(claw-hwp patchInPlaceSectors Rust 포팅, 텍스트 레인만+capability report, 한컴독스=
+  진짜 게이트) / F5 호스팅 운영. 순서 제안 F1→F3→F2→F5→F4. **083**=README 비주얼 개편(7컷·
+  결정적 재촬영 스크립트·autohwp.com 절대 URL·압축 규율 유지). 다음: 착수 순서 사용자 결정 대기
+  (후보: 081 캐럿 / F1+082 퍼널 / 083 README).
   rhwp 상류 중첩 표 스레드 전수 조사(`docs/research/rhwp-nested-tables-2026-08.md`: 그들이 같은 가드를
   통과하며 남긴 5계층 사슬 #2792·래칫 #4252·min-area 착지 #857·by_path 병설 함정 #2755) +
   claw-hwp 분석(`docs/research/claw-hwp-2026-08.md`: 에이전트 스킬 플러그인 — 캐럿 해법 없음, 가치는
