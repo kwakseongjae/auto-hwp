@@ -104,6 +104,7 @@ R12 완료 후 "알려진 한계" 5종을 리서치 4레인으로 조사 → 이
 | [078](078-hwpx-chart-pipeline.md) | HWPX 차트 + PDF 벡터 객체 | **research-complete / open** | P1 | vendored HWP/HWPX 차트 쌍 28개 활용, parser는 part capture만, core enrichment, 공통 SVG lowering |
 | [079](079-llm-roster-assist.md) | 073 LLM 명단 보조 + 비용/PII 하드닝 | **design-complete / open** | P2 | fill-map JSON Schema·ZDR·근거행·로컬 검증; KV 상한은 Durable Object로 승격 |
 | [080](080-hwpx-explicit-page-break.md) | HWPX 명시적 쪽 나누기 보존 | **done** (2026-07-30 배치 3) | P1 | section_page_breaks 단일 진실(3경로 공유=LOCKSTEP 구조화) + 발견 축②(noAdjust 고정 행높이) — bizinfo-mss 붙임1 25==25 게이트 신설. 잔여 오차는 흐름 높이 축=075 이관 |
+| [081](081-nested-cell-caret-cellpath.md) | 중첩 셀 캐럿·편집 — CellPath 캐럿 레인 관통 | **기획 확정 / open** (2026-08-10) | P1 | place.rs:1682 가드 제거+min-area 해소·경로 하나만(깊이≥2 평면 금지)·줄정보/세로이동 동배치·IR-resolve 래칫 게이트. 레퍼런스=rhwp 5계층 사슬 실측(docs/research/rhwp-nested-tables-2026-08.md)+claw-hwp 대조(캐럿 해법 없음). 종료 조건=nested-cell-caret-gap.spec fixme 해제 |
 
 ## 웹 이식(외부 임베드) 준비도 (2026-07-13 SDK 감사)
 

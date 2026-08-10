@@ -6,7 +6,12 @@
 - 정본 배포: **https://autohwp.com** (Vercel full Next — 2026-08-06 컷오버, Actions vercel-deploy.yml).
   GitHub Pages(kwakseongjae.github.io/auto-hwp)는 병행 유지 중 — 리다이렉트 스텁 전환 예정.
   GitHub: https://github.com/kwakseongjae/auto-hwp (public, 홈페이지·description=autohwp.com)
-- 갱신: 2026-08-10 · Claude(Fable 오케스트레이터)+Opus 워커 4+검증 1 — **편집 품질 6건 진단·수리
+- 갱신: 2026-08-10(b) · Claude(Fable)+리서치 워커 2 — **이슈 081 기획 확정(중첩 셀 캐럿 CellPath 관통)**.
+  rhwp 상류 중첩 표 스레드 전수 조사(`docs/research/rhwp-nested-tables-2026-08.md`: 그들이 같은 가드를
+  통과하며 남긴 5계층 사슬 #2792·래칫 #4252·min-area 착지 #857·by_path 병설 함정 #2755) +
+  claw-hwp 분석(`docs/research/claw-hwp-2026-08.md`: 에이전트 스킬 플러그인 — 캐럿 해법 없음, 가치는
+  `.hwp` 재저장 지식·fit·secure-fill 등 아이디어 축, MIT). 계획 정본=`docs/issues/081-…md`
+  (설계 6항+수용 기준 6항+함정+비범위). **작업 미착수 — 사용자 지시(계획만)**. 다음: 081 착수 승인 대기.
   (wf_2fbcd88a): 5.5건 수리 + 1건 엔진 갭 명시**. 레벨 진단 확정: ①셀 안 안내 문구 삭제 불가=
   **engine**(place.rs:1682 `cell_text_hit`가 중첩 표 캐럿 차단 — 그 문구는 셀 안 1×1 중첩 표에 있다.
   **미수리**, 수리 설계는 `apps/hwp-lab/e2e/nested-cell-caret-gap.spec.ts` test.fixme에 CellPath 관통

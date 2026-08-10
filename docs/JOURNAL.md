@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-10(b) (Fable+리서치 워커 2) · 081 기획 — 중첩 셀 캐럿 CellPath 관통
+- rhwp 중첩 표 스레드 전수(198건 축) + claw-hwp 대조 → 교훈 6개를 설계·게이트로 채택, 이슈 081 확정.
+- 작업은 미착수(지시대로 계획만). 멈춘 곳: 081 착수 승인 대기.
+
 ## 2026-08-10 (Fable 오케스트레이터+Opus 워커 4+검증 1) · 편집 품질 6건 — 5.5건 수리·레벨 진단 확정
 - 원자적 applyBatch(고아 op 근절)·행/칸 정밀 앵커+고스트 프리뷰·불릿 서식 상속(protocol+engine)·PDF 화면동일 provider+미리보기.
 - --full EXIT=0·vitest 944·e2e 79/2skip·라이브 ②~⑥ green. 멈춘 곳: ① 중첩 셀 캐럿(engine 갭 — nested-cell-caret-gap.spec fixme에 설계 보존).
