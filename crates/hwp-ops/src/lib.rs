@@ -622,6 +622,80 @@ fn section_mut(doc: &mut SemanticDoc, section: usize) -> Result<&mut Section> {
         .ok_or_else(|| Error::Other(format!("section {section} out of range")))
 }
 
+/// The `(char_shape, para_shape)` a paragraph SYNTHESIZED at block `at` should inherit when its spec
+/// names no formatting — the "(b) 이웃 문단" rung of the 빈 문단 서식 상속 규칙.
+///
+/// Why not "the document default": `CharShape::default()` has `height == 0`, which the typesetter
+/// renders through its 10pt fallback (`hwp-typeset` place.rs / lib.rs `unwrap_or(1000)`), and
+/// `ParaShape::default()` has no indent. In a Korean form's 개요/불릿 list — 12–14pt runs on a −6014
+/// hanging indent — that lands as a smaller, unindented line that visibly does not belong.
+///
+/// Search order: BACKWARD from `at - 1` (the paragraph you inserted *after* — same list level in the
+/// bullet case), then FORWARD from `at`, preferring a paragraph that actually carries TEXT at a real
+/// size. Blank SPACER paragraphs (a form's 6–8pt gap lines) and 표 앵커 문단 are skipped precisely
+/// because inheriting their 6pt shape is the failure we are fixing. Falls back to the nearest
+/// paragraph of any kind, and finally to `(None, None)` = the pre-existing default-shape behaviour.
+fn neighbour_shapes(
+    doc: &SemanticDoc,
+    section: usize,
+    at: usize,
+) -> (Option<usize>, Option<usize>) {
+    let Some(sec) = doc.sections.get(section) else {
+        return (None, None);
+    };
+    let text_bearing = |p: &Paragraph| -> bool {
+        !p.is_table_anchor
+            && p.runs.iter().any(|r| {
+                !run_text(r).trim().is_empty()
+                    && doc
+                        .char_shapes
+                        .get(r.char_shape)
+                        .is_some_and(|s| s.height > 0)
+            })
+    };
+    // The candidate blocks, nearest-first: backward from `at - 1`, then forward from `at`.
+    let order = (0..at.min(sec.blocks.len()))
+        .rev()
+        .chain(at.min(sec.blocks.len())..sec.blocks.len());
+    let mut fallback: Option<&Paragraph> = None;
+    for bi in order {
+        let Block::Paragraph(p) = &sec.blocks[bi] else {
+            continue;
+        };
+        if text_bearing(p) {
+            let cs = p
+                .runs
+                .iter()
+                .find(|r| {
+                    !run_text(r).trim().is_empty()
+                        && doc
+                            .char_shapes
+                            .get(r.char_shape)
+                            .is_some_and(|s| s.height > 0)
+                })
+                .map(|r| r.char_shape);
+            return (cs, Some(p.para_shape));
+        }
+        if fallback.is_none() && !p.is_table_anchor {
+            fallback = Some(p);
+        }
+    }
+    match fallback {
+        Some(p) => (
+            p.runs
+                .iter()
+                .find(|r| {
+                    doc.char_shapes
+                        .get(r.char_shape)
+                        .is_some_and(|s| s.height > 0)
+                })
+                .map(|r| r.char_shape),
+            Some(p.para_shape),
+        ),
+        None => (None, None),
+    }
+}
+
 /// Walk a descending `CellPath` (issue 064 Tier-2) to the LEAF cell (immutable). Level 0 unwraps a 1×1
 /// frame wrapper via `edit_target`; each deeper level indexes the RAW `Block::Table` inside the previous
 /// cell (mirrors `place_nested_table` / `hwp_session::resolve_cell_path`). `None` if any step fails.
@@ -1446,11 +1520,30 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             })
         }
         Op::InsertParagraphAt { section, index, runs, para } => {
+            // 서식 상속 규칙 (빈 문단/합성 문단 채움): a `RunSpec`/`ParaSpec` that names NO formatting
+            // used to synthesize `CharShape::default()` (height 0 → the typesetter's 10pt fallback) and
+            // `ParaShape::default()` (indent 0). Inserted into a bulleted 개요 list — where the form's
+            // own paragraphs are 12–14pt with a −6014 hanging indent — that renders as a SEPARATE,
+            // VISIBLY SMALLER line hanging at the margin (the "불릿 채움이 이상한 크기·위치" report).
+            // So an UNSTYLED insert now inherits the neighbouring body paragraph's char/para shape
+            // ([`neighbour_shapes`]); an insert that DOES name formatting is untouched (explicit wins).
+            let (nb_char, nb_para) = neighbour_shapes(doc, *section, *index);
             let interned: Vec<(usize, String)> = runs
                 .iter()
-                .map(|r| (intern_char_shape(doc, r.to_char_shape()), r.text.clone()))
+                .map(|r| {
+                    let spec = r.to_char_shape();
+                    let cs = match nb_char {
+                        Some(prev) if spec == CharShape::default() => prev,
+                        _ => intern_char_shape(doc, spec),
+                    };
+                    (cs, r.text.clone())
+                })
                 .collect();
-            let para_shape = intern_para_shape(doc, para.to_para_shape());
+            let para_spec = para.to_para_shape();
+            let para_shape = match nb_para {
+                Some(prev) if para_spec == ParaShape::default() && para.style.is_none() => prev,
+                _ => intern_para_shape(doc, para_spec),
+            };
             let style_name = para.style.clone().filter(|s| !s.trim().is_empty());
             let sec = section_mut(doc, *section)?;
             let at = block_insert_index(sec, *index)?;
@@ -1759,6 +1852,32 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             Ok(())
         }
         Op::SetParagraphText { section, block, text } => {
+            // (b) 이웃 문단 rung of the 서식 상속 규칙 — used ONLY when the paragraph itself carries no
+            // usable size (a SYNTHESIZED paragraph whose runs are the height-0 default). A paragraph
+            // that has its own char shape keeps it: that is what Hancom does when you type into an
+            // existing (even empty) line, and it is what the 원 양식's 불릿 문단 needs. Resolved on an
+            // IMMUTABLE read, before the `section_mut` borrow below.
+            let inherited: Option<usize> = {
+                let own = doc
+                    .sections
+                    .get(*section)
+                    .and_then(|s| s.blocks.get(*block))
+                    .and_then(|b| match b {
+                        Block::Paragraph(p) => editable_run_window(p)
+                            .ok()
+                            .and_then(|(lo, _)| p.runs.get(lo))
+                            .map(|r| r.char_shape),
+                        _ => None,
+                    });
+                let usable = own.is_some_and(|i| {
+                    doc.char_shapes.get(i).is_some_and(|s| s.height > 0)
+                });
+                if usable {
+                    None
+                } else {
+                    neighbour_shapes(doc, *section, *block).0
+                }
+            };
             let sec = section_mut(doc, *section)?;
             let blk = sec.blocks.get_mut(*block).ok_or_else(|| {
                 Error::Other(format!("SetParagraphText: block {block} out of range"))
@@ -1771,7 +1890,7 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             // paragraph (섹션 첫 문단의 secPr 호스트 등) edits only inside its text zone (W4.2).
             let (lo, hi) = editable_run_window(p)?;
             // Preserve the window's first run char shape + the paragraph's para shape (color/italic/alignment).
-            let cs = p.runs.get(lo).map(|r| r.char_shape).unwrap_or(0);
+            let cs = inherited.unwrap_or_else(|| p.runs.get(lo).map(|r| r.char_shape).unwrap_or(0));
             let new = vec![Run { char_shape: cs, content: vec![Inline::Text(text.clone())], ..Default::default() }];
             splice_text_window(p, lo, hi, new);
             p.dirty.mark();
@@ -1794,7 +1913,7 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             // `&mut doc`, so compute it here (immutable navigation to read the first-run shape index)
             // BEFORE the `section_mut` borrow below.
             let neutral_shape: Option<usize> = {
-                let existing_idx = doc
+                let own_idx = doc
                     .sections
                     .get(*section)
                     .and_then(|s| s.blocks.get(*block))
@@ -1807,6 +1926,13 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                         }
                         _ => None,
                     });
+                // 서식 상속 규칙: (a) the paragraph's own run when it carries a real size, else
+                // (b) the nearest text-bearing neighbour — a SYNTHESIZED paragraph's height-0 default
+                // would otherwise commit at the typesetter's 10pt fallback amid 12–14pt body text.
+                let existing_idx = own_idx
+                    .filter(|i| doc.char_shapes.get(*i).is_some_and(|s| s.height > 0))
+                    .or_else(|| neighbour_shapes(doc, *section, *block).0)
+                    .or(own_idx);
                 existing_idx.map(|idx| {
                     let mut sh = doc.char_shapes.get(idx).cloned().unwrap_or_default();
                     sh.text_color = Color::default();
@@ -3370,6 +3496,183 @@ mod tests {
             }
         )
         .is_err());
+    }
+
+    /// The REAL page-4 개요 list of `apps/hwp-lab/public/samples/sample-8p.hwp` (예비창업패키지 양식),
+    /// measured from the lifted IR: 6–8pt EMPTY spacer paragraphs alternating with the 14pt "◦" and
+    /// 12pt "-" marker paragraphs, every one of them on the same −6014 hanging indent (para_shape 66).
+    fn bullet_list_doc() -> SemanticDoc {
+        let mut doc = SemanticDoc {
+            char_shapes: vec![CharShape::default()],
+            para_shapes: vec![ParaShape::default()],
+            ..Default::default()
+        };
+        // 0 = default sentinel; 1 = 8pt spacer, 2 = 14pt "◦", 3 = 6pt spacer, 4 = 12pt "-".
+        for h in [800, 1400, 600, 1200] {
+            doc.char_shapes.push(CharShape {
+                height: h,
+                ..Default::default()
+            });
+        }
+        doc.para_shapes.push(ParaShape {
+            indent: -6014,
+            ..Default::default()
+        });
+        let para = |cs: usize, text: &str| {
+            Block::Paragraph(Paragraph {
+                runs: vec![Run {
+                    char_shape: cs,
+                    content: vec![Inline::Text(text.into())],
+                    ..Default::default()
+                }],
+                para_shape: 1,
+                source: Some(ParaSource {
+                    span: (0, 0),
+                    simple: true,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+        };
+        doc.sections.push(Section {
+            blocks: vec![
+                para(1, ""),      // b0 — 8pt spacer
+                para(2, " ◦ "),   // b1 — the ◦ bullet line (14pt)
+                para(3, ""),      // b2 — 6pt spacer
+                para(4, "   - "), // b3 — the - bullet line (12pt)
+                para(3, ""),      // b4 — 6pt spacer
+            ],
+            ..Default::default()
+        });
+        doc
+    }
+
+    #[test]
+    fn insert_paragraph_at_inherits_the_bullet_neighbour_shape() {
+        // 불릿 채움 회귀: an UNSTYLED InsertParagraphAt inside a 개요 list used to synthesize a
+        // height-0 CharShape (→ the typesetter's 10pt fallback) on the DEFAULT ParaShape (indent 0),
+        // so the new line rendered smaller than the 12–14pt form text and hung at the margin instead
+        // of on the bullet's −6014 indent. It must inherit the nearest text-bearing neighbour.
+        let mut doc = bullet_list_doc();
+        apply(
+            &mut doc,
+            &Op::InsertParagraphAt {
+                section: 0,
+                index: 2, // right after the "◦" line (b1), before the 6pt spacer
+                runs: vec![run_spec("오또케는 반려동물 응급 대응 공백을 해소한다")],
+                para: ParaSpec::default(),
+            },
+        )
+        .unwrap();
+        let Block::Paragraph(p) = &doc.sections[0].blocks[2] else {
+            panic!("inserted block is not a paragraph");
+        };
+        assert_eq!(
+            doc.char_shapes[p.runs[0].char_shape].height, 1400,
+            "unstyled insert must inherit the ◦ bullet's 14pt, not the height-0 default"
+        );
+        assert_eq!(
+            doc.para_shapes[p.para_shape].indent, -6014,
+            "unstyled insert must inherit the list's hanging indent, not indent 0"
+        );
+    }
+
+    #[test]
+    fn insert_paragraph_at_skips_a_blank_spacer_when_inheriting() {
+        // The neighbour search must not latch onto the 6pt/8pt BLANK spacer lines a form uses for
+        // vertical gaps — inheriting those is the very "아주 작게 렌더" failure being fixed.
+        let mut doc = bullet_list_doc();
+        apply(
+            &mut doc,
+            &Op::InsertParagraphAt {
+                section: 0,
+                index: 5, // append at the end — the block before it (b4) is a 6pt EMPTY spacer
+                runs: vec![run_spec("추가 항목")],
+                para: ParaSpec::default(),
+            },
+        )
+        .unwrap();
+        let Block::Paragraph(p) = &doc.sections[0].blocks[5] else {
+            panic!("inserted block is not a paragraph");
+        };
+        assert_eq!(
+            doc.char_shapes[p.runs[0].char_shape].height, 1200,
+            "must skip the 6pt blank spacer and inherit the 12pt '-' bullet line"
+        );
+    }
+
+    #[test]
+    fn insert_paragraph_at_keeps_explicit_formatting() {
+        // Explicit wins: a spec that NAMES a size/align is never overridden by the neighbour.
+        let mut doc = bullet_list_doc();
+        apply(
+            &mut doc,
+            &Op::InsertParagraphAt {
+                section: 0,
+                index: 2,
+                runs: vec![RunSpec {
+                    text: "명시 서식".into(),
+                    size_pt: Some(9.0),
+                    ..Default::default()
+                }],
+                para: ParaSpec {
+                    align: Some("center".into()),
+                    ..Default::default()
+                },
+            },
+        )
+        .unwrap();
+        let Block::Paragraph(p) = &doc.sections[0].blocks[2] else {
+            panic!("inserted block is not a paragraph");
+        };
+        assert_eq!(doc.char_shapes[p.runs[0].char_shape].height, 900);
+        assert_eq!(
+            doc.para_shapes[p.para_shape].align,
+            hwp_model::prelude::HorizontalAlign::Center
+        );
+    }
+
+    #[test]
+    fn set_paragraph_text_keeps_the_targets_own_shape_but_rescues_a_synthesized_one() {
+        // (a) The bullet line's OWN 14pt shape survives a fill — Hancom's behaviour when you type
+        //     into an existing line, and what the 원 양식 needs.
+        let mut doc = bullet_list_doc();
+        apply(
+            &mut doc,
+            &Op::SetParagraphText {
+                section: 0,
+                block: 1,
+                text: " ◦ 오또케 서비스 개요".into(),
+            },
+        )
+        .unwrap();
+        let Block::Paragraph(p) = &doc.sections[0].blocks[1] else {
+            panic!()
+        };
+        assert_eq!(doc.char_shapes[p.runs[0].char_shape].height, 1400);
+
+        // (b) A paragraph with NO usable size (a synthesized/height-0 one) falls through to the
+        //     nearest text-bearing neighbour instead of committing at the 10pt fallback.
+        let mut doc = bullet_list_doc();
+        if let Block::Paragraph(p) = &mut doc.sections[0].blocks[2] {
+            p.runs[0].char_shape = 0; // the height-0 default sentinel
+        }
+        apply(
+            &mut doc,
+            &Op::SetParagraphText {
+                section: 0,
+                block: 2,
+                text: "합성 문단 채움".into(),
+            },
+        )
+        .unwrap();
+        let Block::Paragraph(p) = &doc.sections[0].blocks[2] else {
+            panic!()
+        };
+        assert_eq!(
+            doc.char_shapes[p.runs[0].char_shape].height, 1400,
+            "a height-0 paragraph must inherit the neighbour's size, not stay sizeless"
+        );
     }
 
     #[test]

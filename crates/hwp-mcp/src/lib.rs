@@ -1289,9 +1289,14 @@ pub enum Intent {
     /// Structural insert (issue 051) — insert a rich paragraph AT block `index` of `section` as ONE undo
     /// unit (the existing `InsertParagraphAt` op, exposed to the Intent lane). `runs` are styled
     /// `RunSpec`s (same wire shape as `SetParagraphRuns`); `para` is the optional paragraph-shape
-    /// override (`ParaSpec`: align/line_spacing_pct/indent_pt/margins/spacing — omit = inherit the
-    /// document default). `index` anchors like `InsertTableAt`: `Some(i)` = at block `i` (`i == len`
-    /// appends, past-end errors), `None` = the section END.
+    /// override (`ParaSpec`: align/line_spacing_pct/indent_pt/margins/spacing). `index` anchors like
+    /// `InsertTableAt`: `Some(i)` = at block `i` (`i == len` appends, past-end errors), `None` = the
+    /// section END.
+    ///
+    /// 서식 상속: a `runs`/`para` that names NO formatting inherits the char/para shape of the nearest
+    /// TEXT-BEARING neighbour paragraph (blank 6–8pt spacer lines and 표 앵커 문단 are skipped) instead
+    /// of synthesizing the height-0 default — see `docs/INTENT-SCHEMA.md` §6.9 "서식 상속". Explicit
+    /// formatting always wins.
     InsertParagraphAt {
         section: usize,
         index: Option<usize>,
