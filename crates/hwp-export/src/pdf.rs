@@ -112,6 +112,10 @@ struct EmbedFont {
     /// 058). `None` → 명조 glyphs draw with the gothic body face (pre-058 behavior). Discovered from the
     /// system on native, or INJECTED by family name on wasm/web.
     serif: Option<Font>,
+    /// SERIF **BOLD** companion (이슈 6): a serif+bold run (헤더가 명조 볼드인 정부 양식이 흔하다) drew
+    /// with the serif REGULAR before, so the PDF silently lost the weight the screen shows (화면은
+    /// `@font-face … font-weight:700` 로 진짜 볼드). `None` → pre-fix fallback (serif regular).
+    serif_bold: Option<Font>,
     /// EVERY parseable injected face by its EXACT family name (폰트 제공): a glyph whose IR `font`
     /// names a registered family (the own-render explicit-family bypass stamps it verbatim) embeds
     /// with THAT face — e.g. a run set to "Pretendard" ships real Pretendard, not the class
@@ -137,6 +141,9 @@ impl EmbedFont {
                     font,
                     bold: Self::discover_from(BOLD_FONT_CANDIDATES),
                     serif: Self::discover_from(SERIF_FONT_CANDIDATES),
+                    // 네이티브 discover 경로는 serif-bold 후보를 두지 않는다(번들 serif 자체가 없다) —
+                    // 기존 동작 그대로 serif regular 로 폴백. 주입 경로에서만 채워진다.
+                    serif_bold: None,
                     extra: Vec::new(),
                     path: path.to_string(),
                     real: true,
@@ -170,34 +177,35 @@ impl EmbedFont {
     fn from_injected(injected: &[(String, Vec<u8>)]) -> Option<EmbedFont> {
         // Best-effort bold: an injected face whose family hints "bold" backs bold runs (still v1-simple
         // — no family-to-run mapping). Parsed lazily so a non-bold-only injection costs nothing.
+        // 이슈 6: 명조 볼드("Nanum Myeongjo Bold")가 먼저 등록돼도 **본문 고딕 볼드 슬롯을 가로채지
+        // 않도록** serif 로 분류되는 bold 는 제외한다(그건 아래 `serif_bold` 로 간다). serif-bold 밖에
+        // 없으면 예전처럼 그거라도 쓴다(정직한 최선).
+        let is_bold = |family: &str| family.to_ascii_lowercase().contains("bold");
         let bold = injected
             .iter()
-            .find(|(family, _)| family.to_ascii_lowercase().contains("bold"))
+            .find(|(family, _)| is_bold(family) && classify(family) != FontCategory::Serif)
+            .or_else(|| injected.iter().find(|(family, _)| is_bold(family)))
+            .and_then(|(_, bytes)| Font::new(bytes.clone().into(), 0));
+        // 이슈 6: serif + bold 런(정부 양식 헤더의 흔한 조합)이 serif REGULAR 로 떨어져 화면의 볼드가
+        // PDF 에서 사라졌다. serif 로 분류되는 bold 주입 face 를 별도 슬롯에 담는다.
+        let serif_bold = injected
+            .iter()
+            .find(|(family, _)| is_bold(family) && classify(family) == FontCategory::Serif)
             .and_then(|(_, bytes)| Font::new(bytes.clone().into(), 0));
         // Issue 058: an injected face whose family classifies 명조/serif (e.g. "Noto Serif KR") backs the
         // serif slot, so 명조 glyphs (whose IR `font` is the serif substitute) draw with it. A "bold"
         // serif is skipped here (it feeds the bold slot); serif+bold falls back to the serif regular.
         let serif = injected
             .iter()
-            .find(|(family, _)| {
-                !family.to_ascii_lowercase().contains("bold")
-                    && classify(family) == FontCategory::Serif
-            })
+            .find(|(family, _)| !is_bold(family) && classify(family) == FontCategory::Serif)
             .and_then(|(_, bytes)| Font::new(bytes.clone().into(), 0));
         // The BODY (default gothic) face: the first injected face that is NOT the serif/bold slot, so a
         // host that injects [NanumGothic, Noto Serif KR] keeps NanumGothic as the body (and the metric
         // path — `own_render_fonts_with` — picks the same first face). Falls back to the first parseable.
         let body = injected
             .iter()
-            .find(|(family, _)| {
-                !family.to_ascii_lowercase().contains("bold")
-                    && classify(family) != FontCategory::Serif
-            })
-            .or_else(|| {
-                injected
-                    .iter()
-                    .find(|(f, _)| !f.to_ascii_lowercase().contains("bold"))
-            })
+            .find(|(family, _)| !is_bold(family) && classify(family) != FontCategory::Serif)
+            .or_else(|| injected.iter().find(|(f, _)| !is_bold(f)))
             .or_else(|| injected.first());
         let (family, bytes) = body?;
         let font = Font::new(bytes.clone().into(), 0)?;
@@ -210,6 +218,7 @@ impl EmbedFont {
             font,
             bold,
             serif,
+            serif_bold,
             extra,
             path: format!("injected:{family}"),
             real: true,
@@ -609,23 +618,38 @@ fn paint_glyph(
             };
             // Face selection (issue 058): a 명조/serif glyph (IR `font` classifies Serif) draws with the
             // embedded serif face when present; else it falls through to the bold/regular gothic body
-            // (pre-058 behavior). Serif+bold uses the serif regular in v1 (no bundled serif-bold).
+            // (pre-058 behavior). Serif+bold now prefers an injected serif-bold (이슈 6) and only falls
+            // back to the serif regular when the host injected none.
             let is_serif = font
                 .map(|n| classify(n) == FontCategory::Serif)
                 .unwrap_or(false)
                 && f.serif.is_some();
             // 폰트 제공 (explicit-family embed): the own-render bypass stamps a REGISTERED family
             // verbatim — embed with exactly that face when we hold it; else the 058 serif/body route.
-            let explicit = font.and_then(|n| {
+            // 이슈 6: a BOLD run first looks for that family's registered BOLD companion ("<family>
+            // Bold") — the screen binds it at `font-weight:700`, so without this the PDF silently
+            // dropped every bold header back to the regular face (CJK 합성 볼드도 없음 → 계층 소실).
+            let explicit_face = |n: &str| {
                 f.extra
                     .iter()
                     .find(|(fam, _)| fam.trim().eq_ignore_ascii_case(n.trim()))
                     .map(|(_, face)| face)
+            };
+            let explicit = font.and_then(|n| {
+                if bold {
+                    explicit_face(&format!("{} Bold", n.trim())).or_else(|| explicit_face(n))
+                } else {
+                    explicit_face(n)
+                }
             });
             let face = if let Some(face) = explicit {
                 face
             } else if is_serif {
-                f.serif.as_ref().unwrap()
+                if bold {
+                    f.serif_bold.as_ref().or(f.serif.as_ref()).unwrap()
+                } else {
+                    f.serif.as_ref().unwrap()
+                }
             } else if bold {
                 f.bold.as_ref().unwrap_or(&f.font)
             } else {
@@ -845,6 +869,107 @@ mod tests {
         let serif_only = vec![("Nanum Myeongjo".to_string(), bytes)];
         let e2 = EmbedFont::from_injected(&serif_only).expect("serif-only still gives a body");
         assert!(e2.serif.is_some());
+    }
+
+    /// 이슈 6 (화면 == PDF): the host registers `<family> Bold` companions (the screen binds them at
+    /// `font-weight:700`). They must land in the BOLD slots without stealing the body/serif regular
+    /// slots — otherwise the whole document would draw bold, or the gothic body would become 명조.
+    #[test]
+    fn injected_bold_companions_fill_the_bold_slots_only() {
+        let gothic = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/NanumGothic-Regular.ttf"
+        ))
+        .expect("vendored NanumGothic present for the test");
+        let gothic_bold = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/NanumGothic-Bold.ttf"
+        ))
+        .expect("vendored NanumGothic-Bold present for the test");
+        let myeongjo = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/NanumMyeongjo-Regular.ttf"
+        ))
+        .expect("vendored NanumMyeongjo present for the test");
+        let myeongjo_bold = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/NanumMyeongjo-Bold.ttf"
+        ))
+        .expect("vendored NanumMyeongjo-Bold present for the test");
+        // The EXACT order the workspace registers in: gothic body first (it backs the metrics), then
+        // its bold, then the serif substitute + its bold.
+        let injected = vec![
+            ("Nanum Gothic".to_string(), gothic),
+            ("Nanum Gothic Bold".to_string(), gothic_bold),
+            ("Nanum Myeongjo".to_string(), myeongjo),
+            ("Nanum Myeongjo Bold".to_string(), myeongjo_bold),
+        ];
+        let embed = EmbedFont::from_injected(&injected).expect("body face parses");
+        assert_eq!(
+            embed.path, "injected:Nanum Gothic",
+            "the gothic REGULAR stays the body (metric-backing) face"
+        );
+        assert!(embed.bold.is_some(), "the gothic bold fills the bold slot");
+        assert!(
+            embed.serif.is_some(),
+            "the serif regular fills the serif slot"
+        );
+        assert!(
+            embed.serif_bold.is_some(),
+            "the serif bold fills the serif-bold slot (was silently dropped to serif regular)"
+        );
+        assert_eq!(
+            embed.extra.len(),
+            4,
+            "every injected face is kept by family"
+        );
+        // A serif-bold registered FIRST must not hijack the gothic bold slot.
+        let reordered = vec![
+            ("Nanum Myeongjo Bold".to_string(), injected[3].1.clone()),
+            ("Nanum Gothic".to_string(), injected[0].1.clone()),
+            ("Nanum Gothic Bold".to_string(), injected[1].1.clone()),
+        ];
+        let e2 = EmbedFont::from_injected(&reordered).expect("body parses");
+        assert_eq!(
+            e2.path, "injected:Nanum Gothic",
+            "a leading serif-bold never becomes the body"
+        );
+        assert!(e2.bold.is_some() && e2.serif_bold.is_some());
+    }
+
+    /// 이슈 6: a document with BOLD runs must still export (the bold/serif-bold routing is exercised),
+    /// and injecting bold companions must not change the page count (display-only — 게이트 불변).
+    #[test]
+    fn bold_runs_export_with_injected_bold_companions() {
+        let gothic = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/NanumGothic-Regular.ttf"
+        ))
+        .unwrap();
+        let gothic_bold = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/NanumGothic-Bold.ttf"
+        ))
+        .unwrap();
+        let mut doc = doc_with(vec![Block::Paragraph(para("굵은 제목 Bold Title"))]);
+        doc.char_shapes[0] = CharShape {
+            bold: true,
+            ..Default::default()
+        };
+        let plain =
+            export_pdf_with_fonts(&doc, &ApproxFontMetrics, &PdfOptions::default(), &[]).unwrap();
+        let injected = vec![
+            ("Nanum Gothic".to_string(), gothic),
+            ("Nanum Gothic Bold".to_string(), gothic_bold),
+        ];
+        let out =
+            export_pdf_with_fonts(&doc, &ApproxFontMetrics, &PdfOptions::default(), &injected)
+                .unwrap();
+        assert!(out.bytes.starts_with(b"%PDF-"));
+        assert_eq!(
+            out.pages, plain.pages,
+            "bold companions are DISPLAY only — pagination is unchanged"
+        );
     }
 
     #[test]

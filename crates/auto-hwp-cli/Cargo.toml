@@ -48,3 +48,9 @@ clap = { workspace = true }
 hwp-mcp = { workspace = true }
 serde_json = { workspace = true }
 zip = { workspace = true }
+
+# 이슈 6 진단 하네스: 화면(주입 폰트 메트릭) vs PDF(과거: fs discover/Approx) 분기를 실측한다.
+# 기본 빌드에서 제외한다(pdf/shaper/rhwp 없이는 컴파일되지 않음 — `cargo check --all-targets` 보호).
+[[example]]
+name = "font_divergence"
+required-features = ["rhwp", "shaper", "pdf"]

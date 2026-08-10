@@ -2246,13 +2246,22 @@ pub fn emit_pdf(
 /// (issue 018) — the wasm/web path where `std::fs` has no fonts. When `injected_fonts` is non-empty and
 /// parseable, the injected face backs the glyphs; an empty slice takes the native discover path
 /// unchanged. TTF/OTF single-face bytes only (a TTC collection isn't accepted by krilla's simple-text).
+///
+/// ## 화면 == PDF (이슈 6): 메트릭도 주입 폰트로 재구동한다
+/// 이 함수는 예전에 [`own_render_fonts`]로 조판했다 — 네이티브(fs 폰트 발견)에서는 우연히 같은 face 라
+/// 티가 안 났지만, **wasm/web 에서는 `std::fs` 가 비어 `RealFontMetrics::new()` 가 Approx 로 떨어져**
+/// 화면([`render_svg_with`] / [`place`] — 둘 다 `own_render_fonts_with(injected)`)과 **다른 메트릭으로
+/// 재조판**됐다. 결과: 같은 문서인데 PDF 만 줄바꿈·페이지 수·글리프 x 가 어긋나고, `WithFamilies` 가
+/// 없어 `has_family` 가 항상 false → 명시 지정 서체(폰트 제공 우회, `place::display_font`)까지 058 클래스
+/// 대체로 덮어써졌다("화면과 전혀 다른 폰트"의 실체). 이제 화면과 **동일한** provider 를 쓴다.
+/// 빈 슬라이스는 `own_render_fonts_with(&[]) == own_render_fonts` 라 네이티브 경로는 바이트 불변이다.
 #[cfg(feature = "pdf")]
 pub fn emit_pdf_with_fonts(
     doc: &SemanticDoc,
     title: Option<String>,
     injected_fonts: &[(String, Vec<u8>)],
 ) -> Result<hwp_export::pdf::PdfExport, String> {
-    let fonts = own_render_fonts();
+    let fonts = own_render_fonts_with(injected_fonts);
     hwp_export::pdf::export_pdf_with_fonts(
         doc,
         fonts.as_ref(),
@@ -2791,6 +2800,73 @@ mod tests {
         assert_eq!(
             blocks_in_rect_with(&doc, 0, 0.0, 0.0, 1e5, 1e5, &[]).len(),
             blocks_in_rect(&doc, 0, 0.0, 0.0, 1e5, 1e5).len(),
+        );
+    }
+
+    /// 이슈 6 (화면 == PDF, 회귀 잠금): `emit_pdf_with_fonts` MUST typeset with the SAME provider the
+    /// screen uses — `own_render_fonts_with(injected)` — not the bare `own_render_fonts()`.
+    ///
+    /// Why this matters (and why the bug hid for so long): on NATIVE both providers usually resolve to
+    /// the same discovered NanumGothic, so the old code looked fine. On **wasm** `std::fs` is empty →
+    /// `own_render_fonts()` silently degrades to the Approx metrics while the screen measures the
+    /// REGISTERED bytes, so the PDF re-typeset itself with different advances (실측: sample-8p 1쪽에서
+    /// 글리프 x 최대 11.75pt 어긋남). Here we reproduce that on native by injecting a DIFFERENT face
+    /// (NanumMyeongjo) than the one `own_render_fonts()` discovers: the PDF must follow the injected
+    /// metrics, and must NOT equal the bare-provider export.
+    #[cfg(feature = "pdf")]
+    #[test]
+    fn emit_pdf_uses_the_injected_metrics_like_the_screen() {
+        let Ok(myeongjo) = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/NanumMyeongjo-Regular.ttf"
+        )) else {
+            return; // 폰트 자산이 없는 환경(체크아웃 부분) — 조용히 skip
+        };
+        let doc = body_para_doc(&"가나다라마바사 abcdefg ".repeat(60), 20_000);
+        let injected = vec![("Nanum Myeongjo".to_string(), myeongjo)];
+
+        // 화면과 같은 provider 로 조판된 PDF == 명시적으로 그 provider 를 넘긴 export 와 바이트 동일.
+        let via_session = emit_pdf_with_fonts(&doc, None, &injected).expect("pdf");
+        let fonts = own_render_fonts_with(&injected);
+        let via_screen_provider = hwp_export::pdf::export_pdf_with_fonts(
+            &doc,
+            fonts.as_ref(),
+            &hwp_export::pdf::PdfOptions { title: None },
+            &injected,
+        )
+        .expect("pdf");
+        assert_eq!(
+            via_session.bytes, via_screen_provider.bytes,
+            "PDF 는 화면과 동일한 메트릭 provider 로 조판돼야 한다"
+        );
+
+        // 그리고 예전 코드(바 provider)와는 달라야 한다 — 다르지 않으면 이 테스트가 아무것도 안 잠근다.
+        let bare = own_render_fonts();
+        let old = hwp_export::pdf::export_pdf_with_fonts(
+            &doc,
+            bare.as_ref(),
+            &hwp_export::pdf::PdfOptions { title: None },
+            &injected,
+        )
+        .expect("pdf");
+        assert_ne!(
+            via_session.bytes, old.bytes,
+            "주입 face 와 발견 face 의 메트릭이 다르므로 예전 경로와는 반드시 달라야 한다 \
+             (같다면 이 회귀 잠금이 무의미 — 픽스처를 바꿀 것)"
+        );
+
+        // 빈 슬라이스는 네이티브 경로 그대로(골든 불변).
+        assert_eq!(
+            emit_pdf_with_fonts(&doc, None, &[]).expect("pdf").bytes,
+            hwp_export::pdf::export_pdf_with_fonts(
+                &doc,
+                bare.as_ref(),
+                &hwp_export::pdf::PdfOptions { title: None },
+                &[],
+            )
+            .expect("pdf")
+            .bytes,
+            "빈 주입 = discover 경로, 바이트 동일"
         );
     }
 
