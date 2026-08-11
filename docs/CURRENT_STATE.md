@@ -23,7 +23,9 @@
   업로드→8 SVG→셀 편집→undo도 green. 082는 `rhwp` feature 뒤 `experimental_guarded` 소스만 존재하며
   한/글·한컴독스 증거 전 공개 지원 **제외**. `external/rhwp` 무수정, 선재 미추적
   `crates/hwp-rhwp/examples/control-audit.rs` 무접촉. 다음: 보안 변경 명시 커밋/push→PR checks→실제
-  check 이름으로 main 보호→merge→Dependabot open 0 재조회·gate pass. 외부 차단은 소유자 개인정보/
+  check 이름으로 main 보호→merge→Dependabot open 0 재조회·gate pass. PR #2 첫 CI는 Ubuntu에 Tauri
+  네이티브 라이브러리가 없어 `glib-sys`에서 red(코드 clippy 아님); 공식 Tauri Debian prerequisite 설치
+  step을 추가했고 actionlint·런칭 27/27 green, 재실행 대기다. 외부 차단은 소유자 개인정보/
   런칭 문구 승인과 Vercel Upstash Production 변수 2개이며, 없이는 tag/Release/배포/live smoke 금지.
   증거=`docs/launch/evidence/2026-08-12-vercel-preflight.md`. 사용자 지시로 커밋·push·PR·main 병합은
   진행 가능하나 npm publish는 별도 명시 승인 없이는 금지.

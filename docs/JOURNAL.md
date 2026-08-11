@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-12 (Codex sol) · PR #2 Linux CI 전제 보강
+- 첫 `build-test`는 Ubuntu의 Tauri 네이티브 라이브러리 부재로 `glib-sys`에서 red; licenses는 green.
+- 공식 Tauri Debian prerequisite 설치 step을 추가하고 actionlint·launch 27/27·diff green.
+- 다음은 보강 커밋/push 후 CI 재통과→실제 check 이름으로 main 보호→merge.
+
 ## 2026-08-12 (Codex sol) · RC 의존성 보안 보강 완료
 - Dependabot 9건 중 JS 8건을 lockfile override로 해소하고 세 audit 0건, Tauri 2.11.5 데스크톱 check green.
 - glib 1건은 Linux GTK3 전이·취약 API 비도달 근거로 `not_used` 위험 수용; main 병합 뒤 open 0 재확인 예정.
