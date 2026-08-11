@@ -32,6 +32,20 @@
 | tag/Release/site | 작업 에이전트 | 대기 | 보호된 main의 RC SHA를 태그·Release·Vercel workflow `--ref`에 동일 사용 | tag/Release/deploy URL+SHA |
 | 라이브 smoke | 작업 에이전트 | 최종 대기 | 배포 뒤 `LAUNCH_BASE_URL=https://autohwp.com scripts/verify-launch.sh --browser`와 실제 문서 퍼널 | live evidence |
 
+## 현재 안전 정지점
+
+`main` `a7e3a85`에서 자동 게이트는 29/29, 전체 report는 33/40이다. 라이브 smoke와 최종 ready를
+제외한 `node scripts/launch-readiness.mjs --pre-live --strict`는 33/38이며 아래 5개만 실패한다.
+
+1. 소유자의 개인정보 문구 승인
+2. 소유자의 런칭 문구 승인
+3. Vercel Production durable Upstash 연결
+4. 위 세 조건 뒤 확정할 단일 `release_commit`
+5. 그 SHA의 tag/GitHub Release
+
+1~3은 계정·운영 정책·비용 선택이 필요한 외부 조건이다. 이들이 닫히기 전에 4~5나 production 배포를
+선행하지 않는다. 5까지 닫힌 뒤 pre-live strict를 다시 통과시키고 그 다음에만 종합 라이브 smoke를 한다.
+
 ## durable rate-limit 판정
 
 비밀 값은 증거에 기록하지 않는다. 배포 뒤 다음 공개 probe 결과만 저장한다.

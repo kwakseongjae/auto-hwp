@@ -6,6 +6,16 @@
 - 정본 배포: **https://autohwp.com** (Vercel full Next — 2026-08-06 컷오버, Actions vercel-deploy.yml).
   GitHub Pages(kwakseongjae.github.io/auto-hwp)는 병행 유지 중 — 리다이렉트 스텁 전환 예정.
   GitHub: https://github.com/kwakseongjae/auto-hwp (public, 홈페이지·description=autohwp.com)
+- 갱신: 2026-08-12 · Codex(sol) — **오픈소스 런칭 pre-live 안전 정지점 확정, 단독 처리 가능분 완료**.
+  보호된 `main`의 현재 head는 최종 증빙 PR #5 merge `a7e3a85`. 자동 게이트 29/29, 전체 report
+  33/40, `--pre-live --strict`는 33/38이며 남은 P0 5개만 정확히 red다: `release_commit` 미고정,
+  소유자 개인정보 문구 승인, Vercel Production durable Upstash, tag/GitHub Release, 소유자 런칭 문구
+  승인. Dependabot open 0; main 보호는 strict `build-test`+`licenses`, PR/admin/대화해결 적용,
+  force-push/delete 금지 상태를 재확인했다. 다음 순서는 ①소유자가 `docs/launch/OWNER-APPROVAL.md`
+  두 항목 승인 ②Production에 `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN` 등록 ③그 뒤 단일
+  RC SHA를 STATUS에 고정 ④같은 SHA로 tag/Release/prebuilt production 배포 ⑤pre-live strict green 후
+  종합 live smoke ⑥성공 증거와 `stage=ready`. tag/Release/배포/live smoke/npm publish는 실행하지 않았다.
+  선재 미추적 `crates/hwp-rhwp/examples/control-audit.rs`는 계속 보존·무접촉.
 - 갱신: 2026-08-12 · Codex(sol) — **Dependabot actionable open 0, dependency gate 최종 증빙 중**.
   후속 PR #4는 필수 `build-test` 6m19s·`licenses` 9m25s green 뒤 보호된 `main`의 `3a1b030`으로
   병합됐다. GitHub는 #16을 `fixed_at=2026-08-11T20:09:34Z`로 재평가했고 전체 분류는 fixed 12·
