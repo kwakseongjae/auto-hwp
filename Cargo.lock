@@ -2078,6 +2078,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "hwp-hwp5-patch"
+version = "0.0.1"
+dependencies = [
+ "cfb 0.14.0",
+ "flate2",
+ "hwp-core",
+ "hwp-model",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "hwp-hwpx"
 version = "0.0.1"
 dependencies = [
@@ -2113,6 +2126,7 @@ dependencies = [
  "getrandom 0.3.4",
  "hwp-ai",
  "hwp-core",
+ "hwp-hwp5-patch",
  "hwp-hwpx",
  "hwp-ingest",
  "hwp-model",

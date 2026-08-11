@@ -202,15 +202,15 @@ fn renderable_bytes(session: &Session) -> Result<Vec<u8>, String> {
         .ok_or("no document open".into())
 }
 
-/// The tools we expose. Kept in one place so `tools/list` and `tools/call` agree. `export_pdf` is
-/// appended only when the `pdf` feature (krilla, native-only) is compiled in — the service container.
+/// The tools we expose. Kept in one place so `tools/list` and `tools/call` agree. Native exports are
+/// appended only with their backing feature (`rhwp` for original-byte HWP5, `pdf` for krilla).
 fn tools() -> Value {
-    // `mut` is only used when the `pdf` feature appends `export_pdf` below.
-    #[cfg_attr(not(feature = "pdf"), allow(unused_mut))]
+    // `mut` is only used when a native export feature appends tools below.
+    #[cfg_attr(not(any(feature = "pdf", feature = "rhwp")), allow(unused_mut))]
     let mut list = json!([
         {
             "name": "open_document",
-            "description": "Open an HWPX file into the session (required before context/apply/export). In the network service mode, opening while a document is already open requires `force: true` (guards against silent cross-contamination — one container serves one task at a time).",
+            "description": "Open an HWP5 (.hwp) or HWPX file into the session (required before context/apply/export). In the network service mode, opening while a document is already open requires `force: true` (guards against silent cross-contamination — one container serves one task at a time).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -327,6 +327,25 @@ fn tools() -> Value {
             "inputSchema": { "type": "object", "properties": {} }
         }
     ]);
+    // Issue 082: HWP5 save is available only where the HWP5 parser is wired. The capability probe is
+    // read-only and uses the same report the exporter enforces; an agent can ask before choosing a path.
+    #[cfg(feature = "rhwp")]
+    if let Some(arr) = list.as_array_mut() {
+        arr.push(json!({
+            "name": "hwp_export_capability",
+            "description": "Report whether the current HWP5 session can be safely saved back to .hwp. v1 accepts only text edits reproducible as original-record patches; structural/format edits are refused with an HWPX/PDF recommendation.",
+            "inputSchema": { "type": "object", "properties": {} }
+        }));
+        arr.push(json!({
+            "name": "export_hwp",
+            "description": "Save a supported edited HWP5 session back to .hwp using the ORIGINAL container bytes, patching only changed text records and invalidating PrvText/PrvImage. Refuses unsupported structural edits and returns the capability report.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "path": { "type": "string", "description": "Output .hwp path" } },
+                "required": ["path"]
+            }
+        }));
+    }
     // `export_pdf` needs the native-only krilla backend (`pdf` feature) — appended only in that build.
     #[cfg(feature = "pdf")]
     if let Some(arr) = list.as_array_mut() {
@@ -709,6 +728,75 @@ fn do_export(session: &Session, path: &str) -> Result<(usize, bool), String> {
     hwp_core::atomic_write(std::path::Path::new(path), &bytes)
         .map_err(|e| format!("write {path}: {e}"))?;
     Ok((bytes.len(), hwp_core::validate_hwpx(&bytes).ok))
+}
+
+/// Analyze the live session against a freshly parsed pristine HWP5 IR. Re-opening from
+/// `source_bytes` is intentional: `EditSession` stores snapshots, not a trusted op log, so the
+/// original/live semantic comparison is the authoritative capability gate (issue 082).
+#[cfg(feature = "rhwp")]
+fn hwp_export_capability(session: &Session) -> Result<hwp_hwp5_patch::CapabilityReport, String> {
+    use hwp_model::types::SourceFormat;
+    let source = session
+        .source_bytes
+        .as_deref()
+        .ok_or("no document open (call open_document first)")?;
+    if hwp_core::Engine::detect(source) != SourceFormat::Hwp5 {
+        return Err(
+            "export_hwp requires an original HWP5 (.hwp) source; use export_hwpx/export_pdf for this document"
+                .into(),
+        );
+    }
+    let original = hwp_core::Engine::open(source)
+        .map_err(|error| format!("re-open pristine HWP5 for export: {error}"))?;
+    let live = session
+        .doc
+        .as_ref()
+        .ok_or("no document open (call open_document first)")?
+        .doc();
+    hwp_hwp5_patch::analyze(source, &original, live).map_err(|error| error.to_string())
+}
+
+/// Bytes-out HWP5 surface for native shells/services. Unsupported sessions return an explicit
+/// capability report with `bytes=None`; callers must not create a file in that case.
+#[cfg(feature = "rhwp")]
+pub fn export_hwp_bytes(session: &Session) -> Result<hwp_hwp5_patch::ExportResult, String> {
+    use hwp_model::types::SourceFormat;
+    let source = session
+        .source_bytes
+        .as_deref()
+        .ok_or("no document open (call open_document first)")?;
+    if hwp_core::Engine::detect(source) != SourceFormat::Hwp5 {
+        return Err(
+            "export_hwp requires an original HWP5 (.hwp) source; use export_hwpx/export_pdf for this document"
+                .into(),
+        );
+    }
+    let original = hwp_core::Engine::open(source)
+        .map_err(|error| format!("re-open pristine HWP5 for export: {error}"))?;
+    let live = session
+        .doc
+        .as_ref()
+        .ok_or("no document open (call open_document first)")?
+        .doc();
+    hwp_hwp5_patch::export_hwp5(source, &original, live).map_err(|error| error.to_string())
+}
+
+#[cfg(feature = "rhwp")]
+fn do_export_hwp(
+    session: &Session,
+    path: &str,
+) -> Result<(usize, hwp_hwp5_patch::WriteStrategy, String), String> {
+    let result = export_hwp_bytes(session)?;
+    let report = result.report.summary();
+    let strategy = result.strategy.ok_or_else(|| {
+        format!("HWP5 export refused; capability_report={report}; use export_hwpx or export_pdf")
+    })?;
+    let bytes = result.bytes.ok_or_else(|| {
+        format!("HWP5 export refused; capability_report={report}; use export_hwpx or export_pdf")
+    })?;
+    hwp_core::atomic_write(std::path::Path::new(path), &bytes)
+        .map_err(|error| format!("write {path}: {error}"))?;
+    Ok((bytes.len(), strategy, report))
 }
 
 /// Export the live doc to a PDF file at `path` via OUR OWN layout engine (`hwp_session::emit_pdf` —
@@ -2180,6 +2268,20 @@ fn call_tool(name: &str, args: &Value, session: &mut Session) -> Result<String, 
                 if open_safe { "OK" } else { "FAIL" }
             ))
         }
+        #[cfg(feature = "rhwp")]
+        "hwp_export_capability" => {
+            let report = hwp_export_capability(session)?;
+            serde_json::to_string_pretty(&report)
+                .map_err(|error| format!("serialize HWP5 capability report: {error}"))
+        }
+        #[cfg(feature = "rhwp")]
+        "export_hwp" => {
+            let path = arg_str("path").ok_or("missing `path`")?;
+            let (bytes, strategy, report) = do_export_hwp(session, &path)?;
+            Ok(format!(
+                "exported {path} ({bytes} bytes, strategy={strategy:?}); capability_report={report}"
+            ))
+        }
         #[cfg(feature = "pdf")]
         "export_pdf" => {
             let path = arg_str("path").ok_or("missing `path`")?;
@@ -2333,6 +2435,15 @@ mod tests {
         .into()
     }
 
+    #[cfg(feature = "rhwp")]
+    fn hwp5_sample() -> String {
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../benchmarks/benchmark.hwp"
+        )
+        .into()
+    }
+
     /// Own-render emits one `<text>` node per positioned glyph. Join their payloads so assertions
     /// can check a representative phrase without depending on SVG coordinates or element spacing.
     fn own_svg_text(svg: &str) -> String {
@@ -2458,6 +2569,11 @@ mod tests {
                 && names.contains(&"apply_content")
                 && names.contains(&"export_hwpx")
         );
+        #[cfg(feature = "rhwp")]
+        assert!(
+            names.contains(&"hwp_export_capability") && names.contains(&"export_hwp"),
+            "the native HWP5 build exposes both the preflight and save tools"
+        );
         let render = list["result"]["tools"]
             .as_array()
             .unwrap()
@@ -2528,6 +2644,127 @@ mod tests {
         let doc = hwp_core::Engine::open(&bytes).unwrap();
         assert!(
             doc.plain_text().contains("MCP로 추가") && doc.plain_text().contains("에이전트가 작성")
+        );
+    }
+
+    #[cfg(feature = "rhwp")]
+    #[test]
+    fn hwp5_op_bus_edit_exports_through_mcp_and_structural_edit_refuses() {
+        use hwp_model::prelude::{Block, Inline};
+
+        let mut session = Session::default();
+        apply_intent(
+            &mut session,
+            Intent::Open {
+                path: hwp5_sample(),
+            },
+        )
+        .unwrap();
+        let source = session.source_bytes.as_deref().unwrap();
+        let pristine = hwp_core::Engine::open(source).unwrap();
+        let map = hwp_hwp5_patch::observe(source, &pristine).unwrap();
+        let live = session.doc.as_ref().unwrap().doc();
+        let (section, block, before) = map
+            .iter()
+            .filter(|(address, record)| {
+                address.cell_path.is_empty() && record.patchable && !record.semantic_text.is_empty()
+            })
+            .find_map(|(address, record)| {
+                let Block::Paragraph(paragraph) =
+                    &live.sections[address.section].blocks[address.block]
+                else {
+                    return None;
+                };
+                (paragraph.runs.len() == 1
+                    && paragraph.runs[0].content.len() == 1
+                    && matches!(paragraph.runs[0].content[0], Inline::Text(_)))
+                .then(|| (address.section, address.block, record.semantic_text.clone()))
+            })
+            .expect("sample has a simple patchable body paragraph");
+        let after = format!("{before} [MCP-082]");
+        apply_intent(
+            &mut session,
+            Intent::SetParagraphText {
+                section,
+                block,
+                text: after.clone(),
+            },
+        )
+        .unwrap();
+
+        let call = |name: &str, args: Value, session: &mut Session| {
+            handle(
+                &json!({"jsonrpc":"2.0","id":82,"method":"tools/call","params":{"name":name,"arguments":args}}),
+                session,
+            )
+            .unwrap()
+        };
+        let capability = call("hwp_export_capability", json!({}), &mut session);
+        assert_eq!(capability["result"]["isError"], false, "{capability}");
+        assert!(capability["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("text_patch"));
+
+        let out = std::env::temp_dir().join(format!("hwp-mcp-082-{}-text.hwp", std::process::id()));
+        let exported = call(
+            "export_hwp",
+            json!({"path": out.to_str().unwrap()}),
+            &mut session,
+        );
+        assert_eq!(exported["result"]["isError"], false, "{exported}");
+        assert!(exported["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("capability_report"));
+        let reparsed = hwp_core::Engine::open(&std::fs::read(&out).unwrap()).unwrap();
+        let Block::Paragraph(paragraph) = &reparsed.sections[section].blocks[block] else {
+            panic!("patched block stopped being a paragraph");
+        };
+        let reparsed_text: String = paragraph
+            .runs
+            .iter()
+            .flat_map(|run| &run.content)
+            .filter_map(|inline| match inline {
+                Inline::Text(text) => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(reparsed_text, after);
+
+        let table_index = session.doc.as_ref().unwrap().doc().sections[0]
+            .blocks
+            .iter()
+            .position(|block| matches!(block, Block::Table(_)))
+            .unwrap();
+        apply_intent(
+            &mut session,
+            Intent::TableAppendRow {
+                section: 0,
+                index: table_index,
+            },
+        )
+        .unwrap();
+        let refused_report = call("hwp_export_capability", json!({}), &mut session);
+        assert!(refused_report["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("unsupported"));
+        let refused_path =
+            std::env::temp_dir().join(format!("hwp-mcp-082-{}-refused.hwp", std::process::id()));
+        let refused = call(
+            "export_hwp",
+            json!({"path": refused_path.to_str().unwrap()}),
+            &mut session,
+        );
+        assert_eq!(refused["result"]["isError"], true, "{refused}");
+        assert!(refused["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("HWPX"));
+        assert!(
+            !refused_path.exists(),
+            "refusal must not create a partial file"
         );
     }
 
