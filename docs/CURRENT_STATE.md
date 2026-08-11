@@ -6,7 +6,12 @@
 - 정본 배포: **https://autohwp.com** (Vercel full Next — 2026-08-06 컷오버, Actions vercel-deploy.yml).
   GitHub Pages(kwakseongjae.github.io/auto-hwp)는 병행 유지 중 — 리다이렉트 스텁 전환 예정.
   GitHub: https://github.com/kwakseongjae/auto-hwp (public, 홈페이지·description=autohwp.com)
-- 갱신: 2026-08-10(c) · Claude(Fable) — **에이전트 퍼널 축 로드맵화 + 이슈 082·083 기획 확정(작업 미착수)**.
+- 갱신: 2026-08-11 · Claude(Fable) — **codex(sol) 인수인계 킷 완성 — 퍼널 트랙 착수 준비 완료**.
+  F1을 이슈 [084](issues/084-mcp-render-ownrender.md)로 승격(MCP render_page 자체 렌더 교체 — 설계·
+  수용 기준·함정 확정). `docs/handoff/CODEX-SOL-2026-08-11.md`: 공통 인수인계 절차(복원→AGENTS→
+  베이스라인 그린 확인→체크포인트 규율) + 붙여넣기용 착수 프롬프트 4벌(A=084부터 시작, B=082,
+  C=081 병행 가능, D=083 병행 가능) + 동시 작업 조율 규칙(트랙 간 파일 비중첩·git status 선확인).
+  작업 자체는 미착수 — codex 측 착수 대기.
   `docs/AGENT-FUNNEL-ROADMAP.md`: 에이전트→호스팅 서버(.hwp 첨부)→중간 사용자 검토→최종 .hwp/PDF
   export 퍼널. 실사 결과 뼈대 기존재(hwp-mcp `--http-network` 서비스 모드+Docker 178MB+제안 흐름
   propose/commit+export_pdf/hwpx) — 갭 4개: F1 render_page가 P1 잔재(rhwp 원본 전용, 편집 문서 거부
