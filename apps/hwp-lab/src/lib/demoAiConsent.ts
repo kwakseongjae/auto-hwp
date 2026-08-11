@@ -24,6 +24,14 @@ export function demoAiConsentMessage(transport: DemoAiTransport): string {
 /** 기본(정적 데모 = Worker 경유) 문구 — 기존 계약 그대로. */
 export const DEMO_AI_CONSENT_MESSAGE = demoAiConsentMessage("worker");
 
+/** 공개 데모는 첨부를 보내지 않는다. UI와 서버(maxAttachments=0)가 같은 정책을 쓰도록 네트워크
+ *  호출 전에 판정하는 작은 순수 함수다. BYOK 경로에는 적용하지 않는다. */
+export function demoAiAttachmentError(count: number): string | null {
+  return count > 0
+    ? "공개 데모 AI는 이미지·참조 문서 첨부를 전송하지 않습니다. 첨부 없이 다시 요청하거나 BYOK 프록시를 사용하세요."
+    : null;
+}
+
 /** 인앱 모달용 — **같은 문구**를 문단 단위로 쪼갠다(빈 줄은 버린다). 문구는 위 한 곳에서만 나오므로
  *  다이얼로그가 프라이버시 계약과 어긋날 수 없다(모달로 바꾸면서 문구를 새로 쓰지 않는다는 규율의 구현). */
 export function splitConsentMessage(message: string): string[] {

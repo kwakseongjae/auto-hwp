@@ -1,0 +1,46 @@
+name: Feature request
+description: Propose a user problem and a testable, contract-compatible capability.
+title: "[feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: What workflow is blocked? Avoid prescribing an API before describing the need.
+    validations:
+      required: true
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Closest layer
+      options:
+        - Rust parse / IR / typeset / render / export
+        - Intent and operation bus
+        - Headless editor core
+        - React SDK
+        - CLI / MCP / service
+        - Documentation / onboarding
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Proposed outcome and acceptance test
+      description: Describe observable behavior, limitations, and how it could be verified.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: invariants
+    attributes:
+      label: Project fit
+      options:
+        - label: The proposal preserves local-first document processing or clearly identifies any optional transmission.
+          required: true
+        - label: The proposal does not require bypassing Intent preview, approval, validation, or undo.
+          required: true

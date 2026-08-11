@@ -19,7 +19,7 @@ function env(kv: FakeKv, overrides: Record<string, unknown> = {}) {
     RATELIMIT: kv,
     ALLOWED_ORIGIN: "https://kwakseongjae.github.io",
     MODEL: "openai/gpt-5.6-luna",
-    DAILY_CAP: "2000",
+    DAILY_CAP: "400",
     PER_IP_CAP: "20",
     MAX_TOKENS: "2048",
     REASONING_EFFORT: "low",
@@ -136,7 +136,7 @@ describe("demo AI proxy request and cost guards", () => {
     expect((await worker.fetch(request(validBody()), env(ipFull) as never)).status).toBe(429);
     expect(upstream).not.toHaveBeenCalled();
 
-    const globalFull = fakeKv((key) => (key.startsWith("all:") ? "2000" : null));
+    const globalFull = fakeKv((key) => (key.startsWith("all:") ? "400" : null));
     expect((await worker.fetch(request(validBody()), env(globalFull) as never)).status).toBe(429);
     expect(upstream).not.toHaveBeenCalled();
   });

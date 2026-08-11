@@ -3,12 +3,16 @@ import { SiteHeader } from "@/components/site/SiteHeader";
 import { docHref } from "@/components/site/paths";
 import styles from "./docs.module.css";
 import { DOCS, DOC_GROUPS, REPO, docsInGroup } from "./docsRegistry";
+import { AgentPromptCard } from "./AgentPromptCard";
 import { DocsNav } from "./DocsNav";
+import { readLaunchAgentPrompt } from "./agentPromptSource";
 
 // /docs 허브 — **서버 컴포넌트 · 정적**. "use client" 금지(크롤러가 JS 없이 읽어야 한다).
 export const dynamic = "force-static";
 
 export default function DocsHubPage() {
+  const agentPrompt = readLaunchAgentPrompt();
+
   return (
     <div className={styles.page}>
       <SiteHeader current="docs" />
@@ -25,6 +29,8 @@ export default function DocsHubPage() {
               원문에서 빌드할 때 생성되므로, 레포와 사이트가 어긋날 수 없습니다.
             </p>
           </div>
+
+          <AgentPromptCard title="AI 에이전트에게 연동 맡기기" prompt={agentPrompt} />
 
           {DOC_GROUPS.map((g) => (
             <section key={g.id}>

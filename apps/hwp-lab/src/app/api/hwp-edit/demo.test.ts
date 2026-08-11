@@ -188,12 +188,10 @@ describe("hwp-edit — 공개 데모 모드", () => {
     expect(res.status).toBe(200);
   });
 
-  // ── ④ 한도(IP 상시 · 일일 전역은 기본 비활성) ─────────────────────────────────────────────────
-  it("기본값: 일일 전역 캡은 꺼져 있다(IP 캡만 적용 — 전역 카운터를 굴리지도 않는다)", async () => {
-    // 사용자 결정(2026-07-30): 일일 전역 캡 기본 비활성. 같은 IP 로 IP 캡까지 쓰고, 서로 다른 IP 로는
-    // 전역 한도 없이 계속 통과해야 한다(예전 기본값 2000 이 살아 있으면 이 테스트는 무의미해지지 않지만,
-    // readDemoConfig().dailyCap === null 로 "정말 무제한인지"를 직접 잠근다).
-    expect(readDemoConfig()).toMatchObject({ ok: true, value: { dailyCap: null, perIpCap: 20 } });
+  // ── ④ 한도(IP 상시 · 일일 전역 기본 400) ─────────────────────────────────────────────────────
+  it("기본값: IP 20회와 일일 전역 400회가 함께 켜진다", async () => {
+    // 2026-08-08 실청구 약 $0.0124/요청을 기준으로 공개 런칭 전 안전 기본값을 다시 켰다.
+    expect(readDemoConfig()).toMatchObject({ ok: true, value: { dailyCap: 400, perIpCap: 20 } });
     process.env.DEMO_AI_PER_IP_CAP = "1";
     stubUpstream();
     for (let i = 0; i < 5; i += 1) {
@@ -281,11 +279,11 @@ describe("hwp-edit — 공개 데모 모드", () => {
         return new Response(JSON.stringify({ choices: [{ message: { content: "[]" } }] }), { status: 200 });
       }),
     );
-    // 기본(일일 캡 off) — IP 카운터 하나만 굴린다.
+    // 기본도 IP + 전역 카운터를 함께 굴린다.
     expect((await POST(req(validBody()))).status).toBe(200);
-    expect(calls.filter((u) => u === "https://redis.example/pipeline")).toHaveLength(1);
+    expect(calls.filter((u) => u === "https://redis.example/pipeline")).toHaveLength(2);
 
-    // 일일 캡을 켜면 전역 카운터가 하나 더 붙는다(ip + 전체).
+    // env로 값을 바꿔도 카운터 수는 ip + 전체 두 개다.
     process.env.DEMO_AI_DAILY_CAP = "100";
     calls.length = 0;
     expect((await POST(req(validBody()))).status).toBe(200);
@@ -448,9 +446,58 @@ describe("hwp-edit — 공개 데모 모드", () => {
   });
 
   // ── ⑥ GET 프로브 ──────────────────────────────────────────────────────────────────────────────
-  it("GET: 키가 있으면 live/demo, 없으면 static(=AI 없음, mock 아님)", async () => {
-    const live = (await (await GET()).json()) as { mode: string; provider: string; model: string; configured: boolean };
-    expect(live).toMatchObject({ mode: "live", provider: "demo", model: "openai/gpt-5.6-luna", configured: true });
+  it("GET: 키·비밀 없는 rate-limit store·실제 cap을 함께 진단한다", async () => {
+    const live = (await (await GET()).json()) as {
+      mode: string;
+      provider: string;
+      model: string;
+      configured: boolean;
+      rate_limit: {
+        store: string;
+        durable: boolean;
+        store_configured: boolean;
+        daily_cap: number;
+        per_ip_cap: number;
+        configuration_valid: boolean;
+      };
+    };
+    expect(live).toMatchObject({
+      mode: "live",
+      provider: "demo",
+      model: "openai/gpt-5.6-luna",
+      configured: true,
+      rate_limit: {
+        store: "memory",
+        durable: false,
+        store_configured: false,
+        daily_cap: 400,
+        per_ip_cap: 20,
+        configuration_valid: true,
+      },
+    });
+
+    process.env.UPSTASH_REDIS_REST_URL = "https://redis.example";
+    process.env.UPSTASH_REDIS_REST_TOKEN = "secret";
+    const probeFetch = vi.fn(async () =>
+      new Response(JSON.stringify([{ result: "PONG" }]), { status: 200, headers: { "content-type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", probeFetch);
+    const durable = (await (await GET()).json()) as { rate_limit: { store: string; durable: boolean } };
+    expect(durable.rate_limit).toEqual(expect.objectContaining({ store: "upstash", durable: true }));
+    expect(probeFetch).toHaveBeenCalledTimes(1);
+
+    // 같은 warm instance의 공개 GET은 60초 캐시를 써 저장소를 매번 두드리지 않는다.
+    await GET();
+    expect(probeFetch).toHaveBeenCalledTimes(1);
+
+    resetMemoryCounters();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("unauthorized", { status: 401 })));
+    const unreachable = (await (await GET()).json()) as {
+      rate_limit: { store: string; durable: boolean; store_configured: boolean; configuration_valid: boolean };
+    };
+    expect(unreachable.rate_limit).toEqual(
+      expect.objectContaining({ store: "memory", durable: false, store_configured: true, configuration_valid: false }),
+    );
 
     delete process.env.OPENROUTER_API_KEY;
     const off = (await (await GET()).json()) as { mode: string; configured: boolean; message: string };

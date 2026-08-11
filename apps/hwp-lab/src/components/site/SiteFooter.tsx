@@ -29,6 +29,7 @@ export function SiteFooter() {
           <a href={docHref("embed")}>임베드 가이드</a>
           <a href={docHref("cli")}>CLI</a>
           <a href={docHref("mcp")}>MCP</a>
+          <a href={siteHref("/privacy")}>개인정보</a>
         </div>
         <div className={styles.col}>
           <b>소스</b>
@@ -47,7 +48,8 @@ export function SiteFooter() {
         </div>
       </div>
       <div className={styles.legal}>
-        Apache-2.0 라이선스 · 「한글」과 HWP는 (주)한글과컴퓨터의 상표이며, 이 프로젝트는 한글과컴퓨터와
+        <a href={siteHref("/privacy")}>개인정보 및 로컬 데이터</a> · Apache-2.0 라이선스 · 「한글」과 HWP는
+        (주)한글과컴퓨터의 상표이며, 이 프로젝트는 한글과컴퓨터와
         무관한 독립 구현입니다.
       </div>
     </footer>

@@ -27,7 +27,7 @@ npm i @auto-hwp/react @auto-hwp/engine @auto-hwp/editor-core @auto-hwp/ai-protoc
 | `@auto-hwp/ai-protocol` | L2' (isomorphic) | EditRequest/Response·buildDocContext(R5 펜스)·validate\*. fetch·키 0. 서버·클라 공유. |
 | `@auto-hwp/react` | L3 (UI) | `<HwpWorkspace/>` + 오버레이·채팅. 전부 교체 가능. `peerDependencies`: react/react-dom ≥18. |
 
-`@auto-hwp/react` 는 `@auto-hwp/engine`·`@auto-hwp/editor-core` 를 실버전(`^0.0.2`)으로 의존한다(모노레포
+`@auto-hwp/react` 는 `@auto-hwp/engine`·`@auto-hwp/editor-core` 를 실버전(`^0.0.4`)으로 의존한다(모노레포
 `file:` 아님 — 발행본은 레지스트리에서 정상 해석된다). `@auto-hwp/ai-protocol` 은 서버 프록시에서도 쓰므로
 독립 설치한다.
 
@@ -35,9 +35,8 @@ npm i @auto-hwp/react @auto-hwp/engine @auto-hwp/editor-core @auto-hwp/ai-protoc
 
 ## 2. wasm / 워커 로딩 — 기본값은 CDN, 자기 호스팅은 오버라이드
 
-> ⚠️ **버전 주의(2026-07-30):** 이 절의 **CDN 기본값·`onProgress`·`prefetch()` 는 다음 발행(0.0.3)부터**
-> 실린다. 현재 레지스트리 실물은 `0.0.2` 이며 거기서는 §2.2 의 **명시 URL(4파일 복사)** 만 동작한다.
-> 아래 §2.1 코드는 0.0.3 이후 기준이고, `examples/vite-embed` 는 아직 0.0.2 기준(명시 URL)이다.
+> 현재 공개 stable `0.0.4`에는 이 절의 **CDN 기본값·`onProgress`·`prefetch()`**가 모두 포함돼 있다.
+> `examples/vite-embed`는 CDN에 기대지 않는 자기호스팅 경로도 계속 검증하기 위해 명시 URL을 사용한다.
 
 ### 2.1 기본값 — 아무것도 복사하지 않는다
 
@@ -61,7 +60,7 @@ const adapter = new WasmAdapter(undefined, { worker: {} });  // 워커 엔진 + 
   같은 출처의 **blob 심**(`import "<cdn>/worker.js"`)으로 감싼다. 엄격 CSP 라면 `worker-src blob:` 필요(§4).
 - 오프라인/내부망·CDN 차단 환경은 §2.2 로 간다. **CDN 은 기본값일 뿐, 요구사항이 아니다.**
 
-실측(2026-07-30, `@auto-hwp/engine@0.0.2`):
+역사적 전송 기준 실측(2026-07-30, `@auto-hwp/engine@0.0.2`; 현재 stable의 기능 기준은 `0.0.4`):
 
 | 항목 | 값 |
 |---|---|
@@ -80,12 +79,12 @@ CDN 을 못 쓰거나(폐쇄망·CSP·규정) 버전을 직접 고정하고 싶�
 public/hwp/hwp_wasm_bg.wasm      ← node_modules/@auto-hwp/engine/pkg/hwp_wasm_bg.wasm  (런타임에 URL fetch)
 public/hwp/worker.js             ← node_modules/@auto-hwp/engine/worker.js             (모듈 워커 엔트리)
 public/hwp/index.js              ← node_modules/@auto-hwp/engine/index.js              (worker.js 가 import)
-public/hwp/cdn.js                ← node_modules/@auto-hwp/engine/cdn.js                (0.0.3~ — index.js 가 import)
+public/hwp/cdn.js                ← node_modules/@auto-hwp/engine/cdn.js                (현행 stable — index.js 가 import)
 public/hwp/pkg/hwp_wasm.js       ← node_modules/@auto-hwp/engine/pkg/hwp_wasm.js       (wasm-bindgen 글루)
 ```
 
-> ⚠️ **0.0.3~ 는 `cdn.js` 가 필수다.** `index.js` 가 `./cdn.js` 를 import 하므로 빠지면 워커가 모듈
-> 로드 404 로 즉사한다(0.0.2 에는 이 파일이 없으니 4파일 그대로다).
+> ⚠️ **현행 stable은 `cdn.js`가 필수다.** `index.js`가 `./cdn.js`를 import하므로 빠지면 워커가 모듈
+> 로드 404로 즉사한다. 다섯 파일의 상대 구조를 한 벌로 유지한다.
 
 > `worker.js → ./index.js → ./pkg/hwp_wasm.js` 의 **상대 import 체인**이 `public/hwp/` 안에서 그대로
 > 성립하도록 디렉토리 구조를 보존해 복사해야 한다. Vite 라면 `vite.config` 에 `optimizeDeps.exclude:
@@ -111,7 +110,7 @@ import wasmUrl from "@auto-hwp/engine/pkg/hwp_wasm_bg.wasm?url";
 const adapter = new WasmAdapter(wasmUrl);   // 워커를 쓰려면 worker.js 는 여전히 정적 서빙 필요
 ```
 
-### 2.3 진행률 + 프리페치 (0.0.3~)
+### 2.3 진행률 + 프리페치 (stable 0.0.4)
 
 wasm 은 비압축 ~7.7MB(압축 전송 ~3.0MB)라 첫 로드가 눈에 띈다. 어댑터가 두 가지를 준다:
 
@@ -148,7 +147,7 @@ useEffect(() => { requestIdleCallback(() => void adapter.prefetch()); }, [adapte
 import { HwpWorkspace, WasmAdapter } from "@auto-hwp/react";
 import "@auto-hwp/react/styles.css";               // ← 스타일은 수동 import (사이드이펙트 CSS)
 
-// 0.0.3~ : 인자 없이 = CDN 기본값(§2.1). 자기 호스팅이면 아래처럼 명시 URL 을 준다(§2.2).
+// stable 0.0.4: 인자 없이 = CDN 기본값(§2.1). 자기 호스팅이면 아래처럼 명시 URL 을 준다(§2.2).
 const adapter = new WasmAdapter(
   new URL("/hwp/hwp_wasm_bg.wasm", window.location.origin),
   { worker: { url: new URL("/hwp/worker.js", window.location.origin) } },
@@ -334,10 +333,10 @@ bypass: 등록된 이름과 일치하는 명시 지정은 명조/고딕 대체�
 
 ```bash
 cd examples/vite-embed
-npm install              # 레지스트리 @auto-hwp/* ^0.0.2 (fresh clone 경로)
-npm run dev              # predev 훅이 wasm/워커/폰트를 public/ 로 복사(0.0.2 = 명시 URL 경로)
+npm install              # 레지스트리 @auto-hwp/* ^0.0.4 (fresh clone 경로)
+npm run dev              # predev 훅이 wasm/워커/폰트를 public/ 로 복사(자기호스팅 경로)
 npm run test:e2e         # Playwright: 업로드 → 8쪽 SVG → 셀 마킹 → mock 편집 → undo
 
-REPO_DEV=1 npm run dev   # 미발행 변경(예: 0.0.3 CDN 기본값)을 이 예제에서 미리 확인
+REPO_DEV=1 npm run dev   # 미발행 변경을 이 예제에서 미리 확인
 npm run use-local        # REPO_DEV 없이 강제로 로컬 tarball 얹기
 ```

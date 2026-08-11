@@ -3,6 +3,7 @@
 import { ShieldCheck, X } from "lucide-react";
 import { useCallback, useEffect, useRef, type MouseEvent as ReactMouseEvent } from "react";
 import styles from "./DemoAiConsentDialog.module.css";
+import { siteHref } from "./site/paths";
 
 /** 데모 AI 전송 동의 모달 — 네이티브 `window.confirm` 의 대체.
  *
@@ -120,7 +121,10 @@ export default function DemoAiConsentDialog({ open, paragraphs, onAccept, onDecl
         </div>
 
         {/* 영속 사실의 고지 — 저장되는 것은 "동의했다"는 사실뿐이고, 그 사실이 이 브라우저에 남는다. */}
-        <p className={styles.note}>동의하면 이 브라우저에 한 번만 기억되고 다음부터는 묻지 않습니다.</p>
+        <p className={styles.note}>
+          동의하면 이 브라우저에 한 번만 기억되고 다음부터는 묻지 않습니다.{" "}
+          <a href={siteHref("/privacy")}>전송·보유 범위와 동의 철회 보기</a>
+        </p>
 
         <div className={styles.actions}>
           <button type="button" className={styles.btn} onClick={onDecline} data-testid="demo-ai-consent-decline">

@@ -1,6 +1,6 @@
 # auto-hwp Vite 임베드 예제 (issue 063 — 이식 증명)
 
-비-Next(Vite) 앱에서 **레지스트리 발행본**(`@auto-hwp/* ^0.0.2`)을 설치해 `<HwpWorkspace/>` 를 렌더한다.
+비-Next(Vite) 앱에서 **레지스트리 발행본**(`@auto-hwp/* ^0.0.4`)을 설치해 `<HwpWorkspace/>` 를 렌더한다.
 소스경로 import 는 0 — `node_modules` 의 발행본만 소비한다. 이 예제가 그린이면 "제3자가
 `npm i @auto-hwp/*` 로 자기 페이지에 hwp 뷰어/에디터를 심을 수 있다"가 증명된다.
 
@@ -31,14 +31,14 @@ npm install              # 원복(레지스트리)
 `--no-save` 라 `package.json` 의 선언은 **레지스트리 그대로**다. 즉 이 예제의 선언은 언제나 외부
 사용자가 보는 것과 같고, 로컬본은 `node_modules` 에만 얹힌다.
 
-> ⚠️ 이 예제는 아직 **0.0.2 기준**이라 wasm/워커를 명시 URL(§2.2 4파일 복사)로 로드한다. 0.0.3 의
-> **CDN 기본값**(`new WasmAdapter()` 한 줄)은 발행 후에 이 예제도 그쪽으로 옮긴다.
+> 이 예제는 stable `0.0.4`의 CDN 기본값 대신 wasm/워커를 명시 URL로 로드한다. CDN 없이도 동작해야 하는
+> 폐쇄망·엄격 CSP 호스트의 자기호스팅 경로를 계속 검증하기 위한 의도된 선택이다.
 
 ## 구성
 
 | 파일 | 역할 |
 |---|---|
-| `package.json` | `@auto-hwp/*` 를 레지스트리 `^0.0.2` 로 설치 — **발행본** 소비. |
+| `package.json` | `@auto-hwp/*` 를 레지스트리 `^0.0.4` 로 설치 — **발행본** 소비. |
 | `scripts/prepare-deps.mjs` | REPO_DEV=1 일 때만 로컬 `packages/*` pack → `npm install --no-save` 오버라이드. |
 | `scripts/pack-deps.mjs` | 4개 패키지 `npm pack` → `vendor/` (발행 순서 engine→editor-core→ai-protocol→react). |
 | `scripts/copy-assets.mjs` | `node_modules/@auto-hwp/engine` 에서 wasm+worker+글루를 `public/hwp/` 로 복사(비-Next 정적 서빙 레시피). |

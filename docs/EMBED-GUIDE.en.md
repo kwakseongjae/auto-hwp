@@ -30,7 +30,7 @@ npm i @auto-hwp/react @auto-hwp/engine @auto-hwp/editor-core @auto-hwp/ai-protoc
 | `@auto-hwp/ai-protocol` | L2' (isomorphic) | EditRequest/Response · `buildDocContext` (prompt fencing) · validators. No fetch, no keys — shared by server and client. |
 | `@auto-hwp/react` | L3 (UI) | `<HwpWorkspace/>` + overlays. Every piece is replaceable. `peerDependencies`: react/react-dom ≥18. |
 
-`@auto-hwp/react` depends on `@auto-hwp/engine` and `@auto-hwp/editor-core` by real version (`^0.0.2`),
+`@auto-hwp/react` depends on `@auto-hwp/engine` and `@auto-hwp/editor-core` by real version (`^0.0.4`),
 so a plain registry install resolves. `@auto-hwp/ai-protocol` is installed separately because your
 server proxy imports the same module.
 
@@ -38,9 +38,8 @@ server proxy imports the same module.
 
 ## 2. Loading the wasm / worker — CDN by default, self-hosting as the override
 
-> ⚠️ **Version note (2026-07-30):** the **CDN default, `onProgress` and `prefetch()` land in the next
-> release (0.0.3)**. The current registry build is `0.0.2`, where only the **explicit-URL path (§2.2)**
-> works. §2.1 describes 0.0.3 onward.
+> The public stable release `0.0.4` includes the **CDN default, `onProgress`, and `prefetch()`** described
+> here. `examples/vite-embed` deliberately keeps exercising the explicit self-hosted asset path too.
 
 ### 2.1 Default — copy nothing
 
@@ -67,7 +66,8 @@ const adapter = new WasmAdapter(undefined, { worker: {} });   // worker engine +
   therefore need `worker-src blob:` (§4).
 - Air-gapped / CDN-blocked deployments: go to §2.2. **The CDN is a default, not a requirement.**
 
-Measured on 2026-07-30 for `@auto-hwp/engine@0.0.2`:
+Historical transfer baseline measured on 2026-07-30 for `@auto-hwp/engine@0.0.2`; the current feature
+contract below targets stable `0.0.4`:
 
 | | |
 |---|---|
@@ -86,12 +86,12 @@ the relative layout** (`examples/vite-embed/scripts/copy-assets.mjs` is exactly 
 public/hwp/hwp_wasm_bg.wasm      ← node_modules/@auto-hwp/engine/pkg/hwp_wasm_bg.wasm  (fetched at runtime)
 public/hwp/worker.js             ← node_modules/@auto-hwp/engine/worker.js             (module worker entry)
 public/hwp/index.js              ← node_modules/@auto-hwp/engine/index.js              (imported by worker.js)
-public/hwp/cdn.js                ← node_modules/@auto-hwp/engine/cdn.js                (0.0.3+ — imported by index.js)
+public/hwp/cdn.js                ← node_modules/@auto-hwp/engine/cdn.js                (current stable — imported by index.js)
 public/hwp/pkg/hwp_wasm.js       ← node_modules/@auto-hwp/engine/pkg/hwp_wasm.js       (wasm-bindgen glue)
 ```
 
-> ⚠️ **`cdn.js` is required from 0.0.3 on**: `index.js` imports `./cdn.js`, so leaving it out kills the
-> worker with a module-load 404. On 0.0.2 the file does not exist and the list is the classic four.
+> ⚠️ **`cdn.js` is required by the current stable release**: `index.js` imports `./cdn.js`, so leaving it
+> out kills the worker with a module-load 404. Keep the relative layout of all five files intact.
 
 ```tsx
 const adapter = new WasmAdapter(
@@ -116,7 +116,7 @@ import wasmUrl from "@auto-hwp/engine/pkg/hwp_wasm_bg.wasm?url";
 const adapter = new WasmAdapter(wasmUrl);   // worker mode still needs worker.js served statically
 ```
 
-### 2.3 Progress + prefetch (0.0.3 onward)
+### 2.3 Progress + prefetch (stable 0.0.4)
 
 The wasm is ~7.7 MB uncompressed (~3.0 MB over the wire), so the first load is visible. Two hooks:
 
@@ -296,10 +296,10 @@ The examples install the **registry** packages by default — the same path an o
 
 ```bash
 cd examples/vite-embed
-npm install              # registry @auto-hwp/* ^0.0.2 (fresh-clone path)
-npm run dev              # predev copies wasm/worker/fonts into public/ (0.0.2 = explicit-URL path)
+npm install              # registry @auto-hwp/* ^0.0.4 (fresh-clone path)
+npm run dev              # predev copies wasm/worker/fonts into public/ (self-hosted path)
 npm run test:e2e         # Playwright: upload → 8-page SVG → cell marking → mock edit → undo
 
-REPO_DEV=1 npm run dev   # try unpublished changes (e.g. the 0.0.3 CDN default) in the example
+REPO_DEV=1 npm run dev   # try unpublished changes in the example
 npm run use-local        # force the local tarballs without REPO_DEV
 ```

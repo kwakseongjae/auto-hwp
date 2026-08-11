@@ -16,7 +16,7 @@
 //     계약이 앱과 드리프트하지 않는다).
 //  ② known-field 검증(validateRequest + 데모 상한) · 본문 바이트 상한 · 상류 텍스트 상한.
 //  ③ 모델·max_tokens·reasoning effort·zdr 은 **서버 고정**(env 로만 오버라이드).
-//  ④ IP 캡(상시) + 일일 전체 캡(**기본 비활성** — `DEMO_AI_DAILY_CAP` 을 넣었을 때만).
+//  ④ IP 캡(상시) + 일일 전체 캡(기본 400회, env 로 더 낮출 수 있음).
 //     Upstash(REST)가 있으면 durable, 없으면 인메모리 best-effort.
 //  ⑤ Origin same-origin 검증(브라우저 교차 출처 사용 차단).
 
@@ -31,8 +31,8 @@ import {
   type Intent,
 } from "@auto-hwp/ai-protocol";
 
-/** 기본 모델: GPT-5.6 Luna(base — luna-pro 아님). Worker 실측에서 요청당 ~$0.0005(최악 $0.001) ·
- *  ZDR 라우팅 가능 · Intent JSON 형식 준수 확인됨. Gemini 계열은 서버리스 출구 리전 차단 이력이 있어
+/** 기본 모델: GPT-5.6 Luna(base — luna-pro 아님). 2026-08-08 실전 docContext(6,082 token) 청구
+ *  실측은 요청당 약 $0.0124였다. ZDR 라우팅 가능 · Intent JSON 형식 준수 확인됨. Gemini 계열은 서버리스 출구 리전 차단 이력이 있어
  *  기본에서 제외한다. `DEMO_AI_MODEL`(또는 Worker 와 같은 이름의 `MODEL`)로만 바꾼다 — 바꾸면 아래
  *  예산 계산을 **반드시** 새 단가로 다시 한다. */
 const DEFAULT_MODEL = "openai/gpt-5.6-luna";
@@ -45,14 +45,11 @@ const MAX_UPSTREAM_TEXT_BYTES = 128 * 1024;
  *  Worker 는 2048 이었다(추론 토큰이 max_tokens 에 합산돼 1024 에서 다중 셀 채움이 절단 → 전량 드롭).
  *  라우트는 4096 으로 올린다(BYOK 경로와 같은 값 — 8쪽 표 다중 채움에서 절단 여유).
  *
- *  ⚠️ 예산 계산(단가 $0.10/M 입력 · $0.60/M 출력):
- *    출력 4,096 tok × $0.60/M                    = $0.00246
- *    입력 ≈12,483 tok × $0.10/M (아래 상한 역산)  = $0.00125
- *    요청당 최악 ≈ **$0.0037**(실사용은 출력 상한을 거의 안 써 요청당 $0.0005 수준).
- *  일일 전역 캡이 꺼진 기본 구성에서 비용은 IP 캡으로만 잡힌다: IP 하나당 하루 최악 20 × $0.0037
- *  ≈ **$0.074**. 즉 서로 다른 IP 100개가 한도를 다 태우면 최악 ≈ $7.4/일이다(실사용 기준으론 $1 내외).
- *  비용이 실제로 커지면 `DEMO_AI_DAILY_CAP` 으로 전역 상한을 되켠다 — 예: 1300 ≈ 최악 $4.8/일. */
+ *  ⚠️ 공급자 표면 단가만으로 역산한 과거 $0.0037 상한은 실제 청구를 설명하지 못했다. 2026-08-08
+ *  실전 요청은 약 $0.0124였으므로 운영 예산은 **실측값**을 사용한다. 기본 전역 400회면 약 $4.96/일
+ *  (과금 재시도 전)이다. 모델·프롬프트·재시도 정책이 바뀌면 실제 usage를 다시 재고 기본 캡을 조정한다. */
 const MAX_TOKENS_CEILING = 4096;
+const DEFAULT_DAILY_CAP = 400;
 
 /** 추론 노력 기본값. 구조화 추출 작업이라 깊은 추론이 필요 없고, 추론 토큰이 출력 예산을 먹어 절단을
  *  유발한 장본인이다 → "low". `DEMO_AI_REASONING_EFFORT=""`(빈 문자열)이면 필드 자체를 안 보낸다(롤백). */
@@ -76,13 +73,12 @@ const DEMO_REQUEST_LIMITS = {
   maxImageDataUrl: 0,
 } as const;
 
-/** IP 캡(기본 20/일). 일일 전역 캡을 끈 뒤로는 **남용 방어선이 사실상 이것 하나**다.
+/** IP 캡(기본 20/일). 전역 캡과 함께 한 사용자가 전체 예산을 독점하지 못하게 한다.
  *
  *  20 을 그대로 둔 근거: (a) Worker 시절부터 쓰던 값이고 이 값이 막았다는 사용자 신고나 실사용 분포
- *  측정치가 **아직 없다** — 근거 없이 올리면 방어선만 헐거워진다. (b) 비용 산식이 선명하다: IP 하나가
- *  태울 수 있는 최악이 20 × $0.0037 ≈ $0.074/일이라 "동시 방문 IP 수"만 보면 일예산이 계산된다.
- *  올릴 때는 반드시 실사용 분포(요청/세션 p95)를 먼저 재고, "IP 수 × 캡 × $0.0037 = 최악 일예산"을
- *  다시 계산한 뒤 `DEMO_AI_PER_IP_CAP` 로 올려라(코드 기본값을 바꾸는 것보다 env 가 되돌리기 쉽다).
+ *  측정치가 **아직 없다** — 근거 없이 올리면 방어선만 헐거워진다. (b) 실제 청구 평균 $0.0124 기준
+ *  한 IP가 20회를 모두 쓰면 약 $0.25다. 올릴 때는 반드시 실사용 분포(요청/세션 p95)를 먼저 재고,
+ *  IP별 예산을 다시 계산한 뒤 `DEMO_AI_PER_IP_CAP` 로 올려라(코드 기본값보다 env 가 되돌리기 쉽다).
  *  ⚠️ 정직하게: IP 캡은 NAT/공유망(회사·학교·모바일 캐리어)에서는 **여러 사람이 한 몫을 나눠 쓰고**,
  *  반대로 IPv6·모바일 로밍처럼 주소가 자주 바뀌는 환경에서는 우회된다. 인증이 아니라 저지선이다. */
 const DEFAULT_PER_IP_CAP = 20;
@@ -98,13 +94,11 @@ const COUNTER_TTL_SECONDS = 90_000;
  *  찾지 못했습니다")로 둔갑했다. 즉 상류 장애가 사용자에게는 "당신 지시가 잘못됐다"로 보였다.
  *  실측(동일 payload): 1회차 = 위 429 봉투, **2회차 = 16건 정상 반환**(finish_reason=stop).
  *
- *  그래서 두 가지를 한다: ① 200-본문-오류를 **오류로 판정**하고(침묵 금지) ② 일시적 실패에 한해
- *  서버가 **1회만** 자동 재시도한다(사용자에게 두 번 클릭시키지 않는다).
+ *  그래서 두 가지를 한다: ① 200-본문-오류를 **오류로 판정**하고(침묵 금지) ② 일시적 무과금 실패는
+ *  최대 3회, 모델이 답했지만 형식이 깨진 과금 실패는 1회만 자동 재시도한다.
  *
- *  ⚠️ 비용: 재시도는 실패한 요청에서만 일어나므로 정상 경로 단가는 그대로고, 최악만 2배
- *  ($0.0037 → $0.0074/요청). IP 캡은 **재시도를 세지 않는다**(상류 호출 전에 1회만 증가 —
- *  사용자 체감 1회 = 쿼터 1회). 재시도 횟수를 늘리려면 비용 산식(위 MAX_TOKENS_CEILING 주석)을
- *  다시 계산하라 — 여기 상수만 올리면 조용히 예산이 배로 뛴다. */
+ *  ⚠️ 비용: IP/전역 캡은 **사용자 요청**을 세고 상류 재시도는 세지 않는다. 과금 호출은 최대 2회라
+ *  실측 평균의 약 2배까지 갈 수 있다. 재시도 횟수를 올리기 전 usage와 기본 400회 캡을 함께 재산정한다. */
 const MAX_UPSTREAM_ATTEMPTS = 4;
 /** **과금된** 시도(모델이 실제로 답을 생성한 호출)의 상한. 위 4회는 혼잡 실패를 넘기기 위한 것이고,
  *  이 2회가 비용의 실제 상한이다 — 혼잡(429) 응답은 토큰을 생성하지 않아 **$0** 이기 때문이다
@@ -138,11 +132,11 @@ function positiveConfigInt(raw: string | undefined, fallback: number, max: numbe
   return Number.isSafeInteger(value) && value > 0 && value <= max ? value : null;
 }
 
-/** 일일 전역 캡 — **기본 비활성**(사용자 결정 2026-07-30: 캡에 막혀 데모가 죽는 것보다 열어 두는 쪽).
- *  미설정/빈 값 = `null`(무제한), 설정 = 그 값, 잘못된 값 = `undefined`(설정 오류 → 503).
- *  ⚠️ 비용이 커지면 여기를 고치지 말고 **env 로 재활성**하라(`DEMO_AI_DAILY_CAP=1300` ≈ 최악 $4.8/일). */
-function readDailyCap(raw: string | undefined): number | null | undefined {
-  if (raw === undefined || raw.trim() === "") return null;
+/** 일일 전역 캡 — 미설정/빈 값도 안전 기본값 400. 양의 env 값으로 더 낮추거나 명시 조정할 수 있고,
+ *  잘못된 값은 `undefined`(설정 오류 → 503)다. 공개 데모에서 무제한 모드는 제공하지 않는다.
+ *  ⚠️ Upstash가 없으면 서버 인스턴스별 best-effort이므로 durable 절대 상한이 아니다. */
+function readDailyCap(raw: string | undefined): number | undefined {
+  if (raw === undefined || raw.trim() === "") return DEFAULT_DAILY_CAP;
   const value = Number(raw);
   return Number.isSafeInteger(value) && value > 0 && value <= 1_000_000 ? value : undefined;
 }
@@ -250,10 +244,14 @@ export async function readJsonLimited(req: Request, maxBytes: number = MAX_REQUE
 
 type Counter = { count: number; resetAt: number };
 const memoryCounters = new Map<string, Counter>();
+type UpstashProbeCache = { url: string; reachable: boolean; expiresAt: number };
+let upstashProbeCache: UpstashProbeCache | null = null;
+const UPSTASH_PROBE_TTL_MS = 60_000;
 
 /** 테스트/운영 점검용 — 인메모리 카운터를 비운다(프로세스 로컬). */
 export function resetMemoryCounters(): void {
   memoryCounters.clear();
+  upstashProbeCache = null;
 }
 
 function bumpMemory(key: string, ttlMs: number): number {
@@ -290,6 +288,30 @@ async function bumpUpstash(url: string, token: string, key: string, ttl: number)
   } catch {
     return null;
   }
+}
+
+/** 비밀을 응답에 싣지 않고 실제 Redis REST 경로까지 확인한다. 공개 GET의 남용으로 저장소 호출이
+ *  늘지 않도록 warm instance마다 결과를 60초 캐시한다. */
+async function canReachUpstash(url: string, token: string): Promise<boolean> {
+  const now = Date.now();
+  if (upstashProbeCache?.url === url && upstashProbeCache.expiresAt > now) return upstashProbeCache.reachable;
+  let reachable = false;
+  try {
+    const res = await fetch(`${url.replace(/\/+$/, "")}/pipeline`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify([["PING"]]),
+      cache: "no-store",
+    });
+    if (res.ok) {
+      const data = (await res.json()) as Array<{ result?: unknown; error?: unknown }>;
+      reachable = Array.isArray(data) && data[0]?.result === "PONG";
+    }
+  } catch {
+    reachable = false;
+  }
+  upstashProbeCache = { url, reachable, expiresAt: now + UPSTASH_PROBE_TTL_MS };
+  return reachable;
 }
 
 /** 카운터 1 증가 후 현재 값. Upstash 가 설정돼 있으면 durable, 아니면(또는 호출 실패면) 인메모리. */
@@ -438,8 +460,8 @@ function worthRetrying(parsed: { intents: Intent[]; drops: string[]; arrayShaped
 export interface DemoConfig {
   model: string;
   maxTokens: number;
-  /** `null` = 일일 전역 캡 없음(기본). 숫자면 그 값이 하루 전체 상한. */
-  dailyCap: number | null;
+  /** 하루 전체 상한. 기본 400회이며 공개 데모에서 무제한 값은 허용하지 않는다. */
+  dailyCap: number;
   perIpCap: number;
   effort: string;
 }
@@ -447,11 +469,10 @@ export interface DemoConfig {
 type ConfigRead = { ok: true; value: DemoConfig } | { ok: false; error: string };
 
 export function readDemoConfig(): ConfigRead {
-  const dailyCap = readDailyCap(process.env.DEMO_AI_DAILY_CAP); // null = 무제한(기본)
+  const dailyCap = readDailyCap(process.env.DEMO_AI_DAILY_CAP);
   const perIpCap = positiveConfigInt(process.env.DEMO_AI_PER_IP_CAP, DEFAULT_PER_IP_CAP, 100_000);
   const maxTokens = positiveConfigInt(process.env.DEMO_AI_MAX_TOKENS, MAX_TOKENS_CEILING, MAX_TOKENS_CEILING);
-  // 모순 검사는 **일일 캡이 켜져 있을 때만** 의미가 있다(무제한이면 IP 캡이 그보다 클 수 없다).
-  if (dailyCap === undefined || perIpCap === null || maxTokens === null || (dailyCap !== null && perIpCap > dailyCap)) {
+  if (dailyCap === undefined || perIpCap === null || maxTokens === null || perIpCap > dailyCap) {
     return { ok: false, error: "데모 AI 한도 설정이 잘못되었습니다(서버 env 확인 필요)." };
   }
   // 설정 오타로 예산 계산 밖의 추론 노력이 나가지 않게 화이트리스트로 잠근다(빈 값 = 미전송).
@@ -498,8 +519,8 @@ export async function handleDemoEdit(req: Request): Promise<Response> {
   }
 
   // ── 한도 ──────────────────────────────────────────────────────────────────────────────────────
-  // IP 캡은 항상 돈다(기본 구성에서 유일한 방어선). 일일 전역 캡은 env 로 켰을 때만 — 무제한이면
-  // 카운터조차 굴리지 않는다(Upstash 왕복 1회를 매 요청 아끼고, 의미 없는 키를 만들지 않는다).
+  // IP 캡과 전역 캡을 항상 함께 센다. Upstash가 없으면 둘 다 인메모리 best-effort이므로 런칭 전
+  // durable rate-limit 게이트를 별도로 닫아야 한다.
   const day = dayKey();
   const ipCount = await bumpCounter(`ah:demo:ip:${day}:${clientIp(req)}`);
   if (ipCount > perIpCap) {
@@ -515,14 +536,12 @@ export async function handleDemoEdit(req: Request): Promise<Response> {
       429,
     );
   }
-  if (dailyCap !== null) {
-    const dayCount = await bumpCounter(`ah:demo:all:${day}`);
-    if (dayCount > dailyCap) {
-      return jsonRes(
-        { error: "오늘 데모 전체 사용 한도를 다 썼습니다(예산 보호). 한국시간 매일 오전 9시(UTC 0시)에 다시 열립니다." },
-        429,
-      );
-    }
+  const dayCount = await bumpCounter(`ah:demo:all:${day}`);
+  if (dayCount > dailyCap) {
+    return jsonRes(
+      { error: "오늘 데모 전체 사용 한도를 다 썼습니다(예산 보호). 한국시간 매일 오전 9시(UTC 0시)에 다시 열립니다." },
+      429,
+    );
   }
 
   // ── 상류 호출 + **자동 재시도**(혼잡 최대 3회 · 과금 최대 2회) ─────────────────────────────────
@@ -613,14 +632,27 @@ export async function handleDemoEdit(req: Request): Promise<Response> {
 
 /** 데모 모드의 GET(프로브). 키가 없으면 `mode:"static"` — 클라가 "AI 없음"으로 정직하게 표시한다
  *  (mock 이 아니다: mock 은 결정적 가짜 편집이 **동작하는** 상태다). */
-export function demoProbe(): Response {
+export async function demoProbe(): Promise<Response> {
   const configured = Boolean(process.env.OPENROUTER_API_KEY?.trim());
+  const limits = readDemoConfig();
+  const upstashUrl = process.env.UPSTASH_REDIS_REST_URL?.trim() ?? "";
+  const upstashToken = process.env.UPSTASH_REDIS_REST_TOKEN?.trim() ?? "";
+  const upstashConfigured = Boolean(upstashUrl && upstashToken);
+  const upstashReachable = upstashConfigured && (await canReachUpstash(upstashUrl, upstashToken));
   return jsonRes(
     {
       mode: configured ? "live" : "static",
       provider: "demo",
       model: configured ? demoModel() : null,
       configured,
+      rate_limit: {
+        store: upstashReachable ? "upstash" : "memory",
+        durable: upstashReachable,
+        store_configured: upstashConfigured,
+        daily_cap: limits.ok ? limits.value.dailyCap : null,
+        per_ip_cap: limits.ok ? limits.value.perIpCap : null,
+        configuration_valid: limits.ok && (!upstashConfigured || upstashReachable),
+      },
       ...(configured ? {} : { message: UNCONFIGURED_MESSAGE }),
     },
     200,

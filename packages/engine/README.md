@@ -103,7 +103,7 @@ ones, so the published size is used as the denominator and the ratio never reach
 | `toHwpx()` | `Uint8Array` | round-trip-safe HWPX. |
 | `free()` | `void` | idempotent; frees the wasm handle. |
 
-Coordinates for `hitTest`/`tableAt` are **own-render px** (= HWPUNIT / 96). Edit Intents address the
+Coordinates for `hitTest`/`tableAt` are **own-render px** (= HWPUNIT / 75). Edit Intents address the
 model in **structure indices** (section/block/row/col), never pixels.
 
 ## ⚠️ wasm panic recovery (required reading)

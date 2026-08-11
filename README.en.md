@@ -36,24 +36,44 @@ the file itself is never uploaded. That AI is **a trial we pay for**, so it has 
 
 ## Adding it to your own product
 
+### Hand this to your coding agent
+
+Paste the request below into Codex, Claude Code, Cursor, or another coding agent. The
+[canonical agent prompt](./docs/launch/AGENT-PROMPT.md) carries the full checklist so the agent starts from the site docs,
+pins the public stable release, preserves the local-processing boundary, and runs a real-file smoke test.
+
+```text
+Integrate auto-hwp into this project. First read https://autohwp.com/llms.txt,
+https://autohwp.com/docs/llm, and https://autohwp.com/docs/embed; do not guess undocumented APIs.
+Finish the no-AI local document path first, then verify opening, editing, and exporting a real HWP/HWPX file.
+```
+
 ### npm — 60 seconds
 
 ```bash
-npm i @auto-hwp/react     # pulls in the engine (@auto-hwp/engine) + the headless core
+npm i @auto-hwp/react@0.0.4 @auto-hwp/ai-protocol@0.0.4
+# react pulls in the engine + headless core; the BYOK bridge below imports ai-protocol directly
 ```
 
 ```tsx
 import { useMemo, useState } from 'react';
 import { HwpWorkspace, WasmAdapter, workspacePanel, type HwpWorkspaceProps } from '@auto-hwp/react';
+import { buildDocContext } from '@auto-hwp/ai-protocol';
 import '@auto-hwp/react/styles.css';
 
 // The LLM call happens on YOUR server — no package in this repo ever sees an API key (BYOK).
-const askAi: HwpWorkspaceProps['onAiRequest'] = async (instruction, anchors, docContext) => {
+const askAi: HwpWorkspaceProps['onAiRequest'] = async (instruction, anchors, context) => {
   const res = await fetch('/api/hwp-edit', {
     method: 'POST',
-    body: JSON.stringify({ instruction, anchors, docContext }),
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      instruction,
+      anchors,
+      docContext: buildDocContext(context, anchors), // keeps document data inside the R5 fence
+    }),
   });
-  return res.json();                     // an array of validated edit commands (Intents)
+  const data = await res.json();
+  return data.intents ?? [];             // HwpWorkspace requires an Intent[]
 };
 
 export function Editor() {

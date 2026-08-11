@@ -105,9 +105,10 @@ R12 완료 후 "알려진 한계" 5종을 리서치 4레인으로 조사 → 이
 | [079](079-llm-roster-assist.md) | 073 LLM 명단 보조 + 비용/PII 하드닝 | **design-complete / open** | P2 | fill-map JSON Schema·ZDR·근거행·로컬 검증; KV 상한은 Durable Object로 승격 |
 | [080](080-hwpx-explicit-page-break.md) | HWPX 명시적 쪽 나누기 보존 | **done** (2026-07-30 배치 3) | P1 | section_page_breaks 단일 진실(3경로 공유=LOCKSTEP 구조화) + 발견 축②(noAdjust 고정 행높이) — bizinfo-mss 붙임1 25==25 게이트 신설. 잔여 오차는 흐름 높이 축=075 이관 |
 | [081](081-nested-cell-caret-cellpath.md) | 중첩 셀 캐럿·편집 — CellPath 캐럿 레인 관통 | **기획 확정 / open** (2026-08-10) | P1 | place.rs:1682 가드 제거+min-area 해소·경로 하나만(깊이≥2 평면 금지)·줄정보/세로이동 동배치·IR-resolve 래칫 게이트. 레퍼런스=rhwp 5계층 사슬 실측(docs/research/rhwp-nested-tables-2026-08.md)+claw-hwp 대조(캐럿 해법 없음). 종료 조건=nested-cell-caret-gap.spec fixme 해제 |
-| [082](082-hwp5-resave.md) | `.hwp`(HWP5) 재저장 v1 — 원본 바이트 in-place 텍스트 패치 | **기획 확정 / open** (2026-08-10) | P1 | 에이전트 퍼널 F3(docs/AGENT-FUNNEL-ROADMAP.md). claw-hwp(MIT) patchInPlaceSectors Rust 포팅·한컴독스=진짜 게이트·구조 편집은 capability report로 정직 강등. 함정 목록=hwp-internals 실측 지식 |
+| [082](082-hwp5-resave.md) | `.hwp`(HWP5) 재저장 v1 — 원본 바이트 in-place 텍스트 패치 | **implemented / manual-gate** (2026-08-11) | P1 | Rust 레코드/CFB 패치 + MCP capability/export + no-op byte-identical + depth-2 CellPath + rhwp 재파싱 + full verify green. 남음: 한/글 또는 한컴독스 실물 열기 |
 | [083](083-readme-visuals.md) | README 비주얼 개편 — 스크린샷·GIF 베이스 | **기획 확정 / open** (2026-08-10) | P2 | 7컷(코어 퍼널 GIF+기능 그리드)·shoot-readme.mjs 결정적 재촬영·autohwp.com 절대 URL(npm 겸용)·압축 규율 유지(글→이미지 치환, 증량 금지) |
 | [084](084-mcp-render-ownrender.md) | MCP render_page 자체 렌더 교체 — 편집 문서 중간 산출물 | **done / main** (2026-08-11) | P1 | 퍼널 F1. 기본·typed 렌더를 live IR 기반 hwp-session 자체 렌더로 전환, revision 캐시·source:"original" 옵트인 보존. feature 조합·wasm·서비스 Docker·verify --full green |
+| [085](085-open-source-launch-readiness.md) | 오픈소스 런칭 준비 — agent-first truth gate + 신뢰·릴리스 레일 | **L0/L1 automated green / RC evidence open** (2026-08-12) | **P0** | 자동 25/25, 전체 25/34. 082는 네이티브 증거 전까지 제외; 남은 9건은 소유자 승인·GitHub 설정·fresh consumer·릴리스/라이브 증거 |
 
 ## 웹 이식(외부 임베드) 준비도 (2026-07-13 SDK 감사)
 

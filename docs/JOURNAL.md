@@ -5,6 +5,29 @@
 
 ---
 
+## 2026-08-12 (Codex sol) · 082+085 RC 로컬 완료, PR/보호 레일 진입
+- 082는 guarded 소스만 포함·공개 지원 제외, 085는 agent-first 문서/신뢰/비용/릴리스 게이트를 완성.
+- GitHub 보안 설정·fresh Vite/Next/Node/Bun·pack 증거 완료; `verify-launch` 27/27 자동 green.
+- `verify-local --full` green(8/18/24/6·vitest 261+64+416+195+11·e2e 79/2skip).
+- 차단: 소유자 문구 2건 승인, Vercel Upstash 2변수. 다음은 두 커밋→PR checks→main 보호/merge.
+
+## 2026-08-12 (Codex sol) · 085 L0/L1 자동 런칭 레일 green
+- README/llms/docs CTA·privacy/security/community·PR CI를 보완하고 082는 네이티브 증거 전까지 런칭 제외.
+- `verify-launch --automated` 25/25; 전체는 25/34이며 남은 9건은 ready/commit+소유자·GitHub·RC 수동 증거.
+- launch 단위 5·app vitest 194·typecheck·production/static build·actionlint·브라우저 10 URL 모두 green.
+- full 재검증은 무변경 rhwp/hwp-viewer rustc 유휴 대기로 중단; RC clean runner 재실행 필요. 커밋·푸시 안 함.
+
+## 2026-08-12 (Codex sol) · 085 오픈소스 런칭 계획+게이트
+- 컨셉 정본·agent prompt·콘텐츠 brief·상태 manifest와 정적 감사 33항/브라우저 5건을 구현.
+- 단위 4건·typecheck green; 현행 report 7/33, strict는 남은 P0 23건 때문에 의도적으로 red.
+- 비증분 full verify green: 게이트 8/18/24/6·vitest 944·e2e 79 passed/2 expected skip.
+- 다음: 082 실물 확인·include/exclude 결정 후 L0→L1→L2→L3. 커밋·푸시 안 함.
+
+## 2026-08-11 (Codex sol) · 082 HWP5 재저장 v1 구현 완료(미커밋·실물 게이트 대기)
+- 원본 레코드/CFB 텍스트 패치, 좌표 기반 CellPath, MCP capability/export, preview 섹터 zeroing을 구현.
+- 3종 주소 전수 일치·no-op 바이트 동일·rhwp/strict CFB·구조 편집 거부; `verify-local.sh --full` 전부 green.
+- 남음: 공개 편집본을 한/글 또는 한컴독스에서 열어 수용 확인. 사용자 확인 전 커밋·푸시 금지.
+
 ## 2026-08-11 (Codex sol) · 084 main 반영 체크포인트
 - 사용자 승인에 따라 084 코드·테스트·정본 7개 파일만 커밋/푸시; 선재 `control-audit.rs`는 제외·보존.
 - 완료: live IR own-render·revision 캐시·원본 옵트인, 전체 검증·서비스 Docker green. 다음: 082 착수.
