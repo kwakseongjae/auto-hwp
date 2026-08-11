@@ -20,6 +20,7 @@ const PUBLIC_CONSUMER_DOCS = [
 const REQUIRED_MANUAL_GATES = [
   "privacy_copy_owner_review",
   "github_security_settings",
+  "dependency_security",
   "branch_protection",
   "durable_rate_limit",
   "fresh_consumer_smoke",

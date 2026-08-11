@@ -6,25 +6,27 @@
 - 정본 배포: **https://autohwp.com** (Vercel full Next — 2026-08-06 컷오버, Actions vercel-deploy.yml).
   GitHub Pages(kwakseongjae.github.io/auto-hwp)는 병행 유지 중 — 리다이렉트 스텁 전환 예정.
   GitHub: https://github.com/kwakseongjae/auto-hwp (public, 홈페이지·description=autohwp.com)
-- 갱신: 2026-08-12 · Codex(sol) — **이슈 082+085 RC 로컬 검증 완료·PR 직전, live smoke 전 외부 게이트 2종 차단**.
-  브랜치 `codex/open-source-launch-085`(base `9784fd2`). 컨셉은 “local-first Rust 코어가 본체, AI는
-  명시 동의 뒤 Intent→미리보기→승인→undo를 따르는 선택 어댑터”로 고정했다. README 한·영문은
-  `@auto-hwp/react@0.0.4`+`ai-protocol@0.0.4`를 직접 설치하는 에이전트/BYOK 복붙 경로로 교정했고,
-  `/docs` 단일 프롬프트 CTA·사이트/레포 llms.txt·`/privacy`·SECURITY/Support/행동강령/기여 템플릿·
-  CSP와 PR CI를 완성했다. 데모 비용은 실청구 $0.0124 기준 전역 400/IP 20으로 잠그고, Upstash는
-  변수 존재가 아니라 60초 캐시 `PING` 도달성까지 probe한다. 첨부는 공개 데모에서 네트워크 전에
-  정직 거부(BYOK만 허용). GitHub private reporting·Dependabot·secret scanning/push protection은
-  실제 활성화·재조회 완료. npm stable fresh Vite/Next(README AI 브리지 타입 포함)·Node/Bun 8쪽과
-  browser-harness 편집/undo green, 네 package registry shasum과 local pack dry-run 증거 완료.
-  `scripts/verify-launch.sh --automated` **27/27**, 전체 report **29/37**(의도된 pending 8), actionlint·
-  diff-check green. `scripts/verify-local.sh --full` EXIT=0: 게이트 8==8/18==18/24==24/6==6, HWPX
-  ±1 98.2%, wasm 재빌드/wasm-opt, vitest 261+64+416+195+11, e2e 79 passed/2 expected skip.
-  082 소스는 `rhwp` feature 뒤 `experimental_guarded`로 존재하지만 한/글·한컴독스 증거 전 공개 지원
-  **제외**. `external/rhwp` 무수정, 선재 미추적 `crates/hwp-rhwp/examples/control-audit.rs` 무접촉.
-  다음: 명시적 파일만 082→085 두 커밋, push/PR→실제 checks→main 보호→merge. 그 뒤에도 소유자
-  개인정보/런칭 문구 승인과 Upstash Production 변수 2개가 필요하며, 없이는 tag/Release/배포/live smoke
-  금지. Vercel env 이름 실측 증거=`docs/launch/evidence/2026-08-12-vercel-preflight.md`. 현재 사용자
-  지시로 커밋·push·PR·main 병합은 진행 가능하나 npm publish는 별도 명시 승인 없이는 금지.
+- 갱신: 2026-08-12 · Codex(sol) — **082+085 RC 및 의존성 보안 보강 검증 완료, PR/보호 규칙 진입**.
+  브랜치 `codex/open-source-launch-085`(base `9784fd2`), 원격 커밋은 `ff0c584`(082 guarded resave)와
+  `5bb471e`(agent-first launch RC). 컨셉은 “local-first Rust 코어가 본체, AI는 명시 동의 뒤
+  Intent→미리보기→승인→undo를 따르는 선택 어댑터”로 고정했다. README 한·영문은
+  `@auto-hwp/react@0.0.4`+`ai-protocol@0.0.4` 직접 설치/BYOK 복붙 계약, `/docs` 단일 프롬프트 CTA,
+  사이트·레포 llms.txt, privacy/security/community, CSP·PR CI까지 정합화했다. 공개 데모는 실청구
+  $0.0124 기준 전역 400/IP 20, Upstash 실 `PING` 도달성 probe, 첨부는 네트워크 전 거부(BYOK만 허용).
+  GitHub private reporting·Dependabot·secret scanning/push protection은 실제 활성화했다. 첫 push에서
+  발견한 Dependabot 9건 중 npm/pnpm 8건은 `undici 7.29.0`·`postcss 8.5.23`·`nanoid 3.3.17`로 고정해
+  세 audit 0건; Rust `glib 0.18.5` 1건은 Linux Tauri GTK3 전이·취약 API 비도달을 입증해 `not_used`
+  위험 수용했다. Tauri 2.11.5/plugin-dialog 2.7.2 갱신 후 `cargo check -p hwp-viewer` green(13m58s).
+  `verify-launch --automated` **27/27**, 전체 report **29/38**(pending 9), fmt·deny·diff green.
+  `verify-local --full` EXIT=0: 게이트 8==8/18==18/24==24/6==6, HWPX ±1 98.2%, wasm/wasm-opt,
+  vitest 261+64+416+195+11, e2e 79 passed/2 expected skip. fresh Vite/Next/Node/Bun과 browser-harness
+  업로드→8 SVG→셀 편집→undo도 green. 082는 `rhwp` feature 뒤 `experimental_guarded` 소스만 존재하며
+  한/글·한컴독스 증거 전 공개 지원 **제외**. `external/rhwp` 무수정, 선재 미추적
+  `crates/hwp-rhwp/examples/control-audit.rs` 무접촉. 다음: 보안 변경 명시 커밋/push→PR checks→실제
+  check 이름으로 main 보호→merge→Dependabot open 0 재조회·gate pass. 외부 차단은 소유자 개인정보/
+  런칭 문구 승인과 Vercel Upstash Production 변수 2개이며, 없이는 tag/Release/배포/live smoke 금지.
+  증거=`docs/launch/evidence/2026-08-12-vercel-preflight.md`. 사용자 지시로 커밋·push·PR·main 병합은
+  진행 가능하나 npm publish는 별도 명시 승인 없이는 금지.
 - 갱신: 2026-08-11 · Codex(sol) — **이슈 082 `.hwp` 재저장 v1 구현 완료·실물 게이트 대기**.
   신규 `hwp-hwp5-patch`: 원본 레코드→`section+CellPath+block` 주소 관찰, UTF-16 PARA_TEXT 최소 패치,
   nchars MSB/CHAR_SHAPE 보정, 네이티브 빈 문단, CFB same-chain/FAT·mini→regular·전체 재작성 폴백,

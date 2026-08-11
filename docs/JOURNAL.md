@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-12 (Codex sol) · RC 의존성 보안 보강 완료
+- Dependabot 9건 중 JS 8건을 lockfile override로 해소하고 세 audit 0건, Tauri 2.11.5 데스크톱 check green.
+- glib 1건은 Linux GTK3 전이·취약 API 비도달 근거로 `not_used` 위험 수용; main 병합 뒤 open 0 재확인 예정.
+- `verify-launch` 27/27·전체 29/38, fmt·licenses·diff green. 다음은 보안 커밋→PR CI→main 보호/merge.
+- 외부 차단은 소유자 문구 2건과 Upstash Production 변수 2개; 이 전에는 tag·배포·live smoke 금지.
+
 ## 2026-08-12 (Codex sol) · 082+085 RC 로컬 완료, PR/보호 레일 진입
 - 082는 guarded 소스만 포함·공개 지원 제외, 085는 agent-first 문서/신뢰/비용/릴리스 게이트를 완성.
 - GitHub 보안 설정·fresh Vite/Next/Node/Bun·pack 증거 완료; `verify-launch` 27/27 자동 green.

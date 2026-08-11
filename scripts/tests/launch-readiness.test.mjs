@@ -33,6 +33,7 @@ function manifest(overrides = {}) {
     manual_gates: {
       privacy_copy_owner_review: { status: "pass", evidence: "docs/launch/evidence/privacy.md" },
       github_security_settings: { status: "pass", evidence: "docs/launch/evidence/security.md" },
+      dependency_security: { status: "pass", evidence: "docs/launch/evidence/dependencies.md" },
       branch_protection: { status: "pass", evidence: "docs/launch/evidence/branch.md" },
       durable_rate_limit: { status: "pass", evidence: "docs/launch/evidence/rate-limit.md" },
       fresh_consumer_smoke: { status: "pass", evidence: "docs/launch/evidence/consumer.md" },
@@ -107,6 +108,7 @@ function passingFiles() {
     "docs/launch/STATUS.json": manifest(),
     "docs/launch/evidence/privacy.md": "reviewed",
     "docs/launch/evidence/security.md": "enabled",
+    "docs/launch/evidence/dependencies.md": "audited",
     "docs/launch/evidence/branch.md": "protected",
     "docs/launch/evidence/rate-limit.md": "durable",
     "docs/launch/evidence/consumer.md": "passed",

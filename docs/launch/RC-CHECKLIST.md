@@ -20,6 +20,7 @@
 | 게이트 | 담당 | 현재 | 닫는 정확한 방법 | 증거 |
 |---|---|---:|---|---|
 | GitHub 보안 설정 | 작업 에이전트 | 완료 | private reporting·Dependabot·secret scanning·push protection 재조회 | `evidence/2026-08-12-github-security.md` |
+| 의존성 보안 | 작업 에이전트 | 병합 대기 | lockfile 8건 수정+감사 0; glib 비도달 위험 수용. main 병합 뒤 open alert 0 재조회 | `evidence/2026-08-12-dependency-security.md` |
 | 개인정보 문구 | 소유자 | 대기 | 실제 운영과 `/privacy`를 대조한 뒤 `OWNER-APPROVAL.md`에 승인자/시각 기록 | 승인된 `OWNER-APPROVAL.md` |
 | 런칭 문구 | 소유자 | 대기 | CONTENT-BRIEF의 허용/금지 주장과 README 한·영문 승인 | 승인된 `OWNER-APPROVAL.md` |
 | durable rate limit | 소유자(저장소 생성)→작업 에이전트(연결 검증) | 차단 | Vercel Production에 `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`을 등록하고 RC 배포 | `evidence/2026-08-12-vercel-preflight.md` + 아래 probe 로그 |
