@@ -1,6 +1,6 @@
 # 084 — MCP `render_page`를 자체 렌더로: 편집된 문서의 중간 산출물 레인
 
-- 상태: **기획 확정 · 착수 가능** (2026-08-11) — 에이전트 퍼널 **F1** (`docs/AGENT-FUNNEL-ROADMAP.md`)
+- 상태: **구현·검증 완료 · main 반영** (2026-08-11) — 에이전트 퍼널 **F1** (`docs/AGENT-FUNNEL-ROADMAP.md`)
 - 우선순위: P1 · 크기: 작음(반나절급) — 퍼널 첫 관문이자 082의 선행 데모 기반
 - 영역: `crates/hwp-mcp` (코어 렌더는 기존 `hwp-session` 재사용 — 신규 조판/렌더 코드 없음)
 
@@ -26,13 +26,22 @@
 
 ## 수용 기준
 
-- [ ] 편집된 문서(`apply_content` 후) `render_page` → 편집이 반영된 페이지 SVG 반환.
-- [ ] 페이지 수·내용이 `export_pdf`와 일치(같은 조판) — 픽스처 1건으로 잠금(페이지 수 + 대표 글리프).
-- [ ] 무편집 문서 기본 경로도 자체 렌더(웹과 동일 화면). `source:"original"`은 종전 rhwp 경로 그대로.
-- [ ] 기존 테스트 `render_svg_is_original_only_edited_docs_refuse` → 새 계약으로 교체(red→green).
-- [ ] 같은 revision 2회 요청 시 재조판 1회(캐시 동작 테스트).
-- [ ] `scripts/verify-local.sh --full` EXIT=0 · 게이트 8/18/24/6·HWPX축·LOCKSTEP 불변
+- [x] 편집된 문서(`apply_content` 후) `render_page` → 편집이 반영된 페이지 SVG 반환.
+- [x] 페이지 수·내용이 `export_pdf`와 일치(같은 조판) — 픽스처 1건으로 잠금(페이지 수 + 대표 글리프).
+- [x] 무편집 문서 기본 경로도 자체 렌더(웹과 동일 화면). `source:"original"`은 종전 rhwp 경로 그대로.
+- [x] 기존 테스트 `render_svg_is_original_only_edited_docs_refuse` → 새 계약으로 교체(red→green).
+- [x] 같은 revision 2회 요청 시 재조판 1회(캐시 동작 테스트).
+- [x] `scripts/verify-local.sh --full` EXIT=0 · 게이트 8/18/24/6·HWPX축·LOCKSTEP 불변
       (조판 코드 무접촉 — hwp-mcp 배선만).
+
+## 완료 실측 (2026-08-11)
+
+- red에서 default 비-rhwp의 종전 `render_page needs a build with --features rhwp` 오류를 재현한 뒤,
+  편집 반영·JSON/typed 캐시 공유·revision당 자체 렌더 1회·원본 옵트인 계약을 테스트로 잠갔다.
+- feature별 lib 테스트: default 38, rhwp 42, pdf 39, no-default 23; rhwp+pdf 전체 64 green.
+  wasm32 no-default check와 `Dockerfile.service` 실제 Linux release 빌드(`rhwp pdf`)도 green.
+- `scripts/verify-local.sh --full` EXIT=0: 게이트 8/18/24/6, wasm·JS·vitest 944,
+  e2e 79 passed/2 expected skip. `external/rhwp`와 조판 코드는 무접촉이다.
 
 ## 함정
 

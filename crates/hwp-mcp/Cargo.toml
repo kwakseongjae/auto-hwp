@@ -26,7 +26,8 @@ default = ["http"]
 # Gating it lets the lib compile to wasm32 under `--no-default-features` (Session/Intent/apply_intent
 # are already wasm-safe; only the HTTP server pulled getrandom/std::net).
 http = ["dep:getrandom", "dep:subtle"]
-# Enables the `render_page` control tool (current doc → SVG) via the rhwp bootstrap.
+# Enables the optional `render_page { source: "original" }` comparison path plus legacy rhwp
+# hit-test/caret geometry. The default live `render_page` is own-render and needs no feature.
 rhwp = ["hwp-core/rhwp"]
 # Issue 013 (service container): the `export_pdf` control tool. Pulls hwp-session/pdf (krilla) — a
 # native-only, wasm-unsafe backend — so it is a SEPARATE opt-in feature the container build turns on;

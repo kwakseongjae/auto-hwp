@@ -5,6 +5,15 @@
 
 ---
 
+## 2026-08-11 (Codex sol) · 084 main 반영 체크포인트
+- 사용자 승인에 따라 084 코드·테스트·정본 7개 파일만 커밋/푸시; 선재 `control-audit.rs`는 제외·보존.
+- 완료: live IR own-render·revision 캐시·원본 옵트인, 전체 검증·서비스 Docker green. 다음: 082 착수.
+
+## 2026-08-11 (Codex sol) · 084 MCP render_page 자체 렌더 — 구현·검증 완료(미커밋)
+- default/typed 렌더를 live IR own-render로 전환하고 revision SVG 캐시와 `source:"original"` 옵트인을 보존.
+- red→green·feature/default/rhwp/pdf/no-default/wasm·서비스 Docker 빌드 green.
+- `verify-local.sh --full` EXIT=0(게이트 8/18/24/6·vitest 944·e2e 79/2skip). 멈춘 곳: 사용자 확인 후 커밋/푸시→082.
+
 ## 2026-08-11 (Fable) · codex(sol) 인수인계 킷 — 084 이슈화 + 착수 프롬프트 4벌
 - F1→이슈 084 승격, docs/handoff/CODEX-SOL-2026-08-11.md에 공통 절차+프롬프트 A(084)/B(082)/C(081)/D(083).
 - 트랙 간 파일 비중첩 설계·동시 작업 조율 규칙 포함. 멈춘 곳: codex 착수 대기.

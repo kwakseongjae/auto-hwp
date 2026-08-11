@@ -6,6 +6,18 @@
 - 정본 배포: **https://autohwp.com** (Vercel full Next — 2026-08-06 컷오버, Actions vercel-deploy.yml).
   GitHub Pages(kwakseongjae.github.io/auto-hwp)는 병행 유지 중 — 리다이렉트 스텁 전환 예정.
   GitHub: https://github.com/kwakseongjae/auto-hwp (public, 홈페이지·description=autohwp.com)
+- 갱신: 2026-08-11 · Codex(sol) — **이슈 084 MCP `render_page` 자체 렌더 교체 완료·main 반영**.
+  기본 `render_page`/typed `Intent::Render`를 편집된 live IR→`hwp_session::render_svg`로 전환하고,
+  `Session.render`에 revision별 페이지 SVG 캐시(동일 revision 재조판 1회)를 추가. `page_count`도
+  `hwp_session::place` 캐시로 웹·PDF와 같은 provider를 사용한다. 종전 rhwp 렌더/파싱 캐시는
+  `source:"original"` 옵트인으로 분리했고 무편집 전용·기존 편집 거부 문구를 그대로 보존했다.
+  red→green: 종전 default 비-rhwp 오류를 재현 후 편집 반영 문구·JSON/typed 캐시 공유·원본 옵트인·
+  `export_pdf` 페이지/대표 글리프 픽스처로 잠금. feature 실측 default 38, rhwp 42, pdf 39,
+  no-default 23, rhwp+pdf 전체 64 green; wasm32 no-default check green. `Dockerfile.service` 실제 빌드
+  성공(`tf-hwp-service:issue-084`, Linux release `rhwp pdf`). `verify-local.sh --full` EXIT=0 — 게이트
+  8==8/18==18/24==24/6==6·wasm/JS/vitest(261+64+416+192+11)·e2e 79 passed/2 expected skip.
+  착수 전 있던 `crates/hwp-rhwp/examples/control-audit.rs`는 7월 진단 예제로 판정, 그대로 보존·무접촉.
+  다음: 퍼널 트랙 B인 082 `.hwp` 재저장 착수.
 - 갱신: 2026-08-11 · Claude(Fable) — **codex(sol) 인수인계 킷 완성 — 퍼널 트랙 착수 준비 완료**.
   F1을 이슈 [084](issues/084-mcp-render-ownrender.md)로 승격(MCP render_page 자체 렌더 교체 — 설계·
   수용 기준·함정 확정). `docs/handoff/CODEX-SOL-2026-08-11.md`: 공통 인수인계 절차(복원→AGENTS→

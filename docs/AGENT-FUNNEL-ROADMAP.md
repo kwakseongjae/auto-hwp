@@ -1,6 +1,7 @@
 # 에이전트 퍼널 로드맵 — "AI가 .hwp를 받아 작업하고, 사람이 중간 검토하고, .hwp로 돌려준다"
 
-- 확정: 2026-08-10 (기획만 — 작업 미착수). 오픈소스 레포의 공개 로드맵 축으로 관리한다.
+- 확정: 2026-08-10. **F1(이슈 084)은 2026-08-11 구현·검증 완료·main 반영**; 나머지는 기획 상태다.
+  오픈소스 레포의 공개 로드맵 축으로 관리한다.
 - 비전(사용자 정의): 에이전트가 **우리가 호스팅한 서버**에 사업계획서 같은 `.hwp`를 첨부해 요청 →
   원본 베이스로 AI가 작업 → **중간 단계는 사용자가 확인·수정·피드백** 가능한 형태 →
   **최종 export는 `.hwp`**(어려우면 PDF라도). MCP처럼 호출 가능한 엔진 고도화가 축이다.
@@ -15,18 +16,18 @@
 | 호스팅 셸 | ✅ Docker 서비스 컨테이너 178MB, 2-stage, SELF-HOST 문서화 | `Dockerfile.service`, `docs/SELF-HOST.md` |
 | 작업 op | ✅ `open_document`·`get_context`·`apply_content`·`find/replace`·`undo/redo` + **제안 흐름 `propose_content`/`commit_proposal`** | `crates/hwp-mcp/src/lib.rs` |
 | 최종 export | ✅ `export_hwpx`·`export_pdf`(pdf feature=컨테이너) / ❌ `.hwp` 없음 — `.hwp` 열면 "HWP5→HWPX (converted)" | lib.rs:589,647 |
-| 중간 렌더 | ⚠️ `render_page`가 **P1 잔재** — rhwp 렌더라 "원본 전용, 편집된 문서 거부" | lib.rs:177-190 |
+| 중간 렌더 | ✅ `render_page` 기본값은 live IR 자체 렌더·revision 캐시. rhwp 원본은 `source:"original"` 옵트인 | `crates/hwp-mcp/src/lib.rs`, 이슈 084 |
 | 사람 검토 화면 | ⚠️ 웹 워크스페이스(제안 카드·고스트 프리뷰·카드별 되돌리기)는 완성돼 있으나 `/d/<key>` 매핑이 **브라우저 localStorage 전용** — 기기 간 공유 불가 | `apps/hwp-lab/src/lib/docUrl.ts` |
 
-즉 이 축은 신규 건설이 아니라 **네 개의 갭 메우기**다: ① 중간 렌더를 자체 렌더로 교체
-② 검토 링크의 서버측 세션 ③ `.hwp` 재저장(→ 이슈 082) ④ 호스팅 운영(멀티테넌트·인증·과금 없는 rate).
+즉 이 축은 신규 건설이 아니라 **네 개의 갭 메우기**다. ① 중간 자체 렌더는 이슈 084로 완료했고,
+남은 것은 ② 검토 링크의 서버측 세션 ③ `.hwp` 재저장(→ 이슈 082) ④ 호스팅 운영이다.
 
-## F1 — 중간 산출물 레인: `render_page`를 자체 렌더로 (작음)
+## F1 — 중간 산출물 레인: `render_page`를 자체 렌더로 (✅ 2026-08-11 구현·검증 완료·main)
 
-P1 시절 rhwp 렌더를 걷어내고 own-render(`hwp-session` render_svg — autohwp.com 프로덕션 표면과 동일)로
-교체. 편집된 문서도 페이지 SVG/PNG를 돌려준다 → 에이전트가 "지금 문서가 이렇게 생겼다"를 매 단계
-사용자에게 보여줄 수 있다. `export_pdf`는 이미 자체 조판이므로 렌더-export 일치가 구조로 보장된다.
-- 게이트: 편집 후 render_page == 웹 워크스페이스 렌더(같은 IR·같은 조판) 픽스처 대조.
+기본 렌더를 own-render(`hwp-session::render_svg` — autohwp.com 프로덕션 표면과 동일)로 교체했다.
+편집된 문서의 페이지 SVG를 돌려주며, 종전 rhwp 원본 렌더는 `source:"original"`로만 남겼다.
+`page_count`·`export_pdf`도 같은 조판 provider를 사용한다. 편집 픽스처·revision 캐시·PDF 페이지/대표
+글리프·feature 조합·서비스 Docker·전체 검증으로 게이트를 잠갔다. 상세는 이슈 084.
 
 ## F2 — 검토 퍼널: 서버측 문서 세션 + 승인 API (중간)
 
