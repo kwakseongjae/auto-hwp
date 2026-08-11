@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-12 (Codex sol) · PR #2 병합 + Rust High 후속
+- PR #2를 보호된 `main` `76cdd8c`로 병합; 기존 npm/pnpm actionable alert는 모두 닫힘.
+- 새 High #16 `quinn-proto 0.11.14`를 0.11.15로 패치, metadata/deny/fmt/launch 29/29/diff green.
+- 다음은 workspace check→후속 PR CI/merge→Dependabot open 0→dependency gate 최종 증빙 PR.
+
 ## 2026-08-12 (Codex sol) · PR CI green + main 보호 적용
 - PR #2 `b2258e2`: build-test 11m11s·licenses 2m47s green, checkout v6 경고 0.
 - 실제 context 2개 strict+PR 필수+admin+대화 해결, force-push/delete 금지로 main 보호 후 API 재조회.
