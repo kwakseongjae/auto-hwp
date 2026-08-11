@@ -7,7 +7,8 @@
   GitHub Pages(kwakseongjae.github.io/auto-hwp)는 병행 유지 중 — 리다이렉트 스텁 전환 예정.
   GitHub: https://github.com/kwakseongjae/auto-hwp (public, 홈페이지·description=autohwp.com)
 - 갱신: 2026-08-12 · Codex(sol) — **오픈소스 런칭 pre-live 안전 정지점 확정, 단독 처리 가능분 완료**.
-  보호된 `main`의 현재 head는 최종 증빙 PR #5 merge `a7e3a85`. 자동 게이트 29/29, 전체 report
+  제품·STATUS 검증 기준점은 최종 증빙 PR #5 merge `a7e3a85`이며, 이후 커밋은 이 상태를 보존하는
+  docs-only 핸드오프다. 자동 게이트 29/29, 전체 report
   33/40, `--pre-live --strict`는 33/38이며 남은 P0 5개만 정확히 red다: `release_commit` 미고정,
   소유자 개인정보 문구 승인, Vercel Production durable Upstash, tag/GitHub Release, 소유자 런칭 문구
   승인. Dependabot open 0; main 보호는 strict `build-test`+`licenses`, PR/admin/대화해결 적용,

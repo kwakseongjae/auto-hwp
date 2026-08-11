@@ -34,7 +34,8 @@
 
 ## 현재 안전 정지점
 
-`main` `a7e3a85`에서 자동 게이트는 29/29, 전체 report는 33/40이다. 라이브 smoke와 최종 ready를
+제품·STATUS 검증 기준점 `a7e3a85`에서 자동 게이트는 29/29, 전체 report는 33/40이다. 이후 커밋은
+이 상태를 보존하는 docs-only 핸드오프다. 라이브 smoke와 최종 ready를
 제외한 `node scripts/launch-readiness.mjs --pre-live --strict`는 33/38이며 아래 5개만 실패한다.
 
 1. 소유자의 개인정보 문구 승인
