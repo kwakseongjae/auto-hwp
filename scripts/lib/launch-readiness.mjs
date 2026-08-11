@@ -353,6 +353,25 @@ export function auditLaunch(source) {
     "workflow_dispatch를 유지하면서 pull_request에 fmt·clippy·test·문서 게이트의 bounded lane을 추가한다.",
   );
 
+  const workflowPaths = [
+    ".github/workflows/ci.yml",
+    ".github/workflows/vercel-deploy.yml",
+    ".github/workflows/publish.yml",
+    ".github/workflows/deploy-demo.yml",
+  ];
+  const staleCheckoutWorkflows = workflowPaths.filter(
+    (relative) => !/actions\/checkout@v6/.test(read(relative)),
+  );
+  add(
+    "community.actions-node24",
+    "community",
+    "P1",
+    staleCheckoutWorkflows.length === 0,
+    "CI·배포·발행 workflow가 Node 24 기반 checkout action을 사용한다",
+    "GitHub hosted runner와 맞는 actions/checkout@v6로 올려 Node 20 강제 전환 경고를 제거한다.",
+    staleCheckoutWorkflows.join(", "),
+  );
+
   const vercelConfig = safeJson(source, "apps/hwp-lab/vercel.json");
   const vercelDeployWorkflow = read(".github/workflows/vercel-deploy.yml");
   add(

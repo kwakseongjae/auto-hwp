@@ -57,6 +57,8 @@ packages are released in lockstep.)*
 
 - **Vercel 배포 경로 단일화.** 모든 브랜치의 자동 Git 빌드를 끄고 Rust·wasm을 선행 생성하는 수동
   `--prebuilt` workflow만 허용해, 지원하지 않는 preview 빌드가 PR 신호를 오염시키지 않게 했다.
+- **GitHub Actions 런타임.** CI·배포·발행 workflow의 checkout을 Node 24 기반 v6로 올려 Node 20
+  강제 전환 경고와 향후 중단 위험을 제거했다.
 - **런칭 의존성 보안.** demo worker의 `undici` 7.29.0, lab의 `nanoid` 3.3.17, Tauri UI의
   `postcss` 8.5.23을 override/lockfile에 고정하고 각 npm/pnpm audit 0건을 확인했다. Tauri는 2.11.5로
   갱신했다.

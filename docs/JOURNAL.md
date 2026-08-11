@@ -5,6 +5,14 @@
 
 ---
 
+## 2026-08-12 (Codex sol) · Actions v6 회귀 게이트 green
+- checkout v6 전환 뒤 launch 29/29·전체 workflow actionlint·diff green.
+- 다음은 보강 커밋/push→PR CI 통과→main 보호/merge.
+
+## 2026-08-12 (Codex sol) · GitHub Actions Node 24 전환
+- PR 경고에서 checkout v4의 Node 20 강제 전환 확인; CI·배포·발행 5곳을 공식 checkout v6로 갱신.
+- 정적 회귀 게이트를 추가. 다음은 launch/actionlint 재검증→커밋/push→PR CI.
+
 ## 2026-08-12 (Codex sol) · prebuilt-only 자동 게이트 green
 - Vercel 자동 Git 배포=false와 수동 `--prebuilt` workflow를 P0 계약으로 잠금.
 - launch 28/28·actionlint·JSON·diff green. 다음은 커밋/push→PR CI→main 보호/merge.

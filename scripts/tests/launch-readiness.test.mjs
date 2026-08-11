@@ -94,8 +94,11 @@ function passingFiles() {
     ".github/PULL_REQUEST_TEMPLATE.md": "Checklist",
     ".github/ISSUE_TEMPLATE/bug_report.yml": "name: Bug",
     ".github/ISSUE_TEMPLATE/feature_request.yml": "name: Feature",
-    ".github/workflows/ci.yml": "on:\n  pull_request:\n  workflow_dispatch:",
-    ".github/workflows/vercel-deploy.yml": "on:\n  workflow_dispatch:\nrun: vercel deploy --prebuilt",
+    ".github/workflows/ci.yml": "on:\n  pull_request:\n  workflow_dispatch:\nuses: actions/checkout@v6",
+    ".github/workflows/vercel-deploy.yml":
+      "on:\n  workflow_dispatch:\nuses: actions/checkout@v6\nrun: vercel deploy --prebuilt",
+    ".github/workflows/publish.yml": "uses: actions/checkout@v6",
+    ".github/workflows/deploy-demo.yml": "uses: actions/checkout@v6",
     "apps/hwp-lab/vercel.json": JSON.stringify({ git: { deploymentEnabled: false } }),
     "apps/hwp-lab/next.config.mjs": `Content-Security-Policy X-Content-Type-Options Referrer-Policy
       Permissions-Policy frame-ancestors`,
@@ -154,6 +157,7 @@ test("깨진 사이트 llms·복붙 예제·단위·CI·메타데이터를 각�
     "docs.geometry-unit",
     "release.repository-metadata",
     "community.pull-request-ci",
+    "community.actions-node24",
     "release.prebuilt-deploy-only",
   ]) assert.equal(failed.has(id), true, id);
 });
