@@ -1,7 +1,9 @@
 # Dependency security preflight — 2026-08-12
 
 브랜치 첫 push 직후 GitHub가 기본 브랜치에 open Dependabot alert 9건(High 3, Moderate 6)을 보고했다.
-비밀 값이나 사용자 문서는 조회하지 않고 advisory·manifest·버전 범위만 REST API로 분류했다.
+비밀 값이나 사용자 문서는 조회하지 않고 advisory·manifest·버전 범위만 REST API로 분류했다. PR #2가
+`main`의 `76cdd8c`로 병합된 뒤 기존 npm/pnpm 경고는 actionable open에서 모두 사라졌다. 전체 이력의
+상태는 fixed 11건, auto-dismissed 3건, 아래 `glib` 위험 수용 1건이었다.
 
 ## 수정한 8건
 
@@ -33,8 +35,25 @@ High/Moderate/Low 포함 **0건**으로 종료했다.
 지원하거나 해당 API가 도달 가능해지면 즉시 재검토한다. 이는 취약 버전이 사라졌다는 주장이 아니라
 현재 제품 경로의 비도달성에 근거한 명시적 위험 수용이다.
 
+## 후속 High alert #16 — `quinn-proto`
+
+- Advisory: `GHSA-4w2j-m93h-cj5j` (High, remote memory exhaustion)
+- manifest: `Cargo.lock`, 취약 범위 `< 0.11.15`, 최초 수정 버전 `0.11.15`
+- PR #2 병합 뒤 REST API 재조회에서 `quinn-proto 0.11.14`가 유일한 actionable open으로 새로 나타났다.
+- `cargo tree --locked --target all -i quinn-proto@0.11.15`는 현재 활성 워크스페이스 그래프에 해당
+  package ID가 없다고 확인했다. 잠금파일에만 남은 항목이라도 GitHub 정본을 흐리지 않도록 dismiss하지
+  않고 `cargo update -p quinn-proto@0.11.14 --precise 0.11.15`로 패치했다.
+
+패치 후 `cargo metadata --locked --no-deps`, `cargo deny check licenses`, `cargo fmt --all --check`,
+`cargo check --workspace --all-targets --locked`(11m45s), `scripts/verify-launch.sh --automated`(29/29),
+`git diff --check`를 통과했다. lockfile diff는 버전과 checksum만 바뀐다.
+
 ## 남은 확인
 
-npm alert 8건은 이 브랜치의 lockfile 수정이 `main`에 병합된 뒤 GitHub가 closed로 재평가해야 한다.
-그 전까지 `dependency_security`는 `pending`이며, 병합 후 open alert가 0인지 REST API로 재조회한 뒤
-이 문서에 결과를 추가하고 gate를 `pass`로 바꾼다.
+`quinn-proto` 후속 PR이 보호된 `main`에 병합되고 GitHub가 alert #16을 closed로 재평가해야 한다.
+그 전까지 `dependency_security`는 `pending`이다. 병합 후 아래 API 결과에서 actionable open이 0인지
+재조회한 뒤 이 문서에 결과와 시각을 추가하고 gate를 `pass`로 바꾼다.
+
+```bash
+gh api --paginate 'repos/kwakseongjae/auto-hwp/dependabot/alerts?state=open'
+```

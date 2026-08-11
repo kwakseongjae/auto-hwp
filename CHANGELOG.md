@@ -61,7 +61,8 @@ packages are released in lockstep.)*
   강제 전환 경고와 향후 중단 위험을 제거했다.
 - **런칭 의존성 보안.** demo worker의 `undici` 7.29.0, lab의 `nanoid` 3.3.17, Tauri UI의
   `postcss` 8.5.23을 override/lockfile에 고정하고 각 npm/pnpm audit 0건을 확인했다. Tauri는 2.11.5로
-  갱신했다.
+  갱신했고, GitHub 재평가에서 새로 열린 High advisory를 닫기 위해 잠금파일의 `quinn-proto`도
+  0.11.15로 올렸다.
 - **`DocSession.applyBatch` 원자성.** 중간 Intent가 실패하면 앞서 적용된 op까지 롤백하고 refresh하여
   “실패했는데 일부만 남는” 고아 편집을 막는다.
 - **패널/편집 UX 회귀.** 패널 접기 뒤 채팅 상태를 보존하고, 탭 라벨 정렬·행/칸 선택·undo 안내와

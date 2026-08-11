@@ -6,6 +6,15 @@
 - 정본 배포: **https://autohwp.com** (Vercel full Next — 2026-08-06 컷오버, Actions vercel-deploy.yml).
   GitHub Pages(kwakseongjae.github.io/auto-hwp)는 병행 유지 중 — 리다이렉트 스텁 전환 예정.
   GitHub: https://github.com/kwakseongjae/auto-hwp (public, 홈페이지·description=autohwp.com)
+- 갱신: 2026-08-12 · Codex(sol) — **PR #2 main 병합 완료, Dependabot 후속 High 패치 검증 중**.
+  오픈소스 런칭 RC는 보호된 `main`의 `76cdd8c`로 병합됐다. 병합 후 기존 npm/pnpm actionable alert는
+  모두 닫혔으나 새 #16(`quinn-proto 0.11.14`, `GHSA-4w2j-m93h-cj5j`, High)이 유일한 open으로
+  나타났다. 활성 cargo graph에는 없는 lockfile 항목이지만 dismiss하지 않고 후속 브랜치
+  `codex/open-source-launch-security-evidence`에서 0.11.15로 갱신했다. metadata locked·deny licenses·
+  fmt·workspace all-targets locked(11m45s)·launch 29/29·diff가 green이다. 다음은 명시 커밋→PR→필수
+  checks→main 병합→Dependabot open 0 재조회→최종 증빙 PR 순서로 닫는다. 그 전까지 dependency gate는
+  pending이다. 라이브 진입 외부 차단은 소유자 개인정보/런칭 문구 승인과 Vercel Production Upstash
+  URL/token 2개이며, 해결 전 tag/Release/배포/live smoke 금지. npm publish는 별도 명시 승인 없이는 금지.
 - 갱신: 2026-08-12 · Codex(sol) — **082+085 RC 검증·PR CI green·main 보호 적용, 증거 반영 후 merge 직전**.
   브랜치 `codex/open-source-launch-085`(base `9784fd2`), 원격 커밋은 `ff0c584`(082 guarded resave)와
   `5bb471e`(agent-first launch RC). 컨셉은 “local-first Rust 코어가 본체, AI는 명시 동의 뒤
