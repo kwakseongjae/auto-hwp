@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-12 (Codex sol) · pre-live 안전 정지점
+- PR #5 `main` `a7e3a85`; launch automated 29/29·report 33/40·pre-live 33/38.
+- open alert 0·보호 설정 유지. 남은 red는 owner 승인 2+Upstash+RC SHA+tag/Release 5개뿐.
+- 다음은 외부 3조건 후 동일 SHA tag/Release/prebuilt 배포→pre-live green→live smoke; publish 미실행.
+
 ## 2026-08-12 (Codex sol) · dependency gate open 0 확정
 - PR #4 필수 checks green 뒤 `main` `3a1b030` 병합; alert #16은 5초 뒤 fixed.
 - Dependabot 최종 fixed 12·auto-dismissed 3·dismissed 1·open 0을 API로 재조회.
