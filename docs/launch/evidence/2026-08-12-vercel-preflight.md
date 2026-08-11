@@ -1,5 +1,13 @@
 # Vercel Production preflight — 2026-08-12
 
+## 배포 경로
+
+PR #2의 Git preview는 `apps/hwp-lab`만 `npm install`해 로컬 `file:` 패키지의 빌드 도구(`vite`)를
+찾지 못하고 실패했다. 이는 지원 배포 경로가 아니다. 프로젝트는 Rust/wasm 산출물을 먼저 만드는
+`.github/workflows/vercel-deploy.yml`의 `vercel deploy --prebuilt`만 사용하며,
+`apps/hwp-lab/vercel.json`의 `git.deploymentEnabled=false`로 모든 브랜치의 자동 Git 배포를 막았다.
+preview도 같은 workflow를 `target=preview`로 수동 실행한다.
+
 - Project: `kwakseongjaes-projects/auto-hwp` (`.vercel/project.json`의 `projectName=auto-hwp`)
 - Read-only command: `vercel env ls production`
 - 확인된 Production 변수 이름: `OPENROUTER_API_KEY`, `DEMO_SITE_URL`, `NEXT_PUBLIC_DEMO_AI`,

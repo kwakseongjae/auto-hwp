@@ -12,6 +12,8 @@
 - 오픈소스 런칭은 저장소 태그 후보 `oss-launch-2026.08.12`와 GitHub Release, autohwp.com 배포를
   하나의 `release_commit`에 고정한다. 내용 변화 없는 npm 재발행은 하지 않는다.
 - 다음 npm 발행은 네 패키지를 새 버전으로 lockstep 발행하는 별도 릴리스다.
+- Vercel Git 자동 빌드는 모든 브랜치에서 끈다. preview와 production 모두 Rust·wasm을 먼저 만든
+  `vercel-deploy.yml`의 수동 `--prebuilt` 경로만 사용한다.
 - 082의 구현 코드는 `hwp-mcp`의 `rhwp` feature 뒤에 `experimental_guarded` 상태로 존재하지만, 한/글·
   한컴독스 수용 전에는 공개 지원 범위와 런칭 메시지에서 제외한다. 소스 존재를 지원 약속으로 해석하지 않는다.
 

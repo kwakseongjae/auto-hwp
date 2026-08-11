@@ -95,6 +95,8 @@ function passingFiles() {
     ".github/ISSUE_TEMPLATE/bug_report.yml": "name: Bug",
     ".github/ISSUE_TEMPLATE/feature_request.yml": "name: Feature",
     ".github/workflows/ci.yml": "on:\n  pull_request:\n  workflow_dispatch:",
+    ".github/workflows/vercel-deploy.yml": "on:\n  workflow_dispatch:\nrun: vercel deploy --prebuilt",
+    "apps/hwp-lab/vercel.json": JSON.stringify({ git: { deploymentEnabled: false } }),
     "apps/hwp-lab/next.config.mjs": `Content-Security-Policy X-Content-Type-Options Referrer-Policy
       Permissions-Policy frame-ancestors`,
     "apps/hwp-lab/src/app/privacy/page.tsx": "Privacy. 전체 400회, Upstash 없이는 best-effort.",
@@ -138,6 +140,7 @@ test("깨진 사이트 llms·복붙 예제·단위·CI·메타데이터를 각�
   files["packages/engine/README.md"] = "Coordinates = HWPUNIT / 96";
   files["Cargo.toml"] = 'repository = "https://github.com/USER/auto-hwp"';
   files[".github/workflows/ci.yml"] = "on:\n  workflow_dispatch:";
+  files["apps/hwp-lab/vercel.json"] = JSON.stringify({ git: { deploymentEnabled: { main: false } } });
 
   const failed = new Set(
     auditLaunch(createMemorySource(files))
@@ -151,6 +154,7 @@ test("깨진 사이트 llms·복붙 예제·단위·CI·메타데이터를 각�
     "docs.geometry-unit",
     "release.repository-metadata",
     "community.pull-request-ci",
+    "release.prebuilt-deploy-only",
   ]) assert.equal(failed.has(id), true, id);
 });
 

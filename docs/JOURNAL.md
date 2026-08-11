@@ -5,6 +5,15 @@
 
 ---
 
+## 2026-08-12 (Codex sol) · prebuilt-only 자동 게이트 green
+- Vercel 자동 Git 배포=false와 수동 `--prebuilt` workflow를 P0 계약으로 잠금.
+- launch 28/28·actionlint·JSON·diff green. 다음은 커밋/push→PR CI→main 보호/merge.
+
+## 2026-08-12 (Codex sol) · Vercel prebuilt-only 불변식 복구
+- PR Git preview가 독립 `file:` 패키지의 `vite` 미설치로 실패; 이 클라우드 빌드는 비지원 경로로 확정.
+- 모든 브랜치 자동 Git 배포를 끄고 수동 `vercel deploy --prebuilt`만 허용하는 P0 정적 게이트를 추가.
+- 다음은 launch/actionlint 재검증→커밋/push→PR CI→main 보호/merge.
+
 ## 2026-08-12 (Codex sol) · PR #2 Linux CI 전제 보강
 - 첫 `build-test`는 Ubuntu의 Tauri 네이티브 라이브러리 부재로 `glib-sys`에서 red; licenses는 green.
 - 공식 Tauri Debian prerequisite 설치 step을 추가하고 actionlint·launch 27/27·diff green.

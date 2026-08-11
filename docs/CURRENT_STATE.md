@@ -25,7 +25,11 @@
   `crates/hwp-rhwp/examples/control-audit.rs` 무접촉. 다음: 보안 변경 명시 커밋/push→PR checks→실제
   check 이름으로 main 보호→merge→Dependabot open 0 재조회·gate pass. PR #2 첫 CI는 Ubuntu에 Tauri
   네이티브 라이브러리가 없어 `glib-sys`에서 red(코드 clippy 아님); 공식 Tauri Debian prerequisite 설치
-  step을 추가했고 actionlint·런칭 27/27 green, 재실행 대기다. 외부 차단은 소유자 개인정보/
+  step을 추가했고 actionlint green. 같은 PR의 Vercel Git preview는 독립 `file:` 패키지의 `vite`를
+  설치하지 못해 red였으나 이 경로는 비지원이다. 모든 브랜치의 Git 자동 배포를 끄고 Rust/wasm 포함
+  `vercel-deploy.yml --prebuilt`만 허용하는 P0 자동 게이트를 추가했다. launch **28/28**·actionlint·
+  JSON·diff green이며 보강 커밋/push 후 CI 재실행 대기다.
+  외부 차단은 소유자 개인정보/
   런칭 문구 승인과 Vercel Upstash Production 변수 2개이며, 없이는 tag/Release/배포/live smoke 금지.
   증거=`docs/launch/evidence/2026-08-12-vercel-preflight.md`. 사용자 지시로 커밋·push·PR·main 병합은
   진행 가능하나 npm publish는 별도 명시 승인 없이는 금지.

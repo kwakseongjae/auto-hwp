@@ -353,6 +353,19 @@ export function auditLaunch(source) {
     "workflow_dispatch를 유지하면서 pull_request에 fmt·clippy·test·문서 게이트의 bounded lane을 추가한다.",
   );
 
+  const vercelConfig = safeJson(source, "apps/hwp-lab/vercel.json");
+  const vercelDeployWorkflow = read(".github/workflows/vercel-deploy.yml");
+  add(
+    "release.prebuilt-deploy-only",
+    "release",
+    "P0",
+    vercelConfig?.git?.deploymentEnabled === false &&
+      /^\s*workflow_dispatch\s*:/m.test(vercelDeployWorkflow) &&
+      /vercel\s+deploy\s+--prebuilt/.test(vercelDeployWorkflow),
+    "Vercel 자동 Git 빌드를 끄고 Rust·wasm을 포함한 수동 prebuilt 배포만 허용한다",
+    "apps/hwp-lab/vercel.json의 git.deploymentEnabled=false와 workflow_dispatch 기반 --prebuilt 배포를 유지한다.",
+  );
+
   const securityConfig = [
     read("apps/hwp-lab/next.config.mjs"),
     read("apps/hwp-lab/src/middleware.ts"),
