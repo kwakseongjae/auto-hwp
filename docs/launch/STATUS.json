@@ -33,8 +33,8 @@
       "evidence": "docs/launch/evidence/2026-08-12-dependency-security.md"
     },
     "branch_protection": {
-      "status": "pending",
-      "evidence": ""
+      "status": "pass",
+      "evidence": "docs/launch/evidence/2026-08-12-branch-protection.md"
     },
     "durable_rate_limit": {
       "status": "pending",

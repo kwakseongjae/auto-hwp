@@ -27,8 +27,8 @@
 | 런칭 문구 | 소유자 | 대기 | CONTENT-BRIEF의 허용/금지 주장과 README 한·영문 승인 | 승인된 `OWNER-APPROVAL.md` |
 | durable rate limit | 소유자(저장소 생성)→작업 에이전트(연결 검증) | 차단 | Vercel Production에 `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`을 등록하고 RC 배포 | `evidence/2026-08-12-vercel-preflight.md` + 아래 probe 로그 |
 | fresh consumer | 작업 에이전트 | 완료 | 빈 temp에서 Vite·Next production build, Node·Bun 실제 8쪽 렌더, Vite 브라우저 편집/undo | `evidence/2026-08-12-fresh-consumer.md` |
-| PR CI | 작업 에이전트 | 진행 | RC PR에서 `build-test`, `licenses` 실제 성공 | PR checks URL |
-| main 보호 | 작업 에이전트 | 대기 | 실제 PR check context 이름 확인 뒤 strict checks+PR 필수+admin 적용, 재조회 | GitHub 설정/API 로그 |
+| PR CI | 작업 에이전트 | 완료 | RC PR에서 `build-test`, `licenses` 실제 성공 | [run 31527277416](https://github.com/kwakseongjae/auto-hwp/actions/runs/31527277416) |
+| main 보호 | 작업 에이전트 | 완료 | 실제 PR check context 이름으로 strict checks+PR 필수+admin 적용, API 재조회 | `evidence/2026-08-12-branch-protection.md` |
 | tag/Release/site | 작업 에이전트 | 대기 | 보호된 main의 RC SHA를 태그·Release·Vercel workflow `--ref`에 동일 사용 | tag/Release/deploy URL+SHA |
 | 라이브 smoke | 작업 에이전트 | 최종 대기 | 배포 뒤 `LAUNCH_BASE_URL=https://autohwp.com scripts/verify-launch.sh --browser`와 실제 문서 퍼널 | live evidence |
 

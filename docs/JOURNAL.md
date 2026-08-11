@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-12 (Codex sol) · PR CI green + main 보호 적용
+- PR #2 `b2258e2`: build-test 11m11s·licenses 2m47s green, checkout v6 경고 0.
+- 실제 context 2개 strict+PR 필수+admin+대화 해결, force-push/delete 금지로 main 보호 후 API 재조회.
+- 다음은 증거 커밋/push→CI 재통과→merge→Dependabot default-branch 재평가.
+
 ## 2026-08-12 (Codex sol) · Actions v6 회귀 게이트 green
 - checkout v6 전환 뒤 launch 29/29·전체 workflow actionlint·diff green.
 - 다음은 보강 커밋/push→PR CI 통과→main 보호/merge.

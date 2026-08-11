@@ -6,7 +6,7 @@
 - 정본 배포: **https://autohwp.com** (Vercel full Next — 2026-08-06 컷오버, Actions vercel-deploy.yml).
   GitHub Pages(kwakseongjae.github.io/auto-hwp)는 병행 유지 중 — 리다이렉트 스텁 전환 예정.
   GitHub: https://github.com/kwakseongjae/auto-hwp (public, 홈페이지·description=autohwp.com)
-- 갱신: 2026-08-12 · Codex(sol) — **082+085 RC 및 의존성 보안 보강 검증 완료, PR/보호 규칙 진입**.
+- 갱신: 2026-08-12 · Codex(sol) — **082+085 RC 검증·PR CI green·main 보호 적용, 증거 반영 후 merge 직전**.
   브랜치 `codex/open-source-launch-085`(base `9784fd2`), 원격 커밋은 `ff0c584`(082 guarded resave)와
   `5bb471e`(agent-first launch RC). 컨셉은 “local-first Rust 코어가 본체, AI는 명시 동의 뒤
   Intent→미리보기→승인→undo를 따르는 선택 어댑터”로 고정했다. README 한·영문은
@@ -17,7 +17,7 @@
   발견한 Dependabot 9건 중 npm/pnpm 8건은 `undici 7.29.0`·`postcss 8.5.23`·`nanoid 3.3.17`로 고정해
   세 audit 0건; Rust `glib 0.18.5` 1건은 Linux Tauri GTK3 전이·취약 API 비도달을 입증해 `not_used`
   위험 수용했다. Tauri 2.11.5/plugin-dialog 2.7.2 갱신 후 `cargo check -p hwp-viewer` green(13m58s).
-  `verify-launch --automated` **27/27**, 전체 report **29/38**(pending 9), fmt·deny·diff green.
+  `verify-launch --automated` **29/29**, 전체 report **32/40**(pending 8), fmt·deny·diff green.
   `verify-local --full` EXIT=0: 게이트 8==8/18==18/24==24/6==6, HWPX ±1 98.2%, wasm/wasm-opt,
   vitest 261+64+416+195+11, e2e 79 passed/2 expected skip. fresh Vite/Next/Node/Bun과 browser-harness
   업로드→8 SVG→셀 편집→undo도 green. 082는 `rhwp` feature 뒤 `experimental_guarded` 소스만 존재하며
@@ -30,7 +30,9 @@
   `vercel-deploy.yml --prebuilt`만 허용하는 P0 자동 게이트를 추가했다. launch **28/28**·actionlint·
   JSON·diff green. PR CI에서 `checkout@v4` Node 20 강제 전환 경고가 확인돼 CI·배포·발행 전 레인을
   공식 Node 24 기반 `checkout@v6`로 올리고 정적 회귀 게이트를 추가했다. launch **29/29**·전체 workflow
-  actionlint·diff green이며 보강 커밋/push 후 CI 재실행 대기다.
+  actionlint·diff green. PR #2 최종 후보 `b2258e2`에서 `build-test`(11m11s)·`licenses`(2m47s)가
+  경고 없이 green. 이 실제 context로 main 보호를 적용·재조회했다(strict, admin 적용, PR 필수/승인 0,
+  대화 해결 필수, force-push/delete 금지). 증거 반영 커밋/push→CI 재통과 후 merge가 다음이다.
   외부 차단은 소유자 개인정보/
   런칭 문구 승인과 Vercel Upstash Production 변수 2개이며, 없이는 tag/Release/배포/live smoke 금지.
   증거=`docs/launch/evidence/2026-08-12-vercel-preflight.md`. 사용자 지시로 커밋·push·PR·main 병합은
