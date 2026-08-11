@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-12 (Codex sol) · dependency gate open 0 확정
+- PR #4 필수 checks green 뒤 `main` `3a1b030` 병합; alert #16은 5초 뒤 fixed.
+- Dependabot 최종 fixed 12·auto-dismissed 3·dismissed 1·open 0을 API로 재조회.
+- 최종 증빙 PR에서 dependency pass; 이후는 소유자 승인 2건+Upstash가 라이브 선행 차단.
+
 ## 2026-08-12 (Codex sol) · PR #2 병합 + Rust High 후속
 - PR #2를 보호된 `main` `76cdd8c`로 병합; 기존 npm/pnpm actionable alert는 모두 닫힘.
 - 새 High #16 `quinn-proto 0.11.14`를 0.11.15로 패치, metadata/deny/fmt/launch 29/29/diff green.

@@ -48,11 +48,18 @@ High/Moderate/Low 포함 **0건**으로 종료했다.
 `cargo check --workspace --all-targets --locked`(11m45s), `scripts/verify-launch.sh --automated`(29/29),
 `git diff --check`를 통과했다. lockfile diff는 버전과 checksum만 바뀐다.
 
-## 남은 확인
+## 기본 브랜치 최종 결과
 
-`quinn-proto` 후속 PR이 보호된 `main`에 병합되고 GitHub가 alert #16을 closed로 재평가해야 한다.
-그 전까지 `dependency_security`는 `pending`이다. 병합 후 아래 API 결과에서 actionable open이 0인지
-재조회한 뒤 이 문서에 결과와 시각을 추가하고 gate를 `pass`로 바꾼다.
+- [PR #4](https://github.com/kwakseongjae/auto-hwp/pull/4)의 `build-test`(6m19s)와
+  `licenses`(9m25s)가 [CI run 31530666444](https://github.com/kwakseongjae/auto-hwp/actions/runs/31530666444)에서
+  통과했다.
+- 보호된 `main`의 merge commit은 `3a1b03011b99f337bb7cd4e6f1de8a1bb46af9da`다.
+- GitHub는 alert #16을 merge 5초 뒤인 `2026-08-11T20:09:34Z`에 `fixed`로 재평가했다
+  (`dismissed_at=null`).
+- 최종 REST API 분류는 fixed 12, auto-dismissed 3, dismissed 1, **open 0**이다.
+
+따라서 actionable Dependabot alert가 없고, 유일한 위험 수용은 위에 근거를 명시한 `glib` #1이다.
+`dependency_security` gate를 `pass`로 전환한다. 재조회 명령은 아래와 같다.
 
 ```bash
 gh api --paginate 'repos/kwakseongjae/auto-hwp/dependabot/alerts?state=open'

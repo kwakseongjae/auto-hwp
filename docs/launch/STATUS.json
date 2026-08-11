@@ -29,7 +29,7 @@
       "evidence": "docs/launch/evidence/2026-08-12-github-security.md"
     },
     "dependency_security": {
-      "status": "pending",
+      "status": "pass",
       "evidence": "docs/launch/evidence/2026-08-12-dependency-security.md"
     },
     "branch_protection": {

@@ -6,6 +6,14 @@
 - 정본 배포: **https://autohwp.com** (Vercel full Next — 2026-08-06 컷오버, Actions vercel-deploy.yml).
   GitHub Pages(kwakseongjae.github.io/auto-hwp)는 병행 유지 중 — 리다이렉트 스텁 전환 예정.
   GitHub: https://github.com/kwakseongjae/auto-hwp (public, 홈페이지·description=autohwp.com)
+- 갱신: 2026-08-12 · Codex(sol) — **Dependabot actionable open 0, dependency gate 최종 증빙 중**.
+  후속 PR #4는 필수 `build-test` 6m19s·`licenses` 9m25s green 뒤 보호된 `main`의 `3a1b030`으로
+  병합됐다. GitHub는 #16을 `fixed_at=2026-08-11T20:09:34Z`로 재평가했고 전체 분류는 fixed 12·
+  auto-dismissed 3·dismissed 1(`glib` 비도달 위험 수용)·open 0이다. 최종 증빙 브랜치
+  `codex/open-source-launch-final-evidence`에서 STATUS dependency_security를 pass로 전환한다.
+  이 PR 병합 후 자동 게이트는 29/29, 전체는 33/40 예상이다. 남는 7개는 소유자 개인정보/런칭 문구
+  승인→Vercel Production Upstash URL/token→RC SHA·tag/Release·prebuilt 배포→live smoke→ready 순서다.
+  외부 3조건 전 tag/Release/배포/live smoke 금지, npm publish는 별도 명시 승인 없이는 금지.
 - 갱신: 2026-08-12 · Codex(sol) — **PR #2 main 병합 완료, Dependabot 후속 High 패치 검증 중**.
   오픈소스 런칭 RC는 보호된 `main`의 `76cdd8c`로 병합됐다. 병합 후 기존 npm/pnpm actionable alert는
   모두 닫혔으나 새 #16(`quinn-proto 0.11.14`, `GHSA-4w2j-m93h-cj5j`, High)이 유일한 open으로
