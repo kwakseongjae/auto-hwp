@@ -1,0 +1,18 @@
+[package]
+name = "hwp-hwp5-patch"
+description = "Original-byte HWP5 text patcher: maps SemanticDoc paragraph addresses back to BodyText records and rewrites only edited streams."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+cfb = { workspace = true }
+flate2 = { workspace = true }
+hwp-model = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+hwp-core = { workspace = true, features = ["rhwp"] }

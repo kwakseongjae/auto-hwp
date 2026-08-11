@@ -177,7 +177,7 @@ pub fn guarded_dispatch(root: &Path, req: &Value, session: &mut Session) -> Opti
     // Path confinement on the paths the tools touch. open = input (must exist); export = output.
     let confine = match name {
         "open_document" => Some(true),
-        "export_hwpx" | "export_pdf" => Some(false),
+        "export_hwpx" | "export_hwp" | "export_pdf" => Some(false),
         _ => None,
     };
     if let Some(must_exist) = confine {

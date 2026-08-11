@@ -102,6 +102,10 @@
   color: var(--ah-muted);
 }
 
+.note a {
+  color: var(--ah-accent-ink);
+}
+
 .actions {
   display: flex;
   justify-content: flex-end;

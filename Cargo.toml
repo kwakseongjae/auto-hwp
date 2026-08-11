@@ -14,7 +14,7 @@ edition = "2021"
 version = "0.0.1"
 license = "Apache-2.0"
 rust-version = "1.95"
-repository = "https://github.com/USER/auto-hwp"
+repository = "https://github.com/kwakseongjae/auto-hwp"
 authors = ["auto-hwp contributors"]
 
 [workspace.dependencies]
@@ -23,6 +23,7 @@ thiserror = "2"
 quick-xml = "0.37"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 flate2 = "1"
+cfb = "0.14"
 # RustCrypto (MIT OR Apache-2.0, pure-Rust, wasm-safe). Distribution-doc AES-128-ECB is driven by
 # `aes` + its re-exported `cipher` traits directly (the `ecb` crate is avoided — single-license MIT).
 # `sha1` is used ONLY by hwp-crypto's golden-vector synthesis (dev-dep), never on the decrypt path.
@@ -51,6 +52,7 @@ hwp-session = { path = "crates/hwp-session" }
 hwp-jsx = { path = "crates/hwp-jsx" }
 hwp-export = { path = "crates/hwp-export" }
 hwp-foreign = { path = "crates/hwp-foreign" }
+hwp-hwp5-patch = { path = "crates/hwp-hwp5-patch" }
 
 [profile.release]
 opt-level = 3

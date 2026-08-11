@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   DEMO_AI_CONSENT_MESSAGE,
   DEMO_AI_CONSENT_STORAGE_KEY,
+  demoAiAttachmentError,
   demoAiConsentMessage,
   demoAiConsentParagraphs,
   ensureDemoAiConsent,
@@ -23,6 +24,12 @@ function memoryStorage(seed: Record<string, string> = {}): DemoAiConsentStorage 
 }
 
 describe("public demo AI consent", () => {
+  it("첨부는 공개 데모 네트워크 호출 전에 정직하게 거부한다", () => {
+    expect(demoAiAttachmentError(0)).toBeNull();
+    expect(demoAiAttachmentError(1)).toContain("첨부를 전송하지 않습니다");
+    expect(demoAiAttachmentError(1)).toContain("BYOK");
+  });
+
   it("does not grant or suppress a later prompt after decline", async () => {
     const state: DemoAiConsentState = { granted: false };
     const store = memoryStorage();

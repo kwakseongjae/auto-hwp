@@ -3,10 +3,10 @@
 정적 데모(GitHub Pages)는 서버가 없어 OpenRouter 키를 담을 데가 없다. 이 Cloudflare Worker가 키를
 쥐고 **모델 고정 · 일일 한도 · CORS 잠금**으로 비용을 방어한다. 클라이언트는 키를 절대 보지 않는다.
 
-- 모델: `openai/gpt-5.6-luna`($0.10/M 입력 · $0.60/M 출력). 모델·단가를 바꾸면 한도도 함께 재산정한다.
-- 비용 방어선: `DAILY_CAP=2000`(전체) + `PER_IP_CAP=20`(1인). 유효한 요청만 차감한다.
-  요청당 최악 ≈ $0.00248(입력·출력 상한 동시) → 하루 최대 **$4.95(<$5)**. 실측 기준 $1~2/일.
-  수치 유도는 `wrangler.toml`의 주석과 `src/index.ts`의 `MAX_TOKENS_CEILING` 주석에 있다.
+- 모델: `openai/gpt-5.6-luna`. 모델·프롬프트를 바꾸면 실제 usage를 다시 측정한다.
+- 비용 방어선: `DAILY_CAP=400`(전체) + `PER_IP_CAP=20`(1인). 유효한 요청만 차감한다.
+  2026-08-08 실전 6,082-token 문맥은 약 $0.0124/요청이 청구돼 400회가 약 **$4.96/일**이다
+  (과금 재시도 전). 표면 단가만으로 더 낮게 추정하지 않는다.
 - 프롬프트는 워커가 `@auto-hwp/ai-protocol`로 조립(앱과 같은 계약) → 출력은 우리 JSON Intent로 제한.
 - 출력 예산 `MAX_TOKENS=2048` + `REASONING_EFFORT=low`: gpt-5.6-luna는 **추론 토큰이 `max_tokens`에
   함께 계산**돼, 1024에서는 다중 셀 채움(SetTableCell 약 10건) JSON이 잘리고 전량 드롭됐다(이슈 1-(1)).

@@ -34,15 +34,48 @@ packages are released in lockstep.)*
 
 ## [Unreleased]
 
-0.0.4 발행 이후의 변경을 여기에 쌓는다. 아래는 **공개 데모만** 해당하며 npm 패키지에는 포함되지 않는다.
+0.0.4 발행 이후의 변경이다. 아래 SDK 항목은 **main에만 있고 아직 npm stable 0.0.4에는 포함되지
+않는다.** 오픈소스 런칭 태그와 npm 버전을 억지로 맞추기 위해 재발행하지 않으며, 다음 lockstep npm
+릴리스에서 별도 버전으로 낸다.
+
+### 추가 (Added)
+
+- **실험적 HWP5 텍스트 재저장 레인(공개 지원 제외).** `hwp-mcp`의 `rhwp` feature에서 원본 바이트를
+  보존하는 텍스트 전용 `hwp_export_capability`/`export_hwp`를 추가했다. 구조·서식·이미지 편집은 출력
+  없이 거부한다. 한/글 또는 한컴독스 실물 수용 증거가 끝나기 전에는 공식 지원 기능으로 주장하지 않는다.
+- **`@auto-hwp/react` — 호스트 툴바 확장과 의존성 없는 아이콘 세트.** `toolbarItems`로 제품 고유
+  액션을 전역 툴바에 넣고, SDK와 같은 글리프를 `icons` 네임스페이스로 재사용할 수 있다.
+- **정밀 선택과 적용 전 고스트 프리뷰.** `@auto-hwp/editor-core`의 `rangeLabel`/`rangeText`,
+  `intentGhost*`와 React `RowHeadOverlay`/`GhostPreviewOverlay`를 공개했다. 행 머리 및 Shift 범위 선택과
+  제안이 덮어쓸 위치의 반투명 미리보기를 같은 주소 계약으로 제공한다.
+- **PDF 미리보기 표면.** `PdfPreviewDialog`를 공개하고 데모 다운로드 경로가 저장 전에 결과를 검토할 수
+  있게 했다.
+- **AI 결과 진단과 문단 run 문맥.** `DocProfile`/`ParaRun`, `EditFailureReason`, 응답의 optional
+  `reason`/`message`, 완결된 JSON 항목만 복구하는 `salvageJsonArrayItems`를 additive로 추가했다.
+
+### 수정 (Fixed)
+
+- **Vercel 배포 경로 단일화.** 모든 브랜치의 자동 Git 빌드를 끄고 Rust·wasm을 선행 생성하는 수동
+  `--prebuilt` workflow만 허용해, 지원하지 않는 preview 빌드가 PR 신호를 오염시키지 않게 했다.
+- **GitHub Actions 런타임.** CI·배포·발행 workflow의 checkout을 Node 24 기반 v6로 올려 Node 20
+  강제 전환 경고와 향후 중단 위험을 제거했다.
+- **런칭 의존성 보안.** demo worker의 `undici` 7.29.0, lab의 `nanoid` 3.3.17, Tauri UI의
+  `postcss` 8.5.23을 override/lockfile에 고정하고 각 npm/pnpm audit 0건을 확인했다. Tauri는 2.11.5로
+  갱신했다.
+- **`DocSession.applyBatch` 원자성.** 중간 Intent가 실패하면 앞서 적용된 op까지 롤백하고 refresh하여
+  “실패했는데 일부만 남는” 고아 편집을 막는다.
+- **패널/편집 UX 회귀.** 패널 접기 뒤 채팅 상태를 보존하고, 탭 라벨 정렬·행/칸 선택·undo 안내와
+  PDF 화면 동일 경로를 보강했다.
 
 ### 변경 (Changed)
 
-- **공개 데모 AI 모델 GLM 5.2 → GPT-5.6 Luna(OpenRouter).** 요청당 비용이 ~$0.0038 → ~$0.0005로
-  약 1/7이라 일일 전체 한도를 `DAILY_CAP=1200 → 2000`으로 되돌렸다(1인 한도 20건·출력 1024토큰
-  상한은 그대로). 데모 동의 문구와 README의 전송 대상 표기도 새 모델명으로 갱신했다.
-  *(EN — public demo AI model switched to GPT-5.6 Luna on OpenRouter (~1/7 the per-request cost of
-  GLM 5.2); the demo's daily cap goes back to 2000. Demo-only — not part of the npm packages.)*
+- **공개 데모 AI 모델 GLM 5.2 → GPT-5.6 Luna(OpenRouter).** 실제 6,082-token 문맥 청구는 요청당
+  약 **$0.0124**로 초기 표면 단가 추정($0.0005)이 틀렸음을 확인했다. 공개 런칭 전 Vercel 경로의
+  전체 일일 기본 한도를 **400회**(IP당 20회)로 다시 켰다. Upstash 미구성 시 인스턴스별 best-effort라는
+  한계도 개인정보 안내와 런칭 게이트에 공개한다.
+  *(EN — the demo model moved to GPT-5.6 Luna. A real 6,082-token request billed about $0.0124,
+  invalidating the earlier $0.0005 estimate; the Vercel demo now defaults to a 400-request global cap
+  plus 20 per IP. Without Upstash the global counter is per-instance best effort.)*
 
 ---
 

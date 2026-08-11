@@ -16,6 +16,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${SITE}/bulk${SLASH}`, lastModified: now, changeFrequency: "monthly", priority: 0.8 },
     { url: `${SITE}/bench${SLASH}`, lastModified: now, changeFrequency: "monthly", priority: 0.7 },
     { url: `${SITE}/docs${SLASH}`, lastModified: now, changeFrequency: "weekly", priority: 0.8 },
+    { url: `${SITE}/privacy${SLASH}`, lastModified: now, changeFrequency: "yearly", priority: 0.4 },
     ...DOCS.map((d) => ({
       url: `${SITE}/docs/${d.slug}${SLASH}`,
       lastModified: now,

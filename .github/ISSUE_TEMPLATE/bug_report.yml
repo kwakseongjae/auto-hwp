@@ -1,0 +1,55 @@
+name: Bug report
+description: Report a reproducible auto-hwp defect without sharing a private document.
+title: "[bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not attach confidential HWP/HWPX files, credentials, or exploits. Reduce the problem to a synthetic or redistributable fixture. Security issues belong in GitHub Private Vulnerability Reporting.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: npm version, CLI output, or full commit SHA.
+      placeholder: "@auto-hwp/react 0.0.4"
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - Browser / React SDK
+        - Node or Bun engine
+        - Rust CLI
+        - MCP or service container
+        - autohwp.com demo
+        - Documentation or packaging
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: Commands, synthetic fixture provenance, and exact steps.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification output
+      description: Relevant test output and browser/OS/runtime. Remove document text and secrets.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I verified that this report contains no private document, personal information, credential, or undisclosed exploit.
+          required: true

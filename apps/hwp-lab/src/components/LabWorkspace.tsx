@@ -9,7 +9,13 @@ import { AutosaveController, IdbSnapshotStore, findRecoverable, formatAge, recov
 import { clearLiveDoc, decideResume, readLiveDoc, resumeToastMessage, writeLiveDoc } from "@/lib/resumeSession";
 import { DOC_URL_MISSING_MESSAGE, docUrlPath, homePath, lookupDocUrl, parseDocUrl, rememberDocUrl, shortDocKey } from "@/lib/docUrl";
 import { limitMessage, oversizeMessage } from "@/lib/limits";
-import { ensureDemoAiConsent, splitConsentMessage, type DemoAiConsentState, type DemoAiTransport } from "@/lib/demoAiConsent";
+import {
+  demoAiAttachmentError,
+  ensureDemoAiConsent,
+  splitConsentMessage,
+  type DemoAiConsentState,
+  type DemoAiTransport,
+} from "@/lib/demoAiConsent";
 import { demoAiHttpError, readDemoAiResponse } from "@/lib/demoAiResponse";
 import DemoAiConsentDialog from "./DemoAiConsentDialog";
 import { ThemeToggle, useTheme } from "./ThemeToggle";
@@ -734,6 +740,10 @@ export default function LabWorkspace() {
       throw new Error("정적 데모에서는 AI 편집을 지원하지 않습니다 — 레포를 클론해 로컬 실행(.env.local에 OPENROUTER_API_KEY) 시 사용할 수 있습니다.");
     }
     if (demoAiOn) {
+      // 공개 데모의 비용·데이터 경계는 텍스트 문맥만 허용한다(maxAttachments=0). ChatPanel의 SDK
+      // 첨부 UI가 보이더라도 payload를 same-origin route까지 조용히 버리거나 보내지 않는다.
+      const attachmentError = demoAiAttachmentError(opts?.attachments?.length ?? 0);
+      if (attachmentError) throw new Error(attachmentError);
       // 동의 문구는 **실제 중계 경로**를 말한다(worker=Cloudflare Worker / route=우리 서버(Vercel)).
       // 게이트는 인앱 모달로 묻고(askDemoAiConsent), 동의는 이 브라우저에 1회만 기억된다.
       if (!(await ensureDemoAiConsent(demoAiConsentRef.current, askDemoAiConsent, demoAiTransport))) {

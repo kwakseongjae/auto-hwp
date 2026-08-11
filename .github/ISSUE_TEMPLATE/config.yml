@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/kwakseongjae/auto-hwp/security/advisories/new
+    about: Report vulnerabilities and private-data exposure without publishing details.
+  - name: Support guide
+    url: https://github.com/kwakseongjae/auto-hwp/blob/main/SUPPORT.md
+    about: Pick the right channel and prepare a safe minimal reproduction.

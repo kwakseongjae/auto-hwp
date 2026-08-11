@@ -111,7 +111,7 @@ scripts/bench-local.sh --dir <경로>  # 다른 폴더를 잰다
 ```
 React UI (@auto-hwp/react: HwpWorkspace + overlays)          ← 선택 레이어
  → editor-core (@auto-hwp/editor-core: headless selection/edit/session)
-  → EngineAdapter 27메서드 (adapter.ts)                     ← 자체 에디터는 여기에 연결
+  → EngineAdapter 34메서드 (adapter.ts)                     ← 자체 에디터는 여기에 연결
    → WasmAdapter(웹) | TauriAdapter(데스크톱) — 같은 계약
     → @auto-hwp/engine (wasm): SemanticDoc + 조판 + SVG/HTML/PDF/HWPX
 ```

@@ -66,7 +66,7 @@ jobs:
           test -n "$VERCEL_ORG_ID" || { echo "::error::secret VERCEL_ORG_ID 이 없습니다"; exit 1; }
           test -n "$VERCEL_PROJECT_ID" || { echo "::error::secret VERCEL_PROJECT_ID 이 없습니다"; exit 1; }
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive # external/rhwp — engine wasm 빌드(cargo resolve)에 필요
 

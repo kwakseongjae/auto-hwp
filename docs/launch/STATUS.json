@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "target": "open-source-launch",
+  "updated_at": "2026-08-12",
+  "stage": "preparation",
+  "stable_npm_version": "0.0.4",
+  "release_commit": "",
+  "release": {
+    "kind": "open-source-launch",
+    "tag_candidate": "oss-launch-2026.08.12",
+    "npm_policy": "0.0.4 remains the verified stable; main package changes stay Unreleased until the next lockstep npm release"
+  },
+  "feature_scope": {
+    "hwp5_resave_v1": {
+      "decision": "excluded",
+      "artifact_presence": "experimental_guarded",
+      "public_support": "excluded",
+      "native_validation": "pending",
+      "evidence": "docs/HWP5-RESAVE-MANUAL-VALIDATION.md"
+    }
+  },
+  "manual_gates": {
+    "privacy_copy_owner_review": {
+      "status": "pending",
+      "evidence": ""
+    },
+    "github_security_settings": {
+      "status": "pass",
+      "evidence": "docs/launch/evidence/2026-08-12-github-security.md"
+    },
+    "dependency_security": {
+      "status": "pending",
+      "evidence": "docs/launch/evidence/2026-08-12-dependency-security.md"
+    },
+    "branch_protection": {
+      "status": "pass",
+      "evidence": "docs/launch/evidence/2026-08-12-branch-protection.md"
+    },
+    "durable_rate_limit": {
+      "status": "pending",
+      "evidence": "docs/launch/evidence/2026-08-12-vercel-preflight.md"
+    },
+    "fresh_consumer_smoke": {
+      "status": "pass",
+      "evidence": "docs/launch/evidence/2026-08-12-fresh-consumer.md"
+    },
+    "tag_and_github_release": {
+      "status": "pending",
+      "evidence": ""
+    },
+    "release_candidate_live_smoke": {
+      "status": "pending",
+      "evidence": ""
+    },
+    "launch_copy_owner_approval": {
+      "status": "pending",
+      "evidence": ""
+    }
+  }
+}

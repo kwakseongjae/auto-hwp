@@ -1,6 +1,6 @@
 // prepare-deps.mjs — 이 예제의 의존 소스를 고른다 (W6.4).
 //
-// 기본값은 **레지스트리**(`@auto-hwp/* ^0.0.2`)다: fresh clone → `npm install` → `npm run dev` 만으로
+// 기본값은 **레지스트리**(`@auto-hwp/* ^0.0.4`)다: fresh clone → `npm install` → `npm run dev` 만으로
 // 외부 사용자와 완전히 같은 경로가 재현된다(레포 빌드 산출물이 끼어들 여지 0).
 //
 // REPO_DEV=1 이면 **로컬 tarball 이 레지스트리본을 덮어쓴다**: packages/* 를 `npm pack` 해
@@ -8,7 +8,7 @@
 // 레지스트리 그대로 남고, 원복은 `npm install` 한 번이다. 미발행 변경(예: 0.0.3 예정 CDN 기본값)을
 // 이 예제에서 미리 확인할 때 쓴다.
 //
-//   npm run dev                 # 레지스트리 ^0.0.2
+//   npm run dev                 # 레지스트리 ^0.0.4
 //   REPO_DEV=1 npm run dev      # 로컬 packages/* 빌드본
 //   npm run use-local           # REPO_DEV 없이 강제로 로컬 tarball 얹기
 import { execFileSync } from "node:child_process";
@@ -22,7 +22,7 @@ const vendor = path.join(appRoot, "vendor");
 const force = process.argv.includes("--force");
 
 if (!force && process.env.REPO_DEV !== "1") {
-  console.log("[prepare-deps] 레지스트리 의존 사용(@auto-hwp/* ^0.0.2). 로컬 빌드본을 쓰려면 REPO_DEV=1.");
+  console.log("[prepare-deps] 레지스트리 의존 사용(@auto-hwp/* ^0.0.4). 로컬 빌드본을 쓰려면 REPO_DEV=1.");
   process.exit(0);
 }
 

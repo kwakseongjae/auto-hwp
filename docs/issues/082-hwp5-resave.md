@@ -1,9 +1,10 @@
 # 082 — `.hwp`(HWP5) 재저장 v1: 원본 바이트 베이스 in-place 텍스트 패치
 
-- 상태: **기획 확정 · 미착수** (2026-08-10) — 에이전트 퍼널 F3 (`docs/AGENT-FUNNEL-ROADMAP.md`)
+- 상태: **구현 완료 · 한컴 실물 수용 게이트 대기** (2026-08-11) — 에이전트 퍼널 F3
+  (`docs/AGENT-FUNNEL-ROADMAP.md`)
 - 우선순위: P1 — 우리 최대 커버리지 갭. 한국 실무는 "받은 .hwp를 .hwp로 돌려줘야" 하고, 현재 우리는
   `.hwp`를 열면 HWPX/PDF로만 내보낸다(`hwp-mcp` export_bytes = serialize_hwpx 고정).
-- 영역: 신규 crate `hwp-hwp5-patch`(가칭) + `hwp-mcp` export 툴 + capability report
+- 영역: 신규 crate `hwp-hwp5-patch` + `hwp-mcp` export 툴 + capability report
 - 레퍼런스: `docs/research/claw-hwp-2026-08.md` — claw-hwp(MIT)의 `patchInPlaceSectors` 계열이
   공개된 유일한 검증 사례. **JS 셸아웃 금지**(코어 하나 원칙) — Rust 포팅(MIT 고지+NOTICE 추가).
 
@@ -33,13 +34,31 @@
 
 ## 수용 기준
 
-- [ ] 무편집 문서: export 산출물이 원본과 **바이트 동일**(패치 0건 = 통과 경로 자체가 no-op).
-- [ ] 텍스트 편집 문서: 미편집 Section·스트림·헤더는 바이트 동일, 편집 문단만 변경(섹터 diff 검증).
-- [ ] 산출물을 **rhwp가 재파싱해 우리 IR과 일치**(자체 왕복 게이트 — 오프라인·CI 가능).
+- [x] 무편집 문서: export 산출물이 원본과 **바이트 동일**(패치 0건 = 통과 경로 자체가 no-op).
+- [x] 텍스트 편집 문서: 미편집 Section·스트림·헤더는 바이트 동일, 편집 문단만 변경(섹터 diff 검증).
+- [x] 산출물을 **rhwp가 재파싱해 우리 IR과 일치**(자체 왕복 게이트 — 오프라인·CI 가능).
 - [ ] **한/글 실물 또는 한컴독스가 산출물을 연다** — 수동 검증 절차 문서화(claw-hwp의 GT 방식.
       자동화는 후속 — 075 한컴 네이티브 오라클과 합류 가능).
-- [ ] 중첩 셀 텍스트(레벨 산술) 픽스처 포함 — 081과 같은 sample-8p 1×1 중첩 표로.
-- [ ] 게이트 8/18/24/6·HWPX축 불변(이 작업은 조판 무접촉), rhwp vendored 무수정(불변식 3).
+- [x] 중첩 셀 텍스트(레벨 산술) 픽스처 포함 — `inner-table-01.hwp`의 depth-2 CellPath로 잠금.
+- [x] 게이트 8/18/24/6·HWPX축 불변(이 작업은 조판 무접촉), rhwp vendored 무수정(불변식 3).
+
+## 구현·자동 검증 결과 (2026-08-11)
+
+- 원본 HWP5 레코드를 독립 순회해 `section + CellPath + block` 주소로 번역한다. 전수 매핑은
+  sample-8p `352/352`, benchmark1 `1096/1096`, inner-table-01 `82/82`이며 마지막 코퍼스는
+  depth-2 중첩 셀을 포함한다.
+- UTF-16 최소 diff로 PARA_TEXT·`nchars`·PARA_CHAR_SHAPE를 보정한다. 마지막 문단 MSB를 보존하고,
+  빈 문자열은 PARA_TEXT 없는 네이티브 빈 문단으로 기록한다.
+- CFB 0.14 기반 same-chain/FAT 확장·mini→regular 승격과 전체 재작성 폴백을 구현했다. 실제 중첩 셀
+  편집본은 strict CFB와 rhwp 재파싱을 통과했고, 32,768B 컨테이너에서 preview 잔존 바이트 제거를
+  포함해 23개 물리 섹터만 달라졌다. 미편집 스트림과 FileHeader는 바이트 동일하며 PrvText/PrvImage는
+  0으로 덮어쓴 뒤 무효화한다.
+- `hwp_export_capability`와 `export_hwp`를 `rhwp` feature에 추가했다. 텍스트 편집은 원본 바이트에서
+  재저장하고, 구조·서식·이미지 편집이 섞이면 출력 파일 없이 HWPX/PDF를 권고한다.
+- `scripts/verify-local.sh --full` 통과: 게이트 `8==8/18==18/24==24/6==6`, HWPX ±1 `98.2%`,
+  vitest `261+64+416+192+11`, Playwright `79 passed/2 expected skip`, `external/rhwp` 무수정.
+- 남은 단 하나의 외부 게이트와 기록 양식은
+  [`docs/HWP5-RESAVE-MANUAL-VALIDATION.md`](../HWP5-RESAVE-MANUAL-VALIDATION.md)에 고정했다.
 
 ## 함정 (claw-hwp `references/hwp-internals.md` 실측 지식 — 착수 전 필독)
 

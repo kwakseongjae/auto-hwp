@@ -4,9 +4,7 @@
   "buildCommand": "npm run build",
   "installCommand": "npm install --no-audit --no-fund",
   "git": {
-    "deploymentEnabled": {
-      "main": false
-    }
+    "deploymentEnabled": false
   },
   "headers": [
     {

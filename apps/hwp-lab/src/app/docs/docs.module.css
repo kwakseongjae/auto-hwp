@@ -450,6 +450,90 @@
   line-height: 1.75;
 }
 
+.agentPromptCard {
+  margin: 28px 0 8px;
+  padding: 20px;
+  border: 1px solid var(--ah-accent-line);
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--ah-accent-wash), var(--ah-surface));
+}
+
+.agentPromptHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.agentPromptKicker {
+  margin: 0 0 5px;
+  color: var(--ah-accent-ink-2);
+  font-size: 10.5px;
+  font-weight: 750;
+  letter-spacing: 0.11em;
+}
+
+.agentPromptHead h2 {
+  margin: 0;
+  color: var(--ah-fg-strong);
+  font-size: 18px;
+}
+
+.agentPromptHead button {
+  flex: none;
+  border: 1px solid var(--ah-accent-line);
+  border-radius: 8px;
+  padding: 7px 11px;
+  background: var(--ah-surface-btn);
+  color: var(--ah-accent-ink);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.agentPromptHead button:hover {
+  background: var(--ah-surface-hover);
+}
+
+.agentPromptHead button:focus-visible {
+  outline: 2px solid var(--ah-accent-ink);
+  outline-offset: 2px;
+}
+
+.agentPromptIntro {
+  margin: 12px 0;
+  max-width: 68ch;
+  color: var(--ah-muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.agentPromptBody {
+  max-height: 310px;
+  margin: 0;
+  padding: 13px 15px;
+  overflow: auto;
+  border: 1px solid var(--ah-line-2);
+  border-radius: 9px;
+  background: var(--ah-surface-3);
+  color: var(--ah-fg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 12px/1.6 ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+@media (max-width: 620px) {
+  .agentPromptHead {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .agentPromptHead button {
+    align-self: flex-start;
+  }
+}
+
 .groupHead {
   margin: 40px 0 4px;
   font-size: 17px;

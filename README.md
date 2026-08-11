@@ -35,24 +35,44 @@
 
 ## 내 서비스에 붙이기
 
+### AI 에이전트에게 연동 맡기기
+
+Codex·Claude Code·Cursor 같은 코딩 에이전트에는 아래 문장을 그대로 붙여넣으세요. 전체 체크리스트는
+[에이전트 시작 프롬프트 정본](./docs/launch/AGENT-PROMPT.md)에 있으며, 에이전트가 사이트 문서부터 읽고
+stable 버전·로컬 처리 경계·실파일 smoke까지 확인하게 합니다.
+
+```text
+auto-hwp를 이 프로젝트에 통합해줘. 먼저 https://autohwp.com/llms.txt 와
+https://autohwp.com/docs/llm, https://autohwp.com/docs/embed 를 읽고 문서에 없는 API는 추측하지 마.
+AI 없는 로컬 문서 경로를 먼저 완성하고, 마지막에 실제 HWP/HWPX 열기·편집·내보내기를 검증해줘.
+```
+
 ### npm — 60초
 
 ```bash
-npm i @auto-hwp/react     # 엔진(@auto-hwp/engine)·헤드리스 코어가 함께 설치됩니다
+npm i @auto-hwp/react@0.0.4 @auto-hwp/ai-protocol@0.0.4
+# react가 엔진·헤드리스 코어를 함께 설치하고, ai-protocol은 아래 BYOK 브리지에서 직접 import합니다
 ```
 
 ```tsx
 import { useMemo, useState } from 'react';
 import { HwpWorkspace, WasmAdapter, workspacePanel, type HwpWorkspaceProps } from '@auto-hwp/react';
+import { buildDocContext } from '@auto-hwp/ai-protocol';
 import '@auto-hwp/react/styles.css';
 
 // LLM 호출은 당신 서버에서 — 이 저장소의 어떤 패키지도 API 키를 보지 않습니다(BYOK).
-const askAi: HwpWorkspaceProps['onAiRequest'] = async (instruction, anchors, docContext) => {
+const askAi: HwpWorkspaceProps['onAiRequest'] = async (instruction, anchors, context) => {
   const res = await fetch('/api/hwp-edit', {
     method: 'POST',
-    body: JSON.stringify({ instruction, anchors, docContext }),
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      instruction,
+      anchors,
+      docContext: buildDocContext(context, anchors), // 문서 데이터는 R5 펜스 안에 둡니다
+    }),
   });
-  return res.json();                     // 검증된 편집 명령(Intent) 배열
+  const data = await res.json();
+  return data.intents ?? [];             // HwpWorkspace 계약은 반드시 Intent[]
 };
 
 export function Editor() {

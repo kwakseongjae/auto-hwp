@@ -8,8 +8,8 @@
 // @auto-hwp/ai-protocol로 조립하므로(서버가 프롬프트를 통제) 출력은 우리 JSON Intent 형식으로 제한되고,
 // 프롬프트 계약이 앱과 드리프트하지 않는다(wrangler가 ai-protocol을 번들).
 //
-// 비용 방어선: GPT-5.6 Luna($0.10/M 입력 · $0.60/M 출력). 요청당 상한을 MAX_TOKENS·입력 상한에서
-// 역산해 DAILY_CAP와 곱한 값이 $5를 넘지 않게 유지한다 — 실제 수치는 MAX_TOKENS_CEILING 주석 참조.
+// 비용 방어선: 표면 단가 역산보다 2026-08-08 실청구($0.0124/요청)를 우선한다. DAILY_CAP 기본 400은
+// 과금 재시도 전 약 $4.96/일이다. 실제 usage를 다시 재기 전에는 캡을 올리지 않는다.
 // PER_IP_CAP로 한 명이 독식 못 하게. 모델을 바꾸면 캡을 새 단가로 반드시 재계산한다.
 // (Gemini Flash-Lite가 더 싸지만 Cloudflare Worker 출구 리전을 구글이 지역 차단 — DEFAULT_MODEL 주석 참조.)
 
@@ -34,8 +34,8 @@ interface Env {
   REASONING_EFFORT?: string; // "minimal"|"low"|"medium"|"high" — 빈 문자열이면 상류에 안 보냄(롤백 스위치)
 }
 
-// 기본 모델: GPT-5.6 Luna(base — luna-pro 아님). 이전 GLM 5.2 대비 요청당 비용 약 1/7이라 같은
-// 예산에서 DAILY_CAP를 올릴 수 있다. Gemini Flash-Lite가 더 싸지만 Cloudflare Worker 출구 리전을
+// 기본 모델: GPT-5.6 Luna(base — luna-pro 아님). 초기 표면 단가 추정과 달리 실전 6,082-token 문맥은
+// 약 $0.0124가 청구됐다. Gemini Flash-Lite가 더 싸지만 Cloudflare Worker 출구 리전을
 // 구글이 지역 차단("not available in your region")해 구글 계열은 제외. 모델은 wrangler.toml MODEL로
 // 오버라이드하며, 바꾸면 거기 DAILY_CAP도 새 단가로 재계산한다.
 const DEFAULT_MODEL = "openai/gpt-5.6-luna";
@@ -52,19 +52,9 @@ const MAX_UPSTREAM_TEXT_BYTES = 128 * 1024;
  *    1필드 → 1건 OK(6.4s) · 2필드 → 2건 OK(7.8s) · 5필드(팀 3행) → 0건(12.5s)
  *    같은 5필드를 컨텍스트 758자로 줄여도 0건(10.3s) — 입력이 아니라 **출력 예산**이 벽이었다.
  *
- *  예산 재계산(단가 $0.10/M 입력 · $0.60/M 출력, DAILY_CAP 2000 유지). 토큰 환산은 자수 × 계수로
- *  보수적으로 잡는다(영문 0.25 tok/자 · 한글 0.7 · 혼합 0.6 · 구조 JSON 0.4):
- *    출력  2,048 tok × $0.60/M                                        = $0.001229
- *    입력  시스템 13,022자(영문)          → 3,256 tok
- *          instruction  1,500자(한글)     → 1,050 tok
- *          docContext   8,000자(혼합)     → 4,800 tok
- *          anchors JSON 8,192자(구조)     → 3,277 tok
- *          펜스/고정 문구                 →   100 tok
- *          합계 12,483 tok × $0.10/M                                  = $0.001248
- *    요청당 최악 ≈ $0.00248 → × DAILY_CAP 2000 = **$4.95/일 (< $5)** ✓
- *  실측 시나리오(docContext 3,259자 · 입력 ≈ 4,800 tok)는 요청당 ≈ $0.0017이고, 대부분의 요청은
- *  출력 상한을 다 쓰지 않는다(2필드 요청은 수백 토큰) → 실제 일예산은 $1~2 수준.
- *  ⚠ 위 최악 계산은 DEMO_REQUEST_LIMITS의 입력 상한(아래)에 의존한다 — 어느 쪽을 바꾸든 같이 고쳐라. */
+ *  ⚠️ 과거 표면 단가 역산($0.00248/요청)은 실제 청구를 과소평가했다. 운영 기준은 실측 $0.0124이며,
+ *  DAILY_CAP 400이면 과금 재시도 전 약 $4.96/일이다. 모델·입력 상한·재시도 정책이 바뀌면 OpenRouter
+ *  usage를 다시 측정하고 이 값과 wrangler.toml을 함께 고친다. */
 const MAX_TOKENS_CEILING = 2048;
 
 /** 추론 노력 기본값. 이 작업은 "구조화 추출"이라 깊은 추론이 필요 없고, 추론 토큰이 출력 예산을
@@ -194,7 +184,7 @@ export default {
     if (req.method !== "POST") return json({ error: "POST only" }, 405, cors);
     if (!env.OPENROUTER_API_KEY?.trim()) return json({ error: "AI provider is not configured" }, 503, cors);
 
-    const dailyCap = positiveConfigInt(env.DAILY_CAP, 1200, 100_000);
+    const dailyCap = positiveConfigInt(env.DAILY_CAP, 400, 100_000);
     const perIpCap = positiveConfigInt(env.PER_IP_CAP, 20, 10_000);
     const maxTokens = positiveConfigInt(env.MAX_TOKENS, MAX_TOKENS_CEILING, MAX_TOKENS_CEILING);
     if (dailyCap === null || perIpCap === null || maxTokens === null || perIpCap > dailyCap) {

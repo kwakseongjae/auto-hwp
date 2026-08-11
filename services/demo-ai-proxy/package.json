@@ -20,5 +20,9 @@
     "@cloudflare/workers-types": "^5.20260722.1",
     "vitest": "^4.1.10",
     "wrangler": "^4.114.0"
+  },
+  "overrides": {
+    "nanoid": "3.3.17",
+    "undici": "7.29.0"
   }
 }

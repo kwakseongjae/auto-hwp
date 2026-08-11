@@ -25,6 +25,32 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // /samples)는 NEXT_PUBLIC_BASE_PATH 를 접두해 같은 경로 체계를 유지한다.
 const isDemo = process.env.DEMO_STATIC === "1";
 const demoBasePath = isDemo ? (process.env.DEMO_BASE_PATH ?? "") : "";
+const isDevelopment = process.env.NODE_ENV === "development";
+
+// 첫 공식 사이트의 브라우저 경계. Next의 인라인 부트 스크립트와 wasm 컴파일, CDN wasm 및
+// cross-origin module worker의 blob shim만 연다. AI는 full Next에서 same-origin이고 정적 데모의
+// 선택 프록시는 workers.dev만 허용한다. 개발 중에는 HMR websocket/eval을 별도로 추가한다.
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'" + (isDevelopment ? " 'unsafe-eval'" : ""),
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: https:",
+  "font-src 'self' data:",
+  "connect-src 'self' https://cdn.jsdelivr.net https://*.workers.dev" + (isDevelopment ? " ws: wss:" : ""),
+  "worker-src 'self' blob:",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join("; ");
+
+const SECURITY_HEADERS = [
+  { key: "Content-Security-Policy", value: CONTENT_SECURITY_POLICY },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=(), usb=()" },
+  { key: "X-Frame-Options", value: "DENY" },
+];
 
 const nextConfig = {
   ...(isDemo
@@ -62,6 +88,9 @@ const nextConfig = {
   ...(isDemo
     ? {}
     : {
+        async headers() {
+          return [{ source: "/:path*", headers: SECURITY_HEADERS }];
+        },
         async rewrites() {
           return [{ source: "/d/:key", destination: "/" }];
         },
