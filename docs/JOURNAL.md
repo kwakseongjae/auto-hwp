@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-12 (Codex sol) · 공개 베타 배포 완료·브라우저 허용 대기
+- PR #9 CI green→main `31f205f`; 동일 SHA tag/prerelease/Vercel production run 31593516444 success.
+- autohwp.com 홈·OG·canonical green, launch smoke 4/6 + privacy 테스트 보정 후 해당 항목 green.
+- Upstash expected red 유지; pre-live 37/38. stage=beta-live, ready로 가장하지 않음.
+- 최종 8쪽 퍼널 PNG/MP4는 Chrome 원격 디버깅 Allow 대기 후 수행. `control-audit.rs` 무접촉.
+
 ## 2026-08-12 (Codex sol) · 네트워크 중단 전 안전 정지
 - 제품 커밋 `844bff3` push·PR #9 생성 완료; 태그·Release·배포·라이브 변경은 미실행.
 - CI run `31588176341`의 build-test/licenses 진행 중에 사용자 요청으로 감시만 중단.

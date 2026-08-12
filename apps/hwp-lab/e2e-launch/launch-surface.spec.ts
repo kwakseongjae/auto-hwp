@@ -60,8 +60,10 @@ test("문서 허브에서 에이전트 프롬프트를 발견하고 복사 완�
 test("푸터와 AI 개인정보 고지가 privacy 정본으로 연결된다", async ({ page }) => {
   await page.goto("/");
   const footerPrivacy = page.locator('footer a[href="/privacy"], footer a[href="/privacy/"]');
-  await expect(footerPrivacy).toHaveCount(1);
-  await footerPrivacy.click();
+  // 푸터는 빠른 링크와 법적 고지에서 같은 정본을 두 번 노출할 수 있다. 개수보다 적어도 한 진입점이
+  // 실제 privacy 페이지로 연결되는 계약을 잠근다.
+  await expect(footerPrivacy.first()).toBeVisible();
+  await footerPrivacy.first().click();
   await expect(page).toHaveURL(/\/privacy\/?$/);
   await expect(page.getByRole("heading", { name: /개인정보/ })).toBeVisible();
 });
