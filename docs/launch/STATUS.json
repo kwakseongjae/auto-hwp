@@ -10,6 +10,13 @@
     "tag_candidate": "oss-launch-2026.08.12",
     "npm_policy": "0.0.4 remains the verified stable; main package changes stay Unreleased until the next lockstep npm release"
   },
+  "operational_decisions": {
+    "durable_rate_limit": {
+      "decision": "deferred_for_public_beta_by_owner",
+      "effect": "the demo uses per-instance memory counters, not a durable global cost ceiling",
+      "evidence": "docs/launch/evidence/2026-08-12-beta-rate-limit-deferral.md"
+    }
+  },
   "feature_scope": {
     "hwp5_resave_v1": {
       "decision": "excluded",
@@ -38,7 +45,7 @@
     },
     "durable_rate_limit": {
       "status": "pending",
-      "evidence": "docs/launch/evidence/2026-08-12-vercel-preflight.md"
+      "evidence": "docs/launch/evidence/2026-08-12-beta-rate-limit-deferral.md"
     },
     "fresh_consumer_smoke": {
       "status": "pass",

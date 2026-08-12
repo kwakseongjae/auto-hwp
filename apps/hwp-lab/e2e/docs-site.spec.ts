@@ -73,8 +73,18 @@ test("랜딩에 사이트 헤더·문서 동선·푸터가 있다", async ({ pag
   // 기능 쇼케이스(GIF 3종) — 지연 로드라 뷰포트에 넣고 확인한다.
   const showcase = page.locator('[data-testid="landing-showcase"]');
   await showcase.scrollIntoViewIfNeeded();
-  await expect(showcase.locator("img")).toHaveCount(3);
+  await expect(showcase.locator('img[src$=".gif"]')).toHaveCount(3);
 
   await page.locator('[data-testid="docs-link"]').click();
   await expect(page).toHaveURL(/\/docs\/?$/);
+});
+
+test("랜딩은 실제 편집 화면과 함께 3단계 레이아웃 기여 동선을 제공한다", async ({ page }) => {
+  await page.goto("/");
+  const contribution = page.getByTestId("community-contribution");
+  await expect(contribution).toBeVisible();
+  await expect(contribution).toContainText("문서 하나를 열어 보는 것부터 컨트리뷰션");
+  await expect(contribution).toContainText("파일명·본문·해시 없이");
+  await expect(contribution.locator('img[src$="/docs-assets/launch-layout-report.png"]')).toBeVisible();
+  await expect(contribution.locator('a[href="#try-document"]')).toHaveText("내 문서로 확인하기");
 });
