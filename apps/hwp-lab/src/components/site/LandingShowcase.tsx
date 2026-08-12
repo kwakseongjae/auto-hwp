@@ -61,6 +61,40 @@ export function LandingShowcase() {
         ))}
       </div>
 
+      <div className={styles.community} data-testid="community-contribution">
+        <div className={styles.communityCopy}>
+          <p className={styles.kicker}>베타를 함께 완성하는 가장 가벼운 방법</p>
+          <h2 className={styles.title}>문서 하나를 열어 보는 것부터 컨트리뷰션입니다</h2>
+          <p className={styles.sub}>
+            오토한글(auto-hwp)은 AI가 한글을 이해하고, 수정하고, 마침내 정복할 수 있는 미래를 만듭니다.
+            지금은 서로 다른 문서의 긴 꼬리를 집단지성으로 찾아야 하는 베타 단계입니다.
+          </p>
+          <ol className={styles.steps}>
+            <li><b>브라우저에서 문서를 엽니다.</b> 파일은 문서 처리 서버로 업로드되지 않습니다.</li>
+            <li><b>한/글·한컴독스와 화면을 비교합니다.</b> 쪽수·줄바꿈·표·글꼴 차이를 찾습니다.</li>
+            <li><b>레이아웃 문제 제보를 누릅니다.</b> 파일명·본문·해시 없이 GitHub 초안이 열립니다.</li>
+          </ol>
+          <div className={styles.communityActions}>
+            <a className={styles.primaryAction} href="#try-document">내 문서로 확인하기</a>
+            <a href="https://github.com/kwakseongjae/auto-hwp/issues/new?template=layout-gap.md" target="_blank" rel="noreferrer">
+              제보 양식 미리 보기 →
+            </a>
+          </div>
+          <p className={styles.privacyNote}>
+            공개 이슈에 직접 적은 내용은 GitHub에 남습니다. 비공개 문서·파일명·본문·개인정보는 올리지 마세요.
+          </p>
+        </div>
+        {/* 실제 브라우저 화면 — 릴리스 촬영 스크립트가 같은 경로에 결정적으로 갱신한다. */}
+        {/* eslint-disable-next-line @next/next/no-img-element -- 정적 제품 스크린샷, 원본 비율 유지 */}
+        <img
+          className={styles.communityShot}
+          src={`${BASE}/docs-assets/launch-layout-report.png`}
+          alt="오토한글 편집 화면 상단의 레이아웃 문제 제보 버튼과 8쪽 한글 문서"
+          loading="lazy"
+          decoding="async"
+        />
+      </div>
+
       <div className={styles.paths}>
         <a className={styles.path} href={siteHref("/docs")} data-testid="docs-link">
           <b>문서</b>

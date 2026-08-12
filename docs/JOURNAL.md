@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-12 (Codex sol) · 집단지성 베타 랜딩·실화면 자산
+- 랜딩/README에 문서 1개→비식별 GitHub 조판 제보 기여 퍼널과 실제 8쪽 화면을 연결.
+- Threads 초안에 실제 PNG 2컷·20초 MP4를 배치하고 공개 베타 릴리스 노트 완성.
+- vitest 198·typecheck·build·PW 6/6·launch 29/29 green; full은 macOS Tauri clippy 20분 정체.
+- Upstash는 소유자 결정으로 베타 유예하되 durable gate pending·전역 비용 위험을 명시. 다음 PR/CI→RC 배포.
+
 ## 2026-08-12 (Codex sol) · 소유자 승인 + 레이아웃 제보 퍼널
 - privacy/동의/README에 “AI 문맥 전송, 오토한글(auto-hwp) 자체 보유 없음”과 rate-key 예외 고정.
 - 파일명·본문·해시 없는 GitHub 조판 제보 버튼·경량 템플릿, Threads 6개 초안·이미지 2컷 완성.

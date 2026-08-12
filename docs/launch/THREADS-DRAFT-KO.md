@@ -24,7 +24,7 @@
 파일을 공개할 필요는 없습니다. 몇 쪽에서 표·줄바꿈·글꼴 중 무엇이 다른지만 GitHub 이슈로 알려
 주셔도 진짜 컨트리뷰션이 됩니다. 문서마다 다른 엣지 케이스를 발견하는 일 자체가 꽤 재미있을 거예요.
 
-미디어: `docs/assets/guide-engine.gif` — 실제 브라우저 업로드→렌더 장면
+미디어: `docs/assets/launch-layout-report.png` — 실제 8쪽 HWP 렌더와 **레이아웃 문제 제보** 버튼
 
 ## 3/6 — 왜 에디터와 LLM까지 만드는가
 
@@ -33,7 +33,7 @@
 문서를 눈으로 보고 → 고칠 곳을 선택하고 → AI 제안을 카드로 확인하고 → 적용하거나 되돌리는 전 과정이
 한 코어 위에 있어야, 사람과 에이전트가 같은 문서를 두고 같이 학습할 수 있기 때문입니다.
 
-미디어: `docs/assets/guide-vibe.gif` — 실제 선택→AI 제안→적용·되돌리기 장면
+미디어: `assets/launch/live-contribution-flow.mp4` — 랜딩 기여 안내→예시 문서→실제 렌더 20초 화면 녹화
 
 ## 4/6 — 데이터 경계
 
@@ -59,7 +59,7 @@ GitHub에 직접 작성한 공개 제보는 GitHub에 남으니, 파일명·본�
 
 잘 안 되는 문서가 실패가 아니라, 지금 우리가 가장 찾고 싶은 지도입니다.
 
-미디어: `assets/brand/landing-live.png` — 실제 베타 화면
+미디어: `assets/launch/live-landing-contribution.png` — 실제 베타 랜딩의 집단지성 기여 안내
 
 ## 6/6 — 초대
 
@@ -81,5 +81,5 @@ GitHub: https://github.com/kwakseongjae/auto-hwp
 - autohwp.com에서 비민감 `.hwp` 샘플을 열고 **레이아웃 문제 제보** 버튼이 새 GitHub 초안을 여는지 확인
 - 초안 URL·본문에 파일명·문서 본문·해시가 없는지 확인
 - `/privacy`, `/llms.txt`, `/docs/llm`, `/docs/embed`가 200인지 확인
-- Threads가 GIF를 재생하는지 확인하고, 재생하지 않으면 같은 컷의 첫 프레임 PNG로 교체
+- Threads가 MP4를 재생하는지 확인하고, 재생하지 않으면 `docs/assets/launch-layout-report.png`로 교체
 - HWPX 한계 문구가 해당 릴리스의 실제 상태와 같은지 확인

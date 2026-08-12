@@ -1230,7 +1230,7 @@ export default function LabWorkspace() {
                 </div>
                 {/* 그리드 영역(copy/stage/ways)으로 배치 — 데스크톱은 좌: 카피+카드 / 우: 스테이지,
                     좁은 화면은 카피 → 스테이지(제품 그림) → 카드 순서가 된다. */}
-                <div className="lab-ways-block">
+                <div className="lab-ways-block" id="try-document">
                   {/* 이 데모에서 할 수 있는 일 두 가지 — 문서 편집 / 양식 일괄 작성. */}
                   <div className="lab-ways">
                     <div className="lab-way">

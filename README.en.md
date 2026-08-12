@@ -31,8 +31,18 @@ as wasm in the browser or on your own server (a laptop, an intranet box).
 
 The file never leaves the browser. Only if you **opt into AI editing** does your instruction plus the document profile, body
 excerpt and table context go — after an explicit consent prompt — through our demo server to OpenRouter (GPT-5.6 Luna);
-the file itself is never uploaded. That AI is **a trial we pay for**, so it has per-day and per-IP caps, and the demo takes
-`.hwp` only. In a product, put your own proxy there — see below.
+the file itself is never uploaded. auto-hwp does not store or own the original document, transmitted context, or AI response
+in its own database or storage. A document-free IP/date usage counter remains for roughly 25 hours for abuse prevention.
+That AI is **a trial we pay for**, so it has per-day and per-IP caps, and the demo takes `.hwp` only. In a product, put your
+own proxy there — see below.
+
+### Contribute with one document
+
+Open a document in the browser, compare the layout with Hancom Office, then use **Report layout issue** in the editor.
+The draft includes only the format and empty comparison fields — never the filename, document text, hash, or bytes.
+Public issue content remains on GitHub, so do not attach private documents or personal information.
+
+<p align="center"><img src="./docs/assets/launch-layout-report.png" alt="The Report layout issue entry in the auto-hwp editor" width="900"></p>
 
 ## Adding it to your own product
 

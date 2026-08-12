@@ -20,6 +20,7 @@ const ASSETS = [
   "guide-engine.gif", // 랜딩 기능 섹션 — 열기·렌더
   "guide-vibe.gif", //  랜딩 기능 섹션 — 말로 고치기
   "guide-bulk.gif", //  랜딩 기능 섹션 — 양식 일괄 작성
+  "launch-layout-report.png", // 집단지성 베타 CTA + README — 실제 8쪽 편집 화면
 ];
 
 mkdirSync(destDir, { recursive: true });
