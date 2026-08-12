@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-12 (Codex sol) · 네트워크 중단 전 안전 정지
+- 제품 커밋 `844bff3` push·PR #9 생성 완료; 태그·Release·배포·라이브 변경은 미실행.
+- CI run `31588176341`의 build-test/licenses 진행 중에 사용자 요청으로 감시만 중단.
+- 재개: context_restore→`gh pr checks 9`→green이면 merge→병합 SHA tag/Release/Vercel→live smoke.
+- red면 로그 진단부터; Upstash durable gate pending, 선재 `control-audit.rs` 무접촉.
+
 ## 2026-08-12 (Codex sol) · 집단지성 베타 랜딩·실화면 자산
 - 랜딩/README에 문서 1개→비식별 GitHub 조판 제보 기여 퍼널과 실제 8쪽 화면을 연결.
 - Threads 초안에 실제 PNG 2컷·20초 MP4를 배치하고 공개 베타 릴리스 노트 완성.

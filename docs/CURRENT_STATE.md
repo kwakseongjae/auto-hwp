@@ -15,8 +15,12 @@
   통과했다. `verify-local --full`은 macOS Tauri clippy 링크가 CPU 0%로 20분 정체돼 중단했으며 진단
   메시지나 코드 실패는 없었다(직전 배치와 같은 로컬 환경 현상; PR Linux CI로 독립 검증). 소유자 지시로 Upstash는
   공개 베타에서 유예하되 pass로 가장하지 않고 durable gate pending·전역 비용 상한 부재를 명시했다.
-  다음: full 결과 기록→커밋/PR/필수 CI→main merge SHA를 RC로 고정→동일 SHA tag/Release/Vercel
-  production→라이브 smoke·최종 스크린샷/영상. 선재 미추적 `control-audit.rs` 무접촉.
+  제품 커밋 `844bff3`은 origin에 push했고 PR #9(https://github.com/kwakseongjae/auto-hwp/pull/9)를
+  만들었다. CI run `31588176341`의 `build-test`·`licenses`가 진행 중이던 시점에 사용자 요청으로 감시를
+  안전 중단했다. **재개 첫 순서**: `bash scripts/context_restore.sh` → `gh pr checks 9` → 둘 다 green이면
+  PR #9 병합 → origin/main 병합 SHA를 RC로 고정 → 동일 SHA tag/Release/Vercel production → 라이브
+  smoke·최종 스크린샷/영상. red면 로그 진단부터 하고 병합 금지. 태그·배포·라이브 변경은 아직 없음.
+  선재 미추적 `control-audit.rs` 무접촉.
 - 갱신: 2026-08-12 · Codex(sol) — **소유자 문구 승인 반영 + 브라우저 레이아웃 제보 퍼널 완료**.
   AI 문맥은 동의 뒤 전송되지만 오토한글(auto-hwp)은 원본·전송 문맥·응답을 자체 DB/스토리지에
   저장·보유하지 않는다고 privacy·동의 모달·README에 고정했다(문서 콘텐츠 없는 IP·날짜별 횟수 키
