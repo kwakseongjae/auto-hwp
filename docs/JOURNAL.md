@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-12 (Codex sol) · 인앱 브라우저 라이브 퍼널 촬영
+- autohwp.com 랜딩→예시 HWP→8 SVG→레이아웃 제보 실검증, 초안 파일명·본문·해시 없음 확인.
+- 라이브 PNG 2컷 + 실제 프레임 88장 기반 22초 1280×720 MP4 생성, Threads 미디어 갱신.
+- live smoke pass; durable Upstash만 pending이라 stage=beta-live 유지. 다음 PR #10 CI/merge.
+- 선재 `control-audit.rs` 무접촉.
+
 ## 2026-08-12 (Codex sol) · 공개 베타 배포 완료·브라우저 허용 대기
 - PR #9 CI green→main `31f205f`; 동일 SHA tag/prerelease/Vercel production run 31593516444 success.
 - autohwp.com 홈·OG·canonical green, launch smoke 4/6 + privacy 테스트 보정 후 해당 항목 green.

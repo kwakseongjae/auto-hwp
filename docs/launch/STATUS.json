@@ -56,8 +56,8 @@
       "evidence": "docs/launch/evidence/2026-08-12-oss-beta-live.md"
     },
     "release_candidate_live_smoke": {
-      "status": "pending",
-      "evidence": ""
+      "status": "pass",
+      "evidence": "docs/launch/evidence/2026-08-12-oss-beta-live.md"
     },
     "launch_copy_owner_approval": {
       "status": "pass",

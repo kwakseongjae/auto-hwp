@@ -6,6 +6,13 @@
 - 정본 배포: **https://autohwp.com** (Vercel full Next — 2026-08-06 컷오버, Actions vercel-deploy.yml).
   GitHub Pages(kwakseongjae.github.io/auto-hwp)는 병행 유지 중 — 리다이렉트 스텁 전환 예정.
   GitHub: https://github.com/kwakseongjae/auto-hwp (public, 홈페이지·description=autohwp.com)
+- 갱신: 2026-08-12 · Codex(sol) — **인앱 브라우저 라이브 퍼널 smoke·최종 홍보 촬영 완료**.
+  autohwp.com 랜딩→기여 CTA→예시 `.hwp`→8 SVG 렌더→레이아웃 제보 링크를 실검증했다. GitHub 초안
+  URL을 디코딩해 샘플 파일명·문서 본문 대표 문자열·해시가 모두 없음 확인. 라이브 PNG 2컷과 인앱
+  브라우저 실제 프레임 88장으로 만든 22초 1280×720 MP4를 `assets/launch/live-production-*`에 저장하고
+  Threads 2/6·3/6·5/6 미디어를 라이브 자산으로 교체했다. `release_candidate_live_smoke=pass`;
+  런칭 report는 durable Upstash와 final ready만 red라 `beta-live` 유지. PR #10에 증거 반영 후 CI/merge가
+  다음. 선재 `control-audit.rs` 무접촉.
 - 갱신: 2026-08-12 · Codex(sol) — **오픈소스 공개 베타 RC 동일 SHA 배포 완료, 최종 브라우저 smoke 중**.
   PR #9 CI build-test 6m17s·licenses 2m49s green 후 보호된 main `31f205f` 병합. 같은 전체 SHA
   `31f205f8355df892d9a7233b2c8b4eeb432bb13e`로 `oss-launch-2026.08.12` 태그·GitHub prerelease·
