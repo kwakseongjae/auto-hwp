@@ -2,9 +2,9 @@
   "schema_version": 1,
   "target": "open-source-launch",
   "updated_at": "2026-08-12",
-  "stage": "preparation",
+  "stage": "beta-live",
   "stable_npm_version": "0.0.4",
-  "release_commit": "",
+  "release_commit": "31f205f8355df892d9a7233b2c8b4eeb432bb13e",
   "release": {
     "kind": "open-source-launch",
     "tag_candidate": "oss-launch-2026.08.12",
@@ -52,12 +52,12 @@
       "evidence": "docs/launch/evidence/2026-08-12-fresh-consumer.md"
     },
     "tag_and_github_release": {
-      "status": "pending",
-      "evidence": ""
+      "status": "pass",
+      "evidence": "docs/launch/evidence/2026-08-12-oss-beta-live.md"
     },
     "release_candidate_live_smoke": {
-      "status": "pending",
-      "evidence": ""
+      "status": "pass",
+      "evidence": "docs/launch/evidence/2026-08-12-oss-beta-live.md"
     },
     "launch_copy_owner_approval": {
       "status": "pass",
