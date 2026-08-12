@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-12 (Codex sol) · 소유자 승인 + 레이아웃 제보 퍼널
+- privacy/동의/README에 “AI 문맥 전송, 오토한글(auto-hwp) 자체 보유 없음”과 rate-key 예외 고정.
+- 파일명·본문·해시 없는 GitHub 조판 제보 버튼·경량 템플릿, Threads 6개 초안·이미지 2컷 완성.
+- launch 29/29·report 35/40·pre-live 35/38; 남음 Upstash→RC SHA→tag/Release 뒤 live smoke.
+- vitest 198·build·e2e 80/2skip·실브라우저·clippy green; full test는 macOS Tauri 링크 정체로 중단.
+
 ## 2026-08-12 (Codex sol) · pre-live 안전 정지점
 - PR #5 `main` `a7e3a85`; launch automated 29/29·report 33/40·pre-live 33/38.
 - open alert 0·보호 설정 유지. 남은 red는 owner 승인 2+Upstash+RC SHA+tag/Release 5개뿐.

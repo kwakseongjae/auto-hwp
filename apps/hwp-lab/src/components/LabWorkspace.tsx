@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Crosshair, ExternalLink, FolderOpen, RotateCcw, Sparkles, X as XIcon } from "lucide-react";
+import { Check, Crosshair, ExternalLink, FolderOpen, MessageSquareWarning, RotateCcw, Sparkles, X as XIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HwpWorkspace, WasmAdapter, FONT_CATALOG, chatSidePanel, type AiRequestOptions, type Anchor, type Citation, type DocContext, type Intent, type WasmAdapterOptions, type WorkspaceToolbarItem } from "@auto-hwp/react";
 import { buildDocContext, createAgentEventParser, type AgentEvent } from "@auto-hwp/ai-protocol";
@@ -9,6 +9,7 @@ import { AutosaveController, IdbSnapshotStore, findRecoverable, formatAge, recov
 import { clearLiveDoc, decideResume, readLiveDoc, resumeToastMessage, writeLiveDoc } from "@/lib/resumeSession";
 import { DOC_URL_MISSING_MESSAGE, docUrlPath, homePath, lookupDocUrl, parseDocUrl, rememberDocUrl, shortDocKey } from "@/lib/docUrl";
 import { limitMessage, oversizeMessage } from "@/lib/limits";
+import { layoutReportFormat, layoutReportUrl } from "@/lib/layoutReport";
 import {
   demoAiAttachmentError,
   ensureDemoAiConsent,
@@ -1022,6 +1023,18 @@ export default function LabWorkspace() {
           </a>
         )}
 
+        <a
+          className="lab-btn lab-hbtn"
+          data-testid="layout-report"
+          href={layoutReportUrl(layoutReportFormat(doc.name))}
+          target="_blank"
+          rel="noreferrer"
+          title="파일명·본문·해시 없이 형식과 빈 비교 항목만 GitHub 공개 이슈 초안에 채웁니다"
+        >
+          <MessageSquareWarning size={14} />
+          레이아웃 문제 제보
+        </a>
+
         {/* 헤더 액션은 앱 디자인 토큰(lab-hbtn)으로 통일한다 — 이전엔 브라우저 기본 버튼처럼 보여
             "시스템 UI가 문서 위에 끼어 있다"는 인상을 줬다(사용자 피드백 이슈 4). */}
         <label className="lab-btn lab-hbtn" title="내 컴퓨터의 .hwp/.hwpx 파일을 엽니다">
@@ -1261,7 +1274,7 @@ export default function LabWorkspace() {
                   </div>
                   <p className="lab-hero-note">
                     {DEMO_AI_ON
-                      ? "파일 원본은 업로드하지 않습니다 · AI 사용 시 필요한 문서 문맥만 OpenRouter로 전송하며 첫 요청 전에 동의를 받습니다"
+                      ? "파일 원본은 업로드하지 않습니다 · AI 문맥은 동의 뒤 전송되지만 오토한글(auto-hwp)은 원본·전송 문맥·응답을 자체 저장소에 보유하지 않습니다"
                       : "파일 원본은 브라우저 밖으로 나가지 않습니다 · AI 연동 시 전송 범위와 제공자는 호스트가 결정합니다"}
                   </p>
                   {/* W6.2: 엔진(wasm) 내려받기 상태. 유휴 프리페치가 랜딩에서 미리 돌므로 대부분 파일을
