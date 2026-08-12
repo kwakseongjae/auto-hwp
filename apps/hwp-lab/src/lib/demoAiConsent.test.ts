@@ -108,6 +108,8 @@ describe("public demo AI consent", () => {
     expect(route).toContain("오토한글 데모 서버(Vercel)를 거쳐");
     expect(route).toContain("OpenRouter");
     expect(route).toContain("파일 원본 전체는 업로드하지 않습니다");
+    expect(route).toContain("오토한글(auto-hwp)은 원본 문서·전송된 문맥·AI 응답을");
+    expect(route).toContain("저장·보유하지 않습니다");
     expect(route).toContain("되돌릴 수 있습니다");
     expect(demoAiConsentParagraphs("worker").join(" ")).toContain("Cloudflare Worker를 거쳐");
   });

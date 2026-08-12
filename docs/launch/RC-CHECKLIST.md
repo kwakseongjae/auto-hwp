@@ -34,18 +34,17 @@
 
 ## 현재 안전 정지점
 
-제품·STATUS 검증 기준점 `a7e3a85`에서 자동 게이트는 29/29, 전체 report는 33/40이다. 이후 커밋은
-이 상태를 보존하는 docs-only 핸드오프다. 라이브 smoke와 최종 ready를
-제외한 `node scripts/launch-readiness.mjs --pre-live --strict`는 33/38이며 아래 5개만 실패한다.
+제품·STATUS 검증 기준점 `a7e3a85`에서 자동 게이트는 29/29였다. 2026-08-12 소유자가 개인정보·런칭
+문구를 승인해 현재 기대치는 전체 report 35/40, 라이브 smoke와 최종 ready를 제외한
+`node scripts/launch-readiness.mjs --pre-live --strict` 35/38이다. 아래 3개만 남는다.
 
-1. 소유자의 개인정보 문구 승인
-2. 소유자의 런칭 문구 승인
-3. Vercel Production durable Upstash 연결
-4. 위 세 조건 뒤 확정할 단일 `release_commit`
-5. 그 SHA의 tag/GitHub Release
+1. Vercel Production durable Upstash 연결
+2. 그 뒤 확정할 단일 `release_commit`
+3. 같은 SHA의 tag/GitHub Release
 
-1~3은 계정·운영 정책·비용 선택이 필요한 외부 조건이다. 이들이 닫히기 전에 4~5나 production 배포를
-선행하지 않는다. 5까지 닫힌 뒤 pre-live strict를 다시 통과시키고 그 다음에만 종합 라이브 smoke를 한다.
+1은 계정·운영 정책·비용 선택이 필요한 외부 조건이다. 이 조건이 닫히기 전에 2~3이나 production
+배포를 선행하지 않는다. 3까지 닫힌 뒤 pre-live strict를 다시 통과시키고 그 다음에만 종합 라이브
+smoke를 한다.
 
 ## durable rate-limit 판정
 

@@ -21,8 +21,8 @@ export default function PrivacyPage() {
         <p className={styles.kicker}>LOCAL FIRST, DISCLOSED WHEN OPTIONAL</p>
         <h1>개인정보 및 로컬 데이터 안내</h1>
         <p className={styles.lede}>
-          오토한글의 기본 문서 경로는 브라우저 안에서 동작합니다. AI 편집은 별도 선택 사항이며, 그때만
-          아래에 적은 문맥이 명시적 동의 뒤 외부 처리자에게 전달됩니다.
+          오토한글(auto-hwp)의 기본 문서 경로는 브라우저 안에서 동작합니다. AI 편집은 별도 선택 사항이며,
+          그때만 아래에 적은 문맥이 명시적 동의 뒤 외부 처리자에게 전달됩니다.
         </p>
         <p className={styles.updated}>최종 갱신: 2026-08-12 · 적용 대상: autohwp.com 라이브 데모</p>
 
@@ -87,10 +87,17 @@ export default function PrivacyPage() {
             AI 요청에 첨부하지 않지만, 발췌와 표 내용에는 개인정보가 포함될 수 있으므로 확인 후 사용하세요.
           </p>
           <p>
-            애플리케이션 코드는 AI 요청 본문이나 모델 응답을 별도 데이터베이스에 저장하지 않습니다.
+            <strong>
+              AI 문맥은 전송되지만, 오토한글(auto-hwp)은 원본 문서·전송된 문맥·AI 응답을 자체
+              데이터베이스나 스토리지에 저장·보유하지 않습니다.
+            </strong>{" "}
             OpenRouter 요청은 zero-data-retention 제공자를 요구하며 해당 경로가 없으면 실패하도록 구성돼
             있습니다. 다만 Vercel·OpenRouter·Upstash 같은 인프라 처리자는 보안 및 운영을 위해 HTTP 메타데이터를
             각자 정책에 따라 처리할 수 있습니다.
+          </p>
+          <p>
+            문서 내용과 별개로, 남용 방지를 위한 IP·날짜별 사용 횟수 키만 서버 메모리 또는 Upstash에 약
+            25시간 유지됩니다. 이 키에는 문서 파일·본문·AI 응답이 들어가지 않습니다.
           </p>
           <p>
             공개 데모 AI는 이미지·참조 문서 첨부를 전송하지 않습니다. 첨부가 있는 요청은 네트워크 전송
@@ -112,9 +119,11 @@ export default function PrivacyPage() {
         </section>
 
         <section>
-          <h2>문의와 보안 제보</h2>
+          <h2>레이아웃·보안 제보</h2>
           <p>
-            일반적인 개인정보 질문은 개인 내용을 싣지 않은 상태로{" "}
+            편집 화면의 <strong>레이아웃 문제 제보</strong> 버튼은 파일명·본문·해시를 제외한 GitHub 이슈
+            초안을 엽니다. 공개 이슈에 작성한 내용은 GitHub에 저장되므로 비공개 문서나 개인정보를
+            붙이지 마세요. 일반적인 개인정보 질문도 개인 내용을 싣지 않은 상태로{" "}
             <a href={REPO + "/issues/new"} target="_blank" rel="noreferrer">
               GitHub 이슈
             </a>

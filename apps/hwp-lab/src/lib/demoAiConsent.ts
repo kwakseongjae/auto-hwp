@@ -16,7 +16,8 @@ const RELAY: Record<DemoAiTransport, string> = {
 export function demoAiConsentMessage(transport: DemoAiTransport): string {
   return (
     "데모 AI 편집을 위해 입력한 지시와 현재 문서의 제목·본문 발췌·표 내용·선택 위치가 " +
-    `${RELAY[transport]} OpenRouter(GPT-5.6 Luna)로 전송됩니다. 파일 원본 전체는 업로드하지 않습니다.\n` +
+    `${RELAY[transport]} OpenRouter(GPT-5.6 Luna)로 전송됩니다. 파일 원본 전체는 업로드하지 않습니다. ` +
+    "오토한글(auto-hwp)은 원본 문서·전송된 문맥·AI 응답을 자체 데이터베이스나 스토리지에 저장·보유하지 않습니다.\n" +
     "받은 제안은 적용 전에 카드로 보여 주며, 적용해도 한 번에 되돌릴 수 있습니다.\n\n전송하고 AI 편집을 사용할까요?"
   );
 }

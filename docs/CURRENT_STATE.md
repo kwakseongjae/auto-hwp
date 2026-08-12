@@ -6,6 +6,18 @@
 - 정본 배포: **https://autohwp.com** (Vercel full Next — 2026-08-06 컷오버, Actions vercel-deploy.yml).
   GitHub Pages(kwakseongjae.github.io/auto-hwp)는 병행 유지 중 — 리다이렉트 스텁 전환 예정.
   GitHub: https://github.com/kwakseongjae/auto-hwp (public, 홈페이지·description=autohwp.com)
+- 갱신: 2026-08-12 · Codex(sol) — **소유자 문구 승인 반영 + 브라우저 레이아웃 제보 퍼널 완료**.
+  AI 문맥은 동의 뒤 전송되지만 오토한글(auto-hwp)은 원본·전송 문맥·응답을 자체 DB/스토리지에
+  저장·보유하지 않는다고 privacy·동의 모달·README에 고정했다(문서 콘텐츠 없는 IP·날짜별 횟수 키
+  약 25시간 예외). 열린 문서 헤더에 파일명·본문·해시 없이 형식과 빈 비교 항목만 GitHub 공개 이슈
+  초안으로 여는 `레이아웃 문제 제보`를 추가하고 이슈 템플릿을 1분 참여형으로 줄였다. 첫 Threads 6개
+  초안·생성 이미지 2컷·HWPX 한계 정본도 `docs/launch/THREADS-DRAFT-KO.md`에 확정. 소유자 수동 게이트
+  2개 pass로 launch automated 29/29·report 35/40·pre-live 35/38; 남은 3개는 Production Upstash →
+  RC SHA 고정 → 동일 SHA tag/Release다. 검증: hwp-lab vitest 198, typecheck, production build,
+  Playwright 80 passed/2 expected skip, browser-harness 실제 HWP 8쪽·비식별 이슈 초안, 전체 clippy green
+  (18m49s). `verify-local --full`의 workspace test는 macOS `tauri-utils` 링크가 CPU 0%로 20분 정체돼
+  중단했으며 코드 실패는 없음. 배포/tag/live smoke/npm publish는 미실행. 선재 미추적
+  `crates/hwp-rhwp/examples/control-audit.rs`는 보존·무접촉.
 - 갱신: 2026-08-12 · Codex(sol) — **오픈소스 런칭 pre-live 안전 정지점 확정, 단독 처리 가능분 완료**.
   제품·STATUS 검증 기준점은 최종 증빙 PR #5 merge `a7e3a85`이며, 이후 커밋은 이 상태를 보존하는
   docs-only 핸드오프다. 자동 게이트 29/29, 전체 report

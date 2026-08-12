@@ -21,8 +21,8 @@
   },
   "manual_gates": {
     "privacy_copy_owner_review": {
-      "status": "pending",
-      "evidence": ""
+      "status": "pass",
+      "evidence": "docs/launch/OWNER-APPROVAL.md"
     },
     "github_security_settings": {
       "status": "pass",
@@ -53,8 +53,8 @@
       "evidence": ""
     },
     "launch_copy_owner_approval": {
-      "status": "pending",
-      "evidence": ""
+      "status": "pass",
+      "evidence": "docs/launch/OWNER-APPROVAL.md"
     }
   }
 }
