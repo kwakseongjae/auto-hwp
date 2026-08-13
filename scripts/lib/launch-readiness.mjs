@@ -372,14 +372,22 @@ export function auditLaunch(source) {
   const staleCheckoutWorkflows = workflowPaths.filter(
     (relative) => !/actions\/checkout@v6/.test(read(relative)),
   );
+  const nodeWorkflowPaths = [
+    ".github/workflows/vercel-deploy.yml",
+    ".github/workflows/publish.yml",
+    ".github/workflows/deploy-demo.yml",
+  ];
+  const staleSetupNodeWorkflows = nodeWorkflowPaths.filter(
+    (relative) => !/actions\/setup-node@v7/.test(read(relative)),
+  );
   add(
     "community.actions-node24",
     "community",
     "P1",
-    staleCheckoutWorkflows.length === 0,
-    "CI·배포·발행 workflow가 Node 24 기반 checkout action을 사용한다",
-    "GitHub hosted runner와 맞는 actions/checkout@v6로 올려 Node 20 강제 전환 경고를 제거한다.",
-    staleCheckoutWorkflows.join(", "),
+    staleCheckoutWorkflows.length === 0 && staleSetupNodeWorkflows.length === 0,
+    "CI·배포·발행 workflow가 Node 24 기반 GitHub action을 사용한다",
+    "actions/checkout@v6와 actions/setup-node@v7을 유지해 Node 20 강제 전환 경고를 제거한다.",
+    [...staleCheckoutWorkflows, ...staleSetupNodeWorkflows].join(", "),
   );
 
   const vercelConfig = safeJson(source, "apps/hwp-lab/vercel.json");

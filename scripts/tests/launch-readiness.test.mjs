@@ -97,9 +97,9 @@ function passingFiles() {
     ".github/ISSUE_TEMPLATE/feature_request.yml": "name: Feature",
     ".github/workflows/ci.yml": "on:\n  pull_request:\n  workflow_dispatch:\njobs:\n  issue-link:\nuses: actions/checkout@v6",
     ".github/workflows/vercel-deploy.yml":
-      "on:\n  workflow_dispatch:\nuses: actions/checkout@v6\nrun: vercel deploy --prebuilt",
-    ".github/workflows/publish.yml": "uses: actions/checkout@v6",
-    ".github/workflows/deploy-demo.yml": "uses: actions/checkout@v6",
+      "on:\n  workflow_dispatch:\nuses: actions/checkout@v6\nuses: actions/setup-node@v7\nrun: vercel deploy --prebuilt",
+    ".github/workflows/publish.yml": "uses: actions/checkout@v6\nuses: actions/setup-node@v7",
+    ".github/workflows/deploy-demo.yml": "uses: actions/checkout@v6\nuses: actions/setup-node@v7",
     "apps/hwp-lab/vercel.json": JSON.stringify({ git: { deploymentEnabled: false } }),
     "apps/hwp-lab/next.config.mjs": `Content-Security-Policy X-Content-Type-Options Referrer-Policy
       Permissions-Policy frame-ancestors frame-src 'self' blob:`,

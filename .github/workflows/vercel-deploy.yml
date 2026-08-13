@@ -88,7 +88,7 @@ jobs:
 
       # Node 24 — Vercel 프로젝트 설정(nodeVersion 24.x)과 맞춘다. prebuilt 는 러너에서 빌드한
       # 산출물이 그대로 함수가 되므로, 여기 Node 가 런타임 Node 와 어긋나면 안 된다.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24.x
       - name: install pnpm (packages/* 빌드 관례)

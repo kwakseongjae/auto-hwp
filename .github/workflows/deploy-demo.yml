@@ -47,7 +47,7 @@ jobs:
           curl -sL https://github.com/WebAssembly/binaryen/releases/download/version_119/binaryen-version_119-x86_64-linux.tar.gz | tar xz -C /tmp
           echo "/tmp/binaryen-version_119/bin" >> "$GITHUB_PATH"
           /tmp/binaryen-version_119/bin/wasm-opt --version
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20.19
       # hwp-lab 의 build:deps 는 pnpm -C 로 각 패키지를 빌드한다(레포 관례).
