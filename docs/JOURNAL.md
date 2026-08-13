@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-13 (Codex sol) · npm 0.0.5 릴리스 준비
+- 이슈 #23에서 npm 4종·CDN 핀·현재 소비자 문서를 lockstep 0.0.5로 올리고 CHANGELOG를 확정.
+- launch 30/30, 패키지 64/262/418 tests, 4종 tarball dry-run과 engine wasm 7,560KB green.
+- full verify는 기존 macOS shared-target clippy 저CPU 정체로 중단; PR Linux CI 뒤 실제 publish 예정.
+- Vercel은 수동 prebuilt로 확인했으며 npm 릴리스와 분리, 선재 examples 무접촉.
+
 ## 2026-08-13 (Codex sol) · #19 main 병합
 - PR #20 필수 checks(issue-link/build-test/licenses) green 후 main `f32f0ca` 병합, #19 자동 close.
 - npm 네 패키지 latest는 `0.0.4`; 이번 additive Intent/DTO 수정은 아직 npm 미배포.

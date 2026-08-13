@@ -6,9 +6,9 @@
 
 ## 릴리스 정책
 
-- 공개 npm stable은 `@auto-hwp/{engine,editor-core,ai-protocol,react}@0.0.4`다.
-- main에는 0.0.4 이후 package 소스 변경이 있으므로 이를 0.0.4의 기능처럼 쓰지 않고
-  `CHANGELOG.md`의 `Unreleased`에 기록한다.
+- 공개 npm stable은 `@auto-hwp/{engine,editor-core,ai-protocol,react}@0.0.5`다.
+- 0.0.5 이후 package 소스 변경은 이를 0.0.5의 기능처럼 쓰지 않고 `CHANGELOG.md`의 `Unreleased`에
+  기록한다.
 - 오픈소스 런칭은 저장소 태그 후보 `oss-launch-2026.08.12`와 GitHub Release, autohwp.com 배포를
   하나의 `release_commit`에 고정한다. 내용 변화 없는 npm 재발행은 하지 않는다.
 - 다음 npm 발행은 네 패키지를 새 버전으로 lockstep 발행하는 별도 릴리스다.

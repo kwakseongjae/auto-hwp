@@ -3,6 +3,16 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-13 · Codex(sol) — **npm lockstep 0.0.5 릴리스 후보 준비·PR 전 검증 완료**.
+  소유자 발행 승인에 따라 공개 이슈 #23과 브랜치 `codex/issue-23-npm-0.0.5`를 만들었다. 네 패키지,
+  lockfile, engine CDN 핀, 현재 설치 안내를 0.0.5로 맞추고 CHANGELOG Unreleased를 0.0.5(파괴 변경 없음)
+  절로 확정했다. launch automated 30/30, ai-protocol 64, editor-core 262, React 418, 네 tarball dry-run
+  green; engine wasm 7,560KB, React tarball의 형제 의존 `^0.0.5`와 source `file:` 복원도 확인했다.
+  `verify-local --full`은 종전 macOS shared-target Tauri/rhwp clippy 저CPU 정체가 재현되어 진단 오류 없이
+  중단했다. 다음: 명시 commit/push→PR `Closes #23`→Linux CI green→merge→publish.yml dry_run=false→
+  registry 4종/fresh consumer 검증. Vercel은 Git auto deploy가 아니라 수동 prebuilt workflow이며 이번 npm
+  릴리스 비범위다. 선재 `crates/hwp-rhwp/examples/` 무접촉.
+
 - 갱신: 2026-08-13 · Codex(sol) — **이슈 #19 중첩 표 삭제·즉시 undo 수정 main 병합 완료**.
   공개 이슈 #19→PR #20으로 진행해 필수 checks(issue-link, build-test, licenses) green 후 보호된 main
   `f32f0ca`에 병합했고 이슈는 자동 close됐다. `TableBox`가
