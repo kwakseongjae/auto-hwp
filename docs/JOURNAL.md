@@ -5,6 +5,18 @@
 
 ---
 
+## 2026-08-13 (Codex sol) · GA4·Google/Naver·Brave 등록 완료
+- production `0979297` success; 동의 전 GA 0·허용/철회·비식별 sample event·Realtime 검증.
+- GA custom dimension 6개, export/layout key event; Google verified+sitemap 15·home indexed.
+- Naver verified+sitemap+핵심 URL 4개 수집 요청, Brave Submit URL success.
+- 다음: 2026-08-20 Brave 색인, document_open success key event·하위 URL 상태 재확인; examples 무접촉.
+
+## 2026-08-13 (Codex sol) · 성장 계측 배포 중 안전 중단
+- PR #34 checks green→main `0979297`; production push run `31691376098` 진행 중.
+- 로컬 watcher만 중단했으며 배포는 GitHub/Vercel에서 계속된다. Google/Naver Verify는 아직 미실행.
+- 재개: run 결과→라이브 meta/CSP/GA opt-in smoke→Google/Naver verify+sitemap→Brave→GA 증거화.
+- 체크포인트 문서 외 선재 `crates/hwp-rhwp/examples/` 무접촉.
+
 ## 2026-08-13 (Codex sol) · GA4·검색 등록 준비
 - #29~#33: GA4 property/stream과 Google/Naver HTML meta token을 만들고 Vercel Production env에 등록.
 - 익명 opt-in 전 GA 요청 0·철회 즉시 disable·문서 콘텐츠 금지 typed event/CSP/privacy를 구현.
