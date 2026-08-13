@@ -34,9 +34,14 @@ packages are released in lockstep.)*
 
 ## [Unreleased]
 
-0.0.4 발행 이후의 변경이다. 아래 SDK 항목은 **main에만 있고 아직 npm stable 0.0.4에는 포함되지
-않는다.** 오픈소스 런칭 태그와 npm 버전을 억지로 맞추기 위해 재발행하지 않으며, 다음 lockstep npm
-릴리스에서 별도 버전으로 낸다.
+아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
+
+---
+
+## [0.0.5] — 2026-08-13
+
+0.0.4 이후의 additive SDK·Intent 확장과 편집 안정성 수정 릴리스다. npm 패키지 네 종을 lockstep으로
+발행한다. 파괴 변경은 없다.
 
 ### 추가 (Added)
 
@@ -67,6 +72,9 @@ packages are released in lockstep.)*
   “실패했는데 일부만 남는” 고아 편집을 막는다.
 - **패널/편집 UX 회귀.** 패널 접기 뒤 채팅 상태를 보존하고, 탭 라벨 정렬·행/칸 선택·undo 안내와
   PDF 화면 동일 경로를 보강했다.
+- **중첩 표 삭제와 즉시 undo.** 셀 안의 예시 표를 선택해 Backspace/Delete할 때 바깥 양식 표 전체가
+  사라지지 않고 선택한 자식 블록만 삭제된다. 삭제 직후 다른 곳을 클릭하지 않아도 Command/Ctrl+Z가
+  복구하며, 이를 위해 additive `DeleteNestedBlock` Intent와 중첩 블록 주소 DTO를 공개했다.
 
 ### 변경 (Changed)
 

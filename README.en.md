@@ -61,7 +61,7 @@ Finish the no-AI local document path first, then verify opening, editing, and ex
 ### npm — 60 seconds
 
 ```bash
-npm i @auto-hwp/react@0.0.4 @auto-hwp/ai-protocol@0.0.4
+npm i @auto-hwp/react@0.0.5 @auto-hwp/ai-protocol@0.0.5
 # react pulls in the engine + headless core; the BYOK bridge below imports ai-protocol directly
 ```
 
@@ -205,7 +205,7 @@ The longer version is in [WHY](./docs/WHY.md#english).
 | Chat-driven ("vibe") editing | 19 typed edit commands · preview cards before apply · per-card revert | not found | not found |
 | Automated fidelity gate | page count + line-break match rate checked on every commit ([accuracy](#accuracy-and-limits)) | not found | not found |
 | Distribution surface | npm · CLI · MCP server · Claude Code skill · web demo | browser extensions · VS Code extension · npm · web demo | npm |
-| Latest npm release | `@auto-hwp/engine` 0.0.4 (2026-07) | `@rhwp/core` 0.8.2 (2026-07) | `hwp.js` 0.0.3 (2020-10) |
+| Latest npm release | `@auto-hwp/engine` 0.0.5 (2026-08) | `@rhwp/core` 0.8.2 (2026-07) | `hwp.js` 0.0.3 (2020-10) |
 
 <sub>As of 2026-07, from each project's public repository and npm registry metadata only. "Not found" means we could not
 find it in public material — not that it is impossible. rhwp is also the upstream auto-hwp bootstraps its `.hwp` parsing

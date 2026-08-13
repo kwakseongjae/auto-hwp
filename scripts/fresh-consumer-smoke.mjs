@@ -30,7 +30,7 @@ const repoRoot = path.resolve(here, "..");
 const args = new Set(process.argv.slice(2));
 const keep = args.has("--keep");
 const versionArg = process.argv.find((value) => value.startsWith("--version="));
-const version = versionArg?.slice("--version=".length) || "0.0.4";
+const version = versionArg?.slice("--version=".length) || "0.0.5";
 if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) {
   throw new Error(`invalid --version: ${version}`);
 }

@@ -3,12 +3,12 @@
   "target": "open-source-launch",
   "updated_at": "2026-08-12",
   "stage": "beta-live",
-  "stable_npm_version": "0.0.4",
+  "stable_npm_version": "0.0.5",
   "release_commit": "31f205f8355df892d9a7233b2c8b4eeb432bb13e",
   "release": {
     "kind": "open-source-launch",
     "tag_candidate": "oss-launch-2026.08.12",
-    "npm_policy": "0.0.4 remains the verified stable; main package changes stay Unreleased until the next lockstep npm release"
+    "npm_policy": "0.0.5 is the lockstep npm release; later main package changes stay Unreleased until the next lockstep npm release"
   },
   "operational_decisions": {
     "durable_rate_limit": {
