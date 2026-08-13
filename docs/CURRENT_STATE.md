@@ -11,8 +11,10 @@
   공개 샘플 8쪽에서 PDF blob 미리보기(기존 차단 아이콘·콘솔 오류 없음), AI 제안→`✓ 적용됨`→undo
   오류 0건을 실검증했다. main 외 종전 브랜치는 로컬·원격 모두 삭제됐다. main 보호는 strict
   `issue-link`+`build-test`+`licenses`, PR/admin/대화해결 적용, force-push/delete 금지다. 배포 성공 로그의
-  유일한 Node20 deprecation 경고는 이슈 #15를 열어 공식 setup-node v7(Node24) 후속 PR에서 마감 중.
-  선재 `control-audit.rs` 무접촉.
+  유일했던 Node20 deprecation 경고는 이슈 #15→PR #16의 공식 setup-node v7(Node24) 전환으로 닫았다.
+  필수 checks(issue-link 5s, build-test 6m10s, licenses 2m46s) green 후 main `86a4cff`에 병합했고, 같은
+  전체 SHA `86a4cff81cc35b403d3e0d6997f03bd00839121e`의 production run 31668877992가 6m8s success,
+  `setup-node@v7`·autohwp.com 별칭 smoke green·Node20 annotation 0을 확인했다. 선재 `control-audit.rs` 무접촉.
 
 - 갱신: 2026-08-13 · Codex(sol) — **정식 런칭 후 버그 #11·#12 수정 및 issue-first 파이프라인 검증 중**.
   공개 GitHub 이슈 #11(병합 셀 covered 좌표 `no active cell`), #12(PDF blob iframe CSP 차단),

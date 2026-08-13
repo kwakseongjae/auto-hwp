@@ -10,6 +10,7 @@
 - `issue-link` 필수 check·CODEOWNERS·이슈 우선 문서를 추가하고 기존 main 외 브랜치를 모두 정리.
 - 동일 SHA production run 31667859879 success; autohwp.com CSP/PDF/AI 적용·undo 라이브 smoke green.
 - 배포의 setup-node v4 Node20 경고만 #15(v7/Node24) 후속으로 처리 중; `control-audit.rs` 무접촉.
+- #15→PR #16 CI green·main `86a4cff`; Node24 production run 31668877992 6m8s success, 경고 0·별칭 smoke green.
 
 ## 2026-08-12 (Codex sol) · 인앱 브라우저 라이브 퍼널 촬영
 - autohwp.com 랜딩→예시 HWP→8 SVG→레이아웃 제보 실검증, 초안 파일명·본문·해시 없음 확인.
