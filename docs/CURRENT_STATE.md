@@ -3,6 +3,15 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-13 · Codex(sol) — **이슈 #26 Vercel main 자동 production prebuilt 배포 실증 완료**.
+  PR #27 필수 checks green→main `dd527d8` 병합. 별도 수동 실행 없이 동일 SHA의 push event가
+  production run 31680139716을 시작해 6m30s success했다. engine wasm·JS deps·production env pull·
+  Vercel prebuild/deploy가 모두 green이고, autohwp.com `/` 200·`/og.png` 200·canonical·CSP/HSTS/
+  nosniff/frame deny를 재확인했다. native Vercel Git build는 계속 off, 수동 preview/production도 유지.
+  증거=`docs/launch/evidence/2026-08-13-vercel-main-auto-production.md`. 다음: 이 docs-only 증거 PR의
+  필수 CI→merge 뒤 path filter가 추가 production run을 만들지 않는지 확인. 선재
+  `crates/hwp-rhwp/examples/` 무접촉.
+
 - 갱신: 2026-08-13 · Codex(sol) — **이슈 #26 Vercel main→production 자동 prebuilt 배포 구현 완료·PR 전**.
   Vercel native Git build는 계속 `deploymentEnabled=false`로 두고, `vercel-deploy.yml`에 관련 경로
   main push 트리거를 추가했다. push에는 `inputs.target`이 없으므로 event name으로 DEPLOY_TARGET=
