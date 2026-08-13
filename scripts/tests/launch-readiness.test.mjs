@@ -97,7 +97,7 @@ function passingFiles() {
     ".github/ISSUE_TEMPLATE/feature_request.yml": "name: Feature",
     ".github/workflows/ci.yml": "on:\n  pull_request:\n  workflow_dispatch:\njobs:\n  issue-link:\nuses: actions/checkout@v6",
     ".github/workflows/vercel-deploy.yml":
-      "on:\n  workflow_dispatch:\nuses: actions/checkout@v6\nuses: actions/setup-node@v7\nrun: vercel deploy --prebuilt",
+      "on:\n  workflow_dispatch:\n  push:\n    branches: [main]\nenv:\n  DEPLOY_TARGET: ${{ github.event_name == 'push' && 'production' || inputs.target }}\n  PROD_FLAG: ${{ (github.event_name == 'push' || inputs.target == 'production') && '--prod' || '' }}\nuses: actions/checkout@v6\nuses: actions/setup-node@v7\nrun: vercel deploy --prebuilt",
     ".github/workflows/publish.yml": "uses: actions/checkout@v6\nuses: actions/setup-node@v7",
     ".github/workflows/deploy-demo.yml": "uses: actions/checkout@v6\nuses: actions/setup-node@v7",
     "apps/hwp-lab/vercel.json": JSON.stringify({ git: { deploymentEnabled: false } }),
@@ -162,6 +162,19 @@ test("깨진 사이트 llms·복붙 예제·단위·CI·메타데이터를 각�
     "community.actions-node24",
     "release.prebuilt-deploy-only",
   ]) assert.equal(failed.has(id), true, id);
+});
+
+test("Vercel main 자동 배포는 push를 production으로 정규화해야 한다", () => {
+  const files = passingFiles();
+  files[".github/workflows/vercel-deploy.yml"] =
+    "on:\n  workflow_dispatch:\n  push:\n    branches: [main]\nuses: actions/checkout@v6\nuses: actions/setup-node@v7\nrun: vercel deploy --prebuilt";
+
+  const failed = new Set(
+    auditLaunch(createMemorySource(files))
+      .filter((check) => check.status === "fail")
+      .map((check) => check.id),
+  );
+  assert.equal(failed.has("release.prebuilt-deploy-only"), true);
 });
 
 test("pending 수동 게이트와 HWP5 포함 결정은 증거 없이 통과하지 않는다", () => {

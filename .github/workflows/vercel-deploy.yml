@@ -1,4 +1,4 @@
-# Vercel(autohwp.com) 배포 — **수동 전용**(workflow_dispatch, 이 레포 CI 원칙 2026-07-11).
+# Vercel(autohwp.com) 배포 — main의 제품 변경은 자동 production, 필요할 때는 수동 preview/production.
 #
 # GitHub Pages 정적 데모(deploy-demo.yml)와 **병행**한다. 이쪽은 서버가 있는 full Next 배포다:
 #   /api/hwp-edit(데모 AI 라우트) + 절대 URL 메타(OG/canonical) + 커스텀 도메인 autohwp.com.
@@ -14,8 +14,8 @@
 #   VERCEL_ORG_ID      — team_4X1lyulthUiBtmklmjAUsXLv   (비밀 아님. .vercel/project.json 의 orgId)
 #   VERCEL_PROJECT_ID  — prj_5ps7tZkirpzDXEaGzLD1Acob6ctR (비밀 아님. .vercel/project.json 의 projectId)
 #
-# autohwp.com 은 2026-08-06 부터 **라이브**다(가비아 DNS 반영 완료, TLS 발급됨). 그래도 기본 target 은
-# preview — 프로덕션 배포는 실행 시 target=production 을 **명시**해야 한다(오배포 방지).
+# autohwp.com 은 2026-08-06 부터 **라이브**다(가비아 DNS 반영 완료, TLS 발급됨). 수동 실행의 기본
+# target은 preview이고, main의 관련 경로 push는 아래 DEPLOY_TARGET 정규화로 production에만 배포한다.
 # 되돌리기: `vercel rollback <이전 배포 URL> --scope kwakseongjaes-projects` 또는 대시보드 Instant Rollback.
 name: vercel-deploy
 
@@ -29,35 +29,40 @@ on:
           - preview
           - production
         default: preview
-  # 컷오버 확정 후에만 주석을 푼다(그 전에는 자동 프로덕션 배포 금지 — 이 레포 CI 원칙).
-  # push:
-  #   branches: [main]
-  #   paths:
-  #     - "apps/hwp-lab/**"
-  #     - "packages/**"
-  #     - "crates/**"
-  #     - ".github/workflows/vercel-deploy.yml"
+  push:
+    branches: [main]
+    paths:
+      - "apps/hwp-lab/**"
+      - "packages/**"
+      - "crates/**"
+      - "external/rhwp"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "vercel.json"
+      - ".github/workflows/vercel-deploy.yml"
 
 permissions:
   contents: read
 
 concurrency:
-  group: vercel-deploy-${{ inputs.target }}
+  group: vercel-deploy-${{ github.event_name == 'push' && 'production' || inputs.target }}
   cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     environment:
-      name: vercel-${{ inputs.target }}
+      name: vercel-${{ github.event_name == 'push' && 'production' || inputs.target }}
       url: ${{ steps.deploy.outputs.url }}
     env:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      # push 이벤트에는 inputs.target이 없다. 먼저 production으로 정규화해 preview 오배포를 차단한다.
+      DEPLOY_TARGET: ${{ github.event_name == 'push' && 'production' || inputs.target }}
       # preview 면 빈 문자열, production 이면 "--prod" — build/deploy 양쪽에 같은 값을 준다
       # (한쪽만 --prod 면 프로덕션 env 로 빌드한 산출물을 프리뷰에 올리는 등 조용히 어긋난다).
-      PROD_FLAG: ${{ inputs.target == 'production' && '--prod' || '' }}
+      PROD_FLAG: ${{ (github.event_name == 'push' || inputs.target == 'production') && '--prod' || '' }}
     steps:
       # 토큰 없이 툴체인 20분을 태우지 않도록 fail-fast.
       - name: verify secrets are present
@@ -123,12 +128,12 @@ jobs:
       # 4) 프로젝트 설정 + 환경변수(DEMO_SITE_URL / NEXT_PUBLIC_DEMO_AI / DEMO_AI_MODE …)를 내려받는다.
       #    ⚠️ 레포 루트에서 실행한다 — rootDirectory=apps/hwp-lab 는 project.json 이 들고 있고,
       #    build:deps 가 ../../packages/* 를 필요로 하므로 체크아웃 전체가 있어야 한다.
-      - name: vercel pull (${{ inputs.target }} env)
+      - name: vercel pull (normalized target env)
         run: |
           # whoami는 정보성만 — 팀 스코프 토큰은 user 엔드포인트가 막혀 "User not found"가 나도
           # 유효할 수 있다(7차 오탐 실측). 판정은 아래 --scope pull이 한다.
           vercel whoami --token="$VERCEL_TOKEN" || echo "whoami 실패(팀 스코프 토큰이면 정상) — pull로 판정"
-          vercel pull --yes --environment=${{ inputs.target }} --scope="$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
+          vercel pull --yes --environment="$DEPLOY_TARGET" --scope="$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
 
       # 5) 빌드 — 여기서 apps/hwp-lab 의 installCommand/buildCommand(prebuild→build:deps→
       #    copy-wasm/fonts/samples→next build)가 돌아 .vercel/output 이 만들어진다.
@@ -157,7 +162,7 @@ jobs:
       #       — 프로덕션 생성 URL 조차 `302 → vercel.com/sso-api` 다(2026-08-06 실측). 공개인 건 프로덕션
       #       별칭뿐이므로 스모크는 별칭을 때린다. 프리뷰는 공개 URL 이 없어 검사를 생략한다.
       - name: smoke check (production alias)
-        if: ${{ inputs.target == 'production' }}
+        if: ${{ env.DEPLOY_TARGET == 'production' }}
         env:
           # 2026-08-06 가비아 DNS 반영 완료(A @ → 216.150.1.1, CNAME www → vercel-dns-016) —
           # autohwp.com 이 이미 공개 200 이라 여기를 정본으로 때린다.
