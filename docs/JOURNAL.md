@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-13 (Codex sol) · Vercel main 자동 production 실증
+- PR #27 CI green→main `dd527d8`; push event가 자동 production run 31680139716 시작.
+- 6m30s prebuilt deploy success, autohwp.com 홈/OG 200·canonical·보안 헤더 green.
+- native Git build off·수동 preview/production 유지; docs-only 증거 PR에서 path filter 무배포 확인 예정.
+- 선재 `crates/hwp-rhwp/examples/` 무접촉.
+
 ## 2026-08-13 (Codex sol) · Vercel main 자동 production 준비
 - 이슈 #26: native Git build는 끈 채 관련 main push→prebuilt production workflow를 추가.
 - push의 빈 inputs를 production env/--prod/smoke로 명시 정규화하고 수동 preview/production은 보존.
