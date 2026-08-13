@@ -417,12 +417,11 @@ export function ChatPanel(props: ChatPanelProps) {
   // undefined) so opening the workspace doesn't steal focus. The marked selection is already shown as an
   // anchor chip above — this only routes the user to the composer to type.
   const focusToken = props.focusToken;
-  const firstFocus = useRef(true);
+  const focusedToken = useRef(0);
   useEffect(() => {
-    if (firstFocus.current) {
-      firstFocus.current = false;
-      if (!focusToken) return;
-    }
+    // Design → Vibe after a selection is cleared is NOT an explicit focus request. Focusing merely
+    // because `active` changed steals document ⌘Z until the user clicks the canvas again (issue #19).
+    if (!focusToken || focusToken <= focusedToken.current) return;
     if (props.active === false) return;
     // WorkspacePanel may reveal the previously display:none vibe pane in the same commit. Focus on the
     // next frame, after that visibility change is painted; focusing a hidden textarea is ignored by Chrome.
@@ -430,6 +429,7 @@ export function ChatPanel(props: ChatPanelProps) {
       const el = inputRef.current;
       if (!el) return;
       el.focus();
+      focusedToken.current = focusToken;
       el.scrollIntoView?.({ block: "nearest" });
     });
     return () => cancelAnimationFrame(frame);

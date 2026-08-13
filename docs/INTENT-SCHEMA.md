@@ -500,6 +500,19 @@ visual affinity**를 쓴다. 반면 아래 `CaretRectBody`는 주소의 canonica
 | `section` | integer | 구역 인덱스 | ● |
 | `index` | integer | 블록 인덱스 | ● |
 
+#### `DeleteNestedBlock` — 셀 안의 중첩 블록 삭제(1 undo 단위, 수동 UI 전용)
+```json
+{ "intent": "DeleteNestedBlock", "section": 0, "path": [{"block": 1, "row": 3, "col": 1}], "index": 2 }
+```
+| 필드 | 타입 | 단위/값 | 필수 |
+|------|------|---------|------|
+| `section` | integer | 구역 인덱스 | ● |
+| `path` | CellStep[] | 삭제 대상의 **부모 셀**까지 내려가는 CellPath(비어 있으면 거부) | ● |
+| `index` | integer | 부모 셀 `blocks` 안의 중첩 블록 인덱스 | ● |
+
+`DeleteBlock`과 주소 공간을 분리한다. 중첩 표를 선택한 Backspace/Delete만 이 Intent를 사용하며,
+최상위 바깥 표는 보존된다. AI 화이트리스트에는 넣지 않는다.
+
 ### 6.7 문자 / 문단 서식
 
 > ⚠️ 단위: `size_pt`는 **포인트(pt)**. 색은 `"#RRGGBB"`. `align` ∈

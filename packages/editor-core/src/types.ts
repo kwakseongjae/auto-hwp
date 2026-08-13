@@ -29,6 +29,10 @@ export interface TableBox {
   rows: number;
   cols: number;
   first_row: number;
+  /** Descending path to this nested table's PARENT CELL. Empty/absent for a top-level table. */
+  path?: CellAddr[];
+  /** Block index of this table inside its parent cell; meaningful when `path` is non-empty. */
+  self_block?: number;
 }
 
 /** An anchored image's placed box in own-render px space (mirrors @auto-hwp/engine ImageBox / hwp-session
@@ -309,11 +313,11 @@ export interface Anchor {
   label: string;
   page: number;
   text?: string;
-  /** The DESCENDING CellPath for a NESTED cell anchor (issue 064 Tier-2) — present only on a `kind:"cell"`
-   *  anchor whose cell is nested (length ≥ 2). Absent (or length 1) ⇒ a plain top-level cell = the flat
-   *  `(section, block, rows[0], cols[0])`. Threaded into the `SetTableCellRuns` commit so the edit walks
-   *  to the LEAF cell; also folded into `selKey` so distinct nesting levels are distinct selections. */
+  /** DESCENDING CellPath. For a nested cell it reaches that cell; for a nested table it reaches the
+   *  PARENT cell and `nestedBlock` names the table block inside it. Absent means a flat top-level target. */
   path?: CellAddr[];
+  /** Block index of a selected nested table inside the parent cell addressed by `path`. */
+  nestedBlock?: number;
 }
 
 /** The read-only document context handed to the host AI callback alongside the instruction + anchors,

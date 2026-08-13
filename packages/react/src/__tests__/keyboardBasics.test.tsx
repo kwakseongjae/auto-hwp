@@ -74,6 +74,61 @@ function drillCell(sheet: HTMLElement, x: number, y: number) {
 }
 
 describe("키보드 기본기 — ⌘Z / ⌘⇧Z 실행취소·재실행", () => {
+  it("중첩 표 Backspace는 바깥 표가 아닌 자식 블록을 지우고, 즉시 ⌘Z도 삭제 커밋 뒤 실행된다", async () => {
+    let releaseApply!: () => void;
+    const gate = new Promise<void>((resolve) => { releaseApply = resolve; });
+    const nestedTable: TableBox = {
+      ...table,
+      path: [{ block: 1, row: 0, col: 0 }],
+      self_block: 2,
+    };
+    const adapter = new MockAdapter({ table: nestedTable, pageGeom: geom, pages: 1, applyGate: () => gate });
+    const { container } = mount(adapter);
+    const sheet = await sheetOf(container);
+
+    fireEvent.pointerDown(sheet, { clientX: 100, clientY: 100, button: 0, pointerId: 1 });
+    fireEvent.pointerUp(sheet, { clientX: 100, clientY: 100, button: 0, pointerId: 1 });
+    await waitFor(() => expect(container.querySelector(".hw-mark-table")).toBeTruthy());
+
+    fireEvent.keyDown(window, { key: "Backspace" });
+    fireEvent.keyDown(window, { key: "z", metaKey: true });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(adapter.undos).toBe(0); // delete is still in flight; undo waits instead of observing empty
+
+    releaseApply();
+    await waitFor(() => expect(adapter.applied[0]).toEqual({
+      intent: "DeleteNestedBlock",
+      section: 0,
+      path: [{ block: 1, row: 0, col: 0 }],
+      index: 2,
+    }));
+    await waitFor(() => expect(adapter.undos).toBe(1));
+    expect(adapter.applied.some((i) => i.intent === "DeleteBlock")).toBe(false);
+  });
+
+  it("표 삭제로 Design→Vibe 탭이 돌아와도 작성창이 포커스를 훔치지 않아 ⌘Z가 바로 동작한다", async () => {
+    const nestedTable: TableBox = {
+      ...table,
+      path: [{ block: 1, row: 0, col: 0 }],
+      self_block: 2,
+    };
+    const adapter = new MockAdapter({ table: nestedTable, pageGeom: geom, pages: 1 });
+    const { container } = mount(adapter);
+    const sheet = await sheetOf(container);
+    const composer = container.querySelector("textarea.hw-textarea") as HTMLTextAreaElement;
+
+    fireEvent.pointerDown(sheet, { clientX: 100, clientY: 100, button: 0, pointerId: 1 });
+    fireEvent.pointerUp(sheet, { clientX: 100, clientY: 100, button: 0, pointerId: 1 });
+    await waitFor(() => expect(container.querySelector(".hw-mark-table")).toBeTruthy());
+    fireEvent.keyDown(window, { key: "Backspace" });
+    await waitFor(() => expect(adapter.applied[0]?.intent).toBe("DeleteNestedBlock"));
+    await new Promise((r) => setTimeout(r, 20)); // panel tab effect + focus RAF
+    expect(document.activeElement).not.toBe(composer);
+
+    fireEvent.keyDown(window, { key: "z", metaKey: true });
+    await waitFor(() => expect(adapter.undos).toBe(1));
+  });
+
   it("⌘Z 는 툴바 ↶ 버튼과 같은 레인으로 실행취소한다", async () => {
     const adapter = new MockAdapter({ table, pageGeom: geom, pages: 1 });
     const { container } = mount(adapter);

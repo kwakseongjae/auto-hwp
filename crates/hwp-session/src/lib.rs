@@ -546,6 +546,13 @@ pub struct TableBoxDto {
     pub block: usize,
     pub rows: usize,
     pub cols: usize,
+    /// Descending path to the PARENT CELL when this is a nested table. Empty for a top-level table.
+    /// Together with `self_block` this is a complete, mutation-safe address for deleting only the
+    /// selected nested table instead of its outer top-level table block (issue #19).
+    pub path: Vec<CellAddrDto>,
+    /// This table's block index inside its parent cell. For a top-level table this equals `block` and
+    /// `path` is empty, so existing flat consumers keep using `(section, block)` unchanged.
+    pub self_block: usize,
     /// For a table SPLIT across pages, this fragment's FIRST global row index (0 for a single-page
     /// table). The cell-range selection adds this offset to its fragment-local row indices so a batch
     /// op targets the correct GLOBAL rows of the (possibly frame-wrapped) table.
@@ -584,6 +591,8 @@ pub fn table_bbox_placed(
             block: t.block,
             rows: t.rows,
             cols: t.cols,
+            path: t.ancestors.iter().map(CellAddrDto::from).collect(),
+            self_block: t.self_block,
             first_row: t.first_row,
         })
 }
@@ -626,6 +635,8 @@ pub fn table_at_placed(placed: &PlacedDoc, page: u32, x: f64, y: f64) -> Option<
             block: t.block,
             rows: t.rows,
             cols: t.cols,
+            path: t.ancestors.iter().map(CellAddrDto::from).collect(),
+            self_block: t.self_block,
             first_row: t.first_row,
         })
 }
@@ -3485,6 +3496,20 @@ mod tests {
         let k = HWPUNIT_PER_PX;
         let px = (leaf.x + leaf.w / 2.0) / k;
         let py = (leaf.y + leaf.h / 2.0) / k;
+        let table_hit =
+            table_at_placed(&placed, pi as u32, px, py).expect("nested table hit resolves");
+        assert_eq!(
+            table_hit.path,
+            nt.ancestors
+                .iter()
+                .map(CellAddrDto::from)
+                .collect::<Vec<_>>(),
+            "table selection carries its parent-cell path"
+        );
+        assert_eq!(
+            table_hit.self_block, 1,
+            "table selection carries its block index inside that cell"
+        );
         let hit = table_cell_at_placed(&doc, &placed, pi as u32, px, py)
             .expect("nested cell hit resolves");
         // The DEEPER path wins (rfind picks the innermost table).

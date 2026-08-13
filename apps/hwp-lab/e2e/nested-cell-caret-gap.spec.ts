@@ -24,11 +24,17 @@ import { expect, test, type Page } from "@playwright/test";
 //   adapter : WasmAdapter/TauriAdapter + worker RPC 화이트리스트에 path 변형 노출, wasm 재빌드.
 const SAMPLE = path.resolve(process.cwd(), "public", "samples", "sample-8p.hwp");
 const NEEDLE = "생산품";
+const MOD = process.platform === "darwin" ? "Meta" : "Control";
 
 async function open(page: Page) {
   await page.goto("/");
   await page.locator('[data-testid="file-input"]').setInputFiles(SAMPLE);
   await expect(page.locator(".hw-sheet svg").first()).toBeVisible({ timeout: 60_000 });
+}
+
+async function showPage(page: Page, index: number) {
+  await page.locator(`.hw-sheet[data-page="${index}"]`).scrollIntoViewIfNeeded();
+  await expect(page.locator(`.hw-sheet[data-page="${index}"] svg`)).toBeVisible({ timeout: 30_000 });
 }
 
 /** 글리프 단위 <text> 를 y 밴드로 묶어 needle 이 있는 줄의 글리프 박스를 찾는다(옵션: 화면 안으로 스크롤). */
@@ -96,5 +102,34 @@ test.fixme("중첩 셀(1×1 표 안) 문단도 캐럿으로 지우고 ⌘Z 로 �
   await expect.poll(async () => (await findGlyph(page, NEEDLE)) === null, { timeout: 30_000 }).toBe(true);
 
   await page.keyboard.press("Meta+z");
+  await expect.poll(async () => (await findGlyph(page, NEEDLE)) !== null, { timeout: 30_000 }).toBe(true);
+});
+
+test("중첩 표 선택 Backspace는 바깥 표를 보존하고, 즉시 undo도 클릭 없이 복구한다", async ({ page }) => {
+  await open(page);
+  await findGlyph(page, NEEDLE, true);
+  await page.waitForTimeout(800);
+  let hit = await findGlyph(page, NEEDLE);
+  if (!hit) throw new Error("중첩 표 문구를 화면에 올리지 못함");
+  expect(await findGlyph(page, "창업아이템명")).not.toBeNull();
+
+  // 1) 실제 삭제 대상을 확인한다: 중첩 표의 문구만 사라지고 같은 바깥 양식 표의 형제 행은 남는다.
+  await page.mouse.click(hit.x + hit.width / 2, hit.y + hit.height / 2);
+  await expect(page.locator(".hw-mark-table")).toHaveCount(1);
+  await page.keyboard.press("Backspace");
+  await expect.poll(async () => (await findGlyph(page, NEEDLE)) === null, { timeout: 30_000 }).toBe(true);
+  expect(await findGlyph(page, "창업아이템명")).not.toBeNull();
+
+  await page.keyboard.press(`${MOD}+z`);
+  await showPage(page, 1); // undo reflow may virtualize the restored page off-DOM; no click/focus change
+  await expect.poll(async () => (await findGlyph(page, NEEDLE)) !== null, { timeout: 30_000 }).toBe(true);
+
+  // 2) 경쟁 상태 회귀: 재선택 후 삭제와 undo를 기다림/중간 클릭 없이 연달아 보낸다.
+  hit = await findGlyph(page, NEEDLE);
+  if (!hit) throw new Error("undo 뒤 중첩 표 문구가 복구되지 않음");
+  await page.mouse.click(hit.x + hit.width / 2, hit.y + hit.height / 2);
+  await page.keyboard.press("Backspace");
+  await page.keyboard.press(`${MOD}+z`);
+  await showPage(page, 1);
   await expect.poll(async () => (await findGlyph(page, NEEDLE)) !== null, { timeout: 30_000 }).toBe(true);
 });
