@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-13 (Codex sol) · #19 main 병합
+- PR #20 필수 checks(issue-link/build-test/licenses) green 후 main `f32f0ca` 병합, #19 자동 close.
+- npm 네 패키지 latest는 `0.0.4`; 이번 additive Intent/DTO 수정은 아직 npm 미배포.
+- 정본 상태 동기화는 이슈 #21 후속 문서 PR로 진행, 선재 examples 무접촉.
+
 ## 2026-08-13 (Codex sol) · #19 중첩 표 삭제·즉시 undo
 - 중첩 표 선택에 부모 CellPath+자식 block 주소를 싣고 `DeleteNestedBlock`으로 바깥 양식 표를 보존.
 - 삭제 커밋/undo를 직렬화하고 Design→Vibe 전환의 채팅 textarea 포커스 탈취를 제거.
