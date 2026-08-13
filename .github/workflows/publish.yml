@@ -37,7 +37,7 @@ jobs:
 
       # 빌드 툴체인을 설치하기 전에 토큰을 fail-fast 검증한다. `npm publish --dry-run`은
       # 토큰이 없어도 경고만 내고 성공할 수 있으므로 whoami가 발행 인증의 정본이다.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20.19
           registry-url: "https://registry.npmjs.org"

@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-13 (Codex sol) · 런칭 후 버그 수정·정식 OSS 파이프라인·프로덕션 배포
+- #11 병합 셀 좌표를 active origin으로 정규화, #12 PDF blob CSP를 최소 허용; PR #14 CI green→main `2eb29d7`.
+- `issue-link` 필수 check·CODEOWNERS·이슈 우선 문서를 추가하고 기존 main 외 브랜치를 모두 정리.
+- 동일 SHA production run 31667859879 success; autohwp.com CSP/PDF/AI 적용·undo 라이브 smoke green.
+- 배포의 setup-node v4 Node20 경고만 #15(v7/Node24) 후속으로 처리 중; `control-audit.rs` 무접촉.
+
 ## 2026-08-12 (Codex sol) · 인앱 브라우저 라이브 퍼널 촬영
 - autohwp.com 랜딩→예시 HWP→8 SVG→레이아웃 제보 실검증, 초안 파일명·본문·해시 없음 확인.
 - 라이브 PNG 2컷 + 실제 프레임 88장 기반 22초 1280×720 MP4 생성, Threads 미디어 갱신.

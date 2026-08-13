@@ -3,6 +3,17 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-13 · Codex(sol) — **정식 런칭 후 버그 2건 수정·프로덕션 배포·issue-first 전환 완료**.
+  이슈 #11/#12/#13 → PR #14로 진행해 필수 checks(issue-link 3s, build-test 5m28s, licenses 2m45s)
+  green 후 보호된 main `2eb29d7`에 병합했고 세 이슈는 자동 close됐다. 같은 전체 SHA
+  `2eb29d7f54f946e7a74206120e9d9e9fc5b96afa`를 Vercel production run 31667859879로 배포해
+  6m16s success, autohwp.com 별칭 smoke와 실제 CSP `frame-src 'self' blob:`을 확인했다. 인앱 브라우저
+  공개 샘플 8쪽에서 PDF blob 미리보기(기존 차단 아이콘·콘솔 오류 없음), AI 제안→`✓ 적용됨`→undo
+  오류 0건을 실검증했다. main 외 종전 브랜치는 로컬·원격 모두 삭제됐다. main 보호는 strict
+  `issue-link`+`build-test`+`licenses`, PR/admin/대화해결 적용, force-push/delete 금지다. 배포 성공 로그의
+  유일한 Node20 deprecation 경고는 이슈 #15를 열어 공식 setup-node v7(Node24) 후속 PR에서 마감 중.
+  선재 `control-audit.rs` 무접촉.
+
 - 갱신: 2026-08-13 · Codex(sol) — **정식 런칭 후 버그 #11·#12 수정 및 issue-first 파이프라인 검증 중**.
   공개 GitHub 이슈 #11(병합 셀 covered 좌표 `no active cell`), #12(PDF blob iframe CSP 차단),
   #13(issue-first 파이프라인)을 생성했다. hwp-ops는 병합 영역 내부 좌표를 유일한 active origin으로
