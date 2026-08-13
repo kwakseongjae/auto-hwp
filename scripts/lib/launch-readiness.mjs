@@ -398,9 +398,15 @@ export function auditLaunch(source) {
     "P0",
     vercelConfig?.git?.deploymentEnabled === false &&
       /^\s*workflow_dispatch\s*:/m.test(vercelDeployWorkflow) &&
+      /^\s*push\s*:/m.test(vercelDeployWorkflow) &&
+      /branches:\s*\[main\]/.test(vercelDeployWorkflow) &&
+      /github\.event_name\s*==\s*'push'\s*&&\s*'production'/.test(vercelDeployWorkflow) &&
+      /github\.event_name\s*==\s*'push'\s*\|\|\s*inputs\.target\s*==\s*'production'/.test(
+        vercelDeployWorkflow,
+      ) &&
       /vercel\s+deploy\s+--prebuilt/.test(vercelDeployWorkflow),
-    "Vercel 자동 Git 빌드를 끄고 Rust·wasm을 포함한 수동 prebuilt 배포만 허용한다",
-    "apps/hwp-lab/vercel.json의 git.deploymentEnabled=false와 workflow_dispatch 기반 --prebuilt 배포를 유지한다.",
+    "Vercel Git 빌드를 끄고 main 제품 변경을 Rust·wasm 포함 prebuilt production으로 자동 배포한다",
+    "Git 배포 비활성화, 수동 preview/production, main push→production 정규화와 --prebuilt를 유지한다.",
   );
 
   const securityConfig = [

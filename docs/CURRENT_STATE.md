@@ -3,6 +3,16 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-13 · Codex(sol) — **이슈 #26 Vercel main→production 자동 prebuilt 배포 구현 완료·PR 전**.
+  Vercel native Git build는 계속 `deploymentEnabled=false`로 두고, `vercel-deploy.yml`에 관련 경로
+  main push 트리거를 추가했다. push에는 `inputs.target`이 없으므로 event name으로 DEPLOY_TARGET=
+  production·PROD_FLAG=--prod·production environment/smoke를 명시 정규화했다. 수동 dispatch의 preview
+  기본값과 production 선택은 유지한다. paths는 hwp-lab/packages/crates/external submodule/Cargo manifests/
+  root vercel config/workflow로 제한해 docs-only merge는 배포하지 않는다. launch regression 8/8,
+  automated 30/30, actionlint(YAML/expression; shellcheck 연동 제외) green. 다음: commit/push→PR `Closes #26`
+  →필수 CI→merge→merge가 자동 생성한 production run과 autohwp.com smoke 확인. 선재
+  `crates/hwp-rhwp/examples/` 무접촉.
+
 - 갱신: 2026-08-13 · Codex(sol) — **npm 4종 lockstep 0.0.5 발행·fresh consumer 검증 완료**.
   이슈 #23→PR #24 필수 checks green 후 main `7a41cb6` 병합. 같은 SHA의 publish workflow
   run 31678071089를 `dry_run=false`로 실행해 engine→editor-core→ai-protocol→react 네 패키지를

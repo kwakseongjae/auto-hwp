@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-13 (Codex sol) · Vercel main 자동 production 준비
+- 이슈 #26: native Git build는 끈 채 관련 main push→prebuilt production workflow를 추가.
+- push의 빈 inputs를 production env/--prod/smoke로 명시 정규화하고 수동 preview/production은 보존.
+- docs-only 제외 path filter, launch 8/8·30/30·actionlint green; PR/CI/첫 자동 배포가 다음.
+- 선재 `crates/hwp-rhwp/examples/` 무접촉.
+
 ## 2026-08-13 (Codex sol) · npm 0.0.5 발행 완료
 - PR #24 CI green→main `7a41cb6`; publish run 31678071089로 npm 4종 0.0.5 lockstep 발행 성공.
 - registry license/shasum/size와 React `^0.0.5` 형제 의존을 재조회.
