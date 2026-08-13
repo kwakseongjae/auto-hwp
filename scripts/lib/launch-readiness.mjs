@@ -352,6 +352,16 @@ export function auditLaunch(source) {
     "외부 pull request가 자동으로 제한된 CI 검증을 받는다",
     "workflow_dispatch를 유지하면서 pull_request에 fmt·clippy·test·문서 게이트의 bounded lane을 추가한다.",
   );
+  const codeowners = read(".github/CODEOWNERS");
+  const pullTemplateBody = pullTemplate ? read(pullTemplate) : "";
+  add(
+    "community.issue-first",
+    "community",
+    "P0",
+    /\bissue-link\s*:/.test(ci) && /Closes\s+#/i.test(pullTemplateBody) && /@kwakseongjae/.test(codeowners),
+    "모든 PR이 공개 이슈에서 시작하고 소유자에게 자동 라우팅된다",
+    "CI issue-link check, PR 템플릿의 Closes #<issue>, CODEOWNERS를 유지한다.",
+  );
 
   const workflowPaths = [
     ".github/workflows/ci.yml",
@@ -396,6 +406,7 @@ export function auditLaunch(source) {
     "Referrer-Policy",
     "Permissions-Policy",
     "frame-ancestors",
+    "frame-src 'self' blob:",
   ];
   const missingHeaders = requiredHeaders.filter((header) => !securityConfig.includes(header));
   add(

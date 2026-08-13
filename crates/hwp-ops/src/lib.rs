@@ -709,7 +709,7 @@ fn resolve_cell<'a>(doc: &'a SemanticDoc, section: usize, path: &[CellStep]) -> 
     let mut cell = t
         .cells
         .iter()
-        .find(|c| c.active && c.row == first.row && c.col == first.col)?;
+        .find(|c| cell_covers(c, first.row, first.col))?;
     for step in rest {
         let Block::Table(nt) = cell.blocks.get(step.block)? else {
             return None;
@@ -717,9 +717,21 @@ fn resolve_cell<'a>(doc: &'a SemanticDoc, section: usize, path: &[CellStep]) -> 
         cell = nt
             .cells
             .iter()
-            .find(|c| c.active && c.row == step.row && c.col == step.col)?;
+            .find(|c| cell_covers(c, step.row, step.col))?;
     }
     Some(cell)
+}
+
+/// Resolve any logical grid coordinate inside an ACTIVE cell, including a slot covered by a
+/// row/column span. AI proposals describe the visible table grid and can legitimately point at a
+/// covered coordinate; the edit target is the unique active origin cell that owns that coordinate.
+/// Out-of-range coordinates still match nothing and remain a hard error.
+fn cell_covers(cell: &Cell, row: usize, col: usize) -> bool {
+    cell.active
+        && cell.row <= row
+        && row < cell.row.saturating_add(cell.row_span.max(1))
+        && cell.col <= col
+        && col < cell.col.saturating_add(cell.col_span.max(1))
 }
 
 /// Mutable twin of [`resolve_cell`] — walks the same descending `CellPath` to the LEAF cell for editing.
@@ -737,7 +749,7 @@ fn resolve_cell_mut<'a>(
     let mut cell = t
         .cells
         .iter_mut()
-        .find(|c| c.active && c.row == first.row && c.col == first.col)?;
+        .find(|c| cell_covers(c, first.row, first.col))?;
     for step in rest {
         let Block::Table(nt) = cell.blocks.get_mut(step.block)? else {
             return None;
@@ -745,7 +757,7 @@ fn resolve_cell_mut<'a>(
         cell = nt
             .cells
             .iter_mut()
-            .find(|c| c.active && c.row == step.row && c.col == step.col)?;
+            .find(|c| cell_covers(c, step.row, step.col))?;
     }
     Some(cell)
 }
@@ -4441,6 +4453,75 @@ mod tests {
                 col: 0,
                 runs: vec![run_spec("x")],
             }
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn set_table_cell_normalizes_a_covered_coordinate_to_its_merged_origin() {
+        // GitHub #11: an AI fill can name a visible coordinate that lies inside a merged cell. The
+        // model has not invented a different cell — that coordinate is owned by the active origin.
+        // Applying it must update that origin instead of failing with `no active cell`.
+        let mut doc = doc_with(vec![simple_para(1, "앞")]);
+        let cell = |text: &str, col_span: usize, row_span: usize| CellSpec {
+            text: text.into(),
+            col_span,
+            row_span,
+            ..Default::default()
+        };
+        apply(
+            &mut doc,
+            &Op::InsertTableAt {
+                section: 0,
+                index: 1,
+                rows: vec![
+                    vec![cell("가로 병합", 2, 1), cell("오른쪽", 1, 1)],
+                    vec![
+                        cell("세로 병합", 1, 2),
+                        cell("아래", 1, 1),
+                        cell("끝", 1, 1),
+                    ],
+                    vec![cell("아래2", 1, 1), cell("끝2", 1, 1)],
+                ],
+            },
+        )
+        .unwrap();
+
+        // (0,1) is covered by the origin at (0,0); (2,0) is covered by (1,0).
+        apply(
+            &mut doc,
+            &Op::SetTableCell {
+                section: 0,
+                index: 1,
+                row: 0,
+                col: 1,
+                runs: vec![run_spec("가로 수정")],
+            },
+        )
+        .unwrap();
+        apply(
+            &mut doc,
+            &Op::SetTableCell {
+                section: 0,
+                index: 1,
+                row: 2,
+                col: 0,
+                runs: vec![run_spec("세로 수정")],
+            },
+        )
+        .unwrap();
+
+        assert_eq!(cell_text(&doc, 1, 0, 0), "가로 수정");
+        assert_eq!(cell_text(&doc, 1, 1, 0), "세로 수정");
+        assert!(apply(
+            &mut doc,
+            &Op::SetTableCell {
+                section: 0,
+                index: 1,
+                row: 99,
+                col: 99,
+                runs: vec![run_spec("범위 밖")],
+            },
         )
         .is_err());
     }

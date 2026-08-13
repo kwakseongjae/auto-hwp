@@ -2,9 +2,12 @@
 
 <!-- Describe the user-visible outcome and the narrowest reason for this change. -->
 
+Closes #<!-- required: every PR starts from a public issue -->
+
 ## Contract and risk
 
 - [ ] I read `AGENTS.md` and the relevant issue's invariants and traps.
+- [ ] The linked issue states the reproduction/problem and acceptance criteria before implementation.
 - [ ] I did not add, remove, or expose user document content in fixtures, logs, screenshots, or CI artifacts.
 - [ ] Intent schema changes are additive and unknown fields still fail explicitly.
 - [ ] Geometry remains px (= HWPUNIT/75); edit commits remain HWPUNIT.

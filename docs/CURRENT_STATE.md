@@ -3,6 +3,19 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-13 · Codex(sol) — **정식 런칭 후 버그 #11·#12 수정 및 issue-first 파이프라인 검증 중**.
+  공개 GitHub 이슈 #11(병합 셀 covered 좌표 `no active cell`), #12(PDF blob iframe CSP 차단),
+  #13(issue-first 파이프라인)을 생성했다. hwp-ops는 병합 영역 내부 좌표를 유일한 active origin으로
+  정규화하고 범위 밖은 계속 거절하며 회귀 테스트 97/97 green. 사이트 CSP는 외부 프레임을 닫은 채
+  `frame-src 'self' blob:`만 추가했고 실제 Next 응답 헤더+PDF 다운로드 e2e 2/2 green. PR에
+  `Closes #`를 강제하는 `issue-link` check, CODEOWNERS, CONTRIBUTING/AGENTS 절차를 추가했다. 기존
+  main 외 브랜치는 패치 동등성/merge 여부 확인 후 로컬·원격 모두 정리했고 현재 작업 브랜치만 존재.
+  검증: fmt, hwp-ops clippy/97 tests, wasm rebuild+wasm-opt, JS 64+261+416+198, Next production build,
+  launch 29/29, smoke 2/2. macOS shared target의 workspace clippy는 종전처럼 CPU 0% 정체되어 중단했고
+  격리 target hwp-ops clippy는 green; PR Linux CI로 전체를 독립 검증한다. 다음: 명시 파일만 commit/push
+  → PR(Closes #11/#12/#13) → 필수 checks green → main merge → main SHA Vercel production → 라이브
+  PDF/AI smoke → 이슈 close·브랜치 삭제. 선재 `control-audit.rs` 무접촉.
+
 - 정본 배포: **https://autohwp.com** (Vercel full Next — 2026-08-06 컷오버, Actions vercel-deploy.yml).
   GitHub Pages(kwakseongjae.github.io/auto-hwp)는 병행 유지 중 — 리다이렉트 스텁 전환 예정.
   GitHub: https://github.com/kwakseongjae/auto-hwp (public, 홈페이지·description=autohwp.com)

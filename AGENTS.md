@@ -12,6 +12,13 @@ HWP(한글) 자체 엔진: Rust 코어(파싱→IR→조판→렌더→export→
 - 컨텍스트가 요약(compact)된 채 재개되면: 첫 행동으로 context_restore.sh를 실행해 복원한다.
   요약문과 파일이 충돌하면 **파일이 정본**이다.
 
+## 정식 오픈소스 작업 프로토콜
+- 모든 코드·문서 변경은 먼저 공개 GitHub 이슈를 만들거나 기존 이슈를 연결한다.
+- `main` 직접 작업·직접 push 금지: 이슈 브랜치 → PR 본문 `Closes #<issue>` → 필수 CI → merge 순서다.
+- 필수 checks는 `issue-link`·`build-test`·`licenses`; 대화 해결 전 merge 금지. 배포는 보호된
+  `main`의 정확한 commit SHA로만 실행한다.
+- merge 뒤 작업 브랜치를 삭제한다. 사용자 콘텐츠·민감 문서는 이슈/PR/CI 아티팩트에 올리지 않는다.
+
 ## 로드맵/상태 지도 (정본 위치)
 | 무엇 | 어디 |
 |---|---|
@@ -37,7 +44,8 @@ scripts/verify-local.sh          # quick: fmt·clippy·전체 테스트·게이�
 scripts/verify-local.sh --full   # + wasm 재빌드·JS 빌드/vitest·e2e — crates/UI 접촉 시 필수
 ```
 푸시 전 quick은 최소, crates·packages 접촉 시 --full. fmt는 이제 강제(2026-07-11 전체 포맷 완료 —
-fmt-dirty 커밋은 다음 verify에서 걸린다). GitHub Actions는 `gh workflow run ci`로만 수동 실행.
+fmt-dirty 커밋은 다음 verify에서 걸린다). GitHub Actions는 PR마다 자동 실행되며 `gh workflow run ci`로
+수동 재검증도 가능하다.
 
 ## 함정 top 6 (전체는 각 이슈 파일의 "함정" 절)
 - e2e 전 `rm -rf apps/hwp-lab/.next` — 웹팩 캐시가 dist 재빌드를 감지 못해 가짜 통과/실패.

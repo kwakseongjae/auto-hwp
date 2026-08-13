@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# auto-hwp 로컬 검증 정본 — CI(GitHub Actions)는 workflow_dispatch 수동 전용으로 전환됨(2026-07-11).
+# auto-hwp 로컬 검증 정본 — CI(GitHub Actions)는 main 대상 PR + workflow_dispatch에서 실행된다.
 # 머지/푸시 전 이 스크립트가 그린이어야 한다. CI가 검사하던 것(fmt/clippy/test/wasm/deny)을 전부 포함하고,
 # CI가 못 하던 것(게이트 v2, rhwp 피처 테스트, wasm 재빌드, JS/e2e)까지 --full에서 커버한다.
 #

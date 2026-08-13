@@ -57,7 +57,10 @@ test("업로드 → 8페이지 SVG → 셀 클릭 마킹 → mock 편집이 그 
 // issue 022 + inspector 모드: 열기 직후 기본 폰트(NanumGothic)가 자동 등록되어 화면 @font-face 가
 // 주입되고 PDF 버튼이 즉시 활성화된다. 전역 FontPicker는 선택 디자인과 혼동되지 않도록 노출하지 않는다.
 test("기본 폰트 자동 적용 → 전역 FontPicker 없음 + @font-face 주입 + PDF 다운로드", async ({ page }) => {
-  await page.goto("/");
+  const response = await page.goto("/");
+  // GitHub #12: the PDF bytes are previewed through an in-memory blob iframe. Assert the real app
+  // response permits that narrow lane; merely checking `src=blob:` would still pass on a blocked frame.
+  expect(response?.headers()["content-security-policy"]).toContain("frame-src 'self' blob:");
   await page.locator('[data-testid="file-input"]').setInputFiles(BENCHMARK);
   await expect(page.locator(".hw-sheet svg").first()).toBeVisible({ timeout: 60_000 });
 
