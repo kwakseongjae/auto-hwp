@@ -4,7 +4,7 @@
 > 당신의 인프라다. 이 문서는 "우리 인프라 안에서 auto-hwp를 돌리고 싶다"는 세 가지 방식을 실물로 다룬다.
 >
 > 이 문서의 모든 커맨드와 수치는 **실제로 실행해 확인**했다(2026-08-05, macOS arm64 / Docker 29.4.3 /
-> Node v24.14.0 / Bun 1.3.8 / npm `@auto-hwp/engine@0.0.4`). 확인하지 못한 것은 그렇게 적었다.
+> Node v24.14.0 / Bun 1.3.8 / npm `@auto-hwp/engine@0.0.5`). 확인하지 못한 것은 그렇게 적었다.
 
 ---
 
@@ -248,7 +248,7 @@ doc.undo();
 doc.free();                         // 문서 스왑마다 명시 호출
 ```
 
-**실측 결과 (Node v24.14.0, `@auto-hwp/engine@0.0.4`):**
+**실측 결과 (Node v24.14.0, `@auto-hwp/engine@0.0.5`):**
 
 | 문서 | 입력 | open | 전 페이지 SVG | PDF |
 |---|---|---|---|---|
@@ -301,7 +301,7 @@ app.listen(8080);
 ```html
 <!-- 클라이언트: 받은 SVG는 여전히 '문서에서 나온 신뢰불가 문자열'이다 -->
 <script type="module">
-  import { sanitizeSvg } from "https://cdn.jsdelivr.net/npm/@auto-hwp/engine@0.0.4/index.js";
+  import { sanitizeSvg } from "https://cdn.jsdelivr.net/npm/@auto-hwp/engine@0.0.5/index.js";
   const svg = await (await fetch("/doc/abc/page/0.svg")).text();
   document.querySelector("#page").innerHTML = sanitizeSvg(svg);   // raw innerHTML 금지
 </script>
@@ -458,7 +458,7 @@ console.log(ENGINE_VERSION, "| pages", doc.pageCount(), "| svg0", doc.renderPage
 try { doc.exportPdf(); } catch (e) { console.log("no-font guard →", e.code); }
 doc.free();
 EOF
-node smoke.mjs /경로/문서.hwpx     # 기대: 0.0.4 | pages N | svg0 >0 B  /  no-font guard → font_missing
+node smoke.mjs /경로/문서.hwpx     # 기대: 0.0.5 | pages N | svg0 >0 B  /  no-font guard → font_missing
 bun  smoke.mjs /경로/문서.hwpx     # 동일 출력
 
 # ── C. 정적 wasm ──────────────────────────────────────────────────────────

@@ -3,6 +3,15 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-13 · Codex(sol) — **npm 4종 lockstep 0.0.5 발행·fresh consumer 검증 완료**.
+  이슈 #23→PR #24 필수 checks green 후 main `7a41cb6` 병합. 같은 SHA의 publish workflow
+  run 31678071089를 `dry_run=false`로 실행해 engine→editor-core→ai-protocol→react 네 패키지를
+  모두 발행했다. registry version/license/shasum/unpacked size와 React 의존 `^0.0.5`를 재조회했다.
+  빈 temp에서 Vite·Next production build, Node 24.14.0·Bun 1.3.8 실제 sample-8p 8쪽 렌더
+  (SVG 61,957 B)·HWPX export(25,216 B)까지 green. 증거=`docs/launch/evidence/2026-08-13-npm-0.0.5.md`.
+  Vercel Git auto deploy는 꺼져 있고 수동 prebuilt workflow만 사용하므로 프로덕션은 미배포 상태다.
+  선재 `crates/hwp-rhwp/examples/` 무접촉.
+
 - 갱신: 2026-08-13 · Codex(sol) — **npm lockstep 0.0.5 릴리스 후보 준비·PR 전 검증 완료**.
   소유자 발행 승인에 따라 공개 이슈 #23과 브랜치 `codex/issue-23-npm-0.0.5`를 만들었다. 네 패키지,
   lockfile, engine CDN 핀, 현재 설치 안내를 0.0.5로 맞추고 CHANGELOG Unreleased를 0.0.5(파괴 변경 없음)
