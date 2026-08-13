@@ -18,6 +18,22 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  issue-link:
+    name: issue-link
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require a closing issue reference
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const body = context.payload.pull_request?.body ?? "";
+            const closesIssue = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#[0-9]+\b/i.test(body);
+            if (!closesIssue) {
+              core.setFailed("PR 본문에 `Closes #<issue>`를 적어 주세요. 모든 변경은 공개 이슈에서 시작합니다.");
+            }
+
   build-test:
     runs-on: ubuntu-latest
     timeout-minutes: 60

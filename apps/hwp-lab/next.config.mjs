@@ -38,6 +38,9 @@ const CONTENT_SECURITY_POLICY = [
   "font-src 'self' data:",
   "connect-src 'self' https://cdn.jsdelivr.net https://*.workers.dev" + (isDevelopment ? " ws: wss:" : ""),
   "worker-src 'self' blob:",
+  // PDF preview uses an in-memory `blob:` URL in our own iframe. Keep external frames blocked while
+  // allowing only this same-origin/generated-document lane (GitHub #12).
+  "frame-src 'self' blob:",
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",

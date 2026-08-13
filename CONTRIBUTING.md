@@ -3,6 +3,19 @@
 기여 환영합니다. 이 프로젝트는 **정확도 게이트가 CI보다 우선**하는 코드베이스입니다 —
 아래 불변식을 깨는 PR은 아무리 좋아 보여도 머지되지 않습니다.
 
+## 이슈에서 시작하는 개발 흐름
+
+정식 런칭 이후 모든 코드·문서 변경은 공개 GitHub 이슈에서 시작합니다.
+
+1. 기존 이슈를 검색하고, 없으면 bug/feature/layout 템플릿으로 재현·기대 결과·수용 기준을 적습니다.
+2. `main`에서 짧은 작업 브랜치를 만들고 이슈 범위만 수정합니다. 사용자 문서나 개인정보는 커밋하지 않습니다.
+3. 관련 테스트와 아래 로컬 검증을 통과시킨 뒤 PR을 열고 본문에 `Closes #<issue>`를 적습니다.
+4. 자동 CI의 `issue-link`, `build-test`, `licenses`와 리뷰 대화 해결이 모두 green이어야 merge할 수 있습니다.
+5. merge 뒤 작업 브랜치는 삭제합니다. 프로덕션 배포는 보호된 `main`의 정확한 commit SHA로만 실행합니다.
+
+PR의 이슈 연결은 권고가 아니라 필수 CI 게이트입니다. 작은 문구 수정도 이슈에 목적과 완료 조건을 남겨,
+외부 기여자가 결정 과정과 현재 상태를 GitHub만 보고 이어갈 수 있게 합니다.
+
 ## 개발 환경
 
 ```bash
@@ -22,7 +35,8 @@ scripts/verify-local.sh          # quick: fmt·clippy·전체 테스트·게이�
 scripts/verify-local.sh --full   # + wasm 재빌드·JS 빌드/vitest·e2e — crates/packages 접촉 시 필수
 ```
 
-CI(GitHub Actions)는 수동 트리거 전용입니다 — **로컬 verify가 정본**입니다.
+CI(GitHub Actions)는 모든 `main` 대상 PR에 자동 실행됩니다. **로컬 verify가 정본**이며 CI는 독립적인
+Linux 검증과 이슈 연결·라이선스 게이트를 담당합니다.
 
 ## 조판 이슈 기여
 

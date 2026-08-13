@@ -1,0 +1,4 @@
+# Keep ownership explicit while the maintainer team is small. Branch protection still allows the
+# repository owner to merge after required checks; this file makes review routing automatic as the
+# contributor base grows.
+* @kwakseongjae

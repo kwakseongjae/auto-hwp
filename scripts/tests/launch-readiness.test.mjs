@@ -91,17 +91,18 @@ function passingFiles() {
     "SECURITY.md": "Supported Versions. Report privately with a GitHub security advisory.",
     "CODE_OF_CONDUCT.md": "Contributor Covenant",
     "SUPPORT.md": "Support boundaries",
-    ".github/PULL_REQUEST_TEMPLATE.md": "Checklist",
+    ".github/PULL_REQUEST_TEMPLATE.md": "Checklist\nCloses #123",
+    ".github/CODEOWNERS": "* @kwakseongjae",
     ".github/ISSUE_TEMPLATE/bug_report.yml": "name: Bug",
     ".github/ISSUE_TEMPLATE/feature_request.yml": "name: Feature",
-    ".github/workflows/ci.yml": "on:\n  pull_request:\n  workflow_dispatch:\nuses: actions/checkout@v6",
+    ".github/workflows/ci.yml": "on:\n  pull_request:\n  workflow_dispatch:\njobs:\n  issue-link:\nuses: actions/checkout@v6",
     ".github/workflows/vercel-deploy.yml":
       "on:\n  workflow_dispatch:\nuses: actions/checkout@v6\nrun: vercel deploy --prebuilt",
     ".github/workflows/publish.yml": "uses: actions/checkout@v6",
     ".github/workflows/deploy-demo.yml": "uses: actions/checkout@v6",
     "apps/hwp-lab/vercel.json": JSON.stringify({ git: { deploymentEnabled: false } }),
     "apps/hwp-lab/next.config.mjs": `Content-Security-Policy X-Content-Type-Options Referrer-Policy
-      Permissions-Policy frame-ancestors`,
+      Permissions-Policy frame-ancestors frame-src 'self' blob:`,
     "apps/hwp-lab/src/app/privacy/page.tsx": "Privacy. 전체 400회, Upstash 없이는 best-effort.",
     "apps/hwp-lab/src/app/api/hwp-edit/demo.ts":
       'const DEFAULT_DAILY_CAP = 400; `ah:demo:all:${day}`; canReachUpstash(); [["PING"]]; store_configured',
@@ -157,6 +158,7 @@ test("깨진 사이트 llms·복붙 예제·단위·CI·메타데이터를 각�
     "docs.geometry-unit",
     "release.repository-metadata",
     "community.pull-request-ci",
+    "community.issue-first",
     "community.actions-node24",
     "release.prebuilt-deploy-only",
   ]) assert.equal(failed.has(id), true, id);
