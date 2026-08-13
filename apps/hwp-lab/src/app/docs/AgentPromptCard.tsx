@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { trackAgentPromptCopy } from "@/lib/workspace/analytics";
 import styles from "./docs.module.css";
 
 type Props = {
@@ -29,8 +30,11 @@ export function AgentPromptCard({ title, prompt }: Props) {
       if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(prompt);
       else if (!copyWithTextarea(prompt)) throw new Error("clipboard unavailable");
       setResult("copied");
+      trackAgentPromptCopy({ result: "success" });
     } catch {
-      setResult(copyWithTextarea(prompt) ? "copied" : "failed");
+      const copied = copyWithTextarea(prompt);
+      setResult(copied ? "copied" : "failed");
+      trackAgentPromptCopy({ result: copied ? "success" : "failed" });
     }
   };
 
