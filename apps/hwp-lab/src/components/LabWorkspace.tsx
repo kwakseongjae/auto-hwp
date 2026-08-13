@@ -11,6 +11,16 @@ import { DOC_URL_MISSING_MESSAGE, docUrlPath, homePath, lookupDocUrl, parseDocUr
 import { limitMessage, oversizeMessage } from "@/lib/limits";
 import { layoutReportFormat, layoutReportUrl } from "@/lib/layoutReport";
 import {
+  fileType,
+  trackAiRequest,
+  trackDocumentOpen,
+  trackExport,
+  trackLayoutReportOpen,
+  trackUploadStart,
+  type DocumentSource,
+  type ExportFormat,
+} from "@/lib/workspace/analytics";
+import {
   demoAiAttachmentError,
   ensureDemoAiConsent,
   splitConsentMessage,
@@ -448,12 +458,15 @@ export default function LabWorkspace() {
   // 이슈 055 사후 #2: 거부/취소/실패 경로는 busy/probe 상태만 정리하고 **현재 doc 은 유지**한다 — 두
   // 번째 파일 열기가 거부됐다고 이미 열린 문서를 언마운트하지 않는다(열린 문서가 없었다면 그대로 없음).
   const openBytes = useCallback(
-    async (bytes: Uint8Array, name: string): Promise<boolean> => {
+    async (bytes: Uint8Array, name: string, source: DocumentSource = "unknown"): Promise<boolean> => {
+      const format = fileType(name);
       if (!/\.(hwp|hwpx)$/i.test(name)) {
+        trackDocumentOpen({ fileType: format, source, result: "unsupported" });
         setLabError(`지원하지 않는 형식입니다: ${name}\n.hwp 또는 .hwpx 파일만 열 수 있습니다.`);
         return false;
       }
       if (bytes.length === 0) {
+        trackDocumentOpen({ fileType: format, source, result: "empty" });
         setLabError(`빈 파일입니다: ${name}`);
         return false;
       }
@@ -461,6 +474,7 @@ export default function LabWorkspace() {
       // 파싱(워커 복사)을 시작하기 전에 정직한 사유로 거부한다.
       const tooBig = oversizeMessage(bytes.length, name);
       if (tooBig) {
+        trackDocumentOpen({ fileType: format, source, result: "too_large" });
         setLabError(tooBig);
         return false;
       }
@@ -472,14 +486,16 @@ export default function LabWorkspace() {
       const probe = new WasmAdapter(wasmUrl, adapterOptions);
       probeRef.current = probe; // 취소 버튼이 이 핸들의 dispose()로 파싱을 중단한다(워커 종료)
       try {
-        await probe.open(bytes, name);
+        const opened = await probe.open(bytes, name);
         probe.dispose();
         if (!latest()) return false; // 더 새 open 이 시작됨 — 그쪽 결과가 이긴다
+        trackDocumentOpen({ fileType: format, source, result: "success", pages: opened.pages });
         setDoc({ bytes, name });
         return true;
       } catch (err) {
         // 이슈 055: 사용자가 취소(워커 종료)한 경우 — 오류가 아니다. 조용히 접는다(현재 문서 유지).
         if ((err as { code?: string })?.code === "worker_terminated") {
+          trackDocumentOpen({ fileType: format, source, result: "cancelled" });
           return false;
         }
         if (workerMode) {
@@ -495,6 +511,7 @@ export default function LabWorkspace() {
           }
         }
         if (!latest()) return false; // 뒤에 새 open 이 시작됐다 — 그쪽 표면을 어지럽히지 않는다
+        trackDocumentOpen({ fileType: format, source, result: "failed" });
         // 이슈 055 한도 UX: DocLimit/형식 계열 오류는 사람이 읽는 사유로 매핑, 모르는 오류는 기존 문구.
         const friendly = limitMessage(msg(err));
         setLabError(
@@ -524,7 +541,8 @@ export default function LabWorkspace() {
       const file = e.target.files?.[0];
       e.target.value = ""; // 같은 파일 재선택 허용
       if (!file) return;
-      await openBytes(new Uint8Array(await file.arrayBuffer()), file.name);
+      trackUploadStart({ fileType: fileType(file.name), source: "picker" });
+      await openBytes(new Uint8Array(await file.arrayBuffer()), file.name, "upload");
     },
     [openBytes],
   );
@@ -537,7 +555,7 @@ export default function LabWorkspace() {
       try {
         const r = await fetch(`${BASE}/samples/${file}`);
         if (!r.ok) throw new Error(`샘플이 배치되지 않았습니다 (${r.status}) — apps/hwp-lab에서 npm run dev/build를 다시 실행하세요.`);
-        await openBytes(new Uint8Array(await r.arrayBuffer()), file);
+        await openBytes(new Uint8Array(await r.arrayBuffer()), file, "sample");
       } catch (e) {
         setLabError(msg(e));
       }
@@ -608,7 +626,11 @@ export default function LabWorkspace() {
           setResuming(true);
           // 시드(편집 전 원본)는 원래 파일명 그대로 연다 — 바이트가 .hwp 인데 " (복구본).hwpx" 로
           // 열면 확장자와 내용이 어긋난다. 편집본 스냅샷은 진짜 HWPX 라 기존 이름 규칙 유지.
-          const ok = await openBytes(rec.bytes, rec.seed && rec.sourceName ? rec.sourceName : recoveredName(rec.docName));
+          const ok = await openBytes(
+            rec.bytes,
+            rec.seed && rec.sourceName ? rec.sourceName : recoveredName(rec.docName),
+            fromUrl ? "url" : "recovery",
+          );
           if (cancelled) return;
           setResuming(false);
           if (ok) {
@@ -648,7 +670,7 @@ export default function LabWorkspace() {
   const onRestore = useCallback(async () => {
     if (!recovery) return;
     pendingRecoveryRef.current = recovery; // 열기 성공 시 [doc] 이펙트가 소비(adoptRecovered)한다
-    const ok = await openBytes(recovery.bytes, recoveredName(recovery.docName));
+    const ok = await openBytes(recovery.bytes, recoveredName(recovery.docName), "recovery");
     if (!ok) {
       // 열기 실패 — 재귀속되지 않았다. 스냅샷은 보존하고 사유만 알린다(다시 시도/무시는 사용자의 선택).
       pendingRecoveryRef.current = null;
@@ -726,6 +748,15 @@ export default function LabWorkspace() {
       window.setTimeout(() => URL.revokeObjectURL(a.href), 4000);
       await autosave.markExported();
       setSavedLabel(null);
+      const format: ExportFormat =
+        mime === "application/pdf"
+          ? "pdf"
+          : mime === "text/html"
+            ? "html"
+            : mime === "application/hwp+zip"
+              ? "hwpx"
+              : "unknown";
+      trackExport({ format, result: "success" });
     },
     [autosave],
   );
@@ -751,6 +782,7 @@ export default function LabWorkspace() {
         throw new Error("AI 전송에 동의하지 않아 요청을 보내지 않았습니다. 수동 편집과 내보내기는 계속 사용할 수 있습니다.");
       }
     }
+    trackAiRequest({ transport: demoAiOn ? "demo" : "byok" });
     // 066: 표/셀 앵커마다 엔진에서 그 표의 셀 그리드(행×열·각 셀 텍스트·빈칸)를 조회해 doc-context 에
     // 첨부한다 — 그래야 모델이 "표 채워줘"·라벨 옆 값칸 지정·구조편집(행 N개)을 정확히 한다(얇은 앵커
     // 컨텍스트에선 intents 0 이었음). 표가 아니거나 조회 실패면 null(첨부 없음 → 기존 동작, 회귀 방지).
@@ -1029,6 +1061,7 @@ export default function LabWorkspace() {
           href={layoutReportUrl(layoutReportFormat(doc.name))}
           target="_blank"
           rel="noreferrer"
+          onClick={trackLayoutReportOpen}
           title="파일명·본문·해시 없이 형식과 빈 비교 항목만 GitHub 공개 이슈 초안에 채웁니다"
         >
           <MessageSquareWarning size={14} />
@@ -1161,7 +1194,8 @@ export default function LabWorkspace() {
             className={theme === "light" ? undefined : "hw-studio"}
             // 이슈 050: 페이지 위에 이미지를 드롭하면 삽입, .hwp/.hwpx 를 드롭하면 이 콜백으로 열기.
             onOpenFile={async (bytes, name) => {
-              await openBytes(bytes, name); // 성공 여부는 복구 배너 전용 — 드롭 열기는 결과 무시(050 동작 유지)
+              trackUploadStart({ fileType: fileType(name), source: "drop" });
+              await openBytes(bytes, name, "drop"); // 성공 여부는 복구 배너 전용 — 드롭 열기는 결과 무시(050 동작 유지)
             }}
             // 이슈 052: 내보내기는 웹 기본(브라우저 다운로드)을 그대로 수행하고 스냅샷을 정리한다.
             onExport={onExport}

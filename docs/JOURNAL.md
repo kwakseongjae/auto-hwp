@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-13 (Codex sol) · GA4·검색 등록 준비
+- #29~#33: GA4 property/stream과 Google/Naver HTML meta token을 만들고 Vercel Production env에 등록.
+- 익명 opt-in 전 GA 요청 0·철회 즉시 disable·문서 콘텐츠 금지 typed event/CSP/privacy를 구현.
+- app 208 tests·typecheck·build, 전용 Playwright 2/2, launch 30/30 green; full은 기존 shared clippy 정체.
+- 다음: PR/CI/main 자동 배포→Google/Naver verify+sitemap→Brave submit; 선재 examples 무접촉.
+
 ## 2026-08-13 (Codex sol) · Vercel main 자동 production 실증
 - PR #27 CI green→main `dd527d8`; push event가 자동 production run 31680139716 시작.
 - 6m30s prebuilt deploy success, autohwp.com 홈/OG 200·canonical·보안 헤더 green.

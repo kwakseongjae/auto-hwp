@@ -3,6 +3,16 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-13 · Codex(sol) — **이슈 #29~#33 성장 계측·검색 등록 구현 및 콘솔 사전 설정 완료, PR 전**.
+  GA4 속성/웹 스트림을 `https://autohwp.com`·Asia/Seoul·KRW로 만들고 Enhanced Measurement를 껐다.
+  Google Search Console URL-prefix와 Naver Search Advisor 사이트를 HTML meta 방식으로 추가해 verification
+  token 2개와 GA 측정 ID를 Vercel Production env에 등록했다. 코드는 명시적 opt-in 전 GA script/request 0,
+  거부·철회 즉시 disable, 파일명·본문·프롬프트·원문 오류 금지, hwp/hwpx·쪽수 bucket·결과 enum만 전송한다.
+  Google/Naver meta와 GA CSP는 ID/env가 있을 때만 출력된다. hwp-lab 208 tests·typecheck·production build,
+  analytics Playwright 2/2, launch 30/30 green; `verify-local --full`은 코드 오류 전 종전 macOS shared-target
+  clippy CPU 0% 정체로 중단했다. 다음: commit/push→PR `Closes #30/#31/#32`→CI/main 자동 production→라이브
+  meta·동의/네트워크 smoke→양 콘솔 Verify+sitemap→Brave submit/CAPTCHA. 선재 `crates/hwp-rhwp/examples/` 무접촉.
+
 - 갱신: 2026-08-13 · Codex(sol) — **이슈 #26 Vercel main 자동 production prebuilt 배포 실증 완료**.
   PR #27 필수 checks green→main `dd527d8` 병합. 별도 수동 실행 없이 동일 SHA의 push event가
   production run 31680139716을 시작해 6m30s success했다. engine wasm·JS deps·production env pull·

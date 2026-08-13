@@ -24,7 +24,7 @@ export default function PrivacyPage() {
           오토한글(auto-hwp)의 기본 문서 경로는 브라우저 안에서 동작합니다. AI 편집은 별도 선택 사항이며,
           그때만 아래에 적은 문맥이 명시적 동의 뒤 외부 처리자에게 전달됩니다.
         </p>
-        <p className={styles.updated}>최종 갱신: 2026-08-12 · 적용 대상: autohwp.com 라이브 데모</p>
+        <p className={styles.updated}>최종 갱신: 2026-08-13 · 적용 대상: autohwp.com 라이브 데모</p>
 
         <section>
           <h2>한눈에 보는 데이터 경계</h2>
@@ -60,6 +60,11 @@ export default function PrivacyPage() {
                     서버 메모리 또는 Upstash 카운터 키. 약 25시간 뒤 만료. 기본 한도는 IP당 20회·전체
                     400회이며, Upstash가 없으면 서버 인스턴스별 best-effort입니다.
                   </td>
+                </tr>
+                <tr>
+                  <th>선택적 익명 사용 분석</th>
+                  <td>페이지 방문, 문서 형식·쪽수 구간, 열기·AI 요청·내보내기·제보 이동의 성공 여부</td>
+                  <td>명시적으로 허용한 브라우저에서만 Google Analytics로 전송. 문서명·본문·프롬프트·응답은 제외</td>
                 </tr>
               </tbody>
             </table>
@@ -109,8 +114,10 @@ export default function PrivacyPage() {
         <section>
           <h2>분석·쿠키·외부 제품에 임베드할 때</h2>
           <p>
-            현재 데모에는 광고, 행동 분석 SDK, 제3자 추적 쿠키가 없습니다. CDN에서 엔진 바이트를 받는 기본
-            설정은 네트워크 요청이며, 폐쇄망에서는 임베드 가이드의 자기호스팅 경로로 바꿀 수 있습니다.
+            광고는 없습니다. 익명 사용 분석은 별도 선택 사항이며, 허용하기 전에는 Google Analytics 스크립트나
+            요청을 보내지 않습니다. 허용하면 페이지 방문과 기능 단계의 제한된 enum·구간 값만 전송하고,
+            파일명·문서 본문·표 내용·AI 지시문과 응답·선택 위치·문서 해시·원문 오류는 보내지 않습니다.
+            선택은 이 브라우저의 localStorage에 저장되며 아래에서 초기화할 수 있습니다.
           </p>
           <p>
             npm 패키지·CLI·MCP를 자신의 제품이나 인프라에 붙인 운영자는 별도의 데이터 처리자입니다. 어떤
