@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-13 (Codex sol) · npm 0.0.5 발행 완료
+- PR #24 CI green→main `7a41cb6`; publish run 31678071089로 npm 4종 0.0.5 lockstep 발행 성공.
+- registry license/shasum/size와 React `^0.0.5` 형제 의존을 재조회.
+- fresh Vite·Next build, Node/Bun sample-8p 8쪽 렌더·HWPX export green.
+- Vercel은 수동 prebuilt라 미배포; 발행 증거 후속 PR 진행, 선재 examples 무접촉.
+
 ## 2026-08-13 (Codex sol) · npm 0.0.5 릴리스 준비
 - 이슈 #23에서 npm 4종·CDN 핀·현재 소비자 문서를 lockstep 0.0.5로 올리고 CHANGELOG를 확정.
 - launch 30/30, 패키지 64/262/418 tests, 4종 tarball dry-run과 engine wasm 7,560KB green.

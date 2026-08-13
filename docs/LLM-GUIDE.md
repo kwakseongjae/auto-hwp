@@ -4,7 +4,7 @@
 > 받은 코딩 에이전트(Claude Code·Codex·Cursor·Copilot Workspace 등)가, 추측 없이 **한 번에 맞는 코드**를
 > 쓰도록 만든 문서다. 진입점 인덱스는 루트 [`llms.txt`](../llms.txt).
 >
-> 이 문서의 모든 API·수치는 **npm 발행본 `0.0.4`에 대고 실행해 확인**했다(§5 실측표). 코드가 정본이며,
+> 이 문서의 모든 API·수치는 **npm 발행본 `0.0.5`에 대고 실행해 확인**했다(§5 실측표). 코드가 정본이며,
 > 어긋나면 `node_modules/@auto-hwp/engine/index.d.ts`가 이긴다.
 
 ---
@@ -262,7 +262,7 @@ claude mcp add auto-hwp -- hwp-mcp
 
 ## 2. 함정 목록 — 에이전트가 실제로 틀리는 것들
 
-기존 문서·코드에서 추출했고, 번호 옆 ✔은 이번에 0.0.4로 **재현 확인**한 항목이다.
+기존 문서·코드에서 추출했고, 번호 옆 ✔은 이번에 0.0.5로 **재현 확인**한 항목이다.
 
 1. **버전 pin은 협상 대상이 아니다 — `@latest` 금지.** wasm-bindgen 글루(JS)와 `.wasm` 바이너리는 함께
    컴파일된 **한 벌**이다. 버전이 어긋나면 링크 실패하거나, 더 나쁘게는 링크된 뒤 신규 Intent를
@@ -332,8 +332,8 @@ claude mcp add auto-hwp -- hwp-mcp
     암호(password) `.hwp`는 **열지 못한다**(정직 거부). PDF의 수식·차트는 자리표시 상자다.
 18. **`file:` 의존을 그대로 복사하지 마라.** 이 레포 안의 `packages/*`·`examples/*`는 모노레포라
     `"@auto-hwp/engine": "file:../engine"` 같은 로컬 경로 의존이 섞여 있다. 외부 프로젝트로 옮길 때는
-    **레지스트리 버전(`^0.0.4`)** 으로 바꿔야 한다(발행본 `@auto-hwp/react`는 이미
-    `@auto-hwp/engine ^0.0.4` / `@auto-hwp/editor-core ^0.0.4`를 의존한다 — 확인함).
+    **레지스트리 버전(`^0.0.5`)** 으로 바꿔야 한다(발행본 `@auto-hwp/react`는 이미
+    `@auto-hwp/engine ^0.0.5` / `@auto-hwp/editor-core ^0.0.5`를 의존한다 — 확인함).
 
 ---
 
@@ -370,14 +370,14 @@ try { doc.exportPdf(); } catch (e) { console.log("no-font guard →", e.code); }
 doc.free();
 ```
 
-기대 출력: `engine 0.0.4` / `pages` ≥ 1 / `svg0 bytes` > 0 / `no-font guard → font_missing`.
+기대 출력: `engine 0.0.5` / `pages` ≥ 1 / `svg0 bytes` > 0 / `no-font guard → font_missing`.
 어느 한 줄이라도 다르면 **배선이 틀린 것이지 문서가 틀린 게 아니다** — §2 함정 1·2·12를 다시 보라.
 
 ### 4.2 브라우저 (콘솔/스크래치 페이지)
 
 ```html
 <script type="module">
-  import { initEngine, HwpDoc, sanitizeSvg } from "https://cdn.jsdelivr.net/npm/@auto-hwp/engine@0.0.4/index.js";
+  import { initEngine, HwpDoc, sanitizeSvg } from "https://cdn.jsdelivr.net/npm/@auto-hwp/engine@0.0.5/index.js";
   await initEngine();                       // 인자 없음 = 같은 버전의 wasm을 자동으로
   const bytes = new Uint8Array(await (await fetch("./sample.hwpx")).arrayBuffer());
   const doc = HwpDoc.open(bytes, "sample.hwpx");
@@ -392,13 +392,13 @@ doc.free();
 
 ---
 
-## 5. 실측 기준선 (2026-08-05, npm `0.0.4`, macOS arm64 / Node v24.14.0)
+## 5. 실측 기준선 (2026-08-13, npm `0.0.5`, macOS arm64 / Node v24.14.0)
 
 에이전트가 "이 정도면 정상인가"를 판단할 기준. 재현 방법은 §4.1 + 반복 루프.
 
 | 항목 | 실측값 |
 |---|---|
-| `@auto-hwp/engine@0.0.4` 언팩 크기 / 파일 수 | 8,378,694 B / 14개 |
+| `@auto-hwp/engine@0.0.5` 언팩 크기 / 파일 수 | 8,381,619 B / 14개 |
 | `pkg/hwp_wasm_bg.wasm` (비압축) | 7,725,936 B |
 | `initEngine(bytes)` (로컬 바이트, 캐시 없음) | 23 ms |
 | `benchmark.hwp` (67 KB) → open / 8쪽 SVG / PDF | 14 ms / 1 ms(465 KB) / 61 ms(92 KB) |
