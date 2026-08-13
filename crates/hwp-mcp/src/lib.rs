@@ -1389,6 +1389,14 @@ pub enum Intent {
         section: usize,
         index: usize,
     },
+    /// Delete a selected table/block INSIDE a parent cell addressed by descending CellPath. Manual UI
+    /// only (not in the AI whitelist): unlike `DeleteBlock`, this can never remove the outer section
+    /// table that merely contains the selected nested table (issue #19).
+    DeleteNestedBlock {
+        section: usize,
+        path: Vec<hwp_ops::CellStep>,
+        index: usize,
+    },
     /// Image insert (issue 050 — drop / upload) — embed a base64 PNG/JPEG image as a new BinData and
     /// anchor an image paragraph in `section` as ONE undo unit (`InsertImageAt`). A web drop/upload has
     /// BYTES, not a file path, so the payload is `data_b64` (base64, no `data:` prefix); the true format
@@ -2112,6 +2120,21 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
         }
         Intent::DeleteBlock { section, index } => {
             do_delete_block(session, section, index)?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::DeleteNestedBlock {
+            section,
+            path,
+            index,
+        } => {
+            let doc = session.doc.as_mut().ok_or("no document open")?;
+            doc.do_op(&hwp_ops::Op::DeleteNestedBlock {
+                section,
+                path,
+                index,
+            })
+            .map_err(|e| e.to_string())?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }

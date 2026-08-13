@@ -175,6 +175,14 @@ pub enum Op {
         section: usize,
         index: usize,
     },
+    /// Delete one block inside a nested table's PARENT CELL, addressed by its descending CellPath.
+    /// This is the nested structural twin of `DeleteBlock`: the outer section/table remains intact and
+    /// one undo snapshot restores the removed child block (issue #19).
+    DeleteNestedBlock {
+        section: usize,
+        path: Vec<CellStep>,
+        index: usize,
+    },
     /// Move the block at index `from` to index `to` within `section` (removing it, then reinserting at
     /// the post-removal index). Generalizes M4's "move = DeleteBlock + InsertImageAt" to ANY block
     /// (tables, paragraphs) in ONE op so a single undo restores the original order. `to == len` (the
@@ -760,6 +768,32 @@ fn resolve_cell_mut<'a>(
             .find(|c| cell_covers(c, step.row, step.col))?;
     }
     Some(cell)
+}
+
+/// Remove one block from the parent cell reached by `path`. The path must be non-empty: top-level
+/// deletion stays on `DeleteBlock`, which keeps the two address spaces impossible to confuse.
+fn delete_nested_block(
+    doc: &mut SemanticDoc,
+    section: usize,
+    path: &[CellStep],
+    index: usize,
+) -> Result<()> {
+    if path.is_empty() {
+        return Err(Error::Other(
+            "DeleteNestedBlock: empty parent cell path".into(),
+        ));
+    }
+    let cell = resolve_cell_mut(doc, section, path)
+        .ok_or_else(|| Error::Other("DeleteNestedBlock: parent cell path not found".into()))?;
+    if index >= cell.blocks.len() {
+        return Err(Error::Other(format!(
+            "DeleteNestedBlock: block index {index} out of range (cell has {} blocks)",
+            cell.blocks.len()
+        )));
+    }
+    cell.blocks.remove(index);
+    cell.dirty.mark();
+    Ok(())
 }
 
 /// Rebuild the (possibly NESTED) LEAF cell reached by `path` from `runs`, NON-DESTRUCTIVELY (issue 064
@@ -1641,6 +1675,9 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             sec.blocks.remove(*index);
             sec.dirty.mark();
             Ok(())
+        }
+        Op::DeleteNestedBlock { section, path, index } => {
+            delete_nested_block(doc, *section, path, *index)
         }
         Op::MoveBlock { section, from, to } => {
             let sec = section_mut(doc, *section)?;
@@ -4765,6 +4802,90 @@ mod tests {
             matches!(c00.blocks[0], Block::Paragraph(_))
                 && matches!(c00.blocks[1], Block::Table(_)),
             "outer (0,0) keeps [Paragraph, Table]"
+        );
+    }
+
+    #[test]
+    fn delete_nested_block_removes_only_child_table_and_undo_restores_it() {
+        let mut doc = doc_with(vec![simple_para(1, "앞")]);
+        let cell = |t: &str| CellSpec {
+            text: t.into(),
+            ..Default::default()
+        };
+        apply(
+            &mut doc,
+            &Op::InsertTableAt {
+                section: 0,
+                index: 1,
+                rows: vec![vec![cell("바깥")]],
+            },
+        )
+        .unwrap();
+        let plain = intern_char_shape(&mut doc, CharShape::default());
+        let nested = Table {
+            rows: 1,
+            cols: 1,
+            col_widths: vec![1],
+            cells: vec![Cell {
+                row: 0,
+                col: 0,
+                row_span: 1,
+                col_span: 1,
+                active: true,
+                blocks: vec![Block::Paragraph(Paragraph {
+                    runs: vec![Run {
+                        char_shape: plain,
+                        content: vec![Inline::Text("예시".into())],
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                })],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        {
+            let Block::Table(outer) = &mut doc.sections[0].blocks[1] else {
+                panic!("outer table")
+            };
+            outer.cells[0].blocks.push(Block::Table(nested)); // child index 1
+        }
+        let mut session = EditSession::new(doc);
+        session
+            .do_op(&Op::DeleteNestedBlock {
+                section: 0,
+                path: vec![CellStep {
+                    block: 1,
+                    row: 0,
+                    col: 0,
+                }],
+                index: 1,
+            })
+            .unwrap();
+
+        assert_eq!(
+            session.doc().sections[0].blocks.len(),
+            2,
+            "outer section blocks stay intact"
+        );
+        let Block::Table(outer) = &session.doc().sections[0].blocks[1] else {
+            panic!("outer table survives")
+        };
+        assert!(
+            outer.cells[0]
+                .blocks
+                .iter()
+                .all(|b| !matches!(b, Block::Table(_))),
+            "only nested table is removed"
+        );
+
+        assert!(session.undo());
+        let Block::Table(outer) = &session.doc().sections[0].blocks[1] else {
+            panic!("outer table restored")
+        };
+        assert!(
+            matches!(outer.cells[0].blocks[1], Block::Table(_)),
+            "one undo restores nested table in place"
         );
     }
 

@@ -656,6 +656,10 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // suppresses the refreshToken editor-close while a Tab commit-move re-enters the next cell.
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
+  // Block deletion is asynchronous (wasm mutation → page recount → undo-book push). A ⌘Z arriving in
+  // that window must wait for the delete to become a complete undo unit instead of observing an empty
+  // stack. The resolved promise remains harmless until the next block edit (issue #19).
+  const pendingBlockEditRef = useRef<Promise<void>>(Promise.resolve());
   const editorRef = useRef(editor);
   editorRef.current = editor;
   // COUNTED shield (issue 055 사후, consumeShield): armed +1 for a Tab commit's OWN re-flow only (a bare
@@ -2409,14 +2413,22 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     [core, toast, onTrap, msg],
   );
   const onDeleteSelectedBlock = useCallback(
-    async (section: number, block: number) => {
-      try {
-        await core.edit.deleteBlock(section, block);
-        core.selection.clear(); // the deleted block's mark is gone; drop the stale selection
-        toast(msg.workspace.deleted);
-      } catch (e) {
-        if (!onTrap(e, msg.workspace.trapRecovered)) toast(msg.workspace.deleteFailed(String(e)));
-      }
+    (anchor: Anchor): Promise<void> => {
+      const task = pendingBlockEditRef.current.then(async () => {
+        try {
+          if (anchor.path?.length && anchor.nestedBlock != null) {
+            await core.edit.deleteNestedBlock(anchor.section, anchor.path, anchor.nestedBlock);
+          } else {
+            await core.edit.deleteBlock(anchor.section, anchor.block);
+          }
+          core.selection.clear(); // the deleted block's mark is gone; drop the stale selection
+          toast(msg.workspace.deleted);
+        } catch (e) {
+          if (!onTrap(e, msg.workspace.trapRecovered)) toast(msg.workspace.deleteFailed(String(e)));
+        }
+      });
+      pendingBlockEditRef.current = task;
+      return task;
     },
     [core, toast, onTrap, msg],
   );
@@ -2444,7 +2456,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       if (a.kind !== "paragraph" && a.kind !== "table") return;
       e.preventDefault();
       if (e.key === "Enter") void onInsertBlankBelow(a.section, a.block);
-      else void onDeleteSelectedBlock(a.section, a.block);
+      else void onDeleteSelectedBlock(a);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -3100,10 +3112,12 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // ⌘Z 도 무반응"이라고 느낀 상황의 절반은 실은 "편집이 애초에 커밋되지 않아 되돌릴 것이 없다"였다.
   // 빈 스택을 정직하게 알려야 사용자가 '편집이 안 먹었다'는 진짜 문제를 인지한다.
   const undo = useCallback(async () => {
+    await pendingBlockEditRef.current;
     toast((await core.session.undo()) ? msg.workspace.undoToast : msg.workspace.undoEmpty);
   }, [core, toast, msg]);
 
   const redo = useCallback(async () => {
+    await pendingBlockEditRef.current;
     toast((await core.session.redo()) ? msg.workspace.redoToast : msg.workspace.redoEmpty);
   }, [core, toast, msg]);
 

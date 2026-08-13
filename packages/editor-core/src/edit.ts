@@ -3,7 +3,7 @@ import { coreMessagesKoKR, type CoreMessages } from "./messages";
 import { inheritRuns } from "./runs";
 import type { DocSession } from "./session";
 import type { SelectionModel } from "./selection";
-import type { DocContext, Intent, IntentCard, RunSpec } from "./types";
+import type { CellAddr, DocContext, Intent, IntentCard, RunSpec } from "./types";
 
 /** A rectangular cell range `[r0..=r1] × [c0..=c1]` (inclusive, MODEL-GLOBAL) — the target of a batch
  *  format / shade (INTENT-SCHEMA §6.8). A single cell is `r0==r1 && c0==c1`. */
@@ -175,6 +175,12 @@ export class EditController {
    *  ⌘Z away; the engine throws on an out-of-range index (거짓 성공 없음). */
   async deleteBlock(section: number, index: number): Promise<number> {
     return this.session.applyBatch([{ intent: "DeleteBlock", section, index }]);
+  }
+
+  /** Delete one block inside a nested table's parent cell. `path` addresses the parent cell and
+   *  `index` is the selected nested table's block index inside that cell. One undo batch. */
+  async deleteNestedBlock(section: number, path: CellAddr[], index: number): Promise<number> {
+    return this.session.applyBatch([{ intent: "DeleteNestedBlock", section, path, index }]);
   }
 
   /** 이미지 삽입 (issue 050): embed a dropped/uploaded image (base64 PNG/JPEG bytes, NO `data:` prefix) at

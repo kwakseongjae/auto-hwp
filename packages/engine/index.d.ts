@@ -56,6 +56,10 @@ export interface TableBox {
   rows: number;
   cols: number;
   first_row: number;
+  /** Descending path to a nested table's parent cell. Empty for a top-level table. */
+  path: CellAddr[];
+  /** This table's block index inside that parent cell (equals `block` at top level). */
+  self_block: number;
 }
 
 /** An anchored image's placed box (own-render px space; issue 049); null on a miss. `x/y/w/h` is the

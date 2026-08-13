@@ -345,7 +345,19 @@ describe("SelectionModel — Figma table drill (issue 06x)", () => {
 // resolve the INNER table box + the nested LEAF cell (length-2 path); outside it resolves the OUTER
 // table + a length-1 cell. The drill stack matches by `sameTable`, so nested levels don't collide with
 // the outer table's `(section, block)`.
-const NESTED_INNER: TableBox = { section: 0, block: 1, x: 0, y: 0, w: 200, h: 200, rows: 2, cols: 2, first_row: 0 };
+const NESTED_INNER: TableBox = {
+  section: 0,
+  block: 1,
+  x: 0,
+  y: 0,
+  w: 200,
+  h: 200,
+  rows: 2,
+  cols: 2,
+  first_row: 0,
+  path: [{ block: 1, row: 0, col: 0 }],
+  self_block: 1,
+};
 const NESTED_OUTER: TableBox = { section: 0, block: 1, x: 0, y: 0, w: 400, h: 400, rows: 2, cols: 1, first_row: 0 };
 // The nested grid occupies the top-left quadrant (x<200 && y<200) — the OUTER cell (0,0). Elsewhere is a
 // plain outer cell (length-1 path).
@@ -379,6 +391,18 @@ const nestedCellAt = (_p: number, x: number, y: number): CellHit => {
 
 describe("SelectionModel — nested table drill (issue 064 Tier-2)", () => {
   const model = () => new SelectionModel(new MockAdapter({ pages: 1, table: nestedTableAt, cell: nestedCellAt }));
+
+  it("a plain click on a nested table keeps its parent-cell path + child block deletion address", async () => {
+    const m = model();
+    await click(m, 0, 50, 50);
+    expect(anchors(m)[0]).toMatchObject({
+      kind: "table",
+      section: 0,
+      block: 1,
+      path: [{ block: 1, row: 0, col: 0 }],
+      nestedBlock: 1,
+    });
+  });
 
   it("drillInto a nested cell descends → the anchor carries the length-2 CellPath", async () => {
     const m = model();

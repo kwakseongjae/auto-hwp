@@ -3,6 +3,19 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-13 · Codex(sol) — **이슈 #19 중첩 표 삭제·즉시 undo 수정 완료, push 승인 대기**.
+  공개 이슈 #19를 만들고 브랜치 `codex/issue-19-nested-table-delete-undo`에서 수정했다. `TableBox`가
+  중첩 표의 부모 CellPath+cell 내부 block index를 보존하고, 수동 전용 additive
+  `DeleteNestedBlock` Intent/Op가 해당 자식 블록만 제거한다. 최상위 `DeleteBlock`은 그대로다.
+  삭제 중 들어온 undo는 커밋 완료 뒤 직렬화하며, 선택 삭제로 Design→Vibe 탭이 돌아올 때 채팅
+  textarea가 자동 포커스를 훔치던 두 번째 원인도 `AI에게 전달` focusToken 증가 때만 포커스하도록
+  교정했다. 공개 `sample-8p.hwp` E2E에서 중첩 예시만 삭제·바깥 `창업아이템명` 보존·undo 복구·
+  재삭제 직후 무클릭 undo 복구 1/1 green. hwp-ops 98, MCP schema 14, editor-core 262, React 418,
+  hwp-lab 198, 격리 target clippy `-D warnings`, wasm 재빌드+wasm-opt(7,560KB), 게이트
+  8==8/18==18/24==24 green. `verify-local --full`은 코드 오류 전 macOS shared-target Tauri/rhwp
+  clippy가 CPU 0%로 재정체되어 중단했고 동일 범위를 격리 target으로 green 확인했다. 다음: 사용자
+  확인 후 commit/push → PR `Closes #19` → 필수 CI → merge/deploy. 선재 `crates/hwp-rhwp/examples/` 무접촉.
+
 - 갱신: 2026-08-13 · Codex(sol) — **정식 런칭 후 버그 2건 수정·프로덕션 배포·issue-first 전환 완료**.
   이슈 #11/#12/#13 → PR #14로 진행해 필수 checks(issue-link 3s, build-test 5m28s, licenses 2m45s)
   green 후 보호된 main `2eb29d7`에 병합했고 세 이슈는 자동 close됐다. 같은 전체 SHA

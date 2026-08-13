@@ -50,10 +50,11 @@ const CELL_PROBE_PX = 3;
 export function selKey(a: Anchor): string {
   const r = a.rows ? `${a.rows[0]}-${a.rows[1]}` : "";
   const c = a.cols ? `${a.cols[0]}-${a.cols[1]}` : "";
-  // A NESTED cell (issue 064 Tier-2): fold the descending path so distinct nesting levels are DISTINCT
-  // selections. A length-1 (or absent) path adds nothing → identical key to before (back-compat).
-  const p = a.path && a.path.length > 1 ? ":" + a.path.map((s) => `${s.block}.${s.row}.${s.col}`).join(">") : "";
-  return `${a.section}:${a.block}:${r}:${c}${p}`;
+  // A nested cell/table folds its descending path so nesting levels are DISTINCT. A nested table's
+  // parent path can be length 1, so `nestedBlock` is the explicit signal that the path must be kept.
+  const p = a.path && (a.path.length > 1 || a.nestedBlock != null) ? ":" + a.path.map((s) => `${s.block}.${s.row}.${s.col}`).join(">") : "";
+  const nb = a.nestedBlock == null ? "" : `:b${a.nestedBlock}`;
+  return `${a.section}:${a.block}:${r}:${c}${p}${nb}`;
 }
 
 /** Cell chip label = a short text snippet + a 1-based "N행 M열" (issue 023). Empty cell → "표 N행 M열".
@@ -129,9 +130,18 @@ export function deriveSel(page: number, table: TableBox | null, cell: CellHit | 
   }
   if (table) {
     const label = messages.tableAt(page + 1);
+    const nested = !!table.path?.length && table.self_block != null;
     return {
       mark: { page, box: { x: table.x, y: table.y, w: table.w, h: table.h }, label, kind: "table" },
-      anchor: { kind: "table", section: table.section, block: table.block, label, page },
+      anchor: {
+        kind: "table",
+        section: table.section,
+        block: table.block,
+        label,
+        page,
+        path: nested ? table.path : undefined,
+        nestedBlock: nested ? table.self_block : undefined,
+      },
     };
   }
   if (hit) {

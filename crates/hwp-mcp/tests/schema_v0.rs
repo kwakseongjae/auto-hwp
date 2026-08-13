@@ -269,6 +269,11 @@ fn examples() -> Vec<Example> {
             r#"{"intent":"DeleteBlock","section":0,"index":0}"#,
             Synthetic,
         ),
+        e(
+            "DeleteNestedBlock",
+            r#"{"intent":"DeleteNestedBlock","section":0,"path":[{"block":1,"row":0,"col":0}],"index":1}"#,
+            DeserializeOnly,
+        ),
         // ---- structural inserts (issue 051 — chat structural edit; Intent exposure of the EXISTING
         //      InsertTableAt / InsertParagraphAt ops). `index` may be an int (at that block; == len
         //      appends) or null/absent (section END — the InsertImage anchor precedent). ----
@@ -335,7 +340,7 @@ fn de_err(v: Value) -> String {
 fn every_intent_variant_has_a_documented_example() {
     assert_eq!(
         examples().len(),
-        45,
+        46,
         "one JSON example per Intent variant (see INTENT-SCHEMA.md)"
     );
 }

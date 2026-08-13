@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-13 (Codex sol) · #19 중첩 표 삭제·즉시 undo
+- 중첩 표 선택에 부모 CellPath+자식 block 주소를 싣고 `DeleteNestedBlock`으로 바깥 양식 표를 보존.
+- 삭제 커밋/undo를 직렬화하고 Design→Vibe 전환의 채팅 textarea 포커스 탈취를 제거.
+- Rust/JS 단위·격리 clippy·wasm 재빌드·8/18/24 게이트와 sample-8p 실제 E2E green.
+- 브랜치 `codex/issue-19-nested-table-delete-undo`; commit/push/PR은 사용자 확인 대기, 선재 examples 무접촉.
+
 ## 2026-08-13 (Codex sol) · 런칭 후 버그 수정·정식 OSS 파이프라인·프로덕션 배포
 - #11 병합 셀 좌표를 active origin으로 정규화, #12 PDF blob CSP를 최소 허용; PR #14 CI green→main `2eb29d7`.
 - `issue-link` 필수 check·CODEOWNERS·이슈 우선 문서를 추가하고 기존 main 외 브랜치를 모두 정리.
