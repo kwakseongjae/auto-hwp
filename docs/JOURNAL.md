@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-13 (Codex sol) · 오래된 control-audit 로컬 진단 예제 정리
+- #36: 7월 HWP control 좌표 덤프용 일회성·미참조 Rust 예제로 판정.
+- 생성물이 아닌 소스라 gitignore하지 않고 미추적 파일·빈 examples 디렉터리를 삭제.
+- 즉시 필요한 사용자 인증 작업 없음; 2026-08-20 검색 색인·GA 파생 key event만 후속.
+
 ## 2026-08-13 (Codex sol) · GA4·Google/Naver·Brave 등록 완료
 - production `0979297` success; 동의 전 GA 0·허용/철회·비식별 sample event·Realtime 검증.
 - GA custom dimension 6개, export/layout key event; Google verified+sitemap 15·home indexed.

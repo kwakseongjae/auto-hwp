@@ -11,9 +11,11 @@
   `ws_layout_report_open` key event를 설정했다. Google URL-prefix meta verified, sitemap 15 URL success,
   homepage indexed/HTTPS; `/docs`·`/bulk`·`/privacy`는 발견됨-pending이고 privacy는 수동 요청했다. Naver
   meta verified+sitemap+핵심 URL 4개 수집 요청, Brave homepage Submit URL success. 증거=
-  `docs/launch/evidence/2026-08-13-growth-search-registration.md`. 다음 비동기: 2026-08-20 Brave 실제 색인,
-  GA `ws_document_open result=success` 파생 key event, Google/Naver 하위 URL 자연 색인 재확인. 선재
-  `crates/hwp-rhwp/examples/` 무접촉.
+  `docs/launch/evidence/2026-08-13-growth-search-registration.md`. 사용자가 즉시 해야 할 인증·로그인 작업은
+  없다. 다음 비동기: 2026-08-20 Brave 실제 색인, GA `ws_document_open result=success` 파생 key event,
+  Google/Naver 하위 URL 자연 색인 재확인. 7월 일회성 진단 뒤 미추적으로 남은
+  `crates/hwp-rhwp/examples/control-audit.rs`는 이슈 #36에서 용도·비참조·feature 부적합을 확인하고 삭제했다.
+  생성물이 아닌 소스라 `.gitignore`에는 추가하지 않았다.
 
 - 갱신: 2026-08-13 · Codex(sol) — **이슈 #26 Vercel main 자동 production prebuilt 배포 실증 완료**.
   PR #27 필수 checks green→main `dd527d8` 병합. 별도 수동 실행 없이 동일 SHA의 push event가
