@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-14 (Grok 4.6) · 제품 방향 v3 착수
+- 딥리서치 14m Partial + 레포 적대검수. 공개 이슈 #38, 브랜치 docs/issue-38-product-direction-v3.
+- v3 초안 씀. 다음: 이 브랜치 PR `Closes #38` → 082 한컴 게이트는 별 이슈.
+- Ralph 경로 사용 안 함. 사용자 문서 무접촉.
+
 ## 2026-08-13 (Codex sol) · 오래된 control-audit 로컬 진단 예제 정리
 - #36: 7월 HWP control 좌표 덤프용 일회성·미참조 Rust 예제로 판정.
 - 생성물이 아닌 소스라 gitignore하지 않고 미추적 파일·빈 examples 디렉터리를 삭제.

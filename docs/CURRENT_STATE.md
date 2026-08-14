@@ -3,6 +3,13 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-14 · Grok 4.6 — **제품 방향 v3 문서화 착수(#38)**.
+  현행 목적지 초안=`docs/PRODUCT-DIRECTION-V3.md`(v1 §4 불변식 유지). 외부 근거=
+  세션 워크플로 `deep-research`(14m03s, Partial, 1차 출처). 브랜치
+  `docs/issue-38-product-direction-v3`. 다음 코딩 한 줄은 082 한컴 수동 게이트
+  실행/공개제외 유지 결정. 056·067 재구현 금지. F2·누름틀·044 default-on은 이슈
+  신설 대기. 선재 사용자 문서·corpus 무접촉.
+
 - 갱신: 2026-08-13 · Codex(sol) — **성장 계측 production·Google/Naver 등록·Brave 제출 완료**.
   main `097929767fd8bec6df42acb18ca74835aa342a24`의 자동 production run `31691376098`은 전체 success.
   라이브에서 동의 전 GA script/request/cookie 0, 허용 뒤 page_view, 철회 즉시 disable을 확인했고 샘플
