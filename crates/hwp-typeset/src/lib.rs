@@ -53,12 +53,25 @@ pub(crate) const BASELINE_RATIO: f64 = 0.85;
 /// 한컴 실측 대조(benchmark1.hwp): 한컴이 저장한 `<hp:lineseg>` 의 최대 세로 위치가 71891 로
 /// **71435 짜리 본문 상자에 맞고 77103 에는 한참 못 미친다** — 즉 71435 가 한컴이 실제로 쓴
 /// 본문 높이다.
+/// Paper size used for layout/paint. HWP5 stores unswapped A4 + `landscape=true`;
+/// rhwp swaps at render (`PageAreas::from_page_def_for_page`). HWPX already stores
+/// display width/height (`landscape` derived from width>height), so we only swap
+/// when the flag is set *and* the stored box is still portrait.
+pub fn display_paper(page: &PageSetup) -> (i32, i32) {
+    if page.landscape && page.width < page.height {
+        (page.height, page.width)
+    } else {
+        (page.width, page.height)
+    }
+}
+
 pub fn body_box(page: &PageSetup) -> (f64, f64, f64, f64) {
+    let (pw, ph) = display_paper(page);
     let left = page.margin_left + page.margin_gutter.max(0);
     let top = page.margin_top + page.margin_header.max(0);
     let bottom = page.margin_bottom + page.margin_footer.max(0);
-    let w = (page.width - left - page.margin_right).max(1) as f64;
-    let h = (page.height - top - bottom).max(1) as f64;
+    let w = (pw - left - page.margin_right).max(1) as f64;
+    let h = (ph - top - bottom).max(1) as f64;
     (left as f64, top as f64, w, h)
 }
 
@@ -304,8 +317,9 @@ impl LayoutEngine for NaiveLayout {
                 pages.push(PageLayout::default());
             }
             if let Some(p) = pages.last_mut() {
-                p.width = page.width as f64;
-                p.height = page.height as f64;
+                let (w, h) = display_paper(page);
+                p.width = w as f64;
+                p.height = h as f64;
             }
             // "쪽 나누기 앞에서" — 블록별 강제 개쪽 플래그. place_doc/block_pages 와 **같은 함수**를
             // 거쳐야 LOCKSTEP 이 유지된다(이슈 080).
@@ -388,9 +402,10 @@ impl LayoutEngine for NaiveLayout {
 }
 
 fn new_page(page: &PageSetup) -> PageLayout {
+    let (w, h) = display_paper(page);
     PageLayout {
-        width: page.width as f64,
-        height: page.height as f64,
+        width: w as f64,
+        height: h as f64,
         lines: Vec::new(),
     }
 }
@@ -1423,6 +1438,24 @@ mod tests {
             ..page
         };
         assert_eq!((body_box(&bound).0, body_box(&bound).2), (6669.0, 47190.0));
+    }
+
+    #[test]
+    fn display_paper_swaps_hwp5_landscape_portrait_box() {
+        let mut page = PageSetup {
+            width: 59528,
+            height: 84188,
+            landscape: true,
+            ..Default::default()
+        };
+        assert_eq!(display_paper(&page), (84188, 59528));
+        page.landscape = false;
+        assert_eq!(display_paper(&page), (59528, 84188));
+        // HWPX already stores display size — do not double-swap.
+        page.width = 84188;
+        page.height = 59528;
+        page.landscape = true;
+        assert_eq!(display_paper(&page), (84188, 59528));
     }
 
     /// 세로 병합 셀은 **덮는 행들의 합이 모자랄 때만** 부족분을 더한다 — 균등 분배 금지.

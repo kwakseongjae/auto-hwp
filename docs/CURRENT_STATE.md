@@ -3,11 +3,11 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
-- 갱신: 2026-08-15 · Grok 4.6 — **에이전트 규율 #43 (PR만, 병합은 질문)**.
-  #40/#41은 main `dbc76ef`에 이미 병합. 이번 브랜치 `docs/issue-43-ask-before-merge`:
-  비사소 PR은 체크 green 후 멈추고 묻는다. UI는 chrome-devtools로 업로드/클릭
-  검수. 전역 `~/.grok`에도 동일 규칙·`browser-qa` 스킬·MCP 핀. 다음: 사용자
-  병합 승인. 082 한컴 게이트는 별건. 선재 사용자 문서 무접촉.
+- 갱신: 2026-08-15 · Grok 4.6 — **#42 조판 네 결함 한 PR 구현 중**.
+  브랜치 `fix/issue-42-layout-gap`. 원인: HWP5 가로 미교환, `Control::Form` 드롭,
+  머리말 decorations 미조판. 원본 `.hwp`는 로컬에 없음(이슈 PDF만). 공개 게이트
+  유지. 다음: 테스트·브라우저 검수 후 PR `Closes #42`, 머지는 질문. 사용자 문서
+  무접촉.
 
 
 - 갱신: 2026-08-13 · Codex(sol) — **성장 계측 production·Google/Naver 등록·Brave 제출 완료**.
