@@ -234,7 +234,7 @@ cargo install --git https://github.com/kwakseongjae/auto-hwp auto-hwp-cli --feat
 ```bash
 auto-hwp inspect 양식.hwpx --out fill-map.json      # 라벨→값칸 초안 유도(autohwp.fillmap.v1)
 $EDITOR fill-map.json                               # 사람이 검수 — 이 단계를 건너뛰지 마라
-auto-hwp fill 양식.hwpx --map fill-map.json --data 명단.csv --out 결과/
+auto-hwp fill 양식.hwpx --map fill-map.json --data 명단.xlsx --out 결과/
 ```
 
 **④ 검증** — `결과/report.json`의 `rows[].needsReview`가 전부 `false`인지 본다(사유는 `rows[].reasons` —

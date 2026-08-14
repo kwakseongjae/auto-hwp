@@ -6,6 +6,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 
 mod fill;
+mod xlsx_roster;
 use hwp_model::types::SourceFormat;
 
 #[derive(Parser)]
@@ -236,7 +237,7 @@ enum Cmd {
         #[arg(long)]
         out: Option<PathBuf>,
     },
-    /// 벌크 채움 2/2 (issue 073): 확정 fill-map + 명단(JSON/단순 CSV) → 인원별 HWPX + zip +
+    /// 벌크 채움 2/2 (issue 073): 확정 fill-map + 명단(JSON/단순 CSV/xlsx 첫 시트) → 인원별 HWPX + zip +
     /// report.json(행별 검증: 값 존재·쪽수 기준선). 문제 행은 needsReview로 보고, --strict면 스킵.
     Fill {
         /// 원본 양식 (.hwp/.hwpx — 산출물은 HWPX).
@@ -244,7 +245,7 @@ enum Cmd {
         /// fill-map JSON (inspect 초안을 검수·pin 확정한 것).
         #[arg(long)]
         map: PathBuf,
-        /// 명단: .json(객체 배열, 권장) 또는 단순 .csv(헤더=키, 내장 콤마/따옴표 미지원).
+        /// 명단: .json(객체 배열) · 단순 .csv · .xlsx(첫 시트, 1행=키). 병합/추가 시트는 거부.
         #[arg(long)]
         data: PathBuf,
         /// 출력 디렉토리 (개별 파일 + output.zip + report.json).

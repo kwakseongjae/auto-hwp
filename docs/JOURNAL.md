@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-14 (Grok 4.6) · #38 머지 후 #40 xlsx 착수
+- PR #39 green→main `d24d0b5`. Grok 전역 rules/hook + 레포 `.grok/rules`에 issue-first 고정.
+- `feat/issue-40-xlsx-roster`에서 CLI·/bulk 첫 시트 xlsx 파서 구현·단위테스트 green.
+- 다음: PR `Closes #40`. 082 한컴 게이트는 별 이슈.
+
 ## 2026-08-14 (Grok 4.6) · 제품 방향 v3 착수
 - 딥리서치 14m Partial + 레포 적대검수. 공개 이슈 #38, 브랜치 docs/issue-38-product-direction-v3.
 - v3 초안 씀. 다음: 이 브랜치 PR `Closes #38` → 082 한컴 게이트는 별 이슈.

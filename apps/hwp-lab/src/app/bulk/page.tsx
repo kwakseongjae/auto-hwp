@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { HwpDoc, initEngine, sanitizeSvg } from "@auto-hwp/engine";
 import { applyDemoSpec, buildDemoRoster, DEMO_TEMPLATE, diagnoseKeys, rosterColumns, unmatchedMessage, unmatchedReasons } from "@/lib/bulkFill";
 import { parseRoster, readRoster, ROSTER_FORMAT_LABEL } from "@/lib/bulkRoster";
+import { parseXlsxRoster } from "@/lib/xlsxRoster";
 import { baselinePages, generateBatch, renderRowPreview, type FilledValue, type FillTarget, type RowCore, type RowPreview } from "@/lib/bulkEngine";
 import { createLock, MainThreadLane, WorkerLane, yieldToUi, type BulkLane } from "@/lib/bulkLane";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -211,6 +212,7 @@ export default function BulkFillPage() {
   const [tpl, setTpl] = useState<{ bytes: Uint8Array; name: string; sha: string; pages: number } | null>(null);
   const [fields, setFields] = useState<Field[]>([]);
   const [rosterText, setRosterText] = useState("");
+  const [rosterFromXlsx, setRosterFromXlsx] = useState(false);
   const [results, setResults] = useState<RowResult[]>([]);
   const [baseline, setBaseline] = useState(0);
   const [idx, setIdx] = useState(0);
@@ -731,6 +733,22 @@ export default function BulkFillPage() {
     return diagnoseKeys(rosterView.columns, activeKeys);
   }, [rosterView, activeKeys]);
   const patchField = (id: number, patch: Partial<Field>) => setFields((fs) => fs.map((f) => (f.id === id ? { ...f, ...patch } : f)));
+  const onRosterFile = async (file: File) => {
+    try {
+      if (/\.xlsx$/i.test(file.name)) {
+        const rows = await parseXlsxRoster(await file.arrayBuffer());
+        setRosterText(JSON.stringify(rows, null, 2));
+        setRosterFromXlsx(true);
+        setNotice(`엑셀 첫 시트 ${rows.length}행을 읽었습니다`);
+        setError(null);
+        return;
+      }
+      setRosterFromXlsx(false);
+      setRosterText(await readTextFile(file));
+    } catch (err) {
+      setError(`명단 파일 읽기 실패: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
 
   // ── 퍼널 상태(스테퍼) ─────────────────────────────────────────────────────────────────────────
   const stepDone = (n: number) => (n === 1 ? !!tpl : n === 2 ? activeFields.length > 0 : n === 3 ? rosterView.rows.length > 0 : n === 4 ? results.length > 0 : downloaded);
@@ -987,13 +1005,13 @@ export default function BulkFillPage() {
             <h2><span className="num">3</span> 명단 <small>한 사람 = 한 묶음 — ②에서 정한 칸 이름으로 값을 적으면 그 자리에 들어갑니다</small></h2>
 
             <div className="bulk-roster-bar">
-              <span className="bulk-hint">엑셀 표를 복사해 그대로 붙여넣어도 되고(탭 구분), CSV·JSON·“키: 값” 블록도 자동으로 알아봅니다.</span>
+              <span className="bulk-hint">엑셀 파일(.xlsx, 첫 시트)을 열거나, 표를 복사해 붙여넣어도 됩니다. CSV·JSON·“키: 값” 블록도 자동으로 알아봅니다.</span>
               <span className="spacer" />
-              <button className="bulk-btn sm ghost" data-testid="bulk-roster-template" onClick={() => { setRosterText(buildRosterTemplate(activeFields)); setNotice(null); }}>형식 예시 넣기</button>
-              <label className="bulk-btn sm ghost"><FolderOpen size={13} /> 파일 열기<input type="file" accept=".csv,.txt,.tsv,.json" hidden data-testid="bulk-roster-file" onChange={(e) => { const f = e.target.files?.[0]; if (f) void readTextFile(f).then(setRosterText).catch((err) => setError(`명단 파일 읽기 실패: ${err}`)); }} /></label>
+              <button className="bulk-btn sm ghost" data-testid="bulk-roster-template" onClick={() => { setRosterText(buildRosterTemplate(activeFields)); setRosterFromXlsx(false); setNotice(null); }}>형식 예시 넣기</button>
+              <label className="bulk-btn sm ghost"><FolderOpen size={13} /> 파일 열기<input type="file" accept=".csv,.txt,.tsv,.json,.xlsx" hidden data-testid="bulk-roster-file" onChange={(e) => { const f = e.target.files?.[0]; if (f) void onRosterFile(f); }} /></label>
             </div>
 
-            <textarea className="bulk-roster" data-testid="bulk-roster" value={rosterText} onChange={(e) => setRosterText(e.target.value)} rows={9} spellCheck={false}
+            <textarea className="bulk-roster" data-testid="bulk-roster" value={rosterText} onChange={(e) => { setRosterText(e.target.value); setRosterFromXlsx(false); }} rows={9} spellCheck={false}
               placeholder={activeFields.slice(0, 3).map((f) => `${f.key}: 값`).join("\n") + "\n\n(빈 줄로 사람 구분 — CSV/엑셀 붙여넣기/JSON도 자동 인식)"} />
 
             {/* 읽은 결과를 즉시 되비춘다 — 무엇이 몇 명으로 읽혔는지 생성 전에 눈으로 확인. */}
@@ -1006,7 +1024,7 @@ export default function BulkFillPage() {
               <div className="bulk-roster-preview" data-testid="bulk-roster-preview">
                 <div className="head">
                   <b>{rosterView.rows.length}명</b> 인식
-                  {rosterView.format && <em>{ROSTER_FORMAT_LABEL[rosterView.format]}</em>}
+                  {rosterFromXlsx ? <em>엑셀(.xlsx) 첫 시트</em> : rosterView.format && <em>{ROSTER_FORMAT_LABEL[rosterView.format]}</em>}
                   <small>{rosterView.rows.length > ROSTER_PREVIEW_ROWS ? `앞 ${ROSTER_PREVIEW_ROWS}명만 표시` : "아래 값 그대로 문서에 들어갑니다"}</small>
                 </div>
                 <div className="tablewrap">

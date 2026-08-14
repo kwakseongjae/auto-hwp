@@ -113,7 +113,7 @@ auto-hwp inspect 양식.hwpx --out fill-map.json
 ```bash
 auto-hwp fill 양식.hwpx \
   --map fill-map.json \
-  --data 명단.csv \
+  --data 명단.xlsx \
   --out 결과/ \
   --pattern '{index:03d}_{성명}.hwpx'
 ```
@@ -121,13 +121,14 @@ auto-hwp fill 양식.hwpx \
 | 인자 | 뜻 |
 |---|---|
 | `--map` | 검수를 마친 fill-map JSON |
-| `--data` | 명단. `.json`(객체 배열, 권장) 또는 단순 `.csv`(첫 줄 = 헤더 = 키) |
+| `--data` | 명단. `.xlsx`(첫 시트, 1행=키) · `.json`(객체 배열) · 단순 `.csv`(첫 줄 = 헤더 = 키) |
 | `--out` | 출력 디렉토리 (기본 `fill-out`) — 개별 파일 + `output.zip` + `report.json` |
 | `--pattern` | 파일명. `{index}` · `{index:03d}` · `{키}` 를 끼워 넣는다 (기본 `{index:03d}_{성명}.hwpx`) |
 | `--strict` | 검증에 걸린 행을 **만들지 않고 건너뛴다** (기본: 만들되 `needsReview`로 보고) |
 
 CLI의 CSV 파서는 단순하다 — 따옴표를 발견하면 조용히 잘못 읽는 대신 **정직하게 거부**한다.
-값에 콤마·따옴표가 들어가면 JSON 명단을 써라. 열 수가 헤더와 다른 행도 에러다.
+값에 콤마·따옴표가 들어가면 `.xlsx`나 JSON 명단을 써라. `.xlsx`는 **첫 시트만** 읽고, 시트가
+둘 이상이거나 병합 셀이 있으면 거부한다. 열 수가 헤더와 다른 행도 에러다.
 
 ## 검증 — 무엇을 보장하나
 
