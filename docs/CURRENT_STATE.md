@@ -3,12 +3,11 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
-- 갱신: 2026-08-14 · Grok 4.6 — **#38 머지 · #40 xlsx 명단 구현 중**.
-  PR #39가 main `d24d0b5`에 병합됨(`Closes #38`). 제품 방향 v3=
-  `docs/PRODUCT-DIRECTION-V3.md`. 구현 브랜치 `feat/issue-40-xlsx-roster`:
-  CLI `fill --data *.xlsx` + `/bulk` 파일 열기 첫 시트 계약(추가 시트·병합 셀
-  정직 거부). 픽스처 `testdata/roster/`. 다음: PR `Closes #40` → 필수 CI.
-  082 한컴 수동 게이트는 별건. 056·067 재구현 금지. 선재 사용자 문서 무접촉.
+- 갱신: 2026-08-15 · Grok 4.6 — **에이전트 규율 #43 (PR만, 병합은 질문)**.
+  #40/#41은 main `dbc76ef`에 이미 병합. 이번 브랜치 `docs/issue-43-ask-before-merge`:
+  비사소 PR은 체크 green 후 멈추고 묻는다. UI는 chrome-devtools로 업로드/클릭
+  검수. 전역 `~/.grok`에도 동일 규칙·`browser-qa` 스킬·MCP 핀. 다음: 사용자
+  병합 승인. 082 한컴 게이트는 별건. 선재 사용자 문서 무접촉.
 
 
 - 갱신: 2026-08-13 · Codex(sol) — **성장 계측 production·Google/Naver 등록·Brave 제출 완료**.

@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-15 (Grok 4.6) · 병합은 묻고, UI는 브라우저 검수
+- #43: 에이전트는 PR에서 멈춤(사소·명시 머지 제외). UI는 chrome-devtools 실검수.
+- 전역 ~/.grok rules/skills + 레포 `.grok` 동기화. 다음: PR 승인 후 머지.
+
 ## 2026-08-14 (Grok 4.6) · #38 머지 후 #40 xlsx 착수
 - PR #39 green→main `d24d0b5`. Grok 전역 rules/hook + 레포 `.grok/rules`에 issue-first 고정.
 - `feat/issue-40-xlsx-roster`에서 CLI·/bulk 첫 시트 xlsx 파서 구현·단위테스트 green.
