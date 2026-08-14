@@ -11,6 +11,12 @@
 | [005](005-page-section-layout.md) | 쪽/구역 레이아웃(여백·단·머리말/꼬리말·쪽번호) | **partial** | P2 | 방향+여백 완료. 단/머리말/쪽번호는 OWPML 검증 미완(워크플로 실패) → long-term |
 | [006](006-image-embedding.md) | 이미지 임베드(BinData + manifest + `hp:pic`) | **long-term** | P2 | 코퍼스에 임베드 이미지 예제 0 → 검증 불가. 외부 샘플 확보 필요 |
 
+## 제품 로드맵 v3 (2026-08-14) — HWPX 정본 · 벌크 엔진 · 레시피 · 데스크톱 나중
+
+총괄: **[docs/PRODUCT-DIRECTION-V3.md](../PRODUCT-DIRECTION-V3.md)** (v1 §4 계약 계승).
+공개 추적: GitHub **#38**. 착수 한 줄: 082 한컴 수동 게이트 또는 공개 제외 유지.
+파일 이슈 없는 후속(신설 예정): F2 검토 URL, 누름틀 fill, 044 default-on(QA 후).
+
 ## 제품 로드맵 v1 (2026-07-02) — "코어 하나, 셸 셋"
 
 총괄 지시서: **[docs/PRODUCT-DIRECTION.md](../PRODUCT-DIRECTION.md)** (레드팀 R1–R13 + 빌더 공통 계약 §4 — **모든 이슈 착수 전 필독**).
