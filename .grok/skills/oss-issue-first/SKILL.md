@@ -13,4 +13,6 @@ Follow `CONTRIBUTING.md` §이슈에서 시작하는 개발 흐름 and `AGENTS.m
 2. Branch from `origin/main`. Do not commit `main`.
 3. PR body must include `Closes #<issue>`. Required checks: `issue-link`, `build-test`, `licenses`.
 4. Verify with `scripts/verify-local.sh` (use `--full` if crates or packages changed).
-5. Merge only with green checks and resolved review threads. Delete the branch. Deploy only a protected `main` SHA.
+5. After the three checks are green, **ask before merge** unless the user said
+   머지/병합/merge or the change is trivial. Then delete the branch. Deploy only
+   a protected `main` SHA. UI work also follows `.grok/skills/browser-qa/SKILL.md`.

@@ -15,10 +15,14 @@ HWP(한글) 자체 엔진: Rust 코어(파싱→IR→조판→렌더→export→
 ## 정식 오픈소스 작업 프로토콜
 - Grok/다른 에이전트: `.grok/skills/oss-issue-first/SKILL.md` — 구현·문서 변경의 첫 동작은 이슈다.
 - 모든 코드·문서 변경은 먼저 공개 GitHub 이슈를 만들거나 기존 이슈를 연결한다.
-- `main` 직접 작업·직접 push 금지: 이슈 브랜치 → PR 본문 `Closes #<issue>` → 필수 CI → merge 순서다.
+- `main` 직접 작업·직접 push 금지: 이슈 브랜치 → PR 본문 `Closes #<issue>` → 필수 CI 순서다.
 - 필수 checks는 `issue-link`·`build-test`·`licenses`; 대화 해결 전 merge 금지. 배포는 보호된
   `main`의 정확한 commit SHA로만 실행한다.
+- **에이전트는 PR에서 멈춘다.** 사용자가 머지/병합/merge 라고 하거나, 변경이 사소한
+  경우(오타·주석·JOURNAL만·한 줄 포인터)만 병합한다. 그 외에는 물어본다.
 - merge 뒤 작업 브랜치를 삭제한다. 사용자 콘텐츠·민감 문서는 이슈/PR/CI 아티팩트에 올리지 않는다.
+- UI·레이아웃·라우팅·클라이언트 상태·업로드 화면을 바꿨으면 브라우저 MCP로 실제 업로드/클릭
+  검수를 한다(스크린샷 한 장은 검수가 아니다). 절차: `.grok/skills/browser-qa/SKILL.md`.
 
 ## 로드맵/상태 지도 (정본 위치)
 | 무엇 | 어디 |
