@@ -3,7 +3,7 @@
 //! `inspect`  — 양식에서 라벨→값칸 fill-map **초안**을 유도한다(autohwp.fillmap.v1 JSON). 사람이
 //!              검수해 `pin`(명시 주소)을 확정하는 것이 계약이다 — 코퍼스 실측에서 중복 라벨이
 //!              37건이라 라벨 매칭만으로는 모호하다(073 §코퍼스 실측).
-//! `fill`     — 확정 fill-map + 명단(JSON 배열/단순 CSV)으로 인원별 문서를 만든다. 편집 레인은
+//! `fill`     — 확정 fill-map + 명단(JSON 배열/단순 CSV/xlsx 첫 시트)으로 인원별 문서를 만든다. 편집 레인은
 //!              웹과 동일한 `hwp_mcp::apply_intent_json`(SetTableCell/Replace)이라 검증·거부
 //!              규칙이 앱과 한 벌이다. 산출물마다 재개봉 검증(값 존재 + 쪽수 == 무편집 왕복
 //!              기준선)을 돌리고, 문제 행은 조용히 넘기지 않는다: 기본 = 생성 + `needsReview`
@@ -166,9 +166,16 @@ struct RowReport {
     reasons: Vec<String>,
 }
 
-/// 명단 로드: `.json` = 객체 배열(권장), `.csv` = 헤더행 + 단순 콤마 분리(따옴표/콤마 내장 미지원 —
-/// 그런 데이터는 JSON으로. 조용한 오파싱 방지를 위해 셀 안 따옴표를 발견하면 정직하게 거부).
+/// 명단 로드: `.xlsx` = 첫 시트(이슈 #40), `.json` = 객체 배열(권장), `.csv` = 헤더행 + 단순
+/// 콤마 분리(따옴표/콤마 내장 미지원 — 그런 데이터는 JSON 또는 xlsx로. 조용한 오파싱 방지를 위해
+/// 셀 안 따옴표를 발견하면 정직하게 거부).
 fn load_roster(path: &Path) -> Result<Vec<Map<String, Value>>, String> {
+    if path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("xlsx"))
+    {
+        return crate::xlsx_roster::load_path(path);
+    }
     let text =
         std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
     if path
@@ -419,5 +426,92 @@ mod tests {
         let p = std::env::temp_dir().join("fill_test_cols.csv");
         std::fs::write(&p, "a,b\n1\n").unwrap();
         assert!(load_roster(&p).unwrap_err().contains("열 수"));
+    }
+
+    fn roster_fixture(name: &str) -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../testdata/roster")
+            .join(name)
+    }
+
+    #[test]
+    fn xlsx_first_sheet_parses_korean_headers_and_keeps_commas() {
+        let rows = load_roster(&roster_fixture("ok.xlsx")).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["성명"], Value::String("김하나".into()));
+        assert_eq!(rows[0]["기업명"], Value::String("하나테크,본사".into()));
+        assert_eq!(rows[1]["기업명"], Value::String("두리소프트".into()));
+    }
+
+    #[test]
+    fn xlsx_extra_sheet_and_merged_header_are_honest_errors() {
+        let extra = load_roster(&roster_fixture("extra-sheet.xlsx")).unwrap_err();
+        assert!(extra.contains("2개"), "{extra}");
+        let merged = load_roster(&roster_fixture("merged-header.xlsx")).unwrap_err();
+        assert!(merged.contains("병합"), "{merged}");
+    }
+
+    fn tiny_form_hwpx() -> Vec<u8> {
+        use hwp_model::prelude::*;
+        let mut doc = SemanticDoc {
+            char_shapes: vec![CharShape::default()],
+            para_shapes: vec![ParaShape::default()],
+            ..Default::default()
+        };
+        doc.sections.push(Section {
+            blocks: vec![Block::Paragraph(Paragraph {
+                runs: vec![Run {
+                    char_shape: 0,
+                    char_ref: None,
+                    content: vec![Inline::Text("이름자리".into())],
+                }],
+                ..Default::default()
+            })],
+            ..Default::default()
+        });
+        hwp_hwpx::serialize::serialize(&doc).expect("synth hwpx")
+    }
+
+    #[test]
+    fn xlsx_roster_fills_two_public_form_rows() {
+        let dir = std::env::temp_dir().join(format!("fill_xlsx_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let template = dir.join("form.hwpx");
+        std::fs::write(&template, tiny_form_hwpx()).unwrap();
+        let map = dir.join("map.json");
+        std::fs::write(
+            &map,
+            r#"{
+              "schema":"autohwp.fillmap.v1",
+              "fields":[{"key":"성명","target":{"kind":"replace","query":"이름자리"},"required":true}]
+            }"#,
+        )
+        .unwrap();
+        let out = dir.join("out");
+        run_fill(FillArgs {
+            template: &template,
+            map: &map,
+            data: &roster_fixture("ok.xlsx"),
+            out: &out,
+            pattern: "{index:03d}_{성명}.hwpx",
+            strict: true,
+        })
+        .unwrap();
+        let a = std::fs::read(out.join("001_김하나.hwpx")).unwrap();
+        let b = std::fs::read(out.join("002_이두리.hwpx")).unwrap();
+        let ta = {
+            let mut s = Session::default();
+            open_bytes(&mut s, &a, "a.hwpx").unwrap();
+            doc_of(&s).unwrap().plain_text()
+        };
+        let tb = {
+            let mut s = Session::default();
+            open_bytes(&mut s, &b, "b.hwpx").unwrap();
+            doc_of(&s).unwrap().plain_text()
+        };
+        assert!(ta.contains("김하나"), "{ta}");
+        assert!(tb.contains("이두리"), "{tb}");
+        assert!(!ta.contains("이름자리"));
     }
 }

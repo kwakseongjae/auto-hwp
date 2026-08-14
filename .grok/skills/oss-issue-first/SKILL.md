@@ -3,7 +3,8 @@ name: oss-issue-first
 description: >
   auto-hwp is public. Every code or docs change starts with a GitHub issue,
   then an issue branch, then a PR whose body contains Closes #<n>. Use when
-  implementing, fixing, writing docs, committing, or opening a PR in this repo.
+  implementing, fixing, writing docs, committing, opening a PR, or when the
+  user says 진행/ㄱㄱ/파이프라인/오픈소스니까/실제 작업 in this repo.
 ---
 
 Follow `CONTRIBUTING.md` §이슈에서 시작하는 개발 흐름 and `AGENTS.md` §정식 오픈소스 작업 프로토콜.
