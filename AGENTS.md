@@ -13,6 +13,7 @@ HWP(한글) 자체 엔진: Rust 코어(파싱→IR→조판→렌더→export→
   요약문과 파일이 충돌하면 **파일이 정본**이다.
 
 ## 정식 오픈소스 작업 프로토콜
+- Grok/다른 에이전트: `.grok/skills/oss-issue-first/SKILL.md` — 구현·문서 변경의 첫 동작은 이슈다.
 - 모든 코드·문서 변경은 먼저 공개 GitHub 이슈를 만들거나 기존 이슈를 연결한다.
 - `main` 직접 작업·직접 push 금지: 이슈 브랜치 → PR 본문 `Closes #<issue>` → 필수 CI → merge 순서다.
 - 필수 checks는 `issue-link`·`build-test`·`licenses`; 대화 해결 전 merge 금지. 배포는 보호된
