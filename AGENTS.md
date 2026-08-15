@@ -76,3 +76,29 @@ React UI(packages/react: HwpWorkspace + 오버레이들)
 편집 흐름: UI 제스처 → Intent → `apply_intent`(hwp-mcp) → Op → 스냅샷 undo(50) →
 layoutInvalidated → refreshToken → 페이지 SVG **선택적 재주입**(034) + **가상화**(037).
 성능 규율: 드래그/호버/줌 제스처 중 React 리렌더 0회 — vitest 카운터가 잠근다.
+
+## Cursor Cloud specific instructions
+클라우드 VM은 업데이트 스크립트(서브모듈 init · `wasm-bindgen-cli` 0.2.125 · 패키지 install)가 이미
+돌아간 상태로 부팅한다. 아래는 **빌드/실행 시 걸리는 비자명한 함정**만 적는다(표준 명령은 기존 문서 인용).
+
+- **메인 제품 = 웹앱 `apps/hwp-lab`(Next.js, 브라우저 wasm 엔진).** 기동: `cd apps/hwp-lab && npm run dev`
+  → http://localhost:3000. `predev` 훅이 `build:deps`(JS 패키지 dist) + wasm/폰트/샘플 복사를 자동 수행한다.
+  키 없이도 **mock 모드**로 업로드→렌더→편집→export 전체 완주(우상단 배지 `mock 모드`). 실 LLM은
+  `apps/hwp-lab/.env.local`(gitignore)에 `OPENROUTER_API_KEY`/`ANTHROPIC_API_KEY` — 상세는 `apps/hwp-lab/QA.md`.
+- **엔진 wasm은 첫 세션에 한 번 빌드해야 한다**(pkg/는 gitignore): `pnpm -C packages/engine build`
+  (cargo + wasm-bindgen 사용, `wasm-size` 프로필). 툴체인은 이미 PATH에 있다(cargo/wasm-bindgen).
+- **`wasm-opt`(binaryen)는 미설치 — 의도적.** 번들이 다이어트 안 돼 ~11.5MB(정상은 ~8.7MB)이지만
+  **기능은 100% 동일**(다이어트는 게이트 아님). dev/QA엔 무영향 — 크기 최적화가 필요할 때만 `binaryen` 설치.
+- **pnpm `file:` 주입(injected) 함정 — 이번 세션 실측:** `@auto-hwp/react`는 `file:../editor-core`·
+  `file:../engine`를 **install 시점 스냅샷(하드카피)** 으로 주입한다. 그래서 dist가 없을 때 install하면
+  주입본에 dist가 빠져 이후 `pnpm -C packages/react build`가
+  `Failed to resolve entry for package "@auto-hwp/editor-core"`로 실패한다. **해법:
+  editor-core/ai-protocol/engine dist를 먼저 빌드한 뒤 `pnpm -C packages/react install`을 다시 돌려
+  주입본을 갱신**하고 나서 react를 빌드한다(= handover-verify.sh의 빌드 순서).
+- **Rust 워크스페이스 검증엔 GTK/WebKit 시스템 라이브러리가 필요**(워크스페이스 멤버 `crates/hwp-viewer`가
+  Tauri 데스크톱 셸). VM에 CI와 동일하게 이미 설치돼 있다(`libwebkit2gtk-4.1-dev`·`libgtk-3-dev`·
+  `librsvg2-dev`·`libxdo-dev`·`libayatana-appindicator3-dev` 등 — 목록은 `.github/workflows/ci.yml`).
+  이게 없으면 `scripts/verify-local.sh`의 `cargo clippy --workspace`가 `gdk-3.0` 못 찾아 실패한다.
+- **테스트/린트 정본은 `scripts/verify-local.sh`**(quick = Rust fmt/clippy/test/게이트/wasm 위생/deny).
+  JS 단위 테스트는 각 패키지 `pnpm -C packages/<p> exec vitest run` + `apps/hwp-lab`에서 `npx vitest run`.
+  e2e(playwright)는 최초 1회 `npx playwright install chromium`(네트워크) 필요.
