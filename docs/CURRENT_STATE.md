@@ -3,6 +3,11 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-15 · Grok 4.6 — **#48 중첩 셀 캐럿**. 공개 이슈
+  https://github.com/kwakseongjae/auto-hwp/issues/48 . 브랜치
+  `feat/issue-48-nested-caret`. 계약 테스트(ignore/fixme) 선설치. 구현 전.
+  머지 후보는 이슈 체크리스트+CI 3종+sample-8p 실브라우저. #42와 분리.
+
 - 갱신: 2026-08-15 · Grok 4.6 — **에이전트 규율 #43 (PR만, 병합은 질문)**.
   #40/#41은 main `dbc76ef`에 이미 병합. 이번 브랜치 `docs/issue-43-ask-before-merge`:
   비사소 PR은 체크 green 후 멈추고 묻는다. UI는 chrome-devtools로 업로드/클릭

@@ -80,6 +80,45 @@ async function findGlyph(page: Page, needle: string, scroll = false) {
   }, [needle, scroll] as [string, boolean]);
 }
 
+test.fixme("중첩 셀 클릭이 다른 대상에 은닉 undo를 만들지 않는다", async ({ page }) => {
+  await open(page);
+  await findGlyph(page, NEEDLE, true);
+  await page.waitForTimeout(800);
+  const hit = await findGlyph(page, NEEDLE);
+  if (!hit) throw new Error("문구를 화면에 올리지 못함");
+  await page.mouse.click(hit.x + hit.width / 2, hit.y + hit.height / 2);
+  await page.waitForTimeout(300);
+  const undos = page.locator('[data-testid="undo"], button[title="실행취소"]');
+  await page.keyboard.press(`${MOD}+z`);
+  expect(await findGlyph(page, NEEDLE)).not.toBeNull();
+  expect(await findGlyph(page, "창업아이템명")).not.toBeNull();
+  await expect(undos).toBeVisible();
+});
+
+test.fixme("중첩 셀에서 Home/End가 바깥 표 줄이 아니라 leaf 줄을 움직인다", async ({ page }) => {
+  await open(page);
+  await findGlyph(page, NEEDLE, true);
+  await page.waitForTimeout(800);
+  const hit = await findGlyph(page, NEEDLE);
+  if (!hit) throw new Error("문구를 화면에 올리지 못함");
+  const cx = hit.x + hit.width / 2;
+  const cy = hit.y + hit.height / 2;
+  for (let i = 0; i < 4 && (await page.locator(".hw-caret").count()) === 0; i++) {
+    await page.mouse.click(cx, cy);
+    await page.waitForTimeout(400);
+  }
+  await expect(page.locator(".hw-caret")).toHaveCount(1, { timeout: 10_000 });
+  const before = await page.locator(".hw-caret").boundingBox();
+  await page.keyboard.press("Home");
+  const home = await page.locator(".hw-caret").boundingBox();
+  await page.keyboard.press("End");
+  const end = await page.locator(".hw-caret").boundingBox();
+  expect(home).toBeTruthy();
+  expect(end).toBeTruthy();
+  expect(end!.x).toBeGreaterThan(home!.x);
+  expect(Math.abs((home!.y ?? 0) - (before!.y ?? 0))).toBeLessThan(8);
+});
+
 test.fixme("중첩 셀(1×1 표 안) 문단도 캐럿으로 지우고 ⌘Z 로 되살릴 수 있어야 한다", async ({ page }) => {
   await open(page);
   expect(await findGlyph(page, NEEDLE)).not.toBeNull();

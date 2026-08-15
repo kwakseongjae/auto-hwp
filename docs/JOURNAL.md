@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-15 (Grok 4.6) · #48 캐럿 이슈+계약 테스트
+- 공개 #48. 브랜치 feat/issue-48-nested-caret. 테스트는 ignore/fixme.
+- 구현·PR은 다음. #42와 분리.
+
 ## 2026-08-15 (Grok 4.6) · 병합은 묻고, UI는 브라우저 검수
 - #43: 에이전트는 PR에서 멈춤(사소·명시 머지 제외). UI는 chrome-devtools 실검수.
 - 전역 ~/.grok rules/skills + 레포 `.grok` 동기화. 다음: PR 승인 후 머지.
