@@ -7,7 +7,8 @@
   `feat/issue-48-nested-caret`. `cell_text_hit` min-area+path, `CaretRectCell.path`
   additive, `CellCaretAnchor.path` + Home/End. sample-8p: 1클릭=표(#19),
   더블클릭=캐럿, Home/End leaf 줄, ⌘A+Backspace는 생산품만, undo 복구.
-  다음: PR `Closes #48` · CI 3종 green 후 머지 질문. #42/#46과 분리.
+  PR https://github.com/kwakseongjae/auto-hwp/pull/49 `Closes #48`.
+  다음: CI 3종 green 후 머지 질문. #42/#46과 분리.
 
 - 갱신: 2026-08-15 · Grok 4.6 — **#48 중첩 셀 캐럿**. 공개 이슈
   https://github.com/kwakseongjae/auto-hwp/issues/48 . 브랜치
