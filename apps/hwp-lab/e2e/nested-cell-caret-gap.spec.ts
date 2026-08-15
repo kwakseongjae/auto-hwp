@@ -1,7 +1,7 @@
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
-// caret-undo 증상 1 — **미수리 갭의 실행 가능한 기술서**(test.fixme: 지금은 반드시 실패한다).
+// caret-undo 증상 1 — issue #48 수용 테스트 (중첩 셀 캐럿).
 //
 // 재현(실측, sample-8p.hwp): 일반현황 표의 파란 안내 문구
 //   "※ 협약기간 내 제작·개발 완료할 최종 생산품의 형태, 수량 등 기재"
@@ -80,7 +80,7 @@ async function findGlyph(page: Page, needle: string, scroll = false) {
   }, [needle, scroll] as [string, boolean]);
 }
 
-test.fixme("중첩 셀 클릭이 다른 대상에 은닉 undo를 만들지 않는다", async ({ page }) => {
+test("중첩 셀 클릭이 다른 대상에 은닉 undo를 만들지 않는다", async ({ page }) => {
   await open(page);
   await findGlyph(page, NEEDLE, true);
   await page.waitForTimeout(800);
@@ -95,7 +95,7 @@ test.fixme("중첩 셀 클릭이 다른 대상에 은닉 undo를 만들지 않�
   await expect(undos).toBeVisible();
 });
 
-test.fixme("중첩 셀에서 Home/End가 바깥 표 줄이 아니라 leaf 줄을 움직인다", async ({ page }) => {
+test("중첩 셀에서 Home/End가 바깥 표 줄이 아니라 leaf 줄을 움직인다", async ({ page }) => {
   await open(page);
   await findGlyph(page, NEEDLE, true);
   await page.waitForTimeout(800);
@@ -103,23 +103,24 @@ test.fixme("중첩 셀에서 Home/End가 바깥 표 줄이 아니라 leaf 줄을
   if (!hit) throw new Error("문구를 화면에 올리지 못함");
   const cx = hit.x + hit.width / 2;
   const cy = hit.y + hit.height / 2;
-  for (let i = 0; i < 4 && (await page.locator(".hw-caret").count()) === 0; i++) {
-    await page.mouse.click(cx, cy);
-    await page.waitForTimeout(400);
-  }
+  // 06x: a single click marks the nested TABLE (#19). Double-click drills the leaf and plants the caret.
+  await page.mouse.dblclick(cx, cy);
   await expect(page.locator(".hw-caret")).toHaveCount(1, { timeout: 10_000 });
-  const before = await page.locator(".hw-caret").boundingBox();
+  const caret = page.locator(".hw-caret");
+  const before = await caret.boundingBox();
   await page.keyboard.press("Home");
-  const home = await page.locator(".hw-caret").boundingBox();
+  // moveToLineEnd probes every offset — wait for the bar to actually move.
+  await expect.poll(async () => (await caret.boundingBox())?.x ?? before?.x, { timeout: 10_000 }).toBeLessThan((before?.x ?? 0) - 4);
+  const home = await caret.boundingBox();
   await page.keyboard.press("End");
-  const end = await page.locator(".hw-caret").boundingBox();
+  await expect.poll(async () => (await caret.boundingBox())?.x ?? home?.x, { timeout: 10_000 }).toBeGreaterThan((home?.x ?? 0) + 4);
+  const end = await caret.boundingBox();
   expect(home).toBeTruthy();
   expect(end).toBeTruthy();
-  expect(end!.x).toBeGreaterThan(home!.x);
   expect(Math.abs((home!.y ?? 0) - (before!.y ?? 0))).toBeLessThan(8);
 });
 
-test.fixme("중첩 셀(1×1 표 안) 문단도 캐럿으로 지우고 ⌘Z 로 되살릴 수 있어야 한다", async ({ page }) => {
+test("중첩 셀(1×1 표 안) 문단도 캐럿으로 지우고 ⌘Z 로 되살릴 수 있어야 한다", async ({ page }) => {
   await open(page);
   expect(await findGlyph(page, NEEDLE)).not.toBeNull();
   await findGlyph(page, NEEDLE, true);
@@ -129,11 +130,8 @@ test.fixme("중첩 셀(1×1 표 안) 문단도 캐럿으로 지우고 ⌘Z 로 �
   const cx = hit.x + hit.width / 2;
   const cy = hit.y + hit.height / 2;
 
-  // 표 → 셀 드릴 → 글자 캐럿 (지금은 여기서 멈춘다: 중첩 표 위에는 캐럿이 서지 않는다)
-  for (let i = 0; i < 4 && (await page.locator(".hw-caret").count()) === 0; i++) {
-    await page.mouse.click(cx, cy);
-    await page.waitForTimeout(400);
-  }
+  // 06x: 더블클릭이 중첩 leaf를 드릴하고 글자 캐럿을 세운다 (한 클릭은 표 선택 — #19).
+  await page.mouse.dblclick(cx, cy);
   await expect(page.locator(".hw-caret")).toHaveCount(1, { timeout: 10_000 });
 
   await page.keyboard.press("Meta+a");

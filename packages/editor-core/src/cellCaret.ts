@@ -25,7 +25,7 @@ import { type RangeRect, rectsByProbe, selRange } from "./caretRange";
 import { Emitter } from "./events";
 import type { RunStyle } from "./runs";
 import type { DocSession } from "./session";
-import type { CellCaretRect, RunSpec } from "./types";
+import type { CellAddr, CellCaretRect, CellTextHit, RunSpec } from "./types";
 
 /** The MODEL half of a cell caret: the cell address + the editor-space (para, offset) within it. */
 export interface CellCaretAnchor {
@@ -33,6 +33,8 @@ export interface CellCaretAnchor {
   block: number;
   row: number;
   col: number;
+  /** Descending CellPath for a nested leaf (issue #48). Absent / length ≤ 1 = the flat 053 lane. */
+  path?: CellAddr[];
   /** "\n"-segment ordinal within the cell (the editor paragraph — see the module header). */
   para: number;
   /** Char offset within that paragraph, `0..=paraLen` (never counts a "\n"). */
@@ -43,6 +45,35 @@ export interface CellCaretAnchor {
   selAnchor: number;
   /** The paragraph's char count — the clamp bound for caret moves. */
   paraLen: number;
+}
+
+/** True when `path` is a nested (≥2) CellPath that must use the path commit/read lane (A2). */
+export function isNestedPath(path?: CellAddr[]): path is CellAddr[] {
+  return !!path && path.length > 1;
+}
+
+function pathKey(path: CellAddr[]): string {
+  return path.map((s) => `${s.block}.${s.row}.${s.col}`).join("/");
+}
+
+function samePath(a: CellAddr[], b: CellAddr[]): boolean {
+  return a.length === b.length && a.every((s, i) => s.block === b[i].block && s.row === b[i].row && s.col === b[i].col);
+}
+
+function leafRowCol(hit: CellTextHit): { row: number; col: number } {
+  if (isNestedPath(hit.path)) {
+    const last = hit.path[hit.path.length - 1];
+    return { row: last.row, col: last.col };
+  }
+  return { row: hit.row ?? 0, col: hit.col ?? 0 };
+}
+
+function sameCellPara(a: Pick<CellCaretAnchor, "section" | "block" | "row" | "col" | "para" | "path">, hit: CellTextHit): boolean {
+  if (a.section !== hit.section || a.block !== hit.block || a.para !== hit.para) return false;
+  if (isNestedPath(a.path) || isNestedPath(hit.path)) {
+    return isNestedPath(a.path) && isNestedPath(hit.path) && samePath(a.path, hit.path);
+  }
+  return a.row === (hit.row ?? 0) && a.col === (hit.col ?? 0);
 }
 
 /** A live cell caret: the model anchor + its geometry (own-render PAGE px + the owning page). */
@@ -217,7 +248,7 @@ export class CellCaretController {
   private changed = new Emitter<CellCaretState | null>();
   private chain: Promise<unknown> = Promise.resolve();
   /** 마우스 글자 드래그가 현재 셀 문단을 소유하는 동안의 고정 주소. */
-  private dragging: Pick<CellCaretAnchor, "section" | "block" | "row" | "col" | "para"> | null = null;
+  private dragging: Pick<CellCaretAnchor, "section" | "block" | "row" | "col" | "para" | "path"> | null = null;
   /** 포인터 종료 뒤 늦은 cell hit가 드래그 소유권을 되살리지 못하게 하는 취소 세대. */
   private dragGeneration = 0;
   /** offset → caret rect 메모(현재 주소 한정 — `memoKey` 가 바뀌면 버린다). 범위 하이라이트가 오프셋을
@@ -277,27 +308,21 @@ export class CellCaretController {
         return null;
       }
       const prev = extend ? this.state?.anchor : undefined;
-      const same =
-        prev &&
-        prev.section === hit.section &&
-        prev.block === hit.block &&
-        prev.row === hit.row &&
-        prev.col === hit.col &&
-        prev.para === hit.para;
+      const same = prev && sameCellPara(prev, hit);
       const offset = clampOffset(hit.offset, hit.para_len);
-      return this.publish(
-        {
-          section: hit.section,
-          block: hit.block,
-          row: hit.row,
-          col: hit.col,
-          para: hit.para,
-          offset,
-          selAnchor: same ? prev!.selAnchor : offset,
-          paraLen: hit.para_len,
-        },
-        hit.caret,
-      );
+      const { row, col } = leafRowCol(hit);
+      const anchor: CellCaretAnchor = {
+        section: hit.section,
+        block: hit.block,
+        row,
+        col,
+        para: hit.para,
+        offset,
+        selAnchor: same ? prev!.selAnchor : offset,
+        paraLen: hit.para_len,
+      };
+      if (isNestedPath(hit.path)) anchor.path = hit.path;
+      return this.publish(anchor, hit.caret);
     });
   }
 
@@ -311,14 +336,7 @@ export class CellCaretController {
       if (!a) return false;
       const hit = (await this.adapter.hitTestCellText!(page, x, y)) ?? null;
       if (generation !== this.dragGeneration) return false;
-      if (
-        !hit ||
-        hit.section !== a.section ||
-        hit.block !== a.block ||
-        hit.row !== a.row ||
-        hit.col !== a.col ||
-        hit.para !== a.para
-      ) {
+      if (!hit || !sameCellPara(a, hit)) {
         return false;
       }
       const offset = clampOffset(hit.offset, hit.para_len);
@@ -328,6 +346,7 @@ export class CellCaretController {
         row: a.row,
         col: a.col,
         para: a.para,
+        path: a.path,
       };
       await this.publish({ ...a, offset, selAnchor: offset, paraLen: hit.para_len }, hit.caret);
       return true;
@@ -342,14 +361,7 @@ export class CellCaretController {
       const d = this.dragging;
       if (!a || !d) return false;
       const hit = (await this.adapter.hitTestCellText!(page, x, y)) ?? null;
-      const same =
-        hit &&
-        hit.section === d.section &&
-        hit.block === d.block &&
-        hit.row === d.row &&
-        hit.col === d.col &&
-        hit.para === d.para;
-      if (!same) return true; // 소유권은 유지하되 범위는 마지막 유효 오프셋에 클램프
+      if (!hit || !sameCellPara(d, hit)) return true; // 소유권은 유지하되 범위는 마지막 유효 오프셋에 클램프
       await this.publish({ ...a, offset: clampOffset(hit.offset, a.paraLen) }, hit.caret);
       return true;
     });
@@ -392,6 +404,29 @@ export class CellCaretController {
     });
   }
 
+  /** Home/End — move to the first/last offset of the CURRENT visual line (leaf line info, issue #48).
+   *  Uses the same `caretRectCell` probe as range highlights so a nested path walks the leaf, not
+   *  the outer table. */
+  moveToLineEnd(which: "start" | "end"): Promise<CellCaretState | null> {
+    return this.enqueue(async () => {
+      const a = this.state?.anchor;
+      if (!a || !this.adapter.caretRectCell) return null;
+      const here = await this.probeRect(a, a.offset);
+      if (!here) return null;
+      let target = a.offset;
+      for (let o = 0; o <= a.paraLen; o++) {
+        const r = await this.probeRect(a, o);
+        if (!r || r.page !== here.page || Math.abs(r.top - here.top) > 0.05) continue;
+        if (which === "start") {
+          target = o;
+          break;
+        }
+        target = o;
+      }
+      return this.publish({ ...a, offset: target, selAnchor: target });
+    });
+  }
+
   /** Insert `text` at the caret as ONE `SetTableCellRuns` undo unit (per-keystroke commit lane).
    *  A "\n" in `text` splits the paragraph (Enter). 범위가 살아 있으면 그 범위를 **대체**한다.
    *  Resolves false when no caret is active. */
@@ -413,15 +448,14 @@ export class CellCaretController {
       if (!a || !this.supported) return false;
       const { start, end } = selRange(a.selAnchor, a.offset);
       if (end <= start) return false;
-      const runs = await this.adapter.blockRuns!(a.section, a.block, a.row, a.col);
+      const runs = await this.readRuns(a);
+      if (!runs) return false;
       const joined = runsText(runs);
       const g0 = cellGlobalOffset(joined, a.para, start);
       const g1 = cellGlobalOffset(joined, a.para, end);
       const on = !rangeHasStyle(runs, g0, g1, key);
       const nextRuns = styleRunRange(runs, g0, g1, key, on);
-      await this.session.applyBatch([
-        { intent: "SetTableCellRuns", section: a.section, index: a.block, row: a.row, col: a.col, runs: nextRuns },
-      ]);
+      await this.session.applyBatch([this.commitIntent(a, nextRuns)]);
       this.rectMemo.clear(); // 서식은 글자 폭을 바꾼다 — 캐시된 기하는 버린다
       await this.publish({ ...a });
       return true;
@@ -434,7 +468,8 @@ export class CellCaretController {
   async styleAtCaret(): Promise<RunStyle | null> {
     const a = this.state?.anchor;
     if (!a || !this.supported) return null;
-    const runs = await this.adapter.blockRuns!(a.section, a.block, a.row, a.col);
+    const runs = await this.readRuns(a);
+    if (!runs) return null;
     const joined = runsText(runs);
     const global = cellGlobalOffset(joined, a.para, a.offset);
     return inheritStyleAt(runs, global);
@@ -444,15 +479,40 @@ export class CellCaretController {
    *  다시 물어보므로(엔진엔 "구간 기하" 표면이 없다) 같은 오프셋을 반복해서 왕복하지 않게 한다. 커밋/주소
    *  변경/해제 때 버린다(기하가 달라지므로). */
   private async probeRect(a: CellCaretAnchor, offset: number): Promise<CellCaretRect | null> {
-    const key = `${a.section}/${a.block}/${a.row}/${a.col}/${a.para}`;
+    const key = isNestedPath(a.path)
+      ? `${a.section}/${pathKey(a.path)}/${a.para}`
+      : `${a.section}/${a.block}/${a.row}/${a.col}/${a.para}`;
     if (this.memoKey !== key) {
       this.memoKey = key;
       this.rectMemo.clear();
     }
     if (this.rectMemo.has(offset)) return this.rectMemo.get(offset)!;
-    const r = (await this.adapter.caretRectCell!(a.section, a.block, a.row, a.col, a.para, offset)) ?? null;
+    const r =
+      (await this.adapter.caretRectCell!(
+        a.section,
+        a.block,
+        a.row,
+        a.col,
+        a.para,
+        offset,
+        isNestedPath(a.path) ? a.path : undefined,
+      )) ?? null;
     this.rectMemo.set(offset, r);
     return r;
+  }
+
+  private async readRuns(a: CellCaretAnchor): Promise<RunSpec[] | null> {
+    if (isNestedPath(a.path)) {
+      if (!this.adapter.blockRunsPath) return null;
+      return (await this.adapter.blockRunsPath(a.section, a.path)) ?? [];
+    }
+    return (await this.adapter.blockRuns!(a.section, a.block, a.row, a.col)) ?? [];
+  }
+
+  private commitIntent(a: CellCaretAnchor, runs: RunSpec[]) {
+    return isNestedPath(a.path)
+      ? { intent: "SetTableCellRuns", section: a.section, index: a.block, row: a.row, col: a.col, path: a.path, runs }
+      : { intent: "SetTableCellRuns", section: a.section, index: a.block, row: a.row, col: a.col, runs };
   }
 
   /** Resolve `anchor` to geometry (caret bar + 범위 하이라이트) and emit. Geometry 가 사라지면 018 대로
@@ -475,7 +535,8 @@ export class CellCaretController {
   private async splice(insert: string, del: number): Promise<boolean> {
     const a = this.state?.anchor;
     if (!a || !this.supported) return false;
-    const runs = await this.adapter.blockRuns!(a.section, a.block, a.row, a.col);
+    const runs = await this.readRuns(a);
+    if (!runs) return false;
     const joined = runsText(runs);
     const { start, end } = selRange(a.selAnchor, a.offset);
     const ranged = end > start;
@@ -485,9 +546,7 @@ export class CellCaretController {
     if (delChars > 0 && global === 0) return false; // Backspace at the cell start — graceful no-op
     if (!ranged && delChars === 0 && insert.length === 0) return false;
     const nextRuns = spliceRuns(runs, global, delChars, insert);
-    await this.session.applyBatch([
-      { intent: "SetTableCellRuns", section: a.section, index: a.block, row: a.row, col: a.col, runs: nextRuns },
-    ]);
+    await this.session.applyBatch([this.commitIntent(a, nextRuns)]);
     // Re-anchor in the NEW text (the splice math is pure, so this needs no second read), then
     // re-resolve the rect against the post-edit geometry (the row may have grown/wrapped).
     const nextJoined = joined.slice(0, Math.max(0, global - delChars)) + insert + joined.slice(global);

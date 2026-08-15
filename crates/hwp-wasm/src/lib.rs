@@ -572,6 +572,35 @@ impl HwpDoc {
             .transpose()
     }
 
+    /// Path-addressed twin of [`Self::cell_caret_rect`] (issue #48). `path_json` is the descending
+    /// `CellPath` (`[{block,row,col}, …]`). Length-1 is the flat 053 lane; length ≥ 2 walks the
+    /// nested leaf. JSON **string** `{page,x,top,height}` or JS `null` (018).
+    #[wasm_bindgen(js_name = cellCaretRectPath)]
+    pub fn cell_caret_rect_path(
+        &self,
+        section: usize,
+        path_json: &str,
+        para: usize,
+        offset: usize,
+    ) -> Result<Option<String>, JsValue> {
+        let path: Vec<hwp_session::CellAddrDto> =
+            serde_json::from_str(path_json).map_err(|e| js_err("parse path", &e.to_string()))?;
+        let fonts = hwp_session::own_render_fonts_with(&self.fonts);
+        let c = self.with_placed(|doc, placed| {
+            hwp_session::cell_caret_rect_path_placed(
+                doc,
+                placed,
+                fonts.as_ref(),
+                section,
+                &path,
+                para,
+                offset,
+            )
+        })?;
+        c.map(|c| serde_json::to_string(&c).map_err(|e| js_err("serialize", &e.to_string())))
+            .transpose()
+    }
+
     /// Body-paragraph caret, hit half: resolve PAGE-LOCAL own-render px `(x, y)` to a JSON **string**
     /// `{section, block, offset, para_len, caret:{page,x,y,w,h}}`, or JS `null` off an editable body
     /// paragraph (018). At a wrap boundary `caret` retains clicked-page visual affinity. Uses the

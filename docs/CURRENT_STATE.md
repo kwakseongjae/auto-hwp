@@ -3,6 +3,12 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-15 · Grok 4.6 — **#48 중첩 셀 캐럿 구현**. 브랜치
+  `feat/issue-48-nested-caret`. `cell_text_hit` min-area+path, `CaretRectCell.path`
+  additive, `CellCaretAnchor.path` + Home/End. sample-8p: 1클릭=표(#19),
+  더블클릭=캐럿, Home/End leaf 줄, ⌘A+Backspace는 생산품만, undo 복구.
+  다음: PR `Closes #48` · CI 3종 green 후 머지 질문. #42/#46과 분리.
+
 - 갱신: 2026-08-15 · Grok 4.6 — **#48 중첩 셀 캐럿**. 공개 이슈
   https://github.com/kwakseongjae/auto-hwp/issues/48 . 브랜치
   `feat/issue-48-nested-caret`. 계약 테스트(ignore/fixme) 선설치. 구현 전.

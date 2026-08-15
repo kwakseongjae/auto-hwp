@@ -244,12 +244,17 @@ export interface CellCaretRect {
 export interface CellTextHit {
   section: number;
   block: number;
-  row: number;
-  col: number;
+  /** Flat leaf coords for a depth-1 hit. Omitted on a nested hit so consumers cannot plant
+   *  outer-table (row, col) as the edit target (issue #48 R2). */
+  row?: number;
+  col?: number;
   para: number;
   offset: number;
   para_len: number;
   caret: CellCaretRect;
+  /** Descending CellPath for a nested leaf. Omitted on depth-1 so the 053 JSON stays the
+   *  six-field shape (issue #48 A2). */
+  path?: CellAddr[];
 }
 
 /** A resolved TEXT caret position in the MODEL — the editable half of a glyph caret, derived from a

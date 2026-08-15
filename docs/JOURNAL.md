@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-15 (Grok 4.6) · #48 중첩 셀 캐럿 구현
+- path 캐럿 관통. sample-8p 브라우저: 캐럿·Home/End·삭제/undo·#19 표선택.
+- 다음: PR Closes #48, CI 후 머지 질문. #42 분리.
+
 ## 2026-08-15 (Grok 4.6) · #48 캐럿 이슈+계약 테스트
 - 공개 #48. 브랜치 feat/issue-48-nested-caret. 테스트는 ignore/fixme.
 - 구현·PR은 다음. #42와 분리.

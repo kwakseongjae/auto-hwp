@@ -94,8 +94,6 @@ fn nested_table_is_placed_with_ancestors() {
     );
 }
 
-/// Exit gate for #48. Today `cell_text_hit` returns None on nested tables.
-#[ignore = "issue-48"]
 #[test]
 fn nested_cell_text_hit_resolves_to_leaf() {
     let doc = nested_doc();
@@ -115,6 +113,21 @@ fn nested_cell_text_hit_resolves_to_leaf() {
     )
     .expect("nested leaf must be a caret target");
     assert_eq!(hit.section, 0);
+    assert_eq!(hit.path.len(), 2, "depth-2 leaf carries a CellPath");
+    let rect = hwp_typeset::cell_caret_rect_path(
+        &doc,
+        &placed,
+        &ApproxFontMetrics,
+        hit.section,
+        &hit.path,
+        hit.para,
+        hit.offset,
+    )
+    .expect("path caret rect must resolve");
+    assert!(
+        (rect.x - hit.caret.x).abs() < 0.01 && (rect.top - hit.caret.top).abs() < 0.01,
+        "path caret == hit caret"
+    );
 }
 
 #[test]

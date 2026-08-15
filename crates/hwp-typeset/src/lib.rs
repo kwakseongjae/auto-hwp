@@ -25,9 +25,9 @@ mod old_hangul;
 /// Positioned layout (glyphs/images/boxes per page) — the paint-IR bridge consumed by `hwp-render`.
 pub mod place;
 pub use place::{
-    block_pages, cell_caret_rect, cell_text_hit, column_offsets, place_doc, row_offsets, BlockKind,
-    CellAddr, CellCaretRect, CellTextHit, PlacedBlock, PlacedCell, PlacedDoc, PlacedGlyph,
-    PlacedImage, PlacedPage, PlacedRect, PlacedTable,
+    block_pages, cell_caret_rect, cell_caret_rect_path, cell_text_hit, column_offsets, place_doc,
+    row_offsets, BlockKind, CellAddr, CellCaretRect, CellTextHit, PlacedBlock, PlacedCell,
+    PlacedDoc, PlacedGlyph, PlacedImage, PlacedPage, PlacedRect, PlacedTable,
 };
 
 /// Half the EM for half-width glyphs.

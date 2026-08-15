@@ -420,4 +420,56 @@ describe("CellCaretController (headless click → caret → commit)", () => {
     expect((adapter.applied[1] as Intent & { runs: RunSpec[] }).runs).toEqual([{ text: "AB2", bold: true }]);
     expect(session.canUndo()).toBe(true);
   });
+
+  it("a nested hit commits SetTableCellRuns.path and does not plant outer flat coords", async () => {
+    const path = [
+      { block: 1, row: 0, col: 0 },
+      { block: 0, row: 0, col: 0 },
+    ];
+    const { adapter, ctl } = makeController({
+      cellText: hit({
+        row: undefined,
+        col: undefined,
+        path,
+        offset: 1,
+        para_len: 3,
+      }),
+      cellCaret: cellRect,
+      runs: [{ text: "WRONG" }],
+      runsPath: [{ text: "ABC" }],
+    });
+    await ctl.clickAt(0, 5, 5);
+    expect(ctl.get()?.anchor.path).toEqual(path);
+    expect(await ctl.insertText("X")).toBe(true);
+    expect(adapter.applied[0]).toEqual({
+      intent: "SetTableCellRuns",
+      section: 0,
+      index: 1,
+      row: 0,
+      col: 0,
+      path,
+      runs: [{ text: "AXBC" }],
+    });
+  });
+
+  it("Home/End move to the first/last offset of the current visual line", async () => {
+    const { ctl } = makeController({
+      cellText: hit({ offset: 2, para_len: 5 }),
+      cellCaret: (_s, _b, _r, _c, _p, offset) => ({
+        page: 0,
+        x: 100 + offset * 10,
+        top: offset < 3 ? 200 : 220,
+        height: 13,
+      }),
+      runs: [{ text: "ABCDE" }],
+    });
+    await ctl.clickAt(0, 5, 5);
+    const home = await ctl.moveToLineEnd("start");
+    expect(home?.anchor.offset).toBe(0);
+    expect(home?.rect.x).toBe(100);
+    await ctl.move(4);
+    const end = await ctl.moveToLineEnd("end");
+    expect(end?.anchor.offset).toBe(5);
+    expect(end?.rect.top).toBe(220);
+  });
 });

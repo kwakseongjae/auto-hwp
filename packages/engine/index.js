@@ -244,6 +244,13 @@ export class HwpDoc {
       return s == null ? null : JSON.parse(s);
     });
   }
+  /** Path-addressed twin of `cellCaretRect` (issue #48). Length-1 is the flat 053 lane. */
+  cellCaretRectPath(section, path, para, offset) {
+    return this.#call((r) => {
+      const s = r.cellCaretRectPath(section, JSON.stringify(path ?? []), para, offset);
+      return s == null ? null : JSON.parse(s);
+    });
+  }
   /** Body-paragraph caret, hit half: the editable `(section, block, offset)` target under own-render
    *  px `(x,y)`, plus `para_len` and its zero-width caret rect, or `null` outside a body paragraph
    *  (018). The embedded caret stays on the queried page at a wrapped line end (visual affinity).
