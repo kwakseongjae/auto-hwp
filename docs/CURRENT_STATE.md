@@ -3,6 +3,18 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-18 · Claude(Fable) — **#50 인수·계획 확정 (우로보로스 인터뷰 D1–D9)**.
+  PR #53(#33·#29 close)·PR #55(#54 로드맵 트랙) 머지 완료. #50(모델 프로바이더 허브,
+  외부 제안)은 타당성 검증(Copilot SDK 2026-06 GA·OpenRouter PKCE 공식·Codex CLI 격리
+  실증) 후 **즉시 인수** — 크레딧 댓글 게시, 우산 유지, 첫 슬라이스는 서브이슈
+  **#56**(OpenRouter PKCE v1). 핵심 결정: 어댑터 계약 3종 동시 설계·구현은 OpenRouter부터
+  / **서버 커스터디 키**(globalThis 메모리만, 브라우저는 connected+키출처 메타) /
+  **이중 게이트**(`AUTO_HWP_LOCAL_MODELS=1`+루프백 검사 — 서버형 데모 demo.ts가 Vercel에
+  실려 빌드 게이팅만으론 부족) / 첫 PR에 모델 셀렉트 포함(no-silent-fallback 테스트) /
+  demo.ts 무접촉·프로덕션 무변경. Ouroboros Seed `seed_8e464381dc64`(수락 기준·verify
+  커맨드 구조화 — Grok 착수 프롬프트로 사용). 착수 순서: Grok은 **T0(#46 조판 정합
+  재정의) 먼저** → #56 → #51 → B0. 상세 계약·함정은 #56 본문이 정본.
+
 - 갱신: 2026-08-18 · Claude(Fable) — **#48 머지 완료 + 장기 로드맵 트랙 3종 + 역할 분담**.
   PR #49는 Cursor 리뷰 2건을 검수해 수리 후 머지(main `773c52f`, #48 close): High(Tauri
   `blockRunsPath` 부재 → 입력이 침묵하는 죽은 캐럿)는 심기 가드+계약 테스트로 막고
