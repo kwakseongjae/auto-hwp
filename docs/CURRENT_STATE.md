@@ -3,6 +3,16 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-19 · Grok 4.6 — **T0 / PR #46 정합 재정의 완료 · 머지 질문**.
+  `fix/issue-42-layout-gap`에 origin/main(#49 중첩 캐럿) 병합. `hwpx_rhwp_parity`는
+  부분집합 동등: 본문 22쪽/301줄 잠금, 제외 extras는 ours 0/0/0 · rhwp
+  landscape_swaps=1. 살린 요소는 자체 픽스처(머리말 표 XML·폼 표식 글리프·가로+머리말
+  7==7 LOCKSTEP). 게이트 8==8/18==18/24==24 · 줄바꿈 98.9%+. 워크스페이스 테스트
+  green. macOS workspace clippy는 종전대로 스킵, 격리 target clippy `-D warnings`
+  green — Linux CI가 전체 clippy를 본다. sample-8p 브라우저: 업로드+예시 경로
+  모두 `HWP · 8쪽`·아웃라인 점프. 제보 원문 .hwp는 레포에 없음. 다음: CI 3종
+  green 확인 후 **머지 질문**(비사소). #42 제보자 답변은 소유자 게시.
+
 - 갱신: 2026-08-18 · Claude(Fable) — **#50 인수·계획 확정 (우로보로스 인터뷰 D1–D9)**.
   PR #53(#33·#29 close)·PR #55(#54 로드맵 트랙) 머지 완료. #50(모델 프로바이더 허브,
   외부 제안)은 타당성 검증(Copilot SDK 2026-06 GA·OpenRouter PKCE 공식·Codex CLI 격리

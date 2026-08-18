@@ -2539,6 +2539,36 @@ pub(crate) mod tests {
         assert!(body_text(&decos[1].blocks).contains("ZZFOOTERZZ"));
     }
 
+    /// #42 / T0: 머리말 안의 표는 본문이 아니라 decorations 로 살아야 한다.
+    /// 제보 원문(.hwp/PDF)은 쓰지 않는다 — 최소 구조 XML 만.
+    #[test]
+    fn header_table_stays_in_decorations_not_body() {
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p id="1"><hp:run charPrIDRef="0"><hp:ctrl><hp:header id="5" applyPageType="BOTH"><hp:subList><hp:p><hp:run><hp:tbl rowCnt="1" colCnt="1"><hp:tr><hp:tc><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:subList><hp:p><hp:run><hp:t>제목표</hp:t></hp:run></hp:p></hp:subList></hp:tc></hp:tr></hp:tbl></hp:run></hp:p></hp:subList></hp:header></hp:ctrl></hp:run></hp:p><hp:p id="2"><hp:run><hp:t>본문</hp:t></hp:run></hp:p></hs:sec>"#;
+        let mut blocks = Vec::new();
+        let mut decos = Vec::new();
+        parse_section(xml, &mut blocks, &mut decos, &Default::default()).unwrap();
+
+        let body = body_text(&blocks);
+        assert!(body.contains("본문"), "본문: {body}");
+        assert!(
+            !body.contains("제목표"),
+            "머리말 표가 본문으로 샜다: {body}"
+        );
+        assert_eq!(decos.len(), 1);
+        assert_eq!(decos[0].kind, DecoKind::Header);
+        let deco_tables = decos[0]
+            .blocks
+            .iter()
+            .filter(|b| matches!(b, Block::Table(_)))
+            .count();
+        assert_eq!(deco_tables, 1, "머리말에 표 1개가 있어야 한다");
+        assert!(
+            body_text(&decos[0].blocks).contains("제목표"),
+            "머리말 표 셀 텍스트: {}",
+            body_text(&decos[0].blocks)
+        );
+    }
+
     /// 회귀 잠금(2단계): 각주/미주 본문도 본문 블록이 아니라 호스트 런의 `Inline::Note` 로 간다
     /// (.hwp lift 와 같은 구조). 각주가 새면 본문 페이지에 각주 텍스트가 한 줄씩 더 조판된다.
     #[test]

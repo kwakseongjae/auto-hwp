@@ -1216,6 +1216,24 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(form_visible_text(&edit).unwrap(), "단체명을 기재해 주세요.");
+
+        // 구조 스냅샷: 표식은 직전 문단에 붙고, 문단이 없으면 새 문단을 만든다.
+        let mut blocks = vec![Block::Paragraph(Paragraph::default())];
+        append_form_text(&mut blocks, "☐ 공연제작".into());
+        match &blocks[..] {
+            [Block::Paragraph(p)] => {
+                assert_eq!(p.runs.len(), 1);
+                match &p.runs[0].content[..] {
+                    [Inline::Text(t)] => assert_eq!(t, "☐ 공연제작"),
+                    other => panic!("expected one text run, got {other:?}"),
+                }
+            }
+            other => panic!("expected one paragraph, got {other:?}"),
+        }
+        let mut empty = Vec::new();
+        append_form_text(&mut empty, "☑".into());
+        assert_eq!(empty.len(), 1);
+        assert!(matches!(&empty[0], Block::Paragraph(p) if p.runs.len() == 1));
     }
 
     #[test]
