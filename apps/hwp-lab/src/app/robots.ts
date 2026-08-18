@@ -11,7 +11,7 @@ const SITE = (process.env.NEXT_PUBLIC_SITE_URL || `https://kwakseongjae.github.i
 
 export default function robots(): MetadataRoute.Robots {
   return {
-    rules: [{ userAgent: "*", allow: "/", disallow: ["/api/", "/d/"] }],
+    rules: [{ userAgent: "*", allow: "/", disallow: ["/api/", "/d/", "/models"] }],
     sitemap: `${SITE}/sitemap.xml`,
   };
 }

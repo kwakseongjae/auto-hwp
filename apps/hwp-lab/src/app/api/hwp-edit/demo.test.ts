@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET, POST } from "./route";
 import { readDemoConfig, resetMemoryCounters } from "./demo";
 import { demoAiHttpError } from "../../../lib/demoAiResponse";
+import { resetOpenRouterSessionForTests } from "@/lib/openrouter/session";
 
 const ORIGIN = "https://demo.test";
 
@@ -52,6 +53,7 @@ describe("hwp-edit — 공개 데모 모드", () => {
   const saved = { ...process.env };
 
   beforeEach(() => {
+    resetOpenRouterSessionForTests();
     resetMemoryCounters();
     process.env.DEMO_AI_MODE = "1";
     process.env.OPENROUTER_API_KEY = "test-only-key";
@@ -447,7 +449,7 @@ describe("hwp-edit — 공개 데모 모드", () => {
 
   // ── ⑥ GET 프로브 ──────────────────────────────────────────────────────────────────────────────
   it("GET: 키·비밀 없는 rate-limit store·실제 cap을 함께 진단한다", async () => {
-    const live = (await (await GET()).json()) as {
+    const live = (await (await GET(new Request("http://localhost/api/hwp-edit"))).json()) as {
       mode: string;
       provider: string;
       model: string;
@@ -482,17 +484,17 @@ describe("hwp-edit — 공개 데모 모드", () => {
       new Response(JSON.stringify([{ result: "PONG" }]), { status: 200, headers: { "content-type": "application/json" } }),
     );
     vi.stubGlobal("fetch", probeFetch);
-    const durable = (await (await GET()).json()) as { rate_limit: { store: string; durable: boolean } };
+    const durable = (await (await GET(new Request("http://localhost/api/hwp-edit"))).json()) as { rate_limit: { store: string; durable: boolean } };
     expect(durable.rate_limit).toEqual(expect.objectContaining({ store: "upstash", durable: true }));
     expect(probeFetch).toHaveBeenCalledTimes(1);
 
     // 같은 warm instance의 공개 GET은 60초 캐시를 써 저장소를 매번 두드리지 않는다.
-    await GET();
+    await GET(new Request("http://localhost/api/hwp-edit"));
     expect(probeFetch).toHaveBeenCalledTimes(1);
 
     resetMemoryCounters();
     vi.stubGlobal("fetch", vi.fn(async () => new Response("unauthorized", { status: 401 })));
-    const unreachable = (await (await GET()).json()) as {
+    const unreachable = (await (await GET(new Request("http://localhost/api/hwp-edit"))).json()) as {
       rate_limit: { store: string; durable: boolean; store_configured: boolean; configuration_valid: boolean };
     };
     expect(unreachable.rate_limit).toEqual(
@@ -500,7 +502,7 @@ describe("hwp-edit — 공개 데모 모드", () => {
     );
 
     delete process.env.OPENROUTER_API_KEY;
-    const off = (await (await GET()).json()) as { mode: string; configured: boolean; message: string };
+    const off = (await (await GET(new Request("http://localhost/api/hwp-edit"))).json()) as { mode: string; configured: boolean; message: string };
     expect(off.mode).toBe("static");
     expect(off.configured).toBe(false);
     expect(off.message).toContain("구성되지 않았습니다");
@@ -510,6 +512,7 @@ describe("hwp-edit — 공개 데모 모드", () => {
 describe("hwp-edit — BYOK 경로 무변경(데모 모드 꺼짐)", () => {
   const saved = { ...process.env };
   beforeEach(() => {
+    resetOpenRouterSessionForTests();
     resetMemoryCounters();
     delete process.env.DEMO_AI_MODE;
     delete process.env.OPENROUTER_API_KEY;
@@ -537,7 +540,7 @@ describe("hwp-edit — BYOK 경로 무변경(데모 모드 꺼짐)", () => {
   });
 
   it("GET 도 기존 계약(mock) 그대로", async () => {
-    const data = (await (await GET()).json()) as { mode: string; provider: string };
+    const data = (await (await GET(new Request("http://localhost/api/hwp-edit"))).json()) as { mode: string; provider: string };
     expect(data).toMatchObject({ mode: "mock", provider: "mock" });
   });
 });

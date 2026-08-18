@@ -3,6 +3,18 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-19 · Grok 4.6 — **#56 OpenRouter PKCE v1 · PR 전**.
+  `feat/issue-56-openrouter-pkce`: 서버 커스터디 키(`globalThis`) +
+  `resolveOpenRouterKey`(세션 ?? env, 명시 에러) + `/api/auth/openrouter/*` 이중 게이트
+  (`AUTO_HWP_LOCAL_MODELS=1`+루프백; DEMO_STATIC/DEMO_AI_MODE 차단) + `/models`
+  Connect 카드·카탈로그 셀렉트. 선택이 스트리밍/비스트리밍 양쪽에 반영. `demo.ts` diff 0.
+  vitest: resolveKey·models-gating·auth·hwp-edit PKCE. hwp-lab 239, ai-protocol 64,
+  editor-core 265, react 418. e2e 85 passed / 3 skipped. 브라우저: Connect →
+  OpenRouter Sign Up/Sign in(사람 로그인 경계). 콜백 이후는 모의 교환 테스트.
+  `verify-local --full`은 crates 무접촉이라 workspace clippy/wasm 재빌드 스킵(종전
+  macOS clippy 정체). 다음: 푸시·PR `Closes #56` + Part of #50, CI 3종, **머지 금지**.
+  실계정 E2E는 소유자 QA 대기.
+
 - 갱신: 2026-08-19 · Grok 4.6 — **PR #46 Cursor High 2건 수리 · 머지 대기**.
   `fix/issue-42-layout-gap`: (1) `set_page_size` 여백 안내선이 `display_paper`의
   (pw, ph)에서 빼도록 교정 — landscape에서 margin_right=0/bottom 팽창 해소.

@@ -87,6 +87,10 @@ const nextConfig = {
     // 배지 툴팁의 모델명 **폴백**(1순위는 서버 상태 응답 GET /api/hwp-edit 의 `model`). 서버가 없는
     // 정적 데모에서만 의미가 있고, 비어 있으면 툴팁은 모델명을 지어내지 않는다.
     NEXT_PUBLIC_AI_MODEL: process.env.NEXT_PUBLIC_AI_MODEL ?? "",
+    // 로컬 Models 내비 노출만. 값은 AUTO_HWP_LOCAL_MODELS 에서 파생하고 정적 데모/미설정이면 빈다.
+    // 실제 라우트는 서버 이중 게이트가 막는다 — 이 플래그만으로 키가 열리지 않는다.
+    NEXT_PUBLIC_AUTO_HWP_LOCAL_MODELS:
+      !isDemo && process.env.AUTO_HWP_LOCAL_MODELS === "1" ? "1" : "",
   },
   // 문서 세션 URL(/d/<불투명 키>)은 **클라이언트 전용 라우트**다: 서버가 아는 것은 아무 것도 없고
   // (키는 이 브라우저 안에서만 스냅샷으로 환원된다) 화면도 랜딩과 같은 앱 하나다. 그래서 별도 페이지를
