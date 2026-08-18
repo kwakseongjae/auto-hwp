@@ -2220,6 +2220,14 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
           if (body) run(sel ? core.caret.extendLine(1) : core.caret.moveLine(1));
           else if (!sel) fallThroughTo("down");
           return;
+        case "Home":
+          e.preventDefault();
+          run(core.caret.moveToLineEnd("start"));
+          return;
+        case "End":
+          e.preventDefault();
+          run(core.caret.moveToLineEnd("end"));
+          return;
         case "Backspace":
           e.preventDefault();
           run(core.caret.deleteBack());

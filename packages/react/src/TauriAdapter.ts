@@ -1,5 +1,5 @@
 import type { EngineAdapter } from "./EngineAdapter";
-import type { BlockHit, CaretRect, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "./types";
+import type { BlockHit, CaretRect, CellAddr, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "./types";
 
 /** The desktop `hit_test` command's DTO (camelCase, crates/hwp-viewer/src/lib.rs `HitDto`). Remapped
  *  into editor-core's snake_case `HitResult` below so both adapters return ONE shape. */
@@ -177,8 +177,25 @@ export class TauriAdapter implements EngineAdapter {
   /** Cell-addressed caret, geometry half (issue 053) — the `CaretRectCell` Intent via the same general
    *  command; `{kind:"caretCell", caret}` matches `CellCaretRect` verbatim. `null` on an unresolvable
    *  address; a PAST-END offset CLAMPS (a rect, never null). */
-  async caretRectCell(section: number, block: number, row: number, col: number, para: number, offset: number): Promise<CellCaretRect | null> {
-    const out = (await this.applyIntent({ intent: "CaretRectCell", section, block, row, col, para, offset })) as {
+  async caretRectCell(
+    section: number,
+    block: number,
+    row: number,
+    col: number,
+    para: number,
+    offset: number,
+    path?: CellAddr[],
+  ): Promise<CellCaretRect | null> {
+    const out = (await this.applyIntent({
+      intent: "CaretRectCell",
+      section,
+      block,
+      row,
+      col,
+      para,
+      offset,
+      ...(path && path.length > 1 ? { path } : {}),
+    })) as {
       caret?: CellCaretRect | null;
     };
     return out.caret ?? null;
