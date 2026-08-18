@@ -3,6 +3,16 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-18 · Claude(Fable) — **#48 머지 완료 + 장기 로드맵 트랙 3종 + 역할 분담**.
+  PR #49는 Cursor 리뷰 2건을 검수해 수리 후 머지(main `773c52f`, #48 close): High(Tauri
+  `blockRunsPath` 부재 → 입력이 침묵하는 죽은 캐럿)는 심기 가드+계약 테스트로 막고
+  후속 #51(Tauri 배선)·#52(본문 Home/End 시각 줄)로 분리. #33은 Brave 5일차 0건을
+  pending으로 기록한 증거 PR #53(`Closes #33`; 머지 후 상위 #29도 close). 이 브랜치
+  `docs/issue-54-roadmap-tracks`(#54): `TYPESET/BLOG/DESKTOP-ROADMAP.md` 신설(조판
+  장기전 근거=PR #46 정합 301vs282 충돌), AGENTS 역할 분담(Fable=기획·검수·조율 /
+  Grok 4.6=실작업), THREADS 다음 시리즈 방향 3종. #42 답변 초안은 TYPESET-ROADMAP
+  부록 — 소유자가 게시. 다음: #53·#54 CI green 후 머지, T0(#46 정합 재정의)는 Grok.
+
 - 갱신: 2026-08-15 · Grok 4.6 — **#48 중첩 셀 캐럿 구현**. 브랜치
   `feat/issue-48-nested-caret`. `cell_text_hit` min-area+path, `CaretRectCell.path`
   additive, `CellCaretAnchor.path` + Home/End. sample-8p: 1클릭=표(#19),
