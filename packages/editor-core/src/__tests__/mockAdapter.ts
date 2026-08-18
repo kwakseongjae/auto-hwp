@@ -1,5 +1,5 @@
 import type { EngineAdapter } from "../adapter";
-import type { BlockHit, CaretRect, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox, TableGrid } from "../types";
+import type { BlockHit, CaretRect, CellAddr, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox, TableGrid } from "../types";
 
 /** A headless EngineAdapter for node tests: canned geometry resolvers + a spy-able applyIntent/undo.
  *  No wasm, no DOM — pure in-memory. Mirrors @auto-hwp/react's test MockAdapter so the same selection
@@ -37,6 +37,8 @@ export class MockAdapter implements EngineAdapter {
        *  col)` resolver (issue 051 — so a delete-preview test can model "paragraph vs table cell" reads).
        *  Omit to OMIT the method. */
       runs?: RunSpec[] | ((section: number, block: number, row?: number, col?: number) => RunSpec[]);
+      /** Canned nested-cell runs for `blockRunsPath` (issue #48). Omit to OMIT the method. */
+      runsPath?: RunSpec[] | ((section: number, path: CellAddr[]) => RunSpec[]);
       /** Canned glyph-caret hit for `hitTestText` (issue 041), or a coordinate-aware resolver. Present
        *  makes `hitTestText` answer; omit to OMIT the method (a no-glyph-caret backend). */
       hitText?: HitResult | null | ((page: number, x: number, y: number) => HitResult | null);
@@ -78,6 +80,7 @@ export class MockAdapter implements EngineAdapter {
     if (!("rowBoundaries" in this.opts)) (this as { tableRowBoundaries?: unknown }).tableRowBoundaries = undefined;
     if (!("pageGeom" in this.opts)) (this as { pageGeometry?: unknown }).pageGeometry = undefined;
     if (!("runs" in this.opts)) (this as { blockRuns?: unknown }).blockRuns = undefined;
+    if (!("runsPath" in this.opts)) (this as { blockRunsPath?: unknown }).blockRunsPath = undefined;
     if (!("hitText" in this.opts)) (this as { hitTestText?: unknown }).hitTestText = undefined;
     if (!("caret" in this.opts)) (this as { caretRect?: unknown }).caretRect = undefined;
     if (!("cellText" in this.opts)) (this as { hitTestCellText?: unknown }).hitTestCellText = undefined;
@@ -150,6 +153,10 @@ export class MockAdapter implements EngineAdapter {
     const r = this.opts.runs;
     return (typeof r === "function" ? r(section, block, row, col) : r) ?? [];
   }
+  async blockRunsPath(section: number, path: CellAddr[]): Promise<RunSpec[]> {
+    const r = this.opts.runsPath;
+    return (typeof r === "function" ? r(section, path) : r) ?? [];
+  }
   async hitTestText(page: number, x: number, y: number): Promise<HitResult | null> {
     const h = this.opts.hitText;
     return (typeof h === "function" ? h(page, x, y) : h) ?? null;
@@ -162,7 +169,15 @@ export class MockAdapter implements EngineAdapter {
     const h = this.opts.cellText;
     return (typeof h === "function" ? h(page, x, y) : h) ?? null;
   }
-  async caretRectCell(section: number, block: number, row: number, col: number, para: number, offset: number): Promise<CellCaretRect | null> {
+  async caretRectCell(
+    section: number,
+    block: number,
+    row: number,
+    col: number,
+    para: number,
+    offset: number,
+    _path?: CellAddr[],
+  ): Promise<CellCaretRect | null> {
     const c = this.opts.cellCaret;
     return (typeof c === "function" ? c(section, block, row, col, para, offset) : c) ?? null;
   }

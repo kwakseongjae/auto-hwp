@@ -1481,6 +1481,11 @@ pub enum Intent {
         col: usize,
         para: usize,
         offset: usize,
+        /// Descending `CellPath` to a nested leaf (issue #48). Absent/`None` = the flat 053
+        /// `(section, block, row, col)` lane. Length ≥ 2 walks the path; length 1 is ignored
+        /// (A2 — depth-1 stays on the existing lane). Additive; `deny_unknown_fields` stays.
+        #[serde(default)]
+        path: Option<Vec<hwp_ops::CellStep>>,
     },
     /// Body-paragraph caret, hit half: resolve a PAGE-LOCAL own-render px click to an editable
     /// top-level paragraph target `{section, block, offset, para_len, caret}`. Geometry consumes OUR
@@ -1771,12 +1776,29 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
             col,
             para,
             offset,
+            path,
         } => Ok(Outcome::CaretCell(with_own_placed(
             session,
             |doc, placed, fonts| {
-                hwp_session::cell_caret_rect_placed(
-                    doc, placed, fonts, section, block, row, col, para, offset,
-                )
+                // A2: only length > 1 takes the path lane; depth-1 stays on the 053 resolver.
+                match path.as_deref() {
+                    Some(p) if p.len() > 1 => {
+                        let addrs: Vec<hwp_session::CellAddrDto> = p
+                            .iter()
+                            .map(|s| hwp_session::CellAddrDto {
+                                block: s.block,
+                                row: s.row,
+                                col: s.col,
+                            })
+                            .collect();
+                        hwp_session::cell_caret_rect_path_placed(
+                            doc, placed, fonts, section, &addrs, para, offset,
+                        )
+                    }
+                    _ => hwp_session::cell_caret_rect_placed(
+                        doc, placed, fonts, section, block, row, col, para, offset,
+                    ),
+                }
             },
         )?)),
         // Body-paragraph caret — the own-render counterpart of the cell-addressed lane above. These

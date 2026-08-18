@@ -78,6 +78,7 @@ interface EngineDoc {
   tableCellAt(page: number, x: number, y: number): MaybePromise<unknown>;
   cellTextHit(page: number, x: number, y: number): MaybePromise<unknown>;
   cellCaretRect(section: number, block: number, row: number, col: number, para: number, offset: number): MaybePromise<unknown>;
+  cellCaretRectPath?(section: number, path: CellAddr[], para: number, offset: number): MaybePromise<unknown>;
   imageAt(page: number, x: number, y: number): MaybePromise<unknown>;
   imageBbox(page: number, section: number, block: number): MaybePromise<unknown>;
   blocksInRect(page: number, x0: number, y0: number, x1: number, y1: number): MaybePromise<unknown>;
@@ -216,6 +217,7 @@ export class WasmAdapter implements EngineAdapter {
       tableCellAt: call("tableCellAt"),
       cellTextHit: call("cellTextHit"),
       cellCaretRect: call("cellCaretRect"),
+      cellCaretRectPath: call("cellCaretRectPath"),
       imageAt: call("imageAt"),
       imageBbox: call("imageBbox"),
       blocksInRect: call("blocksInRect"),
@@ -422,8 +424,21 @@ export class WasmAdapter implements EngineAdapter {
   /** Cell-addressed caret, geometry half (issue 053) — the engine `cellCaretRect` binding (same
    *  injected-font placement as `hitTestCellText`, so hit → caret → typing stay on one geometry).
    *  `null` when the address doesn't resolve; a PAST-END offset CLAMPS (a rect, never null). */
-  caretRectCell(section: number, block: number, row: number, col: number, para: number, offset: number): Promise<CellCaretRect | null> {
-    return this.guard(async (d) => (await d.cellCaretRect(section, block, row, col, para, offset)) as CellCaretRect | null);
+  caretRectCell(
+    section: number,
+    block: number,
+    row: number,
+    col: number,
+    para: number,
+    offset: number,
+    path?: CellAddr[],
+  ): Promise<CellCaretRect | null> {
+    return this.guard(async (d) => {
+      if (path && path.length > 1 && d.cellCaretRectPath) {
+        return (await d.cellCaretRectPath(section, path, para, offset)) as CellCaretRect | null;
+      }
+      return (await d.cellCaretRect(section, block, row, col, para, offset)) as CellCaretRect | null;
+    });
   }
 
   /** Image click-select (issue 049) — the engine `imageAt` binding (delegates to hwp-session's

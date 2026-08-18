@@ -145,7 +145,15 @@ export interface EngineAdapter {
    *  A PAST-END `offset` is CLAMPED to the paragraph end and returns a rect — NEVER null — so the caller
    *  must not read a null rect as "end of paragraph" (same contract as `caretRect`). Backends that can't
    *  answer OMIT this method (the cell caret feature is then off). */
-  caretRectCell?(section: number, block: number, row: number, col: number, para: number, offset: number): Promise<CellCaretRect | null>;
+  caretRectCell?(
+    section: number,
+    block: number,
+    row: number,
+    col: number,
+    para: number,
+    offset: number,
+    path?: CellAddr[],
+  ): Promise<CellCaretRect | null>;
 
   /** OPTIONAL — read-only search of the doc's editable simple paragraphs (issue 045). Returns the matches
    *  in reading order (char coords over each paragraph's concatenated run text), or `[]` on no hit. No

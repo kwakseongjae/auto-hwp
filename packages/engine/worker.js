@@ -43,6 +43,7 @@ const METHODS = new Set([
   'tableCellAt',
   'cellTextHit',
   'cellCaretRect',
+  'cellCaretRectPath',
   'bodyTextHit',
   'bodyCaretRect',
   'blocksInRect',

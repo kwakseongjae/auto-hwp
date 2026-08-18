@@ -144,6 +144,18 @@ impl PlacedTable {
             .filter(|c| x >= c.x && x <= c.x + c.w && y >= c.y && y <= c.y + c.h)
             .min_by(|a, b| (a.w * a.h).total_cmp(&(b.w * b.h)))
     }
+
+    /// Descending `CellPath` to the cell at `(row, col)` of this fragment (issue #48).
+    /// Ancestors (outermost first) plus this table's `{self_block, row, col}`.
+    pub fn leaf_path(&self, row: usize, col: usize) -> Vec<CellAddr> {
+        let mut path = self.ancestors.clone();
+        path.push(CellAddr {
+            block: self.self_block,
+            row,
+            col,
+        });
+        path
+    }
 }
 
 /// What kind of top-level block a [`PlacedBlock`] band came from — lets a point-action UI label the
@@ -1416,6 +1428,10 @@ pub struct CellTextHit {
     pub offset: usize,
     pub para_len: usize,
     pub caret: CellCaretRect,
+    /// Descending `CellPath` to this cell. Empty for a depth-1 (top-level) hit so existing
+    /// consumers keep the flat `(section, block, row, col)` lane (issue #48 A2). Length ≥ 2
+    /// addresses a nested leaf; the DTO then omits the flat row/col (R2).
+    pub path: Vec<CellAddr>,
 }
 
 /// One laid-out cell text line handed to [`walk_cell_lines`]'s callback, in the EDITOR address
@@ -1438,8 +1454,8 @@ struct CellLineGeom<'a> {
 /// Re-drive `place_cell_content`'s EXACT vertical/horizontal accounting over a cell's blocks —
 /// same vertical centering, same indent/align/slack, same per-glyph advances, same trailing-leading
 /// trim — but instead of pushing `PlacedGlyph`s, hand each LINE's geometry to `on_line`. Return
-/// `true` from the callback to stop early. Nested tables advance the cursor (their inner cells are
-/// not caret targets — mirrors "nested cells aren't edit targets").
+/// `true` from the callback to stop early. Nested tables advance the cursor (walk the LEAF cell
+/// separately via its `CellPath` — issue #48).
 #[allow(clippy::too_many_arguments)]
 fn walk_cell_lines(
     blocks: &[Block],
@@ -1596,25 +1612,86 @@ fn model_cell(
     Some((t, cell))
 }
 
-/// Cell-addressed caret rect (issue 053): the caret geometry at char `offset` of the `para`-th
-/// paragraph of cell `(row, col)` of the table at `(section, block)` — own-render ABSOLUTE page
-/// HWPUNIT, on the page the owning fragment landed on. A past-end `offset` CLAMPS to the paragraph
-/// end and returns a rect (never `None` for it — the same contract as the NodeId `CaretRect`).
-/// `None` when the address doesn't resolve (no such table/cell/paragraph, or the cell isn't placed).
-#[allow(clippy::too_many_arguments)]
-pub fn cell_caret_rect(
-    doc: &SemanticDoc,
-    placed: &PlacedDoc,
-    fonts: &dyn FontMetricsProvider,
+/// Walk a descending `CellPath` to the LEAF table+cell (issue #48). Level 0 unwraps a 1×1 frame
+/// wrapper via `edit_target`; deeper levels index the RAW `Block::Table` inside the previous cell
+/// (mirrors `place_nested_table` / `hwp_ops::resolve_cell`). Length-1 is the flat 053 lane (A2).
+fn model_cell_path<'a>(
+    doc: &'a SemanticDoc,
     section: usize,
-    block: usize,
-    row: usize,
-    col: usize,
+    path: &[CellAddr],
+) -> Option<(&'a Table, &'a Cell)> {
+    let (first, rest) = path.split_first()?;
+    if rest.is_empty() {
+        return model_cell(doc, section, first.block, first.row, first.col);
+    }
+    let sec = doc.sections.get(section)?;
+    let Block::Table(t0) = sec.blocks.get(first.block)? else {
+        return None;
+    };
+    let t0 = t0.edit_target();
+    let mut cell = t0
+        .cells
+        .iter()
+        .find(|c| c.active && c.row == first.row && c.col == first.col)?;
+    for (i, addr) in rest.iter().enumerate() {
+        let Block::Table(nt) = cell.blocks.get(addr.block)? else {
+            return None;
+        };
+        if i + 1 == rest.len() {
+            let leaf = nt
+                .cells
+                .iter()
+                .find(|c| c.active && c.row == addr.row && c.col == addr.col)?;
+            return Some((nt, leaf));
+        }
+        cell = nt
+            .cells
+            .iter()
+            .find(|c| c.active && c.row == addr.row && c.col == addr.col)?;
+    }
+    None
+}
+
+/// The `(page, PlacedCell)` that draws the leaf cell of `path` (issue #48). Matches the fragment
+/// whose `ancestors` + `self_block` equal the path prefix + last step's block.
+fn owning_cell_rect_path(
+    placed: &PlacedDoc,
+    section: usize,
+    path: &[CellAddr],
+) -> Option<(usize, PlacedCell)> {
+    let last = path.last()?;
+    let prefix = &path[..path.len() - 1];
+    for (pi, pg) in placed.pages.iter().enumerate() {
+        for t in pg.tables.iter().filter(|t| t.section == section) {
+            if t.ancestors.as_slice() != prefix || t.self_block != last.block {
+                continue;
+            }
+            if last.row < t.first_row || last.row >= t.last_row {
+                continue;
+            }
+            if let Some(c) = t
+                .cells
+                .iter()
+                .find(|c| c.row == last.row && c.col == last.col)
+            {
+                return Some((pi, c.clone()));
+            }
+        }
+    }
+    None
+}
+
+#[allow(clippy::too_many_arguments)]
+fn caret_rect_in_cell(
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+    page: usize,
+    pc: &PlacedCell,
+    table: &Table,
+    cell: &Cell,
     para: usize,
     offset: usize,
 ) -> Option<CellCaretRect> {
-    let (page, pc) = owning_cell_rect(placed, section, block, row, col)?;
-    let (table, cell) = model_cell(doc, section, block, row, col)?;
     let (pad_left, pad_right) = crate::cell_horizontal_padding(table, cell);
     let mut out: Option<CellCaretRect> = None;
     walk_cell_lines(
@@ -1658,12 +1735,73 @@ pub fn cell_caret_rect(
     out
 }
 
+/// Cell-addressed caret rect (issue 053): the caret geometry at char `offset` of the `para`-th
+/// paragraph of cell `(row, col)` of the table at `(section, block)` — own-render ABSOLUTE page
+/// HWPUNIT, on the page the owning fragment landed on. A past-end `offset` CLAMPS to the paragraph
+/// end and returns a rect (never `None` for it — the same contract as the NodeId `CaretRect`).
+/// `None` when the address doesn't resolve (no such table/cell/paragraph, or the cell isn't placed).
+#[allow(clippy::too_many_arguments)]
+pub fn cell_caret_rect(
+    doc: &SemanticDoc,
+    placed: &PlacedDoc,
+    fonts: &dyn FontMetricsProvider,
+    section: usize,
+    block: usize,
+    row: usize,
+    col: usize,
+    para: usize,
+    offset: usize,
+) -> Option<CellCaretRect> {
+    let (page, pc) = owning_cell_rect(placed, section, block, row, col)?;
+    let (table, cell) = model_cell(doc, section, block, row, col)?;
+    caret_rect_in_cell(doc, fonts, page, &pc, table, cell, para, offset)
+}
+
+/// Path-addressed twin of [`cell_caret_rect`] (issue #48). A length-1 path is the flat 053
+/// lane (A2 — do not reimplement depth-1 here). Length ≥ 2 walks the nested leaf.
+pub fn cell_caret_rect_path(
+    doc: &SemanticDoc,
+    placed: &PlacedDoc,
+    fonts: &dyn FontMetricsProvider,
+    section: usize,
+    path: &[CellAddr],
+    para: usize,
+    offset: usize,
+) -> Option<CellCaretRect> {
+    if path.len() <= 1 {
+        let step = path.first()?;
+        return cell_caret_rect(
+            doc, placed, fonts, section, step.block, step.row, step.col, para, offset,
+        );
+    }
+    let (page, pc) = owning_cell_rect_path(placed, section, path)?;
+    let (table, cell) = model_cell_path(doc, section, path)?;
+    caret_rect_in_cell(doc, fonts, page, &pc, table, cell, para, offset)
+}
+
 /// Cell-addressed hit test (issue 053): resolve a page-space point (HWPUNIT) to the CELL TEXT caret
 /// target under it — the inverse of [`cell_caret_rect`]. Picks the topmost table fragment containing
 /// the point, the cell within it, then the vertically NEAREST text line and the char boundary
 /// nearest to `x` (a click in the padding still carets the closest position — 근접 스냅, mirroring
 /// `block_at`'s nearest-band rule). `None` off any table cell, on a continuation fragment of a
 /// row-spanning cell (its text lives on the owning page), or when the cell has no paragraph.
+/// Smallest-area table fragment containing `(x, y)` (issue #48 A1). Nested tables sit inside
+/// their parent so min-area == innermost; a same-area tie prefers the deeper path, then the
+/// later (painted-on-top) fragment.
+fn table_at_min_area(pg: &PlacedPage, x: f64, y: f64) -> Option<&PlacedTable> {
+    pg.tables
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| x >= t.x && x <= t.x + t.w && y >= t.y && y <= t.y + t.h)
+        .min_by(|(ia, a), (ib, b)| {
+            (a.w * a.h)
+                .total_cmp(&(b.w * b.h))
+                .then_with(|| b.ancestors.len().cmp(&a.ancestors.len()))
+                .then_with(|| ib.cmp(ia))
+        })
+        .map(|(_, t)| t)
+}
+
 pub fn cell_text_hit(
     doc: &SemanticDoc,
     placed: &PlacedDoc,
@@ -1673,26 +1811,21 @@ pub fn cell_text_hit(
     y: f64,
 ) -> Option<CellTextHit> {
     let pg = placed.pages.get(page)?;
-    let t = pg
-        .tables
-        .iter()
-        .rfind(|t| x >= t.x && x <= t.x + t.w && y >= t.y && y <= t.y + t.h)?;
-    // issue 064 Tier-2: the click-to-type CELL CARET lane is addressed by the FLAT `(section, block, row,
-    // col)` (no CellPath), so it cannot reach a NESTED leaf — `model_cell` below would resolve the OUTER
-    // block's cell at those coords (wrong cell). A nested cell is edited via the double-click inline editor
-    // (which threads the path). So DON'T place a text caret over a nested grid — return None; the inline
-    // editor still opens on double-click. (`ancestors` is empty for every top-level table → unchanged.)
-    if !t.ancestors.is_empty() {
-        return None;
-    }
+    let t = table_at_min_area(pg, x, y)?;
     let pc = t.cell_at(x, y)?;
     if pc.row < t.first_row {
         return None; // continuation fragment — the text (and its caret) lives on the owning page
     }
+    let path = t.leaf_path(pc.row, pc.col);
     let (section, block) = (t.section, t.block);
-    let (table, cell) = model_cell(doc, section, block, pc.row, pc.col)?;
+    let (table, cell) = if path.len() > 1 {
+        model_cell_path(doc, section, &path)?
+    } else {
+        model_cell(doc, section, block, pc.row, pc.col)?
+    };
     let (pad_left, pad_right) = crate::cell_horizontal_padding(table, cell);
     let (row, col, cx, cy, cw, chh) = (pc.row, pc.col, pc.x, pc.y, pc.w, pc.h);
+    let hit_path = if path.len() > 1 { path } else { Vec::new() };
     let mut best: Option<(f64, CellTextHit)> = None;
     walk_cell_lines(
         &cell.blocks,
@@ -1747,6 +1880,7 @@ pub fn cell_text_hit(
                             top: lg.top,
                             height: lg.height,
                         },
+                        path: hit_path.clone(),
                     },
                 ));
             }
