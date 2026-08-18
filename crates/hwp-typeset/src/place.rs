@@ -354,7 +354,6 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
 
     for (sec_idx, sec) in doc.sections.iter().enumerate() {
         let page = &sec.page;
-        let section_first_page = pages.len() - 1;
         // 본문 상자는 crate::body_box 단일 지점에서 — 머리말/꼬리말/제본 여백까지 반영해야
         // NaiveLayout 과 쪽수가 어긋나지 않는다(LOCKSTEP, 이슈 074).
         let (ml, mt, body_w, body_h) = crate::body_box(page);
@@ -364,6 +363,9 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
             pages.push(PlacedPage::default());
         }
         set_page_size(pages.last_mut().unwrap(), page);
+        // After the fresh-page push: decorations must start on THIS section's first page,
+        // not the previous section's last page (PR #46 review).
+        let section_first_page = pages.len() - 1;
         // "쪽 나누기 앞에서" — NaiveLayout/block_pages 와 공유하는 단일 판정(이슈 080, LOCKSTEP).
         let brk = crate::section_page_breaks(sec, doc);
         let mut vert = 0.0f64; // page-relative vertical cursor (within the body box)
@@ -2189,16 +2191,17 @@ fn paragraph_object(p: &Paragraph) -> Option<(f64, f64, String, Option<String>)>
 }
 
 fn set_page_size(pg: &mut PlacedPage, page: &PageSetup) {
-    let (w, h) = crate::display_paper(page);
-    pg.width = w as f64;
-    pg.height = h as f64;
+    // Guides must use the same swapped paper as body_box / pg.width (HWP5 landscape).
+    let (pw, ph) = crate::display_paper(page);
+    pg.width = pw as f64;
+    pg.height = ph as f64;
     // 여백 안내선은 **글자가 실제로 놓이는 상자**(= crate::body_box)를 가리켜야 한다 — 제본/
     // 머리말/꼬리말 여백을 빼먹으면 눈금자와 본문이 어긋난다(이슈 074).
     let (ml, mt, bw, bh) = crate::body_box(page);
     pg.margin_left = ml;
     pg.margin_top = mt;
-    pg.margin_right = (page.width as f64 - ml - bw).max(0.0);
-    pg.margin_bottom = (page.height as f64 - mt - bh).max(0.0);
+    pg.margin_right = (pw as f64 - ml - bw).max(0.0);
+    pg.margin_bottom = (ph as f64 - mt - bh).max(0.0);
 }
 
 fn new_page(pages: &mut Vec<PlacedPage>, page: &PageSetup) {
@@ -2355,6 +2358,49 @@ mod tests {
         assert_eq!(naive.pages[0].height, placed.pages[0].height);
     }
 
+    /// PR #46 review: landscape guides subtract from `display_paper`, not the unswapped box.
+    #[test]
+    fn landscape_margin_guides_match_display_paper_and_body_box() {
+        let mut doc = doc_with(vec![Block::Paragraph(para("가로"))]);
+        doc.sections[0].page = PageSetup {
+            width: 59528,
+            height: 84188,
+            landscape: true,
+            margin_left: 1000,
+            margin_right: 2000,
+            margin_top: 3000,
+            margin_bottom: 4000,
+            margin_header: 1500,
+            margin_footer: 2500,
+            margin_gutter: 500,
+            ..Default::default()
+        };
+        let placed = place_doc(&doc, &crate::ApproxFontMetrics);
+        assert_eq!(placed.pages.len(), 1);
+        let pg = &placed.pages[0];
+        let (pw, ph) = crate::display_paper(&doc.sections[0].page);
+        let (ml, mt, bw, bh) = crate::body_box(&doc.sections[0].page);
+        assert_eq!(pg.width, pw as f64);
+        assert_eq!(pg.height, ph as f64);
+        assert!(
+            pg.margin_right > 0.0,
+            "landscape right guide must stay positive, got {}",
+            pg.margin_right
+        );
+        assert_eq!(pg.margin_left, ml);
+        assert_eq!(pg.margin_top, mt);
+        assert_eq!(
+            pg.margin_left + bw + pg.margin_right,
+            pw as f64,
+            "left+body_w+right must equal display width"
+        );
+        assert_eq!(
+            pg.margin_top + bh + pg.margin_bottom,
+            ph as f64,
+            "top+body_h+bottom must equal display height"
+        );
+    }
+
     #[test]
     fn header_decoration_paints_in_header_band_without_extra_pages() {
         let mut doc = doc_with(vec![Block::Paragraph(para("본문"))]);
@@ -2395,6 +2441,80 @@ mod tests {
             header_glyphs.iter().any(|g| g.ch == '제' || g.ch == '목'),
             "title text must appear in the header band"
         );
+    }
+
+    /// PR #46 review: next-section decorations must not paint on the previous section's last page.
+    #[test]
+    fn later_section_header_does_not_paint_on_prior_section_last_page() {
+        fn page() -> PageSetup {
+            PageSetup {
+                width: 59528,
+                height: 84188,
+                margin_left: 2000,
+                margin_right: 2000,
+                margin_top: 4000,
+                margin_bottom: 2000,
+                margin_header: 2000,
+                margin_footer: 2000,
+                ..Default::default()
+            }
+        }
+        fn header(text: &str) -> PageDecoration {
+            PageDecoration {
+                kind: DecoKind::Header,
+                apply: ApplyPage::Both,
+                blocks: vec![Block::Paragraph(para(text))],
+                from_source: false,
+            }
+        }
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape::default());
+        doc.para_shapes.push(ParaShape::default());
+        let mut first_second = para("본문계속");
+        first_second.page_break_before = true;
+        doc.sections.push(Section {
+            page: page(),
+            blocks: vec![
+                Block::Paragraph(para("본문하나")),
+                Block::Paragraph(first_second),
+            ],
+            decorations: vec![header("甲머리")],
+            ..Default::default()
+        });
+        doc.sections.push(Section {
+            page: page(),
+            blocks: vec![Block::Paragraph(para("본문둘"))],
+            decorations: vec![header("乙머리")],
+            ..Default::default()
+        });
+
+        let placed = place_doc(&doc, &crate::ApproxFontMetrics);
+        assert_eq!(placed.pages.len(), 3, "2 body pages + 1 next-section page");
+        let header_chars = |pg: &PlacedPage| -> String {
+            pg.glyphs
+                .iter()
+                .filter(|g| g.baseline < 6000.0)
+                .map(|g| g.ch)
+                .collect()
+        };
+        let last_of_first = header_chars(&placed.pages[1]);
+        assert!(
+            last_of_first.contains('甲'),
+            "section 1 last page must keep its own header, got {last_of_first}"
+        );
+        assert!(
+            !last_of_first.contains('乙'),
+            "section 1 last page must not carry section 2 header, got {last_of_first}"
+        );
+        let first_of_second = header_chars(&placed.pages[2]);
+        assert!(
+            first_of_second.contains('乙'),
+            "section 2 first page must paint its header, got {first_of_second}"
+        );
+        let naive = crate::NaiveLayout
+            .layout(&doc, &crate::ApproxFontMetrics)
+            .unwrap();
+        assert_eq!(naive.pages.len(), placed.pages.len(), "LOCKSTEP");
     }
 
     fn title_table(text: &str) -> Table {

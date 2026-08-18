@@ -3,6 +3,17 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-19 · Grok 4.6 — **PR #46 Cursor High 2건 수리 · 머지 대기**.
+  `fix/issue-42-layout-gap`: (1) `set_page_size` 여백 안내선이 `display_paper`의
+  (pw, ph)에서 빼도록 교정 — landscape에서 margin_right=0/bottom 팽창 해소.
+  (2) `section_first_page`를 fresh-page push+`set_page_size` 뒤로 이동 — 다음 섹션
+  머리말이 이전 섹션 마지막 쪽에 겹치지 않음. 잠금 테스트 2건. 게이트
+  8==8/18==18/24==24 · 줄바꿈 98.9%+ · `hwpx_rhwp_parity` 3/3. 격리 clippy
+  hwp-typeset `-D warnings` green. `verify-local --full`은 macOS shared-target
+  workspace clippy 정체로 격리 대체(wasm-opt 7,551,556 B · e2e 85 passed /
+  3 skipped). 다음: 푸시 후 CI 3종 green + 리뷰 스레드 답글(resolve는 검수자).
+  **머지 금지**. #42 제보자 답변은 소유자 게시.
+
 - 갱신: 2026-08-19 · Grok 4.6 — **T0 / PR #46 정합 재정의 완료 · 머지 질문**.
   `fix/issue-42-layout-gap`에 origin/main(#49 중첩 캐럿) 병합. `hwpx_rhwp_parity`는
   부분집합 동등: 본문 22쪽/301줄 잠금, 제외 extras는 ours 0/0/0 · rhwp
