@@ -7,7 +7,7 @@
 
 ## 2026-08-19 (Grok 4.6) · #56 OpenRouter PKCE v1
 - 서버 커스터디 키 + 모델 셀렉트 + 이중 게이트. demo.ts 무접촉.
-- Connect→OpenRouter 로그인 화면까지. 실계정 E2E는 소유자. 다음: PR, 머지 금지.
+- PR #59 CI 3종 green. Cursor 3건 수리·답글. 실계정 E2E는 소유자. 머지 금지.
 
 ## 2026-08-19 (Grok 4.6) · PR #46 Cursor High 2건 수리
 - 여백 안내선=`display_paper`. 섹션 머리말 시작쪽=fresh-page 이후.
