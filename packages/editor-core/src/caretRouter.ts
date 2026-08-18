@@ -180,7 +180,8 @@ export class CaretRouter {
     return true;
   }
 
-  /** Home/End — 현재 시각 줄의 처음/끝. 셀은 leaf 줄정보(issue #48), 본문은 줄 박스. */
+  /** Home/End — 셀은 현재 시각 줄의 처음/끝(leaf 줄정보, issue #48). 본문은 v1로 문단
+   *  처음/끝으로 이동한다 — 시각 줄 경계 이동은 #52 후속. */
   async moveToLineEnd(which: "start" | "end"): Promise<boolean> {
     if (this.active === "cell") return !!(await this.cell.moveToLineEnd(which));
     if (this.active === "body") {

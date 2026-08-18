@@ -452,6 +452,23 @@ describe("CellCaretController (headless click → caret → commit)", () => {
     });
   });
 
+  it("a nested hit does NOT plant when the backend lacks blockRunsPath (dead-caret guard, #51)", async () => {
+    const path = [
+      { block: 1, row: 0, col: 0 },
+      { block: 0, row: 0, col: 0 },
+    ];
+    const { adapter, ctl } = makeController({
+      cellText: hit({ row: undefined, col: undefined, path, offset: 1, para_len: 3 }),
+      cellCaret: cellRect,
+      runs: [{ text: "WRONG" }],
+      // runsPath 생략 → blockRunsPath 부재 (Tauri v1)
+    });
+    expect(await ctl.clickAt(0, 5, 5)).toBeNull();
+    expect(ctl.get()).toBeNull();
+    expect(await ctl.insertText("X")).toBe(false);
+    expect(adapter.applied).toHaveLength(0);
+  });
+
   it("Home/End move to the first/last offset of the current visual line", async () => {
     const { ctl } = makeController({
       cellText: hit({ offset: 2, para_len: 5 }),

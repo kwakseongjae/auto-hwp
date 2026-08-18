@@ -307,6 +307,12 @@ export class CellCaretController {
         this.clear();
         return null;
       }
+      if (isNestedPath(hit.path) && !this.adapter.blockRunsPath) {
+        // 중첩 leaf 는 읽기 경로(blockRunsPath)까지 있어야 심는다(018: 부재=기능 off) — 없으면
+        // 입력이 조용히 무시되는 죽은 캐럿이 된다. 백엔드가 배선될 때까지(#51) 표 선택으로 강등.
+        this.clear();
+        return null;
+      }
       const prev = extend ? this.state?.anchor : undefined;
       const same = prev && sameCellPara(prev, hit);
       const offset = clampOffset(hit.offset, hit.para_len);
