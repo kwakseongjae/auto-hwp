@@ -120,12 +120,15 @@ export interface CellCaretRect {
 export interface CellTextHit {
   section: number;
   block: number;
-  row: number;
-  col: number;
+  /** Flat leaf coords for a depth-1 hit. Omitted on a nested hit (issue #48 R2). */
+  row?: number;
+  col?: number;
   para: number;
   offset: number;
   para_len: number;
   caret: CellCaretRect;
+  /** Descending CellPath for a nested leaf. Omitted on depth-1 (issue #48 A2). */
+  path?: CellAddr[];
 }
 
 /** Body-paragraph caret rect — own-render px. `w` is always 0 (a document insertion boundary); the
@@ -324,6 +327,8 @@ export class HwpDoc {
    *  the OWNING page, or `null` when the address doesn't resolve (018). A PAST-END `offset` CLAMPS to
    *  the paragraph end (a rect, never null). */
   cellCaretRect(section: number, block: number, row: number, col: number, para: number, offset: number): CellCaretRect | null;
+  /** Path-addressed twin of `cellCaretRect` (issue #48). Length-1 is the flat 053 lane. */
+  cellCaretRectPath(section: number, path: CellAddr[], para: number, offset: number): CellCaretRect | null;
   /** Body-paragraph caret, hit half: resolves a page-local own-render px click to the editable
    *  `(section, block, offset)` target, or `null` outside a body paragraph (018). Geometry consumes the
    *  cached PlacedGlyph stream directly; it does not parse SVG markup or use rhwp coordinates. */

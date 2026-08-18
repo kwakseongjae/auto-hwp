@@ -422,8 +422,8 @@ fn cell_caret_intents_dispatch_and_roundtrip() {
     match apply_intent_json(&mut s, &parse(&hit_json)) {
         Ok(Outcome::HitCell(Some(h))) => {
             assert_eq!(
-                (h.section, h.block, h.row, h.col, h.para, h.offset),
-                (0, 1, 0, 0, 0, 0)
+                (h.section, h.block, h.row, h.col, h.para, h.offset, h.path),
+                (0, 1, Some(0), Some(0), 0, 0, None)
             );
             assert!(h.para_len >= 2, "cell A1 has text");
             assert!(
@@ -625,6 +625,37 @@ fn unknown_field_is_rejected() {
         err.contains("unknown field") && err.contains("weight"),
         "nested run rejects unknown field: {err}"
     );
+}
+
+/// Depth-1 cell caret JSON stays the six-field 053 shape (#48 must not break this).
+#[test]
+fn caret_rect_cell_without_path_still_deserializes() {
+    deserialize_intent(&parse(
+        r#"{"intent":"CaretRectCell","section":0,"block":1,"row":0,"col":0,"para":0,"offset":1}"#,
+    ))
+    .expect("depth-1 CaretRectCell JSON must stay valid");
+}
+
+#[test]
+fn caret_rect_cell_unknown_field_is_still_rejected() {
+    let err = de_err(json!({
+        "intent":"CaretRectCell",
+        "section":0,"block":1,"row":0,"col":0,"para":0,"offset":1,
+        "bogus": true
+    }));
+    assert!(
+        err.contains("unknown field") && err.contains("bogus"),
+        "CaretRectCell must keep deny_unknown_fields: {err}"
+    );
+}
+
+/// Additive optional `path` on CaretRectCell (issue #48).
+#[test]
+fn caret_rect_cell_accepts_additive_path() {
+    deserialize_intent(&parse(
+        r#"{"intent":"CaretRectCell","section":0,"block":1,"row":0,"col":0,"para":0,"offset":1,"path":[{"block":1,"row":0,"col":0},{"block":1,"row":0,"col":0}]}"#,
+    ))
+    .expect("CaretRectCell.path must be additive");
 }
 
 /// Issue 050: `InsertImage` DESERIALIZES fine but the DISPATCH validates the payload — a base64 blob

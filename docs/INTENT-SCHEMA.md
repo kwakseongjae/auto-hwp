@@ -293,6 +293,7 @@ para, offset, para_len, caret:{page,x,top,height}}` (row/col 모델-전역, `par
 | `col` | integer | 셀 열(모델-전역) | ● |
 | `para` | integer | 셀 내 문단 서수(0-based) — 셀 텍스트를 `"\n"`으로 나눈 **에디터 세그먼트** 공간(`blockRuns` join / `SetTableCellRuns` split과 동일; 모델 문단 내 강제 줄바꿈도 경계) | ● |
 | `offset` | integer | 문단 내 문자(char) 인덱스(`"\n"` 미포함) | ● |
+| `path` | `{block,row,col}[]` | 중첩 leaf `CellPath` (issue #48). 생략/`null`/길이 1 = 기존 053 평면 레인. 길이 ≥ 2만 path 레인 (A2) | ○ |
 
 결과 `{kind:"caretCell", caret}` — `caret`은 `{page, x, top, height}`(px + 소유 fragment의 0-based
 페이지 — 분할 표는 셀의 top row를 그린 페이지). **past-end `offset`은 문단 끝으로 클램프**되어

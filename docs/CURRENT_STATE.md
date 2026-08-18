@@ -3,6 +3,46 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-18 · Claude(Fable) — **#50 인수·계획 확정 (우로보로스 인터뷰 D1–D9)**.
+  PR #53(#33·#29 close)·PR #55(#54 로드맵 트랙) 머지 완료. #50(모델 프로바이더 허브,
+  외부 제안)은 타당성 검증(Copilot SDK 2026-06 GA·OpenRouter PKCE 공식·Codex CLI 격리
+  실증) 후 **즉시 인수** — 크레딧 댓글 게시, 우산 유지, 첫 슬라이스는 서브이슈
+  **#56**(OpenRouter PKCE v1). 핵심 결정: 어댑터 계약 3종 동시 설계·구현은 OpenRouter부터
+  / **서버 커스터디 키**(globalThis 메모리만, 브라우저는 connected+키출처 메타) /
+  **이중 게이트**(`AUTO_HWP_LOCAL_MODELS=1`+루프백 검사 — 서버형 데모 demo.ts가 Vercel에
+  실려 빌드 게이팅만으론 부족) / 첫 PR에 모델 셀렉트 포함(no-silent-fallback 테스트) /
+  demo.ts 무접촉·프로덕션 무변경. Ouroboros Seed `seed_8e464381dc64`(수락 기준·verify
+  커맨드 구조화 — Grok 착수 프롬프트로 사용). 착수 순서: Grok은 **T0(#46 조판 정합
+  재정의) 먼저** → #56 → #51 → B0. 상세 계약·함정은 #56 본문이 정본.
+
+- 갱신: 2026-08-18 · Claude(Fable) — **#48 머지 완료 + 장기 로드맵 트랙 3종 + 역할 분담**.
+  PR #49는 Cursor 리뷰 2건을 검수해 수리 후 머지(main `773c52f`, #48 close): High(Tauri
+  `blockRunsPath` 부재 → 입력이 침묵하는 죽은 캐럿)는 심기 가드+계약 테스트로 막고
+  후속 #51(Tauri 배선)·#52(본문 Home/End 시각 줄)로 분리. #33은 Brave 5일차 0건을
+  pending으로 기록한 증거 PR #53(`Closes #33`; 머지 후 상위 #29도 close). 이 브랜치
+  `docs/issue-54-roadmap-tracks`(#54): `TYPESET/BLOG/DESKTOP-ROADMAP.md` 신설(조판
+  장기전 근거=PR #46 정합 301vs282 충돌), AGENTS 역할 분담(Fable=기획·검수·조율 /
+  Grok 4.6=실작업), THREADS 다음 시리즈 방향 3종. #42 답변 초안은 TYPESET-ROADMAP
+  부록 — 소유자가 게시. 다음: #53·#54 CI green 후 머지, T0(#46 정합 재정의)는 Grok.
+
+- 갱신: 2026-08-15 · Grok 4.6 — **#48 중첩 셀 캐럿 구현**. 브랜치
+  `feat/issue-48-nested-caret`. `cell_text_hit` min-area+path, `CaretRectCell.path`
+  additive, `CellCaretAnchor.path` + Home/End. sample-8p: 1클릭=표(#19),
+  더블클릭=캐럿, Home/End leaf 줄, ⌘A+Backspace는 생산품만, undo 복구.
+  PR https://github.com/kwakseongjae/auto-hwp/pull/49 `Closes #48`.
+  다음: CI 3종 green 후 머지 질문. #42/#46과 분리.
+
+- 갱신: 2026-08-15 · Grok 4.6 — **#48 중첩 셀 캐럿**. 공개 이슈
+  https://github.com/kwakseongjae/auto-hwp/issues/48 . 브랜치
+  `feat/issue-48-nested-caret`. 계약 테스트(ignore/fixme) 선설치. 구현 전.
+  머지 후보는 이슈 체크리스트+CI 3종+sample-8p 실브라우저. #42와 분리.
+
+- 갱신: 2026-08-15 · Grok 4.6 — **에이전트 규율 #43 (PR만, 병합은 질문)**.
+  #40/#41은 main `dbc76ef`에 이미 병합. 이번 브랜치 `docs/issue-43-ask-before-merge`:
+  비사소 PR은 체크 green 후 멈추고 묻는다. UI는 chrome-devtools로 업로드/클릭
+  검수. 전역 `~/.grok`에도 동일 규칙·`browser-qa` 스킬·MCP 핀. 다음: 사용자
+  병합 승인. 082 한컴 게이트는 별건. 선재 사용자 문서 무접촉.
+
 - 갱신: 2026-08-15 · Grok 4.6 — **#42 조판 네 결함 한 PR 구현 중**.
   브랜치 `fix/issue-42-layout-gap`. 원인: HWP5 가로 미교환, `Control::Form` 드롭,
   머리말 decorations 미조판. 원본 `.hwp`는 로컬에 없음(이슈 PDF만). 공개 게이트

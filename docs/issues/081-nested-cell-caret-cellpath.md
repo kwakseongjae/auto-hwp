@@ -1,6 +1,6 @@
 # 081 — 중첩 셀 캐럿·편집: CellPath를 캐럿 레인에 관통
 
-- 상태: **기획 확정 · 미착수** (2026-08-10) — 편집 품질 배치(2026-08-10)에서 진단만 완료된 갭
+- 상태: **공개 이슈 #48로 승격** (2026-08-15). 기획은 여기, 이슈/PR/수용은 GitHub #48.
 - 우선순위: P1 — 중첩 표는 한국 공문서의 정의적 형상(rhwp 오너: "표 하나로 부족하면 표 안에 표를
   중첩시킨다"). sample-8p.hwp의 파란 안내 문구가 실사용 재현체이고, rhwp 코퍼스 실측으로도
   투명 1×1 래퍼+중첩 표 형상이 문서 681개 중 65개(~10%)에 있다.
@@ -74,13 +74,12 @@ sample-8p.hwp 일반현황 표(s0/b10, 9×8)의 셀 (r1,c3) 안 **1×1 중첩 �
 
 ## 수용 기준
 
-- [ ] **래칫 게이트(R1)**: 게이트 코퍼스 전 문서에서 depth≥2 placed CellPath 전수가 IR resolve 성공
-      (단정 테스트 — verify quick 레인에 추가).
-- [ ] `nested-cell-caret-gap.spec.ts` fixme 해제 → green (캐럿→⌘A→Backspace→⌘Z 왕복, 실브라우저).
-- [ ] 깊이 1 무회귀: cell-caret-053 등 기존 e2e 전건 + "깊이 1은 기존 레인을 탄다" 명시 테스트(A2).
+- [x] **래칫 게이트(R1)**: `placed_nested_paths_resolve_in_ir` — depth≥2 placed CellPath가 IR leaf Table까지 resolve.
+- [x] `nested-cell-caret-gap.spec.ts` fixme 해제 (캐럿→⌘A→Backspace→⌘Z, Home/End, 은닉 undo, #19).
+- [x] 깊이 1 무회귀: `top_level_cell_text_hit_still_resolves` + `caret_rect_cell_without_path_still_deserializes` (A2).
 - [ ] 게이트 8/18/24/6 · HWPX축 · LOCKSTEP · byte-verbatim 왕복 전부 불변 (조판 출력 무변경 — 읽기 전용 작업).
-- [ ] 은닉 undo 단위 관찰의 원인 확정 + 재발 차단 테스트.
-- [ ] 세로 이동/Home/End가 중첩 leaf 안에서 leaf 축 줄정보를 읽는다(바깥 축 오독 금지 — rhwp #2792 레벨 4c 재현 방지).
+- [x] 은닉 undo 단위 관찰: 중첩 위 클릭이 캐럿 없이 표 선택만 하고, 커밋은 `SetTableCellRuns.path`만.
+- [x] Home/End가 중첩 leaf 줄정보를 `caretRectCell(..., path)` probe로 읽는다.
 
 ## 함정 (착수 전 필독)
 

@@ -1180,12 +1180,20 @@ pub struct CellCaretDto {
 pub struct CellTextHitDto {
     pub section: usize,
     pub block: usize,
-    pub row: usize,
-    pub col: usize,
+    /// Flat leaf `(row, col)` for a depth-1 hit. Omitted on a nested hit (issue #48 R2) so a
+    /// consumer cannot treat outer-table coords as the edit target.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub row: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub col: Option<usize>,
     pub para: usize,
     pub offset: usize,
     pub para_len: usize,
     pub caret: CellCaretDto,
+    /// Descending `CellPath` for a nested leaf. Omitted on depth-1 so existing JSON stays the
+    /// six-field 053 shape (additive, issue #48 A2).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<Vec<CellAddrDto>>,
 }
 
 fn cell_caret_dto(r: hwp_typeset::CellCaretRect) -> CellCaretDto {
@@ -1243,6 +1251,29 @@ pub fn cell_caret_rect_placed(
         .map(cell_caret_dto)
 }
 
+/// Path-addressed twin of [`cell_caret_rect_placed`] (issue #48). Length-1 delegates to the
+/// flat 053 lane (A2).
+pub fn cell_caret_rect_path_placed(
+    doc: &SemanticDoc,
+    placed: &PlacedDoc,
+    fonts: &dyn hwp_model::prelude::FontMetricsProvider,
+    section: usize,
+    path: &[CellAddrDto],
+    para: usize,
+    offset: usize,
+) -> Option<CellCaretDto> {
+    let addrs: Vec<hwp_typeset::CellAddr> = path
+        .iter()
+        .map(|a| hwp_typeset::CellAddr {
+            block: a.block,
+            row: a.row,
+            col: a.col,
+        })
+        .collect();
+    hwp_typeset::cell_caret_rect_path(doc, placed, fonts, section, &addrs, para, offset)
+        .map(cell_caret_dto)
+}
+
 /// Cell text hit (issue 053): resolve a PAGE-LOCAL px click to the cell-text caret target under it —
 /// the cell-addressed twin of the NodeId `HitTest`, covering the `in_cell → node:None` gap
 /// (docs/CARET-GAP.md §2). `None` off any table cell (018 null policy).
@@ -1264,15 +1295,21 @@ pub fn cell_text_hit_placed(
 ) -> Option<CellTextHitDto> {
     let k = HWPUNIT_PER_PX;
     hwp_typeset::cell_text_hit(doc, placed, fonts, page as usize, x * k, y * k).map(|h| {
+        let nested = h.path.len() > 1;
         CellTextHitDto {
             section: h.section,
             block: h.block,
-            row: h.row,
-            col: h.col,
+            row: if nested { None } else { Some(h.row) },
+            col: if nested { None } else { Some(h.col) },
             para: h.para,
             offset: h.offset,
             para_len: h.para_len,
             caret: cell_caret_dto(h.caret),
+            path: if nested {
+                Some(h.path.iter().map(CellAddrDto::from).collect())
+            } else {
+                None
+            },
         }
     })
 }

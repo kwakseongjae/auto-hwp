@@ -24,11 +24,20 @@ HWP(한글) 자체 엔진: Rust 코어(파싱→IR→조판→렌더→export→
 - UI·레이아웃·라우팅·클라이언트 상태·업로드 화면을 바꿨으면 브라우저 MCP로 실제 업로드/클릭
   검수를 한다(스크린샷 한 장은 검수가 아니다). 절차: `.grok/skills/browser-qa/SKILL.md`.
 
+## 에이전트 역할 분담 (2026-08-18 확정)
+- **Claude(Fable) = 기획·검수·로드맵 조율.** 트랙·이슈 설계(수용 기준 작성), PR 리뷰 판정과
+  머지 조건 확인, 로드맵 문서 정합 유지, 리서치. 큰 구현은 직접 맡지 않는다.
+- **Grok 4.6 = 실작업.** 이슈의 수용 기준을 계약으로 삼아 구현·테스트·브라우저 QA까지.
+  막히면 이슈에 근거를 남기고 Fable 검수로 되돌린다.
+- 공통 규율(issue-first · PR 정지 · 병합은 질문 · UI 브라우저 QA)은 역할과 무관하게 동일
+  적용. 사용자 명시 지시가 이 표보다 우선하며, 다른 에이전트(Codex 등)는 사용자가 지정할 때만.
+
 ## 로드맵/상태 지도 (정본 위치)
 | 무엇 | 어디 |
 |---|---|
 | 현재 위치·다음 작업 | `docs/CURRENT_STATE.md` (단일 복원 지점) |
-| 현행 로드맵 | `docs/PRODUCT-DIRECTION-V2.md` (R12: 이슈 051–056) |
+| 현행 로드맵 | `docs/PRODUCT-DIRECTION-V3.md` (A~D축; V2는 R12 잔여 참고) |
+| 장기 트랙 | `docs/TYPESET-ROADMAP.md`(조판) · `docs/BLOG-ROADMAP.md`(블로그) · `docs/DESKTOP-ROADMAP.md`(데스크톱) |
 | 공통 계약(불변식 전문) | `docs/PRODUCT-DIRECTION.md` §4 — **이슈 착수 전 필독** |
 | 이슈 진행표 | `docs/issues/README.md` (⚠️ 상태 진실은 git log — 복원 스크립트가 대조) |
 | 세션 로그 | `docs/JOURNAL.md` (append-only) |
