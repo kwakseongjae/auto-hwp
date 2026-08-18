@@ -108,6 +108,23 @@ describe("openrouter auth routes", () => {
     leak(JSON.stringify(st), ["sk-or-test-session-key"]);
   });
 
+  it("disconnect reports env as keySource when the env key remains", async () => {
+    process.env.OPENROUTER_API_KEY = "env-only-key";
+    setPkceVerifier("test-verifier");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ key: "sk-or-test-session-key" }),
+      })),
+    );
+    await callback(req("/api/auth/openrouter/callback?code=oauth-code-not-a-key"));
+    const gone = await disconnect(req("/api/auth/openrouter/disconnect", { method: "POST" }));
+    const body = (await gone.json()) as { connected: boolean; keySource: string | null };
+    expect(body).toEqual({ connected: false, keySource: "env", selectedModel: null });
+    leak(JSON.stringify(body), ["sk-or-test-session-key", "env-only-key"]);
+  });
+
   it("stores an explicit model slug without echoing any key", async () => {
     process.env.OPENROUTER_API_KEY = "env-only-key";
     const res = await setModel(

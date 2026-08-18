@@ -836,8 +836,6 @@ export default function LabWorkspace() {
       ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
       // 대화 메모리(에이전틱 스트리밍): 직전 채팅 턴(바운드). 서버가 모델 messages 에 접는다.
       ...(opts?.history?.length ? { history: opts.history } : {}),
-      // 명시 모델(로컬 Models 선택). 서버 세션 선택이 정본이고, 클라가 알면 요청에도 실어 양 경로가 같다.
-      ...(aiModel ? { model: aiModel } : {}),
     };
 
     // ── 데모 프록시 경로 ──────────────────────────────────────────────────────────────────────────
@@ -929,7 +927,7 @@ export default function LabWorkspace() {
     // Feature A: 근거(출처)를 채팅으로 전달 — intents 반환 계약(Promise<Intent[]>)은 불변(InlineEditPanel 안전).
     if (opts?.onCitations) opts.onCitations(data.citations ?? []);
     return data.intents ?? [];
-  }, [adapter, aiModel, askDemoAiConsent, demoAiOn, demoAiTransport]);
+  }, [adapter, askDemoAiConsent, demoAiOn, demoAiTransport]);
 
   // R8: 폰트는 번들하지 않는다. 기본 NanumGothic 이 자동 등록되므로 PDF 는 곧바로 활성화되지만,
   // (기본 폰트 fetch 실패 등으로) 미주입 상태에서 PDF 를 누르면 이 폴백이 호출된다: 기본 폰트를 다시

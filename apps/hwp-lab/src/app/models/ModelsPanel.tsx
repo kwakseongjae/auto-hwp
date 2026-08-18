@@ -103,8 +103,15 @@ export function ModelsPanel() {
     try {
       const res = await fetch("/api/auth/openrouter/disconnect", { method: "POST" });
       if (!res.ok) throw new Error("연결을 끊지 못했습니다.");
-      setStatus({ connected: false, keySource: null, selectedModel: null, defaultModel: status?.defaultModel ?? "x-ai/grok-4.5" });
-      setModels(null);
+      const data = (await res.json()) as Status;
+      setStatus({
+        connected: false,
+        keySource: data.keySource ?? null,
+        selectedModel: data.selectedModel ?? null,
+        defaultModel: data.defaultModel || status?.defaultModel || "x-ai/grok-4.5",
+      });
+      if (data.keySource) await loadCatalog();
+      else setModels(null);
       setNotice("이 서버 메모리의 키를 지웠습니다. OpenRouter 대시보드의 키는 직접 폐기하세요.");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
