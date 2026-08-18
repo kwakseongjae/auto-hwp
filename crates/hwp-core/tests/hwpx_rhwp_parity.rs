@@ -7,6 +7,8 @@
 //! (benchmark1: 214 → 87). rhwp 를 정답지로 두면 그 갭이 사람 눈 없이 드러난다.
 //!
 //! 조판 게이트(layout-check 8==8 / 18==18)는 *결과*를 잠그지만 이 테스트는 *입력*을 잠근다.
+//! 조판 파리티는 T0 이후 **부분집합 동등**이다 — rhwp 가 표현하는 본문만 줄수/쪽수를 맞추고,
+//! 살린 요소(폼·머리말 표·가로 스왑)는 개수만 고정한다.
 #![cfg(feature = "rhwp")]
 
 use hwp_model::prelude::*;
@@ -152,6 +154,123 @@ fn typeset(doc: &SemanticDoc) -> (usize, usize) {
     (r.pages.len(), r.pages.iter().map(|p| p.lines.len()).sum())
 }
 
+/// 우리가 rhwp lift 보다 더 살린 요소 — 정합 비교에서 빼되, 개수는 고정한다 (T0 / #42).
+/// 제외가 침묵 구멍이 되지 않게, 픽스처마다 이 숫자가 바뀌면 테스트가 깨진다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RevivedExtras {
+    /// 본문·머리말에 보이는 폼 컨트롤 표식(`☐`/`☑`) 런 수.
+    form_control_marks: usize,
+    /// `Section.decorations` 안의 표 수 (머리말/꼬리말 제목 표).
+    header_footer_tables: usize,
+    /// `display_paper` 가 가로로 뒤바꿀 구역 수 (`landscape && width < height`).
+    landscape_swaps: usize,
+}
+
+fn walk_blocks(blocks: &[Block], f: &mut dyn FnMut(&Block)) {
+    for b in blocks {
+        f(b);
+        if let Block::Table(t) = b {
+            for c in &t.cells {
+                walk_blocks(&c.blocks, f);
+            }
+        }
+    }
+}
+
+fn is_form_mark_text(t: &str) -> bool {
+    let t = t.trim_start();
+    t.starts_with('☐') || t.starts_with('☑')
+}
+
+fn revived_extras(doc: &SemanticDoc) -> RevivedExtras {
+    let mut form_control_marks = 0;
+    let mut header_footer_tables = 0;
+    let mut landscape_swaps = 0;
+    let mut count_forms = |blocks: &[Block]| {
+        walk_blocks(blocks, &mut |b| {
+            if let Block::Paragraph(p) = b {
+                for r in &p.runs {
+                    for i in &r.content {
+                        if let Inline::Text(t) = i {
+                            if is_form_mark_text(t) {
+                                form_control_marks += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    };
+    for sec in &doc.sections {
+        if sec.page.landscape && sec.page.width < sec.page.height {
+            landscape_swaps += 1;
+        }
+        count_forms(&sec.blocks);
+        for deco in &sec.decorations {
+            count_forms(&deco.blocks);
+            walk_blocks(&deco.blocks, &mut |b| {
+                if matches!(b, Block::Table(_)) {
+                    header_footer_tables += 1;
+                }
+            });
+        }
+    }
+    RevivedExtras {
+        form_control_marks,
+        header_footer_tables,
+        landscape_swaps,
+    }
+}
+
+fn strip_form_marks(blocks: &mut [Block]) {
+    for b in blocks.iter_mut() {
+        match b {
+            Block::Table(t) => {
+                for c in &mut t.cells {
+                    strip_form_marks(&mut c.blocks);
+                }
+            }
+            Block::Paragraph(p) => {
+                for r in &mut p.runs {
+                    r.content.retain(|i| match i {
+                        Inline::Text(t) => !is_form_mark_text(t),
+                        _ => true,
+                    });
+                }
+            }
+        }
+    }
+    // 빈 스페이서·표 앵커 문단은 조판 높이에 들어가므로 지우지 않는다.
+    // 폼 전용 문단이 비더라도 줄 하나 — benchmark1 은 폼 0개라 무해하고,
+    // 픽스처가 폼을 품으면 extras.form_control_marks 가 먼저 깨진다.
+}
+
+/// rhwp lift 가 표현하는 부분집합 — 본문 문단·표. 폼 표식·머리말 표·HWP5 가로 스왑은 뺀다.
+fn rhwp_expressible_subset(doc: &SemanticDoc) -> SemanticDoc {
+    let mut d = doc.clone();
+    for sec in &mut d.sections {
+        sec.decorations.clear();
+        // HWPX 규약: 가로 여부는 저장된 상자에서 유도한다. rhwp 가 HWPX 에 남긴
+        // `landscape=true` + 세로 상자(WIDELY 오표기)에 HWP5 스왑을 적용하지 않는다.
+        sec.page.landscape = sec.page.width > sec.page.height;
+        strip_form_marks(&mut sec.blocks);
+    }
+    d
+}
+
+/// `benchmark1.hwpx` 에서 우리가 살린 요소의 개수. rhwp 경로는 HWPX Skeleton 이
+/// 세로 상자에 `landscape=true` 를 붙여 스왑 후보가 1이다. 머리말 표·폼은 이 픽스처에 없다.
+const BENCH1_OURS_EXTRAS: RevivedExtras = RevivedExtras {
+    form_control_marks: 0,
+    header_footer_tables: 0,
+    landscape_swaps: 0,
+};
+const BENCH1_RHWP_EXTRAS: RevivedExtras = RevivedExtras {
+    form_control_marks: 0,
+    header_footer_tables: 0,
+    landscape_swaps: 1,
+};
+
 /// 모든 표의 행 높이를 **저장된 높이로 바닥 고정**한다 — rhwp lift 가 무조건 하는 것
 /// (`lift_table`: `row_heights = stored_row_heights(..)`)과 같은 상태로 맞추기 위한 테스트 변환.
 fn floor_rows_to_stored(blocks: &mut [Block]) {
@@ -170,22 +289,21 @@ fn floor_rows_to_stored(blocks: &mut [Block]) {
     }
 }
 
-/// **조판 파리티** — 같은 `.hwpx` 를 우리 파서로 읽어 조판한 결과가 rhwp lift 로 읽어 조판한
-/// 결과와 (알려진 정책 차이 하나를 빼고) 같아야 한다.
+/// **조판 파리티 (T0 부분집합 동등)** — 같은 `.hwpx` 를 우리 파서 / rhwp lift 로 읽어
+/// **rhwp 가 표현하는 본문 부분집합**만 같은 엔진으로 조판한다.
 ///
-/// 왜 별도 오라클인가: CLI `layout-check <파일>.hwpx`도 이제 production HWPX parser를 타지만,
-/// 한컴-authored lineseg cache가 있어야 줄수 점수를 낼 수 있다. 이 테스트는 cache 유무와 무관하게
-/// 우리 HWPX parser와 rhwp lift의 구조/조판 파리티를 고정한다: rhwp lift를 정답지로 두고
-/// **엔진을 고정한 채 파서만 바꿔** 차이를 본다.
+/// #42 수리가 폼 컨트롤·머리말 표·HWP5 가로 스왑을 살리면, 그 요소는 rhwp lift 에 없거나
+/// (HWPX Skeleton 의 오표기 `landscape=true`) 다르게 부호화된다. 그 차이를 "우리 301 vs
+/// rhwp 282"처럼 전량 동등으로 잠그면 수리가 게이트를 깨뜨린다. 그래서:
+/// 1. 살린 요소는 비교에서 **명시적으로 제외**하고 (`rhwp_expressible_subset`)
+/// 2. 제외 개수는 `BENCH1_*_EXTRAS` 로 **고정**한다 — 침묵 구멍 방지.
+/// 3. 살린 요소 자체는 이 파일이 아닌 픽스처 테스트가 잠근다.
 ///
-/// 잠그는 것:
+/// 잠그는 것 (부분집합):
 /// 1. **총 줄수 완전 일치** — 표 앵커 문단(`is_table_anchor`)을 안 세우면 표마다 빈 줄이 1개씩
 ///    초과 예약된다(측정: 368 vs 301, 정확히 표 67개만큼 초과). 구조 회귀의 가장 예민한 탐지기.
-/// 2. **쪽수 완전 일치** — 이슈 074 전에는 18 vs 20 이었고 "행 높이 바닥 정책 차이"로 설명했다.
-///    이제는 그 차이가 없다: 조판기가 `row_heights` 가 비면 `stored_row_heights` 를 바닥으로
-///    쓰므로(`apply_row_overrides`, 074) 두 파서가 같은 표 높이를 얻는다. 실측 22쪽/301줄 ==
-///    22쪽/301줄. 바닥을 명시적으로 깔아도(아래 `floored`) 결과가 같아야 한다 — 바닥이 이미
-///    적용됐다는 뜻이고, 이게 깨지면 020/054 의 렌더 IR 이 조판에서 새는 것이다.
+/// 2. **쪽수 완전 일치** — 이슈 074 이후 두 파서는 같은 표 높이를 얻는다. 실측 22쪽/301줄.
+///    바닥을 명시적으로 깔아도 결과가 같아야 한다.
 #[test]
 fn hwpx_parser_typesets_like_the_rhwp_lift() {
     let bytes = bench();
@@ -193,6 +311,20 @@ fn hwpx_parser_typesets_like_the_rhwp_lift() {
         .parse(&bytes, hwp_model::types::SourceFormat::Hwpx)
         .expect("자체 파서");
     let theirs = hwp_rhwp::parse_to_semantic_guarded(&bytes).expect("rhwp 경로");
+
+    let ours_x = revived_extras(&ours);
+    let theirs_x = revived_extras(&theirs);
+    assert_eq!(
+        ours_x, BENCH1_OURS_EXTRAS,
+        "우리 파서에서 제외한 살린 요소 수가 바뀌었다: {ours_x:?}"
+    );
+    assert_eq!(
+        theirs_x, BENCH1_RHWP_EXTRAS,
+        "rhwp lift 에서 제외한 살린 요소 수가 바뀌었다: {theirs_x:?}"
+    );
+
+    let ours = rhwp_expressible_subset(&ours);
+    let theirs = rhwp_expressible_subset(&theirs);
 
     let (op, ol) = typeset(&ours);
     let (tp, tl) = typeset(&theirs);
@@ -203,13 +335,21 @@ fn hwpx_parser_typesets_like_the_rhwp_lift() {
     }
     let (fp, fl) = typeset(&floored);
     println!(
-        "조판 파리티 — 우리 {op}쪽/{ol}줄 (행높이 바닥고정 시 {fp}쪽/{fl}줄) · rhwp lift {tp}쪽/{tl}줄"
+        "조판 파리티(부분집합) — 제외 ours={ours_x:?} rhwp={theirs_x:?} · 우리 {op}쪽/{ol}줄 (행높이 바닥고정 시 {fp}쪽/{fl}줄) · rhwp lift {tp}쪽/{tl}줄"
     );
 
-    assert_eq!(ol, tl, "총 줄수 불일치: 우리 {ol} vs rhwp lift {tl}");
+    assert_eq!(
+        (op, ol),
+        (22, 301),
+        "benchmark1.hwpx 부분집합 조판이 22쪽/301줄에서 벗어났다: {op}쪽/{ol}줄"
+    );
+    assert_eq!(
+        ol, tl,
+        "총 줄수 불일치(부분집합): 우리 {ol} vs rhwp lift {tl}"
+    );
     assert_eq!(
         op, tp,
-        "쪽수 불일치: 우리 파서 {op} vs rhwp lift {tp} (074 이후 두 경로는 같은 표 높이를 얻는다)"
+        "쪽수 불일치(부분집합): 우리 파서 {op} vs rhwp lift {tp}"
     );
     assert_eq!(
         (fp, fl),

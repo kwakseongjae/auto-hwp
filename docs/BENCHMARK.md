@@ -36,8 +36,9 @@ HWP/HWPX 는 문서를 저장할 때 **한글 자신이 계산한 조판 결과�
 같은 문서를 서로 다른 코드 경로로 읽거나 조판해서 결과가 갈리는지 본다. 절대 참값은 아니지만
 **한쪽이 조용히 망가지는 것을 잡는 데는 참값보다 예민하다**.
 
-- `.hwpx` 를 우리 HWPX 파서 vs rhwp lift 로 각각 읽고, 엔진을 고정한 채 조판 결과를 비교
-  (`crates/hwp-core/tests/hwpx_rhwp_parity.rs`)
+- `.hwpx` 를 우리 HWPX 파서 vs rhwp lift 로 각각 읽고, rhwp 가 표현하는 본문 부분집합의
+  조판(쪽수·줄수)을 비교한다 (`crates/hwp-core/tests/hwpx_rhwp_parity.rs`, T0).
+  살린 요소(폼 컨트롤·머리말 표·HWP5 가로 스왑)는 비교에서 빼고 개수만 고정한다.
 - 캐럿 API vs 렌더된 SVG 글리프 좌표 (`packages/engine/bench/body-caret-crosscheck.mjs`)
 - **LOCKSTEP**: `place_doc`(`crates/hwp-typeset/src/place.rs`)과 `NaiveLayout`(`lib.rs`)의 쪽수는
   항상 일치해야 한다. 한쪽만 고치면 게이트가 아니라 코드 리뷰 규율이 막는다(불변식 2).

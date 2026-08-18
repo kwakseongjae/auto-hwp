@@ -3,6 +3,27 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-19 · Grok 4.6 — **PR #46 Cursor High 2건 수리 · 머지 대기**.
+  `fix/issue-42-layout-gap`: (1) `set_page_size` 여백 안내선이 `display_paper`의
+  (pw, ph)에서 빼도록 교정 — landscape에서 margin_right=0/bottom 팽창 해소.
+  (2) `section_first_page`를 fresh-page push+`set_page_size` 뒤로 이동 — 다음 섹션
+  머리말이 이전 섹션 마지막 쪽에 겹치지 않음. 잠금 테스트 2건. 게이트
+  8==8/18==18/24==24 · 줄바꿈 98.9%+ · `hwpx_rhwp_parity` 3/3. 격리 clippy
+  hwp-typeset `-D warnings` green. `verify-local --full`은 macOS shared-target
+  workspace clippy 정체로 격리 대체(wasm-opt 7,551,556 B · e2e 85 passed /
+  3 skipped). 다음: 푸시 후 CI 3종 green + 리뷰 스레드 답글(resolve는 검수자).
+  **머지 금지**. #42 제보자 답변은 소유자 게시.
+
+- 갱신: 2026-08-19 · Grok 4.6 — **T0 / PR #46 정합 재정의 완료 · 머지 질문**.
+  `fix/issue-42-layout-gap`에 origin/main(#49 중첩 캐럿) 병합. `hwpx_rhwp_parity`는
+  부분집합 동등: 본문 22쪽/301줄 잠금, 제외 extras는 ours 0/0/0 · rhwp
+  landscape_swaps=1. 살린 요소는 자체 픽스처(머리말 표 XML·폼 표식 글리프·가로+머리말
+  7==7 LOCKSTEP). 게이트 8==8/18==18/24==24 · 줄바꿈 98.9%+. 워크스페이스 테스트
+  green. macOS workspace clippy는 종전대로 스킵, 격리 target clippy `-D warnings`
+  green — Linux CI가 전체 clippy를 본다. sample-8p 브라우저: 업로드+예시 경로
+  모두 `HWP · 8쪽`·아웃라인 점프. 제보 원문 .hwp는 레포에 없음. 다음: CI 3종
+  green 확인 후 **머지 질문**(비사소). #42 제보자 답변은 소유자 게시.
+
 - 갱신: 2026-08-18 · Claude(Fable) — **#50 인수·계획 확정 (우로보로스 인터뷰 D1–D9)**.
   PR #53(#33·#29 close)·PR #55(#54 로드맵 트랙) 머지 완료. #50(모델 프로바이더 허브,
   외부 제안)은 타당성 검증(Copilot SDK 2026-06 GA·OpenRouter PKCE 공식·Codex CLI 격리
@@ -42,6 +63,12 @@
   비사소 PR은 체크 green 후 멈추고 묻는다. UI는 chrome-devtools로 업로드/클릭
   검수. 전역 `~/.grok`에도 동일 규칙·`browser-qa` 스킬·MCP 핀. 다음: 사용자
   병합 승인. 082 한컴 게이트는 별건. 선재 사용자 문서 무접촉.
+
+- 갱신: 2026-08-15 · Grok 4.6 — **#42 조판 네 결함 한 PR 구현 중**.
+  브랜치 `fix/issue-42-layout-gap`. 원인: HWP5 가로 미교환, `Control::Form` 드롭,
+  머리말 decorations 미조판. 원본 `.hwp`는 로컬에 없음(이슈 PDF만). 공개 게이트
+  유지. 다음: 테스트·브라우저 검수 후 PR `Closes #42`, 머지는 질문. 사용자 문서
+  무접촉.
 
 
 - 갱신: 2026-08-13 · Codex(sol) — **성장 계측 production·Google/Naver 등록·Brave 제출 완료**.

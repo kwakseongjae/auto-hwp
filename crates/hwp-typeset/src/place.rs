@@ -363,6 +363,9 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
             pages.push(PlacedPage::default());
         }
         set_page_size(pages.last_mut().unwrap(), page);
+        // After the fresh-page push: decorations must start on THIS section's first page,
+        // not the previous section's last page (PR #46 review).
+        let section_first_page = pages.len() - 1;
         // "쪽 나누기 앞에서" — NaiveLayout/block_pages 와 공유하는 단일 판정(이슈 080, LOCKSTEP).
         let brk = crate::section_page_breaks(sec, doc);
         let mut vert = 0.0f64; // page-relative vertical cursor (within the body box)
@@ -485,6 +488,7 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                 }
             }
         }
+        place_section_decorations(&mut pages, section_first_page, sec, doc, fonts);
     }
     PlacedDoc { pages }
 }
@@ -2187,21 +2191,109 @@ fn paragraph_object(p: &Paragraph) -> Option<(f64, f64, String, Option<String>)>
 }
 
 fn set_page_size(pg: &mut PlacedPage, page: &PageSetup) {
-    pg.width = page.width as f64;
-    pg.height = page.height as f64;
+    // Guides must use the same swapped paper as body_box / pg.width (HWP5 landscape).
+    let (pw, ph) = crate::display_paper(page);
+    pg.width = pw as f64;
+    pg.height = ph as f64;
     // 여백 안내선은 **글자가 실제로 놓이는 상자**(= crate::body_box)를 가리켜야 한다 — 제본/
     // 머리말/꼬리말 여백을 빼먹으면 눈금자와 본문이 어긋난다(이슈 074).
     let (ml, mt, bw, bh) = crate::body_box(page);
     pg.margin_left = ml;
     pg.margin_top = mt;
-    pg.margin_right = (page.width as f64 - ml - bw).max(0.0);
-    pg.margin_bottom = (page.height as f64 - mt - bh).max(0.0);
+    pg.margin_right = (pw as f64 - ml - bw).max(0.0);
+    pg.margin_bottom = (ph as f64 - mt - bh).max(0.0);
 }
 
 fn new_page(pages: &mut Vec<PlacedPage>, page: &PageSetup) {
     let mut pg = PlacedPage::default();
     set_page_size(&mut pg, page);
     pages.push(pg);
+}
+
+fn deco_applies(apply: ApplyPage, page_idx: usize) -> bool {
+    match apply {
+        ApplyPage::Both => true,
+        ApplyPage::Odd => page_idx.is_multiple_of(2),
+        ApplyPage::Even => page_idx % 2 == 1,
+    }
+}
+
+/// Paint lifted 머리말/꼬리말 into the reserved header/footer bands.
+/// Body pagination is unchanged (LOCKSTEP): the bands are already subtracted by `body_box`.
+fn place_section_decorations(
+    pages: &mut [PlacedPage],
+    first_page: usize,
+    sec: &Section,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+) {
+    if sec.decorations.is_empty() {
+        return;
+    }
+    let page = &sec.page;
+    let (pw, ph) = crate::display_paper(page);
+    let left = (page.margin_left + page.margin_gutter.max(0)) as f64;
+    let right = page.margin_right.max(0) as f64;
+    let band_w = (pw as f64 - left - right).max(1.0);
+    let header_y = page.margin_header.max(0) as f64;
+    let header_h = page.margin_top.max(0) as f64;
+    let footer_h = page.margin_bottom.max(0) as f64;
+    let footer_y = (ph as f64 - page.margin_footer.max(0) as f64 - footer_h).max(0.0);
+
+    for (i, pg) in pages.iter_mut().enumerate().skip(first_page) {
+        for deco in &sec.decorations {
+            if !deco_applies(deco.apply, i) {
+                continue;
+            }
+            let (y, h) = match deco.kind {
+                DecoKind::Header => (header_y, header_h.max(1.0)),
+                DecoKind::Footer => (footer_y, footer_h.max(1.0)),
+            };
+            place_deco_blocks(pg, &deco.blocks, doc, fonts, left, y, band_w, h, page);
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn place_deco_blocks(
+    dest: &mut PlacedPage,
+    blocks: &[Block],
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+    ml: f64,
+    mt: f64,
+    body_w: f64,
+    body_h: f64,
+    page: &PageSetup,
+) {
+    let mut tmp = vec![dest.clone()];
+    let mut vert = 0.0;
+    for (bi, block) in blocks.iter().enumerate() {
+        match block {
+            Block::Paragraph(p) => {
+                if p.is_table_anchor {
+                    continue;
+                }
+                place_paragraph(
+                    p, doc, fonts, ml, mt, body_w, body_h, &mut vert, &mut tmp, page, 0, bi,
+                );
+            }
+            Block::Table(t) => {
+                let unwrapped = crate::unwrap_frame_table(t);
+                let (t, frame) = match &unwrapped {
+                    Some((inner, f)) => (inner, *f),
+                    None => (t, None),
+                };
+                vert = place_table(
+                    t, doc, fonts, ml, mt, body_h, vert, body_w, &mut tmp, page, 0, bi, frame,
+                );
+            }
+        }
+        if tmp.len() > 1 {
+            tmp.truncate(1);
+        }
+    }
+    *dest = tmp.remove(0);
 }
 
 /// Re-export so the renderer can compute a baseline from a bare size without re-deriving the ratio.
@@ -2235,6 +2327,353 @@ mod tests {
         };
         doc.sections.push(sec);
         doc
+    }
+
+    #[test]
+    fn hwp5_landscape_section_gets_swapped_page_box() {
+        let mut doc = doc_with(vec![Block::Paragraph(para("가로"))]);
+        doc.sections[0].page = PageSetup {
+            width: 59528,
+            height: 84188,
+            landscape: true,
+            margin_left: 1000,
+            margin_right: 1000,
+            margin_top: 1000,
+            margin_bottom: 1000,
+            ..Default::default()
+        };
+        let placed = place_doc(&doc, &crate::ApproxFontMetrics);
+        assert_eq!(placed.pages.len(), 1);
+        assert!(
+            placed.pages[0].width > placed.pages[0].height,
+            "landscape must paint a wide page, got {}×{}",
+            placed.pages[0].width,
+            placed.pages[0].height
+        );
+        let naive = crate::NaiveLayout
+            .layout(&doc, &crate::ApproxFontMetrics)
+            .unwrap();
+        assert_eq!(naive.pages.len(), 1);
+        assert_eq!(naive.pages[0].width, placed.pages[0].width);
+        assert_eq!(naive.pages[0].height, placed.pages[0].height);
+    }
+
+    /// PR #46 review: landscape guides subtract from `display_paper`, not the unswapped box.
+    #[test]
+    fn landscape_margin_guides_match_display_paper_and_body_box() {
+        let mut doc = doc_with(vec![Block::Paragraph(para("가로"))]);
+        doc.sections[0].page = PageSetup {
+            width: 59528,
+            height: 84188,
+            landscape: true,
+            margin_left: 1000,
+            margin_right: 2000,
+            margin_top: 3000,
+            margin_bottom: 4000,
+            margin_header: 1500,
+            margin_footer: 2500,
+            margin_gutter: 500,
+            ..Default::default()
+        };
+        let placed = place_doc(&doc, &crate::ApproxFontMetrics);
+        assert_eq!(placed.pages.len(), 1);
+        let pg = &placed.pages[0];
+        let (pw, ph) = crate::display_paper(&doc.sections[0].page);
+        let (ml, mt, bw, bh) = crate::body_box(&doc.sections[0].page);
+        assert_eq!(pg.width, pw as f64);
+        assert_eq!(pg.height, ph as f64);
+        assert!(
+            pg.margin_right > 0.0,
+            "landscape right guide must stay positive, got {}",
+            pg.margin_right
+        );
+        assert_eq!(pg.margin_left, ml);
+        assert_eq!(pg.margin_top, mt);
+        assert_eq!(
+            pg.margin_left + bw + pg.margin_right,
+            pw as f64,
+            "left+body_w+right must equal display width"
+        );
+        assert_eq!(
+            pg.margin_top + bh + pg.margin_bottom,
+            ph as f64,
+            "top+body_h+bottom must equal display height"
+        );
+    }
+
+    #[test]
+    fn header_decoration_paints_in_header_band_without_extra_pages() {
+        let mut doc = doc_with(vec![Block::Paragraph(para("본문"))]);
+        doc.sections[0].page = PageSetup {
+            width: 59528,
+            height: 84188,
+            margin_left: 2000,
+            margin_right: 2000,
+            margin_top: 4000,
+            margin_bottom: 2000,
+            margin_header: 2000,
+            margin_footer: 2000,
+            ..Default::default()
+        };
+        doc.sections[0].decorations.push(PageDecoration {
+            kind: DecoKind::Header,
+            apply: ApplyPage::Both,
+            blocks: vec![Block::Paragraph(para("제목표"))],
+            from_source: false,
+        });
+        let placed = place_doc(&doc, &crate::ApproxFontMetrics);
+        assert_eq!(placed.pages.len(), 1);
+        let header_glyphs: Vec<_> = placed.pages[0]
+            .glyphs
+            .iter()
+            .filter(|g| g.baseline < 6000.0)
+            .collect();
+        assert!(
+            !header_glyphs.is_empty(),
+            "header band must contain glyphs, got {:?}",
+            placed.pages[0]
+                .glyphs
+                .iter()
+                .map(|g| (g.ch, g.baseline))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            header_glyphs.iter().any(|g| g.ch == '제' || g.ch == '목'),
+            "title text must appear in the header band"
+        );
+    }
+
+    /// PR #46 review: next-section decorations must not paint on the previous section's last page.
+    #[test]
+    fn later_section_header_does_not_paint_on_prior_section_last_page() {
+        fn page() -> PageSetup {
+            PageSetup {
+                width: 59528,
+                height: 84188,
+                margin_left: 2000,
+                margin_right: 2000,
+                margin_top: 4000,
+                margin_bottom: 2000,
+                margin_header: 2000,
+                margin_footer: 2000,
+                ..Default::default()
+            }
+        }
+        fn header(text: &str) -> PageDecoration {
+            PageDecoration {
+                kind: DecoKind::Header,
+                apply: ApplyPage::Both,
+                blocks: vec![Block::Paragraph(para(text))],
+                from_source: false,
+            }
+        }
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape::default());
+        doc.para_shapes.push(ParaShape::default());
+        let mut first_second = para("본문계속");
+        first_second.page_break_before = true;
+        doc.sections.push(Section {
+            page: page(),
+            blocks: vec![
+                Block::Paragraph(para("본문하나")),
+                Block::Paragraph(first_second),
+            ],
+            decorations: vec![header("甲머리")],
+            ..Default::default()
+        });
+        doc.sections.push(Section {
+            page: page(),
+            blocks: vec![Block::Paragraph(para("본문둘"))],
+            decorations: vec![header("乙머리")],
+            ..Default::default()
+        });
+
+        let placed = place_doc(&doc, &crate::ApproxFontMetrics);
+        assert_eq!(placed.pages.len(), 3, "2 body pages + 1 next-section page");
+        let header_chars = |pg: &PlacedPage| -> String {
+            pg.glyphs
+                .iter()
+                .filter(|g| g.baseline < 6000.0)
+                .map(|g| g.ch)
+                .collect()
+        };
+        let last_of_first = header_chars(&placed.pages[1]);
+        assert!(
+            last_of_first.contains('甲'),
+            "section 1 last page must keep its own header, got {last_of_first}"
+        );
+        assert!(
+            !last_of_first.contains('乙'),
+            "section 1 last page must not carry section 2 header, got {last_of_first}"
+        );
+        let first_of_second = header_chars(&placed.pages[2]);
+        assert!(
+            first_of_second.contains('乙'),
+            "section 2 first page must paint its header, got {first_of_second}"
+        );
+        let naive = crate::NaiveLayout
+            .layout(&doc, &crate::ApproxFontMetrics)
+            .unwrap();
+        assert_eq!(naive.pages.len(), placed.pages.len(), "LOCKSTEP");
+    }
+
+    fn title_table(text: &str) -> Table {
+        Table {
+            rows: 1,
+            cols: 1,
+            cells: vec![Cell {
+                row: 0,
+                col: 0,
+                blocks: vec![Block::Paragraph(para(text))],
+                ..Default::default()
+            }],
+            col_widths: vec![10_000],
+            stored_row_heights: vec![2000],
+            row_heights: vec![2000],
+            ..Default::default()
+        }
+    }
+
+    /// #42 / T0: 머리말 **표**가 머리말 밴드에 그려지고 본문 쪽수는 늘지 않는다.
+    #[test]
+    fn header_table_paints_in_header_band_without_extra_pages() {
+        let mut doc = doc_with(vec![Block::Paragraph(para("본문"))]);
+        doc.sections[0].page = PageSetup {
+            width: 59528,
+            height: 84188,
+            margin_left: 2000,
+            margin_right: 2000,
+            margin_top: 4000,
+            margin_bottom: 2000,
+            margin_header: 2000,
+            margin_footer: 2000,
+            ..Default::default()
+        };
+        doc.sections[0].decorations.push(PageDecoration {
+            kind: DecoKind::Header,
+            apply: ApplyPage::Both,
+            blocks: vec![Block::Table(title_table("제목표"))],
+            from_source: false,
+        });
+        let placed = place_doc(&doc, &crate::ApproxFontMetrics);
+        assert_eq!(
+            placed.pages.len(),
+            1,
+            "머리말 표는 본문 쪽을 늘리면 안 된다"
+        );
+        assert!(
+            !placed.pages[0].tables.is_empty(),
+            "머리말 표가 배치되어야 한다"
+        );
+        let header_tables: Vec<_> = placed.pages[0]
+            .tables
+            .iter()
+            .filter(|t| t.y < 6000.0)
+            .collect();
+        assert!(
+            !header_tables.is_empty(),
+            "표가 머리말 밴드에 있어야 한다, tables={:?}",
+            placed.pages[0]
+                .tables
+                .iter()
+                .map(|t| (t.x, t.y, t.w, t.h))
+                .collect::<Vec<_>>()
+        );
+        let naive = crate::NaiveLayout
+            .layout(&doc, &crate::ApproxFontMetrics)
+            .unwrap();
+        assert_eq!(naive.pages.len(), placed.pages.len(), "LOCKSTEP");
+    }
+
+    /// #42 / T0: 폼 체크박스 표식은 글리프로 보여야 한다 (rhwp 무관 IR 픽스처).
+    #[test]
+    fn form_checkbox_marks_paint_as_glyphs() {
+        let doc = doc_with(vec![
+            Block::Paragraph(para("☐ 공연제작")),
+            Block::Paragraph(para("☑ 완료")),
+        ]);
+        let placed = place_doc(&doc, &crate::ApproxFontMetrics);
+        let chars: String = placed.pages[0].glyphs.iter().map(|g| g.ch).collect();
+        assert!(chars.contains('☐'), "empty checkbox missing in {chars}");
+        assert!(chars.contains('☑'), "checked checkbox missing in {chars}");
+        assert!(chars.contains('공'), "caption missing in {chars}");
+    }
+
+    /// #42 / T0: 세로 6쪽 + 가로 1쪽 = 7쪽. 머리말 표를 붙여도 7==7, LOCKSTEP.
+    #[test]
+    fn mixed_orientation_and_header_table_keep_seven_pages() {
+        let portrait = PageSetup {
+            width: 59528,
+            height: 84188,
+            landscape: false,
+            margin_left: 2000,
+            margin_right: 2000,
+            margin_top: 4000,
+            margin_bottom: 2000,
+            margin_header: 2000,
+            margin_footer: 2000,
+            ..Default::default()
+        };
+        let landscape = PageSetup {
+            width: 59528,
+            height: 84188,
+            landscape: true,
+            ..portrait
+        };
+        let header = PageDecoration {
+            kind: DecoKind::Header,
+            apply: ApplyPage::Both,
+            blocks: vec![Block::Table(title_table("제목표"))],
+            from_source: false,
+        };
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape::default());
+        doc.para_shapes.push(ParaShape::default());
+        let portrait_blocks: Vec<Block> = (0..6)
+            .map(|i| {
+                let mut p = para(&format!("세로{i}"));
+                p.page_break_before = i > 0;
+                Block::Paragraph(p)
+            })
+            .collect();
+        doc.sections.push(Section {
+            page: portrait,
+            blocks: portrait_blocks,
+            decorations: vec![header.clone()],
+            ..Default::default()
+        });
+        doc.sections.push(Section {
+            page: landscape,
+            blocks: vec![Block::Paragraph(para("가로"))],
+            decorations: vec![header],
+            ..Default::default()
+        });
+
+        let placed = place_doc(&doc, &crate::ApproxFontMetrics);
+        assert_eq!(placed.pages.len(), 7, "7==7 body pages");
+        assert!(
+            placed.pages[0].height > placed.pages[0].width,
+            "first pages stay portrait"
+        );
+        assert!(
+            placed.pages[6].width > placed.pages[6].height,
+            "last page must swap to landscape, got {}×{}",
+            placed.pages[6].width,
+            placed.pages[6].height
+        );
+        assert!(
+            placed
+                .pages
+                .iter()
+                .all(|p| p.tables.iter().any(|t| t.y < 6000.0)),
+            "every page should paint the header table"
+        );
+        let naive = crate::NaiveLayout
+            .layout(&doc, &crate::ApproxFontMetrics)
+            .unwrap();
+        assert_eq!(naive.pages.len(), 7, "LOCKSTEP 7==7");
+        assert_eq!(naive.pages[6].width, placed.pages[6].width);
+        assert_eq!(naive.pages[6].height, placed.pages[6].height);
     }
 
     fn one_cell_table(margin: i32) -> Table {

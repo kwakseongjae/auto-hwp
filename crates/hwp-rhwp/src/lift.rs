@@ -248,6 +248,11 @@ impl<'a> Lifter<'a> {
                         blocks.push(object_paragraph(Inline::Chart(chart)));
                     }
                 }
+                Control::Form(form) => {
+                    if let Some(text) = form_visible_text(form) {
+                        append_form_text(blocks, text);
+                    }
+                }
                 _ => {}
             }
         }
@@ -893,6 +898,54 @@ fn marker_run(inline: Inline) -> Run {
     }
 }
 
+fn form_visible_text(f: &rhwp::model::control::FormObject) -> Option<String> {
+    use rhwp::model::control::FormType;
+    match f.form_type {
+        FormType::CheckBox | FormType::RadioButton => {
+            let mark = if f.value != 0 { "☑" } else { "☐" };
+            let cap = f.caption.trim();
+            Some(if cap.is_empty() {
+                mark.to_string()
+            } else {
+                format!("{mark} {cap}")
+            })
+        }
+        FormType::Edit | FormType::ComboBox => {
+            let t = f.text.trim();
+            let t = if t.is_empty() { f.caption.trim() } else { t };
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
+        }
+        FormType::PushButton => {
+            let t = f.caption.trim();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
+        }
+    }
+}
+
+fn append_form_text(blocks: &mut Vec<Block>, text: String) {
+    let run = Run {
+        char_shape: 0,
+        char_ref: None,
+        content: vec![Inline::Text(text)],
+    };
+    if let Some(Block::Paragraph(p)) = blocks.last_mut() {
+        p.runs.push(run);
+    } else {
+        blocks.push(Block::Paragraph(Paragraph {
+            runs: vec![run],
+            ..Default::default()
+        }));
+    }
+}
+
 /// Map an rhwp field to its OWPML (type token, command). v1 handles HYPERLINK only — its command is
 /// a plain URL (low risk). Other field types (click-here forms, cross-refs, …) return None so the
 /// spanned text still round-trips without a (riskier) synthesized field.
@@ -1144,6 +1197,44 @@ fn lift_para_shape(p: &RParaShape, from_hwpx: bool) -> ParaShape {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn form_checkbox_and_edit_become_visible_text() {
+        use rhwp::model::control::{FormObject, FormType};
+        let mut box_off = FormObject {
+            form_type: FormType::CheckBox,
+            caption: "공연제작".into(),
+            value: 0,
+            ..Default::default()
+        };
+        assert_eq!(form_visible_text(&box_off).unwrap(), "☐ 공연제작");
+        box_off.value = 1;
+        assert_eq!(form_visible_text(&box_off).unwrap(), "☑ 공연제작");
+        let edit = FormObject {
+            form_type: FormType::Edit,
+            text: "단체명을 기재해 주세요.".into(),
+            ..Default::default()
+        };
+        assert_eq!(form_visible_text(&edit).unwrap(), "단체명을 기재해 주세요.");
+
+        // 구조 스냅샷: 표식은 직전 문단에 붙고, 문단이 없으면 새 문단을 만든다.
+        let mut blocks = vec![Block::Paragraph(Paragraph::default())];
+        append_form_text(&mut blocks, "☐ 공연제작".into());
+        match &blocks[..] {
+            [Block::Paragraph(p)] => {
+                assert_eq!(p.runs.len(), 1);
+                match &p.runs[0].content[..] {
+                    [Inline::Text(t)] => assert_eq!(t, "☐ 공연제작"),
+                    other => panic!("expected one text run, got {other:?}"),
+                }
+            }
+            other => panic!("expected one paragraph, got {other:?}"),
+        }
+        let mut empty = Vec::new();
+        append_form_text(&mut empty, "☑".into());
+        assert_eq!(empty.len(), 1);
+        assert!(matches!(&empty[0], Block::Paragraph(p) if p.runs.len() == 1));
+    }
 
     #[test]
     fn diagonal_kind_gates_on_direction_bits_and_line_type() {
