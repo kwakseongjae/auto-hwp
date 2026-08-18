@@ -108,7 +108,7 @@ export function ModelsPanel() {
         connected: false,
         keySource: data.keySource ?? null,
         selectedModel: data.selectedModel ?? null,
-        defaultModel: data.defaultModel || status?.defaultModel || "x-ai/grok-4.5",
+        defaultModel: data.defaultModel || "x-ai/grok-4.5",
       });
       if (data.keySource) await loadCatalog();
       else setModels(null);

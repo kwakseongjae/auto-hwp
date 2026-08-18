@@ -37,6 +37,11 @@ export function resolveOpenRouterKey(): { key: string; source: OpenRouterKeySour
  * Explicit request/session selection wins and is never swapped for a vision model.
  * Without an explicit choice, env default (and the existing vision override) apply.
  */
+/** Env/default slug only — never the wiped session selection. */
+export function openRouterEnvDefaultModel(): string {
+  return process.env.AUTO_HWP_OPENROUTER_MODEL?.trim() || DEFAULT_OPENROUTER_MODEL;
+}
+
 export function resolveOpenRouterModel(requested?: string | null, opts?: { hasImage?: boolean }): string {
   const fromRequest = typeof requested === "string" ? requested.trim() : "";
   const fromSession = getSelectedOpenRouterModel() ?? "";

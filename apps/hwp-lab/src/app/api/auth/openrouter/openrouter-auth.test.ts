@@ -121,7 +121,12 @@ describe("openrouter auth routes", () => {
     await callback(req("/api/auth/openrouter/callback?code=oauth-code-not-a-key"));
     const gone = await disconnect(req("/api/auth/openrouter/disconnect", { method: "POST" }));
     const body = (await gone.json()) as { connected: boolean; keySource: string | null };
-    expect(body).toEqual({ connected: false, keySource: "env", selectedModel: null });
+    expect(body).toEqual({
+      connected: false,
+      keySource: "env",
+      selectedModel: null,
+      defaultModel: "x-ai/grok-4.5",
+    });
     leak(JSON.stringify(body), ["sk-or-test-session-key", "env-only-key"]);
   });
 

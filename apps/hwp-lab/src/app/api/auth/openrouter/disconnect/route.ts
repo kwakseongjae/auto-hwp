@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { peekOpenRouterKeySource } from "@/lib/openrouter/resolveKey";
+import { openRouterEnvDefaultModel, peekOpenRouterKeySource } from "@/lib/openrouter/resolveKey";
 import { clearOpenRouterSession, getSelectedOpenRouterModel } from "@/lib/openrouter/session";
 import { rejectIfGated } from "../_guard";
 
@@ -14,5 +14,6 @@ export async function POST(req: Request) {
     connected: false,
     keySource: peekOpenRouterKeySource(),
     selectedModel: getSelectedOpenRouterModel(),
+    defaultModel: openRouterEnvDefaultModel(),
   });
 }
