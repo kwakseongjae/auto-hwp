@@ -3,6 +3,21 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-20 · Claude(Fable) — **#56 실계정 QA 통과 · PR #59 머지**(main `a53006f`, #56 close).
+  소유자 Chrome(claude-in-chrome)으로 종단 검증: `/models` LOCAL ONLY·카드 1장 →
+  Connect → OpenRouter 인가(QA 키에 크레딧 상한 $1·라벨 localhost:3000) → 콜백 →
+  `connected=true·keySource=session` 전환 → 카탈로그 **403종** 로드 → 모델 명시 선택
+  (`anthropic/claude-haiku-4.5`, 기본 grok-4.5와 다름) → sample-8p에서 실제 AI 편집
+  (SetTableCell 제안→적용→되돌리기 정상). **`GET /api/hwp-edit`가
+  `provider:openrouter·model:anthropic/claude-haiku-4.5·keySource:session`을 반환해
+  "선택 모델이 요청을 구동한다"를 확증**. disconnect 후 `keySource:env·model:grok-4.5`로
+  정확히 복귀. 게이트 실측: 비루프백 Host → 404, connect는 `code_challenge_method=S256`
+  + 요청 오리진 기반 callback_url. dev 로그·status 응답에 키 유출 0건.
+  보안 리뷰 MEDIUM 2건(Host 기반 루프백 검사·소비 경로 무게이트)은 v1 잔여 위험으로
+  **우산 #50에 후속 하드닝 등록** 후 스레드 해결. ⚠️ 소유자 조치: OpenRouter 대시보드에
+  남은 QA 키(`localhost:3000`) 수동 폐기 — disconnect는 서버 메모리만 지운다.
+  다음: Grok 트랙은 #51(Tauri blockRunsPath) 또는 T1(제보→픽스처 절차) 또는 B0(블로그).
+
 - 갱신: 2026-08-19 · Grok 4.6 — **#56 OpenRouter PKCE v1 · PR #59 · CI 3종 green**.
   https://github.com/kwakseongjae/auto-hwp/pull/59 `Closes #56` · Part of #50 ·
   설계 크레딧 @SEUNGJU-PARK-KR. 서버 커스터디 키 + 이중 게이트 + 모델 셀렉트.
