@@ -18,6 +18,13 @@ import {
   validateResponse,
 } from "@auto-hwp/ai-protocol";
 import { demoProbe, handleDemoEdit, isDemoAiMode } from "./demo";
+import { localModelsDeniedReason } from "@/lib/openrouter/gating";
+import {
+  MissingOpenRouterKeyError,
+  peekOpenRouterKeySource,
+  resolveOpenRouterKey,
+  resolveOpenRouterModel,
+} from "@/lib/openrouter/resolveKey";
 
 // @anthropic-ai/sdk 는 route handler(Node.js 런타임)에서만 사용. edge 런타임 선언 금지(이슈 §함정).
 // API 키/LLM 코드는 이 서버 전용 모듈에만 존재 — 클라이언트 번들에 절대 포함되지 않는다(R6).
@@ -162,13 +169,8 @@ async function liveIntents(
   return validateResponse(text, { onDrop: (reason) => console.warn(`[hwp-edit] ${reason}`) });
 }
 
-// OpenRouter default model(사용자 선택). env `AUTO_HWP_OPENROUTER_MODEL`로 언제든 override(정확한 슬러그).
-// x-ai/grok-4.5 는 OpenRouter 상 input_modalities = ["text","image","file"] — vision 지원(2026-07 실측).
-// 그래서 이미지 첨부는 별도 vision 모델로 스왑하지 않고 이 모델로 곧장 content-parts 를 보낸다. 혹시
-// 비전 미지원 모델로 override 한 경우를 대비해 `AUTO_HWP_OPENROUTER_VISION_MODEL` 로 이미지 요청 전용
-// 모델을 지정할 수 있다(미지정이면 기본 모델 그대로 — 기본이 vision 이므로 안전).
-const OPENROUTER_MODEL = process.env.AUTO_HWP_OPENROUTER_MODEL || "x-ai/grok-4.5";
-const OPENROUTER_VISION_MODEL = process.env.AUTO_HWP_OPENROUTER_VISION_MODEL || OPENROUTER_MODEL;
+// OpenRouter 모델은 `resolveOpenRouterModel` 이 요청마다 고른다(명시 선택 > 세션 > env > 기본).
+// 명시 선택이 있으면 vision 모델로 조용히 바꾸지 않는다(issue #56 no-silent-fallback).
 
 /** OpenRouter(OpenAI 호환 Chat Completions) 경로. 키는 이 서버 핸들러 밖으로 나가지 않는다(R6).
  *  system/user 프롬프트(R5 펜스·화이트리스트·doc-context)는 Anthropic 경로와 동일하게 ai-protocol이 조립.
@@ -183,6 +185,7 @@ async function openRouterIntents(
   docContext: string,
   webSearch: boolean,
   attachments: Attachment[],
+  model: string,
 ): Promise<{ intents: Intent[]; citations: Citation[] }> {
   // 멀티모달: 이미지 첨부가 있으면 OpenAI content-PARTS 로 유저 메시지를 조립하고(vision), 이미지 지원
   // 모델을 쓴다. 이미지가 없으면 기존 STRING content 그대로(back-compat). 문서 첨부의 텍스트는 두 경로
@@ -192,7 +195,7 @@ async function openRouterIntents(
     ? buildUserMessageParts({ instruction, anchors, docContext, attachments })
     : buildUserMessage({ instruction, anchors, docContext, attachments });
   const body: Record<string, unknown> = {
-    model: hasImage ? OPENROUTER_VISION_MODEL : OPENROUTER_MODEL,
+    model,
     max_tokens: 4096,
     messages: [
       { role: "system", content: buildSystemPrompt() },
@@ -348,7 +351,7 @@ async function streamOpenRouterTurn(
 /** web_search 툴 실행: OpenRouter web 플러그인(`plugins:[{id:"web"}]`)으로 별도 검색 API 키 없이 서버사이드
  *  검색을 수행하는 NON-스트리밍 서브콜. 요약 텍스트(툴 결과로 모델에 되돌림)와 url_citation 근거를 돌려준다.
  *  R5: 결과는 참고 DATA — 호출부가 tool 롤 메시지로 주입한다(지시로 취급하지 않는다). */
-async function execWebSearch(apiKey: string, query: string): Promise<{ content: string; citations: Citation[] }> {
+async function execWebSearch(apiKey: string, query: string, model: string): Promise<{ content: string; citations: Citation[] }> {
   const res = await fetch(OPENROUTER_URL, {
     method: "POST",
     headers: {
@@ -358,7 +361,7 @@ async function execWebSearch(apiKey: string, query: string): Promise<{ content: 
       "X-Title": "auto-hwp",
     },
     body: JSON.stringify({
-      model: OPENROUTER_MODEL,
+      model,
       max_tokens: 1024,
       plugins: [{ id: "web" }],
       messages: [
@@ -378,7 +381,7 @@ async function execWebSearch(apiKey: string, query: string): Promise<{ content: 
 /** OpenRouter tool-calling 에이전트 루프. 각 단계를 emit(AgentEvent)로 스트리밍한다. 모델이 web_search 를
  *  스스로 호출하면 실행 후 tool 결과를 대화에 넣고 다시 부른다. emit_intents(터미널)면 검증 후 intents 이벤트로
  *  종료. AGENT_MAX_ITERS 를 넘기면 빈 intents 로 종료(무한 루프 방지). */
-async function runOpenRouterAgent(apiKey: string, messages: ChatMsg[], emit: (ev: AgentEvent) => void): Promise<void> {
+async function runOpenRouterAgent(apiKey: string, messages: ChatMsg[], emit: (ev: AgentEvent) => void, model: string): Promise<void> {
   const tools = agentToolSchemas();
   let searchCount = 0;
   for (let iter = 0; iter < AGENT_MAX_ITERS; iter++) {
@@ -390,7 +393,7 @@ async function runOpenRouterAgent(apiKey: string, messages: ChatMsg[], emit: (ev
     const forceFinal = iter === AGENT_MAX_ITERS - 1 || searchCount >= AGENT_MAX_SEARCHES;
     const turn = await streamOpenRouterTurn(
       apiKey,
-      { model: OPENROUTER_MODEL, max_tokens: 4096, messages, tools, tool_choice: forceFinal ? "none" : "auto" },
+      { model, max_tokens: 4096, messages, tools, tool_choice: forceFinal ? "none" : "auto" },
       (text) => emit({ type: "thinking_delta", text }),
     );
 
@@ -421,7 +424,7 @@ async function runOpenRouterAgent(apiKey: string, messages: ChatMsg[], emit: (ev
         const query = typeof args.query === "string" ? args.query : "";
         emit({ type: "status", phase: "searching" });
         emit({ type: "tool_call", tool: "web_search", args: { query } });
-        const { content, citations } = await execWebSearch(apiKey, query);
+        const { content, citations } = await execWebSearch(apiKey, query, model);
         emit({ type: "tool_result", tool: "web_search", citations });
         messages.push({ role: "tool", tool_call_id: tc.id, name: "web_search", content });
       } else {
@@ -467,6 +470,7 @@ function buildAgentStream(
   docContext: string,
   attachments: Attachment[],
   history: ChatTurn[],
+  requestedModel?: string,
 ): ReadableStream<Uint8Array> {
   const enc = new TextEncoder();
   return new ReadableStream<Uint8Array>({
@@ -479,19 +483,23 @@ function buildAgentStream(
           await runAnthropicAgent(process.env.ANTHROPIC_API_KEY!, instruction, anchors, docContext, attachments, emit);
         } else {
           // OpenRouter tool-calling 루프. 시스템(에이전트 프롬프트) + 메모리(직전 턴) + 유저 turn 을 조립한다.
+          // 키는 요청 시점에 재검증한다 — HMR 로 세션이 비면 env 폴백 또는 명시 에러(침묵 mock 금지).
+          const { key } = resolveOpenRouterKey();
           const hasImage = attachments.some((a) => a.kind === "image" && typeof a.dataUrl === "string" && a.dataUrl.length > 0);
+          const model = resolveOpenRouterModel(requestedModel, { hasImage });
           const userContent = hasImage
             ? buildUserMessageParts({ instruction, anchors, docContext, attachments })
             : buildUserMessage({ instruction, anchors, docContext, attachments });
           const messages: ChatMsg[] = [{ role: "system", content: buildAgentSystemPrompt() }];
           for (const turn of history) messages.push({ role: turn.role, content: turn.text });
           messages.push({ role: "user", content: userContent });
-          await runOpenRouterAgent(process.env.OPENROUTER_API_KEY!, messages, emit);
+          await runOpenRouterAgent(key, messages, emit, model);
         }
       } catch (e) {
         const detail = e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : String(e);
-        console.error("[hwp-edit] agent stream failed:", detail);
-        emit({ type: "error", message: `에이전트 실패: ${detail}` });
+        const safe = detail.replace(/sk-or-[a-zA-Z0-9_-]+/g, "[redacted]");
+        console.error("[hwp-edit] agent stream failed:", safe);
+        emit({ type: "error", message: `에이전트 실패: ${safe}` });
       } finally {
         controller.close();
       }
@@ -499,19 +507,33 @@ function buildAgentStream(
   });
 }
 
-/** 프로바이더 우선순위: OpenRouter(있으면) → Anthropic → mock. */
+/** 프로바이더 우선순위: OpenRouter(세션 키 또는 env) → Anthropic → mock.
+ *  PKCE 세션만 있고 env 가 없어도 openrouter 로 간다 — anthropic/mock 침묵 폴백 금지. */
 function activeProvider(): "openrouter" | "anthropic" | "mock" {
-  if (process.env.OPENROUTER_API_KEY) return "openrouter";
+  if (peekOpenRouterKeySource()) return "openrouter";
   if (process.env.ANTHROPIC_API_KEY) return "anthropic";
   return "mock";
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   // 공개 데모 모드(DEMO_AI_MODE=1): 프로바이더/모델을 서버가 고정하므로 프로브도 데모 계약으로 답한다.
   if (isDemoAiMode()) return demoProbe();
   const provider = activeProvider();
-  const model = provider === "openrouter" ? OPENROUTER_MODEL : provider === "anthropic" ? "claude-opus-4-8" : null;
-  return NextResponse.json({ mode: provider === "mock" ? "mock" : "live", provider, model });
+  const model = provider === "openrouter" ? resolveOpenRouterModel() : provider === "anthropic" ? "claude-opus-4-8" : null;
+  const payload: {
+    mode: "mock" | "live";
+    provider: "openrouter" | "anthropic" | "mock";
+    model: string | null;
+    keySource: "session" | "env" | null;
+    localModels?: true;
+  } = {
+    mode: provider === "mock" ? "mock" : "live",
+    provider,
+    model,
+    keySource: peekOpenRouterKeySource(),
+  };
+  if (!localModelsDeniedReason(req)) payload.localModels = true;
+  return NextResponse.json(payload);
 }
 
 export async function POST(req: Request) {
@@ -535,6 +557,9 @@ export async function POST(req: Request) {
   // Feature A: 명시적 웹 검색 플래그(선택) — validateRequest 계약(instruction/anchors/docContext) 밖의
   // 부가 필드라 raw body에서 직접 읽는다(boolean 아니면 false). intents 스키마와 무관(요청 부가 옵션).
   const webSearch = typeof (body as { webSearch?: unknown }).webSearch === "boolean" ? (body as { webSearch: boolean }).webSearch : false;
+  // 모델 슬러그(선택, additive) — validateRequest 계약 밖의 부가 필드. 명시 선택이 스트리밍/비스트리밍
+  // 양쪽에 그대로 반영된다. 없거나 비문자면 세션 선택 → env 기본.
+  const requestedModel = typeof (body as { model?: unknown }).model === "string" ? (body as { model: string }).model : undefined;
 
   const provider = activeProvider();
 
@@ -543,31 +568,49 @@ export async function POST(req: Request) {
   // 대화 메모리(history, 바운드)를 모델 messages 에 접는다. 비스트리밍 JSON POST(아래)는 그대로 둔다.
   if (new URL(req.url).searchParams.get("stream") === "1") {
     const history = readHistory(body);
-    const stream = buildAgentStream(provider, instruction, anchors, docContext, attachments, history);
-    return new Response(stream, {
-      headers: {
-        "Content-Type": "application/x-ndjson; charset=utf-8",
-        "Cache-Control": "no-cache, no-transform",
-        "X-Accel-Buffering": "no", // 프록시 버퍼링 비활성(즉시 플러시)
-      },
-    });
+    const stream = buildAgentStream(provider, instruction, anchors, docContext, attachments, history, requestedModel);
+    const headers: Record<string, string> = {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      "X-Accel-Buffering": "no", // 프록시 버퍼링 비활성(즉시 플러시)
+    };
+    const keySource = peekOpenRouterKeySource();
+    if (keySource) headers["X-Auto-Hwp-Key-Source"] = keySource;
+    return new Response(stream, { headers });
   }
 
   if (provider === "mock") {
     // mock 모드 — 결정적 편집 제안(키 없이 전체 플로우 완주 가능). mock은 웹 검색을 하지 않으므로 근거 없음.
-    return NextResponse.json({ intents: mockIntents(instruction, anchors, docContext), citations: [], mode: "mock", provider: "mock" });
+    return NextResponse.json({ intents: mockIntents(instruction, anchors, docContext), citations: [], mode: "mock", provider: "mock", keySource: null });
   }
   try {
     if (provider === "openrouter") {
-      const { intents, citations } = await openRouterIntents(process.env.OPENROUTER_API_KEY!, instruction, anchors, docContext, webSearch, attachments);
-      return NextResponse.json({ intents, citations, mode: "live", provider });
+      let resolved;
+      try {
+        resolved = resolveOpenRouterKey();
+      } catch (e) {
+        const message = e instanceof MissingOpenRouterKeyError ? e.message : "OpenRouter API key is not available.";
+        return NextResponse.json({ error: message }, { status: 502 });
+      }
+      const hasImage = attachments.some((a) => a.kind === "image" && typeof a.dataUrl === "string" && a.dataUrl.length > 0);
+      const { intents, citations } = await openRouterIntents(
+        resolved.key,
+        instruction,
+        anchors,
+        docContext,
+        webSearch,
+        attachments,
+        resolveOpenRouterModel(requestedModel, { hasImage }),
+      );
+      return NextResponse.json({ intents, citations, mode: "live", provider, keySource: resolved.source });
     }
     // Anthropic 경로는 내장 웹 검색이 없다(Grok과 달리) — 근거 없음(빈 배열)으로 형태만 additive 유지.
     const intents = await liveIntents(process.env.ANTHROPIC_API_KEY!, instruction, anchors, docContext, attachments);
     return NextResponse.json({ intents, citations: [], mode: "live", provider });
   } catch (e) {
     const detail = e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : String(e);
-    console.error("[hwp-edit] live LLM call failed:", detail);
-    return NextResponse.json({ error: `LLM 호출 실패: ${detail}` }, { status: 502 });
+    const safe = detail.replace(/sk-or-[a-zA-Z0-9_-]+/g, "[redacted]");
+    console.error("[hwp-edit] live LLM call failed:", safe);
+    return NextResponse.json({ error: `LLM 호출 실패: ${safe}` }, { status: 502 });
   }
 }

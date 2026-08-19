@@ -4,6 +4,7 @@
 // additive `citations` on the response. The intents whitelist/validation lane is unchanged.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "./route";
+import { resetOpenRouterSessionForTests } from "@/lib/openrouter/session";
 
 // A canned OpenRouter (OpenAI-compatible) success body: JSON intents in `content` + web-search sources in
 // `annotations` (the shape the web plugin returns).
@@ -35,6 +36,7 @@ describe("hwp-edit route — web-search plugin + citations (Feature A)", () => {
   let calls: { url: unknown; init: RequestInit }[];
 
   beforeEach(() => {
+    resetOpenRouterSessionForTests();
     process.env.OPENROUTER_API_KEY = "test-key"; // force the openrouter provider (checked first)
     delete process.env.ANTHROPIC_API_KEY;
     calls = [];
@@ -97,6 +99,7 @@ describe("hwp-edit route — multimodal attachments (image vision + doc text)", 
   const IMG = "data:image/png;base64,iVBORw0KGgoAAAANSU=";
 
   beforeEach(() => {
+    resetOpenRouterSessionForTests();
     process.env.OPENROUTER_API_KEY = "test-key";
     delete process.env.ANTHROPIC_API_KEY;
     calls = [];
@@ -233,6 +236,7 @@ describe("hwp-edit route — agentic streaming (tool-calling loop + NDJSON Agent
   let searchCalls: RequestInit[]; // captured web_search sub-call inits
 
   beforeEach(() => {
+    resetOpenRouterSessionForTests();
     process.env.OPENROUTER_API_KEY = "test-key";
     delete process.env.ANTHROPIC_API_KEY;
     streamCalls = [];

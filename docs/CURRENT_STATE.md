@@ -3,6 +3,13 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-19 · Grok 4.6 — **#56 OpenRouter PKCE v1 · PR #59 · CI 3종 green**.
+  https://github.com/kwakseongjae/auto-hwp/pull/59 `Closes #56` · Part of #50 ·
+  설계 크레딧 @SEUNGJU-PARK-KR. 서버 커스터디 키 + 이중 게이트 + 모델 셀렉트.
+  `demo.ts` diff 0. Cursor Medium 3건 수리(`0733493`)·스레드 답글만(resolve는 검수자).
+  브라우저: Connect → OpenRouter Sign Up/Sign in. 실계정 E2E는 소유자 QA 대기.
+  **머지 금지**.
+
 - 갱신: 2026-08-19 · Grok 4.6 — **PR #46 Cursor High 2건 수리 · 머지 대기**.
   `fix/issue-42-layout-gap`: (1) `set_page_size` 여백 안내선이 `display_paper`의
   (pw, ph)에서 빼도록 교정 — landscape에서 margin_right=0/bottom 팽창 해소.

@@ -7,7 +7,7 @@ import styles from "./site.module.css";
 // 공통 사이트 헤더 — **서버 컴포넌트**다("use client" 금지). 유일한 클라이언트 조각은 ThemeToggle.
 // 편집기 화면(문서를 연 뒤)에는 붙지 않는다 — 거기는 기존 앱 헤더(.lab-header)가 담당한다.
 
-export type SiteNavKey = "home" | "bulk" | "bench" | "docs";
+export type SiteNavKey = "home" | "bulk" | "bench" | "docs" | "models";
 
 // ⚠️ 홈("데모") 항목은 두지 않는다 — 왼쪽 로고가 이미 홈 앵커이고, 랜딩 헤더에 붙은 "데모" 태그는
 // 제품을 스스로 견본 취급하게 만든다(사용자 피드백: 에디터의 "정적 데모·AI" 라벨을 걷어낸 것과 같은
@@ -18,7 +18,18 @@ const NAV: { key: SiteNavKey; href: string; label: string; title: string }[] = [
   { key: "docs", href: siteHref("/docs"), label: "Docs", title: "임베드·CLI·MCP·Intent 스키마 문서" },
 ];
 
+const MODELS_NAV: { key: SiteNavKey; href: string; label: string; title: string } = {
+  key: "models",
+  href: siteHref("/models"),
+  label: "Models",
+  title: "로컬 OpenRouter 연결 · 모델 선택",
+};
+
 export function SiteHeader({ current }: { current?: SiteNavKey }) {
+  const items =
+    process.env.NEXT_PUBLIC_AUTO_HWP_LOCAL_MODELS === "1"
+      ? [...NAV, MODELS_NAV]
+      : NAV;
   return (
     <header className={styles.header}>
       {/* 로고 = 낙관(도장) + 워드텍스트. 도장은 장식이라 alt 를 비운다 — 바로 옆에 같은 뜻의
@@ -31,7 +42,7 @@ export function SiteHeader({ current }: { current?: SiteNavKey }) {
         <small>auto-hwp</small>
       </a>
       <nav className={styles.nav} aria-label="사이트">
-        {NAV.map((n) => (
+        {items.map((n) => (
           <a key={n.key} href={n.href} title={n.title} aria-current={current === n.key ? "page" : undefined}>
             {n.label}
           </a>

@@ -2,6 +2,8 @@
 
 깃 저장소가 아직 없어 이슈를 파일로 관리한다. 각 이슈는 `NNN-slug.md`. 상태: `open` · `in-progress` · `done` · `wontfix`.
 
+GitHub 우산 **#50** 어댑터 계약(파일 이슈 050 이미지 삽입과 별개): [050-adapter-contract.md](050-adapter-contract.md). 첫 슬라이스는 #56.
+
 | # | 제목 | 상태 | 우선순위 | 비고 |
 |---|------|------|----------|------|
 | [001](001-native-numbering-bullets.md) | 네이티브 자동번호/글머리표 풀(`hh:numbering`/`hh:bullet`) | **long-term** | P2 | 코퍼스 근거 0 + 오라클 검증 불가. 외부 샘플 확보 필요. 현재 행잉인덴트+마커로 대체 |
