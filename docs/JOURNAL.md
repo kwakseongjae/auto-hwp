@@ -17,6 +17,11 @@
 - 부분집합 22/301 + extras 핀. 머리말 표·폼·가로 자체 픽스처. 7==7.
 - 게이트 유지. sample-8p 업로드/렌더 검수. 다음: CI green 후 머지 질문.
 
+## 2026-08-20 (Claude Fable) · #56 실계정 QA 통과 → PR #59 머지
+- 소유자 Chrome으로 PKCE 종단 검증: 인가→session 키→카탈로그 403종→모델 선택→AI 편집→undo→disconnect.
+- `GET /api/hwp-edit`가 선택 모델·session 출처 확증. 보안 MEDIUM 2건은 #50에 잔여 위험 등록.
+- main `a53006f`, #56 close. 소유자 조치: OpenRouter QA 키 수동 폐기. 다음: #51 / T1 / B0.
+
 ## 2026-08-18 (Claude Fable) · #50 인수 + 우로보로스 인터뷰로 계획 확정
 - #50 타당성 검증 후 인수(크레딧 댓글)·서브이슈 #56(OpenRouter PKCE v1, 계약+수락 기준 포함).
 - 인터뷰 D1–D9: 서버 커스터디 키·이중 게이트·모델 셀렉트 포함·우산 유지. Seed seed_8e464381dc64.
