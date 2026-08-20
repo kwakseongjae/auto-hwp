@@ -7,6 +7,23 @@
   https://github.com/kwakseongjae/auto-hwp/pull/68 `Closes #64` · #51 흡수.
   3종 Intent 래퍼 + 필수 목록 + CI vitest. normalize는 #65. **머지 금지** — CI 3종 green 대기.
 
+- 갱신: 2026-08-20 · Claude(Fable) — **#64 머지 + 데스크톱 셸 결함 2건 발견 + T1 계획 확정**.
+  PR #68 머지(main `9b3b659`, #64·#51 close): 3종(blockRunsPath·tableGrid·docProfile)이
+  read-only Intent 래퍼로 배선, `desktopRequired.ts` 필수 목록 + CI 계약 테스트(존재·
+  non-stub·Intent 라운드트립·커맨드 24종 등록)가 `build-test` 신규 node 스텝에서 실행,
+  normalize 2종 명시적 제외. 게이트 8==8/18==18/24==24 검수자 직접 재현.
+  ⚠️ **QA 경로 결함 발견(#69)**: `VITE_SHELL=workspace cargo tauri dev`로 띄워도
+  `beforeDevCommand`가 env를 주입하지 않아 vite 프로세스에 플래그가 안 닿는다(`ps eww`로
+  실측) → `__WORKSPACE_SHELL__=false`로 **레거시 App.tsx가 부팅**된다. 그래서 PR #68의
+  증거 `2026-08-20-d0-workspace-shell.png`는 **이름과 달리 워크스페이스 셸이 아니다** —
+  3종의 가시 효과는 아직 미확증(코드·게이트·CI는 독립 검증됨). 소유자 실사용에서 확인된
+  셸 UI 갭은 **#70**(Figma형 인플레이스 편집·우측 바이브 패널·모델 연결·열기/저장 배치).
+  **T1 실행 계획**을 TYPESET-ROADMAP §4에 확정: 실사 결과 오라클(`layout-check`)이
+  코퍼스 60여 건 중 **4건에만** 돌고, `bench-corpus.sh`는 "크래시 없음"만 봐서 #42처럼
+  **쪽수는 맞는데 비는 문서가 통과**한다. GOV-SOURCES 7건은 전부 보도자료형(양식 편향).
+  이슈 **#71**(커버리지 지도+수집 편향) → **#72**(오라클 전수 스윕+baseline) →
+  **#73**(제보→픽스처 절차). 다음: Grok 착수 순서 사용자 결정.
+
 - 갱신: 2026-08-20 · Claude(Fable) — **블로그·데스크톱 트랙 우로보로스 구체화 → 이슈 5건**.
   인터뷰 2건(블로그 `interview_20260820_045204`/Seed `seed_e2faaecf79a5`, 데스크톱
   `interview_20260820_062442`/Seed `seed_e31ddce71c7e`) + 수락 가드 6레인. **가드가
