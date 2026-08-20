@@ -8,12 +8,10 @@ import {
   DESKTOP_INTENT_ROUTED_METHODS,
   DESKTOP_REQUIRED_METHODS,
 } from "../../../editor-core/src/desktopRequired";
-import { TauriAdapter } from "../TauriAdapter";
-import { WasmAdapter } from "../WasmAdapter";
 
 // Issue #64 D0 — CI contract for the shipping adapter pair. Presence / non-stub / Intent
-// round-trip / generate_handler cross-check. Run from packages/react vitest AND from the
-// build-test job's node step (without this hook the test never runs on GitHub Actions).
+// round-trip / generate_handler cross-check. Source-scan only: CI has no engine wasm pkg,
+// so this file must not import WasmAdapter.
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "../../../..");
@@ -25,7 +23,6 @@ function readRepo(rel: string): string {
 function rustIntentVariants(src: string): Set<string> {
   const start = src.indexOf("pub enum Intent {");
   expect(start).toBeGreaterThan(-1);
-  // Enum body ends at the first `}\n\n` after the start (next item is MAX_IMAGE_BYTES / Outcome).
   const body = src.slice(start, src.indexOf("\npub const MAX_IMAGE_BYTES", start));
   const names = new Set<string>();
   for (const m of body.matchAll(/^\s{4}([A-Z][A-Za-z0-9]+)\s*[{,]/gm)) {
@@ -55,41 +52,58 @@ function tauriDirectCommands(src: string): string[] {
   return names;
 }
 
-function methodSource(cls: { prototype: object }, name: string): string {
-  const fn = (cls.prototype as Record<string, unknown>)[name];
-  expect(typeof fn, `${name} must exist on the adapter prototype`).toBe("function");
-  return Function.prototype.toString.call(fn);
+/** Pull one class method body from a TypeScript source file (brace-matched). */
+function extractMethod(src: string, className: string, name: string): string | null {
+  const cls = src.indexOf(`export class ${className}`);
+  const slice = cls >= 0 ? src.slice(cls) : src;
+  const re = new RegExp(`\\n  (?:async\\s+)?${name}\\s*\\(`);
+  const m = re.exec(slice);
+  if (!m) return null;
+  const start = slice.indexOf("{", m.index);
+  if (start < 0) return null;
+  let depth = 0;
+  for (let i = start; i < slice.length; i++) {
+    if (slice[i] === "{") depth++;
+    else if (slice[i] === "}") {
+      depth--;
+      if (depth === 0) return slice.slice(start, i + 1);
+    }
+  }
+  return slice.slice(start);
 }
 
 const NOOP = new Set<string>(DESKTOP_DOCUMENTED_NOOPS);
 
 describe("desktop adapter contract (issue #64 D0)", () => {
+  const wasmSrc = readRepo("packages/react/src/WasmAdapter.ts");
+  const tauriSrc = readRepo("packages/react/src/TauriAdapter.ts");
+
   it("required methods exist on both shipping adapters and are not no-op stubs", () => {
     for (const name of DESKTOP_REQUIRED_METHODS) {
-      const wasmSrc = methodSource(WasmAdapter, name);
-      const tauriSrc = methodSource(TauriAdapter, name);
+      const wasmFn = extractMethod(wasmSrc, "WasmAdapter", name);
+      const tauriFn = extractMethod(tauriSrc, "TauriAdapter", name);
+      expect(wasmFn, `WasmAdapter.${name} missing`).toBeTruthy();
+      expect(tauriFn, `TauriAdapter.${name} missing`).toBeTruthy();
       if (NOOP.has(name)) {
-        // Documented desktop no-ops (native font stack / session lifetime). Wasm still does real work.
-        expect(wasmSrc).toMatch(/this\./);
+        expect(wasmFn, `WasmAdapter.${name} looks empty`).toMatch(/this\./);
         continue;
       }
-      expect(wasmSrc, `WasmAdapter.${name} looks empty`).toMatch(/this\./);
-      const tauriLive = /this\.(invoke|applyIntent)/.test(tauriSrc) || /return true/.test(tauriSrc);
-      expect(tauriLive, `TauriAdapter.${name} is a silent no-op stub:\n${tauriSrc}`).toBe(true);
+      expect(wasmFn, `WasmAdapter.${name} looks empty`).toMatch(/this\./);
+      const tauriLive = /this\.(invoke|applyIntent)/.test(tauriFn!) || /return true/.test(tauriFn!);
+      expect(tauriLive, `TauriAdapter.${name} is a silent no-op stub:\n${tauriFn}`).toBe(true);
     }
   });
 
   it("normalize is explicitly off on TauriAdapter (capability-off, not a missing list entry)", () => {
     for (const name of DESKTOP_EXPLICITLY_OFF) {
       expect(DESKTOP_REQUIRED_METHODS).not.toContain(name);
-      expect((TauriAdapter.prototype as Record<string, unknown>)[name]).toBeUndefined();
-      expect(typeof (WasmAdapter.prototype as Record<string, unknown>)[name]).toBe("function");
+      expect(extractMethod(tauriSrc, "TauriAdapter", name), `TauriAdapter must omit ${name}`).toBeNull();
+      expect(extractMethod(wasmSrc, "WasmAdapter", name), `WasmAdapter still has ${name}`).toBeTruthy();
     }
   });
 
   it("Intent-routed methods name a real hwp_mcp::Intent variant", () => {
     const variants = rustIntentVariants(readRepo("crates/hwp-mcp/src/lib.rs"));
-    const tauriSrc = readRepo("packages/react/src/TauriAdapter.ts");
     for (const [method, intent] of Object.entries(DESKTOP_INTENT_ROUTED_METHODS)) {
       expect(variants.has(intent), `Intent::${intent} missing from hwp-mcp enum`).toBe(true);
       expect(tauriSrc).toContain(`intent: "${intent}"`);
@@ -98,7 +112,6 @@ describe("desktop adapter contract (issue #64 D0)", () => {
   });
 
   it("the 24 direct TauriAdapter invoke commands are registered in generate_handler", () => {
-    const tauriSrc = readRepo("packages/react/src/TauriAdapter.ts");
     const handler = generateHandlerCommands(readRepo("crates/hwp-viewer/src/lib.rs"));
     const commands = tauriDirectCommands(tauriSrc);
     expect(commands).toHaveLength(24);
