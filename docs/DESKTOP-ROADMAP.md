@@ -9,9 +9,10 @@
 - `VITE_SHELL=workspace`로 데스크톱이 웹과 같은 `HwpWorkspace`를 마운트한다(R10).
   **기본 off가 계약**이다 — off면 기존 뷰어와 바이트 동일, 롤백은 플래그 하나.
 - 채팅(바이브)은 op-bus Intent[] 노출 전까지 데스크톱에서 비활성.
-- TauriAdapter는 EngineAdapter 34메서드 계약을 wasm과 공유하지만, **중첩 셀 캐럿의
-  읽기 경로(`blockRunsPath`)가 미배선**(#51) — PR #49가 가드를 넣어 데스크톱에서는
-  중첩 캐럿을 심지 않고 표 선택으로 강등한다(죽은 캐럿 방지).
+- TauriAdapter는 EngineAdapter 34메서드 계약을 wasm과 공유한다. D0(#64, #51 흡수)가
+  `blockRunsPath`·`tableGrid`·`docProfile`을 read-only Intent 래퍼로 배선한다. `normalize`
+  2종은 명시적 capability-off(#65). 중첩 캐럿의 죽은-캐럿 가드(#48)는 임의 백엔드 omit에
+  계속 유효하다.
 - macOS 타이틀바는 CSS `h-9` 확정 해법(ccb9d5a) — 재작업 금지.
 
 ## 1. 원칙

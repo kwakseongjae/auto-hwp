@@ -1506,6 +1506,28 @@ pub enum Intent {
         block: usize,
         offset: usize,
     },
+    /// Nested-cell styled-run read (issue #64 D0) — the read-only Intent twin of the wasm
+    /// `blockRunsPath` binding. Walks a descending `CellPath` to the leaf cell and returns its
+    /// current runs (empty when the path does not resolve). No undo unit, no revision bump.
+    /// Desktop `TauriAdapter.blockRunsPath` is a wrapper over this; the wasm shell keeps the
+    /// direct `hwp-session` binding (same function, same DTO).
+    BlockRunsPath {
+        section: usize,
+        path: Vec<hwp_ops::CellStep>,
+    },
+    /// Table cell GRID (issue #64 D0) — the read-only Intent twin of the wasm `tableGrid` binding.
+    /// Pure model read of every ACTIVE cell's `(row, col, text)` at `(section, block)`. `null` when
+    /// the block is not a table (018). No undo unit, no revision bump.
+    TableGrid {
+        section: usize,
+        block: usize,
+    },
+    /// Deterministic document profile (issue #64 D0) — the read-only Intent twin of the wasm
+    /// `docProfile` binding. Title candidate + structure counts + headings + table inventory +
+    /// excerpt. Pure model read, zero LLM calls, no undo unit, no revision bump.
+    /// Empty struct (not a unit variant) so `deny_unknown_fields` still rejects extra keys
+    /// (`{"intent":"DocProfile","bogus":1}` → error). Wire JSON stays `{"intent":"DocProfile"}`.
+    DocProfile {},
 }
 
 /// Largest single embedded image we accept, in DECODED bytes (issue 050 — 014 hardening spirit: reject
@@ -1605,6 +1627,77 @@ pub enum Outcome {
     HitBody(Option<hwp_session::BodyTextHitDto>),
     /// Body paragraph caret result: zero-width own-render px rect, or `None` (018).
     CaretBody(Option<hwp_session::BodyCaretDto>),
+    /// Nested-cell styled runs (issue #64 D0). Empty when the path does not resolve.
+    Runs(Vec<hwp_session::RunDto>),
+    /// Table cell GRID (issue #64 D0). `None` when the block is not a table (018).
+    TableGrid(Option<hwp_session::TableGridDto>),
+    /// Deterministic document profile (issue #64 D0).
+    DocProfile(hwp_session::DocProfileDto),
+}
+
+/// Shape a typed [`Outcome`] into the `{kind, …}` JSON both shells return (`WasmAdapter.applyIntent`
+/// and the desktop `apply_intent_json` command). Kept exhaustive so a new variant fails to compile
+/// here rather than silently emitting nothing in one shell and not the other.
+pub fn outcome_to_json(o: &Outcome) -> Value {
+    match o {
+        Outcome::Opened {
+            format,
+            editable,
+            sections,
+        } => {
+            json!({ "kind": "opened", "format": format, "editable": editable, "sections": sections })
+        }
+        Outcome::PageCount(n) => json!({ "kind": "pageCount", "pages": n }),
+        Outcome::Rendered(svg) => json!({ "kind": "rendered", "svg": svg }),
+        Outcome::Applied { blocks, ops } => {
+            json!({ "kind": "applied", "blocks": blocks, "ops": ops })
+        }
+        Outcome::Exported { bytes, open_safe } => {
+            json!({ "kind": "exported", "bytes": bytes, "openSafe": open_safe })
+        }
+        Outcome::Undone(changed) => json!({ "kind": "undone", "changed": changed }),
+        Outcome::Redone(changed) => json!({ "kind": "redone", "changed": changed }),
+        Outcome::Text(text) => json!({ "kind": "text", "text": text }),
+        Outcome::Proposed { rationale, preview } => {
+            json!({ "kind": "proposed", "rationale": rationale, "preview": preview })
+        }
+        Outcome::Committed { ops } => json!({ "kind": "committed", "ops": ops }),
+        Outcome::Discarded(discarded) => json!({ "kind": "discarded", "discarded": discarded }),
+        Outcome::Found { matches } => {
+            json!({ "kind": "found", "matches": serde_json::to_value(matches).unwrap_or(Value::Null) })
+        }
+        Outcome::Replaced { replaced, pages } => {
+            json!({ "kind": "replaced", "replaced": replaced, "pages": pages })
+        }
+        Outcome::Hit(hit) => {
+            json!({ "kind": "hit", "hit": serde_json::to_value(hit).unwrap_or(Value::Null) })
+        }
+        Outcome::Caret(caret) => {
+            json!({ "kind": "caret", "caret": serde_json::to_value(caret).unwrap_or(Value::Null) })
+        }
+        Outcome::Edited { pages } => json!({ "kind": "edited", "pages": pages }),
+        Outcome::HitCell(hit) => {
+            json!({ "kind": "hitCell", "hit": serde_json::to_value(hit).unwrap_or(Value::Null) })
+        }
+        Outcome::CaretCell(caret) => {
+            json!({ "kind": "caretCell", "caret": serde_json::to_value(caret).unwrap_or(Value::Null) })
+        }
+        Outcome::HitBody(hit) => {
+            json!({ "kind": "hitBody", "hit": serde_json::to_value(hit).unwrap_or(Value::Null) })
+        }
+        Outcome::CaretBody(caret) => {
+            json!({ "kind": "caretBody", "caret": serde_json::to_value(caret).unwrap_or(Value::Null) })
+        }
+        Outcome::Runs(runs) => {
+            json!({ "kind": "runs", "runs": serde_json::to_value(runs).unwrap_or(Value::Null) })
+        }
+        Outcome::TableGrid(grid) => {
+            json!({ "kind": "tableGrid", "grid": serde_json::to_value(grid).unwrap_or(Value::Null) })
+        }
+        Outcome::DocProfile(profile) => {
+            json!({ "kind": "docProfile", "profile": serde_json::to_value(profile).unwrap_or(Value::Null) })
+        }
+    }
 }
 
 /// The highest `intent_version` this build understands (issue 008). The request envelope may carry
@@ -1822,6 +1915,45 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
                 )
             },
         )?)),
+        // Read-only model queries (issue #64 D0). Same hwp-session functions the wasm bindings
+        // call; no placement, no undo unit, no revision bump. Desktop reaches them through
+        // `apply_intent_json` so no new Tauri command is required.
+        Intent::BlockRunsPath { section, path } => {
+            let doc = session
+                .doc
+                .as_ref()
+                .ok_or("no document open (call open_document first)")?
+                .doc();
+            let addrs: Vec<hwp_session::CellAddrDto> = path
+                .iter()
+                .map(|s| hwp_session::CellAddrDto {
+                    block: s.block,
+                    row: s.row,
+                    col: s.col,
+                })
+                .collect();
+            Ok(Outcome::Runs(hwp_session::block_runs_path(
+                doc, section, &addrs,
+            )))
+        }
+        Intent::TableGrid { section, block } => {
+            let doc = session
+                .doc
+                .as_ref()
+                .ok_or("no document open (call open_document first)")?
+                .doc();
+            Ok(Outcome::TableGrid(hwp_session::table_grid(
+                doc, section, block,
+            )))
+        }
+        Intent::DocProfile {} => {
+            let doc = session
+                .doc
+                .as_ref()
+                .ok_or("no document open (call open_document first)")?
+                .doc();
+            Ok(Outcome::DocProfile(hwp_session::doc_profile(doc)))
+        }
         Intent::InsertText { node, offset, text } => {
             do_insert_text(session, node, offset, &text)?;
             // Live page count after the reflow, via OUR engine (P1: edited docs count from the IR).

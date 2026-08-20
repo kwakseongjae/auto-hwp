@@ -107,6 +107,56 @@ describe("TauriAdapter — render + geometry commands speak own-render px (issue
 });
 
 describe("TauriAdapter — run reads + edit intents (issue 043)", () => {
+  it("blockRunsPath is an applyIntent wrapper (BlockRunsPath), not a new Tauri command", async () => {
+    const runs = [{ text: "A1", bold: true }];
+    const { invoke, calls } = mockInvoke({ apply_intent_json: { kind: "runs", runs } });
+    const a = new TauriAdapter({ invoke });
+    const path = [
+      { block: 1, row: 0, col: 0 },
+      { block: 0, row: 0, col: 0 },
+    ];
+    expect(await a.blockRunsPath!(0, path)).toEqual(runs);
+    expect(calls[0]).toEqual({
+      cmd: "apply_intent_json",
+      args: { intent: { intent: "BlockRunsPath", section: 0, path } },
+    });
+  });
+
+  it("tableGrid is an applyIntent wrapper (TableGrid); null off a non-table (018)", async () => {
+    const grid = { section: 0, block: 1, rows: 2, cols: 3, cells: [{ row: 0, col: 0, text: "A1" }] };
+    const { invoke, calls } = mockInvoke({ apply_intent_json: { kind: "tableGrid", grid } });
+    const a = new TauriAdapter({ invoke });
+    expect(await a.tableGrid!(0, 1)).toEqual(grid);
+    expect(calls[0]).toEqual({
+      cmd: "apply_intent_json",
+      args: { intent: { intent: "TableGrid", section: 0, block: 1 } },
+    });
+    const miss = new TauriAdapter({ invoke: mockInvoke({ apply_intent_json: { kind: "tableGrid", grid: null } }).invoke });
+    expect(await miss.tableGrid!(0, 0)).toBeNull();
+  });
+
+  it("docProfile is an applyIntent wrapper (DocProfile) and returns the profile verbatim", async () => {
+    const profile = {
+      title: "본문",
+      sections: 1,
+      paragraph_count: 1,
+      table_count: 1,
+      image_count: 0,
+      chart_count: 0,
+      equation_count: 0,
+      headings: [],
+      tables: [],
+      excerpt: "본문 문단",
+    };
+    const { invoke, calls } = mockInvoke({ apply_intent_json: { kind: "docProfile", profile } });
+    const a = new TauriAdapter({ invoke });
+    expect(await a.docProfile!()).toEqual(profile);
+    expect(calls[0]).toEqual({
+      cmd: "apply_intent_json",
+      args: { intent: { intent: "DocProfile" } },
+    });
+  });
+
   it("blockRuns maps to get_block_runs; omitted row/col become null (paragraph target)", async () => {
     const runs = [{ text: "A", bold: true }, { text: "B" }];
     const { invoke, calls } = mockInvoke({ get_block_runs: runs });

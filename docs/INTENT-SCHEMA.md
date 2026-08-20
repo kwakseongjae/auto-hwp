@@ -766,6 +766,44 @@ visual affinity**를 쓴다. 반면 아래 `CaretRectBody`는 주소의 canonica
 실패(정직한 op 에러, 무변경): `알 수 없는 차트 종류 …`(type≠bar/pie/line), `categories 가 비어 있습니다`,
 `series 가 비어 있습니다`, `series … 의 값 개수(…)가 categories 개수(…)와 다릅니다`(계열 길이 불일치).
 
+### 6.11 읽기 전용 모델 조회 (이슈 #64 D0; additive)
+
+> 세 Intent는 `hwp-session`에 이미 있는 순수 모델 read를 op-bus에 **노출만** 한다. 신규 Tauri
+> 커맨드 없음 — 데스크톱 `TauriAdapter`는 `apply_intent_json` 래퍼(기존 `HitTestCell` 선례).
+> 읽기 전용: undo 단위/리비전 범프 없음. AI 편집 화이트리스트에는 넣지 않는다.
+
+#### `BlockRunsPath` — 중첩 셀의 현재 styled runs
+```json
+{ "intent": "BlockRunsPath", "section": 0, "path": [{ "block": 1, "row": 0, "col": 0 }] }
+```
+| 필드 | 타입 | 단위/값 | 필수 |
+|------|------|---------|------|
+| `section` | integer | 구역 인덱스 | ● |
+| `path` | `{block,row,col}[]` | 내림 `CellPath`(길이 1 = 평면 셀) | ● |
+
+결과 `{kind:"runs", runs}` — `runs`는 `RunSpec[]`(경로 미해소면 `[]`). wasm `blockRunsPath` 바인딩과
+같은 `hwp_session::block_runs_path`.
+
+#### `TableGrid` — 표 블록의 ACTIVE 셀 격자
+```json
+{ "intent": "TableGrid", "section": 0, "block": 1 }
+```
+| 필드 | 타입 | 단위/값 | 필수 |
+|------|------|---------|------|
+| `section` | integer | 구역 인덱스 | ● |
+| `block` | integer | 표 블록 인덱스 | ● |
+
+결과 `{kind:"tableGrid", grid}` — `grid`는 `{section, block, rows, cols, cells:[{row,col,text}]}`
+또는 표가 아니면 `null`(018). `(row, col)`은 `SetTableCell`이 쓰는 좌표(`edit_target`).
+
+#### `DocProfile` — 결정론 문서 프로필
+```json
+{ "intent": "DocProfile" }
+```
+
+필드 없음. 결과 `{kind:"docProfile", profile}` — `title` + 구조 카운트 + headings + table inventory
++ excerpt. 조판 없음, LLM 호출 0.
+
 ---
 
 ## 7. 드리프트 방지

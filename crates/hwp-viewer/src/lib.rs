@@ -1610,68 +1610,11 @@ async fn delete_back(
 // ---- is ADDITIVE (the existing per-op/path commands above are untouched) and routes through the SAME
 // ---- op-bus / hwp-session facade the wasm backend uses — identical semantics + identical null policy. ----
 
-/// Serialize a typed [`Outcome`] into the SAME `{kind, …}` JSON the wasm backend returns
-/// (`hwp-wasm::outcome_to_json`), so both `EngineAdapter` backends hand editor-core one Outcome shape.
-fn outcome_to_json(o: &Outcome) -> Value {
-    match o {
-        Outcome::Opened {
-            format,
-            editable,
-            sections,
-        } => {
-            json!({ "kind": "opened", "format": format, "editable": editable, "sections": sections })
-        }
-        Outcome::PageCount(n) => json!({ "kind": "pageCount", "pages": n }),
-        Outcome::Rendered(svg) => json!({ "kind": "rendered", "svg": svg }),
-        Outcome::Applied { blocks, ops } => {
-            json!({ "kind": "applied", "blocks": blocks, "ops": ops })
-        }
-        Outcome::Exported { bytes, open_safe } => {
-            json!({ "kind": "exported", "bytes": bytes, "openSafe": open_safe })
-        }
-        Outcome::Undone(changed) => json!({ "kind": "undone", "changed": changed }),
-        Outcome::Redone(changed) => json!({ "kind": "redone", "changed": changed }),
-        Outcome::Text(text) => json!({ "kind": "text", "text": text }),
-        Outcome::Proposed { rationale, preview } => {
-            json!({ "kind": "proposed", "rationale": rationale, "preview": preview })
-        }
-        Outcome::Committed { ops } => json!({ "kind": "committed", "ops": ops }),
-        Outcome::Discarded(discarded) => json!({ "kind": "discarded", "discarded": discarded }),
-        Outcome::Found { matches } => {
-            json!({ "kind": "found", "matches": serde_json::to_value(matches).unwrap_or(Value::Null) })
-        }
-        Outcome::Replaced { replaced, pages } => {
-            json!({ "kind": "replaced", "replaced": replaced, "pages": pages })
-        }
-        Outcome::Hit(hit) => {
-            json!({ "kind": "hit", "hit": serde_json::to_value(hit).unwrap_or(Value::Null) })
-        }
-        Outcome::Caret(caret) => {
-            json!({ "kind": "caret", "caret": serde_json::to_value(caret).unwrap_or(Value::Null) })
-        }
-        Outcome::Edited { pages } => json!({ "kind": "edited", "pages": pages }),
-        // Cell-addressed caret (issue 053) — same {kind, …} shape as hwp-wasm::outcome_to_json.
-        Outcome::HitCell(hit) => {
-            json!({ "kind": "hitCell", "hit": serde_json::to_value(hit).unwrap_or(Value::Null) })
-        }
-        Outcome::CaretCell(caret) => {
-            json!({ "kind": "caretCell", "caret": serde_json::to_value(caret).unwrap_or(Value::Null) })
-        }
-        // Body-paragraph caret (own-render PlacedGlyph authority) — keep the Tauri Outcome surface
-        // byte-shaped like hwp-wasm so editor-core/host adapters do not branch by shell.
-        Outcome::HitBody(hit) => {
-            json!({ "kind": "hitBody", "hit": serde_json::to_value(hit).unwrap_or(Value::Null) })
-        }
-        Outcome::CaretBody(caret) => {
-            json!({ "kind": "caretBody", "caret": serde_json::to_value(caret).unwrap_or(Value::Null) })
-        }
-    }
-}
-
 /// Apply ONE Intent-JSON envelope (schema v0, issue 008) via the SAME op-bus the desktop's per-op
 /// commands use ([`hwp_mcp::apply_intent_json`]) — the GENERAL edit lane the `TauriAdapter.applyIntent`
 /// dispatches, so every schema-v0 Intent (SetTableCellRuns / SetCellRangeFmt / ApplyContent / …) is
-/// covered without a per-Intent command. Returns the `{kind, …}` Outcome JSON (wasm-identical). A bad
+/// covered without a per-Intent command. Returns the `{kind, …}` Outcome JSON (wasm-identical; the
+/// shaper lives in `hwp_mcp::outcome_to_json` so a new variant cannot drift between shells). A bad
 /// envelope / refused edit surfaces the typed op-bus error verbatim as `Err` (the UI toasts it).
 #[tauri::command]
 async fn apply_intent_json(
@@ -1682,7 +1625,7 @@ async fn apply_intent_json(
     tauri::async_runtime::spawn_blocking(move || {
         let mut s = sess.lock().map_err(|_| "session poisoned")?;
         let outcome = hwp_mcp::apply_intent_json(&mut s, &intent)?;
-        Ok(outcome_to_json(&outcome))
+        Ok(hwp_mcp::outcome_to_json(&outcome))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -2109,7 +2052,7 @@ mod tests {
         });
         let outcome =
             hwp_mcp::apply_intent_json(&mut sess, &envelope).expect("apply_intent_json applies");
-        let shaped = outcome_to_json(&outcome);
+        let shaped = hwp_mcp::outcome_to_json(&outcome);
         assert_eq!(
             shaped["kind"], "applied",
             "ApplyContent → kind:applied (wasm-identical): {shaped}"
@@ -2120,11 +2063,78 @@ mod tests {
         );
 
         // Undo through the same lane shapes `kind:"undone"` with the changed flag (wasm parity).
-        let undone = outcome_to_json(
+        let undone = hwp_mcp::outcome_to_json(
             &hwp_mcp::apply_intent_json(&mut sess, &json!({ "intent": "Undo" })).unwrap(),
         );
         assert_eq!(undone["kind"], "undone");
         assert_eq!(undone["changed"], true, "the ApplyContent is undoable");
+    }
+
+    /// Issue #64 D0 — the three read-only Intents TauriAdapter wraps (`BlockRunsPath` /
+    /// `TableGrid` / `DocProfile`) dispatch on a public fixture through the SAME
+    /// `apply_intent_json` + `outcome_to_json` lane the desktop command uses. No new
+    /// Tauri command; no revision bump.
+    #[cfg(feature = "rhwp")]
+    #[test]
+    fn d0_read_only_intents_roundtrip_on_sample_8p() {
+        let mut sess = hwp_mcp::Session::default();
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../apps/hwp-lab/public/samples/sample-8p.hwp"
+        );
+        mcp_call(&mut sess, "open_document", json!({ "path": path })).unwrap();
+        let before = sess.doc.as_ref().unwrap().revision();
+
+        let profile = hwp_mcp::outcome_to_json(
+            &hwp_mcp::apply_intent_json(&mut sess, &json!({ "intent": "DocProfile" })).unwrap(),
+        );
+        assert_eq!(profile["kind"], "docProfile");
+        assert!(
+            profile["profile"]["table_count"].as_u64().unwrap() >= 1,
+            "sample-8p has tables: {profile}"
+        );
+
+        let table = &profile["profile"]["tables"][0];
+        let section = table["section"].as_u64().unwrap();
+        let block = table["block"].as_u64().unwrap();
+
+        let grid = hwp_mcp::outcome_to_json(
+            &hwp_mcp::apply_intent_json(
+                &mut sess,
+                &json!({ "intent": "TableGrid", "section": section, "block": block }),
+            )
+            .unwrap(),
+        );
+        assert_eq!(grid["kind"], "tableGrid");
+        let cells = grid["grid"]["cells"].as_array().expect("grid.cells");
+        assert!(!cells.is_empty(), "TableGrid lists active cells: {grid}");
+
+        let path = json!([{
+            "block": block,
+            "row": cells[0]["row"],
+            "col": cells[0]["col"]
+        }]);
+        let runs = hwp_mcp::outcome_to_json(
+            &hwp_mcp::apply_intent_json(
+                &mut sess,
+                &json!({ "intent": "BlockRunsPath", "section": section, "path": path }),
+            )
+            .unwrap(),
+        );
+        assert_eq!(runs["kind"], "runs");
+        assert!(
+            runs["runs"]
+                .as_array()
+                .map(|a| !a.is_empty())
+                .unwrap_or(false),
+            "BlockRunsPath returns the origin cell's runs: {runs}"
+        );
+
+        assert_eq!(
+            sess.doc.as_ref().unwrap().revision(),
+            before,
+            "D0 Intents are read-only"
+        );
     }
 
     /// An unknown / mistyped Intent field is a HARD error (deny_unknown_fields, R11) surfaced verbatim as

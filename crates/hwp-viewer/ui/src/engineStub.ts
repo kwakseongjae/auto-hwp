@@ -13,6 +13,8 @@ const webOnly = (): never => {
 
 /** Placeholder for the wasm document handle — never constructed in the desktop shell. */
 export class HwpDoc {}
+/** Placeholder for the wasm worker client — the desktop shell never instantiates WasmAdapter. */
+export class EngineWorkerClient {}
 export const initEngine = webOnly;
 export const resetEngine = webOnly;
 export const initEngineSync = webOnly;

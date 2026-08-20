@@ -33,11 +33,13 @@ export interface EngineAdapter {
    *  original's look) — read the initial state via `normalizeActive`. RENDER-IR only — the round-trip
    *  bytes are untouched, so a save is verbatim either way. Resolves to a report so the UI can tell the
    *  user whether this document actually looked degraded. Backends that can't answer OMIT this (toggle
-   *  hidden). Reference impl: `WasmAdapter` via the engine `setNormalize` binding. */
+   *  hidden). Reference impl: `WasmAdapter` via the engine `setNormalize` binding.
+   *  Desktop: explicitly off (issue #64 / #65) — see `desktopRequired.ts`. */
   setNormalize?(on: boolean): Promise<NormalizeReport>;
 
   /** OPTIONAL — whether "레이아웃 정리" is currently ON (the engine may auto-enable it at open on a
-   *  degraded conversion; the UI syncs its toggle from this after each open). */
+   *  degraded conversion; the UI syncs its toggle from this after each open). Desktop: explicitly
+   *  off (issue #64 / #65) — see `desktopRequired.ts`. */
   normalizeActive?(): Promise<boolean>;
 
   /** Structural block under a PAGE-LOCAL px point, or null on a miss. */
@@ -101,7 +103,9 @@ export interface EngineAdapter {
    *  (issue 064 Tier-2) — the nested-cell twin of `blockRuns`, so the inline editor prefills a nested LEAF
    *  cell's runs. `path` is the `CellHit.path` the engine returned (a length-1 path is the flat cell).
    *  Backends that omit it fall back to `blockRuns` for a length-1 path (no nested prefill). Reference
-   *  impl: `WasmAdapter` via the engine `blockRunsPath` binding. */
+   *  impls: `WasmAdapter` via the engine `blockRunsPath` binding; `TauriAdapter` via the `BlockRunsPath`
+   *  Intent (`apply_intent_json`). Desktop-required (issue #64 — separate axis from this `?`): see
+   *  `desktopRequired.ts`. */
   blockRunsPath?(section: number, path: CellAddr[]): Promise<RunSpec[]>;
 
   /** OPTIONAL — the cell GRID of the table block at `(section, block)` (issue 066): every ACTIVE cell's
@@ -109,8 +113,9 @@ export interface EngineAdapter {
    *  (which cells are labels, which are blank) — the fix for "표 채워줘 → intents 0" / 라벨 옆이 아닌 라벨
    *  칸을 겨냥하던 버그. Resolves to `null` when the block isn't a table (018 null policy — the caller then
    *  attaches no grid). Coordinates are the SAME `(row, col)` `SetTableCell` targets. Backends that can't
-   *  answer OMIT this (the chat then falls back to the thin anchor-only context). Reference impl:
-   *  `WasmAdapter` via the engine `tableGrid` binding. */
+   *  answer OMIT this (the chat then falls back to the thin anchor-only context). Reference impls:
+   *  `WasmAdapter` via the engine `tableGrid` binding; `TauriAdapter` via the `TableGrid` Intent.
+   *  Desktop-required (issue #64 — separate axis from this `?`): see `desktopRequired.ts`. */
   tableGrid?(section: number, block: number): Promise<TableGrid | null>;
 
   /** OPTIONAL — WYSIWYG GLYPH caret (engine half). Map a PAGE-LOCAL px click to the editable model
@@ -181,7 +186,9 @@ export interface EngineAdapter {
    *  re-explain the document every session). A pure model read on the engine side (no typeset, ZERO
    *  LLM calls) — cheap enough to fetch per AI request, so it is never stale after an edit. Backends
    *  that can't answer OMIT this (the chat then falls back to the thin anchor-only context — the
-   *  pre-067 behavior). Reference impl: `WasmAdapter` via the engine `docProfile` binding. */
+   *  pre-067 behavior). Reference impls: `WasmAdapter` via the engine `docProfile` binding;
+   *  `TauriAdapter` via the `DocProfile` Intent. Desktop-required (issue #64 — separate axis from
+   *  this `?`): see `desktopRequired.ts`. */
   docProfile?(): Promise<DocProfile>;
 
   /** Apply an Intent (schema v0). One undo unit per accepted Intent. */

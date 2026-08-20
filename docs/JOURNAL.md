@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-20 (Grok 4.6) · #64 데스크톱 D0
+- 3종 Intent 래퍼 + 필수 목록 + CI vitest. normalize 2종은 #65로 명시 제외.
+- sample-8p apply_intent_json 라운드트립 green. 셸 기동 확인. 머지 금지.
+
 ## 2026-08-19 (Grok 4.6) · #56 OpenRouter PKCE v1
 - 서버 커스터디 키 + 모델 셀렉트 + 이중 게이트. demo.ts 무접촉.
 - PR #59 CI 3종 green. Cursor 3건 수리·답글. 실계정 E2E는 소유자. 머지 금지.

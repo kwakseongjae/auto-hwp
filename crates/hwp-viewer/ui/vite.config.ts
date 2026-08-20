@@ -13,6 +13,9 @@ import tailwindcss from "@tailwindcss/vite";
 const P = (rel: string) => resolve(import.meta.dirname, rel);
 const workspaceAlias = [
   { find: "@auto-hwp/react/styles.css", replacement: P("../../../packages/react/dist/styles.css") },
+  // Subpath first: `@auto-hwp/engine` would otherwise prefix-rewrite
+  // `@auto-hwp/engine/worker-client` to `engineStub.ts/worker-client` (missing).
+  { find: "@auto-hwp/engine/worker-client", replacement: P("src/engineStub.ts") },
   { find: "@auto-hwp/engine", replacement: P("src/engineStub.ts") },
   { find: "@auto-hwp/react", replacement: P("../../../packages/react/dist/index.js") },
 ];
