@@ -2076,11 +2076,11 @@ mod tests {
     /// Tauri command; no revision bump.
     #[cfg(feature = "rhwp")]
     #[test]
-    fn d0_read_only_intents_roundtrip_on_sample_8p() {
+    fn d0_read_only_intents_roundtrip_on_showcase() {
         let mut sess = hwp_mcp::Session::default();
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../apps/hwp-lab/public/samples/sample-8p.hwp"
+            "/../../corpus/hwpx/FormattingShowcase.hwpx"
         );
         mcp_call(&mut sess, "open_document", json!({ "path": path })).unwrap();
         let before = sess.doc.as_ref().unwrap().revision();
@@ -2091,7 +2091,7 @@ mod tests {
         assert_eq!(profile["kind"], "docProfile");
         assert!(
             profile["profile"]["table_count"].as_u64().unwrap() >= 1,
-            "sample-8p has tables: {profile}"
+            "showcase has tables: {profile}"
         );
 
         let table = &profile["profile"]["tables"][0];
