@@ -27,10 +27,17 @@
 
 | 단계 | 선행 조건 | 목표 | 내용 |
 |---|---|---|---|
-| **D0 부채 상환** | 없음(수시) | 어댑터 패리티 | **#51** `blockRunsPath` 배선(중첩 캐럿 커밋). 34메서드 계약의 wasm↔Tauri 패리티 감사를 정례화 — 새 어댑터 메서드는 두 백엔드 동시 배선 또는 명시적 capability-off를 PR 수용 기준으로 |
+| **D0 부채 상환** | 없음(수시) | 어댑터 패리티 (이슈 **#64**, 하위 #51) | hwp-session에 이미 있는 **얇은 3종**(`blockRunsPath`·`tableGrid`·`docProfile`)을 **read-only Intent 래퍼**로 배선(기존 `HitTestCell`·`CaretRectCell` 선례 — hwp-viewer diff 0, 두 백엔드가 같은 op-bus 공유). **"데스크톱 필수 메서드" 선언 목록** 신설 + **CI 계약 테스트**(존재·non-stub·Intent 라운드트립·커맨드 등록 교차검증)을 `build-test`의 신규 node 스텝에서 실행. `normalize` 2종은 사유 기록 커밋과 함께 **명시적 capability-off**(코어 승격은 **#65**) |
 | **D1 기본 셸 전환** | SDK 승격 8종+회귀0 | workspace가 기본 | `VITE_SHELL=workspace` 기본 on, 기존 뷰어 제거. 채팅은 op-bus Intent[] 노출 후 활성. §4.8 QA(실빌드 업로드/편집/undo/export) 통과가 게이트 |
 | **D2 OS 통합** | D1 | 데스크톱다움 | `.hwp`/`.hwpx` 파일 연결(더블클릭 열기), OS 인쇄 대화상자, 로컬 MCP 서버 내장(앱이 곧 에이전트 엔드포인트 — AI-LOCAL-CONTROL-PLAN 계승), 최근 문서 |
 | **D3 배포** | D2 | 설치 가능한 제품 | macOS 서명/공증 + Windows 서명, 자동 업데이트 채널, 릴리스 파이프라인(기존 prebuilt 규율 연장). 다운로드 페이지는 autohwp.com에 |
+
+## 2.1 D0 범위를 이렇게 좁힌 근거 (2026-08-20 인터뷰 · 실측)
+
+- 계약 `adapter.ts`는 34메서드 중 **20개가 optional**이고, `HwpWorkspace.tsx:3135`는 "`tableGrid`는 OPTIONAL(TauriAdapter엔 없음) — 없으면 앵커 `text`로 강등"이라고 **의도된 설계**로 적어 두었다. **omit 자체는 부채가 아니다.** 진짜 부채는 "omit이 조용히 죽는" 경우이고 그건 #48이 가드로 막았다.
+- 갭 5종은 동질하지 않다: 3종은 `crates/hwp-session/src/lib.rs`(`doc_profile`:317·`table_grid`:1003·`block_runs_path`:2111)에 이미 있어 얇은 배선이지만, **normalize 2종은 `crates/hwp-wasm`의 `HwpDoc` 상태머신**(`normalize_on`·`ls_baseline` + open 시 자동 적용)에만 있고 `crates/hwp-viewer`에는 참조가 **0건**이다 → 승격하면 CLI `layout-check`의 open 경로가 바뀌어 게이트를 건드릴 수 있다.
+- ⚠️ `ci.yml` 필수 3종에 pnpm·node·vitest 스텝이 **0건**이라, CI 계약 테스트는 `build-test`에 node 스텝을 신설해야 실제로 돈다.
+- §4.8 체크리스트에는 D0 갭 메서드 대응 항목이 없어 **갱신이 선행**이다. 다만 §4.8 전면 QA는 D1 게이트이지 D0가 아니다 — D0 QA는 배선한 3종의 가시 효과 확인으로 한정한다.
 
 ## 3. 하지 말 것
 
@@ -40,5 +47,5 @@
 
 ## 4. 다음 한 줄
 
-**#51(blockRunsPath 배선)이 D0의 첫 티켓이다 — A~C축 일정과 독립으로 착수 가능.**
+**#64(D0 우산: 3종 배선 + 필수 목록 + CI 계약 테스트)가 첫 티켓이다 — A~C축과 독립 착수 가능. Seed `seed_e31ddce71c7e`.**
 (기획·검수: Fable / 실작업: Grok 4.6 — AGENTS.md §에이전트 역할 분담)

@@ -17,6 +17,12 @@
 - 부분집합 22/301 + extras 핀. 머리말 표·폼·가로 자체 픽스처. 7==7.
 - 게이트 유지. sample-8p 업로드/렌더 검수. 다음: CI green 후 머지 질문.
 
+## 2026-08-20 (Claude Fable) · 블로그·데스크톱 트랙 우로보로스 구체화
+- 인터뷰 2건 + 수락 가드 6레인. 가드가 두 계획의 전제를 뒤집었고 레포로 재확인해 반영.
+- 블로그: 창간 3편을 1차 자료로 환원(제품 활용 주제는 /docs에 이미 있고 GSC가 색인 거절).
+- 데스크톱: D0를 얇은 3종으로 축소(20/34가 의도된 optional), normalize는 명시적 제외.
+- 이슈 #62·#63·#64·#65·#66. Seed seed_e2faaecf79a5 / seed_e31ddce71c7e.
+
 ## 2026-08-20 (Claude Fable) · #56 실계정 QA 통과 → PR #59 머지
 - 소유자 Chrome으로 PKCE 종단 검증: 인가→session 키→카탈로그 403종→모델 선택→AI 편집→undo→disconnect.
 - `GET /api/hwp-edit`가 선택 모델·session 출처 확증. 보안 MEDIUM 2건은 #50에 잔여 위험 등록.
