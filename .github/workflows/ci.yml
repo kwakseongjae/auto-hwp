@@ -1,7 +1,8 @@
 name: ci
 
 # 로컬 정본은 여전히 `scripts/verify-local.sh`다. 외부 PR에는 비밀·배포 권한 없이 실행 가능한 bounded
-# 레인(fmt/clippy/native/wasm/license + 런칭 정적 계약)만 자동으로 건다. 전체 JS/e2e/배포는 RC 로컬 게이트다.
+# 레인(fmt/clippy/native/wasm/license + 데스크톱 어댑터 계약 vitest + 런칭 정적 계약)만 자동으로 건다.
+# 전체 JS/e2e/배포는 RC 로컬 게이트다. 계약 테스트(#64)는 build-test의 node 스텝이 없으면 CI에서 안 돈다.
 on:
   pull_request:
     branches: [main]
@@ -66,6 +67,14 @@ jobs:
         run: cargo test --workspace
       - name: wasm hygiene (pure core compiles to wasm32)
         run: cargo check -p hwp-model -p hwp-ops -p hwp-ingest --target wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: packages/react/package-lock.json
+      - name: desktop adapter contract (vitest)
+        working-directory: packages/react
+        run: npm ci && npx vitest run src/__tests__/desktopParity.contract.test.ts
       - name: launch docs and trust contracts
         run: scripts/verify-launch.sh --automated
 

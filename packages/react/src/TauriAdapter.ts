@@ -1,5 +1,5 @@
 import type { EngineAdapter } from "./EngineAdapter";
-import type { BlockHit, CaretRect, CellAddr, CellCaretRect, CellHit, CellTextHit, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox } from "./types";
+import type { BlockHit, CaretRect, CellAddr, CellCaretRect, CellHit, CellTextHit, DocProfile, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
 
 /** The desktop `hit_test` command's DTO (camelCase, crates/hwp-viewer/src/lib.rs `HitDto`). Remapped
  *  into editor-core's snake_case `HitResult` below so both adapters return ONE shape. */
@@ -130,6 +130,30 @@ export class TauriAdapter implements EngineAdapter {
    *  op-bus's paragraph target) when absent, mirroring the wasm binding's `row ?? null`. */
   blockRuns(section: number, block: number, row?: number, col?: number): Promise<RunSpec[]> {
     return this.invoke<RunSpec[]>("get_block_runs", { section, block, row: row ?? null, col: col ?? null });
+  }
+
+  /** Nested-cell styled-run read (issue #64 D0) — the `BlockRunsPath` Intent through the GENERAL
+   *  `apply_intent_json` command (same op-bus the wasm `blockRunsPath` binding calls). Empty array
+   *  when the path does not resolve. No new Tauri command. */
+  async blockRunsPath(section: number, path: CellAddr[]): Promise<RunSpec[]> {
+    const out = (await this.applyIntent({ intent: "BlockRunsPath", section, path })) as { runs?: RunSpec[] };
+    return out.runs ?? [];
+  }
+
+  /** Table cell GRID (issue #64 D0) — the `TableGrid` Intent via the same general command.
+   *  `{kind:"tableGrid", grid}` matches `TableGrid` verbatim; `null` when the block is not a table
+   *  (018). Same `hwp_session::table_grid` the wasm binding uses. */
+  async tableGrid(section: number, block: number): Promise<TableGrid | null> {
+    const out = (await this.applyIntent({ intent: "TableGrid", section, block })) as { grid?: TableGrid | null };
+    return out.grid ?? null;
+  }
+
+  /** Document profile (issue #64 D0) — the `DocProfile` Intent via the same general command.
+   *  `{kind:"docProfile", profile}` matches `DocProfile` verbatim (pure model read, no typeset). */
+  async docProfile(): Promise<DocProfile> {
+    const out = (await this.applyIntent({ intent: "DocProfile" })) as { profile?: DocProfile };
+    if (!out.profile) throw new Error("docProfile: missing profile in Outcome");
+    return out.profile;
   }
 
   /** Document outline (issue 046) — the desktop `doc_outline` command (crates/hwp-viewer, delegates to

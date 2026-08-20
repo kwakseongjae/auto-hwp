@@ -213,6 +213,26 @@ VITE_SHELL=workspace cargo tauri dev   # (또는 tauri.conf의 beforeDevCommand�
 - [ ] **채팅**: v1 비활성 — AI 전달 시 정직한 사유 노출(크래시 아님). 수동 편집은 정상.
 - [ ] **회귀 0**: 플래그 off로 재빌드 시 기존 앱과 **동일**(위 자동 sha256 동일이 근거).
 
+#### D0 갭 대응 (이슈 #64 — 배선한 3종의 가시 효과. §4.8 전면 QA는 D1 게이트)
+
+선행: `pnpm -C packages/editor-core build && pnpm -C packages/react build`
+(`crates/hwp-viewer/ui`는 `@auto-hwp/react`를 `file:`로 소비하고 predev 훅이 없다 — 스테일 dist로
+"여전히 강등됨" 오판하는 066 전례). `docProfile`의 데스크톱 가시 효과는 PDF export 직전 토스트인데
+default feature는 `rhwp`뿐 → **반드시** `-f "rhwp shaper pdf"`:
+
+```
+pnpm -C packages/editor-core build && pnpm -C packages/react build
+VITE_SHELL=workspace cargo tauri dev -f "rhwp shaper pdf"
+```
+
+- [ ] **중첩 셀 캐럿 (`blockRunsPath`)**: sample-8p에서 중첩 셀 더블클릭 → 캐럿이 실제로 서고 입력이
+      커밋된다. 표 선택으로 강등되면 실패(죽은 캐럿 가드가 읽기 경로 부재로 심기를 거부한 것).
+- [ ] **표 복사 (`tableGrid`)**: 표 선택 후 ⌘C → 클립보드가 TSV(탭=열, 줄바꿈=행)다. 앵커 `text`로
+      강등되면 실패.
+- [ ] **문서 프로필 (`docProfile`)**: PDF 내보내기 직전, 수식·차트가 있는 문서는 자리표시 토스트가
+      뜬다. sample-8p처럼 수식/차트 0이면 토스트가 없는 것이 정상(호출은 하고 카운트 0이라 생략).
+      피처 없이 돌리면 export 커맨드가 거절되어 이 경로를 검증할 수 없다.
+
 기본값 전환(플래그 default→workspace)은 **이 QA 전 항목 0 회귀 확인 후**의 후속 이슈다(044는 default 안 바꿈).
 
 ---

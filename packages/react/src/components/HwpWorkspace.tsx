@@ -3132,7 +3132,8 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // ⌘C — 현재 선택(문단/표/셀)의 **평문**을 클립보드로. 읽기 전용이라 op 도 undo 단위도 없다.
   //   · 셀/문단 → 앵커가 이미 들고 있는 `text`(히트 테스트가 채운 그 텍스트) — 엔진 왕복 0회.
   //   · 표 → `tableGrid` 로 격자를 읽어 TSV(탭=열, 줄바꿈=행). 스프레드시트에 붙여넣으면 표가 표로 산다.
-  //     `tableGrid` 는 OPTIONAL 메서드다(TauriAdapter 엔 없음) — 없거나 실패하면 앵커 `text` 로 강등한다.
+  //     `tableGrid` 는 OPTIONAL 메서드다 — 없거나 실패하면 앵커 `text` 로 강등한다. 데스크톱은 #64 에서
+  //     Intent 래퍼로 배선되어 있고(필수 목록), 임의 백엔드는 계속 omit 할 수 있다.
   const selectionPlainText = useCallback(
     async (sels: Selection[]): Promise<string> => {
       const parts: string[] = [];

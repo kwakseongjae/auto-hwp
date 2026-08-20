@@ -3,6 +3,10 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-20 · Grok 4.6 — **#64 D0 · PR #68**. 
+  https://github.com/kwakseongjae/auto-hwp/pull/68 `Closes #64` · #51 흡수.
+  3종 Intent 래퍼 + 필수 목록 + CI vitest. normalize는 #65. **머지 금지** — CI 3종 green 대기.
+
 - 갱신: 2026-08-20 · Claude(Fable) — **블로그·데스크톱 트랙 우로보로스 구체화 → 이슈 5건**.
   인터뷰 2건(블로그 `interview_20260820_045204`/Seed `seed_e2faaecf79a5`, 데스크톱
   `interview_20260820_062442`/Seed `seed_e31ddce71c7e`) + 수락 가드 6레인. **가드가

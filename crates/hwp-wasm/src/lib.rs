@@ -735,7 +735,7 @@ impl HwpDoc {
         let value: serde_json::Value = serde_json::from_str(intent_json)
             .map_err(|e| js_err("bad_json", &format!("intent is not valid JSON: {e}")))?;
         let outcome = hwp_mcp::apply_intent_json(&mut self.session, &value).map_err(engine_err)?;
-        let json = outcome_to_json(&outcome);
+        let json = hwp_mcp::outcome_to_json(&outcome);
         serde_json::to_string(&json).map_err(|e| js_err("serialize", &e.to_string()))
     }
 
@@ -821,62 +821,5 @@ impl HwpDoc {
     #[wasm_bindgen(js_name = toHwpx)]
     pub fn to_hwpx(&self) -> Result<Vec<u8>, JsValue> {
         hwp_mcp::export_bytes(&self.session).map_err(engine_err)
-    }
-}
-
-/// Shape an [`hwp_mcp::Outcome`] into a tagged JSON object (`{kind, …}`). `Outcome` is not itself
-/// `Serialize`, but its payload DTOs (`FindMatch`/`HitResult`/`CaretRect`) are, so nested results are
-/// serialized through serde. Kept exhaustive so a new Outcome variant fails to compile here (drift
-/// guard) rather than silently emitting nothing.
-fn outcome_to_json(o: &hwp_mcp::Outcome) -> serde_json::Value {
-    use hwp_mcp::Outcome::*;
-    use serde_json::json;
-    match o {
-        Opened {
-            format,
-            editable,
-            sections,
-        } => {
-            json!({ "kind": "opened", "format": format, "editable": editable, "sections": sections })
-        }
-        PageCount(n) => json!({ "kind": "pageCount", "pages": n }),
-        Rendered(svg) => json!({ "kind": "rendered", "svg": svg }),
-        Applied { blocks, ops } => json!({ "kind": "applied", "blocks": blocks, "ops": ops }),
-        Exported { bytes, open_safe } => {
-            json!({ "kind": "exported", "bytes": bytes, "openSafe": open_safe })
-        }
-        Undone(changed) => json!({ "kind": "undone", "changed": changed }),
-        Redone(changed) => json!({ "kind": "redone", "changed": changed }),
-        Text(text) => json!({ "kind": "text", "text": text }),
-        Proposed { rationale, preview } => {
-            json!({ "kind": "proposed", "rationale": rationale, "preview": preview })
-        }
-        Committed { ops } => json!({ "kind": "committed", "ops": ops }),
-        Discarded(discarded) => json!({ "kind": "discarded", "discarded": discarded }),
-        Found { matches } => {
-            json!({ "kind": "found", "matches": serde_json::to_value(matches).unwrap_or(serde_json::Value::Null) })
-        }
-        Replaced { replaced, pages } => {
-            json!({ "kind": "replaced", "replaced": replaced, "pages": pages })
-        }
-        Hit(hit) => {
-            json!({ "kind": "hit", "hit": serde_json::to_value(hit).unwrap_or(serde_json::Value::Null) })
-        }
-        Caret(caret) => {
-            json!({ "kind": "caret", "caret": serde_json::to_value(caret).unwrap_or(serde_json::Value::Null) })
-        }
-        Edited { pages } => json!({ "kind": "edited", "pages": pages }),
-        HitCell(hit) => {
-            json!({ "kind": "hitCell", "hit": serde_json::to_value(hit).unwrap_or(serde_json::Value::Null) })
-        }
-        CaretCell(caret) => {
-            json!({ "kind": "caretCell", "caret": serde_json::to_value(caret).unwrap_or(serde_json::Value::Null) })
-        }
-        HitBody(hit) => {
-            json!({ "kind": "hitBody", "hit": serde_json::to_value(hit).unwrap_or(serde_json::Value::Null) })
-        }
-        CaretBody(caret) => {
-            json!({ "kind": "caretBody", "caret": serde_json::to_value(caret).unwrap_or(serde_json::Value::Null) })
-        }
     }
 }

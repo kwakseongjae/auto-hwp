@@ -318,6 +318,20 @@ fn examples() -> Vec<Example> {
             r#"{"intent":"CaretRectBody","page":0,"section":0,"block":0,"offset":1}"#,
             DeserializeOnly,
         ),
+        // ---- read-only model queries (issue #64 D0). Dispatch is covered by the dedicated
+        //      `read_only_model_intents_dispatch_and_do_not_bump_revision` test (no revision bump,
+        //      so they cannot ride the Synthetic mutator lane). ----
+        e(
+            "BlockRunsPath",
+            r#"{"intent":"BlockRunsPath","section":0,"path":[{"block":1,"row":0,"col":0}]}"#,
+            DeserializeOnly,
+        ),
+        e(
+            "TableGrid",
+            r#"{"intent":"TableGrid","section":0,"block":1}"#,
+            DeserializeOnly,
+        ),
+        e("DocProfile", r#"{"intent":"DocProfile"}"#, DeserializeOnly),
     ]
 }
 
@@ -340,7 +354,7 @@ fn de_err(v: Value) -> String {
 fn every_intent_variant_has_a_documented_example() {
     assert_eq!(
         examples().len(),
-        46,
+        49,
         "one JSON example per Intent variant (see INTENT-SCHEMA.md)"
     );
 }
@@ -656,6 +670,99 @@ fn caret_rect_cell_accepts_additive_path() {
         r#"{"intent":"CaretRectCell","section":0,"block":1,"row":0,"col":0,"para":0,"offset":1,"path":[{"block":1,"row":0,"col":0},{"block":1,"row":0,"col":0}]}"#,
     ))
     .expect("CaretRectCell.path must be additive");
+}
+
+/// Issue #64 D0 — read-only model Intents deserialize, dispatch against the synthetic 3×2 table,
+/// return the same DTOs the wasm bindings already expose, and never bump the revision.
+#[test]
+fn read_only_model_intents_dispatch_and_do_not_bump_revision() {
+    use hwp_mcp::Outcome;
+    let mut s = synthetic_session();
+    let before = s.doc.as_ref().unwrap().revision();
+
+    match apply_intent_json(
+        &mut s,
+        &parse(r#"{"intent":"BlockRunsPath","section":0,"path":[{"block":1,"row":0,"col":0}]}"#),
+    ) {
+        Ok(Outcome::Runs(runs)) => {
+            let text: String = runs.iter().map(|r| r.text.as_str()).collect();
+            assert!(
+                text.contains("A1"),
+                "leaf cell (0,0) of the synthetic table must round-trip via BlockRunsPath, got {text:?}"
+            );
+        }
+        Ok(_) => panic!("BlockRunsPath returned a non-runs outcome"),
+        Err(e) => panic!("BlockRunsPath errored: {e}"),
+    }
+
+    match apply_intent_json(
+        &mut s,
+        &parse(r#"{"intent":"TableGrid","section":0,"block":1}"#),
+    ) {
+        Ok(Outcome::TableGrid(Some(grid))) => {
+            assert_eq!(grid.section, 0);
+            assert_eq!(grid.block, 1);
+            assert!(
+                grid.cells
+                    .iter()
+                    .any(|c| c.row == 0 && c.col == 0 && c.text.contains("A1")),
+                "TableGrid must list the origin cell with its text"
+            );
+        }
+        Ok(Outcome::TableGrid(None)) => panic!("synthetic block 1 is a table"),
+        Ok(_) => panic!("TableGrid returned a non-grid outcome"),
+        Err(e) => panic!("TableGrid errored: {e}"),
+    }
+
+    match apply_intent_json(
+        &mut s,
+        &parse(r#"{"intent":"TableGrid","section":0,"block":0}"#),
+    ) {
+        Ok(Outcome::TableGrid(None)) => {}
+        Ok(_) => panic!("paragraph block 0 must be a TableGrid miss (018)"),
+        Err(e) => panic!("TableGrid (paragraph) errored: {e}"),
+    }
+
+    match apply_intent_json(&mut s, &parse(r#"{"intent":"DocProfile"}"#)) {
+        Ok(Outcome::DocProfile(p)) => {
+            assert!(p.paragraph_count >= 1, "synthetic doc has a body paragraph");
+            assert!(p.table_count >= 1, "synthetic doc has a table");
+            assert!(
+                p.excerpt.contains("본문") || p.excerpt.contains("A1"),
+                "profile excerpt must ground the synthetic doc, got {:?}",
+                p.excerpt
+            );
+        }
+        Ok(_) => panic!("DocProfile returned a non-profile outcome"),
+        Err(e) => panic!("DocProfile errored: {e}"),
+    }
+
+    assert_eq!(
+        s.doc.as_ref().unwrap().revision(),
+        before,
+        "D0 read-only Intents never mutate"
+    );
+}
+
+#[test]
+fn d0_read_only_intents_reject_unknown_fields() {
+    for (label, body) in [
+        (
+            "BlockRunsPath",
+            json!({"intent":"BlockRunsPath","section":0,"path":[],"bogus":1}),
+        ),
+        (
+            "TableGrid",
+            json!({"intent":"TableGrid","section":0,"block":1,"bogus":1}),
+        ),
+        ("DocProfile", json!({"intent":"DocProfile","bogus":1})),
+    ] {
+        let err = de_err(body);
+        assert!(
+            err.contains("unknown field") && err.contains("bogus"),
+            "{label} must keep deny_unknown_fields: {err}"
+        );
+    }
 }
 
 /// Issue 050: `InsertImage` DESERIALIZES fine but the DISPATCH validates the payload — a base64 blob
