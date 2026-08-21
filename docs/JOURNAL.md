@@ -6,7 +6,7 @@
 ---
 
 ## 2026-08-21 (Grok 4.6) · #71 조판 코퍼스 커버리지
-- tag-layout + tag-corpus.mjs. 82건 지도. 혼합 0 / 각주 1 / 차트 1.
+- PR #76. tag-layout + tag-corpus.mjs. 82건. 혼합 0 / 각주 1 / 차트 1.
 - GOV 양식 4건(KOGL-1 실측). hwpxlib 데이터 49. 머지 금지.
 
 ## 2026-08-20 (Grok 4.6) · #64 데스크톱 D0
