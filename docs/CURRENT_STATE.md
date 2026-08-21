@@ -3,6 +3,14 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-21 · Grok 4.6 — **#78 T2-A · 조판 최약 축**.
+  브랜치 `fix/issue-78-typeset-weak-axes`. 원인: HWPX `fieldBegin type="MEMO"` 풍선
+  본문이 셀/본문 조판으로 샘 → 11mm 셀이 74줄, 다쪽 표 +3쪽.
+  수리: 메모 본문을 header/note와 같은 SubFrame으로 격리. 게이트 8==8/18==18/24==24.
+  오라클: multipage_table 쪽수일치 **33.3%→46.7%** · 본문줄 91.8%→95.1%.
+  header_footer **미개선**(40% / 81.9%) — 밴드 overflow·body_box 미차감은 기각.
+  회귀 0(변경 파일 2건=메모 쌍둥이). **머지 금지**.
+
 - 갱신: 2026-08-21 · Grok 4.6 — **#72 T1-R2 · 오라클 전수 스윕**.
   브랜치 `feat/issue-72-oracle-sweep`. `layout-check --json` + `scripts/oracle-sweep.mjs`.
   82건: 채점가능 79 · 채점불가 3 · 일치 51 · 줄격차 12 · 쪽격차 16.

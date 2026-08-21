@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-21 (Grok 4.6) · #78 조판 최약 축
+- 다쪽 표: 메모 풍선 누수 수리. 쪽수일치 33.3→46.7%. 게이트 무변경.
+- header_footer 미개선(원인 분석은 PR). 머지 금지.
+
 ## 2026-08-21 (Grok 4.6) · #72 오라클 전수 스윕
 - layout-check --json + oracle-sweep. 82건 채점가능 79 / 불가 3. 참값 아님.
 - 최저 축 header_footer·footnote·multicolumn. 게이트 무변경. 머지 금지.

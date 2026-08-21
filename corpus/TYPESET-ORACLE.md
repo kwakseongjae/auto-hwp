@@ -18,10 +18,10 @@
 | 실패 | 0 |
 | 미반입 (GOV) | 0 |
 | 일치 (쪽수 + 줄 98.9%+) | 51 |
-| 줄격차 | 12 |
-| 쪽격차 | 16 |
-| 본문 줄정확 평균 (채점 가능·본문 오라클만) | 94.1% |
-| 셀 줄정확 평균 (채점 가능·셀 오라클만) | 96.6% |
+| 줄격차 | 14 |
+| 쪽격차 | 14 |
+| 본문 줄정확 평균 (채점 가능·본문 오라클만) | 94.7% |
+| 셀 줄정확 평균 (채점 가능·셀 오라클만) | 96.7% |
 
 ## 요소별 점수 (채점 가능 문서만 — 채점 불가를 0으로 넣지 않음)
 
@@ -31,7 +31,7 @@
 | `form_control` | 폼 컨트롤 | 4 | 4 | 0 | 100 | 100 | — |
 | `mixed_orientation` | 가로세로 혼합 | 0 | 0 | 0 | — | — | — |
 | `nested_table` | 중첩 표 | 10 | 10 | 0 | 40 | 94.5 | 98.6 |
-| `multipage_table` | 다쪽 표 | 16 | 15 | 1 | 33.3 | 91.8 | 95.1 |
+| `multipage_table` | 다쪽 표 | 16 | 15 | 1 | 46.7 | 95.1 | 95.2 |
 | `footnote` | 각주 | 1 | 1 | 0 | 0 | 90 | 100 |
 | `multicolumn` | 다단 | 2 | 2 | 0 | 50 | 91.7 | — |
 | `chart` | 차트 | 1 | 1 | 0 | 100 | 99 | 100 |
@@ -84,8 +84,8 @@
 | `corpus/hwpxlib_corpus/error/20241104/mot.hwpx` | hwpxlib | 일치 | 2 | 2 | 100 | 100 | multipage_table, shape_ole |
 | `corpus/hwpxlib_corpus/error/20250523/프로젝트 계획서.hwpx` | hwpxlib | 채점불가 | — | — | — | — | multipage_table |
 | `corpus/hwpxlib_corpus/error/20250808/2015년_12월_재난안전종합상황_분석_및_전망.hwpx` | hwpxlib | 쪽격차 | 85 | 76 | 69.9 | 99.5 | header_footer, nested_table, shape_ole |
-| `corpus/hwpxlib_corpus/error/20251107/test_re.hwpx` | hwpxlib | 쪽격차 | 18 | 15 | 73.6 | 86.5 | multipage_table |
-| `corpus/hwpxlib_corpus/error/20251107/test.hwpx` | hwpxlib | 쪽격차 | 18 | 15 | 73.6 | 86.5 | multipage_table |
+| `corpus/hwpxlib_corpus/error/20251107/test_re.hwpx` | hwpxlib | 줄격차 | 15 | 15 | 98.1 | 87.3 | multipage_table |
+| `corpus/hwpxlib_corpus/error/20251107/test.hwpx` | hwpxlib | 줄격차 | 15 | 15 | 98.1 | 87.3 | multipage_table |
 | `corpus/hwpxlib_corpus/error/20260805/고정폭빈칸_문서.hwpx` | hwpxlib | 일치 | 1 | 1 | 100 | — | — |
 | `corpus/hwpxlib_corpus/error/20260806/표전체 형광색인 경우 오류.hwpx` | hwpxlib | 줄격차 | 1 | 1 | 75 | 100 | — |
 | `corpus/hwpxlib_corpus/reader_writer/ChangeTrack.hwpx` | hwpxlib | 일치 | 1 | 1 | 100 | — | — |
