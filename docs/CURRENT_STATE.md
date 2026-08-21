@@ -3,6 +3,13 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-21 · Grok 4.6 — **#72 T1-R2 · 오라클 전수 스윕**.
+  브랜치 `feat/issue-72-oracle-sweep`. `layout-check --json` + `scripts/oracle-sweep.mjs`.
+  82건: 채점가능 79 · 채점불가 3 · 일치 51 · 줄격차 12 · 쪽격차 16.
+  점수는 한/글 참값이 아니라 저장 lineseg 회귀 잠금. 최저 축: header_footer 81.9% /
+  footnote 90% / multicolumn 91.7%. 기존 게이트 8==8/18==18/24==24 무변경.
+  CI는 `--check-committed`만. **머지 금지**.
+
 - 갱신: 2026-08-21 · Grok 4.6 — **#71 T1-R1 · PR #76**.
   https://github.com/kwakseongjae/auto-hwp/pull/76 `Closes #71`.
   코퍼스 82건 tag-layout 태깅. 빈칸: 가로세로 혼합 0 · 각주 1 · 차트 1.

@@ -77,18 +77,19 @@ T0(#46)이 main에 착지했다. T1은 "제보가 게이트가 된다"를 실제
 | 자산 | 규모 | 검증 축 |
 |---|---|---|
 | `benchmarks/benchmark{,1,2}` + PDF | 3건 | **`layout-check` 줄 단위 오라클** (8==8·18==18·24==24) |
-| `corpus/hwp/` · `corpus/hwpx/` | 12 + 5 | 기능별 소품(수식·도형·OLE·필드·이미지) — 오라클 미적용 |
-| `corpus/hwpxlib_corpus/` | 49 | Apache-2.0 **데이터**(코드 참조 금지) — 오라클 미적용. `scripts/fetch-hwpxlib-corpus.mjs` |
+| `corpus/hwp/` · `corpus/hwpx/` | 12 + 5 | 기능별 소품. 줄 단위 점수는 TYPESET-ORACLE (채점 불가 문서는 0점 아님) |
+| `corpus/hwpxlib_corpus/` | 49 | Apache-2.0 **데이터**(코드 참조 금지). 점수는 TYPESET-ORACLE. `scripts/fetch-hwpxlib-corpus.mjs` |
 | `corpus/GOV-SOURCES.md` + `gov-sources.json` | 보도 7 + 양식/서식 4 | KOGL 실측 검증, **재배포 대신 재현**(sha256) |
 | `corpus/TYPESET-COVERAGE.md` | 전 건 태깅 | 이슈 #71 커버리지 지도. `node scripts/tag-corpus.mjs` |
 | `corpus/private/` | 로컬 전용 | gitignore + SHA 잠금(modu-startup 6==6) |
-| `scripts/bench-corpus.sh` | 전수 스윕 | ⚠️ **"크래시 없이 통과"만** — 시각·조판 충실도 미검증 |
+| `scripts/bench-corpus.sh` | 전수 스윕 | 두 축 분리: **pipeline(크래시 없음)** · **layout-check(줄 단위 정합)**. 후자는 참값 아님(저장 lineseg 잠금) |
+| `corpus/TYPESET-ORACLE.md` | 82건 점수 | 이슈 #72 오라클 스윕. `node scripts/oracle-sweep.mjs`. 채점 불가 ≠ 0점 |
 
 ### 4.2 진짜 갭 세 개
 
-1. **오라클이 4건에만 돈다.** 코퍼스는 60건이 넘는데 줄 단위 정합을 채점하는 건 벤치 3건 + modu-startup뿐이다. 나머지는 "안 죽었다"까지만 안다.
-2. **스윕 축이 충실도가 아니다.** `bench-corpus.sh`는 detect/render/pdf/extract가 통과하면 OK다 — #42처럼 **쪽수는 맞는데 내용이 비는** 문서가 그대로 통과한다.
-3. **제보를 재현할 수 없다.** #42는 제보자 `.hwp`가 레포에 없어 그 파일 자체의 7==7을 끝내 재현하지 못했다. 개인정보 규율상 원문을 받을 수도 없다 — **구조만 남긴 최소 재현물**을 만드는 절차가 없다.
+1. **오라클이 4건에만 돌았다.** (R2/#72가 측정 갭을 닫음 — `corpus/TYPESET-ORACLE.md`. 점수는 참값 아님·채점 불가≠0점. 수리는 다음 이슈.)
+2. **스윕 축이 충실도가 아니었다.** (R2/#72: `bench-corpus.sh`가 pipeline/layout-check를 분리 보고. 기존 "크래시 없음" 초록은 충실도 통과가 아니다.)
+3. **제보를 재현할 수 없다.** #42는 제보자 `.hwp`가 레포에 없어 그 파일 자체의 7==7을 끝내 재현하지 못했다. 개인정보 규율상 원문을 받을 수도 없다 — **구조만 남긴 최소 재현물**을 만드는 절차가 없다. (#73)
 
 또 하나: GOV-SOURCES 7건은 전부 **보도자료**형이다. #42류 결함(폼 컨트롤·머리말 표·가로세로 혼합)은 **양식(서식)**에 산다 — 수집 대상이 편향돼 있다.
 

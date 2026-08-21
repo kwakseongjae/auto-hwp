@@ -69,6 +69,8 @@ scripts/bench-local.sh
 ```bash
 scripts/bench-local.sh --pipeline   # 조판 대신 "크래시 없이 통과하는가" (bench-corpus.sh 위임)
 scripts/bench-local.sh --dir <경로>  # 다른 폴더를 잰다
+node scripts/oracle-sweep.mjs        # 공개 코퍼스 전수 layout-check (로컬). --check 가 회귀
+# bench-corpus.sh 는 pipeline(크래시 없음)과 layout-check(줄 단위)를 분리 보고한다.
 ```
 
 ### 2) 격차를 찾으면 — 문서가 아니라 수치를 올립니다

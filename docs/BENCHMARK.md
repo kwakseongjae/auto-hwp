@@ -142,6 +142,10 @@ HWP/HWPX 는 문서를 저장할 때 **한글 자신이 계산한 조판 결과�
    문단만 어긋나도 `cargo test` 가 붉어진다. "대충 비슷하면 통과"가 없다.
 3. **머지 규율** — `verify-local.sh` 가 그린이 아니면 머지하지 않는다. crates/packages 를 만졌으면
    `--full`(wasm 재빌드 + 캐럿 교차검증 + JS 유닛 + E2E)이 필수다(AGENTS.md).
+4. **코퍼스 전수 스윕** (이슈 #72, 기존 게이트와 **별 축**) — `node scripts/oracle-sweep.mjs`.
+   점수는 한/글의 참값이 아니라 저장 lineseg 기준의 회귀 잠금이다. 변환 HWPX의 빈
+   `linesegarray`는 채점 불가이지 0점이 아니다. CI는 `--check-committed`(요약)만 돌리고
+   전수 재실행은 로컬 전용 — 8==8/18==18/24==24 게이트 시간을 늘리지 않는다.
 
 여기에 구조적 불변식이 겹친다:
 

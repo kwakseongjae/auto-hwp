@@ -105,7 +105,7 @@ soffice가 없으면 조용히 건너뛴다.
 
 | 명령 | 하는 일 |
 |---|---|
-| `layout-check <파일>` | production parser+우리 조판 vs 한컴 stored lineseg 대조(쪽수·본문/셀 문단 줄수). `--rows <섹션>/<블록>`은 표 행 높이, `--cells <섹션>/<블록>\|all`은 셀 불일치 폭·padding을 감사. 한컴 저작 HWPX도 production parser를 타며, lineseg cache가 없으면 missing-oracle로 명시. `--features rhwp` 필요 |
+| `layout-check <파일>` | production parser+우리 조판 vs 한컴 stored lineseg 대조(쪽수·본문/셀 문단 줄수). `--json`은 점수 배열(코퍼스 스윕). `--rows <섹션>/<블록>`은 표 행 높이, `--cells <섹션>/<블록>\|all`은 셀 불일치 폭·padding을 감사. 한컴 저작 HWPX도 production parser를 타며, lineseg cache가 없으면 **채점 불가**(0점 아님). 점수는 한/글 참값이 아니라 저장 lineseg 회귀 잠금. `--features rhwp` 필요 |
 | `fidelity [파일]` | 충실도 게이트 전제조건 점검 + 가능하면 기준 렌더와 비교 |
 | `oracle <파일>` | LibreOffice + H2Orestart로 기준 PDF 생성 (`--out <디렉토리>`) |
 | `verify-convert <파일>` | 원본 `.hwp`와 변환 `.hwpx`를 나란히 렌더한 HTML로 육안 대조. `--features rhwp` 필요 |

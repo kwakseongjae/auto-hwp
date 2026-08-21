@@ -36,6 +36,12 @@ else
   echo "⚠️  modu-startup 게이트 skipped(corpus/private 부재 — 로컬 전용 실물 벤치, 공개 커밋 금지)"
 fi
 
+echo "═══ 조판 오라클 스윕 산출물 (이슈 72 — 전수 재실행 아님 · 커밋된 요약만) ═══"
+# 코퍼스 전수 layout-check 는 로컬 `node scripts/oracle-sweep.mjs` (--check 가 회귀).
+# 여기서는 게이트 시간을 늘리지 않고, 커밋된 JSON/MD 가 규율(참값 아님 · 채점 불가≠0점)을 지키는지 본다.
+node --test scripts/tests/oracle-sweep.test.mjs
+node scripts/oracle-sweep.mjs --check-committed
+
 echo "═══ HWPX 축 게이트 (W4.3 — 참값 아님 · 현재 실측 회귀 잠금) ═══"
 # ⚠️ 아래 상수는 "한/글의 참값"이 **아니다**. 오늘 이 엔진이 내는 값을 그대로 못 박은 회귀 금지선일
 #    뿐이다(HWPX 참값 오라클 = 네이티브 렌더 대조는 이슈 075 몫). 위 .hwp 게이트가 "우리 == 한컴"을
