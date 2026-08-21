@@ -3,6 +3,11 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-21 · Grok 4.6 — **#71 T1-R1 · PR #76**.
+  https://github.com/kwakseongjae/auto-hwp/pull/76 `Closes #71`.
+  코퍼스 82건 tag-layout 태깅. 빈칸: 가로세로 혼합 0 · 각주 1 · 차트 1.
+  hwpxlib 데이터 49 + GOV 양식/서식 4 (KOGL-1 실측). **머지 금지**.
+
 - 갱신: 2026-08-20 · Grok 4.6 — **#64 D0 · PR #68**. 
   https://github.com/kwakseongjae/auto-hwp/pull/68 `Closes #64` · #51 흡수.
   3종 Intent 래퍼 + 필수 목록 + CI vitest. normalize는 #65. **머지 금지** — CI 3종 green 대기.

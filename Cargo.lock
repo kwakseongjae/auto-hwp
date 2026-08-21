@@ -316,6 +316,7 @@ dependencies = [
  "hwp-session",
  "hwp-typeset",
  "quick-xml 0.37.5",
+ "serde",
  "serde_json",
  "zip 2.4.2",
 ]

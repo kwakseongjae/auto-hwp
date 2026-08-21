@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "note": "Canonical machine list for scripts/fetch-gov-corpus.mjs. Binaries are NOT committed — reproduce from source_url and verify sha256. KOGL type must be measured on source_page.",
+  "files": [
+    {
+      "file": "korea-kr-moel__260331_보도참고_2026년_제1차_추경예산안_주요내용.hwpx",
+      "publisher": "고용노동부(정책브리핑)",
+      "kind": "보도자료",
+      "kogl": "KOGL-1",
+      "kogl_verified": true,
+      "source_page": "https://www.korea.kr/briefing/pressReleaseView.do?newsId=156752041",
+      "source_url": "https://www.korea.kr/common/download.do?fileId=198406157&tblKey=GMN",
+      "sha256": "1e4785355e7af5e47eb24168a2bc1f98ad7f1b2f9aa0a9010e59f3041cee5238"
+    },
+    {
+      "file": "korea-kr-mpva__260413_보도자료_2026년_국외_보훈사적지_답사_참가자_모집.hwpx",
+      "publisher": "국가보훈부(정책브리핑)",
+      "kind": "보도자료",
+      "kogl": "KOGL-1",
+      "kogl_verified": true,
+      "source_page": "https://www.korea.kr/briefing/pressReleaseView.do?newsId=156754206",
+      "source_url": "https://www.korea.kr/common/download.do?fileId=198421990&tblKey=GMN",
+      "sha256": "93f63161ba3d86022bafa8b888c01edaebb5dd5f2fa55aeda58b554b33462c81"
+    },
+    {
+      "file": "korea-kr-mcst__0326_광화문_현판_토론회_개최.hwpx",
+      "publisher": "문화체육관광부(정책브리핑)",
+      "kind": "보도자료",
+      "kogl": "KOGL-0",
+      "kogl_verified": true,
+      "source_page": "https://www.korea.kr/briefing/pressReleaseView.do?newsId=156750968",
+      "source_url": "https://www.korea.kr/common/download.do?fileId=198399778&tblKey=GMN",
+      "sha256": "6d3356866c25c43ebd505ae4c2c4f0dd7bfef8fbabbccc5a1b575fb57f37de97"
+    },
+    {
+      "file": "korea-kr-mcst__0411_문체부_2026년_1회_추경_확정.hwpx",
+      "publisher": "문화체육관광부(정책브리핑)",
+      "kind": "보도자료",
+      "kogl": "KOGL-0",
+      "kogl_verified": true,
+      "source_page": "https://www.korea.kr/briefing/pressReleaseView.do?newsId=156754077",
+      "source_url": "https://www.korea.kr/common/download.do?fileId=198421223&tblKey=GMN",
+      "sha256": "05028f7210c55724e719717ecbac4e4026d6c44d9e8dba8de18dea74be04134e"
+    },
+    {
+      "file": "korea-kr-mcst__0212_개선이_필요한_공공언어_30선_발표.hwpx",
+      "publisher": "문화체육관광부(정책브리핑)",
+      "kind": "보도자료",
+      "kogl": "KOGL-1",
+      "kogl_verified": true,
+      "source_page": "https://www.korea.kr/briefing/pressReleaseView.do?newsId=156744367",
+      "source_url": "https://www.korea.kr/common/download.do?fileId=198358317&tblKey=GMN",
+      "sha256": "f7ff611ee9d3ad9a076de2c63e6053e006b8cc9dd96853f60a24f57195d3820c"
+    },
+    {
+      "file": "korea-kr-mcst__0413_사회문화시설_활용_인문_프로그램_공모.hwpx",
+      "publisher": "문화체육관광부(정책브리핑)",
+      "kind": "보도자료(공모)",
+      "kogl": "KOGL-0",
+      "kogl_verified": true,
+      "source_page": "https://www.korea.kr/briefing/pressReleaseView.do?newsId=156754121",
+      "source_url": "https://www.korea.kr/common/download.do?fileId=198422462&tblKey=GMN",
+      "sha256": "338a76aa6700a769a432795f59a003a032607f47ac4f57c533981d3e116ba310"
+    },
+    {
+      "file": "mohw__보도참고_도수치료_관리급여_전환_3종_고시개정안_행정예고.hwpx",
+      "publisher": "보건복지부",
+      "kind": "보도자료",
+      "kogl": "KOGL-1",
+      "kogl_verified": true,
+      "source_page": "https://mohw.go.kr/board.es?act=view&bid=0027&list_no=1490937&mid=a10503010100",
+      "source_url": "https://mohw.go.kr/boardDownload.es?bid=0027&list_no=1490937&seq=1",
+      "sha256": "72fa704001c7a144589e8faa5069a0ffbacefa718710cd9327e216d6125e5c50"
+    },
+    {
+      "file": "kogl__붙임_개방지원_사업_신청서.hwp",
+      "publisher": "한국문화정보원(공공누리)",
+      "kind": "양식(신청서)",
+      "kogl": "KOGL-1",
+      "kogl_verified": true,
+      "kogl_measured_on": "2026-08-21",
+      "kogl_quote": "한국문화정보원이 제공한 본 저작물은 “공공누리” 제1유형:출처표시 조건에 따라 이용할 수 있습니다.",
+      "source_page": "https://www.kogl.or.kr/edu/eduDataView.do?dataIdx=58",
+      "source_url": "https://www.kogl.or.kr/edu/eduDataFileDown.do?dataIdx=58&dataFileIdx=2",
+      "sha256": "42919e899498c59a25f6e57eca932a02ee15f114c5fd32b047c4b8ce93c31f4b"
+    },
+    {
+      "file": "kogl__서식1_저작재산권_양도_계약서.hwp",
+      "publisher": "한국문화정보원(공공누리)",
+      "kind": "서식(계약서)",
+      "kogl": "KOGL-1",
+      "kogl_verified": true,
+      "kogl_measured_on": "2026-08-21",
+      "kogl_quote": "한국문화정보원이 제공한 본 저작물은 “공공누리” 제1유형:출처표시 조건에 따라 이용할 수 있습니다.",
+      "source_page": "https://www.kogl.or.kr/edu/eduDataView.do?dataIdx=131",
+      "source_url": "https://www.kogl.or.kr/edu/eduDataFileDown.do?dataIdx=131&dataFileIdx=1",
+      "sha256": "65df1316e43bb45580ca97011fbbabe63daec4cbdfa2b45b66300b8a637e9d79"
+    },
+    {
+      "file": "kogl__서식2_공공저작물_자유이용_허락_동의서.hwp",
+      "publisher": "한국문화정보원(공공누리)",
+      "kind": "서식(동의서)",
+      "kogl": "KOGL-1",
+      "kogl_verified": true,
+      "kogl_measured_on": "2026-08-21",
+      "kogl_quote": "한국문화정보원이 제공한 본 저작물은 “공공누리” 제1유형:출처표시 조건에 따라 이용할 수 있습니다.",
+      "source_page": "https://www.kogl.or.kr/edu/eduDataView.do?dataIdx=131",
+      "source_url": "https://www.kogl.or.kr/edu/eduDataFileDown.do?dataIdx=131&dataFileIdx=2",
+      "sha256": "5b4213ac34b91523c69aef1ed4290d243d0d372fb9052c16ed6840d8c480257a"
+    },
+    {
+      "file": "kogl__서식3_초상이용_동의서.hwp",
+      "publisher": "한국문화정보원(공공누리)",
+      "kind": "서식(동의서)",
+      "kogl": "KOGL-1",
+      "kogl_verified": true,
+      "kogl_measured_on": "2026-08-21",
+      "kogl_quote": "한국문화정보원이 제공한 본 저작물은 “공공누리” 제1유형:출처표시 조건에 따라 이용할 수 있습니다.",
+      "source_page": "https://www.kogl.or.kr/edu/eduDataView.do?dataIdx=131",
+      "source_url": "https://www.kogl.or.kr/edu/eduDataFileDown.do?dataIdx=131&dataFileIdx=3",
+      "sha256": "e39ba20523a12172b33cd9a934cbbffd1c91da906ef36278c883467e69196a12"
+    }
+  ]
+}
