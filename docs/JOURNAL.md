@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-21 (Grok 4.6) · #71 조판 코퍼스 커버리지
+- tag-layout + tag-corpus.mjs. 82건 지도. 혼합 0 / 각주 1 / 차트 1.
+- GOV 양식 4건(KOGL-1 실측). hwpxlib 데이터 49. 머지 금지.
+
 ## 2026-08-20 (Grok 4.6) · #64 데스크톱 D0
 - 3종 Intent 래퍼 + 필수 목록 + CI vitest. normalize 2종은 #65로 명시 제외.
 - sample-8p apply_intent_json 라운드트립 green. 셸 기동 확인. 머지 금지.

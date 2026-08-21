@@ -78,8 +78,9 @@ T0(#46)이 main에 착지했다. T1은 "제보가 게이트가 된다"를 실제
 |---|---|---|
 | `benchmarks/benchmark{,1,2}` + PDF | 3건 | **`layout-check` 줄 단위 오라클** (8==8·18==18·24==24) |
 | `corpus/hwp/` · `corpus/hwpx/` | 12 + 5 | 기능별 소품(수식·도형·OLE·필드·이미지) — 오라클 미적용 |
-| `corpus/hwpxlib_corpus/` | ~47 | Apache-2.0 **데이터**(코드 참조 금지) — 오라클 미적용 |
-| `corpus/GOV-SOURCES.md` + `scripts/fetch-gov-corpus.mjs` | 7건 | KOGL 실측 검증, **재배포 대신 재현**(sha256) |
+| `corpus/hwpxlib_corpus/` | 49 | Apache-2.0 **데이터**(코드 참조 금지) — 오라클 미적용. `scripts/fetch-hwpxlib-corpus.mjs` |
+| `corpus/GOV-SOURCES.md` + `gov-sources.json` | 보도 7 + 양식/서식 4 | KOGL 실측 검증, **재배포 대신 재현**(sha256) |
+| `corpus/TYPESET-COVERAGE.md` | 전 건 태깅 | 이슈 #71 커버리지 지도. `node scripts/tag-corpus.mjs` |
 | `corpus/private/` | 로컬 전용 | gitignore + SHA 잠금(modu-startup 6==6) |
 | `scripts/bench-corpus.sh` | 전수 스윕 | ⚠️ **"크래시 없이 통과"만** — 시각·조판 충실도 미검증 |
 

@@ -26,6 +26,10 @@ mod chart_render;
 mod eq_render;
 #[cfg(feature = "rhwp")]
 mod lift;
+#[cfg(feature = "rhwp")]
+mod source_tags;
+#[cfg(feature = "rhwp")]
+pub use source_tags::{source_layout_census, SourceLayoutCensus};
 
 #[cfg(not(feature = "rhwp"))]
 const NOT_WIRED: &str =

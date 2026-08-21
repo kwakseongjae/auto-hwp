@@ -6,6 +6,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 
 mod fill;
+mod inspect_layout;
 mod xlsx_roster;
 use hwp_model::types::SourceFormat;
 
@@ -172,6 +173,14 @@ enum Cmd {
         #[arg(long, value_name = "SECTION/BLOCK")]
         cells: Option<String>,
     },
+    /// Issue #71: tag typesetting elements actually present in the file (JSON array on stdout).
+    /// Opens the file with the production parser; HWPX also scans source XML so dropped IR
+    /// cannot hide forms/headers. `--features rhwp` is required for binary `.hwp`.
+    TagLayout {
+        /// One or more `.hwp` / `.hwpx` files.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+    },
     /// PIVOT M0: project an HWPX into a JSX(content)+CSS(design) project directory
     /// (project.json, document.jsx, sections/, styles/document.css, assets/). HWPX-only.
     OpenProject {
@@ -331,6 +340,7 @@ fn run() -> Result<(), String> {
             out,
             verify,
         } => edit(&file, &append, &out, verify)?,
+        Cmd::TagLayout { files } => inspect_layout::run(&files)?,
         Cmd::Inspect { file, out } => fill::run_inspect(&file, out.as_deref())?,
         Cmd::Fill {
             template,
