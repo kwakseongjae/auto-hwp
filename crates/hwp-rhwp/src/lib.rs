@@ -1279,10 +1279,20 @@ pub struct CellLineMismatch {
 
 #[cfg(feature = "rhwp")]
 fn is_generated_object_paragraph(p: &Paragraph) -> bool {
-    p.runs
-        .iter()
-        .flat_map(|r| &r.content)
-        .any(|i| matches!(i, Inline::Image(_) | Inline::Equation(_) | Inline::Chart(_)))
+    // Extra lift paragraphs still emitted for equations/charts (`object_paragraph`). Pictures ride
+    // on the host (issue 82); skipping an image-bearing host would drop the rhwp-paired cell para.
+    let mut has_visible = false;
+    let mut has_eq_or_chart = false;
+    for inl in p.runs.iter().flat_map(|r| &r.content) {
+        match inl {
+            Inline::Text(t) if t.chars().any(|c| c != '\u{FFFC}' && !c.is_whitespace()) => {
+                has_visible = true;
+            }
+            Inline::Equation(_) | Inline::Chart(_) => has_eq_or_chart = true,
+            _ => {}
+        }
+    }
+    has_eq_or_chart && !has_visible
 }
 
 #[cfg(feature = "rhwp")]

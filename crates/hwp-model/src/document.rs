@@ -345,11 +345,26 @@ pub struct FieldMarker {
     pub command: String,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct ImageRef {
     pub bin_ref: String,
     pub width: HwpUnit,
     pub height: HwpUnit,
+    /// When false the picture is a floating wrap object: still drawn, but its box is not a body
+    /// line. Hancom stores the host's lineseg at text height (issue 82: issue_265.hwp). Default
+    /// true preserves the previous "always reserve" behaviour for HWPX / inserted images.
+    pub treat_as_char: bool,
+}
+
+impl Default for ImageRef {
+    fn default() -> Self {
+        Self {
+            bin_ref: String::new(),
+            width: 0,
+            height: 0,
+            treat_as_char: true,
+        }
+    }
 }
 
 /// A 수식. The `script` is HWP's equation markup (e.g. `"1 over 2"`), which is the SAME language as

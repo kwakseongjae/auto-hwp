@@ -322,6 +322,7 @@ fn t5_raw_and_passthrough_byte_identical() {
                 bin_ref: "img1".into(),
                 width: 100,
                 height: 200,
+                ..Default::default()
             }),
             Inline::Equation(EquationRef {
                 script: "1 over 2".into(),

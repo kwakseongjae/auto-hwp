@@ -1634,7 +1634,7 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             sec.blocks.insert(at, Block::Paragraph(Paragraph {
                 runs: vec![Run {
                     char_shape: plain,
-                    content: vec![Inline::Image(ImageRef { bin_ref, width: *width, height: *height })],
+                    content: vec![Inline::Image(ImageRef { bin_ref, width: *width, height: *height, ..Default::default() })],
                     ..Default::default()
                 }],
                 dirty: Dirty(true),

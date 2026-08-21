@@ -696,6 +696,7 @@ mod tests {
                 bin_ref: "img1".into(),
                 width: 10000,
                 height: 8000,
+                ..Default::default()
             })],
             ..Default::default()
         });
@@ -836,6 +837,7 @@ mod tests {
                 bin_ref: "photo".into(),
                 width: 10000,
                 height: 8000,
+                ..Default::default()
             })],
             ..Default::default()
         });
@@ -875,6 +877,7 @@ mod tests {
                 bin_ref: "eq".into(),
                 width: 10000,
                 height: 8000,
+                ..Default::default()
             })],
             ..Default::default()
         });

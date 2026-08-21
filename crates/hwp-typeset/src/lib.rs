@@ -1029,7 +1029,10 @@ fn object_height(p: &Paragraph) -> i32 {
     for run in &p.runs {
         for inl in &run.content {
             match inl {
-                Inline::Image(img) => h = h.max(img.height),
+                // Floating wrap pictures (!treat_as_char) do not advance the body: Hancom's
+                // host lineseg stays at text height (issue 82). Treat-as-char / HWPX pics still
+                // reserve the box (LOCKSTEP with place_doc via the same layout_paragraph).
+                Inline::Image(img) if img.treat_as_char => h = h.max(img.height),
                 Inline::Equation(eq) => h = h.max(eq.height),
                 // Issue 062-7: LOCKSTEP with place_doc's paragraph_object — a chart reserves the same
                 // stored-size box in the NaiveLayout twin, so pagination stays identical across both.

@@ -1612,6 +1612,13 @@ enum RunPiece {
     /// An INLINE 수식 (a run-level `<hp:equation>` beside text) — needs a unique element id, so it is
     /// rendered at emit time like [`RunPiece::Note`], not pre-rendered.
     Equation(EquationRef),
+    /// An INLINE 그림 (a run-level `<hp:pic>` beside text). Image-ONLY paragraphs still use
+    /// [`EmitBlock::Image`]; mixed hosts (issue 82) must not drop their text.
+    Image {
+        bin_ref: String,
+        width: i32,
+        height: i32,
+    },
     /// A foot/endnote whose body is emitted (via `emit_cell_content`) into a `<hp:subList>` inside
     /// the note ctrl — needs the emit context, so it's rendered at emit time, not pre-rendered.
     Note {
@@ -1691,15 +1698,25 @@ fn dirty_appended(b: &Block) -> bool {
 /// Project a `Block` to an `EmitBlock` UNCONDITIONALLY (the dirty gate lives in [`dirty_emit`]).
 /// Used for cell content, which is always emitted in full when its enclosing table is — recursing
 /// into nested tables.
+fn paragraph_has_visible_text(p: &Paragraph) -> bool {
+    p.runs.iter().flat_map(|r| &r.content).any(|i| match i {
+        // U+FFFC is the picture/equation control placeholder, not author text.
+        Inline::Text(t) => t.chars().any(|c| c != '\u{FFFC}' && !c.is_whitespace()),
+        _ => false,
+    })
+}
+
 fn project_block(b: &Block) -> EmitBlock {
     match b {
-        // An image-bearing paragraph (the v2 lift emits each picture as its own paragraph) becomes
-        // an EmitBlock::Image — checked BEFORE the text path, since para_runs() drops Inline::Image.
+        // Image-ONLY paragraph (no author text) → EmitBlock::Image. Mixed hosts — a picture
+        // control riding on a real text paragraph (issue 82 .hwp lift) — fall through to Para
+        // so the text is not dropped ("사용자 콘텐츠 삭제 금지"). Same guard as equations.
         Block::Paragraph(p)
             if p.runs
                 .iter()
                 .flat_map(|r| &r.content)
-                .any(|i| matches!(i, Inline::Image(_))) =>
+                .any(|i| matches!(i, Inline::Image(_)))
+                && !paragraph_has_visible_text(p) =>
         {
             let im = p
                 .runs
@@ -1845,6 +1862,7 @@ fn para_runs(p: &Paragraph) -> Vec<RunPiece> {
                     | Inline::Bookmark(_)
                     | Inline::Note(_)
                     | Inline::Equation(_)
+                    | Inline::Image(_)
             )
         })
     };
@@ -1890,6 +1908,14 @@ fn para_runs(p: &Paragraph) -> Vec<RunPiece> {
                 Inline::Equation(eq) => {
                     flush(&mut text, &mut out);
                     out.push(RunPiece::Equation(eq.clone()));
+                }
+                Inline::Image(im) => {
+                    flush(&mut text, &mut out);
+                    out.push(RunPiece::Image {
+                        bin_ref: im.bin_ref.clone(),
+                        width: im.width,
+                        height: im.height,
+                    });
                 }
                 Inline::Bookmark(name) => {
                     flush(&mut text, &mut out);
@@ -2021,12 +2047,20 @@ fn emit_pic(
     base_para_ref: &str,
     plain_ref: &str,
 ) {
+    out.push_str(&format!(
+        "<hp:p id=\"{pid}\" paraPrIDRef=\"{base_para_ref}\" styleIDRef=\"0\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\"><hp:run charPrIDRef=\"{plain_ref}\">{}<hp:t></hp:t></hp:run></hp:p>",
+        pic_xml(picid, bin_ref, w, h)
+    ));
+}
+
+/// The bare `<hp:pic …>…</hp:pic>` element (no paragraph/run wrapper) — shared by the
+/// own-paragraph emitter above and the INLINE run piece (a picture beside text, issue 82).
+fn pic_xml(picid: u64, bin_ref: &str, w: i32, h: i32) -> String {
     let w = w.max(1);
     let h = h.max(1);
     let (cx, cy) = (w / 2, h / 2);
-    out.push_str(&format!(
-        "<hp:p id=\"{pid}\" paraPrIDRef=\"{base_para_ref}\" styleIDRef=\"0\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\"><hp:run charPrIDRef=\"{plain_ref}\">\
-<hp:pic id=\"{picid}\" zOrder=\"0\" numberingType=\"PICTURE\" textWrap=\"TOP_AND_BOTTOM\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"{picid}\" reverse=\"0\">\
+    format!(
+        "<hp:pic id=\"{picid}\" zOrder=\"0\" numberingType=\"PICTURE\" textWrap=\"TOP_AND_BOTTOM\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" href=\"\" groupLevel=\"0\" instid=\"{picid}\" reverse=\"0\">\
 <hp:offset x=\"0\" y=\"0\"/><hp:orgSz width=\"{w}\" height=\"{h}\"/><hp:curSz width=\"{w}\" height=\"{h}\"/>\
 <hp:flip horizontal=\"0\" vertical=\"0\"/><hp:rotationInfo angle=\"0\" centerX=\"{cx}\" centerY=\"{cy}\" rotateimage=\"1\"/>\
 <hp:renderingInfo><hc:transMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:scaMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/><hc:rotMatrix e1=\"1\" e2=\"0\" e3=\"0\" e4=\"0\" e5=\"1\" e6=\"0\"/></hp:renderingInfo>\
@@ -2036,9 +2070,8 @@ fn emit_pic(
 <hp:imgDim dimwidth=\"{w}\" dimheight=\"{h}\"/><hp:effects/>\
 <hp:sz width=\"{w}\" widthRelTo=\"ABSOLUTE\" height=\"{h}\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/>\
 <hp:pos treatAsChar=\"1\" affectLSpacing=\"0\" flowWithText=\"1\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PARA\" horzRelTo=\"PARA\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"0\" horzOffset=\"0\"/>\
-<hp:outMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/></hp:pic>\
-<hp:t></hp:t></hp:run></hp:p>"
-    ));
+<hp:outMargin left=\"0\" right=\"0\" top=\"0\" bottom=\"0\"/></hp:pic>"
+    )
 }
 
 /// Emit a 수식 as an inline (`treatAsChar`) `<hp:equation>` wrapped in its own `<hp:p>`. The HWP
@@ -2144,6 +2177,19 @@ fn emit_paragraph(
                     "<hp:run charPrIDRef=\"{}\">{}<hp:t></hp:t></hp:run>",
                     ctx.plain_ref,
                     equation_xml(eqid, eq)
+                ));
+            }
+            RunPiece::Image {
+                bin_ref,
+                width,
+                height,
+            } => {
+                let picid = *next_id;
+                *next_id += 1;
+                out.push_str(&format!(
+                    "<hp:run charPrIDRef=\"{}\">{}<hp:t></hp:t></hp:run>",
+                    ctx.plain_ref,
+                    pic_xml(picid, bin_ref, *width, *height)
                 ));
             }
             RunPiece::Note {
@@ -2455,6 +2501,52 @@ mod tests {
                 .count(),
             1,
             "수식도 인라인 조각으로 함께 나가야 한다"
+        );
+    }
+
+    fn img_ref() -> ImageRef {
+        ImageRef {
+            bin_ref: "image1".into(),
+            width: 4000,
+            height: 3000,
+            ..Default::default()
+        }
+    }
+
+    /// Issue 82: a picture riding on a text host must not become EmitBlock::Image (that drops
+    /// the text). Image-only paragraphs keep the dedicated object path.
+    #[test]
+    fn image_only_paragraph_emits_as_object_mixed_one_keeps_its_text() {
+        let only = para_with(vec![Inline::Image(img_ref())]);
+        assert!(matches!(project_block(&only), EmitBlock::Image { .. }));
+
+        let placeholder = para_with(vec![
+            Inline::Text("\u{FFFC}".into()),
+            Inline::Image(img_ref()),
+        ]);
+        assert!(
+            matches!(project_block(&placeholder), EmitBlock::Image { .. }),
+            "U+FFFC 자리표시만 있는 호스트는 그림 전용 문단으로 나간다"
+        );
+
+        let mixed = para_with(vec![Inline::Text("본문".into()), Inline::Image(img_ref())]);
+        let EmitBlock::Para { runs, .. } = project_block(&mixed) else {
+            panic!("텍스트+그림 호스트는 Para 로 나가야 한다");
+        };
+        let texts: String = runs
+            .iter()
+            .filter_map(|p| match p {
+                RunPiece::Text(t, _) => Some(t.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(texts, "본문", "그림 옆 텍스트가 살아 있어야 한다");
+        assert_eq!(
+            runs.iter()
+                .filter(|p| matches!(p, RunPiece::Image { .. }))
+                .count(),
+            1,
+            "그림도 인라인 조각으로 함께 나가야 한다"
         );
     }
 
