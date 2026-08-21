@@ -573,8 +573,8 @@ struct RunMeta {
     structural: bool,
 }
 
-/// 본문이 아닌 서브바디 프레임(머리말/꼬리말/각주/미주). 여는 태그에서 `blocks` 스택에 프레임을
-/// 밀고 이 값을 함께 쌓아, 닫는 태그에서 어디로 보낼지를 결정한다 — `<hp:tc>` 와 같은 규율.
+/// 본문이 아닌 서브바디 프레임(머리말/꼬리말/각주/미주/필드 본문). 여는 태그에서 `blocks` 스택에
+/// 프레임을 밀고 이 값을 함께 쌓아, 닫는 태그에서 어디로 보낼지를 결정한다 — `<hp:tc>` 와 같은 규율.
 enum SubFrame {
     Deco {
         kind: DecoKind,
@@ -587,6 +587,8 @@ enum SubFrame {
         suffix_char: u16,
         inst_id: u32,
     },
+    /// `<hp:fieldBegin>` 안의 `<hp:subList>` (한컴 메모 풍선 등). 셀/본문 조판에 넣으면 안 된다.
+    FieldBody,
 }
 
 /// `<hp:p pageBreak="…">` 을 불리언으로 (이슈 080). OWPML 은 `0|1` 을 쓰지만 일부 변환기가
@@ -788,10 +790,20 @@ fn parse_section(
                         in_script = true;
                         mark_not_simple(&mut paras);
                     }
-                    // 필드(하이퍼링크/누름틀/상호참조) 시작 — `<hp:parameters>` 자식을 가지므로 Start.
+                    // 필드(하이퍼링크/누름틀/상호참조/메모) 시작 — `<hp:parameters>` 자식을 가지므로 Start.
+                    // MEMO 만 내부 `<hp:subList>` 문단(풍선 본문)을 품는다. 프레임을 안 밀면 그
+                    // 문단이 셀/본문 조판으로 새어 행 높이가 폭주한다(이슈 78: 11mm 셀이 74줄).
+                    // HYPERLINK/FORMULA/CLICK_HERE 는 parameters 만 있고 보이는 글자는 호스트
+                    // 문단의 fieldBegin~fieldEnd 사이라 프레임이 필요 없다.
                     b"fieldBegin" => {
-                        field = Some(FieldAccum::from_attrs(&e));
+                        let fa = FieldAccum::from_attrs(&e);
+                        let isolate_memo = fa.field_type.eq_ignore_ascii_case("MEMO");
+                        field = Some(fa);
                         mark_not_simple(&mut paras);
+                        if isolate_memo {
+                            blocks.push(Vec::new());
+                            subs.push(SubFrame::FieldBody);
+                        }
                     }
                     // 필드의 `Command` 파라미터(하이퍼링크 URL 등)만 본문 텍스트로 모은다.
                     b"stringParam" if field.is_some() => {
@@ -1018,6 +1030,11 @@ fn parse_section(
                 }
                 b"fieldBegin" => {
                     if let Some(f) = field.take() {
+                        if matches!(subs.last(), Some(SubFrame::FieldBody)) {
+                            let _ = subs.pop();
+                            // 메모 풍선 본문. 호스트 문단은 non-simple 이라 원문 XML 이 왕복한다.
+                            let _body = blocks.pop();
+                        }
                         push_pending(&mut paras, Inline::FieldBegin(f.into_marker()));
                     }
                 }
@@ -1137,6 +1154,9 @@ fn parse_section(
                                     // 그래도 콘텐츠를 버리지는 않는다(현행 동작과 동일한 자리로).
                                     target.extend(body);
                                 }
+                            }
+                            SubFrame::FieldBody => {
+                                // `</hp:fieldBegin>` 이 정상 닫힘. 여기로 오면 태그 짝이 틀린 XML.
                             }
                         }
                     }
@@ -1800,6 +1820,63 @@ pub(crate) mod tests {
             })
             .collect();
         assert_eq!(order, ["e", "b"]);
+    }
+
+    /// 이슈 78: 메모 필드 본문(`fieldBegin type="MEMO"` 의 내부 subList)은 셀 조판으로 새면 안 된다.
+    /// 보이는 셀 글자(`35%`)만 남고, 풍선 안 장문은 버려진다(호스트는 non-simple → XML 왕복).
+    #[test]
+    fn memo_field_body_does_not_leak_into_table_cell() {
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run><hp:tbl rowCnt="1" colCnt="1" noAdjust="0"><hp:tr>
+          <hp:tc><hp:subList lineWrap="BREAK">
+            <hp:p><hp:run>
+              <hp:ctrl><hp:fieldBegin id="9" type="MEMO">
+                <hp:parameters cnt="1" name=""><hp:stringParam name="Command">MEMO</hp:stringParam></hp:parameters>
+                <hp:subList>
+                  <hp:p><hp:run><hp:t>풍선장문 논술형 35% 이상 단, 보통교과의 체육·예술</hp:t></hp:run></hp:p>
+                </hp:subList>
+              </hp:fieldBegin></hp:ctrl>
+              <hp:t>35%</hp:t>
+              <hp:ctrl><hp:fieldEnd beginIDRef="9"/></hp:ctrl>
+            </hp:run></hp:p>
+          </hp:subList>
+          <hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/>
+          <hp:cellSz width="3215" height="2928"/>
+          </hp:tc></hp:tr></hp:tbl></hp:run></hp:p></hs:sec>"#;
+        let blocks = parse_sec(xml);
+        let text = body_text(&blocks);
+        assert!(
+            text.contains("35%"),
+            "셀에 보이는 글자가 있어야 한다: {text}"
+        );
+        assert!(
+            !text.contains("풍선장문"),
+            "메모 풍선 본문이 셀/본문으로 샜다: {text}"
+        );
+        assert!(
+            !text.contains("보통교과"),
+            "메모 풍선 장문이 셀/본문으로 샜다: {text}"
+        );
+        let inls = all_inlines(&blocks);
+        assert!(
+            inls.iter()
+                .any(|i| matches!(i, Inline::FieldBegin(m) if m.id == 9 && m.field_type == "MEMO")),
+            "FieldBegin 마커는 남아야 한다"
+        );
+        assert!(
+            inls.iter()
+                .any(|i| matches!(i, Inline::FieldEnd(id) if *id == 9)),
+            "FieldEnd 마커는 남아야 한다"
+        );
+        let cell_paras = blocks.iter().find_map(|b| match b {
+            Block::Table(t) => t.cells.first().map(|c| {
+                c.blocks
+                    .iter()
+                    .filter(|b| matches!(b, Block::Paragraph(p) if !p.is_table_anchor))
+                    .count()
+            }),
+            _ => None,
+        });
+        assert_eq!(cell_paras, Some(1), "메모 문단이 셀에 추가되면 안 된다");
     }
 
     /// 파라미터 없는 self-closing `<hp:fieldBegin/>` 도 실물에 있다.
