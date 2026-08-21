@@ -2,7 +2,7 @@
 
 재현: `node scripts/tag-corpus.mjs` (이슈 #71). 생성 2026-08-21. 태그는 파일명 추정이 아니라 `auto-hwp tag-layout`이 파일을 열어 확인한 결과다.
 
-오라클(`layout-check` 줄 단위)이 도는 대상은 **게이트 3건**뿐이고, 나머지 축은 침묵한다. 빈칸 우선순위는 TYPESET-ROADMAP §0의 침묵 축이 먼저다.
+요소 태깅 지도다. 줄 단위 정합 점수는 `corpus/TYPESET-ORACLE.md`(이슈 #72, `node scripts/oracle-sweep.mjs`)가 전수 채점한다. 빈칸 우선순위는 TYPESET-ROADMAP §0의 침묵 축이 먼저다.
 
 ## 문서 수
 

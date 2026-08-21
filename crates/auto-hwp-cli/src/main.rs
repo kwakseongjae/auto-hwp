@@ -7,6 +7,7 @@ use clap::{Parser, Subcommand};
 
 mod fill;
 mod inspect_layout;
+mod layout_score;
 mod xlsx_roster;
 use hwp_model::types::SourceFormat;
 
@@ -157,10 +158,13 @@ enum Cmd {
     },
     /// Score our own layout engine against Hancom's stored `<hp:lineseg>` layout (page count and
     /// paragraph/cell line-count matches). Original HWP and Hancom-authored HWPX carry this oracle;
-    /// normalized/converted HWPX may not. HWPX enters through the production parser, so parser drift
-    /// is visible too. Needs `--features rhwp`.
+    /// normalized/converted HWPX may not — those are **unscorable**, not 0%. HWPX enters through the
+    /// production parser, so parser drift is visible too. Needs `--features rhwp`.
+    /// Scores are a stored-lineseg regression lock, not Hangul's live renderer (issue #72).
     LayoutCheck {
-        file: PathBuf,
+        /// One file (human summary) or many (`--json` batch).
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
         /// Diagnostic (issue 020): per-row height audit of ONE table — OUR reserved row heights
         /// (term-decomposed: lines × EM × linespace + 위/아래 간격 + CELL_PAD) vs Hancom's actual
         /// (rhwp-parsed) cell heights + lineseg sums. Format `<section>/<block>` indexing OUR lifted
@@ -172,6 +176,10 @@ enum Cmd {
         /// or `all`. The normal summary always includes the document-wide cell-lineseg score.
         #[arg(long, value_name = "SECTION/BLOCK")]
         cells: Option<String>,
+        /// JSON array of per-file scores (issue #72 corpus sweep). No cell text. Incompatible with
+        /// `--rows`/`--cells`.
+        #[arg(long)]
+        json: bool,
     },
     /// Issue #71: tag typesetting elements actually present in the file (JSON array on stdout).
     /// Opens the file with the production parser; HWPX also scans source XML so dropped IR
@@ -321,8 +329,22 @@ fn run() -> Result<(), String> {
         Cmd::View { file, out } => view(&file, &out)?,
         Cmd::Convert { file, out, verify } => convert(&file, out, verify)?,
         Cmd::VerifyConvert { file, out } => verify_convert(&file, &out)?,
-        Cmd::LayoutCheck { file, rows, cells } => {
-            layout_check(&file, rows.as_deref(), cells.as_deref())?
+        Cmd::LayoutCheck {
+            files,
+            rows,
+            cells,
+            json,
+        } => {
+            if json {
+                if rows.is_some() || cells.is_some() {
+                    return Err("--json cannot be combined with --rows/--cells".into());
+                }
+                layout_score::run_json(&files)?;
+            } else if files.len() != 1 {
+                return Err("layout-check (human) takes one file; pass --json for a batch".into());
+            } else {
+                layout_check(&files[0], rows.as_deref(), cells.as_deref())?;
+            }
         }
         Cmd::OpenProject { file, out_dir } => open_project(&file, &out_dir)?,
         Cmd::ExportHtml { file, out } => export_html(&file, &out)?,
@@ -1185,6 +1207,10 @@ fn layout_check(file: &PathBuf, rows: Option<&str>, cells: Option<&str>) -> Resu
     );
     println!("  문단       {} 개 대조", f.paragraphs);
     println!(
+        "    저장 lineseg 있음 {:>5} · 없음 {:>5}  (없음=빈 문단 또는 캐시 제거)",
+        f.body_paragraphs_with_oracle, f.body_paragraphs_missing_oracle
+    );
+    println!(
         "    줄수 정확 일치   {:>5} ({:.1}%)",
         f.line_exact,
         pct(f.line_exact)
@@ -1229,6 +1255,13 @@ fn layout_check(file: &PathBuf, rows: Option<&str>, cells: Option<&str>) -> Resu
         println!(
             "    ⚠ 셀 lineseg oracle 없음: 변환/정규화 HWPX가 레이아웃 캐시를 제거했을 수 있음"
         );
+    }
+    let scorable = f.body_paragraphs_with_oracle > 0 || f.cell_paragraphs > 0;
+    if !scorable {
+        println!(
+            "  ⚠ 채점 불가: 저장 linesegarray가 비어 있다 (변환/정규화 HWPX). 이 문서는 0점이 아니다."
+        );
+        println!("     점수는 한/글의 참값이 아니라 저장 lineseg 기준의 회귀 잠금이다.");
     }
     if let Some(spec) = cells {
         let filter = if spec.eq_ignore_ascii_case("all") {

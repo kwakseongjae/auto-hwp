@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-21 (Grok 4.6) · #72 오라클 전수 스윕
+- layout-check --json + oracle-sweep. 82건 채점가능 79 / 불가 3. 참값 아님.
+- 최저 축 header_footer·footnote·multicolumn. 게이트 무변경. 머지 금지.
+
 ## 2026-08-21 (Grok 4.6) · #71 조판 코퍼스 커버리지
 - PR #76. tag-layout + tag-corpus.mjs. 82건. 혼합 0 / 각주 1 / 차트 1.
 - GOV 양식 4건(KOGL-1 실측). hwpxlib 데이터 49. 머지 금지.

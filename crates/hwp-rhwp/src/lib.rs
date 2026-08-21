@@ -1207,6 +1207,13 @@ pub struct LayoutFidelity {
     pub our_pages: usize,
     /// Top-level body paragraphs compared (rhwp ↔ our, 1:1 in document order).
     pub paragraphs: usize,
+    /// Body paragraphs with a real stored `<hp:lineseg>` (non-empty, not a missing-oracle
+    /// placeholder). Converted/normalized HWPX often has none — those documents are **unscorable**,
+    /// not 0%. The legacy body score below still uses `line_segs.len().max(1)` so the existing
+    /// 98.9% gate numbers do not move.
+    pub body_paragraphs_with_oracle: usize,
+    /// Body paragraphs whose stored lineseg cache is empty or a missing-oracle placeholder.
+    pub body_paragraphs_missing_oracle: usize,
     /// Paragraphs whose line count matches Hancom's exactly.
     pub line_exact: usize,
     /// Paragraphs within ±1 line of Hancom's.
@@ -1517,6 +1524,16 @@ pub fn layout_fidelity_for_doc(bytes: &[u8], our: &SemanticDoc) -> Result<Layout
         });
         for rp in &rsec.paragraphs {
             let Some(op) = our_paras.next() else { break };
+            let stored = rp
+                .line_segs
+                .iter()
+                .filter(|ls| !ls.is_missing_lineseg_placeholder())
+                .count();
+            if stored == 0 {
+                f.body_paragraphs_missing_oracle += 1;
+            } else {
+                f.body_paragraphs_with_oracle += 1;
+            }
             let oracle = rp.line_segs.len().max(1); // an empty paragraph still occupies one line
             let ours = layout_paragraph(op, our, body_w, &fonts).len();
             f.paragraphs += 1;
@@ -1880,6 +1897,15 @@ mod cell_lineseg_gate_tests {
         assert_eq!(
             f.cell_paragraphs_missing_oracle, 0,
             "{name}: canonical HWP must retain every cell lineseg oracle"
+        );
+        assert!(
+            f.body_paragraphs_with_oracle > 0,
+            "{name}: canonical HWP must retain body linesegs"
+        );
+        assert_eq!(
+            f.body_paragraphs_with_oracle + f.body_paragraphs_missing_oracle,
+            f.paragraphs,
+            "{name}: body oracle counters must partition paragraphs"
         );
     }
 
