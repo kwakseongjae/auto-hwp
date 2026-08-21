@@ -573,7 +573,7 @@ struct RunMeta {
     structural: bool,
 }
 
-/// 본문이 아닌 서브바디 프레임(머리말/꼬리말/각주/미주/필드 본문). 여는 태그에서 `blocks` 스택에
+/// 본문이 아닌 서브바디 프레임(머리말/꼬리말/각주/미주/필드 본문/도형글). 여는 태그에서 `blocks` 스택에
 /// 프레임을 밀고 이 값을 함께 쌓아, 닫는 태그에서 어디로 보낼지를 결정한다 — `<hp:tc>` 와 같은 규율.
 enum SubFrame {
     Deco {
@@ -589,6 +589,10 @@ enum SubFrame {
     },
     /// `<hp:fieldBegin>` 안의 `<hp:subList>` (한컴 메모 풍선 등). 셀/본문 조판에 넣으면 안 된다.
     FieldBody,
+    /// 도형 텍스트상자(`<hp:drawText><hp:subList>`)·표 캡션(`<hp:caption><hp:subList>`).
+    /// 한컴은 본문 문단 스트림에 넣지 않는다(overlay / 표 부속). 프레임이 없으면 그 안의
+    /// `<hp:p>` 가 섹션 루트로 새어 문단 짝이 밀리고 쪽수가 늘어난다(이슈 80: 재난안전 +82문단).
+    Overlay,
 }
 
 /// `<hp:p pageBreak="…">` 을 불리언으로 (이슈 080). OWPML 은 `0|1` 을 쓰지만 일부 변환기가
@@ -842,6 +846,18 @@ fn parse_section(
                             suffix_char: attr_wchar(&e, b"suffixChar"),
                             inst_id: attr_u64(&e, b"instId").unwrap_or(0) as u32,
                         });
+                    }
+                    // 도형 글상자 / 표 캡션 — 메모 풍선과 같은 구멍. 한컴 lineseg 오라클의 **본문**
+                    // 문단 스트림에 없고, 섹션 루트로 새면 짝이 밀린다(이슈 80).
+                    // 셀 안의 drawText 는 rhwp 도 셀 문단으로 세므로 프레임을 밀면 셀 구조 불일치가
+                    // 늘어난다 — 본문으로 새는 경우만 격리한다.
+                    b"drawText" | b"caption" => {
+                        mark_not_simple(&mut paras);
+                        let in_cell = tbls.last().is_some_and(|f| f.cell.is_some());
+                        if !in_cell {
+                            blocks.push(Vec::new());
+                            subs.push(SubFrame::Overlay);
+                        }
                     }
                     // Structural children (secPr/ctrl/equation/container/…) make a paragraph NOT
                     // re-emittable from the lossy AST. `linesegarray`/`lineseg` are layout CACHE —
@@ -1155,10 +1171,19 @@ fn parse_section(
                                     target.extend(body);
                                 }
                             }
-                            SubFrame::FieldBody => {
-                                // `</hp:fieldBegin>` 이 정상 닫힘. 여기로 오면 태그 짝이 틀린 XML.
+                            SubFrame::FieldBody | SubFrame::Overlay => {
+                                // `</hp:fieldBegin>` / `</hp:drawText>` 가 정상 닫힘. 여기로 오면
+                                // 태그 짝이 틀린 XML — 프레임만 버린다.
                             }
                         }
+                    }
+                }
+                // 도형 글상자 / 표 캡션 프레임을 닫는다. 본문·셀로 보내지 않는다(호스트는
+                // non-simple 이라 원문 XML 이 왕복). 여는 태그 없이 닫히면 루트 프레임을 지킨다.
+                b"drawText" | b"caption" => {
+                    if matches!(subs.last(), Some(SubFrame::Overlay)) {
+                        let _ = subs.pop();
+                        let _ = blocks.pop();
                     }
                 }
                 b"tc" => {
@@ -1877,6 +1902,121 @@ pub(crate) mod tests {
             _ => None,
         });
         assert_eq!(cell_paras, Some(1), "메모 문단이 셀에 추가되면 안 된다");
+    }
+
+    /// 이슈 80: 도형 텍스트상자(`<hp:drawText><hp:subList>`) 문단은 본문이 아니다.
+    /// 프레임이 없으면 커버 제목·글상자가 본문 스트림에 끼어 문단 짝이 밀린다.
+    #[test]
+    fn draw_text_body_does_not_leak_into_section_blocks() {
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p id="1"><hp:run>
+          <hp:container>
+            <hp:rect>
+              <hp:drawText>
+                <hp:subList>
+                  <hp:p><hp:run><hp:t>ZZDRAWTEXTZZ</hp:t></hp:run></hp:p>
+                </hp:subList>
+              </hp:drawText>
+            </hp:rect>
+          </hp:container>
+          <hp:t>본문 한 줄</hp:t>
+        </hp:run></hp:p></hs:sec>"#;
+        let blocks = parse_sec(xml);
+        let text = body_text(&blocks);
+        assert!(text.contains("본문 한 줄"), "본문은 그대로: {text}");
+        assert!(
+            !text.contains("ZZDRAWTEXTZZ"),
+            "도형 글상자가 본문으로 샜다: {text}"
+        );
+        assert_eq!(blocks.len(), 1, "호스트 문단 하나뿐");
+    }
+
+    /// 이슈 80: 표 캡션(`<hp:caption><hp:subList>`)도 본문 문단 스트림이 아니다.
+    #[test]
+    fn table_caption_does_not_leak_into_section_blocks() {
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p id="1"><hp:run>
+          <hp:tbl rowCnt="1" colCnt="1">
+            <hp:caption>
+              <hp:subList>
+                <hp:p><hp:run><hp:t>ZZCAPTIONZZ</hp:t></hp:run></hp:p>
+              </hp:subList>
+            </hp:caption>
+            <hp:tr><hp:tc>
+              <hp:cellAddr colAddr="0" rowAddr="0"/>
+              <hp:cellSpan colSpan="1" rowSpan="1"/>
+              <hp:subList><hp:p><hp:run><hp:t>셀</hp:t></hp:run></hp:p></hp:subList>
+            </hp:tc></hp:tr>
+          </hp:tbl>
+        </hp:run></hp:p></hs:sec>"#;
+        let blocks = parse_sec(xml);
+        let text = body_text(&blocks);
+        assert!(text.contains("셀"), "셀 글자는 있어야 한다: {text}");
+        assert!(
+            !text.contains("ZZCAPTIONZZ"),
+            "표 캡션이 본문으로 샜다: {text}"
+        );
+        let n_para = blocks
+            .iter()
+            .filter(|b| matches!(b, Block::Paragraph(p) if !p.is_table_anchor))
+            .count();
+        assert_eq!(n_para, 0, "캡션이 본문 문단으로 나오면 안 된다");
+    }
+
+    /// 셀 안 글상자는 rhwp 셀 문단 스트림에 남는다 — 본문 격리만 하고 셀 짝은 건드리지 않는다.
+    #[test]
+    fn draw_text_inside_cell_stays_in_the_cell() {
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p id="1"><hp:run>
+          <hp:tbl rowCnt="1" colCnt="1"><hp:tr><hp:tc>
+            <hp:cellAddr colAddr="0" rowAddr="0"/>
+            <hp:cellSpan colSpan="1" rowSpan="1"/>
+            <hp:subList>
+              <hp:p><hp:run>
+                <hp:t>셀</hp:t>
+                <hp:rect>
+                  <hp:drawText>
+                    <hp:subList>
+                      <hp:p><hp:run><hp:t>ZZCELLBOXZZ</hp:t></hp:run></hp:p>
+                    </hp:subList>
+                  </hp:drawText>
+                </hp:rect>
+              </hp:run></hp:p>
+            </hp:subList>
+          </hp:tc></hp:tr></hp:tbl>
+        </hp:run></hp:p></hs:sec>"#;
+        let blocks = parse_sec(xml);
+        let text = body_text(&blocks);
+        assert!(text.contains("셀"), "셀 글자: {text}");
+        assert!(
+            text.contains("ZZCELLBOXZZ"),
+            "셀 안 글상자는 셀에 남아야 한다: {text}"
+        );
+    }
+
+    /// 실물 회귀(이슈 80): 재난안전 HWPX 의 본문 문단 수는 rhwp 의 754+10(구역1) 과 같아야 한다.
+    /// drawText/caption 이 새면 ~82개가 더 생긴다.
+    #[test]
+    fn disaster_hwpx_body_para_count_matches_source_stream() {
+        let p = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/hwpxlib_corpus/error/20250808/2015년_12월_재난안전종합상황_분석_및_전망.hwpx"
+        );
+        let Ok(bytes) = std::fs::read(p) else {
+            return;
+        };
+        let doc = parse_semantic(&bytes).expect("parse");
+        let n: usize = doc
+            .sections
+            .iter()
+            .map(|s| {
+                s.blocks
+                    .iter()
+                    .filter(|b| matches!(b, Block::Paragraph(_)))
+                    .count()
+            })
+            .sum();
+        assert_eq!(
+            n, 764,
+            "drawText/caption 누수면 본문 문단이 764보다 크다 (got {n})"
+        );
     }
 
     /// 파라미터 없는 self-closing `<hp:fieldBegin/>` 도 실물에 있다.
