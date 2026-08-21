@@ -1278,24 +1278,6 @@ pub struct CellLineMismatch {
 }
 
 #[cfg(feature = "rhwp")]
-fn is_generated_object_paragraph(p: &Paragraph) -> bool {
-    // Extra lift paragraphs still emitted for equations/charts (`object_paragraph`). Pictures ride
-    // on the host (issue 82); skipping an image-bearing host would drop the rhwp-paired cell para.
-    let mut has_visible = false;
-    let mut has_eq_or_chart = false;
-    for inl in p.runs.iter().flat_map(|r| &r.content) {
-        match inl {
-            Inline::Text(t) if t.chars().any(|c| c != '\u{FFFC}' && !c.is_whitespace()) => {
-                has_visible = true;
-            }
-            Inline::Equation(_) | Inline::Chart(_) => has_eq_or_chart = true,
-            _ => {}
-        }
-    }
-    has_eq_or_chart && !has_visible
-}
-
-#[cfg(feature = "rhwp")]
 fn text_preview(text: &str) -> String {
     const CAP: usize = 96;
     let mut out = String::new();
@@ -1357,16 +1339,14 @@ fn score_cell_table(
             .blocks
             .iter()
             .filter_map(|b| match b {
-                Block::Paragraph(p) if !is_generated_object_paragraph(p) => Some(p),
+                Block::Paragraph(p) => Some(p),
                 _ => None,
             })
             .collect();
         if rcell.paragraphs.len() != oparas.len() {
             f.cell_structure_mismatches += rcell.paragraphs.len().abs_diff(oparas.len());
-            // Do NOT zip a shifted stream: generated object paragraphs are deliberately absent from
-            // `oparas`, and any unexpected lift asymmetry after that filtering would pair unrelated
-            // source/model paragraphs. Mark the cell structurally unscorable; nested tables below
-            // still recurse independently.
+            // Do NOT zip a shifted stream: any lift asymmetry would pair unrelated source/model
+            // paragraphs. Mark the cell structurally unscorable; nested tables below still recurse.
         } else {
             for (pi, (rp, op)) in rcell.paragraphs.iter().zip(oparas).enumerate() {
                 f.cell_paragraphs_seen += 1;
@@ -1524,7 +1504,8 @@ pub fn layout_fidelity_for_doc(bytes: &[u8], our: &SemanticDoc) -> Result<Layout
     }
 
     // The lift emits exactly one `Block::Paragraph` per rhwp top-level paragraph, in order (a pure
-    // object/table anchor still gets an empty paragraph first) — so the two streams zip 1:1.
+    // object/table anchor still gets an empty paragraph first; pictures/equations/charts ride on
+    // that host — issues 82 and 84) — so the two streams zip 1:1.
     for (rsec, osec) in rdoc.sections.iter().zip(our.sections.iter()) {
         let body_w =
             (osec.page.width - osec.page.margin_left - osec.page.margin_right).max(1) as f64;

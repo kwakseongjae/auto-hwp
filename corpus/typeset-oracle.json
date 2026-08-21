@@ -16,7 +16,7 @@
     "match": 53,
     "line_gap": 16,
     "page_gap": 10,
-    "mean_line_exact_pct": 97.2,
+    "mean_line_exact_pct": 97.3,
     "mean_cell_exact_pct": 96.7
   },
   "by_tag": {
@@ -116,7 +116,7 @@
       "fail": 0,
       "page_match": 1,
       "page_match_rate": 50,
-      "mean_line_exact_pct": 92.1,
+      "mean_line_exact_pct": 97.4,
       "mean_cell_exact_pct": null
     },
     "shape_ole": {
@@ -155,15 +155,15 @@
       "mean_cell_exact_pct": null
     },
     {
-      "tag": "equation",
-      "tagged": 3,
-      "scorable": 2,
-      "unscorable": 1,
+      "tag": "header_footer",
+      "tagged": 5,
+      "scorable": 5,
+      "unscorable": 0,
       "fail": 0,
-      "page_match": 1,
-      "page_match_rate": 50,
-      "mean_line_exact_pct": 92.1,
-      "mean_cell_exact_pct": null
+      "page_match": 3,
+      "page_match_rate": 60,
+      "mean_line_exact_pct": 93.3,
+      "mean_cell_exact_pct": 98.5
     }
   ],
   "documents": [
@@ -751,17 +751,17 @@
       "error": null,
       "score_kind": "scorable",
       "verdict": "page_gap",
-      "our_pages": 3,
+      "our_pages": 2,
       "oracle_pages": 1,
       "page_match": false,
       "paragraphs": 19,
       "body_paragraphs_with_oracle": 19,
       "body_paragraphs_missing_oracle": 0,
-      "line_exact": 16,
+      "line_exact": 18,
       "line_within1": 18,
-      "line_exact_pct": 84.2,
+      "line_exact_pct": 94.7,
       "line_within1_pct": 94.7,
-      "our_lines": 20,
+      "our_lines": 22,
       "oracle_lines": 24,
       "cell_paragraphs": 0,
       "cell_paragraphs_seen": 0,

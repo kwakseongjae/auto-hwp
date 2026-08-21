@@ -20,7 +20,7 @@
 | 일치 (쪽수 + 줄 98.9%+) | 53 |
 | 줄격차 | 16 |
 | 쪽격차 | 10 |
-| 본문 줄정확 평균 (채점 가능·본문 오라클만) | 97.2% |
+| 본문 줄정확 평균 (채점 가능·본문 오라클만) | 97.3% |
 | 셀 줄정확 평균 (채점 가능·셀 오라클만) | 96.7% |
 
 ## 요소별 점수 (채점 가능 문서만 — 채점 불가를 0으로 넣지 않음)
@@ -35,7 +35,7 @@
 | `footnote` | 각주 | 1 | 1 | 0 | 0 | 90 | 100 |
 | `multicolumn` | 다단 | 2 | 2 | 0 | 50 | 91.7 | — |
 | `chart` | 차트 | 1 | 1 | 0 | 100 | 99 | 100 |
-| `equation` | 수식 | 3 | 2 | 1 | 50 | 92.1 | — |
+| `equation` | 수식 | 3 | 2 | 1 | 50 | 97.4 | — |
 | `shape_ole` | 도형/OLE | 33 | 33 | 0 | 87.9 | 98.6 | 97.3 |
 
 ## 가장 낮은 요소 축 (다음 수리 티켓 근거)
@@ -44,7 +44,7 @@
 |---:|---|---:|---:|---:|---:|
 | 1 | `footnote` (각주) | 1 | 0 | 90 | 100 |
 | 2 | `multicolumn` (다단) | 2 | 50 | 91.7 | — |
-| 3 | `equation` (수식) | 2 | 50 | 92.1 | — |
+| 3 | `header_footer` (머리말/꼬리말) | 5 | 60 | 93.3 | 98.5 |
 
 ## 문서별 점수
 
@@ -62,7 +62,7 @@
 | `corpus/hwp/issue_265.hwp` | corpus-hwp | 쪽격차 | 17 | 16 | 91.3 | 98 | header_footer |
 | `corpus/hwp/issue-505-equations.hwp` | corpus-hwp | 일치 | 4 | 4 | 100 | — | equation |
 | `corpus/hwp/k-water-rfp.hwp` | corpus-hwp | 줄격차 | 27 | 27 | 93.8 | 98 | header_footer, nested_table, multipage_table, shape_ole |
-| `corpus/hwp/math-001.hwp` | corpus-hwp | 쪽격차 | 3 | 1 | 84.2 | — | equation |
+| `corpus/hwp/math-001.hwp` | corpus-hwp | 쪽격차 | 2 | 1 | 94.7 | — | equation |
 | `corpus/hwp/shape-001.hwp` | corpus-hwp | 일치 | 1 | 1 | 100 | — | shape_ole |
 | `corpus/hwp/tac-img-02.hwp` | corpus-hwp | 줄격차 | 66 | 66 | 98 | 98.5 | nested_table, multipage_table, shape_ole |
 | `corpus/hwp/test-image.hwp` | corpus-hwp | 일치 | 5 | 5 | 100 | — | — |

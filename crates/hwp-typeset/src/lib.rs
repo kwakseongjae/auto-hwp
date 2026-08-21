@@ -1033,6 +1033,9 @@ fn object_height(p: &Paragraph) -> i32 {
                 // host lineseg stays at text height (issue 82). Treat-as-char / HWPX pics still
                 // reserve the box (LOCKSTEP with place_doc via the same layout_paragraph).
                 Inline::Image(img) if img.treat_as_char => h = h.max(img.height),
+                // Equations/charts: every observed corpus object is treat_as_char=true (inline).
+                // They reserve height even after riding on the host (issue 84). Do not copy the
+                // picture floating skip — "not drawn as a body line" would be a different decision.
                 Inline::Equation(eq) => h = h.max(eq.height),
                 // Issue 062-7: LOCKSTEP with place_doc's paragraph_object — a chart reserves the same
                 // stored-size box in the NaiveLayout twin, so pagination stays identical across both.

@@ -230,8 +230,8 @@ impl<'a> Lifter<'a> {
             ..Default::default()
         }));
 
-        // The host we just pushed — pictures ride here (issue 82). Tables still follow as
-        // `Block::Table` (scoring zips paragraphs only, so a table does not shift the pair).
+        // The host we just pushed — pictures (issue 82), equations and OOXML charts (issue 84)
+        // ride here. Tables still follow as `Block::Table` (scoring zips paragraphs only).
         let host_idx = blocks.len() - 1;
         for ctrl in &p.controls {
             match ctrl {
@@ -248,13 +248,20 @@ impl<'a> Lifter<'a> {
                     }
                 }
                 Control::Equation(eq) => {
-                    blocks.push(object_paragraph(Inline::Equation(lift_equation(eq))));
+                    // Same extra-paragraph hole as Picture, different height rule: every
+                    // corpus equation is treat_as_char=true (inline), so object_height still
+                    // reserves the box. math-001.hwp: 19 rhwp paras vs 63 lifted (+44).
+                    if let Some(Block::Paragraph(host)) = blocks.get_mut(host_idx) {
+                        attach_inline_object(host, Inline::Equation(lift_equation(eq)));
+                    }
                 }
                 // Issue 062-7: an OOXML (DrawingML) chart hosted in a drawing shape. Rendered (or a
                 // reserved stub box) only for the OOXML path; native/legacy charts stay dropped.
                 Control::Shape(shape) => {
                     if let Some(chart) = self.lift_chart(shape) {
-                        blocks.push(object_paragraph(Inline::Chart(chart)));
+                        if let Some(Block::Paragraph(host)) = blocks.get_mut(host_idx) {
+                            attach_inline_object(host, Inline::Chart(chart));
+                        }
                     }
                 }
                 Control::Form(form) => {
@@ -760,32 +767,15 @@ fn utf16_to_char_idx(text: &str, utf16_pos: u32) -> usize {
 /// font/장평/자간, sub/superscript, emphasis, and underline color are left at our defaults: the
 /// serializer can't emit them yet, and setting them would only force redundant charPr synthesis
 /// (it dedups identical results back to the document's default charPr).
-/// Attach an image to the host paragraph it was anchored on. A following `object_paragraph`
-/// would be an extra body paragraph rhwp does not have, so layout-check's 1:1 zip shifts
-/// (issue 82). Equations/charts still use [`object_paragraph`] — that leak was not identified.
+/// Attach a picture/equation/chart to the host paragraph it was anchored on. A following
+/// extra paragraph would be a body paragraph rhwp does not have, so layout-check's 1:1 zip
+/// shifts (pictures: issue 82; equations/charts: issue 84).
 fn attach_inline_object(host: &mut Paragraph, inline: Inline) {
     host.runs.push(Run {
         char_shape: host.runs.last().map(|r| r.char_shape).unwrap_or(0),
         content: vec![inline],
         ..Default::default()
     });
-}
-
-/// Wrap a single inline object (equation / chart) in its own paragraph block, emitted in reading
-/// order after the text paragraph it was anchored in. Pictures no longer use this (issue 82).
-fn object_paragraph(inline: Inline) -> Block {
-    Block::Paragraph(Paragraph {
-        runs: vec![Run {
-            char_shape: 0,
-            content: vec![inline],
-            ..Default::default()
-        }],
-        provenance: Provenance {
-            source: Some(SourceFormat::Hwp5),
-            raw: None,
-        },
-        ..Default::default()
-    })
 }
 
 /// Per-row MINIMUM-height floors (HWPUNIT) from Hancom's stored cell heights — the min-row-height
@@ -1409,6 +1399,12 @@ mod tests {
         });
 
         let semantic = Lifter::new(&doc).run();
+        let blocks = &semantic.sections[0].blocks;
+        assert_eq!(
+            blocks.len(),
+            1,
+            "chart must ride on the host paragraph, got {blocks:?}"
+        );
         let chart = semantic
             .sections
             .iter()
@@ -1536,6 +1532,106 @@ mod tests {
             .filter(|i| matches!(i, Inline::Image(_)))
             .count();
         assert_eq!(images, 1, "the picture rides on the host paragraph");
+    }
+
+    /// Issue 84: an Equation control is an extra *inline* on the host, not a second body paragraph.
+    /// Unlike pictures, corpus equations are treat_as_char=true — height still reserved.
+    #[test]
+    fn equation_control_rides_on_the_host_paragraph() {
+        use rhwp::model::control::Equation;
+        use rhwp::model::document::{Document, Section};
+        use rhwp::model::paragraph::Paragraph as RPara;
+
+        let eq = Equation {
+            script: "1 over 2".into(),
+            common: rhwp::model::shape::CommonObjAttr {
+                width: 2000,
+                height: 1500,
+                treat_as_char: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let para = RPara {
+            text: "본문\u{FFFC}계속".into(),
+            controls: vec![Control::Equation(Box::new(eq))],
+            ..Default::default()
+        };
+        let mut doc = Document::default();
+        doc.sections.push(Section {
+            paragraphs: vec![para],
+            ..Default::default()
+        });
+
+        let semantic = Lifter::new(&doc).run();
+        let blocks = &semantic.sections[0].blocks;
+        assert_eq!(
+            blocks.len(),
+            1,
+            "equation must not add a following object paragraph"
+        );
+        let Block::Paragraph(p) = &blocks[0] else {
+            panic!("host must stay a paragraph");
+        };
+        let eqs = p
+            .runs
+            .iter()
+            .flat_map(|r| &r.content)
+            .filter(|i| matches!(i, Inline::Equation(_)))
+            .count();
+        assert_eq!(eqs, 1, "the equation rides on the host paragraph");
+        let text: String = p
+            .runs
+            .iter()
+            .flat_map(|r| &r.content)
+            .filter_map(|i| match i {
+                Inline::Text(s) => Some(s.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(text.contains("본문"), "host text must survive: {text:?}");
+    }
+
+    #[test]
+    fn two_equations_on_one_host_stay_one_paragraph() {
+        use rhwp::model::control::Equation;
+        use rhwp::model::document::{Document, Section};
+        use rhwp::model::paragraph::Paragraph as RPara;
+
+        let mk = |script: &str| {
+            Control::Equation(Box::new(Equation {
+                script: script.into(),
+                common: rhwp::model::shape::CommonObjAttr {
+                    width: 1000,
+                    height: 800,
+                    treat_as_char: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            }))
+        };
+        let para = RPara {
+            text: "앞\u{FFFC}뒤\u{FFFC}".into(),
+            controls: vec![mk("a"), mk("b")],
+            ..Default::default()
+        };
+        let mut doc = Document::default();
+        doc.sections.push(Section {
+            paragraphs: vec![para],
+            ..Default::default()
+        });
+        let semantic = Lifter::new(&doc).run();
+        assert_eq!(semantic.sections[0].blocks.len(), 1);
+        let Block::Paragraph(p) = &semantic.sections[0].blocks[0] else {
+            panic!("host");
+        };
+        let eqs = p
+            .runs
+            .iter()
+            .flat_map(|r| &r.content)
+            .filter(|i| matches!(i, Inline::Equation(_)))
+            .count();
+        assert_eq!(eqs, 2);
     }
 
     /// A picture control on a text paragraph must keep the text *and* the image on that one

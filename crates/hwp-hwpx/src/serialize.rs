@@ -1733,19 +1733,21 @@ fn project_block(b: &Block) -> EmitBlock {
                 height: im.height,
             }
         }
-        // An equation-ONLY paragraph → EmitBlock::Equation (also before the text path). The .hwp lift
-        // emits every 수식 as its own object paragraph, so this is its shape.
+        // A single equation-ONLY paragraph → EmitBlock::Equation (also before the text path).
+        // Issue 84: .hwp lift now attaches every 수식 to its host. One empty host + one equation
+        // still uses this arm; two+ equations (or mixed text) fall through to Para so nothing is
+        // dropped ("사용자 콘텐츠 삭제 금지").
         //
-        // ⚠️ The "no visible text" guard is load-bearing since the HWPX parser started reading
-        // `<hp:equation>`: there a 수식 sits INSIDE a run next to real text, and this branch keeps only
-        // the equation — a mixed paragraph would silently lose its text ("사용자 콘텐츠 삭제 금지").
-        // Mixed paragraphs fall through to the Para path, where `para_runs` emits the equation as an
-        // inline ctrl piece in document order, so nothing is dropped either way.
+        // ⚠️ The "exactly one equation / no visible text" guard is load-bearing since the HWPX
+        // parser started reading `<hp:equation>`: there a 수식 sits INSIDE a run next to real text,
+        // and this branch keeps only the first equation.
         Block::Paragraph(p)
             if p.runs
                 .iter()
                 .flat_map(|r| &r.content)
-                .any(|i| matches!(i, Inline::Equation(_)))
+                .filter(|i| matches!(i, Inline::Equation(_)))
+                .count()
+                == 1
                 && !p
                     .runs
                     .iter()
@@ -2469,16 +2471,15 @@ mod tests {
         })
     }
 
-    /// .hwp lift 의 수식은 **자기 문단 하나**(object_paragraph)라 `EmitBlock::Equation` 으로 나간다 —
-    /// 예전 그대로. 반면 HWPX 는 수식이 런 안에서 텍스트 **옆에** 산다: 그 문단까지 Equation 으로
-    /// 뭉개면 텍스트가 조용히 사라진다("사용자 콘텐츠 삭제 금지"). 두 모양을 모두 잠근다.
+    /// 수식만 하나인 문단은 `EmitBlock::Equation`. 텍스트가 섞이거나 수식이 둘 이상이면 Para —
+    /// 그 문단까지 Equation 으로 뭉개면 나머지 수식/텍스트가 사라진다("사용자 콘텐츠 삭제 금지").
     #[test]
     fn equation_only_paragraph_emits_as_object_mixed_one_keeps_its_text() {
-        // (a) 수식만 있는 문단 → 전용 오브젝트 문단(.hwp 경로, 바이트동일 유지).
+        // (a) 수식만 있는 문단 → 전용 오브젝트 문단.
         let only = para_with(vec![Inline::Equation(eq_ref("1 over 2"))]);
         assert!(matches!(project_block(&only), EmitBlock::Equation(_)));
 
-        // (b) 텍스트 + 수식 섞인 문단(HWPX 모양) → 일반 문단 + 인라인 수식 조각.
+        // (b) 텍스트 + 수식 섞인 문단(HWPX 모양 / issue 84 .hwp 호스트) → 일반 문단 + 인라인 수식.
         let mixed = para_with(vec![
             Inline::Text("앞".into()),
             Inline::Equation(eq_ref("a over b")),
@@ -2501,6 +2502,21 @@ mod tests {
                 .count(),
             1,
             "수식도 인라인 조각으로 함께 나가야 한다"
+        );
+
+        // (c) 수식 두 개, 텍스트 없음 (math-001 선택지 줄) — 첫 수식만 Equation 으로 내보내면 둘째가 사라진다.
+        let two = para_with(vec![
+            Inline::Equation(eq_ref("1")),
+            Inline::Equation(eq_ref("2")),
+        ]);
+        let EmitBlock::Para { runs, .. } = project_block(&two) else {
+            panic!("수식 둘은 Para 로 나가야 한다");
+        };
+        assert_eq!(
+            runs.iter()
+                .filter(|p| matches!(p, RunPiece::Equation(_)))
+                .count(),
+            2
         );
     }
 

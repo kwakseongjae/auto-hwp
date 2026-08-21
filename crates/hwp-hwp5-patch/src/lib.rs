@@ -354,20 +354,11 @@ fn skip_object_paragraphs(blocks: &[Block], index: &mut usize) {
     }
 }
 
-fn is_object_only(paragraph: &Paragraph) -> bool {
-    // Extra lift paragraphs still emitted for equations/charts. Pictures ride on the host
-    // (issue 82); skipping an image-bearing host would look for the next IR block and fail
-    // the HWP5 ↔ IR map (benchmark1 cell with a picture and no text).
-    let mut has_text_or_note = false;
-    let mut has_eq_or_chart = false;
-    for inline in paragraph.runs.iter().flat_map(|run| &run.content) {
-        match inline {
-            Inline::Text(_) | Inline::Note(_) => has_text_or_note = true,
-            Inline::Equation(_) | Inline::Chart(_) => has_eq_or_chart = true,
-            _ => {}
-        }
-    }
-    has_eq_or_chart && !has_text_or_note
+fn is_object_only(_paragraph: &Paragraph) -> bool {
+    // Issues 82 and 84: pictures, equations, and charts ride on the host paragraph. Lift no
+    // longer emits extra object paragraphs. Skipping an object-bearing host would desync the
+    // HWP5 ↔ IR map (benchmark1 cell with a picture and no text; math-001 empty host + equation).
+    false
 }
 
 pub(crate) fn paragraph_text(paragraph: &Paragraph) -> String {

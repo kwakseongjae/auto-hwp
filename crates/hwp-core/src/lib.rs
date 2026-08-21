@@ -934,8 +934,7 @@ mod inplace_tests {
         ))
         .unwrap();
         let doc = Engine::open(&bytes).unwrap();
-        let eqs = doc.sections.iter().flat_map(|s| &s.blocks).filter(|b| matches!(b,
-            Block::Paragraph(p) if p.runs.iter().flat_map(|r| &r.content).any(|i| matches!(i, Inline::Equation(_))))).count();
+        let eqs = collect_equations(&doc).len();
         assert!(eqs > 0, "lift captured equations: {eqs}");
 
         let out = serialize_hwpx(&doc).unwrap();
