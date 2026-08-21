@@ -1125,6 +1125,7 @@ fn parse_section(
                                     bin_ref,
                                     width: pa.width,
                                     height: pa.height,
+                                    ..Default::default()
                                 }),
                             );
                         }

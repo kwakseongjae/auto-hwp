@@ -230,12 +230,21 @@ impl<'a> Lifter<'a> {
             ..Default::default()
         }));
 
+        // The host we just pushed — pictures ride here (issue 82). Tables still follow as
+        // `Block::Table` (scoring zips paragraphs only, so a table does not shift the pair).
+        let host_idx = blocks.len() - 1;
         for ctrl in &p.controls {
             match ctrl {
                 Control::Table(t) => blocks.push(Block::Table(self.lift_table(t))),
                 Control::Picture(pic) => {
+                    // A Picture is a control ON an existing rhwp paragraph, not a second body
+                    // paragraph. Emitting `object_paragraph` made layout-check zip 1:1 slip
+                    // (issue_265.hwp: 199 vs 195, +4). Caption/text-box lists stay nested on the
+                    // rhwp object and are not flattened — they were not the leak.
                     if let Some(img) = self.lift_picture(pic) {
-                        blocks.push(object_paragraph(Inline::Image(img)));
+                        if let Some(Block::Paragraph(host)) = blocks.get_mut(host_idx) {
+                            attach_inline_object(host, Inline::Image(img));
+                        }
                     }
                 }
                 Control::Equation(eq) => {
@@ -290,6 +299,7 @@ impl<'a> Lifter<'a> {
             bin_ref,
             width: pic.common.width as i32,
             height: pic.common.height as i32,
+            treat_as_char: pic.common.treat_as_char,
         })
     }
 
@@ -726,6 +736,7 @@ impl<'a> Lifter<'a> {
             bin_ref,
             width: 0,
             height: 0,
+            treat_as_char: true,
         })
     }
 }
@@ -749,8 +760,19 @@ fn utf16_to_char_idx(text: &str, utf16_pos: u32) -> usize {
 /// font/장평/자간, sub/superscript, emphasis, and underline color are left at our defaults: the
 /// serializer can't emit them yet, and setting them would only force redundant charPr synthesis
 /// (it dedups identical results back to the document's default charPr).
-/// Wrap a single inline object (image / equation) in its own paragraph block, emitted in reading
-/// order after the text paragraph it was anchored in. (Exact mid-run anchoring is a later refinement.)
+/// Attach an image to the host paragraph it was anchored on. A following `object_paragraph`
+/// would be an extra body paragraph rhwp does not have, so layout-check's 1:1 zip shifts
+/// (issue 82). Equations/charts still use [`object_paragraph`] — that leak was not identified.
+fn attach_inline_object(host: &mut Paragraph, inline: Inline) {
+    host.runs.push(Run {
+        char_shape: host.runs.last().map(|r| r.char_shape).unwrap_or(0),
+        content: vec![inline],
+        ..Default::default()
+    });
+}
+
+/// Wrap a single inline object (equation / chart) in its own paragraph block, emitted in reading
+/// order after the text paragraph it was anchored in. Pictures no longer use this (issue 82).
 fn object_paragraph(inline: Inline) -> Block {
     Block::Paragraph(Paragraph {
         runs: vec![Run {
@@ -1466,5 +1488,110 @@ mod tests {
             .flat_map(|r| &r.content)
             .any(|i| matches!(i, Inline::Chart(_)));
         assert!(!has_chart, "a non-OOXML OLE must not produce a chart node");
+    }
+
+    /// Issue 82: a Picture control is an extra *inline* on the host paragraph, not a second
+    /// body paragraph. layout-check zips `Block::Paragraph` 1:1 with rhwp paragraphs.
+    #[test]
+    fn picture_control_rides_on_the_host_paragraph() {
+        use rhwp::model::bin_data::BinDataContent;
+        use rhwp::model::document::{Document, Section};
+        use rhwp::model::image::Picture;
+        use rhwp::model::paragraph::Paragraph as RPara;
+
+        let mut doc = Document::default();
+        doc.bin_data_content.push(BinDataContent {
+            id: 1,
+            data: rhwp::model::bin_data::BinDataBytes::Loaded(b"fake-png".to_vec()),
+            extension: "png".to_string(),
+        });
+        let mut pic = Picture::default();
+        pic.image_attr.bin_data_id = 1;
+        pic.common.width = 4000;
+        pic.common.height = 3000;
+        let para = RPara {
+            text: "\u{FFFC}".into(),
+            controls: vec![Control::Picture(Box::new(pic))],
+            ..Default::default()
+        };
+        doc.sections.push(Section {
+            paragraphs: vec![para],
+            ..Default::default()
+        });
+
+        let semantic = Lifter::new(&doc).run();
+        let blocks = &semantic.sections[0].blocks;
+        assert_eq!(
+            blocks.len(),
+            1,
+            "picture must not add a following object paragraph, got {blocks:?}"
+        );
+        let Block::Paragraph(p) = &blocks[0] else {
+            panic!("host must stay a paragraph");
+        };
+        let images = p
+            .runs
+            .iter()
+            .flat_map(|r| &r.content)
+            .filter(|i| matches!(i, Inline::Image(_)))
+            .count();
+        assert_eq!(images, 1, "the picture rides on the host paragraph");
+    }
+
+    /// A picture control on a text paragraph must keep the text *and* the image on that one
+    /// block — splitting it would shift every later paragraph pair (issue_265.hwp p76).
+    #[test]
+    fn picture_on_a_text_host_does_not_split_the_paragraph() {
+        use rhwp::model::bin_data::BinDataContent;
+        use rhwp::model::document::{Document, Section};
+        use rhwp::model::image::Picture;
+        use rhwp::model::paragraph::Paragraph as RPara;
+
+        let mut doc = Document::default();
+        doc.bin_data_content.push(BinDataContent {
+            id: 1,
+            data: rhwp::model::bin_data::BinDataBytes::Loaded(b"fake-png".to_vec()),
+            extension: "png".to_string(),
+        });
+        let mut pic = Picture::default();
+        pic.image_attr.bin_data_id = 1;
+        pic.common.width = 4000;
+        pic.common.height = 3000;
+        let para = RPara {
+            text: "본문 텍스트\u{FFFC}계속".into(),
+            controls: vec![Control::Picture(Box::new(pic))],
+            ..Default::default()
+        };
+        doc.sections.push(Section {
+            paragraphs: vec![para],
+            ..Default::default()
+        });
+
+        let semantic = Lifter::new(&doc).run();
+        let blocks = &semantic.sections[0].blocks;
+        assert_eq!(blocks.len(), 1, "one rhwp paragraph → one block");
+        let Block::Paragraph(p) = &blocks[0] else {
+            panic!("host must stay a paragraph");
+        };
+        let text: String = p
+            .runs
+            .iter()
+            .flat_map(|r| &r.content)
+            .filter_map(|i| match i {
+                Inline::Text(s) => Some(s.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            text.contains("본문 텍스트"),
+            "host text must survive: {text:?}"
+        );
+        assert!(
+            p.runs
+                .iter()
+                .flat_map(|r| &r.content)
+                .any(|i| matches!(i, Inline::Image(_))),
+            "image must ride on the same paragraph"
+        );
     }
 }

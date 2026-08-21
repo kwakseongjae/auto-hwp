@@ -638,6 +638,7 @@ fn handle_empty(e: &BytesStart, paras: &mut [ParaAccum], ctx: &DocxCtx) {
                                 bin_ref: bin_ref.clone(),
                                 width: w,
                                 height: h,
+                                ..Default::default()
                             }));
                         }
                     }

@@ -947,6 +947,7 @@ fn parse_inline(node: &JsxNode) -> Result<Inline> {
                     .get("data-h")
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(0),
+                ..Default::default()
             })),
             Some(Tag::Equation) => {
                 let bytes = unb64(e.attrs.get("data-b64").map(String::as_str).unwrap_or(""))
