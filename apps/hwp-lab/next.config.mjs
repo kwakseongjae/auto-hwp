@@ -18,9 +18,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
  *    끌어넣지 않도록 한다.
  */
 // 정적 데모 빌드 (OSS): DEMO_STATIC=1 이면 서버 없는 `output:"export"` 로 GitHub Pages 등에
-// 배포 가능한 정적 사이트를 만든다. AI 프록시(/api/hwp-edit)는 라우트 핸들러라 export 와 공존할
-// 수 없으므로 scripts/build-demo.mjs 가 빌드 동안 api/ 를 임시로 치워둔다(클라이언트는
-// NEXT_PUBLIC_DEMO=1 을 보고 프록시 프로브를 건너뛰고 "정적 데모" 모드로 동작).
+// 배포 가능한 정적 사이트를 만든다. AI 프록시(/api/hwp-edit)와 요청 헤더를 읽는 로컬 /models는
+// export 와 공존할 수 없으므로 scripts/build-demo.mjs 가 빌드 동안 api/ 와 models/ 를 임시로
+// 치워둔다(클라이언트는 NEXT_PUBLIC_DEMO=1 을 보고 프록시 프로브를 건너뛰고 "정적 데모" 모드로 동작).
 // DEMO_BASE_PATH 는 프로젝트 페이지(/auto-hwp) 배포용 — 코드의 절대경로 fetch(/hwp, /fonts,
 // /samples)는 NEXT_PUBLIC_BASE_PATH 를 접두해 같은 경로 체계를 유지한다.
 const isDemo = process.env.DEMO_STATIC === "1";

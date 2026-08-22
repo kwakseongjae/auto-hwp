@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   isLoopbackRequest,
   localModelsDeniedReason,
+  localModelsPageRequest,
   requestOrigin,
 } from "./gating";
 
@@ -60,6 +61,20 @@ describe("models-gating", () => {
         }),
       ),
     ).toBe("non-loopback");
+  });
+
+  it("keeps the actual page Host authoritative against inverse forwarded-host spoofing", () => {
+    process.env.AUTO_HWP_LOCAL_MODELS = "1";
+
+    const publicHost = localModelsPageRequest("autohwp.com", "localhost:3000");
+    expect(publicHost).not.toBeNull();
+    expect(localModelsDeniedReason(publicHost!)).toBe("non-loopback");
+
+    const loopback = localModelsPageRequest("127.0.0.1:3000", null);
+    expect(loopback).not.toBeNull();
+    expect(localModelsDeniedReason(loopback!)).toBeNull();
+
+    expect(localModelsPageRequest(null, "localhost:3000")).toBeNull();
   });
 
   it("denies the static demo build (DEMO_STATIC=1)", () => {
