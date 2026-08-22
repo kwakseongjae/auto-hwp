@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-22 (Codex sol) · #116 완료 → #118 착수
+- PR #125를 승인에 따라 squash 병합(main `241e70c`), #116 close.
+- 필수 CI·독립 검수 green; 병합 브랜치와 clean worktree 정리 완료.
+- #118은 독립 lockfile 4개만 nanoid 3.3.18+로 갱신하며 unrelated graph 변경을 금지.
+- 다음: #118 검증·PR·병합 → 비공개 Advisory → #100 → #101 → #102.
+
 ## 2026-08-22 (Codex sol) · #116 dependency remediation PR
 - PR #125: hwp-lab nanoid 3.3.17→3.3.18, app package/lockfile 2개만 변경.
 - clean install·audit 0·247/247·typecheck·server/static build·quick 전부 PASS.
