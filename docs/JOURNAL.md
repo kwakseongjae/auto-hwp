@@ -10,7 +10,7 @@
 - #139 우산과 #140~#144를 만들고 #140 single-instance/cold·warm open/교체 확인을 구현.
 - 실앱 QA: HWP 8쪽·HWPX 22쪽, 취소/승인·확대·단일 프로세스 PASS.
 - HWP open의 원본 옆 자동 HWPX 생성 제거; full verify PASS, PR #145 개설·#137 승인 대기.
-- #145 첫 CI Linux-only dead-code 발견; macOS/test cfg로 경계를 좁혀 재실행.
+- #145 첫 CI Linux-only dead-code를 macOS/test cfg로 수정; 최종 필수 CI 3종 green.
 
 ## 2026-08-23 (Codex sol) · #101 T1 PDF calibration 구현 완료
 - 공식 HWP5/PDF 20쌍 manifest+baseline; 자체 PDF full run 20/20·baseline byte-identical.

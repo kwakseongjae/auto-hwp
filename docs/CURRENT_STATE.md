@@ -14,10 +14,11 @@
   원본 옆 자동 HWPX 생성도 제거해 재검증에서 파일 생성 0이다. hwp-viewer 15건·desktop shell
   계약 5건(1 sandbox skip)·패키징과 `verify-local --full`이 PASS했다: canonical 8/18/24,
   PDF 51/51, Vitest 269+64+425+247+11, Playwright 85 pass/3 intentional skip, licenses green.
-  커밋 `ef5c4c8`을 push하고 PR **#145**(`Closes #140`)를 열었다. 첫 CI는 issue-link/licenses
-  green 뒤 Linux에서 macOS 전용 `paths_from_urls` dead-code를 잡았고, macOS 또는 test에서만
-  컴파일하도록 cfg 경계를 좁혀 재검증 중이다. **다음:** #145 최종 CI와 리뷰에서 정지;
-  #137 병합은 별도 사용자 승인 대기, 승인 뒤 #138 main retarget.
+  커밋 `ef5c4c8`을 push하고 PR **#145**(`Closes #140`)를 열었다. 첫 CI가 Linux에서 macOS
+  전용 `paths_from_urls` dead-code를 잡아 macOS 또는 test에서만 컴파일하도록 cfg 경계를
+  좁혔고, 최종 head `4b4188b`에서 issue-link·build-test·licenses가 모두 green·MERGEABLE이다.
+  **다음:** #145 리뷰/사용자 병합 승인에서 정지; #137도 별도 사용자 승인 대기이며, 승인 뒤
+  #138을 main으로 retarget한다.
 
 - 갱신: 2026-08-23 · Codex(sol) — **#101 T1 PDF calibration 구현·재현 완료 · stacked PR 준비**.
   #100 PR #136(`d803ab1`)은 MERGEABLE이고 필수 CI 3종 green이나 비사소 PR이라 사용자 병합
