@@ -29,8 +29,9 @@
   #116 nanoid 앱 패치는 로컬 240/240·audit 0이나 #117 clean build 선행으로 blocked;
   나머지 독립 lockfile은 #118. 비공개 보안 트랙은 공개 이슈와 분리해 유지한다.
   커뮤니티 #42/#50 후속 답변과 외부 PR/이슈 점검을 마쳤고 악성·스팸 신호는 0건;
-  `auto-hwp-github`가 매일 09:30 KST 추적한다. 다음: #97/#115/#119 병합 → #120 rebase/병합 →
-  #122 rebase/병합 승인 → #116 → #100 안전 승격 → #101 calibration → #102 PDF replay 순.
+  `auto-hwp-github`가 매일 09:30 KST 추적한다. 겹치는 CI/상태 파일 때문에 다음 순서를 지킨다:
+  #97 병합 → #115 rebase·CI·병합 → #119 병합 → #120 rebase·CI·병합 → #122 rebase·CI·병합 승인 →
+  #116 → #100 안전 승격 → #101 calibration → #102 PDF replay.
 
 - 갱신: 2026-08-22 · Codex(sol) — **rhwp 경계 감사 · #84 차단 · #69 재진단/QA**.
   결론: auto-hwp는 rhwp 완전 종속이 아니다. **HWP5 ingest/lift와 일부 수식·차트 보강**은
