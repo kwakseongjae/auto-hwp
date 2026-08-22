@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-08-22 (Codex sol) · #99 공공문서 카탈로그 PR
+- PR #120: 공식 12개 출처군 후보 259건(HWP5 119/HWPX 19/PDF 121), pair 120개.
+- metadata-only·바이너리 0; 개인정보/접근통제 fail-closed, 라이선스 6건은 review-required.
+- 계약 54/54·verify quick·독립 리뷰·필수 CI 3종 PASS; #100이 안전 승격을 담당.
+- PR #97/#115/#119는 all checks green·MERGEABLE; 모두 비사소라 사용자 병합 대기.
+- 다음: #97/#115/#119/#120 병합 승인 → #116 → #100 → PDF 시각 오라클 #101/#102.
+
 ## 2026-08-22 (Codex sol) · 로드맵 실행 + #117 PR
 - PR #115(#98)·#97(#69)은 all checks green/mergeable, 비사소라 병합 대기.
 - #117은 서버·정적 build와 85 E2E를 통과해 PR #119 생성; CI 진행 중.
