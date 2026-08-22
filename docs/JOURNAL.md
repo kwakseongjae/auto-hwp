@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-08-22 (Codex sol) · R15 증거 배치 병합 체크포인트
+- PR #97/#115/#119/#120/#122를 승인 순서로 병합; 필수 CI와 독립 리뷰 모두 PASS.
+- 데스크톱·canonical 조판·models 빌드·공공 카탈로그·PDF 시각 비교 기반이 main에 합류.
+- #69/#98/#117/#99/#121 close, 전체 export/compare 우산 #93은 open 유지.
+- 비공개 Advisory는 공개 트랙과 분리; rhwp 독립은 #87→#107→#94, #84는 #89 대기.
+- 다음: #116 → #100 → #101 → #102.
+
 ## 2026-08-22 (Codex sol) · #121 PDF 시각 오라클 기반 PR
 - PR #122: 구조 우선 PDF↔PDF report-only 비교기, JSON/HTML+진단 PNG 5종, worst 5쪽/영역.
 - 51/51·verify quick·필수 CI 3종·독립 보안/범위 검수 PASS; #93은 전체 파이프라인까지 open.
