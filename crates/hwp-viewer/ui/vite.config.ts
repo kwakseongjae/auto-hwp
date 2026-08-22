@@ -20,14 +20,18 @@ const workspaceAlias = [
   { find: "@auto-hwp/react", replacement: P("../../../packages/react/dist/index.js") },
 ];
 
-// Tauri expects a fixed dev port and a static build in `dist/` (see tauri.conf.json).
-export default defineConfig({
+// Tauri expects a fixed dev port and a static build in `dist/` (see tauri.conf.json). Issue 069 uses
+// the explicit Vite mode from tauri.workspace.conf.json so the selected shell is part of the child
+// process command instead of an implicit inherited-env contract. A cargo-tauri 2.11.2 probe DOES inherit
+// VITE_SHELL today; keep the env check as a direct-Vite compatibility path without relying on it for QA.
+// With the default config both inputs are absent and the legacy shell stays on.
+export default defineConfig(({ mode }) => ({
   plugins: [react(), tailwindcss()],
   clearScreen: false,
-  // Build-time shell flag folded to a literal boolean so the DEFAULT build tree-shakes the workspace
-  // branch entirely (main.tsx `if (__WORKSPACE_SHELL__)`). `VITE_SHELL=workspace vite build` → true.
-  define: { __WORKSPACE_SHELL__: JSON.stringify(process.env.VITE_SHELL === "workspace") },
+  // Fold to a literal so the DEFAULT build tree-shakes the workspace branch entirely (main.tsx
+  // `if (__WORKSPACE_SHELL__)`). `vite --mode workspace` is the reliable Tauri QA path.
+  define: { __WORKSPACE_SHELL__: JSON.stringify(mode === "workspace" || process.env.VITE_SHELL === "workspace") },
   resolve: { alias: workspaceAlias },
   server: { port: 1420, strictPort: true },
   build: { target: "safari15", outDir: "dist", emptyOutDir: true },
-});
+}));

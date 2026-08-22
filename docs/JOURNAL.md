@@ -5,6 +5,27 @@
 
 ---
 
+## 2026-08-22 (Codex sol) · #69 PR #97 개설
+- `c7dd0d9`를 push하고 PR #97(`Closes #69`) 개설; issue-link 통과, build-test/licenses 확인 중.
+- 머지하지 않고 필수 checks와 사용자 결정을 기다린다.
+
+## 2026-08-22 (Codex sol) · #69 커밋 전 최종 검수
+- clean checkout 패키징의 JS dist 공백을 찾아 workspace build hook에 editor-core→react→UI 순서를 고정.
+- full verify: 8/18/24 게이트·82건 커밋 산출물 계약·wasm/JS/vitest·Playwright 85 pass/3 skip.
+- 계약 테스트 4/4·포트 선점 실패·debug `.app` 패키징을 재검증. 다음: PR `Closes #69`에서 정지.
+
+## 2026-08-22 (Codex sol) · #69 workspace 데스크톱 QA 경로 검증 완료
+- explicit Vite workspace mode·전용 1421·bind guard/strictPort·가시 마커와 CI 계약 테스트를 구현.
+- 디버그 `.app`에서 공개 HWPX/HWP 열기·렌더·페이지 이동·줌 통과; side-effect 산출물은 즉시 제거.
+- `verify-local --full`: 8/18/24 게이트·82 오라클·wasm/JS/vitest·Playwright 85 pass/3 skip 전부 그린.
+- 다음: PR `Closes #69`, 필수 checks 확인 후 머지 여부를 사용자에게 묻는다.
+
+## 2026-08-22 (Codex sol) · 엔진 경계 감사 + #69 데스크톱 QA 재진단
+- HWP5 ingest는 rhwp, HWPX/IR/조판/SVG·PDF/ops는 자체 엔진; fork는 고유 commit 0인 pinned mirror → #87/#88.
+- #84는 수식 44개 중 own-render 11개만 남는 차단 회귀를 재현해 중단, inline object flow #89로 분리.
+- #69의 env 유실·PNG 오라벨은 반증; 실제 stale 1420 오접속을 1421/mode/bind guard/마커로 격리.
+- 디버그 `.app`에서 공개 HWPX·HWP 열기/렌더·페이지 이동·줌 통과. 다음: full verify → PR, 머지 금지.
+
 ## 2026-08-21 (Grok 4.6) · #82 .hwp lift 그림 문단 누수
 - Picture object_paragraph 제거. issue_265 19→17쪽 / 62.6→91.3%. 게이트 무변경.
 - header_footer 쪽수 40→60 · 본문줄 87.6→93.3. 일치 52→53. 머지 금지.

@@ -193,16 +193,31 @@ wasm(브라우저)은 폰트가 **없어서** `registerFont(bytes)`로 메트릭
   open→pageSvg→셀클릭 · onExport 가로채기 · 웹 불변).
 - **웹 e2e**(`apps/hwp-lab`, `.next` 삭제 후 전 스펙): onExport는 opt-in이라 웹 앱은 미사용 → 무회귀.
 
-### 4.8 수동 QA 체크리스트 — `VITE_SHELL=workspace cargo tauri dev`
+### 4.8 수동 QA 체크리스트 — `scripts/app-workspace.sh`
 
-GUI는 헤드리스 불가라 아래는 **사람이 도는 큐**(빌드·마운트 스모크까지가 자동, 나머지 수동):
+GUI는 헤드리스 불가라 아래는 **사람이 도는 큐**(빌드·마운트 스모크까지가 자동, 나머지 수동).
+`tauri.workspace.conf.json`은 Tauri의 기본 설정을 override해 Vite를 **`--mode workspace`**와
+전용 `127.0.0.1:1421`에서 직접 시작한다. 기본 `cargo tauri dev`는 의도대로 레거시 셸(off)과
+`1420`을 유지한다. 런처는 1421이 이미 점유됐으면 Tauri 기동 전에 실패하므로 스테일 Vite에
+WebView가 붙는 오판도 차단한다.
+`app-workspace.sh`는 editor-core → react dist를 먼저 빌드하고 `rhwp`/`shaper`/`pdf` 피처를 모두 켠다:
+workspace 패키징 hook도 같은 editor-core → react → UI 순서를 보장하므로 clean checkout에서 stale/missing
+dist에 기대지 않는다.
+현재 로컬 `cargo-tauri 2.11.2` 통제 프로브에서는 hook으로 `VITE_SHELL`이 상속되어 이슈 제보의
+역사적 env 유실은 재현되지 않았다. 이 수정의 핵심은 현재 Tauri의 env 상속을 수리한다는 주장이
+아니라, 셀 선택을 자식 프로세스에 보이는 명시적 Vite mode 계약으로 고정한 것이다.
 
 ```
-# 워크트리/레포 루트에서 (빌드 순서: editor-core → ai-protocol → react → ui)
-pnpm -C packages/editor-core build && pnpm -C packages/react build
-VITE_SHELL=workspace cargo tauri dev   # (또는 tauri.conf의 beforeDevCommand에 VITE_SHELL 주입)
+# 워크트리/레포 루트에서
+scripts/app-workspace.sh
+
+# 실행 중 플래그를 프로세스 명령줄에서도 확인
+ps ax -o pid=,command= | grep '[v]ite.*--mode workspace.*--port 1421'
 ```
 
+- [ ] **셸 즉시 판별**: 상단 `한칸` 옆에 보라색 **`WORKSPACE`** 배지가 보이고, 위 `ps`
+      결과에 `--mode workspace --host 127.0.0.1 --port 1421`가 있다. 둘 중 하나라도 없으면
+      워크스페이스 QA를 중단한다.
 - [ ] **타이틀바**: macOS 신호등이 h-9 바 **세로 중앙**에 온다(재핀 금지 규율 유지). `열기`/`저장` 버튼 + 드래그 영역.
 - [ ] **열기**: `열기` → 네이티브 다이얼로그 → .hwp/.hwpx 선택 → 렌더. 같은 파일 재선택도 재오픈.
 - [ ] **드래그드롭**: Finder에서 .hwpx 드롭 → 열림. 비문서 파일 드롭 → "hwp/hwpx만" 안내.
@@ -213,16 +228,21 @@ VITE_SHELL=workspace cargo tauri dev   # (또는 tauri.conf의 beforeDevCommand�
 - [ ] **채팅**: v1 비활성 — AI 전달 시 정직한 사유 노출(크래시 아님). 수동 편집은 정상.
 - [ ] **회귀 0**: 플래그 off로 재빌드 시 기존 앱과 **동일**(위 자동 sha256 동일이 근거).
 
+> **#69 재검증 정정:** PR #68의 `docs/launch/evidence/2026-08-20-d0-workspace-shell.png`는
+> 이름 그대로 `WorkspaceShell + HwpWorkspace`의 빈 상태다. 위쪽 `열기 / 저장 / 한칸`은
+> `WorkspaceShell`, 안쪽 `auto-hwp / 문서 없음 / 90% / 표 추가 / 이미지 / HTML / HWPX / PDF`와
+> `문서를 열면 여기에 페이지가 표시됩니다.`는 공유 `HwpWorkspace`에서 온다. 레거시 `App.tsx`의
+> 빈 상태(`한글 문서를 열어 시작하세요`)와 다르다. 따라서 원래 파일명을 보존한다. 다만 이 사진은
+> **워크스페이스 셸의 빈 상태**만 증명하며 D0 3종의 실제 문서 동작을 증명하지는 않는다.
+
 #### D0 갭 대응 (이슈 #64 — 배선한 3종의 가시 효과. §4.8 전면 QA는 D1 게이트)
 
-선행: `pnpm -C packages/editor-core build && pnpm -C packages/react build`
-(`crates/hwp-viewer/ui`는 `@auto-hwp/react`를 `file:`로 소비하고 predev 훅이 없다 — 스테일 dist로
-"여전히 강등됨" 오판하는 066 전례). `docProfile`의 데스크톱 가시 효과는 PDF export 직전 토스트인데
-default feature는 `rhwp`뿐 → **반드시** `-f "rhwp shaper pdf"`:
+`scripts/app-workspace.sh`가 JS dist를 선행 빌드한다(`crates/hwp-viewer/ui`는 `@auto-hwp/react`를
+`file:`로 소비하므로 스테일 dist로 "여전히 강등됨"을 오판하는 066 전례를 차단). `docProfile`의
+데스크톱 가시 효과는 PDF export 직전 토스트이므로 런처가 `rhwp`/`shaper`/`pdf`를 모두 명시한다:
 
 ```
-pnpm -C packages/editor-core build && pnpm -C packages/react build
-VITE_SHELL=workspace cargo tauri dev -f "rhwp shaper pdf"
+scripts/app-workspace.sh
 ```
 
 - [ ] **중첩 셀 캐럿 (`blockRunsPath`)**: sample-8p에서 중첩 셀 더블클릭 → 캐럿이 실제로 서고 입력이

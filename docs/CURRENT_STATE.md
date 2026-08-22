@@ -3,6 +3,23 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-22 · Codex(sol) — **rhwp 경계 감사 · #84 차단 · #69 재진단/QA**.
+  결론: auto-hwp는 rhwp 완전 종속이 아니다. **HWP5 ingest/lift와 일부 수식·차트 보강**은
+  rhwp에 의존하지만, HWPX 파서/직렬화 · SemanticDoc IR · 조판 · SVG/PDF 렌더 · 세션/ops/AI는
+  자체 엔진이다. 다만 `external/rhwp`는 사용자 fork URL을 가리킬 뿐 upstream 대비 고유 commit 0,
+  upstream 18 commit 뒤인 pinned mirror라 “우리가 고치는 active fork” 상태는 아니다. 공개 후속:
+  #87(self-owned HWP5 ingest/fork governance) · #88(HWP/HWPX pair oracle) · #89(inline object atom flow).
+  #84 dirty branch는 보존했으나 own-render가 수식 44개 중 11개만 배치해 **33개를 잃으므로 PR 금지**;
+  공개 blocker 댓글 후 워커를 중단했고 #89 선행이다.
+  #69는 env 유실·PNG 오라벨 진단이 모두 반증됐다. 실제 결함은 실패한 Vite 대신 stale 1420에
+  붙을 수 있는 경로다. `codex/issue-69-desktop-shell-qa`에서 explicit workspace mode + 전용 1421 +
+  bind guard/strictPort + WORKSPACE 마커를 구현. 디버그 `.app`에서 공개 HWPX 1쪽과 HWP5 5쪽을
+  네이티브 다이얼로그로 열고 페이지 이동·90→99% 줌까지 실측. clean checkout 패키징을 위해
+  workspace build hook도 editor-core → react → UI 순서를 보장한다. `verify-local --full`은 조판
+  8==8/18==18/24==24 · 82건 커밋 오라클 산출물 계약 · wasm/JS/vitest · Playwright
+  85 pass/3 skip로 전부 그린. 상태: PR #97 open(`Closes #69`, 머지 금지). main `80c2c4a`
+  동기화 과정의 문서 충돌은 #84→#89 차단 판단을 보존해 해결했으며 필수 checks 재실행 대기.
+
 - 갱신: 2026-08-21 · Grok 4.6 — **#82 T2-C · .hwp lift 그림 문단 누수**.
   브랜치 `fix/issue-82-hwp-lift-leak`. 원인: lift가 Picture를 호스트 뒤에
   `object_paragraph`로 한 장 더 넣어 본문 zip이 밀림(issue_265: 199 vs 195).
