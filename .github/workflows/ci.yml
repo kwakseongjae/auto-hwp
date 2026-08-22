@@ -72,6 +72,8 @@ jobs:
           node-version: "20"
           cache: npm
           cache-dependency-path: packages/react/package-lock.json
+      - name: desktop workspace shell launch contract
+        run: node --test scripts/tests/desktop-shell-mode.test.mjs
       - name: typeset oracle summary (issue 72 — no layout-check rerun)
         run: node --test scripts/tests/oracle-sweep.test.mjs && node scripts/oracle-sweep.mjs --check-committed
       - name: desktop adapter contract (vitest)

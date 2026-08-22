@@ -155,6 +155,13 @@ function WorkspaceShell() {
         <span data-tauri-drag-region className="ml-1 text-sm font-medium">
           {docName ?? "한칸"}
         </span>
+        <span
+          data-shell-mode="workspace"
+          title="공유 HwpWorkspace 데스크톱 셀"
+          className="rounded bg-violet-600 px-1.5 py-0.5 text-[10px] font-bold tracking-widest text-white"
+        >
+          WORKSPACE
+        </span>
         {note && <span className="text-xs text-neutral-400">· {note}</span>}
         <div data-tauri-drag-region className="h-6 flex-1" />
       </header>
