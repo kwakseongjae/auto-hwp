@@ -91,6 +91,8 @@ jobs:
             benchmarks/benchmark1.hwp \
             benchmarks/benchmark2.hwp \
             | node scripts/canonical-layout-gate.mjs
+      - name: PDF visual oracle foundation (issue 121)
+        run: python3 -m unittest discover -s scripts/tests -p 'test_pdf_visual_check.py'
       - name: desktop adapter contract (vitest)
         working-directory: packages/react
         run: npm ci && npx vitest run src/__tests__/desktopParity.contract.test.ts
