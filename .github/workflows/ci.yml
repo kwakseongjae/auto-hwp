@@ -80,8 +80,11 @@ jobs:
             scripts/tests/gov-sources.test.mjs \
             scripts/tests/fetch-gov-corpus.test.mjs \
             scripts/tests/gov-source-catalog.test.mjs \
+            scripts/tests/public-corpus-manifest.test.mjs \
+            scripts/tests/safe-document-download.test.mjs \
             scripts/tests/oracle-sweep.test.mjs
           node scripts/gov-source-catalog.mjs --check
+          node scripts/public-corpus-intake.mjs --check
           node scripts/oracle-sweep.mjs --check-committed
       - name: canonical layout gate (issue 98 — bounded three-document run)
         run: |

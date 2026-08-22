@@ -41,12 +41,15 @@ else
   echo "⚠️  modu-startup 게이트 skipped(corpus/private 부재 — 로컬 전용 실물 벤치, 공개 커밋 금지)"
 fi
 
-echo "═══ 공공문서 후보 카탈로그 계약 (이슈 99 — metadata-only · 다운로드 없음) ═══"
+echo "═══ 공공문서 후보·승격 코퍼스 계약 (이슈 99·100 — CI 다운로드 없음) ═══"
 node --test \
   scripts/tests/gov-sources.test.mjs \
   scripts/tests/fetch-gov-corpus.test.mjs \
-  scripts/tests/gov-source-catalog.test.mjs
+  scripts/tests/gov-source-catalog.test.mjs \
+  scripts/tests/public-corpus-manifest.test.mjs \
+  scripts/tests/safe-document-download.test.mjs
 node scripts/gov-source-catalog.mjs --check
+node scripts/public-corpus-intake.mjs --check
 
 echo "═══ 조판 오라클 스윕 산출물 (이슈 72 — 전수 재실행 아님 · 커밋된 요약만) ═══"
 # 코퍼스 전수 layout-check 는 로컬 `node scripts/oracle-sweep.mjs` (--check 가 회귀).

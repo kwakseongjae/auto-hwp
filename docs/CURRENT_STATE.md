@@ -3,6 +3,17 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-23 · Codex(sol) — **#100 구현·실수집 완료 · 커밋/PR 전 최종 diff 검수**.
+  `codex/issue-100-public-corpus`에서 공식 HWP5 20건·HWPX 20건·같은 서식의 PDF pair
+  10쌍(총 50)을 권리·privacy·접근성 재검토 후 `corpus/private/`에 수집했고, 재실행 50/50
+  SHA·크기·컨테이너 일치 및 production `tag-layout` 40/40 open을 확인했다. 공개 diff에는
+  바이너리·본문·로컬 경로·격리 메타데이터가 없고 `public-corpus-manifest.json`의 provenance,
+  license scope, retrieval time, SHA, magic, size, feature tag, pair id만 남는다. 수집기는 HTTPS,
+  redirect host, 매 hop public DNS pin, 30초·32MiB, HWP5 CFB/HWPX ZIP/PDF 구조, exclusive
+  no-overwrite를 강제한다. 공개 계약 72건과 `verify-local` quick가 PASS했고 canonical
+  8/18/24쪽·98.9%+, PDF visual 51/51도 유지됐다. **다음:** 전체 diff/보안 검수 → commit·push →
+  PR(`Closes #100`) 필수 CI → 사용자 병합 승인. 이후 #101 calibration → #102 parity.
+
 - 갱신: 2026-08-23 · Codex(sol) — **P0 보안 수정·공개 완료 · #100 unblocked**.
   GHSA-5jw4-mcv6-c6gv를 공개했고 production 수정은 main `2ec233f`, Linux inode 재사용까지
   잠근 테스트 보강 뒤 최신 main은 `6af878c`다. public-main CI `32579085452`에서 Rust/native,
