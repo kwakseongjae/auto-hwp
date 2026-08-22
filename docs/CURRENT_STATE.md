@@ -3,6 +3,18 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-22 · Codex(sol) — **#118/#130 완료 · PR #131 병합, 비공개 Advisory가 다음**.
+  PR #131을 squash 병합(main `18d00d1`)했고 #118·#130은 close됐다. 루트가 추적하는
+  first-party lockfile 4개와 demo proxy의 필수 exact override만 nanoid 3.3.18로 맞췄으며,
+  unrelated graph·`undici` override·vendored `external/rhwp`는 바꾸지 않았다. 각 패키지의
+  fresh npm ci/audit(취약점 0), 독립 리뷰(P0~P2 없음), `verify-local --full`이 PASS했다:
+  canonical 8/18/24쪽·줄정확 98.9%+, PDF visual oracle 51/51, 오라클 82문서,
+  Vitest 269+64+425+247+11, Playwright 85 pass/3 intentional skip. 필수 checks
+  `issue-link`·`build-test`·`licenses`도 최종 head `4e93601`에서 green이었고 병합 브랜치와
+  worktree를 정리했다. **다음:** 공개 트랙과 완전히 분리해 비공개 Security Advisory의
+  수정·회귀 테스트·비공개 검수를 완료한다. 세부·영향 경로·재현법은 공개 이슈/PR/CI에
+  남기지 않는다. 그 뒤 #100 → #101 → #102 순서를 유지한다.
+
 - 갱신: 2026-08-22 · Codex(sol) — **#116 완료 · PR #125 병합, #118 착수**.
   사용자 승인에 따라 PR #125를 squash 병합(main `241e70c`)했고 #116은 close됐다.
   hwp-lab의 nanoid 3.3.17→3.3.18만 반영했으며 필수 checks와 독립 검수는 green이다.
