@@ -59,6 +59,29 @@ export function localModelsDeniedReason(req: Request): LocalModelsDenyReason | n
   return null;
 }
 
+/**
+ * Rebuild the page request without letting a proxy header replace the actual Host.
+ * Missing or syntactically invalid Host values fail closed by returning null.
+ */
+export function localModelsPageRequest(
+  host: string | null | undefined,
+  forwardedHost: string | null | undefined,
+): Request | null {
+  const actualHost = host?.trim();
+  if (!actualHost) return null;
+
+  try {
+    return new Request(`http://${actualHost}/models`, {
+      headers: {
+        host: actualHost,
+        ...(forwardedHost ? { "x-forwarded-host": forwardedHost } : {}),
+      },
+    });
+  } catch {
+    return null;
+  }
+}
+
 /** Callback / connect URL origin from the request itself — no hardcoded 3000/3100/3110. */
 export function requestOrigin(req: Request): string {
   const url = new URL(req.url);

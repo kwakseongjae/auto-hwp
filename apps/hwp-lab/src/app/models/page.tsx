@@ -3,13 +3,14 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { SiteFooter } from "@/components/site/SiteFooter";
 import { SiteHeader } from "@/components/site/SiteHeader";
-import { localModelsDeniedReason } from "@/lib/openrouter/gating";
+import { localModelsDeniedReason, localModelsPageRequest } from "@/lib/openrouter/gating";
 import { ModelsPanel } from "./ModelsPanel";
 import styles from "./models.module.css";
 
-const STATIC_DEMO = process.env.DEMO_STATIC === "1";
-
-export const dynamic = STATIC_DEMO ? "force-static" : "force-dynamic";
+// Next 15 requires route-segment config to be statically analyzable. The page reads request
+// headers and must therefore stay dynamic in every server build. `build-demo.mjs` removes this
+// local-only route from the app tree while producing the serverless static demo.
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Models",
@@ -18,17 +19,9 @@ export const metadata: Metadata = {
 };
 
 export default async function ModelsPage() {
-  if (STATIC_DEMO) notFound();
   const h = await headers();
-  const host = h.get("x-forwarded-host") || h.get("host") || "localhost";
-  const proto = h.get("x-forwarded-proto") || "http";
-  const req = new Request(`${proto}://${host}/models`, {
-    headers: {
-      host,
-      ...(h.get("x-forwarded-host") ? { "x-forwarded-host": h.get("x-forwarded-host")! } : {}),
-    },
-  });
-  if (localModelsDeniedReason(req)) notFound();
+  const req = localModelsPageRequest(h.get("host"), h.get("x-forwarded-host"));
+  if (!req || localModelsDeniedReason(req)) notFound();
 
   return (
     <div className={styles.page}>
