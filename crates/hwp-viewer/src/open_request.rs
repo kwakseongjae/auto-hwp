@@ -104,6 +104,7 @@ where
 
 /// Platform `RunEvent::Opened` values are URLs. Accept only `file:` URLs that convert to local paths;
 /// custom/http schemes never reach the filesystem intake.
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn paths_from_urls(urls: &[tauri::Url], cwd: &Path) -> Vec<String> {
     normalize_paths(
         urls.iter()
