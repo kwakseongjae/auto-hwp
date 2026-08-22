@@ -18,6 +18,11 @@
 - 실제 `.app`: 편집→dirty-close 차단→0600 snapshot→강제종료→최신 rev 복원→저장/clean 종료 PASS.
 - #137/#145 green 유지·미병합; 다음은 승인 후 #141 commit/PR, #145 병합 뒤 #142.
 
+## 2026-08-23 (Codex sol) · #102 PR #138 개설
+- `eb94323` push, PR #138(`Closes #102`, base=#137 branch) MERGEABLE; 이슈에 검증 근거 기록.
+- #136은 main 기준 필수 CI 3종 green, #137/#138은 부모 브랜치 기준 checks 없는 정상 stack.
+- 다음: #136 승인 병합 → #137 main retarget/CI/승인 → #138 main retarget/CI/승인.
+
 ## 2026-08-23 (Codex sol) · #102 SVG→PDF parity 구현 완료
 - equation/chart SVG를 제한 parser→krilla vector로 재생; unsupported는 visible stub+진단.
 - page별 produced/replayed/stubbed 균형과 public HWPX·실제 rhwp chart fragment 회귀를 잠금.
