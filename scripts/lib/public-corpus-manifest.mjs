@@ -26,6 +26,16 @@ const LICENSE_SCOPES = new Set([
 const PRIVACY_CLASSES = new Set(["blank-form-template", "official-publication", "public-guidance"]);
 const SHA256 = /^[0-9a-f]{64}$/;
 const SLUG = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/;
+const APPROVED_OFFICIAL_HOSTS = new Set([
+  "rda.go.kr",
+  "www.kdca.go.kr",
+  "www.korea.kr",
+  "www.law.go.kr",
+  "www.mafra.go.kr",
+  "www.moe.go.kr",
+  "www.mohw.go.kr",
+  "www.nfa.go.kr",
+]);
 
 function exactKeys(value, keys, path, errors) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -45,11 +55,19 @@ function realDate(value) {
 }
 
 function realTimestamp(value) {
-  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value) && !Number.isNaN(Date.parse(value));
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value)) return false;
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) return false;
+  const normalized = value.includes(".") ? value : value.replace("Z", ".000Z");
+  return new Date(parsed).toISOString() === normalized;
 }
 
 function publicUrl(value, path, errors) {
-  try { return parsePublicHttpsUrl(value, path); }
+  try {
+    const url = parsePublicHttpsUrl(value, path);
+    if (!APPROVED_OFFICIAL_HOSTS.has(url.hostname)) errors.push(`${path}: host is not in the reviewed official allowlist`);
+    return url;
+  }
   catch (error) { errors.push(error.message); return null; }
 }
 
@@ -106,7 +124,11 @@ export function validatePublicCorpusManifest(doc, { enforceMinimums = true } = {
     else {
       const normalized = [];
       for (const [hostIndex, host] of artifact.allowed_redirect_hosts.entries()) {
-        try { normalized.push(parseAllowedRedirectHostname(host, `${path}.allowed_redirect_hosts[${hostIndex}]`)); }
+        try {
+          const normalizedHost = parseAllowedRedirectHostname(host, `${path}.allowed_redirect_hosts[${hostIndex}]`);
+          normalized.push(normalizedHost);
+          if (!APPROVED_OFFICIAL_HOSTS.has(normalizedHost)) errors.push(`${path}.allowed_redirect_hosts[${hostIndex}]: host is not in the reviewed official allowlist`);
+        }
         catch (error) { errors.push(error.message); }
       }
       if (new Set(normalized).size !== normalized.length || [...normalized].sort().join("\0") !== normalized.join("\0")) errors.push(`${path}.allowed_redirect_hosts: sorted unique hosts required`);

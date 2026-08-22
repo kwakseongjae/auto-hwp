@@ -20,6 +20,9 @@ test("manifest rejects downgraded rights, privacy, hashes, ordering, and unknown
     (doc) => { doc.artifacts[0].license.scope = "unknown"; },
     (doc) => { doc.artifacts[0].privacy_review.decision = "quarantine"; },
     (doc) => { doc.artifacts[0].sha256 = "A".repeat(64); },
+    (doc) => { doc.artifacts[0].retrieved_at = "2026-02-31T00:00:00.000Z"; },
+    (doc) => { doc.artifacts[0].source_url = "https://attacker.example/download"; },
+    (doc) => { doc.artifacts[0].allowed_redirect_hosts = ["attacker.example"]; },
     (doc) => { doc.artifacts.reverse(); },
     (doc) => { doc.artifacts[0].local_path = "/private/example"; },
   ]) {
