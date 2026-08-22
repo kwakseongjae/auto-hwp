@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-23 (Codex sol) · P0 Security Advisory 공개 완료
+- GHSA-5jw4-mcv6-c6gv 공개; 수정 `2ec233f`, Linux 회귀 보강 포함 최신 main `6af878c`.
+- public-main CI `32579085452` green, 관리자 보호 예외는 즉시 원복·필수 보호 규칙 유지.
+- temporary private fork는 정상 정리됐고 #100을 `status:ready`로 전환.
+- 다음: #100 → #101 → #102.
+
 ## 2026-08-22 (Codex sol) · #118/#130 dependency sweep 완료
 - PR #131을 squash 병합(main `18d00d1`), #118·#130 close; 브랜치/worktree 정리 완료.
 - first-party lockfile 4개+demo exact override만 nanoid 3.3.18; unrelated graph/rhwp 무변경.

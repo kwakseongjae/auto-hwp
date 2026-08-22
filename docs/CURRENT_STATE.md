@@ -3,6 +3,16 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-23 · Codex(sol) — **P0 보안 수정·공개 완료 · #100 unblocked**.
+  GHSA-5jw4-mcv6-c6gv를 공개했고 production 수정은 main `2ec233f`, Linux inode 재사용까지
+  잠근 테스트 보강 뒤 최신 main은 `6af878c`다. public-main CI `32579085452`에서 Rust/native,
+  wasm, 공공 코퍼스 안전 계약, canonical 조판, PDF visual, desktop adapter, licenses가 모두
+  PASS했다. Advisory 병합 중 필요한 최소 관리자 예외는 즉시 원복했고 main은 필수 checks
+  `build-test`·`licenses`·`issue-link`, enforce-admins, force-push/deletion 금지를 그대로 유지한다.
+  temporary private fork는 공개 절차에 따라 정리됐고 private artifact는 public history에 없다.
+  #100을 `status:ready`로 전환했다. **다음:** #100(20 HWP5·20 HWPX·공식 PDF pair 10+) →
+  #101(20쌍+ report-only visual calibration) → #102(equation/chart PaintOp PDF parity).
+
 - 갱신: 2026-08-22 · Codex(sol) — **#118/#130 완료 · PR #131 병합, 비공개 Advisory가 다음**.
   PR #131을 squash 병합(main `18d00d1`)했고 #118·#130은 close됐다. 루트가 추적하는
   first-party lockfile 4개와 demo proxy의 필수 exact override만 nanoid 3.3.18로 맞췄으며,
