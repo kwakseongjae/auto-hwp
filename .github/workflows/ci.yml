@@ -74,8 +74,14 @@ jobs:
           cache-dependency-path: packages/react/package-lock.json
       - name: desktop workspace shell launch contract
         run: node --test scripts/tests/desktop-shell-mode.test.mjs
-      - name: typeset oracle summary (issue 72 — no layout-check rerun)
-        run: node --test scripts/tests/oracle-sweep.test.mjs && node scripts/oracle-sweep.mjs --check-committed
+      - name: public corpus metadata contracts (issues 71, 72, 99)
+        run: |
+          node --test \
+            scripts/tests/gov-sources.test.mjs \
+            scripts/tests/gov-source-catalog.test.mjs \
+            scripts/tests/oracle-sweep.test.mjs
+          node scripts/gov-source-catalog.mjs --check
+          node scripts/oracle-sweep.mjs --check-committed
       - name: canonical layout gate (issue 98 — bounded three-document run)
         run: |
           node --test scripts/tests/canonical-layout-gate.test.mjs
