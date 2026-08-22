@@ -17,7 +17,8 @@
   네이티브 다이얼로그로 열고 페이지 이동·90→99% 줌까지 실측. clean checkout 패키징을 위해
   workspace build hook도 editor-core → react → UI 순서를 보장한다. `verify-local --full`은 조판
   8==8/18==18/24==24 · 82건 커밋 오라클 산출물 계약 · wasm/JS/vitest · Playwright
-  85 pass/3 skip로 전부 그린. 상태: PR #97 open(`Closes #69`, 머지 금지, 필수 checks 확인 중).
+  85 pass/3 skip로 전부 그린. 상태: PR #97 open(`Closes #69`, 머지 금지). main `80c2c4a`
+  동기화 과정의 문서 충돌은 #84→#89 차단 판단을 보존해 해결했으며 필수 checks 재실행 대기.
 
 - 갱신: 2026-08-21 · Grok 4.6 — **#82 T2-C · .hwp lift 그림 문단 누수**.
   브랜치 `fix/issue-82-hwp-lift-leak`. 원인: lift가 Picture를 호스트 뒤에
@@ -71,8 +72,11 @@
   33.3%→66.7% · 중첩표 40%→70% · 머리말 40%→60%(본문줄 81.9%→93.3%) ·
   도형/OLE 75.8%→87.9% · 일치 51→53 · 쪽격차 16→10. **3건 모두 점수 하락 0건 ·
   채점 로직 무변경 · 게이트 8==8/18==18/24==24 검수자 직접 재현.**
-  **#84**(수식·차트 extra 문단 — 같은 계열 마지막)는 착수 시점 기준 진행 중 —
-  인수 전 `gh pr list --search 84`와 `git status`로 상태부터 확인할 것.
+  **#84**(수식·차트 extra 문단)는 **워커 중단 — WIP 보존**: 브랜치
+  `fix/issue-84-object-paragraph-leak` 커밋 `93d493d`(미검증). 디스크 풀 복구 직후
+  workspace clippy 정체로 `--full` 미완, PR 없음. 검수자 확인분: 게이트 3종 통과 ·
+  채점 로직 무변경 · 스윕 하락 0건 · equation 축 본문줄 92.1%→97.3%(math-001 3→2쪽).
+  남은 일은 **검증 완주 → PR**이며 재구현 불필요 — 절차는 핸드오프 §2.
 
 - 갱신: 2026-08-20 · Claude(Fable) — **#64 머지 + 데스크톱 셸 결함 2건 발견 + T1 계획 확정**.
   PR #68 머지(main `9b3b659`, #64·#51 close): 3종(blockRunsPath·tableGrid·docProfile)이
