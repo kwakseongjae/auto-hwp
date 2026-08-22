@@ -76,6 +76,15 @@ jobs:
         run: node --test scripts/tests/desktop-shell-mode.test.mjs
       - name: typeset oracle summary (issue 72 — no layout-check rerun)
         run: node --test scripts/tests/oracle-sweep.test.mjs && node scripts/oracle-sweep.mjs --check-committed
+      - name: canonical layout gate (issue 98 — bounded three-document run)
+        run: |
+          node --test scripts/tests/canonical-layout-gate.test.mjs
+          cargo run -q -p auto-hwp-cli --features "shaper rhwp" -- \
+            layout-check --json \
+            benchmarks/benchmark.hwp \
+            benchmarks/benchmark1.hwp \
+            benchmarks/benchmark2.hwp \
+            | node scripts/canonical-layout-gate.mjs
       - name: desktop adapter contract (vitest)
         working-directory: packages/react
         run: npm ci && npx vitest run src/__tests__/desktopParity.contract.test.ts

@@ -5,6 +5,33 @@
 
 ---
 
+## 2026-08-22 (Codex sol) · #121 PDF 시각 오라클 기반 PR
+- PR #122: 구조 우선 PDF↔PDF report-only 비교기, JSON/HTML+진단 PNG 5종, worst 5쪽/영역.
+- 51/51·verify quick·필수 CI 3종·독립 보안/범위 검수 PASS; #93은 전체 파이프라인까지 open.
+- rhwp 재감사: HWP5/HWP3 decode+object fragment/oracle 의존, fork 고유 commit 0; #87→#107→#94.
+- 외부 PR 0·외부 open issue #50만 유지·신규 미응답/악성 0; advisory는 비공개 draft 유지.
+- 다음: #97→#115 rebase→#119→#120 rebase→#122 rebase·병합 승인 후 #116→#100→#101→#102.
+
+## 2026-08-22 (Codex sol) · #99 공공문서 카탈로그 PR
+- PR #120: 공식 12개 출처군 후보 259건(HWP5 119/HWPX 19/PDF 121), pair 120개.
+- metadata-only·바이너리 0; 개인정보/접근통제 fail-closed, 라이선스 6건은 review-required.
+- 계약 54/54·verify quick·독립 리뷰·필수 CI 3종 PASS; #100이 안전 승격을 담당.
+- PR #97/#115/#119는 all checks green·MERGEABLE; 모두 비사소라 사용자 병합 대기.
+- 다음: #97/#115/#119/#120 병합 승인 → #116 → #100 → PDF 시각 오라클 #101/#102.
+
+## 2026-08-22 (Codex sol) · 로드맵 실행 + #117 PR
+- PR #115(#98)·#97(#69)은 all checks green/mergeable, 비사소라 병합 대기.
+- #117은 서버·정적 build와 85 E2E를 통과해 PR #119 생성; CI 진행 중.
+- #116 앱 nanoid 패치는 검증됐지만 #117 선행 blocked, 독립 lock은 #118.
+- rhwp는 파싱 전용이고 자체 IR→조판→렌더→PDF를 소유; decode 독립은 #87→#94→#107.
+- 다음: #119 checks/병합 승인 → #116 → 공공 코퍼스(#99/#100)·PDF 오라클(#101/#102).
+
+## 2026-08-22 (Codex sol) · #114 로드맵 + #98 canonical gate
+- R15~R18 마일스톤과 실행 이슈 #98~#114를 등재하고 #42/#50 커뮤니티 후속 답변.
+- #98/PR #115: JSON으로 8/18/24·98.9%·오라클 문단 강제; 17/17+quick+Critic PASS.
+- PR #91 머지, stale #47 close. #97은 CI green이나 main 갱신 후 conflict — 업데이트 대기.
+- 다음: PR #115 checks → 비공개 P0 advisory patch → 공공 코퍼스·PDF 오라클.
+
 ## 2026-08-22 (Codex sol) · #69 PR #97 개설
 - `c7dd0d9`를 push하고 PR #97(`Closes #69`) 개설; issue-link 통과, build-test/licenses 확인 중.
 - 머지하지 않고 필수 checks와 사용자 결정을 기다린다.

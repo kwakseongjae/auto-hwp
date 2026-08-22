@@ -3,6 +3,36 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-22 · Codex(sol) — **#114 실행 로드맵 · #98/#69/#117/#99/#121 구현 체크포인트**.
+  공개 로드맵 #114와 R15~R18 마일스톤에 실행 이슈 #98~#118 및 #121을 의존 순서와 수용 기준으로
+  등재했다. 구조 재감사 결과 HWPX parser/writer·SemanticDoc·조판·live SVG·PDF·편집 op-bus는
+  자체 Rust 코어가 소유한다. 반면 출하 Web/Tauri/service의 HWP5/HWP3 decode는 rhwp 하드
+  의존이고, 수식·차트 SVG fragment와 original/lineseg oracle에도 좁은 렌더 의존이 남는다.
+  `kwakseongjae/rhwp` URL+SHA pin은 했지만 fork 고유 commit이 0개라 현재는 유지 포크보다 고정
+  mirror에 가깝다. #87(fork 거버넌스) → #107(자체 parser skeleton/differential) → #94(cutover)로
+  제거하며, 버전 문구 drift·예외 경계·미사용 façade 부채는 #87 댓글에 기록했다.
+  **PR #115(#98) all checks green·MERGEABLE**: canonical gate가 8/18/24쪽,
+  98.9/99.2/99.7% 줄정확, 91/257/365 본문 오라클, missing=0을 quick/full/CI에 강제한다.
+  **PR #97(#69) main 동기화·all checks green·MERGEABLE**: 워크스페이스 셸 실행 경로와
+  clean checkout 빌드 계약을 검증했으며 비사소 변경이라 사용자 병합 대기다.
+  **PR #119(#117) all checks green·MERGEABLE**: Next 15 `/models` 빌드를 literal dynamic으로 고치고
+  정적 demo의 api/models 격리·복원 실패·Host 스푸핑을 fail-closed로 잠갔다. 로컬 검증은
+  앱 247, 전체 Playwright 85 pass/3 intentional skip, 서버/정적 build와 독립 리뷰 PASS.
+  **PR #120(#99) all checks green·MERGEABLE**: 바이너리 없이 공식 12개 출처군의 HWP5 119·HWPX 19·
+  PDF 121 = 후보 259건과 pair 120개를 provenance·privacy·license와 함께 metadata-only로
+  등재했다. 8개 조판 빈칸을 우선순위화했고 계약 54/54·quick·독립 리뷰가 모두 PASS;
+  라이선스 재검토 6건과 URL·magic bytes·SHA·바이너리 PII 검증은 #100에서 승격 전 수행한다.
+  **PR #122(#121) all checks green·MERGEABLE**: 이미 export된 own PDF와 명시적 reference PDF를
+  구조 우선(page/box/rotation/orientation)으로 비교하고, JSON·HTML·side-by-side·aligned·overlay·
+  heatmap과 최악 5쪽/영역을 report-only로 만든다. 51/51·quick·필수 CI·독립 보안/범위 검수 PASS;
+  20쌍 T0/T1 calibration/manifest는 #101, object/PaintOp replay·SVG↔PDF parity는 #102가 소유한다.
+  #116 nanoid 앱 패치는 로컬 240/240·audit 0이나 #117 clean build 선행으로 blocked;
+  나머지 독립 lockfile은 #118. 비공개 보안 트랙은 공개 이슈와 분리해 유지한다.
+  커뮤니티 #42/#50 후속 답변과 외부 PR/이슈 점검을 마쳤고 악성·스팸 신호는 0건;
+  `auto-hwp-github`가 매일 09:30 KST 추적한다. 겹치는 CI/상태 파일 때문에 다음 순서를 지킨다:
+  #97 병합 → #115 rebase·CI·병합 → #119 병합 → #120 rebase·CI·병합 → #122 rebase·CI·병합 승인 →
+  #116 → #100 안전 승격 → #101 calibration → #102 PDF replay.
+
 - 갱신: 2026-08-22 · Codex(sol) — **rhwp 경계 감사 · #84 차단 · #69 재진단/QA**.
   결론: auto-hwp는 rhwp 완전 종속이 아니다. **HWP5 ingest/lift와 일부 수식·차트 보강**은
   rhwp에 의존하지만, HWPX 파서/직렬화 · SemanticDoc IR · 조판 · SVG/PDF 렌더 · 세션/ops/AI는
