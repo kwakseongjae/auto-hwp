@@ -15,6 +15,8 @@ echo "═══ clippy (-D warnings) ═══"
 cargo clippy --workspace --all-targets -- -D warnings
 echo "═══ tests (workspace) ═══"
 cargo test --workspace
+echo "═══ PDF visual oracle (standard-library unittest) ═══"
+python3 -m unittest discover -s scripts/tests -p 'test_pdf_visual_check.py'
 echo "═══ tests (hwp-rhwp features) ═══"
 cargo test -p hwp-rhwp --features "rhwp shaper"
 
