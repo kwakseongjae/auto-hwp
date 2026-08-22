@@ -3,6 +3,18 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-23 · Codex(sol) — **#101 T1 PDF calibration 구현·재현 완료 · stacked PR 준비**.
+  #100 PR #136(`d803ab1`)은 MERGEABLE이고 필수 CI 3종 green이나 비사소 PR이라 사용자 병합
+  승인 대기다. 그 헤드 위 `codex/issue-101-pdf-calibration`에서 국가법령정보센터 공식 HWP5/PDF
+  20쌍을 T1 provenance·권리·SHA·Hancom PDF producer·OS disclosure·`pdffonts` 지문과 함께
+  metadata-only manifest로 고정했다. 자체 `export-pdf`→구조→144 DPI 비교 full run은 20/20
+  재현됐고 committed baseline과 byte-identical: scored 18건/19쪽, page-count structural mismatch
+  2건(`17184503`, `17184525`)은 pixel score 0건. HTML/PNG/바이너리는 private/ignored다.
+  새 validator/runner/4 tests, 기존 PDF 51 tests, `verify-local` quick가 PASS했고 canonical
+  8/18/24·98.9%+, 오라클 82건 무변경. **다음:** commit·push → #101 stacked PR(Closes #101,
+  base=#100 branch) → #136 사용자 승인 병합 → #101 base를 main으로 전환·CI → 사용자 병합 승인
+  → #102 PaintOp/SVG↔PDF parity.
+
 - 갱신: 2026-08-23 · Codex(sol) — **#100 구현·실수집 완료 · 커밋/PR 전 최종 diff 검수**.
   `codex/issue-100-public-corpus`에서 공식 HWP5 20건·HWPX 20건·같은 서식의 PDF pair
   10쌍(총 50)을 권리·privacy·접근성 재검토 후 `corpus/private/`에 수집했고, 재실행 50/50

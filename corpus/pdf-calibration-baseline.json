@@ -1,0 +1,636 @@
+{
+  "schema_version": 1,
+  "manifest_sha256": "cece7a9c7eaa21dc8ed7e1ab4bba10b5783f3b3702156e556bf24981fe2e3c2a",
+  "calibration": {
+    "engine_commit": "d803ab1f6540adb7b54ae60959d9923d4e534b2f",
+    "cli_features": [
+      "pdf",
+      "rhwp",
+      "shaper"
+    ],
+    "observed_at": "2026-08-22",
+    "mode": "report-only",
+    "quality_threshold": null
+  },
+  "environment": {
+    "pdfinfo": "pdfinfo version 26.07.0",
+    "pdftoppm": "pdftoppm version 26.07.0",
+    "platform_system": "Darwin",
+    "platform_release": "25.5.0",
+    "platform_machine": "arm64",
+    "python_implementation": "CPython",
+    "python_version": "3.14.6",
+    "dpi": 144,
+    "candidate_font_fingerprint": "sha256:76f45ef4a6bcff344c837c95a7dcc26e017e38b5846d5ae0cdcb5b86be2e2d31",
+    "alignment": {
+      "max_abs_translation_px": 3,
+      "scale": 1,
+      "crop": false,
+      "rotation_degrees": 0
+    }
+  },
+  "counts": {
+    "trusted_pairs": 20,
+    "scored_reports": 18,
+    "structural_mismatches": 2,
+    "scored_pages": 19
+  },
+  "pairs": [
+    {
+      "pair_id": "law-go-271027-17184499",
+      "status": "scored_report",
+      "source_sha256": "39192069329373f80cdd812d7e6a8de9061021c4b0ec4d7caf4be5e42ca1f191",
+      "reference_sha256": "01d013d2dbe59e286fcc5879ab83b3cd4f1be7d82870c3b870ee5a8c6a3a5fc6",
+      "candidate_sha256": "7262779119b75179e39ac0bd348377677e06147bcc269c6d322195552a2fc5ea",
+      "reference_page_count": 2,
+      "candidate_page_count": 2,
+      "structural_mismatches": [],
+      "scored_pages": 2,
+      "worst_page": {
+        "page": 2,
+        "global_ssim_like": 0.095849,
+        "local_ssim_like_mean": 0.308775,
+        "ink_f1": 0.197847,
+        "edge_f1": 0.421567,
+        "worst_tile_recall": 0
+      },
+      "worst_tile": {
+        "page": 1,
+        "recall": 0,
+        "tile": {
+          "height": 128,
+          "left": 512,
+          "matched_ink_pixels": 0,
+          "reference_ink_pixels": 640,
+          "top": 1408,
+          "width": 128
+        }
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184501",
+      "status": "scored_report",
+      "source_sha256": "811183a397a4fa55f04fd9714879cdb320d90b08597f9bc3579a89458ef30ce5",
+      "reference_sha256": "c0b94f5d13316b92a5c3b81ef54b4c0bfec33a526b9ff25e3f153a1f4f74f65f",
+      "candidate_sha256": "e813faa630ecd4a744309a0ebc6d065503679be30b777a3da10e5bed4a482f7b",
+      "reference_page_count": 1,
+      "candidate_page_count": 1,
+      "structural_mismatches": [],
+      "scored_pages": 1,
+      "worst_page": {
+        "page": 1,
+        "global_ssim_like": 0.196153,
+        "local_ssim_like_mean": 0.381664,
+        "ink_f1": 0.369506,
+        "edge_f1": 0.449762,
+        "worst_tile_recall": 0
+      },
+      "worst_tile": {
+        "page": 1,
+        "recall": 0,
+        "tile": {
+          "height": 128,
+          "left": 0,
+          "matched_ink_pixels": 0,
+          "reference_ink_pixels": 18,
+          "top": 0,
+          "width": 128
+        }
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184503",
+      "status": "structural_mismatch",
+      "source_sha256": "96885f4e5df7887e5147fd2317b10b376cf9c67f030ee99228c6c6eba4375e92",
+      "reference_sha256": "56d9497a1fab0d0a73046ea6ef34500cee7620b5dfc129de1b8af47563ef11ea",
+      "candidate_sha256": "53472f6ab21a70967323850974a8bfebfd0170164bfd3e197c2079d6560ad02e",
+      "reference_page_count": 1,
+      "candidate_page_count": 2,
+      "structural_mismatches": [
+        {
+          "candidate": 2,
+          "kind": "page_count",
+          "reference": 1
+        }
+      ],
+      "scored_pages": 0,
+      "worst_page": null,
+      "worst_tile": null
+    },
+    {
+      "pair_id": "law-go-271027-17184505",
+      "status": "scored_report",
+      "source_sha256": "682cbf6d11a8bbddc5667e4c7b860a048204f47eabf2df67a6c068a2332e4c23",
+      "reference_sha256": "e069e4184746ce959c6430b2a3c3de48d17735d3d96234006788468ac9bbd5d1",
+      "candidate_sha256": "7641158d954804ccc6af3a6c6f35fed60f3cd4d6880f60f05c4aa2dabf27b66e",
+      "reference_page_count": 1,
+      "candidate_page_count": 1,
+      "structural_mismatches": [],
+      "scored_pages": 1,
+      "worst_page": {
+        "page": 1,
+        "global_ssim_like": 0.296228,
+        "local_ssim_like_mean": 0.456113,
+        "ink_f1": 0.494839,
+        "edge_f1": 0.628057,
+        "worst_tile_recall": 0
+      },
+      "worst_tile": {
+        "page": 1,
+        "recall": 0,
+        "tile": {
+          "height": 128,
+          "left": 640,
+          "matched_ink_pixels": 0,
+          "reference_ink_pixels": 40,
+          "top": 0,
+          "width": 128
+        }
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184507",
+      "status": "scored_report",
+      "source_sha256": "2239613b8609103bec2a3ee68e02ebfebab6829800756fcc918a8dcc181b6510",
+      "reference_sha256": "04685c76a3eb07a3009c4a2a2160fddcc12d63a5f76b8da4e1e7fd662bdc3c12",
+      "candidate_sha256": "76aa83d125927252144a0c63779e6f47a7cad6fe43c020cbc8b251a2ebaae06d",
+      "reference_page_count": 1,
+      "candidate_page_count": 1,
+      "structural_mismatches": [],
+      "scored_pages": 1,
+      "worst_page": {
+        "page": 1,
+        "global_ssim_like": 0.440048,
+        "local_ssim_like_mean": 0.792568,
+        "ink_f1": 0.355916,
+        "edge_f1": 0.581326,
+        "worst_tile_recall": 0
+      },
+      "worst_tile": {
+        "page": 1,
+        "recall": 0,
+        "tile": {
+          "height": 128,
+          "left": 0,
+          "matched_ink_pixels": 0,
+          "reference_ink_pixels": 72,
+          "top": 0,
+          "width": 128
+        }
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184509",
+      "status": "scored_report",
+      "source_sha256": "62e0f560a14d5406c7850a8ddf08ee547cc9a7a9ec4e880e38b073c5a8c5a491",
+      "reference_sha256": "280047052c43ab09e092c17a5ff70bd621ca3b9cedd33ac0a4cbbdafc52ca141",
+      "candidate_sha256": "99a8d2a806ca68831e94dbaa89ff923643447668d15290abc4d296face763d80",
+      "reference_page_count": 1,
+      "candidate_page_count": 1,
+      "structural_mismatches": [],
+      "scored_pages": 1,
+      "worst_page": {
+        "page": 1,
+        "global_ssim_like": 0.297274,
+        "local_ssim_like_mean": 0.514518,
+        "ink_f1": 0.478312,
+        "edge_f1": 0.762264,
+        "worst_tile_recall": 0
+      },
+      "worst_tile": {
+        "page": 1,
+        "recall": 0,
+        "tile": {
+          "height": 128,
+          "left": 0,
+          "matched_ink_pixels": 0,
+          "reference_ink_pixels": 36,
+          "top": 0,
+          "width": 128
+        }
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184511",
+      "status": "scored_report",
+      "source_sha256": "58d4302527076799988dd54279a10de4f2a489fa731e4bad596ca209f160e0b3",
+      "reference_sha256": "9bf747f2dd88b8d844ae0c5c3d7fa998a65591c305690853177cd76f66f90be8",
+      "candidate_sha256": "ef598bbff10dd9cb9f252a174ea7063211ac27955eda38e91f3999c57c2dce5e",
+      "reference_page_count": 1,
+      "candidate_page_count": 1,
+      "structural_mismatches": [],
+      "scored_pages": 1,
+      "worst_page": {
+        "page": 1,
+        "global_ssim_like": 0.167987,
+        "local_ssim_like_mean": 0.395929,
+        "ink_f1": 0.323253,
+        "edge_f1": 0.479558,
+        "worst_tile_recall": 0
+      },
+      "worst_tile": {
+        "page": 1,
+        "recall": 0,
+        "tile": {
+          "height": 128,
+          "left": 896,
+          "matched_ink_pixels": 0,
+          "reference_ink_pixels": 2271,
+          "top": 128,
+          "width": 128
+        }
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184513",
+      "status": "scored_report",
+      "source_sha256": "32cb80a08144c9e79f27d373f436bc5979030a9b9246f2a0ec566a5008e8b79b",
+      "reference_sha256": "cdbbcd0b5cc7c853354e570caed98d6fc59186691d6c3aa8d855fe819b2cce6b",
+      "candidate_sha256": "5287d5c8a54ec4755636a9a0a564cf022f45acfec136b5a5465231d83f2f4781",
+      "reference_page_count": 1,
+      "candidate_page_count": 1,
+      "structural_mismatches": [],
+      "scored_pages": 1,
+      "worst_page": {
+        "page": 1,
+        "global_ssim_like": 0.342347,
+        "local_ssim_like_mean": 0.484242,
+        "ink_f1": 0.670089,
+        "edge_f1": 0.388469,
+        "worst_tile_recall": 0
+      },
+      "worst_tile": {
+        "page": 1,
+        "recall": 0,
+        "tile": {
+          "height": 128,
+          "left": 640,
+          "matched_ink_pixels": 0,
+          "reference_ink_pixels": 81,
+          "top": 0,
+          "width": 128
+        }
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184515",
+      "status": "scored_report",
+      "source_sha256": "85e9d52ce12f8e8bd8df812519f7882454521e10448cbef95ed7e4cda8e08c8f",
+      "reference_sha256": "1ed78601b44edfd75a97e97107a3f18e0a29e345615fdce2e23f57f20fb5c0d7",
+      "candidate_sha256": "ad6f3614426fd4a4c5a2292060b85c0788093c15c27944435445fc3eae3efbaf",
+      "reference_page_count": 1,
+      "candidate_page_count": 1,
+      "structural_mismatches": [],
+      "scored_pages": 1,
+      "worst_page": {
+        "page": 1,
+        "global_ssim_like": 0.251399,
+        "local_ssim_like_mean": 0.577226,
+        "ink_f1": 0.235626,
+        "edge_f1": 0.399952,
+        "worst_tile_recall": 0
+      },
+      "worst_tile": {
+        "page": 1,
+        "recall": 0,
+        "tile": {
+          "height": 128,
+          "left": 0,
+          "matched_ink_pixels": 0,
+          "reference_ink_pixels": 24,
+          "top": 0,
+          "width": 128
+        }
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184517",
+      "status": "scored_report",
+      "source_sha256": "f4b9699c78f9ac63ca271008296b76390226728df084c33d9d7027071d918a18",
+      "reference_sha256": "75e628b1c57bddc931848d5fe6eeb22d0a20a5d5d018530cd5f717c2f186261f",
+      "candidate_sha256": "99bd5cd36ffc2a65c4a0c3df43eabdd4c7360cf87af26cf3c0b7c2e671c8926d",
+      "reference_page_count": 1,
+      "candidate_page_count": 1,
+      "structural_mismatches": [],
+      "scored_pages": 1,
+      "worst_page": {
+        "page": 1,
+        "global_ssim_like": 0.133465,
+        "local_ssim_like_mean": 0.487928,
+        "ink_f1": 0.168603,
+        "edge_f1": 0.457569,
+        "worst_tile_recall": 0
+      },
+      "worst_tile": {
+        "page": 1,
+        "recall": 0,
+        "tile": {
+          "height": 128,
+          "left": 768,
+          "matched_ink_pixels": 0,
+          "reference_ink_pixels": 987,
+          "top": 128,
+          "width": 128
+        }
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184519",
+      "status": "scored_report",
+      "source_sha256": "2c8d0fcedcb4933a1ac2833f431bf71f1a994b798982569292b48fce047af4df",
+      "reference_sha256": "168f6e81517784f79bd1f55123bb0eef813bafcbd0534906a088e1b9767c2bb6",
+      "candidate_sha256": "9b64bda58a9e5e16ede7ff5a102c4cf79af12e0326b81946688855c6fabe636f",
+      "reference_page_count": 1,
+      "candidate_page_count": 1,
+      "structural_mismatches": [],
+      "scored_pages": 1,
+      "worst_page": {
+        "page": 1,
+        "global_ssim_like": 0.267126,
+        "local_ssim_like_mean": 0.4478,
+        "ink_f1": 0.582663,
+        "edge_f1": 0.469177,
+        "worst_tile_recall": 0
+      },
+      "worst_tile": {
+        "page": 1,
+        "recall": 0,
+        "tile": {
+          "height": 128,
+          "left": 0,
+          "matched_ink_pixels": 0,
+          "reference_ink_pixels": 72,
+          "top": 0,
+          "width": 128
+        }
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184521",
+      "status": "scored_report",
+      "source_sha256": "5674a44e7fec3d78501c2dbc46a0d63b2241264c15c7488783eaf355bfdb56d9",
+      "reference_sha256": "c012a0e9c8ec4f557c1bdaaf3e2543192737d3174560a72331e9c0c92fcbe68b",
+      "candidate_sha256": "85dab7fadc332db983b8d29df85deb8b4310d12ca97ea61131a37f766d407fc8",
+      "reference_page_count": 1,
+      "candidate_page_count": 1,
+      "structural_mismatches": [],
+      "scored_pages": 1,
+      "worst_page": {
+        "page": 1,
+        "global_ssim_like": 0.320831,
+        "local_ssim_like_mean": 0.411128,
+        "ink_f1": 0.584933,
+        "edge_f1": 0.361312,
+        "worst_tile_recall": 0
+      },
+      "worst_tile": {
+        "page": 1,
+        "recall": 0,
+        "tile": {
+          "height": 128,
+          "left": 640,
+          "matched_ink_pixels": 0,
+          "reference_ink_pixels": 79,
+          "top": 0,
+          "width": 128
+        }
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184523",
+      "status": "scored_report",
+      "source_sha256": "4c5207a4896acfe8572c6c02b317792933b6b806fa829067346cfe9dcfd99dd3",
+      "reference_sha256": "4f3c7b94c4d147691b8af2716123b6a6ca1a91755f50d1992930203a62799a28",
+      "candidate_sha256": "89697898cc482fada09e62aea2d2812bb5ec7cc58d8c052b9a913a4f2ebd2dfa",
+      "reference_page_count": 1,
+      "candidate_page_count": 1,
+      "structural_mismatches": [],
+      "scored_pages": 1,
+      "worst_page": {
+        "page": 1,
+        "global_ssim_like": 0.25088,
+        "local_ssim_like_mean": 0.398658,
+        "ink_f1": 0.586083,
+        "edge_f1": 0.403216,
+        "worst_tile_recall": 0
+      },
+      "worst_tile": {
+        "page": 1,
+        "recall": 0,
+        "tile": {
+          "height": 128,
+          "left": 0,
+          "matched_ink_pixels": 0,
+          "reference_ink_pixels": 30,
+          "top": 0,
+          "width": 128
+        }
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184525",
+      "status": "structural_mismatch",
+      "source_sha256": "283d39dcb83a4950d539639d0c60e091429d97602cb40be679266817fc70deb8",
+      "reference_sha256": "82b37ac15fc3b5f22183168fb10ff3416069a79dd6f180f8263fcf5084b0d88e",
+      "candidate_sha256": "706cf567f87838203f4b6b062ff07edfa63128464aa2727647ee99e488c5cf77",
+      "reference_page_count": 1,
+      "candidate_page_count": 2,
+      "structural_mismatches": [
+        {
+          "candidate": 2,
+          "kind": "page_count",
+          "reference": 1
+        }
+      ],
+      "scored_pages": 0,
+      "worst_page": null,
+      "worst_tile": null
+    },
+    {
+      "pair_id": "law-go-271027-17184527",
+      "status": "scored_report",
+      "source_sha256": "bd4b55725c0b3904aac770d5aee3722484458041a4384a27e0a17f60cdcadf76",
+      "reference_sha256": "89752a84db2b617564c87768702f4289fb47e155584bada6cd65de5bdd820b5e",
+      "candidate_sha256": "5fc77d354a144534539ea0ba035b52c40205eb2b1a24b3283b0031140993fd17",
+      "reference_page_count": 1,
+      "candidate_page_count": 1,
+      "structural_mismatches": [],
+      "scored_pages": 1,
+      "worst_page": {
+        "page": 1,
+        "global_ssim_like": 0.269865,
+        "local_ssim_like_mean": 0.689149,
+        "ink_f1": 0.280714,
+        "edge_f1": 0.461814,
+        "worst_tile_recall": 0
+      },
+      "worst_tile": {
+        "page": 1,
+        "recall": 0,
+        "tile": {
+          "height": 128,
+          "left": 0,
+          "matched_ink_pixels": 0,
+          "reference_ink_pixels": 72,
+          "top": 0,
+          "width": 128
+        }
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184529",
+      "status": "scored_report",
+      "source_sha256": "ffebb654df18e2524ddb28df7d63bb58442aa431cfeb21d8732ccbd57be2a416",
+      "reference_sha256": "c074580f4546560fb69fd571e86fb5b0cf4ebc64f1bd24e02fb239065a2e779c",
+      "candidate_sha256": "ca7178dd7c5e3886fd887fe02226cd491e7f989ca7fbc39baf0e546339a2a637",
+      "reference_page_count": 1,
+      "candidate_page_count": 1,
+      "structural_mismatches": [],
+      "scored_pages": 1,
+      "worst_page": {
+        "page": 1,
+        "global_ssim_like": 0.27096,
+        "local_ssim_like_mean": 0.630525,
+        "ink_f1": 0.27397,
+        "edge_f1": 0.435597,
+        "worst_tile_recall": 0
+      },
+      "worst_tile": {
+        "page": 1,
+        "recall": 0,
+        "tile": {
+          "height": 128,
+          "left": 0,
+          "matched_ink_pixels": 0,
+          "reference_ink_pixels": 72,
+          "top": 0,
+          "width": 128
+        }
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184531",
+      "status": "scored_report",
+      "source_sha256": "af1bafe1f95778af9ad0c0cddb2240aea67c22ed69dbf2e0f09a83ea22045037",
+      "reference_sha256": "7f8db2f067134375bb2861f0a3c9bc15af4055e8be8ca5a8d0f61372e2ad8e96",
+      "candidate_sha256": "34119b08597f96b1bcac4c634ae11f9ddbc89a4df74edcc9a8172fbdbb918218",
+      "reference_page_count": 1,
+      "candidate_page_count": 1,
+      "structural_mismatches": [],
+      "scored_pages": 1,
+      "worst_page": {
+        "page": 1,
+        "global_ssim_like": 0.352007,
+        "local_ssim_like_mean": 0.50682,
+        "ink_f1": 0.682588,
+        "edge_f1": 0.54998,
+        "worst_tile_recall": 0
+      },
+      "worst_tile": {
+        "page": 1,
+        "recall": 0,
+        "tile": {
+          "height": 128,
+          "left": 0,
+          "matched_ink_pixels": 0,
+          "reference_ink_pixels": 12,
+          "top": 0,
+          "width": 128
+        }
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184533",
+      "status": "scored_report",
+      "source_sha256": "eb1f9a967a882c062fe17af6d9659fcc3f4e90318863ba43c3fdfebb6c733f48",
+      "reference_sha256": "54c12427c1f75348c9fb1af465f08f055d41d3013f8a6eefeedb91962ff6e4d9",
+      "candidate_sha256": "674a1e454b5d695f6f71f192f903bba984df16966bb88340e54d47e6324bac03",
+      "reference_page_count": 1,
+      "candidate_page_count": 1,
+      "structural_mismatches": [],
+      "scored_pages": 1,
+      "worst_page": {
+        "page": 1,
+        "global_ssim_like": 0.189076,
+        "local_ssim_like_mean": 0.643906,
+        "ink_f1": 0.147587,
+        "edge_f1": 0.378095,
+        "worst_tile_recall": 0
+      },
+      "worst_tile": {
+        "page": 1,
+        "recall": 0,
+        "tile": {
+          "height": 128,
+          "left": 0,
+          "matched_ink_pixels": 0,
+          "reference_ink_pixels": 24,
+          "top": 0,
+          "width": 128
+        }
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184535",
+      "status": "scored_report",
+      "source_sha256": "470aaacd0079677d3b6387b9d92a2cf25042edce8928080fad1e6a344d1521ec",
+      "reference_sha256": "8c1b19ed6762affe7ea02e09ef684210654a6c17d899366c6f2584f41313fa1d",
+      "candidate_sha256": "8684e11a930c71073b90e08c15047a9393e27f17f46ca1e14233dc3e43fa08f9",
+      "reference_page_count": 1,
+      "candidate_page_count": 1,
+      "structural_mismatches": [],
+      "scored_pages": 1,
+      "worst_page": {
+        "page": 1,
+        "global_ssim_like": 0.395899,
+        "local_ssim_like_mean": 0.631475,
+        "ink_f1": 0.555527,
+        "edge_f1": 0.543138,
+        "worst_tile_recall": 0
+      },
+      "worst_tile": {
+        "page": 1,
+        "recall": 0,
+        "tile": {
+          "height": 128,
+          "left": 384,
+          "matched_ink_pixels": 0,
+          "reference_ink_pixels": 257,
+          "top": 768,
+          "width": 128
+        }
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184537",
+      "status": "scored_report",
+      "source_sha256": "2a0fc6865d2494b3268954389a6ec958fb44b898a988fb80fd4b32423a48b075",
+      "reference_sha256": "c1d14d6adad73b0f248770187f1622dafd6e6e7b6d6b9e8ecb191d84c5a2a8cb",
+      "candidate_sha256": "559dc045922d9f0e102e7d83599afe28db83bbb98b6cc5168c3ca67c03ba46f1",
+      "reference_page_count": 1,
+      "candidate_page_count": 1,
+      "structural_mismatches": [],
+      "scored_pages": 1,
+      "worst_page": {
+        "page": 1,
+        "global_ssim_like": 0.26767,
+        "local_ssim_like_mean": 0.467534,
+        "ink_f1": 0.532799,
+        "edge_f1": 0.563288,
+        "worst_tile_recall": 0
+      },
+      "worst_tile": {
+        "page": 1,
+        "recall": 0,
+        "tile": {
+          "height": 128,
+          "left": 0,
+          "matched_ink_pixels": 0,
+          "reference_ink_pixels": 54,
+          "top": 0,
+          "width": 128
+        }
+      }
+    }
+  ]
+}

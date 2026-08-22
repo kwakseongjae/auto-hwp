@@ -10,6 +10,46 @@ non-standard JSON `NaN`/`Infinity` tokens.
 The existing stored-lineseg `layout-check` remains the fast layout regression gate. This visual report
 is additive and does not replace or relax it.
 
+## First T1 calibration (issue #101)
+
+The first committed calibration contract is split into two metadata-only files:
+
+- `corpus/pdf-calibration-manifest.json` pins 20 official law.go.kr HWP5/PDF attachment pairs,
+  their rights/provenance records, source/reference hashes, Hancom PDF producer metadata, normalized
+  `pdffonts` fingerprints, the own-engine font hash, 144 DPI, and the no-normalization policy.
+- `corpus/pdf-calibration-baseline.json` is the redacted machine-readable result produced at engine
+  commit `d803ab1f6540adb7b54ae60959d9923d4e534b2f`. It records 18 scored reports (19 pages) and two
+  page-count structural mismatches. It contains no pass field or aggregate quality threshold.
+
+The two structural mismatches are `law-go-271027-17184503` and
+`law-go-271027-17184525`: the official PDF has one page while the own engine exports two. Their
+pixel comparison is deliberately absent rather than represented as a low or zero score. Among the
+18 structurally comparable pairs, the results remain diagnostics: several worst tiles have zero
+recall and the worst-page ink/edge metrics show substantial fidelity work remains. Calibration does
+not turn those observations into a gate.
+
+The full side-by-side, overlay, and heatmap HTML/PNG reports stay under `corpus/private/` and are
+gitignored. Given a private flat directory containing the 20 HWP5 files and another containing the
+20 matching official PDFs, reproduce the whole HWP5 → own PDF → structural check → pixel report
+pipeline with:
+
+```bash
+cargo build -p auto-hwp-cli --features "pdf shaper rhwp"
+node scripts/pdf-visual-calibrate.mjs --run \
+  --source-root corpus/private/pdf-calibration/sources \
+  --reference-root corpus/private/pdf-calibration/references \
+  --output-dir corpus/private/pdf-calibration/run-001 \
+  --cli target/debug/auto-hwp
+```
+
+The output directory must not exist. The runner verifies every source/reference hash and byte count,
+recomputes each reference font fingerprint, exports candidates through `export-pdf`, and builds the
+entire result in a private staging directory before an atomic rename. A tool/input error removes only
+that unique staging directory. A structural mismatch remains a successful report-only observation.
+`node scripts/pdf-visual-calibrate.mjs --check` validates the committed manifest and baseline without
+network access or private binaries; CI runs this check alongside the existing Python resource-limit
+and self-compare determinism suite.
+
 ## Scope
 
 `scripts/pdf-visual-check.py` currently provides:

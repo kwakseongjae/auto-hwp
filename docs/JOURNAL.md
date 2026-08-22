@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-23 (Codex sol) · #101 T1 PDF calibration 구현 완료
+- 공식 HWP5/PDF 20쌍 manifest+baseline; 자체 PDF full run 20/20·baseline byte-identical.
+- 18건/19쪽 pixel report, page-count mismatch 2건은 score 없이 구조 단계에서 차단.
+- validator/runner/4 tests + PDF 51 tests + quick verify PASS; HTML/PNG/binary는 private.
+- 다음: stacked PR → #136 승인 병합 → #101 main retarget/CI/승인 → #102.
+
 ## 2026-08-23 (Codex sol) · #100 public corpus intake 구현 완료
 - HWP5 20·HWPX 20·공식 PDF pair 10쌍을 private 수집; SHA/구조 50/50·production open 40/40.
 - 공개에는 provenance·권리·privacy·SHA·magic·size·feature/pair만, 바이너리·본문·격리정보 0.
