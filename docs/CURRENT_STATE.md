@@ -17,7 +17,7 @@
   네이티브 다이얼로그로 열고 페이지 이동·90→99% 줌까지 실측. clean checkout 패키징을 위해
   workspace build hook도 editor-core → react → UI 순서를 보장한다. `verify-local --full`은 조판
   8==8/18==18/24==24 · 82건 커밋 오라클 산출물 계약 · wasm/JS/vitest · Playwright
-  85 pass/3 skip로 전부 그린. 상태: #69 PR 개설 단계(`Closes #69`, 머지 금지).
+  85 pass/3 skip로 전부 그린. 상태: PR #97 open(`Closes #69`, 머지 금지, 필수 checks 확인 중).
 
 - 갱신: 2026-08-21 · Grok 4.6 — **#82 T2-C · .hwp lift 그림 문단 누수**.
   브랜치 `fix/issue-82-hwp-lift-leak`. 원인: lift가 Picture를 호스트 뒤에

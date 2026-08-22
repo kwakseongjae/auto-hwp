@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-22 (Codex sol) · #69 PR #97 개설
+- `c7dd0d9`를 push하고 PR #97(`Closes #69`) 개설; issue-link 통과, build-test/licenses 확인 중.
+- 머지하지 않고 필수 checks와 사용자 결정을 기다린다.
+
 ## 2026-08-22 (Codex sol) · #69 커밋 전 최종 검수
 - clean checkout 패키징의 JS dist 공백을 찾아 workspace build hook에 editor-core→react→UI 순서를 고정.
 - full verify: 8/18/24 게이트·82건 커밋 산출물 계약·wasm/JS/vitest·Playwright 85 pass/3 skip.
