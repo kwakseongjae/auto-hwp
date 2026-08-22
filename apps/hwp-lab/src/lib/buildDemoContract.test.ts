@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildDemo, demoRouteHolds } from "../../scripts/build-demo.mjs";
 
 const PAGE = fileURLToPath(new URL("../app/models/page.tsx", import.meta.url));
+const ROOT_GITIGNORE = fileURLToPath(new URL("../../../../.gitignore", import.meta.url));
 const roots: string[] = [];
 
 function fixtureRoot(): string {
@@ -27,6 +28,13 @@ afterEach(() => {
 });
 
 describe("static demo route contract", () => {
+  it("ignores both crash-recovery hold directories", () => {
+    const ignore = readFileSync(ROOT_GITIGNORE, "utf8");
+
+    expect(ignore).toMatch(/^apps\/hwp-lab\/\.demo-api-hold\/$/m);
+    expect(ignore).toMatch(/^apps\/hwp-lab\/\.demo-models-hold\/$/m);
+  });
+
   it("keeps the Next 15 segment config literal and server-dynamic", () => {
     const source = readFileSync(PAGE, "utf8");
     const assignment = source.match(/export const dynamic\s*=\s*([^;]+);/);

@@ -35,6 +35,7 @@ apps/hwp-lab/public/fonts/
 apps/hwp-lab/public/samples/
 apps/hwp-lab/public/docs-assets/
 apps/hwp-lab/.demo-api-hold/
+apps/hwp-lab/.demo-models-hold/
 apps/hwp-lab/.turbo/
 apps/hwp-lab/tsconfig.tsbuildinfo
 apps/hwp-lab/next-env.d.ts
