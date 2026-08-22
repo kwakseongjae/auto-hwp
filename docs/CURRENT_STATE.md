@@ -3,6 +3,15 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-22 · Codex(sol) — **#116 완료 · PR #125 병합, #118 착수**.
+  사용자 승인에 따라 PR #125를 squash 병합(main `241e70c`)했고 #116은 close됐다.
+  hwp-lab의 nanoid 3.3.17→3.3.18만 반영했으며 필수 checks와 독립 검수는 green이다.
+  병합 브랜치와 깨끗한 worktree 정리도 완료했다. 다음은 #118: `packages/ai-protocol` ·
+  `packages/editor-core` · `packages/react` · `services/demo-ai-proxy`의 독립 lockfile만
+  nanoid 3.3.18 이상으로 갱신하고, 관련 없는 그래프 변경 없이 각 npm ci/audit와 관련
+  test/build, 저장소 전수 검사를 통과시킨다. 이후 비공개 Advisory를 공개 트랙과 분리해 완료한 뒤
+  #100(권리·PII 안전 승격) → #101(20쌍+ calibration) → #102(PaintOp/SVG↔PDF parity) 순이다.
+
 - 갱신: 2026-08-22 · Codex(sol) — **#116 dependency remediation · PR #125 green, 병합 승인 대기**.
   `codex/issue-116-nanoid-security`를 최신 main `24c2f1a` 위로 fast-forward하고 기존 2파일
   WIP를 보존·재적용했다. PR #125(`7cd4083`)는 hwp-lab의 exact override와 같은 app lock
