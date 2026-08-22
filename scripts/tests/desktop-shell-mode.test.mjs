@@ -103,3 +103,28 @@ test("workspace shell is unmistakable and the original evidence is retained hone
   await access(join(root, "docs/launch/evidence/2026-08-20-d0-workspace-shell.png"));
   await assert.rejects(access(join(root, "docs/launch/evidence/2026-08-20-d0-legacy-shell-mislabeled-as-workspace.png")));
 });
+
+test("desktop file-open requests converge on one bounded, private, single-instance route", async () => {
+  const cargo = await read("crates/hwp-viewer/Cargo.toml");
+  const rust = await read("crates/hwp-viewer/src/lib.rs");
+  const intake = await read("crates/hwp-viewer/src/open_request.rs");
+  const shell = await read("crates/hwp-viewer/ui/src/WorkspaceShell.tsx");
+
+  assert.match(cargo, /tauri-plugin-single-instance/);
+  const singleInstance = rust.indexOf("tauri_plugin_single_instance::init");
+  const dialogPlugin = rust.indexOf("tauri_plugin_dialog::init");
+  assert.ok(singleInstance >= 0 && singleInstance < dialogPlugin, "single-instance must be first");
+  assert.match(rust, /RunEvent::Opened/);
+  assert.match(rust, /take_open_requests/);
+  assert.doesNotMatch(rust, /with_extension\("hwpx"\)/, "opening must not auto-convert beside source");
+  assert.match(intake, /const MAX_PENDING_OPEN_REQUESTS: usize = 8/);
+  assert.match(intake, /metadata\.is_file\(\)/);
+  assert.match(intake, /url\.scheme\(\) == "file"/);
+
+  assert.match(shell, /listen\("desktop-open-request"/);
+  assert.match(shell, /invoke<string\[\]>\("take_open_requests"\)/);
+  assert.match(shell, /role="dialog"/);
+  assert.match(shell, /resolveReplacement\(false\)/);
+  assert.match(shell, /resolveReplacement\(true\)/);
+  assert.doesNotMatch(shell, /window\.confirm\s*\(/);
+});

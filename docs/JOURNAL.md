@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-23 (Codex sol) · #136 병합 · #140 데스크톱 파일 열기 구현
+- #136 squash 병합(main `0c354cb`, #100 close); #137은 green/MERGEABLE, #138 stack 재정렬.
+- #139 우산과 #140~#144를 만들고 #140 single-instance/cold·warm open/교체 확인을 구현.
+- 실앱 QA: HWP 8쪽·HWPX 22쪽, 취소/승인·확대·단일 프로세스 PASS.
+- HWP open의 원본 옆 자동 HWPX 생성 제거; full verify PASS, 다음 #140 PR·#137 승인 대기.
+
 ## 2026-08-23 (Codex sol) · #101 T1 PDF calibration 구현 완료
 - 공식 HWP5/PDF 20쌍 manifest+baseline; 자체 PDF full run 20/20·baseline byte-identical.
 - 18건/19쪽 pixel report, page-count mismatch 2건은 score 없이 구조 단계에서 차단.
