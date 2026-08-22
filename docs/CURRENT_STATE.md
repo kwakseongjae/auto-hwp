@@ -3,6 +3,24 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-22 · Codex(sol) — **R15 증거 배치 병합 완료 · 다음 실행 순서 확정**.
+  사용자 승인 순서대로 PR #97(`eaf08f1`) → #115(`0dae4ac`) → #119(`2160af3`) →
+  #120(`9bb76e3`) → #122(`73ea1d3`)를 모두 squash 병합했고 필수 checks
+  `issue-link`·`build-test`·`licenses`는 각 최종 head에서 green이었다. 이에 #69·#98·#117·
+  #99·#121은 close됐고, 전체 HWP/HWPX→own PDF→시각 비교 파이프라인 우산 #93은 open이다.
+  남은 증거는 다음과 같다: 데스크톱 workspace 셸/clean checkout 결정론, canonical 조판 게이트
+  8/18/24쪽·98.9/99.2/99.7% 줄정확·91/257/365 본문 오라클, `/models` 서버/정적 빌드
+  fail-closed, 공식 12개 출처군 후보 259건·pair 120개 metadata-only 카탈로그, 144 DPI·±3px
+  정렬의 report-only PDF 비교기(51/51). 공개 바이너리 수집은 아직 하지 않았고 #100이
+  권리·PII·magic bytes·SHA·quarantine을 통과한 자료만 안전 승격한다.
+  **다음 실행 순서:** #116(nanoid 앱 패치; #117 병합으로 unblocked) → #100(공공 샘플 안전
+  승격) → #101(20쌍 이상 PDF calibration/임계치) → #102(PaintOp/object replay와 SVG↔PDF
+  sink parity). rhwp는 HWP5/HWP3 decode와 일부 수식·차트 fragment/oracle에 아직 의존하지만
+  HWPX·IR·조판·SVG/PDF·ops/AI는 자체 코어다. fork 고유 commit 0인 pinned mirror 상태를
+  #87(거버넌스) → #107(자체 HWP5 parser+differential) → #94(단계적 cutover)로 바꾼다.
+  #84는 #89 선행 전까지 보존·차단한다. 보안 수정은 비공개 Advisory에서만 계속하며 공개
+  이슈/PR/CI에 세부 내용을 남기지 않는다. `auto-hwp-github` 09:30 KST 추적은 계속한다.
+
 - 갱신: 2026-08-22 · Codex(sol) — **#114 실행 로드맵 · #98/#69/#117/#99/#121 구현 체크포인트**.
   공개 로드맵 #114와 R15~R18 마일스톤에 실행 이슈 #98~#118 및 #121을 의존 순서와 수용 기준으로
   등재했다. 구조 재감사 결과 HWPX parser/writer·SemanticDoc·조판·live SVG·PDF·편집 op-bus는
