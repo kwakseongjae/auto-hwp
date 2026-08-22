@@ -1,0 +1,1581 @@
+{
+  "schema_version": 1,
+  "policy": {
+    "binary_storage": "gitignored-private",
+    "redistribution": "metadata-only",
+    "minimums": {
+      "hwp5": 20,
+      "hwpx": 20,
+      "official_pdf_pairs": 10
+    }
+  },
+  "artifacts": [
+    {
+      "id": "kdca-311074-hwpx",
+      "file": "kdca-311074-hwpx.hwpx",
+      "format": "hwpx",
+      "publisher": "질병관리청",
+      "kind": "official-publication",
+      "source_page": "https://www.kdca.go.kr/kdca/2847/subview.do?enc=Zm5jdDF8QEB8JTJGYmJzJTJGa2RjYSUyRjQxJTJGMzExMDc0JTJGYXJ0Y2xWaWV3LmRvJTNG",
+      "source_url": "https://www.kdca.go.kr/bbs/kdca/42/307112/download.do",
+      "allowed_redirect_hosts": [
+        "www.kdca.go.kr"
+      ],
+      "license": {
+        "code": "KOGL-0",
+        "evidence_url": "https://www.kdca.go.kr/kdca/2847/subview.do?enc=Zm5jdDF8QEB8JTJGYmJzJTJGa2RjYSUyRjQxJTJGMzExMDc0JTJGYXJ0Y2xWaWV3LmRvJTNG",
+        "observed_at": "2026-08-22",
+        "scope": "license-as-observed-private-evaluation"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.166Z",
+      "sha256": "dfc8603ea7d99b68e8ec866c42deafeb1f392fafb64d8407aebecb6a23226eb1",
+      "detected_magic": "hwpx-owpml-zip",
+      "size_bytes": 438470,
+      "feature_tags": [
+        "chart",
+        "multipage_table"
+      ],
+      "pair_id": "kdca-311074",
+      "privacy_review": {
+        "classification": "official-publication",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "korea-kr-198358317-hwpx",
+      "file": "korea-kr-198358317-hwpx.hwpx",
+      "format": "hwpx",
+      "publisher": "문화체육관광부(정책브리핑)",
+      "kind": "official-publication",
+      "source_page": "https://www.korea.kr/briefing/pressReleaseView.do?newsId=156744367",
+      "source_url": "https://www.korea.kr/common/download.do?fileId=198358317&tblKey=GMN",
+      "allowed_redirect_hosts": [
+        "www.korea.kr"
+      ],
+      "license": {
+        "code": "KOGL-1",
+        "evidence_url": "https://www.korea.kr/briefing/pressReleaseView.do?newsId=156744367",
+        "observed_at": "2026-08-22",
+        "scope": "text-only-private-evaluation"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.174Z",
+      "sha256": "f7ff611ee9d3ad9a076de2c63e6053e006b8cc9dd96853f60a24f57195d3820c",
+      "detected_magic": "hwpx-owpml-zip",
+      "size_bytes": 111711,
+      "feature_tags": [
+        "body_text"
+      ],
+      "pair_id": null,
+      "privacy_review": {
+        "classification": "official-publication",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "korea-kr-198399778-hwpx",
+      "file": "korea-kr-198399778-hwpx.hwpx",
+      "format": "hwpx",
+      "publisher": "문화체육관광부(정책브리핑)",
+      "kind": "official-publication",
+      "source_page": "https://www.korea.kr/briefing/pressReleaseView.do?newsId=156750968",
+      "source_url": "https://www.korea.kr/common/download.do?fileId=198399778&tblKey=GMN",
+      "allowed_redirect_hosts": [
+        "www.korea.kr"
+      ],
+      "license": {
+        "code": "KOGL-0",
+        "evidence_url": "https://www.korea.kr/briefing/pressReleaseView.do?newsId=156750968",
+        "observed_at": "2026-08-22",
+        "scope": "text-only-private-evaluation"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.179Z",
+      "sha256": "6d3356866c25c43ebd505ae4c2c4f0dd7bfef8fbabbccc5a1b575fb57f37de97",
+      "detected_magic": "hwpx-owpml-zip",
+      "size_bytes": 561932,
+      "feature_tags": [
+        "body_text"
+      ],
+      "pair_id": null,
+      "privacy_review": {
+        "classification": "official-publication",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "korea-kr-198406157-hwpx",
+      "file": "korea-kr-198406157-hwpx.hwpx",
+      "format": "hwpx",
+      "publisher": "고용노동부(정책브리핑)",
+      "kind": "official-publication",
+      "source_page": "https://www.korea.kr/briefing/pressReleaseView.do?newsId=156752041",
+      "source_url": "https://www.korea.kr/common/download.do?fileId=198406157&tblKey=GMN",
+      "allowed_redirect_hosts": [
+        "www.korea.kr"
+      ],
+      "license": {
+        "code": "KOGL-1",
+        "evidence_url": "https://www.korea.kr/briefing/pressReleaseView.do?newsId=156752041",
+        "observed_at": "2026-08-22",
+        "scope": "text-only-private-evaluation"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.183Z",
+      "sha256": "1e4785355e7af5e47eb24168a2bc1f98ad7f1b2f9aa0a9010e59f3041cee5238",
+      "detected_magic": "hwpx-owpml-zip",
+      "size_bytes": 105748,
+      "feature_tags": [
+        "body_text"
+      ],
+      "pair_id": null,
+      "privacy_review": {
+        "classification": "official-publication",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "korea-kr-198421223-hwpx",
+      "file": "korea-kr-198421223-hwpx.hwpx",
+      "format": "hwpx",
+      "publisher": "문화체육관광부(정책브리핑)",
+      "kind": "official-publication",
+      "source_page": "https://www.korea.kr/briefing/pressReleaseView.do?newsId=156754077",
+      "source_url": "https://www.korea.kr/common/download.do?fileId=198421223&tblKey=GMN",
+      "allowed_redirect_hosts": [
+        "www.korea.kr"
+      ],
+      "license": {
+        "code": "KOGL-0",
+        "evidence_url": "https://www.korea.kr/briefing/pressReleaseView.do?newsId=156754077",
+        "observed_at": "2026-08-22",
+        "scope": "text-only-private-evaluation"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.189Z",
+      "sha256": "05028f7210c55724e719717ecbac4e4026d6c44d9e8dba8de18dea74be04134e",
+      "detected_magic": "hwpx-owpml-zip",
+      "size_bytes": 567529,
+      "feature_tags": [
+        "body_text"
+      ],
+      "pair_id": null,
+      "privacy_review": {
+        "classification": "official-publication",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "korea-kr-198421990-hwpx",
+      "file": "korea-kr-198421990-hwpx.hwpx",
+      "format": "hwpx",
+      "publisher": "국가보훈부(정책브리핑)",
+      "kind": "official-publication",
+      "source_page": "https://www.korea.kr/briefing/pressReleaseView.do?newsId=156754206",
+      "source_url": "https://www.korea.kr/common/download.do?fileId=198421990&tblKey=GMN",
+      "allowed_redirect_hosts": [
+        "www.korea.kr"
+      ],
+      "license": {
+        "code": "KOGL-1",
+        "evidence_url": "https://www.korea.kr/briefing/pressReleaseView.do?newsId=156754206",
+        "observed_at": "2026-08-22",
+        "scope": "text-only-private-evaluation"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.197Z",
+      "sha256": "93f63161ba3d86022bafa8b888c01edaebb5dd5f2fa55aeda58b554b33462c81",
+      "detected_magic": "hwpx-owpml-zip",
+      "size_bytes": 722892,
+      "feature_tags": [
+        "body_text"
+      ],
+      "pair_id": null,
+      "privacy_review": {
+        "classification": "official-publication",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "korea-kr-198422462-hwpx",
+      "file": "korea-kr-198422462-hwpx.hwpx",
+      "format": "hwpx",
+      "publisher": "문화체육관광부(정책브리핑)",
+      "kind": "official-publication",
+      "source_page": "https://www.korea.kr/briefing/pressReleaseView.do?newsId=156754121",
+      "source_url": "https://www.korea.kr/common/download.do?fileId=198422462&tblKey=GMN",
+      "allowed_redirect_hosts": [
+        "www.korea.kr"
+      ],
+      "license": {
+        "code": "KOGL-0",
+        "evidence_url": "https://www.korea.kr/briefing/pressReleaseView.do?newsId=156754121",
+        "observed_at": "2026-08-22",
+        "scope": "text-only-private-evaluation"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.207Z",
+      "sha256": "338a76aa6700a769a432795f59a003a032607f47ac4f57c533981d3e116ba310",
+      "detected_magic": "hwpx-owpml-zip",
+      "size_bytes": 1392858,
+      "feature_tags": [
+        "body_text"
+      ],
+      "pair_id": null,
+      "privacy_review": {
+        "classification": "official-publication",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "korea-kr-198527427-hwpx",
+      "file": "korea-kr-198527427-hwpx.hwpx",
+      "format": "hwpx",
+      "publisher": "교육부(정책브리핑)",
+      "kind": "official-publication",
+      "source_page": "https://www.korea.kr/briefing/pressReleaseView.do?newsId=156774930",
+      "source_url": "https://www.korea.kr/common/download.do?fileId=198527427&tblKey=GMN",
+      "allowed_redirect_hosts": [
+        "www.korea.kr"
+      ],
+      "license": {
+        "code": "KOGL-1",
+        "evidence_url": "https://www.korea.kr/briefing/pressReleaseView.do?newsId=156774930",
+        "observed_at": "2026-08-23",
+        "scope": "text-only-private-evaluation"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.457Z",
+      "sha256": "36f90eac5a8641429c266615b530dd74147da921db4f6e09d7694250ccda61bf",
+      "detected_magic": "hwpx-owpml-zip",
+      "size_bytes": 23216816,
+      "feature_tags": [
+        "multipage_table"
+      ],
+      "pair_id": null,
+      "privacy_review": {
+        "classification": "official-publication",
+        "decision": "include",
+        "reviewed_at": "2026-08-23"
+      }
+    },
+    {
+      "id": "korea-kr-198527872-hwpx",
+      "file": "korea-kr-198527872-hwpx.hwpx",
+      "format": "hwpx",
+      "publisher": "관세청(정책브리핑)",
+      "kind": "official-publication",
+      "source_page": "https://www.korea.kr/briefing/pressReleaseView.do?newsId=156774999",
+      "source_url": "https://www.korea.kr/common/download.do?fileId=198527872&tblKey=GMN",
+      "allowed_redirect_hosts": [
+        "www.korea.kr"
+      ],
+      "license": {
+        "code": "KOGL-1",
+        "evidence_url": "https://www.korea.kr/briefing/pressReleaseView.do?newsId=156774999",
+        "observed_at": "2026-08-23",
+        "scope": "text-only-private-evaluation"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.467Z",
+      "sha256": "f47b6b7cb4342797c3cab743a878fb10194206a2b5b518dfabbe92856582c826",
+      "detected_magic": "hwpx-owpml-zip",
+      "size_bytes": 181333,
+      "feature_tags": [
+        "image_object"
+      ],
+      "pair_id": null,
+      "privacy_review": {
+        "classification": "official-publication",
+        "decision": "include",
+        "reviewed_at": "2026-08-23"
+      }
+    },
+    {
+      "id": "law-go-271027-17184499-hwp5",
+      "file": "law-go-271027-17184499-hwp5.hwp",
+      "format": "hwp5",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361771",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.468Z",
+      "sha256": "39192069329373f80cdd812d7e6a8de9061021c4b0ec4d7caf4be5e42ca1f191",
+      "detected_magic": "hwp5-cfb",
+      "size_bytes": 24576,
+      "feature_tags": [
+        "form_control",
+        "multipage_table"
+      ],
+      "pair_id": "law-go-271027-17184499",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184499-pdf",
+      "file": "law-go-271027-17184499-pdf.pdf",
+      "format": "pdf",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361773",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.468Z",
+      "sha256": "01d013d2dbe59e286fcc5879ab83b3cd4f1be7d82870c3b870ee5a8c6a3a5fc6",
+      "detected_magic": "pdf",
+      "size_bytes": 165598,
+      "feature_tags": [
+        "form_control",
+        "multipage_table"
+      ],
+      "pair_id": "law-go-271027-17184499",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184501-hwp5",
+      "file": "law-go-271027-17184501-hwp5.hwp",
+      "format": "hwp5",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361779",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.469Z",
+      "sha256": "811183a397a4fa55f04fd9714879cdb320d90b08597f9bc3579a89458ef30ce5",
+      "detected_magic": "hwp5-cfb",
+      "size_bytes": 52224,
+      "feature_tags": [
+        "form_control"
+      ],
+      "pair_id": "law-go-271027-17184501",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184501-pdf",
+      "file": "law-go-271027-17184501-pdf.pdf",
+      "format": "pdf",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361781",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.469Z",
+      "sha256": "c0b94f5d13316b92a5c3b81ef54b4c0bfec33a526b9ff25e3f153a1f4f74f65f",
+      "detected_magic": "pdf",
+      "size_bytes": 41442,
+      "feature_tags": [
+        "form_control"
+      ],
+      "pair_id": "law-go-271027-17184501",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184503-hwp5",
+      "file": "law-go-271027-17184503-hwp5.hwp",
+      "format": "hwp5",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361785",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.469Z",
+      "sha256": "96885f4e5df7887e5147fd2317b10b376cf9c67f030ee99228c6c6eba4375e92",
+      "detected_magic": "hwp5-cfb",
+      "size_bytes": 70144,
+      "feature_tags": [
+        "form_control"
+      ],
+      "pair_id": "law-go-271027-17184503",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184503-pdf",
+      "file": "law-go-271027-17184503-pdf.pdf",
+      "format": "pdf",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361787",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.469Z",
+      "sha256": "56d9497a1fab0d0a73046ea6ef34500cee7620b5dfc129de1b8af47563ef11ea",
+      "detected_magic": "pdf",
+      "size_bytes": 51588,
+      "feature_tags": [
+        "form_control"
+      ],
+      "pair_id": "law-go-271027-17184503",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184505-hwp5",
+      "file": "law-go-271027-17184505-hwp5.hwp",
+      "format": "hwp5",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361799",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.469Z",
+      "sha256": "682cbf6d11a8bbddc5667e4c7b860a048204f47eabf2df67a6c068a2332e4c23",
+      "detected_magic": "hwp5-cfb",
+      "size_bytes": 50688,
+      "feature_tags": [
+        "form_control"
+      ],
+      "pair_id": "law-go-271027-17184505",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184505-pdf",
+      "file": "law-go-271027-17184505-pdf.pdf",
+      "format": "pdf",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361801",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.469Z",
+      "sha256": "e069e4184746ce959c6430b2a3c3de48d17735d3d96234006788468ac9bbd5d1",
+      "detected_magic": "pdf",
+      "size_bytes": 51105,
+      "feature_tags": [
+        "form_control"
+      ],
+      "pair_id": "law-go-271027-17184505",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184507-hwp5",
+      "file": "law-go-271027-17184507-hwp5.hwp",
+      "format": "hwp5",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361825",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.470Z",
+      "sha256": "2239613b8609103bec2a3ee68e02ebfebab6829800756fcc918a8dcc181b6510",
+      "detected_magic": "hwp5-cfb",
+      "size_bytes": 15360,
+      "feature_tags": [
+        "form_control"
+      ],
+      "pair_id": "law-go-271027-17184507",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184507-pdf",
+      "file": "law-go-271027-17184507-pdf.pdf",
+      "format": "pdf",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361829",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.470Z",
+      "sha256": "04685c76a3eb07a3009c4a2a2160fddcc12d63a5f76b8da4e1e7fd662bdc3c12",
+      "detected_magic": "pdf",
+      "size_bytes": 32943,
+      "feature_tags": [
+        "form_control"
+      ],
+      "pair_id": "law-go-271027-17184507",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184509-hwp5",
+      "file": "law-go-271027-17184509-hwp5.hwp",
+      "format": "hwp5",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361835",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.470Z",
+      "sha256": "62e0f560a14d5406c7850a8ddf08ee547cc9a7a9ec4e880e38b073c5a8c5a491",
+      "detected_magic": "hwp5-cfb",
+      "size_bytes": 19456,
+      "feature_tags": [
+        "form_control"
+      ],
+      "pair_id": "law-go-271027-17184509",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184509-pdf",
+      "file": "law-go-271027-17184509-pdf.pdf",
+      "format": "pdf",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361837",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.470Z",
+      "sha256": "280047052c43ab09e092c17a5ff70bd621ca3b9cedd33ac0a4cbbdafc52ca141",
+      "detected_magic": "pdf",
+      "size_bytes": 57389,
+      "feature_tags": [
+        "form_control"
+      ],
+      "pair_id": "law-go-271027-17184509",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184511-hwp5",
+      "file": "law-go-271027-17184511-hwp5.hwp",
+      "format": "hwp5",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361841",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.470Z",
+      "sha256": "58d4302527076799988dd54279a10de4f2a489fa731e4bad596ca209f160e0b3",
+      "detected_magic": "hwp5-cfb",
+      "size_bytes": 86016,
+      "feature_tags": [
+        "form_control"
+      ],
+      "pair_id": "law-go-271027-17184511",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184511-pdf",
+      "file": "law-go-271027-17184511-pdf.pdf",
+      "format": "pdf",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361843",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.470Z",
+      "sha256": "9bf747f2dd88b8d844ae0c5c3d7fa998a65591c305690853177cd76f66f90be8",
+      "detected_magic": "pdf",
+      "size_bytes": 84728,
+      "feature_tags": [
+        "form_control"
+      ],
+      "pair_id": "law-go-271027-17184511",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184513-hwp5",
+      "file": "law-go-271027-17184513-hwp5.hwp",
+      "format": "hwp5",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361847",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.471Z",
+      "sha256": "32cb80a08144c9e79f27d373f436bc5979030a9b9246f2a0ec566a5008e8b79b",
+      "detected_magic": "hwp5-cfb",
+      "size_bytes": 91648,
+      "feature_tags": [
+        "form_control"
+      ],
+      "pair_id": "law-go-271027-17184513",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184513-pdf",
+      "file": "law-go-271027-17184513-pdf.pdf",
+      "format": "pdf",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361849",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.471Z",
+      "sha256": "cdbbcd0b5cc7c853354e570caed98d6fc59186691d6c3aa8d855fe819b2cce6b",
+      "detected_magic": "pdf",
+      "size_bytes": 55437,
+      "feature_tags": [
+        "form_control"
+      ],
+      "pair_id": "law-go-271027-17184513",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184515-hwp5",
+      "file": "law-go-271027-17184515-hwp5.hwp",
+      "format": "hwp5",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361853",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.471Z",
+      "sha256": "85e9d52ce12f8e8bd8df812519f7882454521e10448cbef95ed7e4cda8e08c8f",
+      "detected_magic": "hwp5-cfb",
+      "size_bytes": 41472,
+      "feature_tags": [
+        "form_control"
+      ],
+      "pair_id": "law-go-271027-17184515",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184515-pdf",
+      "file": "law-go-271027-17184515-pdf.pdf",
+      "format": "pdf",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361855",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.471Z",
+      "sha256": "1ed78601b44edfd75a97e97107a3f18e0a29e345615fdce2e23f57f20fb5c0d7",
+      "detected_magic": "pdf",
+      "size_bytes": 35796,
+      "feature_tags": [
+        "form_control"
+      ],
+      "pair_id": "law-go-271027-17184515",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184517-hwp5",
+      "file": "law-go-271027-17184517-hwp5.hwp",
+      "format": "hwp5",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361861",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.471Z",
+      "sha256": "f4b9699c78f9ac63ca271008296b76390226728df084c33d9d7027071d918a18",
+      "detected_magic": "hwp5-cfb",
+      "size_bytes": 38912,
+      "feature_tags": [
+        "form_control"
+      ],
+      "pair_id": "law-go-271027-17184517",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184517-pdf",
+      "file": "law-go-271027-17184517-pdf.pdf",
+      "format": "pdf",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361863",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.471Z",
+      "sha256": "75e628b1c57bddc931848d5fe6eeb22d0a20a5d5d018530cd5f717c2f186261f",
+      "detected_magic": "pdf",
+      "size_bytes": 39215,
+      "feature_tags": [
+        "form_control"
+      ],
+      "pair_id": "law-go-271027-17184517",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184519-hwp5",
+      "file": "law-go-271027-17184519-hwp5.hwp",
+      "format": "hwp5",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361867",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.471Z",
+      "sha256": "2c8d0fcedcb4933a1ac2833f431bf71f1a994b798982569292b48fce047af4df",
+      "detected_magic": "hwp5-cfb",
+      "size_bytes": 56320,
+      "feature_tags": [
+        "form_control"
+      ],
+      "pair_id": "law-go-271027-17184519",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184521-hwp5",
+      "file": "law-go-271027-17184521-hwp5.hwp",
+      "format": "hwp5",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361873",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.472Z",
+      "sha256": "5674a44e7fec3d78501c2dbc46a0d63b2241264c15c7488783eaf355bfdb56d9",
+      "detected_magic": "hwp5-cfb",
+      "size_bytes": 48640,
+      "feature_tags": [
+        "form_control"
+      ],
+      "pair_id": "law-go-271027-17184521",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184523-hwp5",
+      "file": "law-go-271027-17184523-hwp5.hwp",
+      "format": "hwp5",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361881",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.472Z",
+      "sha256": "4c5207a4896acfe8572c6c02b317792933b6b806fa829067346cfe9dcfd99dd3",
+      "detected_magic": "hwp5-cfb",
+      "size_bytes": 20480,
+      "feature_tags": [
+        "form_control"
+      ],
+      "pair_id": "law-go-271027-17184523",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184525-hwp5",
+      "file": "law-go-271027-17184525-hwp5.hwp",
+      "format": "hwp5",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361887",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.472Z",
+      "sha256": "283d39dcb83a4950d539639d0c60e091429d97602cb40be679266817fc70deb8",
+      "detected_magic": "hwp5-cfb",
+      "size_bytes": 21504,
+      "feature_tags": [
+        "form_control"
+      ],
+      "pair_id": "law-go-271027-17184525",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184527-hwp5",
+      "file": "law-go-271027-17184527-hwp5.hwp",
+      "format": "hwp5",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361893",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.472Z",
+      "sha256": "bd4b55725c0b3904aac770d5aee3722484458041a4384a27e0a17f60cdcadf76",
+      "detected_magic": "hwp5-cfb",
+      "size_bytes": 14848,
+      "feature_tags": [
+        "form_control"
+      ],
+      "pair_id": "law-go-271027-17184527",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184529-hwp5",
+      "file": "law-go-271027-17184529-hwp5.hwp",
+      "format": "hwp5",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361901",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.472Z",
+      "sha256": "ffebb654df18e2524ddb28df7d63bb58442aa431cfeb21d8732ccbd57be2a416",
+      "detected_magic": "hwp5-cfb",
+      "size_bytes": 16384,
+      "feature_tags": [
+        "form_control"
+      ],
+      "pair_id": "law-go-271027-17184529",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184531-hwp5",
+      "file": "law-go-271027-17184531-hwp5.hwp",
+      "format": "hwp5",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361907",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.472Z",
+      "sha256": "af1bafe1f95778af9ad0c0cddb2240aea67c22ed69dbf2e0f09a83ea22045037",
+      "detected_magic": "hwp5-cfb",
+      "size_bytes": 20480,
+      "feature_tags": [
+        "form_control"
+      ],
+      "pair_id": "law-go-271027-17184531",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184533-hwp5",
+      "file": "law-go-271027-17184533-hwp5.hwp",
+      "format": "hwp5",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361913",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.473Z",
+      "sha256": "eb1f9a967a882c062fe17af6d9659fcc3f4e90318863ba43c3fdfebb6c733f48",
+      "detected_magic": "hwp5-cfb",
+      "size_bytes": 15360,
+      "feature_tags": [
+        "form_control"
+      ],
+      "pair_id": "law-go-271027-17184533",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184535-hwp5",
+      "file": "law-go-271027-17184535-hwp5.hwp",
+      "format": "hwp5",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361919",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.473Z",
+      "sha256": "470aaacd0079677d3b6387b9d92a2cf25042edce8928080fad1e6a344d1521ec",
+      "detected_magic": "hwp5-cfb",
+      "size_bytes": 18432,
+      "feature_tags": [
+        "form_control"
+      ],
+      "pair_id": "law-go-271027-17184535",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "law-go-271027-17184537-hwp5",
+      "file": "law-go-271027-17184537-hwp5.hwp",
+      "format": "hwp5",
+      "publisher": "고용노동부·법제처",
+      "kind": "blank-form-template",
+      "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+      "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361925",
+      "allowed_redirect_hosts": [
+        "www.law.go.kr"
+      ],
+      "license": {
+        "code": "Copyright Act Article 7",
+        "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+        "observed_at": "2026-08-22",
+        "scope": "statutory-public-domain"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.473Z",
+      "sha256": "2a0fc6865d2494b3268954389a6ec958fb44b898a988fb80fd4b32423a48b075",
+      "detected_magic": "hwp5-cfb",
+      "size_bytes": 20480,
+      "feature_tags": [
+        "form_control",
+        "multipage_table"
+      ],
+      "pair_id": "law-go-271027-17184537",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "mafra-570867-579163",
+      "file": "mafra-570867-579163.hwpx",
+      "format": "hwpx",
+      "publisher": "농림축산식품부",
+      "kind": "public-guidance",
+      "source_page": "https://www.mafra.go.kr/bbs/home/791/570867/artclView.do",
+      "source_url": "https://www.mafra.go.kr/bbs/home/791/579163/download.do",
+      "allowed_redirect_hosts": [
+        "www.mafra.go.kr"
+      ],
+      "license": {
+        "code": "KOGL-1",
+        "evidence_url": "https://www.mafra.go.kr/bbs/home/791/570867/artclView.do",
+        "observed_at": "2026-08-22",
+        "scope": "license-as-observed-private-evaluation"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.474Z",
+      "sha256": "75df170708ddeefa207ea760ae1e0944efb2b32752b22341e49c6c60fe8ace6b",
+      "detected_magic": "hwpx-owpml-zip",
+      "size_bytes": 31261,
+      "feature_tags": [
+        "equation",
+        "footnote",
+        "multipage_table"
+      ],
+      "pair_id": null,
+      "privacy_review": {
+        "classification": "public-guidance",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "mafra-570867-579164",
+      "file": "mafra-570867-579164.hwpx",
+      "format": "hwpx",
+      "publisher": "농림축산식품부",
+      "kind": "public-guidance",
+      "source_page": "https://www.mafra.go.kr/bbs/home/791/570867/artclView.do",
+      "source_url": "https://www.mafra.go.kr/bbs/home/791/579164/download.do",
+      "allowed_redirect_hosts": [
+        "www.mafra.go.kr"
+      ],
+      "license": {
+        "code": "KOGL-1",
+        "evidence_url": "https://www.mafra.go.kr/bbs/home/791/570867/artclView.do",
+        "observed_at": "2026-08-22",
+        "scope": "license-as-observed-private-evaluation"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.587Z",
+      "sha256": "f7c59132144457812f4ce51b29831edb9d9e0df94eb764553bdd2e196ccc2556",
+      "detected_magic": "hwpx-owpml-zip",
+      "size_bytes": 1309717,
+      "feature_tags": [
+        "equation",
+        "footnote",
+        "multipage_table"
+      ],
+      "pair_id": null,
+      "privacy_review": {
+        "classification": "public-guidance",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "mafra-570867-579165",
+      "file": "mafra-570867-579165.hwpx",
+      "format": "hwpx",
+      "publisher": "농림축산식품부",
+      "kind": "public-guidance",
+      "source_page": "https://www.mafra.go.kr/bbs/home/791/570867/artclView.do",
+      "source_url": "https://www.mafra.go.kr/bbs/home/791/579165/download.do",
+      "allowed_redirect_hosts": [
+        "www.mafra.go.kr"
+      ],
+      "license": {
+        "code": "KOGL-1",
+        "evidence_url": "https://www.mafra.go.kr/bbs/home/791/570867/artclView.do",
+        "observed_at": "2026-08-22",
+        "scope": "license-as-observed-private-evaluation"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.589Z",
+      "sha256": "da3a7c24a8918102e2620853a0849290fbc8d7330a5be20a465b8f126ae098c1",
+      "detected_magic": "hwpx-owpml-zip",
+      "size_bytes": 58428,
+      "feature_tags": [
+        "equation",
+        "footnote",
+        "multipage_table"
+      ],
+      "pair_id": null,
+      "privacy_review": {
+        "classification": "public-guidance",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "mafra-570867-579166",
+      "file": "mafra-570867-579166.hwpx",
+      "format": "hwpx",
+      "publisher": "농림축산식품부",
+      "kind": "public-guidance",
+      "source_page": "https://www.mafra.go.kr/bbs/home/791/570867/artclView.do",
+      "source_url": "https://www.mafra.go.kr/bbs/home/791/579166/download.do",
+      "allowed_redirect_hosts": [
+        "www.mafra.go.kr"
+      ],
+      "license": {
+        "code": "KOGL-1",
+        "evidence_url": "https://www.mafra.go.kr/bbs/home/791/570867/artclView.do",
+        "observed_at": "2026-08-22",
+        "scope": "license-as-observed-private-evaluation"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.607Z",
+      "sha256": "820b2a39a3c5f060d0ca33f7db1667d1e480acaee32427e270fadb3fb3ae2fea",
+      "detected_magic": "hwpx-owpml-zip",
+      "size_bytes": 243857,
+      "feature_tags": [
+        "equation",
+        "footnote",
+        "multipage_table"
+      ],
+      "pair_id": null,
+      "privacy_review": {
+        "classification": "public-guidance",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "moe-104863-hwpx",
+      "file": "moe-104863-hwpx.hwpx",
+      "format": "hwpx",
+      "publisher": "교육부",
+      "kind": "official-publication",
+      "source_page": "https://www.moe.go.kr/boardCnts/viewRenew.do?boardID=294&boardSeq=104863&lev=0&m=020402&s=moe",
+      "source_url": "https://www.moe.go.kr/boardCnts/fileDown.do?m=020402&s=moe&fileSeq=9aa25b9277d1bffeca15f0c625719d77",
+      "allowed_redirect_hosts": [
+        "www.moe.go.kr"
+      ],
+      "license": {
+        "code": "KOGL-1",
+        "evidence_url": "https://www.moe.go.kr/boardCnts/viewRenew.do?boardID=294&boardSeq=104863&lev=0&m=020402&s=moe",
+        "observed_at": "2026-08-23",
+        "scope": "license-as-observed-private-evaluation"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.838Z",
+      "sha256": "e229a8dd9a44eb56fead78965856a006c800fe7864b04f898ff1f087452e8837",
+      "detected_magic": "hwpx-owpml-zip",
+      "size_bytes": 460070,
+      "feature_tags": [
+        "footnote",
+        "mixed_orientation",
+        "multicolumn",
+        "multipage_table"
+      ],
+      "pair_id": null,
+      "privacy_review": {
+        "classification": "official-publication",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "mohw-1480808-hwpx",
+      "file": "mohw-1480808-hwpx.hwpx",
+      "format": "hwpx",
+      "publisher": "보건복지부",
+      "kind": "official-publication",
+      "source_page": "https://www.mohw.go.kr/board.es?act=view&bid=0027&list_no=1480808&mid=a10503000000",
+      "source_url": "https://www.mohw.go.kr/boardDownload.es?bid=0027&list_no=1480808&seq=1",
+      "allowed_redirect_hosts": [
+        "www.mohw.go.kr"
+      ],
+      "license": {
+        "code": "KOGL-1",
+        "evidence_url": "https://www.mohw.go.kr/board.es?act=view&bid=0027&list_no=1480808&mid=a10503000000",
+        "observed_at": "2026-08-22",
+        "scope": "license-as-observed-private-evaluation"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.846Z",
+      "sha256": "0acf3a1868a485f0f4f6a2eeb275b89bf15443800f39522f1ca0bfff69146713",
+      "detected_magic": "hwpx-owpml-zip",
+      "size_bytes": 530619,
+      "feature_tags": [
+        "multipage_table"
+      ],
+      "pair_id": "mohw-1480808",
+      "privacy_review": {
+        "classification": "official-publication",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "mohw-1490937-hwpx",
+      "file": "mohw-1490937-hwpx.hwpx",
+      "format": "hwpx",
+      "publisher": "보건복지부",
+      "kind": "official-publication",
+      "source_page": "https://www.mohw.go.kr/board.es?act=view&bid=0027&list_no=1490937&mid=a10503010100",
+      "source_url": "https://www.mohw.go.kr/boardDownload.es?bid=0027&list_no=1490937&seq=1",
+      "allowed_redirect_hosts": [
+        "www.mohw.go.kr"
+      ],
+      "license": {
+        "code": "KOGL-1",
+        "evidence_url": "https://www.mohw.go.kr/board.es?act=view&bid=0027&list_no=1490937&mid=a10503010100",
+        "observed_at": "2026-08-21",
+        "scope": "license-as-observed-private-evaluation"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.850Z",
+      "sha256": "72fa704001c7a144589e8faa5069a0ffbacefa718710cd9327e216d6125e5c50",
+      "detected_magic": "hwpx-owpml-zip",
+      "size_bytes": 130796,
+      "feature_tags": [
+        "multipage_table"
+      ],
+      "pair_id": null,
+      "privacy_review": {
+        "classification": "official-publication",
+        "decision": "include",
+        "reviewed_at": "2026-08-23"
+      }
+    },
+    {
+      "id": "nfa-458-forms-hwpx",
+      "file": "nfa-458-forms-hwpx.hwpx",
+      "format": "hwpx",
+      "publisher": "소방청",
+      "kind": "blank-form-template",
+      "source_page": "https://www.nfa.go.kr/nfa/news/job/nfajob/?cntId=458&mode=view",
+      "source_url": "https://www.nfa.go.kr/board/file/bbs_0000000000000012/458/FILE_000000000026202/2026010510521616538",
+      "allowed_redirect_hosts": [
+        "www.nfa.go.kr"
+      ],
+      "license": {
+        "code": "KOGL-1",
+        "evidence_url": "https://www.nfa.go.kr/nfa/news/job/nfajob/?cntId=458&mode=view",
+        "observed_at": "2026-08-22",
+        "scope": "license-as-observed-private-evaluation"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.886Z",
+      "sha256": "dfff25c0f0a0c4b2070856731bf77324ba9ec5b2cff45a9922a6b7bcdb93a1b5",
+      "detected_magic": "hwpx-owpml-zip",
+      "size_bytes": 362745,
+      "feature_tags": [
+        "form_control",
+        "multipage_table",
+        "nested_table"
+      ],
+      "pair_id": "nfa-458-forms",
+      "privacy_review": {
+        "classification": "blank-form-template",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "nfa-458-plan-hwpx",
+      "file": "nfa-458-plan-hwpx.hwpx",
+      "format": "hwpx",
+      "publisher": "소방청",
+      "kind": "official-publication",
+      "source_page": "https://www.nfa.go.kr/nfa/news/job/nfajob/?cntId=458&mode=view",
+      "source_url": "https://www.nfa.go.kr/board/file/bbs_0000000000000012/673167/FILE_000000000026183/2026010509522049188",
+      "allowed_redirect_hosts": [
+        "www.nfa.go.kr"
+      ],
+      "license": {
+        "code": "KOGL-1",
+        "evidence_url": "https://www.nfa.go.kr/nfa/news/job/nfajob/?cntId=458&mode=view",
+        "observed_at": "2026-08-22",
+        "scope": "license-as-observed-private-evaluation"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.903Z",
+      "sha256": "d3506891420e8d55cf36ee502c291124952643c53c7feb071ecd4d671035db90",
+      "detected_magic": "hwpx-owpml-zip",
+      "size_bytes": 382443,
+      "feature_tags": [
+        "multipage_table"
+      ],
+      "pair_id": "nfa-458-plan",
+      "privacy_review": {
+        "classification": "official-publication",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "nfa-458-qualification-hwpx",
+      "file": "nfa-458-qualification-hwpx.hwpx",
+      "format": "hwpx",
+      "publisher": "소방청",
+      "kind": "public-guidance",
+      "source_page": "https://www.nfa.go.kr/nfa/news/job/nfajob/?cntId=458&mode=view",
+      "source_url": "https://www.nfa.go.kr/board/file/bbs_0000000000000012/673167/FILE_000000000026186/2026010509524070484",
+      "allowed_redirect_hosts": [
+        "www.nfa.go.kr"
+      ],
+      "license": {
+        "code": "KOGL-1",
+        "evidence_url": "https://www.nfa.go.kr/nfa/news/job/nfajob/?cntId=458&mode=view",
+        "observed_at": "2026-08-22",
+        "scope": "license-as-observed-private-evaluation"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.914Z",
+      "sha256": "e96fd5f36fe97f39ba6c8258ac89f56cdc062602ce5133228f818cdc4c2efb63",
+      "detected_magic": "hwpx-owpml-zip",
+      "size_bytes": 171542,
+      "feature_tags": [
+        "multipage_table"
+      ],
+      "pair_id": "nfa-458-qualification",
+      "privacy_review": {
+        "classification": "public-guidance",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    },
+    {
+      "id": "rda-100000807526-hwpx",
+      "file": "rda-100000807526-hwpx.hwpx",
+      "format": "hwpx",
+      "publisher": "농촌진흥청 농촌인적자원개발센터",
+      "kind": "official-publication",
+      "source_page": "https://rda.go.kr/board/board.do?dataNo=100000807526&mode=view&prgId=day_farmprmninfoEntry",
+      "source_url": "https://rda.go.kr/fileDownLoadDw.do?boardId=farmprmninfo&dataNo=100000807526&sortNo=1",
+      "allowed_redirect_hosts": [
+        "rda.go.kr"
+      ],
+      "license": {
+        "code": "KOGL-1",
+        "evidence_url": "https://rda.go.kr/board/board.do?dataNo=100000807526&mode=view&prgId=day_farmprmninfoEntry",
+        "observed_at": "2026-08-22",
+        "scope": "license-as-observed-private-evaluation"
+      },
+      "retrieved_at": "2026-08-22T17:08:43.924Z",
+      "sha256": "4dee539496c36c83060d7e2ffa9487587c0ac2ebeeb735e18336beb4234bd26e",
+      "detected_magic": "hwpx-owpml-zip",
+      "size_bytes": 1514620,
+      "feature_tags": [
+        "body_text"
+      ],
+      "pair_id": "rda-100000807526",
+      "privacy_review": {
+        "classification": "official-publication",
+        "decision": "include",
+        "reviewed_at": "2026-08-22"
+      }
+    }
+  ]
+}

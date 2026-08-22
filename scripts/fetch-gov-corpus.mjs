@@ -46,7 +46,8 @@ function namedPathExists(path) {
 function hasDocumentMagic(bytes) {
   return (
     (bytes[0] === 0x50 && bytes[1] === 0x4b) ||
-    (bytes[0] === 0xd0 && bytes[1] === 0xcf)
+    (bytes[0] === 0xd0 && bytes[1] === 0xcf) ||
+    bytes.subarray(0, 5).toString("ascii") === "%PDF-"
   );
 }
 

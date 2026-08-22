@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-23 (Codex sol) · #100 public corpus intake 구현 완료
+- HWP5 20·HWPX 20·공식 PDF pair 10쌍을 private 수집; SHA/구조 50/50·production open 40/40.
+- 공개에는 provenance·권리·privacy·SHA·magic·size·feature/pair만, 바이너리·본문·격리정보 0.
+- HTTPS/DNS pin/redirect/timeout/size/CFB·ZIP·PDF/no-overwrite 계약 72건·quick verify PASS.
+- 다음: diff 검수 → commit/PR CI → 승인 병합 → #101 → #102.
+
 ## 2026-08-23 (Codex sol) · P0 Security Advisory 공개 완료
 - GHSA-5jw4-mcv6-c6gv 공개; 수정 `2ec233f`, Linux 회귀 보강 포함 최신 main `6af878c`.
 - public-main CI `32579085452` green, 관리자 보호 예외는 즉시 원복·필수 보호 규칙 유지.
