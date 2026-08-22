@@ -18,12 +18,15 @@ cargo test --workspace
 echo "═══ tests (hwp-rhwp features) ═══"
 cargo test -p hwp-rhwp --features "rhwp shaper"
 
-echo "═══ 게이트 v2 (benchmark 8==8 · benchmark1 18==18 · benchmark2 24==24 · modu-startup 6==6) ═══"
-for b in benchmark benchmark1 benchmark2; do
-  out=$(cargo run -q -p auto-hwp-cli --features "shaper rhwp" -- layout-check "benchmarks/${b}.hwp")
-  echo "$out" | grep "쪽수"
-  echo "$out" | grep "쪽수" | grep -q "일치" || { echo "❌ 게이트 실패: ${b}.hwp 페이지 수 불일치"; exit 1; }
-done
+echo "═══ 게이트 v2 (benchmark 8 · benchmark1 18 · benchmark2 24 · 줄정확 98.9%+ · modu-startup 6==6) ═══"
+# 사람이 읽는 `쪽수 일치` 문자열만 보면 7==7 같은 절대 쪽수 회귀도 통과한다. JSON 검증기가
+# 정확한 문서 집합, 절대 쪽수, 채점 가능 여부, 줄 정확도, 본문 오라클 보존을 한 계약으로 강제한다.
+cargo run -q -p auto-hwp-cli --features "shaper rhwp" -- \
+  layout-check --json \
+  benchmarks/benchmark.hwp \
+  benchmarks/benchmark1.hwp \
+  benchmarks/benchmark2.hwp \
+  | node scripts/canonical-layout-gate.mjs
 # modu-startup 실물 양식은 공개 재배포 금지 — corpus/private/(gitignore)에만 존재한다.
 # 있으면 기존과 동일하게 SHA + 6==6을 강제하고, 없으면 점수를 꾸며내지 않고 skip을 명시한다(068 규율).
 MODU=corpus/private/modu-startup/modu-startup.hwp
@@ -39,7 +42,7 @@ fi
 echo "═══ 조판 오라클 스윕 산출물 (이슈 72 — 전수 재실행 아님 · 커밋된 요약만) ═══"
 # 코퍼스 전수 layout-check 는 로컬 `node scripts/oracle-sweep.mjs` (--check 가 회귀).
 # 여기서는 게이트 시간을 늘리지 않고, 커밋된 JSON/MD 가 규율(참값 아님 · 채점 불가≠0점)을 지키는지 본다.
-node --test scripts/tests/oracle-sweep.test.mjs
+node --test scripts/tests/canonical-layout-gate.test.mjs scripts/tests/oracle-sweep.test.mjs
 node scripts/oracle-sweep.mjs --check-committed
 
 echo "═══ HWPX 축 게이트 (W4.3 — 참값 아님 · 현재 실측 회귀 잠금) ═══"
