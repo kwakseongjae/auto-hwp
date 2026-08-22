@@ -28,6 +28,11 @@ pub mod pdf;
 #[cfg(feature = "pdf")]
 mod bmp;
 
+/// Bounded, no-fetch lowering for the equation/chart SVG fragment carried by `PaintOp::Image.svg`.
+/// Feature `pdf`; private because callers consume it only through the PDF replay diagnostics.
+#[cfg(feature = "pdf")]
+mod svg_fragment;
+
 use hwp_jsx::css::emit_css;
 use hwp_jsx::jsx::{JsxElement, JsxNode, Tag};
 use hwp_jsx::project::{Asset, JsxCssProject};

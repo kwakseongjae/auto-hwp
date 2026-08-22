@@ -2065,11 +2065,16 @@ dependencies = [
 name = "hwp-export"
 version = "0.0.1"
 dependencies = [
+ "hwp-core",
  "hwp-jsx",
  "hwp-model",
  "hwp-render",
  "hwp-typeset",
  "krilla",
+ "kurbo 0.13.1",
+ "quick-xml 0.37.5",
+ "rhwp",
+ "svgtypes 0.16.1",
 ]
 
 [[package]]
