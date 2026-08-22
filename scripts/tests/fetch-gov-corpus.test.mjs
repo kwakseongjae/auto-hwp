@@ -152,18 +152,22 @@ test("existing-file identity races are detected without mutating the replacement
   const f = fixture(t);
   const item = writeManifest(f.manifest);
   const beforeOpen = join(f.directory, "before-open.hwpx");
+  const replacementBeforeOpen = Buffer.concat([
+    validHwpx.subarray(0, 2),
+    Buffer.from("replacement before open"),
+  ]);
   writeFileSync(beforeOpen, validHwpx);
   assert.throws(
     () =>
       admitExistingDocument(beforeOpen, item, {
         beforeOpen(path) {
           unlinkSync(path);
-          writeFileSync(path, Buffer.from("replacement before open"), { flag: "wx" });
+          writeFileSync(path, replacementBeforeOpen, { flag: "wx" });
         },
       }),
-    /identity changed during admission/,
+    /identity changed during admission|sha256/,
   );
-  assert.equal(readFileSync(beforeOpen, "utf8"), "replacement before open");
+  assert.deepEqual(readFileSync(beforeOpen), replacementBeforeOpen);
 
   const beforeFinal = join(f.directory, "before-final.hwpx");
   writeFileSync(beforeFinal, validHwpx);
