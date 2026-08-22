@@ -39,6 +39,10 @@ else
   echo "⚠️  modu-startup 게이트 skipped(corpus/private 부재 — 로컬 전용 실물 벤치, 공개 커밋 금지)"
 fi
 
+echo "═══ 공공문서 후보 카탈로그 계약 (이슈 99 — metadata-only · 다운로드 없음) ═══"
+node --test scripts/tests/gov-sources.test.mjs scripts/tests/gov-source-catalog.test.mjs
+node scripts/gov-source-catalog.mjs --check
+
 echo "═══ 조판 오라클 스윕 산출물 (이슈 72 — 전수 재실행 아님 · 커밋된 요약만) ═══"
 # 코퍼스 전수 layout-check 는 로컬 `node scripts/oracle-sweep.mjs` (--check 가 회귀).
 # 여기서는 게이트 시간을 늘리지 않고, 커밋된 JSON/MD 가 규율(참값 아님 · 채점 불가≠0점)을 지키는지 본다.
