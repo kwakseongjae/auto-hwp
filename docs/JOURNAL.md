@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-22 (Codex sol) · #118/#130 dependency sweep 완료
+- PR #131을 squash 병합(main `18d00d1`), #118·#130 close; 브랜치/worktree 정리 완료.
+- first-party lockfile 4개+demo exact override만 nanoid 3.3.18; unrelated graph/rhwp 무변경.
+- npm ci/audit 0·full verify·독립 검수·필수 CI 3종 모두 PASS.
+- 다음: 비공개 Security Advisory 완료 → #100 → #101 → #102(기밀 세부 공개 금지).
+
 ## 2026-08-22 (Codex sol) · #116 완료 → #118 착수
 - PR #125를 승인에 따라 squash 병합(main `241e70c`), #116 close.
 - 필수 CI·독립 검수 green; 병합 브랜치와 clean worktree 정리 완료.
