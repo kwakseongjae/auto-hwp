@@ -3,6 +3,18 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-22 · Codex(sol) — **#116 dependency remediation · PR #125 green, 병합 승인 대기**.
+  `codex/issue-116-nanoid-security`를 최신 main `24c2f1a` 위로 fast-forward하고 기존 2파일
+  WIP를 보존·재적용했다. PR #125(`7cd4083`)는 hwp-lab의 exact override와 같은 app lock
+  entry만 nanoid 3.3.17→3.3.18로 바꾼다(2 files, 4+/4-). 독립 lockfile 4개는 #118 소유로
+  건드리지 않았다. fresh `npm ci --ignore-scripts`·`npm audit --audit-level=low`는 취약점 0,
+  앱 247/247·typecheck·server build·static demo build(`/models` 복원)·`verify-local` quick가
+  모두 PASS했다. registry tarball/integrity와 byte-exact 일치하고 독립 리뷰 P0~P2 없음,
+  필수 checks `issue-link`·`build-test`·`licenses`도 green이다. **비사소 PR이므로 병합하지
+  말고 사용자 승인을 기다린다.** 승인·병합 뒤 #118은 별도 lockfile sweep으로 유지한다.
+  #100은 비공개 보안 트랙 완료 전까지 blocked이며, 이후 #100 → #101 → #102 순서다.
+  비공개 Advisory 세부는 공개 이슈/PR/CI에 남기지 않는다.
+
 - 갱신: 2026-08-22 · Codex(sol) — **R15 증거 배치 병합 완료 · 다음 실행 순서 확정**.
   사용자 승인 순서대로 PR #97(`eaf08f1`) → #115(`0dae4ac`) → #119(`2160af3`) →
   #120(`9bb76e3`) → #122(`73ea1d3`)를 모두 squash 병합했고 필수 checks

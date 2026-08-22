@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-08-22 (Codex sol) · #116 dependency remediation PR
+- PR #125: hwp-lab nanoid 3.3.17→3.3.18, app package/lockfile 2개만 변경.
+- clean install·audit 0·247/247·typecheck·server/static build·quick 전부 PASS.
+- registry integrity 일치·독립 리뷰 P0~P2 없음·필수 CI 3종 green; 병합은 승인 대기.
+- #118 독립 lockfile sweep과 비공개 Advisory는 분리 유지.
+- 다음: #125 승인/병합 → #118; 비공개 게이트 뒤 #100 → #101 → #102.
+
 ## 2026-08-22 (Codex sol) · R15 증거 배치 병합 체크포인트
 - PR #97/#115/#119/#120/#122를 승인 순서로 병합; 필수 CI와 독립 리뷰 모두 PASS.
 - 데스크톱·canonical 조판·models 빌드·공공 카탈로그·PDF 시각 비교 기반이 main에 합류.
