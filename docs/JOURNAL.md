@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-08-22 (Codex sol) · #121 PDF 시각 오라클 기반 PR
+- PR #122: 구조 우선 PDF↔PDF report-only 비교기, JSON/HTML+진단 PNG 5종, worst 5쪽/영역.
+- 51/51·verify quick·필수 CI 3종·독립 보안/범위 검수 PASS; #93은 전체 파이프라인까지 open.
+- rhwp 재감사: HWP5/HWP3 decode+object fragment/oracle 의존, fork 고유 commit 0; #87→#107→#94.
+- 외부 PR 0·외부 open issue #50만 유지·신규 미응답/악성 0; advisory는 비공개 draft 유지.
+- 다음: #97/#115/#119 → #120/#122 순차 rebase·병합 승인 후 #116→#100→#101→#102.
+
 ## 2026-08-22 (Codex sol) · #99 공공문서 카탈로그 PR
 - PR #120: 공식 12개 출처군 후보 259건(HWP5 119/HWPX 19/PDF 121), pair 120개.
 - metadata-only·바이너리 0; 개인정보/접근통제 fail-closed, 라이선스 6건은 review-required.
