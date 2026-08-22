@@ -8,7 +8,7 @@
   R17(AI-native transaction) / R18(HWP5 독립·데스크톱 GA). 실행 이슈 #98~#113을
   선후관계·수용 기준과 함께 등재했고, 기존 #84는 #89 선행 blocked, #87은 fork
   거버넌스, #94/#107은 자체 HWP5 parser 구현으로 범위를 분리했다.
-  **#98 구현 완료·PR 준비**: `layout-check --json` 단일 검증기가 정확히 3문서만 받아
+  **#98 구현 완료·PR #115 checks 대기**: `layout-check --json` 단일 검증기가 정확히 3문서만 받아
   양쪽 절대 쪽수 8/18/24, 줄정확 98.9%+, 본문 오라클 91/257/365+, missing=0을
   quick/full/CI에 강제한다. 7==7·98.8·누락·중복·미등록·채점불가를 fail-closed.
   실측 8/18/24 · 98.9/99.2/99.7 · 91/257/365, node 17/17, `verify-local` quick,
@@ -17,7 +17,7 @@
   필수 CI green이나 main 갱신 후 merge conflict — branch update·재검증 대기. 정상 외부
   제보 #42/#50에 후속 이슈를
   답변했고 악성·스팸 신호는 0건. heartbeat `auto-hwp-github`가 매일 09:30 KST 추적.
-  다음: #98 PR green까지 → 비공개 P0 advisory patch → #99/#100·#101 순으로 진행.
+  다음: PR #115 필수 checks green까지 → 비공개 P0 advisory patch → #99/#100·#101 순으로 진행.
 
 - 갱신: 2026-08-22 · Codex(sol) — **rhwp 경계 감사 · #84 차단 · #69 재진단/QA**.
   결론: auto-hwp는 rhwp 완전 종속이 아니다. **HWP5 ingest/lift와 일부 수식·차트 보강**은

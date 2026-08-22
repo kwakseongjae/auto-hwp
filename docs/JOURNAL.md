@@ -7,9 +7,9 @@
 
 ## 2026-08-22 (Codex sol) · #114 로드맵 + #98 canonical gate
 - R15~R18 마일스톤과 실행 이슈 #98~#114를 등재하고 #42/#50 커뮤니티 후속 답변.
-- #98: JSON으로 8/18/24·98.9%·오라클 문단을 quick/full/CI에 강제; 17/17+quick+Critic PASS.
+- #98/PR #115: JSON으로 8/18/24·98.9%·오라클 문단 강제; 17/17+quick+Critic PASS.
 - PR #91 머지, stale #47 close. #97은 CI green이나 main 갱신 후 conflict — 업데이트 대기.
-- 다음: #98 PR → 비공개 P0 advisory patch → 공공 코퍼스·PDF 오라클.
+- 다음: PR #115 checks → 비공개 P0 advisory patch → 공공 코퍼스·PDF 오라클.
 
 ## 2026-08-22 (Codex sol) · #69 PR #97 개설
 - `c7dd0d9`를 push하고 PR #97(`Closes #69`) 개설; issue-link 통과, build-test/licenses 확인 중.
