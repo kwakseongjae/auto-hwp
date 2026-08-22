@@ -24,39 +24,65 @@ test("gov-sources.json loads only KOGL-0/1 with full sha256", () => {
   );
 });
 
-test("loadGovSources drops unverified and KOGL-4", () => {
-  const items = loadGovSources(
-    JSON.stringify({
-      files: [
-        {
-          file: "a.hwpx",
-          source_url: "https://example.test/a",
-          source_page: "https://example.test/p",
-          kogl: "KOGL-1",
-          kogl_verified: false,
-          sha256: "a".repeat(64),
-        },
-        {
-          file: "b.hwpx",
-          source_url: "https://example.test/b",
-          source_page: "https://example.test/p",
-          kogl: "KOGL-4",
-          kogl_verified: true,
-          sha256: "b".repeat(64),
-        },
-        {
-          file: "c.hwpx",
-          source_url: "https://example.test/c",
-          source_page: "https://example.test/p",
-          kogl: "KOGL-0",
-          kogl_verified: true,
-          sha256: "c".repeat(64),
-        },
-      ],
-    }),
-  );
-  assert.deepEqual(
-    items.map((i) => i.file),
-    ["c.hwpx"],
+test("loadGovSources fails closed on unverified and non-redistributable rows", () => {
+  const base = {
+    file: "sample.hwpx",
+    publisher: "기관",
+    kind: "양식",
+    source_url: "https://example.test/a",
+    source_page: "https://example.test/p",
+    kogl: "KOGL-1",
+    kogl_verified: true,
+    sha256: "a".repeat(64),
+  };
+  for (const patch of [{ kogl_verified: false }, { kogl: "KOGL-4" }, { kogl: "KOGL-1-extra" }]) {
+    assert.throws(
+      () =>
+        loadGovSources(
+          JSON.stringify({ schema_version: 1, files: [{ ...base, ...patch }] }),
+        ),
+      /verified exact KOGL-0\/1 required/,
+    );
+  }
+});
+
+test("loadGovSources rejects traversal, non-document names, and duplicate destinations", () => {
+  const base = {
+    file: "sample.hwpx",
+    publisher: "기관",
+    kind: "양식",
+    source_url: "https://example.test/a",
+    source_page: "https://example.test/p",
+    kogl: "KOGL-1",
+    kogl_verified: true,
+    sha256: "a".repeat(64),
+  };
+  for (const [patch, message] of [
+    [{ file: "../sample.hwpx" }, /basename only/],
+    [{ file: "..\\sample.hwpx" }, /basename only/],
+    [{ file: "CON.hwp" }, /Windows-compatible/],
+    [{ file: "sample.pdf" }, /\.hwp or \.hwpx required/],
+    [{ file: "e\u0301.hwpx" }, /NFC-normalized/],
+    [{ sha256: "abc" }, /full SHA-256/],
+    [{ source_url: "http://example.test/a" }, /HTTPS without credentials/],
+    [{ unknown: true }, /unknown field/],
+  ]) {
+    assert.throws(
+      () =>
+        loadGovSources(
+          JSON.stringify({ schema_version: 1, files: [{ ...base, ...patch }] }),
+        ),
+      message,
+    );
+  }
+  assert.throws(
+    () =>
+      loadGovSources(
+        JSON.stringify({
+          schema_version: 1,
+          files: [base, { ...base, source_url: "https://example.test/b" }],
+        }),
+      ),
+    /duplicate sample\.hwpx/,
   );
 });

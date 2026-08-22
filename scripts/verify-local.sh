@@ -42,7 +42,10 @@ else
 fi
 
 echo "═══ 공공문서 후보 카탈로그 계약 (이슈 99 — metadata-only · 다운로드 없음) ═══"
-node --test scripts/tests/gov-sources.test.mjs scripts/tests/gov-source-catalog.test.mjs
+node --test \
+  scripts/tests/gov-sources.test.mjs \
+  scripts/tests/fetch-gov-corpus.test.mjs \
+  scripts/tests/gov-source-catalog.test.mjs
 node scripts/gov-source-catalog.mjs --check
 
 echo "═══ 조판 오라클 스윕 산출물 (이슈 72 — 전수 재실행 아님 · 커밋된 요약만) ═══"
