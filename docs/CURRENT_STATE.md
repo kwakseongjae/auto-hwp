@@ -62,7 +62,9 @@
   Vitest **1,018**까지 green이고 sandbox port EPERM만 허용된 로컬 서버에서 분리한 Chromium도
   **85 pass/3 intentional skip/0 fail**이다. 임시 dependency link를 모두 제거했으며 production
   route·HWPX parser/serializer·shared typesetter·`external/rhwp`·generated asset diff 0을 재확인했다.
-  **다음:** security/diff→commit/push/PR #178→required CI·자율 병합→#94 동기화와 next boundary child.
+  final security/diff review도 source content/path/hash/raw payload/credential 노출 0이며 구현 commit
+  `28d1c55`을 push하고 PR #179를 `Closes #178`로 게시했다. **다음:** PR checkpoint push→exact-head
+  required CI·댓글·mergeability 추적→green 자율 병합→#94 동기화와 next boundary child.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #173 병합 · #174 multi-table 경계 착수**.
   자체 HWP5 파서가 exact `tbl ` marker/common-object/TABLE/LIST_HEADER/cell paragraph를 검증해

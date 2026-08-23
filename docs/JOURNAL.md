@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #178 PR #179 게시
+- strict 8×5 implementation `28d1c55` push, PR #179(`Closes #178`) 생성.
+- full/Vitest 1,018/Chromium 85·3, route/rhwp/HWPX/generated 불변을 공개 검증에 명시.
+- 다음 exact-head required CI·댓글 추적→green 자율 병합→next boundary.
+
 ## 2026-08-24 (Codex sol) · #178 full green / PR ready
 - quick/full Rust·PDF51·canonical·corpus84·oracle82·HWPX·wasm/JS + Vitest 1,018 green.
 - 허용된 로컬 서버 Chromium 85 pass/3 intentional skip/0 fail; 임시 link 제거.
