@@ -98,6 +98,19 @@ enum NestedTableMutation {
     TooDeep,
 }
 
+#[derive(Clone, Copy)]
+enum EightByFiveMutation {
+    None,
+    BadAttribute,
+    BadRowCellCount,
+    BadRowSpan,
+    BadLayoutWidthDelta,
+    BadWidthReference,
+    MissingNestedTable,
+    WrongNestedPosition,
+    BadStaleNestedHeight,
+}
+
 #[test]
 fn parses_page_setup_and_blank_source_line_metrics() {
     let doc = OwnHwp5Parser::new()
@@ -726,6 +739,75 @@ fn strict_nested_table_slice_rejects_hostile_attributes_topology_and_extensions(
             ..
         })
     ));
+}
+
+#[test]
+fn owns_exact_eight_by_five_rowspan_and_nine_bounded_nested_tables() {
+    let doc = OwnHwp5Parser::new()
+        .parse(&eight_by_five_fixture(EightByFiveMutation::None))
+        .expect("strict 8x5 nested-table fixture parses");
+    let [Block::Paragraph(anchor), Block::Table(table)] = doc.sections[0].blocks.as_slice() else {
+        panic!("table host must lower to one anchor and one table")
+    };
+    assert!(anchor.is_table_anchor);
+    assert_eq!((table.rows, table.cols, table.cells.len()), (8, 5, 19));
+    assert!(
+        !table.keep_together,
+        "row-boundary policy uses shared row fragmentation"
+    );
+    assert!(table.fixed_row_heights, "no-adjust reaches shared IR");
+    assert_eq!(table.col_widths, vec![7_667, 16_324, 3_879, 3_955, 16_324]);
+    assert_eq!(
+        table.row_heights,
+        vec![5_012, 7_339, 10_169, 10_169, 10_169, 10_169, 11_921, 1_848]
+    );
+    assert_eq!(
+        table
+            .cells
+            .iter()
+            .filter(|cell| cell.row_span == 2)
+            .map(|cell| (cell.row, cell.col, cell.width))
+            .collect::<Vec<_>>(),
+        vec![(6, 0, Some(7_667))]
+    );
+    assert_eq!(
+        table
+            .cells
+            .iter()
+            .filter(|cell| cell
+                .blocks
+                .iter()
+                .any(|block| matches!(block, Block::Table(_))))
+            .count(),
+        9
+    );
+    let corrected = table
+        .cells
+        .iter()
+        .find(|cell| (cell.row, cell.col, cell.col_span) == (6, 3, 2))
+        .expect("exact stale-width slot");
+    assert_eq!(corrected.width, Some(20_279));
+}
+
+#[test]
+fn strict_eight_by_five_slice_rejects_hostile_topology_widths_and_nesting() {
+    for mutation in [
+        EightByFiveMutation::BadAttribute,
+        EightByFiveMutation::BadRowCellCount,
+        EightByFiveMutation::BadRowSpan,
+        EightByFiveMutation::BadLayoutWidthDelta,
+        EightByFiveMutation::BadWidthReference,
+        EightByFiveMutation::MissingNestedTable,
+        EightByFiveMutation::WrongNestedPosition,
+        EightByFiveMutation::BadStaleNestedHeight,
+    ] {
+        assert!(
+            OwnHwp5Parser::new()
+                .parse(&eight_by_five_fixture(mutation))
+                .is_err(),
+            "hostile 8x5 mutation must fail closed"
+        );
+    }
 }
 
 fn fixture(mutation: Mutation) -> Vec<u8> {
@@ -1401,6 +1483,244 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
     compound.into_inner().into_inner()
 }
 
+fn eight_by_five_fixture(mutation: EightByFiveMutation) -> Vec<u8> {
+    const COL_WIDTHS: [u32; 5] = [7_667, 16_324, 3_879, 3_955, 16_324];
+    const ROW_HEIGHTS: [u32; 8] = [5_012, 7_339, 10_169, 10_169, 10_169, 10_169, 11_921, 1_848];
+    const POSITIONS: [(usize, usize, usize, usize); 19] = [
+        (0, 0, 1, 1),
+        (0, 1, 1, 1),
+        (0, 2, 2, 1),
+        (0, 4, 1, 1),
+        (1, 0, 1, 1),
+        (1, 1, 4, 1),
+        (2, 0, 1, 1),
+        (2, 1, 4, 1),
+        (3, 0, 1, 1),
+        (3, 1, 4, 1),
+        (4, 0, 1, 1),
+        (4, 1, 4, 1),
+        (5, 0, 1, 1),
+        (5, 1, 4, 1),
+        (6, 0, 1, 2),
+        (6, 1, 2, 1),
+        (6, 3, 2, 1),
+        (7, 1, 2, 1),
+        (7, 3, 2, 1),
+    ];
+    const NESTED: [(usize, usize); 9] = [
+        (0, 1),
+        (0, 4),
+        (1, 1),
+        (2, 1),
+        (3, 1),
+        (4, 1),
+        (5, 1),
+        (6, 1),
+        (6, 3),
+    ];
+
+    let mut header = vec![0; 256];
+    header[..HWP_SIGNATURE.len()].copy_from_slice(HWP_SIGNATURE);
+    header[32..36].copy_from_slice(&[0, 0, 0, 5]);
+
+    let mut doc_info = Vec::new();
+    let mut properties = vec![0; 26];
+    properties[..2].copy_from_slice(&1u16.to_le_bytes());
+    push_record(&mut doc_info, TAG_DOCUMENT_PROPERTIES, 0, &properties);
+    let mut mappings = Vec::new();
+    for count in [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0] {
+        mappings.extend_from_slice(&(count as u32).to_le_bytes());
+    }
+    push_record(&mut doc_info, TAG_ID_MAPPINGS, 0, &mappings);
+    for _ in 0..7 {
+        push_record(&mut doc_info, TAG_FACE_NAME, 0, &face_name("Test Sans"));
+    }
+    push_record(&mut doc_info, TAG_BORDER_FILL, 0, &solid_border_fill());
+    push_record(&mut doc_info, TAG_CHAR_SHAPE, 0, &char_shape());
+    push_record(&mut doc_info, TAG_PARA_SHAPE, 0, &para_shape());
+
+    let mut body = Vec::new();
+    let mut host_text = extended_control(0x0002, CTRL_SECTION_DEF);
+    host_text.extend(extended_control(0x000b, CTRL_TABLE));
+    host_text.push(0x000d);
+    push_para_header_with_break(
+        &mut body,
+        host_text.len() as u32,
+        (1 << 2) | (1 << 0x000b),
+        1,
+        0,
+        0x01,
+    );
+    push_record(&mut body, TAG_PARA_TEXT, 1, &utf16_bytes(&host_text));
+    push_record(&mut body, TAG_PARA_CHAR_SHAPE, 1, &shape_refs(&[(0, 0)]));
+
+    let mut section_control = Vec::with_capacity(28);
+    section_control.extend_from_slice(&CTRL_SECTION_DEF.to_le_bytes());
+    section_control.extend([0; 24]);
+    push_record(&mut body, TAG_CTRL_HEADER, 1, &section_control);
+    push_record(&mut body, TAG_PAGE_DEF, 2, &page_def(Mutation::None));
+
+    push_table_common(&mut body, 1, 48_149, 66_796);
+    let mut table = Vec::with_capacity(38);
+    table.extend_from_slice(
+        &if matches!(mutation, EightByFiveMutation::BadAttribute) {
+            0x0600_000cu32
+        } else {
+            0x0600_000e
+        }
+        .to_le_bytes(),
+    );
+    table.extend_from_slice(&8u16.to_le_bytes());
+    table.extend_from_slice(&5u16.to_le_bytes());
+    table.extend_from_slice(&0u16.to_le_bytes());
+    for padding in [510i16, 510, 141, 141] {
+        table.extend_from_slice(&padding.to_le_bytes());
+    }
+    let mut row_counts = [4u16, 2, 2, 2, 2, 2, 3, 2];
+    if matches!(mutation, EightByFiveMutation::BadRowCellCount) {
+        row_counts[6] = 2;
+    }
+    for count in row_counts {
+        table.extend_from_slice(&count.to_le_bytes());
+    }
+    table.extend_from_slice(&1u16.to_le_bytes());
+    table.extend_from_slice(&0u16.to_le_bytes());
+    push_record(&mut body, TAG_TABLE, 2, &table);
+
+    for &(row, col, col_span, original_row_span) in &POSITIONS {
+        let row_span =
+            if (row, col) == (6, 0) && matches!(mutation, EightByFiveMutation::BadRowSpan) {
+                1
+            } else {
+                original_row_span
+            };
+        let layout_width = COL_WIDTHS[col..col + col_span].iter().sum::<u32>();
+        let stale_width_slot = (row, col, col_span, original_row_span) == (6, 3, 2, 1);
+        let core_width = if stale_width_slot {
+            layout_width
+                - if matches!(mutation, EightByFiveMutation::BadLayoutWidthDelta) {
+                    175
+                } else {
+                    176
+                }
+        } else {
+            layout_width
+        };
+        let cell_height = if original_row_span == 2 {
+            ROW_HEIGHTS[row] + ROW_HEIGHTS[row + 1]
+        } else {
+            ROW_HEIGHTS[row]
+        };
+        let paragraph_count = match (row, col) {
+            (2, 1) | (5, 1) => 4u16,
+            (3, 1) | (4, 1) => 3,
+            _ => 1,
+        };
+        let width_ref = if row == 0 {
+            0x0100u16
+        } else if (row, col) == (6, 1) {
+            if matches!(mutation, EightByFiveMutation::BadWidthReference) {
+                0
+            } else {
+                0x0400
+            }
+        } else {
+            0
+        };
+        let mut cell = Vec::with_capacity(47);
+        cell.extend_from_slice(&paragraph_count.to_le_bytes());
+        cell.extend_from_slice(&0x0020_0000u32.to_le_bytes());
+        cell.extend_from_slice(&width_ref.to_le_bytes());
+        for value in [col as u16, row as u16, col_span as u16, row_span as u16] {
+            cell.extend_from_slice(&value.to_le_bytes());
+        }
+        cell.extend_from_slice(&core_width.to_le_bytes());
+        cell.extend_from_slice(&cell_height.to_le_bytes());
+        for padding in [510i16, 510, 141, 141] {
+            cell.extend_from_slice(&padding.to_le_bytes());
+        }
+        cell.extend_from_slice(&1u16.to_le_bytes());
+        cell.extend_from_slice(&layout_width.to_le_bytes());
+        cell.extend([0; 9]);
+        push_record(&mut body, TAG_LIST_HEADER, 2, &cell);
+
+        let mut nested_here = NESTED.contains(&(row, col));
+        if matches!(mutation, EightByFiveMutation::MissingNestedTable) && (row, col) == (6, 3) {
+            nested_here = false;
+        }
+        if matches!(mutation, EightByFiveMutation::WrongNestedPosition) {
+            if (row, col) == (0, 1) {
+                nested_here = false;
+            }
+            if (row, col) == (0, 0) {
+                nested_here = true;
+            }
+        }
+        for paragraph_index in 0..paragraph_count as usize {
+            let carries_nested = nested_here && paragraph_index == 0;
+            let paragraph_text = if carries_nested {
+                let mut text = extended_control(0x000b, CTRL_TABLE);
+                text.push(0x000d);
+                text
+            } else {
+                vec!['A' as u16, 0x000d]
+            };
+            push_para_header_at_level(
+                &mut body,
+                2,
+                paragraph_text.len() as u32,
+                if carries_nested { 1 << 0x000b } else { 0 },
+                1,
+                0,
+                0,
+            );
+            push_record(&mut body, TAG_PARA_TEXT, 3, &utf16_bytes(&paragraph_text));
+            push_record(&mut body, TAG_PARA_CHAR_SHAPE, 3, &shape_refs(&[(0, 0)]));
+            if carries_nested {
+                let (nested_width, common_height, cell_height) = match (row, col) {
+                    (0, 1) => (
+                        14_275,
+                        if matches!(mutation, EightByFiveMutation::BadStaleNestedHeight) {
+                            3_881
+                        } else {
+                            3_882
+                        },
+                        1_848,
+                    ),
+                    (0, 4) => (14_841, 3_882, 1_848),
+                    (2, 1) => (38_896, 3_631, 3_631),
+                    (5, 1) => (38_896, 3_150, 3_150),
+                    (6, 1) | (6, 3) => (19_086, 5_131, 5_131),
+                    _ => (38_896, 5_131, 5_131),
+                };
+                push_one_by_one_with_geometry(
+                    &mut body,
+                    3,
+                    nested_width,
+                    common_height,
+                    cell_height,
+                );
+            }
+        }
+    }
+
+    let mut compound = CompoundFile::create(Cursor::new(Vec::new())).unwrap();
+    {
+        let mut stream = compound.create_stream("/FileHeader").unwrap();
+        stream.write_all(&header).unwrap();
+    }
+    {
+        let mut stream = compound.create_stream("/DocInfo").unwrap();
+        stream.write_all(&doc_info).unwrap();
+    }
+    compound.create_storage("/BodyText").unwrap();
+    {
+        let mut stream = compound.create_stream("/BodyText/Section0").unwrap();
+        stream.write_all(&body).unwrap();
+    }
+    compound.into_inner().into_inner()
+}
+
 fn nested_table_fixture(mutation: NestedTableMutation) -> Vec<u8> {
     const COL_WIDTHS: [u32; 8] = [3_182, 6_810, 659, 8_082, 5_346, 10_534, 5_935, 7_435];
     const ROW_HEIGHTS: [u32; 9] = [
@@ -1608,6 +1928,60 @@ fn push_table_common(out: &mut Vec<u8>, level: u16, width: u32, height: u32) {
     common.extend_from_slice(&0i32.to_le_bytes());
     common.extend_from_slice(&0u16.to_le_bytes());
     push_record(out, TAG_CTRL_HEADER, level, &common);
+}
+
+fn push_one_by_one_with_geometry(
+    out: &mut Vec<u8>,
+    control_level: u16,
+    width: u32,
+    common_height: u32,
+    cell_height: u32,
+) {
+    push_table_common(out, control_level, width, common_height);
+    let child_level = control_level + 1;
+    let mut table = Vec::with_capacity(24);
+    table.extend_from_slice(&0x0400_0006u32.to_le_bytes());
+    table.extend_from_slice(&1u16.to_le_bytes());
+    table.extend_from_slice(&1u16.to_le_bytes());
+    table.extend_from_slice(&0u16.to_le_bytes());
+    for padding in [510i16, 510, 141, 141] {
+        table.extend_from_slice(&padding.to_le_bytes());
+    }
+    table.extend_from_slice(&1u16.to_le_bytes());
+    table.extend_from_slice(&1u16.to_le_bytes());
+    table.extend_from_slice(&0u16.to_le_bytes());
+    push_record(out, TAG_TABLE, child_level, &table);
+
+    let mut cell = Vec::with_capacity(47);
+    cell.extend_from_slice(&1u16.to_le_bytes());
+    cell.extend_from_slice(&0x0020_0000u32.to_le_bytes());
+    cell.extend_from_slice(&0x0500u16.to_le_bytes());
+    for value in [0u16, 0, 1, 1] {
+        cell.extend_from_slice(&value.to_le_bytes());
+    }
+    cell.extend_from_slice(&width.to_le_bytes());
+    cell.extend_from_slice(&cell_height.to_le_bytes());
+    for padding in [510i16, 510, 141, 141] {
+        cell.extend_from_slice(&padding.to_le_bytes());
+    }
+    cell.extend_from_slice(&1u16.to_le_bytes());
+    cell.extend_from_slice(&width.to_le_bytes());
+    cell.extend([0; 9]);
+    push_record(out, TAG_LIST_HEADER, child_level, &cell);
+
+    push_para_header_at_level(out, child_level, 2, 0, 1, 0, 0);
+    push_record(
+        out,
+        TAG_PARA_TEXT,
+        child_level + 1,
+        &utf16_bytes(&['N' as u16, 0x000d]),
+    );
+    push_record(
+        out,
+        TAG_PARA_CHAR_SHAPE,
+        child_level + 1,
+        &shape_refs(&[(0, 0)]),
+    );
 }
 
 fn push_nested_one_by_one(out: &mut Vec<u8>, control_level: u16, carries_deeper: bool) {

@@ -3,7 +3,7 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
-- 갱신: 2026-08-24 · Codex(sol) — **#176 nested TABLE 구현·전체 검증 완료**.
+- 갱신: 2026-08-24 · Codex(sol) — **PR #177 병합 · #178 next 8×5 TABLE 착수**.
   #175는 exact head `6711ff9`에서 issue-link/build-test/licenses green, CLEAN/MERGEABLE,
   review/general/inline 댓글 0을 확인하고 protected main `c917c584`로 squash 병합했다. #174 close와
   원격 branch 정리 후 #94에 bounded two-table host 소유 근거를 동기화했다. 월요일 #114 감사에서
@@ -27,8 +27,44 @@
   **85 pass/3 intentional skip/0 fail**이다. 임시 dependency link는 제거했고 production route·
   HWPX parser/serializer·shared typesetter·`external/rhwp`·generated asset diff 0, 공개 금지 원문·
   경로·hash·raw payload·credential diff 0을 확인했다. 구현은 commit `52e9fc6`으로 push했고 PR #177을
-  `Closes #176`으로 게시했다. **다음:** required CI·댓글 확인→자율 병합→#94 동기화→다음 TABLE
-  `13704..13746` classification-first child.
+  `Closes #176`으로 게시했다. exact head `e3199a7`에서 issue-link **2s**·build-test **9m12s**·licenses
+  **2m52s** green, MERGEABLE, review/general/inline 댓글 0을 확인하고 protected main `aa7a23f7`로
+  squash 병합했다. #176 close·원격 branch 정리 후 #94에 근거를 동기화하고, 중복 없는 #178을
+  R18/P1/area:hwp5/status:ready로 열었다. exact latest main의
+  `codex/issue-178-hwp5-next-table` worktree와 pinned rhwp oracle을 초기화했다. **다음:** content-free
+  TABLE `0x4d/13704..13746`의 exact flag/topology/geometry/nesting을 먼저 분류→shared IR이 모든 active
+  semantics를 faithful하게 표현할 때만 synthetic/hostile fixture와 strict parser 구현. production route·
+  HWPX·shared layout·generated assets·rhwp는 불변. 1차 분류 결과 attr exact `0x0600000e`, 8×5,
+  active cells **19**, row counts `4/2/2/2/2/2/3/2`, horizontal merges + `(row6,col0)`의 2-row
+  merge, depth-1 1×1 nested table **9개**다. row-span 1 cells가 도출한 높이
+  `5012/7339/10169×4/11921/1848`은 object height **66796**과 정확히 같고 spanning cell height도
+  마지막 두 행 합과 같다. 모든 셀의 stored width는 shared `Cell.width` ragged-row lane으로 보존 가능;
+  row6 마지막 cell의 legacy 13B extension만 core width와 다르며 아래 row/grid width와 일치하므로
+  extension을 geometry로 오인하지 않고 exact bounded discriminator로 다뤄야 한다. low attr=2는 로컬
+  공식 rev1.3 표기와 pinned rhwp의 RowBreak 해석이 충돌하므로 현 shared pagination 의미로 섣불리
+  확정하지 않는다. 다만 repeat-header bit는 active header cell이 없어 inert하고 no-adjust는 exact row
+  heights로 표현 가능하다. one-shot numeric classifier는 제거했다. **다음:** exact topology/
+  width-ref/extension/nested-position synthetic+hostile fixture→strict parser; row-span height constraints와
+  ragged `Cell.width`를 보존하고 global column widths는 기존 lift와 동일한 bounded derivation만 사용.
+  첫 own parse는 top-level을 통과해 nested 1×1 geometry까지 전진했다. 9개 중 7개는 common/cell
+  height가 exact하고, 첫 행의 좁은 2개만 stale common **3882** 대 cell **1848**이다. 폭/extension은
+  전부 일치하고 다른 framing도 같으므로 depth-1 exact height pair만 bounded legacy exception으로
+  소유하며 cell height를 shared IR geometry로 보존한다. 추가 one-shot classifier도 제거했다.
+  strict parser와 합성 회귀를 구현해 exact width-ref pattern, 19-cell row-major span, layout-width
+  override delta, row-span height 합, 9개 nested 위치/개수, 2개 stale common-height pair를 검증한다.
+  13B override를 authoritative `Cell.width=20279`로 내리면 span equations가 5개 열
+  `7667/16324/3879/3955/16324`를 유일하게 복원하고 모든 행 effective width가 object **48149**와
+  일치한다. attr/count/rowspan/delta/width-ref/nested missing·wrong-position/stale-height hostile 8축은
+  fail-closed. HWP5 **59 tests**, fmt, clippy `-D warnings`, wasm32 green이며 public boundary는 다음
+  `CTRL_HEADER 0x47/21538..21588`의 unowned common-object attr로 전진했다. quick의 Rust workspace,
+  PDF visual **51**, canonical **8/18/24·98.9%+**, public corpus **84**, oracle **82**, HWPX,
+  wasm/licenses가 green이다. full은 wasm 재빌드 **7,810,657B**, JS build·crosscheck·i18n,
+  Vitest **1,018**까지 green이고 sandbox port EPERM만 허용된 로컬 서버에서 분리한 Chromium도
+  **85 pass/3 intentional skip/0 fail**이다. 임시 dependency link를 모두 제거했으며 production
+  route·HWPX parser/serializer·shared typesetter·`external/rhwp`·generated asset diff 0을 재확인했다.
+  final security/diff review도 source content/path/hash/raw payload/credential 노출 0이며 구현 commit
+  `28d1c55`을 push하고 PR #179를 `Closes #178`로 게시했다. **다음:** PR checkpoint push→exact-head
+  required CI·댓글·mergeability 추적→green 자율 병합→#94 동기화와 next boundary child.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #173 병합 · #174 multi-table 경계 착수**.
   자체 HWP5 파서가 exact `tbl ` marker/common-object/TABLE/LIST_HEADER/cell paragraph를 검증해
