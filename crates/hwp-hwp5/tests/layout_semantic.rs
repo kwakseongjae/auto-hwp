@@ -68,6 +68,15 @@ enum Mutation {
     BadTableGeometry,
     BadTableCellAlign,
     BadTableBorderRef,
+    LargeTable,
+    LargeTableBadCellCount,
+    LargeTableExtraCell,
+    LargeTableBadSpan,
+    LargeTableBadWidth,
+    LargeTableBadParagraphCount,
+    LargeTableBadRowHeight,
+    LargeTableBadWidthRef,
+    LargeTableBadCellOrder,
 }
 
 #[test]
@@ -485,6 +494,7 @@ fn owns_strict_inline_one_by_one_table_as_anchor_plus_shared_ir() {
     };
     assert!(anchor.is_table_anchor);
     assert_eq!((table.rows, table.cols), (1, 1));
+    assert!(table.keep_together);
     assert_eq!(table.col_widths, vec![20_000]);
     assert_eq!(table.row_heights, vec![2_000]);
     assert_eq!(table.padding, Some([510, 510, 141, 141]));
@@ -523,6 +533,57 @@ fn strict_inline_table_rejects_unowned_attributes_topology_geometry_alignment_an
     }
 }
 
+#[test]
+fn owns_strict_inline_ten_by_two_table_with_horizontal_merges_and_multiple_paragraphs() {
+    let doc = OwnHwp5Parser::new()
+        .parse(&fixture(Mutation::LargeTable))
+        .expect("strict 10x2 table fixture parses");
+    let Block::Table(table) = &doc.sections[0].blocks[1] else {
+        panic!("table host must be followed by a shared table block")
+    };
+    assert_eq!((table.rows, table.cols, table.cells.len()), (10, 2, 17));
+    assert!(table.keep_together, "TABLE no-split attr reaches shared IR");
+    assert_eq!(table.col_widths, vec![9_361, 38_552]);
+    assert_eq!(table.row_heights.iter().sum::<i32>(), 65_409);
+    assert_eq!(
+        table
+            .cells
+            .iter()
+            .filter(|cell| cell.col_span == 2)
+            .map(|cell| cell.row)
+            .collect::<Vec<_>>(),
+        vec![0, 1, 5]
+    );
+    assert_eq!(table.cells[0].blocks.len(), 5);
+    let Block::Paragraph(first) = &table.cells[0].blocks[0] else {
+        panic!("cell content remains paragraph blocks")
+    };
+    assert!(
+        first.runs.last().is_some_and(|run| run.content.is_empty()
+            && run.char_shape != first.runs[0].char_shape),
+        "paragraph-mark character shape remains as a terminal empty run"
+    );
+}
+
+#[test]
+fn strict_ten_by_two_table_rejects_hostile_counts_spans_geometry_and_width_refs() {
+    for mutation in [
+        Mutation::LargeTableBadCellCount,
+        Mutation::LargeTableExtraCell,
+        Mutation::LargeTableBadSpan,
+        Mutation::LargeTableBadWidth,
+        Mutation::LargeTableBadParagraphCount,
+        Mutation::LargeTableBadRowHeight,
+        Mutation::LargeTableBadWidthRef,
+        Mutation::LargeTableBadCellOrder,
+    ] {
+        assert!(
+            OwnHwp5Parser::new().parse(&fixture(mutation)).is_err(),
+            "hostile mutation must fail closed"
+        );
+    }
+}
+
 fn fixture(mutation: Mutation) -> Vec<u8> {
     let mut header = vec![0; 256];
     header[..HWP_SIGNATURE.len()].copy_from_slice(HWP_SIGNATURE);
@@ -536,6 +597,27 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
             | Mutation::BadTableGeometry
             | Mutation::BadTableCellAlign
             | Mutation::BadTableBorderRef
+            | Mutation::LargeTable
+            | Mutation::LargeTableBadCellCount
+            | Mutation::LargeTableExtraCell
+            | Mutation::LargeTableBadSpan
+            | Mutation::LargeTableBadWidth
+            | Mutation::LargeTableBadParagraphCount
+            | Mutation::LargeTableBadRowHeight
+            | Mutation::LargeTableBadWidthRef
+            | Mutation::LargeTableBadCellOrder
+    );
+    let has_large_table = matches!(
+        mutation,
+        Mutation::LargeTable
+            | Mutation::LargeTableBadCellCount
+            | Mutation::LargeTableExtraCell
+            | Mutation::LargeTableBadSpan
+            | Mutation::LargeTableBadWidth
+            | Mutation::LargeTableBadParagraphCount
+            | Mutation::LargeTableBadRowHeight
+            | Mutation::LargeTableBadWidthRef
+            | Mutation::LargeTableBadCellOrder
     );
     let mut doc_info = Vec::new();
     let mut properties = vec![0; 26];
@@ -560,7 +642,7 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
         1,
         1,
         usize::from(has_table),
-        1,
+        if has_large_table { 2 } else { 1 },
         0,
         0,
         0,
@@ -577,6 +659,9 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
         push_record(&mut doc_info, TAG_BORDER_FILL, 0, &solid_border_fill());
     }
     push_record(&mut doc_info, TAG_CHAR_SHAPE, 0, &char_shape());
+    if has_large_table {
+        push_record(&mut doc_info, TAG_CHAR_SHAPE, 0, &char_shape());
+    }
     push_record(&mut doc_info, TAG_PARA_SHAPE, 0, &para_shape());
 
     let mut body = Vec::new();
@@ -813,6 +898,11 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
         }
     }
     if has_table {
+        let (table_width, table_height, table_rows, table_cols) = if has_large_table {
+            (47_913u32, 65_409u32, 10u16, 2u16)
+        } else {
+            (20_000, 2_000, 1, 1)
+        };
         let mut common = Vec::with_capacity(46);
         common.extend_from_slice(&CTRL_TABLE.to_le_bytes());
         let attr = if matches!(mutation, Mutation::BadTableAttr) {
@@ -823,8 +913,8 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
         common.extend_from_slice(&attr.to_le_bytes());
         common.extend_from_slice(&0u32.to_le_bytes());
         common.extend_from_slice(&0u32.to_le_bytes());
-        common.extend_from_slice(&20_000u32.to_le_bytes());
-        common.extend_from_slice(&2_000u32.to_le_bytes());
+        common.extend_from_slice(&table_width.to_le_bytes());
+        common.extend_from_slice(&table_height.to_le_bytes());
         common.extend_from_slice(&0i32.to_le_bytes());
         for margin in [100i16, 100, 50, 50] {
             common.extend_from_slice(&margin.to_le_bytes());
@@ -834,15 +924,21 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
         common.extend_from_slice(&0u16.to_le_bytes());
         push_record(&mut body, TAG_CTRL_HEADER, 1, &common);
 
-        let mut table = Vec::with_capacity(24);
+        let mut table = Vec::with_capacity(22 + usize::from(table_rows) * 2);
         table.extend_from_slice(&0x0400_0006u32.to_le_bytes());
-        table.extend_from_slice(&1u16.to_le_bytes());
-        table.extend_from_slice(&1u16.to_le_bytes());
+        table.extend_from_slice(&table_rows.to_le_bytes());
+        table.extend_from_slice(&table_cols.to_le_bytes());
         table.extend_from_slice(&0u16.to_le_bytes());
         for padding in [510i16, 510, 141, 141] {
             table.extend_from_slice(&padding.to_le_bytes());
         }
-        table.extend_from_slice(&1u16.to_le_bytes());
+        if has_large_table {
+            for height in [6_500u16; 9].into_iter().chain([6_909]) {
+                table.extend_from_slice(&height.to_le_bytes());
+            }
+        } else {
+            table.extend_from_slice(&1u16.to_le_bytes());
+        }
         table.extend_from_slice(&1u16.to_le_bytes());
         table.extend_from_slice(&0u16.to_le_bytes());
         push_record(
@@ -856,51 +952,134 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
             &table,
         );
 
-        let mut cell = Vec::with_capacity(47);
-        cell.extend_from_slice(&1u16.to_le_bytes());
-        cell.extend_from_slice(
-            &if matches!(mutation, Mutation::BadTableCellAlign) {
-                0u32
-            } else {
-                0x0020_0000
-            }
-            .to_le_bytes(),
-        );
-        cell.extend_from_slice(&0x0500u16.to_le_bytes());
-        for value in [0u16, 0, 1, 1] {
-            cell.extend_from_slice(&value.to_le_bytes());
+        let mut positions = if has_large_table {
+            (0usize..10)
+                .flat_map(|row| {
+                    if matches!(row, 0 | 1 | 5) {
+                        vec![(row, 0usize, 2usize)]
+                    } else {
+                        vec![(row, 0, 1), (row, 1, 1)]
+                    }
+                })
+                .collect::<Vec<_>>()
+        } else {
+            vec![(0, 0, 1)]
+        };
+        if matches!(mutation, Mutation::LargeTableBadCellCount) {
+            positions.pop();
         }
-        cell.extend_from_slice(
-            &if matches!(mutation, Mutation::BadTableGeometry) {
-                19_999u32
-            } else {
-                20_000
-            }
-            .to_le_bytes(),
-        );
-        cell.extend_from_slice(&2_000u32.to_le_bytes());
-        for padding in [510i16, 510, 141, 141] {
-            cell.extend_from_slice(&padding.to_le_bytes());
+        if matches!(mutation, Mutation::LargeTableExtraCell) {
+            positions.push((9, 1, 1));
         }
-        cell.extend_from_slice(
-            &if matches!(mutation, Mutation::BadTableBorderRef) {
-                2u16
+        if matches!(mutation, Mutation::LargeTableBadSpan) {
+            positions[0].2 = 1;
+        }
+        if matches!(mutation, Mutation::LargeTableBadCellOrder) {
+            positions.swap(2, 3);
+        }
+        for (cell_index, (row, col, col_span)) in positions.into_iter().enumerate() {
+            let paragraph_count = if has_large_table && cell_index == 0 {
+                if matches!(mutation, Mutation::LargeTableBadParagraphCount) {
+                    6u16
+                } else {
+                    5
+                }
             } else {
                 1
+            };
+            let width_ref =
+                if matches!(mutation, Mutation::LargeTableBadWidthRef) && cell_index == 0 {
+                    0x0200u16
+                } else if has_large_table {
+                    [0x0000u16, 0x0100, 0x0500][cell_index % 3]
+                } else {
+                    0x0500
+                };
+            let mut cell_width = if has_large_table {
+                [9_361u32, 38_552][col..col + col_span].iter().sum()
+            } else {
+                20_000
+            };
+            if cell_index == 0
+                && matches!(
+                    mutation,
+                    Mutation::BadTableGeometry | Mutation::LargeTableBadWidth
+                )
+            {
+                cell_width -= 1;
             }
-            .to_le_bytes(),
-        );
-        cell.extend([0; 13]);
-        push_record(&mut body, TAG_LIST_HEADER, 2, &cell);
+            let mut cell_height = if has_large_table {
+                if row == 9 {
+                    6_909u32
+                } else {
+                    6_500
+                }
+            } else {
+                2_000
+            };
+            if matches!(mutation, Mutation::LargeTableBadRowHeight) && cell_index == 0 {
+                cell_height -= 1;
+            }
 
-        push_para_header_at_level(&mut body, 2, 2, 0, 1, 0, 0);
-        push_record(
-            &mut body,
-            TAG_PARA_TEXT,
-            3,
-            &utf16_bytes(&['A' as u16, 0x000d]),
-        );
-        push_record(&mut body, TAG_PARA_CHAR_SHAPE, 3, &shape_refs(&[(0, 0)]));
+            let mut cell = Vec::with_capacity(47);
+            cell.extend_from_slice(&paragraph_count.to_le_bytes());
+            cell.extend_from_slice(
+                &if matches!(mutation, Mutation::BadTableCellAlign) {
+                    0u32
+                } else {
+                    0x0020_0000
+                }
+                .to_le_bytes(),
+            );
+            cell.extend_from_slice(&width_ref.to_le_bytes());
+            for value in [col as u16, row as u16, col_span as u16, 1] {
+                cell.extend_from_slice(&value.to_le_bytes());
+            }
+            cell.extend_from_slice(&cell_width.to_le_bytes());
+            cell.extend_from_slice(&cell_height.to_le_bytes());
+            for padding in [510i16, 510, 141, 141] {
+                cell.extend_from_slice(&padding.to_le_bytes());
+            }
+            cell.extend_from_slice(
+                &if matches!(mutation, Mutation::BadTableBorderRef) {
+                    2u16
+                } else {
+                    1
+                }
+                .to_le_bytes(),
+            );
+            cell.extend([0; 13]);
+            push_record(&mut body, TAG_LIST_HEADER, 2, &cell);
+
+            for paragraph in 0..paragraph_count {
+                let terminal_shape = has_large_table && cell_index == 0 && paragraph == 0;
+                push_para_header_at_level(
+                    &mut body,
+                    2,
+                    2,
+                    0,
+                    if terminal_shape { 2 } else { 1 },
+                    0,
+                    0,
+                );
+                push_record(
+                    &mut body,
+                    TAG_PARA_TEXT,
+                    3,
+                    &utf16_bytes(&['A' as u16, 0x000d]),
+                );
+                push_record(
+                    &mut body,
+                    TAG_PARA_CHAR_SHAPE,
+                    3,
+                    &shape_refs(if terminal_shape {
+                        &[(0, 0), (1, 1)]
+                    } else {
+                        &[(0, 0)]
+                    }),
+                );
+            }
+        }
     }
 
     if matches!(mutation, Mutation::MidSectionSeparator) {

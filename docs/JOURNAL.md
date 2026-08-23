@@ -5,6 +5,26 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #170 PR #173 게시
+- strict 10×2 TABLE commit `25010cb`을 push하고 PR #173(`Closes #170`) 생성.
+- route/rhwp/HWPX/generated 불변과 quick/full/Vitest 1,007/Chromium 85·3을 명시.
+- 다음 required CI·댓글 추적→green 자율 병합→multi-table boundary child.
+
+## 2026-08-24 (Codex sol) · #170 full green / PR ready
+- strict 10×2 TABLE + terminal char shape + bounded extra-cell guard 최종 확정.
+- quick/full·Vitest 1,007·Chromium 85/3 green; route/rhwp/HWPX/generated diff 0.
+- 다음 commit/push/PR→required CI/merge→next public boundary child.
+
+## 2026-08-24 (Codex sol) · #170 strict 10×2 TABLE focused green
+- exact 17 cells/3 horizontal spans/1~5 paras → shared Table, no-split keep_together=true.
+- hostile 8종 fail-closed; terminal char-shape run 보존; HWP5 53/clippy/wasm32 green.
+- public boundary 0x4d 936..982→multi-table CTRL 5926..5976. 다음 quick→full→PR/CI.
+
+## 2026-08-24 (Codex sol) · PR #172 merged → #170 resumed
+- #172 required CI/CLEAN/MERGEABLE·댓글 0 후 main `e14c8e7` 병합; #171 close·branch 정리.
+- #170 중복 docs checkpoint는 main 포함을 대조해 skip, exact new main으로 rebase/push.
+- 다음 strict 10×2/17-cell parser + keep_together=true/hostile tests→full/PR/CI.
+
 ## 2026-08-24 (Codex sol) · #171 full green / PR ready
 - keep-together page/column 3-path LOCKSTEP와 default/over-tall fallback 확정.
 - quick/full·Vitest 1,007·Chromium 85/3 green; route/rhwp/HWPX/generated diff 0.
