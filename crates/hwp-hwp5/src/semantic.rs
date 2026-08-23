@@ -3212,10 +3212,28 @@ fn make_runs(
                 content: Vec::new(),
                 ..Run::default()
             }]),
+            [(0, control_shape), (terminator, terminator_shape)]
+                if !decoded.structural_controls.is_empty()
+                    && decoded.structural_controls[0].0 == 0
+                    && decoded.terminator == Some(*terminator) =>
+            {
+                Ok(vec![
+                    Run {
+                        char_shape: *control_shape,
+                        content: Vec::new(),
+                        ..Run::default()
+                    },
+                    Run {
+                        char_shape: *terminator_shape,
+                        content: Vec::new(),
+                        ..Run::default()
+                    },
+                ])
+            }
             _ => Err(malformed(
                 &record.expect("non-empty refs have a source record"),
                 Some(section),
-                "empty paragraph has invalid PARA_CHAR_SHAPE boundaries",
+                "text-empty control host has invalid PARA_CHAR_SHAPE boundaries",
             )),
         };
     }

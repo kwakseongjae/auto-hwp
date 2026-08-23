@@ -178,7 +178,21 @@
   PARA_CHAR_SHAPE `0x44/44479..44499`의 enclosing paragraph framing·count/index sequence를 두 번
   content-free 분류하고, active semantics를 손실 없이 shared IR로 표현할 수 있을 때만 atomic exact
   discriminator와 positive/hostile fixture를 구현. production route·rhwp·HWPX·shared typesetter·
-  generated assets·public fixtures 불변.
+  generated assets·public fixtures 불변. 두 probe run은 exact 동일했다: 이 레코드는 일반 빈 문단이
+  아니라 단일 `tbl ` structural marker 8 UTF-16 units와 종결자만 가진 text-empty host이며,
+  PARA_HEADER는 char-count 9/control-mask `0x800`/declared-shapes 2, shape sequence는 marker start와
+  terminator에 대응하는 두 유효 pool ref다. 앞선 table host 20개는 모두 단일 start ref였고 이 form만
+  terminal insertion style을 별도 보존한다. parser는 visible text·geometry를 만들지 않고, 첫 structural
+  control이 offset 0이며 두 번째 boundary가 exact terminator일 때만 두 empty typed run으로 내린다.
+  malformed terminal offset, out-of-pool ref, declared-count mismatch는 각각 typed fail-closed fixture로
+  고정했다. HWP5 **68 tests** green이고 공개 boundary는 다음 cell LIST_HEADER
+  `0x48/45487..45538`로 전진했다. temporary classifiers는 제거되어 probe diff 0. fmt, workspace
+  clippy `-D warnings`, wasm32, quick/full 모두 green: PDF visual **51**, canonical **8/18/24 + 98.9%+**,
+  public corpus **84**, oracle **82**, wasm optimized **7,810,657B**, Vitest **1,018**, Chromium
+  **85 passed/3 skipped/0 failed**. full의 sandbox bind EPERM만 별도 허용된 Playwright 실행으로 대체
+  검증했고 임시 node_modules symlink 6개는 제거했다. 최종 diff/check와 공개 보안 감사 clean,
+  strict parser/tests/state 5개만 변경되며 production route·rhwp·HWPX·typesetter·generated diff 0.
+  **다음:** commit/push/PR→exact-head CI·댓글·mergeability 감사→merge→#94/next child.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #173 병합 · #174 multi-table 경계 착수**.
   자체 HWP5 파서가 exact `tbl ` marker/common-object/TABLE/LIST_HEADER/cell paragraph를 검증해

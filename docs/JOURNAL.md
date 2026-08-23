@@ -5,6 +5,16 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #188 full green
+- quick/full green: PDF51, canonical gates, corpus84/oracle82, wasm 7,810,657B, Vitest1,018.
+- sandbox bind만 별도 Playwright로 검증: Chromium 85 passed/3 skipped/0 failed.
+- temp links removed; route/rhwp/HWPX/typesetter/generated/security diff clean. 다음 PR/CI/merge.
+
+## 2026-08-24 (Codex sol) · #188 classified / focused green
+- two runs exact: one table marker at 0 + terminator at 8; active text/geometry none, rhwp preserves refs.
+- exact terminal pair → two empty typed runs; bad boundary/ref/count fail closed; HWP5 68 green.
+- next LIST_HEADER 45487..45538; classifiers removed/probe diff 0. 다음 full gates→PR/CI/merge.
+
 ## 2026-08-24 (Codex sol) · PR #187 merged / #188 started
 - #187 exact-head required CI·MERGEABLE/CLEAN·댓글 0 후 main `55fc41aa`; #186 close·branch 정리.
 - #94 근거 동기화, next empty PARA_CHAR_SHAPE boundary #188 등록, exact-main worktree 시작.
