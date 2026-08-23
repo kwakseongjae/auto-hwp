@@ -31,6 +31,8 @@ const PATH_CODEC = { encode: (p: string) => new TextEncoder().encode(p), decode:
 const RECOVERY_PREFIX = "auto-hwp-recovery:";
 type RecoverySummary = { documentId: string; generation: number; revision: number; savedAtMs: number; byteLen: number };
 type RecoveryListing = { records: RecoverySummary[]; warnings: string[] };
+type RecentDocument = { path: string; lastOpenedMs: number };
+type RecentDocumentListing = { entries: RecentDocument[]; warnings: string[] };
 type SaveContinuation = "none" | "replace" | "close";
 const recoveryPayload = (record: RecoverySummary) =>
   new TextEncoder().encode(`${RECOVERY_PREFIX}${record.documentId}:${record.generation}`);
@@ -81,6 +83,8 @@ function WorkspaceShell() {
   const [sessionStatus, setSessionStatus] = useState<DesktopSessionStatus | null>(null);
   const [recoveries, setRecoveries] = useState<RecoverySummary[]>([]);
   const [recoveryScanComplete, setRecoveryScanComplete] = useState(false);
+  const [recentDocuments, setRecentDocuments] = useState<RecentDocument[]>([]);
+  const [recentScanComplete, setRecentScanComplete] = useState(false);
   const [restoredFromId, setRestoredFromId] = useState<string | null>(null);
   const [closeRequested, setCloseRequested] = useState(false);
   const [pendingOverwrite, setPendingOverwrite] = useState<{ path: string; after: SaveContinuation } | null>(null);
@@ -119,6 +123,32 @@ function WorkspaceShell() {
       if (snapshotTimer.current) window.clearTimeout(snapshotTimer.current);
     };
   }, [flash]);
+
+  const refreshRecentDocuments = useCallback(async () => {
+    const listing = await invoke<RecentDocumentListing>("list_recent_documents");
+    setRecentDocuments(listing.entries.slice(0, 9));
+    setRecentScanComplete(true);
+    if (listing.warnings[0]) flash(listing.warnings[0]);
+  }, [flash]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlistenWarning: undefined | (() => void);
+    void refreshRecentDocuments().catch((error) => {
+      if (!cancelled) {
+        setRecentScanComplete(true);
+        flash(`최근 문서 목록을 확인하지 못했습니다: ${error}`);
+      }
+    });
+    void listen<string>("desktop-warning", (event) => flash(event.payload)).then((un) => {
+      if (cancelled) un();
+      else unlistenWarning = un;
+    });
+    return () => {
+      cancelled = true;
+      unlistenWarning?.();
+    };
+  }, [flash, refreshRecentDocuments]);
 
   useEffect(() => {
     let cancelled = false;
@@ -220,6 +250,33 @@ function WorkspaceShell() {
       flash(`열기 실패: ${e}`);
     }
   }, [requestOpen, flash]);
+
+  const reopenRecentDocument = useCallback(async (index: number) => {
+    try {
+      await invoke("reopen_recent_document", { index });
+    } catch (error) {
+      flash(String(error));
+      await refreshRecentDocuments().catch(() => undefined);
+    }
+  }, [flash, refreshRecentDocuments]);
+
+  const removeRecentDocument = useCallback(async (index: number) => {
+    try {
+      const listing = await invoke<RecentDocumentListing>("remove_recent_document", { index });
+      setRecentDocuments(listing.entries.slice(0, 9));
+    } catch (error) {
+      flash(`최근 문서를 목록에서 지우지 못했습니다: ${error}`);
+    }
+  }, [flash]);
+
+  const clearRecentDocuments = useCallback(async () => {
+    try {
+      await invoke("clear_recent_documents");
+      setRecentDocuments([]);
+    } catch (error) {
+      flash(`최근 문서 목록을 비우지 못했습니다: ${error}`);
+    }
+  }, [flash]);
 
   // 저장 (HWPX) — the atomic P0-1 path (`hwp_core::atomic_write`: temp + fsync + rename) via the existing
   // path-based `export_hwpx` command. The byte twin (`toHwpx()`) exists on the adapter but the host chrome
@@ -397,7 +454,63 @@ function WorkspaceShell() {
           제자리 편집 · 서식 툴바 · 열/행 크기 조절 · 우클릭 메뉴). No fontCatalog: desktop renders with its
           native font stack (registerFont is a documented no-op). onExport intercepts HTML/PDF export. */}
       <div className="min-h-0 flex-1">
-        <HwpWorkspace adapter={adapter} document={doc} onAiRequest={disabledAi} enableEditing onExport={onExport} />
+        {hasDoc ? (
+          <HwpWorkspace adapter={adapter} document={doc} onAiRequest={disabledAi} enableEditing onExport={onExport} />
+        ) : (
+          <main className="mx-auto flex h-full w-full max-w-3xl flex-col px-8 py-12" aria-labelledby="desktop-home-title">
+            <div className="flex items-end justify-between gap-6 border-b border-black/10 pb-6 dark:border-white/10">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-600">auto-hwp desktop</p>
+                <h1 id="desktop-home-title" className="mt-2 text-3xl font-semibold tracking-tight">문서를 안전하게 여세요</h1>
+                <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
+                  HWP는 원본을 보존해 열고, 편집본은 HWPX로 저장합니다.
+                </p>
+              </div>
+              <button
+                onClick={() => void doOpen()}
+                className="shrink-0 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500"
+              >파일 열기</button>
+            </div>
+
+            <section className="min-h-0 flex-1 pt-7" aria-labelledby="recent-documents-title">
+              <div className="flex items-center justify-between">
+                <h2 id="recent-documents-title" className="text-sm font-semibold">최근 문서</h2>
+                {recentDocuments.length > 0 && (
+                  <button onClick={() => void clearRecentDocuments()} className="text-xs text-neutral-500 hover:text-neutral-900 dark:hover:text-white">
+                    모두 지우기
+                  </button>
+                )}
+              </div>
+              {!recentScanComplete ? (
+                <p className="mt-5 text-sm text-neutral-500">최근 문서를 확인하고 있습니다…</p>
+              ) : recentDocuments.length === 0 ? (
+                <div className="mt-5 rounded-xl border border-dashed border-black/15 px-5 py-10 text-center dark:border-white/15">
+                  <p className="text-sm font-medium">아직 최근 문서가 없습니다</p>
+                  <p className="mt-1 text-xs text-neutral-500">성공적으로 연 문서만 이 기기에 최대 9개 기록됩니다.</p>
+                </div>
+              ) : (
+                <ul className="mt-3 divide-y divide-black/10 overflow-hidden rounded-xl border border-black/10 dark:divide-white/10 dark:border-white/10">
+                  {recentDocuments.map((entry, index) => (
+                    <li key={`${entry.path}:${entry.lastOpenedMs}`} className="flex items-center gap-3 px-4 py-3">
+                      <button onClick={() => void reopenRecentDocument(index)} className="min-w-0 flex-1 text-left">
+                        <span className="block truncate text-sm font-medium">{basename(entry.path)}</span>
+                        <span className="mt-0.5 block text-xs text-neutral-500">{new Date(entry.lastOpenedMs).toLocaleString()}</span>
+                      </button>
+                      <button
+                        onClick={() => void removeRecentDocument(index)}
+                        aria-label={`${basename(entry.path)} 최근 목록에서 지우기`}
+                        className="rounded-md px-2 py-1 text-xs text-neutral-500 hover:bg-black/5 hover:text-neutral-900 dark:hover:bg-white/10 dark:hover:text-white"
+                      >지우기</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p className="mt-4 text-xs leading-5 text-neutral-400">
+                최근 목록에는 로컬 경로와 마지막으로 연 시간만 저장됩니다. 문서 내용·텍스트·해시·미리보기·AI 컨텍스트는 저장하지 않습니다.
+              </p>
+            </section>
+          </main>
+        )}
       </div>
 
       {!hasDoc && recoveries[0] && (

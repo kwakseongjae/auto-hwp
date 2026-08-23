@@ -3,6 +3,23 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-23 · Codex(sol) — **#137/#145/#146/#138 병합 · #142 구현·패키지 QA 완료**.
+  PR #137(PDF calibration)은 main `6574a6d`, #145(데스크톱 OS open)은 `3fd9740`,
+  #146(#141 무손실 복구)은 `e963f5c`, #138(equation/chart SVG→PDF vector replay)은 최신 main
+  `fa7d803`으로 각각 squash 병합했고 작업 브랜치를 정리했다. #138은 main 기반 독립 12파일로
+  재배치한 뒤 issue-link·build-test·licenses green, CLEAN/MERGEABLE을 다시 확인했다.
+  `codex/issue-142-desktop-home`은 최신 main 위에서 최근 문서 최대 9건(최신순·중복 제거·재열기·
+  개별/전체 삭제·누락/이름변경/권한상실 자동 prune)과 SIZE/POSITION/MAXIMIZED 창 상태 복원을
+  구현했다. app-data에는 경로+마지막 연 시각만 저장하고 bytes/text/hash/thumbnail/AI context는
+  금지하며 0700/0600·64KiB 상한·atomic write·symlink 거부·손상/스키마 reset을 강제한다.
+  full verify는 canonical 8/18/24·98.9%+, PDF 51/51, oracle 82, Rust/wasm/JS/Vitest를 통과했고,
+  샌드박스 포트 차단 뒤 별도 Playwright 전수는 85 pass/3 intentional skip였다. ad-hoc 서명
+  `.app` QA에서 첫 빌드의 숨은 창 결함을 발견해 plugin 복원 뒤 명시적 `window.show()`로 수정했고,
+  공개 benchmark.hwp 8쪽 렌더, 재시작 최근 목록/재열기, 누락 파일의 경로 비노출 경고+자동 제거,
+  개별/전체 삭제, 저장 JSON 최소 필드·0600, 최대화 재시작 복원을 확인했다. 테스트 목록은 비웠고
+  창은 일반 크기로 되돌렸다. **다음:** docs 포함 commit·push → PR(`Closes #142`) → 필수 CI·병합;
+  이어 #143 네이티브 인쇄/메뉴/단축키, #144 release packaging/update 트랙으로 진행한다.
+
 - 갱신: 2026-08-23 · Codex(sol) — **#141 데스크톱 무손실 복구 구현·실앱 QA 완료, 게시 준비**.
   `codex/issue-141-desktop-recovery`를 #145 head `c190e8e` 위에 쌓아 Rust authoritative
   revision/dirty 상태, 원본 identity(경로는 메모리 전용)와 외부 변경 덮어쓰기 차단, app-data
