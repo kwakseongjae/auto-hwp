@@ -54,7 +54,9 @@ jobs:
             libxdo-dev \
             libssl-dev \
             libayatana-appindicator3-dev \
-            librsvg2-dev
+            librsvg2-dev \
+            librsvg2-bin \
+            poppler-utils
       - uses: dtolnay/rust-toolchain@1.95
         with:
           components: rustfmt, clippy
@@ -97,6 +99,8 @@ jobs:
             | node scripts/canonical-layout-gate.mjs
       - name: PDF visual oracle foundation (issue 121)
         run: python3 -m unittest discover -s scripts/tests -p 'test_pdf_visual_check.py'
+      - name: SVG sink to PDF sink vector parity (issue 102)
+        run: python3 scripts/pdf-svg-parity-check.py --output-dir "$RUNNER_TEMP/pdf-svg-parity"
       - name: desktop adapter contract (vitest)
         working-directory: packages/react
         run: npm ci && npx vitest run src/__tests__/desktopParity.contract.test.ts

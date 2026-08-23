@@ -23,6 +23,28 @@
   트리를 그대로 보존해 재배치하고 새 CI를 실행 중이다. **다음:** 이 변경을 단일 커밋으로 만든 뒤
   #145 green/병합 → 최신 main 위 rebase → push/PR(`Closes #141`) → 필수 CI, 이어 #142 착수.
 
+- 갱신: 2026-08-23 · Codex(sol) — **#102 PR #138 개설 · 3단 stacked merge 승인 대기**.
+  `eb94323`을 push하고 PR #138(`Closes #102`, base=`codex/issue-101-pdf-calibration`)을
+  개설했으며 MERGEABLE이다. 공개 이슈 #102에도 bounded parser/vector replay, fail-closed stub,
+  계수 불변식, public HWPX·rhwp fragment 회귀와 시각 수치를 기록했다. 현재 #136은 main 기준
+  MERGEABLE이고 필수 CI `issue-link`·`build-test`·`licenses` green, #137과 #138은 각각 부모
+  브랜치 기준 MERGEABLE이라 checks가 없는 정상 stacked 상태다. **다음:** 사용자 승인 후 #136
+  병합 → #137 main retarget·필수 CI·승인 병합 → #138 main retarget·필수 CI·승인 병합.
+
+- 갱신: 2026-08-23 · Codex(sol) — **#102 equation/chart SVG→PDF vector replay 구현·검증 완료**.
+  #101 head `92f7a63` 위 `codex/issue-102-pdf-svg-replay`에서 PDF sink가 버리던
+  `PaintOp::Image.svg`를 외부 fetch 없는 제한 SVG parser로 해석해 krilla vector로 재생한다.
+  허용 subset은 group/basic shape/path/text이며 script·event·foreignObject·external URL·namespace와
+  크기/깊이/명령 한도를 위반하면 빈칸 대신 visible stub+stable diagnostic으로 fail-closed한다.
+  페이지별 text/table/image/equation/chart produced=replayed+stubbed 불변식을 export가 강제하며,
+  synthetic 수식·차트, public `SimpleEquation.hwpx`, 실제 vendored rhwp chart fragment 회귀를 잠갔다.
+  own SVG↔PDF 144 DPI 실측은 equation ink 535/505(1.059), chart 18753/19014(0.986),
+  ink F1 0.9759·edge F1 0.9870; placeholder border가 아닌 내부 ink를 CI에서 강제한다.
+  `verify-local --full`은 Rust/wasm/JS·Vitest 269+64+425+247와 별도 Playwright 85 pass/3 skip,
+  최종 quick도 canonical 8/18/24·98.9%+, PDF 51, oracle 82, licenses까지 PASS했다.
+  **다음:** commit·push → #102 stacked PR(base=#101 branch, `Closes #102`) → #136 사용자 승인
+  병합 → #137 main retarget/CI/승인 → #102 main retarget/CI/승인 순서를 지킨다.
+
 - 갱신: 2026-08-23 · Codex(sol) — **PR #136 병합 · 데스크톱 #139 로드맵/#140 구현·실앱 QA**.
   사용자 승인에 따라 #136을 squash 병합(main `0c354cb`, #100 close)했고 #137은 main 위
   `ad55605`로 재배치해 필수 checks 3종 green·MERGEABLE, #138은 그 위 `e18a396`로 정리했다.

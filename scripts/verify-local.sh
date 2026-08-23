@@ -52,6 +52,13 @@ node --test \
 node scripts/gov-source-catalog.mjs --check
 node scripts/public-corpus-intake.mjs --check
 node scripts/pdf-visual-calibrate.mjs --check
+if command -v rsvg-convert >/dev/null && command -v pdfinfo >/dev/null && command -v pdftoppm >/dev/null; then
+  parity_tmp=$(mktemp -d "${TMPDIR:-/tmp}/auto-hwp-pdf-svg-parity.XXXXXX")
+  python3 scripts/pdf-svg-parity-check.py --output-dir "$parity_tmp/result"
+  rm -rf "$parity_tmp"
+else
+  echo "⚠️  PDF SVG parity skipped(rsvg-convert/Poppler 부재 — CI에서는 필수 실행)"
+fi
 
 echo "═══ 조판 오라클 스윕 산출물 (이슈 72 — 전수 재실행 아님 · 커밋된 요약만) ═══"
 # 코퍼스 전수 layout-check 는 로컬 `node scripts/oracle-sweep.mjs` (--check 가 회귀).

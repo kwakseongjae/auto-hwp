@@ -387,7 +387,7 @@ pub struct EquationRef {
     /// never part of the equation's semantic identity: `None` (no rhwp / un-rendered) keeps the old
     /// stub-box behavior byte-for-byte, so this is purely additive. Consumed by the own-render SvgSink
     /// (embedded as a `<g transform=translate(box)>`) and the HTML export (inline `<svg>`); the PDF
-    /// backend ignores it (v1 stub deferred — no SVG→PDF path yet).
+    /// backend replays the same bounded primitive subset as vectors (#102).
     pub rendered_svg: Option<String>,
 }
 
@@ -398,7 +398,7 @@ pub struct EquationRef {
 /// the chart's identity: `None` (no rhwp / legacy OLE VtChart / parse failure) keeps the stub box
 /// byte-for-byte, so this is purely additive. Consumed by the own-render SvgSink (rides the SHARED
 /// `PaintOp::Image.svg` channel — same as an equation) and the HTML export (inline `<svg>`); the PDF
-/// backend ignores it (v1 stub deferred — no SVG→PDF path yet).
+/// backend replays the same bounded primitive subset as vectors (#102).
 #[derive(Clone, Debug)]
 pub struct ChartRef {
     pub width: HwpUnit,

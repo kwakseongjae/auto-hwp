@@ -28,9 +28,16 @@ use krilla::color::rgb;
 use krilla::geom::{PathBuilder, Point, Rect};
 use krilla::num::NormalizedF32;
 use krilla::page::PageSettings;
-use krilla::paint::{Fill, Stroke, StrokeDash};
+use krilla::paint::{
+    Fill, LineCap as KrillaLineCap, LineJoin as KrillaLineJoin, Stroke, StrokeDash,
+};
 use krilla::text::{Font, TextDirection};
 use krilla::Document;
+
+use crate::svg_fragment::{
+    DominantBaseline, Fragment, LineCap as SvgLineCap, LineJoin as SvgLineJoin, PathCommand,
+    Primitive as SvgPrimitive, Style as SvgStyle, TextAnchor, TextPrimitive,
+};
 
 /// 1 PDF point = 1/72 inch; 1 inch = 7200 HWPUNIT ⇒ 100 HWPUNIT per point.
 const HWPUNIT_PER_PT: f64 = 7200.0 / 72.0;
@@ -240,6 +247,63 @@ pub struct PdfExport {
     pub pages: usize,
     /// Path of the embedded font, or `None` when no Korean face was found (glyphs are stub boxes).
     pub font_path: Option<String>,
+    /// Per-page proof that every produced paint operation was either replayed or explicitly stubbed.
+    pub replay: Vec<PdfPageReplayStats>,
+    /// Bounded capability failures. An unsupported SVG never becomes an unexplained blank object.
+    pub diagnostics: Vec<PdfCapabilityDiagnostic>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PdfReplayCounts {
+    pub produced: usize,
+    pub replayed: usize,
+    pub stubbed: usize,
+}
+
+impl PdfReplayCounts {
+    fn produced_replayed(&mut self) {
+        self.produced += 1;
+        self.replayed += 1;
+    }
+
+    fn produced_stubbed(&mut self) {
+        self.produced += 1;
+        self.stubbed += 1;
+    }
+
+    fn is_balanced(&self) -> bool {
+        self.produced == self.replayed + self.stubbed
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PdfPageReplayStats {
+    pub page_index: usize,
+    pub text: PdfReplayCounts,
+    /// Rect/Line paint operations are the table and page-geometry lane in schema v1.
+    pub table_geometry: PdfReplayCounts,
+    pub image: PdfReplayCounts,
+    pub equation: PdfReplayCounts,
+    pub chart: PdfReplayCounts,
+}
+
+impl PdfPageReplayStats {
+    fn is_balanced(&self) -> bool {
+        self.text.is_balanced()
+            && self.table_geometry.is_balanced()
+            && self.image.is_balanced()
+            && self.equation.is_balanced()
+            && self.chart.is_balanced()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PdfCapabilityDiagnostic {
+    pub page_index: usize,
+    pub op_index: usize,
+    pub kind: String,
+    /// Stable machine-readable code; source SVG/content is intentionally never copied here.
+    pub code: String,
 }
 
 /// True iff a real (Korean-capable) font is available to embed — i.e. a future [`export_pdf`] will
@@ -294,8 +358,19 @@ pub fn export_pdf_with_fonts(
         document.set_metadata(meta);
     }
 
-    for tree in &trees {
-        lower_tree_to_page(&mut document, tree, doc, embed.as_ref());
+    let mut replay = Vec::with_capacity(trees.len());
+    let mut diagnostics = Vec::new();
+    for (page_index, tree) in trees.iter().enumerate() {
+        let (stats, mut page_diagnostics) =
+            lower_tree_to_page(&mut document, tree, doc, embed.as_ref(), page_index);
+        if !stats.is_balanced() {
+            return Err(format!(
+                "pdf.replay.unbalanced: page {} produced operations were silently lost",
+                page_index + 1
+            ));
+        }
+        replay.push(stats);
+        diagnostics.append(&mut page_diagnostics);
     }
 
     let bytes = document
@@ -305,6 +380,8 @@ pub fn export_pdf_with_fonts(
         pages: trees.len(),
         bytes,
         font_path: embed.as_ref().map(|f| f.path.clone()),
+        replay,
+        diagnostics,
     })
 }
 
@@ -315,17 +392,24 @@ fn lower_tree_to_page(
     tree: &PageLayerTree,
     doc: &SemanticDoc,
     embed: Option<&EmbedFont>,
-) {
+    page_index: usize,
+) -> (PdfPageReplayStats, Vec<PdfCapabilityDiagnostic>) {
     let w = pt(tree.width).max(1.0);
     let h = pt(tree.height).max(1.0);
     let settings = PageSettings::from_wh(w, h).unwrap_or_else(|| PageSettings::new(default_size()));
     let mut page = document.start_page_with(settings);
     let mut surface = page.surface();
+    let mut stats = PdfPageReplayStats {
+        page_index,
+        ..Default::default()
+    };
+    let mut diagnostics = Vec::new();
 
-    for op in &tree.ops {
+    for (op_index, op) in tree.ops.iter().enumerate() {
         match op {
             PaintOp::Rect { x, y, w, h, fill } => {
                 paint_rect(&mut surface, *x, *y, *w, *h, *fill);
+                stats.table_geometry.produced_replayed();
             }
             PaintOp::Line {
                 x1,
@@ -337,6 +421,7 @@ fn lower_tree_to_page(
                 width,
             } => {
                 paint_line(&mut surface, *x1, *y1, *x2, *y2, *color, *style, *width);
+                stats.table_geometry.produced_replayed();
             }
             PaintOp::Image {
                 x,
@@ -344,11 +429,41 @@ fn lower_tree_to_page(
                 w,
                 h,
                 bin_ref,
-                // Equation SVG (issue 062-5) is ignored by the PDF backend — v1 defers SVG→PDF (no
-                // resvg), so an equation renders as the same stub box `paint_image` draws for it.
-                svg: _,
+                svg,
             } => {
-                paint_image(&mut surface, *x, *y, *w, *h, bin_ref, doc);
+                if let Some(svg) = svg.as_deref() {
+                    let (kind, counts) = if is_chart_svg(svg) {
+                        ("chart", &mut stats.chart)
+                    } else {
+                        ("equation", &mut stats.equation)
+                    };
+                    match crate::svg_fragment::parse(svg) {
+                        Ok(fragment) => {
+                            paint_svg_fragment(&mut surface, *x, *y, &fragment, embed);
+                            counts.produced_replayed();
+                        }
+                        Err(code) => {
+                            paint_image(&mut surface, *x, *y, *w, *h, bin_ref, doc);
+                            counts.produced_stubbed();
+                            diagnostics.push(PdfCapabilityDiagnostic {
+                                page_index,
+                                op_index,
+                                kind: kind.into(),
+                                code,
+                            });
+                        }
+                    }
+                } else if paint_image(&mut surface, *x, *y, *w, *h, bin_ref, doc) {
+                    stats.image.produced_replayed();
+                } else {
+                    stats.image.produced_stubbed();
+                    diagnostics.push(PdfCapabilityDiagnostic {
+                        page_index,
+                        op_index,
+                        kind: "image".into(),
+                        code: "image.unsupported_or_missing".into(),
+                    });
+                }
             }
             PaintOp::Glyph {
                 x,
@@ -380,12 +495,313 @@ fn lower_tree_to_page(
                     cluster.as_deref(),
                     embed,
                 );
+                if embed.is_some() || ch.is_whitespace() {
+                    stats.text.produced_replayed();
+                } else {
+                    stats.text.produced_stubbed();
+                    diagnostics.push(PdfCapabilityDiagnostic {
+                        page_index,
+                        op_index,
+                        kind: "text".into(),
+                        code: "font.unavailable".into(),
+                    });
+                }
             }
         }
     }
 
     surface.finish();
     page.finish();
+    (stats, diagnostics)
+}
+
+fn is_chart_svg(svg: &str) -> bool {
+    svg.contains("hwp-gen-chart") || svg.contains("hwp-ooxml-chart")
+}
+
+/// Replay one already-validated resource-free SVG fragment. Fragment coordinates are CSS px, while
+/// the object origin is paint-IR HWPUNIT; both become PDF points at this boundary.
+fn paint_svg_fragment(
+    surface: &mut krilla::surface::Surface,
+    origin_x: f64,
+    origin_y: f64,
+    fragment: &Fragment,
+    embed: Option<&EmbedFont>,
+) {
+    surface.push_transform(&krilla::geom::Transform::from_translate(
+        pt(origin_x),
+        pt(origin_y),
+    ));
+    for primitive in &fragment.primitives {
+        match primitive {
+            SvgPrimitive::Rect { x, y, w, h, style } => {
+                let Some(rect) = Rect::from_xywh(
+                    px_pt(*x),
+                    px_pt(*y),
+                    px_pt(*w).max(0.001),
+                    px_pt(*h).max(0.001),
+                ) else {
+                    continue;
+                };
+                let mut builder = PathBuilder::new();
+                builder.push_rect(rect);
+                if let Some(path) = builder.finish() {
+                    draw_svg_path(surface, &path, style);
+                }
+            }
+            SvgPrimitive::Line {
+                x1,
+                y1,
+                x2,
+                y2,
+                style,
+            } => {
+                let mut builder = PathBuilder::new();
+                builder.move_to(px_pt(*x1), px_pt(*y1));
+                builder.line_to(px_pt(*x2), px_pt(*y2));
+                if let Some(path) = builder.finish() {
+                    draw_svg_path(surface, &path, style);
+                }
+            }
+            SvgPrimitive::Path { commands, style } => {
+                let mut builder = PathBuilder::new();
+                for command in commands {
+                    match *command {
+                        PathCommand::Move(x, y) => builder.move_to(px_pt(x), px_pt(y)),
+                        PathCommand::Line(x, y) => builder.line_to(px_pt(x), px_pt(y)),
+                        PathCommand::Quad(x1, y1, x, y) => {
+                            builder.quad_to(px_pt(x1), px_pt(y1), px_pt(x), px_pt(y));
+                        }
+                        PathCommand::Cubic(x1, y1, x2, y2, x, y) => builder.cubic_to(
+                            px_pt(x1),
+                            px_pt(y1),
+                            px_pt(x2),
+                            px_pt(y2),
+                            px_pt(x),
+                            px_pt(y),
+                        ),
+                        PathCommand::Close => builder.close(),
+                    }
+                }
+                if let Some(path) = builder.finish() {
+                    draw_svg_path(surface, &path, style);
+                }
+            }
+            SvgPrimitive::Circle {
+                cx,
+                cy,
+                rx,
+                ry,
+                style,
+            } => {
+                let path = ellipse_path(*cx, *cy, *rx, *ry);
+                if let Some(path) = path {
+                    draw_svg_path(surface, &path, style);
+                }
+            }
+            SvgPrimitive::Text(text) => paint_svg_text(surface, text, embed),
+        }
+    }
+    surface.pop();
+}
+
+fn px_pt(value: f64) -> f32 {
+    value as f32 * PT_PER_PX
+}
+
+fn opacity(value: f32) -> NormalizedF32 {
+    NormalizedF32::new(value).unwrap_or(NormalizedF32::ONE)
+}
+
+fn draw_svg_path(
+    surface: &mut krilla::surface::Surface,
+    path: &krilla::geom::Path,
+    style: &SvgStyle,
+) {
+    surface.set_fill(style.fill.map(|color| Fill {
+        paint: rgb_of(color).into(),
+        opacity: opacity(style.opacity),
+        rule: Default::default(),
+    }));
+    surface.set_stroke(style.stroke.map(|color| Stroke {
+        paint: rgb_of(color).into(),
+        width: px_pt(style.stroke_width).max(0.001),
+        line_cap: match style.line_cap {
+            SvgLineCap::Butt => KrillaLineCap::Butt,
+            SvgLineCap::Round => KrillaLineCap::Round,
+            SvgLineCap::Square => KrillaLineCap::Square,
+        },
+        line_join: match style.line_join {
+            SvgLineJoin::Miter => KrillaLineJoin::Miter,
+            SvgLineJoin::Round => KrillaLineJoin::Round,
+            SvgLineJoin::Bevel => KrillaLineJoin::Bevel,
+        },
+        opacity: opacity(style.opacity),
+        dash: style.dash.as_ref().map(|values| StrokeDash {
+            array: values.iter().map(|value| px_pt(*value)).collect(),
+            offset: 0.0,
+        }),
+        ..Default::default()
+    }));
+    surface.draw_path(path);
+}
+
+fn ellipse_path(cx: f64, cy: f64, rx: f64, ry: f64) -> Option<krilla::geom::Path> {
+    if rx <= 0.0 || ry <= 0.0 {
+        return None;
+    }
+    // Four cubic Beziers; kappa is the standard circle approximation constant.
+    const K: f64 = 0.552_284_749_830_793_6;
+    let mut builder = PathBuilder::new();
+    builder.move_to(px_pt(cx + rx), px_pt(cy));
+    builder.cubic_to(
+        px_pt(cx + rx),
+        px_pt(cy + K * ry),
+        px_pt(cx + K * rx),
+        px_pt(cy + ry),
+        px_pt(cx),
+        px_pt(cy + ry),
+    );
+    builder.cubic_to(
+        px_pt(cx - K * rx),
+        px_pt(cy + ry),
+        px_pt(cx - rx),
+        px_pt(cy + K * ry),
+        px_pt(cx - rx),
+        px_pt(cy),
+    );
+    builder.cubic_to(
+        px_pt(cx - rx),
+        px_pt(cy - K * ry),
+        px_pt(cx - K * rx),
+        px_pt(cy - ry),
+        px_pt(cx),
+        px_pt(cy - ry),
+    );
+    builder.cubic_to(
+        px_pt(cx + K * rx),
+        px_pt(cy - ry),
+        px_pt(cx + rx),
+        px_pt(cy - K * ry),
+        px_pt(cx + rx),
+        px_pt(cy),
+    );
+    builder.close();
+    builder.finish()
+}
+
+fn paint_svg_text(
+    surface: &mut krilla::surface::Surface,
+    text: &TextPrimitive,
+    embed: Option<&EmbedFont>,
+) {
+    if text.text.is_empty() {
+        return;
+    }
+    let size = px_pt(text.size);
+    let approx_width = text.text.chars().count() as f32 * size * 0.55;
+    let x = px_pt(text.x)
+        - match text.anchor {
+            TextAnchor::Start => 0.0,
+            TextAnchor::Middle => approx_width / 2.0,
+            TextAnchor::End => approx_width,
+        };
+    let y = px_pt(text.y)
+        + match text.dominant_baseline {
+            DominantBaseline::Auto => 0.0,
+            DominantBaseline::Central => size * 0.35,
+        };
+
+    let Some(embed) = embed else {
+        // Font-less/headless fallback: preserve each character slot individually, not one opaque
+        // whole-object box. The caller's page stats already expose that the font capability is absent.
+        for idx in 0..text.text.chars().count() {
+            let Some(rect) = Rect::from_xywh(
+                x + idx as f32 * size * 0.55,
+                y - size * 0.8,
+                size * 0.5,
+                size,
+            ) else {
+                continue;
+            };
+            let mut builder = PathBuilder::new();
+            builder.push_rect(rect);
+            if let Some(path) = builder.finish() {
+                surface.set_fill(None);
+                surface.set_stroke(Some(Stroke {
+                    paint: rgb::Color::black().into(),
+                    width: 0.25,
+                    ..Default::default()
+                }));
+                surface.draw_path(&path);
+            }
+        }
+        return;
+    };
+
+    let explicit = text.family.as_deref().and_then(|family| {
+        embed
+            .extra
+            .iter()
+            .find(|(candidate, _)| candidate.trim().eq_ignore_ascii_case(family.trim()))
+            .map(|(_, font)| font)
+    });
+    let family_is_serif = text
+        .family
+        .as_deref()
+        .map(|family| {
+            classify(family) == FontCategory::Serif
+                || family.to_ascii_lowercase().contains("serif")
+                || family.to_ascii_lowercase().contains("times")
+        })
+        .unwrap_or(false);
+    let face = if let Some(face) = explicit {
+        face
+    } else if family_is_serif {
+        if text.bold {
+            embed
+                .serif_bold
+                .as_ref()
+                .or(embed.serif.as_ref())
+                .or(embed.bold.as_ref())
+                .unwrap_or(&embed.font)
+        } else {
+            embed.serif.as_ref().unwrap_or(&embed.font)
+        }
+    } else if text.bold {
+        embed.bold.as_ref().unwrap_or(&embed.font)
+    } else {
+        &embed.font
+    };
+
+    surface.set_stroke(None);
+    surface.set_fill(text.style.fill.map(|color| Fill {
+        paint: rgb_of(color).into(),
+        opacity: opacity(text.style.opacity),
+        rule: Default::default(),
+    }));
+    if text.italic {
+        const SLANT: f32 = 0.21;
+        surface.push_transform(&krilla::geom::Transform::from_row(
+            1.0,
+            0.0,
+            -SLANT,
+            1.0,
+            SLANT * y,
+            0.0,
+        ));
+    }
+    surface.draw_text(
+        Point::from_xy(x, y),
+        face.clone(),
+        size,
+        &text.text,
+        false,
+        TextDirection::Auto,
+    );
+    if text.italic {
+        surface.pop();
+    }
 }
 
 /// A minimal A4 size in points as a last-resort page size (only hit if width/height were non-finite).
@@ -503,10 +919,10 @@ fn paint_image(
     h: f64,
     bin_ref: &str,
     doc: &SemanticDoc,
-) {
+) -> bool {
     let size = match krilla::geom::Size::from_wh(pt(w).max(0.01), pt(h).max(0.01)) {
         Some(s) => s,
-        None => return,
+        None => return false,
     };
 
     if let Some(img) = decode_image(bin_ref, doc) {
@@ -515,6 +931,7 @@ fn paint_image(
         surface.push_transform(&krilla::geom::Transform::from_translate(pt(x), pt(y)));
         surface.draw_image(img, size);
         surface.pop();
+        true
     } else {
         // Stub box: light fill + grey outline, same intent as the SVG `#F0F0F0` placeholder.
         paint_rect(
@@ -531,6 +948,7 @@ fn paint_image(
             }),
         );
         paint_rect(surface, x, y, w, h, None);
+        false
     }
 }
 
@@ -749,10 +1167,8 @@ mod tests {
         assert!(out.pages >= 1);
     }
 
-    /// Issue 062-follow (AI-generated charts): a generated chart is an `Inline::Chart` on the
-    /// `PaintOp::Image.svg` channel. The PDF backend ignores the SVG and draws its reserved box (v1 —
-    /// no SVG→PDF vector path yet, exactly like the 062 OOXML chart). Assert the export doesn't panic
-    /// and the chart page is present.
+    /// #102: a generated chart on the `PaintOp::Image.svg` channel is replayed as PDF vectors, never
+    /// silently degraded to the old whole-object placeholder.
     #[test]
     fn exports_a_doc_with_a_generated_chart_without_panicking() {
         let mut chart_para = Paragraph::default();
@@ -775,6 +1191,148 @@ mod tests {
         let out = export_pdf(&doc, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
         assert!(out.bytes.starts_with(b"%PDF-"), "valid PDF header");
         assert!(out.pages >= 1, "the chart box is laid out on a page");
+        let chart = out
+            .replay
+            .iter()
+            .map(|page| &page.chart)
+            .find(|c| c.produced > 0)
+            .unwrap();
+        assert_eq!(chart.produced, chart.replayed);
+        assert_eq!(chart.stubbed, 0);
+        assert!(out.diagnostics.iter().all(|d| d.kind != "chart"));
+    }
+
+    #[test]
+    fn equation_svg_replays_and_unsupported_svg_has_explicit_diagnostic() {
+        let equation_para = |svg: &str| {
+            let mut paragraph = Paragraph::default();
+            paragraph.runs.push(Run {
+                char_shape: 0,
+                content: vec![Inline::Equation(EquationRef {
+                    script: "x over 2".into(),
+                    font: "HYhwpEQ".into(),
+                    base_unit: 1000,
+                    baseline: 0,
+                    color: Color {
+                        r: 0,
+                        g: 0,
+                        b: 0,
+                        a: 255,
+                    },
+                    width: 3000,
+                    height: 1500,
+                    version: "Equation Version 60".into(),
+                    rendered_svg: Some(svg.into()),
+                })],
+                ..Default::default()
+            });
+            paragraph
+        };
+
+        let good = doc_with(vec![Block::Paragraph(equation_para(
+            r##"<g><text x="1" y="12" font-size="12" fill="#000">x</text><line x1="0" y1="14" x2="12" y2="14" stroke="#000"/></g>"##,
+        ))]);
+        let out = export_pdf(&good, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
+        let equation = out
+            .replay
+            .iter()
+            .map(|page| &page.equation)
+            .find(|counts| counts.produced > 0)
+            .expect("equation PaintOp is produced");
+        assert_eq!(equation.produced, equation.replayed);
+        assert_eq!(equation.stubbed, 0);
+
+        let bad = doc_with(vec![Block::Paragraph(equation_para(
+            "<foreignObject><div>network-capable content</div></foreignObject>",
+        ))]);
+        let out = export_pdf(&bad, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
+        let equation = out
+            .replay
+            .iter()
+            .map(|page| &page.equation)
+            .find(|counts| counts.produced > 0)
+            .expect("equation PaintOp is produced");
+        assert_eq!(equation.stubbed, 1, "unsupported SVG gets a visible stub");
+        assert!(out.diagnostics.iter().any(|diagnostic| {
+            diagnostic.kind == "equation"
+                && diagnostic.code == "svg.element.unsupported:foreignobject"
+        }));
+    }
+
+    #[test]
+    fn public_hwpx_equation_fixture_replays_through_the_production_engine() {
+        let bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/hwpxlib_corpus/reader_writer/SimpleEquation.hwpx"
+        ))
+        .expect("public HWPX fixture is tracked");
+        let doc =
+            hwp_core::Engine::open(&bytes).expect("production HWPX parser/enrichment opens it");
+        let out = export_pdf(&doc, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
+        let produced: usize = out.replay.iter().map(|page| page.equation.produced).sum();
+        let replayed: usize = out.replay.iter().map(|page| page.equation.replayed).sum();
+        let stubbed: usize = out.replay.iter().map(|page| page.equation.stubbed).sum();
+        assert!(produced > 0, "fixture must exercise the equation SVG lane");
+        assert_eq!(produced, replayed);
+        assert_eq!(stubbed, 0, "public HWPX equations are vectors, not boxes");
+        assert!(out.diagnostics.iter().all(|d| d.kind != "equation"));
+    }
+
+    #[test]
+    fn replay_accounting_covers_text_table_geometry_and_raster_image() {
+        let table = Table {
+            rows: 1,
+            cols: 1,
+            cells: vec![Cell {
+                blocks: vec![Block::Paragraph(para("셀"))],
+                ..Default::default()
+            }],
+            col_widths: vec![8000],
+            ..Default::default()
+        };
+        let mut image_paragraph = Paragraph::default();
+        image_paragraph.runs.push(Run {
+            char_shape: 0,
+            content: vec![Inline::Image(ImageRef {
+                bin_ref: "bmp-accounting".into(),
+                width: 1500,
+                height: 1500,
+                treat_as_char: true,
+            })],
+            ..Default::default()
+        });
+        let mut doc = doc_with(vec![
+            Block::Paragraph(para("본문")),
+            Block::Table(table),
+            Block::Paragraph(image_paragraph),
+        ]);
+        doc.bin_data.push(BinData {
+            bin_ref: "bmp-accounting".into(),
+            bytes: tiny_bmp(),
+            kind: "bmp".into(),
+        });
+
+        let out = export_pdf(&doc, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
+        let sum = |pick: fn(&PdfPageReplayStats) -> &PdfReplayCounts| -> PdfReplayCounts {
+            out.replay
+                .iter()
+                .fold(PdfReplayCounts::default(), |mut acc, page| {
+                    let counts = pick(page);
+                    acc.produced += counts.produced;
+                    acc.replayed += counts.replayed;
+                    acc.stubbed += counts.stubbed;
+                    acc
+                })
+        };
+        for counts in [
+            sum(|page| &page.text),
+            sum(|page| &page.table_geometry),
+            sum(|page| &page.image),
+        ] {
+            assert!(counts.produced > 0, "lane must be exercised");
+            assert_eq!(counts.produced, counts.replayed + counts.stubbed);
+        }
+        assert_eq!(sum(|page| &page.image).stubbed, 0, "BMP is a real replay");
     }
 
     #[test]
