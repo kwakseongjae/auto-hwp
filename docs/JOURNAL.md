@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #174 PR #175 게시
+- bounded multi-table commit `aee1f70` push, PR #175(`Closes #174`) 생성.
+- route/rhwp/HWPX/generated 불변과 quick/full/Vitest 1,018/Chromium 85·3 명시.
+- 다음 required CI·댓글 추적→green 자율 병합→TABLE 7561 child.
+
 ## 2026-08-24 (Codex sol) · #174 full green / PR ready
 - max-2 ordered tables + own padding, HWP5 55; next boundary TABLE 7561..7605.
 - quick/full·Vitest 1,018·Chromium 85/3 green; route/rhwp/HWPX/generated diff 0.

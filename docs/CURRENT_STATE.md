@@ -82,7 +82,9 @@
   build cache 누적으로 ENOSPC였고, 병합 완료 #164/#166/#168/#170/#171의 재생성 가능한 Cargo
   cache만 `cargo clean`해 약 69GiB를 회수한 뒤 같은 quick이 전부 green. 임시 dependency link 제거,
   production route·rhwp·HWPX parser/serializer·generated asset diff 0.
-  **다음:** final security/diff→commit/push/PR #174→필수 CI/자율 병합→TABLE 7561 child 분류.
+  검증 완료 commit `aee1f70`을 push하고 PR #175(`Closes #174`, `Refs #94 #170 #171 #172 #173`)을
+  게시했다. **다음:** exact-head issue-link/build-test/licenses·mergeability·review/comment 추적→전부
+  green이면 자율 병합·branch 정리→TABLE 7561 child 분류.
 
 - 갱신: 2026-08-23 · Codex(sol) — **#161 PR #163 게시**.
   검증 완료 commit `c751833`을 push하고 PR #163(`Closes #161`, `Refs #94 #160`)을 만들었다.
