@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-23 (Codex sol) · #158 PR #159
+- commit `5b57498` push, PR #159(`Closes #158`, `Refs #94 #87 #95`) 게시.
+- 다음 required CI/review 감시→green 자율 병합→PARA_HEADER 0x42 child issue.
+
 ## 2026-08-23 (Codex sol) · #158 full green
 - support-pool final security/diff review; production/rhwp/generated diff 0.
 - full Rust/PDF/8·18·24/wasm/JS/Vitest 1,018 + Chromium 85 pass/3 skip/0 fail.

@@ -3,6 +3,13 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-23 · Codex(sol) — **#158 PR #159 게시**.
+  검증 완료 commit `5b57498`을 push하고 PR #159(`Closes #158`, `Refs #94 #87 #95`)을 만들었다.
+  exact support-pool parsing, active unsupported fail-closed, public boundary `0x19→0x42`, no production
+  cutover/no rhwp fallback과 quick/full/Chromium 85 pass·3 intentional skip·generated/rhwp diff 0을
+  본문에 명시했다. **다음:** 이 상태 commit push→issue-link/build-test/licenses·mergeability·review/comment를
+  추적하고 전부 green이면 자율 병합·원격 브랜치 정리→`PARA_HEADER 0x42` child를 issue-first로 착수한다.
+
 - 갱신: 2026-08-23 · Codex(sol) — **#158 전체 검증 완료 · PR 준비**.
   first-party support-pool slice의 최종 보안/diff review에서 HWP 5.1 numbering 확장은 실측 구조를
   정확히 소비하되 의미 소유 전 active use를 계속 fail-closed하는 경계를 명시했다. focused
