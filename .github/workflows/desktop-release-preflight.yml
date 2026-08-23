@@ -1,0 +1,62 @@
+name: desktop-release-preflight
+
+# Issue #149: this workflow never signs, publishes, uploads, or receives credentials. It only proves
+# that a proposed desktop release identity is the exact current protected-main commit. Real release
+# credentials and artifacts remain behind the separate #144 protected release gate.
+on:
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: "Exact 40-hex commit SHA expected to equal current main"
+        required: true
+        type: string
+      version:
+        description: "SemVer (stable: 1.2.3, preview: 1.2.4-rc.1)"
+        required: true
+        type: string
+      channel:
+        description: "Release channel"
+        required: true
+        type: choice
+        options:
+          - preview
+          - stable
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-preflight
+  cancel-in-progress: false
+
+jobs:
+  exact-main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RELEASE_SHA: ${{ inputs.release_sha }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_CHANNEL: ${{ inputs.channel }}
+    steps:
+      # actions/checkout v6.0.2, pinned because release trust must not follow a movable tag.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ inputs.release_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: fetch current main without credentials persistence
+        run: git fetch --no-tags --depth=1 origin main
+      - name: verify exact protected-main identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA" || {
+            echo "::error::checked-out HEAD does not equal requested release SHA"
+            exit 1
+          }
+          MAIN_SHA="$(git rev-parse origin/main)"
+          node scripts/desktop-release-manifest.mjs preflight \
+            --source-sha "$RELEASE_SHA" \
+            --main-sha "$MAIN_SHA" \
+            --version "$RELEASE_VERSION" \
+            --channel "$RELEASE_CHANNEL"

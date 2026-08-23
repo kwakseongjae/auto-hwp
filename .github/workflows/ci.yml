@@ -75,7 +75,10 @@ jobs:
           cache: npm
           cache-dependency-path: packages/react/package-lock.json
       - name: desktop workspace shell launch contract
-        run: node --test scripts/tests/desktop-shell-mode.test.mjs
+        run: |
+          node --test \
+            scripts/tests/desktop-shell-mode.test.mjs \
+            scripts/tests/desktop-release-manifest.test.mjs
       - name: public corpus safety and metadata contracts
         run: |
           node --test \

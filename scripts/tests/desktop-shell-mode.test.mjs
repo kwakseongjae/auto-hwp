@@ -98,7 +98,7 @@ test("workspace shell is unmistakable and the original evidence is retained hone
   assert.match(docs, /scripts\/app-workspace\.sh/);
   assert.match(docs, /2026-08-20-d0-workspace-shell\.png/);
   assert.match(docs, /워크스페이스 셸의 빈 상태/);
-  assert.match(ci, /node --test scripts\/tests\/desktop-shell-mode\.test\.mjs/);
+  assert.match(ci, /node --test[\s\\]+scripts\/tests\/desktop-shell-mode\.test\.mjs/);
 
   await access(join(root, "docs/launch/evidence/2026-08-20-d0-workspace-shell.png"));
   await assert.rejects(access(join(root, "docs/launch/evidence/2026-08-20-d0-legacy-shell-mislabeled-as-workspace.png")));

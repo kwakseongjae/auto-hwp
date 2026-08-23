@@ -3,6 +3,34 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-23 · Codex(sol) — **#149 exact-main 데스크톱 릴리스 신뢰 기반 구현**.
+  #144 감사에서 현재 desktop release/updater workflow가 없고 macOS config는 로컬 ad-hoc
+  `signingIdentity: "-"`뿐임을 확인했다. 실제 인증서 없이 #144를 닫지 않도록 하위 #149를 만들고,
+  strict release manifest/CLI·읽기 전용 수동 preflight·CI/verify-local 계약·공식 근거 문서를
+  구현했다. source SHA는 별도 current main SHA와 같아야 하고 preview/stable SemVer·macOS
+  universal/Windows x64 완전 matrix·안전 basename/non-symlink·byte length/SHA-256·unknown field
+  거부를 강제한다. Linux/Windows arm64는 native clean-machine QA 전까지 지원을 주장하지 않는다.
+  Actions checkout은 공식 v6.0.2 commit `d23441a`로 고정했고 signing/publish/upload/secret 권한은
+  없다. 공격적/변조 입력 포함 Node 8건과 정본 quick 전체가 green이다(canonical 8/18/24·98.9%+,
+  PDF 51, corpus 계약 84, oracle 82, HWPX 잠금, Rust/WASM/licenses). **다음:**
+  commit `c25102d`·PR #150(`Closes #149`, `Refs #144`)까지 게시했다. 첫 CI는 issue-link/licenses와
+  신규 release 8건 모두 green이었으나 기존 desktop-shell 정적 테스트가 CI 명령의 한 줄 문자열만
+  허용해, 두 테스트 파일을 multiline로 묶은 동등한 명령을 거부했다(제품/계약 실패 아님).
+  **다음:** 기존 정적 단언을 whitespace-safe로 고쳐 두 파일 결합 실행을 로컬 재현 → 보정 commit/push
+  → 필수 CI·리뷰·병합. #144는 Developer ID/notary,
+  Authenticode, mandatory updater key/signature, SBOM/provenance, rollback/clean-machine QA까지 open 유지.
+
+- 갱신: 2026-08-23 · Codex(sol) — **PR #148 병합 · #144 Desktop GA release trust 착수**.
+  #143 PR #148은 head `824f112`에서 issue-link·build-test·licenses green,
+  CLEAN/MERGEABLE·리뷰/댓글 0을 재확인한 뒤 main `eed9786`으로 squash 병합했고 원격 브랜치를
+  정리했다. #143은 close됐고 own-PDF native print 계약이 main 정본이다. #140~#143 선행이 모두
+  병합되어 #144를 `status:blocked`에서 `status:ready`로 전환했고, 정확한 최신 main에서
+  `codex/issue-144-release`를 만들었다. **다음:** release workflow/config/권한과 기존 패키징
+  상태를 먼저 감사하고, 비밀키를 요구하지 않는 검증 가능한 층(정확한 main SHA·target matrix·
+  checksums/SBOM/provenance·updater manifest fail-closed·preview/stable/rollback 정책)을 구현한다.
+  실제 Developer ID/Authenticode 자격증명·notarization은 protected release environment 경계로만
+  연결하고, 자격증명 없는 로컬/PR에서는 서명 성공을 꾸며내지 않는다.
+
 - 갱신: 2026-08-23 · Codex(sol) — **#143 네이티브 own-PDF 인쇄 구현·실앱 QA 완료**.
   `print_doc_pdf`는 live doc을 기존 `place_doc → PaintOp → krilla`의 `emit_pdf`로만 만들고,
   page별 text/table/image/equation/chart replay가 전량 non-stub·diagnostic-free일 때만 macOS
