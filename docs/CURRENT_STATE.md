@@ -113,7 +113,14 @@
   classifier·production route·rhwp·HWPX parser/serializer·shared typesetter·generated asset diff
   0, source content/path/hash/raw payload/credential 노출 0을 확인했고 변경 파일은 strict HWP5
   parser/tests/state 5개뿐이다. 구현 commit `4aa018b`을 push하고 PR #183을 `Closes #182`로
-  게시했다. **다음:** exact-head CI·댓글·mergeability→자율 병합→#94 동기화→next child.
+  게시했다. exact head `75f49e9f`에서 issue-link **3s**·build-test **7m46s**·licenses **2m48s**
+  green, MERGEABLE, review/general/inline 댓글 0을 확인하고 protected main `c95fef7c`로 squash
+  병합했다. #182 close·원격 branch 정리 후 #94에 exact 근거와 다음 boundary를 동기화했다.
+  중복 없는 #184를 R18/P1/area:hwp5/status:ready로 열고 exact latest main의
+  `codex/issue-184-hwp5-next-table` worktree와 pinned rhwp oracle을 초기화했다. **다음:**
+  content-free TABLE `0x4d/30321..30361`의 flags·topology·geometry·nesting을 먼저 분류하고,
+  shared IR/SVG/PDF가 모든 active semantics를 faithful하게 표현할 때만 synthetic/hostile fixture와
+  strict parser를 구현. production route·HWPX·shared layout defaults·generated assets·rhwp는 불변.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #173 병합 · #174 multi-table 경계 착수**.
   자체 HWP5 파서가 exact `tbl ` marker/common-object/TABLE/LIST_HEADER/cell paragraph를 검증해
