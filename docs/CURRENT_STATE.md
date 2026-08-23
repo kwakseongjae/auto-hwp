@@ -3,22 +3,24 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
-- 갱신: 2026-08-24 · Codex(sol) — **#166 `nwno` 구현·full green / PR #167 게시**.
-  `PageNumberDecoration.start: NonZeroU16`을 source-neutral IR과 JSX side-channel/equality에 추가하고,
-  기존 schema-v1 blob은 start=1로 읽되 0은 거부한다. HWP5 exact 10B `nwno`의 page counter만 strict
-  파싱해 같은 첫 문단의 owned `pgnp`에 결합하며 unknown attr·비page counter·0·중복·position 누락·
-  다중 구역 상속은 content-free 정적 사유로 fail-closed한다. 조판은 구역 start+최종 physical page
-  order로 SVG/PDF 공통 glyph를 만들고 body geometry/page count 및 3-path LOCKSTEP은 불변이다.
-  공개 benchmark 자체 파서 경계는 `0x47/451..465`에서 `0x47/499..549`로 전진했다. Rust workspace,
-  HWP5 **48**, typeset **94**, PDF visual **51**, canonical **8/18/24·98.9%+**, public corpus **84**,
-  oracle **82**, HWPX, wasm(7,810,113B), licenses, JS build·crosscheck·i18n, Vitest **1,018**이 green;
-  Chromium **85 pass/3 intentional skip/0 fail**이다. fresh worktree node_modules와 sandbox port는
-  루트 설치 임시 링크/허용된 로컬 서버로 분리 검증 후 링크를 제거했다. production route·
-  `external/rhwp`·generated asset diff 0. 구현 commit `4ed836a`과 PR #167(`Closes #166`,
-  `Refs #94 #164`)을 게시했다. 최초 PR-open stdin 오류로 빈 본문 event의 issue-link가 실패했고 현재
-  본문은 즉시 복구됐지만 rerun은 최초 payload를 재사용해 같은 실패를 냈다; 이 상태 commit push의
-  새 synchronize event로 재검증한다. build-test **9m19s**·licenses **2m22s**는 이미 green이다.
-  **다음:** state push→새 issue-link/required CI·review/comment→green 자율 병합→499..549 원인 분해.
+- 갱신: 2026-08-24 · Codex(sol) — **#168 strict inline 1×1 table 구현·full green / PR 준비**.
+  자체 HWP5 파서가 exact `tbl ` marker/common-object/TABLE/LIST_HEADER/cell paragraph를 검증해
+  treat-as-character 1×1 표를 source-neutral `Table`/`Cell` IR로 내린다. 셀/개체 geometry,
+  inherited padding, CENTER alignment, border-fill refs를 range/shape 검증하고 visible host text,
+  larger·floating·merged·captioned·nested table과 불일치 geometry/ref는 content-free fail-closed한다.
+  nested cell을 위해 문단 파서는 상대 `base_level`을 소유한다. 표에 앞선 public prerequisite인
+  exact 19B `secd` extension, dormant note-shape framing, visually inert page-border refs도 strict하게
+  소유했다. page-border attr은 로컬 vendored 공식 HWP 5.0 revision 1.3의 low bits와 관측된 두 legacy
+  word만 허용하며 보이는 border/shade/diagonal은 거부한다. 동일한 `pgnp`/`nwno` 중복은 typed
+  equality로 idempotent collapse하고 충돌 중복은 거부한다. 공개 자체 파서 경계는
+  `CTRL_HEADER 0x47/499..549`에서 다음 larger `TABLE 0x4d/936..982`로 전진했다.
+  quick/full의 Rust workspace, HWP5 **51**, typeset **94**, PDF visual **51**, canonical
+  **8/18/24·98.9%+**, public corpus **84**, oracle **82**, HWPX, wasm(7,810,113B), licenses,
+  JS build·crosscheck·i18n, Vitest **1,007**이 green이고 Chromium **85 pass/3 intentional skip/0 fail**.
+  fresh worktree node_modules와 sandbox port는 루트 설치 임시 링크/허용된 로컬 서버로 분리 검증 후
+  링크를 제거했다. production route·HWPX parser/serializer·shared typesetter·`external/rhwp`·
+  generated asset diff 0이며 원문·경로·hash·raw payload는 공개하지 않았다. **다음:** 최종 diff→
+  commit/push/PR `Closes #168`→필수 CI·댓글 확인 후 자율 병합→#169 larger TABLE 936..982 분해.
 
 - 갱신: 2026-08-23 · Codex(sol) — **#161 PR #163 게시**.
   검증 완료 commit `c751833`을 push하고 PR #163(`Closes #161`, `Refs #94 #160`)을 만들었다.

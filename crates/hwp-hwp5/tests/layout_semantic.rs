@@ -6,6 +6,7 @@ use std::io::{Cursor, Write};
 const TAG_DOCUMENT_PROPERTIES: u16 = 0x10;
 const TAG_ID_MAPPINGS: u16 = 0x11;
 const TAG_FACE_NAME: u16 = 0x13;
+const TAG_BORDER_FILL: u16 = 0x14;
 const TAG_CHAR_SHAPE: u16 = 0x15;
 const TAG_PARA_SHAPE: u16 = 0x19;
 const TAG_PARA_HEADER: u16 = 0x42;
@@ -13,11 +14,14 @@ const TAG_PARA_TEXT: u16 = 0x43;
 const TAG_PARA_CHAR_SHAPE: u16 = 0x44;
 const TAG_PARA_LINE_SEG: u16 = 0x45;
 const TAG_CTRL_HEADER: u16 = 0x47;
+const TAG_LIST_HEADER: u16 = 0x48;
 const TAG_PAGE_DEF: u16 = 0x49;
 const TAG_FOOTNOTE_SHAPE: u16 = 0x4a;
+const TAG_TABLE: u16 = 0x4d;
 const CTRL_SECTION_DEF: u32 = u32::from_be_bytes(*b"secd");
 const CTRL_PAGE_NUM_POS: u32 = u32::from_be_bytes(*b"pgnp");
 const CTRL_NEW_NUMBER: u32 = u32::from_be_bytes(*b"nwno");
+const CTRL_TABLE: u32 = u32::from_be_bytes(*b"tbl ");
 
 #[derive(Clone, Copy)]
 enum Mutation {
@@ -56,6 +60,14 @@ enum Mutation {
     BadNewNumberZero,
     NewNumberWithoutPageNumber,
     DuplicateNewNumber,
+    DuplicatePageNumber,
+    IdempotentPageNumberControls,
+    Table,
+    BadTableAttr,
+    BadTableTopology,
+    BadTableGeometry,
+    BadTableCellAlign,
+    BadTableBorderRef,
 }
 
 #[test]
@@ -350,6 +362,10 @@ fn rejects_malformed_or_unowned_page_number_semantics() {
             Mutation::BadPageNumberUserSymbol,
             "page-number user-symbol semantics are not yet supported",
         ),
+        (
+            Mutation::DuplicatePageNumber,
+            "page-number positions are duplicated with conflicting semantics",
+        ),
     ] {
         assert!(matches!(
             OwnHwp5Parser::new().parse(&fixture(mutation)),
@@ -392,6 +408,19 @@ fn parses_page_number_restart_into_source_neutral_start() {
 }
 
 #[test]
+fn collapses_exact_duplicate_page_number_controls_by_typed_equality() {
+    let doc = OwnHwp5Parser::new()
+        .parse(&fixture(Mutation::IdempotentPageNumberControls))
+        .expect("identical pgnp/nwno records are idempotent");
+    let number = doc.sections[0].page_number.expect("page number");
+    assert_eq!(number.start.get(), 7);
+    assert_eq!(
+        number.position,
+        hwp_model::document::PageNumberPosition::BottomCenter
+    );
+}
+
+#[test]
 fn rejects_malformed_or_unowned_new_number_semantics() {
     for (mutation, reason) in [
         (
@@ -416,7 +445,7 @@ fn rejects_malformed_or_unowned_new_number_semantics() {
         ),
         (
             Mutation::DuplicateNewNumber,
-            "page-number restart has children or is duplicated",
+            "page-number restarts are duplicated with conflicting semantics",
         ),
     ] {
         assert!(matches!(
@@ -444,11 +473,70 @@ fn rejects_multi_section_new_number_until_inheritance_is_owned() {
     ));
 }
 
+#[test]
+fn owns_strict_inline_one_by_one_table_as_anchor_plus_shared_ir() {
+    let doc = OwnHwp5Parser::new()
+        .parse(&fixture(Mutation::Table))
+        .expect("strict table fixture parses");
+    let [Block::Paragraph(anchor), Block::Table(table), Block::Paragraph(_)] =
+        doc.sections[0].blocks.as_slice()
+    else {
+        panic!("table host must become anchor + table block")
+    };
+    assert!(anchor.is_table_anchor);
+    assert_eq!((table.rows, table.cols), (1, 1));
+    assert_eq!(table.col_widths, vec![20_000]);
+    assert_eq!(table.row_heights, vec![2_000]);
+    assert_eq!(table.padding, Some([510, 510, 141, 141]));
+    assert!(table.borders.iter().all(Option::is_some));
+    let cell = &table.cells[0];
+    assert_eq!(
+        (cell.row, cell.col, cell.row_span, cell.col_span),
+        (0, 0, 1, 1)
+    );
+    assert_eq!(cell.width, Some(20_000));
+    assert_eq!(
+        cell.padding, None,
+        "width_ref low bit inherits table padding"
+    );
+    let Block::Paragraph(cell_paragraph) = &cell.blocks[0] else {
+        panic!("cell owns one paragraph")
+    };
+    assert!(cell_paragraph
+        .runs
+        .iter()
+        .any(|run| run.content.iter().any(
+            |inline| matches!(inline, hwp_model::document::Inline::Text(text) if text == "A")
+        )));
+}
+
+#[test]
+fn strict_inline_table_rejects_unowned_attributes_topology_geometry_alignment_and_refs() {
+    for mutation in [
+        Mutation::BadTableAttr,
+        Mutation::BadTableTopology,
+        Mutation::BadTableGeometry,
+        Mutation::BadTableCellAlign,
+        Mutation::BadTableBorderRef,
+    ] {
+        assert!(OwnHwp5Parser::new().parse(&fixture(mutation)).is_err());
+    }
+}
+
 fn fixture(mutation: Mutation) -> Vec<u8> {
     let mut header = vec![0; 256];
     header[..HWP_SIGNATURE.len()].copy_from_slice(HWP_SIGNATURE);
     header[32..36].copy_from_slice(&[0, 0, 0, 5]);
 
+    let has_table = matches!(
+        mutation,
+        Mutation::Table
+            | Mutation::BadTableAttr
+            | Mutation::BadTableTopology
+            | Mutation::BadTableGeometry
+            | Mutation::BadTableCellAlign
+            | Mutation::BadTableBorderRef
+    );
     let mut doc_info = Vec::new();
     let mut properties = vec![0; 26];
     let section_count = if matches!(
@@ -462,12 +550,31 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
     properties[..2].copy_from_slice(&section_count.to_le_bytes());
     push_record(&mut doc_info, TAG_DOCUMENT_PROPERTIES, 0, &properties);
     let mut mappings = Vec::new();
-    for count in [0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0] {
+    for count in [
+        0,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        usize::from(has_table),
+        1,
+        0,
+        0,
+        0,
+        1,
+        0,
+    ] {
         mappings.extend_from_slice(&(count as u32).to_le_bytes());
     }
     push_record(&mut doc_info, TAG_ID_MAPPINGS, 0, &mappings);
     for _ in 0..7 {
         push_record(&mut doc_info, TAG_FACE_NAME, 0, &face_name("Test Sans"));
+    }
+    if has_table {
+        push_record(&mut doc_info, TAG_BORDER_FILL, 0, &solid_border_fill());
     }
     push_record(&mut doc_info, TAG_CHAR_SHAPE, 0, &char_shape());
     push_record(&mut doc_info, TAG_PARA_SHAPE, 0, &para_shape());
@@ -491,6 +598,8 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
             | Mutation::BadNewNumberType
             | Mutation::BadNewNumberZero
             | Mutation::DuplicateNewNumber
+            | Mutation::DuplicatePageNumber
+            | Mutation::IdempotentPageNumberControls
     );
     let has_new_number = matches!(
         mutation,
@@ -502,6 +611,7 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
             | Mutation::BadNewNumberZero
             | Mutation::NewNumberWithoutPageNumber
             | Mutation::DuplicateNewNumber
+            | Mutation::IdempotentPageNumberControls
     );
     let has_columns = matches!(
         mutation,
@@ -517,12 +627,24 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
     }
     if has_page_number {
         section_text.extend(extended_control(0x0015, CTRL_PAGE_NUM_POS));
+        if matches!(
+            mutation,
+            Mutation::DuplicatePageNumber | Mutation::IdempotentPageNumberControls
+        ) {
+            section_text.extend(extended_control(0x0015, CTRL_PAGE_NUM_POS));
+        }
     }
     if has_new_number {
         section_text.extend(extended_control(0x0015, CTRL_NEW_NUMBER));
-        if matches!(mutation, Mutation::DuplicateNewNumber) {
+        if matches!(
+            mutation,
+            Mutation::DuplicateNewNumber | Mutation::IdempotentPageNumberControls
+        ) {
             section_text.extend(extended_control(0x0015, CTRL_NEW_NUMBER));
         }
+    }
+    if has_table {
+        section_text.extend(extended_control(0x000b, CTRL_TABLE));
     }
     if matches!(mutation, Mutation::BadControlFrame) {
         section_text[7] = 0;
@@ -536,7 +658,8 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
                 1 << 0x15
             } else {
                 0
-            },
+            }
+            | if has_table { 1 << 0x000b } else { 0 },
         1,
         0,
         if has_columns {
@@ -613,43 +736,58 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
         push_record(&mut body, TAG_CTRL_HEADER, 1, &column);
     }
     if has_page_number {
-        let mut control = Vec::with_capacity(16);
-        control.extend_from_slice(&CTRL_PAGE_NUM_POS.to_le_bytes());
-        let attr = if matches!(mutation, Mutation::BadPageNumberAttr) {
-            1u32 << 16
-        } else if matches!(mutation, Mutation::BadPageNumberPosition) {
-            11u32 << 8
-        } else if matches!(mutation, Mutation::BadPageNumberFormat) {
-            6
-        } else {
-            5u32 << 8
-        };
-        control.extend_from_slice(&attr.to_le_bytes());
-        let user = if matches!(mutation, Mutation::BadPageNumberUserSymbol) {
-            '*' as u16
-        } else {
-            0
-        };
-        let prefix = if matches!(mutation, Mutation::BadPageNumberSurrogate) {
-            0xd800
-        } else {
-            '[' as u16
-        };
-        for scalar in [user, prefix, ']' as u16, '-' as u16] {
-            control.extend_from_slice(&scalar.to_le_bytes());
-        }
-        if matches!(mutation, Mutation::BadPageNumberLength) {
-            control.pop();
-        }
-        push_record(&mut body, TAG_CTRL_HEADER, 1, &control);
-    }
-    if has_new_number {
-        let count = if matches!(mutation, Mutation::DuplicateNewNumber) {
+        let count = if matches!(
+            mutation,
+            Mutation::DuplicatePageNumber | Mutation::IdempotentPageNumberControls
+        ) {
             2
         } else {
             1
         };
-        for _ in 0..count {
+        for index in 0..count {
+            let mut control = Vec::with_capacity(16);
+            control.extend_from_slice(&CTRL_PAGE_NUM_POS.to_le_bytes());
+            let attr = if matches!(mutation, Mutation::BadPageNumberAttr) {
+                1u32 << 16
+            } else if matches!(mutation, Mutation::BadPageNumberPosition) {
+                11u32 << 8
+            } else if matches!(mutation, Mutation::BadPageNumberFormat) {
+                6
+            } else if matches!(mutation, Mutation::DuplicatePageNumber) && index == 1 {
+                4u32 << 8
+            } else {
+                5u32 << 8
+            };
+            control.extend_from_slice(&attr.to_le_bytes());
+            let user = if matches!(mutation, Mutation::BadPageNumberUserSymbol) {
+                '*' as u16
+            } else {
+                0
+            };
+            let prefix = if matches!(mutation, Mutation::BadPageNumberSurrogate) {
+                0xd800
+            } else {
+                '[' as u16
+            };
+            for scalar in [user, prefix, ']' as u16, '-' as u16] {
+                control.extend_from_slice(&scalar.to_le_bytes());
+            }
+            if matches!(mutation, Mutation::BadPageNumberLength) {
+                control.pop();
+            }
+            push_record(&mut body, TAG_CTRL_HEADER, 1, &control);
+        }
+    }
+    if has_new_number {
+        let count = if matches!(
+            mutation,
+            Mutation::DuplicateNewNumber | Mutation::IdempotentPageNumberControls
+        ) {
+            2
+        } else {
+            1
+        };
+        for index in 0..count {
             let mut control = Vec::with_capacity(10);
             control.extend_from_slice(&CTRL_NEW_NUMBER.to_le_bytes());
             let attr = if matches!(mutation, Mutation::BadNewNumberAttr) {
@@ -662,6 +800,8 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
             control.extend_from_slice(&attr.to_le_bytes());
             let start = if matches!(mutation, Mutation::BadNewNumberZero) {
                 0u16
+            } else if matches!(mutation, Mutation::DuplicateNewNumber) {
+                7 + index as u16
             } else {
                 7
             };
@@ -671,6 +811,96 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
             }
             push_record(&mut body, TAG_CTRL_HEADER, 1, &control);
         }
+    }
+    if has_table {
+        let mut common = Vec::with_capacity(46);
+        common.extend_from_slice(&CTRL_TABLE.to_le_bytes());
+        let attr = if matches!(mutation, Mutation::BadTableAttr) {
+            0x082a_2310u32
+        } else {
+            0x082a_2311
+        };
+        common.extend_from_slice(&attr.to_le_bytes());
+        common.extend_from_slice(&0u32.to_le_bytes());
+        common.extend_from_slice(&0u32.to_le_bytes());
+        common.extend_from_slice(&20_000u32.to_le_bytes());
+        common.extend_from_slice(&2_000u32.to_le_bytes());
+        common.extend_from_slice(&0i32.to_le_bytes());
+        for margin in [100i16, 100, 50, 50] {
+            common.extend_from_slice(&margin.to_le_bytes());
+        }
+        common.extend_from_slice(&1u32.to_le_bytes());
+        common.extend_from_slice(&0i32.to_le_bytes());
+        common.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut body, TAG_CTRL_HEADER, 1, &common);
+
+        let mut table = Vec::with_capacity(24);
+        table.extend_from_slice(&0x0400_0006u32.to_le_bytes());
+        table.extend_from_slice(&1u16.to_le_bytes());
+        table.extend_from_slice(&1u16.to_le_bytes());
+        table.extend_from_slice(&0u16.to_le_bytes());
+        for padding in [510i16, 510, 141, 141] {
+            table.extend_from_slice(&padding.to_le_bytes());
+        }
+        table.extend_from_slice(&1u16.to_le_bytes());
+        table.extend_from_slice(&1u16.to_le_bytes());
+        table.extend_from_slice(&0u16.to_le_bytes());
+        push_record(
+            &mut body,
+            if matches!(mutation, Mutation::BadTableTopology) {
+                TAG_PAGE_DEF
+            } else {
+                TAG_TABLE
+            },
+            2,
+            &table,
+        );
+
+        let mut cell = Vec::with_capacity(47);
+        cell.extend_from_slice(&1u16.to_le_bytes());
+        cell.extend_from_slice(
+            &if matches!(mutation, Mutation::BadTableCellAlign) {
+                0u32
+            } else {
+                0x0020_0000
+            }
+            .to_le_bytes(),
+        );
+        cell.extend_from_slice(&0x0500u16.to_le_bytes());
+        for value in [0u16, 0, 1, 1] {
+            cell.extend_from_slice(&value.to_le_bytes());
+        }
+        cell.extend_from_slice(
+            &if matches!(mutation, Mutation::BadTableGeometry) {
+                19_999u32
+            } else {
+                20_000
+            }
+            .to_le_bytes(),
+        );
+        cell.extend_from_slice(&2_000u32.to_le_bytes());
+        for padding in [510i16, 510, 141, 141] {
+            cell.extend_from_slice(&padding.to_le_bytes());
+        }
+        cell.extend_from_slice(
+            &if matches!(mutation, Mutation::BadTableBorderRef) {
+                2u16
+            } else {
+                1
+            }
+            .to_le_bytes(),
+        );
+        cell.extend([0; 13]);
+        push_record(&mut body, TAG_LIST_HEADER, 2, &cell);
+
+        push_para_header_at_level(&mut body, 2, 2, 0, 1, 0, 0);
+        push_record(
+            &mut body,
+            TAG_PARA_TEXT,
+            3,
+            &utf16_bytes(&['A' as u16, 0x000d]),
+        );
+        push_record(&mut body, TAG_PARA_CHAR_SHAPE, 3, &shape_refs(&[(0, 0)]));
     }
 
     if matches!(mutation, Mutation::MidSectionSeparator) {
@@ -798,6 +1028,26 @@ fn push_para_header_with_break(
     line_segments: u16,
     break_type: u8,
 ) {
+    push_para_header_at_level(
+        out,
+        0,
+        char_count,
+        control_mask,
+        char_shapes,
+        line_segments,
+        break_type,
+    );
+}
+
+fn push_para_header_at_level(
+    out: &mut Vec<u8>,
+    level: u16,
+    char_count: u32,
+    control_mask: u32,
+    char_shapes: u16,
+    line_segments: u16,
+    break_type: u8,
+) {
     let mut data = Vec::with_capacity(22);
     data.extend_from_slice(&char_count.to_le_bytes());
     data.extend_from_slice(&control_mask.to_le_bytes());
@@ -808,7 +1058,23 @@ fn push_para_header_with_break(
     data.extend_from_slice(&0u16.to_le_bytes());
     data.extend_from_slice(&line_segments.to_le_bytes());
     data.extend_from_slice(&0u32.to_le_bytes());
-    push_record(out, TAG_PARA_HEADER, 0, &data);
+    push_record(out, TAG_PARA_HEADER, level, &data);
+}
+
+fn solid_border_fill() -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(40);
+    bytes.extend_from_slice(&0u16.to_le_bytes());
+    for _ in 0..4 {
+        bytes.push(1); // solid
+        bytes.push(0); // thinnest owned width
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+    }
+    bytes.push(0); // no diagonal
+    bytes.push(0);
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.extend_from_slice(&0u32.to_le_bytes()); // no fill
+    bytes.extend_from_slice(&0u32.to_le_bytes()); // required zero tail
+    bytes
 }
 
 fn face_name(value: &str) -> Vec<u8> {

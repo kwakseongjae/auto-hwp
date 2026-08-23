@@ -19,12 +19,15 @@ const TAG_PARA_TEXT: u16 = 0x43;
 const TAG_PARA_CHAR_SHAPE: u16 = 0x44;
 const TAG_PARA_LINE_SEG: u16 = 0x45;
 const TAG_CTRL_HEADER: u16 = 0x47;
+const TAG_LIST_HEADER: u16 = 0x48;
 const TAG_PAGE_DEF: u16 = 0x49;
+const TAG_TABLE: u16 = 0x4d;
 
 const CTRL_SECTION_DEF: u32 = u32::from_be_bytes(*b"secd");
 const CTRL_COLUMN_DEF: u32 = u32::from_be_bytes(*b"cold");
 const CTRL_PAGE_NUM_POS: u32 = u32::from_be_bytes(*b"pgnp");
 const CTRL_NEW_NUMBER: u32 = u32::from_be_bytes(*b"nwno");
+const CTRL_TABLE: u32 = u32::from_be_bytes(*b"tbl ");
 
 #[derive(Clone, Copy, Debug, Default)]
 struct IdMappings {
@@ -979,7 +982,7 @@ fn parse_section(
             .get(ordinal + 1)
             .copied()
             .unwrap_or(stream.records.len());
-        let parsed = parse_paragraph(
+        let mut parsed = parse_paragraph(
             stream,
             &stream.records[start..end],
             doc,
@@ -1036,7 +1039,22 @@ fn parse_section(
             separator_zone_seen |= has_separator;
             has_active_columns = true;
         }
+        if !parsed.tables.is_empty() {
+            if parsed.paragraph.runs.iter().any(|run| {
+                run.content
+                    .iter()
+                    .any(|inline| matches!(inline, Inline::Text(text) if !text.is_empty()))
+            }) {
+                return Err(malformed(
+                    &stream.records[start],
+                    Some(section),
+                    "owned inline table host also contains visible text",
+                ));
+            }
+            parsed.paragraph.is_table_anchor = true;
+        }
         blocks.push(Block::Paragraph(parsed.paragraph));
+        blocks.extend(parsed.tables.into_iter().map(Block::Table));
     }
     Ok(Section {
         blocks,
@@ -1054,6 +1072,7 @@ struct ParsedParagraph {
     paragraph: Paragraph,
     page: Option<PageSetup>,
     page_number: Option<PageNumberDecoration>,
+    tables: Vec<Table>,
 }
 
 fn parse_paragraph(
@@ -1066,6 +1085,10 @@ fn parse_paragraph(
     _current_page: Option<&PageSetup>,
 ) -> Result<ParsedParagraph> {
     let header = records[0];
+    let base_level = header.level;
+    if header.tag != TAG_PARA_HEADER {
+        return Err(unsupported(header, section));
+    }
     let header_data = data(stream, &header);
     if header_data.len() < 22 {
         return Err(malformed(
@@ -1133,7 +1156,7 @@ fn parse_paragraph(
     let mut cursor = 1usize;
     while cursor < records.len() {
         let record = records[cursor];
-        if record.level != 1 {
+        if record.level != base_level + 1 {
             return Err(unsupported(record, section));
         }
         match record.tag {
@@ -1150,13 +1173,17 @@ fn parse_paragraph(
                 };
                 if !matches!(
                     control_id,
-                    CTRL_SECTION_DEF | CTRL_COLUMN_DEF | CTRL_PAGE_NUM_POS | CTRL_NEW_NUMBER
+                    CTRL_SECTION_DEF
+                        | CTRL_COLUMN_DEF
+                        | CTRL_PAGE_NUM_POS
+                        | CTRL_NEW_NUMBER
+                        | CTRL_TABLE
                 ) {
                     return Err(unsupported(record, section));
                 }
                 let start = cursor;
                 cursor += 1;
-                while cursor < records.len() && records[cursor].level > 1 {
+                while cursor < records.len() && records[cursor].level > base_level + 1 {
                     cursor += 1;
                 }
                 structural_controls.push((&records[start], &records[start + 1..cursor]));
@@ -1203,6 +1230,7 @@ fn parse_paragraph(
     let mut raw_columns = None;
     let mut page_number = None;
     let mut page_number_start = None;
+    let mut tables = Vec::new();
     for ((marker_offset, marker_id), (control, children)) in
         decoded.structural_controls.iter().zip(structural_controls)
     {
@@ -1223,7 +1251,9 @@ fn parse_paragraph(
                         "section definition marker is duplicate or not at paragraph start",
                     ));
                 }
-                page = Some(parse_section_control(stream, control, children, section)?);
+                page = Some(parse_section_control(
+                    stream, control, children, doc, section,
+                )?);
             }
             CTRL_COLUMN_DEF => {
                 if !children.is_empty() || raw_columns.is_some() {
@@ -1240,31 +1270,58 @@ fn parse_paragraph(
                 )?);
             }
             CTRL_PAGE_NUM_POS => {
-                if !children.is_empty() || page_number.is_some() {
+                if !children.is_empty() {
                     return Err(malformed(
                         control,
                         Some(section),
-                        "page-number position has children or is duplicated",
+                        "page-number position has children",
                     ));
                 }
-                page_number = Some(parse_page_number_control(
-                    data(stream, control),
-                    control,
-                    section,
-                )?);
+                let candidate = parse_page_number_control(data(stream, control), control, section)?;
+                match page_number {
+                    Some(existing) if existing == candidate => {}
+                    Some(_) => {
+                        return Err(malformed(
+                            control,
+                            Some(section),
+                            "page-number positions are duplicated with conflicting semantics",
+                        ));
+                    }
+                    None => page_number = Some(candidate),
+                }
             }
             CTRL_NEW_NUMBER => {
-                if !children.is_empty() || page_number_start.is_some() {
+                if !children.is_empty() {
                     return Err(malformed(
                         control,
                         Some(section),
-                        "page-number restart has children or is duplicated",
+                        "page-number restart has children",
                     ));
                 }
-                page_number_start = Some((
-                    parse_new_number_control(data(stream, control), control, section)?,
-                    *control,
-                ));
+                let candidate = parse_new_number_control(data(stream, control), control, section)?;
+                match page_number_start {
+                    Some((existing, _)) if existing == candidate => {}
+                    Some(_) => {
+                        return Err(malformed(
+                            control,
+                            Some(section),
+                            "page-number restarts are duplicated with conflicting semantics",
+                        ));
+                    }
+                    None => page_number_start = Some((candidate, *control)),
+                }
+            }
+            CTRL_TABLE => {
+                if tables.len() == 1 {
+                    return Err(malformed(
+                        control,
+                        Some(section),
+                        "owned paragraph contains duplicate tables",
+                    ));
+                }
+                tables.push(parse_inline_table(
+                    stream, control, children, doc, para_usage, styles, section,
+                )?);
             }
             _ => unreachable!("structural control id filtered above"),
         }
@@ -1354,6 +1411,7 @@ fn parse_paragraph(
         paragraph,
         page,
         page_number,
+        tables,
     })
 }
 
@@ -1490,6 +1548,240 @@ fn parse_new_number_control(
         .ok_or_else(|| malformed(record, Some(section), "page-number restart must be nonzero"))
 }
 
+/// Own the first bounded binary-table slice seen in the public corpus: an inline, treat-as-character
+/// 1×1 table with one cell paragraph. The strict framing is intentional. A larger or floating table
+/// must fail closed until its positioning, split, caption, merge, and cell-list semantics are typed.
+#[allow(clippy::too_many_arguments)]
+fn parse_inline_table(
+    stream: &StreamProbe,
+    control: &Record,
+    children: &[Record],
+    doc: &SemanticDoc,
+    para_usage: &[ParaUsage],
+    styles: &[StyleDef],
+    section: usize,
+) -> Result<Table> {
+    let common = data(stream, control);
+    if common.len() != 46 || read_u32(common, 0) != Some(CTRL_TABLE) {
+        return Err(malformed(
+            control,
+            Some(section),
+            "inline table CTRL_HEADER is not the owned 46-byte record",
+        ));
+    }
+    // Observed public slice: treat-as-char, para-relative inline placement, top-and-bottom wrapping,
+    // and the known storage high bit. Exact matching prevents a floating object from being flattened.
+    if read_u32(common, 4) != Some(0x082a_2311) {
+        return Err(malformed(
+            control,
+            Some(section),
+            "inline table common-object attributes are not owned",
+        ));
+    }
+    if read_u32(common, 8) != Some(0) || read_u32(common, 12) != Some(0) {
+        return Err(malformed(
+            control,
+            Some(section),
+            "inline table offsets must be zero",
+        ));
+    }
+    let width = read_u32(common, 16).expect("exact length checked");
+    let height = read_u32(common, 20).expect("exact length checked");
+    const MAX_OBJECT_HWPUNIT: u32 = 10_000_000;
+    if width == 0 || height == 0 || width > MAX_OBJECT_HWPUNIT || height > MAX_OBJECT_HWPUNIT {
+        return Err(malformed(
+            control,
+            Some(section),
+            "inline table dimensions are not positive and bounded",
+        ));
+    }
+    let margin = |at: usize| i16::from_le_bytes(common[at..at + 2].try_into().unwrap());
+    let margins = [margin(28), margin(30), margin(32), margin(34)];
+    if margins.iter().any(|value| *value < 0) {
+        return Err(malformed(
+            control,
+            Some(section),
+            "inline table outer margins must be nonnegative",
+        ));
+    }
+    if read_i32(common, 40) != Some(0) || read_u16(common, 44) != Some(0) {
+        return Err(malformed(
+            control,
+            Some(section),
+            "inline table page-break prevention or description is not owned",
+        ));
+    }
+    if children.len() < 3
+        || children[0].tag != TAG_TABLE
+        || children[1].tag != TAG_LIST_HEADER
+        || children[2].tag != TAG_PARA_HEADER
+        || children[0].level != control.level + 1
+        || children[1].level != control.level + 1
+        || children[2].level != control.level + 1
+    {
+        return Err(malformed(
+            control,
+            Some(section),
+            "inline table child topology is not exactly TABLE, LIST_HEADER, paragraph",
+        ));
+    }
+
+    let table_record = children[0];
+    let table_bytes = data(stream, &table_record);
+    if table_bytes.len() != 24 {
+        return Err(unsupported(table_record, section));
+    }
+    if read_u32(table_bytes, 0) != Some(0x0400_0006)
+        || read_u16(table_bytes, 4) != Some(1)
+        || read_u16(table_bytes, 6) != Some(1)
+        || read_u16(table_bytes, 8) != Some(0)
+        || read_u16(table_bytes, 18) != Some(1)
+        || read_u16(table_bytes, 22) != Some(0)
+    {
+        return Err(malformed(
+            &table_record,
+            Some(section),
+            "TABLE attributes or 1x1 topology are not owned",
+        ));
+    }
+    let table_padding = [10usize, 12, 14, 16]
+        .map(|at| i16::from_le_bytes(table_bytes[at..at + 2].try_into().unwrap()));
+    if table_padding.iter().any(|value| *value < 0) {
+        return Err(malformed(
+            &table_record,
+            Some(section),
+            "TABLE padding must be nonnegative",
+        ));
+    }
+    let table_border_id = read_u16(table_bytes, 20).expect("exact length checked");
+    let table_fill = table_border(doc, table_border_id, &table_record, section, "table")?;
+
+    let list_record = children[1];
+    let list_bytes = data(stream, &list_record);
+    if list_bytes.len() != 47 {
+        return Err(malformed(
+            &list_record,
+            Some(section),
+            "owned cell LIST_HEADER is not exactly 47 bytes",
+        ));
+    }
+    if read_u16(list_bytes, 0) != Some(1)
+        || read_u32(list_bytes, 2) != Some(0x0020_0000)
+        || read_u16(list_bytes, 6) != Some(0x0500)
+        || read_u16(list_bytes, 8) != Some(0)
+        || read_u16(list_bytes, 10) != Some(0)
+        || read_u16(list_bytes, 12) != Some(1)
+        || read_u16(list_bytes, 14) != Some(1)
+        || read_u32(list_bytes, 16) != Some(width)
+        || read_u32(list_bytes, 20) != Some(height)
+    {
+        return Err(malformed(
+            &list_record,
+            Some(section),
+            "cell LIST_HEADER attributes or geometry are not the owned centered 1x1 slice",
+        ));
+    }
+    let cell_padding = [24usize, 26, 28, 30]
+        .map(|at| i16::from_le_bytes(list_bytes[at..at + 2].try_into().unwrap()));
+    if cell_padding.iter().any(|value| *value < 0) {
+        return Err(malformed(
+            &list_record,
+            Some(section),
+            "cell stored padding must be nonnegative",
+        ));
+    }
+    // The pinned parser can only materialize a field name from an extension of at least 18 bytes.
+    // This exact 13-byte public storage tail carries no typed field in that oracle and is discarded;
+    // any other length remains unsupported instead of becoming passthrough executable/content data.
+    debug_assert_eq!(list_bytes[34..].len(), 13);
+    let cell_border_id = read_u16(list_bytes, 32).expect("exact length checked");
+    let cell_fill = table_border(doc, cell_border_id, &list_record, section, "table cell")?;
+
+    let parsed_cell = parse_paragraph(
+        stream,
+        &children[2..],
+        doc,
+        para_usage,
+        styles,
+        section,
+        None,
+    )?;
+    if parsed_cell.page.is_some()
+        || parsed_cell.page_number.is_some()
+        || !parsed_cell.tables.is_empty()
+        || parsed_cell.paragraph.page_break_before
+        || parsed_cell.paragraph.column_break_before
+        || parsed_cell.paragraph.column_layout_before.is_some()
+    {
+        return Err(malformed(
+            &children[2],
+            Some(section),
+            "owned table cell paragraph contains nested layout controls",
+        ));
+    }
+
+    let cell = Cell {
+        row: 0,
+        col: 0,
+        row_span: 1,
+        col_span: 1,
+        blocks: vec![Block::Paragraph(parsed_cell.paragraph)],
+        active: true,
+        shade_color: cell_fill.shade,
+        has_border: cell_fill.has_border,
+        borders: cell_fill.borders,
+        diagonal: cell_fill.diagonal,
+        // width_ref low bit is off: stored cell padding is inactive and table padding is inherited.
+        padding: None,
+        width: Some(width as HwpUnit),
+        ..Cell::default()
+    };
+    Ok(Table {
+        rows: 1,
+        cols: 1,
+        cells: vec![cell],
+        col_widths: vec![width as HwpUnit],
+        row_heights: vec![height as HwpUnit],
+        outer_margin_left: margins[0] as HwpUnit,
+        outer_margin_right: margins[1] as HwpUnit,
+        outer_margin_top: margins[2] as HwpUnit,
+        outer_margin_bottom: margins[3] as HwpUnit,
+        padding: Some(table_padding.map(|value| value as HwpUnit)),
+        borders: table_fill.borders,
+        provenance: Provenance {
+            source: Some(SourceFormat::Hwp5),
+            raw: None,
+        },
+        ..Table::default()
+    })
+}
+
+fn table_border<'a>(
+    doc: &'a SemanticDoc,
+    id: u16,
+    record: &Record,
+    section: usize,
+    kind: &'static str,
+) -> Result<&'a BorderFillDef> {
+    if id == 0 {
+        return Err(malformed(
+            record,
+            Some(section),
+            "owned table border-fill reference must be nonzero",
+        ));
+    }
+    doc.header_pools
+        .border
+        .get(&(id as u64))
+        .ok_or(Error::InvalidReference {
+            kind,
+            index: id as usize,
+            pool_len: doc.header_pools.border.len(),
+            section: Some(section),
+            offset: record.head,
+        })
+}
+
 fn validate_para_usage(
     usage: &ParaUsage,
     decoded: &DecodedText,
@@ -1542,24 +1834,145 @@ fn parse_section_control(
     stream: &StreamProbe,
     control: &Record,
     children: &[Record],
+    doc: &SemanticDoc,
     section: usize,
 ) -> Result<PageSetup> {
     let bytes = data(stream, control);
-    if bytes.len() != 28 {
+    if !matches!(bytes.len(), 28 | 47) {
         return Err(malformed(
             control,
             Some(section),
-            "section CTRL_HEADER is not the owned 28-byte base record",
+            "section CTRL_HEADER is not the owned base or 19-byte extension record",
         ));
     }
     if read_u32(bytes, 0) != Some(CTRL_SECTION_DEF) {
         return Err(unsupported(*control, section));
     }
-    if children.len() != 1 || children[0].tag != TAG_PAGE_DEF || children[0].level != 2 {
+    if bytes.len() == 47 {
+        // HWP 5.0.1.5+: representative language (0 = application default), followed by the
+        // pinned-rhwp/Hancom master-page tail marker and 15 reserved zero bytes.
+        if read_u16(bytes, 28) != Some(0)
+            || !matches!(read_u16(bytes, 30), Some(0 | 1))
+            || bytes[32..].iter().any(|byte| *byte != 0)
+        {
+            return Err(malformed(
+                control,
+                Some(section),
+                "section CTRL_HEADER extension semantics are not owned",
+            ));
+        }
+    }
+    if children.is_empty() || children[0].tag != TAG_PAGE_DEF || children[0].level != 2 {
         let offending = children.first().copied().unwrap_or(*control);
         return Err(unsupported(offending, section));
     }
+    match children.len() {
+        1 => {}
+        6 if children[1..3]
+            .iter()
+            .all(|record| record.tag == 0x4a && record.level == 2)
+            && children[3..]
+                .iter()
+                .all(|record| record.tag == 0x4b && record.level == 2) =>
+        {
+            for record in &children[1..3] {
+                validate_dormant_note_shape(stream, record, section)?;
+            }
+            for record in &children[3..] {
+                validate_inactive_page_border(stream, record, doc, section)?;
+            }
+        }
+        _ => return Err(unsupported(children[1], section)),
+    }
     parse_page_def(data(stream, &children[0]), &children[0], section)
+}
+
+/// Note-shape records are safe to ignore only in this parser's current lane because no foot/endnote
+/// control is accepted. Validate the complete known 28-byte scalar/line framing so malformed dormant
+/// metadata cannot ride along; a future note-control slice must promote these values into shared IR.
+fn validate_dormant_note_shape(
+    stream: &StreamProbe,
+    record: &Record,
+    section: usize,
+) -> Result<()> {
+    let bytes = data(stream, record);
+    if bytes.len() != 28 {
+        return Err(malformed(
+            record,
+            Some(section),
+            "dormant note shape is not exactly 28 bytes",
+        ));
+    }
+    for at in [4usize, 6, 8] {
+        let scalar = read_u16(bytes, at).expect("exact length checked");
+        if (0xd800..=0xdfff).contains(&scalar) {
+            return Err(malformed(
+                record,
+                Some(section),
+                "dormant note shape contains a surrogate code unit",
+            ));
+        }
+    }
+    if read_u16(bytes, 10) == Some(0) || border_line_style(bytes[22]).is_none() || bytes[23] > 15 {
+        return Err(malformed(
+            record,
+            Some(section),
+            "dormant note shape has invalid numbering or separator line framing",
+        ));
+    }
+    Ok(())
+}
+
+/// Page-border records are discarded only when their referenced borderFill is visually inert.
+/// Any visible edge, shade, or diagonal remains unsupported rather than silently disappearing.
+fn validate_inactive_page_border(
+    stream: &StreamProbe,
+    record: &Record,
+    doc: &SemanticDoc,
+    section: usize,
+) -> Result<()> {
+    let bytes = data(stream, record);
+    if bytes.len() != 14 {
+        return Err(malformed(
+            record,
+            Some(section),
+            "page border/fill is not exactly 14 bytes",
+        ));
+    }
+    let attr = read_u32(bytes, 0).expect("exact length checked");
+    // Spec revision 1.3 owns bits 0..4. The public Hancom-authored slice carries one exact legacy
+    // storage word whose low five bits decode normally; pinned-rhwp confirms its referenced fill is
+    // fully inert. Keep that word as a narrow allowlist instead of accepting arbitrary high bits.
+    if attr & !0x1f != 0 && !matches!(attr, 0x0978_f9c1 | 0x271b_0b81) {
+        return Err(malformed(
+            record,
+            Some(section),
+            "page border/fill has unknown attribute bits",
+        ));
+    }
+    let border_id = read_u16(bytes, 12).expect("exact length checked");
+    if border_id == 0 {
+        return Ok(());
+    }
+    let border =
+        doc.header_pools
+            .border
+            .get(&(border_id as u64))
+            .ok_or(Error::InvalidReference {
+                kind: "page border fill",
+                index: border_id as usize,
+                pool_len: doc.header_pools.border.len(),
+                section: Some(section),
+                offset: record.head,
+            })?;
+    if border.has_border || border.shade.is_some() || border.diagonal.is_some() {
+        return Err(malformed(
+            record,
+            Some(section),
+            "active page border or fill semantics are not supported",
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -2088,15 +2501,15 @@ fn decode_text(bytes: &[u8], record: Record, section: usize) -> Result<DecodedTe
                 inline_control_mask |= 1 << 0x0009;
                 cursor += 8;
             }
-            0x0002 | 0x0015 => {
+            0x0002 | 0x000b | 0x0015 => {
                 if cursor + 8 > units.len() {
                     return Err(malformed(
                         &record,
                         Some(section),
-                        if unit == 0x0002 {
-                            "PARA_TEXT section control is truncated"
-                        } else {
-                            "PARA_TEXT page-number control is truncated"
+                        match unit {
+                            0x0002 => "PARA_TEXT section control is truncated",
+                            0x000b => "PARA_TEXT table control is truncated",
+                            _ => "PARA_TEXT page-number control is truncated",
                         },
                     ));
                 }
@@ -2104,10 +2517,10 @@ fn decode_text(bytes: &[u8], record: Record, section: usize) -> Result<DecodedTe
                     return Err(malformed(
                         &record,
                         Some(section),
-                        if unit == 0x0002 {
-                            "PARA_TEXT section control framing is invalid"
-                        } else {
-                            "PARA_TEXT page-number control framing is invalid"
+                        match unit {
+                            0x0002 => "PARA_TEXT section control framing is invalid",
+                            0x000b => "PARA_TEXT table control framing is invalid",
+                            _ => "PARA_TEXT page-number control framing is invalid",
                         },
                     ));
                 }
@@ -2116,6 +2529,7 @@ fn decode_text(bytes: &[u8], record: Record, section: usize) -> Result<DecodedTe
                 let control_id = u32::from_le_bytes([lo[0], lo[1], hi[0], hi[1]]);
                 let owned = match unit {
                     0x0002 => matches!(control_id, CTRL_SECTION_DEF | CTRL_COLUMN_DEF),
+                    0x000b => control_id == CTRL_TABLE,
                     0x0015 => matches!(control_id, CTRL_PAGE_NUM_POS | CTRL_NEW_NUMBER),
                     _ => false,
                 };
