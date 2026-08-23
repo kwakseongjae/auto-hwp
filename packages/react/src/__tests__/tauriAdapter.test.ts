@@ -12,6 +12,9 @@ import type { Intent } from "../types";
 function mockInvoke(returns: Record<string, unknown>) {
   const calls: { cmd: string; args?: Record<string, unknown> }[] = [];
   const invoke = vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
+    if (cmd === "desktop_session_status") {
+      return returns[cmd] ?? { documentId: "001122", revision: 0, savedRevision: 0, dirty: false, hasSource: true };
+    }
     calls.push({ cmd, args });
     return returns[cmd];
   });
@@ -34,6 +37,15 @@ describe("TauriAdapter — open / lifecycle (issue 043)", () => {
     const { invoke } = mockInvoke({});
     const a = new TauriAdapter({ invoke });
     await expect(a.open(new Uint8Array())).rejects.toThrow(/resolveOpenPath/);
+  });
+
+  it("openDocument override keeps opaque recovery ids out of the shared path bridge", async () => {
+    const { invoke } = mockInvoke({});
+    const openDocument = vi.fn(async () => ({ format: "HWPX", editable: true, sections: 1, pages: 3 }));
+    const a = new TauriAdapter({ invoke, openDocument });
+    const bytes = new TextEncoder().encode("recovery:opaque-id:2");
+    await expect(a.open(bytes, "복구본.hwpx")).resolves.toMatchObject({ pages: 3 });
+    expect(openDocument).toHaveBeenCalledWith(bytes, "복구본.hwpx");
   });
 
   it("dispose() is a no-op (the desktop session outlives the component)", () => {
@@ -186,6 +198,27 @@ describe("TauriAdapter — run reads + edit intents (issue 043)", () => {
     await expect(a.applyIntent({ intent: "SetParagraphText", section: 0, block: 3, text: "x" })).rejects.toThrow(
       /structural content/,
     );
+  });
+
+  it("mutation callback follows the Rust revision and ignores read-only Intent queries", async () => {
+    let revision = 0;
+    const invoke = vi.fn(async (cmd: string) => {
+      if (cmd === "desktop_session_status") {
+        return { documentId: "001122", revision, savedRevision: 0, dirty: revision > 0, hasSource: true };
+      }
+      if (cmd === "apply_intent_json") return { kind: "ok" };
+      if (cmd === "open_doc") return { pages: 1, editable: true, format: "HWPX" };
+      throw new Error(`unexpected ${cmd}`);
+    }) as <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
+    const a = new TauriAdapter({ invoke, resolveOpenPath: async () => "/tmp/a.hwpx" });
+    const onMutation = vi.fn();
+    a.onMutation = onMutation;
+    await a.open(new Uint8Array([1]), "a.hwpx");
+    await a.applyIntent({ intent: "DocProfile" });
+    expect(onMutation).not.toHaveBeenCalled();
+    revision = 1;
+    await a.applyIntent({ intent: "SetParagraphText", section: 0, block: 0, text: "edited" });
+    expect(onMutation).toHaveBeenCalledTimes(1);
   });
 
   it("undo / redo resolve true and call the undo/redo commands", async () => {

@@ -17,6 +17,14 @@ type TauriHitDto = {
  *  hard @tauri-apps dependency — the host passes its own `invoke`. */
 export type Invoke = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
+export type DesktopSessionStatus = {
+  documentId: string | null;
+  revision: number;
+  savedRevision: number;
+  dirty: boolean;
+  hasSource: boolean;
+};
+
 export interface TauriAdapterOptions {
   /** The Tauri `invoke`. */
   invoke: Invoke;
@@ -24,6 +32,9 @@ export interface TauriAdapterOptions {
    *  this to bridge the web `open(bytes)` seam — e.g. write the bytes to a temp file and return the
    *  path. Reference impl: the real app migration (issue 044) wires this to a Tauri command. */
   resolveOpenPath?: (bytes: Uint8Array, name?: string) => Promise<string>;
+  /** Optional host-owned open dispatcher. Desktop recovery uses this to open app-data HWPX bytes by
+   *  opaque recovery id without manufacturing a source path or exposing it to the shared workspace. */
+  openDocument?: (bytes: Uint8Array, name?: string) => Promise<OpenResult>;
 }
 
 /// TauriAdapter — the DESKTOP backend for the shared @auto-hwp/react workspace (issue 043 convergence
@@ -46,19 +57,61 @@ export interface TauriAdapterOptions {
 export class TauriAdapter implements EngineAdapter {
   private invoke: Invoke;
   private resolveOpenPath?: (bytes: Uint8Array, name?: string) => Promise<string>;
+  private openDocument?: (bytes: Uint8Array, name?: string) => Promise<OpenResult>;
+  private lastRevision: number | null = null;
+  /** Fires only when the authoritative Rust revision changed, never for read-only Intent queries. */
+  onMutation: (() => void) | null = null;
+  /** Host chrome observes open/save/dirty transitions without putting paths in React state. */
+  onSessionStatus: ((status: DesktopSessionStatus) => void) | null = null;
 
   constructor(opts: TauriAdapterOptions) {
     this.invoke = opts.invoke;
     this.resolveOpenPath = opts.resolveOpenPath;
+    this.openDocument = opts.openDocument;
   }
 
   async open(bytes: Uint8Array, name?: string): Promise<OpenResult> {
+    if (this.openDocument) {
+      const opened = await this.openDocument(bytes, name);
+      await this.syncRevision(false);
+      return opened;
+    }
     if (!this.resolveOpenPath) {
       throw new Error("TauriAdapter.open needs `resolveOpenPath` (the app opens by path, not bytes)");
     }
     const path = await this.resolveOpenPath(bytes, name);
     const r = await this.invoke<{ pages: number; editable: boolean; format: string }>("open_doc", { path });
+    await this.syncRevision(false);
     return { format: r.format, editable: r.editable, sections: 1, pages: r.pages };
+  }
+
+  async sessionStatus(): Promise<DesktopSessionStatus> {
+    return this.invoke<DesktopSessionStatus>("desktop_session_status");
+  }
+
+  /** Reconcile mutations performed outside this adapter (for example the embedded MCP control
+   *  server's `doc-changed` event) through the same authoritative revision comparison. */
+  refreshSessionStatus(): Promise<DesktopSessionStatus> {
+    return this.syncRevision(true);
+  }
+
+  private async syncRevision(notify: boolean): Promise<DesktopSessionStatus> {
+    const status = await this.sessionStatus();
+    const changed = this.lastRevision != null && status.revision !== this.lastRevision;
+    this.lastRevision = status.revision;
+    try {
+      this.onSessionStatus?.(status);
+    } catch {
+      /* host observer errors never turn a successful engine operation into a failure */
+    }
+    if (notify && changed) {
+      try {
+        this.onMutation?.();
+      } catch {
+        /* same observer isolation as WasmAdapter */
+      }
+    }
+    return status;
   }
 
   pageCount(): Promise<number> {
@@ -236,14 +289,16 @@ export class TauriAdapter implements EngineAdapter {
   /** Replace (issue 045) — the desktop `replace_text` command, ONE undo unit (all=false → the first match
    *  in the doc). Its `ReplaceResult` ({replaced, pages}) matches editor-core's `ReplaceResult` verbatim.
    *  Same run-preserving op-bus core as the wasm `Replace` Intent (040 교훈: no plain-text collapse). */
-  replace(query: string, replacement: string, opts: FindReplaceOptions): Promise<ReplaceResult> {
-    return this.invoke<ReplaceResult>("replace_text", {
+  async replace(query: string, replacement: string, opts: FindReplaceOptions): Promise<ReplaceResult> {
+    const result = await this.invoke<ReplaceResult>("replace_text", {
       query,
       replacement,
       caseSensitive: !!opts.caseSensitive,
       wholeWord: !!opts.wholeWord,
       all: !!opts.all,
     });
+    await this.syncRevision(true);
+    return result;
   }
 
   /** Apply one schema-v0 Intent through the desktop's GENERAL `apply_intent_json` command (issue 043) —
@@ -251,17 +306,21 @@ export class TauriAdapter implements EngineAdapter {
    *  covered (SetTableCellRuns / SetCellRangeFmt / ApplyContent / TableInsertRows / …), so no Intent
    *  silently no-ops; the command returns the `{kind, …}` Outcome (wasm-identical) and rejects with the
    *  typed op-bus error verbatim on a refused edit. */
-  applyIntent(intent: Intent): Promise<Outcome> {
-    return this.invoke<Outcome>("apply_intent_json", { intent });
+  async applyIntent(intent: Intent): Promise<Outcome> {
+    const outcome = await this.invoke<Outcome>("apply_intent_json", { intent });
+    await this.syncRevision(true);
+    return outcome;
   }
 
   async undo(): Promise<boolean> {
     await this.invoke<number>("undo");
+    await this.syncRevision(true);
     return true;
   }
 
   async redo(): Promise<boolean> {
     await this.invoke<number>("redo");
+    await this.syncRevision(true);
     return true;
   }
 

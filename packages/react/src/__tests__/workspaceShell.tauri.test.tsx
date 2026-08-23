@@ -34,6 +34,7 @@ function makeInvoke(calls: string[]) {
     const table = <R,>(v: R) => v as unknown as T;
     switch (cmd) {
       case "open_doc": return table({ pages: 1, editable: true, format: "hwpx" });
+      case "desktop_session_status": return table({ documentId: "001122", revision: 0, savedRevision: 0, dirty: false, hasSource: true });
       case "own_page_count": return table(1);
       case "render_own_page": return table(SVG);
       case "own_hit_test": return table(null);

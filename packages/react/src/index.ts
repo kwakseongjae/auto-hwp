@@ -168,7 +168,7 @@ export type { CodedError, RecoverySnapshot, RecoverySnapshotSource, RecoveryInfo
 // Web Worker (parse/layout/export/toHwpx off the main thread); the adapter surface is unchanged.
 export type { WasmAdapterOptions, WasmAdapterWorkerOptions } from "./WasmAdapter";
 export { TauriAdapter } from "./TauriAdapter";
-export type { TauriAdapterOptions, Invoke } from "./TauriAdapter";
+export type { DesktopSessionStatus, TauriAdapterOptions, Invoke } from "./TauriAdapter";
 
 // Headless core (issue 026) — the React binding hook + a re-export of @auto-hwp/editor-core so a host can
 // build a fully custom UI over the SAME core (no @auto-hwp/react components required). The heavy editing

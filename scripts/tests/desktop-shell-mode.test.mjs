@@ -124,7 +124,14 @@ test("desktop file-open requests converge on one bounded, private, single-instan
   assert.match(shell, /listen\("desktop-open-request"/);
   assert.match(shell, /invoke<string\[\]>\("take_open_requests"\)/);
   assert.match(shell, /role="dialog"/);
-  assert.match(shell, /resolveReplacement\(false\)/);
-  assert.match(shell, /resolveReplacement\(true\)/);
+  assert.match(shell, /sessionStatus\.dirty/);
+  assert.match(shell, />취소<\/button>/);
+  assert.match(shell, />버리기<\/button>/);
+  assert.match(shell, />저장<\/button>/);
+  assert.match(shell, /write_recovery_snapshot/);
+  assert.match(shell, /window\.clearTimeout\(snapshotTimer\.current\)/, "save must cancel a queued recovery write");
+  assert.match(shell, /list_recovery_snapshots/);
+  assert.match(shell, /!recoveryScanComplete/, "cold-open must wait for the recovery scan");
+  assert.match(shell, /EXTERNAL_SOURCE_CHANGED/);
   assert.doesNotMatch(shell, /window\.confirm\s*\(/);
 });
