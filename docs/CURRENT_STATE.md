@@ -3,7 +3,7 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
-- 갱신: 2026-08-24 · Codex(sol) — **PR #172 병합 · #170 strict 10×2 TABLE 재개**.
+- 갱신: 2026-08-24 · Codex(sol) — **PR #173 병합 · #174 multi-table 경계 착수**.
   자체 HWP5 파서가 exact `tbl ` marker/common-object/TABLE/LIST_HEADER/cell paragraph를 검증해
   treat-as-character 1×1 표를 source-neutral `Table`/`Cell` IR로 내린다. 셀/개체 geometry,
   inherited padding, CENTER alignment, border-fill refs를 range/shape 검증하고 visible host text,
@@ -53,9 +53,36 @@
   로컬 서버에서 분리 재실행해 Chromium **85 pass/3 intentional skip/0 fail**이며, 이후 강화한
   distinct terminal char-shape/extra-cell bound도 focused HWP5·clippy 재검증 green. 임시 dependency
   link 제거, production route·rhwp·HWPX parser/serializer·generated asset diff 0.
-  검증 완료 commit `25010cb`을 push하고 PR #173(`Closes #170`, `Refs #94 #168 #171 #172`)을
-  게시했다. **다음:** exact-head issue-link/build-test/licenses·mergeability·review/comment 추적→전부
-  green이면 자율 병합·branch 정리→다음 multi-table boundary child 분류.
+  검증 완료 PR #173은 exact head `864d985`에서 issue-link **5s**·build-test **9m01s**·licenses
+  **2m45s** green, CLEAN/MERGEABLE, review/general/inline 댓글 0을 확인하고 main `cfb42b3d`로
+  squash 병합했다. #170 close·원격 branch 정리 후 #94에 근거를 동기화했고, 중복 검색 0건인
+  다음 content-free 경계를 #174로 등록했다. exact latest main의
+  `codex/issue-174-hwp5-multi-table`에서 marker/header 1:1 순서, disjoint child ownership,
+  anchor→ordered Table lowering을 먼저 분류하며 표현 불가능한 inline semantics면 fail-closed와 최소
+  prerequisite를 유지한다. 커뮤니티 감사상 새 외부 PR·스팸·보안 신호는 없고 기존 외부 #50은
+  Proposal·provider 보안 child에 이미 연결돼 있다. **다음:** #174 content-free 분류→합성 hostile
+  fixture→focused/quick/full; production route·HWPX·rhwp 불변. 1차 분류 결과 host는 visible char 0,
+  table marker 2개(offset 0/8)와 동일 순서의 disjoint CTRL_HEADER 2개를 가진다. 두 번째 표는 exact
+  common-object/no-split 1×1/1 active cell/4 paragraphs이며 object·cell geometry가 일치한다. 기존
+  strict 1×1과의 유일한 의미 차이는 LIST_HEADER `0x0501`: pinned rhwp와 공식 bitfield상 low bit는
+  cell-own inner margin이고 shared `Cell.padding`으로 정확히 표현 가능하다. rhwp lift도 동일 control
+  순서대로 anchor 뒤 `Block::Table`을 1:1 emit한다. 따라서 #174는 exact own-margin bit + ordered
+  multi-table lowering만 소유하고 보호/header/form 등 다른 low bit와 mixed/nested/floating은 거부한다.
+  구현은 host당 exact 최대 2개, marker/header count·ID·순서와 disjoint record-level child 귀속을 기존
+  strict framing으로 검증한 뒤 ordered `Table`을 emit한다. 1×1 `0x0501`만 stored padding을
+  `Cell.padding`으로 내리고 10×2 또는 protect/header/form low bit는 거부한다. 합성 positive는
+  10×2→1×1 순서/단일 anchor/4 paragraphs/own padding을 잠갔고 missing·extra marker, visible text,
+  unknown cell bit, stray child, third control을 정확한 정적 오류로 거부한다. 공개 경계는 multi-table
+  CTRL `5926..5976`를 넘어 다음 TABLE `0x4d/7561..7605`의 unowned attr/framing으로 전진했다.
+  HWP5 **55 tests**, clippy `-D warnings`, wasm32 green; route/rhwp/HWPX/generated diff 0.
+  quick/full의 Rust workspace, typeset **100+4**, PDF visual **51**, canonical **8/18/24·98.9%+**,
+  public corpus **84**, oracle **82**, HWPX, wasm(7,810,657B), licenses, JS build·crosscheck·i18n,
+  Vitest **1,018**이 green이다. full의 샌드박스 포트 EPERM만 전용 `PW_PORT=31974`에서 분리해
+  Chromium **85 pass/3 intentional skip/0 fail**을 확인했다. 첫 quick은 코드가 아닌 완료 worktree
+  build cache 누적으로 ENOSPC였고, 병합 완료 #164/#166/#168/#170/#171의 재생성 가능한 Cargo
+  cache만 `cargo clean`해 약 69GiB를 회수한 뒤 같은 quick이 전부 green. 임시 dependency link 제거,
+  production route·rhwp·HWPX parser/serializer·generated asset diff 0.
+  **다음:** final security/diff→commit/push/PR #174→필수 CI/자율 병합→TABLE 7561 child 분류.
 
 - 갱신: 2026-08-23 · Codex(sol) — **#161 PR #163 게시**.
   검증 완료 commit `c751833`을 push하고 PR #163(`Closes #161`, `Refs #94 #160`)을 만들었다.

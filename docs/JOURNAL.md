@@ -5,6 +5,26 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #174 full green / PR ready
+- max-2 ordered tables + own padding, HWP5 55; next boundary TABLE 7561..7605.
+- quick/full·Vitest 1,018·Chromium 85/3 green; route/rhwp/HWPX/generated diff 0.
+- merged-worktree build cache만 정리(약 69GiB); 다음 commit/push/PR→CI/merge.
+
+## 2026-08-24 (Codex sol) · #174 focused green
+- exact max-2 anchor→ordered tables + 1×1 cell-own padding; hostile 6축 fail-closed.
+- HWP5 55/clippy/wasm32 green; public boundary 5926..5976→TABLE 7561..7605.
+- route/rhwp/HWPX/generated diff 0. 다음 quick→full→PR/CI/merge.
+
+## 2026-08-24 (Codex sol) · #174 content-free classified
+- host visible 0, table markers 0/8 ↔ disjoint CTRL 2; second = strict 1×1/4 paras.
+- only new semantic is width-ref `0x0501` low-bit cell-own padding; shared Cell.padding represents it.
+- pinned rhwp lift confirms anchor→ordered Table 1:1. 다음 strict synthetic/hostile→public boundary.
+
+## 2026-08-24 (Codex sol) · PR #173 merged → #174 started
+- #173 required CI/CLEAN/MERGEABLE·댓글 0 후 main `cfb42b3d` 병합; #170 close·branch 정리.
+- #94 동기화, 중복 없는 multi-table boundary #174 생성, exact-main worktree 시작.
+- 다음 content-free marker/header/child-order 분류→strict synthetic tests; route/rhwp 불변.
+
 ## 2026-08-24 (Codex sol) · #170 PR #173 게시
 - strict 10×2 TABLE commit `25010cb`을 push하고 PR #173(`Closes #170`) 생성.
 - route/rhwp/HWPX/generated 불변과 quick/full/Vitest 1,007/Chromium 85·3을 명시.

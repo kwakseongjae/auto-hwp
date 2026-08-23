@@ -1312,11 +1312,11 @@ fn parse_paragraph(
                 }
             }
             CTRL_TABLE => {
-                if !tables.is_empty() {
+                if tables.len() == 2 {
                     return Err(unsupported_reason(
                         *control,
                         section,
-                        "paragraphs with multiple table controls are not yet owned",
+                        "paragraphs with more than two table controls are not owned",
                     ));
                 }
                 tables.push(parse_inline_table(
@@ -1548,11 +1548,13 @@ fn parse_new_number_control(
         .ok_or_else(|| malformed(record, Some(section), "page-number restart must be nonzero"))
 }
 
-/// Own the two bounded binary-table slices seen at the public first-party boundary: the original
-/// inline 1×1 table and the following inline 10×2 table. Both use the same exact common-object and
-/// no-split TABLE attributes. The larger slice has 17 active cells (three horizontal merges), one to
-/// five paragraphs per cell, and no zones/captions/nested layout. Anything outside that narrow,
-/// source-neutral shape remains fail-closed rather than being approximated.
+/// Own the bounded binary-table slices seen at the public first-party boundary: strict inline 1×1
+/// and 10×2 tables. They use the same exact common-object and no-split TABLE attributes. The larger
+/// slice has 17 active cells (three horizontal merges), one to five paragraphs per cell, and no
+/// zones/captions/nested layout. A 1×1 cell may use the exact observed cell-own inner-margin bit;
+/// protection/header/form bits remain unsupported. Multiple controls in one text-empty host are
+/// emitted in marker/header order by `parse_paragraph`. Anything outside this narrow, source-neutral
+/// shape remains fail-closed rather than being approximated.
 #[allow(clippy::too_many_arguments)]
 fn parse_inline_table(
     stream: &StreamProbe,
@@ -1731,9 +1733,12 @@ fn parse_inline_table(
             ));
         }
         let paragraph_count = read_u16(list_bytes, 0).expect("exact length checked") as usize;
+        let width_ref = read_u16(list_bytes, 6).expect("exact length checked");
+        let owned_width_ref = matches!(width_ref, 0x0000 | 0x0100 | 0x0500)
+            || (width_ref == 0x0501 && (rows, cols) == (1, 1));
         if !(1..=5).contains(&paragraph_count)
             || read_u32(list_bytes, 2) != Some(0x0020_0000)
-            || !matches!(read_u16(list_bytes, 6), Some(0x0000 | 0x0100 | 0x0500))
+            || !owned_width_ref
         {
             return Err(malformed(
                 &list_record,
@@ -1835,8 +1840,9 @@ fn parse_inline_table(
             has_border: cell_fill.has_border,
             borders: cell_fill.borders,
             diagonal: cell_fill.diagonal,
-            // All observed width-reference words have the apply-inner-margin low bit off.
-            padding: None,
+            // The exact observed low bit is HWP's apply-inner-margin flag. Other cell extension
+            // bits (protect/header/form) were rejected with the width-reference word above.
+            padding: (width_ref == 0x0501).then_some(cell_padding.map(|value| value as HwpUnit)),
             width: Some(cell_width as HwpUnit),
             ..Cell::default()
         });

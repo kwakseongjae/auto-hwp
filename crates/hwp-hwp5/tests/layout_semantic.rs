@@ -77,6 +77,13 @@ enum Mutation {
     LargeTableBadRowHeight,
     LargeTableBadWidthRef,
     LargeTableBadCellOrder,
+    MultiTable,
+    MultiTableMissingMarker,
+    MultiTableExtraMarker,
+    MultiTableVisibleText,
+    MultiTableBadCellFlag,
+    MultiTableStrayChild,
+    MultiTableThirdControl,
 }
 
 #[test]
@@ -584,6 +591,73 @@ fn strict_ten_by_two_table_rejects_hostile_counts_spans_geometry_and_width_refs(
     }
 }
 
+#[test]
+fn owns_two_ordered_tables_in_one_text_empty_host_and_cell_own_padding() {
+    let doc = OwnHwp5Parser::new()
+        .parse(&fixture(Mutation::MultiTable))
+        .expect("bounded multi-table host parses");
+    let [Block::Paragraph(anchor), Block::Table(first), Block::Table(second), Block::Paragraph(_)] =
+        doc.sections[0].blocks.as_slice()
+    else {
+        panic!("host must lower to one anchor followed by both tables in source order")
+    };
+    assert!(anchor.is_table_anchor);
+    assert_eq!((first.rows, first.cols, first.cells.len()), (10, 2, 17));
+    assert_eq!((second.rows, second.cols, second.cells.len()), (1, 1, 1));
+    assert_eq!(second.cells[0].blocks.len(), 4);
+    assert_eq!(second.cells[0].padding, Some([283, 283, 141, 141]));
+    assert_eq!(second.cells[0].width, Some(20_000));
+}
+
+#[test]
+fn multi_table_host_rejects_marker_mismatch_visible_text_unknown_cell_bits_and_strays() {
+    for mutation in [
+        Mutation::MultiTableMissingMarker,
+        Mutation::MultiTableExtraMarker,
+    ] {
+        assert!(matches!(
+            OwnHwp5Parser::new().parse(&fixture(mutation)),
+            Err(Error::MalformedRecord {
+                tag: TAG_PARA_HEADER,
+                reason: "PARA_TEXT structural markers do not match CTRL_HEADER records",
+                ..
+            })
+        ));
+    }
+    assert!(matches!(
+        OwnHwp5Parser::new().parse(&fixture(Mutation::MultiTableVisibleText)),
+        Err(Error::MalformedRecord {
+            tag: TAG_PARA_HEADER,
+            reason: "owned inline table host also contains visible text",
+            ..
+        })
+    ));
+    assert!(matches!(
+        OwnHwp5Parser::new().parse(&fixture(Mutation::MultiTableBadCellFlag)),
+        Err(Error::MalformedRecord {
+            tag: TAG_LIST_HEADER,
+            reason: "cell LIST_HEADER count, direction, alignment, or width reference is not owned",
+            ..
+        })
+    ));
+    assert!(matches!(
+        OwnHwp5Parser::new().parse(&fixture(Mutation::MultiTableStrayChild)),
+        Err(Error::MalformedRecord {
+            tag: TAG_PAGE_DEF,
+            reason: "owned TABLE has more active cells than its bounded topology",
+            ..
+        })
+    ));
+    assert!(matches!(
+        OwnHwp5Parser::new().parse(&fixture(Mutation::MultiTableThirdControl)),
+        Err(Error::UnsupportedBodyRecord {
+            tag: TAG_CTRL_HEADER,
+            reason: "paragraphs with more than two table controls are not owned",
+            ..
+        })
+    ));
+}
+
 fn fixture(mutation: Mutation) -> Vec<u8> {
     let mut header = vec![0; 256];
     header[..HWP_SIGNATURE.len()].copy_from_slice(HWP_SIGNATURE);
@@ -606,6 +680,23 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
             | Mutation::LargeTableBadRowHeight
             | Mutation::LargeTableBadWidthRef
             | Mutation::LargeTableBadCellOrder
+            | Mutation::MultiTable
+            | Mutation::MultiTableMissingMarker
+            | Mutation::MultiTableExtraMarker
+            | Mutation::MultiTableVisibleText
+            | Mutation::MultiTableBadCellFlag
+            | Mutation::MultiTableStrayChild
+            | Mutation::MultiTableThirdControl
+    );
+    let has_multi_table = matches!(
+        mutation,
+        Mutation::MultiTable
+            | Mutation::MultiTableMissingMarker
+            | Mutation::MultiTableExtraMarker
+            | Mutation::MultiTableVisibleText
+            | Mutation::MultiTableBadCellFlag
+            | Mutation::MultiTableStrayChild
+            | Mutation::MultiTableThirdControl
     );
     let has_large_table = matches!(
         mutation,
@@ -618,6 +709,13 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
             | Mutation::LargeTableBadRowHeight
             | Mutation::LargeTableBadWidthRef
             | Mutation::LargeTableBadCellOrder
+            | Mutation::MultiTable
+            | Mutation::MultiTableMissingMarker
+            | Mutation::MultiTableExtraMarker
+            | Mutation::MultiTableVisibleText
+            | Mutation::MultiTableBadCellFlag
+            | Mutation::MultiTableStrayChild
+            | Mutation::MultiTableThirdControl
     );
     let mut doc_info = Vec::new();
     let mut properties = vec![0; 26];
@@ -730,6 +828,18 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
     }
     if has_table {
         section_text.extend(extended_control(0x000b, CTRL_TABLE));
+        if has_multi_table && !matches!(mutation, Mutation::MultiTableMissingMarker) {
+            section_text.extend(extended_control(0x000b, CTRL_TABLE));
+        }
+        if matches!(mutation, Mutation::MultiTableExtraMarker) {
+            section_text.extend(extended_control(0x000b, CTRL_TABLE));
+        }
+        if matches!(mutation, Mutation::MultiTableThirdControl) {
+            section_text.extend(extended_control(0x000b, CTRL_TABLE));
+        }
+    }
+    if matches!(mutation, Mutation::MultiTableVisibleText) {
+        section_text.push('X' as u16);
     }
     if matches!(mutation, Mutation::BadControlFrame) {
         section_text[7] = 0;
@@ -1078,6 +1188,80 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
                         &[(0, 0)]
                     }),
                 );
+            }
+        }
+    }
+
+    if has_multi_table {
+        let additional_tables = if matches!(mutation, Mutation::MultiTableThirdControl) {
+            2
+        } else {
+            1
+        };
+        for _ in 0..additional_tables {
+            let mut common = Vec::with_capacity(46);
+            common.extend_from_slice(&CTRL_TABLE.to_le_bytes());
+            common.extend_from_slice(&0x082a_2311u32.to_le_bytes());
+            common.extend_from_slice(&0u32.to_le_bytes());
+            common.extend_from_slice(&0u32.to_le_bytes());
+            common.extend_from_slice(&20_000u32.to_le_bytes());
+            common.extend_from_slice(&2_000u32.to_le_bytes());
+            common.extend_from_slice(&0i32.to_le_bytes());
+            for margin in [100i16, 100, 50, 50] {
+                common.extend_from_slice(&margin.to_le_bytes());
+            }
+            common.extend_from_slice(&1u32.to_le_bytes());
+            common.extend_from_slice(&0i32.to_le_bytes());
+            common.extend_from_slice(&0u16.to_le_bytes());
+            push_record(&mut body, TAG_CTRL_HEADER, 1, &common);
+
+            let mut table = Vec::with_capacity(24);
+            table.extend_from_slice(&0x0400_0006u32.to_le_bytes());
+            table.extend_from_slice(&1u16.to_le_bytes());
+            table.extend_from_slice(&1u16.to_le_bytes());
+            table.extend_from_slice(&0u16.to_le_bytes());
+            for padding in [510i16, 510, 141, 141] {
+                table.extend_from_slice(&padding.to_le_bytes());
+            }
+            table.extend_from_slice(&1u16.to_le_bytes());
+            table.extend_from_slice(&1u16.to_le_bytes());
+            table.extend_from_slice(&0u16.to_le_bytes());
+            push_record(&mut body, TAG_TABLE, 2, &table);
+
+            let mut cell = Vec::with_capacity(47);
+            cell.extend_from_slice(&4u16.to_le_bytes());
+            cell.extend_from_slice(&0x0020_0000u32.to_le_bytes());
+            cell.extend_from_slice(
+                &if matches!(mutation, Mutation::MultiTableBadCellFlag) {
+                    0x0503u16
+                } else {
+                    0x0501
+                }
+                .to_le_bytes(),
+            );
+            for value in [0u16, 0, 1, 1] {
+                cell.extend_from_slice(&value.to_le_bytes());
+            }
+            cell.extend_from_slice(&20_000u32.to_le_bytes());
+            cell.extend_from_slice(&2_000u32.to_le_bytes());
+            for padding in [283i16, 283, 141, 141] {
+                cell.extend_from_slice(&padding.to_le_bytes());
+            }
+            cell.extend_from_slice(&1u16.to_le_bytes());
+            cell.extend([0; 13]);
+            push_record(&mut body, TAG_LIST_HEADER, 2, &cell);
+            for _ in 0..4 {
+                push_para_header_at_level(&mut body, 2, 2, 0, 1, 0, 0);
+                push_record(
+                    &mut body,
+                    TAG_PARA_TEXT,
+                    3,
+                    &utf16_bytes(&['A' as u16, 0x000d]),
+                );
+                push_record(&mut body, TAG_PARA_CHAR_SHAPE, 3, &shape_refs(&[(0, 0)]));
+            }
+            if matches!(mutation, Mutation::MultiTableStrayChild) {
+                push_record(&mut body, TAG_PAGE_DEF, 2, &[0; 4]);
             }
         }
     }
