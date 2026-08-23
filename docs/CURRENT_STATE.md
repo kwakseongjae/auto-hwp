@@ -3,6 +3,13 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-23 · Codex(sol) — **#154 PR #155 게시**.
+  검증 완료 commit `a6acbca`를 push하고 PR #155(`Closes #154`, `Refs #94 #87`)를 만들었다.
+  PR 본문에 text-only candidate/no production cutover, unsupported fail-closed, no rhwp fallback,
+  full Rust/조판/PDF/WASM/licenses·Vitest 1,018·Chromium 85 pass/3 skip·generated/submodule diff 0을
+  명시했다. **다음:** 이 상태 commit push → issue-link/build-test/licenses, mergeability, review/comment를
+  추적해 green이면 자율 병합·원격 브랜치 정리 → #94 다음 first-party slice를 issue-first로 착수한다.
+
 - 갱신: 2026-08-23 · Codex(sol) — **#154 구현·전체 검증 완료 · PR 준비**.
   final security review에서 run 경계 처리를 O(runs×chars)에서 binary-search+linear slice로 바꿔
   적대적 대형 입력의 CPU 증폭을 막고, unsupported body 오류를 정확한 tag·section·raw byte span으로

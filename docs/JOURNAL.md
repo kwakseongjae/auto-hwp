@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-23 (Codex sol) · #154 PR #155
+- commit `a6acbca` push, PR #155(`Closes #154`, `Refs #94 #87`) 게시.
+- 다음 required CI/review 감시→green 자율 병합→#94 next first-party slice.
+
 ## 2026-08-23 (Codex sol) · #154 full green
 - run 경계 CPU 증폭 제거+unsupported raw span; final focused/quick 재통과.
 - full Rust/PDF/8·18·24/WASM/licenses + Vitest 1,018 + Chromium 85 pass/3 skip.
