@@ -5,6 +5,25 @@
 
 ---
 
+## 2026-08-23 (Codex sol) · #156 PR #157
+- commit `01b637c` push, PR #157(`Closes #156`, `Refs #94 #87`) 게시.
+- 다음 required CI/review 감시→green 자율 병합→#94 next first-party child.
+
+## 2026-08-23 (Codex sol) · #156 full green
+- secd/PAGE_DEF + blank source metrics final diff/security review; production/rhwp 불변.
+- focused 27 + quick 전체 + full Rust/PDF/wasm/JS/Vitest 1,018 green.
+- Chromium 85 pass/3 intentional skip/0 fail. 다음 commit/PR/CI/병합→#94 next child.
+
+## 2026-08-23 (Codex sol) · #156 source-layout focused green
+- strict secd/PAGE_DEF + blank-only PARA_LINE_SEG metrics; unsupported constructs fail closed.
+- 합성 정상/적대 11건 포함 hwp-hwp5 27 tests, clippy, wasm32 green.
+- 다음 security review→quick/full→commit/PR/CI/병합; production/rhwp 불변.
+
+## 2026-08-23 (Codex sol) · PR #155 병합 → #156 착수
+- #155 required CI/CLEAN·댓글 0 확인 후 main `c16e231` 병합; #154 close.
+- #94 완료 근거 동기화, child #156 생성 후 latest-main worktree 시작.
+- 다음 strict PAGE_DEF + source line metrics; production route/rhwp 불변.
+
 ## 2026-08-23 (Codex sol) · #154 PR #155
 - commit `a6acbca` push, PR #155(`Closes #154`, `Refs #94 #87`) 게시.
 - 다음 required CI/review 감시→green 자율 병합→#94 next first-party slice.

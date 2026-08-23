@@ -17,6 +17,11 @@ const TAG_MEMO_SHAPE: u16 = 0x5c;
 const TAG_PARA_HEADER: u16 = 0x42;
 const TAG_PARA_TEXT: u16 = 0x43;
 const TAG_PARA_CHAR_SHAPE: u16 = 0x44;
+const TAG_PARA_LINE_SEG: u16 = 0x45;
+const TAG_CTRL_HEADER: u16 = 0x47;
+const TAG_PAGE_DEF: u16 = 0x49;
+
+const CTRL_SECTION_DEF: u32 = u32::from_be_bytes(*b"secd");
 
 #[derive(Clone, Copy, Debug, Default)]
 struct IdMappings {
@@ -359,6 +364,7 @@ fn parse_para_shape(bytes: &[u8], record: &Record) -> Result<ParaShape> {
 fn parse_section(stream: &StreamProbe, doc: &SemanticDoc) -> Result<Section> {
     let section = stream.section.expect("caller selected section streams");
     let mut blocks = Vec::new();
+    let mut page = None;
     let starts: Vec<usize> = stream
         .records
         .iter()
@@ -384,15 +390,21 @@ fn parse_section(stream: &StreamProbe, doc: &SemanticDoc) -> Result<Section> {
             .get(ordinal + 1)
             .copied()
             .unwrap_or(stream.records.len());
-        blocks.push(Block::Paragraph(parse_paragraph(
-            stream,
-            &stream.records[start..end],
-            doc,
-            section,
-        )?));
+        let parsed = parse_paragraph(stream, &stream.records[start..end], doc, section)?;
+        if let Some(parsed_page) = parsed.page {
+            if ordinal != 0 || page.replace(parsed_page).is_some() {
+                return Err(malformed(
+                    &stream.records[start],
+                    Some(section),
+                    "section definition may occur only once and only in the first paragraph",
+                ));
+            }
+        }
+        blocks.push(Block::Paragraph(parsed.paragraph));
     }
     Ok(Section {
         blocks,
+        page: page.unwrap_or_default(),
         provenance: Provenance {
             source: Some(SourceFormat::Hwp5),
             raw: None,
@@ -401,12 +413,17 @@ fn parse_section(stream: &StreamProbe, doc: &SemanticDoc) -> Result<Section> {
     })
 }
 
+struct ParsedParagraph {
+    paragraph: Paragraph,
+    page: Option<PageSetup>,
+}
+
 fn parse_paragraph(
     stream: &StreamProbe,
     records: &[Record],
     doc: &SemanticDoc,
     section: usize,
-) -> Result<Paragraph> {
+) -> Result<ParsedParagraph> {
     let header = records[0];
     let header_data = data(stream, &header);
     if header_data.len() < 22 {
@@ -424,11 +441,7 @@ fn parse_paragraph(
     let declared_char_shapes = read_u16(header_data, 12).expect("base length checked") as usize;
     let declared_range_tags = read_u16(header_data, 14).expect("base length checked");
     let declared_line_segments = read_u16(header_data, 16).expect("base length checked");
-    if style_id != 0
-        || break_type & !0x04 != 0
-        || declared_range_tags != 0
-        || declared_line_segments != 0
-    {
+    if style_id != 0 || break_type & !0x04 != 0 || declared_range_tags != 0 {
         return Err(unsupported(header, section));
     }
     if para_shape_id + 1 >= doc.para_shapes.len() {
@@ -443,15 +456,33 @@ fn parse_paragraph(
 
     let mut text_record = None;
     let mut shape_record = None;
-    for record in &records[1..] {
+    let mut line_record = None;
+    let mut section_control = None;
+    let mut cursor = 1usize;
+    while cursor < records.len() {
+        let record = records[cursor];
         if record.level != 1 {
-            return Err(unsupported(*record, section));
+            return Err(unsupported(record, section));
         }
         match record.tag {
-            TAG_PARA_TEXT if text_record.is_none() => text_record = Some(*record),
-            TAG_PARA_CHAR_SHAPE if shape_record.is_none() => shape_record = Some(*record),
-            _ => return Err(unsupported(*record, section)),
+            TAG_PARA_TEXT if text_record.is_none() => text_record = Some(record),
+            TAG_PARA_CHAR_SHAPE if shape_record.is_none() => shape_record = Some(record),
+            TAG_PARA_LINE_SEG if line_record.is_none() => line_record = Some(record),
+            TAG_CTRL_HEADER if section_control.is_none() => {
+                if read_u32(data(stream, &record), 0) != Some(CTRL_SECTION_DEF) {
+                    return Err(unsupported(record, section));
+                }
+                let start = cursor;
+                cursor += 1;
+                while cursor < records.len() && records[cursor].level > 1 {
+                    cursor += 1;
+                }
+                section_control = Some((&records[start], &records[start + 1..cursor]));
+                continue;
+            }
+            _ => return Err(unsupported(record, section)),
         }
+        cursor += 1;
     }
     let decoded = match text_record {
         Some(record) => decode_text(data(stream, &record), record, section)?,
@@ -478,6 +509,35 @@ fn parse_paragraph(
             "PARA_HEADER control mask differs from supported PARA_TEXT controls",
         ));
     }
+    let page = match (decoded.section_controls.as_slice(), section_control) {
+        ([], None) => None,
+        ([(marker_offset, marker_id)], Some((control, children)))
+            if *marker_id == CTRL_SECTION_DEF =>
+        {
+            if *marker_offset != 0 {
+                return Err(malformed(
+                    control,
+                    Some(section),
+                    "section definition marker is not at paragraph start",
+                ));
+            }
+            Some(parse_section_control(stream, control, children, section)?)
+        }
+        (_, Some((control, _))) => {
+            return Err(malformed(
+                control,
+                Some(section),
+                "section control header does not match PARA_TEXT marker",
+            ))
+        }
+        (_, None) => {
+            return Err(malformed(
+                &header,
+                Some(section),
+                "PARA_TEXT section marker has no section control header",
+            ))
+        }
+    };
     let refs = match shape_record {
         Some(record) => parse_shape_refs(data(stream, &record), record, section, doc)?,
         None => Vec::new(),
@@ -490,23 +550,247 @@ fn parse_paragraph(
         ));
     }
     let runs = make_runs(&decoded, &refs, shape_record, section)?;
-    Ok(Paragraph {
-        para_shape: para_shape_id + 1,
-        page_break_before: break_type & 0x04 != 0,
-        runs,
-        provenance: Provenance {
-            source: Some(SourceFormat::Hwp5),
-            raw: None,
+    let line_metrics = parse_line_metrics(
+        stream,
+        line_record,
+        declared_line_segments as usize,
+        &decoded,
+        &header,
+        section,
+    )?;
+    Ok(ParsedParagraph {
+        paragraph: Paragraph {
+            para_shape: para_shape_id + 1,
+            page_break_before: break_type & 0x04 != 0,
+            runs,
+            // Stored line boxes are only an authored-height hint for a true blank spacer.
+            // They never dictate line breaks for visible text or a control-host paragraph.
+            source_line_metrics: if decoded.chars.is_empty() && page.is_none() {
+                line_metrics
+            } else {
+                Vec::new()
+            },
+            provenance: Provenance {
+                source: Some(SourceFormat::Hwp5),
+                raw: None,
+            },
+            ..Paragraph::default()
         },
-        ..Paragraph::default()
+        page,
     })
+}
+
+fn parse_section_control(
+    stream: &StreamProbe,
+    control: &Record,
+    children: &[Record],
+    section: usize,
+) -> Result<PageSetup> {
+    let bytes = data(stream, control);
+    if bytes.len() != 28 {
+        return Err(malformed(
+            control,
+            Some(section),
+            "section CTRL_HEADER is not the owned 28-byte base record",
+        ));
+    }
+    if read_u32(bytes, 0) != Some(CTRL_SECTION_DEF) {
+        return Err(unsupported(*control, section));
+    }
+    if children.len() != 1 || children[0].tag != TAG_PAGE_DEF || children[0].level != 2 {
+        let offending = children.first().copied().unwrap_or(*control);
+        return Err(unsupported(offending, section));
+    }
+    parse_page_def(data(stream, &children[0]), &children[0], section)
+}
+
+fn parse_page_def(bytes: &[u8], record: &Record, section: usize) -> Result<PageSetup> {
+    if bytes.len() != 40 {
+        return Err(malformed(
+            record,
+            Some(section),
+            "PAGE_DEF is not exactly 40 bytes",
+        ));
+    }
+    let mut values = [0i32; 9];
+    for (index, value) in values.iter_mut().enumerate() {
+        let raw = read_u32(bytes, index * 4).expect("exact length checked");
+        *value = i32::try_from(raw).map_err(|_| {
+            malformed(
+                record,
+                Some(section),
+                "PAGE_DEF dimension exceeds signed HWPUNIT range",
+            )
+        })?;
+    }
+    let attr = read_u32(bytes, 36).expect("exact length checked");
+    if attr & !0x07 != 0 {
+        return Err(malformed(
+            record,
+            Some(section),
+            "PAGE_DEF has unsupported attribute bits",
+        ));
+    }
+    // Alternating inside/outside margins need a page-parity model that PageSetup does not yet own.
+    // Refuse instead of pretending duplex/top-flip are single-sided.
+    if (attr >> 1) & 0x03 != 0 {
+        return Err(malformed(
+            record,
+            Some(section),
+            "PAGE_DEF binding mode is not yet supported",
+        ));
+    }
+    let landscape = attr & 0x01 != 0;
+    let [width, height, margin_left, margin_right, margin_top, margin_bottom, margin_header, margin_footer, margin_gutter] =
+        values;
+    if width == 0 || height == 0 {
+        return Err(malformed(
+            record,
+            Some(section),
+            "PAGE_DEF paper dimensions are zero",
+        ));
+    }
+    let (display_width, display_height) = if landscape && width < height {
+        (height as i64, width as i64)
+    } else {
+        (width as i64, height as i64)
+    };
+    let horizontal = margin_left as i64 + margin_gutter as i64 + margin_right as i64;
+    let vertical =
+        margin_top as i64 + margin_header as i64 + margin_bottom as i64 + margin_footer as i64;
+    if horizontal >= display_width || vertical >= display_height {
+        return Err(malformed(
+            record,
+            Some(section),
+            "PAGE_DEF margins leave no positive body box",
+        ));
+    }
+    Ok(PageSetup {
+        width,
+        height,
+        margin_left,
+        margin_right,
+        margin_top,
+        margin_bottom,
+        margin_header,
+        margin_footer,
+        margin_gutter,
+        landscape,
+        columns: 1,
+    })
+}
+
+fn parse_line_metrics(
+    stream: &StreamProbe,
+    record: Option<Record>,
+    declared: usize,
+    decoded: &DecodedText,
+    header: &Record,
+    section: usize,
+) -> Result<Vec<SourceLineMetric>> {
+    let Some(record) = record else {
+        return if declared == 0 {
+            Ok(Vec::new())
+        } else {
+            Err(malformed(
+                header,
+                Some(section),
+                "PARA_HEADER declares line segments but PARA_LINE_SEG is missing",
+            ))
+        };
+    };
+    let bytes = data(stream, &record);
+    if !bytes.len().is_multiple_of(36) {
+        return Err(malformed(
+            &record,
+            Some(section),
+            "PARA_LINE_SEG length is not a multiple of 36",
+        ));
+    }
+    let actual = bytes.len() / 36;
+    if actual != declared {
+        return Err(malformed(
+            header,
+            Some(section),
+            "PARA_HEADER line-segment count differs from PARA_LINE_SEG",
+        ));
+    }
+    let mut prior_start = None;
+    let mut metrics = Vec::with_capacity(actual);
+    let mut all_zero_height = true;
+    for entry in bytes.chunks_exact(36) {
+        let text_start = read_u32(entry, 0).expect("chunk length checked");
+        if prior_start.is_some_and(|prior| prior > text_start) {
+            return Err(malformed(
+                &record,
+                Some(section),
+                "PARA_LINE_SEG text starts are not ordered",
+            ));
+        }
+        if !decoded.is_boundary(text_start) {
+            return Err(malformed(
+                &record,
+                Some(section),
+                "PARA_LINE_SEG text start is not a scalar/control boundary",
+            ));
+        }
+        prior_start = Some(text_start);
+        let vertical_pos = read_i32(entry, 4).expect("chunk length checked");
+        let height = read_i32(entry, 8).expect("chunk length checked");
+        let text_height = read_i32(entry, 12).expect("chunk length checked");
+        let baseline = read_i32(entry, 16).expect("chunk length checked");
+        let line_spacing = read_i32(entry, 20).expect("chunk length checked");
+        let segment_width = read_i32(entry, 28).expect("chunk length checked");
+        if [
+            vertical_pos,
+            height,
+            text_height,
+            baseline,
+            line_spacing,
+            segment_width,
+        ]
+        .into_iter()
+        .any(|value| value < 0)
+        {
+            return Err(malformed(
+                &record,
+                Some(section),
+                "PARA_LINE_SEG has a negative geometry field",
+            ));
+        }
+        all_zero_height &= height == 0 && text_height == 0;
+        metrics.push(SourceLineMetric {
+            height,
+            text_height,
+            baseline,
+        });
+    }
+    if all_zero_height {
+        metrics.clear();
+    }
+    Ok(metrics)
 }
 
 #[derive(Default)]
 struct DecodedText {
     chars: Vec<(u32, char)>,
+    section_controls: Vec<(u32, u32)>,
     stored_units: u32,
     inline_control_mask: u32,
+}
+
+impl DecodedText {
+    fn is_boundary(&self, offset: u32) -> bool {
+        offset == 0
+            || self
+                .chars
+                .binary_search_by_key(&offset, |(start, _)| *start)
+                .is_ok()
+            || self
+                .section_controls
+                .binary_search_by_key(&offset, |(start, _)| *start)
+                .is_ok()
+    }
 }
 
 fn decode_text(bytes: &[u8], record: Record, section: usize) -> Result<DecodedText> {
@@ -522,6 +806,7 @@ fn decode_text(bytes: &[u8], record: Record, section: usize) -> Result<DecodedTe
         .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
         .collect();
     let mut chars = Vec::new();
+    let mut section_controls = Vec::new();
     let mut cursor = 0usize;
     let mut ended = false;
     let mut inline_control_mask = 0u32;
@@ -551,6 +836,31 @@ fn decode_text(bytes: &[u8], record: Record, section: usize) -> Result<DecodedTe
                 }
                 chars.push((start, '\t'));
                 inline_control_mask |= 1 << 0x0009;
+                cursor += 8;
+            }
+            0x0002 => {
+                if cursor + 8 > units.len() {
+                    return Err(malformed(
+                        &record,
+                        Some(section),
+                        "PARA_TEXT section control is truncated",
+                    ));
+                }
+                if units[cursor + 7] != unit || units[cursor + 3..cursor + 7] != [0; 4] {
+                    return Err(malformed(
+                        &record,
+                        Some(section),
+                        "PARA_TEXT section control framing is invalid",
+                    ));
+                }
+                let lo = units[cursor + 1].to_le_bytes();
+                let hi = units[cursor + 2].to_le_bytes();
+                let control_id = u32::from_le_bytes([lo[0], lo[1], hi[0], hi[1]]);
+                if control_id != CTRL_SECTION_DEF {
+                    return Err(unsupported(record, section));
+                }
+                section_controls.push((start, control_id));
+                inline_control_mask |= 1 << 0x0002;
                 cursor += 8;
             }
             0x000a => {
@@ -620,6 +930,7 @@ fn decode_text(bytes: &[u8], record: Record, section: usize) -> Result<DecodedTe
     }
     Ok(DecodedText {
         chars,
+        section_controls,
         stored_units: units.len() as u32,
         inline_control_mask,
     })
@@ -697,37 +1008,38 @@ fn make_runs(
     } else {
         refs.to_vec()
     };
-    let mut boundaries = Vec::with_capacity(effective.len() + 1);
     for (start, _) in &effective {
-        let index = decoded
-            .chars
-            .binary_search_by_key(start, |(offset, _)| *offset)
-            .map_err(|_| {
-                malformed(
-                    &record.expect("styled boundaries have a source record"),
-                    Some(section),
-                    "PARA_CHAR_SHAPE boundary is not a scalar start",
-                )
-            })?;
-        boundaries.push(index);
-    }
-    boundaries.push(decoded.chars.len());
-    let mut runs = Vec::new();
-    for (index, (_, shape)) in effective.iter().copied().enumerate() {
-        let text: String = decoded.chars[boundaries[index]..boundaries[index + 1]]
-            .iter()
-            .map(|(_, value)| *value)
-            .collect();
-        if text.is_empty() {
+        if !decoded.is_boundary(*start) {
             return Err(malformed(
-                &record.expect("styled run has a source record"),
+                &record.expect("styled boundaries have a source record"),
                 Some(section),
-                "PARA_CHAR_SHAPE creates an empty run",
+                "PARA_CHAR_SHAPE boundary is not a scalar start",
             ));
         }
+    }
+    let mut runs = Vec::new();
+    let mut ref_index = 0usize;
+    let mut current_shape = effective[0].1;
+    let mut current_text = String::new();
+    for (offset, value) in &decoded.chars {
+        while ref_index + 1 < effective.len() && effective[ref_index + 1].0 <= *offset {
+            ref_index += 1;
+            let next_shape = effective[ref_index].1;
+            if next_shape != current_shape && !current_text.is_empty() {
+                runs.push(Run {
+                    char_shape: current_shape,
+                    content: vec![Inline::Text(std::mem::take(&mut current_text))],
+                    ..Run::default()
+                });
+            }
+            current_shape = next_shape;
+        }
+        current_text.push(*value);
+    }
+    if !current_text.is_empty() {
         runs.push(Run {
-            char_shape: shape,
-            content: vec![Inline::Text(text)],
+            char_shape: current_shape,
+            content: vec![Inline::Text(current_text)],
             ..Run::default()
         });
     }
