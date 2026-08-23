@@ -1830,8 +1830,13 @@ fn parse_inline_table(
     }
     let table_fill = table_border(doc, table_border_id, &table_record, section, "table")?;
 
+    let exact_six_by_four =
+        (common_attr, table_attr, rows, cols) == (0x082a_2311, 0x0400_0004, 6, 4);
+    let exact_seven_by_three =
+        (common_attr, table_attr, rows, cols) == (0x082a_2311, 0x0600_000c, 7, 3);
     let mut cells = Vec::with_capacity(expected_cells);
     let mut cell_heights = Vec::with_capacity(expected_cells);
+    let mut cell_width_refs = Vec::with_capacity(expected_cells);
     let mut nested_table_count = 0usize;
     let mut cursor = 1usize;
     while cursor < children.len() {
@@ -1867,10 +1872,6 @@ fn parse_inline_table(
                 "cell LIST_HEADER count, direction, alignment, or width reference is not owned",
             ));
         }
-        let exact_six_by_four =
-            (common_attr, table_attr, rows, cols) == (0x082a_2311, 0x0400_0004, 6, 4);
-        let exact_seven_by_three =
-            (common_attr, table_attr, rows, cols) == (0x082a_2311, 0x0600_000c, 7, 3);
         if (exact_six_by_four || exact_seven_by_three) && paragraph_count != 1 {
             return Err(malformed(
                 &list_record,
@@ -1906,13 +1907,10 @@ fn parse_inline_table(
             } else {
                 None
             };
-        let expected_six_by_four_width_ref =
-            exact_six_by_four.then_some(if row == 0 { 0x0100 } else { 0x0500 });
         let expected_seven_by_three_width_ref =
             exact_seven_by_three.then_some(if col == 2 { 0x0100 } else { 0x0500 });
         let expected_exact_width_ref = expected_one_by_two_width_ref
             .or(expected_eight_by_five_width_ref)
-            .or(expected_six_by_four_width_ref)
             .or(expected_seven_by_three_width_ref);
         let owned_width_ref = expected_exact_width_ref.map_or_else(
             || {
@@ -2083,6 +2081,7 @@ fn parse_inline_table(
             blocks.extend(parsed.tables.into_iter().map(Block::Table));
         }
         cell_heights.push(cell_height as HwpUnit);
+        cell_width_refs.push(width_ref);
         cells.push(Cell {
             row,
             col,
@@ -2107,6 +2106,20 @@ fn parse_inline_table(
             Some(section),
             "owned TABLE active-cell count differs from its exact topology",
         ));
+    }
+    if exact_six_by_four {
+        let row_header_then_body = cells
+            .iter()
+            .zip(&cell_width_refs)
+            .all(|(cell, width_ref)| *width_ref == if cell.row == 0 { 0x0100 } else { 0x0500 });
+        let all_body_reference = cell_width_refs.iter().all(|width_ref| *width_ref == 0x0500);
+        if !(row_header_then_body || all_body_reference) {
+            return Err(malformed(
+                &table_record,
+                Some(section),
+                "6x4 cell width-reference sequence differs from its exact owned variants",
+            ));
+        }
     }
     let expected_nested_tables = match (table_attr, rows, cols) {
         (0x0600_000c, 9, 8) => 1,

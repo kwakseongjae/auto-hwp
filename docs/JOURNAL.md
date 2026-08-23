@@ -5,6 +5,16 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #186 full green
+- quick/full green: PDF51, canonical gates, corpus84/oracle82, wasm 7,810,657B, Vitest1,018.
+- sandbox bind만 별도 Playwright로 검증: Chromium 85 passed/3 skipped/0 failed.
+- temporary links removed; final security/diff clean. 다음 commit/push/PR/CI/merge.
+
+## 2026-08-24 (Codex sol) · #186 focused green
+- two whole 6×4 width-ref patterns only; mixed patterns rejected both directions, output geometry same.
+- HWP5 66/fmt/workspace clippy/wasm32 green; next PARA_CHAR_SHAPE 44479..44499.
+- classifier/route/rhwp/HWPX/generated diff 0. 다음 quick→full→PR/CI/merge.
+
 ## 2026-08-24 (Codex sol) · #186 classified
 - #182와 geometry/topology exact 동일한 6×4; 차이는 width-ref 24개가 모두 `0x0500`.
 - 0x0100↔0x0500 차이는 active low cell bits 불변·raw roundtrip hint; 렌더 geometry 손실 없음.

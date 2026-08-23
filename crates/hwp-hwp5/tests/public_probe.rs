@@ -28,27 +28,27 @@ fn public_hwp5_has_bounded_content_free_record_provenance() {
 }
 
 #[test]
-fn explicit_own_parser_owns_bounded_seven_by_three_table_then_stops_content_free() {
+fn explicit_own_parser_owns_bounded_six_by_four_width_reference_variant_then_stops_content_free() {
     let probed = probe(&benchmark()).unwrap();
     let next = probed
         .streams
         .iter()
         .flat_map(|stream| &stream.records)
-        .find(|record| record.head == 40_865)
+        .find(|record| record.head == 44_479)
         .unwrap();
     assert_eq!(
         (next.tag, next.level, next.head, next.data, next.end, next.size,),
-        (0x48, 2, 40_865, 40_869, 40_916, 47)
+        (0x44, 1, 44_479, 44_483, 44_499, 16)
     );
     let error = OwnHwp5Parser::new().parse(&benchmark()).unwrap_err();
     eprintln!("{error:?}");
     assert!(matches!(
         error,
         Error::MalformedRecord {
-            tag: 0x48,
+            tag: 0x44,
             section: Some(0),
-            offset: 40865,
-            reason: "cell LIST_HEADER width reference differs from its exact owned topology",
+            offset: 44479,
+            reason: "empty paragraph has invalid PARA_CHAR_SHAPE boundaries",
             ..
         }
     ));
