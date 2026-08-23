@@ -990,6 +990,7 @@ fn parse_section(
             styles,
             section,
             page.as_ref(),
+            0,
         )?;
         if let Some(parsed_page) = parsed.page {
             if ordinal != 0 || page.replace(parsed_page).is_some() {
@@ -1075,6 +1076,7 @@ struct ParsedParagraph {
     tables: Vec<Table>,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn parse_paragraph(
     stream: &StreamProbe,
     records: &[Record],
@@ -1083,6 +1085,7 @@ fn parse_paragraph(
     styles: &[StyleDef],
     section: usize,
     _current_page: Option<&PageSetup>,
+    table_depth: usize,
 ) -> Result<ParsedParagraph> {
     let header = records[0];
     let base_level = header.level;
@@ -1320,7 +1323,14 @@ fn parse_paragraph(
                     ));
                 }
                 tables.push(parse_inline_table(
-                    stream, control, children, doc, para_usage, styles, section,
+                    stream,
+                    control,
+                    children,
+                    doc,
+                    para_usage,
+                    styles,
+                    section,
+                    table_depth,
                 )?);
             }
             _ => unreachable!("structural control id filtered above"),
@@ -1548,13 +1558,12 @@ fn parse_new_number_control(
         .ok_or_else(|| malformed(record, Some(section), "page-number restart must be nonzero"))
 }
 
-/// Own the bounded binary-table slices seen at the public first-party boundary: strict inline 1×1
-/// and 10×2 tables. They use the same exact common-object and no-split TABLE attributes. The larger
-/// slice has 17 active cells (three horizontal merges), one to five paragraphs per cell, and no
-/// zones/captions/nested layout. A 1×1 cell may use the exact observed cell-own inner-margin bit;
+/// Own the bounded binary-table slices seen at the public first-party boundary: strict inline 1×1,
+/// 10×2, and 9×8 tables. The 9×8 slice has 34 active cells, an exact horizontal-merge topology, and
+/// one nested 1×1 table at depth one. A 1×1 cell may use the exact observed cell-own inner-margin bit;
 /// protection/header/form bits remain unsupported. Multiple controls in one text-empty host are
-/// emitted in marker/header order by `parse_paragraph`. Anything outside this narrow, source-neutral
-/// shape remains fail-closed rather than being approximated.
+/// emitted in marker/header order by `parse_paragraph`. Anything outside these exact source-neutral
+/// shapes, including deeper nesting, remains fail-closed rather than being approximated.
 #[allow(clippy::too_many_arguments)]
 fn parse_inline_table(
     stream: &StreamProbe,
@@ -1564,7 +1573,15 @@ fn parse_inline_table(
     para_usage: &[ParaUsage],
     styles: &[StyleDef],
     section: usize,
+    table_depth: usize,
 ) -> Result<Table> {
+    if table_depth >= 2 {
+        return Err(unsupported_reason(
+            *control,
+            section,
+            "table nesting deeper than one level is not owned",
+        ));
+    }
     let common = data(stream, control);
     if common.len() != 46 || read_u32(common, 0) != Some(CTRL_TABLE) {
         return Err(malformed(
@@ -1626,7 +1643,7 @@ fn parse_inline_table(
 
     let table_record = children[0];
     let table_bytes = data(stream, &table_record);
-    if table_bytes.len() < 24 || read_u32(table_bytes, 0) != Some(0x0400_0006) {
+    if table_bytes.len() < 24 {
         return Err(malformed(
             &table_record,
             Some(section),
@@ -1635,17 +1652,63 @@ fn parse_inline_table(
     }
     let rows = read_u16(table_bytes, 4).expect("minimum length checked") as usize;
     let cols = read_u16(table_bytes, 6).expect("minimum length checked") as usize;
-    let expected_cells = match (rows, cols) {
-        (1, 1) => 1,
-        (10, 2) => 17,
+    let table_attr = read_u32(table_bytes, 0).expect("minimum length checked");
+    let expected_positions = match (table_attr, rows, cols) {
+        (0x0400_0006, 1, 1) => vec![(0, 0, 1)],
+        (0x0400_0006, 10, 2) => (0..10)
+            .flat_map(|row| {
+                if matches!(row, 0 | 1 | 5) {
+                    vec![(row, 0, 2)]
+                } else {
+                    vec![(row, 0, 1), (row, 1, 1)]
+                }
+            })
+            .collect(),
+        (0x0600_000c, 9, 8) => vec![
+            (0, 0, 3),
+            (0, 3, 5),
+            (1, 0, 3),
+            (1, 3, 5),
+            (2, 0, 3),
+            (2, 3, 2),
+            (2, 5, 1),
+            (2, 6, 2),
+            (3, 0, 8),
+            (4, 0, 1),
+            (4, 1, 1),
+            (4, 2, 2),
+            (4, 4, 3),
+            (4, 7, 1),
+            (5, 0, 1),
+            (5, 1, 1),
+            (5, 2, 2),
+            (5, 4, 3),
+            (5, 7, 1),
+            (6, 0, 1),
+            (6, 1, 1),
+            (6, 2, 2),
+            (6, 4, 3),
+            (6, 7, 1),
+            (7, 0, 1),
+            (7, 1, 1),
+            (7, 2, 2),
+            (7, 4, 3),
+            (7, 7, 1),
+            (8, 0, 1),
+            (8, 1, 1),
+            (8, 2, 2),
+            (8, 4, 3),
+            (8, 7, 1),
+        ],
         _ => {
             return Err(malformed(
                 &table_record,
                 Some(section),
-                "TABLE row/column topology is not in the owned 1x1 or 10x2 subset",
+                "TABLE attributes or row/column topology are not owned",
             ))
         }
     };
+    let expected_cells = expected_positions.len();
     if read_u16(table_bytes, 8) != Some(0) {
         return Err(malformed(
             &table_record,
@@ -1684,14 +1747,22 @@ fn parse_inline_table(
             "TABLE padding must be nonnegative",
         ));
     }
-    let row_sizes = (0..rows)
+    let row_cell_counts = (0..rows)
         .map(|row| read_u16(table_bytes, 18 + row * 2).expect("exact length checked") as HwpUnit)
         .collect::<Vec<_>>();
-    if row_sizes.iter().any(|height| *height <= 0) {
+    let expected_row_cell_counts = (0..rows)
+        .map(|row| {
+            expected_positions
+                .iter()
+                .filter(|(cell_row, _, _)| *cell_row == row)
+                .count() as HwpUnit
+        })
+        .collect::<Vec<_>>();
+    if row_cell_counts != expected_row_cell_counts {
         return Err(malformed(
             &table_record,
             Some(section),
-            "TABLE row-size slots must be positive",
+            "TABLE row cell counts differ from its owned active-cell topology",
         ));
     }
     let table_border_at = 18 + rows * 2;
@@ -1707,6 +1778,7 @@ fn parse_inline_table(
 
     let mut cells = Vec::with_capacity(expected_cells);
     let mut cell_heights = Vec::with_capacity(expected_cells);
+    let mut nested_table_count = 0usize;
     let mut cursor = 1usize;
     while cursor < children.len() {
         if cells.len() == expected_cells {
@@ -1767,6 +1839,17 @@ fn parse_inline_table(
                 "cell coordinates, horizontal span, or dimensions are outside the owned TABLE grid",
             ));
         }
+        let list_extra = &list_bytes[34..];
+        let zero_legacy_extra = list_extra.iter().all(|byte| *byte == 0);
+        let mirrored_width_extra = read_u32(list_extra, 0) == Some(cell_width)
+            && list_extra[4..].iter().all(|byte| *byte == 0);
+        if !(zero_legacy_extra || mirrored_width_extra) {
+            return Err(malformed(
+                &list_record,
+                Some(section),
+                "cell LIST_HEADER extension is not zero or an exact width mirror",
+            ));
+        }
         let cell_padding = [24usize, 26, 28, 30]
             .map(|at| i16::from_le_bytes(list_bytes[at..at + 2].try_into().unwrap()));
         if cell_padding.iter().any(|value| *value < 0) {
@@ -1776,15 +1859,15 @@ fn parse_inline_table(
                 "cell stored padding must be nonnegative",
             ));
         }
-        // The 13-byte extension cannot yield a typed field in the pinned parser. Keep it inert and
-        // out of shared IR; the exact 47-byte framing prevents a longer field-bearing tail.
-        debug_assert_eq!(list_bytes[34..].len(), 13);
+        // The bounded 13-byte extension is either the legacy all-zero form or an exact cell-width
+        // mirror followed by reserved zeros. Longer field-bearing tails remain unsupported.
+        debug_assert_eq!(list_extra.len(), 13);
         let cell_border_id = read_u16(list_bytes, 32).expect("exact length checked");
         let cell_fill = table_border(doc, cell_border_id, &list_record, section, "table cell")?;
 
         cursor += 1;
         let mut blocks = Vec::with_capacity(paragraph_count);
-        for _ in 0..paragraph_count {
+        for paragraph_index in 0..paragraph_count {
             let Some(header) = children.get(cursor).copied() else {
                 return Err(malformed(
                     &list_record,
@@ -1804,7 +1887,7 @@ fn parse_inline_table(
             while cursor < children.len() && children[cursor].level > child_level {
                 cursor += 1;
             }
-            let parsed = parse_paragraph(
+            let mut parsed = parse_paragraph(
                 stream,
                 &children[start..cursor],
                 doc,
@@ -1812,10 +1895,10 @@ fn parse_inline_table(
                 styles,
                 section,
                 None,
+                table_depth + 1,
             )?;
             if parsed.page.is_some()
                 || parsed.page_number.is_some()
-                || !parsed.tables.is_empty()
                 || parsed.paragraph.page_break_before
                 || parsed.paragraph.column_break_before
                 || parsed.paragraph.column_layout_before.is_some()
@@ -1826,7 +1909,28 @@ fn parse_inline_table(
                     "owned table cell paragraph contains nested layout controls",
                 ));
             }
+            if !parsed.tables.is_empty() {
+                let owned_nested_position = (table_attr, rows, cols) == (0x0600_000c, 9, 8)
+                    && (row, col, col_span) == (1, 3, 5)
+                    && paragraph_index == 1
+                    && parsed.tables.len() == 1;
+                let has_visible_text = parsed.paragraph.runs.iter().any(|run| {
+                    run.content
+                        .iter()
+                        .any(|inline| matches!(inline, Inline::Text(text) if !text.is_empty()))
+                });
+                if !owned_nested_position || has_visible_text {
+                    return Err(malformed(
+                        &header,
+                        Some(section),
+                        "nested table is not at the exact owned cell paragraph position",
+                    ));
+                }
+                nested_table_count += parsed.tables.len();
+                parsed.paragraph.is_table_anchor = true;
+            }
             blocks.push(Block::Paragraph(parsed.paragraph));
+            blocks.extend(parsed.tables.into_iter().map(Block::Table));
         }
         cell_heights.push(cell_height as HwpUnit);
         cells.push(Cell {
@@ -1854,16 +1958,15 @@ fn parse_inline_table(
             "owned TABLE active-cell count differs from its exact topology",
         ));
     }
+    let expected_nested_tables = usize::from((table_attr, rows, cols) == (0x0600_000c, 9, 8));
+    if nested_table_count != expected_nested_tables {
+        return Err(malformed(
+            &table_record,
+            Some(section),
+            "owned TABLE nested-table count differs from its exact topology",
+        ));
+    }
 
-    let expected_positions = (0..rows)
-        .flat_map(|row| {
-            if cols == 2 && matches!(row, 0 | 1 | 5) {
-                vec![(row, 0, 2)]
-            } else {
-                (0..cols).map(|col| (row, col, 1)).collect()
-            }
-        })
-        .collect::<Vec<_>>();
     if cells
         .iter()
         .zip(&expected_positions)
@@ -1876,23 +1979,8 @@ fn parse_inline_table(
         ));
     }
 
-    let mut col_widths = vec![None::<HwpUnit>; cols];
     let mut derived_rows = vec![None::<HwpUnit>; rows];
     for (cell, cell_height) in cells.iter().zip(cell_heights) {
-        let cell_width = cell.width.expect("owned cells always carry width");
-        if cell.col_span == 1 {
-            match col_widths[cell.col] {
-                Some(existing) if existing != cell_width => {
-                    return Err(malformed(
-                        &table_record,
-                        Some(section),
-                        "single-column cell widths disagree across TABLE rows",
-                    ))
-                }
-                None => col_widths[cell.col] = Some(cell_width),
-                _ => {}
-            }
-        }
         match derived_rows[cell.row] {
             Some(existing) if existing != cell_height => {
                 return Err(malformed(
@@ -1905,34 +1993,73 @@ fn parse_inline_table(
             _ => {}
         }
     }
-    let col_widths = col_widths
+
+    // Recover absolute column boundaries from all cell span equations. This handles the 9×8 slice,
+    // where several columns never appear as a standalone cell but the connected span graph still
+    // determines every boundary uniquely. Endpoints are pinned to 0 and the common-object width.
+    let mut boundaries = vec![None::<i64>; cols + 1];
+    boundaries[0] = Some(0);
+    boundaries[cols] = Some(i64::from(width));
+    for _ in 0..=cells.len() + cols {
+        let mut progressed = false;
+        for cell in &cells {
+            let start = cell.col;
+            let end = cell.col + cell.col_span;
+            let cell_width = i64::from(cell.width.expect("owned cells always carry width"));
+            match (boundaries[start], boundaries[end]) {
+                (Some(left), Some(right)) if right - left != cell_width => {
+                    return Err(malformed(
+                        &table_record,
+                        Some(section),
+                        "TABLE span equations disagree with common-object geometry",
+                    ));
+                }
+                (Some(left), None) => {
+                    boundaries[end] = Some(left + cell_width);
+                    progressed = true;
+                }
+                (None, Some(right)) => {
+                    boundaries[start] = Some(right - cell_width);
+                    progressed = true;
+                }
+                _ => {}
+            }
+        }
+        if !progressed {
+            break;
+        }
+    }
+    let boundaries = boundaries
         .into_iter()
         .collect::<Option<Vec<_>>>()
         .ok_or_else(|| {
             malformed(
                 &table_record,
                 Some(section),
-                "TABLE has a column whose width cannot be derived from an active cell",
+                "TABLE column boundaries are not uniquely derivable from active cells",
             )
         })?;
-    if col_widths
-        .iter()
-        .try_fold(0i64, |sum, value| sum.checked_add(i64::from(*value)))
-        != Some(i64::from(width))
-        || cells.iter().any(|cell| {
-            col_widths[cell.col..cell.col + cell.col_span]
-                .iter()
-                .map(|value| i64::from(*value))
-                .sum::<i64>()
-                != i64::from(cell.width.expect("owned cells always carry width"))
-        })
+    if boundaries.first() != Some(&0)
+        || boundaries.last() != Some(&i64::from(width))
+        || boundaries.windows(2).any(|pair| pair[0] >= pair[1])
     {
         return Err(malformed(
             &table_record,
             Some(section),
-            "TABLE column widths or merged-cell widths disagree with common-object geometry",
+            "TABLE column boundaries are nonpositive or outside common-object geometry",
         ));
     }
+    let col_widths = boundaries
+        .windows(2)
+        .map(|pair| HwpUnit::try_from(pair[1] - pair[0]))
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|_| {
+            malformed(
+                &table_record,
+                Some(section),
+                "TABLE column width exceeds the shared geometry range",
+            )
+        })?;
     let derived_rows = derived_rows
         .into_iter()
         .collect::<Option<Vec<_>>>()
@@ -1962,6 +2089,10 @@ fn parse_inline_table(
         keep_together: true,
         col_widths,
         row_heights: derived_rows,
+        // The exact 9×8 attribute carries HWP's no-adjust bit. Its stored row heights are therefore
+        // exact clipping geometry, not merely content-size floors. The other owned HWP5 subsets keep
+        // their historical floor behavior.
+        fixed_row_heights: table_attr == 0x0600_000c,
         outer_margin_left: margins[0] as HwpUnit,
         outer_margin_right: margins[1] as HwpUnit,
         outer_margin_top: margins[2] as HwpUnit,

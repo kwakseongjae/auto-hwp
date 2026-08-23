@@ -5,6 +5,31 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #176 PR #177 게시
+- bounded nested TABLE commit `52e9fc6` push, PR #177(`Closes #176`) 생성.
+- full/Vitest 1,018/Chromium 85·3, route/rhwp/HWPX/generated 불변을 공개 검증에 명시.
+- 다음 required CI·댓글 추적→green 자율 병합→TABLE 13704 child.
+
+## 2026-08-24 (Codex sol) · #176 full green / PR ready
+- full Rust/PDF/corpus/oracle/HWPX/wasm/JS + Vitest 1,018 green.
+- 허용된 로컬 서버 Chromium 85 pass/3 intentional skip/0 fail; 임시 link 제거.
+- route/rhwp/HWPX/generated/security diff 0. 다음 commit/push/PR→CI/merge.
+
+## 2026-08-24 (Codex sol) · #176 quick green
+- focused clippy/wasm32 + quick Rust/PDF51/canonical 8·18·24/98.9%+/corpus84/oracle82 green.
+- HWP5 57, next boundary TABLE 13704..13746; route/rhwp/HWPX/generated unchanged.
+- next full→security/diff→commit/push/PR #176.
+
+## 2026-08-24 (Codex sol) · #176 nested TABLE focused green
+- exact 9×8/34 cells + one depth-1 1×1 nested table → shared Table/Cell/Block IR.
+- row counts/span equations/fixed heights/13B extension/depth bound hostile 7축; HWP5 57 green.
+- public boundary advanced TABLE 7561..7605 → TABLE 13704..13746; next clippy/wasm→quick/full.
+
+## 2026-08-24 (Codex sol) · #175 merged / #176 started
+- #175 main `c917c584`, #174 close·remote branch 정리; required CI/comment audit green.
+- #94/#114 동기화, open PR·신규 community/security signal 0; #176 R18 child 등록.
+- next TABLE 7561..7605 content-free 분류부터 진행; route/rhwp/HWPX 불변.
+
 ## 2026-08-24 (Codex sol) · #174 PR #175 게시
 - bounded multi-table commit `aee1f70` push, PR #175(`Closes #174`) 생성.
 - route/rhwp/HWPX/generated 불변과 quick/full/Vitest 1,018/Chromium 85·3 명시.

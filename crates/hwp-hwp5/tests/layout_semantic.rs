@@ -86,6 +86,18 @@ enum Mutation {
     MultiTableThirdControl,
 }
 
+#[derive(Clone, Copy)]
+enum NestedTableMutation {
+    None,
+    BadAttribute,
+    BadRowCellCount,
+    BadSpan,
+    BadWidth,
+    BadListExtra,
+    MissingNestedTable,
+    TooDeep,
+}
+
 #[test]
 fn parses_page_setup_and_blank_source_line_metrics() {
     let doc = OwnHwp5Parser::new()
@@ -658,6 +670,64 @@ fn multi_table_host_rejects_marker_mismatch_visible_text_unknown_cell_bits_and_s
     ));
 }
 
+#[test]
+fn owns_exact_nine_by_eight_table_with_one_bounded_nested_table() {
+    let doc = OwnHwp5Parser::new()
+        .parse(&nested_table_fixture(NestedTableMutation::None))
+        .expect("strict 9x8 nested-table fixture parses");
+    let [Block::Paragraph(anchor), Block::Table(table)] = doc.sections[0].blocks.as_slice() else {
+        panic!("table host must lower to one anchor and one table")
+    };
+    assert!(anchor.is_table_anchor);
+    assert_eq!((table.rows, table.cols, table.cells.len()), (9, 8, 34));
+    assert!(table.keep_together);
+    assert!(table.fixed_row_heights, "no-adjust reaches shared IR");
+    assert_eq!(
+        table.col_widths,
+        vec![3_182, 6_810, 659, 8_082, 5_346, 10_534, 5_935, 7_435]
+    );
+    assert_eq!(table.row_heights.iter().sum::<i32>(), 24_072);
+    let host = table
+        .cells
+        .iter()
+        .find(|cell| (cell.row, cell.col, cell.col_span) == (1, 3, 5))
+        .expect("exact nested-table host cell");
+    let [Block::Paragraph(_), Block::Paragraph(nested_anchor), Block::Table(nested)] =
+        host.blocks.as_slice()
+    else {
+        panic!("nested host paragraph must be followed by its table")
+    };
+    assert!(nested_anchor.is_table_anchor);
+    assert_eq!((nested.rows, nested.cols, nested.cells.len()), (1, 1, 1));
+}
+
+#[test]
+fn strict_nested_table_slice_rejects_hostile_attributes_topology_and_extensions() {
+    for mutation in [
+        NestedTableMutation::BadAttribute,
+        NestedTableMutation::BadRowCellCount,
+        NestedTableMutation::BadSpan,
+        NestedTableMutation::BadWidth,
+        NestedTableMutation::BadListExtra,
+        NestedTableMutation::MissingNestedTable,
+    ] {
+        assert!(
+            OwnHwp5Parser::new()
+                .parse(&nested_table_fixture(mutation))
+                .is_err(),
+            "hostile nested-table mutation must fail closed"
+        );
+    }
+    assert!(matches!(
+        OwnHwp5Parser::new().parse(&nested_table_fixture(NestedTableMutation::TooDeep)),
+        Err(Error::UnsupportedBodyRecord {
+            tag: TAG_CTRL_HEADER,
+            reason: "table nesting deeper than one level is not owned",
+            ..
+        })
+    ));
+}
+
 fn fixture(mutation: Mutation) -> Vec<u8> {
     let mut header = vec![0; 256];
     header[..HWP_SIGNATURE.len()].copy_from_slice(HWP_SIGNATURE);
@@ -1043,8 +1113,9 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
             table.extend_from_slice(&padding.to_le_bytes());
         }
         if has_large_table {
-            for height in [6_500u16; 9].into_iter().chain([6_909]) {
-                table.extend_from_slice(&height.to_le_bytes());
+            // HWP TABLE stores active-cell counts per row here, not row heights.
+            for count in [1u16, 1, 2, 2, 2, 1, 2, 2, 2, 2] {
+                table.extend_from_slice(&count.to_le_bytes());
             }
         } else {
             table.extend_from_slice(&1u16.to_le_bytes());
@@ -1328,6 +1399,281 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
         stream.write_all(&body).unwrap();
     }
     compound.into_inner().into_inner()
+}
+
+fn nested_table_fixture(mutation: NestedTableMutation) -> Vec<u8> {
+    const COL_WIDTHS: [u32; 8] = [3_182, 6_810, 659, 8_082, 5_346, 10_534, 5_935, 7_435];
+    const ROW_HEIGHTS: [u32; 9] = [
+        2_512, 4_842, 3_744, 2_229, 2_229, 2_129, 2_129, 2_129, 2_129,
+    ];
+    let positions = vec![
+        (0usize, 0usize, 3usize),
+        (0, 3, 5),
+        (1, 0, 3),
+        (1, 3, 5),
+        (2, 0, 3),
+        (2, 3, 2),
+        (2, 5, 1),
+        (2, 6, 2),
+        (3, 0, 8),
+        (4, 0, 1),
+        (4, 1, 1),
+        (4, 2, 2),
+        (4, 4, 3),
+        (4, 7, 1),
+        (5, 0, 1),
+        (5, 1, 1),
+        (5, 2, 2),
+        (5, 4, 3),
+        (5, 7, 1),
+        (6, 0, 1),
+        (6, 1, 1),
+        (6, 2, 2),
+        (6, 4, 3),
+        (6, 7, 1),
+        (7, 0, 1),
+        (7, 1, 1),
+        (7, 2, 2),
+        (7, 4, 3),
+        (7, 7, 1),
+        (8, 0, 1),
+        (8, 1, 1),
+        (8, 2, 2),
+        (8, 4, 3),
+        (8, 7, 1),
+    ];
+
+    let mut header = vec![0; 256];
+    header[..HWP_SIGNATURE.len()].copy_from_slice(HWP_SIGNATURE);
+    header[32..36].copy_from_slice(&[0, 0, 0, 5]);
+
+    let mut doc_info = Vec::new();
+    let mut properties = vec![0; 26];
+    properties[..2].copy_from_slice(&1u16.to_le_bytes());
+    push_record(&mut doc_info, TAG_DOCUMENT_PROPERTIES, 0, &properties);
+    let mut mappings = Vec::new();
+    for count in [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0] {
+        mappings.extend_from_slice(&(count as u32).to_le_bytes());
+    }
+    push_record(&mut doc_info, TAG_ID_MAPPINGS, 0, &mappings);
+    for _ in 0..7 {
+        push_record(&mut doc_info, TAG_FACE_NAME, 0, &face_name("Test Sans"));
+    }
+    push_record(&mut doc_info, TAG_BORDER_FILL, 0, &solid_border_fill());
+    push_record(&mut doc_info, TAG_CHAR_SHAPE, 0, &char_shape());
+    push_record(&mut doc_info, TAG_PARA_SHAPE, 0, &para_shape());
+
+    let mut body = Vec::new();
+    let mut host_text = extended_control(0x0002, CTRL_SECTION_DEF);
+    host_text.extend(extended_control(0x000b, CTRL_TABLE));
+    host_text.push(0x000d);
+    push_para_header_with_break(
+        &mut body,
+        host_text.len() as u32,
+        (1 << 2) | (1 << 0x000b),
+        1,
+        0,
+        0x01,
+    );
+    push_record(&mut body, TAG_PARA_TEXT, 1, &utf16_bytes(&host_text));
+    push_record(&mut body, TAG_PARA_CHAR_SHAPE, 1, &shape_refs(&[(0, 0)]));
+
+    let mut section_control = Vec::with_capacity(28);
+    section_control.extend_from_slice(&CTRL_SECTION_DEF.to_le_bytes());
+    section_control.extend([0; 24]);
+    push_record(&mut body, TAG_CTRL_HEADER, 1, &section_control);
+    push_record(&mut body, TAG_PAGE_DEF, 2, &page_def(Mutation::None));
+
+    push_table_common(&mut body, 1, 47_983, 24_072);
+    let mut table = Vec::with_capacity(40);
+    table.extend_from_slice(
+        &if matches!(mutation, NestedTableMutation::BadAttribute) {
+            0x0600_0008u32
+        } else {
+            0x0600_000c
+        }
+        .to_le_bytes(),
+    );
+    table.extend_from_slice(&9u16.to_le_bytes());
+    table.extend_from_slice(&8u16.to_le_bytes());
+    table.extend_from_slice(&0u16.to_le_bytes());
+    for padding in [140i16, 140, 140, 140] {
+        table.extend_from_slice(&padding.to_le_bytes());
+    }
+    let mut row_counts = [2u16, 2, 4, 1, 5, 5, 5, 5, 5];
+    if matches!(mutation, NestedTableMutation::BadRowCellCount) {
+        row_counts[0] = 3;
+    }
+    for count in row_counts {
+        table.extend_from_slice(&count.to_le_bytes());
+    }
+    table.extend_from_slice(&1u16.to_le_bytes());
+    table.extend_from_slice(&0u16.to_le_bytes());
+    push_record(&mut body, TAG_TABLE, 2, &table);
+
+    for (cell_index, &(row, col, original_span)) in positions.iter().enumerate() {
+        let col_span = if cell_index == 0 && matches!(mutation, NestedTableMutation::BadSpan) {
+            2
+        } else {
+            original_span
+        };
+        let mut cell_width = COL_WIDTHS[col..col + col_span].iter().sum::<u32>();
+        if cell_index == 0 && matches!(mutation, NestedTableMutation::BadWidth) {
+            cell_width -= 1;
+        }
+        let nested_host = (row, col, original_span) == (1, 3, 5);
+        let paragraph_count = if nested_host { 2u16 } else { 1 };
+        let mut cell = Vec::with_capacity(47);
+        cell.extend_from_slice(&paragraph_count.to_le_bytes());
+        cell.extend_from_slice(&0x0020_0000u32.to_le_bytes());
+        cell.extend_from_slice(&0x0500u16.to_le_bytes());
+        for value in [col as u16, row as u16, col_span as u16, 1] {
+            cell.extend_from_slice(&value.to_le_bytes());
+        }
+        cell.extend_from_slice(&cell_width.to_le_bytes());
+        cell.extend_from_slice(&ROW_HEIGHTS[row].to_le_bytes());
+        for padding in [141i16, 141, 141, 141] {
+            cell.extend_from_slice(&padding.to_le_bytes());
+        }
+        cell.extend_from_slice(&1u16.to_le_bytes());
+        cell.extend_from_slice(&cell_width.to_le_bytes());
+        cell.extend([0; 9]);
+        if cell_index == 0 && matches!(mutation, NestedTableMutation::BadListExtra) {
+            cell[38] = 1;
+        }
+        push_record(&mut body, TAG_LIST_HEADER, 2, &cell);
+
+        for paragraph_index in 0..paragraph_count as usize {
+            let carries_nested = nested_host
+                && paragraph_index == 1
+                && !matches!(mutation, NestedTableMutation::MissingNestedTable);
+            let paragraph_text = if carries_nested {
+                let mut text = extended_control(0x000b, CTRL_TABLE);
+                text.push(0x000d);
+                text
+            } else {
+                vec!['A' as u16, 0x000d]
+            };
+            push_para_header_at_level(
+                &mut body,
+                2,
+                paragraph_text.len() as u32,
+                if carries_nested { 1 << 0x000b } else { 0 },
+                1,
+                0,
+                0,
+            );
+            push_record(&mut body, TAG_PARA_TEXT, 3, &utf16_bytes(&paragraph_text));
+            push_record(&mut body, TAG_PARA_CHAR_SHAPE, 3, &shape_refs(&[(0, 0)]));
+            if carries_nested {
+                push_nested_one_by_one(
+                    &mut body,
+                    3,
+                    matches!(mutation, NestedTableMutation::TooDeep),
+                );
+            }
+        }
+    }
+
+    let mut compound = CompoundFile::create(Cursor::new(Vec::new())).unwrap();
+    {
+        let mut stream = compound.create_stream("/FileHeader").unwrap();
+        stream.write_all(&header).unwrap();
+    }
+    {
+        let mut stream = compound.create_stream("/DocInfo").unwrap();
+        stream.write_all(&doc_info).unwrap();
+    }
+    compound.create_storage("/BodyText").unwrap();
+    {
+        let mut stream = compound.create_stream("/BodyText/Section0").unwrap();
+        stream.write_all(&body).unwrap();
+    }
+    compound.into_inner().into_inner()
+}
+
+fn push_table_common(out: &mut Vec<u8>, level: u16, width: u32, height: u32) {
+    let mut common = Vec::with_capacity(46);
+    common.extend_from_slice(&CTRL_TABLE.to_le_bytes());
+    common.extend_from_slice(&0x082a_2311u32.to_le_bytes());
+    common.extend_from_slice(&0u32.to_le_bytes());
+    common.extend_from_slice(&0u32.to_le_bytes());
+    common.extend_from_slice(&width.to_le_bytes());
+    common.extend_from_slice(&height.to_le_bytes());
+    common.extend_from_slice(&0i32.to_le_bytes());
+    for margin in [141i16, 141, 141, 141] {
+        common.extend_from_slice(&margin.to_le_bytes());
+    }
+    common.extend_from_slice(&1u32.to_le_bytes());
+    common.extend_from_slice(&0i32.to_le_bytes());
+    common.extend_from_slice(&0u16.to_le_bytes());
+    push_record(out, TAG_CTRL_HEADER, level, &common);
+}
+
+fn push_nested_one_by_one(out: &mut Vec<u8>, control_level: u16, carries_deeper: bool) {
+    push_table_common(out, control_level, 35_500, 1_848);
+    let child_level = control_level + 1;
+    let mut table = Vec::with_capacity(24);
+    table.extend_from_slice(&0x0400_0006u32.to_le_bytes());
+    table.extend_from_slice(&1u16.to_le_bytes());
+    table.extend_from_slice(&1u16.to_le_bytes());
+    table.extend_from_slice(&0u16.to_le_bytes());
+    for padding in [510i16, 510, 141, 141] {
+        table.extend_from_slice(&padding.to_le_bytes());
+    }
+    table.extend_from_slice(&1u16.to_le_bytes());
+    table.extend_from_slice(&1u16.to_le_bytes());
+    table.extend_from_slice(&0u16.to_le_bytes());
+    push_record(out, TAG_TABLE, child_level, &table);
+
+    let mut cell = Vec::with_capacity(47);
+    cell.extend_from_slice(&1u16.to_le_bytes());
+    cell.extend_from_slice(&0x0020_0000u32.to_le_bytes());
+    cell.extend_from_slice(&0x0500u16.to_le_bytes());
+    for value in [0u16, 0, 1, 1] {
+        cell.extend_from_slice(&value.to_le_bytes());
+    }
+    cell.extend_from_slice(&35_500u32.to_le_bytes());
+    cell.extend_from_slice(&1_848u32.to_le_bytes());
+    for padding in [510i16, 510, 141, 141] {
+        cell.extend_from_slice(&padding.to_le_bytes());
+    }
+    cell.extend_from_slice(&1u16.to_le_bytes());
+    cell.extend_from_slice(&35_500u32.to_le_bytes());
+    cell.extend([0; 9]);
+    push_record(out, TAG_LIST_HEADER, child_level, &cell);
+
+    let paragraph_text = if carries_deeper {
+        let mut text = extended_control(0x000b, CTRL_TABLE);
+        text.push(0x000d);
+        text
+    } else {
+        vec!['N' as u16, 0x000d]
+    };
+    push_para_header_at_level(
+        out,
+        child_level,
+        paragraph_text.len() as u32,
+        if carries_deeper { 1 << 0x000b } else { 0 },
+        1,
+        0,
+        0,
+    );
+    push_record(
+        out,
+        TAG_PARA_TEXT,
+        child_level + 1,
+        &utf16_bytes(&paragraph_text),
+    );
+    push_record(
+        out,
+        TAG_PARA_CHAR_SHAPE,
+        child_level + 1,
+        &shape_refs(&[(0, 0)]),
+    );
+    if carries_deeper {
+        push_nested_one_by_one(out, control_level + 2, false);
+    }
 }
 
 fn page_def(mutation: Mutation) -> Vec<u8> {
