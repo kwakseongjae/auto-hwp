@@ -3,6 +3,41 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-23 · Codex(sol) — **#160 전체 검증 완료 · PR 준비**.
+  strict STYLE/content-free header diagnostics와 #161 다단 blocker 분리를 최종 security/diff review했다.
+  STYLE 이름은 strict UTF-16 확인 후 폐기하고, 참조는 linear 검증하며 unsupported reason은 정적 문자열과
+  tag·section·span만 포함한다. focused hwp-hwp5 **36 tests**, clippy, wasm32와 quick 전체가 green이고,
+  full은 Rust/PDF51/canonical **8/18/24·98.9%+**/corpus84/oracle82/HWPX/wasm/licenses, JS build,
+  Vitest **1,018**, 실제 Chromium **85 pass/3 intentional skip/0 fail**을 통과했다. 임시 링크 제거 후
+  production route, generated asset, `external/rhwp` diff 0. **다음:** commit/push/PR #160→필수 CI·댓글
+  확인→green 자율 병합→#161 column IR/LOCKSTEP 구현.
+
+- 갱신: 2026-08-23 · Codex(sol) — **#160 quick 전체 green**.
+  strict STYLE/ref와 content-free break reason의 security/diff review에서 STYLE 문자열은 검증 후 폐기되고,
+  next/active shape ref는 linear pass로 범위 확인하며 unknown attr/tail·standalone/compound multi-column·column·
+  range tag는 거부한다. 첫 quick은 코드가 아닌 완료 worktree build cache 누적으로 117MiB만 남아 PDF parity
+  compile에서 ENOSPC였고, 병합 완료 #156/#158의 Cargo 산출물만 `cargo clean`해 21GiB를 회수했다.
+  재실행한 quick 전체는 workspace tests, PDF 51/parity, canonical **8/18/24·98.9%+**, corpus 84,
+  oracle 82, HWPX locks, wasm32, licenses가 green이다. `external/rhwp`/generated/production route diff 0.
+  **다음:** full→final diff→commit/PR/CI/병합; 이후 #161 column IR/LOCKSTEP.
+
+- 갱신: 2026-08-23 · Codex(sol) — **#160 STYLE focused green · 다단 blocker #161 분리**.
+  공개 benchmark의 `PARA_HEADER 0x42/section0/0..28` 원인은 content-free 분해 결과
+  `multi-column break`다. 현재 `PageSetup.columns`를 두 paginator가 소비하지 않아 rhwp의 section-priority를
+  모방하는 것은 거짓 지원이므로 거부를 유지하고, shared IR·`place_doc`/`NaiveLayout` LOCKSTEP 범위를
+  #161로 issue-first 분리했다. #160은 strict UTF-16 STYLE, kind/next/active shape ref, 기본 record와
+  실측 optional zero tail을 소유하고 paragraph style ref 및 break/range 사유를 정적으로 분류한다.
+  hwp-hwp5 **36 tests** green, 공개 경계는 정확한 reason으로 잠겼다. **다음:** clippy/wasm→quick/security/full→
+  commit/PR/CI/병합. production route와 `external/rhwp`는 불변이다.
+
+- 갱신: 2026-08-23 · Codex(sol) — **PR #159 병합 · #160 STYLE/PARA_HEADER slice 착수**.
+  #159는 head `1df8e2f`에서 issue-link·build-test 6m37s·licenses green, CLEAN/MERGEABLE,
+  리뷰/일반/인라인 댓글 0을 확인한 뒤 main `40026f6`으로 squash 병합했고 #158이 close됐다.
+  원격 브랜치를 정리하고 #94에 완료 근거를 동기화했다. 공개 benchmark의 다음 경계
+  `PARA_HEADER tag 0x42 start 0 end 28`을 계약으로 child #160을 만들고 정확한 최신 main에서
+  `codex/issue-160-hwp5-style`을 시작했다. **다음:** content-free 원인 분해→strict STYLE pool과
+  owned style/break refs; columns/range tags는 fail-closed. production route와 `external/rhwp`는 불변이다.
+
 - 갱신: 2026-08-23 · Codex(sol) — **#158 PR #159 게시**.
   검증 완료 commit `5b57498`을 push하고 PR #159(`Closes #158`, `Refs #94 #87 #95`)을 만들었다.
   exact support-pool parsing, active unsupported fail-closed, public boundary `0x19→0x42`, no production

@@ -62,13 +62,14 @@ pub enum Error {
         offset: usize,
     },
     #[error(
-        "unsupported text-only HWP5 record tag {tag:#x} at section {section} bytes {start}..{end}"
+        "unsupported text-only HWP5 record tag {tag:#x} at section {section} bytes {start}..{end}: {reason}"
     )]
     UnsupportedBodyRecord {
         tag: u16,
         section: usize,
         start: usize,
         end: usize,
+        reason: &'static str,
     },
     #[error("decompressed HWP5 data exceeds {limit}-byte limit")]
     DecompressedLimit { limit: u64 },
