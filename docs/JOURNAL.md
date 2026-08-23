@@ -5,6 +5,18 @@
 
 ---
 
+## 2026-08-23 (Codex sol) · #143 네이티브 인쇄 구현·실앱 QA
+- own-PDF replay preflight 뒤 PDFKit/AppKit 인메모리 인쇄, 버튼·⌘P·경로 없는 상태를 구현.
+- 패키지 QA가 nil NSPrintInfo SIGSEGV와 ScaleDownToFit 축소를 찾아 shared info+ScaleNone으로 수정.
+- 공개 HWP 8쪽 native preview·취소·Save as PDF PASS; own↔print 이동 0px·bbox 0~1px·edge F1≈1.
+- full Rust/조판/PDF/WASM/licensing green, Vitest 1,007·Playwright 85 pass/3 skip; 다음 PR/CI/병합→#144.
+
+## 2026-08-23 (Codex sol) · #147 병합 → #143 착수
+- PR #147 필수 CI 3종·CLEAN/MERGEABLE 확인 후 main `246733a`로 squash 병합, 원격 브랜치 정리.
+- #142 close; 최근 문서·창 복원 계약은 main 정본이 됨.
+- 최신 main에서 `codex/issue-143-native-print` 생성, #101/#102/open 선행 의존 모두 해소 확인.
+- 다음: own-PDF bytes/diagnostics 단일 입력의 macOS native print panel과 안전한 temp lifecycle 구현.
+
 ## 2026-08-23 (Codex sol) · #142 데스크톱 홈·창 상태 구현
 - #137/#145/#146/#138을 필수 CI·CLEAN 확인 뒤 병합하고 stacked 브랜치를 정리.
 - 최근 문서 9건 path/time-only·0700/0600·누락 prune와 안전한 창 size/position/maximized 복원 구현.

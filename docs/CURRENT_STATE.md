@@ -3,6 +3,32 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-23 · Codex(sol) — **#143 네이티브 own-PDF 인쇄 구현·실앱 QA 완료**.
+  `print_doc_pdf`는 live doc을 기존 `place_doc → PaintOp → krilla`의 `emit_pdf`로만 만들고,
+  page별 text/table/image/equation/chart replay가 전량 non-stub·diagnostic-free일 때만 macOS
+  PDFKit/AppKit 인메모리 spool을 main thread에서 연다. temp/path/webview `window.print()`는 없고,
+  UI 버튼·⌘P·취소/실패/기능 진단 메시지를 연결했다. synthetic production PDF는 2개 section의
+  portrait/landscape media와 5개 object lane을 모두 통과한다. 첫 ad-hoc `.app` QA가 nil
+  `NSPrintInfo`의 AppKit SIGSEGV를 발견해 `sharedPrintInfo`로 수정했고, 두 번째 QA가
+  ScaleDownToFit의 A4 약 10% 축소를 발견해 `kPDFPrintPageScaleNone`으로 고정했다. 최종 공개
+  benchmark.hwp는 8쪽 렌더→native Print 8-page preview→취소 복귀→Print ▸ Save as PDF 8쪽 A4를
+  통과했다. own export↔print PDF report-only 144 DPI 비교는 구조 불일치 0, 이동 0px, clipped ink 0,
+  bbox delta 0~1px, edge F1 0.999891~1.0, ink F1 0.884169~0.989237다. full verify 본체는 canonical
+  8/18/24·98.9%+, PDF 51/51, oracle 82, Rust/wasm/licenses green; JS build와 Vitest
+  269+64+427+247, Playwright 85 pass/3 intentional skip도 별도 완료했다. **다음:** 임시 QA
+  의존성/앱을 정리하고 commit·push→PR(`Closes #143`)→필수 CI·자율 병합, 이어 #144 release
+  packaging/update 트랙을 착수한다.
+
+- 갱신: 2026-08-23 · Codex(sol) — **PR #147 병합 · #143 네이티브 own-PDF 인쇄 착수**.
+  #142 PR #147은 head `8f5a01e`에서 issue-link·build-test·licenses green,
+  CLEAN/MERGEABLE·리뷰/댓글 0을 재확인한 뒤 main `246733a`로 squash 병합했고 원격 브랜치를
+  정리했다. #142는 close됐고 최근 문서·창 상태 계약이 main 정본이다. 최신 main에서
+  `codex/issue-143-native-print`를 만들었다. #143은 #101/#102와 데스크톱 open 선행이 모두
+  병합되어 unblocked다. **다음:** 기존 own-PDF bytes/replay diagnostics를 유일 인쇄 입력으로
+  재사용하고, webview `window.print()` 없이 macOS 네이티브 print panel·private bounded temp·
+  취소/실패/cleanup 계약을 구현한다. synthetic table/equation/chart와 public calibration으로
+  dialog 직전 object ink를 증명하고 패키지 print-to-PDF QA 뒤 PR/CI/병합한다.
+
 - 갱신: 2026-08-23 · Codex(sol) — **#137/#145/#146/#138 병합 · #142 구현·패키지 QA 완료**.
   PR #137(PDF calibration)은 main `6574a6d`, #145(데스크톱 OS open)은 `3fd9740`,
   #146(#141 무손실 복구)은 `e963f5c`, #138(equation/chart SVG→PDF vector replay)은 최신 main

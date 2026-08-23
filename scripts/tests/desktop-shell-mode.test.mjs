@@ -180,3 +180,24 @@ test("desktop home keeps nine path-only recents and restores only safe window ge
   assert.match(shell, /clear_recent_documents/);
   assert.match(shell, /최근 목록에는 로컬 경로와 마지막으로 연 시간만 저장됩니다/);
 });
+
+test("desktop print uses the own-PDF replay proof and never webview layout", async () => {
+  const rust = await read("crates/hwp-viewer/src/lib.rs");
+  const nativePrint = await read("crates/hwp-viewer/src/native_print.rs");
+  const shell = await read("crates/hwp-viewer/ui/src/WorkspaceShell.tsx");
+
+  assert.match(rust, /hwp_session::emit_pdf\(doc, None\)/);
+  assert.match(rust, /native_print::preflight\(&export\)/);
+  assert.match(rust, /run_on_main_thread/);
+  assert.match(nativePrint, /printOperationForPrintInfo/);
+  assert.match(nativePrint, /NSPrintInfo::sharedPrintInfo\(\)/);
+  assert.match(nativePrint, /setShowsPrintPanel\(true\)/);
+  assert.match(nativePrint, /kPDFPrintPageScaleNone=0/);
+  assert.match(nativePrint, /PRINT_REPLAY_UNBALANCED/);
+  assert.match(nativePrint, /PRINT_REPLAY_DEGRADED/);
+  assert.match(nativePrint, /PRINT_CAPABILITY_DIAGNOSTIC/);
+  assert.doesNotMatch(nativePrint, /temp_dir|NamedTempFile|File::create|write_all/);
+  assert.doesNotMatch(shell, /window\.print\s*\(/);
+  assert.match(shell, /invoke<NativePrintResult>\("print_doc_pdf"\)/);
+  assert.match(shell, /event\.key\.toLowerCase\(\) !== "p"/);
+});

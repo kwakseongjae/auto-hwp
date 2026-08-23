@@ -70,3 +70,10 @@ arboard = "3"
 # shared Rust session/window. It owns no document behavior.
 tauri-plugin-single-instance = "2"
 tauri-plugin-window-state = "2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Issue #143: hand the already-produced own-engine PDF bytes to PDFKit/AppKit's native print
+# operation. No webview print/layout path and no temporary file are involved.
+objc2 = { version = "0.6", features = ["catch-all"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPrintInfo", "NSPrintOperation"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSString"] }
