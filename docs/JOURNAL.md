@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #164 PR #165 posted
+- verified implementation `a5a7b21` push + PR #165 (`Closes #164`, `Refs #94 #161`).
+- strict single-section pgnp/shared SVG·PDF/LOCKSTEP/public boundary and full evidence published.
+- production route·external/rhwp·generated drift 0; browser flake disclosed.
+- 다음 state commit push→required CI/review/comment→green 자율 병합.
+
 ## 2026-08-24 (Codex sol) · #164 full green / PR ready
 - full Rust/PDF51/canonical 8·18·24+98.9%/corpus84/oracle82/HWPX/wasm/licenses/JS green.
 - Vitest 1,018; Chromium 84 pass/3 intentional skip/1 retry-pass/0 fail.
