@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #170 PR #173 게시
+- strict 10×2 TABLE commit `25010cb`을 push하고 PR #173(`Closes #170`) 생성.
+- route/rhwp/HWPX/generated 불변과 quick/full/Vitest 1,007/Chromium 85·3을 명시.
+- 다음 required CI·댓글 추적→green 자율 병합→multi-table boundary child.
+
 ## 2026-08-24 (Codex sol) · #170 full green / PR ready
 - strict 10×2 TABLE + terminal char shape + bounded extra-cell guard 최종 확정.
 - quick/full·Vitest 1,007·Chromium 85/3 green; route/rhwp/HWPX/generated diff 0.

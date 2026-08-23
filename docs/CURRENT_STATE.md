@@ -53,7 +53,9 @@
   로컬 서버에서 분리 재실행해 Chromium **85 pass/3 intentional skip/0 fail**이며, 이후 강화한
   distinct terminal char-shape/extra-cell bound도 focused HWP5·clippy 재검증 green. 임시 dependency
   link 제거, production route·rhwp·HWPX parser/serializer·generated asset diff 0.
-  **다음:** final commit/push/PR #170→필수 CI/자율 병합→다음 child 분류.
+  검증 완료 commit `25010cb`을 push하고 PR #173(`Closes #170`, `Refs #94 #168 #171 #172`)을
+  게시했다. **다음:** exact-head issue-link/build-test/licenses·mergeability·review/comment 추적→전부
+  green이면 자율 병합·branch 정리→다음 multi-table boundary child 분류.
 
 - 갱신: 2026-08-23 · Codex(sol) — **#161 PR #163 게시**.
   검증 완료 commit `c751833`을 push하고 PR #163(`Closes #161`, `Refs #94 #160`)을 만들었다.
