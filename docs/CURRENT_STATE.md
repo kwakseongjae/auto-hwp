@@ -3,6 +3,63 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-23 · Codex(sol) — **#161 PR #163 게시**.
+  검증 완료 commit `c751833`을 push하고 PR #163(`Closes #161`, `Refs #94 #160`)을 만들었다.
+  normal 1~32단 strict subset, 3-path LOCKSTEP, SVG/PDF shared line, separator-span/distribution
+  fail-closed, public boundary 0x47/431..451, no production cutover/no rhwp/generated drift와
+  quick/full/Vitest 1,018/Chromium 85 pass·3 skip을 본문에 명시했다. **다음:** 이 상태 commit push→
+  issue-link/build-test/licenses·mergeability·review/comment 추적→전부 green이면 자율 병합·branch 정리.
+
+- 갱신: 2026-08-23 · Codex(sol) — **#161 게시 준비 완료**.
+  최종 quick이 다시 전부 green이고, PDF export가 column separator `PaintOp::Line`을 같은 page tree에서
+  produced=1/replayed=1/stubbed=0으로 소비하는 직접 회귀도 추가했다. 별도 demo proxy **11 tests**를
+  동일 lockfile 의존성으로 확인해 full Vitest 합계는 **1,018**, Chromium은 **85 pass/3 skip**이다.
+  final diff/security review에서 source content/path/hash/credential 노출·silent fallback·production route
+  변경이 없고 `external/rhwp`와 generated asset diff도 0이다. **다음:** commit/push→PR `Closes #161`/
+  `Refs #94 #160`→issue-link/build-test/licenses·mergeability·review/comment 확인→green 자율 병합.
+
+- 갱신: 2026-08-23 · Codex(sol) — **#161 full green · separator span 최종 하드닝**.
+  full의 Rust/PDF/canonical/public corpus/oracle/HWPX/wasm/JS build·crosscheck·i18n과 Vitest
+  **1,007**이 green이고, 샌드박스 포트 EPERM만 전용 `PW_PORT=31861`에서 분리 재실행해 실제
+  Chromium **85 pass/3 intentional skip/0 fail**을 확인했다. 이후 페이지 전체 구분선 렌더의
+  정직한 경계로 mid-section separator zone도 fail-closed하고 합성 회귀를 추가해 hwp-hwp5
+  **42 tests**·clippy·wasm32 green. demo proxy 11건은 별도 재실행 green으로 full 합계 **1,018**.
+  임시 dependency link 제거, route/rhwp/generated diff 0.
+  **다음:** final quick→security/diff→commit/push/PR #161→필수 CI·자율 병합.
+
+- 갱신: 2026-08-23 · Codex(sol) — **#161 quick 전체 green**.
+  strict normal-column subset과 shared LOCKSTEP column lane을 quick 전수 검증했다. rhwp governance,
+  fmt/clippy, workspace+rhwp tests, PDF visual 51/parity, canonical **8/18/24·98.9%+**, public corpus
+  계약 84, oracle 82, HWPX lock, wasm32, licenses가 전부 green이다. private `modu-startup`/정부양식
+  실물 gate만 로컬 corpus 부재로 기존 정책대로 skip됐다. production route, `external/rhwp`, generated
+  wasm diff 0. **다음:** `verify-local --full`→final security/diff→commit/push/PR #161→CI/자율 병합.
+
+- 갱신: 2026-08-23 · Codex(sol) — **#161 의미 경계 하드닝 · focused/wasm green**.
+  HWP5 `cold`의 normal 1~32단과 LTR/RTL만 owned로 한정하고 distribute/parallel은 정상 단처럼
+  흉내내지 않고 fail-closed한다. 최초 owned zone 전 단나누기와 구분선이 포함된 복수 zone도
+  정확한 의미/세로 span을 소유할 때까지 정적·content-free 오류로 거부한다. hwp-hwp5 **41 tests**,
+  hwp-typeset **90+4**, hwp-render **17+3**, touched-crate clippy `-D warnings`, hwp-hwp5/typeset wasm32,
+  production route/rhwp/generated diff 0. 전체 workspace clippy는 기존 hwp-foreign·hwp-jsx-test의
+  Rust 1.95 신규 lint 기준선에서만 실패. **다음:** quick→full→최종 diff/PR #161/CI/자율 병합.
+
+- 갱신: 2026-08-23 · Codex(sol) — **#161 column IR/parser/LOCKSTEP 1차 focused green**.
+  `Paragraph` 열 zone/단나누기 + 절대 HWPUNIT `ColumnLayout`(종류·LTR/RTL·폭·간격·구분선)을
+  source-neutral IR로 추가했다. HWP5 `cold`는 1~32단, exact 16B equal/관측 proportional unequal,
+  upper attr·direction·zero width·tail·separator style를 strict 검증한 뒤 page body의 절대 geometry로만
+  옮긴다. 별도 column lane을 public `place_doc`/`NaiveLayout`/`block_pages`에 동시 연결해
+  문단·표를 열/쪽 경계에서 분할하고 구분선은 공유 `PlacedLine`→SVG/PDF PaintOp로 내린다.
+  focused hwp-hwp5 **38 tests**, hwp-typeset **83 tests**, public 경계 `0x42/0..28`→
+  `CTRL_HEADER 0x47/431..451`, focused clippy `-D warnings` green. **다음:** unequal/3단·RTL·
+  zone/page/column break·hostile fixture 확장→workspace/quick/full; production route/rhwp 불변.
+
+- 갱신: 2026-08-23 · Codex(sol) — **PR #162 병합 · #161 다단 조판 착수**.
+  #162는 head `24516e7`에서 issue-link·build-test 8m58s·licenses green, CLEAN/MERGEABLE,
+  리뷰/일반/인라인 댓글 0을 확인한 뒤 main `a5c1125`로 squash 병합했고 #160이 close됐다.
+  원격 브랜치를 정리하고 #94에 STYLE/ref 소유 및 multi-column fail-closed 경계를 동기화했다.
+  정확한 latest main에서 `codex/issue-161-hwp5-columns`를 시작했다. **다음:** source-neutral
+  column geometry→strict `cold` parser→`place_doc`/`NaiveLayout`/`block_pages` LOCKSTEP fixture.
+  production HWP5 route와 `external/rhwp`는 불변이다.
+
 - 갱신: 2026-08-23 · Codex(sol) — **#160 PR #162 게시**.
   검증 완료 commit `75f5ad5`를 push하고 PR #162(`Closes #160`, `Refs #94 #158 #161`)를 만들었다.
   strict STYLE, content-free failure reasons, public multi-column boundary, #161 faithful column dependency,

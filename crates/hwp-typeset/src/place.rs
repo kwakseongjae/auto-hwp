@@ -349,6 +349,9 @@ pub struct PlacedDoc {
 /// `NaiveLayout` page count. `fonts` supplies advances (inject [`crate::RealFontMetrics`] under the
 /// `shaper` feature for real glyph widths; [`crate::ApproxFontMetrics`] otherwise).
 pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDoc {
+    if crate::uses_column_flow(doc) {
+        return place_doc_columns(doc, fonts);
+    }
     let mut pages: Vec<PlacedPage> = vec![PlacedPage::default()];
     let mut started = false; // any content placed on the current page yet?
 
@@ -493,11 +496,193 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
     PlacedDoc { pages }
 }
 
+/// Explicit-column placement lane. The established single-column implementation above is retained
+/// unchanged and remains the path for every document without a column-zone/break signal.
+fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDoc {
+    let mut pages = vec![PlacedPage::default()];
+    let mut started = false;
+    for (section_index, section) in doc.sections.iter().enumerate() {
+        let page = &section.page;
+        let (body_x, body_y, body_w, body_h) = crate::body_box(page);
+        if started {
+            pages.push(PlacedPage::default());
+        }
+        set_page_size(pages.last_mut().expect("page exists"), page);
+        let section_first_page = pages.len() - 1;
+        let breaks = crate::section_page_breaks(section, doc);
+        let mut flow = crate::ColumnFlow::new(body_w);
+
+        for (block_index, block) in section.blocks.iter().enumerate() {
+            match block {
+                Block::Paragraph(paragraph) => {
+                    let shape = doc.para_shapes.get(paragraph.para_shape);
+                    if let Some(columns) = &paragraph.column_layout_before {
+                        if flow.start_zone(columns, body_w, body_h) {
+                            new_page(&mut pages, page);
+                        }
+                    }
+                    if breaks[block_index] && flow.y() > 0.0 {
+                        new_page(&mut pages, page);
+                        flow.reset_page();
+                    } else if paragraph.column_break_before && flow.advance_column() {
+                        new_page(&mut pages, page);
+                    }
+                    if paragraph.is_table_anchor {
+                        started = true;
+                        continue;
+                    }
+                    if flow.vert() > 0.0 {
+                        flow.add(shape.map(|value| value.space_before).unwrap_or(0).max(0) as f64);
+                    }
+                    let start_page = pages.len() - 1;
+                    let start_column = flow.column_index();
+                    let start_box = flow.box_now();
+                    let start_y = body_y + flow.y();
+                    place_paragraph_columns(
+                        paragraph,
+                        doc,
+                        fonts,
+                        body_x,
+                        body_y,
+                        body_h,
+                        &mut flow,
+                        &mut pages,
+                        page,
+                        section_index,
+                        block_index,
+                    );
+                    let end_page = pages.len() - 1;
+                    let end_y = body_y + flow.y();
+                    let kind = if paragraph_object(paragraph).is_some() {
+                        BlockKind::Image
+                    } else {
+                        BlockKind::Paragraph
+                    };
+                    if start_page == end_page && start_column == flow.column_index() {
+                        pages[start_page].blocks.push(PlacedBlock {
+                            x: body_x + start_box.x,
+                            y: start_y,
+                            w: start_box.width,
+                            h: (end_y - start_y).max(0.0),
+                            section: section_index,
+                            block: block_index,
+                            kind,
+                        });
+                    }
+                    flow.add(shape.map(|value| value.space_after).unwrap_or(0).max(0) as f64);
+                    started = true;
+                }
+                Block::Table(table) => {
+                    if breaks[block_index] && flow.y() > 0.0 {
+                        new_page(&mut pages, page);
+                        flow.reset_page();
+                    }
+                    let promoted = crate::unwrap_frame_table(table);
+                    let (table, frame) = match &promoted {
+                        Some((inner, frame)) => (inner, *frame),
+                        None => (table, None),
+                    };
+                    if flow.vert() > 0.0 {
+                        flow.add(table.outer_margin_top.max(0) as f64);
+                    }
+                    let start_page = pages.len() - 1;
+                    place_table_columns(
+                        table,
+                        doc,
+                        fonts,
+                        body_x,
+                        body_y,
+                        body_h,
+                        &mut flow,
+                        &mut pages,
+                        page,
+                        section_index,
+                        block_index,
+                        frame,
+                    );
+                    let end_page = pages.len() - 1;
+                    for output in pages.iter_mut().take(end_page + 1).skip(start_page) {
+                        if let Some(placed) = output.tables.iter().rev().find(|placed| {
+                            placed.section == section_index
+                                && placed.block == block_index
+                                && placed.ancestors.is_empty()
+                        }) {
+                            output.blocks.push(PlacedBlock {
+                                x: placed.x,
+                                y: placed.y,
+                                w: placed.w,
+                                h: placed.h,
+                                section: section_index,
+                                block: block_index,
+                                kind: BlockKind::Table,
+                            });
+                        }
+                    }
+                    flow.add(table.outer_margin_bottom.max(0) as f64);
+                    started = true;
+                }
+            }
+        }
+        let separator_layouts = section
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Paragraph(paragraph) => paragraph.column_layout_before.as_ref(),
+                Block::Table(_) => None,
+            })
+            .filter(|layout| layout.separator.is_some())
+            .collect::<Vec<_>>();
+        // The common HWP/HWPX contract is one column definition per section. For that exact case,
+        // emit the rule once per physical page; it is lowered through the same PaintOp::Line path to
+        // both SVG and PDF. Multiple separator-bearing zones need vertical span ownership and remain
+        // deliberately undrawn rather than overlapping contradictory rules.
+        if let [layout] = separator_layouts.as_slice() {
+            for output in pages.iter_mut().skip(section_first_page) {
+                emit_column_separators(output, layout, body_x, body_y, body_w, body_h);
+            }
+        }
+        place_section_decorations(&mut pages, section_first_page, section, doc, fonts);
+    }
+    PlacedDoc { pages }
+}
+
+fn emit_column_separators(
+    page: &mut PlacedPage,
+    layout: &ColumnLayout,
+    body_x: f64,
+    body_y: f64,
+    body_w: f64,
+    body_h: f64,
+) {
+    let Some(separator) = layout.separator else {
+        return;
+    };
+    let mut boxes = crate::column_boxes(layout, body_w);
+    boxes.sort_by(|left, right| left.x.total_cmp(&right.x));
+    for pair in boxes.windows(2) {
+        let gap_left = pair[0].x + pair[0].width;
+        let gap_right = pair[1].x;
+        let x = body_x + (gap_left + gap_right) / 2.0;
+        page.lines.push(PlacedLine {
+            x1: x,
+            y1: body_y,
+            x2: x,
+            y2: body_y + body_h,
+            color: separator.color,
+            style: separator.style,
+            width: separator.width_px,
+        });
+    }
+}
+
 /// Map each top-level block to the 0-based page index its first line/row STARTS on, re-driving the
 /// SAME vertical accounting as [`place_doc`] (fresh page per section, paragraph space-before/after,
 /// table outer margins + fit/overflow page breaks) WITHOUT placing glyphs. `out[section][block]` =
 /// page index. Lets a document-outline / page-nav panel scroll the page list to a heading's page.
 pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Vec<usize>> {
+    if crate::uses_column_flow(doc) {
+        return block_pages_columns(doc, fonts);
+    }
     let mut out: Vec<Vec<usize>> = Vec::with_capacity(doc.sections.len());
     let mut page_idx = 0usize; // current (global) page index
     let mut started = false;
@@ -597,6 +782,108 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
         out.push(sec_pages);
     }
     out
+}
+
+fn block_pages_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Vec<usize>> {
+    let mut output = Vec::with_capacity(doc.sections.len());
+    let mut page_index = 0usize;
+    let mut started = false;
+    for section in &doc.sections {
+        let page = &section.page;
+        let (_, _, body_w, body_h) = crate::body_box(page);
+        if started {
+            page_index += 1;
+        }
+        let breaks = crate::section_page_breaks(section, doc);
+        let mut flow = crate::ColumnFlow::new(body_w);
+        let mut section_pages = Vec::with_capacity(section.blocks.len());
+        for (block_index, block) in section.blocks.iter().enumerate() {
+            match block {
+                Block::Paragraph(paragraph) => {
+                    let shape = doc.para_shapes.get(paragraph.para_shape);
+                    if let Some(columns) = &paragraph.column_layout_before {
+                        if flow.start_zone(columns, body_w, body_h) {
+                            page_index += 1;
+                        }
+                    }
+                    if breaks[block_index] && flow.y() > 0.0 {
+                        page_index += 1;
+                        flow.reset_page();
+                    } else if paragraph.column_break_before && flow.advance_column() {
+                        page_index += 1;
+                    }
+                    if paragraph.is_table_anchor {
+                        section_pages.push(page_index);
+                        started = true;
+                        continue;
+                    }
+                    if flow.vert() > 0.0 {
+                        flow.add(shape.map(|value| value.space_before).unwrap_or(0).max(0) as f64);
+                    }
+                    let ratio = line_spacing_ratio(paragraph, doc);
+                    let indent = indent_of(paragraph, doc, flow.min_width());
+                    let lines = layout_paragraph(paragraph, doc, indent.wrap_w, fonts);
+                    let mut recorded = false;
+                    for line in &lines {
+                        if flow.vert() + line.vert_size > flow.available_height(body_h)
+                            && flow.vert() > 0.0
+                            && flow.advance_column()
+                        {
+                            page_index += 1;
+                        }
+                        if !recorded {
+                            section_pages.push(page_index);
+                            recorded = true;
+                        }
+                        flow.add(line.vert_size * ratio);
+                    }
+                    if !recorded {
+                        section_pages.push(page_index);
+                    }
+                    flow.add(shape.map(|value| value.space_after).unwrap_or(0).max(0) as f64);
+                    started = true;
+                }
+                Block::Table(table) => {
+                    if breaks[block_index] && flow.y() > 0.0 {
+                        page_index += 1;
+                        flow.reset_page();
+                    }
+                    let promoted = crate::unwrap_frame_table(table);
+                    let table = promoted.as_ref().map(|(inner, _)| inner).unwrap_or(table);
+                    if flow.vert() > 0.0 {
+                        flow.add(table.outer_margin_top.max(0) as f64);
+                    }
+                    let rows = crate::table_row_heights(table, flow.min_width(), doc, fonts);
+                    if flow.vert() > 0.0
+                        && rows.first().is_some_and(|height| {
+                            let available = flow.available_height(body_h);
+                            flow.vert() + height > available && *height <= available
+                        })
+                        && flow.advance_column()
+                    {
+                        page_index += 1;
+                    }
+                    section_pages.push(page_index);
+                    for (row, height) in rows.iter().enumerate() {
+                        let available = flow.available_height(body_h);
+                        if row > 0
+                            && flow.vert() + height > available
+                            && flow.vert() > 0.0
+                            && *height <= available
+                            && flow.advance_column()
+                        {
+                            page_index += 1;
+                        }
+                        flow.add(*height);
+                    }
+                    flow.add(table.outer_margin_bottom.max(0) as f64);
+                    started = true;
+                }
+            }
+        }
+        output.push(section_pages);
+    }
+    output
 }
 
 /// 문단 들여쓰기/여백 (paragraph indent geometry) resolved from a [`ParaShape`].
@@ -753,6 +1040,117 @@ fn place_paragraph(
     }
 }
 
+/// Multi-column twin of [`place_paragraph`]. It uses the shared [`crate::ColumnFlow`] transition
+/// state and the narrowest active column as the wrap width, which guarantees that a paragraph that
+/// crosses into an unequal-width column never paints outside that column's body box.
+#[allow(clippy::too_many_arguments)]
+fn place_paragraph_columns(
+    p: &Paragraph,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+    ml: f64,
+    mt: f64,
+    body_h: f64,
+    flow: &mut crate::ColumnFlow,
+    pages: &mut Vec<PlacedPage>,
+    page: &PageSetup,
+    section: usize,
+    block: usize,
+) {
+    let glyphs = paragraph_glyphs(p, doc, fonts);
+    let align = doc
+        .para_shapes
+        .get(p.para_shape)
+        .map(|shape| shape.align)
+        .unwrap_or_default();
+    let ratio = line_spacing_ratio(p, doc);
+    let ind = indent_of(p, doc, flow.min_width());
+    let lines = layout_paragraph(p, doc, ind.wrap_w, fonts);
+    let obj = paragraph_object(p);
+
+    for (line_index, line) in lines.iter().enumerate() {
+        if flow.vert() + line.vert_size > flow.available_height(body_h)
+            && flow.vert() > 0.0
+            && flow.advance_column()
+        {
+            new_page(pages, page);
+        }
+        let column = flow.box_now();
+        let line_top = mt + flow.y();
+        let line_indent = ind.left
+            + if line_index == 0 {
+                ind.first_extra
+            } else {
+                0.0
+            };
+        let slack = (column.width
+            - ind.left
+            - if line_index == 0 {
+                ind.first_extra.max(0.0)
+            } else {
+                0.0
+            }
+            - line.horz_size)
+            .max(0.0);
+        let x0 = ml
+            + column.x
+            + line_indent
+            + match align {
+                HorizontalAlign::Right => slack,
+                HorizontalAlign::Center => slack / 2.0,
+                _ => 0.0,
+            };
+        let baseline = line_top + line.baseline;
+        let start = line.text_pos as usize;
+        let end = lines
+            .get(line_index + 1)
+            .map(|next| next.text_pos as usize)
+            .unwrap_or(glyphs.len());
+        let mut x = x0;
+        let plain = FontKey {
+            family: String::new(),
+            bold: false,
+            italic: false,
+        };
+        let page_out = pages.last_mut().expect("placed document always has a page");
+        for glyph in glyphs.get(start..end.min(glyphs.len())).unwrap_or(&[]) {
+            let advance = fonts.advance_width(&plain, glyph.ch, glyph.size as i32) * glyph.ratio
+                + glyph.spacing_em * glyph.size;
+            if glyph.ch != ' ' && glyph.ch != '\t' && glyph.ch != '\n' {
+                page_out.glyphs.push(PlacedGlyph {
+                    x,
+                    baseline,
+                    ch: glyph.ch,
+                    size: glyph.size,
+                    color: glyph.color,
+                    underline: glyph.underline,
+                    bold: glyph.bold,
+                    italic: glyph.italic,
+                    font: glyph.font.clone(),
+                    cluster: glyph.cluster.clone(),
+                });
+            }
+            x += advance;
+        }
+        if line_index == 0 {
+            if let Some((width, height, bin_ref, svg)) = &obj {
+                page_out.images.push(PlacedImage {
+                    x: x0,
+                    y: line_top,
+                    w: (*width).min(column.width),
+                    h: *height,
+                    bin_ref: bin_ref.clone(),
+                    svg: svg.clone(),
+                    is_background: false,
+                    section,
+                    block,
+                });
+            }
+        }
+        flow.add(line.vert_size * ratio);
+    }
+}
+
 /// Place a table, SPLITTING it across pages at row boundaries when it doesn't fit (한글식 표 나눔).
 /// Column widths come from `col_widths` (else an equal split, mirroring `table_height`). `vert` is the
 /// page-relative cursor where the table starts; `mt`/`body_h` frame the body. A first-row reserve moves
@@ -821,6 +1219,85 @@ fn place_table(
         frame,
     );
     y - mt // final page-relative cursor (bottom of the last fragment)
+}
+
+/// Column-aware row fragmentation twin of [`place_table`]. Row heights are measured at the
+/// narrowest active column, so a fragment remains bounded when unequal columns are traversed.
+#[allow(clippy::too_many_arguments)]
+fn place_table_columns(
+    t: &Table,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+    ml: f64,
+    mt: f64,
+    body_h: f64,
+    flow: &mut crate::ColumnFlow,
+    pages: &mut Vec<PlacedPage>,
+    page: &PageSetup,
+    section: usize,
+    block: usize,
+    frame: Option<CellEdge>,
+) {
+    if t.rows == 0 || t.cols == 0 {
+        return;
+    }
+    let table_width = flow.min_width();
+    let col_x = column_offsets(t, table_width);
+    let row_h = row_heights(t, table_width, doc, fonts);
+    let available = flow.available_height(body_h);
+    if flow.vert() > 0.0
+        && flow.vert() + row_h[0] > available
+        && row_h[0] <= available
+        && flow.advance_column()
+    {
+        new_page(pages, page);
+    }
+
+    let mut fragment_first = 0usize;
+    let mut fragment_x = ml + flow.box_now().x;
+    let mut fragment_top = mt + flow.y();
+    for row in 0..t.rows {
+        let available = flow.available_height(body_h);
+        if row > fragment_first && flow.vert() + row_h[row] > available && row_h[row] <= available {
+            flush_fragment(
+                pages,
+                t,
+                doc,
+                fonts,
+                fragment_x,
+                fragment_top,
+                &col_x,
+                &row_h,
+                fragment_first,
+                row,
+                section,
+                block,
+                frame,
+            );
+            if flow.advance_column() {
+                new_page(pages, page);
+            }
+            fragment_first = row;
+            fragment_x = ml + flow.box_now().x;
+            fragment_top = mt + flow.y();
+        }
+        flow.add(row_h[row]);
+    }
+    flush_fragment(
+        pages,
+        t,
+        doc,
+        fonts,
+        fragment_x,
+        fragment_top,
+        &col_x,
+        &row_h,
+        fragment_first,
+        t.rows,
+        section,
+        block,
+        frame,
+    );
 }
 
 /// Draw ONE page fragment of a table: rows `[first, last)` anchored at `frag_top` on the LAST page, as a
@@ -2327,6 +2804,157 @@ mod tests {
         };
         doc.sections.push(sec);
         doc
+    }
+
+    #[test]
+    fn explicit_columns_keep_all_three_layout_paths_in_lockstep_and_bounded() {
+        let columns = ColumnLayout {
+            widths: vec![2_000, 3_000],
+            gaps: vec![500],
+            separator: Some(ColumnSeparator {
+                color: Color {
+                    r: 255,
+                    g: 0,
+                    b: 0,
+                    a: 255,
+                },
+                style: LineStyle::Solid,
+                width_px: 0.5,
+            }),
+            ..ColumnLayout::default()
+        };
+        let mut first = para("가\n나\n다\n라\n마\n바\n사\n아\n자\n차");
+        first.column_layout_before = Some(columns);
+        let mut second = para("둘째 단");
+        second.column_break_before = true;
+        let mut table = Table {
+            rows: 2,
+            cols: 1,
+            ..Table::default()
+        };
+        for row in 0..2 {
+            table.cells.push(Cell {
+                row,
+                col: 0,
+                row_span: 1,
+                col_span: 1,
+                active: true,
+                blocks: vec![Block::Paragraph(para("표"))],
+                ..Cell::default()
+            });
+        }
+        let mut doc = doc_with(vec![
+            Block::Paragraph(first),
+            Block::Paragraph(second),
+            Block::Table(table),
+        ]);
+        doc.sections[0].page = PageSetup {
+            width: 5_500,
+            height: 5_000,
+            margin_left: 0,
+            margin_right: 0,
+            margin_top: 0,
+            margin_bottom: 0,
+            ..PageSetup::default()
+        };
+
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let naive = crate::NaiveLayout
+            .layout(&doc, &ApproxFontMetrics)
+            .expect("column layout succeeds through the public engine");
+        let mapped = block_pages(&doc, &ApproxFontMetrics);
+        assert_eq!(placed.pages.len(), naive.pages.len(), "LOCKSTEP page count");
+        assert_eq!(mapped[0].len(), doc.sections[0].blocks.len());
+        for page in &placed.pages {
+            assert!(page.glyphs.iter().all(|glyph| {
+                (glyph.x >= 0.0 && glyph.x < 2_000.0) || (glyph.x >= 2_500.0 && glyph.x < 5_500.0)
+            }));
+            assert!(page.tables.iter().all(|table| {
+                (table.x >= 0.0 && table.x + table.w <= 2_000.0)
+                    || (table.x >= 2_500.0 && table.x + table.w <= 5_500.0)
+            }));
+            assert!(page.lines.iter().any(|line| {
+                line.x1 == 2_250.0 && line.x2 == 2_250.0 && line.color.r == 255 && line.width == 0.5
+            }));
+        }
+        let second_column_has_content = placed.pages.iter().any(|page| {
+            page.glyphs.iter().any(|glyph| glyph.x >= 2_500.0)
+                || page.tables.iter().any(|table| table.x >= 2_500.0)
+        });
+        assert!(
+            second_column_has_content,
+            "explicit column break advances flow"
+        );
+    }
+
+    #[test]
+    fn unequal_rtl_columns_page_break_zone_change_and_section_transition_are_lockstep() {
+        let rtl = ColumnLayout {
+            direction: ColumnDirection::RightToLeft,
+            widths: vec![1_000, 2_000, 3_000],
+            gaps: vec![500, 500],
+            ..ColumnLayout::default()
+        };
+        let mut first = para("첫");
+        first.column_layout_before = Some(rtl.clone());
+        let mut second = para("둘");
+        second.column_break_before = true;
+        let mut third = para("셋");
+        third.page_break_before = true;
+        let mut one_column = para("통단");
+        one_column.column_layout_before = Some(ColumnLayout {
+            widths: vec![7_000],
+            gaps: Vec::new(),
+            ..ColumnLayout::default()
+        });
+        let mut doc = doc_with(vec![
+            Block::Paragraph(first),
+            Block::Paragraph(second),
+            Block::Paragraph(third),
+            Block::Paragraph(one_column),
+        ]);
+        doc.sections[0].page = PageSetup {
+            width: 7_000,
+            height: 4_000,
+            margin_left: 0,
+            margin_right: 0,
+            margin_top: 0,
+            margin_bottom: 0,
+            ..PageSetup::default()
+        };
+        let mut next_section = Section {
+            blocks: vec![Block::Paragraph({
+                let mut paragraph = para("다음 구역");
+                paragraph.column_layout_before = Some(rtl);
+                paragraph
+            })],
+            page: doc.sections[0].page,
+            ..Section::default()
+        };
+        next_section.page.columns = 3;
+        doc.sections.push(next_section);
+
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let naive = crate::NaiveLayout
+            .layout(&doc, &ApproxFontMetrics)
+            .expect("layout");
+        let mapped = block_pages(&doc, &ApproxFontMetrics);
+        assert_eq!(placed.pages.len(), naive.pages.len());
+        assert_eq!(mapped.len(), 2);
+        assert!(placed.pages[0]
+            .glyphs
+            .iter()
+            .any(|glyph| glyph.x >= 4_000.0));
+        assert!(placed.pages[0]
+            .glyphs
+            .iter()
+            .any(|glyph| (1_500.0..4_000.0).contains(&glyph.x)));
+        assert!(placed.pages.len() >= 3, "page break + section transition");
+        assert!(placed.pages[1]
+            .glyphs
+            .iter()
+            .any(|glyph| glyph.x >= 4_000.0));
+        assert!(placed.pages[1].glyphs.iter().any(|glyph| glyph.x < 1_000.0));
     }
 
     #[test]

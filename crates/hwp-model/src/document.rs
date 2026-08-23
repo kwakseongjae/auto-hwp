@@ -207,6 +207,14 @@ pub struct Paragraph {
     /// `column_type == Page/Section` (NOT the shared para_shape's attr1 bit19, which can't carry a
     /// per-paragraph break). Pagination forces a fresh page when set, OR'd with the para_shape flag.
     pub page_break_before: bool,
+    /// A hard 단 나누기 before this paragraph. In a multi-column zone this advances to the
+    /// next column, or to column zero on a fresh page when the current column is the last one.
+    pub column_break_before: bool,
+    /// A new source-neutral column zone beginning before this paragraph. HWP5 stores this as a
+    /// `cold` control and HWPX as a section/column property. Keeping the geometry on the paragraph
+    /// (rather than only on [`PageSetup`]) preserves documents that switch 1→2→1 columns inside a
+    /// section. `None` means the preceding zone remains active.
+    pub column_layout_before: Option<ColumnLayout>,
     /// This (empty) paragraph is a pure TABLE/object ANCHOR — in HWP a table control hangs off a host
     /// paragraph; the lift emits that host as an empty `Paragraph` immediately before the `Table` block.
     /// Hancom reserves NO line for such an anchor, so pagination skips its height (a genuine blank
@@ -655,6 +663,53 @@ pub enum DiagonalKind {
     Cross,
 }
 
+/// How content is distributed across a column zone.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ColumnKind {
+    #[default]
+    Normal,
+    Distribute,
+    Parallel,
+}
+
+/// Physical order in which columns receive content.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ColumnDirection {
+    #[default]
+    LeftToRight,
+    RightToLeft,
+}
+
+/// Optional rule drawn in the middle of every inter-column gap.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ColumnSeparator {
+    pub color: crate::types::Color,
+    pub style: LineStyle,
+    /// Device-pixel stroke width, shared by the SVG and PDF paint sinks.
+    pub width_px: f64,
+}
+
+/// Absolute, source-neutral column geometry in HWPUNIT.
+///
+/// `widths` has one positive entry per column and `gaps` has exactly `widths.len()-1` non-negative
+/// entries. Parsers must resolve source-specific proportional encodings before constructing this IR.
+/// The empty default is the implicit one-column body box and avoids baking a page width into a new
+/// document before its [`PageSetup`] is known.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ColumnLayout {
+    pub kind: ColumnKind,
+    pub direction: ColumnDirection,
+    pub widths: Vec<HwpUnit>,
+    pub gaps: Vec<HwpUnit>,
+    pub separator: Option<ColumnSeparator>,
+}
+
+impl ColumnLayout {
+    pub fn count(&self) -> usize {
+        self.widths.len().max(1)
+    }
+}
+
 impl Cell {
     fn any_dirty(&self) -> bool {
         self.dirty.is_dirty() || self.blocks.iter().any(Block::any_dirty)
@@ -790,6 +845,9 @@ impl SemanticDoc {
         }
         fn para(p: &Paragraph) -> usize {
             os(&p.style_name)
+                + p.column_layout_before.as_ref().map_or(0, |columns| {
+                    (columns.widths.len() + columns.gaps.len()) * size_of::<HwpUnit>()
+                })
                 + p.source
                     .as_ref()
                     .map_or(0, |src| os(&src.para_pr) + os(&src.style) + os(&src.id))

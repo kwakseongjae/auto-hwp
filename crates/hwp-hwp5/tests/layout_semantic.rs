@@ -30,6 +30,14 @@ enum Mutation {
     DuplicatePageDef,
     BadControlFrame,
     UnsupportedBinding,
+    Column2,
+    ColumnUnequal,
+    BadColumnPayload,
+    BadColumnTrailingGap,
+    BadColumnDirection,
+    BadColumnKind,
+    ColumnBreakWithoutDefinition,
+    MidSectionSeparator,
 }
 
 #[test]
@@ -177,6 +185,109 @@ fn rejects_non_integral_line_segment_payload() {
     ));
 }
 
+#[test]
+fn parses_equal_width_column_definition_into_absolute_shared_geometry() {
+    let doc = OwnHwp5Parser::new()
+        .parse(&fixture(Mutation::Column2))
+        .expect("owned column fixture parses");
+    let Block::Paragraph(paragraph) = &doc.sections[0].blocks[0] else {
+        panic!("expected paragraph")
+    };
+    let columns = paragraph
+        .column_layout_before
+        .as_ref()
+        .expect("cold control becomes shared geometry");
+    assert_eq!(columns.widths, vec![20_760, 20_760]);
+    assert_eq!(columns.gaps, vec![1_000]);
+    let separator = columns.separator.expect("separator parsed");
+    assert_eq!(separator.style, hwp_model::document::LineStyle::Solid);
+    assert_eq!(separator.color.r, 255);
+    assert_eq!(separator.width_px, 0.5);
+    assert_eq!(doc.sections[0].page.columns, 2);
+}
+
+#[test]
+fn rejects_truncated_column_definition_without_partial_semantics() {
+    assert!(matches!(
+        OwnHwp5Parser::new().parse(&fixture(Mutation::BadColumnPayload)),
+        Err(Error::MalformedRecord {
+            tag: TAG_CTRL_HEADER,
+            section: Some(0),
+            reason: "equal-width column definition is not exactly 16 bytes",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn resolves_unequal_proportional_columns_without_leaking_raw_weights() {
+    let doc = OwnHwp5Parser::new()
+        .parse(&fixture(Mutation::ColumnUnequal))
+        .expect("owned unequal column fixture parses");
+    let Block::Paragraph(paragraph) = &doc.sections[0].blocks[0] else {
+        panic!("expected paragraph")
+    };
+    let columns = paragraph.column_layout_before.as_ref().expect("columns");
+    assert_eq!(columns.widths, vec![6_858, 13_716, 20_576]);
+    assert_eq!(columns.gaps, vec![685, 685]);
+    assert_eq!(
+        columns.widths.iter().sum::<i32>() + columns.gaps.iter().sum::<i32>(),
+        42_520,
+        "absolute geometry exactly fills the page body"
+    );
+}
+
+#[test]
+fn rejects_hostile_unequal_tail_and_unknown_direction() {
+    assert!(matches!(
+        OwnHwp5Parser::new().parse(&fixture(Mutation::BadColumnTrailingGap)),
+        Err(Error::MalformedRecord {
+            reason: "column definition has a trailing gap after the last column",
+            ..
+        })
+    ));
+    assert!(matches!(
+        OwnHwp5Parser::new().parse(&fixture(Mutation::BadColumnDirection)),
+        Err(Error::MalformedRecord {
+            reason: "column definition direction is not supported",
+            ..
+        })
+    ));
+    assert!(matches!(
+        OwnHwp5Parser::new().parse(&fixture(Mutation::BadColumnKind)),
+        Err(Error::MalformedRecord {
+            reason: "column distribution kind is not yet supported",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn rejects_column_break_before_any_owned_column_zone() {
+    assert!(matches!(
+        OwnHwp5Parser::new().parse(&fixture(Mutation::ColumnBreakWithoutDefinition)),
+        Err(Error::MalformedRecord {
+            tag: TAG_PARA_HEADER,
+            section: Some(0),
+            reason: "column break appears before an owned column definition",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn rejects_mid_section_separator_without_owned_vertical_span() {
+    assert!(matches!(
+        OwnHwp5Parser::new().parse(&fixture(Mutation::MidSectionSeparator)),
+        Err(Error::MalformedRecord {
+            tag: TAG_PARA_HEADER,
+            section: Some(0),
+            reason: "column separator zone must begin with its section",
+            ..
+        })
+    ));
+}
+
 fn fixture(mutation: Mutation) -> Vec<u8> {
     let mut header = vec![0; 256];
     header[..HWP_SIGNATURE.len()].copy_from_slice(HWP_SIGNATURE);
@@ -199,11 +310,36 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
 
     let mut body = Vec::new();
     let mut section_text = extended_control(0x0002, CTRL_SECTION_DEF);
+    let has_columns = matches!(
+        mutation,
+        Mutation::Column2
+            | Mutation::ColumnUnequal
+            | Mutation::BadColumnPayload
+            | Mutation::BadColumnTrailingGap
+            | Mutation::BadColumnDirection
+            | Mutation::BadColumnKind
+    );
+    if has_columns {
+        section_text.extend(extended_control(0x0002, u32::from_be_bytes(*b"cold")));
+    }
     if matches!(mutation, Mutation::BadControlFrame) {
         section_text[7] = 0;
     }
     section_text.push(0x000d);
-    push_para_header(&mut body, section_text.len() as u32, 1 << 2, 1, 0);
+    push_para_header_with_break(
+        &mut body,
+        section_text.len() as u32,
+        1 << 2,
+        1,
+        0,
+        if has_columns {
+            0x03
+        } else if matches!(mutation, Mutation::ColumnBreakWithoutDefinition) {
+            0x08
+        } else {
+            0
+        },
+    );
     push_record(&mut body, TAG_PARA_TEXT, 1, &utf16_bytes(&section_text));
     push_record(&mut body, TAG_PARA_CHAR_SHAPE, 1, &shape_refs(&[(0, 0)]));
     let mut section_control = Vec::with_capacity(28);
@@ -218,30 +354,97 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
             push_record(&mut body, TAG_PAGE_DEF, 2, &page_def(mutation));
         }
     }
-
-    let declared_lines = if matches!(mutation, Mutation::BadLineCount) {
-        2
-    } else {
-        1
-    };
-    push_para_header(&mut body, 1, 0, 1, declared_lines);
-    push_record(&mut body, TAG_PARA_TEXT, 1, &utf16_bytes(&[0x000d]));
-    push_record(&mut body, TAG_PARA_CHAR_SHAPE, 1, &shape_refs(&[(0, 0)]));
-    let start = if matches!(mutation, Mutation::BadLineBoundary) {
-        1
-    } else {
-        0
-    };
-    let (height, text_height, baseline) = if matches!(mutation, Mutation::ZeroHeightLine) {
-        (0, 0, 0)
-    } else {
-        (1_500, 1_200, 900)
-    };
-    let mut line = line_seg(start, height, text_height, baseline);
-    if matches!(mutation, Mutation::BadLineLength) {
-        line.pop();
+    if has_columns {
+        let mut column = Vec::new();
+        column.extend_from_slice(&u32::from_be_bytes(*b"cold").to_le_bytes());
+        if matches!(
+            mutation,
+            Mutation::ColumnUnequal | Mutation::BadColumnTrailingGap
+        ) {
+            column.extend_from_slice(&(3u16 << 2).to_le_bytes());
+            column.extend_from_slice(&0u16.to_le_bytes());
+            for (width, gap) in [
+                (10_000u16, 1_000u16),
+                (20_000, 1_000),
+                (
+                    30_000,
+                    u16::from(matches!(mutation, Mutation::BadColumnTrailingGap)),
+                ),
+            ] {
+                column.extend_from_slice(&width.to_le_bytes());
+                column.extend_from_slice(&gap.to_le_bytes());
+            }
+            column.extend([0; 6]);
+        } else {
+            let direction = if matches!(mutation, Mutation::BadColumnDirection) {
+                2u16 << 10
+            } else {
+                0
+            };
+            let kind = u16::from(matches!(mutation, Mutation::BadColumnKind));
+            column.extend_from_slice(&((2u16 << 2) | (1 << 12) | direction | kind).to_le_bytes());
+            column.extend_from_slice(&1_000u16.to_le_bytes());
+            column.extend_from_slice(&0u16.to_le_bytes());
+            column.push(if matches!(mutation, Mutation::Column2) {
+                1
+            } else {
+                0
+            });
+            column.push(0);
+            column.extend_from_slice(
+                &if matches!(mutation, Mutation::Column2) {
+                    0x0000_00ffu32
+                } else {
+                    0
+                }
+                .to_le_bytes(),
+            );
+        }
+        if matches!(mutation, Mutation::BadColumnPayload) {
+            column.pop();
+        }
+        push_record(&mut body, TAG_CTRL_HEADER, 1, &column);
     }
-    push_record(&mut body, TAG_PARA_LINE_SEG, 1, &line);
+
+    if matches!(mutation, Mutation::MidSectionSeparator) {
+        let mut text = extended_control(0x0002, u32::from_be_bytes(*b"cold"));
+        text.push(0x000d);
+        push_para_header_with_break(&mut body, text.len() as u32, 1 << 2, 1, 0, 0x02);
+        push_record(&mut body, TAG_PARA_TEXT, 1, &utf16_bytes(&text));
+        push_record(&mut body, TAG_PARA_CHAR_SHAPE, 1, &shape_refs(&[(0, 0)]));
+        let mut column = Vec::with_capacity(16);
+        column.extend_from_slice(&u32::from_be_bytes(*b"cold").to_le_bytes());
+        column.extend_from_slice(&((2u16 << 2) | (1 << 12)).to_le_bytes());
+        column.extend_from_slice(&1_000u16.to_le_bytes());
+        column.extend_from_slice(&0u16.to_le_bytes());
+        column.extend_from_slice(&[1, 0]);
+        column.extend_from_slice(&0x0000_00ffu32.to_le_bytes());
+        push_record(&mut body, TAG_CTRL_HEADER, 1, &column);
+    } else {
+        let declared_lines = if matches!(mutation, Mutation::BadLineCount) {
+            2
+        } else {
+            1
+        };
+        push_para_header(&mut body, 1, 0, 1, declared_lines);
+        push_record(&mut body, TAG_PARA_TEXT, 1, &utf16_bytes(&[0x000d]));
+        push_record(&mut body, TAG_PARA_CHAR_SHAPE, 1, &shape_refs(&[(0, 0)]));
+        let start = if matches!(mutation, Mutation::BadLineBoundary) {
+            1
+        } else {
+            0
+        };
+        let (height, text_height, baseline) = if matches!(mutation, Mutation::ZeroHeightLine) {
+            (0, 0, 0)
+        } else {
+            (1_500, 1_200, 900)
+        };
+        let mut line = line_seg(start, height, text_height, baseline);
+        if matches!(mutation, Mutation::BadLineLength) {
+            line.pop();
+        }
+        push_record(&mut body, TAG_PARA_LINE_SEG, 1, &line);
+    }
 
     let mut compound = CompoundFile::create(Cursor::new(Vec::new())).unwrap();
     {
@@ -310,12 +513,23 @@ fn push_para_header(
     char_shapes: u16,
     line_segments: u16,
 ) {
+    push_para_header_with_break(out, char_count, control_mask, char_shapes, line_segments, 0);
+}
+
+fn push_para_header_with_break(
+    out: &mut Vec<u8>,
+    char_count: u32,
+    control_mask: u32,
+    char_shapes: u16,
+    line_segments: u16,
+    break_type: u8,
+) {
     let mut data = Vec::with_capacity(22);
     data.extend_from_slice(&char_count.to_le_bytes());
     data.extend_from_slice(&control_mask.to_le_bytes());
     data.extend_from_slice(&0u16.to_le_bytes());
     data.push(0);
-    data.push(0);
+    data.push(break_type);
     data.extend_from_slice(&char_shapes.to_le_bytes());
     data.extend_from_slice(&0u16.to_le_bytes());
     data.extend_from_slice(&line_segments.to_le_bytes());

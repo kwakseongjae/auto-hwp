@@ -5,6 +5,47 @@
 
 ---
 
+## 2026-08-23 (Codex sol) · #161 PR #163 posted
+- verified `c751833` push + PR #163 (`Closes #161`, `Refs #94 #160`).
+- strict normal columns/LOCKSTEP/shared SVG·PDF/fail-closed boundaries and full evidence published.
+- production route·rhwp·generated drift 0.
+- 다음 state commit push→required CI/review/comment→green 자율 병합.
+
+## 2026-08-23 (Codex sol) · #161 ready for PR
+- final quick green + PDF column line direct replay produced=1/replayed=1/stubbed=0.
+- full Vitest 1,018(별도 proxy11 포함), Chromium 85 pass/3 skip; temporary links removed.
+- final security/diff: content/path/hash/credential/fallback·route/rhwp/generated drift 0.
+- 다음 commit/push→PR #161/required CI→green 자율 병합.
+
+## 2026-08-23 (Codex sol) · #161 full green + separator span hardening
+- full Rust/PDF/wasm/JS/Vitest 1,007 green; Chromium 85 pass/3 intentional skip/0 fail.
+- mid-section separator zone도 정확한 span 소유 전 fail-closed; hwp-hwp5 42/clippy/wasm green.
+- 임시 dependency link 제거, production/rhwp/generated diff 0.
+- 다음 final quick→diff→PR #161/CI/자율 병합.
+
+## 2026-08-23 (Codex sol) · #161 quick green
+- rhwp governance/fmt/clippy/workspace+rhwp/PDF51/parity/canonical 8·18·24+98.9% 전부 green.
+- public corpus 84·oracle82·HWPX lock·wasm32·licenses green; private 실물 gate만 정책상 skip.
+- production route·external/rhwp·generated wasm diff 0.
+- 다음 full→final diff→PR #161/CI/자율 병합.
+
+## 2026-08-23 (Codex sol) · #161 meaning boundary hardening
+- HWP5는 normal 1~32단/LTR·RTL만 owned; distribute/parallel은 fail-closed.
+- 최초 zone 전 단나누기·구분선 포함 복수 zone도 정적 오류로 거부해 거짓 지원 제거.
+- hwp-hwp5 41·typeset 90+4·render 17+3, touched clippy/wasm32 green; route/rhwp/generated diff 0.
+- 다음 quick→full→PR #161/CI/자율 병합.
+
+## 2026-08-23 (Codex sol) · #161 column focused green
+- source-neutral column IR + strict HWP5 cold parser; proportional→absolute body geometry.
+- public place_doc/NaiveLayout/block_pages 동시 column lane, 문단·표 경계/LOCKSTEP + SVG/PDF 구분선.
+- hwp-hwp5 38·typeset 83 + focused clippy green; public boundary 0x42→0x47/431..451.
+- 다음 unequal/3단·RTL·zone/page/column/hostile 확장→quick/full; production/rhwp 불변.
+
+## 2026-08-23 (Codex sol) · PR #162 병합 → #161 착수
+- #162 required CI/CLEAN·댓글 0 확인 후 main `a5c1125` 병합; #160 close·원격 branch 정리.
+- #94 경계 동기화, latest-main `codex/issue-161-hwp5-columns` 시작.
+- 다음 column IR→strict cold parser→LOCKSTEP multi-column layout; production/rhwp 불변.
+
 ## 2026-08-23 (Codex sol) · #160 PR #162
 - commit `75f5ad5` push, PR #162(`Closes #160`, `Refs #94 #158 #161`) 게시.
 - 다음 required CI/review 감시→green 자율 병합→#161 column IR/LOCKSTEP.

@@ -75,6 +75,160 @@ pub fn body_box(page: &PageSetup) -> (f64, f64, f64, f64) {
     (left as f64, top as f64, w, h)
 }
 
+/// One column body box relative to the section body's left edge. Returned in **flow order**; an RTL
+/// layout therefore yields the physically rightmost box first while every `x` remains page-relative.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ColumnBox {
+    pub x: f64,
+    pub width: f64,
+}
+
+/// Resolve source-neutral absolute column geometry against the actual body width. The empty/default
+/// layout is exactly the historic single-column body. Invalid editor-created geometry degrades to a
+/// single bounded column; strict file parsers reject it before it reaches this defensive layer.
+pub fn column_boxes(layout: &ColumnLayout, body_w: f64) -> Vec<ColumnBox> {
+    if layout.widths.is_empty()
+        || layout.widths.iter().any(|width| *width <= 0)
+        || layout.gaps.len() + 1 != layout.widths.len()
+        || layout.gaps.iter().any(|gap| *gap < 0)
+    {
+        return vec![ColumnBox {
+            x: 0.0,
+            width: body_w.max(1.0),
+        }];
+    }
+
+    let raw_total = layout.widths.iter().map(|value| *value as f64).sum::<f64>()
+        + layout.gaps.iter().map(|value| *value as f64).sum::<f64>();
+    if raw_total <= 0.0 {
+        return vec![ColumnBox {
+            x: 0.0,
+            width: body_w.max(1.0),
+        }];
+    }
+    // Small integer-rounding residue is absorbed by the same scale as a defensive over-wide input;
+    // this guarantees the final box cannot escape the body right edge.
+    let scale = body_w.max(1.0) / raw_total;
+    let mut x = 0.0;
+    let mut boxes = Vec::with_capacity(layout.widths.len());
+    for (index, width) in layout.widths.iter().enumerate() {
+        let width = *width as f64 * scale;
+        boxes.push(ColumnBox { x, width });
+        if let Some(gap) = layout.gaps.get(index) {
+            x += width + *gap as f64 * scale;
+        }
+    }
+    if layout.direction == ColumnDirection::RightToLeft {
+        boxes.reverse();
+    }
+    boxes
+}
+
+/// Shared vertical/column cursor used by all three pagination paths. Keeping transitions here makes
+/// page-count LOCKSTEP structural instead of relying on three hand-copied interpretations.
+#[derive(Clone, Debug)]
+pub(crate) struct ColumnFlow {
+    boxes: Vec<ColumnBox>,
+    column: usize,
+    zone_top: f64,
+    vert: f64,
+    max_vert: f64,
+}
+
+impl ColumnFlow {
+    pub(crate) fn new(body_w: f64) -> Self {
+        Self {
+            boxes: column_boxes(&ColumnLayout::default(), body_w),
+            column: 0,
+            zone_top: 0.0,
+            vert: 0.0,
+            max_vert: 0.0,
+        }
+    }
+
+    pub(crate) fn box_now(&self) -> ColumnBox {
+        self.boxes[self.column]
+    }
+
+    pub(crate) fn column_index(&self) -> usize {
+        self.column
+    }
+
+    pub(crate) fn min_width(&self) -> f64 {
+        self.boxes
+            .iter()
+            .map(|column| column.width)
+            .fold(f64::INFINITY, f64::min)
+            .max(1.0)
+    }
+
+    pub(crate) fn y(&self) -> f64 {
+        self.zone_top + self.vert
+    }
+
+    pub(crate) fn vert(&self) -> f64 {
+        self.vert
+    }
+
+    pub(crate) fn add(&mut self, value: f64) {
+        self.vert += value;
+        self.max_vert = self.max_vert.max(self.vert);
+    }
+
+    pub(crate) fn available_height(&self, body_h: f64) -> f64 {
+        (body_h - self.zone_top).max(1.0)
+    }
+
+    /// Advance to the next flow column. Returns true when the caller must create a fresh page.
+    pub(crate) fn advance_column(&mut self) -> bool {
+        self.max_vert = self.max_vert.max(self.vert);
+        if self.column + 1 < self.boxes.len() {
+            self.column += 1;
+            self.vert = 0.0;
+            false
+        } else {
+            self.reset_page();
+            true
+        }
+    }
+
+    pub(crate) fn reset_page(&mut self) {
+        self.column = 0;
+        self.zone_top = 0.0;
+        self.vert = 0.0;
+        self.max_vert = 0.0;
+    }
+
+    /// Close the current column zone at its greatest consumed height and activate new geometry.
+    /// Returns true when the new zone cannot start on this page and must begin on a fresh page.
+    pub(crate) fn start_zone(&mut self, layout: &ColumnLayout, body_w: f64, body_h: f64) -> bool {
+        self.max_vert = self.max_vert.max(self.vert);
+        self.zone_top += self.max_vert;
+        self.boxes = column_boxes(layout, body_w);
+        self.column = 0;
+        self.vert = 0.0;
+        self.max_vert = 0.0;
+        if self.zone_top >= body_h {
+            self.reset_page();
+            true
+        } else {
+            false
+        }
+    }
+}
+
+fn uses_column_flow(doc: &SemanticDoc) -> bool {
+    doc.sections.iter().any(|section| {
+        section.blocks.iter().any(|block| {
+            matches!(
+                block,
+                Block::Paragraph(paragraph)
+                    if paragraph.column_layout_before.is_some() || paragraph.column_break_before
+            )
+        })
+    })
+}
+
 /// 강제 쪽 나누기("쪽 나누기 앞에서")의 **블록 단위 단일 진실** — `sec.blocks[i]` 앞에서 쪽을
 /// 넘겨야 하면 `out[i] == true`. `NaiveLayout`·[`place_doc`]·[`block_pages`] 셋이 전부 이 하나를
 /// 거쳐야 LOCKSTEP 이 구조적으로 보장된다(불변식 #2 — 세 경로에 같은 판정을 세 번 손으로 적으면
@@ -309,6 +463,9 @@ pub struct NaiveLayout;
 
 impl LayoutEngine for NaiveLayout {
     fn layout(&self, doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Result<LayoutResult> {
+        if uses_column_flow(doc) {
+            return Ok(layout_columns(doc, fonts));
+        }
         let mut pages = vec![PageLayout::default()];
         for sec in &doc.sections {
             let page = &sec.page;
@@ -400,6 +557,95 @@ impl LayoutEngine for NaiveLayout {
         }
         Ok(LayoutResult { pages })
     }
+}
+
+/// Column-enabled pagination lane. The historic lane above remains byte-for-byte untouched and is
+/// selected for every document without an explicit column-zone/break signal.
+fn layout_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> LayoutResult {
+    let mut pages = vec![PageLayout::default()];
+    for section in &doc.sections {
+        let page = &section.page;
+        let (_, _, body_w, body_h) = body_box(page);
+        if !pages
+            .last()
+            .map(|value| value.lines.is_empty())
+            .unwrap_or(true)
+        {
+            pages.push(PageLayout::default());
+        }
+        if let Some(output) = pages.last_mut() {
+            let (width, height) = display_paper(page);
+            output.width = width as f64;
+            output.height = height as f64;
+        }
+        let breaks = section_page_breaks(section, doc);
+        let mut flow = ColumnFlow::new(body_w);
+        for (block_index, block) in section.blocks.iter().enumerate() {
+            match block {
+                Block::Paragraph(paragraph) => {
+                    let shape = doc.para_shapes.get(paragraph.para_shape);
+                    if let Some(columns) = &paragraph.column_layout_before {
+                        if flow.start_zone(columns, body_w, body_h) {
+                            pages.push(new_page(page));
+                        }
+                    }
+                    if breaks[block_index] && flow.y() > 0.0 {
+                        pages.push(new_page(page));
+                        flow.reset_page();
+                    } else if paragraph.column_break_before && flow.advance_column() {
+                        pages.push(new_page(page));
+                    }
+                    if paragraph.is_table_anchor {
+                        continue;
+                    }
+                    if flow.vert() > 0.0 {
+                        flow.add(shape.map(|value| value.space_before).unwrap_or(0).max(0) as f64);
+                    }
+                    let ratio = line_spacing_ratio(paragraph, doc);
+                    for mut line in layout_paragraph(paragraph, doc, flow.min_width(), fonts) {
+                        if flow.vert() + line.vert_size > flow.available_height(body_h)
+                            && flow.vert() > 0.0
+                            && flow.advance_column()
+                        {
+                            pages.push(new_page(page));
+                        }
+                        line.horz_pos += flow.box_now().x;
+                        let advance = line.vert_size * ratio;
+                        pages.last_mut().expect("page exists").lines.push(LineSeg {
+                            vert_pos: flow.y(),
+                            ..line
+                        });
+                        flow.add(advance);
+                    }
+                    flow.add(shape.map(|value| value.space_after).unwrap_or(0).max(0) as f64);
+                }
+                Block::Table(table) => {
+                    if breaks[block_index] && flow.y() > 0.0 {
+                        pages.push(new_page(page));
+                        flow.reset_page();
+                    }
+                    let promoted = unwrap_frame_table(table);
+                    let table = promoted.as_ref().map(|(inner, _)| inner).unwrap_or(table);
+                    if flow.vert() > 0.0 {
+                        flow.add(table.outer_margin_top.max(0) as f64);
+                    }
+                    for row_height in table_row_heights(table, flow.min_width(), doc, fonts) {
+                        let available = flow.available_height(body_h);
+                        if flow.vert() + row_height > available
+                            && flow.vert() > 0.0
+                            && row_height <= available
+                            && flow.advance_column()
+                        {
+                            pages.push(new_page(page));
+                        }
+                        flow.add(row_height);
+                    }
+                    flow.add(table.outer_margin_bottom.max(0) as f64);
+                }
+            }
+        }
+    }
+    LayoutResult { pages }
 }
 
 fn new_page(page: &PageSetup) -> PageLayout {
