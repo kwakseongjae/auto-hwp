@@ -3,7 +3,7 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
-- 갱신: 2026-08-24 · Codex(sol) — **#168 strict inline 1×1 table 구현·full green / PR 준비**.
+- 갱신: 2026-08-24 · Codex(sol) — **#168 strict inline 1×1 table 구현·full green / PR #169 게시**.
   자체 HWP5 파서가 exact `tbl ` marker/common-object/TABLE/LIST_HEADER/cell paragraph를 검증해
   treat-as-character 1×1 표를 source-neutral `Table`/`Cell` IR로 내린다. 셀/개체 geometry,
   inherited padding, CENTER alignment, border-fill refs를 range/shape 검증하고 visible host text,
@@ -19,8 +19,9 @@
   JS build·crosscheck·i18n, Vitest **1,007**이 green이고 Chromium **85 pass/3 intentional skip/0 fail**.
   fresh worktree node_modules와 sandbox port는 루트 설치 임시 링크/허용된 로컬 서버로 분리 검증 후
   링크를 제거했다. production route·HWPX parser/serializer·shared typesetter·`external/rhwp`·
-  generated asset diff 0이며 원문·경로·hash·raw payload는 공개하지 않았다. **다음:** 최종 diff→
-  commit/push/PR `Closes #168`→필수 CI·댓글 확인 후 자율 병합→#169 larger TABLE 936..982 분해.
+  generated asset diff 0이며 원문·경로·hash·raw payload는 공개하지 않았다. 구현 commit `12a754b`을
+  push하고 PR #169(`Closes #168`, `Refs #94 #164 #166`)를 게시했다. **다음:** 이 상태 commit push→
+  exact-head 필수 CI·mergeability·review/comment 확인 후 자율 병합→#170 larger TABLE 936..982 분해.
 
 - 갱신: 2026-08-23 · Codex(sol) — **#161 PR #163 게시**.
   검증 완료 commit `c751833`을 push하고 PR #163(`Closes #161`, `Refs #94 #160`)을 만들었다.

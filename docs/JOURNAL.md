@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #168 PR #169 posted
+- 구현 `12a754b` push + PR #169(`Closes #168`, `Refs #94 #164 #166`) 게시.
+- next GitHub 번호는 PR이 사용했으므로 larger TABLE 936..982 후속은 #170 issue-first.
+- 다음 state push→required CI/mergeability/review/comment→green 자율 병합→#170.
+
 ## 2026-08-24 (Codex sol) · #168 inline 1×1 table full green / PR ready
 - strict tbl/common-object/TABLE/LIST_HEADER/cell paragraph → shared Table/Cell IR.
 - secd extension·dormant notes·inert page border prerequisite와 typed duplicate collapse 소유.
