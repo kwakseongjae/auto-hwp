@@ -225,12 +225,44 @@ fn emit_rawparts(parts: &[RawPart]) -> Vec<RawPartBlob> {
 fn emit_section_meta(sec: &Section) -> SectionMeta {
     SectionMeta {
         page: PageSetupBlob::from(&sec.page),
+        page_number: sec.page_number.map(emit_page_number),
         page_edited: sec.page_edited,
         provenance_raw_b64: sec.provenance.raw.as_ref().map(|r| b64(r)),
         provenance_source: sec.provenance.source.map(|s| s.as_str().to_string()),
         passthrough: emit_rawparts(&sec.passthrough.parts),
         dirty: sec.dirty.is_dirty(),
         decorations: sec.decorations.iter().map(emit_decoration).collect(),
+    }
+}
+
+fn emit_page_number(number: PageNumberDecoration) -> PageNumberBlob {
+    PageNumberBlob {
+        format: match number.format {
+            PageNumberFormat::Digit => "digit",
+            PageNumberFormat::CircledDigit => "circled-digit",
+            PageNumberFormat::RomanUpper => "roman-upper",
+            PageNumberFormat::RomanLower => "roman-lower",
+            PageNumberFormat::LatinUpper => "latin-upper",
+            PageNumberFormat::LatinLower => "latin-lower",
+        }
+        .into(),
+        position: match number.position {
+            PageNumberPosition::None => "none",
+            PageNumberPosition::TopLeft => "top-left",
+            PageNumberPosition::TopCenter => "top-center",
+            PageNumberPosition::TopRight => "top-right",
+            PageNumberPosition::BottomLeft => "bottom-left",
+            PageNumberPosition::BottomCenter => "bottom-center",
+            PageNumberPosition::BottomRight => "bottom-right",
+            PageNumberPosition::OutsideTop => "outside-top",
+            PageNumberPosition::OutsideBottom => "outside-bottom",
+            PageNumberPosition::InsideTop => "inside-top",
+            PageNumberPosition::InsideBottom => "inside-bottom",
+        }
+        .into(),
+        prefix: number.prefix,
+        suffix: number.suffix,
+        dash: number.dash,
     }
 }
 
@@ -740,6 +772,11 @@ pub fn parse(proj: &JsxCssProject) -> Result<SemanticDoc> {
         doc.sections.push(Section {
             blocks,
             page: meta.page.into(),
+            page_number: meta
+                .page_number
+                .as_ref()
+                .map(parse_page_number)
+                .transpose()?,
             page_edited: meta.page_edited,
             decorations: meta
                 .decorations
@@ -766,6 +803,43 @@ pub fn parse(proj: &JsxCssProject) -> Result<SemanticDoc> {
     }
 
     Ok(doc)
+}
+
+fn parse_page_number(number: &PageNumberBlob) -> Result<PageNumberDecoration> {
+    let format = match number.format.as_str() {
+        "digit" => PageNumberFormat::Digit,
+        "circled-digit" => PageNumberFormat::CircledDigit,
+        "roman-upper" => PageNumberFormat::RomanUpper,
+        "roman-lower" => PageNumberFormat::RomanLower,
+        "latin-upper" => PageNumberFormat::LatinUpper,
+        "latin-lower" => PageNumberFormat::LatinLower,
+        other => return Err(Error::Parse(format!("unknown page-number format: {other}"))),
+    };
+    let position = match number.position.as_str() {
+        "none" => PageNumberPosition::None,
+        "top-left" => PageNumberPosition::TopLeft,
+        "top-center" => PageNumberPosition::TopCenter,
+        "top-right" => PageNumberPosition::TopRight,
+        "bottom-left" => PageNumberPosition::BottomLeft,
+        "bottom-center" => PageNumberPosition::BottomCenter,
+        "bottom-right" => PageNumberPosition::BottomRight,
+        "outside-top" => PageNumberPosition::OutsideTop,
+        "outside-bottom" => PageNumberPosition::OutsideBottom,
+        "inside-top" => PageNumberPosition::InsideTop,
+        "inside-bottom" => PageNumberPosition::InsideBottom,
+        other => {
+            return Err(Error::Parse(format!(
+                "unknown page-number position: {other}"
+            )))
+        }
+    };
+    Ok(PageNumberDecoration {
+        format,
+        position,
+        prefix: number.prefix,
+        suffix: number.suffix,
+        dash: number.dash,
+    })
 }
 
 fn err(s: String) -> Error {

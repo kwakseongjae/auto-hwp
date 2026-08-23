@@ -5,6 +5,24 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #164 full green / PR ready
+- full Rust/PDF51/canonical 8·18·24+98.9%/corpus84/oracle82/HWPX/wasm/licenses/JS green.
+- Vitest 1,018; Chromium 84 pass/3 intentional skip/1 retry-pass/0 fail.
+- final boundary 0x47/451..465; production route·rhwp·generated diff 0.
+- 다음 commit/push/PR #164→required CI/review/comment→green 자율 병합.
+
+## 2026-08-24 (Codex sol) · #164 pgnp focused green
+- source-neutral page-number IR + strict single-section HWP5 `pgnp`; multi-section inheritance fail-closed.
+- JSX side-channel/equality preserves semantics; final page index decoration keeps body/page LOCKSTEP.
+- HWP5 20, typeset focused 2, JSX round-trip, PDF 5 glyph replay green; public boundary 451..465.
+- 다음 full→security/diff→commit/push/PR #164→required CI/자율 병합; route/rhwp 불변.
+
+## 2026-08-24 (Codex sol) · PR #163 merged → #164 pgnp started
+- #163 required CI/CLEAN·댓글 0 후 main `80a35d7` 병합; #161 close·remote branch 정리.
+- #94 동기화; next 0x47/431..451 = content-free `pgnp`, raw payload 출력 없음.
+- child #164 + latest-main `codex/issue-164-hwp5-page-number` 시작.
+- 다음 page-number IR→strict parser→shared SVG/PDF paint; route/rhwp 불변.
+
 ## 2026-08-23 (Codex sol) · #161 PR #163 posted
 - verified `c751833` push + PR #163 (`Closes #161`, `Refs #94 #160`).
 - strict normal columns/LOCKSTEP/shared SVG·PDF/fail-closed boundaries and full evidence published.

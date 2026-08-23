@@ -2704,7 +2704,7 @@ fn place_section_decorations(
     doc: &SemanticDoc,
     fonts: &dyn FontMetricsProvider,
 ) {
-    if sec.decorations.is_empty() {
+    if sec.decorations.is_empty() && sec.page_number.is_none() {
         return;
     }
     let page = &sec.page;
@@ -2728,7 +2728,156 @@ fn place_section_decorations(
             };
             place_deco_blocks(pg, &deco.blocks, doc, fonts, left, y, band_w, h, page);
         }
+        if let Some(number) = sec.page_number {
+            place_page_number(
+                pg,
+                number,
+                i + 1,
+                fonts,
+                left,
+                header_y,
+                footer_y,
+                band_w,
+                header_h,
+                footer_h,
+            );
+        }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn place_page_number(
+    page: &mut PlacedPage,
+    decoration: PageNumberDecoration,
+    page_number: usize,
+    fonts: &dyn FontMetricsProvider,
+    left: f64,
+    header_y: f64,
+    footer_y: f64,
+    band_w: f64,
+    header_h: f64,
+    footer_h: f64,
+) {
+    if decoration.position == PageNumberPosition::None {
+        return;
+    }
+    let number = format_page_number(page_number, decoration.format);
+    let mut text = String::new();
+    if let Some(dash) = decoration.dash {
+        text.push(dash);
+    }
+    if let Some(prefix) = decoration.prefix {
+        text.push(prefix);
+    }
+    text.push_str(&number);
+    if let Some(suffix) = decoration.suffix {
+        text.push(suffix);
+    }
+    if let Some(dash) = decoration.dash {
+        text.push(dash);
+    }
+
+    let size = 1_000.0;
+    let key = FontKey {
+        family: String::new(),
+        bold: false,
+        italic: false,
+    };
+    let width = text
+        .chars()
+        .map(|ch| fonts.advance_width(&key, ch, size as i32))
+        .sum::<f64>();
+    let is_odd = page_number % 2 == 1;
+    let (top, height, horizontal) = match decoration.position {
+        PageNumberPosition::TopLeft => (header_y, header_h, 0),
+        PageNumberPosition::TopCenter => (header_y, header_h, 1),
+        PageNumberPosition::TopRight => (header_y, header_h, 2),
+        PageNumberPosition::BottomLeft => (footer_y, footer_h, 0),
+        PageNumberPosition::BottomCenter => (footer_y, footer_h, 1),
+        PageNumberPosition::BottomRight => (footer_y, footer_h, 2),
+        PageNumberPosition::OutsideTop => (header_y, header_h, usize::from(is_odd) * 2),
+        PageNumberPosition::OutsideBottom => (footer_y, footer_h, usize::from(is_odd) * 2),
+        PageNumberPosition::InsideTop => (header_y, header_h, usize::from(!is_odd) * 2),
+        PageNumberPosition::InsideBottom => (footer_y, footer_h, usize::from(!is_odd) * 2),
+        PageNumberPosition::None => return,
+    };
+    let mut x = match horizontal {
+        0 => left,
+        1 => left + (band_w - width) / 2.0,
+        _ => left + band_w - width,
+    };
+    let baseline = top + (height.max(size) - size) / 2.0 + BASELINE_RATIO * size;
+    for ch in text.chars() {
+        page.glyphs.push(PlacedGlyph {
+            x,
+            baseline,
+            ch,
+            size,
+            color: Color::default(),
+            underline: false,
+            bold: false,
+            italic: false,
+            font: None,
+            cluster: None,
+        });
+        x += fonts.advance_width(&key, ch, size as i32);
+    }
+}
+
+fn format_page_number(number: usize, format: PageNumberFormat) -> String {
+    match format {
+        PageNumberFormat::Digit => number.to_string(),
+        PageNumberFormat::CircledDigit if (1..=20).contains(&number) => {
+            char::from_u32(0x2460 + number as u32 - 1)
+                .expect("circled digit range is scalar")
+                .to_string()
+        }
+        PageNumberFormat::CircledDigit => number.to_string(),
+        PageNumberFormat::RomanUpper => format_roman(number, true),
+        PageNumberFormat::RomanLower => format_roman(number, false),
+        PageNumberFormat::LatinUpper => format_latin(number, true),
+        PageNumberFormat::LatinLower => format_latin(number, false),
+    }
+}
+
+fn format_roman(mut number: usize, upper: bool) -> String {
+    if number == 0 || number > 3_999 {
+        return number.to_string();
+    }
+    let values = [1_000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1];
+    let upper_symbols = [
+        "M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I",
+    ];
+    let lower_symbols = [
+        "m", "cm", "d", "cd", "c", "xc", "l", "xl", "x", "ix", "v", "iv", "i",
+    ];
+    let symbols = if upper {
+        &upper_symbols
+    } else {
+        &lower_symbols
+    };
+    let mut out = String::new();
+    for (value, symbol) in values.into_iter().zip(symbols) {
+        while number >= value {
+            out.push_str(symbol);
+            number -= value;
+        }
+    }
+    out
+}
+
+fn format_latin(mut number: usize, upper: bool) -> String {
+    if number == 0 {
+        return String::new();
+    }
+    let mut out = String::new();
+    while number != 0 {
+        number -= 1;
+        let base = if upper { b'A' } else { b'a' };
+        out.insert(0, (base + (number % 26) as u8) as char);
+        number /= 26;
+    }
+    out
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2955,6 +3104,170 @@ mod tests {
             .iter()
             .any(|glyph| glyph.x >= 4_000.0));
         assert!(placed.pages[1].glyphs.iter().any(|glyph| glyph.x < 1_000.0));
+    }
+
+    #[test]
+    fn page_number_decoration_does_not_change_pagination_or_body_geometry() {
+        let mut doc = doc_with(vec![Block::Paragraph(para(
+            "가\n나\n다\n라\n마\n바\n사\n아",
+        ))]);
+        doc.sections[0].page = PageSetup {
+            width: 5_000,
+            height: 3_000,
+            margin_left: 500,
+            margin_right: 500,
+            margin_top: 500,
+            margin_bottom: 500,
+            margin_header: 100,
+            margin_footer: 100,
+            ..PageSetup::default()
+        };
+        let without = place_doc(&doc, &ApproxFontMetrics);
+        doc.sections[0].page_number = Some(PageNumberDecoration {
+            format: PageNumberFormat::LatinUpper,
+            position: PageNumberPosition::BottomCenter,
+            prefix: Some('['),
+            suffix: Some(']'),
+            dash: Some('-'),
+        });
+
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let naive = crate::NaiveLayout
+            .layout(&doc, &ApproxFontMetrics)
+            .expect("page-number decoration keeps layout valid");
+        assert_eq!(placed.pages.len(), without.pages.len());
+        assert_eq!(placed.pages.len(), naive.pages.len());
+        assert!(placed.pages.len() >= 2);
+        for (before, after) in without.pages.iter().zip(&placed.pages) {
+            assert_eq!(before.rects.len(), after.rects.len());
+            assert_eq!(before.tables.len(), after.tables.len());
+            assert_eq!(before.images.len(), after.images.len());
+            assert!(after.glyphs.len() > before.glyphs.len());
+        }
+        let first_footer = placed.pages[0]
+            .glyphs
+            .iter()
+            .filter(|glyph| glyph.baseline > 2_400.0)
+            .map(|glyph| glyph.ch)
+            .collect::<String>();
+        let second_footer = placed.pages[1]
+            .glyphs
+            .iter()
+            .filter(|glyph| glyph.baseline > 2_400.0)
+            .map(|glyph| glyph.ch)
+            .collect::<String>();
+        assert_eq!(first_footer, "-[A]-");
+        assert_eq!(second_footer, "-[B]-");
+    }
+
+    #[test]
+    fn page_number_formats_are_deterministic_and_bounded() {
+        assert_eq!(format_page_number(20, PageNumberFormat::CircledDigit), "⑳");
+        assert_eq!(format_page_number(21, PageNumberFormat::CircledDigit), "21");
+        assert_eq!(format_page_number(14, PageNumberFormat::RomanUpper), "XIV");
+        assert_eq!(format_page_number(14, PageNumberFormat::RomanLower), "xiv");
+        assert_eq!(format_page_number(27, PageNumberFormat::LatinUpper), "AA");
+        assert_eq!(format_page_number(27, PageNumberFormat::LatinLower), "aa");
+    }
+
+    #[test]
+    fn page_number_positions_map_to_bands_and_duplex_edges() {
+        let decoration = |position| PageNumberDecoration {
+            format: PageNumberFormat::Digit,
+            position,
+            prefix: None,
+            suffix: None,
+            dash: None,
+        };
+        let placed = |position, number| {
+            let mut page = PlacedPage::default();
+            place_page_number(
+                &mut page,
+                decoration(position),
+                number,
+                &ApproxFontMetrics,
+                100.0,
+                200.0,
+                700.0,
+                600.0,
+                100.0,
+                100.0,
+            );
+            page.glyphs.first().map(|glyph| (glyph.x, glyph.baseline))
+        };
+
+        let top_left = placed(PageNumberPosition::TopLeft, 1).unwrap();
+        let top_center = placed(PageNumberPosition::TopCenter, 1).unwrap();
+        let top_right = placed(PageNumberPosition::TopRight, 1).unwrap();
+        let bottom_left = placed(PageNumberPosition::BottomLeft, 1).unwrap();
+        let bottom_center = placed(PageNumberPosition::BottomCenter, 1).unwrap();
+        let bottom_right = placed(PageNumberPosition::BottomRight, 1).unwrap();
+        assert!(top_left.0 < top_center.0 && top_center.0 < top_right.0);
+        assert!(bottom_left.0 < bottom_center.0 && bottom_center.0 < bottom_right.0);
+        assert_eq!(top_left.1, top_center.1);
+        assert_eq!(top_center.1, top_right.1);
+        assert_eq!(bottom_left.1, bottom_center.1);
+        assert_eq!(bottom_center.1, bottom_right.1);
+        assert!(top_left.1 < bottom_left.1);
+        assert!(placed(PageNumberPosition::None, 1).is_none());
+        assert_eq!(
+            placed(PageNumberPosition::OutsideTop, 1).unwrap().0,
+            top_right.0
+        );
+        assert_eq!(
+            placed(PageNumberPosition::OutsideTop, 2).unwrap().0,
+            top_left.0
+        );
+        assert_eq!(
+            placed(PageNumberPosition::InsideBottom, 1).unwrap().0,
+            bottom_left.0
+        );
+        assert_eq!(
+            placed(PageNumberPosition::InsideBottom, 2).unwrap().0,
+            bottom_right.0
+        );
+    }
+
+    #[test]
+    fn page_number_continues_from_final_page_order_across_sections() {
+        let mut doc = doc_with(vec![Block::Paragraph(para("가"))]);
+        doc.sections[0].page = PageSetup {
+            width: 5_000,
+            height: 3_000,
+            margin_left: 500,
+            margin_right: 500,
+            margin_top: 500,
+            margin_bottom: 500,
+            margin_header: 100,
+            margin_footer: 100,
+            ..PageSetup::default()
+        };
+        let number = PageNumberDecoration {
+            format: PageNumberFormat::Digit,
+            position: PageNumberPosition::BottomCenter,
+            prefix: None,
+            suffix: None,
+            dash: None,
+        };
+        doc.sections[0].page_number = Some(number);
+        doc.sections.push(Section {
+            blocks: vec![Block::Paragraph(para("나"))],
+            page: doc.sections[0].page,
+            page_number: Some(number),
+            ..Section::default()
+        });
+
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        assert_eq!(placed.pages.len(), 2);
+        let footer_text = |page: &PlacedPage| {
+            page.glyphs
+                .iter()
+                .filter(|glyph| glyph.baseline > 2_400.0)
+                .map(|glyph| glyph.ch)
+                .collect::<String>()
+        };
+        assert_eq!(footer_text(&placed.pages[0]), "1");
+        assert_eq!(footer_text(&placed.pages[1]), "2");
     }
 
     #[test]

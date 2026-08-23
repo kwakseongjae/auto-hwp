@@ -23,6 +23,7 @@ const TAG_PAGE_DEF: u16 = 0x49;
 
 const CTRL_SECTION_DEF: u32 = u32::from_be_bytes(*b"secd");
 const CTRL_COLUMN_DEF: u32 = u32::from_be_bytes(*b"cold");
+const CTRL_PAGE_NUM_POS: u32 = u32::from_be_bytes(*b"pgnp");
 
 #[derive(Clone, Copy, Debug, Default)]
 struct IdMappings {
@@ -123,6 +124,7 @@ pub(crate) fn parse_text_only(bytes: &[u8]) -> Result<SemanticDoc> {
             &doc,
             &pools.para_usage,
             &pools.styles,
+            pools.section_count == 1,
         )?);
     }
     Ok(doc)
@@ -926,10 +928,24 @@ fn parse_section(
     doc: &SemanticDoc,
     para_usage: &[ParaUsage],
     styles: &[StyleDef],
+    allow_page_number: bool,
 ) -> Result<Section> {
     let section = stream.section.expect("caller selected section streams");
+    if !allow_page_number {
+        if let Some(control) = stream.records.iter().find(|record| {
+            record.tag == TAG_CTRL_HEADER
+                && read_u32(data(stream, record), 0) == Some(CTRL_PAGE_NUM_POS)
+        }) {
+            return Err(malformed(
+                control,
+                Some(section),
+                "multi-section page-number inheritance is not yet supported",
+            ));
+        }
+    }
     let mut blocks = Vec::new();
     let mut page = None;
+    let mut page_number = None;
     let mut has_active_columns = false;
     let mut column_zone_count = 0usize;
     let mut separator_zone_seen = false;
@@ -977,6 +993,15 @@ fn parse_section(
                 ));
             }
         }
+        if let Some(parsed_page_number) = parsed.page_number {
+            if ordinal != 0 || page_number.replace(parsed_page_number).is_some() {
+                return Err(malformed(
+                    &stream.records[start],
+                    Some(section),
+                    "page-number position may occur only once and only in the first paragraph",
+                ));
+            }
+        }
         if parsed.paragraph.column_break_before
             && parsed.paragraph.column_layout_before.is_none()
             && !has_active_columns
@@ -1012,6 +1037,7 @@ fn parse_section(
     Ok(Section {
         blocks,
         page: page.unwrap_or_default(),
+        page_number,
         provenance: Provenance {
             source: Some(SourceFormat::Hwp5),
             raw: None,
@@ -1023,6 +1049,7 @@ fn parse_section(
 struct ParsedParagraph {
     paragraph: Paragraph,
     page: Option<PageSetup>,
+    page_number: Option<PageNumberDecoration>,
 }
 
 fn parse_paragraph(
@@ -1117,7 +1144,10 @@ fn parse_paragraph(
                         "structural CTRL_HEADER is shorter than its control id",
                     ));
                 };
-                if !matches!(control_id, CTRL_SECTION_DEF | CTRL_COLUMN_DEF) {
+                if !matches!(
+                    control_id,
+                    CTRL_SECTION_DEF | CTRL_COLUMN_DEF | CTRL_PAGE_NUM_POS
+                ) {
                     return Err(unsupported(record, section));
                 }
                 let start = cursor;
@@ -1167,6 +1197,7 @@ fn parse_paragraph(
     }
     let mut page = None;
     let mut raw_columns = None;
+    let mut page_number = None;
     for ((marker_offset, marker_id), (control, children)) in
         decoded.structural_controls.iter().zip(structural_controls)
     {
@@ -1198,6 +1229,20 @@ fn parse_paragraph(
                     ));
                 }
                 raw_columns = Some(parse_column_control(
+                    data(stream, control),
+                    control,
+                    section,
+                )?);
+            }
+            CTRL_PAGE_NUM_POS => {
+                if !children.is_empty() || page_number.is_some() {
+                    return Err(malformed(
+                        control,
+                        Some(section),
+                        "page-number position has children or is duplicated",
+                    ));
+                }
+                page_number = Some(parse_page_number_control(
                     data(stream, control),
                     control,
                     section,
@@ -1263,7 +1308,7 @@ fn parse_paragraph(
         runs,
         // Stored line boxes are only an authored-height hint for a true blank spacer.
         // They never dictate line breaks for visible text or a control-host paragraph.
-        source_line_metrics: if decoded.chars.is_empty() && page.is_none() {
+        source_line_metrics: if decoded.chars.is_empty() && decoded.structural_controls.is_empty() {
             line_metrics
         } else {
             Vec::new()
@@ -1277,7 +1322,99 @@ fn parse_paragraph(
     if let (Some(page), Some(layout)) = (&mut page, &paragraph.column_layout_before) {
         page.columns = u8::try_from(layout.count()).unwrap_or(u8::MAX);
     }
-    Ok(ParsedParagraph { paragraph, page })
+    Ok(ParsedParagraph {
+        paragraph,
+        page,
+        page_number,
+    })
+}
+
+fn parse_page_number_control(
+    bytes: &[u8],
+    record: &Record,
+    section: usize,
+) -> Result<PageNumberDecoration> {
+    if bytes.len() != 16 {
+        return Err(malformed(
+            record,
+            Some(section),
+            "page-number position is not exactly 16 bytes",
+        ));
+    }
+    if read_u32(bytes, 0) != Some(CTRL_PAGE_NUM_POS) {
+        return Err(unsupported(*record, section));
+    }
+    let attr = read_u32(bytes, 4).expect("exact length checked");
+    if attr & !0x0fff != 0 {
+        return Err(malformed(
+            record,
+            Some(section),
+            "page-number position has unknown attribute bits",
+        ));
+    }
+    let format = match attr & 0xff {
+        0 => PageNumberFormat::Digit,
+        1 => PageNumberFormat::CircledDigit,
+        2 => PageNumberFormat::RomanUpper,
+        3 => PageNumberFormat::RomanLower,
+        4 => PageNumberFormat::LatinUpper,
+        5 => PageNumberFormat::LatinLower,
+        _ => {
+            return Err(malformed(
+                record,
+                Some(section),
+                "page-number format is not yet supported",
+            ))
+        }
+    };
+    let position = match (attr >> 8) & 0x0f {
+        0 => PageNumberPosition::None,
+        1 => PageNumberPosition::TopLeft,
+        2 => PageNumberPosition::TopCenter,
+        3 => PageNumberPosition::TopRight,
+        4 => PageNumberPosition::BottomLeft,
+        5 => PageNumberPosition::BottomCenter,
+        6 => PageNumberPosition::BottomRight,
+        7 => PageNumberPosition::OutsideTop,
+        8 => PageNumberPosition::OutsideBottom,
+        9 => PageNumberPosition::InsideTop,
+        10 => PageNumberPosition::InsideBottom,
+        _ => {
+            return Err(malformed(
+                record,
+                Some(section),
+                "page-number position is not supported",
+            ))
+        }
+    };
+    let scalar = |at: usize| -> Result<Option<char>> {
+        let unit = read_u16(bytes, at).expect("exact length checked");
+        if unit == 0 {
+            return Ok(None);
+        }
+        if (0xd800..=0xdfff).contains(&unit) {
+            return Err(malformed(
+                record,
+                Some(section),
+                "page-number decoration contains a surrogate code unit",
+            ));
+        }
+        Ok(char::from_u32(u32::from(unit)))
+    };
+    if scalar(8)?.is_some() {
+        return Err(malformed(
+            record,
+            Some(section),
+            "page-number user-symbol semantics are not yet supported",
+        ));
+    }
+    Ok(PageNumberDecoration {
+        format,
+        position,
+        prefix: scalar(10)?,
+        suffix: scalar(12)?,
+        dash: scalar(14)?,
+    })
 }
 
 fn validate_para_usage(
@@ -1878,29 +2015,42 @@ fn decode_text(bytes: &[u8], record: Record, section: usize) -> Result<DecodedTe
                 inline_control_mask |= 1 << 0x0009;
                 cursor += 8;
             }
-            0x0002 => {
+            0x0002 | 0x0015 => {
                 if cursor + 8 > units.len() {
                     return Err(malformed(
                         &record,
                         Some(section),
-                        "PARA_TEXT section control is truncated",
+                        if unit == 0x0002 {
+                            "PARA_TEXT section control is truncated"
+                        } else {
+                            "PARA_TEXT page-number control is truncated"
+                        },
                     ));
                 }
                 if units[cursor + 7] != unit || units[cursor + 3..cursor + 7] != [0; 4] {
                     return Err(malformed(
                         &record,
                         Some(section),
-                        "PARA_TEXT section control framing is invalid",
+                        if unit == 0x0002 {
+                            "PARA_TEXT section control framing is invalid"
+                        } else {
+                            "PARA_TEXT page-number control framing is invalid"
+                        },
                     ));
                 }
                 let lo = units[cursor + 1].to_le_bytes();
                 let hi = units[cursor + 2].to_le_bytes();
                 let control_id = u32::from_le_bytes([lo[0], lo[1], hi[0], hi[1]]);
-                if !matches!(control_id, CTRL_SECTION_DEF | CTRL_COLUMN_DEF) {
+                let owned = match unit {
+                    0x0002 => matches!(control_id, CTRL_SECTION_DEF | CTRL_COLUMN_DEF),
+                    0x0015 => control_id == CTRL_PAGE_NUM_POS,
+                    _ => false,
+                };
+                if !owned {
                     return Err(unsupported(record, section));
                 }
                 structural_controls.push((start, control_id));
-                inline_control_mask |= 1 << 0x0002;
+                inline_control_mask |= 1 << unit;
                 cursor += 8;
             }
             0x000a => {

@@ -127,6 +127,9 @@ fn block_text(b: &Block, out: &mut String) {
 pub struct Section {
     pub blocks: Vec<Block>,
     pub page: PageSetup,
+    /// Optional page-number decoration scoped to this section. The displayed number is derived from
+    /// final page order by the typesetter; parsers store only source-neutral format/position facts.
+    pub page_number: Option<PageNumberDecoration>,
     /// True once `page` was explicitly edited — the serializer then patches the section's `secPr`
     /// (parsed sections leave this false so their original page setup round-trips verbatim).
     pub page_edited: bool,
@@ -136,6 +139,42 @@ pub struct Section {
     pub provenance: Provenance,
     pub passthrough: Passthrough,
     pub dirty: Dirty,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PageNumberDecoration {
+    pub format: PageNumberFormat,
+    pub position: PageNumberPosition,
+    pub prefix: Option<char>,
+    pub suffix: Option<char>,
+    pub dash: Option<char>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PageNumberFormat {
+    #[default]
+    Digit,
+    CircledDigit,
+    RomanUpper,
+    RomanLower,
+    LatinUpper,
+    LatinLower,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PageNumberPosition {
+    #[default]
+    None,
+    TopLeft,
+    TopCenter,
+    TopRight,
+    BottomLeft,
+    BottomCenter,
+    BottomRight,
+    OutsideTop,
+    OutsideBottom,
+    InsideTop,
+    InsideBottom,
 }
 
 /// A header or footer (master pages deferred) and which pages it applies to.
