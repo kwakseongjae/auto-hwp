@@ -68,7 +68,7 @@ jobs:
       - name: test (native)
         run: cargo test --workspace
       - name: wasm hygiene (pure core compiles to wasm32)
-        run: cargo check -p hwp-model -p hwp-ops -p hwp-ingest --target wasm32-unknown-unknown
+        run: cargo check -p hwp-model -p hwp-ops -p hwp-ingest -p hwp-hwp5 --target wasm32-unknown-unknown
       - uses: actions/setup-node@v4
         with:
           node-version: "20"

@@ -1,4 +1,5 @@
 use crate::{Error, Result};
+pub(crate) use hwp_hwp5::Record;
 
 pub(crate) const TAG_PARA_HEADER: u16 = 0x42;
 pub(crate) const TAG_PARA_TEXT: u16 = 0x43;
@@ -10,17 +11,6 @@ pub(crate) const TAG_TABLE: u16 = 0x4d;
 
 // HWP stores control IDs as `u32::from_be_bytes(*b"....")`, serialized LE.
 const CTRL_TABLE: u32 = u32::from_be_bytes(*b"tbl ");
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Record {
-    pub(crate) tag: u16,
-    pub(crate) level: u16,
-    pub(crate) size: usize,
-    pub(crate) head: usize,
-    pub(crate) data: usize,
-    pub(crate) end: usize,
-    pub(crate) extended: bool,
-}
 
 #[derive(Clone, Debug)]
 pub(crate) struct RawParagraph {
@@ -47,47 +37,8 @@ pub(crate) struct RawCell {
 }
 
 pub(crate) fn parse_records(raw: &[u8]) -> Result<Vec<Record>> {
-    let mut out = Vec::new();
-    let mut p = 0usize;
-    while p < raw.len() {
-        if raw[p..].iter().all(|byte| *byte == 0) {
-            break;
-        }
-        let head = p;
-        let header = read_u32(raw, p)?;
-        p += 4;
-        let tag = (header & 0x3ff) as u16;
-        let level = ((header >> 10) & 0x3ff) as u16;
-        let packed_size = ((header >> 20) & 0xfff) as usize;
-        let (size, extended) = if packed_size == 0xfff {
-            let size = read_u32(raw, p)? as usize;
-            p += 4;
-            (size, true)
-        } else {
-            (packed_size, false)
-        };
-        let data = p;
-        let end = data
-            .checked_add(size)
-            .filter(|end| *end <= raw.len())
-            .ok_or_else(|| {
-                Error::Record(format!(
-                    "record at byte {head} declares {size} bytes beyond section length {}",
-                    raw.len()
-                ))
-            })?;
-        out.push(Record {
-            tag,
-            level,
-            size,
-            head,
-            data,
-            end,
-            extended,
-        });
-        p = end;
-    }
-    Ok(out)
+    hwp_hwp5::walk_records(raw, hwp_hwp5::RecordLimits::default())
+        .map_err(|error| Error::Record(error.to_string()))
 }
 
 pub(crate) fn parse_section(records: &[Record], raw: &[u8]) -> Result<Vec<RawParagraph>> {

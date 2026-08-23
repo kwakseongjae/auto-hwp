@@ -1,6 +1,6 @@
 [package]
-name = "hwp-hwp5-patch"
-description = "Original-byte HWP5 text patcher: maps SemanticDoc paragraph addresses back to BodyText records and rewrites only edited streams."
+name = "hwp-hwp5"
+description = "First-party, bounded HWP5 container and record inspection for auto-hwp."
 edition.workspace = true
 version.workspace = true
 license.workspace = true
@@ -9,11 +9,10 @@ rust-version.workspace = true
 [dependencies]
 cfb = { workspace = true }
 flate2 = { workspace = true }
-hwp-hwp5 = { workspace = true }
+hwp-ingest = { workspace = true }
 hwp-model = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-hwp-core = { workspace = true, features = ["rhwp"] }
+serde_json = { workspace = true }

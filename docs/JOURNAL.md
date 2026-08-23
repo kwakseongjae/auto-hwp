@@ -5,6 +5,26 @@
 
 ---
 
+## 2026-08-23 (Codex sol) · #107 PR #153
+- commit `513e8e2` push, PR #153(`Closes #107`, `Refs #94 #87`) 게시.
+- 다음 required CI/review 감시→green 자율 병합→#94 first semantic slice.
+
+## 2026-08-23 (Codex sol) · #107 full green
+- Rust/clippy·canonical 8/18/24+98.9%·PDF51·corpus84·oracle82·HWPX·WASM/licenses green.
+- JS build/Vitest 1,018; actual Chromium E2E 85 pass/3 intentional skip.
+- generated diff 0. 다음 final review→commit/push→PR/CI/merge→#94 child.
+
+## 2026-08-23 (Codex sol) · #107 자체 HWP5 skeleton 구현
+- wasm-clean `hwp-hwp5`: FileHeader/security flags·bounded CFB/record walk·unknown raw spans.
+- `hwp-hwp5-patch`가 공용 walker를 재사용; own-only fail-closed, production route 불변.
+- content-free native↔rhwp 8축 differential+topology fingerprint; focused 21 tests+wasm green.
+- 다음 docs/clippy/full gate→PR/CI/병합→#94 DocInfo/text slice.
+
+## 2026-08-23 (Codex sol) · #152 병합 → #107 착수
+- PR #152 필수 CI·CLEAN 확인 후 main `1b272844` 병합, 원격 브랜치 정리.
+- #87 F0 완료 기록·epic open 유지, #94/#107 ready 전환.
+- 최신 main worktree 생성. 다음 hwp-hwp5-patch 재사용 감사→own skeleton/differential 구현.
+
 ## 2026-08-23 (Codex sol) · #151 full green
 - full Rust/조판/PDF/WASM/licenses와 Vitest 1,018 green; Chromium E2E 85 pass/3 skip.
 - 공개 `/bench`·CONTRIBUTING·진단 문구까지 정확한 rhwp 예외 경계로 교정, Next 20 routes build green.

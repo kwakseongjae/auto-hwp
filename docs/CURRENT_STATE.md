@@ -3,6 +3,44 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-23 · Codex(sol) — **#107 PR #153 게시**.
+  검증 완료 commit `513e8e2`를 push하고 PR #153(`Closes #107`, `Refs #94 #87`)을 만들었다.
+  production route 불변, own-only fail-closed, content-free differential, hostile bounds, public benchmark
+  gap(1/1 sections·353/352 paragraphs·389/382 runs·32/32 tables·38/32 controls)을 본문에 명시했다.
+  **다음:** 상태 commit push→issue-link/build-test/licenses·mergeability·review/comment 감시→green 자율
+  병합·원격 브랜치 정리→#94 첫 child issue로 DocInfo pool/paragraph text slice를 분리 착수한다.
+
+- 갱신: 2026-08-23 · Codex(sol) — **#107 전체 검증 green·게시 준비**.
+  rhwp boundary 6, fmt/clippy/workspace, 신규 8 + patch 11 + core differential 2, PDF visual 51,
+  canonical 8/18/24·line 98.9%+, public corpus contract 84, oracle 82, HWPX locks, wasm32+optimized
+  7,793,352B, licenses가 green이다. 새 worktree의 node_modules 부재로 full script가 JS 진입에서
+  한 번 환경 실패했으나 동일 lockfile의 기존 설치본을 symlink 재사용해 JS build/crosscheck/i18n,
+  Vitest 269+64+427+247+11=1,018과 실제 Chromium Playwright 85 pass/3 intentional skip를 완료했다.
+  generated wasm/JS·external/rhwp diff는 없다. 최종 diff/security review에서 production `unsafe`·
+  credential/path/text/hash 유출·silent fallback을 발견하지 않았고, missing DocInfo/Section0와 section
+  gap도 fail-closed로 보강 후 focused test/clippy/wasm을 재통과했다. **다음:** commit·push→PR `Closes #107`/
+  `Refs #94 #87`→필수 CI·리뷰/댓글 확인→자율 병합→#94 첫 child issue/branch.
+
+- 갱신: 2026-08-23 · Codex(sol) — **#107 first-party HWP5 skeleton·differential 구현**.
+  신규 wasm-clean `hwp-hwp5`가 CFB/FileHeader 11개 flag, 64MiB raw·256MiB cumulative inflate·
+  4096 entry·1M record 상한, normal/extended bounded record walk와 unknown tag의 stream-relative
+  raw-span provenance를 소유한다. `hwp-hwp5-patch`도 이 워커를 재사용해 중복 parser truth를 없앴다.
+  `open_hwp5_own`은 DocInfo/text slice 전까지 명시적으로 fail-closed하고 rhwp fallback이 없으며,
+  `hwp5_differential`은 native↔rhwp 구조 8축과 본문/경로/원본 hash 없는 SemanticDoc topology
+  fingerprint를 낸다. production `Engine::open` 기본은 불변이다. focused 8+11+2 tests와 wasm32
+  check green. 디스크 부족으로 완료/현재 worktree의 재생성 가능 `target/` 35GiB를 정리했다.
+  **다음:** 문서 계약→clippy/workspace/전체 조판 게이트→commit·push·PR #107→CI·병합, 이어 #94
+  DocInfo pool+PARA_TEXT 최소 SemanticDoc slice를 별도 issue-first 단위로 착수한다.
+
+- 갱신: 2026-08-23 · Codex(sol) — **PR #152 병합 · #107 자체 HWP5 skeleton 착수**.
+  #151 PR #152는 head `d65c844`에서 issue-link·build-test·licenses green, CLEAN/MERGEABLE,
+  리뷰/댓글 0을 확인한 뒤 main `1b272844`로 squash 병합했고 원격 브랜치를 삭제했다. #87에는
+  F0 완료 증거를 남기되 F1+ epic이라 open 유지했고, #94/#107을 blocked→ready로 전환했다.
+  최신 main에서 `codex/issue-107-hwp5-skeleton`을 만들었다. **다음:** `hwp-hwp5-patch`의 CFB·
+  FileHeader·record walker를 읽고 재사용 가능한 first-party `hwp-hwp5` 경계를 설계한다. 첫 PR은
+  production default/fallback을 바꾸지 않고 FileHeader security flags·bounded record walk·unknown
+  raw-span provenance·content-free dual-parser report를 구현한다. `external/rhwp`는 변경하지 않는다.
+
 - 갱신: 2026-08-23 · Codex(sol) — **#151 전체 검증·공개 truth surface 정합 완료**.
   `verify-local.sh --full`의 Rust workspace/clippy·HWP5 feature·canonical 8/18/24와 98.9%+·
   PDF visual 51·public corpus 84·oracle 82·HWPX locks·WASM 7,793,352B·licenses·JS builds와

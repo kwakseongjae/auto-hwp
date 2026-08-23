@@ -130,6 +130,7 @@ else
 fi
 
 echo "═══ wasm 위생 ═══"
+cargo check -p hwp-hwp5 --target wasm32-unknown-unknown
 cargo check -p hwp-wasm --target wasm32-unknown-unknown
 
 if command -v cargo-deny >/dev/null 2>&1; then
