@@ -56,6 +56,7 @@ pub fn doc_value_eq(a: &SemanticDoc, b: &SemanticDoc) -> bool {
 
 fn section_eq(a: &Section, b: &Section) -> bool {
     page_eq(&a.page, &b.page)
+        && a.page_number == b.page_number
         && a.page_edited == b.page_edited
         && prov_eq(&a.provenance, &b.provenance)
         && pass_eq(&a.passthrough, &b.passthrough)

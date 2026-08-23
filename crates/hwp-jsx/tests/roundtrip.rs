@@ -56,6 +56,28 @@ fn t1_roundtrip_all_fixtures() {
     }
 }
 
+#[test]
+fn t1d_page_number_semantics_roundtrip_and_are_equality_visible() {
+    let mut doc = SemanticDoc::default();
+    doc.sections.push(Section {
+        page_number: Some(PageNumberDecoration {
+            format: PageNumberFormat::RomanLower,
+            position: PageNumberPosition::OutsideBottom,
+            prefix: Some('('),
+            suffix: Some(')'),
+            dash: Some('-'),
+        }),
+        ..Section::default()
+    });
+
+    let back = parse(&emit(&doc)).expect("page-number projection round-trip");
+    assert!(doc_value_eq(&doc, &back));
+
+    let mut tampered = back;
+    tampered.sections[0].page_number = None;
+    assert!(!doc_value_eq(&doc, &tampered));
+}
+
 /// T1b — the equality test is FALSIFIABLE: mutating the round-tripped doc breaks it.
 #[test]
 fn t1b_equality_is_falsifiable() {

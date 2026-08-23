@@ -79,6 +79,10 @@ pub type ShapeBlob = String;
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct SectionMeta {
     pub page: PageSetupBlob,
+    /// Source-neutral page-number decoration. Optional and defaulted so schema-v1 projects written
+    /// before issue #164 remain readable.
+    #[serde(default)]
+    pub page_number: Option<PageNumberBlob>,
     pub page_edited: bool,
     /// base64 of `Section.provenance.raw` (the original section XML), or None.
     pub provenance_raw_b64: Option<String>,
@@ -86,6 +90,15 @@ pub struct SectionMeta {
     pub passthrough: Vec<RawPartBlob>,
     pub dirty: bool,
     pub decorations: Vec<DecorationBlob>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PageNumberBlob {
+    pub format: String,
+    pub position: String,
+    pub prefix: Option<char>,
+    pub suffix: Option<char>,
+    pub dash: Option<char>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

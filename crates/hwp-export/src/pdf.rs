@@ -1187,6 +1187,52 @@ mod tests {
     }
 
     #[test]
+    fn page_number_decoration_replays_as_text_from_the_shared_paint_tree() {
+        let bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/NanumGothic-Regular.ttf"
+        ))
+        .expect("vendored NanumGothic present for the test");
+        let injected = vec![("Nanum Gothic".to_string(), bytes)];
+        let plain = doc_with(vec![Block::Paragraph(para("본문"))]);
+        let mut numbered = plain.clone();
+        numbered.sections[0].page_number = Some(PageNumberDecoration {
+            format: PageNumberFormat::Digit,
+            position: PageNumberPosition::BottomCenter,
+            prefix: Some('['),
+            suffix: Some(']'),
+            dash: Some('-'),
+        });
+
+        let plain_out = export_pdf_with_fonts(
+            &plain,
+            &ApproxFontMetrics,
+            &PdfOptions::default(),
+            &injected,
+        )
+        .unwrap();
+        let numbered_out = export_pdf_with_fonts(
+            &numbered,
+            &ApproxFontMetrics,
+            &PdfOptions::default(),
+            &injected,
+        )
+        .unwrap();
+
+        assert_eq!(numbered_out.pages, plain_out.pages);
+        assert_eq!(
+            numbered_out.replay[0].text.produced,
+            plain_out.replay[0].text.produced + 5,
+            "-[1]- is five shared PaintOp::Glyph operations"
+        );
+        assert_eq!(
+            numbered_out.replay[0].text.produced,
+            numbered_out.replay[0].text.replayed
+        );
+        assert_eq!(numbered_out.replay[0].text.stubbed, 0);
+    }
+
+    #[test]
     fn empty_doc_still_makes_a_pdf() {
         let doc = doc_with(vec![Block::Paragraph(para(""))]);
         let out = export_pdf(&doc, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
