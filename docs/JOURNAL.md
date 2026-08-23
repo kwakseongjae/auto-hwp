@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-23 (Codex sol) · #107 PR #153
+- commit `513e8e2` push, PR #153(`Closes #107`, `Refs #94 #87`) 게시.
+- 다음 required CI/review 감시→green 자율 병합→#94 first semantic slice.
+
 ## 2026-08-23 (Codex sol) · #107 full green
 - Rust/clippy·canonical 8/18/24+98.9%·PDF51·corpus84·oracle82·HWPX·WASM/licenses green.
 - JS build/Vitest 1,018; actual Chromium E2E 85 pass/3 intentional skip.

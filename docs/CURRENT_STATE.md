@@ -3,6 +3,13 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-23 · Codex(sol) — **#107 PR #153 게시**.
+  검증 완료 commit `513e8e2`를 push하고 PR #153(`Closes #107`, `Refs #94 #87`)을 만들었다.
+  production route 불변, own-only fail-closed, content-free differential, hostile bounds, public benchmark
+  gap(1/1 sections·353/352 paragraphs·389/382 runs·32/32 tables·38/32 controls)을 본문에 명시했다.
+  **다음:** 상태 commit push→issue-link/build-test/licenses·mergeability·review/comment 감시→green 자율
+  병합·원격 브랜치 정리→#94 첫 child issue로 DocInfo pool/paragraph text slice를 분리 착수한다.
+
 - 갱신: 2026-08-23 · Codex(sol) — **#107 전체 검증 green·게시 준비**.
   rhwp boundary 6, fmt/clippy/workspace, 신규 8 + patch 11 + core differential 2, PDF visual 51,
   canonical 8/18/24·line 98.9%+, public corpus contract 84, oracle 82, HWPX locks, wasm32+optimized
