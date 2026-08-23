@@ -5,6 +5,18 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #166 nwno full green / PR ready
+- NonZero start IR+legacy JSX default; exact page-counter nwno와 hostile fail-closed 구현.
+- shared SVG/PDF progression·LOCKSTEP; public boundary 451..465→499..549.
+- Rust/PDF51/canonical/corpus84/oracle82/HWPX/wasm/licenses/JS/Vitest1,018/Chromium85 green.
+- route·rhwp·generated diff 0; 다음 commit/push/PR→CI→green 자율 병합→next boundary.
+
+## 2026-08-24 (Codex sol) · PR #165 merged → #166 nwno started
+- #165 required CI/CLEAN·댓글 0 후 main `ff449e4` 병합; #164 close·remote branch 정리.
+- #94 동기화; next 0x47/451..465 = content-free `nwno`, temporary structural assertion removed.
+- child #166 + latest-main `codex/issue-166-hwp5-new-number` 시작.
+- 다음 page start IR→strict parser→shared SVG/PDF progression; route/rhwp 불변.
+
 ## 2026-08-24 (Codex sol) · #164 PR #165 posted
 - verified implementation `a5a7b21` push + PR #165 (`Closes #164`, `Refs #94 #161`).
 - strict single-section pgnp/shared SVG·PDF/LOCKSTEP/public boundary and full evidence published.

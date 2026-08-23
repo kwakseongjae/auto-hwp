@@ -17,6 +17,7 @@ const TAG_PAGE_DEF: u16 = 0x49;
 const TAG_FOOTNOTE_SHAPE: u16 = 0x4a;
 const CTRL_SECTION_DEF: u32 = u32::from_be_bytes(*b"secd");
 const CTRL_PAGE_NUM_POS: u32 = u32::from_be_bytes(*b"pgnp");
+const CTRL_NEW_NUMBER: u32 = u32::from_be_bytes(*b"nwno");
 
 #[derive(Clone, Copy)]
 enum Mutation {
@@ -47,6 +48,14 @@ enum Mutation {
     BadPageNumberFormat,
     BadPageNumberSurrogate,
     BadPageNumberUserSymbol,
+    NewNumber,
+    NewNumberMultiSection,
+    BadNewNumberLength,
+    BadNewNumberAttr,
+    BadNewNumberType,
+    BadNewNumberZero,
+    NewNumberWithoutPageNumber,
+    DuplicateNewNumber,
 }
 
 #[test]
@@ -367,6 +376,74 @@ fn rejects_multi_section_page_number_until_inheritance_is_owned() {
     ));
 }
 
+#[test]
+fn parses_page_number_restart_into_source_neutral_start() {
+    let doc = OwnHwp5Parser::new()
+        .parse(&fixture(Mutation::NewNumber))
+        .expect("owned page-number restart fixture parses");
+    assert_eq!(
+        doc.sections[0]
+            .page_number
+            .expect("page-number decoration")
+            .start
+            .get(),
+        7
+    );
+}
+
+#[test]
+fn rejects_malformed_or_unowned_new_number_semantics() {
+    for (mutation, reason) in [
+        (
+            Mutation::BadNewNumberLength,
+            "new-number control is not exactly 10 bytes",
+        ),
+        (
+            Mutation::BadNewNumberAttr,
+            "new-number control has unknown attribute bits",
+        ),
+        (
+            Mutation::BadNewNumberType,
+            "non-page new-number counter is not yet supported",
+        ),
+        (
+            Mutation::BadNewNumberZero,
+            "page-number restart must be nonzero",
+        ),
+        (
+            Mutation::NewNumberWithoutPageNumber,
+            "page-number restart requires an owned page-number position",
+        ),
+        (
+            Mutation::DuplicateNewNumber,
+            "page-number restart has children or is duplicated",
+        ),
+    ] {
+        assert!(matches!(
+            OwnHwp5Parser::new().parse(&fixture(mutation)),
+            Err(Error::MalformedRecord {
+                tag: TAG_CTRL_HEADER,
+                section: Some(0),
+                reason: actual,
+                ..
+            }) if actual == reason
+        ));
+    }
+}
+
+#[test]
+fn rejects_multi_section_new_number_until_inheritance_is_owned() {
+    assert!(matches!(
+        OwnHwp5Parser::new().parse(&fixture(Mutation::NewNumberMultiSection)),
+        Err(Error::MalformedRecord {
+            tag: TAG_CTRL_HEADER,
+            section: Some(0),
+            reason: "multi-section page-number inheritance is not yet supported",
+            ..
+        })
+    ));
+}
+
 fn fixture(mutation: Mutation) -> Vec<u8> {
     let mut header = vec![0; 256];
     header[..HWP_SIGNATURE.len()].copy_from_slice(HWP_SIGNATURE);
@@ -374,7 +451,10 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
 
     let mut doc_info = Vec::new();
     let mut properties = vec![0; 26];
-    let section_count = if matches!(mutation, Mutation::PageNumberMultiSection) {
+    let section_count = if matches!(
+        mutation,
+        Mutation::PageNumberMultiSection | Mutation::NewNumberMultiSection
+    ) {
         2u16
     } else {
         1
@@ -404,6 +484,24 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
             | Mutation::BadPageNumberFormat
             | Mutation::BadPageNumberSurrogate
             | Mutation::BadPageNumberUserSymbol
+            | Mutation::NewNumber
+            | Mutation::NewNumberMultiSection
+            | Mutation::BadNewNumberLength
+            | Mutation::BadNewNumberAttr
+            | Mutation::BadNewNumberType
+            | Mutation::BadNewNumberZero
+            | Mutation::DuplicateNewNumber
+    );
+    let has_new_number = matches!(
+        mutation,
+        Mutation::NewNumber
+            | Mutation::NewNumberMultiSection
+            | Mutation::BadNewNumberLength
+            | Mutation::BadNewNumberAttr
+            | Mutation::BadNewNumberType
+            | Mutation::BadNewNumberZero
+            | Mutation::NewNumberWithoutPageNumber
+            | Mutation::DuplicateNewNumber
     );
     let has_columns = matches!(
         mutation,
@@ -420,6 +518,12 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
     if has_page_number {
         section_text.extend(extended_control(0x0015, CTRL_PAGE_NUM_POS));
     }
+    if has_new_number {
+        section_text.extend(extended_control(0x0015, CTRL_NEW_NUMBER));
+        if matches!(mutation, Mutation::DuplicateNewNumber) {
+            section_text.extend(extended_control(0x0015, CTRL_NEW_NUMBER));
+        }
+    }
     if matches!(mutation, Mutation::BadControlFrame) {
         section_text[7] = 0;
     }
@@ -427,7 +531,12 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
     push_para_header_with_break(
         &mut body,
         section_text.len() as u32,
-        (1 << 2) | if has_page_number { 1 << 0x15 } else { 0 },
+        (1 << 2)
+            | if has_page_number || has_new_number {
+                1 << 0x15
+            } else {
+                0
+            },
         1,
         0,
         if has_columns {
@@ -534,6 +643,35 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
         }
         push_record(&mut body, TAG_CTRL_HEADER, 1, &control);
     }
+    if has_new_number {
+        let count = if matches!(mutation, Mutation::DuplicateNewNumber) {
+            2
+        } else {
+            1
+        };
+        for _ in 0..count {
+            let mut control = Vec::with_capacity(10);
+            control.extend_from_slice(&CTRL_NEW_NUMBER.to_le_bytes());
+            let attr = if matches!(mutation, Mutation::BadNewNumberAttr) {
+                1u32 << 16
+            } else if matches!(mutation, Mutation::BadNewNumberType) {
+                1
+            } else {
+                0
+            };
+            control.extend_from_slice(&attr.to_le_bytes());
+            let start = if matches!(mutation, Mutation::BadNewNumberZero) {
+                0u16
+            } else {
+                7
+            };
+            control.extend_from_slice(&start.to_le_bytes());
+            if matches!(mutation, Mutation::BadNewNumberLength) {
+                control.pop();
+            }
+            push_record(&mut body, TAG_CTRL_HEADER, 1, &control);
+        }
+    }
 
     if matches!(mutation, Mutation::MidSectionSeparator) {
         let mut text = extended_control(0x0002, u32::from_be_bytes(*b"cold"));
@@ -589,7 +727,10 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
         let mut stream = compound.create_stream("/BodyText/Section0").unwrap();
         stream.write_all(&body).unwrap();
     }
-    if matches!(mutation, Mutation::PageNumberMultiSection) {
+    if matches!(
+        mutation,
+        Mutation::PageNumberMultiSection | Mutation::NewNumberMultiSection
+    ) {
         let mut stream = compound.create_stream("/BodyText/Section1").unwrap();
         stream.write_all(&body).unwrap();
     }

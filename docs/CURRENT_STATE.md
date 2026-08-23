@@ -3,18 +3,19 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
-- 갱신: 2026-08-24 · Codex(sol) — **#164 PR #165 게시**.
-  source-neutral page-number format/position/decorations를 IR과 JSX side-channel/equality에 보존하고,
-  HWP5 `pgnp` exact 16B·format 0..5·position 0..10·UTF-16/attr/user-symbol을 strict 파싱한다.
-  단일 섹션만 owned로 한정해 미검증 다중 섹션 상속은 정적 사유로 fail-closed한다. 최종 page index로
-  만든 글리프를 기존 decoration lane에 추가해 본문 geometry/page count를 바꾸지 않고 SVG/PDF 공통
-  PaintOp을 사용하며 상/하·좌/중/우·안/밖 홀짝과 구역 전환 전역 번호를 직접 회귀로 잠갔다.
-  full의 fmt/clippy/workspace, PDF visual **51**, canonical **8/18/24·98.9%+**,
-  public corpus **84**, oracle **82**, HWPX, wasm, licenses, JS build와 Vitest **1,018**이 green이다.
-  Chromium은 **84 pass/3 intentional skip/1 flaky retry-pass/0 fail**; 공개 경계 0x47/451..465,
-  production route·`external/rhwp`·generated asset diff 0. 구현 commit `a5a7b21`을 push하고 PR #165
-  (`Closes #164`, `Refs #94 #161`)를 만들었다. **다음:** state commit push→issue-link/build-test/licenses·
-  mergeability·review/comment 확인→전부 green이면 자율 병합·branch 정리.
+- 갱신: 2026-08-24 · Codex(sol) — **#166 `nwno` 구현·full 검증 완료 / PR 준비**.
+  `PageNumberDecoration.start: NonZeroU16`을 source-neutral IR과 JSX side-channel/equality에 추가하고,
+  기존 schema-v1 blob은 start=1로 읽되 0은 거부한다. HWP5 exact 10B `nwno`의 page counter만 strict
+  파싱해 같은 첫 문단의 owned `pgnp`에 결합하며 unknown attr·비page counter·0·중복·position 누락·
+  다중 구역 상속은 content-free 정적 사유로 fail-closed한다. 조판은 구역 start+최종 physical page
+  order로 SVG/PDF 공통 glyph를 만들고 body geometry/page count 및 3-path LOCKSTEP은 불변이다.
+  공개 benchmark 자체 파서 경계는 `0x47/451..465`에서 `0x47/499..549`로 전진했다. Rust workspace,
+  HWP5 **48**, typeset **94**, PDF visual **51**, canonical **8/18/24·98.9%+**, public corpus **84**,
+  oracle **82**, HWPX, wasm(7,810,113B), licenses, JS build·crosscheck·i18n, Vitest **1,018**이 green;
+  Chromium **85 pass/3 intentional skip/0 fail**이다. fresh worktree node_modules와 sandbox port는
+  루트 설치 임시 링크/허용된 로컬 서버로 분리 검증 후 링크를 제거했다. production route·
+  `external/rhwp`·generated asset diff 0. **다음:** final diff/security review→commit/push→PR `Closes
+  #166`/`Refs #94 #164`→required CI/review/comment 추적→green 자율 병합→다음 499..549 원인 분해.
 
 - 갱신: 2026-08-23 · Codex(sol) — **#161 PR #163 게시**.
   검증 완료 commit `c751833`을 push하고 PR #163(`Closes #161`, `Refs #94 #160`)을 만들었다.

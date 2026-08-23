@@ -64,7 +64,9 @@ rejected instead of being interpreted as records.
   unknown body controls, and unsupported pool values fail closed with a static reason plus tag,
   section, and byte span only. It cannot call rhwp. The public benchmark now passes its first
   multi-column paragraph header and `cold` definition, then stops at the next unowned control header
-  (`0x47`, section 0, bytes 431..451) without exposing content.
+  (`0x47`, section 0, bytes 499..549) without exposing content. The owned prefix now includes strict
+  single-section `pgnp` positioning and `nwno` page-counter restarts; other counters, zero starts,
+  duplicates, missing positions, and multi-section inheritance fail closed.
 - `hwp5_differential`: explicitly runs the owned probe and current rhwp semantic oracle, then reports
   section/paragraph/run/table/image/control/equation/chart counts and their deltas.
 

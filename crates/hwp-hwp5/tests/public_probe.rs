@@ -36,8 +36,8 @@ fn explicit_own_parser_never_falls_back() {
         Error::UnsupportedBodyRecord {
             tag: 0x47,
             section: 0,
-            start: 451,
-            end: 465,
+            start: 499,
+            end: 549,
             reason: "record semantics are not owned",
             ..
         }

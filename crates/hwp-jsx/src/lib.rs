@@ -237,6 +237,7 @@ fn emit_section_meta(sec: &Section) -> SectionMeta {
 
 fn emit_page_number(number: PageNumberDecoration) -> PageNumberBlob {
     PageNumberBlob {
+        start: number.start.get(),
         format: match number.format {
             PageNumberFormat::Digit => "digit",
             PageNumberFormat::CircledDigit => "circled-digit",
@@ -806,6 +807,8 @@ pub fn parse(proj: &JsxCssProject) -> Result<SemanticDoc> {
 }
 
 fn parse_page_number(number: &PageNumberBlob) -> Result<PageNumberDecoration> {
+    let start = std::num::NonZeroU16::new(number.start)
+        .ok_or_else(|| Error::Parse("page-number start must be nonzero".into()))?;
     let format = match number.format.as_str() {
         "digit" => PageNumberFormat::Digit,
         "circled-digit" => PageNumberFormat::CircledDigit,
@@ -834,6 +837,7 @@ fn parse_page_number(number: &PageNumberBlob) -> Result<PageNumberDecoration> {
         }
     };
     Ok(PageNumberDecoration {
+        start,
         format,
         position,
         prefix: number.prefix,
