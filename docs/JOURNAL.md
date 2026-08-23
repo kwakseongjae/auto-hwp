@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-23 (Codex sol) · #156 PR #157
+- commit `01b637c` push, PR #157(`Closes #156`, `Refs #94 #87`) 게시.
+- 다음 required CI/review 감시→green 자율 병합→#94 next first-party child.
+
 ## 2026-08-23 (Codex sol) · #156 full green
 - secd/PAGE_DEF + blank source metrics final diff/security review; production/rhwp 불변.
 - focused 27 + quick 전체 + full Rust/PDF/wasm/JS/Vitest 1,018 green.

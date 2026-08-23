@@ -3,6 +3,13 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-23 · Codex(sol) — **#156 PR #157 게시**.
+  검증 완료 commit `01b637c`를 push하고 PR #157(`Closes #156`, `Refs #94 #87`)을 만들었다.
+  strict PAGE_DEF/source metrics, unsupported fail-closed, no production cutover/no rhwp fallback과
+  quick/full/Chromium 85 pass·3 intentional skip·generated/rhwp diff 0을 본문에 명시했다.
+  **다음:** 이 상태 문서 commit push→issue-link/build-test/licenses·mergeability·review/comment를 추적하고
+  전부 green이면 자율 병합·원격 브랜치 정리→#94 다음 first-party child를 issue-first로 착수한다.
+
 - 갱신: 2026-08-23 · Codex(sol) — **#156 전체 검증 완료 · PR 준비**.
   strict secd/PAGE_DEF와 blank-only PARA_LINE_SEG 구현을 최종 보안/diff review했고 오류 진단은
   content-free tag·section·span만 유지한다. focused hwp-hwp5 **27 tests**, clippy, wasm32와 quick 전체
