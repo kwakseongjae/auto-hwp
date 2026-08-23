@@ -126,6 +126,7 @@ enum OneByTwoMutation {
 #[derive(Clone, Copy)]
 enum SixByFourMutation {
     None,
+    AllBodyWidthReferences,
     BadCommonAttribute,
     BadTableAttribute,
     BadRowCellCount,
@@ -133,6 +134,7 @@ enum SixByFourMutation {
     BadRowHeight,
     BadParagraphCount,
     BadWidthReference,
+    BadAllBodyWidthReference,
     BadCellOrder,
     BadListExtension,
 }
@@ -928,6 +930,26 @@ fn owns_exact_six_by_four_atomic_full_grid_table() {
 }
 
 #[test]
+fn owns_exact_six_by_four_all_body_width_reference_variant() {
+    let doc = OwnHwp5Parser::new()
+        .parse(&six_by_four_fixture(
+            SixByFourMutation::AllBodyWidthReferences,
+        ))
+        .expect("strict all-body-reference 6x4 table fixture parses");
+    let [Block::Paragraph(anchor), Block::Table(table)] = doc.sections[0].blocks.as_slice() else {
+        panic!("table host must lower to one anchor and one table")
+    };
+    assert!(anchor.is_table_anchor);
+    assert_eq!((table.rows, table.cols, table.cells.len()), (6, 4, 24));
+    assert_eq!(table.col_widths, vec![3_238, 14_908, 11_795, 18_021]);
+    assert_eq!(
+        table.row_heights,
+        vec![1_946, 1_846, 1_846, 1_846, 1_846, 1_846]
+    );
+    assert!(table.cells.iter().all(|cell| cell.padding.is_none()));
+}
+
+#[test]
 fn strict_six_by_four_slice_rejects_hostile_pairing_topology_geometry_and_extensions() {
     for mutation in [
         SixByFourMutation::BadCommonAttribute,
@@ -937,6 +959,7 @@ fn strict_six_by_four_slice_rejects_hostile_pairing_topology_geometry_and_extens
         SixByFourMutation::BadRowHeight,
         SixByFourMutation::BadParagraphCount,
         SixByFourMutation::BadWidthReference,
+        SixByFourMutation::BadAllBodyWidthReference,
         SixByFourMutation::BadCellOrder,
         SixByFourMutation::BadListExtension,
     ] {
@@ -1949,7 +1972,15 @@ fn six_by_four_fixture(mutation: SixByFourMutation) -> Vec<u8> {
     for (index, (row, col)) in positions.into_iter().enumerate() {
         let mut width = COL_WIDTHS[col];
         let mut height = ROW_HEIGHTS[row];
-        let mut width_ref = if row == 0 { 0x0100u16 } else { 0x0500 };
+        let all_body_width_references = matches!(
+            mutation,
+            SixByFourMutation::AllBodyWidthReferences | SixByFourMutation::BadAllBodyWidthReference
+        );
+        let mut width_ref = if all_body_width_references || row != 0 {
+            0x0500u16
+        } else {
+            0x0100
+        };
         if index == 0 && matches!(mutation, SixByFourMutation::BadWidth) {
             width -= 1;
         }
@@ -1958,6 +1989,9 @@ fn six_by_four_fixture(mutation: SixByFourMutation) -> Vec<u8> {
         }
         if index == 0 && matches!(mutation, SixByFourMutation::BadWidthReference) {
             width_ref = 0x0500;
+        }
+        if index == 0 && matches!(mutation, SixByFourMutation::BadAllBodyWidthReference) {
+            width_ref = 0x0100;
         }
         let mut cell = Vec::with_capacity(47);
         cell.extend_from_slice(

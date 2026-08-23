@@ -5,6 +5,30 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #186 PR #187 게시
+- verified parser/test/state commit `2b387e2` push, PR #187(`Closes #186`) 생성.
+- 다음 exact-head required CI·review/general/inline·mergeability 추적→병합→#94/next child.
+
+## 2026-08-24 (Codex sol) · #186 full green
+- quick/full green: PDF51, canonical gates, corpus84/oracle82, wasm 7,810,657B, Vitest1,018.
+- sandbox bind만 별도 Playwright로 검증: Chromium 85 passed/3 skipped/0 failed.
+- temporary links removed; final security/diff clean. 다음 commit/push/PR/CI/merge.
+
+## 2026-08-24 (Codex sol) · #186 focused green
+- two whole 6×4 width-ref patterns only; mixed patterns rejected both directions, output geometry same.
+- HWP5 66/fmt/workspace clippy/wasm32 green; next PARA_CHAR_SHAPE 44479..44499.
+- classifier/route/rhwp/HWPX/generated diff 0. 다음 quick→full→PR/CI/merge.
+
+## 2026-08-24 (Codex sol) · #186 classified
+- #182와 geometry/topology exact 동일한 6×4; 차이는 width-ref 24개가 모두 `0x0500`.
+- 0x0100↔0x0500 차이는 active low cell bits 불변·raw roundtrip hint; 렌더 geometry 손실 없음.
+- classifier 제거. 다음 two whole-pattern allowlist + mixed/unknown hostile; route/rhwp/HWPX 불변.
+
+## 2026-08-24 (Codex sol) · PR #185 merged / #186 started
+- #185 exact-head required CI·MERGEABLE·댓글 0 후 main `ee28afa2`; #184 close·branch 정리.
+- #94 근거 동기화, next LIST_HEADER width-ref boundary #186 등록, exact-main worktree 시작.
+- 다음 enclosing 6×4 variant content-free classification; route/rhwp/HWPX 불변.
+
 ## 2026-08-24 (Codex sol) · #184 PR #185 게시
 - verified parser/test/state commit `2f0c7ba` push, PR #185(`Closes #184`) 생성.
 - 다음 exact-head required CI·review/general/inline·mergeability 추적→병합→#94/next child.

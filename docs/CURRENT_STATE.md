@@ -143,8 +143,35 @@
   link는 모두 제거했다. final diff/security review에서 production route·rhwp·HWPX parser/serializer·
   shared typesetter·generated asset diff 0, source content/path/hash/raw payload/credential 노출 0을
   확인했고 변경 파일은 strict HWP5 parser/tests/state 5개뿐이다. 구현 commit `2f0c7ba`을 push하고
-  PR #185를 `Closes #184`로 게시했다. **다음:** exact-head CI·댓글·mergeability→자율 병합→
-  #94 동기화→next child.
+  PR #185를 `Closes #184`로 게시했다. exact head `a2825e6f`에서 issue-link **2s**·build-test
+  **7m34s**·licenses **2m16s** green, MERGEABLE, review/general/inline 댓글 0을 확인하고 protected
+  main `ee28afa2`로 squash 병합했다. #184 close·원격 branch 정리 후 #94에 exact 근거와 다음
+  boundary를 동기화했다. 중복 없는 #186을 R18/P1/area:hwp5/status:ready로 열고 exact latest main의
+  `codex/issue-186-hwp5-width-ref` worktree와 pinned rhwp oracle을 초기화했다. **다음:** content-free
+  LIST_HEADER `0x48/40865..40916`가 속한 6×4 variant의 전체 width-ref pattern·topology·geometry·
+  framing을 먼저 분류하고 active semantic을 shared IR/SVG/PDF로 faithful하게 표현할 수 있을 때만
+  exact discriminator와 synthetic/hostile fixture를 구현. production route·HWPX·shared layout
+  defaults·generated assets·rhwp는 불변. 분류 결과 enclosing common/TABLE attr, 6×4/24-cell
+  row-major topology, 1문단/cell, widths/heights, padding·border, mirrored 13B extension은 #182 form과
+  exact 동일하다. 유일한 차이는 #182 form이 row0=`0x0100`/rows1..5=`0x0500`인 반면 이번 form은
+  24개 width-ref가 전부 `0x0500`이다. 두 값의 차이 `0x0400`은 pinned rhwp도 raw roundtrip hint로
+  보존할 뿐 렌더에서 해석하는 low active bits(own-margin/protect/header/form)를 바꾸지 않는다. absolute
+  cell/object geometry도 완전히 같아 shared IR/SVG/PDF의 active semantic 손실이 없다. one-shot numeric
+  classifier는 두 번 동일 결과를 확인한 뒤 제거했다. **다음:** 6×4 전체 width-ref sequence를
+  row0/body pattern 또는 all-`0x0500` 두 exact variant로만 원자 검증하고, 셀별 혼합·다른 word는
+  fail-closed하는 synthetic positive/hostile 회귀 구현; route/rhwp/HWPX/generated 불변. parser는
+  24-cell width-ref sequence 전체를 수집해 row0/body 또는 all-`0x0500`일 때만 수용하고, 두 pattern을
+  셀별로 섞은 hostile 변형은 양방향 모두 fail-closed한다. all-body synthetic positive도 기존 form과
+  동일한 shared geometry·no cell-own padding으로 내려감을 검증한다. HWP5 **66 tests**, fmt, workspace
+  clippy `-D warnings`, wasm32 green이며 공개 own-parser boundary는 표 밖 빈 문단의
+  PARA_CHAR_SHAPE `0x44/44479..44499` invalid boundary로 전진했다. temporary classifier diff 0,
+  production route·rhwp·HWPX/generated diff 0. quick와 full은 모두 green: PDF visual **51**, canonical
+  **8/18/24 + 98.9%+**, public corpus **84**, oracle **82**, wasm optimized **7,810,657B**, Vitest
+  **1,018**, Chromium **85 passed/3 skipped/0 failed**. full의 sandbox bind EPERM만 별도 허용된
+  Playwright 실행으로 대체 검증했고 임시 node_modules symlink 6개는 모두 제거했다. 최종 diff/check와
+  공개 보안 감사도 clean이며 strict parser/tests/state 5개만 변경된다. 구현 commit `2b387e2`를
+  push하고 PR #187을 `Closes #186`로 게시했다. **다음:** exact-head CI·댓글·mergeability 감사→
+  merge→#94 동기화→PARA_CHAR_SHAPE next child.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #173 병합 · #174 multi-table 경계 착수**.
   자체 HWP5 파서가 exact `tbl ` marker/common-object/TABLE/LIST_HEADER/cell paragraph를 검증해
