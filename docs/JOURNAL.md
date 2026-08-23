@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-23 (Codex sol) · #161 PR #163 posted
+- verified `c751833` push + PR #163 (`Closes #161`, `Refs #94 #160`).
+- strict normal columns/LOCKSTEP/shared SVG·PDF/fail-closed boundaries and full evidence published.
+- production route·rhwp·generated drift 0.
+- 다음 state commit push→required CI/review/comment→green 자율 병합.
+
 ## 2026-08-23 (Codex sol) · #161 ready for PR
 - final quick green + PDF column line direct replay produced=1/replayed=1/stubbed=0.
 - full Vitest 1,018(별도 proxy11 포함), Chromium 85 pass/3 skip; temporary links removed.

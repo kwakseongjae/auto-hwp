@@ -3,6 +3,13 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-23 · Codex(sol) — **#161 PR #163 게시**.
+  검증 완료 commit `c751833`을 push하고 PR #163(`Closes #161`, `Refs #94 #160`)을 만들었다.
+  normal 1~32단 strict subset, 3-path LOCKSTEP, SVG/PDF shared line, separator-span/distribution
+  fail-closed, public boundary 0x47/431..451, no production cutover/no rhwp/generated drift와
+  quick/full/Vitest 1,018/Chromium 85 pass·3 skip을 본문에 명시했다. **다음:** 이 상태 commit push→
+  issue-link/build-test/licenses·mergeability·review/comment 추적→전부 green이면 자율 병합·branch 정리.
+
 - 갱신: 2026-08-23 · Codex(sol) — **#161 게시 준비 완료**.
   최종 quick이 다시 전부 green이고, PDF export가 column separator `PaintOp::Line`을 같은 page tree에서
   produced=1/replayed=1/stubbed=0으로 소비하는 직접 회귀도 추가했다. 별도 demo proxy **11 tests**를
