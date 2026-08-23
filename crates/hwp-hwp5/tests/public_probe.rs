@@ -28,17 +28,27 @@ fn public_hwp5_has_bounded_content_free_record_provenance() {
 }
 
 #[test]
-fn explicit_own_parser_owns_the_ten_by_two_table_then_stops_content_free() {
+fn explicit_own_parser_owns_bounded_multi_table_then_stops_content_free() {
+    let probed = probe(&benchmark()).unwrap();
+    let next = probed
+        .streams
+        .iter()
+        .flat_map(|stream| &stream.records)
+        .find(|record| record.head == 7_561)
+        .unwrap();
+    assert_eq!(
+        (next.tag, next.level, next.head, next.data, next.end, next.size,),
+        (0x4d, 2, 7_561, 7_565, 7_605, 40)
+    );
     let error = OwnHwp5Parser::new().parse(&benchmark()).unwrap_err();
     eprintln!("{error:?}");
     assert!(matches!(
         error,
-        Error::UnsupportedBodyRecord {
-            tag: 0x47,
-            section: 0,
-            start: 5926,
-            end: 5976,
-            reason: "paragraphs with multiple table controls are not yet owned",
+        Error::MalformedRecord {
+            tag: 0x4d,
+            section: Some(0),
+            offset: 7561,
+            reason: "TABLE attributes or framing are not owned",
             ..
         }
     ));
