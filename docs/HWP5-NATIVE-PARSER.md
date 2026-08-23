@@ -4,7 +4,8 @@ Issue #107 introduced the first owned binary-HWP layer; issue #154 added its fir
 issue #156 added the minimum source-layout facts needed by the shared typesetter, issue #158 owns
 the paragraph support-pool boundary, and issue #160 owns DocInfo styles plus content-free paragraph
 header refusal reasons; issue #161 adds strict column definitions and the shared multi-column layout
-contract. None of these slices changes production parsing.
+contract; issue #168 adds the first strict inline 1×1 table slice. None of these slices changes
+production parsing.
 
 ## What is owned now
 
@@ -22,6 +23,10 @@ checked. A pool that is merely present is not treated as active: custom tabs, nu
 visible paragraph border/fill still fail closed when a paragraph would depend on semantics the shared
 typesetter does not yet own. The owned section-definition boundary maps a strict 40-byte `PAGE_DEF` to
 `Section.page`, including all six margins, gutter, and HWP5 landscape orientation. A strict
+19-byte `secd` extension is accepted only in the documented representative-language/master-page-tail
+shape. Exact 28-byte foot/endnote-shape records are validated but remain dormant because note controls
+are unsupported. Page-border records may be discarded only when their resolved `BorderFillDef` is
+visually inert; visible page borders, shades, or diagonals fail closed. A strict
 `PARA_LINE_SEG` reader validates declared counts and UTF-16 scalar/control starts, but exposes stored
 line-box metrics only for true blank spacer paragraphs. Stored line breaks never override our
 typesetter and zero-height segments are non-authoritative. A strict `cold` reader accepts bounded
@@ -59,14 +64,19 @@ rejected instead of being interpreted as records.
 
 - `Engine::open`: unchanged production route. Binary HWP still uses the governed rhwp bootstrap.
 - `open_hwp5_own`: explicit first-party-only route. It returns a `SemanticDoc` only for the owned
-  text, single-sided page setup, and strict column subset. Tables, images, fields, notes, equations, charts,
+  text, single-sided page setup, strict column subset, and strict inline 1×1 table subset. Larger,
+  floating, merged, captioned, or nested tables, images, fields, notes, equations, charts,
   decorations, page border/fill, duplex binding, active custom tabs/lists/paragraph borders,
   unknown body controls, and unsupported pool values fail closed with a static reason plus tag,
   section, and byte span only. It cannot call rhwp. The public benchmark now passes its first
-  multi-column paragraph header and `cold` definition, then stops at the next unowned control header
-  (`0x47`, section 0, bytes 499..549) without exposing content. The owned prefix now includes strict
+  multi-column paragraph header and `cold` definition plus its first inline table, then stops at the
+  next larger TABLE record (`0x4d`, section 0, bytes 936..982) without exposing content. The owned prefix includes strict
   single-section `pgnp` positioning and `nwno` page-counter restarts; other counters, zero starts,
-  duplicates, missing positions, and multi-section inheritance fail closed.
+  conflicting duplicates, missing positions, and multi-section inheritance fail closed. Exact duplicate
+  `pgnp`/`nwno` records are idempotently collapsed by typed equality. The first public `tbl ` control is
+  owned only as a treat-as-character 1×1 table with one centered cell paragraph, inherited table
+  padding, consistent object/cell geometry, and resolved border fills. It lowers to the shared
+  `Table`/`Cell` IR, so SVG and PDF consume the same `place_doc` geometry.
 - `hwp5_differential`: explicitly runs the owned probe and current rhwp semantic oracle, then reports
   section/paragraph/run/table/image/control/equation/chart counts and their deltas.
 

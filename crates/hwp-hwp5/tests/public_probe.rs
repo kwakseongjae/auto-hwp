@@ -34,10 +34,10 @@ fn explicit_own_parser_never_falls_back() {
     assert!(matches!(
         error,
         Error::UnsupportedBodyRecord {
-            tag: 0x47,
+            tag: 0x4d,
             section: 0,
-            start: 499,
-            end: 549,
+            start: 936,
+            end: 982,
             reason: "record semantics are not owned",
             ..
         }

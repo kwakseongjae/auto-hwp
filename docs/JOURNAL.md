@@ -5,6 +5,23 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #168 PR #169 posted
+- 구현 `12a754b` push + PR #169(`Closes #168`, `Refs #94 #164 #166`) 게시.
+- next GitHub 번호는 PR이 사용했으므로 larger TABLE 936..982 후속은 #170 issue-first.
+- 다음 state push→required CI/mergeability/review/comment→green 자율 병합→#170.
+
+## 2026-08-24 (Codex sol) · #168 inline 1×1 table full green / PR ready
+- strict tbl/common-object/TABLE/LIST_HEADER/cell paragraph → shared Table/Cell IR.
+- secd extension·dormant notes·inert page border prerequisite와 typed duplicate collapse 소유.
+- public boundary 499..549→TABLE 936..982; hostile fixture와 HWP5 51 tests green.
+- quick/full·Vitest 1,007·Chromium 85/3 green; route/rhwp/HWPX/generated diff 0. 다음 PR→CI→#169.
+
+## 2026-08-24 (Codex sol) · PR #167 merged → #168 next control started
+- #167 required CI/MERGEABLE·댓글 0 후 main `c39b852` 병합; #166 close·remote branch 정리.
+- #94 완료 근거 동기화; next content-free boundary 0x47/499..549.
+- child #168 + latest-main `codex/issue-168-hwp5-next-control`; rhwp pinned `f137b4c9`.
+- 다음 bounded structural probe→oracle 대조→최소 typed subset; probe/raw content commit 금지.
+
 ## 2026-08-24 (Codex sol) · #166 PR #167 posted
 - 구현 `4ed836a` push + PR #167; build-test 9m19s·licenses 2m22s green.
 - 최초 빈-body event는 본문 복구 뒤에도 rerun payload가 stale이라 issue-link 재실패.
