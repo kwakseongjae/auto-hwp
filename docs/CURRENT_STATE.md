@@ -3,6 +3,43 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-23 · Codex(sol) — **#154 PR #155 게시**.
+  검증 완료 commit `a6acbca`를 push하고 PR #155(`Closes #154`, `Refs #94 #87`)를 만들었다.
+  PR 본문에 text-only candidate/no production cutover, unsupported fail-closed, no rhwp fallback,
+  full Rust/조판/PDF/WASM/licenses·Vitest 1,018·Chromium 85 pass/3 skip·generated/submodule diff 0을
+  명시했다. **다음:** 이 상태 commit push → issue-link/build-test/licenses, mergeability, review/comment를
+  추적해 green이면 자율 병합·원격 브랜치 정리 → #94 다음 first-party slice를 issue-first로 착수한다.
+
+- 갱신: 2026-08-23 · Codex(sol) — **#154 구현·전체 검증 완료 · PR 준비**.
+  final security review에서 run 경계 처리를 O(runs×chars)에서 binary-search+linear slice로 바꿔
+  적대적 대형 입력의 CPU 증폭을 막고, unsupported body 오류를 정확한 tag·section·raw byte span으로
+  고정했다. 최종 focused 16 tests+clippy+wasm32와 quick 전체가 재통과했다. 앞선 full은 Rust workspace,
+  PDF51, canonical 8/18/24+98.9%, corpus84, oracle82, HWPX locks, optimized wasm 7,793,352B,
+  JS build/crosscheck/i18n, Vitest 269+64+427+247+11=1,018을 통과했다. E2E 첫 시도는 기본 3100에
+  다른 factsheet 앱이 떠 있어 잘못 재사용된 환경 실패였고, 전용 `PW_PORT=31854` 재실행은 실제
+  Chromium **85 pass/3 intentional skip**다. 임시 node_modules symlink 전부 제거, generated wasm/
+  public assets/rhwp submodule diff 0. **다음:** final diff→commit/push→PR `Closes #154`/`Refs #94 #87`
+  → 필수 CI·review/comment 확인→green 자율 병합→#94 다음 first-party slice issue.
+
+- 갱신: 2026-08-23 · Codex(sol) — **#154 HWP5 text-only SemanticDoc slice · quick green**.
+  first-party `hwp-hwp5`가 26B DOCUMENT_PROPERTIES·15+optional MemoShape ID_MAPPINGS와
+  FACE_NAME/CHAR_SHAPE/PARA_SHAPE를 strict count/reference로 읽고, 22B PARA_HEADER의 declared
+  run/control counts와 UTF-16LE(서로게이트·탭·줄바꿈·HWP blank)를 검증해 direct text paragraph/run을
+  우리 `SemanticDoc`으로 만든다. table/image/field/note/equation/chart/unknown body record는 tag·section·
+  offset만으로 fail-closed하고 rhwp fallback은 없다. production `Engine::open`은 rhwp bootstrap 그대로다.
+  정상/적대 합성 8건+공개 benchmark no-fallback, workspace/clippy/PDF51/canonical 8·18·24+98.9%/
+  corpus84/oracle82/HWPX locks/wasm/licenses quick가 green이다. **다음:** 문서·diff 최종 review →
+  `verify-local --full`(JS/Chromium 포함) → commit/push/PR #154/CI/자율 병합 → #94 다음 slice issue.
+
+- 갱신: 2026-08-23 · Codex(sol) — **PR #153 병합 · #154 semantic slice 착수**.
+  #107 PR #153은 head `8e8315b`에서 issue-link·build-test 8m12s·licenses green,
+  CLEAN/MERGEABLE·리뷰/일반/인라인 댓글 0을 확인한 뒤 main `aab77c0`으로 squash 병합했고 원격
+  브랜치를 삭제했다. #107은 close됐고 #94에 완료 증거/다음 범위를 기록했다. 중복 검색 후 child
+  #154(DocInfo pools + fail-closed text-only SemanticDoc)를 만들고 정확한 최신 main에서
+  `codex/issue-154-hwp5-text`를 시작했다. **다음:** `hwp-hwp5` record spans 위에 strict
+  DOCUMENT_PROPERTIES/ID_MAPPINGS/FACE_NAME/CHAR_SHAPE/PARA_SHAPE와 text-only paragraph/run을
+  설계한다. control/object가 하나라도 있으면 partial success 없이 거부하고 production route는 불변이다.
+
 - 갱신: 2026-08-23 · Codex(sol) — **#107 PR #153 게시**.
   검증 완료 commit `513e8e2`를 push하고 PR #153(`Closes #107`, `Refs #94 #87`)을 만들었다.
   production route 불변, own-only fail-closed, content-free differential, hostile bounds, public benchmark

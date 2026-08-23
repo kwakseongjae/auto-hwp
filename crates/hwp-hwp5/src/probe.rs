@@ -20,6 +20,9 @@ pub struct StreamProbe {
     pub section: Option<usize>,
     pub decompressed_bytes: usize,
     pub records: Vec<Record>,
+    /// Decompressed bytes stay crate-private and are never serialized into diagnostics.
+    #[serde(skip)]
+    pub(crate) raw: Vec<u8>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -156,6 +159,7 @@ fn inspect_stream<R: Read + Seek>(
         section,
         decompressed_bytes: raw.len(),
         records,
+        raw,
     })
 }
 

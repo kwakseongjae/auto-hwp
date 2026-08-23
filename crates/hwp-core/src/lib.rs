@@ -51,17 +51,12 @@ impl Engine {
 }
 
 /// Run only the first-party HWP5 parser lane. This entry point is intentionally separate from
-/// [`Engine::open`]: until the native DocInfo/text slices land, it validates the owned container and
-/// record layers and then returns `CapabilityUnavailable`. It never calls or falls back to rhwp.
+/// [`Engine::open`]: it accepts the strict text-only subset and returns a parse error for every
+/// unsupported construct. It never calls or falls back to rhwp.
 pub fn open_hwp5_own(bytes: &[u8]) -> Result<SemanticDoc> {
     hwp_hwp5::OwnHwp5Parser::new()
         .parse(bytes)
-        .map_err(|error| match error {
-            hwp_hwp5::Error::SemanticSlicePending => {
-                Error::CapabilityUnavailable(hwp_hwp5::OWN_SEMANTIC_SLICE_PENDING)
-            }
-            other => Error::Parse(other.to_string()),
-        })
+        .map_err(|error| Error::Parse(error.to_string()))
 }
 
 /// Content-free structural comparison between the first-party HWP5 candidate and the current rhwp
@@ -86,11 +81,10 @@ mod hwp5_candidate_tests {
 
     #[test]
     fn own_only_fails_closed_even_when_rhwp_is_available() {
-        assert!(matches!(
-            open_hwp5_own(&benchmark()),
-            Err(Error::CapabilityUnavailable(message))
-                if message == hwp_hwp5::OWN_SEMANTIC_SLICE_PENDING
-        ));
+        let error = open_hwp5_own(&benchmark()).unwrap_err().to_string();
+        assert!(error.contains("HWP5"));
+        assert!(error.contains("tag"));
+        assert!(!error.contains("benchmark.hwp"));
     }
 
     #[test]

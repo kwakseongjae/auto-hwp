@@ -5,6 +5,25 @@
 
 ---
 
+## 2026-08-23 (Codex sol) · #154 PR #155
+- commit `a6acbca` push, PR #155(`Closes #154`, `Refs #94 #87`) 게시.
+- 다음 required CI/review 감시→green 자율 병합→#94 next first-party slice.
+
+## 2026-08-23 (Codex sol) · #154 full green
+- run 경계 CPU 증폭 제거+unsupported raw span; final focused/quick 재통과.
+- full Rust/PDF/8·18·24/WASM/licenses + Vitest 1,018 + Chromium 85 pass/3 skip.
+- 임시 links/generated/rhwp diff 0. 다음 commit/push/PR/CI/병합→#94 next slice.
+
+## 2026-08-23 (Codex sol) · #154 HWP5 text slice quick green
+- own DocInfo pools + strict UTF-16 paragraph/run → SemanticDoc; unsupported body는 fail-closed.
+- 합성 정상/적대 8건, 공개 benchmark no-fallback, workspace/clippy/8·18·24/PDF/WASM quick green.
+- production route/rhwp submodule 불변. 다음 full→diff→commit/PR/CI/병합→#94 next slice.
+
+## 2026-08-23 (Codex sol) · PR #153 병합 → #154 착수
+- #153 required CI/CLEAN·댓글 0 확인 후 main `aab77c0` 병합, 원격 branch 정리; #107 close.
+- #94에 완료 증거 기록, child #154 생성 후 latest-main worktree 시작.
+- 다음 strict DocInfo pools→fail-closed text-only SemanticDoc; production route 불변.
+
 ## 2026-08-23 (Codex sol) · #107 PR #153
 - commit `513e8e2` push, PR #153(`Closes #107`, `Refs #94 #87`) 게시.
 - 다음 required CI/review 감시→green 자율 병합→#94 first semantic slice.
