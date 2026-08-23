@@ -100,7 +100,20 @@
   refs도 일치한다. row0 width-ref는 모두 `0x0100`, rows1..5는 `0x0500`; repeat-header attr은 active
   header cell이 없어 inert이고 no-split은 shared `keep_together`로 보존 가능하다. one-shot numeric
   classifier는 제거했다. **다음:** exact tuple/24-cell row-major/width-ref/geometry synthetic+hostile
-  fixture→strict parser; route/rhwp/HWPX/generated 불변.
+  fixture→strict parser; route/rhwp/HWPX/generated 불변. strict parser와 합성 회귀를 구현해 exact
+  common/table pair, 24-cell row-major full grid, row counts, 1-paragraph cells, row0/body width refs,
+  mirrored extension, column/row/object geometry를 검증한다. common/table attr·row count·width·height·
+  paragraph count·width-ref·order·extension hostile **9축**은 fail-closed. HWP5 **63 tests**, fmt,
+  clippy `-D warnings`, wasm32 green이며 public boundary는 다음 TABLE `0x4d/30321..30361`의 unowned
+  topology로 전진했다. quick의 Rust workspace, PDF visual **51**, canonical
+  **8/18/24·98.9%+**, public corpus **84**, oracle **82**, HWPX, wasm/licenses가 모두 green이다.
+  full도 wasm 재빌드 **7,810,657B**, JS build·crosscheck·i18n, Vitest **1,018**까지 green이고
+  sandbox port EPERM만 허용된 로컬 서버에서 분리한 Chromium **85 pass/3 intentional skip/0
+  fail**이다. 임시 dependency link는 모두 제거했다. final diff/security review에서 one-shot
+  classifier·production route·rhwp·HWPX parser/serializer·shared typesetter·generated asset diff
+  0, source content/path/hash/raw payload/credential 노출 0을 확인했고 변경 파일은 strict HWP5
+  parser/tests/state 5개뿐이다. **다음:** commit/push/PR→exact-head CI·댓글·mergeability→자율
+  병합→#94 동기화→next child.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #173 병합 · #174 multi-table 경계 착수**.
   자체 HWP5 파서가 exact `tbl ` marker/common-object/TABLE/LIST_HEADER/cell paragraph를 검증해

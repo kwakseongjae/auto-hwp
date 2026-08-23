@@ -1559,9 +1559,10 @@ fn parse_new_number_control(
 }
 
 /// Own the bounded binary-table slices seen at the public first-party boundary: strict inline 1×1,
-/// 10×2, 9×8, and 8×5 tables. The 9×8 slice has 34 active cells and one nested 1×1 table; the 8×5
-/// slice has 19 active cells, one bounded vertical merge, and nine nested 1×1 tables. A 1×1 cell may
-/// use the exact observed cell-own inner-margin bit;
+/// 10×2, 9×8, 8×5, and 6×4 tables. The 9×8 slice has 34 active cells and one nested 1×1 table; the
+/// 8×5 slice has 19 active cells, one bounded vertical merge, and nine nested 1×1 tables. The 6×4
+/// slice is a complete 24-cell grid with one paragraph per cell. A 1×1 cell may use the exact
+/// observed cell-own inner-margin bit;
 /// protection/header/form bits remain unsupported. Multiple controls in one text-empty host are
 /// emitted in marker/header order by `parse_paragraph`. Anything outside these exact source-neutral
 /// shapes, including deeper nesting, remains fail-closed rather than being approximated.
@@ -1662,6 +1663,9 @@ fn parse_inline_table(
         (0x082a_2211, 0x0400_0004, 1, 2) => {
             vec![(0, 0, 1, 1), (0, 1, 1, 1)]
         }
+        (0x082a_2311, 0x0400_0004, 6, 4) => (0..6)
+            .flat_map(|row| (0..4).map(move |col| (row, col, 1, 1)))
+            .collect(),
         (0x082a_2311, 0x0400_0006, 10, 2) => (0..10)
             .flat_map(|row| {
                 if matches!(row, 0 | 1 | 5) {
@@ -1841,6 +1845,15 @@ fn parse_inline_table(
                 "cell LIST_HEADER count, direction, alignment, or width reference is not owned",
             ));
         }
+        let exact_six_by_four =
+            (common_attr, table_attr, rows, cols) == (0x082a_2311, 0x0400_0004, 6, 4);
+        if exact_six_by_four && paragraph_count != 1 {
+            return Err(malformed(
+                &list_record,
+                Some(section),
+                "6x4 cell paragraph count differs from its exact owned topology",
+            ));
+        }
         let col = read_u16(list_bytes, 8).expect("exact length checked") as usize;
         let row = read_u16(list_bytes, 10).expect("exact length checked") as usize;
         let col_span = read_u16(list_bytes, 12).expect("exact length checked") as usize;
@@ -1869,8 +1882,11 @@ fn parse_inline_table(
             } else {
                 None
             };
-        let expected_exact_width_ref =
-            expected_one_by_two_width_ref.or(expected_eight_by_five_width_ref);
+        let expected_six_by_four_width_ref =
+            exact_six_by_four.then_some(if row == 0 { 0x0100 } else { 0x0500 });
+        let expected_exact_width_ref = expected_one_by_two_width_ref
+            .or(expected_eight_by_five_width_ref)
+            .or(expected_six_by_four_width_ref);
         let owned_width_ref = expected_exact_width_ref.map_or_else(
             || {
                 matches!(width_ref, 0x0000 | 0x0100 | 0x0500)
