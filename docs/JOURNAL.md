@@ -5,6 +5,26 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #178 full green / PR ready
+- quick/full Rust·PDF51·canonical·corpus84·oracle82·HWPX·wasm/JS + Vitest 1,018 green.
+- 허용된 로컬 서버 Chromium 85 pass/3 intentional skip/0 fail; 임시 link 제거.
+- route/rhwp/HWPX/generated diff 0. 다음 commit/push/PR→CI/merge→next boundary.
+
+## 2026-08-24 (Codex sol) · #178 focused green
+- strict 8×5/19 cells + rowspan + nested 9; stale extension width를 own geometry로 복원.
+- hostile 8축, HWP5 59/clippy/wasm32 green; next CTRL_HEADER 21538..21588.
+- route/rhwp/HWPX/generated 불변. 다음 quick→full→PR/CI/merge.
+
+## 2026-08-24 (Codex sol) · #178 content-free classified
+- exact 8×5/19 cells, row-span 1개, depth-1 nested 1×1 9개; active topology bounded.
+- row heights sum 66796 exact; ragged stored widths fit Cell.width, one legacy extension differs.
+- one-shot classifier removed. 다음 strict synthetic/hostile→parser; route/rhwp/HWPX 불변.
+
+## 2026-08-24 (Codex sol) · PR #177 merged / #178 started
+- #177 required CI·MERGEABLE·댓글 0 후 main `aa7a23f7`; #176 close·branch 정리.
+- #94 동기화, 중복 없는 8×5 TABLE #178 등록, exact-main worktree 시작.
+- next `13704..13746` content-free classification; route/rhwp/HWPX 불변.
+
 ## 2026-08-24 (Codex sol) · #176 PR #177 게시
 - bounded nested TABLE commit `52e9fc6` push, PR #177(`Closes #176`) 생성.
 - full/Vitest 1,018/Chromium 85·3, route/rhwp/HWPX/generated 불변을 공개 검증에 명시.

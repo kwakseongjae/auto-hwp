@@ -1559,8 +1559,9 @@ fn parse_new_number_control(
 }
 
 /// Own the bounded binary-table slices seen at the public first-party boundary: strict inline 1×1,
-/// 10×2, and 9×8 tables. The 9×8 slice has 34 active cells, an exact horizontal-merge topology, and
-/// one nested 1×1 table at depth one. A 1×1 cell may use the exact observed cell-own inner-margin bit;
+/// 10×2, 9×8, and 8×5 tables. The 9×8 slice has 34 active cells and one nested 1×1 table; the 8×5
+/// slice has 19 active cells, one bounded vertical merge, and nine nested 1×1 tables. A 1×1 cell may
+/// use the exact observed cell-own inner-margin bit;
 /// protection/header/form bits remain unsupported. Multiple controls in one text-empty host are
 /// emitted in marker/header order by `parse_paragraph`. Anything outside these exact source-neutral
 /// shapes, including deeper nesting, remains fail-closed rather than being approximated.
@@ -1654,51 +1655,72 @@ fn parse_inline_table(
     let cols = read_u16(table_bytes, 6).expect("minimum length checked") as usize;
     let table_attr = read_u32(table_bytes, 0).expect("minimum length checked");
     let expected_positions = match (table_attr, rows, cols) {
-        (0x0400_0006, 1, 1) => vec![(0, 0, 1)],
+        (0x0400_0006, 1, 1) => vec![(0, 0, 1, 1)],
         (0x0400_0006, 10, 2) => (0..10)
             .flat_map(|row| {
                 if matches!(row, 0 | 1 | 5) {
-                    vec![(row, 0, 2)]
+                    vec![(row, 0, 2, 1)]
                 } else {
-                    vec![(row, 0, 1), (row, 1, 1)]
+                    vec![(row, 0, 1, 1), (row, 1, 1, 1)]
                 }
             })
             .collect(),
         (0x0600_000c, 9, 8) => vec![
-            (0, 0, 3),
-            (0, 3, 5),
-            (1, 0, 3),
-            (1, 3, 5),
-            (2, 0, 3),
-            (2, 3, 2),
-            (2, 5, 1),
-            (2, 6, 2),
-            (3, 0, 8),
-            (4, 0, 1),
-            (4, 1, 1),
-            (4, 2, 2),
-            (4, 4, 3),
-            (4, 7, 1),
-            (5, 0, 1),
-            (5, 1, 1),
-            (5, 2, 2),
-            (5, 4, 3),
-            (5, 7, 1),
-            (6, 0, 1),
-            (6, 1, 1),
-            (6, 2, 2),
-            (6, 4, 3),
-            (6, 7, 1),
-            (7, 0, 1),
-            (7, 1, 1),
-            (7, 2, 2),
-            (7, 4, 3),
-            (7, 7, 1),
-            (8, 0, 1),
-            (8, 1, 1),
-            (8, 2, 2),
-            (8, 4, 3),
-            (8, 7, 1),
+            (0, 0, 3, 1),
+            (0, 3, 5, 1),
+            (1, 0, 3, 1),
+            (1, 3, 5, 1),
+            (2, 0, 3, 1),
+            (2, 3, 2, 1),
+            (2, 5, 1, 1),
+            (2, 6, 2, 1),
+            (3, 0, 8, 1),
+            (4, 0, 1, 1),
+            (4, 1, 1, 1),
+            (4, 2, 2, 1),
+            (4, 4, 3, 1),
+            (4, 7, 1, 1),
+            (5, 0, 1, 1),
+            (5, 1, 1, 1),
+            (5, 2, 2, 1),
+            (5, 4, 3, 1),
+            (5, 7, 1, 1),
+            (6, 0, 1, 1),
+            (6, 1, 1, 1),
+            (6, 2, 2, 1),
+            (6, 4, 3, 1),
+            (6, 7, 1, 1),
+            (7, 0, 1, 1),
+            (7, 1, 1, 1),
+            (7, 2, 2, 1),
+            (7, 4, 3, 1),
+            (7, 7, 1, 1),
+            (8, 0, 1, 1),
+            (8, 1, 1, 1),
+            (8, 2, 2, 1),
+            (8, 4, 3, 1),
+            (8, 7, 1, 1),
+        ],
+        (0x0600_000e, 8, 5) => vec![
+            (0, 0, 1, 1),
+            (0, 1, 1, 1),
+            (0, 2, 2, 1),
+            (0, 4, 1, 1),
+            (1, 0, 1, 1),
+            (1, 1, 4, 1),
+            (2, 0, 1, 1),
+            (2, 1, 4, 1),
+            (3, 0, 1, 1),
+            (3, 1, 4, 1),
+            (4, 0, 1, 1),
+            (4, 1, 4, 1),
+            (5, 0, 1, 1),
+            (5, 1, 4, 1),
+            (6, 0, 1, 2),
+            (6, 1, 2, 1),
+            (6, 3, 2, 1),
+            (7, 1, 2, 1),
+            (7, 3, 2, 1),
         ],
         _ => {
             return Err(malformed(
@@ -1754,7 +1776,7 @@ fn parse_inline_table(
         .map(|row| {
             expected_positions
                 .iter()
-                .filter(|(cell_row, _, _)| *cell_row == row)
+                .filter(|(cell_row, _, _, _)| *cell_row == row)
                 .count() as HwpUnit
         })
         .collect::<Vec<_>>();
@@ -1806,12 +1828,7 @@ fn parse_inline_table(
         }
         let paragraph_count = read_u16(list_bytes, 0).expect("exact length checked") as usize;
         let width_ref = read_u16(list_bytes, 6).expect("exact length checked");
-        let owned_width_ref = matches!(width_ref, 0x0000 | 0x0100 | 0x0500)
-            || (width_ref == 0x0501 && (rows, cols) == (1, 1));
-        if !(1..=5).contains(&paragraph_count)
-            || read_u32(list_bytes, 2) != Some(0x0020_0000)
-            || !owned_width_ref
-        {
+        if !(1..=5).contains(&paragraph_count) || read_u32(list_bytes, 2) != Some(0x0020_0000) {
             return Err(malformed(
                 &list_record,
                 Some(section),
@@ -1824,9 +1841,39 @@ fn parse_inline_table(
         let row_span = read_u16(list_bytes, 14).expect("exact length checked") as usize;
         let cell_width = read_u32(list_bytes, 16).expect("exact length checked");
         let cell_height = read_u32(list_bytes, 20).expect("exact length checked");
+        let expected_eight_by_five_width_ref = if (table_attr, rows, cols) == (0x0600_000e, 8, 5) {
+            Some(if row == 0 {
+                0x0100
+            } else if (row, col, col_span, row_span) == (6, 1, 2, 1) {
+                0x0400
+            } else {
+                0x0000
+            })
+        } else {
+            None
+        };
+        let owned_width_ref = expected_eight_by_five_width_ref.map_or_else(
+            || {
+                matches!(width_ref, 0x0000 | 0x0100 | 0x0500)
+                    || (width_ref == 0x0501 && (rows, cols) == (1, 1))
+            },
+            |expected| width_ref == expected,
+        );
+        if !owned_width_ref {
+            return Err(malformed(
+                &list_record,
+                Some(section),
+                if expected_eight_by_five_width_ref.is_some() {
+                    "cell LIST_HEADER width reference differs from its exact owned topology"
+                } else {
+                    "cell LIST_HEADER count, direction, alignment, or width reference is not owned"
+                },
+            ));
+        }
         if col_span == 0
-            || row_span != 1
+            || row_span == 0
             || col.checked_add(col_span).is_none_or(|end| end > cols)
+            || row.checked_add(row_span).is_none_or(|end| end > rows)
             || row >= rows
             || cell_width == 0
             || cell_height == 0
@@ -1841,13 +1888,36 @@ fn parse_inline_table(
         }
         let list_extra = &list_bytes[34..];
         let zero_legacy_extra = list_extra.iter().all(|byte| *byte == 0);
-        let mirrored_width_extra = read_u32(list_extra, 0) == Some(cell_width)
-            && list_extra[4..].iter().all(|byte| *byte == 0);
-        if !(zero_legacy_extra || mirrored_width_extra) {
+        let extension_width = read_u32(list_extra, 0).unwrap_or(0);
+        let width_extension = extension_width > 0 && list_extra[4..].iter().all(|byte| *byte == 0);
+        let stale_core_width_slot = (table_attr, rows, cols, row, col, col_span, row_span)
+            == (0x0600_000e, 8, 5, 6, 3, 2, 1);
+        if !(zero_legacy_extra
+            || (width_extension && (extension_width == cell_width || stale_core_width_slot)))
+        {
             return Err(malformed(
                 &list_record,
                 Some(section),
-                "cell LIST_HEADER extension is not zero or an exact width mirror",
+                "cell LIST_HEADER extension is not zero or an owned layout-width mirror",
+            ));
+        }
+        if stale_core_width_slot && extension_width.checked_sub(cell_width) != Some(176) {
+            return Err(malformed(
+                &list_record,
+                Some(section),
+                "owned stale core cell width does not match its bounded layout-width delta",
+            ));
+        }
+        let layout_width = if width_extension {
+            extension_width
+        } else {
+            cell_width
+        };
+        if layout_width == 0 || layout_width > MAX_OBJECT_HWPUNIT {
+            return Err(malformed(
+                &list_record,
+                Some(section),
+                "cell LIST_HEADER layout width is not positive and bounded",
             ));
         }
         let cell_padding = [24usize, 26, 28, 30]
@@ -1859,8 +1929,9 @@ fn parse_inline_table(
                 "cell stored padding must be nonnegative",
             ));
         }
-        // The bounded 13-byte extension is either the legacy all-zero form or an exact cell-width
-        // mirror followed by reserved zeros. Longer field-bearing tails remain unsupported.
+        // The bounded 13-byte extension is either the legacy all-zero form or a layout-width mirror
+        // followed by reserved zeros. One exact public slot carries a newer layout width over a stale
+        // core width; the global span equations below prove that override instead of trusting it alone.
         debug_assert_eq!(list_extra.len(), 13);
         let cell_border_id = read_u16(list_bytes, 32).expect("exact length checked");
         let cell_fill = table_border(doc, cell_border_id, &list_record, section, "table cell")?;
@@ -1910,10 +1981,27 @@ fn parse_inline_table(
                 ));
             }
             if !parsed.tables.is_empty() {
-                let owned_nested_position = (table_attr, rows, cols) == (0x0600_000c, 9, 8)
-                    && (row, col, col_span) == (1, 3, 5)
-                    && paragraph_index == 1
-                    && parsed.tables.len() == 1;
+                let owned_nested_position = match (table_attr, rows, cols) {
+                    (0x0600_000c, 9, 8) => {
+                        (row, col, col_span, row_span, paragraph_index) == (1, 3, 5, 1, 1)
+                    }
+                    (0x0600_000e, 8, 5) => {
+                        paragraph_index == 0
+                            && matches!(
+                                (row, col, col_span, row_span),
+                                (0, 1, 1, 1)
+                                    | (0, 4, 1, 1)
+                                    | (1, 1, 4, 1)
+                                    | (2, 1, 4, 1)
+                                    | (3, 1, 4, 1)
+                                    | (4, 1, 4, 1)
+                                    | (5, 1, 4, 1)
+                                    | (6, 1, 2, 1)
+                                    | (6, 3, 2, 1)
+                            )
+                    }
+                    _ => false,
+                } && parsed.tables.len() == 1;
                 let has_visible_text = parsed.paragraph.runs.iter().any(|run| {
                     run.content
                         .iter()
@@ -1947,7 +2035,7 @@ fn parse_inline_table(
             // The exact observed low bit is HWP's apply-inner-margin flag. Other cell extension
             // bits (protect/header/form) were rejected with the width-reference word above.
             padding: (width_ref == 0x0501).then_some(cell_padding.map(|value| value as HwpUnit)),
-            width: Some(cell_width as HwpUnit),
+            width: Some(layout_width as HwpUnit),
             ..Cell::default()
         });
     }
@@ -1958,7 +2046,11 @@ fn parse_inline_table(
             "owned TABLE active-cell count differs from its exact topology",
         ));
     }
-    let expected_nested_tables = usize::from((table_attr, rows, cols) == (0x0600_000c, 9, 8));
+    let expected_nested_tables = match (table_attr, rows, cols) {
+        (0x0600_000c, 9, 8) => 1,
+        (0x0600_000e, 8, 5) => 9,
+        _ => 0,
+    };
     if nested_table_count != expected_nested_tables {
         return Err(malformed(
             &table_record,
@@ -1970,7 +2062,7 @@ fn parse_inline_table(
     if cells
         .iter()
         .zip(&expected_positions)
-        .any(|(cell, expected)| (cell.row, cell.col, cell.col_span) != *expected)
+        .any(|(cell, expected)| (cell.row, cell.col, cell.col_span, cell.row_span) != *expected)
     {
         return Err(malformed(
             &table_record,
@@ -1980,16 +2072,19 @@ fn parse_inline_table(
     }
 
     let mut derived_rows = vec![None::<HwpUnit>; rows];
-    for (cell, cell_height) in cells.iter().zip(cell_heights) {
+    for (cell, cell_height) in cells.iter().zip(&cell_heights) {
+        if cell.row_span != 1 {
+            continue;
+        }
         match derived_rows[cell.row] {
-            Some(existing) if existing != cell_height => {
+            Some(existing) if existing != *cell_height => {
                 return Err(malformed(
                     &table_record,
                     Some(section),
                     "cell heights disagree within a TABLE row",
                 ))
             }
-            None => derived_rows[cell.row] = Some(cell_height),
+            None => derived_rows[cell.row] = Some(*cell_height),
             _ => {}
         }
     }
@@ -2070,11 +2165,29 @@ fn parse_inline_table(
                 "TABLE has a row whose stored height cannot be derived from an active cell",
             )
         })?;
-    if derived_rows
+    for (cell, cell_height) in cells.iter().zip(&cell_heights) {
+        if cell.row_span <= 1 {
+            continue;
+        }
+        let end = cell.row + cell.row_span;
+        let span_height = derived_rows[cell.row..end]
+            .iter()
+            .try_fold(0i64, |sum, value| sum.checked_add(i64::from(*value)));
+        if span_height != Some(i64::from(*cell_height)) {
+            return Err(malformed(
+                &table_record,
+                Some(section),
+                "row-spanning cell height disagrees with its covered TABLE rows",
+            ));
+        }
+    }
+    let stored_height = derived_rows
         .iter()
-        .try_fold(0i64, |sum, value| sum.checked_add(i64::from(*value)))
-        != Some(i64::from(height))
-    {
+        .try_fold(0i64, |sum, value| sum.checked_add(i64::from(*value)));
+    let owned_nested_stale_common_height = table_depth == 1
+        && (table_attr, rows, cols, height, stored_height)
+            == (0x0400_0006, 1, 1, 3_882, Some(1_848));
+    if stored_height != Some(i64::from(height)) && !owned_nested_stale_common_height {
         return Err(malformed(
             &table_record,
             Some(section),
@@ -2086,13 +2199,15 @@ fn parse_inline_table(
         rows,
         cols,
         cells,
-        keep_together: true,
+        // The exact 8×5 form follows the current shared row-fragmentation behavior. Its low flag has
+        // conflicting legacy descriptions, so this stays bounded to the observed form; the other
+        // owned forms retain their already-proven keep-together behavior.
+        keep_together: table_attr != 0x0600_000e,
         col_widths,
         row_heights: derived_rows,
-        // The exact 9×8 attribute carries HWP's no-adjust bit. Its stored row heights are therefore
-        // exact clipping geometry, not merely content-size floors. The other owned HWP5 subsets keep
-        // their historical floor behavior.
-        fixed_row_heights: table_attr == 0x0600_000c,
+        // Both exact large-table attributes carry HWP's no-adjust bit. Their stored row heights are
+        // exact clipping geometry, not merely content-size floors.
+        fixed_row_heights: matches!(table_attr, 0x0600_000c | 0x0600_000e),
         outer_margin_left: margins[0] as HwpUnit,
         outer_margin_right: margins[1] as HwpUnit,
         outer_margin_top: margins[2] as HwpUnit,
