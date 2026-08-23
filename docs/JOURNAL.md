@@ -5,6 +5,16 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #184 full green / PR ready
+- quick/full: Rust·PDF51·canonical·corpus84·oracle82·HWPX·wasm/JS + Vitest 1,018 green.
+- 허용된 로컬 서버 Chromium 85 pass/3 intentional skip/0 fail; 임시 link 제거.
+- route/rhwp/HWPX/shared typesetter/generated/security diff 0. 다음 commit/push/PR→CI/merge.
+
+## 2026-08-24 (Codex sol) · #184 focused green
+- strict 7×3/19 merged cells + exact width-ref/span/geometry/1-paragraph ownership; hostile 10축.
+- HWP5 65/fmt/workspace clippy/wasm32 green; next LIST_HEADER 40865..40916.
+- classifier/route/rhwp/HWPX/generated diff 0. 다음 quick→full→PR/CI/merge.
+
 ## 2026-08-24 (Codex sol) · #184 classified
 - exact 7×3/19 cells; vertical span 1 + final-row horizontal span 1, no nesting, 1 paragraph/cell.
 - column/row/span sums equal object geometry; exact width-ref pattern; no-split/no-adjust faithfully modeled.
