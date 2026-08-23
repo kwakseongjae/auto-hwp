@@ -28,17 +28,17 @@ fn public_hwp5_has_bounded_content_free_record_provenance() {
 }
 
 #[test]
-fn explicit_own_parser_never_falls_back() {
+fn explicit_own_parser_owns_the_ten_by_two_table_then_stops_content_free() {
     let error = OwnHwp5Parser::new().parse(&benchmark()).unwrap_err();
     eprintln!("{error:?}");
     assert!(matches!(
         error,
         Error::UnsupportedBodyRecord {
-            tag: 0x4d,
+            tag: 0x47,
             section: 0,
-            start: 936,
-            end: 982,
-            reason: "record semantics are not owned",
+            start: 5926,
+            end: 5976,
+            reason: "paragraphs with multiple table controls are not yet owned",
             ..
         }
     ));
