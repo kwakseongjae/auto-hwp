@@ -5,6 +5,26 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #180 PR #181 게시
+- exact parser/test/state commit `c64bbf3` push, PR #181(`Closes #180`) 생성.
+- exact head `c64bbf3217dbf48f5800e52fdec2476484a56edb`, MERGEABLE, issue-link green.
+- build-test/licenses·inline 댓글 추적→green 자율 병합→#94/next child.
+
+## 2026-08-24 (Codex sol) · #180 full green / PR ready
+- quick/full Rust·PDF51·canonical·corpus84·oracle82·HWPX·wasm/JS + Vitest 1,018 green.
+- 허용된 로컬 서버 Chromium 85 pass/3 intentional skip/0 fail; 임시 link 제거.
+- route/rhwp/HWPX/generated diff 0. 다음 commit/push/PR→CI/merge→next child.
+
+## 2026-08-24 (Codex sol) · #180 classified / focused green
+- exact column-relative 1×2/2 cells; one-row no-split makes repeat-header inert and faithfully owned.
+- hostile 7축, HWP5 61/clippy/wasm32 green; next TABLE 25952..25990.
+- one-shot classifier removed; route/rhwp/HWPX/generated 불변. 다음 quick→full→PR/CI/merge.
+
+## 2026-08-24 (Codex sol) · PR #179 merged / #180 started
+- #179 required CI·CLEAN/MERGEABLE·댓글 0 후 main `22b6979a`; #178 close·branch 정리.
+- #94 동기화, next common-object boundary #180 등록, exact-main worktree 시작.
+- `0x47/21538..21588` content-free classification; route/rhwp/HWPX 불변.
+
 ## 2026-08-24 (Codex sol) · #178 PR #179 게시
 - strict 8×5 implementation `28d1c55` push, PR #179(`Closes #178`) 생성.
 - full/Vitest 1,018/Chromium 85·3, route/rhwp/HWPX/generated 불변을 공개 검증에 명시.
