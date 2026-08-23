@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-23 (Codex sol) · #160 PR #162
+- commit `75f5ad5` push, PR #162(`Closes #160`, `Refs #94 #158 #161`) 게시.
+- 다음 required CI/review 감시→green 자율 병합→#161 column IR/LOCKSTEP.
+
 ## 2026-08-23 (Codex sol) · #160 full green
 - strict STYLE/content-free diagnostics final review; production/rhwp/generated diff 0.
 - full Rust/PDF/8·18·24/wasm/JS/Vitest 1,018 + Chromium 85 pass/3 skip/0 fail.

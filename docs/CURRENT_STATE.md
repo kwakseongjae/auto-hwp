@@ -3,6 +3,13 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-23 · Codex(sol) — **#160 PR #162 게시**.
+  검증 완료 commit `75f5ad5`를 push하고 PR #162(`Closes #160`, `Refs #94 #158 #161`)를 만들었다.
+  strict STYLE, content-free failure reasons, public multi-column boundary, #161 faithful column dependency,
+  no production cutover/no rhwp fallback과 quick/full/Chromium 85 pass·3 intentional skip·generated/rhwp
+  diff 0을 본문에 명시했다. **다음:** 이 상태 commit push→issue-link/build-test/licenses·mergeability·
+  review/comment를 추적하고 전부 green이면 자율 병합·원격 브랜치 정리→#161 구현을 시작한다.
+
 - 갱신: 2026-08-23 · Codex(sol) — **#160 전체 검증 완료 · PR 준비**.
   strict STYLE/content-free header diagnostics와 #161 다단 blocker 분리를 최종 security/diff review했다.
   STYLE 이름은 strict UTF-16 확인 후 폐기하고, 참조는 linear 검증하며 unsupported reason은 정적 문자열과
