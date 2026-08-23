@@ -43,6 +43,7 @@ fi
 
 echo "═══ 공공문서 후보·승격 코퍼스 계약 (이슈 99·100 — CI 다운로드 없음) ═══"
 node --test \
+  scripts/tests/desktop-release-manifest.test.mjs \
   scripts/tests/gov-sources.test.mjs \
   scripts/tests/fetch-gov-corpus.test.mjs \
   scripts/tests/gov-source-catalog.test.mjs \

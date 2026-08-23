@@ -5,6 +5,18 @@
 
 ---
 
+## 2026-08-23 (Codex sol) · #149 릴리스 신뢰 기반 구현
+- #144 감사 후 실제 자격증명 단계와 분리한 하위 #149를 issue-first로 등록.
+- exact-main SHA·preview/stable·mac universal/Windows x64·checksum strict manifest/CLI 구현.
+- 읽기 전용 수동 preflight와 CI/verify-local 계약, 지원 비주장·credential 경계 문서화.
+- 공격/변조 입력 포함 Node 8건 green; 다음 quick→PR/CI/병합, #144 실제 서명 게이트 유지.
+
+## 2026-08-23 (Codex sol) · #148 병합 → #144 착수
+- PR #148 필수 CI 3종·CLEAN/MERGEABLE 확인 후 main `eed9786`으로 squash 병합, 원격 브랜치 정리.
+- #143 close; own-PDF native print·실앱 parity 계약은 main 정본이 됨.
+- #140~#143 병합을 확인해 #144를 ready로 전환하고 최신 main 기반 release 브랜치 생성.
+- 다음: release workflow/config 감사→무자격증명 검증층부터 구현, 실제 signing은 보호 환경으로 격리.
+
 ## 2026-08-23 (Codex sol) · #143 네이티브 인쇄 구현·실앱 QA
 - own-PDF replay preflight 뒤 PDFKit/AppKit 인메모리 인쇄, 버튼·⌘P·경로 없는 상태를 구현.
 - 패키지 QA가 nil NSPrintInfo SIGSEGV와 ScaleDownToFit 축소를 찾아 shared info+ScaleNone으로 수정.
