@@ -1,16 +1,20 @@
 # First-party HWP5 parser boundary
 
 Issue #107 introduced the first owned binary-HWP layer; issue #154 added its first semantic slice,
-issue #156 added the minimum source-layout facts needed by the shared typesetter, and issue #158
-owns the paragraph support-pool boundary. None of these slices changes production parsing.
+issue #156 added the minimum source-layout facts needed by the shared typesetter, issue #158 owns
+the paragraph support-pool boundary, and issue #160 owns DocInfo styles plus content-free paragraph
+header refusal reasons. None of these slices changes production parsing.
 
 ## What is owned now
 
 `crates/hwp-hwp5` parses the CFB `FileHeader`, exposes every documented property/security flag,
 walks `DocInfo` and `BodyText/SectionN` records, and preserves unknown records as `(tag, level,
 size, header/data/end offsets, extended-header bit)`. It also decodes the strict DocInfo font,
-character-shape, paragraph-shape, border-fill, tab-definition, numbering, and bullet pools plus direct
-paragraph text and character-shape runs into `SemanticDoc`. Known binary border edges, solid shade,
+character-shape, paragraph-shape, border-fill, tab-definition, numbering, bullet, and style pools plus
+direct paragraph text and character-shape runs into `SemanticDoc`. STYLE names are validated as strict
+UTF-16 but not copied into telemetry; kind, next-style, and the active para/character-shape reference
+are range checked. The documented STYLE base and the observed optional zero reserved tail are accepted;
+nonzero or unknown tails fail closed. Known binary border edges, solid shade,
 and diagonal directions map to the shared `BorderFillDef`; unknown line values and image, gradient,
 patterned, alpha, or mixed fills are refused rather than flattened. Paragraph references are range
 checked. A pool that is merely present is not treated as active: custom tabs, numbering/bullets, and
@@ -45,8 +49,11 @@ rejected instead of being interpreted as records.
 - `open_hwp5_own`: explicit first-party-only route. It returns a `SemanticDoc` only for the owned
   text plus single-sided page-setup subset. Tables, images, fields, notes, equations, charts,
   columns, decorations, page border/fill, duplex binding, active custom tabs/lists/paragraph borders,
-  unknown body controls, and unsupported pool values fail closed with tag, section, and byte span
-  only. It cannot call rhwp.
+  unknown body controls, and unsupported pool values fail closed with a static reason plus tag,
+  section, and byte span only. It cannot call rhwp. The public benchmark currently stops at a
+  multi-column paragraph header (`0x42`, section 0, bytes 0..28): accepting it would be dishonest
+  because section columns are not yet consumed by both paginators. Issue #161 owns that IR and
+  LOCKSTEP typesetting dependency.
 - `hwp5_differential`: explicitly runs the owned probe and current rhwp semantic oracle, then reports
   section/paragraph/run/table/image/control/equation/chart counts and their deltas.
 

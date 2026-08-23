@@ -49,6 +49,7 @@ struct Pools {
     para_shapes: Vec<ParaShape>,
     para_usage: Vec<ParaUsage>,
     border_fills: Vec<BorderFillDef>,
+    styles: Vec<StyleDef>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -72,6 +73,14 @@ struct NumberingDef {
 #[derive(Clone, Debug, Default)]
 struct BulletDef {
     char_shape_ref: u32,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct StyleDef {
+    kind: u8,
+    next_style: u8,
+    para_shape: u16,
+    char_shape: u16,
 }
 
 pub(crate) fn parse_text_only(bytes: &[u8]) -> Result<SemanticDoc> {
@@ -108,8 +117,12 @@ pub(crate) fn parse_text_only(bytes: &[u8]) -> Result<SemanticDoc> {
         doc.header_pools.border.insert((index + 1) as u64, border);
     }
     for stream in section_streams {
-        doc.sections
-            .push(parse_section(stream, &doc, &pools.para_usage)?);
+        doc.sections.push(parse_section(
+            stream,
+            &doc,
+            &pools.para_usage,
+            &pools.styles,
+        )?);
     }
     Ok(doc)
 }
@@ -212,6 +225,21 @@ fn parse_pools(inspected: &Hwp5Probe) -> Result<Pools> {
         })
         .collect::<Result<Vec<_>>>()?;
     let (para_shapes, para_usage): (Vec<_>, Vec<_>) = parsed_para_shapes.into_iter().unzip();
+    let style_records: Vec<&Record> = stream
+        .records
+        .iter()
+        .filter(|record| record.tag == TAG_STYLE)
+        .collect();
+    let styles = style_records
+        .iter()
+        .map(|record| parse_style(data(stream, record), record))
+        .collect::<Result<Vec<_>>>()?;
+    validate_style_refs(
+        &styles,
+        &style_records,
+        para_shapes.len(),
+        char_shapes.len(),
+    )?;
 
     Ok(Pools {
         section_count,
@@ -219,7 +247,90 @@ fn parse_pools(inspected: &Hwp5Probe) -> Result<Pools> {
         para_shapes,
         para_usage,
         border_fills,
+        styles,
     })
+}
+
+fn parse_style(bytes: &[u8], record: &Record) -> Result<StyleDef> {
+    let mut reader = Reader::new(bytes);
+    reader
+        .hwp_string()
+        .ok_or_else(|| malformed(record, None, "STYLE local name is invalid UTF-16"))?;
+    reader
+        .hwp_string()
+        .ok_or_else(|| malformed(record, None, "STYLE English name is invalid UTF-16"))?;
+    let attr = reader
+        .u8()
+        .ok_or_else(|| malformed(record, None, "STYLE metadata is truncated"))?;
+    if attr & !0x07 != 0 || attr & 0x07 > 1 {
+        return Err(malformed(
+            record,
+            None,
+            "STYLE has an unknown kind or attributes",
+        ));
+    }
+    let next_style = reader
+        .u8()
+        .ok_or_else(|| malformed(record, None, "STYLE metadata is truncated"))?;
+    reader
+        .u16()
+        .ok_or_else(|| malformed(record, None, "STYLE language id is truncated"))?;
+    let para_shape = reader
+        .u16()
+        .ok_or_else(|| malformed(record, None, "STYLE paragraph-shape ref is truncated"))?;
+    let char_shape = reader
+        .u16()
+        .ok_or_else(|| malformed(record, None, "STYLE character-shape ref is truncated"))?;
+    match reader.remaining() {
+        0 => {}
+        2 if reader.u16() == Some(0) => {}
+        2 => return Err(malformed(record, None, "STYLE reserved tail is nonzero")),
+        _ => return Err(malformed(record, None, "STYLE has unknown trailing bytes")),
+    }
+    Ok(StyleDef {
+        kind: attr & 0x07,
+        next_style,
+        para_shape,
+        char_shape,
+    })
+}
+
+fn validate_style_refs(
+    styles: &[StyleDef],
+    records: &[&Record],
+    para_shapes: usize,
+    char_shapes: usize,
+) -> Result<()> {
+    for (style, record) in styles.iter().zip(records.iter().copied()) {
+        if style.next_style as usize >= styles.len() {
+            return Err(invalid_pool_ref(
+                "next style",
+                style.next_style as usize,
+                styles.len(),
+                record,
+            ));
+        }
+        match style.kind {
+            0 if style.para_shape as usize >= para_shapes => {
+                return Err(invalid_pool_ref(
+                    "style paragraph shape",
+                    style.para_shape as usize,
+                    para_shapes,
+                    record,
+                ));
+            }
+            1 if style.char_shape as usize >= char_shapes => {
+                return Err(invalid_pool_ref(
+                    "style character shape",
+                    style.char_shape as usize,
+                    char_shapes,
+                    record,
+                ));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 fn parse_id_mappings(bytes: &[u8], record: &Record) -> Result<IdMappings> {
@@ -813,6 +924,7 @@ fn parse_section(
     stream: &StreamProbe,
     doc: &SemanticDoc,
     para_usage: &[ParaUsage],
+    styles: &[StyleDef],
 ) -> Result<Section> {
     let section = stream.section.expect("caller selected section streams");
     let mut blocks = Vec::new();
@@ -831,6 +943,7 @@ fn parse_section(
             section,
             start: stream.records.first().map_or(0, |record| record.head),
             end: stream.records.first().map_or(0, |record| record.end),
+            reason: "section has no top-level paragraph header",
         });
     }
     if starts[0] != 0 {
@@ -847,6 +960,7 @@ fn parse_section(
             &stream.records[start..end],
             doc,
             para_usage,
+            styles,
             section,
         )?;
         if let Some(parsed_page) = parsed.page {
@@ -881,6 +995,7 @@ fn parse_paragraph(
     records: &[Record],
     doc: &SemanticDoc,
     para_usage: &[ParaUsage],
+    styles: &[StyleDef],
     section: usize,
 ) -> Result<ParsedParagraph> {
     let header = records[0];
@@ -900,8 +1015,44 @@ fn parse_paragraph(
     let declared_char_shapes = read_u16(header_data, 12).expect("base length checked") as usize;
     let declared_range_tags = read_u16(header_data, 14).expect("base length checked");
     let declared_line_segments = read_u16(header_data, 16).expect("base length checked");
-    if style_id != 0 || break_type & !0x04 != 0 || declared_range_tags != 0 {
-        return Err(unsupported(header, section));
+    if (styles.is_empty() && style_id != 0)
+        || (!styles.is_empty() && style_id as usize >= styles.len())
+    {
+        return Err(Error::InvalidReference {
+            kind: "paragraph style",
+            index: style_id as usize,
+            pool_len: styles.len(),
+            section: Some(section),
+            offset: header.head,
+        });
+    }
+    if break_type & 0x02 != 0 {
+        return Err(unsupported_reason(
+            header,
+            section,
+            "multi-column break is not owned",
+        ));
+    }
+    if break_type & 0x08 != 0 {
+        return Err(unsupported_reason(
+            header,
+            section,
+            "column break is not owned",
+        ));
+    }
+    if break_type & !0x0f != 0 {
+        return Err(unsupported_reason(
+            header,
+            section,
+            "paragraph break type has unknown bits",
+        ));
+    }
+    if declared_range_tags != 0 {
+        return Err(unsupported_reason(
+            header,
+            section,
+            "paragraph range tags are not owned",
+        ));
     }
     if para_shape_id + 1 >= doc.para_shapes.len() {
         return Err(Error::InvalidReference {
@@ -1007,6 +1158,13 @@ fn parse_paragraph(
             ))
         }
     };
+    if break_type & 0x01 != 0 && page.is_none() {
+        return Err(unsupported_reason(
+            header,
+            section,
+            "section break has no matching section definition",
+        ));
+    }
     let refs = match shape_record {
         Some(record) => parse_shape_refs(data(stream, &record), record, section, doc)?,
         None => Vec::new(),
@@ -1614,11 +1772,16 @@ fn malformed(record: &Record, section: Option<usize>, reason: &'static str) -> E
 }
 
 fn unsupported(record: Record, section: usize) -> Error {
+    unsupported_reason(record, section, "record semantics are not owned")
+}
+
+fn unsupported_reason(record: Record, section: usize, reason: &'static str) -> Error {
     Error::UnsupportedBodyRecord {
         tag: record.tag,
         section,
         start: record.head,
         end: record.end,
+        reason,
     }
 }
 
@@ -1846,6 +2009,94 @@ mod support_pool_tests {
             bytes.extend_from_slice(&1u32.to_le_bytes());
         }
         bytes
+    }
+
+    fn style(kind: u8, next_style: u8, para_shape: u16, char_shape: u16) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&('가' as u16).to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&('A' as u16).to_le_bytes());
+        bytes.push(kind);
+        bytes.push(next_style);
+        bytes.extend_from_slice(&1042u16.to_le_bytes());
+        bytes.extend_from_slice(&para_shape.to_le_bytes());
+        bytes.extend_from_slice(&char_shape.to_le_bytes());
+        bytes
+    }
+
+    #[test]
+    fn style_parses_exact_base_and_observed_zero_tail() {
+        let bytes = style(0, 0, 0, 0);
+        let parsed = parse_style(&bytes, &record(TAG_STYLE, bytes.len())).unwrap();
+        assert_eq!(parsed.kind, 0);
+        assert_eq!(parsed.next_style, 0);
+        assert_eq!(parsed.para_shape, 0);
+
+        let mut tailed = bytes;
+        tailed.extend_from_slice(&0u16.to_le_bytes());
+        assert!(parse_style(&tailed, &record(TAG_STYLE, tailed.len())).is_ok());
+        let last = tailed.len() - 1;
+        tailed[last] = 1;
+        assert!(matches!(
+            parse_style(&tailed, &record(TAG_STYLE, tailed.len())),
+            Err(Error::MalformedRecord {
+                reason: "STYLE reserved tail is nonzero",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn style_rejects_hostile_lengths_unknown_kinds_and_bad_refs() {
+        let hostile = [0xff, 0xff];
+        assert!(matches!(
+            parse_style(&hostile, &record(TAG_STYLE, hostile.len())),
+            Err(Error::MalformedRecord {
+                reason: "STYLE local name is invalid UTF-16",
+                ..
+            })
+        ));
+
+        let unknown = style(2, 0, 0, 0);
+        assert!(matches!(
+            parse_style(&unknown, &record(TAG_STYLE, unknown.len())),
+            Err(Error::MalformedRecord {
+                reason: "STYLE has an unknown kind or attributes",
+                ..
+            })
+        ));
+
+        let source = record(TAG_STYLE, 0);
+        assert!(validate_style_refs(
+            &[StyleDef {
+                kind: 0,
+                next_style: 0,
+                para_shape: 0,
+                char_shape: 0,
+            }],
+            &[&source],
+            1,
+            1,
+        )
+        .is_ok());
+        assert!(matches!(
+            validate_style_refs(
+                &[StyleDef {
+                    kind: 1,
+                    next_style: 2,
+                    para_shape: 0,
+                    char_shape: 0,
+                }],
+                &[&source],
+                1,
+                1,
+            ),
+            Err(Error::InvalidReference {
+                kind: "next style",
+                ..
+            })
+        ));
     }
 
     #[test]

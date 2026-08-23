@@ -36,6 +36,9 @@ fn explicit_own_parser_never_falls_back() {
         Error::UnsupportedBodyRecord {
             tag: 0x42,
             section: 0,
+            start: 0,
+            end: 28,
+            reason: "multi-column break is not owned",
             ..
         }
     ));
