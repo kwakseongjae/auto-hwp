@@ -1,11 +1,11 @@
-//! First-party HWP5 boundary: bounded CFB/FileHeader/record inspection and content-free
-//! differential telemetry. It deliberately does not claim semantic parsing until DocInfo and body
-//! text slices are implemented; [`OwnHwp5Parser::parse`] therefore fails closed without calling
-//! rhwp or any other parser.
+//! First-party HWP5 boundary: bounded CFB/FileHeader/record inspection, a strict text-only semantic
+//! slice, and content-free differential telemetry. [`OwnHwp5Parser::parse`] accepts only the owned
+//! subset and fails closed without calling rhwp or any other parser for every unsupported record.
 
 mod header;
 mod probe;
 mod record;
+mod semantic;
 
 pub use header::{
     parse_file_header, FileHeader, FileHeaderFlags, HeaderError, HwpVersion, FILE_HEADER_SIZE,
@@ -19,9 +19,6 @@ pub use record::{walk_records, Record, RecordError, RecordLimits};
 
 use hwp_model::document::SemanticDoc;
 use thiserror::Error;
-
-pub const OWN_SEMANTIC_SLICE_PENDING: &str =
-    "first-party HWP5 SemanticDoc decode is not complete (DocInfo/text slice pending)";
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -41,10 +38,40 @@ pub enum Error {
     OpaqueBody(u32),
     #[error("record stream error: {0}")]
     Record(#[from] RecordError),
+    #[error(
+        "HWP5 record tag {tag:#x} at section {section:?} byte {offset} is malformed: {reason}"
+    )]
+    MalformedRecord {
+        tag: u16,
+        section: Option<usize>,
+        offset: usize,
+        reason: &'static str,
+    },
+    #[error("HWP5 pool count mismatch for tag {tag:#x}: expected {expected}, found {actual}")]
+    PoolCountMismatch {
+        tag: u16,
+        expected: usize,
+        actual: usize,
+    },
+    #[error("HWP5 {kind} reference {index} is outside pool size {pool_len} at section {section:?} byte {offset}")]
+    InvalidReference {
+        kind: &'static str,
+        index: usize,
+        pool_len: usize,
+        section: Option<usize>,
+        offset: usize,
+    },
+    #[error(
+        "unsupported text-only HWP5 record tag {tag:#x} at section {section} bytes {start}..{end}"
+    )]
+    UnsupportedBodyRecord {
+        tag: u16,
+        section: usize,
+        start: usize,
+        end: usize,
+    },
     #[error("decompressed HWP5 data exceeds {limit}-byte limit")]
     DecompressedLimit { limit: u64 },
-    #[error("{OWN_SEMANTIC_SLICE_PENDING}")]
-    SemanticSlicePending,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -63,8 +90,6 @@ impl OwnHwp5Parser {
     }
 
     pub fn parse(&self, bytes: &[u8]) -> Result<SemanticDoc> {
-        // Validate everything this slice owns before reporting the precise missing capability.
-        let _ = self.inspect(bytes)?;
-        Err(Error::SemanticSlicePending)
+        semantic::parse_text_only(bytes)
     }
 }

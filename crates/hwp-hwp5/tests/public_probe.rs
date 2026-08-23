@@ -29,8 +29,12 @@ fn public_hwp5_has_bounded_content_free_record_provenance() {
 
 #[test]
 fn explicit_own_parser_never_falls_back() {
+    let error = OwnHwp5Parser::new().parse(&benchmark()).unwrap_err();
+    eprintln!("{error:?}");
     assert!(matches!(
-        OwnHwp5Parser::new().parse(&benchmark()),
-        Err(Error::SemanticSlicePending)
+        error,
+        Error::UnsupportedBodyRecord { .. }
+            | Error::InvalidReference { .. }
+            | Error::MalformedRecord { .. }
     ));
 }

@@ -1,14 +1,16 @@
 # First-party HWP5 parser boundary
 
-Issue #107 introduces the first owned binary-HWP layer without changing production parsing.
+Issue #107 introduced the first owned binary-HWP layer; issue #154 adds its first semantic slice
+without changing production parsing.
 
 ## What is owned now
 
 `crates/hwp-hwp5` parses the CFB `FileHeader`, exposes every documented property/security flag,
 walks `DocInfo` and `BodyText/SectionN` records, and preserves unknown records as `(tag, level,
-size, header/data/end offsets, extended-header bit)`. Offsets are relative to the decompressed
-standard stream. Source bytes, text, filenames, credentials, and source hashes are never copied
-into the probe or differential report.
+size, header/data/end offsets, extended-header bit)`. It also decodes the strict DocInfo font,
+character-shape, and paragraph-shape pools plus direct paragraph text and character-shape runs into
+`SemanticDoc`. Offsets are relative to the decompressed standard stream. Source bytes, text,
+filenames, credentials, and source hashes are never copied into the probe or differential report.
 
 Untrusted input is bounded before and during inspection:
 
@@ -18,14 +20,21 @@ Untrusted input is bounded before and during inspection:
 - records per stream: 1,000,000;
 - every normal and extended record length is checked before forming a span.
 
+The semantic slice additionally cross-checks ID-mapping pool counts, paragraph-declared run counts,
+UTF-16 scalar boundaries, references, and supported inline-control masks. Run construction is
+bounded to binary-search validation plus a linear text pass; it does not rescan the paragraph once
+per run.
+
 Encrypted, distribution, DRM, and public-key-encrypted bodies are opaque to this slice and are
 rejected instead of being interpreted as records.
 
 ## Parser modes
 
 - `Engine::open`: unchanged production route. Binary HWP still uses the governed rhwp bootstrap.
-- `open_hwp5_own`: explicit first-party-only route. It validates the owned layers, then returns the
-  precise pending-capability error until DocInfo and text decoding land. It cannot call rhwp.
+- `open_hwp5_own`: explicit first-party-only route. It returns a `SemanticDoc` only for the owned
+  text-only subset. Tables, images, fields, notes, equations, charts, unknown body controls, and
+  unsupported pool references fail closed with tag, section, and byte span only. It cannot call
+  rhwp.
 - `hwp5_differential`: explicitly runs the owned probe and current rhwp semantic oracle, then reports
   section/paragraph/run/table/image/control/equation/chart counts and their deltas.
 
@@ -41,7 +50,7 @@ or claim semantic parity.
 
 ## Cutover rule
 
-The next #94 slices promote DocInfo pools and paragraph text/control decoding into this crate. The
-production route may change only when public-corpus differential gates, native/wasm parity, hostile
-input tests, and the canonical 8/18/24-page + 98.9% line gate remain green. Explicit own-parser mode
-must continue to fail closed for every unsupported semantic construct.
+The next #94 slices promote page setup, tables, BinData/images, and remaining controls into this
+crate. The production route may change only when public-corpus differential gates, native/wasm
+parity, hostile input tests, and the canonical 8/18/24-page + 98.9% line gate remain green. Explicit
+own-parser mode must continue to fail closed for every unsupported semantic construct.
