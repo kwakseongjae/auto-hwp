@@ -1,0 +1,581 @@
+{
+  "schema_version": 1,
+  "policy": {
+    "mode": "report-only",
+    "quality_threshold": null,
+    "minimum_trusted_pairs": 20,
+    "candidate_font": {
+      "file": "assets/fonts/NanumGothic-Regular.ttf",
+      "sha256": "76f45ef4a6bcff344c837c95a7dcc26e017e38b5846d5ae0cdcb5b86be2e2d31"
+    },
+    "raster": {
+      "dpi": 144,
+      "max_translation_px": 3,
+      "scale": 1,
+      "crop": false,
+      "rotation_degrees": 0
+    }
+  },
+  "pairs": [
+    {
+      "pair_id": "law-go-271027-17184499",
+      "source": {
+        "artifact_id": "law-go-271027-17184499-hwp5",
+        "file": "law-go-271027-17184499-hwp5.hwp",
+        "format": "hwp5",
+        "sha256": "39192069329373f80cdd812d7e6a8de9061021c4b0ec4d7caf4be5e42ca1f191"
+      },
+      "reference": {
+        "file": "law-go-271027-17184499-pdf.pdf",
+        "tier": "T1",
+        "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+        "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361773",
+        "sha256": "01d013d2dbe59e286fcc5879ab83b3cd4f1be7d82870c3b870ee5a8c6a3a5fc6",
+        "size_bytes": 165598,
+        "license": {
+          "code": "Copyright Act Article 7",
+          "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+          "observed_at": "2026-08-22",
+          "scope": "statutory-public-domain"
+        },
+        "product": "Hancom PDF",
+        "build": "Hancom PDF 1.3.0.546 (embedded Producer metadata)",
+        "os": "not disclosed by official publisher",
+        "font_fingerprint": "pdffonts-normalized-sha256:21dc7dfc05bbb66bd74ea5d80fd40f6beb518bf29d4af7737ceb1f47a375d148",
+        "note": "Official law.go.kr HWP/PDF attachment pair; pair_id=law-go-271027-17184499; association self-attested from the same source page"
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184501",
+      "source": {
+        "artifact_id": "law-go-271027-17184501-hwp5",
+        "file": "law-go-271027-17184501-hwp5.hwp",
+        "format": "hwp5",
+        "sha256": "811183a397a4fa55f04fd9714879cdb320d90b08597f9bc3579a89458ef30ce5"
+      },
+      "reference": {
+        "file": "law-go-271027-17184501-pdf.pdf",
+        "tier": "T1",
+        "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+        "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361781",
+        "sha256": "c0b94f5d13316b92a5c3b81ef54b4c0bfec33a526b9ff25e3f153a1f4f74f65f",
+        "size_bytes": 41442,
+        "license": {
+          "code": "Copyright Act Article 7",
+          "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+          "observed_at": "2026-08-22",
+          "scope": "statutory-public-domain"
+        },
+        "product": "Hancom PDF",
+        "build": "Hancom PDF 1.3.0.546 (embedded Producer metadata)",
+        "os": "not disclosed by official publisher",
+        "font_fingerprint": "pdffonts-normalized-sha256:bde31c0ad5e8e99daf2045953079bf502a93cf4abb3a4c2f7c83f51b5ba5308b",
+        "note": "Official law.go.kr HWP/PDF attachment pair; pair_id=law-go-271027-17184501; association self-attested from the same source page"
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184503",
+      "source": {
+        "artifact_id": "law-go-271027-17184503-hwp5",
+        "file": "law-go-271027-17184503-hwp5.hwp",
+        "format": "hwp5",
+        "sha256": "96885f4e5df7887e5147fd2317b10b376cf9c67f030ee99228c6c6eba4375e92"
+      },
+      "reference": {
+        "file": "law-go-271027-17184503-pdf.pdf",
+        "tier": "T1",
+        "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+        "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361787",
+        "sha256": "56d9497a1fab0d0a73046ea6ef34500cee7620b5dfc129de1b8af47563ef11ea",
+        "size_bytes": 51588,
+        "license": {
+          "code": "Copyright Act Article 7",
+          "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+          "observed_at": "2026-08-22",
+          "scope": "statutory-public-domain"
+        },
+        "product": "Hancom PDF",
+        "build": "Hancom PDF 1.3.0.546 (embedded Producer metadata)",
+        "os": "not disclosed by official publisher",
+        "font_fingerprint": "pdffonts-normalized-sha256:a1a753fd040d2004ca3c5740a8dd65963f9a038488d3456f57fadb640e473945",
+        "note": "Official law.go.kr HWP/PDF attachment pair; pair_id=law-go-271027-17184503; association self-attested from the same source page"
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184505",
+      "source": {
+        "artifact_id": "law-go-271027-17184505-hwp5",
+        "file": "law-go-271027-17184505-hwp5.hwp",
+        "format": "hwp5",
+        "sha256": "682cbf6d11a8bbddc5667e4c7b860a048204f47eabf2df67a6c068a2332e4c23"
+      },
+      "reference": {
+        "file": "law-go-271027-17184505-pdf.pdf",
+        "tier": "T1",
+        "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+        "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361801",
+        "sha256": "e069e4184746ce959c6430b2a3c3de48d17735d3d96234006788468ac9bbd5d1",
+        "size_bytes": 51105,
+        "license": {
+          "code": "Copyright Act Article 7",
+          "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+          "observed_at": "2026-08-22",
+          "scope": "statutory-public-domain"
+        },
+        "product": "Hancom PDF",
+        "build": "Hancom PDF 1.3.0.546 (embedded Producer metadata)",
+        "os": "not disclosed by official publisher",
+        "font_fingerprint": "pdffonts-normalized-sha256:e9213c385af85a3b24010e71759afe243d4f6ac4c16b3ac0fc791820ce58e18a",
+        "note": "Official law.go.kr HWP/PDF attachment pair; pair_id=law-go-271027-17184505; association self-attested from the same source page"
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184507",
+      "source": {
+        "artifact_id": "law-go-271027-17184507-hwp5",
+        "file": "law-go-271027-17184507-hwp5.hwp",
+        "format": "hwp5",
+        "sha256": "2239613b8609103bec2a3ee68e02ebfebab6829800756fcc918a8dcc181b6510"
+      },
+      "reference": {
+        "file": "law-go-271027-17184507-pdf.pdf",
+        "tier": "T1",
+        "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+        "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361829",
+        "sha256": "04685c76a3eb07a3009c4a2a2160fddcc12d63a5f76b8da4e1e7fd662bdc3c12",
+        "size_bytes": 32943,
+        "license": {
+          "code": "Copyright Act Article 7",
+          "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+          "observed_at": "2026-08-22",
+          "scope": "statutory-public-domain"
+        },
+        "product": "Hancom PDF",
+        "build": "Hancom PDF 1.3.0.546 (embedded Producer metadata)",
+        "os": "not disclosed by official publisher",
+        "font_fingerprint": "pdffonts-normalized-sha256:2ef5ae76ffc02a3944abb34880db3acc98ee1d7c90236cefc8f59f30de79c9fa",
+        "note": "Official law.go.kr HWP/PDF attachment pair; pair_id=law-go-271027-17184507; association self-attested from the same source page"
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184509",
+      "source": {
+        "artifact_id": "law-go-271027-17184509-hwp5",
+        "file": "law-go-271027-17184509-hwp5.hwp",
+        "format": "hwp5",
+        "sha256": "62e0f560a14d5406c7850a8ddf08ee547cc9a7a9ec4e880e38b073c5a8c5a491"
+      },
+      "reference": {
+        "file": "law-go-271027-17184509-pdf.pdf",
+        "tier": "T1",
+        "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+        "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361837",
+        "sha256": "280047052c43ab09e092c17a5ff70bd621ca3b9cedd33ac0a4cbbdafc52ca141",
+        "size_bytes": 57389,
+        "license": {
+          "code": "Copyright Act Article 7",
+          "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+          "observed_at": "2026-08-22",
+          "scope": "statutory-public-domain"
+        },
+        "product": "Hancom PDF",
+        "build": "Hancom PDF 1.3.0.546 (embedded Producer metadata)",
+        "os": "not disclosed by official publisher",
+        "font_fingerprint": "pdffonts-normalized-sha256:c11e44f10eabff508066a3b60ce5c2a4697584a3a01086715f51e4a7e4fe8cc3",
+        "note": "Official law.go.kr HWP/PDF attachment pair; pair_id=law-go-271027-17184509; association self-attested from the same source page"
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184511",
+      "source": {
+        "artifact_id": "law-go-271027-17184511-hwp5",
+        "file": "law-go-271027-17184511-hwp5.hwp",
+        "format": "hwp5",
+        "sha256": "58d4302527076799988dd54279a10de4f2a489fa731e4bad596ca209f160e0b3"
+      },
+      "reference": {
+        "file": "law-go-271027-17184511-pdf.pdf",
+        "tier": "T1",
+        "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+        "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361843",
+        "sha256": "9bf747f2dd88b8d844ae0c5c3d7fa998a65591c305690853177cd76f66f90be8",
+        "size_bytes": 84728,
+        "license": {
+          "code": "Copyright Act Article 7",
+          "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+          "observed_at": "2026-08-22",
+          "scope": "statutory-public-domain"
+        },
+        "product": "Hancom PDF",
+        "build": "Hancom PDF 1.3.0.546 (embedded Producer metadata)",
+        "os": "not disclosed by official publisher",
+        "font_fingerprint": "pdffonts-normalized-sha256:18d0d893eda7b0aec6b0904d4a5cc7d73925c29d27b2abb7653db48963c495e1",
+        "note": "Official law.go.kr HWP/PDF attachment pair; pair_id=law-go-271027-17184511; association self-attested from the same source page"
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184513",
+      "source": {
+        "artifact_id": "law-go-271027-17184513-hwp5",
+        "file": "law-go-271027-17184513-hwp5.hwp",
+        "format": "hwp5",
+        "sha256": "32cb80a08144c9e79f27d373f436bc5979030a9b9246f2a0ec566a5008e8b79b"
+      },
+      "reference": {
+        "file": "law-go-271027-17184513-pdf.pdf",
+        "tier": "T1",
+        "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+        "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361849",
+        "sha256": "cdbbcd0b5cc7c853354e570caed98d6fc59186691d6c3aa8d855fe819b2cce6b",
+        "size_bytes": 55437,
+        "license": {
+          "code": "Copyright Act Article 7",
+          "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+          "observed_at": "2026-08-22",
+          "scope": "statutory-public-domain"
+        },
+        "product": "Hancom PDF",
+        "build": "Hancom PDF 1.3.0.546 (embedded Producer metadata)",
+        "os": "not disclosed by official publisher",
+        "font_fingerprint": "pdffonts-normalized-sha256:fcb9657077f2fd7a266484385834882a3919511f748c9968606be97836e4867c",
+        "note": "Official law.go.kr HWP/PDF attachment pair; pair_id=law-go-271027-17184513; association self-attested from the same source page"
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184515",
+      "source": {
+        "artifact_id": "law-go-271027-17184515-hwp5",
+        "file": "law-go-271027-17184515-hwp5.hwp",
+        "format": "hwp5",
+        "sha256": "85e9d52ce12f8e8bd8df812519f7882454521e10448cbef95ed7e4cda8e08c8f"
+      },
+      "reference": {
+        "file": "law-go-271027-17184515-pdf.pdf",
+        "tier": "T1",
+        "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+        "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361855",
+        "sha256": "1ed78601b44edfd75a97e97107a3f18e0a29e345615fdce2e23f57f20fb5c0d7",
+        "size_bytes": 35796,
+        "license": {
+          "code": "Copyright Act Article 7",
+          "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+          "observed_at": "2026-08-22",
+          "scope": "statutory-public-domain"
+        },
+        "product": "Hancom PDF",
+        "build": "Hancom PDF 1.3.0.546 (embedded Producer metadata)",
+        "os": "not disclosed by official publisher",
+        "font_fingerprint": "pdffonts-normalized-sha256:aa4950090ac0399bd5aac293702db3546faff73bad961b01f22a9b9fbb091c1b",
+        "note": "Official law.go.kr HWP/PDF attachment pair; pair_id=law-go-271027-17184515; association self-attested from the same source page"
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184517",
+      "source": {
+        "artifact_id": "law-go-271027-17184517-hwp5",
+        "file": "law-go-271027-17184517-hwp5.hwp",
+        "format": "hwp5",
+        "sha256": "f4b9699c78f9ac63ca271008296b76390226728df084c33d9d7027071d918a18"
+      },
+      "reference": {
+        "file": "law-go-271027-17184517-pdf.pdf",
+        "tier": "T1",
+        "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+        "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361863",
+        "sha256": "75e628b1c57bddc931848d5fe6eeb22d0a20a5d5d018530cd5f717c2f186261f",
+        "size_bytes": 39215,
+        "license": {
+          "code": "Copyright Act Article 7",
+          "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+          "observed_at": "2026-08-22",
+          "scope": "statutory-public-domain"
+        },
+        "product": "Hancom PDF",
+        "build": "Hancom PDF 1.3.0.546 (embedded Producer metadata)",
+        "os": "not disclosed by official publisher",
+        "font_fingerprint": "pdffonts-normalized-sha256:d27c4ff3b0b0765d97bc74a4c35450446b6c65d18fbe84e2ee96f23b092f7973",
+        "note": "Official law.go.kr HWP/PDF attachment pair; pair_id=law-go-271027-17184517; association self-attested from the same source page"
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184519",
+      "source": {
+        "artifact_id": "law-go-271027-17184519-hwp5",
+        "file": "law-go-271027-17184519-hwp5.hwp",
+        "format": "hwp5",
+        "sha256": "2c8d0fcedcb4933a1ac2833f431bf71f1a994b798982569292b48fce047af4df"
+      },
+      "reference": {
+        "file": "law-go-271027-17184519-pdf.pdf",
+        "tier": "T1",
+        "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+        "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361869",
+        "sha256": "168f6e81517784f79bd1f55123bb0eef813bafcbd0534906a088e1b9767c2bb6",
+        "size_bytes": 64737,
+        "license": {
+          "code": "Copyright Act Article 7",
+          "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+          "observed_at": "2026-08-22",
+          "scope": "statutory-public-domain"
+        },
+        "product": "Hancom PDF",
+        "build": "Hancom PDF 1.3.0.546 (embedded Producer metadata)",
+        "os": "not disclosed by official publisher",
+        "font_fingerprint": "pdffonts-normalized-sha256:5f9d7cbf2e9a7a60dcf8931a46ccd7d24262ee2822e566897be64854b296b591",
+        "note": "Official law.go.kr HWP/PDF attachment pair; pair_id=law-go-271027-17184519; association self-attested from the same source page"
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184521",
+      "source": {
+        "artifact_id": "law-go-271027-17184521-hwp5",
+        "file": "law-go-271027-17184521-hwp5.hwp",
+        "format": "hwp5",
+        "sha256": "5674a44e7fec3d78501c2dbc46a0d63b2241264c15c7488783eaf355bfdb56d9"
+      },
+      "reference": {
+        "file": "law-go-271027-17184521-pdf.pdf",
+        "tier": "T1",
+        "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+        "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361875",
+        "sha256": "c012a0e9c8ec4f557c1bdaaf3e2543192737d3174560a72331e9c0c92fcbe68b",
+        "size_bytes": 53831,
+        "license": {
+          "code": "Copyright Act Article 7",
+          "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+          "observed_at": "2026-08-22",
+          "scope": "statutory-public-domain"
+        },
+        "product": "Hancom PDF",
+        "build": "Hancom PDF 1.3.0.546 (embedded Producer metadata)",
+        "os": "not disclosed by official publisher",
+        "font_fingerprint": "pdffonts-normalized-sha256:052e4c141ff2f7501046ac6f3b7fbf53c2f904e75e03a06675e33b5778f68a75",
+        "note": "Official law.go.kr HWP/PDF attachment pair; pair_id=law-go-271027-17184521; association self-attested from the same source page"
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184523",
+      "source": {
+        "artifact_id": "law-go-271027-17184523-hwp5",
+        "file": "law-go-271027-17184523-hwp5.hwp",
+        "format": "hwp5",
+        "sha256": "4c5207a4896acfe8572c6c02b317792933b6b806fa829067346cfe9dcfd99dd3"
+      },
+      "reference": {
+        "file": "law-go-271027-17184523-pdf.pdf",
+        "tier": "T1",
+        "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+        "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361883",
+        "sha256": "4f3c7b94c4d147691b8af2716123b6a6ca1a91755f50d1992930203a62799a28",
+        "size_bytes": 66640,
+        "license": {
+          "code": "Copyright Act Article 7",
+          "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+          "observed_at": "2026-08-22",
+          "scope": "statutory-public-domain"
+        },
+        "product": "Hancom PDF",
+        "build": "Hancom PDF 1.3.0.546 (embedded Producer metadata)",
+        "os": "not disclosed by official publisher",
+        "font_fingerprint": "pdffonts-normalized-sha256:e490fcd34e747c1a2236378b21c8ca61639ba18ebdd6f0f91d852e05e83b801d",
+        "note": "Official law.go.kr HWP/PDF attachment pair; pair_id=law-go-271027-17184523; association self-attested from the same source page"
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184525",
+      "source": {
+        "artifact_id": "law-go-271027-17184525-hwp5",
+        "file": "law-go-271027-17184525-hwp5.hwp",
+        "format": "hwp5",
+        "sha256": "283d39dcb83a4950d539639d0c60e091429d97602cb40be679266817fc70deb8"
+      },
+      "reference": {
+        "file": "law-go-271027-17184525-pdf.pdf",
+        "tier": "T1",
+        "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+        "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361889",
+        "sha256": "82b37ac15fc3b5f22183168fb10ff3416069a79dd6f180f8263fcf5084b0d88e",
+        "size_bytes": 62588,
+        "license": {
+          "code": "Copyright Act Article 7",
+          "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+          "observed_at": "2026-08-22",
+          "scope": "statutory-public-domain"
+        },
+        "product": "Hancom PDF",
+        "build": "Hancom PDF 1.3.0.546 (embedded Producer metadata)",
+        "os": "not disclosed by official publisher",
+        "font_fingerprint": "pdffonts-normalized-sha256:959eba4ff77864a5b3a8ca7f6d742646493b1d3ba2f21931dcb73b7b12d34d61",
+        "note": "Official law.go.kr HWP/PDF attachment pair; pair_id=law-go-271027-17184525; association self-attested from the same source page"
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184527",
+      "source": {
+        "artifact_id": "law-go-271027-17184527-hwp5",
+        "file": "law-go-271027-17184527-hwp5.hwp",
+        "format": "hwp5",
+        "sha256": "bd4b55725c0b3904aac770d5aee3722484458041a4384a27e0a17f60cdcadf76"
+      },
+      "reference": {
+        "file": "law-go-271027-17184527-pdf.pdf",
+        "tier": "T1",
+        "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+        "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361895",
+        "sha256": "89752a84db2b617564c87768702f4289fb47e155584bada6cd65de5bdd820b5e",
+        "size_bytes": 32951,
+        "license": {
+          "code": "Copyright Act Article 7",
+          "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+          "observed_at": "2026-08-22",
+          "scope": "statutory-public-domain"
+        },
+        "product": "Hancom PDF",
+        "build": "Hancom PDF 1.3.0.546 (embedded Producer metadata)",
+        "os": "not disclosed by official publisher",
+        "font_fingerprint": "pdffonts-normalized-sha256:d39284072dcc5a39d0482976e82570642708d1cd7c87a2a4f7385e37d4a979bc",
+        "note": "Official law.go.kr HWP/PDF attachment pair; pair_id=law-go-271027-17184527; association self-attested from the same source page"
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184529",
+      "source": {
+        "artifact_id": "law-go-271027-17184529-hwp5",
+        "file": "law-go-271027-17184529-hwp5.hwp",
+        "format": "hwp5",
+        "sha256": "ffebb654df18e2524ddb28df7d63bb58442aa431cfeb21d8732ccbd57be2a416"
+      },
+      "reference": {
+        "file": "law-go-271027-17184529-pdf.pdf",
+        "tier": "T1",
+        "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+        "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361903",
+        "sha256": "c074580f4546560fb69fd571e86fb5b0cf4ebc64f1bd24e02fb239065a2e779c",
+        "size_bytes": 37262,
+        "license": {
+          "code": "Copyright Act Article 7",
+          "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+          "observed_at": "2026-08-22",
+          "scope": "statutory-public-domain"
+        },
+        "product": "Hancom PDF",
+        "build": "Hancom PDF 1.3.0.546 (embedded Producer metadata)",
+        "os": "not disclosed by official publisher",
+        "font_fingerprint": "pdffonts-normalized-sha256:86e177498811327eef77e460e30a94d0acbc79d130b1cbdb9a13a06d048b05e7",
+        "note": "Official law.go.kr HWP/PDF attachment pair; pair_id=law-go-271027-17184529; association self-attested from the same source page"
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184531",
+      "source": {
+        "artifact_id": "law-go-271027-17184531-hwp5",
+        "file": "law-go-271027-17184531-hwp5.hwp",
+        "format": "hwp5",
+        "sha256": "af1bafe1f95778af9ad0c0cddb2240aea67c22ed69dbf2e0f09a83ea22045037"
+      },
+      "reference": {
+        "file": "law-go-271027-17184531-pdf.pdf",
+        "tier": "T1",
+        "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+        "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361909",
+        "sha256": "7f8db2f067134375bb2861f0a3c9bc15af4055e8be8ca5a8d0f61372e2ad8e96",
+        "size_bytes": 58144,
+        "license": {
+          "code": "Copyright Act Article 7",
+          "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+          "observed_at": "2026-08-22",
+          "scope": "statutory-public-domain"
+        },
+        "product": "Hancom PDF",
+        "build": "Hancom PDF 1.3.0.546 (embedded Producer metadata)",
+        "os": "not disclosed by official publisher",
+        "font_fingerprint": "pdffonts-normalized-sha256:2330281f509d4354d8db94aad485092994f98a686688919ee7733adfed3bdbcd",
+        "note": "Official law.go.kr HWP/PDF attachment pair; pair_id=law-go-271027-17184531; association self-attested from the same source page"
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184533",
+      "source": {
+        "artifact_id": "law-go-271027-17184533-hwp5",
+        "file": "law-go-271027-17184533-hwp5.hwp",
+        "format": "hwp5",
+        "sha256": "eb1f9a967a882c062fe17af6d9659fcc3f4e90318863ba43c3fdfebb6c733f48"
+      },
+      "reference": {
+        "file": "law-go-271027-17184533-pdf.pdf",
+        "tier": "T1",
+        "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+        "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361915",
+        "sha256": "54c12427c1f75348c9fb1af465f08f055d41d3013f8a6eefeedb91962ff6e4d9",
+        "size_bytes": 33473,
+        "license": {
+          "code": "Copyright Act Article 7",
+          "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+          "observed_at": "2026-08-22",
+          "scope": "statutory-public-domain"
+        },
+        "product": "Hancom PDF",
+        "build": "Hancom PDF 1.3.0.546 (embedded Producer metadata)",
+        "os": "not disclosed by official publisher",
+        "font_fingerprint": "pdffonts-normalized-sha256:d39284072dcc5a39d0482976e82570642708d1cd7c87a2a4f7385e37d4a979bc",
+        "note": "Official law.go.kr HWP/PDF attachment pair; pair_id=law-go-271027-17184533; association self-attested from the same source page"
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184535",
+      "source": {
+        "artifact_id": "law-go-271027-17184535-hwp5",
+        "file": "law-go-271027-17184535-hwp5.hwp",
+        "format": "hwp5",
+        "sha256": "470aaacd0079677d3b6387b9d92a2cf25042edce8928080fad1e6a344d1521ec"
+      },
+      "reference": {
+        "file": "law-go-271027-17184535-pdf.pdf",
+        "tier": "T1",
+        "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+        "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361921",
+        "sha256": "8c1b19ed6762affe7ea02e09ef684210654a6c17d899366c6f2584f41313fa1d",
+        "size_bytes": 45192,
+        "license": {
+          "code": "Copyright Act Article 7",
+          "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+          "observed_at": "2026-08-22",
+          "scope": "statutory-public-domain"
+        },
+        "product": "Hancom PDF",
+        "build": "Hancom PDF 1.3.0.546 (embedded Producer metadata)",
+        "os": "not disclosed by official publisher",
+        "font_fingerprint": "pdffonts-normalized-sha256:527eccb3bd34fc3e65fc129ffb1b295f8b81236a0766f3abe254902b4d090e0e",
+        "note": "Official law.go.kr HWP/PDF attachment pair; pair_id=law-go-271027-17184535; association self-attested from the same source page"
+      }
+    },
+    {
+      "pair_id": "law-go-271027-17184537",
+      "source": {
+        "artifact_id": "law-go-271027-17184537-hwp5",
+        "file": "law-go-271027-17184537-hwp5.hwp",
+        "format": "hwp5",
+        "sha256": "2a0fc6865d2494b3268954389a6ec958fb44b898a988fb80fd4b32423a48b075"
+      },
+      "reference": {
+        "file": "law-go-271027-17184537-pdf.pdf",
+        "tier": "T1",
+        "source_page": "https://www.law.go.kr/LSW/lsInfoP.do?ancYnChk=0&lsiSeq=271027",
+        "source_url": "https://www.law.go.kr/LSW/flDownload.do?flSeq=151361927",
+        "sha256": "c1d14d6adad73b0f248770187f1622dafd6e6e7b6d6b9e8ecb191d84c5a2a8cb",
+        "size_bytes": 49389,
+        "license": {
+          "code": "Copyright Act Article 7",
+          "evidence_url": "https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1029423769",
+          "observed_at": "2026-08-22",
+          "scope": "statutory-public-domain"
+        },
+        "product": "Hancom PDF",
+        "build": "Hancom PDF 1.3.0.546 (embedded Producer metadata)",
+        "os": "not disclosed by official publisher",
+        "font_fingerprint": "pdffonts-normalized-sha256:001deb3ce9d3b3acb49c7f81d09f39c4a9dedd35fcb3d868598a01d58ec3f8c4",
+        "note": "Official law.go.kr HWP/PDF attachment pair; pair_id=law-go-271027-17184537; association self-attested from the same source page"
+      }
+    }
+  ]
+}

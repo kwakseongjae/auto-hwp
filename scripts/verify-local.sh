@@ -47,9 +47,11 @@ node --test \
   scripts/tests/fetch-gov-corpus.test.mjs \
   scripts/tests/gov-source-catalog.test.mjs \
   scripts/tests/public-corpus-manifest.test.mjs \
+  scripts/tests/pdf-calibration.test.mjs \
   scripts/tests/safe-document-download.test.mjs
 node scripts/gov-source-catalog.mjs --check
 node scripts/public-corpus-intake.mjs --check
+node scripts/pdf-visual-calibrate.mjs --check
 
 echo "═══ 조판 오라클 스윕 산출물 (이슈 72 — 전수 재실행 아님 · 커밋된 요약만) ═══"
 # 코퍼스 전수 layout-check 는 로컬 `node scripts/oracle-sweep.mjs` (--check 가 회귀).

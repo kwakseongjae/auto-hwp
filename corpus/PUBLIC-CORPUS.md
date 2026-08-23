@@ -38,5 +38,8 @@ local/central 불일치·CRC 오류를 거부하고 HWP5는 CFB FAT/디렉터리
 기존 파일은 단일-link regular inode와 SHA/크기/컨테이너를 다시 확인하며, 다른 파일을 덮어쓰지 않는다.
 로그는 공개 artifact id와 통과/정책 실패만 남기고 문서명·본문·SHA를 출력하지 않는다.
 
-공식 PDF는 한/글 자체 렌더의 절대 참값으로 선언하지 않는다. #101에서 페이지 구조를 먼저 맞춘 뒤
-정렬 오차와 시각 지표를 report-only로 보정하고, #88·#93의 pair/oracle 입력으로 사용한다.
+공식 PDF는 한/글 자체 렌더의 절대 참값으로 선언하지 않는다. #101은 HWP5 20건 모두에 대응하는
+공식 PDF를 추가 관측해 `pdf-calibration-manifest.json`에 T1 provenance를 고정했다. 이 중 처음
+10개만 위 intake manifest의 50건에 포함되고, 추가 10개 역시 바이너리는 private에만 둔다.
+`pdf-calibration-baseline.json`은 페이지 구조를 먼저 비교한 report-only 결과이며, #88·#93의
+pair/oracle 입력으로 사용한다.
