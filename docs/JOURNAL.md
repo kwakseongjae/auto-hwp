@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #166 PR #167 posted
+- 구현 `4ed836a` push + PR #167; build-test 9m19s·licenses 2m22s green.
+- 최초 빈-body event는 본문 복구 뒤에도 rerun payload가 stale이라 issue-link 재실패.
+- 현재 본문은 `Closes #166`; state commit push로 새 synchronize event를 트리거한다.
+- 다음 required CI/review/comment→green 자율 병합→next 499..549.
+
 ## 2026-08-24 (Codex sol) · #166 nwno full green / PR ready
 - NonZero start IR+legacy JSX default; exact page-counter nwno와 hostile fail-closed 구현.
 - shared SVG/PDF progression·LOCKSTEP; public boundary 451..465→499..549.
