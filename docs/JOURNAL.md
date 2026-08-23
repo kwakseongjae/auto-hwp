@@ -5,6 +5,30 @@
 
 ---
 
+## 2026-08-23 (Codex sol) · #158 PR #159
+- commit `5b57498` push, PR #159(`Closes #158`, `Refs #94 #87 #95`) 게시.
+- 다음 required CI/review 감시→green 자율 병합→PARA_HEADER 0x42 child issue.
+
+## 2026-08-23 (Codex sol) · #158 full green
+- support-pool final security/diff review; production/rhwp/generated diff 0.
+- full Rust/PDF/8·18·24/wasm/JS/Vitest 1,018 + Chromium 85 pass/3 skip/0 fail.
+- 다음 commit/push/PR/CI/병합→benchmark PARA_HEADER 0x42 child issue.
+
+## 2026-08-23 (Codex sol) · #158 quick green
+- strict length/ref/security review; unknown fill/style and active unsupported semantics fail closed.
+- workspace/PDF51/8·18·24+98.9/corpus84/oracle82/HWPX/wasm/licenses quick green.
+- 다음 full→final diff→commit/PR/CI/병합; production/rhwp/generated diff 0.
+
+## 2026-08-23 (Codex sol) · #158 support pools focused green
+- strict BORDER_FILL/TAB_DEF/NUMBERING/BULLET + inert/active usage gates; benchmark 0x19→0x42.
+- 합성 정상/적대 7건 추가, hwp-hwp5 34 tests, clippy, wasm32 green.
+- 다음 quick/security/full→commit/PR/CI/병합; production/rhwp 불변.
+
+## 2026-08-23 (Codex sol) · PR #157 병합 → #158 착수
+- #157 required CI/CLEAN·댓글 0 확인 후 main `82ca4e6` 병합; #156 close·원격 브랜치 정리.
+- #94 완료 근거 동기화, benchmark 다음 경계 기준 child #158 생성·latest-main worktree 시작.
+- 다음 strict support pools + honest active-use gates; production/rhwp 불변.
+
 ## 2026-08-23 (Codex sol) · #156 PR #157
 - commit `01b637c` push, PR #157(`Closes #156`, `Refs #94 #87`) 게시.
 - 다음 required CI/review 감시→green 자율 병합→#94 next first-party child.

@@ -33,8 +33,10 @@ fn explicit_own_parser_never_falls_back() {
     eprintln!("{error:?}");
     assert!(matches!(
         error,
-        Error::UnsupportedBodyRecord { .. }
-            | Error::InvalidReference { .. }
-            | Error::MalformedRecord { .. }
+        Error::UnsupportedBodyRecord {
+            tag: 0x42,
+            section: 0,
+            ..
+        }
     ));
 }
