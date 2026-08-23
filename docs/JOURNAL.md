@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #184 classified
+- exact 7×3/19 cells; vertical span 1 + final-row horizontal span 1, no nesting, 1 paragraph/cell.
+- column/row/span sums equal object geometry; exact width-ref pattern; no-split/no-adjust faithfully modeled.
+- one-shot classifier removed. 다음 synthetic hostile→strict parser; route/rhwp/HWPX 불변.
+
 ## 2026-08-24 (Codex sol) · PR #183 merged / #184 started
 - #183 exact-head required CI·MERGEABLE·댓글 0 후 main `c95fef7c`; #182 close·branch 정리.
 - #94 근거 동기화, next TABLE boundary #184 등록, exact-main worktree 시작.

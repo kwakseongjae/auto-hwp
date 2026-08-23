@@ -121,6 +121,16 @@
   content-free TABLE `0x4d/30321..30361`의 flags·topology·geometry·nesting을 먼저 분류하고,
   shared IR/SVG/PDF가 모든 active semantics를 faithful하게 표현할 때만 synthetic/hostile fixture와
   strict parser를 구현. production route·HWPX·shared layout defaults·generated assets·rhwp는 불변.
+  분류 결과 exact common attr `0x082a2311` + TABLE attr `0x0600000c`, 7×3/active cells **19**,
+  row counts `3/3/2/3/3/3/2`다. `(row1,col0)`의 2-row vertical merge와
+  `(row6,col0)`의 2-column horizontal merge만 있고 중첩 표는 없다. 모든 셀 1문단, mirrored 13B
+  extension이며 col widths `6509/31215/10200` 합은 object **47924**와 exact다. row heights
+  `2229/2129×5/2229` 합은 object **15103**과 exact이고 vertical span height **4258**도 두 행 합과
+  같다. width-ref는 col0/1 `0x0500`, col2 `0x0100`으로 고정된다. attr의 no-split/no-adjust는 기존
+  shared `keep_together=true`/`fixed_row_heights=true`로 보존되고 repeat-header는 active header cell이
+  없어 inert하다. one-shot numeric classifier는 두 번 동일 결과를 확인한 뒤 제거했다. **다음:**
+  exact tuple/19-cell topology/width-ref/span/geometry/extension synthetic+hostile fixture→strict parser;
+  route/rhwp/HWPX/generated 불변.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #173 병합 · #174 multi-table 경계 착수**.
   자체 HWP5 파서가 exact `tbl ` marker/common-object/TABLE/LIST_HEADER/cell paragraph를 검증해
