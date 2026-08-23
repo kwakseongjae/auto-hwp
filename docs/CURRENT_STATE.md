@@ -26,8 +26,9 @@
   Vitest **1,018**까지 green이고 샌드박스 포트 EPERM만 허용된 로컬 서버에서 분리 실행해 Chromium
   **85 pass/3 intentional skip/0 fail**이다. 임시 dependency link는 제거했고 production route·
   HWPX parser/serializer·shared typesetter·`external/rhwp`·generated asset diff 0, 공개 금지 원문·
-  경로·hash·raw payload·credential diff 0을 확인했다. **다음:** commit/push/PR #176→required CI·댓글
-  확인→자율 병합→#94 동기화→다음 TABLE `13704..13746` classification-first child.
+  경로·hash·raw payload·credential diff 0을 확인했다. 구현은 commit `52e9fc6`으로 push했고 PR #177을
+  `Closes #176`으로 게시했다. **다음:** required CI·댓글 확인→자율 병합→#94 동기화→다음 TABLE
+  `13704..13746` classification-first child.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #173 병합 · #174 multi-table 경계 착수**.
   자체 HWP5 파서가 exact `tbl ` marker/common-object/TABLE/LIST_HEADER/cell paragraph를 검증해
