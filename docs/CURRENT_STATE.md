@@ -93,7 +93,14 @@
   main의 `codex/issue-182-hwp5-next-table` worktree와 pinned rhwp oracle을 초기화했다. **다음:**
   content-free TABLE `0x4d/25952..25990`의 flags·topology·geometry·nesting을 먼저 분류하고 shared
   IR/SVG/PDF가 모든 active semantics를 faithful하게 표현할 때만 strict synthetic/hostile slice를 구현.
-  production route·HWPX·shared layout defaults·generated assets·rhwp는 불변.
+  production route·HWPX·shared layout defaults·generated assets·rhwp는 불변. 분류 결과 exact common
+  attr `0x082a2311` + TABLE attr `0x04000004`, 6×4 완전 격자/24 active cells, row counts 전부 4,
+  병합·중첩 없음, 모든 셀 1문단이다. col widths `3238/14908/11795/18021` 합은 object **47962**,
+  row heights `1946/1846×5` 합은 object **11176**과 exact다. mirrored 13B extension과 padding·border
+  refs도 일치한다. row0 width-ref는 모두 `0x0100`, rows1..5는 `0x0500`; repeat-header attr은 active
+  header cell이 없어 inert이고 no-split은 shared `keep_together`로 보존 가능하다. one-shot numeric
+  classifier는 제거했다. **다음:** exact tuple/24-cell row-major/width-ref/geometry synthetic+hostile
+  fixture→strict parser; route/rhwp/HWPX/generated 불변.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #173 병합 · #174 multi-table 경계 착수**.
   자체 HWP5 파서가 exact `tbl ` marker/common-object/TABLE/LIST_HEADER/cell paragraph를 검증해

@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #182 classified
+- exact 6×4/24 full-grid table; no merge/nesting, 1 paragraph per cell.
+- column/row sums equal object geometry; row0/body width-ref pattern exact; repeat-header inert.
+- one-shot classifier removed. 다음 synthetic hostile→strict parser; route/rhwp/HWPX 불변.
+
 ## 2026-08-24 (Codex sol) · PR #181 merged / #182 started
 - #181 exact-head required CI·CLEAN/MERGEABLE·댓글 0 후 main `09e71a07`; #180 close·branch 정리.
 - #94 동기화, next TABLE boundary #182 등록, exact-main worktree 시작.
