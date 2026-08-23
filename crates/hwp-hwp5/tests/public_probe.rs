@@ -28,17 +28,17 @@ fn public_hwp5_has_bounded_content_free_record_provenance() {
 }
 
 #[test]
-fn explicit_own_parser_owns_bounded_multi_table_then_stops_content_free() {
+fn explicit_own_parser_owns_bounded_nested_table_then_stops_content_free() {
     let probed = probe(&benchmark()).unwrap();
     let next = probed
         .streams
         .iter()
         .flat_map(|stream| &stream.records)
-        .find(|record| record.head == 7_561)
+        .find(|record| record.head == 13_704)
         .unwrap();
     assert_eq!(
         (next.tag, next.level, next.head, next.data, next.end, next.size,),
-        (0x4d, 2, 7_561, 7_565, 7_605, 40)
+        (0x4d, 2, 13_704, 13_708, 13_746, 38)
     );
     let error = OwnHwp5Parser::new().parse(&benchmark()).unwrap_err();
     eprintln!("{error:?}");
@@ -47,8 +47,8 @@ fn explicit_own_parser_owns_bounded_multi_table_then_stops_content_free() {
         Error::MalformedRecord {
             tag: 0x4d,
             section: Some(0),
-            offset: 7561,
-            reason: "TABLE attributes or framing are not owned",
+            offset: 13704,
+            reason: "TABLE attributes or row/column topology are not owned",
             ..
         }
     ));

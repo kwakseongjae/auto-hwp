@@ -3,6 +3,32 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-24 · Codex(sol) — **#176 nested TABLE 구현·전체 검증 완료**.
+  #175는 exact head `6711ff9`에서 issue-link/build-test/licenses green, CLEAN/MERGEABLE,
+  review/general/inline 댓글 0을 확인하고 protected main `c917c584`로 squash 병합했다. #174 close와
+  원격 branch 정리 후 #94에 bounded two-table host 소유 근거를 동기화했다. 월요일 #114 감사에서
+  open PR 0, 새 외부 제보·스팸·보안 신호 0, 기존 외부 #50의 Proposal/security 라우팅, desktop
+  signing blocker를 재확인했다. 중복 없는 #176을 R18/P1/area:hwp5/status:ready로 열고 exact latest
+  main의 `codex/issue-176-hwp5-next-table` worktree를 만들었다. **다음:** content-free TABLE
+  `0x4d/7561..7605` header/child topology 분류→faithful shared-IR 표현 가능할 때만 synthetic/hostile
+  fixture와 strict parser 구현. production route·HWPX·shared layout·generated assets·rhwp는 불변.
+  분류 결과 exact 9×8/34 active cells, 행별 count `2/2/4/1/5/5/5/5/5`, 고정 horizontal merge
+  topology, 1~2 cell paragraphs, 단 하나의 depth-1 1×1 nested table이다. attr은 no-split·inert
+  repeat-header·no-adjust의 exact `0x0600000c`이고 shared IR의 keep-together/fixed-row-height/nested
+  Block으로 표현 가능하다. parser는 row count·span/order·record level, zero/mirrored-width 13B cell
+  extension, border refs, row heights, common geometry를 검증하고 span equation graph로 8개 column
+  boundary를 유일하게 복원한다. nested table은 exact cell/paragraph 위치와 depth≤1만 허용한다.
+  synthetic positive + hostile attr/row-count/span/width/extension/missing/deeper-nest 7축을 추가해 HWP5
+  **57 tests** green. 공개 own-parser 경계는 다음 TABLE `0x4d/13704..13746`(8×5)으로 전진했다.
+  focused clippy `-D warnings`·wasm32와 quick의 fork governance, fmt/clippy, Rust workspace,
+  PDF visual **51**, canonical **8/18/24·98.9%+**, public corpus **84**, oracle **82**, HWPX,
+  wasm/licenses가 모두 green이다. full도 wasm 재빌드(7,810,657B), JS build·crosscheck·i18n,
+  Vitest **1,018**까지 green이고 샌드박스 포트 EPERM만 허용된 로컬 서버에서 분리 실행해 Chromium
+  **85 pass/3 intentional skip/0 fail**이다. 임시 dependency link는 제거했고 production route·
+  HWPX parser/serializer·shared typesetter·`external/rhwp`·generated asset diff 0, 공개 금지 원문·
+  경로·hash·raw payload·credential diff 0을 확인했다. **다음:** commit/push/PR #176→required CI·댓글
+  확인→자율 병합→#94 동기화→다음 TABLE `13704..13746` classification-first child.
+
 - 갱신: 2026-08-24 · Codex(sol) — **PR #173 병합 · #174 multi-table 경계 착수**.
   자체 HWP5 파서가 exact `tbl ` marker/common-object/TABLE/LIST_HEADER/cell paragraph를 검증해
   treat-as-character 1×1 표를 source-neutral `Table`/`Cell` IR로 내린다. 셀/개체 geometry,
