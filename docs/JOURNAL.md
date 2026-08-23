@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #186 classified
+- #182와 geometry/topology exact 동일한 6×4; 차이는 width-ref 24개가 모두 `0x0500`.
+- 0x0100↔0x0500 차이는 active low cell bits 불변·raw roundtrip hint; 렌더 geometry 손실 없음.
+- classifier 제거. 다음 two whole-pattern allowlist + mixed/unknown hostile; route/rhwp/HWPX 불변.
+
 ## 2026-08-24 (Codex sol) · PR #185 merged / #186 started
 - #185 exact-head required CI·MERGEABLE·댓글 0 후 main `ee28afa2`; #184 close·branch 정리.
 - #94 근거 동기화, next LIST_HEADER width-ref boundary #186 등록, exact-main worktree 시작.

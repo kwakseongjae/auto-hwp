@@ -151,7 +151,15 @@
   LIST_HEADER `0x48/40865..40916`가 속한 6×4 variant의 전체 width-ref pattern·topology·geometry·
   framing을 먼저 분류하고 active semantic을 shared IR/SVG/PDF로 faithful하게 표현할 수 있을 때만
   exact discriminator와 synthetic/hostile fixture를 구현. production route·HWPX·shared layout
-  defaults·generated assets·rhwp는 불변.
+  defaults·generated assets·rhwp는 불변. 분류 결과 enclosing common/TABLE attr, 6×4/24-cell
+  row-major topology, 1문단/cell, widths/heights, padding·border, mirrored 13B extension은 #182 form과
+  exact 동일하다. 유일한 차이는 #182 form이 row0=`0x0100`/rows1..5=`0x0500`인 반면 이번 form은
+  24개 width-ref가 전부 `0x0500`이다. 두 값의 차이 `0x0400`은 pinned rhwp도 raw roundtrip hint로
+  보존할 뿐 렌더에서 해석하는 low active bits(own-margin/protect/header/form)를 바꾸지 않는다. absolute
+  cell/object geometry도 완전히 같아 shared IR/SVG/PDF의 active semantic 손실이 없다. one-shot numeric
+  classifier는 두 번 동일 결과를 확인한 뒤 제거했다. **다음:** 6×4 전체 width-ref sequence를
+  row0/body pattern 또는 all-`0x0500` 두 exact variant로만 원자 검증하고, 셀별 혼합·다른 word는
+  fail-closed하는 synthetic positive/hostile 회귀 구현; route/rhwp/HWPX/generated 불변.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #173 병합 · #174 multi-table 경계 착수**.
   자체 HWP5 파서가 exact `tbl ` marker/common-object/TABLE/LIST_HEADER/cell paragraph를 검증해
