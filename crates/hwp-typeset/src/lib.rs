@@ -162,8 +162,9 @@ pub fn is_full_width(ch: char) -> bool {
 // rhwp reimplements Hancom's 금칙 처리: a small closed set of glyphs that may not begin a line (줄머리
 // 금칙 — closing brackets, trailing punctuation, trailing marks) or end one (줄꼬리 금칙 — opening
 // brackets, leading currency signs). We re-derive the sets here rather than call across the vendored
-// crate (rhwp is parse-only + not modifiable), so `layout_paragraph` — the ONE break truth shared by
-// NaiveLayout (oracle) and place_doc (renderer) — stays in lockstep for both paths.
+// crate (rhwp is not a production layout engine and its submodule is not modified), so
+// `layout_paragraph` — the ONE break truth shared by NaiveLayout (oracle) and place_doc (renderer) —
+// stays in lockstep for both paths.
 
 /// 줄머리 금칙: this char may NOT start a line (닫는 괄호·구두점·후행 부호). rhwp set, verbatim.
 fn is_line_start_forbidden(ch: char) -> bool {

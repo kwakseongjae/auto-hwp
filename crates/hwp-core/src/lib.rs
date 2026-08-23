@@ -1,48 +1,20 @@
-//! The capability registry / façade. Picks the best-available implementation per
-//! capability and routes `open()` by detected format. This is the mechanism that lets
-//! us swap rhwp out per capability (docs/DEPENDENCY-STRATEGY.md §2): our own crates are
-//! preferred; the rhwp bootstrap fills gaps (HWP5 parse, layout, render) when wired.
+//! Format-routing façade for the first-party auto-hwp engine.
+//!
+//! HWPX parse/write, live layout, render, PDF export, and editing are owned by this
+//! workspace. The replaceable rhwp boundary is limited to binary HWP5/HWP3 decode plus
+//! explicitly named read-only oracle/enrichment helpers (see `docs/RHWP-FORK-GOVERNANCE.md`).
 
-use hwp_hwpx::{HwpxParser, HwpxWriter};
+use hwp_hwpx::HwpxParser;
 use hwp_model::prelude::*;
 use hwp_rhwp::RhwpEngine;
 use hwp_typeset::{NaiveLayout, NullFontMetrics};
 
-/// Assembled engine: one chosen implementation behind each capability trait.
-pub struct Engine {
-    pub layout: Box<dyn LayoutEngine>,
-    pub renderer: Box<dyn Renderer>,
-    pub serializer: Box<dyn HwpxSerializer>,
-    pub fonts: Box<dyn FontMetricsProvider>,
-}
-
-impl Default for Engine {
-    fn default() -> Self {
-        Self::assemble()
-    }
-}
+/// Stateless format router. Production layout/render/export are called through the
+/// first-party crates directly; this type must not assemble a dormant rhwp renderer.
+#[derive(Default)]
+pub struct Engine;
 
 impl Engine {
-    /// Assemble the engine from the best-available implementations.
-    pub fn assemble() -> Self {
-        Engine {
-            // Layout/render: rhwp bootstrap when wired, else our (stub) own engine.
-            layout: if RhwpEngine::is_available() {
-                Box::new(RhwpEngine::new())
-            } else {
-                Box::new(NaiveLayout)
-            },
-            renderer: if RhwpEngine::is_available() {
-                Box::new(RhwpEngine::new())
-            } else {
-                Box::new(hwp_render::NullRenderer)
-            },
-            // Serializer is ALWAYS ours (rhwp's is Hancom-incompatible).
-            serializer: Box::new(HwpxWriter),
-            fonts: Box::new(NullFontMetrics),
-        }
-    }
-
     /// Open a document: detect format, route to the matching parser.
     ///
     /// HWPX/HWP keep their existing parsers; DOCX (full-ish edit) and PDF (VIEW-MOSTLY, positioned

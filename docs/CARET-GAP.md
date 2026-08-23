@@ -216,8 +216,8 @@ editor-core 모델/계약 테스트: `cd packages/editor-core && npm test` (`car
 - **P0 판정: own-render `PlacedGlyph` 기반 통일 가능(채택).** 캐럿 지오메트리는 rhwp 글리프 박스가
   아니라 `hwp-typeset/src/place.rs`의 `cell_caret_rect`/`cell_text_hit`(=`place_cell_content`의 글리프
   수학을 읽기 전용 재구동, 조판 무변경 V4)에서 나온다. 화면 SVG와 동일한 `place_doc` 산출이므로
-  §3†의 25-vs-14 페이지 발산이 **원천적으로 캐럿에 영향을 못 준다**(우회 성공). rhwp는 파싱 전용
-  원칙 그대로.
+  §3†의 25-vs-14 페이지 발산이 **원천적으로 캐럿에 영향을 못 준다**(우회 성공). rhwp 원본
+  render/geometry helper는 read-only 비교 경로이고 캐럿은 자체 IR 전용이다.
 - **P1 표면**: `Intent::HitTestCell{page,x,y}` + `Intent::CaretRectCell{section,block,row,col,para,offset}`
   (hwp-session `cell_text_hit(_placed)`/`cell_caret_rect(_placed)` 경유, px, 018 null). `para`/`offset`은
   **에디터("\n"-split) 공간** — `blockRuns` join/`SetTableCellRuns` split과 동일 공간이라 강제 줄바꿈

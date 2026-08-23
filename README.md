@@ -261,8 +261,9 @@ AI가 읽은 것(평문)과 사람이 보는 것(조판된 지면)이 서로 다
 
 이 프로젝트는 앞선 작업들의 어깨를 빌렸습니다.
 
-- **[rhwp](https://github.com/edwardkim/rhwp)** (MIT) — 바이너리 `.hwp` 파싱의 상류이자 이 엔진을 시작하게 만든 영감입니다.
-  파싱 부트스트랩과 조판 참조로 쓰고, 렌더는 항상 우리 IR에서 합니다.
+- **[rhwp](https://github.com/edwardkim/rhwp)** (MIT) — 바이너리 `.hwp` 디코드의 상류이자 이 엔진을 시작하게 만든 영감입니다.
+  governed fork를 HWP5/HWP3 decode와 read-only 원본/오라클·수식/차트 보강에 제한해 쓰며,
+  HWPX parse/write와 live 조판·렌더·PDF·편집은 자체 IR 엔진이 담당합니다.
 - **나눔고딕 · 나눔명조** (OFL, NAVER) — 기본 화면·PDF 서체. 카탈로그 8종 전부 OFL이라 재배포와 임베딩이 적법합니다.
 - **LibreOffice + H2Orestart** (GPL) — 충실도 대조용 오라클로 프로세스 **밖에서만** 호출합니다. 배포되는
   바이너리·npm 패키지에는 GPL 코드가 들어가지 않습니다.

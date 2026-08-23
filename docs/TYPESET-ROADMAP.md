@@ -26,7 +26,8 @@
 
 - 게이트 하향 금지: benchmark 8==8 · benchmark1 18==18 · 줄바꿈 98.9%+ 유지. 정합 기준을
   **재정의**할 수는 있어도(아래 T0) 기존 게이트 수치를 느슨하게 풀지 않는다.
-- LOCKSTEP: `place_doc` ↔ `NaiveLayout` 페이지 수 일치. rhwp는 vendored 무수정 + 파싱 전용.
+- LOCKSTEP: `place_doc` ↔ `NaiveLayout` 페이지 수 일치. rhwp는 vendored 무수정이며 저장
+  lineseg/원본 비교는 read-only oracle로만 쓴다. 생산 조판·렌더는 자체 IR 전용이다.
 - 제보 문서는 **개인정보 없이 구조만** 픽스처화한다(파일명·본문·해시 금지 — 제보 템플릿 규율
   그대로). 재현 불가 제보는 pending으로 정직하게 남긴다.
 - 판정 함정 4종(rhwp #3556에서 배움): 오라클 통과 ≠ 무손실 · 착수 전 최신 main 확인 ·

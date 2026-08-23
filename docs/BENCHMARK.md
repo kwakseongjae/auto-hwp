@@ -27,8 +27,9 @@ HWP/HWPX 는 문서를 저장할 때 **한글 자신이 계산한 조판 결과�
 
 ### ② rhwp 파싱 — 보조 오라클
 
-`external/rhwp`(MIT)는 바이너리 `.hwp`(HWP5)를 읽는 상류 파서다. 우리는 이것을 **파싱 전용**으로만
-쓴다(불변식 3) — 렌더는 항상 우리 IR 에서 나온다. 쪽수 대조의 "한컴(rhwp)" 열과 HWPX 파서 파리티
+`external/rhwp`(MIT)는 바이너리 `.hwp`(HWP5)를 읽는 상류 파서다. 생산 live 조판·렌더·PDF는
+항상 우리 IR에서 나오며, 이 문서에서는 rhwp의 저장 lineseg·원본 레이어를 **read-only oracle**로만
+쓴다(정확한 예외는 `RHWP-FORK-GOVERNANCE.md`). 쪽수 대조의 "한컴(rhwp)" 열과 HWPX 파서 파리티
 테스트의 기준선이 여기서 나온다.
 
 ### ③ 서로 다른 두 경로의 상호 대조

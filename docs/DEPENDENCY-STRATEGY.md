@@ -11,13 +11,15 @@
 
 | Capability (trait) | 의미 | 부트스트랩 구현 | 자체 구현 목표 |
 |---|---|---|---|
-| `DocumentParser` | bytes → SemanticDoc | `hwp-rhwp`(HWP5/HWP3/HWPX), `hwp-hwpx`(HWPX) | `hwp-hwpx` 완전 OWPML 파서 + 자체 HWP5 파서 |
-| `LayoutEngine` | doc → line segs/pagination | rhwp typeset | `hwp-typeset`(자간/장평/배분·나눔/금칙/줄간격 4모드) |
-| `Renderer` | layout → PageLayerTree(paint IR) | rhwp `getPageLayerTree` | `hwp-render` 자체 paint |
+| `DocumentParser` | bytes → SemanticDoc | `hwp-rhwp`(HWP5/HWP3), `hwp-hwpx`(HWPX) | HWPX는 자체 완료; #107/#94 자체 HWP5 파서 |
+| `LayoutEngine` | doc → line segs/pagination | 없음(저장 lineseg는 oracle만) | **`hwp-typeset` 생산 경로** |
+| `Renderer` | layout → PageLayerTree(paint IR) | 없음(`source:"original"`은 read-only 비교만) | **`hwp-render` 생산 경로** |
 | `HwpxSerializer` | doc → .hwpx (dirty-only) | **없음**(rhwp 직렬화기는 한컴 비호환) | **`hwp-hwpx` 자체 — 처음부터 우리 것** |
 | `FontMetricsProvider` | 글리프 advance | rhwp host Canvas `measureText` | harfrust/rustybuzz 셰이핑 기반 |
 
-→ `hwp-core::Engine`이 "능력별로 가용한 최선의 구현"을 조립한다. rhwp가 없으면 자체/degraded 구현으로 폴백하되 **워크스페이스는 항상 green으로 컴파일·동작**한다.
+→ `hwp-core::Engine`은 상태 없는 포맷 라우터다. dormant rhwp layout/renderer를 조립하지 않는다.
+HWPX와 live layout/render/export/edit는 rhwp 없이 동작하고, rhwp feature가 없으면 HWP5/HWP3
+입력만 명시적으로 unavailable이다. 예외 목록과 포크 절차는 `RHWP-FORK-GOVERNANCE.md`가 정본이다.
 
 ---
 

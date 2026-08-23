@@ -5,6 +5,22 @@
 
 ---
 
+## 2026-08-23 (Codex sol) · #151 full green
+- full Rust/조판/PDF/WASM/licenses와 Vitest 1,018 green; Chromium E2E 85 pass/3 skip.
+- 공개 `/bench`·CONTRIBUTING·진단 문구까지 정확한 rhwp 예외 경계로 교정, Next 20 routes build green.
+- submodule/generated diff 0. 다음 final diff→commit/push/PR/CI/병합→#107.
+
+## 2026-08-23 (Codex sol) · #151 rhwp fork boundary 구현
+- v0.7.19/f137b4c policy·governance와 network-free drift verifier/CI gate 구현.
+- dormant rhwp layout/renderer 조립·trait 위장을 제거하고 HWPX/live own-engine 경계를 명시.
+- 변조 6 tests, hwp-core 29·hwp-rhwp 34 green; submodule diff 0. 다음 full verify→PR/CI/병합→#107.
+
+## 2026-08-23 (Codex sol) · #150 병합 → #151 rhwp F0 착수
+- PR #150 필수 CI·CLEAN 확인 후 main `82e0269` 병합, #149 close·원격 브랜치 정리.
+- #144는 실제 signing/updater key/clean-machine 증거 blocker를 기록하고 open 유지.
+- #87 하위 #151 생성; 최신 main worktree와 fork v0.7.19/f137b4c pinned 경계 확인.
+- 다음: version/call graph/assemble 감사→fork governance+network-free drift gate 구현.
+
 ## 2026-08-23 (Codex sol) · #149 릴리스 신뢰 기반 구현
 - #144 감사 후 실제 자격증명 단계와 분리한 하위 #149를 issue-first로 등록.
 - exact-main SHA·preview/stable·mac universal/Windows x64·checksum strict manifest/CLI 구현.

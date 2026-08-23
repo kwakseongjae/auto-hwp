@@ -1613,7 +1613,7 @@ pub enum Outcome {
     /// Caret-rect result: the caret geometry, or `None` if the target doesn't render on that page.
     Caret(Option<CaretRect>),
     /// In-place edit result (InsertText / DeleteBack): the new page count so the UI re-renders,
-    /// mirroring `Replaced` (0 when no rhwp render is available).
+    /// mirroring `Replaced` (0 when no rhwp read-only original render is available).
     Edited {
         pages: u32,
     },
