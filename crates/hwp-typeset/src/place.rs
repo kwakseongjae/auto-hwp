@@ -752,6 +752,10 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
                     // the remaining body flows to the next page. Record the page where the FIRST row
                     // lands as the table's start page (outline/page-nav only needs the start).
                     let row_h = crate::table_row_heights(t, body_w, doc, fonts);
+                    if crate::keep_table_on_fresh_lane(t, &row_h, vert, body_h) {
+                        page_idx += 1;
+                        vert = 0.0;
+                    }
                     // `rh <= body_h` on both checks: an over-tall row (taller than the whole body) never
                     // forces a page bump — mirrors place_table + NaiveLayout so the start pages stay aligned.
                     if vert > 0.0
@@ -854,6 +858,15 @@ fn block_pages_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Ve
                         flow.add(table.outer_margin_top.max(0) as f64);
                     }
                     let rows = crate::table_row_heights(table, flow.min_width(), doc, fonts);
+                    if crate::keep_table_on_fresh_lane(
+                        table,
+                        &rows,
+                        flow.vert(),
+                        flow.available_height(body_h),
+                    ) && flow.advance_column()
+                    {
+                        page_index += 1;
+                    }
                     if flow.vert() > 0.0
                         && rows.first().is_some_and(|height| {
                             let available = flow.available_height(body_h);
@@ -1184,6 +1197,10 @@ fn place_table(
     let row_h = row_heights(t, avail_w, doc, fonts);
 
     let mut vert = vert;
+    if crate::keep_table_on_fresh_lane(t, &row_h, vert, body_h) {
+        new_page(pages, page);
+        vert = 0.0;
+    }
     // First-row reserve: if not at page top and even the first row won't fit the remaining body, start
     // the table on a fresh page (a table that fits stays put; one that doesn't begins on a clean page).
     // EXCEPT a row taller than the whole body (e.g. the 자가진단표 wrapped in one 1×1 cell): bumping it to
@@ -1244,6 +1261,10 @@ fn place_table_columns(
     let table_width = flow.min_width();
     let col_x = column_offsets(t, table_width);
     let row_h = row_heights(t, table_width, doc, fonts);
+    let available = flow.available_height(body_h);
+    if crate::keep_table_on_fresh_lane(t, &row_h, flow.vert(), available) && flow.advance_column() {
+        new_page(pages, page);
+    }
     let available = flow.available_height(body_h);
     if flow.vert() > 0.0
         && flow.vert() + row_h[0] > available
@@ -3821,6 +3842,14 @@ mod tests {
         }
     }
 
+    fn fixed_height_table(rows: usize, row_height: HwpUnit, keep_together: bool) -> Table {
+        let mut table = n_row_table(rows);
+        table.row_heights = vec![row_height; rows];
+        table.fixed_row_heights = true;
+        table.keep_together = keep_together;
+        table
+    }
+
     /// 이슈 080 — 표 호스트 앵커에 걸린 `<hp:p pageBreak="1">` 은 **표 앞**에서 쪽을 넘겨야 한다.
     /// 우리 HWPX 블록 순서는 왕복 해자 때문에 `[Table, 앵커]` 라, 앵커 자리에서 실행하면 쪽이 표
     /// **뒤**에서 넘어간다(표만 이전 쪽에 남는다). 판정은 세 조판 경로가 공유하는
@@ -4046,6 +4075,172 @@ mod tests {
         assert_eq!(frags.len(), 1, "a fitting table is one fragment");
         assert_eq!((frags[0].first_row, frags[0].last_row), (0, 2));
         assert_eq!(placed.pages.len(), 1, "no extra pages");
+    }
+
+    #[test]
+    fn keep_together_fits_current_page_without_advancing() {
+        use crate::LayoutEngine;
+
+        let table = fixed_height_table(2, 2_000, true);
+        let doc = doc_with_page(
+            vec![Block::Paragraph(para("앞")), Block::Table(table)],
+            6_000,
+        );
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let fragments = placed.pages[0].tables.iter().collect::<Vec<_>>();
+        assert_eq!(placed.pages.len(), 1);
+        assert_eq!(fragments.len(), 1);
+        assert_eq!((fragments[0].first_row, fragments[0].last_row), (0, 2));
+        assert_eq!(
+            crate::NaiveLayout
+                .layout(&doc, &ApproxFontMetrics)
+                .unwrap()
+                .pages
+                .len(),
+            1
+        );
+        assert_eq!(block_pages(&doc, &ApproxFontMetrics)[0], vec![0, 0]);
+    }
+
+    #[test]
+    fn keep_together_moves_whole_table_in_all_three_paginators() {
+        use crate::LayoutEngine;
+
+        let table = fixed_height_table(2, 2_700, true);
+        let doc = doc_with_page(
+            vec![Block::Paragraph(para("앞")), Block::Table(table)],
+            6_000,
+        );
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        assert_eq!(placed.pages.len(), 2);
+        assert!(placed.pages[0].tables.is_empty());
+        assert_eq!(placed.pages[1].tables.len(), 1);
+        assert_eq!(
+            (
+                placed.pages[1].tables[0].first_row,
+                placed.pages[1].tables[0].last_row
+            ),
+            (0, 2)
+        );
+        assert_eq!(
+            crate::NaiveLayout
+                .layout(&doc, &ApproxFontMetrics)
+                .unwrap()
+                .pages
+                .len(),
+            2
+        );
+        assert_eq!(block_pages(&doc, &ApproxFontMetrics)[0], vec![0, 1]);
+    }
+
+    #[test]
+    fn keep_together_over_tall_table_keeps_row_fragment_fallback() {
+        use crate::LayoutEngine;
+
+        let table = fixed_height_table(3, 3_000, true);
+        let doc = doc_with_page(
+            vec![Block::Paragraph(para("앞")), Block::Table(table)],
+            6_000,
+        );
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        assert!(
+            !placed.pages[0].tables.is_empty(),
+            "over-tall keep-together table must not waste the current page"
+        );
+        let fragments = placed
+            .pages
+            .iter()
+            .flat_map(|page| &page.tables)
+            .collect::<Vec<_>>();
+        assert!(fragments.len() >= 2);
+        assert_eq!(fragments.first().unwrap().first_row, 0);
+        assert_eq!(fragments.last().unwrap().last_row, 3);
+        assert_eq!(
+            crate::NaiveLayout
+                .layout(&doc, &ApproxFontMetrics)
+                .unwrap()
+                .pages
+                .len(),
+            placed.pages.len()
+        );
+        assert_eq!(block_pages(&doc, &ApproxFontMetrics)[0][1], 0);
+    }
+
+    #[test]
+    fn default_table_retains_row_fragmentation() {
+        let table = fixed_height_table(2, 2_700, false);
+        let doc = doc_with_page(
+            vec![Block::Paragraph(para("앞")), Block::Table(table)],
+            6_000,
+        );
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        assert!(!placed.pages[0].tables.is_empty());
+        assert!(!placed.pages[1].tables.is_empty());
+        assert_eq!(placed.pages[0].tables[0].first_row, 0);
+        assert_eq!(placed.pages[0].tables[0].last_row, 1);
+    }
+
+    #[test]
+    fn keep_together_advances_to_fresh_column_in_lockstep() {
+        use crate::LayoutEngine;
+
+        let mut first = para("앞");
+        first.column_layout_before = Some(ColumnLayout {
+            widths: vec![2_500, 2_500],
+            gaps: vec![0],
+            ..ColumnLayout::default()
+        });
+        let mut table = fixed_height_table(2, 2_700, true);
+        table.col_widths = vec![2_500];
+        let doc = doc_with_page(vec![Block::Paragraph(first), Block::Table(table)], 6_000);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        assert_eq!(placed.pages.len(), 1);
+        assert_eq!(placed.pages[0].tables.len(), 1);
+        let fragment = &placed.pages[0].tables[0];
+        assert!(fragment.x >= 2_500.0, "table begins in the second column");
+        assert_eq!((fragment.first_row, fragment.last_row), (0, 2));
+        assert_eq!(
+            crate::NaiveLayout
+                .layout(&doc, &ApproxFontMetrics)
+                .unwrap()
+                .pages
+                .len(),
+            1
+        );
+        assert_eq!(block_pages(&doc, &ApproxFontMetrics)[0], vec![0, 0]);
+    }
+
+    #[test]
+    fn keep_together_over_tall_column_table_fragments_without_blank_lane() {
+        use crate::LayoutEngine;
+
+        let mut first = para("앞");
+        first.column_layout_before = Some(ColumnLayout {
+            widths: vec![2_500, 2_500],
+            gaps: vec![0],
+            ..ColumnLayout::default()
+        });
+        let mut table = fixed_height_table(3, 3_000, true);
+        table.col_widths = vec![2_500];
+        let doc = doc_with_page(vec![Block::Paragraph(first), Block::Table(table)], 6_000);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        assert_eq!(placed.pages.len(), 1);
+        assert!(placed.pages[0].tables.len() >= 2);
+        assert!(
+            placed.pages[0].tables[0].x < 2_500.0,
+            "over-tall table begins in the current column instead of wasting it"
+        );
+        assert_eq!(placed.pages[0].tables.first().unwrap().first_row, 0);
+        assert_eq!(placed.pages[0].tables.last().unwrap().last_row, 3);
+        assert_eq!(
+            crate::NaiveLayout
+                .layout(&doc, &ApproxFontMetrics)
+                .unwrap()
+                .pages
+                .len(),
+            1
+        );
+        assert_eq!(block_pages(&doc, &ApproxFontMetrics)[0], vec![0, 0]);
     }
 
     #[test]
