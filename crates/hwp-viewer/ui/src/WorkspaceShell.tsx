@@ -33,6 +33,17 @@ type RecoverySummary = { documentId: string; generation: number; revision: numbe
 type RecoveryListing = { records: RecoverySummary[]; warnings: string[] };
 type RecentDocument = { path: string; lastOpenedMs: number };
 type RecentDocumentListing = { entries: RecentDocument[]; warnings: string[] };
+type NativePrintResult = {
+  status: "printed" | "cancelledOrFailed";
+  preflight: {
+    pages: number;
+    textOps: number;
+    tableGeometryOps: number;
+    imageOps: number;
+    equationOps: number;
+    chartOps: number;
+  };
+};
 type SaveContinuation = "none" | "replace" | "close";
 const recoveryPayload = (record: RecoverySummary) =>
   new TextEncoder().encode(`${RECOVERY_PREFIX}${record.documentId}:${record.generation}`);
@@ -85,6 +96,7 @@ function WorkspaceShell() {
   const [recoveryScanComplete, setRecoveryScanComplete] = useState(false);
   const [recentDocuments, setRecentDocuments] = useState<RecentDocument[]>([]);
   const [recentScanComplete, setRecentScanComplete] = useState(false);
+  const [printing, setPrinting] = useState(false);
   const [restoredFromId, setRestoredFromId] = useState<string | null>(null);
   const [closeRequested, setCloseRequested] = useState(false);
   const [pendingOverwrite, setPendingOverwrite] = useState<{ path: string; after: SaveContinuation } | null>(null);
@@ -397,6 +409,40 @@ function WorkspaceShell() {
     [doSaveHwpx, flash],
   );
 
+  const doPrint = useCallback(async () => {
+    if (!hasDoc || printing) return;
+    setPrinting(true);
+    try {
+      const result = await invoke<NativePrintResult>("print_doc_pdf");
+      if (result.status === "printed") {
+        flash(`인쇄 작업 전달 · ${result.preflight.pages}쪽`);
+      } else {
+        flash("인쇄를 취소했거나 프린터가 작업을 완료하지 못했습니다");
+      }
+    } catch (error) {
+      const code = String(error);
+      if (code.includes("PRINT_CAPABILITY_DIAGNOSTIC") || code.includes("PRINT_REPLAY_DEGRADED")) {
+        flash("PDF 기능 진단이 남아 있어 인쇄를 중단했습니다");
+      } else if (code.includes("PRINT_NATIVE_UNAVAILABLE_ON_PLATFORM")) {
+        flash("이 운영체제의 네이티브 인쇄 경로는 아직 준비되지 않았습니다");
+      } else {
+        flash(`인쇄 실패: ${error}`);
+      }
+    } finally {
+      setPrinting(false);
+    }
+  }, [flash, hasDoc, printing]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "p") return;
+      event.preventDefault();
+      void doPrint();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [doPrint]);
+
   // 드래그드롭 열기 — the WebView never fires a browser `drop`, so subscribe to Tauri's native
   // `onDragDropEvent` (it carries OS file PATHS). A dropped .hwp/.hwpx opens; anything else is ignored.
   const requestOpenRef = useRef(requestOpen);
@@ -435,6 +481,14 @@ function WorkspaceShell() {
           className="rounded-md px-2 py-0.5 text-xs font-medium text-neutral-700 hover:bg-black/5 disabled:opacity-40 dark:text-neutral-200 dark:hover:bg-white/10"
         >
           저장
+        </button>
+        <button
+          onClick={() => void doPrint()}
+          disabled={!hasDoc || printing}
+          title="자체 PDF로 인쇄 (⌘P)"
+          className="rounded-md px-2 py-0.5 text-xs font-medium text-neutral-700 hover:bg-black/5 disabled:opacity-40 dark:text-neutral-200 dark:hover:bg-white/10"
+        >
+          {printing ? "인쇄 준비…" : "인쇄"}
         </button>
         <span data-tauri-drag-region className="ml-1 text-sm font-medium">
           {docName ?? "한칸"}{sessionStatus?.dirty ? " •" : ""}

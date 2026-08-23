@@ -7,6 +7,8 @@
 //! functions so it is unit-testable headless. The A3 embedded control server lives in [`server`].
 
 mod desktop_state;
+#[cfg(feature = "pdf")]
+mod native_print;
 mod open_request;
 mod recent_documents;
 mod recovery;
@@ -1984,6 +1986,54 @@ async fn export_pdf_bytes(_sess: tauri::State<'_, SharedSession>) -> Result<Vec<
     )
 }
 
+/// Print the live document from the exact same own-engine PDF projection used by export. PDF bytes
+/// and replay diagnostics are produced off the event loop; only the in-memory PDFKit/AppKit modal
+/// operation runs on the macOS main thread. No path or document content crosses back to the webview.
+#[cfg(feature = "pdf")]
+#[tauri::command]
+async fn print_doc_pdf(
+    app: tauri::AppHandle,
+    sess: tauri::State<'_, SharedSession>,
+) -> Result<native_print::NativePrintResult, String> {
+    let sess = sess.inner().clone();
+    let export = tauri::async_runtime::spawn_blocking(move || {
+        let s = sess.lock().map_err(|_| "session poisoned")?;
+        let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+        hwp_session::emit_pdf(doc, None)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    let preflight = native_print::preflight(&export)?;
+    let bytes = export.bytes;
+
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    app.run_on_main_thread(move || {
+        let _ = tx.send(native_print::run_print_panel(&bytes, "auto-hwp document"));
+    })
+    .map_err(|_| String::from("PRINT_MAIN_THREAD_UNAVAILABLE"))?;
+    let printed = tauri::async_runtime::spawn_blocking(move || {
+        rx.recv()
+            .map_err(|_| String::from("PRINT_NATIVE_RESULT_LOST"))?
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    Ok(native_print::NativePrintResult {
+        status: if printed {
+            "printed"
+        } else {
+            "cancelledOrFailed"
+        },
+        preflight,
+    })
+}
+
+#[cfg(not(feature = "pdf"))]
+#[tauri::command]
+async fn print_doc_pdf() -> Result<Value, String> {
+    Err("인쇄는 `--features pdf` 빌드가 필요합니다".into())
+}
+
 /// Build + run the viewer window. Manages the shared session + cached bytes, registers commands,
 /// and (in `setup`) spawns the A3 loopback control server so an external agent can drive this
 /// running instance.
@@ -2071,6 +2121,7 @@ pub fn run() {
             export_hwpx,
             export_doc_html,
             export_doc_pdf,
+            print_doc_pdf,
             propose,
             commit_proposal,
             discard_proposal,
