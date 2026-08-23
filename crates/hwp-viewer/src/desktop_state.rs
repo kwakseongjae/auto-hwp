@@ -138,6 +138,12 @@ impl DesktopDocumentState {
         self.document_id.as_deref()
     }
 
+    pub(crate) fn source_path(&self) -> Option<&Path> {
+        self.source
+            .as_ref()
+            .map(|source| source.canonical_path.as_path())
+    }
+
     pub(crate) fn should_prevent_close(&mut self, revision: u64) -> bool {
         if self.allow_close_once {
             self.allow_close_once = false;

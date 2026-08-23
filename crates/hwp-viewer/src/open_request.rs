@@ -44,14 +44,15 @@ impl OpenRequestQueue {
     }
 }
 
-fn supported_extension(path: &Path) -> bool {
+pub(crate) fn supported_path(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| ext.eq_ignore_ascii_case("hwp") || ext.eq_ignore_ascii_case("hwpx"))
 }
 
-/// Resolve and validate candidates without opening or reading their content. Canonicalizing here
-/// deduplicates relative paths and symlink aliases; the engine still performs all format validation.
+/// Resolve candidates and verify that the current process can open them for reading, without
+/// consuming document bytes. Canonicalizing here deduplicates relative paths and symlink aliases;
+/// the engine still performs all container and format validation.
 pub(crate) fn normalize_paths(
     candidates: impl IntoIterator<Item = PathBuf>,
     cwd: &Path,
@@ -60,7 +61,7 @@ pub(crate) fn normalize_paths(
     let mut accepted = Vec::new();
 
     for candidate in candidates {
-        if accepted.len() >= MAX_PENDING_OPEN_REQUESTS || !supported_extension(&candidate) {
+        if accepted.len() >= MAX_PENDING_OPEN_REQUESTS || !supported_path(&candidate) {
             continue;
         }
         let resolved = if candidate.is_absolute() {
@@ -74,7 +75,10 @@ pub(crate) fn normalize_paths(
         let Ok(metadata) = std::fs::metadata(&canonical) else {
             continue;
         };
-        if !metadata.is_file() || !supported_extension(&canonical) {
+        if !metadata.is_file()
+            || !supported_path(&canonical)
+            || std::fs::File::open(&canonical).is_err()
+        {
             continue;
         }
         let Some(path) = canonical.to_str().map(str::to_owned) else {
@@ -175,6 +179,18 @@ mod tests {
             [text, folder, fixture.root.join("missing.hwpx")],
             &fixture.root,
         );
+        assert!(paths.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_a_document_after_read_permission_is_lost() {
+        use std::os::unix::fs::PermissionsExt;
+        let fixture = Fixture::new();
+        let document = fixture.file("private.hwpx");
+        std::fs::set_permissions(&document, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let paths = normalize_paths([document.clone()], &fixture.root);
+        std::fs::set_permissions(&document, std::fs::Permissions::from_mode(0o600)).unwrap();
         assert!(paths.is_empty());
     }
 

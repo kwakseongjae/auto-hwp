@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-08-23 (Codex sol) · #142 데스크톱 홈·창 상태 구현
+- #137/#145/#146/#138을 필수 CI·CLEAN 확인 뒤 병합하고 stacked 브랜치를 정리.
+- 최근 문서 9건 path/time-only·0700/0600·누락 prune와 안전한 창 size/position/maximized 복원 구현.
+- full verify 본체 green, Playwright 85 pass/3 skip; 패키지 QA가 숨은 첫 창을 찾아 명시적 show로 수정.
+- 실앱에서 HWP 8쪽·재시작/재열기·누락 경고/자동 제거·개별/전체 삭제·최대화 복원 PASS.
+- 다음: #142 commit/PR/CI/병합 → #143 네이티브 인쇄·메뉴·단축키.
+
 ## 2026-08-23 (Codex sol) · #137 병합 · #138/#145 재배치
 - 사용자 자율 진행 승인; #137 squash 병합(main `6574a6d`) 후 #138을 main 기반으로 재배치.
 - #138은 이전 head와 byte-identical tree·#102 독립 12파일로 새 CI 실행 중.

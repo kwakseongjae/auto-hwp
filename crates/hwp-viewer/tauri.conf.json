@@ -24,6 +24,7 @@
         "height": 800,
         "minWidth": 720,
         "minHeight": 480,
+        "visible": false,
         "resizable": true,
         "dragDropEnabled": true,
         "titleBarStyle": "Overlay",

@@ -135,3 +135,48 @@ test("desktop file-open requests converge on one bounded, private, single-instan
   assert.match(shell, /EXTERNAL_SOURCE_CHANGED/);
   assert.doesNotMatch(shell, /window\.confirm\s*\(/);
 });
+
+test("desktop home keeps nine path-only recents and restores only safe window geometry", async () => {
+  const cargo = await read("crates/hwp-viewer/Cargo.toml");
+  const config = await read("crates/hwp-viewer/tauri.conf.json");
+  const rust = await read("crates/hwp-viewer/src/lib.rs");
+  const recent = await read("crates/hwp-viewer/src/recent_documents.rs");
+  const shell = await read("crates/hwp-viewer/ui/src/WorkspaceShell.tsx");
+
+  assert.match(cargo, /tauri-plugin-window-state/);
+  assert.match(config, /"visible": false/);
+  const singleInstance = rust.indexOf("tauri_plugin_single_instance::init");
+  const windowState = rust.indexOf("tauri_plugin_window_state::Builder");
+  const dialogPlugin = rust.indexOf("tauri_plugin_dialog::init");
+  assert.ok(singleInstance >= 0 && singleInstance < windowState && windowState < dialogPlugin);
+  assert.match(rust, /StateFlags::SIZE/);
+  assert.match(rust, /StateFlags::POSITION/);
+  assert.match(rust, /StateFlags::MAXIMIZED/);
+  assert.doesNotMatch(rust, /StateFlags::VISIBLE|StateFlags::FULLSCREEN|StateFlags::DECORATIONS/);
+  const setupWindow = rust.indexOf('app.get_webview_window("main")');
+  const showWindow = rust.indexOf("window.show()?", setupWindow);
+  const closeHandler = rust.indexOf("window.on_window_event", setupWindow);
+  assert.ok(
+    setupWindow >= 0 && showWindow > setupWindow && closeHandler > showWindow,
+    "the initially hidden window must be shown explicitly after plugin restoration",
+  );
+
+  assert.match(recent, /const MAX_RECENT_DOCUMENTS: usize = 9/);
+  assert.match(recent, /pub\(crate\) path: String/);
+  assert.match(recent, /pub\(crate\) last_opened_ms: u64/);
+  assert.doesNotMatch(recent, /document_bytes|extracted_text|thumbnail_bytes|ai_context:/i);
+  assert.match(rust, /reopen_recent_document/);
+  assert.match(rust, /SharedRecentDocuments/);
+  assert.ok(
+    rust.indexOf("apply_intent(&mut s, Intent::Open") < rust.indexOf("store.record(path)"),
+    "a failed parse must never enter the recent-document store",
+  );
+  assert.match(rust, /validated_open_path/);
+  assert.match(rust, /queue_open_paths\(&app, vec!\[path\]\)/);
+
+  assert.match(shell, /list_recent_documents/);
+  assert.match(shell, /reopen_recent_document/);
+  assert.match(shell, /remove_recent_document/);
+  assert.match(shell, /clear_recent_documents/);
+  assert.match(shell, /최근 목록에는 로컬 경로와 마지막으로 연 시간만 저장됩니다/);
+});

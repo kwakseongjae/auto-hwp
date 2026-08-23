@@ -8,6 +8,7 @@
 
 mod desktop_state;
 mod open_request;
+mod recent_documents;
 mod recovery;
 pub mod server;
 
@@ -21,9 +22,11 @@ use tauri::{Emitter, Manager};
 /// `spawn_blocking` worker, keeping the parse/serialize/render off the async/IPC thread.
 pub type SharedSession = Arc<Mutex<hwp_mcp::Session>>;
 pub(crate) type SharedDesktopState = Arc<Mutex<desktop_state::DesktopDocumentState>>;
+pub(crate) type SharedRecentDocuments = Arc<Mutex<()>>;
 
 const DESKTOP_OPEN_REQUEST_EVENT: &str = "desktop-open-request";
 const DESKTOP_CLOSE_REQUEST_EVENT: &str = "desktop-close-request";
+const DESKTOP_WARNING_EVENT: &str = "desktop-warning";
 
 fn queue_open_paths(app: &tauri::AppHandle, paths: Vec<String>) {
     let queued = app.state::<open_request::OpenRequestQueue>().push(paths);
@@ -45,6 +48,65 @@ fn focus_main_window(app: &tauri::AppHandle) {
 #[tauri::command]
 fn take_open_requests(requests: tauri::State<'_, open_request::OpenRequestQueue>) -> Vec<String> {
     requests.take()
+}
+
+fn recent_store(app: &tauri::AppHandle) -> Result<recent_documents::RecentDocumentStore, String> {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| "최근 문서 저장 위치를 확인하지 못했습니다")?;
+    recent_documents::RecentDocumentStore::new(&app_data)
+}
+
+#[tauri::command]
+fn list_recent_documents(
+    app: tauri::AppHandle,
+    recent: tauri::State<'_, SharedRecentDocuments>,
+) -> Result<recent_documents::RecentDocumentListing, String> {
+    let _guard = recent
+        .lock()
+        .map_err(|_| "최근 문서 상태 잠금에 실패했습니다")?;
+    recent_store(&app)?.list()
+}
+
+#[tauri::command]
+fn remove_recent_document(
+    index: usize,
+    app: tauri::AppHandle,
+    recent: tauri::State<'_, SharedRecentDocuments>,
+) -> Result<recent_documents::RecentDocumentListing, String> {
+    let _guard = recent
+        .lock()
+        .map_err(|_| "최근 문서 상태 잠금에 실패했습니다")?;
+    recent_store(&app)?.remove(index)
+}
+
+#[tauri::command]
+fn clear_recent_documents(
+    app: tauri::AppHandle,
+    recent: tauri::State<'_, SharedRecentDocuments>,
+) -> Result<(), String> {
+    let _guard = recent
+        .lock()
+        .map_err(|_| "최근 문서 상태 잠금에 실패했습니다")?;
+    recent_store(&app)?.clear()
+}
+
+#[tauri::command]
+fn reopen_recent_document(
+    index: usize,
+    app: tauri::AppHandle,
+    recent: tauri::State<'_, SharedRecentDocuments>,
+) -> Result<(), String> {
+    let _guard = recent
+        .lock()
+        .map_err(|_| "최근 문서 상태 잠금에 실패했습니다")?;
+    let store = recent_store(&app)?;
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let path = store.validated_open_path(index, &cwd)?;
+    queue_open_paths(&app, vec![path]);
+    focus_main_window(&app);
+    Ok(())
 }
 
 /// Call an MCP tool through the shared op-bus dispatch ([`hwp_mcp::handle`]) — the single mutation
@@ -84,11 +146,15 @@ fn pages(s: &mut hwp_mcp::Session) -> u32 {
 #[tauri::command]
 async fn open_doc(
     path: String,
+    app: tauri::AppHandle,
     sess: tauri::State<'_, SharedSession>,
     desktop: tauri::State<'_, SharedDesktopState>,
+    recent: tauri::State<'_, SharedRecentDocuments>,
 ) -> Result<Value, String> {
+    let app_data = app.path().app_data_dir().ok();
     let sess = sess.inner().clone();
     let desktop = desktop.inner().clone();
+    let recent = recent.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         // Capture the identity before parsing. The path stays memory-only; recovery metadata receives
         // only the random document id created here.
@@ -102,7 +168,31 @@ async fn open_doc(
             } => (format, editable),
             _ => return Err("unexpected outcome".into()),
         };
+        let recent_path = next_desktop.source_path().map(std::path::Path::to_path_buf);
         *desktop.lock().map_err(|_| "desktop state poisoned")? = next_desktop;
+        let recent_result = recent
+            .lock()
+            .map_err(|_| String::from("최근 문서 상태 잠금에 실패했습니다"))
+            .and_then(|_guard| {
+                app_data
+                    .as_deref()
+                    .ok_or(String::from("최근 문서 저장 위치를 확인하지 못했습니다"))
+                    .and_then(recent_documents::RecentDocumentStore::new)
+                    .and_then(|store| {
+                        recent_path
+                            .as_deref()
+                            .ok_or(String::from("최근 문서 경로를 확인하지 못했습니다"))
+                            .and_then(|path| store.record(path))
+                    })
+            });
+        if recent_result.is_err() {
+            // The document is already open. Recent-list persistence is non-critical and must not
+            // turn a successful open into a false failure; surface only a path-free local warning.
+            let _ = app.emit(
+                DESKTOP_WARNING_EVENT,
+                "문서는 열렸지만 최근 문서 목록에는 기록하지 못했습니다",
+            );
+        }
 
         Ok(json!({
             "pages": pages(&mut s),
@@ -1912,16 +2002,32 @@ pub fn run() {
         focus_main_window(app);
     }));
 
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    let builder = builder.plugin(
+        tauri_plugin_window_state::Builder::default()
+            .with_state_flags(
+                tauri_plugin_window_state::StateFlags::SIZE
+                    | tauri_plugin_window_state::StateFlags::POSITION
+                    | tauri_plugin_window_state::StateFlags::MAXIMIZED,
+            )
+            .build(),
+    );
+
     let app = builder
         .plugin(tauri_plugin_dialog::init())
         .manage(SharedSession::default())
         .manage(SharedDesktopState::default())
+        .manage(SharedRecentDocuments::default())
         .manage(open_request::OpenRequestQueue::default())
         .setup(|app| {
             let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
             let paths = open_request::paths_from_argv(std::env::args_os(), &cwd);
             queue_open_paths(app.handle(), paths);
             if let Some(window) = app.get_webview_window("main") {
+                // The config keeps the window hidden until the window-state plugin has restored
+                // size/position/maximized. VISIBLE is deliberately not persisted, so showing is an
+                // explicit startup action instead of trusting a stale saved visibility bit.
+                window.show()?;
                 let handle = app.handle().clone();
                 window.on_window_event(move |event| {
                     let tauri::WindowEvent::CloseRequested { api, .. } = event else {
@@ -2019,6 +2125,10 @@ pub fn run() {
             blocks_in_rect,
             export_hwpx_bytes,
             export_pdf_bytes,
+            list_recent_documents,
+            reopen_recent_document,
+            remove_recent_document,
+            clear_recent_documents,
             take_open_requests
         ])
         .build(tauri::generate_context!())

@@ -69,3 +69,4 @@ arboard = "3"
 # Issue #140: the first registered plugin routes warm file-association launches back to the one
 # shared Rust session/window. It owns no document behavior.
 tauri-plugin-single-instance = "2"
+tauri-plugin-window-state = "2"
