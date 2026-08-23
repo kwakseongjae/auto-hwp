@@ -28,27 +28,27 @@ fn public_hwp5_has_bounded_content_free_record_provenance() {
 }
 
 #[test]
-fn explicit_own_parser_owns_bounded_six_by_four_table_then_stops_content_free() {
+fn explicit_own_parser_owns_bounded_seven_by_three_table_then_stops_content_free() {
     let probed = probe(&benchmark()).unwrap();
     let next = probed
         .streams
         .iter()
         .flat_map(|stream| &stream.records)
-        .find(|record| record.head == 30_321)
+        .find(|record| record.head == 40_865)
         .unwrap();
     assert_eq!(
         (next.tag, next.level, next.head, next.data, next.end, next.size,),
-        (0x4d, 2, 30_321, 30_325, 30_361, 36)
+        (0x48, 2, 40_865, 40_869, 40_916, 47)
     );
     let error = OwnHwp5Parser::new().parse(&benchmark()).unwrap_err();
     eprintln!("{error:?}");
     assert!(matches!(
         error,
         Error::MalformedRecord {
-            tag: 0x4d,
+            tag: 0x48,
             section: Some(0),
-            offset: 30321,
-            reason: "TABLE attributes or row/column topology are not owned",
+            offset: 40865,
+            reason: "cell LIST_HEADER width reference differs from its exact owned topology",
             ..
         }
     ));
