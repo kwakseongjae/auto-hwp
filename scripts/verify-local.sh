@@ -9,6 +9,10 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 MODE="${1:---quick}"
 
+echo "═══ rhwp fork/boundary governance (network-free) ═══"
+node --test scripts/tests/rhwp-boundary.test.mjs
+node scripts/verify-rhwp-boundary.mjs
+
 echo "═══ fmt ═══"
 cargo fmt --all --check
 echo "═══ clippy (-D warnings) ═══"

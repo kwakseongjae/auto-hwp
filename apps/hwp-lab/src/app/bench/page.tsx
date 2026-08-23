@@ -102,8 +102,8 @@ export default function BenchPage() {
           <div className={styles.oracleCard}>
             <b>오라클 ② rhwp 파싱</b>
             <p>
-              바이너리 <code>.hwp</code>를 읽는 상류 파서(MIT). 파싱 전용으로만 씁니다 — 렌더는 항상 우리
-              IR 에서 나옵니다.
+              바이너리 <code>.hwp</code>를 읽는 상류 파서(MIT). HWP5/HWP3 decode와 명시적 read-only
+              원본/오라클·수식/차트 보강에만 쓰며, live 렌더·PDF·편집은 항상 우리 IR에서 나옵니다.
             </p>
           </div>
           <div className={styles.oracleCard}>

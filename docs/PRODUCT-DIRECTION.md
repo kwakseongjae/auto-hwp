@@ -86,8 +86,11 @@ PDF로 export. 에이전트 쪽은 서비스(컨테이너) 호출로, **사이�
    020(b70ac3f)에서 달성한 게이트 v2. 두 문서 모두 일치 유지가 게이트다.
 2. **LOCKSTEP**: `hwp-typeset/src/place.rs::place_doc`과 `hwp-typeset/src/lib.rs::NaiveLayout`의
    페이지 수는 항상 일치해야 한다. 오라클은 NaiveLayout을 쓴다. 한쪽만 고치지 마라.
-3. **rhwp는 수정 금지**: `external/rhwp`는 vendored 서브모듈. 어댑터는 `crates/hwp-rhwp`에서만.
-4. **rhwp는 파싱 전용**: 렌더는 항상 우리 IR에서. rhwp 출력물 패치 금지.
+3. **rhwp는 수정 금지**: `external/rhwp`는 governed fork의 고정 서브모듈. 어댑터는
+   `crates/hwp-rhwp`에서만(`docs/RHWP-FORK-GOVERNANCE.md`).
+4. **생산 렌더는 자체 IR 전용**: HWP5/HWP3 decode와 명시적 read-only 원본/오라클·수식/차트
+   enrichment만 rhwp 예외다. HWPX parser/writer와 live 조판·렌더·PDF·편집은 자체 소유이며,
+   편집·합성 HWPX를 rhwp로 재렌더/저장하지 않는다.
 5. **단위**: 자체 렌더 지오메트리 커맨드(own_hit_test/table_at/…)는 **px**(=HWPUNIT/75),
    ops는 **HWPUNIT**. 변환은 커밋 시점에. 단위 슬립은 조용히 클릭선택/이동/리사이즈를 죽인다.
 6. **사용자 콘텐츠 삭제 금지**, 커밋/푸시는 명시 요청 시에만.

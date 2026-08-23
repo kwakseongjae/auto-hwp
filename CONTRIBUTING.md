@@ -101,7 +101,9 @@ node scripts/oracle-sweep.mjs        # 공개 코퍼스 전수 layout-check (로
    건드리는 변경은 반드시 게이트 before==after를 증명해야 합니다.
 2. **LOCKSTEP**: `place_doc`(crates/hwp-typeset/src/place.rs)과 `NaiveLayout`(lib.rs)의
    페이지 수는 항상 일치해야 합니다 — 한쪽만 고치지 마세요.
-3. **rhwp는 파싱 전용**: `external/`은 vendored 수정 금지. 렌더는 항상 우리 IR(SemanticDoc)에서.
+3. **rhwp 경계**: `external/`은 governed fork의 고정 submodule이라 직접 수정하지 않습니다. 생산
+   live 조판·렌더·PDF·편집은 항상 우리 IR에서 하고, HWP5/HWP3 decode와 명시적 read-only
+   원본/오라클·수식/차트 enrichment만 예외로 둡니다(`docs/RHWP-FORK-GOVERNANCE.md`).
 4. **단위 규율**: 지오메트리 커맨드 = px(=HWPUNIT/75), ops 커밋 = HWPUNIT.
    변환은 `packages/editor-core/src/units.ts` 단일 지점에서만.
 5. **round-trip moat**: 편집하지 않은 HWPX 콘텐츠는 바이트 그대로 재직렬화되어야 합니다.

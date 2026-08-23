@@ -63,10 +63,6 @@ impl RhwpEngine {
     pub fn new() -> Self {
         Self
     }
-    /// Whether the rhwp bootstrap is wired in this build.
-    pub const fn is_available() -> bool {
-        cfg!(feature = "rhwp")
-    }
 }
 
 /// Hardened HWP5 parse for **untrusted** input (issue #014; the service path — 013 wires it). Caps
@@ -1944,38 +1940,6 @@ impl DocumentParser for RhwpEngine {
         #[cfg(not(feature = "rhwp"))]
         {
             let _ = bytes;
-            Err(Error::CapabilityUnavailable(NOT_WIRED))
-        }
-    }
-}
-
-impl LayoutEngine for RhwpEngine {
-    fn layout(&self, _doc: &SemanticDoc, _fonts: &dyn FontMetricsProvider) -> Result<LayoutResult> {
-        #[cfg(feature = "rhwp")]
-        {
-            Err(Error::NotImplemented(
-                "rhwp LayoutEngine mapping (M1 cont.)",
-            ))
-        }
-        #[cfg(not(feature = "rhwp"))]
-        {
-            Err(Error::CapabilityUnavailable(NOT_WIRED))
-        }
-    }
-}
-
-impl Renderer for RhwpEngine {
-    fn page_layer_tree(&self, _layout: &LayoutResult, _page: usize) -> Result<PageLayerTree> {
-        // rhwp exposes DocumentCore::build_page_layer_tree(page) (paint IR, schemaVersion 1);
-        // mapping rhwp::paint::PageLayerTree → our PageLayerTree is the next render step.
-        #[cfg(feature = "rhwp")]
-        {
-            Err(Error::NotImplemented(
-                "rhwp PageLayerTree → ours mapping (M1 cont.)",
-            ))
-        }
-        #[cfg(not(feature = "rhwp"))]
-        {
             Err(Error::CapabilityUnavailable(NOT_WIRED))
         }
     }

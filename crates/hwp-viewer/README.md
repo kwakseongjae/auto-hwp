@@ -1,14 +1,15 @@
 # hwp-viewer — Tauri 2 viewer shell (A2) + embedded live-control server (A3)
 
-A native desktop shell that opens an HWPX, renders pages faithfully (rhwp → SVG), and runs AI
-content through the op-bus. It also embeds a loopback control server so an external agent can drive
-the *running* editor (A3).
+A native desktop shell that opens HWP/HWPX and renders the live document through the first-party
+IR→typeset→paint path, exports through the same own PDF engine, and runs AI content through the
+op-bus. rhwp is limited to binary HWP decode and explicit read-only original/oracle helpers. It also
+embeds a loopback control server so an external agent can drive the *running* editor (A3).
 
 ## Run the window (your machine)
 The CLI build verifies headlessly, but launching the window needs the Tauri dev runner:
 
 ```bash
-# rhwp render is a DEFAULT feature now — plain run just works:
+# Binary HWP decode support is a DEFAULT feature — plain run opens HWP/HWPX:
 cargo run -p hwp-viewer
 
 #   …or, for proper macOS app activation (Dock icon, focus), the dev runner:

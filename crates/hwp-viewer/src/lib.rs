@@ -1,9 +1,10 @@
 //! auto-hwp Tauri 2 viewer shell (milestone A2).
 //!
-//! Opens an HWPX, renders pages faithfully (rhwp → SVG, behind `--features rhwp`), and runs
+//! Opens HWP/HWPX, renders live pages through the first-party IR engine, and runs
 //! AI content through the **same op-bus** the CLI/MCP use — by reusing [`hwp_mcp::handle`] so
 //! there is one mutation surface. The GUI window is launched by the user (`cargo run -p
-//! hwp-viewer --features rhwp`, or `cargo tauri dev`); the command *logic* is factored into pure
+//! hwp-viewer`, or `cargo tauri dev`); rhwp is limited to binary decode and explicit read-only
+//! original/oracle helpers. The command *logic* is factored into pure
 //! functions so it is unit-testable headless. The A3 embedded control server lives in [`server`].
 
 mod desktop_state;

@@ -82,7 +82,9 @@ kordoc `patchHwp`, claw-hwp(릴리스 0), HOP의 HWP 저장(HWPX 저장은 DEVEL
 
 ## 4. 네 축과 착수 순서
 
-불변식(게이트 8==8·18==18, LOCKSTEP, rhwp 파싱 전용, Intent additive, 단위)은 v1 §4.
+불변식(게이트 8==8·18==18, LOCKSTEP, rhwp 경계, Intent additive, 단위)은 v1 §4.
+rhwp의 정확한 예외(HWP5/HWP3 decode·read-only 원본/오라클·수식/차트 enrichment)는
+`RHWP-FORK-GOVERNANCE.md`가 정본이고, 생산 live 렌더/export/edit는 자체 IR만 쓴다.
 
 ```
 0. 스테일 문서 + 082 한컴 게이트 결정

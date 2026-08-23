@@ -30,7 +30,7 @@
 
 ```
 [업로드] ── hwp-ingest(포맷감지·리소스한도)
-   ├─ .hwp  → external/rhwp v0.7.15(파스전용) → hwp-rhwp lift → SemanticDoc(IR)
+   ├─ .hwp  → external/rhwp v0.7.19(decode/read-only helper) → hwp-rhwp lift → SemanticDoc(IR)
    └─ .hwpx → hwp-hwpx 자체 파서(subset 모델 + 나머지 verbatim 보존 = round-trip moat)
 [조판] hwp-typeset place_doc — 기본 ApproxFontMetrics(근사), shaper feature시 rustybuzz 실측
 [렌더] hwp-render PaintOp 4종(Glyph/Rect/Line/Image) → SVG    [편집] hwp-ops Op-bus(41 Intent)
@@ -93,7 +93,7 @@
 | ID | 심각도 | 진단 | 상태 |
 |---|---|---|---|
 | S1 | **P0** | **rhwp upstream = 전면 경쟁자** — v0.7.19(7/17)까지 4버전 앞섬. 파싱→조판→렌더→PDF→웹 에디터→AI/VLM 연동까지 전 스택 출하 중(~3.6k★, 월 2~3회 릴리스, 기여자 15+). 릴리스 노트의 주제(표 페이지네이션 정밀도·HWPX 저장 한컴 호환·resilient parsing)가 우리 이슈와 거의 1:1 | 웹조사 2026-07-22 |
-| S2 | **P1** | **재벤더링 지연의 실비용** — v0.7.15→0.7.19 사이에 파스 전용 사용에도 직접 이득인 변경 존재(resilient parsing, BinData 메모리 244→49MB, 거대 표 타임아웃 픽스, HML 지원). 블로킹=미러 포크에 태그 없음(needsExternal, **사용자 액션 필요**) | 062 실행 스텝 |
+| S2 | **해소** | v0.7.19/f137b4c로 재벤더링했고 #151이 fork policy·gitlink·Cargo.lock과 실제 생산 경계를 network-free CI로 잠갔다. 다음 병목은 버전 핀이 아니라 #107/#94 자체 HWP5 decode 교체다. | #151 (2026-08-23) |
 | S3 | P1 | **HWPX 의무화(2026-05-18 온나라 시행)** — 공공발 문서가 HWPX로 이동. 우리 HWPX 파서는 최근에야 HWP 수준 도달 + "한글의 HWPX 저장 열화" 이슈까지 확인. HWPX-in 코퍼스·게이트의 전략 순위 급등 | 웹조사 (기회) |
 | S4 | P1 | **MCP 유행에서 표면 미노출** — "HWP를 LLM에 물리는 MCP 서버"가 상반기 최대 유행 장르(treesoop/hwp-mcp가 rhwp 기반으로 선점, kordoc·airmang도 가세). 우리 `hwp-mcp`는 존재하나 대외 설치 1줄(`claude mcp add`)·npm 표면 미정비 — **기회 손실형 병목** | 신규 |
 | S5 | P2 | kordoc은 위협 아님 — 개인 메인테이너의 추출/생성 파이프라인(TS, MIT), WYSIWYG 아님. 단 HWPX 생성·서식보존 편집·SVG 렌더로 접근 중이라 주시. UX 레퍼런스 가치(폼필·신구대조) | 062 조사와 일치 |

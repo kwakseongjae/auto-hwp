@@ -46,7 +46,9 @@ HWP(한글) 자체 엔진: Rust 코어(파싱→IR→조판→렌더→export→
 ## 불변식 다이제스트 (위반 = 작업 실패 — 전문은 PRODUCT-DIRECTION.md §4)
 1. 게이트: `layout-check` → benchmark **8==8** · benchmark1 **18==18** · 줄바꿈 98.9%+ 유지.
 2. LOCKSTEP: `place_doc`(crates/hwp-typeset/src/place.rs)과 `NaiveLayout`(lib.rs)의 페이지 수 항상 일치 — 한쪽만 고치지 마라.
-3. rhwp(`external/`)는 vendored 수정 금지 + **파싱 전용** — 렌더는 항상 우리 IR에서.
+3. rhwp(`external/`)는 vendored 수정 금지. 생산 live 조판·렌더·PDF·편집은 항상 우리 IR에서.
+   예외는 HWP5/HWP3 decode와 명시적 read-only 원본/오라클·수식/차트 enrichment뿐이다
+   (`docs/RHWP-FORK-GOVERNANCE.md`; HWPX parser/writer는 자체 소유).
 4. 단위: 지오메트리 커맨드 = **px**(=HWPUNIT/75), ops 커밋 = **HWPUNIT** — 변환은 `packages/editor-core/src/units.ts` 단일 지점.
 5. 에디터는 순수 `#000` 렌더, 텍스트 커밋은 `SetTableCellRuns`/`SetParagraphRuns`만(평문 variant는 run 붕괴).
 6. 사용자 콘텐츠 삭제 금지 · 커밋/푸시는 명시 요청 시에만.

@@ -3,6 +3,38 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-23 · Codex(sol) — **#151 전체 검증·공개 truth surface 정합 완료**.
+  `verify-local.sh --full`의 Rust workspace/clippy·HWP5 feature·canonical 8/18/24와 98.9%+·
+  PDF visual 51·public corpus 84·oracle 82·HWPX locks·WASM 7,793,352B·licenses·JS builds와
+  Vitest 269+64+427+247+11이 green이다. 샌드박스 port EPERM만 분리해 실제 Chromium
+  Playwright 전수 85 pass/3 intentional skip를 완료했고 `/bench` truth 문구 수정 뒤 Next production
+  build 20 routes도 green이다. CONTRIBUTING·bench·viewer·benchmark/caret/strategy 문서까지 현재
+  예외 목록으로 동기화했고, 재벤더링 blocker는 해소로 교정했다. submodule gitlink/content diff 0,
+  생성물 diff 0이다. **다음:** 최종 staged diff 검수→commit·push→PR `Closes #151`/`Refs #87`→
+  필수 CI·리뷰·자율 병합→#87 F0 close/요약→#107 자체 HWP5 skeleton 착수.
+
+- 갱신: 2026-08-23 · Codex(sol) — **#151 rhwp fork boundary 구현·focused 검증 green**.
+  machine-readable policy와 governance를 v0.7.19/f137b4c에 고정하고, fork/upstream·월간 sync·
+  security SLA·immutable patch tag·bump/rollback 절차를 명문화했다. 현재 사실은 “완전 종속 아님”:
+  HWPX parse/write와 live layout/render/PDF/edit는 자체 엔진이고, HWP5/HWP3 decode·read-only
+  original/lineseg oracle·수식/차트 derived SVG enrichment만 rhwp에 남는다. dormant
+  `Engine::assemble()`과 실제로 NotImplemented였던 rhwp LayoutEngine/Renderer trait impl을 제거했다.
+  network-free verifier는 policy/gitlink/submodule HEAD/Cargo.lock/vendor/core/HWPX 독립/docs를
+  fail-closed로 잠그고 URL·version·tag·commit·code/docs 변조 6 tests를 통과했다. hwp-core 29건,
+  hwp-rhwp 34건 green, `external/rhwp` gitlink/content diff 0. **다음:** `verify-local.sh --full` →
+  diff/security review → commit·push·PR `Closes #151`/`Refs #87` → CI·자율 병합, 이어 #107.
+
+- 갱신: 2026-08-23 · Codex(sol) — **PR #150 병합 · #151 rhwp fork governance 착수**.
+  #149 PR #150은 보정 head `52210c1`에서 issue-link·build-test·licenses green,
+  CLEAN/MERGEABLE·리뷰/댓글 0을 확인한 뒤 main `82e0269`로 squash 병합했고 원격 브랜치를
+  정리했다. #149는 close됐고 exact-main/checksum/read-only preflight가 main 정본이다. #144에는
+  실제 Apple/Windows 서명 자격증명·updater 키 수명주기·clean-machine QA가 없이는 완료를 주장하지
+  않는 blocker를 공개 기록하고 `status:blocked`로 전환했다. #87 F0 하위 #151을 만들고 최신 main
+  기반 `codex/issue-151-rhwp-governance`를 시작했다. pinned submodule은 fork URL
+  `kwakseongjae/rhwp`, tag v0.7.19, commit `f137b4c`로 확인했다. **다음:** Cargo/vendor 문구와
+  production call graph·dormant `Engine::assemble()`을 감사하고, network-free fork boundary verifier,
+  governance 문서, CI/verify-local 게이트를 구현한다. `external/rhwp` content/gitlink는 변경하지 않는다.
+
 - 갱신: 2026-08-23 · Codex(sol) — **#149 exact-main 데스크톱 릴리스 신뢰 기반 구현**.
   #144 감사에서 현재 desktop release/updater workflow가 없고 macOS config는 로컬 ad-hoc
   `signingIdentity: "-"`뿐임을 확인했다. 실제 인증서 없이 #144를 닫지 않도록 하위 #149를 만들고,

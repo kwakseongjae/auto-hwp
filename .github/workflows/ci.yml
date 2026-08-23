@@ -74,6 +74,10 @@ jobs:
           node-version: "20"
           cache: npm
           cache-dependency-path: packages/react/package-lock.json
+      - name: rhwp fork and production-boundary contract
+        run: |
+          node --test scripts/tests/rhwp-boundary.test.mjs
+          node scripts/verify-rhwp-boundary.mjs
       - name: desktop workspace shell launch contract
         run: |
           node --test \

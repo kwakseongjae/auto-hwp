@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "fork_repo": "https://github.com/kwakseongjae/rhwp.git",
+  "upstream_repo": "https://github.com/edwardkim/rhwp.git",
+  "fork_release_tag": "v0.7.19",
+  "fork_commit": "f137b4c9468eaff5bb43e25108e9c9d39a2ed15b",
+  "crate_version": "0.7.19",
+  "upstream_base_tag": "v0.7.19",
+  "upstream_base_commit": "f137b4c9468eaff5bb43e25108e9c9d39a2ed15b",
+  "policy_issue": 87,
+  "implementation_issue": 151
+}

@@ -1,6 +1,6 @@
 [package]
 name = "hwp-viewer"
-description = "auto-hwp Tauri 2 viewer shell (A2): open an HWPX, render pages faithfully (rhwp SVG), and run AI content through the op-bus. Hosts the A3 embedded loopback control server."
+description = "auto-hwp Tauri 2 desktop shell: first-party live layout/render/PDF/editing with rhwp limited to binary HWP decode and read-only original helpers."
 edition.workspace = true
 version.workspace = true
 license.workspace = true
@@ -16,8 +16,8 @@ name = "hwp-viewer"
 path = "src/main.rs"
 
 [features]
-# rhwp render is ON by default — a viewer without faithful page rendering is pointless, and this
-# removes the `--features rhwp` footgun (plain `cargo run -p hwp-viewer` now renders + captures).
+# Binary HWP decode/original-reference helpers are ON by default. Live layout/render/PDF remain
+# first-party; disabling this feature only removes HWP5/HWP3 input and named read-only helpers.
 default = ["rhwp"]
 rhwp = ["hwp-core/rhwp", "hwp-mcp/rhwp"]
 # In-app AI generation (natural language → AiContent via a provider). Kept SEPARATE from default so
