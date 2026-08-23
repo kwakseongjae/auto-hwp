@@ -169,8 +169,9 @@
   **8/18/24 + 98.9%+**, public corpus **84**, oracle **82**, wasm optimized **7,810,657B**, Vitest
   **1,018**, Chromium **85 passed/3 skipped/0 failed**. full의 sandbox bind EPERM만 별도 허용된
   Playwright 실행으로 대체 검증했고 임시 node_modules symlink 6개는 모두 제거했다. 최종 diff/check와
-  공개 보안 감사도 clean이며 strict parser/tests/state 5개만 변경된다. **다음:** commit/push/PR→
-  exact-head CI·댓글·mergeability 감사→merge→#94 동기화→PARA_CHAR_SHAPE next child.
+  공개 보안 감사도 clean이며 strict parser/tests/state 5개만 변경된다. 구현 commit `2b387e2`를
+  push하고 PR #187을 `Closes #186`로 게시했다. **다음:** exact-head CI·댓글·mergeability 감사→
+  merge→#94 동기화→PARA_CHAR_SHAPE next child.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #173 병합 · #174 multi-table 경계 착수**.
   자체 HWP5 파서가 exact `tbl ` marker/common-object/TABLE/LIST_HEADER/cell paragraph를 검증해
