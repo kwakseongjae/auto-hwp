@@ -28,17 +28,17 @@ fn public_hwp5_has_bounded_content_free_record_provenance() {
 }
 
 #[test]
-fn explicit_own_parser_owns_bounded_one_by_two_table_then_stops_content_free() {
+fn explicit_own_parser_owns_bounded_six_by_four_table_then_stops_content_free() {
     let probed = probe(&benchmark()).unwrap();
     let next = probed
         .streams
         .iter()
         .flat_map(|stream| &stream.records)
-        .find(|record| record.head == 25_952)
+        .find(|record| record.head == 30_321)
         .unwrap();
     assert_eq!(
         (next.tag, next.level, next.head, next.data, next.end, next.size,),
-        (0x4d, 2, 25_952, 25_956, 25_990, 34)
+        (0x4d, 2, 30_321, 30_325, 30_361, 36)
     );
     let error = OwnHwp5Parser::new().parse(&benchmark()).unwrap_err();
     eprintln!("{error:?}");
@@ -47,7 +47,7 @@ fn explicit_own_parser_owns_bounded_one_by_two_table_then_stops_content_free() {
         Error::MalformedRecord {
             tag: 0x4d,
             section: Some(0),
-            offset: 25952,
+            offset: 30321,
             reason: "TABLE attributes or row/column topology are not owned",
             ..
         }

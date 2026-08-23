@@ -123,6 +123,20 @@ enum OneByTwoMutation {
     BadListExtension,
 }
 
+#[derive(Clone, Copy)]
+enum SixByFourMutation {
+    None,
+    BadCommonAttribute,
+    BadTableAttribute,
+    BadRowCellCount,
+    BadWidth,
+    BadRowHeight,
+    BadParagraphCount,
+    BadWidthReference,
+    BadCellOrder,
+    BadListExtension,
+}
+
 #[test]
 fn parses_page_setup_and_blank_source_line_metrics() {
     let doc = OwnHwp5Parser::new()
@@ -863,6 +877,59 @@ fn strict_one_by_two_slice_rejects_hostile_flags_topology_widths_and_extensions(
                 .parse(&one_by_two_fixture(mutation))
                 .is_err(),
             "hostile 1x2 mutation must fail closed"
+        );
+    }
+}
+
+#[test]
+fn owns_exact_six_by_four_atomic_full_grid_table() {
+    let doc = OwnHwp5Parser::new()
+        .parse(&six_by_four_fixture(SixByFourMutation::None))
+        .expect("strict 6x4 full-grid table fixture parses");
+    let [Block::Paragraph(anchor), Block::Table(table)] = doc.sections[0].blocks.as_slice() else {
+        panic!("table host must lower to one anchor and one table")
+    };
+    assert!(anchor.is_table_anchor);
+    assert_eq!((table.rows, table.cols, table.cells.len()), (6, 4, 24));
+    assert!(table.keep_together, "no-split table stays atomic");
+    assert!(!table.fixed_row_heights);
+    assert_eq!(table.col_widths, vec![3_238, 14_908, 11_795, 18_021]);
+    assert_eq!(
+        table.row_heights,
+        vec![1_946, 1_846, 1_846, 1_846, 1_846, 1_846]
+    );
+    assert_eq!(table.padding, Some([140, 140, 140, 140]));
+    assert!(table
+        .cells
+        .iter()
+        .enumerate()
+        .all(|(index, cell)| (cell.row, cell.col) == (index / 4, index % 4)));
+    assert!(table.cells.iter().all(|cell| {
+        cell.row_span == 1
+            && cell.col_span == 1
+            && cell.blocks.len() == 1
+            && matches!(cell.blocks[0], Block::Paragraph(_))
+    }));
+}
+
+#[test]
+fn strict_six_by_four_slice_rejects_hostile_pairing_topology_geometry_and_extensions() {
+    for mutation in [
+        SixByFourMutation::BadCommonAttribute,
+        SixByFourMutation::BadTableAttribute,
+        SixByFourMutation::BadRowCellCount,
+        SixByFourMutation::BadWidth,
+        SixByFourMutation::BadRowHeight,
+        SixByFourMutation::BadParagraphCount,
+        SixByFourMutation::BadWidthReference,
+        SixByFourMutation::BadCellOrder,
+        SixByFourMutation::BadListExtension,
+    ] {
+        assert!(
+            OwnHwp5Parser::new()
+                .parse(&six_by_four_fixture(mutation))
+                .is_err(),
+            "hostile 6x4 mutation must fail closed"
         );
     }
 }
@@ -1659,6 +1726,172 @@ fn one_by_two_fixture(mutation: OneByTwoMutation) -> Vec<u8> {
         cell.extend_from_slice(&width.to_le_bytes());
         cell.extend([0; 9]);
         if index == 0 && matches!(mutation, OneByTwoMutation::BadListExtension) {
+            cell[38] = 1;
+        }
+        push_record(&mut body, TAG_LIST_HEADER, 2, &cell);
+        push_para_header_at_level(&mut body, 2, 2, 0, 1, 0, 0);
+        push_record(
+            &mut body,
+            TAG_PARA_TEXT,
+            3,
+            &utf16_bytes(&[u16::from(b'A') + index as u16, 0x000d]),
+        );
+        push_record(&mut body, TAG_PARA_CHAR_SHAPE, 3, &shape_refs(&[(0, 0)]));
+    }
+
+    let mut compound = CompoundFile::create(Cursor::new(Vec::new())).unwrap();
+    {
+        let mut stream = compound.create_stream("/FileHeader").unwrap();
+        stream.write_all(&header).unwrap();
+    }
+    {
+        let mut stream = compound.create_stream("/DocInfo").unwrap();
+        stream.write_all(&doc_info).unwrap();
+    }
+    compound.create_storage("/BodyText").unwrap();
+    {
+        let mut stream = compound.create_stream("/BodyText/Section0").unwrap();
+        stream.write_all(&body).unwrap();
+    }
+    compound.into_inner().into_inner()
+}
+
+fn six_by_four_fixture(mutation: SixByFourMutation) -> Vec<u8> {
+    const COL_WIDTHS: [u32; 4] = [3_238, 14_908, 11_795, 18_021];
+    const ROW_HEIGHTS: [u32; 6] = [1_946, 1_846, 1_846, 1_846, 1_846, 1_846];
+
+    let mut header = vec![0; 256];
+    header[..HWP_SIGNATURE.len()].copy_from_slice(HWP_SIGNATURE);
+    header[32..36].copy_from_slice(&[0, 0, 0, 5]);
+
+    let mut doc_info = Vec::new();
+    let mut properties = vec![0; 26];
+    properties[..2].copy_from_slice(&1u16.to_le_bytes());
+    push_record(&mut doc_info, TAG_DOCUMENT_PROPERTIES, 0, &properties);
+    let mut mappings = Vec::new();
+    for count in [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0] {
+        mappings.extend_from_slice(&(count as u32).to_le_bytes());
+    }
+    push_record(&mut doc_info, TAG_ID_MAPPINGS, 0, &mappings);
+    for _ in 0..7 {
+        push_record(&mut doc_info, TAG_FACE_NAME, 0, &face_name("Test Sans"));
+    }
+    push_record(&mut doc_info, TAG_BORDER_FILL, 0, &solid_border_fill());
+    push_record(&mut doc_info, TAG_CHAR_SHAPE, 0, &char_shape());
+    push_record(&mut doc_info, TAG_PARA_SHAPE, 0, &para_shape());
+
+    let mut body = Vec::new();
+    let mut host_text = extended_control(0x0002, CTRL_SECTION_DEF);
+    host_text.extend(extended_control(0x000b, CTRL_TABLE));
+    host_text.push(0x000d);
+    push_para_header_with_break(
+        &mut body,
+        host_text.len() as u32,
+        (1 << 2) | (1 << 0x000b),
+        1,
+        0,
+        0x01,
+    );
+    push_record(&mut body, TAG_PARA_TEXT, 1, &utf16_bytes(&host_text));
+    push_record(&mut body, TAG_PARA_CHAR_SHAPE, 1, &shape_refs(&[(0, 0)]));
+
+    let mut section_control = Vec::with_capacity(28);
+    section_control.extend_from_slice(&CTRL_SECTION_DEF.to_le_bytes());
+    section_control.extend([0; 24]);
+    push_record(&mut body, TAG_CTRL_HEADER, 1, &section_control);
+    push_record(&mut body, TAG_PAGE_DEF, 2, &page_def(Mutation::None));
+
+    let mut common = Vec::with_capacity(46);
+    common.extend_from_slice(&CTRL_TABLE.to_le_bytes());
+    common.extend_from_slice(
+        &if matches!(mutation, SixByFourMutation::BadCommonAttribute) {
+            0x082a_2211u32
+        } else {
+            0x082a_2311
+        }
+        .to_le_bytes(),
+    );
+    common.extend_from_slice(&0u32.to_le_bytes());
+    common.extend_from_slice(&0u32.to_le_bytes());
+    common.extend_from_slice(&47_962u32.to_le_bytes());
+    common.extend_from_slice(&11_176u32.to_le_bytes());
+    common.extend_from_slice(&0i32.to_le_bytes());
+    for margin in [138i16, 138, 138, 138] {
+        common.extend_from_slice(&margin.to_le_bytes());
+    }
+    common.extend_from_slice(&1u32.to_le_bytes());
+    common.extend_from_slice(&0i32.to_le_bytes());
+    common.extend_from_slice(&0u16.to_le_bytes());
+    push_record(&mut body, TAG_CTRL_HEADER, 1, &common);
+
+    let mut table = Vec::with_capacity(34);
+    table.extend_from_slice(
+        &if matches!(mutation, SixByFourMutation::BadTableAttribute) {
+            0x0400_0006u32
+        } else {
+            0x0400_0004
+        }
+        .to_le_bytes(),
+    );
+    table.extend_from_slice(&6u16.to_le_bytes());
+    table.extend_from_slice(&4u16.to_le_bytes());
+    table.extend_from_slice(&0u16.to_le_bytes());
+    for padding in [140i16, 140, 140, 140] {
+        table.extend_from_slice(&padding.to_le_bytes());
+    }
+    let mut row_counts = [4u16; 6];
+    if matches!(mutation, SixByFourMutation::BadRowCellCount) {
+        row_counts[2] = 3;
+    }
+    for count in row_counts {
+        table.extend_from_slice(&count.to_le_bytes());
+    }
+    table.extend_from_slice(&1u16.to_le_bytes());
+    table.extend_from_slice(&0u16.to_le_bytes());
+    push_record(&mut body, TAG_TABLE, 2, &table);
+
+    let mut positions = (0usize..6)
+        .flat_map(|row| (0usize..4).map(move |col| (row, col)))
+        .collect::<Vec<_>>();
+    if matches!(mutation, SixByFourMutation::BadCellOrder) {
+        positions.swap(0, 1);
+    }
+    for (index, (row, col)) in positions.into_iter().enumerate() {
+        let mut width = COL_WIDTHS[col];
+        let mut height = ROW_HEIGHTS[row];
+        let mut width_ref = if row == 0 { 0x0100u16 } else { 0x0500 };
+        if index == 0 && matches!(mutation, SixByFourMutation::BadWidth) {
+            width -= 1;
+        }
+        if index == 0 && matches!(mutation, SixByFourMutation::BadRowHeight) {
+            height -= 1;
+        }
+        if index == 0 && matches!(mutation, SixByFourMutation::BadWidthReference) {
+            width_ref = 0x0500;
+        }
+        let mut cell = Vec::with_capacity(47);
+        cell.extend_from_slice(
+            &if index == 0 && matches!(mutation, SixByFourMutation::BadParagraphCount) {
+                2u16
+            } else {
+                1
+            }
+            .to_le_bytes(),
+        );
+        cell.extend_from_slice(&0x0020_0000u32.to_le_bytes());
+        cell.extend_from_slice(&width_ref.to_le_bytes());
+        for value in [col as u16, row as u16, 1, 1] {
+            cell.extend_from_slice(&value.to_le_bytes());
+        }
+        cell.extend_from_slice(&width.to_le_bytes());
+        cell.extend_from_slice(&height.to_le_bytes());
+        for padding in [141i16, 141, 141, 141] {
+            cell.extend_from_slice(&padding.to_le_bytes());
+        }
+        cell.extend_from_slice(&1u16.to_le_bytes());
+        cell.extend_from_slice(&width.to_le_bytes());
+        cell.extend([0; 9]);
+        if index == 0 && matches!(mutation, SixByFourMutation::BadListExtension) {
             cell[38] = 1;
         }
         push_record(&mut body, TAG_LIST_HEADER, 2, &cell);

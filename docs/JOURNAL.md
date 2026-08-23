@@ -5,6 +5,30 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #182 PR #183 게시
+- verified parser/test/state commit `4aa018b` push, PR #183(`Closes #182`) 생성.
+- 다음 exact-head required CI·review/general/inline·mergeability 추적→병합→#94/next child.
+
+## 2026-08-24 (Codex sol) · #182 full green / PR ready
+- quick/full: Rust·PDF51·canonical·corpus84·oracle82·HWPX·wasm/JS + Vitest 1,018 green.
+- 허용된 로컬 서버 Chromium 85 pass/3 intentional skip/0 fail; 임시 link 제거.
+- route/rhwp/HWPX/shared typesetter/generated/security diff 0. 다음 commit/push/PR→CI/merge.
+
+## 2026-08-24 (Codex sol) · #182 focused green
+- strict 6×4/24 full grid + exact width-ref/geometry/1-paragraph ownership; hostile 9축.
+- HWP5 63/fmt/clippy/wasm32 green; next TABLE 30321..30361.
+- one-shot classifier/route/rhwp/HWPX/generated diff 0. 다음 quick→full→PR/CI/merge.
+
+## 2026-08-24 (Codex sol) · #182 classified
+- exact 6×4/24 full-grid table; no merge/nesting, 1 paragraph per cell.
+- column/row sums equal object geometry; row0/body width-ref pattern exact; repeat-header inert.
+- one-shot classifier removed. 다음 synthetic hostile→strict parser; route/rhwp/HWPX 불변.
+
+## 2026-08-24 (Codex sol) · PR #181 merged / #182 started
+- #181 exact-head required CI·CLEAN/MERGEABLE·댓글 0 후 main `09e71a07`; #180 close·branch 정리.
+- #94 동기화, next TABLE boundary #182 등록, exact-main worktree 시작.
+- `0x4d/25952..25990` content-free classification; route/rhwp/HWPX 불변.
+
 ## 2026-08-24 (Codex sol) · #180 PR #181 게시
 - exact parser/test/state commit `c64bbf3` push, PR #181(`Closes #180`) 생성.
 - exact head `c64bbf3217dbf48f5800e52fdec2476484a56edb`, MERGEABLE, issue-link green.
