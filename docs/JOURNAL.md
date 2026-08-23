@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #188 PR #189 게시
+- verified parser/test/state commit `ae3ea4f` push, PR #189(`Closes #188`) 생성.
+- 다음 exact-head required CI·review/general/inline·mergeability 추적→병합→#94/next child.
+
 ## 2026-08-24 (Codex sol) · #188 full green
 - quick/full green: PDF51, canonical gates, corpus84/oracle82, wasm 7,810,657B, Vitest1,018.
 - sandbox bind만 별도 Playwright로 검증: Chromium 85 passed/3 skipped/0 failed.
