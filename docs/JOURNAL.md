@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #184 PR #185 게시
+- verified parser/test/state commit `2f0c7ba` push, PR #185(`Closes #184`) 생성.
+- 다음 exact-head required CI·review/general/inline·mergeability 추적→병합→#94/next child.
+
 ## 2026-08-24 (Codex sol) · #184 full green / PR ready
 - quick/full: Rust·PDF51·canonical·corpus84·oracle82·HWPX·wasm/JS + Vitest 1,018 green.
 - 허용된 로컬 서버 Chromium 85 pass/3 intentional skip/0 fail; 임시 link 제거.
