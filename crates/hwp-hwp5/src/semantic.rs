@@ -1591,9 +1591,12 @@ fn parse_inline_table(
             "inline table CTRL_HEADER is not the owned 46-byte record",
         ));
     }
-    // Observed public slice: treat-as-char, para-relative inline placement, top-and-bottom wrapping,
-    // and the known storage high bit. Exact matching prevents a floating object from being flattened.
-    if read_u32(common, 4) != Some(0x082a_2311) {
+    // Observed public slices are treat-as-char, top-and-bottom objects with absolute dimensions and
+    // the known table-numbering high bit. Most store para-relative horizontal placement; one exact
+    // 1×2 form stores column-relative placement. The table tuple below binds each flag word to only
+    // its observed topology so a floating or unrelated object cannot be flattened.
+    let common_attr = read_u32(common, 4).expect("exact length checked");
+    if !matches!(common_attr, 0x082a_2311 | 0x082a_2211) {
         return Err(malformed(
             control,
             Some(section),
@@ -1654,9 +1657,12 @@ fn parse_inline_table(
     let rows = read_u16(table_bytes, 4).expect("minimum length checked") as usize;
     let cols = read_u16(table_bytes, 6).expect("minimum length checked") as usize;
     let table_attr = read_u32(table_bytes, 0).expect("minimum length checked");
-    let expected_positions = match (table_attr, rows, cols) {
-        (0x0400_0006, 1, 1) => vec![(0, 0, 1, 1)],
-        (0x0400_0006, 10, 2) => (0..10)
+    let expected_positions = match (common_attr, table_attr, rows, cols) {
+        (0x082a_2311, 0x0400_0006, 1, 1) => vec![(0, 0, 1, 1)],
+        (0x082a_2211, 0x0400_0004, 1, 2) => {
+            vec![(0, 0, 1, 1), (0, 1, 1, 1)]
+        }
+        (0x082a_2311, 0x0400_0006, 10, 2) => (0..10)
             .flat_map(|row| {
                 if matches!(row, 0 | 1 | 5) {
                     vec![(row, 0, 2, 1)]
@@ -1665,7 +1671,7 @@ fn parse_inline_table(
                 }
             })
             .collect(),
-        (0x0600_000c, 9, 8) => vec![
+        (0x082a_2311, 0x0600_000c, 9, 8) => vec![
             (0, 0, 3, 1),
             (0, 3, 5, 1),
             (1, 0, 3, 1),
@@ -1701,7 +1707,7 @@ fn parse_inline_table(
             (8, 4, 3, 1),
             (8, 7, 1, 1),
         ],
-        (0x0600_000e, 8, 5) => vec![
+        (0x082a_2311, 0x0600_000e, 8, 5) => vec![
             (0, 0, 1, 1),
             (0, 1, 1, 1),
             (0, 2, 2, 1),
@@ -1841,18 +1847,31 @@ fn parse_inline_table(
         let row_span = read_u16(list_bytes, 14).expect("exact length checked") as usize;
         let cell_width = read_u32(list_bytes, 16).expect("exact length checked");
         let cell_height = read_u32(list_bytes, 20).expect("exact length checked");
-        let expected_eight_by_five_width_ref = if (table_attr, rows, cols) == (0x0600_000e, 8, 5) {
-            Some(if row == 0 {
-                0x0100
-            } else if (row, col, col_span, row_span) == (6, 1, 2, 1) {
-                0x0400
+        let expected_one_by_two_width_ref =
+            if (common_attr, table_attr, rows, cols) == (0x082a_2211, 0x0400_0004, 1, 2) {
+                Some(if (row, col, col_span, row_span) == (0, 0, 1, 1) {
+                    0x0500
+                } else {
+                    0x0000
+                })
             } else {
-                0x0000
-            })
-        } else {
-            None
-        };
-        let owned_width_ref = expected_eight_by_five_width_ref.map_or_else(
+                None
+            };
+        let expected_eight_by_five_width_ref =
+            if (common_attr, table_attr, rows, cols) == (0x082a_2311, 0x0600_000e, 8, 5) {
+                Some(if row == 0 {
+                    0x0100
+                } else if (row, col, col_span, row_span) == (6, 1, 2, 1) {
+                    0x0400
+                } else {
+                    0x0000
+                })
+            } else {
+                None
+            };
+        let expected_exact_width_ref =
+            expected_one_by_two_width_ref.or(expected_eight_by_five_width_ref);
+        let owned_width_ref = expected_exact_width_ref.map_or_else(
             || {
                 matches!(width_ref, 0x0000 | 0x0100 | 0x0500)
                     || (width_ref == 0x0501 && (rows, cols) == (1, 1))
@@ -1863,7 +1882,7 @@ fn parse_inline_table(
             return Err(malformed(
                 &list_record,
                 Some(section),
-                if expected_eight_by_five_width_ref.is_some() {
+                if expected_exact_width_ref.is_some() {
                     "cell LIST_HEADER width reference differs from its exact owned topology"
                 } else {
                     "cell LIST_HEADER count, direction, alignment, or width reference is not owned"

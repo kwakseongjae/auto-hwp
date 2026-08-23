@@ -28,27 +28,27 @@ fn public_hwp5_has_bounded_content_free_record_provenance() {
 }
 
 #[test]
-fn explicit_own_parser_owns_bounded_eight_by_five_table_then_stops_content_free() {
+fn explicit_own_parser_owns_bounded_one_by_two_table_then_stops_content_free() {
     let probed = probe(&benchmark()).unwrap();
     let next = probed
         .streams
         .iter()
         .flat_map(|stream| &stream.records)
-        .find(|record| record.head == 21_538)
+        .find(|record| record.head == 25_952)
         .unwrap();
     assert_eq!(
         (next.tag, next.level, next.head, next.data, next.end, next.size,),
-        (0x47, 1, 21_538, 21_542, 21_588, 46)
+        (0x4d, 2, 25_952, 25_956, 25_990, 34)
     );
     let error = OwnHwp5Parser::new().parse(&benchmark()).unwrap_err();
     eprintln!("{error:?}");
     assert!(matches!(
         error,
         Error::MalformedRecord {
-            tag: 0x47,
+            tag: 0x4d,
             section: Some(0),
-            offset: 21538,
-            reason: "inline table common-object attributes are not owned",
+            offset: 25952,
+            reason: "TABLE attributes or row/column topology are not owned",
             ..
         }
     ));

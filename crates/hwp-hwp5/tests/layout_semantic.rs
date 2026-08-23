@@ -111,6 +111,18 @@ enum EightByFiveMutation {
     BadStaleNestedHeight,
 }
 
+#[derive(Clone, Copy)]
+enum OneByTwoMutation {
+    None,
+    BadCommonAttribute,
+    BadTableAttribute,
+    BadRowCellCount,
+    BadWidth,
+    BadWidthReference,
+    BadCellOrder,
+    BadListExtension,
+}
+
 #[test]
 fn parses_page_setup_and_blank_source_line_metrics() {
     let doc = OwnHwp5Parser::new()
@@ -810,6 +822,51 @@ fn strict_eight_by_five_slice_rejects_hostile_topology_widths_and_nesting() {
     }
 }
 
+#[test]
+fn owns_exact_column_relative_one_by_two_header_table() {
+    let doc = OwnHwp5Parser::new()
+        .parse(&one_by_two_fixture(OneByTwoMutation::None))
+        .expect("strict column-relative 1x2 table fixture parses");
+    let [Block::Paragraph(anchor), Block::Table(table)] = doc.sections[0].blocks.as_slice() else {
+        panic!("table host must lower to one anchor and one table")
+    };
+    assert!(anchor.is_table_anchor);
+    assert_eq!((table.rows, table.cols, table.cells.len()), (1, 2, 2));
+    assert!(table.keep_together, "no-split one-row table stays atomic");
+    assert!(!table.fixed_row_heights);
+    assert_eq!(table.col_widths, vec![39_903, 2_261]);
+    assert_eq!(table.row_heights, vec![3_005]);
+    assert_eq!(table.padding, Some([140, 140, 140, 140]));
+    assert_eq!(
+        table
+            .cells
+            .iter()
+            .map(|cell| (cell.row, cell.col, cell.width))
+            .collect::<Vec<_>>(),
+        vec![(0, 0, Some(39_903)), (0, 1, Some(2_261))]
+    );
+}
+
+#[test]
+fn strict_one_by_two_slice_rejects_hostile_flags_topology_widths_and_extensions() {
+    for mutation in [
+        OneByTwoMutation::BadCommonAttribute,
+        OneByTwoMutation::BadTableAttribute,
+        OneByTwoMutation::BadRowCellCount,
+        OneByTwoMutation::BadWidth,
+        OneByTwoMutation::BadWidthReference,
+        OneByTwoMutation::BadCellOrder,
+        OneByTwoMutation::BadListExtension,
+    ] {
+        assert!(
+            OwnHwp5Parser::new()
+                .parse(&one_by_two_fixture(mutation))
+                .is_err(),
+            "hostile 1x2 mutation must fail closed"
+        );
+    }
+}
+
 fn fixture(mutation: Mutation) -> Vec<u8> {
     let mut header = vec![0; 256];
     header[..HWP_SIGNATURE.len()].copy_from_slice(HWP_SIGNATURE);
@@ -1478,6 +1535,155 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
         Mutation::PageNumberMultiSection | Mutation::NewNumberMultiSection
     ) {
         let mut stream = compound.create_stream("/BodyText/Section1").unwrap();
+        stream.write_all(&body).unwrap();
+    }
+    compound.into_inner().into_inner()
+}
+
+fn one_by_two_fixture(mutation: OneByTwoMutation) -> Vec<u8> {
+    let mut header = vec![0; 256];
+    header[..HWP_SIGNATURE.len()].copy_from_slice(HWP_SIGNATURE);
+    header[32..36].copy_from_slice(&[0, 0, 0, 5]);
+
+    let mut doc_info = Vec::new();
+    let mut properties = vec![0; 26];
+    properties[..2].copy_from_slice(&1u16.to_le_bytes());
+    push_record(&mut doc_info, TAG_DOCUMENT_PROPERTIES, 0, &properties);
+    let mut mappings = Vec::new();
+    for count in [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0] {
+        mappings.extend_from_slice(&(count as u32).to_le_bytes());
+    }
+    push_record(&mut doc_info, TAG_ID_MAPPINGS, 0, &mappings);
+    for _ in 0..7 {
+        push_record(&mut doc_info, TAG_FACE_NAME, 0, &face_name("Test Sans"));
+    }
+    push_record(&mut doc_info, TAG_BORDER_FILL, 0, &solid_border_fill());
+    push_record(&mut doc_info, TAG_CHAR_SHAPE, 0, &char_shape());
+    push_record(&mut doc_info, TAG_PARA_SHAPE, 0, &para_shape());
+
+    let mut body = Vec::new();
+    let mut host_text = extended_control(0x0002, CTRL_SECTION_DEF);
+    host_text.extend(extended_control(0x000b, CTRL_TABLE));
+    host_text.push(0x000d);
+    push_para_header_with_break(
+        &mut body,
+        host_text.len() as u32,
+        (1 << 2) | (1 << 0x000b),
+        1,
+        0,
+        0x01,
+    );
+    push_record(&mut body, TAG_PARA_TEXT, 1, &utf16_bytes(&host_text));
+    push_record(&mut body, TAG_PARA_CHAR_SHAPE, 1, &shape_refs(&[(0, 0)]));
+
+    let mut section_control = Vec::with_capacity(28);
+    section_control.extend_from_slice(&CTRL_SECTION_DEF.to_le_bytes());
+    section_control.extend([0; 24]);
+    push_record(&mut body, TAG_CTRL_HEADER, 1, &section_control);
+    push_record(&mut body, TAG_PAGE_DEF, 2, &page_def(Mutation::None));
+
+    let mut common = Vec::with_capacity(46);
+    common.extend_from_slice(&CTRL_TABLE.to_le_bytes());
+    common.extend_from_slice(
+        &if matches!(mutation, OneByTwoMutation::BadCommonAttribute) {
+            0x082a_2311u32
+        } else {
+            0x082a_2211
+        }
+        .to_le_bytes(),
+    );
+    common.extend_from_slice(&0u32.to_le_bytes());
+    common.extend_from_slice(&0u32.to_le_bytes());
+    common.extend_from_slice(&42_164u32.to_le_bytes());
+    common.extend_from_slice(&3_005u32.to_le_bytes());
+    common.extend_from_slice(&0i32.to_le_bytes());
+    for margin in [140i16, 140, 140, 140] {
+        common.extend_from_slice(&margin.to_le_bytes());
+    }
+    common.extend_from_slice(&1u32.to_le_bytes());
+    common.extend_from_slice(&0i32.to_le_bytes());
+    common.extend_from_slice(&0u16.to_le_bytes());
+    push_record(&mut body, TAG_CTRL_HEADER, 1, &common);
+
+    let mut table = Vec::with_capacity(24);
+    table.extend_from_slice(
+        &if matches!(mutation, OneByTwoMutation::BadTableAttribute) {
+            0x0400_0006u32
+        } else {
+            0x0400_0004
+        }
+        .to_le_bytes(),
+    );
+    table.extend_from_slice(&1u16.to_le_bytes());
+    table.extend_from_slice(&2u16.to_le_bytes());
+    table.extend_from_slice(&0u16.to_le_bytes());
+    for padding in [140i16, 140, 140, 140] {
+        table.extend_from_slice(&padding.to_le_bytes());
+    }
+    table.extend_from_slice(
+        &if matches!(mutation, OneByTwoMutation::BadRowCellCount) {
+            1u16
+        } else {
+            2
+        }
+        .to_le_bytes(),
+    );
+    table.extend_from_slice(&1u16.to_le_bytes());
+    table.extend_from_slice(&0u16.to_le_bytes());
+    push_record(&mut body, TAG_TABLE, 2, &table);
+
+    let mut cells = vec![(0u16, 39_903u32, 0x0500u16), (1, 2_261, 0)];
+    if matches!(mutation, OneByTwoMutation::BadCellOrder) {
+        cells.swap(0, 1);
+    }
+    for (index, (col, mut width, mut width_ref)) in cells.into_iter().enumerate() {
+        if index == 0 && matches!(mutation, OneByTwoMutation::BadWidth) {
+            width -= 1;
+        }
+        if index == 0 && matches!(mutation, OneByTwoMutation::BadWidthReference) {
+            width_ref = 0;
+        }
+        let mut cell = Vec::with_capacity(47);
+        cell.extend_from_slice(&1u16.to_le_bytes());
+        cell.extend_from_slice(&0x0020_0000u32.to_le_bytes());
+        cell.extend_from_slice(&width_ref.to_le_bytes());
+        for value in [col, 0, 1, 1] {
+            cell.extend_from_slice(&value.to_le_bytes());
+        }
+        cell.extend_from_slice(&width.to_le_bytes());
+        cell.extend_from_slice(&3_005u32.to_le_bytes());
+        for padding in [141i16, 141, 141, 141] {
+            cell.extend_from_slice(&padding.to_le_bytes());
+        }
+        cell.extend_from_slice(&1u16.to_le_bytes());
+        cell.extend_from_slice(&width.to_le_bytes());
+        cell.extend([0; 9]);
+        if index == 0 && matches!(mutation, OneByTwoMutation::BadListExtension) {
+            cell[38] = 1;
+        }
+        push_record(&mut body, TAG_LIST_HEADER, 2, &cell);
+        push_para_header_at_level(&mut body, 2, 2, 0, 1, 0, 0);
+        push_record(
+            &mut body,
+            TAG_PARA_TEXT,
+            3,
+            &utf16_bytes(&[u16::from(b'A') + index as u16, 0x000d]),
+        );
+        push_record(&mut body, TAG_PARA_CHAR_SHAPE, 3, &shape_refs(&[(0, 0)]));
+    }
+
+    let mut compound = CompoundFile::create(Cursor::new(Vec::new())).unwrap();
+    {
+        let mut stream = compound.create_stream("/FileHeader").unwrap();
+        stream.write_all(&header).unwrap();
+    }
+    {
+        let mut stream = compound.create_stream("/DocInfo").unwrap();
+        stream.write_all(&doc_info).unwrap();
+    }
+    compound.create_storage("/BodyText").unwrap();
+    {
+        let mut stream = compound.create_stream("/BodyText/Section0").unwrap();
         stream.write_all(&body).unwrap();
     }
     compound.into_inner().into_inner()
