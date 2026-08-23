@@ -407,6 +407,9 @@ fn emit_table(t: &Table) -> JsxNode {
     let mut el = JsxElement::new(Tag::Table)
         .with_attr("data-rows", t.rows.to_string())
         .with_attr("data-cols", t.cols.to_string());
+    if t.keep_together {
+        el.attrs.insert("data-keep-together".into(), "1".into());
+    }
     if !t.col_widths.is_empty() {
         let w = t
             .col_widths
@@ -1108,6 +1111,11 @@ fn parse_table(el: &JsxElement) -> Result<Table> {
         .get("data-rowh")
         .map(|s| s.split(',').filter_map(|h| h.parse().ok()).collect())
         .unwrap_or_default();
+    let keep_together = match el.attrs.get("data-keep-together").map(String::as_str) {
+        None => false,
+        Some("1") => true,
+        Some(_) => return Err(Error::Parse("invalid table keep-together flag".into())),
+    };
     Ok(Table {
         rows: el
             .attrs
@@ -1120,6 +1128,7 @@ fn parse_table(el: &JsxElement) -> Result<Table> {
             .and_then(|v| v.parse().ok())
             .unwrap_or(0),
         cells,
+        keep_together,
         col_widths,
         row_heights,
         // Render-IR only (HWPX auto-fit floor) — the JSX surface never carries it (defaults empty).

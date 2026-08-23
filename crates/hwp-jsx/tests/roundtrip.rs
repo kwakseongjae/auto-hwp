@@ -185,6 +185,7 @@ fn t1c_per_edge_borders_and_diagonal_roundtrip() {
         rows: 1,
         cols: 1,
         cells: vec![cell],
+        keep_together: true,
         col_widths: vec![1],
         ..Default::default()
     };
@@ -196,10 +197,53 @@ fn t1c_per_edge_borders_and_diagonal_roundtrip() {
         ..Default::default()
     });
 
-    let back = parse(&emit(&doc)).expect("parse(emit(doc))");
+    let jsx = emit(&doc);
+    let table_element = match &jsx.sections[0] {
+        JsxNode::Element(section) => section
+            .children
+            .iter()
+            .find_map(|node| match node {
+                JsxNode::Element(element) if element.tag() == Some(Tag::Table) => Some(element),
+                _ => None,
+            })
+            .expect("projected table"),
+        _ => panic!("section projection is an element"),
+    };
+    assert_eq!(
+        table_element
+            .attrs
+            .get("data-keep-together")
+            .map(String::as_str),
+        Some("1")
+    );
+    let back = parse(&jsx).expect("parse(emit(doc))");
     assert!(
         doc_value_eq(&doc, &back),
         "per-edge borders + diagonal must round-trip value-equal"
+    );
+    let mut changed_keep = back.clone();
+    if let Some(Block::Table(table)) = changed_keep.sections[0].blocks.get_mut(0) {
+        table.keep_together = false;
+    }
+    assert!(
+        !doc_value_eq(&doc, &changed_keep),
+        "equality must observe keep-together semantics"
+    );
+    let mut invalid_keep = jsx.clone();
+    if let JsxNode::Element(section) = &mut invalid_keep.sections[0] {
+        let table = section
+            .children
+            .iter_mut()
+            .find_map(|node| match node {
+                JsxNode::Element(element) if element.tag() == Some(Tag::Table) => Some(element),
+                _ => None,
+            })
+            .expect("projected table");
+        table.attrs.insert("data-keep-together".into(), "2".into());
+    }
+    assert!(
+        parse(&invalid_keep).is_err(),
+        "unknown keep-together values must fail closed"
     );
 
     // Falsifiable: corrupt the round-tripped left edge style → equality must now FAIL.

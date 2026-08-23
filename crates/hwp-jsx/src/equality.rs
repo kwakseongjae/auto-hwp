@@ -158,6 +158,7 @@ fn inline_eq(a: &Inline, b: &Inline) -> bool {
 fn table_eq(a: &Table, b: &Table) -> bool {
     a.rows == b.rows
         && a.cols == b.cols
+        && a.keep_together == b.keep_together
         && a.col_widths == b.col_widths
         && a.row_heights == b.row_heights
         && prov_eq(&a.provenance, &b.provenance)

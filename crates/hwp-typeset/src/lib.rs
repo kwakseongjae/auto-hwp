@@ -540,7 +540,12 @@ impl LayoutEngine for NaiveLayout {
                         if vert > 0.0 {
                             vert += t.outer_margin_top.max(0) as f64;
                         }
-                        for rh in table_row_heights(t, body_w, doc, fonts) {
+                        let rows = table_row_heights(t, body_w, doc, fonts);
+                        if keep_table_on_fresh_lane(t, &rows, vert, body_h) {
+                            pages.push(new_page(page));
+                            vert = 0.0;
+                        }
+                        for rh in rows {
                             // `rh <= body_h`: a row taller than the whole body never triggers a break — it
                             // can't fit a fresh page either, so a break would only waste the current page
                             // (the 자가진단표 1×1 mega-cell). Mirrors place_table + block_pages for lockstep.
@@ -629,7 +634,17 @@ fn layout_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> LayoutR
                     if flow.vert() > 0.0 {
                         flow.add(table.outer_margin_top.max(0) as f64);
                     }
-                    for row_height in table_row_heights(table, flow.min_width(), doc, fonts) {
+                    let rows = table_row_heights(table, flow.min_width(), doc, fonts);
+                    if keep_table_on_fresh_lane(
+                        table,
+                        &rows,
+                        flow.vert(),
+                        flow.available_height(body_h),
+                    ) && flow.advance_column()
+                    {
+                        pages.push(new_page(page));
+                    }
+                    for row_height in rows {
                         let available = flow.available_height(body_h);
                         if flow.vert() + row_height > available
                             && flow.vert() > 0.0
@@ -905,6 +920,23 @@ pub(crate) fn table_row_heights(
     }
     apply_row_overrides(&mut row_h, t);
     row_h
+}
+
+/// Whether a keep-together table should advance before row 0. The whole measured table must fit a
+/// fresh lane; over-tall tables deliberately return false and retain bounded row fragmentation.
+/// `vert > 0` also suppresses pointless blank-page/blank-column advances at a lane top.
+pub(crate) fn keep_table_on_fresh_lane(
+    table: &Table,
+    row_heights: &[f64],
+    vert: f64,
+    available: f64,
+) -> bool {
+    let total: f64 = row_heights.iter().sum();
+    table.keep_together
+        && vert > 0.0
+        && total > 0.0
+        && total <= available
+        && vert + total > available
 }
 
 /// Apply per-row MINIMUM-height overrides (HWPUNIT) from [`Table::row_heights`] as a FLOOR on the

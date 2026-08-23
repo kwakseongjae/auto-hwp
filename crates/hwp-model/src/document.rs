@@ -461,6 +461,11 @@ pub struct Table {
     pub rows: usize,
     pub cols: usize,
     pub cells: Vec<Cell>,
+    /// Keep the table on one page/column when its fully measured height fits a fresh lane. If the
+    /// current lane lacks room, all three pagination paths advance once before placing row 0. A table
+    /// taller than a fresh lane still uses the existing row-fragmentation fallback, so hostile or
+    /// genuinely over-tall input cannot create an advance loop. `false` preserves legacy behavior.
+    pub keep_together: bool,
     /// Per-column widths (HWPUNIT), `cols` entries — for faithful column proportions on render.
     /// Empty when unknown (then the renderer falls back to auto-layout).
     pub col_widths: Vec<HwpUnit>,

@@ -3,7 +3,7 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
-- 갱신: 2026-08-24 · Codex(sol) — **#168 strict inline 1×1 table 구현·full green / PR #169 게시**.
+- 갱신: 2026-08-24 · Codex(sol) — **PR #169 병합 · #170 분류 · #171 keep-together 게시 준비 완료**.
   자체 HWP5 파서가 exact `tbl ` marker/common-object/TABLE/LIST_HEADER/cell paragraph를 검증해
   treat-as-character 1×1 표를 source-neutral `Table`/`Cell` IR로 내린다. 셀/개체 geometry,
   inherited padding, CENTER alignment, border-fill refs를 range/shape 검증하고 visible host text,
@@ -19,9 +19,24 @@
   JS build·crosscheck·i18n, Vitest **1,007**이 green이고 Chromium **85 pass/3 intentional skip/0 fail**.
   fresh worktree node_modules와 sandbox port는 루트 설치 임시 링크/허용된 로컬 서버로 분리 검증 후
   링크를 제거했다. production route·HWPX parser/serializer·shared typesetter·`external/rhwp`·
-  generated asset diff 0이며 원문·경로·hash·raw payload는 공개하지 않았다. 구현 commit `12a754b`을
-  push하고 PR #169(`Closes #168`, `Refs #94 #164 #166`)를 게시했다. **다음:** 이 상태 commit push→
-  exact-head 필수 CI·mergeability·review/comment 확인 후 자율 병합→#170 larger TABLE 936..982 분해.
+  generated asset diff 0이며 원문·경로·hash·raw payload는 공개하지 않았다. PR #169는 exact head
+  `d870e80`의 필수 CI·MERGEABLE·댓글 0을 확인하고 main `0cb4529`로 병합, #168 close·branch 정리.
+  #170의 next TABLE은 content-free 분류상 10×2/17 cells/가로병합 3행/셀 1~5문단이며 width/height
+  합이 object geometry와 정확히 일치한다. 그러나 official no-split attr을 현 always-row-split IR이
+  표현하지 못해 #170은 fail-closed 유지하고 #171을 prerequisite로 열었다. exact latest-main
+  `codex/issue-171-table-keep-together`에서 additive `Table.keep_together` default false와
+  `place_doc`/`NaiveLayout`/`block_pages`/column flow 동일 선결정을 구현했다. 전체 측정 높이가 fresh
+  lane에는 맞고 current remainder에만 안 맞을 때 row 0 전에 한 번 advance하며, current에 맞거나
+  fresh lane보다 큰 표와 default false 표는 기존 row fragmentation 그대로다. JSX는 true만
+  `data-keep-together=1`로 왕복하고 다른 값은 거부하며 equality도 의미를 비교한다. direct tests는
+  current fit/page move/over-tall fallback/default unchanged/column move/column over-tall을 잠갔다.
+  quick/full의 Rust workspace, hwp-typeset **100+4**, PDF visual **51**, canonical
+  **8/18/24·98.9%+**, public corpus **84**, oracle **82**, HWPX, wasm(7,810,657B), licenses,
+  JS build·crosscheck·i18n, Vitest **1,007**이 green이고, 샌드박스 포트 EPERM만 허용된 로컬
+  서버에서 분리 재실행해 Chromium **85 pass/3 intentional skip/0 fail**이다. 임시 dependency
+  link는 제거했고 production route·rhwp·HWPX parser/serializer·generated asset diff 0.
+  **다음:** commit/push/PR #171→필수 CI/자율 병합→#170 rebase 후 keep_together=true strict
+  10×2 parser 재개.
 
 - 갱신: 2026-08-23 · Codex(sol) — **#161 PR #163 게시**.
   검증 완료 commit `c751833`을 push하고 PR #163(`Closes #161`, `Refs #94 #160`)을 만들었다.

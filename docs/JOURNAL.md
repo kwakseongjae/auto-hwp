@@ -5,6 +5,22 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #171 full green / PR ready
+- keep-together page/column 3-path LOCKSTEP와 default/over-tall fallback 확정.
+- quick/full·Vitest 1,007·Chromium 85/3 green; route/rhwp/HWPX/generated diff 0.
+- 다음 commit/push/PR→required CI/merge→#170 rebase/parser resume.
+
+## 2026-08-24 (Codex sol) · #171 keep-together focused green
+- additive Table flag/default false + JSX strict roundtrip/equality.
+- 3-path page current/move/over-tall/default and column move/over-tall direct tests green.
+- hwp-typeset 90+4, hwp-jsx 14, touched clippy green; route/rhwp/HWPX/generated unchanged.
+- 다음 quick→full→PR/CI/merge→#170 rebase/parser resume.
+
+## 2026-08-24 (Codex sol) · #170 classified → #171 keep-together started
+- #169 main `0cb4529`; #170 next TABLE 10×2/17 cells, exact geometry, official no-split prerequisite.
+- #170 fail-closed checkpoint `4e652e6` push; #171 + latest-main keep-together branch 시작.
+- 다음 additive IR/default false→3-path+column LOCKSTEP tests/implementation→full/PR/CI→#170 resume.
+
 ## 2026-08-24 (Codex sol) · #168 PR #169 posted
 - 구현 `12a754b` push + PR #169(`Closes #168`, `Refs #94 #164 #166`) 게시.
 - next GitHub 번호는 PR이 사용했으므로 larger TABLE 936..982 후속은 #170 issue-first.
