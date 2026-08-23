@@ -64,3 +64,8 @@ base64 = "0.21"
 # OS clipboard for own-mode copy/paste — the WKWebView's navigator.clipboard.readText is unreliable
 # (no browser-grade permission/gesture pipeline under our strict CSP), so read/write go through here.
 arboard = "3"
+
+[target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
+# Issue #140: the first registered plugin routes warm file-association launches back to the one
+# shared Rust session/window. It owns no document behavior.
+tauri-plugin-single-instance = "2"

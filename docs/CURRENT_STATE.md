@@ -3,6 +3,23 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-23 · Codex(sol) — **PR #136 병합 · 데스크톱 #139 로드맵/#140 구현·실앱 QA**.
+  사용자 승인에 따라 #136을 squash 병합(main `0c354cb`, #100 close)했고 #137은 main 위
+  `ad55605`로 재배치해 필수 checks 3종 green·MERGEABLE, #138은 그 위 `e18a396`로 정리했다.
+  데스크톱 레퍼런스(HOP/Tauri/한컴과 공개 이슈)를 바탕으로 #139 우산과 #140~#144를 만들었고,
+  #140 브랜치에서 기존 엔진을 복제하지 않는 OS 경계를 구현했다: 단일 인스턴스 우선 등록,
+  local regular HWP/HWPX만 받는 8건 제한 큐, cold/warm/macOS Opened 수렴, focus/unminimize,
+  Rust→webview 무경로 이벤트, 앱 내부 교체 확인. 공개 패키지 QA에서 HWP 8쪽 콜드 열기·확대,
+  HWPX 22쪽 웜 요청의 취소/승인, 단일 프로세스를 확인했다. QA가 발견한 기존 HWP open의
+  원본 옆 자동 HWPX 생성도 제거해 재검증에서 파일 생성 0이다. hwp-viewer 15건·desktop shell
+  계약 5건(1 sandbox skip)·패키징과 `verify-local --full`이 PASS했다: canonical 8/18/24,
+  PDF 51/51, Vitest 269+64+425+247+11, Playwright 85 pass/3 intentional skip, licenses green.
+  커밋 `ef5c4c8`을 push하고 PR **#145**(`Closes #140`)를 열었다. 첫 CI가 Linux에서 macOS
+  전용 `paths_from_urls` dead-code를 잡아 macOS 또는 test에서만 컴파일하도록 cfg 경계를
+  좁혔고, 최종 head `4b4188b`에서 issue-link·build-test·licenses가 모두 green·MERGEABLE이다.
+  **다음:** #145 리뷰/사용자 병합 승인에서 정지; #137도 별도 사용자 승인 대기이며, 승인 뒤
+  #138을 main으로 retarget한다.
+
 - 갱신: 2026-08-23 · Codex(sol) — **#101 T1 PDF calibration 구현·재현 완료 · stacked PR 준비**.
   #100 PR #136(`d803ab1`)은 MERGEABLE이고 필수 CI 3종 green이나 비사소 PR이라 사용자 병합
   승인 대기다. 그 헤드 위 `codex/issue-101-pdf-calibration`에서 국가법령정보센터 공식 HWP5/PDF

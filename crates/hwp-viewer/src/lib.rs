@@ -6,16 +6,42 @@
 //! hwp-viewer --features rhwp`, or `cargo tauri dev`); the command *logic* is factored into pure
 //! functions so it is unit-testable headless. The A3 embedded control server lives in [`server`].
 
+mod open_request;
 pub mod server;
 
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
+use tauri::{Emitter, Manager};
 
 /// Shared op-bus session (the open document), mutated by `apply_content`/`export_hwpx` and by the
 /// embedded A3 control server — so the window renders the LIVE edited document, not a stale copy.
 /// `Arc` so the heavy commands can clone a handle out of `State` and move it into a
 /// `spawn_blocking` worker, keeping the parse/serialize/render off the async/IPC thread.
 pub type SharedSession = Arc<Mutex<hwp_mcp::Session>>;
+
+const DESKTOP_OPEN_REQUEST_EVENT: &str = "desktop-open-request";
+
+fn queue_open_paths(app: &tauri::AppHandle, paths: Vec<String>) {
+    let queued = app.state::<open_request::OpenRequestQueue>().push(paths);
+    if queued > 0 {
+        // The queue is authoritative, so an event arriving before the webview listener is harmless:
+        // WorkspaceShell drains it after subscribing. The event carries no path/private metadata.
+        let _ = app.emit(DESKTOP_OPEN_REQUEST_EVENT, ());
+    }
+}
+
+fn focus_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+#[tauri::command]
+fn take_open_requests(requests: tauri::State<'_, open_request::OpenRequestQueue>) -> Vec<String> {
+    requests.take()
+}
 
 /// Call an MCP tool through the shared op-bus dispatch ([`hwp_mcp::handle`]) — the single mutation
 /// surface. Returns the tool's text on success, or its error text (MCP `isError`).
@@ -56,7 +82,6 @@ async fn open_doc(path: String, sess: tauri::State<'_, SharedSession>) -> Result
     let sess = sess.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut s = sess.lock().map_err(|_| "session poisoned")?;
-        let original = path.clone();
         // accepts .hwp (view) and .hwpx; surface the 2-tier capability (editable) + format for the chip.
         let (format, editable) = match apply_intent(&mut s, Intent::Open { path })? {
             Outcome::Opened {
@@ -65,28 +90,13 @@ async fn open_doc(path: String, sess: tauri::State<'_, SharedSession>) -> Result
             _ => return Err("unexpected outcome".into()),
         };
 
-        // Auto-convert a binary .hwp: save an editable `.hwpx` beside the original so the user gets a
-        // round-trip-safe copy to work in. Best-effort — a write failure (e.g. read-only folder) must
-        // NOT break opening the view, which keeps rendering the faithful native .hwp until an edit.
-        let mut converted_path = Value::Null;
-        if format.starts_with("HWP5") {
-            let hwpx = std::path::Path::new(&original).with_extension("hwpx");
-            if hwpx.as_os_str() != std::path::Path::new(&original).as_os_str() {
-                let dest = hwpx.to_string_lossy().into_owned();
-                if let Ok(Outcome::Exported {
-                    open_safe: true, ..
-                }) = apply_intent(&mut s, Intent::Export { path: dest.clone() })
-                {
-                    converted_path = json!(dest);
-                }
-            }
-        }
-
         Ok(json!({
             "pages": pages(&mut s),
             "editable": editable,
             "format": format,
-            "convertedPath": converted_path,
+            // Compatibility field for the legacy shell. Opening is read-only with respect to the
+            // filesystem; conversion happens only after an explicit Save/Export destination.
+            "convertedPath": Value::Null,
         }))
     })
     .await
@@ -1700,10 +1710,27 @@ async fn export_pdf_bytes(_sess: tauri::State<'_, SharedSession>) -> Result<Vec<
 /// running instance.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // Tauri requires single-instance to be registered before every other plugin. A second process
+    // contributes only validated local document paths, then focuses the existing window.
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+        let paths = open_request::paths_from_argv(args, std::path::Path::new(&cwd));
+        if paths.is_empty() {
+            return;
+        }
+        queue_open_paths(app, paths);
+        focus_main_window(app);
+    }));
+
+    let app = builder
         .plugin(tauri_plugin_dialog::init())
         .manage(SharedSession::default())
+        .manage(open_request::OpenRequestQueue::default())
         .setup(|app| {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let paths = open_request::paths_from_argv(std::env::args_os(), &cwd);
+            queue_open_paths(app.handle(), paths);
             server::spawn(app.handle().clone());
             Ok(())
         })
@@ -1772,10 +1799,26 @@ pub fn run() {
             apply_intent_json,
             blocks_in_rect,
             export_hwpx_bytes,
-            export_pdf_bytes
+            export_pdf_bytes,
+            take_open_requests
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running auto-hwp viewer");
+        .build(tauri::generate_context!())
+        .expect("error while building auto-hwp viewer");
+
+    app.run(|app, event| {
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Opened { urls } = event {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let paths = open_request::paths_from_urls(&urls, &cwd);
+            if paths.is_empty() {
+                return;
+            }
+            queue_open_paths(app, paths);
+            focus_main_window(app);
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = (app, event);
+    });
 }
 
 /// Lock in the invariant the A3 server (and the `spawn_blocking` workers) rely on: the session is
@@ -1812,12 +1855,11 @@ mod tests {
         assert!(svg.contains("<svg"), "HW5 page renders to SVG");
     }
 
-    /// Track A: opening a .hwp can now export an open-safe HWPX — the substance behind open_doc's
-    /// auto-save of a `.hwpx` beside the original. (open_doc itself needs a Tauri State; this drives
-    /// the same Open→Export path through the session.)
+    /// Track A: after opening a .hwp, an explicit export can produce an open-safe HWPX at the caller's
+    /// chosen destination. Opening alone never chooses or writes that destination.
     #[cfg(feature = "rhwp")]
     #[test]
-    fn hwp5_open_exports_open_safe_hwpx_beside() {
+    fn hwp5_session_exports_open_safe_hwpx_on_request() {
         let mut sess = hwp_mcp::Session::default();
         let bench = concat!(
             env!("CARGO_MANIFEST_DIR"),

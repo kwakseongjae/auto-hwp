@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 /** Result of opening a document: page count + 2-tier capability (editable) + a format label.
- *  `convertedPath` is set when a binary .hwp was auto-converted to an editable .hwpx saved beside it. */
+ *  `convertedPath` is retained for wire compatibility but opening never writes beside the source. */
 export type OpenResult = {
   pages: number;
   editable: boolean;

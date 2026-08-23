@@ -1,6 +1,7 @@
 import { StrictMode, useCallback, useEffect, useRef, useState } from "react";
 import type { Root } from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { HwpWorkspace, TauriAdapter, type OnAiRequest } from "@auto-hwp/react";
@@ -29,6 +30,7 @@ const PATH_CODEC = { encode: (p: string) => new TextEncoder().encode(p), decode:
 const adapter = new TauriAdapter({ invoke, resolveOpenPath: async (bytes) => PATH_CODEC.decode(bytes) });
 
 const IS_DOC = /\.(hwp|hwpx)$/i;
+const MAX_PENDING_OPEN_REQUESTS = 8;
 const basename = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
 /// Chat / vibe-edit — DISABLED in the v1 desktop shell (documented in docs/TAURI-CONVERGENCE.md §4). The
@@ -50,6 +52,7 @@ function WorkspaceShell() {
   const [doc, setDoc] = useState<{ bytes: Uint8Array; name?: string } | null>(null);
   const [docName, setDocName] = useState<string | null>(null);
   const [note, setNote] = useState<string>("");
+  const [pendingOpenPaths, setPendingOpenPaths] = useState<string[]>([]);
   const hasDoc = doc != null;
 
   const flash = useCallback((s: string) => {
@@ -66,15 +69,70 @@ function WorkspaceShell() {
     setDocName(name);
   }, []);
 
+  // All desktop entry points converge here: native dialog, drag/drop, cold launch, and warm
+  // file-association events. Keep a bounded, de-duplicated queue so a platform batch cannot race
+  // React state or silently replace multiple documents.
+  const requestOpen = useCallback((paths: string[]) => {
+    const valid = paths.filter((path) => IS_DOC.test(path));
+    if (valid.length === 0) return;
+    setPendingOpenPaths((current) =>
+      [...new Set([...current, ...valid])].slice(0, MAX_PENDING_OPEN_REQUESTS),
+    );
+  }, []);
+
+  // Register before the first drain. Rust owns the durable in-memory queue, so an OS event that
+  // arrives before this listener is ready is picked up by `take_open_requests` without exposing its
+  // path in the event payload.
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: undefined | (() => void);
+    const drain = async () => {
+      try {
+        const paths = await invoke<string[]>("take_open_requests");
+        if (!cancelled) requestOpen(paths);
+      } catch (e) {
+        if (!cancelled) flash(`연결된 파일 열기 실패: ${e}`);
+      }
+    };
+    void (async () => {
+      unlisten = await listen("desktop-open-request", () => void drain());
+      if (!cancelled) await drain();
+    })();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [flash, requestOpen]);
+
+  // One native window owns one Rust session in v1. Until #141 adds a precise dirty signal, the first
+  // document can open immediately but every replacement pauses on the in-app confirmation below.
+  // Do not use `window.confirm`: packaged WKWebView behavior is not consistent enough for a data-loss
+  // boundary, and an app-owned dialog is both testable and visible.
+  useEffect(() => {
+    const path = pendingOpenPaths[0];
+    if (!path || hasDoc) return;
+    openPath(path);
+    setPendingOpenPaths((current) => current.slice(1));
+  }, [hasDoc, openPath, pendingOpenPaths]);
+
+  const resolveReplacement = useCallback(
+    (replace: boolean) => {
+      const path = pendingOpenPaths[0];
+      if (replace && path) openPath(path);
+      setPendingOpenPaths((current) => current.slice(1));
+    },
+    [openPath, pendingOpenPaths],
+  );
+
   const doOpen = useCallback(async () => {
     try {
       const path = await openDialog({ filters: [{ name: "HWP/HWPX", extensions: ["hwpx", "hwp"] }] });
       if (typeof path !== "string") return;
-      openPath(path);
+      requestOpen([path]);
     } catch (e) {
       flash(`열기 실패: ${e}`);
     }
-  }, [openPath, flash]);
+  }, [requestOpen, flash]);
 
   // 저장 (HWPX) — the atomic P0-1 path (`hwp_core::atomic_write`: temp + fsync + rename) via the existing
   // path-based `export_hwpx` command. The byte twin (`toHwpx()`) exists on the adapter but the host chrome
@@ -115,8 +173,8 @@ function WorkspaceShell() {
 
   // 드래그드롭 열기 — the WebView never fires a browser `drop`, so subscribe to Tauri's native
   // `onDragDropEvent` (it carries OS file PATHS). A dropped .hwp/.hwpx opens; anything else is ignored.
-  const openPathRef = useRef(openPath);
-  openPathRef.current = openPath;
+  const requestOpenRef = useRef(requestOpen);
+  requestOpenRef.current = requestOpen;
   useEffect(() => {
     let un: undefined | (() => void);
     (async () => {
@@ -124,7 +182,7 @@ function WorkspaceShell() {
         const p = event.payload;
         if (p.type !== "drop") return;
         const hit = p.paths.find((f) => IS_DOC.test(f));
-        if (hit) openPathRef.current(hit);
+        if (hit) requestOpenRef.current([hit]);
         else if (p.paths.length > 0) flash(".hwp / .hwpx 파일만 열 수 있습니다");
       });
     })();
@@ -172,6 +230,39 @@ function WorkspaceShell() {
       <div className="min-h-0 flex-1">
         <HwpWorkspace adapter={adapter} document={doc} onAiRequest={disabledAi} enableEditing onExport={onExport} />
       </div>
+
+      {hasDoc && pendingOpenPaths[0] && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="replace-document-title"
+        >
+          <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-2xl dark:bg-neutral-800">
+            <h2 id="replace-document-title" className="text-base font-semibold">
+              현재 문서를 닫을까요?
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-neutral-600 dark:text-neutral-300">
+              {basename(pendingOpenPaths[0])} 파일을 열면 저장하지 않은 변경은 사라질 수 있습니다.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                autoFocus
+                onClick={() => resolveReplacement(false)}
+                className="rounded-md border border-black/15 px-3 py-1.5 text-sm dark:border-white/20"
+              >
+                취소
+              </button>
+              <button
+                onClick={() => resolveReplacement(true)}
+                className="rounded-md bg-violet-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-violet-500"
+              >
+                열기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
