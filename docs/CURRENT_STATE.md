@@ -3,7 +3,7 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
-- 갱신: 2026-08-24 · Codex(sol) — **PR #179 병합 · #180 next common-object 착수**.
+- 갱신: 2026-08-24 · Codex(sol) — **PR #181 게시 · #180 CI 추적 중**.
   #175는 exact head `6711ff9`에서 issue-link/build-test/licenses green, CLEAN/MERGEABLE,
   review/general/inline 댓글 0을 확인하고 protected main `c917c584`로 squash 병합했다. #174 close와
   원격 branch 정리 후 #94에 bounded two-table host 소유 근거를 동기화했다. 월요일 #114 감사에서
@@ -86,8 +86,10 @@
   분리한 Chromium **85 pass/3 intentional skip/0 fail**이다. 임시 dependency link를 제거했고
   production route·rhwp·HWPX parser/serializer·shared typesetter·generated asset diff 0을 확인했다.
   final security/diff review도 source content/path/hash/raw payload/credential 노출 0, silent fallback 0,
-  변경 파일은 parser/tests/state 5개뿐이다. **다음:** commit/push/PR #180→required CI·자율 병합→
-  #94 동기화와 next child.
+  변경 파일은 parser/tests/state 5개뿐이다. 구현 commit `c64bbf3`을 push하고 PR #181을
+  `Closes #180`으로 게시했다. exact head `c64bbf3217dbf48f5800e52fdec2476484a56edb`는
+  MERGEABLE, review/general 댓글 0이며 issue-link green, build-test/licenses 진행 중이다. **다음:**
+  exact-head required CI와 inline 댓글까지 추적→green 자율 병합→#94 동기화와 next child.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #173 병합 · #174 multi-table 경계 착수**.
   자체 HWP5 파서가 exact `tbl ` marker/common-object/TABLE/LIST_HEADER/cell paragraph를 검증해

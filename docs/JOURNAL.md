@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #180 PR #181 게시
+- exact parser/test/state commit `c64bbf3` push, PR #181(`Closes #180`) 생성.
+- exact head `c64bbf3217dbf48f5800e52fdec2476484a56edb`, MERGEABLE, issue-link green.
+- build-test/licenses·inline 댓글 추적→green 자율 병합→#94/next child.
+
 ## 2026-08-24 (Codex sol) · #180 full green / PR ready
 - quick/full Rust·PDF51·canonical·corpus84·oracle82·HWPX·wasm/JS + Vitest 1,018 green.
 - 허용된 로컬 서버 Chromium 85 pass/3 intentional skip/0 fail; 임시 link 제거.
