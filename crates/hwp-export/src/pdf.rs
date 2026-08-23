@@ -1197,6 +1197,7 @@ mod tests {
         let plain = doc_with(vec![Block::Paragraph(para("본문"))]);
         let mut numbered = plain.clone();
         numbered.sections[0].page_number = Some(PageNumberDecoration {
+            start: std::num::NonZeroU16::new(7).unwrap(),
             format: PageNumberFormat::Digit,
             position: PageNumberPosition::BottomCenter,
             prefix: Some('['),
@@ -1223,7 +1224,7 @@ mod tests {
         assert_eq!(
             numbered_out.replay[0].text.produced,
             plain_out.replay[0].text.produced + 5,
-            "-[1]- is five shared PaintOp::Glyph operations"
+            "-[7]- is five shared PaintOp::Glyph operations"
         );
         assert_eq!(
             numbered_out.replay[0].text.produced,

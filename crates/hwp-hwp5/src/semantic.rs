@@ -24,6 +24,7 @@ const TAG_PAGE_DEF: u16 = 0x49;
 const CTRL_SECTION_DEF: u32 = u32::from_be_bytes(*b"secd");
 const CTRL_COLUMN_DEF: u32 = u32::from_be_bytes(*b"cold");
 const CTRL_PAGE_NUM_POS: u32 = u32::from_be_bytes(*b"pgnp");
+const CTRL_NEW_NUMBER: u32 = u32::from_be_bytes(*b"nwno");
 
 #[derive(Clone, Copy, Debug, Default)]
 struct IdMappings {
@@ -934,7 +935,10 @@ fn parse_section(
     if !allow_page_number {
         if let Some(control) = stream.records.iter().find(|record| {
             record.tag == TAG_CTRL_HEADER
-                && read_u32(data(stream, record), 0) == Some(CTRL_PAGE_NUM_POS)
+                && matches!(
+                    read_u32(data(stream, record), 0),
+                    Some(CTRL_PAGE_NUM_POS) | Some(CTRL_NEW_NUMBER)
+                )
         }) {
             return Err(malformed(
                 control,
@@ -1146,7 +1150,7 @@ fn parse_paragraph(
                 };
                 if !matches!(
                     control_id,
-                    CTRL_SECTION_DEF | CTRL_COLUMN_DEF | CTRL_PAGE_NUM_POS
+                    CTRL_SECTION_DEF | CTRL_COLUMN_DEF | CTRL_PAGE_NUM_POS | CTRL_NEW_NUMBER
                 ) {
                     return Err(unsupported(record, section));
                 }
@@ -1198,6 +1202,7 @@ fn parse_paragraph(
     let mut page = None;
     let mut raw_columns = None;
     let mut page_number = None;
+    let mut page_number_start = None;
     for ((marker_offset, marker_id), (control, children)) in
         decoded.structural_controls.iter().zip(structural_controls)
     {
@@ -1248,8 +1253,31 @@ fn parse_paragraph(
                     section,
                 )?);
             }
+            CTRL_NEW_NUMBER => {
+                if !children.is_empty() || page_number_start.is_some() {
+                    return Err(malformed(
+                        control,
+                        Some(section),
+                        "page-number restart has children or is duplicated",
+                    ));
+                }
+                page_number_start = Some((
+                    parse_new_number_control(data(stream, control), control, section)?,
+                    *control,
+                ));
+            }
             _ => unreachable!("structural control id filtered above"),
         }
+    }
+    if let Some((start, control)) = page_number_start {
+        let Some(number) = page_number.as_mut() else {
+            return Err(malformed(
+                &control,
+                Some(section),
+                "page-number restart requires an owned page-number position",
+            ));
+        };
+        number.start = start;
     }
     if break_type & 0x01 != 0 && page.is_none() {
         return Err(unsupported_reason(
@@ -1409,12 +1437,57 @@ fn parse_page_number_control(
         ));
     }
     Ok(PageNumberDecoration {
+        start: std::num::NonZeroU16::MIN,
         format,
         position,
         prefix: scalar(10)?,
         suffix: scalar(12)?,
         dash: scalar(14)?,
     })
+}
+
+fn parse_new_number_control(
+    bytes: &[u8],
+    record: &Record,
+    section: usize,
+) -> Result<std::num::NonZeroU16> {
+    if bytes.len() != 10 {
+        return Err(malformed(
+            record,
+            Some(section),
+            "new-number control is not exactly 10 bytes",
+        ));
+    }
+    if read_u32(bytes, 0) != Some(CTRL_NEW_NUMBER) {
+        return Err(unsupported(*record, section));
+    }
+    let attr = read_u32(bytes, 4).expect("exact length checked");
+    if attr & !0x0f != 0 {
+        return Err(malformed(
+            record,
+            Some(section),
+            "new-number control has unknown attribute bits",
+        ));
+    }
+    match attr & 0x0f {
+        0 => {}
+        1..=5 => {
+            return Err(malformed(
+                record,
+                Some(section),
+                "non-page new-number counter is not yet supported",
+            ));
+        }
+        _ => {
+            return Err(malformed(
+                record,
+                Some(section),
+                "new-number counter type is not supported",
+            ));
+        }
+    }
+    std::num::NonZeroU16::new(read_u16(bytes, 8).expect("exact length checked"))
+        .ok_or_else(|| malformed(record, Some(section), "page-number restart must be nonzero"))
 }
 
 fn validate_para_usage(
@@ -2043,7 +2116,7 @@ fn decode_text(bytes: &[u8], record: Record, section: usize) -> Result<DecodedTe
                 let control_id = u32::from_le_bytes([lo[0], lo[1], hi[0], hi[1]]);
                 let owned = match unit {
                     0x0002 => matches!(control_id, CTRL_SECTION_DEF | CTRL_COLUMN_DEF),
-                    0x0015 => control_id == CTRL_PAGE_NUM_POS,
+                    0x0015 => matches!(control_id, CTRL_PAGE_NUM_POS | CTRL_NEW_NUMBER),
                     _ => false,
                 };
                 if !owned {

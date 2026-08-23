@@ -94,11 +94,18 @@ pub struct SectionMeta {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PageNumberBlob {
+    /// Defaults to one for schema-v1 projects written before page-number restarts were modeled.
+    #[serde(default = "default_page_number_start")]
+    pub start: u16,
     pub format: String,
     pub position: String,
     pub prefix: Option<char>,
     pub suffix: Option<char>,
     pub dash: Option<char>,
+}
+
+fn default_page_number_start() -> u16 {
+    1
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

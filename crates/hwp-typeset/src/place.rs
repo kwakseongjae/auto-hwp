@@ -2732,7 +2732,7 @@ fn place_section_decorations(
             place_page_number(
                 pg,
                 number,
-                i + 1,
+                usize::from(number.start.get()) + (i - first_page),
                 fonts,
                 left,
                 header_y,
@@ -3124,6 +3124,7 @@ mod tests {
         };
         let without = place_doc(&doc, &ApproxFontMetrics);
         doc.sections[0].page_number = Some(PageNumberDecoration {
+            start: std::num::NonZeroU16::new(7).unwrap(),
             format: PageNumberFormat::LatinUpper,
             position: PageNumberPosition::BottomCenter,
             prefix: Some('['),
@@ -3156,8 +3157,8 @@ mod tests {
             .filter(|glyph| glyph.baseline > 2_400.0)
             .map(|glyph| glyph.ch)
             .collect::<String>();
-        assert_eq!(first_footer, "-[A]-");
-        assert_eq!(second_footer, "-[B]-");
+        assert_eq!(first_footer, "-[G]-");
+        assert_eq!(second_footer, "-[H]-");
     }
 
     #[test]
@@ -3173,6 +3174,7 @@ mod tests {
     #[test]
     fn page_number_positions_map_to_bands_and_duplex_edges() {
         let decoration = |position| PageNumberDecoration {
+            start: std::num::NonZeroU16::MIN,
             format: PageNumberFormat::Digit,
             position,
             prefix: None,
@@ -3229,7 +3231,7 @@ mod tests {
     }
 
     #[test]
-    fn page_number_continues_from_final_page_order_across_sections() {
+    fn page_number_restart_is_scoped_to_each_section() {
         let mut doc = doc_with(vec![Block::Paragraph(para("가"))]);
         doc.sections[0].page = PageSetup {
             width: 5_000,
@@ -3243,6 +3245,7 @@ mod tests {
             ..PageSetup::default()
         };
         let number = PageNumberDecoration {
+            start: std::num::NonZeroU16::MIN,
             format: PageNumberFormat::Digit,
             position: PageNumberPosition::BottomCenter,
             prefix: None,
@@ -3250,10 +3253,14 @@ mod tests {
             dash: None,
         };
         doc.sections[0].page_number = Some(number);
+        let restarted = PageNumberDecoration {
+            start: std::num::NonZeroU16::new(7).unwrap(),
+            ..number
+        };
         doc.sections.push(Section {
             blocks: vec![Block::Paragraph(para("나"))],
             page: doc.sections[0].page,
-            page_number: Some(number),
+            page_number: Some(restarted),
             ..Section::default()
         });
 
@@ -3267,7 +3274,7 @@ mod tests {
                 .collect::<String>()
         };
         assert_eq!(footer_text(&placed.pages[0]), "1");
-        assert_eq!(footer_text(&placed.pages[1]), "2");
+        assert_eq!(footer_text(&placed.pages[1]), "7");
     }
 
     #[test]

@@ -5,6 +5,7 @@
 use crate::style::{CharShape, ParaShape};
 use crate::types::{Dirty, HwpUnit, NodeId, Passthrough, Provenance};
 use std::collections::{BTreeMap, BTreeSet};
+use std::num::NonZeroU16;
 
 /// A whole document.
 #[derive(Clone, Debug, Default)]
@@ -127,8 +128,8 @@ fn block_text(b: &Block, out: &mut String) {
 pub struct Section {
     pub blocks: Vec<Block>,
     pub page: PageSetup,
-    /// Optional page-number decoration scoped to this section. The displayed number is derived from
-    /// final page order by the typesetter; parsers store only source-neutral format/position facts.
+    /// Optional page-number decoration scoped to this section. The typesetter derives progression
+    /// from the source-neutral section start, format, position, and final page order.
     pub page_number: Option<PageNumberDecoration>,
     /// True once `page` was explicitly edited — the serializer then patches the section's `secPr`
     /// (parsed sections leave this false so their original page setup round-trips verbatim).
@@ -143,6 +144,8 @@ pub struct Section {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PageNumberDecoration {
+    /// The first visible number in this section. Zero is not a valid authored restart value.
+    pub start: NonZeroU16,
     pub format: PageNumberFormat,
     pub position: PageNumberPosition,
     pub prefix: Option<char>,

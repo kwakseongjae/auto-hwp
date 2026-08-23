@@ -61,6 +61,7 @@ fn t1d_page_number_semantics_roundtrip_and_are_equality_visible() {
     let mut doc = SemanticDoc::default();
     doc.sections.push(Section {
         page_number: Some(PageNumberDecoration {
+            start: std::num::NonZeroU16::new(7).unwrap(),
             format: PageNumberFormat::RomanLower,
             position: PageNumberPosition::OutsideBottom,
             prefix: Some('('),
@@ -70,12 +71,37 @@ fn t1d_page_number_semantics_roundtrip_and_are_equality_visible() {
         ..Section::default()
     });
 
-    let back = parse(&emit(&doc)).expect("page-number projection round-trip");
+    let mut projected = emit(&doc);
+    assert_eq!(
+        projected.manifest.sections[0]
+            .page_number
+            .as_ref()
+            .unwrap()
+            .start,
+        7
+    );
+    let back = parse(&projected).expect("page-number projection round-trip");
     assert!(doc_value_eq(&doc, &back));
+
+    projected.manifest.sections[0]
+        .page_number
+        .as_mut()
+        .unwrap()
+        .start = 0;
+    assert!(parse(&projected).is_err(), "zero restart must fail closed");
 
     let mut tampered = back;
     tampered.sections[0].page_number = None;
     assert!(!doc_value_eq(&doc, &tampered));
+}
+
+#[test]
+fn t1e_legacy_page_number_blob_defaults_restart_to_one() {
+    let blob: hwp_jsx::project::PageNumberBlob = serde_json::from_str(
+        r#"{"format":"digit","position":"bottom-center","prefix":null,"suffix":null,"dash":null}"#,
+    )
+    .expect("pre-restart schema-v1 blob remains readable");
+    assert_eq!(blob.start, 1);
 }
 
 /// T1b — the equality test is FALSIFIABLE: mutating the round-tripped doc breaks it.
