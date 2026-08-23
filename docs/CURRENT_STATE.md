@@ -3,6 +3,42 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-23 · Codex(sol) — **#158 전체 검증 완료 · PR 준비**.
+  first-party support-pool slice의 최종 보안/diff review에서 HWP 5.1 numbering 확장은 실측 구조를
+  정확히 소비하되 의미 소유 전 active use를 계속 fail-closed하는 경계를 명시했다. focused
+  hwp-hwp5 **34 tests**, clippy, wasm32와 quick 전체가 green이고, full은 Rust/PDF51/canonical
+  **8/18/24·98.9%+**/corpus84/oracle82/HWPX/wasm/licenses, JS build, Vitest **1,018**, 실제 Chromium
+  **85 pass/3 intentional skip/0 fail**을 통과했다. 임시 의존성 링크 제거 후 production route,
+  generated asset, `external/rhwp` diff 0. **다음:** commit/push/PR #158→필수 CI·댓글 확인→green
+  자율 병합→공개 benchmark `PARA_HEADER 0x42` 경계를 다음 child issue로 분리한다.
+
+- 갱신: 2026-08-23 · Codex(sol) — **#158 quick 전체 green**.
+  support-pool parser의 모든 count×payload는 overflow/정확 길이를 먼저 검증하고, base numbering/bullet
+  char-shape 및 para tab/numbering/border refs는 범위를 확인한다. known border style만 축약 매핑하며 unknown,
+  pattern/image/gradient/alpha/mixed fill은 거부한다. hostile 경로의 `expect`는 앞선 exact-bound 검사 뒤뿐이고
+  오류는 tag·section·offset 정적 문구만 담는다. quick 전체에서 workspace tests, PDF 51, canonical
+  **8/18/24·98.9%+**, corpus 84, PDF parity, oracle 82, HWPX locks, wasm32, licenses가 green이다.
+  `external/rhwp`/generated/production route diff 0. **다음:** `verify-local --full`→final diff→commit/PR/CI/병합.
+
+- 갱신: 2026-08-23 · Codex(sol) — **#158 support pools focused green**.
+  first-party lane이 BORDER_FILL의 4 edge·solid shade·diagonal을 shared `BorderFillDef`로 옮기고,
+  TAB_DEF/NUMBERING(5.1 확장 8–10레벨 포함)/BULLET 가변 payload와 모든 pool ref를 strict 검증한다.
+  pool 존재와 active use를 분리해 기본 tab/비활성 ref는 보존하되 custom tab·목록/글머리·가시 paragraph
+  border/fill은 거짓 렌더 없이 content-free fail-closed한다. 공개 benchmark의 첫 경계는 기존
+  DocInfo PARA_SHAPE(tag 0x19) pool-ref 실패에서 BodyText PARA_HEADER(tag 0x42)로 전진했다.
+  합성 정상/적대 7건 추가, hwp-hwp5 **34 tests**, clippy `-D warnings`, wasm32 green.
+  **다음:** quick 전체 게이트→security/diff review→full→commit/push/PR #158→필수 CI·자율 병합.
+  production route와 `external/rhwp`는 불변이다.
+
+- 갱신: 2026-08-23 · Codex(sol) — **PR #157 병합 · #158 support-pool slice 착수**.
+  #157은 head `60cc790`에서 issue-link·build-test 8m02s·licenses green, CLEAN/MERGEABLE,
+  리뷰/일반/인라인 댓글 0을 확인한 뒤 main `82ca4e6`로 squash 병합했고 #156이 close됐다.
+  원격 브랜치를 정리하고 #94에 완료 근거를 동기화했다. 공개 benchmark의 다음 실패점이
+  PARA_SHAPE support-pool 참조임을 재현해 child #158을 만들고 정확한 최신 main에서
+  `codex/issue-158-hwp5-support-pools`를 시작했다. **다음:** BORDER_FILL/TAB_DEF/NUMBERING/BULLET를
+  strict parse하되 inert presence와 active semantics를 나눠, 표현 불가능한 탭·목록·border는 계속
+  fail-closed한다. production route와 `external/rhwp`는 바꾸지 않는다.
+
 - 갱신: 2026-08-23 · Codex(sol) — **#156 PR #157 게시**.
   검증 완료 commit `01b637c`를 push하고 PR #157(`Closes #156`, `Refs #94 #87`)을 만들었다.
   strict PAGE_DEF/source metrics, unsupported fail-closed, no production cutover/no rhwp fallback과

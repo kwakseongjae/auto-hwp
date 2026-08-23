@@ -47,6 +47,31 @@ struct Pools {
     section_count: usize,
     char_shapes: Vec<CharShape>,
     para_shapes: Vec<ParaShape>,
+    para_usage: Vec<ParaUsage>,
+    border_fills: Vec<BorderFillDef>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct ParaUsage {
+    has_custom_tabs: bool,
+    numbering: u16,
+    border_fill: u16,
+    head_type: u8,
+}
+
+#[derive(Clone, Debug, Default)]
+struct TabDef {
+    custom_count: usize,
+}
+
+#[derive(Clone, Debug, Default)]
+struct NumberingDef {
+    char_shape_refs: Vec<u32>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct BulletDef {
+    char_shape_ref: u32,
 }
 
 pub(crate) fn parse_text_only(bytes: &[u8]) -> Result<SemanticDoc> {
@@ -79,8 +104,12 @@ pub(crate) fn parse_text_only(bytes: &[u8]) -> Result<SemanticDoc> {
         doc.header_pools.para.insert(index as u64, shape.clone());
         doc.para_shapes.push(shape);
     }
+    for (index, border) in pools.border_fills.into_iter().enumerate() {
+        doc.header_pools.border.insert((index + 1) as u64, border);
+    }
     for stream in section_streams {
-        doc.sections.push(parse_section(stream, &doc)?);
+        doc.sections
+            .push(parse_section(stream, &doc, &pools.para_usage)?);
     }
     Ok(doc)
 }
@@ -142,17 +171,54 @@ fn parse_pools(inspected: &Hwp5Probe) -> Result<Pools> {
         .filter(|record| record.tag == TAG_CHAR_SHAPE)
         .map(|record| parse_char_shape(data(stream, record), record, &faces))
         .collect::<Result<Vec<_>>>()?;
-    let para_shapes = stream
+    let border_fills = stream
+        .records
+        .iter()
+        .filter(|record| record.tag == TAG_BORDER_FILL)
+        .map(|record| parse_border_fill(data(stream, record), record))
+        .collect::<Result<Vec<_>>>()?;
+    let tab_defs = stream
+        .records
+        .iter()
+        .filter(|record| record.tag == TAG_TAB_DEF)
+        .map(|record| parse_tab_def(data(stream, record), record))
+        .collect::<Result<Vec<_>>>()?;
+    let numberings = stream
+        .records
+        .iter()
+        .filter(|record| record.tag == TAG_NUMBERING)
+        .map(|record| parse_numbering(data(stream, record), record))
+        .collect::<Result<Vec<_>>>()?;
+    let bullets = stream
+        .records
+        .iter()
+        .filter(|record| record.tag == TAG_BULLET)
+        .map(|record| parse_bullet(data(stream, record), record))
+        .collect::<Result<Vec<_>>>()?;
+    validate_support_refs(&numberings, &bullets, char_shapes.len(), stream)?;
+    let parsed_para_shapes = stream
         .records
         .iter()
         .filter(|record| record.tag == TAG_PARA_SHAPE)
-        .map(|record| parse_para_shape(data(stream, record), record))
+        .map(|record| {
+            parse_para_shape(
+                data(stream, record),
+                record,
+                &tab_defs,
+                numberings.len(),
+                bullets.len(),
+                border_fills.len(),
+            )
+        })
         .collect::<Result<Vec<_>>>()?;
+    let (para_shapes, para_usage): (Vec<_>, Vec<_>) = parsed_para_shapes.into_iter().unzip();
 
     Ok(Pools {
         section_count,
         char_shapes,
         para_shapes,
+        para_usage,
+        border_fills,
     })
 }
 
@@ -316,7 +382,341 @@ fn parse_char_shape(bytes: &[u8], record: &Record, faces: &[Vec<FontFace>]) -> R
     })
 }
 
-fn parse_para_shape(bytes: &[u8], record: &Record) -> Result<ParaShape> {
+fn parse_border_fill(bytes: &[u8], record: &Record) -> Result<BorderFillDef> {
+    let mut reader = Reader::new(bytes);
+    let attr = reader
+        .u16()
+        .ok_or_else(|| malformed(record, None, "BORDER_FILL has no attributes"))?;
+    let mut borders = [None; 4];
+    let mut has_border = false;
+    for edge in &mut borders {
+        let line_type = reader
+            .u8()
+            .ok_or_else(|| malformed(record, None, "BORDER_FILL edge is truncated"))?;
+        let width = reader
+            .u8()
+            .ok_or_else(|| malformed(record, None, "BORDER_FILL edge is truncated"))?;
+        let color = reader
+            .u32()
+            .ok_or_else(|| malformed(record, None, "BORDER_FILL edge is truncated"))?;
+        let style = border_line_style(line_type)
+            .ok_or_else(|| malformed(record, None, "BORDER_FILL has an unknown line type"))?;
+        if width > 15 {
+            return Err(malformed(
+                record,
+                None,
+                "BORDER_FILL has an unknown line width",
+            ));
+        }
+        has_border |= style != LineStyle::None;
+        *edge = Some(CellEdge {
+            color: opaque_bgr(color),
+            style,
+            width_px: border_width_px(width),
+        });
+    }
+    let diagonal_type = reader
+        .u8()
+        .ok_or_else(|| malformed(record, None, "BORDER_FILL diagonal is truncated"))?;
+    let diagonal_width = reader
+        .u8()
+        .ok_or_else(|| malformed(record, None, "BORDER_FILL diagonal is truncated"))?;
+    let diagonal_color = reader
+        .u32()
+        .ok_or_else(|| malformed(record, None, "BORDER_FILL diagonal is truncated"))?;
+    let diagonal_style = border_line_style(diagonal_type)
+        .ok_or_else(|| malformed(record, None, "BORDER_FILL has an unknown diagonal type"))?;
+    if diagonal_width > 15 {
+        return Err(malformed(
+            record,
+            None,
+            "BORDER_FILL has an unknown diagonal width",
+        ));
+    }
+    let diagonal = diagonal_kind(attr, diagonal_style).map(|kind| CellDiagonal {
+        kind,
+        color: opaque_bgr(diagonal_color),
+        width_px: border_width_px(diagonal_width),
+    });
+
+    let fill_type = reader
+        .u32()
+        .ok_or_else(|| malformed(record, None, "BORDER_FILL has no fill type"))?;
+    let shade = match fill_type {
+        0 => {
+            let reserved = reader
+                .u32()
+                .ok_or_else(|| malformed(record, None, "BORDER_FILL no-fill tail is truncated"))?;
+            if reserved != 0 {
+                return Err(malformed(
+                    record,
+                    None,
+                    "BORDER_FILL no-fill tail is not zero",
+                ));
+            }
+            None
+        }
+        1 => {
+            let face = reader
+                .u32()
+                .ok_or_else(|| malformed(record, None, "BORDER_FILL solid fill is truncated"))?;
+            let _pattern_color = reader
+                .u32()
+                .ok_or_else(|| malformed(record, None, "BORDER_FILL solid fill is truncated"))?;
+            let pattern = reader
+                .i32()
+                .ok_or_else(|| malformed(record, None, "BORDER_FILL solid fill is truncated"))?;
+            if pattern != -1 {
+                return Err(malformed(
+                    record,
+                    None,
+                    "BORDER_FILL pattern semantics are not supported",
+                ));
+            }
+            let additional = reader.u32().ok_or_else(|| {
+                malformed(record, None, "BORDER_FILL additional property is truncated")
+            })?;
+            if additional != 0 {
+                return Err(malformed(
+                    record,
+                    None,
+                    "BORDER_FILL additional property is not supported",
+                ));
+            }
+            let alpha = reader
+                .u8()
+                .ok_or_else(|| malformed(record, None, "BORDER_FILL alpha is truncated"))?;
+            if alpha != 0 {
+                return Err(malformed(
+                    record,
+                    None,
+                    "BORDER_FILL alpha is not supported",
+                ));
+            }
+            nondefault_shade(face)
+        }
+        value if value & !0x07 != 0 => {
+            return Err(malformed(record, None, "BORDER_FILL has unknown fill bits"))
+        }
+        _ => {
+            return Err(malformed(
+                record,
+                None,
+                "BORDER_FILL image, gradient, or mixed fill is not supported",
+            ))
+        }
+    };
+    if !reader.is_finished() {
+        return Err(malformed(
+            record,
+            None,
+            "BORDER_FILL has an unowned trailing payload",
+        ));
+    }
+    Ok(BorderFillDef {
+        borders,
+        shade,
+        diagonal,
+        has_border,
+    })
+}
+
+fn parse_tab_def(bytes: &[u8], record: &Record) -> Result<TabDef> {
+    let mut reader = Reader::new(bytes);
+    let attr = reader
+        .u32()
+        .ok_or_else(|| malformed(record, None, "TAB_DEF header is truncated"))?;
+    if attr & !0x03 != 0 {
+        return Err(malformed(
+            record,
+            None,
+            "TAB_DEF has unsupported attribute bits",
+        ));
+    }
+    let count = reader
+        .u32()
+        .ok_or_else(|| malformed(record, None, "TAB_DEF count is truncated"))?
+        as usize;
+    let payload = count.checked_mul(8).ok_or_else(|| {
+        malformed(
+            record,
+            None,
+            "TAB_DEF item count exceeds the bounded payload",
+        )
+    })?;
+    if reader.remaining() != payload {
+        return Err(malformed(
+            record,
+            None,
+            "TAB_DEF count differs from its item payload",
+        ));
+    }
+    for _ in 0..count {
+        let _position = reader.u32().expect("payload length checked");
+        let tab_type = reader.u8().expect("payload length checked");
+        let fill_type = reader.u8().expect("payload length checked");
+        let reserved = reader.u16().expect("payload length checked");
+        if tab_type > 3 || fill_type > 16 || reserved != 0 {
+            return Err(malformed(
+                record,
+                None,
+                "TAB_DEF item has an unsupported type or reserved value",
+            ));
+        }
+    }
+    Ok(TabDef {
+        custom_count: count,
+    })
+}
+
+fn parse_numbering(bytes: &[u8], record: &Record) -> Result<NumberingDef> {
+    let mut reader = Reader::new(bytes);
+    let mut char_shape_refs = Vec::with_capacity(7);
+    for _ in 0..7 {
+        reader
+            .u32()
+            .ok_or_else(|| malformed(record, None, "NUMBERING head is truncated"))?;
+        reader
+            .skip(4)
+            .ok_or_else(|| malformed(record, None, "NUMBERING head is truncated"))?;
+        char_shape_refs.push(
+            reader
+                .u32()
+                .ok_or_else(|| malformed(record, None, "NUMBERING head is truncated"))?,
+        );
+        reader
+            .hwp_string()
+            .ok_or_else(|| malformed(record, None, "NUMBERING format string is invalid"))?;
+    }
+    reader
+        .u16()
+        .ok_or_else(|| malformed(record, None, "NUMBERING start value is truncated"))?;
+    if reader.remaining() != 0 {
+        if reader.remaining() < 28 {
+            return Err(malformed(
+                record,
+                None,
+                "NUMBERING has a partial level-start extension",
+            ));
+        }
+        for _ in 0..7 {
+            reader.u32().expect("extension length checked");
+        }
+        if reader.remaining() != 0 {
+            // HWP 5.1 stores levels 8–10 as three interleaved extended
+            // heads, format strings, and start values. We consume that
+            // structure exactly but keep active numbering fail-closed until
+            // the extended head semantics are independently owned.
+            for _ in 0..3 {
+                reader.u32().ok_or_else(|| {
+                    malformed(record, None, "NUMBERING extended head is truncated")
+                })?;
+                reader.skip(8).ok_or_else(|| {
+                    malformed(record, None, "NUMBERING extended head is truncated")
+                })?;
+                reader.hwp_string().ok_or_else(|| {
+                    malformed(record, None, "NUMBERING extended format string is invalid")
+                })?;
+                reader.u32().ok_or_else(|| {
+                    malformed(record, None, "NUMBERING extended start value is truncated")
+                })?;
+            }
+            if !reader.is_finished() {
+                return Err(malformed(
+                    record,
+                    None,
+                    "NUMBERING has an unknown trailing extension",
+                ));
+            }
+        }
+    }
+    Ok(NumberingDef { char_shape_refs })
+}
+
+fn parse_bullet(bytes: &[u8], record: &Record) -> Result<BulletDef> {
+    let mut reader = Reader::new(bytes);
+    reader
+        .u32()
+        .ok_or_else(|| malformed(record, None, "BULLET head is truncated"))?;
+    reader
+        .skip(4)
+        .ok_or_else(|| malformed(record, None, "BULLET head is truncated"))?;
+    let char_shape_ref = reader
+        .u32()
+        .ok_or_else(|| malformed(record, None, "BULLET head is truncated"))?;
+    reader
+        .u16()
+        .ok_or_else(|| malformed(record, None, "BULLET character is truncated"))?;
+    match reader.remaining() {
+        0 => false,
+        10 => {
+            let image = reader.u32().expect("extension length checked") != 0;
+            reader.skip(4).expect("extension length checked");
+            reader.u16().expect("extension length checked");
+            image
+        }
+        _ => {
+            return Err(malformed(
+                record,
+                None,
+                "BULLET has a partial or unknown extension",
+            ))
+        }
+    };
+    Ok(BulletDef { char_shape_ref })
+}
+
+fn validate_support_refs(
+    numberings: &[NumberingDef],
+    bullets: &[BulletDef],
+    char_shapes: usize,
+    stream: &StreamProbe,
+) -> Result<()> {
+    let numbering_records: Vec<_> = stream
+        .records
+        .iter()
+        .filter(|record| record.tag == TAG_NUMBERING)
+        .collect();
+    for (definition, record) in numberings.iter().zip(numbering_records) {
+        for &reference in &definition.char_shape_refs {
+            if reference != u32::MAX && reference as usize >= char_shapes {
+                return Err(invalid_pool_ref(
+                    "numbering character shape",
+                    reference as usize,
+                    char_shapes,
+                    record,
+                ));
+            }
+        }
+    }
+    let bullet_records: Vec<_> = stream
+        .records
+        .iter()
+        .filter(|record| record.tag == TAG_BULLET)
+        .collect();
+    for (definition, record) in bullets.iter().zip(bullet_records) {
+        if definition.char_shape_ref != u32::MAX
+            && definition.char_shape_ref as usize >= char_shapes
+        {
+            return Err(invalid_pool_ref(
+                "bullet character shape",
+                definition.char_shape_ref as usize,
+                char_shapes,
+                record,
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn parse_para_shape(
+    bytes: &[u8],
+    record: &Record,
+    tab_defs: &[TabDef],
+    numberings: usize,
+    bullets: usize,
+    border_fills: usize,
+) -> Result<(ParaShape, ParaUsage)> {
     if bytes.len() < 42 {
         return Err(malformed(
             record,
@@ -328,14 +728,46 @@ fn parse_para_shape(bytes: &[u8], record: &Record) -> Result<ParaShape> {
     let tab_def = read_u16(bytes, 28).expect("base length checked");
     let numbering = read_u16(bytes, 30).expect("base length checked");
     let border = read_u16(bytes, 32).expect("base length checked");
-    if tab_def != 0 || numbering != 0 || border != 0 {
-        return Err(malformed(
+    if tab_defs.is_empty() {
+        if tab_def != 0 {
+            return Err(invalid_pool_ref(
+                "tab definition",
+                tab_def as usize,
+                0,
+                record,
+            ));
+        }
+    } else if tab_def as usize >= tab_defs.len() {
+        return Err(invalid_pool_ref(
+            "tab definition",
+            tab_def as usize,
+            tab_defs.len(),
             record,
-            None,
-            "text-only PARA_SHAPE references an unsupported pool",
         ));
     }
-    Ok(ParaShape {
+    let head_type = ((attr >> 23) & 0x03) as u8;
+    let head_pool = if head_type == 3 { bullets } else { numberings };
+    if numbering != 0 && numbering as usize > head_pool {
+        return Err(invalid_pool_ref(
+            if head_type == 3 {
+                "bullet"
+            } else {
+                "numbering"
+            },
+            numbering as usize,
+            head_pool,
+            record,
+        ));
+    }
+    if border != 0 && border as usize > border_fills {
+        return Err(invalid_pool_ref(
+            "border fill",
+            border as usize,
+            border_fills,
+            record,
+        ));
+    }
+    let shape = ParaShape {
         align: match (attr >> 2) & 0x07 {
             1 => HorizontalAlign::Left,
             2 => HorizontalAlign::Right,
@@ -356,12 +788,32 @@ fn parse_para_shape(bytes: &[u8], record: &Record) -> Result<ParaShape> {
         space_before: read_i32(bytes, 16).expect("base length checked"),
         space_after: read_i32(bytes, 20).expect("base length checked"),
         line_spacing_value: read_i32(bytes, 24).expect("base length checked"),
+        widow_orphan: attr & (1 << 16) != 0,
+        keep_with_next: attr & (1 << 17) != 0,
+        keep_lines: attr & (1 << 18) != 0,
         page_break_before: attr & (1 << 19) != 0,
+        numbering_id: numbering,
+        border_fill_id: border,
         ..ParaShape::default()
-    })
+    };
+    Ok((
+        shape,
+        ParaUsage {
+            has_custom_tabs: tab_defs
+                .get(tab_def as usize)
+                .is_some_and(|definition| definition.custom_count != 0),
+            numbering,
+            border_fill: border,
+            head_type,
+        },
+    ))
 }
 
-fn parse_section(stream: &StreamProbe, doc: &SemanticDoc) -> Result<Section> {
+fn parse_section(
+    stream: &StreamProbe,
+    doc: &SemanticDoc,
+    para_usage: &[ParaUsage],
+) -> Result<Section> {
     let section = stream.section.expect("caller selected section streams");
     let mut blocks = Vec::new();
     let mut page = None;
@@ -390,7 +842,13 @@ fn parse_section(stream: &StreamProbe, doc: &SemanticDoc) -> Result<Section> {
             .get(ordinal + 1)
             .copied()
             .unwrap_or(stream.records.len());
-        let parsed = parse_paragraph(stream, &stream.records[start..end], doc, section)?;
+        let parsed = parse_paragraph(
+            stream,
+            &stream.records[start..end],
+            doc,
+            para_usage,
+            section,
+        )?;
         if let Some(parsed_page) = parsed.page {
             if ordinal != 0 || page.replace(parsed_page).is_some() {
                 return Err(malformed(
@@ -422,6 +880,7 @@ fn parse_paragraph(
     stream: &StreamProbe,
     records: &[Record],
     doc: &SemanticDoc,
+    para_usage: &[ParaUsage],
     section: usize,
 ) -> Result<ParsedParagraph> {
     let header = records[0];
@@ -453,6 +912,15 @@ fn parse_paragraph(
             offset: header.head,
         });
     }
+    let usage = para_usage
+        .get(para_shape_id)
+        .ok_or(Error::InvalidReference {
+            kind: "paragraph usage",
+            index: para_shape_id,
+            pool_len: para_usage.len(),
+            section: Some(section),
+            offset: header.head,
+        })?;
 
     let mut text_record = None;
     let mut shape_record = None;
@@ -509,6 +977,7 @@ fn parse_paragraph(
             "PARA_HEADER control mask differs from supported PARA_TEXT controls",
         ));
     }
+    validate_para_usage(usage, &decoded, doc, &header, section)?;
     let page = match (decoded.section_controls.as_slice(), section_control) {
         ([], None) => None,
         ([(marker_offset, marker_id)], Some((control, children)))
@@ -578,6 +1047,54 @@ fn parse_paragraph(
         },
         page,
     })
+}
+
+fn validate_para_usage(
+    usage: &ParaUsage,
+    decoded: &DecodedText,
+    doc: &SemanticDoc,
+    header: &Record,
+    section: usize,
+) -> Result<()> {
+    if usage.has_custom_tabs && decoded.chars.iter().any(|(_, value)| *value == '\t') {
+        return Err(malformed(
+            header,
+            Some(section),
+            "active custom tab semantics are not supported",
+        ));
+    }
+    if usage.head_type != 0 {
+        return Err(malformed(
+            header,
+            Some(section),
+            if usage.numbering == 0 {
+                "active paragraph head has no numbering or bullet reference"
+            } else {
+                "active numbering and bullet semantics are not supported"
+            },
+        ));
+    }
+    if usage.border_fill != 0 {
+        let border = doc
+            .header_pools
+            .border
+            .get(&(usage.border_fill as u64))
+            .ok_or(Error::InvalidReference {
+                kind: "paragraph border fill",
+                index: usage.border_fill as usize,
+                pool_len: doc.header_pools.border.len(),
+                section: Some(section),
+                offset: header.head,
+            })?;
+        if border.has_border || border.shade.is_some() || border.diagonal.is_some() {
+            return Err(malformed(
+                header,
+                Some(section),
+                "active paragraph border or fill semantics are not supported",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn parse_section_control(
@@ -1105,6 +1622,16 @@ fn unsupported(record: Record, section: usize) -> Error {
     }
 }
 
+fn invalid_pool_ref(kind: &'static str, index: usize, pool_len: usize, record: &Record) -> Error {
+    Error::InvalidReference {
+        kind,
+        index,
+        pool_len,
+        section: None,
+        offset: record.head,
+    }
+}
+
 fn read_u16(bytes: &[u8], offset: usize) -> Option<u16> {
     Some(u16::from_le_bytes(
         bytes.get(offset..offset + 2)?.try_into().ok()?,
@@ -1134,6 +1661,51 @@ fn bgr(value: u32) -> Color {
             a: 255,
         }
     }
+}
+
+fn opaque_bgr(value: u32) -> Color {
+    Color {
+        a: 255,
+        ..bgr(value)
+    }
+}
+
+fn nondefault_shade(value: u32) -> Option<Color> {
+    let color = opaque_bgr(value);
+    ((color.r, color.g, color.b) != (0, 0, 0) && (color.r, color.g, color.b) != (255, 255, 255))
+        .then_some(color)
+}
+
+fn border_line_style(value: u8) -> Option<LineStyle> {
+    Some(match value {
+        0 => LineStyle::None,
+        2 | 4 | 5 | 6 => LineStyle::Dashed,
+        3 | 7 => LineStyle::Dotted,
+        8..=11 => LineStyle::Double,
+        1 | 12..=16 => LineStyle::Solid,
+        _ => return None,
+    })
+}
+
+fn diagonal_kind(attr: u16, style: LineStyle) -> Option<DiagonalKind> {
+    if style == LineStyle::None {
+        return None;
+    }
+    let slash = (attr >> 2) & 0x07 != 0;
+    let backslash = (attr >> 5) & 0x07 != 0;
+    match (slash, backslash) {
+        (true, true) => Some(DiagonalKind::Cross),
+        (true, false) => Some(DiagonalKind::Slash),
+        (false, true) => Some(DiagonalKind::BackSlash),
+        (false, false) => None,
+    }
+}
+
+fn border_width_px(value: u8) -> f64 {
+    const WIDTHS: [f64; 16] = [
+        0.5, 0.5, 0.6, 0.75, 1.0, 1.1, 1.5, 1.9, 2.3, 2.6, 3.8, 5.7, 7.6, 11.3, 15.1, 18.9,
+    ];
+    WIDTHS[value as usize]
 }
 
 struct Reader<'a> {
@@ -1178,6 +1750,14 @@ impl<'a> Reader<'a> {
         Some(())
     }
 
+    fn remaining(&self) -> usize {
+        self.bytes.len().saturating_sub(self.cursor)
+    }
+
+    fn is_finished(&self) -> bool {
+        self.cursor == self.bytes.len()
+    }
+
     fn array10(&mut self) -> Option<[u8; 10]> {
         let value = self.bytes.get(self.cursor..self.cursor + 10)?;
         self.cursor += 10;
@@ -1195,5 +1775,247 @@ impl<'a> Reader<'a> {
             .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
             .collect();
         String::from_utf16(&units).ok()
+    }
+}
+
+#[cfg(test)]
+mod support_pool_tests {
+    use super::*;
+
+    fn record(tag: u16, size: usize) -> Record {
+        Record {
+            tag,
+            level: 0,
+            size,
+            head: 17,
+            data: 21,
+            end: 21 + size,
+            extended: false,
+        }
+    }
+
+    fn border_fill(fill_type: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&(1u16 << 2).to_le_bytes()); // slash direction
+        for (kind, width, color) in [
+            (1u8, 0u8, 0x0000_00ffu32),
+            (2, 1, 0x0000_ff00),
+            (3, 2, 0x00ff_0000),
+            (8, 3, 0),
+        ] {
+            bytes.push(kind);
+            bytes.push(width);
+            bytes.extend_from_slice(&color.to_le_bytes());
+        }
+        bytes.push(1); // diagonal solid
+        bytes.push(0);
+        bytes.extend_from_slice(&0x0000_ff00u32.to_le_bytes());
+        bytes.extend_from_slice(&fill_type.to_le_bytes());
+        match fill_type {
+            0 => bytes.extend_from_slice(&0u32.to_le_bytes()),
+            1 => {
+                bytes.extend_from_slice(&0x00ff_0000u32.to_le_bytes());
+                bytes.extend_from_slice(&0u32.to_le_bytes());
+                bytes.extend_from_slice(&(-1i32).to_le_bytes());
+                bytes.extend_from_slice(&0u32.to_le_bytes());
+                bytes.push(0);
+            }
+            _ => {}
+        }
+        bytes
+    }
+
+    fn numbering() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for _ in 0..7 {
+            bytes.extend_from_slice(&0u32.to_le_bytes());
+            bytes.extend_from_slice(&0i16.to_le_bytes());
+            bytes.extend_from_slice(&0i16.to_le_bytes());
+            bytes.extend_from_slice(&0u32.to_le_bytes());
+            bytes.extend_from_slice(&0u16.to_le_bytes());
+        }
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        for _ in 0..7 {
+            bytes.extend_from_slice(&1u32.to_le_bytes());
+        }
+        for _ in 0..3 {
+            bytes.extend_from_slice(&0u32.to_le_bytes());
+            bytes.extend_from_slice(&0u32.to_le_bytes());
+            bytes.extend_from_slice(&0u32.to_le_bytes());
+            bytes.extend_from_slice(&0u16.to_le_bytes());
+            bytes.extend_from_slice(&1u32.to_le_bytes());
+        }
+        bytes
+    }
+
+    #[test]
+    fn border_fill_maps_known_edges_shade_and_diagonal() {
+        let bytes = border_fill(1);
+        let parsed = parse_border_fill(&bytes, &record(TAG_BORDER_FILL, bytes.len())).unwrap();
+        assert!(parsed.has_border);
+        assert_eq!(parsed.borders[0].unwrap().style, LineStyle::Solid);
+        assert_eq!(parsed.borders[1].unwrap().style, LineStyle::Dashed);
+        assert_eq!(parsed.borders[2].unwrap().style, LineStyle::Dotted);
+        assert_eq!(parsed.borders[3].unwrap().style, LineStyle::Double);
+        assert_eq!(parsed.borders[0].unwrap().color.r, 255);
+        assert_eq!(parsed.shade.unwrap().b, 255);
+        assert_eq!(parsed.diagonal.unwrap().kind, DiagonalKind::Slash);
+    }
+
+    #[test]
+    fn border_fill_refuses_unknown_lines_and_unowned_fills() {
+        let mut bad_line = border_fill(0);
+        bad_line[2] = 17;
+        assert!(matches!(
+            parse_border_fill(&bad_line, &record(TAG_BORDER_FILL, bad_line.len())),
+            Err(Error::MalformedRecord {
+                reason: "BORDER_FILL has an unknown line type",
+                ..
+            })
+        ));
+
+        let image = border_fill(2);
+        assert!(matches!(
+            parse_border_fill(&image, &record(TAG_BORDER_FILL, image.len())),
+            Err(Error::MalformedRecord {
+                reason: "BORDER_FILL image, gradient, or mixed fill is not supported",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn tab_definition_count_is_exact_and_bounded() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&7200u32.to_le_bytes());
+        bytes.extend_from_slice(&0u8.to_le_bytes());
+        bytes.extend_from_slice(&1u8.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        assert_eq!(
+            parse_tab_def(&bytes, &record(TAG_TAB_DEF, bytes.len()))
+                .unwrap()
+                .custom_count,
+            1
+        );
+        bytes.pop();
+        assert!(parse_tab_def(&bytes, &record(TAG_TAB_DEF, bytes.len())).is_err());
+    }
+
+    #[test]
+    fn numbering_510_extension_is_fully_consumed() {
+        let bytes = numbering();
+        let parsed = parse_numbering(&bytes, &record(TAG_NUMBERING, bytes.len())).unwrap();
+        assert_eq!(parsed.char_shape_refs.len(), 7);
+        let mut truncated = bytes;
+        truncated.pop();
+        assert!(parse_numbering(&truncated, &record(TAG_NUMBERING, truncated.len())).is_err());
+    }
+
+    #[test]
+    fn paragraph_refs_are_range_checked_but_inert_refs_survive() {
+        let mut bytes = vec![0; 42];
+        bytes[28..30].copy_from_slice(&0u16.to_le_bytes());
+        bytes[30..32].copy_from_slice(&1u16.to_le_bytes());
+        bytes[32..34].copy_from_slice(&1u16.to_le_bytes());
+        let (shape, usage) = parse_para_shape(
+            &bytes,
+            &record(TAG_PARA_SHAPE, bytes.len()),
+            &[TabDef::default()],
+            1,
+            0,
+            1,
+        )
+        .unwrap();
+        assert_eq!(shape.numbering_id, 1);
+        assert_eq!(shape.border_fill_id, 1);
+        assert_eq!(usage.head_type, 0);
+
+        bytes[30..32].copy_from_slice(&2u16.to_le_bytes());
+        assert!(matches!(
+            parse_para_shape(
+                &bytes,
+                &record(TAG_PARA_SHAPE, bytes.len()),
+                &[TabDef::default()],
+                1,
+                0,
+                1,
+            ),
+            Err(Error::InvalidReference {
+                kind: "numbering",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn active_custom_tabs_lists_and_paragraph_borders_fail_closed() {
+        let header = record(TAG_PARA_HEADER, 22);
+        let mut doc = SemanticDoc::default();
+        doc.header_pools.border.insert(
+            1,
+            BorderFillDef {
+                has_border: true,
+                ..BorderFillDef::default()
+            },
+        );
+        let tab = DecodedText {
+            chars: vec![(0, '\t')],
+            ..DecodedText::default()
+        };
+        assert!(validate_para_usage(
+            &ParaUsage {
+                has_custom_tabs: true,
+                ..ParaUsage::default()
+            },
+            &tab,
+            &doc,
+            &header,
+            0,
+        )
+        .is_err());
+        assert!(validate_para_usage(
+            &ParaUsage {
+                numbering: 1,
+                head_type: 2,
+                ..ParaUsage::default()
+            },
+            &DecodedText::default(),
+            &doc,
+            &header,
+            0,
+        )
+        .is_err());
+        assert!(validate_para_usage(
+            &ParaUsage {
+                border_fill: 1,
+                ..ParaUsage::default()
+            },
+            &DecodedText::default(),
+            &doc,
+            &header,
+            0,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn bullet_base_and_extension_are_exact() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&0i16.to_le_bytes());
+        bytes.extend_from_slice(&0i16.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&0x2022u16.to_le_bytes());
+        let parsed = parse_bullet(&bytes, &record(TAG_BULLET, bytes.len())).unwrap();
+        assert_eq!(parsed.char_shape_ref, 0);
+
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&[0; 4]);
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        assert!(parse_bullet(&bytes, &record(TAG_BULLET, bytes.len())).is_ok());
+        bytes.pop();
+        assert!(parse_bullet(&bytes, &record(TAG_BULLET, bytes.len())).is_err());
     }
 }
