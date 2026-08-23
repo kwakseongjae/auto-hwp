@@ -3,6 +3,32 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-23 · Codex(sol) — **#156 전체 검증 완료 · PR 준비**.
+  strict secd/PAGE_DEF와 blank-only PARA_LINE_SEG 구현을 최종 보안/diff review했고 오류 진단은
+  content-free tag·section·span만 유지한다. focused hwp-hwp5 **27 tests**, clippy, wasm32와 quick 전체
+  게이트가 green이며 canonical 8/18/24·98.9%+, PDF 51, corpus 84, oracle 82, HWPX locks, licenses를
+  보존했다. full의 Rust/PDF/wasm/JS/Vitest 1,018도 green; 샌드박스 포트 EPERM만 분리해 전용
+  `PW_PORT=31856` 실제 Chromium을 재실행한 결과 **85 pass/3 intentional skip/0 fail**. generated asset와
+  `external/rhwp` diff 0, production route 무변경. **다음:** commit/push/PR #156→필수 CI·댓글 확인→green
+  자율 병합→#94 완료 근거와 다음 first-party child를 issue-first로 착수한다.
+
+- 갱신: 2026-08-23 · Codex(sol) — **#156 PAGE_DEF/source metrics focused green**.
+  first-party lane이 첫 문단 `0x0002/secd` marker↔CTRL_HEADER↔단일 PAGE_DEF 계층을 대조하고,
+  40B page size·6 margins·gutter·landscape·positive body box를 `Section.page`로 만든다. duplex/top-flip,
+  column/deco/border/note/unknown child는 거짓 지원 없이 거부한다. 36B PARA_LINE_SEG는 declared count,
+  scalar/control boundary, ordered start, nonnegative geometry를 검증하고 true blank에만 source metric을
+  주며 zero-height/visible text/control-host에는 권위를 주지 않는다. 합성 정상/적대 11건 포함
+  hwp-hwp5 **27 tests**, clippy `-D warnings`, wasm32 green. **다음:** security/diff review→quick 전체 게이트→
+  full 검증→commit/push/PR #156→필수 CI·자율 병합. production route/rhwp는 불변이다.
+
+- 갱신: 2026-08-23 · Codex(sol) — **PR #155 병합 · #156 HWP5 source-layout slice 착수**.
+  #155는 head `d4eb9df`에서 issue-link·build-test 9m52s·licenses green, CLEAN/MERGEABLE,
+  리뷰/일반/인라인 댓글 0을 확인한 뒤 main `c16e231`로 squash 병합했고 #154가 close됐다.
+  #94에 완료 근거를 동기화하고 child #156을 만든 뒤 정확한 최신 main에서
+  `codex/issue-156-hwp5-layout`을 시작했다. **다음:** section-definition/PAGE_DEF와
+  non-authoritative PARA_LINE_SEG source metrics를 strict hierarchy/count/span 검증으로 구현한다.
+  production HWP5 route와 `external/rhwp`는 바꾸지 않는다.
+
 - 갱신: 2026-08-23 · Codex(sol) — **#154 PR #155 게시**.
   검증 완료 commit `a6acbca`를 push하고 PR #155(`Closes #154`, `Refs #94 #87`)를 만들었다.
   PR 본문에 text-only candidate/no production cutover, unsupported fail-closed, no rhwp fallback,
