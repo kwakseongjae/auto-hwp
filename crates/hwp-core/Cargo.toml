@@ -21,6 +21,7 @@ pdfin = ["hwp-foreign/pdfin"]
 hwp-model = { workspace = true }
 hwp-ingest = { workspace = true }
 hwp-hwpx = { workspace = true }
+hwp-hwp5 = { workspace = true }
 hwp-typeset = { workspace = true }
 hwp-ops = { workspace = true }
 hwp-rhwp = { workspace = true }
@@ -29,3 +30,4 @@ hwp-foreign = { workspace = true }
 [dev-dependencies]
 # Build a tiny in-memory `.docx` for the P5 `Engine::open` DOCX-routing test (docx feature only).
 zip = { workspace = true }
+serde_json = { workspace = true }

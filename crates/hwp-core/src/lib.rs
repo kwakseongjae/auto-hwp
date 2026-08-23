@@ -50,6 +50,64 @@ impl Engine {
     }
 }
 
+/// Run only the first-party HWP5 parser lane. This entry point is intentionally separate from
+/// [`Engine::open`]: until the native DocInfo/text slices land, it validates the owned container and
+/// record layers and then returns `CapabilityUnavailable`. It never calls or falls back to rhwp.
+pub fn open_hwp5_own(bytes: &[u8]) -> Result<SemanticDoc> {
+    hwp_hwp5::OwnHwp5Parser::new()
+        .parse(bytes)
+        .map_err(|error| match error {
+            hwp_hwp5::Error::SemanticSlicePending => {
+                Error::CapabilityUnavailable(hwp_hwp5::OWN_SEMANTIC_SLICE_PENDING)
+            }
+            other => Error::Parse(other.to_string()),
+        })
+}
+
+/// Content-free structural comparison between the first-party HWP5 candidate and the current rhwp
+/// semantic oracle. Production routing is not changed by this diagnostic.
+pub fn hwp5_differential(bytes: &[u8]) -> Result<hwp_hwp5::DifferentialReport> {
+    let native = hwp_hwp5::probe(bytes).map_err(|error| Error::Parse(error.to_string()))?;
+    let semantic = RhwpEngine::new().parse(bytes, SourceFormat::Hwp5)?;
+    Ok(hwp_hwp5::compare_with_semantic(&native, &semantic))
+}
+
+#[cfg(all(test, feature = "rhwp"))]
+mod hwp5_candidate_tests {
+    use super::*;
+
+    fn benchmark() -> Vec<u8> {
+        std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../benchmarks/benchmark.hwp"
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn own_only_fails_closed_even_when_rhwp_is_available() {
+        assert!(matches!(
+            open_hwp5_own(&benchmark()),
+            Err(Error::CapabilityUnavailable(message))
+                if message == hwp_hwp5::OWN_SEMANTIC_SLICE_PENDING
+        ));
+    }
+
+    #[test]
+    fn differential_is_content_free_and_deterministic() {
+        let first = hwp5_differential(&benchmark()).unwrap();
+        let second = hwp5_differential(&benchmark()).unwrap();
+        eprintln!("{}", serde_json::to_string_pretty(&first).unwrap());
+        assert_eq!(first, second);
+        assert!(first.native.paragraphs > 0);
+        assert!(first.oracle.paragraphs > 0);
+        let json = serde_json::to_string(&first).unwrap();
+        assert!(!json.contains("benchmark.hwp"));
+        assert!(!json.contains("BodyText"));
+        assert!(json.contains("topo-fnv1a64:"));
+    }
+}
+
 /// **W4.4 — HWPX 수식 enrichment.** HWPX 파서는 `<hp:equation>` 을 verbatim(script + 박스)으로만
 /// 잡아 `EquationRef::rendered_svg` 가 비어 있고, 그래서 own-render/HTML 이 스텁 박스를 그린다.
 /// `.hwp` lift 는 062-5 에서 이미 rhwp 수식 엔진을 부르고 있으므로, 같은 엔진을

@@ -11,7 +11,7 @@
 
 | Capability (trait) | 의미 | 부트스트랩 구현 | 자체 구현 목표 |
 |---|---|---|---|
-| `DocumentParser` | bytes → SemanticDoc | `hwp-rhwp`(HWP5/HWP3), `hwp-hwpx`(HWPX) | HWPX는 자체 완료; #107/#94 자체 HWP5 파서 |
+| `DocumentParser` | bytes → SemanticDoc | `hwp-rhwp`(HWP5/HWP3), `hwp-hwpx`(HWPX) | HWPX 자체 완료; #107 `hwp-hwp5` container/record+differential 완료, #94 semantic cutover |
 | `LayoutEngine` | doc → line segs/pagination | 없음(저장 lineseg는 oracle만) | **`hwp-typeset` 생산 경로** |
 | `Renderer` | layout → PageLayerTree(paint IR) | 없음(`source:"original"`은 read-only 비교만) | **`hwp-render` 생산 경로** |
 | `HwpxSerializer` | doc → .hwpx (dirty-only) | **없음**(rhwp 직렬화기는 한컴 비호환) | **`hwp-hwpx` 자체 — 처음부터 우리 것** |

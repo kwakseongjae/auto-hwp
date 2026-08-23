@@ -53,6 +53,7 @@ hwp-jsx = { path = "crates/hwp-jsx" }
 hwp-export = { path = "crates/hwp-export" }
 hwp-foreign = { path = "crates/hwp-foreign" }
 hwp-hwp5-patch = { path = "crates/hwp-hwp5-patch" }
+hwp-hwp5 = { path = "crates/hwp-hwp5" }
 
 [profile.release]
 opt-level = 3

@@ -43,5 +43,7 @@ HWPX를 rhwp에 다시 넣어 생산 렌더·저장하지 않는다. rhwp 직렬
 ## 독립화 순서
 
 F0(#87/#151)은 이 문서·검증기·코드 경계를 소유한다. F1(#107)은 자체 HWP5 container/record
-skeleton과 differential harness를 만들고, F2(#94)는 feature별 파서를 교체한다. 한 기능씩 corpus와
+경계를 `hwp-hwp5`로 구현했다(`docs/HWP5-NATIVE-PARSER.md`). production decode는 아직 rhwp이며,
+#94가 DocInfo/text/object semantic slice와 corpus parity를 순차 승격한다. 자체 전용 API는 미지원
+slice에서 fail-closed하고 production route로 fallback하지 않는다. 한 기능씩 corpus와
 lineseg/페이지/PDF 시각 오라클을 통과시킨 뒤에만 rhwp 호출을 제거한다.

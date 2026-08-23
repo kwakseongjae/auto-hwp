@@ -2040,12 +2040,14 @@ name = "hwp-core"
 version = "0.0.1"
 dependencies = [
  "hwp-foreign",
+ "hwp-hwp5",
  "hwp-hwpx",
  "hwp-ingest",
  "hwp-model",
  "hwp-ops",
  "hwp-rhwp",
  "hwp-typeset",
+ "serde_json",
  "zip 2.4.2",
 ]
 
@@ -2098,12 +2100,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "hwp-hwp5"
+version = "0.0.1"
+dependencies = [
+ "cfb 0.14.0",
+ "flate2",
+ "hwp-ingest",
+ "hwp-model",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "hwp-hwp5-patch"
 version = "0.0.1"
 dependencies = [
  "cfb 0.14.0",
  "flate2",
  "hwp-core",
+ "hwp-hwp5",
  "hwp-model",
  "serde",
  "serde_json",
