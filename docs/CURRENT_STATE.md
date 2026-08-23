@@ -13,7 +13,11 @@
   Actions checkout은 공식 v6.0.2 commit `d23441a`로 고정했고 signing/publish/upload/secret 권한은
   없다. 공격적/변조 입력 포함 Node 8건과 정본 quick 전체가 green이다(canonical 8/18/24·98.9%+,
   PDF 51, corpus 계약 84, oracle 82, HWPX 잠금, Rust/WASM/licenses). **다음:**
-  commit/push/PR(`Closes #149`, `Refs #144`) → 필수 CI·리뷰·병합. #144는 Developer ID/notary,
+  commit `c25102d`·PR #150(`Closes #149`, `Refs #144`)까지 게시했다. 첫 CI는 issue-link/licenses와
+  신규 release 8건 모두 green이었으나 기존 desktop-shell 정적 테스트가 CI 명령의 한 줄 문자열만
+  허용해, 두 테스트 파일을 multiline로 묶은 동등한 명령을 거부했다(제품/계약 실패 아님).
+  **다음:** 기존 정적 단언을 whitespace-safe로 고쳐 두 파일 결합 실행을 로컬 재현 → 보정 commit/push
+  → 필수 CI·리뷰·병합. #144는 Developer ID/notary,
   Authenticode, mandatory updater key/signature, SBOM/provenance, rollback/clean-machine QA까지 open 유지.
 
 - 갱신: 2026-08-23 · Codex(sol) — **PR #148 병합 · #144 Desktop GA release trust 착수**.
