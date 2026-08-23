@@ -3,6 +3,26 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-23 · Codex(sol) — **#141 데스크톱 무손실 복구 구현·실앱 QA 완료, 게시 준비**.
+  `codex/issue-141-desktop-recovery`를 #145 head `c190e8e` 위에 쌓아 Rust authoritative
+  revision/dirty 상태, 원본 identity(경로는 메모리 전용)와 외부 변경 덮어쓰기 차단, app-data
+  HWPX 복구본(문서당 2세대·총 256MiB·디렉터리 0700/파일 0600·경로/파일명 무저장), 손상/스키마
+  격리 경고, dirty 교체/닫기의 저장·버리기·취소, 재시작 복구/삭제, 복구본의 새 미저장 문서 열기를
+  구현했다. 시작 시 복구 스캔보다 OS open 큐가 먼저 빠지는 경쟁과 저장/autosave 경합도 차단했다.
+  headless 회귀는 hwp-viewer 29건(복구 root symlink 거부·다문서 격리 충돌·discard/autosave
+  경합 포함), React 427건, JS 전체 1,007건, PDF visual 51/51,
+  canonical 8/18/24·98.9%+, Playwright 85 pass/3 intentional skip, licenses green이다. 실제 ad-hoc
+  서명 `.app`에서 공개 benchmark.hwp 8쪽 열기→편집→dirty bullet→닫기 차단/취소→0600 snapshot→
+  강제종료→복구 제안→최신 rev 복원→새 HWPX 저장→clean 종료를 확인했다. 앱 번들은 성공했고
+  최종 코드도 `--bundles app` 패키징·ad-hoc 서명이 PASS했다(DMG 기본 실행만 로컬 샌드박스의
+  bundle_dmg 단계에서 실패). full verify의 기본 3100은 실행 중인 타 FACTSHEET 앱을 재사용해
+  file-input timeout이 났고, 기존 앱을 건드리지 않은 `PW_PORT=3141` 전수 재실행은 85/85 PASS했다.
+  테스트 복구본/출력은 정리했다.
+  사용자 승인 후 PR #137은 main `6574a6d`로 squash 병합했고 #138은 main 위에 #102 커밋만
+  재배치해 원래 head와 byte-identical tree로 새 CI를 실행 중이다. #145도 최신 main 위로 기능
+  트리를 그대로 보존해 재배치하고 새 CI를 실행 중이다. **다음:** 이 변경을 단일 커밋으로 만든 뒤
+  #145 green/병합 → 최신 main 위 rebase → push/PR(`Closes #141`) → 필수 CI, 이어 #142 착수.
+
 - 갱신: 2026-08-23 · Codex(sol) — **PR #136 병합 · 데스크톱 #139 로드맵/#140 구현·실앱 QA**.
   사용자 승인에 따라 #136을 squash 병합(main `0c354cb`, #100 close)했고 #137은 main 위
   `ad55605`로 재배치해 필수 checks 3종 green·MERGEABLE, #138은 그 위 `e18a396`로 정리했다.

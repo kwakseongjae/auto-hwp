@@ -6,7 +6,9 @@
 //! hwp-viewer --features rhwp`, or `cargo tauri dev`); the command *logic* is factored into pure
 //! functions so it is unit-testable headless. The A3 embedded control server lives in [`server`].
 
+mod desktop_state;
 mod open_request;
+mod recovery;
 pub mod server;
 
 use serde_json::{json, Value};
@@ -18,8 +20,10 @@ use tauri::{Emitter, Manager};
 /// `Arc` so the heavy commands can clone a handle out of `State` and move it into a
 /// `spawn_blocking` worker, keeping the parse/serialize/render off the async/IPC thread.
 pub type SharedSession = Arc<Mutex<hwp_mcp::Session>>;
+pub(crate) type SharedDesktopState = Arc<Mutex<desktop_state::DesktopDocumentState>>;
 
 const DESKTOP_OPEN_REQUEST_EVENT: &str = "desktop-open-request";
+const DESKTOP_CLOSE_REQUEST_EVENT: &str = "desktop-close-request";
 
 fn queue_open_paths(app: &tauri::AppHandle, paths: Vec<String>) {
     let queued = app.state::<open_request::OpenRequestQueue>().push(paths);
@@ -78,9 +82,18 @@ fn pages(s: &mut hwp_mcp::Session) -> u32 {
 // loop stays responsive on tens-of-MB files; the `Mutex` lock is taken INSIDE the worker (cloning the
 // `Arc` out of `State` first), never on the async runtime thread.
 #[tauri::command]
-async fn open_doc(path: String, sess: tauri::State<'_, SharedSession>) -> Result<Value, String> {
+async fn open_doc(
+    path: String,
+    sess: tauri::State<'_, SharedSession>,
+    desktop: tauri::State<'_, SharedDesktopState>,
+) -> Result<Value, String> {
     let sess = sess.inner().clone();
+    let desktop = desktop.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        // Capture the identity before parsing. The path stays memory-only; recovery metadata receives
+        // only the random document id created here.
+        let mut next_desktop = desktop_state::DesktopDocumentState::default();
+        next_desktop.opened_path(std::path::Path::new(&path), 0)?;
         let mut s = sess.lock().map_err(|_| "session poisoned")?;
         // accepts .hwp (view) and .hwpx; surface the 2-tier capability (editable) + format for the chip.
         let (format, editable) = match apply_intent(&mut s, Intent::Open { path })? {
@@ -89,6 +102,7 @@ async fn open_doc(path: String, sess: tauri::State<'_, SharedSession>) -> Result
             } => (format, editable),
             _ => return Err("unexpected outcome".into()),
         };
+        *desktop.lock().map_err(|_| "desktop state poisoned")? = next_desktop;
 
         Ok(json!({
             "pages": pages(&mut s),
@@ -101,6 +115,152 @@ async fn open_doc(path: String, sess: tauri::State<'_, SharedSession>) -> Result
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn open_recovery(
+    document_id: String,
+    generation: u64,
+    app: tauri::AppHandle,
+    sess: tauri::State<'_, SharedSession>,
+    desktop: tauri::State<'_, SharedDesktopState>,
+) -> Result<Value, String> {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app-data directory unavailable: {e}"))?;
+    let sess = sess.inner().clone();
+    let desktop = desktop.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let bytes = recovery::RecoveryStore::new(&app_data)?.read(&document_id, generation)?;
+        let mut next_desktop = desktop_state::DesktopDocumentState::default();
+        next_desktop.opened_recovery(0)?;
+        let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        let opened = hwp_mcp::open_bytes(&mut s, &bytes, "recovered.hwpx")?;
+        let pages = pages(&mut s);
+        *desktop.lock().map_err(|_| "desktop state poisoned")? = next_desktop;
+        Ok(json!({
+            "pages": pages,
+            "editable": opened.editable,
+            "format": opened.format,
+            "convertedPath": Value::Null,
+        }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn desktop_session_status(
+    sess: tauri::State<'_, SharedSession>,
+    desktop: tauri::State<'_, SharedDesktopState>,
+) -> Result<desktop_state::DesktopSessionStatus, String> {
+    let sess = sess.inner().clone();
+    let desktop = desktop.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let revision = sess
+            .lock()
+            .map_err(|_| "session poisoned")?
+            .doc
+            .as_ref()
+            .map(|doc| doc.revision())
+            .unwrap_or(0);
+        Ok(desktop
+            .lock()
+            .map_err(|_| "desktop state poisoned")?
+            .status(revision))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn write_recovery_snapshot(
+    app: tauri::AppHandle,
+    sess: tauri::State<'_, SharedSession>,
+    desktop: tauri::State<'_, SharedDesktopState>,
+) -> Result<Option<recovery::RecoverySummary>, String> {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app-data directory unavailable: {e}"))?;
+    let sess = sess.inner().clone();
+    let desktop = desktop.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        // Keep the normal session -> desktop lock order through the write. A concurrent Save either
+        // waits and then removes this completed snapshot, or wins first and makes this a clean no-op;
+        // it can never leave a stale recovery record after a successful save.
+        let session = sess.lock().map_err(|_| "session poisoned")?;
+        let revision = session.doc.as_ref().ok_or("no document open")?.revision();
+        let state = desktop.lock().map_err(|_| "desktop state poisoned")?;
+        if !state.should_write_recovery(revision) {
+            return Ok(None);
+        }
+        let document_id = state
+            .document_id()
+            .ok_or("no desktop document open")?
+            .to_owned();
+        let bytes = hwp_mcp::export_bytes(&session)?;
+        let saved_at_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| "system clock is before the Unix epoch")?
+            .as_millis()
+            .try_into()
+            .map_err(|_| "system clock timestamp overflow")?;
+        recovery::RecoveryStore::new(&app_data)
+            .and_then(|store| store.write(&document_id, revision, saved_at_ms, &bytes))
+            .map(Some)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn list_recovery_snapshots(
+    app: tauri::AppHandle,
+) -> Result<recovery::RecoveryListing, String> {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app-data directory unavailable: {e}"))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        recovery::RecoveryStore::new(&app_data)?.list_with_warnings()
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn discard_recovery_snapshots(
+    document_id: String,
+    app: tauri::AppHandle,
+    desktop: tauri::State<'_, SharedDesktopState>,
+) -> Result<(), String> {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app-data directory unavailable: {e}"))?;
+    let desktop = desktop.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        // Mark the live document before deleting. A snapshot already holding the desktop lock
+        // finishes first and is then deleted; one waiting behind this command becomes a no-op.
+        desktop
+            .lock()
+            .map_err(|_| "desktop state poisoned")?
+            .suppress_recovery_for(&document_id);
+        recovery::RecoveryStore::new(&app_data)?.discard_document(&document_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn allow_desktop_close(desktop: tauri::State<'_, SharedDesktopState>) -> Result<(), String> {
+    desktop
+        .lock()
+        .map_err(|_| "desktop state poisoned")?
+        .allow_close_once();
+    Ok(())
 }
 
 #[tauri::command]
@@ -212,16 +372,45 @@ fn apply_content(content: String, sess: tauri::State<'_, SharedSession>) -> Resu
 #[tauri::command]
 async fn export_hwpx(
     path: String,
+    overwrite_confirmed: Option<bool>,
+    app: tauri::AppHandle,
     sess: tauri::State<'_, SharedSession>,
+    desktop: tauri::State<'_, SharedDesktopState>,
 ) -> Result<String, String> {
     let sess = sess.inner().clone();
+    let desktop = desktop.inner().clone();
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app-data directory unavailable: {e}"))?;
     tauri::async_runtime::spawn_blocking(move || {
         let mut s = sess.lock().map_err(|_| "session poisoned")?;
+        let revision = s.doc.as_ref().ok_or("no document open")?.revision();
+        let destination = std::path::PathBuf::from(&path);
+        {
+            let state = desktop.lock().map_err(|_| "desktop state poisoned")?;
+            if !overwrite_confirmed.unwrap_or(false) && state.external_conflict(&destination)? {
+                return Err("EXTERNAL_SOURCE_CHANGED".into());
+            }
+        }
         match apply_intent(&mut s, Intent::Export { path })? {
-            Outcome::Exported { bytes, open_safe } => Ok(format!(
-                "{bytes} bytes · editor-open-safety {}",
-                if open_safe { "OK" } else { "FAIL" }
-            )),
+            Outcome::Exported { bytes, open_safe } => {
+                let mut state = desktop.lock().map_err(|_| "desktop state poisoned")?;
+                state.mark_saved(&destination, revision)?;
+                let recovery_warning = state.document_id().and_then(|document_id| {
+                    recovery::RecoveryStore::new(&app_data)
+                        .and_then(|store| store.discard_document(document_id))
+                        .err()
+                });
+                let mut message = format!(
+                    "{bytes} bytes · editor-open-safety {}",
+                    if open_safe { "OK" } else { "FAIL" }
+                );
+                if let Some(error) = recovery_warning {
+                    message.push_str(&format!(" · 저장 성공, 복구본 정리 실패: {error}"));
+                }
+                Ok(message)
+            }
             _ => Err("unexpected outcome".into()),
         }
     })
@@ -1726,16 +1915,46 @@ pub fn run() {
     let app = builder
         .plugin(tauri_plugin_dialog::init())
         .manage(SharedSession::default())
+        .manage(SharedDesktopState::default())
         .manage(open_request::OpenRequestQueue::default())
         .setup(|app| {
             let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
             let paths = open_request::paths_from_argv(std::env::args_os(), &cwd);
             queue_open_paths(app.handle(), paths);
+            if let Some(window) = app.get_webview_window("main") {
+                let handle = app.handle().clone();
+                window.on_window_event(move |event| {
+                    let tauri::WindowEvent::CloseRequested { api, .. } = event else {
+                        return;
+                    };
+                    let revision = handle
+                        .state::<SharedSession>()
+                        .lock()
+                        .ok()
+                        .and_then(|session| session.doc.as_ref().map(|doc| doc.revision()))
+                        .unwrap_or(0);
+                    let prevent = handle
+                        .state::<SharedDesktopState>()
+                        .lock()
+                        .is_ok_and(|mut state| state.should_prevent_close(revision));
+                    if prevent {
+                        api.prevent_close();
+                        // No document metadata in the event; the webview queries only the dirty bit.
+                        let _ = handle.emit(DESKTOP_CLOSE_REQUEST_EVENT, ());
+                    }
+                });
+            }
             server::spawn(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             open_doc,
+            open_recovery,
+            desktop_session_status,
+            write_recovery_snapshot,
+            list_recovery_snapshots,
+            discard_recovery_snapshots,
+            allow_desktop_close,
             render_page,
             render_doc_html,
             render_own_page,
@@ -2238,5 +2457,37 @@ mod tests {
             reopened.plain_text().contains("바이트 내보내기"),
             "the live edit is in the exported bytes"
         );
+    }
+
+    #[test]
+    fn desktop_recovery_snapshot_reopens_the_latest_completed_revision() {
+        let mut sess = hwp_mcp::Session::default();
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/hwpx/FormattingShowcase.hwpx"
+        );
+        mcp_call(&mut sess, "open_document", json!({ "path": path })).unwrap();
+        mcp_call(
+            &mut sess,
+            "apply_content",
+            json!({ "content": r#"{"blocks":[{"type":"heading","text":"복구 최신 리비전","style":"개요 1"}]}"# }),
+        )
+        .unwrap();
+        let revision = sess.doc.as_ref().unwrap().revision();
+        let bytes = hwp_mcp::export_bytes(&sess).unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "auto-hwp-recovery-roundtrip-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir(&root).unwrap();
+        let store = recovery::RecoveryStore::new(&root).unwrap();
+        let saved = store
+            .write("00112233445566778899aabbccddeeff", revision, 1, &bytes)
+            .unwrap();
+        let recovered = store.read(&saved.document_id, saved.generation).unwrap();
+        let reopened = hwp_core::Engine::open(&recovered).unwrap();
+        assert!(reopened.plain_text().contains("복구 최신 리비전"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

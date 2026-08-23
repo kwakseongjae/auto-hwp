@@ -5,6 +5,19 @@
 
 ---
 
+## 2026-08-23 (Codex sol) · #137 병합 · #138/#145 재배치
+- 사용자 자율 진행 승인; #137 squash 병합(main `6574a6d`) 후 #138을 main 기반으로 재배치.
+- #138은 이전 head와 byte-identical tree·#102 독립 12파일로 새 CI 실행 중.
+- #145도 기능 트리 무변경으로 최신 main에 재배치해 새 CI 실행 중.
+- 다음: #145 green/병합 → #141 rebase·push·PR·CI → #142.
+
+## 2026-08-23 (Codex sol) · #141 무손실 복구 구현·실앱 QA
+- revision dirty·외부변경 차단·비공개 2세대 HWPX 복구·격리/상한·저장/버리기/취소 구현.
+- cold-open/recovery-scan·저장/discard-autosave 경합과 symlink/격리 충돌을 잠그고 테스트 green.
+- full verify: canonical 8/18/24, PDF 51/51, JS 1,007, PW_PORT=3141 85 pass/3 skip, licenses PASS.
+- 실제 `.app`: 편집→dirty-close 차단→0600 snapshot→강제종료→최신 rev 복원→저장/clean 종료 PASS.
+- #137/#145 green 유지·미병합; 다음은 승인 후 #141 commit/PR, #145 병합 뒤 #142.
+
 ## 2026-08-23 (Codex sol) · #136 병합 · #140 데스크톱 파일 열기 구현
 - #136 squash 병합(main `0c354cb`, #100 close); #137은 green/MERGEABLE, #138 stack 재정렬.
 - #139 우산과 #140~#144를 만들고 #140 single-instance/cold·warm open/교체 확인을 구현.

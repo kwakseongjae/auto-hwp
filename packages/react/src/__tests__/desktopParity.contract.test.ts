@@ -111,12 +111,12 @@ describe("desktop adapter contract (issue #64 D0)", () => {
     }
   });
 
-  it("the 24 direct TauriAdapter invoke commands are registered in generate_handler", () => {
+  it("the 25 direct TauriAdapter invoke commands are registered in generate_handler", () => {
     const handler = generateHandlerCommands(readRepo("crates/hwp-viewer/src/lib.rs"));
     const commands = tauriDirectCommands(tauriSrc);
-    expect(commands).toHaveLength(24);
+    expect(commands).toHaveLength(25);
     const unique = new Set(commands);
-    expect(unique.size).toBe(24);
+    expect(unique.size).toBe(25);
     for (const cmd of unique) {
       expect(handler.has(cmd), `${cmd} is invoked by TauriAdapter but not in generate_handler![]`).toBe(true);
     }
