@@ -170,8 +170,15 @@
   **1,018**, Chromium **85 passed/3 skipped/0 failed**. full의 sandbox bind EPERM만 별도 허용된
   Playwright 실행으로 대체 검증했고 임시 node_modules symlink 6개는 모두 제거했다. 최종 diff/check와
   공개 보안 감사도 clean이며 strict parser/tests/state 5개만 변경된다. 구현 commit `2b387e2`를
-  push하고 PR #187을 `Closes #186`로 게시했다. **다음:** exact-head CI·댓글·mergeability 감사→
-  merge→#94 동기화→PARA_CHAR_SHAPE next child.
+  push하고 PR #187을 `Closes #186`로 게시했다. exact head `1436566f`에서 issue-link **3s**·
+  build-test **7m55s**·licenses **2m15s** green, MERGEABLE/CLEAN, review/general/inline 댓글 0을
+  확인하고 protected main `55fc41aa`로 squash 병합했다. #186 close·원격 branch 정리 후 #94에
+  content-free 근거를 동기화했다. 중복 없는 #188을 R18/P1/area:hwp5/status:ready로 열고 exact
+  latest main의 `codex/issue-188-hwp5-empty-char-shape` worktree를 초기화했다. **다음:** 빈 문단
+  PARA_CHAR_SHAPE `0x44/44479..44499`의 enclosing paragraph framing·count/index sequence를 두 번
+  content-free 분류하고, active semantics를 손실 없이 shared IR로 표현할 수 있을 때만 atomic exact
+  discriminator와 positive/hostile fixture를 구현. production route·rhwp·HWPX·shared typesetter·
+  generated assets·public fixtures 불변.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #173 병합 · #174 multi-table 경계 착수**.
   자체 HWP5 파서가 exact `tbl ` marker/common-object/TABLE/LIST_HEADER/cell paragraph를 검증해
