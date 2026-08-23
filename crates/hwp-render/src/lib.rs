@@ -542,6 +542,53 @@ mod tests {
     }
 
     #[test]
+    fn column_separator_uses_the_shared_line_ir_and_svg_sink() {
+        let mut paragraph = para("두 단");
+        paragraph.column_layout_before = Some(ColumnLayout {
+            widths: vec![2_000, 2_000],
+            gaps: vec![1_000],
+            separator: Some(ColumnSeparator {
+                color: Color {
+                    r: 255,
+                    g: 0,
+                    b: 0,
+                    a: 255,
+                },
+                style: LineStyle::Dashed,
+                width_px: 0.7,
+            }),
+            ..ColumnLayout::default()
+        });
+        let mut doc = doc_with(vec![Block::Paragraph(paragraph)]);
+        doc.sections[0].page = PageSetup {
+            width: 5_000,
+            height: 6_000,
+            margin_left: 0,
+            margin_right: 0,
+            margin_top: 0,
+            margin_bottom: 0,
+            ..PageSetup::default()
+        };
+        let tree = render_page(&doc, &ApproxFontMetrics, 0).expect("column page renders");
+        assert!(tree.ops.iter().any(|operation| {
+            matches!(
+                operation,
+                PaintOp::Line {
+                    x1,
+                    x2,
+                    color,
+                    style: LineStyle::Dashed,
+                    width,
+                    ..
+                } if *x1 == 2_500.0 && *x2 == 2_500.0 && color.r == 255 && *width == 0.7
+            )
+        }));
+        let svg = &render_doc_svg(&doc, &ApproxFontMetrics)[0];
+        assert!(svg.contains("<line"));
+        assert!(svg.contains("stroke-dasharray"));
+    }
+
+    #[test]
     fn old_hangul_pua_svg_carries_jamo_cluster() {
         // Issue 062-2: U+E1A7 (Hanyang-PUA) renders as its 첫가끝 자모 시퀀스 ᄀᆞ (U+1100 U+119E),
         // NOT the raw PUA codepoint (needs 함초롬) and NOT the metric proxy '가'. The IR carries the

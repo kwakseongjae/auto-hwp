@@ -34,11 +34,11 @@ fn explicit_own_parser_never_falls_back() {
     assert!(matches!(
         error,
         Error::UnsupportedBodyRecord {
-            tag: 0x42,
+            tag: 0x47,
             section: 0,
-            start: 0,
-            end: 28,
-            reason: "multi-column break is not owned",
+            start: 431,
+            end: 451,
+            reason: "record semantics are not owned",
             ..
         }
     ));

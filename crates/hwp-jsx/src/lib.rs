@@ -887,9 +887,11 @@ fn parse_para(el: &JsxElement) -> Result<Paragraph> {
             .unwrap_or_default(),
         passthrough: parse_pass_attr(el)?,
         dirty: Dirty(el.attrs.contains_key("data-dirty")),
-        // Per-paragraph hard page break + table-anchor flag aren't carried through the HTML/JSX projection
-        // (own-render gets them from the rhwp lift); default false here.
+        // Structural page/column-zone breaks + table-anchor flag aren't carried through the HTML/JSX
+        // projection (own-render gets them from the binary parser); keep them explicitly absent here.
         page_break_before: false,
+        column_break_before: false,
+        column_layout_before: None,
         is_table_anchor: false,
         // Original paraPrIDRef, carried losslessly (mirrors run `data-cref`) so the round-trip is exact.
         para_ref: el.attrs.get("data-pref").cloned(),

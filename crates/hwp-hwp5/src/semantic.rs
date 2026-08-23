@@ -22,6 +22,7 @@ const TAG_CTRL_HEADER: u16 = 0x47;
 const TAG_PAGE_DEF: u16 = 0x49;
 
 const CTRL_SECTION_DEF: u32 = u32::from_be_bytes(*b"secd");
+const CTRL_COLUMN_DEF: u32 = u32::from_be_bytes(*b"cold");
 
 #[derive(Clone, Copy, Debug, Default)]
 struct IdMappings {
@@ -929,6 +930,9 @@ fn parse_section(
     let section = stream.section.expect("caller selected section streams");
     let mut blocks = Vec::new();
     let mut page = None;
+    let mut has_active_columns = false;
+    let mut column_zone_count = 0usize;
+    let mut separator_zone_seen = false;
     let starts: Vec<usize> = stream
         .records
         .iter()
@@ -962,6 +966,7 @@ fn parse_section(
             para_usage,
             styles,
             section,
+            page.as_ref(),
         )?;
         if let Some(parsed_page) = parsed.page {
             if ordinal != 0 || page.replace(parsed_page).is_some() {
@@ -971,6 +976,36 @@ fn parse_section(
                     "section definition may occur only once and only in the first paragraph",
                 ));
             }
+        }
+        if parsed.paragraph.column_break_before
+            && parsed.paragraph.column_layout_before.is_none()
+            && !has_active_columns
+        {
+            return Err(malformed(
+                &stream.records[start],
+                Some(section),
+                "column break appears before an owned column definition",
+            ));
+        }
+        if let Some(layout) = &parsed.paragraph.column_layout_before {
+            let has_separator = layout.separator.is_some();
+            if has_separator && ordinal != 0 {
+                return Err(malformed(
+                    &stream.records[start],
+                    Some(section),
+                    "column separator zone must begin with its section",
+                ));
+            }
+            if column_zone_count != 0 && (separator_zone_seen || has_separator) {
+                return Err(malformed(
+                    &stream.records[start],
+                    Some(section),
+                    "multiple column zones with separators are not yet supported",
+                ));
+            }
+            column_zone_count += 1;
+            separator_zone_seen |= has_separator;
+            has_active_columns = true;
         }
         blocks.push(Block::Paragraph(parsed.paragraph));
     }
@@ -997,6 +1032,7 @@ fn parse_paragraph(
     para_usage: &[ParaUsage],
     styles: &[StyleDef],
     section: usize,
+    _current_page: Option<&PageSetup>,
 ) -> Result<ParsedParagraph> {
     let header = records[0];
     let header_data = data(stream, &header);
@@ -1025,20 +1061,6 @@ fn parse_paragraph(
             section: Some(section),
             offset: header.head,
         });
-    }
-    if break_type & 0x02 != 0 {
-        return Err(unsupported_reason(
-            header,
-            section,
-            "multi-column break is not owned",
-        ));
-    }
-    if break_type & 0x08 != 0 {
-        return Err(unsupported_reason(
-            header,
-            section,
-            "column break is not owned",
-        ));
     }
     if break_type & !0x0f != 0 {
         return Err(unsupported_reason(
@@ -1076,7 +1098,7 @@ fn parse_paragraph(
     let mut text_record = None;
     let mut shape_record = None;
     let mut line_record = None;
-    let mut section_control = None;
+    let mut structural_controls = Vec::new();
     let mut cursor = 1usize;
     while cursor < records.len() {
         let record = records[cursor];
@@ -1087,8 +1109,15 @@ fn parse_paragraph(
             TAG_PARA_TEXT if text_record.is_none() => text_record = Some(record),
             TAG_PARA_CHAR_SHAPE if shape_record.is_none() => shape_record = Some(record),
             TAG_PARA_LINE_SEG if line_record.is_none() => line_record = Some(record),
-            TAG_CTRL_HEADER if section_control.is_none() => {
-                if read_u32(data(stream, &record), 0) != Some(CTRL_SECTION_DEF) {
+            TAG_CTRL_HEADER => {
+                let Some(control_id) = read_u32(data(stream, &record), 0) else {
+                    return Err(malformed(
+                        &record,
+                        Some(section),
+                        "structural CTRL_HEADER is shorter than its control id",
+                    ));
+                };
+                if !matches!(control_id, CTRL_SECTION_DEF | CTRL_COLUMN_DEF) {
                     return Err(unsupported(record, section));
                 }
                 let start = cursor;
@@ -1096,7 +1125,7 @@ fn parse_paragraph(
                 while cursor < records.len() && records[cursor].level > 1 {
                     cursor += 1;
                 }
-                section_control = Some((&records[start], &records[start + 1..cursor]));
+                structural_controls.push((&records[start], &records[start + 1..cursor]));
                 continue;
             }
             _ => return Err(unsupported(record, section)),
@@ -1129,35 +1158,54 @@ fn parse_paragraph(
         ));
     }
     validate_para_usage(usage, &decoded, doc, &header, section)?;
-    let page = match (decoded.section_controls.as_slice(), section_control) {
-        ([], None) => None,
-        ([(marker_offset, marker_id)], Some((control, children)))
-            if *marker_id == CTRL_SECTION_DEF =>
-        {
-            if *marker_offset != 0 {
-                return Err(malformed(
-                    control,
-                    Some(section),
-                    "section definition marker is not at paragraph start",
-                ));
-            }
-            Some(parse_section_control(stream, control, children, section)?)
-        }
-        (_, Some((control, _))) => {
+    if decoded.structural_controls.len() != structural_controls.len() {
+        return Err(malformed(
+            &header,
+            Some(section),
+            "PARA_TEXT structural markers do not match CTRL_HEADER records",
+        ));
+    }
+    let mut page = None;
+    let mut raw_columns = None;
+    for ((marker_offset, marker_id), (control, children)) in
+        decoded.structural_controls.iter().zip(structural_controls)
+    {
+        let actual_id = read_u32(data(stream, control), 0).expect("control id checked above");
+        if *marker_id != actual_id {
             return Err(malformed(
                 control,
                 Some(section),
-                "section control header does not match PARA_TEXT marker",
-            ))
+                "structural control header does not match PARA_TEXT marker",
+            ));
         }
-        (_, None) => {
-            return Err(malformed(
-                &header,
-                Some(section),
-                "PARA_TEXT section marker has no section control header",
-            ))
+        match actual_id {
+            CTRL_SECTION_DEF => {
+                if *marker_offset != 0 || page.is_some() {
+                    return Err(malformed(
+                        control,
+                        Some(section),
+                        "section definition marker is duplicate or not at paragraph start",
+                    ));
+                }
+                page = Some(parse_section_control(stream, control, children, section)?);
+            }
+            CTRL_COLUMN_DEF => {
+                if !children.is_empty() || raw_columns.is_some() {
+                    return Err(malformed(
+                        control,
+                        Some(section),
+                        "column definition has children or is duplicated",
+                    ));
+                }
+                raw_columns = Some(parse_column_control(
+                    data(stream, control),
+                    control,
+                    section,
+                )?);
+            }
+            _ => unreachable!("structural control id filtered above"),
         }
-    };
+    }
     if break_type & 0x01 != 0 && page.is_none() {
         return Err(unsupported_reason(
             header,
@@ -1165,6 +1213,28 @@ fn parse_paragraph(
             "section break has no matching section definition",
         ));
     }
+    if break_type & 0x02 != 0 && raw_columns.is_none() {
+        return Err(unsupported_reason(
+            header,
+            section,
+            "multi-column break has no owned column definition",
+        ));
+    }
+    let column_layout = match raw_columns {
+        Some(raw) => Some(resolve_columns(
+            raw,
+            page.as_ref().or(_current_page).ok_or_else(|| {
+                malformed(
+                    &header,
+                    Some(section),
+                    "column definition appears before page geometry",
+                )
+            })?,
+            &header,
+            section,
+        )?),
+        None => None,
+    };
     let refs = match shape_record {
         Some(record) => parse_shape_refs(data(stream, &record), record, section, doc)?,
         None => Vec::new(),
@@ -1185,26 +1255,29 @@ fn parse_paragraph(
         &header,
         section,
     )?;
-    Ok(ParsedParagraph {
-        paragraph: Paragraph {
-            para_shape: para_shape_id + 1,
-            page_break_before: break_type & 0x04 != 0,
-            runs,
-            // Stored line boxes are only an authored-height hint for a true blank spacer.
-            // They never dictate line breaks for visible text or a control-host paragraph.
-            source_line_metrics: if decoded.chars.is_empty() && page.is_none() {
-                line_metrics
-            } else {
-                Vec::new()
-            },
-            provenance: Provenance {
-                source: Some(SourceFormat::Hwp5),
-                raw: None,
-            },
-            ..Paragraph::default()
+    let paragraph = Paragraph {
+        para_shape: para_shape_id + 1,
+        page_break_before: break_type & 0x04 != 0,
+        column_break_before: break_type & 0x08 != 0,
+        column_layout_before: column_layout,
+        runs,
+        // Stored line boxes are only an authored-height hint for a true blank spacer.
+        // They never dictate line breaks for visible text or a control-host paragraph.
+        source_line_metrics: if decoded.chars.is_empty() && page.is_none() {
+            line_metrics
+        } else {
+            Vec::new()
         },
-        page,
-    })
+        provenance: Provenance {
+            source: Some(SourceFormat::Hwp5),
+            raw: None,
+        },
+        ..Paragraph::default()
+    };
+    if let (Some(page), Some(layout)) = (&mut page, &paragraph.column_layout_before) {
+        page.columns = u8::try_from(layout.count()).unwrap_or(u8::MAX);
+    }
+    Ok(ParsedParagraph { paragraph, page })
 }
 
 fn validate_para_usage(
@@ -1277,6 +1350,298 @@ fn parse_section_control(
         return Err(unsupported(offending, section));
     }
     parse_page_def(data(stream, &children[0]), &children[0], section)
+}
+
+#[derive(Debug)]
+struct RawColumnLayout {
+    kind: ColumnKind,
+    direction: ColumnDirection,
+    count: usize,
+    equal_gap: Option<u16>,
+    width_weights: Vec<u16>,
+    gap_weights: Vec<u16>,
+    separator: Option<ColumnSeparator>,
+}
+
+/// Strict HWP5 `cold` control parser. The control id is part of `bytes`; all source-specific
+/// proportional values stay private to this stage and are resolved to absolute HWPUNIT by
+/// [`resolve_columns`] before entering the shared IR.
+fn parse_column_control(bytes: &[u8], record: &Record, section: usize) -> Result<RawColumnLayout> {
+    if read_u32(bytes, 0) != Some(CTRL_COLUMN_DEF) {
+        return Err(unsupported(*record, section));
+    }
+    let attr = read_u16(bytes, 4).ok_or_else(|| {
+        malformed(
+            record,
+            Some(section),
+            "column definition is shorter than its attributes",
+        )
+    })?;
+    if attr & 0xe000 != 0 {
+        return Err(malformed(
+            record,
+            Some(section),
+            "column definition has unknown attribute bits",
+        ));
+    }
+    let kind = match attr & 0x03 {
+        0 => ColumnKind::Normal,
+        1 | 2 => {
+            return Err(malformed(
+                record,
+                Some(section),
+                "column distribution kind is not yet supported",
+            ))
+        }
+        _ => {
+            return Err(malformed(
+                record,
+                Some(section),
+                "column definition has an unknown column kind",
+            ))
+        }
+    };
+    let count = ((attr >> 2) & 0xff) as usize;
+    if !(1..=32).contains(&count) {
+        return Err(malformed(
+            record,
+            Some(section),
+            "column definition count is outside the owned range",
+        ));
+    }
+    let direction = match (attr >> 10) & 0x03 {
+        0 => ColumnDirection::LeftToRight,
+        1 => ColumnDirection::RightToLeft,
+        _ => {
+            return Err(malformed(
+                record,
+                Some(section),
+                "column definition direction is not supported",
+            ))
+        }
+    };
+    let same_width = attr & (1 << 12) != 0;
+    let (equal_gap, width_weights, gap_weights, separator_at) = if same_width {
+        if bytes.len() != 16 {
+            return Err(malformed(
+                record,
+                Some(section),
+                "equal-width column definition is not exactly 16 bytes",
+            ));
+        }
+        let gap = read_u16(bytes, 6).expect("exact length checked");
+        if read_u16(bytes, 8) != Some(0) {
+            return Err(malformed(
+                record,
+                Some(section),
+                "column definition has unsupported upper attributes",
+            ));
+        }
+        (Some(gap), Vec::new(), Vec::new(), 10)
+    } else if count == 1 {
+        if bytes.len() != 16 {
+            return Err(malformed(
+                record,
+                Some(section),
+                "single-column definition is not exactly 16 bytes",
+            ));
+        }
+        let gap = read_u16(bytes, 6).expect("exact length checked");
+        if read_u16(bytes, 8) != Some(0) {
+            return Err(malformed(
+                record,
+                Some(section),
+                "column definition has unsupported upper attributes",
+            ));
+        }
+        (Some(gap), Vec::new(), Vec::new(), 10)
+    } else {
+        let expected = 14usize
+            .checked_add(count.checked_mul(4).ok_or_else(|| {
+                malformed(record, Some(section), "column definition length overflows")
+            })?)
+            .ok_or_else(|| {
+                malformed(record, Some(section), "column definition length overflows")
+            })?;
+        if bytes.len() != expected {
+            return Err(malformed(
+                record,
+                Some(section),
+                "unequal-width column definition has an unexpected length",
+            ));
+        }
+        if read_u16(bytes, 6) != Some(0) {
+            return Err(malformed(
+                record,
+                Some(section),
+                "column definition has unsupported upper attributes",
+            ));
+        }
+        let mut widths = Vec::with_capacity(count);
+        let mut gaps = Vec::with_capacity(count.saturating_sub(1));
+        for index in 0..count {
+            let at = 8 + index * 4;
+            let width = read_u16(bytes, at).expect("exact length checked");
+            let gap = read_u16(bytes, at + 2).expect("exact length checked");
+            if width == 0 {
+                return Err(malformed(
+                    record,
+                    Some(section),
+                    "column definition contains a zero width",
+                ));
+            }
+            widths.push(width);
+            if index + 1 == count {
+                if gap != 0 {
+                    return Err(malformed(
+                        record,
+                        Some(section),
+                        "column definition has a trailing gap after the last column",
+                    ));
+                }
+            } else {
+                gaps.push(gap);
+            }
+        }
+        (None, widths, gaps, 8 + count * 4)
+    };
+
+    let line_type = bytes[separator_at];
+    let line_width = bytes[separator_at + 1];
+    let line_color = read_u32(bytes, separator_at + 2).expect("exact length checked");
+    let separator = if line_type == 0 {
+        if line_width != 0 || line_color != 0 {
+            return Err(malformed(
+                record,
+                Some(section),
+                "disabled column separator has nonzero style data",
+            ));
+        }
+        None
+    } else {
+        let style = border_line_style(line_type).ok_or_else(|| {
+            malformed(
+                record,
+                Some(section),
+                "column separator has an unknown line type",
+            )
+        })?;
+        if style == LineStyle::None || line_width > 15 {
+            return Err(malformed(
+                record,
+                Some(section),
+                "column separator has an unknown line width",
+            ));
+        }
+        Some(ColumnSeparator {
+            color: opaque_bgr(line_color),
+            style,
+            width_px: border_width_px(line_width),
+        })
+    };
+    Ok(RawColumnLayout {
+        kind,
+        direction,
+        count,
+        equal_gap,
+        width_weights,
+        gap_weights,
+        separator,
+    })
+}
+
+fn resolve_columns(
+    raw: RawColumnLayout,
+    page: &PageSetup,
+    record: &Record,
+    section: usize,
+) -> Result<ColumnLayout> {
+    let display_width = if page.landscape && page.width < page.height {
+        page.height
+    } else {
+        page.width
+    };
+    let body_width = i64::from(display_width)
+        - i64::from(page.margin_left)
+        - i64::from(page.margin_gutter)
+        - i64::from(page.margin_right);
+    if body_width <= 0 {
+        return Err(malformed(
+            record,
+            Some(section),
+            "column definition has no positive page body width",
+        ));
+    }
+
+    let (mut widths, gaps) = if let Some(gap) = raw.equal_gap {
+        let count = raw.count;
+        let gaps = vec![i32::from(gap); count.saturating_sub(1)];
+        let gap_total = i64::from(gap) * count.saturating_sub(1) as i64;
+        let remaining = body_width - gap_total;
+        if remaining < count as i64 {
+            return Err(malformed(
+                record,
+                Some(section),
+                "column gaps leave no positive column width",
+            ));
+        }
+        let base = remaining / count as i64;
+        let mut widths = vec![base as i32; count];
+        *widths.last_mut().expect("positive count") += (remaining % count as i64) as i32;
+        (widths, gaps)
+    } else {
+        let weight_total = raw
+            .width_weights
+            .iter()
+            .chain(&raw.gap_weights)
+            .map(|value| u64::from(*value))
+            .sum::<u64>();
+        if weight_total == 0 {
+            return Err(malformed(
+                record,
+                Some(section),
+                "column definition has zero total weight",
+            ));
+        }
+        let scale =
+            |value: u16| -> i32 { ((u64::from(value) * body_width as u64) / weight_total) as i32 };
+        let widths = raw
+            .width_weights
+            .iter()
+            .copied()
+            .map(scale)
+            .collect::<Vec<_>>();
+        let gaps = raw
+            .gap_weights
+            .iter()
+            .copied()
+            .map(scale)
+            .collect::<Vec<_>>();
+        (widths, gaps)
+    };
+    let used = widths
+        .iter()
+        .chain(&gaps)
+        .map(|value| i64::from(*value))
+        .sum::<i64>();
+    let residue = body_width - used;
+    if let Some(last) = widths.last_mut() {
+        *last = last.saturating_add(residue as i32);
+    }
+    if widths.iter().any(|width| *width <= 0) {
+        return Err(malformed(
+            record,
+            Some(section),
+            "column definition resolves to a non-positive width",
+        ));
+    }
+    Ok(ColumnLayout {
+        kind: raw.kind,
+        direction: raw.direction,
+        widths,
+        gaps,
+        separator: raw.separator,
+    })
 }
 
 fn parse_page_def(bytes: &[u8], record: &Record, section: usize) -> Result<PageSetup> {
@@ -1449,7 +1814,7 @@ fn parse_line_metrics(
 #[derive(Default)]
 struct DecodedText {
     chars: Vec<(u32, char)>,
-    section_controls: Vec<(u32, u32)>,
+    structural_controls: Vec<(u32, u32)>,
     stored_units: u32,
     inline_control_mask: u32,
 }
@@ -1462,7 +1827,7 @@ impl DecodedText {
                 .binary_search_by_key(&offset, |(start, _)| *start)
                 .is_ok()
             || self
-                .section_controls
+                .structural_controls
                 .binary_search_by_key(&offset, |(start, _)| *start)
                 .is_ok()
     }
@@ -1481,7 +1846,7 @@ fn decode_text(bytes: &[u8], record: Record, section: usize) -> Result<DecodedTe
         .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
         .collect();
     let mut chars = Vec::new();
-    let mut section_controls = Vec::new();
+    let mut structural_controls = Vec::new();
     let mut cursor = 0usize;
     let mut ended = false;
     let mut inline_control_mask = 0u32;
@@ -1531,10 +1896,10 @@ fn decode_text(bytes: &[u8], record: Record, section: usize) -> Result<DecodedTe
                 let lo = units[cursor + 1].to_le_bytes();
                 let hi = units[cursor + 2].to_le_bytes();
                 let control_id = u32::from_le_bytes([lo[0], lo[1], hi[0], hi[1]]);
-                if control_id != CTRL_SECTION_DEF {
+                if !matches!(control_id, CTRL_SECTION_DEF | CTRL_COLUMN_DEF) {
                     return Err(unsupported(record, section));
                 }
-                section_controls.push((start, control_id));
+                structural_controls.push((start, control_id));
                 inline_control_mask |= 1 << 0x0002;
                 cursor += 8;
             }
@@ -1605,7 +1970,7 @@ fn decode_text(bytes: &[u8], record: Record, section: usize) -> Result<DecodedTe
     }
     Ok(DecodedText {
         chars,
-        section_controls,
+        structural_controls,
         stored_units: units.len() as u32,
         inline_control_mask,
     })

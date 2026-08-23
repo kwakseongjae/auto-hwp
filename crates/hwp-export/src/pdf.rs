@@ -1160,6 +1160,33 @@ mod tests {
     }
 
     #[test]
+    fn column_separator_replays_from_the_same_paint_tree_in_pdf() {
+        let mut paragraph = para("왼쪽 단");
+        paragraph.column_layout_before = Some(ColumnLayout {
+            widths: vec![20_000, 20_000],
+            gaps: vec![2_000],
+            separator: Some(ColumnSeparator {
+                color: Color {
+                    r: 12,
+                    g: 34,
+                    b: 56,
+                    a: 255,
+                },
+                style: LineStyle::Dashed,
+                width_px: 0.5,
+            }),
+            ..ColumnLayout::default()
+        });
+        let doc = doc_with(vec![Block::Paragraph(paragraph)]);
+
+        let out = export_pdf(&doc, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
+        assert_eq!(out.pages, 1);
+        assert_eq!(out.replay[0].table_geometry.produced, 1);
+        assert_eq!(out.replay[0].table_geometry.replayed, 1);
+        assert_eq!(out.replay[0].table_geometry.stubbed, 0);
+    }
+
+    #[test]
     fn empty_doc_still_makes_a_pdf() {
         let doc = doc_with(vec![Block::Paragraph(para(""))]);
         let out = export_pdf(&doc, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
