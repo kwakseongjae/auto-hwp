@@ -192,8 +192,35 @@
   **85 passed/3 skipped/0 failed**. full의 sandbox bind EPERM만 별도 허용된 Playwright 실행으로 대체
   검증했고 임시 node_modules symlink 6개는 제거했다. 최종 diff/check와 공개 보안 감사 clean,
   strict parser/tests/state 5개만 변경되며 production route·rhwp·HWPX·typesetter·generated diff 0.
-  구현 commit `ae3ea4f`를 push하고 PR #189를 `Closes #188`로 게시했다. **다음:** exact-head
-  CI·댓글·mergeability 감사→merge→#94 동기화→next LIST_HEADER child.
+  구현 commit `ae3ea4f`를 push하고 PR #189를 `Closes #188`로 게시했다. exact head `81eb33f7`에서
+  issue-link **2s**·build-test **7m41s**·licenses **2m58s** green, MERGEABLE/CLEAN,
+  review/general/inline 댓글 0을 확인하고 protected main `1263805e`로 squash 병합했다. #188 close·
+  원격 branch 정리 후 #94에 content-free 근거를 동기화했다. 중복 없는 #190을
+  R18/P1/area:hwp5/status:ready로 열고 exact latest main의 `codex/issue-190-hwp5-cell-property`
+  worktree를 초기화했다. **다음:** cell LIST_HEADER `0x48/45487..45538`의 enclosing common/TABLE,
+  전체 active-cell topology/order, geometry, flags, width-ref sequence, extension framing을 두 번
+  content-free 분류하고 shared IR로 active semantics를 lossless 표현할 수 있을 때만 atomic exact
+  discriminator와 positive/hostile fixture를 구현. route·rhwp·HWPX·typesetter·generated 불변.
+  두 독립 분류 run은 exact 동일했다. enclosing form은 common attr `0x082a2311` + TABLE attr
+  `0x04000006`, 1×1/active cell 1개이며 cell은 row/col 0, span 1×1, width-ref `0x0500`, exact
+  object/cell geometry, mirrored 13B layout-width extension을 가진다. 새 경계는 기존 최대 5개보다 긴
+  **6개 cell paragraph**뿐이고, 여섯 문단 모두 strict PARA_HEADER/TEXT/CHAR_SHAPE/LINE_SEG framing으로
+  구조 해석 가능하다. shared IR의 `Cell.blocks`는 임의 길이를 이미 lossless 보존하고 전역 span/row
+  방정식이 single-cell 폭·높이를 common geometry와 검증하므로 새 렌더 의미나 추측이 필요 없다.
+  one-shot classifier는 제거되어 probe diff 0. **다음:** 이 exact 1×1 tuple에서 width-ref `0x0500`일
+  때만 count 6을 허용하고, 7문단·다른 width-ref·geometry/extension drift를 fail-closed synthetic
+  회귀로 고정한 뒤 public own-parser boundary를 다음 레코드로 전진시킨다. 구현은 generic 1~5 count를
+  유지하면서 exact tuple+`0x0500`의 count 6만 additive로 소유한다. positive fixture는 여섯 Block을
+  shared IR에 보존하며 count 7, `0x0100` pairing, cell/common geometry drift, 13B extension drift의
+  hostile 4축은 fail-closed한다. HWP5 **70 tests**, fmt, clippy `-D warnings`, wasm32 green이며 공개
+  boundary는 다음 common-object `CTRL_HEADER 0x47/47738`로 전진했다. quick/full 모두 green:
+  PDF visual **51**, canonical **8/18/24 + 98.9%+**, public corpus **84**, oracle **82**, HWPX,
+  wasm optimized **7,810,657B**, Vitest **1,007**, Chromium **85 passed/3 skipped/0 failed**. full의
+  sandbox bind EPERM만 허용된 Playwright 실행으로 분리 검증했고 임시 node_modules link 4개는 모두
+  제거했다. generated asset·production route·rhwp·HWPX·typesetter diff 0. **다음:** final
+  diff/security audit도 source content/path/hash/raw payload/credential 노출 0으로 clean하다. 구현·근거
+  commit `6bf0333`까지 push하고 PR #191을 `Closes #190`으로 게시했다. **다음:** exact-head required
+  CI(issue-link/build-test/licenses), review/general/inline 댓글, mergeability 확인→green이면 squash merge.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #173 병합 · #174 multi-table 경계 착수**.
   자체 HWP5 파서가 exact `tbl ` marker/common-object/TABLE/LIST_HEADER/cell paragraph를 검증해

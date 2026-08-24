@@ -67,6 +67,11 @@ enum Mutation {
     TableBadTerminatorShapeBoundary,
     TableBadTerminatorShapeReference,
     TableBadDeclaredTerminatorShapeCount,
+    SixParagraphTable,
+    SixParagraphBadWidthReference,
+    SixParagraphBadGeometry,
+    SixParagraphBadExtension,
+    SevenParagraphTable,
     BadTableAttr,
     BadTableTopology,
     BadTableGeometry,
@@ -668,6 +673,40 @@ fn strict_inline_table_rejects_unowned_attributes_topology_geometry_alignment_an
 }
 
 #[test]
+fn owns_exact_six_paragraph_one_by_one_cell() {
+    let doc = OwnHwp5Parser::new()
+        .parse(&fixture(Mutation::SixParagraphTable))
+        .expect("exact six-paragraph cell parses");
+    let Block::Table(table) = &doc.sections[0].blocks[1] else {
+        panic!("table host must be followed by a shared table block")
+    };
+    assert_eq!((table.rows, table.cols, table.cells.len()), (1, 1, 1));
+    assert_eq!(table.col_widths, vec![20_000]);
+    assert_eq!(table.row_heights, vec![2_000]);
+    assert_eq!(table.cells[0].width, Some(20_000));
+    assert_eq!(table.cells[0].blocks.len(), 6);
+    assert!(table.cells[0]
+        .blocks
+        .iter()
+        .all(|block| matches!(block, Block::Paragraph(_))));
+}
+
+#[test]
+fn six_paragraph_cell_rejects_unowned_count_pairing_and_geometry() {
+    for mutation in [
+        Mutation::SevenParagraphTable,
+        Mutation::SixParagraphBadWidthReference,
+        Mutation::SixParagraphBadGeometry,
+        Mutation::SixParagraphBadExtension,
+    ] {
+        assert!(
+            OwnHwp5Parser::new().parse(&fixture(mutation)).is_err(),
+            "hostile six-paragraph mutation must fail closed"
+        );
+    }
+}
+
+#[test]
 fn owns_strict_inline_ten_by_two_table_with_horizontal_merges_and_multiple_paragraphs() {
     let doc = OwnHwp5Parser::new()
         .parse(&fixture(Mutation::LargeTable))
@@ -1118,6 +1157,11 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
             | Mutation::TableBadTerminatorShapeBoundary
             | Mutation::TableBadTerminatorShapeReference
             | Mutation::TableBadDeclaredTerminatorShapeCount
+            | Mutation::SixParagraphTable
+            | Mutation::SixParagraphBadWidthReference
+            | Mutation::SixParagraphBadGeometry
+            | Mutation::SixParagraphBadExtension
+            | Mutation::SevenParagraphTable
             | Mutation::BadTableAttr
             | Mutation::BadTableTopology
             | Mutation::BadTableGeometry
@@ -1577,7 +1621,17 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
             positions.swap(2, 3);
         }
         for (cell_index, (row, col, col_span)) in positions.into_iter().enumerate() {
-            let paragraph_count = if has_large_table && cell_index == 0 {
+            let paragraph_count = if matches!(mutation, Mutation::SevenParagraphTable) {
+                7u16
+            } else if matches!(
+                mutation,
+                Mutation::SixParagraphTable
+                    | Mutation::SixParagraphBadWidthReference
+                    | Mutation::SixParagraphBadGeometry
+                    | Mutation::SixParagraphBadExtension
+            ) {
+                6
+            } else if has_large_table && cell_index == 0 {
                 if matches!(mutation, Mutation::LargeTableBadParagraphCount) {
                     6u16
                 } else {
@@ -1586,14 +1640,15 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
             } else {
                 1
             };
-            let width_ref =
-                if matches!(mutation, Mutation::LargeTableBadWidthRef) && cell_index == 0 {
-                    0x0200u16
-                } else if has_large_table {
-                    [0x0000u16, 0x0100, 0x0500][cell_index % 3]
-                } else {
-                    0x0500
-                };
+            let width_ref = if matches!(mutation, Mutation::SixParagraphBadWidthReference) {
+                0x0100u16
+            } else if matches!(mutation, Mutation::LargeTableBadWidthRef) && cell_index == 0 {
+                0x0200u16
+            } else if has_large_table {
+                [0x0000u16, 0x0100, 0x0500][cell_index % 3]
+            } else {
+                0x0500
+            };
             let mut cell_width = if has_large_table {
                 [9_361u32, 38_552][col..col + col_span].iter().sum()
             } else {
@@ -1602,7 +1657,9 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
             if cell_index == 0
                 && matches!(
                     mutation,
-                    Mutation::BadTableGeometry | Mutation::LargeTableBadWidth
+                    Mutation::BadTableGeometry
+                        | Mutation::LargeTableBadWidth
+                        | Mutation::SixParagraphBadGeometry
                 )
             {
                 cell_width -= 1;
@@ -1647,7 +1704,18 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
                 }
                 .to_le_bytes(),
             );
-            cell.extend([0; 13]);
+            if matches!(
+                mutation,
+                Mutation::SixParagraphTable | Mutation::SixParagraphBadExtension
+            ) {
+                cell.extend_from_slice(&cell_width.to_le_bytes());
+                cell.extend([0; 9]);
+                if matches!(mutation, Mutation::SixParagraphBadExtension) {
+                    cell[38] = 1;
+                }
+            } else {
+                cell.extend([0; 13]);
+            }
             push_record(&mut body, TAG_LIST_HEADER, 2, &cell);
 
             for paragraph in 0..paragraph_count {

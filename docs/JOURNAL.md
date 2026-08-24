@@ -5,6 +5,30 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #190 PR #191 posted
+- final diff/security audit clean; verified commits through `6bf0333` pushed.
+- PR #191 created with `Closes #190`; next required CI/comments/mergeability→merge.
+
+## 2026-08-24 (Codex sol) · #190 full green
+- quick/full green: PDF51, canonical gates, corpus84/oracle82, wasm 7,810,657B, Vitest1,007.
+- sandbox bind only separated: Chromium 85 passed/3 skipped/0 failed; temp links removed.
+- route/rhwp/HWPX/typesetter/generated diff 0; next audit→evidence commit→PR/CI/merge.
+
+## 2026-08-24 (Codex sol) · #190 focused green
+- exact 1×1 + `0x0500` only owns six paragraphs; shared IR preserves all six blocks.
+- count7/wrong width-ref/geometry/extension hostile axes fail closed; HWP5 70, fmt/clippy/wasm32 green.
+- public boundary advanced to common-object `0x47/47738`; next quick/full→audit→PR/CI/merge.
+
+## 2026-08-24 (Codex sol) · #190 classified
+- two content-free runs exact: owned 1×1 table, `0x0500`, exact geometry/extension, 6 cell paragraphs.
+- shared `Cell.blocks` is lossless; global span/row equations already prove geometry; classifier removed.
+- next exact six-count discriminator + count/width-ref/geometry/extension hostile tests, then full gates/PR.
+
+## 2026-08-24 (Codex sol) · PR #189 merged / #190 started
+- #189 exact-head required CI·MERGEABLE/CLEAN·댓글 0 후 main `1263805e`; #188 close·branch 정리.
+- #94 근거 동기화, next cell LIST_HEADER boundary #190 등록, exact-main worktree 시작.
+- 다음 enclosing table 전체 content-free 2회 분류; route/rhwp/HWPX/typesetter/generated 불변.
+
 ## 2026-08-24 (Codex sol) · #188 PR #189 게시
 - verified parser/test/state commit `ae3ea4f` push, PR #189(`Closes #188`) 생성.
 - 다음 exact-head required CI·review/general/inline·mergeability 추적→병합→#94/next child.

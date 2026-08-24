@@ -1834,6 +1834,8 @@ fn parse_inline_table(
         (common_attr, table_attr, rows, cols) == (0x082a_2311, 0x0400_0004, 6, 4);
     let exact_seven_by_three =
         (common_attr, table_attr, rows, cols) == (0x082a_2311, 0x0600_000c, 7, 3);
+    let exact_one_by_one =
+        (common_attr, table_attr, rows, cols) == (0x082a_2311, 0x0400_0006, 1, 1);
     let mut cells = Vec::with_capacity(expected_cells);
     let mut cell_heights = Vec::with_capacity(expected_cells);
     let mut cell_width_refs = Vec::with_capacity(expected_cells);
@@ -1865,7 +1867,9 @@ fn parse_inline_table(
         }
         let paragraph_count = read_u16(list_bytes, 0).expect("exact length checked") as usize;
         let width_ref = read_u16(list_bytes, 6).expect("exact length checked");
-        if !(1..=5).contains(&paragraph_count) || read_u32(list_bytes, 2) != Some(0x0020_0000) {
+        let owned_paragraph_count = (1..=5).contains(&paragraph_count)
+            || (exact_one_by_one && paragraph_count == 6 && width_ref == 0x0500);
+        if !owned_paragraph_count || read_u32(list_bytes, 2) != Some(0x0020_0000) {
             return Err(malformed(
                 &list_record,
                 Some(section),
