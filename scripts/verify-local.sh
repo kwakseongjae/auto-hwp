@@ -82,10 +82,12 @@ hwpx_ge() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a+0 >= b-0)}'; }
 hwpx_check() { cargo run -q -p auto-hwp-cli --features "shaper rhwp" -- layout-check "$1"; }
 
 # ① benchmark1.hwpx — 쪽수 + 본문 문단 줄수 exact/±1 바닥.
-#    2026-07-30 실측 기준선: 우리 22쪽 · 정확 291/325(89.5%) · ±1 319/325(98.2%).
+#    2026-08-24 실측 기준선: 우리 30쪽 · 정확 291/325(89.5%) · ±1 319/325(98.2%).
+#    OWPML NARROWLY 구역을 세로로 무시하던 parser 결함(#96)을 고쳐 22→30으로 이동했다.
+#    stored-lineseg 비교는 25쪽이라 남은 5쪽 과대조판은 숨기지 않는다. 줄수 바닥은 완전 불변.
 #    (같은 파일이 apps/hwp-lab/public/samples/sample-18p.hwpx 로도 배포된다 — 한 번만 잰다.)
 HWPX_MAIN=benchmarks/benchmark1.hwpx
-HWPX_MAIN_PAGES=22
+HWPX_MAIN_PAGES=30
 HWPX_MAIN_EXACT_MIN=89.5
 HWPX_MAIN_W1_MIN=98.2
 out=$(hwpx_check "$HWPX_MAIN")

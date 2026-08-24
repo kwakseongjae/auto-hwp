@@ -154,8 +154,9 @@ fn typeset(doc: &SemanticDoc) -> (usize, usize) {
     (r.pages.len(), r.pages.iter().map(|p| p.lines.len()).sum())
 }
 
-/// 우리가 rhwp lift 보다 더 살린 요소 — 정합 비교에서 빼되, 개수는 고정한다 (T0 / #42).
-/// 제외가 침묵 구멍이 되지 않게, 픽스처마다 이 숫자가 바뀌면 테스트가 깨진다.
+/// 본문 줄수 부분집합 비교에서 의도적으로 제외하는 typed surface. 자체 파서와 rhwp가 둘 다
+/// 표현하는 항목도 비교 축 밖이면 여기서 계수한다. 제외가 침묵 구멍이 되지 않게, 픽스처마다
+/// 이 숫자가 바뀌면 테스트가 깨진다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RevivedExtras {
     /// 본문·머리말에 보이는 폼 컨트롤 표식(`☐`/`☑`) 런 수.
@@ -245,25 +246,26 @@ fn strip_form_marks(blocks: &mut [Block]) {
     // 픽스처가 폼을 품으면 extras.form_control_marks 가 먼저 깨진다.
 }
 
-/// rhwp lift 가 표현하는 부분집합 — 본문 문단·표. 폼 표식·머리말 표·HWP5 가로 스왑은 뺀다.
+/// 두 파서가 공유하는 본문 줄수 부분집합. 폼 표식·머리말 표·용지 방향은 별도 typed
+/// regression에서 잠그므로 이 비교에서는 정규화한다.
 fn rhwp_expressible_subset(doc: &SemanticDoc) -> SemanticDoc {
     let mut d = doc.clone();
     for sec in &mut d.sections {
         sec.decorations.clear();
-        // HWPX 규약: 가로 여부는 저장된 상자에서 유도한다. rhwp 가 HWPX 에 남긴
-        // `landscape=true` + 세로 상자(WIDELY 오표기)에 HWP5 스왑을 적용하지 않는다.
+        // 이 테스트는 본문 줄수 부분집합만 비교한다. 방향은 parser·place·PDF의 별도
+        // regression이 잠그므로 두 후보 모두 stored box 방향으로 정규화한다.
         sec.page.landscape = sec.page.width > sec.page.height;
         strip_form_marks(&mut sec.blocks);
     }
     d
 }
 
-/// `benchmark1.hwpx` 에서 우리가 살린 요소의 개수. rhwp 경로는 HWPX Skeleton 이
-/// 세로 상자에 `landscape=true` 를 붙여 스왑 후보가 1이다. 머리말 표·폼은 이 픽스처에 없다.
+/// `benchmark1.hwpx`에서 부분집합 밖 typed surface의 개수. 자체 parser와 rhwp 모두 OWPML
+/// NARROWLY 구역 하나를 landscape swap으로 해석한다. 머리말 표·폼은 이 픽스처에 없다.
 const BENCH1_OURS_EXTRAS: RevivedExtras = RevivedExtras {
     form_control_marks: 0,
     header_footer_tables: 0,
-    landscape_swaps: 0,
+    landscape_swaps: 1,
 };
 const BENCH1_RHWP_EXTRAS: RevivedExtras = RevivedExtras {
     form_control_marks: 0,
@@ -292,9 +294,8 @@ fn floor_rows_to_stored(blocks: &mut [Block]) {
 /// **조판 파리티 (T0 부분집합 동등)** — 같은 `.hwpx` 를 우리 파서 / rhwp lift 로 읽어
 /// **rhwp 가 표현하는 본문 부분집합**만 같은 엔진으로 조판한다.
 ///
-/// #42 수리가 폼 컨트롤·머리말 표·HWP5 가로 스왑을 살리면, 그 요소는 rhwp lift 에 없거나
-/// (HWPX Skeleton 의 오표기 `landscape=true`) 다르게 부호화된다. 그 차이를 "우리 301 vs
-/// rhwp 282"처럼 전량 동등으로 잠그면 수리가 게이트를 깨뜨린다. 그래서:
+/// 폼 컨트롤·머리말 표·용지 방향은 본문 줄수와 다른 typed surface다. 그 차이를 "우리 301 vs
+/// rhwp 282"처럼 전량 동등으로 잠그면 독립적인 수리가 게이트를 깨뜨린다. 그래서:
 /// 1. 살린 요소는 비교에서 **명시적으로 제외**하고 (`rhwp_expressible_subset`)
 /// 2. 제외 개수는 `BENCH1_*_EXTRAS` 로 **고정**한다 — 침묵 구멍 방지.
 /// 3. 살린 요소 자체는 이 파일이 아닌 픽스처 테스트가 잠근다.
@@ -341,7 +342,7 @@ fn hwpx_parser_typesets_like_the_rhwp_lift() {
     assert_eq!(
         (op, ol),
         (22, 301),
-        "benchmark1.hwpx 부분집합 조판이 22쪽/301줄에서 벗어났다: {op}쪽/{ol}줄"
+        "benchmark1.hwpx 방향 정규화 부분집합 조판이 22쪽/301줄에서 벗어났다: {op}쪽/{ol}줄"
     );
     assert_eq!(
         ol, tl,

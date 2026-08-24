@@ -862,7 +862,7 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
                     // Row-level split accounting, matching place_doc/place_table: a row that doesn't fit
                     // the remaining body flows to the next page. Record the page where the FIRST row
                     // lands as the table's start page (outline/page-nav only needs the start).
-                    let row_h = crate::table_row_heights(t, body_w, doc, fonts);
+                    let row_h = crate::table_page_flow_row_heights(t, body_w, body_h, doc, fonts);
                     let caption_metrics = crate::table_caption_metrics(t, body_w, doc, fonts);
                     if let Some((_, caption_height)) = caption_metrics {
                         if crate::keep_captioned_table_on_fresh_lane(
@@ -906,7 +906,29 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
                         vert = 0.0;
                     }
                     sec_pages.push(page_idx); // the table starts here (where its first row lands)
+                    let repeated_header = if t.repeat_first_row {
+                        row_h.first().copied().unwrap_or(0.0)
+                    } else {
+                        0.0
+                    };
                     for (r, rh) in row_h.iter().enumerate() {
+                        let header = if r > 0 { repeated_header } else { 0.0 };
+                        if let Some(fragments) = crate::over_tall_cell_fragments(
+                            t,
+                            r,
+                            *rh,
+                            (body_h - vert).max(1.0),
+                            (body_h - header).max(1.0),
+                        ) {
+                            for (index, fragment) in fragments.iter().enumerate() {
+                                if index > 0 {
+                                    page_idx += 1;
+                                    vert = header;
+                                }
+                                vert += fragment;
+                            }
+                            continue;
+                        }
                         if r > 0 && vert + rh > body_h && vert > 0.0 && *rh <= body_h {
                             page_idx += 1;
                             vert = 0.0;
@@ -1581,7 +1603,7 @@ fn place_table(
     let col_x = column_offsets(t, avail_w);
     // Per-row heights: the SAME sizing the reservation summed (table_height), so fragment heights add up
     // exactly and the page boundaries match NaiveLayout's row-level accounting.
-    let row_h = row_heights(t, avail_w, doc, fonts);
+    let row_h = crate::table_page_flow_row_heights(t, avail_w, body_h, doc, fonts);
 
     let mut vert = vert;
     if !crate::has_flow_caption(t) && crate::keep_table_on_fresh_lane(t, &row_h, vert, body_h) {
@@ -1601,12 +1623,43 @@ fn place_table(
     let mut frag_first = 0usize; // first row index of the current page fragment
     let mut frag_top = mt + vert; // absolute y of the current fragment's top edge
     let mut y = mt + vert; // absolute running top of the next row
+    let repeated_header = if t.repeat_first_row {
+        row_h.first().copied().unwrap_or(0.0)
+    } else {
+        0.0
+    };
     for r in 0..t.rows {
+        let header = if r > 0 { repeated_header } else { 0.0 };
+        if let Some(fragments) = crate::over_tall_cell_fragments(
+            t,
+            r,
+            row_h[r],
+            (body_h - (y - mt)).max(1.0),
+            (body_h - header).max(1.0),
+        ) {
+            if frag_first < r {
+                flush_fragment(
+                    pages, t, doc, fonts, ml, frag_top, &col_x, &row_h, frag_first, r, section,
+                    block, frame,
+                );
+            }
+            let final_height = flush_over_tall_row(
+                pages, t, doc, fonts, ml, y, mt, &col_x, &row_h, r, &fragments, header, page,
+                section, block, frame,
+            );
+            frag_first = r + 1;
+            y = mt + final_height;
+            frag_top = y;
+            continue;
+        }
         // Break BEFORE row r if it would cross the body bottom — but never before a fragment's own first
         // row (a row taller than a whole page draws and clips, like before, rather than looping forever),
         // and never to give a row TALLER than the whole body its own page (it can't fit there either, so
         // the break would only waste the current page). `rh <= body_h` mirrors NaiveLayout/block_pages.
-        if r > frag_first && (y - mt) + row_h[r] > body_h && row_h[r] <= body_h {
+        if ((r > frag_first) || (r == frag_first && frag_top > mt))
+            && (y - mt) + row_h[r] > body_h
+            && row_h[r] <= body_h
+        {
             flush_fragment(
                 pages, t, doc, fonts, ml, frag_top, &col_x, &row_h, frag_first, r, section, block,
                 frame,
@@ -1618,11 +1671,123 @@ fn place_table(
         }
         y += row_h[r];
     }
-    flush_fragment(
-        pages, t, doc, fonts, ml, frag_top, &col_x, &row_h, frag_first, t.rows, section, block,
-        frame,
-    );
+    if frag_first < t.rows {
+        flush_fragment(
+            pages, t, doc, fonts, ml, frag_top, &col_x, &row_h, frag_first, t.rows, section, block,
+            frame,
+        );
+    }
     y - mt // final page-relative cursor (bottom of the last fragment)
+}
+
+/// Paint one text-only over-tall row as repeated page fragments. Geometry is emitted from an empty
+/// clone through the ordinary `flush_fragment` path, so cell boxes/provenance stay identical. Text is
+/// laid out once in the full logical row, then each glyph is translated into exactly one page slice;
+/// no paragraph is re-shaped per page and no glyph can be duplicated.
+#[allow(clippy::too_many_arguments)]
+fn flush_over_tall_row(
+    pages: &mut Vec<PlacedPage>,
+    table: &Table,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+    ml: f64,
+    first_top: f64,
+    body_top: f64,
+    col_x: &[f64],
+    row_heights: &[f64],
+    row: usize,
+    fragments: &[f64],
+    repeated_header: f64,
+    page: &PageSetup,
+    section: usize,
+    block: usize,
+    frame: Option<CellEdge>,
+) -> f64 {
+    let mut logical = vec![PlacedPage::default()];
+    flush_fragment(
+        &mut logical,
+        table,
+        doc,
+        fonts,
+        ml,
+        0.0,
+        col_x,
+        row_heights,
+        row,
+        row + 1,
+        section,
+        block,
+        None,
+    );
+    let logical_glyphs = std::mem::take(&mut logical[0].glyphs);
+
+    let mut shell = table.clone();
+    for cell in &mut shell.cells {
+        cell.blocks.clear();
+        cell.fill_image = None;
+    }
+    let mut slice_heights = row_heights.to_vec();
+    let mut offset = 0.0;
+    for (index, height) in fragments.iter().copied().enumerate() {
+        let slice_top = if index == 0 {
+            first_top
+        } else {
+            new_page(pages, page);
+            if repeated_header > 0.0 && row > 0 {
+                flush_fragment(
+                    pages,
+                    table,
+                    doc,
+                    fonts,
+                    ml,
+                    body_top,
+                    col_x,
+                    row_heights,
+                    0,
+                    1,
+                    section,
+                    block,
+                    frame,
+                );
+            }
+            body_top + repeated_header
+        };
+        slice_heights[row] = height;
+        flush_fragment(
+            pages,
+            &shell,
+            doc,
+            fonts,
+            ml,
+            slice_top,
+            col_x,
+            &slice_heights,
+            row,
+            row + 1,
+            section,
+            block,
+            frame,
+        );
+        let end = offset + height;
+        if let Some(current) = pages.last_mut() {
+            current.glyphs.extend(
+                logical_glyphs
+                    .iter()
+                    .filter(|glyph| glyph.baseline > offset && glyph.baseline <= end)
+                    .cloned()
+                    .map(|mut glyph| {
+                        glyph.baseline = slice_top + glyph.baseline - offset;
+                        glyph
+                    }),
+            );
+        }
+        offset = end;
+    }
+    if fragments.len() > 1 {
+        repeated_header + fragments.last().copied().unwrap_or(0.0)
+    } else {
+        (first_top - body_top) + fragments.last().copied().unwrap_or(0.0)
+    }
 }
 
 /// Column-aware row fragmentation twin of [`place_table`]. Row heights are measured at the
@@ -4624,6 +4789,108 @@ mod tests {
         assert_eq!(frags.len(), 1, "a fitting table is one fragment");
         assert_eq!((frags[0].first_row, frags[0].last_row), (0, 2));
         assert_eq!(placed.pages.len(), 1, "no extra pages");
+    }
+
+    #[test]
+    fn text_only_cell_row_taller_than_page_continues_without_duplicate_glyphs() {
+        use crate::LayoutEngine;
+
+        let mut table = n_row_table(2);
+        table.split_over_tall_cells = true;
+        table.cells[1].blocks = vec![Block::Paragraph(para(
+            "가\n나\n다\n라\n마\n바\n사\n아\n자\n차\n카\n타",
+        ))];
+        let doc = doc_with_page(vec![Block::Table(table.clone())], 5_000);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let naive = crate::NaiveLayout
+            .layout(&doc, &ApproxFontMetrics)
+            .expect("continued cell layout");
+        assert_eq!(placed.pages.len(), naive.pages.len(), "LOCKSTEP");
+        assert!(placed.pages.len() >= 3, "one over-tall row must continue");
+        assert_eq!(
+            placed
+                .pages
+                .iter()
+                .flat_map(|page| &page.glyphs)
+                .filter(|glyph| glyph.ch != '행')
+                .count(),
+            12,
+            "each continued cell glyph is painted exactly once"
+        );
+        assert_eq!(block_pages(&doc, &ApproxFontMetrics)[0], vec![0]);
+
+        table.cells[1].source_page_segments = 5;
+        assert_eq!(
+            crate::over_tall_cell_fragments(&table, 1, 12_000.0, 4_000.0, 5_000.0)
+                .expect("stored clean continuation lower bound")
+                .len(),
+            5,
+            "clean HWPX lineseg resets preserve a content-free minimum fragment count"
+        );
+        table.geometry_edited = true;
+        assert_eq!(
+            crate::over_tall_cell_fragments(&table, 1, 12_000.0, 4_000.0, 5_000.0)
+                .expect("edited geometry falls back to measured continuation")
+                .len(),
+            3,
+            "stale source segment caches cannot constrain an edited table"
+        );
+        table.geometry_edited = false;
+        table.cells[1].source_page_segments = 257;
+        assert_eq!(
+            crate::over_tall_cell_fragments(&table, 1, 12_000.0, 4_000.0, 5_000.0)
+                .expect("oversize untrusted cache falls back to measurement")
+                .len(),
+            3,
+            "hostile lineseg reset counts cannot manufacture unbounded pages"
+        );
+        table.cells[1].source_page_segments = 5;
+        table.repeat_first_row = true;
+        let source_locked = doc_with_page(vec![Block::Table(table.clone())], 5_000);
+        let source_placed = place_doc(&source_locked, &ApproxFontMetrics);
+        assert!(source_placed.pages.len() >= 5);
+        assert_eq!(
+            source_placed
+                .pages
+                .iter()
+                .flat_map(|page| &page.glyphs)
+                .filter(|glyph| glyph.ch == '행')
+                .count(),
+            source_placed.pages.len(),
+            "the first row is repeated once per continued page"
+        );
+        assert_eq!(
+            source_placed
+                .pages
+                .iter()
+                .flat_map(|page| &page.glyphs)
+                .filter(|glyph| glyph.ch != '행')
+                .count(),
+            12,
+            "source fragment lower bounds cannot duplicate or lose body glyphs"
+        );
+        assert_eq!(
+            crate::NaiveLayout
+                .layout(&source_locked, &ApproxFontMetrics)
+                .unwrap()
+                .pages
+                .len(),
+            source_placed.pages.len(),
+            "source-fragment continuation remains LOCKSTEP"
+        );
+
+        table.split_over_tall_cells = false;
+        let legacy = doc_with_page(vec![Block::Table(table)], 5_000);
+        assert_eq!(place_doc(&legacy, &ApproxFontMetrics).pages.len(), 1);
+        assert_eq!(
+            crate::NaiveLayout
+                .layout(&legacy, &ApproxFontMetrics)
+                .unwrap()
+                .pages
+                .len(),
+            1,
+            "pageBreak=NONE remains bounded legacy overflow"
+        );
     }
 
     #[test]

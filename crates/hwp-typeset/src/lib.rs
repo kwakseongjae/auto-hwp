@@ -46,6 +46,9 @@ const SPACE: f64 = 0.3;
 const DEFAULT_LINESPACE: f64 = 1.6;
 /// Baseline as a fraction of the line height (matches Hancom's 850/1000 convention).
 pub(crate) const BASELINE_RATIO: f64 = 0.85;
+/// Stored HWPX lineseg caches are untrusted hints, never authority to manufacture unbounded pages.
+/// Real public fixtures need single digits; this ceiling is intentionally generous and fail-closed.
+const MAX_SOURCE_CELL_PAGE_SEGMENTS: usize = 256;
 
 /// 본문 상자(HWPUNIT) — `(원점_x, 원점_y, 너비, 높이)`. **쪽수 계산의 단일 진실**이라
 /// `NaiveLayout`·`place_doc`·`block_pages` 셋이 전부 이걸 거쳐야 LOCKSTEP 이 깨지지 않는다.
@@ -61,9 +64,9 @@ pub(crate) const BASELINE_RATIO: f64 = 0.85;
 /// **71435 짜리 본문 상자에 맞고 77103 에는 한참 못 미친다** — 즉 71435 가 한컴이 실제로 쓴
 /// 본문 높이다.
 /// Paper size used for layout/paint. HWP5 stores unswapped A4 + `landscape=true`;
-/// rhwp swaps at render (`PageAreas::from_page_def_for_page`). HWPX already stores
-/// display width/height (`landscape` derived from width>height), so we only swap
-/// when the flag is set *and* the stored box is still portrait.
+/// rhwp swaps at render (`PageAreas::from_page_def_for_page`). OWPML likewise stores
+/// short/long paper edges plus a separate NARROWLY/WIDELY orientation token, so we
+/// swap only when the landscape flag is set and the stored box is still portrait.
 pub fn display_paper(page: &PageSetup) -> (i32, i32) {
     if page.landscape && page.width < page.height {
         (page.height, page.width)
@@ -547,7 +550,7 @@ impl LayoutEngine for NaiveLayout {
                         if vert > 0.0 {
                             vert += t.outer_margin_top.max(0) as f64;
                         }
-                        let rows = table_row_heights(t, body_w, doc, fonts);
+                        let rows = table_page_flow_row_heights(t, body_w, body_h, doc, fonts);
                         let caption_metrics = table_caption_metrics(t, body_w, doc, fonts);
                         if let Some((_, caption_height)) = caption_metrics {
                             if keep_captioned_table_on_fresh_lane(
@@ -580,7 +583,27 @@ impl LayoutEngine for NaiveLayout {
                             );
                             vert += t.caption.as_ref().unwrap().spacing.max(0) as f64;
                         }
-                        for rh in rows {
+                        let repeated_header = if t.repeat_first_row {
+                            rows.first().copied().unwrap_or(0.0)
+                        } else {
+                            0.0
+                        };
+                        for (row, rh) in rows.into_iter().enumerate() {
+                            let header = if row > 0 { repeated_header } else { 0.0 };
+                            let continued = (body_h - header).max(1.0);
+                            let first_available = (body_h - vert).max(1.0);
+                            if let Some(fragments) =
+                                over_tall_cell_fragments(t, row, rh, first_available, continued)
+                            {
+                                for (index, fragment) in fragments.iter().enumerate() {
+                                    if index > 0 {
+                                        pages.push(new_page(page));
+                                        vert = header;
+                                    }
+                                    vert += fragment;
+                                }
+                                continue;
+                            }
                             // `rh <= body_h`: a row taller than the whole body never triggers a break — it
                             // can't fit a fresh page either, so a break would only waste the current page
                             // (the 자가진단표 1×1 mega-cell). Mirrors place_table + block_pages for lockstep.
@@ -1213,6 +1236,201 @@ pub(crate) fn keep_table_on_fresh_lane(
         && total > 0.0
         && total <= available
         && vert + total > available
+}
+
+/// Return page-body slices for an HWPX `pageBreak="CELL"` row that is taller than every fresh
+/// continuation lane. `first_available` is the remainder of the page where the row begins;
+/// `continued_available` excludes a repeated header row. This is deliberately fail-closed: only a
+/// single, text-only row can be continued. Nested tables and paint objects keep bounded overflow
+/// until their clipping/replay semantics are modeled.
+pub(crate) fn over_tall_cell_fragments(
+    table: &Table,
+    row: usize,
+    row_height: f64,
+    first_available: f64,
+    continued_available: f64,
+) -> Option<Vec<f64>> {
+    if !table.split_over_tall_cells
+        || row >= table.rows
+        || !row_height.is_finite()
+        || !first_available.is_finite()
+        || !continued_available.is_finite()
+        || row_height <= continued_available
+        || first_available <= 0.0
+        || continued_available <= 0.0
+    {
+        return None;
+    }
+    let participating: Vec<&Cell> = table
+        .cells
+        .iter()
+        .filter(|cell| {
+            cell.active && cell.row <= row && row < cell.row.saturating_add(cell.row_span.max(1))
+        })
+        .collect();
+    if participating.is_empty()
+        || participating.iter().any(|cell| {
+            cell.row != row
+                || cell.row_span.max(1) != 1
+                || cell.fill_image.is_some()
+                || cell.blocks.iter().any(|block| match block {
+                    Block::Paragraph(paragraph) => paragraph.runs.iter().any(|run| {
+                        run.content.iter().any(|inline| {
+                            !matches!(
+                                inline,
+                                Inline::Text(_)
+                                    | Inline::FieldBegin(_)
+                                    | Inline::FieldEnd(_)
+                                    | Inline::Bookmark(_)
+                            )
+                        })
+                    }),
+                    Block::Table(_) => true,
+                })
+        })
+    {
+        return None;
+    }
+
+    let mut fragments = Vec::new();
+    let mut remaining = row_height;
+    let first = remaining.min(first_available);
+    fragments.push(first);
+    remaining -= first;
+    while remaining > continued_available {
+        fragments.push(continued_available);
+        remaining -= continued_available;
+    }
+    if remaining > 0.0 {
+        fragments.push(remaining);
+    }
+    let source_minimum = if table.geometry_edited || table.dirty.is_dirty() {
+        0
+    } else {
+        participating
+            .iter()
+            .filter(|cell| !cell.dirty.is_dirty())
+            .map(|cell| cell.source_page_segments)
+            .max()
+            .unwrap_or(0)
+    };
+    if source_minimum > fragments.len()
+        && source_minimum > 1
+        && source_minimum <= MAX_SOURCE_CELL_PAGE_SEGMENTS
+    {
+        let capacity =
+            first_available + continued_available * source_minimum.saturating_sub(1) as f64;
+        if row_height <= capacity {
+            fragments.clear();
+            let mut remaining = row_height;
+            for index in 0..source_minimum {
+                let slots = (source_minimum - index) as f64;
+                let cap = if index == 0 {
+                    first_available
+                } else {
+                    continued_available
+                };
+                let later_capacity =
+                    continued_available * source_minimum.saturating_sub(index + 1) as f64;
+                let minimum_here = (remaining - later_capacity).max(f64::EPSILON);
+                let slice = (remaining / slots).max(minimum_here).min(cap);
+                fragments.push(slice);
+                remaining -= slice;
+            }
+            if let Some(last) = fragments.last_mut() {
+                *last += remaining;
+            }
+        }
+    }
+    (fragments.len() > 1).then_some(fragments)
+}
+
+/// Row heights used only for `pageBreak="CELL"` pagination. A stored HWPX row normally retains
+/// its parsed height; when its text itself is taller than a fresh continuation lane, however,
+/// CELL flow must paginate that text. Re-measure only those overflowing rows from content while
+/// leaving every ordinary/fitting row exact. Paint geometry and serialization remain untouched.
+pub(crate) fn table_page_flow_row_heights(
+    table: &Table,
+    avail_w: f64,
+    body_h: f64,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+) -> Vec<f64> {
+    let mut rows = table_row_heights(table, avail_w, doc, fonts);
+    if !table.split_over_tall_cells || rows.is_empty() {
+        return rows;
+    }
+    let header = if table.repeat_first_row && table.rows > 1 {
+        rows[0]
+    } else {
+        0.0
+    };
+    let continued_available = (body_h - header).max(1.0);
+    for (row, measured_height) in rows.iter_mut().enumerate() {
+        let Some(content_height) = continued_text_row_height(table, row, avail_w, doc, fonts)
+        else {
+            continue;
+        };
+        if over_tall_cell_fragments(
+            table,
+            row,
+            content_height,
+            continued_available,
+            continued_available,
+        )
+        .is_some()
+        {
+            *measured_height = content_height;
+        }
+    }
+    rows
+}
+
+/// Text stack height for a row that continues through a page boundary. Ordinary cell sizing trims
+/// the last line's leading from every paragraph; in one continued cell, that leading remains the
+/// inter-paragraph gap and only the final paragraph trims it. This distinction is activated only
+/// after the stack exceeds a continuation lane, so the established row-height gates stay untouched.
+fn continued_text_row_height(
+    table: &Table,
+    row: usize,
+    avail_w: f64,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+) -> Option<f64> {
+    let mut maximum = 0.0f64;
+    let mut seen = false;
+    for (cell_index, cell) in table.cells.iter().enumerate() {
+        if !cell.active || cell.row != row || cell.row_span.max(1) != 1 || cell.fill_image.is_some()
+        {
+            continue;
+        }
+        if cell
+            .blocks
+            .iter()
+            .any(|block| !matches!(block, Block::Paragraph(_)))
+        {
+            return None;
+        }
+        let text_width = table_cell_text_width(table, avail_w, cell_index);
+        let paragraph_count = cell.blocks.len();
+        let mut height = 0.0;
+        for (index, block) in cell.blocks.iter().enumerate() {
+            let Block::Paragraph(paragraph) = block else {
+                unreachable!("checked above")
+            };
+            height += cell_paragraph_height(paragraph, doc, text_width, fonts);
+            if index + 1 < paragraph_count {
+                let ratio = line_spacing_ratio(paragraph, doc);
+                if let Some(last) = layout_cell_paragraph(paragraph, doc, text_width, fonts).last()
+                {
+                    height += (last.vert_size * (ratio - 1.0)).max(0.0);
+                }
+            }
+        }
+        maximum = maximum.max(height + CELL_PAD);
+        seen = true;
+    }
+    seen.then_some(maximum)
 }
 
 /// Apply per-row MINIMUM-height overrides (HWPUNIT) from [`Table::row_heights`] as a FLOOR on the

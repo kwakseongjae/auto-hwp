@@ -471,6 +471,15 @@ pub struct Table {
     /// taller than a fresh lane still uses the existing row-fragmentation fallback, so hostile or
     /// genuinely over-tall input cannot create an advance loop. `false` preserves legacy behavior.
     pub keep_together: bool,
+    /// RENDER-IR ONLY: an HWPX `<hp:tbl pageBreak="CELL">` may continue the text of one
+    /// auto-fit cell/row on the next page when that row is taller than a page body. The old
+    /// row-boundary-only paginator clipped such rows onto one page. Binary HWP and synthesized
+    /// tables leave this false until their equivalent provenance is modeled. Ordinary rows retain
+    /// their stored sizing; only a text stack taller than a fresh page lane activates continuation.
+    pub split_over_tall_cells: bool,
+    /// RENDER-IR ONLY: HWPX `repeatHeader="1"`. The first table row is repeated before a
+    /// continued `pageBreak="CELL"` slice and consumes flow height on every continuation page.
+    pub repeat_first_row: bool,
     /// Per-column widths (HWPUNIT), `cols` entries — for faithful column proportions on render.
     /// Empty when unknown (then the renderer falls back to auto-layout).
     pub col_widths: Vec<HwpUnit>,
@@ -693,6 +702,11 @@ pub struct Cell {
     /// 잡는다. 폭이 절반이면 셀 글이 두 배로 줄바꿈되고 그만큼 행이 부풀어(+4285 HWPUNIT) 페이지가
     /// 밀린다. 격자 근사는 폭 조절 UI 용으로 남기고, **조판/그리기는 저장된 실폭**을 쓴다.
     pub width: Option<HwpUnit>,
+    /// RENDER-IR ONLY: number of page fragments observed in this HWPX cell's stored line layout
+    /// (`vertpos` reset count + 1). Used only as a lower bound for an unedited
+    /// `pageBreak="CELL"` continuation; cell/table dirtiness or table geometry edits discard this
+    /// stale cache and return pagination to live measurement.
+    pub source_page_segments: usize,
     pub dirty: Dirty,
 }
 
@@ -813,6 +827,7 @@ impl Default for Cell {
             src_span: None,
             padding: None,
             width: None,
+            source_page_segments: 0,
             dirty: Dirty::default(),
         }
     }
