@@ -618,10 +618,20 @@ fn discard_proposal(sess: tauri::State<'_, SharedSession>) -> Result<(), String>
 fn ai_generate(prompt: String, sess: tauri::State<'_, SharedSession>) -> Result<String, String> {
     let mut s = sess.lock().map_err(|_| "session poisoned")?;
     let provider = pick_provider();
-    let doc = s.doc.as_ref().ok_or("no document open")?.doc();
-    let proposal = hwp_ai::propose(doc, &*provider, &prompt).map_err(|e| e.to_string())?;
+    let (content, proposal) = {
+        let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+        let content =
+            hwp_ai::author_content(doc, &*provider, &prompt).map_err(|e| e.to_string())?;
+        let proposal = hwp_ai::propose_from_content(doc, &content, &format!("지시: {prompt}"))
+            .map_err(|e| e.to_string())?;
+        (content, proposal)
+    };
+    let content_json = serde_json::to_string(&content).map_err(|e| e.to_string())?;
+    hwp_mcp::propose_intents_v1(
+        &mut s,
+        &[json!({"intent":"ApplyContent", "json":content_json})],
+    )?;
     let preview = format!("{}\n\n{}", proposal.rationale, proposal.preview());
-    s.pending = Some(proposal);
     Ok(format!("[{}]\n{preview}", provider.name()))
 }
 
@@ -655,7 +665,6 @@ fn ai_edit_propose(
 ) -> Result<Value, String> {
     let mut s = sess.lock().map_err(|_| "session poisoned")?;
     let provider = pick_provider();
-    let doc = s.doc.as_ref().ok_or("no document open")?.doc();
     // Marked anchors (issue #009) take priority over the single click-scope: they carry exact structure
     // coords (row/col, first_row-corrected) and scope the edit to just those spots. Fall back to the
     // legacy click-scope directive when no anchors ride along (keeps the no-chip flow byte-identical).
@@ -673,22 +682,39 @@ fn ai_edit_propose(
             _ => instruction.clone(),
         },
     };
-    let mut proposal =
-        hwp_ai::propose_edits(doc, &*provider, &scoped).map_err(|e| e.to_string())?;
+    let (mut script, mut proposal) = {
+        let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+        let script =
+            hwp_ai::author_edit_script(doc, &*provider, &scoped).map_err(|e| e.to_string())?;
+        let proposal =
+            hwp_ai::propose_from_edit_script(doc, &script, &format!("편집 지시: {scoped}"))
+                .map_err(|e| e.to_string())?;
+        (script, proposal)
+    };
     // Preset "표 채우기" (issue #011): the prompt already tells the model to preserve the header/음영
     // rows, but this makes it structural — drop any text-fill op that targets a protected row so a model
     // that ignores the prompt can never clobber them. All `doc` reads finish here (before s.pending).
     if guardTableHeader == Some(true) {
-        let blocked =
-            hwp_session::protect_table_header_rows(doc, &mut proposal.ops, anchors.as_deref());
+        let blocked = {
+            let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+            hwp_session::protect_table_header_edit_script(doc, &mut script, anchors.as_deref())
+        };
+        let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+        proposal = hwp_ai::propose_from_edit_script(doc, &script, &format!("편집 지시: {scoped}"))
+            .map_err(|e| e.to_string())?;
         if blocked > 0 {
             proposal.rationale.push_str(&format!(
                 "\n※ 헤더/음영 행 보존: 보호된 행을 덮어쓰려는 편집 {blocked}건을 제외했습니다."
             ));
         }
     }
-    let out = hwp_session::proposal_json(provider.name(), &proposal);
-    s.pending = Some(proposal);
+    let script_json = serde_json::to_string(&script).map_err(|e| e.to_string())?;
+    let canonical = hwp_mcp::propose_intents_v1(
+        &mut s,
+        &[json!({"intent":"ApplyEditScript", "json":script_json})],
+    )?;
+    let mut out = hwp_session::proposal_json(provider.name(), &proposal);
+    out["proposal"] = serde_json::to_value(canonical).map_err(|e| e.to_string())?;
     Ok(out)
 }
 
@@ -738,20 +764,22 @@ fn propose_insert_image(
 ) -> Result<Value, String> {
     let (path, safe) = hwp_session::stash_image(&name, Some(&dataB64), None)?;
     let mut s = sess.lock().map_err(|_| "session poisoned")?;
-    let doc = s.doc.as_ref().ok_or("no document open")?.doc();
-    let proposal = hwp_session::build_insert_image_proposal(
-        doc,
-        &path,
-        scopeSection,
-        scopeBlock,
-        widthMm,
-        heightMm,
-    )?;
+    let script =
+        hwp_session::build_insert_image_script(&path, scopeSection, scopeBlock, widthMm, heightMm)?;
+    let proposal = {
+        let doc = s.doc.as_ref().ok_or("no document open")?.doc();
+        hwp_ai::propose_from_edit_script(doc, &script, "이미지 삽입").map_err(|e| e.to_string())?
+    };
     // No provider on the deterministic image path — label the rationale with the filename so the
     // card reads "📎 <name>"; the structured op carries the anchored target like any other.
     let mut out = hwp_session::proposal_json("deterministic", &proposal);
     out["rationale"] = json!(format!("📎 {safe}"));
-    s.pending = Some(proposal);
+    let script_json = serde_json::to_string(&script).map_err(|e| e.to_string())?;
+    let canonical = hwp_mcp::propose_intents_v1(
+        &mut s,
+        &[json!({"intent":"ApplyEditScript", "json":script_json})],
+    )?;
+    out["proposal"] = serde_json::to_value(canonical).map_err(|e| e.to_string())?;
     Ok(out)
 }
 

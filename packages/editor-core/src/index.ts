@@ -118,7 +118,10 @@ export { Emitter } from "./events";
 export type { Listener } from "./events";
 
 // Types
+export { canonicalProposalDigest } from "./proposal";
+export type { ProposalDigestMaterial } from "./proposal";
 export type {
+  AffectedAddress,
   AgentEvent,
   AiRequestOptions,
   Anchor,
@@ -148,6 +151,8 @@ export type {
   Outcome,
   OutlineItem,
   PageGeom,
+  ProposalCapabilities,
+  ProposalV1,
   PointerInput,
   ProfileHeading,
   ProfileTable,

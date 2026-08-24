@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #104 canonical Proposal v1
+- Web/Tauri/MCP/SDK를 revision/session/document-bound scratch preview와 one-undo commit으로 통합.
+- AiContent/EditScript strict normalize·즉시 compile, stale/mid-batch/recorded digest parity를 잠금.
+- quick/full green: 8/18/24+98.9%, oracle82, Vitest 1,023, Chromium 85 pass/3 skip; rhwp 무수정.
+- 다음: commit/push→`Closes #104` PR/CI/merge→#105/#106 verified AI execution.
+
 ## 2026-08-24 (Codex sol) · #89 inline object atom flow
 - HWP5 control anchor와 shared Text/Object atom flow를 복원해 body/cell/caret LOCKSTEP을 구현.
 - math 실측 19 paragraph = 44 Equation = 44 PlacedImage = 44 PaintOp; 3쪽/16 exact→2쪽/19 exact.

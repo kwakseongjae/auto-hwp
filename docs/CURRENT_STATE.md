@@ -3,6 +3,35 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-24 · Codex(sol) — **#104 Proposal v1 full green · PR 직전**.
+  Web/Tauri/MCP/SDK가 같은 `ProposeIntents`→strict decode/normalize→detached scratch→
+  `CommitProposal(id, expected_revision)` 계약을 쓴다. DTO는 session/document/base revision,
+  normalized Intents, addresses/pages, capabilities, risks/warnings와 canonical digest를 포함한다.
+  pending validated snapshot은 엔진 내부에만 있고 reopen/edit/undo/redo/다른 commit 뒤 stale이며,
+  commit은 정확히 한 undo 단위다. AiContent/EditScript는 nested unknown field까지 preview 전에
+  거부하고 typed parse·재직렬화 후 즉시 scratch op로 컴파일한다. 데스크톱 AI 생성/채팅/첨부도
+  canonical pending으로 이관했고 header guard는 digest 전 DSL 자체를 필터링한다. recorded
+  Rust/TS/Web/Tauri digest는 `fnv1a64:12f669d02eea3d03`. quick/full은 canonical
+  **8/18/24 + 98.9%+**, corpus **84**, catalog **259/12 families/120 pairs**, oracle **82**,
+  PDF visual **51**, wasm **7,964,478B**, Vitest **1,023**, Chromium **85 pass/3 intentional skip**로
+  green이다. sandbox port EPERM은 승인된 동일 final wasm E2E로 해소했다. 임시 dependency 제거,
+  generated wasm diff 0, rhwp gitlink clean. `docs/PROPOSAL-V1.md`에 checksum≠auth와 binding 신뢰
+  경계를 명시했다. **다음:** privacy/diff 최종 감사→commit/push/PR `Closes #104`→exact-head
+  CI/comments green autonomous merge→#105/#106.
+
+- 갱신: 2026-08-24 · Codex(sol) — **PR #207 병합 · #104 canonical Proposal v1 착수**.
+  PR #207 exact head `e6d232b5`에서 issue-link **4s**·build-test **9m24s**·licenses **3m4s**
+  green, MERGEABLE, review/general/inline 댓글 0을 확인하고 protected main `2218fb26`으로 squash
+  병합했다. #89와 object-paragraph leak #84를 close했고 #93/#114에 content-free 성과·잔여를
+  동기화했다. exact main의 `codex/issue-104-proposal-v1` worktree와 pinned rhwp `f137b4c9`를
+  준비했다. 초기 감사상 Rust `Proposal`은 ops+rationale뿐이고 MCP pending은 revision/document에
+  묶이지 않아 propose 후 undo/redo/외부 commit에도 stale commit 가능하며, 웹은 Proposal 없이
+  raw `Intent[]`를 preview/apply한다. 반면 monotonic revision, scratch validation, atomic rollback,
+  one-unit undo는 이미 first-party primitive로 존재한다. **다음:** canonical Proposal v1 DTO/digest와
+  strict normalized Intent decode를 hwp-mcp 중심에 정의→session/document/revision/capability/risk binding→
+  stale invalidation 및 expected-revision commit→scratch preview no-mutation/mid-batch rollback tests→
+  wasm/Tauri/SDK recorded fixture digest parity. schema v0은 additive only, unknown field explicit reject.
+
 - 갱신: 2026-08-24 · Codex(sol) — **#89 inline object atom flow full green · PR 직전**.
   원인은 rhwp 미해결이 아니라 우리 lift가 이미 파싱된 `control_text_positions()`를 버리고 수식/차트를
   가짜 별도 문단으로 만들며, 자체 조판이 문단당 tallest object 하나만 소비한 데 있었다. 외부 rhwp는

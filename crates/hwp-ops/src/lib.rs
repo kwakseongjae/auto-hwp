@@ -365,7 +365,7 @@ pub enum Op {
 /// block index; at each deeper level the index of the `Block::Table` INSIDE the previous cell. `(row,
 /// col)` is that table's `edit_target` cell address. The wire twins are `hwp_typeset::CellAddr` /
 /// `hwp_session::CellAddrDto`.
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct CellStep {
     pub block: usize,
     pub row: usize,
@@ -408,7 +408,7 @@ pub struct PageMargins {
 /// grid. `#[serde(default)]` lets a cell omit any field (`{}` = an empty plain cell);
 /// `deny_unknown_fields` rejects a misspelled cell key (e.g. `colspan`) instead of silently
 /// dropping a span — mirroring `RunSpec`'s contract.
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct CellSpec {
     pub text: String,
@@ -439,7 +439,7 @@ impl Default for CellSpec {
 /// keyword); `deny_unknown_fields` rejects a misspelled key (invariant 7 — additive + explicit unknown
 /// rejection). `title`/`width`/`height` are optional (`#[serde(default)]`); `categories`/`series` are
 /// required. `width`/`height` are OWN-RENDER PX (px = HWPUNIT/75); absent → a sensible default box.
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ChartSpec {
     /// Chart type: `"bar"` | `"pie"` | `"line"` (validated on apply — anything else is an honest error).
@@ -461,7 +461,7 @@ pub struct ChartSpec {
 }
 
 /// One named data series of an [`ChartSpec`] — `values` align 1:1 with `ChartSpec::categories`.
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ChartSeries {
     pub name: String,
@@ -475,7 +475,7 @@ pub struct ChartSeries {
 /// `SetParagraphRuns` Intents. `#[serde(default)]` lets a run omit any field (missing → the
 /// field's `Default`, e.g. `{"text":"강조","bold":true}`); `deny_unknown_fields` rejects a
 /// misspelled run key rather than silently dropping formatting.
-#[derive(Clone, Debug, Default, serde::Deserialize)]
+#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RunSpec {
     pub text: String,
@@ -527,7 +527,7 @@ impl RunSpec {
 /// `Deserialize` (issue 051): the wire shape carried inside the `InsertParagraphAt` Intent's
 /// `para` field. Every field is `Option` (omit = inherit); `deny_unknown_fields` rejects a
 /// misspelled key instead of silently dropping the override — mirroring `RunSpec`'s contract.
-#[derive(Clone, Debug, Default, PartialEq, serde::Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ParaSpec {
     /// Named paragraph style to apply (e.g. "개요 1", "본문"); resolved to a styleIDRef on export.
@@ -2714,6 +2714,21 @@ impl EditSession {
         Ok(())
     }
 
+    /// Commit a document that was produced and fully validated on a scratch clone as ONE undo unit.
+    ///
+    /// This is the transaction boundary used by revision-bound Proposal v1: proposal construction
+    /// applies every typed Intent to a detached [`EditSession`], then the live session swaps in that
+    /// exact validated snapshot only after its document/session/revision binding is rechecked. The
+    /// caller cannot observe a partial batch, and one undo restores the byte/semantic pre-commit state.
+    /// The Proposal builder must reject an unchanged scratch revision before reaching this boundary.
+    pub fn commit_prevalidated(&mut self, next: SemanticDoc) -> bool {
+        let snap = std::mem::replace(&mut self.doc, next);
+        self.push_undo(snap);
+        self.redo.clear();
+        self.rev += 1;
+        true
+    }
+
     /// Undo the last committed op (in-memory swap; emits no XML). Returns false if nothing to undo.
     pub fn undo(&mut self) -> bool {
         let Some(prev) = self.undo.pop() else {
@@ -2940,6 +2955,34 @@ mod tests {
         assert!(s.undo());
         assert!(!s.doc().any_dirty(), "one undo reverts the whole batch");
         assert!(!s.undo(), "the batch was a single undo unit");
+    }
+
+    #[test]
+    fn prevalidated_snapshot_is_one_undo_unit() {
+        let original = doc_with(vec![simple_para(1, "가"), simple_para(2, "나")]);
+        let mut next = original.clone();
+        apply(
+            &mut next,
+            &Op::SetCharPr {
+                range: Range {
+                    start: NodeId(1),
+                    end: NodeId(1),
+                },
+                shape: bold(),
+            },
+        )
+        .unwrap();
+
+        let mut session = EditSession::new(original.clone());
+        assert!(session.commit_prevalidated(next));
+        assert_eq!(session.revision(), 1);
+        assert!(session.doc().any_dirty());
+        assert!(session.undo());
+        assert!(!session.doc().any_dirty());
+        assert!(
+            !session.undo(),
+            "snapshot commit creates exactly one undo unit"
+        );
     }
 
     #[test]

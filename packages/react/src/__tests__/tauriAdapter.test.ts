@@ -190,6 +190,35 @@ describe("TauriAdapter — run reads + edit intents (issue 043)", () => {
     expect(calls[0]).toEqual({ cmd: "apply_intent_json", args: { intent } });
   });
 
+  it("Proposal v1 preview/commit use the same strict apply_intent_json lane", async () => {
+    const proposal = {
+      kind: "proposalV1", proposal_version: 1, proposal_id: "proposal-v1:fnv1a64:12f669d02eea3d03", digest: "fnv1a64:12f669d02eea3d03",
+      session_id: "s", document_id: "d", base_revision: 4,
+      intents: [{ intent: "SetParagraphText", section: 0, block: 1, text: "x" }],
+      affected_addresses: [{ section: 0, block: 1, row: null, col: null }], affected_pages: [0],
+      capabilities: { intent_version: 0, editable: true, hwpx_export: true, hwp_export: false, pdf_export: true },
+      risks: [], warnings: [],
+    };
+    const { invoke, calls } = mockInvoke({ apply_intent_json: proposal });
+    const a = new TauriAdapter({ invoke });
+    await expect(a.proposeIntents(proposal.intents)).resolves.toMatchObject({
+      proposal_id: "proposal-v1:fnv1a64:12f669d02eea3d03",
+      digest: "fnv1a64:12f669d02eea3d03",
+    });
+    expect(calls[0]).toEqual({
+      cmd: "apply_intent_json",
+      args: { intent: { intent: "ProposeIntents", intents: proposal.intents } },
+    });
+
+    const committed = mockInvoke({ apply_intent_json: { kind: "committed", ops: 1 } });
+    const b = new TauriAdapter({ invoke: committed.invoke });
+    await expect(b.commitProposal("proposal-v1:fnv1a64:12f669d02eea3d03", 4)).resolves.toBe(1);
+    expect(committed.calls[0]).toEqual({
+      cmd: "apply_intent_json",
+      args: { intent: { intent: "CommitProposal", proposal_id: "proposal-v1:fnv1a64:12f669d02eea3d03", expected_revision: 4 } },
+    });
+  });
+
   it("applyIntent surfaces a rejected op-bus edit (no silent no-op)", async () => {
     const invoke = vi.fn(async () => {
       throw new Error("paragraph 3 has structural content and cannot be edited in place");

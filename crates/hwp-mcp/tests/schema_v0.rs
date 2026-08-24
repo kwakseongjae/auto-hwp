@@ -104,6 +104,11 @@ fn examples() -> Vec<Example> {
             Showcase,
         ),
         e(
+            "ApplyEditScript",
+            r#"{"intent":"ApplyEditScript","json":"{\"edits\":[{\"op\":\"set_paragraph\",\"section\":0,\"block\":0,\"text\":\"에이전트 편집\"}]}"}"#,
+            Showcase,
+        ),
+        e(
             "Export",
             r#"{"intent":"Export","path":"/tmp/hwp_intent_schema_out.hwpx"}"#,
             Showcase,
@@ -117,7 +122,17 @@ fn examples() -> Vec<Example> {
             r#"{"intent":"Propose","json":"{\"blocks\":[{\"type\":\"heading\",\"text\":\"제안\",\"align\":\"center\"}]}"}"#,
             Showcase,
         ),
+        e(
+            "ProposeIntents",
+            r#"{"intent":"ProposeIntents","intents":[{"intent":"SetParagraphText","section":0,"block":0,"text":"제안"}]}"#,
+            DeserializeOnly,
+        ),
         e("Commit", r#"{"intent":"Commit"}"#, DeserializeOnly),
+        e(
+            "CommitProposal",
+            r#"{"intent":"CommitProposal","proposal_id":"proposal-v1:fnv1a64:0000000000000000","expected_revision":0}"#,
+            DeserializeOnly,
+        ),
         e(
             "DiscardProposal",
             r#"{"intent":"DiscardProposal"}"#,
@@ -354,7 +369,7 @@ fn de_err(v: Value) -> String {
 fn every_intent_variant_has_a_documented_example() {
     assert_eq!(
         examples().len(),
-        49,
+        52,
         "one JSON example per Intent variant (see INTENT-SCHEMA.md)"
     );
 }

@@ -34,6 +34,7 @@ export type {
   SelMarquee,
   PointerInput,
   PageGeom,
+  ProposalV1,
   RunSpec,
   CellRange,
   CellFmt,

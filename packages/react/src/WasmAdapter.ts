@@ -2,7 +2,7 @@ import { HwpDoc, initEngine, resetEngine } from "@auto-hwp/engine";
 import type { EngineLoadProgress } from "@auto-hwp/engine";
 import { EngineWorkerClient } from "@auto-hwp/engine/worker-client";
 import type { EngineAdapter } from "./EngineAdapter";
-import type { BlockHit, CaretRect, CellAddr, CellCaretRect, CellHit, CellTextHit, DocProfile, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, NormalizeReport, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
+import type { BlockHit, CaretRect, CellAddr, CellCaretRect, CellHit, CellTextHit, DocProfile, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, NormalizeReport, OpenResult, Outcome, OutlineItem, PageGeom, ProposalV1, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
 
 type WasmInput = string | URL | Request | BufferSource | WebAssembly.Module;
 
@@ -576,8 +576,27 @@ export class WasmAdapter implements EngineAdapter {
 
   async applyIntent(intent: Intent): Promise<Outcome> {
     const out = await this.guard(async (d) => (await d.applyIntent(intent)) as Outcome);
-    this.notifyMutation(); // issue 052: the edit lane — every accepted Intent mutates the document
+    const readOnly = ["proposalV1", "pageCount", "rendered", "text", "found", "hit", "caret", "hitCell", "caretCell", "hitBody", "caretBody", "runs", "tableGrid", "docProfile"];
+    if (!readOnly.includes(out.kind)) this.notifyMutation();
     return out;
+  }
+
+  async proposeIntents(intents: Intent[]): Promise<ProposalV1> {
+    const out = await this.applyIntent({ intent: "ProposeIntents", intents });
+    if (out.kind !== "proposalV1") throw new Error(`engine returned ${out.kind}, expected proposalV1`);
+    return out as unknown as ProposalV1;
+  }
+
+  async commitProposal(proposalId: string, expectedRevision: number): Promise<number> {
+    const out = await this.applyIntent({
+      intent: "CommitProposal",
+      proposal_id: proposalId,
+      expected_revision: expectedRevision,
+    });
+    if (out.kind !== "committed" || typeof out.ops !== "number") {
+      throw new Error(`engine returned ${out.kind}, expected committed`);
+    }
+    return out.ops;
   }
 
   async undo(): Promise<boolean> {

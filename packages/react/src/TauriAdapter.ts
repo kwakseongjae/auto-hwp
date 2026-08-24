@@ -1,5 +1,5 @@
 import type { EngineAdapter } from "./EngineAdapter";
-import type { BlockHit, CaretRect, CellAddr, CellCaretRect, CellHit, CellTextHit, DocProfile, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
+import type { BlockHit, CaretRect, CellAddr, CellCaretRect, CellHit, CellTextHit, DocProfile, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, OpenResult, Outcome, OutlineItem, PageGeom, ProposalV1, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
 
 /** The desktop `hit_test` command's DTO (camelCase, crates/hwp-viewer/src/lib.rs `HitDto`). Remapped
  *  into editor-core's snake_case `HitResult` below so both adapters return ONE shape. */
@@ -310,6 +310,24 @@ export class TauriAdapter implements EngineAdapter {
     const outcome = await this.invoke<Outcome>("apply_intent_json", { intent });
     await this.syncRevision(true);
     return outcome;
+  }
+
+  async proposeIntents(intents: Intent[]): Promise<ProposalV1> {
+    const out = await this.applyIntent({ intent: "ProposeIntents", intents });
+    if (out.kind !== "proposalV1") throw new Error(`engine returned ${out.kind}, expected proposalV1`);
+    return out as unknown as ProposalV1;
+  }
+
+  async commitProposal(proposalId: string, expectedRevision: number): Promise<number> {
+    const out = await this.applyIntent({
+      intent: "CommitProposal",
+      proposal_id: proposalId,
+      expected_revision: expectedRevision,
+    });
+    if (out.kind !== "committed" || typeof out.ops !== "number") {
+      throw new Error(`engine returned ${out.kind}, expected committed`);
+    }
+    return out.ops;
   }
 
   async undo(): Promise<boolean> {
