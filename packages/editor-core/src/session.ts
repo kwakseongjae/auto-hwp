@@ -1,6 +1,6 @@
 import type { EngineAdapter } from "./adapter";
 import { Emitter } from "./events";
-import type { Anchor, CellAddr, DocContext, ImageBox, Intent, NormalizeReport, OpenResult, OutlineItem, PageGeom, RunSpec } from "./types";
+import type { Anchor, CellAddr, DocContext, ImageBox, Intent, NormalizeReport, OpenResult, OutlineItem, PageGeom, ProposalV1, RunSpec } from "./types";
 
 /// DocSession — the document lifecycle facade over an EngineAdapter (SDK-LAYERS L2), DESCENDED from
 /// HwpWorkspace's document/undo/font state. It owns: the open-document metadata (`OpenResult`), the
@@ -46,6 +46,9 @@ export class DocSession {
   }
   canRedo(): boolean {
     return this.redoBatches.length > 0;
+  }
+  supportsProposals(): boolean {
+    return this.adapter.proposeIntents != null && this.adapter.commitProposal != null;
   }
   /** The current undo-stack DEPTH (count of applied batches). The chat's per-card 되돌리기 reads this to
    *  know whether a given applied turn's batch is STILL the top of the stack: `applyBatch` pushes a batch
@@ -136,6 +139,24 @@ export class DocSession {
       await this.refreshPages();
       this.layoutInvalidated.emit();
     }
+    return applied;
+  }
+
+  /** Scratch-preview a strictly decoded canonical transaction. The engine's live revision, document,
+   *  and undo depth are unchanged; the returned identity is valid only for its `base_revision`. */
+  async propose(intents: Intent[]): Promise<ProposalV1> {
+    if (!this.adapter.proposeIntents) throw new Error("canonical Proposal v1 is unsupported by this adapter");
+    return this.adapter.proposeIntents(intents);
+  }
+
+  /** Commit one revision-bound proposal as exactly ONE engine/user undo unit. */
+  async commitProposal(proposal: ProposalV1): Promise<number> {
+    if (!this.adapter.commitProposal) throw new Error("canonical Proposal v1 is unsupported by this adapter");
+    const applied = await this.adapter.commitProposal(proposal.proposal_id, proposal.base_revision);
+    this.undoBatches.push(1);
+    this.redoBatches = [];
+    await this.refreshPages();
+    this.layoutInvalidated.emit();
     return applied;
   }
 

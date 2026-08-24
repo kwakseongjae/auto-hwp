@@ -106,6 +106,7 @@ Intent 표면은 하나지만 이를 나르는 전송은 둘이다. 이 문서�
 | 블록 인덱스 범위 밖 | `SetTableCell: block index {i} out of range` 등 op별 |
 | 구조 문단 in-place 편집 | `paragraph N has structural content and cannot be edited in place` |
 | 대기 제안 없이 Commit | `대기 중인 제안이 없습니다 (propose first)` |
+| 오래된/다른 Proposal v1 커밋 | `stale Proposal v1 (...)` |
 | rhwp 미빌드에서 렌더/캐럿 | `render needs a build with --features rhwp` / `hit_test needs ...` / `caret_rect needs ...` |
 
 ---
@@ -208,6 +209,53 @@ path traversal(호스트 파일 노출) 벡터이므로 **여기 나열된 필�
 { "intent": "Commit" }
 ```
 필드 없음. 실패: `대기 중인 제안이 없습니다 (propose first)`.
+
+`Propose`/`Commit`은 기존 AiContent 호출자를 위한 호환 레인이다. 내부에서는 즉시 아래
+Proposal v1 계약으로 컴파일되고 live revision을 다시 확인하므로, 오래된 pending ops를 그대로
+적용하지 않는다.
+
+#### `ApplyEditScript` — anchored 편집 DSL의 즉시 컴파일
+```json
+{
+  "intent": "ApplyEditScript",
+  "json": "{\"edits\":[{\"op\":\"set_paragraph\",\"section\":0,\"block\":0,\"text\":\"제안\"}]}"
+}
+```
+
+`json`은 typed `EditScript`로 즉시 parse·정규화한 뒤 live 또는 Proposal scratch에서 typed op로
+컴파일한다. Proposal 밖에서 직접 호출하면 한 undo 단위이며, AI preview는 반드시 아래
+`ProposeIntents` 안에 넣는다. 알 수 없는 command/필드는 parse 단계에서 거부한다.
+
+#### `ProposeIntents` — canonical Proposal v1 scratch preview
+```json
+{
+  "intent": "ProposeIntents",
+  "intents": [
+    { "intent": "SetParagraphText", "section": 0, "block": 0, "text": "제안" }
+  ]
+}
+```
+
+- 각 내부 Intent를 이 문서의 `deny_unknown_fields` decoder로 다시 읽고 기본값을 채운 typed
+  형태로 정규화한다. lifecycle/query/undo/redo/proposal 중첩은 preview 전에 거부한다.
+- `ApplyContent`의 JSON 문자열도 즉시 typed `AiContent`로 파싱·재직렬화한 뒤 scratch에서 op로
+  컴파일한다. 공백·키 순서·생략 가능한 기본값이 Proposal identity를 바꾸지 않는다.
+- scratch clone에 전체 batch를 적용해 live bytes/revision/undo depth를 바꾸지 않는다.
+- 결과는 `proposal_id`, `session_id`, `document_id`, `base_revision`, 정규화 Intents,
+  영향 주소/쪽, capability snapshot, risks/warnings, cross-surface digest를 갖는 Proposal v1이다.
+
+#### `CommitProposal` — revision-bound atomic commit
+```json
+{
+  "intent": "CommitProposal",
+  "proposal_id": "proposal-v1:fnv1a64:…",
+  "expected_revision": 7
+}
+```
+
+`proposal_id`와 expected/live/base revision, session/document identity가 모두 일치할 때만 scratch에서
+검증된 snapshot을 한 undo 단위로 교체한다. reopen, 외부 편집, undo, redo, 다른 commit 뒤에는
+`stale Proposal v1`로 거부하며 실패한 proposal은 재사용할 수 없다.
 
 #### `DiscardProposal` — 대기 제안 폐기
 ```json
@@ -809,7 +857,7 @@ visual affinity**를 쓴다. 반면 아래 `CaretRectBody`는 주소의 canonica
 ## 7. 드리프트 방지
 
 - 정본 테스트: `crates/hwp-mcp/tests/schema_v0.rs`.
-  - 위 40개 예제가 실제로 `deserialize_intent`로 파싱됨(문서↔코드 필드명/타입 일치 보증).
+  - 위 52개 예제가 실제로 `deserialize_intent`로 파싱됨(문서↔코드 필드명/타입 일치 보증).
   - `Synthetic` 대상은 결정적 3×2 표 문서에 op-bus로 디스패치되어 편집을 만든다(리비전 범프).
   - `Showcase` 대상은 실제 HWPX를 열어 엔드투엔드로 디스패치된다.
   - unknown 태그/필드, 태그·필수 필드 누락, `intent_version`(없음/0/범위밖/비정수)를 고정.

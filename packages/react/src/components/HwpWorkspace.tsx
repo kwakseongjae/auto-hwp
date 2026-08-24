@@ -3089,9 +3089,11 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       inlineEditShieldRef.current++;
       if (isImage) imageCommittingRef.current++;
       try {
-        await core.session.applyBatch(intents);
+        const proposal = core.session.supportsProposals() ? await core.session.propose(intents) : null;
+        if (proposal) await core.session.commitProposal(proposal);
+        else await core.session.applyBatch(intents);
         toast(msg.workspace.appliedEdits(intents.length));
-        return core.edit.preview(intents);
+        return core.edit.preview(proposal?.intents ?? intents);
       } catch (e) {
         disarmShield(inlineEditShieldRef);
         if (isImage) disarmShield(imageCommittingRef);

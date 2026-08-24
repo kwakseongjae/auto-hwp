@@ -1,4 +1,4 @@
-import type { BlockHit, CaretRect, CellAddr, CellCaretRect, CellHit, CellTextHit, DocProfile, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, NormalizeReport, OpenResult, Outcome, OutlineItem, PageGeom, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
+import type { BlockHit, CaretRect, CellAddr, CellCaretRect, CellHit, CellTextHit, DocProfile, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, NormalizeReport, OpenResult, Outcome, OutlineItem, PageGeom, ProposalV1, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
 
 /// EngineAdapter — the backend seam (SDK-LAYERS L1↔L2). It abstracts the ACTUAL surface a backend
 /// exposes (open / page SVG / hit-test·tableAt / applyIntent / undo·redo / export) so the SAME
@@ -193,6 +193,10 @@ export interface EngineAdapter {
 
   /** Apply an Intent (schema v0). One undo unit per accepted Intent. */
   applyIntent(intent: Intent): Promise<Outcome>;
+
+  /** Canonical AI transaction lane. Preview is scratch-only; commit is revision-bound and one undo. */
+  proposeIntents?(intents: Intent[]): Promise<ProposalV1>;
+  commitProposal?(proposalId: string, expectedRevision: number): Promise<number>;
 
   /** Undo / redo the last edit. Graceful no-op (resolves false) when the stack is empty. */
   undo(): Promise<boolean>;

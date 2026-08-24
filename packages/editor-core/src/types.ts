@@ -92,6 +92,37 @@ export interface CellHit {
  *  ApplyContent, Replace, …). The adapter forwards it to the engine verbatim. */
 export type Intent = { intent: string; [field: string]: unknown };
 
+export interface AffectedAddress {
+  section: number | null;
+  block: number | null;
+  row: number | null;
+  col: number | null;
+}
+
+export interface ProposalCapabilities {
+  intent_version: number;
+  editable: boolean;
+  hwpx_export: boolean;
+  hwp_export: boolean;
+  pdf_export: boolean;
+}
+
+/** Revision-bound Proposal v1 returned byte-for-byte-equivalently by wasm/Tauri/MCP. */
+export interface ProposalV1 {
+  proposal_version: 1;
+  proposal_id: string;
+  digest: string;
+  session_id: string;
+  document_id: string;
+  base_revision: number;
+  intents: Intent[];
+  affected_addresses: AffectedAddress[];
+  affected_pages: number[];
+  capabilities: ProposalCapabilities;
+  risks: string[];
+  warnings: string[];
+}
+
 /** A STYLED text run (Intent schema v0 `RunSpec`, INTENT-SCHEMA §6.7) — the read shape `blockRuns`
  *  returns AND the write shape `SetTableCellRuns`/`SetParagraphRuns` accept, so a text edit round-trips
  *  through the SAME type (run-format preservation, issue 027 §함정). A multi-paragraph cell's paragraphs

@@ -42,6 +42,13 @@ vi.mock("@auto-hwp/engine", () => {
         throw trap();
       }
       const s = typeof intent === "string" ? intent : JSON.stringify(intent);
+      if (s.includes('"ProposeIntents"')) return {
+        kind: "proposalV1", proposal_version: 1, proposal_id: "proposal-v1:fnv1a64:12f669d02eea3d03", digest: "fnv1a64:12f669d02eea3d03",
+        session_id: "s", document_id: "d", base_revision: 4, intents: [], affected_addresses: [],
+        affected_pages: [0], capabilities: { intent_version: 0, editable: true, hwpx_export: true, hwp_export: false, pdf_export: true },
+        risks: [], warnings: [],
+      };
+      if (s.includes('"CommitProposal"')) return { kind: "committed", ops: 1 };
       if (s.includes('"Replace"')) return { kind: "replaced", replaced: engineState.replaced, pages: 3 };
       return { kind: "ok" };
     }
@@ -151,6 +158,18 @@ describe("issue 052 — trap recovery, snapshot-first", () => {
 });
 
 describe("issue 052 — onMutation (autosave trigger)", () => {
+  it("Proposal preview is read-only while commit is the one mutation", async () => {
+    const a = await openAdapter();
+    let fired = 0;
+    a.onMutation = () => fired++;
+    const proposal = await a.proposeIntents([{ intent: "SetParagraphText", section: 0, block: 0, text: "x" }]);
+    expect(proposal.proposal_id).toBe("proposal-v1:fnv1a64:12f669d02eea3d03");
+    expect(proposal.digest).toBe("fnv1a64:12f669d02eea3d03");
+    expect(fired).toBe(0);
+    await expect(a.commitProposal(proposal.proposal_id, proposal.base_revision)).resolves.toBe(1);
+    expect(fired).toBe(1);
+  });
+
   it("fires on successful applyIntent, effective undo/redo, and effective replace — not on reads/open", async () => {
     const a = await openAdapter();
     let fired = 0;

@@ -22,6 +22,7 @@ pub mod network;
 use hwp_ops::EditSession;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// MCP protocol revision we advertise (widely supported by current clients).
 pub const PROTOCOL_VERSION: &str = "2024-11-05";
@@ -76,16 +77,66 @@ pub struct CaretRect {
     pub height: f64,
 }
 
+pub const PROPOSAL_VERSION: u8 = 1;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(deny_unknown_fields)]
+pub struct AffectedAddress {
+    pub section: Option<usize>,
+    pub block: Option<usize>,
+    pub row: Option<usize>,
+    pub col: Option<usize>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CapabilitySnapshot {
+    pub intent_version: u8,
+    pub editable: bool,
+    pub hwpx_export: bool,
+    pub hwp_export: bool,
+    pub pdf_export: bool,
+}
+
+/// One external proposal contract for Web, Tauri, MCP, and SDK. Every field participates in
+/// `digest`; callers must treat the DTO as immutable and commit with both `proposal_id` and
+/// `base_revision`.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ProposalV1 {
+    pub proposal_version: u8,
+    pub proposal_id: String,
+    pub digest: String,
+    pub session_id: String,
+    pub document_id: String,
+    pub base_revision: u64,
+    pub intents: Vec<Value>,
+    pub affected_addresses: Vec<AffectedAddress>,
+    pub affected_pages: Vec<u32>,
+    pub capabilities: CapabilitySnapshot,
+    pub risks: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+struct PendingProposal {
+    dto: ProposalV1,
+    preview_doc: hwp_model::prelude::SemanticDoc,
+}
+
+static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
+
 /// Server-side session: the currently-open document with its undo/redo history
 /// (mutated by `apply_content`; reverted by the `undo`/`redo` tools).
-#[derive(Default)]
 pub struct Session {
     pub doc: Option<EditSession>,
     pub source_path: Option<String>,
     /// Original file bytes — retained for the opt-in `source: "original"` rhwp comparison surface.
     pub source_bytes: Option<Vec<u8>>,
-    /// A validated-but-uncommitted edit from `propose_content`, awaiting `commit_proposal`.
-    pub pending: Option<hwp_ai::Proposal>,
+    /// A validated-but-uncommitted, revision-bound transaction.
+    pending: Option<PendingProposal>,
+    session_id: String,
+    document_id: Option<String>,
+    document_generation: u64,
     /// Own-render placement cached by `EditSession::revision`. Shared by both cell and body caret
     /// Intents so the native/Tauri lane has the same place-once query cost as the wasm handle.
     own_placed: Option<(u64, hwp_session::PlacedDoc)>,
@@ -94,6 +145,25 @@ pub struct Session {
     /// Persistent render state keyed by the live edit revision. The default own-render cache is
     /// always available; the faithful-original rhwp cache is additive when that feature is built.
     render: RenderState,
+}
+
+impl Default for Session {
+    fn default() -> Self {
+        let id = NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed);
+        Session {
+            doc: None,
+            source_path: None,
+            source_bytes: None,
+            pending: None,
+            session_id: format!("session-{id}"),
+            document_id: None,
+            document_generation: 0,
+            own_placed: None,
+            #[cfg(test)]
+            own_place_builds: 0,
+            render: RenderState::default(),
+        }
+    }
 }
 
 /// Render-side cache for one open document. Reset on `open_document` / `close_document`.
@@ -290,8 +360,16 @@ fn tools() -> Value {
         },
         {
             "name": "commit_proposal",
-            "description": "Apply the pending proposal (from propose_content) to the document via the undoable op-bus. Errors if there is no pending proposal; reversible with undo.",
-            "inputSchema": { "type": "object", "properties": {} }
+            "description": "Atomically apply a pending Proposal v1 only when its proposal_id and expected_revision still match the live document. Reopen/edit/undo/redo makes it stale.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "proposal_id": { "type": "string" },
+                    "expected_revision": { "type": "integer", "minimum": 0 }
+                },
+                "required": ["proposal_id", "expected_revision"],
+                "additionalProperties": false
+            }
         },
         {
             "name": "find_text",
@@ -682,6 +760,11 @@ pub fn open_bytes(session: &mut Session, bytes: &[u8], name: &str) -> Result<Ope
     session.source_path = Some(name.to_string());
     session.source_bytes = Some(bytes.to_vec());
     session.pending = None; // a fresh document drops any stale proposal
+    session.document_generation += 1;
+    session.document_id = Some(format!(
+        "{}-document-{}",
+        session.session_id, session.document_generation
+    ));
     session.own_placed = None;
     #[cfg(test)]
     {
@@ -706,6 +789,23 @@ fn do_apply_content(session: &mut Session, json: &str) -> Result<(usize, usize),
     let ops = hwp_ai::content::compile_to_ops(&ai);
     sess.do_ops(&ops).map_err(|e| e.to_string())?;
     Ok((ai.blocks.len(), ops.len()))
+}
+
+/// Compile + apply an anchored EditScript as ONE undo unit. The script is an authoring DSL only;
+/// Proposal v1 parses and normalizes it before this function runs on the detached scratch session.
+fn do_apply_edit_script(session: &mut Session, json: &str) -> Result<(usize, usize), String> {
+    let script: hwp_ai::edit::EditScript =
+        serde_json::from_str(json).map_err(|e| format!("invalid EditScript: {e}"))?;
+    let sess = session
+        .doc
+        .as_mut()
+        .ok_or("no document open (call open_document first)")?;
+    let ops = hwp_ai::edit::compile_edits(sess.doc(), &script).map_err(|e| e.to_string())?;
+    if ops.is_empty() {
+        return Err("EditScript produced no edits".into());
+    }
+    sess.do_ops(&ops).map_err(|e| e.to_string())?;
+    Ok((script.edits.len(), ops.len()))
 }
 
 /// Serialize the live doc to round-trip-safe HWPX bytes (no filesystem) — the bytes-out surface the
@@ -828,6 +928,7 @@ fn do_close(session: &mut Session) {
     session.source_path = None;
     session.source_bytes = None;
     session.pending = None;
+    session.document_id = None;
     session.own_placed = None;
     #[cfg(test)]
     {
@@ -1137,7 +1238,7 @@ fn do_delete_block(session: &mut Session, section: usize, index: usize) -> Resul
 /// Compatibility policy (frozen at v0): NEW fields may be added only as `Option` (absent → `None`);
 /// renaming/removing a field or changing its meaning requires an `intent_version` bump. The Tauri
 /// shell constructs these variants directly in Rust, so this derive is purely additive to it.
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(tag = "intent", deny_unknown_fields)]
 pub enum Intent {
     Open {
@@ -1150,6 +1251,11 @@ pub enum Intent {
     ApplyContent {
         json: String,
     },
+    /// Anchored AI editing DSL. It must be parsed/normalized and compiled immediately inside a
+    /// Proposal v1 scratch transaction; callers must not treat the script itself as commit-ready.
+    ApplyEditScript {
+        json: String,
+    },
     Export {
         path: String,
     },
@@ -1160,8 +1266,19 @@ pub enum Intent {
     Propose {
         json: String,
     },
+    /// Canonical Proposal v1 entry point shared by Web/Tauri/MCP/SDK. Every nested Intent is decoded
+    /// again through this same strict schema before scratch preview; query/lifecycle/proposal Intents
+    /// are rejected as unsupported transaction members.
+    ProposeIntents {
+        intents: Vec<Value>,
+    },
     /// Commit the pending proposal as one undo unit. Errors if none is pending.
     Commit,
+    /// Commit a canonical proposal only when both its identity and the live revision still match.
+    CommitProposal {
+        proposal_id: String,
+        expected_revision: u64,
+    },
     /// Drop the pending proposal without applying it.
     DiscardProposal,
     /// Read-only search of the open document's editable simple paragraphs.
@@ -1595,6 +1712,7 @@ pub enum Outcome {
         rationale: String,
         preview: String,
     },
+    ProposalV1(ProposalV1),
     Committed {
         ops: usize,
     },
@@ -1660,6 +1778,13 @@ pub fn outcome_to_json(o: &Outcome) -> Value {
         Outcome::Text(text) => json!({ "kind": "text", "text": text }),
         Outcome::Proposed { rationale, preview } => {
             json!({ "kind": "proposed", "rationale": rationale, "preview": preview })
+        }
+        Outcome::ProposalV1(proposal) => {
+            let mut value = serde_json::to_value(proposal).unwrap_or(Value::Null);
+            if let Value::Object(fields) = &mut value {
+                fields.insert("kind".into(), Value::String("proposalV1".into()));
+            }
+            value
         }
         Outcome::Committed { ops } => json!({ "kind": "committed", "ops": ops }),
         Outcome::Discarded(discarded) => json!({ "kind": "discarded", "discarded": discarded }),
@@ -1742,6 +1867,366 @@ pub fn deserialize_intent(value: &Value) -> Result<Intent, String> {
     serde_json::from_value::<Intent>(body).map_err(|e| e.to_string())
 }
 
+fn proposal_intent_allowed(kind: &str) -> bool {
+    matches!(
+        kind,
+        "ApplyContent"
+            | "ApplyEditScript"
+            | "Replace"
+            | "InsertText"
+            | "DeleteBack"
+            | "SetImageSize"
+            | "MoveImage"
+            | "MoveBlock"
+            | "TableInsertRows"
+            | "SetTableCell"
+            | "TableAppendRow"
+            | "SetParagraphText"
+            | "SetTableColWidths"
+            | "SetTableRowHeights"
+            | "SetPageMargins"
+            | "SetCharFmt"
+            | "SetRunCharFmt"
+            | "SetTableCellRuns"
+            | "SetParagraphRuns"
+            | "SplitParagraph"
+            | "MergeParagraph"
+            | "SetTableCellShade"
+            | "SetCellRangeShade"
+            | "SetCellRangeFmt"
+            | "DeleteBlock"
+            | "DeleteNestedBlock"
+            | "InsertImage"
+            | "InsertTableAt"
+            | "InsertParagraphAt"
+            | "InsertChartAt"
+    )
+}
+
+fn reject_unknown_dsl_fields(raw: &Value, normalized: &Value, path: &str) -> Result<(), String> {
+    match (raw, normalized) {
+        (Value::Object(input), Value::Object(known)) => {
+            for (key, value) in input {
+                let next = format!("{path}.{key}");
+                let expected = known
+                    .get(key)
+                    .ok_or_else(|| format!("unknown field `{next}`"))?;
+                reject_unknown_dsl_fields(value, expected, &next)?;
+            }
+        }
+        (Value::Array(input), Value::Array(known)) => {
+            for (index, value) in input.iter().enumerate() {
+                let expected = known
+                    .get(index)
+                    .ok_or_else(|| format!("unexpected array item `{path}[{index}]`"))?;
+                reject_unknown_dsl_fields(value, expected, &format!("{path}[{index}]"))?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn normalized_intent(value: &Value) -> Result<Value, String> {
+    let kind = value
+        .get("intent")
+        .and_then(Value::as_str)
+        .ok_or("proposal intent requires a string `intent` tag")?;
+    if !proposal_intent_allowed(kind) {
+        return Err(format!("intent {kind:?} is unsupported inside Proposal v1"));
+    }
+    let mut typed = deserialize_intent(value)?;
+    // AiContent is an authoring DSL, not a second proposal wire format. Parse it now and serialize
+    // the typed value back so whitespace, object-key order, and omitted serde defaults cannot alter
+    // the Proposal identity. Its compiled ops are then validated immediately on the scratch session.
+    if let Intent::ApplyContent { json } = &mut typed {
+        let raw: Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
+        let content = hwp_ai::content::parse_content(json).map_err(|e| e.to_string())?;
+        let normalized = serde_json::to_value(&content)
+            .map_err(|e| format!("normalize ApplyContent payload: {e}"))?;
+        reject_unknown_dsl_fields(&raw, &normalized, "AiContent")?;
+        *json = serde_json::to_string(&content)
+            .map_err(|e| format!("normalize ApplyContent payload: {e}"))?;
+    }
+    if let Intent::ApplyEditScript { json } = &mut typed {
+        let raw: Value =
+            serde_json::from_str(json).map_err(|e| format!("invalid EditScript: {e}"))?;
+        let script: hwp_ai::edit::EditScript =
+            serde_json::from_str(json).map_err(|e| format!("invalid EditScript: {e}"))?;
+        let normalized = serde_json::to_value(&script)
+            .map_err(|e| format!("normalize EditScript payload: {e}"))?;
+        reject_unknown_dsl_fields(&raw, &normalized, "EditScript")?;
+        *json = serde_json::to_string(&script)
+            .map_err(|e| format!("normalize EditScript payload: {e}"))?;
+    }
+    serde_json::to_value(typed).map_err(|e| format!("normalize intent {kind}: {e}"))
+}
+
+fn proposal_addresses(intents: &[Value]) -> Vec<AffectedAddress> {
+    let mut addresses = Vec::new();
+    for intent in intents {
+        let section = intent
+            .get("section")
+            .and_then(Value::as_u64)
+            .map(|v| v as usize);
+        let block = intent
+            .get("block")
+            .or_else(|| intent.get("index"))
+            .or_else(|| intent.get("from"))
+            .and_then(Value::as_u64)
+            .map(|v| v as usize);
+        let row = intent
+            .get("row")
+            .and_then(Value::as_u64)
+            .map(|v| v as usize);
+        let col = intent
+            .get("col")
+            .and_then(Value::as_u64)
+            .map(|v| v as usize);
+        if section.is_some() || block.is_some() || row.is_some() || col.is_some() {
+            addresses.push(AffectedAddress {
+                section,
+                block,
+                row,
+                col,
+            });
+        }
+    }
+    addresses.sort();
+    addresses.dedup();
+    addresses
+}
+
+fn proposal_pages(
+    doc: &hwp_model::prelude::SemanticDoc,
+    addresses: &[AffectedAddress],
+) -> (Vec<u32>, bool) {
+    let placed = hwp_session::place(doc, &[]);
+    let mut pages = Vec::new();
+    for address in addresses {
+        let (Some(section), Some(block)) = (address.section, address.block) else {
+            continue;
+        };
+        for (page, placed_page) in placed.pages.iter().enumerate() {
+            if placed_page
+                .blocks
+                .iter()
+                .any(|b| b.section == section && b.block == block)
+                || placed_page
+                    .tables
+                    .iter()
+                    .any(|t| t.section == section && t.block == block)
+                || placed_page
+                    .images
+                    .iter()
+                    .any(|i| i.section == section && i.block == block)
+            {
+                pages.push(page as u32);
+            }
+        }
+    }
+    pages.sort_unstable();
+    pages.dedup();
+    let conservative = pages.is_empty() || addresses.iter().any(|a| a.block.is_none());
+    if conservative {
+        pages = (0..placed.pages.len() as u32).collect();
+    }
+    (pages, conservative)
+}
+
+fn proposal_risks(intents: &[Value]) -> Vec<String> {
+    let mut risks = Vec::new();
+    for intent in intents {
+        let kind = intent.get("intent").and_then(Value::as_str).unwrap_or("");
+        let risk = match kind {
+            "DeleteBlock" | "DeleteNestedBlock" => Some("destructive-content-removal"),
+            "Replace" => Some("content-rewrite"),
+            "SetPageMargins" => Some("document-reflow"),
+            "InsertImage" => Some("embedded-binary"),
+            "InsertTableAt" | "InsertParagraphAt" | "InsertChartAt" | "SplitParagraph"
+            | "MergeParagraph" | "MoveBlock" | "MoveImage" => Some("structure-change"),
+            "ApplyContent" => Some("authoring-dsl"),
+            "ApplyEditScript" => Some("authoring-dsl"),
+            _ => None,
+        };
+        if let Some(risk) = risk {
+            risks.push(risk.to_string());
+        }
+        if kind == "Replace" && intent.get("all").and_then(Value::as_bool) == Some(true) {
+            risks.push("multi-target-change".into());
+        }
+    }
+    risks.sort();
+    risks.dedup();
+    risks
+}
+
+fn canonical_value(value: &Value) -> Value {
+    match value {
+        Value::Array(values) => Value::Array(values.iter().map(canonical_value).collect()),
+        Value::Object(fields) => {
+            let mut keys: Vec<_> = fields.keys().collect();
+            keys.sort();
+            let mut out = serde_json::Map::new();
+            for key in keys {
+                out.insert(key.clone(), canonical_value(&fields[key]));
+            }
+            Value::Object(out)
+        }
+        other => other.clone(),
+    }
+}
+
+fn proposal_digest(value: &Value) -> Result<String, String> {
+    let bytes = serde_json::to_vec(&canonical_value(value))
+        .map_err(|e| format!("serialize proposal digest material: {e}"))?;
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in bytes {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    Ok(format!("fnv1a64:{hash:016x}"))
+}
+
+/// Strictly decode, normalize, and scratch-apply an Intent batch without changing the live revision,
+/// undo depth, or document. A later commit must present the returned id and exact base revision.
+pub fn propose_intents_v1(session: &mut Session, values: &[Value]) -> Result<ProposalV1, String> {
+    if values.is_empty() {
+        return Err("Proposal v1 requires at least one Intent".into());
+    }
+    let live = session
+        .doc
+        .as_ref()
+        .ok_or("no document open (call open_document first)")?;
+    let base_revision = live.revision();
+    let live_doc = live.doc().clone();
+    let document_id = session
+        .document_id
+        .clone()
+        .ok_or("open document has no identity")?;
+    let normalized: Vec<Value> = values
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            normalized_intent(value).map_err(|e| format!("proposal intent[{index}]: {e}"))
+        })
+        .collect::<Result<_, _>>()?;
+
+    let mut scratch = Session {
+        doc: Some(EditSession::with_budget(
+            live_doc.clone(),
+            LIVE_UNDO_LIMIT,
+            LIVE_UNDO_MEM_BUDGET,
+        )),
+        ..Session::default()
+    };
+    for (index, intent) in normalized.iter().enumerate() {
+        apply_intent_json(&mut scratch, intent)
+            .map_err(|e| format!("proposal scratch intent[{index}] failed: {e}"))?;
+    }
+    let scratch_session = scratch.doc.take().expect("scratch document installed");
+    if scratch_session.revision() == 0 {
+        return Err("Proposal v1 produced no document change".into());
+    }
+    let preview_doc = scratch_session.into_doc();
+
+    let affected_addresses = proposal_addresses(&normalized);
+    let (affected_pages, conservative_pages) = proposal_pages(&live_doc, &affected_addresses);
+    let capabilities = CapabilitySnapshot {
+        intent_version: INTENT_VERSION as u8,
+        editable: true,
+        hwpx_export: true,
+        hwp_export: cfg!(feature = "rhwp")
+            && session
+                .source_bytes
+                .as_deref()
+                .map(hwp_core::Engine::detect)
+                == Some(hwp_model::types::SourceFormat::Hwp5),
+        pdf_export: cfg!(feature = "pdf"),
+    };
+    let risks = proposal_risks(&normalized);
+    let mut warnings = Vec::new();
+    if affected_addresses.is_empty() {
+        warnings.push("affected-address-unresolved".into());
+    }
+    if conservative_pages {
+        warnings.push("affected-pages-conservative".into());
+    }
+    let material = json!({
+        "proposal_version": PROPOSAL_VERSION,
+        "session_id": session.session_id,
+        "document_id": document_id,
+        "base_revision": base_revision,
+        "intents": normalized,
+        "affected_addresses": affected_addresses,
+        "affected_pages": affected_pages,
+        "capabilities": capabilities,
+        "risks": risks,
+        "warnings": warnings,
+    });
+    let digest = proposal_digest(&material)?;
+    let dto = ProposalV1 {
+        proposal_version: PROPOSAL_VERSION,
+        proposal_id: format!("proposal-v1:{digest}"),
+        digest,
+        session_id: session.session_id.clone(),
+        document_id,
+        base_revision,
+        intents: normalized,
+        affected_addresses,
+        affected_pages,
+        capabilities,
+        risks,
+        warnings,
+    };
+    session.pending = Some(PendingProposal {
+        dto: dto.clone(),
+        preview_doc,
+    });
+    Ok(dto)
+}
+
+pub fn commit_proposal_v1(
+    session: &mut Session,
+    proposal_id: &str,
+    expected_revision: u64,
+) -> Result<usize, String> {
+    let pending = session
+        .pending
+        .take()
+        .ok_or("no pending Proposal v1 (propose first)")?;
+    let live_revision = session
+        .doc
+        .as_ref()
+        .ok_or("no document open (call open_document first)")?
+        .revision();
+    let live_document = session
+        .document_id
+        .as_deref()
+        .ok_or("no document identity")?;
+    if pending.dto.proposal_id != proposal_id
+        || pending.dto.base_revision != expected_revision
+        || live_revision != expected_revision
+        || pending.dto.session_id != session.session_id
+        || pending.dto.document_id != live_document
+    {
+        return Err(format!(
+            "stale Proposal v1 (proposal={}, expected_revision={}, live_revision={})",
+            pending.dto.proposal_id, expected_revision, live_revision
+        ));
+    }
+    let intents = pending.dto.intents.len();
+    let changed = session
+        .doc
+        .as_mut()
+        .expect("live document checked")
+        .commit_prevalidated(pending.preview_doc);
+    if !changed {
+        return Err("Proposal v1 preview equals the live document".into());
+    }
+    Ok(intents)
+}
+
 /// Convenience end-to-end entry: deserialize a JSON envelope ([`deserialize_intent`]) then dispatch
 /// it through [`apply_intent`]. The single "JSON in → Outcome out" seam an external consumer uses.
 pub fn apply_intent_json(session: &mut Session, value: &Value) -> Result<Outcome, String> {
@@ -1762,6 +2247,10 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
         }
         Intent::ApplyContent { json } => {
             let (blocks, ops) = do_apply_content(session, &json)?;
+            Ok(Outcome::Applied { blocks, ops })
+        }
+        Intent::ApplyEditScript { json } => {
+            let (blocks, ops) = do_apply_edit_script(session, &json)?;
             Ok(Outcome::Applied { blocks, ops })
         }
         Intent::Export { path } => {
@@ -1801,22 +2290,30 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
                 hwp_ai::propose_from_content(doc, &ai, "GUI 제안").map_err(|e| e.to_string())?;
             let rationale = proposal.rationale.clone();
             let preview = proposal.preview();
-            session.pending = Some(proposal);
+            propose_intents_v1(
+                session,
+                &[json!({ "intent": "ApplyContent", "json": json })],
+            )?;
             Ok(Outcome::Proposed { rationale, preview })
         }
+        Intent::ProposeIntents { intents } => {
+            Ok(Outcome::ProposalV1(propose_intents_v1(session, &intents)?))
+        }
         Intent::Commit => {
-            let proposal = session
+            let (proposal_id, expected_revision) = session
                 .pending
-                .take()
+                .as_ref()
+                .map(|pending| (pending.dto.proposal_id.clone(), pending.dto.base_revision))
                 .ok_or("대기 중인 제안이 없습니다 (propose first)")?;
-            let sess = session
-                .doc
-                .as_mut()
-                .ok_or("no document open (call open_document first)")?;
-            let ops = proposal.ops.len();
-            sess.do_ops(&proposal.ops).map_err(|e| e.to_string())?;
+            let ops = commit_proposal_v1(session, &proposal_id, expected_revision)?;
             Ok(Outcome::Committed { ops })
         }
+        Intent::CommitProposal {
+            proposal_id,
+            expected_revision,
+        } => Ok(Outcome::Committed {
+            ops: commit_proposal_v1(session, &proposal_id, expected_revision)?,
+        }),
         Intent::DiscardProposal => Ok(Outcome::Discarded(session.pending.take().is_some())),
         Intent::Find {
             query,
@@ -2513,24 +3010,24 @@ fn call_tool(name: &str, args: &Value, session: &mut Session) -> Result<String, 
             let ai = hwp_ai::content::parse_content(&content).map_err(|e| e.to_string())?;
             let proposal = hwp_ai::propose_from_content(sess.doc(), &ai, "MCP 제안")
                 .map_err(|e| e.to_string())?;
-            let n = proposal.ops.len();
             let preview = proposal.preview();
-            session.pending = Some(proposal);
+            let dto = propose_intents_v1(
+                session,
+                &[json!({ "intent": "ApplyContent", "json": content })],
+            )?;
+            let contract = serde_json::to_string_pretty(&dto)
+                .map_err(|e| format!("serialize Proposal v1: {e}"))?;
             Ok(format!(
-                "제안 준비됨 ({n} op) — 적용하려면 commit_proposal.\n\n미리보기:\n{preview}"
+                "Proposal v1 준비됨 — proposal_id와 base_revision으로 commit_proposal을 호출하세요.\n\n{contract}\n\n미리보기:\n{preview}"
             ))
         }
         "commit_proposal" => {
-            let proposal = session
-                .pending
-                .take()
-                .ok_or("대기 중인 제안이 없습니다 (call propose_content first)")?;
-            let sess = session
-                .doc
-                .as_mut()
-                .ok_or("no document open (call open_document first)")?;
-            let n = proposal.ops.len();
-            sess.do_ops(&proposal.ops).map_err(|e| e.to_string())?;
+            let proposal_id = arg_str("proposal_id").ok_or("missing `proposal_id`")?;
+            let expected_revision = args
+                .get("expected_revision")
+                .and_then(Value::as_u64)
+                .ok_or("missing or invalid `expected_revision`")?;
+            let n = commit_proposal_v1(session, &proposal_id, expected_revision)?;
             Ok(format!("적용 완료 ({n} op) — undo 로 되돌릴 수 있습니다"))
         }
         "render_page" => {
@@ -3172,7 +3669,17 @@ mod tests {
         );
 
         // commit_proposal applies it.
-        let c = call("commit_proposal", json!({}), &mut s);
+        let pending = s.pending.as_ref().unwrap();
+        let proposal_id = pending.dto.proposal_id.clone();
+        let expected_revision = pending.dto.base_revision;
+        let c = call(
+            "commit_proposal",
+            json!({
+                "proposal_id": proposal_id,
+                "expected_revision": expected_revision
+            }),
+            &mut s,
+        );
         assert_eq!(c["result"]["isError"], false, "{c}");
         assert!(text(&call("extract_text", json!({}), &mut s)).contains("제안 제목"));
 
@@ -4025,5 +4532,209 @@ mod tests {
             png,
             "image bytes survive reopen→re-export"
         );
+    }
+
+    #[test]
+    fn proposal_v1_preview_is_strict_normalized_and_live_read_only() {
+        let mut s = Session::default();
+        apply_intent(&mut s, Intent::Open { path: showcase() }).unwrap();
+        let before_bytes = export_bytes(&s).unwrap();
+        let before_rev = s.doc.as_ref().unwrap().revision();
+        let before_undo = s.doc.as_ref().unwrap().can_undo();
+        let values = vec![json!({
+            "intent": "InsertParagraphAt",
+            "section": 0,
+            "index": null,
+            "runs": [{"text":"Proposal v1"}]
+        })];
+
+        let proposal = propose_intents_v1(&mut s, &values).unwrap();
+        assert_eq!(proposal.proposal_version, 1);
+        assert!(proposal.proposal_id.ends_with(&proposal.digest));
+        assert_eq!(proposal.base_revision, before_rev);
+        assert_eq!(proposal.intents[0]["runs"][0]["bold"], false);
+        assert!(proposal.intents[0]["para"].is_object());
+        assert_eq!(s.doc.as_ref().unwrap().revision(), before_rev);
+        assert_eq!(s.doc.as_ref().unwrap().can_undo(), before_undo);
+        assert_eq!(export_bytes(&s).unwrap(), before_bytes);
+
+        let n = commit_proposal_v1(&mut s, &proposal.proposal_id, proposal.base_revision).unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(s.doc.as_ref().unwrap().revision(), before_rev + 1);
+        assert!(
+            s.doc.as_mut().unwrap().undo(),
+            "one undo reverts the whole proposal"
+        );
+        assert_eq!(export_bytes(&s).unwrap(), before_bytes);
+    }
+
+    #[test]
+    fn proposal_v1_rejects_unknown_unsupported_and_mid_batch_failure_without_live_mutation() {
+        let mut s = Session::default();
+        apply_intent(&mut s, Intent::Open { path: showcase() }).unwrap();
+        let before_bytes = export_bytes(&s).unwrap();
+        let before_rev = s.doc.as_ref().unwrap().revision();
+
+        let unknown = [json!({
+            "intent":"SetParagraphText", "section":0, "block":0, "text":"x", "bogus":1
+        })];
+        assert!(propose_intents_v1(&mut s, &unknown)
+            .unwrap_err()
+            .contains("unknown field"));
+        assert!(propose_intents_v1(&mut s, &[json!({"intent":"Undo"})])
+            .unwrap_err()
+            .contains("unsupported"));
+        assert!(propose_intents_v1(
+            &mut s,
+            &[json!({
+                "intent":"ApplyContent",
+                "json": r#"{"blocks":[{"type":"paragraph","runs":[{"text":"x","bogus":1}]}]}"#
+            })]
+        )
+        .unwrap_err()
+        .contains("unknown field"));
+        assert!(propose_intents_v1(
+            &mut s,
+            &[json!({
+                "intent":"ApplyEditScript",
+                "json": r#"{"edits":[{"op":"set_paragraph","section":0,"block":0,"text":"x","bogus":1}]}"#
+            })]
+        )
+        .unwrap_err()
+        .contains("unknown field"));
+
+        let batch = [
+            json!({"intent":"ApplyContent", "json": r#"{"blocks":[{"type":"paragraph","runs":[{"text":"scratch only"}]}]}"#}),
+            json!({"intent":"SetParagraphText", "section":999, "block":0, "text":"fail"}),
+        ];
+        assert!(propose_intents_v1(&mut s, &batch)
+            .unwrap_err()
+            .contains("scratch intent[1] failed"));
+        assert_eq!(s.doc.as_ref().unwrap().revision(), before_rev);
+        assert!(!s.doc.as_ref().unwrap().can_undo());
+        assert_eq!(export_bytes(&s).unwrap(), before_bytes);
+    }
+
+    #[test]
+    fn proposal_v1_becomes_stale_after_any_live_revision_change() {
+        let mut s = Session::default();
+        apply_intent(&mut s, Intent::Open { path: showcase() }).unwrap();
+        let proposed = propose_intents_v1(
+            &mut s,
+            &[json!({"intent":"ApplyContent", "json": r#"{"blocks":[{"type":"paragraph","runs":[{"text":"old proposal"}]}]}"#})],
+        )
+        .unwrap();
+        apply_intent(
+            &mut s,
+            Intent::ApplyContent {
+                json: r#"{"blocks":[{"type":"paragraph","runs":[{"text":"external edit"}]}]}"#
+                    .into(),
+            },
+        )
+        .unwrap();
+        let live_before_reject = export_bytes(&s).unwrap();
+        let err =
+            commit_proposal_v1(&mut s, &proposed.proposal_id, proposed.base_revision).unwrap_err();
+        assert!(err.contains("stale Proposal v1"));
+        assert_eq!(export_bytes(&s).unwrap(), live_before_reject);
+        assert!(s.pending.is_none(), "a rejected stale proposal is consumed");
+
+        let proposed = propose_intents_v1(
+            &mut s,
+            &[json!({"intent":"ApplyContent", "json": r#"{"blocks":[{"type":"paragraph","runs":[{"text":"undo stale"}]}]}"#})],
+        )
+        .unwrap();
+        assert!(s.doc.as_mut().unwrap().undo());
+        assert!(commit_proposal_v1(&mut s, &proposed.proposal_id, proposed.base_revision).is_err());
+
+        let proposed = propose_intents_v1(
+            &mut s,
+            &[json!({"intent":"ApplyContent", "json": r#"{"blocks":[{"type":"paragraph","runs":[{"text":"redo stale"}]}]}"#})],
+        )
+        .unwrap();
+        assert!(s.doc.as_mut().unwrap().redo());
+        assert!(commit_proposal_v1(&mut s, &proposed.proposal_id, proposed.base_revision).is_err());
+
+        let proposed = propose_intents_v1(
+            &mut s,
+            &[json!({"intent":"ApplyContent", "json": r#"{"blocks":[{"type":"paragraph","runs":[{"text":"reopen stale"}]}]}"#})],
+        )
+        .unwrap();
+        apply_intent(&mut s, Intent::Open { path: showcase() }).unwrap();
+        assert!(
+            commit_proposal_v1(&mut s, &proposed.proposal_id, proposed.base_revision)
+                .unwrap_err()
+                .contains("no pending")
+        );
+    }
+
+    #[test]
+    fn proposal_v1_digest_fixture_is_stable() {
+        let material = json!({
+            "proposal_version": 1,
+            "session_id": "fixture-session",
+            "document_id": "fixture-document",
+            "base_revision": 7,
+            "intents": [{"block":2,"intent":"SetParagraphText","section":0,"text":"값"}],
+            "affected_addresses": [{"block":2,"col":null,"row":null,"section":0}],
+            "affected_pages": [1],
+            "capabilities": {"editable":true,"hwp_export":false,"hwpx_export":true,"intent_version":0,"pdf_export":true},
+            "risks": [],
+            "warnings": []
+        });
+        assert_eq!(
+            proposal_digest(&material).unwrap(),
+            "fnv1a64:12f669d02eea3d03"
+        );
+    }
+
+    #[test]
+    fn proposal_v1_normalizes_ai_content_before_identity() {
+        let mut compact = Session::default();
+        let mut formatted = Session::default();
+        apply_intent(&mut compact, Intent::Open { path: showcase() }).unwrap();
+        apply_intent(&mut formatted, Intent::Open { path: showcase() }).unwrap();
+        let compact_json = r#"{"blocks":[{"type":"paragraph","runs":[{"text":"same"}]}]}"#;
+        let formatted_json = r#"{
+          "blocks": [
+            { "runs": [{ "text": "same" }], "type": "paragraph" }
+          ]
+        }"#;
+        let first = propose_intents_v1(
+            &mut compact,
+            &[json!({"intent":"ApplyContent", "json": compact_json})],
+        )
+        .unwrap();
+        let second = propose_intents_v1(
+            &mut formatted,
+            &[json!({"intent":"ApplyContent", "json": formatted_json})],
+        )
+        .unwrap();
+        assert_eq!(first.intents, second.intents);
+        // Session/document ids intentionally bind the full digest, so payload normalization is
+        // compared independently from the cross-session proposal identity.
+        assert_eq!(first.risks, second.risks);
+    }
+
+    #[test]
+    fn proposal_v1_normalizes_edit_script_and_compiles_it_immediately() {
+        let mut session = Session::default();
+        apply_intent(&mut session, Intent::Open { path: showcase() }).unwrap();
+        let before = session.doc.as_ref().unwrap().revision();
+        let proposal = propose_intents_v1(
+            &mut session,
+            &[json!({
+                "intent": "ApplyEditScript",
+                "json": "{ \"edits\": [{ \"text\": \"script\", \"block\": 0, \"section\": 0, \"op\": \"set_paragraph\" }] }"
+            })],
+        )
+        .unwrap();
+        assert_eq!(session.doc.as_ref().unwrap().revision(), before);
+        assert_eq!(proposal.intents[0]["intent"], "ApplyEditScript");
+        assert_eq!(proposal.risks, ["authoring-dsl"]);
+        assert!(proposal.intents[0]["json"]
+            .as_str()
+            .unwrap()
+            .starts_with("{\"edits\":"));
     }
 }

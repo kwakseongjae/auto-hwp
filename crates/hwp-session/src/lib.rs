@@ -2331,12 +2331,25 @@ pub fn build_insert_image_proposal(
     width_mm: Option<f32>,
     height_mm: Option<f32>,
 ) -> Result<hwp_ai::Proposal, String> {
+    let script = build_insert_image_script(path, scope_section, scope_block, width_mm, height_mm)?;
+    hwp_ai::propose_from_edit_script(doc, &script, "이미지 삽입").map_err(|e| e.to_string())
+}
+
+/// Build the typed authoring script for a chat-attached image. Proposal v1 callers serialize this
+/// value and let the engine parse/compile it again on the detached scratch transaction.
+pub fn build_insert_image_script(
+    path: &std::path::Path,
+    scope_section: Option<usize>,
+    scope_block: Option<usize>,
+    width_mm: Option<f32>,
+    height_mm: Option<f32>,
+) -> Result<hwp_ai::edit::EditScript, String> {
     let (section, block, position) = match (scope_section, scope_block) {
         (Some(sec), Some(blk)) => (sec, blk, "after"),
         (Some(sec), None) => (sec, 0, "end"),
         _ => (0, 0, "end"),
     };
-    let script = hwp_ai::edit::EditScript {
+    Ok(hwp_ai::edit::EditScript {
         edits: vec![serde_json::from_value(serde_json::json!({
             "op": "insert_image",
             "section": section,
@@ -2347,8 +2360,7 @@ pub fn build_insert_image_proposal(
             "height_mm": height_mm,
         }))
         .map_err(|e| format!("이미지 편집 구성 실패: {e}"))?],
-    };
-    hwp_ai::propose_from_edit_script(doc, &script, "이미지 삽입").map_err(|e| e.to_string())
+    })
 }
 
 /// Shape a validated [`hwp_ai::Proposal`] into the structured JSON the chat panel renders: the
@@ -2537,6 +2549,55 @@ pub fn protect_table_header_rows(
     before - ops.len()
 }
 
+/// EditScript-level form of [`protect_table_header_rows`]. Filtering before Proposal v1 keeps the
+/// normalized authoring payload and its immediately compiled scratch snapshot exactly aligned.
+pub fn protect_table_header_edit_script(
+    doc: &SemanticDoc,
+    script: &mut hwp_ai::edit::EditScript,
+    anchors_json: Option<&str>,
+) -> usize {
+    let Some(json) = anchors_json else { return 0 };
+    let Ok(anchors): std::result::Result<Vec<AnchorDto>, _> = serde_json::from_str(json) else {
+        return 0;
+    };
+    let mut guard: std::collections::HashMap<(usize, usize), std::collections::BTreeSet<usize>> =
+        std::collections::HashMap::new();
+    for anchor in anchors {
+        guard
+            .entry((anchor.section, anchor.block))
+            .or_insert_with(|| protected_rows(doc, anchor.section, anchor.block));
+    }
+    let mut blocked = 0;
+    script.edits.retain_mut(|edit| match edit {
+        hwp_ai::edit::EditCommand::SetCell {
+            section,
+            block,
+            row,
+            ..
+        } => {
+            let protected = guard
+                .get(&(*section, *block))
+                .is_some_and(|rows| rows.contains(row));
+            blocked += usize::from(protected);
+            !protected
+        }
+        hwp_ai::edit::EditCommand::SetCells {
+            section,
+            block,
+            cells,
+        } => {
+            let before = cells.len();
+            if let Some(rows) = guard.get(&(*section, *block)) {
+                cells.retain(|cell| !rows.contains(&cell.row));
+            }
+            blocked += before - cells.len();
+            !cells.is_empty()
+        }
+        _ => true,
+    });
+    blocked
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2698,6 +2759,32 @@ mod tests {
         assert_eq!(protect_table_header_rows(&doc, &mut ops, None), 0);
         assert_eq!(protect_table_header_rows(&doc, &mut ops, Some("[]")), 0);
         assert_eq!(ops.len(), 2, "nothing stripped when no anchor rides along");
+    }
+
+    #[test]
+    fn proposal_v1_script_guard_filters_the_authoring_payload_before_compile() {
+        let doc = doc_with_table();
+        let anchors =
+            r#"[{"kind":"range","section":0,"block":1,"rows":[0,1],"cols":[0,1],"label":"표"}]"#;
+        let mut script: hwp_ai::edit::EditScript = serde_json::from_value(serde_json::json!({
+            "edits": [{
+                "op": "set_cells",
+                "section": 0,
+                "block": 1,
+                "cells": [
+                    {"row": 0, "col": 0, "text": "blocked"},
+                    {"row": 1, "col": 0, "text": "kept"}
+                ]
+            }]
+        }))
+        .unwrap();
+        assert_eq!(
+            protect_table_header_edit_script(&doc, &mut script, Some(anchors)),
+            1
+        );
+        let ops = hwp_ai::edit::compile_edits(&doc, &script).unwrap();
+        assert_eq!(ops.len(), 1);
+        assert!(matches!(ops[0], Op::SetTableCell { row: 1, .. }));
     }
 
     /// A section-0 doc with THREE distinct top-level blocks stacked down the page: a header paragraph,

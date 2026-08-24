@@ -3,7 +3,16 @@ import { coreMessagesKoKR, type CoreMessages } from "./messages";
 import { inheritRuns } from "./runs";
 import type { DocSession } from "./session";
 import type { SelectionModel } from "./selection";
-import type { CellAddr, DocContext, Intent, IntentCard, RunSpec } from "./types";
+import type { CellAddr, DocContext, Intent, IntentCard, ProposalV1, RunSpec } from "./types";
+
+function stableIntentKey(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableIntentKey).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableIntentKey(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "undefined";
+}
 
 /** A rectangular cell range `[r0..=r1] × [c0..=c1]` (inclusive, MODEL-GLOBAL) — the target of a batch
  *  format / shade (INTENT-SCHEMA §6.8). A single cell is `r0==r1 && c0==c1`. */
@@ -49,6 +58,7 @@ export class EditController {
   /** issue 077 — the injected string catalog for the preview cards. Defaults to Korean; the React
    *  binding assigns the host-merged catalog through `EditorCore.messages`. */
   messages: CoreMessages = coreMessagesKoKR;
+  private proposals = new Map<string, ProposalV1>();
 
   constructor(
     private session: DocSession,
@@ -72,8 +82,14 @@ export class EditController {
    *  pure `describeIntent` unchanged. The chat panel uses THIS for its cards; applying still goes
    *  through the same `apply` (one undo batch) — there is NO auto-apply path for a destructive card. */
   async previewCards(intents: Intent[]): Promise<IntentCard[]> {
+    let previewIntents = intents;
+    if (this.session.supportsProposals()) {
+      const proposal = await this.session.propose(intents);
+      this.proposals.set(stableIntentKey(intents), proposal);
+      previewIntents = proposal.intents;
+    }
     return Promise.all(
-      intents.map(async (intent) => {
+      previewIntents.map(async (intent) => {
         const card = describeIntent(intent, this.messages.intent);
         if (card.destructive && card.section !== null && card.block !== null) {
           const detail = await deleteBlockDetail(
@@ -92,7 +108,11 @@ export class EditController {
   /** Apply a previewed proposal as ONE undo batch, then clear the consumed selection. Resolves to how
    *  many ops were applied. Rethrows on failure (the UI surfaces the error / trap-recovery message). */
   async apply(intents: Intent[]): Promise<number> {
-    const applied = await this.session.applyBatch(intents);
+    const key = stableIntentKey(intents);
+    const applied = this.session.supportsProposals()
+      ? await this.session.commitProposal(this.proposals.get(key) ?? (await this.session.propose(intents)))
+      : await this.session.applyBatch(intents);
+    this.proposals.delete(key);
     this.selection.clear();
     return applied;
   }
