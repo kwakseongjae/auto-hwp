@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #193 canonical caption loss seams closed
+- JSX/equality now round-trip caption semantics strictly; duplicate captions fail closed.
+- semantic HTML keeps caption content/position; equation enrichment reaches caption blocks.
+- focused JSX 15/export 10 + quick all green; next push/CI→merge.
+
 ## 2026-08-24 (Codex sol) · #193 caption budget bypass closed
 - security re-audit found layout-limit traversal omitted new caption blocks.
 - caption paragraphs/nested tables now share the iterative budget/depth guard; hostile regression green.

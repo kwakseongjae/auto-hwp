@@ -439,11 +439,33 @@ fn emit_table(t: &Table) -> JsxNode {
     if t.dirty.is_dirty() {
         el.attrs.insert("data-dirty".into(), "1".into());
     }
+    if let Some(caption) = &t.caption {
+        el.children.push(emit_table_caption(caption));
+    }
     // Cells are emitted flat (one <TableCell> each) — the parser reconstructs the Vec<Cell>
     // in order; HWP's merge convention keeps covered cells active=false but present.
     for c in &t.cells {
         el.children.push(emit_cell(c));
     }
+    JsxNode::Element(el)
+}
+
+fn emit_table_caption(caption: &TableCaption) -> JsxNode {
+    let position = match caption.position {
+        TableCaptionPosition::Left => "left",
+        TableCaptionPosition::Right => "right",
+        TableCaptionPosition::Top => "top",
+        TableCaptionPosition::Bottom => "bottom",
+    };
+    let mut el = JsxElement::new(Tag::TableCaption)
+        .with_attr("data-position", position)
+        .with_attr("data-spacing", caption.spacing.to_string())
+        .with_attr("data-width", caption.width.to_string())
+        .with_attr("data-max-width", caption.max_width.to_string());
+    if caption.include_margin {
+        el.attrs.insert("data-include-margin".into(), "1".into());
+    }
+    el.children.extend(caption.blocks.iter().map(emit_block));
     JsxNode::Element(el)
 }
 
@@ -1093,14 +1115,24 @@ fn parse_inline(node: &JsxNode) -> Result<Inline> {
 }
 
 fn parse_table(el: &JsxElement) -> Result<Table> {
-    let cells = el
-        .children
-        .iter()
-        .map(|c| match c {
-            JsxNode::Element(e) if e.tag() == Some(Tag::TableCell) => parse_cell(e),
-            _ => Err(Error::Parse("table child is not a TableCell".into())),
-        })
-        .collect::<Result<_>>()?;
+    let mut cells = Vec::new();
+    let mut caption = None;
+    for child in &el.children {
+        match child {
+            JsxNode::Element(e) if e.tag() == Some(Tag::TableCell) => cells.push(parse_cell(e)?),
+            JsxNode::Element(e) if e.tag() == Some(Tag::TableCaption) && caption.is_none() => {
+                caption = Some(parse_table_caption(e)?);
+            }
+            JsxNode::Element(e) if e.tag() == Some(Tag::TableCaption) => {
+                return Err(Error::Parse("table has more than one caption".into()));
+            }
+            _ => {
+                return Err(Error::Parse(
+                    "table child is not a TableCell or TableCaption".into(),
+                ))
+            }
+        }
+    }
     let col_widths = el
         .attrs
         .get("data-colw")
@@ -1117,7 +1149,7 @@ fn parse_table(el: &JsxElement) -> Result<Table> {
         Some(_) => return Err(Error::Parse("invalid table keep-together flag".into())),
     };
     Ok(Table {
-        caption: None,
+        caption,
         rows: el
             .attrs
             .get("data-rows")
@@ -1164,6 +1196,40 @@ fn parse_table(el: &JsxElement) -> Result<Table> {
         // (equality is explicitly modulo source spans).
         src_span: None,
         dirty: Dirty(el.attrs.contains_key("data-dirty")),
+    })
+}
+
+fn parse_table_caption(el: &JsxElement) -> Result<TableCaption> {
+    let required_i32 = |name: &str| {
+        el.attrs
+            .get(name)
+            .ok_or_else(|| Error::Parse(format!("table caption is missing {name}")))?
+            .parse::<HwpUnit>()
+            .map_err(|_| Error::Parse(format!("invalid table caption {name}")))
+    };
+    let position = match el.attrs.get("data-position").map(String::as_str) {
+        Some("left") => TableCaptionPosition::Left,
+        Some("right") => TableCaptionPosition::Right,
+        Some("top") => TableCaptionPosition::Top,
+        Some("bottom") => TableCaptionPosition::Bottom,
+        _ => return Err(Error::Parse("invalid table caption position".into())),
+    };
+    let include_margin = match el.attrs.get("data-include-margin").map(String::as_str) {
+        None => false,
+        Some("1") => true,
+        Some(_) => {
+            return Err(Error::Parse(
+                "invalid table caption include-margin flag".into(),
+            ))
+        }
+    };
+    Ok(TableCaption {
+        position,
+        blocks: el.children.iter().map(parse_block).collect::<Result<_>>()?,
+        spacing: required_i32("data-spacing")?,
+        width: required_i32("data-width")?,
+        max_width: required_i32("data-max-width")?,
+        include_margin,
     })
 }
 

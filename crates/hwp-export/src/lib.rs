@@ -144,9 +144,11 @@ fn render_element(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut St
         Some(Tag::Para) => wrap(el, "p", &id_attr(el), assets, out),
         Some(Tag::Run) | Some(Tag::Span) => wrap(el, "span", "", assets, out),
         Some(Tag::Table) => render_table(el, assets, out),
-        // TableRow/TableCell are rendered by render_table (the codec emits cells FLAT under Table
+        // TableCaption/TableRow/TableCell are rendered by render_table (the codec emits cells FLAT under Table
         // with data-row/data-col); a stray one outside a Table just renders its children.
-        Some(Tag::TableRow) | Some(Tag::TableCell) => render_children(el, assets, out),
+        Some(Tag::TableCaption) | Some(Tag::TableRow) | Some(Tag::TableCell) => {
+            render_children(el, assets, out)
+        }
         Some(Tag::Image) => render_image(el, assets, out),
         Some(Tag::Equation) => render_equation(el, out),
         Some(Tag::Chart) => render_chart(el, out),
@@ -244,6 +246,23 @@ fn render_table(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut Stri
         out.push_str(" style=\"table-layout:fixed\"");
     }
     out.push('>');
+    if let Some(caption) = el.children.iter().find_map(|child| match child {
+        JsxNode::Element(caption) if caption.tag() == Some(Tag::TableCaption) => Some(caption),
+        _ => None,
+    }) {
+        let position = caption
+            .attrs
+            .get("data-position")
+            .map(String::as_str)
+            .unwrap_or("bottom");
+        out.push_str("<caption");
+        if matches!(position, "top" | "bottom") {
+            out.push_str(&format!(" style=\"caption-side:{}\"", esc_attr(position)));
+        }
+        out.push_str(&format!(" data-position=\"{}\">", esc_attr(position)));
+        render_children(caption, assets, out);
+        out.push_str("</caption>");
+    }
     if !cols_px.is_empty() && total > 0.0 {
         out.push_str("<colgroup>");
         for w in &cols_px {
@@ -648,6 +667,48 @@ mod tests {
             1,
             "only the overridden row carries a height"
         );
+    }
+
+    #[test]
+    fn table_caption_content_and_position_reach_html() {
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape::default());
+        doc.para_shapes.push(ParaShape::default());
+        let caption_para = Paragraph {
+            runs: vec![Run {
+                char_shape: 0,
+                char_ref: None,
+                content: vec![Inline::Text("caption witness".into())],
+            }],
+            ..Default::default()
+        };
+        let table = Table {
+            caption: Some(TableCaption {
+                position: TableCaptionPosition::Top,
+                blocks: vec![Block::Paragraph(caption_para)],
+                spacing: 850,
+                width: 8_504,
+                max_width: 48_047,
+                include_margin: false,
+            }),
+            rows: 1,
+            cols: 1,
+            cells: vec![Cell {
+                row: 0,
+                col: 0,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        doc.sections.push(Section {
+            blocks: vec![Block::Table(table)],
+            ..Default::default()
+        });
+
+        let html = html_of(&doc);
+        assert!(html.contains("<caption style=\"caption-side:top\" data-position=\"top\">"));
+        assert!(html.contains("caption witness"));
+        assert!(html.find("<caption").unwrap() < html.find("<tr").unwrap());
     }
 
     #[test]

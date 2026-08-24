@@ -26,7 +26,13 @@
   bypass를 발견해, caption paragraphs와 caption-nested tables도 explicit work stack에 `depth+1`로 넣었다.
   hostile caption-only deep nesting 회귀, hwp-ingest **14 tests**, focused clippy `-D warnings`, wasm32 및
   quick 전체(PDF51·canonical 8/18/24·98.9%+·corpus84·oracle82·HWPX·licenses) green.
-  **다음:** security fix commit/push로 #194 CI 재기동→required CI·review/comment·mergeability
+  canonical projection audit에서 JSX codec/equality가 새 caption을 누락하고 HWPX equation enrichment가
+  caption blocks를 재귀하지 않는 두 loss seam도 발견해 닫았다. `TableCaption` closed tag는 방향·blocks·
+  gap·width/max-width·include-margin을 strict round-trip하고 duplicate/invalid value는 fail-closed한다.
+  semantic HTML도 caption content와 top/bottom 위치를 보존하며, caption 내부 후처리는 cell과 같은 재귀
+  경로를 탄다. focused hwp-jsx **15 tests**(unit 3+roundtrip 12), hwp-export **10 tests**, 관련 clippy
+  `-D warnings` green. quick도 workspace/PDF **51**/canonical **8·18·24·98.9%+**/public corpus **84**/
+  oracle **82**/HWPX/wasm/licenses 전체 green. **다음:** continuity 포함 loss-seam fix commit/push로 #194 CI 재기동→required CI·review/comment·mergeability
   green이면 squash merge/branch 정리→#192를 latest main에 재배치해 strict captioned-table parser 재개.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #181 병합 · #182 next TABLE 착수**.

@@ -261,6 +261,80 @@ fn t1c_per_edge_borders_and_diagonal_roundtrip() {
     );
 }
 
+#[test]
+fn t1f_table_caption_roundtrips_and_fails_closed() {
+    let caption = TableCaption {
+        position: TableCaptionPosition::Top,
+        blocks: vec![Block::Paragraph(Paragraph {
+            runs: vec![Run {
+                char_shape: 0,
+                char_ref: None,
+                content: vec![Inline::Text("caption".into())],
+            }],
+            ..Default::default()
+        })],
+        spacing: 850,
+        width: 8_504,
+        max_width: 48_047,
+        include_margin: true,
+    };
+    let table = Table {
+        caption: Some(caption),
+        rows: 1,
+        cols: 1,
+        cells: vec![Cell {
+            row: 0,
+            col: 0,
+            blocks: vec![Block::Paragraph(Paragraph::default())],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let mut doc = SemanticDoc::default();
+    doc.char_shapes.push(CharShape::default());
+    doc.para_shapes.push(ParaShape::default());
+    doc.sections.push(Section {
+        blocks: vec![Block::Table(table)],
+        ..Default::default()
+    });
+
+    let projected = emit(&doc);
+    let back = parse(&projected).expect("captioned table projection round-trip");
+    assert!(doc_value_eq(&doc, &back));
+
+    let mut changed = back.clone();
+    if let Some(Block::Table(table)) = changed.sections[0].blocks.get_mut(0) {
+        table.caption.as_mut().unwrap().spacing += 1;
+    }
+    assert!(
+        !doc_value_eq(&doc, &changed),
+        "caption geometry must be equality-visible"
+    );
+
+    let mut duplicate = projected;
+    if let JsxNode::Element(section) = &mut duplicate.sections[0] {
+        let table = section
+            .children
+            .iter_mut()
+            .find_map(|node| match node {
+                JsxNode::Element(element) if element.tag() == Some(Tag::Table) => Some(element),
+                _ => None,
+            })
+            .unwrap();
+        let caption = table
+            .children
+            .iter()
+            .find(|node| matches!(node, JsxNode::Element(e) if e.tag() == Some(Tag::TableCaption)))
+            .unwrap()
+            .clone();
+        table.children.push(caption);
+    }
+    assert!(
+        parse(&duplicate).is_err(),
+        "duplicate captions must fail closed"
+    );
+}
+
 /// T2 — CSS-only op: changes the stylesheet projection, leaves the JSX byte-identical,
 /// and the reparsed CharShape reflects the new font-size (height = 1400 for 14pt).
 #[test]

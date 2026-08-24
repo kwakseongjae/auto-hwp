@@ -164,8 +164,24 @@ fn table_eq(a: &Table, b: &Table) -> bool {
         && prov_eq(&a.provenance, &b.provenance)
         && pass_eq(&a.passthrough, &b.passthrough)
         && a.dirty == b.dirty
+        && caption_eq(a.caption.as_ref(), b.caption.as_ref())
         && a.cells.len() == b.cells.len()
         && a.cells.iter().zip(&b.cells).all(|(x, y)| cell_eq(x, y))
+}
+
+fn caption_eq(a: Option<&TableCaption>, b: Option<&TableCaption>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => {
+            a.position == b.position
+                && a.spacing == b.spacing
+                && a.width == b.width
+                && a.max_width == b.max_width
+                && a.include_margin == b.include_margin
+                && blocks_eq(&a.blocks, &b.blocks)
+        }
+        _ => false,
+    }
 }
 
 fn cell_eq(a: &Cell, b: &Cell) -> bool {

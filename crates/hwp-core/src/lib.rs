@@ -138,6 +138,9 @@ fn enrich_blocks(blocks: &mut [Block]) {
                 }
             }
             Block::Table(t) => {
+                if let Some(caption) = &mut t.caption {
+                    enrich_blocks(&mut caption.blocks);
+                }
                 for c in &mut t.cells {
                     enrich_blocks(&mut c.blocks);
                 }
