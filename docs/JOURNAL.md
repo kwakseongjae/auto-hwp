@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #196 stale boundary docs fixed
+- HWP5 native-parser doc no longer claims offset 936 stop; records benchmark-end exact-subset truth.
+- semantic delta and corpus/wasm/hostile/layout cutover gates stay explicit; next push/restarted CI.
+
 ## 2026-08-24 (Codex sol) · PR #197 posted
 - `Closes #196` PR #197 published with explicit no-cutover/delta/privacy boundaries.
 - next final-head required CI + reviews/comments/mergeability → autonomous merge.
