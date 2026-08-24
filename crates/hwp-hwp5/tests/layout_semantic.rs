@@ -867,7 +867,10 @@ fn owns_exact_nine_by_eight_table_with_one_bounded_nested_table() {
     assert!(anchor.is_table_anchor);
     assert_eq!((table.rows, table.cols, table.cells.len()), (9, 8, 34));
     assert!(table.keep_together);
-    assert!(table.fixed_row_heights, "no-adjust reaches shared IR");
+    assert!(
+        !table.fixed_row_heights,
+        "HWP5 TABLE page-break/repeat-header bits are not HWPX noAdjust"
+    );
     assert_eq!(
         table.col_widths,
         vec![3_182, 6_810, 659, 8_082, 5_346, 10_534, 5_935, 7_435]
@@ -928,7 +931,10 @@ fn owns_exact_eight_by_five_rowspan_and_nine_bounded_nested_tables() {
         !table.keep_together,
         "row-boundary policy uses shared row fragmentation"
     );
-    assert!(table.fixed_row_heights, "no-adjust reaches shared IR");
+    assert!(
+        !table.fixed_row_heights,
+        "HWP5 TABLE page-break/repeat-header bits are not HWPX noAdjust"
+    );
     assert_eq!(table.col_widths, vec![7_667, 16_324, 3_879, 3_955, 16_324]);
     assert_eq!(
         table.row_heights,
@@ -1113,7 +1119,7 @@ fn owns_exact_top_captioned_four_by_five_full_grid_table() {
     assert!(anchor.is_table_anchor);
     assert_eq!((table.rows, table.cols, table.cells.len()), (4, 5, 20));
     assert!(table.keep_together);
-    assert!(table.fixed_row_heights);
+    assert!(!table.fixed_row_heights);
     assert_eq!(table.col_widths, vec![3_221, 6_593, 8_956, 21_855, 7_422]);
     assert_eq!(table.row_heights, vec![1_948, 1_848, 1_848, 1_848]);
     let caption = table
@@ -1180,7 +1186,7 @@ fn owns_exact_plain_four_by_five_full_grid_table() {
     assert_eq!((table.rows, table.cols, table.cells.len()), (4, 5, 20));
     assert!(table.caption.is_none());
     assert!(table.keep_together);
-    assert!(table.fixed_row_heights);
+    assert!(!table.fixed_row_heights);
     assert_eq!(table.col_widths, vec![3_221, 9_238, 14_770, 12_223, 8_594]);
     assert_eq!(table.row_heights, vec![1_948, 1_848, 1_848, 1_848]);
     assert!(table.cells.iter().enumerate().all(|(index, cell)| {
@@ -1232,7 +1238,10 @@ fn owns_exact_seven_by_three_merged_atomic_table() {
     assert!(anchor.is_table_anchor);
     assert_eq!((table.rows, table.cols, table.cells.len()), (7, 3, 19));
     assert!(table.keep_together, "no-split table stays atomic");
-    assert!(table.fixed_row_heights, "no-adjust rows remain exact");
+    assert!(
+        !table.fixed_row_heights,
+        "HWP5 TABLE page-break/repeat-header bits keep row heights as floors"
+    );
     assert_eq!(table.col_widths, vec![6_509, 31_215, 10_200]);
     assert_eq!(
         table.row_heights,

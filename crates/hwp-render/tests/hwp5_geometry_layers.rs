@@ -93,5 +93,8 @@ fn benchmark_masks_prove_page_number_ownership_and_isolate_body_pages() {
             },
         )
         .collect();
-    assert_eq!(differing_body_pages, vec![2, 7]);
+    assert!(
+        differing_body_pages.is_empty(),
+        "all body SVG pages are exact; the only remaining paint delta is owned page numbering"
+    );
 }

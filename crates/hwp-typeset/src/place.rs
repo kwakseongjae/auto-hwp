@@ -605,6 +605,7 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
                         page,
                         section_index,
                         block_index,
+                        None,
                     );
                     let end_page = pages.len() - 1;
                     let end_y = body_y + flow.y();
@@ -1357,6 +1358,7 @@ fn place_paragraph_columns(
     page: &PageSetup,
     section: usize,
     block: usize,
+    width_cap: Option<f64>,
 ) {
     let glyphs = paragraph_glyphs(p, doc, fonts);
     let align = doc
@@ -1365,7 +1367,11 @@ fn place_paragraph_columns(
         .map(|shape| shape.align)
         .unwrap_or_default();
     let ratio = line_spacing_ratio(p, doc);
-    let ind = indent_of(p, doc, flow.min_width());
+    let layout_width = width_cap
+        .map(|cap| flow.min_width().min(cap))
+        .unwrap_or_else(|| flow.min_width())
+        .max(1.0);
+    let ind = indent_of(p, doc, layout_width);
     let lines = layout_paragraph(p, doc, ind.wrap_w, fonts);
     let obj = paragraph_object(p);
 
@@ -1377,6 +1383,10 @@ fn place_paragraph_columns(
             new_page(pages, page);
         }
         let column = flow.box_now();
+        let effective_width = width_cap
+            .map(|cap| column.width.min(cap))
+            .unwrap_or(column.width)
+            .max(1.0);
         let line_top = mt + flow.y();
         let line_indent = ind.left
             + if line_index == 0 {
@@ -1384,7 +1394,7 @@ fn place_paragraph_columns(
             } else {
                 0.0
             };
-        let slack = (column.width
+        let slack = (effective_width
             - ind.left
             - if line_index == 0 {
                 ind.first_extra.max(0.0)
@@ -1438,7 +1448,7 @@ fn place_paragraph_columns(
                 page_out.images.push(PlacedImage {
                     x: x0,
                     y: line_top,
-                    w: (*width).min(column.width),
+                    w: (*width).min(effective_width),
                     h: *height,
                     bin_ref: bin_ref.clone(),
                     svg: svg.clone(),
@@ -1519,7 +1529,18 @@ fn place_caption_columns(
                     flow.add(shape.map(|value| value.space_before).unwrap_or(0).max(0) as f64);
                 }
                 place_paragraph_columns(
-                    paragraph, doc, fonts, ml, mt, body_h, flow, pages, page, section, block,
+                    paragraph,
+                    doc,
+                    fonts,
+                    ml,
+                    mt,
+                    body_h,
+                    flow,
+                    pages,
+                    page,
+                    section,
+                    block,
+                    (caption.max_width > 0).then_some(caption.max_width as f64),
                 );
                 flow.add(shape.map(|value| value.space_after).unwrap_or(0).max(0) as f64);
             }
@@ -4275,6 +4296,72 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn column_flow_honors_caption_max_width_for_centered_glyphs() {
+        use crate::LayoutEngine;
+
+        let plain_lead = para("");
+        let mut column_lead = plain_lead.clone();
+        column_lead.column_layout_before = Some(ColumnLayout {
+            widths: vec![60_000],
+            gaps: vec![],
+            ..ColumnLayout::default()
+        });
+        let table = captioned_table(TableCaptionPosition::Top, false);
+        let mut uncapped_table = table.clone();
+        uncapped_table
+            .caption
+            .as_mut()
+            .expect("synthetic caption")
+            .max_width = 0;
+        let mut plain = doc_with_page(
+            vec![Block::Paragraph(plain_lead), Block::Table(table.clone())],
+            20_000,
+        );
+        let mut column = doc_with_page(
+            vec![Block::Paragraph(column_lead), Block::Table(table)],
+            20_000,
+        );
+        let mut uncapped_column = column.clone();
+        uncapped_column.sections[0].blocks[1] = Block::Table(uncapped_table);
+        plain.para_shapes[0].align = HorizontalAlign::Center;
+        column.para_shapes[0].align = HorizontalAlign::Center;
+        uncapped_column.para_shapes[0].align = HorizontalAlign::Center;
+
+        let plain_placed = place_doc(&plain, &ApproxFontMetrics);
+        let column_placed = place_doc(&column, &ApproxFontMetrics);
+        let uncapped_placed = place_doc(&uncapped_column, &ApproxFontMetrics);
+        let first_caption_x = |placed: &PlacedDoc| {
+            placed
+                .pages
+                .iter()
+                .flat_map(|page| &page.glyphs)
+                .find(|glyph| glyph.ch == '캡')
+                .expect("synthetic caption glyph")
+                .x
+        };
+        assert_eq!(
+            first_caption_x(&plain_placed).to_bits(),
+            first_caption_x(&column_placed).to_bits(),
+            "an explicit one-column zone must not discard caption.max_width"
+        );
+        assert_eq!(
+            first_caption_x(&uncapped_placed) - first_caption_x(&column_placed),
+            (60_000.0 - 48_000.0) / 2.0,
+            "centered caption offset is half the body/max-width discriminator"
+        );
+        assert_eq!(plain_placed.pages.len(), column_placed.pages.len());
+        assert_eq!(
+            crate::NaiveLayout
+                .layout(&column, &ApproxFontMetrics)
+                .unwrap()
+                .pages
+                .len(),
+            column_placed.pages.len(),
+            "LOCKSTEP"
+        );
     }
 
     #[test]

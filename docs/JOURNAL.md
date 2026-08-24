@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #204 HWP5 body render exact
+- live cell width(+176), caption cap(143→71.5), HWP5 row-floor semantics를 fail-closed로 교정.
+- 8쪽 body placement/SVG exact; own page-number 제거 시 rhwp PDF bytes/pages/replay/diagnostics exact.
+- quick/full green: 8/18/24+98.9%, Vitest 1,018, Chromium 85 pass/3 skip; vendor/generated diff 0.
+- 다음: commit/push→`Closes #204` PR→exact-head CI/merge→#94 갱신→다음 corpus slice.
+
 ## 2026-08-24 (Codex sol) · #202 full green
 - quick/full green: canonical 8/18/24+98.9%, corpus84/oracle82, wasm 7,818,196B, PDF51.
 - JS/crosscheck/i18n + Vitest 1,018 green; Chromium 85 pass/3 intentional skip/0 fail.

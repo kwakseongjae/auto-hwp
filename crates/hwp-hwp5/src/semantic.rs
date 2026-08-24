@@ -2459,9 +2459,10 @@ fn parse_inline_table(
         keep_together: table_attr != 0x0600_000e,
         col_widths,
         row_heights: derived_rows,
-        // The exact no-adjust table attributes carry HWP's no-adjust bit. Their stored row heights are
-        // exact clipping geometry, not merely content-size floors.
-        fixed_row_heights: matches!(table_attr, 0x0600_0006 | 0x0600_000c | 0x0600_000e),
+        // HWP5 TABLE bits 0..=1 are the page-break policy and bit 2 is repeat-header. They do not
+        // encode HWPX's `<hp:tbl noAdjust="1">` contract. Keep native HWP5 row heights as content
+        // floors, matching the shared model and the production rhwp lift.
+        fixed_row_heights: false,
         outer_margin_left: margins[0] as HwpUnit,
         outer_margin_right: margins[1] as HwpUnit,
         outer_margin_top: margins[2] as HwpUnit,

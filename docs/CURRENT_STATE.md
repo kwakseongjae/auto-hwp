@@ -3,6 +3,43 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-24 · Codex(sol) — **#204 full green · PR 직전**.
+  `scripts/verify-local.sh` quick와 `--full` 모두 green: fmt/clippy/workspace/rhwp-feature/PDF 51,
+  canonical **8/18/24 + 98.9%+**, corpus 계약 84·catalog 259/12 families/120 pairs,
+  oracle 82, wasm **7,820,727B**, JS/crosscheck/i18n, Vitest **1,018**, Chromium **85 pass / 3
+  intentional skip / 0 fail**. 첫 full은 격리 worktree의 node_modules 부재, 둘째는 sandbox port
+  EPERM으로 환경상 중단됐고 기존 캐시 링크와 승인된 로컬 포트 실행으로 각각 해소했다. 임시 링크는
+  전부 제거했다. `external/rhwp`·wasm 생성물 diff 0, diff-check green. **다음:** 커밋/푸시→PR
+  `Closes #204`→exact-head CI/리뷰/댓글 감사→green merge→#94 동기화→다음 #94 slice issue-first.
+
+- 갱신: 2026-08-24 · Codex(sol) — **#204 구현 완료 · 전체 검증 전**.
+  남은 두 body delta의 원인을 content-free 수치로 확정했다. ① HWP5 cell LIST_HEADER의 exact
+  13B extension 첫 u32가 stale core width보다 **176 HWPUNIT** 큰 live layout width인데 rhwp lift가
+  보존만 하고 읽지 않아 span 열을 38/−38로 균분했다. exact 길이·zero reserved tail·positive i32만
+  수용하고 global boundary/span equation이 완결·무모순일 때만 열 격자로 채택하며, 아니면 기존 bounded
+  heuristic으로 fail closed한다. ② explicit column-flow caption이 `max_width`를 무시해 body/cap 차이
+  143의 절반인 **71.5 HWPUNIT**만큼 중앙 정렬 glyph가 밀렸다. 모든 column 문단 경로가 optional width
+  cap으로 같은 wrap/alignment/object width를 쓰게 했다. ③ 자체 HWP5 파서가 TABLE page-break/repeat-header
+  하위 비트를 HWPX `noAdjust`로 오해해 row height를 exact/clipping 처리했다. 모델 계약대로 HWP5는 floor,
+  HWPX만 fixed로 복원했다. 결과: 8쪽 body glyph/block/table/cell/rect/line/image와 body SVG가 rhwp와
+  **전부 exact**, own page-number를 제거한 PDF는 rhwp PDF와 **byte/pages/replay/diagnostics exact**다.
+  hwp-hwp5 78·hwp-rhwp lift 13·hwp-typeset 100·core/render/PDF focused green. `external/rhwp` 무수정,
+  production rhwp·eligible=false 유지. **다음:** 문서/JOURNAL→quick/full→privacy/vendor diff 감사→PR.
+
+- 갱신: 2026-08-24 · Codex(sol) — **PR #203 병합 · #204 착수**.
+  PR #203 exact head `ef334eb4`에서 issue-link **5s**·build-test **9m53s**·licenses
+  **2m38s** green, CLEAN/MERGEABLE, review/general/inline 댓글 0을 확인하고 protected main
+  `6c9d516a`로 squash 병합했다. #202 close·원격 브랜치 삭제를 확인하고 #94에 content-free
+  근거를 동기화했다. 페이지당 +3 glyph는 first-party page-number decoration이며 이를 제외한
+  candidate body는 8쪽 모두 exact, rhwp body와는 6/8쪽 exact다. 남은 두 곳은 0-based page 2의
+  table/cell/rect/line 최대 **177 HWPUNIT**와 page 7의 glyph x 8개 최대 **72 HWPUNIT**뿐이다.
+  중복 검색 뒤 후속 **#204**를 R18/P1/area:hwp5+typeset/status:ready로 열고 exact main의
+  `codex/issue-204-hwp5-semantic-deltas` worktree를 만들었다. **다음:** 원문·font name·파일명·
+  경로·hash/raw 없이 두 opaque site의 resolved table/row/cell/paragraph/char-shape/font-metric
+  입력을 fail-closed로 비교한다. 74/148 vertical cascade·176/177 horizontal delta와 x-only 72의
+  정확한 discriminator를 synthetic/hostile fixture로 독립 재현한 뒤 first-party parser/IR/layout의
+  최소 원인만 수리한다. production rhwp·`external/rhwp`·eligible=false·oracle/gates는 불변.
+
 - 갱신: 2026-08-24 · Codex(sol) — **PR #201 병합 · #202 착수**.
   PR #201 exact head `cce9892` 상태에서 issue-link **4s**·build-test **9m35s**·licenses
   **2m47s** green, CLEAN/MERGEABLE, review/general/inline 댓글 0을 확인하고 protected main
