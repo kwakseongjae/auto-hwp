@@ -332,6 +332,7 @@ dependencies = [
  "quick-xml 0.37.5",
  "serde",
  "serde_json",
+ "sha2",
  "zip 2.4.2",
 ]
 
@@ -2234,6 +2235,8 @@ dependencies = [
  "hwp-typeset",
  "serde",
  "serde_json",
+ "sha2",
+ "ttf-parser",
 ]
 
 [[package]]

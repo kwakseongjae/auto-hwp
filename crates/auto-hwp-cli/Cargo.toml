@@ -48,6 +48,7 @@ serde = { workspace = true }
 # 벌크 채움(issue 073): 편집 레인은 웹과 동일한 hwp-mcp Intent 경로를 쓴다(검증·거부 규칙 한 벌).
 hwp-mcp = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 zip = { workspace = true }
 # 073/#40 xlsx 명단: workspace zip + quick-xml only (no calamine, no native runtime).
 quick-xml = { workspace = true }

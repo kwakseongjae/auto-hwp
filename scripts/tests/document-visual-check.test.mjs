@@ -36,6 +36,10 @@ function fixture() {
       schema_version: 1, coordinate_space: "HWPUNIT", candidate_pdf_sha256: "${"a".repeat(64)}",
       pages: [{ page: 1, width: 59500, height: 84200, regions: [] }]
     }) + "\\n");
+    const fontReportIndex = args.indexOf("--font-report");
+    if (fontReportIndex >= 0) fs.writeFileSync(args[fontReportIndex + 1], JSON.stringify({
+      schema_version: 1, registry_fingerprint: "sha256:${"b".repeat(64)}", face_count: 1, lanes: []
+    }) + "\\n");
   `);
   executable(python, `
     const fs = require("node:fs");
@@ -102,4 +106,18 @@ test("a failed subprocess leaves no partial final or staging directory", () => {
     readdirSync(root).filter((name) => name.startsWith(".auto-hwp-visual-")),
     [],
   );
+});
+
+test("a registry fingerprint is forwarded and retained without paths", () => {
+  const { root, document, reference, cli, python } = fixture();
+  const registry = join(root, "fonts.json");
+  writeFileSync(registry, "{}", { mode: 0o600 });
+  const output = join(root, "result");
+  const result = runVisualCheck({
+    document, reference, reference_tier: "T3", output_dir: output, cli, python,
+    font_registry: registry,
+  });
+  assert.equal(result.candidate_font_fingerprint, `sha256:${"b".repeat(64)}`);
+  assert.equal(lstatSync(join(output, "candidate-font-realization.json")).mode & 0o777, 0o600);
+  assert.doesNotMatch(readFileSync(join(output, "summary.json"), "utf8"), /auto-hwp-document-visual-/);
 });

@@ -5,6 +5,18 @@
 
 ---
 
+## 2026-08-25 (Codex sol) · #215 deterministic font registry
+- strict bounded font manifest/realization report와 layout·PDF 동일 face-hash 선택을 공유 코어에 구현.
+- CLI·wasm·Tauri 등록/화면/PDF/print와 #213 visual-check fingerprint를 연결, OFL 6-face fixture 추가.
+- full green: 8/18/24+98.9%, oracle82, AI120, Vitest1,012, Chromium83 pass/3 skip/2 retry-pass.
+- 다음: audit→commit/push→`Closes #215` PR/CI/merge→desktop geometry/HWP5 cutover 우선순위 재평가.
+
+## 2026-08-25 (Codex sol) · PR #214 merge / #215 start
+- #214 exact-head CI 3종 green·댓글 0 확인 후 main `e990f619` 병합, #213 close/branch 정리.
+- #93/#114에 102 semantic region·font object 126:3 신호를 content-free로 동기화.
+- #215를 strict licensed font registry + layout/PDF face lockstep child로 등재·착수.
+- 다음: 기존 font injection/resolution 지도화→mismatched-face RED→공유 bounded registry 구현.
+
 ## 2026-08-25 (Codex sol) · #213 semantic PDF visual check
 - HWP/HWPX→own PDF→SHA-bound text/table/image/object metrics를 한 atomic 명령으로 연결.
 - strict manifest·resource/privacy hostile 경계와 worst 5 region JSON/HTML, CI 계약을 추가.

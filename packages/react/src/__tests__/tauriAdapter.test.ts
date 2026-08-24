@@ -266,12 +266,15 @@ describe("TauriAdapter — run reads + edit intents (issue 043)", () => {
 });
 
 describe("TauriAdapter — fonts + export (issue 043)", () => {
-  it("registerFont is a no-op and hasFont is always true (native font stack)", async () => {
-    const { invoke, calls } = mockInvoke({});
+  it("registerFont forwards explicit bytes while native fallback remains available", async () => {
+    const { invoke, calls } = mockInvoke({ register_font: undefined });
     const a = new TauriAdapter({ invoke });
     await expect(a.registerFont("Noto", new Uint8Array([1]))).resolves.toBeUndefined();
     expect(a.hasFont()).toBe(true);
-    expect(calls).toEqual([]); // no command issued for font registration on the desktop
+    expect(calls).toEqual([{
+      cmd: "register_font",
+      args: { family: "Noto", bytes: [1] },
+    }]);
   });
 
   it("exportHtml maps to render_doc_html (string)", async () => {

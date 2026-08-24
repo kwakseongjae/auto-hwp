@@ -767,18 +767,35 @@ impl HwpDoc {
     /// deterministic Approx fallback (backward compatible) and `export_pdf` throws `font_missing`.
     #[wasm_bindgen(js_name = registerFont)]
     pub fn register_font(&mut self, family: String, bytes: Vec<u8>) -> Result<(), JsValue> {
-        if bytes.starts_with(b"ttcf") {
-            return Err(js_err(
-                "ttc_unsupported",
-                "TTC(글꼴 컬렉션)는 지원하지 않습니다 — 단일 TTF/OTF 파일을 선택하세요 (krilla 서브셋 제약)",
-            ));
+        use hwp_session::font_registry::{FontFaceInput, FontRegistry, FontRegistryLimits};
+        let mut prospective = self.fonts.clone();
+        match prospective
+            .iter_mut()
+            .find(|(registered, _)| registered.trim().eq_ignore_ascii_case(family.trim()))
+        {
+            Some(slot) => *slot = (family.clone(), bytes.clone()),
+            None => prospective.push((family.clone(), bytes.clone())),
         }
+        FontRegistry::new(
+            prospective
+                .iter()
+                .map(|(family, bytes)| {
+                    FontFaceInput::from_legacy_label(family.clone(), bytes.clone())
+                })
+                .collect(),
+            FontRegistryLimits::default(),
+        )
+        .map_err(|message| js_err("invalid_font_registry", &message))?;
         // Upsert by family (issue 058): replace this family's bytes in place if present (so re-picking a
         // face takes effect immediately), else append (so a serif substitute coexists with the gothic
         // body — the first-registered body still backs metrics). Invalidate the revision-keyed SVG cache
         // — the new metrics re-paginate, and a stale cache would make the screen disagree with the PDF
         // (issue §함정: 캐시 무효화).
-        match self.fonts.iter_mut().find(|(f, _)| *f == family) {
+        match self
+            .fonts
+            .iter_mut()
+            .find(|(registered, _)| registered.trim().eq_ignore_ascii_case(family.trim()))
+        {
             Some(slot) => slot.1 = bytes,
             None => self.fonts.push((family, bytes)),
         }

@@ -6,6 +6,8 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 
 mod fill;
+#[cfg(feature = "pdf")]
+mod font_registry;
 mod inspect_layout;
 mod layout_score;
 mod xlsx_roster;
@@ -218,6 +220,13 @@ enum Cmd {
         /// used for this PDF. The sidecar is candidate-SHA-bound and never contains document text.
         #[arg(long)]
         visual_regions: Option<PathBuf>,
+        /// Strict schema-v1 local font registry manifest. Files are explicit, SHA-256 pinned,
+        /// regular non-symlink TTF/OTF inputs; no system-directory scan occurs.
+        #[arg(long)]
+        font_registry: Option<PathBuf>,
+        /// Write a content-free/path-free font realization report (requires --font-registry).
+        #[arg(long)]
+        font_report: Option<PathBuf>,
     },
     /// PIVOT M0: apply ONE CSS-only AI-routing op (CssSetDecl) to a project dir, proving
     /// content/design separation — only styles/document.css is re-written; the .jsx are untouched.
@@ -356,7 +365,15 @@ fn run() -> Result<(), String> {
             file,
             out,
             visual_regions,
-        } => export_pdf(&file, &out, visual_regions.as_deref())?,
+            font_registry,
+            font_report,
+        } => export_pdf(
+            &file,
+            &out,
+            visual_regions.as_deref(),
+            font_registry.as_deref(),
+            font_report.as_deref(),
+        )?,
         Cmd::EditOp {
             proj,
             node,
@@ -781,7 +798,30 @@ fn export_html(file: &PathBuf, out: &Path) -> Result<(), String> {
 /// PHASE P4: export to PDF from OUR OWN layout (paint IR → krilla, Korean font subsetting). The PDF
 /// matches own-render because both replay the same paint IR. Needs `--features pdf`.
 #[cfg(feature = "pdf")]
-fn export_pdf(file: &PathBuf, out: &Path, visual_regions: Option<&Path>) -> Result<(), String> {
+fn export_pdf(
+    file: &PathBuf,
+    out: &Path,
+    visual_regions: Option<&Path>,
+    font_registry: Option<&Path>,
+    font_report: Option<&Path>,
+) -> Result<(), String> {
+    if font_report.is_some() && font_registry.is_none() {
+        return Err("--font-report requires --font-registry".into());
+    }
+    if let Some(path) = font_report {
+        if path == out || visual_regions.is_some_and(|regions| regions == path) {
+            return Err("--font-report must not reuse another export output path".into());
+        }
+        if path
+            .try_exists()
+            .map_err(|error| format!("inspect {}: {error}", path.display()))?
+        {
+            return Err(format!(
+                "font report output already exists; refusing to overwrite {}",
+                path.display()
+            ));
+        }
+    }
     if let Some(path) = visual_regions {
         if path == out {
             return Err("--visual-regions must not be the PDF output path".into());
@@ -800,7 +840,16 @@ fn export_pdf(file: &PathBuf, out: &Path, visual_regions: Option<&Path>) -> Resu
     // Engine::open handles both: .hwpx parse (default build) + .hwp lift (needs --features rhwp).
     let doc = hwp_core::Engine::open(&bytes).map_err(|e| e.to_string())?;
     let title = file.file_stem().map(|s| s.to_string_lossy().into_owned());
-    let result = hwp_session::emit_pdf(&doc, title)?;
+    let registry = font_registry.map(font_registry::load).transpose()?;
+    let injected = registry
+        .as_ref()
+        .map(|registry| registry.injected_faces())
+        .unwrap_or_default();
+    let result = if registry.is_some() {
+        hwp_session::emit_pdf_with_fonts(&doc, title, &injected)?
+    } else {
+        hwp_session::emit_pdf(&doc, title)?
+    };
     let evidence = visual_regions
         .map(|_| {
             let mut bytes = serde_json::to_vec_pretty(&result.visual_evidence)
@@ -826,6 +875,9 @@ fn export_pdf(file: &PathBuf, out: &Path, visual_regions: Option<&Path>) -> Resu
             .write_all(&bytes)
             .map_err(|error| format!("write {}: {error}", path.display()))?;
     }
+    if let (Some(path), Some(registry)) = (font_report, registry.as_ref()) {
+        font_registry::write_report_new(path, &registry.realization_report(&doc))?;
+    }
     match &result.font_path {
         Some(p) => println!(
             "wrote {} ({} pages, {} KB) — Korean font embedded from {p}",
@@ -847,7 +899,13 @@ fn export_pdf(file: &PathBuf, out: &Path, visual_regions: Option<&Path>) -> Resu
 /// INTERIM (no `pdf` feature): explain the build flag + the headless-print fallback. We do NOT
 /// silently produce a wrong/empty file — the user gets an actionable message.
 #[cfg(not(feature = "pdf"))]
-fn export_pdf(file: &PathBuf, _out: &Path, _visual_regions: Option<&Path>) -> Result<(), String> {
+fn export_pdf(
+    file: &PathBuf,
+    _out: &Path,
+    _visual_regions: Option<&Path>,
+    _font_registry: Option<&Path>,
+    _font_report: Option<&Path>,
+) -> Result<(), String> {
     let _ = file;
     Err("export-pdf needs a build with `--features pdf` (krilla PDF backend + Korean font embedding).\n\
          Interim fallback without that feature: `auto-hwp export-html <doc> -o doc.html` then print the \

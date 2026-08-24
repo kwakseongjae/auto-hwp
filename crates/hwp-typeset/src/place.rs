@@ -3016,6 +3016,9 @@ struct GlyphInfo {
     /// Requested font family (CharShape.font_family) — display only (the SVG/text font-family); advances
     /// still use the default metrics, so a font change re-DISPLAYS without reflowing.
     font: Option<String>,
+    /// Exact metric selection key. This is resolved once with the same family substitution as the
+    /// display face, keeping the line breaker and positioned glyph advances in lockstep.
+    metric_font: FontKey,
     /// 장평 (width scale, default 1.0) + 자간 (letter gap as a fraction of the EM, default 0.0), resolved
     /// from the run's char shape per the glyph's script. The DRAWN advance must apply these so glyphs
     /// sit where the line-breaker (which now scales advances) computed — else a compressed run renders
@@ -3042,12 +3045,7 @@ impl ParagraphAtom {
     fn advance(&self, fonts: &dyn FontMetricsProvider) -> f64 {
         match self {
             Self::Glyph(glyph) => {
-                let plain = FontKey {
-                    family: String::new(),
-                    bold: false,
-                    italic: false,
-                };
-                fonts.advance_width(&plain, glyph.ch, glyph.size as i32) * glyph.ratio
+                fonts.advance_width(&glyph.metric_font, glyph.ch, glyph.size as i32) * glyph.ratio
                     + glyph.spacing_em * glyph.size
             }
             Self::Object {
@@ -3140,6 +3138,7 @@ fn paragraph_atoms(
                         let cluster = crate::old_hangul_cluster(ch);
                         let sch = crate::subst_glyph(ch);
                         let slot = crate::script_slot(sch);
+                        let metric_font = crate::resolved_font_key(cs, sch, fonts);
                         let (ratio, spacing_em) = cs
                             .map(|c| {
                                 let r = match *c.ratio.get(slot) {
@@ -3159,6 +3158,7 @@ fn paragraph_atoms(
                             bold,
                             italic,
                             font: display_font(cs, slot, fonts),
+                            metric_font,
                             ratio,
                             spacing_em,
                             cluster,
