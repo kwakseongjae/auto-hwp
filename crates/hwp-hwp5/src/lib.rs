@@ -12,7 +12,11 @@ pub use header::{
     HWP_SIGNATURE,
 };
 pub use probe::{
-    compare_with_semantic, probe, DifferentialReport, Hwp5Probe, StreamProbe, StructuralDelta,
+    compare_semantic_candidates, compare_semantic_candidates_with_source, compare_with_semantic,
+    probe, rejected_eligibility, rejected_eligibility_with_source, source_record_projection,
+    DifferentialReport, Hwp5Probe, OwnParserEligibilityReport, SemanticControlCounts,
+    SemanticDifferentialReport, SemanticMismatch, SemanticProjection, SemanticScopeCounts,
+    SourceControlHeaderCounts, SourceRecordProjection, StreamProbe, StructuralDelta,
     StructuralInventory,
 };
 pub use record::{walk_records, Record, RecordError, RecordLimits};
@@ -76,6 +80,38 @@ pub enum Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+impl Error {
+    /// Stable content-free classifier for corpus eligibility reports. The detailed error remains
+    /// available to local diagnostics, while public matrices never expose paths, offsets, or input.
+    pub fn eligibility_code(&self) -> &'static str {
+        match self {
+            Self::Limit(_) | Self::DecompressedLimit { .. } => "resource-limit",
+            Self::Cfb(_) => "invalid-container",
+            Self::MissingStream(_) => "missing-required-stream",
+            Self::NonContiguousSections { .. } => "noncontiguous-sections",
+            Self::Header(_) => "invalid-header",
+            Self::OpaqueBody(_) => "opaque-body",
+            Self::Record(_) => "malformed-record",
+            Self::MalformedRecord { reason, .. } => match *reason {
+                "BORDER_FILL image, gradient, or mixed fill is not supported" => {
+                    "unsupported-border-fill"
+                }
+                "STYLE has an unknown kind or attributes" => "unsupported-style-semantics",
+                "TABLE attributes or row/column topology are not owned" => {
+                    "unsupported-table-topology"
+                }
+                "section CTRL_HEADER extension semantics are not owned" => {
+                    "unsupported-section-control"
+                }
+                _ => "malformed-record",
+            },
+            Self::PoolCountMismatch { .. } => "pool-count-mismatch",
+            Self::InvalidReference { .. } => "invalid-reference",
+            Self::UnsupportedBodyRecord { .. } => "unsupported-semantic",
+        }
+    }
+}
 
 /// Explicit own-parser entry point. This type has no rhwp dependency and cannot silently fall back.
 #[derive(Default)]

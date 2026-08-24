@@ -67,6 +67,29 @@ pub fn hwp5_differential(bytes: &[u8]) -> Result<hwp_hwp5::DifferentialReport> {
     Ok(hwp_hwp5::compare_with_semantic(&native, &semantic))
 }
 
+/// Fail-closed production-cutover diagnostic. An unsupported first-party parse becomes a static,
+/// content-free ineligible result; rhwp is consulted only when the candidate parse succeeds, and
+/// remains the production parser regardless of the result.
+pub fn hwp5_own_parser_eligibility(bytes: &[u8]) -> Result<hwp_hwp5::OwnParserEligibilityReport> {
+    let source = match hwp_hwp5::probe(bytes) {
+        Ok(source) => source,
+        Err(error) => return Ok(hwp_hwp5::rejected_eligibility(error.eligibility_code())),
+    };
+    let candidate = match hwp_hwp5::OwnHwp5Parser::new().parse(bytes) {
+        Ok(candidate) => candidate,
+        Err(error) => {
+            return Ok(hwp_hwp5::rejected_eligibility_with_source(
+                &source,
+                error.eligibility_code(),
+            ));
+        }
+    };
+    let oracle = RhwpEngine::new().parse(bytes, SourceFormat::Hwp5)?;
+    Ok(hwp_hwp5::compare_semantic_candidates_with_source(
+        &source, &candidate, &oracle,
+    ))
+}
+
 #[cfg(all(test, feature = "rhwp"))]
 mod hwp5_candidate_tests {
     use super::*;
@@ -99,6 +122,69 @@ mod hwp5_candidate_tests {
         assert!(!json.contains("benchmark.hwp"));
         assert!(!json.contains("BodyText"));
         assert!(json.contains("topo-fnv1a64:"));
+    }
+
+    #[test]
+    fn eligibility_uses_semantic_coordinates_and_is_content_free() {
+        let legacy = hwp5_differential(&benchmark()).unwrap();
+        let first = hwp5_own_parser_eligibility(&benchmark()).unwrap();
+        let second = hwp5_own_parser_eligibility(&benchmark()).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(first.schema, "auto-hwp.hwp5-own-parser-eligibility.v2");
+        assert!(!first.eligible);
+        assert_eq!(first.rejection_code, Some("semantic-mismatch"));
+        let source = first.source_records.expect("source record classification");
+        assert_eq!(source.paragraph_headers, 353);
+        assert_eq!(source.run_position_tuples, 389);
+        assert_eq!(source.control_headers.tables, 32);
+        assert_eq!(source.control_headers.section_definitions, 1);
+        assert_eq!(source.control_headers.column_definitions, 1);
+        assert_eq!(source.control_headers.page_number_positions, 2);
+        assert_eq!(source.control_headers.new_number_controls, 2);
+        assert_eq!(source.control_headers.other, 0);
+        assert_eq!(legacy.delta.paragraphs, 1);
+        assert_eq!(legacy.delta.runs, 7);
+        assert_eq!(legacy.delta.controls, 6);
+        let comparison = first.comparison.as_ref().expect("owned benchmark parses");
+        assert_eq!(comparison.schema, "auto-hwp.hwp5-semantic-differential.v2");
+        assert!(comparison.text_matches);
+        assert!(!comparison.topology_matches);
+        assert_eq!(
+            comparison.candidate.paragraphs,
+            comparison.oracle.paragraphs
+        );
+        assert_eq!(comparison.candidate.controls, comparison.oracle.controls);
+        assert_eq!(
+            comparison.candidate.runs.body,
+            comparison.oracle.runs.body + 2
+        );
+        assert_eq!(
+            comparison.candidate.runs.table_cells,
+            comparison.oracle.runs.table_cells + 4
+        );
+        assert_eq!(
+            comparison.candidate.empty_text_runs.body,
+            comparison.oracle.empty_text_runs.body + 2
+        );
+        assert_eq!(
+            comparison.candidate.empty_text_runs.table_cells,
+            comparison.oracle.empty_text_runs.table_cells + 4
+        );
+        let json = serde_json::to_string(&first).unwrap();
+        assert!(!json.contains("benchmark.hwp"));
+        assert!(!json.contains("BodyText"));
+        assert!(json.contains("topo-fnv1a64:"));
+    }
+
+    #[test]
+    fn unsupported_input_is_ineligible_without_dynamic_error_details() {
+        let report = hwp5_own_parser_eligibility(b"fixture-input-marker").unwrap();
+        assert!(!report.eligible);
+        assert_eq!(report.rejection_code, Some("invalid-container"));
+        assert!(report.source_records.is_none());
+        assert!(report.comparison.is_none());
+        let json = serde_json::to_string(&report).unwrap();
+        assert!(!json.contains("fixture-input-marker"));
     }
 }
 

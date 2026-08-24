@@ -5,6 +5,17 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #198 full/audit green
+- quick and full green: PDF51, canonical 8/18/24+98.9%, corpus84/oracle82, wasm 7,818,243B.
+- JS/Vitest 1,007 and Chromium 85 pass/3 intentional skip/0 fail; temporary links removed.
+- final boundary/privacy audit clean; next commit/push and `Closes #198` PR.
+
+## 2026-08-24 (Codex sol) · #198 typed eligibility implemented
+- v1 +1/+7/+6 classified as caption-counter, six metadata headers, and six empty semantic runs.
+- additive v2 compares same-coordinate semantics/text privately and rejects every unexplained delta.
+- public intake fetched 50/50; HWP5 matrix is 13 committed / 33 with private intake, 0 eligible.
+- next focused hostile/privacy tests, clippy/wasm, quick/full gates, then PR.
+
 ## 2026-08-24 (Codex sol) · PR #197 merged · #198 started
 - #197 merged as `6f1f3687`; #196 closed and parent #94 received content-free evidence.
 - #198 opened for typed semantic-delta classification and fail-closed own-parser eligibility.

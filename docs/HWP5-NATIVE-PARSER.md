@@ -80,6 +80,12 @@ rejected instead of being interpreted as records.
   to shared `Table`/`Cell`/`TableCaption` IR, so SVG and PDF consume the same `place_doc` geometry.
 - `hwp5_differential`: explicitly runs the owned probe and current rhwp semantic oracle, then reports
   section/paragraph/run/table/image/control/equation/chart counts and their deltas.
+- `hwp5_own_parser_eligibility`: runs the first-party parser and rhwp into the same typed semantic
+  projection. Paragraphs and runs are split into body/decoration/table-cell/table-caption/note scopes;
+  controls are split by semantic kind. Exact text is compared only in memory and leaves the report as
+  one boolean. Unsupported input returns a static rejection code without invoking rhwp. Even an exact
+  v2 semantic match remains `render-parity-unproven` until a per-document layout/PDF evidence channel
+  is attached; v2 cannot produce a false-positive eligible result from counts and text alone.
 
 The report's `topo-fnv1a64:*` value hashes only typed `SemanticDoc` topology markers and collection
 cardinalities. It deliberately ignores text, URLs, image bytes, source paths, provenance bytes, and
@@ -90,14 +96,34 @@ Raw-record counts and semantic counts are not treated as equivalent truth. In pa
 `CTRL_HEADER` records. Semantic `controls` counts typed table/image/equation/chart and remaining
 field/note/raw control nodes. The differential makes these gaps measurable; it does not relax a gate
 or claim semantic parity. On the completed bounded benchmark, sections/tables/images/equations/charts
-currently agree while native-minus-oracle is paragraphs `+1`, runs `+7`, and controls `+6`. Those
-content-free deltas must be classified before any production cutover claim.
+currently agree while native-minus-oracle is paragraphs `+1`, runs `+7`, and controls `+6`.
+
+The additive v2 semantic comparison classifies those numbers without changing v1:
+
+- paragraph `+1` is the v1 semantic counter omitting one table-caption paragraph. Both semantic
+  projections contain the same 91 body, 261 table-cell, and 1 table-caption paragraphs;
+- control `+6` is six source metadata headers: one section definition, one column definition, two
+  page-number-position controls, and two new-number controls. Both semantic projections contain the
+  same 32 tables and no other active semantic control;
+- run `+7` contains the same omitted caption run plus six empty text runs retained by the first-party
+  parser and elided by rhwp: two in body paragraphs and four in table cells. Exact text comparison is
+  equal, but effective empty-run typography/layout parity is not yet proven.
+
+The completed benchmark therefore remains `semantic-mismatch` and ineligible. The checker does not
+allow-list the six empty runs: an empty run can still carry a character shape that affects blank-line
+height. That difference must clear layout/PDF evidence before eligibility can change.
 
 ## Cutover rule
 
-Completing one bounded benchmark is only the first eligibility milestone. The next #94 slices must
-classify the remaining semantic-count deltas, run fail-closed own-parser eligibility across the
-privacy-safe public corpus, and promote BinData/images, decorations, and other controls only when
+Completing one bounded benchmark is only the first eligibility milestone. The content-free committed
+HWP5 matrix currently covers 13 public cases and reports eligible 0, semantic-mismatch 1,
+unsupported-semantic 7, unsupported-section-control 4, and invalid-container 1. The optional
+rights-reviewed private intake expands this to 33 cases: the additional 20 classify as
+unsupported-style-semantics 15, unsupported-border-fill 3, and unsupported-table-topology 2. This is a truthful starting
+matrix rather than a coverage score: every unknown, unsupported, malformed, ambiguous, or
+unexplained semantic difference is ineligible. The next #94 slices must classify each rejection,
+keep the private 20-file rights-reviewed intake in the same local gate when present, and promote
+BinData/images, decorations, and other controls only when
 encountered semantics have faithful shared-IR representations. The production route may change only
 when corpus differential gates, native/wasm parity, hostile input tests, and the canonical
 8/18/24-page + 98.9% line gate remain green. Explicit own-parser mode must continue to fail closed for

@@ -9,6 +9,15 @@
 40/40이 정상 종료했다. 이 확인은 문서가 안전하게 열리고 조판 feature를 계측할 수 있다는 증거이지,
 한/글과의 시각 동일성 점수는 아니다.
 
+first-party HWP5 전환 적격성은 별도 fail-closed 계약이다. 저장소에 직접 커밋된 공개 HWP5 12건과
+bounded benchmark 1건은 `hwp5_eligibility_matrix`가 파일명·경로·본문·원본 hash 없이 반복 실행한다.
+현재 13건 모두 ineligible이며 사유 집계는 semantic-mismatch 1, unsupported-semantic 7,
+unsupported-section-control 4, invalid-container 1이다. private intake 20건이 로컬에 있으면 매트릭스는
+자동으로 33건으로 확장되며, 현재 추가 거부 사유는 unsupported-style-semantics 15,
+unsupported-border-fill 3, unsupported-table-topology 2다. production parser 40/40 통과와 자체 파서
+eligible은 서로 다른 지표다. 또한 typed semantic 비교가 같더라도 문서별 layout/PDF 근거가 없는
+v2는 `render-parity-unproven`으로 거부한다.
+
 | 형식 | 승격 | 역할 |
 |---|---:|---|
 | HWP5 | 20 | 법령 별지 빈 양식·표·form-control 축 |
