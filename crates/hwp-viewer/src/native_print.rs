@@ -248,6 +248,7 @@ mod tests {
                 color: Color::default(),
                 width: 3000,
                 height: 1500,
+                treat_as_char: true,
                 version: "Equation Version 60".into(),
                 rendered_svg: Some(
                     r##"<g><text x="1" y="12" font-size="12" fill="#000">x</text><line x1="0" y1="14" x2="12" y2="14" stroke="#000"/></g>"##.into(),
@@ -256,6 +257,7 @@ mod tests {
         let chart_paragraph = paragraph(vec![Inline::Chart(ChartRef {
                 width: 6000,
                 height: 3600,
+                treat_as_char: true,
                 rendered_svg: Some(
                     r##"<g class="hwp-gen-chart"><rect x="0" y="0" width="30" height="18" fill="#fff"/><polyline points="0,16 10,4 20,12 30,2" fill="none" stroke="#06c"/></g>"##.into(),
                 ),

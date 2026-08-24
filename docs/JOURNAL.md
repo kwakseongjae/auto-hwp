@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #89 inline object atom flow
+- HWP5 control anchor와 shared Text/Object atom flow를 복원해 body/cell/caret LOCKSTEP을 구현.
+- math 실측 19 paragraph = 44 Equation = 44 PlacedImage = 44 PaintOp; 3쪽/16 exact→2쪽/19 exact.
+- quick/full green: 8/18/24+98.9%, oracle82, Vitest 1,018, Chromium 85 pass/3 skip; rhwp 무수정.
+- 다음: commit/push→`Closes #89` PR/CI/merge→#84/#93/#114 동기화→#104 AI Proposal.
+
 ## 2026-08-24 (Codex sol) · #95/#96 HWPX page structure
 - CELL continuation/repeat-header와 clean lineseg fragment lower-bound를 자체 parser/typesetter에 구현.
 - pair03 4→6쪽, pair04 final landscape; 두 T1 report 모두 structural match/scored, threshold 없음.

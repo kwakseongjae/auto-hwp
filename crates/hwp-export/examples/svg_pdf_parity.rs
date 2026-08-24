@@ -89,6 +89,7 @@ fn fixture_doc() -> SemanticDoc {
         },
         width: 9000,
         height: 3600,
+        treat_as_char: true,
         version: "Equation Version 60".into(),
         rendered_svg: Some(
             r##"<g class="hwp-equation"><text x="8" y="20" font-size="18" font-style="italic" fill="#111">x</text><line x1="3" y1="25" x2="45" y2="25" stroke="#111" stroke-width="1.5"/><text x="18" y="43" font-size="16" fill="#111">2</text><path d="M58 8 Q70 24 58 42" fill="none" stroke="#0655c9" stroke-width="2" stroke-linecap="round"/></g>"##.into(),
@@ -97,6 +98,7 @@ fn fixture_doc() -> SemanticDoc {
     let chart = ChartRef {
         width: 24000,
         height: 13500,
+        treat_as_char: true,
         rendered_svg: Some(
             r##"<g class="hwp-gen-chart" data-chart-type="bar"><rect x="0" y="0" width="320" height="180" fill="#fff" stroke="#ccc" stroke-width="1"/><line x1="35" y1="145" x2="300" y2="145" stroke="#777"/><rect x="60" y="85" width="38" height="60" fill="#4472c4"/><rect x="125" y="52" width="38" height="93" fill="#ed7d31"/><rect x="190" y="105" width="38" height="40" fill="#70ad47"/><polyline points="60,72 144,35 228,82" fill="none" stroke="#a50021" stroke-width="3" stroke-linejoin="round"/><circle cx="144" cy="35" r="4" fill="#a50021"/><text x="160" y="22" font-family="sans-serif" font-size="14" font-weight="700" text-anchor="middle" fill="#222">PDF parity</text></g>"##.into(),
         ),

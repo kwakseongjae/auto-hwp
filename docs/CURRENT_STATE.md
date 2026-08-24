@@ -3,6 +3,38 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-24 · Codex(sol) — **#89 inline object atom flow full green · PR 직전**.
+  원인은 rhwp 미해결이 아니라 우리 lift가 이미 파싱된 `control_text_positions()`를 버리고 수식/차트를
+  가짜 별도 문단으로 만들며, 자체 조판이 문단당 tallest object 하나만 소비한 데 있었다. 외부 rhwp는
+  무수정으로 두고 HWP5 Picture/Equation/OOXML Chart를 Unicode char anchor에 stable splice하며 U+FFFC를
+  한 번만 소비한다. IR에 Equation/Chart `treat_as_char`를 additive 보존했고 HWPX/JSX codec과 semantic
+  equality도 동기화했다. shared layout/place는 모든 Text/Object atom을 동일 순서·폭으로 줄바꿈하고
+  line별 높이, floating no-reserve, body/column/cell/caret를 같은 advance로 소비한다. synthetic body/cell
+  LOCKSTEP 및 real `math-001.hwp` **19 paragraph = 44 Equation = 44 PlacedImage = 44 PaintOp** 회귀가 green;
+  layout-check는 종전 main **3쪽·20줄·16/19 exact → 2쪽·24줄·19/19 exact**로 개선됐다(한컴 1쪽 잔여는
+  숨기지 않음). quick/full은 fmt·clippy·workspace·rhwp feature·PDF visual **51**, canonical
+  **8/18/24 + 98.9%+**, public corpus **84**, catalog **259/12 families/120 pairs**, oracle **82**,
+  HWPX non-truth lock 89.5% exact/98.2% within1 및 cell floor 5/5·9/9, wasm **7,831,754B**,
+  JS/crosscheck/i18n, Vitest **1,018**, Chromium **85 pass/3 intentional skip/0 fail**로 green이다.
+  첫 browser 실행의 port EPERM과 둘째의 ENOSPC는 각각 승인 실행과 재생성 가능한 target 15.5GiB
+  정리로 해소했다. 임시 node 링크 제거, generated wasm/assets diff 0, rhwp gitlink clean이다.
+  **다음:** privacy/diff 최종 감사→JOURNAL→commit/push/PR `Closes #89`→exact-head CI/comments green
+  autonomous merge→#84/#93/#114 content-free 동기화→#104 canonical AI Proposal 착수.
+
+- 갱신: 2026-08-24 · Codex(sol) — **PR #206 병합 · #89 착수**.
+  PR #206 exact head `62470347`에서 issue-link **5s**·build-test **9m35s**·licenses
+  **2m45s** green, CLEAN/MERGEABLE, review/general/inline 댓글 0을 확인하고 protected main
+  `59033031`로 squash 병합했다. #95/#96 close·원격 브랜치 삭제를 확인했고 #93/#114에
+  content-free T1 구조 회복과 worst-tile recall 0.0 잔여를 동기화했다. open PR 0, 신규 외부
+  요청·보안/스팸 신호 0이며 외부 #50은 이미 Proposal/provider roadmap으로 접수돼 있다.
+  다음 P0는 #84의 실제 수식 **44 중 33개 손실**과 #93 객체 타일 누락을 동시에 막는 #89다.
+  #104 AI Proposal보다 먼저 source-order Text/Equation/Chart atom flow를 자체 typesetter에 세워,
+  AI의 atomic edit가 render에서 객체를 잃지 않게 한다. exact main의
+  `codex/issue-89-inline-object-flow` worktree를 만들었다. **다음:** production 경로의
+  `paragraph_object()` 단수 소비자와 rhwp `control_text_positions()` lift를 읽기 전용으로 지도화→
+  synthetic Text/EqA/Text/EqB/ChartC RED→shared flow의 최소 additive IR/placement contract→
+  body/cell/caret/Naive/place lockstep. 실제 원문·파일명·경로/hash/raw는 공개하지 않는다.
+
 - 갱신: 2026-08-24 · Codex(sol) — **#95/#96 full green · PR 직전**.
   focused HWPX **96**·typeset **97**·hostile **7** 및 clippy green. quick/full은 canonical
   **8/18/24 + 98.9%+**, public corpus 계약 **84**, catalog **259/12 families/120 pairs**,

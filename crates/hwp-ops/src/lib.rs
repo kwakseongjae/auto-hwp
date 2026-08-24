@@ -2471,6 +2471,7 @@ fn build_chart_ref(spec: &ChartSpec) -> Result<ChartRef> {
     Ok(ChartRef {
         width: (w_px * HWPUNIT_PER_PX).round() as HwpUnit,
         height: (h_px * HWPUNIT_PER_PX).round() as HwpUnit,
+        treat_as_char: true,
         rendered_svg: Some(svg),
     })
 }

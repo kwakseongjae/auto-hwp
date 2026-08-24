@@ -1629,29 +1629,70 @@ pub fn layout_paragraph(
     line_width: f64,
     fonts: &dyn FontMetricsProvider,
 ) -> Vec<LineSeg> {
-    // (char, size_hwpunit) for every text glyph, in order, plus its 장평/자간-scaled advance.
+    // One ordered flow slot per text glyph or embedded object. U+FFFC is only an internal metric
+    // proxy: the placer walks the identical Inline order and draws the actual object at that slot.
     let mut chars: Vec<(char, i32)> = Vec::new();
     let mut advs: Vec<f64> = Vec::new();
+    let mut object_heights: Vec<f64> = Vec::new();
     let font = plain_font();
     for run in &p.runs {
         let cs = doc.char_shapes.get(run.char_shape);
         let size = cs.map(|c| c.height).filter(|&h| h > 0).unwrap_or(1000);
         for inl in &run.content {
-            if let Inline::Text(t) = inl {
-                for ch in t.chars() {
-                    let sch = subst_glyph(ch);
-                    chars.push((sch, size));
-                    advs.push(scaled_advance(sch, size, cs, &font, fonts));
+            match inl {
+                Inline::Text(t) => {
+                    for ch in t.chars() {
+                        let sch = subst_glyph(ch);
+                        chars.push((sch, size));
+                        advs.push(scaled_advance(sch, size, cs, &font, fonts));
+                        object_heights.push(0.0);
+                    }
                 }
+                Inline::Image(image) => {
+                    chars.push(('\u{FFFC}', 1));
+                    advs.push(if image.treat_as_char {
+                        image.width.max(0) as f64
+                    } else {
+                        0.0
+                    });
+                    object_heights.push(if image.treat_as_char {
+                        image.height.max(0) as f64
+                    } else {
+                        0.0
+                    });
+                }
+                Inline::Equation(equation) => {
+                    chars.push(('\u{FFFC}', 1));
+                    advs.push(if equation.treat_as_char {
+                        equation.width.max(0) as f64
+                    } else {
+                        0.0
+                    });
+                    object_heights.push(if equation.treat_as_char {
+                        equation.height.max(0) as f64
+                    } else {
+                        0.0
+                    });
+                }
+                Inline::Chart(chart) => {
+                    chars.push(('\u{FFFC}', 1));
+                    advs.push(if chart.treat_as_char {
+                        chart.width.max(0) as f64
+                    } else {
+                        0.0
+                    });
+                    object_heights.push(if chart.treat_as_char {
+                        chart.height.max(0) as f64
+                    } else {
+                        0.0
+                    });
+                }
+                _ => {}
             }
         }
     }
     let n = chars.len();
     let adv = |i: usize| advs[i];
-
-    // Tallest anchored object (image/equation) — an object paragraph is ONE line, but as tall as
-    // the object (so pagination accounts for a half-page image, not a 1000-unit text line).
-    let obj_h = object_height(p);
 
     if n == 0 {
         // An empty paragraph still occupies one line — height = the object's if it anchors one.
@@ -1662,11 +1703,7 @@ pub fn layout_paragraph(
         // 이슈 074: 빈 줄의 EM 은 **그 문단의 글자 크기**다 — 1000(10pt) 고정이 아니다. 한컴 실측
         // (benchmark1 page 2, 빈 문단): vpos 7665→8317 = 652 = 500(5pt) × 130%. 우리는 1000×130%
         // = 1300 을 잡아 빈 줄마다 두 배로 부풀렸고, 표가 많은 양식에서 누적돼 페이지가 밀렸다.
-        let lh = if obj_h > 0 {
-            obj_h as f64
-        } else {
-            fonts.line_height(empty_para_size(p, doc))
-        };
+        let lh = fonts.line_height(empty_para_size(p, doc));
         let mut lines = vec![mk_line(0, lh, 0.0)];
         apply_source_line_metrics(p, &mut lines);
         return lines;
@@ -1748,7 +1785,15 @@ pub fn layout_paragraph(
         };
         // Line box height = the font's real leading for the tallest glyph (real shaper) or flat EM
         // (approximation), NOT the bare EM — so rows match the actual face's line height.
-        lines.push(mk_line(start as u32, fonts.line_height(max_size), lw));
+        let object_height = object_heights[start..line_end]
+            .iter()
+            .copied()
+            .fold(0.0f64, f64::max);
+        lines.push(mk_line(
+            start as u32,
+            fonts.line_height(max_size).max(object_height),
+            lw,
+        ));
         // Consume the '\n' itself on a forced break so the next line starts after it (it draws
         // nothing — the place step skips '\n'). Otherwise advance to the computed break point.
         start = if forced && line_end < n {
@@ -1756,17 +1801,6 @@ pub fn layout_paragraph(
         } else {
             line_end
         };
-    }
-    // An inline object taller than the text bumps the line it sits on (approximated as the first).
-    if obj_h > 0 {
-        if let Some(first) = lines.first_mut() {
-            if obj_h as f64 > first.vert_size {
-                let h = obj_h as f64;
-                first.vert_size = h;
-                first.text_height = h;
-                first.baseline = h * BASELINE_RATIO;
-            }
-        }
     }
     lines
 }
@@ -1794,27 +1828,6 @@ fn apply_source_line_metrics(p: &Paragraph, lines: &mut [LineSeg]) {
             line.baseline = source.baseline as f64;
         }
     }
-}
-
-/// Tallest anchored image/equation in the paragraph (HWPUNIT), or 0 if none.
-fn object_height(p: &Paragraph) -> i32 {
-    let mut h = 0;
-    for run in &p.runs {
-        for inl in &run.content {
-            match inl {
-                // Floating wrap pictures (!treat_as_char) do not advance the body: Hancom's
-                // host lineseg stays at text height (issue 82). Treat-as-char / HWPX pics still
-                // reserve the box (LOCKSTEP with place_doc via the same layout_paragraph).
-                Inline::Image(img) if img.treat_as_char => h = h.max(img.height),
-                Inline::Equation(eq) => h = h.max(eq.height),
-                // Issue 062-7: LOCKSTEP with place_doc's paragraph_object — a chart reserves the same
-                // stored-size box in the NaiveLayout twin, so pagination stays identical across both.
-                Inline::Chart(c) => h = h.max(c.height),
-                _ => {}
-            }
-        }
-    }
-    h.max(0)
 }
 
 /// Sum of (pre-scaled) advances + max glyph size over `[a, b)`. `advs` parallels `chars` and already
@@ -2437,6 +2450,7 @@ mod tests {
             content: vec![Inline::Chart(ChartRef {
                 width: 30000,
                 height: 40000,
+                treat_as_char: true,
                 rendered_svg: Some("<g class=\"hwp-gen-chart\"><rect/></g>".into()),
             })],
             ..Default::default()
@@ -2483,6 +2497,93 @@ mod tests {
             (chart_img.h - 40000.0).abs() < 1.0,
             "the reserved box height is honored on the placed surface"
         );
+    }
+
+    #[test]
+    fn mixed_inline_objects_wrap_in_source_order_with_per_line_height() {
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape::default());
+        let equation = |script: &str, height| {
+            Inline::Equation(EquationRef {
+                script: script.into(),
+                font: String::new(),
+                base_unit: 1000,
+                baseline: 0,
+                color: Color::default(),
+                width: 900,
+                height,
+                treat_as_char: true,
+                version: String::new(),
+                rendered_svg: None,
+            })
+        };
+        let paragraph = Paragraph {
+            runs: vec![Run {
+                char_shape: 0,
+                content: vec![
+                    Inline::Text("A".into()),
+                    equation("EqA", 1300),
+                    Inline::Text("B".into()),
+                    equation("EqB", 1800),
+                    Inline::Text("C".into()),
+                    Inline::Chart(ChartRef {
+                        width: 900,
+                        height: 1600,
+                        treat_as_char: true,
+                        rendered_svg: None,
+                    }),
+                ],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let lines = layout_paragraph(&paragraph, &doc, 2000.0, &ApproxFontMetrics);
+        assert_eq!(
+            lines.len(),
+            3,
+            "objects take width and wrap as ordered atoms"
+        );
+        assert_eq!(
+            lines.iter().map(|line| line.text_pos).collect::<Vec<_>>(),
+            [0, 3, 5]
+        );
+        assert_eq!(lines[0].vert_size, 1300.0);
+        assert_eq!(lines[1].vert_size, 1800.0);
+        assert_eq!(lines[2].vert_size, 1600.0);
+    }
+
+    #[test]
+    fn floating_equation_keeps_anchor_without_affecting_line_metrics() {
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape::default());
+        let paragraph = Paragraph {
+            runs: vec![Run {
+                char_shape: 0,
+                content: vec![
+                    Inline::Text("A".into()),
+                    Inline::Equation(EquationRef {
+                        script: "floating".into(),
+                        font: String::new(),
+                        base_unit: 1000,
+                        baseline: 0,
+                        color: Color::default(),
+                        width: 5000,
+                        height: 9000,
+                        treat_as_char: false,
+                        version: String::new(),
+                        rendered_svg: None,
+                    }),
+                    Inline::Text("B".into()),
+                ],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let lines = layout_paragraph(&paragraph, &doc, 1100.0, &ApproxFontMetrics);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].horz_size, 1000.0);
+        assert_eq!(lines[0].vert_size, 1000.0);
     }
 
     /// A doc with NO chart is byte-identical to before (the chart path is purely additive): the two

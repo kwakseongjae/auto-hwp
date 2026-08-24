@@ -122,7 +122,10 @@ fn inline_eq(a: &Inline, b: &Inline) -> bool {
     match (a, b) {
         (Inline::Text(x), Inline::Text(y)) => x == y,
         (Inline::Image(x), Inline::Image(y)) => {
-            x.bin_ref == y.bin_ref && x.width == y.width && x.height == y.height
+            x.bin_ref == y.bin_ref
+                && x.width == y.width
+                && x.height == y.height
+                && x.treat_as_char == y.treat_as_char
         }
         (Inline::Equation(x), Inline::Equation(y)) => {
             x.script == y.script
@@ -132,11 +135,14 @@ fn inline_eq(a: &Inline, b: &Inline) -> bool {
                 && x.color == y.color
                 && x.width == y.width
                 && x.height == y.height
+                && x.treat_as_char == y.treat_as_char
                 && x.version == y.version
         }
         // Issue 062-7: a chart's identity is its reserved box; the SVG is a derived cache (like the
         // equation's rendered_svg, excluded above), so it doesn't gate value-equality.
-        (Inline::Chart(x), Inline::Chart(y)) => x.width == y.width && x.height == y.height,
+        (Inline::Chart(x), Inline::Chart(y)) => {
+            x.width == y.width && x.height == y.height && x.treat_as_char == y.treat_as_char
+        }
         (Inline::FieldBegin(x), Inline::FieldBegin(y)) => {
             x.id == y.id && x.field_type == y.field_type && x.command == y.command
         }
