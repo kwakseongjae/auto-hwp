@@ -10,19 +10,19 @@ fn empty_run_evidence_normalization_is_svg_exact() {
     ))
     .unwrap();
     let candidate = open_hwp5_own(&bytes).unwrap();
-    let oracle = Engine::open(&bytes).unwrap();
+    let production = Engine::open(&bytes).unwrap();
     let mut normalized = candidate.clone();
     normalize_hwp5_empty_runs_for_layout_evidence(&mut normalized);
 
     let candidate_svg = render_doc_svg(&candidate, &ApproxFontMetrics);
     let normalized_svg = render_doc_svg(&normalized, &ApproxFontMetrics);
-    let oracle_svg = render_doc_svg(&oracle, &ApproxFontMetrics);
+    let production_svg = render_doc_svg(&production, &ApproxFontMetrics);
     assert!(
         candidate_svg == normalized_svg,
         "empty-run normalization must be SVG-exact without printing source content"
     );
     assert!(
-        candidate_svg != oracle_svg,
-        "remaining parser render parity must stay fail-closed"
+        candidate_svg == production_svg,
+        "production SVG must retain the strictly owned page-number decoration"
     );
 }

@@ -32,28 +32,28 @@ fn masked_svg(tree: &PageLayerTree, categories: &[DiagnosticPaintCategory]) -> S
 fn benchmark_masks_prove_page_number_ownership_and_isolate_body_pages() {
     let bytes = fixture();
     let candidate = open_hwp5_own(&bytes).unwrap();
-    let oracle = Engine::open(&bytes).unwrap();
+    let production = Engine::open(&bytes).unwrap();
     let candidate_masks = render_doc_diagnostic_masks(&candidate, &ApproxFontMetrics);
-    let oracle_masks = render_doc_diagnostic_masks(&oracle, &ApproxFontMetrics);
+    let production_masks = render_doc_diagnostic_masks(&production, &ApproxFontMetrics);
     assert_eq!(candidate_masks.len(), 8);
-    assert_eq!(candidate_masks.len(), oracle_masks.len());
+    assert_eq!(candidate_masks.len(), production_masks.len());
 
-    for (candidate_mask, oracle_mask) in candidate_masks.iter().zip(&oracle_masks) {
+    for (candidate_mask, production_mask) in candidate_masks.iter().zip(&production_masks) {
         let candidate_decoration = candidate_mask
             .categories
             .iter()
             .filter(|category| **category == DiagnosticPaintCategory::PageDecoration)
             .count();
-        let oracle_decoration = oracle_mask
+        let production_decoration = production_mask
             .categories
             .iter()
             .filter(|category| **category == DiagnosticPaintCategory::PageDecoration)
             .count();
-        assert_eq!(candidate_decoration, oracle_decoration + 3);
+        assert_eq!(candidate_decoration, production_decoration);
         assert!(!candidate_mask
             .categories
             .contains(&DiagnosticPaintCategory::BoundaryCrossing));
-        assert!(!oracle_mask
+        assert!(!production_mask
             .categories
             .contains(&DiagnosticPaintCategory::BoundaryCrossing));
     }
@@ -78,23 +78,23 @@ fn benchmark_masks_prove_page_number_ownership_and_isolate_body_pages() {
         );
     }
 
-    let oracle_trees = render_doc_trees(&oracle, &ApproxFontMetrics);
+    let production_trees = render_doc_trees(&production, &ApproxFontMetrics);
     let differing_body_pages: Vec<_> = candidate_trees
         .iter()
         .zip(&candidate_masks)
-        .zip(&oracle_trees)
-        .zip(&oracle_masks)
+        .zip(&production_trees)
+        .zip(&production_masks)
         .enumerate()
         .filter_map(
-            |(page, (((candidate_tree, candidate_mask), oracle_tree), oracle_mask))| {
+            |(page, (((candidate_tree, candidate_mask), production_tree), production_mask))| {
                 (masked_svg(candidate_tree, &candidate_mask.categories)
-                    != masked_svg(oracle_tree, &oracle_mask.categories))
+                    != masked_svg(production_tree, &production_mask.categories))
                 .then_some(page)
             },
         )
         .collect();
     assert!(
         differing_body_pages.is_empty(),
-        "all body SVG pages are exact; the only remaining paint delta is owned page numbering"
+        "all production body SVG pages remain exact after page-number enrichment"
     );
 }

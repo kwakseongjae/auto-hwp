@@ -36,15 +36,16 @@ fn page_decoration_mask_agrees_with_pdf_replay_counts() {
     ))
     .unwrap();
     let candidate = open_hwp5_own(&bytes).unwrap();
-    let oracle = Engine::open(&bytes).unwrap();
+    let production = Engine::open(&bytes).unwrap();
     let mut candidate_without_page_number = candidate.clone();
     for section in &mut candidate_without_page_number.sections {
         section.page_number = None;
     }
     let candidate_masks = render_doc_diagnostic_masks(&candidate, &ApproxFontMetrics);
-    let oracle_masks = render_doc_diagnostic_masks(&oracle, &ApproxFontMetrics);
+    let production_masks = render_doc_diagnostic_masks(&production, &ApproxFontMetrics);
     let candidate_pdf = export_pdf(&candidate, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
-    let oracle_pdf = export_pdf(&oracle, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
+    let production_pdf =
+        export_pdf(&production, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
     let body_pdf = export_pdf(
         &candidate_without_page_number,
         &ApproxFontMetrics,
@@ -53,38 +54,40 @@ fn page_decoration_mask_agrees_with_pdf_replay_counts() {
     .unwrap();
 
     assert_eq!(candidate_pdf.pages, 8);
-    assert_eq!(candidate_pdf.pages, oracle_pdf.pages);
-    for (((candidate_page, oracle_page), candidate_mask), oracle_mask) in candidate_pdf
+    assert_eq!(candidate_pdf.pages, production_pdf.pages);
+    for (((candidate_page, production_page), candidate_mask), production_mask) in candidate_pdf
         .replay
         .iter()
-        .zip(&oracle_pdf.replay)
+        .zip(&production_pdf.replay)
         .zip(&candidate_masks)
-        .zip(&oracle_masks)
+        .zip(&production_masks)
     {
         let candidate_decoration = candidate_mask
             .categories
             .iter()
             .filter(|category| **category == DiagnosticPaintCategory::PageDecoration)
             .count();
-        let oracle_decoration = oracle_mask
+        let production_decoration = production_mask
             .categories
             .iter()
             .filter(|category| **category == DiagnosticPaintCategory::PageDecoration)
             .count();
-        assert_eq!(candidate_decoration, oracle_decoration + 3);
-        assert_eq!(candidate_page.text.produced, oracle_page.text.produced + 3);
-        assert_eq!(candidate_page.text.replayed, oracle_page.text.replayed + 3);
-        assert_eq!(candidate_page.text.stubbed, oracle_page.text.stubbed);
-        assert_eq!(candidate_page.table_geometry, oracle_page.table_geometry);
-        assert_eq!(candidate_page.image, oracle_page.image);
-        assert_eq!(candidate_page.equation, oracle_page.equation);
-        assert_eq!(candidate_page.chart, oracle_page.chart);
+        assert_eq!(candidate_decoration, production_decoration);
+        assert_eq!(candidate_page.text, production_page.text);
+        assert_eq!(
+            candidate_page.table_geometry,
+            production_page.table_geometry
+        );
+        assert_eq!(candidate_page.image, production_page.image);
+        assert_eq!(candidate_page.equation, production_page.equation);
+        assert_eq!(candidate_page.chart, production_page.chart);
     }
     assert!(
-        body_pdf.bytes == oracle_pdf.bytes
-            && body_pdf.pages == oracle_pdf.pages
-            && body_pdf.replay == oracle_pdf.replay
-            && body_pdf.diagnostics == oracle_pdf.diagnostics,
-        "removing the first-party page number leaves the PDF byte-exact"
+        candidate_pdf.bytes == production_pdf.bytes
+            && candidate_pdf.pages == production_pdf.pages
+            && candidate_pdf.replay == production_pdf.replay
+            && candidate_pdf.diagnostics == production_pdf.diagnostics,
+        "production PDF must retain the strictly owned page-number decoration"
     );
+    assert_ne!(body_pdf.bytes, production_pdf.bytes);
 }

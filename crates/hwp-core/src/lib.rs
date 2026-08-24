@@ -30,10 +30,15 @@ impl Engine {
                 enrich_equations(&mut d);
                 d
             }
-            SourceFormat::Hwp5 | SourceFormat::Hwp3 => {
-                // Bootstrap path: rhwp parses binary HWP (when wired).
-                RhwpEngine::new().parse(bytes, fmt)?
+            SourceFormat::Hwp5 => {
+                // Bootstrap body decode remains on governed rhwp. A strict first-party parse may
+                // enrich only page-number metadata that rhwp omitted; unsupported/conflicting input
+                // is an atomic no-op, never a hidden parser cutover.
+                let mut d = RhwpEngine::new().parse(bytes, fmt)?;
+                enrich_hwp5_owned_page_numbers(bytes, &mut d);
+                d
             }
+            SourceFormat::Hwp3 => RhwpEngine::new().parse(bytes, fmt)?,
             SourceFormat::Docx => hwp_foreign::read_docx(bytes)?,
             SourceFormat::Pdf => hwp_foreign::read_pdf(bytes)?,
             SourceFormat::Unknown => return Err(Error::UnknownFormat),
@@ -48,6 +53,39 @@ impl Engine {
     pub fn detect(bytes: &[u8]) -> SourceFormat {
         hwp_ingest::detect(bytes)
     }
+}
+
+/// Merge the one bounded HWP5 decoration already owned by the strict parser. The candidate parse
+/// must succeed for the whole document, and this helper validates every section before mutating any
+/// section so a topology mismatch or typed conflict cannot leave a partially enriched document.
+fn enrich_hwp5_owned_page_numbers(bytes: &[u8], target: &mut SemanticDoc) {
+    let Ok(owned) = hwp_hwp5::OwnHwp5Parser::new().parse(bytes) else {
+        return;
+    };
+    merge_owned_page_numbers(target, &owned);
+}
+
+fn merge_owned_page_numbers(target: &mut SemanticDoc, owned: &SemanticDoc) -> bool {
+    if target.sections.len() != owned.sections.len()
+        || !target
+            .sections
+            .iter()
+            .zip(&owned.sections)
+            .all(
+                |(target, owned)| match (target.page_number, owned.page_number) {
+                    (Some(current), Some(candidate)) => current == candidate,
+                    _ => true,
+                },
+            )
+    {
+        return false;
+    }
+    for (target, owned) in target.sections.iter_mut().zip(&owned.sections) {
+        if target.page_number.is_none() {
+            target.page_number = owned.page_number;
+        }
+    }
+    true
 }
 
 /// Run only the first-party HWP5 parser lane. This entry point is intentionally separate from
@@ -100,6 +138,7 @@ pub fn hwp5_own_parser_eligibility(bytes: &[u8]) -> Result<hwp_hwp5::OwnParserEl
 #[cfg(all(test, feature = "rhwp"))]
 mod hwp5_candidate_tests {
     use super::*;
+    use std::num::NonZeroU16;
 
     fn benchmark() -> Vec<u8> {
         std::fs::read(concat!(
@@ -115,6 +154,71 @@ mod hwp5_candidate_tests {
         assert_eq!(doc.origin, Some(SourceFormat::Hwp5));
         assert_eq!(doc.sections.len(), 1);
         assert!(!doc.sections[0].blocks.is_empty());
+    }
+
+    fn number(start: u16, position: PageNumberPosition) -> PageNumberDecoration {
+        PageNumberDecoration {
+            start: NonZeroU16::new(start).unwrap(),
+            format: PageNumberFormat::Digit,
+            position,
+            prefix: None,
+            suffix: None,
+            dash: Some('-'),
+        }
+    }
+
+    fn sections(numbers: &[Option<PageNumberDecoration>]) -> SemanticDoc {
+        SemanticDoc {
+            sections: numbers
+                .iter()
+                .map(|page_number| Section {
+                    page_number: *page_number,
+                    ..Section::default()
+                })
+                .collect(),
+            ..SemanticDoc::default()
+        }
+    }
+
+    #[test]
+    fn page_number_merge_is_atomic_for_topology_partial_and_typed_conflicts() {
+        let first = number(1, PageNumberPosition::BottomCenter);
+        let second = number(2, PageNumberPosition::BottomCenter);
+        let conflicting = number(1, PageNumberPosition::TopCenter);
+
+        let mut topology = sections(&[None]);
+        assert!(!merge_owned_page_numbers(
+            &mut topology,
+            &sections(&[Some(first), Some(second)])
+        ));
+        assert!(topology.sections[0].page_number.is_none());
+
+        let mut partial = sections(&[None, Some(conflicting)]);
+        assert!(!merge_owned_page_numbers(
+            &mut partial,
+            &sections(&[Some(first), Some(second)])
+        ));
+        assert!(partial.sections[0].page_number.is_none());
+        assert_eq!(partial.sections[1].page_number, Some(conflicting));
+
+        let mut compatible = sections(&[None, Some(second)]);
+        assert!(merge_owned_page_numbers(
+            &mut compatible,
+            &sections(&[Some(first), Some(second)])
+        ));
+        assert_eq!(compatible.sections[0].page_number, Some(first));
+        assert_eq!(compatible.sections[1].page_number, Some(second));
+    }
+
+    #[test]
+    fn production_hwp5_open_enriches_the_strictly_owned_page_number() {
+        let doc = Engine::open(&benchmark()).expect("production HWP5 open succeeds");
+        assert_eq!(doc.sections.len(), 1);
+        assert_eq!(
+            doc.sections[0].page_number,
+            open_hwp5_own(&benchmark()).unwrap().sections[0].page_number
+        );
+        assert!(doc.sections[0].page_number.is_some());
     }
 
     #[test]

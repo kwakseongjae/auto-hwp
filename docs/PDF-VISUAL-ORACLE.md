@@ -444,6 +444,22 @@ line/image evidence exact. The next bounded implementation should connect that o
 the production path fail-closed; it must not modify rhwp, claim OFL fallback as exact, or relax the
 visual oracle.
 
+### Fail-closed page-number enrichment remeasurement (2026-08-25, #219)
+
+The bounded #219 enrichment restored the owned bottom-center page number while retaining rhwp as the
+base HWP5 decoder. The canonical run remained 8 pages and 102 semantic regions, and produced candidate
+PDF SHA-256 `25524c3dfc15e19498fb5623e74bc38f16ba9e751dba7470ef441406cdb9e5bd`.
+Aggregate page ink F1 moved only slightly because the decoration is small: pages 1–8 changed from
+`0.819208, 0.853208, 0.791151, 0.318353, 0.252517, 0.358842, 0.290394, 0.221304` to
+`0.819227, 0.853170, 0.791077, 0.318685, 0.252800, 0.358870, 0.290371, 0.221422`.
+
+The structural signal is decisive: content-bbox height deltas collapsed from
+`-100, -559, -59, -952, -639, -610, -91, -143` pixels to
+`+2, +5, -2, +2, +1, -1, +1, +1`. Direct inspection confirms that the candidate now paints the
+bottom-center page number at the reference location. This closes the missing-decoration defect, not
+the broader typography/color fidelity gap; the T3 reference, thresholds, translation bounds, and
+report-only `pass=null` policy remain unchanged.
+
 ## Tests
 
 Run the dependency-free synthetic metric and PNG codec suite with:
