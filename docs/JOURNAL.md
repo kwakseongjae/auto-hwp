@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #190 classified
+- two content-free runs exact: owned 1×1 table, `0x0500`, exact geometry/extension, 6 cell paragraphs.
+- shared `Cell.blocks` is lossless; global span/row equations already prove geometry; classifier removed.
+- next exact six-count discriminator + count/width-ref/geometry/extension hostile tests, then full gates/PR.
+
 ## 2026-08-24 (Codex sol) · PR #189 merged / #190 started
 - #189 exact-head required CI·MERGEABLE/CLEAN·댓글 0 후 main `1263805e`; #188 close·branch 정리.
 - #94 근거 동기화, next cell LIST_HEADER boundary #190 등록, exact-main worktree 시작.

@@ -201,6 +201,15 @@
   전체 active-cell topology/order, geometry, flags, width-ref sequence, extension framing을 두 번
   content-free 분류하고 shared IR로 active semantics를 lossless 표현할 수 있을 때만 atomic exact
   discriminator와 positive/hostile fixture를 구현. route·rhwp·HWPX·typesetter·generated 불변.
+  두 독립 분류 run은 exact 동일했다. enclosing form은 common attr `0x082a2311` + TABLE attr
+  `0x04000006`, 1×1/active cell 1개이며 cell은 row/col 0, span 1×1, width-ref `0x0500`, exact
+  object/cell geometry, mirrored 13B layout-width extension을 가진다. 새 경계는 기존 최대 5개보다 긴
+  **6개 cell paragraph**뿐이고, 여섯 문단 모두 strict PARA_HEADER/TEXT/CHAR_SHAPE/LINE_SEG framing으로
+  구조 해석 가능하다. shared IR의 `Cell.blocks`는 임의 길이를 이미 lossless 보존하고 전역 span/row
+  방정식이 single-cell 폭·높이를 common geometry와 검증하므로 새 렌더 의미나 추측이 필요 없다.
+  one-shot classifier는 제거되어 probe diff 0. **다음:** 이 exact 1×1 tuple에서 width-ref `0x0500`일
+  때만 count 6을 허용하고, 7문단·다른 width-ref·geometry/extension drift를 fail-closed synthetic
+  회귀로 고정한 뒤 public own-parser boundary를 다음 레코드로 전진시킨다.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #173 병합 · #174 multi-table 경계 착수**.
   자체 HWP5 파서가 exact `tbl ` marker/common-object/TABLE/LIST_HEADER/cell paragraph를 검증해
