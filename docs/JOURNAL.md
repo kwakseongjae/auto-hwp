@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #192 implementation pushed
+- exact captioned-table parser/tests/continuity committed as `8453f30` and pushed.
+- next `Closes #192` PR → required CI/comments/mergeability → autonomous merge.
+
 ## 2026-08-24 (Codex sol) · #192 full/audit green
 - quick all green; full Rust/gates/WASM/JS + Vitest 1,007 green.
 - Chromium full 82 pass/3 skip/2 retry-pass; lone timeout passes alone in 26.9s.
