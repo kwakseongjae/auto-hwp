@@ -266,6 +266,135 @@ class VisualRegionTests(unittest.TestCase):
         )
 
 
+class VerticalTraceTests(unittest.TestCase):
+    def bounds(self, left=0, top=0, width=3, height=6):
+        return {"left": left, "top": top, "width": width, "height": height}
+
+    def test_exact_and_constant_offset_are_report_only_hypotheses(self):
+        candidate = gray_image(8, 24, [(1, 6), (2, 7)])
+        exact = pdf_visual_check._vertical_trace(
+            "text", "painted", self.bounds(top=4), candidate, candidate
+        )
+        reference = gray_image(8, 24, [(1, 9), (2, 10)])
+        shifted = pdf_visual_check._vertical_trace(
+            "text", "painted", self.bounds(top=4), reference, candidate
+        )
+
+        self.assertEqual(exact["status"], "hypothesis")
+        self.assertEqual(exact["offset_px"], 0)
+        self.assertEqual(shifted["status"], "hypothesis")
+        self.assertEqual(shifted["offset_px"], 3)
+        self.assertEqual(shifted["policy"]["role"], "report_only_hypothesis")
+        self.assertNotIn("passed", shifted)
+
+    def test_two_transition_offsets_expose_cumulative_increment_and_blank_gap(self):
+        candidate = gray_image(12, 48, [(1, 11), (6, 27)])
+        reference = gray_image(12, 48, [(1, 13), (6, 32)])
+        first_bounds = self.bounds(left=0, top=9, width=3, height=5)
+        second_bounds = self.bounds(left=5, top=25, width=3, height=5)
+        regions = [
+            {
+                "id": "text-0001",
+                "category": "text",
+                "aligned_bounds_px": first_bounds,
+                "vertical_trace": pdf_visual_check._vertical_trace(
+                    "text", "painted", first_bounds, reference, candidate
+                ),
+            },
+            {
+                "id": "table-0002",
+                "category": "table",
+                "aligned_bounds_px": second_bounds,
+                "vertical_trace": pdf_visual_check._vertical_trace(
+                    "table", "not-applicable", second_bounds, reference, candidate
+                ),
+            },
+        ]
+
+        transitions = pdf_visual_check._vertical_transitions(regions)
+
+        self.assertEqual(regions[0]["vertical_trace"]["offset_px"], 2)
+        self.assertEqual(regions[1]["vertical_trace"]["offset_px"], 5)
+        self.assertEqual(transitions[0]["status"], "hypothesis")
+        self.assertEqual(transitions[0]["candidate_gap_px"], 11)
+        self.assertEqual(transitions[0]["offset_increment_px"], 3)
+        self.assertEqual(transitions[0]["reference_gap_hypothesis_px"], 14)
+
+    def test_repeated_row_pattern_is_explicitly_ambiguous(self):
+        candidate = gray_image(4, 16, [(1, 3)])
+        reference = gray_image(4, 16, [(1, 3), (1, 9)])
+        trace = pdf_visual_check._vertical_trace(
+            "text", "painted", self.bounds(top=2, width=3, height=3), reference, candidate
+        )
+
+        self.assertEqual(trace["status"], "ambiguous")
+        self.assertEqual(trace["best_offsets_px"], [0, 6])
+        self.assertIn("same best", trace["reason"])
+
+    def test_page_edge_clips_search_window_without_moving_the_region(self):
+        candidate = gray_image(5, 12, [(1, 1)])
+        reference = gray_image(5, 12, [(1, 2)])
+        trace = pdf_visual_check._vertical_trace(
+            "text", "painted", self.bounds(top=0, height=4), reference, candidate
+        )
+
+        self.assertEqual(trace["status"], "hypothesis")
+        self.assertEqual(trace["offset_px"], 1)
+        self.assertEqual(trace["considered_offsets_px"], {"min": 0, "max": 8, "count": 9})
+
+    def test_missing_blank_and_nontext_evidence_never_become_zero_score(self):
+        blank = gray_image(6, 12)
+        reference = gray_image(6, 12, [(1, 4)])
+        bounds = self.bounds(top=2)
+
+        missing = pdf_visual_check._vertical_trace(
+            "text", "painted", bounds, reference, blank
+        )
+        expected_missing = pdf_visual_check._vertical_trace(
+            "text", "expected-missing", None, reference, blank
+        )
+        nontext = pdf_visual_check._vertical_trace(
+            "image", "not-applicable", bounds, reference, blank
+        )
+
+        self.assertEqual(missing["status"], "unscorable")
+        self.assertEqual(expected_missing["status"], "unscorable")
+        self.assertEqual(nontext["status"], "not-applicable")
+        self.assertNotIn("offset_px", missing)
+
+    def test_trace_work_is_bounded_and_reported_unscorable(self):
+        image = gray_image(10, 20, [(1, 4)])
+        trace = pdf_visual_check._vertical_trace(
+            "text", "painted", self.bounds(top=2), image, image, max_work=1
+        )
+
+        self.assertEqual(trace["status"], "unscorable")
+        self.assertIn("work budget", trace["reason"])
+        self.assertEqual(trace["work_units"], 0)
+
+    def test_overlapping_regions_are_not_claimed_as_sequential_transitions(self):
+        trace = {"status": "hypothesis", "offset_px": 0}
+        transitions = pdf_visual_check._vertical_transitions(
+            [
+                {
+                    "id": "table-0001",
+                    "category": "table",
+                    "aligned_bounds_px": self.bounds(top=2, height=8),
+                    "vertical_trace": trace,
+                },
+                {
+                    "id": "text-0002",
+                    "category": "text",
+                    "aligned_bounds_px": self.bounds(top=5, height=2),
+                    "vertical_trace": trace,
+                },
+            ]
+        )
+
+        self.assertEqual(transitions[0]["status"], "ambiguous")
+        self.assertIn("overlap", transitions[0]["reason"])
+
+
 class MetricRegressionTests(unittest.TestCase):
     def test_bounded_translation_is_detected_and_reported(self):
         reference = gray_image(16, 16, rectangle(2, 2, 5, 5))

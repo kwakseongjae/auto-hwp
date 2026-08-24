@@ -91,6 +91,9 @@ MAX_VISUAL_REGIONS_TOTAL = 10_000
 MAX_VISUAL_REGIONS_PER_PAGE = 2_000
 MAX_VISUAL_REGION_PAGE_AREA_MULTIPLIER = 16
 VISUAL_REGION_CATEGORIES = frozenset({"text", "table", "image", "object"})
+MAX_VERTICAL_TRACE_PX = 128
+HARD_MAX_VERTICAL_TRACE_WORK_PER_PAGE = 50_000_000
+VERTICAL_TRACE_PROFILE_ROW_COST = 6
 
 REFERENCE_TIERS: Mapping[str, str] = {
     "T0": "Licensed Hancom Windows/WebHWP rendering with product, build, and font provenance.",
@@ -1912,6 +1915,279 @@ def _crop_image(image: GrayImage, left: int, top: int, right: int, bottom: int) 
     return GrayImage(width, bottom - top, bytes(pixels))
 
 
+def _row_ink_counts(
+    image: GrayImage, left: int, top: int, right: int, bottom: int
+) -> List[int]:
+    counts: List[int] = []
+    for row in range(top, bottom):
+        start = row * image.width + left
+        counts.append(
+            sum(
+                1
+                for value in image.pixels[start : start + (right - left)]
+                if value < INK_THRESHOLD
+            )
+        )
+    return counts
+
+
+def _row_profile_similarity(
+    candidate_counts: Sequence[int], reference_counts: Sequence[int]
+) -> Tuple[float, float, int]:
+    candidate_active = {index for index, count in enumerate(candidate_counts) if count}
+    reference_active = {index for index, count in enumerate(reference_counts) if count}
+    overlap = len(candidate_active & reference_active)
+    active_total = len(candidate_active) + len(reference_active)
+    row_f1 = 0.0 if active_total == 0 else (2.0 * overlap / active_total)
+    dot = sum(left * right for left, right in zip(candidate_counts, reference_counts))
+    candidate_norm = sum(value * value for value in candidate_counts)
+    reference_norm = sum(value * value for value in reference_counts)
+    cosine = (
+        0.0
+        if candidate_norm == 0 or reference_norm == 0
+        else dot / math.sqrt(candidate_norm * reference_norm)
+    )
+    return row_f1, cosine, overlap
+
+
+def _vertical_trace(
+    category: str,
+    paint_status: str,
+    bounds: Optional[Mapping[str, int]],
+    reference: GrayImage,
+    aligned_candidate: GrayImage,
+    max_work: int = HARD_MAX_VERTICAL_TRACE_WORK_PER_PAGE,
+) -> Dict[str, Any]:
+    policy = {
+        "role": "report_only_hypothesis",
+        "search_axis": "vertical_only",
+        "max_abs_offset_px": MAX_VERTICAL_TRACE_PX,
+        "ink_threshold_gray_lt": INK_THRESHOLD,
+        "ranking": ["active_row_f1", "row_ink_count_cosine"],
+    }
+    if category not in {"text", "table"}:
+        return {
+            "status": "not-applicable",
+            "reason": "category has no vertical text/table transition",
+            "policy": policy,
+        }
+    if paint_status == "expected-missing":
+        return {
+            "status": "unscorable",
+            "reason": "source-visible text produced no placed glyph",
+            "policy": policy,
+        }
+    if bounds is None:
+        return {
+            "status": "unscorable",
+            "reason": "aligned region bounds are unavailable",
+            "policy": policy,
+        }
+
+    left = int(bounds["left"])
+    top = int(bounds["top"])
+    right = left + int(bounds["width"])
+    bottom = top + int(bounds["height"])
+    minimum_offset = max(-MAX_VERTICAL_TRACE_PX, -top)
+    maximum_offset = min(MAX_VERTICAL_TRACE_PX, reference.height - bottom)
+    considered = {
+        "min": minimum_offset,
+        "max": maximum_offset,
+        "count": max(0, maximum_offset - minimum_offset + 1),
+    }
+    width = right - left
+    height = bottom - top
+    work_units = (
+        width * height
+        + width * (height + maximum_offset - minimum_offset)
+        + height * considered["count"] * VERTICAL_TRACE_PROFILE_ROW_COST
+    )
+    if work_units > max_work:
+        return {
+            "status": "unscorable",
+            "reason": "bounded per-page vertical trace work budget is exhausted",
+            "policy": policy,
+            "considered_offsets_px": considered,
+            "work_units": 0,
+        }
+
+    candidate_counts = _row_ink_counts(aligned_candidate, left, top, right, bottom)
+    candidate_active_rows = sum(1 for count in candidate_counts if count)
+    if candidate_active_rows == 0:
+        return {
+            "status": "unscorable",
+            "reason": "candidate region has no ink rows",
+            "policy": policy,
+            "candidate_active_rows": 0,
+            "work_units": width * height,
+        }
+    reference_window = _row_ink_counts(
+        reference,
+        left,
+        top + minimum_offset,
+        right,
+        bottom + maximum_offset,
+    )
+    rankings: List[Dict[str, Any]] = []
+    for offset in range(minimum_offset, maximum_offset + 1):
+        start = offset - minimum_offset
+        reference_counts = reference_window[start : start + height]
+        row_f1, cosine, overlap = _row_profile_similarity(
+            candidate_counts, reference_counts
+        )
+        rankings.append(
+            {
+                "offset_px": offset,
+                "active_row_f1": row_f1,
+                "row_ink_count_cosine": cosine,
+                "overlapping_active_rows": overlap,
+                "reference_active_rows": sum(1 for count in reference_counts if count),
+            }
+        )
+    if not rankings or max(item["reference_active_rows"] for item in rankings) == 0:
+        return {
+            "status": "unscorable",
+            "reason": "reference search window has no ink rows",
+            "policy": policy,
+            "candidate_active_rows": candidate_active_rows,
+            "considered_offsets_px": considered,
+            "work_units": work_units,
+        }
+
+    def rank(item: Mapping[str, Any]) -> Tuple[float, float]:
+        return (item["active_row_f1"], item["row_ink_count_cosine"])
+
+    best_rank = max(rank(item) for item in rankings)
+    best = [item for item in rankings if rank(item) == best_rank]
+    lower = [item for item in rankings if rank(item) < best_rank]
+    lower.sort(
+        key=lambda item: (
+            -item["active_row_f1"],
+            -item["row_ink_count_cosine"],
+            abs(item["offset_px"]),
+            item["offset_px"],
+        )
+    )
+    runner_up = lower[0] if lower else None
+    common = {
+        "policy": policy,
+        "candidate_active_rows": candidate_active_rows,
+        "considered_offsets_px": considered,
+        "best_score": {
+            "active_row_f1": best_rank[0],
+            "row_ink_count_cosine": best_rank[1],
+        },
+        "runner_up": runner_up,
+        "work_units": work_units,
+    }
+    if best_rank[0] == 0.0:
+        return {
+            **common,
+            "status": "unscorable",
+            "reason": "candidate and reference have no overlapping active rows in the bounded search window",
+        }
+    if len(best) != 1:
+        return {
+            **common,
+            "status": "ambiguous",
+            "reason": "multiple offsets have the same best row-profile rank",
+            "best_offsets_px": [item["offset_px"] for item in best],
+        }
+    return {
+        **common,
+        "status": "hypothesis",
+        "reason": None,
+        "offset_px": best[0]["offset_px"],
+        "reference_active_rows": best[0]["reference_active_rows"],
+        "overlapping_active_rows": best[0]["overlapping_active_rows"],
+    }
+
+
+def _vertical_transitions(regions: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    ordered = sorted(
+        (
+            region
+            for region in regions
+            if region.get("category") in {"text", "table"}
+            and region.get("aligned_bounds_px") is not None
+        ),
+        key=lambda region: (
+            region["aligned_bounds_px"]["top"],
+            region["aligned_bounds_px"]["left"],
+            region["id"],
+        ),
+    )
+    transitions: List[Dict[str, Any]] = []
+    for previous, current in zip(ordered, ordered[1:]):
+        previous_bounds = previous["aligned_bounds_px"]
+        current_bounds = current["aligned_bounds_px"]
+        previous_trace = previous["vertical_trace"]
+        current_trace = current["vertical_trace"]
+        item: Dict[str, Any] = {
+            "from_region_id": previous["id"],
+            "from_category": previous["category"],
+            "to_region_id": current["id"],
+            "to_category": current["category"],
+            "candidate_gap_px": current_bounds["top"]
+            - (previous_bounds["top"] + previous_bounds["height"]),
+        }
+        if item["candidate_gap_px"] < 0:
+            item.update(
+                status="ambiguous",
+                reason="aligned source regions overlap, so they are not a sequential vertical transition",
+            )
+            transitions.append(item)
+            continue
+        statuses = {previous_trace["status"], current_trace["status"]}
+        if "unscorable" in statuses:
+            item.update(
+                status="unscorable",
+                reason="one or both endpoint traces are unscorable",
+            )
+        elif "ambiguous" in statuses:
+            item.update(
+                status="ambiguous",
+                reason="one or both endpoint traces have tied best offsets",
+            )
+        elif statuses != {"hypothesis"}:
+            item.update(
+                status="not-applicable",
+                reason="one or both endpoint categories are not traceable",
+            )
+        else:
+            previous_reference_top = previous_bounds["top"] + previous_trace["offset_px"]
+            current_reference_top = current_bounds["top"] + current_trace["offset_px"]
+            if current_reference_top < previous_reference_top:
+                item.update(
+                    status="ambiguous",
+                    reason="best-offset hypotheses reverse region top order",
+                )
+            else:
+                reference_gap = current_reference_top - (
+                    previous_reference_top + previous_bounds["height"]
+                )
+                if reference_gap < 0:
+                    item.update(
+                        status="ambiguous",
+                        reason="best-offset hypotheses make non-overlapping source regions overlap",
+                        reference_gap_hypothesis_px=reference_gap,
+                    )
+                else:
+                    item.update(
+                        status="hypothesis",
+                        reason=None,
+                        from_offset_px=previous_trace["offset_px"],
+                        to_offset_px=current_trace["offset_px"],
+                        offset_increment_px=(
+                            current_trace["offset_px"]
+                            - previous_trace["offset_px"]
+                        ),
+                        reference_gap_hypothesis_px=reference_gap,
+                    )
+        transitions.append(item)
+    return transitions
+
+
 def _score_visual_regions(
     page_contract: Mapping[str, Any],
     reference: GrayImage,
@@ -1926,6 +2202,25 @@ def _score_visual_regions(
     dx = int(translation["dx"])
     dy = int(translation["dy"])
     results: List[Dict[str, Any]] = []
+    vertical_trace_work = 0
+
+    def trace(
+        category: str,
+        paint_status: str,
+        bounds: Optional[Mapping[str, int]],
+    ) -> Dict[str, Any]:
+        nonlocal vertical_trace_work
+        result = _vertical_trace(
+            category,
+            paint_status,
+            bounds,
+            reference,
+            aligned_candidate,
+            HARD_MAX_VERTICAL_TRACE_WORK_PER_PAGE - vertical_trace_work,
+        )
+        vertical_trace_work += int(result.get("work_units", 0))
+        return result
+
     for region in page_contract["regions"]:
         raw_left = math.floor(float(region["x"]) * candidate_raw_width / page_width)
         raw_top = math.floor(float(region["y"]) * candidate_raw_height / page_height)
@@ -1970,6 +2265,11 @@ def _score_visual_regions(
                     "metrics": None,
                 }
             )
+            base["vertical_trace"] = trace(
+                region["category"],
+                region["paint_status"],
+                None,
+            )
             results.append(base)
             continue
         if right <= left or bottom <= top:
@@ -1981,8 +2281,19 @@ def _score_visual_regions(
                     "metrics": None,
                 }
             )
+            base["vertical_trace"] = trace(
+                region["category"],
+                region["paint_status"],
+                None,
+            )
             results.append(base)
             continue
+        aligned_bounds = {
+            "left": left,
+            "top": top,
+            "width": right - left,
+            "height": bottom - top,
+        }
         reference_crop = _crop_image(reference, left, top, right, bottom)
         candidate_crop = _crop_image(aligned_candidate, left, top, right, bottom)
         _, metrics = _compare_images(
@@ -1995,12 +2306,7 @@ def _score_visual_regions(
             {
                 "status": metrics["status"],
                 "reason": None,
-                "aligned_bounds_px": {
-                    "left": left,
-                    "top": top,
-                    "width": right - left,
-                    "height": bottom - top,
-                },
+                "aligned_bounds_px": aligned_bounds,
                 "metrics": {
                     "global_ssim_like": metrics["ssim_like"]["global"],
                     "local_ssim_like_mean": metrics["ssim_like"]["local"]["mean"],
@@ -2009,6 +2315,11 @@ def _score_visual_regions(
                     "edge_f1": metrics["edge"]["f1"],
                     "unscorable_metrics": metrics["unscorable_metrics"],
                 },
+                "vertical_trace": trace(
+                    region["category"],
+                    region["paint_status"],
+                    aligned_bounds,
+                ),
             }
         )
         results.append(base)
@@ -2062,17 +2373,42 @@ def _render_html(report: Mapping[str, Any]) -> str:
                 f"<td>{html.escape(region['status'])}</td>"
                 f"<td>{_format_metric(None if region.get('metrics') is None else region['metrics']['ink']['f1'])}</td>"
                 f"<td>{_format_metric(None if region.get('metrics') is None else region['metrics']['edge_f1'])}</td>"
+                f"<td>{html.escape(region.get('vertical_trace', {}).get('status', 'unavailable'))}</td>"
+                f"<td>{_format_metric(region.get('vertical_trace', {}).get('offset_px'))}</td>"
                 "</tr>"
                 for region in semantic_regions
             )
             region_table = (
                 "<h3>Semantic regions (additive, report-only)</h3>"
                 "<table><tr><th>ID</th><th>Category</th><th>Status</th>"
-                "<th>Ink F1</th><th>Edge F1</th></tr>"
+                "<th>Ink F1</th><th>Edge F1</th><th>Vertical trace</th>"
+                "<th>Offset hypothesis (px)</th></tr>"
                 f"{region_rows}</table>"
             )
         else:
             region_table = "<p class=muted>No first-party semantic region manifest was provided.</p>"
+        vertical_transitions = page.get("vertical_transitions", [])
+        if vertical_transitions:
+            transition_rows = "".join(
+                "<tr>"
+                f"<td>{html.escape(item['from_region_id'])}</td>"
+                f"<td>{html.escape(item['to_region_id'])}</td>"
+                f"<td>{html.escape(item['status'])}</td>"
+                f"<td>{_format_metric(item.get('candidate_gap_px'))}</td>"
+                f"<td>{_format_metric(item.get('offset_increment_px'))}</td>"
+                f"<td>{html.escape(str(item.get('reason') or ''))}</td>"
+                "</tr>"
+                for item in vertical_transitions
+            )
+            transition_table = (
+                "<h3>Vertical transitions (report-only hypotheses)</h3>"
+                "<table><tr><th>From</th><th>To</th><th>Status</th>"
+                "<th>Candidate gap (px)</th><th>Offset increment (px)</th>"
+                "<th>Evidence note</th></tr>"
+                f"{transition_rows}</table>"
+            )
+        else:
+            transition_table = ""
         artifacts = page.get("artifacts", {})
         image_cards: List[str] = []
         for key, label in (
@@ -2101,6 +2437,7 @@ def _render_html(report: Mapping[str, Any]) -> str:
               <p>{html.escape(offset_text)}</p>
               {metric_rows}
               {region_table}
+              {transition_table}
               <div class=images>{''.join(image_cards)}</div>
               <details><summary>Page JSON</summary><pre>{html.escape(json.dumps(page, ensure_ascii=False, indent=2, sort_keys=True))}</pre></details>
             </section>
@@ -2233,8 +2570,14 @@ def _summarize_pages(pages: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
     unscorable_regions = 0
     partially_unscorable_regions = 0
     category_counts: Dict[str, Dict[str, int]] = {}
+    trace_status_counts: Dict[str, int] = {}
+    transition_status_counts: Dict[str, int] = {}
+    transition_hypotheses: List[Dict[str, Any]] = []
     for page in pages:
         for region in page.get("semantic_regions", []):
+            trace_status = region.get("vertical_trace", {}).get("status")
+            if trace_status is not None:
+                trace_status_counts[trace_status] = trace_status_counts.get(trace_status, 0) + 1
             category = region["category"]
             counts = category_counts.setdefault(
                 category,
@@ -2261,6 +2604,18 @@ def _summarize_pages(pages: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
                     "aligned_bounds_px": region["aligned_bounds_px"],
                 }
             )
+        for transition in page.get("vertical_transitions", []):
+            transition_status = transition["status"]
+            transition_status_counts[transition_status] = (
+                transition_status_counts.get(transition_status, 0) + 1
+            )
+            if transition_status == "hypothesis":
+                transition_hypotheses.append(
+                    {
+                        "page": page["page"],
+                        **transition,
+                    }
+                )
 
     def region_key(region: Mapping[str, Any]) -> Tuple[float, float, int, str]:
         return (
@@ -2285,6 +2640,9 @@ def _summarize_pages(pages: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         "partially_unscorable_regions": partially_unscorable_regions,
         "unscorable_regions": unscorable_regions,
         "region_category_counts": category_counts,
+        "vertical_trace_status_counts": trace_status_counts,
+        "vertical_transition_status_counts": transition_status_counts,
+        "vertical_transition_hypotheses": transition_hypotheses,
     }
 
 
@@ -2679,6 +3037,9 @@ def _run_visual_check_from_snapshots(
             "worst_regions": [],
             "scored_regions": 0,
             "unscorable_regions": 0,
+            "vertical_trace_status_counts": {},
+            "vertical_transition_status_counts": {},
+            "vertical_transition_hypotheses": [],
             "pixel_comparison_attempted": False,
         }
         _write_report(output_dir, report, {}, limits)
@@ -2794,6 +3155,13 @@ def _run_visual_check_from_snapshots(
                         "reason": "page raster dimensions are unscorable without forbidden resizing",
                         "aligned_bounds_px": None,
                         "metrics": None,
+                        "vertical_trace": _vertical_trace(
+                            region["category"],
+                            region["paint_status"],
+                            None,
+                            reference_raw_image,
+                            candidate_raw_image,
+                        ),
                     }
                     for region in visual_regions["document"]["pages"][page_number - 1]["regions"]
                 ]
@@ -2822,6 +3190,7 @@ def _run_visual_check_from_snapshots(
                     "alignment": None,
                     "metrics": None,
                     "semantic_regions": semantic_regions,
+                    "vertical_transitions": [],
                     "intentional_blank_text_regions": (
                         visual_regions["document"]["pages"][page_number - 1][
                             "intentional_blank_text_regions"
@@ -2924,6 +3293,7 @@ def _run_visual_check_from_snapshots(
                 metrics["alignment"]["candidate_translation_px"],
                 limits.max_edge_work,
             )
+        vertical_transitions = _vertical_transitions(semantic_regions)
         report["pages"].append(
             {
                 "page": page_number,
@@ -2938,6 +3308,7 @@ def _run_visual_check_from_snapshots(
                 "alignment": metrics["alignment"],
                 "metrics": metrics,
                 "semantic_regions": semantic_regions,
+                "vertical_transitions": vertical_transitions,
                 "intentional_blank_text_regions": (
                     visual_regions["document"]["pages"][page_number - 1][
                         "intentional_blank_text_regions"
@@ -2990,7 +3361,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--candidate-regions",
         help=(
-            "optional schema-v1 content-free HWPUNIT region manifest emitted from "
+            "optional schema-v2 content-free HWPUNIT region manifest emitted from "
             "the same first-party placement as the candidate PDF"
         ),
     )

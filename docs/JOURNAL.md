@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-25 (Codex sol) · #223 vertical-transition trace
+- fixed alignment의 row-ink profile로 ±128px offset/transition 가설을 bounded·content-free하게 추가.
+- canonical은 SHA·scores 불변, unique/tie 55/5; page4/5 첫 table transition이 0→+17/+19px.
+- Python62·quick 전체 green, 독립 2회 JSON/HTML exact; rhwp/Rust/threshold/pass 불변.
+- 다음: PR/CI/merge→consecutive-table/anchor-spacing 최소 fixture child.
+
 ## 2026-08-25 (Codex sol) · #221 paint-backed visual regions
 - visual schema v2가 blank 42개를 제외하고 painted text 28개·expected-missing 0을 증명했다.
 - candidate PDF SHA는 #219와 exact; reference-empty 12개가 누적 수직 drift 축을 가리킨다.

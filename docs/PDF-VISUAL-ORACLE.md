@@ -346,6 +346,26 @@ ink, and edge diagnostics, explicit unscorable reasons, per-category counts, and
 regions. Regions are additive and may overlap—for example, cell text remains inside a table region—so
 they are diagnostic lenses rather than a partition or an aggregate quality score.
 
+### Bounded vertical-transition trace
+
+For `text` and `table` regions, the report also emits a content-free, report-only vertical trace.
+It keeps the page's already-selected global alignment and the region's fixed horizontal extent, then
+compares candidate and reference row-ink profiles over integer vertical offsets from -128 through
++128 pixels. Ranking is lexicographic: active-row F1 first, row-ink-count cosine second. There is no
+minimum score or confidence threshold. A unique best rank is labeled `hypothesis`; an exact tie is
+`ambiguous`; absent candidate/reference overlap, missing placement evidence, or exhausted bounded work
+is `unscorable`. Image/object regions are `not-applicable`.
+
+The search reads each candidate crop and the union of its reference search window once. Per-page work
+is capped at 50,000,000 pixel/profile operations. The report records the considered offset range,
+best and runner-up evidence, tied offsets, active-row counts, and work units. None of these fields feed
+page metrics, region metrics, alignment, thresholds, status, or `policy.pass`.
+
+Adjacent non-overlapping text/table regions are ordered by aligned top coordinate. When both endpoint
+traces are unique and their reference hypotheses remain non-overlapping and monotonic, the report
+records candidate/reference gap hypotheses and the offset increment. Ties, missing evidence, source
+overlap, or hypothesis-induced overlap remain explicit ambiguity instead of becoming a layout fact.
+
 ## Visual report
 
 For every dimension-compatible page, `index.html` shows:
@@ -484,6 +504,24 @@ bounded cumulative vertical-position drift: lower-page candidate symbols/heading
 the reference content has already moved. The next rendering child should isolate the first divergent
 vertical increment; font weight/category remains a separate axis. T3 authority, translation bounds,
 thresholds, and `pass=null` remain unchanged.
+
+### First vertical-transition trace (2026-08-25, #223)
+
+The trace reran the exact #219/#221 candidate PDF SHA-256
+`25524c3dfc15e19498fb5623e74bc38f16ba9e751dba7470ef441406cdb9e5bd`; export bytes, eight-page
+structure, global translations, page/region scores, T3 authority, and `pass=null` were unchanged.
+All 60 paint-backed text/table regions produced content-free trace evidence: 55 unique hypotheses and
+5 exact ties in the first run. Repeated short marker rows explain the ties and remain visible rather
+than receiving an arbitrary nearest match. Of 52 adjacent pairs, 26 remain valid hypotheses and 26
+are explicit ambiguity because their source regions overlap, their endpoints tie, or the inferred
+reference gaps would overlap. Two independent runs produced byte-identical JSON and HTML reports.
+
+The earliest stable page-4/page-5 divergence is bounded to `table-0001 → table-0002`: the first table
+anchors at 0 px while the second table's reference-row hypothesis is +17 px and +19 px lower,
+respectively. The same transition class is +9 px on page 1 and +33 px on page 7, while later isolated
+text rows often repeat and therefore do not yet identify a safe renderer formula. This supports a
+separate consecutive-table/anchor-spacing investigation; it does not justify changing table height,
+paragraph line metrics, or font realization in #223.
 
 ## Tests
 
