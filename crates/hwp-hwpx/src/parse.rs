@@ -2791,6 +2791,48 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn two_hwpx_table_hosts_keep_only_their_explicit_margin_evidence() {
+        let cell = |text: &str| {
+            format!(
+                r#"<hp:tr><hp:tc><hp:subList><hp:p><hp:run><hp:t>{text}</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="1000" height="500"/></hp:tc></hp:tr>"#
+            )
+        };
+        let table = |id: usize, top: i32, bottom: i32| {
+            format!(
+                r#"<hp:p id="{id}"><hp:run><hp:tbl rowCnt="1" colCnt="1"><hp:outMargin left="0" right="0" top="{top}" bottom="{bottom}"/>{}</hp:tbl><hp:t></hp:t></hp:run></hp:p>"#,
+                cell("셀")
+            )
+        };
+        let xml = format!(
+            r#"<hs:sec xmlns:hs="s" xmlns:hp="p">{}{}</hs:sec>"#,
+            table(1, 100, 200),
+            table(2, 300, 400),
+        );
+        let mut blocks = Vec::new();
+        parse_section(&xml, &mut blocks, &mut Vec::new(), &Default::default()).unwrap();
+
+        let tables: Vec<_> = blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Table(table) => Some((table.outer_margin_top, table.outer_margin_bottom)),
+                Block::Paragraph(_) => None,
+            })
+            .collect();
+        let anchors: Vec<_> = blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Paragraph(paragraph) => Some((
+                    paragraph.is_table_anchor,
+                    paragraph.source_line_metrics.len(),
+                )),
+                Block::Table(_) => None,
+            })
+            .collect();
+        assert_eq!(tables, vec![(100, 200), (300, 400)]);
+        assert_eq!(anchors, vec![(true, 0), (true, 0)]);
+    }
+
     /// 표를 품었어도 **보이는 텍스트가 있으면** 앵커가 아니다 — 그 줄은 실제로 조판돼야 한다.
     #[test]
     fn table_host_paragraph_with_text_is_not_an_anchor() {

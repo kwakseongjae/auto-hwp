@@ -3,6 +3,25 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-25 · Codex(sol) — **#225 원인 단일화·회귀 계약·full 검증 완료, PR 직전**.
+  #223 head `bc6b2f5`의 CI 3종 green·댓글/review 0 뒤 main `edb6ac94` 병합, #93/#114 동기화,
+  #225 issue-first/exact-main worktree 착수. canonical page4 candidate/reference 첫 표 ink span은
+  143–206/143–205px로 높이 문제가 아니고 둘째 표
+  시작만 210→229px(+19)이다. raw HWP5 anchor는 page4/5 첫 line `(vertical=0,height=3285,
+  spacing=960)` 다음 line `vertical=4245`; page1은 `(0,2130,452)`→`2582`라 #223의 +19/+9px와
+  exact 단위 변환(HWPUNIT/50 at 144 DPI)으로 맞는다. own/rhwp/production의 모든 top-level table
+  margin·placed geometry는 exact이며 current delta는 page1 1989(owned 2441 대비 -452), page4/5
+  3286(owned 4246 대비 -960)이다. 즉 margin parse/table height가 아니라 host anchor의 stored
+  `line_spacing` 소실이다. synthetic은 margin sum vs max/collapse, zero/top/bottom/both, anchor=0,
+  real spacer, page break + place/Naive/block_pages LOCKSTEP을 잠갔고 HWPX 두 표는 explicit margins만
+  소유하고 source anchor metric이 없음을 분리했다. focused 5종과 full의 Rust workspace/rhwp/AI120/
+  8·18·24+98.9%/oracle82/wasm/licenses/JS build/Vitest1,012가 모두 green이다. 샌드박스 포트 EPERM 뒤
+  권한 환경 Chromium도 **83 pass·3 intentional skip·2 retry-pass**(기존 타이밍 계열)다. production
+  조판·score/threshold는 무변경이고 rhwp `f137b4c9`도 clean이다. **다음:** diff/privacy/vendor 감사→
+  commit/push/PR `Closes #225`→CI/merge 후,
+  HWP5 source anchor spacing을 별도 IR 축으로 owned parse→rhwp base enrichment→세 LOCKSTEP 경로에
+  fail-closed 연결하는 renderer child. HWPX anchor skip, rhwp vendor, scores/threshold는 불변.
+
 - 갱신: 2026-08-25 · Codex(sol) — **#223 report-only vertical-transition trace 구현·canonical 진단**.
   fixed page alignment 뒤 text/table의 row-ink profile만 ±128px에서 비교하고 active-row F1→row-count
   cosine 순으로 unique=`hypothesis`, exact tie=`ambiguous`, 증거 없음/예산 초과=`unscorable`로 낸다.
