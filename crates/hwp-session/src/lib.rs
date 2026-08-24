@@ -26,6 +26,8 @@
 use hwp_model::prelude::SemanticDoc;
 use serde_json::{json, Value};
 
+pub mod font_registry;
+
 /// The positioned, paginated document produced by [`place`] — re-exported so a caller (the wasm
 /// `HwpDoc` layout cache, issue 025) can name and store it without depending on `hwp-typeset` directly.
 pub use hwp_typeset::PlacedDoc;
@@ -66,12 +68,10 @@ pub fn own_render_fonts() -> Box<dyn hwp_model::prelude::FontMetricsProvider> {
 pub fn own_render_fonts_with(
     injected: &[(String, Vec<u8>)],
 ) -> Box<dyn hwp_model::prelude::FontMetricsProvider> {
-    match injected.iter().find(|(_, b)| !b.is_empty()) {
-        Some((_family, bytes)) => Box::new(WithFamilies {
-            inner: Box::new(hwp_typeset::RealFontMetrics::from_bytes(bytes)),
-            families: injected.iter().map(|(f, _)| f.clone()).collect(),
-        }),
-        None => own_render_fonts(),
+    if injected.iter().any(|(_, bytes)| !bytes.is_empty()) {
+        Box::new(hwp_typeset::RealFontMetrics::from_registry(injected))
+    } else {
+        own_render_fonts()
     }
 }
 #[cfg(not(feature = "shaper"))]
@@ -96,11 +96,13 @@ pub fn own_render_fonts_with(
 /// (e.g. "Pretendard") bypasses the 058 class substitute and keeps its own name (the screen
 /// `@font-face` and the PDF per-family embed pick it up). Metrics delegate untouched (V5 게이트 불변); the
 /// zero-injection path never builds this, so golden bytes are unchanged.
+#[cfg(not(feature = "shaper"))]
 struct WithFamilies {
     inner: Box<dyn hwp_model::prelude::FontMetricsProvider>,
     families: Vec<String>,
 }
 
+#[cfg(not(feature = "shaper"))]
 impl hwp_model::prelude::FontMetricsProvider for WithFamilies {
     fn advance_width(
         &self,
@@ -3044,6 +3046,103 @@ mod tests {
             .bytes,
             "빈 주입 = discover 경로, 바이트 동일"
         );
+    }
+
+    /// Issue 215 RED: a requested family must choose the same face for placement regardless of
+    /// registration order. Before the registry fix, `own_render_fonts_with` measured every run with
+    /// the first injected face, while the PDF embedder could select the requested second face.
+    #[cfg(feature = "shaper")]
+    #[test]
+    fn injected_metrics_follow_the_requested_family_not_the_first_face() {
+        let Ok(gothic) = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/NanumGothic-Regular.ttf"
+        )) else {
+            return;
+        };
+        let Ok(myeongjo) = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/NanumMyeongjo-Regular.ttf"
+        )) else {
+            return;
+        };
+        let mut doc = body_para_doc("MWMW narrow iii", 20_000);
+        doc.char_shapes[0].font_family = Some("Nanum Myeongjo".to_string());
+
+        let requested_only = place(&doc, &[("Nanum Myeongjo".to_string(), myeongjo.clone())]);
+        let requested_second = place(
+            &doc,
+            &[
+                ("Nanum Gothic".to_string(), gothic),
+                ("Nanum Myeongjo".to_string(), myeongjo),
+            ],
+        );
+        let xs = |placed: &PlacedDoc| {
+            placed.pages[0]
+                .glyphs
+                .iter()
+                .map(|glyph| glyph.x)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            xs(&requested_second),
+            xs(&requested_only),
+            "the requested family must drive layout metrics even when registered second"
+        );
+    }
+
+    #[cfg(all(feature = "shaper", feature = "pdf"))]
+    #[test]
+    fn exact_registry_face_is_reported_and_exports_stable_pdf_bytes() {
+        use crate::font_registry::{
+            FontFaceInput, FontRegistry, FontRegistryLimits, FontStyle, RealizationStatus,
+        };
+        let Ok(gothic) = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/NanumGothic-Regular.ttf"
+        )) else {
+            return;
+        };
+        let Ok(myeongjo) = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/NanumMyeongjo-Regular.ttf"
+        )) else {
+            return;
+        };
+        let registry = FontRegistry::new(
+            vec![
+                FontFaceInput {
+                    family: "Nanum Gothic".into(),
+                    style: FontStyle::Regular,
+                    bytes: gothic,
+                    face_index: 0,
+                },
+                FontFaceInput {
+                    family: "Nanum Myeongjo".into(),
+                    style: FontStyle::Regular,
+                    bytes: myeongjo,
+                    face_index: 0,
+                },
+            ],
+            FontRegistryLimits::default(),
+        )
+        .unwrap();
+        let mut doc = body_para_doc("exact family proof", 20_000);
+        doc.char_shapes[0].font_family = Some("Nanum Myeongjo".into());
+        let report = registry.realization_report(&doc);
+        assert_eq!(report.lanes.len(), 1);
+        assert_eq!(report.lanes[0].status, RealizationStatus::Exact);
+        assert_eq!(
+            report.lanes[0]
+                .selected_face_sha256
+                .as_deref()
+                .map(str::len),
+            Some(64)
+        );
+        let faces = registry.injected_faces();
+        let first = emit_pdf_with_fonts(&doc, None, &faces).unwrap();
+        let second = emit_pdf_with_fonts(&doc, None, &faces).unwrap();
+        assert_eq!(first.bytes, second.bytes);
     }
 
     #[test]

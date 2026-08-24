@@ -16,6 +16,8 @@ use hwp_model::prelude::*;
 
 use crate::is_full_width;
 
+type AdvanceCacheKey = (String, bool, bool, char, i32);
+
 /// System font candidates probed at runtime, Korean-capable first. The first that parses wins; if
 /// none is present we fall back to the per-script approximation (so this never panics headless/CI).
 /// We deliberately prefer a FULL-EM Korean face (AppleGothic packs Hangul at exactly 1 EM, like
@@ -165,8 +167,19 @@ pub struct RealFontMetrics {
     /// Proportional Latin/serif face for Latin/digit/punctuation. `None` → route Latin to `font`
     /// (the old single-face behavior), so a machine without a Latin face is never worse than before.
     latin: Option<LoadedFont>,
-    /// (char, size_hwpunit) → advance HWPUNIT. RefCell: the trait method is `&self`.
-    cache: RefCell<HashMap<(char, i32), f64>>,
+    /// Explicit host-provided faces. Unlike the legacy first-face mapping, these are selected by the
+    /// requested family/style so layout and PDF realization cannot silently disagree.
+    registered: Vec<RegisteredFace>,
+    /// (normalized family, bold, italic, char, size_hwpunit) → advance HWPUNIT.
+    cache: RefCell<HashMap<AdvanceCacheKey, f64>>,
+}
+
+struct RegisteredFace {
+    family: String,
+    category: hwp_model::font_class::FontCategory,
+    bold: bool,
+    italic: bool,
+    font: LoadedFont,
 }
 
 impl Default for RealFontMetrics {
@@ -182,6 +195,7 @@ impl RealFontMetrics {
         RealFontMetrics {
             font: LoadedFont::discover(),
             latin: LoadedFont::discover_from(LATIN_FONT_CANDIDATES),
+            registered: Vec::new(),
             cache: RefCell::new(HashMap::new()),
         }
     }
@@ -195,14 +209,35 @@ impl RealFontMetrics {
     /// same bytes → identical advances). Bytes that don't parse fall back to the per-script
     /// approximation (never panics). TTF/OTF single-face only (face index 0); a TTC isn't accepted.
     pub fn from_bytes(bytes: &[u8]) -> RealFontMetrics {
-        let font = LoadedFont::from_bytes(
-            bytes.to_vec().into_boxed_slice(),
-            0,
-            "<injected>".to_string(),
-        );
+        Self::from_registry(&[(String::new(), bytes.to_vec())])
+    }
+
+    /// Build deterministic metrics from all caller-provided faces. Invalid/empty faces are ignored;
+    /// registration order is only the final default when neither an exact family nor a matching
+    /// serif/sans category exists.
+    pub fn from_registry(faces: &[(String, Vec<u8>)]) -> RealFontMetrics {
+        let registered = faces
+            .iter()
+            .filter_map(|(family, bytes)| {
+                let font = LoadedFont::from_bytes(
+                    bytes.clone().into_boxed_slice(),
+                    0,
+                    "<injected>".to_string(),
+                )?;
+                let lower = family.to_lowercase();
+                Some(RegisteredFace {
+                    family: normalized_family(family),
+                    category: hwp_model::font_class::classify(family),
+                    bold: lower.contains("bold") || lower.contains("boldface"),
+                    italic: lower.contains("italic") || lower.contains("oblique"),
+                    font,
+                })
+            })
+            .collect();
         RealFontMetrics {
-            font,
+            font: None,
             latin: None,
+            registered,
             cache: RefCell::new(HashMap::new()),
         }
     }
@@ -210,12 +245,15 @@ impl RealFontMetrics {
     /// True when a real font backs the metrics (a Korean-capable face was found). False = the
     /// approximate fallback is active (no font on this machine / CI).
     pub fn is_real(&self) -> bool {
-        self.font.is_some()
+        self.font.is_some() || !self.registered.is_empty()
     }
 
     /// Path of the loaded font, or `None` when falling back to approximate metrics. Diagnostics.
     pub fn font_path(&self) -> Option<&str> {
-        self.font.as_ref().map(|f| f.path.as_str())
+        self.font
+            .as_ref()
+            .or_else(|| self.registered.first().map(|face| &face.font))
+            .map(|f| f.path.as_str())
     }
 
     /// Path of the loaded proportional Latin face, or `None` when Latin routes to the Korean face
@@ -246,42 +284,95 @@ impl RealFontMetrics {
     }
 
     /// Base advance (no 자간/장평) in HWPUNIT — the [`FontMetricsProvider`] contract value.
-    fn base_advance(&self, ch: char, size_hwpunit: i32) -> f64 {
+    fn base_advance(&self, key: &FontKey, ch: char, size_hwpunit: i32) -> f64 {
         let em = size_hwpunit.max(1) as f64;
-        let key = (ch, size_hwpunit);
-        if let Some(&v) = self.cache.borrow().get(&key) {
+        let cache_key = (
+            normalized_family(&key.family),
+            key.bold,
+            key.italic,
+            ch,
+            size_hwpunit,
+        );
+        if let Some(&v) = self.cache.borrow().get(&cache_key) {
             return v;
         }
-        let adv = match &self.font {
-            // Full-width glyphs (Hangul/CJK/fullwidth, 전각) snap to the 1-EM grid: Hancom spaces
-            // them on the EM grid regardless of the font's own (often tighter) advance, so snapping
-            // keeps our line breaks aligned with Hancom's.
-            Some(_) if is_full_width(ch) => em,
-            // Proportional glyphs (Latin/digit/punct) get the REAL HarfBuzz-shaped advance from the
-            // PROPORTIONAL LATIN face when present (Times/Helvetica/Liberation) — the Korean face
-            // packs Latin too wide (overflows narrow cells). The Latin face falls back to the Korean
-            // face, then the per-script approximation, so an absent glyph never collapses to zero.
-            Some(kor) => {
-                let latin = self.latin.as_ref().unwrap_or(kor);
-                let raw = latin.raw_advance(ch);
+        let selected = self.registered_face(key);
+        let adv = if let Some(face) = selected {
+            if is_full_width(ch) {
+                em
+            } else {
+                let raw = face.raw_advance(ch);
                 if raw > 0.0 {
-                    raw / latin.units_per_em * em
-                } else if self.latin.is_some() {
-                    // Glyph absent in the Latin face — try the Korean face before approximating.
-                    let kraw = kor.raw_advance(ch);
-                    if kraw > 0.0 {
-                        kraw / kor.units_per_em * em
-                    } else {
-                        approx_advance(ch, em)
-                    }
+                    raw / face.units_per_em * em
                 } else {
                     approx_advance(ch, em)
                 }
             }
-            None => approx_advance(ch, em),
+        } else {
+            match &self.font {
+                // Full-width glyphs (Hangul/CJK/fullwidth, 전각) snap to the 1-EM grid: Hancom spaces
+                // them on the EM grid regardless of the font's own (often tighter) advance, so snapping
+                // keeps our line breaks aligned with Hancom's.
+                Some(_) if is_full_width(ch) => em,
+                // Proportional glyphs (Latin/digit/punct) get the REAL HarfBuzz-shaped advance from the
+                // PROPORTIONAL LATIN face when present (Times/Helvetica/Liberation) — the Korean face
+                // packs Latin too wide (overflows narrow cells). The Latin face falls back to the Korean
+                // face, then the per-script approximation, so an absent glyph never collapses to zero.
+                Some(kor) => {
+                    let latin = self.latin.as_ref().unwrap_or(kor);
+                    let raw = latin.raw_advance(ch);
+                    if raw > 0.0 {
+                        raw / latin.units_per_em * em
+                    } else if self.latin.is_some() {
+                        // Glyph absent in the Latin face — try the Korean face before approximating.
+                        let kraw = kor.raw_advance(ch);
+                        if kraw > 0.0 {
+                            kraw / kor.units_per_em * em
+                        } else {
+                            approx_advance(ch, em)
+                        }
+                    } else {
+                        approx_advance(ch, em)
+                    }
+                }
+                None => approx_advance(ch, em),
+            }
         };
-        self.cache.borrow_mut().insert(key, adv);
+        self.cache.borrow_mut().insert(cache_key, adv);
         adv
+    }
+
+    fn registered_face(&self, key: &FontKey) -> Option<&LoadedFont> {
+        if self.registered.is_empty() {
+            return None;
+        }
+        let family = normalized_family(&key.family);
+        let exact = |face: &&RegisteredFace| face.family == family;
+        self.registered
+            .iter()
+            .filter(exact)
+            .find(|face| face.bold == key.bold && face.italic == key.italic)
+            .or_else(|| {
+                self.registered
+                    .iter()
+                    .filter(exact)
+                    .find(|face| !face.bold && !face.italic)
+            })
+            .or_else(|| self.registered.iter().find(|face| face.family == family))
+            .or_else(|| {
+                let category = hwp_model::font_class::classify(&key.family);
+                self.registered.iter().find(|face| {
+                    face.category == category && face.bold == key.bold && face.italic == key.italic
+                })
+            })
+            .or_else(|| {
+                let category = hwp_model::font_class::classify(&key.family);
+                self.registered
+                    .iter()
+                    .find(|face| face.category == category && !face.bold && !face.italic)
+            })
+            .or_else(|| self.registered.first())
+            .map(|face| &face.font)
     }
 
     /// Advance in HWPUNIT with 자간/장평 from the [`CharShape`] applied (the layout engine's job per
@@ -289,7 +380,15 @@ impl RealFontMetrics {
     /// per-glyph gap as a fraction of the EM. `script` picks the per-script slot; default = Hangul.
     pub fn advance_scaled(&self, ch: char, size_hwpunit: i32, cs: &CharShape) -> f64 {
         let script = script_of(ch);
-        let base = self.base_advance(ch, size_hwpunit);
+        let base = self.base_advance(
+            &FontKey {
+                family: String::new(),
+                bold: cs.bold,
+                italic: cs.italic,
+            },
+            ch,
+            size_hwpunit,
+        );
         // 0 = unset → 100% (no scaling); otherwise clamp to HWP's 50–200% range. Remap BEFORE the
         // clamp so a default (0) shape is full-width, not clamped up to the 50% floor.
         let ratio = match *cs.ratio.get(script) {
@@ -338,8 +437,8 @@ fn script_of(ch: char) -> ScriptClass {
 }
 
 impl FontMetricsProvider for RealFontMetrics {
-    fn advance_width(&self, _font: &FontKey, ch: char, size_hwpunit: i32) -> f64 {
-        self.base_advance(ch, size_hwpunit)
+    fn advance_width(&self, font: &FontKey, ch: char, size_hwpunit: i32) -> f64 {
+        self.base_advance(font, ch, size_hwpunit)
     }
 
     /// Real line height from the Korean face's vertical metrics (ascent + descent + line_gap),
@@ -356,6 +455,24 @@ impl FontMetricsProvider for RealFontMetrics {
         // a Fixed/Minimum-spacing floor can be reintroduced per-type later if needed.)
         size_hwpunit.max(1) as f64
     }
+
+    fn has_family(&self, family: &str) -> bool {
+        let family = normalized_family(family);
+        self.registered.iter().any(|face| face.family == family)
+    }
+}
+
+fn normalized_family(family: &str) -> String {
+    let mut words: Vec<_> = family.split_whitespace().collect();
+    while words.last().is_some_and(|word| {
+        matches!(
+            word.to_ascii_lowercase().as_str(),
+            "regular" | "bold" | "italic" | "oblique" | "boldface"
+        )
+    }) {
+        words.pop();
+    }
+    words.join(" ").to_lowercase()
 }
 
 #[cfg(test)]
@@ -397,6 +514,7 @@ mod tests {
         let m = RealFontMetrics {
             font: None,
             latin: None,
+            registered: Vec::new(),
             cache: RefCell::new(HashMap::new()),
         };
         let f = FontKey {

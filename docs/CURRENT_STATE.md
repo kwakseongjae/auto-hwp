@@ -3,6 +3,37 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-25 · Codex(sol) — **#215 deterministic licensed font registry 구현·full green · PR 직전**.
+  strict schema v1 registry가 family/style·face 수/개별/총 bytes·TTF/OTF magic·실제 face parse·SHA-256을
+  검증하고, 경로/본문/font bytes 없는 deterministic fingerprint와 exact/fallback/unavailable realization을
+  낸다. RealFontMetrics의 줄바꿈과 place_doc, PDF embed가 같은 normalized family/style/face hash를
+  선택하며 regular/bold/italic/bold-italic 실면을 지원한다. CLI `--font-registry`/`--font-report`, wasm의
+  bounded atomic register, Tauri의 실제 register command와 screen/PDF/print 주입을 같은 계약으로 묶었다.
+  OFL Nanum Gothic/Myeongjo 6-face 공개 manifest의 footnote 보고서는 13 glyph exact + 1,391 glyph
+  category fallback을 정직하게 기록했고, visual-check는 candidate fingerprint를 자동 전달한다.
+  서로 다른 process의 PDF SHA가 `d461528f…`로 exact, 5쪽·41 semantic region 비교 가능 영역은 전부
+  1.0이다(빈 ink는 기존 규칙대로 partially-unscorable). focused/full은 workspace·PDF visual **55**·
+  document visual **4**·AI **20문서/120작업 100%**·canonical **8/18/24+98.9%**·corpus **84**·oracle
+  **82**·HWPX body exact **89.5%/±1 98.2%**·wasm **8,016,704B**·Vitest **1,012**·Chromium
+  **83 pass/3 intentional skip/2 retry-pass**, licenses와 PDF-feature clippy green이다. 첫 E2E 실패 둘은
+  재시도 2.8/3.0초 통과한 기존 flaky이며 코드 회귀 0. rhwp `f137b4c9`는 pinned/무수정.
+  **다음:** diff/privacy·generated audit→commit/push→PR `Closes #215`→exact-head CI/comments green
+  자율 병합→desktop overlay geometry까지 registry를 전파하는 bounded follow-up 또는 #94 HWP5 cutover
+  corpus 증거 중 roadmap 우선순위를 재평가해 issue-first 진행.
+
+- 갱신: 2026-08-25 · Codex(sol) — **PR #214 병합 · #215 deterministic font registry 착수**.
+  #213 exact head `50bd1bf`는 issue-link **3s**·licenses **2m41s**·build-test **9m41s** green,
+  CLEAN/MERGEABLE, review/general 댓글 0으로 protected main `e990f619`에 squash 병합됐다. #213은
+  close되고 원격 branch도 삭제했다. #93/#114에는 원문 없이 8쪽·102영역(70 text/32 table), worst-page
+  ink F1 **0.218434**, 여러 text region **0.0**, reference PDF font object **126** 대 candidate realized
+  face **3**을 동기화했다. threshold/pass는 null이고 기존 page/tile/region oracle은 무변경이다.
+  이 신호를 first-party child #215로 등재하고 exact main의 `codex/issue-215-font-registry`를 만들었다.
+  목표는 명시적으로 제공된 합법 font bytes만 쓰는 strict registry, layout/PDF 동일 face hash lockstep,
+  OFL substitute의 정직한 fallback 표시와 path/text/raw-byte 없는 realization report다. proprietary font
+  vendoring·network lookup·system scan·substitute exact 주장 금지. rhwp는 `f137b4c9` pinned/무수정.
+  **다음:** 기존 RealFontMetrics/EmbedFont/injected web·desktop font flow를 지도화→한 family/style이 layout와
+  PDF에서 서로 다른 face를 고르는 RED→versioned bounded registry DTO와 resolver를 공유 코어에 최소 구현.
+
 - 갱신: 2026-08-25 · Codex(sol) — **#213 one-command semantic PDF visual check full green · PR 직전**.
   `render_doc_trees_with_placement` 한 번의 first-party placement에서 own PDF와 SHA-bound content-free
   text/table/image/object 영역을 함께 만들고, strict schema/쪽·MediaBox/유한·범위·중복·symlink·8MiB·

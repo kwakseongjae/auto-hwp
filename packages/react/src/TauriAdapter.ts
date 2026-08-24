@@ -51,9 +51,8 @@ export interface TauriAdapterOptions {
 /// Two seams are DESKTOP-SPECIFIC (host chrome), documented not hidden:
 ///   • `open(bytes)` vs. the app's path-based `open_doc` — bridged by `resolveOpenPath` (a native file
 ///     dialog wraps opening; the workspace's `<input type=file>` is a web convenience).
-///   • `registerFont` is a no-op + `hasFont()` is always true — the desktop renders with its native /
-///     bundled font stack (no per-call byte injection like the fontless browser); PDF export subsets a
-///     discovered Korean face natively. (Byte-injected own-render metrics on desktop = a 044 follow-up.)
+///   • `registerFont` forwards explicit bytes into the same bounded registry used by wasm; the native
+///     bundled stack remains the zero-registration fallback. PDF export and own-render share the bytes.
 export class TauriAdapter implements EngineAdapter {
   private invoke: Invoke;
   private resolveOpenPath?: (bytes: Uint8Array, name?: string) => Promise<string>;
@@ -342,10 +341,8 @@ export class TauriAdapter implements EngineAdapter {
     return true;
   }
 
-  async registerFont(_family: string, _bytes: Uint8Array): Promise<void> {
-    // The desktop build renders with its native / bundled font stack; there is no per-call byte
-    // injection command (unlike the fontless browser). Documented no-op — see the class header.
-    // Params match the EngineAdapter contract (and WasmAdapter) even though nothing is injected.
+  async registerFont(family: string, bytes: Uint8Array): Promise<void> {
+    await this.invoke<void>("register_font", { family, bytes: Array.from(bytes) });
   }
 
   hasFont(): boolean {

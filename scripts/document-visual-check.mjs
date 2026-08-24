@@ -11,7 +11,7 @@ const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const VALUE_OPTIONS = new Set([
   "--reference", "--reference-tier", "--reference-product", "--reference-build",
   "--reference-os", "--font-fingerprint", "--candidate-font-fingerprint", "--reference-note",
-  "--output-dir", "--cli", "--python", "--max-translation-px",
+  "--output-dir", "--cli", "--python", "--max-translation-px", "--font-registry",
 ]);
 
 export function usage() {
@@ -93,11 +93,31 @@ export function runVisualCheck(args) {
   mkdirSync(stage, { mode: 0o700 });
   const candidate = join(stage, "candidate-own.pdf");
   const regions = join(stage, "candidate-regions.json");
+  const fontReport = join(stage, "candidate-font-realization.json");
   const report = join(stage, "report");
   try {
-    command(cli, ["export-pdf", document, "-o", candidate, "--visual-regions", regions], "own PDF export");
+    const exportArgs = ["export-pdf", document, "-o", candidate, "--visual-regions", regions];
+    if (args.font_registry !== undefined) {
+      const registry = resolve(args.font_registry);
+      regularFile(registry, "font registry");
+      exportArgs.push("--font-registry", registry, "--font-report", fontReport);
+    }
+    command(cli, exportArgs, "own PDF export");
     privateFile(candidate);
     privateFile(regions);
+    let registryFingerprint;
+    if (args.font_registry !== undefined) {
+      privateFile(fontReport);
+      const realization = JSON.parse(readFileSync(fontReport, "utf8"));
+      registryFingerprint = realization.registry_fingerprint;
+      if (typeof registryFingerprint !== "string" || !registryFingerprint.startsWith("sha256:")) {
+        throw new Error("font realization report has no valid registry fingerprint");
+      }
+      if (args.candidate_font_fingerprint !== undefined
+          && args.candidate_font_fingerprint !== registryFingerprint) {
+        throw new Error("--candidate-font-fingerprint disagrees with --font-registry");
+      }
+    }
     const compareArgs = [
       join(repo, "scripts/pdf-visual-check.py"), candidate,
       "--reference", reference,
@@ -105,6 +125,8 @@ export function runVisualCheck(args) {
       "--reference-tier", args.reference_tier,
       "--output-dir", report,
     ];
+    const compareValues = { ...args };
+    if (registryFingerprint !== undefined) compareValues.candidate_font_fingerprint = registryFingerprint;
     for (const [key, flag] of [
       ["reference_product", "--reference-product"],
       ["reference_build", "--reference-build"],
@@ -113,7 +135,7 @@ export function runVisualCheck(args) {
       ["candidate_font_fingerprint", "--candidate-font-fingerprint"],
       ["reference_note", "--reference-note"],
       ["max_translation_px", "--max-translation-px"],
-    ]) if (args[key] !== undefined) compareArgs.push(flag, args[key]);
+    ]) if (compareValues[key] !== undefined) compareArgs.push(flag, compareValues[key]);
     command(args.python, compareArgs, "PDF visual comparator");
     const evidence = JSON.parse(readFileSync(regions, "utf8"));
     const reportJson = JSON.parse(readFileSync(join(report, "report.json"), "utf8"));
@@ -123,11 +145,15 @@ export function runVisualCheck(args) {
       source_format: extname(document).slice(1).toLowerCase(),
       candidate_pdf_sha256: evidence.candidate_pdf_sha256,
       visual_region_schema_version: evidence.schema_version,
+      candidate_font_fingerprint: registryFingerprint ?? args.candidate_font_fingerprint ?? null,
       report_status: reportJson.status,
       policy_pass: null,
       artifacts: {
         candidate_pdf: "candidate-own.pdf",
         candidate_regions: "candidate-regions.json",
+        ...(registryFingerprint === undefined ? {} : {
+          candidate_font_realization: "candidate-font-realization.json",
+        }),
         report_json: "report/report.json",
         report_html: "report/index.html",
       },

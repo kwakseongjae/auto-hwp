@@ -24,6 +24,7 @@ use tauri::{Emitter, Manager};
 /// `Arc` so the heavy commands can clone a handle out of `State` and move it into a
 /// `spawn_blocking` worker, keeping the parse/serialize/render off the async/IPC thread.
 pub type SharedSession = Arc<Mutex<hwp_mcp::Session>>;
+pub type SharedFonts = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
 pub(crate) type SharedDesktopState = Arc<Mutex<desktop_state::DesktopDocumentState>>;
 pub(crate) type SharedRecentDocuments = Arc<Mutex<()>>;
 
@@ -356,6 +357,35 @@ fn allow_desktop_close(desktop: tauri::State<'_, SharedDesktopState>) -> Result<
     Ok(())
 }
 
+/// Register/replace one explicit host-provided face using the same bounded contract as wasm. The
+/// bytes remain process-local; no system directory is scanned and no path crosses the webview IPC.
+#[tauri::command]
+fn register_font(
+    family: String,
+    bytes: Vec<u8>,
+    fonts: tauri::State<'_, SharedFonts>,
+) -> Result<(), String> {
+    use hwp_session::font_registry::{FontFaceInput, FontRegistry, FontRegistryLimits};
+    let mut fonts = fonts.lock().map_err(|_| "font registry poisoned")?;
+    let mut prospective = fonts.clone();
+    match prospective
+        .iter_mut()
+        .find(|(registered, _)| registered.trim().eq_ignore_ascii_case(family.trim()))
+    {
+        Some(slot) => *slot = (family.clone(), bytes.clone()),
+        None => prospective.push((family.clone(), bytes.clone())),
+    }
+    FontRegistry::new(
+        prospective
+            .iter()
+            .map(|(family, bytes)| FontFaceInput::from_legacy_label(family.clone(), bytes.clone()))
+            .collect(),
+        FontRegistryLimits::default(),
+    )?;
+    *fonts = prospective;
+    Ok(())
+}
+
 #[tauri::command]
 async fn render_page(page: u32, sess: tauri::State<'_, SharedSession>) -> Result<String, String> {
     let sess = sess.inner().clone();
@@ -396,12 +426,15 @@ async fn render_doc_html(sess: tauri::State<'_, SharedSession>) -> Result<String
 async fn render_own_page(
     page: u32,
     sess: tauri::State<'_, SharedSession>,
+    fonts: tauri::State<'_, SharedFonts>,
 ) -> Result<String, String> {
     let sess = sess.inner().clone();
+    let fonts = fonts.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let s = sess.lock().map_err(|_| "session poisoned")?;
+        let fonts = fonts.lock().map_err(|_| "font registry poisoned")?;
         let doc = s.doc.as_ref().ok_or("no document open")?.doc();
-        let svgs = hwp_session::render_svg(doc);
+        let svgs = hwp_session::render_svg_with(doc, &fonts);
         svgs.get(page as usize)
             .cloned()
             .ok_or_else(|| format!("page {page} out of range (0..{})", svgs.len()))
@@ -413,15 +446,20 @@ async fn render_own_page(
 /// Page count of the LIVE document as paginated by OUR OWN engine (may differ from `doc_page_count`,
 /// which uses the rhwp paginator) — drives the "자체 렌더" virtualized page list. 0 if no document.
 #[tauri::command]
-async fn own_page_count(sess: tauri::State<'_, SharedSession>) -> Result<u32, String> {
+async fn own_page_count(
+    sess: tauri::State<'_, SharedSession>,
+    fonts: tauri::State<'_, SharedFonts>,
+) -> Result<u32, String> {
     let sess = sess.inner().clone();
+    let fonts = fonts.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let s = sess.lock().map_err(|_| "session poisoned")?;
+        let fonts = fonts.lock().map_err(|_| "font registry poisoned")?;
         let doc = match s.doc.as_ref() {
             Some(d) => d.doc(),
             None => return Ok(0),
         };
-        Ok(hwp_session::render_svg(doc).len() as u32)
+        Ok(hwp_session::render_svg_with(doc, &fonts).len() as u32)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -545,15 +583,22 @@ async fn export_doc_html(
 async fn export_doc_pdf(
     path: String,
     sess: tauri::State<'_, SharedSession>,
+    fonts: tauri::State<'_, SharedFonts>,
 ) -> Result<String, String> {
     let sess = sess.inner().clone();
+    let fonts = fonts.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let s = sess.lock().map_err(|_| "session poisoned")?;
+        let fonts = fonts.lock().map_err(|_| "font registry poisoned")?;
         let doc = s.doc.as_ref().ok_or("no document open")?.doc();
         let title = std::path::Path::new(&path)
             .file_stem()
             .map(|t| t.to_string_lossy().into_owned());
-        let result = hwp_session::emit_pdf(doc, title)?;
+        let result = if fonts.is_empty() {
+            hwp_session::emit_pdf(doc, title)?
+        } else {
+            hwp_session::emit_pdf_with_fonts(doc, title, &fonts)?
+        };
         std::fs::write(&path, &result.bytes).map_err(|e| format!("write {path}: {e}"))?;
         let font = match &result.font_path {
             Some(_) => "한글 글꼴 임베드됨",
@@ -1992,12 +2037,21 @@ async fn export_hwpx_bytes(sess: tauri::State<'_, SharedSession>) -> Result<Vec<
 /// place_doc → paint IR → krilla path). Needs `--features pdf`; without it a clear error (below).
 #[cfg(feature = "pdf")]
 #[tauri::command]
-async fn export_pdf_bytes(sess: tauri::State<'_, SharedSession>) -> Result<Vec<u8>, String> {
+async fn export_pdf_bytes(
+    sess: tauri::State<'_, SharedSession>,
+    fonts: tauri::State<'_, SharedFonts>,
+) -> Result<Vec<u8>, String> {
     let sess = sess.inner().clone();
+    let fonts = fonts.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let s = sess.lock().map_err(|_| "session poisoned")?;
+        let fonts = fonts.lock().map_err(|_| "font registry poisoned")?;
         let doc = s.doc.as_ref().ok_or("no document open")?.doc();
-        Ok(hwp_session::emit_pdf(doc, None)?.bytes)
+        if fonts.is_empty() {
+            Ok(hwp_session::emit_pdf(doc, None)?.bytes)
+        } else {
+            Ok(hwp_session::emit_pdf_with_fonts(doc, None, &fonts)?.bytes)
+        }
     })
     .await
     .map_err(|e| e.to_string())?
@@ -2023,12 +2077,19 @@ async fn export_pdf_bytes(_sess: tauri::State<'_, SharedSession>) -> Result<Vec<
 async fn print_doc_pdf(
     app: tauri::AppHandle,
     sess: tauri::State<'_, SharedSession>,
+    fonts: tauri::State<'_, SharedFonts>,
 ) -> Result<native_print::NativePrintResult, String> {
     let sess = sess.inner().clone();
+    let fonts = fonts.inner().clone();
     let export = tauri::async_runtime::spawn_blocking(move || {
         let s = sess.lock().map_err(|_| "session poisoned")?;
+        let fonts = fonts.lock().map_err(|_| "font registry poisoned")?;
         let doc = s.doc.as_ref().ok_or("no document open")?.doc();
-        hwp_session::emit_pdf(doc, None)
+        if fonts.is_empty() {
+            hwp_session::emit_pdf(doc, None)
+        } else {
+            hwp_session::emit_pdf_with_fonts(doc, None, &fonts)
+        }
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -2095,6 +2156,7 @@ pub fn run() {
     let app = builder
         .plugin(tauri_plugin_dialog::init())
         .manage(SharedSession::default())
+        .manage(SharedFonts::default())
         .manage(SharedDesktopState::default())
         .manage(SharedRecentDocuments::default())
         .manage(open_request::OpenRequestQueue::default())
@@ -2143,6 +2205,7 @@ pub fn run() {
             render_page,
             render_doc_html,
             render_own_page,
+            register_font,
             own_page_count,
             doc_page_count,
             doc_outline,

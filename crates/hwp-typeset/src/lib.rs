@@ -1634,7 +1634,6 @@ pub fn layout_paragraph(
     let mut chars: Vec<(char, i32)> = Vec::new();
     let mut advs: Vec<f64> = Vec::new();
     let mut object_heights: Vec<f64> = Vec::new();
-    let font = plain_font();
     for run in &p.runs {
         let cs = doc.char_shapes.get(run.char_shape);
         let size = cs.map(|c| c.height).filter(|&h| h > 0).unwrap_or(1000);
@@ -1643,6 +1642,7 @@ pub fn layout_paragraph(
                 Inline::Text(t) => {
                     for ch in t.chars() {
                         let sch = subst_glyph(ch);
+                        let font = resolved_font_key(cs, sch, fonts);
                         chars.push((sch, size));
                         advs.push(scaled_advance(sch, size, cs, &font, fonts));
                         object_heights.push(0.0);
@@ -1879,6 +1879,41 @@ pub(crate) fn script_slot(ch: char) -> ScriptClass {
         0x3040..=0x30FF => ScriptClass::Japanese,
         0x0000..=0x024F => ScriptClass::Latin,
         _ => ScriptClass::Other,
+    }
+}
+
+/// Resolve one glyph to the same display family/style that the placer and PDF exporter use. An
+/// explicitly registered document family wins; otherwise the deterministic OFL substitute name is
+/// carried in the key so a matching injected serif/sans face can drive both metrics and realization.
+pub(crate) fn resolved_font_key(
+    cs: Option<&CharShape>,
+    ch: char,
+    fonts: &dyn FontMetricsProvider,
+) -> FontKey {
+    let Some(cs) = cs else { return plain_font() };
+    let slot = script_slot(ch);
+    let requested = cs
+        .fonts
+        .get(slot as usize)
+        .and_then(|name| name.as_deref())
+        .or(cs.font_family.as_deref())
+        .map(str::trim)
+        .filter(|name| !name.is_empty());
+    let family = requested
+        .and_then(|name| {
+            if fonts.has_family(name) {
+                Some(name.to_string())
+            } else {
+                let panose = cs.font_panose.get(slot as usize).and_then(Option::as_ref);
+                hwp_model::font_class::substitute_family_with_panose(name, panose)
+                    .map(str::to_string)
+            }
+        })
+        .unwrap_or_default();
+    FontKey {
+        family,
+        bold: cs.bold,
+        italic: cs.italic,
     }
 }
 

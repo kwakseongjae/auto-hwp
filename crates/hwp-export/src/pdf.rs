@@ -1198,30 +1198,35 @@ fn paint_glyph(
                     .map(|(_, face)| face)
             };
             let explicit = font.and_then(|n| {
-                if bold {
-                    explicit_face(&format!("{} Bold", n.trim())).or_else(|| explicit_face(n))
-                } else {
-                    explicit_face(n)
-                }
+                let n = n.trim();
+                let styled = match (bold, italic) {
+                    (true, true) => explicit_face(&format!("{n} Bold Italic"))
+                        .or_else(|| explicit_face(&format!("{n} Italic Bold")))
+                        .map(|face| (face, true)),
+                    (true, false) => explicit_face(&format!("{n} Bold")).map(|face| (face, false)),
+                    (false, true) => explicit_face(&format!("{n} Italic")).map(|face| (face, true)),
+                    (false, false) => None,
+                };
+                styled.or_else(|| explicit_face(n).map(|face| (face, false)))
             });
-            let face = if let Some(face) = explicit {
-                face
+            let (face, realized_italic) = if let Some((face, realized_italic)) = explicit {
+                (face, realized_italic)
             } else if is_serif {
                 if bold {
-                    f.serif_bold.as_ref().or(f.serif.as_ref()).unwrap()
+                    (f.serif_bold.as_ref().or(f.serif.as_ref()).unwrap(), false)
                 } else {
-                    f.serif.as_ref().unwrap()
+                    (f.serif.as_ref().unwrap(), false)
                 }
             } else if bold {
-                f.bold.as_ref().unwrap_or(&f.font)
+                (f.bold.as_ref().unwrap_or(&f.font), false)
             } else {
-                &f.font
+                (&f.font, false)
             };
             let (bx, by) = (pt(x), pt(y));
             // Italic: NanumGothic has no italic face, so synthesize an oblique by shearing the glyph
             // about its baseline (x' = x - SLANT*y + SLANT*baseline) — ascenders lean right, the
             // baseline origin stays put. Matches the webview's font-style:italic synthesis.
-            if italic {
+            if italic && !realized_italic {
                 const SLANT: f32 = 0.21; // ≈ 12°, the conventional faux-italic angle
                 surface.push_transform(&krilla::geom::Transform::from_row(
                     1.0,
@@ -1241,7 +1246,7 @@ fn paint_glyph(
                 false,
                 TextDirection::Auto,
             );
-            if italic {
+            if italic && !realized_italic {
                 surface.pop();
             }
         }
