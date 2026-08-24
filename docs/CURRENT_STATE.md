@@ -3,6 +3,18 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-24 · Codex(sol) — **PR #195 병합 · #196 착수**.
+  PR #195 exact head `cecbfdc`에서 issue-link **5s**·build-test **9m31s**·licenses **2m54s** green,
+  CLEAN/MERGEABLE, review/general/inline 댓글 0을 확인하고 protected main `dee2996f`로 squash 병합했다.
+  #192 close와 원격 branch 삭제를 확인하고 #94에 content-free 근거를 동기화했다. 최근 GitHub 활동은
+  owner 작업뿐이며 신규 외부 제보·PR·댓글, 스팸·악성·보안/개인정보 신호는 0이다. 다음 unowned
+  boundary `TABLE 0x4d/51364`는 중복 이슈가 없어 classification-first 자식 **#196**을 R18/P1/
+  area:hwp5/status:ready로 열고 exact main의 `codex/issue-196-hwp5-next-table` worktree를 만들었다.
+  **다음:** source text/path/hash/raw를 출력하지 않는 content-free probe를 독립 2회 수행해 common/table
+  flags, full cell topology/order/span, geometry, references, paragraph/nesting/extension framing을 분류한다.
+  모든 active semantics가 shared IR로 faithful할 때만 exact discriminator+positive/hostile fixture를
+  구현한다. production route·`external/rhwp`·HWPX·shared layout·generated assets·scoring은 불변.
+
 - 갱신: 2026-08-24 · Codex(sol) — **PR #194 병합 · #192 latest main 재개**.
   PR #194 exact head `89c3ea4`에서 issue-link **3s**·build-test **9m24s**·licenses **2m58s** green,
   MERGEABLE/CLEAN, review/general/inline 외부 댓글 0을 확인하고 protected main `f2306d17`로 squash

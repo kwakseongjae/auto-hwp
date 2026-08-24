@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #195 merged / #196 started
+- #195 exact-head CI green, CLEAN/MERGEABLE, comments 0; main `dee2996f`, #192 closed.
+- #94 synced; no new external/community/security signal; remote branch removed.
+- #196 opened for TABLE `0x4d/51364`; exact-main worktree ready for content-free classification.
+
 ## 2026-08-24 (Codex sol) · PR #195 posted
 - `Closes #192` PR #195 published with exact validation and privacy/rhwp boundaries.
 - next final-head required CI + reviews/comments/mergeability → autonomous merge.
