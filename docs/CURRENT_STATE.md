@@ -30,9 +30,9 @@
   분류했다. 임시 dependency links는 제거했고 final diff audit에서 production route·`external/rhwp`·
   HWPX·shared layout·generated assets·oracle scoring diff 0, private text/path/hash/raw/credential diff 0을
   확인했다. 구현·검증·continuity를 commit `8453f30`으로 원격
-  `codex/issue-192-hwp5-common-object`에 push했다. **다음:** `Closes #192` PR 게시→required CI·
-  comments·mergeability green이면 autonomous merge; 이후 #94 근거 동기화와 다음 boundary
-  `TABLE 0x4d/51364` issue.
+  `codex/issue-192-hwp5-common-object`에 push하고 PR **#195**를 `Closes #192`로 게시했다.
+  **다음:** final head required CI·comments·mergeability green이면 autonomous merge; 이후 #94 근거
+  동기화와 다음 boundary `TABLE 0x4d/51364` issue.
 
 - 갱신: 2026-08-24 · Codex(sol) — **#193 shared table-caption foundation 구현 중**.
   `TableCaption`을 source-neutral shared IR에 추가하고 rhwp HWP5 lift가 방향 4종·문단 blocks·gap·

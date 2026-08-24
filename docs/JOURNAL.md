@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · PR #195 posted
+- `Closes #192` PR #195 published with exact validation and privacy/rhwp boundaries.
+- next final-head required CI + reviews/comments/mergeability → autonomous merge.
+
 ## 2026-08-24 (Codex sol) · #192 implementation pushed
 - exact captioned-table parser/tests/continuity committed as `8453f30` and pushed.
 - next `Closes #192` PR → required CI/comments/mergeability → autonomous merge.
