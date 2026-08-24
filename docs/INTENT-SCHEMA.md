@@ -242,7 +242,9 @@ Proposal v1 계약으로 컴파일되고 live revision을 다시 확인하므로
   컴파일한다. 공백·키 순서·생략 가능한 기본값이 Proposal identity를 바꾸지 않는다.
 - scratch clone에 전체 batch를 적용해 live bytes/revision/undo depth를 바꾸지 않는다.
 - 결과는 `proposal_id`, `session_id`, `document_id`, `base_revision`, 정규화 Intents,
-  영향 주소/쪽, capability snapshot, risks/warnings, cross-surface digest를 갖는 Proposal v1이다.
+  영향 주소/쪽, capability snapshot, risks/warnings, cross-surface digest와 content-free
+  `verification` 보고서를 갖는 Proposal v1이다. 보고서 계약은
+  [PRECOMMIT-VERIFICATION-V1.md](PRECOMMIT-VERIFICATION-V1.md)를 따른다.
 
 #### `CommitProposal` — revision-bound atomic commit
 ```json
@@ -255,7 +257,8 @@ Proposal v1 계약으로 컴파일되고 live revision을 다시 확인하므로
 
 `proposal_id`와 expected/live/base revision, session/document identity가 모두 일치할 때만 scratch에서
 검증된 snapshot을 한 undo 단위로 교체한다. reopen, 외부 편집, undo, redo, 다른 commit 뒤에는
-`stale Proposal v1`로 거부하며 실패한 proposal은 재사용할 수 없다.
+`stale Proposal v1`로 거부하며, `verification.commit_allowed`가 false인 proposal도 거부한다.
+실패한 proposal은 재사용할 수 없다.
 
 #### `DiscardProposal` — 대기 제안 폐기
 ```json

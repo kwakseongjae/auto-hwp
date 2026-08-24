@@ -156,6 +156,47 @@ pub fn place(doc: &SemanticDoc, injected: &[(String, Vec<u8>)]) -> PlacedDoc {
     hwp_typeset::place_doc(doc, fonts.as_ref())
 }
 
+/// Content-free inventory used by Proposal verification. Both page counts are deliberately driven
+/// with the exact same font provider: a mismatch is therefore a real LOCKSTEP failure, not a host
+/// font-discovery artifact.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct VerificationLayoutInventory {
+    pub pages: usize,
+    pub lockstep_pages: usize,
+    pub lines: usize,
+    pub glyphs: usize,
+    pub blocks: usize,
+    pub tables: usize,
+    pub images: usize,
+    pub placeholder_objects: usize,
+}
+
+pub fn verification_layout_inventory(
+    doc: &SemanticDoc,
+) -> Result<VerificationLayoutInventory, String> {
+    use hwp_model::capability::LayoutEngine;
+    let fonts = own_render_fonts();
+    let placed = hwp_typeset::place_doc(doc, fonts.as_ref());
+    let lockstep = hwp_typeset::NaiveLayout
+        .layout(doc, fonts.as_ref())
+        .map_err(|e| format!("verification layout failed: {e}"))?;
+    Ok(VerificationLayoutInventory {
+        pages: placed.pages.len(),
+        lockstep_pages: lockstep.pages.len(),
+        lines: lockstep.pages.iter().map(|page| page.lines.len()).sum(),
+        glyphs: placed.pages.iter().map(|page| page.glyphs.len()).sum(),
+        blocks: placed.pages.iter().map(|page| page.blocks.len()).sum(),
+        tables: placed.pages.iter().map(|page| page.tables.len()).sum(),
+        images: placed.pages.iter().map(|page| page.images.len()).sum(),
+        placeholder_objects: placed
+            .pages
+            .iter()
+            .flat_map(|page| &page.images)
+            .filter(|image| image.bin_ref.is_empty() && image.svg.is_none())
+            .count(),
+    })
+}
+
 // ---- Outline (heading nav) --------------------------------------------------------------------
 
 /// One heading in the document outline: where it lives in the model + the page it starts on.

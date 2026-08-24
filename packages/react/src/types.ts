@@ -35,6 +35,7 @@ export type {
   PointerInput,
   PageGeom,
   ProposalV1,
+  VerificationReportV1,
   RunSpec,
   CellRange,
   CellFmt,

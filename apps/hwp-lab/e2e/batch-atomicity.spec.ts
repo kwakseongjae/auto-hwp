@@ -64,7 +64,7 @@ test("N건 일괄 적용 → 카드의 되돌리기 1클릭 → 문서가 원상
   await expect.poll(async () => docText(page), { timeout: 30_000 }).toBe(before);
 });
 
-test("배치가 도중에 실패하면 이미 들어간 편집까지 롤백된다 (적용 실패 = 문서 그대로)", async ({ page }) => {
+test("제안 검증이 도중에 실패하면 카드·부분 편집 없이 원문을 유지한다", async ({ page }) => {
   await open(page);
   const before = await docText(page);
 
@@ -72,12 +72,13 @@ test("배치가 도중에 실패하면 이미 들어간 편집까지 롤백된�
     { intent: "SetParagraphText", section: 0, block: PARA_BLOCK, text: "PARTIAL" },
     { intent: "SetParagraphText", section: 0, block: 99999, text: "없는 블록" }, // 엔진이 거절
   ]);
-  await propose(page, "이 문단을 고쳐줘");
+  await showVibePanel(page);
+  await page.locator(".hw-textarea").fill("이 문단을 고쳐줘");
+  await page.locator(".hw-btn-send").click();
+  await expect(page.locator(".hw-chat")).toContainText("proposal scratch intent[1] failed", { timeout: 30_000 });
+  await expect(page.locator(".hw-card")).toHaveCount(0);
 
-  await page.locator(".hw-review .hw-btn-primary").click();
-  await expect(page.locator(".hw-chat")).toContainText("적용 실패", { timeout: 30_000 });
-
-  // 실패 안내가 정직하려면 문서에 첫 건의 흔적도 남아 있으면 안 된다.
+  // 검증 실패가 정직하려면 승인 카드도, 첫 intent의 흔적도 없어야 한다.
   await expect.poll(async () => docText(page), { timeout: 30_000 }).toBe(before);
 
   // 그리고 되돌릴 것이 없다고 정직하게 답해야 한다(예전엔 침묵 → "⌘Z 무반응"으로 읽혔다).
@@ -87,8 +88,6 @@ test("배치가 도중에 실패하면 이미 들어간 편집까지 롤백된�
   await page.keyboard.press("Meta+z");
   await expect(page.locator(".hw-status")).toContainText("되돌릴 편집이 없습니다", { timeout: 30_000 });
 
-  // ⚠️ 이 스펙은 **사용자에게 보이는 계약**(실패 = 화면 원상 + 정직한 ⌘Z 안내)만 잠근다. 수리 전 코드에서
-  //   화면이 그대로였던 이유는 "안전해서"가 아니라 부분 실패가 리플로우조차 일으키지 않아 **오염이 보이지
-  //   않았기 때문**이다(모델은 더러운데 렌더는 옛것). 롤백 자체의 red→green 증명은
-  //   packages/editor-core/src/__tests__/session.test.ts 의 배치 원자성 3건이 담당한다.
+  // UI는 검증 실패를 승인 가능한 카드로 가장하지 않는다. 엔진의 detached scratch와 live revision
+  // 불변은 hwp-mcp Proposal v1 단위 테스트가 별도로 잠근다.
 });

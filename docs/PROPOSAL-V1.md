@@ -13,6 +13,7 @@ Proposal v1은 Web, Tauri, MCP, SDK가 공유하는 외부 편집 계약이다. 
 - 기본값까지 채운 `intents`
 - `affected_addresses`, `affected_pages`
 - `capabilities`, `risks`, `warnings`
+- 의미·LOCKSTEP·SVG/PDF 증거와 구조 판정을 담은 `verification`
 
 중첩 Intent는 schema v0의 `deny_unknown_fields` decoder를 다시 통과한다. 알 수 없거나 malformed인
 필드, lifecycle/query/undo/redo, 중첩 proposal은 scratch 실행 전에 거부한다. `AiContent`는 허용된
@@ -26,7 +27,7 @@ reopen, 다른 편집, undo, redo, 다른 commit 뒤의 proposal은 stale이며 
 ## Digest와 신뢰 경계
 
 digest는 재귀적으로 object key를 정렬한 UTF-8 JSON에 대한 FNV-1a 64-bit 값이다. Rust와 TypeScript
-recorded fixture는 `fnv1a64:12f669d02eea3d03`을 공유한다. 이 값은 transport 간 정규화 parity를
+recorded fixture는 `fnv1a64:1dba1532ae014063`을 공유한다. 이 값은 transport 간 정규화 parity를
 확인하는 checksum이지 인증 수단이 아니다. 커밋 권한은 엔진 내부에만 보관한 pending snapshot과
 session/document/revision binding에서 나온다. 외부에서 DTO를 고치거나 같은 digest를 만들더라도
 엔진이 보관한 정확한 pending proposal이 아니면 커밋할 수 없다.
@@ -44,3 +45,4 @@ Web / Tauri / MCP / SDK
 ```
 
 필드별 wire 예제와 오류 표는 [INTENT-SCHEMA.md](INTENT-SCHEMA.md) §6.2를 정본으로 삼는다.
+검증 판정과 비공개 증거 계약은 [PRECOMMIT-VERIFICATION-V1.md](PRECOMMIT-VERIFICATION-V1.md)를 따른다.
