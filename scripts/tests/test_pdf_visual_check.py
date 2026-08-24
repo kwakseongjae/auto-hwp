@@ -106,7 +106,7 @@ class VisualRegionTests(unittest.TestCase):
 
     def manifest(self, candidate_sha256: str):
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "coordinate_space": "HWPUNIT",
             "candidate_pdf_sha256": candidate_sha256,
             "pages": [
@@ -114,10 +114,12 @@ class VisualRegionTests(unittest.TestCase):
                     "page": 1,
                     "width": 59500.0,
                     "height": 84200.0,
+                    "intentional_blank_text_regions": 2,
                     "regions": [
                         {
                             "id": "text-0001",
                             "category": "text",
+                            "paint_status": "painted",
                             "x": 1000.0,
                             "y": 2000.0,
                             "w": 10000.0,
@@ -142,6 +144,7 @@ class VisualRegionTests(unittest.TestCase):
         loaded = self.load(self.manifest(candidate_sha256), candidate_sha256)
         self.assertEqual(loaded["total_regions"], 1)
         self.assertEqual(loaded["category_counts"]["text"], 1)
+        self.assertEqual(loaded["intentional_blank_text_regions"], 2)
         self.assertNotIn("text", loaded["document"]["pages"][0]["regions"][0])
 
         for mutation, pattern in (
@@ -149,6 +152,18 @@ class VisualRegionTests(unittest.TestCase):
             (lambda doc: doc.update({"candidate_pdf_sha256": "b" * 64}), "SHA-256 mismatch"),
             (lambda doc: doc["pages"][0].update({"width": 59400}), "dimensions do not match"),
             (lambda doc: doc["pages"][0]["regions"][0].update({"category": "secret"}), "category"),
+            (
+                lambda doc: doc["pages"][0]["regions"][0].update(
+                    {"paint_status": "not-applicable"}
+                ),
+                "paint_status",
+            ),
+            (
+                lambda doc: doc["pages"][0].update(
+                    {"intentional_blank_text_regions": -1}
+                ),
+                "intentional_blank_text_regions",
+            ),
             (lambda doc: doc["pages"][0]["regions"][0].update({"x": -1}), "outside its page"),
             (lambda doc: doc["pages"][0]["regions"][0].update({"w": float("nan")}), "non-finite"),
         ):
@@ -165,6 +180,7 @@ class VisualRegionTests(unittest.TestCase):
             {
                 "id": f"text-{index:04d}",
                 "category": "text",
+                "paint_status": "painted",
                 "x": 0.0,
                 "y": 0.0,
                 "w": 59500.0,
@@ -204,6 +220,7 @@ class VisualRegionTests(unittest.TestCase):
                 {
                     "id": "table-0001",
                     "category": "table",
+                    "paint_status": "not-applicable",
                     "x": 20.0,
                     "y": 20.0,
                     "w": 40.0,
@@ -228,6 +245,16 @@ class VisualRegionTests(unittest.TestCase):
             100_000,
         )
         self.assertEqual(missing[0]["metrics"]["ink"]["f1"], 0.0)
+
+        page["regions"][0]["category"] = "text"
+        page["regions"][0]["id"] = "text-0001"
+        page["regions"][0]["paint_status"] = "expected-missing"
+        explicit_missing = pdf_visual_check._score_visual_regions(
+            page, reference, candidate, 10, 10, {"dx": 0, "dy": 0}, 100_000
+        )
+        self.assertEqual(explicit_missing[0]["status"], "unscorable")
+        self.assertIsNone(explicit_missing[0]["metrics"])
+        self.assertIn("no placed glyph", explicit_missing[0]["reason"])
         self.assertEqual(missing[0]["status"], "partially_unscorable")
         summary = pdf_visual_check._summarize_pages(
             [{"page": 1, "metrics": None, "semantic_regions": missing}]

@@ -321,10 +321,18 @@ otherwise white, globally similar page.
 
 ### Semantic regions
 
-When `--candidate-regions` is supplied, the exporter evidence divides the candidate placement into
-four content-free categories: paragraph bands (`text`), placed table boxes (`table`), raster images
+When `--candidate-regions` is supplied, visual-region schema v2 divides the candidate placement into
+four content-free categories: paint-backed paragraph bands (`text`), placed table boxes (`table`), raster images
 (`image`), and SVG-backed equations/charts/other objects (`object`). IDs and HWPUNIT geometry are
 present; source text, paths, binary identifiers, and font paths are absent.
+
+For paragraph bands, source-visible text is reduced to a boolean and checked against the exact placed
+glyph stream. Any glyph inside the band wins as `painted`, including a generated marker on a
+text-empty paragraph. Without a glyph, source-visible paragraphs become `expected-missing`; only a
+band with neither source-visible text nor a placed glyph is an intentional blank. Intentional blank
+page-fragments are counted separately and never enter pixel ranking. `expected-missing` is an explicit
+unscorable placement failure. Non-text regions use `not-applicable`. A painted region that rasterizes
+without candidate ink remains partially unscorable with an explicit metric reason rather than being hidden.
 
 The manifest must be strict UTF-8 JSON with exactly the known fields, ordered one-based pages, finite
 positive in-page geometry, unique per-page IDs, matching MediaBox dimensions, and an exact SHA-256
@@ -459,6 +467,23 @@ The structural signal is decisive: content-bbox height deltas collapsed from
 bottom-center page number at the reference location. This closes the missing-decoration defect, not
 the broader typography/color fidelity gap; the T3 reference, thresholds, translation bounds, and
 report-only `pass=null` policy remain unchanged.
+
+### Paint-backed text-region remeasurement (2026-08-25, #221)
+
+Visual-region schema v2 reran the exact #219 candidate PDF without changing its SHA-256
+`25524c3dfc15e19498fb5623e74bc38f16ba9e751dba7470ef441406cdb9e5bd`, proving that this evidence
+change does not alter placement or export bytes. Of the former 70 broad paragraph bands, 42 are now
+classified as intentional blanks and excluded from pixel ranking. All remaining 28 text regions are
+`painted`, all 28 contain candidate ink, and none is `expected-missing`.
+
+Twelve of those 28 painted regions remain partially unscorable because the globally aligned
+reference band contains no ink. Eleven contain only 22 candidate pixels and one contains 2,406,
+while additional scored text regions have zero overlap despite ink on both sides. Together with
+direct page inspection, this replaces the earlier ambiguous “candidate missing text” signal with a
+bounded cumulative vertical-position drift: lower-page candidate symbols/headings occupy bands where
+the reference content has already moved. The next rendering child should isolate the first divergent
+vertical increment; font weight/category remains a separate axis. T3 authority, translation bounds,
+thresholds, and `pass=null` remain unchanged.
 
 ## Tests
 

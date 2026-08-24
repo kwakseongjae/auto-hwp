@@ -3,6 +3,21 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-25 · Codex(sol) — **PR #220 병합 · #221 paint-backed text-region evidence 구현·재측정 완료**.
+  #219 exact head `be39cae`는 교체 CI의 issue-link **3s**·licenses **2m51s**·build-test **11m1s**
+  green, CLEAN/MERGEABLE, 댓글/review 0으로 protected main `ffce59dd`에 squash 병합됐다. #219는
+  close되고 원격 branch도 삭제했으며 #93/#94/#114에 content-free 결과를 동기화했다. 후속 P0 #221을
+  등재하고 exact main의 `codex/issue-221-paint-backed-regions`를 만들었다. visual-region schema v2가
+  source-visible boolean과 exact placed glyph를 결합해 `painted`/`expected-missing`을 강제하고 intentional
+  blank page-fragment를 별도 집계한다. canonical은 기존 broad text 70개를 blank **42** + painted **28**로
+  분리했고 painted 전부 candidate ink>0, expected-missing 0이다. PDF SHA `25524c3d…` exact로 조판/export
+  바이트 불변. 남은 28 중 reference-empty 12(11개 candidate 22px, 1개 2,406px)와 양쪽 ink지만 F1=0인
+  영역이 실제 누적 수직 위치 drift를 가리킨다. focused Rust 4 + Python 55 + Node 4, hwp-export 45,
+  full Rust/rhwp/AI120/8·18·24+98.9%/공공문서·오라클/JS build/Vitest1,012 모두 green. Chromium은
+  **84 pass·3 intentional skip·1 retry-pass**(image toast timing flake; 재시도 3.0s)다.
+  **다음:** commit/push→`Closes #221` PR/CI/merge→#93/#114 동기화→첫 divergent vertical increment를
+  고정하는 단일축 child. threshold/T3/`pass=null`·HWP/HWPX/rhwp/generated assets는 불변이다.
+
 - 갱신: 2026-08-25 · Codex(sol) — **#219 owned page-number enrichment 구현·시각 계측·full green · PR 직전**.
   production HWP5는 governed rhwp base decode를 유지하고, strict first-party parser가 whole-document
   parse에 성공하며 section topology·기존 typed decoration과 모두 호환될 때만
