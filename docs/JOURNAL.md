@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #190 focused green
+- exact 1×1 + `0x0500` only owns six paragraphs; shared IR preserves all six blocks.
+- count7/wrong width-ref/geometry/extension hostile axes fail closed; HWP5 70, fmt/clippy/wasm32 green.
+- public boundary advanced to common-object `0x47/47738`; next quick/full→audit→PR/CI/merge.
+
 ## 2026-08-24 (Codex sol) · #190 classified
 - two content-free runs exact: owned 1×1 table, `0x0500`, exact geometry/extension, 6 cell paragraphs.
 - shared `Cell.blocks` is lossless; global span/row equations already prove geometry; classifier removed.
