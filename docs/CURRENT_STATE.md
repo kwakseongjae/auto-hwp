@@ -218,7 +218,9 @@
   wasm optimized **7,810,657B**, Vitest **1,007**, Chromium **85 passed/3 skipped/0 failed**. full의
   sandbox bind EPERM만 허용된 Playwright 실행으로 분리 검증했고 임시 node_modules link 4개는 모두
   제거했다. generated asset·production route·rhwp·HWPX·typesetter diff 0. **다음:** final
-  diff/security audit→verification evidence commit/push/PR/CI/merge.
+  diff/security audit도 source content/path/hash/raw payload/credential 노출 0으로 clean하다. 구현·근거
+  commit `6bf0333`까지 push하고 PR #191을 `Closes #190`으로 게시했다. **다음:** exact-head required
+  CI(issue-link/build-test/licenses), review/general/inline 댓글, mergeability 확인→green이면 squash merge.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #173 병합 · #174 multi-table 경계 착수**.
   자체 HWP5 파서가 exact `tbl ` marker/common-object/TABLE/LIST_HEADER/cell paragraph를 검증해

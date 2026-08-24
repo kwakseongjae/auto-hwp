@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #190 PR #191 posted
+- final diff/security audit clean; verified commits through `6bf0333` pushed.
+- PR #191 created with `Closes #190`; next required CI/comments/mergeability→merge.
+
 ## 2026-08-24 (Codex sol) · #190 full green
 - quick/full green: PDF51, canonical gates, corpus84/oracle82, wasm 7,810,657B, Vitest1,007.
 - sandbox bind only separated: Chromium 85 passed/3 skipped/0 failed; temp links removed.
