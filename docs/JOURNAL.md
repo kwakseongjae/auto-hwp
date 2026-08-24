@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · PR #199 posted
+- `Closes #198` PR #199 published with no-cutover, zero-eligible, and privacy boundaries explicit.
+- next final-head required CI + reviews/comments/mergeability → autonomous merge.
+
 ## 2026-08-24 (Codex sol) · #198 pushed
 - typed eligibility/matrix/docs committed through `f8b43e8` and pushed.
 - next publish `Closes #198` PR, then exact-head required CI/comments/mergeability audit.
