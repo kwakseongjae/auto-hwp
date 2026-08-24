@@ -1598,7 +1598,7 @@ fn parse_inline_table(
     // 1×2 form stores column-relative placement. The table tuple below binds each flag word to only
     // its observed topology so a floating or unrelated object cannot be flattened.
     let common_attr = read_u32(common, 4).expect("exact length checked");
-    if !matches!(common_attr, 0x082a_2311 | 0x082a_2211) {
+    if !matches!(common_attr, 0x082a_2311 | 0x082a_2211 | 0x282a_2311) {
         return Err(malformed(
             control,
             Some(section),
@@ -1639,7 +1639,92 @@ fn parse_inline_table(
         ));
     }
     let child_level = control.level + 1;
-    if children.len() < 3 || children[0].tag != TAG_TABLE || children[0].level != child_level {
+    let (table_index, caption) = if common_attr == 0x282a_2311 {
+        let Some(list_record) = children.first().copied() else {
+            return Err(malformed(
+                control,
+                Some(section),
+                "captioned TABLE is missing its caption LIST_HEADER",
+            ));
+        };
+        let list_bytes = data(stream, &list_record);
+        if list_record.tag != TAG_LIST_HEADER
+            || list_record.level != child_level
+            || list_bytes.len() != 30
+            || read_u16(list_bytes, 0) != Some(1)
+            || read_u32(list_bytes, 2) != Some(0)
+            || read_u16(list_bytes, 6) != Some(0)
+            || read_u32(list_bytes, 8) != Some(2)
+            || read_u32(list_bytes, 12) != Some(8_504)
+            || read_u16(list_bytes, 16) != Some(850)
+            || read_u32(list_bytes, 18) != Some(48_047)
+            || list_bytes[22..].iter().any(|byte| *byte != 0)
+        {
+            return Err(malformed(
+                &list_record,
+                Some(section),
+                "caption LIST_HEADER differs from the exact owned top-caption tuple",
+            ));
+        }
+        let Some(header) = children.get(1).copied() else {
+            return Err(malformed(
+                &list_record,
+                Some(section),
+                "caption LIST_HEADER declares a missing paragraph",
+            ));
+        };
+        if header.tag != TAG_PARA_HEADER || header.level != child_level {
+            return Err(malformed(
+                &header,
+                Some(section),
+                "caption LIST_HEADER is not followed by its paragraph header",
+            ));
+        }
+        let mut next = 2usize;
+        while next < children.len() && children[next].level > child_level {
+            next += 1;
+        }
+        let parsed = parse_paragraph(
+            stream,
+            &children[1..next],
+            doc,
+            para_usage,
+            styles,
+            section,
+            None,
+            table_depth + 1,
+        )?;
+        if parsed.page.is_some()
+            || parsed.page_number.is_some()
+            || parsed.paragraph.page_break_before
+            || parsed.paragraph.column_break_before
+            || parsed.paragraph.column_layout_before.is_some()
+            || !parsed.tables.is_empty()
+        {
+            return Err(malformed(
+                &header,
+                Some(section),
+                "owned table caption contains nested layout controls",
+            ));
+        }
+        (
+            next,
+            Some(TableCaption {
+                position: TableCaptionPosition::Top,
+                blocks: vec![Block::Paragraph(parsed.paragraph)],
+                spacing: 850,
+                width: 8_504,
+                max_width: 48_047,
+                include_margin: false,
+            }),
+        )
+    } else {
+        (0, None)
+    };
+    if children.len() < table_index + 3
+        || children[table_index].tag != TAG_TABLE
+        || children[table_index].level != child_level
+    {
         return Err(malformed(
             control,
             Some(section),
@@ -1647,7 +1732,7 @@ fn parse_inline_table(
         ));
     }
 
-    let table_record = children[0];
+    let table_record = children[table_index];
     let table_bytes = data(stream, &table_record);
     if table_bytes.len() < 24 {
         return Err(malformed(
@@ -1754,6 +1839,9 @@ fn parse_inline_table(
             (7, 1, 2, 1),
             (7, 3, 2, 1),
         ],
+        (0x282a_2311, 0x0600_0006, 4, 5) => (0..4)
+            .flat_map(|row| (0..5).map(move |col| (row, col, 1, 1)))
+            .collect(),
         _ => {
             return Err(malformed(
                 &table_record,
@@ -1836,11 +1924,25 @@ fn parse_inline_table(
         (common_attr, table_attr, rows, cols) == (0x082a_2311, 0x0600_000c, 7, 3);
     let exact_one_by_one =
         (common_attr, table_attr, rows, cols) == (0x082a_2311, 0x0400_0006, 1, 1);
+    let exact_captioned = (common_attr, table_attr, rows, cols) == (0x282a_2311, 0x0600_0006, 4, 5);
+    if exact_captioned
+        && (width != 48_047
+            || height != 7_492
+            || margins != [141, 141, 141, 141]
+            || table_padding != [141, 141, 141, 141]
+            || table_border_id != 4)
+    {
+        return Err(malformed(
+            &table_record,
+            Some(section),
+            "captioned TABLE common or table geometry differs from its exact owned tuple",
+        ));
+    }
     let mut cells = Vec::with_capacity(expected_cells);
     let mut cell_heights = Vec::with_capacity(expected_cells);
     let mut cell_width_refs = Vec::with_capacity(expected_cells);
     let mut nested_table_count = 0usize;
-    let mut cursor = 1usize;
+    let mut cursor = table_index + 1;
     while cursor < children.len() {
         if cells.len() == expected_cells {
             return Err(malformed(
@@ -1913,9 +2015,11 @@ fn parse_inline_table(
             };
         let expected_seven_by_three_width_ref =
             exact_seven_by_three.then_some(if col == 2 { 0x0100 } else { 0x0500 });
+        let expected_captioned_width_ref = exact_captioned.then_some(0x0400);
         let expected_exact_width_ref = expected_one_by_two_width_ref
             .or(expected_eight_by_five_width_ref)
-            .or(expected_seven_by_three_width_ref);
+            .or(expected_seven_by_three_width_ref)
+            .or(expected_captioned_width_ref);
         let owned_width_ref = expected_exact_width_ref.map_or_else(
             || {
                 matches!(width_ref, 0x0000 | 0x0100 | 0x0500)
@@ -1998,6 +2102,18 @@ fn parse_inline_table(
         // core width; the global span equations below prove that override instead of trusting it alone.
         debug_assert_eq!(list_extra.len(), 13);
         let cell_border_id = read_u16(list_bytes, 32).expect("exact length checked");
+        if exact_captioned
+            && (paragraph_count != 1
+                || cell_padding != [141, 141, 141, 141]
+                || !width_extension
+                || extension_width != cell_width)
+        {
+            return Err(malformed(
+                &list_record,
+                Some(section),
+                "captioned TABLE cell framing differs from its exact owned tuple",
+            ));
+        }
         let cell_fill = table_border(doc, cell_border_id, &list_record, section, "table cell")?;
 
         cursor += 1;
@@ -2263,6 +2379,16 @@ fn parse_inline_table(
     let stored_height = derived_rows
         .iter()
         .try_fold(0i64, |sum, value| sum.checked_add(i64::from(*value)));
+    if exact_captioned
+        && (col_widths != [3_221, 6_593, 8_956, 21_855, 7_422]
+            || derived_rows != [1_948, 1_848, 1_848, 1_848])
+    {
+        return Err(malformed(
+            &table_record,
+            Some(section),
+            "captioned TABLE column or row geometry differs from its exact owned grid",
+        ));
+    }
     let owned_nested_stale_common_height = table_depth == 1
         && (table_attr, rows, cols, height, stored_height)
             == (0x0400_0006, 1, 1, 3_882, Some(1_848));
@@ -2275,6 +2401,7 @@ fn parse_inline_table(
     }
 
     Ok(Table {
+        caption,
         rows,
         cols,
         cells,
@@ -2284,9 +2411,9 @@ fn parse_inline_table(
         keep_together: table_attr != 0x0600_000e,
         col_widths,
         row_heights: derived_rows,
-        // Both exact large-table attributes carry HWP's no-adjust bit. Their stored row heights are
+        // The exact no-adjust table attributes carry HWP's no-adjust bit. Their stored row heights are
         // exact clipping geometry, not merely content-size floors.
-        fixed_row_heights: matches!(table_attr, 0x0600_000c | 0x0600_000e),
+        fixed_row_heights: matches!(table_attr, 0x0600_0006 | 0x0600_000c | 0x0600_000e),
         outer_margin_left: margins[0] as HwpUnit,
         outer_margin_right: margins[1] as HwpUnit,
         outer_margin_top: margins[2] as HwpUnit,
