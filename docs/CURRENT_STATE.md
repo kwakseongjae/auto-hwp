@@ -3,6 +3,32 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-25 · Codex(sol) — **#217 deterministic-font fidelity 재측정 완료 · 진단 PR 직전**.
+  public canonical 8쪽 HWP/PDF를 OFL registry로 독립 process 2회 실행해 candidate PDF SHA
+  `2ee86296…`와 registry fingerprint `39841f73…`, 8쪽·102영역(70 text/32 table)이 exact 반복됐다.
+  3,143 glyph는 모두 정직한 fallback이며 path/text/font bytes/source hash는 보고서에 없다. 무등록 대비
+  worst-page ink F1은 **0.218434→0.221304**, page delta는 **-0.008762~+0.002870**, table 평균
+  **-0.000277**, numeric text 평균 **+0.000277**뿐이고 8쪽 content-bbox height delta는 전부 불변이다.
+  text 70 중 F1 0이 **52**, candidate-empty/reference-nonempty가 **25**로 남아 주원인은 font registry가
+  아니다. 시각 확인과 기존 `hwp5_empty_run_layout`의 content-free 경계가 official 하단 쪽번호 대
+  production rhwp lift의 누락을 재확인했다. own candidate는 매쪽 decoration glyph 정확히 3개이며 이를
+  제거할 때 body glyph/block/table/cell/rect/line/image가 exact다. threshold/translation/oracle/T3/
+  `pass=null` 무변경, rhwp `f137b4c9` pinned/무수정. **다음:** 문서 diff·quick 감사→commit/push→
+  PR `Closes #217`·CI green 자율 병합→owned `Section.page_number`를 production HWP5 경로에 fail-closed로
+  연결하는 구현 child를 issue-first 착수한다.
+
+- 갱신: 2026-08-25 · Codex(sol) — **PR #216 병합 · #217 deterministic-font fidelity 재측정 착수**.
+  #215 exact head `715a8eb`는 issue-link **3s**·licenses **11m17s**·build-test **11m18s** green,
+  MERGEABLE, review/general/inline 댓글 0으로 protected main `49c809db`에 squash 병합됐다. #215는
+  close되고 원격 branch도 삭제했다. strict font registry, layout/PDF face lockstep, CLI/wasm/Tauri,
+  OFL 6-face fixture와 content-free realization이 main 정본이다. 다음 P0를 #93 child #217로 등재하고
+  exact main의 `codex/issue-217-font-fidelity`를 만들었다. 목표는 canonical 공개 8쪽 HWP/PDF를 새
+  registry로 독립 process 2회 재측정해 #213 전후 page/tile/semantic-region 변화를 분리하고, 가장 큰
+  잔여 text/table 결함을 content-free 또는 synthetic 최소 경계로 고정하는 것이다. threshold,
+  translation, oracle, T3 reference, `policy.pass=null`은 불변이며 proprietary font/rhwp 수정은 금지.
+  rhwp는 `f137b4c9` pinned/무수정. **다음:** exact CLI 빌드→benchmark.hwp/benchmark.pdf를 OFL registry로
+  두 번 atomic visual-check→SHA/fingerprint/구조·region diff→선두 잔여 원인을 분류한다.
+
 - 갱신: 2026-08-25 · Codex(sol) — **#215 deterministic licensed font registry 구현·full green · PR 직전**.
   strict schema v1 registry가 family/style·face 수/개별/총 bytes·TTF/OTF magic·실제 face parse·SHA-256을
   검증하고, 경로/본문/font bytes 없는 deterministic fingerprint와 exact/fallback/unavailable realization을

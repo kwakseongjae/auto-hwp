@@ -419,6 +419,31 @@ and paginator fixes. Both are now structurally comparable, so pixel metrics are 
 silently assigning structural failures a score. Both still have worst-tile recall `0.0`; restoring
 page count and orientation is therefore a prerequisite, not evidence of complete visual fidelity.
 
+### Deterministic-font remeasurement (2026-08-25, #217)
+
+The canonical public 8-page HWP/PDF pair was rerun in two independent processes with the #215 public
+Nanum OFL registry. Both runs produced the same candidate PDF SHA-256
+`2ee862963eceb8c3c31e2a05d8ee915b3e3ad61778a4b541e9aae005fc2d0ad9`, registry fingerprint
+`sha256:39841f738d60ca1822789c92bbc30d134969910589584b3766a4d9365b3742a9`, 8 pages, and 102
+semantic regions (70 text, 32 table). All 3,143 non-whitespace glyph requests were reported as
+OFL fallback rather than exact realization; no path, text, font bytes, or source hash entered the
+report.
+
+The registry changed the worst-page ink F1 from `0.218434` to `0.221304`. Per-page changes ranged
+from `-0.008762` to `+0.002870`; mean table-region ink F1 changed by `-0.000277` and mean numeric
+text-region ink F1 by `+0.000277`. All eight content-bbox height deltas were unchanged. Fifty-two of
+70 text regions remained at ink F1 `0.0`, including 25 where the candidate region had no ink while
+the same aligned reference band did. This is a useful negative result: deterministic substitution
+made the export reproducible and diagnosable, but did not explain the dominant fidelity gap.
+
+Direct inspection isolates one already-owned non-font defect: the official PDF paints a bottom-center
+page-number decoration while the production rhwp semantic lift omits it. The existing content-free
+`hwp5_empty_run_layout` regression proves the first-party HWP5 candidate owns exactly three decoration
+glyphs per page and that removing only `Section.page_number` leaves body glyph/block/table/cell/rect/
+line/image evidence exact. The next bounded implementation should connect that owned decoration to
+the production path fail-closed; it must not modify rhwp, claim OFL fallback as exact, or relax the
+visual oracle.
+
 ## Tests
 
 Run the dependency-free synthetic metric and PNG codec suite with:

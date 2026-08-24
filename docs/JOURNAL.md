@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-25 (Codex sol) · #217 deterministic-font fidelity remeasurement
+- public 8-page HWP/PDF + OFL registry를 독립 2회 실행해 PDF SHA/fingerprint/102 regions exact 반복.
+- font 전후 worst-page 0.218434→0.221304; text F1=0 52/70·candidate-empty 25로 주원인 아님을 증명.
+- official 쪽번호 대 rhwp lift 누락을 기존 own-parser 3 glyph/page content-free regression에 연결.
+- 다음: docs PR/CI/merge→owned page-number decoration production 연결 child.
+
 ## 2026-08-25 (Codex sol) · #215 deterministic font registry
 - strict bounded font manifest/realization report와 layout·PDF 동일 face-hash 선택을 공유 코어에 구현.
 - CLI·wasm·Tauri 등록/화면/PDF/print와 #213 visual-check fingerprint를 연결, OFL 6-face fixture 추가.
