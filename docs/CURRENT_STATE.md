@@ -19,7 +19,11 @@
   0 fail**이다. 임시 node_modules links는 제거했다. public HWP5 benchmark의 #192 exact top-caption
   geometry만 검사하는 content-free real-boundary 회귀도 추가해 direction/width/gap/max-width/attached
   paragraph가 shared Table IR까지 도달함을 확인했다. private text/path/hash/raw는 출력·커밋하지 않았다.
-  **다음:** final diff/security audit→push/PR/CI/merge→#192를 latest main에 rebase해 strict parser 재개.
+  final diff/security audit에서 변경은 shared model/lift/typesetter/JSX default/tests/continuity 문서뿐이고
+  `external/rhwp`·generated wasm/assets·HWPX parser/serializer·oracle scoring diff 0을 확인했다. commits
+  `e49bd7c`·`e383477`·`ff9d88e`를 push하고 PR **#194**를 `Closes #193`으로 게시했다.
+  **다음:** #194 required CI·review/comment·mergeability 확인→green이면 사용자 포괄 승인에 따라 squash
+  merge/branch 정리→#192를 latest main에 재배치해 strict captioned-table parser 재개.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #181 병합 · #182 next TABLE 착수**.
   #175는 exact head `6711ff9`에서 issue-link/build-test/licenses green, CLEAN/MERGEABLE,

@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #193 PR #194 posted
+- final boundary/security audit clean; commits through `ff9d88e` pushed and PR #194 created.
+- next required CI/comments/mergeability→merge, then rebase #192 and implement strict captioned table.
+
 ## 2026-08-24 (Codex sol) · #193 full + real boundary green
 - full green: wasm 7,817,187B, Vitest 1,007, Chromium 85 pass/3 skip/0 fail; temp links removed.
 - content-free public HWP5 regression proves #192 exact top caption reaches shared IR; next PR/merge.
