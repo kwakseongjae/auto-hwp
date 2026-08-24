@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #193 caption foundation started
+- #191 merged main `882783a6`; #192 next boundary is an exact top-captioned 4×5 table.
+- parser-only widening refused because shared Table/rhwp lift drops caption; dependency #193 opened.
+- next caption IR + LOCKSTEP placement + shared SVG/PDF + rhwp lift; caption-none route stays unchanged.
+
 ## 2026-08-24 (Codex sol) · #190 PR #191 posted
 - final diff/security audit clean; verified commits through `6bf0333` pushed.
 - PR #191 created with `Closes #190`; next required CI/comments/mergeability→merge.

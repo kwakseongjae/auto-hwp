@@ -219,8 +219,15 @@
   sandbox bind EPERM만 허용된 Playwright 실행으로 분리 검증했고 임시 node_modules link 4개는 모두
   제거했다. generated asset·production route·rhwp·HWPX·typesetter diff 0. **다음:** final
   diff/security audit도 source content/path/hash/raw payload/credential 노출 0으로 clean하다. 구현·근거
-  commit `6bf0333`까지 push하고 PR #191을 `Closes #190`으로 게시했다. **다음:** exact-head required
-  CI(issue-link/build-test/licenses), review/general/inline 댓글, mergeability 확인→green이면 squash merge.
+  commit `6bf0333`까지 push하고 PR #191을 `Closes #190`으로 게시했다. exact head `3fdd4a9`에서
+  required CI green·MERGEABLE/CLEAN·댓글 0 후 protected main `882783a6`로 squash 병합했다. #190
+  close·branch 정리·#94 동기화 후 #192를 열었고, 두 content-free run에서 다음 경계가 top-captioned
+  `tbl `임을 확정했다. 본체는 exact 4×5 full grid지만 shared `Table`과 rhwp lift가 caption
+  text/direction/gap을 보존하지 않아 parser-only 확장을 거부했다. 선행 #193을
+  R18/P1/layout/area:typeset+area:hwp5/status:ready로 열고 exact latest main의
+  `codex/issue-193-table-caption` worktree와 pinned rhwp oracle `f137b4c9`를 초기화했다. **다음:**
+  source-neutral TableCaption IR→place_doc/NaiveLayout LOCKSTEP→shared SVG/PDF paint→rhwp lift 회귀.
+  caption None의 기존 layout/export와 route·external/rhwp·HWPX roundtrip은 불변.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #173 병합 · #174 multi-table 경계 착수**.
   자체 HWP5 파서가 exact `tbl ` marker/common-object/TABLE/LIST_HEADER/cell paragraph를 검증해
