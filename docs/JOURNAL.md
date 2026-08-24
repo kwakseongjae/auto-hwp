@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #106 AI-native task suite
+- 합성 20문서·120작업을 12개 독립 점수와 안전/원자성/가역성 100% gate로 잠금.
+- provider no-fallback live report를 contributor CI에서 분리하고 prompt-injection hostile 11건 추가.
+- quick/full green: 8/18/24+98.9%, oracle82, Vitest1,012, Chromium85 pass/3 skip; rhwp 무수정.
+- 다음: commit/push→`Closes #106` PR/CI/merge→#93 HWP5 독립 트랙.
+
 ## 2026-08-24 (Codex sol) · PR #209 merge checkpoint
 - #105 exact head `f0231459` CI 3종 green·댓글 0 확인 후 main `b25303fa` 병합.
 - 다음: 장기 Goal 실행 중단·로드맵 브리핑; `goal로 진행해줘` 시 #106부터 재개.

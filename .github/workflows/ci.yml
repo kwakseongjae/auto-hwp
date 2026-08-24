@@ -83,6 +83,11 @@ jobs:
           node --test \
             scripts/tests/desktop-shell-mode.test.mjs \
             scripts/tests/desktop-release-manifest.test.mjs
+      - name: AI-native recorded task suite (issue 106)
+        run: |
+          node scripts/generate-ai-task-fixtures.mjs --check
+          node --test scripts/tests/ai-task-suite.test.mjs
+          node scripts/ai-task-suite.mjs
       - name: public corpus safety and metadata contracts
         run: |
           node --test \
