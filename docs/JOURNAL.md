@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #193 caption foundation implemented
+- shared caption IR + rhwp lift preserve direction/blocks/gap/width/max-width/include-margin.
+- top/bottom now share single/column place_doc·NaiveLayout·block_pages flow; side captions stay typed/deferred.
+- synthetic LOCKSTEP/keep/over-tall and feature-rhwp lift tests green; next full gates→PR/merge→#192.
+
 ## 2026-08-24 (Codex sol) · #193 caption foundation started
 - #191 merged main `882783a6`; #192 next boundary is an exact top-captioned 4×5 table.
 - parser-only widening refused because shared Table/rhwp lift drops caption; dependency #193 opened.

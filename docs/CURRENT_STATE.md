@@ -3,6 +3,17 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-24 · Codex(sol) — **#193 shared table-caption foundation 구현 중**.
+  `TableCaption`을 source-neutral shared IR에 추가하고 rhwp HWP5 lift가 방향 4종·문단 blocks·gap·
+  width/max-width·include-margin을 손실 없이 내리도록 했다. top/bottom은 기존 paragraph placer와
+  row fragmenter를 사용해 단일열·다단의 `place_doc`/`NaiveLayout`/`block_pages` 3경로에 같은
+  예약·배치를 연결했고, keep-together는 caption+gap+rows 전체가 fresh lane에 들어갈 때만 한 번
+  전진한다. over-tall은 기존 bounded row fallback을 유지한다. left/right는 IR에는 보존하되 아직
+  없는 horizontal lane을 흉내내지 않고 의도적으로 미배치한다. synthetic top/bottom 위치·LOCKSTEP·
+  keep/over-tall 및 rhwp lift 회귀 green; focused typeset 92 tests, feature-rhwp caption 2 tests,
+  clippy `-D warnings` green. `external/rhwp` diff 0. **다음:** full workspace quick/full gates와
+  public #192 captioned host 실측 검증→문서/PR/CI/merge→#192 rebase 후 strict parser 재개.
+
 - 갱신: 2026-08-24 · Codex(sol) — **PR #181 병합 · #182 next TABLE 착수**.
   #175는 exact head `6711ff9`에서 issue-link/build-test/licenses green, CLEAN/MERGEABLE,
   review/general/inline 댓글 0을 확인하고 protected main `c917c584`로 squash 병합했다. #174 close와

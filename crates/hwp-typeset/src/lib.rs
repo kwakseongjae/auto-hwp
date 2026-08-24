@@ -541,9 +541,37 @@ impl LayoutEngine for NaiveLayout {
                             vert += t.outer_margin_top.max(0) as f64;
                         }
                         let rows = table_row_heights(t, body_w, doc, fonts);
-                        if keep_table_on_fresh_lane(t, &rows, vert, body_h) {
+                        let caption_metrics = table_caption_metrics(t, body_w, doc, fonts);
+                        if let Some((_, caption_height)) = caption_metrics {
+                            if keep_captioned_table_on_fresh_lane(
+                                t,
+                                &rows,
+                                caption_height,
+                                vert,
+                                body_h,
+                            ) {
+                                pages.push(new_page(page));
+                                vert = 0.0;
+                            }
+                        } else if keep_table_on_fresh_lane(t, &rows, vert, body_h) {
                             pages.push(new_page(page));
                             vert = 0.0;
+                        }
+                        if t.caption
+                            .as_ref()
+                            .is_some_and(|caption| caption.position == TableCaptionPosition::Top)
+                        {
+                            vert = flow_caption_naive(
+                                t.caption.as_ref().expect("checked caption"),
+                                doc,
+                                fonts,
+                                body_w,
+                                body_h,
+                                vert,
+                                &mut pages,
+                                page,
+                            );
+                            vert += t.caption.as_ref().unwrap().spacing.max(0) as f64;
                         }
                         for rh in rows {
                             // `rh <= body_h`: a row taller than the whole body never triggers a break — it
@@ -554,6 +582,22 @@ impl LayoutEngine for NaiveLayout {
                                 vert = 0.0;
                             }
                             vert += rh;
+                        }
+                        if t.caption
+                            .as_ref()
+                            .is_some_and(|caption| caption.position == TableCaptionPosition::Bottom)
+                        {
+                            vert += t.caption.as_ref().unwrap().spacing.max(0) as f64;
+                            vert = flow_caption_naive(
+                                t.caption.as_ref().expect("checked caption"),
+                                doc,
+                                fonts,
+                                body_w,
+                                body_h,
+                                vert,
+                                &mut pages,
+                                page,
+                            );
                         }
                         vert += t.outer_margin_bottom.max(0) as f64;
                     }
@@ -635,14 +679,42 @@ fn layout_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> LayoutR
                         flow.add(table.outer_margin_top.max(0) as f64);
                     }
                     let rows = table_row_heights(table, flow.min_width(), doc, fonts);
-                    if keep_table_on_fresh_lane(
-                        table,
-                        &rows,
-                        flow.vert(),
-                        flow.available_height(body_h),
-                    ) && flow.advance_column()
-                    {
+                    let caption_metrics =
+                        table_caption_metrics(table, flow.min_width(), doc, fonts);
+                    let should_advance = if let Some((_, caption_height)) = caption_metrics {
+                        keep_captioned_table_on_fresh_lane(
+                            table,
+                            &rows,
+                            caption_height,
+                            flow.vert(),
+                            flow.available_height(body_h),
+                        )
+                    } else {
+                        keep_table_on_fresh_lane(
+                            table,
+                            &rows,
+                            flow.vert(),
+                            flow.available_height(body_h),
+                        )
+                    };
+                    if should_advance && flow.advance_column() {
                         pages.push(new_page(page));
+                    }
+                    if table
+                        .caption
+                        .as_ref()
+                        .is_some_and(|caption| caption.position == TableCaptionPosition::Top)
+                    {
+                        flow_caption_columns_naive(
+                            table.caption.as_ref().expect("checked caption"),
+                            doc,
+                            fonts,
+                            body_h,
+                            &mut flow,
+                            &mut pages,
+                            page,
+                        );
+                        flow.add(table.caption.as_ref().unwrap().spacing.max(0) as f64);
                     }
                     for row_height in rows {
                         let available = flow.available_height(body_h);
@@ -654,6 +726,22 @@ fn layout_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> LayoutR
                             pages.push(new_page(page));
                         }
                         flow.add(row_height);
+                    }
+                    if table
+                        .caption
+                        .as_ref()
+                        .is_some_and(|caption| caption.position == TableCaptionPosition::Bottom)
+                    {
+                        flow.add(table.caption.as_ref().unwrap().spacing.max(0) as f64);
+                        flow_caption_columns_naive(
+                            table.caption.as_ref().expect("checked caption"),
+                            doc,
+                            fonts,
+                            body_h,
+                            &mut flow,
+                            &mut pages,
+                            page,
+                        );
                     }
                     flow.add(table.outer_margin_bottom.max(0) as f64);
                 }
@@ -669,6 +757,114 @@ fn new_page(page: &PageSetup) -> PageLayout {
         width: w as f64,
         height: h as f64,
         lines: Vec::new(),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn flow_caption_naive(
+    caption: &TableCaption,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+    avail_w: f64,
+    body_h: f64,
+    mut vert: f64,
+    pages: &mut Vec<PageLayout>,
+    page: &PageSetup,
+) -> f64 {
+    let width = if caption.max_width > 0 {
+        avail_w.min(caption.max_width as f64)
+    } else {
+        avail_w
+    }
+    .max(1.0);
+    for block in &caption.blocks {
+        match block {
+            Block::Paragraph(paragraph) => {
+                let shape = doc.para_shapes.get(paragraph.para_shape);
+                if vert > 0.0 {
+                    vert += shape.map(|value| value.space_before).unwrap_or(0).max(0) as f64;
+                }
+                let ratio = line_spacing_ratio(paragraph, doc);
+                for line in layout_paragraph(paragraph, doc, width, fonts) {
+                    if vert + line.vert_size > body_h && vert > 0.0 {
+                        pages.push(new_page(page));
+                        vert = 0.0;
+                    }
+                    let advance = line.vert_size * ratio;
+                    pages.last_mut().expect("page exists").lines.push(LineSeg {
+                        vert_pos: vert,
+                        ..line
+                    });
+                    vert += advance;
+                }
+                vert += shape.map(|value| value.space_after).unwrap_or(0).max(0) as f64;
+            }
+            Block::Table(table) => {
+                let height = table_height(table, width, doc, fonts);
+                if vert + height > body_h && vert > 0.0 && height <= body_h {
+                    pages.push(new_page(page));
+                    vert = 0.0;
+                }
+                vert += height;
+            }
+        }
+    }
+    vert
+}
+
+#[allow(clippy::too_many_arguments)]
+fn flow_caption_columns_naive(
+    caption: &TableCaption,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+    body_h: f64,
+    flow: &mut ColumnFlow,
+    pages: &mut Vec<PageLayout>,
+    page: &PageSetup,
+) {
+    let width = if caption.max_width > 0 {
+        flow.min_width().min(caption.max_width as f64)
+    } else {
+        flow.min_width()
+    }
+    .max(1.0);
+    for block in &caption.blocks {
+        match block {
+            Block::Paragraph(paragraph) => {
+                let shape = doc.para_shapes.get(paragraph.para_shape);
+                if flow.vert() > 0.0 {
+                    flow.add(shape.map(|value| value.space_before).unwrap_or(0).max(0) as f64);
+                }
+                let ratio = line_spacing_ratio(paragraph, doc);
+                for mut line in layout_paragraph(paragraph, doc, width, fonts) {
+                    if flow.vert() + line.vert_size > flow.available_height(body_h)
+                        && flow.vert() > 0.0
+                        && flow.advance_column()
+                    {
+                        pages.push(new_page(page));
+                    }
+                    line.horz_pos += flow.box_now().x;
+                    let advance = line.vert_size * ratio;
+                    pages.last_mut().expect("page exists").lines.push(LineSeg {
+                        vert_pos: flow.y(),
+                        ..line
+                    });
+                    flow.add(advance);
+                }
+                flow.add(shape.map(|value| value.space_after).unwrap_or(0).max(0) as f64);
+            }
+            Block::Table(table) => {
+                let height = table_height(table, width, doc, fonts);
+                if flow.vert() + height > flow.available_height(body_h)
+                    && flow.vert() > 0.0
+                    && height <= flow.available_height(body_h)
+                    && flow.advance_column()
+                {
+                    pages.push(new_page(page));
+                }
+                flow.add(height);
+            }
+        }
     }
 }
 
@@ -791,6 +987,79 @@ fn block_height(b: &Block, doc: &SemanticDoc, width: f64, fonts: &dyn FontMetric
         Block::Paragraph(p) => cell_paragraph_height(p, doc, width, fonts),
         Block::Table(t) => table_height(t, width, doc, fonts),
     }
+}
+
+/// Whether a caption participates in today's vertical table flow. Side captions are preserved in
+/// the IR, but require a horizontal lane model and therefore remain deliberately unplaced.
+pub(crate) fn has_flow_caption(table: &Table) -> bool {
+    table.caption.as_ref().is_some_and(|caption| {
+        matches!(
+            caption.position,
+            TableCaptionPosition::Top | TableCaptionPosition::Bottom
+        )
+    })
+}
+
+/// Text width and measured block height for a top/bottom caption. This is shared by both pagination
+/// twins; actual glyph placement still goes through the ordinary paragraph placer.
+pub(crate) fn table_caption_metrics(
+    table: &Table,
+    avail_w: f64,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+) -> Option<(f64, f64)> {
+    let caption = table.caption.as_ref()?;
+    if !matches!(
+        caption.position,
+        TableCaptionPosition::Top | TableCaptionPosition::Bottom
+    ) {
+        return None;
+    }
+    let width = if caption.max_width > 0 {
+        avail_w.min(caption.max_width as f64)
+    } else {
+        avail_w
+    }
+    .max(1.0);
+    // Caption paragraphs use the ordinary body-flow accounting (not the trimmed cell-height
+    // heuristic): full line advance plus paragraph spacing. This is the same formula consumed by
+    // `flow_caption_naive` and `place_caption`, so keep-together never decides from a shorter proxy.
+    let height = caption
+        .blocks
+        .iter()
+        .map(|block| match block {
+            Block::Paragraph(paragraph) => {
+                let shape = doc.para_shapes.get(paragraph.para_shape);
+                let lines = layout_paragraph(paragraph, doc, width, fonts);
+                let ratio = line_spacing_ratio(paragraph, doc);
+                shape.map(|value| value.space_before).unwrap_or(0).max(0) as f64
+                    + lines.iter().map(|line| line.vert_size * ratio).sum::<f64>()
+                    + shape.map(|value| value.space_after).unwrap_or(0).max(0) as f64
+            }
+            Block::Table(table) => table_height(table, width, doc, fonts),
+        })
+        .sum();
+    Some((width, height))
+}
+
+pub(crate) fn keep_captioned_table_on_fresh_lane(
+    table: &Table,
+    row_heights: &[f64],
+    caption_height: f64,
+    vert: f64,
+    available: f64,
+) -> bool {
+    let spacing = table
+        .caption
+        .as_ref()
+        .map(|caption| caption.spacing.max(0) as f64)
+        .unwrap_or(0.0);
+    let total = row_heights.iter().sum::<f64>() + caption_height + spacing;
+    table.keep_together
+        && vert > 0.0
+        && total > 0.0
+        && total <= available
+        && vert + total > available
 }
 
 /// Estimated height of a table (HWPUNIT): Σ row heights, each row = max content height of the cells

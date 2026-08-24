@@ -17,6 +17,7 @@ use rhwp::model::control::Control;
 use rhwp::model::document::Document as RDoc;
 use rhwp::model::page::PageDef;
 use rhwp::model::paragraph::Paragraph as RParagraph;
+use rhwp::model::shape::CaptionDirection as RCaptionDirection;
 use rhwp::model::style::{
     Alignment, CharShape as RCharShape, ParaShape as RParaShape, UnderlineType,
 };
@@ -576,9 +577,25 @@ impl<'a> Lifter<'a> {
             })
             .collect();
 
+        let caption = t.caption.as_ref().map(|caption| {
+            let mut blocks = Vec::new();
+            for paragraph in &caption.paragraphs {
+                self.push_paragraph(paragraph, &mut blocks);
+            }
+            TableCaption {
+                position: lift_caption_position(caption.direction),
+                blocks,
+                spacing: i32::from(caption.spacing),
+                width: i32::try_from(caption.width).unwrap_or(i32::MAX),
+                max_width: i32::try_from(caption.max_width).unwrap_or(i32::MAX),
+                include_margin: caption.include_margin,
+            }
+        });
+
         Table {
             rows: t.row_count as usize,
             cols: t.col_count as usize,
+            caption,
             // MINIMUM row-height floors from Hancom's stored cell heights (issue 020). HWP writes each
             // cell's laid-out height; where that height EXCEEDS our content-measured height, the row is a
             // fixed/minimum-height row (측정: benchmark1 표순번 6 rows sit at 2990 HWPUNIT regardless of
@@ -738,6 +755,15 @@ impl<'a> Lifter<'a> {
             height: 0,
             treat_as_char: true,
         })
+    }
+}
+
+fn lift_caption_position(direction: RCaptionDirection) -> TableCaptionPosition {
+    match direction {
+        RCaptionDirection::Left => TableCaptionPosition::Left,
+        RCaptionDirection::Right => TableCaptionPosition::Right,
+        RCaptionDirection::Top => TableCaptionPosition::Top,
+        RCaptionDirection::Bottom => TableCaptionPosition::Bottom,
     }
 }
 
@@ -1219,6 +1245,61 @@ fn lift_para_shape(p: &RParaShape, from_hwpx: bool) -> ParaShape {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn caption_directions_map_without_loss() {
+        assert_eq!(
+            lift_caption_position(RCaptionDirection::Left),
+            TableCaptionPosition::Left
+        );
+        assert_eq!(
+            lift_caption_position(RCaptionDirection::Right),
+            TableCaptionPosition::Right
+        );
+        assert_eq!(
+            lift_caption_position(RCaptionDirection::Top),
+            TableCaptionPosition::Top
+        );
+        assert_eq!(
+            lift_caption_position(RCaptionDirection::Bottom),
+            TableCaptionPosition::Bottom
+        );
+    }
+
+    #[test]
+    fn table_caption_content_and_geometry_lift_into_shared_ir() {
+        use rhwp::model::shape::Caption as RCaption;
+
+        let source = RDoc::default();
+        let lifter = Lifter::new(&source);
+        let table = RTable {
+            row_count: 1,
+            col_count: 1,
+            caption: Some(RCaption {
+                direction: RCaptionDirection::Top,
+                width: 8_504,
+                spacing: 850,
+                max_width: 48_047,
+                include_margin: true,
+                paragraphs: vec![RParagraph {
+                    text: "합성 캡션".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let lifted = lifter.lift_table(&table);
+        let caption = lifted.caption.expect("caption must not be dropped");
+        assert_eq!(caption.position, TableCaptionPosition::Top);
+        assert_eq!(caption.width, 8_504);
+        assert_eq!(caption.spacing, 850);
+        assert_eq!(caption.max_width, 48_047);
+        assert!(caption.include_margin);
+        assert_eq!(caption.blocks.len(), 1);
+        assert!(matches!(caption.blocks[0], Block::Paragraph(_)));
+    }
 
     #[test]
     fn form_checkbox_and_edit_become_visible_text() {
