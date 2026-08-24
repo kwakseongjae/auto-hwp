@@ -14,8 +14,12 @@
   clippy `-D warnings` green. 첫 quick은 explicit JSX Table 생성자의 새 필드 누락을 잡아 기존 의미인
   `caption: None`으로 보완했고 재실행 quick 전체 green: workspace tests, PDF visual **51**,
   canonical **8/18/24·98.9%+**, public corpus **84**, oracle **82**, HWPX, wasm/licenses. `external/rhwp`
-  diff 0. **다음:** `--full`과 public #192 captioned host 실측 검증→문서/PR/CI/merge→#192 rebase 후
-  strict parser 재개.
+  diff 0. `--full`도 새 wasm **7,817,187B**, JS build/crosscheck/i18n, Vitest **1,007** green;
+  sandbox bind EPERM만 허용된 로컬 서버에서 분리 실행해 Chromium **85 pass/3 intentional skip/
+  0 fail**이다. 임시 node_modules links는 제거했다. public HWP5 benchmark의 #192 exact top-caption
+  geometry만 검사하는 content-free real-boundary 회귀도 추가해 direction/width/gap/max-width/attached
+  paragraph가 shared Table IR까지 도달함을 확인했다. private text/path/hash/raw는 출력·커밋하지 않았다.
+  **다음:** final diff/security audit→push/PR/CI/merge→#192를 latest main에 rebase해 strict parser 재개.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #181 병합 · #182 next TABLE 착수**.
   #175는 exact head `6711ff9`에서 issue-link/build-test/licenses green, CLEAN/MERGEABLE,

@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #193 full + real boundary green
+- full green: wasm 7,817,187B, Vitest 1,007, Chromium 85 pass/3 skip/0 fail; temp links removed.
+- content-free public HWP5 regression proves #192 exact top caption reaches shared IR; next PR/merge.
+
 ## 2026-08-24 (Codex sol) · #193 quick green
 - explicit JSX table constructor fixed to preserve legacy `caption: None`; rerun quick all green.
 - PDF51, canonical 8/18/24·98.9%+, corpus84/oracle82, HWPX/wasm/licenses unchanged; next full.
