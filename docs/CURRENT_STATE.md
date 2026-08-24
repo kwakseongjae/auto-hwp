@@ -3,6 +3,26 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-25 · Codex(sol) — **#228 병합 · #229 text residual classifier 착수**.
+  #227 exact head `8b704c51`은 issue-link **2s**·licenses **2m3s**·build-test **9m25s** green,
+  CLEAN/MERGEABLE, 댓글/review 0으로 protected main `91231645`에 squash 병합됐다. #227은 close되고
+  원격 branch도 삭제했으며 #93/#114에 content-free 결과를 동기화했다. Goal의 AI-native #106은
+  main `e0b1c8d`의 deterministic **120-task** suite로 이미 완료 상태임을 재확인했다. 다음 P0 #229를
+  #93 child로 issue-first 등재하고 exact main의 `codex/issue-229-text-residual` worktree를 만들었다.
+  기존 candidate PDF·fixed page alignment·paint-backed text region을 재사용해 positioned ink와
+  ±32px bounded local-translation ink를 비교하는 report-only classifier를 구현했다. 페이지당 50M
+  work cap이며 geometry-dominant/glyph-style-dominant/mixed/ambiguous/unscorable만 낸다. pure move,
+  stroke, mixed, repeat tie, blank, page-edge clip, budget 합성 경계와 comparator Python **69**, Node **8**
+  green. 무등록 canonical 2회는 기존 PDF SHA `61ab5f3a…`, report SHA `077d4f47…`, report HTML SHA
+  `64e9946a…`가 각각 exact이고 8쪽/T3/`pass=null`과 모든 기존 score가 불변이다. paint-backed text
+  28개는 geometry **10**·mixed **9**·ambiguous **8**·unscorable **1**·glyph-style **0**이다. geometry
+  10개는 22 candidate ink pixel의 반복 short-glyph cohort로 local F1 **.954545~.977778**, offsets는
+  page4 `(18,22)`, page5 `(12,22)`, page7 `(12,16)`, page8 `(12,-4)`에 모인다. 폰트 교체보다 이
+  cohort의 generated-marker/field provenance와 x/y placement를 먼저 격리해야 한다. source text/font
+  path·bytes·proprietary name은 공개하지 않았고 layout/rhwp도 불변이다. quick은 Rust/rhwp, AI120,
+  8/18/24+98.9%, public corpus84, oracle82, wasm, licenses 전부 green이다. **다음:** final diff/privacy
+  감사→commit/push→PR `Closes #229`→CI/merge→반복 22px glyph provenance child를 issue-first 착수.
+
 - 갱신: 2026-08-25 · Codex(sol) — **#227 first-party HWP5 anchor spacing 구현·시각 실증·quick green**.
   #225 exact head `d170b00`은 issue-link **3s**·licenses **8m52s**·build-test **9m42s** green,
   MERGEABLE, 댓글/review 0으로 protected main `f8c3ccd`에 squash 병합됐다. #225는 close되고 원격

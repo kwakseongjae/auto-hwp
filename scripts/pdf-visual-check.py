@@ -94,6 +94,13 @@ VISUAL_REGION_CATEGORIES = frozenset({"text", "table", "image", "object"})
 MAX_VERTICAL_TRACE_PX = 128
 HARD_MAX_VERTICAL_TRACE_WORK_PER_PAGE = 50_000_000
 VERTICAL_TRACE_PROFILE_ROW_COST = 6
+MAX_TEXT_RESIDUAL_TRANSLATION_PX = 32
+HARD_MAX_TEXT_RESIDUAL_WORK_PER_PAGE = 50_000_000
+TEXT_RESIDUAL_GEOMETRY_MIN_F1 = 0.90
+TEXT_RESIDUAL_MATERIAL_GAIN = 0.15
+TEXT_RESIDUAL_MIXED_GAIN = 0.05
+TEXT_RESIDUAL_INK_RATIO_MIN = 0.80
+TEXT_RESIDUAL_INK_RATIO_MAX = 1.25
 
 REFERENCE_TIERS: Mapping[str, str] = {
     "T0": "Licensed Hancom Windows/WebHWP rendering with product, build, and font provenance.",
@@ -2103,6 +2110,264 @@ def _vertical_trace(
     }
 
 
+def _binary_integral(image: GrayImage) -> List[int]:
+    """Return a one-cell-padded summed-area table for thresholded foreground ink."""
+    stride = image.width + 1
+    integral = [0] * (stride * (image.height + 1))
+    for y in range(image.height):
+        row_sum = 0
+        source = y * image.width
+        target = (y + 1) * stride
+        previous = y * stride
+        for x in range(image.width):
+            row_sum += int(image.pixels[source + x] < INK_THRESHOLD)
+            integral[target + x + 1] = integral[previous + x + 1] + row_sum
+    return integral
+
+
+def _integral_rect_count(
+    integral: Sequence[int], stride: int, left: int, top: int, right: int, bottom: int
+) -> int:
+    return (
+        integral[bottom * stride + right]
+        - integral[top * stride + right]
+        - integral[bottom * stride + left]
+        + integral[top * stride + left]
+    )
+
+
+def _text_residual_trace(
+    category: str,
+    paint_status: str,
+    bounds: Optional[Mapping[str, int]],
+    reference: GrayImage,
+    aligned_candidate: GrayImage,
+    alignment_clipped: bool = False,
+    max_work: int = HARD_MAX_TEXT_RESIDUAL_WORK_PER_PAGE,
+    max_translation: int = MAX_TEXT_RESIDUAL_TRANSLATION_PX,
+) -> Dict[str, Any]:
+    """Classify text residuals without changing any scored metric or page alignment."""
+    policy = {
+        "role": "report_only_hypothesis",
+        "search_axis": "bounded_local_xy_translation",
+        "max_abs_offset_px": max_translation,
+        "ink_threshold_gray_lt": INK_THRESHOLD,
+        "geometry_min_local_ink_f1": TEXT_RESIDUAL_GEOMETRY_MIN_F1,
+        "material_local_gain": TEXT_RESIDUAL_MATERIAL_GAIN,
+        "mixed_local_gain": TEXT_RESIDUAL_MIXED_GAIN,
+        "similar_ink_ratio": [
+            TEXT_RESIDUAL_INK_RATIO_MIN,
+            TEXT_RESIDUAL_INK_RATIO_MAX,
+        ],
+    }
+    if category != "text":
+        return {
+            "status": "not-applicable",
+            "classification": None,
+            "reason": "category is not a paint-backed text region",
+            "policy": policy,
+        }
+    if paint_status == "expected-missing":
+        return {
+            "status": "unscorable",
+            "classification": "unscorable",
+            "reason": "source-visible text produced no placed glyph",
+            "policy": policy,
+        }
+    if bounds is None:
+        return {
+            "status": "unscorable",
+            "classification": "unscorable",
+            "reason": "aligned region bounds are unavailable",
+            "policy": policy,
+        }
+    if alignment_clipped:
+        return {
+            "status": "unscorable",
+            "classification": "unscorable",
+            "reason": "global alignment clipped the text region",
+            "policy": policy,
+        }
+
+    if max_translation < 0 or max_translation > MAX_TEXT_RESIDUAL_TRANSLATION_PX:
+        raise ValueError(
+            f"text residual translation bound must be between 0 and {MAX_TEXT_RESIDUAL_TRANSLATION_PX}px"
+        )
+    left = int(bounds["left"])
+    top = int(bounds["top"])
+    width = int(bounds["width"])
+    height = int(bounds["height"])
+    radius = max_translation
+    if (
+        left - radius < 0
+        or top - radius < 0
+        or left + width + radius > reference.width
+        or top + height + radius > reference.height
+    ):
+        return {
+            "status": "unscorable",
+            "classification": "unscorable",
+            "reason": "bounded local search window is clipped by the page edge",
+            "policy": policy,
+            "work_units": 0,
+        }
+
+    reference_window = _crop_image(
+        reference,
+        left - radius,
+        top - radius,
+        left + width + radius,
+        top + height + radius,
+    )
+    candidate_crop = _crop_image(
+        aligned_candidate,
+        left,
+        top,
+        left + width,
+        top + height,
+    )
+    candidate_points = [
+        divmod(index, width)
+        for index, value in enumerate(candidate_crop.pixels)
+        if value < INK_THRESHOLD
+    ]
+    if not candidate_points:
+        return {
+            "status": "unscorable",
+            "classification": "unscorable",
+            "reason": "candidate text region has no ink",
+            "policy": policy,
+            "work_units": width * height,
+        }
+
+    offsets = list(_translation_order(radius))
+    work_units = (
+        width * height
+        + reference_window.width * reference_window.height
+        + len(candidate_points) * len(offsets)
+        + len(offsets)
+    )
+    if work_units > max_work:
+        return {
+            "status": "unscorable",
+            "classification": "unscorable",
+            "reason": "bounded per-page text residual work budget is exhausted",
+            "policy": policy,
+            "work_units": 0,
+        }
+
+    integral = _binary_integral(reference_window)
+    stride = reference_window.width + 1
+    candidate_count = len(candidate_points)
+    rankings: List[Dict[str, Any]] = []
+    for dx, dy in offsets:
+        origin_x = radius + dx
+        origin_y = radius + dy
+        reference_count = _integral_rect_count(
+            integral,
+            stride,
+            origin_x,
+            origin_y,
+            origin_x + width,
+            origin_y + height,
+        )
+        intersection = sum(
+            reference_window.pixels[(origin_y + y) * reference_window.width + origin_x + x]
+            < INK_THRESHOLD
+            for y, x in candidate_points
+        )
+        denominator = candidate_count + reference_count
+        rankings.append(
+            {
+                "offset_px": {"dx": dx, "dy": dy},
+                "ink_f1": 0.0 if denominator == 0 else 2.0 * intersection / denominator,
+                "candidate_to_reference_ink_ratio": (
+                    None if reference_count == 0 else candidate_count / reference_count
+                ),
+                "overlap_ink_pixels": intersection,
+                "reference_ink_pixels": reference_count,
+            }
+        )
+
+    positioned = next(
+        item
+        for item in rankings
+        if item["offset_px"] == {"dx": 0, "dy": 0}
+    )
+    best_f1 = max(item["ink_f1"] for item in rankings)
+    best = [item for item in rankings if item["ink_f1"] == best_f1]
+    lower = sorted(
+        (item for item in rankings if item["ink_f1"] < best_f1),
+        key=lambda item: (
+            -item["ink_f1"],
+            abs(item["offset_px"]["dx"]) + abs(item["offset_px"]["dy"]),
+            item["offset_px"]["dy"],
+            item["offset_px"]["dx"],
+        ),
+    )
+    common = {
+        "policy": policy,
+        "positioned_ink_f1": positioned["ink_f1"],
+        "best_local_ink_f1": best_f1,
+        "local_gain": best_f1 - positioned["ink_f1"],
+        "runner_up": lower[0] if lower else None,
+        "work_units": work_units,
+    }
+    if best_f1 == 0.0:
+        return {
+            **common,
+            "status": "unscorable",
+            "classification": "unscorable",
+            "reason": "candidate and reference have no overlapping ink in the bounded search window",
+        }
+    if len(best) != 1:
+        return {
+            **common,
+            "status": "ambiguous",
+            "classification": "ambiguous",
+            "reason": "multiple local translations have the same best ink F1",
+            "best_offsets_px": [item["offset_px"] for item in best],
+        }
+
+    winner = best[0]
+    offset = winner["offset_px"]
+    nonzero_offset = offset != {"dx": 0, "dy": 0}
+    ratio = winner["candidate_to_reference_ink_ratio"]
+    similar_ink = (
+        ratio is not None
+        and TEXT_RESIDUAL_INK_RATIO_MIN <= ratio <= TEXT_RESIDUAL_INK_RATIO_MAX
+    )
+    gain = common["local_gain"]
+    if (
+        nonzero_offset
+        and gain >= TEXT_RESIDUAL_MATERIAL_GAIN
+        and best_f1 >= TEXT_RESIDUAL_GEOMETRY_MIN_F1
+        and similar_ink
+    ):
+        classification = "geometry-dominant"
+        reason = "bounded local translation materially restores high-fidelity ink overlap"
+    elif not nonzero_offset and best_f1 < 1.0:
+        classification = "glyph-style-dominant"
+        reason = "position is already optimal while glyph ink shape or density remains different"
+    elif nonzero_offset and gain >= TEXT_RESIDUAL_MIXED_GAIN:
+        classification = "mixed"
+        reason = "local translation helps, but glyph ink shape or density remains different"
+    else:
+        classification = "ambiguous"
+        reason = "bounded evidence does not uniquely separate geometry from glyph style"
+    return {
+        **common,
+        "status": "hypothesis" if classification != "ambiguous" else "ambiguous",
+        "classification": classification,
+        "reason": reason,
+        "best_offset_px": offset,
+        "candidate_to_reference_ink_ratio": ratio,
+        "overlap_ink_pixels": winner["overlap_ink_pixels"],
+        "reference_ink_pixels": winner["reference_ink_pixels"],
+        "candidate_ink_pixels": candidate_count,
+    }
+
+
 def _vertical_transitions(regions: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
     ordered = sorted(
         (
@@ -2203,6 +2468,7 @@ def _score_visual_regions(
     dy = int(translation["dy"])
     results: List[Dict[str, Any]] = []
     vertical_trace_work = 0
+    text_residual_work = 0
 
     def trace(
         category: str,
@@ -2219,6 +2485,25 @@ def _score_visual_regions(
             HARD_MAX_VERTICAL_TRACE_WORK_PER_PAGE - vertical_trace_work,
         )
         vertical_trace_work += int(result.get("work_units", 0))
+        return result
+
+    def text_residual(
+        category: str,
+        paint_status: str,
+        bounds: Optional[Mapping[str, int]],
+        alignment_clipped: bool,
+    ) -> Dict[str, Any]:
+        nonlocal text_residual_work
+        result = _text_residual_trace(
+            category,
+            paint_status,
+            bounds,
+            reference,
+            aligned_candidate,
+            alignment_clipped,
+            HARD_MAX_TEXT_RESIDUAL_WORK_PER_PAGE - text_residual_work,
+        )
+        text_residual_work += int(result.get("work_units", 0))
         return result
 
     for region in page_contract["regions"]:
@@ -2270,6 +2555,9 @@ def _score_visual_regions(
                 region["paint_status"],
                 None,
             )
+            base["text_residual"] = text_residual(
+                region["category"], region["paint_status"], None, False
+            )
             results.append(base)
             continue
         if right <= left or bottom <= top:
@@ -2285,6 +2573,9 @@ def _score_visual_regions(
                 region["category"],
                 region["paint_status"],
                 None,
+            )
+            base["text_residual"] = text_residual(
+                region["category"], region["paint_status"], None, False
             )
             results.append(base)
             continue
@@ -2319,6 +2610,12 @@ def _score_visual_regions(
                     region["category"],
                     region["paint_status"],
                     aligned_bounds,
+                ),
+                "text_residual": text_residual(
+                    region["category"],
+                    region["paint_status"],
+                    aligned_bounds,
+                    base["alignment_clipped"],
                 ),
             }
         )
@@ -2375,6 +2672,9 @@ def _render_html(report: Mapping[str, Any]) -> str:
                 f"<td>{_format_metric(None if region.get('metrics') is None else region['metrics']['edge_f1'])}</td>"
                 f"<td>{html.escape(region.get('vertical_trace', {}).get('status', 'unavailable'))}</td>"
                 f"<td>{_format_metric(region.get('vertical_trace', {}).get('offset_px'))}</td>"
+                f"<td>{html.escape(str(region.get('text_residual', {}).get('classification') or 'not-applicable'))}</td>"
+                f"<td>{_format_metric(region.get('text_residual', {}).get('best_local_ink_f1'))}</td>"
+                f"<td>{_format_metric(region.get('text_residual', {}).get('local_gain'))}</td>"
                 "</tr>"
                 for region in semantic_regions
             )
@@ -2382,7 +2682,8 @@ def _render_html(report: Mapping[str, Any]) -> str:
                 "<h3>Semantic regions (additive, report-only)</h3>"
                 "<table><tr><th>ID</th><th>Category</th><th>Status</th>"
                 "<th>Ink F1</th><th>Edge F1</th><th>Vertical trace</th>"
-                "<th>Offset hypothesis (px)</th></tr>"
+                "<th>Offset hypothesis (px)</th><th>Text residual</th>"
+                "<th>Best local ink F1</th><th>Local gain</th></tr>"
                 f"{region_rows}</table>"
             )
         else:
@@ -2573,11 +2874,34 @@ def _summarize_pages(pages: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
     trace_status_counts: Dict[str, int] = {}
     transition_status_counts: Dict[str, int] = {}
     transition_hypotheses: List[Dict[str, Any]] = []
+    text_residual_classification_counts: Dict[str, int] = {}
+    text_residual_hypotheses: List[Dict[str, Any]] = []
     for page in pages:
         for region in page.get("semantic_regions", []):
             trace_status = region.get("vertical_trace", {}).get("status")
             if trace_status is not None:
                 trace_status_counts[trace_status] = trace_status_counts.get(trace_status, 0) + 1
+            text_residual = region.get("text_residual", {})
+            residual_classification = text_residual.get("classification")
+            if residual_classification is not None:
+                text_residual_classification_counts[residual_classification] = (
+                    text_residual_classification_counts.get(residual_classification, 0) + 1
+                )
+                if text_residual.get("status") == "hypothesis":
+                    text_residual_hypotheses.append(
+                        {
+                            "page": page["page"],
+                            "id": region["id"],
+                            "classification": residual_classification,
+                            "best_offset_px": text_residual.get("best_offset_px"),
+                            "positioned_ink_f1": text_residual.get("positioned_ink_f1"),
+                            "best_local_ink_f1": text_residual.get("best_local_ink_f1"),
+                            "local_gain": text_residual.get("local_gain"),
+                            "candidate_to_reference_ink_ratio": text_residual.get(
+                                "candidate_to_reference_ink_ratio"
+                            ),
+                        }
+                    )
             category = region["category"]
             counts = category_counts.setdefault(
                 category,
@@ -2643,6 +2967,8 @@ def _summarize_pages(pages: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         "vertical_trace_status_counts": trace_status_counts,
         "vertical_transition_status_counts": transition_status_counts,
         "vertical_transition_hypotheses": transition_hypotheses,
+        "text_residual_classification_counts": text_residual_classification_counts,
+        "text_residual_hypotheses": text_residual_hypotheses,
     }
 
 
@@ -3040,6 +3366,8 @@ def _run_visual_check_from_snapshots(
             "vertical_trace_status_counts": {},
             "vertical_transition_status_counts": {},
             "vertical_transition_hypotheses": [],
+            "text_residual_classification_counts": {},
+            "text_residual_hypotheses": [],
             "pixel_comparison_attempted": False,
         }
         _write_report(output_dir, report, {}, limits)
@@ -3156,6 +3484,13 @@ def _run_visual_check_from_snapshots(
                         "aligned_bounds_px": None,
                         "metrics": None,
                         "vertical_trace": _vertical_trace(
+                            region["category"],
+                            region["paint_status"],
+                            None,
+                            reference_raw_image,
+                            candidate_raw_image,
+                        ),
+                        "text_residual": _text_residual_trace(
                             region["category"],
                             region["paint_status"],
                             None,
