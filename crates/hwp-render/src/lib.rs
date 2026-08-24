@@ -499,6 +499,84 @@ pub fn render_doc_trees(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> V
     place_doc(doc, fonts).pages.iter().map(lower_page).collect()
 }
 
+/// Content-free paint ownership for one operation in the shared page tree. The mask carries no
+/// glyph text, font name, image reference, source provenance, or coordinates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DiagnosticPaintCategory {
+    Body,
+    PageDecoration,
+    /// An object intersects the body boundary and must not be guessed into either side.
+    BoundaryCrossing,
+}
+
+/// An opaque per-page category mask aligned 1:1 with [`PageLayerTree::ops`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DiagnosticPageMask {
+    pub page_ordinal: usize,
+    pub categories: Vec<DiagnosticPaintCategory>,
+}
+
+fn vertical_category(
+    top: f64,
+    bottom: f64,
+    body_top: f64,
+    body_bottom: f64,
+) -> DiagnosticPaintCategory {
+    if !top.is_finite() || !bottom.is_finite() {
+        return DiagnosticPaintCategory::BoundaryCrossing;
+    }
+    if bottom <= body_top || top >= body_bottom {
+        DiagnosticPaintCategory::PageDecoration
+    } else if top >= body_top && bottom <= body_bottom {
+        DiagnosticPaintCategory::Body
+    } else {
+        DiagnosticPaintCategory::BoundaryCrossing
+    }
+}
+
+fn paint_category(op: &PaintOp, body_top: f64, body_bottom: f64) -> DiagnosticPaintCategory {
+    match op {
+        // Glyph ownership follows its baseline, matching the placed-layout comparator. An ascent may
+        // legitimately cross a margin while the line itself still belongs to the body.
+        PaintOp::Glyph { y, .. } if !y.is_finite() => DiagnosticPaintCategory::BoundaryCrossing,
+        PaintOp::Glyph { y, .. } if *y < body_top || *y > body_bottom => {
+            DiagnosticPaintCategory::PageDecoration
+        }
+        PaintOp::Glyph { .. } => DiagnosticPaintCategory::Body,
+        PaintOp::Rect { y, h, .. } | PaintOp::Image { y, h, .. } => {
+            vertical_category(*y, *y + *h, body_top, body_bottom)
+        }
+        PaintOp::Line { y1, y2, .. } => {
+            vertical_category(y1.min(*y2), y1.max(*y2), body_top, body_bottom)
+        }
+    }
+}
+
+/// Classify the exact paint trees consumed by SVG and PDF into opaque body/decoration masks. This is
+/// diagnostic-only: it neither rewrites the trees nor changes either backend's replay behavior.
+pub fn render_doc_diagnostic_masks(
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+) -> Vec<DiagnosticPageMask> {
+    place_doc(doc, fonts)
+        .pages
+        .iter()
+        .enumerate()
+        .map(|(page_ordinal, page)| {
+            let tree = lower_page(page);
+            let body_bottom = page.height - page.margin_bottom;
+            DiagnosticPageMask {
+                page_ordinal,
+                categories: tree
+                    .ops
+                    .iter()
+                    .map(|op| paint_category(op, page.margin_top, body_bottom))
+                    .collect(),
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -525,6 +603,46 @@ mod tests {
         };
         doc.sections.push(sec);
         doc
+    }
+
+    #[test]
+    fn diagnostic_mask_fails_closed_for_crossing_and_nonfinite_nontext_paint() {
+        let crossing = PaintOp::Line {
+            x1: 0.0,
+            y1: 1_000.0,
+            x2: 1_000.0,
+            y2: 3_000.0,
+            color: Color::default(),
+            style: LineStyle::Solid,
+            width: 1.0,
+        };
+        let non_finite = PaintOp::Image {
+            x: 0.0,
+            y: f64::NAN,
+            w: 10.0,
+            h: 10.0,
+            bin_ref: "not-observed-by-mask".into(),
+            svg: None,
+        };
+        let decoration = PaintOp::Rect {
+            x: 0.0,
+            y: 500.0,
+            w: 10.0,
+            h: 10.0,
+            fill: None,
+        };
+        assert_eq!(
+            paint_category(&crossing, 2_000.0, 18_000.0),
+            DiagnosticPaintCategory::BoundaryCrossing
+        );
+        assert_eq!(
+            paint_category(&non_finite, 2_000.0, 18_000.0),
+            DiagnosticPaintCategory::BoundaryCrossing
+        );
+        assert_eq!(
+            paint_category(&decoration, 2_000.0, 18_000.0),
+            DiagnosticPaintCategory::PageDecoration
+        );
     }
 
     #[test]
