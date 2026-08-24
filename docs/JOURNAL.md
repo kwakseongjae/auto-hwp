@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · PR #189 merged / #190 started
+- #189 exact-head required CI·MERGEABLE/CLEAN·댓글 0 후 main `1263805e`; #188 close·branch 정리.
+- #94 근거 동기화, next cell LIST_HEADER boundary #190 등록, exact-main worktree 시작.
+- 다음 enclosing table 전체 content-free 2회 분류; route/rhwp/HWPX/typesetter/generated 불변.
+
 ## 2026-08-24 (Codex sol) · #188 PR #189 게시
 - verified parser/test/state commit `ae3ea4f` push, PR #189(`Closes #188`) 생성.
 - 다음 exact-head required CI·review/general/inline·mergeability 추적→병합→#94/next child.
