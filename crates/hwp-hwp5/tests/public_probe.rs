@@ -28,27 +28,16 @@ fn public_hwp5_has_bounded_content_free_record_provenance() {
 }
 
 #[test]
-fn explicit_own_parser_owns_six_paragraph_cell_then_stops_content_free() {
-    let probed = probe(&benchmark()).unwrap();
-    let next = probed
-        .streams
-        .iter()
-        .flat_map(|stream| &stream.records)
-        .find(|record| record.head == 47_738)
-        .unwrap();
-    assert_eq!(
-        (next.tag, next.level, next.head, next.data, next.end, next.size),
-        (0x47, 1, 47_738, 47_742, 47_788, 46)
-    );
+fn explicit_own_parser_owns_captioned_table_then_stops_content_free() {
     let error = OwnHwp5Parser::new().parse(&benchmark()).unwrap_err();
     eprintln!("{error:?}");
     assert!(matches!(
         error,
         Error::MalformedRecord {
-            tag: 0x47,
+            tag: 0x4d,
             section: Some(0),
-            offset: 47738,
-            reason: "inline table common-object attributes are not owned",
+            offset: 51364,
+            reason: "TABLE attributes or row/column topology are not owned",
             ..
         }
     ));

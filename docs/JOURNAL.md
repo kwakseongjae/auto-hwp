@@ -5,6 +5,29 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · PR #195 posted
+- `Closes #192` PR #195 published with exact validation and privacy/rhwp boundaries.
+- next final-head required CI + reviews/comments/mergeability → autonomous merge.
+
+## 2026-08-24 (Codex sol) · #192 implementation pushed
+- exact captioned-table parser/tests/continuity committed as `8453f30` and pushed.
+- next `Closes #192` PR → required CI/comments/mergeability → autonomous merge.
+
+## 2026-08-24 (Codex sol) · #192 full/audit green
+- quick all green; full Rust/gates/WASM/JS + Vitest 1,007 green.
+- Chromium full 82 pass/3 skip/2 retry-pass; lone timeout passes alone in 26.9s.
+- rhwp/generated/HWPX/layout/scoring/private-content diffs 0; next PR/CI/merge.
+
+## 2026-08-24 (Codex sol) · #192 captioned HWP5 table owned
+- exact top-caption prefix + 4×5 full grid now lower to shared IR; hostile 11-axis fail-closed.
+- public own-parser boundary advanced to TABLE `0x4d/51364`; HWP5 72/clippy/wasm32 green.
+- next quick/full→audit→PR/CI/merge, then #94+next boundary.
+
+## 2026-08-24 (Codex sol) · #194 merged / #192 rebased
+- #194 exact-head required CI green, CLEAN/MERGEABLE, external comments 0; main `f2306d17`.
+- #193 closed/remote branch removed; #192 docs-only history was already absorbed and rebased cleanly.
+- next strict top-captioned 4×5 HWP5 parser + hostile fixtures; production/rhwp/HWPX/layout unchanged.
+
 ## 2026-08-24 (Codex sol) · #193 canonical caption loss seams closed
 - JSX/equality now round-trip caption semantics strictly; duplicate captions fail closed.
 - semantic HTML keeps caption content/position; equation enrichment reaches caption blocks.

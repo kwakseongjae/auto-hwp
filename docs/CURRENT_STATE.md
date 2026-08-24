@@ -3,6 +3,37 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-24 · Codex(sol) — **PR #194 병합 · #192 latest main 재개**.
+  PR #194 exact head `89c3ea4`에서 issue-link **3s**·build-test **9m24s**·licenses **2m58s** green,
+  MERGEABLE/CLEAN, review/general/inline 외부 댓글 0을 확인하고 protected main `f2306d17`로 squash
+  병합했다. #193 close와 원격 branch 정리 후 `codex/issue-192-hwp5-common-object`의 과거 문서-only
+  커밋을 latest main에 rebase했고, 정본에 이미 흡수된 중복이라 branch는 exact main과 clean하다.
+  #192의 두 content-free 분류 run은 exact 동일: common attr `0x282a2311`, TABLE 앞 30B caption
+  LIST_HEADER+strict 1 paragraph, top/width **8504**/gap **850**/max-width **48047**/include-margin false,
+  list attr·width-ref·reserved tail zero. 본체는 attr `0x06000006`, 4×5 full grid/20 cells, column widths
+  `3221/6593/8956/21855/7422`, row heights `1948/1848/1848/1848`, 각 cell 1 paragraph·width-ref
+  `0x0400`·mirrored extension이다. **다음:** 이 exact tuple만 parser에 additive로 소유하고 caption
+  paragraph를 ordinary shared Block으로 내려 synthetic positive+hostile discriminator를 잠근다.
+  route·`external/rhwp`·HWPX·shared layout·generated assets·oracle scoring은 불변.
+  구현은 caption LIST_HEADER와 정확히 한 ordinary paragraph를 TABLE 전용 prefix로 소비하고,
+  top/width/gap/max-width/include-margin을 shared `TableCaption`으로 내린다. 4×5 full-grid tuple만
+  additive로 열어 common/table geometry, row counts, cell order/span, paragraph count, padding,
+  width-ref `0x0400`, mirrored extension, nonzero/range-checked border refs와 exact row/column geometry를
+  검증한다. synthetic positive와 direction/gap/reserved/missing·extra paragraph/table attr/row count/
+  width-ref/extension/geometry/border hostile **11축**이 green이다. 실제 public benchmark own-parser는
+  이 table을 통과해 다음 unowned TABLE `0x4d/51364`까지 전진했다. HWP5 **72 tests**(15+47+2+8),
+  focused clippy `-D warnings`, wasm32 green. quick은 workspace/PDF visual **51**/canonical
+  **8·18·24·98.9%+**/public corpus **84**/oracle **82**/HWPX/wasm/licenses 전체 green이다. full도 새
+  wasm **7,818,243B**, JS builds/crosscheck/i18n와 Vitest **1,007** green. Chromium 전체 run은
+  **82 pass/3 intentional skip/2 retry-pass/1 timeout**이었고, 유일한 HWPX secPr-host timeout은
+  깨끗한 서버의 단독 재검증에서 **1 pass/0 fail (26.9s)**로 통과해 장시간 직렬 실행 누적 지연으로
+  분류했다. 임시 dependency links는 제거했고 final diff audit에서 production route·`external/rhwp`·
+  HWPX·shared layout·generated assets·oracle scoring diff 0, private text/path/hash/raw/credential diff 0을
+  확인했다. 구현·검증·continuity를 commit `8453f30`으로 원격
+  `codex/issue-192-hwp5-common-object`에 push하고 PR **#195**를 `Closes #192`로 게시했다.
+  **다음:** final head required CI·comments·mergeability green이면 autonomous merge; 이후 #94 근거
+  동기화와 다음 boundary `TABLE 0x4d/51364` issue.
+
 - 갱신: 2026-08-24 · Codex(sol) — **#193 shared table-caption foundation 구현 중**.
   `TableCaption`을 source-neutral shared IR에 추가하고 rhwp HWP5 lift가 방향 4종·문단 blocks·gap·
   width/max-width·include-margin을 손실 없이 내리도록 했다. top/bottom은 기존 paragraph placer와
