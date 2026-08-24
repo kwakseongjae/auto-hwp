@@ -3,6 +3,47 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-24 · Codex(sol) — **PR #197 병합 · #198 착수**.
+  PR #197 exact head `c68b74e`에서 issue-link **5s**·build-test **9m57s**·licenses **2m49s** green,
+  CLEAN/MERGEABLE, review/general/inline 댓글 0을 확인하고 protected main `6f1f3687`로 squash 병합했다.
+  #196 close·원격 branch 정리를 확인하고 #94에 benchmark-complete/no-cutover 근거를 동기화했다.
+  content-free native/rhwp comparison은 sections **1/1**, tables **32/32**, images/equations/charts
+  **0/0**이며 native 쪽 paragraphs **+1**, runs **+7**, controls **+6**이다. raw-record와 semantic IR
+  count를 같은 지표로 취급하지 않고 typed meaning을 분류하기 위해 후속 **#198**을 R18/P1/
+  area:hwp5/status:ready로 열고 exact main의 `codex/issue-198-hwp5-eligibility` worktree를 만들었다.
+  **다음:** 기존 differential schema와 두 projection의 counting semantics를 조사해 additive typed
+  projection을 설계한다. 공개 HWP5 corpus에 fail-closed eligibility matrix를 산출하되 원문·파일명·
+  경로·원본 hash/raw는 출력하지 않는다. unknown/unsupported/ambiguous는 ineligible이며 production
+  route는 rhwp를 유지한다. `external/rhwp`·HWPX·shared layout·PDF scoring은 불변.
+  v1 `+1/+7/+6`을 typed v2로 재측정했다. paragraph +1은 v1이 caption paragraph/run을 순회하지
+  않은 차이이고 semantic 양쪽은 body **91**/cell **261**/caption **1**로 같다. control +6은 table이
+  아니라 section **1**/column **1**/page-number-position **2**/new-number **2** metadata header이며
+  semantic table **32/32**가 같다. 실 semantic run 차이는 empty text run body **+2**/cell **+4**이고
+  exact text는 같다. 빈 run의 char-shape가 blank-line 조판에 미칠 가능성을 아직 증명하지 않았으므로
+  benchmark는 `semantic-mismatch` ineligible로 유지한다. additive v2는 source header를 typed aggregate로,
+  semantic paragraph/run을 location별로, control을 kind별로 비교하며 text는 메모리에서 exact 비교 후
+  boolean만 노출한다. counts/text가 같아도 per-doc layout/PDF evidence channel이 아직 없으므로
+  `render-parity-unproven`으로 거부해 false-positive eligible을 막는다. unsupported/error는 동적 상세
+  없이 static code로 거부하고 rhwp를 호출하지 않는다.
+  committed public HWP5 **13건** 2회 matrix는 eligible **0**, semantic-mismatch **1**,
+  unsupported-semantic **7**, unsupported-section-control **4**, invalid-container **1**로 deterministic하다.
+  권리/개인정보/컨테이너 검토가 고정된 public intake **50/50**(HWP5 20/HWPX 20/PDF 10)을 private
+  ignored lane에 안전하게 재수집했다. optional HWP5 20건을 포함한 **33건** matrix도 2회 deterministic하며
+  추가 분류는 unsupported-style-semantics **15**, unsupported-border-fill **3**,
+  unsupported-table-topology **2**다. 원문·파일명·경로·원본 hash는 report/log에 없다.
+  hostile/content-free projection tests, focused clippy `-D warnings`, wasm32 green. quick 전체도
+  workspace/PDF visual **51**/canonical **8·18·24·98.9%+**/public corpus **84**/oracle **82**/HWPX/
+  wasm/licenses green이다. full은 새 wasm **7,818,243B**, JS build/crosscheck/i18n, Vitest **1,007**
+  green이고 sandbox port EPERM 뒤 실제 Chromium **85 pass/3 intentional skip/0 fail**이다. 임시
+  node_modules links는 제거했다. final audit에서 변경은 HWP5 typed v2/eligibility/matrix와 문서뿐이며
+  production route·`external/rhwp`·HWPX·shared typesetter·generated wasm/assets·oracle scoring diff 0,
+  private source text/path/hash/raw/credential diff 0이다. **다음:** commit/push→`Closes #198` PR→
+  exact-head CI/comments/mergeability green이면 autonomous merge. 후속은 empty-run 6건의
+  char-shape/layout/PDF 영향 판정과 가장 큰 corpus refusal인 STYLE 15건 classification-first slice.
+  continuity start `0e943c9`와 구현/검증 `f8b43e8`을 원격
+  `codex/issue-198-hwp5-eligibility`에 push했다. `Closes #198` PR **#199**를 게시했다.
+  **다음:** final head required CI·reviews/comments·mergeability green이면 autonomous merge.
+
 - 갱신: 2026-08-24 · Codex(sol) — **PR #195 병합 · #196 착수**.
   PR #195 exact head `cecbfdc`에서 issue-link **5s**·build-test **9m31s**·licenses **2m54s** green,
   CLEAN/MERGEABLE, review/general/inline 댓글 0을 확인하고 protected main `dee2996f`로 squash 병합했다.

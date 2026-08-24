@@ -5,6 +5,30 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · PR #199 posted
+- `Closes #198` PR #199 published with no-cutover, zero-eligible, and privacy boundaries explicit.
+- next final-head required CI + reviews/comments/mergeability → autonomous merge.
+
+## 2026-08-24 (Codex sol) · #198 pushed
+- typed eligibility/matrix/docs committed through `f8b43e8` and pushed.
+- next publish `Closes #198` PR, then exact-head required CI/comments/mergeability audit.
+
+## 2026-08-24 (Codex sol) · #198 full/audit green
+- quick and full green: PDF51, canonical 8/18/24+98.9%, corpus84/oracle82, wasm 7,818,243B.
+- JS/Vitest 1,007 and Chromium 85 pass/3 intentional skip/0 fail; temporary links removed.
+- final boundary/privacy audit clean; next commit/push and `Closes #198` PR.
+
+## 2026-08-24 (Codex sol) · #198 typed eligibility implemented
+- v1 +1/+7/+6 classified as caption-counter, six metadata headers, and six empty semantic runs.
+- additive v2 compares same-coordinate semantics/text privately and rejects every unexplained delta.
+- public intake fetched 50/50; HWP5 matrix is 13 committed / 33 with private intake, 0 eligible.
+- next focused hostile/privacy tests, clippy/wasm, quick/full gates, then PR.
+
+## 2026-08-24 (Codex sol) · PR #197 merged · #198 started
+- #197 merged as `6f1f3687`; #196 closed and parent #94 received content-free evidence.
+- #198 opened for typed semantic-delta classification and fail-closed own-parser eligibility.
+- next inspect projection/count semantics, then implement without changing production rhwp route.
+
 ## 2026-08-24 (Codex sol) · #196 stale boundary docs fixed
 - HWP5 native-parser doc no longer claims offset 936 stop; records benchmark-end exact-subset truth.
 - semantic delta and corpus/wasm/hostile/layout cutover gates stay explicit; next push/restarted CI.
