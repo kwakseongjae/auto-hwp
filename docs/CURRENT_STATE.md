@@ -3,6 +3,19 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-24 · Codex(sol) — **PR #197 병합 · #198 착수**.
+  PR #197 exact head `c68b74e`에서 issue-link **5s**·build-test **9m57s**·licenses **2m49s** green,
+  CLEAN/MERGEABLE, review/general/inline 댓글 0을 확인하고 protected main `6f1f3687`로 squash 병합했다.
+  #196 close·원격 branch 정리를 확인하고 #94에 benchmark-complete/no-cutover 근거를 동기화했다.
+  content-free native/rhwp comparison은 sections **1/1**, tables **32/32**, images/equations/charts
+  **0/0**이며 native 쪽 paragraphs **+1**, runs **+7**, controls **+6**이다. raw-record와 semantic IR
+  count를 같은 지표로 취급하지 않고 typed meaning을 분류하기 위해 후속 **#198**을 R18/P1/
+  area:hwp5/status:ready로 열고 exact main의 `codex/issue-198-hwp5-eligibility` worktree를 만들었다.
+  **다음:** 기존 differential schema와 두 projection의 counting semantics를 조사해 additive typed
+  projection을 설계한다. 공개 HWP5 corpus에 fail-closed eligibility matrix를 산출하되 원문·파일명·
+  경로·원본 hash/raw는 출력하지 않는다. unknown/unsupported/ambiguous는 ineligible이며 production
+  route는 rhwp를 유지한다. `external/rhwp`·HWPX·shared layout·PDF scoring은 불변.
+
 - 갱신: 2026-08-24 · Codex(sol) — **PR #195 병합 · #196 착수**.
   PR #195 exact head `cecbfdc`에서 issue-link **5s**·build-test **9m31s**·licenses **2m54s** green,
   CLEAN/MERGEABLE, review/general/inline 댓글 0을 확인하고 protected main `dee2996f`로 squash 병합했다.

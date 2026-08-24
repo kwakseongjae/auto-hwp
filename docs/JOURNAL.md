@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · PR #197 merged · #198 started
+- #197 merged as `6f1f3687`; #196 closed and parent #94 received content-free evidence.
+- #198 opened for typed semantic-delta classification and fail-closed own-parser eligibility.
+- next inspect projection/count semantics, then implement without changing production rhwp route.
+
 ## 2026-08-24 (Codex sol) · #196 stale boundary docs fixed
 - HWP5 native-parser doc no longer claims offset 936 stop; records benchmark-end exact-subset truth.
 - semantic delta and corpus/wasm/hostile/layout cutover gates stay explicit; next push/restarted CI.
