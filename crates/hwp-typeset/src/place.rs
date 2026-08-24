@@ -5373,6 +5373,125 @@ mod tests {
         );
     }
 
+    fn table_with_margins(top: i32, bottom: i32) -> Table {
+        let mut table = one_cell_table(0);
+        table.outer_margin_top = top;
+        table.outer_margin_bottom = bottom;
+        table
+    }
+
+    fn top_level_table_tops(doc: &SemanticDoc) -> Vec<(f64, f64)> {
+        place_doc(doc, &ApproxFontMetrics).pages[0]
+            .tables
+            .iter()
+            .filter(|table| table.ancestors.is_empty())
+            .map(|table| (table.y, table.h))
+            .collect()
+    }
+
+    #[test]
+    fn consecutive_table_gap_is_exact_bottom_plus_top_margin() {
+        use crate::LayoutEngine;
+
+        for (first_bottom, second_top) in [(0, 0), (300, 0), (0, 700), (300, 700)] {
+            let doc = doc_with(vec![
+                Block::Table(table_with_margins(900, first_bottom)),
+                Block::Table(table_with_margins(second_top, 800)),
+            ]);
+            let tables = top_level_table_tops(&doc);
+            let gap = tables[1].0 - (tables[0].0 + tables[0].1);
+            assert_eq!(
+                gap,
+                f64::from(first_bottom + second_top),
+                "only the preceding bottom and following top margins form the gap"
+            );
+            if first_bottom > 0 && second_top > 0 {
+                assert_ne!(
+                    gap,
+                    f64::from(first_bottom.max(second_top)),
+                    "the current contract sums margins instead of collapsing to max"
+                );
+            }
+            assert_eq!(
+                tables[0].0, 7_200.0,
+                "page-top suppresses the first table margin but keeps the page margin"
+            );
+            assert_eq!(
+                place_doc(&doc, &ApproxFontMetrics).pages.len(),
+                crate::NaiveLayout
+                    .layout(&doc, &ApproxFontMetrics)
+                    .unwrap()
+                    .pages
+                    .len(),
+                "LOCKSTEP"
+            );
+            assert_eq!(block_pages(&doc, &ApproxFontMetrics)[0], vec![0, 0]);
+        }
+    }
+
+    #[test]
+    fn table_anchor_is_zero_but_real_spacer_and_page_break_are_owned() {
+        use crate::LayoutEngine;
+
+        let anchor = Paragraph {
+            is_table_anchor: true,
+            ..Default::default()
+        };
+        let without_anchor = doc_with(vec![
+            Block::Table(one_cell_table(0)),
+            Block::Table(one_cell_table(0)),
+        ]);
+        let with_anchor = doc_with(vec![
+            Block::Table(one_cell_table(0)),
+            Block::Paragraph(anchor.clone()),
+            Block::Table(one_cell_table(0)),
+        ]);
+        assert_eq!(
+            top_level_table_tops(&without_anchor),
+            top_level_table_tops(&with_anchor),
+            "a pure host anchor contributes no line"
+        );
+
+        let with_spacer = doc_with(vec![
+            Block::Table(one_cell_table(0)),
+            Block::Paragraph(para("")),
+            Block::Table(one_cell_table(0)),
+        ]);
+        let spacer_tables = top_level_table_tops(&with_spacer);
+        let spacer_placed = place_doc(&with_spacer, &ApproxFontMetrics);
+        let spacer_band = spacer_placed.pages[0]
+            .blocks
+            .iter()
+            .find(|block| block.block == 1)
+            .expect("real blank spacer has a provenance band");
+        assert_eq!(
+            spacer_tables[1].0 - (spacer_tables[0].0 + spacer_tables[0].1),
+            spacer_band.h,
+        );
+
+        let break_anchor = Paragraph {
+            is_table_anchor: true,
+            page_break_before: true,
+            ..Default::default()
+        };
+        let page_break = doc_with(vec![
+            Block::Table(one_cell_table(0)),
+            Block::Paragraph(break_anchor),
+            Block::Table(table_with_margins(700, 0)),
+        ]);
+        let placed = place_doc(&page_break, &ApproxFontMetrics);
+        let naive = crate::NaiveLayout
+            .layout(&page_break, &ApproxFontMetrics)
+            .unwrap();
+        assert_eq!(placed.pages.len(), 2);
+        assert_eq!(placed.pages.len(), naive.pages.len(), "LOCKSTEP");
+        assert_eq!(placed.pages[1].tables[0].y, 7_200.0);
+        assert_eq!(
+            block_pages(&page_break, &ApproxFontMetrics)[0],
+            vec![0, 1, 1]
+        );
+    }
+
     #[test]
     fn placed_blocks_resolve_point_to_the_right_block() {
         // Two paragraphs framing a table: every top-level block must get exactly one provenance band

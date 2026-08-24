@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-25 (Codex sol) · #225 HWP5 table-anchor spacing ownership
+- page1/4/5의 +9/+19/+19px 누락이 raw host `line_spacing` 452/960/960 HWPUNIT와 exact임을 격리.
+- margins/table geometry는 owned·rhwp·production exact; HWPX는 explicit margins만 소유함을 분리.
+- full green: 8/18/24+98.9%, AI120, oracle82, Vitest1,012, Chromium83 pass/3 skip/2 retry-pass.
+- 다음: 진단 PR/CI/merge→HWP5-only spacing IR·owned/rhwp enrichment·LOCKSTEP renderer child.
+
 ## 2026-08-25 (Codex sol) · #223 vertical-transition trace
 - fixed alignment의 row-ink profile로 ±128px offset/transition 가설을 bounded·content-free하게 추가.
 - canonical은 SHA·scores 불변, unique/tie 55/5; page4/5 첫 table transition이 0→+17/+19px.

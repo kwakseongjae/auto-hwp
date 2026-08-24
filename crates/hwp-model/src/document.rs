@@ -259,8 +259,10 @@ pub struct Paragraph {
     pub column_layout_before: Option<ColumnLayout>,
     /// This (empty) paragraph is a pure TABLE/object ANCHOR — in HWP a table control hangs off a host
     /// paragraph; the lift emits that host as an empty `Paragraph` immediately before the `Table` block.
-    /// Hancom reserves NO line for such an anchor, so pagination skips its height (a genuine blank
-    /// spacer paragraph — text-empty but NOT hosting a control — is left alone and keeps its line).
+    /// The anchor reserves no ordinary text line, so pagination skips its height (a genuine blank
+    /// spacer paragraph — text-empty but NOT hosting a control — keeps its line). Binary HWP5 may
+    /// separately store inter-object distance in the anchor line's `line_spacing`; that source-owned
+    /// axis is diagnosed by #225 and must not be confused with restoring a phantom text line.
     pub is_table_anchor: bool,
     /// Requested named style (e.g. "개요 1"); resolved to a `styleIDRef` by the serializer.
     pub style_name: Option<String>,

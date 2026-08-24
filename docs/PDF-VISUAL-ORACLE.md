@@ -523,6 +523,28 @@ text rows often repeat and therefore do not yet identify a safe renderer formula
 separate consecutive-table/anchor-spacing investigation; it does not justify changing table height,
 paragraph line metrics, or font realization in #223.
 
+### HWP5 table-anchor spacing ownership (2026-08-25, #225)
+
+The #223 transition was decomposed without changing placement. On canonical page 4, the candidate
+and reference first-table ink spans are rows 143–206 and 143–205, while the second table begins on
+rows 210 and 229. The first table's height is therefore not the missing 19-pixel increment.
+
+Content-free HWP5 `PARA_LINE_SEG` evidence identifies the exact source-owned distance. On pages 4 and
+5, the first table host has `(vertical_pos=0, line_height=3285, line_spacing=960)` and the next host
+starts at `vertical_pos=4245`; on page 1 the corresponding values are `(0, 2130, 452)` and `2582`.
+At the report's 144 DPI, 960 and 452 HWPUNIT are 19.2 and 9.04 pixels—the observed +19 and +9
+transition increments. The production layout instead advances only by table height plus the preceding
+bottom and following top margins: 3,286 rather than 4,246 HWPUNIT on pages 4/5, and 1,989 rather than
+2,441 on page 1.
+
+The strict owned HWP5 parser, rhwp-base lift, and production-enriched document have identical
+top-level table margins and placed table geometry, so this is neither margin parse loss nor an
+own-vs-rhwp discrepancy. Synthetic tests separately pin summed (not collapsed) table margins, a
+zero-height pure anchor, a real blank spacer, fresh-page behavior, and `place_doc`/`NaiveLayout`/
+`block_pages` page ownership. An owned HWPX pair retains only its explicit outer margins and carries
+no source anchor-line metric, so HWPX's established zero-height anchor contract must not inherit this
+HWP5-only source evidence. A renderer fix belongs in a separate child and must preserve that boundary.
+
 ## Tests
 
 Run the dependency-free synthetic metric and PNG codec suite with:
