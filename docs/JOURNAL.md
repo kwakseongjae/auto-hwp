@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #196 pushed
+- benchmark-complete parser/tests/continuity committed through `50ca455` and pushed.
+- next `Closes #196` PR → required CI/comments/mergeability → autonomous merge.
+
 ## 2026-08-24 (Codex sol) · #196 full/audit green
 - full green: PDF51, wasm 7,818,243B, Vitest 1,007, Chromium 85 pass/3 skip/0 fail.
 - rhwp/HWPX/layout/generated/scoring/private-content diffs 0; temp links/instrumentation removed.

@@ -47,7 +47,8 @@
   skip/0 fail**로 재시도 없이 통과했다. 임시 dependency links는 제거했고 final audit에서 변경은
   HWP5 exact parser/fixtures, hwp-core own-only success contract, content-free public completion regression,
   continuity 문서뿐이다. `external/rhwp`·HWPX·shared typesetter·generated wasm/assets·oracle scoring diff 0,
-  임시 instrumentation 및 private text/path/hash/raw/credential diff 0을 확인했다. **다음:** commit/push/
+  임시 instrumentation 및 private text/path/hash/raw/credential diff 0을 확인했다. 구현·검증·continuity를
+  commits `7663aa7`·`50ca455`로 원격 `codex/issue-196-hwp5-next-table`에 push했다. **다음:**
   `Closes #196` PR→required CI·comments·mergeability green이면 autonomous merge; 후속 delta/eligibility issue.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #194 병합 · #192 latest main 재개**.
