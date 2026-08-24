@@ -1,4 +1,4 @@
-use hwp_hwp5::{probe, Error, OwnHwp5Parser};
+use hwp_hwp5::{probe, OwnHwp5Parser};
 
 fn benchmark() -> Vec<u8> {
     std::fs::read(concat!(
@@ -28,17 +28,10 @@ fn public_hwp5_has_bounded_content_free_record_provenance() {
 }
 
 #[test]
-fn explicit_own_parser_owns_captioned_table_then_stops_content_free() {
-    let error = OwnHwp5Parser::new().parse(&benchmark()).unwrap_err();
-    eprintln!("{error:?}");
-    assert!(matches!(
-        error,
-        Error::MalformedRecord {
-            tag: 0x4d,
-            section: Some(0),
-            offset: 51364,
-            reason: "TABLE attributes or row/column topology are not owned",
-            ..
-        }
-    ));
+fn explicit_own_parser_reaches_public_benchmark_end_content_free() {
+    let doc = OwnHwp5Parser::new()
+        .parse(&benchmark())
+        .expect("first-party parser owns the complete bounded public benchmark");
+    assert_eq!(doc.sections.len(), 1);
+    assert!(!doc.sections[0].blocks.is_empty());
 }

@@ -3,6 +3,59 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-24 · Codex(sol) — **PR #195 병합 · #196 착수**.
+  PR #195 exact head `cecbfdc`에서 issue-link **5s**·build-test **9m31s**·licenses **2m54s** green,
+  CLEAN/MERGEABLE, review/general/inline 댓글 0을 확인하고 protected main `dee2996f`로 squash 병합했다.
+  #192 close와 원격 branch 삭제를 확인하고 #94에 content-free 근거를 동기화했다. 최근 GitHub 활동은
+  owner 작업뿐이며 신규 외부 제보·PR·댓글, 스팸·악성·보안/개인정보 신호는 0이다. 다음 unowned
+  boundary `TABLE 0x4d/51364`는 중복 이슈가 없어 classification-first 자식 **#196**을 R18/P1/
+  area:hwp5/status:ready로 열고 exact main의 `codex/issue-196-hwp5-next-table` worktree를 만들었다.
+  **다음:** source text/path/hash/raw를 출력하지 않는 content-free probe를 독립 2회 수행해 common/table
+  flags, full cell topology/order/span, geometry, references, paragraph/nesting/extension framing을 분류한다.
+  모든 active semantics가 shared IR로 faithful할 때만 exact discriminator+positive/hostile fixture를
+  구현한다. production route·`external/rhwp`·HWPX·shared layout·generated assets·scoring은 불변.
+  pinned oracle submodule 초기화 중 병합 완료 #192의 재생성 가능한 target cache가 디스크를 채워,
+  해당 target만 `cargo clean`해 **14.2GiB**를 회수한 뒤 pinned `f137b4c`를 정상 초기화했다. 임시
+  numeric-only instrumentation으로 독립 2회 분류한 결과는 exact 동일했고 계측은 제거했다. boundary는
+  common attr `0x082a2311`/width **48046**/height **7492**/margins `[141;4]`, table attr
+  `0x06000006`/4×5 full grid/20 cells/row counts `[5;4]`/padding `[141;4]`/border 4/zone 0이다.
+  cells는 row-major 1×1 spans, 각 1 ordinary paragraph(일부 empty)/nested controls 0, width-ref
+  `0x0500`, mirrored 13B extension, padding `[141;4]`, exact columns
+  `3221/9238/14770/12223/8594`, rows `1948/1848/1848/1848`; border refs는 range-valid row variants다.
+  모든 active semantics가 현 shared Table/Cell/Paragraph IR로 손실 없이 표현 가능하다. **다음:** 이
+  exact tuple만 additive로 소유하고 positive + attr/count/span/width-ref/extension/geometry/paragraph/
+  padding/border hostile discriminators를 잠근 뒤 public boundary를 다음 unsupported record로 전진.
+  구현은 이 exact uncaptioned tuple만 match에 추가하고 common/table geometry, full-grid positions,
+  width-ref sequence, mirrored extensions, paragraph/padding, row-specific range-valid border refs와 exact
+  row/column geometry를 묶어 검증한다. synthetic positive는 실제와 같이 마지막 행의 ordinary empty
+  paragraphs도 포함하며 common width/table attr/table border/row count/span/width-ref/extension/grid/
+  paragraph count/padding/cell border **11축** hostile fixture가 모두 fail-closed한다. 이 slice 뒤에는
+  다음 unsupported record가 없었고 own parser가 public benchmark 전체를 끝까지 성공해, 공개 경계
+  회귀를 원문을 출력하지 않는 full-parse success 계약으로 바꿨다. HWP5 **74 tests**(15+49+2+8)와
+  focused clippy `-D warnings` green. **다음:** wasm32→quick/full gates와 final diff/security audit;
+  #196 PR/CI/merge 뒤 #94의 benchmark-complete와 production cutover 전 corpus differential gap을 분리.
+  quick 첫 run은 과거 hwp-core 계약이 own-only benchmark 실패를 기대해 새 성공을 회귀로 잡았고,
+  이를 production route 변경 없이 “rhwp fallback 없이 benchmark 완주” 계약으로 갱신했다. focused
+  hwp-core 2 tests green이며 content-free deterministic differential은 native/oracle
+  sections **1/1**, tables **32/32**, images **0/0**, equations/charts **0/0**이지만 paragraphs
+  **353/352**, runs **389/382**, controls **38/32** delta를 드러냈다. 이는 cutover 전 별도 분류 대상이다.
+  rerun quick은 workspace 전체, canonical **8/18/24·98.9%+**, public corpus **84**, oracle **82**,
+  HWPX, wasm/licenses 모두 green. **다음:** full gate→final audit→commit/push/PR/CI/merge; 후속은
+  content-free semantic delta를 원인별로 분해한 뒤 84-document own-parser eligibility matrix로 확장.
+  full도 Rust/gates, PDF visual **51**, 새 wasm **7,818,243B**, JS builds/crosscheck/i18n, Vitest
+  **1,007** green이다. sandbox bind EPERM 뒤 허용된 실제 서버에서 Chromium **85 pass/3 intentional
+  skip/0 fail**로 재시도 없이 통과했다. 임시 dependency links는 제거했고 final audit에서 변경은
+  HWP5 exact parser/fixtures, hwp-core own-only success contract, content-free public completion regression,
+  native-parser boundary 문서와 continuity뿐이다. `external/rhwp`·HWPX·shared typesetter·generated
+  wasm/assets·oracle scoring diff 0,
+  임시 instrumentation 및 private text/path/hash/raw/credential diff 0을 확인했다. 구현·검증·continuity를
+  commits `7663aa7`·`50ca455`로 원격 `codex/issue-196-hwp5-next-table`에 push했다. **다음:**
+  PR **#197**을 `Closes #196`으로 게시했다. **다음:** final head required CI·comments·mergeability
+  green이면 autonomous merge; 후속 content-free semantic-delta/84-doc eligibility issue.
+  후속 설계 audit에서 `docs/HWP5-NATIVE-PARSER.md`가 여전히 첫 1×1 뒤 offset 936 중단을 주장하는
+  stale 계약임을 발견해, benchmark-end exact-subset 사실·paragraph/run/control delta·corpus cutover
+  gates로 정정했다. **다음:** docs fix commit/push로 #197 final CI 재기동→green이면 merge.
+
 - 갱신: 2026-08-24 · Codex(sol) — **PR #194 병합 · #192 latest main 재개**.
   PR #194 exact head `89c3ea4`에서 issue-link **3s**·build-test **9m24s**·licenses **2m58s** green,
   MERGEABLE/CLEAN, review/general/inline 외부 댓글 0을 확인하고 protected main `f2306d17`로 squash

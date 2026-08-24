@@ -5,6 +5,43 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #196 stale boundary docs fixed
+- HWP5 native-parser doc no longer claims offset 936 stop; records benchmark-end exact-subset truth.
+- semantic delta and corpus/wasm/hostile/layout cutover gates stay explicit; next push/restarted CI.
+
+## 2026-08-24 (Codex sol) · PR #197 posted
+- `Closes #196` PR #197 published with explicit no-cutover/delta/privacy boundaries.
+- next final-head required CI + reviews/comments/mergeability → autonomous merge.
+
+## 2026-08-24 (Codex sol) · #196 pushed
+- benchmark-complete parser/tests/continuity committed through `50ca455` and pushed.
+- next `Closes #196` PR → required CI/comments/mergeability → autonomous merge.
+
+## 2026-08-24 (Codex sol) · #196 full/audit green
+- full green: PDF51, wasm 7,818,243B, Vitest 1,007, Chromium 85 pass/3 skip/0 fail.
+- rhwp/HWPX/layout/generated/scoring/private-content diffs 0; temp links/instrumentation removed.
+- next commit/push/PR/CI/merge, then semantic-delta + eligibility child.
+
+## 2026-08-24 (Codex sol) · #196 quick green
+- stale own-only failure contract updated to fallback-free benchmark success; quick all green.
+- deterministic delta: paragraphs +1, runs +7, controls +6; tables/sections/images/equations/charts equal.
+- next full/audit→PR/merge, then semantic-delta + 84-doc eligibility issue.
+
+## 2026-08-24 (Codex sol) · #196 reaches benchmark end
+- exact plain 4×5 parser + positive/11 hostile axes implemented; empty paragraphs preserved.
+- no next unsupported record: first-party parser completes the public benchmark content-free.
+- HWP5 74 + focused clippy green; next wasm32→quick/full/audit→PR/merge.
+
+## 2026-08-24 (Codex sol) · #196 classification deterministic
+- numeric-only probe runs agree: exact uncaptioned 4×5 full grid, 20 cells, no nesting.
+- geometry/refs/extensions/paragraphs fit shared IR without loss; temporary instrumentation removed.
+- reclaimed 14.2GiB merged #192 target cache; next exact parser + hostile fixtures.
+
+## 2026-08-24 (Codex sol) · #195 merged / #196 started
+- #195 exact-head CI green, CLEAN/MERGEABLE, comments 0; main `dee2996f`, #192 closed.
+- #94 synced; no new external/community/security signal; remote branch removed.
+- #196 opened for TABLE `0x4d/51364`; exact-main worktree ready for content-free classification.
+
 ## 2026-08-24 (Codex sol) · PR #195 posted
 - `Closes #192` PR #195 published with exact validation and privacy/rhwp boundaries.
 - next final-head required CI + reviews/comments/mergeability → autonomous merge.

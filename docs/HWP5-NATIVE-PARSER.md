@@ -4,8 +4,9 @@ Issue #107 introduced the first owned binary-HWP layer; issue #154 added its fir
 issue #156 added the minimum source-layout facts needed by the shared typesetter, issue #158 owns
 the paragraph support-pool boundary, and issue #160 owns DocInfo styles plus content-free paragraph
 header refusal reasons; issue #161 adds strict column definitions and the shared multi-column layout
-contract; issue #168 adds the first strict inline 1×1 table slice. None of these slices changes
-production parsing.
+contract. Issues #168–#196 then advanced one content-free control/table boundary at a time through
+strict exact subsets. The bounded public benchmark now parses to the end in the first-party-only lane.
+None of these slices changes production parsing.
 
 ## What is owned now
 
@@ -64,19 +65,19 @@ rejected instead of being interpreted as records.
 
 - `Engine::open`: unchanged production route. Binary HWP still uses the governed rhwp bootstrap.
 - `open_hwp5_own`: explicit first-party-only route. It returns a `SemanticDoc` only for the owned
-  text, single-sided page setup, strict column subset, and strict inline 1×1 table subset. Larger,
-  floating, merged, captioned, or nested tables, images, fields, notes, equations, charts,
+  text, single-sided page setup, strict column subset, page numbering, and explicitly enumerated
+  table subsets. These include exact merged/full-grid forms, bounded depth-1 nested tables, multiple
+  ordered table controls, fixed row geometry, and top captions represented by shared source-neutral
+  IR. Unenumerated table attributes/topologies, floating objects, images, fields, notes, equations, charts,
   decorations, page border/fill, duplex binding, active custom tabs/lists/paragraph borders,
   unknown body controls, and unsupported pool values fail closed with a static reason plus tag,
-  section, and byte span only. It cannot call rhwp. The public benchmark now passes its first
-  multi-column paragraph header and `cold` definition plus its first inline table, then stops at the
-  next larger TABLE record (`0x4d`, section 0, bytes 936..982) without exposing content. The owned prefix includes strict
+  section, and byte span only. It cannot call rhwp. The bounded public benchmark now reaches the end
+  without exposing content or using a fallback. This proves that document's exact subsets, not generic
+  HWP5 coverage or production readiness. The owned lane includes strict
   single-section `pgnp` positioning and `nwno` page-counter restarts; other counters, zero starts,
   conflicting duplicates, missing positions, and multi-section inheritance fail closed. Exact duplicate
-  `pgnp`/`nwno` records are idempotently collapsed by typed equality. The first public `tbl ` control is
-  owned only as a treat-as-character 1×1 table with one centered cell paragraph, inherited table
-  padding, consistent object/cell geometry, and resolved border fills. It lowers to the shared
-  `Table`/`Cell` IR, so SVG and PDF consume the same `place_doc` geometry.
+  `pgnp`/`nwno` records are idempotently collapsed by typed equality. Every owned `tbl ` control lowers
+  to shared `Table`/`Cell`/`TableCaption` IR, so SVG and PDF consume the same `place_doc` geometry.
 - `hwp5_differential`: explicitly runs the owned probe and current rhwp semantic oracle, then reports
   section/paragraph/run/table/image/control/equation/chart counts and their deltas.
 
@@ -88,11 +89,16 @@ Raw-record counts and semantic counts are not treated as equivalent truth. In pa
 `runs` currently counts `PARA_CHAR_SHAPE` position tuples and native `controls` counts
 `CTRL_HEADER` records. Semantic `controls` counts typed table/image/equation/chart and remaining
 field/note/raw control nodes. The differential makes these gaps measurable; it does not relax a gate
-or claim semantic parity.
+or claim semantic parity. On the completed bounded benchmark, sections/tables/images/equations/charts
+currently agree while native-minus-oracle is paragraphs `+1`, runs `+7`, and controls `+6`. Those
+content-free deltas must be classified before any production cutover claim.
 
 ## Cutover rule
 
-The next #94 slices promote tables, BinData/images, decorations, and remaining controls into
-this crate. The production route may change only when public-corpus differential gates, native/wasm
-parity, hostile input tests, and the canonical 8/18/24-page + 98.9% line gate remain green. Explicit
-own-parser mode must continue to fail closed for every unsupported semantic construct.
+Completing one bounded benchmark is only the first eligibility milestone. The next #94 slices must
+classify the remaining semantic-count deltas, run fail-closed own-parser eligibility across the
+privacy-safe public corpus, and promote BinData/images, decorations, and other controls only when
+encountered semantics have faithful shared-IR representations. The production route may change only
+when corpus differential gates, native/wasm parity, hostile input tests, and the canonical
+8/18/24-page + 98.9% line gate remain green. Explicit own-parser mode must continue to fail closed for
+every unsupported semantic construct.
