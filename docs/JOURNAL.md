@@ -5,6 +5,16 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #200 full green
+- quick/full green: PDF51, canonical 8/18/24+98.9%, corpus84/oracle82, wasm 7,818,243B.
+- Vitest 1,018 and Chromium 85 pass/3 intentional skip/0 fail; temporary links removed.
+- next final audit, commit/push, `Closes #200` PR, then exact-head CI/merge.
+
+## 2026-08-24 (Codex sol) · #200 empty-run evidence implemented
+- six deltas classified: five glyphless-after-content; one empty paragraph remains 1600 HWPUNIT.
+- evidence-clone placed flow/glyph, SVG, and PDF bytes are exact; hostile height/control cases stay blocked.
+- candidate/rhwp remains 8 pages but exact geometry differs and candidate paints +24 glyphs; next full gates/PR.
+
 ## 2026-08-24 (Codex sol) · PR #199 posted
 - `Closes #198` PR #199 published with no-cutover, zero-eligible, and privacy boundaries explicit.
 - next final-head required CI + reviews/comments/mergeability → autonomous merge.

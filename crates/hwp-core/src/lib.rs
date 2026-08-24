@@ -59,6 +59,13 @@ pub fn open_hwp5_own(bytes: &[u8]) -> Result<SemanticDoc> {
         .map_err(|error| Error::Parse(error.to_string()))
 }
 
+/// Produce a diagnostic clone-equivalent model for proving whether HWP5 empty-run representation
+/// differences affect our shared layout/render/export stack. The first-party parser never calls this
+/// automatically, so source semantics and production routing remain unchanged.
+pub fn normalize_hwp5_empty_runs_for_layout_evidence(doc: &mut SemanticDoc) {
+    hwp_hwp5::normalize_empty_runs_for_layout_evidence(doc);
+}
+
 /// Content-free structural comparison between the first-party HWP5 candidate and the current rhwp
 /// semantic oracle. Production routing is not changed by this diagnostic.
 pub fn hwp5_differential(bytes: &[u8]) -> Result<hwp_hwp5::DifferentialReport> {
@@ -132,7 +139,7 @@ mod hwp5_candidate_tests {
         assert_eq!(first, second);
         assert_eq!(first.schema, "auto-hwp.hwp5-own-parser-eligibility.v2");
         assert!(!first.eligible);
-        assert_eq!(first.rejection_code, Some("semantic-mismatch"));
+        assert_eq!(first.rejection_code, Some("render-parity-unproven"));
         let source = first.source_records.expect("source record classification");
         assert_eq!(source.paragraph_headers, 353);
         assert_eq!(source.run_position_tuples, 389);
@@ -170,6 +177,21 @@ mod hwp5_candidate_tests {
             comparison.candidate.empty_text_runs.table_cells,
             comparison.oracle.empty_text_runs.table_cells + 4
         );
+        assert!(comparison.empty_run_typography_equivalent);
+        assert_eq!(comparison.empty_run_typography.len(), 6);
+        assert_eq!(
+            comparison
+                .empty_run_typography
+                .iter()
+                .filter(|observation| observation.paragraph_has_visible_content)
+                .count(),
+            5
+        );
+        assert!(comparison
+            .empty_run_typography
+            .iter()
+            .filter(|observation| !observation.paragraph_has_visible_content)
+            .all(|observation| observation.effective_height_matches));
         let json = serde_json::to_string(&first).unwrap();
         assert!(!json.contains("benchmark.hwp"));
         assert!(!json.contains("BodyText"));

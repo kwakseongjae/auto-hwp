@@ -21,3 +21,4 @@ shaper = ["hwp-typeset/shaper"]
 [dev-dependencies]
 # Parse a corpus HWPX into a SemanticDoc for the end-to-end SVG render test (this path, NOT rhwp).
 hwp-hwpx = { workspace = true }
+hwp-core = { workspace = true, features = ["rhwp"] }

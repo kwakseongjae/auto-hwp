@@ -2200,6 +2200,7 @@ name = "hwp-render"
 version = "0.0.1"
 dependencies = [
  "base64 0.21.7",
+ "hwp-core",
  "hwp-hwpx",
  "hwp-model",
  "hwp-typeset",

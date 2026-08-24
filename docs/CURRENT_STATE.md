@@ -3,6 +3,37 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-24 · Codex(sol) — **PR #199 병합 · #200 착수**.
+  PR #199 exact head `bdecc52`에서 issue-link **4s**·build-test **8m55s**·licenses **2m48s** green,
+  CLEAN/MERGEABLE, review/general/inline 댓글 0을 확인하고 protected main `ffe25edb`로 squash
+  병합했다. #198 close와 #94의 비식별 13/33건 matrix·no-cutover 근거를 동기화했다.
+  고정 benchmark의 빈 text run 6개(본문 2, 표 셀 4)가 char-shape·빈 문단/행 높이에 영향을
+  주는지 증명하기 위해 후속 **#200**을 R18/P1/area:hwp5/status:ready로 열고 exact main의
+  `codex/issue-200-empty-run-layout` worktree를 만들었다. **다음:** 원문·파일명·경로·hash/raw를
+  출력하지 않는 opaque location 기반으로 6개 run의 resolved char-shape를 비교하고, 두
+  파싱 후보를 같은 자체 shared typesetter에 투입해 page/line/cell geometry·SVG/PDF 차이를
+  자동 증거로 고정한다. 무해성 증명 전에는 `semantic-mismatch`/eligible=false를 유지하고,
+  production route·`external/rhwp`·HWPX·oracle scoring은 변경하지 않는다.
+  opaque global paragraph ordinal로 실측한 6개 차이 문단 중 5개는 visible content 뒤의 glyphless
+  terminator run이고, 나머지 빈 body 문단은 candidate 2/oracle 1 run이지만 양쪽 유효 높이가
+  **1600 HWPUNIT**로 같다. 소스 IR은 그대로 두고 증거용 clone에만 명시적 normalization을
+  적용했으며, visible paragraph의 empty run 제거·empty paragraph의 effective-height run 보존·
+  non-text control 제외를 hostile tests로 잠그었다. 원 candidate 대 evidence clone은 shared placed
+  flow/glyph, 페이지별 SVG, PDF bytes가 exact이다. candidate/rhwp는 모두 **8 pages**이고
+  페이지별 block/table/rect/line 개수는 같지만 exact geometry는 다르고 candidate painted glyph가
+  **+24(3/page)**이므로 빈 run을 제외한 남은 렌더 격차가 있다. 따라서 benchmark는
+  `semantic-mismatch`에서 `render-parity-unproven`으로만 전진하고 eligible=false를 유지한다.
+  실행 계측 13건 matrix는 eligible 0, render-parity-unproven 1, unsupported-semantic 7,
+  unsupported-border-fill 3, unsupported-style-semantics 1, invalid-container 1이다. **다음:**
+  focused/full gates→audit→commit/push/PR/CI/merge. 후속은 페이지당 3 glyph decoration과 exact
+  block/table/cell geometry 격차를 content-free category로 분해하는 classification-first slice.
+  quick은 workspace/PDF visual **51**/canonical **8·18·24·98.9%+**/public corpus **84**/oracle
+  **82**/HWPX/wasm/licenses green. full은 wasm **7,818,243B**, JS build/crosscheck/i18n,
+  Vitest **1,018**(269+64+427+247+11) green이고 sandbox port EPERM 후 실제 Chromium
+  **85 pass/3 intentional skip/0 fail**다. 임시 node_modules links는 제거했고 generated wasm/assets는
+  byte-identical로 git diff 0이다. **다음:** final boundary/privacy audit→commit/push→`Closes #200`
+  PR→exact-head CI/comments/mergeability green이면 autonomous merge.
+
 - 갱신: 2026-08-24 · Codex(sol) — **PR #197 병합 · #198 착수**.
   PR #197 exact head `c68b74e`에서 issue-link **5s**·build-test **9m57s**·licenses **2m49s** green,
   CLEAN/MERGEABLE, review/general/inline 댓글 0을 확인하고 protected main `6f1f3687`로 squash 병합했다.

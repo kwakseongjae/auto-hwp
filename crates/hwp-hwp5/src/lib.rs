@@ -13,11 +13,12 @@ pub use header::{
 };
 pub use probe::{
     compare_semantic_candidates, compare_semantic_candidates_with_source, compare_with_semantic,
-    probe, rejected_eligibility, rejected_eligibility_with_source, source_record_projection,
-    DifferentialReport, Hwp5Probe, OwnParserEligibilityReport, SemanticControlCounts,
-    SemanticDifferentialReport, SemanticMismatch, SemanticProjection, SemanticScopeCounts,
-    SourceControlHeaderCounts, SourceRecordProjection, StreamProbe, StructuralDelta,
-    StructuralInventory,
+    normalize_empty_runs_for_layout_evidence, probe, rejected_eligibility,
+    rejected_eligibility_with_source, source_record_projection, DifferentialReport,
+    EmptyRunShapeObservation, EmptyRunTypographyObservation, Hwp5Probe, OwnParserEligibilityReport,
+    SemanticControlCounts, SemanticDifferentialReport, SemanticMismatch, SemanticProjection,
+    SemanticScopeCounts, SourceControlHeaderCounts, SourceRecordProjection, StreamProbe,
+    StructuralDelta, StructuralInventory,
 };
 pub use record::{walk_records, Record, RecordError, RecordLimits};
 
