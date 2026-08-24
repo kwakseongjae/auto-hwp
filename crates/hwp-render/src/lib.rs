@@ -496,7 +496,19 @@ pub fn render_doc_svg(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec
 /// SAME trees, so every export matches own-render. (The SVG sink uses this under the hood via
 /// [`render_doc_svg`]; PDF export in `hwp-export` consumes these directly.)
 pub fn render_doc_trees(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<PageLayerTree> {
-    place_doc(doc, fonts).pages.iter().map(lower_page).collect()
+    render_doc_trees_with_placement(doc, fonts).1
+}
+
+/// Lower `doc` to paint trees while retaining the exact positioned document that produced them.
+/// Visual evidence and PDF export use this entry point so diagnostic regions can never come from a
+/// second layout pass or a different font provider.
+pub fn render_doc_trees_with_placement(
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+) -> (hwp_typeset::PlacedDoc, Vec<PageLayerTree>) {
+    let placed = place_doc(doc, fonts);
+    let trees = placed.pages.iter().map(lower_page).collect();
+    (placed, trees)
 }
 
 /// Content-free paint ownership for one operation in the shared page tree. The mask carries no

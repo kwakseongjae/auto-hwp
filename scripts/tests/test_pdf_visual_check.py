@@ -96,6 +96,150 @@ class MetricTests(unittest.TestCase):
         self.assertEqual(metrics["worst_tile_recall"]["recall"], 1.0)
         self.assertEqual(metrics["unscorable_metrics"], {})
 
+
+class VisualRegionTests(unittest.TestCase):
+    def page_info(self):
+        return pdf_visual_check.PdfInfo(
+            1,
+            (pdf_visual_check.PdfPageInfo(1, (0.0, 0.0, 595.0, 842.0), 0),),
+        )
+
+    def manifest(self, candidate_sha256: str):
+        return {
+            "schema_version": 1,
+            "coordinate_space": "HWPUNIT",
+            "candidate_pdf_sha256": candidate_sha256,
+            "pages": [
+                {
+                    "page": 1,
+                    "width": 59500.0,
+                    "height": 84200.0,
+                    "regions": [
+                        {
+                            "id": "text-0001",
+                            "category": "text",
+                            "x": 1000.0,
+                            "y": 2000.0,
+                            "w": 10000.0,
+                            "h": 3000.0,
+                            "clipped": False,
+                        }
+                    ],
+                }
+            ],
+        }
+
+    def load(self, document, candidate_sha256):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "regions.json"
+            path.write_text(json.dumps(document), encoding="utf-8")
+            return pdf_visual_check._load_visual_regions(
+                path, candidate_sha256, self.page_info()
+            )
+
+    def test_manifest_is_sha_bound_strict_and_content_free(self):
+        candidate_sha256 = "a" * 64
+        loaded = self.load(self.manifest(candidate_sha256), candidate_sha256)
+        self.assertEqual(loaded["total_regions"], 1)
+        self.assertEqual(loaded["category_counts"]["text"], 1)
+        self.assertNotIn("text", loaded["document"]["pages"][0]["regions"][0])
+
+        for mutation, pattern in (
+            (lambda doc: doc.update({"unknown": True}), "fields differ"),
+            (lambda doc: doc.update({"candidate_pdf_sha256": "b" * 64}), "SHA-256 mismatch"),
+            (lambda doc: doc["pages"][0].update({"width": 59400}), "dimensions do not match"),
+            (lambda doc: doc["pages"][0]["regions"][0].update({"category": "secret"}), "category"),
+            (lambda doc: doc["pages"][0]["regions"][0].update({"x": -1}), "outside its page"),
+            (lambda doc: doc["pages"][0]["regions"][0].update({"w": float("nan")}), "non-finite"),
+        ):
+            with self.subTest(pattern=pattern):
+                document = self.manifest(candidate_sha256)
+                mutation(document)
+                with self.assertRaisesRegex(pdf_visual_check.VisualCheckError, pattern):
+                    self.load(document, candidate_sha256)
+
+    def test_manifest_rejects_overlapping_regions_that_exhaust_scoring_work(self):
+        candidate_sha256 = "a" * 64
+        document = self.manifest(candidate_sha256)
+        document["pages"][0]["regions"] = [
+            {
+                "id": f"text-{index:04d}",
+                "category": "text",
+                "x": 0.0,
+                "y": 0.0,
+                "w": 59500.0,
+                "h": 84200.0,
+                "clipped": False,
+            }
+            for index in range(
+                1, pdf_visual_check.MAX_VISUAL_REGION_PAGE_AREA_MULTIPLIER + 2
+            )
+        ]
+
+        with self.assertRaisesRegex(pdf_visual_check.VisualCheckError, "scoring budget"):
+            self.load(document, candidate_sha256)
+
+    def test_manifest_rejects_page_mismatch_and_duplicate_region_ids(self):
+        candidate_sha256 = "a" * 64
+        no_pages = self.manifest(candidate_sha256)
+        no_pages["pages"] = []
+        with self.assertRaisesRegex(pdf_visual_check.VisualCheckError, "page count"):
+            self.load(no_pages, candidate_sha256)
+
+        duplicate = self.manifest(candidate_sha256)
+        duplicate["pages"][0]["regions"].append(
+            dict(duplicate["pages"][0]["regions"][0])
+        )
+        with self.assertRaisesRegex(pdf_visual_check.VisualCheckError, "duplicate"):
+            self.load(duplicate, candidate_sha256)
+
+    def test_semantic_region_uses_global_alignment_without_a_second_search(self):
+        ink = rectangle(2, 2, 5, 5)
+        reference = gray_image(10, 10, ink)
+        candidate = gray_image(10, 10, ink)
+        page = {
+            "width": 100.0,
+            "height": 100.0,
+            "regions": [
+                {
+                    "id": "table-0001",
+                    "category": "table",
+                    "x": 20.0,
+                    "y": 20.0,
+                    "w": 40.0,
+                    "h": 40.0,
+                    "clipped": False,
+                }
+            ],
+        }
+        regions = pdf_visual_check._score_visual_regions(
+            page, reference, candidate, 10, 10, {"dx": 0, "dy": 0}, 100_000
+        )
+        self.assertEqual(regions[0]["metrics"]["ink"]["f1"], 1.0)
+        self.assertEqual(regions[0]["metrics"]["global_ssim_like"], 1.0)
+
+        missing = pdf_visual_check._score_visual_regions(
+            page,
+            reference,
+            gray_image(10, 10),
+            10,
+            10,
+            {"dx": 0, "dy": 0},
+            100_000,
+        )
+        self.assertEqual(missing[0]["metrics"]["ink"]["f1"], 0.0)
+        self.assertEqual(missing[0]["status"], "partially_unscorable")
+        summary = pdf_visual_check._summarize_pages(
+            [{"page": 1, "metrics": None, "semantic_regions": missing}]
+        )
+        self.assertEqual(summary["scored_regions"], 1)
+        self.assertEqual(summary["partially_unscorable_regions"], 1)
+        self.assertEqual(
+            summary["region_category_counts"]["table"]["partially_unscorable"], 1
+        )
+
+
+class MetricRegressionTests(unittest.TestCase):
     def test_bounded_translation_is_detected_and_reported(self):
         reference = gray_image(16, 16, rectangle(2, 2, 5, 5))
         candidate = gray_image(16, 16, rectangle(4, 3, 7, 6))

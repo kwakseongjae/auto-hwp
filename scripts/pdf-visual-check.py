@@ -39,7 +39,7 @@ except ImportError:  # pragma: no cover - exercised only on non-POSIX Python.
     posix_resource = None  # type: ignore[assignment]
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 DPI = 144
 MAX_TRANSLATION_PX = 3
 INK_THRESHOLD = 245
@@ -84,6 +84,13 @@ HARD_MAX_REPORT_ASSET_BYTES = 128 * MIB
 HARD_MAX_REPORT_BYTES = 2 * GIB
 HARD_MAX_SUBPROCESS_OUTPUT_BYTES = 4 * MIB
 HARD_SUBPROCESS_TIMEOUT_SECONDS = 300.0
+
+VISUAL_REGION_SCHEMA_VERSION = 1
+MAX_VISUAL_REGION_MANIFEST_BYTES = 8 * MIB
+MAX_VISUAL_REGIONS_TOTAL = 10_000
+MAX_VISUAL_REGIONS_PER_PAGE = 2_000
+MAX_VISUAL_REGION_PAGE_AREA_MULTIPLIER = 16
+VISUAL_REGION_CATEGORIES = frozenset({"text", "table", "image", "object"})
 
 REFERENCE_TIERS: Mapping[str, str] = {
     "T0": "Licensed Hancom Windows/WebHWP rendering with product, build, and font provenance.",
@@ -369,6 +376,140 @@ def _snapshot_file(source: Path, destination: Path, max_bytes: int) -> int:
     finally:
         os.close(input_fd)
     return total
+
+
+def _reject_json_constant(value: str) -> Any:
+    raise VisualCheckError(f"visual region manifest contains non-finite JSON value: {value}")
+
+
+def _exact_object_keys(value: Any, expected: Set[str], label: str) -> Mapping[str, Any]:
+    if not isinstance(value, dict):
+        raise VisualCheckError(f"{label} must be an object")
+    actual = set(value)
+    if actual != expected:
+        missing = sorted(expected - actual)
+        unknown = sorted(actual - expected)
+        raise VisualCheckError(
+            f"{label} fields differ; missing={missing}, unknown={unknown}"
+        )
+    return value
+
+
+def _finite_number(value: Any, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise VisualCheckError(f"{label} must be a finite number")
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise VisualCheckError(f"{label} must be a finite number")
+    return parsed
+
+
+def _load_visual_regions(
+    snapshot: Path,
+    candidate_sha256: str,
+    candidate_info: PdfInfo,
+) -> Dict[str, Any]:
+    try:
+        document = json.loads(
+            snapshot.read_text("utf-8"), parse_constant=_reject_json_constant
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise VisualCheckError(f"visual region manifest is not strict UTF-8 JSON: {error}") from error
+    root = _exact_object_keys(
+        document,
+        {"schema_version", "coordinate_space", "candidate_pdf_sha256", "pages"},
+        "visual region manifest",
+    )
+    if root["schema_version"] != VISUAL_REGION_SCHEMA_VERSION:
+        raise VisualCheckError("visual region manifest schema_version must be 1")
+    if root["coordinate_space"] != "HWPUNIT":
+        raise VisualCheckError("visual region manifest coordinate_space must be HWPUNIT")
+    if root["candidate_pdf_sha256"] != candidate_sha256:
+        raise VisualCheckError("visual region manifest candidate PDF SHA-256 mismatch")
+    pages = root["pages"]
+    if not isinstance(pages, list) or len(pages) != candidate_info.page_count:
+        raise VisualCheckError("visual region manifest page count does not match candidate PDF")
+
+    ids: Set[str] = set()
+    total_regions = 0
+    category_counts = {category: 0 for category in sorted(VISUAL_REGION_CATEGORIES)}
+    for index, (page, pdf_page) in enumerate(zip(pages, candidate_info.pages), start=1):
+        page = _exact_object_keys(
+            page, {"page", "width", "height", "regions"}, f"visual regions page {index}"
+        )
+        if page["page"] != index:
+            raise VisualCheckError("visual region manifest pages must be ordered and one-based")
+        page_width = _finite_number(page["width"], f"visual regions page {index}.width")
+        page_height = _finite_number(page["height"], f"visual regions page {index}.height")
+        if page_width <= 0 or page_height <= 0:
+            raise VisualCheckError("visual region page dimensions must be positive")
+        if (
+            abs(page_width / 100.0 - pdf_page.width_pt) > PDF_BOX_VALIDATION_TOLERANCE_PT
+            or abs(page_height / 100.0 - pdf_page.height_pt) > PDF_BOX_VALIDATION_TOLERANCE_PT
+        ):
+            raise VisualCheckError(
+                f"visual regions page {index} dimensions do not match candidate PDF MediaBox"
+            )
+        regions = page["regions"]
+        if not isinstance(regions, list) or len(regions) > MAX_VISUAL_REGIONS_PER_PAGE:
+            raise VisualCheckError(
+                f"visual regions page {index} exceeds {MAX_VISUAL_REGIONS_PER_PAGE} entries"
+            )
+        total_regions += len(regions)
+        if total_regions > MAX_VISUAL_REGIONS_TOTAL:
+            raise VisualCheckError(
+                f"visual region manifest exceeds {MAX_VISUAL_REGIONS_TOTAL} entries"
+            )
+        page_region_area = 0.0
+        for region_index, region in enumerate(regions):
+            label = f"visual regions page {index}.regions[{region_index}]"
+            region = _exact_object_keys(
+                region, {"id", "category", "x", "y", "w", "h", "clipped"}, label
+            )
+            region_id = region["id"]
+            if not isinstance(region_id, str) or not re.fullmatch(
+                r"(?:text|table|image|object)-[0-9]{4}", region_id
+            ):
+                raise VisualCheckError(f"{label}.id is invalid")
+            global_id = f"{index}:{region_id}"
+            if global_id in ids:
+                raise VisualCheckError(f"duplicate visual region id: {global_id}")
+            ids.add(global_id)
+            category = region["category"]
+            if category not in VISUAL_REGION_CATEGORIES or not region_id.startswith(f"{category}-"):
+                raise VisualCheckError(f"{label}.category is invalid or disagrees with id")
+            if not isinstance(region["clipped"], bool):
+                raise VisualCheckError(f"{label}.clipped must be boolean")
+            x = _finite_number(region["x"], f"{label}.x")
+            y = _finite_number(region["y"], f"{label}.y")
+            width = _finite_number(region["w"], f"{label}.w")
+            height = _finite_number(region["h"], f"{label}.h")
+            epsilon = 1e-6
+            if (
+                x < -epsilon
+                or y < -epsilon
+                or width <= 0
+                or height <= 0
+                or x + width > page_width + epsilon
+                or y + height > page_height + epsilon
+            ):
+                raise VisualCheckError(f"{label} is outside its page or has empty geometry")
+            page_region_area += width * height
+            if (
+                page_region_area
+                > page_width * page_height * MAX_VISUAL_REGION_PAGE_AREA_MULTIPLIER
+            ):
+                raise VisualCheckError(
+                    f"visual regions page {index} overlap area exceeds the bounded scoring budget"
+                )
+            category_counts[category] += 1
+    return {
+        "document": document,
+        "sha256": _sha256(snapshot),
+        "bytes": snapshot.stat().st_size,
+        "total_regions": total_regions,
+        "category_counts": category_counts,
+    }
 
 
 def _command_env() -> Dict[str, str]:
@@ -1733,6 +1874,110 @@ def _heatmap_pixels(reference: GrayImage, candidate: GrayImage) -> bytes:
     return bytes(output)
 
 
+def _crop_image(image: GrayImage, left: int, top: int, right: int, bottom: int) -> GrayImage:
+    if not (0 <= left < right <= image.width and 0 <= top < bottom <= image.height):
+        raise VisualCheckError("semantic region crop is empty or outside the raster canvas")
+    width = right - left
+    pixels = bytearray(width * (bottom - top))
+    target = 0
+    for row in range(top, bottom):
+        start = row * image.width + left
+        pixels[target : target + width] = image.pixels[start : start + width]
+        target += width
+    return GrayImage(width, bottom - top, bytes(pixels))
+
+
+def _score_visual_regions(
+    page_contract: Mapping[str, Any],
+    reference: GrayImage,
+    aligned_candidate: GrayImage,
+    candidate_raw_width: int,
+    candidate_raw_height: int,
+    translation: Mapping[str, int],
+    max_edge_work: int,
+) -> List[Dict[str, Any]]:
+    page_width = float(page_contract["width"])
+    page_height = float(page_contract["height"])
+    dx = int(translation["dx"])
+    dy = int(translation["dy"])
+    results: List[Dict[str, Any]] = []
+    for region in page_contract["regions"]:
+        raw_left = math.floor(float(region["x"]) * candidate_raw_width / page_width)
+        raw_top = math.floor(float(region["y"]) * candidate_raw_height / page_height)
+        raw_right = math.ceil(
+            (float(region["x"]) + float(region["w"]))
+            * candidate_raw_width
+            / page_width
+        )
+        raw_bottom = math.ceil(
+            (float(region["y"]) + float(region["h"]))
+            * candidate_raw_height
+            / page_height
+        )
+        left = max(0, raw_left + dx)
+        top = max(0, raw_top + dy)
+        right = min(reference.width, raw_right + dx)
+        bottom = min(reference.height, raw_bottom + dy)
+        base = {
+            "id": region["id"],
+            "category": region["category"],
+            "source_bounds_hwpunit": {
+                "x": region["x"],
+                "y": region["y"],
+                "w": region["w"],
+                "h": region["h"],
+            },
+            "source_clipped_to_page": region["clipped"],
+            "alignment_clipped": (
+                left != raw_left + dx
+                or top != raw_top + dy
+                or right != raw_right + dx
+                or bottom != raw_bottom + dy
+            ),
+        }
+        if right <= left or bottom <= top:
+            base.update(
+                {
+                    "status": "unscorable",
+                    "reason": "region moved outside the fixed page canvas by global alignment",
+                    "aligned_bounds_px": None,
+                    "metrics": None,
+                }
+            )
+            results.append(base)
+            continue
+        reference_crop = _crop_image(reference, left, top, right, bottom)
+        candidate_crop = _crop_image(aligned_candidate, left, top, right, bottom)
+        _, metrics = _compare_images(
+            reference_crop,
+            candidate_crop,
+            max_translation=0,
+            max_edge_work=max_edge_work,
+        )
+        base.update(
+            {
+                "status": metrics["status"],
+                "reason": None,
+                "aligned_bounds_px": {
+                    "left": left,
+                    "top": top,
+                    "width": right - left,
+                    "height": bottom - top,
+                },
+                "metrics": {
+                    "global_ssim_like": metrics["ssim_like"]["global"],
+                    "local_ssim_like_mean": metrics["ssim_like"]["local"]["mean"],
+                    "union_foreground_mae": metrics["union_foreground_mae"],
+                    "ink": metrics["ink"],
+                    "edge_f1": metrics["edge"]["f1"],
+                    "unscorable_metrics": metrics["unscorable_metrics"],
+                },
+            }
+        )
+        results.append(base)
+    return results
+
+
 def _format_metric(value: Any) -> str:
     if value is None:
         return "unscorable"
@@ -1771,6 +2016,26 @@ def _render_html(report: Mapping[str, Any]) -> str:
               <tr><td>Worst-tile recall</td><td>{_format_metric(None if worst_tile is None else worst_tile['recall'])}</td></tr>
             </table>
             """
+        semantic_regions = page.get("semantic_regions", [])
+        if semantic_regions:
+            region_rows = "".join(
+                "<tr>"
+                f"<td>{html.escape(region['id'])}</td>"
+                f"<td>{html.escape(region['category'])}</td>"
+                f"<td>{html.escape(region['status'])}</td>"
+                f"<td>{_format_metric(None if region.get('metrics') is None else region['metrics']['ink']['f1'])}</td>"
+                f"<td>{_format_metric(None if region.get('metrics') is None else region['metrics']['edge_f1'])}</td>"
+                "</tr>"
+                for region in semantic_regions
+            )
+            region_table = (
+                "<h3>Semantic regions (additive, report-only)</h3>"
+                "<table><tr><th>ID</th><th>Category</th><th>Status</th>"
+                "<th>Ink F1</th><th>Edge F1</th></tr>"
+                f"{region_rows}</table>"
+            )
+        else:
+            region_table = "<p class=muted>No first-party semantic region manifest was provided.</p>"
         artifacts = page.get("artifacts", {})
         image_cards: List[str] = []
         for key, label in (
@@ -1798,6 +2063,7 @@ def _render_html(report: Mapping[str, Any]) -> str:
               <h2>Page {page['page']} - {html.escape(page['status'])}</h2>
               <p>{html.escape(offset_text)}</p>
               {metric_rows}
+              {region_table}
               <div class=images>{''.join(image_cards)}</div>
               <details><summary>Page JSON</summary><pre>{html.escape(json.dumps(page, ensure_ascii=False, indent=2, sort_keys=True))}</pre></details>
             </section>
@@ -1821,6 +2087,7 @@ def _render_html(report: Mapping[str, Any]) -> str:
 
     worst_pages = report.get("summary", {}).get("worst_pages", [])
     worst_tiles = report.get("summary", {}).get("worst_tiles", [])
+    worst_regions = report.get("summary", {}).get("worst_regions", [])
     return f"""<!doctype html>
 <html lang=en>
 <head>
@@ -1872,6 +2139,7 @@ def _render_html(report: Mapping[str, Any]) -> str:
     <h2>Worst-page diagnostics</h2>
     <p>Worst pages: <code>{html.escape(json.dumps(worst_pages, ensure_ascii=False, sort_keys=True))}</code></p>
     <p>Worst tiles: <code>{html.escape(json.dumps(worst_tiles, ensure_ascii=False, sort_keys=True))}</code></p>
+    <p>Worst semantic regions: <code>{html.escape(json.dumps(worst_regions, ensure_ascii=False, sort_keys=True))}</code></p>
   </section>
   {''.join(page_sections)}
 </body>
@@ -1924,6 +2192,50 @@ def _summarize_pages(pages: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
             )
     tile_entries.sort(key=lambda item: (item["recall"], item["page"]))
 
+    region_entries = []
+    unscorable_regions = 0
+    partially_unscorable_regions = 0
+    category_counts: Dict[str, Dict[str, int]] = {}
+    for page in pages:
+        for region in page.get("semantic_regions", []):
+            category = region["category"]
+            counts = category_counts.setdefault(
+                category,
+                {"total": 0, "scored": 0, "partially_unscorable": 0, "unscorable": 0},
+            )
+            counts["total"] += 1
+            metrics = region.get("metrics")
+            if metrics is None:
+                counts["unscorable"] += 1
+                unscorable_regions += 1
+                continue
+            counts["scored"] += 1
+            if region.get("status") == "partially_unscorable":
+                counts["partially_unscorable"] += 1
+                partially_unscorable_regions += 1
+            region_entries.append(
+                {
+                    "page": page["page"],
+                    "id": region["id"],
+                    "category": category,
+                    "ink_f1": metrics["ink"]["f1"],
+                    "local_ssim_like_mean": metrics["local_ssim_like_mean"],
+                    "edge_f1": metrics["edge_f1"],
+                    "aligned_bounds_px": region["aligned_bounds_px"],
+                }
+            )
+
+    def region_key(region: Mapping[str, Any]) -> Tuple[float, float, int, str]:
+        return (
+            float("inf") if region["ink_f1"] is None else region["ink_f1"],
+            float("inf")
+            if region["local_ssim_like_mean"] is None
+            else region["local_ssim_like_mean"],
+            region["page"],
+            region["id"],
+        )
+    region_entries.sort(key=region_key)
+
     return {
         "total_pages": len(pages),
         "scored_pages": len(scored),
@@ -1931,6 +2243,11 @@ def _summarize_pages(pages: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         "partially_unscorable_pages": len(partially_unscorable),
         "worst_pages": worst_pages,
         "worst_tiles": tile_entries[:5],
+        "worst_regions": region_entries[:5],
+        "scored_regions": len(region_entries),
+        "partially_unscorable_regions": partially_unscorable_regions,
+        "unscorable_regions": unscorable_regions,
+        "region_category_counts": category_counts,
     }
 
 
@@ -2234,12 +2551,20 @@ def _run_visual_check_impl(args: argparse.Namespace) -> Dict[str, Any]:
         temporary_path = Path(temporary)
         candidate_snapshot = temporary_path / "candidate.pdf"
         reference_snapshot = temporary_path / "reference.pdf"
+        regions_snapshot = None
         candidate_bytes = _snapshot_file(
             candidate_path, candidate_snapshot, limits.max_input_bytes
         )
         reference_bytes = _snapshot_file(
             reference_path, reference_snapshot, limits.max_input_bytes
         )
+        if args.candidate_regions:
+            regions_snapshot = temporary_path / "candidate-regions.json"
+            _snapshot_file(
+                Path(args.candidate_regions),
+                regions_snapshot,
+                MAX_VISUAL_REGION_MANIFEST_BYTES,
+            )
         return _run_visual_check_from_snapshots(
             args,
             candidate_snapshot,
@@ -2249,6 +2574,7 @@ def _run_visual_check_impl(args: argparse.Namespace) -> Dict[str, Any]:
             candidate_bytes,
             reference_bytes,
             limits,
+            regions_snapshot,
         )
 
 
@@ -2261,6 +2587,7 @@ def _run_visual_check_from_snapshots(
     candidate_bytes: int,
     reference_bytes: int,
     limits: ResourceLimits,
+    regions_snapshot: Optional[Path] = None,
 ) -> Dict[str, Any]:
     candidate_sha = _sha256(candidate_snapshot)
     reference_sha = _sha256(reference_snapshot)
@@ -2274,6 +2601,23 @@ def _run_visual_check_from_snapshots(
     )
     candidate_info = _inspect_pdf(candidate_snapshot, limits)
     reference_info = _inspect_pdf(reference_snapshot, limits)
+    visual_regions = (
+        _load_visual_regions(regions_snapshot, candidate_sha, candidate_info)
+        if regions_snapshot is not None
+        else None
+    )
+    report["inputs"]["candidate"]["visual_regions"] = (
+        {
+            "provided": True,
+            "schema_version": VISUAL_REGION_SCHEMA_VERSION,
+            "sha256": visual_regions["sha256"],
+            "bytes": visual_regions["bytes"],
+            "total_regions": visual_regions["total_regions"],
+            "category_counts": visual_regions["category_counts"],
+        }
+        if visual_regions is not None
+        else {"provided": False}
+    )
     structural = _compare_pdf_structure(candidate_info, reference_info)
     report["structural"] = structural
     report["pages"] = []
@@ -2292,6 +2636,9 @@ def _run_visual_check_from_snapshots(
             "partially_unscorable_pages": 0,
             "worst_pages": [],
             "worst_tiles": [],
+            "worst_regions": [],
+            "scored_regions": 0,
+            "unscorable_regions": 0,
             "pixel_comparison_attempted": False,
         }
         _write_report(output_dir, report, {}, limits)
@@ -2391,6 +2738,24 @@ def _run_visual_check_from_snapshots(
         width_delta = abs(candidate_raw_image.width - reference_raw_image.width)
         height_delta = abs(candidate_raw_image.height - reference_raw_image.height)
         if width_delta > MAX_RASTER_PADDING_PX or height_delta > MAX_RASTER_PADDING_PX:
+            semantic_regions = []
+            if visual_regions is not None:
+                semantic_regions = [
+                    {
+                        "id": region["id"],
+                        "category": region["category"],
+                        "source_bounds_hwpunit": {
+                            key: region[key] for key in ("x", "y", "w", "h")
+                        },
+                        "source_clipped_to_page": region["clipped"],
+                        "alignment_clipped": False,
+                        "status": "unscorable",
+                        "reason": "page raster dimensions are unscorable without forbidden resizing",
+                        "aligned_bounds_px": None,
+                        "metrics": None,
+                    }
+                    for region in visual_regions["document"]["pages"][page_number - 1]["regions"]
+                ]
             report["pages"].append(
                 {
                     "page": page_number,
@@ -2415,6 +2780,7 @@ def _run_visual_check_from_snapshots(
                     },
                     "alignment": None,
                     "metrics": None,
+                    "semantic_regions": semantic_regions,
                     "artifacts": artifacts,
                 }
             )
@@ -2499,6 +2865,17 @@ def _run_visual_check_from_snapshots(
                 "heatmap": f"assets/{heatmap_name}",
             }
         )
+        semantic_regions = []
+        if visual_regions is not None:
+            semantic_regions = _score_visual_regions(
+                visual_regions["document"]["pages"][page_number - 1],
+                reference_image,
+                aligned_candidate,
+                candidate_raw_image.width,
+                candidate_raw_image.height,
+                metrics["alignment"]["candidate_translation_px"],
+                limits.max_edge_work,
+            )
         report["pages"].append(
             {
                 "page": page_number,
@@ -2512,6 +2889,7 @@ def _run_visual_check_from_snapshots(
                 "raster_canvas": raster_canvas,
                 "alignment": metrics["alignment"],
                 "metrics": metrics,
+                "semantic_regions": semantic_regions,
                 "artifacts": artifacts,
             }
         )
@@ -2551,6 +2929,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("candidate", help="candidate PDF exported by auto-hwp")
     parser.add_argument("--reference", required=True, help="reference PDF")
+    parser.add_argument(
+        "--candidate-regions",
+        help=(
+            "optional schema-v1 content-free HWPUNIT region manifest emitted from "
+            "the same first-party placement as the candidate PDF"
+        ),
+    )
     parser.add_argument(
         "--reference-tier",
         required=True,

@@ -19,12 +19,14 @@ krilla = { version = "0.8", optional = true, default-features = false, features 
 quick-xml = { workspace = true, optional = true }
 svgtypes = { version = "0.16", optional = true }
 kurbo = { version = "0.13", optional = true }
+serde = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
 
 [features]
 default = []
 # High-level PDF export (krilla): own layout → paint IR → PDF with Korean font subsetting. Pairs with
 # the caller's font provider; under `shaper` the real rustybuzz advances drive placement.
-pdf = ["dep:krilla", "dep:hwp-render", "dep:hwp-typeset", "dep:quick-xml", "dep:svgtypes", "dep:kurbo"]
+pdf = ["dep:krilla", "dep:hwp-render", "dep:hwp-typeset", "dep:quick-xml", "dep:svgtypes", "dep:kurbo", "dep:serde", "dep:sha2"]
 # Drive the PDF export's placement with the real shaper (forwarded to hwp-render/hwp-typeset).
 shaper = ["hwp-render?/shaper", "hwp-typeset?/shaper"]
 

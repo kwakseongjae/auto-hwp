@@ -109,8 +109,11 @@ jobs:
             benchmarks/benchmark1.hwp \
             benchmarks/benchmark2.hwp \
             | node scripts/canonical-layout-gate.mjs
-      - name: PDF visual oracle foundation (issue 121)
-        run: python3 -m unittest discover -s scripts/tests -p 'test_pdf_visual_check.py'
+      - name: PDF visual oracle and one-command document runner (issues 121, 213)
+        run: |
+          python3 -m unittest discover -s scripts/tests -p 'test_pdf_visual_check.py'
+          node --check scripts/document-visual-check.mjs
+          node --test scripts/tests/document-visual-check.test.mjs
       - name: SVG sink to PDF sink vector parity (issue 102)
         run: python3 scripts/pdf-svg-parity-check.py --output-dir "$RUNNER_TEMP/pdf-svg-parity"
       - name: desktop adapter contract (vitest)

@@ -21,6 +21,8 @@ echo "═══ tests (workspace) ═══"
 cargo test --workspace
 echo "═══ PDF visual oracle (standard-library unittest) ═══"
 python3 -m unittest discover -s scripts/tests -p 'test_pdf_visual_check.py'
+node --check scripts/document-visual-check.mjs
+node --test scripts/tests/document-visual-check.test.mjs
 echo "═══ tests (hwp-rhwp features) ═══"
 cargo test -p hwp-rhwp --features "rhwp shaper"
 

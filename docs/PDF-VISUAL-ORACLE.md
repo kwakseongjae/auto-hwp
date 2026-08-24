@@ -1,10 +1,11 @@
-# PDF visual oracle (report-only V0/V1)
+# PDF visual oracle (report-only V0/V1/V2)
 
 This document describes the bounded report-only foundation in GitHub issue #121, under the broader
-#93 visual-oracle track. It compares a PDF already exported by auto-hwp's own engine with an
-explicitly classified PDF reference. It does **not** render HWP/HWPX itself, infer that a nearby PDF
-is ground truth, or decide pass/fail.
-Current reports use `schema_version: 3`; non-finite values are rejected rather than emitted as
+#93 visual-oracle track. The low-level comparator compares an auto-hwp PDF with an explicitly
+classified PDF reference. Issue #213 adds a one-command HWP/HWPX runner and semantic regions emitted
+from the exact placement used by the PDF export. It does **not** infer that a nearby PDF is ground
+truth or decide pass/fail.
+Current reports use `schema_version: 4`; non-finite values are rejected rather than emitted as
 non-standard JSON `NaN`/`Infinity` tokens.
 
 The existing stored-lineseg `layout-check` remains the fast layout regression gate. This visual report
@@ -63,6 +64,9 @@ and self-compare determinism suite.
 - deterministic integer translation alignment bounded to ±3 px;
 - complementary global, local, foreground, ink, edge, bounding-box, and tile metrics;
 - local side-by-side, overlay, and heatmap diagnostics;
+- content-free text/table/image/object region metrics bound to the exact candidate PDF SHA-256;
+- a worst-five semantic-region ranking that reuses the one whole-page translation and performs no
+  object-local alignment;
 - explicit JSON `null` plus reasons when a metric is unscorable;
 - no absolute thresholds and no pass/fail field.
 
@@ -104,21 +108,32 @@ report because raster output can change across versions.
 
 ## Usage
 
-First export the candidate with our PDF path. Binary `.hwp` additionally needs the `rhwp` parser
-feature; this does not make rhwp the renderer.
+For normal document diagnosis, build the CLI and run the atomic one-command path. Binary `.hwp`
+additionally needs the `rhwp` parser feature; this does not make rhwp the renderer. The candidate PDF
+and content-free region evidence are both derived from our shared IR and placement.
 
 ```bash
-cargo run -p auto-hwp-cli --features pdf,shaper,rhwp -- \
-  export-pdf benchmarks/benchmark.hwp -o /tmp/benchmark-own.pdf
+cargo build -p auto-hwp-cli --features "pdf shaper rhwp"
+node scripts/document-visual-check.mjs benchmarks/benchmark.hwp \
+  --reference benchmarks/benchmark.pdf \
+  --reference-tier T3 \
+  --output-dir /tmp/benchmark-visual-report \
+  --cli target/debug/auto-hwp
 ```
 
-Then compare that explicit candidate with a reference. The output directory must not already exist.
-The report is built in a sibling staging directory and renamed into place only after JSON, HTML, and
-all assets succeed, so a failed run does not leave a partial report that blocks retry.
+Use T0/T1 only with the complete self-attested provenance options documented below. The output
+directory must not already exist. Candidate export, region evidence, JSON, HTML, and assets are built
+in a private sibling staging directory and renamed together only after every step succeeds.
+
+The lower-level two-step interface remains available for isolated comparator work:
 
 ```bash
+target/debug/auto-hwp export-pdf benchmarks/benchmark.hwp \
+  -o /tmp/benchmark-own.pdf \
+  --visual-regions /tmp/benchmark-own.regions.json
 python3 scripts/pdf-visual-check.py /tmp/benchmark-own.pdf \
   --reference benchmarks/benchmark.pdf \
+  --candidate-regions /tmp/benchmark-own.regions.json \
   --reference-tier T1 \
   --reference-product "official publication PDF" \
   --reference-build "recorded by fixture manifest" \
@@ -129,8 +144,9 @@ python3 scripts/pdf-visual-check.py /tmp/benchmark-own.pdf \
   --output-dir /tmp/benchmark-visual-report
 ```
 
-Open `/tmp/benchmark-visual-report/index.html` locally. Machine-readable results are in
-`report.json`; stable PNG assets are under `assets/`.
+Open `/tmp/benchmark-visual-report/index.html` locally. The one-command result keeps the comparator
+under `report/report.json` and `report/assets/`, alongside the exact candidate PDF, SHA-bound region
+evidence, and a content-free `summary.json`.
 
 Input paths are redacted to their basenames by default so private directory names do not leak into a
 shared report. `--include-input-paths` is an explicit local-only override; SHA-256 remains the stable
@@ -303,8 +319,24 @@ exact ink-recall value, and the worst tile is reported with its coordinates and 
 the first report-only local-region alarm: a tiny missing equation or chart cannot disappear inside an
 otherwise white, globally similar page.
 
-Future slices may add semantic text/table/image/equation/chart regions from `PageLayerTree`; these
-fixed tiles do not claim to identify object types.
+### Semantic regions
+
+When `--candidate-regions` is supplied, the exporter evidence divides the candidate placement into
+four content-free categories: paragraph bands (`text`), placed table boxes (`table`), raster images
+(`image`), and SVG-backed equations/charts/other objects (`object`). IDs and HWPUNIT geometry are
+present; source text, paths, binary identifiers, and font paths are absent.
+
+The manifest must be strict UTF-8 JSON with exactly the known fields, ordered one-based pages, finite
+positive in-page geometry, unique per-page IDs, matching MediaBox dimensions, and an exact SHA-256
+match to the candidate PDF. It is rejected on unknown categories/fields, non-finite values, duplicate
+IDs, page mismatch, symlink input, excessive entries, or more than 16 page-equivalents of overlapping
+region area. These bounds keep repeated full-page regions from multiplying metric work.
+
+Each region is cropped only after the page's single bounded translation is chosen. There is no second
+search that could hide a locally misplaced object. The report records independent SSIM-like, MAE,
+ink, and edge diagnostics, explicit unscorable reasons, per-category counts, and the worst five
+regions. Regions are additive and may overlap—for example, cell text remains inside a table region—so
+they are diagnostic lenses rather than a partition or an aggregate quality score.
 
 ## Visual report
 
@@ -317,9 +349,9 @@ For every dimension-compatible page, `index.html` shows:
 - absolute grayscale-difference heatmap;
 - a metric table and the complete page JSON.
 
-The summary lists up to five lowest-ink-F1 pages and five lowest-recall worst tiles. These are
-diagnostic rankings only, not acceptance decisions. HTML has no remote scripts, fonts, or network
-dependencies.
+The summary lists up to five lowest-ink-F1 pages, five lowest-recall worst tiles, and five worst
+semantic regions when evidence is present. These are diagnostic rankings only, not acceptance
+decisions. HTML has no remote scripts, fonts, or network dependencies.
 
 ## Determinism and identity
 
@@ -342,10 +374,10 @@ the output. Repeating a comparison with identical file bytes, command arguments,
 and OS/font environment should therefore produce identical report bytes and asset PNGs even when the
 input parents and output directories differ.
 
-The current CLI computes hashes but does not yet consume a signed fixture manifest. Issue #101 owns
-the ≥20-pair T0/T1 calibration and reviewed-manifest work: source/reference hash, Hancom
-product/build, OS, export method, font-file hashes, and redistribution authority. A sibling `.pdf`
-alone must never be promoted to T0 or T1.
+The current CLI computes hashes and binds semantic evidence to the exact PDF, but it does not consume
+a cryptographically signed fixture manifest. The ≥20-pair T1 calibration stores reviewed source and
+reference hashes, producer/build/OS/export/font metadata, and redistribution authority. A sibling
+`.pdf` alone must never be promoted to T0 or T1.
 
 ## Report-only interpretation
 
@@ -395,7 +427,7 @@ Run the dependency-free synthetic metric and PNG codec suite with:
 python3 scripts/tests/test_pdf_visual_check.py -v
 ```
 
-The suite covers exact identity, bounded translation, clipped-ink penalties, translation overflow,
+The suites cover exact identity, bounded translation, clipped-ink penalties, translation overflow,
 missing small foreground, blank/unscorable semantics, missing-all-ink loss, 2 px edge tolerance,
 white padding without resampling, PNG round-trips, A4 tolerance, and structural mismatches. It also
 exercises valid/different CropBoxes, `-cropbox` page rendering, input/page/pixel/raster/decompression,
@@ -403,29 +435,31 @@ ink/alignment/edge-work, derived-asset, and report-total limits; subprocess outp
 and POSIX file-size caps;
 T0/T1 provenance, path redaction, forced `0700`/`0600` modes under umask `000` and `022`, secure
 symlink rejection, finite box/rotation validation, resource-exhaustion conversion,
-structural-before-raster orchestration, complete unscorable HTML/JSON output, and atomic failure.
+structural-before-raster orchestration, strict SHA-bound semantic-region validation, bounded region
+work, fixed-global-alignment region scoring, complete unscorable HTML/JSON output, and atomic failure.
+The Node suite additionally covers one-command private staging, no-overwrite behavior, source-path
+redaction, symlink rejection, and failed-subprocess cleanup.
 When Poppler and
 `benchmarks/benchmark.pdf` are present, it rasterizes the first page and performs an exact
 self-compare; otherwise that integration case is skipped.
 
-The standard-library suite is wired into `scripts/verify-local.sh` and the required GitHub
-`build-test` job through `unittest discover`. It includes a two-run whole-report determinism check
+Both suites are wired into `scripts/verify-local.sh` and the required GitHub `build-test` job. The
+Python suite includes a two-run whole-report determinism check
 covering the raw byte-identical `report.json`, HTML, and every raw/derived PNG asset without deleting,
 normalizing, or ignoring any clock or path field.
 Synthetic/structural/resource tests need no third-party Python dependency; the one Poppler
 self-compare remains automatically skipped when Poppler or the benchmark fixture is unavailable.
 
-## Known first-slice limits
+## Known limits
 
-- Inputs are PDF files; reference manifests are not yet parsed.
 - Provenance is required and labelled `self_attested`, but no signed manifest authenticates it yet.
-- The script assumes the caller already produced the candidate through `export-pdf`.
-- It does not yet compare own SVG against own PDF from the same `PageLayerTree`.
-- It cannot yet count text/table/image/equation/chart objects or PDF replay/stub events; issue #102
-  owns object accounting and SVG/PDF replay/sink parity.
+- Semantic evidence describes candidate placement, not reference-document object boundaries; metrics
+  therefore answer “how does this candidate region compare at the same location?” rather than doing
+  cross-document object matching.
+- Equations and charts share the `object` category; subtype attribution remains future work.
+- Paragraph regions are block bands. Text inside a table is diagnosed through the containing table
+  region rather than duplicated as an independent text region.
 - It does not mask dynamic regions; broad automatic masking would make missing content easier to hide.
-- It does not address the known PDF `PaintOp::Image.svg` equation/chart stub. Instead, the current
-  image/tile diagnostics make that loss visible while the renderer fix proceeds separately.
 - Poppler version and platform are recorded but not enforced by a baseline manifest yet.
 - A non-POSIX platform cannot stop `pdftoppm` while it is writing an oversized file; it falls back to
   the documented post-write stat check.

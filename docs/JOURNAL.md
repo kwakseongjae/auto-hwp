@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-25 (Codex sol) · #213 semantic PDF visual check
+- HWP/HWPX→own PDF→SHA-bound text/table/image/object metrics를 한 atomic 명령으로 연결.
+- strict manifest·resource/privacy hostile 경계와 worst 5 region JSON/HTML, CI 계약을 추가.
+- quick/full green: 8/18/24+98.9%, oracle82, Vitest1,012, Chromium85 pass/3 skip; rhwp 무수정.
+- 다음: commit/push→`Closes #213` PR/CI/merge→#93 worst text-region 최소 fixture.
+
 ## 2026-08-24 (Codex sol) · #106 AI-native task suite
 - 합성 20문서·120작업을 12개 독립 점수와 안전/원자성/가역성 100% gate로 잠금.
 - provider no-fallback live report를 contributor CI에서 분리하고 prompt-injection hostile 11건 추가.
