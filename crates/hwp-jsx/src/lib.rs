@@ -1162,6 +1162,9 @@ fn parse_table(el: &JsxElement) -> Result<Table> {
             .unwrap_or(0),
         cells,
         keep_together,
+        // Render-IR only (HWPX `pageBreak="CELL"`) — JSX has no page-break provenance yet.
+        split_over_tall_cells: false,
+        repeat_first_row: false,
         col_widths,
         row_heights,
         // Render-IR only (HWPX auto-fit floor) — the JSX surface never carries it (defaults empty).
@@ -1276,6 +1279,7 @@ fn parse_cell(el: &JsxElement) -> Result<Cell> {
         padding: None,
         // 저장된 셀 실폭(074)도 JSX 투영 대상이 아니다 — 없으면 조판기가 열 격자로 근사한다.
         width: None,
+        source_page_segments: 0,
         dirty: Dirty(el.attrs.contains_key("data-dirty")),
     })
 }

@@ -336,9 +336,11 @@ fn parse_page_setup(sec_xml: &str) -> Option<PageSetup> {
     if let Some(h) = tag_attr_i32(pp_tag, "height") {
         page.height = h;
     }
-    // `landscape` is unreliable across authoring tools (portrait docs are sometimes tagged WIDELY);
-    // derive the actual orientation from the dimensions, which is all layout consumes.
-    page.landscape = page.width > page.height;
+    // OWPML stores the short/long paper edges in width/height and carries orientation separately:
+    // WIDELY=portrait, NARROWLY=landscape. This deliberately mirrors the already-vendored rhwp
+    // parser and our serializer; deriving solely from width/height loses mixed-orientation sections.
+    page.landscape = tag_attr_str(pp_tag, "landscape")
+        .is_some_and(|value| value.eq_ignore_ascii_case("NARROWLY"));
     // The page `<hp:margin …/>` lives inside `<hp:pagePr>`; take the first one AFTER the pagePr open.
     if let Some(mrel) = sec_xml[pp_end..].find("<hp:margin") {
         let mstart = pp_end + mrel;
@@ -376,10 +378,15 @@ fn parse_page_setup(sec_xml: &str) -> Option<PageSetup> {
 
 /// The `i32` value of attribute `name` (its first occurrence) within a single XML tag substring.
 fn tag_attr_i32(tag: &str, name: &str) -> Option<i32> {
+    tag_attr_str(tag, name)?.trim().parse().ok()
+}
+
+/// The borrowed value of attribute `name` (its first occurrence) within one XML opening tag.
+fn tag_attr_str<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
     let pat = format!("{name}=\"");
     let s = tag.find(&pat)? + pat.len();
     let e = tag[s..].find('"')? + s;
-    tag[s..e].trim().parse().ok()
+    Some(&tag[s..e])
 }
 
 struct TblFrame {
@@ -405,6 +412,10 @@ struct TblFrame {
     cur_cell_has_margin: bool,
     /// The in-progress cell's `<hp:cellMargin left right top bottom>` (HWPUNIT).
     cur_cell_margin: Option<[i32; 4]>,
+    /// Stored cell lineseg `vertpos` continuity. A decrease means Hancom continued this cell on a
+    /// new page; retained only as a render-cache lower bound for clean HWPX input.
+    cur_cell_last_vert: Option<i32>,
+    cur_cell_page_segments: usize,
 }
 
 impl TblFrame {
@@ -421,6 +432,8 @@ impl TblFrame {
             cur_cell_sz: None,
             cur_cell_has_margin: false,
             cur_cell_margin: None,
+            cur_cell_last_vert: None,
+            cur_cell_page_segments: 0,
         }
     }
 }
@@ -748,10 +761,16 @@ fn parse_section(
                         let border_ref = attr_u64(&e, b"borderFillIDRef");
                         // noAdjust=1 → fixed row heights; 0/absent → auto-fit (content drives; don't floor).
                         let no_adjust = attr_usize(&e, b"noAdjust") == Some(1);
+                        let split_over_tall_cells = attr_str(&e, b"pageBreak")
+                            .as_deref()
+                            .is_some_and(|value| value.eq_ignore_ascii_case("CELL"));
+                        let repeat_first_row = attr_usize(&e, b"repeatHeader") == Some(1);
                         tbls.push(TblFrame::new(
                             Table {
                                 rows,
                                 cols,
+                                split_over_tall_cells,
+                                repeat_first_row,
                                 provenance: hwpx_prov(),
                                 ..Default::default()
                             },
@@ -771,6 +790,8 @@ fn parse_section(
                             f.cur_cell_has_margin = attr_usize(&e, b"hasMargin") == Some(1);
                             f.cur_cell_sz = None;
                             f.cur_cell_margin = None;
+                            f.cur_cell_last_vert = None;
+                            f.cur_cell_page_segments = 0;
                         }
                     }
                     // D1: a `<hp:pic>` opens picture-capture mode (its `<hp:sz>` + `<hc:img>` fill a
@@ -989,6 +1010,18 @@ fn parse_section(
                 b"nbSpace" => push_inline_char(&mut paras, '\u{00A0}'),
                 b"tab" => push_inline_char(&mut paras, '\t'),
                 b"lineBreak" => push_inline_char(&mut paras, '\n'),
+                b"lineseg" => {
+                    if let Some(frame) = tbls.last_mut().filter(|frame| frame.cell.is_some()) {
+                        if let Some(vert) = attr_i32(&e, b"vertpos") {
+                            if frame.cur_cell_last_vert.is_none() {
+                                frame.cur_cell_page_segments = 1;
+                            } else if frame.cur_cell_last_vert.is_some_and(|last| vert < last) {
+                                frame.cur_cell_page_segments += 1;
+                            }
+                            frame.cur_cell_last_vert = Some(vert);
+                        }
+                    }
+                }
                 // 필드 끝 마커 — 항상 self-closing. 짝(`beginIDRef`)을 그대로 들고 간다.
                 b"fieldEnd" => {
                     let id = attr_u64(&e, b"beginIDRef").unwrap_or(0) as u32;
@@ -1212,6 +1245,7 @@ fn parse_section(
                             // 열 경계가 다른 한글 표에서 최대 2배까지 틀리고, 그만큼 셀 글이 더
                             // 줄바꿈돼 행 높이가 부푼다.
                             c.width = (w > 0).then_some(w);
+                            c.source_page_segments = f.cur_cell_page_segments;
                             f.geoms.push(CellGeom {
                                 row: c.row,
                                 col: c.col,
@@ -1226,6 +1260,8 @@ fn parse_section(
                         f.cur_cell_sz = None;
                         f.cur_cell_has_margin = false;
                         f.cur_cell_margin = None;
+                        f.cur_cell_last_vert = None;
+                        f.cur_cell_page_segments = 0;
                     }
                 }
                 b"tbl" => {
@@ -2166,7 +2202,15 @@ pub(crate) mod tests {
             pg.height - (pg.margin_top + pg.margin_header) - (pg.margin_bottom + pg.margin_footer),
             68597
         );
-        assert!(!pg.landscape, "portrait derived from width<height");
+        assert!(!pg.landscape, "OWPML WIDELY is portrait");
+        let landscape = sec.replace("WIDELY", "NARROWLY");
+        let pg = parse_page_setup(&landscape).expect("landscape secPr");
+        assert!(pg.landscape, "OWPML NARROWLY is landscape");
+        assert_eq!(
+            (pg.width, pg.height),
+            (59528, 84186),
+            "orientation does not rewrite OWPML's stored short/long paper edges"
+        );
         // No secPr → None (the caller keeps PageSetup::default()).
         assert!(parse_page_setup("<hs:sec><hp:p/></hs:sec>").is_none());
     }
@@ -2397,6 +2441,39 @@ pub(crate) mod tests {
             })
             .collect();
         assert_eq!(flags, vec![false, true, false]);
+    }
+
+    #[test]
+    fn table_cell_page_break_is_captured_for_render_flow_only() {
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run><hp:tbl rowCnt="1" colCnt="1" pageBreak="CELL" repeatHeader="1" noAdjust="0"><hp:tr><hp:tc><hp:subList><hp:p><hp:run><hp:t>A</hp:t></hp:run><hp:linesegarray><hp:lineseg vertpos="100"/><hp:lineseg vertpos="0"/></hp:linesegarray></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="1000" height="500"/></hp:tc></hp:tr></hp:tbl></hp:run></hp:p></hs:sec>"#;
+        let mut blocks = Vec::new();
+        parse_section(xml, &mut blocks, &mut Vec::new(), &Default::default()).unwrap();
+        let table = blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Table(table) => Some(table),
+                _ => None,
+            })
+            .expect("table");
+        assert!(table.split_over_tall_cells);
+        assert!(table.repeat_first_row);
+        assert_eq!(table.cells[0].source_page_segments, 2);
+
+        let none = xml.replace("pageBreak=\"CELL\"", "pageBreak=\"NONE\"");
+        let mut blocks = Vec::new();
+        parse_section(&none, &mut blocks, &mut Vec::new(), &Default::default()).unwrap();
+        let table = blocks
+            .iter()
+            .find_map(|block| match block {
+                Block::Table(table) => Some(table),
+                _ => None,
+            })
+            .expect("table");
+        assert!(!table.split_over_tall_cells);
+        assert!(
+            table.repeat_first_row,
+            "repeat header is independent of split mode"
+        );
     }
 
     /// 표만 품은 호스트 문단의 `pageBreak="1"` 도 그대로 실린다. 우리 블록 순서는 `[Table, 앵커]`

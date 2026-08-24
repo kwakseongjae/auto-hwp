@@ -3,6 +3,44 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-24 · Codex(sol) — **#95/#96 full green · PR 직전**.
+  focused HWPX **96**·typeset **97**·hostile **7** 및 clippy green. quick/full은 canonical
+  **8/18/24 + 98.9%+**, public corpus 계약 **84**, catalog **259/12 families/120 pairs**,
+  oracle **82**, PDF visual **51**, wasm **7,825,742B**, JS/crosscheck/i18n, Vitest
+  **1,018**, Chromium **85 pass/3 intentional skip/0 fail**이다. 첫 full의 유일 실패는 sandbox
+  port 3100 EPERM이며 승인된 로컬 E2E로 환경 원인을 해소했다. OWPML 방향 복원으로
+  benchmark1.hwpx는 종전 잘못된 세로 해석의 비-참값 잠금 **22→30**으로 의도 이동했고,
+  stored-lineseg 25쪽과의 잔여 +5는 숨기지 않았다. body exact **89.5%**·within1 **98.2%** 및
+  cell floors 5/5·9/9는 불변, oracle logic/tolerance/82 baseline은 무변경이다. 임시 node/target
+  링크를 제거했고 generated wasm/assets diff 0, rhwp exact gitlink clean이다. **다음:** privacy/diff
+  최종 감사→commit/push→PR `Closes #95`·`Closes #96`→exact-head CI/comments green merge→#93/#114 동기화.
+
+- 갱신: 2026-08-24 · Codex(sol) — **#95 구현·T1 실측 완료 · #96도 함께 해소**.
+  비공개 official pair를 원문 없이 구조화해 #95의 원인을 HWPX `pageBreak=CELL`인 1행짜리
+  text-only over-tall cell 2곳과 repeat-header, 저장 lineseg의 페이지별 `vertpos` reset으로
+  최소화했다. 자체 parser가 CELL/repeatHeader와 clean cell의 fragment lower-bound만 IR에
+  보존하고, `place_doc`·`NaiveLayout`·`block_pages`가 같은 fail-closed 분할을 쓴다. nested
+  table/image/object, dirty cell/table, geometry edit는 source cache를 거부한다. 결과 pair 03은
+  **4→6쪽**, body **25/25 exact**, cell **77/83 exact·83/83 within1**, LOCKSTEP이며 T1 visual이
+  `structural_mismatch`→**6쪽 scored_report**로 전환됐다. 동시에 자체 HWPX parser가 무시하던
+  OWPML 방향 계약(`WIDELY=portrait`, `NARROWLY=landscape`)을 vendored rhwp·자체 serializer와
+  일치시켜 pair 03의 1~3 세로/4~6 가로, #96 pair 04의 **1~2 세로/3 가로** MediaBox가 official과
+  구조 exact가 됐다. pair 04 cell lines도 **111/111 exact, 149=149**로 회복됐다. oracle scoring은
+  무변경이고 visual은 threshold 없는 report-only다. **다음:** 문서 표 갱신→focused/workspace→
+  quick/full gate→privacy/vendor/generated audit→PR에서 `Closes #95`·`Closes #96`→CI green merge.
+
+- 갱신: 2026-08-24 · Codex(sol) — **PR #205 병합 · #95 착수**.
+  PR #205 exact head `99f6cd75`의 issue-link·build-test·licenses green, CLEAN/MERGEABLE,
+  review/general/inline 댓글 0을 확인하고 protected main `51741a51`로 squash 병합했다. #204는
+  close됐고 #94에 body/SVG exact 및 owned page-number를 제외한 PDF byte exact 근거와
+  production rhwp·eligible=false 유지 결정을 동기화했다. 다음 P0는 공식 MOHW HWPX/PDF pair에서
+  own export가 **6쪽을 4쪽으로 축소**하는 #95다. #101 visual calibration과 #102 PDF replay는 이미
+  완료됐으므로 중복 없이 table/cell pagination 원인을 최소화한다. 원문·파일명·로컬 경로·hash/raw는
+  공개하지 않고, synthetic fixture로만 회귀를 커밋한다. `place_doc`/`NaiveLayout` LOCKSTEP,
+  oracle scoring 불변, 8/18/24 및 98.9%+ 게이트 유지가 수용 조건이다. **다음:** private pair를
+  content-free 구조 통계로 재현→section/table/cell flow의 첫 divergent decision을 추적→최소
+  synthetic regression→두 layout 경로 동시 수리→#93 report-only 재측정.
+
 - 갱신: 2026-08-24 · Codex(sol) — **#204 full green · PR 직전**.
   `scripts/verify-local.sh` quick와 `--full` 모두 green: fmt/clippy/workspace/rhwp-feature/PDF 51,
   canonical **8/18/24 + 98.9%+**, corpus 계약 84·catalog 259/12 families/120 pairs,

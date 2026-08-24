@@ -373,13 +373,19 @@ Source binaries and full reports remained under ignored/private paths; no docume
 |---|---:|---|---:|---:|---|
 | 01 | 4 → 4 | `scored_report` | 0.150700 | 0.318802 | typography/table geometry drift |
 | 02 | 4 → 4 | `scored_report` | 0.123952 | 0.173607 | typography/table geometry drift |
-| 03 | 4 → 6 | `structural_mismatch` | — | — | table/cell flow collapse; #95 |
-| 04 | 3 → 3 | `structural_mismatch` | — | — | final page portrait vs official landscape; #96 |
+| 03 | 6 → 6 | `scored_report` | 0.151803 | 0.283513 | CELL continuation restored; pages 1–3 portrait, 4–6 landscape; #95 |
+| 04 | 3 → 3 | `scored_report` | 0.124490 | 0.175401 | final-page landscape restored; #96 |
 | 05 | 9 → 9 | `scored_report` | 0.074480 | 0.257094 | page count alone hides large visual drift |
 
-All three scored documents had worst-tile recall `0.0`. This run proves that the structure-first
-stage and local-region alarm expose failures that a page-count or white-background-dominated score
-would miss. It does **not** provide enough samples to define an acceptance threshold.
+The three documents scored in the initial pass had worst-tile recall `0.0`. This run proves that the
+structure-first stage and local-region alarm expose failures that a page-count or
+white-background-dominated score would miss. It does **not** provide enough samples to define an
+acceptance threshold.
+
+The #95/#96 follow-up on 2026-08-24 re-ran the same two private T1 pairs after the own HWPX parser
+and paginator fixes. Both are now structurally comparable, so pixel metrics are reported instead of
+silently assigning structural failures a score. Both still have worst-tile recall `0.0`; restoring
+page count and orientation is therefore a prerequisite, not evidence of complete visual fidelity.
 
 ## Tests
 

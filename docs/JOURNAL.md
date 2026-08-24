@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #95/#96 HWPX page structure
+- CELL continuation/repeat-header와 clean lineseg fragment lower-bound를 자체 parser/typesetter에 구현.
+- pair03 4→6쪽, pair04 final landscape; 두 T1 report 모두 structural match/scored, threshold 없음.
+- quick/full green: 8/18/24+98.9%, Vitest 1,018, Chromium 85 pass/3 skip; vendor/generated diff 0.
+- 다음: commit/push→`Closes #95`·`Closes #96` PR→exact-head CI/merge→#93/#114 동기화.
+
 ## 2026-08-24 (Codex sol) · #204 HWP5 body render exact
 - live cell width(+176), caption cap(143→71.5), HWP5 row-floor semantics를 fail-closed로 교정.
 - 8쪽 body placement/SVG exact; own page-number 제거 시 rhwp PDF bytes/pages/replay/diagnostics exact.
