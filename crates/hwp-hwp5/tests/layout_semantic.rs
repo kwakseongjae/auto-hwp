@@ -165,6 +165,22 @@ enum CaptionedTableMutation {
 }
 
 #[derive(Clone, Copy)]
+enum PlainFourByFiveMutation {
+    None,
+    BadCommonWidth,
+    BadTableAttribute,
+    BadTableBorder,
+    BadRowCellCount,
+    BadCellSpan,
+    BadWidthReference,
+    BadListExtension,
+    BadGridGeometry,
+    BadParagraphCount,
+    BadCellPadding,
+    BadCellBorder,
+}
+
+#[derive(Clone, Copy)]
 enum SevenByThreeMutation {
     None,
     BadCommonAttribute,
@@ -1148,6 +1164,59 @@ fn strict_captioned_table_rejects_hostile_caption_topology_geometry_and_refs() {
                 .parse(&captioned_table_fixture(mutation))
                 .is_err(),
             "hostile captioned-table mutation must fail closed"
+        );
+    }
+}
+
+#[test]
+fn owns_exact_plain_four_by_five_full_grid_table() {
+    let doc = OwnHwp5Parser::new()
+        .parse(&plain_four_by_five_fixture(PlainFourByFiveMutation::None))
+        .expect("strict plain 4x5 full-grid table fixture parses");
+    let [Block::Paragraph(anchor), Block::Table(table)] = doc.sections[0].blocks.as_slice() else {
+        panic!("table host must lower to one anchor and one table")
+    };
+    assert!(anchor.is_table_anchor);
+    assert_eq!((table.rows, table.cols, table.cells.len()), (4, 5, 20));
+    assert!(table.caption.is_none());
+    assert!(table.keep_together);
+    assert!(table.fixed_row_heights);
+    assert_eq!(table.col_widths, vec![3_221, 9_238, 14_770, 12_223, 8_594]);
+    assert_eq!(table.row_heights, vec![1_948, 1_848, 1_848, 1_848]);
+    assert!(table.cells.iter().enumerate().all(|(index, cell)| {
+        (cell.row, cell.col, cell.row_span, cell.col_span, cell.width)
+            == (
+                index / 5,
+                index % 5,
+                1,
+                1,
+                Some(table.col_widths[index % 5]),
+            )
+            && cell.blocks.len() == 1
+            && matches!(cell.blocks[0], Block::Paragraph(_))
+    }));
+}
+
+#[test]
+fn strict_plain_four_by_five_rejects_hostile_pairing_topology_geometry_and_refs() {
+    for mutation in [
+        PlainFourByFiveMutation::BadCommonWidth,
+        PlainFourByFiveMutation::BadTableAttribute,
+        PlainFourByFiveMutation::BadTableBorder,
+        PlainFourByFiveMutation::BadRowCellCount,
+        PlainFourByFiveMutation::BadCellSpan,
+        PlainFourByFiveMutation::BadWidthReference,
+        PlainFourByFiveMutation::BadListExtension,
+        PlainFourByFiveMutation::BadGridGeometry,
+        PlainFourByFiveMutation::BadParagraphCount,
+        PlainFourByFiveMutation::BadCellPadding,
+        PlainFourByFiveMutation::BadCellBorder,
+    ] {
+        assert!(
+            OwnHwp5Parser::new()
+                .parse(&plain_four_by_five_fixture(mutation))
+                .is_err(),
+            "hostile plain 4x5 mutation must fail closed"
         );
     }
 }
@@ -2471,6 +2540,202 @@ fn captioned_table_fixture(mutation: CaptionedTableMutation) -> Vec<u8> {
             &utf16_bytes(&[u16::from(b'A') + index as u16, 0x000d]),
         );
         push_record(&mut body, TAG_PARA_CHAR_SHAPE, 3, &shape_refs(&[(0, 0)]));
+    }
+
+    let mut compound = CompoundFile::create(Cursor::new(Vec::new())).unwrap();
+    {
+        let mut stream = compound.create_stream("/FileHeader").unwrap();
+        stream.write_all(&header).unwrap();
+    }
+    {
+        let mut stream = compound.create_stream("/DocInfo").unwrap();
+        stream.write_all(&doc_info).unwrap();
+    }
+    compound.create_storage("/BodyText").unwrap();
+    {
+        let mut stream = compound.create_stream("/BodyText/Section0").unwrap();
+        stream.write_all(&body).unwrap();
+    }
+    compound.into_inner().into_inner()
+}
+
+fn plain_four_by_five_fixture(mutation: PlainFourByFiveMutation) -> Vec<u8> {
+    const COL_WIDTHS: [u32; 5] = [3_221, 9_238, 14_770, 12_223, 8_594];
+    const ROW_HEIGHTS: [u32; 4] = [1_948, 1_848, 1_848, 1_848];
+
+    let mut header = vec![0; 256];
+    header[..HWP_SIGNATURE.len()].copy_from_slice(HWP_SIGNATURE);
+    header[32..36].copy_from_slice(&[0, 0, 0, 5]);
+
+    let mut doc_info = Vec::new();
+    let mut properties = vec![0; 26];
+    properties[..2].copy_from_slice(&1u16.to_le_bytes());
+    push_record(&mut doc_info, TAG_DOCUMENT_PROPERTIES, 0, &properties);
+    let mut mappings = Vec::new();
+    for count in [0, 1, 1, 1, 1, 1, 1, 1, 36, 1, 0, 0, 0, 1, 0] {
+        mappings.extend_from_slice(&(count as u32).to_le_bytes());
+    }
+    push_record(&mut doc_info, TAG_ID_MAPPINGS, 0, &mappings);
+    for _ in 0..7 {
+        push_record(&mut doc_info, TAG_FACE_NAME, 0, &face_name("Test Sans"));
+    }
+    for _ in 0..36 {
+        push_record(&mut doc_info, TAG_BORDER_FILL, 0, &solid_border_fill());
+    }
+    push_record(&mut doc_info, TAG_CHAR_SHAPE, 0, &char_shape());
+    push_record(&mut doc_info, TAG_PARA_SHAPE, 0, &para_shape());
+
+    let mut body = Vec::new();
+    let mut host_text = extended_control(0x0002, CTRL_SECTION_DEF);
+    host_text.extend(extended_control(0x000b, CTRL_TABLE));
+    host_text.push(0x000d);
+    push_para_header_with_break(
+        &mut body,
+        host_text.len() as u32,
+        (1 << 2) | (1 << 0x000b),
+        1,
+        0,
+        0x01,
+    );
+    push_record(&mut body, TAG_PARA_TEXT, 1, &utf16_bytes(&host_text));
+    push_record(&mut body, TAG_PARA_CHAR_SHAPE, 1, &shape_refs(&[(0, 0)]));
+
+    let mut section_control = Vec::with_capacity(28);
+    section_control.extend_from_slice(&CTRL_SECTION_DEF.to_le_bytes());
+    section_control.extend([0; 24]);
+    push_record(&mut body, TAG_CTRL_HEADER, 1, &section_control);
+    push_record(&mut body, TAG_PAGE_DEF, 2, &page_def(Mutation::None));
+
+    let mut common = Vec::with_capacity(46);
+    common.extend_from_slice(&CTRL_TABLE.to_le_bytes());
+    common.extend_from_slice(&0x082a_2311u32.to_le_bytes());
+    common.extend_from_slice(&0u32.to_le_bytes());
+    common.extend_from_slice(&0u32.to_le_bytes());
+    common.extend_from_slice(
+        &if matches!(mutation, PlainFourByFiveMutation::BadCommonWidth) {
+            48_045u32
+        } else {
+            48_046
+        }
+        .to_le_bytes(),
+    );
+    common.extend_from_slice(&7_492u32.to_le_bytes());
+    common.extend_from_slice(&0i32.to_le_bytes());
+    for margin in [141i16, 141, 141, 141] {
+        common.extend_from_slice(&margin.to_le_bytes());
+    }
+    common.extend_from_slice(&1u32.to_le_bytes());
+    common.extend_from_slice(&0i32.to_le_bytes());
+    common.extend_from_slice(&0u16.to_le_bytes());
+    push_record(&mut body, TAG_CTRL_HEADER, 1, &common);
+
+    let mut table = Vec::with_capacity(30);
+    table.extend_from_slice(
+        &if matches!(mutation, PlainFourByFiveMutation::BadTableAttribute) {
+            0x0400_0006u32
+        } else {
+            0x0600_0006
+        }
+        .to_le_bytes(),
+    );
+    table.extend_from_slice(&4u16.to_le_bytes());
+    table.extend_from_slice(&5u16.to_le_bytes());
+    table.extend_from_slice(&0u16.to_le_bytes());
+    for padding in [141i16, 141, 141, 141] {
+        table.extend_from_slice(&padding.to_le_bytes());
+    }
+    let mut row_counts = [5u16; 4];
+    if matches!(mutation, PlainFourByFiveMutation::BadRowCellCount) {
+        row_counts[0] = 4;
+    }
+    for count in row_counts {
+        table.extend_from_slice(&count.to_le_bytes());
+    }
+    table.extend_from_slice(
+        &if matches!(mutation, PlainFourByFiveMutation::BadTableBorder) {
+            5u16
+        } else {
+            4
+        }
+        .to_le_bytes(),
+    );
+    table.extend_from_slice(&0u16.to_le_bytes());
+    push_record(&mut body, TAG_TABLE, 2, &table);
+
+    for index in 0usize..20 {
+        let row = index / 5;
+        let col = index % 5;
+        let paragraph_count =
+            if index == 0 && matches!(mutation, PlainFourByFiveMutation::BadParagraphCount) {
+                2u16
+            } else {
+                1
+            };
+        let mut width = COL_WIDTHS[col];
+        if index == 0 && matches!(mutation, PlainFourByFiveMutation::BadGridGeometry) {
+            width -= 1;
+        }
+        let width_ref =
+            if index == 0 && matches!(mutation, PlainFourByFiveMutation::BadWidthReference) {
+                0x0100u16
+            } else {
+                0x0500
+            };
+        let col_span = if index == 0 && matches!(mutation, PlainFourByFiveMutation::BadCellSpan) {
+            2u16
+        } else {
+            1
+        };
+        let mut cell = Vec::with_capacity(47);
+        cell.extend_from_slice(&paragraph_count.to_le_bytes());
+        cell.extend_from_slice(&0x0020_0000u32.to_le_bytes());
+        cell.extend_from_slice(&width_ref.to_le_bytes());
+        for value in [col as u16, row as u16, col_span, 1] {
+            cell.extend_from_slice(&value.to_le_bytes());
+        }
+        cell.extend_from_slice(&width.to_le_bytes());
+        cell.extend_from_slice(&ROW_HEIGHTS[row].to_le_bytes());
+        for (padding_index, padding) in [141i16, 141, 141, 141].into_iter().enumerate() {
+            let value = if index == 0
+                && padding_index == 0
+                && matches!(mutation, PlainFourByFiveMutation::BadCellPadding)
+            {
+                142
+            } else {
+                padding
+            };
+            cell.extend_from_slice(&value.to_le_bytes());
+        }
+        let border = if index == 0 && matches!(mutation, PlainFourByFiveMutation::BadCellBorder) {
+            34u16
+        } else {
+            match row {
+                0 => 35,
+                1 => 36,
+                _ => 4,
+            }
+        };
+        cell.extend_from_slice(&border.to_le_bytes());
+        cell.extend_from_slice(&width.to_le_bytes());
+        cell.extend([0; 9]);
+        if index == 0 && matches!(mutation, PlainFourByFiveMutation::BadListExtension) {
+            cell[38] = 1;
+        }
+        push_record(&mut body, TAG_LIST_HEADER, 2, &cell);
+
+        for paragraph_index in 0..paragraph_count {
+            let empty = row == 3 && col > 0 && paragraph_index == 0;
+            push_para_header_at_level(&mut body, 2, if empty { 1 } else { 2 }, 0, 1, 0, 0);
+            if !empty {
+                push_record(
+                    &mut body,
+                    TAG_PARA_TEXT,
+                    3,
+                    &utf16_bytes(&[u16::from(b'A') + index as u16, 0x000d]),
+                );
+            }
+            push_record(&mut body, TAG_PARA_CHAR_SHAPE, 3, &shape_refs(&[(0, 0)]));
+        }
     }
 
     let mut compound = CompoundFile::create(Cursor::new(Vec::new())).unwrap();

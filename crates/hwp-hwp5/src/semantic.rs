@@ -1559,11 +1559,11 @@ fn parse_new_number_control(
 }
 
 /// Own the bounded binary-table slices seen at the public first-party boundary: strict inline 1×1,
-/// 10×2, 9×8, 8×5, 6×4, and 7×3 tables. The 9×8 slice has 34 active cells and one nested 1×1 table;
-/// the 8×5 slice has 19 active cells, one bounded vertical merge, and nine nested 1×1 tables. The
-/// 6×4 slice is a complete 24-cell grid. The 7×3 slice has 19 active cells and one vertical plus one
-/// horizontal merge. Both have one paragraph per cell. A 1×1 cell may use the exact observed
-/// cell-own inner-margin bit;
+/// 10×2, 9×8, 8×5, 6×4, 7×3, and two exact 4×5 full-grid tables (one top-captioned). The 9×8 slice
+/// has 34 active cells and one nested 1×1 table; the 8×5 slice has 19 active cells, one bounded
+/// vertical merge, and nine nested 1×1 tables. The 6×4 slice is a complete 24-cell grid. The 7×3
+/// slice has 19 active cells and one vertical plus one horizontal merge. Both have one paragraph per
+/// cell. A 1×1 cell may use the exact observed cell-own inner-margin bit;
 /// protection/header/form bits remain unsupported. Multiple controls in one text-empty host are
 /// emitted in marker/header order by `parse_paragraph`. Anything outside these exact source-neutral
 /// shapes, including deeper nesting, remains fail-closed rather than being approximated.
@@ -1842,6 +1842,9 @@ fn parse_inline_table(
         (0x282a_2311, 0x0600_0006, 4, 5) => (0..4)
             .flat_map(|row| (0..5).map(move |col| (row, col, 1, 1)))
             .collect(),
+        (0x082a_2311, 0x0600_0006, 4, 5) => (0..4)
+            .flat_map(|row| (0..5).map(move |col| (row, col, 1, 1)))
+            .collect(),
         _ => {
             return Err(malformed(
                 &table_record,
@@ -1925,6 +1928,8 @@ fn parse_inline_table(
     let exact_one_by_one =
         (common_attr, table_attr, rows, cols) == (0x082a_2311, 0x0400_0006, 1, 1);
     let exact_captioned = (common_attr, table_attr, rows, cols) == (0x282a_2311, 0x0600_0006, 4, 5);
+    let exact_plain_four_by_five =
+        (common_attr, table_attr, rows, cols) == (0x082a_2311, 0x0600_0006, 4, 5);
     if exact_captioned
         && (width != 48_047
             || height != 7_492
@@ -1936,6 +1941,19 @@ fn parse_inline_table(
             &table_record,
             Some(section),
             "captioned TABLE common or table geometry differs from its exact owned tuple",
+        ));
+    }
+    if exact_plain_four_by_five
+        && (width != 48_046
+            || height != 7_492
+            || margins != [141, 141, 141, 141]
+            || table_padding != [141, 141, 141, 141]
+            || table_border_id != 4)
+    {
+        return Err(malformed(
+            &table_record,
+            Some(section),
+            "plain 4x5 TABLE common or table geometry differs from its exact owned tuple",
         ));
     }
     let mut cells = Vec::with_capacity(expected_cells);
@@ -2016,10 +2034,12 @@ fn parse_inline_table(
         let expected_seven_by_three_width_ref =
             exact_seven_by_three.then_some(if col == 2 { 0x0100 } else { 0x0500 });
         let expected_captioned_width_ref = exact_captioned.then_some(0x0400);
+        let expected_plain_four_by_five_width_ref = exact_plain_four_by_five.then_some(0x0500);
         let expected_exact_width_ref = expected_one_by_two_width_ref
             .or(expected_eight_by_five_width_ref)
             .or(expected_seven_by_three_width_ref)
-            .or(expected_captioned_width_ref);
+            .or(expected_captioned_width_ref)
+            .or(expected_plain_four_by_five_width_ref);
         let owned_width_ref = expected_exact_width_ref.map_or_else(
             || {
                 matches!(width_ref, 0x0000 | 0x0100 | 0x0500)
@@ -2112,6 +2132,24 @@ fn parse_inline_table(
                 &list_record,
                 Some(section),
                 "captioned TABLE cell framing differs from its exact owned tuple",
+            ));
+        }
+        let expected_plain_border_id = match row {
+            0 => 35,
+            1 => 36,
+            _ => 4,
+        };
+        if exact_plain_four_by_five
+            && (paragraph_count != 1
+                || cell_padding != [141, 141, 141, 141]
+                || !width_extension
+                || extension_width != cell_width
+                || cell_border_id != expected_plain_border_id)
+        {
+            return Err(malformed(
+                &list_record,
+                Some(section),
+                "plain 4x5 TABLE cell framing differs from its exact owned tuple",
             ));
         }
         let cell_fill = table_border(doc, cell_border_id, &list_record, section, "table cell")?;
@@ -2387,6 +2425,16 @@ fn parse_inline_table(
             &table_record,
             Some(section),
             "captioned TABLE column or row geometry differs from its exact owned grid",
+        ));
+    }
+    if exact_plain_four_by_five
+        && (col_widths != [3_221, 9_238, 14_770, 12_223, 8_594]
+            || derived_rows != [1_948, 1_848, 1_848, 1_848])
+    {
+        return Err(malformed(
+            &table_record,
+            Some(section),
+            "plain 4x5 TABLE column or row geometry differs from its exact owned grid",
         ));
     }
     let owned_nested_stale_common_height = table_depth == 1

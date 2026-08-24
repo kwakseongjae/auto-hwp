@@ -51,8 +51,8 @@ impl Engine {
 }
 
 /// Run only the first-party HWP5 parser lane. This entry point is intentionally separate from
-/// [`Engine::open`]: it accepts the strict text-only subset and returns a parse error for every
-/// unsupported construct. It never calls or falls back to rhwp.
+/// [`Engine::open`]: it accepts only explicitly owned strict subsets and returns a parse error for
+/// every unsupported construct. It never calls or falls back to rhwp.
 pub fn open_hwp5_own(bytes: &[u8]) -> Result<SemanticDoc> {
     hwp_hwp5::OwnHwp5Parser::new()
         .parse(bytes)
@@ -80,11 +80,11 @@ mod hwp5_candidate_tests {
     }
 
     #[test]
-    fn own_only_fails_closed_even_when_rhwp_is_available() {
-        let error = open_hwp5_own(&benchmark()).unwrap_err().to_string();
-        assert!(error.contains("HWP5"));
-        assert!(error.contains("tag"));
-        assert!(!error.contains("benchmark.hwp"));
+    fn own_only_completes_benchmark_without_consulting_rhwp() {
+        let doc = open_hwp5_own(&benchmark()).expect("strict first-party benchmark parse succeeds");
+        assert_eq!(doc.origin, Some(SourceFormat::Hwp5));
+        assert_eq!(doc.sections.len(), 1);
+        assert!(!doc.sections[0].blocks.is_empty());
     }
 
     #[test]
