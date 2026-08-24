@@ -240,13 +240,13 @@ fn benchmark_empty_run_deltas_are_content_free_and_layout_classified() {
         assert_eq!(candidate_page.rects.len(), oracle_page.rects.len());
         assert_eq!(candidate_page.lines.len(), oracle_page.lines.len());
     }
-    assert!(!same_page_and_block_geometry(
+    assert!(same_page_and_block_geometry(
         &candidate_placed,
         &oracle_placed
     ));
-    assert!(!same_table_geometry(&candidate_placed, &oracle_placed));
-    assert!(!same_rect_geometry(&candidate_placed, &oracle_placed));
-    assert!(!same_line_geometry(&candidate_placed, &oracle_placed));
+    assert!(same_table_geometry(&candidate_placed, &oracle_placed));
+    assert!(same_rect_geometry(&candidate_placed, &oracle_placed));
+    assert!(same_line_geometry(&candidate_placed, &oracle_placed));
     assert_eq!(
         candidate_placed
             .pages
@@ -275,61 +275,15 @@ fn benchmark_empty_run_deltas_are_content_free_and_layout_classified() {
             && page.decoration_glyphs.candidate_only == 3
             && page.decoration_glyphs.first_changed_ordinal == Some(0)
     }));
-    assert_eq!(
-        typed_delta
-            .pages
-            .iter()
-            .filter(|page| !page.body_glyphs.is_exact())
-            .map(|page| page.page_ordinal)
-            .collect::<Vec<_>>(),
-        vec![2, 7]
-    );
-    assert_eq!(
-        typed_delta.pages[2].body_glyphs.max_abs_delta_hwpunit_ceil,
-        148
-    );
-    assert_eq!(
-        typed_delta.pages[7].body_glyphs.max_abs_delta_hwpunit_ceil,
-        72
-    );
-    assert_eq!(
-        typed_delta
-            .pages
-            .iter()
-            .filter(|page| {
-                !page.blocks.is_exact()
-                    || !page.tables.is_exact()
-                    || !page.cells.is_exact()
-                    || !page.rects.is_exact()
-                    || !page.lines.is_exact()
-            })
-            .map(|page| page.page_ordinal)
-            .collect::<Vec<_>>(),
-        vec![2]
-    );
-    assert_eq!(typed_delta.pages[2].cells.max_abs_delta_hwpunit_ceil, 177);
-    assert_eq!(
-        typed_delta.pages[2].body_glyphs.first_changed_ordinal,
-        Some(12)
-    );
-    assert_eq!(
-        typed_delta.pages[2]
-            .body_glyphs
-            .max_delta_coordinate_ordinal,
-        Some(1)
-    );
-    assert_eq!(typed_delta.pages[2].tables.first_changed_ordinal, Some(0));
-    assert_eq!(typed_delta.pages[2].cells.first_changed_ordinal, Some(0));
-    assert_eq!(
-        typed_delta.pages[7].body_glyphs.first_changed_ordinal,
-        Some(324)
-    );
-    assert_eq!(
-        typed_delta.pages[7]
-            .body_glyphs
-            .max_delta_coordinate_ordinal,
-        Some(0)
-    );
+    assert!(typed_delta.pages.iter().all(|page| {
+        page.body_glyphs.is_exact()
+            && page.blocks.is_exact()
+            && page.tables.is_exact()
+            && page.cells.is_exact()
+            && page.rects.is_exact()
+            && page.lines.is_exact()
+            && page.images.is_exact()
+    }));
     let typed_public = format!("{typed_delta:?}");
     assert!(!typed_public.contains("benchmark.hwp"));
     assert!(!typed_public.contains("BodyText"));

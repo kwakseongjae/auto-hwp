@@ -571,7 +571,9 @@ impl<'a> Lifter<'a> {
                     padding: c.apply_inner_margin.then(|| lift_padding(&c.padding)),
                     // 이슈 074: 저장된 셀 실폭 — 한글 표는 행마다 열 경계가 달라(ragged) 열 격자
                     // 근사로는 폭이 최대 2배까지 틀린다. 0 은 "없음"으로 본다.
-                    width: (c.width > 0).then_some(c.width as i32),
+                    width: i32::try_from(cell_layout_width(c))
+                        .ok()
+                        .filter(|width| *width > 0),
                     ..Default::default()
                 }
             })
@@ -608,7 +610,7 @@ impl<'a> Lifter<'a> {
             // distributes its stored height evenly (height/span) so the sum over the span is preserved.
             row_heights: stored_row_heights(&t.cells, t.row_count as usize),
             // Per-column widths (HWPUNIT) for faithful column proportions on render.
-            col_widths: derive_col_widths(&t.cells, t.col_count as usize),
+            col_widths: derive_col_widths(&t.cells, t.col_count as usize, t.common.width),
             // Outer vertical margins (바깥 여백) so consecutive tables keep HWP's real gap on render.
             outer_margin_top: t.outer_margin_top.max(0) as i32,
             outer_margin_bottom: t.outer_margin_bottom.max(0) as i32,
@@ -862,9 +864,16 @@ fn stored_row_heights(cells: &[rhwp::model::table::Cell], rows: usize) -> Vec<i3
 /// short lines. We seed exact widths from single-column cells, then iteratively resolve span-only
 /// columns: for a span whose other columns are known, the leftover width is split among the unknown
 /// columns. Remaining unknowns keep the 1800 fallback. Proportions then match Hancom's grid.
-fn derive_col_widths(cells: &[rhwp::model::table::Cell], cols: usize) -> Vec<i32> {
+fn derive_col_widths(
+    cells: &[rhwp::model::table::Cell],
+    cols: usize,
+    total_width: u32,
+) -> Vec<i32> {
     if cols == 0 {
         return Vec::new();
+    }
+    if let Some(exact) = derive_exact_col_widths(cells, cols, total_width) {
+        return exact;
     }
     let mut w = vec![0u32; cols];
     let mut known = vec![false; cols];
@@ -872,7 +881,7 @@ fn derive_col_widths(cells: &[rhwp::model::table::Cell], cols: usize) -> Vec<i32
     for c in cells {
         let col = c.col as usize;
         if c.col_span <= 1 && col < cols {
-            w[col] = w[col].max(c.width);
+            w[col] = w[col].max(cell_layout_width(c));
             known[col] = true;
         }
     }
@@ -882,6 +891,7 @@ fn derive_col_widths(cells: &[rhwp::model::table::Cell], cols: usize) -> Vec<i32
     while changed {
         changed = false;
         for c in cells {
+            let cell_width = cell_layout_width(c);
             let span = c.col_span.max(1) as usize;
             let start = c.col as usize;
             if span <= 1 || start >= cols {
@@ -893,10 +903,10 @@ fn derive_col_widths(cells: &[rhwp::model::table::Cell], cols: usize) -> Vec<i32
                 continue;
             }
             let known_sum: u32 = (start..end).filter(|&i| known[i]).map(|i| w[i]).sum();
-            if c.width <= known_sum {
+            if cell_width <= known_sum {
                 continue; // can't split a non-positive remainder sensibly
             }
-            let each = (c.width - known_sum) / unknown.len() as u32;
+            let each = (cell_width - known_sum) / unknown.len() as u32;
             if each == 0 {
                 continue;
             }
@@ -914,6 +924,84 @@ fn derive_col_widths(cells: &[rhwp::model::table::Cell], cols: usize) -> Vec<i32
         }
     }
     w.into_iter().map(|x| x as i32).collect()
+}
+
+/// Solve the source cell-span equations against the common-object endpoints. The extension-aware
+/// width is load-bearing: a newer LIST_HEADER can deliberately supersede one stale core width. Any
+/// missing, contradictory, non-positive, or overflowing equation rejects the exact solve as a whole;
+/// the caller then uses the historical bounded fallback rather than partially mixing two grids.
+fn derive_exact_col_widths(
+    cells: &[rhwp::model::table::Cell],
+    cols: usize,
+    total_width: u32,
+) -> Option<Vec<i32>> {
+    let total_width = i64::from(total_width);
+    if cols == 0 || total_width <= 0 || total_width > i64::from(i32::MAX) {
+        return None;
+    }
+    let mut boundaries = vec![None::<i64>; cols + 1];
+    boundaries[0] = Some(0);
+    boundaries[cols] = Some(total_width);
+    for _ in 0..=cells.len() + cols {
+        let mut progressed = false;
+        for cell in cells {
+            let start = cell.col as usize;
+            let span = cell.col_span.max(1) as usize;
+            let end = start.checked_add(span)?;
+            if start >= cols || end > cols {
+                return None;
+            }
+            let width = i64::from(cell_layout_width(cell));
+            if width <= 0 || width > i64::from(i32::MAX) {
+                return None;
+            }
+            match (boundaries[start], boundaries[end]) {
+                (Some(left), Some(right)) if right - left != width => return None,
+                (Some(left), None) => {
+                    boundaries[end] = Some(left.checked_add(width)?);
+                    progressed = true;
+                }
+                (None, Some(right)) => {
+                    boundaries[start] = Some(right.checked_sub(width)?);
+                    progressed = true;
+                }
+                _ => {}
+            }
+        }
+        if !progressed {
+            break;
+        }
+    }
+    let boundaries = boundaries.into_iter().collect::<Option<Vec<_>>>()?;
+    if boundaries.first() != Some(&0)
+        || boundaries.last() != Some(&total_width)
+        || boundaries.windows(2).any(|pair| pair[0] >= pair[1])
+    {
+        return None;
+    }
+    boundaries
+        .windows(2)
+        .map(|pair| i32::try_from(pair[1] - pair[0]).ok())
+        .collect()
+}
+
+/// HWP5 cell LIST_HEADERs may carry a 13-byte layout extension whose first `u32` is the live cell
+/// width and whose remaining bytes are reserved zeroes. rhwp intentionally preserves that tail but
+/// exposes only the older core-width slot. Prefer the exact bounded extension in our lift so a stale
+/// core width cannot equal-split a ragged span. Longer/non-zero/zero/overflow tails fail closed to the
+/// core field; `external/rhwp` remains untouched.
+fn cell_layout_width(cell: &rhwp::model::table::Cell) -> u32 {
+    if cell.raw_list_extra.len() == 13 && cell.raw_list_extra[4..].iter().all(|byte| *byte == 0) {
+        let width = u32::from_le_bytes(
+            cell.raw_list_extra[..4]
+                .try_into()
+                .expect("exact four-byte prefix"),
+        );
+        if width > 0 && i32::try_from(width).is_ok() {
+            return width;
+        }
+    }
+    cell.width
 }
 
 /// rhwp `Padding` (i16 per side) → our `[left, right, top, bottom]` HWPUNIT array, negatives
@@ -1245,6 +1333,60 @@ fn lift_para_shape(p: &RParaShape, from_hwpx: bool) -> ParaShape {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cell_layout_width_uses_only_the_exact_bounded_extension() {
+        let mut cell = rhwp::model::table::Cell {
+            width: 1_000,
+            ..Default::default()
+        };
+        let mut exact = vec![0; 13];
+        exact[..4].copy_from_slice(&1_176u32.to_le_bytes());
+        cell.raw_list_extra = exact.clone();
+        assert_eq!(cell_layout_width(&cell), 1_176);
+
+        let mut nonzero_tail = exact.clone();
+        nonzero_tail[12] = 1;
+        cell.raw_list_extra = nonzero_tail;
+        assert_eq!(cell_layout_width(&cell), 1_000);
+
+        cell.raw_list_extra = exact[..12].to_vec();
+        assert_eq!(cell_layout_width(&cell), 1_000);
+
+        let mut zero = vec![0; 13];
+        zero[..4].copy_from_slice(&0u32.to_le_bytes());
+        cell.raw_list_extra = zero;
+        assert_eq!(cell_layout_width(&cell), 1_000);
+
+        let mut overflow = vec![0; 13];
+        overflow[..4].copy_from_slice(&u32::MAX.to_le_bytes());
+        cell.raw_list_extra = overflow;
+        assert_eq!(cell_layout_width(&cell), 1_000);
+    }
+
+    #[test]
+    fn exact_column_solver_uses_layout_extension_for_span_equations() {
+        let single = |col, width| rhwp::model::table::Cell {
+            col,
+            col_span: 1,
+            width,
+            ..Default::default()
+        };
+        let mut spanning = rhwp::model::table::Cell {
+            col: 1,
+            col_span: 2,
+            width: 1_800,
+            ..Default::default()
+        };
+        spanning.raw_list_extra = vec![0; 13];
+        spanning.raw_list_extra[..4].copy_from_slice(&2_000u32.to_le_bytes());
+        let cells = vec![single(0, 1_000), single(2, 1_000), spanning];
+        assert_eq!(derive_col_widths(&cells, 3, 3_000), vec![1_000; 3]);
+
+        let mut contradictory = cells;
+        contradictory[2].raw_list_extra[..4].copy_from_slice(&1_900u32.to_le_bytes());
+        assert!(derive_exact_col_widths(&contradictory, 3, 3_000).is_none());
+    }
 
     #[test]
     fn caption_directions_map_without_loss() {

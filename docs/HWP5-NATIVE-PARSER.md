@@ -136,6 +136,26 @@ deltas bounded by 72 HWPUNIT and otherwise exact geometry. This proves that page
 omission rather than a native regression, but it does not waive the two remaining body-layout deltas;
 the benchmark stays `render-parity-unproven` and ineligible.
 
+#204 resolves both bounded body-layout deltas without editing vendored rhwp or changing production
+routing. First, an exact 13-byte HWP5 cell `LIST_HEADER` extension carries the live layout width in its
+first `u32`; one observed span cell's older core-width slot was stale by 176 HWPUNIT. The rhwp adapter
+now accepts that extension only at the exact length, with a positive signed-32-bit width and an all-zero
+reserved tail. A global column-boundary/span-equation solve is used only when every boundary is known,
+positive, bounded, and mutually consistent; otherwise the entire solve fails closed to the prior
+bounded heuristic. Second, the explicit-column caption path now applies `TableCaption.max_width` to
+the same wrapping, alignment, and object-width calculations as the flat path. The bounded discriminator
+is 143 HWPUNIT, whose half produced the former 71.5-HWPUNIT centered-glyph shift. Finally, HWP5 TABLE
+bits 0–1/2 are kept as page-break/repeat-header semantics rather than being mistaken for HWPX
+`noAdjust`; HWP5 stored row heights remain floors, while only the HWPX parser may request exact clipping.
+
+After those corrections, all eight pages are exact against the rhwp oracle for body glyphs, blocks,
+tables, cells, rectangles, lines, images, and body-only SVG. The first-party page-number decoration is
+still intentionally present only in the candidate (three glyphs per page). Removing only that owned
+decoration makes PDF bytes, page count, replay counters, and diagnostics exact against the rhwp PDF.
+This is strong evidence for the one bounded benchmark, not generic HWP5 coverage: production remains
+on rhwp, `external/rhwp` remains immutable, and eligibility remains false until the parser-wide corpus
+and cutover gates below are satisfied.
+
 ## Cutover rule
 
 Completing one bounded benchmark is only the first eligibility milestone. The content-free committed

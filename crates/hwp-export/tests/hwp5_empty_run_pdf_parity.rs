@@ -37,10 +37,20 @@ fn page_decoration_mask_agrees_with_pdf_replay_counts() {
     .unwrap();
     let candidate = open_hwp5_own(&bytes).unwrap();
     let oracle = Engine::open(&bytes).unwrap();
+    let mut candidate_without_page_number = candidate.clone();
+    for section in &mut candidate_without_page_number.sections {
+        section.page_number = None;
+    }
     let candidate_masks = render_doc_diagnostic_masks(&candidate, &ApproxFontMetrics);
     let oracle_masks = render_doc_diagnostic_masks(&oracle, &ApproxFontMetrics);
     let candidate_pdf = export_pdf(&candidate, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
     let oracle_pdf = export_pdf(&oracle, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
+    let body_pdf = export_pdf(
+        &candidate_without_page_number,
+        &ApproxFontMetrics,
+        &PdfOptions::default(),
+    )
+    .unwrap();
 
     assert_eq!(candidate_pdf.pages, 8);
     assert_eq!(candidate_pdf.pages, oracle_pdf.pages);
@@ -70,4 +80,11 @@ fn page_decoration_mask_agrees_with_pdf_replay_counts() {
         assert_eq!(candidate_page.equation, oracle_page.equation);
         assert_eq!(candidate_page.chart, oracle_page.chart);
     }
+    assert!(
+        body_pdf.bytes == oracle_pdf.bytes
+            && body_pdf.pages == oracle_pdf.pages
+            && body_pdf.replay == oracle_pdf.replay
+            && body_pdf.diagnostics == oracle_pdf.diagnostics,
+        "removing the first-party page number leaves the PDF byte-exact"
+    );
 }
