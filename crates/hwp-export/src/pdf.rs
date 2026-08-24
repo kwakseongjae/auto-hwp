@@ -360,6 +360,20 @@ fn block_band_contains_glyph(
     })
 }
 
+fn paragraph_paint_status(
+    paragraph: &Paragraph,
+    page: &hwp_typeset::PlacedPage,
+    block: &hwp_typeset::PlacedBlock,
+) -> Option<&'static str> {
+    if block_band_contains_glyph(page, block) {
+        Some("painted")
+    } else if paragraph_expects_text_paint(paragraph) {
+        Some("expected-missing")
+    } else {
+        None
+    }
+}
+
 fn visual_evidence(
     placed: &PlacedDoc,
     doc: &SemanticDoc,
@@ -384,15 +398,10 @@ fn visual_evidence(
                     Block::Table(_) => None,
                 })
                 .ok_or_else(|| "pdf.visual_evidence.paragraph_provenance_mismatch".to_string())?;
-            if !paragraph_expects_text_paint(paragraph) {
+            let Some(paint_status) = paragraph_paint_status(paragraph, page, block) else {
                 counters[0] += 1;
                 intentional_blank_text_regions += 1;
                 continue;
-            }
-            let paint_status = if block_band_contains_glyph(page, block) {
-                "painted"
-            } else {
-                "expected-missing"
             };
             push_visual_region(
                 &mut regions,
@@ -1481,6 +1490,19 @@ mod tests {
             &continuation_without_text,
             &block
         ));
+        assert_eq!(
+            paragraph_paint_status(&para(" \t\n"), &first_fragment, &block),
+            Some("painted"),
+            "a marker or generated glyph paints even when the source text run is blank"
+        );
+        assert_eq!(
+            paragraph_paint_status(&para("visible"), &continuation_without_text, &block),
+            Some("expected-missing")
+        );
+        assert_eq!(
+            paragraph_paint_status(&para(" \t\n"), &continuation_without_text, &block),
+            None
+        );
     }
 
     #[test]

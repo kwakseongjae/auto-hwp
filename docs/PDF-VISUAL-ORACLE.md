@@ -327,10 +327,12 @@ four content-free categories: paint-backed paragraph bands (`text`), placed tabl
 present; source text, paths, binary identifiers, and font paths are absent.
 
 For paragraph bands, source-visible text is reduced to a boolean and checked against the exact placed
-glyph stream. Intentional blank page-fragments are counted separately and never enter pixel ranking.
-Visible paragraphs are marked `painted` or `expected-missing`; the latter is an explicit unscorable
-placement failure. Non-text regions use `not-applicable`. A painted region that rasterizes without
-candidate ink remains partially unscorable with an explicit metric reason rather than being hidden.
+glyph stream. Any glyph inside the band wins as `painted`, including a generated marker on a
+text-empty paragraph. Without a glyph, source-visible paragraphs become `expected-missing`; only a
+band with neither source-visible text nor a placed glyph is an intentional blank. Intentional blank
+page-fragments are counted separately and never enter pixel ranking. `expected-missing` is an explicit
+unscorable placement failure. Non-text regions use `not-applicable`. A painted region that rasterizes
+without candidate ink remains partially unscorable with an explicit metric reason rather than being hidden.
 
 The manifest must be strict UTF-8 JSON with exactly the known fields, ordered one-based pages, finite
 positive in-page geometry, unique per-page IDs, matching MediaBox dimensions, and an exact SHA-256
