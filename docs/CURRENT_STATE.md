@@ -22,8 +22,12 @@
   final diff/security audit에서 변경은 shared model/lift/typesetter/JSX default/tests/continuity 문서뿐이고
   `external/rhwp`·generated wasm/assets·HWPX parser/serializer·oracle scoring diff 0을 확인했다. commits
   `e49bd7c`·`e383477`·`ff9d88e`를 push하고 PR **#194**를 `Closes #193`으로 게시했다.
-  **다음:** #194 required CI·review/comment·mergeability 확인→green이면 사용자 포괄 승인에 따라 squash
-  merge/branch 정리→#192를 latest main에 재배치해 strict captioned-table parser 재개.
+  PR 대기 중 security re-audit에서 post-parse layout guard가 새 caption blocks를 순회하지 않는 budget
+  bypass를 발견해, caption paragraphs와 caption-nested tables도 explicit work stack에 `depth+1`로 넣었다.
+  hostile caption-only deep nesting 회귀, hwp-ingest **14 tests**, focused clippy `-D warnings`, wasm32 및
+  quick 전체(PDF51·canonical 8/18/24·98.9%+·corpus84·oracle82·HWPX·licenses) green.
+  **다음:** security fix commit/push로 #194 CI 재기동→required CI·review/comment·mergeability
+  green이면 squash merge/branch 정리→#192를 latest main에 재배치해 strict captioned-table parser 재개.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #181 병합 · #182 next TABLE 착수**.
   #175는 exact head `6711ff9`에서 issue-link/build-test/licenses green, CLEAN/MERGEABLE,

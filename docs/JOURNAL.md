@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #193 caption budget bypass closed
+- security re-audit found layout-limit traversal omitted new caption blocks.
+- caption paragraphs/nested tables now share the iterative budget/depth guard; hostile regression green.
+- quick all green; next push/restarted CI→merge.
+
 ## 2026-08-24 (Codex sol) · #193 PR #194 posted
 - final boundary/security audit clean; commits through `ff9d88e` pushed and PR #194 created.
 - next required CI/comments/mergeability→merge, then rebase #192 and implement strict captioned table.

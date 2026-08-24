@@ -193,7 +193,7 @@ pub fn check_table_nesting(current_depth: usize) -> Result<(), DocLimit> {
 /// Post-parse guard: a document that survives parsing can still blow up **layout** (hundreds of
 /// thousands of paragraphs, or a pathologically nested table that the HWP5 lift produced without
 /// going through the HWPX parse-time [`check_table_nesting`]). This counts paragraphs (top-level +
-/// cell) and table nesting depth **iteratively** (an explicit work stack, so counting a hostile
+/// table caption + cell) and table nesting depth **iteratively** (an explicit work stack, so counting a hostile
 /// deep document cannot itself overflow the stack) and fails with [`DocLimit::TooManyParagraphs`] /
 /// [`DocLimit::TableNestingTooDeep`].
 ///
@@ -233,6 +233,14 @@ pub fn check_layout_limits(doc: &SemanticDoc) -> Result<(), DocLimit> {
                 }
             }
             Block::Table(t) => {
+                // Caption blocks are table-owned layout input just like cell blocks. Omitting them
+                // would let an untrusted HWP5 caption bypass both the paragraph budget and nested-table
+                // depth cap before reaching the typesetter.
+                if let Some(caption) = &t.caption {
+                    for child in &caption.blocks {
+                        stack.push((child, depth + 1));
+                    }
+                }
                 for cell in &t.cells {
                     for cb in &cell.blocks {
                         stack.push((cb, depth + 1));
@@ -247,7 +255,7 @@ pub fn check_layout_limits(doc: &SemanticDoc) -> Result<(), DocLimit> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hwp_model::document::{Cell, Paragraph, Section, Table};
+    use hwp_model::document::{Cell, Paragraph, Section, Table, TableCaption};
 
     #[test]
     fn raw_size_and_entry_and_decomp_predicates() {
@@ -288,12 +296,18 @@ mod tests {
     fn layout_guard_counts_paragraphs_including_cells() {
         let mut doc = SemanticDoc::default();
         let mut sec = Section::default();
-        // 2 top-level paragraphs + a table with a cell holding 1 paragraph = 3 paragraphs.
+        // 2 top-level paragraphs + a table caption + a cell holding 1 paragraph = 4 paragraphs.
         sec.blocks.push(Block::Paragraph(Paragraph::default()));
         sec.blocks.push(Block::Paragraph(Paragraph::default()));
         let mut cell = Cell::default();
         cell.blocks.push(Block::Paragraph(Paragraph::default()));
-        let mut table = Table::default();
+        let mut table = Table {
+            caption: Some(TableCaption {
+                blocks: vec![Block::Paragraph(Paragraph::default())],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
         table.cells.push(cell);
         sec.blocks.push(Block::Table(table));
         doc.sections.push(sec);
@@ -319,6 +333,34 @@ mod tests {
         let mut sec = Section::default();
         sec.blocks.push(Block::Table(inner));
         doc.sections.push(sec);
+        assert!(matches!(
+            check_layout_limits(&doc),
+            Err(DocLimit::TableNestingTooDeep { .. })
+        ));
+    }
+
+    #[test]
+    fn layout_guard_rejects_deep_table_nesting_hidden_in_captions() {
+        let mut inner = Table {
+            caption: Some(TableCaption {
+                blocks: vec![Block::Paragraph(Paragraph::default())],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        for _ in 0..(MAX_TABLE_NESTING + 2) {
+            inner = Table {
+                caption: Some(TableCaption {
+                    blocks: vec![Block::Table(inner)],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+        }
+        let mut doc = SemanticDoc::default();
+        let mut section = Section::default();
+        section.blocks.push(Block::Table(inner));
+        doc.sections.push(section);
         assert!(matches!(
             check_layout_limits(&doc),
             Err(DocLimit::TableNestingTooDeep { .. })
