@@ -151,6 +151,31 @@ fn same_glyph_paint(left: &PlacedDoc, right: &PlacedDoc) -> bool {
     })
 }
 
+fn clear_anchor_spacing(blocks: &mut [Block]) {
+    for block in blocks {
+        match block {
+            Block::Paragraph(paragraph) => {
+                for run in &mut paragraph.runs {
+                    for inline in &mut run.content {
+                        if let Inline::Note(note) = inline {
+                            clear_anchor_spacing(&mut note.body);
+                        }
+                    }
+                }
+            }
+            Block::Table(table) => {
+                table.source_anchor_spacing_after = 0;
+                if let Some(caption) = &mut table.caption {
+                    clear_anchor_spacing(&mut caption.blocks);
+                }
+                for cell in &mut table.cells {
+                    clear_anchor_spacing(&mut cell.blocks);
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn benchmark_empty_run_deltas_are_content_free_and_layout_classified() {
     let bytes = std::fs::read(concat!(
@@ -235,24 +260,41 @@ fn benchmark_empty_run_deltas_are_content_free_and_layout_classified() {
     let candidate_placed = place_doc(&candidate, &ApproxFontMetrics);
     let oracle_placed = place_doc(&oracle, &ApproxFontMetrics);
     let production_placed = place_doc(&production, &ApproxFontMetrics);
-    let typed_delta = compare_placed_docs(&candidate_placed, &oracle_placed);
+    // This test owns only empty-run/page-number classification. Remove the independently owned #227
+    // table-anchor axis when comparing the strict parser to the deliberately unenriched rhwp base.
+    let mut candidate_without_anchor_spacing = candidate.clone();
+    for section in &mut candidate_without_anchor_spacing.sections {
+        clear_anchor_spacing(&mut section.blocks);
+    }
+    let candidate_oracle_placed = place_doc(&candidate_without_anchor_spacing, &ApproxFontMetrics);
+    let typed_delta = compare_placed_docs(&candidate_oracle_placed, &oracle_placed);
     assert_eq!(candidate_placed.pages.len(), 8);
-    assert_eq!(candidate_placed.pages.len(), oracle_placed.pages.len());
-    for (candidate_page, oracle_page) in candidate_placed.pages.iter().zip(&oracle_placed.pages) {
+    assert_eq!(
+        candidate_oracle_placed.pages.len(),
+        oracle_placed.pages.len()
+    );
+    for (candidate_page, oracle_page) in candidate_oracle_placed
+        .pages
+        .iter()
+        .zip(&oracle_placed.pages)
+    {
         assert_eq!(candidate_page.blocks.len(), oracle_page.blocks.len());
         assert_eq!(candidate_page.tables.len(), oracle_page.tables.len());
         assert_eq!(candidate_page.rects.len(), oracle_page.rects.len());
         assert_eq!(candidate_page.lines.len(), oracle_page.lines.len());
     }
     assert!(same_page_and_block_geometry(
-        &candidate_placed,
+        &candidate_oracle_placed,
         &oracle_placed
     ));
-    assert!(same_table_geometry(&candidate_placed, &oracle_placed));
-    assert!(same_rect_geometry(&candidate_placed, &oracle_placed));
-    assert!(same_line_geometry(&candidate_placed, &oracle_placed));
+    assert!(same_table_geometry(
+        &candidate_oracle_placed,
+        &oracle_placed
+    ));
+    assert!(same_rect_geometry(&candidate_oracle_placed, &oracle_placed));
+    assert!(same_line_geometry(&candidate_oracle_placed, &oracle_placed));
     assert_eq!(
-        candidate_placed
+        candidate_oracle_placed
             .pages
             .iter()
             .map(|page| page.glyphs.len())

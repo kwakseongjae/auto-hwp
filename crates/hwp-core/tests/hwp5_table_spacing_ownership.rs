@@ -53,7 +53,7 @@ fn assert_same_table_geometry(left: &PlacedDoc, right: &PlacedDoc) {
 }
 
 #[test]
-fn benchmark_anchor_spacing_loss_is_not_a_margin_or_parser_delta() {
+fn benchmark_anchor_spacing_is_owned_without_changing_margin_or_table_geometry() {
     let bytes = std::fs::read(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../benchmarks/benchmark.hwp"
@@ -68,9 +68,33 @@ fn benchmark_anchor_spacing_loss_is_not_a_margin_or_parser_delta() {
     let owned_placed = place_doc(&owned, &ApproxFontMetrics);
     let rhwp_placed = place_doc(&rhwp, &ApproxFontMetrics);
     let production_placed = place_doc(&production, &ApproxFontMetrics);
-    assert_same_table_geometry(&owned_placed, &rhwp_placed);
+    let positive_spacing: Vec<_> = production.sections[0]
+        .blocks
+        .iter()
+        .enumerate()
+        .filter_map(|(block, value)| match value {
+            Block::Table(table) if table.source_anchor_spacing_after > 0 => {
+                Some((block, table.source_anchor_spacing_after))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        positive_spacing,
+        vec![
+            (1, 452),
+            (15, 960),
+            (32, 960),
+            (52, 900),
+            (58, 900),
+            (62, 960)
+        ]
+    );
     assert_same_table_geometry(&owned_placed, &production_placed);
 
+    let rhwp_page1 = top_level_tables(&rhwp_placed, 0);
+    let rhwp_page4 = top_level_tables(&rhwp_placed, 3);
+    let rhwp_page5 = top_level_tables(&rhwp_placed, 4);
     let page1 = top_level_tables(&production_placed, 0);
     let page4 = top_level_tables(&production_placed, 3);
     let page5 = top_level_tables(&production_placed, 4);
@@ -79,19 +103,22 @@ fn benchmark_anchor_spacing_loss_is_not_a_margin_or_parser_delta() {
     assert_eq!((page5[0].0, page5[1].0), (32, 34));
 
     let placed_delta = |tables: &[(usize, f64, f64)]| tables[1].1 - tables[0].1;
-    assert_eq!(placed_delta(&page1), 1_989.0);
-    assert_eq!(placed_delta(&page4), 3_286.0);
-    assert_eq!(placed_delta(&page5), 3_286.0);
+    assert_eq!(placed_delta(&rhwp_page1), 1_989.0);
+    assert_eq!(placed_delta(&rhwp_page4), 3_286.0);
+    assert_eq!(placed_delta(&rhwp_page5), 3_286.0);
+    assert_eq!(placed_delta(&page1), 2_441.0);
+    assert_eq!(placed_delta(&page4), 4_246.0);
+    assert_eq!(placed_delta(&page5), 4_246.0);
 
     // Raw HWP5 PARA_LINE_SEG evidence is pinned independently in hwp-rhwp's
     // table_anchor_spacing test. It predicts 2,441 / 4,246 / 4,246 HWPUNIT
     // between table tops. The exact deficits are the preceding anchor line's
     // stored line_spacing, not a table margin or parser disagreement.
-    assert_eq!(2_441.0 - placed_delta(&page1), 452.0);
-    assert_eq!(4_246.0 - placed_delta(&page4), 960.0);
-    assert_eq!(4_246.0 - placed_delta(&page5), 960.0);
+    assert_eq!(placed_delta(&page1) - placed_delta(&rhwp_page1), 452.0);
+    assert_eq!(placed_delta(&page4) - placed_delta(&rhwp_page4), 960.0);
+    assert_eq!(placed_delta(&page5) - placed_delta(&rhwp_page5), 960.0);
 
     println!(
-        "hwp5-table-spacing.v1 parsers=exact page1_missing=452 page4_missing=960 page5_missing=960 cause=anchor_line_spacing"
+        "hwp5-table-spacing.v2 owned_adjacent_hosts=6 page1_added=452 page4_added=960 page5_added=960 owner=first_party_ir"
     );
 }

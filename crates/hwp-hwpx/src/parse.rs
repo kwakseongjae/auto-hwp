@@ -2815,7 +2815,11 @@ pub(crate) mod tests {
         let tables: Vec<_> = blocks
             .iter()
             .filter_map(|block| match block {
-                Block::Table(table) => Some((table.outer_margin_top, table.outer_margin_bottom)),
+                Block::Table(table) => Some((
+                    table.outer_margin_top,
+                    table.outer_margin_bottom,
+                    table.source_anchor_spacing_after,
+                )),
                 Block::Paragraph(_) => None,
             })
             .collect();
@@ -2829,7 +2833,7 @@ pub(crate) mod tests {
                 Block::Table(_) => None,
             })
             .collect();
-        assert_eq!(tables, vec![(100, 200), (300, 400)]);
+        assert_eq!(tables, vec![(100, 200, 0), (300, 400, 0)]);
         assert_eq!(anchors, vec![(true, 0), (true, 0)]);
     }
 

@@ -613,6 +613,10 @@ fn owns_strict_inline_one_by_one_table_as_anchor_plus_shared_ir() {
     assert!(table.keep_together);
     assert_eq!(table.col_widths, vec![20_000]);
     assert_eq!(table.row_heights, vec![2_000]);
+    assert_eq!(
+        table.source_anchor_spacing_after, 0,
+        "a host without a following source-adjacent table cannot claim its stored spacing"
+    );
     assert_eq!(table.padding, Some([510, 510, 141, 141]));
     assert!(table.borders.iter().all(Option::is_some));
     let cell = &table.cells[0];
@@ -802,6 +806,8 @@ fn owns_two_ordered_tables_in_one_text_empty_host_and_cell_own_padding() {
     assert!(anchor.is_table_anchor);
     assert_eq!((first.rows, first.cols, first.cells.len()), (10, 2, 17));
     assert_eq!((second.rows, second.cols, second.cells.len()), (1, 1, 1));
+    assert_eq!(first.source_anchor_spacing_after, 0);
+    assert_eq!(second.source_anchor_spacing_after, 0);
     assert_eq!(second.cells[0].blocks.len(), 4);
     assert_eq!(second.cells[0].padding, Some([283, 283, 141, 141]));
     assert_eq!(second.cells[0].width, Some(20_000));
@@ -1528,7 +1534,7 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
         } else {
             1
         },
-        0,
+        u16::from(has_table),
         if has_columns {
             0x03
         } else if matches!(mutation, Mutation::ColumnBreakWithoutDefinition) {
@@ -1559,6 +1565,14 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
         shape_refs(&[(0, 0)])
     };
     push_record(&mut body, TAG_PARA_CHAR_SHAPE, 1, &host_shape_refs);
+    if has_table {
+        push_record(
+            &mut body,
+            TAG_PARA_LINE_SEG,
+            1,
+            &line_seg(0, 1_500, 1_200, 900),
+        );
+    }
     let mut section_control = Vec::with_capacity(28);
     section_control.extend_from_slice(&CTRL_SECTION_DEF.to_le_bytes());
     section_control.extend([0; 24]);

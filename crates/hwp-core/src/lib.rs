@@ -32,8 +32,8 @@ impl Engine {
             }
             SourceFormat::Hwp5 => {
                 // Bootstrap body decode remains on governed rhwp. A strict first-party parse may
-                // enrich only page-number metadata that rhwp omitted; unsupported/conflicting input
-                // is an atomic no-op, never a hidden parser cutover.
+                // Enrich only strictly owned render metadata that rhwp omitted; unsupported/conflicting
+                // input is an atomic no-op for each axis, never a hidden parser cutover.
                 let mut d = RhwpEngine::new().parse(bytes, fmt)?;
                 enrich_hwp5_owned_page_numbers(bytes, &mut d);
                 d
@@ -63,6 +63,7 @@ fn enrich_hwp5_owned_page_numbers(bytes: &[u8], target: &mut SemanticDoc) {
         return;
     };
     merge_owned_page_numbers(target, &owned);
+    merge_owned_table_anchor_spacings(target, &owned);
 }
 
 fn merge_owned_page_numbers(target: &mut SemanticDoc, owned: &SemanticDoc) -> bool {
@@ -84,6 +85,142 @@ fn merge_owned_page_numbers(target: &mut SemanticDoc, owned: &SemanticDoc) -> bo
         if target.page_number.is_none() {
             target.page_number = owned.page_number;
         }
+    }
+    true
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TableTopology {
+    rows: usize,
+    cols: usize,
+    cells: Vec<(usize, usize, usize, usize, bool, Option<HwpUnit>)>,
+    col_widths: Vec<HwpUnit>,
+    row_heights: Vec<HwpUnit>,
+    margins: [HwpUnit; 4],
+}
+
+fn visit_tables<'a>(blocks: &'a [Block], output: &mut Vec<&'a Table>) {
+    for block in blocks {
+        match block {
+            Block::Paragraph(paragraph) => {
+                for run in &paragraph.runs {
+                    for inline in &run.content {
+                        if let Inline::Note(note) = inline {
+                            visit_tables(&note.body, output);
+                        }
+                    }
+                }
+            }
+            Block::Table(table) => {
+                output.push(table);
+                if let Some(caption) = &table.caption {
+                    visit_tables(&caption.blocks, output);
+                }
+                for cell in &table.cells {
+                    visit_tables(&cell.blocks, output);
+                }
+            }
+        }
+    }
+}
+
+fn section_table_topology(section: &Section) -> Vec<TableTopology> {
+    let mut tables = Vec::new();
+    visit_tables(&section.blocks, &mut tables);
+    tables
+        .into_iter()
+        .map(|table| TableTopology {
+            rows: table.rows,
+            cols: table.cols,
+            cells: table
+                .cells
+                .iter()
+                .map(|cell| {
+                    (
+                        cell.row,
+                        cell.col,
+                        cell.row_span,
+                        cell.col_span,
+                        cell.active,
+                        cell.width,
+                    )
+                })
+                .collect(),
+            col_widths: table.col_widths.clone(),
+            row_heights: table.row_heights.clone(),
+            margins: [
+                table.outer_margin_left,
+                table.outer_margin_right,
+                table.outer_margin_top,
+                table.outer_margin_bottom,
+            ],
+        })
+        .collect()
+}
+
+fn visit_table_spacings_mut(blocks: &mut [Block], spacings: &mut impl Iterator<Item = HwpUnit>) {
+    for block in blocks {
+        match block {
+            Block::Paragraph(paragraph) => {
+                for run in &mut paragraph.runs {
+                    for inline in &mut run.content {
+                        if let Inline::Note(note) = inline {
+                            visit_table_spacings_mut(&mut note.body, spacings);
+                        }
+                    }
+                }
+            }
+            Block::Table(table) => {
+                table.source_anchor_spacing_after = spacings
+                    .next()
+                    .expect("table topology validated before mutation");
+                if let Some(caption) = &mut table.caption {
+                    visit_table_spacings_mut(&mut caption.blocks, spacings);
+                }
+                for cell in &mut table.cells {
+                    visit_table_spacings_mut(&mut cell.blocks, spacings);
+                }
+            }
+        }
+    }
+}
+
+/// Copy strictly owned HWP5 table-host spacing only after every section/table signature and every
+/// pre-existing typed value is compatible. Validation completes before the first mutation.
+fn merge_owned_table_anchor_spacings(target: &mut SemanticDoc, owned: &SemanticDoc) -> bool {
+    if target.sections.len() != owned.sections.len() {
+        return false;
+    }
+    let mut owned_by_section = Vec::with_capacity(owned.sections.len());
+    for (target_section, owned_section) in target.sections.iter().zip(&owned.sections) {
+        if section_table_topology(target_section) != section_table_topology(owned_section) {
+            return false;
+        }
+        let mut target_tables = Vec::new();
+        let mut owned_tables = Vec::new();
+        visit_tables(&target_section.blocks, &mut target_tables);
+        visit_tables(&owned_section.blocks, &mut owned_tables);
+        if target_tables
+            .iter()
+            .zip(&owned_tables)
+            .any(|(target, owned)| {
+                target.source_anchor_spacing_after != 0
+                    && target.source_anchor_spacing_after != owned.source_anchor_spacing_after
+            })
+        {
+            return false;
+        }
+        owned_by_section.push(
+            owned_tables
+                .iter()
+                .map(|table| table.source_anchor_spacing_after)
+                .collect::<Vec<_>>(),
+        );
+    }
+    for (section, spacings) in target.sections.iter_mut().zip(owned_by_section) {
+        let mut spacings = spacings.into_iter();
+        visit_table_spacings_mut(&mut section.blocks, &mut spacings);
+        debug_assert!(spacings.next().is_none());
     }
     true
 }
@@ -180,6 +317,21 @@ mod hwp5_candidate_tests {
         }
     }
 
+    fn table_doc(rows: usize, spacing: HwpUnit) -> SemanticDoc {
+        SemanticDoc {
+            sections: vec![Section {
+                blocks: vec![Block::Table(Table {
+                    rows,
+                    cols: 1,
+                    source_anchor_spacing_after: spacing,
+                    ..Table::default()
+                })],
+                ..Section::default()
+            }],
+            ..SemanticDoc::default()
+        }
+    }
+
     #[test]
     fn page_number_merge_is_atomic_for_topology_partial_and_typed_conflicts() {
         let first = number(1, PageNumberPosition::BottomCenter);
@@ -219,6 +371,50 @@ mod hwp5_candidate_tests {
             open_hwp5_own(&benchmark()).unwrap().sections[0].page_number
         );
         assert!(doc.sections[0].page_number.is_some());
+    }
+
+    #[test]
+    fn table_anchor_spacing_merge_is_atomic_for_topology_and_typed_conflicts() {
+        let owned = table_doc(1, 300);
+
+        let mut topology = table_doc(2, 0);
+        assert!(!merge_owned_table_anchor_spacings(&mut topology, &owned));
+        let Block::Table(table) = &topology.sections[0].blocks[0] else {
+            unreachable!()
+        };
+        assert_eq!(table.source_anchor_spacing_after, 0);
+
+        let mut conflict = table_doc(1, 200);
+        assert!(!merge_owned_table_anchor_spacings(&mut conflict, &owned));
+        let Block::Table(table) = &conflict.sections[0].blocks[0] else {
+            unreachable!()
+        };
+        assert_eq!(table.source_anchor_spacing_after, 200);
+
+        let mut compatible = table_doc(1, 0);
+        assert!(merge_owned_table_anchor_spacings(&mut compatible, &owned));
+        let Block::Table(table) = &compatible.sections[0].blocks[0] else {
+            unreachable!()
+        };
+        assert_eq!(table.source_anchor_spacing_after, 300);
+    }
+
+    #[test]
+    fn production_hwp5_open_enriches_owned_anchor_spacing_without_rhwp_ownership() {
+        let bytes = benchmark();
+        let owned = open_hwp5_own(&bytes).unwrap();
+        let rhwp = RhwpEngine::new().parse(&bytes, SourceFormat::Hwp5).unwrap();
+        let production = Engine::open(&bytes).unwrap();
+        let spacing = |doc: &SemanticDoc, block: usize| match &doc.sections[0].blocks[block] {
+            Block::Table(table) => table.source_anchor_spacing_after,
+            Block::Paragraph(_) => panic!("expected canonical table block"),
+        };
+
+        for (block, expected) in [(1, 452), (15, 960), (32, 960)] {
+            assert_eq!(spacing(&owned, block), expected);
+            assert_eq!(spacing(&rhwp, block), 0, "rhwp lift is not the owner");
+            assert_eq!(spacing(&production, block), expected);
+        }
     }
 
     #[test]

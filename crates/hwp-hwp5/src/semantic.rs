@@ -956,6 +956,7 @@ fn parse_section(
     let mut has_active_columns = false;
     let mut column_zone_count = 0usize;
     let mut separator_zone_seen = false;
+    let mut pending_table_host: Option<(usize, HostLineMetric)> = None;
     let starts: Vec<usize> = stream
         .records
         .iter()
@@ -1054,8 +1055,15 @@ fn parse_section(
             }
             parsed.paragraph.is_table_anchor = true;
         }
+        let current_host = parsed
+            .paragraph
+            .is_table_anchor
+            .then_some(parsed.host_line)
+            .flatten();
+        attach_source_adjacent_table_spacing(&mut blocks, pending_table_host, current_host);
         blocks.push(Block::Paragraph(parsed.paragraph));
         blocks.extend(parsed.tables.into_iter().map(Block::Table));
+        pending_table_host = current_host.map(|metric| (blocks.len() - 1, metric));
     }
     Ok(Section {
         blocks,
@@ -1074,6 +1082,44 @@ struct ParsedParagraph {
     page: Option<PageSetup>,
     page_number: Option<PageNumberDecoration>,
     tables: Vec<Table>,
+    host_line: Option<HostLineMetric>,
+}
+
+#[derive(Clone, Copy)]
+struct HostLineMetric {
+    vertical_pos: HwpUnit,
+    height: HwpUnit,
+    spacing: HwpUnit,
+}
+
+fn attach_source_adjacent_table_spacing(
+    blocks: &mut [Block],
+    pending: Option<(usize, HostLineMetric)>,
+    current: Option<HostLineMetric>,
+) {
+    let (Some((table_index, previous)), Some(current)) = (pending, current) else {
+        return;
+    };
+    if previous
+        .vertical_pos
+        .checked_add(previous.height)
+        .and_then(|end| end.checked_add(previous.spacing))
+        != Some(current.vertical_pos)
+    {
+        return;
+    }
+    let Some(Block::Table(table)) = blocks.get_mut(table_index) else {
+        unreachable!("pending table host always points at its final table")
+    };
+    table.source_anchor_spacing_after = previous.spacing;
+}
+
+#[derive(Default)]
+struct ParsedLineMetrics {
+    render: Vec<SourceLineMetric>,
+    /// A pure one-line HWP5 table host may own an additional gap after its final hosted table.
+    /// Kept private until the paragraph/control structure proves that it is such a host.
+    single_positive_host_line: Option<HostLineMetric>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1395,6 +1441,11 @@ fn parse_paragraph(
         &header,
         section,
     )?;
+    let host_line = if decoded.chars.is_empty() && !tables.is_empty() {
+        line_metrics.single_positive_host_line
+    } else {
+        None
+    };
     let paragraph = Paragraph {
         para_shape: para_shape_id + 1,
         page_break_before: break_type & 0x04 != 0,
@@ -1404,7 +1455,7 @@ fn parse_paragraph(
         // Stored line boxes are only an authored-height hint for a true blank spacer.
         // They never dictate line breaks for visible text or a control-host paragraph.
         source_line_metrics: if decoded.chars.is_empty() && decoded.structural_controls.is_empty() {
-            line_metrics
+            line_metrics.render
         } else {
             Vec::new()
         },
@@ -1422,6 +1473,7 @@ fn parse_paragraph(
         page,
         page_number,
         tables,
+        host_line,
     })
 }
 
@@ -3071,10 +3123,10 @@ fn parse_line_metrics(
     decoded: &DecodedText,
     header: &Record,
     section: usize,
-) -> Result<Vec<SourceLineMetric>> {
+) -> Result<ParsedLineMetrics> {
     let Some(record) = record else {
         return if declared == 0 {
-            Ok(Vec::new())
+            Ok(ParsedLineMetrics::default())
         } else {
             Err(malformed(
                 header,
@@ -3102,6 +3154,7 @@ fn parse_line_metrics(
     let mut prior_start = None;
     let mut metrics = Vec::with_capacity(actual);
     let mut all_zero_height = true;
+    let mut single_positive_host_line = None;
     for entry in bytes.chunks_exact(36) {
         let text_start = read_u32(entry, 0).expect("chunk length checked");
         if prior_start.is_some_and(|prior| prior > text_start) {
@@ -3143,6 +3196,13 @@ fn parse_line_metrics(
             ));
         }
         all_zero_height &= height == 0 && text_height == 0;
+        if actual == 1 && height > 0 && line_spacing > 0 {
+            single_positive_host_line = Some(HostLineMetric {
+                vertical_pos,
+                height,
+                spacing: line_spacing,
+            });
+        }
         metrics.push(SourceLineMetric {
             height,
             text_height,
@@ -3151,8 +3211,12 @@ fn parse_line_metrics(
     }
     if all_zero_height {
         metrics.clear();
+        single_positive_host_line = None;
     }
-    Ok(metrics)
+    Ok(ParsedLineMetrics {
+        render: metrics,
+        single_positive_host_line,
+    })
 }
 
 #[derive(Default)]
@@ -3700,6 +3764,45 @@ impl<'a> Reader<'a> {
 #[cfg(test)]
 mod support_pool_tests {
     use super::*;
+
+    #[test]
+    fn source_adjacency_assigns_spacing_only_to_the_final_hosted_table() {
+        let mut blocks = vec![
+            Block::Table(Table::default()),
+            Block::Table(Table::default()),
+        ];
+        let previous = HostLineMetric {
+            vertical_pos: 100,
+            height: 1_000,
+            spacing: 300,
+        };
+        let adjacent = HostLineMetric {
+            vertical_pos: 1_400,
+            height: 1_000,
+            spacing: 200,
+        };
+        attach_source_adjacent_table_spacing(&mut blocks, Some((1, previous)), Some(adjacent));
+        let [Block::Table(first), Block::Table(last)] = blocks.as_slice() else {
+            unreachable!()
+        };
+        assert_eq!(first.source_anchor_spacing_after, 0);
+        assert_eq!(last.source_anchor_spacing_after, 300);
+
+        let mut mismatch = vec![Block::Table(Table::default())];
+        let non_adjacent = HostLineMetric {
+            vertical_pos: 1_401,
+            ..adjacent
+        };
+        attach_source_adjacent_table_spacing(
+            &mut mismatch,
+            Some((0, previous)),
+            Some(non_adjacent),
+        );
+        let Block::Table(table) = &mismatch[0] else {
+            unreachable!()
+        };
+        assert_eq!(table.source_anchor_spacing_after, 0);
+    }
 
     fn record(tag: u16, size: usize) -> Record {
         Record {
