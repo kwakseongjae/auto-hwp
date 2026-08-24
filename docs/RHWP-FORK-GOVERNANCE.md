@@ -12,7 +12,8 @@
 |---|---|---|
 | HWPX parse/write·무손실 round-trip | `hwp-hwpx` | 자체 엔진 |
 | live 조판·SVG·PDF·편집 op-bus | `hwp-typeset`→`hwp-render`/`hwp-export`→`hwp-ops` | 자체 엔진 |
-| HWP5/HWP3 bytes→SemanticDoc | `hwp-rhwp`→`external/rhwp` | 교체 대상 hard dependency (#107, #94) |
+| HWP5 bytes→SemanticDoc | `hwp-rhwp` base + strict owned page-number enrichment | 교체 중 hard dependency (#107, #94, #219) |
+| HWP3 bytes→SemanticDoc | `hwp-rhwp`→`external/rhwp` | 교체 대상 hard dependency (#107, #94) |
 | 원본 SVG/lineseg/glyph 비교 | 명시적 `source:"original"`·오라클 API | read-only 보조 경로 |
 | 수식/차트 SVG enrichment | `hwp-rhwp` helper가 derived cache만 채움 | 좁은 교체 대상 |
 
@@ -44,6 +45,8 @@ HWPX를 rhwp에 다시 넣어 생산 렌더·저장하지 않는다. rhwp 직렬
 
 F0(#87/#151)은 이 문서·검증기·코드 경계를 소유한다. F1(#107)은 자체 HWP5 container/record
 경계를 `hwp-hwp5`로 구현했다(`docs/HWP5-NATIVE-PARSER.md`). production decode는 아직 rhwp이며,
+#219는 whole-document strict parse와 section/typed-value 호환이 모두 성립할 때만
+`Section.page_number`를 production 결과에 atomic 보강한다. 이는 generic cutover가 아니며,
 #94가 DocInfo/text/object semantic slice와 corpus parity를 순차 승격한다. 자체 전용 API는 미지원
 slice에서 fail-closed하고 production route로 fallback하지 않는다. 한 기능씩 corpus와
 lineseg/페이지/PDF 시각 오라클을 통과시킨 뒤에만 rhwp 호출을 제거한다.

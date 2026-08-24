@@ -3,6 +3,20 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-25 · Codex(sol) — **#219 owned page-number enrichment 구현·시각 계측·full green · PR 직전**.
+  production HWP5는 governed rhwp base decode를 유지하고, strict first-party parser가 whole-document
+  parse에 성공하며 section topology·기존 typed decoration과 모두 호환될 때만
+  `Section.page_number`를 validation-before-mutation으로 atomic 보강한다. parse 실패, section mismatch,
+  partial/conflict는 전체 no-op이고 HWP3/HWPX·generic eligibility·`external/rhwp`(`f137b4c9`)는 불변이다.
+  focused core/render/export 11 tests와 CLI build green; production SVG/PDF는 first-party candidate와
+  쪽당 3 decoration glyph까지 exact다. canonical T3 visual은 8쪽·102영역 유지, PDF SHA `25524c3d…`,
+  content-bbox height delta가 기존 `-59..-952px`에서 **`-2..+5px`**로 수렴했다. page ink F1은 장식이
+  작아 `-0.000074..+0.000332` 범위만 움직였고 typography/color 잔여는 미해결이다. threshold/oracle/
+  `pass=null` 무변경. `verify-local --full`의 Rust/rhwp/wasm/JS/Vitest 1,012 tests는 green이고,
+  샌드박스 밖 Chromium은 **83 pass·3 intentional skip·2 retry-pass**(기존 타이밍 계열)다.
+  **다음:** final diff/privacy/vendor 감사→commit/push/PR `Closes #219`→필수 CI·댓글 감사·자율 병합→
+  #93/#94/#114 동기화 후 다음 조판 fidelity child를 issue-first 선정.
+
 - 갱신: 2026-08-25 · Codex(sol) — **#217 deterministic-font fidelity 재측정 완료 · 진단 PR 직전**.
   public canonical 8쪽 HWP/PDF를 OFL registry로 독립 process 2회 실행해 candidate PDF SHA
   `2ee86296…`와 registry fingerprint `39841f73…`, 8쪽·102영역(70 text/32 table)이 exact 반복됐다.

@@ -6,7 +6,8 @@ the paragraph support-pool boundary, and issue #160 owns DocInfo styles plus con
 header refusal reasons; issue #161 adds strict column definitions and the shared multi-column layout
 contract. Issues #168–#196 then advanced one content-free control/table boundary at a time through
 strict exact subsets. The bounded public benchmark now parses to the end in the first-party-only lane.
-None of these slices changes production parsing.
+Issue #219 connects one already-proven decoration to production as a fail-closed enrichment; it is
+not a generic parser cutover.
 
 ## What is owned now
 
@@ -63,7 +64,11 @@ rejected instead of being interpreted as records.
 
 ## Parser modes
 
-- `Engine::open`: unchanged production route. Binary HWP still uses the governed rhwp bootstrap.
+- `Engine::open`: binary HWP5 still uses the governed rhwp bootstrap for the base `SemanticDoc`.
+  After that succeeds, the strict first-party parser may enrich only `Section.page_number`, and only
+  when the complete owned parse succeeds, section topology is identical, and every pre-existing
+  typed page-number value is compatible. Validation precedes mutation, so parse failure, topology
+  mismatch, or any conflict is an atomic no-op. HWP3 remains the unmodified rhwp route.
 - `open_hwp5_own`: explicit first-party-only route. It returns a `SemanticDoc` only for the owned
   text, single-sided page setup, strict column subset, page numbering, and explicitly enumerated
   table subsets. These include exact merged/full-grid forms, bounded depth-1 nested tables, multiple
@@ -148,13 +153,20 @@ is 143 HWPUNIT, whose half produced the former 71.5-HWPUNIT centered-glyph shift
 bits 0–1/2 are kept as page-break/repeat-header semantics rather than being mistaken for HWPX
 `noAdjust`; HWP5 stored row heights remain floors, while only the HWPX parser may request exact clipping.
 
-After those corrections, all eight pages are exact against the rhwp oracle for body glyphs, blocks,
+After those corrections, all eight pages are exact against the raw rhwp oracle for body glyphs, blocks,
 tables, cells, rectangles, lines, images, and body-only SVG. The first-party page-number decoration is
 still intentionally present only in the candidate (three glyphs per page). Removing only that owned
 decoration makes PDF bytes, page count, replay counters, and diagnostics exact against the rhwp PDF.
 This is strong evidence for the one bounded benchmark, not generic HWP5 coverage: production remains
 on rhwp, `external/rhwp` remains immutable, and eligibility remains false until the parser-wide corpus
 and cutover gates below are satisfied.
+
+#219 then promoted only that typed page-number fact into `Engine::open`. The base HWP5 document is
+still decoded by rhwp; a complete strict first-party parse acts as the fail-closed evidence source.
+On the canonical eight-page benchmark, production SVG and PDF now match the first-party candidate,
+including three page-number glyphs per page. HWP3, HWPX, the generic cutover eligibility result, and
+vendored rhwp are unchanged. This bounded enrichment does not imply that unsupported first-party
+documents can bypass rhwp.
 
 ## Cutover rule
 

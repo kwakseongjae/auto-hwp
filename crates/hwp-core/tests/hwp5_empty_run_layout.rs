@@ -2,6 +2,8 @@
 
 use hwp_core::{hwp5_own_parser_eligibility, open_hwp5_own, Engine};
 use hwp_model::document::{Block, Inline, Paragraph, SemanticDoc};
+use hwp_model::prelude::{DocumentParser, SourceFormat};
+use hwp_rhwp::RhwpEngine;
 use hwp_typeset::{compare_placed_docs, place_doc, ApproxFontMetrics, PlacedDoc};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -157,7 +159,8 @@ fn benchmark_empty_run_deltas_are_content_free_and_layout_classified() {
     ))
     .unwrap();
     let candidate = open_hwp5_own(&bytes).unwrap();
-    let oracle = Engine::open(&bytes).unwrap();
+    let oracle = RhwpEngine::new().parse(&bytes, SourceFormat::Hwp5).unwrap();
+    let production = Engine::open(&bytes).unwrap();
     let candidate_paragraphs = paragraphs(&candidate);
     let oracle_paragraphs = paragraphs(&oracle);
     assert_eq!(candidate_paragraphs.len(), oracle_paragraphs.len());
@@ -231,6 +234,7 @@ fn benchmark_empty_run_deltas_are_content_free_and_layout_classified() {
 
     let candidate_placed = place_doc(&candidate, &ApproxFontMetrics);
     let oracle_placed = place_doc(&oracle, &ApproxFontMetrics);
+    let production_placed = place_doc(&production, &ApproxFontMetrics);
     let typed_delta = compare_placed_docs(&candidate_placed, &oracle_placed);
     assert_eq!(candidate_placed.pages.len(), 8);
     assert_eq!(candidate_placed.pages.len(), oracle_placed.pages.len());
@@ -277,6 +281,18 @@ fn benchmark_empty_run_deltas_are_content_free_and_layout_classified() {
     }));
     assert!(typed_delta.pages.iter().all(|page| {
         page.body_glyphs.is_exact()
+            && page.blocks.is_exact()
+            && page.tables.is_exact()
+            && page.cells.is_exact()
+            && page.rects.is_exact()
+            && page.lines.is_exact()
+            && page.images.is_exact()
+    }));
+    let production_delta = compare_placed_docs(&candidate_placed, &production_placed);
+    assert!(production_delta.pages.iter().all(|page| {
+        page.page_box.is_exact()
+            && page.decoration_glyphs.is_exact()
+            && page.body_glyphs.is_exact()
             && page.blocks.is_exact()
             && page.tables.is_exact()
             && page.cells.is_exact()

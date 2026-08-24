@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-25 (Codex sol) · #219 fail-closed HWP5 page-number enrichment
+- rhwp base decode 뒤 whole-document strict parse·typed/topology 호환 때만 `Section.page_number` atomic 보강.
+- production SVG/PDF=own candidate; T3 8쪽 bbox height delta `-59..-952px`→`-2..+5px`, oracle 불변.
+- full green: 8/18/24+98.9%, AI120, Vitest1,012, Chromium83 pass/3 skip/2 retry-pass; rhwp 무수정.
+- 다음: commit/push/PR/CI/merge→#93/#94/#114 동기화→다음 조판 fidelity child.
+
 ## 2026-08-25 (Codex sol) · #217 deterministic-font fidelity remeasurement
 - public 8-page HWP/PDF + OFL registry를 독립 2회 실행해 PDF SHA/fingerprint/102 regions exact 반복.
 - font 전후 worst-page 0.218434→0.221304; text F1=0 52/70·candidate-empty 25로 주원인 아님을 증명.
