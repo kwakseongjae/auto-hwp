@@ -2,7 +2,7 @@
 
 use hwp_core::{hwp5_own_parser_eligibility, open_hwp5_own, Engine};
 use hwp_model::document::{Block, Inline, Paragraph, SemanticDoc};
-use hwp_typeset::{place_doc, ApproxFontMetrics, PlacedDoc};
+use hwp_typeset::{compare_placed_docs, place_doc, ApproxFontMetrics, PlacedDoc};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Scope {
@@ -231,6 +231,7 @@ fn benchmark_empty_run_deltas_are_content_free_and_layout_classified() {
 
     let candidate_placed = place_doc(&candidate, &ApproxFontMetrics);
     let oracle_placed = place_doc(&oracle, &ApproxFontMetrics);
+    let typed_delta = compare_placed_docs(&candidate_placed, &oracle_placed);
     assert_eq!(candidate_placed.pages.len(), 8);
     assert_eq!(candidate_placed.pages.len(), oracle_placed.pages.len());
     for (candidate_page, oracle_page) in candidate_placed.pages.iter().zip(&oracle_placed.pages) {
@@ -259,6 +260,98 @@ fn benchmark_empty_run_deltas_are_content_free_and_layout_classified() {
             .sum::<usize>()
             + 24
     );
+    assert!(candidate
+        .sections
+        .iter()
+        .any(|section| section.page_number.is_some()));
+    assert!(oracle
+        .sections
+        .iter()
+        .all(|section| section.page_number.is_none()));
+    assert!(typed_delta.pages.iter().all(|page| {
+        page.page_box.is_exact()
+            && page.decoration_glyphs.candidate_count == 3
+            && page.decoration_glyphs.oracle_count == 0
+            && page.decoration_glyphs.candidate_only == 3
+            && page.decoration_glyphs.first_changed_ordinal == Some(0)
+    }));
+    assert_eq!(
+        typed_delta
+            .pages
+            .iter()
+            .filter(|page| !page.body_glyphs.is_exact())
+            .map(|page| page.page_ordinal)
+            .collect::<Vec<_>>(),
+        vec![2, 7]
+    );
+    assert_eq!(
+        typed_delta.pages[2].body_glyphs.max_abs_delta_hwpunit_ceil,
+        148
+    );
+    assert_eq!(
+        typed_delta.pages[7].body_glyphs.max_abs_delta_hwpunit_ceil,
+        72
+    );
+    assert_eq!(
+        typed_delta
+            .pages
+            .iter()
+            .filter(|page| {
+                !page.blocks.is_exact()
+                    || !page.tables.is_exact()
+                    || !page.cells.is_exact()
+                    || !page.rects.is_exact()
+                    || !page.lines.is_exact()
+            })
+            .map(|page| page.page_ordinal)
+            .collect::<Vec<_>>(),
+        vec![2]
+    );
+    assert_eq!(typed_delta.pages[2].cells.max_abs_delta_hwpunit_ceil, 177);
+    assert_eq!(
+        typed_delta.pages[2].body_glyphs.first_changed_ordinal,
+        Some(12)
+    );
+    assert_eq!(
+        typed_delta.pages[2]
+            .body_glyphs
+            .max_delta_coordinate_ordinal,
+        Some(1)
+    );
+    assert_eq!(typed_delta.pages[2].tables.first_changed_ordinal, Some(0));
+    assert_eq!(typed_delta.pages[2].cells.first_changed_ordinal, Some(0));
+    assert_eq!(
+        typed_delta.pages[7].body_glyphs.first_changed_ordinal,
+        Some(324)
+    );
+    assert_eq!(
+        typed_delta.pages[7]
+            .body_glyphs
+            .max_delta_coordinate_ordinal,
+        Some(0)
+    );
+    let typed_public = format!("{typed_delta:?}");
+    assert!(!typed_public.contains("benchmark.hwp"));
+    assert!(!typed_public.contains("BodyText"));
+
+    let mut candidate_without_page_number = candidate.clone();
+    for section in &mut candidate_without_page_number.sections {
+        section.page_number = None;
+    }
+    let candidate_without_page_number_placed =
+        place_doc(&candidate_without_page_number, &ApproxFontMetrics);
+    let page_number_delta =
+        compare_placed_docs(&candidate_placed, &candidate_without_page_number_placed);
+    assert!(page_number_delta.pages.iter().all(|page| {
+        page.decoration_glyphs.candidate_only == 3
+            && page.body_glyphs.is_exact()
+            && page.blocks.is_exact()
+            && page.tables.is_exact()
+            && page.cells.is_exact()
+            && page.rects.is_exact()
+            && page.lines.is_exact()
+            && page.images.is_exact()
+    }));
 
     let mut normalized = candidate.clone();
     hwp_hwp5::normalize_empty_runs_for_layout_evidence(&mut normalized);

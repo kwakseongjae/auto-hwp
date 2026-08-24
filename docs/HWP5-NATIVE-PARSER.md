@@ -125,6 +125,17 @@ painted glyphs (three per page). The empty-run difference is therefore semantica
 the completed benchmark remains ineligible as `render-parity-unproven`; the remaining parser-wide
 render delta must be isolated before cutover.
 
+#202 decomposes that aggregate without retaining source content or identifying metadata. The repeated
+three-glyph delta is entirely the first-party page-number decoration already owned by #164: rhwp's
+semantic projection does not carry it, and removing only `Section.page_number` leaves every body glyph,
+block, table, cell, rect, and line exact against the unmodified first-party candidate. Opaque masks over
+the shared `PageLayerTree` give SVG and PDF the same decoration/body boundary. Against rhwp, body SVG is
+exact on six of eight pages. Only zero-based page 2 has block/table/cell/rect/line deltas (all counts and
+payload classes match; maximum bounded delta is 177 HWPUNIT), while page 7 has eight glyph x-position
+deltas bounded by 72 HWPUNIT and otherwise exact geometry. This proves that page numbers are an oracle
+omission rather than a native regression, but it does not waive the two remaining body-layout deltas;
+the benchmark stays `render-parity-unproven` and ineligible.
+
 ## Cutover rule
 
 Completing one bounded benchmark is only the first eligibility milestone. The content-free committed

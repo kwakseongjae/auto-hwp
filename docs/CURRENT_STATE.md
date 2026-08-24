@@ -3,6 +3,40 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-24 · Codex(sol) — **PR #201 병합 · #202 착수**.
+  PR #201 exact head `cce9892` 상태에서 issue-link **4s**·build-test **9m35s**·licenses
+  **2m47s** green, CLEAN/MERGEABLE, review/general/inline 댓글 0을 확인하고 protected main
+  `585f9e92`로 squash 병합했다. #200은 close됐고 #94에 빈 run 조판 동등성과
+  `render-parity-unproven` no-cutover 근거를 동기화했다. 남은 candidate/rhwp 차이는
+  모두 8쪽·페이지별 block/table/rect/line 개수 동일이지만 exact geometry가 다르고,
+  candidate에 glyph가 **+24(매 페이지 +3)**다. 중복 검색에서 #164 page-number 소유는
+  이미 완료됐으나 현재 차이의 원인은 미증명이므로, classification-first 후속 **#202**를
+  R18/P1/area:hwp5/status:ready로 열고 exact main의 `codex/issue-202-hwp5-geometry`
+  worktree를 만들었다. **다음:** 원문·파일명·경로·hash/raw 없이 배치/조판/
+  PaintOp을 page-decoration/body/table-cell/other로 나누고 opaque ordinal·exact/quantized
+  delta만 기록한다. +3 glyph/page의 typed 소유과 body geometry를 독립 증명한 뒤
+  가장 작은 fail-closed 후속을 고른다. production route·`external/rhwp`·eligible=false는 불변.
+  content-free placed comparator는 page box/decoration glyph/body glyph/block/table/cell/rect/line/image를
+  페이지별로 나누고 exact/payload mismatch/one-sided/nonfinite·<1 HWPUNIT/≤1px/≤10px/>10px,
+  max delta와 opaque first ordinal/coordinate slot만 남긴다. 반복·ordinal shift·누락 page·non-text
+  image·NaN은 fail-closed hostile test로 잠김. shared PaintOp에도 원문/좌표 없는 1:1
+  body/page-decoration/boundary-crossing mask를 추가해 SVG·PDF replay가 같은 경계를 쓰게 했다.
+  실측상 +3 glyph/page는 #164에서 소유한 page-number decoration이고 rhwp projection의
+  누락이다. candidate에서 page_number만 제거하면 body glyph/block/table/cell/rect/line/image가
+  모두 exact이며, PDF도 페이지당 text replay 3개 차이를 같은 mask로 설명한다.
+  rhwp 대비 body는 8쪽 중 6쪽 exact. 0-based page 2만 block/table/cell/rect/line 차이가
+  남고 max **177 HWPUNIT**, page 7은 glyph x 8개만 max **72 HWPUNIT** 차이며 나머지
+  geometry는 exact이다. 쪽번호는 native regression이 아닌 oracle omission으로 분리됐지만,
+  body 2곳은 미증명이므로 `render-parity-unproven`/eligible=false를 유지한다. **다음:**
+  focused clippy/tests와 quick은 green: workspace/PDF visual **51**/canonical **8·18·24·98.9%+**/
+  public corpus **84**/oracle **82**/HWPX/wasm/licenses. full은 wasm **7,818,196B**, JS build/
+  crosscheck/i18n, Vitest **1,018**(269+64+427+247+11) green. sandbox port EPERM 후 실제
+  Chromium **85 pass/3 intentional skip/0 fail**. 임시 node_modules link는 제거했고 generated
+  wasm/assets는 git diff 0이다. **다음:** privacy/boundary audit → commit/push/`Closes #202`
+  PR → exact-head CI/comments/mergeability green이면 autonomous merge. 후속은 page 2의 첫 table/cell
+  geometry와 page 7 glyph ordinal 324의 x-only delta를 resolved semantic field별로 분해하는 더
+  작은 classification-first issue로 연다.
+
 - 갱신: 2026-08-24 · Codex(sol) — **PR #199 병합 · #200 착수**.
   PR #199 exact head `bdecc52`에서 issue-link **4s**·build-test **8m55s**·licenses **2m48s** green,
   CLEAN/MERGEABLE, review/general/inline 댓글 0을 확인하고 protected main `ffe25edb`로 squash

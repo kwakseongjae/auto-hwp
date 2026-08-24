@@ -22,6 +22,13 @@ pub use shaper::RealFontMetrics;
 /// (`subst_glyph` 측정 프록시 + `place::paragraph_glyphs` 그리기 확장)에서 소비된다.
 mod old_hangul;
 
+/// Content-free differential diagnostics for two already-positioned documents. This never replaces
+/// layout or rendering; it only classifies evidence produced by the shared typesetter.
+pub mod diagnostic;
+pub use diagnostic::{
+    compare_placed_docs, GeometryDeltaSummary, PagePlacementDelta, PlacedDocDeltaReport,
+};
+
 /// Positioned layout (glyphs/images/boxes per page) — the paint-IR bridge consumed by `hwp-render`.
 pub mod place;
 pub use place::{

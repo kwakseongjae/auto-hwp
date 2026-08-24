@@ -5,6 +5,17 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #202 full green
+- quick/full green: canonical 8/18/24+98.9%, corpus84/oracle82, wasm 7,818,196B, PDF51.
+- JS/crosscheck/i18n + Vitest 1,018 green; Chromium 85 pass/3 intentional skip/0 fail.
+- temporary dependency links removed; next privacy/boundary audit, commit/push, `Closes #202` PR/CI/merge.
+
+## 2026-08-24 (Codex sol) · #202 decoration/body delta decomposition
+- PR #201 merged at `585f9e92`; #200 closed and #94 updated; #202 opened from exact main.
+- +3 glyph/page is native page-number decoration only; removing it leaves all candidate body placement exact.
+- rhwp body gap is page 2 table/cell max 177 HWPUNIT and page 7 glyph-x max 72; other six pages exact.
+- content-free placed summaries + shared SVG/PDF paint masks implemented; next gates/audit/PR then semantic-field slice.
+
 ## 2026-08-24 (Codex sol) · #200 full green
 - quick/full green: PDF51, canonical 8/18/24+98.9%, corpus84/oracle82, wasm 7,818,243B.
 - Vitest 1,018 and Chromium 85 pass/3 intentional skip/0 fail; temporary links removed.
