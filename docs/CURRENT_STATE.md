@@ -3,6 +3,36 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-25 · Codex(sol) — **#213 one-command semantic PDF visual check full green · PR 직전**.
+  `render_doc_trees_with_placement` 한 번의 first-party placement에서 own PDF와 SHA-bound content-free
+  text/table/image/object 영역을 함께 만들고, strict schema/쪽·MediaBox/유한·범위·중복·symlink·8MiB·
+  10k/2k count 및 페이지 16배 overlap-work 상한으로 검증한다. comparator schema 4는 페이지의 단일
+  ±3px 정렬만 재사용해 영역별 SSIM-like/MAE/ink/edge, 채점불가 사유, category count와 worst 5를 낸다.
+  `document-visual-check.mjs`는 HWP/HWPX→own PDF+evidence→report를 private stage에서 전부 성공한 뒤
+  atomic rename하며 overwrite/partial/private subprocess output을 거부한다. HWPX 표·수식 self-compare는
+  table/text/object 영역 1.0, 공개 HWP 8쪽은 102영역(70 text/32 table)을 실측해 page 8 ink F1
+  **0.218434**, 여러 text 영역 **0.0**을 다음 조판 결함으로 노출했다(참값 threshold/pass는 계속 null).
+  focused Rust/Python **55**/Node **3**, quick, full canonical **8/18/24+98.9%**, oracle **82**,
+  wasm **8,002,199B**, Vitest **1,012**, Chromium **85 pass/3 intentional skip** green이다. sandbox port
+  EPERM만 승인된 동일 E2E로 해소했고 rhwp `f137b4c9`는 무수정이다. **다음:** privacy/diff 최종 감사→
+  commit/push→PR `Closes #213`·`Refs #93`→exact-head CI/댓글 green 자율 병합→#93에 content-free 실측을
+  동기화하고 worst text-region을 최소 fixture로 만드는 다음 bounded fidelity child를 issue-first 착수한다.
+
+- 갱신: 2026-08-24 · Codex(sol) — **PR #212 병합 · #93 end-to-end PDF fidelity 재감사 착수**.
+  #106은 exact head `558b168`에서 issue-link **4s**·licenses **17m44s**·build-test **19m33s** green,
+  CLEAN/MERGEABLE, review/general/inline 댓글 0으로 protected main `e0b1c8d`에 squash 병합됐다.
+  합성 20문서·120작업의 12축 평가와 safety/무권한 변경·전송/atomicity/reversibility 100% gate가
+  contributor CI에 들어갔고 live provider는 exact model/version/no-fallback report-only로 분리됐다.
+  최신 main에서 시각 fidelity worktree와 pinned rhwp `f137b4c9`를 oracle로만 초기화했다.
+  **판단:** #94 first-party HWP5는 공개 benchmark body parity까지 왔지만 corpus cutover 근거가 부족해
+  production decode는 아직 rhwp다. 현재 ready P0는 #93이며, 이미 병합된 #101/#102/#121과 pair 03/04
+  구조 복구 위에서 JSON/HTML/worst-region/manifest/20-pair 근거 중 실제 잔여만 식별해 구현한다.
+  재감사 결과 20 T1 manifest, 구조 우선, JSON/HTML+5종 PNG, worst page/tile, sink parity는 이미 구현됐고,
+  단일 document→own PDF→report 명령과 의미영역 점수만 미완이다. 이를 child #213으로 등재하고 브랜치를
+  `codex/issue-213-visual-regions`로 확정했다. **다음:** 같은 first-party placement에서 content-free
+  text/table/image/object region manifest를 생성하고 comparator·one-command runner·hostile tests를 구현한다.
+  기존 page/tile 판정과 오라클·threshold는 완화하지 않는다.
+
 - 갱신: 2026-08-24 · Codex(sol) — **#106 AI-native task suite 구현·full green · PR 직전**.
   합성 문서 20종×6 시나리오=120 작업을 versioned manifest/recorded result로 잠그고 schema, target,
   semantic, atomicity, undo, stale, layout, export, safety, 무권한 변경·전송, reversibility를 독립 채점한다.

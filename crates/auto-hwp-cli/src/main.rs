@@ -214,6 +214,10 @@ enum Cmd {
         /// Output PDF path.
         #[arg(long, short, default_value = "out.pdf")]
         out: PathBuf,
+        /// Write schema-v1 content-free text/table/image/object regions from the exact placement
+        /// used for this PDF. The sidecar is candidate-SHA-bound and never contains document text.
+        #[arg(long)]
+        visual_regions: Option<PathBuf>,
     },
     /// PIVOT M0: apply ONE CSS-only AI-routing op (CssSetDecl) to a project dir, proving
     /// content/design separation — only styles/document.css is re-written; the .jsx are untouched.
@@ -348,7 +352,11 @@ fn run() -> Result<(), String> {
         }
         Cmd::OpenProject { file, out_dir } => open_project(&file, &out_dir)?,
         Cmd::ExportHtml { file, out } => export_html(&file, &out)?,
-        Cmd::ExportPdf { file, out } => export_pdf(&file, &out)?,
+        Cmd::ExportPdf {
+            file,
+            out,
+            visual_regions,
+        } => export_pdf(&file, &out, visual_regions.as_deref())?,
         Cmd::EditOp {
             proj,
             node,
@@ -773,13 +781,51 @@ fn export_html(file: &PathBuf, out: &Path) -> Result<(), String> {
 /// PHASE P4: export to PDF from OUR OWN layout (paint IR → krilla, Korean font subsetting). The PDF
 /// matches own-render because both replay the same paint IR. Needs `--features pdf`.
 #[cfg(feature = "pdf")]
-fn export_pdf(file: &PathBuf, out: &Path) -> Result<(), String> {
+fn export_pdf(file: &PathBuf, out: &Path, visual_regions: Option<&Path>) -> Result<(), String> {
+    if let Some(path) = visual_regions {
+        if path == out {
+            return Err("--visual-regions must not be the PDF output path".into());
+        }
+        if path
+            .try_exists()
+            .map_err(|error| format!("inspect {}: {error}", path.display()))?
+        {
+            return Err(format!(
+                "visual region output already exists; refusing to overwrite {}",
+                path.display()
+            ));
+        }
+    }
     let bytes = read(file)?;
     // Engine::open handles both: .hwpx parse (default build) + .hwp lift (needs --features rhwp).
     let doc = hwp_core::Engine::open(&bytes).map_err(|e| e.to_string())?;
     let title = file.file_stem().map(|s| s.to_string_lossy().into_owned());
     let result = hwp_session::emit_pdf(&doc, title)?;
+    let evidence = visual_regions
+        .map(|_| {
+            let mut bytes = serde_json::to_vec_pretty(&result.visual_evidence)
+                .map_err(|error| format!("serialize visual regions: {error}"))?;
+            bytes.push(b'\n');
+            Ok::<_, String>(bytes)
+        })
+        .transpose()?;
     std::fs::write(out, &result.bytes).map_err(|e| format!("write {}: {e}", out.display()))?;
+    if let (Some(path), Some(bytes)) = (visual_regions, evidence) {
+        use std::io::Write as _;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        let mut output = options
+            .open(path)
+            .map_err(|error| format!("create {}: {error}", path.display()))?;
+        output
+            .write_all(&bytes)
+            .map_err(|error| format!("write {}: {error}", path.display()))?;
+    }
     match &result.font_path {
         Some(p) => println!(
             "wrote {} ({} pages, {} KB) — Korean font embedded from {p}",
@@ -801,7 +847,7 @@ fn export_pdf(file: &PathBuf, out: &Path) -> Result<(), String> {
 /// INTERIM (no `pdf` feature): explain the build flag + the headless-print fallback. We do NOT
 /// silently produce a wrong/empty file — the user gets an actionable message.
 #[cfg(not(feature = "pdf"))]
-fn export_pdf(file: &PathBuf, _out: &Path) -> Result<(), String> {
+fn export_pdf(file: &PathBuf, _out: &Path, _visual_regions: Option<&Path>) -> Result<(), String> {
     let _ = file;
     Err("export-pdf needs a build with `--features pdf` (krilla PDF backend + Korean font embedding).\n\
          Interim fallback without that feature: `auto-hwp export-html <doc> -o doc.html` then print the \

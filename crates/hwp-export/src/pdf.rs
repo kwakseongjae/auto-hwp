@@ -23,6 +23,7 @@ use hwp_model::font_class::{classify, FontCategory};
 use hwp_model::layout::{PageLayerTree, PaintOp};
 use hwp_model::prelude::FontMetricsProvider;
 use hwp_model::types::Color;
+use hwp_typeset::{BlockKind, PlacedDoc};
 
 use krilla::color::rgb;
 use krilla::geom::{PathBuilder, Point, Rect};
@@ -33,6 +34,8 @@ use krilla::paint::{
 };
 use krilla::text::{Font, TextDirection};
 use krilla::Document;
+use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use crate::svg_fragment::{
     DominantBaseline, Fragment, LineCap as SvgLineCap, LineJoin as SvgLineJoin, PathCommand,
@@ -240,6 +243,36 @@ pub struct PdfOptions {
     pub title: Option<String>,
 }
 
+/// Content-free visual regions derived from the exact placement that produced a PDF. Coordinates
+/// are HWPUNIT in page space; no glyph text, model address, file path, font path, or binary id is
+/// exposed. The candidate hash binds this evidence to one exact PDF byte stream.
+#[derive(Clone, Debug, Serialize)]
+pub struct PdfVisualEvidence {
+    pub schema_version: u32,
+    pub coordinate_space: &'static str,
+    pub candidate_pdf_sha256: String,
+    pub pages: Vec<PdfPageVisualEvidence>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct PdfPageVisualEvidence {
+    pub page: usize,
+    pub width: f64,
+    pub height: f64,
+    pub regions: Vec<PdfVisualRegion>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct PdfVisualRegion {
+    pub id: String,
+    pub category: &'static str,
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    pub clipped: bool,
+}
+
 /// Result of a PDF export: the bytes plus what font path (if any) backed the glyphs.
 #[derive(Clone, Debug)]
 pub struct PdfExport {
@@ -251,6 +284,114 @@ pub struct PdfExport {
     pub replay: Vec<PdfPageReplayStats>,
     /// Bounded capability failures. An unsupported SVG never becomes an unexplained blank object.
     pub diagnostics: Vec<PdfCapabilityDiagnostic>,
+    /// Additive report-only regions from the same placement and font provider as `bytes`.
+    pub visual_evidence: PdfVisualEvidence,
+}
+
+fn push_visual_region(
+    regions: &mut Vec<PdfVisualRegion>,
+    counters: &mut [usize; 4],
+    category_index: usize,
+    category: &'static str,
+    page_width: f64,
+    page_height: f64,
+    raw: (f64, f64, f64, f64),
+) -> Result<(), String> {
+    let (x, y, w, h) = raw;
+    if ![page_width, page_height, x, y, w, h]
+        .into_iter()
+        .all(f64::is_finite)
+    {
+        return Err("pdf.visual_evidence.non_finite_geometry".into());
+    }
+    if page_width <= 0.0 || page_height <= 0.0 || w <= 0.0 || h <= 0.0 {
+        return Ok(());
+    }
+    let raw_right = x + w;
+    let raw_bottom = y + h;
+    let left = x.clamp(0.0, page_width);
+    let top = y.clamp(0.0, page_height);
+    let right = raw_right.clamp(0.0, page_width);
+    let bottom = raw_bottom.clamp(0.0, page_height);
+    if right <= left || bottom <= top {
+        return Ok(());
+    }
+    counters[category_index] += 1;
+    regions.push(PdfVisualRegion {
+        id: format!("{category}-{:04}", counters[category_index]),
+        category,
+        x: left,
+        y: top,
+        w: right - left,
+        h: bottom - top,
+        clipped: left != x || top != y || right != raw_right || bottom != raw_bottom,
+    });
+    Ok(())
+}
+
+fn visual_evidence(
+    placed: &PlacedDoc,
+    candidate_pdf_sha256: String,
+) -> Result<PdfVisualEvidence, String> {
+    let mut pages = Vec::with_capacity(placed.pages.len());
+    for (page_index, page) in placed.pages.iter().enumerate() {
+        let mut regions = Vec::new();
+        let mut counters = [0usize; 4];
+        for block in page
+            .blocks
+            .iter()
+            .filter(|block| block.kind == BlockKind::Paragraph)
+        {
+            push_visual_region(
+                &mut regions,
+                &mut counters,
+                0,
+                "text",
+                page.width,
+                page.height,
+                (block.x, block.y, block.w, block.h),
+            )?;
+        }
+        for table in &page.tables {
+            push_visual_region(
+                &mut regions,
+                &mut counters,
+                1,
+                "table",
+                page.width,
+                page.height,
+                (table.x, table.y, table.w, table.h),
+            )?;
+        }
+        for image in page.images.iter().filter(|image| !image.is_background) {
+            let (category_index, category) = if image.svg.is_some() {
+                (3, "object")
+            } else {
+                (2, "image")
+            };
+            push_visual_region(
+                &mut regions,
+                &mut counters,
+                category_index,
+                category,
+                page.width,
+                page.height,
+                (image.x, image.y, image.w, image.h),
+            )?;
+        }
+        pages.push(PdfPageVisualEvidence {
+            page: page_index + 1,
+            width: page.width,
+            height: page.height,
+            regions,
+        });
+    }
+    Ok(PdfVisualEvidence {
+        schema_version: 1,
+        coordinate_space: "HWPUNIT",
+        candidate_pdf_sha256,
+        pages,
+    })
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -342,7 +483,7 @@ pub fn export_pdf_with_fonts(
     injected_fonts: &[(String, Vec<u8>)],
 ) -> Result<PdfExport, String> {
     // One PageLayerTree per page from our own pipeline — the SAME IR the SVG sink replays.
-    let trees = hwp_render::render_doc_trees(doc, fonts);
+    let (placed, trees) = hwp_render::render_doc_trees_with_placement(doc, fonts);
     // Injected bytes win over discover (wasm has no fs fonts); an empty slice → pure discover (native
     // path, byte-identical). A non-empty-but-unparseable injection still falls back to discover.
     let embed = if injected_fonts.is_empty() {
@@ -376,12 +517,15 @@ pub fn export_pdf_with_fonts(
     let bytes = document
         .finish()
         .map_err(|e| format!("krilla finish: {e:?}"))?;
+    let candidate_pdf_sha256 = format!("{:x}", Sha256::digest(&bytes));
+    let visual_evidence = visual_evidence(&placed, candidate_pdf_sha256)?;
     Ok(PdfExport {
         pages: trees.len(),
         bytes,
         font_path: embed.as_ref().map(|f| f.path.clone()),
         replay,
         diagnostics,
+        visual_evidence,
     })
 }
 
@@ -1157,6 +1301,23 @@ mod tests {
             "non-trivial PDF size, got {}",
             out.bytes.len()
         );
+        assert_eq!(out.visual_evidence.schema_version, 1);
+        assert_eq!(out.visual_evidence.coordinate_space, "HWPUNIT");
+        assert_eq!(out.visual_evidence.pages.len(), out.pages);
+        assert_eq!(
+            out.visual_evidence.candidate_pdf_sha256,
+            format!("{:x}", Sha256::digest(&out.bytes))
+        );
+        let regions = &out.visual_evidence.pages[0].regions;
+        assert!(regions.iter().any(|region| region.category == "text"));
+        assert!(regions.iter().all(|region| {
+            region.x >= 0.0
+                && region.y >= 0.0
+                && region.w > 0.0
+                && region.h > 0.0
+                && region.x + region.w <= out.visual_evidence.pages[0].width
+                && region.y + region.h <= out.visual_evidence.pages[0].height
+        }));
     }
 
     #[test]
@@ -1275,6 +1436,12 @@ mod tests {
         assert_eq!(chart.produced, chart.replayed);
         assert_eq!(chart.stubbed, 0);
         assert!(out.diagnostics.iter().all(|d| d.kind != "chart"));
+        assert!(out
+            .visual_evidence
+            .pages
+            .iter()
+            .flat_map(|page| &page.regions)
+            .any(|region| region.category == "object"));
     }
 
     #[test]

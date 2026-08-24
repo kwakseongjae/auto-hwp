@@ -2075,6 +2075,8 @@ dependencies = [
  "kurbo 0.13.1",
  "quick-xml 0.37.5",
  "rhwp",
+ "serde",
+ "sha2",
  "svgtypes 0.16.1",
 ]
 
