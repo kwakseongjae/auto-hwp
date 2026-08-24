@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #198 pushed
+- typed eligibility/matrix/docs committed through `f8b43e8` and pushed.
+- next publish `Closes #198` PR, then exact-head required CI/comments/mergeability audit.
+
 ## 2026-08-24 (Codex sol) · #198 full/audit green
 - quick and full green: PDF51, canonical 8/18/24+98.9%, corpus84/oracle82, wasm 7,818,243B.
 - JS/Vitest 1,007 and Chromium 85 pass/3 intentional skip/0 fail; temporary links removed.

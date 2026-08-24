@@ -40,6 +40,8 @@
   private source text/path/hash/raw/credential diff 0이다. **다음:** commit/push→`Closes #198` PR→
   exact-head CI/comments/mergeability green이면 autonomous merge. 후속은 empty-run 6건의
   char-shape/layout/PDF 영향 판정과 가장 큰 corpus refusal인 STYLE 15건 classification-first slice.
+  continuity start `0e943c9`와 구현/검증 `f8b43e8`을 원격
+  `codex/issue-198-hwp5-eligibility`에 push했다. **다음:** `Closes #198` PR 게시→required CI.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #195 병합 · #196 착수**.
   PR #195 exact head `cecbfdc`에서 issue-link **5s**·build-test **9m31s**·licenses **2m54s** green,
