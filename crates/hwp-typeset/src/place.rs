@@ -442,6 +442,41 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                     if vert > 0.0 {
                         vert += t.outer_margin_top.max(0) as f64;
                     }
+                    let rows = crate::table_row_heights(t, body_w, doc, fonts);
+                    if let Some((_, caption_height)) =
+                        crate::table_caption_metrics(t, body_w, doc, fonts)
+                    {
+                        if crate::keep_captioned_table_on_fresh_lane(
+                            t,
+                            &rows,
+                            caption_height,
+                            vert,
+                            body_h,
+                        ) {
+                            new_page(&mut pages, page);
+                            vert = 0.0;
+                        }
+                    }
+                    if t.caption
+                        .as_ref()
+                        .is_some_and(|caption| caption.position == TableCaptionPosition::Top)
+                    {
+                        vert = place_caption(
+                            t.caption.as_ref().expect("checked caption"),
+                            doc,
+                            fonts,
+                            ml,
+                            mt,
+                            body_w,
+                            body_h,
+                            vert,
+                            &mut pages,
+                            page,
+                            sec_idx,
+                            blk_idx,
+                        );
+                        vert += t.caption.as_ref().unwrap().spacing.max(0) as f64;
+                    }
                     let start_page = pages.len() - 1;
                     // place_table SPLITS the table across pages itself (한글식 row-level break): a
                     // first-row reserve, then a new page whenever the next row crosses the body bottom,
@@ -450,6 +485,26 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                         t, doc, fonts, ml, mt, body_h, vert, body_w, &mut pages, page, sec_idx,
                         blk_idx, frame,
                     );
+                    if t.caption
+                        .as_ref()
+                        .is_some_and(|caption| caption.position == TableCaptionPosition::Bottom)
+                    {
+                        vert += t.caption.as_ref().unwrap().spacing.max(0) as f64;
+                        vert = place_caption(
+                            t.caption.as_ref().expect("checked caption"),
+                            doc,
+                            fonts,
+                            ml,
+                            mt,
+                            body_w,
+                            body_h,
+                            vert,
+                            &mut pages,
+                            page,
+                            sec_idx,
+                            blk_idx,
+                        );
+                    }
                     let end_page = pages.len() - 1;
                     // Provenance bands for point-to-scope: one band per fragment page from its ACTUAL box,
                     // so own_hit_test resolves the table — and the scope pin hugs it — on EVERY page it
@@ -585,6 +640,41 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
                     if flow.vert() > 0.0 {
                         flow.add(table.outer_margin_top.max(0) as f64);
                     }
+                    let rows = crate::table_row_heights(table, flow.min_width(), doc, fonts);
+                    if let Some((_, caption_height)) =
+                        crate::table_caption_metrics(table, flow.min_width(), doc, fonts)
+                    {
+                        if crate::keep_captioned_table_on_fresh_lane(
+                            table,
+                            &rows,
+                            caption_height,
+                            flow.vert(),
+                            flow.available_height(body_h),
+                        ) && flow.advance_column()
+                        {
+                            new_page(&mut pages, page);
+                        }
+                    }
+                    if table
+                        .caption
+                        .as_ref()
+                        .is_some_and(|caption| caption.position == TableCaptionPosition::Top)
+                    {
+                        place_caption_columns(
+                            table.caption.as_ref().expect("checked caption"),
+                            doc,
+                            fonts,
+                            body_x,
+                            body_y,
+                            body_h,
+                            &mut flow,
+                            &mut pages,
+                            page,
+                            section_index,
+                            block_index,
+                        );
+                        flow.add(table.caption.as_ref().unwrap().spacing.max(0) as f64);
+                    }
                     let start_page = pages.len() - 1;
                     place_table_columns(
                         table,
@@ -600,6 +690,26 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
                         block_index,
                         frame,
                     );
+                    if table
+                        .caption
+                        .as_ref()
+                        .is_some_and(|caption| caption.position == TableCaptionPosition::Bottom)
+                    {
+                        flow.add(table.caption.as_ref().unwrap().spacing.max(0) as f64);
+                        place_caption_columns(
+                            table.caption.as_ref().expect("checked caption"),
+                            doc,
+                            fonts,
+                            body_x,
+                            body_y,
+                            body_h,
+                            &mut flow,
+                            &mut pages,
+                            page,
+                            section_index,
+                            block_index,
+                        );
+                    }
                     let end_page = pages.len() - 1;
                     for output in pages.iter_mut().take(end_page + 1).skip(start_page) {
                         if let Some(placed) = output.tables.iter().rev().find(|placed| {
@@ -752,9 +862,36 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
                     // the remaining body flows to the next page. Record the page where the FIRST row
                     // lands as the table's start page (outline/page-nav only needs the start).
                     let row_h = crate::table_row_heights(t, body_w, doc, fonts);
-                    if crate::keep_table_on_fresh_lane(t, &row_h, vert, body_h) {
+                    let caption_metrics = crate::table_caption_metrics(t, body_w, doc, fonts);
+                    if let Some((_, caption_height)) = caption_metrics {
+                        if crate::keep_captioned_table_on_fresh_lane(
+                            t,
+                            &row_h,
+                            caption_height,
+                            vert,
+                            body_h,
+                        ) {
+                            page_idx += 1;
+                            vert = 0.0;
+                        }
+                    } else if crate::keep_table_on_fresh_lane(t, &row_h, vert, body_h) {
                         page_idx += 1;
                         vert = 0.0;
+                    }
+                    if t.caption
+                        .as_ref()
+                        .is_some_and(|caption| caption.position == TableCaptionPosition::Top)
+                    {
+                        advance_caption_block_pages(
+                            t.caption.as_ref().expect("checked caption"),
+                            doc,
+                            fonts,
+                            body_w,
+                            body_h,
+                            &mut page_idx,
+                            &mut vert,
+                        );
+                        vert += t.caption.as_ref().unwrap().spacing.max(0) as f64;
                     }
                     // `rh <= body_h` on both checks: an over-tall row (taller than the whole body) never
                     // forces a page bump — mirrors place_table + NaiveLayout so the start pages stay aligned.
@@ -775,6 +912,21 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
                         }
                         vert += rh;
                     }
+                    if t.caption
+                        .as_ref()
+                        .is_some_and(|caption| caption.position == TableCaptionPosition::Bottom)
+                    {
+                        vert += t.caption.as_ref().unwrap().spacing.max(0) as f64;
+                        advance_caption_block_pages(
+                            t.caption.as_ref().expect("checked caption"),
+                            doc,
+                            fonts,
+                            body_w,
+                            body_h,
+                            &mut page_idx,
+                            &mut vert,
+                        );
+                    }
                     vert += t.outer_margin_bottom.max(0) as f64;
                     // No trailing page-slice (matches place_doc/NaiveLayout): a leftover over-tall row /
                     // margin spill is resolved by the next block's reserve, so the recorded start pages
@@ -786,6 +938,100 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
         out.push(sec_pages);
     }
     out
+}
+
+#[allow(clippy::too_many_arguments)]
+fn advance_caption_block_pages(
+    caption: &TableCaption,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+    avail_w: f64,
+    body_h: f64,
+    page_index: &mut usize,
+    vert: &mut f64,
+) {
+    let width = if caption.max_width > 0 {
+        avail_w.min(caption.max_width as f64)
+    } else {
+        avail_w
+    }
+    .max(1.0);
+    for child in &caption.blocks {
+        match child {
+            Block::Paragraph(paragraph) => {
+                let shape = doc.para_shapes.get(paragraph.para_shape);
+                if *vert > 0.0 {
+                    *vert += shape.map(|value| value.space_before).unwrap_or(0).max(0) as f64;
+                }
+                let ratio = line_spacing_ratio(paragraph, doc);
+                for line in layout_paragraph(paragraph, doc, width, fonts) {
+                    if *vert + line.vert_size > body_h && *vert > 0.0 {
+                        *page_index += 1;
+                        *vert = 0.0;
+                    }
+                    *vert += line.vert_size * ratio;
+                }
+                *vert += shape.map(|value| value.space_after).unwrap_or(0).max(0) as f64;
+            }
+            Block::Table(table) => {
+                let height = table_height(table, width, doc, fonts);
+                if *vert + height > body_h && *vert > 0.0 && height <= body_h {
+                    *page_index += 1;
+                    *vert = 0.0;
+                }
+                *vert += height;
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn advance_caption_columns_pages(
+    caption: &TableCaption,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+    body_h: f64,
+    flow: &mut crate::ColumnFlow,
+    page_index: &mut usize,
+) {
+    let width = if caption.max_width > 0 {
+        flow.min_width().min(caption.max_width as f64)
+    } else {
+        flow.min_width()
+    }
+    .max(1.0);
+    for child in &caption.blocks {
+        match child {
+            Block::Paragraph(paragraph) => {
+                let shape = doc.para_shapes.get(paragraph.para_shape);
+                if flow.vert() > 0.0 {
+                    flow.add(shape.map(|value| value.space_before).unwrap_or(0).max(0) as f64);
+                }
+                let ratio = line_spacing_ratio(paragraph, doc);
+                for line in layout_paragraph(paragraph, doc, width, fonts) {
+                    if flow.vert() + line.vert_size > flow.available_height(body_h)
+                        && flow.vert() > 0.0
+                        && flow.advance_column()
+                    {
+                        *page_index += 1;
+                    }
+                    flow.add(line.vert_size * ratio);
+                }
+                flow.add(shape.map(|value| value.space_after).unwrap_or(0).max(0) as f64);
+            }
+            Block::Table(table) => {
+                let height = table_height(table, width, doc, fonts);
+                if flow.vert() + height > flow.available_height(body_h)
+                    && flow.vert() > 0.0
+                    && height <= flow.available_height(body_h)
+                    && flow.advance_column()
+                {
+                    *page_index += 1;
+                }
+                flow.add(height);
+            }
+        }
+    }
 }
 
 fn block_pages_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Vec<usize>> {
@@ -858,14 +1104,41 @@ fn block_pages_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Ve
                         flow.add(table.outer_margin_top.max(0) as f64);
                     }
                     let rows = crate::table_row_heights(table, flow.min_width(), doc, fonts);
-                    if crate::keep_table_on_fresh_lane(
-                        table,
-                        &rows,
-                        flow.vert(),
-                        flow.available_height(body_h),
-                    ) && flow.advance_column()
-                    {
+                    let caption_metrics =
+                        crate::table_caption_metrics(table, flow.min_width(), doc, fonts);
+                    let should_advance = if let Some((_, caption_height)) = caption_metrics {
+                        crate::keep_captioned_table_on_fresh_lane(
+                            table,
+                            &rows,
+                            caption_height,
+                            flow.vert(),
+                            flow.available_height(body_h),
+                        )
+                    } else {
+                        crate::keep_table_on_fresh_lane(
+                            table,
+                            &rows,
+                            flow.vert(),
+                            flow.available_height(body_h),
+                        )
+                    };
+                    if should_advance && flow.advance_column() {
                         page_index += 1;
+                    }
+                    if table
+                        .caption
+                        .as_ref()
+                        .is_some_and(|caption| caption.position == TableCaptionPosition::Top)
+                    {
+                        advance_caption_columns_pages(
+                            table.caption.as_ref().expect("checked caption"),
+                            doc,
+                            fonts,
+                            body_h,
+                            &mut flow,
+                            &mut page_index,
+                        );
+                        flow.add(table.caption.as_ref().unwrap().spacing.max(0) as f64);
                     }
                     if flow.vert() > 0.0
                         && rows.first().is_some_and(|height| {
@@ -888,6 +1161,21 @@ fn block_pages_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Ve
                             page_index += 1;
                         }
                         flow.add(*height);
+                    }
+                    if table
+                        .caption
+                        .as_ref()
+                        .is_some_and(|caption| caption.position == TableCaptionPosition::Bottom)
+                    {
+                        flow.add(table.caption.as_ref().unwrap().spacing.max(0) as f64);
+                        advance_caption_columns_pages(
+                            table.caption.as_ref().expect("checked caption"),
+                            doc,
+                            fonts,
+                            body_h,
+                            &mut flow,
+                            &mut page_index,
+                        );
                     }
                     flow.add(table.outer_margin_bottom.max(0) as f64);
                     started = true;
@@ -1164,6 +1452,84 @@ fn place_paragraph_columns(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn place_caption(
+    caption: &TableCaption,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+    ml: f64,
+    mt: f64,
+    avail_w: f64,
+    body_h: f64,
+    mut vert: f64,
+    pages: &mut Vec<PlacedPage>,
+    page: &PageSetup,
+    section: usize,
+    block: usize,
+) -> f64 {
+    let width = if caption.max_width > 0 {
+        avail_w.min(caption.max_width as f64)
+    } else {
+        avail_w
+    }
+    .max(1.0);
+    for child in &caption.blocks {
+        match child {
+            Block::Paragraph(paragraph) => {
+                let shape = doc.para_shapes.get(paragraph.para_shape);
+                if vert > 0.0 {
+                    vert += shape.map(|value| value.space_before).unwrap_or(0).max(0) as f64;
+                }
+                place_paragraph(
+                    paragraph, doc, fonts, ml, mt, width, body_h, &mut vert, pages, page, section,
+                    block,
+                );
+                vert += shape.map(|value| value.space_after).unwrap_or(0).max(0) as f64;
+            }
+            Block::Table(table) => {
+                vert = place_table(
+                    table, doc, fonts, ml, mt, body_h, vert, width, pages, page, section, block,
+                    None,
+                );
+            }
+        }
+    }
+    vert
+}
+
+#[allow(clippy::too_many_arguments)]
+fn place_caption_columns(
+    caption: &TableCaption,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+    ml: f64,
+    mt: f64,
+    body_h: f64,
+    flow: &mut crate::ColumnFlow,
+    pages: &mut Vec<PlacedPage>,
+    page: &PageSetup,
+    section: usize,
+    block: usize,
+) {
+    for child in &caption.blocks {
+        match child {
+            Block::Paragraph(paragraph) => {
+                let shape = doc.para_shapes.get(paragraph.para_shape);
+                if flow.vert() > 0.0 {
+                    flow.add(shape.map(|value| value.space_before).unwrap_or(0).max(0) as f64);
+                }
+                place_paragraph_columns(
+                    paragraph, doc, fonts, ml, mt, body_h, flow, pages, page, section, block,
+                );
+                flow.add(shape.map(|value| value.space_after).unwrap_or(0).max(0) as f64);
+            }
+            Block::Table(table) => place_table_columns(
+                table, doc, fonts, ml, mt, body_h, flow, pages, page, section, block, None,
+            ),
+        }
+    }
+}
+
 /// Place a table, SPLITTING it across pages at row boundaries when it doesn't fit (한글식 표 나눔).
 /// Column widths come from `col_widths` (else an equal split, mirroring `table_height`). `vert` is the
 /// page-relative cursor where the table starts; `mt`/`body_h` frame the body. A first-row reserve moves
@@ -1197,7 +1563,7 @@ fn place_table(
     let row_h = row_heights(t, avail_w, doc, fonts);
 
     let mut vert = vert;
-    if crate::keep_table_on_fresh_lane(t, &row_h, vert, body_h) {
+    if !crate::has_flow_caption(t) && crate::keep_table_on_fresh_lane(t, &row_h, vert, body_h) {
         new_page(pages, page);
         vert = 0.0;
     }
@@ -1262,7 +1628,10 @@ fn place_table_columns(
     let col_x = column_offsets(t, table_width);
     let row_h = row_heights(t, table_width, doc, fonts);
     let available = flow.available_height(body_h);
-    if crate::keep_table_on_fresh_lane(t, &row_h, flow.vert(), available) && flow.advance_column() {
+    if !crate::has_flow_caption(t)
+        && crate::keep_table_on_fresh_lane(t, &row_h, flow.vert(), available)
+        && flow.advance_column()
+    {
         new_page(pages, page);
     }
     let available = flow.available_height(body_h);
@@ -3848,6 +4217,99 @@ mod tests {
         table.fixed_row_heights = true;
         table.keep_together = keep_together;
         table
+    }
+
+    fn captioned_table(position: TableCaptionPosition, keep_together: bool) -> Table {
+        let mut table = fixed_height_table(1, 3000, keep_together);
+        table.caption = Some(TableCaption {
+            position,
+            blocks: vec![Block::Paragraph(para("캡션"))],
+            spacing: 500,
+            max_width: 48_000,
+            ..Default::default()
+        });
+        table
+    }
+
+    #[test]
+    fn top_and_bottom_captions_paint_on_the_expected_side_in_lockstep() {
+        use crate::LayoutEngine;
+
+        for (position, expect_top) in [
+            (TableCaptionPosition::Top, true),
+            (TableCaptionPosition::Bottom, false),
+        ] {
+            let doc = doc_with_page(vec![Block::Table(captioned_table(position, false))], 20_000);
+            let placed = place_doc(&doc, &ApproxFontMetrics);
+            let naive = crate::NaiveLayout
+                .layout(&doc, &ApproxFontMetrics)
+                .expect("caption layout");
+            assert_eq!(
+                placed.pages.len(),
+                naive.pages.len(),
+                "LOCKSTEP {position:?}"
+            );
+            assert_eq!(block_pages(&doc, &ApproxFontMetrics)[0][0], 0);
+
+            let table = placed.pages[0].tables.first().expect("placed table");
+            let caption_baseline = placed.pages[0]
+                .glyphs
+                .iter()
+                .find(|glyph| glyph.ch == '캡')
+                .expect("caption glyph")
+                .baseline;
+            if expect_top {
+                assert!(caption_baseline < table.y, "top caption must precede table");
+                assert!(
+                    table.y - caption_baseline >= 500.0,
+                    "stored caption gap must separate caption and table"
+                );
+            } else {
+                assert!(
+                    caption_baseline > table.y + table.h,
+                    "bottom caption must follow table"
+                );
+                assert!(
+                    caption_baseline - (table.y + table.h) >= 500.0,
+                    "stored caption gap must separate table and caption"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn keep_together_moves_caption_and_table_as_one_without_blank_loop() {
+        use crate::LayoutEngine;
+
+        let doc = doc_with_page(
+            vec![
+                Block::Table(fixed_height_table(1, 4_000, false)),
+                Block::Table(captioned_table(TableCaptionPosition::Top, true)),
+            ],
+            8_000,
+        );
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let naive = crate::NaiveLayout
+            .layout(&doc, &ApproxFontMetrics)
+            .expect("caption layout");
+        assert_eq!(placed.pages.len(), naive.pages.len(), "LOCKSTEP");
+        assert_eq!(placed.pages.len(), 2, "one bounded advance");
+        assert!(
+            placed.pages[1].glyphs.iter().any(|glyph| glyph.ch == '캡'),
+            "caption advances with its table"
+        );
+        assert_eq!(placed.pages[1].tables.len(), 1, "table follows caption");
+        assert_eq!(block_pages(&doc, &ApproxFontMetrics)[0], vec![0, 1]);
+
+        let mut over_tall = captioned_table(TableCaptionPosition::Top, true);
+        over_tall.row_heights = vec![10_000];
+        let hostile = doc_with_page(vec![Block::Table(over_tall)], 5_000);
+        let hostile_placed = place_doc(&hostile, &ApproxFontMetrics);
+        let hostile_naive = crate::NaiveLayout
+            .layout(&hostile, &ApproxFontMetrics)
+            .expect("bounded hostile caption layout");
+        assert_eq!(hostile_placed.pages.len(), hostile_naive.pages.len());
+        assert_eq!(hostile_placed.pages.len(), 1, "no blank-page loop");
     }
 
     /// 이슈 080 — 표 호스트 앵커에 걸린 `<hp:p pageBreak="1">` 은 **표 앞**에서 쪽을 넘겨야 한다.

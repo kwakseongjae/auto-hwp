@@ -3,6 +3,38 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-24 · Codex(sol) — **#193 shared table-caption foundation 구현 중**.
+  `TableCaption`을 source-neutral shared IR에 추가하고 rhwp HWP5 lift가 방향 4종·문단 blocks·gap·
+  width/max-width·include-margin을 손실 없이 내리도록 했다. top/bottom은 기존 paragraph placer와
+  row fragmenter를 사용해 단일열·다단의 `place_doc`/`NaiveLayout`/`block_pages` 3경로에 같은
+  예약·배치를 연결했고, keep-together는 caption+gap+rows 전체가 fresh lane에 들어갈 때만 한 번
+  전진한다. over-tall은 기존 bounded row fallback을 유지한다. left/right는 IR에는 보존하되 아직
+  없는 horizontal lane을 흉내내지 않고 의도적으로 미배치한다. synthetic top/bottom 위치·LOCKSTEP·
+  keep/over-tall 및 rhwp lift 회귀 green; focused typeset 92 tests, feature-rhwp caption 2 tests,
+  clippy `-D warnings` green. 첫 quick은 explicit JSX Table 생성자의 새 필드 누락을 잡아 기존 의미인
+  `caption: None`으로 보완했고 재실행 quick 전체 green: workspace tests, PDF visual **51**,
+  canonical **8/18/24·98.9%+**, public corpus **84**, oracle **82**, HWPX, wasm/licenses. `external/rhwp`
+  diff 0. `--full`도 새 wasm **7,817,187B**, JS build/crosscheck/i18n, Vitest **1,007** green;
+  sandbox bind EPERM만 허용된 로컬 서버에서 분리 실행해 Chromium **85 pass/3 intentional skip/
+  0 fail**이다. 임시 node_modules links는 제거했다. public HWP5 benchmark의 #192 exact top-caption
+  geometry만 검사하는 content-free real-boundary 회귀도 추가해 direction/width/gap/max-width/attached
+  paragraph가 shared Table IR까지 도달함을 확인했다. private text/path/hash/raw는 출력·커밋하지 않았다.
+  final diff/security audit에서 변경은 shared model/lift/typesetter/JSX default/tests/continuity 문서뿐이고
+  `external/rhwp`·generated wasm/assets·HWPX parser/serializer·oracle scoring diff 0을 확인했다. commits
+  `e49bd7c`·`e383477`·`ff9d88e`를 push하고 PR **#194**를 `Closes #193`으로 게시했다.
+  PR 대기 중 security re-audit에서 post-parse layout guard가 새 caption blocks를 순회하지 않는 budget
+  bypass를 발견해, caption paragraphs와 caption-nested tables도 explicit work stack에 `depth+1`로 넣었다.
+  hostile caption-only deep nesting 회귀, hwp-ingest **14 tests**, focused clippy `-D warnings`, wasm32 및
+  quick 전체(PDF51·canonical 8/18/24·98.9%+·corpus84·oracle82·HWPX·licenses) green.
+  canonical projection audit에서 JSX codec/equality가 새 caption을 누락하고 HWPX equation enrichment가
+  caption blocks를 재귀하지 않는 두 loss seam도 발견해 닫았다. `TableCaption` closed tag는 방향·blocks·
+  gap·width/max-width·include-margin을 strict round-trip하고 duplicate/invalid value는 fail-closed한다.
+  semantic HTML도 caption content와 top/bottom 위치를 보존하며, caption 내부 후처리는 cell과 같은 재귀
+  경로를 탄다. focused hwp-jsx **15 tests**(unit 3+roundtrip 12), hwp-export **10 tests**, 관련 clippy
+  `-D warnings` green. quick도 workspace/PDF **51**/canonical **8·18·24·98.9%+**/public corpus **84**/
+  oracle **82**/HWPX/wasm/licenses 전체 green. **다음:** continuity 포함 loss-seam fix commit/push로 #194 CI 재기동→required CI·review/comment·mergeability
+  green이면 squash merge/branch 정리→#192를 latest main에 재배치해 strict captioned-table parser 재개.
+
 - 갱신: 2026-08-24 · Codex(sol) — **PR #181 병합 · #182 next TABLE 착수**.
   #175는 exact head `6711ff9`에서 issue-link/build-test/licenses green, CLEAN/MERGEABLE,
   review/general/inline 댓글 0을 확인하고 protected main `c917c584`로 squash 병합했다. #174 close와
@@ -219,8 +251,15 @@
   sandbox bind EPERM만 허용된 Playwright 실행으로 분리 검증했고 임시 node_modules link 4개는 모두
   제거했다. generated asset·production route·rhwp·HWPX·typesetter diff 0. **다음:** final
   diff/security audit도 source content/path/hash/raw payload/credential 노출 0으로 clean하다. 구현·근거
-  commit `6bf0333`까지 push하고 PR #191을 `Closes #190`으로 게시했다. **다음:** exact-head required
-  CI(issue-link/build-test/licenses), review/general/inline 댓글, mergeability 확인→green이면 squash merge.
+  commit `6bf0333`까지 push하고 PR #191을 `Closes #190`으로 게시했다. exact head `3fdd4a9`에서
+  required CI green·MERGEABLE/CLEAN·댓글 0 후 protected main `882783a6`로 squash 병합했다. #190
+  close·branch 정리·#94 동기화 후 #192를 열었고, 두 content-free run에서 다음 경계가 top-captioned
+  `tbl `임을 확정했다. 본체는 exact 4×5 full grid지만 shared `Table`과 rhwp lift가 caption
+  text/direction/gap을 보존하지 않아 parser-only 확장을 거부했다. 선행 #193을
+  R18/P1/layout/area:typeset+area:hwp5/status:ready로 열고 exact latest main의
+  `codex/issue-193-table-caption` worktree와 pinned rhwp oracle `f137b4c9`를 초기화했다. **다음:**
+  source-neutral TableCaption IR→place_doc/NaiveLayout LOCKSTEP→shared SVG/PDF paint→rhwp lift 회귀.
+  caption None의 기존 layout/export와 route·external/rhwp·HWPX roundtrip은 불변.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #173 병합 · #174 multi-table 경계 착수**.
   자체 HWP5 파서가 exact `tbl ` marker/common-object/TABLE/LIST_HEADER/cell paragraph를 검증해

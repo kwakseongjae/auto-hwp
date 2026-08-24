@@ -5,6 +5,38 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #193 canonical caption loss seams closed
+- JSX/equality now round-trip caption semantics strictly; duplicate captions fail closed.
+- semantic HTML keeps caption content/position; equation enrichment reaches caption blocks.
+- focused JSX 15/export 10 + quick all green; next push/CI→merge.
+
+## 2026-08-24 (Codex sol) · #193 caption budget bypass closed
+- security re-audit found layout-limit traversal omitted new caption blocks.
+- caption paragraphs/nested tables now share the iterative budget/depth guard; hostile regression green.
+- quick all green; next push/restarted CI→merge.
+
+## 2026-08-24 (Codex sol) · #193 PR #194 posted
+- final boundary/security audit clean; commits through `ff9d88e` pushed and PR #194 created.
+- next required CI/comments/mergeability→merge, then rebase #192 and implement strict captioned table.
+
+## 2026-08-24 (Codex sol) · #193 full + real boundary green
+- full green: wasm 7,817,187B, Vitest 1,007, Chromium 85 pass/3 skip/0 fail; temp links removed.
+- content-free public HWP5 regression proves #192 exact top caption reaches shared IR; next PR/merge.
+
+## 2026-08-24 (Codex sol) · #193 quick green
+- explicit JSX table constructor fixed to preserve legacy `caption: None`; rerun quick all green.
+- PDF51, canonical 8/18/24·98.9%+, corpus84/oracle82, HWPX/wasm/licenses unchanged; next full.
+
+## 2026-08-24 (Codex sol) · #193 caption foundation implemented
+- shared caption IR + rhwp lift preserve direction/blocks/gap/width/max-width/include-margin.
+- top/bottom now share single/column place_doc·NaiveLayout·block_pages flow; side captions stay typed/deferred.
+- synthetic LOCKSTEP/keep/over-tall and feature-rhwp lift tests green; next full gates→PR/merge→#192.
+
+## 2026-08-24 (Codex sol) · #193 caption foundation started
+- #191 merged main `882783a6`; #192 next boundary is an exact top-captioned 4×5 table.
+- parser-only widening refused because shared Table/rhwp lift drops caption; dependency #193 opened.
+- next caption IR + LOCKSTEP placement + shared SVG/PDF + rhwp lift; caption-none route stays unchanged.
+
 ## 2026-08-24 (Codex sol) · #190 PR #191 posted
 - final diff/security audit clean; verified commits through `6bf0333` pushed.
 - PR #191 created with `Closes #190`; next required CI/comments/mergeability→merge.

@@ -461,6 +461,11 @@ pub struct Table {
     pub rows: usize,
     pub cols: usize,
     pub cells: Vec<Cell>,
+    /// Optional text caption owned by this table. Captions live in the shared IR rather than in an
+    /// HWP5-only side channel so the own typesetter, SVG renderer, and PDF exporter consume the same
+    /// content. Top/bottom are the currently supported flow positions; side captions are retained as
+    /// typed data and deliberately left out of vertical flow until a horizontal lane model exists.
+    pub caption: Option<TableCaption>,
     /// Keep the table on one page/column when its fully measured height fits a fresh lane. If the
     /// current lane lacks room, all three pagination paths advance once before placing row 0. A table
     /// taller than a fresh lane still uses the existing row-fragmentation fallback, so hostile or
@@ -530,6 +535,28 @@ pub struct Table {
     pub provenance: Provenance,
     pub passthrough: Passthrough,
     pub dirty: Dirty,
+}
+
+/// Source-neutral table caption position.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TableCaptionPosition {
+    Left,
+    Right,
+    Top,
+    #[default]
+    Bottom,
+}
+
+/// A table caption expressed in ordinary document blocks. `spacing` is the gap between caption and
+/// table; `width` is the side-caption lane width, while `max_width` bounds top/bottom text flow.
+#[derive(Clone, Debug, Default)]
+pub struct TableCaption {
+    pub position: TableCaptionPosition,
+    pub blocks: Vec<Block>,
+    pub spacing: HwpUnit,
+    pub width: HwpUnit,
+    pub max_width: HwpUnit,
+    pub include_margin: bool,
 }
 
 impl Table {
