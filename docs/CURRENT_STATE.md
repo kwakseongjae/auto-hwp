@@ -3,6 +3,32 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-25 · Codex(sol) — **#223 report-only vertical-transition trace 구현·canonical 진단**.
+  fixed page alignment 뒤 text/table의 row-ink profile만 ±128px에서 비교하고 active-row F1→row-count
+  cosine 순으로 unique=`hypothesis`, exact tie=`ambiguous`, 증거 없음/예산 초과=`unscorable`로 낸다.
+  reference window 1회 scan + page당 50M work cap이며 score/threshold/pass에는 입력하지 않는다. 합성
+  exact·constant·2단 누적·blank gap·repeat tie·page clipping·missing/nontext·budget·overlap 10축 포함
+  Python **62** green. canonical candidate SHA `25524c3d…`·8쪽·global translations·T3/`pass=null`
+  불변, trace는 unique 55/tie 5·transitions hypothesis 26/ambiguous 26. 독립 2회 report JSON/HTML
+  SHA도 exact다. pages 4/5의 최초 안정 분기는 `table-0001→table-0002`에서 **0→+17/+19px**이고,
+  page1 +9px·page7 +33px 같은 transition class가 반복된다. 뒤 short text rows는 반복 패턴이라 noise가
+  커서 아직 table height/font/line metric 수정을 정당화하지 않는다. **다음:** overlap ambiguity 반영
+  canonical 재실행→docs/tests/quick→commit/push/PR `Closes #223`→CI/merge→consecutive-table/anchor-spacing
+  원인을 synthetic HWP/HWPX 최소 fixture로 분리하는 child. `verify-local` quick은 Rust workspace/rhwp
+  feature/wasm/licenses/AI120/8·18·24+98.9%/public corpus/oracle82 포함 전부 green. rhwp 무수정.
+
+- 갱신: 2026-08-25 · Codex(sol) — **PR #222 병합 · #223 vertical-transition trace 착수**.
+  #221 exact head `e192e5e`는 issue-link **4s**·licenses **3m51s**·build-test **9m58s** green,
+  MERGEABLE, 댓글/review 0으로 protected main `015eebc4`에 squash 병합됐다. #221은 close되고 원격
+  branch도 삭제했으며 #93/#114에 content-free 결과를 동기화했다. canonical PDF SHA `25524c3d…`는
+  불변이고 broad text 70개는 intentional blank **42** + paint-backed **28**, expected-missing 0이다.
+  생성 marker도 placed glyph가 band 안에 있으면 source text가 비어도 painted가 우선한다. 후속 P0
+  #223을 등재하고 exact main의 `codex/issue-223-vertical-transition-trace`를 만들었다. row-span 실측은
+  pages 4/5에서 title/table 시작 뒤 약 한 band, 다음 body에서 약 두 band로 커지는 불연속을 보이지만
+  아직 table margin/anchor spacing/line height 중 하나로 확정하지 않는다. **다음:** fixed page alignment와
+  score를 건드리지 않는 monotonic content-free transition trace 설계·합성 테스트→canonical 재측정.
+  font category/weight는 별도 축, T3/threshold/`pass=null`·8/18/24·98.9%·oracle82·rhwp는 불변이다.
+
 - 갱신: 2026-08-25 · Codex(sol) — **PR #220 병합 · #221 paint-backed text-region evidence 구현·재측정 완료**.
   #219 exact head `be39cae`는 교체 CI의 issue-link **3s**·licenses **2m51s**·build-test **11m1s**
   green, CLEAN/MERGEABLE, 댓글/review 0으로 protected main `ffce59dd`에 squash 병합됐다. #219는
