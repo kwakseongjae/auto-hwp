@@ -28,27 +28,27 @@ fn public_hwp5_has_bounded_content_free_record_provenance() {
 }
 
 #[test]
-fn explicit_own_parser_owns_bounded_six_by_four_width_reference_variant_then_stops_content_free() {
+fn explicit_own_parser_owns_bounded_control_host_terminator_shape_then_stops_content_free() {
     let probed = probe(&benchmark()).unwrap();
     let next = probed
         .streams
         .iter()
         .flat_map(|stream| &stream.records)
-        .find(|record| record.head == 44_479)
+        .find(|record| record.head == 45_487)
         .unwrap();
     assert_eq!(
         (next.tag, next.level, next.head, next.data, next.end, next.size,),
-        (0x44, 1, 44_479, 44_483, 44_499, 16)
+        (0x48, 2, 45_487, 45_491, 45_538, 47)
     );
     let error = OwnHwp5Parser::new().parse(&benchmark()).unwrap_err();
     eprintln!("{error:?}");
     assert!(matches!(
         error,
         Error::MalformedRecord {
-            tag: 0x44,
+            tag: 0x48,
             section: Some(0),
-            offset: 44479,
-            reason: "empty paragraph has invalid PARA_CHAR_SHAPE boundaries",
+            offset: 45487,
+            reason: "cell LIST_HEADER count, direction, alignment, or width reference is not owned",
             ..
         }
     ));

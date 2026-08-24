@@ -63,6 +63,10 @@ enum Mutation {
     DuplicatePageNumber,
     IdempotentPageNumberControls,
     Table,
+    TableTerminatorCharShape,
+    TableBadTerminatorShapeBoundary,
+    TableBadTerminatorShapeReference,
+    TableBadDeclaredTerminatorShapeCount,
     BadTableAttr,
     BadTableTopology,
     BadTableGeometry,
@@ -596,6 +600,61 @@ fn owns_strict_inline_one_by_one_table_as_anchor_plus_shared_ir() {
 }
 
 #[test]
+fn owns_exact_terminator_char_shape_for_text_empty_control_host() {
+    let doc = OwnHwp5Parser::new()
+        .parse(&fixture(Mutation::TableTerminatorCharShape))
+        .expect("control marker and terminator shape boundaries parse");
+    let [Block::Paragraph(anchor), Block::Table(_), Block::Paragraph(_)] =
+        doc.sections[0].blocks.as_slice()
+    else {
+        panic!("table host, table, and trailing blank paragraph expected")
+    };
+    assert!(anchor.is_table_anchor);
+    assert_eq!(anchor.runs.len(), 2);
+    assert_eq!(
+        anchor
+            .runs
+            .iter()
+            .map(|run| run.char_shape)
+            .collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    assert!(anchor.runs.iter().all(|run| run.content.is_empty()));
+}
+
+#[test]
+fn strict_text_empty_control_host_rejects_bad_terminator_shape_boundaries_and_counts() {
+    assert!(matches!(
+        OwnHwp5Parser::new().parse(&fixture(Mutation::TableBadTerminatorShapeBoundary)),
+        Err(Error::MalformedRecord {
+            tag: TAG_PARA_CHAR_SHAPE,
+            section: Some(0),
+            reason: "text-empty control host has invalid PARA_CHAR_SHAPE boundaries",
+            ..
+        })
+    ));
+    assert!(matches!(
+        OwnHwp5Parser::new().parse(&fixture(Mutation::TableBadTerminatorShapeReference)),
+        Err(Error::InvalidReference {
+            kind: "character shape",
+            index: 2,
+            pool_len: 2,
+            section: Some(0),
+            ..
+        })
+    ));
+    assert!(matches!(
+        OwnHwp5Parser::new().parse(&fixture(Mutation::TableBadDeclaredTerminatorShapeCount)),
+        Err(Error::MalformedRecord {
+            tag: TAG_PARA_HEADER,
+            section: Some(0),
+            reason: "PARA_HEADER character-shape count differs from PARA_CHAR_SHAPE",
+            ..
+        })
+    ));
+}
+
+#[test]
 fn strict_inline_table_rejects_unowned_attributes_topology_geometry_alignment_and_refs() {
     for mutation in [
         Mutation::BadTableAttr,
@@ -1055,6 +1114,10 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
     let has_table = matches!(
         mutation,
         Mutation::Table
+            | Mutation::TableTerminatorCharShape
+            | Mutation::TableBadTerminatorShapeBoundary
+            | Mutation::TableBadTerminatorShapeReference
+            | Mutation::TableBadDeclaredTerminatorShapeCount
             | Mutation::BadTableAttr
             | Mutation::BadTableTopology
             | Mutation::BadTableGeometry
@@ -1106,6 +1169,13 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
             | Mutation::MultiTableStrayChild
             | Mutation::MultiTableThirdControl
     );
+    let has_terminal_shape = matches!(
+        mutation,
+        Mutation::TableTerminatorCharShape
+            | Mutation::TableBadTerminatorShapeBoundary
+            | Mutation::TableBadTerminatorShapeReference
+            | Mutation::TableBadDeclaredTerminatorShapeCount
+    );
     let mut doc_info = Vec::new();
     let mut properties = vec![0; 26];
     let section_count = if matches!(
@@ -1129,7 +1199,11 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
         1,
         1,
         usize::from(has_table),
-        if has_large_table { 2 } else { 1 },
+        if has_large_table || has_terminal_shape {
+            2
+        } else {
+            1
+        },
         0,
         0,
         0,
@@ -1146,7 +1220,7 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
         push_record(&mut doc_info, TAG_BORDER_FILL, 0, &solid_border_fill());
     }
     push_record(&mut doc_info, TAG_CHAR_SHAPE, 0, &char_shape());
-    if has_large_table {
+    if has_large_table || has_terminal_shape {
         push_record(&mut doc_info, TAG_CHAR_SHAPE, 0, &char_shape());
     }
     push_record(&mut doc_info, TAG_PARA_SHAPE, 0, &para_shape());
@@ -1244,7 +1318,12 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
                 0
             }
             | if has_table { 1 << 0x000b } else { 0 },
-        1,
+        if has_terminal_shape && !matches!(mutation, Mutation::TableBadDeclaredTerminatorShapeCount)
+        {
+            2
+        } else {
+            1
+        },
         0,
         if has_columns {
             0x03
@@ -1255,7 +1334,27 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
         },
     );
     push_record(&mut body, TAG_PARA_TEXT, 1, &utf16_bytes(&section_text));
-    push_record(&mut body, TAG_PARA_CHAR_SHAPE, 1, &shape_refs(&[(0, 0)]));
+    let host_shape_refs = if has_terminal_shape {
+        let terminator = section_text.len() as u32 - 1;
+        shape_refs(&[
+            (0, 0),
+            (
+                if matches!(mutation, Mutation::TableBadTerminatorShapeBoundary) {
+                    terminator - 1
+                } else {
+                    terminator
+                },
+                if matches!(mutation, Mutation::TableBadTerminatorShapeReference) {
+                    2
+                } else {
+                    1
+                },
+            ),
+        ])
+    } else {
+        shape_refs(&[(0, 0)])
+    };
+    push_record(&mut body, TAG_PARA_CHAR_SHAPE, 1, &host_shape_refs);
     let mut section_control = Vec::with_capacity(28);
     section_control.extend_from_slice(&CTRL_SECTION_DEF.to_le_bytes());
     section_control.extend([0; 24]);
