@@ -1,0 +1,64 @@
+name: ai-task-live
+
+on:
+  schedule:
+    - cron: "15 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-task-live
+  cancel-in-progress: false
+
+jobs:
+  recorded-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: node scripts/generate-ai-task-fixtures.mjs --check
+      - run: node --test scripts/tests/ai-task-suite.test.mjs
+      - run: node scripts/ai-task-suite.mjs
+
+  live-model-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      AI_EVAL_PROVIDER: openrouter
+      AI_EVAL_MODEL: ${{ vars.AI_EVAL_MODEL }}
+      AI_EVAL_MODEL_VERSION: ${{ vars.AI_EVAL_MODEL_VERSION }}
+      AI_EVAL_TEMPERATURE: ${{ vars.AI_EVAL_TEMPERATURE || '0' }}
+      AI_EVAL_OUTPUT: ${{ runner.temp }}/ai-task-live-report.json
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Check owner-provisioned live evaluation settings
+        id: settings
+        shell: bash
+        run: |
+          if [[ -n "$OPENROUTER_API_KEY" && -n "$AI_EVAL_MODEL" && -n "$AI_EVAL_MODEL_VERSION" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Live AI evaluation skipped: provision OPENROUTER_API_KEY and AI_EVAL_MODEL/AI_EVAL_MODEL_VERSION. No provider fallback was attempted."
+            echo "Live provider lane skipped because its exact provider/model credentials are not provisioned." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Run 120-task live model report
+        if: steps.settings.outputs.enabled == 'true'
+        run: node scripts/ai-task-suite-live.mjs
+      - name: Upload content-free live score report
+        if: steps.settings.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-task-live-report
+          path: ${{ runner.temp }}/ai-task-live-report.json
+          if-no-files-found: error
+          retention-days: 30

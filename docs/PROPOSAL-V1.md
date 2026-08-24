@@ -46,3 +46,5 @@ Web / Tauri / MCP / SDK
 
 필드별 wire 예제와 오류 표는 [INTENT-SCHEMA.md](INTENT-SCHEMA.md) §6.2를 정본으로 삼는다.
 검증 판정과 비공개 증거 계약은 [PRECOMMIT-VERIFICATION-V1.md](PRECOMMIT-VERIFICATION-V1.md)를 따른다.
+100+ 작업에서 schema·target·semantic·atomicity·undo·stale·layout·export와 권한 경계를 독립 채점하는
+회귀 계약은 [AI-TASK-SUITE.md](AI-TASK-SUITE.md)를 따른다.

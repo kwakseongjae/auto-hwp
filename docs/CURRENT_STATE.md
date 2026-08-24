@@ -3,6 +3,18 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-24 · Codex(sol) — **#106 AI-native task suite 구현·full green · PR 직전**.
+  합성 문서 20종×6 시나리오=120 작업을 versioned manifest/recorded result로 잠그고 schema, target,
+  semantic, atomicity, undo, stale, layout, export, safety, 무권한 변경·전송, reversibility를 독립 채점한다.
+  안전·무권한 변경/전송·원자성·가역성은 100% hard gate이고 일반 정확도는 report-only다. 문서 prompt
+  injection과 이름을 바꾼 권한 Intent를 hostile test로 막되, 알 수 없는 일반 편집 Intent는 정확도 실패로
+  분리한다. contributor CI/quick은 외부 호출 없이 recorded 계약만 실행한다. 별도 월요일 workflow는
+  소유자가 exact OpenRouter model/version/key를 제공할 때만 live 120건을 실행하고 provider fallback,
+  raw 응답·사용자 문서 저장을 금지한다. 검증은 hostile **11/11**, recorded hard gates **120/120**,
+  quick 전체, full canonical **8/18/24+98.9%**, oracle **82**, PDF visual **51**, Vitest **1,012**,
+  Chromium **85 pass/3 intentional skip**, wasm **7,993,318B** green이다. rhwp `f137b4c9`는 무수정.
+  **다음:** commit/push→PR `Closes #106`→exact-head CI/댓글 확인 후 자율 병합→#93 HWP5 독립 트랙.
+
 - 갱신: 2026-08-24 · Codex(sol) — **PR #209 병합 · 장기 Goal 실행 중단/브리핑 지점**.
   모든 Proposal v1은 live/private-scratch 의미 diff, 동일 font provider의 place/Naive LOCKSTEP,
   page·line·object inventory, before/after 영향 페이지 SVG hash/bytes와 무변경 페이지 목록을 낸다.

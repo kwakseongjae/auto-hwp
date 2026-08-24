@@ -24,6 +24,11 @@ python3 -m unittest discover -s scripts/tests -p 'test_pdf_visual_check.py'
 echo "═══ tests (hwp-rhwp features) ═══"
 cargo test -p hwp-rhwp --features "rhwp shaper"
 
+echo "═══ AI-native recorded task suite (이슈 106 — contributor network 없음) ═══"
+node scripts/generate-ai-task-fixtures.mjs --check
+node --test scripts/tests/ai-task-suite.test.mjs
+node scripts/ai-task-suite.mjs
+
 echo "═══ 게이트 v2 (benchmark 8 · benchmark1 18 · benchmark2 24 · 줄정확 98.9%+ · modu-startup 6==6) ═══"
 # 사람이 읽는 `쪽수 일치` 문자열만 보면 7==7 같은 절대 쪽수 회귀도 통과한다. JSON 검증기가
 # 정확한 문서 집합, 절대 쪽수, 채점 가능 여부, 줄 정확도, 본문 오라클 보존을 한 계약으로 강제한다.
