@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · PR #197 posted
+- `Closes #196` PR #197 published with explicit no-cutover/delta/privacy boundaries.
+- next final-head required CI + reviews/comments/mergeability → autonomous merge.
+
 ## 2026-08-24 (Codex sol) · #196 pushed
 - benchmark-complete parser/tests/continuity committed through `50ca455` and pushed.
 - next `Closes #196` PR → required CI/comments/mergeability → autonomous merge.

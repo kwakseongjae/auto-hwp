@@ -49,7 +49,8 @@
   continuity 문서뿐이다. `external/rhwp`·HWPX·shared typesetter·generated wasm/assets·oracle scoring diff 0,
   임시 instrumentation 및 private text/path/hash/raw/credential diff 0을 확인했다. 구현·검증·continuity를
   commits `7663aa7`·`50ca455`로 원격 `codex/issue-196-hwp5-next-table`에 push했다. **다음:**
-  `Closes #196` PR→required CI·comments·mergeability green이면 autonomous merge; 후속 delta/eligibility issue.
+  PR **#197**을 `Closes #196`으로 게시했다. **다음:** final head required CI·comments·mergeability
+  green이면 autonomous merge; 후속 content-free semantic-delta/84-doc eligibility issue.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #194 병합 · #192 latest main 재개**.
   PR #194 exact head `89c3ea4`에서 issue-link **3s**·build-test **9m24s**·licenses **2m58s** green,
