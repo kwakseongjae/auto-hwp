@@ -33,8 +33,8 @@ function fixture() {
     const regions = args[args.indexOf("--visual-regions") + 1];
     fs.writeFileSync(out, "%PDF-own\\n%%EOF\\n");
     fs.writeFileSync(regions, JSON.stringify({
-      schema_version: 1, coordinate_space: "HWPUNIT", candidate_pdf_sha256: "${"a".repeat(64)}",
-      pages: [{ page: 1, width: 59500, height: 84200, regions: [] }]
+      schema_version: 2, coordinate_space: "HWPUNIT", candidate_pdf_sha256: "${"a".repeat(64)}",
+      pages: [{ page: 1, width: 59500, height: 84200, intentional_blank_text_regions: 0, regions: [] }]
     }) + "\\n");
     const fontReportIndex = args.indexOf("--font-report");
     if (fontReportIndex >= 0) fs.writeFileSync(args[fontReportIndex + 1], JSON.stringify({

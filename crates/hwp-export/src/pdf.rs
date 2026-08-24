@@ -18,7 +18,7 @@
 //! PDF points (1pt = 1/72in), top-left origin, y-down — the SAME orientation — so we only scale by
 //! `HWPUNIT_PER_PT` (1in = 7200 HWPUNIT = 72pt ⇒ 100 HWPUNIT/pt). No y-flip needed.
 
-use hwp_model::document::{LineStyle, SemanticDoc};
+use hwp_model::document::{Block, Inline, LineStyle, Paragraph, SemanticDoc};
 use hwp_model::font_class::{classify, FontCategory};
 use hwp_model::layout::{PageLayerTree, PaintOp};
 use hwp_model::prelude::FontMetricsProvider;
@@ -259,6 +259,9 @@ pub struct PdfPageVisualEvidence {
     pub page: usize,
     pub width: f64,
     pub height: f64,
+    /// Paragraph page-fragments that intentionally paint no text. They are content-free evidence,
+    /// not missing-ink regions, and therefore never enter pixel scoring.
+    pub intentional_blank_text_regions: usize,
     pub regions: Vec<PdfVisualRegion>,
 }
 
@@ -266,6 +269,10 @@ pub struct PdfPageVisualEvidence {
 pub struct PdfVisualRegion {
     pub id: String,
     pub category: &'static str,
+    /// Text regions are `painted` when the exact placement contains a glyph in the block band, or
+    /// `expected-missing` when source-visible text produced no glyph there. Non-text regions use
+    /// `not-applicable`. This exposes a layout evidence failure without leaking text or addresses.
+    pub paint_status: &'static str,
     pub x: f64,
     pub y: f64,
     pub w: f64,
@@ -293,10 +300,11 @@ fn push_visual_region(
     counters: &mut [usize; 4],
     category_index: usize,
     category: &'static str,
-    page_width: f64,
-    page_height: f64,
+    paint_status: &'static str,
+    page_size: (f64, f64),
     raw: (f64, f64, f64, f64),
 ) -> Result<(), String> {
+    let (page_width, page_height) = page_size;
     let (x, y, w, h) = raw;
     if ![page_width, page_height, x, y, w, h]
         .into_iter()
@@ -320,6 +328,7 @@ fn push_visual_region(
     regions.push(PdfVisualRegion {
         id: format!("{category}-{:04}", counters[category_index]),
         category,
+        paint_status,
         x: left,
         y: top,
         w: right - left,
@@ -329,26 +338,69 @@ fn push_visual_region(
     Ok(())
 }
 
+fn paragraph_expects_text_paint(paragraph: &Paragraph) -> bool {
+    paragraph.runs.iter().any(|run| {
+        run.content.iter().any(|inline| {
+            matches!(inline, Inline::Text(text) if text.chars().any(|ch| !matches!(ch, ' ' | '\t' | '\n')))
+        })
+    })
+}
+
+fn block_band_contains_glyph(
+    page: &hwp_typeset::PlacedPage,
+    block: &hwp_typeset::PlacedBlock,
+) -> bool {
+    let right = block.x + block.w;
+    let bottom = block.y + block.h;
+    page.glyphs.iter().any(|glyph| {
+        glyph.x >= block.x
+            && glyph.x <= right
+            && glyph.baseline >= block.y
+            && glyph.baseline <= bottom
+    })
+}
+
 fn visual_evidence(
     placed: &PlacedDoc,
+    doc: &SemanticDoc,
     candidate_pdf_sha256: String,
 ) -> Result<PdfVisualEvidence, String> {
     let mut pages = Vec::with_capacity(placed.pages.len());
     for (page_index, page) in placed.pages.iter().enumerate() {
         let mut regions = Vec::new();
         let mut counters = [0usize; 4];
+        let mut intentional_blank_text_regions = 0usize;
         for block in page
             .blocks
             .iter()
             .filter(|block| block.kind == BlockKind::Paragraph)
         {
+            let paragraph = doc
+                .sections
+                .get(block.section)
+                .and_then(|section| section.blocks.get(block.block))
+                .and_then(|block| match block {
+                    Block::Paragraph(paragraph) => Some(paragraph),
+                    Block::Table(_) => None,
+                })
+                .ok_or_else(|| "pdf.visual_evidence.paragraph_provenance_mismatch".to_string())?;
+            if !paragraph_expects_text_paint(paragraph) {
+                counters[0] += 1;
+                intentional_blank_text_regions += 1;
+                continue;
+            }
+            let paint_status = if block_band_contains_glyph(page, block) {
+                "painted"
+            } else {
+                "expected-missing"
+            };
             push_visual_region(
                 &mut regions,
                 &mut counters,
                 0,
                 "text",
-                page.width,
-                page.height,
+                paint_status,
+                (page.width, page.height),
                 (block.x, block.y, block.w, block.h),
             )?;
         }
@@ -358,8 +410,8 @@ fn visual_evidence(
                 &mut counters,
                 1,
                 "table",
-                page.width,
-                page.height,
+                "not-applicable",
+                (page.width, page.height),
                 (table.x, table.y, table.w, table.h),
             )?;
         }
@@ -374,8 +426,8 @@ fn visual_evidence(
                 &mut counters,
                 category_index,
                 category,
-                page.width,
-                page.height,
+                "not-applicable",
+                (page.width, page.height),
                 (image.x, image.y, image.w, image.h),
             )?;
         }
@@ -383,11 +435,12 @@ fn visual_evidence(
             page: page_index + 1,
             width: page.width,
             height: page.height,
+            intentional_blank_text_regions,
             regions,
         });
     }
     Ok(PdfVisualEvidence {
-        schema_version: 1,
+        schema_version: 2,
         coordinate_space: "HWPUNIT",
         candidate_pdf_sha256,
         pages,
@@ -518,7 +571,7 @@ pub fn export_pdf_with_fonts(
         .finish()
         .map_err(|e| format!("krilla finish: {e:?}"))?;
     let candidate_pdf_sha256 = format!("{:x}", Sha256::digest(&bytes));
-    let visual_evidence = visual_evidence(&placed, candidate_pdf_sha256)?;
+    let visual_evidence = visual_evidence(&placed, doc, candidate_pdf_sha256)?;
     Ok(PdfExport {
         pages: trees.len(),
         bytes,
@@ -1264,6 +1317,7 @@ mod tests {
     use super::*;
     use hwp_model::prelude::*;
     use hwp_typeset::ApproxFontMetrics;
+    use std::num::NonZeroU16;
 
     fn para(text: &str) -> Paragraph {
         Paragraph {
@@ -1306,7 +1360,7 @@ mod tests {
             "non-trivial PDF size, got {}",
             out.bytes.len()
         );
-        assert_eq!(out.visual_evidence.schema_version, 1);
+        assert_eq!(out.visual_evidence.schema_version, 2);
         assert_eq!(out.visual_evidence.coordinate_space, "HWPUNIT");
         assert_eq!(out.visual_evidence.pages.len(), out.pages);
         assert_eq!(
@@ -1315,6 +1369,14 @@ mod tests {
         );
         let regions = &out.visual_evidence.pages[0].regions;
         assert!(regions.iter().any(|region| region.category == "text"));
+        assert!(regions
+            .iter()
+            .filter(|region| region.category == "text")
+            .all(|region| region.paint_status == "painted"));
+        assert_eq!(
+            out.visual_evidence.pages[0].intentional_blank_text_regions,
+            0
+        );
         assert!(regions.iter().all(|region| {
             region.x >= 0.0
                 && region.y >= 0.0
@@ -1323,6 +1385,129 @@ mod tests {
                 && region.x + region.w <= out.visual_evidence.pages[0].width
                 && region.y + region.h <= out.visual_evidence.pages[0].height
         }));
+    }
+
+    #[test]
+    fn visual_evidence_separates_blank_bands_from_painted_text_with_stable_ordinals() {
+        let table = Table {
+            rows: 1,
+            cols: 1,
+            cells: vec![Cell {
+                blocks: vec![Block::Paragraph(para("table cell text"))],
+                ..Default::default()
+            }],
+            col_widths: vec![8_000],
+            ..Default::default()
+        };
+        let doc = doc_with(vec![
+            Block::Paragraph(para(" \t\n")),
+            Block::Paragraph(para("painted body")),
+            Block::Table(table),
+        ]);
+
+        let out = export_pdf(&doc, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
+        let page = &out.visual_evidence.pages[0];
+        assert_eq!(page.intentional_blank_text_regions, 1);
+        let text_regions = page
+            .regions
+            .iter()
+            .filter(|region| region.category == "text")
+            .collect::<Vec<_>>();
+        assert_eq!(text_regions.len(), 1);
+        assert_eq!(text_regions[0].id, "text-0002");
+        assert_eq!(text_regions[0].paint_status, "painted");
+        assert_eq!(
+            page.regions
+                .iter()
+                .filter(|region| region.category == "table")
+                .count(),
+            1,
+            "table-cell glyphs remain represented by the table region, not a body text region"
+        );
+    }
+
+    #[test]
+    fn blank_body_is_not_misclassified_by_a_page_number_decoration() {
+        let mut doc = doc_with(vec![Block::Paragraph(para("\t \n"))]);
+        doc.sections[0].page_number = Some(PageNumberDecoration {
+            start: NonZeroU16::MIN,
+            format: PageNumberFormat::Digit,
+            position: PageNumberPosition::BottomCenter,
+            prefix: None,
+            suffix: None,
+            dash: Some('-'),
+        });
+
+        let out = export_pdf(&doc, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
+        let page = &out.visual_evidence.pages[0];
+        assert_eq!(page.intentional_blank_text_regions, 1);
+        assert!(page.regions.iter().all(|region| region.category != "text"));
+    }
+
+    #[test]
+    fn page_fragment_paint_status_uses_only_glyphs_inside_that_band() {
+        let block = hwp_typeset::PlacedBlock {
+            x: 100.0,
+            y: 200.0,
+            w: 400.0,
+            h: 100.0,
+            section: 0,
+            block: 0,
+            kind: BlockKind::Paragraph,
+        };
+        let glyph = |x, baseline| hwp_typeset::PlacedGlyph {
+            x,
+            baseline,
+            ch: '가',
+            size: 100.0,
+            color: Color::default(),
+            underline: false,
+            bold: false,
+            italic: false,
+            font: None,
+            cluster: None,
+        };
+        let first_fragment = hwp_typeset::PlacedPage {
+            glyphs: vec![glyph(120.0, 250.0)],
+            ..Default::default()
+        };
+        let continuation_without_text = hwp_typeset::PlacedPage {
+            glyphs: vec![glyph(120.0, 350.0)],
+            ..Default::default()
+        };
+
+        assert!(block_band_contains_glyph(&first_fragment, &block));
+        assert!(!block_band_contains_glyph(
+            &continuation_without_text,
+            &block
+        ));
+    }
+
+    #[test]
+    fn clipped_visual_region_keeps_paint_status_and_bounded_geometry() {
+        let mut regions = Vec::new();
+        let mut counters = [0usize; 4];
+
+        push_visual_region(
+            &mut regions,
+            &mut counters,
+            0,
+            "text",
+            "painted",
+            (100.0, 200.0),
+            (-10.0, 180.0, 50.0, 40.0),
+        )
+        .unwrap();
+
+        assert_eq!(regions.len(), 1);
+        let region = &regions[0];
+        assert_eq!(region.id, "text-0001");
+        assert_eq!(region.paint_status, "painted");
+        assert_eq!(
+            (region.x, region.y, region.w, region.h),
+            (0.0, 180.0, 40.0, 20.0)
+        );
+        assert!(region.clipped);
     }
 
     #[test]

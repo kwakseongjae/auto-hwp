@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-25 (Codex sol) · #221 paint-backed visual regions
+- visual schema v2가 blank 42개를 제외하고 painted text 28개·expected-missing 0을 증명했다.
+- candidate PDF SHA는 #219와 exact; reference-empty 12개가 누적 수직 drift 축을 가리킨다.
+- full green: 8/18/24+98.9%, AI120, Vitest1,012, Chromium84 pass/3 skip/1 retry-pass; rhwp 무수정.
+- 다음: commit/push/PR/CI/merge→#93/#114 동기화→첫 divergent vertical increment 단일축 child.
+
 ## 2026-08-25 (Codex sol) · #219 fail-closed HWP5 page-number enrichment
 - rhwp base decode 뒤 whole-document strict parse·typed/topology 호환 때만 `Section.page_number` atomic 보강.
 - production SVG/PDF=own candidate; T3 8쪽 bbox height delta `-59..-952px`→`-2..+5px`, oracle 불변.

@@ -85,7 +85,7 @@ HARD_MAX_REPORT_BYTES = 2 * GIB
 HARD_MAX_SUBPROCESS_OUTPUT_BYTES = 4 * MIB
 HARD_SUBPROCESS_TIMEOUT_SECONDS = 300.0
 
-VISUAL_REGION_SCHEMA_VERSION = 1
+VISUAL_REGION_SCHEMA_VERSION = 2
 MAX_VISUAL_REGION_MANIFEST_BYTES = 8 * MIB
 MAX_VISUAL_REGIONS_TOTAL = 10_000
 MAX_VISUAL_REGIONS_PER_PAGE = 2_000
@@ -421,7 +421,9 @@ def _load_visual_regions(
         "visual region manifest",
     )
     if root["schema_version"] != VISUAL_REGION_SCHEMA_VERSION:
-        raise VisualCheckError("visual region manifest schema_version must be 1")
+        raise VisualCheckError(
+            f"visual region manifest schema_version must be {VISUAL_REGION_SCHEMA_VERSION}"
+        )
     if root["coordinate_space"] != "HWPUNIT":
         raise VisualCheckError("visual region manifest coordinate_space must be HWPUNIT")
     if root["candidate_pdf_sha256"] != candidate_sha256:
@@ -432,13 +434,27 @@ def _load_visual_regions(
 
     ids: Set[str] = set()
     total_regions = 0
+    intentional_blank_text_regions = 0
     category_counts = {category: 0 for category in sorted(VISUAL_REGION_CATEGORIES)}
     for index, (page, pdf_page) in enumerate(zip(pages, candidate_info.pages), start=1):
         page = _exact_object_keys(
-            page, {"page", "width", "height", "regions"}, f"visual regions page {index}"
+            page,
+            {"page", "width", "height", "intentional_blank_text_regions", "regions"},
+            f"visual regions page {index}",
         )
         if page["page"] != index:
             raise VisualCheckError("visual region manifest pages must be ordered and one-based")
+        page_blank_regions = page["intentional_blank_text_regions"]
+        if (
+            isinstance(page_blank_regions, bool)
+            or not isinstance(page_blank_regions, int)
+            or page_blank_regions < 0
+            or page_blank_regions > MAX_VISUAL_REGIONS_PER_PAGE
+        ):
+            raise VisualCheckError(
+                "visual region intentional_blank_text_regions must be a bounded non-negative integer"
+            )
+        intentional_blank_text_regions += page_blank_regions
         page_width = _finite_number(page["width"], f"visual regions page {index}.width")
         page_height = _finite_number(page["height"], f"visual regions page {index}.height")
         if page_width <= 0 or page_height <= 0:
@@ -464,7 +480,9 @@ def _load_visual_regions(
         for region_index, region in enumerate(regions):
             label = f"visual regions page {index}.regions[{region_index}]"
             region = _exact_object_keys(
-                region, {"id", "category", "x", "y", "w", "h", "clipped"}, label
+                region,
+                {"id", "category", "paint_status", "x", "y", "w", "h", "clipped"},
+                label,
             )
             region_id = region["id"]
             if not isinstance(region_id, str) or not re.fullmatch(
@@ -478,6 +496,12 @@ def _load_visual_regions(
             category = region["category"]
             if category not in VISUAL_REGION_CATEGORIES or not region_id.startswith(f"{category}-"):
                 raise VisualCheckError(f"{label}.category is invalid or disagrees with id")
+            paint_status = region["paint_status"]
+            if category == "text":
+                if paint_status not in {"painted", "expected-missing"}:
+                    raise VisualCheckError(f"{label}.paint_status is invalid for text")
+            elif paint_status != "not-applicable":
+                raise VisualCheckError(f"{label}.paint_status must be not-applicable")
             if not isinstance(region["clipped"], bool):
                 raise VisualCheckError(f"{label}.clipped must be boolean")
             x = _finite_number(region["x"], f"{label}.x")
@@ -509,6 +533,7 @@ def _load_visual_regions(
         "bytes": snapshot.stat().st_size,
         "total_regions": total_regions,
         "category_counts": category_counts,
+        "intentional_blank_text_regions": intentional_blank_text_regions,
     }
 
 
@@ -1921,6 +1946,7 @@ def _score_visual_regions(
         base = {
             "id": region["id"],
             "category": region["category"],
+            "paint_status": region["paint_status"],
             "source_bounds_hwpunit": {
                 "x": region["x"],
                 "y": region["y"],
@@ -1935,6 +1961,17 @@ def _score_visual_regions(
                 or bottom != raw_bottom + dy
             ),
         }
+        if region["paint_status"] == "expected-missing":
+            base.update(
+                {
+                    "status": "unscorable",
+                    "reason": "source-visible paragraph produced no placed glyph in its page band",
+                    "aligned_bounds_px": None,
+                    "metrics": None,
+                }
+            )
+            results.append(base)
+            continue
         if right <= left or bottom <= top:
             base.update(
                 {
@@ -2614,6 +2651,9 @@ def _run_visual_check_from_snapshots(
             "bytes": visual_regions["bytes"],
             "total_regions": visual_regions["total_regions"],
             "category_counts": visual_regions["category_counts"],
+            "intentional_blank_text_regions": visual_regions[
+                "intentional_blank_text_regions"
+            ],
         }
         if visual_regions is not None
         else {"provided": False}
@@ -2744,6 +2784,7 @@ def _run_visual_check_from_snapshots(
                     {
                         "id": region["id"],
                         "category": region["category"],
+                        "paint_status": region["paint_status"],
                         "source_bounds_hwpunit": {
                             key: region[key] for key in ("x", "y", "w", "h")
                         },
@@ -2781,6 +2822,13 @@ def _run_visual_check_from_snapshots(
                     "alignment": None,
                     "metrics": None,
                     "semantic_regions": semantic_regions,
+                    "intentional_blank_text_regions": (
+                        visual_regions["document"]["pages"][page_number - 1][
+                            "intentional_blank_text_regions"
+                        ]
+                        if visual_regions is not None
+                        else 0
+                    ),
                     "artifacts": artifacts,
                 }
             )
@@ -2890,11 +2938,21 @@ def _run_visual_check_from_snapshots(
                 "alignment": metrics["alignment"],
                 "metrics": metrics,
                 "semantic_regions": semantic_regions,
+                "intentional_blank_text_regions": (
+                    visual_regions["document"]["pages"][page_number - 1][
+                        "intentional_blank_text_regions"
+                    ]
+                    if visual_regions is not None
+                    else 0
+                ),
                 "artifacts": artifacts,
             }
         )
 
     report["summary"] = _summarize_pages(report["pages"])
+    report["summary"]["intentional_blank_text_regions"] = sum(
+        page.get("intentional_blank_text_regions", 0) for page in report["pages"]
+    )
     report["summary"]["pixel_comparison_attempted"] = True
     if report["summary"]["unscorable_pages"]:
         report["status"] = "partially_unscorable"
