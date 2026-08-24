@@ -107,6 +107,59 @@ export interface ProposalCapabilities {
   pdf_export: boolean;
 }
 
+export interface SemanticDiffEvidence {
+  before_hash: string;
+  after_hash: string;
+  changed_addresses: AffectedAddress[];
+  unchanged_blocks_checked: number;
+  unexpected_changes: AffectedAddress[];
+}
+
+export interface LayoutEvidence {
+  pages: number;
+  lockstep_pages: number;
+  lines: number;
+  glyphs: number;
+  blocks: number;
+  tables: number;
+  images: number;
+}
+
+export interface PageArtifactEvidence {
+  page: number;
+  before_svg_hash: string | null;
+  after_svg_hash: string | null;
+  before_svg_bytes: number;
+  after_svg_bytes: number;
+}
+
+export interface PdfArtifactEvidence {
+  before_hash: string;
+  after_hash: string;
+  before_bytes: number;
+  after_bytes: number;
+  before_pages: number;
+  after_pages: number;
+  before_stubbed_objects: number;
+  after_stubbed_objects: number;
+  diagnostic_codes: string[];
+}
+
+export interface VerificationReportV1 {
+  verification_version: 1;
+  semantic: SemanticDiffEvidence;
+  before_layout: LayoutEvidence;
+  after_layout: LayoutEvidence;
+  affected_pages: number[];
+  unaffected_pages_checked: number[];
+  page_artifacts: PageArtifactEvidence[];
+  pdf: PdfArtifactEvidence | null;
+  structural_failures: string[];
+  advisories: string[];
+  commit_allowed: boolean;
+  submission_ready: boolean;
+}
+
 /** Revision-bound Proposal v1 returned byte-for-byte-equivalently by wasm/Tauri/MCP. */
 export interface ProposalV1 {
   proposal_version: 1;
@@ -121,6 +174,7 @@ export interface ProposalV1 {
   capabilities: ProposalCapabilities;
   risks: string[];
   warnings: string[];
+  verification: VerificationReportV1;
 }
 
 /** A STYLED text run (Intent schema v0 `RunSpec`, INTENT-SCHEMA §6.7) — the read shape `blockRuns`

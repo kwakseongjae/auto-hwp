@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #105 pre-commit verifier
+- Proposal scratch에 content-free semantic/LOCKSTEP/SVG/PDF 검증 보고서와 commit gate를 결합.
+- 새 placeholder/stub·미선언 변경은 차단, 기존 미지원 객체는 submission-ready만 false로 분리.
+- full green: 8/18/24+98.9%, oracle82, PDF51, Vitest1,012, Chromium85 pass/3 skip; rhwp 무수정.
+- 다음: commit/push→`Closes #105` PR/CI/merge 후 장기 Goal 실행을 멈추고 로드맵 브리핑.
+
 ## 2026-08-24 (Codex sol) · #104 canonical Proposal v1
 - Web/Tauri/MCP/SDK를 revision/session/document-bound scratch preview와 one-undo commit으로 통합.
 - AiContent/EditScript strict normalize·즉시 compile, stale/mid-batch/recorded digest parity를 잠금.

@@ -98,6 +98,71 @@ pub struct CapabilitySnapshot {
     pub pdf_export: bool,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SemanticDiffEvidence {
+    pub before_hash: String,
+    pub after_hash: String,
+    pub changed_addresses: Vec<AffectedAddress>,
+    pub unchanged_blocks_checked: usize,
+    pub unexpected_changes: Vec<AffectedAddress>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LayoutEvidence {
+    pub pages: usize,
+    pub lockstep_pages: usize,
+    pub lines: usize,
+    pub glyphs: usize,
+    pub blocks: usize,
+    pub tables: usize,
+    pub images: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PageArtifactEvidence {
+    pub page: u32,
+    pub before_svg_hash: Option<String>,
+    pub after_svg_hash: Option<String>,
+    pub before_svg_bytes: usize,
+    pub after_svg_bytes: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PdfArtifactEvidence {
+    pub before_hash: String,
+    pub after_hash: String,
+    pub before_bytes: usize,
+    pub after_bytes: usize,
+    pub before_pages: usize,
+    pub after_pages: usize,
+    pub before_stubbed_objects: usize,
+    pub after_stubbed_objects: usize,
+    pub diagnostic_codes: Vec<String>,
+}
+
+/// Content-free proof produced from the engine-held live/scratch pair. Hashes are stable evidence
+/// identifiers, not authorization or cryptographic signatures; structural gates remain authoritative.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct VerificationReportV1 {
+    pub verification_version: u8,
+    pub semantic: SemanticDiffEvidence,
+    pub before_layout: LayoutEvidence,
+    pub after_layout: LayoutEvidence,
+    pub affected_pages: Vec<u32>,
+    pub unaffected_pages_checked: Vec<u32>,
+    pub page_artifacts: Vec<PageArtifactEvidence>,
+    pub pdf: Option<PdfArtifactEvidence>,
+    pub structural_failures: Vec<String>,
+    pub advisories: Vec<String>,
+    pub commit_allowed: bool,
+    pub submission_ready: bool,
+}
+
 /// One external proposal contract for Web, Tauri, MCP, and SDK. Every field participates in
 /// `digest`; callers must treat the DTO as immutable and commit with both `proposal_id` and
 /// `base_revision`.
@@ -116,6 +181,7 @@ pub struct ProposalV1 {
     pub capabilities: CapabilitySnapshot,
     pub risks: Vec<String>,
     pub warnings: Vec<String>,
+    pub verification: VerificationReportV1,
 }
 
 struct PendingProposal {
@@ -1712,7 +1778,7 @@ pub enum Outcome {
         rationale: String,
         preview: String,
     },
-    ProposalV1(ProposalV1),
+    ProposalV1(Box<ProposalV1>),
     Committed {
         ops: usize,
     },
@@ -1965,6 +2031,7 @@ fn normalized_intent(value: &Value) -> Result<Value, String> {
 fn proposal_addresses(intents: &[Value]) -> Vec<AffectedAddress> {
     let mut addresses = Vec::new();
     for intent in intents {
+        let kind = intent.get("intent").and_then(Value::as_str).unwrap_or("");
         let section = intent
             .get("section")
             .and_then(Value::as_u64)
@@ -1983,7 +2050,33 @@ fn proposal_addresses(intents: &[Value]) -> Vec<AffectedAddress> {
             .get("col")
             .and_then(Value::as_u64)
             .map(|v| v as usize);
-        if section.is_some() || block.is_some() || row.is_some() || col.is_some() {
+        // Index-shifting edits invalidate stable block addressing for the remainder of a section.
+        // Authoring DSLs may touch arbitrary sections, so they deliberately declare the whole doc.
+        if matches!(kind, "ApplyContent" | "ApplyEditScript" | "Replace") {
+            addresses.push(AffectedAddress {
+                section: None,
+                block: None,
+                row: None,
+                col: None,
+            });
+        } else if matches!(
+            kind,
+            "InsertTableAt"
+                | "InsertParagraphAt"
+                | "InsertChartAt"
+                | "DeleteBlock"
+                | "SplitParagraph"
+                | "MergeParagraph"
+                | "MoveBlock"
+                | "MoveImage"
+        ) {
+            addresses.push(AffectedAddress {
+                section,
+                block: None,
+                row: None,
+                col: None,
+            });
+        } else if section.is_some() || block.is_some() || row.is_some() || col.is_some() {
             addresses.push(AffectedAddress {
                 section,
                 block,
@@ -2088,6 +2181,239 @@ fn proposal_digest(value: &Value) -> Result<String, String> {
     Ok(format!("fnv1a64:{hash:016x}"))
 }
 
+fn evidence_hash(bytes: &[u8]) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("fnv1a64:{hash:016x}")
+}
+
+fn address_is_declared(address: &AffectedAddress, declared: &[AffectedAddress]) -> bool {
+    declared.iter().any(|scope| {
+        scope.section.is_none()
+            || (scope.section == address.section
+                && (scope.block.is_none() || scope.block == address.block))
+    })
+}
+
+fn semantic_diff_evidence(
+    before: &hwp_model::prelude::SemanticDoc,
+    after: &hwp_model::prelude::SemanticDoc,
+    declared: &[AffectedAddress],
+) -> SemanticDiffEvidence {
+    let before_debug = format!("{before:?}");
+    let after_debug = format!("{after:?}");
+    let mut changed_addresses = Vec::new();
+    let mut unchanged_blocks_checked = 0;
+    let sections = before.sections.len().max(after.sections.len());
+    for section in 0..sections {
+        let before_blocks = before
+            .sections
+            .get(section)
+            .map(|s| s.blocks.as_slice())
+            .unwrap_or(&[]);
+        let after_blocks = after
+            .sections
+            .get(section)
+            .map(|s| s.blocks.as_slice())
+            .unwrap_or(&[]);
+        let blocks = before_blocks.len().max(after_blocks.len());
+        for block in 0..blocks {
+            let before_hash = before_blocks
+                .get(block)
+                .map(|b| evidence_hash(format!("{b:?}").as_bytes()));
+            let after_hash = after_blocks
+                .get(block)
+                .map(|b| evidence_hash(format!("{b:?}").as_bytes()));
+            let address = AffectedAddress {
+                section: Some(section),
+                block: Some(block),
+                row: None,
+                col: None,
+            };
+            if before_hash != after_hash {
+                changed_addresses.push(address);
+            } else if !address_is_declared(&address, declared) {
+                unchanged_blocks_checked += 1;
+            }
+        }
+    }
+    let unexpected_changes = changed_addresses
+        .iter()
+        .filter(|address| !address_is_declared(address, declared))
+        .cloned()
+        .collect();
+    SemanticDiffEvidence {
+        before_hash: evidence_hash(before_debug.as_bytes()),
+        after_hash: evidence_hash(after_debug.as_bytes()),
+        changed_addresses,
+        unchanged_blocks_checked,
+        unexpected_changes,
+    }
+}
+
+fn layout_evidence(
+    doc: &hwp_model::prelude::SemanticDoc,
+) -> Result<(LayoutEvidence, usize), String> {
+    let inventory = hwp_session::verification_layout_inventory(doc)?;
+    Ok((
+        LayoutEvidence {
+            pages: inventory.pages,
+            lockstep_pages: inventory.lockstep_pages,
+            lines: inventory.lines,
+            glyphs: inventory.glyphs,
+            blocks: inventory.blocks,
+            tables: inventory.tables,
+            images: inventory.images,
+        },
+        inventory.placeholder_objects,
+    ))
+}
+
+#[cfg(feature = "pdf")]
+fn pdf_evidence(
+    before: &hwp_model::prelude::SemanticDoc,
+    after: &hwp_model::prelude::SemanticDoc,
+) -> Result<PdfArtifactEvidence, String> {
+    let before_pdf = hwp_session::emit_pdf(before, None)?;
+    let after_pdf = hwp_session::emit_pdf(after, None)?;
+    let before_stubbed_objects = before_pdf
+        .replay
+        .iter()
+        .map(|page| page.image.stubbed + page.equation.stubbed + page.chart.stubbed)
+        .sum();
+    let after_stubbed_objects = after_pdf
+        .replay
+        .iter()
+        .map(|page| page.image.stubbed + page.equation.stubbed + page.chart.stubbed)
+        .sum();
+    let mut diagnostic_codes: Vec<String> = after_pdf
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.code.clone())
+        .collect();
+    diagnostic_codes.sort();
+    diagnostic_codes.dedup();
+    Ok(PdfArtifactEvidence {
+        before_hash: evidence_hash(&before_pdf.bytes),
+        after_hash: evidence_hash(&after_pdf.bytes),
+        before_bytes: before_pdf.bytes.len(),
+        after_bytes: after_pdf.bytes.len(),
+        before_pages: before_pdf.pages,
+        after_pages: after_pdf.pages,
+        before_stubbed_objects,
+        after_stubbed_objects,
+        diagnostic_codes,
+    })
+}
+
+#[cfg(not(feature = "pdf"))]
+fn pdf_evidence(
+    _before: &hwp_model::prelude::SemanticDoc,
+    _after: &hwp_model::prelude::SemanticDoc,
+) -> Result<PdfArtifactEvidence, String> {
+    Err("pdf verification is unavailable in this build".into())
+}
+
+fn verify_proposal(
+    before: &hwp_model::prelude::SemanticDoc,
+    after: &hwp_model::prelude::SemanticDoc,
+    declared: &[AffectedAddress],
+) -> Result<VerificationReportV1, String> {
+    let semantic = semantic_diff_evidence(before, after, declared);
+    let (before_layout, before_placeholders) = layout_evidence(before)?;
+    let (after_layout, after_placeholders) = layout_evidence(after)?;
+    let (before_pages, _) = proposal_pages(before, declared);
+    let (after_pages, _) = proposal_pages(after, declared);
+    let before_svg = hwp_session::render_svg(before);
+    let after_svg = hwp_session::render_svg(after);
+    let mut affected_pages = before_pages;
+    affected_pages.extend(after_pages);
+    let mut unaffected_pages_checked = Vec::new();
+    for page in 0..before_svg.len().max(after_svg.len()) {
+        let changed = before_svg.get(page) != after_svg.get(page);
+        if changed {
+            affected_pages.push(page as u32);
+        } else if !affected_pages.contains(&(page as u32)) {
+            unaffected_pages_checked.push(page as u32);
+        }
+    }
+    affected_pages.sort_unstable();
+    affected_pages.dedup();
+    let page_artifacts: Vec<PageArtifactEvidence> = affected_pages
+        .iter()
+        .map(|page| {
+            let before = before_svg.get(*page as usize);
+            let after = after_svg.get(*page as usize);
+            PageArtifactEvidence {
+                page: *page,
+                before_svg_hash: before.map(|svg| evidence_hash(svg.as_bytes())),
+                after_svg_hash: after.map(|svg| evidence_hash(svg.as_bytes())),
+                before_svg_bytes: before.map_or(0, |svg| svg.len()),
+                after_svg_bytes: after.map_or(0, |svg| svg.len()),
+            }
+        })
+        .collect();
+
+    let mut structural_failures = Vec::new();
+    if !semantic.unexpected_changes.is_empty() {
+        structural_failures.push("declared-unaffected-semantic-change".into());
+    }
+    if before_layout.pages != before_layout.lockstep_pages
+        || after_layout.pages != after_layout.lockstep_pages
+    {
+        structural_failures.push("layout-lockstep-mismatch".into());
+    }
+    if after_placeholders > before_placeholders {
+        structural_failures.push("placeholder-rendered-object".into());
+    }
+    let pdf = if cfg!(feature = "pdf") {
+        Some(pdf_evidence(before, after)?)
+    } else {
+        None
+    };
+    if pdf
+        .as_ref()
+        .is_some_and(|evidence| evidence.after_stubbed_objects > evidence.before_stubbed_objects)
+    {
+        structural_failures.push("pdf-object-replay-incomplete".into());
+    }
+    structural_failures.sort();
+    structural_failures.dedup();
+    let mut advisories = Vec::new();
+    if pdf.is_none() {
+        advisories.push("pdf-evidence-unavailable".into());
+    }
+    if page_artifacts
+        .iter()
+        .any(|page| page.before_svg_hash != page.after_svg_hash)
+    {
+        advisories.push("affected-page-svg-changed".into());
+    }
+    let commit_allowed = structural_failures.is_empty();
+    let submission_ready = commit_allowed
+        && after_placeholders == 0
+        && pdf.as_ref().is_none_or(|evidence| {
+            evidence.after_stubbed_objects == 0 && evidence.diagnostic_codes.is_empty()
+        });
+    Ok(VerificationReportV1 {
+        verification_version: 1,
+        semantic,
+        before_layout,
+        after_layout,
+        affected_pages,
+        unaffected_pages_checked,
+        page_artifacts,
+        pdf,
+        structural_failures,
+        advisories,
+        commit_allowed,
+        submission_ready,
+    })
+}
+
 /// Strictly decode, normalize, and scratch-apply an Intent batch without changing the live revision,
 /// undo depth, or document. A later commit must present the returned id and exact base revision.
 pub fn propose_intents_v1(session: &mut Session, values: &[Value]) -> Result<ProposalV1, String> {
@@ -2131,7 +2457,12 @@ pub fn propose_intents_v1(session: &mut Session, values: &[Value]) -> Result<Pro
     let preview_doc = scratch_session.into_doc();
 
     let affected_addresses = proposal_addresses(&normalized);
-    let (affected_pages, conservative_pages) = proposal_pages(&live_doc, &affected_addresses);
+    let verification = verify_proposal(&live_doc, &preview_doc, &affected_addresses)?;
+    let affected_pages = verification.affected_pages.clone();
+    let conservative_pages = affected_addresses.is_empty()
+        || affected_addresses
+            .iter()
+            .any(|address| address.block.is_none());
     let capabilities = CapabilitySnapshot {
         intent_version: INTENT_VERSION as u8,
         editable: true,
@@ -2163,6 +2494,7 @@ pub fn propose_intents_v1(session: &mut Session, values: &[Value]) -> Result<Pro
         "capabilities": capabilities,
         "risks": risks,
         "warnings": warnings,
+        "verification": verification,
     });
     let digest = proposal_digest(&material)?;
     let dto = ProposalV1 {
@@ -2178,6 +2510,7 @@ pub fn propose_intents_v1(session: &mut Session, values: &[Value]) -> Result<Pro
         capabilities,
         risks,
         warnings,
+        verification,
     };
     session.pending = Some(PendingProposal {
         dto: dto.clone(),
@@ -2213,6 +2546,12 @@ pub fn commit_proposal_v1(
         return Err(format!(
             "stale Proposal v1 (proposal={}, expected_revision={}, live_revision={})",
             pending.dto.proposal_id, expected_revision, live_revision
+        ));
+    }
+    if !pending.dto.verification.commit_allowed {
+        return Err(format!(
+            "Proposal v1 verification blocked commit: {}",
+            pending.dto.verification.structural_failures.join(",")
         ));
     }
     let intents = pending.dto.intents.len();
@@ -2296,9 +2635,9 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
             )?;
             Ok(Outcome::Proposed { rationale, preview })
         }
-        Intent::ProposeIntents { intents } => {
-            Ok(Outcome::ProposalV1(propose_intents_v1(session, &intents)?))
-        }
+        Intent::ProposeIntents { intents } => Ok(Outcome::ProposalV1(
+            propose_intents_v1(session, &intents)?.into(),
+        )),
         Intent::Commit => {
             let (proposal_id, expected_revision) = session
                 .pending
@@ -4554,6 +4893,22 @@ mod tests {
         assert_eq!(proposal.base_revision, before_rev);
         assert_eq!(proposal.intents[0]["runs"][0]["bold"], false);
         assert!(proposal.intents[0]["para"].is_object());
+        assert!(proposal.verification.commit_allowed);
+        assert!(proposal.verification.submission_ready);
+        assert_ne!(
+            proposal.verification.semantic.before_hash,
+            proposal.verification.semantic.after_hash
+        );
+        assert!(proposal.verification.semantic.unexpected_changes.is_empty());
+        assert_eq!(
+            proposal.verification.before_layout.pages,
+            proposal.verification.before_layout.lockstep_pages
+        );
+        assert_eq!(
+            proposal.verification.after_layout.pages,
+            proposal.verification.after_layout.lockstep_pages
+        );
+        assert!(!proposal.verification.page_artifacts.is_empty());
         assert_eq!(s.doc.as_ref().unwrap().revision(), before_rev);
         assert_eq!(s.doc.as_ref().unwrap().can_undo(), before_undo);
         assert_eq!(export_bytes(&s).unwrap(), before_bytes);
@@ -4566,6 +4921,40 @@ mod tests {
             "one undo reverts the whole proposal"
         );
         assert_eq!(export_bytes(&s).unwrap(), before_bytes);
+    }
+
+    #[test]
+    fn proposal_verification_detects_unexpected_semantic_change_and_blocks_commit() {
+        let mut s = Session::default();
+        apply_intent(&mut s, Intent::Open { path: showcase() }).unwrap();
+        let before_rev = s.doc.as_ref().unwrap().revision();
+        let proposal = propose_intents_v1(
+            &mut s,
+            &[json!({"intent":"SetParagraphText","section":0,"block":0,"text":"검증"})],
+        )
+        .unwrap();
+        let live = s.doc.as_ref().unwrap().doc();
+        let preview = &s.pending.as_ref().unwrap().preview_doc;
+        let wrong_scope = [AffectedAddress {
+            section: Some(0),
+            block: Some(1),
+            row: None,
+            col: None,
+        }];
+        let evidence = semantic_diff_evidence(live, preview, &wrong_scope);
+        assert!(!evidence.unexpected_changes.is_empty());
+
+        let pending = s.pending.as_mut().unwrap();
+        pending.dto.verification.commit_allowed = false;
+        pending
+            .dto
+            .verification
+            .structural_failures
+            .push("declared-unaffected-semantic-change".into());
+        let err =
+            commit_proposal_v1(&mut s, &proposal.proposal_id, proposal.base_revision).unwrap_err();
+        assert!(err.contains("verification blocked commit"));
+        assert_eq!(s.doc.as_ref().unwrap().revision(), before_rev);
     }
 
     #[test]
@@ -4680,11 +5069,19 @@ mod tests {
             "affected_pages": [1],
             "capabilities": {"editable":true,"hwp_export":false,"hwpx_export":true,"intent_version":0,"pdf_export":true},
             "risks": [],
-            "warnings": []
+            "warnings": [],
+            "verification": {
+                "verification_version": 1,
+                "semantic": {"before_hash":"b","after_hash":"a","changed_addresses":[],"unchanged_blocks_checked":1,"unexpected_changes":[]},
+                "before_layout": {"pages":1,"lockstep_pages":1,"lines":1,"glyphs":1,"blocks":1,"tables":0,"images":0},
+                "after_layout": {"pages":1,"lockstep_pages":1,"lines":1,"glyphs":1,"blocks":1,"tables":0,"images":0},
+                "affected_pages":[1], "unaffected_pages_checked":[], "page_artifacts":[], "pdf":null, "structural_failures":[], "advisories":[],
+                "commit_allowed":true, "submission_ready":true
+            }
         });
         assert_eq!(
             proposal_digest(&material).unwrap(),
-            "fnv1a64:12f669d02eea3d03"
+            "fnv1a64:1dba1532ae014063"
         );
     }
 

@@ -3,6 +3,30 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-24 · Codex(sol) — **#105 pre-commit verifier full green · PR 직전**.
+  모든 Proposal v1은 live/private-scratch 의미 diff, 동일 font provider의 place/Naive LOCKSTEP,
+  page·line·object inventory, before/after 영향 페이지 SVG hash/bytes와 무변경 페이지 목록을 낸다.
+  pdf feature는 동일 IR의 before/after PDF hash·쪽수·replay/stub·진단 코드를 추가한다. 선언 범위 밖
+  의미 변경, LOCKSTEP 불일치, 새 placeholder/PDF stub은 commit을 차단한다. 기존 미지원 객체는 무관한
+  편집을 막지 않지만 `submission_ready=false`다. raw text/SVG/PDF/font path는 보고서에 없다.
+  Web/Tauri/MCP/SDK strict DTO와 recorded digest `fnv1a64:1dba1532ae014063`가 일치한다.
+  full은 canonical **8/18/24+98.9%**, corpus **84**, catalog **259/12/120**, oracle **82**,
+  PDF visual **51**, wasm **7,993,318B**, Vitest **1,012** green. Chromium 기존 84건+수정 대상 2건
+  재검증으로 최종 **85 pass/3 intentional skip**이며 rhwp는 무수정이다. **다음:** privacy/diff 감사→
+  commit/push/PR `Closes #105`→exact-head CI/comments green autonomous merge→요청대로 실행 중단·브리핑.
+
+- 갱신: 2026-08-24 · Codex(sol) — **PR #208 병합 · #105 pre-commit verifier 착수**.
+  PR #208 exact head `19569fe8`에서 issue-link **4s**·build-test **8m46s**·licenses **2m44s**
+  green, CLEAN/MERGEABLE, review/general/inline 댓글 0을 확인하고 protected main `9175a500`으로
+  squash 병합했다. #104 close·원격/로컬 브랜치 정리 후 #105/#106을 status:ready로 전환하고 #114를
+  content-free 동기화했다. exact main의 `codex/issue-105-precommit-verifier`와 pinned rhwp
+  `f137b4c9`를 준비했다. #105는 #104의 엔진-held scratch snapshot을 유일 pre-state/post-state로
+  사용하고, raw content 대신 deterministic hash/count를 낸다. 구조 gate(LOCKSTEP, declared-unaffected,
+  object inventory, export replay/readiness)가 commit을 막고 SVG/PDF visual evidence는 advisory다.
+  **다음:** 기존 place/Naive/block_pages, PaintOp inventory, SVG, PDF replay diagnostics를 하나의
+  VerificationReport v1로 조합→affected/unaffected node hashes와 before/after page evidence→
+  missing/placeholder object fail-closed→proposal id/revision-bound verify→Web/Tauri/MCP/SDK surface.
+
 - 갱신: 2026-08-24 · Codex(sol) — **#104 Proposal v1 full green · PR 직전**.
   Web/Tauri/MCP/SDK가 같은 `ProposeIntents`→strict decode/normalize→detached scratch→
   `CommitProposal(id, expected_revision)` 계약을 쓴다. DTO는 session/document/base revision,

@@ -23,6 +23,14 @@ class CanonicalAdapter extends MockAdapter {
       capabilities: { intent_version: 0, editable: true, hwpx_export: true, hwp_export: false, pdf_export: true },
       risks: [],
       warnings: [],
+      verification: {
+        verification_version: 1,
+        semantic: { before_hash: "fnv1a64:before", after_hash: "fnv1a64:after", changed_addresses: [], unchanged_blocks_checked: 1, unexpected_changes: [] },
+        before_layout: { pages: 1, lockstep_pages: 1, lines: 1, glyphs: 1, blocks: 1, tables: 0, images: 0 },
+        after_layout: { pages: 1, lockstep_pages: 1, lines: 1, glyphs: 1, blocks: 1, tables: 0, images: 0 },
+        affected_pages: [0], unaffected_pages_checked: [], page_artifacts: [], pdf: null, structural_failures: [], advisories: [],
+        commit_allowed: true, submission_ready: true,
+      },
     };
   }
 
