@@ -107,17 +107,30 @@ The additive v2 semantic comparison classifies those numbers without changing v1
   same 32 tables and no other active semantic control;
 - run `+7` contains the same omitted caption run plus six empty text runs retained by the first-party
   parser and elided by rhwp: two in body paragraphs and four in table cells. Exact text comparison is
-  equal, but effective empty-run typography/layout parity is not yet proven.
+  equal. The additive empty-run typography projection records only opaque paragraph ordinals, semantic
+  scope, run ordinal, resolved height, visible-content boolean, and layout role; it never records text,
+  file names, paths, source hashes, or raw records.
 
-The completed benchmark therefore remains `semantic-mismatch` and ineligible. The checker does not
-allow-list the six empty runs: an empty run can still carry a character shape that affects blank-line
-height. That difference must clear layout/PDF evidence before eligibility can change.
+Issue #200 classified the six-run delta without changing the parsed source model. Five differing
+paragraphs contain visible content, so their trailing glyphless runs are invisible to the shared
+typesetter. The remaining wholly empty body paragraph has two candidate empty runs versus one oracle
+run, but both resolve to the same 1600 HWPUNIT effective height. A diagnostic-only normalization clone
+drops only those layout-invisible runs (or retains the effective-height run for an empty paragraph).
+Hostile fixtures keep different empty-paragraph heights and non-text controls non-equivalent.
+
+The candidate and that evidence clone are exact across positioned flow/glyph paint, per-page SVG, and
+PDF bytes. Candidate and rhwp still both produce 8 pages with equal per-page block/table/rect/line
+counts, but exact block/table/cell/rect/line geometry does not yet match and the candidate has 24 more
+painted glyphs (three per page). The empty-run difference is therefore semantically classified, while
+the completed benchmark remains ineligible as `render-parity-unproven`; the remaining parser-wide
+render delta must be isolated before cutover.
 
 ## Cutover rule
 
 Completing one bounded benchmark is only the first eligibility milestone. The content-free committed
-HWP5 matrix currently covers 13 public cases and reports eligible 0, semantic-mismatch 1,
-unsupported-semantic 7, unsupported-section-control 4, and invalid-container 1. The optional
+HWP5 matrix currently covers 13 public cases and reports eligible 0, render-parity-unproven 1,
+unsupported-semantic 7, unsupported-border-fill 3, unsupported-style-semantics 1, and
+invalid-container 1. The optional
 rights-reviewed private intake expands this to 33 cases: the additional 20 classify as
 unsupported-style-semantics 15, unsupported-border-fill 3, and unsupported-table-topology 2. This is a truthful starting
 matrix rather than a coverage score: every unknown, unsupported, malformed, ambiguous, or

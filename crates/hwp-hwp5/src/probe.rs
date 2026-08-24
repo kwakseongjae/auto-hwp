@@ -2,7 +2,7 @@ use crate::{parse_file_header, walk_records, Error, FileHeader, Record, RecordLi
 use cfb::CompoundFile;
 use flate2::read::DeflateDecoder;
 use hwp_ingest::limits::{self, MAX_DECOMPRESSED_TOTAL, MAX_ENTRY_COUNT};
-use hwp_model::document::{Block, Inline, SemanticDoc};
+use hwp_model::document::{Block, Inline, Paragraph, Run, SemanticDoc};
 use serde::Serialize;
 use std::io::{Cursor, Read, Seek};
 
@@ -143,6 +143,34 @@ pub struct SemanticDifferentialReport {
     /// Exact text equality is checked in memory and exposed only as a boolean. Source text and a
     /// content-derived hash never enter the report.
     pub text_matches: bool,
+    /// Content-free, opaque observations for paragraphs whose empty-run counts differ. Empty runs
+    /// have no glyphs; the shared typesetter reads only the resolved height when the whole paragraph
+    /// is empty. This evidence therefore records no text, source path, file name, or source hash.
+    pub empty_run_typography: Vec<EmptyRunTypographyObservation>,
+    /// True only when removing the count-only empty-run difference preserves typed topology and every
+    /// empty paragraph resolves to the same effective height. This is semantic equivalence evidence,
+    /// not production-cutover permission; layout/PDF parity remains a separate gate.
+    pub empty_run_typography_equivalent: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct EmptyRunShapeObservation {
+    pub run_ordinal: usize,
+    pub height_hwpunit: i32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct EmptyRunTypographyObservation {
+    pub scope: &'static str,
+    /// Global traversal ordinal only. It is deliberately not a section/block/cell source address.
+    pub paragraph_ordinal: usize,
+    pub paragraph_has_visible_content: bool,
+    pub candidate: Vec<EmptyRunShapeObservation>,
+    pub oracle: Vec<EmptyRunShapeObservation>,
+    pub candidate_effective_empty_height_hwpunit: i32,
+    pub oracle_effective_empty_height_hwpunit: i32,
+    pub layout_role: &'static str,
+    pub effective_height_matches: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -339,12 +367,26 @@ pub fn compare_semantic_candidates(
     oracle: &SemanticDoc,
 ) -> OwnParserEligibilityReport {
     let text_matches = semantic_text_projection(candidate) == semantic_text_projection(oracle);
+    let empty_run_typography = empty_run_typography(candidate, oracle);
+    let normalized_topology_matches = semantic_v2_topology_without_empty_runs(candidate)
+        == semantic_v2_topology_without_empty_runs(oracle);
+    let empty_run_typography_equivalent = !empty_run_typography.is_empty()
+        && normalized_topology_matches
+        && empty_run_typography.iter().all(|observation| {
+            observation.paragraph_has_visible_content || observation.effective_height_matches
+        });
     let candidate = semantic_projection(candidate);
     let oracle = semantic_projection(oracle);
     let topology_matches =
         candidate.semantic_topology_fingerprint == oracle.semantic_topology_fingerprint;
     let mismatches = semantic_mismatches(&candidate, &oracle);
-    let semantic_matches = topology_matches && text_matches && mismatches.is_empty();
+    let only_empty_run_counts_differ = mismatches.iter().all(|mismatch| {
+        mismatch.category.starts_with("runs.")
+            || mismatch.category.starts_with("coalesced-text-runs.")
+            || mismatch.category.starts_with("empty-text-runs.")
+    });
+    let semantic_matches = (topology_matches && text_matches && mismatches.is_empty())
+        || (text_matches && empty_run_typography_equivalent && only_empty_run_counts_differ);
     OwnParserEligibilityReport {
         schema: "auto-hwp.hwp5-own-parser-eligibility.v2",
         // v2 classifies semantic equality but has no per-document layout/PDF evidence channel yet.
@@ -363,6 +405,8 @@ pub fn compare_semantic_candidates(
             mismatches,
             topology_matches,
             text_matches,
+            empty_run_typography,
+            empty_run_typography_equivalent,
         }),
     }
 }
@@ -433,6 +477,65 @@ pub fn rejected_eligibility_with_source(
     let mut report = rejected_eligibility(rejection_code);
     report.source_records = Some(source_record_projection(source));
     report
+}
+
+/// Normalize only empty runs that the current shared typesetter cannot observe, for differential
+/// layout evidence. This is deliberately **not** called by [`OwnHwp5Parser`](crate::OwnHwp5Parser):
+/// the parsed source semantics remain intact. A paragraph with visible content drops glyphless empty
+/// runs; a wholly empty paragraph retains exactly the run that supplies its effective positive
+/// height (or the first run when every height is zero). Controls and other non-text content are never
+/// classified as empty. Hostile tests lock these boundaries.
+pub fn normalize_empty_runs_for_layout_evidence(doc: &mut SemanticDoc) {
+    fn visit(blocks: &mut [Block], doc_shapes: &[hwp_model::style::CharShape]) {
+        for block in blocks {
+            match block {
+                Block::Paragraph(paragraph) => {
+                    for run in &mut paragraph.runs {
+                        for inline in &mut run.content {
+                            if let Inline::Note(note) = inline {
+                                visit(&mut note.body, doc_shapes);
+                            }
+                        }
+                    }
+                    let visible = paragraph_has_visible_content(paragraph);
+                    if visible {
+                        paragraph.runs.retain(|run| !is_empty_text_run(run));
+                    } else if paragraph.runs.len() > 1
+                        && paragraph.runs.iter().all(is_empty_text_run)
+                    {
+                        let retained = paragraph
+                            .runs
+                            .iter()
+                            .find(|run| {
+                                doc_shapes
+                                    .get(run.char_shape)
+                                    .is_some_and(|shape| shape.height > 0)
+                            })
+                            .or_else(|| paragraph.runs.first())
+                            .cloned();
+                        paragraph.runs.clear();
+                        paragraph.runs.extend(retained);
+                    }
+                }
+                Block::Table(table) => {
+                    if let Some(caption) = &mut table.caption {
+                        visit(&mut caption.blocks, doc_shapes);
+                    }
+                    for cell in &mut table.cells {
+                        visit(&mut cell.blocks, doc_shapes);
+                    }
+                }
+            }
+        }
+    }
+
+    let shapes = doc.char_shapes.clone();
+    for section in &mut doc.sections {
+        visit(&mut section.blocks, &shapes);
+        for decoration in &mut section.decorations {
+            visit(&mut decoration.blocks, &shapes);
+        }
+    }
 }
 
 pub fn source_record_projection(source: &Hwp5Probe) -> SourceRecordProjection {
@@ -515,6 +618,73 @@ fn semantic_v2_topology(doc: &SemanticDoc) -> u64 {
     hash.0
 }
 
+fn semantic_v2_topology_without_empty_runs(doc: &SemanticDoc) -> u64 {
+    let mut hash = Fnv1a::new();
+    hash.marker(20, doc.sections.len());
+    for section in &doc.sections {
+        hash.marker(21, section.blocks.len());
+        hash_v2_blocks_without_empty_runs(&section.blocks, &mut hash);
+        hash.marker(22, section.decorations.len());
+        for decoration in &section.decorations {
+            hash.marker(23, decoration.blocks.len());
+            hash_v2_blocks_without_empty_runs(&decoration.blocks, &mut hash);
+        }
+    }
+    hash.0
+}
+
+fn hash_v2_blocks_without_empty_runs(blocks: &[Block], hash: &mut Fnv1a) {
+    hash.marker(24, blocks.len());
+    for block in blocks {
+        match block {
+            Block::Paragraph(paragraph) => {
+                let visible_runs: Vec<_> = paragraph
+                    .runs
+                    .iter()
+                    .filter(|run| !is_empty_text_run(run))
+                    .collect();
+                hash.marker(25, visible_runs.len());
+                for run in visible_runs {
+                    hash.marker(26, run.content.len());
+                    for inline in &run.content {
+                        match inline {
+                            Inline::Text(_) => hash.marker(27, 0),
+                            Inline::Image(_) => hash.marker(28, 0),
+                            Inline::Equation(_) => hash.marker(29, 0),
+                            Inline::Chart(_) => hash.marker(30, 0),
+                            Inline::Note(note) => {
+                                hash.marker(31, note.body.len());
+                                hash_v2_blocks_without_empty_runs(&note.body, hash);
+                            }
+                            Inline::FieldBegin(_) => hash.marker(32, 0),
+                            Inline::FieldEnd(_) => hash.marker(33, 0),
+                            Inline::Bookmark(_) => hash.marker(34, 0),
+                            Inline::Raw(_) => hash.marker(35, 0),
+                        }
+                    }
+                }
+            }
+            Block::Table(table) => {
+                hash.marker(36, table.rows);
+                hash.marker(37, table.cols);
+                hash.marker(38, table.cells.len());
+                hash.marker(39, usize::from(table.caption.is_some()));
+                if let Some(caption) = &table.caption {
+                    hash_v2_blocks_without_empty_runs(&caption.blocks, hash);
+                }
+                for cell in &table.cells {
+                    hash.marker(40, cell.row);
+                    hash.marker(41, cell.col);
+                    hash.marker(42, cell.row_span);
+                    hash.marker(43, cell.col_span);
+                    hash.marker(44, usize::from(cell.active));
+                    hash_v2_blocks_without_empty_runs(&cell.blocks, hash);
+                }
+            }
+        }
+    }
+}
+
 fn hash_v2_blocks(blocks: &[Block], hash: &mut Fnv1a) {
     hash.marker(24, blocks.len());
     for block in blocks {
@@ -562,13 +732,159 @@ fn hash_v2_blocks(blocks: &[Block], hash: &mut Fnv1a) {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum SemanticScope {
     Body,
     Decoration,
     TableCell,
     TableCaption,
     Note,
+}
+
+impl SemanticScope {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Body => "body",
+            Self::Decoration => "decoration",
+            Self::TableCell => "table-cell",
+            Self::TableCaption => "table-caption",
+            Self::Note => "note",
+        }
+    }
+}
+
+fn is_empty_text_run(run: &Run) -> bool {
+    run.content.iter().all(|inline| match inline {
+        Inline::Text(text) => text.is_empty(),
+        _ => false,
+    })
+}
+
+fn semantic_paragraphs(doc: &SemanticDoc) -> Vec<(SemanticScope, &Paragraph)> {
+    fn visit<'a>(
+        blocks: &'a [Block],
+        scope: SemanticScope,
+        out: &mut Vec<(SemanticScope, &'a Paragraph)>,
+    ) {
+        for block in blocks {
+            match block {
+                Block::Paragraph(paragraph) => {
+                    out.push((scope, paragraph));
+                    for run in &paragraph.runs {
+                        for inline in &run.content {
+                            if let Inline::Note(note) = inline {
+                                visit(&note.body, SemanticScope::Note, out);
+                            }
+                        }
+                    }
+                }
+                Block::Table(table) => {
+                    if let Some(caption) = &table.caption {
+                        visit(&caption.blocks, SemanticScope::TableCaption, out);
+                    }
+                    for cell in &table.cells {
+                        visit(&cell.blocks, SemanticScope::TableCell, out);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    for section in &doc.sections {
+        visit(&section.blocks, SemanticScope::Body, &mut out);
+        for decoration in &section.decorations {
+            visit(&decoration.blocks, SemanticScope::Decoration, &mut out);
+        }
+    }
+    out
+}
+
+fn effective_empty_height(paragraph: &Paragraph, doc: &SemanticDoc) -> i32 {
+    paragraph
+        .runs
+        .iter()
+        .filter_map(|run| doc.char_shapes.get(run.char_shape))
+        .map(|shape| shape.height)
+        .find(|height| *height > 0)
+        .unwrap_or(1000)
+}
+
+fn empty_shapes(paragraph: &Paragraph, doc: &SemanticDoc) -> Vec<EmptyRunShapeObservation> {
+    paragraph
+        .runs
+        .iter()
+        .enumerate()
+        .filter(|(_, run)| is_empty_text_run(run))
+        .map(|(run_ordinal, run)| EmptyRunShapeObservation {
+            run_ordinal,
+            height_hwpunit: doc
+                .char_shapes
+                .get(run.char_shape)
+                .map(|shape| shape.height)
+                .unwrap_or_default(),
+        })
+        .collect()
+}
+
+fn paragraph_has_visible_content(paragraph: &Paragraph) -> bool {
+    paragraph.runs.iter().any(|run| {
+        run.content.iter().any(|inline| match inline {
+            Inline::Text(text) => !text.is_empty(),
+            _ => true,
+        })
+    })
+}
+
+fn empty_run_typography(
+    candidate: &SemanticDoc,
+    oracle: &SemanticDoc,
+) -> Vec<EmptyRunTypographyObservation> {
+    let candidate_paragraphs = semantic_paragraphs(candidate);
+    let oracle_paragraphs = semantic_paragraphs(oracle);
+    if candidate_paragraphs.len() != oracle_paragraphs.len() {
+        return Vec::new();
+    }
+
+    candidate_paragraphs
+        .into_iter()
+        .zip(oracle_paragraphs)
+        .enumerate()
+        .filter_map(
+            |(
+                paragraph_ordinal,
+                ((candidate_scope, candidate_para), (oracle_scope, oracle_para)),
+            )| {
+                if candidate_scope != oracle_scope {
+                    return None;
+                }
+                let candidate_shapes = empty_shapes(candidate_para, candidate);
+                let oracle_shapes = empty_shapes(oracle_para, oracle);
+                if candidate_shapes.len() == oracle_shapes.len() {
+                    return None;
+                }
+                let visible = paragraph_has_visible_content(candidate_para)
+                    || paragraph_has_visible_content(oracle_para);
+                let candidate_height = effective_empty_height(candidate_para, candidate);
+                let oracle_height = effective_empty_height(oracle_para, oracle);
+                Some(EmptyRunTypographyObservation {
+                    scope: candidate_scope.label(),
+                    paragraph_ordinal,
+                    paragraph_has_visible_content: visible,
+                    candidate: candidate_shapes,
+                    oracle: oracle_shapes,
+                    candidate_effective_empty_height_hwpunit: candidate_height,
+                    oracle_effective_empty_height_hwpunit: oracle_height,
+                    layout_role: if visible {
+                        "no-glyph-layout-neutral"
+                    } else {
+                        "empty-paragraph-height-source"
+                    },
+                    effective_height_matches: candidate_height == oracle_height,
+                })
+            },
+        )
+        .collect()
 }
 
 fn increment_scope(counts: &mut SemanticScopeCounts, scope: SemanticScope, amount: usize) {
@@ -928,5 +1244,131 @@ mod tests {
         let identical = compare_semantic_candidates(&left, &left);
         assert!(!identical.eligible);
         assert_eq!(identical.rejection_code, Some("render-parity-unproven"));
+    }
+
+    fn doc_with_runs(runs: Vec<hwp_model::document::Run>, heights: &[i32]) -> SemanticDoc {
+        let mut doc = SemanticDoc {
+            char_shapes: heights
+                .iter()
+                .map(|height| hwp_model::style::CharShape {
+                    height: *height,
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        };
+        doc.sections.push(Default::default());
+        doc.sections[0]
+            .blocks
+            .push(Block::Paragraph(hwp_model::document::Paragraph {
+                runs,
+                ..Default::default()
+            }));
+        doc
+    }
+
+    fn run(shape: usize, text: &str) -> hwp_model::document::Run {
+        hwp_model::document::Run {
+            char_shape: shape,
+            content: if text.is_empty() {
+                Vec::new()
+            } else {
+                vec![Inline::Text(text.into())]
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn trailing_empty_run_is_explicitly_layout_neutral() {
+        let candidate = doc_with_runs(vec![run(0, "visible"), run(1, "")], &[1200, 2400]);
+        let oracle = doc_with_runs(vec![run(0, "visible")], &[1200]);
+        let report = compare_semantic_candidates(&candidate, &oracle);
+        let comparison = report.comparison.unwrap();
+        assert!(comparison.empty_run_typography_equivalent);
+        assert_eq!(comparison.empty_run_typography.len(), 1);
+        let observation = &comparison.empty_run_typography[0];
+        assert!(observation.paragraph_has_visible_content);
+        assert_eq!(observation.layout_role, "no-glyph-layout-neutral");
+        assert_eq!(observation.candidate[0].height_hwpunit, 2400);
+        assert!(observation.effective_height_matches);
+    }
+
+    #[test]
+    fn empty_paragraph_requires_equal_effective_height() {
+        let same_candidate = doc_with_runs(vec![run(0, ""), run(0, "")], &[1600]);
+        let same_oracle = doc_with_runs(vec![run(0, "")], &[1600]);
+        let same = compare_semantic_candidates(&same_candidate, &same_oracle)
+            .comparison
+            .unwrap();
+        assert!(same.empty_run_typography_equivalent);
+        assert!(same.empty_run_typography[0].effective_height_matches);
+        assert_eq!(
+            same.empty_run_typography[0].layout_role,
+            "empty-paragraph-height-source"
+        );
+
+        let different_oracle = doc_with_runs(vec![run(0, "")], &[1000]);
+        let different = compare_semantic_candidates(&same_candidate, &different_oracle)
+            .comparison
+            .unwrap();
+        assert!(!different.empty_run_typography_equivalent);
+        assert!(!different.empty_run_typography[0].effective_height_matches);
+    }
+
+    #[test]
+    fn non_text_content_is_never_normalized_as_an_empty_run() {
+        let mut candidate_run = run(0, "");
+        candidate_run
+            .content
+            .push(Inline::Raw(hwp_model::types::RawPart {
+                tag: "fixture-control".into(),
+                bytes: vec![1],
+            }));
+        let candidate = doc_with_runs(vec![candidate_run], &[1000]);
+        let oracle = doc_with_runs(Vec::new(), &[1000]);
+        let comparison = compare_semantic_candidates(&candidate, &oracle)
+            .comparison
+            .unwrap();
+        assert!(comparison.empty_run_typography.is_empty());
+        assert!(!comparison.empty_run_typography_equivalent);
+    }
+
+    #[test]
+    fn evidence_normalization_preserves_empty_height_and_controls() {
+        let mut visible = doc_with_runs(
+            vec![run(0, ""), run(1, "visible"), run(2, "")],
+            &[900, 1200, 2400],
+        );
+        normalize_empty_runs_for_layout_evidence(&mut visible);
+        let Block::Paragraph(visible_para) = &visible.sections[0].blocks[0] else {
+            unreachable!()
+        };
+        assert_eq!(visible_para.runs.len(), 1);
+        assert_eq!(visible_para.runs[0].char_shape, 1);
+
+        let mut empty = doc_with_runs(vec![run(0, ""), run(1, ""), run(2, "")], &[0, 1600, 2400]);
+        normalize_empty_runs_for_layout_evidence(&mut empty);
+        let Block::Paragraph(empty_para) = &empty.sections[0].blocks[0] else {
+            unreachable!()
+        };
+        assert_eq!(empty_para.runs.len(), 1);
+        assert_eq!(empty_para.runs[0].char_shape, 1);
+        assert_eq!(effective_empty_height(empty_para, &empty), 1600);
+
+        let mut control_run = run(0, "");
+        control_run
+            .content
+            .push(Inline::Raw(hwp_model::types::RawPart {
+                tag: "fixture-control".into(),
+                bytes: vec![1],
+            }));
+        let mut control = doc_with_runs(vec![control_run, run(0, "")], &[1000]);
+        normalize_empty_runs_for_layout_evidence(&mut control);
+        let Block::Paragraph(control_para) = &control.sections[0].blocks[0] else {
+            unreachable!()
+        };
+        assert_eq!(control_para.runs.len(), 1);
+        assert!(matches!(control_para.runs[0].content[0], Inline::Raw(_)));
     }
 }

@@ -11,12 +11,14 @@
 
 first-party HWP5 전환 적격성은 별도 fail-closed 계약이다. 저장소에 직접 커밋된 공개 HWP5 12건과
 bounded benchmark 1건은 `hwp5_eligibility_matrix`가 파일명·경로·본문·원본 hash 없이 반복 실행한다.
-현재 13건 모두 ineligible이며 사유 집계는 semantic-mismatch 1, unsupported-semantic 7,
-unsupported-section-control 4, invalid-container 1이다. private intake 20건이 로컬에 있으면 매트릭스는
+현재 13건 모두 ineligible이며 실행 계측 사유 집계는 render-parity-unproven 1,
+unsupported-semantic 7, unsupported-border-fill 3, unsupported-style-semantics 1,
+invalid-container 1이다. private intake 20건이 로컬에 있으면 매트릭스는
 자동으로 33건으로 확장되며, 현재 추가 거부 사유는 unsupported-style-semantics 15,
 unsupported-border-fill 3, unsupported-table-topology 2다. production parser 40/40 통과와 자체 파서
-eligible은 서로 다른 지표다. 또한 typed semantic 비교가 같더라도 문서별 layout/PDF 근거가 없는
-v2는 `render-parity-unproven`으로 거부한다.
+eligible은 서로 다른 지표다. #200은 benchmark의 빈 run 6개만 증거용 clone에서
+정규화했을 때 shared geometry·SVG·PDF가 exact임을 잠그었지만, 전체 candidate/rhwp
+geometry는 아직 다르므로 `render-parity-unproven`·eligible=false를 유지한다.
 
 | 형식 | 승격 | 역할 |
 |---|---:|---|
