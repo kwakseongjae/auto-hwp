@@ -213,8 +213,12 @@
   유지하면서 exact tuple+`0x0500`의 count 6만 additive로 소유한다. positive fixture는 여섯 Block을
   shared IR에 보존하며 count 7, `0x0100` pairing, cell/common geometry drift, 13B extension drift의
   hostile 4축은 fail-closed한다. HWP5 **70 tests**, fmt, clippy `-D warnings`, wasm32 green이며 공개
-  boundary는 다음 common-object `CTRL_HEADER 0x47/47738`로 전진했다. **다음:** quick/full gate와
-  final diff/security audit→commit/push/PR/CI/merge; route·rhwp·HWPX·typesetter·generated 불변.
+  boundary는 다음 common-object `CTRL_HEADER 0x47/47738`로 전진했다. quick/full 모두 green:
+  PDF visual **51**, canonical **8/18/24 + 98.9%+**, public corpus **84**, oracle **82**, HWPX,
+  wasm optimized **7,810,657B**, Vitest **1,007**, Chromium **85 passed/3 skipped/0 failed**. full의
+  sandbox bind EPERM만 허용된 Playwright 실행으로 분리 검증했고 임시 node_modules link 4개는 모두
+  제거했다. generated asset·production route·rhwp·HWPX·typesetter diff 0. **다음:** final
+  diff/security audit→verification evidence commit/push/PR/CI/merge.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #173 병합 · #174 multi-table 경계 착수**.
   자체 HWP5 파서가 exact `tbl ` marker/common-object/TABLE/LIST_HEADER/cell paragraph를 검증해

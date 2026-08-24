@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #190 full green
+- quick/full green: PDF51, canonical gates, corpus84/oracle82, wasm 7,810,657B, Vitest1,007.
+- sandbox bind only separated: Chromium 85 passed/3 skipped/0 failed; temp links removed.
+- route/rhwp/HWPX/typesetter/generated diff 0; next audit→evidence commit→PR/CI/merge.
+
 ## 2026-08-24 (Codex sol) · #190 focused green
 - exact 1×1 + `0x0500` only owns six paragraphs; shared IR preserves all six blocks.
 - count7/wrong width-ref/geometry/extension hostile axes fail closed; HWP5 70, fmt/clippy/wasm32 green.
