@@ -149,6 +149,27 @@ impl<'a> Lifter<'a> {
     /// block-level objects (tables, pictures, equations) anchored in its controls.
     fn push_paragraph(&self, p: &RParagraph, blocks: &mut Vec<Block>) {
         let mut runs = self.lift_runs(p);
+        // rhwp already decoded each extended control's character position from PARA_TEXT's UTF-16
+        // gaps. Preserve that evidence in our source-neutral Run/Inline order instead of appending
+        // pictures or manufacturing a second paragraph for equations/charts (#89).
+        let positions = p.control_text_positions();
+        let mut objects = Vec::new();
+        for (index, ctrl) in p.controls.iter().enumerate() {
+            let position = positions
+                .get(index)
+                .copied()
+                .unwrap_or_else(|| p.text.chars().count());
+            let inline = match ctrl {
+                Control::Picture(pic) => self.lift_picture(pic).map(Inline::Image),
+                Control::Equation(eq) => Some(Inline::Equation(lift_equation(eq))),
+                Control::Shape(shape) => self.lift_chart(shape).map(Inline::Chart),
+                _ => None,
+            };
+            if let Some(inline) = inline {
+                objects.push((position, inline));
+            }
+        }
+        splice_inline_objects(&mut runs, objects);
         // Inline foot/endnote reference markers — appended at paragraph end for v1 (exact mid-run
         // anchoring is a later refinement); the note body renders at the page foot / document end.
         for ctrl in &p.controls {
@@ -231,33 +252,11 @@ impl<'a> Lifter<'a> {
             ..Default::default()
         }));
 
-        // The host we just pushed — pictures ride here (issue 82). Tables still follow as
-        // `Block::Table` (scoring zips paragraphs only, so a table does not shift the pair).
-        let host_idx = blocks.len() - 1;
+        // Tables remain block-level. Renderable picture/equation/chart controls were already woven
+        // into the host run above, in stable source order.
         for ctrl in &p.controls {
             match ctrl {
                 Control::Table(t) => blocks.push(Block::Table(self.lift_table(t))),
-                Control::Picture(pic) => {
-                    // A Picture is a control ON an existing rhwp paragraph, not a second body
-                    // paragraph. Emitting `object_paragraph` made layout-check zip 1:1 slip
-                    // (issue_265.hwp: 199 vs 195, +4). Caption/text-box lists stay nested on the
-                    // rhwp object and are not flattened — they were not the leak.
-                    if let Some(img) = self.lift_picture(pic) {
-                        if let Some(Block::Paragraph(host)) = blocks.get_mut(host_idx) {
-                            attach_inline_object(host, Inline::Image(img));
-                        }
-                    }
-                }
-                Control::Equation(eq) => {
-                    blocks.push(object_paragraph(Inline::Equation(lift_equation(eq))));
-                }
-                // Issue 062-7: an OOXML (DrawingML) chart hosted in a drawing shape. Rendered (or a
-                // reserved stub box) only for the OOXML path; native/legacy charts stay dropped.
-                Control::Shape(shape) => {
-                    if let Some(chart) = self.lift_chart(shape) {
-                        blocks.push(object_paragraph(Inline::Chart(chart)));
-                    }
-                }
                 Control::Form(form) => {
                     if let Some(text) = form_visible_text(form) {
                         append_form_text(blocks, text);
@@ -385,6 +384,7 @@ impl<'a> Lifter<'a> {
         Some(ChartRef {
             width: w,
             height: h,
+            treat_as_char: ole.common.treat_as_char,
             rendered_svg: crate::chart_render::chart_svg(&xml, w, h),
         })
     }
@@ -791,29 +791,72 @@ fn utf16_to_char_idx(text: &str, utf16_pos: u32) -> usize {
 /// Attach an image to the host paragraph it was anchored on. A following `object_paragraph`
 /// would be an extra body paragraph rhwp does not have, so layout-check's 1:1 zip shifts
 /// (issue 82). Equations/charts still use [`object_paragraph`] — that leak was not identified.
-fn attach_inline_object(host: &mut Paragraph, inline: Inline) {
-    host.runs.push(Run {
-        char_shape: host.runs.last().map(|r| r.char_shape).unwrap_or(0),
-        content: vec![inline],
-        ..Default::default()
-    });
-}
+/// Weave decoded controls into the already style-split text runs. Positions are Unicode scalar
+/// indices (rhwp's contract), equal positions keep control order, and a literal U+FFFC placeholder
+/// is consumed once so it cannot become a second visible slot. Non-text markers stay in place.
+fn splice_inline_objects(runs: &mut Vec<Run>, mut objects: Vec<(usize, Inline)>) {
+    if objects.is_empty() {
+        return;
+    }
+    objects.sort_by_key(|(position, _)| *position); // stable sort preserves control order
+    let mut objects = objects.into_iter().peekable();
+    let mut char_pos = 0usize;
+    let mut rebuilt = Vec::with_capacity(runs.len() + 1);
 
-/// Wrap a single inline object (equation / chart) in its own paragraph block, emitted in reading
-/// order after the text paragraph it was anchored in. Pictures no longer use this (issue 82).
-fn object_paragraph(inline: Inline) -> Block {
-    Block::Paragraph(Paragraph {
-        runs: vec![Run {
-            char_shape: 0,
-            content: vec![inline],
+    for run in runs.drain(..) {
+        let mut out = Run {
+            char_shape: run.char_shape,
+            char_ref: run.char_ref,
+            content: Vec::new(),
+        };
+        for inline in run.content {
+            match inline {
+                Inline::Text(text) => {
+                    let mut chunk = String::new();
+                    for ch in text.chars() {
+                        let has_anchor = objects
+                            .peek()
+                            .map(|(position, _)| *position <= char_pos)
+                            .unwrap_or(false);
+                        if has_anchor {
+                            if !chunk.is_empty() {
+                                out.content.push(Inline::Text(std::mem::take(&mut chunk)));
+                            }
+                            while objects
+                                .peek()
+                                .map(|(position, _)| *position <= char_pos)
+                                .unwrap_or(false)
+                            {
+                                let (_, object) = objects.next().unwrap();
+                                out.content.push(object);
+                            }
+                            if ch == '\u{FFFC}' {
+                                char_pos += 1;
+                                continue;
+                            }
+                        }
+                        chunk.push(ch);
+                        char_pos += 1;
+                    }
+                    if !chunk.is_empty() {
+                        out.content.push(Inline::Text(chunk));
+                    }
+                }
+                marker => out.content.push(marker),
+            }
+        }
+        rebuilt.push(out);
+    }
+
+    if objects.peek().is_some() {
+        let mut tail = Run {
+            char_shape: rebuilt.last().map(|run| run.char_shape).unwrap_or(0),
             ..Default::default()
-        }],
-        provenance: Provenance {
-            source: Some(SourceFormat::Hwp5),
-            raw: None,
-        },
-        ..Default::default()
-    })
+        };
+        tail.content.extend(objects.map(|(_, object)| object));
+        rebuilt.push(tail);
+    }
+    *runs = rebuilt;
 }
 
 /// Per-row MINIMUM-height floors (HWPUNIT) from Hancom's stored cell heights — the min-row-height
@@ -1104,6 +1147,7 @@ fn lift_equation(eq: &rhwp::model::control::Equation) -> EquationRef {
         color: lift_text_color(eq.color),
         width: eq.common.width as i32,
         height: eq.common.height as i32,
+        treat_as_char: eq.common.treat_as_char,
         version: eq.version_info.clone(),
         // Issue 062-5: precompute the equation SVG via rhwp's own engine (raw `eq.color` is rhwp's
         // ColorRef 0x00BBGGRR — pass it straight to `eq_color_to_svg`). `None` on empty/failed render
@@ -1816,5 +1860,149 @@ mod tests {
                 .any(|i| matches!(i, Inline::Image(_))),
             "image must ride on the same paragraph"
         );
+    }
+
+    #[test]
+    fn equation_controls_keep_same_position_order_without_extra_paragraphs() {
+        use rhwp::model::control::Equation;
+        use rhwp::model::document::{Document, Section};
+        use rhwp::model::paragraph::Paragraph as RPara;
+
+        let equation = |script: &str| {
+            let equation = Equation {
+                script: script.into(),
+                common: rhwp::model::shape::CommonObjAttr {
+                    width: 800,
+                    height: 1200,
+                    treat_as_char: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            Control::Equation(Box::new(equation))
+        };
+        // A ends at UTF-16 1; B begins at 17, so the 16-unit gap carries two controls at char 1.
+        let para = RPara {
+            text: "AB".into(),
+            char_offsets: vec![0, 17],
+            controls: vec![equation("EqA"), equation("EqB")],
+            ..Default::default()
+        };
+        let mut doc = Document::default();
+        doc.sections.push(Section {
+            paragraphs: vec![para],
+            ..Default::default()
+        });
+
+        let semantic = Lifter::new(&doc).run();
+        assert_eq!(semantic.sections[0].blocks.len(), 1);
+        let Block::Paragraph(paragraph) = &semantic.sections[0].blocks[0] else {
+            panic!("host remains one paragraph")
+        };
+        let tokens: Vec<String> = paragraph
+            .runs
+            .iter()
+            .flat_map(|run| &run.content)
+            .filter_map(|inline| match inline {
+                Inline::Text(text) => Some(text.clone()),
+                Inline::Equation(equation) => Some(equation.script.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(tokens, ["A", "EqA", "EqB", "B"]);
+    }
+
+    #[test]
+    fn object_placeholder_is_consumed_once_at_the_anchor() {
+        let mut runs = vec![Run {
+            char_shape: 0,
+            content: vec![Inline::Text("A\u{FFFC}B".into())],
+            ..Default::default()
+        }];
+        splice_inline_objects(
+            &mut runs,
+            vec![(
+                1,
+                Inline::Image(ImageRef {
+                    bin_ref: "image1".into(),
+                    width: 10,
+                    height: 10,
+                    treat_as_char: true,
+                }),
+            )],
+        );
+        let visible: String = runs
+            .iter()
+            .flat_map(|run| &run.content)
+            .filter_map(|inline| match inline {
+                Inline::Text(text) => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            visible, "AB",
+            "U+FFFC must not become a second visible slot"
+        );
+        assert_eq!(
+            runs.iter()
+                .flat_map(|run| &run.content)
+                .filter(|inline| matches!(inline, Inline::Image(_)))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn math_fixture_keeps_19_paragraphs_and_44_equations_through_paint_ir() {
+        use hwp_model::layout::PaintOp;
+
+        let bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/hwp/math-001.hwp"
+        ))
+        .unwrap();
+        let parsed = rhwp::parse_document(&bytes).unwrap();
+        let semantic = Lifter::new(&parsed).run();
+        let paragraphs = semantic
+            .sections
+            .iter()
+            .flat_map(|section| &section.blocks)
+            .filter(|block| matches!(block, Block::Paragraph(_)))
+            .count();
+        let equations = semantic
+            .sections
+            .iter()
+            .flat_map(|section| &section.blocks)
+            .filter_map(|block| match block {
+                Block::Paragraph(paragraph) => Some(paragraph),
+                _ => None,
+            })
+            .flat_map(|paragraph| &paragraph.runs)
+            .flat_map(|run| &run.content)
+            .filter(|inline| matches!(inline, Inline::Equation(_)))
+            .count();
+        assert_eq!(paragraphs, 19);
+        assert_eq!(equations, 44);
+
+        let placed = hwp_typeset::place_doc(&semantic, &hwp_typeset::ApproxFontMetrics);
+        let placed_equations = placed
+            .pages
+            .iter()
+            .flat_map(|page| &page.images)
+            .filter(|image| image.bin_ref.is_empty() && image.svg.is_some())
+            .count();
+        assert_eq!(placed_equations, 44);
+
+        let paint_equations = (0..placed.pages.len())
+            .map(|page| hwp_render::render_page(&semantic, &hwp_typeset::ApproxFontMetrics, page))
+            .collect::<Result<Vec<_>>>()
+            .unwrap()
+            .iter()
+            .flat_map(|tree| &tree.ops)
+            .filter(|op| {
+                matches!(op, PaintOp::Image { bin_ref, svg: Some(_), .. } if bin_ref.is_empty())
+            })
+            .count();
+        assert_eq!(paint_equations, 44);
     }
 }

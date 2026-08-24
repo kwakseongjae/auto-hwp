@@ -730,6 +730,7 @@ mod tests {
                         color: Color::default(),
                         width: 1000,
                         height: 1000,
+                        treat_as_char: true,
                         version: String::new(),
                         // No precomputed SVG → the honest [수식] placeholder (this test asserts exactly
                         // that fallback; the rendered-SVG path is covered by a dedicated test below).
@@ -778,6 +779,7 @@ mod tests {
                     color: Color::default(),
                     width: 1500, // HWPUNIT → 1500/75 = 20px box width
                     height: 750, // → 10px
+                    treat_as_char: true,
                     version: String::new(),
                     rendered_svg: Some("<text x=\"0\" y=\"9\">1</text>".into()),
                 })],
@@ -821,6 +823,7 @@ mod tests {
                         content: vec![Inline::Chart(ChartRef {
                             width: 1500, // → 20px
                             height: 750, // → 10px
+                            treat_as_char: true,
                             rendered_svg: svg.map(str::to_string),
                         })],
                     }],

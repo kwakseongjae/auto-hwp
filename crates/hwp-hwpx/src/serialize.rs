@@ -2115,10 +2115,11 @@ fn equation_xml(eqid: u64, eq: &EquationRef) -> String {
     let baseline = eq.baseline;
     let color = eq.color.to_hex();
     let script = xml_escape(&eq.script);
+    let treat_as_char = usize::from(eq.treat_as_char);
     format!(
         "<hp:equation id=\"{eqid}\" zOrder=\"0\" numberingType=\"EQUATION\" textWrap=\"TOP_AND_BOTTOM\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" version=\"{version}\" baseLine=\"{baseline}\" textColor=\"{color}\" baseUnit=\"{base_unit}\" lineMode=\"CHAR\" font=\"{font}\">\
 <hp:sz width=\"{w}\" widthRelTo=\"ABSOLUTE\" height=\"{h}\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/>\
-<hp:pos treatAsChar=\"1\" affectLSpacing=\"0\" flowWithText=\"1\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PARA\" horzRelTo=\"PARA\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"0\" horzOffset=\"0\"/>\
+<hp:pos treatAsChar=\"{treat_as_char}\" affectLSpacing=\"0\" flowWithText=\"1\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PARA\" horzRelTo=\"PARA\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"0\" horzOffset=\"0\"/>\
 <hp:outMargin left=\"56\" right=\"56\" top=\"0\" bottom=\"0\"/>\
 <hp:script>{script}</hp:script></hp:equation>"
     )
@@ -2453,6 +2454,7 @@ mod tests {
             color: Color::from_hex("#000000").unwrap(),
             width: 3000,
             height: 1500,
+            treat_as_char: true,
             version: String::new(),
             rendered_svg: None,
         }

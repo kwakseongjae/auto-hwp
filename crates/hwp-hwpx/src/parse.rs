@@ -472,6 +472,7 @@ struct EqAccum {
     color: Color,
     width: i32,  // <hp:sz width> (HWPUNIT)
     height: i32, // <hp:sz height>
+    treat_as_char: bool,
     version: String,
 }
 
@@ -496,6 +497,7 @@ impl EqAccum {
                     a: 255,
                 }),
             version: attr_str(e, b"version").unwrap_or_default(),
+            treat_as_char: true,
             ..Default::default()
         }
     }
@@ -509,6 +511,7 @@ impl EqAccum {
             color: self.color,
             width: self.width,
             height: self.height,
+            treat_as_char: self.treat_as_char,
             version: self.version,
             // 파생 캐시 — rhwp 의 수식 엔진이 필요하고 이 크레이트는 rhwp 를 모른다(wasm 대상).
             // `None` = 예전과 바이트동일한 스텁 박스 폴백이라 순수 가산이다.
@@ -917,14 +920,16 @@ fn parse_section(
             // Inside a `<hp:equation>`: only its `<hp:sz>` matters (the reserved box the typesetter
             // and the own-render stub use). Everything else (pos/outMargin/…) is structural.
             Ok(Event::Empty(e)) if eq.is_some() => {
-                if e.local_name().as_ref() == b"sz" {
-                    if let Some(a) = eq.as_mut() {
+                if let Some(a) = eq.as_mut() {
+                    if e.local_name().as_ref() == b"sz" {
                         if let Some(w) = attr_i32(&e, b"width") {
                             a.width = w;
                         }
                         if let Some(h) = attr_i32(&e, b"height") {
                             a.height = h;
                         }
+                    } else if e.local_name().as_ref() == b"pos" {
+                        a.treat_as_char = attr_usize(&e, b"treatAsChar") != Some(0);
                     }
                 }
                 mark_not_simple(&mut paras);
@@ -1772,7 +1777,7 @@ pub(crate) mod tests {
         let xml = r##"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p><hp:run charPrIDRef="7"><hp:t>앞</hp:t>
           <hp:equation id="9" version="Equation Version 60" baseLine="70" textColor="#FF0000" baseUnit="1200" lineMode="CHAR" font="HYhwpEQ">
             <hp:sz width="4300" height="2100" widthRelTo="ABSOLUTE" heightRelTo="ABSOLUTE" protect="0"/>
-            <hp:pos treatAsChar="1"/><hp:outMargin left="56" right="56" top="0" bottom="0"/>
+            <hp:pos treatAsChar="0"/><hp:outMargin left="56" right="56" top="0" bottom="0"/>
             <hp:script>1 over 2 + sqrt {a &lt; b}</hp:script>
           </hp:equation><hp:t>뒤</hp:t></hp:run></hp:p></hs:sec>"##;
         let blocks = parse_sec(xml);
@@ -1790,6 +1795,10 @@ pub(crate) mod tests {
         assert_eq!(eq.baseline, 70);
         assert_eq!(eq.color, Color::from_hex("#FF0000").unwrap());
         assert_eq!(eq.version, "Equation Version 60");
+        assert!(
+            !eq.treat_as_char,
+            "floating equation placement survives parse"
+        );
         // 파생 캐시는 rhwp 의존 → 항상 None(렌더러가 스텁 박스로 폴백).
         assert!(eq.rendered_svg.is_none());
         // 주변 텍스트는 그대로 살아 있어야 한다("사용자 콘텐츠 삭제 금지").

@@ -430,6 +430,9 @@ pub struct EquationRef {
     pub color: crate::types::Color,
     pub width: HwpUnit,
     pub height: HwpUnit,
+    /// Whether the equation participates in the text line as one inline atom. Floating equations
+    /// retain their anchor/order but do not reserve line width or height.
+    pub treat_as_char: bool,
     /// e.g. "Equation Version 60"; empty → the default on export.
     pub version: String,
     /// PRECOMPUTED render (issue 062-5): the `<g>`-embeddable SVG fragment rhwp's equation engine
@@ -453,6 +456,8 @@ pub struct EquationRef {
 pub struct ChartRef {
     pub width: HwpUnit,
     pub height: HwpUnit,
+    /// Whether the chart participates in the text line as one inline atom.
+    pub treat_as_char: bool,
     pub rendered_svg: Option<String>,
 }
 

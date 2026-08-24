@@ -1069,9 +1069,15 @@ mod inplace_tests {
         ))
         .unwrap();
         let doc = Engine::open(&bytes).unwrap();
-        let eqs = doc.sections.iter().flat_map(|s| &s.blocks).filter(|b| matches!(b,
-            Block::Paragraph(p) if p.runs.iter().flat_map(|r| &r.content).any(|i| matches!(i, Inline::Equation(_))))).count();
-        assert!(eqs > 0, "lift captured equations: {eqs}");
+        let paragraphs = doc
+            .sections
+            .iter()
+            .flat_map(|section| &section.blocks)
+            .filter(|block| matches!(block, Block::Paragraph(_)))
+            .count();
+        let eqs = collect_equations(&doc).len();
+        assert_eq!(paragraphs, 19, "one rhwp paragraph stays one IR paragraph");
+        assert_eq!(eqs, 44, "every equation control stays inline on its host");
 
         let out = serialize_hwpx(&doc).unwrap();
         assert!(validate_hwpx(&out).ok, "equation output open-safe");

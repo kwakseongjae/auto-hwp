@@ -1251,6 +1251,7 @@ mod tests {
             content: vec![Inline::Chart(ChartRef {
                 width: 30000,
                 height: 19500,
+                treat_as_char: true,
                 rendered_svg: Some(
                     "<g class=\"hwp-gen-chart\"><rect x=\"0\" y=\"0\" width=\"10\" height=\"10\"/></g>"
                         .into(),
@@ -1295,6 +1296,7 @@ mod tests {
                     },
                     width: 3000,
                     height: 1500,
+                    treat_as_char: true,
                     version: "Equation Version 60".into(),
                     rendered_svg: Some(svg.into()),
                 })],

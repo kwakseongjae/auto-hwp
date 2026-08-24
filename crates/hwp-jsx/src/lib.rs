@@ -351,7 +351,8 @@ fn emit_inline(inl: &Inline) -> JsxNode {
             JsxElement::new(Tag::Image)
                 .with_attr("src", format!("assets/{}", img.bin_ref))
                 .with_attr("data-w", img.width.to_string())
-                .with_attr("data-h", img.height.to_string()),
+                .with_attr("data-h", img.height.to_string())
+                .with_attr("data-tac", if img.treat_as_char { "1" } else { "0" }),
         ),
         Inline::Equation(e) => {
             // The editable model rides in `data-b64` (round-trips every field incl. the cached SVG).
@@ -361,7 +362,8 @@ fn emit_inline(inl: &Inline) -> JsxNode {
             let mut el = JsxElement::new(Tag::Equation)
                 .with_attr("data-b64", b64(&encode_equation(e)))
                 .with_attr("data-w", e.width.to_string())
-                .with_attr("data-h", e.height.to_string());
+                .with_attr("data-h", e.height.to_string())
+                .with_attr("data-tac", if e.treat_as_char { "1" } else { "0" });
             if let Some(svg) = &e.rendered_svg {
                 el = el.with_attr("data-eq-svg", svg.clone());
             }
@@ -373,7 +375,8 @@ fn emit_inline(inl: &Inline) -> JsxNode {
             // [차트] placeholder (rhwp-off / legacy OLE / un-rendered).
             let mut el = JsxElement::new(Tag::Chart)
                 .with_attr("data-w", c.width.to_string())
-                .with_attr("data-h", c.height.to_string());
+                .with_attr("data-h", c.height.to_string())
+                .with_attr("data-tac", if c.treat_as_char { "1" } else { "0" });
             if let Some(svg) = &c.rendered_svg {
                 el = el.with_attr("data-chart-svg", svg.clone());
             }
@@ -671,6 +674,7 @@ fn encode_equation(e: &EquationRef) -> Vec<u8> {
         color: [e.color.r, e.color.g, e.color.b, e.color.a],
         width: e.width,
         height: e.height,
+        treat_as_char: e.treat_as_char,
         version: e.version.clone(),
         rendered_svg: e.rendered_svg.clone(),
     })
@@ -692,6 +696,7 @@ fn decode_equation(bytes: &[u8]) -> EquationRef {
         },
         width: b.width,
         height: b.height,
+        treat_as_char: b.treat_as_char,
         version: b.version,
         rendered_svg: b.rendered_svg,
     }
@@ -1052,7 +1057,7 @@ fn parse_inline(node: &JsxNode) -> Result<Inline> {
                     .get("data-h")
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(0),
-                ..Default::default()
+                treat_as_char: e.attrs.get("data-tac").map(|v| v != "0").unwrap_or(true),
             })),
             Some(Tag::Equation) => {
                 let bytes = unb64(e.attrs.get("data-b64").map(String::as_str).unwrap_or(""))
@@ -1070,6 +1075,7 @@ fn parse_inline(node: &JsxNode) -> Result<Inline> {
                     .get("data-h")
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(0),
+                treat_as_char: e.attrs.get("data-tac").map(|v| v != "0").unwrap_or(true),
                 rendered_svg: e
                     .attrs
                     .get("data-chart-svg")
@@ -1389,11 +1395,17 @@ struct EqBlob {
     color: [u8; 4],
     width: i32,
     height: i32,
+    #[serde(default = "default_true")]
+    treat_as_char: bool,
     version: String,
     /// Precomputed equation SVG fragment (issue 062-5). `#[serde(default)]` keeps blobs written
     /// before this field parseable (→ `None`), so the JSX round-trip stays backward-compatible.
     #[serde(default)]
     rendered_svg: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Serialize, Deserialize)]

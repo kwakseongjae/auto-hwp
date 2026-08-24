@@ -899,6 +899,7 @@ mod tests {
                 color: Color::default(),
                 width: 10000,
                 height: 8000,
+                treat_as_char: true,
                 version: String::new(),
                 rendered_svg: rendered_svg.map(str::to_string),
             })],
@@ -945,6 +946,7 @@ mod tests {
             content: vec![Inline::Chart(ChartRef {
                 width: 30000,
                 height: 20000,
+                treat_as_char: true,
                 rendered_svg: Some("<g class=\"hwp-ooxml-chart\"><rect/></g>".into()),
             })],
             ..Default::default()

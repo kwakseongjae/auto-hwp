@@ -400,7 +400,7 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                     // touched. Tag it IMAGE when it carries an anchored object so the UI can label it.
                     let bend_page = pages.len() - 1;
                     let bend_y = mt + vert;
-                    let kind = if paragraph_object(p).is_some() {
+                    let kind = if paragraph_has_object(p) {
                         BlockKind::Image
                     } else {
                         BlockKind::Paragraph
@@ -609,7 +609,7 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
                     );
                     let end_page = pages.len() - 1;
                     let end_y = body_y + flow.y();
-                    let kind = if paragraph_object(paragraph).is_some() {
+                    let kind = if paragraph_has_object(paragraph) {
                         BlockKind::Image
                     } else {
                         BlockKind::Paragraph
@@ -1263,7 +1263,7 @@ fn place_paragraph(
 ) {
     // Flat (char, size, color, underline) over the paragraph's text — same order layout_paragraph
     // breaks on, so line `text_pos` indexes straight into this.
-    let glyphs = paragraph_glyphs(p, doc, fonts);
+    let atoms = paragraph_atoms(p, doc, fonts);
     let align = doc
         .para_shapes
         .get(p.para_shape)
@@ -1273,9 +1273,6 @@ fn place_paragraph(
     // Paragraph indent: block left/right margins shrink the wrap width; first-line indent shifts line 0.
     let ind = indent_of(p, doc, body_w);
     let lines = layout_paragraph(p, doc, ind.wrap_w, fonts);
-
-    // Anchored object (image/equation) on this paragraph — placed on its (single) line.
-    let obj = paragraph_object(p);
 
     for (li, ls) in lines.iter().enumerate() {
         if *vert + ls.vert_size > body_h && *vert > 0.0 {
@@ -1310,31 +1307,10 @@ fn place_paragraph(
         let end = lines
             .get(li + 1)
             .map(|n| n.text_pos as usize)
-            .unwrap_or(glyphs.len());
+            .unwrap_or(atoms.len());
         let mut x = x0;
-        let plain = FontKey {
-            family: String::new(),
-            bold: false,
-            italic: false,
-        };
-        for g in glyphs.get(start..end.min(glyphs.len())).unwrap_or(&[]) {
-            let adv =
-                fonts.advance_width(&plain, g.ch, g.size as i32) * g.ratio + g.spacing_em * g.size;
-            if g.ch != ' ' && g.ch != '\t' && g.ch != '\n' {
-                pg.glyphs.push(PlacedGlyph {
-                    x,
-                    baseline,
-                    ch: g.ch,
-                    size: g.size,
-                    color: g.color,
-                    underline: g.underline,
-                    bold: g.bold,
-                    italic: g.italic,
-                    font: g.font.clone(),
-                    cluster: g.cluster.clone(),
-                });
-            }
-            x += adv;
+        for atom in atoms.get(start..end.min(atoms.len())).unwrap_or(&[]) {
+            x += place_atom(pg, atom, x, line_top, baseline, fonts, section, block);
         }
 
         // (No per-line text-box: the SvgSink strokes fill:None rects as borders, so a box per line
@@ -1342,23 +1318,6 @@ fn place_paragraph(
         // read-only fidelity view — caret hit-testing uses the rhwp path, not these boxes — so only
         // table/cell borders are drawn. Line-level hit geometry can come back behind a flag if the
         // own surface ever becomes editable.)
-
-        // An anchored object sits on the first line of its paragraph.
-        if li == 0 {
-            if let Some((w, h, bin_ref, svg)) = &obj {
-                pg.images.push(PlacedImage {
-                    x: x0,
-                    y: line_top,
-                    w: *w,
-                    h: *h,
-                    bin_ref: bin_ref.clone(),
-                    svg: svg.clone(),
-                    is_background: false,
-                    section,
-                    block,
-                });
-            }
-        }
 
         *vert += ls.vert_size * ratio;
     }
@@ -1382,7 +1341,7 @@ fn place_paragraph_columns(
     block: usize,
     width_cap: Option<f64>,
 ) {
-    let glyphs = paragraph_glyphs(p, doc, fonts);
+    let atoms = paragraph_atoms(p, doc, fonts);
     let align = doc
         .para_shapes
         .get(p.para_shape)
@@ -1395,7 +1354,6 @@ fn place_paragraph_columns(
         .max(1.0);
     let ind = indent_of(p, doc, layout_width);
     let lines = layout_paragraph(p, doc, ind.wrap_w, fonts);
-    let obj = paragraph_object(p);
 
     for (line_index, line) in lines.iter().enumerate() {
         if flow.vert() + line.vert_size > flow.available_height(body_h)
@@ -1438,47 +1396,11 @@ fn place_paragraph_columns(
         let end = lines
             .get(line_index + 1)
             .map(|next| next.text_pos as usize)
-            .unwrap_or(glyphs.len());
+            .unwrap_or(atoms.len());
         let mut x = x0;
-        let plain = FontKey {
-            family: String::new(),
-            bold: false,
-            italic: false,
-        };
         let page_out = pages.last_mut().expect("placed document always has a page");
-        for glyph in glyphs.get(start..end.min(glyphs.len())).unwrap_or(&[]) {
-            let advance = fonts.advance_width(&plain, glyph.ch, glyph.size as i32) * glyph.ratio
-                + glyph.spacing_em * glyph.size;
-            if glyph.ch != ' ' && glyph.ch != '\t' && glyph.ch != '\n' {
-                page_out.glyphs.push(PlacedGlyph {
-                    x,
-                    baseline,
-                    ch: glyph.ch,
-                    size: glyph.size,
-                    color: glyph.color,
-                    underline: glyph.underline,
-                    bold: glyph.bold,
-                    italic: glyph.italic,
-                    font: glyph.font.clone(),
-                    cluster: glyph.cluster.clone(),
-                });
-            }
-            x += advance;
-        }
-        if line_index == 0 {
-            if let Some((width, height, bin_ref, svg)) = &obj {
-                page_out.images.push(PlacedImage {
-                    x: x0,
-                    y: line_top,
-                    w: (*width).min(effective_width),
-                    h: *height,
-                    bin_ref: bin_ref.clone(),
-                    svg: svg.clone(),
-                    is_background: false,
-                    section,
-                    block,
-                });
-            }
+        for atom in atoms.get(start..end.min(atoms.len())).unwrap_or(&[]) {
+            x += place_atom(page_out, atom, x, line_top, baseline, fonts, section, block);
         }
         flow.add(line.vert_size * ratio);
     }
@@ -2327,11 +2249,6 @@ fn place_cell_content(
         .map(|b| block_height_for_place(b, doc, textw, fonts))
         .sum();
     let mut vy = cy + ((ch - content_h) / 2.0).max(0.0);
-    let plain = FontKey {
-        family: String::new(),
-        bold: false,
-        italic: false,
-    };
     for (bi, b) in blocks.iter().enumerate() {
         let Block::Paragraph(p) = b else {
             // A NESTED table (a table inside this cell): DRAW it at the current cursor — its height is
@@ -2354,8 +2271,7 @@ fn place_cell_content(
             vy += block_height_for_place(b, doc, textw, fonts);
             continue;
         };
-        let para_top = vy;
-        let glyphs = paragraph_glyphs(p, doc, fonts);
+        let atoms = paragraph_atoms(p, doc, fonts);
         let align = doc
             .para_shapes
             .get(p.para_shape)
@@ -2365,22 +2281,6 @@ fn place_cell_content(
         // Same paragraph indent as the body: block left/right margins shrink wrap; first line shifts.
         let ind = indent_of(p, doc, textw);
         let lines = layout_paragraph(p, doc, ind.wrap_w, fonts);
-        // A cell-anchored image/equation/chart (issue #196 Batch D): draw it at the paragraph top.
-        // `layout_paragraph` already bumped the first line's height to the object, so the cell row
-        // reserved this space — drawing is pagination-neutral (the vy advance below is unchanged).
-        if let Some((w, h, bin_ref, svg)) = paragraph_object(p) {
-            pg.images.push(PlacedImage {
-                x: cx + pad_left,
-                y: para_top,
-                w,
-                h,
-                bin_ref,
-                svg,
-                is_background: false,
-                section: ctx.section,
-                block: ctx.outer_block,
-            });
-        }
         for (li, ls) in lines.iter().enumerate() {
             let line_indent = ind.left + if li == 0 { ind.first_extra } else { 0.0 };
             let slack = (ind.wrap_w
@@ -2404,26 +2304,19 @@ fn place_cell_content(
             let end = lines
                 .get(li + 1)
                 .map(|n| n.text_pos as usize)
-                .unwrap_or(glyphs.len());
+                .unwrap_or(atoms.len());
             let mut x = x0;
-            for g in glyphs.get(start..end.min(glyphs.len())).unwrap_or(&[]) {
-                let adv = fonts.advance_width(&plain, g.ch, g.size as i32) * g.ratio
-                    + g.spacing_em * g.size;
-                if g.ch != ' ' && g.ch != '\t' && g.ch != '\n' {
-                    pg.glyphs.push(PlacedGlyph {
-                        x,
-                        baseline,
-                        ch: g.ch,
-                        size: g.size,
-                        color: g.color,
-                        underline: g.underline,
-                        bold: g.bold,
-                        italic: g.italic,
-                        font: g.font.clone(),
-                        cluster: g.cluster.clone(),
-                    });
-                }
-                x += adv;
+            for atom in atoms.get(start..end.min(atoms.len())).unwrap_or(&[]) {
+                x += place_atom(
+                    pg,
+                    atom,
+                    x,
+                    vy,
+                    baseline,
+                    fonts,
+                    ctx.section,
+                    ctx.outer_block,
+                );
             }
             vy += ls.vert_size * ratio;
         }
@@ -2532,18 +2425,27 @@ fn walk_cell_lines(
         .map(|b| block_height_for_place(b, doc, textw, fonts))
         .sum();
     let mut vy = cy + ((ch - content_h) / 2.0).max(0.0);
-    let plain = FontKey {
-        family: String::new(),
-        bold: false,
-        italic: false,
-    };
     let mut seg_base = 0usize; // cell-global ordinal of this model paragraph's FIRST "\n"-segment
     for b in blocks {
         let Block::Paragraph(p) = b else {
             vy += block_height_for_place(b, doc, textw, fonts);
             continue;
         };
-        let glyphs = paragraph_glyphs(p, doc, fonts);
+        let atoms = paragraph_atoms(p, doc, fonts);
+        let glyphs: Vec<&GlyphInfo> = atoms
+            .iter()
+            .filter_map(|atom| match atom {
+                ParagraphAtom::Glyph(glyph) => Some(glyph),
+                ParagraphAtom::Object { .. } => None,
+            })
+            .collect();
+        let mut text_prefix = Vec::with_capacity(atoms.len() + 1);
+        text_prefix.push(0usize);
+        for atom in &atoms {
+            let next = text_prefix.last().copied().unwrap_or(0)
+                + usize::from(matches!(atom, ParagraphAtom::Glyph(_)));
+            text_prefix.push(next);
+        }
         // "\n"-segment map (the EDITOR address space — see CellTextHit): positions of the forced
         // breaks split the paragraph into nl_pos.len()+1 segments; a glyph at index i belongs to the
         // segment holding it, with segment-local offset i - seg_start.
@@ -2586,21 +2488,26 @@ fn walk_cell_lines(
             let end = lines
                 .get(li + 1)
                 .map(|n| n.text_pos as usize)
-                .unwrap_or(glyphs.len())
-                .min(glyphs.len());
-            let line_glyphs = glyphs.get(start..end).unwrap_or(&[]);
-            let advances: Vec<f64> = line_glyphs
-                .iter()
-                .map(|g| {
-                    fonts.advance_width(&plain, g.ch, g.size as i32) * g.ratio
-                        + g.spacing_em * g.size
-                })
-                .collect();
-            let chars: Vec<char> = line_glyphs.iter().map(|g| g.ch).collect();
-            let s = seg_of(start); // the line's segment (a '\n' ends its line, so lines never straddle)
+                .unwrap_or(atoms.len())
+                .min(atoms.len());
+            let text_start = text_prefix[start.min(atoms.len())];
+            let mut pending_object_advance = 0.0;
+            let mut advances = Vec::new();
+            let mut chars = Vec::new();
+            for atom in atoms.get(start..end).unwrap_or(&[]) {
+                match atom {
+                    ParagraphAtom::Object { .. } => pending_object_advance += atom.advance(fonts),
+                    ParagraphAtom::Glyph(glyph) => {
+                        advances.push(pending_object_advance + atom.advance(fonts));
+                        pending_object_advance = 0.0;
+                        chars.push(glyph.ch);
+                    }
+                }
+            }
+            let s = seg_of(text_start); // a '\n' ends its line, so lines never straddle segments
             let stop = on_line(&CellLineGeom {
                 para: seg_base + s,
-                line_start: start - seg_start(s),
+                line_start: text_start - seg_start(s),
                 x0,
                 top: vy,
                 height: ls.vert_size,
@@ -3098,6 +3005,7 @@ fn block_height_for_place(
 
 /// Flat (char, size, color, underline) over a paragraph's text runs — the SAME enumeration order
 /// `layout_paragraph` breaks on, so a line's `text_pos` indexes straight into this slice.
+#[derive(Clone)]
 struct GlyphInfo {
     ch: char,
     size: f64,
@@ -3118,11 +3026,102 @@ struct GlyphInfo {
     cluster: Option<String>,
 }
 
-fn paragraph_glyphs(
+#[derive(Clone)]
+enum ParagraphAtom {
+    Glyph(GlyphInfo),
+    Object {
+        width: f64,
+        height: f64,
+        bin_ref: String,
+        svg: Option<String>,
+        treat_as_char: bool,
+    },
+}
+
+impl ParagraphAtom {
+    fn advance(&self, fonts: &dyn FontMetricsProvider) -> f64 {
+        match self {
+            Self::Glyph(glyph) => {
+                let plain = FontKey {
+                    family: String::new(),
+                    bold: false,
+                    italic: false,
+                };
+                fonts.advance_width(&plain, glyph.ch, glyph.size as i32) * glyph.ratio
+                    + glyph.spacing_em * glyph.size
+            }
+            Self::Object {
+                width,
+                treat_as_char,
+                ..
+            } => {
+                if *treat_as_char {
+                    *width
+                } else {
+                    0.0
+                }
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn place_atom(
+    page: &mut PlacedPage,
+    atom: &ParagraphAtom,
+    x: f64,
+    line_top: f64,
+    baseline: f64,
+    fonts: &dyn FontMetricsProvider,
+    section: usize,
+    block: usize,
+) -> f64 {
+    match atom {
+        ParagraphAtom::Glyph(glyph) => {
+            if glyph.ch != ' ' && glyph.ch != '\t' && glyph.ch != '\n' {
+                page.glyphs.push(PlacedGlyph {
+                    x,
+                    baseline,
+                    ch: glyph.ch,
+                    size: glyph.size,
+                    color: glyph.color,
+                    underline: glyph.underline,
+                    bold: glyph.bold,
+                    italic: glyph.italic,
+                    font: glyph.font.clone(),
+                    cluster: glyph.cluster.clone(),
+                });
+            }
+            atom.advance(fonts)
+        }
+        ParagraphAtom::Object {
+            width,
+            height,
+            bin_ref,
+            svg,
+            ..
+        } => {
+            page.images.push(PlacedImage {
+                x,
+                y: line_top,
+                w: *width,
+                h: *height,
+                bin_ref: bin_ref.clone(),
+                svg: svg.clone(),
+                is_background: false,
+                section,
+                block,
+            });
+            atom.advance(fonts)
+        }
+    }
+}
+
+fn paragraph_atoms(
     p: &Paragraph,
     doc: &SemanticDoc,
     fonts: &dyn FontMetricsProvider,
-) -> Vec<GlyphInfo> {
+) -> Vec<ParagraphAtom> {
     let mut out = Vec::new();
     for run in &p.runs {
         let cs = doc.char_shapes.get(run.char_shape);
@@ -3132,42 +3131,81 @@ fn paragraph_glyphs(
         let bold = cs.map(|c| c.bold).unwrap_or(false);
         let italic = cs.map(|c| c.italic).unwrap_or(false);
         for inl in &run.content {
-            if let Inline::Text(t) = inl {
-                for ch in t.chars() {
-                    // Issue 062-2: a Hanyang-PUA 옛한글 음절 draws as its 첫가끝 자모 시퀀스 (an OFL-
-                    // coverable cluster) while `subst_glyph` swaps `ch` to the full-width metric proxy
-                    // — so advances/breaking (via layout_paragraph) stay in lockstep with the drawn cell.
-                    let cluster = crate::old_hangul_cluster(ch);
-                    let sch = crate::subst_glyph(ch);
-                    let slot = crate::script_slot(sch);
-                    let (ratio, spacing_em) = cs
-                        .map(|c| {
-                            let r = match *c.ratio.get(slot) {
-                                0 => 100,
-                                r => r.clamp(50, 200),
-                            } as f64
-                                / 100.0;
-                            let s = (*c.spacing.get(slot)).clamp(-50, 50) as f64 / 100.0;
-                            (r, s)
-                        })
-                        .unwrap_or((1.0, 0.0));
-                    out.push(GlyphInfo {
-                        ch: sch,
-                        size,
-                        color,
-                        underline,
-                        bold,
-                        italic,
-                        font: display_font(cs, slot, fonts),
-                        ratio,
-                        spacing_em,
-                        cluster,
-                    });
+            match inl {
+                Inline::Text(t) => {
+                    for ch in t.chars() {
+                        // Issue 062-2: a Hanyang-PUA 옛한글 음절 draws as its 첫가끝 자모 시퀀스 (an OFL-
+                        // coverable cluster) while `subst_glyph` swaps `ch` to the full-width metric proxy
+                        // — so advances/breaking (via layout_paragraph) stay in lockstep with the drawn cell.
+                        let cluster = crate::old_hangul_cluster(ch);
+                        let sch = crate::subst_glyph(ch);
+                        let slot = crate::script_slot(sch);
+                        let (ratio, spacing_em) = cs
+                            .map(|c| {
+                                let r = match *c.ratio.get(slot) {
+                                    0 => 100,
+                                    r => r.clamp(50, 200),
+                                } as f64
+                                    / 100.0;
+                                let s = (*c.spacing.get(slot)).clamp(-50, 50) as f64 / 100.0;
+                                (r, s)
+                            })
+                            .unwrap_or((1.0, 0.0));
+                        out.push(ParagraphAtom::Glyph(GlyphInfo {
+                            ch: sch,
+                            size,
+                            color,
+                            underline,
+                            bold,
+                            italic,
+                            font: display_font(cs, slot, fonts),
+                            ratio,
+                            spacing_em,
+                            cluster,
+                        }));
+                    }
                 }
+                Inline::Image(image) => out.push(ParagraphAtom::Object {
+                    width: image.width.max(0) as f64,
+                    height: image.height.max(0) as f64,
+                    bin_ref: image.bin_ref.clone(),
+                    svg: None,
+                    treat_as_char: image.treat_as_char,
+                }),
+                Inline::Equation(equation) => out.push(ParagraphAtom::Object {
+                    width: equation.width.max(0) as f64,
+                    height: equation.height.max(0) as f64,
+                    bin_ref: String::new(),
+                    svg: equation.rendered_svg.clone(),
+                    treat_as_char: equation.treat_as_char,
+                }),
+                Inline::Chart(chart) => out.push(ParagraphAtom::Object {
+                    width: chart.width.max(0) as f64,
+                    height: chart.height.max(0) as f64,
+                    bin_ref: String::new(),
+                    svg: chart.rendered_svg.clone(),
+                    treat_as_char: chart.treat_as_char,
+                }),
+                _ => {}
             }
         }
     }
     out
+}
+
+#[cfg(test)]
+fn paragraph_glyphs(
+    p: &Paragraph,
+    doc: &SemanticDoc,
+    fonts: &dyn FontMetricsProvider,
+) -> Vec<GlyphInfo> {
+    paragraph_atoms(p, doc, fonts)
+        .into_iter()
+        .filter_map(|atom| match atom {
+            ParagraphAtom::Glyph(glyph) => Some(glyph),
+            ParagraphAtom::Object { .. } => None,
+        })
+        .collect()
 }
 
 /// The OFL substitute display family for a glyph (issue 058): resolve the char shape's per-script font
@@ -3202,45 +3240,15 @@ fn display_font(
     hwp_model::font_class::substitute_family_with_panose(name, panose).map(str::to_string)
 }
 
-/// The tallest anchored image/equation/chart on the paragraph as `(w, h, bin_ref, svg)` — `bin_ref`
-/// empty for an equation/chart (the renderer draws a placeholder box unless `svg` is present), and
-/// `svg` is the precomputed fragment (equation: issue 062-5; chart: issue 062-7; `None` for images and
-/// un-rendered equations/charts). `None` if the paragraph anchors no object.
-fn paragraph_object(p: &Paragraph) -> Option<(f64, f64, String, Option<String>)> {
-    let mut best: Option<(f64, f64, String, Option<String>)> = None;
-    for run in &p.runs {
-        for inl in &run.content {
-            let cand = match inl {
-                Inline::Image(img) => Some((
-                    img.width as f64,
-                    img.height as f64,
-                    img.bin_ref.clone(),
-                    None,
-                )),
-                Inline::Equation(eq) => Some((
-                    eq.width as f64,
-                    eq.height as f64,
-                    String::new(),
-                    eq.rendered_svg.clone(),
-                )),
-                // Issue 062-7: a chart rides the same object channel as an equation — empty bin_ref +
-                // its precomputed SVG fragment (`None` → stub box). Box from the stored chart size.
-                Inline::Chart(c) => Some((
-                    c.width as f64,
-                    c.height as f64,
-                    String::new(),
-                    c.rendered_svg.clone(),
-                )),
-                _ => None,
-            };
-            if let Some((w, h, r, svg)) = cand {
-                if best.as_ref().map(|(_, bh, _, _)| h > *bh).unwrap_or(true) {
-                    best = Some((w, h, r, svg));
-                }
-            }
-        }
-    }
-    best
+fn paragraph_has_object(p: &Paragraph) -> bool {
+    p.runs.iter().any(|run| {
+        run.content.iter().any(|inline| {
+            matches!(
+                inline,
+                Inline::Image(_) | Inline::Equation(_) | Inline::Chart(_)
+            )
+        })
+    })
 }
 
 fn set_page_size(pg: &mut PlacedPage, page: &PageSetup) {
@@ -3529,6 +3537,125 @@ mod tests {
         };
         doc.sections.push(sec);
         doc
+    }
+
+    fn mixed_object_paragraph() -> Paragraph {
+        let equation = |name: &str, height| {
+            Inline::Equation(EquationRef {
+                script: name.into(),
+                font: String::new(),
+                base_unit: 1000,
+                baseline: 0,
+                color: Color::default(),
+                width: 800,
+                height,
+                treat_as_char: true,
+                version: String::new(),
+                rendered_svg: Some(format!("<g id=\"{name}\"/>")),
+            })
+        };
+        Paragraph {
+            runs: vec![Run {
+                char_shape: 0,
+                content: vec![
+                    Inline::Text("A".into()),
+                    equation("EqA", 1200),
+                    Inline::Text("B".into()),
+                    equation("EqB", 1400),
+                    Inline::Text("C".into()),
+                    Inline::Chart(ChartRef {
+                        width: 800,
+                        height: 1600,
+                        treat_as_char: true,
+                        rendered_svg: Some("<g id=\"ChartC\"/>".into()),
+                    }),
+                ],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn mixed_inline_objects_place_in_order_in_body_and_cell() {
+        let mut body = doc_with(vec![Block::Paragraph(mixed_object_paragraph())]);
+        body.sections[0].page.width = 3000;
+        body.sections[0].page.height = 10000;
+        body.sections[0].page.margin_left = 0;
+        body.sections[0].page.margin_right = 0;
+        body.sections[0].page.margin_top = 0;
+        body.sections[0].page.margin_bottom = 0;
+        let placed = place_doc(&body, &ApproxFontMetrics);
+        let images = &placed.pages[0].images;
+        assert_eq!(images.len(), 3, "every object atom is painted exactly once");
+        assert!(images[0].svg.as_deref().unwrap().contains("EqA"));
+        assert!(images[1].svg.as_deref().unwrap().contains("EqB"));
+        assert!(images[2].svg.as_deref().unwrap().contains("ChartC"));
+        assert_ne!((images[0].x, images[0].y), (images[1].x, images[1].y));
+        assert!(images[2].y > images[1].y, "ChartC wraps to the next line");
+        assert_eq!(
+            placed.pages.len(),
+            crate::NaiveLayout
+                .layout(&body, &ApproxFontMetrics)
+                .unwrap()
+                .pages
+                .len(),
+            "body placement stays in LOCKSTEP"
+        );
+
+        let table = Table {
+            rows: 1,
+            cols: 1,
+            col_widths: vec![6000],
+            cells: vec![Cell {
+                row: 0,
+                col: 0,
+                width: Some(6000),
+                blocks: vec![Block::Paragraph(mixed_object_paragraph())],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let cell_doc = doc_with(vec![Block::Table(table)]);
+        let cell_placed = place_doc(&cell_doc, &ApproxFontMetrics);
+        assert_eq!(cell_placed.pages[0].images.len(), 3);
+        let start = cell_caret_rect(
+            &cell_doc,
+            &cell_placed,
+            &ApproxFontMetrics,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        )
+        .expect("cell caret before mixed flow");
+        let end = cell_caret_rect(
+            &cell_doc,
+            &cell_placed,
+            &ApproxFontMetrics,
+            0,
+            0,
+            0,
+            0,
+            0,
+            3,
+        )
+        .expect("cell caret after mixed flow");
+        assert!(
+            end.x > start.x,
+            "caret geometry includes inline object advances"
+        );
+        assert_eq!(
+            cell_placed.pages.len(),
+            crate::NaiveLayout
+                .layout(&cell_doc, &ApproxFontMetrics)
+                .unwrap()
+                .pages
+                .len(),
+            "cell placement stays in LOCKSTEP"
+        );
     }
 
     #[test]
