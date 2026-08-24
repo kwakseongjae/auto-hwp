@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · PR #209 merge checkpoint
+- #105 exact head `f0231459` CI 3종 green·댓글 0 확인 후 main `b25303fa` 병합.
+- 다음: 장기 Goal 실행 중단·로드맵 브리핑; `goal로 진행해줘` 시 #106부터 재개.
+
 ## 2026-08-24 (Codex sol) · #105 pre-commit verifier
 - Proposal scratch에 content-free semantic/LOCKSTEP/SVG/PDF 검증 보고서와 commit gate를 결합.
 - 새 placeholder/stub·미선언 변경은 차단, 기존 미지원 객체는 submission-ready만 false로 분리.

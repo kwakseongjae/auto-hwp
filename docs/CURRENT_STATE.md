@@ -3,7 +3,7 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
-- 갱신: 2026-08-24 · Codex(sol) — **#105 pre-commit verifier full green · PR 직전**.
+- 갱신: 2026-08-24 · Codex(sol) — **PR #209 병합 · 장기 Goal 실행 중단/브리핑 지점**.
   모든 Proposal v1은 live/private-scratch 의미 diff, 동일 font provider의 place/Naive LOCKSTEP,
   page·line·object inventory, before/after 영향 페이지 SVG hash/bytes와 무변경 페이지 목록을 낸다.
   pdf feature는 동일 IR의 before/after PDF hash·쪽수·replay/stub·진단 코드를 추가한다. 선언 범위 밖
@@ -12,8 +12,10 @@
   Web/Tauri/MCP/SDK strict DTO와 recorded digest `fnv1a64:1dba1532ae014063`가 일치한다.
   full은 canonical **8/18/24+98.9%**, corpus **84**, catalog **259/12/120**, oracle **82**,
   PDF visual **51**, wasm **7,993,318B**, Vitest **1,012** green. Chromium 기존 84건+수정 대상 2건
-  재검증으로 최종 **85 pass/3 intentional skip**이며 rhwp는 무수정이다. **다음:** privacy/diff 감사→
-  commit/push/PR `Closes #105`→exact-head CI/comments green autonomous merge→요청대로 실행 중단·브리핑.
+  재검증으로 최종 **85 pass/3 intentional skip**이며 rhwp는 무수정이다. PR #209 exact head
+  `f0231459`는 issue-link **5s**·build-test **9m22s**·licenses **2m44s**, CLEAN/MERGEABLE,
+  review/general/inline 댓글 0으로 protected main `b25303fa`에 squash 병합됐다. **다음:** 사용자 요청대로
+  장기 Goal 실행을 멈추고 완료/잔여/최종 목적을 브리핑. 재개 문구는 `goal로 진행해줘`; 첫 작업은 #106.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #208 병합 · #105 pre-commit verifier 착수**.
   PR #208 exact head `19569fe8`에서 issue-link **4s**·build-test **8m46s**·licenses **2m44s**
