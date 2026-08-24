@@ -541,7 +541,8 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                     // vert>body_h and resolved by the NEXT block's page reserve — IDENTICAL to
                     // NaiveLayout, keeping the two page counts in lockstep (a `while vert>body_h` here
                     // would re-fragment an over-tall row that NaiveLayout leaves whole → page drift).
-                    vert += t.outer_margin_bottom.max(0) as f64;
+                    vert += (t.outer_margin_bottom.max(0) + t.source_anchor_spacing_after.max(0))
+                        as f64;
                     started = true;
                 }
             }
@@ -729,7 +730,11 @@ fn place_doc_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Plac
                             });
                         }
                     }
-                    flow.add(table.outer_margin_bottom.max(0) as f64);
+                    flow.add(
+                        (table.outer_margin_bottom.max(0)
+                            + table.source_anchor_spacing_after.max(0))
+                            as f64,
+                    );
                     started = true;
                 }
             }
@@ -950,7 +955,8 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
                             &mut vert,
                         );
                     }
-                    vert += t.outer_margin_bottom.max(0) as f64;
+                    vert += (t.outer_margin_bottom.max(0) + t.source_anchor_spacing_after.max(0))
+                        as f64;
                     // No trailing page-slice (matches place_doc/NaiveLayout): a leftover over-tall row /
                     // margin spill is resolved by the next block's reserve, so the recorded start pages
                     // stay aligned with place_doc's fragment pages.
@@ -1200,7 +1206,11 @@ fn block_pages_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Ve
                             &mut page_index,
                         );
                     }
-                    flow.add(table.outer_margin_bottom.max(0) as f64);
+                    flow.add(
+                        (table.outer_margin_bottom.max(0)
+                            + table.source_anchor_spacing_after.max(0))
+                            as f64,
+                    );
                     started = true;
                 }
             }
@@ -5430,6 +5440,80 @@ mod tests {
     }
 
     #[test]
+    fn hwp5_anchor_spacing_is_added_once_and_does_not_carry_to_a_fresh_lane() {
+        use crate::LayoutEngine;
+
+        let mut first = table_with_margins(0, 300);
+        first.source_anchor_spacing_after = 700;
+        let doc = doc_with(vec![
+            Block::Table(first),
+            Block::Table(table_with_margins(500, 0)),
+        ]);
+        let tables = top_level_table_tops(&doc);
+        assert_eq!(
+            tables[1].0 - (tables[0].0 + tables[0].1),
+            1_500.0,
+            "bottom margin + source anchor spacing + next top margin, exactly once"
+        );
+        assert_eq!(
+            place_doc(&doc, &ApproxFontMetrics).pages.len(),
+            crate::NaiveLayout
+                .layout(&doc, &ApproxFontMetrics)
+                .unwrap()
+                .pages
+                .len(),
+            "LOCKSTEP"
+        );
+
+        let mut overflowing = one_cell_table(0);
+        overflowing.row_heights = vec![1_000];
+        overflowing.source_anchor_spacing_after = 2_000;
+        let mut following = one_cell_table(0);
+        following.row_heights = vec![1_000];
+        let fresh_page = doc_with_page(
+            vec![
+                Block::Table(overflowing.clone()),
+                Block::Table(following.clone()),
+            ],
+            2_500,
+        );
+        let placed = place_doc(&fresh_page, &ApproxFontMetrics);
+        let naive = crate::NaiveLayout
+            .layout(&fresh_page, &ApproxFontMetrics)
+            .unwrap();
+        assert_eq!(placed.pages.len(), 2);
+        assert_eq!(placed.pages.len(), naive.pages.len(), "LOCKSTEP");
+        assert_eq!(placed.pages[1].tables[0].y, 0.0, "spacing is not carried");
+        assert_eq!(block_pages(&fresh_page, &ApproxFontMetrics)[0], vec![0, 1]);
+
+        let column_anchor = Paragraph {
+            is_table_anchor: true,
+            column_layout_before: Some(ColumnLayout {
+                widths: vec![10_000, 10_000],
+                gaps: vec![1_000],
+                ..ColumnLayout::default()
+            }),
+            ..Paragraph::default()
+        };
+        let columns = doc_with_page(
+            vec![
+                Block::Paragraph(column_anchor),
+                Block::Table(overflowing),
+                Block::Table(following),
+            ],
+            2_500,
+        );
+        let placed = place_doc(&columns, &ApproxFontMetrics);
+        let naive = crate::NaiveLayout
+            .layout(&columns, &ApproxFontMetrics)
+            .unwrap();
+        assert_eq!(placed.pages.len(), 1);
+        assert_eq!(placed.pages.len(), naive.pages.len(), "column LOCKSTEP");
+        assert!(placed.pages[0].tables[1].x > placed.pages[0].tables[0].x);
+        assert_eq!(block_pages(&columns, &ApproxFontMetrics)[0], vec![0, 0, 0]);
+    }
+
+    #[test]
     fn table_anchor_is_zero_but_real_spacer_and_page_break_are_owned() {
         use crate::LayoutEngine;
 
@@ -5474,8 +5558,10 @@ mod tests {
             page_break_before: true,
             ..Default::default()
         };
+        let mut before_break = one_cell_table(0);
+        before_break.source_anchor_spacing_after = 700;
         let page_break = doc_with(vec![
-            Block::Table(one_cell_table(0)),
+            Block::Table(before_break),
             Block::Paragraph(break_anchor),
             Block::Table(table_with_margins(700, 0)),
         ]);

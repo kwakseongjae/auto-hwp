@@ -629,7 +629,9 @@ impl LayoutEngine for NaiveLayout {
                                 page,
                             );
                         }
-                        vert += t.outer_margin_bottom.max(0) as f64;
+                        vert += (t.outer_margin_bottom.max(0)
+                            + t.source_anchor_spacing_after.max(0))
+                            as f64;
                     }
                 }
             }
@@ -773,7 +775,11 @@ fn layout_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> LayoutR
                             page,
                         );
                     }
-                    flow.add(table.outer_margin_bottom.max(0) as f64);
+                    flow.add(
+                        (table.outer_margin_bottom.max(0)
+                            + table.source_anchor_spacing_after.max(0))
+                            as f64,
+                    );
                 }
             }
         }
@@ -954,6 +960,9 @@ pub fn unwrap_frame_table(t: &Table) -> Option<(Table, Option<CellEdge>)> {
     }
     if inner.outer_margin_bottom == 0 {
         inner.outer_margin_bottom = t.outer_margin_bottom;
+    }
+    if inner.source_anchor_spacing_after == 0 {
+        inner.source_anchor_spacing_after = t.source_anchor_spacing_after;
     }
     // The outer cell's frame edge (the box around the wrapped table). Prefer a real per-edge border;
     // fall back to a default hairline only when the cell merely flags a legacy box.

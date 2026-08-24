@@ -529,6 +529,12 @@ pub struct Table {
     /// consecutive tables abut with no breathing room (the "tables stuck together" artifact).
     pub outer_margin_top: HwpUnit,
     pub outer_margin_bottom: HwpUnit,
+    /// RENDER-IR ONLY (never serialized): binary HWP5 may store an additional authored gap after
+    /// the pure paragraph that hosts this table. The host itself remains a zero-height anchor; this
+    /// field preserves only its positive `PARA_LINE_SEG.line_spacing` evidence. The strict first-party
+    /// HWP5 parser owns the value and production may copy it into an rhwp-base document only after a
+    /// fail-closed table-topology check. HWPX and synthesized tables leave it at zero.
+    pub source_anchor_spacing_after: HwpUnit,
     /// `[start, end)` byte range of this TOP-LEVEL `<hp:tbl>…</hp:tbl>` within
     /// `Section.provenance.raw` (set by the HWPX parser only) — lets the serializer re-emit a
     /// dirty table IN PLACE at its original anchor instead of appending it at the section end

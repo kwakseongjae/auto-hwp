@@ -3,6 +3,27 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-25 · Codex(sol) — **#227 first-party HWP5 anchor spacing 구현·시각 실증·quick green**.
+  #225 exact head `d170b00`은 issue-link **3s**·licenses **8m52s**·build-test **9m42s** green,
+  MERGEABLE, 댓글/review 0으로 protected main `f8c3ccd`에 squash 병합됐다. #225는 close되고 원격
+  branch도 삭제했으며 #93/#114를 content-free 결과로 동기화했다. 후속 P0 #227을 issue-first로
+  등재하고 exact main worktree `codex/issue-227-anchor-spacing`을 만들었다. `Table`에 render-only
+  source spacing-after 축을 추가했으나 **양수만으로 적용하자 8→9쪽이 된 반례**를 즉시 폐기했다.
+  확정 계약은 strict owned parser가 one-line host의 다음 pure-table host 시작점이 정확히
+  `vertical+height+spacing`일 때만 마지막 hosted table에 귀속하는 것이다. production rhwp-base에는
+  whole-document strict parse + section/table/cell topology·typed conflict 전수 검증 뒤 atomic 보강하고
+  rhwp lift 자체는 0이라 소유권이 우리 엔진에 있다. HWPX/synth/non-adjacent는 0이다. 간격은
+  place/Naive/block_pages/columns에 exact once로 연결했고 page/lane carry를 기존 overflow reserve로
+  억제한다. canonical은 6개 source-adjacent host를 소유하며 8쪽 유지, page1/4/5 table transition이
+  **+9/+17/+19→0/0/0px**. page ink F1은 1 `+.062901`, 4 `+.134124`, 5 `+.186803`, 6 `+.407532`,
+  7 `+.128682`; page3 `-.000397`, page8 `-.002868`은 정직한 잔여다. 독립 2회 candidate SHA
+  `61ab5f3a…`·report SHA `45a91035…` exact, 60 regions/42 intentional blank·T3/`pass=null` 불변.
+  quick과 full은 8/18/24+98.9%, AI120, oracle82, Rust/rhwp/wasm/licenses, JS build,
+  Vitest **1,012** 전부 green이다. 샌드박스 포트 EPERM 뒤 권한 환경 Chromium도 **84 pass·3
+  intentional skip·1 retry-pass**이며, 재시도는 기존 image-insert toast timing flake다. rhwp
+  `f137b4c9`는 clean이다. **다음:** final diff/privacy/vendor 감사→commit/push→PR `Closes #227`→
+  exact-head CI/comments green 자율 병합→#93/#114 동기화→다음 visual residual을 issue-first 격리.
+
 - 갱신: 2026-08-25 · Codex(sol) — **#225 원인 단일화·회귀 계약·full 검증 완료, PR 직전**.
   #223 head `bc6b2f5`의 CI 3종 green·댓글/review 0 뒤 main `edb6ac94` 병합, #93/#114 동기화,
   #225 issue-first/exact-main worktree 착수. canonical page4 candidate/reference 첫 표 ink span은

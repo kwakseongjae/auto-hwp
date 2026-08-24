@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-25 (Codex sol) · #227 first-party HWP5 anchor spacing
+- 양수-only 가설의 9쪽 반례를 폐기하고 strict next-host source adjacency만 소유하도록 고정.
+- rhwp base에 atomic owned enrichment, HWPX/synth=0, 모든 LOCKSTEP 경로 exact once를 구현.
+- 8쪽 유지·page1/4/5 transition +9/+17/+19→0; 독립 PDF/report SHA exact, threshold 불변.
+- full green: AI120·oracle82·Vitest1,012·Chromium84 pass/3 skip/1 retry-pass. 다음: PR/CI/merge→잔차 child.
+
 ## 2026-08-25 (Codex sol) · #225 HWP5 table-anchor spacing ownership
 - page1/4/5의 +9/+19/+19px 누락이 raw host `line_spacing` 452/960/960 HWPUNIT와 exact임을 격리.
 - margins/table geometry는 owned·rhwp·production exact; HWPX는 explicit margins만 소유함을 분리.

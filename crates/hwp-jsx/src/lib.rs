@@ -1189,6 +1189,8 @@ fn parse_table(el: &JsxElement) -> Result<Table> {
             .get("data-omb")
             .and_then(|v| v.parse().ok())
             .unwrap_or(0),
+        // Source-owned HWP5 anchor evidence is not an authorable JSX field.
+        source_anchor_spacing_after: 0,
         // F2 serialization-fidelity fields (054) are not projected into JSX yet (the JSX surface is
         // render/edit-oriented): a JSX round-trip keeps pre-F2 semantics for them (defaults).
         outer_margin_left: 0,

@@ -545,6 +545,32 @@ zero-height pure anchor, a real blank spacer, fresh-page behavior, and `place_do
 no source anchor-line metric, so HWPX's established zero-height anchor contract must not inherit this
 HWP5-only source evidence. A renderer fix belongs in a separate child and must preserve that boundary.
 
+### First-party source-adjacent anchor spacing (2026-08-25, #227)
+
+The initial implementation deliberately tested the weaker hypothesis “every positive table-host
+`line_spacing` is a post-table gap.” It produced nine candidate pages against the eight-page source and
+was rejected. Positive spacing becomes authoritative only when the immediately following pure table
+host starts at exactly `previous.vertical_pos + previous.line_height + previous.line_spacing`. A page
+reset, ordinary paragraph, missing/multi-line metric, or arithmetic mismatch therefore leaves the
+render-only value at zero. When one host contains multiple table controls, only its final table owns
+the gap.
+
+The strict first-party HWP5 parser owns this evidence. The production rhwp-base document receives it
+only after a whole-document strict parse and validation-before-mutation comparison of section count,
+ordered table/cell topology, stored sizes, and margins. rhwp itself still supplies zero for the new
+axis; HWPX and synthesized tables also remain zero. `place_doc`, `NaiveLayout`, `block_pages`, and the
+column variants consume the same value once, after the table's bottom margin. Overflow advances the
+next block to a fresh page/lane and resets the cursor, so spacing is never carried onto the new lane.
+
+The canonical document contains six such source-adjacent hosts. It remains eight pages, while the
+page 1/4/5 first table transitions move from +9/+17/+19 pixels to 0/0/0. Page ink F1 deltas against the
+#223 report are +0.062901, +0.000087, -0.000397, +0.134124, +0.186803, +0.407532, +0.128682, and
+-0.002868 for pages 1–8 respectively. The two small negative deltas remain visible rather than being
+masked or thresholded. Two independent runs produced byte-identical candidate PDF SHA-256
+`61ab5f3a9329c9d78376813d63cffb62aa9f495962dda5bae97f402baa0789fb` and report SHA-256
+`45a910358e2ebffe4eb906eef6cdcc157546f86a3ce2ee33f5a8ef320d7b7e49`; T3, global alignment,
+scoring, thresholds, and `policy.pass=null` are unchanged.
+
 ## Tests
 
 Run the dependency-free synthetic metric and PNG codec suite with:
