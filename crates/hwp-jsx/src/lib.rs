@@ -1117,6 +1117,7 @@ fn parse_table(el: &JsxElement) -> Result<Table> {
         Some(_) => return Err(Error::Parse("invalid table keep-together flag".into())),
     };
     Ok(Table {
+        caption: None,
         rows: el
             .attrs
             .get("data-rows")

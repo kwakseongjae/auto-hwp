@@ -11,8 +11,11 @@
   전진한다. over-tall은 기존 bounded row fallback을 유지한다. left/right는 IR에는 보존하되 아직
   없는 horizontal lane을 흉내내지 않고 의도적으로 미배치한다. synthetic top/bottom 위치·LOCKSTEP·
   keep/over-tall 및 rhwp lift 회귀 green; focused typeset 92 tests, feature-rhwp caption 2 tests,
-  clippy `-D warnings` green. `external/rhwp` diff 0. **다음:** full workspace quick/full gates와
-  public #192 captioned host 실측 검증→문서/PR/CI/merge→#192 rebase 후 strict parser 재개.
+  clippy `-D warnings` green. 첫 quick은 explicit JSX Table 생성자의 새 필드 누락을 잡아 기존 의미인
+  `caption: None`으로 보완했고 재실행 quick 전체 green: workspace tests, PDF visual **51**,
+  canonical **8/18/24·98.9%+**, public corpus **84**, oracle **82**, HWPX, wasm/licenses. `external/rhwp`
+  diff 0. **다음:** `--full`과 public #192 captioned host 실측 검증→문서/PR/CI/merge→#192 rebase 후
+  strict parser 재개.
 
 - 갱신: 2026-08-24 · Codex(sol) — **PR #181 병합 · #182 next TABLE 착수**.
   #175는 exact head `6711ff9`에서 issue-link/build-test/licenses green, CLEAN/MERGEABLE,

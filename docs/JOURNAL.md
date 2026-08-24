@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-08-24 (Codex sol) · #193 quick green
+- explicit JSX table constructor fixed to preserve legacy `caption: None`; rerun quick all green.
+- PDF51, canonical 8/18/24·98.9%+, corpus84/oracle82, HWPX/wasm/licenses unchanged; next full.
+
 ## 2026-08-24 (Codex sol) · #193 caption foundation implemented
 - shared caption IR + rhwp lift preserve direction/blocks/gap/width/max-width/include-margin.
 - top/bottom now share single/column place_doc·NaiveLayout·block_pages flow; side captions stay typed/deferred.
