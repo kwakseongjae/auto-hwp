@@ -571,6 +571,30 @@ masked or thresholded. Two independent runs produced byte-identical candidate PD
 `45a910358e2ebffe4eb906eef6cdcc157546f86a3ce2ee33f5a8ef320d7b7e49`; T3, global alignment,
 scoring, thresholds, and `policy.pass=null` are unchanged.
 
+### Content-free text residual classification (2026-08-25, #229)
+
+Paint-backed text regions now carry an additive report-only diagnostic that compares their existing
+positioned ink overlap with a bounded local x/y translation. The search is limited to ±32 pixels and
+50 million work units per page. Page-edge clipping, missing or blank ink, repeated equal-best shapes,
+and budget exhaustion remain explicitly unscorable or ambiguous. A high-fidelity recovery with
+similar ink density is geometry-dominant; an already-optimal position with remaining ink-shape
+difference is glyph-style-dominant; partial positional recovery is mixed. These are hypotheses only:
+they do not feed page/region scores, alignment, reference authority, thresholds, or pass policy.
+
+Synthetic fixtures cover pure translation, stroke change, mixed change, repeated ties, blank input,
+clipping, and budget exhaustion. On the canonical unregistered-font pair, 28 paint-backed text regions
+split into 10 geometry-dominant, 9 mixed, 8 ambiguous, and 1 unscorable; none is uniquely
+glyph-style-dominant. The ten geometry cases form a repeated 22-candidate-ink-pixel cohort with local
+ink F1 0.954545–0.977778 and page-clustered offsets: `(18,22)` on page 4, `(12,22)` on page 5,
+`(12,16)` on page 7, and `(12,-4)` on page 8. This supports a next provenance/placement diagnostic for
+the repeated short glyph rather than an immediate font substitution.
+
+Two independent runs preserved the exact #227 candidate PDF SHA-256
+`61ab5f3a9329c9d78376813d63cffb62aa9f495962dda5bae97f402baa0789fb` and produced identical report
+SHA-256 `077d4f47e05cbc618d32e5fadaf6d390f8b54d51e9af1416a014a3f5f3f0e056`. The eight-page structure,
+all prior metrics, T3 labeling, and `policy.pass=null` are unchanged. No source text, glyph strings,
+font paths or bytes, proprietary font names, or document paths are emitted by the diagnostic.
+
 ## Tests
 
 Run the dependency-free synthetic metric and PNG codec suite with:

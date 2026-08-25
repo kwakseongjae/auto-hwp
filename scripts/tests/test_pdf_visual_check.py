@@ -395,6 +395,166 @@ class VerticalTraceTests(unittest.TestCase):
         self.assertIn("overlap", transitions[0]["reason"])
 
 
+class TextResidualTraceTests(unittest.TestCase):
+    def bounds(self, left=10, top=10, width=10, height=10):
+        return {"left": left, "top": top, "width": width, "height": height}
+
+    def trace(self, reference, candidate, bounds=None, **kwargs):
+        return pdf_visual_check._text_residual_trace(
+            "text",
+            "painted",
+            bounds or self.bounds(),
+            reference,
+            candidate,
+            max_translation=kwargs.pop("max_translation", 4),
+            **kwargs,
+        )
+
+    def test_pure_local_translation_is_geometry_dominant(self):
+        candidate = gray_image(32, 32, rectangle(12, 12, 15, 15))
+        reference = gray_image(32, 32, rectangle(15, 14, 18, 17))
+
+        trace = self.trace(reference, candidate)
+
+        self.assertEqual(trace["status"], "hypothesis")
+        self.assertEqual(trace["classification"], "geometry-dominant")
+        self.assertEqual(trace["best_offset_px"], {"dx": 3, "dy": 2})
+        self.assertEqual(trace["best_local_ink_f1"], 1.0)
+        self.assertGreaterEqual(trace["local_gain"], 0.15)
+
+    def test_same_position_with_different_stroke_is_glyph_style_dominant(self):
+        candidate_points = [(12, 12), (13, 12), (12, 13)]
+        reference_points = candidate_points + [(13, 13)]
+        candidate = gray_image(32, 32, candidate_points)
+        reference = gray_image(32, 32, reference_points)
+
+        trace = self.trace(reference, candidate)
+
+        self.assertEqual(trace["status"], "hypothesis")
+        self.assertEqual(trace["classification"], "glyph-style-dominant")
+        self.assertEqual(trace["best_offset_px"], {"dx": 0, "dy": 0})
+        self.assertLess(trace["best_local_ink_f1"], 1.0)
+
+    def test_translation_plus_shape_change_is_mixed(self):
+        candidate_points = [(12, 12), (13, 12), (12, 13)]
+        reference_points = [(16, 12), (17, 12), (16, 13), (17, 13), (18, 12)]
+        candidate = gray_image(32, 32, candidate_points)
+        reference = gray_image(32, 32, reference_points)
+
+        trace = self.trace(reference, candidate)
+
+        self.assertEqual(trace["status"], "hypothesis")
+        self.assertEqual(trace["classification"], "mixed")
+        self.assertEqual(trace["best_offset_px"], {"dx": 4, "dy": 0})
+        self.assertLess(trace["best_local_ink_f1"], 0.9)
+
+    def test_repeated_shape_is_ambiguous_instead_of_inventing_a_class(self):
+        points = [(12, 12), (13, 12), (12, 13)]
+        candidate = gray_image(40, 40, points)
+        reference = gray_image(40, 40, points + [(x + 8, y) for x, y in points])
+        bounds = self.bounds(left=10, top=10, width=5, height=5)
+
+        trace = self.trace(
+            reference, candidate, bounds=bounds, max_translation=8
+        )
+
+        self.assertEqual(trace["status"], "ambiguous")
+        self.assertEqual(trace["classification"], "ambiguous")
+        self.assertEqual(
+            trace["best_offsets_px"],
+            [{"dx": 0, "dy": 0}, {"dx": 8, "dy": 0}],
+        )
+
+    def test_blank_clipping_and_budget_are_explicitly_unscorable(self):
+        blank = gray_image(32, 32)
+        ink = gray_image(32, 32, [(12, 12)])
+
+        no_candidate = self.trace(ink, blank)
+        clipped = self.trace(
+            ink,
+            ink,
+            bounds=self.bounds(left=2, top=2),
+        )
+        exhausted = self.trace(ink, ink, max_work=1)
+
+        self.assertEqual(no_candidate["classification"], "unscorable")
+        self.assertIn("no ink", no_candidate["reason"])
+        self.assertEqual(clipped["classification"], "unscorable")
+        self.assertIn("page edge", clipped["reason"])
+        self.assertEqual(exhausted["classification"], "unscorable")
+        self.assertIn("work budget", exhausted["reason"])
+        self.assertEqual(exhausted["work_units"], 0)
+
+    def test_nontext_and_expected_missing_never_receive_a_hypothesis(self):
+        image = gray_image(32, 32, [(12, 12)])
+        nontext = pdf_visual_check._text_residual_trace(
+            "table", "not-applicable", self.bounds(), image, image
+        )
+        missing = pdf_visual_check._text_residual_trace(
+            "text", "expected-missing", None, image, image
+        )
+
+        self.assertEqual(nontext["status"], "not-applicable")
+        self.assertIsNone(nontext["classification"])
+        self.assertEqual(missing["classification"], "unscorable")
+
+    def test_summary_counts_classes_and_keeps_only_content_free_hypotheses(self):
+        residual = {
+            "status": "hypothesis",
+            "classification": "geometry-dominant",
+            "best_offset_px": {"dx": 3, "dy": 2},
+            "positioned_ink_f1": 0.1,
+            "best_local_ink_f1": 0.95,
+            "local_gain": 0.85,
+            "candidate_to_reference_ink_ratio": 1.0,
+        }
+        summary = pdf_visual_check._summarize_pages(
+            [
+                {
+                    "page": 1,
+                    "metrics": None,
+                    "semantic_regions": [
+                        {
+                            "id": "text-0001",
+                            "category": "text",
+                            "metrics": None,
+                            "text_residual": residual,
+                        },
+                        {
+                            "id": "text-0002",
+                            "category": "text",
+                            "metrics": None,
+                            "text_residual": {
+                                "status": "ambiguous",
+                                "classification": "ambiguous",
+                            },
+                        },
+                    ],
+                }
+            ]
+        )
+
+        self.assertEqual(
+            summary["text_residual_classification_counts"],
+            {"geometry-dominant": 1, "ambiguous": 1},
+        )
+        self.assertEqual(
+            summary["text_residual_hypotheses"],
+            [
+                {
+                    "page": 1,
+                    "id": "text-0001",
+                    "classification": "geometry-dominant",
+                    "best_offset_px": {"dx": 3, "dy": 2},
+                    "positioned_ink_f1": 0.1,
+                    "best_local_ink_f1": 0.95,
+                    "local_gain": 0.85,
+                    "candidate_to_reference_ink_ratio": 1.0,
+                }
+            ],
+        )
+
+
 class MetricRegressionTests(unittest.TestCase):
     def test_bounded_translation_is_detected_and_reported(self):
         reference = gray_image(16, 16, rectangle(2, 2, 5, 5))

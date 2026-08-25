@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-25 (Codex sol) · #229 text residual classifier
+- fixed page alignment 뒤 ±32px/50M bounded local ink로 geometry·glyph-style·mixed·ambiguous를 분리.
+- 합성 경계 7축·Python69·Node8·quick 전체 green; score/threshold/T3/pass/layout/rhwp 불변.
+- canonical 2회 PDF `61ab5f3a…`·report `077d4f47…` exact; text 28=geometry10/mixed9/ambiguous8/unscorable1.
+- 다음: PR/CI/merge→반복 22px short-glyph의 generated-marker/field provenance와 x/y placement 격리.
+
 ## 2026-08-25 (Codex sol) · #227 first-party HWP5 anchor spacing
 - 양수-only 가설의 9쪽 반례를 폐기하고 strict next-host source adjacency만 소유하도록 고정.
 - rhwp base에 atomic owned enrichment, HWPX/synth=0, 모든 LOCKSTEP 경로 exact once를 구현.
