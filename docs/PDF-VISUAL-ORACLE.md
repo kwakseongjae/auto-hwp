@@ -321,7 +321,7 @@ otherwise white, globally similar page.
 
 ### Semantic regions
 
-When `--candidate-regions` is supplied, visual-region schema v2 divides the candidate placement into
+When `--candidate-regions` is supplied, visual-region schema v3 divides the candidate placement into
 four content-free categories: paint-backed paragraph bands (`text`), placed table boxes (`table`), raster images
 (`image`), and SVG-backed equations/charts/other objects (`object`). IDs and HWPUNIT geometry are
 present; source text, paths, binary identifiers, and font paths are absent.
@@ -333,6 +333,14 @@ band with neither source-visible text nor a placed glyph is an intentional blank
 page-fragments are counted separately and never enter pixel ranking. `expected-missing` is an explicit
 unscorable placement failure. Non-text regions use `not-applicable`. A painted region that rasterizes
 without candidate ink remains partially unscorable with an explicit metric reason rather than being hidden.
+
+Schema v3 additionally binds every painted text region to the aggregate, page-clipped EM bounds and
+source-neutral origin of the glyphs already produced by that same first-party placement. Origins are
+limited to `source-text`, `generated-marker`, `page-decoration`, `mixed`, and `unknown`; non-text uses
+`not-applicable`. Painted text must carry finite non-empty bounds, while expected-missing text must be
+`unknown` with null bounds. The strict loader rejects stale versions, unknown fields, and contradictory
+paint/provenance claims. It never reads PDF text and emits no scalar, source text, field payload, model
+address, font identity, path, raw byte, or private hash.
 
 The manifest must be strict UTF-8 JSON with exactly the known fields, ordered one-based pages, finite
 positive in-page geometry, unique per-page IDs, matching MediaBox dimensions, and an exact SHA-256
@@ -594,6 +602,31 @@ Two independent runs preserved the exact #227 candidate PDF SHA-256
 SHA-256 `077d4f47e05cbc618d32e5fadaf6d390f8b54d51e9af1416a014a3f5f3f0e056`. The eight-page structure,
 all prior metrics, T3 labeling, and `policy.pass=null` are unchanged. No source text, glyph strings,
 font paths or bytes, proprietary font names, or document paths are emitted by the diagnostic.
+
+### Source-neutral glyph provenance and placement (2026-08-25, #231)
+
+Placed glyphs now carry a bounded production class from the first-party typesetter, and visual-region
+schema v3 reports that aggregate class plus the baseline-anchored EM union for each painted paragraph
+band. Synthetic tests cover source text, generated markers, page decorations, mixed and unknown
+production, empty placement, page-edge clipping, and stale provenance/bounds mismatches. The evidence
+is derived from the placement that produced the PDF; it does not re-typeset or inspect PDF text.
+
+On the canonical public pair, all 28 paint-backed text regions—and all ten geometry-dominant,
+22-candidate-ink-pixel residuals—are `source-text`. Every member of that ten-region cohort is one
+1200×1200 HWPUNIT EM box whose origin is consistently 1008 HWPUNIT right and 180 HWPUNIT above its
+owning paragraph-band origin. The local reference offsets still cluster at `(18,22)`, `(12,22)`,
+`(12,16)`, and `(12,-4)` pixels by page. This rules out generated marker/page-decoration provenance;
+the single next renderer axis is therefore the **source-text paragraph placement transform** (the
+mapping from placed paragraph origin/baseline to painted page coordinates), not font substitution.
+No correction is made in this slice.
+
+Two independent runs preserved candidate PDF SHA-256
+`61ab5f3a9329c9d78376813d63cffb62aa9f495962dda5bae97f402baa0789fb`, visual-evidence SHA-256
+`45d389cf08c2763990e488768c59c1deae920e42284022c072357bf7682331ef`, report SHA-256
+`2bd3f3c8e80c7794c1eb3c2a5d369d5fdcb8f7669fb6b2a8e2290901259f1823`, and HTML SHA-256
+`0b23fb3f2bfff43e9d700f91ad6dd9c4b452d7f8237ee13de9086bdd1adcf96d`. The document remains eight
+pages with 60 scored regions and 42 intentional blanks; all prior metrics, T3 authority,
+`policy.pass=null`, PDF bytes, and rhwp remain unchanged.
 
 ## Tests
 

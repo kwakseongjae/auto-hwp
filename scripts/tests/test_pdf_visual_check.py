@@ -106,7 +106,7 @@ class VisualRegionTests(unittest.TestCase):
 
     def manifest(self, candidate_sha256: str):
         return {
-            "schema_version": 2,
+            "schema_version": 3,
             "coordinate_space": "HWPUNIT",
             "candidate_pdf_sha256": candidate_sha256,
             "pages": [
@@ -125,6 +125,13 @@ class VisualRegionTests(unittest.TestCase):
                             "w": 10000.0,
                             "h": 3000.0,
                             "clipped": False,
+                            "glyph_provenance": "source-text",
+                            "placed_em_bounds_hwpunit": {
+                                "x": 1200.0,
+                                "y": 2200.0,
+                                "w": 900.0,
+                                "h": 1000.0,
+                            },
                         }
                     ],
                 }
@@ -146,6 +153,10 @@ class VisualRegionTests(unittest.TestCase):
         self.assertEqual(loaded["category_counts"]["text"], 1)
         self.assertEqual(loaded["intentional_blank_text_regions"], 2)
         self.assertNotIn("text", loaded["document"]["pages"][0]["regions"][0])
+        self.assertEqual(
+            loaded["document"]["pages"][0]["regions"][0]["glyph_provenance"],
+            "source-text",
+        )
 
         for mutation, pattern in (
             (lambda doc: doc.update({"unknown": True}), "fields differ"),
@@ -166,6 +177,18 @@ class VisualRegionTests(unittest.TestCase):
             ),
             (lambda doc: doc["pages"][0]["regions"][0].update({"x": -1}), "outside its page"),
             (lambda doc: doc["pages"][0]["regions"][0].update({"w": float("nan")}), "non-finite"),
+            (
+                lambda doc: doc["pages"][0]["regions"][0].update(
+                    {"glyph_provenance": "raw-secret"}
+                ),
+                "glyph_provenance",
+            ),
+            (
+                lambda doc: doc["pages"][0]["regions"][0][
+                    "placed_em_bounds_hwpunit"
+                ].update({"w": 0}),
+                "outside its page or empty",
+            ),
         ):
             with self.subTest(pattern=pattern):
                 document = self.manifest(candidate_sha256)
@@ -186,6 +209,13 @@ class VisualRegionTests(unittest.TestCase):
                 "w": 59500.0,
                 "h": 84200.0,
                 "clipped": False,
+                "glyph_provenance": "source-text",
+                "placed_em_bounds_hwpunit": {
+                    "x": 1.0,
+                    "y": 1.0,
+                    "w": 1.0,
+                    "h": 1.0,
+                },
             }
             for index in range(
                 1, pdf_visual_check.MAX_VISUAL_REGION_PAGE_AREA_MULTIPLIER + 2
@@ -194,6 +224,52 @@ class VisualRegionTests(unittest.TestCase):
 
         with self.assertRaisesRegex(pdf_visual_check.VisualCheckError, "scoring budget"):
             self.load(document, candidate_sha256)
+
+    def test_manifest_accepts_typed_origins_and_rejects_stale_or_nontext_claims(self):
+        candidate_sha256 = "a" * 64
+        for provenance in (
+            "source-text",
+            "generated-marker",
+            "page-decoration",
+            "mixed",
+            "unknown",
+        ):
+            with self.subTest(provenance=provenance):
+                document = self.manifest(candidate_sha256)
+                document["pages"][0]["regions"][0]["glyph_provenance"] = provenance
+                self.load(document, candidate_sha256)
+
+        stale = self.manifest(candidate_sha256)
+        stale_region = stale["pages"][0]["regions"][0]
+        stale_region["paint_status"] = "expected-missing"
+        with self.assertRaisesRegex(
+            pdf_visual_check.VisualCheckError, "cannot claim placed glyph provenance"
+        ):
+            self.load(stale, candidate_sha256)
+
+        missing = self.manifest(candidate_sha256)
+        missing_region = missing["pages"][0]["regions"][0]
+        missing_region["paint_status"] = "expected-missing"
+        missing_region["glyph_provenance"] = "unknown"
+        missing_region["placed_em_bounds_hwpunit"] = None
+        self.load(missing, candidate_sha256)
+
+        stale_bounds = self.manifest(candidate_sha256)
+        stale_bounds["pages"][0]["regions"][0]["placed_em_bounds_hwpunit"] = None
+        with self.assertRaisesRegex(
+            pdf_visual_check.VisualCheckError, "painted text must carry placed glyph bounds"
+        ):
+            self.load(stale_bounds, candidate_sha256)
+
+        nontext = self.manifest(candidate_sha256)
+        nontext_region = nontext["pages"][0]["regions"][0]
+        nontext_region.update(
+            id="table-0001", category="table", paint_status="not-applicable"
+        )
+        with self.assertRaisesRegex(
+            pdf_visual_check.VisualCheckError, "non-text region cannot claim"
+        ):
+            self.load(nontext, candidate_sha256)
 
     def test_manifest_rejects_page_mismatch_and_duplicate_region_ids(self):
         candidate_sha256 = "a" * 64
@@ -226,6 +302,8 @@ class VisualRegionTests(unittest.TestCase):
                     "w": 40.0,
                     "h": 40.0,
                     "clipped": False,
+                    "glyph_provenance": "not-applicable",
+                    "placed_em_bounds_hwpunit": None,
                 }
             ],
         }
@@ -249,6 +327,7 @@ class VisualRegionTests(unittest.TestCase):
         page["regions"][0]["category"] = "text"
         page["regions"][0]["id"] = "text-0001"
         page["regions"][0]["paint_status"] = "expected-missing"
+        page["regions"][0]["glyph_provenance"] = "unknown"
         explicit_missing = pdf_visual_check._score_visual_regions(
             page, reference, candidate, 10, 10, {"dx": 0, "dy": 0}, 100_000
         )
@@ -518,12 +597,21 @@ class TextResidualTraceTests(unittest.TestCase):
                             "id": "text-0001",
                             "category": "text",
                             "metrics": None,
+                            "glyph_provenance": "source-text",
+                            "placed_em_bounds_hwpunit": {
+                                "x": 1.0,
+                                "y": 2.0,
+                                "w": 3.0,
+                                "h": 4.0,
+                            },
                             "text_residual": residual,
                         },
                         {
                             "id": "text-0002",
                             "category": "text",
                             "metrics": None,
+                            "glyph_provenance": "unknown",
+                            "placed_em_bounds_hwpunit": None,
                             "text_residual": {
                                 "status": "ambiguous",
                                 "classification": "ambiguous",
@@ -545,6 +633,13 @@ class TextResidualTraceTests(unittest.TestCase):
                     "page": 1,
                     "id": "text-0001",
                     "classification": "geometry-dominant",
+                    "glyph_provenance": "source-text",
+                    "placed_em_bounds_hwpunit": {
+                        "x": 1.0,
+                        "y": 2.0,
+                        "w": 3.0,
+                        "h": 4.0,
+                    },
                     "best_offset_px": {"dx": 3, "dy": 2},
                     "positioned_ink_f1": 0.1,
                     "best_local_ink_f1": 0.95,
@@ -552,6 +647,14 @@ class TextResidualTraceTests(unittest.TestCase):
                     "candidate_to_reference_ink_ratio": 1.0,
                 }
             ],
+        )
+        self.assertEqual(
+            summary["glyph_provenance_counts"],
+            {"source-text": 1, "unknown": 1},
+        )
+        self.assertEqual(
+            summary["text_residual_by_glyph_provenance"],
+            {"source-text": {"geometry-dominant": 1}},
         )
 
 

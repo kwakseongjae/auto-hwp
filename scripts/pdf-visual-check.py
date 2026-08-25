@@ -85,7 +85,7 @@ HARD_MAX_REPORT_BYTES = 2 * GIB
 HARD_MAX_SUBPROCESS_OUTPUT_BYTES = 4 * MIB
 HARD_SUBPROCESS_TIMEOUT_SECONDS = 300.0
 
-VISUAL_REGION_SCHEMA_VERSION = 2
+VISUAL_REGION_SCHEMA_VERSION = 3
 MAX_VISUAL_REGION_MANIFEST_BYTES = 8 * MIB
 MAX_VISUAL_REGIONS_TOTAL = 10_000
 MAX_VISUAL_REGIONS_PER_PAGE = 2_000
@@ -491,7 +491,18 @@ def _load_visual_regions(
             label = f"visual regions page {index}.regions[{region_index}]"
             region = _exact_object_keys(
                 region,
-                {"id", "category", "paint_status", "x", "y", "w", "h", "clipped"},
+                {
+                    "id",
+                    "category",
+                    "paint_status",
+                    "x",
+                    "y",
+                    "w",
+                    "h",
+                    "clipped",
+                    "glyph_provenance",
+                    "placed_em_bounds_hwpunit",
+                },
                 label,
             )
             region_id = region["id"]
@@ -512,6 +523,31 @@ def _load_visual_regions(
                     raise VisualCheckError(f"{label}.paint_status is invalid for text")
             elif paint_status != "not-applicable":
                 raise VisualCheckError(f"{label}.paint_status must be not-applicable")
+            glyph_provenance = region["glyph_provenance"]
+            placed_em_bounds = region["placed_em_bounds_hwpunit"]
+            if category == "text":
+                if glyph_provenance not in {
+                    "source-text",
+                    "generated-marker",
+                    "page-decoration",
+                    "mixed",
+                    "unknown",
+                }:
+                    raise VisualCheckError(f"{label}.glyph_provenance is invalid for text")
+                if paint_status == "expected-missing" and (
+                    glyph_provenance != "unknown" or placed_em_bounds is not None
+                ):
+                    raise VisualCheckError(
+                        f"{label} expected-missing text cannot claim placed glyph provenance"
+                    )
+                if paint_status == "painted" and placed_em_bounds is None:
+                    raise VisualCheckError(
+                        f"{label} painted text must carry placed glyph bounds"
+                    )
+            elif glyph_provenance != "not-applicable" or placed_em_bounds is not None:
+                raise VisualCheckError(
+                    f"{label} non-text region cannot claim placed glyph provenance"
+                )
             if not isinstance(region["clipped"], bool):
                 raise VisualCheckError(f"{label}.clipped must be boolean")
             x = _finite_number(region["x"], f"{label}.x")
@@ -528,6 +564,33 @@ def _load_visual_regions(
                 or y + height > page_height + epsilon
             ):
                 raise VisualCheckError(f"{label} is outside its page or has empty geometry")
+            if placed_em_bounds is not None:
+                placed_em_bounds = _exact_object_keys(
+                    placed_em_bounds, {"x", "y", "w", "h"}, f"{label}.placed_em_bounds_hwpunit"
+                )
+                em_x = _finite_number(
+                    placed_em_bounds["x"], f"{label}.placed_em_bounds_hwpunit.x"
+                )
+                em_y = _finite_number(
+                    placed_em_bounds["y"], f"{label}.placed_em_bounds_hwpunit.y"
+                )
+                em_width = _finite_number(
+                    placed_em_bounds["w"], f"{label}.placed_em_bounds_hwpunit.w"
+                )
+                em_height = _finite_number(
+                    placed_em_bounds["h"], f"{label}.placed_em_bounds_hwpunit.h"
+                )
+                if (
+                    em_x < -epsilon
+                    or em_y < -epsilon
+                    or em_width <= 0
+                    or em_height <= 0
+                    or em_x + em_width > page_width + epsilon
+                    or em_y + em_height > page_height + epsilon
+                ):
+                    raise VisualCheckError(
+                        f"{label}.placed_em_bounds_hwpunit is outside its page or empty"
+                    )
             page_region_area += width * height
             if (
                 page_region_area
@@ -2527,6 +2590,8 @@ def _score_visual_regions(
             "id": region["id"],
             "category": region["category"],
             "paint_status": region["paint_status"],
+            "glyph_provenance": region["glyph_provenance"],
+            "placed_em_bounds_hwpunit": region["placed_em_bounds_hwpunit"],
             "source_bounds_hwpunit": {
                 "x": region["x"],
                 "y": region["y"],
@@ -2673,6 +2738,8 @@ def _render_html(report: Mapping[str, Any]) -> str:
                 f"<td>{html.escape(region.get('vertical_trace', {}).get('status', 'unavailable'))}</td>"
                 f"<td>{_format_metric(region.get('vertical_trace', {}).get('offset_px'))}</td>"
                 f"<td>{html.escape(str(region.get('text_residual', {}).get('classification') or 'not-applicable'))}</td>"
+                f"<td>{html.escape(str(region.get('glyph_provenance', 'not-applicable')))}</td>"
+                f"<td>{_format_metric(region.get('placed_em_bounds_hwpunit'))}</td>"
                 f"<td>{_format_metric(region.get('text_residual', {}).get('best_local_ink_f1'))}</td>"
                 f"<td>{_format_metric(region.get('text_residual', {}).get('local_gain'))}</td>"
                 "</tr>"
@@ -2683,6 +2750,7 @@ def _render_html(report: Mapping[str, Any]) -> str:
                 "<table><tr><th>ID</th><th>Category</th><th>Status</th>"
                 "<th>Ink F1</th><th>Edge F1</th><th>Vertical trace</th>"
                 "<th>Offset hypothesis (px)</th><th>Text residual</th>"
+                "<th>Glyph provenance</th><th>Placed EM bounds (HWPUNIT)</th>"
                 "<th>Best local ink F1</th><th>Local gain</th></tr>"
                 f"{region_rows}</table>"
             )
@@ -2876,6 +2944,8 @@ def _summarize_pages(pages: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
     transition_hypotheses: List[Dict[str, Any]] = []
     text_residual_classification_counts: Dict[str, int] = {}
     text_residual_hypotheses: List[Dict[str, Any]] = []
+    glyph_provenance_counts: Dict[str, int] = {}
+    text_residual_by_glyph_provenance: Dict[str, Dict[str, int]] = {}
     for page in pages:
         for region in page.get("semantic_regions", []):
             trace_status = region.get("vertical_trace", {}).get("status")
@@ -2883,16 +2953,31 @@ def _summarize_pages(pages: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
                 trace_status_counts[trace_status] = trace_status_counts.get(trace_status, 0) + 1
             text_residual = region.get("text_residual", {})
             residual_classification = text_residual.get("classification")
+            glyph_provenance = region.get("glyph_provenance")
+            if region.get("category") == "text" and glyph_provenance is not None:
+                glyph_provenance_counts[glyph_provenance] = (
+                    glyph_provenance_counts.get(glyph_provenance, 0) + 1
+                )
             if residual_classification is not None:
                 text_residual_classification_counts[residual_classification] = (
                     text_residual_classification_counts.get(residual_classification, 0) + 1
                 )
                 if text_residual.get("status") == "hypothesis":
+                    provenance_counts = text_residual_by_glyph_provenance.setdefault(
+                        str(glyph_provenance), {}
+                    )
+                    provenance_counts[residual_classification] = (
+                        provenance_counts.get(residual_classification, 0) + 1
+                    )
                     text_residual_hypotheses.append(
                         {
                             "page": page["page"],
                             "id": region["id"],
                             "classification": residual_classification,
+                            "glyph_provenance": glyph_provenance,
+                            "placed_em_bounds_hwpunit": region.get(
+                                "placed_em_bounds_hwpunit"
+                            ),
                             "best_offset_px": text_residual.get("best_offset_px"),
                             "positioned_ink_f1": text_residual.get("positioned_ink_f1"),
                             "best_local_ink_f1": text_residual.get("best_local_ink_f1"),
@@ -2969,6 +3054,8 @@ def _summarize_pages(pages: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         "vertical_transition_hypotheses": transition_hypotheses,
         "text_residual_classification_counts": text_residual_classification_counts,
         "text_residual_hypotheses": text_residual_hypotheses,
+        "glyph_provenance_counts": glyph_provenance_counts,
+        "text_residual_by_glyph_provenance": text_residual_by_glyph_provenance,
     }
 
 
@@ -3368,6 +3455,8 @@ def _run_visual_check_from_snapshots(
             "vertical_transition_hypotheses": [],
             "text_residual_classification_counts": {},
             "text_residual_hypotheses": [],
+            "glyph_provenance_counts": {},
+            "text_residual_by_glyph_provenance": {},
             "pixel_comparison_attempted": False,
         }
         _write_report(output_dir, report, {}, limits)
@@ -3474,6 +3563,10 @@ def _run_visual_check_from_snapshots(
                         "id": region["id"],
                         "category": region["category"],
                         "paint_status": region["paint_status"],
+                        "glyph_provenance": region["glyph_provenance"],
+                        "placed_em_bounds_hwpunit": region[
+                            "placed_em_bounds_hwpunit"
+                        ],
                         "source_bounds_hwpunit": {
                             key: region[key] for key in ("x", "y", "w", "h")
                         },

@@ -23,7 +23,7 @@ use hwp_model::font_class::{classify, FontCategory};
 use hwp_model::layout::{PageLayerTree, PaintOp};
 use hwp_model::prelude::FontMetricsProvider;
 use hwp_model::types::Color;
-use hwp_typeset::{BlockKind, PlacedDoc};
+use hwp_typeset::{BlockKind, PlacedDoc, PlacedGlyph, PlacedGlyphOrigin};
 
 use krilla::color::rgb;
 use krilla::geom::{PathBuilder, Point, Rect};
@@ -278,6 +278,25 @@ pub struct PdfVisualRegion {
     pub w: f64,
     pub h: f64,
     pub clipped: bool,
+    /// Source-neutral aggregate origin for glyphs inside this exact placed paragraph band.
+    pub glyph_provenance: &'static str,
+    /// Baseline-anchored EM union from the same placement. `None` for non-text or missing paint.
+    pub placed_em_bounds_hwpunit: Option<PdfVisualBounds>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct PdfVisualBounds {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct VisualRegionClassification {
+    paint_status: &'static str,
+    glyph_provenance: &'static str,
+    placed_em_bounds_hwpunit: Option<PdfVisualBounds>,
 }
 
 /// Result of a PDF export: the bytes plus what font path (if any) backed the glyphs.
@@ -300,7 +319,7 @@ fn push_visual_region(
     counters: &mut [usize; 4],
     category_index: usize,
     category: &'static str,
-    paint_status: &'static str,
+    classification: VisualRegionClassification,
     page_size: (f64, f64),
     raw: (f64, f64, f64, f64),
 ) -> Result<(), String> {
@@ -328,12 +347,14 @@ fn push_visual_region(
     regions.push(PdfVisualRegion {
         id: format!("{category}-{:04}", counters[category_index]),
         category,
-        paint_status,
+        paint_status: classification.paint_status,
         x: left,
         y: top,
         w: right - left,
         h: bottom - top,
         clipped: left != x || top != y || right != raw_right || bottom != raw_bottom,
+        glyph_provenance: classification.glyph_provenance,
+        placed_em_bounds_hwpunit: classification.placed_em_bounds_hwpunit,
     });
     Ok(())
 }
@@ -358,6 +379,75 @@ fn block_band_contains_glyph(
             && glyph.baseline >= block.y
             && glyph.baseline <= bottom
     })
+}
+
+fn glyphs_in_block_band<'a>(
+    page: &'a hwp_typeset::PlacedPage,
+    block: &hwp_typeset::PlacedBlock,
+) -> Vec<&'a PlacedGlyph> {
+    let right = block.x + block.w;
+    let bottom = block.y + block.h;
+    page.glyphs
+        .iter()
+        .filter(|glyph| {
+            glyph.x >= block.x
+                && glyph.x <= right
+                && glyph.baseline >= block.y
+                && glyph.baseline <= bottom
+        })
+        .collect()
+}
+
+fn glyph_origin_label(origin: PlacedGlyphOrigin) -> &'static str {
+    match origin {
+        PlacedGlyphOrigin::SourceText => "source-text",
+        PlacedGlyphOrigin::GeneratedMarker => "generated-marker",
+        PlacedGlyphOrigin::PageDecoration => "page-decoration",
+        PlacedGlyphOrigin::Unknown => "unknown",
+    }
+}
+
+fn text_glyph_evidence(
+    page: &hwp_typeset::PlacedPage,
+    block: &hwp_typeset::PlacedBlock,
+) -> (&'static str, Option<PdfVisualBounds>) {
+    let glyphs = glyphs_in_block_band(page, block);
+    let Some(first) = glyphs.first() else {
+        return ("unknown", None);
+    };
+    let first_origin = first.origin;
+    let provenance = if glyphs.iter().all(|glyph| glyph.origin == first_origin) {
+        glyph_origin_label(first_origin)
+    } else {
+        "mixed"
+    };
+    let raw_left = glyphs
+        .iter()
+        .map(|glyph| glyph.x)
+        .fold(f64::INFINITY, f64::min);
+    let raw_top = glyphs
+        .iter()
+        .map(|glyph| glyph.baseline - glyph.size)
+        .fold(f64::INFINITY, f64::min);
+    let raw_right = glyphs
+        .iter()
+        .map(|glyph| glyph.x + glyph.size)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let raw_bottom = glyphs
+        .iter()
+        .map(|glyph| glyph.baseline)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let left = raw_left.clamp(0.0, page.width);
+    let top = raw_top.clamp(0.0, page.height);
+    let right = raw_right.clamp(0.0, page.width);
+    let bottom = raw_bottom.clamp(0.0, page.height);
+    let bounds = (right > left && bottom > top).then_some(PdfVisualBounds {
+        x: left,
+        y: top,
+        w: right - left,
+        h: bottom - top,
+    });
+    (provenance, bounds)
 }
 
 fn paragraph_paint_status(
@@ -403,12 +493,17 @@ fn visual_evidence(
                 intentional_blank_text_regions += 1;
                 continue;
             };
+            let (glyph_provenance, placed_em_bounds_hwpunit) = text_glyph_evidence(page, block);
             push_visual_region(
                 &mut regions,
                 &mut counters,
                 0,
                 "text",
-                paint_status,
+                VisualRegionClassification {
+                    paint_status,
+                    glyph_provenance,
+                    placed_em_bounds_hwpunit,
+                },
                 (page.width, page.height),
                 (block.x, block.y, block.w, block.h),
             )?;
@@ -419,7 +514,11 @@ fn visual_evidence(
                 &mut counters,
                 1,
                 "table",
-                "not-applicable",
+                VisualRegionClassification {
+                    paint_status: "not-applicable",
+                    glyph_provenance: "not-applicable",
+                    placed_em_bounds_hwpunit: None,
+                },
                 (page.width, page.height),
                 (table.x, table.y, table.w, table.h),
             )?;
@@ -435,7 +534,11 @@ fn visual_evidence(
                 &mut counters,
                 category_index,
                 category,
-                "not-applicable",
+                VisualRegionClassification {
+                    paint_status: "not-applicable",
+                    glyph_provenance: "not-applicable",
+                    placed_em_bounds_hwpunit: None,
+                },
                 (page.width, page.height),
                 (image.x, image.y, image.w, image.h),
             )?;
@@ -449,7 +552,7 @@ fn visual_evidence(
         });
     }
     Ok(PdfVisualEvidence {
-        schema_version: 2,
+        schema_version: 3,
         coordinate_space: "HWPUNIT",
         candidate_pdf_sha256,
         pages,
@@ -1369,7 +1472,7 @@ mod tests {
             "non-trivial PDF size, got {}",
             out.bytes.len()
         );
-        assert_eq!(out.visual_evidence.schema_version, 2);
+        assert_eq!(out.visual_evidence.schema_version, 3);
         assert_eq!(out.visual_evidence.coordinate_space, "HWPUNIT");
         assert_eq!(out.visual_evidence.pages.len(), out.pages);
         assert_eq!(
@@ -1382,6 +1485,11 @@ mod tests {
             .iter()
             .filter(|region| region.category == "text")
             .all(|region| region.paint_status == "painted"));
+        assert!(regions
+            .iter()
+            .filter(|region| region.category == "text")
+            .all(|region| region.glyph_provenance == "source-text"
+                && region.placed_em_bounds_hwpunit.is_some()));
         assert_eq!(
             out.visual_evidence.pages[0].intentional_blank_text_regions,
             0
@@ -1425,6 +1533,8 @@ mod tests {
         assert_eq!(text_regions.len(), 1);
         assert_eq!(text_regions[0].id, "text-0002");
         assert_eq!(text_regions[0].paint_status, "painted");
+        assert_eq!(text_regions[0].glyph_provenance, "source-text");
+        assert!(text_regions[0].placed_em_bounds_hwpunit.is_some());
         assert_eq!(
             page.regions
                 .iter()
@@ -1475,6 +1585,7 @@ mod tests {
             italic: false,
             font: None,
             cluster: None,
+            origin: hwp_typeset::PlacedGlyphOrigin::SourceText,
         };
         let first_fragment = hwp_typeset::PlacedPage {
             glyphs: vec![glyph(120.0, 250.0)],
@@ -1506,6 +1617,107 @@ mod tests {
     }
 
     #[test]
+    fn glyph_evidence_distinguishes_source_generated_mixed_unknown_and_bounds() {
+        let block = hwp_typeset::PlacedBlock {
+            x: 100.0,
+            y: 200.0,
+            w: 400.0,
+            h: 200.0,
+            section: 0,
+            block: 0,
+            kind: BlockKind::Paragraph,
+        };
+        let glyph = |x, baseline, origin| hwp_typeset::PlacedGlyph {
+            x,
+            baseline,
+            ch: '가',
+            size: 100.0,
+            color: Color::default(),
+            underline: false,
+            bold: false,
+            italic: false,
+            font: None,
+            cluster: None,
+            origin,
+        };
+        let page = |glyphs| hwp_typeset::PlacedPage {
+            width: 1_000.0,
+            height: 2_000.0,
+            glyphs,
+            ..Default::default()
+        };
+
+        let source = page(vec![glyph(
+            120.0,
+            250.0,
+            hwp_typeset::PlacedGlyphOrigin::SourceText,
+        )]);
+        let (provenance, bounds) = text_glyph_evidence(&source, &block);
+        assert_eq!(provenance, "source-text");
+        let bounds = bounds.unwrap();
+        assert_eq!(
+            (bounds.x, bounds.y, bounds.w, bounds.h),
+            (120.0, 150.0, 100.0, 100.0)
+        );
+
+        let decoration = page(vec![glyph(
+            120.0,
+            250.0,
+            hwp_typeset::PlacedGlyphOrigin::PageDecoration,
+        )]);
+        assert_eq!(
+            text_glyph_evidence(&decoration, &block).0,
+            "page-decoration"
+        );
+
+        let marker = page(vec![glyph(
+            120.0,
+            250.0,
+            hwp_typeset::PlacedGlyphOrigin::GeneratedMarker,
+        )]);
+        assert_eq!(text_glyph_evidence(&marker, &block).0, "generated-marker");
+
+        let unknown = page(vec![glyph(
+            120.0,
+            250.0,
+            hwp_typeset::PlacedGlyphOrigin::Unknown,
+        )]);
+        assert_eq!(text_glyph_evidence(&unknown, &block).0, "unknown");
+
+        let mixed = page(vec![
+            glyph(120.0, 250.0, hwp_typeset::PlacedGlyphOrigin::SourceText),
+            glyph(
+                240.0,
+                250.0,
+                hwp_typeset::PlacedGlyphOrigin::GeneratedMarker,
+            ),
+        ]);
+        assert_eq!(text_glyph_evidence(&mixed, &block).0, "mixed");
+
+        let empty = page(Vec::new());
+        assert_eq!(text_glyph_evidence(&empty, &block), ("unknown", None));
+
+        let edge_block = hwp_typeset::PlacedBlock {
+            x: 950.0,
+            y: 0.0,
+            w: 50.0,
+            h: 80.0,
+            ..block
+        };
+        let edge = page(vec![glyph(
+            980.0,
+            60.0,
+            hwp_typeset::PlacedGlyphOrigin::SourceText,
+        )]);
+        let edge_bounds = text_glyph_evidence(&edge, &edge_block).1.unwrap();
+        assert_eq!(
+            (edge_bounds.x, edge_bounds.y, edge_bounds.w, edge_bounds.h),
+            (980.0, 0.0, 20.0, 60.0),
+            "aggregate EM evidence is clipped to the page without exposing the glyph"
+        );
+    }
+
+    #[test]
     fn clipped_visual_region_keeps_paint_status_and_bounded_geometry() {
         let mut regions = Vec::new();
         let mut counters = [0usize; 4];
@@ -1515,7 +1727,11 @@ mod tests {
             &mut counters,
             0,
             "text",
-            "painted",
+            VisualRegionClassification {
+                paint_status: "painted",
+                glyph_provenance: "source-text",
+                placed_em_bounds_hwpunit: None,
+            },
             (100.0, 200.0),
             (-10.0, 180.0, 50.0, 40.0),
         )

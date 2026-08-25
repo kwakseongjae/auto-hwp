@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-25 (Codex sol) · #231 source-neutral glyph provenance
+- PlacedGlyph origin과 visual schema v3 aggregate EM bounds를 strict·content-free로 구현했다.
+- canonical geometry 10/10은 source-text·1200² EM·band 대비 (+1008,-180) HU로 일치했다.
+- PDF/evidence/report/HTML 2회 SHA exact; full green, Vitest1,012, Chromium83 pass/3 skip/2 retry-pass.
+- 다음: PR/CI/merge→#93/#114 sync→source-text paragraph placement transform child issue.
+
 ## 2026-08-25 (Codex sol) · #229 text residual classifier
 - fixed page alignment 뒤 ±32px/50M bounded local ink로 geometry·glyph-style·mixed·ambiguous를 분리.
 - 합성 경계 7축·Python69·Node8·quick 전체 green; score/threshold/T3/pass/layout/rhwp 불변.
