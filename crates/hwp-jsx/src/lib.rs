@@ -987,6 +987,7 @@ fn parse_para(el: &JsxElement) -> Result<Paragraph> {
         style_name: el.attrs.get("data-style").cloned(),
         runs,
         source_line_metrics: Vec::new(),
+        source_line_geometry: Vec::new(),
         source: el.attrs.get("data-src").and_then(|s| decode_para_source(s)),
         provenance: el
             .attrs

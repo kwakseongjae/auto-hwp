@@ -22,7 +22,7 @@ use hwp_model::document::{Block, Inline, LineStyle, Paragraph, SemanticDoc};
 use hwp_model::font_class::{classify, FontCategory};
 use hwp_model::layout::{PageLayerTree, PaintOp};
 use hwp_model::prelude::FontMetricsProvider;
-use hwp_model::types::Color;
+use hwp_model::types::{Color, HwpUnit};
 use hwp_typeset::{BlockKind, PlacedDoc, PlacedGlyph, PlacedGlyphOrigin};
 
 use krilla::color::rgb;
@@ -282,6 +282,9 @@ pub struct PdfVisualRegion {
     pub glyph_provenance: &'static str,
     /// Baseline-anchored EM union from the same placement. `None` for non-text or missing paint.
     pub placed_em_bounds_hwpunit: Option<PdfVisualBounds>,
+    /// Report-only comparison between one strict first-party HWP5 source line and this paragraph
+    /// placement. It is never an input to layout or PDF paint and carries no text or binary fields.
+    pub source_line_transform: PdfSourceLineTransform,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -292,11 +295,60 @@ pub struct PdfVisualBounds {
     pub h: f64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct PdfSourceLineGeometry {
+    pub vertical_pos: HwpUnit,
+    pub height: HwpUnit,
+    pub text_height: HwpUnit,
+    pub baseline: HwpUnit,
+    pub line_spacing: HwpUnit,
+    pub column_start: HwpUnit,
+    pub segment_width: HwpUnit,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct PdfPlacedLineGeometry {
+    pub em_x_from_band: f64,
+    pub em_top_from_band: f64,
+    pub em_baseline_from_band: f64,
+    pub em_width: f64,
+    pub em_height: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct PdfSourceLineDelta {
+    pub em_x_minus_column_start: f64,
+    pub em_baseline_minus_source_baseline: f64,
+    pub band_y_minus_source_vertical_pos: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct PdfSourceLineTransform {
+    pub status: &'static str,
+    pub axis_class: &'static str,
+    pub source: Option<PdfSourceLineGeometry>,
+    pub placed: Option<PdfPlacedLineGeometry>,
+    pub delta: Option<PdfSourceLineDelta>,
+}
+
+impl PdfSourceLineTransform {
+    fn unavailable(status: &'static str) -> Self {
+        Self {
+            status,
+            axis_class: "unavailable",
+            source: None,
+            placed: None,
+            delta: None,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 struct VisualRegionClassification {
     paint_status: &'static str,
     glyph_provenance: &'static str,
     placed_em_bounds_hwpunit: Option<PdfVisualBounds>,
+    source_line_transform: PdfSourceLineTransform,
 }
 
 /// Result of a PDF export: the bytes plus what font path (if any) backed the glyphs.
@@ -355,8 +407,84 @@ fn push_visual_region(
         clipped: left != x || top != y || right != raw_right || bottom != raw_bottom,
         glyph_provenance: classification.glyph_provenance,
         placed_em_bounds_hwpunit: classification.placed_em_bounds_hwpunit,
+        source_line_transform: classification.source_line_transform,
     });
     Ok(())
+}
+
+fn source_line_transform(
+    paragraph: &Paragraph,
+    block: &hwp_typeset::PlacedBlock,
+    glyph_provenance: &'static str,
+    placed_em_bounds_hwpunit: Option<PdfVisualBounds>,
+) -> PdfSourceLineTransform {
+    if paragraph.dirty.is_dirty() {
+        return PdfSourceLineTransform::unavailable("edited");
+    }
+    let [source] = paragraph.source_line_geometry.as_slice() else {
+        return PdfSourceLineTransform::unavailable(if paragraph.source_line_geometry.is_empty() {
+            "missing"
+        } else {
+            "multi-line-ambiguous"
+        });
+    };
+    if glyph_provenance != "source-text" {
+        return PdfSourceLineTransform::unavailable("non-source-text");
+    }
+    let Some(em) = placed_em_bounds_hwpunit else {
+        return PdfSourceLineTransform::unavailable("missing-placement");
+    };
+    let placed = PdfPlacedLineGeometry {
+        em_x_from_band: em.x - block.x,
+        em_top_from_band: em.y - block.y,
+        em_baseline_from_band: em.y + em.h - block.y,
+        em_width: em.w,
+        em_height: em.h,
+    };
+    let delta = PdfSourceLineDelta {
+        em_x_minus_column_start: placed.em_x_from_band - f64::from(source.column_start),
+        em_baseline_minus_source_baseline: placed.em_baseline_from_band
+            - f64::from(source.baseline),
+        band_y_minus_source_vertical_pos: block.y - f64::from(source.vertical_pos),
+    };
+    if ![
+        placed.em_x_from_band,
+        placed.em_top_from_band,
+        placed.em_baseline_from_band,
+        placed.em_width,
+        placed.em_height,
+        delta.em_x_minus_column_start,
+        delta.em_baseline_minus_source_baseline,
+        delta.band_y_minus_source_vertical_pos,
+    ]
+    .into_iter()
+    .all(f64::is_finite)
+    {
+        return PdfSourceLineTransform::unavailable("non-finite-placement");
+    }
+    let horizontal = delta.em_x_minus_column_start.abs() > f64::EPSILON;
+    let vertical = delta.em_baseline_minus_source_baseline.abs() > f64::EPSILON;
+    let axis_class = match (horizontal, vertical) {
+        (false, false) => "exact",
+        (true, false) => "horizontal-only",
+        (false, true) => "vertical-only",
+        (true, true) => "horizontal-and-vertical",
+    };
+    PdfSourceLineTransform {
+        status: "single-line",
+        axis_class,
+        source: Some(PdfSourceLineGeometry {
+            vertical_pos: source.vertical_pos,
+            height: source.height,
+            text_height: source.text_height,
+            baseline: source.baseline,
+            line_spacing: source.line_spacing,
+            column_start: source.column_start,
+            segment_width: source.segment_width,
+        }),
+        placed: Some(placed),
+        delta: Some(delta),
+    }
 }
 
 fn paragraph_expects_text_paint(paragraph: &Paragraph) -> bool {
@@ -494,6 +622,8 @@ fn visual_evidence(
                 continue;
             };
             let (glyph_provenance, placed_em_bounds_hwpunit) = text_glyph_evidence(page, block);
+            let source_line_transform =
+                source_line_transform(paragraph, block, glyph_provenance, placed_em_bounds_hwpunit);
             push_visual_region(
                 &mut regions,
                 &mut counters,
@@ -503,6 +633,7 @@ fn visual_evidence(
                     paint_status,
                     glyph_provenance,
                     placed_em_bounds_hwpunit,
+                    source_line_transform,
                 },
                 (page.width, page.height),
                 (block.x, block.y, block.w, block.h),
@@ -518,6 +649,7 @@ fn visual_evidence(
                     paint_status: "not-applicable",
                     glyph_provenance: "not-applicable",
                     placed_em_bounds_hwpunit: None,
+                    source_line_transform: PdfSourceLineTransform::unavailable("not-applicable"),
                 },
                 (page.width, page.height),
                 (table.x, table.y, table.w, table.h),
@@ -538,6 +670,7 @@ fn visual_evidence(
                     paint_status: "not-applicable",
                     glyph_provenance: "not-applicable",
                     placed_em_bounds_hwpunit: None,
+                    source_line_transform: PdfSourceLineTransform::unavailable("not-applicable"),
                 },
                 (page.width, page.height),
                 (image.x, image.y, image.w, image.h),
@@ -552,7 +685,7 @@ fn visual_evidence(
         });
     }
     Ok(PdfVisualEvidence {
-        schema_version: 3,
+        schema_version: 4,
         coordinate_space: "HWPUNIT",
         candidate_pdf_sha256,
         pages,
@@ -1472,7 +1605,7 @@ mod tests {
             "non-trivial PDF size, got {}",
             out.bytes.len()
         );
-        assert_eq!(out.visual_evidence.schema_version, 3);
+        assert_eq!(out.visual_evidence.schema_version, 4);
         assert_eq!(out.visual_evidence.coordinate_space, "HWPUNIT");
         assert_eq!(out.visual_evidence.pages.len(), out.pages);
         assert_eq!(
@@ -1718,6 +1851,126 @@ mod tests {
     }
 
     #[test]
+    fn source_line_transform_is_bounded_report_only_and_fail_closed() {
+        let source = SourceLineGeometry {
+            vertical_pos: 200,
+            height: 1_500,
+            text_height: 1_200,
+            baseline: 900,
+            line_spacing: 300,
+            column_start: 100,
+            segment_width: 40_000,
+        };
+        let block = hwp_typeset::PlacedBlock {
+            x: 1_000.0,
+            y: 200.0,
+            w: 40_000.0,
+            h: 1_500.0,
+            section: 0,
+            block: 0,
+            kind: BlockKind::Paragraph,
+        };
+        let em = PdfVisualBounds {
+            x: 1_100.0,
+            y: 0.0,
+            w: 1_200.0,
+            h: 1_100.0,
+        };
+        let mut paragraph = para("visible");
+        paragraph.source_line_geometry = vec![source];
+
+        let exact = source_line_transform(&paragraph, &block, "source-text", Some(em));
+        assert_eq!(exact.status, "single-line");
+        assert_eq!(exact.axis_class, "exact");
+        assert_eq!(exact.source.unwrap().segment_width, 40_000);
+        assert_eq!(exact.delta.unwrap().band_y_minus_source_vertical_pos, 0.0);
+
+        let horizontal = source_line_transform(
+            &paragraph,
+            &block,
+            "source-text",
+            Some(PdfVisualBounds { x: 1_200.0, ..em }),
+        );
+        assert_eq!(horizontal.axis_class, "horizontal-only");
+
+        paragraph.source_line_geometry.push(source);
+        assert_eq!(
+            source_line_transform(&paragraph, &block, "source-text", Some(em)).status,
+            "multi-line-ambiguous"
+        );
+        paragraph.source_line_geometry.clear();
+        assert_eq!(
+            source_line_transform(&paragraph, &block, "source-text", Some(em)).status,
+            "missing"
+        );
+        paragraph.source_line_geometry.push(source);
+        paragraph.dirty.mark();
+        assert_eq!(
+            source_line_transform(&paragraph, &block, "source-text", Some(em)).status,
+            "edited"
+        );
+        paragraph.dirty = Dirty::default();
+        assert_eq!(
+            source_line_transform(&paragraph, &block, "generated-marker", Some(em)).status,
+            "non-source-text"
+        );
+        assert_eq!(
+            source_line_transform(&paragraph, &block, "source-text", None).status,
+            "missing-placement"
+        );
+        assert_eq!(
+            source_line_transform(
+                &paragraph,
+                &hwp_typeset::PlacedBlock {
+                    y: f64::NAN,
+                    ..block
+                },
+                "source-text",
+                Some(em),
+            )
+            .status,
+            "non-finite-placement"
+        );
+    }
+
+    #[test]
+    fn diagnostic_source_line_geometry_cannot_change_pdf_bytes() {
+        let baseline = doc_with(vec![Block::Paragraph(para("same layout and paint"))]);
+        let mut diagnostic = baseline.clone();
+        let Block::Paragraph(paragraph) = &mut diagnostic.sections[0].blocks[0] else {
+            unreachable!()
+        };
+        paragraph.source_line_geometry = vec![SourceLineGeometry {
+            vertical_pos: 100,
+            height: 1_500,
+            text_height: 1_200,
+            baseline: 900,
+            line_spacing: 300,
+            column_start: 0,
+            segment_width: 40_000,
+        }];
+
+        let baseline_pdf =
+            export_pdf(&baseline, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
+        let diagnostic_pdf =
+            export_pdf(&diagnostic, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
+        assert_eq!(baseline_pdf.bytes, diagnostic_pdf.bytes);
+        assert_eq!(baseline_pdf.pages, diagnostic_pdf.pages);
+        assert_eq!(
+            baseline_pdf.visual_evidence.pages[0].regions[0]
+                .source_line_transform
+                .status,
+            "missing"
+        );
+        assert_eq!(
+            diagnostic_pdf.visual_evidence.pages[0].regions[0]
+                .source_line_transform
+                .status,
+            "single-line"
+        );
+    }
+
+    #[test]
     fn clipped_visual_region_keeps_paint_status_and_bounded_geometry() {
         let mut regions = Vec::new();
         let mut counters = [0usize; 4];
@@ -1731,6 +1984,7 @@ mod tests {
                 paint_status: "painted",
                 glyph_provenance: "source-text",
                 placed_em_bounds_hwpunit: None,
+                source_line_transform: PdfSourceLineTransform::unavailable("missing-placement"),
             },
             (100.0, 200.0),
             (-10.0, 180.0, 50.0, 40.0),

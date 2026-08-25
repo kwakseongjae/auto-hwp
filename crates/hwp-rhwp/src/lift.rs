@@ -245,6 +245,7 @@ impl<'a> Lifter<'a> {
             } else {
                 Vec::new()
             },
+            source_line_geometry: Vec::new(),
             provenance: Provenance {
                 source: Some(SourceFormat::Hwp5),
                 raw: None,

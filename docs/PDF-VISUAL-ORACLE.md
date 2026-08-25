@@ -321,7 +321,7 @@ otherwise white, globally similar page.
 
 ### Semantic regions
 
-When `--candidate-regions` is supplied, visual-region schema v3 divides the candidate placement into
+When `--candidate-regions` is supplied, visual-region schema v4 divides the candidate placement into
 four content-free categories: paint-backed paragraph bands (`text`), placed table boxes (`table`), raster images
 (`image`), and SVG-backed equations/charts/other objects (`object`). IDs and HWPUNIT geometry are
 present; source text, paths, binary identifiers, and font paths are absent.
@@ -341,6 +341,14 @@ limited to `source-text`, `generated-marker`, `page-decoration`, `mixed`, and `u
 `unknown` with null bounds. The strict loader rejects stale versions, unknown fields, and contradictory
 paint/provenance claims. It never reads PDF text and emits no scalar, source text, field payload, model
 address, font identity, path, raw byte, or private hash.
+
+Schema v4 adds one strictly bounded, report-only HWP5 source-line comparison. A clean paragraph with
+exactly one owned `PARA_LINE_SEG` and source-text paint may expose only seven source-neutral geometry
+values plus paragraph-band-relative EM geometry and three deltas. Missing, edited, multi-line,
+non-source-text, missing-placement, non-finite, and non-text cases carry an explicit status with null
+geometry. The loader rejects stale/unknown fields, values outside 10,000,000 HWPUNIT, non-positive EM
+boxes, and axis labels that disagree with the horizontal/baseline deltas. This stored geometry is
+untrusted evidence: it never enters reflow, pagination, paint, score, alignment, thresholds, or pass.
 
 The manifest must be strict UTF-8 JSON with exactly the known fields, ordered one-based pages, finite
 positive in-page geometry, unique per-page IDs, matching MediaBox dimensions, and an exact SHA-256
@@ -627,6 +635,33 @@ Two independent runs preserved candidate PDF SHA-256
 `0b23fb3f2bfff43e9d700f91ad6dd9c4b452d7f8237ee13de9086bdd1adcf96d`. The document remains eight
 pages with 60 scored regions and 42 intentional blanks; all prior metrics, T3 authority,
 `policy.pass=null`, PDF bytes, and rhwp remain unchanged.
+
+### First-party HWP5 source-line transform (2026-08-25, #233)
+
+The strict first-party parser now retains bounded typed line geometry for non-empty HWP5 paragraphs
+without promoting stored Hancom lines to layout authority. Production HWP5 keeps rhwp only as the
+bootstrap decoder, then atomically attaches this metadata after whole-document block topology,
+run-boundary-neutral inline identity, and existing typed values all agree. The rhwp lift owns none of
+the new field and the vendored tree is unchanged. Synthetic tests cover a valid visible line,
+multi-line ambiguity, count/boundary/length mismatches, zero and oversized geometry, edited and
+missing placement, unknown schema fields, and atomic content/topology/conflict rejection. Adding or
+removing the diagnostic field produces byte-identical PDF output.
+
+On the canonical public pair, 27 of 28 painted text regions have one clean source line and one is
+explicitly multi-line ambiguous. Of the 27, two transforms are exact and 25 are horizontal-only. All
+ten geometry-dominant source-text residuals form one consistent class: source baseline delta is
+exactly 0 HWPUNIT while the placed EM begins 1008 HWPUNIT right of the stored column start. Their
+previous report-only reference offsets remain `(18,22)`, `(12,22)`, `(12,16)`, and `(12,-4)` px by
+page. This supports exactly one next correction investigation—paragraph horizontal start/indent
+ownership—without yet changing the renderer.
+
+Two independent runs preserved candidate PDF SHA-256
+`61ab5f3a9329c9d78376813d63cffb62aa9f495962dda5bae97f402baa0789fb` and produced identical visual
+evidence SHA-256 `d390c1d3be54913565b0dcd1cf906c1ef6745d464ea7127361e6eafc84ed824b`, report SHA-256
+`0d2a83fcd8a2e802967d1c936a47c9d0e0a6f516e3b844ce81cc3f96bab0cdbc`, and HTML SHA-256
+`863c2fe47075e794d9fba5fc7b3b093205a0262ef1a859b40b17d136361be40d`. The document remains eight
+pages with 60 scored regions and 42 intentional blanks; all prior scores, T3 authority,
+`policy.pass=null`, layout/PDF bytes, and reference rules are unchanged.
 
 ## Tests
 

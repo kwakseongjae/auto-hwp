@@ -64,6 +64,90 @@ fn enrich_hwp5_owned_page_numbers(bytes: &[u8], target: &mut SemanticDoc) {
     };
     merge_owned_page_numbers(target, &owned);
     merge_owned_table_anchor_spacings(target, &owned);
+    merge_owned_source_line_geometry(target, &owned);
+}
+
+#[derive(PartialEq, Eq)]
+enum ParagraphInlineIdentity {
+    Text(String),
+    FieldBegin(String, String),
+    FieldEnd,
+    Bookmark(String),
+    Image,
+    Equation,
+    Chart,
+    Note,
+    Raw,
+}
+
+fn paragraph_inline_identity(paragraph: &Paragraph) -> Vec<ParagraphInlineIdentity> {
+    let mut identity = Vec::new();
+    for inline in paragraph.runs.iter().flat_map(|run| &run.content) {
+        match inline {
+            Inline::Text(text) => match identity.last_mut() {
+                Some(ParagraphInlineIdentity::Text(previous)) => previous.push_str(text),
+                _ => identity.push(ParagraphInlineIdentity::Text(text.clone())),
+            },
+            Inline::FieldBegin(field) => identity.push(ParagraphInlineIdentity::FieldBegin(
+                field.field_type.clone(),
+                field.command.clone(),
+            )),
+            Inline::FieldEnd(_) => identity.push(ParagraphInlineIdentity::FieldEnd),
+            Inline::Bookmark(name) => {
+                identity.push(ParagraphInlineIdentity::Bookmark(name.clone()))
+            }
+            Inline::Image(_) => identity.push(ParagraphInlineIdentity::Image),
+            Inline::Equation(_) => identity.push(ParagraphInlineIdentity::Equation),
+            Inline::Chart(_) => identity.push(ParagraphInlineIdentity::Chart),
+            Inline::Note(_) => identity.push(ParagraphInlineIdentity::Note),
+            Inline::Raw(_) => identity.push(ParagraphInlineIdentity::Raw),
+        }
+    }
+    identity
+}
+
+fn paragraph_identity(left: &Paragraph, right: &Paragraph) -> bool {
+    paragraph_inline_identity(left) == paragraph_inline_identity(right)
+}
+
+fn source_line_section_compatible(target: &Section, owned: &Section) -> bool {
+    target.blocks.len() == owned.blocks.len()
+        && target
+            .blocks
+            .iter()
+            .zip(&owned.blocks)
+            .all(|(target, owned)| match (target, owned) {
+                (Block::Paragraph(target), Block::Paragraph(owned)) => {
+                    paragraph_identity(target, owned)
+                        && (target.source_line_geometry.is_empty()
+                            || target.source_line_geometry == owned.source_line_geometry)
+                }
+                (Block::Table(_), Block::Table(_)) => true,
+                _ => false,
+            })
+}
+
+/// Atomically attach strict first-party HWP5 line geometry to the rhwp bootstrap model. This is
+/// diagnostic-only metadata: `hwp-typeset` does not read it, and any block/content/conflict mismatch
+/// leaves the entire production document unchanged.
+fn merge_owned_source_line_geometry(target: &mut SemanticDoc, owned: &SemanticDoc) -> bool {
+    if target.sections.len() != owned.sections.len()
+        || !target
+            .sections
+            .iter()
+            .zip(&owned.sections)
+            .all(|(target, owned)| source_line_section_compatible(target, owned))
+    {
+        return false;
+    }
+    for (target, owned) in target.sections.iter_mut().zip(&owned.sections) {
+        for (target, owned) in target.blocks.iter_mut().zip(&owned.blocks) {
+            if let (Block::Paragraph(target), Block::Paragraph(owned)) = (target, owned) {
+                target.source_line_geometry = owned.source_line_geometry.clone();
+            }
+        }
+    }
+    true
 }
 
 fn merge_owned_page_numbers(target: &mut SemanticDoc, owned: &SemanticDoc) -> bool {
@@ -332,6 +416,38 @@ mod hwp5_candidate_tests {
         }
     }
 
+    fn line_geometry(vertical_pos: HwpUnit) -> SourceLineGeometry {
+        SourceLineGeometry {
+            vertical_pos,
+            height: 1_500,
+            text_height: 1_200,
+            baseline: 900,
+            line_spacing: 300,
+            column_start: 0,
+            segment_width: 40_000,
+        }
+    }
+
+    fn paragraph_doc(text_runs: &[&str], geometry: &[SourceLineGeometry]) -> SemanticDoc {
+        SemanticDoc {
+            sections: vec![Section {
+                blocks: vec![Block::Paragraph(Paragraph {
+                    runs: text_runs
+                        .iter()
+                        .map(|text| Run {
+                            content: vec![Inline::Text((*text).into())],
+                            ..Run::default()
+                        })
+                        .collect(),
+                    source_line_geometry: geometry.to_vec(),
+                    ..Paragraph::default()
+                })],
+                ..Section::default()
+            }],
+            ..SemanticDoc::default()
+        }
+    }
+
     #[test]
     fn page_number_merge_is_atomic_for_topology_partial_and_typed_conflicts() {
         let first = number(1, PageNumberPosition::BottomCenter);
@@ -415,6 +531,72 @@ mod hwp5_candidate_tests {
             assert_eq!(spacing(&rhwp, block), 0, "rhwp lift is not the owner");
             assert_eq!(spacing(&production, block), expected);
         }
+    }
+
+    #[test]
+    fn source_line_geometry_merge_is_atomic_and_run_boundary_neutral() {
+        let geometry = line_geometry(100);
+        let owned = paragraph_doc(&["a", "b"], &[geometry]);
+
+        let mut compatible = paragraph_doc(&["ab"], &[]);
+        assert!(merge_owned_source_line_geometry(&mut compatible, &owned));
+        let Block::Paragraph(paragraph) = &compatible.sections[0].blocks[0] else {
+            unreachable!()
+        };
+        assert_eq!(paragraph.source_line_geometry, vec![geometry]);
+
+        let mut content_conflict = paragraph_doc(&["ac"], &[]);
+        assert!(!merge_owned_source_line_geometry(
+            &mut content_conflict,
+            &owned
+        ));
+        let Block::Paragraph(paragraph) = &content_conflict.sections[0].blocks[0] else {
+            unreachable!()
+        };
+        assert!(paragraph.source_line_geometry.is_empty());
+
+        let existing = line_geometry(200);
+        let mut typed_conflict = paragraph_doc(&["ab"], &[existing]);
+        assert!(!merge_owned_source_line_geometry(
+            &mut typed_conflict,
+            &owned
+        ));
+        let Block::Paragraph(paragraph) = &typed_conflict.sections[0].blocks[0] else {
+            unreachable!()
+        };
+        assert_eq!(paragraph.source_line_geometry, vec![existing]);
+
+        let mut topology = paragraph_doc(&["ab"], &[]);
+        topology.sections[0]
+            .blocks
+            .push(Block::Table(Table::default()));
+        assert!(!merge_owned_source_line_geometry(&mut topology, &owned));
+        let Block::Paragraph(paragraph) = &topology.sections[0].blocks[0] else {
+            unreachable!()
+        };
+        assert!(paragraph.source_line_geometry.is_empty());
+    }
+
+    #[test]
+    fn production_hwp5_open_enriches_owned_line_geometry_without_rhwp_ownership() {
+        let bytes = benchmark();
+        let owned = open_hwp5_own(&bytes).unwrap();
+        let rhwp = RhwpEngine::new().parse(&bytes, SourceFormat::Hwp5).unwrap();
+        let production = Engine::open(&bytes).unwrap();
+        let count = |doc: &SemanticDoc| {
+            doc.sections
+                .iter()
+                .flat_map(|section| &section.blocks)
+                .filter_map(|block| match block {
+                    Block::Paragraph(paragraph) => Some(paragraph.source_line_geometry.len()),
+                    Block::Table(_) => None,
+                })
+                .sum::<usize>()
+        };
+
+        assert!(count(&owned) > 0);
+        assert_eq!(count(&rhwp), 0, "rhwp lift is not the owner");
+        assert_eq!(count(&production), count(&owned));
     }
 
     #[test]

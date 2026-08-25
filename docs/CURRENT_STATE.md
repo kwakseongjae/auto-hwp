@@ -3,7 +3,31 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
-- 갱신: 2026-08-25 · Codex(sol) — **#231 구현 · PR #232 CI 대기**.
+- 갱신: 2026-08-25 · Codex(sol) — **#233 source-line transform 구현·canonical 단일축 확정**.
+  strict first-party HWP5 parser가 이미 framing하는 `PARA_LINE_SEG`에서 vertical/height/text-height/
+  baseline/spacing/column-start/segment-width만 최대 **10,000,000 HWPUNIT**로 검증해 diagnostic-only
+  IR에 보존한다. text offset·raw flags·본문/scalar·field payload·font/path/bytes는 보존/출력하지 않는다.
+  production rhwp-base에는 whole-document block topology와 run-boundary-neutral typed inline identity,
+  기존 geometry conflict를 전수 검증한 뒤 atomic 보강한다. rhwp lift 자체는 geometry **0**이며
+  `external/rhwp`는 무수정이다. multi-line/edited/missing/non-source/stale/nonfinite/hostile은 fail-closed다.
+  visual schema **v4**는 clean single source line과 같은 placement의 EM을 paragraph-band 상대 좌표로
+  비교하고, score/alignment/threshold/pass에는 입력하지 않는다. Rust parser **52**·core **10**·PDF
+  **48**, Python **72**, Node **4** focused green이며 geometry 유무 PDF bytes exact 회귀를 잠갔다.
+  canonical 독립 2회는 candidate PDF SHA `61ab5f3a…` 불변, evidence `d390c1d3…`, report
+  `0d2a83fc…`, HTML `863c2fe4…` exact다. 8쪽·60 scored·42 intentional blank·T3/`pass=null`과 기존
+  residual은 불변이다. painted text 28 = clean single-line **27** + multi-line ambiguous **1**;
+  transform axis는 exact 2/horizontal-only 25. geometry-dominant **10/10**은 source-text,
+  source baseline delta **0**, column-start→placed EM x delta **+1008 HWPUNIT**로 동일해 다음 단일
+  correction 축을 **horizontal paragraph start transform**으로 확정했다. 아직 renderer는 수정하지
+  않았다. `scripts/verify-local.sh --full`은 Rust/Wasm·AI120·8/18/24+98.9%·public corpus84·
+  oracle82·JS build·Vitest **1,012**·Chromium **85 pass/3 intentional skip**까지 최종 exit 0이다.
+  초기 E2E 원자성 실패는 worktree Wasm과 main-linked JS 패키지가 섞인 검증 환경 문제였고, 내부
+  패키지 링크를 현재 worktree로 맞춘 뒤 격리 및 full 모두 green으로 재현했다. **중단 계약:** #233
+  privacy/vendor 감사→commit/push→PR `Closes #233`→필수 CI/댓글 green 자율 병합→#93/#114 동기화까지만
+  완료하고 작업을 끊는다. 다음 세션은 +1008의 para-shape indent/line-start 소유권을 synthetic으로
+  분리하는 correction child를 issue-first 착수하되, 이번 세션에서는 새 이슈나 renderer 수정을 시작하지 않는다.
+
+- 갱신: 2026-08-25 · Codex(sol) — **#232 병합 · #233 source-line transform 착수**.
   first-party `PlacedGlyph`에 source-text/generated-marker/page-decoration/unknown origin을 붙이고,
   visual-region schema v3가 같은 placement의 page-clipped aggregate EM bounds와 mixed 판정을 strict하게
   운반한다. painted text의 null bounds, expected-missing의 stale provenance/bounds, non-text claim과 old/
@@ -17,10 +41,15 @@
   full은 Rust/rhwp, AI120, 8/18/24+98.9%, public corpus84, oracle82, wasm/licenses, JS build와 Vitest
   **1,012**까지 green이다. sandbox port EPERM 뒤 권한 환경 Chromium도 **83 pass·3 intentional
   skip·2 retry-pass flaky**로 exit 0이며, flakes는 hidden textarea visibility와 stale status-toast
-  timing이다. privacy/vendor/diff audit 뒤 exact head `68e495a`를 push하고 PR **#232**(`Closes #231`)를
-  열었다. **다음:** issue-link/build-test/licenses와 review/comment 변화 추적→green/CLEAN이면 protected
-  main에 자율 merge→#93/#114 sync→해당 transform의 source-neutral parser/placement 비교 child를
-  issue-first 착수.
+  timing이다. PR #232 exact head `e5869e7`은 issue-link **4s**·licenses **2m45s**·build-test **9m46s**
+  green, CLEAN/MERGEABLE, 댓글/review 0으로 protected main `e6baed82`에 squash 병합됐다. #231은
+  close되고 원격 branch도 삭제했으며 #93/#114에 content-free 결과를 동기화했다. 후속 P0 #233을
+  issue-first 등재하고 exact main의 `codex/issue-233-source-line-transform` worktree를 만들었다. 목표는
+  first-party HWP5가 이미 strict framing하는 `PARA_LINE_SEG`의 vertical/baseline·column start/segment
+  width를 non-empty text에는 **report-only untrusted hint**로 보존해 #231 placed paragraph/glyph와
+  비교하는 것이다. 기존 empty-spacer 적용 외 layout authority 승격, renderer 수정, raw flag/text offset,
+  원문/scalar/address/font/path/bytes 노출, rhwp 수정은 금지한다. **다음:** owned parser/model/visual join
+  지도화→valid/ambiguous/stale/hostile RED fixtures→최소 diagnostic-only evidence→canonical 10개 재측정.
 
 - 갱신: 2026-08-25 · Codex(sol) — **#228 병합 · #229 text residual classifier 착수**.
   #227 exact head `8b704c51`은 issue-link **2s**·licenses **2m3s**·build-test **9m25s** green,

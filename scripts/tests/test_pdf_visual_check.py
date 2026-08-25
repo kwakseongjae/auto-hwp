@@ -72,6 +72,46 @@ def default_limits(**overrides):
     return pdf_visual_check.ResourceLimits(**values)
 
 
+def unavailable_source_line(status="missing"):
+    return {
+        "status": status,
+        "axis_class": "unavailable",
+        "source": None,
+        "placed": None,
+        "delta": None,
+    }
+
+
+def single_source_line(axis="horizontal-only"):
+    horizontal = 100.0 if axis in {"horizontal-only", "horizontal-and-vertical"} else 0.0
+    vertical = 200.0 if axis in {"vertical-only", "horizontal-and-vertical"} else 0.0
+    return {
+        "status": "single-line",
+        "axis_class": axis,
+        "source": {
+            "vertical_pos": 2000,
+            "height": 1500,
+            "text_height": 1200,
+            "baseline": 900,
+            "line_spacing": 300,
+            "column_start": 0,
+            "segment_width": 10000,
+        },
+        "placed": {
+            "em_x_from_band": horizontal,
+            "em_top_from_band": -100.0,
+            "em_baseline_from_band": 900.0 + vertical,
+            "em_width": 900.0,
+            "em_height": 1000.0,
+        },
+        "delta": {
+            "em_x_minus_column_start": horizontal,
+            "em_baseline_minus_source_baseline": vertical,
+            "band_y_minus_source_vertical_pos": 0.0,
+        },
+    }
+
+
 class MetricTests(unittest.TestCase):
     def test_identical_images_are_exact_without_translation(self):
         image = gray_image(16, 16, rectangle(4, 4, 9, 9))
@@ -106,7 +146,7 @@ class VisualRegionTests(unittest.TestCase):
 
     def manifest(self, candidate_sha256: str):
         return {
-            "schema_version": 3,
+            "schema_version": 4,
             "coordinate_space": "HWPUNIT",
             "candidate_pdf_sha256": candidate_sha256,
             "pages": [
@@ -132,6 +172,7 @@ class VisualRegionTests(unittest.TestCase):
                                 "w": 900.0,
                                 "h": 1000.0,
                             },
+                            "source_line_transform": single_source_line(),
                         }
                     ],
                 }
@@ -216,6 +257,7 @@ class VisualRegionTests(unittest.TestCase):
                     "w": 1.0,
                     "h": 1.0,
                 },
+                "source_line_transform": unavailable_source_line(),
             }
             for index in range(
                 1, pdf_visual_check.MAX_VISUAL_REGION_PAGE_AREA_MULTIPLIER + 2
@@ -224,6 +266,63 @@ class VisualRegionTests(unittest.TestCase):
 
         with self.assertRaisesRegex(pdf_visual_check.VisualCheckError, "scoring budget"):
             self.load(document, candidate_sha256)
+
+    def test_source_line_transform_rejects_unknown_stale_hostile_and_axis_mismatch(self):
+        candidate_sha256 = "a" * 64
+        mutations = (
+            (
+                lambda transform: transform.update({"unknown": True}),
+                "fields differ",
+            ),
+            (
+                lambda transform: transform["source"].update(
+                    {"segment_width": 10_000_001}
+                ),
+                "outside the bounded range",
+            ),
+            (
+                lambda transform: transform["delta"].update(
+                    {"em_x_minus_column_start": float("inf")}
+                ),
+                "non-finite",
+            ),
+            (
+                lambda transform: transform.update({"axis_class": "vertical-only"}),
+                "disagrees with deltas",
+            ),
+            (
+                lambda transform: transform.update(
+                    {
+                        "status": "multi-line-ambiguous",
+                        "axis_class": "unavailable",
+                    }
+                ),
+                "must not claim geometry",
+            ),
+        )
+        for mutation, pattern in mutations:
+            with self.subTest(pattern=pattern):
+                document = self.manifest(candidate_sha256)
+                mutation(
+                    document["pages"][0]["regions"][0]["source_line_transform"]
+                )
+                with self.assertRaisesRegex(pdf_visual_check.VisualCheckError, pattern):
+                    self.load(document, candidate_sha256)
+
+        for status in (
+            "missing",
+            "multi-line-ambiguous",
+            "edited",
+            "non-source-text",
+            "missing-placement",
+            "non-finite-placement",
+        ):
+            with self.subTest(status=status):
+                document = self.manifest(candidate_sha256)
+                document["pages"][0]["regions"][0][
+                    "source_line_transform"
+                ] = unavailable_source_line(status)
+                self.load(document, candidate_sha256)
 
     def test_manifest_accepts_typed_origins_and_rejects_stale_or_nontext_claims(self):
         candidate_sha256 = "a" * 64
@@ -237,6 +336,10 @@ class VisualRegionTests(unittest.TestCase):
             with self.subTest(provenance=provenance):
                 document = self.manifest(candidate_sha256)
                 document["pages"][0]["regions"][0]["glyph_provenance"] = provenance
+                if provenance != "source-text":
+                    document["pages"][0]["regions"][0][
+                        "source_line_transform"
+                    ] = unavailable_source_line("non-source-text")
                 self.load(document, candidate_sha256)
 
         stale = self.manifest(candidate_sha256)
@@ -252,6 +355,9 @@ class VisualRegionTests(unittest.TestCase):
         missing_region["paint_status"] = "expected-missing"
         missing_region["glyph_provenance"] = "unknown"
         missing_region["placed_em_bounds_hwpunit"] = None
+        missing_region["source_line_transform"] = unavailable_source_line(
+            "missing-placement"
+        )
         self.load(missing, candidate_sha256)
 
         stale_bounds = self.manifest(candidate_sha256)
@@ -264,7 +370,10 @@ class VisualRegionTests(unittest.TestCase):
         nontext = self.manifest(candidate_sha256)
         nontext_region = nontext["pages"][0]["regions"][0]
         nontext_region.update(
-            id="table-0001", category="table", paint_status="not-applicable"
+            id="table-0001",
+            category="table",
+            paint_status="not-applicable",
+            source_line_transform=unavailable_source_line("not-applicable"),
         )
         with self.assertRaisesRegex(
             pdf_visual_check.VisualCheckError, "non-text region cannot claim"
@@ -304,6 +413,7 @@ class VisualRegionTests(unittest.TestCase):
                     "clipped": False,
                     "glyph_provenance": "not-applicable",
                     "placed_em_bounds_hwpunit": None,
+                    "source_line_transform": unavailable_source_line("not-applicable"),
                 }
             ],
         }
@@ -328,6 +438,9 @@ class VisualRegionTests(unittest.TestCase):
         page["regions"][0]["id"] = "text-0001"
         page["regions"][0]["paint_status"] = "expected-missing"
         page["regions"][0]["glyph_provenance"] = "unknown"
+        page["regions"][0]["source_line_transform"] = unavailable_source_line(
+            "missing-placement"
+        )
         explicit_missing = pdf_visual_check._score_visual_regions(
             page, reference, candidate, 10, 10, {"dx": 0, "dy": 0}, 100_000
         )
@@ -578,6 +691,7 @@ class TextResidualTraceTests(unittest.TestCase):
         self.assertEqual(missing["classification"], "unscorable")
 
     def test_summary_counts_classes_and_keeps_only_content_free_hypotheses(self):
+        transform = single_source_line("horizontal-only")
         residual = {
             "status": "hypothesis",
             "classification": "geometry-dominant",
@@ -604,6 +718,7 @@ class TextResidualTraceTests(unittest.TestCase):
                                 "w": 3.0,
                                 "h": 4.0,
                             },
+                            "source_line_transform": transform,
                             "text_residual": residual,
                         },
                         {
@@ -612,6 +727,7 @@ class TextResidualTraceTests(unittest.TestCase):
                             "metrics": None,
                             "glyph_provenance": "unknown",
                             "placed_em_bounds_hwpunit": None,
+                            "source_line_transform": unavailable_source_line(),
                             "text_residual": {
                                 "status": "ambiguous",
                                 "classification": "ambiguous",
@@ -640,6 +756,7 @@ class TextResidualTraceTests(unittest.TestCase):
                         "w": 3.0,
                         "h": 4.0,
                     },
+                    "source_line_transform": transform,
                     "best_offset_px": {"dx": 3, "dy": 2},
                     "positioned_ink_f1": 0.1,
                     "best_local_ink_f1": 0.95,
@@ -656,6 +773,48 @@ class TextResidualTraceTests(unittest.TestCase):
             summary["text_residual_by_glyph_provenance"],
             {"source-text": {"geometry-dominant": 1}},
         )
+        self.assertEqual(
+            summary["source_line_transform_status_counts"],
+            {"single-line": 1, "missing": 1},
+        )
+        self.assertEqual(summary["source_line_axis_counts"], {"horizontal-only": 1})
+        self.assertEqual(
+            summary["source_line_single_axis_hypothesis"],
+            {
+                "axis": "horizontal-only",
+                "regions": 1,
+                "basis": "all geometry-dominant source-text regions have one clean source line and the same transform axis",
+            },
+        )
+
+    def test_summary_withholds_single_axis_when_geometry_cohort_is_inconsistent(self):
+        def region(region_id, axis):
+            return {
+                "id": region_id,
+                "category": "text",
+                "metrics": None,
+                "glyph_provenance": "source-text",
+                "placed_em_bounds_hwpunit": None,
+                "source_line_transform": single_source_line(axis),
+                "text_residual": {
+                    "status": "hypothesis",
+                    "classification": "geometry-dominant",
+                },
+            }
+
+        summary = pdf_visual_check._summarize_pages(
+            [
+                {
+                    "page": 1,
+                    "metrics": None,
+                    "semantic_regions": [
+                        region("text-0001", "horizontal-only"),
+                        region("text-0002", "vertical-only"),
+                    ],
+                }
+            ]
+        )
+        self.assertIsNone(summary["source_line_single_axis_hypothesis"])
 
 
 class MetricRegressionTests(unittest.TestCase):
