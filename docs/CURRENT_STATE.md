@@ -3,7 +3,7 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
-- 갱신: 2026-08-25 · Codex(sol) — **#233 source-line transform 구현·canonical 단일축 확정**.
+- 갱신: 2026-08-25 · Codex(sol) — **#233/#234 병합 · source-line 단일축 확정 · 요청 중단점**.
   strict first-party HWP5 parser가 이미 framing하는 `PARA_LINE_SEG`에서 vertical/height/text-height/
   baseline/spacing/column-start/segment-width만 최대 **10,000,000 HWPUNIT**로 검증해 diagnostic-only
   IR에 보존한다. text offset·raw flags·본문/scalar·field payload·font/path/bytes는 보존/출력하지 않는다.
@@ -22,10 +22,12 @@
   않았다. `scripts/verify-local.sh --full`은 Rust/Wasm·AI120·8/18/24+98.9%·public corpus84·
   oracle82·JS build·Vitest **1,012**·Chromium **85 pass/3 intentional skip**까지 최종 exit 0이다.
   초기 E2E 원자성 실패는 worktree Wasm과 main-linked JS 패키지가 섞인 검증 환경 문제였고, 내부
-  패키지 링크를 현재 worktree로 맞춘 뒤 격리 및 full 모두 green으로 재현했다. **중단 계약:** #233
-  privacy/vendor 감사→commit/push→PR `Closes #233`→필수 CI/댓글 green 자율 병합→#93/#114 동기화까지만
-  완료하고 작업을 끊는다. 다음 세션은 +1008의 para-shape indent/line-start 소유권을 synthetic으로
-  분리하는 correction child를 issue-first 착수하되, 이번 세션에서는 새 이슈나 renderer 수정을 시작하지 않는다.
+  패키지 링크를 현재 worktree로 맞춘 뒤 격리 및 full 모두 green으로 재현했다. PR **#234** exact head
+  `ebfe15e`는 issue-link **2s**·licenses **2m53s**·build-test **9m49s** green, CLEAN/MERGEABLE,
+  리뷰·댓글 0건으로 protected main **`e3c7037e`**에 squash 병합됐다. #233은 close, 원격 작업 브랜치는
+  삭제했고 #93/#114에 content-free 결과를 동기화했다. **여기서 요청대로 중단한다.** 다음 세션은
+  +1008의 para-shape indent/line-start 소유권을 synthetic으로 분리하는 correction child를 issue-first
+  착수하되, 이번 세션에서는 해당 이슈 생성이나 renderer 수정을 시작하지 않았다.
 
 - 갱신: 2026-08-25 · Codex(sol) — **#232 병합 · #233 source-line transform 착수**.
   first-party `PlacedGlyph`에 source-text/generated-marker/page-decoration/unknown origin을 붙이고,
