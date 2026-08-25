@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-25 (Codex sol) · #237 ai-task-live 알림 루프 제거
+- 최근 20 push가 전부 ai-task-live 0-job failure였고 live provider 자격증명/모델 변수는 없었다.
+- recorded AI120 CI는 유지하고 미프로비저닝 주간 workflow만 제거했다.
+- live script는 명시적 로컬 report-only 경로로 문서화하며 fail-closed 계약을 보존했다.
+- 다음: PR/CI/merge 후 중단; 재개는 #233의 +1008 HU horizontal paragraph-start correction.
+
 ## 2026-08-25 (Codex sol) · #233 HWP5 source-line transform
 - strict owned diagnostic geometry와 visual schema v4를 구현하고 rhwp lift ownership=0을 잠갔다.
 - canonical 2회 exact; geometry 10/10은 baseline delta 0·horizontal start delta +1008 HU였다.
