@@ -17,6 +17,18 @@ use hwp_model::prelude::*;
 use crate::{layout_paragraph, line_spacing_ratio, table_height, BASELINE_RATIO};
 
 /// A single positioned glyph in absolute page coordinates (HWPUNIT, page-top-left origin).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlacedGlyphOrigin {
+    /// A scalar or cluster carried by a document paragraph run.
+    SourceText,
+    /// A list/numbering marker synthesized by the first-party typesetter.
+    GeneratedMarker,
+    /// A page decoration synthesized from typed section metadata, such as a page number.
+    PageDecoration,
+    /// A bounded producer that has not yet established a more specific origin.
+    Unknown,
+}
+
 #[derive(Clone, Debug)]
 pub struct PlacedGlyph {
     /// Left edge of the glyph's advance box.
@@ -44,6 +56,9 @@ pub struct PlacedGlyph {
     /// (Noto Serif CJK KR / Source Han Serif K) shapes the conjoining jamo into a syllable. `None`
     /// for every ordinary glyph → byte-identical to before (`ch` is drawn).
     pub cluster: Option<String>,
+    /// Source-neutral production class for visual diagnostics. This never contains text, addresses,
+    /// field payloads, or font identity and does not affect layout or paint replay.
+    pub origin: PlacedGlyphOrigin,
 }
 
 /// A positioned image/equation box in absolute page coordinates.
@@ -3098,6 +3113,7 @@ fn place_atom(
                     italic: glyph.italic,
                     font: glyph.font.clone(),
                     cluster: glyph.cluster.clone(),
+                    origin: PlacedGlyphOrigin::SourceText,
                 });
             }
             atom.advance(fonts)
@@ -3413,6 +3429,7 @@ fn place_page_number(
             italic: false,
             font: None,
             cluster: None,
+            origin: PlacedGlyphOrigin::PageDecoration,
         });
         x += fonts.advance_width(&key, ch, size as i32);
     }

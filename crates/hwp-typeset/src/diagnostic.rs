@@ -388,7 +388,7 @@ pub fn compare_placed_docs(candidate: &PlacedDoc, oracle: &PlacedDoc) -> PlacedD
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BlockKind, PlacedBlock, PlacedGlyph, PlacedImage};
+    use crate::{BlockKind, PlacedBlock, PlacedGlyph, PlacedGlyphOrigin, PlacedImage};
     use hwp_model::types::Color;
 
     fn glyph(x: f64, baseline: f64, ch: char) -> PlacedGlyph {
@@ -403,6 +403,7 @@ mod tests {
             italic: false,
             font: None,
             cluster: None,
+            origin: PlacedGlyphOrigin::SourceText,
         }
     }
 

@@ -3,6 +3,25 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-25 · Codex(sol) — **#231 구현 · PR #232 CI 대기**.
+  first-party `PlacedGlyph`에 source-text/generated-marker/page-decoration/unknown origin을 붙이고,
+  visual-region schema v3가 같은 placement의 page-clipped aggregate EM bounds와 mixed 판정을 strict하게
+  운반한다. painted text의 null bounds, expected-missing의 stale provenance/bounds, non-text claim과 old/
+  unknown schema/field는 fail-closed다. Rust 관련 **153**, Python **70**, Node **4**가 green이며 source/
+  generated/decoration/mixed/unknown/empty/clipped/stale 경계를 잠갔다. canonical 2회는 candidate PDF SHA
+  `61ab5f3a…`, evidence `45d389cf…`, report `2bd3f3c8…`, HTML `0b23fb3f…` exact이다. 8쪽·60 scored
+  regions·42 intentional blank·T3/`pass=null`과 기존 metrics/rhwp는 불변이다. paint-backed text 28개와
+  geometry-dominant **10개 전부 source-text**이며, 후자는 모두 단일 1200×1200 HWPUNIT EM이 owning
+  band에서 x **+1008**, y **-180 HWPUNIT**로 동일하다. generated marker/decoration은 배제됐다. 다음
+  단일 renderer 축은 **source-text paragraph placement transform**이며 #231에서는 수정하지 않는다.
+  full은 Rust/rhwp, AI120, 8/18/24+98.9%, public corpus84, oracle82, wasm/licenses, JS build와 Vitest
+  **1,012**까지 green이다. sandbox port EPERM 뒤 권한 환경 Chromium도 **83 pass·3 intentional
+  skip·2 retry-pass flaky**로 exit 0이며, flakes는 hidden textarea visibility와 stale status-toast
+  timing이다. privacy/vendor/diff audit 뒤 exact head `68e495a`를 push하고 PR **#232**(`Closes #231`)를
+  열었다. **다음:** issue-link/build-test/licenses와 review/comment 변화 추적→green/CLEAN이면 protected
+  main에 자율 merge→#93/#114 sync→해당 transform의 source-neutral parser/placement 비교 child를
+  issue-first 착수.
+
 - 갱신: 2026-08-25 · Codex(sol) — **#228 병합 · #229 text residual classifier 착수**.
   #227 exact head `8b704c51`은 issue-link **2s**·licenses **2m3s**·build-test **9m25s** green,
   CLEAN/MERGEABLE, 댓글/review 0으로 protected main `91231645`에 squash 병합됐다. #227은 close되고
