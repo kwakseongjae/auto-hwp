@@ -3,6 +3,17 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-08-25 · Codex(sol) — **#237 ai-task-live 0-job 메일 루프 제거 · 재개 준비**.
+  `.github/workflows/ai-task-live.yml`이 최근 push 20회에서 전부 event=push·failure·jobs=[]를 만들며
+  구독 메일을 반복 발송했다. 저장소에는 `OPENROUTER_API_KEY` secret과 `AI_EVAL_MODEL`/
+  `AI_EVAL_MODEL_VERSION` variable이 없어 live 레인은 실행 불가능했다. 결정론적 **20문서/120작업**
+  recorded suite는 `ci.yml` build-test와 `verify-local.sh`에 그대로 남으므로 live workflow만 제거했다.
+  병합 대기 중 추가 메일도 막도록 GitHub workflow 상태를 즉시 **disabled_manually**로 전환했다.
+  `scripts/ai-task-suite-live.mjs`는 소유자가 환경값을 명시해 로컬에서 실행하는 report-only 경로로
+  문서화했고, key/model/version 누락·provider 실패·authority-like Intent는 계속 fail-closed다.
+  **중단점:** #237 검증→PR/필수 CI/병합→워크플로 비활성 확인 후 종료. 다음 재개는 아래 #233의
+  +1008 HWPUNIT horizontal paragraph-start ownership correction을 issue-first로 시작한다.
+
 - 갱신: 2026-08-25 · Codex(sol) — **#233/#234 병합 · source-line 단일축 확정 · 요청 중단점**.
   strict first-party HWP5 parser가 이미 framing하는 `PARA_LINE_SEG`에서 vertical/height/text-height/
   baseline/spacing/column-start/segment-width만 최대 **10,000,000 HWPUNIT**로 검증해 diagnostic-only

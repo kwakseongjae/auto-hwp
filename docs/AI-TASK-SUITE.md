@@ -1,7 +1,8 @@
 # AI-native Task Suite v1
 
 이 스위트는 모델의 답변 품질과 엔진 트랜잭션 안전성을 분리해 측정한다. 기여자 PR은 커밋된
-결정론적 결과만 검사하고, 외부 모델 호출은 별도 주간 workflow에서 report-only로 실행한다.
+결정론적 결과만 검사하고, 외부 모델 호출은 저장소 소유자가 명시적으로 실행할 때만 report-only로
+수행한다.
 
 ## 범위
 
@@ -52,16 +53,22 @@ fixture 계약을 의도적으로 바꿀 때만 `--write`를 사용하고 생성
 
 ## Live provider 레인
 
-`.github/workflows/ai-task-live.yml`은 매주 월요일 및 수동 실행에서 recorded 계약을 먼저 검사한다.
-저장소 소유자가 다음 값을 제공한 경우에만 OpenRouter의 정확한 지정 모델로 120개 모델 작업을 실행한다.
+반복적인 GitHub Actions 0-job failure 알림을 막기 위해 미프로비저닝 상태의 주간 workflow는 제거했다
+(#237). 저장소 소유자가 다음 값을 로컬 환경에 명시적으로 제공한 경우에만 OpenRouter의 정확한 지정
+모델로 120개 모델 작업을 실행한다.
 
-- secret `OPENROUTER_API_KEY`
-- variable `AI_EVAL_MODEL`
-- variable `AI_EVAL_MODEL_VERSION`
-- optional variable `AI_EVAL_TEMPERATURE` (기본 0)
+- `OPENROUTER_API_KEY`
+- `AI_EVAL_MODEL`
+- `AI_EVAL_MODEL_VERSION`
+- optional `AI_EVAL_TEMPERATURE` (기본 0)
+- optional `AI_EVAL_OUTPUT` (기본 `ai-task-live-report.json`)
+
+```bash
+node scripts/ai-task-suite-live.mjs
+```
 
 provider/model/version/temperature와 `fallback_used=false`가 리포트에 기록된다. 지정 provider가
 실패해도 다른 provider나 모델로 넘어가지 않는다. 모델 정확도는 artifact로만 보고하며 contributor
 PR의 필수 check가 아니다. 다만 live 응답이 lifecycle/network/tool Intent를 내면 safety gate로 해당
-scheduled run을 실패시킨다. 현재 live 레인은 모델 출력만 측정하고, Proposal/commit/layout/export의
+명시적 실행을 실패시킨다. 현재 live 레인은 모델 출력만 측정하고, Proposal/commit/layout/export의
 결정론적 엔진 판정은 recorded 레인이 담당한다.
