@@ -1117,6 +1117,8 @@ fn attach_source_adjacent_table_spacing(
 #[derive(Default)]
 struct ParsedLineMetrics {
     render: Vec<SourceLineMetric>,
+    /// Full source-neutral line geometry for diagnostics only. The typesetter never reads it.
+    diagnostic: Vec<SourceLineGeometry>,
     /// A pure one-line HWP5 table host may own an additional gap after its final hosted table.
     /// Kept private until the paragraph/control structure proves that it is such a host.
     single_positive_host_line: Option<HostLineMetric>,
@@ -1455,10 +1457,11 @@ fn parse_paragraph(
         // Stored line boxes are only an authored-height hint for a true blank spacer.
         // They never dictate line breaks for visible text or a control-host paragraph.
         source_line_metrics: if decoded.chars.is_empty() && decoded.structural_controls.is_empty() {
-            line_metrics.render
+            line_metrics.render.clone()
         } else {
             Vec::new()
         },
+        source_line_geometry: line_metrics.diagnostic,
         provenance: Provenance {
             source: Some(SourceFormat::Hwp5),
             raw: None,
@@ -3153,6 +3156,7 @@ fn parse_line_metrics(
     }
     let mut prior_start = None;
     let mut metrics = Vec::with_capacity(actual);
+    let mut diagnostic = Vec::with_capacity(actual);
     let mut all_zero_height = true;
     let mut single_positive_host_line = None;
     for entry in bytes.chunks_exact(36) {
@@ -3177,6 +3181,7 @@ fn parse_line_metrics(
         let text_height = read_i32(entry, 12).expect("chunk length checked");
         let baseline = read_i32(entry, 16).expect("chunk length checked");
         let line_spacing = read_i32(entry, 20).expect("chunk length checked");
+        let column_start = read_i32(entry, 24).expect("chunk length checked");
         let segment_width = read_i32(entry, 28).expect("chunk length checked");
         if [
             vertical_pos,
@@ -3184,6 +3189,7 @@ fn parse_line_metrics(
             text_height,
             baseline,
             line_spacing,
+            column_start,
             segment_width,
         ]
         .into_iter()
@@ -3193,6 +3199,25 @@ fn parse_line_metrics(
                 &record,
                 Some(section),
                 "PARA_LINE_SEG has a negative geometry field",
+            ));
+        }
+        const MAX_LINE_GEOMETRY_HWPUNIT: HwpUnit = 10_000_000;
+        if [
+            vertical_pos,
+            height,
+            text_height,
+            baseline,
+            line_spacing,
+            column_start,
+            segment_width,
+        ]
+        .into_iter()
+        .any(|value| value > MAX_LINE_GEOMETRY_HWPUNIT)
+        {
+            return Err(malformed(
+                &record,
+                Some(section),
+                "PARA_LINE_SEG geometry exceeds the bounded range",
             ));
         }
         all_zero_height &= height == 0 && text_height == 0;
@@ -3208,13 +3233,24 @@ fn parse_line_metrics(
             text_height,
             baseline,
         });
+        diagnostic.push(SourceLineGeometry {
+            vertical_pos,
+            height,
+            text_height,
+            baseline,
+            line_spacing,
+            column_start,
+            segment_width,
+        });
     }
     if all_zero_height {
         metrics.clear();
+        diagnostic.clear();
         single_positive_host_line = None;
     }
     Ok(ParsedLineMetrics {
         render: metrics,
+        diagnostic,
         single_positive_host_line,
     })
 }

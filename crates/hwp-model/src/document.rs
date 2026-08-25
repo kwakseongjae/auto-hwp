@@ -276,6 +276,10 @@ pub struct Paragraph {
     /// content. Binary forms often use empty spacer paragraphs whose line box is 1500 HWPUNIT even when
     /// no char-shape ref remains; dropping that fact pulled later inline tables hundreds of pixels upward.
     pub source_line_metrics: Vec<SourceLineMetric>,
+    /// Source-neutral HWP5 `PARA_LINE_SEG` geometry retained only for diagnostics. Unlike
+    /// [`source_line_metrics`], this is never consulted by layout, line breaking, pagination, paint,
+    /// or editing. It contains no text offset, flag bits, glyph, font, or binary provenance.
+    pub source_line_geometry: Vec<SourceLineGeometry>,
     /// Provenance for a TOP-LEVEL paragraph parsed from HWPX — enables in-place (non-verbatim)
     /// re-emit: if this paragraph is edited (dirty) the serializer replaces exactly its byte span;
     /// untouched paragraphs ride along byte-verbatim. `None` ⇒ synthesized/appended (legacy path).
@@ -290,6 +294,17 @@ pub struct SourceLineMetric {
     pub height: HwpUnit,
     pub text_height: HwpUnit,
     pub baseline: HwpUnit,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SourceLineGeometry {
+    pub vertical_pos: HwpUnit,
+    pub height: HwpUnit,
+    pub text_height: HwpUnit,
+    pub baseline: HwpUnit,
+    pub line_spacing: HwpUnit,
+    pub column_start: HwpUnit,
+    pub segment_width: HwpUnit,
 }
 
 /// Where a parsed top-level paragraph came from in the section XML, for surgical re-emit.
@@ -956,6 +971,7 @@ impl SemanticDoc {
                 + prov(&p.provenance)
                 + pass(&p.passthrough)
                 + p.runs.len() * size_of::<Run>()
+                + p.source_line_geometry.len() * size_of::<SourceLineGeometry>()
                 + p.runs
                     .iter()
                     .map(|r| {

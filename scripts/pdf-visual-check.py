@@ -85,11 +85,12 @@ HARD_MAX_REPORT_BYTES = 2 * GIB
 HARD_MAX_SUBPROCESS_OUTPUT_BYTES = 4 * MIB
 HARD_SUBPROCESS_TIMEOUT_SECONDS = 300.0
 
-VISUAL_REGION_SCHEMA_VERSION = 3
+VISUAL_REGION_SCHEMA_VERSION = 4
 MAX_VISUAL_REGION_MANIFEST_BYTES = 8 * MIB
 MAX_VISUAL_REGIONS_TOTAL = 10_000
 MAX_VISUAL_REGIONS_PER_PAGE = 2_000
 MAX_VISUAL_REGION_PAGE_AREA_MULTIPLIER = 16
+MAX_SOURCE_LINE_GEOMETRY_HWPUNIT = 10_000_000
 VISUAL_REGION_CATEGORIES = frozenset({"text", "table", "image", "object"})
 MAX_VERTICAL_TRACE_PX = 128
 HARD_MAX_VERTICAL_TRACE_WORK_PER_PAGE = 50_000_000
@@ -502,6 +503,7 @@ def _load_visual_regions(
                     "clipped",
                     "glyph_provenance",
                     "placed_em_bounds_hwpunit",
+                    "source_line_transform",
                 },
                 label,
             )
@@ -548,6 +550,125 @@ def _load_visual_regions(
                 raise VisualCheckError(
                     f"{label} non-text region cannot claim placed glyph provenance"
                 )
+            transform = _exact_object_keys(
+                region["source_line_transform"],
+                {"status", "axis_class", "source", "placed", "delta"},
+                f"{label}.source_line_transform",
+            )
+            transform_status = transform["status"]
+            transform_axis = transform["axis_class"]
+            unavailable_statuses = {
+                "missing",
+                "multi-line-ambiguous",
+                "edited",
+                "non-source-text",
+                "missing-placement",
+                "non-finite-placement",
+            }
+            if category != "text":
+                if transform_status != "not-applicable":
+                    raise VisualCheckError(
+                        f"{label} non-text source_line_transform must be not-applicable"
+                    )
+                unavailable_statuses = unavailable_statuses | {"not-applicable"}
+            elif transform_status not in unavailable_statuses | {"single-line"}:
+                raise VisualCheckError(
+                    f"{label}.source_line_transform.status is invalid"
+                )
+            if transform_status != "single-line":
+                if (
+                    transform_axis != "unavailable"
+                    or transform["source"] is not None
+                    or transform["placed"] is not None
+                    or transform["delta"] is not None
+                ):
+                    raise VisualCheckError(
+                        f"{label} unavailable source_line_transform must not claim geometry"
+                    )
+            else:
+                if category != "text" or glyph_provenance != "source-text":
+                    raise VisualCheckError(
+                        f"{label} single-line transform requires source-text provenance"
+                    )
+                if transform_axis not in {
+                    "exact",
+                    "horizontal-only",
+                    "vertical-only",
+                    "horizontal-and-vertical",
+                }:
+                    raise VisualCheckError(
+                        f"{label}.source_line_transform.axis_class is invalid"
+                    )
+                source = _exact_object_keys(
+                    transform["source"],
+                    {
+                        "vertical_pos",
+                        "height",
+                        "text_height",
+                        "baseline",
+                        "line_spacing",
+                        "column_start",
+                        "segment_width",
+                    },
+                    f"{label}.source_line_transform.source",
+                )
+                for key, value in source.items():
+                    if (
+                        isinstance(value, bool)
+                        or not isinstance(value, int)
+                        or value < 0
+                        or value > MAX_SOURCE_LINE_GEOMETRY_HWPUNIT
+                    ):
+                        raise VisualCheckError(
+                            f"{label}.source_line_transform.source.{key} is outside the bounded range"
+                        )
+                placed = _exact_object_keys(
+                    transform["placed"],
+                    {
+                        "em_x_from_band",
+                        "em_top_from_band",
+                        "em_baseline_from_band",
+                        "em_width",
+                        "em_height",
+                    },
+                    f"{label}.source_line_transform.placed",
+                )
+                delta = _exact_object_keys(
+                    transform["delta"],
+                    {
+                        "em_x_minus_column_start",
+                        "em_baseline_minus_source_baseline",
+                        "band_y_minus_source_vertical_pos",
+                    },
+                    f"{label}.source_line_transform.delta",
+                )
+                for group_name, group in (("placed", placed), ("delta", delta)):
+                    for key, value in group.items():
+                        numeric = _finite_number(
+                            value, f"{label}.source_line_transform.{group_name}.{key}"
+                        )
+                        if abs(numeric) > MAX_SOURCE_LINE_GEOMETRY_HWPUNIT:
+                            raise VisualCheckError(
+                                f"{label}.source_line_transform.{group_name}.{key} is outside the bounded range"
+                            )
+                if placed["em_width"] <= 0 or placed["em_height"] <= 0:
+                    raise VisualCheckError(
+                        f"{label}.source_line_transform placed EM must be positive"
+                    )
+                horizontal = abs(float(delta["em_x_minus_column_start"])) > 1e-9
+                vertical = (
+                    abs(float(delta["em_baseline_minus_source_baseline"])) > 1e-9
+                )
+                expected_axis = {
+                    (False, False): "exact",
+                    (True, False): "horizontal-only",
+                    (False, True): "vertical-only",
+                    (True, True): "horizontal-and-vertical",
+                }[(horizontal, vertical)]
+                if transform_axis != expected_axis:
+                    raise VisualCheckError(
+                        f"{label}.source_line_transform.axis_class disagrees with deltas"
+                    )
             if not isinstance(region["clipped"], bool):
                 raise VisualCheckError(f"{label}.clipped must be boolean")
             x = _finite_number(region["x"], f"{label}.x")
@@ -2592,6 +2713,7 @@ def _score_visual_regions(
             "paint_status": region["paint_status"],
             "glyph_provenance": region["glyph_provenance"],
             "placed_em_bounds_hwpunit": region["placed_em_bounds_hwpunit"],
+            "source_line_transform": region["source_line_transform"],
             "source_bounds_hwpunit": {
                 "x": region["x"],
                 "y": region["y"],
@@ -2740,6 +2862,8 @@ def _render_html(report: Mapping[str, Any]) -> str:
                 f"<td>{html.escape(str(region.get('text_residual', {}).get('classification') or 'not-applicable'))}</td>"
                 f"<td>{html.escape(str(region.get('glyph_provenance', 'not-applicable')))}</td>"
                 f"<td>{_format_metric(region.get('placed_em_bounds_hwpunit'))}</td>"
+                f"<td>{html.escape(str(region.get('source_line_transform', {}).get('status', 'unavailable')))}</td>"
+                f"<td>{html.escape(str(region.get('source_line_transform', {}).get('axis_class', 'unavailable')))}</td>"
                 f"<td>{_format_metric(region.get('text_residual', {}).get('best_local_ink_f1'))}</td>"
                 f"<td>{_format_metric(region.get('text_residual', {}).get('local_gain'))}</td>"
                 "</tr>"
@@ -2751,6 +2875,7 @@ def _render_html(report: Mapping[str, Any]) -> str:
                 "<th>Ink F1</th><th>Edge F1</th><th>Vertical trace</th>"
                 "<th>Offset hypothesis (px)</th><th>Text residual</th>"
                 "<th>Glyph provenance</th><th>Placed EM bounds (HWPUNIT)</th>"
+                "<th>Source line</th><th>Transform axis</th>"
                 "<th>Best local ink F1</th><th>Local gain</th></tr>"
                 f"{region_rows}</table>"
             )
@@ -2946,6 +3071,10 @@ def _summarize_pages(pages: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
     text_residual_hypotheses: List[Dict[str, Any]] = []
     glyph_provenance_counts: Dict[str, int] = {}
     text_residual_by_glyph_provenance: Dict[str, Dict[str, int]] = {}
+    source_line_transform_status_counts: Dict[str, int] = {}
+    source_line_axis_counts: Dict[str, int] = {}
+    geometry_residual_source_line_candidates: List[Dict[str, Any]] = []
+    geometry_residual_hypotheses = 0
     for page in pages:
         for region in page.get("semantic_regions", []):
             trace_status = region.get("vertical_trace", {}).get("status")
@@ -2954,15 +3083,39 @@ def _summarize_pages(pages: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
             text_residual = region.get("text_residual", {})
             residual_classification = text_residual.get("classification")
             glyph_provenance = region.get("glyph_provenance")
+            source_line_transform = region.get("source_line_transform", {})
             if region.get("category") == "text" and glyph_provenance is not None:
                 glyph_provenance_counts[glyph_provenance] = (
                     glyph_provenance_counts.get(glyph_provenance, 0) + 1
                 )
+                transform_status = source_line_transform.get("status")
+                if transform_status is not None:
+                    source_line_transform_status_counts[transform_status] = (
+                        source_line_transform_status_counts.get(transform_status, 0) + 1
+                    )
+                transform_axis = source_line_transform.get("axis_class")
+                if transform_status == "single-line" and transform_axis is not None:
+                    source_line_axis_counts[transform_axis] = (
+                        source_line_axis_counts.get(transform_axis, 0) + 1
+                    )
             if residual_classification is not None:
                 text_residual_classification_counts[residual_classification] = (
                     text_residual_classification_counts.get(residual_classification, 0) + 1
                 )
                 if text_residual.get("status") == "hypothesis":
+                    if residual_classification == "geometry-dominant":
+                        geometry_residual_hypotheses += 1
+                        if (
+                            glyph_provenance == "source-text"
+                            and source_line_transform.get("status") == "single-line"
+                        ):
+                            geometry_residual_source_line_candidates.append(
+                                {
+                                    "page": page["page"],
+                                    "id": region["id"],
+                                    "axis_class": source_line_transform.get("axis_class"),
+                                }
+                            )
                     provenance_counts = text_residual_by_glyph_provenance.setdefault(
                         str(glyph_provenance), {}
                     )
@@ -2978,6 +3131,7 @@ def _summarize_pages(pages: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
                             "placed_em_bounds_hwpunit": region.get(
                                 "placed_em_bounds_hwpunit"
                             ),
+                            "source_line_transform": source_line_transform,
                             "best_offset_px": text_residual.get("best_offset_px"),
                             "positioned_ink_f1": text_residual.get("positioned_ink_f1"),
                             "best_local_ink_f1": text_residual.get("best_local_ink_f1"),
@@ -3037,6 +3191,25 @@ def _summarize_pages(pages: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         )
     region_entries.sort(key=region_key)
 
+    source_line_single_axis_hypothesis = None
+    if (
+        geometry_residual_hypotheses > 0
+        and len(geometry_residual_source_line_candidates)
+        == geometry_residual_hypotheses
+    ):
+        axes = {
+            candidate["axis_class"]
+            for candidate in geometry_residual_source_line_candidates
+        }
+        if len(axes) == 1:
+            axis = next(iter(axes))
+            if axis in {"horizontal-only", "vertical-only"}:
+                source_line_single_axis_hypothesis = {
+                    "axis": axis,
+                    "regions": geometry_residual_hypotheses,
+                    "basis": "all geometry-dominant source-text regions have one clean source line and the same transform axis",
+                }
+
     return {
         "total_pages": len(pages),
         "scored_pages": len(scored),
@@ -3056,6 +3229,9 @@ def _summarize_pages(pages: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         "text_residual_hypotheses": text_residual_hypotheses,
         "glyph_provenance_counts": glyph_provenance_counts,
         "text_residual_by_glyph_provenance": text_residual_by_glyph_provenance,
+        "source_line_transform_status_counts": source_line_transform_status_counts,
+        "source_line_axis_counts": source_line_axis_counts,
+        "source_line_single_axis_hypothesis": source_line_single_axis_hypothesis,
     }
 
 
@@ -3457,6 +3633,9 @@ def _run_visual_check_from_snapshots(
             "text_residual_hypotheses": [],
             "glyph_provenance_counts": {},
             "text_residual_by_glyph_provenance": {},
+            "source_line_transform_status_counts": {},
+            "source_line_axis_counts": {},
+            "source_line_single_axis_hypothesis": None,
             "pixel_comparison_attempted": False,
         }
         _write_report(output_dir, report, {}, limits)
@@ -3567,6 +3746,7 @@ def _run_visual_check_from_snapshots(
                         "placed_em_bounds_hwpunit": region[
                             "placed_em_bounds_hwpunit"
                         ],
+                        "source_line_transform": region["source_line_transform"],
                         "source_bounds_hwpunit": {
                             key: region[key] for key in ("x", "y", "w", "h")
                         },

@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-25 (Codex sol) · #233 HWP5 source-line transform
+- strict owned diagnostic geometry와 visual schema v4를 구현하고 rhwp lift ownership=0을 잠갔다.
+- canonical 2회 exact; geometry 10/10은 baseline delta 0·horizontal start delta +1008 HU였다.
+- PDF bytes/score/layout 불변, full green: Vitest1,012·Chromium85 pass/3 intentional skip.
+- 다음: PR/CI/merge·#93/#114 sync 후 중단; 재개 시 horizontal paragraph-start correction child.
+
 ## 2026-08-25 (Codex sol) · #231 source-neutral glyph provenance
 - PlacedGlyph origin과 visual schema v3 aggregate EM bounds를 strict·content-free로 구현했다.
 - canonical geometry 10/10은 source-text·1200² EM·band 대비 (+1008,-180) HU로 일치했다.

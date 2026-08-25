@@ -31,7 +31,10 @@ enum Mutation {
     BadLineCount,
     BadLineBoundary,
     BadLineLength,
+    OversizeLineGeometry,
     ZeroHeightLine,
+    VisibleLineGeometry,
+    MultiLineGeometry,
     UnsupportedSectionChild,
     DuplicatePageDef,
     BadControlFrame,
@@ -215,6 +218,42 @@ fn parses_page_setup_and_blank_source_line_metrics() {
     assert_eq!(blank.source_line_metrics[0].height, 1_500);
     assert_eq!(blank.source_line_metrics[0].text_height, 1_200);
     assert_eq!(blank.source_line_metrics[0].baseline, 900);
+    assert_eq!(blank.source_line_geometry.len(), 1);
+    let source = blank.source_line_geometry[0];
+    assert_eq!(source.vertical_pos, 100);
+    assert_eq!(source.height, 1_500);
+    assert_eq!(source.text_height, 1_200);
+    assert_eq!(source.baseline, 900);
+    assert_eq!(source.line_spacing, 300);
+    assert_eq!(source.column_start, 0);
+    assert_eq!(source.segment_width, 40_000);
+}
+
+#[test]
+fn preserves_nonempty_line_geometry_without_promoting_it_to_layout_metrics() {
+    let doc = OwnHwp5Parser::new()
+        .parse(&fixture(Mutation::VisibleLineGeometry))
+        .unwrap();
+    let Block::Paragraph(paragraph) = &doc.sections[0].blocks[1] else {
+        panic!("expected visible paragraph")
+    };
+    assert!(paragraph.source_line_metrics.is_empty());
+    assert_eq!(paragraph.source_line_geometry.len(), 1);
+    assert_eq!(paragraph.source_line_geometry[0].baseline, 900);
+}
+
+#[test]
+fn preserves_multiple_source_lines_as_diagnostic_ambiguity() {
+    let doc = OwnHwp5Parser::new()
+        .parse(&fixture(Mutation::MultiLineGeometry))
+        .unwrap();
+    let Block::Paragraph(paragraph) = &doc.sections[0].blocks[1] else {
+        panic!("expected visible paragraph")
+    };
+    assert!(paragraph.source_line_metrics.is_empty());
+    assert_eq!(paragraph.source_line_geometry.len(), 2);
+    assert_eq!(paragraph.source_line_geometry[0].vertical_pos, 100);
+    assert_eq!(paragraph.source_line_geometry[1].vertical_pos, 1_600);
 }
 
 #[test]
@@ -275,6 +314,20 @@ fn zero_height_line_segments_are_non_authoritative() {
         panic!("expected blank paragraph")
     };
     assert!(blank.source_line_metrics.is_empty());
+    assert!(blank.source_line_geometry.is_empty());
+}
+
+#[test]
+fn rejects_line_geometry_outside_the_bounded_range() {
+    assert!(matches!(
+        OwnHwp5Parser::new().parse(&fixture(Mutation::OversizeLineGeometry)),
+        Err(Error::MalformedRecord {
+            tag: TAG_PARA_LINE_SEG,
+            section: Some(0),
+            reason: "PARA_LINE_SEG geometry exceeds the bounded range",
+            ..
+        })
+    ));
 }
 
 #[test]
@@ -2012,13 +2065,23 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
         column.extend_from_slice(&0x0000_00ffu32.to_le_bytes());
         push_record(&mut body, TAG_CTRL_HEADER, 1, &column);
     } else {
-        let declared_lines = if matches!(mutation, Mutation::BadLineCount) {
+        let declared_lines = if matches!(
+            mutation,
+            Mutation::BadLineCount | Mutation::MultiLineGeometry
+        ) {
             2
         } else {
             1
         };
-        push_para_header(&mut body, 1, 0, 1, declared_lines);
-        push_record(&mut body, TAG_PARA_TEXT, 1, &utf16_bytes(&[0x000d]));
+        let paragraph_text = if matches!(mutation, Mutation::VisibleLineGeometry) {
+            vec!['X' as u16, 0x000d]
+        } else if matches!(mutation, Mutation::MultiLineGeometry) {
+            vec!['A' as u16, 'B' as u16, 0x000d]
+        } else {
+            vec![0x000d]
+        };
+        push_para_header(&mut body, paragraph_text.len() as u32, 0, 1, declared_lines);
+        push_record(&mut body, TAG_PARA_TEXT, 1, &utf16_bytes(&paragraph_text));
         push_record(&mut body, TAG_PARA_CHAR_SHAPE, 1, &shape_refs(&[(0, 0)]));
         let start = if matches!(mutation, Mutation::BadLineBoundary) {
             1
@@ -2031,8 +2094,16 @@ fn fixture(mutation: Mutation) -> Vec<u8> {
             (1_500, 1_200, 900)
         };
         let mut line = line_seg(start, height, text_height, baseline);
+        if matches!(mutation, Mutation::OversizeLineGeometry) {
+            line[24..28].copy_from_slice(&10_000_001i32.to_le_bytes());
+        }
         if matches!(mutation, Mutation::BadLineLength) {
             line.pop();
+        }
+        if matches!(mutation, Mutation::MultiLineGeometry) {
+            let mut second = line_seg(1, 1_500, 1_200, 900);
+            second[4..8].copy_from_slice(&1_600i32.to_le_bytes());
+            line.extend(second);
         }
         push_record(&mut body, TAG_PARA_LINE_SEG, 1, &line);
     }
