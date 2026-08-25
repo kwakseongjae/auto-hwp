@@ -11,8 +11,11 @@
   병합 대기 중 추가 메일도 막도록 GitHub workflow 상태를 즉시 **disabled_manually**로 전환했다.
   `scripts/ai-task-suite-live.mjs`는 소유자가 환경값을 명시해 로컬에서 실행하는 report-only 경로로
   문서화했고, key/model/version 누락·provider 실패·authority-like Intent는 계속 fail-closed다.
-  **중단점:** #237 검증→PR/필수 CI/병합→워크플로 비활성 확인 후 종료. 다음 재개는 아래 #233의
-  +1008 HWPUNIT horizontal paragraph-start ownership correction을 issue-first로 시작한다.
+  PR **#238** exact head `0e0311e`는 issue-link **2s**·licenses **2m42s**·build-test **9m37s** green,
+  CLEAN/MERGEABLE, 댓글·리뷰 0건으로 protected main **`8f594fd8`**에 squash 병합됐다. #237은 close,
+  원격 branch는 삭제했고 main에서 workflow 파일이 사라졌다. 비활성화 이후 신규 ai-task-live run은
+  **0건**이다. **여기서 중단 완료.** 다음 재개는 아래 #233의 +1008 HWPUNIT horizontal
+  paragraph-start ownership correction을 issue-first로 시작한다.
 
 - 갱신: 2026-08-25 · Codex(sol) — **#233/#234 병합 · source-line 단일축 확정 · 요청 중단점**.
   strict first-party HWP5 parser가 이미 framing하는 `PARA_LINE_SEG`에서 vertical/height/text-height/
