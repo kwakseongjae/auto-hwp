@@ -3,6 +3,31 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-09-17 · Claude Fable — **데스크톱 0.0.1 출시** (`desktop-v0.0.1`, main `ea5be21`).
+  앱을 실제로 굽고 **Apple 공증까지 마쳐 배포**했다. 사이트 `/download` 에서 받는다.
+  · **무엇이 생겼나**: 대시보드(첫 화면이 파일 열기 대화상자가 아니다) · 버전 기록(⌘⇧V, 저장·
+    되돌리기·★고정) · 검수(⌘⇧I, CLI `layout-check` 와 **같은 숫자**) · 복제.
+  · **버전 저장소는 `versions-v1` 로 새로 만들었다.** `recovery-v1`(#141)은 "두 세대를 묶기
+    위해서만 존재한다"는 계약이라 히스토리를 얹으면 두 목적이 서로를 갉는다. 되돌리기는 현재
+    상태를 먼저 남기고 가고(되돌아올 수 있어야 한다), ★고정은 자동 정리에서 지켜진다.
+  · **찾은 버그(#260)**: 기본 셸이 OS 파일 열기 요청을 아예 안 받았다 — `take_open_requests` 를
+    `WorkspaceShell` 만 폴링했고 그건 기본 off 다. 즉 **#140 파일 연결이 실제 배포 빌드에는
+    닿지 않았다**. 앱을 직접 띄워보지 않았으면 못 찾았다. 근본 수리는 `packages/platform`(#259).
+  · **공증 함정 둘**: ① Tauri 는 **앱만 공증하고 dmg 는 안 한다** — 사용자는 dmg 를 받으므로
+    그대로면 격리에 걸린다. 검증기에 dmg 검사를 넣었다. ② **staple 후 해시가 바뀐다**
+    (`014582…`→`12d1b0…`) — 공증 전 값을 페이지에 실으면 사용자 검증이 전부 실패한다.
+  · **검증기 거짓 음성 2건도 고쳤다**: hardened runtime 을 `-d --verbose=2` 의 CodeDirectory
+    줄에서 읽어야 하는데 못 읽어 **정상 빌드를 막았다**. `.sig` 는 배포 채널에서만 필수로
+    (`REQUIRE_UPDATER_SIG=1`). 정상을 막는 검증기는 통과시키는 것만큼 나쁘다.
+  · **자격증명**: `Developer ID Application: Kwak Seongjae (YWQQFQM38J)` 는 이미 이 맥에 있었고,
+    공증용 앱 암호만 새로 만들었다. `scripts/desktop-notarize-setup.sh` 가 저장을 맡되 암호를
+    인자·환경변수·파일로 받지 않는다(각 도구의 프롬프트에 직접 입력 — 노출 지점 0).
+  · **OAuth 는 막혀 있다**: Anthropic 이 2026-02 에 서드파티 OAuth 를 **명시적으로 금지**했고
+    (Claude Code·Claude.ai 전용, 토큰도 거부), OpenAI "Sign in with ChatGPT" 는 파트너 6곳
+    한정이며 주는 것도 이름·이메일·사진뿐이다. **키체인 BYOK + Ollama** 가 현실적인 경로다.
+  · **다음**: `packages/platform`(#259 — #260 근본 수리) · `packages/theme` · 슬롯 뷰 ·
+    Intel/Windows 빌드(#144) · 자동 업데이트.
+
 - 갱신: 2026-09-17 · Claude Fable — **#256 JS 설치 경로 정정 (앞 항목의 진단 오류 수정)**.
   앞 항목의 "`packages/*` lockfile 없음 · react 가 보는 editor-core dist 사본 스테일" 진단은
   **틀렸다**. `package-lock.json` 은 **6곳에 커밋돼 있고** CI 도 `npm ci` 를 쓴다(정본은 npm).
