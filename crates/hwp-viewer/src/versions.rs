@@ -140,7 +140,7 @@ impl VersionStore {
     pub(crate) fn list(&self, document_id: &str) -> Result<Vec<VersionSummary>, String> {
         validate_document_id(document_id)?;
         let mut records = self.records_for(document_id)?;
-        records.sort_by(|a, b| b.0.sequence.cmp(&a.0.sequence));
+        records.sort_by_key(|r| std::cmp::Reverse(r.0.sequence));
         Ok(records.iter().map(|(m, _, _)| m.into()).collect())
     }
 
@@ -253,7 +253,7 @@ impl VersionStore {
     /// 상한 정리. **고정된 버전은 절대 지우지 않는다.**
     fn prune(&self, document_id: &str) -> Result<(), String> {
         let mut records = self.records_for(document_id)?;
-        records.sort_by(|a, b| b.0.sequence.cmp(&a.0.sequence)); // 최신 먼저
+        records.sort_by_key(|r| std::cmp::Reverse(r.0.sequence)); // 최신 먼저
         let mut unpinned_seen = 0usize;
         for (metadata, bytes_path, meta_path) in &records {
             if metadata.pinned {
