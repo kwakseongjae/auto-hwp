@@ -4,7 +4,7 @@
 >
 > 변환 .hwpx의 빈 `linesegarray`는 **채점 불가**이지 0점이 아니다.
 
-재현: `node scripts/oracle-sweep.mjs` (이슈 #72). 생성 2026-08-21. CLI: `auto-hwp layout-check --json` (features rhwp,shaper). 태그는 `corpus/typeset-coverage.json`(#71)과 조인.
+재현: `node scripts/oracle-sweep.mjs` (이슈 #72). 생성 2026-09-17. CLI: `auto-hwp layout-check --json` (features rhwp,shaper). 태그는 `corpus/typeset-coverage.json`(#71)과 조인.
 
 전수 재실행은 **로컬 전용**. CI는 `--check-committed`(요약 정합)만 본다. 기존 게이트 8==8 · 18==18 · 24==24 · 줄바꿈 98.9%+ 는 이 파일과 별개다.
 
@@ -18,9 +18,9 @@
 | 실패 | 0 |
 | 미반입 (GOV) | 0 |
 | 일치 (쪽수 + 줄 98.9%+) | 53 |
-| 줄격차 | 16 |
-| 쪽격차 | 10 |
-| 본문 줄정확 평균 (채점 가능·본문 오라클만) | 97.2% |
+| 줄격차 | 15 |
+| 쪽격차 | 11 |
+| 본문 줄정확 평균 (채점 가능·본문 오라클만) | 97.4% |
 | 셀 줄정확 평균 (채점 가능·셀 오라클만) | 96.7% |
 
 ## 요소별 점수 (채점 가능 문서만 — 채점 불가를 0으로 넣지 않음)
@@ -30,13 +30,13 @@
 | `header_footer` | 머리말/꼬리말 | 5 | 5 | 0 | 60 | 93.3 | 98.5 |
 | `form_control` | 폼 컨트롤 | 4 | 4 | 0 | 100 | 100 | — |
 | `mixed_orientation` | 가로세로 혼합 | 0 | 0 | 0 | — | — | — |
-| `nested_table` | 중첩 표 | 10 | 10 | 0 | 70 | 97.5 | 98.6 |
-| `multipage_table` | 다쪽 표 | 16 | 15 | 1 | 66.7 | 97.3 | 95.2 |
+| `nested_table` | 중첩 표 | 10 | 10 | 0 | 60 | 97.5 | 98.6 |
+| `multipage_table` | 다쪽 표 | 16 | 15 | 1 | 60 | 97.3 | 95.3 |
 | `footnote` | 각주 | 1 | 1 | 0 | 0 | 90 | 100 |
 | `multicolumn` | 다단 | 2 | 2 | 0 | 50 | 91.7 | — |
 | `chart` | 차트 | 1 | 1 | 0 | 100 | 99 | 100 |
-| `equation` | 수식 | 3 | 2 | 1 | 50 | 92.1 | — |
-| `shape_ole` | 도형/OLE | 33 | 33 | 0 | 87.9 | 98.6 | 97.3 |
+| `equation` | 수식 | 3 | 2 | 1 | 50 | 100 | — |
+| `shape_ole` | 도형/OLE | 33 | 33 | 0 | 84.8 | 98.6 | 97.3 |
 
 ## 가장 낮은 요소 축 (다음 수리 티켓 근거)
 
@@ -44,7 +44,7 @@
 |---:|---|---:|---:|---:|---:|
 | 1 | `footnote` (각주) | 1 | 0 | 90 | 100 |
 | 2 | `multicolumn` (다단) | 2 | 50 | 91.7 | — |
-| 3 | `equation` (수식) | 2 | 50 | 92.1 | — |
+| 3 | `header_footer` (머리말/꼬리말) | 5 | 60 | 93.3 | 98.5 |
 
 ## 문서별 점수
 
@@ -52,7 +52,7 @@
 |---|---|---|---:|---:|---:|---:|---|
 | `benchmarks/benchmark.hwp` | benchmark | 일치 | 8 | 8 | 98.9 | 100 | nested_table |
 | `benchmarks/benchmark1.hwp` | benchmark | 일치 | 18 | 18 | 99.2 | 98.5 | nested_table, multipage_table |
-| `benchmarks/benchmark1.hwpx` | benchmark | 쪽격차 | 22 | 25 | 89.5 | — | nested_table, multipage_table |
+| `benchmarks/benchmark1.hwpx` | benchmark | 쪽격차 | 30 | 25 | 89.5 | — | nested_table, multipage_table |
 | `benchmarks/benchmark2.hwp` | benchmark | 일치 | 24 | 24 | 99.7 | 98.4 | nested_table, multipage_table |
 | `corpus/hwp/복학원서.hwp` | corpus-hwp | 일치 | 1 | 1 | 100 | 100 | shape_ole |
 | `corpus/hwp/한셀OLE.hwp` | corpus-hwp | 일치 | 1 | 1 | 100 | — | shape_ole |
@@ -62,9 +62,9 @@
 | `corpus/hwp/issue_265.hwp` | corpus-hwp | 쪽격차 | 17 | 16 | 91.3 | 98 | header_footer |
 | `corpus/hwp/issue-505-equations.hwp` | corpus-hwp | 일치 | 4 | 4 | 100 | — | equation |
 | `corpus/hwp/k-water-rfp.hwp` | corpus-hwp | 줄격차 | 27 | 27 | 93.8 | 98 | header_footer, nested_table, multipage_table, shape_ole |
-| `corpus/hwp/math-001.hwp` | corpus-hwp | 쪽격차 | 3 | 1 | 84.2 | — | equation |
+| `corpus/hwp/math-001.hwp` | corpus-hwp | 쪽격차 | 2 | 1 | 100 | — | equation |
 | `corpus/hwp/shape-001.hwp` | corpus-hwp | 일치 | 1 | 1 | 100 | — | shape_ole |
-| `corpus/hwp/tac-img-02.hwp` | corpus-hwp | 줄격차 | 66 | 66 | 98 | 98.5 | nested_table, multipage_table, shape_ole |
+| `corpus/hwp/tac-img-02.hwp` | corpus-hwp | 쪽격차 | 68 | 66 | 98 | 98.6 | nested_table, multipage_table, shape_ole |
 | `corpus/hwp/test-image.hwp` | corpus-hwp | 일치 | 5 | 5 | 100 | — | — |
 | `corpus/hwpx/00_smoke_min.hwpx` | corpus-hwpx | 일치 | 1 | 1 | 100 | — | — |
 | `corpus/hwpx/footnote-01.hwpx` | corpus-hwpx | 쪽격차 | 5 | 7 | 90 | 100 | footnote |

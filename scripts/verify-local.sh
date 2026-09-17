@@ -197,6 +197,13 @@ if [ "$MODE" = "--full" ]; then
   fi
   echo "═══ e2e (playwright) ═══"
   (cd apps/hwp-lab && npx playwright test)
+
+  # 이슈 246: `--check-committed`(스키마·요약)만으로는 "커밋된 baseline 이 오늘의 코드와 맞는가"를
+  # 영영 검사하지 못한다. 실제로 8-22~9-17 사이 조판 커밋 36개가 한 번도 채점되지 않았고, 그 사이
+  # tac-img-02(66→68)·benchmark1.hwpx(22→30) 두 건이 조용히 벌어졌다. 전수 재채점은 --full 전용이다
+  # (게이트 시간을 quick 에 얹지 않는다 — crates 를 건드린 변경만 --full 을 돈다).
+  echo "═══ 조판 오라클 전수 재채점 (이슈 246 — 커밋된 baseline vs 오늘 코드) ═══"
+  node scripts/oracle-sweep.mjs --check
 fi
 
 echo ""
