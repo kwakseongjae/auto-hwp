@@ -12,6 +12,7 @@ pub mod capability;
 pub mod document;
 pub mod error;
 pub mod font_class;
+pub mod hancom_pua;
 pub mod layout;
 pub mod normalize;
 pub mod style;

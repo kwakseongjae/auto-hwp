@@ -1614,6 +1614,12 @@ pub(crate) fn subst_glyph(ch: char) -> char {
         _ if matches!(ch as u32, 0xE000..=0xF8FF) && old_hangul::is_pua_old_hangul(ch) => {
             OLD_HANGUL_METRIC_PROXY
         }
+        // 한컴 심볼 PUA (이슈 245): 옛한글과 달리 **평면 15** Supplementary PUA-A 에 산다. 함초롬이
+        // 없으면 아무 폰트도 못 그리므로(HTML=두부 · PDF=무성 소실) 표준 문자로 바꾼다. 1:1 치환이라
+        // 옛한글의 자모 클러스터와 달리 이 한 지점이 측정·그리기 양쪽을 동시에 처리한다.
+        _ if hwp_model::hancom_pua::is_supplementary_pua(ch) => {
+            hwp_model::hancom_pua::map_hancom_symbol_pua(ch).unwrap_or(ch)
+        }
         _ => ch,
     }
 }
@@ -2140,6 +2146,19 @@ mod tests {
             "an already-present middle dot is unchanged"
         );
         assert_eq!(subst_glyph('가'), '가', "ordinary glyphs pass through");
+        // 이슈 245: 한컴 심볼 PUA 는 평면 15 라 옛한글의 BMP 게이트에 안 걸렸다. 함초롬이 없으면
+        // 어느 폰트도 못 그려 PDF 가 조용히 버린다 — 표준 문자로 바꿔야 남는다.
+        assert_eq!(subst_glyph('\u{F02B1}'), '\u{2460}', "① 섹션 번호");
+        assert_eq!(
+            subst_glyph('\u{F02EF}'),
+            '\u{00B7}',
+            "· 구분점 — 빠지면 제품·서비스가 제품 서비스가 된다"
+        );
+        assert_eq!(
+            subst_glyph('\u{F0001}'),
+            '\u{F0001}',
+            "매핑 없는 평면15 PUA 는 그대로 통과(추측 금지)"
+        );
     }
 
     #[test]
