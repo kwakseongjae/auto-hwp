@@ -1739,11 +1739,14 @@ pub fn layout_paragraph(
             }
             w += a;
             end += 1;
-            // A break opportunity follows an ASCII space OR a 전각 공백 (U+3000, `<hp:fwSpace/>`) — the
-            // full-width space HWPX uses to separate a Korean label from its Latin gloss ("문제인식
-            // (Problem)"). Without U+3000 here the mid-word Latin backup below has no space to retreat
-            // to and wraps "(Proble"/"m)"; with it, the line breaks at the space like Hancom.
-            if matches!(chars[end - 1].0, ' ' | '\u{3000}') {
+            // A break opportunity follows an ASCII space, a 전각 공백 (U+3000, `<hp:fwSpace/>`) or a
+            // 고정폭 빈칸 (U+2007, what HWP5's fixed-width space lifts to) — the spaces gov-doc forms
+            // use to separate a Korean label from its Latin gloss ("문제인식 (Problem)"). Without them
+            // here the mid-word Latin backup below has no space to retreat to and wraps
+            // "(Proble"/"m)"; with them, the line breaks at the space like Hancom. 고정폭 means the
+            // width doesn't stretch when justifying, NOT that it can't break — 묶음 빈칸 (U+00A0,
+            // `<hp:nbSpace/>`) is the unbreakable one and is deliberately absent here (issue #244).
+            if matches!(chars[end - 1].0, ' ' | '\u{3000}' | '\u{2007}') {
                 last_space = Some(end);
             }
         }
@@ -2151,6 +2154,38 @@ mod tests {
         assert_eq!(
             lines[1].text_pos, 10,
             "line 2 starts at 'cccc' (after 'aaaa bbbb ')"
+        );
+    }
+
+    #[test]
+    fn fixed_width_space_is_a_break_opportunity() {
+        // Issue #244: a gov-form label cell reads "문제인식\u{2007}(Problem)" — HWP5's 고정폭 빈칸
+        // lifts to U+2007. Without a break opportunity there the Latin gloss has no space to retreat
+        // to and char-breaks mid-word ("(Pr"/"oblem)"); Hancom puts the whole gloss on its own line.
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape::default());
+        // 문제인식 = 4 full-width (1000 each) + U+2007 (500) + "(Problem)" = 9 half-width (500 each).
+        let p = para("문제인식\u{2007}(Problem)");
+        // 6000 fits the label (4500) but not the whole line (9000) — and fits the gloss alone (4500).
+        let lines = layout_paragraph(&p, &doc, 6000.0, &ApproxFontMetrics);
+        assert_eq!(lines.len(), 2, "breaks at the 고정폭 빈칸, not mid-word");
+        assert_eq!(
+            lines[1].text_pos, 5,
+            "line 2 starts at '(' — the Latin gloss stays whole"
+        );
+    }
+
+    /// 묶음 빈칸 (U+00A0, `<hp:nbSpace/>`) is the one that must NOT break — it is the author saying
+    /// "keep these together". Guards the #244 fix from being widened into every Unicode space.
+    #[test]
+    fn nbspace_is_not_a_break_opportunity() {
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape::default());
+        let p = para("문제인식\u{00A0}(Problem)");
+        let lines = layout_paragraph(&p, &doc, 6000.0, &ApproxFontMetrics);
+        assert!(
+            lines.len() < 2 || lines[1].text_pos != 5,
+            "U+00A0 must not become a break opportunity"
         );
     }
 
