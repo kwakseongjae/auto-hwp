@@ -473,6 +473,12 @@ fn esc_body_text(s: &str) -> String {
             '<' => o.push_str("&lt;"),
             '>' => o.push_str("&gt;"),
             '\u{2007}' => o.push_str("\u{2007}<wbr>"),
+            // 한컴 심볼 PUA (이슈 245) → 표준 유니코드. 함초롬이 없으면 브라우저는 이 코드포인트를
+            // 그릴 폰트가 없어 두부(□)를 보여 준다. 섹션 번호 ①②③④ 와 "제품·서비스" 의 구분점이
+            // 여기 걸린다. IR 은 손대지 않으므로 .hwp/.hwpx 왕복은 원본 코드포인트를 그대로 지킨다.
+            _ if hwp_model::hancom_pua::is_supplementary_pua(c) => {
+                o.push(hwp_model::hancom_pua::map_hancom_symbol_pua(c).unwrap_or(c))
+            }
             _ => o.push(c),
         }
     }
@@ -561,6 +567,37 @@ mod tests {
             html.contains("문제인식\u{2007}<wbr>(Problem)"),
             "a break opportunity must follow the 고정폭 빈칸"
         );
+    }
+
+    /// 이슈 245: 한컴 심볼 PUA 는 어느 폰트에도 글리프가 없어 브라우저가 두부(□)를 보여 준다.
+    /// 표준 유니코드로 바꿔야 읽히고, 구조 추출(섹션 번호) 신호도 살아난다.
+    #[test]
+    fn hancom_symbol_pua_becomes_standard_unicode_in_html() {
+        let doc = doc_with_para(vec![Run {
+            char_shape: 0,
+            char_ref: None,
+            content: vec![Inline::Text(
+                "\u{F02B1} 문제인식 / 제품\u{F02EF}서비스".into(),
+            )],
+        }]);
+        let html = html_of(&doc);
+        assert!(html.contains("\u{2460} 문제인식"), "① 섹션 번호: {html}");
+        assert!(html.contains("제품\u{00B7}서비스"), "· 구분점: {html}");
+        assert!(
+            !html.contains('\u{F02B1}') && !html.contains('\u{F02EF}'),
+            "PUA 원본 코드포인트가 HTML 로 새어 나가면 안 된다"
+        );
+    }
+
+    #[test]
+    fn unmapped_supplementary_pua_passes_through_unchanged() {
+        // 표에 없는 코드포인트를 추측으로 바꾸지 않는다 — 원본을 지키는 쪽이 낫다.
+        let doc = doc_with_para(vec![Run {
+            char_shape: 0,
+            char_ref: None,
+            content: vec![Inline::Text("\u{F0001}".into())],
+        }]);
+        assert!(html_of(&doc).contains('\u{F0001}'));
     }
 
     #[test]
