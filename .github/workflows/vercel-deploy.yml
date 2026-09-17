@@ -96,8 +96,11 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24.x
-      - name: install pnpm (packages/* 빌드 관례)
-        run: npm i -g pnpm  # esbuild 빌드 허용은 packages/*/package.json pnpm.onlyBuiltDependencies가 소유(커밋 설정 — 러너 env 무의존)
+      - name: (pnpm 제거됨 — 이슈 265) 정본은 npm 이다
+        # 고정하지 않은 `npm i -g pnpm` 이 매 실행마다 최신 pnpm 을 받아 왔고, pnpm 이 버전을 올릴
+        # 때마다 esbuild 빌드 승인 우회가 무효가 되어 배포가 멈췄다(3회 연속 실패). 이 저장소의
+        # 정본 lockfile 은 `package-lock.json` 이고 ci.yml·verify-local.sh 도 npm 이다(#256·#257).
+        run: node -v && npm -v
 
       # 1) 엔진 wasm → packages/engine/pkg. hwp-lab 의 prebuild(copy-wasm.mjs)가 이걸 public/hwp 로 옮긴다.
       - name: build @auto-hwp/engine (wasm)
@@ -106,18 +109,17 @@ jobs:
           npm install --no-audit --no-fund
           npm run build
 
-      # 2) JS 패키지: install → build 를 의존 순서대로. ⚠️ pnpm 의 `file:` 의존은 심링크가 아니라
-      #    **설치 시점 스냅샷** — react 를 editor-core dist 생성 전에 install 하면 빈 패키지가 복사돼
-      #    번들러가 "Failed to resolve entry" 로 죽는다(deploy-demo.yml 1차 배포 실패 실측).
-      - name: build JS package deps (install after dist exists)
+      # 2) JS 패키지: install → build 를 의존 순서대로.
+      #    pnpm 시절에는 순서가 **깨지기 쉬운 규율**이었다 — `file:` 의존을 심링크가 아니라 설치 시점
+      #    스냅샷으로 복사해서, react 를 editor-core dist 생성 전에 install 하면 빈 패키지가 복사되고
+      #    번들러가 "Failed to resolve entry" 로 죽었다. **npm 은 `file:` 을 심링크로 건다**(#256 실측)
+      #    — 순서를 지켜도 되고 어겨도 dist 가 항상 최신이라, 이 함정이 구조적으로 사라졌다.
+      #    순서는 빌드 의존 때문에 그대로 두되, 이제 그것만이 방어선은 아니다.
+      - name: build JS package deps (npm — 커밋된 package-lock.json 이 정본)
         run: |
-          # --config.dangerouslyAllowAllBuilds=true — pnpm 11이 CI=true에서 미승인 빌드 스크립트
-          # (esbuild)를 하드 에러(exit 1)로 승격한다. package.json pnpm 필드·글로벌 설정은 11에서
-          # 안 먹히는 것을 로컬 CI=true 재현으로 확정(2026-08-06, 5차까지의 삽질 로그 참조).
-          PNPM_FLAGS=--config.dangerouslyAllowAllBuilds=true
-          pnpm -C packages/ai-protocol install $PNPM_FLAGS && pnpm -C packages/ai-protocol build
-          pnpm -C packages/editor-core install $PNPM_FLAGS && pnpm -C packages/editor-core build
-          pnpm -C packages/react install $PNPM_FLAGS
+          npm --prefix packages/ai-protocol ci && npm --prefix packages/ai-protocol run build
+          npm --prefix packages/editor-core ci && npm --prefix packages/editor-core run build
+          npm --prefix packages/react ci
 
       # 3) Vercel CLI — 버전 고정(빌더 출력 포맷이 바뀌면 prebuilt 계약이 흔들린다).
       - name: install vercel CLI (=58.7.1)
