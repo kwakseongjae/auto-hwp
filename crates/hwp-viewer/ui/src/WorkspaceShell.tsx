@@ -1,11 +1,17 @@
 import { StrictMode, useCallback, useEffect, useRef, useState } from "react";
 import type { Root } from "react-dom/client";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { platform } from "@auto-hwp/platform";
 import { HwpWorkspace, TauriAdapter, type DesktopSessionStatus, type OnAiRequest } from "@auto-hwp/react";
 import "@auto-hwp/react/styles.css";
+
+/// RPC 와 네이티브 이벤트는 호스트 계약을 거친다 (이슈 268) — `App.tsx` 와 같은 자리.
+///
+/// 두 셸이 호스트 능력을 **각자** 구현하던 것이 #260 의 원인이었다(OS 파일 열기 요청이 한쪽에만 붙었다).
+/// 이제 둘 다 같은 계약을 본다.
+const invoke = <T,>(command: string, args?: Record<string, unknown>): Promise<T> =>
+  platform().invoke<T>(command, args);
+const listen = <T,>(event: string, handler: (payload: T) => void) =>
+  platform().listen<T>(event, handler);
 
 /// WorkspaceShell — the issue-044 desktop shell. Behind the build-time flag `VITE_SHELL=workspace`, the
 /// Tauri app mounts THIS (the shared `@auto-hwp/react` `HwpWorkspace` over a `TauriAdapter`) instead of the
@@ -152,7 +158,7 @@ function WorkspaceShell() {
         flash(`최근 문서 목록을 확인하지 못했습니다: ${error}`);
       }
     });
-    void listen<string>("desktop-warning", (event) => flash(event.payload)).then((un) => {
+    void listen<string>("desktop-warning", (message) => flash(message)).then((un) => {
       if (cancelled) un();
       else unlistenWarning = un;
     });
@@ -255,7 +261,7 @@ function WorkspaceShell() {
 
   const doOpen = useCallback(async () => {
     try {
-      const path = await openDialog({ filters: [{ name: "HWP/HWPX", extensions: ["hwpx", "hwp"] }] });
+      const path = await platform().pickFile({ filters: [{ name: "HWP/HWPX", extensions: ["hwpx", "hwp"] }] });
       if (typeof path !== "string") return;
       requestOpen([path]);
     } catch (e) {
@@ -311,7 +317,7 @@ function WorkspaceShell() {
         setPendingOpenPaths((current) => current.slice(1));
       } else if (after === "close") {
         await invoke("allow_desktop_close");
-        await getCurrentWebviewWindow().close();
+        await platform().closeWindow();
       }
       setCloseRequested(false);
     },
@@ -347,7 +353,7 @@ function WorkspaceShell() {
   const doSaveHwpx = useCallback(async (after: SaveContinuation = "none") => {
     if (!hasDoc) return false;
     try {
-      const path = await saveDialog({ defaultPath: docName?.replace(/\.hwp$/i, ".hwpx") ?? "export.hwpx", filters: [{ name: "HWPX", extensions: ["hwpx"] }] });
+      const path = await platform().pickSavePath({ defaultPath: docName?.replace(/\.hwp$/i, ".hwpx") ?? "export.hwpx", filters: [{ name: "HWPX", extensions: ["hwpx"] }] });
       if (typeof path !== "string") return false;
       return await saveToPath(path, false, after);
     } catch (e) {
@@ -394,11 +400,11 @@ function WorkspaceShell() {
         if (/hwpx|zip/i.test(mime)) {
           await doSaveHwpx();
         } else if (mime === "application/pdf") {
-          const path = await saveDialog({ defaultPath: filename, filters: [{ name: "PDF", extensions: ["pdf"] }] });
+          const path = await platform().pickSavePath({ defaultPath: filename, filters: [{ name: "PDF", extensions: ["pdf"] }] });
           if (typeof path !== "string") return;
           flash(`PDF 내보냄 · ${await invoke<string>("export_doc_pdf", { path })}`);
         } else {
-          const path = await saveDialog({ defaultPath: filename, filters: [{ name: "HTML", extensions: ["html", "htm"] }] });
+          const path = await platform().pickSavePath({ defaultPath: filename, filters: [{ name: "HTML", extensions: ["html", "htm"] }] });
           if (typeof path !== "string") return;
           flash(`HTML 내보냄 · ${await invoke<string>("export_doc_html", { path })}`);
         }
@@ -450,8 +456,7 @@ function WorkspaceShell() {
   useEffect(() => {
     let un: undefined | (() => void);
     (async () => {
-      un = await getCurrentWebviewWindow().onDragDropEvent((event) => {
-        const p = event.payload;
+      un = await platform().onFileDrop((p) => {
         if (p.type !== "drop") return;
         const hit = p.paths.find((f) => IS_DOC.test(f));
         if (hit) requestOpenRef.current([hit]);

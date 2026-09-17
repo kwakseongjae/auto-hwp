@@ -177,7 +177,7 @@ if [ "$MODE" = "--full" ]; then
   # react 가 보는 dist 가 굳는다. 커밋된 lockfile 과 CI(`npm ci`)가 정본이고, npm 은 `file:` 을
   # **심볼릭 링크**로 걸어 이 문제가 구조적으로 없다. 그러니 없을 때 npm 으로 채운다.
   echo "═══ JS 의존성 (npm — 커밋된 package-lock.json 이 정본) ═══"
-  for pkg in packages/ai-protocol packages/editor-core packages/react; do
+  for pkg in packages/ai-protocol packages/editor-core packages/platform packages/react; do
     if [ -d "$pkg/node_modules" ]; then
       echo "  $pkg — 설치됨"
     elif [ -f "$pkg/package-lock.json" ]; then
@@ -193,6 +193,8 @@ if [ "$MODE" = "--full" ]; then
   # 최신인데 스테일 dist가 그대로 실려 나간다(066 표 그리드가 조용히 드롭돼 QA에서 라벨칸 오타겟 재현).
   npm --prefix packages/ai-protocol run build
   npm --prefix packages/editor-core run build
+  # platform 은 react 보다 먼저 — 데스크톱 UI 가 그 dist 를 소비한다 (이슈 268).
+  npm --prefix packages/platform run build
   npm --prefix packages/react run build
   echo "═══ 본문 캐럿 엔진 교차검증 ═══"
   node packages/engine/bench/body-caret-crosscheck.mjs
@@ -203,6 +205,9 @@ if [ "$MODE" = "--full" ]; then
   echo "═══ vitest ═══"
   (cd packages/editor-core && npx vitest run)
   (cd packages/ai-protocol && npx vitest run)
+  # 이슈 268 — 호스트 경계 가드가 여기서 돈다: `packages/platform/src/tauri.ts` 밖에서
+  # `@tauri-apps/*` 를 import 하면 실패한다. 문서로만 적힌 규율은 다음에 급할 때 사라진다.
+  (cd packages/platform && npx vitest run)
   (cd packages/react && npx vitest run)
   (cd apps/hwp-lab && npx vitest run)
   # 데모 AI 워커도 게이트에 편입(2026-08-05 — 다중 셀 절단 수리가 무성 회귀하지 않게).

@@ -17,6 +17,9 @@ importers:
       '@auto-hwp/engine':
         specifier: file:../../../packages/engine
         version: file:../../../packages/engine
+      '@auto-hwp/platform':
+        specifier: file:../../../packages/platform
+        version: file:../../../packages/platform(@tauri-apps/api@2.11.0)(@tauri-apps/plugin-dialog@2.7.1)(react@18.3.1)
       '@auto-hwp/react':
         specifier: file:../../../packages/react
         version: file:../../../packages/react(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -70,6 +73,21 @@ packages:
   '@auto-hwp/engine@file:../../../packages/engine':
     resolution: {directory: ../../../packages/engine, type: directory}
     engines: {node: '>=18'}
+
+  '@auto-hwp/platform@file:../../../packages/platform':
+    resolution: {directory: ../../../packages/platform, type: directory}
+    engines: {node: '>=18'}
+    peerDependencies:
+      '@tauri-apps/api': ^2.1.1
+      '@tauri-apps/plugin-dialog': ^2.0.1
+      react: '>=18'
+    peerDependenciesMeta:
+      '@tauri-apps/api':
+        optional: true
+      '@tauri-apps/plugin-dialog':
+        optional: true
+      react:
+        optional: true
 
   '@auto-hwp/react@file:../../../packages/react':
     resolution: {directory: ../../../packages/react, type: directory}
@@ -910,6 +928,12 @@ snapshots:
   '@auto-hwp/editor-core@file:../../../packages/editor-core': {}
 
   '@auto-hwp/engine@file:../../../packages/engine': {}
+
+  '@auto-hwp/platform@file:../../../packages/platform(@tauri-apps/api@2.11.0)(@tauri-apps/plugin-dialog@2.7.1)(react@18.3.1)':
+    optionalDependencies:
+      '@tauri-apps/api': 2.11.0
+      '@tauri-apps/plugin-dialog': 2.7.1
+      react: 18.3.1
 
   '@auto-hwp/react@file:../../../packages/react(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
     dependencies:
