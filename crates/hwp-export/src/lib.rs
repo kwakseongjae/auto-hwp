@@ -99,7 +99,7 @@ pub fn emit_html(proj: &JsxCssProject, opts: &HtmlOptions) -> String {
 
 fn render_node(node: &JsxNode, assets: &BTreeMap<&str, &Asset>, out: &mut String) {
     match node {
-        JsxNode::Text(t) => out.push_str(&esc_text(&t.text)),
+        JsxNode::Text(t) => out.push_str(&esc_body_text(&t.text)),
         JsxNode::Element(el) => render_element(el, assets, out),
     }
 }
@@ -454,6 +454,31 @@ fn esc_text(s: &str) -> String {
     o
 }
 
+/// Escape a document text node AND add the break opportunities a browser cannot infer.
+///
+/// HWP5's 고정폭 빈칸 lifts to U+2007 FIGURE SPACE, which UAX #14 classes GL (non-breaking glue), so
+/// the browser reads "문제인식 (Problem)" as one unbreakable unit. In a narrow gov-form label column
+/// that unit overflows, and `BASE_CSS`'s `overflow-wrap:break-word` then splits the Latin word
+/// ("(Pr"/"oblem)" — issue #244). A `<wbr>` after the figure space restores the break Hancom takes.
+///
+/// Why not the alternatives: dropping `overflow-wrap:break-word` lets the whole token spill PAST the
+/// cell border into the neighbour (measured: +28px), and rewriting the character would cost the .hwp
+/// round-trip its 고정폭 빈칸. 묶음 빈칸 (U+00A0) is deliberately NOT given a `<wbr>` — that one is
+/// meant to be unbreakable.
+fn esc_body_text(s: &str) -> String {
+    let mut o = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => o.push_str("&amp;"),
+            '<' => o.push_str("&lt;"),
+            '>' => o.push_str("&gt;"),
+            '\u{2007}' => o.push_str("\u{2007}<wbr>"),
+            _ => o.push(c),
+        }
+    }
+    o
+}
+
 /// Escape an attribute value (adds `"` on top of text escaping).
 fn esc_attr(s: &str) -> String {
     let mut o = String::with_capacity(s.len());
@@ -519,6 +544,35 @@ mod tests {
         assert!(html.contains("안녕하세요"));
         assert!(html.contains("<p")); // the paragraph rendered
         assert!(html.trim_end().ends_with("</html>"));
+    }
+
+    #[test]
+    fn fixed_width_space_carries_a_break_opportunity() {
+        // Issue #244: U+2007 is UAX #14 GL (non-breaking glue), so a browser reads
+        // "문제인식\u{2007}(Problem)" as one unbreakable unit and `overflow-wrap:break-word` splits
+        // the Latin gloss mid-word in a narrow label cell. A `<wbr>` restores Hancom's break.
+        let doc = doc_with_para(vec![Run {
+            char_shape: 0,
+            char_ref: None,
+            content: vec![Inline::Text("문제인식\u{2007}(Problem)".into())],
+        }]);
+        let html = html_of(&doc);
+        assert!(
+            html.contains("문제인식\u{2007}<wbr>(Problem)"),
+            "a break opportunity must follow the 고정폭 빈칸"
+        );
+    }
+
+    #[test]
+    fn nbspace_carries_no_break_opportunity() {
+        // 묶음 빈칸 is the author saying "keep these together" — it must stay unbreakable.
+        let doc = doc_with_para(vec![Run {
+            char_shape: 0,
+            char_ref: None,
+            content: vec![Inline::Text("문제인식\u{00A0}(Problem)".into())],
+        }]);
+        let html = html_of(&doc);
+        assert!(!html.contains("<wbr>"), "U+00A0 must not get a <wbr>");
     }
 
     #[test]
