@@ -4,6 +4,48 @@
 > 얇은 OS 셸, HOP식 「설치해서 한글처럼」 복제 금지")을 **구체화**한다 — 재정의가 아니다.
 > 셸 수렴의 계약은 `docs/TAURI-CONVERGENCE.md`(R10)가 정본이다.
 
+## 0.1 현재 위치 (2026-09-17) — D2 완료, 0.0.1 착수
+
+D0(#64·#51·#48)과 **D2 전부**(#140 파일연결 · #141 복구 · #142 최근문서/창복원 · #143 own-PDF 인쇄)가
+닫혔다. 남은 것은 **셸의 경험**과 **배포(#144)** 다. 우산은 **#259**.
+
+### 이 앱이 무엇인가 (0.0.1 정의)
+
+**"원본과 같은가"를 눈으로 확인하면서 편집하는 앱.** 그 성질 때문에 **내부 엔진 테스트 하니스**를 겸한다.
+우리 계측기(`layout-check`, 82건 스윕)는 전부 CLI 안에만 있었다 — 그 숫자를 화면에 올리면 한 화면이
+사용자에게는 답이고 우리에게는 회귀 탐지기다.
+
+### 확정된 설계 결정
+
+| 결정 | 근거 |
+|---|---|
+| **웹뷰(Tauri) 유지** — Rust 네이티브 GPU UI 기각 | **한글 IME**. 2026 Rust GUI 서베이가 IME 정상 처리로 꼽는 건 Dioxus·fltk·GTK4·Relm4·GPUI·WinSafe·Slint 정도이고 Floem 은 없다. "IME 가 된다"와 "한글 조합·캐럿·선택·클립보드가 워드프로세서 수준으로 된다"는 다르다. 워드프로세서에서 텍스트 입력은 디테일이 아니라 본체다. GPUI 는 crates.io 에도 없다 |
+| **편집=DOM · 충실도=canvas 하이브리드** | 자체 엔진 계획이 이미 명시한 것. 업계 통설(페이지네이션 80%→가상화 15%→canvas 5%)과 일치 |
+| **셸은 새로, 편집 기계는 재사용** | `crates/hwp-viewer/src` 4,597줄 · Tauri 커맨드 83개 · UI 7,373줄이 D2 패리티를 지고 있다. 통째로 버리면 파일연결·복구·인쇄가 같이 죽는다 |
+
+### 레퍼런스 (라이선스 확인 완료 · 2026-09-17)
+
+| 역할 | 레퍼런스 | 라이선스 |
+|---|---|---|
+| 구조 · platform/theme 패키지 · OAuth | [Yaak](https://github.com/mountain-loop/yaak) | MIT(소스). ⚠️ 프리빌트 바이너리는 상업 라이선스 |
+| 우측 패널 · deeplink · MCP 서비스 | [Jan](https://github.com/menloresearch/jan) | Apache-2.0 |
+| 증분 컴파일 · 라이브 프리뷰 | [Typst](https://github.com/typst/typst) | Apache-2.0 |
+| edgeless(후속) | [AFFiNE](https://github.com/toeverything/AFFiNE) | MIT |
+
+⚠️ tldraw 는 source-available(상업 키 필요). 캔버스는 Excalidraw(MIT).
+⚠️ 우리 레포는 **Apache-2.0** — AGPL/GPL 코드는 가져올 수 없다(참고만).
+
+### Yaak 에서 배운 것 — 우리에게 없는 패키지 둘
+
+- **`packages/platform`** — 호스트 능력 추상화. 그쪽 주석이 존재 이유를 정확히 적어 뒀다:
+  *"Nothing outside `src/tauri` may import `@tauri-apps/*` — that is the whole point of the package."*
+  `types.ts`(인터페이스) · `registry.ts`(`setPlatform()`) · `capabilities.ts`(`useCapability()`) · `tauri/` vs `web/`.
+  우리는 **엔진**에 대해 `EngineAdapter` 34메서드로 이걸 하지만 **호스트 능력**(파일 다이얼로그·메뉴·창·
+  인쇄·최근문서)에는 없다. #65 가 "normalize 를 명시적 capability-off" 로 처리된 게 그 부재의 증상이다.
+- **`packages/theme`** — `base`(surface/text/border/semantic) + `components` 2층. 테마가 플러그인 타입이다.
+
+---
+
 ## 0. 현재 위치 (2026-08-23)
 
 - `VITE_SHELL=workspace`로 데스크톱이 웹과 같은 `HwpWorkspace`를 마운트한다(R10).

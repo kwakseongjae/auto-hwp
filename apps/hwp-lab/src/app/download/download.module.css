@@ -1,0 +1,237 @@
+/* /download 전용 스코프 스타일 — 색은 전부 globals.css 의 테마 토큰(--ah-*)에서 온다. 이 파일은
+   그 토큰에 페이지 로컬 이름을 붙이기만 하므로 라이트/다크 전환이 공짜다.
+   /bench 와 같은 규율: 순수 서버 컴포넌트라 CSS 도 이 모듈 하나로 닫힌다. */
+
+.page {
+  --ink: var(--ah-fg);
+  --ink-strong: var(--ah-fg-strong);
+  --muted: var(--ah-muted);
+  --dim: var(--ah-dim);
+  --line: var(--ah-line);
+  --card: var(--ah-surface);
+  --accent: var(--ah-accent);
+
+  min-height: 100vh;
+  background: var(--ah-bg);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo",
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 22px 20px 0;
+}
+
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  text-decoration: none;
+}
+.back:hover {
+  color: var(--ink-strong);
+}
+
+/* ── 히어로 ── */
+.hero {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 56px 20px 40px;
+  text-align: center;
+}
+
+.eyebrow {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.title {
+  margin: 0;
+  font-size: clamp(28px, 5vw, 42px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ink-strong);
+}
+
+.lede {
+  margin: 14px auto 28px;
+  max-width: 34em;
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.lede strong {
+  color: var(--ink-strong);
+  font-weight: 600;
+}
+
+/* 다운로드가 이 페이지의 유일한 주된 행동이다 — 크게, 하나만. */
+.cta {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 14px 28px;
+  border-radius: 12px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.cta:hover {
+  opacity: 0.92;
+  transform: translateY(-1px);
+}
+.ctaSub {
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.85;
+}
+
+.signed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 14px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ── 본문 섹션 ── */
+.section {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 0 20px 36px;
+}
+
+.section h2 {
+  margin: 0 0 14px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.facts > div {
+  background: var(--card);
+  padding: 12px 14px;
+}
+.facts dt {
+  font-size: 11px;
+  color: var(--dim);
+}
+.facts dd {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: var(--ink-strong);
+}
+/* 해시는 한 줄을 다 쓴다 — 줄바꿈되면 사람이 눈으로 대조하기 어려워진다. */
+.wide {
+  grid-column: 1 / -1;
+}
+.hash {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.features,
+.missing {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 10px;
+}
+.features li,
+.missing li {
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--muted);
+  padding-left: 16px;
+  position: relative;
+}
+.features li::before,
+.missing li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.65em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--dim);
+}
+.features b,
+.missing b {
+  color: var(--ink-strong);
+  font-weight: 600;
+}
+
+.note {
+  margin: 14px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--dim);
+}
+.note code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--card);
+  border: 1px solid var(--line);
+}
+.note a {
+  color: var(--accent);
+}
+
+.foot {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 24px 20px 64px;
+  border-top: 1px solid var(--line);
+}
+.foot a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  color: var(--muted);
+  text-decoration: none;
+}
+.foot a:hover {
+  color: var(--ink-strong);
+}

@@ -14,6 +14,7 @@ mod open_request;
 mod recent_documents;
 mod recovery;
 pub mod server;
+mod versions;
 
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
@@ -441,6 +442,289 @@ async fn render_own_page(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// 이슈 261 — 버전 기록. **복구 스냅샷(#141)과 다른 저장소**를 쓴다: 복구는 두 세대만 들고 자동으로
+/// 잘라내고, 이쪽은 사용자가 되돌아갈 지점이라 고정되면 살아남는다.
+///
+/// 저장은 **명시적**이다. 자동 저장이 히스토리를 만들면 목록이 금세 의미 없는 잡음이 된다.
+#[tauri::command]
+async fn save_version(
+    label: String,
+    app: tauri::AppHandle,
+    sess: tauri::State<'_, SharedSession>,
+    desktop: tauri::State<'_, SharedDesktopState>,
+) -> Result<versions::VersionSummary, String> {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app-data directory unavailable: {e}"))?;
+    let sess = sess.inner().clone();
+    let desktop = desktop.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        // 복구 쓰기와 같은 락 순서(session → desktop)를 지킨다.
+        let session = sess.lock().map_err(|_| "session poisoned")?;
+        let doc = session.doc.as_ref().ok_or("열린 문서가 없다")?;
+        let revision = doc.revision();
+        let pages = u32::try_from(doc.doc().sections.len().max(1)).unwrap_or(0);
+        let state = desktop.lock().map_err(|_| "desktop state poisoned")?;
+        let document_id = state.document_id().ok_or("열린 문서가 없다")?.to_owned();
+        let bytes = hwp_mcp::export_bytes(&session)?;
+        let saved_at_ms = now_ms()?;
+        versions::VersionStore::new(&app_data)?.save(
+            &document_id,
+            revision,
+            saved_at_ms,
+            &label,
+            pages,
+            &bytes,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn list_versions(
+    app: tauri::AppHandle,
+    desktop: tauri::State<'_, SharedDesktopState>,
+) -> Result<Vec<versions::VersionSummary>, String> {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app-data directory unavailable: {e}"))?;
+    let desktop = desktop.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let document_id = {
+            let state = desktop.lock().map_err(|_| "desktop state poisoned")?;
+            match state.document_id() {
+                Some(id) => id.to_owned(),
+                // 열린 문서가 없으면 빈 목록이다 — 오류가 아니다.
+                None => return Ok(Vec::new()),
+            }
+        };
+        versions::VersionStore::new(&app_data)?.list(&document_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// 되돌리기. **현재 상태를 먼저 버전으로 남기고** 간다 — 되돌린 뒤 되돌아올 수 없으면 사람이
+/// 되돌리기를 무서워하게 된다.
+#[tauri::command]
+async fn restore_version(
+    sequence: u64,
+    app: tauri::AppHandle,
+    sess: tauri::State<'_, SharedSession>,
+    desktop: tauri::State<'_, SharedDesktopState>,
+) -> Result<u32, String> {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app-data directory unavailable: {e}"))?;
+    let sess = sess.inner().clone();
+    let desktop = desktop.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = versions::VersionStore::new(&app_data)?;
+        let mut session = sess.lock().map_err(|_| "session poisoned")?;
+        let document_id = {
+            let state = desktop.lock().map_err(|_| "desktop state poisoned")?;
+            state.document_id().ok_or("열린 문서가 없다")?.to_owned()
+        };
+        // 안전망을 먼저 친다.
+        if let Some(doc) = session.doc.as_ref() {
+            let revision = doc.revision();
+            let pages = u32::try_from(doc.doc().sections.len().max(1)).unwrap_or(0);
+            let current = hwp_mcp::export_bytes(&session)?;
+            let _ = store.save(
+                &document_id,
+                revision,
+                now_ms()?,
+                "되돌리기 직전",
+                pages,
+                &current,
+            );
+        }
+        let bytes = store.read(&document_id, sequence)?;
+        let _ = hwp_mcp::open_bytes(&mut session, &bytes, "version.hwpx")?;
+        // 되돌린 뒤의 쪽수를 돌려준다 — UI 가 페이지 목록을 다시 그릴 근거다.
+        Ok(pages(&mut session))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pin_version(
+    sequence: u64,
+    pinned: bool,
+    app: tauri::AppHandle,
+    desktop: tauri::State<'_, SharedDesktopState>,
+) -> Result<versions::VersionSummary, String> {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app-data directory unavailable: {e}"))?;
+    let desktop = desktop.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let document_id = {
+            let state = desktop.lock().map_err(|_| "desktop state poisoned")?;
+            state.document_id().ok_or("열린 문서가 없다")?.to_owned()
+        };
+        versions::VersionStore::new(&app_data)?.set_pinned(&document_id, sequence, pinned)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn delete_version(
+    sequence: u64,
+    app: tauri::AppHandle,
+    desktop: tauri::State<'_, SharedDesktopState>,
+) -> Result<(), String> {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app-data directory unavailable: {e}"))?;
+    let desktop = desktop.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let document_id = {
+            let state = desktop.lock().map_err(|_| "desktop state poisoned")?;
+            state.document_id().ok_or("열린 문서가 없다")?.to_owned()
+        };
+        versions::VersionStore::new(&app_data)?.delete(&document_id, sequence)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn now_ms() -> Result<u64, String> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| "system clock is before the Unix epoch")?
+        .as_millis()
+        .try_into()
+        .map_err(|_| "timestamp does not fit u64".to_string())
+}
+
+/// 이슈 259 — 검수 패널의 데이터원. `layout-check` 가 CLI 에서만 내던 수치를 앱으로 올린다.
+///
+/// 같은 계산을 쓴다(`hwp_core::layout_fidelity`): 우리 조판 vs 한컴이 파일에 **저장해 둔** 레이아웃.
+/// 점수는 한/글의 살아있는 렌더러가 아니라 저장 lineseg 기준 회귀 잠금이라(#72), UI 도 그렇게 말한다.
+///
+/// 원본 바이트가 필요하므로 열려 있는 **원본 경로**를 다시 읽는다. 경로는 프로세스 메모리에만 있고
+/// (`desktop_state`), 반환값에는 경로도 문서 내용도 담기지 않는다 — 숫자와 판정뿐이다.
+///
+/// 수치를 낼 수 없으면 **꾸미지 않고** `available: false` 와 사유를 돌려준다(068 규율).
+#[tauri::command]
+async fn fidelity_report(desktop: tauri::State<'_, SharedDesktopState>) -> Result<Value, String> {
+    let desktop = desktop.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = {
+            let d = desktop.lock().map_err(|_| "desktop state poisoned")?;
+            d.source_path().map(std::path::Path::to_path_buf)
+        };
+        let Some(path) = path else {
+            return Ok(serde_json::json!({
+                "available": false,
+                "reason": "열린 원본 파일이 없다 (복구본이거나 새 문서)",
+            }));
+        };
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(e) => {
+                return Ok(serde_json::json!({
+                    "available": false,
+                    "reason": format!("원본을 읽지 못했다: {e}"),
+                }))
+            }
+        };
+        fidelity_json(&bytes)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[cfg(feature = "rhwp")]
+fn fidelity_json(bytes: &[u8]) -> Result<Value, String> {
+    // `catch_unwind`: 적대적/손상 입력이 조판 도중 패닉하더라도 앱이 죽지 않는다. CLI 의 layout-check 와
+    // 같은 방어다.
+    let scored = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        hwp_core::layout_fidelity(bytes)
+    }));
+    let f = match scored {
+        Ok(Ok(f)) => f,
+        Ok(Err(e)) => {
+            return Ok(
+                serde_json::json!({ "available": false, "reason": format!("채점 실패: {e}") }),
+            )
+        }
+        Err(_) => {
+            return Ok(
+                serde_json::json!({ "available": false, "reason": "채점 중 패닉 — 입력이 지원 범위를 벗어났다" }),
+            )
+        }
+    };
+
+    // 저장 lineseg 가 비어 있으면 **0점이 아니라 채점 불가**다. 변환/정규화된 HWPX 가 흔히 그렇다.
+    // 분모는 CLI `layout-check` 와 **정확히 같아야** 한다 — 앱이 다른 숫자를 말하면 계측기가 둘이 된다.
+    let body_scorable = f.body_paragraphs_with_oracle > 0;
+    let cell_scorable = f.cell_paragraphs > 0;
+    let scorable = body_scorable || cell_scorable;
+
+    let pct = |num: usize, den: usize| -> Option<f64> {
+        (den > 0).then(|| (num as f64) * 100.0 / (den as f64))
+    };
+
+    Ok(serde_json::json!({
+        "available": true,
+        "scorable": scorable,
+        "basis": "저장 lineseg (한/글이 파일에 남긴 레이아웃) — 살아있는 렌더러의 참값이 아니다",
+        "pages": {
+            "ours": f.our_pages,
+            "oracle": f.oracle_pages,
+            "match": f.our_pages as u32 == f.oracle_pages,
+        },
+        "body": {
+            "scorable": body_scorable,
+            "paragraphs": f.paragraphs,
+            "with_oracle": f.body_paragraphs_with_oracle,
+            "missing_oracle": f.body_paragraphs_missing_oracle,
+            "exact": f.line_exact,
+            "within1": f.line_within1,
+            "exact_pct": pct(f.line_exact, f.paragraphs),
+            "our_lines": f.our_lines,
+            "oracle_lines": f.oracle_lines,
+        },
+        "cells": {
+            "scorable": cell_scorable,
+            "seen": f.cell_paragraphs_seen,
+            "compared": f.cell_paragraphs,
+            "missing_oracle": f.cell_paragraphs_missing_oracle,
+            "exact": f.cell_line_exact,
+            "within1": f.cell_line_within1,
+            "exact_pct": pct(f.cell_line_exact, f.cell_paragraphs),
+            "our_lines": f.our_cell_lines,
+            "oracle_lines": f.oracle_cell_lines,
+            "structure_mismatches": f.cell_structure_mismatches,
+        },
+        "blocks": {
+            "tables": f.tables,
+            "table_rows": f.table_rows,
+            "images": f.images,
+            "equations": f.equations,
+            "body_height": f.body_height,
+        },
+    }))
+}
+
+#[cfg(not(feature = "rhwp"))]
+fn fidelity_json(_bytes: &[u8]) -> Result<Value, String> {
+    Ok(serde_json::json!({
+        "available": false,
+        "reason": "이 빌드에는 오라클이 없다 (`rhwp` feature 없이 빌드됨)",
+    }))
 }
 
 /// Page count of the LIVE document as paginated by OUR OWN engine (may differ from `doc_page_count`,
@@ -2207,6 +2491,12 @@ pub fn run() {
             render_own_page,
             register_font,
             own_page_count,
+            fidelity_report,
+            save_version,
+            list_versions,
+            restore_version,
+            pin_version,
+            delete_version,
             doc_page_count,
             doc_outline,
             apply_content,
@@ -2742,5 +3032,47 @@ mod tests {
         let reopened = hwp_core::Engine::open(&recovered).unwrap();
         assert!(reopened.plain_text().contains("복구 최신 리비전"));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 이슈 259: 검수 패널이 CLI `layout-check` 와 **같은 숫자**를 말해야 한다. 앱이 자체 계산을 하기
+    /// 시작하면 계측기가 둘이 되고, 둘이 어긋나는 순간 어느 쪽도 못 믿는다. 게이트 상수(benchmark 8쪽)로
+    /// 잠근다 — 이 값이 움직이면 `canonical-layout-gate` 도 같이 움직여야 한다.
+    #[cfg(feature = "rhwp")]
+    #[test]
+    fn fidelity_report_speaks_the_same_numbers_as_layout_check() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../benchmarks/benchmark.hwp"
+        );
+        let bytes = std::fs::read(path).expect("read public benchmark");
+        let v = super::fidelity_json(&bytes).expect("score");
+
+        assert_eq!(v["available"], true);
+        assert_eq!(
+            v["scorable"], true,
+            "공개 벤치마크는 저장 lineseg 를 갖고 있다"
+        );
+        // 게이트 v2 의 benchmark 상수와 동일해야 한다.
+        assert_eq!(v["pages"]["ours"], 8, "우리 쪽수 = 게이트 상수");
+        assert_eq!(v["pages"]["oracle"], 8, "오라클 쪽수 = 게이트 상수");
+        assert_eq!(v["pages"]["match"], true);
+
+        // 채점 불가를 0점으로 위장하지 않는다.
+        let pct = v["body"]["exact_pct"].as_f64().expect("본문 점수");
+        assert!(
+            pct > 98.9,
+            "본문 줄 정확도가 게이트 바닥(98.9%) 위에 있어야 한다: {pct}"
+        );
+    }
+
+    /// 근거를 댈 수 없으면 숫자를 꾸미지 않는다(068 규율) — 빈 입력은 `available: false` + 사유다.
+    #[test]
+    fn fidelity_report_refuses_to_invent_a_score() {
+        let v = super::fidelity_json(b"not a document").expect("no panic");
+        assert_eq!(v["available"], false);
+        assert!(
+            v["reason"].as_str().is_some_and(|r| !r.is_empty()),
+            "왜 못 쟀는지 말해야 한다: {v}"
+        );
     }
 }

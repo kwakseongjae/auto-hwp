@@ -4,6 +4,7 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import { tinykeys } from "tinykeys";
 import { api, type Anchor, type CellHit, type CaretRect, type CharFmt, type FindMatch, type ImageBox, type OutlineItem, type PageGeom, type Proposal, type ProposalOp, type RunDto, type TableBox } from "./api";
 import { runsToHtml, serializeEditor, runsEqual, applyLiveStyle, saveInlineSelection, readCaretStyle, type ParaIndent } from "./richedit";
@@ -18,6 +19,9 @@ import { Chat, type Scope } from "./Chat";
 import { PRESETS, presetAccepts, type PresetTarget } from "./presets";
 import { PendingInline } from "./PendingInline";
 import { Button, IconButton, Sep, SegmentedControl } from "./ui";
+import { InspectPanel, useFidelity } from "./Inspect";
+import { Dashboard } from "./Dashboard";
+import { VersionsPanel } from "./Versions";
 import { toast, Toaster } from "./toast";
 
 type CaretAnchor = { page: number; node: number; offset: number; len: number };
@@ -228,6 +232,17 @@ function FormatControls({ fmt, onPatch }: {
 /// overlay titlebar, a structured composer, the WYSIWYG caret, and the vibe-docs Chat panel.
 export default function App() {
   const [pageCount, setPageCount] = useState(0);
+  // 이슈 259 — 검수. `inspectRev` 는 "다시 재라"는 신호다: 문서를 열거나 쪽수가 바뀌면 오른다.
+  // 조판을 통째로 다시 도는 일이라 타자 단위로는 재지 않는다.
+  const [inspectOpen, setInspectOpen] = useState(false);
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const [inspectRev, setInspectRev] = useState(0);
+  // 배지가 타이틀바에 **상주**하려면 패널을 열지 않아도 수치가 있어야 한다 — 그래서 App 이 소유한다.
+  const inspect = useFidelity(inspectRev);
+  const fidelity = inspect.summary;
+  useEffect(() => {
+    if (pageCount > 0) setInspectRev((r) => r + 1);
+  }, [pageCount]);
   const [svgCache, setSvgCache] = useState<Record<number, string>>({});
   const [docName, setDocName] = useState<string | null>(null);
   const [editable, setEditable] = useState(true);
@@ -2094,9 +2109,10 @@ export default function App() {
   }
 
   // ---- verbs ----
-  const doOpen = useCallback(async () => {
-    const path = await openDialog({ filters: [{ name: "HWP/HWPX", extensions: ["hwpx", "hwp"] }] });
-    if (typeof path !== "string") return;
+  /// 경로 하나를 연다. 대화상자와 **OS 파일 열기**(더블클릭·Finder·argv)가 같은 경로를 쓴다 —
+  /// 이슈 259 에서 기본 셸이 OS 열기 요청을 전혀 받지 않는 것을 발견했다(`take_open_requests` 를
+  /// `WorkspaceShell` 만 폴링했다). 열기 동작이 둘로 갈리면 한쪽만 고쳐지고 다른 쪽은 조용히 썩는다.
+  const openPath = useCallback(async (path: string) => {
     setBusyLabel("문서 여는 중…");
     try {
       const r = await api.openDoc(path);
@@ -2129,6 +2145,35 @@ export default function App() {
       setBusyLabel(null);
     }
   }, [invalidate]);
+
+  const doOpen = useCallback(async () => {
+    const path = await openDialog({ filters: [{ name: "HWP/HWPX", extensions: ["hwpx", "hwp"] }] });
+    if (typeof path !== "string") return;
+    await openPath(path);
+  }, [openPath]);
+
+  /// 복제 — 이슈 261. 현재 문서의 사본을 **사용자가 고른 위치에** 쓰고 그 사본을 연다.
+  /// 원본 파일은 건드리지 않는다(#140: "원본 옆에 자동 변환물을 만들지 않는다"). 사본은 새 신원이라
+  /// 버전 기록도 새로 시작한다 — 사본이 원본의 역사를 물려받으면 어느 쪽 기록인지 흐려진다.
+  const doDuplicate = useCallback(async () => {
+    if (pageCountRef.current === 0) return;
+    const base = (docName || "문서").replace(/\.(hwpx?|HWPX?)$/, "");
+    const path = await saveDialog({
+      defaultPath: `${base} 사본.hwpx`,
+      filters: [{ name: "HWPX", extensions: ["hwpx"] }],
+    });
+    if (typeof path !== "string") return;
+    setBusyLabel("사본 만드는 중…");
+    try {
+      await api.exportHwpx(path);
+      await openPath(path);
+      toast("ok", `사본을 만들어 열었습니다 — 원본은 그대로입니다`);
+    } catch (e) {
+      toast("warn", `복제 실패: ${e}`);
+    } finally {
+      setBusyLabel(null);
+    }
+  }, [docName, openPath]);
 
   const doExport = useCallback(async () => {
     if (pageCountRef.current === 0) return;
@@ -2447,11 +2492,14 @@ export default function App() {
       { id: "chat", title: "AI 바이브 편집 (채팅)", group: "작성", keys: "⌘L", keywords: "ai chat 채팅 편집 vibe 바이브 표 이미지", tone: "ai", disabled: !canEdit, run: () => setChatOpen((o) => !o) },
       { id: "table", title: "표 추가 (문서 끝에)", group: "작성", keys: "⌘T", keywords: "table 표 추가 그리드", disabled: !canEdit, run: () => setComposer("table") },
       { id: "ai", title: "AI 콘텐츠 제안", group: "작성", keys: "⌘.", keywords: "ai 제안 작성 propose", tone: "ai", disabled: !canEdit, run: () => setComposer("ai") },
+      { id: "versions", title: "버전 기록 — 저장하고 되돌리기", group: "검수", keys: "⌘⇧V", keywords: "version 버전 기록 되돌리기 restore history 스냅샷", disabled: !haveDoc, run: () => setVersionsOpen((o) => !o) },
+      { id: "duplicate", title: "문서 복제 (사본 만들기)", group: "문서", keywords: "duplicate 복제 사본 copy", disabled: !haveDoc, run: doDuplicate },
+      { id: "inspect", title: "검수 — 원본과의 충실도", group: "검수", keys: "⌘⇧I", keywords: "inspect 검수 충실도 쪽수 fidelity 원본 대조 오라클 layout-check", disabled: !haveDoc, run: () => setInspectOpen((o) => !o) },
       { id: "find", title: "찾기 / 바꾸기", group: "편집", keys: "⌘F", keywords: "find replace 찾기 바꾸기 검색 치환", disabled: !haveDoc, run: openFind },
       { id: "undo", title: "실행 취소", group: "편집", keys: "⌘Z", keywords: "undo 실행취소", disabled: !canEdit, run: doUndo },
       { id: "redo", title: "다시 실행", group: "편집", keys: "⌘⇧Z", keywords: "redo 다시실행", disabled: !canEdit, run: doRedo },
     ];
-  }, [pageCount, canEdit, doOpen, doExport, doExportHtml, doExportPdf, openFind, doUndo, doRedo]);
+  }, [pageCount, canEdit, doOpen, doExport, doExportHtml, doExportPdf, openFind, doUndo, doRedo, doDuplicate]);
 
   // ---- global shortcuts: registered ONCE; closures call the always-current handler set via a ref. ----
   const handlers = useRef({ doOpen, doExport, doUndo, doRedo, openFind, zoomIn, zoomOut, zoomReset });
@@ -2467,6 +2515,10 @@ export default function App() {
       "$mod+s": (e) => { e.preventDefault(); void handlers.current.doExport(); },
       "$mod+e": (e) => { e.preventDefault(); void handlers.current.doExport(); },
       "$mod+f": (e) => { e.preventDefault(); handlers.current.openFind(); },
+      // 이슈 259 — 검수 패널. ⌘I 가 아니라 ⌘⇧I 다: 본문은 contentEditable 이라 브라우저가 ⌘I 를
+      // **기울임**으로 먹는다. 전역에서 가로채면 편집 중 기울임이 사라진다.
+      "$mod+Shift+i": (e) => { e.preventDefault(); setInspectOpen((o) => !o); },
+      "$mod+Shift+v": (e) => { e.preventDefault(); setVersionsOpen((o) => !o); },
       // Zoom: ⌘0 → 100%, ⌘+ (=⌘⇧=) / ⌘= → in, ⌘- → out. Bound by KEY CODE so the shifted '+' on a
       // US/Korean layout still lands on Equal.
       "$mod+Digit0": (e) => { e.preventDefault(); handlers.current.zoomReset(); },
@@ -2495,6 +2547,35 @@ export default function App() {
   // Repaint when the embedded control server (or any out-of-band path) mutates the live session:
   // it emits "doc-changed" after every call. Re-sync the page count + drop the SVG cache so the
   // viewer reflects an externally opened/edited document. (The in-UI verbs repaint directly.)
+  // 이슈 259 — OS 파일 열기(더블클릭·Finder·argv·두 번째 인스턴스). Rust 쪽이 요청을 **큐**에 쌓아 두므로
+  // (`open_request::OpenRequestQueue`), 리스너가 붙기 전에 도착한 것도 마운트 때 한 번 비워서 받는다.
+  // 그 뒤로는 `desktop-open-request` 이벤트로 받는다. 큐를 비우는 것은 소비이므로 **한 번만** 건다.
+  const openPathRef = useRef(openPath);
+  openPathRef.current = openPath;
+  useEffect(() => {
+    let disposed = false;
+    const drain = async () => {
+      try {
+        const paths = await invoke<string[]>("take_open_requests");
+        // 여러 개가 와도 창은 하나다 — 마지막 것을 연다(Finder 다중 선택의 통상 동작).
+        const last = paths.at(-1);
+        if (last && !disposed) await openPathRef.current(last);
+      } catch {
+        // 큐가 없거나 비어 있으면 조용히 넘어간다 — 빈 상태 화면이 정상이다.
+      }
+    };
+    void drain();
+    let un: undefined | (() => void);
+    void listen("desktop-open-request", () => void drain()).then((f) => {
+      if (disposed) f();
+      else un = f;
+    });
+    return () => {
+      disposed = true;
+      un?.();
+    };
+  }, []);
+
   useEffect(() => {
     let un: undefined | (() => void);
     (async () => {
@@ -2725,6 +2806,31 @@ export default function App() {
               <span className={`h-1.5 w-1.5 rounded-full ${editable ? "bg-emerald-500" : "bg-neutral-400"}`} />
               {editable ? "편집가능" : "보기전용"}
             </span>
+            {/* 이슈 259 — 충실도는 항상 보인다. 이 앱의 논지가 "원본과 같은가" 이므로, 그 답을
+                패널 뒤에 숨기지 않는다. 클릭하면 근거(검수 패널)가 열린다. */}
+            {fidelity && (
+              <button
+                onClick={() => setInspectOpen((o) => !o)}
+                title={
+                  fidelity.scorable
+                    ? `우리 ${fidelity.ours}쪽 · 한컴 저장 ${fidelity.oracle}쪽 — 눌러서 근거 보기`
+                    : "저장 레이아웃이 없어 채점할 수 없는 문서 — 눌러서 이유 보기"
+                }
+                className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-xs tabular-nums transition-colors ${
+                  !fidelity.scorable
+                    ? "bg-neutral-500/15 text-neutral-500 hover:bg-neutral-500/25"
+                    : fidelity.pagesMatch
+                      ? "bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/25 dark:text-emerald-400"
+                      : "bg-rose-500/15 text-rose-700 hover:bg-rose-500/25 dark:text-rose-400"
+                }`}
+              >
+                {!fidelity.scorable
+                  ? "채점 불가"
+                  : fidelity.pagesMatch
+                    ? `원본과 ${fidelity.ours}쪽 일치`
+                    : `원본 ${fidelity.oracle}쪽 · 우리 ${fidelity.ours}쪽`}
+              </button>
+            )}
           </>
         ) : (
           <span data-tauri-drag-region className="text-sm font-semibold tracking-tight text-neutral-400">한칸</span>
@@ -2738,6 +2844,16 @@ export default function App() {
         {canEdit && (
           <IconButton onClick={() => setChatOpen((o) => !o)} title="AI 바이브 편집 (⌘L)" active={chatOpen} tone="ai">
             ✦ 바이브 <kbd className="rounded bg-black/5 px-1 dark:bg-white/10">⌘L</kbd>
+          </IconButton>
+        )}
+        {pageCount > 0 && (
+          <IconButton onClick={() => setVersionsOpen((o) => !o)} title="버전 기록 (⌘⇧V)" active={versionsOpen}>
+            ⏱ 버전
+          </IconButton>
+        )}
+        {pageCount > 0 && (
+          <IconButton onClick={() => setInspectOpen((o) => !o)} title="검수 — 원본과의 충실도 (⌘⇧I)" active={inspectOpen}>
+            ◎ 검수
           </IconButton>
         )}
         <IconButton onClick={() => setPaletteOpen(true)} title="명령 팔레트 (⌘K)">
@@ -3329,16 +3445,8 @@ export default function App() {
               </span>
             </div>
           ) : (
-            <div className="grid h-full place-items-center">
-              <div className="flex flex-col items-center gap-4 text-center">
-                <div className="text-5xl opacity-20">한칸</div>
-                <div className="text-neutral-500 dark:text-neutral-400">한글 문서를 열어 시작하세요</div>
-                <button onClick={doOpen} className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90">
-                  📂 문서 열기 <kbd className="opacity-70">⌘O</kbd>
-                </button>
-                <div className="text-xs text-neutral-400">또는 <kbd className="rounded bg-black/5 px-1 dark:bg-white/10">⌘K</kbd> 로 모든 명령</div>
-              </div>
-            </div>
+            // 이슈 261 — 앱은 파일 열기 대화상자가 아니라 **대시보드**에서 시작한다.
+            <Dashboard onOpenDialog={doOpen} />
           )}
           {/* M1: drop affordance — a sticky pill while an image file is dragged over the pages. */}
           {dragActive && (
@@ -3369,6 +3477,23 @@ export default function App() {
               so there's no modal here. Double-click a cell or a paragraph to edit in place.) */}
         </main>
         </div>
+
+        {versionsOpen && pageCount > 0 && (
+          <VersionsPanel
+            canEdit={canEdit}
+            onRestored={(pages) => {
+              invalidate(pages);
+              setEdited(true);
+              setInspectRev((r) => r + 1);
+              toast("ok", "버전으로 되돌렸습니다 — 직전 상태도 기록에 남아 있습니다");
+            }}
+            onClose={() => setVersionsOpen(false)}
+          />
+        )}
+
+        {inspectOpen && pageCount > 0 && (
+          <InspectPanel data={inspect.data} loading={inspect.loading} error={inspect.error} onRefresh={() => void inspect.reload()} />
+        )}
 
         <Chat
           open={chatOpen && pageCount > 0}
