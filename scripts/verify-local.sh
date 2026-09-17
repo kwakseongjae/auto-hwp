@@ -171,12 +171,29 @@ if [ "$MODE" = "--full" ]; then
   [ "$WASM_OPTED" = 1 ] || echo "(wasm-opt 미적용 — 동작하는 binaryen 없음. brew install binaryen 권장)"
   node apps/hwp-lab/scripts/copy-wasm.mjs
   rm -rf apps/hwp-lab/.next
+  # 이슈 256: --full 은 packages/* 의 node_modules 를 가정한다. fresh clone 에서는 `tsc: command
+  # not found` 로 죽었고, 스크립트가 `pnpm -C` 를 쓰는 탓에 기여자가 `pnpm install` 로 복구하려다
+  # 더 나쁜 상태에 빠졌다 — pnpm 은 `file:` 의존을 store 로 **복사**해서 editor-core 를 다시 빌드해도
+  # react 가 보는 dist 가 굳는다. 커밋된 lockfile 과 CI(`npm ci`)가 정본이고, npm 은 `file:` 을
+  # **심볼릭 링크**로 걸어 이 문제가 구조적으로 없다. 그러니 없을 때 npm 으로 채운다.
+  echo "═══ JS 의존성 (npm — 커밋된 package-lock.json 이 정본) ═══"
+  for pkg in packages/ai-protocol packages/editor-core packages/react; do
+    if [ -d "$pkg/node_modules" ]; then
+      echo "  $pkg — 설치됨"
+    elif [ -f "$pkg/package-lock.json" ]; then
+      echo "  $pkg — node_modules 부재, npm ci 실행"
+      (cd "$pkg" && npm ci --silent)
+    else
+      echo "❌ $pkg 에 package-lock.json 이 없다 — 설치 방법을 확정할 수 없다"; exit 1
+    fi
+  done
+
   echo "═══ JS 빌드 ═══"
   # ⚠️ ai-protocol 먼저 — 앱/에디터가 그 dist(buildDocContext 등)를 소비한다. 이 빌드가 빠지면 소스는
   # 최신인데 스테일 dist가 그대로 실려 나간다(066 표 그리드가 조용히 드롭돼 QA에서 라벨칸 오타겟 재현).
-  pnpm -C packages/ai-protocol build
-  pnpm -C packages/editor-core build
-  pnpm -C packages/react build
+  npm --prefix packages/ai-protocol run build
+  npm --prefix packages/editor-core run build
+  npm --prefix packages/react run build
   echo "═══ 본문 캐럿 엔진 교차검증 ═══"
   node packages/engine/bench/body-caret-crosscheck.mjs
   echo "═══ i18n 게이트 (이슈 077 — SDK 문자열은 카탈로그 경유만) ═══"
@@ -184,9 +201,9 @@ if [ "$MODE" = "--full" ]; then
   # 빌드 산출물이 아니라 소스를 읽으므로 JS 빌드 전후 어디서 돌려도 결과가 같다.
   node packages/react/scripts/check-i18n-literals.mjs
   echo "═══ vitest ═══"
-  pnpm -C packages/editor-core exec vitest run
-  pnpm -C packages/ai-protocol exec vitest run
-  pnpm -C packages/react exec vitest run
+  (cd packages/editor-core && npx vitest run)
+  (cd packages/ai-protocol && npx vitest run)
+  (cd packages/react && npx vitest run)
   (cd apps/hwp-lab && npx vitest run)
   # 데모 AI 워커도 게이트에 편입(2026-08-05 — 다중 셀 절단 수리가 무성 회귀하지 않게).
   # node_modules 부재(fresh clone)면 점수를 꾸며내지 않고 skip을 명시한다.
