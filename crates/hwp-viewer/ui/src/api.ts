@@ -130,6 +130,65 @@ export type RunDto = {
 
 /// Typed bindings to the Rust `Intent` command lane (crates/hwp-viewer/src/lib.rs). No prose
 /// parsing: each command returns a typed value the UI consumes directly.
+/** 이슈 259 — 검수 패널의 데이터. CLI `layout-check` 와 **같은 계산**(`hwp_core::layout_fidelity`)이다.
+ *  점수는 한/글의 살아있는 렌더러가 아니라 파일에 **저장된 lineseg** 기준 회귀 잠금이다(#72). */
+export type Fidelity =
+  | { available: false; reason: string }
+  | {
+      available: true;
+      scorable: boolean;
+      basis: string;
+      pages: { ours: number; oracle: number; match: boolean };
+      body: {
+        scorable: boolean;
+        paragraphs: number;
+        with_oracle: number;
+        missing_oracle: number;
+        exact: number;
+        within1: number;
+        exact_pct: number | null;
+        our_lines: number;
+        oracle_lines: number;
+      };
+      cells: {
+        scorable: boolean;
+        seen: number;
+        compared: number;
+        missing_oracle: number;
+        exact: number;
+        within1: number;
+        exact_pct: number | null;
+        our_lines: number;
+        oracle_lines: number;
+        structure_mismatches: number;
+      };
+      blocks: {
+        tables: number;
+        table_rows: number;
+        images: number;
+        equations: number;
+        body_height: number;
+      };
+    };
+
+/** 이슈 261 — 한 문서의 버전 기록. 복구 스냅샷(#141)과 **다른 저장소**다: 이쪽은 사용자가
+ *  되돌아갈 지점이고, 고정하면 자동 정리에서 살아남는다. */
+export type VersionSummary = {
+  documentId: string;
+  sequence: number;
+  revision: number;
+  savedAtMs: number;
+  byteLen: number;
+  label: string;
+  pinned: boolean;
+  /** 저장 시점의 쪽수. 0 = 모름 — 꾸미지 않는다. */
+  pages: number;
+};
+
+/** 최근 문서 한 줄. `path` 는 로컬 전용이라 UI 는 파일명만 크게 쓴다(#142). */
+export type RecentDocument = { path: string; lastOpenedMs: number };
+export type RecentListing = { entries: RecentDocument[]; warnings: string[] };
+
 export const api = {
   /** Open a .hwp/.hwpx; returns page count + capability. */
   openDoc: (path: string) => invoke<OpenResult>("open_doc", { path }),
@@ -144,6 +203,25 @@ export const api = {
   renderOwnPage: (page: number) => invoke<string>("render_own_page", { page }),
   /** Page count of the live doc as paginated by OUR OWN engine (drives the 자체 렌더 page list). */
   ownPageCount: () => invoke<number>("own_page_count"),
+  /** 검수 수치. 원본 바이트를 다시 읽어 우리 조판 vs 한컴 저장 레이아웃을 대조한다. 낼 수 없으면
+   *  점수를 꾸미지 않고 `available:false` + 사유를 돌려준다. */
+  fidelityReport: () => invoke<Fidelity>("fidelity_report"),
+
+  // ── 최근 문서 (대시보드) ─────────────────────────────────────────────────
+  recentDocuments: () => invoke<RecentListing>("list_recent_documents"),
+  /** 인덱스로 다시 연다. Rust 가 경로를 검증해 열기 큐에 넣고 창을 앞으로 가져온다 —
+   *  경로 문자열이 웹뷰를 건너오지 않는다(#142). */
+  reopenRecent: (index: number) => invoke<void>("reopen_recent_document", { index }),
+  removeRecent: (index: number) => invoke<RecentListing>("remove_recent_document", { index }),
+
+  // ── 버전 기록 ────────────────────────────────────────────────────────────
+  saveVersion: (label: string) => invoke<VersionSummary>("save_version", { label }),
+  listVersions: () => invoke<VersionSummary[]>("list_versions"),
+  /** 되돌리기. 현재 상태를 먼저 버전으로 남기고 간다 — 되돌아올 수 있어야 한다. 새 쪽수를 돌려준다. */
+  restoreVersion: (sequence: number) => invoke<number>("restore_version", { sequence }),
+  pinVersion: (sequence: number, pinned: boolean) =>
+    invoke<VersionSummary>("pin_version", { sequence, pinned }),
+  deleteVersion: (sequence: number) => invoke<void>("delete_version", { sequence }),
   /** Live page count of the open document. */
   pageCount: () => invoke<number>("doc_page_count"),
   /** Document outline (□ labels + numbered section bands) with the page each starts on. */

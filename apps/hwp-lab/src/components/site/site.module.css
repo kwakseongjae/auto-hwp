@@ -214,3 +214,25 @@
 .legal a:hover {
   color: var(--ah-accent-ink);
 }
+
+/* 데스크톱 앱 내려받기 — 내비 링크가 아니라 행동 버튼이다(SiteHeader 주석 참고).
+   .ghost(GitHub)보다 한 단계 강하고, 랜딩의 주요 CTA보다는 약하게 둔다 —
+   헤더가 본문의 주된 행동을 이기면 안 된다. */
+.download {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: 7px;
+  border: 1px solid var(--ah-accent);
+  color: var(--ah-accent);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.download:hover {
+  background: var(--ah-accent);
+  color: #fff;
+}

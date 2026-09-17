@@ -1,0 +1,221 @@
+name: desktop-release
+
+# 이슈 #144 — 서명·공증된 데스크톱 산출물과 검증 가능한 업데이트.
+#
+# 설계 원칙 셋:
+#
+# 1. **fail-closed.** 자격증명이 없으면 **빌드를 시작하기 전에** 멈춘다. 서명 없는 산출물이
+#    "릴리스"라는 이름을 달고 나가는 경로가 없어야 한다. 로컬 미서명 빌드는 여전히
+#    `cargo tauri build` 로 가능하다 — 그건 릴리스가 아니다.
+# 2. **비밀정보는 저장소에 없다.** 인증서·비밀번호·업데이터 개인키는 보호된 시크릿으로만 들어오고,
+#    로그·아티팩트·이슈 어디에도 남지 않는다. 임시 키체인은 항상 정리한다.
+# 3. **신원은 보호된 main 의 정확한 SHA.** #149 의 preflight 계약을 그대로 선행시킨다 —
+#    움직이는 태그가 아니라 40-hex 커밋이다.
+on:
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: "Exact 40-hex commit SHA expected to equal current main"
+        required: true
+        type: string
+      version:
+        description: "SemVer (stable: 1.2.3, preview: 1.2.4-rc.1)"
+        required: true
+        type: string
+      channel:
+        description: "Release channel"
+        required: true
+        type: choice
+        options:
+          - preview
+          - stable
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release
+  cancel-in-progress: false
+
+jobs:
+  # ── 1. 신원 + 자격증명이 모두 갖춰졌는지 먼저 증명한다 ────────────────────────────────
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RELEASE_SHA: ${{ inputs.release_sha }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_CHANNEL: ${{ inputs.channel }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ inputs.release_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: fetch current main without credentials persistence
+        run: git fetch --no-tags --depth=1 origin main
+
+      - name: verify exact protected-main identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA" || {
+            echo "::error::checked-out HEAD does not equal requested release SHA"
+            exit 1
+          }
+          node scripts/desktop-release-manifest.mjs preflight \
+            --source-sha "$RELEASE_SHA" \
+            --main-sha "$(git rev-parse origin/main)" \
+            --version "$RELEASE_VERSION" \
+            --channel "$RELEASE_CHANNEL"
+
+      # 자격증명 **존재 여부만** 본다. 값은 절대 찍지 않는다. 여기서 막으면 서명 없는 산출물이
+      # 만들어지는 일 자체가 없다 — 빌드가 끝난 뒤 "서명을 못 했네" 하는 것보다 싸고 안전하다.
+      - name: require release credentials (fail-closed)
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
+                      APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_P8 TAURI_SIGNING_PRIVATE_KEY; do
+            [ -n "${!name:-}" ] || missing+=("$name")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::release credentials missing: ${missing[*]}"
+            echo "서명 없는 산출물을 릴리스로 내보내지 않는다. 보호된 시크릿을 채운 뒤 다시 실행하라."
+            exit 1
+          fi
+          echo "release credentials present (values never printed)"
+
+  # ── 2. 서명·공증된 macOS universal 빌드 ──────────────────────────────────────────
+  macos:
+    needs: preflight
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ inputs.release_sha }}
+          submodules: recursive
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # 임시 키체인에만 인증서를 넣는다. 러너는 일회용이지만, 그래도 사후 정리를 건다 —
+      # 자격증명 수명을 이 잡 안으로 가둔다.
+      - name: import Apple signing certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/release.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+          echo "RELEASE_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychain -d user -s "$KEYCHAIN" login.keychain-db
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: prepare notarization API key
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s' "$APPLE_API_KEY_P8" | base64 --decode > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+          echo "APPLE_API_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
+
+      # `cargo tauri build` 가 서명·공증·staple 을 수행한다(Tauri v2 문서화된 환경변수).
+      # `createUpdaterArtifacts` 로 `.app.tar.gz` 와 그 `.sig` 가 함께 나온다.
+      - name: build signed + notarized universal bundle
+        working-directory: crates/hwp-viewer
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          npm --prefix ui ci 2>/dev/null || (cd ui && npm install --no-audit --no-fund)
+          cargo tauri build --target universal-apple-darwin \
+            --features rhwp,shaper,pdf \
+            --config '{"bundle":{"createUpdaterArtifacts":true}}'
+
+      # 서명이 실제로 붙었는지 **우리가** 확인한다. 툴체인이 조용히 건너뛰었을 가능성을 남기지 않는다.
+      - name: verify signature, Gatekeeper, and notarization staple
+        run: bash scripts/verify-desktop-signing.sh target/universal-apple-darwin/release/bundle
+
+      - name: always remove the temporary keychain
+        if: always()
+        run: |
+          security delete-keychain "${RELEASE_KEYCHAIN:-}" 2>/dev/null || true
+          rm -f "${APPLE_API_KEY_PATH:-}" 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-universal
+          path: |
+            target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz
+            target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
+          if-no-files-found: error
+          retention-days: 7
+
+  # ── 3. Windows x86_64 ─────────────────────────────────────────────────────────
+  # 서명은 Authenticode 인증서가 보호된 시크릿으로 들어온 뒤에 켠다. 지금은 **명시적으로
+  # 미지원**이라고 말하고 잡을 건너뛴다 — "지원하는 척" 하는 릴리스 페이지를 만들지 않는다(#144 수락 기준).
+  windows:
+    needs: preflight
+    if: ${{ vars.DESKTOP_WINDOWS_SIGNING_READY == 'true' }}
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ inputs.release_sha }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: build signed installer
+        working-directory: crates/hwp-viewer
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          npm --prefix ui ci
+          cargo tauri build --features rhwp,shaper,pdf --config '{\"bundle\":{\"createUpdaterArtifacts\":true}}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: |
+            target/release/bundle/msi/*.msi
+            target/release/bundle/msi/*.msi.zip
+            target/release/bundle/msi/*.msi.zip.sig
+          if-no-files-found: error
+          retention-days: 7
