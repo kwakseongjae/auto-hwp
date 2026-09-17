@@ -86,13 +86,47 @@ pub fn emit_html(proj: &JsxCssProject, opts: &HtmlOptions) -> String {
 
     let css = sanitize_css(&emit_css(&proj.styles));
     let title = esc_text(opts.title.as_deref().unwrap_or("auto-hwp 문서"));
+    // The reading column is the DOCUMENT's body width, not a hardcoded 840px (issue #243). Without
+    // this the table below fills whatever container the viewport gives it, so the same document
+    // measured 792px at a 1440px window and 746px at 794px — never the original's 637px.
+    // `box-sizing:border-box` means max-width includes the 1.5rem side padding, so add it back.
+    let page_css = document_body_width_px(proj)
+        .map(|w| format!(".hwp-doc{{max-width:calc({w:.1}px + 3rem)}}\n"))
+        .unwrap_or_default();
 
     format!(
         "<!doctype html>\n<html lang=\"ko\">\n<head>\n<meta charset=\"utf-8\">\n\
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
-<title>{title}</title>\n<style>\n{BASE_CSS}\n{css}</style>\n</head>\n\
+<title>{title}</title>\n<style>\n{BASE_CSS}\n{page_css}{css}</style>\n</head>\n\
 <body class=\"hwp-doc\">\n{body}</body>\n</html>\n"
     )
+}
+
+/// The document's body width in CSS px (1in = 7200 HWPUNIT = 96px ⇒ px = HWPUNIT/75), taken as the
+/// WIDEST section body so a mixed-orientation document never clips its landscape tables — each table
+/// carries its own width, so a wider container only raises the ceiling.
+///
+/// Mirrors `hwp_typeset::body_box` (landscape swap, gutter added to the left margin) rather than
+/// calling it: the HTML path must work in the default build, where `hwp-typeset` is a `pdf`-feature
+/// dependency only.
+fn document_body_width_px(proj: &JsxCssProject) -> Option<f64> {
+    proj.manifest
+        .sections
+        .iter()
+        .filter_map(|section| {
+            let page = &section.page;
+            let paper_w = if page.landscape && page.width < page.height {
+                page.height
+            } else {
+                page.width
+            };
+            let left = page.margin_left + page.margin_gutter.max(0);
+            let width = paper_w - left - page.margin_right;
+            (width > 0).then(|| f64::from(width) / 75.0)
+        })
+        .fold(None, |acc: Option<f64>, w| {
+            Some(acc.map_or(w, |a| a.max(w)))
+        })
 }
 
 // --- node rendering ---------------------------------------------------------------------------
@@ -235,15 +269,21 @@ fn render_table(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut Stri
         })
         .unwrap_or_default();
 
-    // Column PROPORTIONS as percentages (not absolute px): the table fills the container width
-    // (BASE_CSS .hwp-doc table{width:100%}) while columns keep the original ratios. Absolute px made
-    // gov-doc tables render narrower than the page and starved label columns (e.g. a 48px cell wrapped
-    // Korean one char per line). table-layout:fixed keeps the ratios exact.
+    // The table's OWN width (issue #243), with the columns kept as percentages of it. Percentages
+    // alone made the table a function of the viewport instead of the document — the same table
+    // measured 792px / 746px / 652px at three window widths, never the original 637px. `width` in px
+    // pins it; `max-width:100%` keeps the semantic-reflow contract (a window narrower than the
+    // document still shrinks the table proportionally instead of scrolling).
+    //
+    // ⚠️ Do NOT go back to absolute px on the <col> elements: that starved label columns (a 48px cell
+    // wrapped Korean one char per line). The ratios stay percentages; only the table box is pinned.
     let total: f64 = cols_px.iter().sum();
     out.push_str("<table");
     out.push_str(&class_attr(&el.class_list));
     if !cols_px.is_empty() && total > 0.0 {
-        out.push_str(" style=\"table-layout:fixed\"");
+        out.push_str(&format!(
+            " style=\"table-layout:fixed;width:{total:.1}px;max-width:100%\""
+        ));
     }
     out.push('>');
     if let Some(caption) = el.children.iter().find_map(|child| match child {
@@ -757,6 +797,79 @@ mod tests {
             html.matches("<tr style=").count(),
             1,
             "only the overridden row carries a height"
+        );
+    }
+
+    /// Issue #243: the table's width must come from the DOCUMENT, not from whatever container the
+    /// viewport hands it. Before this, `width:100%` inside a hardcoded `max-width:840px` column made
+    /// the same table measure 792px / 746px / 652px at three window widths — never the original.
+    #[test]
+    fn table_width_comes_from_the_document_not_the_container() {
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape::default());
+        doc.para_shapes.push(ParaShape::default());
+        // 3 columns summing 47746 HWPUNIT = 636.6px — a real gov-form first row (168.4mm).
+        let mut t = Table {
+            rows: 1,
+            cols: 3,
+            col_widths: vec![5328, 1303, 41115],
+            ..Default::default()
+        };
+        for col in 0..3 {
+            t.cells.push(Cell {
+                row: 0,
+                col,
+                col_span: 1,
+                row_span: 1,
+                active: true,
+                ..Default::default()
+            });
+        }
+        doc.sections.push(Section {
+            blocks: vec![Block::Table(t)],
+            ..Default::default()
+        });
+        let html = html_of(&doc);
+        assert!(
+            html.contains("width:636.6px"),
+            "the table carries the document's own width: {html}"
+        );
+        assert!(
+            html.contains("max-width:100%"),
+            "…while still shrinking on a narrower window (semantic-reflow contract)"
+        );
+        // The column RATIOS stay percentages — absolute px on <col> starved label columns.
+        assert!(
+            html.contains("<col style=\"width:"),
+            "columns keep proportional widths"
+        );
+        assert!(
+            !html.contains("<col style=\"width:71.0px"),
+            "columns must NOT become absolute px"
+        );
+    }
+
+    /// The reading column follows the page setup (A4 210mm − 20/20mm margins = 170mm = 642.5px),
+    /// not the old hardcoded 840px. `box-sizing:border-box` means the side padding is added back.
+    #[test]
+    fn reading_column_width_comes_from_the_page_setup() {
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape::default());
+        doc.para_shapes.push(ParaShape::default());
+        doc.sections.push(Section {
+            page: PageSetup {
+                width: 59528,
+                height: 84188,
+                margin_left: 5669,
+                margin_right: 5669,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let html = html_of(&doc);
+        assert!(
+            html.contains(".hwp-doc{max-width:calc(642.5px + 3rem)}"),
+            "reading column = the document body width: {html}"
         );
     }
 
