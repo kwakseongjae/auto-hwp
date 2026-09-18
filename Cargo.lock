@@ -2079,6 +2079,7 @@ dependencies = [
  "serde",
  "sha2",
  "svgtypes 0.16.1",
+ "ttf-parser",
 ]
 
 [[package]]

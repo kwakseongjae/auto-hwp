@@ -21,12 +21,15 @@ svgtypes = { version = "0.16", optional = true }
 kurbo = { version = "0.13", optional = true }
 serde = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
+# 얼굴이 이 코드포인트를 그릴 수 있는지 묻기 위한 것 (이슈 287). krilla 가 이미 끌어오는
+# 크레이트라 의존 트리에 새 코드가 늘지 않는다 — hwp-typeset·hwp-session 도 같은 판을 쓴다.
+ttf-parser = { version = "0.25", optional = true }
 
 [features]
 default = []
 # High-level PDF export (krilla): own layout → paint IR → PDF with Korean font subsetting. Pairs with
 # the caller's font provider; under `shaper` the real rustybuzz advances drive placement.
-pdf = ["dep:krilla", "dep:hwp-render", "dep:hwp-typeset", "dep:quick-xml", "dep:svgtypes", "dep:kurbo", "dep:serde", "dep:sha2"]
+pdf = ["dep:krilla", "dep:hwp-render", "dep:hwp-typeset", "dep:quick-xml", "dep:svgtypes", "dep:kurbo", "dep:serde", "dep:sha2", "dep:ttf-parser"]
 # Drive the PDF export's placement with the real shaper (forwarded to hwp-render/hwp-typeset).
 shaper = ["hwp-render?/shaper", "hwp-typeset?/shaper"]
 
