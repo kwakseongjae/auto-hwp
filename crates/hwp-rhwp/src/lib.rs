@@ -1268,6 +1268,13 @@ pub struct CellLineMismatch {
     pub source_pad_left: f64,
     pub source_pad_right: f64,
     pub our_cell_text_width: f64,
+    /// 이 문단의 좌/우 여백(HWPUNIT) — `our_wrap_width` 가 `our_cell_text_width` 에서 뺀 값.
+    ///
+    /// 따로 싣는 이유(이슈 274): 합계만 보면 한/글이 **어느 쪽을** 적용하는지 알 수 없다. 실측에서
+    /// 한컴이 뺀 양이 우리의 **절반**으로 나왔는데, 그게 "좌우 중 한쪽만" 인지 "합의 절반" 인지는
+    /// 좌/우 값이 갈라져 보여야 판정된다.
+    pub our_margin_left: f64,
+    pub our_margin_right: f64,
     pub our_wrap_width: f64,
     pub oracle_segment_width: f64,
     pub text: String,
@@ -1407,6 +1414,8 @@ fn score_cell_table(
                         source_pad_left: padding.left as f64,
                         source_pad_right: padding.right as f64,
                         our_cell_text_width: cell_text_w,
+                        our_margin_left: left,
+                        our_margin_right: right,
                         our_wrap_width: (cell_text_w - left - right).max(1.0),
                         oracle_segment_width: rp
                             .line_segs

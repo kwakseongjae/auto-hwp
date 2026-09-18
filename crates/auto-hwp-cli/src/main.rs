@@ -1391,7 +1391,7 @@ fn layout_check(file: &PathBuf, rows: Option<&str>, cells: Option<&str>) -> Resu
             None => println!("  셀 줄수 불일치 상세: 전체 표 (폭 HWPUNIT · root=바깥 표)"),
         }
         println!(
-            "    {:>5} {:>5} {:>11} {:>4} {:>4} {:>4} | {:>4} {:>4} | {:>7} {:>7} {:>7} {:>7} {:>7} | 텍스트",
+            "    {:>5} {:>5} {:>11} {:>4} {:>4} {:>4} | {:>4} {:>4} | {:>7} {:>7} {:>7} {:>7} {:>7} {:>11} | 텍스트",
             "구역",
             "블록",
             "표경로",
@@ -1404,7 +1404,8 @@ fn layout_check(file: &PathBuf, rows: Option<&str>, cells: Option<&str>) -> Resu
             "우리셀폭",
             "우리wrap",
             "한컴seg",
-            "L/R패딩"
+            "L/R패딩",
+            "문단여백L/R"
         );
         let mut shown = 0usize;
         for m in f
@@ -1413,7 +1414,7 @@ fn layout_check(file: &PathBuf, rows: Option<&str>, cells: Option<&str>) -> Resu
             .filter(|m| filter.is_none_or(|(s, b)| m.section == s && m.block == b))
         {
             println!(
-                "    {:>5} {:>5} {:>11} {:>4} {:>4} {:>4} | {:>4} {:>4} | {:>7.0} {:>7.0} {:>7.0} {:>7.0} {:>3.0}/{:<3.0} | {}",
+                "    {:>5} {:>5} {:>11} {:>4} {:>4} {:>4} | {:>4} {:>4} | {:>7.0} {:>7.0} {:>7.0} {:>7.0} {:>3.0}/{:<3.0} {:>5.0}/{:<5.0} | {}",
                 m.section,
                 m.block,
                 m.table_path,
@@ -1428,6 +1429,8 @@ fn layout_check(file: &PathBuf, rows: Option<&str>, cells: Option<&str>) -> Resu
                 m.oracle_segment_width,
                 m.source_pad_left,
                 m.source_pad_right,
+                m.our_margin_left,
+                m.our_margin_right,
                 m.text
             );
             shown += 1;
