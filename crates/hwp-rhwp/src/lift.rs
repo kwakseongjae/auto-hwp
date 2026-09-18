@@ -623,6 +623,17 @@ impl<'a> Lifter<'a> {
             padding: Some(lift_padding(&t.padding)),
             borders: self.cell_borders(t.border_fill_id),
             cells,
+            // 이슈 247 — `.hwp` 저장 행높이는 **바닥이 아니라 정확값**이다.
+            //
+            // HWPX 는 교환 포맷이라 `<hp:cellSz height>` 가 희망값일 수 있지만, `.hwp` 의 값은 한컴이
+            // **저장한 실제 레이아웃**이다 — 같은 파일의 `lineseg` 를 우리가 오라클로 쓰는 바로 그
+            // 기하다. 바닥으로 쓰면 한컴이 그린 것보다 행을 키울 수 있게 되고, 그래서 정부 배포 PDF
+            // 1쪽 문서가 2쪽이 됐다(law.go.kr T1 쌍: 55행 표 하나가 +2,474 HWPUNIT 과다 예약).
+            //
+            // **HWPX 입력은 제외한다.** 이 lift 는 HWPX 바이트도 받는데, 거기서는 noAdjust 가 XML 에
+            // 적혀 있고 그 판단은 HWPX 파서 몫이다(이슈 080). 무조건 켜면 교차포맷 파리티가 깨진다 —
+            // `hwpx_rhwp_parity` 가 benchmark1.hwpx 에서 22쪽 vs 16쪽으로 정확히 그걸 잡았다.
+            fixed_row_heights: !self.from_hwpx,
             provenance: Provenance {
                 source: Some(SourceFormat::Hwp5),
                 raw: None,

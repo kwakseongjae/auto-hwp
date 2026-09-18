@@ -31,6 +31,20 @@ fn parse(bytes: &[u8]) -> SemanticDoc {
         .expect("rhwp lift")
 }
 
+/// 재방출한 HWPX 를 **생산 경로**로 다시 연다 (이슈 247).
+///
+/// 재열기에 rhwp lift 를 쓰면 안 된다. `.hwp` 의 저장 행높이는 한컴이 그린 **정확값**이고, 우리는 그
+/// 사실을 HWPX 로 내보낼 때 `<hp:tbl noAdjust="1">` 로 적는다. 그런데 **rhwp 의 표 모델에는 그 필드가
+/// 없어서**(`external/rhwp` 는 vendored — 수정 금지) rhwp 로 읽으면 그 의미가 사라지고 행이 내용만큼
+/// 자란다(benchmark1: 18쪽 → 19쪽). 사용자가 실제로 겪는 경로는 우리 HWPX 파서이고, 그쪽은 noAdjust 를
+/// 읽으므로 18쪽을 그대로 유지한다. 이 테스트가 잠글 것은 **그 경로**다.
+fn reopen_hwpx(bytes: &[u8]) -> SemanticDoc {
+    use hwp_model::prelude::DocumentParser;
+    hwp_hwpx::HwpxParser::new()
+        .parse(bytes, SourceFormat::Hwpx)
+        .expect("생산 HWPX 파서")
+}
+
 /// (NaiveLayout 페이지 수, place_doc 페이지 수) — 항상 일치해야 한다(LOCKSTEP).
 fn page_counts(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> (usize, usize) {
     let naive = hwp_typeset::NaiveLayout
@@ -55,7 +69,36 @@ fn roundtrip_preserves_pages(name: &str) {
     );
 
     let hwpx = hwp_hwpx::serialize::serialize(&orig).expect("serialize to HWPX");
-    let reopened = parse(&hwpx);
+    let reopened = reopen_hwpx(&hwpx);
+    // 이슈 247 — 쪽수가 같아도 **이유가 우연이면** 다음 변경에서 풀린다. `.hwp` 의 저장 행높이는
+    // 한컴이 그린 정확값이고, 우리는 그 사실을 `<hp:tbl noAdjust="1">` 로 적어 보낸다. 재열기한
+    // 문서의 표가 그 사실을 되찾았는지 직접 확인한다 — 잃어버리면 행이 내용만큼 자라 쪽수 보존이
+    // 운에 맡겨진다.
+    let fixed_tables = |d: &SemanticDoc| -> (usize, usize) {
+        let (mut total, mut fixed) = (0usize, 0usize);
+        for sec in &d.sections {
+            for b in &sec.blocks {
+                if let Block::Table(t) = b {
+                    total += 1;
+                    fixed += usize::from(t.fixed_row_heights);
+                }
+            }
+        }
+        (total, fixed)
+    };
+    let (t0, f0) = fixed_tables(&orig);
+    let (t1, f1) = fixed_tables(&reopened);
+    assert_eq!(t0, t1, "{name}: 왕복 후 표 개수 보존 ({t0} → {t1})");
+    // 이 단언이 0 == 0 으로 헛돌지 않게: `.hwp` lift 의 표는 전부 정확값이어야 한다.
+    assert!(
+        t0 > 0 && f0 == t0,
+        "{name}: .hwp 표 {f0}/{t0} 만 정확값으로 잡혔다"
+    );
+    assert_eq!(
+        f0, f1,
+        "{name}: 저장 행높이가 '정확값'이라는 사실이 왕복에서 사라졌다 — 원본 {f0}/{t0} 표 → \
+         재열기 {f1}/{t1} (이슈 247: `<hp:tbl noAdjust>` 재방출)"
+    );
     let (n1, p1) = page_counts(&reopened, &fonts);
     assert_eq!(
         n1, p1,
@@ -95,7 +138,7 @@ fn roundtrip_preserves_stored_row_height_floors() {
     let bytes = std::fs::read(path).expect("read benchmark1.hwp");
     let orig = parse(&bytes);
     let hwpx = hwp_hwpx::serialize::serialize(&orig).expect("serialize to HWPX");
-    let reopened = parse(&hwpx);
+    let reopened = reopen_hwpx(&hwpx);
 
     let tables = |d: &SemanticDoc| -> Vec<Vec<HwpUnit>> {
         let mut out = Vec::new();

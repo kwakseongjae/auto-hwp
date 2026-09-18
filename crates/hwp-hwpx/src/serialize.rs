@@ -1238,6 +1238,7 @@ fn build_table_patch(
         ],
         bf_key: bf_spec(&t.borders, None).map(|s| bf_key(&s)),
         page_break: false, // in-place re-emit stays inside the original wrapper <hp:p>
+        fixed_row_heights: t.fixed_row_heights,
     };
     let tid = *next_id;
     *next_id += 1;
@@ -1655,6 +1656,12 @@ struct EmitTable {
     /// 쪽 나누기 앞에서 on the table's wrapper `<hp:p>` — inherited from an ELIDED pure table-anchor
     /// paragraph (see [`emit_blocks`]) so a forced break on a table survives the round-trip.
     page_break: bool,
+    /// 이슈 247 — 이 표의 `row_heights` 가 **정확값**인가(`.hwp` 저장 레이아웃), 아니면 바닥인가.
+    ///
+    /// `<hp:tbl noAdjust>` 로 나간다. 예전에는 `0`(자동 맞춤) 을 하드코딩해서, `.hwp` 의 정확한 행
+    /// 높이를 HWPX 로 내보내면 그 사실이 사라졌다 — 다시 열면 행이 내용만큼 자라 쪽수가 늘었다
+    /// (`roundtrip_pages`: benchmark1 18쪽 → 19쪽). 아는 것을 적어야 왕복이 성립한다.
+    fixed_row_heights: bool,
 }
 
 /// A dirty block ready to serialize: a paragraph, a table, or an embedded image.
@@ -1784,6 +1791,7 @@ fn project_block(b: &Block) -> EmitBlock {
             ],
             bf_key: bf_spec(&t.borders, None).map(|s| bf_key(&s)),
             page_break: false, // set by emit_blocks when an elided anchor carried a break
+            fixed_row_heights: t.fixed_row_heights,
         }),
     }
 }
@@ -2285,6 +2293,8 @@ fn emit_table(out: &mut String, tid: u64, t: &EmitTable, ctx: &BodyCtx, next_id:
     };
     let [iml, imr, imt, imb] = t.padding.unwrap_or([510, 510, 141, 141]);
     // Table OUTLINE borderFill (표 외곽): the synthesized faithful entry, else the reused document bf.
+    // 이슈 247: 저장 높이가 정확값이면 HWPX 에도 그렇게 적는다(자동 맞춤 안 함).
+    let no_adjust = u8::from(t.fixed_row_heights);
     let tbl_bf = t
         .bf_key
         .as_deref()
@@ -2292,7 +2302,7 @@ fn emit_table(out: &mut String, tid: u64, t: &EmitTable, ctx: &BodyCtx, next_id:
         .map(String::as_str)
         .unwrap_or(bf);
     out.push_str(&format!(
-        "<hp:tbl id=\"{tid}\" zOrder=\"0\" numberingType=\"TABLE\" textWrap=\"TOP_AND_BOTTOM\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" pageBreak=\"CELL\" repeatHeader=\"1\" rowCnt=\"{rows}\" colCnt=\"{cols}\" cellSpacing=\"0\" borderFillIDRef=\"{tbl_bf}\" noAdjust=\"0\">\
+        "<hp:tbl id=\"{tid}\" zOrder=\"0\" numberingType=\"TABLE\" textWrap=\"TOP_AND_BOTTOM\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" pageBreak=\"CELL\" repeatHeader=\"1\" rowCnt=\"{rows}\" colCnt=\"{cols}\" cellSpacing=\"0\" borderFillIDRef=\"{tbl_bf}\" noAdjust=\"{no_adjust}\">\
 <hp:sz width=\"{w}\" widthRelTo=\"ABSOLUTE\" height=\"{height}\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/>\
 <hp:pos treatAsChar=\"1\" affectLSpacing=\"0\" flowWithText=\"1\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PARA\" horzRelTo=\"COLUMN\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"0\" horzOffset=\"0\"/>\
 <hp:outMargin left=\"{oml}\" right=\"{omr}\" top=\"{omt}\" bottom=\"{omb}\"/>\

@@ -2423,6 +2423,49 @@ mod tests {
         assert_eq!(table_height(&t, 40000.0, &doc, &ApproxFontMetrics), 12000.0);
     }
 
+    /// 이슈 247 — `fixed_row_heights` 면 저장 높이가 **정확값**이다: 내용이 더 커도 행을 키우지
+    /// 않는다(한컴은 넘치는 내용을 자르지 행을 늘리지 않는다).
+    ///
+    /// 이게 풀리면 정부 배포 PDF 1쪽 문서가 2쪽이 된다 — law.go.kr T1 쌍에서 55행 표 하나가
+    /// +2,474 HWPUNIT 과다 예약돼 쪽 경계를 넘었다. 바닥(floor) 의미와의 차이는 **내용이 저장
+    /// 높이보다 클 때만** 드러나므로, 그 경우를 직접 잠근다.
+    #[test]
+    fn fixed_row_heights_clamp_instead_of_growing() {
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape::default());
+        let mut t = Table {
+            rows: 1,
+            cols: 1,
+            ..Default::default()
+        };
+        t.cells.push(Cell {
+            row: 0,
+            col: 0,
+            row_span: 1,
+            col_span: 1,
+            active: true,
+            // 저장 높이보다 확실히 큰 내용 — 바닥 의미면 행이 이만큼 커진다.
+            blocks: vec![Block::Paragraph(para(&"가".repeat(200)))],
+            ..Default::default()
+        });
+        t.row_heights = vec![1_324];
+
+        // 바닥(auto-fit): 내용이 이기므로 저장 높이보다 커진다.
+        let floored = table_height(&t, 40_000.0, &doc, &ApproxFontMetrics);
+        assert!(
+            floored > 1_324.0,
+            "자동 맞춤 표는 내용만큼 커져야 한다: {floored}"
+        );
+
+        // 정확값(자동 맞춤 안 함 · .hwp 저장 레이아웃): 내용이 커도 저장 높이를 지킨다.
+        t.fixed_row_heights = true;
+        assert_eq!(
+            table_height(&t, 40_000.0, &doc, &ApproxFontMetrics),
+            1_324.0,
+            "저장 높이가 정확값이면 내용이 넘쳐도 행을 키우지 않는다"
+        );
+    }
+
     /// 빈 문단의 줄 높이는 **그 문단의 글자 크기** × 줄간격 — 1000 고정이 아니다.
     #[test]
     fn empty_paragraph_uses_its_own_char_size() {
