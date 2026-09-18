@@ -14,6 +14,7 @@
     "@tauri-apps/plugin-dialog": "^2.0.1",
     "@auto-hwp/editor-core": "file:../../../packages/editor-core",
     "@auto-hwp/engine": "file:../../../packages/engine",
+    "@auto-hwp/platform": "file:../../../packages/platform",
     "@auto-hwp/react": "file:../../../packages/react",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

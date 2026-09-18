@@ -3,6 +3,25 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-09-18 · Claude Fable — **`packages/platform` 신설** (#268 — #260 근본 수리).
+  · **불변식**: `packages/platform/src/tauri.ts` **밖에서 `@tauri-apps/*` import 0건**. 문서가 아니라
+    `platform-boundary.test.ts` 가 저장소 소스를 훑어 강제하고 `verify-local.sh --full` 에서 돈다.
+  · **왜**: 엔진엔 `EngineAdapter` 34메서드 계약이 있는데 **호스트 능력엔 없었다**. 그래서 셸마다 각자
+    구현했고 #260 이 그 대가였다(OS 파일 열기 요청이 기본 셸에 안 붙음). 실제 표면은 6가지뿐 —
+    RPC · 이벤트 · 파일 다이얼로그 · OS 테마 · 파일 드롭 · 창 닫기.
+  · **계약은 Tauri 를 미러링하지 않는다**: `onDragDropEvent` 재수출은 결합을 옮기기만 한다. HiDPI
+    좌표 함정(물리 px → CSS px)도 어댑터가 흡수한다 — 호출자가 알아야 하면 그건 계약이 아니다.
+  · **능력은 정직하게 신고한다**: 웹은 경로를 못 준다(브라우저는 `File` 객체만) → `dialog.open`/
+    `files.drop` 을 **지원 안 함**으로 신고한다. 지원하는 척하다 조용히 실패하는 게 #260 의 모양이다.
+  · **알게 된 것**: 데스크톱 UI(`crates/hwp-viewer/ui`)만 **pnpm 이 정본**이다(`pnpm-lock.yaml` 커밋).
+    나머지는 npm. 여기서 `npm install` 을 돌리면 `.pnpm` 심볼릭 팜에서 arborist 가 죽는다
+    (`Link.matches` null) — 내 변경 이전부터 그랬다. pnpm 은 `file:` 을 **복사**하므로 packages 를
+    고치면 dist 빌드 후 `pnpm install` 을 다시 해야 한다(스테일 사본 함정).
+  · **막힌 것**: 이 맥에 `auto-hwp viewer` 의 **데스크탑 폴더 접근 동의창이 미응답 상태로 떠 있어**
+    문서 열기가 거기서 멈춘다. **출시된 0.0.1 도 동일하게 멈춘다** — 코드 문제가 아니다. 사용자가
+    창에 한 번 답해야 문서/검수/버전 화면 검수가 재개된다.
+  · **다음**: `packages/theme` · 슬롯 뷰 · Intel/Windows 빌드(#144) · 자동 업데이트.
+
 - 갱신: 2026-09-17 · Claude Fable — **데스크톱 0.0.1 출시** (`desktop-v0.0.1`, main `ea5be21`).
   앱을 실제로 굽고 **Apple 공증까지 마쳐 배포**했다. 사이트 `/download` 에서 받는다.
   · **무엇이 생겼나**: 대시보드(첫 화면이 파일 열기 대화상자가 아니다) · 버전 기록(⌘⇧V, 저장·
