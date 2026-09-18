@@ -1,4 +1,12 @@
-import { invoke } from "@tauri-apps/api/core";
+import { platform } from "@auto-hwp/platform";
+
+/// 모든 RPC 는 호스트 계약을 거친다 (이슈 268).
+///
+/// 예전에는 이 파일이 `@tauri-apps/api/core` 를 직접 물었다. 그러면 이 모듈이 Tauri 위에서만 의미를
+/// 갖게 되고, 호스트 능력이 셸마다 따로 구현되는 구조가 굳는다 — #260 이 그 대가였다. 아래 한 줄만
+/// 계약을 향하게 바꾸면 69개 호출부는 그대로 둘 수 있다.
+const invoke = <T,>(command: string, args?: Record<string, unknown>): Promise<T> =>
+  platform().invoke<T>(command, args);
 
 /** Result of opening a document: page count + 2-tier capability (editable) + a format label.
  *  `convertedPath` is retained for wire compatibility but opening never writes beside the source. */

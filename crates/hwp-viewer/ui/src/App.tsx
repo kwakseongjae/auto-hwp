@@ -1,10 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { listen } from "@tauri-apps/api/event";
-import { invoke } from "@tauri-apps/api/core";
+import { platform } from "@auto-hwp/platform";
 import { tinykeys } from "tinykeys";
 import { api, type Anchor, type CellHit, type CaretRect, type CharFmt, type FindMatch, type ImageBox, type OutlineItem, type PageGeom, type Proposal, type ProposalOp, type RunDto, type TableBox } from "./api";
 import { runsToHtml, serializeEditor, runsEqual, applyLiveStyle, saveInlineSelection, readCaretStyle, type ParaIndent } from "./richedit";
@@ -23,6 +19,15 @@ import { InspectPanel, useFidelity } from "./Inspect";
 import { Dashboard } from "./Dashboard";
 import { VersionsPanel } from "./Versions";
 import { toast, Toaster } from "./toast";
+
+/// RPC 와 네이티브 이벤트는 호스트 계약을 거친다 (이슈 268).
+///
+/// 이름을 그대로 둔 것은 의도다 — 방금 출시한 파일에서 불필요한 호출부 변경은 그 자체가 위험이다.
+/// 달라진 것은 이 두 줄이 어디를 향하느냐뿐이고, 그 한 걸음이 "@tauri-apps 를 직접 물지 않는다" 를 만든다.
+const invoke = <T,>(command: string, args?: Record<string, unknown>): Promise<T> =>
+  platform().invoke<T>(command, args);
+const listen = <T,>(event: string, handler: (payload: T) => void) =>
+  platform().listen<T>(event, handler);
 
 type CaretAnchor = { page: number; node: number; offset: number; len: number };
 
@@ -2147,7 +2152,7 @@ export default function App() {
   }, [invalidate]);
 
   const doOpen = useCallback(async () => {
-    const path = await openDialog({ filters: [{ name: "HWP/HWPX", extensions: ["hwpx", "hwp"] }] });
+    const path = await platform().pickFile({ filters: [{ name: "HWP/HWPX", extensions: ["hwpx", "hwp"] }] });
     if (typeof path !== "string") return;
     await openPath(path);
   }, [openPath]);
@@ -2158,7 +2163,7 @@ export default function App() {
   const doDuplicate = useCallback(async () => {
     if (pageCountRef.current === 0) return;
     const base = (docName || "문서").replace(/\.(hwpx?|HWPX?)$/, "");
-    const path = await saveDialog({
+    const path = await platform().pickSavePath({
       defaultPath: `${base} 사본.hwpx`,
       filters: [{ name: "HWPX", extensions: ["hwpx"] }],
     });
@@ -2177,7 +2182,7 @@ export default function App() {
 
   const doExport = useCallback(async () => {
     if (pageCountRef.current === 0) return;
-    const path = await saveDialog({ defaultPath: "export.hwpx", filters: [{ name: "HWPX", extensions: ["hwpx"] }] });
+    const path = await platform().pickSavePath({ defaultPath: "export.hwpx", filters: [{ name: "HWPX", extensions: ["hwpx"] }] });
     if (typeof path !== "string") return;
     setBusyLabel("내보내는 중…");
     try {
@@ -2192,7 +2197,7 @@ export default function App() {
   // Export the LIVE doc to a self-contained HTML file (JSX/CSS → emit_html; matches the HTML preview).
   const doExportHtml = useCallback(async () => {
     if (pageCountRef.current === 0) return;
-    const path = await saveDialog({ defaultPath: "export.html", filters: [{ name: "HTML", extensions: ["html", "htm"] }] });
+    const path = await platform().pickSavePath({ defaultPath: "export.html", filters: [{ name: "HTML", extensions: ["html", "htm"] }] });
     if (typeof path !== "string") return;
     setBusyLabel("HTML 내보내는 중…");
     try {
@@ -2208,7 +2213,7 @@ export default function App() {
   // 렌더, not a browser print). Needs the `pdf` feature — the command surfaces a clear error if absent.
   const doExportPdf = useCallback(async () => {
     if (pageCountRef.current === 0) return;
-    const path = await saveDialog({ defaultPath: "export.pdf", filters: [{ name: "PDF", extensions: ["pdf"] }] });
+    const path = await platform().pickSavePath({ defaultPath: "export.pdf", filters: [{ name: "PDF", extensions: ["pdf"] }] });
     if (typeof path !== "string") return;
     setBusyLabel("PDF 내보내는 중…");
     try {
@@ -2608,11 +2613,14 @@ export default function App() {
     let unlisten: (() => void) | undefined;
     let mqCleanup: (() => void) | undefined;
     (async () => {
-      try {
-        const w = getCurrentWindow();
-        apply(await w.theme());
-        unlisten = await w.onThemeChanged(({ payload }) => apply(payload));
-      } catch {
+      // 호스트가 OS 테마를 아는지 **묻는다**. 예전에는 try/catch 로 "해 보고 터지면" 이었는데, 그러면
+      // 실패가 정상 흐름과 구분되지 않는다. 안다고 해 놓고 못 읽어 오는 경우까지 아래 폴백이 받는다.
+      const host = platform();
+      const initial = host.has("theme") ? await host.systemTheme() : null;
+      if (initial != null) {
+        apply(initial);
+        unlisten = await host.onThemeChanged(apply);
+      } else {
         const mq = window.matchMedia("(prefers-color-scheme: dark)");
         const onChange = () => apply(mq.matches ? "dark" : "light");
         onChange();
@@ -2635,8 +2643,7 @@ export default function App() {
     const isImage = (p: string) => IMG_EXT.test(p);
     let un: undefined | (() => void);
     (async () => {
-      un = await getCurrentWebviewWindow().onDragDropEvent((event) => {
-        const payload = event.payload;
+      un = await platform().onFileDrop((payload) => {
         if (payload.type === "leave") {
           setDragActive(false);
           return;
@@ -2658,11 +2665,10 @@ export default function App() {
           if (payload.paths.length > 0) toast("info", "이미지 파일만 끌어다 놓을 수 있습니다 (png/jpg/gif…)");
           return;
         }
-        // GUARD the known Tauri HiDPI bug: the drop position arrives in PHYSICAL pixels, but
-        // elementFromPoint / getBoundingClientRect work in CSS pixels — divide by devicePixelRatio.
-        const dpr = window.devicePixelRatio || 1;
-        const clientX = payload.position.x / dpr;
-        const clientY = payload.position.y / dpr;
+        // 좌표는 이미 CSS 픽셀이다 — Tauri 가 물리 픽셀로 주는 HiDPI 함정은 호스트 어댑터가 흡수한다
+        // (`packages/platform/src/tauri.ts`). 호출자가 그 함정을 알아야 한다면 그건 계약이 아니다.
+        const clientX = payload.x;
+        const clientY = payload.y;
         void enqueueEdit(async () => {
           // Map the drop point to an editable anchor via the SAME page-coords→hit_test path as a click;
           // on a miss fall back to the last-pointed scope, else the section/doc end (block=null → end).
@@ -3644,7 +3650,7 @@ export default function App() {
               onClick={() => {
                 const sel = pointMenu; setPointMenu(null);
                 void (async () => {
-                  const path = await openDialog({ multiple: false, filters: [{ name: "이미지", extensions: ["png", "jpg", "jpeg", "gif", "bmp", "webp"] }] });
+                  const path = await platform().pickFile({ multiple: false, filters: [{ name: "이미지", extensions: ["png", "jpg", "jpeg", "gif", "bmp", "webp"] }] });
                   if (typeof path !== "string") return;
                   try { const n = await api.applyImageDrop(path, { section: sel.section, block: sel.block }); setEdited(true); invalidate(n, sel.page); toast("info", "이미지 삽입됨 (⌘Z로 되돌리기)"); }
                   catch (err) { toast("warn", `이미지 삽입 실패: ${err}`); }
