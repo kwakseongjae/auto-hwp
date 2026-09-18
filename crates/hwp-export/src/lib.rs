@@ -33,8 +33,9 @@ mod bmp;
 #[cfg(feature = "pdf")]
 mod svg_fragment;
 
-use hwp_jsx::css::emit_css;
+use hwp_jsx::css::{emit_css, Selector, Stylesheet};
 use hwp_jsx::jsx::{JsxElement, JsxNode, Tag};
+use hwp_jsx::map::char_class_index;
 use hwp_jsx::project::{Asset, JsxCssProject};
 
 /// HTML emit options.
@@ -79,9 +80,11 @@ pub fn emit_html(proj: &JsxCssProject, opts: &HtmlOptions) -> String {
         .map(|a| (a.bin_ref.as_str(), a))
         .collect();
 
+    let char_pt = char_pt_index(&proj.styles);
+
     let mut body = String::new();
     for section in &proj.sections {
-        render_node(section, &assets, &mut body);
+        render_node(section, &assets, &char_pt, &mut body);
     }
 
     let css = sanitize_css(&emit_css(&proj.styles));
@@ -129,18 +132,103 @@ fn document_body_width_px(proj: &JsxCssProject) -> Option<f64> {
         })
 }
 
-// --- node rendering ---------------------------------------------------------------------------
+// --- paragraph strut (issue 282) --------------------------------------------------------------
 
-fn render_node(node: &JsxNode, assets: &BTreeMap<&str, &Asset>, out: &mut String) {
-    match node {
-        JsxNode::Text(t) => out.push_str(&esc_body_text(&t.text)),
-        JsxNode::Element(el) => render_element(el, assets, out),
+/// 문자 클래스(`cN`) → 글자 크기(pt).
+type CharPt<'a> = BTreeMap<&'a str, f64>;
+
+/// `.cN { font-size: 15pt }` 를 모아 색인한다.
+///
+/// 문단은 줄높이(`line-height`)만 싣고 **글자 크기는 `.cN` 에만** 있다. 그래서 문단의 strut 이
+/// 문서 값이 아니라 브라우저 기본 16px 기준으로 잡힌다 — 이 색인이 그걸 메우기 위한 것이다.
+fn char_pt_index(styles: &Stylesheet) -> CharPt<'_> {
+    let mut out = BTreeMap::new();
+    for rule in &styles.rules {
+        let Selector::Class(name) = &rule.selector else {
+            continue;
+        };
+        if char_class_index(name).is_none() {
+            continue;
+        }
+        if let Some(pt) = rule
+            .decls
+            .get("font-size")
+            .and_then(|v| v.strip_suffix("pt"))
+            .and_then(|v| v.trim().parse::<f64>().ok())
+        {
+            out.insert(name.as_str(), pt);
+        }
+    }
+    out
+}
+
+/// 이 문단 안에서 **가장 작은** run 의 글자 크기.
+///
+/// 줄 상자 높이는 `max(문단 strut, span 박스)` 다. 줄높이가 비율이면 사실상
+/// `max(문단 글자크기, span 글자크기) × 비율` 이므로, **문단이 가장 작은 span 이하면 절대 이기지
+/// 못한다** — 즉 모든 줄이 자기 글자 크기대로 선다. "첫 run" 으로 잡으면 크기가 섞인 문단
+/// (실측 103개 중 10개)에서 큰 쪽이 먼저 올 때 여전히 부푼다.
+fn min_run_pt(el: &JsxElement, char_pt: &CharPt<'_>) -> Option<f64> {
+    let mut best: Option<f64> = None;
+    let mut stack: Vec<&JsxElement> = vec![el];
+    while let Some(cur) = stack.pop() {
+        for class in &cur.class_list {
+            if let Some(pt) = char_pt.get(class.as_str()) {
+                best = Some(best.map_or(*pt, |b: f64| b.min(*pt)));
+            }
+        }
+        for child in &cur.children {
+            if let JsxNode::Element(child_el) = child {
+                stack.push(child_el);
+            }
+        }
+    }
+    best
+}
+
+/// 문단에 실을 `style="font-size:…"`. 실을 게 없으면 빈 문자열.
+///
+/// 인라인인 이유: `.pN` 은 **문단 모양 표의 공유 클래스**라 (`p35` = 인덱스) 서로 다른 글자
+/// 크기의 문단들이 같은 클래스를 쓴다. 클래스에 크기를 박으면 다른 문단이 깨진다.
+/// 값은 렌더 시에 자식에서 계산하고 **JSX 내용에는 쓰지 않는다** — `hwp-th` 와 같은 규율이다.
+fn para_font_style(el: &JsxElement, char_pt: &CharPt<'_>) -> String {
+    match min_run_pt(el, char_pt) {
+        Some(pt) => format!(" style=\"font-size:{}pt\"", format_num(pt)),
+        None => String::new(),
     }
 }
 
-fn render_children(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut String) {
+/// `10` 은 `10pt`, `10.5` 는 `10.5pt` — 뒤에 `.0` 을 달지 않는다.
+fn format_num(v: f64) -> String {
+    if (v.fract()).abs() < f64::EPSILON {
+        format!("{}", v as i64)
+    } else {
+        format!("{v}")
+    }
+}
+
+// --- node rendering ---------------------------------------------------------------------------
+
+fn render_node(
+    node: &JsxNode,
+    assets: &BTreeMap<&str, &Asset>,
+    char_pt: &CharPt<'_>,
+    out: &mut String,
+) {
+    match node {
+        JsxNode::Text(t) => out.push_str(&esc_body_text(&t.text)),
+        JsxNode::Element(el) => render_element(el, assets, char_pt, out),
+    }
+}
+
+fn render_children(
+    el: &JsxElement,
+    assets: &BTreeMap<&str, &Asset>,
+    char_pt: &CharPt<'_>,
+    out: &mut String,
+) {
     for c in &el.children {
-        render_node(c, assets, out);
+        render_node(c, assets, char_pt, out);
     }
 }
 
@@ -150,6 +238,7 @@ fn wrap(
     tag: &str,
     extra: &str,
     assets: &BTreeMap<&str, &Asset>,
+    char_pt: &CharPt<'_>,
     out: &mut String,
 ) {
     out.push('<');
@@ -157,13 +246,18 @@ fn wrap(
     out.push_str(&class_attr(&el.class_list));
     out.push_str(extra);
     out.push('>');
-    render_children(el, assets, out);
+    render_children(el, assets, char_pt, out);
     out.push_str("</");
     out.push_str(tag);
     out.push('>');
 }
 
-fn render_element(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut String) {
+fn render_element(
+    el: &JsxElement,
+    assets: &BTreeMap<&str, &Asset>,
+    char_pt: &CharPt<'_>,
+    out: &mut String,
+) {
     match el.tag() {
         Some(Tag::Section) => {
             out.push_str("<section class=\"hwp-section");
@@ -172,16 +266,21 @@ fn render_element(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut St
                 out.push_str(&esc_attr(c));
             }
             out.push_str("\">");
-            render_children(el, assets, out);
+            render_children(el, assets, char_pt, out);
             out.push_str("</section>");
         }
-        Some(Tag::Para) => wrap(el, "p", &id_attr(el), assets, out),
-        Some(Tag::Run) | Some(Tag::Span) => wrap(el, "span", "", assets, out),
-        Some(Tag::Table) => render_table(el, assets, out),
+        Some(Tag::Para) => {
+            // 문단이 자기 글자 크기를 모르면 strut 이 브라우저 기본 16px 로 잡혀 줄 상자가
+            // 내용보다 커진다(#282). 값은 자식 run 에서 렌더 시 계산한다.
+            let extra = format!("{}{}", id_attr(el), para_font_style(el, char_pt));
+            wrap(el, "p", &extra, assets, char_pt, out)
+        }
+        Some(Tag::Run) | Some(Tag::Span) => wrap(el, "span", "", assets, char_pt, out),
+        Some(Tag::Table) => render_table(el, assets, char_pt, out),
         // TableCaption/TableRow/TableCell are rendered by render_table (the codec emits cells FLAT under Table
         // with data-row/data-col); a stray one outside a Table just renders its children.
         Some(Tag::TableCaption) | Some(Tag::TableRow) | Some(Tag::TableCell) => {
-            render_children(el, assets, out)
+            render_children(el, assets, char_pt, out)
         }
         Some(Tag::Image) => render_image(el, assets, out),
         Some(Tag::Equation) => render_equation(el, out),
@@ -190,7 +289,7 @@ fn render_element(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut St
             // FieldBegin/FieldEnd are inline MARKERS (no children); the linked text lives in the
             // sibling runs and renders normally. M1 does not yet pair markers into a clickable <a>
             // (a stateful paragraph walk) — the text is preserved, just not yet a live link.
-            render_children(el, assets, out);
+            render_children(el, assets, char_pt, out);
         }
         Some(Tag::Note) => out.push_str("<sup class=\"hwp-note\" title=\"주석\">※</sup>"),
         Some(Tag::Bookmark) => {
@@ -201,9 +300,9 @@ fn render_element(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut St
                 ));
             }
         }
-        Some(Tag::Header) => wrap(el, "header", "", assets, out),
-        Some(Tag::Footer) => wrap(el, "footer", "", assets, out),
-        Some(Tag::Page) => wrap(el, "div", " data-page", assets, out),
+        Some(Tag::Header) => wrap(el, "header", "", assets, char_pt, out),
+        Some(Tag::Footer) => wrap(el, "footer", "", assets, char_pt, out),
+        Some(Tag::Page) => wrap(el, "div", " data-page", assets, char_pt, out),
         Some(Tag::Raw) => {
             let tag = el
                 .attrs
@@ -218,7 +317,7 @@ fn render_element(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut St
         }
         // Document wrapper (shouldn't appear in `sections`) or an unknown tag → render children so
         // no content is ever lost.
-        Some(Tag::Document) | None => render_children(el, assets, out),
+        Some(Tag::Document) | None => render_children(el, assets, char_pt, out),
     }
 }
 
@@ -226,7 +325,12 @@ fn render_element(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut St
 /// rows (ascending row index), drop covered (`data-inactive`) cells, honor colspan/rowspan + shade,
 /// and — when the codec carries `data-colw` (per-column widths in px) — emit a `<colgroup>` with
 /// `table-layout:fixed` so the column proportions match the original.
-fn render_table(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut String) {
+fn render_table(
+    el: &JsxElement,
+    assets: &BTreeMap<&str, &Asset>,
+    char_pt: &CharPt<'_>,
+    out: &mut String,
+) {
     let mut rows: BTreeMap<usize, Vec<&JsxElement>> = BTreeMap::new();
     for child in &el.children {
         if let JsxNode::Element(cell) = child {
@@ -300,7 +404,7 @@ fn render_table(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut Stri
             out.push_str(&format!(" style=\"caption-side:{}\"", esc_attr(position)));
         }
         out.push_str(&format!(" data-position=\"{}\">", esc_attr(position)));
-        render_children(caption, assets, out);
+        render_children(caption, assets, char_pt, out);
         out.push_str("</caption>");
     }
     if !cols_px.is_empty() && total > 0.0 {
@@ -357,7 +461,7 @@ fn render_table(el: &JsxElement, assets: &BTreeMap<&str, &Asset>, out: &mut Stri
                 out.push_str(&format!(" style=\"background:{}\"", esc_attr(shade)));
             }
             out.push('>');
-            render_children(cell, assets, out);
+            render_children(cell, assets, char_pt, out);
             out.push_str("</td>");
         }
         out.push_str("</tr>");
