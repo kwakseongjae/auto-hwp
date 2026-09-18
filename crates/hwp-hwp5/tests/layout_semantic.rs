@@ -927,8 +927,8 @@ fn owns_exact_nine_by_eight_table_with_one_bounded_nested_table() {
     assert_eq!((table.rows, table.cols, table.cells.len()), (9, 8, 34));
     assert!(table.keep_together);
     assert!(
-        !table.fixed_row_heights,
-        "HWP5 TABLE page-break/repeat-header bits are not HWPX noAdjust"
+        table.fixed_row_heights,
+        "이슈 247 — 비트가 아니라 포맷 성질이 근거다: .hwp 저장 높이는 한컴이 그린 실제 행 높이"
     );
     assert_eq!(
         table.col_widths,
@@ -991,8 +991,8 @@ fn owns_exact_eight_by_five_rowspan_and_nine_bounded_nested_tables() {
         "row-boundary policy uses shared row fragmentation"
     );
     assert!(
-        !table.fixed_row_heights,
-        "HWP5 TABLE page-break/repeat-header bits are not HWPX noAdjust"
+        table.fixed_row_heights,
+        "이슈 247 — 비트가 아니라 포맷 성질이 근거다: .hwp 저장 높이는 한컴이 그린 실제 행 높이"
     );
     assert_eq!(table.col_widths, vec![7_667, 16_324, 3_879, 3_955, 16_324]);
     assert_eq!(
@@ -1059,7 +1059,10 @@ fn owns_exact_column_relative_one_by_two_header_table() {
     assert!(anchor.is_table_anchor);
     assert_eq!((table.rows, table.cols, table.cells.len()), (1, 2, 2));
     assert!(table.keep_together, "no-split one-row table stays atomic");
-    assert!(!table.fixed_row_heights);
+    assert!(
+        table.fixed_row_heights,
+        "이슈 247 — 비트가 아니라 포맷 성질이 근거다: .hwp 저장 높이는 한컴이 그린 실제 행 높이"
+    );
     assert_eq!(table.col_widths, vec![39_903, 2_261]);
     assert_eq!(table.row_heights, vec![3_005]);
     assert_eq!(table.padding, Some([140, 140, 140, 140]));
@@ -1104,7 +1107,10 @@ fn owns_exact_six_by_four_atomic_full_grid_table() {
     assert!(anchor.is_table_anchor);
     assert_eq!((table.rows, table.cols, table.cells.len()), (6, 4, 24));
     assert!(table.keep_together, "no-split table stays atomic");
-    assert!(!table.fixed_row_heights);
+    assert!(
+        table.fixed_row_heights,
+        "이슈 247 — 비트가 아니라 포맷 성질이 근거다: .hwp 저장 높이는 한컴이 그린 실제 행 높이"
+    );
     assert_eq!(table.col_widths, vec![3_238, 14_908, 11_795, 18_021]);
     assert_eq!(
         table.row_heights,
@@ -1178,7 +1184,10 @@ fn owns_exact_top_captioned_four_by_five_full_grid_table() {
     assert!(anchor.is_table_anchor);
     assert_eq!((table.rows, table.cols, table.cells.len()), (4, 5, 20));
     assert!(table.keep_together);
-    assert!(!table.fixed_row_heights);
+    assert!(
+        table.fixed_row_heights,
+        "이슈 247 — 비트가 아니라 포맷 성질이 근거다: .hwp 저장 높이는 한컴이 그린 실제 행 높이"
+    );
     assert_eq!(table.col_widths, vec![3_221, 6_593, 8_956, 21_855, 7_422]);
     assert_eq!(table.row_heights, vec![1_948, 1_848, 1_848, 1_848]);
     let caption = table
@@ -1245,7 +1254,10 @@ fn owns_exact_plain_four_by_five_full_grid_table() {
     assert_eq!((table.rows, table.cols, table.cells.len()), (4, 5, 20));
     assert!(table.caption.is_none());
     assert!(table.keep_together);
-    assert!(!table.fixed_row_heights);
+    assert!(
+        table.fixed_row_heights,
+        "이슈 247 — 비트가 아니라 포맷 성질이 근거다: .hwp 저장 높이는 한컴이 그린 실제 행 높이"
+    );
     assert_eq!(table.col_widths, vec![3_221, 9_238, 14_770, 12_223, 8_594]);
     assert_eq!(table.row_heights, vec![1_948, 1_848, 1_848, 1_848]);
     assert!(table.cells.iter().enumerate().all(|(index, cell)| {
@@ -1298,8 +1310,8 @@ fn owns_exact_seven_by_three_merged_atomic_table() {
     assert_eq!((table.rows, table.cols, table.cells.len()), (7, 3, 19));
     assert!(table.keep_together, "no-split table stays atomic");
     assert!(
-        !table.fixed_row_heights,
-        "HWP5 TABLE page-break/repeat-header bits keep row heights as floors"
+        table.fixed_row_heights,
+        "이슈 247 — 비트가 아니라 포맷 성질이 근거다: .hwp 저장 높이는 한컴이 그린 실제 행 높이"
     );
     assert_eq!(table.col_widths, vec![6_509, 31_215, 10_200]);
     assert_eq!(

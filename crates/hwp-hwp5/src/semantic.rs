@@ -2514,10 +2514,14 @@ fn parse_inline_table(
         keep_together: table_attr != 0x0600_000e,
         col_widths,
         row_heights: derived_rows,
-        // HWP5 TABLE bits 0..=1 are the page-break policy and bit 2 is repeat-header. They do not
-        // encode HWPX's `<hp:tbl noAdjust="1">` contract. Keep native HWP5 row heights as content
-        // floors, matching the shared model and the production rhwp lift.
-        fixed_row_heights: false,
+        // 이슈 247 — 저장 높이는 **정확값**이다. HWP5 TABLE 비트 0..=1 은 쪽나눔 정책, 비트 2 는
+        // 제목행 반복이라 HWPX 의 `<hp:tbl noAdjust="1">` 를 인코딩하지 않는 게 맞다. 그러나 근거는
+        // 플래그가 아니라 **포맷의 성질**이다: HWPX 는 교환 포맷이라 높이가 희망값일 수 있지만,
+        // `.hwp` 의 `derived_rows` 는 한컴이 **저장한 실제 레이아웃**(같은 파일의 `lineseg` 를 우리가
+        // 오라클로 쓰는 바로 그 기하)이다. 바닥으로 쓰면 한컴이 그린 것보다 행을 키울 수 있게 되고,
+        // 실제로 그래서 정부 배포 PDF 1쪽 문서가 2쪽이 됐다(law.go.kr T1 쌍, 초과 +2,474 HWPUNIT).
+        // 생산 rhwp lift 와 LOCKSTEP — `hwp5_empty_run_layout` 이 두 경로의 기하 동일성을 잠근다.
+        fixed_row_heights: true,
         outer_margin_left: margins[0] as HwpUnit,
         outer_margin_right: margins[1] as HwpUnit,
         outer_margin_top: margins[2] as HwpUnit,
