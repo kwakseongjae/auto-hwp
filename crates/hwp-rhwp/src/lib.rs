@@ -1336,6 +1336,8 @@ fn score_cell_table(
     section: usize,
     block: usize,
     path: &str,
+    // 이슈 292 — 맞아떨어진 셀까지 담을 것인가. 기본은 false(불일치만).
+    record_all_cells: bool,
     f: &mut LayoutFidelity,
 ) {
     f.cell_tables += 1;
@@ -1392,7 +1394,11 @@ fn score_cell_table(
                 if ours.abs_diff(oracle) <= 1 {
                     f.cell_line_within1 += 1;
                 }
-                if ours != oracle {
+                // 이슈 292 — 기본은 **불일치만** 담는다(추적에는 그 편이 낫다).
+                // 전량 모드는 맞아떨어진 셀까지 담아 **폭 규칙을 역산할 표본**을 만든다 —
+                // #274 가 "한/글로 최소 문서를 만들어 달라" 고 막혀 있는데, 표본은 이미
+                // 우리 문서 안에 있고 진단기가 그걸 감추고 있었다.
+                if ours != oracle || record_all_cells {
                     let ps = our.para_shapes.get(op.para_shape);
                     let left = ps.map(|s| s.left_margin).unwrap_or(0).max(0) as f64;
                     let right = ps.map(|s| s.right_margin).unwrap_or(0).max(0) as f64;
@@ -1463,6 +1469,7 @@ fn score_cell_table(
                     section,
                     block,
                     &nested_path,
+                    record_all_cells,
                     f,
                 );
             }
@@ -1476,6 +1483,29 @@ pub fn layout_fidelity(bytes: &[u8]) -> Result<LayoutFidelity> {
     layout_fidelity_for_doc(bytes, &our)
 }
 
+/// [`layout_fidelity`] + **맞아떨어진 셀까지** `cell_mismatches` 에 담는다 (이슈 292).
+///
+/// 폭 규칙(#274)을 역산하려면 틀린 셀만으로는 부족하다 — 규칙이 **맞은** 자리가 표본의 대부분이다.
+/// 한 문서에 셀 문단이 1,800개인데 불일치는 4개뿐이라, 진단기가 사실상 표본을 감추고 있었다.
+///
+/// 이름이 `cell_mismatches` 인 채로 전부를 담는 것이 어색하지만, **자료 모양이 같고**
+/// (`우리 줄수`·`한컴 줄수`도 함께 온다) 필드를 새로 만들면 두 벌을 들고 다니게 된다.
+/// 호출부는 `our_lines != oracle_lines` 로 언제든 불일치만 걸러낼 수 있다.
+#[cfg(feature = "rhwp")]
+pub fn layout_fidelity_all_cells(bytes: &[u8]) -> Result<LayoutFidelity> {
+    let our = guarded("layout_fidelity/lift", || lift::parse_to_semantic(bytes))?;
+    layout_fidelity_inner(bytes, &our, true)
+}
+
+/// [`layout_fidelity_for_doc`] 의 전량 판 (이슈 292).
+#[cfg(feature = "rhwp")]
+pub fn layout_fidelity_for_doc_all_cells(
+    bytes: &[u8],
+    our: &SemanticDoc,
+) -> Result<LayoutFidelity> {
+    layout_fidelity_inner(bytes, our, true)
+}
+
 /// Score a caller-supplied [`SemanticDoc`] against the Hancom/rhwp linesegs in `bytes`.
 ///
 /// This is the HWPX parser-seam counterpart of [`layout_fidelity`]: the CLI can parse HWPX through
@@ -1484,6 +1514,16 @@ pub fn layout_fidelity(bytes: &[u8]) -> Result<LayoutFidelity> {
 /// own-input drift it claimed to measure.
 #[cfg(feature = "rhwp")]
 pub fn layout_fidelity_for_doc(bytes: &[u8], our: &SemanticDoc) -> Result<LayoutFidelity> {
+    layout_fidelity_inner(bytes, our, false)
+}
+
+/// 두 진입점의 실제 구현. `record_all_cells` 만 다르다 (이슈 292).
+#[cfg(feature = "rhwp")]
+fn layout_fidelity_inner(
+    bytes: &[u8],
+    our: &SemanticDoc,
+    record_all_cells: bool,
+) -> Result<LayoutFidelity> {
     use hwp_typeset::{layout_paragraph, NaiveLayout};
 
     let rdoc = guarded("layout_fidelity_for_doc/parse_document", || {
@@ -1591,7 +1631,18 @@ pub fn layout_fidelity_for_doc(bytes: &[u8], our: &SemanticDoc) -> Result<Layout
             f.cell_structure_mismatches += rtables.len().abs_diff(otables.len());
         } else {
             for (rt, (bi, ot)) in rtables.into_iter().zip(otables) {
-                score_cell_table(rt, ot, our, &fonts, body_w, si, bi, "root", &mut f);
+                score_cell_table(
+                    rt,
+                    ot,
+                    our,
+                    &fonts,
+                    body_w,
+                    si,
+                    bi,
+                    "root",
+                    record_all_cells,
+                    &mut f,
+                );
             }
         }
     }
