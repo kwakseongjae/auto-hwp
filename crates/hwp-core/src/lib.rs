@@ -855,6 +855,16 @@ pub struct PageFill {
     pub body: f64,
     /// 이 쪽에 놓인 것의 개수(글리프+이미지+표). 0 이면 정말로 빈 쪽이다.
     pub items: usize,
+    /// 이 쪽에 표가 놓인 블록 구간 `(첫, 끝)` — 없으면 `None` (이슈 296).
+    ///
+    /// 글리프에는 블록 인덱스가 없어서 **표가 없는 쪽은 비어 있다.** 정부 양식은 표 중심이라
+    /// 대부분 잡히지만, 본문만 있는 쪽은 못 낸다 — 그건 엔진에 블록을 실어야 하는 일이다.
+    pub blocks: Option<(usize, usize)>,
+    /// 다음 쪽 첫 표의 높이 (HWPUNIT) — **이 쪽에 안 들어가서 밀린 후보**.
+    ///
+    /// 이 값이 `slack()` 보다 크면 "안 들어가서 밀렸다" 가 설명이 된다. **작으면 다른 이유**이고,
+    /// 그게 더 중요한 신호다 — 들어갈 수 있었는데 안 넣은 것이기 때문이다.
+    pub next_block_height: Option<f64>,
 }
 
 impl PageFill {
@@ -901,11 +911,26 @@ pub fn own_page_fills(doc: &SemanticDoc) -> Vec<PageFill> {
                 .fold(0.0f64, f64::max);
             let image_bottom = p.images.iter().map(|m| m.y + m.h).fold(0.0f64, f64::max);
             let table_bottom = p.tables.iter().map(|t| t.y + t.h).fold(0.0f64, f64::max);
+            let blocks = if p.tables.is_empty() {
+                None
+            } else {
+                Some((
+                    p.tables.iter().map(|t| t.block).min().unwrap_or(0),
+                    p.tables.iter().map(|t| t.block).max().unwrap_or(0),
+                ))
+            };
+            // 다음 쪽의 **첫** 표(블록이 가장 이른 것)의 높이. 그게 이 쪽에 밀린 후보다.
+            let next_block_height = placed
+                .pages
+                .get(i + 1)
+                .and_then(|n| n.tables.iter().min_by_key(|t| t.block).map(|t| t.h));
             PageFill {
                 page: i + 1,
                 used: glyph_bottom.max(image_bottom).max(table_bottom),
                 body,
                 items: p.glyphs.len() + p.images.len() + p.tables.len(),
+                blocks,
+                next_block_height,
             }
         })
         .collect()
