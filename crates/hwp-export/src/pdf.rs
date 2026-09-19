@@ -24,6 +24,7 @@ use hwp_model::layout::{PageLayerTree, PaintOp};
 use hwp_model::prelude::FontMetricsProvider;
 use hwp_model::types::{Color, HwpUnit};
 use hwp_typeset::{BlockKind, PlacedDoc, PlacedGlyph, PlacedGlyphOrigin};
+use std::collections::HashSet;
 
 use krilla::color::rgb;
 use krilla::geom::{PathBuilder, Point, Rect};
@@ -112,6 +113,39 @@ const SERIF_FONT_CANDIDATES: &[(&str, u32)] = &[
     ("/usr/share/fonts/truetype/nanum/NanumMyeongjo.ttf", 0),
 ];
 
+/// 얼굴별 원문자 커버리지 (이슈 287).
+///
+/// **왜 얼굴마다 물어야 하나**: 번들 NanumGothic 은 원문자를 하나도 못 그리지만, 시스템
+/// 명조(AppleMyungjo)는 그린다. 무조건 폴백으로 보내면 **그릴 수 있던 얼굴에서 글리프를
+/// 뺏어** 그 문서의 서체가 본문과 따로 놀게 된다. 그래서 "못 그릴 때만" 으로 좁힌다.
+#[derive(Default, Clone)]
+struct EnclosedCoverage {
+    body: HashSet<char>,
+    bold: HashSet<char>,
+    serif: HashSet<char>,
+    serif_bold: HashSet<char>,
+}
+
+/// 이 얼굴이 **실제로 그릴 수 있는** 원문자들.
+///
+/// **글자 단위로 재야 한다.** 처음에는 블록마다 첫 글자만 보고 "이 블록을 덮는다" 고 판정했는데,
+/// 실제 렌더에서 `㊀㋀`(U+3280~)이 빈 네모로 나왔다 — macOS 명조가 `㈀`(U+3200)은 갖고
+/// U+3280 부터는 없는데, 첫 글자만 보고 덮는다고 오판한 것이다. **한 블록 안에서도 얼굴마다
+/// 가진 범위가 다르다.**
+///
+/// 범위가 450자 남짓이라 로드 시점에 전수 조회해도 비용이 없다. 파싱 실패는 빈 집합 —
+/// 못 그린다고 보고 폴백이 걸린다(안전한 쪽).
+fn enclosed_coverage(bytes: &[u8], index: u32) -> HashSet<char> {
+    let Ok(face) = ttf_parser::Face::parse(bytes, index) else {
+        return HashSet::new();
+    };
+    ENCLOSED_RANGES
+        .iter()
+        .flat_map(|&(lo, hi)| (lo as u32..=hi as u32).filter_map(char::from_u32))
+        .filter(|&ch| face.glyph_index(ch).is_some())
+        .collect()
+}
+
 /// A loaded text face for embedding, paired with the path it came from (diagnostics) and whether it
 /// is a real Korean-capable face vs. a last-resort fallback.
 struct EmbedFont {
@@ -131,10 +165,46 @@ struct EmbedFont {
     /// with THAT face — e.g. a run set to "Pretendard" ships real Pretendard, not the class
     /// substitute. Empty on the discover/native path (no behavior change without injection).
     extra: Vec<(String, Font)>,
+    /// 원문자 전용 얼굴 (이슈 287). `None` → 예전처럼 빈칸으로 나간다(회귀 없음).
+    enclosed: Option<Font>,
+    /// 각 얼굴이 원문자를 **그릴 수 있는지**. 폴백은 못 그리는 얼굴에만 건다 — 시스템 명조처럼
+    /// 이미 가진 얼굴에서 뺏으면 그 문서의 서체 충실도가 되레 떨어진다.
+    enclosed_cover: EnclosedCoverage,
     path: String,
     /// True when a candidate from [`FONT_CANDIDATES`] loaded (Korean-capable). False = no font found
     /// (glyphs become stub rects so the box stays visible).
     real: bool,
+}
+
+/// 원문자(①②③ ⓐ ㉠ …) 전용 폴백 얼굴 (이슈 287 — #253 수리).
+///
+/// 번들 4종 어디에도 이 글리프가 없다(`cmap` 직접 파싱으로 확인: NanumGothic 은 0/7,
+/// NanumMyeongjo 는 한글 원문자 ㉠ 만). 그래서 **번들끼리의 폴백으로는 못 고친다.**
+///
+/// 본문 폰트를 바꾸지 않는 이유는 어드밴스가 움직이면 줄 수·쪽수가 따라 움직여 조판
+/// 게이트가 흔들리기 때문이다. 그리기 함수는 **글자 하나를 고정 좌표에** 그리므로,
+/// 그 글자에 한해 얼굴만 바꾸면 **레이아웃이 전혀 안 움직인다.**
+const ENCLOSED_FONT_CANDIDATES: &[(&str, u32)] = &[(
+    concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../assets/fonts/AutoHwpEnclosed-Regular.ttf"
+    ),
+    0,
+)];
+
+/// 폴백 얼굴이 맡는 코드포인트 범위.
+///
+/// 서브셋에 실제로 들어 있는 블록과 **같아야** 한다 — 없는 글자를 폴백으로 보내면 거기서도
+/// 빈칸이 나오고, 원래 얼굴이 그릴 수 있었을 글자를 뺏는 셈이 된다.
+const ENCLOSED_RANGES: &[(char, char)] = &[
+    ('\u{2460}', '\u{24FF}'), // Enclosed Alphanumerics — ①⑴⒜Ⓐ
+    ('\u{2776}', '\u{2793}'), // Dingbat circled — ❶❷
+    ('\u{3200}', '\u{32FF}'), // Enclosed CJK Letters and Months — ㈀㈎㉠㉮㊀㋀
+];
+
+/// 이 글자를 폴백 얼굴로 그려야 하는가.
+pub(crate) fn is_enclosed_glyph(ch: char) -> bool {
+    ENCLOSED_RANGES.iter().any(|&(lo, hi)| ch >= lo && ch <= hi)
 }
 
 impl EmbedFont {
@@ -146,15 +216,26 @@ impl EmbedFont {
             let Ok(bytes) = std::fs::read(path) else {
                 continue;
             };
+            let body_covers = enclosed_coverage(&bytes, index);
             if let Some(font) = Font::new(bytes.into(), index) {
+                let bold = Self::discover_from_with_cover(BOLD_FONT_CANDIDATES);
+                let serif = Self::discover_from_with_cover(SERIF_FONT_CANDIDATES);
+                let enclosed_cover = EnclosedCoverage {
+                    body: body_covers,
+                    bold: bold.as_ref().map(|(_, c)| c.clone()).unwrap_or_default(),
+                    serif: serif.as_ref().map(|(_, c)| c.clone()).unwrap_or_default(),
+                    serif_bold: HashSet::new(),
+                };
                 return Some(EmbedFont {
                     font,
-                    bold: Self::discover_from(BOLD_FONT_CANDIDATES),
-                    serif: Self::discover_from(SERIF_FONT_CANDIDATES),
+                    bold: bold.map(|(f, _)| f),
+                    serif: serif.map(|(f, _)| f),
                     // 네이티브 discover 경로는 serif-bold 후보를 두지 않는다(번들 serif 자체가 없다) —
                     // 기존 동작 그대로 serif regular 로 폴백. 주입 경로에서만 채워진다.
                     serif_bold: None,
                     extra: Vec::new(),
+                    enclosed: Self::discover_from(ENCLOSED_FONT_CANDIDATES),
+                    enclosed_cover,
                     path: path.to_string(),
                     real: true,
                 });
@@ -166,12 +247,21 @@ impl EmbedFont {
     /// Load the first parseable candidate from `candidates` as a krilla [`Font`], or `None`. Shared by
     /// the bold ([`BOLD_FONT_CANDIDATES`]) and serif ([`SERIF_FONT_CANDIDATES`]) auxiliary slots.
     fn discover_from(candidates: &[(&str, u32)]) -> Option<Font> {
+        Self::discover_from_with_cover(candidates).map(|(font, _)| font)
+    }
+
+    /// [`discover_from`] + 그 얼굴이 원문자를 그릴 수 있는지 (이슈 287).
+    ///
+    /// 커버리지는 **여기서** 재야 한다 — 바이트가 손에 있는 유일한 지점이고, krilla `Font` 는
+    /// 글리프 조회를 공개하지 않는다. 로드 시점 한 번이라 비용도 거기서 끝난다.
+    fn discover_from_with_cover(candidates: &[(&str, u32)]) -> Option<(Font, HashSet<char>)> {
         for &(path, index) in candidates {
             let Ok(bytes) = std::fs::read(path) else {
                 continue;
             };
+            let covers = enclosed_coverage(&bytes, index);
             if let Some(font) = Font::new(bytes.into(), index) {
-                return Some(font);
+                return Some((font, covers));
             }
         }
         None
@@ -231,6 +321,11 @@ impl EmbedFont {
             serif_bold,
             extra,
             path: format!("injected:{family}"),
+            // 주입(wasm/web) 경로는 호스트가 어떤 얼굴을 줄지 모르므로 **보수적으로 false** —
+            // 원문자는 전용 얼굴로 그린다. 주입 얼굴이 이미 그릴 수 있어도 손해는 서체 차이뿐이고,
+            // 반대로 못 그리는데 안 걸면 빈칸이 나간다.
+            enclosed_cover: EnclosedCoverage::default(),
+            enclosed: Self::discover_from(ENCLOSED_FONT_CANDIDATES),
             real: true,
         })
     }
@@ -1507,6 +1602,7 @@ fn paint_glyph(
                 };
                 styled.or_else(|| explicit_face(n).map(|face| (face, false)))
             });
+            let explicit_used = explicit.is_some();
             let (face, realized_italic) = if let Some((face, realized_italic)) = explicit {
                 (face, realized_italic)
             } else if is_serif {
@@ -1519,6 +1615,32 @@ fn paint_glyph(
                 (f.bold.as_ref().unwrap_or(&f.font), false)
             } else {
                 (&f.font, false)
+            };
+            // 이슈 287 — 원문자(①②③)는 번들 얼굴에 글리프가 없어 **어드밴스만큼 빈칸**으로
+            // 나갔다(텍스트 레이어에는 남아 검색은 됐다). 이 글자에 한해 전용 얼굴로 그린다.
+            // 위치는 조판이 이미 정했으므로 **레이아웃은 움직이지 않는다.**
+            // 고른 얼굴이 **이 글자를** 그릴 수 있는가. 블록 단위로 뭉뚱그리면 한 블록 안에서
+            // 얼굴이 가진 범위가 갈릴 때 빈 네모가 나간다(실측: macOS 명조가 ㈀ 는 갖고 ㊀ 는 없다).
+            let chosen_covers_enclosed = if explicit_used {
+                // 명시 패밀리(폰트 제공)는 호스트가 고른 얼굴이라 커버리지를 모른다 — 보수적으로 아니오.
+                false
+            } else if is_serif {
+                let c = &f.enclosed_cover;
+                (bold && c.serif_bold.contains(&ch)) || c.serif.contains(&ch)
+            } else if bold {
+                let c = &f.enclosed_cover;
+                c.bold.contains(&ch) || c.body.contains(&ch)
+            } else {
+                f.enclosed_cover.body.contains(&ch)
+            };
+            let face = match (&f.enclosed, cluster) {
+                // 클러스터(옛한글 자모 조합)는 통째로 shaping 되므로 건드리지 않는다.
+                // **고른 얼굴이 이미 그릴 수 있으면 뺏지 않는다** — 뺏으면 그 문서의 서체가
+                // 본문과 따로 논다(시스템 명조가 원문자를 가진 macOS 가 그 경우다).
+                (Some(enclosed), None) if is_enclosed_glyph(ch) && !chosen_covers_enclosed => {
+                    enclosed
+                }
+                _ => face,
             };
             let (bx, by) = (pt(x), pt(y));
             // Italic: NanumGothic has no italic face, so synthesize an oblique by shearing the glyph
@@ -2554,5 +2676,77 @@ mod tests {
         let out = export_pdf(&doc, &ApproxFontMetrics, &PdfOptions::default()).unwrap();
         assert!(out.bytes.starts_with(b"%PDF-"));
         assert!(out.pages >= 1);
+    }
+
+    /// 이슈 287 — 폴백이 맡는 범위. 넓히면 그릴 수 있던 얼굴에서 글리프를 뺏고,
+    /// 좁히면 빈칸이 남는다. 서브셋에 실제로 든 블록과 같아야 한다.
+    #[test]
+    fn enclosed_range_matches_the_subset() {
+        for ch in ['①', '⑳', '⑴', '⒜', 'Ⓐ', 'ⓩ', '❶', '❿', '㉠', '㈀'] {
+            assert!(is_enclosed_glyph(ch), "폴백이 맡아야 한다: {ch}");
+        }
+        // 본문 글자를 뺏으면 서체가 따로 논다.
+        assert!(!is_enclosed_glyph('가'));
+        assert!(!is_enclosed_glyph('A'));
+        assert!(!is_enclosed_glyph('※'));
+    }
+
+    /// **#253 의 전제를 고정한다**: 번들 한글 얼굴은 원문자를 못 그린다.
+    ///
+    /// 이 단언이 빨개지면 번들 폰트가 바뀐 것이고, 그때는 폴백이 필요 없어졌을 수도 있다.
+    /// 조용히 지나가면 "왜 폴백이 있는지" 를 아무도 모르게 된다.
+    #[test]
+    fn bundled_korean_faces_lack_enclosed_glyphs() {
+        for name in [
+            "NanumGothic-Regular.ttf",
+            "NanumGothic-Bold.ttf",
+            "NanumMyeongjo-Regular.ttf",
+            "NanumMyeongjo-Bold.ttf",
+        ] {
+            let path = format!("{}/../../assets/fonts/{name}", env!("CARGO_MANIFEST_DIR"));
+            let Ok(bytes) = std::fs::read(&path) else {
+                continue; // 폰트가 없는 체크아웃에서는 건너뛴다
+            };
+            let cover = enclosed_coverage(&bytes, 0);
+            // 전제는 "하나도 없다" 가 아니다 — 번들 명조는 한글 원문자 `㉠` 를 **가지고 있다**.
+            // #253 이 보고한 것은 **숫자/영문 원문자**이고, 그게 없다는 사실이 폴백의 근거다.
+            for ch in ['①', '⑳', '⒜', 'Ⓐ', '❶', '❿'] {
+                assert!(
+                    !cover.contains(&ch),
+                    "{name} 이 {ch} 를 그릴 수 있게 됐다 — 폴백이 아직 필요한지 다시 보라"
+                );
+            }
+        }
+    }
+
+    /// 번들 폴백 얼굴은 **맡은 범위를 전부** 그릴 수 있어야 한다.
+    #[test]
+    fn bundled_fallback_covers_what_it_claims() {
+        let (path, index) = ENCLOSED_FONT_CANDIDATES[0];
+        let Ok(bytes) = std::fs::read(path) else {
+            return; // 폰트가 없는 체크아웃
+        };
+        let cover = enclosed_coverage(&bytes, index);
+        let want: Vec<char> = ENCLOSED_RANGES
+            .iter()
+            .flat_map(|&(lo, hi)| (lo as u32..=hi as u32).filter_map(char::from_u32))
+            .collect();
+        let missing: Vec<char> = want
+            .iter()
+            .copied()
+            .filter(|c| !cover.contains(c))
+            .collect();
+        // 유니코드에 미할당인 자리는 폰트에도 없다 — 대표 글자들만 못 박는다.
+        for ch in [
+            '①', '⑳', '⒜', 'Ⓐ', '❶', '❿', '㈀', '㈎', '㉠', '㉮', '㊀', '㋀',
+        ] {
+            assert!(cover.contains(&ch), "폴백 얼굴이 {ch} 를 못 그린다");
+        }
+        assert!(
+            missing.len() * 10 < want.len(),
+            "폴백 얼굴이 맡은 범위의 대부분을 못 그린다 ({}/{} 결손)",
+            missing.len(),
+            want.len()
+        );
     }
 }
