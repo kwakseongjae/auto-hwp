@@ -99,11 +99,26 @@ const BOLD_FONT_CANDIDATES: &[(&str, u32)] = &[
 ];
 
 /// SERIF (명조/바탕) faces for glyphs whose document face classifies as [`FontCategory::Serif`] (issue
-/// 058). No serif is bundled (the OFL serif substitute — Nanum Myeongjo — is host-injected, R8), so this
-/// is a best-effort SYSTEM discovery: macOS AppleMyungjo, then Linux Noto Serif CJK / Nanum Myeongjo. If
-/// none loads, the serif slot stays `None` and 명조 glyphs draw with the gothic body face (pre-058). On
-/// the wasm/web path the serif face is INJECTED by family name instead (see [`EmbedFont::from_injected`]).
+/// 058).
+///
+/// **번들 OFL 명조가 1순위다** (이슈 288). 예전에는 시스템 폰트가 먼저였는데, 그러면 같은 문서가
+/// macOS 에서는 AppleMyungjo, 리눅스에서는 Noto Serif(있으면), CI 에서는 **명조 슬롯이 비어 고딕**으로
+/// 나갔다 — 플랫폼마다 결과가 달랐다. 본문 고딕은 이미 번들이 1순위인데([`FONT_CANDIDATES`])
+/// 명조만 아니어서 대칭이 깨져 있었다.
+///
+/// R8 도 "명조(serif) → Nanum Myeongjo(OFL)" 로 라우팅한다고 적었는데, 실제로는 재배포할 수 없는
+/// 시스템 폰트가 먼저 잡히고 있었다. 시스템 후보는 **번들이 없는 체크아웃을 위한 보조**로 남긴다.
+///
+/// 하나도 안 잡히면 슬롯이 `None` 이고 명조 글자는 고딕 본문 얼굴로 그려진다(058 이전 동작).
+/// wasm/web 경로에서는 패밀리 이름으로 **주입**된다 ([`EmbedFont::from_injected`]).
 const SERIF_FONT_CANDIDATES: &[(&str, u32)] = &[
+    (
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/NanumMyeongjo-Regular.ttf"
+        ),
+        0,
+    ),
     ("/System/Library/Fonts/Supplemental/AppleMyungjo.ttf", 0),
     (
         "/usr/share/fonts/opentype/noto/NotoSerifCJKkr-Regular.otf",
@@ -111,6 +126,22 @@ const SERIF_FONT_CANDIDATES: &[(&str, u32)] = &[
     ),
     ("/usr/share/fonts/truetype/noto/NotoSerifCJK-Regular.ttc", 0),
     ("/usr/share/fonts/truetype/nanum/NanumMyeongjo.ttf", 0),
+];
+
+/// SERIF **BOLD** 후보 (이슈 288).
+///
+/// 이슈 6 이 serif+bold 런(정부 양식 헤더의 흔한 조합)이 serif REGULAR 로 떨어져 **화면의 볼드가
+/// PDF 에서 사라지는** 문제를 고쳤지만, 네이티브 경로는 "번들 serif 자체가 없다" 며 `None` 으로
+/// 두었다. 번들 명조 볼드가 실제로 있으므로 채운다.
+const SERIF_BOLD_FONT_CANDIDATES: &[(&str, u32)] = &[
+    (
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/NanumMyeongjo-Bold.ttf"
+        ),
+        0,
+    ),
+    ("/usr/share/fonts/truetype/nanum/NanumMyeongjoBold.ttf", 0),
 ];
 
 /// 얼굴별 원문자 커버리지 (이슈 287).
@@ -220,19 +251,23 @@ impl EmbedFont {
             if let Some(font) = Font::new(bytes.into(), index) {
                 let bold = Self::discover_from_with_cover(BOLD_FONT_CANDIDATES);
                 let serif = Self::discover_from_with_cover(SERIF_FONT_CANDIDATES);
+                let serif_bold = Self::discover_from_with_cover(SERIF_BOLD_FONT_CANDIDATES);
                 let enclosed_cover = EnclosedCoverage {
                     body: body_covers,
                     bold: bold.as_ref().map(|(_, c)| c.clone()).unwrap_or_default(),
                     serif: serif.as_ref().map(|(_, c)| c.clone()).unwrap_or_default(),
-                    serif_bold: HashSet::new(),
+                    serif_bold: serif_bold
+                        .as_ref()
+                        .map(|(_, c)| c.clone())
+                        .unwrap_or_default(),
                 };
                 return Some(EmbedFont {
                     font,
                     bold: bold.map(|(f, _)| f),
                     serif: serif.map(|(f, _)| f),
-                    // 네이티브 discover 경로는 serif-bold 후보를 두지 않는다(번들 serif 자체가 없다) —
-                    // 기존 동작 그대로 serif regular 로 폴백. 주입 경로에서만 채워진다.
-                    serif_bold: None,
+                    // 이슈 288 — 번들 명조 볼드가 실재하므로 채운다. 예전 주석은 "번들 serif 자체가
+                    // 없다" 였는데 그건 번들 명조가 추가되기 전에 쓰인 문장이다.
+                    serif_bold: serif_bold.map(|(f, _)| f),
                     extra: Vec::new(),
                     enclosed: Self::discover_from(ENCLOSED_FONT_CANDIDATES),
                     enclosed_cover,
