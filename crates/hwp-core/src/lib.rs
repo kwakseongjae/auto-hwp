@@ -840,6 +840,77 @@ pub fn own_page_count(doc: &SemanticDoc) -> u32 {
         .unwrap_or(1)
 }
 
+/// 한 쪽의 사용 높이 (이슈 294).
+///
+/// 쪽수가 어긋나는데 **왜** 어긋나는지 볼 도구가 없었다. `--rows`(행 높이)·`--cells`(줄 수)는
+/// 있는데 쪽별 자료가 없어서, "내용 높이는 맞는데 쪽만 더 쓴다" 를 확인만 하고 **어느 쪽에서
+/// 비는지** 를 못 봤다(#247).
+#[derive(Clone, Copy, Debug)]
+pub struct PageFill {
+    /// 1부터 세는 쪽 번호.
+    pub page: usize,
+    /// 본문에 실제로 들어찬 높이 (HWPUNIT) — 줄들의 `vert_pos + vert_size` 최대값.
+    pub used: f64,
+    /// 그 쪽의 본문 높이 (HWPUNIT).
+    pub body: f64,
+    /// 이 쪽에 놓인 것의 개수(글리프+이미지+표). 0 이면 정말로 빈 쪽이다.
+    pub items: usize,
+}
+
+impl PageFill {
+    /// 남는 공간 (HWPUNIT). 음수면 본문을 넘겼다는 뜻이다.
+    pub fn slack(&self) -> f64 {
+        self.body - self.used
+    }
+    /// 채움 비율 (0.0~1.0+).
+    pub fn ratio(&self) -> f64 {
+        if self.body > 0.0 {
+            self.used / self.body
+        } else {
+            0.0
+        }
+    }
+}
+
+/// 쪽별 사용 높이 (이슈 294).
+///
+/// **`NaiveLayout` 의 `lines` 로는 못 잰다.** 거기서 표는 세로 커서만 진행시키고 `lines` 를
+/// 만들지 않아서, 표만 있는 쪽이 "줄 0개" 로 보인다 — 처음에 그걸 「빈 쪽」으로 잘못 셌다.
+///
+/// 그래서 **실제로 그리는 경로**(`place_doc`)를 쓴다. `PlacedPage` 는 글리프·이미지·표 상자를
+/// 모두 들고 있으므로, 그 아래끝의 최대값이 그 쪽이 실제로 쓴 높이다. `place_doc` 과
+/// `NaiveLayout` 은 쪽수가 LOCKSTEP 이라 쪽 경계도 같다.
+pub fn own_page_fills(doc: &SemanticDoc) -> Vec<PageFill> {
+    let body = doc
+        .sections
+        .first()
+        .map(|s| hwp_typeset::body_box(&s.page).3)
+        .unwrap_or(0.0);
+    let placed = hwp_typeset::place_doc(doc, &NullFontMetrics);
+    placed
+        .pages
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            // 글리프는 베이스라인 기준이라 아래끝을 EM 만큼 여유로 본다(정확한 디센트는
+            // 폰트마다 다르고, 여기서 재는 것은 "얼마나 찼는가" 라 그 정도면 충분하다).
+            let glyph_bottom = p
+                .glyphs
+                .iter()
+                .map(|g| g.baseline + g.size * 0.25)
+                .fold(0.0f64, f64::max);
+            let image_bottom = p.images.iter().map(|m| m.y + m.h).fold(0.0f64, f64::max);
+            let table_bottom = p.tables.iter().map(|t| t.y + t.h).fold(0.0f64, f64::max);
+            PageFill {
+                page: i + 1,
+                used: glyph_bottom.max(image_bottom).max(table_bottom),
+                body,
+                items: p.glyphs.len() + p.images.len() + p.tables.len(),
+            }
+        })
+        .collect()
+}
+
 // ---- rhwp bootstrap render path (feature `rhwp`) ----
 // Faithful "원본 그대로" view via the vendored rhwp, in-process. ONLY for the UNEDITED original (a
 // view-only faithful render); an edited document displays + paginates from the IR (`own_page_count`

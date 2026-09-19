@@ -184,6 +184,10 @@ enum Cmd {
         /// (사용자 문서 내용을 로그·CI 로 흘리지 않는다 — 포크 거버넌스).
         #[arg(long, requires = "cells")]
         every_cell: bool,
+        /// 이슈 294 — 쪽별 **사용 높이 · 본문 높이 · 남는 공간**. 쪽수가 어긋나는데 내용 높이는
+        /// 맞을 때, 어느 쪽에서 비는지 본다. `--rows`(행)·`--cells`(줄)의 쪽 단위 짝이다.
+        #[arg(long, conflicts_with_all = ["rows", "cells"])]
+        pages: bool,
         /// JSON array of per-file scores (issue #72 corpus sweep). No cell text. Incompatible with
         /// `--rows`/`--cells`.
         #[arg(long)]
@@ -354,6 +358,7 @@ fn run() -> Result<(), String> {
             cells,
             json,
             every_cell,
+            pages,
         } => {
             if json {
                 if rows.is_some() || cells.is_some() {
@@ -363,7 +368,13 @@ fn run() -> Result<(), String> {
             } else if files.len() != 1 {
                 return Err("layout-check (human) takes one file; pass --json for a batch".into());
             } else {
-                layout_check(&files[0], rows.as_deref(), cells.as_deref(), every_cell)?;
+                layout_check(
+                    &files[0],
+                    rows.as_deref(),
+                    cells.as_deref(),
+                    every_cell,
+                    pages,
+                )?;
             }
         }
         Cmd::OpenProject { file, out_dir } => open_project(&file, &out_dir)?,
@@ -1257,12 +1268,68 @@ fn verify_convert(_file: &PathBuf, _out: &PathBuf) -> Result<(), String> {
     Err("`verify-convert` needs the rhwp bootstrap: build with `--features rhwp`".into())
 }
 
+/// 이슈 294 — 쪽별 사용 높이·남는 공간.
+///
+/// **왜**: 쪽수가 어긋나는데 내용 높이(줄 수 +0.5% · 행 높이 +0.2%)로는 그 차이를 설명할 수
+/// 없었다(#247). 내용이 맞는데 쪽만 더 쓴다면 그 차이는 **빈 공간**이고, 어느 쪽에서 비는지
+/// 보면 원인(표 분할 · keep · 간격 누적)이 갈린다.
+///
+/// 우리 쪽수만 낸다 — 한컴 쪽수는 `layout-check` 요약이 이미 준다. 두 숫자를 나란히 두면
+/// "어느 쪽부터 벌어지는가" 를 눈으로 짚을 수 있다.
+#[cfg(feature = "rhwp")]
+fn page_fill_print(bytes: &[u8]) -> Result<(), String> {
+    let production_hwpx = hwp_core::Engine::detect(bytes) == SourceFormat::Hwpx;
+    let doc = if production_hwpx {
+        hwp_core::Engine::open(bytes).map_err(|e| e.to_string())?
+    } else {
+        hwp_rhwp::parse_to_semantic_guarded(bytes).map_err(|e| e.to_string())?
+    };
+    let fills = hwp_core::own_page_fills(&doc);
+    if fills.is_empty() {
+        return Err("레이아웃을 낼 수 없습니다".into());
+    }
+    let body = fills[0].body;
+    println!("쪽별 채움 (HWPUNIT · 본문 높이 {body:.0})");
+    println!(
+        "    {:>4} {:>9} {:>9} {:>7} {:>5} | 채움",
+        "쪽", "사용", "남음", "비율", "요소"
+    );
+    let mut slack_total = 0.0f64;
+    for f in &fills {
+        let slack = f.slack();
+        slack_total += slack.max(0.0);
+        // 남는 공간을 한 눈에 — 20칸 막대.
+        let filled = ((f.ratio() * 20.0).round() as i64).clamp(0, 20) as usize;
+        let bar: String = "█".repeat(filled) + &"·".repeat(20 - filled);
+        println!(
+            "    {:>4} {:>9.0} {:>9.0} {:>6.1}% {:>5} | {bar}",
+            f.page,
+            f.used,
+            slack,
+            f.ratio() * 100.0,
+            f.items
+        );
+    }
+    let pages_worth = if body > 0.0 { slack_total / body } else { 0.0 };
+    println!(
+        "  합계: 쪽 {} · 남는 공간 {:.0} (= {:.1}쪽 분)",
+        fills.len(),
+        slack_total,
+        pages_worth
+    );
+    println!(
+        "  → 남는 공간이 큰 쪽이 있으면 그 다음 블록이 안 들어가 밀린 것이다 (표 분할·keep·간격)."
+    );
+    Ok(())
+}
+
 #[cfg(feature = "rhwp")]
 fn layout_check(
     file: &PathBuf,
     rows: Option<&str>,
     cells: Option<&str>,
     every_cell: bool,
+    pages: bool,
 ) -> Result<(), String> {
     let bytes = read(file)?;
     if rows.is_some() && cells.is_some() {
@@ -1270,6 +1337,9 @@ fn layout_check(
     }
     if let Some(spec) = rows {
         return table_row_audit_print(&bytes, spec);
+    }
+    if pages {
+        return page_fill_print(&bytes);
     }
     // HWPX must enter through the SAME production parser as own-render/editor. The old command
     // lifted both sides through rhwp, so it could report a perfect score while the actual HWPX IR
@@ -1554,6 +1624,7 @@ fn layout_check(
     _rows: Option<&str>,
     _cells: Option<&str>,
     _every_cell: bool,
+    _pages: bool,
 ) -> Result<(), String> {
     Err("`layout-check` needs the rhwp bootstrap (한컴 linesegs 파싱): build with `--features rhwp`".into())
 }
