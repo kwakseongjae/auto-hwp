@@ -1291,8 +1291,8 @@ fn page_fill_print(bytes: &[u8]) -> Result<(), String> {
     let body = fills[0].body;
     println!("쪽별 채움 (HWPUNIT · 본문 높이 {body:.0})");
     println!(
-        "    {:>4} {:>9} {:>9} {:>7} {:>5} | 채움",
-        "쪽", "사용", "남음", "비율", "요소"
+        "    {:>4} {:>9} {:>9} {:>7} {:>5} {:>11} | 채움                 | 다음 블록",
+        "쪽", "사용", "남음", "비율", "요소", "블록구간"
     );
     let mut slack_total = 0.0f64;
     for f in &fills {
@@ -1301,13 +1301,27 @@ fn page_fill_print(bytes: &[u8]) -> Result<(), String> {
         // 남는 공간을 한 눈에 — 20칸 막대.
         let filled = ((f.ratio() * 20.0).round() as i64).clamp(0, 20) as usize;
         let bar: String = "█".repeat(filled) + &"·".repeat(20 - filled);
+        let blocks = match f.blocks {
+            Some((a, b)) if a == b => format!("b{a}"),
+            Some((a, b)) => format!("b{a}~{b}"),
+            None => "—".into(),
+        };
+        // **이 쪽에 안 들어가서 밀렸는가, 아니면 들어갈 수 있었는데 안 넣었는가.**
+        // 후자가 더 중요한 신호다 — 넣을 수 있었으면 쪽이 하나 줄었다는 뜻이다.
+        let verdict = match f.next_block_height {
+            _ if slack < 0.0 => "넘침".to_string(),
+            Some(h) if h > slack => format!("{h:.0} — 안 들어감"),
+            Some(h) => format!("{h:.0} — ⚠️ 들어갔을 것"),
+            None => "—".into(),
+        };
         println!(
-            "    {:>4} {:>9.0} {:>9.0} {:>6.1}% {:>5} | {bar}",
+            "    {:>4} {:>9.0} {:>9.0} {:>6.1}% {:>5} {:>11} | {bar} | {verdict}",
             f.page,
             f.used,
             slack,
             f.ratio() * 100.0,
-            f.items
+            f.items,
+            blocks
         );
     }
     let pages_worth = if body > 0.0 { slack_total / body } else { 0.0 };
@@ -1317,8 +1331,14 @@ fn page_fill_print(bytes: &[u8]) -> Result<(), String> {
         slack_total,
         pages_worth
     );
+    // 「들어갔을 것」의 개수가 곧 **쪽 나눔이 잃은 쪽 수**의 하한이다.
+    let wasted = fills
+        .iter()
+        .filter(|f| f.slack() > 0.0 && f.next_block_height.is_some_and(|h| h <= f.slack()))
+        .count();
     println!(
-        "  → 남는 공간이 큰 쪽이 있으면 그 다음 블록이 안 들어가 밀린 것이다 (표 분할·keep·간격)."
+        "  → **들어갔을 것 {wasted}쪽** — 다음 블록이 남는 공간보다 작은데도 밀렸다.\n\
+       안 들어간 쪽은 표를 쪽 경계에서 쪼개면 회수된다."
     );
     Ok(())
 }
