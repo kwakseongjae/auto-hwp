@@ -178,6 +178,12 @@ enum Cmd {
         /// or `all`. The normal summary always includes the document-wide cell-lineseg score.
         #[arg(long, value_name = "SECTION/BLOCK")]
         cells: Option<String>,
+        /// 이슈 292 — `--cells` 가 **맞아떨어진 셀까지** 낸다. 기본은 불일치만 나오는데,
+        /// 그러면 셀 폭 규칙(#274)을 역산할 표본이 문서당 몇 개로 줄어든다(실측: 1,835개 중 4개).
+        /// 전량 모드는 눈으로 볼 분량이 아니므로 **TSV** 로 내고 텍스트는 싣지 않는다
+        /// (사용자 문서 내용을 로그·CI 로 흘리지 않는다 — 포크 거버넌스).
+        #[arg(long, requires = "cells")]
+        every_cell: bool,
         /// JSON array of per-file scores (issue #72 corpus sweep). No cell text. Incompatible with
         /// `--rows`/`--cells`.
         #[arg(long)]
@@ -347,6 +353,7 @@ fn run() -> Result<(), String> {
             rows,
             cells,
             json,
+            every_cell,
         } => {
             if json {
                 if rows.is_some() || cells.is_some() {
@@ -356,7 +363,7 @@ fn run() -> Result<(), String> {
             } else if files.len() != 1 {
                 return Err("layout-check (human) takes one file; pass --json for a batch".into());
             } else {
-                layout_check(&files[0], rows.as_deref(), cells.as_deref())?;
+                layout_check(&files[0], rows.as_deref(), cells.as_deref(), every_cell)?;
             }
         }
         Cmd::OpenProject { file, out_dir } => open_project(&file, &out_dir)?,
@@ -1251,7 +1258,12 @@ fn verify_convert(_file: &PathBuf, _out: &PathBuf) -> Result<(), String> {
 }
 
 #[cfg(feature = "rhwp")]
-fn layout_check(file: &PathBuf, rows: Option<&str>, cells: Option<&str>) -> Result<(), String> {
+fn layout_check(
+    file: &PathBuf,
+    rows: Option<&str>,
+    cells: Option<&str>,
+    every_cell: bool,
+) -> Result<(), String> {
     let bytes = read(file)?;
     if rows.is_some() && cells.is_some() {
         return Err("use only one of --rows or --cells".into());
@@ -1263,9 +1275,16 @@ fn layout_check(file: &PathBuf, rows: Option<&str>, cells: Option<&str>) -> Resu
     // lifted both sides through rhwp, so it could report a perfect score while the actual HWPX IR
     // paginated differently. Binary HWP still uses the ordinary rhwp lift.
     let production_hwpx = hwp_core::Engine::detect(&bytes) == SourceFormat::Hwpx;
+    // 이슈 292 — `--every-cell` 이면 맞아떨어진 셀까지 담는다(폭 규칙 역산용 표본).
     let f = if production_hwpx {
         let doc = hwp_core::Engine::open(&bytes).map_err(|e| e.to_string())?;
-        hwp_rhwp::layout_fidelity_for_doc(&bytes, &doc).map_err(|e| e.to_string())?
+        if every_cell {
+            hwp_rhwp::layout_fidelity_for_doc_all_cells(&bytes, &doc).map_err(|e| e.to_string())?
+        } else {
+            hwp_rhwp::layout_fidelity_for_doc(&bytes, &doc).map_err(|e| e.to_string())?
+        }
+    } else if every_cell {
+        hwp_core::layout_fidelity_all_cells(&bytes).map_err(|e| e.to_string())?
     } else {
         hwp_core::layout_fidelity(&bytes).map_err(|e| e.to_string())?
     };
@@ -1384,6 +1403,41 @@ fn layout_check(file: &PathBuf, rows: Option<&str>, cells: Option<&str>) -> Resu
                 .map_err(|_| format!("bad block in {spec:?}"))?;
             Some((section, block))
         };
+        // 이슈 292 — 전량 모드는 **기계가 읽는 TSV** 다. 문서당 수천 줄이라 눈으로 볼 분량이
+        // 아니고, 폭 규칙(#274)을 회귀로 역산하려면 파싱 가능한 형태여야 한다.
+        // **텍스트는 싣지 않는다** — 사용자 문서 내용을 로그·CI 로 흘리지 않는다(포크 거버넌스).
+        if every_cell {
+            println!(
+                "section\tblock\ttable_path\trow\tcol\tpara\tour_lines\toracle_lines\t\
+cell_width\tour_cell_width\tour_wrap\toracle_seg\tpad_l\tpad_r\tmargin_l\tmargin_r"
+            );
+            for m in f
+                .cell_mismatches
+                .iter()
+                .filter(|m| filter.is_none_or(|(s, b)| m.section == s && m.block == b))
+            {
+                println!(
+                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.0}\t{:.0}\t{:.0}\t{:.0}\t{:.0}\t{:.0}\t{:.0}\t{:.0}",
+                    m.section,
+                    m.block,
+                    m.table_path,
+                    m.row,
+                    m.col,
+                    m.paragraph,
+                    m.our_lines,
+                    m.oracle_lines,
+                    m.source_cell_width,
+                    m.our_cell_text_width,
+                    m.our_wrap_width,
+                    m.oracle_segment_width,
+                    m.source_pad_left,
+                    m.source_pad_right,
+                    m.our_margin_left,
+                    m.our_margin_right,
+                );
+            }
+            return Ok(());
+        }
         match filter {
             Some((section, block)) => println!(
                 "  셀 줄수 불일치 상세: 섹션 {section}/블록 {block} (폭 HWPUNIT · root=바깥 표)"
@@ -1495,7 +1549,12 @@ fn table_row_audit_print(bytes: &[u8], spec: &str) -> Result<(), String> {
 }
 
 #[cfg(not(feature = "rhwp"))]
-fn layout_check(_file: &PathBuf, _rows: Option<&str>, _cells: Option<&str>) -> Result<(), String> {
+fn layout_check(
+    _file: &PathBuf,
+    _rows: Option<&str>,
+    _cells: Option<&str>,
+    _every_cell: bool,
+) -> Result<(), String> {
     Err("`layout-check` needs the rhwp bootstrap (한컴 linesegs 파싱): build with `--features rhwp`".into())
 }
 
