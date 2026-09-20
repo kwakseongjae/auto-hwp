@@ -35,6 +35,13 @@
     `empty.sh`/`empty2.py`(빈 쪽 전수). 코퍼스는 둘이다 —
     **내부 문서** `business_plan_k/fixtures/kstartup-forms`(최종 목표) ·
     **회귀 감시** `tf-hwp/corpus/private`(합성 `synth-146p` −13 이 지배하므로 따로 본다).
+  · **PR #306 열림**(`Closes #302`). `--full` 은 통과하되 **`oracle-sweep --check` 는 빨갛다** —
+    그런데 `main` 과 출력이 **글자까지 같다(새 회귀 0건)**. 세 지점에서 재봤다:
+    브랜치 · `main` · `e71b462`(#287) · **`370ec0f`(baseline 을 쓴 바로 그 커밋)** 전부 같은 10건.
+    **baseline 을 만든 커밋 자신이 그 baseline 과 어긋난다** — 스윕이 `rhwp,shaper`(실제 폰트
+    advance)로 채점하는데 baseline 에 플랫폼이 안 적혀 있다. **회귀가 아니라 도구 문제 → #305**.
+    ⚠️ **「#287: --full 그린 · 오라클 baseline 동일」이라는 내 기록은 틀렸다** — 그 커밋에서
+    지금 재보면 빨갛다. 항상 빨간 게이트는 무시하는 법을 가르친다.
   · **#303 머지**(`Closes #304`): `--pages` 가 채점과 같은 `RealFontMetrics` 를 쓴다.
     **`on: pull_request` 에 `types:` 가 없으면 `edited` 가 빠진다** — 본문만 고치면 CI 가
     다시 안 돈다. 커밋을 밀어야 한다.
