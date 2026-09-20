@@ -9,6 +9,50 @@
 #[derive(Clone, Debug, Default)]
 pub struct LayoutResult {
     pub pages: Vec<PageLayout>,
+    /// 쪽을 넘긴 **사유** (이슈 299). 진단 전용 — 판정에는 쓰지 않는다.
+    ///
+    /// 왜 조판기가 남겨야 하나: 밖에서 역산하면 틀린다. `PlacedTable` 의 블록 번호로 되짚어
+    /// 봤더니 중첩 표가 바깥 블록 번호를 달고 쪼개진 표가 범위를 왜곡해, 표인데도 어느 쪽에도
+    /// 안 잡히는 블록이 나왔다(#296). 끊는 그 자리에서 남기면 추측이 사라진다.
+    ///
+    /// 기본 빈 벡터라 이 값을 안 쓰는 경로는 영향이 없다.
+    pub breaks: Vec<PageBreakInfo>,
+}
+
+/// 쪽을 넘긴 이유 (이슈 299).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BreakReason {
+    /// 「쪽 나누기 앞에서」 — 문서가 시킨 것. 우리 판단이 아니다.
+    Forced,
+    /// 구역이 새 쪽에서 시작한다.
+    SectionStart,
+    /// 표를 쪼개지 않기로 해서 통째로 넘겼다 (`keep_together`).
+    KeepTogether,
+    /// 캡션과 표를 떼지 않기로 해서 넘겼다.
+    CaptionKeep,
+    /// 줄 하나가 남은 자리에 안 들어갔다.
+    LineOverflow,
+    /// 표의 행 하나가 남은 자리에 안 들어갔다.
+    RowOverflow,
+    /// 한 쪽보다 큰 셀을 조각내면서 넘겼다.
+    OverTallCell,
+}
+
+/// 쪽 하나를 넘긴 기록 (이슈 299).
+#[derive(Clone, Copy, Debug)]
+pub struct PageBreakInfo {
+    /// 넘어간 **뒤** 쪽 번호 (1부터).
+    pub page: usize,
+    pub reason: BreakReason,
+    /// 그 break 를 일으킨 블록 인덱스.
+    pub block: usize,
+    /// 들어가려던 높이 (HWPUNIT). 사유에 따라 줄·행·표 전체다.
+    pub needed: f64,
+    /// 넘기기 직전에 남아 있던 높이 (HWPUNIT).
+    ///
+    /// **`needed <= available` 인데 넘겼다면 그게 잃은 쪽이다.** 이 두 수를 나란히 두는 것이
+    /// 이 기록의 전부다.
+    pub available: f64,
 }
 
 #[derive(Clone, Debug, Default)]

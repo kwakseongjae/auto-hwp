@@ -477,12 +477,22 @@ impl LayoutEngine for NaiveLayout {
             return Ok(layout_columns(doc, fonts));
         }
         let mut pages = vec![PageLayout::default()];
+        let mut breaks: Vec<PageBreakInfo> = Vec::new();
         for sec in &doc.sections {
             let page = &sec.page;
             let (_, _, body_w, body_h) = body_box(page);
             // Each section starts on a fresh page (matches OWPML section→page).
             if !pages.last().map(|p| p.lines.is_empty()).unwrap_or(true) {
-                pages.push(PageLayout::default());
+                // 구역은 새 쪽에서 시작한다 — 우리 판단이 아니라 문서 구조다.
+                break_page(
+                    &mut pages,
+                    &mut breaks,
+                    page,
+                    BreakReason::SectionStart,
+                    0,
+                    0.0,
+                    0.0,
+                );
             }
             if let Some(p) = pages.last_mut() {
                 let (w, h) = display_paper(page);
@@ -499,7 +509,15 @@ impl LayoutEngine for NaiveLayout {
                     Block::Paragraph(p) => {
                         let ps = doc.para_shapes.get(p.para_shape);
                         if brk[blk_idx] && vert > 0.0 {
-                            pages.push(new_page(page));
+                            break_page(
+                                &mut pages,
+                                &mut breaks,
+                                page,
+                                BreakReason::Forced,
+                                blk_idx,
+                                0.0,
+                                body_h - vert,
+                            );
                             vert = 0.0;
                         }
                         // A pure table anchor reserves NO height (Hancom hangs the table off it with no
@@ -514,7 +532,15 @@ impl LayoutEngine for NaiveLayout {
                         let ratio = line_spacing_ratio(p, doc);
                         for ls in layout_paragraph(p, doc, body_w, fonts) {
                             if vert + ls.vert_size > body_h && vert > 0.0 {
-                                pages.push(new_page(page));
+                                break_page(
+                                    &mut pages,
+                                    &mut breaks,
+                                    page,
+                                    BreakReason::LineOverflow,
+                                    blk_idx,
+                                    ls.vert_size,
+                                    body_h - vert,
+                                );
                                 vert = 0.0;
                             }
                             let adv = ls.vert_size * ratio;
@@ -539,7 +565,15 @@ impl LayoutEngine for NaiveLayout {
                         // 표 앞 강제 개쪽(이슈 080): HWPX 는 표를 품은 호스트 문단의 pageBreak 를 여기로
                         // 끌어올린다. 바깥 여백보다 먼저 — 새 쪽 맨 위에는 여백을 두지 않는다.
                         if brk[blk_idx] && vert > 0.0 {
-                            pages.push(new_page(page));
+                            break_page(
+                                &mut pages,
+                                &mut breaks,
+                                page,
+                                BreakReason::Forced,
+                                blk_idx,
+                                0.0,
+                                body_h - vert,
+                            );
                             vert = 0.0;
                         }
                         // Promote a 1×1 frame-wrapper to its inner table so a tall nested grid splits at
@@ -560,11 +594,29 @@ impl LayoutEngine for NaiveLayout {
                                 vert,
                                 body_h,
                             ) {
-                                pages.push(new_page(page));
+                                let need: f64 = rows.iter().sum::<f64>() + caption_height;
+                                break_page(
+                                    &mut pages,
+                                    &mut breaks,
+                                    page,
+                                    BreakReason::CaptionKeep,
+                                    blk_idx,
+                                    need,
+                                    body_h - vert,
+                                );
                                 vert = 0.0;
                             }
                         } else if keep_table_on_fresh_lane(t, &rows, vert, body_h) {
-                            pages.push(new_page(page));
+                            let need: f64 = rows.iter().sum();
+                            break_page(
+                                &mut pages,
+                                &mut breaks,
+                                page,
+                                BreakReason::KeepTogether,
+                                blk_idx,
+                                need,
+                                body_h - vert,
+                            );
                             vert = 0.0;
                         }
                         if t.caption
@@ -597,7 +649,15 @@ impl LayoutEngine for NaiveLayout {
                             {
                                 for (index, fragment) in fragments.iter().enumerate() {
                                     if index > 0 {
-                                        pages.push(new_page(page));
+                                        break_page(
+                                            &mut pages,
+                                            &mut breaks,
+                                            page,
+                                            BreakReason::OverTallCell,
+                                            blk_idx,
+                                            *fragment,
+                                            body_h - vert,
+                                        );
                                         vert = header;
                                     }
                                     vert += fragment;
@@ -608,7 +668,15 @@ impl LayoutEngine for NaiveLayout {
                             // can't fit a fresh page either, so a break would only waste the current page
                             // (the 자가진단표 1×1 mega-cell). Mirrors place_table + block_pages for lockstep.
                             if vert + rh > body_h && vert > 0.0 && rh <= body_h {
-                                pages.push(new_page(page));
+                                break_page(
+                                    &mut pages,
+                                    &mut breaks,
+                                    page,
+                                    BreakReason::RowOverflow,
+                                    blk_idx,
+                                    rh,
+                                    body_h - vert,
+                                );
                                 vert = 0.0;
                             }
                             vert += rh;
@@ -636,7 +704,7 @@ impl LayoutEngine for NaiveLayout {
                 }
             }
         }
-        Ok(LayoutResult { pages })
+        Ok(LayoutResult { pages, breaks })
     }
 }
 
@@ -784,7 +852,33 @@ fn layout_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> LayoutR
             }
         }
     }
-    LayoutResult { pages }
+    // 단(column) 흐름 경로는 사유를 아직 기록하지 않는다 — 빈 벡터가 "모른다" 를 뜻한다.
+    // 이 경로를 타는 문서에서 `--pages` 의 사유 칸이 비면 그건 버그가 아니라 미구현이다.
+    LayoutResult {
+        pages,
+        breaks: Vec::new(),
+    }
+}
+
+/// 쪽을 넘기며 **사유를 남긴다** (이슈 299). 판정은 호출부가 이미 했고, 여기는 기록만 한다.
+#[allow(clippy::too_many_arguments)]
+fn break_page(
+    pages: &mut Vec<PageLayout>,
+    breaks: &mut Vec<PageBreakInfo>,
+    page: &PageSetup,
+    reason: BreakReason,
+    block: usize,
+    needed: f64,
+    available: f64,
+) {
+    pages.push(new_page(page));
+    breaks.push(PageBreakInfo {
+        page: pages.len(),
+        reason,
+        block,
+        needed,
+        available,
+    });
 }
 
 fn new_page(page: &PageSetup) -> PageLayout {

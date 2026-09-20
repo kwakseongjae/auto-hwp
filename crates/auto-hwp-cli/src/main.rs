@@ -1308,10 +1308,28 @@ fn page_fill_print(bytes: &[u8]) -> Result<(), String> {
         };
         // **이 쪽에 안 들어가서 밀렸는가, 아니면 들어갈 수 있었는데 안 넣었는가.**
         // 후자가 더 중요한 신호다 — 넣을 수 있었으면 쪽이 하나 줄었다는 뜻이다.
-        let verdict = match f.next_block_height {
-            _ if slack < 0.0 => "넘침".to_string(),
-            Some(h) if h > slack => format!("{h:.0} — 안 들어감"),
-            Some(h) => format!("{h:.0} — ⚠️ 들어갔을 것"),
+        // **조판기가 남긴 사유를 쓴다** (이슈 299). 역산은 구멍이 있었다 — 중첩 표가 바깥 블록
+        // 번호를 달고 쪼개진 표가 범위를 왜곡해 표인데도 안 잡히는 블록이 있었다(#296).
+        let verdict = match f.break_reason {
+            Some((reason, needed, avail)) => {
+                let name = match reason {
+                    hwp_core::BreakReason::Forced => "강제개쪽",
+                    hwp_core::BreakReason::SectionStart => "구역시작",
+                    hwp_core::BreakReason::KeepTogether => "표 통째로",
+                    hwp_core::BreakReason::CaptionKeep => "캡션 붙임",
+                    hwp_core::BreakReason::LineOverflow => "줄 안 들어감",
+                    hwp_core::BreakReason::RowOverflow => "행 안 들어감",
+                    hwp_core::BreakReason::OverTallCell => "과대 셀",
+                };
+                // 들어갈 수 있었는데 넘겼다면 그게 잃은 쪽이다.
+                let mark = if needed > 0.0 && needed <= avail {
+                    "  ⚠️ 들어갔을 것"
+                } else {
+                    ""
+                };
+                format!("{name} (필요 {needed:.0} · 남음 {avail:.0}){mark}")
+            }
+            // 단(column) 흐름 경로는 아직 사유를 안 남긴다 — 빈칸은 미구현이지 버그가 아니다.
             None => "—".into(),
         };
         println!(
@@ -1334,11 +1352,14 @@ fn page_fill_print(bytes: &[u8]) -> Result<(), String> {
     // 「들어갔을 것」의 개수가 곧 **쪽 나눔이 잃은 쪽 수**의 하한이다.
     let wasted = fills
         .iter()
-        .filter(|f| f.slack() > 0.0 && f.next_block_height.is_some_and(|h| h <= f.slack()))
+        .filter(|f| {
+            f.break_reason
+                .is_some_and(|(_, needed, avail)| needed > 0.0 && needed <= avail)
+        })
         .count();
     println!(
-        "  → **들어갔을 것 {wasted}쪽** — 다음 블록이 남는 공간보다 작은데도 밀렸다.\n\
-       안 들어간 쪽은 표를 쪽 경계에서 쪼개면 회수된다."
+        "  → **들어갔을 것 {wasted}쪽** — 조판기가 남긴 사유 기준(필요 ≤ 남음인데 넘김).\n\
+       「안 들어감」은 표를 쪽 경계에서 쪼개면 회수된다. 「강제개쪽·구역시작」은 문서가 시킨 것이다."
     );
     Ok(())
 }
