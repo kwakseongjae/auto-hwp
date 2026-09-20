@@ -15,7 +15,7 @@
 use hwp_model::prelude::*;
 
 use crate::{
-    layout_paragraph, line_draws_something, line_spacing_ratio, table_height, BASELINE_RATIO,
+    layout_paragraph, line_forces_break, line_spacing_ratio, table_height, BASELINE_RATIO,
 };
 
 /// A single positioned glyph in absolute page coordinates (HWPUNIT, page-top-left origin).
@@ -853,7 +853,10 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
                     let mut recorded = false;
                     for ls in &lines {
                         // 이슈 302 — `NaiveLayout`·`place_doc` 과 같은 판정을 쓴다(불변식 2).
-                        if vert + ls.vert_size > body_h && vert > 0.0 && line_draws_something(ls) {
+                        if vert + ls.vert_size > body_h
+                            && vert > 0.0
+                            && line_forces_break(ls, vert, body_h)
+                        {
                             page_idx += 1;
                             vert = 0.0;
                         }
@@ -1304,7 +1307,7 @@ fn place_paragraph(
 
     for (li, ls) in lines.iter().enumerate() {
         // 이슈 302 — 그려질 것이 없는 줄로 쪽을 만들면 그 쪽이 통째로 빈다.
-        if *vert + ls.vert_size > body_h && *vert > 0.0 && line_draws_something(ls) {
+        if *vert + ls.vert_size > body_h && *vert > 0.0 && line_forces_break(ls, *vert, body_h) {
             new_page(pages, page);
             *vert = 0.0;
         }

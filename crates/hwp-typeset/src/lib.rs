@@ -534,7 +534,7 @@ impl LayoutEngine for NaiveLayout {
                             // 이슈 302 — 아무것도 그리지 않는 줄은 쪽을 넘기지 못한다.
                             if vert + ls.vert_size > body_h
                                 && vert > 0.0
-                                && line_draws_something(&ls)
+                                && line_forces_break(&ls, vert, body_h)
                             {
                                 break_page(
                                     &mut pages,
@@ -2081,8 +2081,8 @@ fn empty_para_size(p: &Paragraph, doc: &SemanticDoc) -> i32 {
 /// `horz_size` 를 쓰는 이유: `LineSeg` 가 들고 있는 값 중 **그려질 것의 유무**를 말하는
 /// 유일한 값이다. 글리프가 없으면 0 이다. (높이 `vert_size` 는 빈 줄도 갖는다 — 그래서
 /// 진단기의 `필요 1200` 은 빈 줄의 증거가 아니다. 12pt 줄이면 내용이 있어도 1200 이다.)
-pub(crate) fn line_draws_something(ls: &LineSeg) -> bool {
-    ls.horz_size > 0.0
+pub(crate) fn line_forces_break(ls: &LineSeg, vert: f64, body_h: f64) -> bool {
+    ls.horz_size > 0.0 || vert < body_h
 }
 
 pub(crate) fn line_spacing_ratio(p: &Paragraph, doc: &SemanticDoc) -> f64 {
