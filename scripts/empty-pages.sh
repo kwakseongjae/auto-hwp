@@ -13,8 +13,13 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
+# **언제나 빌드한다** (이슈 313 · #305 와 같은 함정).
+# `target/release/auto-hwp` 에 누가 무엇으로 빌드해 뒀는지는 모른다. `--features rhwp`
+# (shaper 없음)면 **approx 메트릭**으로 재고, 그건 다른 숫자다 — 실측으로 같은 main 에서
+# 백지 쪽이 approx 0건 · shaper 1건, corpus 총 격차가 44 · 42 로 갈렸다.
+# 오라클 게이트가 shaper 로 채점하므로 **그쪽이 정본**이다. cargo 는 증분이라 거의 공짜다.
 BIN=target/release/auto-hwp
-[ -x "$BIN" ] || cargo build --release -p auto-hwp-cli --features rhwp
+cargo build --release -q -p auto-hwp-cli --features rhwp,shaper
 
 if [ $# -eq 0 ]; then
   set -- ../business_plan_k/fixtures/kstartup-forms corpus/private
@@ -31,4 +36,7 @@ while IFS= read -r file; do
   printf '%-52s 총 %s쪽 · 백지: %s\n' "$(basename "$file" | cut -c1-52)" "$total" "$empty"
 done < <(find "$@" -type f \( -name '*.hwp' -o -name '*.hwpx' \))
 
-echo "백지 쪽이 있는 문서: ${found}건"
+# 무엇으로 쟀는지 함께 찍는다 — approx 와 shaper 는 다른 숫자를 낸다(이슈 313).
+metrics=$("$BIN" layout-check --json benchmarks/benchmark1.hwp 2>/dev/null \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)[0].get("metrics","?"))' 2>/dev/null || echo "?")
+echo "메트릭 ${metrics} · 백지 쪽이 있는 문서: ${found}건"

@@ -17,8 +17,13 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
+# **언제나 빌드한다** (이슈 313 · #305 와 같은 함정).
+# `target/release/auto-hwp` 에 누가 무엇으로 빌드해 뒀는지는 모른다. `--features rhwp`
+# (shaper 없음)면 **approx 메트릭**으로 재고, 그건 다른 숫자다 — 실측으로 같은 main 에서
+# 백지 쪽이 approx 0건 · shaper 1건, corpus 총 격차가 44 · 42 로 갈렸다.
+# 오라클 게이트가 shaper 로 채점하므로 **그쪽이 정본**이다. cargo 는 증분이라 거의 공짜다.
 BIN=target/release/auto-hwp
-[ -x "$BIN" ] || cargo build --release -p auto-hwp-cli --features rhwp
+cargo build --release -q -p auto-hwp-cli --features rhwp,shaper
 
 if [ $# -eq 0 ]; then
   set -- ../business_plan_k/fixtures/kstartup-forms
@@ -46,7 +51,8 @@ for r in rows:
         match += 1
     else:
         gaps.append((delta, pathlib.Path(r.get("file", "?")).name))
-print(f"채점 {scored}건 · 일치 {match} · 총 쪽 격차 {total}")
+metrics = {r.get("metrics") for r in rows if r.get("metrics")}
+print(f"메트릭 {'/'.join(sorted(metrics)) or '?'} · 채점 {scored}건 · 일치 {match} · 총 쪽 격차 {total}")
 for delta, name in sorted(gaps, reverse=True):
     print(f"  {delta:+d}  {name}")
 PY
