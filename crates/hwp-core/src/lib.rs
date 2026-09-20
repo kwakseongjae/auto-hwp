@@ -868,9 +868,13 @@ pub struct PageFill {
     pub next_block_height: Option<f64>,
     /// 이 쪽을 **시작시킨** break 의 기록 (이슈 299) — 조판기가 그 자리에서 남긴 것이다.
     ///
-    /// `(사유, 들어가려던 높이, 남아 있던 높이)`. **`needed <= available` 인데 넘겼다면
-    /// 그게 잃은 쪽이다.** 역산이 아니라 조판기의 증언이라 구멍이 없다.
-    pub break_reason: Option<(BreakReason, f64, f64)>,
+    /// `(사유, 일으킨 블록, 들어가려던 높이, 남아 있던 높이)`. **`needed <= available` 인데
+    /// 넘겼다면 그게 잃은 쪽이다.** 역산이 아니라 조판기의 증언이라 구멍이 없다.
+    ///
+    /// **블록 번호가 함께 있어야 쓸모가 있다**(이슈 307). `blocks` 는 표가 놓인 구간이라
+    /// 본문만 있는 쪽은 비어 있고, 백지 쪽은 놓인 것이 없어서 **언제나** 비어 있다 —
+    /// 그러면 「무엇이 이 쪽을 만들었나」를 물을 대상이 없다.
+    pub break_reason: Option<(BreakReason, usize, f64, f64)>,
 }
 
 impl PageFill {
@@ -913,12 +917,12 @@ pub fn own_page_fills(doc: &SemanticDoc) -> Vec<PageFill> {
     let placed = hwp_typeset::place_doc(doc, &fonts);
     // 사유는 오라클 경로(`NaiveLayout`)가 남긴다. `place_doc` 과 쪽수가 LOCKSTEP 이라 쪽 번호가
     // 같은 자리를 가리킨다(불변식 2).
-    let reasons: std::collections::BTreeMap<usize, (BreakReason, f64, f64)> = NaiveLayout
+    let reasons: std::collections::BTreeMap<usize, (BreakReason, usize, f64, f64)> = NaiveLayout
         .layout(doc, &fonts)
         .map(|r| {
             r.breaks
                 .iter()
-                .map(|b| (b.page, (b.reason, b.needed, b.available)))
+                .map(|b| (b.page, (b.reason, b.block, b.needed, b.available)))
                 .collect()
         })
         .unwrap_or_default();

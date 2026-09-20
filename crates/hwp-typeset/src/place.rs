@@ -16,6 +16,7 @@ use hwp_model::prelude::*;
 
 use crate::{
     layout_paragraph, line_forces_break, line_spacing_ratio, table_height, BASELINE_RATIO,
+    NOTHING_DRAWN,
 };
 
 /// A single positioned glyph in absolute page coordinates (HWPUNIT, page-top-left origin).
@@ -389,12 +390,15 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
         // "쪽 나누기 앞에서" — NaiveLayout/block_pages 와 공유하는 단일 판정(이슈 080, LOCKSTEP).
         let brk = crate::section_page_breaks(sec, doc);
         let mut vert = 0.0f64; // page-relative vertical cursor (within the body box)
+                               // 이슈 307 — 마지막으로 **뭔가 그린** 쪽. 강제 개쪽은 이 쪽에서만 실행된다.
+        let mut last_drawn = NOTHING_DRAWN;
 
         for (blk_idx, block) in sec.blocks.iter().enumerate() {
             match block {
                 Block::Paragraph(p) => {
                     let ps = doc.para_shapes.get(p.para_shape);
-                    if brk[blk_idx] && vert > 0.0 {
+                    // 이슈 307 — 그려진 것이 없는 쪽에서는 강제 개쪽이 무동작이다.
+                    if brk[blk_idx] && last_drawn == pages.len() - 1 {
                         new_page(&mut pages, page);
                         vert = 0.0;
                     }
@@ -410,8 +414,19 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                     let bstart_page = pages.len() - 1;
                     let bstart_y = mt + vert;
                     place_paragraph(
-                        p, doc, fonts, ml, mt, body_w, body_h, &mut vert, &mut pages, page,
-                        sec_idx, blk_idx,
+                        p,
+                        doc,
+                        fonts,
+                        ml,
+                        mt,
+                        body_w,
+                        body_h,
+                        &mut vert,
+                        &mut pages,
+                        page,
+                        sec_idx,
+                        blk_idx,
+                        &mut last_drawn,
                     );
                     // Provenance band for point-to-scope: the paragraph's row extent on each page it
                     // touched. Tag it IMAGE when it carries an anchored object so the UI can label it.
@@ -441,7 +456,8 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                 }
                 Block::Table(t) => {
                     // 표 앞 강제 개쪽(이슈 080) — 바깥 여백보다 먼저. NaiveLayout/block_pages 동일.
-                    if brk[blk_idx] && vert > 0.0 {
+                    // 이슈 307 — 그려진 것이 없는 쪽에서는 강제 개쪽이 무동작이다.
+                    if brk[blk_idx] && last_drawn == pages.len() - 1 {
                         new_page(&mut pages, page);
                         vert = 0.0;
                     }
@@ -502,6 +518,7 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                         t, doc, fonts, ml, mt, body_h, vert, body_w, &mut pages, page, sec_idx,
                         blk_idx, frame,
                     );
+                    last_drawn = pages.len() - 1; // 이슈 307 — 표는 그려진다
                     if t.caption
                         .as_ref()
                         .is_some_and(|caption| caption.position == TableCaptionPosition::Bottom)
@@ -829,11 +846,14 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
         let mut sec_pages = Vec::with_capacity(sec.blocks.len());
         // "쪽 나누기 앞에서" — NaiveLayout/place_doc 와 공유하는 단일 판정(이슈 080, LOCKSTEP).
         let brk = crate::section_page_breaks(sec, doc);
+        // 이슈 307 — 마지막으로 **뭔가 그린** 쪽. 강제 개쪽은 이 쪽에서만 실행된다.
+        let mut last_drawn = NOTHING_DRAWN;
         for (blk_idx, block) in sec.blocks.iter().enumerate() {
             match block {
                 Block::Paragraph(p) => {
                     let ps = doc.para_shapes.get(p.para_shape);
-                    if brk[blk_idx] && vert > 0.0 {
+                    // 이슈 307 — 그려진 것이 없는 쪽에서는 강제 개쪽이 무동작이다.
+                    if brk[blk_idx] && last_drawn == page_idx {
                         page_idx += 1;
                         vert = 0.0;
                     }
@@ -860,6 +880,9 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
                             page_idx += 1;
                             vert = 0.0;
                         }
+                        if ls.horz_size > 0.0 {
+                            last_drawn = page_idx; // 이슈 307
+                        }
                         if !recorded {
                             sec_pages.push(page_idx); // the block starts where its first line lands
                             recorded = true;
@@ -874,7 +897,8 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
                 }
                 Block::Table(t) => {
                     // 표 앞 강제 개쪽(이슈 080) — 바깥 여백보다 먼저. NaiveLayout/place_doc 동일.
-                    if brk[blk_idx] && vert > 0.0 {
+                    // 이슈 307 — 그려진 것이 없는 쪽에서는 강제 개쪽이 무동작이다.
+                    if brk[blk_idx] && last_drawn == page_idx {
                         page_idx += 1;
                         vert = 0.0;
                     }
@@ -951,6 +975,7 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
                                     page_idx += 1;
                                     vert = header;
                                 }
+                                last_drawn = page_idx; // 이슈 307
                                 vert += fragment;
                             }
                             continue;
@@ -959,6 +984,7 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
                             page_idx += 1;
                             vert = 0.0;
                         }
+                        last_drawn = page_idx; // 이슈 307 — 표의 행은 그려진다
                         vert += rh;
                     }
                     if t.caption
@@ -1291,6 +1317,8 @@ fn place_paragraph(
     page: &PageSetup,
     section: usize,
     block: usize,
+    // 이슈 307 — 마지막으로 **뭔가 그린** 쪽. 여기서 폭이 있는 줄을 놓을 때만 갱신한다.
+    last_drawn: &mut usize,
 ) {
     // Flat (char, size, color, underline) over the paragraph's text — same order layout_paragraph
     // breaks on, so line `text_pos` indexes straight into this.
@@ -1310,6 +1338,9 @@ fn place_paragraph(
         if *vert + ls.vert_size > body_h && *vert > 0.0 && line_forces_break(ls, *vert, body_h) {
             new_page(pages, page);
             *vert = 0.0;
+        }
+        if ls.horz_size > 0.0 {
+            *last_drawn = pages.len() - 1; // 이슈 307
         }
         let pg = pages.last_mut().unwrap();
         let line_top = mt + *vert;
@@ -1466,9 +1497,22 @@ fn place_caption(
                 if vert > 0.0 {
                     vert += shape.map(|value| value.space_before).unwrap_or(0).max(0) as f64;
                 }
+                // 이 경로(캡션 흐름)는 강제 개쪽을 실행하지 않으므로 기록만 버린다.
+                let mut ignored = NOTHING_DRAWN;
                 place_paragraph(
-                    paragraph, doc, fonts, ml, mt, width, body_h, &mut vert, pages, page, section,
+                    paragraph,
+                    doc,
+                    fonts,
+                    ml,
+                    mt,
+                    width,
+                    body_h,
+                    &mut vert,
+                    pages,
+                    page,
+                    section,
                     block,
+                    &mut ignored,
                 );
                 vert += shape.map(|value| value.space_after).unwrap_or(0).max(0) as f64;
             }
@@ -3518,8 +3562,22 @@ fn place_deco_blocks(
                 if p.is_table_anchor {
                     continue;
                 }
+                // 높이 측정용 임시 배치 — 강제 개쪽 판정과 무관하다.
+                let mut ignored = NOTHING_DRAWN;
                 place_paragraph(
-                    p, doc, fonts, ml, mt, body_w, body_h, &mut vert, &mut tmp, page, 0, bi,
+                    p,
+                    doc,
+                    fonts,
+                    ml,
+                    mt,
+                    body_w,
+                    body_h,
+                    &mut vert,
+                    &mut tmp,
+                    page,
+                    0,
+                    bi,
+                    &mut ignored,
                 );
             }
             Block::Table(t) => {

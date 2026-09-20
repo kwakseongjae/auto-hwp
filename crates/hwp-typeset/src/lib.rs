@@ -503,12 +503,15 @@ impl LayoutEngine for NaiveLayout {
             // 거쳐야 LOCKSTEP 이 유지된다(이슈 080).
             let brk = crate::section_page_breaks(sec, doc);
             let mut vert = 0.0f64; // page-relative vertical cursor
+                                   // 이슈 307 — 마지막으로 **뭔가 그린** 쪽. 강제 개쪽은 이 쪽에서만 실행된다.
+            let mut last_drawn = NOTHING_DRAWN;
 
             for (blk_idx, block) in sec.blocks.iter().enumerate() {
                 match block {
                     Block::Paragraph(p) => {
                         let ps = doc.para_shapes.get(p.para_shape);
-                        if brk[blk_idx] && vert > 0.0 {
+                        // 이슈 307 — 그려진 것이 없는 쪽에서는 강제 개쪽이 무동작이다.
+                        if brk[blk_idx] && last_drawn == pages.len() - 1 {
                             break_page(
                                 &mut pages,
                                 &mut breaks,
@@ -548,6 +551,9 @@ impl LayoutEngine for NaiveLayout {
                                 vert = 0.0;
                             }
                             let adv = ls.vert_size * ratio;
+                            if ls.horz_size > 0.0 {
+                                last_drawn = pages.len() - 1; // 이슈 307
+                            }
                             pages.last_mut().unwrap().lines.push(LineSeg {
                                 vert_pos: vert,
                                 ..ls
@@ -568,7 +574,8 @@ impl LayoutEngine for NaiveLayout {
                     Block::Table(t) => {
                         // 표 앞 강제 개쪽(이슈 080): HWPX 는 표를 품은 호스트 문단의 pageBreak 를 여기로
                         // 끌어올린다. 바깥 여백보다 먼저 — 새 쪽 맨 위에는 여백을 두지 않는다.
-                        if brk[blk_idx] && vert > 0.0 {
+                        // 이슈 307 — 그려진 것이 없는 쪽에서는 강제 개쪽이 무동작이다.
+                        if brk[blk_idx] && last_drawn == pages.len() - 1 {
                             break_page(
                                 &mut pages,
                                 &mut breaks,
@@ -664,6 +671,7 @@ impl LayoutEngine for NaiveLayout {
                                         );
                                         vert = header;
                                     }
+                                    last_drawn = pages.len() - 1; // 이슈 307
                                     vert += fragment;
                                 }
                                 continue;
@@ -683,6 +691,7 @@ impl LayoutEngine for NaiveLayout {
                                 );
                                 vert = 0.0;
                             }
+                            last_drawn = pages.len() - 1; // 이슈 307 — 표의 행은 그려진다
                             vert += rh;
                         }
                         if t.caption
@@ -2081,6 +2090,21 @@ fn empty_para_size(p: &Paragraph, doc: &SemanticDoc) -> i32 {
 /// `horz_size` 를 쓰는 이유: `LineSeg` 가 들고 있는 값 중 **그려질 것의 유무**를 말하는
 /// 유일한 값이다. 글리프가 없으면 0 이다. (높이 `vert_size` 는 빈 줄도 갖는다 — 그래서
 /// 진단기의 `필요 1200` 은 빈 줄의 증거가 아니다. 12pt 줄이면 내용이 있어도 1200 이다.)
+/// 「아무것도 그려지지 않은 쪽」에서는 **강제 개쪽이 무동작**이다 (이슈 307).
+///
+/// 원래 가드는 `brk[i] && vert > 0.0` 였고, 뜻은 이미 「쪽 맨 위면 넘기지 마라」 —
+/// 즉 **백지 쪽을 만들지 마라**였다. 그런데 **빈 문단은 아무것도 안 그리면서 `vert` 만
+/// 올린다.** 그래서 표 뒤에 빈 문단이 몇 개 오고 그다음이 강제 개쪽이면, 빈 문단만 놓인
+/// 쪽이 통째로 남는다(실측: `bizinfo 별지1` 의 b332~b335 네 개가 26쪽을 백지로 만들었다).
+///
+/// 그래서 가드를 「그려진 것이 있나」로 바꾼다. **리셋을 안 해도 되는 형태**로 든다 —
+/// 쪽마다 플래그를 껐다 켜면 초기화 지점을 하나라도 빠뜨렸을 때 조용히 틀리는데,
+/// 「마지막으로 뭔가 그린 쪽 번호」는 **놓을 때만 쓰면 된다.**
+///
+/// 「그렸다」의 정의는 세 경로가 **똑같아야** 한다(불변식 2) — `horz_size > 0` 인 줄,
+/// 또는 표의 행. 글리프 유무로 재면 갈린다(공백만 있는 줄은 폭이 있는데 글리프가 없다).
+pub(crate) const NOTHING_DRAWN: usize = usize::MAX;
+
 pub(crate) fn line_forces_break(ls: &LineSeg, vert: f64, body_h: f64) -> bool {
     ls.horz_size > 0.0 || vert < body_h
 }
