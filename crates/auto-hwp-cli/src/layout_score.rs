@@ -16,11 +16,25 @@ use std::path::Path;
 #[cfg_attr(not(any(test, feature = "rhwp")), allow(dead_code))]
 const LINE_MATCH_FLOOR: f64 = 98.9;
 
+/// 이 빌드가 쓰는 폰트 메트릭 (이슈 305).
+#[cfg(feature = "shaper")]
+pub const METRICS_KIND: &str = "shaper";
+#[cfg(not(feature = "shaper"))]
+pub const METRICS_KIND: &str = "approx";
+
 #[derive(Clone, Debug, Serialize)]
 #[cfg_attr(not(feature = "rhwp"), allow(dead_code))]
 pub struct FileScore {
     pub file: String,
     pub format: String,
+    /// 이 점수를 **무엇으로 쟀는가** — `shaper`(rustybuzz 실제 advance) 또는 `approx`
+    /// (전각1·반각0.5·공백0.3 EM). 이슈 305.
+    ///
+    /// 같은 문서·같은 코드라도 **둘은 다른 숫자를 낸다**(실측: `복학원서.hwp` 가
+    /// shaper 18줄 · approx 17줄). 그래서 baseline 과 대조할 때 이 값이 같지 않으면
+    /// 그 비교는 무의미하다. 기록이 없으면 「회귀」와 「다른 빌드」를 가를 수 없다 —
+    /// 실제로 그것 때문에 게이트가 오래 빨간 채로 있었다.
+    pub metrics: &'static str,
     pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -131,6 +145,7 @@ fn fail_report(file: &str, format: &str, error: impl Into<String>) -> FileScore 
     FileScore {
         file: file.to_string(),
         format: format.to_string(),
+        metrics: METRICS_KIND,
         ok: false,
         error: Some(error.into()),
         score_kind: "fail".into(),
@@ -180,6 +195,7 @@ impl FileScore {
         FileScore {
             file: file.to_string(),
             format: format.to_string(),
+            metrics: METRICS_KIND,
             ok: true,
             error: None,
             score_kind: score_kind.to_string(),
