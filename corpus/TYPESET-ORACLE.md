@@ -18,8 +18,8 @@
 | 실패 | 0 |
 | 미반입 (GOV) | 0 |
 | 일치 (쪽수 + 줄 98.9%+) | 53 |
-| 줄격차 | 16 |
-| 쪽격차 | 10 |
+| 줄격차 | 17 |
+| 쪽격차 | 9 |
 | 본문 줄정확 평균 (채점 가능·본문 오라클만) | 97.4% |
 | 셀 줄정확 평균 (채점 가능·셀 오라클만) | 96.7% |
 
@@ -27,16 +27,16 @@
 
 | 축 | 한국어 | 태깅 | 채점가능 | 채점불가 | 쪽수일치율% | 본문 줄정확% | 셀 줄정확% |
 |---|---|---:|---:|---:|---:|---:|---:|
-| `header_footer` | 머리말/꼬리말 | 5 | 5 | 0 | 60 | 93.3 | 98.5 |
+| `header_footer` | 머리말/꼬리말 | 5 | 5 | 0 | 80 | 93.3 | 98.5 |
 | `form_control` | 폼 컨트롤 | 4 | 4 | 0 | 100 | 100 | — |
 | `mixed_orientation` | 가로세로 혼합 | 0 | 0 | 0 | — | — | — |
-| `nested_table` | 중첩 표 | 10 | 10 | 0 | 60 | 97.5 | 98.6 |
-| `multipage_table` | 다쪽 표 | 16 | 15 | 1 | 66.7 | 97.3 | 95.3 |
+| `nested_table` | 중첩 표 | 10 | 10 | 0 | 70 | 97.9 | 98.6 |
+| `multipage_table` | 다쪽 표 | 16 | 15 | 1 | 66.7 | 97.5 | 95.3 |
 | `footnote` | 각주 | 1 | 1 | 0 | 0 | 90 | 100 |
 | `multicolumn` | 다단 | 2 | 2 | 0 | 50 | 91.7 | — |
 | `chart` | 차트 | 1 | 1 | 0 | 100 | 99 | 100 |
 | `equation` | 수식 | 3 | 2 | 1 | 50 | 100 | — |
-| `shape_ole` | 도형/OLE | 33 | 33 | 0 | 87.9 | 98.6 | 97.3 |
+| `shape_ole` | 도형/OLE | 33 | 33 | 0 | 90.9 | 98.6 | 97.3 |
 
 ## 가장 낮은 요소 축 (다음 수리 티켓 근거)
 
@@ -44,7 +44,7 @@
 |---:|---|---:|---:|---:|---:|
 | 1 | `footnote` (각주) | 1 | 0 | 90 | 100 |
 | 2 | `multicolumn` (다단) | 2 | 50 | 91.7 | — |
-| 3 | `header_footer` (머리말/꼬리말) | 5 | 60 | 93.3 | 98.5 |
+| 3 | `header_footer` (머리말/꼬리말) | 5 | 80 | 93.3 | 98.5 |
 
 ## 문서별 점수
 
@@ -52,7 +52,7 @@
 |---|---|---|---:|---:|---:|---:|---|
 | `benchmarks/benchmark.hwp` | benchmark | 일치 | 8 | 8 | 98.9 | 100 | nested_table |
 | `benchmarks/benchmark1.hwp` | benchmark | 일치 | 18 | 18 | 99.2 | 98.5 | nested_table, multipage_table |
-| `benchmarks/benchmark1.hwpx` | benchmark | 쪽격차 | 30 | 25 | 89.5 | — | nested_table, multipage_table |
+| `benchmarks/benchmark1.hwpx` | benchmark | 쪽격차 | 30 | 25 | 92.9 | — | nested_table, multipage_table |
 | `benchmarks/benchmark2.hwp` | benchmark | 일치 | 24 | 24 | 99.7 | 98.4 | nested_table, multipage_table |
 | `corpus/hwp/복학원서.hwp` | corpus-hwp | 일치 | 1 | 1 | 100 | 100 | shape_ole |
 | `corpus/hwp/한셀OLE.hwp` | corpus-hwp | 일치 | 1 | 1 | 100 | — | shape_ole |
@@ -83,7 +83,7 @@
 | `corpus/hwpxlib_corpus/error/20240919/테스트문서.hwpx` | hwpxlib | 일치 | 1 | 1 | 100 | — | — |
 | `corpus/hwpxlib_corpus/error/20241104/mot.hwpx` | hwpxlib | 일치 | 2 | 2 | 100 | 100 | multipage_table, shape_ole |
 | `corpus/hwpxlib_corpus/error/20250523/프로젝트 계획서.hwpx` | hwpxlib | 채점불가 | — | — | — | — | multipage_table |
-| `corpus/hwpxlib_corpus/error/20250808/2015년_12월_재난안전종합상황_분석_및_전망.hwpx` | hwpxlib | 쪽격차 | 77 | 76 | 98.2 | 99.5 | header_footer, nested_table, shape_ole |
+| `corpus/hwpxlib_corpus/error/20250808/2015년_12월_재난안전종합상황_분석_및_전망.hwpx` | hwpxlib | 줄격차 | 76 | 76 | 98.2 | 99.5 | header_footer, nested_table, shape_ole |
 | `corpus/hwpxlib_corpus/error/20251107/test_re.hwpx` | hwpxlib | 줄격차 | 15 | 15 | 98.1 | 87.3 | multipage_table |
 | `corpus/hwpxlib_corpus/error/20251107/test.hwpx` | hwpxlib | 줄격차 | 15 | 15 | 98.1 | 87.3 | multipage_table |
 | `corpus/hwpxlib_corpus/error/20260805/고정폭빈칸_문서.hwpx` | hwpxlib | 일치 | 1 | 1 | 100 | — | — |
