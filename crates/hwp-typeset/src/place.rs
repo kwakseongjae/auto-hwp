@@ -389,6 +389,8 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
         let section_first_page = pages.len() - 1;
         // "쪽 나누기 앞에서" — NaiveLayout/block_pages 와 공유하는 단일 판정(이슈 080, LOCKSTEP).
         let brk = crate::section_page_breaks(sec, doc);
+        // 이슈 314 — 이 뒤의 빈 줄은 쪽을 못 만든다. 구역마다 한 번만 센다.
+        let last_draw = crate::section_last_drawing_block(sec);
         let mut vert = 0.0f64; // page-relative vertical cursor (within the body box)
                                // 이슈 307 — 마지막으로 **뭔가 그린** 쪽. 강제 개쪽은 이 쪽에서만 실행된다.
         let mut last_drawn = NOTHING_DRAWN;
@@ -427,6 +429,7 @@ pub fn place_doc(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> PlacedDo
                         sec_idx,
                         blk_idx,
                         &mut last_drawn,
+                        last_draw.is_some_and(|last| blk_idx > last),
                     );
                     // Provenance band for point-to-scope: the paragraph's row extent on each page it
                     // touched. Tag it IMAGE when it carries an anchored object so the UI can label it.
@@ -846,6 +849,8 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
         let mut sec_pages = Vec::with_capacity(sec.blocks.len());
         // "쪽 나누기 앞에서" — NaiveLayout/place_doc 와 공유하는 단일 판정(이슈 080, LOCKSTEP).
         let brk = crate::section_page_breaks(sec, doc);
+        // 이슈 314 — 이 뒤의 빈 줄은 쪽을 못 만든다. 구역마다 한 번만 센다.
+        let last_draw = crate::section_last_drawing_block(sec);
         // 이슈 307 — 마지막으로 **뭔가 그린** 쪽. 강제 개쪽은 이 쪽에서만 실행된다.
         let mut last_drawn = NOTHING_DRAWN;
         for (blk_idx, block) in sec.blocks.iter().enumerate() {
@@ -875,7 +880,12 @@ pub fn block_pages(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Vec<Ve
                         // 이슈 302 — `NaiveLayout`·`place_doc` 과 같은 판정을 쓴다(불변식 2).
                         if vert + ls.vert_size > body_h
                             && vert > 0.0
-                            && line_forces_break(ls, vert, body_h)
+                            && line_forces_break(
+                                ls,
+                                vert,
+                                body_h,
+                                last_draw.is_some_and(|last| blk_idx > last),
+                            )
                         {
                             page_idx += 1;
                             vert = 0.0;
@@ -1319,6 +1329,8 @@ fn place_paragraph(
     block: usize,
     // 이슈 307 — 마지막으로 **뭔가 그린** 쪽. 여기서 폭이 있는 줄을 놓을 때만 갱신한다.
     last_drawn: &mut usize,
+    // 이슈 314 — 이 문단이 구역의 「마지막으로 그리는 블록」보다 뒤에 있는가.
+    trailing: bool,
 ) {
     // Flat (char, size, color, underline) over the paragraph's text — same order layout_paragraph
     // breaks on, so line `text_pos` indexes straight into this.
@@ -1335,7 +1347,10 @@ fn place_paragraph(
 
     for (li, ls) in lines.iter().enumerate() {
         // 이슈 302 — 그려질 것이 없는 줄로 쪽을 만들면 그 쪽이 통째로 빈다.
-        if *vert + ls.vert_size > body_h && *vert > 0.0 && line_forces_break(ls, *vert, body_h) {
+        if *vert + ls.vert_size > body_h
+            && *vert > 0.0
+            && line_forces_break(ls, *vert, body_h, trailing)
+        {
             new_page(pages, page);
             *vert = 0.0;
         }
@@ -1513,6 +1528,7 @@ fn place_caption(
                     section,
                     block,
                     &mut ignored,
+                    false,
                 );
                 vert += shape.map(|value| value.space_after).unwrap_or(0).max(0) as f64;
             }
@@ -3578,6 +3594,7 @@ fn place_deco_blocks(
                     0,
                     bi,
                     &mut ignored,
+                    false,
                 );
             }
             Block::Table(t) => {
