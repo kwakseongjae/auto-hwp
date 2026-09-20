@@ -29,9 +29,20 @@ const argv = process.argv.slice(2);
 const check = argv.includes("--check");
 const checkCommitted = argv.includes("--check-committed");
 
+/**
+ * **언제나 다시 빌드한다** (이슈 305).
+ *
+ * 예전에는 `target/release/auto-hwp` 가 있으면 **기능을 확인하지 않고 그대로 썼다.**
+ * 그런데 그 자리에는 누가 무엇으로 빌드해 뒀을지 모른다 — 다른 작업을 하다
+ * `--features rhwp` (shaper 없음)로 빌드해 두면, 스윕이 **approx 메트릭으로 채점**한다.
+ *
+ * 같은 문서·같은 코드라도 둘은 다른 숫자를 낸다(실측: `복학원서.hwp` 가
+ * shaper 18줄 · approx 17줄). 그래서 게이트가 오래 빨간 채로 있었고, 나는 그것을
+ * 「회귀」·「기계 차이」·「폰트」로 번갈아 오진했다. **cargo 는 증분이라 이미 맞게
+ * 빌드돼 있으면 거의 공짜다** — 재사용해서 아낄 것이 없었다.
+ */
 function ensureCli() {
   const bin = join(repo, "target", "release", "auto-hwp");
-  if (existsSync(bin)) return bin;
   console.error("oracle-sweep: building auto-hwp (release, rhwp+shaper)…");
   const r = spawnSync(
     "cargo",
@@ -39,6 +50,7 @@ function ensureCli() {
     { cwd: repo, stdio: "inherit" },
   );
   if (r.status !== 0) throw new Error("cargo build auto-hwp-cli failed");
+  if (!existsSync(bin)) throw new Error(`oracle-sweep: ${bin} missing after build`);
   return bin;
 }
 
@@ -62,6 +74,39 @@ function runLayoutJson(bin, paths) {
   return reports;
 }
 
+/**
+ * 이 baseline 이 **어느 코드에서 나왔는지** (이슈 305).
+ *
+ * `generated_at` 은 날짜뿐이라, 어긋났을 때 「다른 기계인가 다른 코드인가」를 가릴 수 없었다.
+ * 실제로 `corpus/hwp/복학원서.hwp` 항목은 최초 baseline(#250) 이후 **한 번도 다시 쓰이지
+ * 않은 채** 남아 있었다 — #275 가 baseline 을 11줄만 부분 갱신하면서 건드리지 않았기 때문이다.
+ * 그 사이 우리 줄수가 18 → 17 로 바뀌었고, 게이트는 그때부터 **줄곧 빨간 채로** 있었다.
+ *
+ * 워킹트리가 더러우면 `-dirty` 를 붙인다 — 그 SHA 로는 재현이 안 되기 때문이다.
+ */
+function generatingCommit() {
+  const sha = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" });
+  if (sha.status !== 0) return "unknown";
+  const head = sha.stdout.trim();
+  // **baseline 자신은 세지 않는다** — 그것을 쓰는 것이 이 함수를 부르는 이유라서,
+  // 포함하면 언제나 `-dirty` 가 된다.
+  const dirty = spawnSync(
+    "git",
+    ["status", "--porcelain", "--", ".", ":!corpus/typeset-oracle.json", ":!corpus/TYPESET-ORACLE.md"],
+    { cwd: repo, encoding: "utf8" },
+  );
+  return dirty.status === 0 && dirty.stdout.trim() ? `${head}-dirty` : head;
+}
+
+/**
+ * 이 점수를 **무엇으로 쟀는가** — 보고서가 말하는 값을 그대로 옮긴다 (이슈 305).
+ * 섞여 있으면(있을 수 없지만) 그대로 드러나도록 정렬해 이어 붙인다.
+ */
+function metricsKind(reports) {
+  const kinds = [...new Set(reports.map((r) => r.metrics).filter(Boolean))].sort();
+  return kinds.length === 1 ? kinds[0] : kinds.join("+") || "unknown";
+}
+
 function buildDoc(coverage, reports, presentRels) {
   const byFile = new Map();
   for (const r of reports) {
@@ -81,6 +126,11 @@ function buildDoc(coverage, reports, presentRels) {
     schema_version: 1,
     issue: 72,
     generated_at: new Date().toISOString().slice(0, 10),
+    // 이슈 305 — 날짜만으로는 「다른 기계인가 다른 코드인가」를 못 가린다.
+    commit: generatingCommit(),
+    // 이슈 305 — **approx 로 잰 점수와 shaper 로 잰 점수는 다른 숫자다.** 어느 쪽인지
+    // 적어 두지 않으면 어긋났을 때 「회귀」와 「다른 빌드」를 가를 수 없다.
+    metrics: metricsKind(reports),
     command: "auto-hwp layout-check --json (features rhwp,shaper) + scripts/oracle-sweep.mjs",
     disclaimer: DISCLAIMER,
     note: "Scores lock today's stored-lineseg numbers. They are not Hangul ground truth. Unscorable converted HWPX is not a zero. corpus/private user docs are not listed. GOV binaries stay unreproduced in git.",

@@ -375,6 +375,15 @@ export function validateCommitted(doc) {
   if (!String(doc.disclaimer || "").includes("참값")) {
     errors.push("disclaimer must say this is not Hangul ground truth");
   }
+  // 이슈 305 — 생성 커밋이 없으면 어긋났을 때 원인을 못 가린다. 손으로 고친 baseline 도 여기서 걸린다.
+  if (!/^[0-9a-f]{40}(-dirty)?$/.test(String(doc.commit || ""))) {
+    errors.push("commit must be the generating git SHA (re-run node scripts/oracle-sweep.mjs)");
+  }
+  // 이슈 305 — baseline 은 **실제 셰이퍼로 잰 것**이어야 한다. approx 로 만든 baseline 을
+  // 커밋하면 그 뒤 모든 비교가 무의미해진다(그리고 게이트는 이유 없이 빨개진다).
+  if (doc.metrics !== "shaper") {
+    errors.push(`metrics must be "shaper" (got ${JSON.stringify(doc.metrics)}) — build with --features rhwp,shaper`);
+  }
   if (!Array.isArray(doc.documents) || doc.documents.length === 0) {
     errors.push("documents[] missing");
     return errors;
