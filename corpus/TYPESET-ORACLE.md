@@ -4,7 +4,7 @@
 >
 > 변환 .hwpx의 빈 `linesegarray`는 **채점 불가**이지 0점이 아니다.
 
-재현: `node scripts/oracle-sweep.mjs` (이슈 #72). 생성 2026-09-18. CLI: `auto-hwp layout-check --json` (features rhwp,shaper). 태그는 `corpus/typeset-coverage.json`(#71)과 조인.
+재현: `node scripts/oracle-sweep.mjs` (이슈 #72). 생성 2026-09-20. CLI: `auto-hwp layout-check --json` (features rhwp,shaper). 태그는 `corpus/typeset-coverage.json`(#71)과 조인.
 
 전수 재실행은 **로컬 전용**. CI는 `--check-committed`(요약 정합)만 본다. 기존 게이트 8==8 · 18==18 · 24==24 · 줄바꿈 98.9%+ 는 이 파일과 별개다.
 
@@ -83,7 +83,7 @@
 | `corpus/hwpxlib_corpus/error/20240919/테스트문서.hwpx` | hwpxlib | 일치 | 1 | 1 | 100 | — | — |
 | `corpus/hwpxlib_corpus/error/20241104/mot.hwpx` | hwpxlib | 일치 | 2 | 2 | 100 | 100 | multipage_table, shape_ole |
 | `corpus/hwpxlib_corpus/error/20250523/프로젝트 계획서.hwpx` | hwpxlib | 채점불가 | — | — | — | — | multipage_table |
-| `corpus/hwpxlib_corpus/error/20250808/2015년_12월_재난안전종합상황_분석_및_전망.hwpx` | hwpxlib | 쪽격차 | 82 | 76 | 98.2 | 99.5 | header_footer, nested_table, shape_ole |
+| `corpus/hwpxlib_corpus/error/20250808/2015년_12월_재난안전종합상황_분석_및_전망.hwpx` | hwpxlib | 쪽격차 | 77 | 76 | 98.2 | 99.5 | header_footer, nested_table, shape_ole |
 | `corpus/hwpxlib_corpus/error/20251107/test_re.hwpx` | hwpxlib | 줄격차 | 15 | 15 | 98.1 | 87.3 | multipage_table |
 | `corpus/hwpxlib_corpus/error/20251107/test.hwpx` | hwpxlib | 줄격차 | 15 | 15 | 98.1 | 87.3 | multipage_table |
 | `corpus/hwpxlib_corpus/error/20260805/고정폭빈칸_문서.hwpx` | hwpxlib | 일치 | 1 | 1 | 100 | — | — |
