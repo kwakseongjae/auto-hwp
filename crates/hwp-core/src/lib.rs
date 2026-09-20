@@ -897,16 +897,24 @@ impl PageFill {
 /// 모두 들고 있으므로, 그 아래끝의 최대값이 그 쪽이 실제로 쓴 높이다. `place_doc` 과
 /// `NaiveLayout` 은 쪽수가 LOCKSTEP 이라 쪽 경계도 같다.
 pub fn own_page_fills(doc: &SemanticDoc) -> Vec<PageFill> {
+    // **채점과 같은 메트릭을 써야 한다.** `layout-check` 의 점수는 `shaper` 일 때 실제 폰트
+    // advance 로 채점하는데, 진단기가 `NullFontMetrics` 를 쓰면 **다른 쪽수**가 나온다 —
+    // 실측으로 한 문서에서 진단 3쪽 · 점수 4쪽이 나왔다. 같은 것을 말하지 않는 도구는
+    // 추적을 늦출 뿐이다.
+    #[cfg(feature = "shaper")]
+    let fonts = hwp_typeset::RealFontMetrics::new();
+    #[cfg(not(feature = "shaper"))]
+    let fonts = hwp_typeset::ApproxFontMetrics;
     let body = doc
         .sections
         .first()
         .map(|s| hwp_typeset::body_box(&s.page).3)
         .unwrap_or(0.0);
-    let placed = hwp_typeset::place_doc(doc, &NullFontMetrics);
+    let placed = hwp_typeset::place_doc(doc, &fonts);
     // 사유는 오라클 경로(`NaiveLayout`)가 남긴다. `place_doc` 과 쪽수가 LOCKSTEP 이라 쪽 번호가
     // 같은 자리를 가리킨다(불변식 2).
     let reasons: std::collections::BTreeMap<usize, (BreakReason, f64, f64)> = NaiveLayout
-        .layout(doc, &NullFontMetrics)
+        .layout(doc, &fonts)
         .map(|r| {
             r.breaks
                 .iter()
