@@ -5,6 +5,7 @@
 //! explicitly named read-only oracle/enrichment helpers (see `docs/RHWP-FORK-GOVERNANCE.md`).
 
 use hwp_hwpx::HwpxParser;
+pub use hwp_model::layout::BreakReason;
 use hwp_model::prelude::*;
 use hwp_rhwp::RhwpEngine;
 use hwp_typeset::{NaiveLayout, NullFontMetrics};
@@ -860,11 +861,16 @@ pub struct PageFill {
     /// 글리프에는 블록 인덱스가 없어서 **표가 없는 쪽은 비어 있다.** 정부 양식은 표 중심이라
     /// 대부분 잡히지만, 본문만 있는 쪽은 못 낸다 — 그건 엔진에 블록을 실어야 하는 일이다.
     pub blocks: Option<(usize, usize)>,
-    /// 다음 쪽 첫 표의 높이 (HWPUNIT) — **이 쪽에 안 들어가서 밀린 후보**.
+    /// 다음 쪽 첫 표의 높이 (HWPUNIT) — 역산한 **근사**다.
     ///
-    /// 이 값이 `slack()` 보다 크면 "안 들어가서 밀렸다" 가 설명이 된다. **작으면 다른 이유**이고,
-    /// 그게 더 중요한 신호다 — 들어갈 수 있었는데 안 넣은 것이기 때문이다.
+    /// ⚠️ 중첩 표가 바깥 블록 번호를 달고 쪼개진 표가 범위를 왜곡해서, 표인데도 안 잡히는
+    /// 블록이 있다(#296). **`break_reason` 이 있으면 그쪽을 믿는다.**
     pub next_block_height: Option<f64>,
+    /// 이 쪽을 **시작시킨** break 의 기록 (이슈 299) — 조판기가 그 자리에서 남긴 것이다.
+    ///
+    /// `(사유, 들어가려던 높이, 남아 있던 높이)`. **`needed <= available` 인데 넘겼다면
+    /// 그게 잃은 쪽이다.** 역산이 아니라 조판기의 증언이라 구멍이 없다.
+    pub break_reason: Option<(BreakReason, f64, f64)>,
 }
 
 impl PageFill {
@@ -897,6 +903,17 @@ pub fn own_page_fills(doc: &SemanticDoc) -> Vec<PageFill> {
         .map(|s| hwp_typeset::body_box(&s.page).3)
         .unwrap_or(0.0);
     let placed = hwp_typeset::place_doc(doc, &NullFontMetrics);
+    // 사유는 오라클 경로(`NaiveLayout`)가 남긴다. `place_doc` 과 쪽수가 LOCKSTEP 이라 쪽 번호가
+    // 같은 자리를 가리킨다(불변식 2).
+    let reasons: std::collections::BTreeMap<usize, (BreakReason, f64, f64)> = NaiveLayout
+        .layout(doc, &NullFontMetrics)
+        .map(|r| {
+            r.breaks
+                .iter()
+                .map(|b| (b.page, (b.reason, b.needed, b.available)))
+                .collect()
+        })
+        .unwrap_or_default();
     placed
         .pages
         .iter()
@@ -931,6 +948,7 @@ pub fn own_page_fills(doc: &SemanticDoc) -> Vec<PageFill> {
                 items: p.glyphs.len() + p.images.len() + p.tables.len(),
                 blocks,
                 next_block_height,
+                break_reason: reasons.get(&(i + 1)).copied(),
             }
         })
         .collect()
