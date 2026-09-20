@@ -1544,7 +1544,9 @@ fn layout_fidelity_inner(
     };
 
     if let Some(s0) = our.sections.first() {
-        f.body_height = s0.page.height - s0.page.margin_top - s0.page.margin_bottom;
+        // 이슈 319 — 조판과 같은 상자(가로 전환·머리말/꼬리말 포함).
+        let (_, _, _, body_h) = hwp_typeset::body_box(&s0.page);
+        f.body_height = body_h as i32;
     }
     for osec in &our.sections {
         for b in &osec.blocks {
@@ -1571,8 +1573,11 @@ fn layout_fidelity_inner(
     // The lift emits exactly one `Block::Paragraph` per rhwp top-level paragraph, in order (a pure
     // object/table anchor still gets an empty paragraph first) — so the two streams zip 1:1.
     for (rsec, osec) in rdoc.sections.iter().zip(our.sections.iter()) {
-        let body_w =
-            (osec.page.width - osec.page.margin_left - osec.page.margin_right).max(1) as f64;
+        // 이슈 319 — **조판과 같은 상자로 재야 한다.** 손계산은 `display_paper` 의 가로
+        // 전환(과 gutter·머리말)을 안 타서, 가로 문서에서 조판은 72850 인데 채점은 48190
+        // 으로 쟀다. 좁은 폭으로 재면 줄이 더 많이 나온다. 바로 아래 셀 채점은 원래
+        // `body_box` 를 쓴다 — 두 채점이 갈려 있었다.
+        let (_, _, body_w, _) = hwp_typeset::body_box(&osec.page);
         let mut our_paras = osec.blocks.iter().filter_map(|b| match b {
             Block::Paragraph(p) => Some(p),
             _ => None,
@@ -1794,8 +1799,8 @@ pub fn table_row_audit(bytes: &[u8], section: usize, block: usize) -> Result<Tab
         rtable
     };
 
-    let page = &osec.page;
-    let body_w = (page.width - page.margin_left - page.margin_right).max(1) as f64;
+    // 이슈 319 — 조판과 같은 상자. 손계산은 가로 전환을 안 탄다.
+    let (_, _, body_w, _) = hwp_typeset::body_box(&osec.page);
     let our_rows = hwp_typeset::row_term_breakdown(ot, body_w, &our, &fonts);
     let rows = ot.rows;
     let cols = ot.cols;
