@@ -62,6 +62,24 @@ function runLayoutJson(bin, paths) {
   return reports;
 }
 
+/**
+ * 이 baseline 이 **어느 코드에서 나왔는지** (이슈 305).
+ *
+ * `generated_at` 은 날짜뿐이라, 어긋났을 때 「다른 기계인가 다른 코드인가」를 가릴 수 없었다.
+ * 실제로 `corpus/hwp/복학원서.hwp` 항목은 최초 baseline(#250) 이후 **한 번도 다시 쓰이지
+ * 않은 채** 남아 있었다 — #275 가 baseline 을 11줄만 부분 갱신하면서 건드리지 않았기 때문이다.
+ * 그 사이 우리 줄수가 18 → 17 로 바뀌었고, 게이트는 그때부터 **줄곧 빨간 채로** 있었다.
+ *
+ * 워킹트리가 더러우면 `-dirty` 를 붙인다 — 그 SHA 로는 재현이 안 되기 때문이다.
+ */
+function generatingCommit() {
+  const sha = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" });
+  if (sha.status !== 0) return "unknown";
+  const head = sha.stdout.trim();
+  const dirty = spawnSync("git", ["status", "--porcelain"], { cwd: repo, encoding: "utf8" });
+  return dirty.status === 0 && dirty.stdout.trim() ? `${head}-dirty` : head;
+}
+
 function buildDoc(coverage, reports, presentRels) {
   const byFile = new Map();
   for (const r of reports) {
@@ -81,6 +99,8 @@ function buildDoc(coverage, reports, presentRels) {
     schema_version: 1,
     issue: 72,
     generated_at: new Date().toISOString().slice(0, 10),
+    // 이슈 305 — 날짜만으로는 「다른 기계인가 다른 코드인가」를 못 가린다.
+    commit: generatingCommit(),
     command: "auto-hwp layout-check --json (features rhwp,shaper) + scripts/oracle-sweep.mjs",
     disclaimer: DISCLAIMER,
     note: "Scores lock today's stored-lineseg numbers. They are not Hangul ground truth. Unscorable converted HWPX is not a zero. corpus/private user docs are not listed. GOV binaries stay unreproduced in git.",

@@ -375,6 +375,10 @@ export function validateCommitted(doc) {
   if (!String(doc.disclaimer || "").includes("참값")) {
     errors.push("disclaimer must say this is not Hangul ground truth");
   }
+  // 이슈 305 — 생성 커밋이 없으면 어긋났을 때 원인을 못 가린다. 손으로 고친 baseline 도 여기서 걸린다.
+  if (!/^[0-9a-f]{40}(-dirty)?$/.test(String(doc.commit || ""))) {
+    errors.push("commit must be the generating git SHA (re-run node scripts/oracle-sweep.mjs)");
+  }
   if (!Array.isArray(doc.documents) || doc.documents.length === 0) {
     errors.push("documents[] missing");
     return errors;

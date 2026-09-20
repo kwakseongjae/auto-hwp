@@ -100,6 +100,12 @@ jobs:
           node scripts/gov-source-catalog.mjs --check
           node scripts/public-corpus-intake.mjs --check
           node scripts/oracle-sweep.mjs --check-committed
+      # 이슈 305 — `--check-committed` 는 스키마만 본다. 실제 재채점은 여태 로컬
+      # `verify-local.sh --full` 에만 있었고, 그래서 baseline 이 **낡은 채로 머지**될 수
+      # 있었다(실측: `복학원서` 항목은 #250 이후 한 번도 다시 쓰이지 않아 게이트가 줄곧
+      # 빨갰다). 재채점을 CI 로 올려 낡은 baseline 이 못 들어오게 한다.
+      - name: oracle sweep re-score (issue 305 — baseline cannot go stale)
+        run: node scripts/oracle-sweep.mjs --check
       - name: canonical layout gate (issue 98 — bounded three-document run)
         run: |
           node --test scripts/tests/canonical-layout-gate.test.mjs
