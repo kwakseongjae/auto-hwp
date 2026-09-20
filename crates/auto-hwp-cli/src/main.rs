@@ -1311,7 +1311,7 @@ fn page_fill_print(bytes: &[u8]) -> Result<(), String> {
         // **조판기가 남긴 사유를 쓴다** (이슈 299). 역산은 구멍이 있었다 — 중첩 표가 바깥 블록
         // 번호를 달고 쪼개진 표가 범위를 왜곡해 표인데도 안 잡히는 블록이 있었다(#296).
         let verdict = match f.break_reason {
-            Some((reason, needed, avail)) => {
+            Some((reason, block, needed, avail)) => {
                 let name = match reason {
                     hwp_core::BreakReason::Forced => "강제개쪽",
                     hwp_core::BreakReason::SectionStart => "구역시작",
@@ -1327,7 +1327,7 @@ fn page_fill_print(bytes: &[u8]) -> Result<(), String> {
                 } else {
                     ""
                 };
-                format!("{name} (필요 {needed:.0} · 남음 {avail:.0}){mark}")
+                format!("{name} b{block} (필요 {needed:.0} · 남음 {avail:.0}){mark}")
             }
             // 단(column) 흐름 경로는 아직 사유를 안 남긴다 — 빈칸은 미구현이지 버그가 아니다.
             None => "—".into(),
@@ -1354,7 +1354,7 @@ fn page_fill_print(bytes: &[u8]) -> Result<(), String> {
         .iter()
         .filter(|f| {
             f.break_reason
-                .is_some_and(|(_, needed, avail)| needed > 0.0 && needed <= avail)
+                .is_some_and(|(_, _, needed, avail)| needed > 0.0 && needed <= avail)
         })
         .count();
     println!(
