@@ -253,6 +253,41 @@ fn uses_column_flow(doc: &SemanticDoc) -> bool {
 /// 판정은 추측이 아니라 소스 스팬 포함 관계다: 호스트 문단의 `<hp:p>` 스팬이 그 표의 `<hp:tbl>`
 /// 스팬을 감싸고 있으면 그 표는 이 문단의 소유다. 스팬이 없는 .hwp lift 경로는 애초에 순서가
 /// `[앵커, Table]` 라 끌어올릴 것이 없고, 이 판정도 자연히 false 가 된다(무해).
+/// 이 블록이 **무언가를 그리는가** (이슈 314).
+///
+/// 표는 그린다. 문단은 **인라인 객체가 있거나 글자가 하나라도 있으면** 그린다 —
+/// 공백만 있는 문단도 폭을 차지하므로 그리는 쪽이다(`horz_size > 0` 과 어긋나지 않게).
+/// 표 앵커 문단은 자기 줄을 만들지 않지만 자기 표가 따로 블록으로 있으므로 여기서는
+/// 글자 기준 그대로 둔다 — 앵커는 배치 경로에서 이미 건너뛴다.
+fn block_draws_something(block: &Block) -> bool {
+    match block {
+        Block::Paragraph(p) => p.runs.iter().any(|run| {
+            run.content.iter().any(|inline| match inline {
+                Inline::Text(text) => !text.is_empty(),
+                _ => true,
+            })
+        }),
+        _ => true,
+    }
+}
+
+/// 구역에서 **마지막으로 그리는 블록**의 인덱스 — 없으면 `None` (이슈 314).
+///
+/// 그 뒤의 블록에서 나온 **폭 0 인 줄**은 쪽을 만들지 못한다. 문서 끝에 빈 문단이 몇 개
+/// 붙어 있으면 그것들만 놓인 쪽이 통째로 비기 때문이다(실측: `어스샷 공모전` 의 `b92`·`b93`
+/// 이 94블록짜리 문서의 마지막 둘이고 둘 다 빈 문단이라 6쪽이 백지였다).
+///
+/// **`None` 이면 규칙은 아예 발동하지 않는다.** 「뒤따르는 빈 줄」이라는 말 자체가 앞에
+/// 무언가 있어야 성립한다 — 그리는 블록이 하나도 없는 문서(예: `"\n\n"` 하나뿐인 문단)는
+/// 지금 동작 그대로 쪽을 나눈다. 캐럿이 그 빈 줄에 앉아야 하기 때문이고,
+/// `hwp-session::body_caret_whitespace_keeps_forced_lines_and_real_advances` 가 그것을 지킨다.
+///
+/// `section_page_breaks` 와 같은 모양으로 **구역마다 한 번 계산해 세 경로가 공유**한다
+/// (불변식 2 — 경로마다 「그린다」를 따로 적으면 그 순간 갈린다).
+pub fn section_last_drawing_block(sec: &Section) -> Option<usize> {
+    sec.blocks.iter().rposition(block_draws_something)
+}
+
 pub fn section_page_breaks(sec: &Section, doc: &SemanticDoc) -> Vec<bool> {
     let mut out = vec![false; sec.blocks.len()];
     for (i, b) in sec.blocks.iter().enumerate() {
@@ -502,6 +537,8 @@ impl LayoutEngine for NaiveLayout {
             // "쪽 나누기 앞에서" — 블록별 강제 개쪽 플래그. place_doc/block_pages 와 **같은 함수**를
             // 거쳐야 LOCKSTEP 이 유지된다(이슈 080).
             let brk = crate::section_page_breaks(sec, doc);
+            // 이슈 314 — 이 뒤의 빈 줄은 쪽을 못 만든다. 구역마다 한 번만 센다.
+            let last_draw = crate::section_last_drawing_block(sec);
             let mut vert = 0.0f64; // page-relative vertical cursor
                                    // 이슈 307 — 마지막으로 **뭔가 그린** 쪽. 강제 개쪽은 이 쪽에서만 실행된다.
             let mut last_drawn = NOTHING_DRAWN;
@@ -537,7 +574,12 @@ impl LayoutEngine for NaiveLayout {
                             // 이슈 302 — 아무것도 그리지 않는 줄은 쪽을 넘기지 못한다.
                             if vert + ls.vert_size > body_h
                                 && vert > 0.0
-                                && line_forces_break(&ls, vert, body_h)
+                                && line_forces_break(
+                                    &ls,
+                                    vert,
+                                    body_h,
+                                    last_draw.is_some_and(|last| blk_idx > last),
+                                )
                             {
                                 break_page(
                                     &mut pages,
@@ -2105,8 +2147,18 @@ fn empty_para_size(p: &Paragraph, doc: &SemanticDoc) -> i32 {
 /// 또는 표의 행. 글리프 유무로 재면 갈린다(공백만 있는 줄은 폭이 있는데 글리프가 없다).
 pub(crate) const NOTHING_DRAWN: usize = usize::MAX;
 
-pub(crate) fn line_forces_break(ls: &LineSeg, vert: f64, body_h: f64) -> bool {
-    ls.horz_size > 0.0 || vert < body_h
+pub(crate) fn line_forces_break(ls: &LineSeg, vert: f64, body_h: f64, trailing: bool) -> bool {
+    // 그리는 줄은 언제나 끊는다 — 어딘가에는 그려져야 한다.
+    if ls.horz_size > 0.0 {
+        return true;
+    }
+    // 이슈 314 — 마지막으로 그리는 블록 **뒤**의 빈 줄. 쪽을 만들어 봐야 그 쪽은 빈다.
+    if trailing {
+        return false;
+    }
+    // 이슈 302 — 이미 넘친 쪽에 도착한 빈 줄만 흡수한다. 여유가 남은 쪽에서는 끊어야
+    // 캐럿이 그 줄에 앉는다.
+    vert < body_h
 }
 
 pub(crate) fn line_spacing_ratio(p: &Paragraph, doc: &SemanticDoc) -> f64 {
