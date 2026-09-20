@@ -531,7 +531,11 @@ impl LayoutEngine for NaiveLayout {
                         }
                         let ratio = line_spacing_ratio(p, doc);
                         for ls in layout_paragraph(p, doc, body_w, fonts) {
-                            if vert + ls.vert_size > body_h && vert > 0.0 {
+                            // 이슈 302 — 아무것도 그리지 않는 줄은 쪽을 넘기지 못한다.
+                            if vert + ls.vert_size > body_h
+                                && vert > 0.0
+                                && line_draws_something(&ls)
+                            {
                                 break_page(
                                     &mut pages,
                                     &mut breaks,
@@ -2060,6 +2064,27 @@ fn empty_para_size(p: &Paragraph, doc: &SemanticDoc) -> i32 {
 
 /// Line advance as a multiple of the glyph size, from the paragraph's percent line spacing
 /// (default ≈ 160%). Fixed/min spacing types fall back to the default for now.
+/// 아무것도 그리지 않는 줄은 쪽을 넘기지 못한다 (이슈 302).
+///
+/// 빈 문단의 줄은 **높이는 차지하지만 글리프가 없다**. 그 줄이 쪽 끝에서 안 들어간다고
+/// 쪽을 넘기면, 뒤이어 강제개쪽이 오거나 문서가 끝나면서 **아무것도 그려지지 않은 쪽**이
+/// 남는다. 한컴은 그 쪽을 만들지 않는다.
+///
+/// 실측(문서 78건): 빈 쪽 7건이 전부 이 모양이었다 — `줄 안 들어감` 으로 생긴 쪽에
+/// 요소 0, 바로 다음 쪽은 `강제개쪽`. 문서 끝(04·어스샷)과 문서 중간(01 의 2쪽,
+/// prism-moel 의 13쪽 중 2쪽) 양쪽에서 났다.
+///
+/// **판정을 한 곳에 두는 이유는 불변식 2 다.** `NaiveLayout` · `place_doc` · `block_pages`
+/// 가 쪽수에 합의해야 하는데, 경로마다 "빈 줄"을 따로 정의하면 그 순간 갈린다.
+/// 세 곳이 이 함수 하나를 부른다.
+///
+/// `horz_size` 를 쓰는 이유: `LineSeg` 가 들고 있는 값 중 **그려질 것의 유무**를 말하는
+/// 유일한 값이다. 글리프가 없으면 0 이다. (높이 `vert_size` 는 빈 줄도 갖는다 — 그래서
+/// 진단기의 `필요 1200` 은 빈 줄의 증거가 아니다. 12pt 줄이면 내용이 있어도 1200 이다.)
+pub(crate) fn line_draws_something(ls: &LineSeg) -> bool {
+    ls.horz_size > 0.0
+}
+
 pub(crate) fn line_spacing_ratio(p: &Paragraph, doc: &SemanticDoc) -> f64 {
     match doc.para_shapes.get(p.para_shape) {
         Some(s) if s.line_spacing_type == LineSpacingType::Percent && s.line_spacing_value > 0 => {
