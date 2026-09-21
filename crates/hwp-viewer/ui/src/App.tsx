@@ -273,6 +273,19 @@ export default function App() {
     try { localStorage.setItem(HINT_KEY, "1"); } catch { /* private mode — just hide it this session */ }
   }, []);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
+  /// 이슈 270 — 열기에 **기다림을 포기할 경로**를 준다.
+  ///
+  /// macOS 개인정보 동의창이 답 없이 떠 있으면 열기가 **영구히 멈춘다**(출시본 0.0.1 동일).
+  /// 진행 표시만 돌고 무엇을 기다리는지 알 수 없어 **앱이 죽은 것으로 보인다.**
+  ///
+  /// **끊지 않고 설명한다.** 큰 문서는 정말로 느릴 수 있어서 하드 타임아웃으로 죽이면 정상
+  /// 동작을 깨뜨린다. 일정 시간이 지나면 무엇을 기다리는지 말하고 취소를 준다 — 취소는
+  /// **기다림을 포기할 뿐** 진행 중인 열기를 죽이지 않는다(뒤늦게 끝나면 그 결과를 버린다).
+  ///
+  /// 토큰으로 가르는 이유: 취소했거나 **다른 문서를 새로 열었으면** 늦게 온 결과가 화면을
+  /// 덮어쓰면 안 된다. `finally` 의 상태 정리도 같은 토큰을 본다.
+  const SLOW_OPEN_MS = 8000;
+  const openToken = useRef(0);
   // The full-screen busy overlay is BLOCKING, so only raise it for genuinely slow work: while busy, a
   // thin top progress bar shows immediately, and the dimming overlay only appears if the op is still
   // running after a short grace period (fast ops finish first → no jarring flash). `overlayBusy`
@@ -2119,8 +2132,29 @@ export default function App() {
   /// `WorkspaceShell` 만 폴링했다). 열기 동작이 둘로 갈리면 한쪽만 고쳐지고 다른 쪽은 조용히 썩는다.
   const openPath = useCallback(async (path: string) => {
     setBusyLabel("문서 여는 중…");
+    const token = ++openToken.current;
+    const abandoned = () => openToken.current !== token; // 이슈 270
+    const slow = window.setTimeout(() => {
+      if (abandoned()) return;
+      setBusyLabel("문서 여는 중… — 권한 요청에 답해야 계속될 수 있습니다");
+      toast(
+        "warn",
+        "열기가 오래 걸립니다. macOS 권한 동의창이 떠 있으면 먼저 답해 주세요.",
+        [
+          {
+            label: "기다리지 않기",
+            run: () => {
+              if (abandoned()) return;
+              openToken.current += 1; // 늦게 오는 결과를 버린다
+              setBusyLabel(null);
+            },
+          },
+        ],
+      );
+    }, SLOW_OPEN_MS);
     try {
       const r = await api.openDoc(path);
+      if (abandoned()) return; // 사용자가 기다리길 그만뒀거나 다른 문서를 열었다
       const name = path.split("/").pop() ?? path;
       setDocName(name);
       setEditable(r.editable);
@@ -2145,9 +2179,12 @@ export default function App() {
         ]);
       }
     } catch (e) {
+      if (abandoned()) return;
       toast("warn", `열기 실패: ${e}`);
     } finally {
-      setBusyLabel(null);
+      window.clearTimeout(slow);
+      // 포기했거나 다른 열기가 시작됐으면 그쪽 상태를 건드리지 않는다.
+      if (!abandoned()) setBusyLabel(null);
     }
   }, [invalidate]);
 
