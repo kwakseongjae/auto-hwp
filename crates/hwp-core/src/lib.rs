@@ -866,6 +866,22 @@ pub struct PageFill {
     /// ⚠️ 중첩 표가 바깥 블록 번호를 달고 쪼개진 표가 범위를 왜곡해서, 표인데도 안 잡히는
     /// 블록이 있다(#296). **`break_reason` 이 있으면 그쪽을 믿는다.**
     pub next_block_height: Option<f64>,
+    /// 이 쪽에 그려진 **공백 아닌 글자 수** (이슈 321).
+    ///
+    /// 저장 `lineseg` 가 제거된 문서(변환 HWPX)에서 「쪽당 얼마나 담았나」를 재는 유일한
+    /// 공통 기준이다 — 한컴 쪽은 `page_text_anchors` 의 글자를 **같은 방식**으로 센다.
+    ///
+    /// **줄 수를 쓰지 않는 이유**: 「서로 다른 baseline 의 개수」는 줄 수가 아니다.
+    /// 나란한 셀의 줄이 같은 baseline 을 공유하면 하나로 합쳐지고, **두 엔진이 다르게
+    /// 합친다** — 실측으로 `복학원서.hwp` 는 저장 lineseg 기준 **100% 정확**인데
+    /// baseline 개수로는 `우리 39 · 한컴 60` 으로 벌어졌다. 그 수로 재면 틀린다.
+    pub chars: usize,
+    /// 이 쪽 글리프의 **서로 다른 baseline 개수**. 줄 수가 **아니다**(위 설명) —
+    /// 같은 쪽 안의 수직 분포를 보는 참고 값이다.
+    pub baselines: usize,
+    /// 그려진 글자의 **아래끝** (HWPUNIT, 본문 상자 기준) — `used` 는 표·이미지까지 포함하는데
+    /// 이 값은 글자만 본다. 한컴의 `max(top + height)` 와 맞댄다.
+    pub text_bottom: f64,
     /// 이 쪽을 **시작시킨** break 의 기록 (이슈 299) — 조판기가 그 자리에서 남긴 것이다.
     ///
     /// `(사유, 일으킨 블록, 들어가려던 높이, 남아 있던 높이)`. **`needed <= available` 인데
@@ -953,11 +969,21 @@ pub fn own_page_fills(doc: &SemanticDoc) -> Vec<PageFill> {
                 .pages
                 .get(i + 1)
                 .and_then(|n| n.tables.iter().min_by_key(|t| t.block).map(|t| t.h));
+            // 이슈 321 — 서로 다른 baseline 의 개수가 곧 줄 수다. 부동소수 비교를 피하려고
+            // 1 HWPUNIT 로 반올림해 센다(한 줄 안의 글리프는 baseline 이 정확히 같다).
+            let mut baselines: Vec<i64> =
+                p.glyphs.iter().map(|g| g.baseline.round() as i64).collect();
+            baselines.sort_unstable();
+            baselines.dedup();
+            let chars = p.glyphs.iter().filter(|g| !g.ch.is_whitespace()).count();
             PageFill {
                 page: i + 1,
                 used: glyph_bottom.max(image_bottom).max(table_bottom),
                 body,
                 items: p.glyphs.len() + p.images.len() + p.tables.len(),
+                chars,
+                baselines: baselines.len(),
+                text_bottom: glyph_bottom,
                 blocks,
                 next_block_height,
                 break_reason: reasons.get(&(i + 1)).copied(),
