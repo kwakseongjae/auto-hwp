@@ -188,6 +188,12 @@ enum Cmd {
         /// 맞을 때, 어느 쪽에서 비는지 본다. `--rows`(행)·`--cells`(줄)의 쪽 단위 짝이다.
         #[arg(long, conflicts_with_all = ["rows", "cells"])]
         pages: bool,
+        /// 이슈 321 — **저장 `lineseg` 가 없는 문서**(변환·정규화 HWPX)를 rhwp 의 **실제 렌더
+        /// 기하**로 잰다. 캐시가 제거된 문서는 `--rows`·`--cells` 가 통째로 비어서 쪽수 말고는
+        /// 대조할 근거가 없었다. 양쪽 모두 **서로 다른 baseline 의 개수**로 줄을 세므로
+        /// 같은 방식이다. 진단 전용 — 오라클 점수·baseline 은 건드리지 않는다.
+        #[arg(long, conflicts_with_all = ["rows", "cells", "pages", "json"])]
+        rendered: bool,
         /// JSON array of per-file scores (issue #72 corpus sweep). No cell text. Incompatible with
         /// `--rows`/`--cells`.
         #[arg(long)]
@@ -359,8 +365,14 @@ fn run() -> Result<(), String> {
             json,
             every_cell,
             pages,
+            rendered,
         } => {
-            if json {
+            if rendered {
+                if files.len() != 1 {
+                    return Err("--rendered takes one file".into());
+                }
+                rendered_check(&files[0])?;
+            } else if json {
                 if rows.is_some() || cells.is_some() {
                     return Err("--json cannot be combined with --rows/--cells".into());
                 }
@@ -1657,6 +1669,117 @@ fn table_row_audit_print(bytes: &[u8], spec: &str) -> Result<(), String> {
         (r.our_total - r.han_cell_total) / n
     );
     Ok(())
+}
+
+/// 이슈 321 — **저장 `lineseg` 가 없는 문서**를 rhwp 의 실제 렌더 기하로 잰다.
+///
+/// 변환·정규화된 HWPX 는 레이아웃 캐시가 제거돼 있어 `--rows`·`--cells` 가 통째로 빈다
+/// (실측: `benchmark1.hwpx` 는 문단 325개 중 저장 lineseg 가 **1개**, `--rows` 의 한컴 셀 높이가
+/// 전 행 2200 고정). 그러면 대조할 근거가 쪽수 하나뿐이다.
+///
+/// 재는 것은 **쪽당 공백 아닌 글자 수**와 **글이 닿은 아래끝**이다. 한컴 쪽은
+/// `page_text_anchors`(그린 것)에서, 우리 쪽은 `own_page_fills` 에서 **같은 방식**으로 센다.
+///
+/// **줄 수로 재지 않는다.** 「서로 다른 baseline 의 개수」는 줄 수가 아니다 — 나란한 셀의
+/// 줄이 같은 baseline 을 공유해 합쳐지고 **두 엔진이 다르게 합친다.** 실측으로
+/// `복학원서.hwp` 는 저장 lineseg 기준 **100% 정확**인데 baseline 개수로는
+/// `우리 39 · 한컴 60` 으로 벌어졌다. 그 수로 쟀으면 멀쩡한 문서를 결함으로 읽었을 것이다.
+#[cfg(feature = "rhwp")]
+fn rendered_check(file: &PathBuf) -> Result<(), String> {
+    let bytes = read(file)?;
+    let doc = hwp_core::Engine::open(&bytes).map_err(|e| e.to_string())?;
+    let ours = hwp_core::own_page_fills(&doc);
+    let han_pages = hwp_rhwp::page_count(&bytes).map_err(|e| e.to_string())? as usize;
+
+    println!(
+        "렌더 기하 대조 (우리 조판 vs 한컴 실제 렌더): {}",
+        file.display()
+    );
+    println!("  쪽수      우리 {:>4} · 한컴 {:>4}", ours.len(), han_pages);
+    println!(
+        "    {:>4} | {:>8} {:>8} {:>7} | {:>9}",
+        "쪽", "우리글자", "한컴글자", "델타", "우리글끝"
+    );
+
+    let dash = "—".to_string();
+    let (mut our_total, mut han_total) = (0usize, 0usize);
+    for page in 0..ours.len().max(han_pages) {
+        let mine = ours.get(page);
+        // 한 쪽이 못 열려도 나머지는 봐야 한다 — 빈칸으로 남기고 계속한다.
+        let han = if page < han_pages {
+            hwp_rhwp::page_text_anchors(&bytes, page as u32)
+                .ok()
+                .map(|anchors| {
+                    anchors
+                        .iter()
+                        .map(|a| a.text.chars().filter(|c| !c.is_whitespace()).count())
+                        .sum::<usize>()
+                })
+        } else {
+            None
+        };
+        our_total += mine.map(|f| f.chars).unwrap_or(0);
+        han_total += han.unwrap_or(0);
+        println!(
+            "    {:>4} | {:>8} {:>8} {:>7} | {:>9}",
+            page + 1,
+            mine.map(|f| f.chars.to_string())
+                .unwrap_or_else(|| dash.clone()),
+            han.map(|n| n.to_string()).unwrap_or_else(|| dash.clone()),
+            match (mine, han) {
+                (Some(f), Some(h)) => format!("{:+}", f.chars as i64 - h as i64),
+                _ => dash.clone(),
+            },
+            mine.map(|f| format!("{:.0}", f.text_bottom))
+                .unwrap_or_else(|| dash.clone()),
+        );
+    }
+    let our_per = if ours.is_empty() {
+        0.0
+    } else {
+        our_total as f64 / ours.len() as f64
+    };
+    let han_per = if han_pages == 0 {
+        0.0
+    } else {
+        han_total as f64 / han_pages as f64
+    };
+    println!(
+        "  합계      글자 우리 {our_total} · 한컴 {han_total} (비율 {:.3})",
+        if han_total > 0 {
+            our_total as f64 / han_total as f64
+        } else {
+            0.0
+        }
+    );
+    println!(
+        "  쪽당      우리 {our_per:.1} · 한컴 {han_per:.1} 자  → **우리가 쪽당 {:.1}% {}**",
+        if han_per > 0.0 {
+            (our_per / han_per - 1.0).abs() * 100.0
+        } else {
+            0.0
+        },
+        if our_per < han_per {
+            "덜 담는다"
+        } else {
+            "더 담는다"
+        }
+    );
+    if han_total > 0 && (our_total as f64 / han_total as f64 - 1.0).abs() > 0.01 {
+        println!(
+            "  ⚠ 총 글자가 1% 넘게 다르다 — 우리가 **안 그리는 것**이 있다는 뜻이라, \
+             쪽당 비교는 그만큼 흔들린다. 비율이 1.000 일 때만 쪽당 수치를 믿을 것."
+        );
+    }
+    println!(
+        "  → 저장 `lineseg` 가 아니라 **그린 것**을 센다. 줄 수가 아니라 글자 수다(주석 참조)."
+    );
+    Ok(())
+}
+
+#[cfg(not(feature = "rhwp"))]
+fn rendered_check(_file: &PathBuf) -> Result<(), String> {
+    Err("`--rendered` needs the rhwp bootstrap: build with `--features rhwp`".into())
 }
 
 #[cfg(not(feature = "rhwp"))]
