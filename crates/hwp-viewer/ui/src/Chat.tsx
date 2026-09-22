@@ -167,7 +167,6 @@ export function Chat(props: {
     }
   }
 
-  const isMock = props.provider === "mock" || props.provider === "none";
   const last = msgs[msgs.length - 1];
   const awaiting = last?.role === "assistant" && last.state === "pending";
 
@@ -321,7 +320,7 @@ export function Chat(props: {
       >
         <button
           onClick={() => setCollapsed(false)}
-          title="바이브 편집 패널 펼치기"
+          title="편집 패널 펼치기"
           className="rounded-md px-1.5 py-1 text-ai hover:bg-ai/10"
         >
           ✦
@@ -330,7 +329,7 @@ export function Chat(props: {
           className="text-[11px] font-medium text-neutral-400"
           style={{ writingMode: "vertical-rl" }}
         >
-          바이브 편집
+          편집
         </span>
         {awaiting && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" title="검토 대기 중인 제안" />}
       </aside>
@@ -352,8 +351,7 @@ export function Chat(props: {
       </div>
 
       <div className="flex h-10 shrink-0 items-center gap-2 border-b border-black/10 px-3 text-sm font-medium text-ai dark:border-white/10">
-        ✦ 바이브 편집
-        <span className="font-normal text-neutral-400">· 가리키고 말하세요</span>
+        편집
         <button
           onClick={() => setCollapsed(true)}
           title="패널 접기"
@@ -362,13 +360,6 @@ export function Chat(props: {
           ⇥
         </button>
       </div>
-
-      {isMock && (
-        <div className="border-b border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-400">
-          ⚠️ 데모 모드(mock): 요청을 실제로 이해하지 못하고 예시 편집만 보여줍니다. 실제 편집은
-          {" "}<code className="rounded bg-black/10 px-1 dark:bg-white/10">ANTHROPIC_API_KEY</code> 설정(또는 Ollama 실행) 후 앱 재시작.
-        </div>
-      )}
 
       <div ref={listRef} className="min-h-0 flex-1 overflow-auto p-3">
         {msgs.length === 0 && (
