@@ -2168,7 +2168,7 @@ export default function App() {
       viewModeRef.current = mode;
       invalidate(r.pages);
       if (mode === "html") void loadDocHtml();
-      if (r.editable) setChatOpen(true); // surface the vibe-docs chat on an editable doc
+      setChatOpen(true); // 0.0.3 — the right dock is the editing body whenever a document is open
       if (r.convertedPath) {
         const saved = r.convertedPath.split("/").pop() ?? r.convertedPath;
         toast("ok", `${name} · ${r.pages}쪽 · 편집용 .hwpx 저장됨: ${saved}`);

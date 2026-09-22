@@ -1,7 +1,7 @@
 {
   "name": "auto-hwp-viewer-ui",
   "private": true,
-  "version": "0.0.2",
+  "version": "0.0.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
