@@ -14,7 +14,8 @@ import { Composer, type ComposerMode } from "./Composer";
 import { Chat, type Scope } from "./Chat";
 import { PRESETS, presetAccepts, type PresetTarget } from "./presets";
 import { PendingInline } from "./PendingInline";
-import { Button, IconButton, Sep, SegmentedControl } from "./ui";
+import { Button, Sep, SegmentedControl } from "./ui";
+import { APP_VERSION } from "./version";
 import { InspectPanel, useFidelity } from "./Inspect";
 import { Dashboard } from "./Dashboard";
 import { VersionsPanel } from "./Versions";
@@ -2537,11 +2538,15 @@ export default function App() {
       { id: "versions", title: "버전 기록 — 저장하고 되돌리기", group: "검수", keys: "⌘⇧V", keywords: "version 버전 기록 되돌리기 restore history 스냅샷", disabled: !haveDoc, run: () => setVersionsOpen((o) => !o) },
       { id: "duplicate", title: "문서 복제 (사본 만들기)", group: "문서", keywords: "duplicate 복제 사본 copy", disabled: !haveDoc, run: doDuplicate },
       { id: "inspect", title: "검수 — 원본과의 충실도", group: "검수", keys: "⌘⇧I", keywords: "inspect 검수 충실도 쪽수 fidelity 원본 대조 오라클 layout-check", disabled: !haveDoc, run: () => setInspectOpen((o) => !o) },
+      { id: "view-svg", title: "원본 보기", group: "보기", keywords: "원본 보기 svg rhwp 레이아웃", disabled: !haveDoc || edited, run: () => setMode("svg") },
+      { id: "view-html", title: "HTML 미리보기", group: "보기", keywords: "html 미리보기 jsx css", disabled: !haveDoc, run: () => setMode("html") },
+      { id: "view-own", title: "자체 렌더", group: "보기", keywords: "자체 렌더 own engine place", disabled: !haveDoc, run: () => setMode("own") },
+      { id: "outline", title: "문서 개요", group: "보기", keys: "⌘\\", keywords: "outline 개요 목차", disabled: !haveDoc, run: () => setOutlineOpen((o) => !o) },
       { id: "find", title: "찾기 / 바꾸기", group: "편집", keys: "⌘F", keywords: "find replace 찾기 바꾸기 검색 치환", disabled: !haveDoc, run: openFind },
       { id: "undo", title: "실행 취소", group: "편집", keys: "⌘Z", keywords: "undo 실행취소", disabled: !canEdit, run: doUndo },
       { id: "redo", title: "다시 실행", group: "편집", keys: "⌘⇧Z", keywords: "redo 다시실행", disabled: !canEdit, run: doRedo },
     ];
-  }, [pageCount, canEdit, doOpen, doExport, doExportHtml, doExportPdf, openFind, doUndo, doRedo, doDuplicate]);
+  }, [pageCount, canEdit, edited, doOpen, doExport, doExportHtml, doExportPdf, openFind, doUndo, doRedo, doDuplicate, setMode]);
 
   // ---- global shortcuts: registered ONCE; closures call the always-current handler set via a ref. ----
   const handlers = useRef({ doOpen, doExport, doUndo, doRedo, openFind, zoomIn, zoomOut, zoomReset });
@@ -2879,55 +2884,24 @@ export default function App() {
           <span data-tauri-drag-region className="text-sm font-semibold tracking-tight text-neutral-400">한칸</span>
         )}
         <div data-tauri-drag-region className="h-6 flex-1" />
-        {pageCount > 0 && (
-          <IconButton onClick={() => setOutlineOpen((o) => !o)} title="문서 개요 (⌘\\)" active={outlineOpen}>
-            ☰ 개요
-          </IconButton>
-        )}
-        {canEdit && (
-          <IconButton onClick={() => setChatOpen((o) => !o)} title="AI 바이브 편집 (⌘L)" active={chatOpen} tone="ai">
-            ✦ 바이브 <kbd className="rounded bg-black/5 px-1 dark:bg-white/10">⌘L</kbd>
-          </IconButton>
-        )}
-        {pageCount > 0 && (
-          <IconButton onClick={() => setVersionsOpen((o) => !o)} title="버전 기록 (⌘⇧V)" active={versionsOpen}>
-            ⏱ 버전
-          </IconButton>
-        )}
-        {pageCount > 0 && (
-          <IconButton onClick={() => setInspectOpen((o) => !o)} title="검수 — 원본과의 충실도 (⌘⇧I)" active={inspectOpen}>
-            ◎ 검수
-          </IconButton>
-        )}
-        <IconButton onClick={() => setPaletteOpen(true)} title="명령 팔레트 (⌘K)">
-          명령 <kbd className="rounded bg-black/5 px-1 dark:bg-white/10">⌘K</kbd>
-        </IconButton>
       </header>
 
       {pageCount > 0 && (
-        <div className="flex h-10 shrink-0 items-center gap-0.5 border-b border-black/10 bg-neutral-50/40 px-2 dark:border-white/10 dark:bg-neutral-800/30">
-          <Button onClick={doOpen} icon="📂" label="열기" keys="⌘O" />
-          <Button onClick={doExport} icon="⬇︎" label="HWPX" keys="⌘S" />
-          <Button onClick={doExportHtml} icon="🅷" label="HTML" />
-          <Button onClick={doExportPdf} icon="📄" label="PDF" />
+        <div className="flex h-10 shrink-0 items-center gap-0.5 overflow-x-auto border-b border-black/10 bg-neutral-50/40 px-2 dark:border-white/10 dark:bg-neutral-800/30">
+          <Button onClick={doOpen} label="열기" keys="⌘O" />
+          <Button onClick={doExport} label="HWPX" keys="⌘S" />
+          <Button onClick={doExportPdf} label="PDF" />
           <Sep />
-          <Button onClick={() => setChatOpen((o) => !o)} icon="✦" label="바이브 편집" tone="ai" keys="⌘L" disabled={!canEdit} />
-          <Button onClick={() => setComposer("table")} icon="▦" label="표" keys="⌘T" disabled={!canEdit} />
+          <Button onClick={() => setChatOpen((o) => !o)} label="바이브" tone="ai" keys="⌘L" disabled={!canEdit} active={chatOpen} />
+          <Button onClick={() => setComposer("table")} label="표" keys="⌘T" disabled={!canEdit} />
           <Sep />
-          {/* View surface: 원본(rhwp layout-preserve) · HTML(JSX/CSS pivot) · 자체 렌더(OUR engine).
-              원본 is disabled once edited (rhwp can't re-render edits); the other two render the live IR. */}
-          <SegmentedControl
-            value={viewMode}
-            onChange={setMode}
-            segments={[
-              { value: "svg", label: "원본", icon: "🖹", title: "원본 보기 (rhwp · 레이아웃 보존)", disabled: edited },
-              { value: "html", label: "HTML", icon: "🅷", title: "HTML 미리보기 (JSX/CSS · 내보내기와 동일)" },
-              { value: "own", label: "자체 렌더", icon: "◈", title: "자체 렌더 (우리 엔진 · place_doc → SVG)" },
-            ]}
-          />
+          <Button onClick={doUndo} label="실행취소" keys="⌘Z" disabled={!canEdit} />
+          <Button onClick={doRedo} label="다시실행" keys="⌘⇧Z" disabled={!canEdit} />
           <Sep />
-          <Button onClick={doUndo} icon="↩︎" label="실행취소" keys="⌘Z" disabled={!canEdit} />
-          <Button onClick={doRedo} icon="↪︎" label="다시실행" disabled={!canEdit} />
+          <Button onClick={() => setOutlineOpen((o) => !o)} label="개요" keys="⌘\\" active={outlineOpen} />
+          <Button onClick={() => setVersionsOpen((o) => !o)} label="버전" keys="⌘⇧V" active={versionsOpen} />
+          <div className="min-w-2 flex-1" />
+          <Button onClick={() => setPaletteOpen(true)} label="명령" keys="⌘K" />
         </div>
       )}
 
@@ -3583,6 +3557,7 @@ export default function App() {
         ) : (
           <span>준비됨</span>
         )}
+        <span className="tabular-nums text-neutral-400" title="앱 버전">{APP_VERSION}</span>
 
         <span className="flex-1" />
 
