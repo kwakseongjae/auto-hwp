@@ -674,6 +674,26 @@ pub fn synthesize_char_pr(
 ) -> String {
     let mut s = base.to_string();
     s = set_attr(&s, "id", &new_id.to_string());
+    // #340: `base` is the header's FIRST charPr, which is not necessarily plain — a form whose charPr 0
+    // is bold+italic+blue leaked those onto every synthesized run (and the dedup below then mapped the
+    // synthesized shape back onto id 0). Neutralize every flag the shape carries explicitly, then
+    // re-apply the shape's own values below.
+    for marker in [
+        "<hh:italic/>",
+        "<hh:bold/>",
+        "<hh:supscript/>",
+        "<hh:subscript/>",
+    ] {
+        s = s.replace(marker, "");
+    }
+    if let Some(p) = s.find("<hh:underline") {
+        let seg = set_attr(&s[p..], "type", "NONE");
+        s = format!("{}{}", &s[..p], seg);
+    }
+    if let Some(p) = s.find("<hh:strikeout") {
+        let seg = set_attr(&s[p..], "shape", "NONE");
+        s = format!("{}{}", &s[..p], seg);
+    }
     // Replace the cloned <hh:fontRef …/> with the interned font's reference, if a font was requested.
     if let Some(fr) = fontref {
         if let Some(p) = s.find("<hh:fontRef") {
@@ -703,9 +723,8 @@ pub fn synthesize_char_pr(
         let vals: [String; 7] = std::array::from_fn(|i| shape.spacing.0[i].to_string());
         s = set_per_script_child(&s, "spacing", &vals);
     }
-    if shape.text_color != Color::default() {
-        s = set_attr(&s, "textColor", &shape.text_color.to_hex());
-    }
+    // Always the shape's own color — `base` may be a blue/red guidance charPr (#340).
+    s = set_attr(&s, "textColor", &shape.text_color.to_hex());
     if shape.shade_color != Color::default() {
         s = set_attr(&s, "shadeColor", &shape.shade_color.to_hex());
     }
@@ -1069,6 +1088,63 @@ mod tests {
     use super::*;
 
     const BASE: &str = r##"<hh:charPr id="0" height="1000" textColor="#000000" shadeColor="none" useFontSpace="0" useKerning="0" symMark="NONE" borderFillIDRef="2"><hh:fontRef hangul="1" latin="1" hanja="1" japanese="1" other="1" symbol="1" user="1"/><hh:ratio hangul="100" latin="100" hanja="100" japanese="100" other="100" symbol="100" user="100"/><hh:spacing hangul="0" latin="0" hanja="0" japanese="0" other="0" symbol="0" user="0"/><hh:relSz hangul="100" latin="100" hanja="100" japanese="100" other="100" symbol="100" user="100"/><hh:offset hangul="0" latin="0" hanja="0" japanese="0" other="0" symbol="0" user="0"/><hh:underline type="NONE" shape="SOLID" color="#000000"/><hh:strikeout shape="NONE" color="#000000"/><hh:outline type="NONE"/><hh:shadow type="NONE" color="#B2B2B2" offsetX="10" offsetY="10"/></hh:charPr>"##;
+
+    /// #340 — 첫 charPr(합성의 복제 원본)가 굵게 · 기울임 · 파랑 · 밑줄 · 취소선 · 위첨자면, 그 값이 합성
+    /// 결과로 새면 안 된다. 새면 합성본이 원본 id 0 과 같아져 중복 제거가 `charPrIDRef="0"` 을 준다.
+    #[test]
+    fn synthesis_does_not_inherit_base_flags() {
+        let styled_base = BASE
+            .replace(r##"textColor="#000000""##, r##"textColor="#0000FF""##)
+            .replace(
+                "<hh:underline type=\"NONE\"",
+                "<hh:italic/><hh:bold/><hh:underline type=\"BOTTOM\"",
+            )
+            .replace(
+                "<hh:strikeout shape=\"NONE\"",
+                "<hh:strikeout shape=\"SOLID\"",
+            )
+            .replace("<hh:outline", "<hh:supscript/><hh:outline");
+        let out = synthesize_char_pr(
+            &styled_base,
+            9,
+            &CharShape {
+                height: 1100,
+                ..Default::default()
+            },
+            None,
+        );
+        assert!(!out.contains("<hh:italic/>"), "italic leaked: {out}");
+        assert!(!out.contains("<hh:bold/>"), "bold leaked: {out}");
+        assert!(!out.contains("<hh:supscript/>"), "supscript leaked: {out}");
+        assert!(
+            out.contains(r##"textColor="#000000""##),
+            "color leaked: {out}"
+        );
+        assert!(
+            out.contains("<hh:underline type=\"NONE\""),
+            "underline leaked: {out}"
+        );
+        assert!(
+            out.contains("<hh:strikeout shape=\"NONE\""),
+            "strikeout leaked: {out}"
+        );
+        // 요청한 표지는 그대로
+        let bold = synthesize_char_pr(
+            &styled_base,
+            9,
+            &CharShape {
+                bold: true,
+                ..Default::default()
+            },
+            None,
+        );
+        assert_eq!(
+            bold.matches("<hh:bold/>").count(),
+            1,
+            "exactly one bold: {bold}"
+        );
+        assert!(!bold.contains("<hh:italic/>"));
+    }
 
     #[test]
     fn bold_synthesis_is_pure_bold_not_colored() {
