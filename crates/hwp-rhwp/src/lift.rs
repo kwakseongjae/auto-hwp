@@ -441,7 +441,7 @@ impl<'a> Lifter<'a> {
             .char_shapes
             .iter()
             .map(|r| {
-                let start = utf16_to_char_idx(&p.text, r.start_pos).min(total);
+                let start = char_shape_start(p, total, r.start_pos);
                 let idx = self
                     .char_id_to_idx
                     .get(&r.char_shape_id)
@@ -779,6 +779,25 @@ fn lift_caption_position(direction: RCaptionDirection) -> TableCaptionPosition {
         RCaptionDirection::Top => TableCaptionPosition::Top,
         RCaptionDirection::Bottom => TableCaptionPosition::Bottom,
     }
+}
+
+/// Char index where a `CharShapeRef` takes effect (issue #338).
+///
+/// `start_pos` is a position in the ORIGINAL HWP5 paragraph stream, which also counts inline
+/// controls (an extended control such as a click-here field begin costs 8 UTF-16 units) that are
+/// not part of `p.text`. rhwp records each char's original position in `char_offsets`, so the
+/// boundary is the first char at or after `start_pos`. Counting units in the control-stripped text
+/// instead shifts every later boundary by the controls' width. Paragraphs without a usable
+/// `char_offsets` (synthetic / length mismatch) keep the plain UTF-16 count.
+fn char_shape_start(p: &RParagraph, total: usize, start_pos: u32) -> usize {
+    if !p.char_offsets.is_empty() && p.char_offsets.len() == total {
+        return p
+            .char_offsets
+            .iter()
+            .position(|&offset| offset >= start_pos)
+            .unwrap_or(total);
+    }
+    utf16_to_char_idx(&p.text, start_pos).min(total)
 }
 
 /// Convert a UTF-16 code-unit offset (rhwp `CharShapeRef.start_pos`) to a char (Unicode scalar)
@@ -1633,6 +1652,74 @@ mod tests {
         // Out-of-table index falls back to the scaled formula, never below the floor.
         assert!(border_width_to_px(20) >= 0.5);
         assert!(border_width_to_px(255) <= 20.0);
+    }
+
+    /// Issue #338: a HWP5 paragraph whose text is preceded by an inline extended control (8 UTF-16
+    /// units — e.g. a click-here field begin) stores `CharShapeRef.start_pos` in ORIGINAL stream units.
+    /// The boundary must be found through rhwp's `char_offsets`, not by counting units in the
+    /// control-stripped text — otherwise the first 8 characters keep the previous shape.
+    #[test]
+    fn char_shape_boundaries_follow_char_offsets_past_inline_controls() {
+        use rhwp::model::document::{Document, Section};
+        use rhwp::model::paragraph::{CharShapeRef, Paragraph as RPara};
+
+        let text = "ABCDEFGHIJ"; // 10 chars; an 8-unit control sits before them (units 0..8)
+        let para = RPara {
+            text: text.into(),
+            char_offsets: (8..18).collect(),
+            char_shapes: vec![
+                CharShapeRef {
+                    start_pos: 0,
+                    char_shape_id: 0,
+                },
+                CharShapeRef {
+                    start_pos: 8, // == the first character → the whole text is shape 1
+                    char_shape_id: 1,
+                },
+                CharShapeRef {
+                    start_pos: 13, // == char 5 ('F')
+                    char_shape_id: 0,
+                },
+            ],
+            ..Default::default()
+        };
+        let mut doc = Document::default();
+        doc.doc_info.char_shapes = vec![
+            RCharShape::default(),
+            RCharShape {
+                italic: true,
+                ..Default::default()
+            },
+        ];
+        doc.sections.push(Section {
+            paragraphs: vec![para],
+            ..Default::default()
+        });
+
+        let semantic = Lifter::new(&doc).run();
+        let Block::Paragraph(paragraph) = &semantic.sections[0].blocks[0] else {
+            panic!("one paragraph")
+        };
+        let runs: Vec<(String, bool)> = paragraph
+            .runs
+            .iter()
+            .map(|run| {
+                let text: String = run
+                    .content
+                    .iter()
+                    .filter_map(|inline| match inline {
+                        Inline::Text(t) => Some(t.as_str()),
+                        _ => None,
+                    })
+                    .collect();
+                (text, semantic.char_shapes[run.char_shape].italic)
+            })
+            .collect();
+        assert_eq!(
+            runs,
+            vec![("ABCDE".to_string(), true), ("FGHIJ".to_string(), false)],
+            "boundaries at stream units 8 and 13 are chars 0 and 5"
+        );
     }
 
     #[test]
