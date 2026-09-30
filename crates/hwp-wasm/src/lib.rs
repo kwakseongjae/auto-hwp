@@ -726,6 +726,28 @@ impl HwpDoc {
         serde_json::to_string(&p).map_err(|e| js_err("serialize", &e.to_string()))
     }
 
+    /// Apply MANY Intent envelopes with ONE reflow (#350) — `intents_json` is a JSON **array** of the
+    /// envelopes [`Self::apply_intent`] takes. Each intent runs through the same op-bus (one undo unit
+    /// each) but the whole-document re-typeset that `applyIntent` does per edit (to report `pages`)
+    /// happens once. Returns `{"kind":"Batch","applied":N,"pages":P}`. Not atomic: throws
+    /// `{code:"batch_failed", message:"intent[i]: …"}` at the first failure, earlier edits stay applied.
+    #[wasm_bindgen(js_name = applyIntents)]
+    pub fn apply_intents(&mut self, intents_json: &str) -> Result<String, JsValue> {
+        let value: serde_json::Value = serde_json::from_str(intents_json)
+            .map_err(|e| js_err("bad_json", &format!("intents is not valid JSON: {e}")))?;
+        let arr = value
+            .as_array()
+            .ok_or_else(|| js_err("bad_json", "intents must be a JSON array"))?;
+        let out = hwp_mcp::apply_intents_json(&mut self.session, arr)
+            .map_err(|(i, e)| js_err("batch_failed", &format!("intent[{i}]: {e}")))?;
+        serde_json::to_string(&serde_json::json!({
+            "kind": "Batch",
+            "applied": out.applied,
+            "pages": out.pages,
+        }))
+        .map_err(|e| js_err("serialize", &e.to_string()))
+    }
+
     /// Apply one Intent-JSON envelope (schema v0, issue 008) via the SAME op-bus the desktop uses
     /// ([`hwp_mcp::apply_intent_json`]) — Propose/Commit/Undo/Redo and every edit variant included.
     /// Returns a JSON `Outcome` (`{kind, …}`). Throws a `{code, message}` error on a bad envelope or a

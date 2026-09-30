@@ -1801,14 +1801,18 @@ pub fn layout_paragraph(
     for run in &p.runs {
         let cs = doc.char_shapes.get(run.char_shape);
         let size = cs.map(|c| c.height).filter(|&h| h > 0).unwrap_or(1000);
+        // The key depends only on (char shape, script slot) — resolve once per slot per run, not per
+        // glyph (the per-glyph family substitution made 0.0.6 typesetting ~4× slower, #350).
+        let mut keys: [Option<FontKey>; 7] = Default::default();
         for inl in &run.content {
             match inl {
                 Inline::Text(t) => {
                     for ch in t.chars() {
                         let sch = subst_glyph(ch);
-                        let font = resolved_font_key(cs, sch, fonts);
+                        let font = keys[script_slot(sch) as usize]
+                            .get_or_insert_with(|| resolved_font_key(cs, sch, fonts));
                         chars.push((sch, size));
-                        advs.push(scaled_advance(sch, size, cs, &font, fonts));
+                        advs.push(scaled_advance(sch, size, cs, font, fonts));
                         object_heights.push(0.0);
                     }
                 }
@@ -2183,6 +2187,43 @@ impl FontMetricsProvider for NullFontMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #350 guard — the font key depends only on (char shape, script slot), so a long single-run
+    /// paragraph must resolve it once per slot, not once per glyph (0.0.6 did it per glyph: the
+    /// family normalization + substitution scan made whole-document typesetting ~4× slower).
+    #[test]
+    fn font_key_resolves_once_per_script_slot_not_per_glyph() {
+        use std::cell::Cell as Counter;
+        struct Counting(Counter<usize>);
+        impl FontMetricsProvider for Counting {
+            fn advance_width(&self, _font: &FontKey, _ch: char, size: i32) -> f64 {
+                size as f64
+            }
+            fn has_family(&self, _family: &str) -> bool {
+                self.0.set(self.0.get() + 1);
+                false
+            }
+        }
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape {
+            font_family: Some("함초롬바탕".into()),
+            ..Default::default()
+        });
+        doc.para_shapes.push(ParaShape::default());
+        let p = Paragraph {
+            runs: vec![Run {
+                char_shape: 0,
+                content: vec![Inline::Text("가나다라마바사아자차 abc".repeat(20))],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let fonts = Counting(Counter::new(0));
+        let lines = layout_paragraph(&p, &doc, 20_000.0, &fonts);
+        assert!(!lines.is_empty());
+        // Hangul + Latin (the space shares Latin's slot) → at most 2 resolutions for 280 glyphs.
+        assert!(fonts.0.get() <= 2, "resolved {} times", fonts.0.get());
+    }
 
     fn para(text: &str) -> Paragraph {
         Paragraph {

@@ -56,6 +56,7 @@ const METHODS = new Set([
   'outline',
   'docProfile',
   'applyIntent',
+  'applyIntents',
   'undo',
   'redo',
   'registerFont',

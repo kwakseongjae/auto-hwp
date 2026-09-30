@@ -206,6 +206,9 @@ pub struct Session {
     /// Own-render placement cached by `EditSession::revision`. Shared by both cell and body caret
     /// Intents so the native/Tauri lane has the same place-once query cost as the wasm handle.
     own_placed: Option<(u64, hwp_session::PlacedDoc)>,
+    /// True while [`apply_intents`] runs: per-edit `Outcome::Edited { pages }` skips the whole-document
+    /// re-typeset (it reports `0`) and the batch reflows ONCE at the end (#350).
+    defer_pages: bool,
     #[cfg(test)]
     own_place_builds: usize,
     /// Persistent render state keyed by the live edit revision. The default own-render cache is
@@ -225,6 +228,7 @@ impl Default for Session {
             document_id: None,
             document_generation: 0,
             own_placed: None,
+            defer_pages: false,
             #[cfg(test)]
             own_place_builds: 0,
             render: RenderState::default(),
@@ -583,6 +587,9 @@ fn render_original(_session: &mut Session, _page: u32) -> Result<String, String>
 /// Live own-render page count. The revision-keyed placement uses the same hwp-session font-provider
 /// lane as screen SVG/PDF, so edited and unedited documents now have one default pagination truth.
 fn page_count_u32(session: &mut Session) -> Result<u32, String> {
+    if session.defer_pages {
+        return Ok(0); // batch lane: the caller reflows once at the end (#350)
+    }
     ensure_own_placed(session)?;
     let pages = session
         .own_placed
@@ -2573,6 +2580,60 @@ pub fn apply_intent_json(session: &mut Session, value: &Value) -> Result<Outcome
     apply_intent(session, intent)
 }
 
+/// Result of [`apply_intents`]: how many intents were applied, and the page count after ONE reflow.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BatchOutcome {
+    pub applied: usize,
+    pub pages: u32,
+}
+
+/// Apply MANY intents with ONE reflow (#350). Each intent goes through the exact [`apply_intent`]
+/// path (same validation, same ops, one undo unit each), but the per-edit whole-document re-typeset
+/// that only feeds `Outcome::Edited { pages }` is skipped; the page count is computed once at the end.
+/// Filling a form issues hundreds of cell/paragraph edits — this turns N typesets into 1.
+///
+/// Not atomic: on the first failing intent the error is returned as `(index, message)` and the edits
+/// before it stay applied (exactly as if they had been sent one by one). Per-intent outcomes are not
+/// returned — use the single [`apply_intent`] lane when you need them.
+pub fn apply_intents(
+    session: &mut Session,
+    intents: Vec<Intent>,
+) -> Result<BatchOutcome, (usize, String)> {
+    let n = intents.len();
+    session.defer_pages = true;
+    let mut failed = None;
+    for (i, intent) in intents.into_iter().enumerate() {
+        if let Err(e) = apply_intent(session, intent) {
+            failed = Some((i, e));
+            break;
+        }
+    }
+    session.defer_pages = false;
+    if let Some(err) = failed {
+        return Err(err);
+    }
+    let pages = if session.doc.is_some() {
+        page_count_u32(session).map_err(|e| (n, e))?
+    } else {
+        0
+    };
+    Ok(BatchOutcome { applied: n, pages })
+}
+
+/// JSON twin of [`apply_intents`]: `values` is an array of Intent envelopes (the same shape
+/// [`apply_intent_json`] takes). A malformed envelope fails before ANY intent is applied.
+pub fn apply_intents_json(
+    session: &mut Session,
+    values: &[Value],
+) -> Result<BatchOutcome, (usize, String)> {
+    let intents = values
+        .iter()
+        .enumerate()
+        .map(|(i, v)| deserialize_intent(v).map_err(|e| (i, e)))
+        .collect::<Result<Vec<_>, _>>()?;
+    apply_intents(session, intents)
+}
+
 /// Apply a typed [`Intent`] against the session, returning a typed [`Outcome`] (no string parsing).
 pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, String> {
     match intent {
@@ -3553,6 +3614,104 @@ mod tests {
         do_close(&mut session);
         assert!(session.own_placed.is_none(), "close releases the placement");
         assert_eq!(session.own_place_builds, 0, "close resets test accounting");
+    }
+
+    /// #350 — `apply_intents` reflows ONCE for N edits (single-lane `apply_intent` reflows per edit),
+    /// and lands on the same document as the one-by-one lane.
+    #[test]
+    fn apply_intents_reflows_once_and_matches_the_single_lane() {
+        use hwp_model::prelude::{CharShape, ParaShape, Section, SemanticDoc};
+        use hwp_ops::{EditSession, Op, ParaSpec, RunSpec};
+        let fresh = || {
+            let mut doc = SemanticDoc::default();
+            doc.char_shapes.push(CharShape::default());
+            doc.para_shapes.push(ParaShape::default());
+            doc.sections.push(Section::default());
+            let mut edit = EditSession::new(doc);
+            for i in 0..3 {
+                edit.do_op(&Op::InsertParagraphAt {
+                    section: 0,
+                    index: i,
+                    runs: vec![RunSpec {
+                        text: format!("문단 {i}"),
+                        ..Default::default()
+                    }],
+                    para: ParaSpec::default(),
+                })
+                .unwrap();
+            }
+            Session {
+                doc: Some(edit),
+                ..Default::default()
+            }
+        };
+        let edits = || {
+            (0..3)
+                .map(|i| Intent::SetParagraphText {
+                    section: 0,
+                    block: i,
+                    text: format!("고친 문단 {i}"),
+                })
+                .collect::<Vec<_>>()
+        };
+
+        let mut one_by_one = fresh();
+        for intent in edits() {
+            apply_intent(&mut one_by_one, intent).unwrap();
+        }
+        assert_eq!(
+            one_by_one.own_place_builds, 3,
+            "the single lane reflows per edit"
+        );
+
+        let mut batched = fresh();
+        let out = apply_intents(&mut batched, edits()).unwrap();
+        assert_eq!(batched.own_place_builds, 1, "the batch reflows once");
+        assert_eq!(out.applied, 3);
+        assert_eq!(out.pages, 1);
+        assert_eq!(
+            batched.doc.as_ref().unwrap().doc().plain_text(),
+            one_by_one.doc.as_ref().unwrap().doc().plain_text()
+        );
+        // One undo unit per intent, like the single lane.
+        assert!(batched.doc.as_mut().unwrap().undo());
+        assert!(batched
+            .doc
+            .as_ref()
+            .unwrap()
+            .doc()
+            .plain_text()
+            .contains("문단 2"));
+
+        // Failure: index of the first bad intent, earlier edits kept, defer flag cleared.
+        let mut s = fresh();
+        let mut bad = edits();
+        bad.insert(
+            1,
+            Intent::SetParagraphText {
+                section: 0,
+                block: 99,
+                text: "없음".into(),
+            },
+        );
+        let (i, _msg) = apply_intents(&mut s, bad).unwrap_err();
+        assert_eq!(i, 1);
+        assert!(s
+            .doc
+            .as_ref()
+            .unwrap()
+            .doc()
+            .plain_text()
+            .contains("고친 문단 0"));
+        assert!(!s.defer_pages, "defer flag is always cleared");
+        // Malformed JSON envelope → nothing applied.
+        let mut s = fresh();
+        let vals = vec![
+            serde_json::json!({"intent_version":0,"intent":"SetParagraphText","section":0,"block":0,"text":"x"}),
+            serde_json::json!({"intent_version":0,"intent":"NoSuchIntent"}),
+        ];
+        assert_eq!(apply_intents_json(&mut s, &vals).unwrap_err().0, 1);
+        assert!(!s.doc.as_ref().unwrap().doc().plain_text().contains('x'));
     }
 
     #[test]
