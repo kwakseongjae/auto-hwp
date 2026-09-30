@@ -36,6 +36,14 @@ packages are released in lockstep.)*
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+---
+
+## [0.0.7] — 2026-09-30
+
+0.0.6 발행 직후 business_plan_k 양식 채우기에서 드러난 속도 회귀 · 넘침 · 삭제 반영 문제를 고치고, 양식을 채우는
+호출자를 위한 API 네 가지(`applyIntents` · `tableCellFits` · `pageUsage` · `toHwpx({ hwpRowHeights })`)를
+더한 lockstep 릴리스다. 새 API 는 모두 additive 이고 파괴 변경은 없다.
+
 ### 수정 (Fixed)
 
 - **HWPX 내보내기가 `DeleteBlock` 을 반영한다(#342).** HWPX 원본에서 지운 문단 · 표가 `toHwpx()` 로
@@ -73,6 +81,15 @@ packages are released in lockstep.)*
   입력의 표는 어느 쪽이든 원래 값을 유지한다. 언제 무엇이 쓰이는지는 `packages/engine/README.md` 표.
   *(EN — export option to write `.hwp`-origin tables with `noAdjust="0"` (rows grow) instead of the 0.0.6
   default `noAdjust="1"`.)*
+
+### 파괴 변경 (Breaking)
+
+- 없음. `toHwpx()` 를 인자 없이 부르면 0.0.6 과 같은 결과(`hwpRowHeights: "exact"`)다. (CLI 는 여전히 소스 빌드 —
+  Rust 워크스페이스 버전 변경 없음)
+
+*(EN — Lockstep 0.0.7: fixes the 0.0.6 typesetting slowdown, clips overflow in fixed-height cells, honors
+`DeleteBlock` in HWPX export, and adds `applyIntents`, `tableCellFits`, `pageUsage` and
+`toHwpx({ hwpRowHeights })`. All additive; no breaking changes.)*
 
 ---
 
