@@ -43,6 +43,10 @@ fn tables(doc: &SemanticDoc) -> usize {
         .count()
 }
 
+fn pages(doc: &SemanticDoc) -> usize {
+    hwp_session::place(doc, &[]).pages.len()
+}
+
 fn open(src: &[u8], name: &str) -> Session {
     let mut s = Session::default();
     open_bytes(&mut s, src, name).expect("open hwpx");
@@ -107,7 +111,7 @@ fn deleted_paragraph_is_gone_after_reopen_and_neighbours_stay_verbatim() {
 }
 
 #[test]
-fn deleted_table_is_cut_and_its_host_becomes_a_plain_paragraph() {
+fn deleted_table_is_cut_together_with_its_bare_host() {
     let src = fixture("FormattingShowcase.hwpx");
     let before = parse_semantic(&src).unwrap();
     let t0 = tables(&before);
@@ -124,20 +128,18 @@ fn deleted_table_is_cut_and_its_host_becomes_a_plain_paragraph() {
     let after = parse_semantic(&out).unwrap();
 
     assert_eq!(tables(&after), t0 - 1, "table gone after reopen");
-    // The host `<hp:p>` survives in the model AND the file → the same block count on reopen.
-    assert_eq!(after.sections[0].blocks.len(), n - 1);
-    let Block::Paragraph(host) = &after.sections[0].blocks[ti] else {
-        panic!("host paragraph now sits where the table was");
-    };
-    assert!(!host.is_table_anchor, "host no longer hosts a table");
-    // In memory the host was flipped too, so the model and a reopen agree.
+    // The host `<hp:p>` hosted only that table: the model keeps it as a zero-line anchor, the file
+    // drops it (an empty `<hp:p>` would reopen as a blank line). Same layout either way.
+    assert_eq!(
+        after.sections[0].blocks.len(),
+        n - 2,
+        "table + bare host gone"
+    );
     let model = s.doc.as_ref().unwrap().doc();
-    let Block::Paragraph(mh) = &model.sections[0].blocks[ti] else {
-        panic!("model host")
-    };
-    assert!(
-        !mh.is_table_anchor,
-        "model host flipped to a plain paragraph"
+    assert_eq!(
+        pages(model),
+        pages(&after),
+        "model and reopen paginate alike"
     );
     assert!(hwp_core::validate_hwpx(&out).ok);
 }
@@ -219,6 +221,12 @@ fn deleting_the_secpr_paragraph_keeps_the_section_setup() {
         "secPr survives exactly once"
     );
     let after = parse_semantic(&out).unwrap();
+    let n = parse_semantic(&src).unwrap().sections[0].blocks.len();
+    assert_eq!(
+        after.sections[0].blocks.len(),
+        n - 1,
+        "secPr rides the next paragraph"
+    );
     if !first_text.trim().is_empty() {
         assert!(
             !after.plain_text().contains(first_text.trim()),

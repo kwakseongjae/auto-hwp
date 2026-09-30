@@ -1683,20 +1683,9 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                 }
                 Block::Table(t) => {
                     if let Some(span) = t.src_span {
+                        // The host `<hp:p>` stays in the model as a zero-line anchor; the serializer
+                        // drops it from the file too once it hosts nothing else (#342).
                         sec.removed_spans.push(span);
-                        // The HWPX host `<hp:p>` of this table (parse order `[Table, host]`) stays in
-                        // the model; with its table gone it is an ordinary empty paragraph in the saved
-                        // file, so stop treating it as a zero-line table anchor — the in-memory layout
-                        // must match what a reopen reads. Callers that want the line gone delete it too.
-                        if let Some(Block::Paragraph(host)) = sec.blocks.get_mut(*index) {
-                            let hosts_it = host
-                                .source
-                                .as_ref()
-                                .is_some_and(|s| s.span.0 <= span.0 && span.1 <= s.span.1);
-                            if host.is_table_anchor && hosts_it {
-                                host.is_table_anchor = false;
-                            }
-                        }
                     }
                 }
             }
