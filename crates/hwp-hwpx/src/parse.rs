@@ -702,7 +702,7 @@ fn recover_stripped_borders(cells: &mut [Cell]) {
 /// [`limits::MAX_TABLE_NESTING`] — the concrete "XML depth counter" for the only nesting that grows
 /// unbounded structures. All other malformation is tolerated (best-effort parse); the reader stops
 /// at the first hard error/EOF as before.
-fn parse_section(
+pub(crate) fn parse_section(
     xml: &str,
     out: &mut Vec<Block>,
     decos: &mut Vec<PageDecoration>,

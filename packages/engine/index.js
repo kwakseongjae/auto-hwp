@@ -224,6 +224,20 @@ export class HwpDoc {
       return s == null ? null : JSON.parse(s);
     });
   }
+  /** Per-cell FIT / overflow report (#347) of the table at `(section, block)` — `CellFit[]` in own-render
+   *  px, or `null` when the block is not a placed table. `overflow` = the content needs more height than
+   *  the cell gives it; on a fixed-height (`fixed`, HWPX `noAdjust="1"`) table that text is clipped (as in
+   *  Hancom), so re-write the cell to at most `line_capacity` lines × `chars_per_line` 한글. */
+  tableCellFits(section, block) {
+    return this.#call((r) => {
+      const s = r.tableCellFits(section, block); // Option<String> → JSON string | null/undefined
+      return s == null ? null : JSON.parse(s);
+    });
+  }
+  /** Per-page body usage (#347) — `{page, body_height, used_height}[]` in own-render px. */
+  pageUsage() {
+    return this.#call((r) => JSON.parse(r.pageUsage()));
+  }
   /** Cell-addressed caret, hit half (issue 053): the TABLE-CELL text caret target under (x,y) in
    *  own-render px — `{section, block, row, col, para, offset, para_len, caret:{page,x,top,height}}`
    *  (`para`/`offset` in the editor "\n"-split space), or `null` off any cell text (018). Served from
@@ -344,6 +358,16 @@ export class HwpDoc {
   applyIntent(intent) {
     const s = typeof intent === 'string' ? intent : JSON.stringify(intent);
     return this.#call((r) => JSON.parse(r.applyIntent(s)));
+  }
+  /** Apply MANY intents with ONE reflow (#350) — `intents` is an array of the envelopes `applyIntent`
+   *  takes (objects or JSON strings). Same op-bus and one undo unit per intent, but the whole-document
+   *  re-typeset `applyIntent` runs per edit happens once. Returns `{kind:"Batch", applied, pages}`.
+   *  Not atomic: throws `{code:"batch_failed", message:"intent[i]: …"}` at the first failure and the
+   *  earlier edits stay applied. */
+  applyIntents(intents) {
+    const arr = (intents ?? []).map((i) => (typeof i === 'string' ? JSON.parse(i) : i));
+    const s = JSON.stringify(arr);
+    return this.#call((r) => JSON.parse(r.applyIntents(s)));
   }
   undo() {
     return this.#call((r) => r.undo());

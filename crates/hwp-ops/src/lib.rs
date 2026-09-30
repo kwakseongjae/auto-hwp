@@ -1672,7 +1672,23 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                     sec.blocks.len()
                 )));
             }
-            sec.blocks.remove(*index);
+            let removed = sec.blocks.remove(*index);
+            // #342: the HWPX serializer patches the ORIGINAL section XML, so a removed source-backed
+            // block must leave a tombstone or its bytes ride along verbatim (it came back on reopen).
+            match &removed {
+                Block::Paragraph(p) => {
+                    if let Some(src) = &p.source {
+                        sec.removed_spans.push(src.span);
+                    }
+                }
+                Block::Table(t) => {
+                    if let Some(span) = t.src_span {
+                        // The host `<hp:p>` stays in the model as a zero-line anchor; the serializer
+                        // drops it from the file too once it hosts nothing else (#342).
+                        sec.removed_spans.push(span);
+                    }
+                }
+            }
             sec.dirty.mark();
             Ok(())
         }

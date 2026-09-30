@@ -718,6 +718,11 @@ fn patch_section_xml(
     let (tbl_edits, tables_in_place) = table_inplace_edits(&original, sec, &edits, table_ref, plan);
     edits.extend(tbl_edits);
 
+    // (1d) DELETIONS (#342): cut the byte spans of blocks an op removed out of the original XML.
+    // Runs after the in-place lanes (it may fold a deleted table into its host paragraph's edit) and
+    // BEFORE the anchor plan (an insertion must never land inside a deleted span).
+    apply_removed_spans(&original, sec, &mut edits);
+
     // (3) APPENDED blocks (dirty, source=None) → emit + inject. Tables already re-emitted in place
     // (1b) are excluded — appending them too would duplicate (issue 057). Sequence-aware (like
     // emit_blocks): a pure table-anchor paragraph is elided and its forced page break rides on the
@@ -754,7 +759,9 @@ fn patch_section_xml(
     let anchors = anchor_new_paragraphs(&original, sec, &dirty, &edits);
     edits.extend(anchors.splices.iter().map(|(at, m)| (*at, *at, m.clone())));
 
-    edits.sort_by_key(|e| std::cmp::Reverse(e.0));
+    // Descending start; on a shared start the WIDER splice first, so an insertion placeholder at
+    // `at` is not swallowed by a deletion `[at, e)` applied after it (#342).
+    edits.sort_by_key(|e| (std::cmp::Reverse(e.0), std::cmp::Reverse(e.1)));
     let mut s = original;
     for (start, end, xml) in &edits {
         s.replace_range(*start..*end, xml);
@@ -960,6 +967,218 @@ fn patch_section_xml(
         }
         None => orig.to_vec(),
     }
+}
+
+/// Turn the section's delete tombstones ([`Section::removed_spans`], recorded by `Op::DeleteBlock`)
+/// into splices on the ORIGINAL section XML (#342). Without this a deleted block's bytes were copied
+/// verbatim and the paragraph/table came back on reopen.
+///
+/// Rules (every one degrades to "keep the bytes", never a bad splice or a panic):
+/// - a stale span (out of bounds / not a char boundary / not addressing `<hp:p` or `<hp:tbl`) is ignored;
+/// - a span that CONTAINS a surviving block's span is ignored — deleting a table's host paragraph while
+///   the table survives must not delete the table ("사용자 콘텐츠 삭제 금지");
+/// - nested tombstones coalesce (deleting a table AND its host = cut the host once);
+/// - a deleted TABLE inside a SURVIVING host paragraph is cut out of that host, whose stale
+///   `<hp:linesegarray>` layout cache (sized for the table) is dropped; an edit already re-emitting
+///   the host is patched instead of adding an overlapping splice;
+/// - a paragraph carrying the section's `<hp:secPr>` never takes the page setup with it: the secPr run
+///   (secPr + following `<hp:ctrl>`s) moves onto the next surviving paragraph (Hancom's own shape), or,
+///   with no usable neighbour, the paragraph shrinks to that run alone.
+fn apply_removed_spans(original: &str, sec: &Section, edits: &mut Vec<(usize, usize, String)>) {
+    if sec.removed_spans.is_empty() {
+        return;
+    }
+    let valid = |(a, b): (usize, usize)| {
+        a < b
+            && b <= original.len()
+            && original.is_char_boundary(a)
+            && original.is_char_boundary(b)
+            && (original[a..].starts_with("<hp:p ")
+                || original[a..].starts_with("<hp:p>")
+                || original[a..].starts_with("<hp:tbl"))
+    };
+    // Surviving top-level spans: paragraphs' `<hp:p>` and tables' `<hp:tbl>`.
+    let mut survivors: Vec<(usize, usize)> = Vec::new();
+    for b in &sec.blocks {
+        match b {
+            Block::Paragraph(p) => {
+                if let Some(src) = &p.source {
+                    survivors.push(src.span);
+                }
+            }
+            Block::Table(t) => {
+                if let Some(sp) = t.src_span {
+                    survivors.push(sp);
+                }
+            }
+        }
+    }
+    let contains =
+        |outer: (usize, usize), inner: (usize, usize)| outer.0 <= inner.0 && inner.1 <= outer.1;
+    let mut doomed: Vec<(usize, usize)> = sec
+        .removed_spans
+        .iter()
+        .copied()
+        .filter(|&t| valid(t))
+        // A surviving block inside (or equal to) the tombstone → keep the bytes.
+        .filter(|&t| !survivors.iter().any(|&s| contains(t, s)))
+        .collect();
+    doomed.sort_by_key(|&(a, b)| (a, std::cmp::Reverse(b)));
+    doomed.dedup();
+    // Coalesce: drop a tombstone nested in an earlier (wider) one.
+    let mut outer: Vec<(usize, usize)> = Vec::new();
+    for t in doomed {
+        if !outer.iter().any(|&o| contains(o, t)) {
+            outer.push(t);
+        }
+    }
+
+    let overlaps = |x: (usize, usize), y: (usize, usize)| x.0 < y.1 && y.0 < x.1;
+    let host_of = |t: (usize, usize)| {
+        survivors
+            .iter()
+            .copied()
+            .filter(|&s| s != t && contains(s, t))
+            .min_by_key(|&(s0, s1)| s1 - s0)
+    };
+    // PASS 1 — tables inside a SURVIVING host paragraph → rewrite (or patch) the host. First, so the
+    // secPr migration below (pass 2) finds a host rewrite as an ordinary edit to patch.
+    for &(a, b) in &outer {
+        let Some(host) = host_of((a, b)) else {
+            continue;
+        };
+        let cut = &original[a..b];
+        if let Some(e) = edits.iter_mut().find(|e| (e.0, e.1) == host) {
+            if let Some(pos) = e.2.find(cut) {
+                e.2.replace_range(pos..pos + cut.len(), "");
+                e.2 = strip_linesegarray(&e.2);
+            }
+        } else if !edits.iter().any(|e| overlaps((e.0, e.1), host)) {
+            let mut xml = String::with_capacity(host.1 - host.0);
+            xml.push_str(&original[host.0..a]);
+            xml.push_str(&original[b..host.1]);
+            // A host that hosted ONLY this table (the model keeps it as a zero-line anchor) would
+            // reopen as an empty line — drop it so the file lays out like the model. Any sign of
+            // other content (text, another table, secPr, page break, a non-text inline) keeps it.
+            let bare = sec.blocks.iter().any(|blk| match blk {
+                Block::Paragraph(p) => {
+                    p.source.as_ref().is_some_and(|s| s.span == host)
+                        && p.is_table_anchor
+                        && !p.page_break_before
+                        && p.runs
+                            .iter()
+                            .flat_map(|r| &r.content)
+                            .all(|i| matches!(i, Inline::Text(t) if t.trim().is_empty()))
+                }
+                Block::Table(_) => false,
+            }) && !xml.contains("<hp:tbl")
+                && !xml.contains("<hp:secPr");
+            let pending_cut = outer.iter().any(|&o| o != (a, b) && contains(host, o));
+            if bare && !pending_cut {
+                edits.push((host.0, host.1, String::new()));
+            } else {
+                edits.push((host.0, host.1, strip_linesegarray(&xml)));
+            }
+        } else if !edits.iter().any(|e| overlaps((e.0, e.1), (a, b))) {
+            edits.push((a, b, String::new()));
+        }
+    }
+    // PASS 2 — whole top-level paragraphs.
+    for &(a, b) in &outer {
+        if host_of((a, b)).is_some() {
+            continue;
+        }
+        // Never overlap a planned edit (defensive: survivors are excluded above, so this only trips
+        // on a malformed doc).
+        if edits.iter().any(|e| overlaps((e.0, e.1), (a, b))) {
+            continue;
+        }
+        let cut = &original[a..b];
+        if !cut.contains("<hp:secPr") {
+            edits.push((a, b, String::new()));
+            continue;
+        }
+        // The section's first paragraph carries `<hp:secPr>` (page setup) — it can't just vanish.
+        // Hancom's own shape is "the first paragraph = a run holding secPr + ctrls, then the text
+        // runs", so MOVE that run onto the next surviving paragraph (no stray empty line, and the
+        // reopened block count matches the model). No usable neighbour → keep a secPr-only paragraph.
+        let Some((run_open, secpr)) = secpr_run(cut) else {
+            continue; // unrecognized shape → keep the bytes verbatim
+        };
+        let moved = format!("{run_open}{secpr}</hp:run>");
+        let next = survivors
+            .iter()
+            .copied()
+            .filter(|&s| s.0 >= b && original[s.0..].starts_with("<hp:p"))
+            .min_by_key(|s| s.0);
+        let mut migrated = false;
+        if let Some(t) = next {
+            if let Some(e) = edits.iter_mut().find(|e| (e.0, e.1) == t) {
+                if let Some(open_end) = e.2.find('>') {
+                    e.2.insert_str(open_end + 1, &moved);
+                    migrated = true;
+                }
+            } else if !edits.iter().any(|e| overlaps((e.0, e.1), t)) {
+                if let Some(open_end) = original[t.0..].find('>') {
+                    let at = t.0 + open_end + 1;
+                    edits.push((at, at, moved.clone()));
+                    migrated = true;
+                }
+            }
+        }
+        let replacement = if migrated {
+            String::new()
+        } else {
+            let open_end = cut.find('>').map(|i| i + 1).unwrap_or(0);
+            format!(
+                "{}{run_open}{secpr}<hp:t></hp:t></hp:run></hp:p>",
+                &cut[..open_end]
+            )
+        };
+        edits.push((a, b, replacement));
+    }
+}
+
+/// The `<hp:secPr>` carrier of a section-first paragraph: the run open tag, and the
+/// `<hp:secPr>…</hp:secPr>` element followed by its `<hp:ctrl>` siblings (단 설정 · 머리말/꼬리말 ·
+/// 쪽 번호 제어). `None` if the shape is not recognized — the caller then keeps the paragraph verbatim
+/// (never a half-cut section header).
+fn secpr_run(para: &str) -> Option<(String, String)> {
+    let sp = para.find("<hp:secPr")?;
+    let run_start = para[..sp].rfind("<hp:run")?;
+    let run_open_end = run_start + para[run_start..].find('>')? + 1;
+    if run_open_end > sp || para[run_start..run_open_end].ends_with("/>") {
+        return None;
+    }
+    let sp_end = sp + para[sp..].find("</hp:secPr>")? + "</hp:secPr>".len();
+    // Following `<hp:ctrl>` siblings (depth-aware: a header ctrl nests paragraphs, not ctrls, but be safe).
+    let mut end = sp_end;
+    while para[end..].starts_with("<hp:ctrl") {
+        let mut depth = 0usize;
+        let mut i = end;
+        loop {
+            let open = para[i..].find("<hp:ctrl").map(|k| i + k);
+            let close = para[i..].find("</hp:ctrl>").map(|k| i + k)?;
+            match open {
+                Some(o) if o < close => {
+                    depth += 1;
+                    i = o + "<hp:ctrl".len();
+                }
+                _ => {
+                    depth = depth.checked_sub(1)?;
+                    i = close + "</hp:ctrl>".len();
+                    if depth == 0 {
+                        break;
+                    }
+                }
+            }
+        }
+        end = i;
+    }
+    Some((
+        para[run_start..run_open_end].to_string(),
+        para[sp..end].to_string(),
+    ))
 }
 
 /// Where each freshly-created paragraph must be spliced into the section's ORIGINAL XML (W4.1).
@@ -3890,5 +4109,102 @@ mod tests {
             text.contains("첫 구역 본문.") && text.contains("둘째 구역 본문."),
             "both sections: {text}"
         );
+    }
+
+    // ---- #342 delete tombstones (synthetic sections — the shapes the fixtures don't carry) ----
+
+    const SECPR: &str = r#"<hp:secPr id="" textDirection="HORIZONTAL"><hp:pagePr landscape="WIDELY" width="59528" height="84188"/></hp:secPr><hp:ctrl><hp:colPr id="" type="NEWSPAPER" colCount="1"/></hp:ctrl>"#;
+
+    fn tbl(text: &str) -> String {
+        format!(
+            r#"<hp:tbl rowCnt="1" colCnt="1" noAdjust="0"><hp:tr><hp:tc><hp:subList><hp:p id="9" paraPrIDRef="0"><hp:run charPrIDRef="0"><hp:t>{text}</hp:t></hp:run></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="1000" height="500"/></hp:tc></hp:tr></hp:tbl>"#
+        )
+    }
+
+    fn section_of(xml: &str) -> Section {
+        let mut blocks = Vec::new();
+        crate::parse::parse_section(xml, &mut blocks, &mut Vec::new(), &Default::default())
+            .unwrap();
+        Section {
+            blocks,
+            provenance: Provenance {
+                source: Some(SourceFormat::Hwpx),
+                raw: Some(xml.as_bytes().to_vec()),
+            },
+            ..Default::default()
+        }
+    }
+
+    /// `Op::DeleteBlock`'s model mutation (the op crate is not a dependency here).
+    fn delete_block(sec: &mut Section, i: usize) {
+        match sec.blocks.remove(i) {
+            Block::Paragraph(p) => sec.removed_spans.extend(p.source.map(|s| s.span)),
+            Block::Table(t) => sec.removed_spans.extend(t.src_span),
+        }
+        sec.dirty.mark();
+    }
+
+    fn patched(sec: &Section) -> String {
+        let raw = sec.provenance.raw.clone().unwrap();
+        String::from_utf8(patch_section_xml(&raw, sec, None, &SynthPlan::default())).unwrap()
+    }
+
+    fn reparse(xml: &str) -> Vec<Block> {
+        let mut blocks = Vec::new();
+        crate::parse::parse_section(xml, &mut blocks, &mut Vec::new(), &Default::default())
+            .unwrap();
+        blocks
+    }
+
+    #[test]
+    fn delete_secpr_paragraph_moves_the_secpr_run_onto_the_next_paragraph() {
+        let xml = format!(
+            r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p id="1" paraPrIDRef="0"><hp:run charPrIDRef="0">{SECPR}</hp:run><hp:run charPrIDRef="0"><hp:t>안내문</hp:t></hp:run></hp:p><hp:p id="2" paraPrIDRef="3"><hp:run charPrIDRef="0"><hp:t>본문</hp:t></hp:run></hp:p></hs:sec>"#
+        );
+        let mut sec = section_of(&xml);
+        delete_block(&mut sec, 0);
+        let out = patched(&sec);
+        assert_eq!(out.matches("<hp:secPr").count(), 1, "{out}");
+        assert!(!out.contains("안내문"));
+        let blocks = reparse(&out);
+        assert_eq!(blocks.len(), 1, "no stray secPr-only line: {out}");
+        // The surviving paragraph kept its own open tag (paraPrIDRef="3") and now leads with secPr.
+        assert!(out.contains(r#"<hp:p id="2" paraPrIDRef="3"><hp:run charPrIDRef="0"><hp:secPr"#));
+    }
+
+    #[test]
+    fn delete_one_of_two_tables_in_a_secpr_host_keeps_the_other() {
+        // The 르노 shape: section 1's first paragraph hosts secPr + a title table + a guide box.
+        let xml = format!(
+            r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p id="1" paraPrIDRef="0"><hp:run charPrIDRef="0">{SECPR}{}{}<hp:t></hp:t></hp:run><hp:linesegarray><hp:lineseg vertsize="9000"/></hp:linesegarray></hp:p><hp:p id="2" paraPrIDRef="0"><hp:run charPrIDRef="0"><hp:t>본문</hp:t></hp:run></hp:p></hs:sec>"#,
+            tbl("제목표"),
+            tbl("표는 삭제 후 제출")
+        );
+        let mut sec = section_of(&xml);
+        let guide = sec
+            .blocks
+            .iter()
+            .position(
+                |b| matches!(b, Block::Table(t) if format!("{:?}", t.cells).contains("삭제 후")),
+            )
+            .unwrap();
+        delete_block(&mut sec, guide);
+        let out = patched(&sec);
+        assert!(!out.contains("삭제 후 제출"), "guide box cut");
+        assert!(out.contains("제목표"), "sibling table kept");
+        assert_eq!(out.matches("<hp:secPr").count(), 1);
+        assert!(
+            !out.contains("<hp:linesegarray"),
+            "stale host layout cache dropped"
+        );
+    }
+
+    #[test]
+    fn stale_or_foreign_tombstones_are_ignored() {
+        let xml = r#"<hs:sec xmlns:hs="s" xmlns:hp="p"><hp:p id="1"><hp:run><hp:t>하나</hp:t></hp:run></hp:p><hp:p id="2"><hp:run><hp:t>둘</hp:t></hp:run></hp:p></hs:sec>"#;
+        let mut sec = section_of(xml);
+        sec.removed_spans = vec![(3, 9), (0, xml.len() + 10), (usize::MAX - 1, usize::MAX)];
+        sec.dirty.mark();
+        assert_eq!(patched(&sec), xml, "nothing cut, no panic");
     }
 }

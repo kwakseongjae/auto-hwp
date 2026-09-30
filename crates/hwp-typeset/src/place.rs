@@ -2046,8 +2046,13 @@ fn flush_fragment(
                 self_block: block,
             };
             let (pad_left, pad_right) = crate::cell_horizontal_padding(t, c);
+            // #347: a fixed-height (`noAdjust="1"`) row never grows, so overflowing text is clipped at
+            // the cell box like Hancom — only when the whole cell lies in this fragment (a cell split
+            // across a page keeps the historical draw).
+            let clip = t.fixed_row_heights && r1 == c.row + c.row_span.max(1);
             place_cell_content(
                 pg, &c.blocks, cx, cy, cw, ch, pad_left, pad_right, doc, fonts, &ctx, c.row, c.col,
+                clip,
             );
         }
     }
@@ -2306,7 +2311,20 @@ fn place_nested_table(
         }
         let (pad_left, pad_right) = crate::cell_horizontal_padding(t, c);
         place_cell_content(
-            pg, &c.blocks, cx, cy, cw, ch, pad_left, pad_right, doc, fonts, ctx, c.row, c.col,
+            pg,
+            &c.blocks,
+            cx,
+            cy,
+            cw,
+            ch,
+            pad_left,
+            pad_right,
+            doc,
+            fonts,
+            ctx,
+            c.row,
+            c.col,
+            t.fixed_row_heights,
         );
     }
     // Attach the per-cell rects to the nested fragment we pushed (by its pinned index — the recursion may
@@ -2333,8 +2351,14 @@ fn place_cell_content(
     ctx: &NestCtx,
     cell_row: usize,
     cell_col: usize,
+    clip: bool,
 ) {
     let textw = (cw - pad_left - pad_right).max(1.0);
+    // #347 clip line: with `clip`, a line whose baseline falls below the cell box is not drawn (Hancom
+    // hides overflow in a fixed-height cell instead of painting it over the next row). Line-granular —
+    // a line whose baseline is inside the box draws whole. The cursor still advances, so reserve and
+    // caret geometry are untouched (LOCKSTEP).
+    let clip_y = if clip { cy + ch + 0.5 } else { f64::INFINITY };
     // Total content height → start offset for vertical centering within the cell box.
     let content_h: f64 = blocks
         .iter()
@@ -2358,7 +2382,9 @@ fn place_cell_content(
                     ancestors: ctx.cell_path(cell_row, cell_col),
                     self_block: bi,
                 };
-                place_nested_table(pg, nt, cx + pad_left, vy, textw, doc, fonts, &child);
+                if vy < clip_y {
+                    place_nested_table(pg, nt, cx + pad_left, vy, textw, doc, fonts, &child);
+                }
             }
             vy += block_height_for_place(b, doc, textw, fonts);
             continue;
@@ -2392,6 +2418,10 @@ fn place_cell_content(
                     _ => 0.0,
                 };
             let baseline = vy + ls.baseline;
+            if baseline > clip_y {
+                vy += ls.vert_size * ratio;
+                continue;
+            }
             let start = ls.text_pos as usize;
             let end = lines
                 .get(li + 1)
@@ -2835,6 +2865,208 @@ pub fn cell_caret_rect_path(
     caret_rect_in_cell(doc, fonts, page, &pc, table, cell, para, offset)
 }
 
+// ---- Cell fit / overflow signal (#347) ------------------------------------------------------
+//
+// The consumer that writes generated text into a government form needs to know, per cell, how much
+// text fits and whether what it wrote overflows a FIXED-height (`noAdjust="1"`) row — Hancom hides
+// that overflow, so the only safe fix is to re-write the cell shorter. Everything below re-runs the
+// SAME helpers the placer and the pagination reserve use (`block_height_for_place`,
+// `layout_cell_paragraph`, `CELL_PAD`), so the numbers agree with what is drawn.
+
+/// One table cell's fit report, in HWPUNIT (the session layer converts to px). See [`table_cell_fits`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct CellFit {
+    pub row: usize,
+    pub col: usize,
+    pub row_span: usize,
+    pub col_span: usize,
+    /// 0-based page of the fragment that draws this cell's text (its top row).
+    pub page: usize,
+    /// Drawn cell box (the owning fragment's rect).
+    pub width: f64,
+    pub height: f64,
+    /// Box width minus the cell's horizontal inner margins — the wrap width of its text.
+    pub text_width: f64,
+    /// Height the content may use: `height − CELL_PAD` (the vertical inset an auto-fit row adds on
+    /// top of its content). `content_height > available_height` ⇔ an auto-fit row would have grown.
+    pub available_height: f64,
+    /// Laid-out height of the current content at `text_width` (paragraphs + nested tables).
+    pub content_height: f64,
+    /// Laid-out lines of the current content (paragraphs only).
+    pub lines: usize,
+    /// One line's advance (line box × line spacing) in the cell's first-paragraph style.
+    pub line_advance: f64,
+    /// Lines of that style that fit in `available_height` (one paragraph; its 위/아래 간격 counted once).
+    pub line_capacity: usize,
+    /// Full-width (한글) characters per line in that style at `text_width` — measured by the real
+    /// line breaker, so 장평/자간/들여쓰기 are included.
+    pub chars_per_line: usize,
+    /// The table's rows are fixed (`noAdjust="1"`): the row never grows, overflow is clipped.
+    pub fixed: bool,
+    /// `content_height > available_height` — the content needs more room than the cell gives it. On a
+    /// `fixed` table this text is (partly) clipped in Hancom and in our render; on an auto-fit table it
+    /// cannot happen (the row grows), except in a row-spanning cell whose rows are pinned elsewhere.
+    pub overflow: bool,
+}
+
+/// Per-cell fit report for the top-level table at `(section, block)` (resolved through a 1×1 frame
+/// wrapper via `edit_target`, the same address space as `SetTableCellRuns`), for every active cell
+/// that was placed. `None` when the block is not a table or the table was not placed.
+pub fn table_cell_fits(
+    doc: &SemanticDoc,
+    placed: &PlacedDoc,
+    fonts: &dyn FontMetricsProvider,
+    section: usize,
+    block: usize,
+) -> Option<Vec<CellFit>> {
+    let Some(Block::Table(outer)) = doc.sections.get(section).and_then(|s| s.blocks.get(block))
+    else {
+        return None;
+    };
+    let t = outer.edit_target();
+    let mut out = Vec::new();
+    for c in t.cells.iter().filter(|c| c.active) {
+        // The fragment that owns the cell's TOP row draws its text (flush_fragment's rule).
+        let Some((page, pc)) = placed.pages.iter().enumerate().find_map(|(pi, pg)| {
+            pg.tables
+                .iter()
+                .filter(|pt| {
+                    pt.section == section
+                        && pt.block == block
+                        && pt.ancestors.is_empty()
+                        && (pt.first_row..pt.last_row).contains(&c.row)
+                })
+                .find_map(|pt| pt.cells.iter().find(|x| x.row == c.row && x.col == c.col))
+                .map(|x| (pi, x.clone()))
+        }) else {
+            continue;
+        };
+        let (pad_left, pad_right) = crate::cell_horizontal_padding(t, c);
+        let text_width = (pc.w - pad_left - pad_right).max(1.0);
+        let content_height: f64 = c
+            .blocks
+            .iter()
+            .map(|b| block_height_for_place(b, doc, text_width, fonts))
+            .sum();
+        let lines = c
+            .blocks
+            .iter()
+            .map(|b| match b {
+                Block::Paragraph(p) => {
+                    crate::layout_cell_paragraph(p, doc, text_width, fonts).len()
+                }
+                Block::Table(_) => 0,
+            })
+            .sum();
+        let available_height = (pc.h - crate::CELL_PAD).max(0.0);
+        let (line_advance, line_capacity, chars_per_line) =
+            style_probe(c, doc, text_width, available_height, fonts);
+        out.push(CellFit {
+            row: c.row,
+            col: c.col,
+            row_span: c.row_span.max(1),
+            col_span: c.col_span.max(1),
+            page,
+            width: pc.w,
+            height: pc.h,
+            text_width,
+            available_height,
+            content_height,
+            lines,
+            line_advance,
+            line_capacity,
+            chars_per_line,
+            fixed: t.fixed_row_heights,
+            overflow: content_height > available_height + 0.5,
+        });
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+/// `(line_advance, line_capacity, chars_per_line)` for text written in the cell's FIRST paragraph
+/// style (its paraPr + first run's charPr) — lay out a long run of '가' with the real breaker.
+fn style_probe(
+    c: &Cell,
+    doc: &SemanticDoc,
+    text_width: f64,
+    available: f64,
+    fonts: &dyn FontMetricsProvider,
+) -> (f64, usize, usize) {
+    const PROBE: usize = 400;
+    let base = c
+        .blocks
+        .iter()
+        .find_map(|b| match b {
+            Block::Paragraph(p) => Some(p.clone()),
+            Block::Table(_) => None,
+        })
+        .unwrap_or_default();
+    let first = base.runs.first();
+    let mut probe = base.clone();
+    probe.runs = vec![Run {
+        char_shape: first.map(|r| r.char_shape).unwrap_or(0),
+        char_ref: first.and_then(|r| r.char_ref.clone()),
+        content: vec![Inline::Text("가".repeat(PROBE))],
+    }];
+    let lines = crate::layout_cell_paragraph(&probe, doc, text_width, fonts);
+    let Some(l0) = lines.first() else {
+        return (0.0, 0, 0);
+    };
+    let ratio = crate::line_spacing_ratio(&probe, doc);
+    let advance = l0.vert_size * ratio;
+    let ps = doc.para_shapes.get(probe.para_shape);
+    let space = ps.map(|s| s.space_before).unwrap_or(0).max(0) as f64
+        + ps.map(|s| s.space_after).unwrap_or(0).max(0) as f64;
+    // n lines occupy (n−1)·advance + vert_size (trailing leading trimmed, like the reserve).
+    let room = available - space - l0.vert_size;
+    let capacity = if room < -0.5 || advance <= 0.0 {
+        0
+    } else {
+        ((room.max(0.0) + 0.5) / advance).floor() as usize + 1
+    };
+    let per_line = lines.get(1).map(|l| l.text_pos as usize).unwrap_or(PROBE);
+    (advance, capacity, per_line)
+}
+
+/// Per-page vertical usage of the BODY area, in HWPUNIT (see [`page_usage`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PageUsage {
+    pub page: usize,
+    /// Body area height: page height − top − bottom margins.
+    pub body_height: f64,
+    /// From the body top to the lowest placed block band on the page (0 for a page with no block).
+    pub used_height: f64,
+}
+
+/// How full each page's body is — the lowest top-level block band per page (a table fragment's
+/// band covers its rows; a paragraph band its lines). Header/footer/page-number decorations are
+/// not blocks and are not counted.
+pub fn page_usage(placed: &PlacedDoc) -> Vec<PageUsage> {
+    placed
+        .pages
+        .iter()
+        .enumerate()
+        .map(|(i, pg)| {
+            let body_height = (pg.height - pg.margin_top - pg.margin_bottom).max(0.0);
+            let bottom = pg
+                .blocks
+                .iter()
+                .map(|b| b.y + b.h)
+                .fold(f64::NEG_INFINITY, f64::max);
+            let used_height = if bottom.is_finite() {
+                (bottom - pg.margin_top).max(0.0)
+            } else {
+                0.0
+            };
+            PageUsage {
+                page: i,
+                body_height,
+                used_height,
+            }
+        })
+        .collect()
+}
+
 /// Cell-addressed hit test (issue 053): resolve a page-space point (HWPUNIT) to the CELL TEXT caret
 /// target under it — the inverse of [`cell_caret_rect`]. Picks the topmost table fragment containing
 /// the point, the cell within it, then the vertically NEAREST text line and the char boundary
@@ -3221,6 +3453,9 @@ fn paragraph_atoms(
         let underline = cs.map(|c| c.underline).unwrap_or(false);
         let bold = cs.map(|c| c.bold).unwrap_or(false);
         let italic = cs.map(|c| c.italic).unwrap_or(false);
+        // Per-run memo keyed by script slot: the metric key and display face depend only on (char
+        // shape, slot), so resolve them once per slot instead of per glyph (#350 — 0.0.6 regression).
+        let mut faces: [Option<(FontKey, Option<String>)>; 7] = Default::default();
         for inl in &run.content {
             match inl {
                 Inline::Text(t) => {
@@ -3231,7 +3466,14 @@ fn paragraph_atoms(
                         let cluster = crate::old_hangul_cluster(ch);
                         let sch = crate::subst_glyph(ch);
                         let slot = crate::script_slot(sch);
-                        let metric_font = crate::resolved_font_key(cs, sch, fonts);
+                        let (metric_font, font) = faces[slot as usize]
+                            .get_or_insert_with(|| {
+                                (
+                                    crate::resolved_font_key(cs, sch, fonts),
+                                    display_font(cs, slot, fonts),
+                                )
+                            })
+                            .clone();
                         let (ratio, spacing_em) = cs
                             .map(|c| {
                                 let r = match *c.ratio.get(slot) {
@@ -3250,7 +3492,7 @@ fn paragraph_atoms(
                             underline,
                             bold,
                             italic,
-                            font: display_font(cs, slot, fonts),
+                            font,
                             metric_font,
                             ratio,
                             spacing_em,
@@ -4906,6 +5148,117 @@ mod tests {
             500.0,
             "noAdjust=1 은 저장 높이가 정확값 — 넘치는 내용은 한컴처럼 잘린다"
         );
+    }
+
+    /// #347 — a fixed-height (`noAdjust="1"`) row does not grow, and its overflowing text used to be
+    /// painted over the NEXT row. Now it is clipped at the cell box (Hancom hides it) and the fit query
+    /// flags exactly that cell. Reserve (page count, table height) is untouched.
+    fn overfull_fixed_table() -> Table {
+        let mut t = fixed_height_table(3, 1500, false);
+        // Row 1 gets far more text than a 1500-HWPUNIT row holds (1000-size glyphs → ~1 line fits).
+        t.cells[1].blocks = (0..6)
+            .map(|_| Block::Paragraph(para("넘치는 글")))
+            .collect();
+        t
+    }
+
+    #[test]
+    fn fixed_row_overflow_is_clipped_not_drawn_over_the_next_row() {
+        let doc = doc_with_page(vec![Block::Table(overfull_fixed_table())], 800_000);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let pg = &placed.pages[0];
+        let t = pg.tables.first().expect("표");
+        let row1 = t.cells.iter().find(|c| c.row == 1).unwrap();
+        let bottom = row1.y + row1.h;
+        let row2_top = t.cells.iter().find(|c| c.row == 2).unwrap().y;
+        assert!((bottom - row2_top).abs() < 1e-6, "rows are contiguous");
+        // Glyphs of row 1's text ("넘치는 글") must stay inside row 1's box.
+        let spill: Vec<f64> = pg
+            .glyphs
+            .iter()
+            .filter(|g| g.ch == '넘' && g.baseline > bottom + 0.5)
+            .map(|g| g.baseline)
+            .collect();
+        assert!(
+            spill.is_empty(),
+            "overflow painted below the cell: {spill:?}"
+        );
+        assert!(
+            pg.glyphs.iter().any(|g| g.ch == '넘'),
+            "the lines that fit still draw"
+        );
+        // Row 2's own text still draws.
+        assert_eq!(pg.glyphs.iter().filter(|g| g.ch == '행').count(), 2);
+        // LOCKSTEP: the fixed rows keep their exact height.
+        assert_eq!(t.h, 4500.0);
+    }
+
+    #[test]
+    fn auto_fit_row_is_never_clipped() {
+        let mut t = overfull_fixed_table();
+        t.fixed_row_heights = false; // same content, rows may grow
+        let doc = doc_with_page(vec![Block::Table(t)], 800_000);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        assert_eq!(
+            placed.pages[0]
+                .glyphs
+                .iter()
+                .filter(|g| g.ch == '넘')
+                .count(),
+            6,
+            "every line draws when the row grows"
+        );
+    }
+
+    #[test]
+    fn cell_fit_flags_only_the_overflowing_fixed_cell() {
+        let doc = doc_with_page(vec![Block::Table(overfull_fixed_table())], 800_000);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let fits = table_cell_fits(&doc, &placed, &ApproxFontMetrics, 0, 0).expect("표 자리");
+        assert_eq!(fits.len(), 3);
+        let over: Vec<usize> = fits.iter().filter(|f| f.overflow).map(|f| f.row).collect();
+        assert_eq!(over, vec![1], "{fits:#?}");
+        let f1 = &fits[1];
+        assert!(f1.fixed && f1.height == 1500.0);
+        assert_eq!(f1.available_height, 1500.0 - crate::CELL_PAD);
+        assert!(f1.content_height > f1.available_height);
+        assert_eq!(f1.lines, 6);
+        // Capacity agrees with the content measure: `line_capacity` lines of the probe style fit,
+        // one more does not.
+        assert!(f1.line_capacity >= 1 && f1.line_capacity < 6, "{f1:?}");
+        assert!(f1.line_advance > 0.0 && f1.chars_per_line > 0);
+        // An unedited 1-line cell fits and reports the same capacity (same style, same box).
+        assert!(!fits[0].overflow && fits[0].line_capacity == f1.line_capacity);
+        // Not a table / out of range → None.
+        assert!(table_cell_fits(&doc, &placed, &ApproxFontMetrics, 0, 9).is_none());
+    }
+
+    #[test]
+    fn line_capacity_and_chars_per_line_match_the_content_measure() {
+        // `chars_per_line × line_capacity` 한글 in one paragraph fits; one line more overflows.
+        let doc = doc_with_page(vec![Block::Table(overfull_fixed_table())], 800_000);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let f = table_cell_fits(&doc, &placed, &ApproxFontMetrics, 0, 0).unwrap()[1].clone();
+        for (n, expect_overflow) in [(f.line_capacity, false), (f.line_capacity + 1, true)] {
+            let mut t = overfull_fixed_table();
+            let text = "가".repeat(f.chars_per_line * n);
+            t.cells[1].blocks = vec![Block::Paragraph(para(&text))];
+            let doc = doc_with_page(vec![Block::Table(t)], 800_000);
+            let placed = place_doc(&doc, &ApproxFontMetrics);
+            let g = &table_cell_fits(&doc, &placed, &ApproxFontMetrics, 0, 0).unwrap()[1];
+            assert_eq!(g.lines, n, "chars_per_line is the real wrap: {g:?}");
+            assert_eq!(g.overflow, expect_overflow, "n={n} {g:?}");
+        }
+    }
+
+    #[test]
+    fn page_usage_reports_body_fill() {
+        let doc = doc_with_page(vec![Block::Table(overfull_fixed_table())], 800_000);
+        let placed = place_doc(&doc, &ApproxFontMetrics);
+        let u = page_usage(&placed);
+        assert_eq!(u.len(), 1);
+        assert_eq!(u[0].body_height, 800_000.0);
+        assert!((u[0].used_height - 4500.0).abs() < 1.0, "{u:?}");
     }
 
     #[test]

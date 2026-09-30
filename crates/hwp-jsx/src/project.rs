@@ -90,6 +90,10 @@ pub struct SectionMeta {
     pub passthrough: Vec<RawPartBlob>,
     pub dirty: bool,
     pub decorations: Vec<DecorationBlob>,
+    /// `Section.removed_spans` (#342 delete tombstones). Omitted when empty so projects written
+    /// without deletions stay byte-identical, and defaulted so older projects still load.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub removed_spans: Vec<[usize; 2]>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

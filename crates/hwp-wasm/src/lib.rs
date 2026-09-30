@@ -522,6 +522,29 @@ impl HwpDoc {
             .transpose()
     }
 
+    /// Per-cell FIT / overflow report (#347) of the table at `(section, block)` — a JSON **string** of
+    /// `CellFit[]` (`{row, col, row_span, col_span, page, width, height, text_width, available_height,
+    /// content_height, lines, line_advance, line_capacity, chars_per_line, fixed, overflow}`, lengths in
+    /// own-render px), or **JS `null`** when the block is not a placed table (policy 018). Served from
+    /// the cached placement with THIS handle's registered fonts — the same geometry the SVG draws.
+    #[wasm_bindgen(js_name = tableCellFits)]
+    pub fn table_cell_fits(&self, section: usize, block: usize) -> Result<Option<String>, JsValue> {
+        let fonts = hwp_session::own_render_fonts_with(&self.fonts);
+        let f = self.with_placed(|doc, placed| {
+            hwp_session::table_cell_fits_placed(doc, placed, fonts.as_ref(), section, block)
+        })?;
+        f.map(|f| serde_json::to_string(&f).map_err(|e| js_err("serialize", &e.to_string())))
+            .transpose()
+    }
+
+    /// Per-page body usage (#347) — a JSON **string** of `{page, body_height, used_height}[]` (own-render
+    /// px; `used_height` = body top → lowest placed block). One entry per page, never null.
+    #[wasm_bindgen(js_name = pageUsage)]
+    pub fn page_usage(&self) -> Result<String, JsValue> {
+        let u = self.with_placed(|_doc, placed| hwp_session::page_usage_placed(placed))?;
+        serde_json::to_string(&u).map_err(|e| js_err("serialize", &e.to_string()))
+    }
+
     /// Cell-addressed caret, hit half (issue 053): the TABLE-CELL text caret target under own-render
     /// px `(x, y)` on `page` — a JSON **string** `{section, block, row, col, para, offset, para_len,
     /// caret:{page,x,top,height}}`, or **JS `null`** off any cell text (an `Option<String>` → `null` —
@@ -724,6 +747,28 @@ impl HwpDoc {
     pub fn doc_profile(&self) -> Result<String, JsValue> {
         let p = hwp_session::doc_profile(self.doc()?);
         serde_json::to_string(&p).map_err(|e| js_err("serialize", &e.to_string()))
+    }
+
+    /// Apply MANY Intent envelopes with ONE reflow (#350) — `intents_json` is a JSON **array** of the
+    /// envelopes [`Self::apply_intent`] takes. Each intent runs through the same op-bus (one undo unit
+    /// each) but the whole-document re-typeset that `applyIntent` does per edit (to report `pages`)
+    /// happens once. Returns `{"kind":"Batch","applied":N,"pages":P}`. Not atomic: throws
+    /// `{code:"batch_failed", message:"intent[i]: …"}` at the first failure, earlier edits stay applied.
+    #[wasm_bindgen(js_name = applyIntents)]
+    pub fn apply_intents(&mut self, intents_json: &str) -> Result<String, JsValue> {
+        let value: serde_json::Value = serde_json::from_str(intents_json)
+            .map_err(|e| js_err("bad_json", &format!("intents is not valid JSON: {e}")))?;
+        let arr = value
+            .as_array()
+            .ok_or_else(|| js_err("bad_json", "intents must be a JSON array"))?;
+        let out = hwp_mcp::apply_intents_json(&mut self.session, arr)
+            .map_err(|(i, e)| js_err("batch_failed", &format!("intent[{i}]: {e}")))?;
+        serde_json::to_string(&serde_json::json!({
+            "kind": "Batch",
+            "applied": out.applied,
+            "pages": out.pages,
+        }))
+        .map_err(|e| js_err("serialize", &e.to_string()))
     }
 
     /// Apply one Intent-JSON envelope (schema v0, issue 008) via the SAME op-bus the desktop uses

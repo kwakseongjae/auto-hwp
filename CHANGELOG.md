@@ -36,8 +36,37 @@ packages are released in lockstep.)*
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+### 수정 (Fixed)
+
+- **HWPX 내보내기가 `DeleteBlock` 을 반영한다(#342).** HWPX 원본에서 지운 문단 · 표가 `toHwpx()` 로
+  다시 열면 되살아나던 문제를 고쳤다. `DeleteBlock` 이 원본 스팬을 묘비로 남기고 직렬화기가 그 바이트를
+  잘라낸다(지우지 않은 블록은 바이트 동일). 표만 지우면 그 표만 품던 호스트 문단도 파일에서 빠진다(모델의
+  0줄 앵커와 같은 배치). 살아 있는 표를 품은 호스트 문단을 지우는 것은 파일에서 무시되고(사용자 콘텐츠
+  보존), 구역 첫 문단(`secPr`)을 지우면 쪽 설정 런이 다음 문단으로 옮겨 간다.
+  *(EN — HWPX export now honors `DeleteBlock`: deleted paragraphs/tables no longer reappear on reopen;
+  untouched blocks stay byte-identical.)*
+- **0.0.6 조판 속도 회귀 해소(#350).** #216(글꼴 실현 레지스트리)부터 글자마다 글꼴 이름을 정규화 ·
+  분류하고 진척 캐시를 문자열 SipHash 로 찾아, 문서 전체 조판이 0.0.5 보다 약 4배 느려졌다(르노 양식
+  shaper 기준 3.7 → 17.4 ms). 글꼴 키를 런 × 문자군마다 한 번만 풀고, 등록 글꼴이 없으면 정규화를
+  건너뛰고, 이름 분류를 메모하고, 진척 캐시를 할당 없는 2단 Fx 해시로 바꿔 2.5 ms 로 되돌렸다. 조판 결과는
+  바이트 동일(게이트 · 골든 그대로). wasm 편집 1건당 29.8 → 6.4 ms(0.0.5: 5.9).
+  *(EN — fixed the 0.0.6 ~4× typesetting slowdown introduced with the font registry; output unchanged.)*
+- **고정 높이 칸(`noAdjust="1"`)의 넘친 글을 아래 행 위에 겹쳐 그리지 않는다(#347).** 한컴처럼 칸 경계에서
+  자른다(줄 단위 — 기준선이 칸 안에 있는 줄만 그린다). SVG · PDF 공통, 예약 높이 · 쪽 수는 그대로다.
+  *(EN — Overflowing text in a fixed-height table row is clipped at the cell box instead of being painted
+  over the next row.)*
+
 ### 추가 (Added)
 
+- **`HwpDoc.applyIntents(intents[])`(#350).** 편집 여러 개를 같은 op-bus 로 적용하되 문서 재조판은 끝에 한
+  번만 한다(`applyIntent` 는 `pages` 를 알려 주려고 편집마다 재조판). 결과 `{kind:"Batch", applied, pages}`.
+  원자적이지 않다 — 첫 실패에서 `{code:"batch_failed", message:"intent[i]: …"}` 를 던지고 앞선 편집은 남는다.
+  르노 양식 133건: 한 건씩 3,960 ms(0.0.6) → 일괄 103 ms. Rust: `hwp_mcp::apply_intents(_json)`.
+  *(EN — batch edits with one reflow; additive.)*
+- **`HwpDoc.tableCellFits(section, block)` · `pageUsage()`(#347).** 칸별 수용량 · 넘침 신호(`CellFit`:
+  칸 크기 · 글 폭 · 쓸 수 있는 높이 · 현재 내용 높이 · 줄 수 · 줄 간격 · 줄 수용량 · 줄당 한글 글자 수 ·
+  `fixed` · `overflow`)와 쪽별 본문 사용 높이. 길이는 자체 렌더 px. 워커 경로에서도 부를 수 있다.
+  *(EN — per-cell fit/overflow report and per-page body usage, additive.)*
 - **`toHwpx({ hwpRowHeights: "exact" | "auto" })`(엔진) · `serialize_hwpx_with`(hwp-core) (#351).** 0.0.6(#275)부터
   `.hwp` 에서 온 표는 저장된 행 높이를 정확값으로 보고 `noAdjust="1"` 로 내보낸다(쪽 수 왕복 보존). 양식을
   긴 글로 채우는 호출자는 `"auto"` 로 예전처럼 `noAdjust="0"`(한컴에서 행이 자람)을 고를 수 있다. HWPX

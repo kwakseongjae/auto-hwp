@@ -16,7 +16,44 @@ use hwp_model::prelude::*;
 
 use crate::is_full_width;
 
-type AdvanceCacheKey = (String, bool, bool, char, i32);
+/// Advance memo, two-level so the per-glyph lookup never allocates (#350): the OUTER key is the
+/// requested family AS WRITTEN (normalization is a pure function of it, so caching by the raw name is
+/// equivalent) and is looked up by `&str`; the INNER key is `(bold, italic, char, size_hwpunit)`.
+type AdvanceCache = HashMap<String, HashMap<(bool, bool, char, i32), f64, FxBuild>, FxBuild>;
+
+/// A tiny multiplicative (Fx-style) hasher for the advance memo. The default SipHash is DoS-resistant
+/// but was the single hottest frame of a whole-document typeset (#350); these keys are glyphs and
+/// family names from the document being laid out, and a collision only costs a probe, never a wrong
+/// value.
+#[derive(Default, Clone, Copy)]
+struct FxHasher(u64);
+
+impl std::hash::Hasher for FxHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        for chunk in bytes.chunks(8) {
+            let mut buf = [0u8; 8];
+            buf[..chunk.len()].copy_from_slice(chunk);
+            self.write_u64(u64::from_le_bytes(buf));
+        }
+    }
+    fn write_u64(&mut self, n: u64) {
+        self.0 = (self.0.rotate_left(5) ^ n).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+    fn write_u32(&mut self, n: u32) {
+        self.write_u64(n as u64);
+    }
+    fn write_u8(&mut self, n: u8) {
+        self.write_u64(n as u64);
+    }
+    fn write_usize(&mut self, n: usize) {
+        self.write_u64(n as u64);
+    }
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+type FxBuild = std::hash::BuildHasherDefault<FxHasher>;
 
 /// System font candidates probed at runtime, Korean-capable first. The first that parses wins; if
 /// none is present we fall back to the per-script approximation (so this never panics headless/CI).
@@ -170,8 +207,8 @@ pub struct RealFontMetrics {
     /// Explicit host-provided faces. Unlike the legacy first-face mapping, these are selected by the
     /// requested family/style so layout and PDF realization cannot silently disagree.
     registered: Vec<RegisteredFace>,
-    /// (normalized family, bold, italic, char, size_hwpunit) → advance HWPUNIT.
-    cache: RefCell<HashMap<AdvanceCacheKey, f64>>,
+    /// family → (bold, italic, char, size_hwpunit) → advance HWPUNIT. See [`AdvanceCache`].
+    cache: RefCell<AdvanceCache>,
 }
 
 struct RegisteredFace {
@@ -196,7 +233,7 @@ impl RealFontMetrics {
             font: LoadedFont::discover(),
             latin: LoadedFont::discover_from(LATIN_FONT_CANDIDATES),
             registered: Vec::new(),
-            cache: RefCell::new(HashMap::new()),
+            cache: RefCell::new(AdvanceCache::default()),
         }
     }
 
@@ -238,7 +275,7 @@ impl RealFontMetrics {
             font: None,
             latin: None,
             registered,
-            cache: RefCell::new(HashMap::new()),
+            cache: RefCell::new(AdvanceCache::default()),
         }
     }
 
@@ -286,14 +323,13 @@ impl RealFontMetrics {
     /// Base advance (no 자간/장평) in HWPUNIT — the [`FontMetricsProvider`] contract value.
     fn base_advance(&self, key: &FontKey, ch: char, size_hwpunit: i32) -> f64 {
         let em = size_hwpunit.max(1) as f64;
-        let cache_key = (
-            normalized_family(&key.family),
-            key.bold,
-            key.italic,
-            ch,
-            size_hwpunit,
-        );
-        if let Some(&v) = self.cache.borrow().get(&cache_key) {
+        let inner_key = (key.bold, key.italic, ch, size_hwpunit);
+        if let Some(&v) = self
+            .cache
+            .borrow()
+            .get(key.family.as_str())
+            .and_then(|m| m.get(&inner_key))
+        {
             return v;
         }
         let selected = self.registered_face(key);
@@ -338,7 +374,11 @@ impl RealFontMetrics {
                 None => approx_advance(ch, em),
             }
         };
-        self.cache.borrow_mut().insert(cache_key, adv);
+        self.cache
+            .borrow_mut()
+            .entry(key.family.clone())
+            .or_default()
+            .insert(inner_key, adv);
         adv
     }
 
@@ -457,6 +497,11 @@ impl FontMetricsProvider for RealFontMetrics {
     }
 
     fn has_family(&self, family: &str) -> bool {
+        // No host-registered face (the default wasm/native path) → nothing to match; skip the
+        // allocating normalization (#350 — it ran per glyph in 0.0.6).
+        if self.registered.is_empty() {
+            return false;
+        }
         let family = normalized_family(family);
         self.registered.iter().any(|face| face.family == family)
     }
@@ -515,7 +560,7 @@ mod tests {
             font: None,
             latin: None,
             registered: Vec::new(),
-            cache: RefCell::new(HashMap::new()),
+            cache: RefCell::new(AdvanceCache::default()),
         };
         let f = FontKey {
             family: String::new(),
