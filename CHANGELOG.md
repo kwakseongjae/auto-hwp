@@ -38,6 +38,39 @@ packages are released in lockstep.)*
 
 ---
 
+## [0.0.6] — 2026-09-30
+
+0.0.5 이후 main 에 쌓인 조판 · 렌더 · HWP5/HWPX 정확도 수정과 진단 도구를 한 번에 발행하는 lockstep 릴리스다.
+직접적인 계기는 business_plan_k 양식 채우기에서 드러난 글자 모양 결함 두 건(#339 · #341)이다. 파괴 변경은 없다.
+
+### 수정 (Fixed)
+
+- **`.hwp` 글자 모양 경계 8글자 밀림(#339).** 인라인 컨트롤 뒤 글자 모양 경계를 `char_offsets` 로 찾아,
+  파란 안내 문구의 앞 8글자가 검정으로 읽히던 문제를 고쳤다.
+- **합성 charPr 가 굵게 · 기울임 · 색을 물려받던 문제(#341).** 칸에 새로 쓴 글이 첫 charPr 의 서식을
+  상속해 전부 굵은 기울임으로 나오던 것을 막았다.
+- 조판 · 렌더 정확도 다수: 표 셀 세로 여백 HWP 기본값(#283), 문단 글자 크기 strut(#285), `.hwp` 행높이
+  정확값(#275), 백지 쪽 · 강제 개쪽 · 빈 줄 쪽 넘김(#306 · #310 · #316), 줄수 채점 용지 상자(#320),
+  원문자 폴백(#289), 명조 번들 OFL 우선(#291), 고정폭 빈칸 줄바꿈(#248), 긴 표 칸의 쪽 넘김(#206) 등.
+- 문서 열기가 오래 걸릴 때 대기 사유와 빠져나갈 길을 보여 준다(#328).
+
+### 추가 (Added)
+
+- `layout-check` 진단: 셀 문단 폭 자료(#293), `--pages` 쪽별 사용 높이 · 밀림 사유(#295 · #297 · #300),
+  `--rendered` 저장 캐시 없는 문서 측정(#322).
+- 한컴 심볼 PUA 를 표준 유니코드로 변환(#255), export-html 표 폭을 문서에서 가져옴(#252),
+  결정적 폰트 실현 레지스트리(#216), PDF 의미 시각 진단(#214), AI 제안 커밋 전 검증 · 리비전 결합
+  트랜잭션(#208 · #209, additive).
+
+### 파괴 변경 (Breaking)
+
+- 없음. (CLI 는 여전히 소스 빌드 — Rust 워크스페이스 버전 변경 없음)
+
+*(EN — Lockstep 0.0.6: layout/render and HWP5/HWPX fidelity fixes accumulated since 0.0.5, including
+the char-shape boundary shift (#339) and synthetic charPr inheriting bold/italic/color (#341). No breaking changes.)*
+
+---
+
 ## [0.0.5] — 2026-08-13
 
 0.0.4 이후의 additive SDK·Intent 확장과 편집 안정성 수정 릴리스다. npm 패키지 네 종을 lockstep으로
