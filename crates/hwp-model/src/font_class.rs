@@ -44,6 +44,27 @@ pub const GOTHIC_DEFAULT: &str = "NanumGothic";
 /// case-insensitive for Latin. Deliberately conservative: an unrecognized name is [`FontCategory::Other`]
 /// (→ the default gothic), never a wrong serif. Most gov-docs name faces 함초롬바탕(명조)/함초롬돋움(고딕).
 pub fn classify(name: &str) -> FontCategory {
+    // #350: the typesetter asks this once per run × script slot; a document names a handful of faces,
+    // so memoize the pure substring scan per thread (bounded — a hostile doc can't grow it forever).
+    thread_local! {
+        static MEMO: std::cell::RefCell<std::collections::HashMap<String, FontCategory>> =
+            std::cell::RefCell::new(std::collections::HashMap::new());
+    }
+    if let Some(hit) = MEMO.with(|m| m.borrow().get(name).copied()) {
+        return hit;
+    }
+    let category = classify_uncached(name);
+    MEMO.with(|m| {
+        let mut m = m.borrow_mut();
+        if m.len() >= 1024 {
+            m.clear();
+        }
+        m.insert(name.to_string(), category);
+    });
+    category
+}
+
+fn classify_uncached(name: &str) -> FontCategory {
     let n = name.trim();
     if n.is_empty() {
         return FontCategory::Other;
