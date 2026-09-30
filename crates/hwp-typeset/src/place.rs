@@ -3221,6 +3221,9 @@ fn paragraph_atoms(
         let underline = cs.map(|c| c.underline).unwrap_or(false);
         let bold = cs.map(|c| c.bold).unwrap_or(false);
         let italic = cs.map(|c| c.italic).unwrap_or(false);
+        // Per-run memo keyed by script slot: the metric key and display face depend only on (char
+        // shape, slot), so resolve them once per slot instead of per glyph (#350 — 0.0.6 regression).
+        let mut faces: [Option<(FontKey, Option<String>)>; 7] = Default::default();
         for inl in &run.content {
             match inl {
                 Inline::Text(t) => {
@@ -3231,7 +3234,14 @@ fn paragraph_atoms(
                         let cluster = crate::old_hangul_cluster(ch);
                         let sch = crate::subst_glyph(ch);
                         let slot = crate::script_slot(sch);
-                        let metric_font = crate::resolved_font_key(cs, sch, fonts);
+                        let (metric_font, font) = faces[slot as usize]
+                            .get_or_insert_with(|| {
+                                (
+                                    crate::resolved_font_key(cs, sch, fonts),
+                                    display_font(cs, slot, fonts),
+                                )
+                            })
+                            .clone();
                         let (ratio, spacing_em) = cs
                             .map(|c| {
                                 let r = match *c.ratio.get(slot) {
@@ -3250,7 +3260,7 @@ fn paragraph_atoms(
                             underline,
                             bold,
                             italic,
-                            font: display_font(cs, slot, fonts),
+                            font,
                             metric_font,
                             ratio,
                             spacing_em,

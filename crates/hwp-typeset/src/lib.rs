@@ -1801,14 +1801,18 @@ pub fn layout_paragraph(
     for run in &p.runs {
         let cs = doc.char_shapes.get(run.char_shape);
         let size = cs.map(|c| c.height).filter(|&h| h > 0).unwrap_or(1000);
+        // The key depends only on (char shape, script slot) — resolve once per slot per run, not per
+        // glyph (the per-glyph family substitution made 0.0.6 typesetting ~4× slower, #350).
+        let mut keys: [Option<FontKey>; 7] = Default::default();
         for inl in &run.content {
             match inl {
                 Inline::Text(t) => {
                     for ch in t.chars() {
                         let sch = subst_glyph(ch);
-                        let font = resolved_font_key(cs, sch, fonts);
+                        let font = keys[script_slot(sch) as usize]
+                            .get_or_insert_with(|| resolved_font_key(cs, sch, fonts));
                         chars.push((sch, size));
-                        advs.push(scaled_advance(sch, size, cs, &font, fonts));
+                        advs.push(scaled_advance(sch, size, cs, font, fonts));
                         object_heights.push(0.0);
                     }
                 }
