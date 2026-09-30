@@ -36,6 +36,15 @@ packages are released in lockstep.)*
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+### 추가 (Added)
+
+- **`toHwpx({ hwpRowHeights: "exact" | "auto" })`(엔진) · `serialize_hwpx_with`(hwp-core).** 0.0.6(#275)부터
+  `.hwp` 에서 온 표는 저장된 행 높이를 정확값으로 보고 `noAdjust="1"` 로 내보낸다(쪽 수 왕복 보존). 양식을
+  긴 글로 채우는 호출자는 `"auto"` 로 예전처럼 `noAdjust="0"`(한컴에서 행이 자람)을 고를 수 있다. HWPX
+  입력의 표는 어느 쪽이든 원래 값을 유지한다. 언제 무엇이 쓰이는지는 `packages/engine/README.md` 표.
+  *(EN — export option to write `.hwp`-origin tables with `noAdjust="0"` (rows grow) instead of the 0.0.6
+  default `noAdjust="1"`.)*
+
 ---
 
 ## [0.0.6] — 2026-09-30

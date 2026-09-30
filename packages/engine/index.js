@@ -363,8 +363,15 @@ export class HwpDoc {
   exportHtml() {
     return this.#call((r) => r.exportHtml());
   }
-  toHwpx() {
-    return this.#call((r) => r.toHwpx());
+  /** HWPX bytes of the current document. `options.hwpRowHeights` (`"exact"` default | `"auto"`) only
+   *  affects tables that came from a binary `.hwp`: `"exact"` writes `noAdjust="1"` (rows keep the
+   *  saved heights — page-count faithful; filled overflow is clipped in Hancom), `"auto"` writes
+   *  `noAdjust="0"` (rows grow with content — the pre-0.0.6 behaviour). HWPX-input tables keep their
+   *  own `noAdjust`. */
+  toHwpx(options) {
+    if (options == null) return this.#call((r) => r.toHwpx());
+    const s = JSON.stringify(options);
+    return this.#call((r) => r.toHwpxWith(s));
   }
   /** Free the wasm allocation. Call on document swap (R13). Idempotent. */
   free() {

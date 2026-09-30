@@ -886,6 +886,19 @@ pub fn export_bytes(session: &Session) -> Result<Vec<u8>, String> {
     hwp_core::serialize_hwpx(doc).map_err(|e| e.to_string())
 }
 
+pub use hwp_core::{HwpRowHeights, HwpxExportOptions};
+
+/// [`export_bytes`] with HWPX export options (e.g. `.hwp` table row-height policy — see
+/// [`hwp_core::HwpRowHeights`]).
+pub fn export_bytes_with(session: &Session, opts: &HwpxExportOptions) -> Result<Vec<u8>, String> {
+    let doc = session
+        .doc
+        .as_ref()
+        .ok_or("no document open (call open_document first)")?
+        .doc();
+    hwp_core::serialize_hwpx_with(doc, opts).map_err(|e| e.to_string())
+}
+
 /// Serialize the live doc to `path`. Returns `(byte_len, editor_open_safe)`. Serializes via
 /// [`export_bytes`], then writes atomically (no logic duplicated between the two surfaces).
 fn do_export(session: &Session, path: &str) -> Result<(usize, bool), String> {

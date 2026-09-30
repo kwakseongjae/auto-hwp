@@ -100,7 +100,7 @@ ones, so the published size is used as the denominator and the ratio never reach
 | `registerFont(family, bytes)` | `void` | drives metrics **and** PDF; **re-layouts** (re-query `pageCount`). |
 | `exportPdf()` | `Uint8Array` | throws `{code:"font_missing"}` if none. |
 | `exportHtml()` | `string` | self-contained HTML. |
-| `toHwpx()` | `Uint8Array` | round-trip-safe HWPX. |
+| `toHwpx(options?)` | `Uint8Array` | round-trip-safe HWPX. `options.hwpRowHeights`: `"exact"` (default) \| `"auto"` — see below. |
 | `free()` | `void` | idempotent; frees the wasm handle. |
 
 Coordinates for `hitTest`/`tableAt` are **own-render px** (= HWPUNIT / 75). Edit Intents address the
@@ -216,3 +216,18 @@ drawn in); document-level per-family mapping is a follow-up.
 binary parser (rhwp) + the krilla PDF stack. An HWPX-only build (drop the crate's default `hwp5`
 feature) is ~4.6 MiB raw / ~1.4 MiB gzipped. Run `wasm-opt -Oz` (binaryen) on the artifact to shrink
 further; it was not available in the build environment.
+
+### Table row heights on export (`noAdjust`)
+
+HWPX marks a table `<hp:tbl noAdjust="1">` when its rows must NOT grow with their content (Hancom clips
+the overflow). When the engine writes it:
+
+| Source of the table | `noAdjust` written |
+|---|---|
+| HWPX input | the file's own value, unchanged (untouched tables and cell edits keep the original bytes) |
+| binary `.hwp` input, `toHwpx()` / `hwpRowHeights: "exact"` (0.0.6+) | `1` — a `.hwp`'s saved row heights are Hancom's real layout, so the page count round-trips |
+| binary `.hwp` input, `hwpRowHeights: "auto"` | `0` — rows grow with filled content in Hancom (pre-0.0.6 behaviour) |
+| table inserted by an edit | `0` |
+
+Filling a `.hwp` form with longer text? Export with `doc.toHwpx({ hwpRowHeights: "auto" })` so Hancom
+grows the rows instead of clipping.
