@@ -232,6 +232,7 @@ fn emit_section_meta(sec: &Section) -> SectionMeta {
         passthrough: emit_rawparts(&sec.passthrough.parts),
         dirty: sec.dirty.is_dirty(),
         decorations: sec.decorations.iter().map(emit_decoration).collect(),
+        removed_spans: sec.removed_spans.iter().map(|&(a, b)| [a, b]).collect(),
     }
 }
 
@@ -830,6 +831,7 @@ pub fn parse(proj: &JsxCssProject) -> Result<SemanticDoc> {
                 parts: parse_rawparts(&meta.passthrough)?,
             },
             dirty: Dirty(meta.dirty),
+            removed_spans: meta.removed_spans.iter().map(|&[a, b]| (a, b)).collect(),
         });
     }
 

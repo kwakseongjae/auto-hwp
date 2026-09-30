@@ -359,6 +359,16 @@ export class HwpDoc {
     const s = typeof intent === 'string' ? intent : JSON.stringify(intent);
     return this.#call((r) => JSON.parse(r.applyIntent(s)));
   }
+  /** Apply MANY intents with ONE reflow (#350) — `intents` is an array of the envelopes `applyIntent`
+   *  takes (objects or JSON strings). Same op-bus and one undo unit per intent, but the whole-document
+   *  re-typeset `applyIntent` runs per edit happens once. Returns `{kind:"Batch", applied, pages}`.
+   *  Not atomic: throws `{code:"batch_failed", message:"intent[i]: …"}` at the first failure and the
+   *  earlier edits stay applied. */
+  applyIntents(intents) {
+    const arr = (intents ?? []).map((i) => (typeof i === 'string' ? JSON.parse(i) : i));
+    const s = JSON.stringify(arr);
+    return this.#call((r) => JSON.parse(r.applyIntents(s)));
+  }
   undo() {
     return this.#call((r) => r.undo());
   }
