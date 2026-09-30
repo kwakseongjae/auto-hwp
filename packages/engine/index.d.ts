@@ -249,6 +249,13 @@ export interface RunSpec {
 }
 
 /** Tagged result of applyIntent (Intent schema v0). `kind` discriminates the payload. */
+/** Result of `applyIntents` (#350). `pages` is the page count after the single reflow. */
+export interface BatchOutcome {
+  kind: 'Batch';
+  applied: number;
+  pages: number;
+}
+
 export type Outcome =
   | { kind: 'opened'; format: string; editable: boolean; sections: number }
   | { kind: 'pageCount'; pages: number }
@@ -368,6 +375,10 @@ export class HwpDoc {
    *  table inventory + body excerpt, for the chat doc-context. Pure model read (no typeset, no LLM). */
   docProfile(): DocProfile;
   applyIntent(intent: object | string): Outcome;
+  /** Apply MANY intents with ONE reflow (#350): same op-bus, one undo unit per intent, but the
+   *  whole-document re-typeset `applyIntent` does per edit runs once. Not atomic — throws
+   *  `{code:"batch_failed", message:"intent[i]: …"}` at the first failure; earlier edits stay applied. */
+  applyIntents(intents: Array<object | string>): BatchOutcome;
   undo(): boolean;
   redo(): boolean;
   /** Inject a single-face TTF/OTF font (R8 — fonts are never bundled). Used for BOTH the layout

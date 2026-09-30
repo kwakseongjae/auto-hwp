@@ -36,6 +36,23 @@ packages are released in lockstep.)*
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+### 수정 (Fixed)
+
+- **0.0.6 조판 속도 회귀 해소(#350).** #216(글꼴 실현 레지스트리)부터 글자마다 글꼴 이름을 정규화 ·
+  분류하고 진척 캐시를 문자열 SipHash 로 찾아, 문서 전체 조판이 0.0.5 보다 약 4배 느려졌다(르노 양식
+  shaper 기준 3.7 → 17.4 ms). 글꼴 키를 런 × 문자군마다 한 번만 풀고, 등록 글꼴이 없으면 정규화를
+  건너뛰고, 이름 분류를 메모하고, 진척 캐시를 할당 없는 2단 Fx 해시로 바꿔 2.5 ms 로 되돌렸다. 조판 결과는
+  바이트 동일(게이트 · 골든 그대로). wasm 편집 1건당 29.8 → 6.4 ms(0.0.5: 5.9).
+  *(EN — fixed the 0.0.6 ~4× typesetting slowdown introduced with the font registry; output unchanged.)*
+
+### 추가 (Added)
+
+- **`HwpDoc.applyIntents(intents[])`(#350).** 편집 여러 개를 같은 op-bus 로 적용하되 문서 재조판은 끝에 한
+  번만 한다(`applyIntent` 는 `pages` 를 알려 주려고 편집마다 재조판). 결과 `{kind:"Batch", applied, pages}`.
+  원자적이지 않다 — 첫 실패에서 `{code:"batch_failed", message:"intent[i]: …"}` 를 던지고 앞선 편집은 남는다.
+  르노 양식 133건: 한 건씩 3,960 ms(0.0.6) → 일괄 103 ms. Rust: `hwp_mcp::apply_intents(_json)`.
+  *(EN — batch edits with one reflow; additive.)*
+
 ---
 
 ## [0.0.6] — 2026-09-30
