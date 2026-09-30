@@ -51,6 +51,10 @@ packages are released in lockstep.)*
   건너뛰고, 이름 분류를 메모하고, 진척 캐시를 할당 없는 2단 Fx 해시로 바꿔 2.5 ms 로 되돌렸다. 조판 결과는
   바이트 동일(게이트 · 골든 그대로). wasm 편집 1건당 29.8 → 6.4 ms(0.0.5: 5.9).
   *(EN — fixed the 0.0.6 ~4× typesetting slowdown introduced with the font registry; output unchanged.)*
+- **고정 높이 칸(`noAdjust="1"`)의 넘친 글을 아래 행 위에 겹쳐 그리지 않는다(#347).** 한컴처럼 칸 경계에서
+  자른다(줄 단위 — 기준선이 칸 안에 있는 줄만 그린다). SVG · PDF 공통, 예약 높이 · 쪽 수는 그대로다.
+  *(EN — Overflowing text in a fixed-height table row is clipped at the cell box instead of being painted
+  over the next row.)*
 
 ### 추가 (Added)
 
@@ -59,6 +63,10 @@ packages are released in lockstep.)*
   원자적이지 않다 — 첫 실패에서 `{code:"batch_failed", message:"intent[i]: …"}` 를 던지고 앞선 편집은 남는다.
   르노 양식 133건: 한 건씩 3,960 ms(0.0.6) → 일괄 103 ms. Rust: `hwp_mcp::apply_intents(_json)`.
   *(EN — batch edits with one reflow; additive.)*
+- **`HwpDoc.tableCellFits(section, block)` · `pageUsage()`(#347).** 칸별 수용량 · 넘침 신호(`CellFit`:
+  칸 크기 · 글 폭 · 쓸 수 있는 높이 · 현재 내용 높이 · 줄 수 · 줄 간격 · 줄 수용량 · 줄당 한글 글자 수 ·
+  `fixed` · `overflow`)와 쪽별 본문 사용 높이. 길이는 자체 렌더 px. 워커 경로에서도 부를 수 있다.
+  *(EN — per-cell fit/overflow report and per-page body usage, additive.)*
 
 ---
 

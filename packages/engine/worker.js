@@ -49,6 +49,8 @@ const METHODS = new Set([
   'blocksInRect',
   'tableColBoundaries',
   'tableRowBoundaries',
+  'tableCellFits',
+  'pageUsage',
   'pageGeometry',
   'blockRuns',
   'blockRunsPath',
