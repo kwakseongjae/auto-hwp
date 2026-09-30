@@ -2188,6 +2188,43 @@ impl FontMetricsProvider for NullFontMetrics {
 mod tests {
     use super::*;
 
+    /// #350 guard — the font key depends only on (char shape, script slot), so a long single-run
+    /// paragraph must resolve it once per slot, not once per glyph (0.0.6 did it per glyph: the
+    /// family normalization + substitution scan made whole-document typesetting ~4× slower).
+    #[test]
+    fn font_key_resolves_once_per_script_slot_not_per_glyph() {
+        use std::cell::Cell as Counter;
+        struct Counting(Counter<usize>);
+        impl FontMetricsProvider for Counting {
+            fn advance_width(&self, _font: &FontKey, _ch: char, size: i32) -> f64 {
+                size as f64
+            }
+            fn has_family(&self, _family: &str) -> bool {
+                self.0.set(self.0.get() + 1);
+                false
+            }
+        }
+        let mut doc = SemanticDoc::default();
+        doc.char_shapes.push(CharShape {
+            font_family: Some("함초롬바탕".into()),
+            ..Default::default()
+        });
+        doc.para_shapes.push(ParaShape::default());
+        let p = Paragraph {
+            runs: vec![Run {
+                char_shape: 0,
+                content: vec![Inline::Text("가나다라마바사아자차 abc".repeat(20))],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let fonts = Counting(Counter::new(0));
+        let lines = layout_paragraph(&p, &doc, 20_000.0, &fonts);
+        assert!(!lines.is_empty());
+        // Hangul + Latin (the space shares Latin's slot) → at most 2 resolutions for 280 glyphs.
+        assert!(fonts.0.get() <= 2, "resolved {} times", fonts.0.get());
+    }
+
     fn para(text: &str) -> Paragraph {
         Paragraph {
             runs: vec![Run {
