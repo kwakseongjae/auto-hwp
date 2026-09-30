@@ -1294,6 +1294,86 @@ pub fn cell_caret_rect_placed(
         .map(cell_caret_dto)
 }
 
+/// Per-cell FIT report (#347) of a table, in own-render PX (lengths ÷ [`HWPUNIT_PER_PX`]). The
+/// overflow signal for a fixed-height (`noAdjust="1"`) form table: `overflow` ⇔ the content needs more
+/// than `available_height`, so Hancom (and our render) clips it and the caller should re-write the cell
+/// shorter. `line_capacity`/`chars_per_line` size a rewrite in the cell's first-paragraph style.
+#[derive(serde::Serialize, Clone, Debug, PartialEq)]
+pub struct CellFitDto {
+    pub row: usize,
+    pub col: usize,
+    pub row_span: usize,
+    pub col_span: usize,
+    pub page: u32,
+    pub width: f64,
+    pub height: f64,
+    pub text_width: f64,
+    pub available_height: f64,
+    pub content_height: f64,
+    pub lines: usize,
+    pub line_advance: f64,
+    pub line_capacity: usize,
+    pub chars_per_line: usize,
+    pub fixed: bool,
+    pub overflow: bool,
+}
+
+/// Per-page body usage (#347), own-render PX: `used_height` = body top → lowest placed block.
+#[derive(serde::Serialize, Clone, Debug, PartialEq)]
+pub struct PageUsageDto {
+    pub page: u32,
+    pub body_height: f64,
+    pub used_height: f64,
+}
+
+/// [`hwp_typeset::table_cell_fits`] over the CACHED placement, converted to px. `None` when
+/// `(section, block)` is not a placed table (018 null policy).
+pub fn table_cell_fits_placed(
+    doc: &SemanticDoc,
+    placed: &PlacedDoc,
+    fonts: &dyn hwp_model::prelude::FontMetricsProvider,
+    section: usize,
+    block: usize,
+) -> Option<Vec<CellFitDto>> {
+    let k = HWPUNIT_PER_PX;
+    let fits = hwp_typeset::table_cell_fits(doc, placed, fonts, section, block)?;
+    Some(
+        fits.into_iter()
+            .map(|f| CellFitDto {
+                row: f.row,
+                col: f.col,
+                row_span: f.row_span,
+                col_span: f.col_span,
+                page: f.page as u32,
+                width: f.width / k,
+                height: f.height / k,
+                text_width: f.text_width / k,
+                available_height: f.available_height / k,
+                content_height: f.content_height / k,
+                lines: f.lines,
+                line_advance: f.line_advance / k,
+                line_capacity: f.line_capacity,
+                chars_per_line: f.chars_per_line,
+                fixed: f.fixed,
+                overflow: f.overflow,
+            })
+            .collect(),
+    )
+}
+
+/// [`hwp_typeset::page_usage`] over the CACHED placement, converted to px.
+pub fn page_usage_placed(placed: &PlacedDoc) -> Vec<PageUsageDto> {
+    let k = HWPUNIT_PER_PX;
+    hwp_typeset::page_usage(placed)
+        .into_iter()
+        .map(|u| PageUsageDto {
+            page: u.page as u32,
+            body_height: u.body_height / k,
+            used_height: u.used_height / k,
+        })
+        .collect()
+}
+
 /// Path-addressed twin of [`cell_caret_rect_placed`] (issue #48). Length-1 delegates to the
 /// flat 053 lane (A2).
 pub fn cell_caret_rect_path_placed(

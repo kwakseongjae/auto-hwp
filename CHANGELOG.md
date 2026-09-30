@@ -36,6 +36,20 @@ packages are released in lockstep.)*
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+### 수정 (Fixed)
+
+- **고정 높이 칸(`noAdjust="1"`)의 넘친 글을 아래 행 위에 겹쳐 그리지 않는다(#347).** 한컴처럼 칸 경계에서
+  자른다(줄 단위 — 기준선이 칸 안에 있는 줄만 그린다). SVG · PDF 공통, 예약 높이 · 쪽 수는 그대로다.
+  *(EN — Overflowing text in a fixed-height table row is clipped at the cell box instead of being painted
+  over the next row.)*
+
+### 추가 (Added)
+
+- **`HwpDoc.tableCellFits(section, block)` · `pageUsage()`(#347).** 칸별 수용량 · 넘침 신호(`CellFit`:
+  칸 크기 · 글 폭 · 쓸 수 있는 높이 · 현재 내용 높이 · 줄 수 · 줄 간격 · 줄 수용량 · 줄당 한글 글자 수 ·
+  `fixed` · `overflow`)와 쪽별 본문 사용 높이. 길이는 자체 렌더 px. 워커 경로에서도 부를 수 있다.
+  *(EN — per-cell fit/overflow report and per-page body usage, additive.)*
+
 ---
 
 ## [0.0.6] — 2026-09-30

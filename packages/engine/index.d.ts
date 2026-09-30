@@ -224,6 +224,46 @@ export interface TableGrid {
 
 /** Page geometry in own-render px (= HWPUNIT/75): page box + printable-area margins, for the ruler
  *  (issue 027). Mirrors hwp-session `PageGeom`. */
+/** Per-cell fit / overflow report (#347). Lengths are own-render px (HWPUNIT ÷ 75). */
+export interface CellFit {
+  row: number;
+  col: number;
+  row_span: number;
+  col_span: number;
+  /** 0-based page of the fragment that draws the cell's text. */
+  page: number;
+  /** Drawn cell box. */
+  width: number;
+  height: number;
+  /** Box width minus the cell's horizontal inner margins (the text wrap width). */
+  text_width: number;
+  /** Height the content may use (`height` − the vertical cell inset). */
+  available_height: number;
+  /** Laid-out height of the current content. */
+  content_height: number;
+  /** Laid-out lines of the current content. */
+  lines: number;
+  /** One line's advance in the cell's first-paragraph style. */
+  line_advance: number;
+  /** Lines of that style that fit in `available_height`. */
+  line_capacity: number;
+  /** Full-width (한글) characters per line in that style at `text_width` (real line breaker). */
+  chars_per_line: number;
+  /** Fixed-height rows (HWPX `noAdjust="1"`): the row never grows; overflow is clipped. */
+  fixed: boolean;
+  /** `content_height > available_height`. */
+  overflow: boolean;
+}
+
+/** Per-page body usage (#347), own-render px. */
+export interface PageUsage {
+  page: number;
+  /** Page height minus top/bottom margins. */
+  body_height: number;
+  /** Body top → lowest placed block on the page (0 when the page has none). */
+  used_height: number;
+}
+
 export interface PageGeom {
   w: number;
   h: number;
@@ -347,6 +387,12 @@ export class HwpDoc {
    *  `number[]` of `rows + 1` absolute px for the ROW-height resize handles (issue 031); `null` off-page.
    *  A SPLIT table returns the per-page FRAGMENT's boundaries (rebased to the fragment top — 023 규칙). */
   tableRowBoundaries(page: number, section: number, block: number): number[] | null;
+  /** Per-cell fit / overflow report (#347) of the table at `(section, block)`, or `null` when the block
+   *  is not a placed table. On a `fixed` table an `overflow` cell is clipped (as in Hancom) — re-write it
+   *  to at most `line_capacity` lines × `chars_per_line` 한글. */
+  tableCellFits(section: number, block: number): CellFit[] | null;
+  /** Per-page body usage (#347): how full each page's body is. */
+  pageUsage(): PageUsage[];
   /** Page geometry (own-render px) for the ruler (issue 027); `null` when the page is out of range. */
   pageGeometry(page: number): PageGeom | null;
   /** The CURRENT styled runs of the `(row,col)` cell of the table at `(section,block)`, or of the
