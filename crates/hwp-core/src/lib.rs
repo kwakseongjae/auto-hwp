@@ -766,6 +766,57 @@ pub fn serialize_hwpx(doc: &SemanticDoc) -> Result<Vec<u8>> {
     hwp_hwpx::HwpxWriter.serialize(doc)
 }
 
+/// How tables that came from a binary `.hwp` write their row heights into HWPX (`<hp:tbl noAdjust>`).
+///
+/// Where `noAdjust` comes from on export:
+/// - **HWPX input**: the file's own `noAdjust` rides through untouched (verbatim span / in-place cell
+///   patch); a whole-table re-emit writes back the value the parser read. This option never changes it.
+/// - **`.hwp` input** (converted to HWPX): since 0.0.6 (#247/#275) every lifted table is written with
+///   `noAdjust="1"`, because a `.hwp`'s stored row heights are the layout Hancom actually saved — that
+///   keeps a round-trip on the same page count. But a table whose cells you FILL with longer text then
+///   stays at the original height in Hancom and the overflow is clipped.
+/// - **Tables inserted by an edit**: always `noAdjust="0"`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HwpRowHeights {
+    /// `noAdjust="1"` — rows keep the `.hwp`'s saved heights (0.0.6 default; page-count faithful).
+    #[default]
+    Exact,
+    /// `noAdjust="0"` — rows may grow with their content in Hancom (the pre-0.0.6 behaviour). Use
+    /// when filling a `.hwp` form with generated content.
+    Auto,
+}
+
+/// Options for [`serialize_hwpx_with`]. `Default` = exactly [`serialize_hwpx`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HwpxExportOptions {
+    pub hwp_row_heights: HwpRowHeights,
+}
+
+/// [`serialize_hwpx`] with export options. Only tables lifted from a `.hwp` (`Provenance.source ==
+/// Hwp5`) are affected; the in-memory document is not modified.
+pub fn serialize_hwpx_with(doc: &SemanticDoc, opts: &HwpxExportOptions) -> Result<Vec<u8>> {
+    if opts.hwp_row_heights == HwpRowHeights::Exact {
+        return serialize_hwpx(doc);
+    }
+    fn relax(blocks: &mut [hwp_model::document::Block]) {
+        for b in blocks {
+            if let hwp_model::document::Block::Table(t) = b {
+                if t.provenance.source == Some(SourceFormat::Hwp5) {
+                    t.fixed_row_heights = false;
+                }
+                for c in &mut t.cells {
+                    relax(&mut c.blocks);
+                }
+            }
+        }
+    }
+    let mut doc = doc.clone();
+    for sec in &mut doc.sections {
+        relax(&mut sec.blocks);
+    }
+    serialize_hwpx(&doc)
+}
+
 /// Editor-open-safety gate on HWPX bytes.
 pub fn validate_hwpx(bytes: &[u8]) -> SafetyReport {
     hwp_hwpx::HwpxWriter.validate_open_safety(bytes)

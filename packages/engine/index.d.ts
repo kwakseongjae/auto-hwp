@@ -288,7 +288,16 @@ export interface RunSpec {
   font?: string;
 }
 
-/** Tagged result of applyIntent (Intent schema v0). `kind` discriminates the payload. */
+/** `toHwpx` options. `hwpRowHeights` (tables that came from a binary `.hwp` only — HWPX-input tables
+ *  always keep their own `noAdjust`):
+ *  - `"exact"` (default, 0.0.6+): `noAdjust="1"` — rows keep the `.hwp`'s saved heights, so the page
+ *    count round-trips; text filled beyond a row's height is clipped in Hancom.
+ *  - `"auto"`: `noAdjust="0"` — rows grow with their content in Hancom (pre-0.0.6 behaviour). Use when
+ *    filling a `.hwp` form with generated content. */
+export interface HwpxExportOptions {
+  hwpRowHeights?: 'exact' | 'auto';
+}
+
 /** Result of `applyIntents` (#350). `pages` is the page count after the single reflow. */
 export interface BatchOutcome {
   kind: 'Batch';
@@ -296,6 +305,7 @@ export interface BatchOutcome {
   pages: number;
 }
 
+/** Tagged result of applyIntent (Intent schema v0). `kind` discriminates the payload. */
 export type Outcome =
   | { kind: 'opened'; format: string; editable: boolean; sections: number }
   | { kind: 'pageCount'; pages: number }
@@ -436,7 +446,8 @@ export class HwpDoc {
   /** Throws {code:"font_missing"} if no font registered. See README for the wasm glyph-embedding note. */
   exportPdf(): Uint8Array;
   exportHtml(): string;
-  toHwpx(): Uint8Array;
+  /** HWPX bytes. `hwpRowHeights` only affects tables from a binary `.hwp` (see `HwpxExportOptions`). */
+  toHwpx(options?: HwpxExportOptions): Uint8Array;
   /** Free the wasm allocation on document swap (R13). Idempotent. */
   free(): void;
 }

@@ -884,4 +884,36 @@ impl HwpDoc {
     pub fn to_hwpx(&self) -> Result<Vec<u8>, JsValue> {
         hwp_mcp::export_bytes(&self.session).map_err(engine_err)
     }
+
+    /// [`Self::to_hwpx`] with options — `options_json` is `{"hwpRowHeights": "exact" | "auto"}`.
+    /// `"auto"` writes tables that came from a binary `.hwp` with `noAdjust="0"` (rows may grow with
+    /// filled content in Hancom — the pre-0.0.6 behaviour); `"exact"` (default) keeps `noAdjust="1"`.
+    /// HWPX-input tables keep their own `noAdjust` either way. Unknown keys/values are rejected.
+    #[wasm_bindgen(js_name = toHwpxWith)]
+    pub fn to_hwpx_with(&self, options_json: &str) -> Result<Vec<u8>, JsValue> {
+        let v: serde_json::Value = serde_json::from_str(options_json)
+            .map_err(|e| js_err("bad_options", &format!("toHwpx options: {e}")))?;
+        let obj = v
+            .as_object()
+            .ok_or_else(|| js_err("bad_options", "toHwpx options must be an object"))?;
+        if let Some(k) = obj.keys().find(|k| k.as_str() != "hwpRowHeights") {
+            return Err(js_err(
+                "bad_options",
+                &format!("unknown toHwpx option {k:?}"),
+            ));
+        }
+        let hwp_row_heights = match obj.get("hwpRowHeights") {
+            None | Some(serde_json::Value::Null) => hwp_mcp::HwpRowHeights::Exact,
+            Some(serde_json::Value::String(s)) if s == "exact" => hwp_mcp::HwpRowHeights::Exact,
+            Some(serde_json::Value::String(s)) if s == "auto" => hwp_mcp::HwpRowHeights::Auto,
+            Some(other) => {
+                return Err(js_err(
+                    "bad_options",
+                    &format!("hwpRowHeights must be \"exact\" or \"auto\", got {other}"),
+                ))
+            }
+        };
+        let opts = hwp_mcp::HwpxExportOptions { hwp_row_heights };
+        hwp_mcp::export_bytes_with(&self.session, &opts).map_err(engine_err)
+    }
 }
