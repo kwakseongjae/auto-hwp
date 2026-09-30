@@ -1139,9 +1139,10 @@ fn apply_removed_spans(original: &str, sec: &Section, edits: &mut Vec<(usize, us
     }
 }
 
-/// The `<hp:secPr>` carrier of a section-first paragraph: `(run open tag, "<hp:secPr>…</hp:secPr>"
-/// + the <hp:ctrl> siblings that follow it)` (단 설정 · 머리말/꼬리말 · 쪽 번호 제어). `None` if the shape
-/// is not recognized — the caller then keeps the paragraph verbatim (never a half-cut section header).
+/// The `<hp:secPr>` carrier of a section-first paragraph: the run open tag, and the
+/// `<hp:secPr>…</hp:secPr>` element followed by its `<hp:ctrl>` siblings (단 설정 · 머리말/꼬리말 ·
+/// 쪽 번호 제어). `None` if the shape is not recognized — the caller then keeps the paragraph verbatim
+/// (never a half-cut section header).
 fn secpr_run(para: &str) -> Option<(String, String)> {
     let sp = para.find("<hp:secPr")?;
     let run_start = para[..sp].rfind("<hp:run")?;
