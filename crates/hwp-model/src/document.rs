@@ -140,6 +140,15 @@ pub struct Section {
     pub provenance: Provenance,
     pub passthrough: Passthrough,
     pub dirty: Dirty,
+    /// SERIALIZE-ONLY tombstones (#342): the original-XML byte spans (`[start, end)` into
+    /// `provenance.raw`) of source-backed top-level blocks an op REMOVED from `blocks` — a paragraph's
+    /// `ParaSource::span` (`<hp:p>…</hp:p>`) or a table's `src_span` (`<hp:tbl>…</hp:tbl>`, which sits
+    /// INSIDE its host `<hp:p>`). The HWPX serializer patches the original section XML in place, so a
+    /// block that is simply gone from `blocks` would otherwise ride along verbatim (the deleted
+    /// paragraph/table came back on reopen). `Op::DeleteBlock` records here; the serializer cuts
+    /// these spans out. Blocks without a span (fresh / .hwp lift) record nothing. Default EMPTY ⇒
+    /// every existing round-trip is byte-identical.
+    pub removed_spans: Vec<(usize, usize)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

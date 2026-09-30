@@ -38,6 +38,13 @@ packages are released in lockstep.)*
 
 ### 수정 (Fixed)
 
+- **HWPX 내보내기가 `DeleteBlock` 을 반영한다(#342).** HWPX 원본에서 지운 문단 · 표가 `toHwpx()` 로
+  다시 열면 되살아나던 문제를 고쳤다. `DeleteBlock` 이 원본 스팬을 묘비로 남기고 직렬화기가 그 바이트를
+  잘라낸다(지우지 않은 블록은 바이트 동일). 표만 지우면 그 표만 품던 호스트 문단도 파일에서 빠진다(모델의
+  0줄 앵커와 같은 배치). 살아 있는 표를 품은 호스트 문단을 지우는 것은 파일에서 무시되고(사용자 콘텐츠
+  보존), 구역 첫 문단(`secPr`)을 지우면 쪽 설정 런이 다음 문단으로 옮겨 간다.
+  *(EN — HWPX export now honors `DeleteBlock`: deleted paragraphs/tables no longer reappear on reopen;
+  untouched blocks stay byte-identical.)*
 - **0.0.6 조판 속도 회귀 해소(#350).** #216(글꼴 실현 레지스트리)부터 글자마다 글꼴 이름을 정규화 ·
   분류하고 진척 캐시를 문자열 SipHash 로 찾아, 문서 전체 조판이 0.0.5 보다 약 4배 느려졌다(르노 양식
   shaper 기준 3.7 → 17.4 ms). 글꼴 키를 런 × 문자군마다 한 번만 풀고, 등록 글꼴이 없으면 정규화를
