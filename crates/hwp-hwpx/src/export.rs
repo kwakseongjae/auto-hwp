@@ -98,6 +98,15 @@ pub fn validate_open_safety(bytes: &[u8]) -> SafetyReport {
     }
 }
 
+/// `secCnt` declared on the `<hh:head …>` open tag, if any (#357).
+fn head_sec_cnt(header: &str) -> Option<usize> {
+    let start = header.find("<hh:head")?;
+    let end = start + header[start..].find('>')?;
+    let tag = &header[start..end];
+    let v = tag.split(" secCnt=\"").nth(1)?;
+    v[..v.find('"')?].parse().ok()
+}
+
 /// STRICTER gate for the FROM-SCRATCH synthesis path (HWP5→HWPX). On top of [`validate_open_safety`]
 /// it checks the two ways a deep-lift off-by-one becomes a Hancom "damaged file" — neither of which
 /// the generic XML/OPC checks catch, and `build_synth_plan` silently no-ops on:
@@ -151,6 +160,20 @@ pub fn validate_synthesis_safety(bytes: &[u8]) -> SafetyReport {
                 }
             }
             None => blocking.push("no header.xml to validate pool references against".into()),
+        }
+
+        // (d) #357: `<hh:head secCnt>` must match the number of section parts — Hancom trusts it
+        // and drops every section past the declared count.
+        if let Some(hb) = pkg.read_header() {
+            let header = String::from_utf8_lossy(&hb);
+            if let Some(declared) = head_sec_cnt(&header) {
+                let actual = pkg.section_part_names().len();
+                if declared != actual {
+                    blocking.push(format!(
+                        "header.xml secCnt={declared} but {actual} section part(s)"
+                    ));
+                }
+            }
         }
 
         // (c) v2 manifest integrity — content.hpf must list every section + BinData part it ships,
