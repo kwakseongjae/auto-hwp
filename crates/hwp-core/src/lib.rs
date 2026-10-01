@@ -2048,6 +2048,60 @@ mod inplace_tests {
         let _ = std::fs::write(std::env::temp_dir().join("multi-converted.hwpx"), &out);
     }
 
+    /// #358: a .hwp whose body REDEFINES the 머리말/꼬리말 mid-section (k-water-rfp: paragraphs 0.0
+    /// and 0.32 both carry header+footer) converts with ONE header/footer per slot in the section's
+    /// first paragraph, placed after the colPr ctrl (Hancom's order). Duplicates there made Hancom
+    /// lay the section out with default margins — tables clipped at the right page edge.
+    #[cfg(feature = "rhwp")]
+    #[test]
+    fn hwp5_mid_section_header_redefinition_is_not_duplicated() {
+        let bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../corpus/hwp/k-water-rfp.hwp"
+        ))
+        .unwrap();
+        let doc = Engine::open(&bytes).unwrap();
+        for (i, sec) in doc.sections.iter().enumerate() {
+            for (a, d) in sec.decorations.iter().enumerate() {
+                assert!(
+                    !sec.decorations[..a]
+                        .iter()
+                        .any(|e| e.kind == d.kind && e.apply == d.apply),
+                    "section {i}: duplicate {:?}/{:?} decoration",
+                    d.kind,
+                    d.apply
+                );
+            }
+        }
+        assert!(
+            !doc.sections[0].decorations.is_empty(),
+            "fixture defines a header/footer in section 0"
+        );
+
+        let out = serialize_hwpx(&doc).expect("converts");
+        assert!(validate_hwpx(&out).ok, "open-safe");
+        let pkg = hwp_hwpx::package::Package::open(&out).unwrap();
+        let sec0 = String::from_utf8(pkg.read_part("Contents/section0.xml").unwrap()).unwrap();
+        assert_eq!(
+            sec0.matches("<hp:header ").count(),
+            1,
+            "one header in section 0"
+        );
+        assert_eq!(
+            sec0.matches("<hp:footer ").count(),
+            1,
+            "one footer in section 0"
+        );
+        let col_pr = sec0.find("<hp:colPr").expect("colPr");
+        let first_deco = sec0
+            .find("<hp:header ")
+            .into_iter()
+            .chain(sec0.find("<hp:footer "))
+            .min()
+            .unwrap();
+        assert!(col_pr < first_deco, "colPr ctrl precedes header/footer");
+    }
+
     /// Track A Phase 5: open_as_hwpx flags a binary .hwp as converted and yields a doc that
     /// serializes to an open-safe HWPX (the engine surface behind the CLI `convert` command).
     #[cfg(feature = "rhwp")]
