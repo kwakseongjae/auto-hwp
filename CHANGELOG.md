@@ -38,6 +38,34 @@ packages are released in lockstep.)*
 
 ---
 
+## [0.0.8] — 2026-10-01
+
+여러 구역(section)을 가진 `.hwp` 를 `.hwpx` 로 바꿀 때 한컴에서 둘째 구역이 사라지거나 표가 오른쪽 쪽 끝에서 잘리던
+변환 결함 두 건을 고친 lockstep 릴리스다. 단일 구역이면서 머리말/꼬리말이 없는 변환과 HWPX 입력 왕복은 바이트 그대로다.
+
+### 수정 (Fixed)
+
+- **다중 구역 변환본의 `header.xml` `secCnt` 를 구역 수로 쓴다(#357).** 단일 구역 씨앗의 `secCnt="1"` 이 그대로 나가
+  한컴이 둘째 구역부터 버렸다. 구역 파트를 덧붙일 때만 `<hh:head secCnt>` 를 다시 쓰고, `validate_synthesis_safety` 가
+  불일치를 막는 오류로 잡는다.
+  *(EN — multi-section `.hwp` → `.hwpx` conversions now declare the real section count in `header.xml`; Hancom
+  no longer drops every section after the first.)*
+- **본문 중간에서 다시 정의한 머리말/꼬리말이 구역 첫 문단에 중복되지 않는다(#358).** 변환기가 구역 안의 모든
+  머리말/꼬리말 정의를 첫 문단에 두 벌씩, 그것도 `secPr` 와 `colPr` 사이에 끼워 한컴이 기본 여백으로 그렸다(표 오른쪽
+  잘림). 구역마다 (종류 × 적용 쪽) 첫 정의만 남기고 한컴 순서(`secPr → colPr → 머리말/꼬리말`)로 넣는다. 자체 렌더의
+  이중 칠도 함께 사라진다. 중간 재정의의 위치 보존 · 쪽 번호 위치 · 스텁 `linesegarray` 는 #360.
+  *(EN — mid-section header/footer redefinitions are no longer duplicated into the section's first paragraph, and
+  header/footer ctrls follow the column ctrl as Hancom writes them; fixes right-edge clipping in Hancom.)*
+
+### 파괴 변경 (Breaking)
+
+- 없음. (CLI 는 여전히 소스 빌드 — Rust 워크스페이스 버전 변경 없음)
+
+*(EN — Lockstep 0.0.8: two `.hwp` → `.hwpx` multi-section conversion fixes (#357, #358). No API changes, no
+breaking changes.)*
+
+---
+
 ## [0.0.7] — 2026-09-30
 
 0.0.6 발행 직후 business_plan_k 양식 채우기에서 드러난 속도 회귀 · 넘침 · 삭제 반영 문제를 고치고, 양식을 채우는
