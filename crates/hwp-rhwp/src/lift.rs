@@ -111,7 +111,28 @@ impl<'a> Lifter<'a> {
             for para in &sec.paragraphs {
                 self.push_paragraph(para, &mut section.blocks);
                 // 머리말/꼬리말 are section-scoped but anchored in a paragraph's controls.
+                // #358: a LATER paragraph may redefine the same slot (kind × apply-page) — HWP
+                // switches the header from that page on. Our IR is section-scoped (no anchor), so
+                // pushing every definition used to emit them ALL into the section's first
+                // paragraph: duplicated `<hp:header>`/`<hp:footer>` that Hancom renders with the
+                // default page margins (tables clipped at the right edge) and own-render
+                // double-paints. Keep the FIRST definition per slot — the one in force from the
+                // section's first page.
                 for ctrl in &para.controls {
+                    let slot = match ctrl {
+                        Control::Header(h) => Some((DecoKind::Header, lift_apply(h.apply_to))),
+                        Control::Footer(f) => Some((DecoKind::Footer, lift_apply(f.apply_to))),
+                        _ => None,
+                    };
+                    if let Some((kind, apply)) = slot {
+                        if section
+                            .decorations
+                            .iter()
+                            .any(|d| d.kind == kind && d.apply == apply)
+                        {
+                            continue;
+                        }
+                    }
                     match ctrl {
                         Control::Header(h) => section.decorations.push(PageDecoration {
                             kind: DecoKind::Header,

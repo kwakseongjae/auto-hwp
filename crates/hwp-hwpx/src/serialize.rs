@@ -864,7 +864,7 @@ fn patch_section_xml(
                 emit_cell_content(&mut deco, &body, &body_ctx, &mut next_id);
                 deco.push_str(&format!("</hp:subList></hp:{tag}></hp:ctrl>"));
             }
-            let at = pos + "</hp:secPr>".len();
+            let at = after_col_pr_ctrl(&s, pos + "</hp:secPr>".len());
             s.insert_str(at, &deco);
         }
     }
@@ -996,6 +996,28 @@ fn patch_section_xml(
             o.into_bytes()
         }
         None => orig.to_vec(),
+    }
+}
+
+/// Where a header/footer ctrl goes in the secPr-carrier run (#358): AFTER the column ctrl that
+/// immediately follows `</hp:secPr>`. Hancom always writes `secPr → <hp:ctrl><hp:colPr/></hp:ctrl>`
+/// and only then the 머리말/꼬리말 ctrls; splicing them between secPr and colPr (the old behaviour)
+/// made Hancom lay the section out with default margins — tables clipped at the right page edge.
+/// `at` is the byte offset just past `</hp:secPr>`; returned unchanged when no colPr ctrl follows.
+fn after_col_pr_ctrl(s: &str, at: usize) -> usize {
+    let rest = &s[at..];
+    let trimmed = rest.trim_start();
+    let lead = rest.len() - trimmed.len();
+    if !trimmed.starts_with("<hp:ctrl>") {
+        return at;
+    }
+    let inner = trimmed["<hp:ctrl>".len()..].trim_start();
+    if !inner.starts_with("<hp:colPr") {
+        return at;
+    }
+    match trimmed.find("</hp:ctrl>") {
+        Some(end) => at + lead + end + "</hp:ctrl>".len(),
+        None => at,
     }
 }
 
@@ -3957,10 +3979,37 @@ mod tests {
         let secpr = sec0.find("</hp:secPr>").expect("secPr present");
         let header = sec0.find(r#"<hp:header id"#).expect("header present");
         assert!(header > secpr, "header spliced after secPr");
+        // #358: Hancom's order is secPr → colPr ctrl → header/footer. A header spliced between
+        // secPr and colPr made Hancom draw the section with default margins (right-edge clipping).
+        let col_pr = sec0.find("<hp:colPr").expect("Skeleton colPr present");
+        assert!(col_pr > secpr, "colPr follows secPr");
+        assert!(
+            header > col_pr,
+            "header must come AFTER the colPr ctrl (#358):\n{sec0}"
+        );
         assert!(
             sec0.contains(r#"applyPageType="BOTH""#) && sec0.contains("머리말텍스트"),
             "header body text emitted"
         );
+    }
+
+    /// #358: the splice point skips exactly the colPr ctrl that follows `</hp:secPr>` — and nothing
+    /// else (no colPr → unchanged; another ctrl first → unchanged).
+    #[test]
+    fn after_col_pr_ctrl_skips_only_a_leading_colpr_ctrl() {
+        let s = r#"<hp:secPr></hp:secPr><hp:ctrl><hp:colPr id="" colCount="1"/></hp:ctrl><hp:t/>"#;
+        let at = s.find("</hp:secPr>").unwrap() + "</hp:secPr>".len();
+        let got = after_col_pr_ctrl(s, at);
+        assert_eq!(&s[got..], "<hp:t/>");
+
+        let none = r#"<hp:secPr></hp:secPr><hp:t/>"#;
+        let at = none.find("</hp:secPr>").unwrap() + "</hp:secPr>".len();
+        assert_eq!(after_col_pr_ctrl(none, at), at);
+
+        let other =
+            r#"<hp:secPr></hp:secPr><hp:ctrl><hp:header/></hp:ctrl><hp:ctrl><hp:colPr/></hp:ctrl>"#;
+        let at = other.find("</hp:secPr>").unwrap() + "</hp:secPr>".len();
+        assert_eq!(after_col_pr_ctrl(other, at), at);
     }
 
     /// 회귀 잠금: HWPX 에서 **파싱된** 머리말(`from_source`)은 편집으로 섹션이 dirty 가 되어도
