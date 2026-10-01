@@ -2033,6 +2033,10 @@ mod inplace_tests {
             pkg.section_part_names().len() >= 2,
             "≥2 section parts emitted"
         );
+        // #357: header.xml secCnt must equal the section parts (Skeleton seeds secCnt="1").
+        let header = String::from_utf8(pkg.read_header().unwrap()).unwrap();
+        let want = format!(r#"secCnt="{}""#, pkg.section_part_names().len());
+        assert!(header.contains(&want), "header must declare {want}");
 
         let reopened = Engine::open(&out).unwrap();
         let norm = |s: &str| s.split_whitespace().collect::<String>();

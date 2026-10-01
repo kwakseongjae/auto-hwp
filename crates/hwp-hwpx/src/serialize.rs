@@ -74,7 +74,7 @@ pub fn serialize(doc: &SemanticDoc) -> Result<Vec<u8>> {
     // PASS 1 — synthesis plan: turn the dirty content's interned non-default Char/ParaShapes,
     // fonts, and cell shades into new header pool entries (ids above the existing max), so the
     // body can reference real, valid pool entries instead of reusing existing (mismatched) ones.
-    let plan = build_synth_plan(doc, header_xml.as_deref(), table_ref.as_deref());
+    let mut plan = build_synth_plan(doc, header_xml.as_deref(), table_ref.as_deref());
 
     let mut zin = ZipArchive::new(Cursor::new(src.bytes.clone()))
         .map_err(|e| Error::Serialize(format!("reopen source: {e}")))?;
@@ -91,6 +91,16 @@ pub fn serialize(doc: &SemanticDoc) -> Result<Vec<u8>> {
     let new_section_items: Vec<(String, String)> = (section_names.len()..doc.sections.len())
         .map(|k| (format!("section{k}"), format!("Contents/section{k}.xml")))
         .collect();
+    // #357: `<hh:head secCnt>` must equal the section count. The seed (Skeleton) says 1, and the
+    // header is otherwise only re-emitted when pools were synthesized — so a multi-section .hwp
+    // shipped `secCnt="1"` with N section parts, and Hancom showed only the first section. Rewrite
+    // it exactly when we append section parts; an HWPX-in seed already has a part per section, so
+    // its header stays byte-identical.
+    if !new_section_items.is_empty() {
+        if let Some(h) = plan.header_out.take().or_else(|| header_xml.clone()) {
+            plan.header_out = Some(set_head_sec_cnt(&h, doc.sections.len()));
+        }
+    }
     // Only inject images the seed package LACKS. HWPX-in pictures (Batch D #196) are now parsed into
     // `doc.bin_data`, but their BinData parts already exist in the source zip and ride along verbatim
     // — re-injecting them would duplicate the part + its `content.hpf` manifest entry. Filtering here
@@ -182,6 +192,26 @@ pub fn serialize(doc: &SemanticDoc) -> Result<Vec<u8>> {
 
     let cur = out.finish().map_err(|e| Error::Serialize(e.to_string()))?;
     Ok(cur.into_inner())
+}
+
+/// Set `secCnt` on the `<hh:head …>` open tag (only there — never a same-named attr elsewhere),
+/// inserting it when absent (#357).
+fn set_head_sec_cnt(header: &str, count: usize) -> String {
+    let Some(start) = header.find("<hh:head") else {
+        return header.to_string();
+    };
+    let Some(end) = header[start..].find('>').map(|i| start + i) else {
+        return header.to_string();
+    };
+    let tag = &header[start..end];
+    let new_tag = if tag.contains(" secCnt=\"") {
+        synth::set_attr(tag, "secCnt", &count.to_string())
+    } else {
+        let body = tag.strip_suffix('/').unwrap_or(tag);
+        let slash = if body.len() < tag.len() { "/" } else { "" };
+        format!("{body} secCnt=\"{count}\"{slash}")
+    };
+    format!("{}{}{}", &header[..start], new_tag, &header[end..])
 }
 
 /// The embedded base HWPX template — a minimal, Hancom-authored single-section package. The
@@ -4102,12 +4132,71 @@ mod tests {
         );
         assert!(hpf.contains(r#"idref="section1""#), "section1 in spine");
 
+        // #357: header.xml declares as many sections as it ships — Hancom drops any past secCnt.
+        let header = String::from_utf8(pkg.read_header().unwrap()).unwrap();
+        assert!(
+            header.contains(r#"secCnt="2""#),
+            "secCnt must equal the 2 section parts: {}",
+            &header[..header.find('>').map_or(header.len(), |i| i + 1).min(300)]
+        );
+
         // Both sections' text round-trips.
         let re = parse_semantic(&out).unwrap();
         let text = re.plain_text();
         assert!(
             text.contains("첫 구역 본문.") && text.contains("둘째 구역 본문."),
             "both sections: {text}"
+        );
+    }
+
+    /// #357: `set_head_sec_cnt` rewrites only the `<hh:head>` open tag, and inserts the attr when absent.
+    #[test]
+    fn set_head_sec_cnt_touches_only_the_head_tag() {
+        let h = r#"<?xml version="1.0"?><hh:head version="1.4" secCnt="1"><hh:x secCnt="1"/></hh:head>"#;
+        assert_eq!(
+            set_head_sec_cnt(h, 3),
+            r#"<?xml version="1.0"?><hh:head version="1.4" secCnt="3"><hh:x secCnt="1"/></hh:head>"#
+        );
+        assert_eq!(
+            set_head_sec_cnt(r#"<hh:head version="1.4"><a/></hh:head>"#, 2),
+            r#"<hh:head version="1.4" secCnt="2"><a/></hh:head>"#
+        );
+    }
+
+    /// #357: the synthesis gate blocks a header whose secCnt disagrees with the section parts.
+    #[test]
+    fn synthesis_safety_blocks_sec_cnt_mismatch() {
+        let mut doc = SemanticDoc::default();
+        for _ in 0..2 {
+            doc.sections.push(Section::default());
+        }
+        let good = serialize(&doc).unwrap();
+        assert!(crate::export::validate_synthesis_safety(&good).ok);
+
+        // Re-pack the same package with the header's secCnt forced back to 1.
+        let pkg = Package::open(&good).unwrap();
+        let header = String::from_utf8(pkg.read_header().unwrap()).unwrap();
+        let bad_header = set_head_sec_cnt(&header, 1);
+        let mut zin = ZipArchive::new(Cursor::new(good.clone())).unwrap();
+        let mut out = ZipWriter::new(Cursor::new(Vec::new()));
+        for i in 0..zin.len() {
+            let f = zin.by_index_raw(i).unwrap();
+            if f.name().ends_with("header.xml") {
+                let name = f.name().to_string();
+                drop(f);
+                out.start_file(name, SimpleFileOptions::default()).unwrap();
+                out.write_all(bad_header.as_bytes()).unwrap();
+            } else {
+                out.raw_copy_file(f).unwrap();
+            }
+        }
+        let bad = out.finish().unwrap().into_inner();
+        let report = crate::export::validate_synthesis_safety(&bad);
+        assert!(!report.ok, "secCnt=1 with 2 sections must block");
+        assert!(
+            report.blocking.iter().any(|b| b.contains("secCnt=1")),
+            "{:?}",
+            report.blocking
         );
     }
 
