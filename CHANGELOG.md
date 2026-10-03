@@ -36,6 +36,19 @@ packages are released in lockstep.)*
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+### 수정 (Fixed)
+
+- **HWPX 내보내기: 새로 내보내는 문단 · run 이 값이 같은 다른 모양 id 로 바뀌던 문제(#387 — 0.0.9 회귀, #356 후속).**
+  파서가 header 풀의 문단 · 글자 모양을 **값**으로 합쳐 인덱스를 매겼는데, 그 값에는 `<hh:heading>`(글머리표 · 번호 ·
+  개요 수준) · `condense` · `snapToGrid` · `align@vertical` · `breakSetting`(`lineWrap` · `widowOrphan` · `keepWithNext` …) ·
+  `autoSpacing` · 글자 `symMark` · `useKerning` · `<hh:shadow>` 등이 없다. 그래서 0.0.9 에서 다시 쓴 표 칸 · 나눈 꼬리 ·
+  이웃 모양을 물려받은 삽입 문단이 「글머리표 ☐ + 오른쪽 정렬」 대신 「글머리표 없음 + 오른쪽 정렬」 같은 쌍둥이 id 로
+  나갔다(한컴에서 선택지 앞 ☐ 가 사라짐). 이제 원본 모양은 **원래 id 마다** 따로 인덱스를 받고(`SemanticDoc::
+  hwpx_pool_{para,char}_ids`), 새로 내보내는 내용은 자기 원래 id 를 그대로 쓴다. 편집하지 않은 문단의 바이트는 그대로다.
+  *(EN — HWPX export: newly emitted paragraphs/runs (rebuilt table cells, split tails, inherited inserts) no longer swap
+  to an equal-valued twin header id that differs in un-modeled attributes such as bullets/numbering; pool shapes are now
+  keyed by their original id.)*
+
 ---
 
 ## [0.0.9] — 2026-10-03

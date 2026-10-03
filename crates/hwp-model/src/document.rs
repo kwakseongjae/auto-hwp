@@ -36,6 +36,13 @@ pub struct SemanticDoc {
     /// behavior is unchanged.
     pub hwpx_pool_char_shapes: BTreeSet<usize>,
     pub hwpx_pool_para_shapes: BTreeSet<usize>,
+    /// #387: each pool index above → the ORIGINAL header `charPr` / `paraPr` id it came from. The HWPX
+    /// parser gives every original id its OWN index (never merged by the lossy parsed value — two ids
+    /// that differ only in 글머리표 · 번호 · 개요 수준 or another un-modeled attribute stay distinct), so
+    /// the serializer can point NEW content carrying that index (a split tail, a rebuilt table cell)
+    /// back at exactly that id. Empty for docs from other sources.
+    pub hwpx_pool_char_ids: BTreeMap<usize, u64>,
+    pub hwpx_pool_para_ids: BTreeMap<usize, u64>,
 }
 
 /// The document's original `header.xml` shape pools, parsed to typed values (issue #003, P1).
@@ -1037,6 +1044,9 @@ impl SemanticDoc {
             + pass(&self.passthrough)
             + (self.hwpx_pool_char_shapes.len() + self.hwpx_pool_para_shapes.len())
                 * size_of::<usize>()
+                * 3
+            + (self.hwpx_pool_char_ids.len() + self.hwpx_pool_para_ids.len())
+                * (size_of::<usize>() + size_of::<u64>())
                 * 3
     }
 }
