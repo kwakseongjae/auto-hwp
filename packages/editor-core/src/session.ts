@@ -1,4 +1,5 @@
 import type { EngineAdapter } from "./adapter";
+import { type EditPolicy, type EditTarget, EditVetoedError, intentTargets } from "./editPolicy";
 import { Emitter } from "./events";
 import type { Anchor, CellAddr, CellFit, DocContext, ImageBox, Intent, NormalizeReport, OpenResult, OutlineItem, PageGeom, PageUsage, ProposalV1, RunSpec } from "./types";
 
@@ -16,6 +17,8 @@ export interface DocSessionOptions {
   coalesceWindowMs?: number;
   /** Clock (tests inject a fake one). Default `Date.now`. */
   now?: () => number;
+  /** Host-defined editable regions + intent veto (#368). See `EditPolicy`. */
+  editPolicy?: EditPolicy;
 }
 
 /// DocSession — the document lifecycle facade over an EngineAdapter (SDK-LAYERS L2), DESCENDED from
@@ -39,6 +42,9 @@ export class DocSession {
   private topKeyAt = 0;
   private readonly coalesceWindowMs: number;
   private readonly now: () => number;
+  /** #368 — host edit policy (null = everything editable, the pre-#368 behavior). */
+  private policy: EditPolicy | null = null;
+  private editabilityChanged = new Emitter<void>();
 
   private docChanged = new Emitter<OpenResult | null>();
   private layoutInvalidated = new Emitter<void>();
@@ -49,6 +55,60 @@ export class DocSession {
   ) {
     this.coalesceWindowMs = opts.coalesceWindowMs ?? 1000;
     this.now = opts.now ?? Date.now;
+    this.policy = opts.editPolicy ?? null;
+  }
+
+  // ── edit policy (#368) ───────────────────────────────────────────────────
+  /** Install (or clear with `null`) the host edit policy. Emits `onEditabilityChange` so carets and
+   *  handles re-evaluate (`EditorCore.invalidateEditability` does the caret half). */
+  setEditPolicy(policy: EditPolicy | null): void {
+    this.policy = policy;
+    this.editabilityChanged.emit();
+  }
+  getEditPolicy(): EditPolicy | null {
+    return this.policy;
+  }
+  /** Fires when the policy is replaced or `invalidateEditability()` is called (dynamic predicates). */
+  onEditabilityChange(l: () => void): () => void {
+    return this.editabilityChanged.on(() => l());
+  }
+  /** Signal that the host's `editable` answers changed (e.g. a collaborator locked a cell). */
+  invalidateEditability(): void {
+    this.editabilityChanged.emit();
+  }
+  /** Whether the policy allows editing `target` (always true without a predicate). */
+  canEdit(target: EditTarget): boolean {
+    const pred = this.policy?.editable;
+    if (!pred) return true;
+    try {
+      return pred(target) !== false;
+    } catch {
+      return false; // a throwing predicate fails closed
+    }
+  }
+  /** Run the policy over a batch: every target of every Intent must be editable, then `beforeApply`
+   *  may veto or rewrite (a rewrite is re-checked). Returns the Intents to apply; throws
+   *  `EditVetoedError` BEFORE anything reaches the adapter. */
+  checkIntents(intents: Intent[]): Intent[] {
+    if (!this.policy) return intents;
+    const assertEditable = (list: Intent[]) => {
+      for (const intent of list) {
+        for (const t of intentTargets(intent)) if (!this.canEdit(t)) throw new EditVetoedError(list, t);
+      }
+    };
+    assertEditable(intents);
+    const hook = this.policy.beforeApply;
+    if (!hook) return intents;
+    let verdict: boolean | Intent[];
+    try {
+      verdict = hook(intents);
+    } catch {
+      verdict = false; // fail closed
+    }
+    if (verdict === false) throw new EditVetoedError(intents, null);
+    if (verdict === true) return intents;
+    assertEditable(verdict);
+    return verdict;
   }
 
   // ── getters ──────────────────────────────────────────────────────────────
@@ -138,6 +198,7 @@ export class DocSession {
    *  deliberately the safe side of the trade (a no-op undo entry vs. an untracked mutation); the UI's
    *  trap lane (`onTrap`) is what tells the user their last edit was rolled back. */
   async applyBatch(intents: Intent[], opts: ApplyBatchOptions = {}): Promise<number> {
+    intents = this.checkIntents(intents); // #368 — vetoed before any adapter call
     const key = opts.coalesceKey ?? null;
     // #369 — may this batch EXTEND the top undo step? Same key, nothing in between (any other batch,
     // undo, redo or external edit clears `topKey`), no redo branch, and within the pause window.
@@ -210,12 +271,14 @@ export class DocSession {
    *  and undo depth are unchanged; the returned identity is valid only for its `base_revision`. */
   async propose(intents: Intent[]): Promise<ProposalV1> {
     if (!this.adapter.proposeIntents) throw new Error("canonical Proposal v1 is unsupported by this adapter");
-    return this.adapter.proposeIntents(intents);
+    return this.adapter.proposeIntents(this.checkIntents(intents));
   }
 
   /** Commit one revision-bound proposal as exactly ONE engine/user undo unit. */
   async commitProposal(proposal: ProposalV1): Promise<number> {
     if (!this.adapter.commitProposal) throw new Error("canonical Proposal v1 is unsupported by this adapter");
+    // #368 — the policy may have tightened since the preview; a rewrite can't apply to a sealed proposal.
+    if (this.checkIntents(proposal.intents) !== proposal.intents) throw new EditVetoedError(proposal.intents, null);
     const applied = await this.adapter.commitProposal(proposal.proposal_id, proposal.base_revision);
     this.undoBatches.push(1);
     this.topKey = null;

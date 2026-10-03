@@ -25,6 +25,7 @@ import { type RangeRect, rectsByProbe, selRange } from "./caretRange";
 import { TypingCoalescer } from "./coalesce";
 import { Emitter } from "./events";
 import type { RunStyle } from "./runs";
+import type { EditTarget } from "./editPolicy";
 import type { DocSession } from "./session";
 import type { CellAddr, CellCaretRect, CellTextHit, RunSpec } from "./types";
 
@@ -258,6 +259,8 @@ export class CellCaretController {
   private memoKey = "";
   /** #369 — groups consecutive keystrokes into word-level undo steps. */
   private typing = new TypingCoalescer();
+  /** #368 — the last `clickAt` landed on cell text the host's edit policy refuses. */
+  lastClickVetoed = false;
 
   constructor(
     private adapter: EngineAdapter,
@@ -292,6 +295,12 @@ export class CellCaretController {
     }
   }
 
+  /** #368 — drop the caret when the host's edit policy no longer allows its cell. */
+  revalidate(): void {
+    const a = this.state?.anchor;
+    if (a && !this.session.canEdit(cellTarget(a.section, a.block, { row: a.row, col: a.col }, a.path))) this.clear();
+  }
+
   /** Queue `fn` after every previously queued operation (strict order under fast keystrokes). */
   private enqueue<T>(fn: () => Promise<T>): Promise<T> {
     const p = this.chain.then(fn);
@@ -305,8 +314,15 @@ export class CellCaretController {
   clickAt(page: number, x: number, y: number, extend = false): Promise<CellCaretState | null> {
     if (!this.supported) return Promise.resolve(null);
     return this.enqueue(async () => {
+      this.lastClickVetoed = false;
       const hit = (await this.adapter.hitTestCellText!(page, x, y)) ?? null;
       if (!hit) {
+        this.clear();
+        return null;
+      }
+      if (!this.session.canEdit(cellTarget(hit.section, hit.block, leafRowCol(hit), hit.path))) {
+        // #368 — a read-only cell: no caret there, and the old caret must not keep receiving keys.
+        this.lastClickVetoed = true;
         this.clear();
         return null;
       }
@@ -571,4 +587,17 @@ export class CellCaretController {
     await this.publish(anchor);
     return true;
   }
+}
+
+/** The #368 edit target of a caret in cell `(row, col)` (a nested leaf carries its descending path). */
+function cellTarget(section: number, block: number, rc: { row: number; col: number }, path?: CellAddr[]): EditTarget {
+  return {
+    kind: "cell",
+    section,
+    block,
+    row: rc.row,
+    col: rc.col,
+    ...(path && path.length > 1 ? { path } : {}),
+    intent: "SetTableCellRuns",
+  };
 }

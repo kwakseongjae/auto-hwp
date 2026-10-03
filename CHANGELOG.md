@@ -51,6 +51,15 @@ packages are released in lockstep.)*
   즉시 버린다. 기본값(50개 · 128MiB)은 그대로다.
   *(EN — host-settable engine undo depth/byte budget and stats.)*
 
+- **호스트가 정하는 편집 가능 영역 + Intent 거부 훅(#368).** `HwpWorkspace` 의 `editable(target)` · `onBeforeApply(intents)`
+  (headless: `createEditorCore(adapter, { session: { editPolicy } })` · `core.setEditPolicy`). 대상은 `cell` · `paragraph` ·
+  `block` · `document` 로 타입이 있다. 읽기 전용 대상에는 캐럿이 놓이지 않고 살아 있던 캐럿도 해제된다(다음 글자가 이전
+  칸으로 새지 않는다). 칸 · 문단 편집기가 열리지 않고, 열 너비 · 행 높이 · 여백 · 그림 손잡이가 숨는다. 정책에 걸린
+  Intent 는 엔진에 닿기 전에 `EditVetoedError`(`code: "edit_vetoed"`)로 거절되고 실행취소 스택은 그대로다 — 화면에는
+  실패가 아니라 「읽기 전용」 안내가 뜬다. 판정이 바뀌면 `core.invalidateEditability()`. 찾아 바꾸기 · 제안 커밋도 같은 정책을 탄다.
+  *(EN — host-defined editable regions + intent veto: read-only targets get no caret, no editor, no structural handles,
+  and their Intents are refused before reaching the engine.)*
+
 ### 변경 (Changed)
 
 - **`DocSession.applyBatch` 가 어댑터의 원자 일괄 경로를 쓴다(#371).** `WasmAdapter` 에서는 묶음마다 엔진 호출 ·
