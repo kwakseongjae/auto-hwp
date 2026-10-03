@@ -3,6 +3,14 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-10-04 · Claude Opus 5.5 — **0.0.10 발행 — 0.0.9 회귀(#387) 수정** (main `a69f4f2`).
+  · **#387 → #388 머지**: HWPX 파서가 header 풀 paraPr/charPr 를 손실 있는 값으로 합쳐 인덱싱 → #356 이 새로 내보낸 문단에
+    「값 같은 쌍둥이 id」를 써서 글머리표 · 번호 · widowOrphan 등이 바뀌었다. 이제 **원래 id 마다 인덱스 하나**
+    (`SemanticDoc::hwpx_pool_{para,char}_ids`), `pool_origin_ids` 는 그 역사상. 테스트 `hwp-mcp/tests/pool_shape_identity.rs`.
+  · **#390 머지 → publish 워크플로 발행 0.0.10**: wasm 8,633,634 B · sha256 `6588ed71…07e3`, Node 20/22/24 · chromium · webkit 확인.
+  · 남은 것: `parse_para_pr`/`parse_char_pr` 는 여전히 손실이 있다(heading · breakSetting 대부분 · autoSpacing · 글자 shadow 등) —
+    **편집으로 새로 합성한** 모양(`synthesize_para_pr`, 기본 paraPr 복제)은 그 속성을 원본에서 물려받지 못한다. 별건.
+
 - 갱신: 2026-10-03 · Claude Opus 5.5 — **HWP 편집기 P0 라운드: PR 3개 초록, 머지 대기** (main `f069f56`).
   · **#374** (#356) 새 문단 · run 의 paraPrIDRef/charPrIDRef 를 원래 header id 로. 단독.
   · **#375** (#371 · #369 · #372) 원자 일괄 `applyIntents(…, {atomic})` · 어댑터 대등성(`applyIntents` · `tableCellFits` ·
