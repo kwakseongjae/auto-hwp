@@ -51,4 +51,10 @@ export type {
   ReplaceResult,
   MatchBox,
   NormalizeReport,
+  BatchApplyOptions,
+  BatchApplyResult,
+  CellFit,
+  HwpxExportOptions,
+  PageUsage,
+  UndoStats,
 } from "@auto-hwp/editor-core";

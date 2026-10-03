@@ -27,6 +27,7 @@
 import type { EngineAdapter } from "./adapter";
 import { clampOffset } from "./caret";
 import { type RangeRect, rectsFromCharBoxes, selRange } from "./caretRange";
+import { TypingCoalescer } from "./coalesce";
 import { inheritStyleAt, rangeHasStyle, runsText, spliceRuns, styleRunRange, type ToggleKey } from "./cellCaret";
 import { Emitter } from "./events";
 import type { RunStyle } from "./runs";
@@ -337,6 +338,8 @@ export interface BodyCaretState {
 /// 모든 비동기 진입점은 CHAIN되어 빠른 연타에서도 순서가 보장된다.
 export class BodyCaretController {
   private state: BodyCaretState | null = null;
+  /** #369 — groups consecutive keystrokes into word-level undo steps. */
+  private typing = new TypingCoalescer();
   private changed = new Emitter<BodyCaretState | null>();
   private chain: Promise<unknown> = Promise.resolve();
   /** 마우스 글자 드래그가 이 문단을 소유하는 동안 true. 포인터 이동은 React state 없이 여기로 온다. */
@@ -535,7 +538,7 @@ export class BodyCaretController {
   /** 캐럿에 글자 삽입 — `SetParagraphRuns` 하나 = undo 하나(키 입력 커밋 레인).
    *  범위가 있으면 그 범위를 **대체**한다. */
   insertText(text: string): Promise<boolean> {
-    return this.enqueue(() => this.splice(text, 0));
+    return this.enqueue(() => this.splice(text, 0, true));
   }
 
   /** 클립보드 평문 붙여넣기. 개행도 run text 안의 bare separator로 포함해 SetParagraphRuns **하나**로
@@ -575,6 +578,7 @@ export class BodyCaretController {
         batch.push({ intent: "SetParagraphRuns", section: a.section, block: a.block, runs: spliceRuns(runs, end, end - start, "") });
       }
       batch.push({ intent: "SplitParagraph", section: a.section, block: a.block, at });
+      this.typing.reset();
       await this.session.applyBatch(batch);
       // 새 문단은 block + 1, 캐럿은 그 맨 앞. 밴드를 다시 찾아 기하를 잡는다(실패하면 캐럿만 사라진다).
       await this.reanchor(a.section, a.block + 1, 0);
@@ -591,6 +595,7 @@ export class BodyCaretController {
       if (end <= start) return false;
       const runs = await this.adapter.blockRuns!(a.section, a.block);
       const on = !rangeHasStyle(runs, start, end, key);
+      this.typing.reset();
       await this.session.applyBatch([
         { intent: "SetParagraphRuns", section: a.section, block: a.block, runs: styleRunRange(runs, start, end, key, on) },
       ]);
@@ -653,6 +658,7 @@ export class BodyCaretController {
     } catch {
       return false;
     }
+    this.typing.reset();
     try {
       await this.session.applyBatch([{ intent: "MergeParagraph", section: a.section, block: a.block }]);
     } catch {
@@ -682,7 +688,7 @@ export class BodyCaretController {
 
   /** 읽기 → splice → `SetParagraphRuns` 커밋 → 재앵커의 공용 레인(insertText/deleteBack).
    *  범위가 살아 있으면 `del` 대신 **그 범위**를 지운다(타이핑 = 대체, Backspace = 범위 삭제). */
-  private async splice(insert: string, del: number): Promise<boolean> {
+  private async splice(insert: string, del: number, typing = false): Promise<boolean> {
     const a = this.state?.anchor;
     if (!a || !this.supported) return false;
     const runs = await this.adapter.blockRuns!(a.section, a.block);
@@ -694,7 +700,9 @@ export class BodyCaretController {
     if (delChars > 0 && at === 0) return false; // 지울 게 앞에 없다(문단 병합은 mergeBack 이 맡는다)
     if (delChars === 0 && insert.length === 0) return false;
     const nextRuns = spliceRuns(runs, at, delChars, insert);
-    await this.session.applyBatch([{ intent: "SetParagraphRuns", section: a.section, block: a.block, runs: nextRuns }]);
+    // #369 — plain typing coalesces into word-level undo steps; paste / delete / replace end the run.
+    const coalesceKey = typing && !ranged && delChars === 0 ? this.typing.keyFor(`para:${a.section}/${a.block}`, at, insert) : (this.typing.reset(), undefined);
+    await this.session.applyBatch([{ intent: "SetParagraphRuns", section: a.section, block: a.block, runs: nextRuns }], { coalesceKey });
     // 편집은 이미 섰다. 이제 기하만 다시 잡는다 — 실패하면 캐럿만 사라진다(018).
     await this.reanchor(a.section, a.block, Math.max(0, at - delChars) + insert.length);
     return true;

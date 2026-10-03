@@ -2610,6 +2610,42 @@ pub struct EditSession {
     /// unchanged, the document bytes are unchanged. Lives here because every mutation funnels
     /// through this type, so no caller can forget to bump it.
     rev: u64,
+    /// An open undo GROUP (#371 · #372): while `Some`, every commit lands in the live document but
+    /// pushes NO snapshot of its own — the group keeps ONE pre-group snapshot and turns into a
+    /// single undo unit at [`EditSession::end_group`] (or rolls the whole group back at
+    /// [`EditSession::abort_group`]). This is what makes a host's batch atomic AND one undo step,
+    /// and why a 100-edit batch costs one snapshot instead of 100.
+    group: Option<UndoGroup>,
+    /// The coalesce key of the CURRENT top undo unit (#369), when it was closed by a keyed group.
+    /// A later group with the same key may JOIN that unit instead of pushing a new one (word-level
+    /// typing undo). Any other mutation — an ungrouped commit, undo, redo, a prevalidated commit, a
+    /// limit change that drops the top — clears it, so a join can only ever extend the unit the
+    /// key was recorded for.
+    top_key: Option<String>,
+}
+
+/// State of an open [`EditSession::begin_group`].
+struct UndoGroup {
+    /// The live document as it was when the group opened — the rollback target of
+    /// [`EditSession::abort_group`], and (for a non-joined group) the single snapshot pushed by
+    /// [`EditSession::end_group`].
+    pre: SemanticDoc,
+    /// Revision at open — `end_group` compares to report whether anything changed.
+    rev_at_begin: u64,
+    /// The group extends the top undo unit (same coalesce key) instead of making a new one.
+    joined: bool,
+    /// The redo stack as it was at open; a commit inside the group clears the live redo stack (a
+    /// new branch), and an abort must hand it back untouched.
+    saved_redo: Option<Vec<SemanticDoc>>,
+}
+
+/// Result of [`EditSession::end_group`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GroupOutcome {
+    /// Something in the group changed the document (a new or extended undo unit exists).
+    pub changed: bool,
+    /// The group extended the previous undo unit (coalesced) rather than pushing a new one.
+    pub joined: bool,
 }
 
 /// Budget eviction floor (issue 071): however large the document, at least this many undo steps
@@ -2640,7 +2676,116 @@ impl EditSession {
             undo_est: Vec::new(),
             mem_budget,
             rev: 0,
+            group: None,
+            top_key: None,
         }
+    }
+
+    /// Change the undo depth (`limit`, `0` = unbounded) and byte budget (`mem_budget`, `0` =
+    /// unbounded) of a LIVE session (#372 — hosts on low-memory devices / many tabs). Tightening
+    /// evicts the OLDEST snapshots immediately (budget never below [`MIN_UNDO_KEPT`], exactly like a
+    /// push). The redo stack is untouched.
+    pub fn set_undo_limits(&mut self, limit: usize, mem_budget: usize) {
+        self.limit = limit;
+        self.mem_budget = mem_budget;
+        self.trim_undo();
+        if self.undo.is_empty() {
+            self.top_key = None;
+        }
+    }
+
+    /// `(snapshots, estimated bytes)` currently held by the undo stack (#372 diagnostics).
+    pub fn undo_stats(&self) -> (usize, usize) {
+        (self.undo.len(), self.undo_est.iter().sum())
+    }
+
+    /// Open an undo GROUP (#371): every commit until [`EditSession::end_group`] becomes ONE undo
+    /// unit, and [`EditSession::abort_group`] rolls the whole group back (document, redo stack —
+    /// the revision moves forward so caches never serve the intermediate state).
+    ///
+    /// `join` = the coalesce key of this group (#369). When it equals the key the CURRENT top undo
+    /// unit was closed with, the group EXTENDS that unit (one undo reverts both) instead of
+    /// pushing a new one. `None` never joins. Groups do not nest — opening a second one is an error.
+    pub fn begin_group(&mut self, join: Option<&str>) -> Result<()> {
+        if self.group.is_some() {
+            return Err(Error::Other("undo group already open".into()));
+        }
+        let joined = join.is_some()
+            && self.top_key.as_deref() == join
+            && !self.undo.is_empty()
+            && self.redo.is_empty();
+        self.group = Some(UndoGroup {
+            pre: self.doc.clone(),
+            rev_at_begin: self.rev,
+            joined,
+            saved_redo: None,
+        });
+        Ok(())
+    }
+
+    /// Whether an undo group is open.
+    pub fn in_group(&self) -> bool {
+        self.group.is_some()
+    }
+
+    /// Close the open group. A group that changed the document becomes ONE undo unit (or extends
+    /// the top one when it joined); `key` is recorded as the new top unit's coalesce key so a later
+    /// group may join it. A group that changed nothing leaves the stacks and the key as they were.
+    /// Closing with no open group is a no-op.
+    pub fn end_group(&mut self, key: Option<&str>) -> GroupOutcome {
+        let Some(g) = self.group.take() else {
+            return GroupOutcome {
+                changed: false,
+                joined: false,
+            };
+        };
+        let changed = self.rev != g.rev_at_begin;
+        if changed {
+            if !g.joined {
+                self.push_undo(g.pre);
+            }
+            self.top_key = key.map(str::to_string);
+        }
+        GroupOutcome {
+            changed,
+            joined: changed && g.joined,
+        }
+    }
+
+    /// Roll the open group back: the document returns to its state at `begin_group`, the redo
+    /// stack is restored, and no undo unit is added (a joined group leaves the unit it would have
+    /// extended exactly as it was). Returns whether anything had to be rolled back.
+    pub fn abort_group(&mut self) -> bool {
+        let Some(g) = self.group.take() else {
+            return false;
+        };
+        if self.rev == g.rev_at_begin {
+            return false;
+        }
+        self.doc = g.pre;
+        if let Some(redo) = g.saved_redo {
+            self.redo = redo;
+        }
+        self.rev += 1;
+        true
+    }
+
+    /// Record one committed change: inside a group it only clears the redo branch (saving it for
+    /// an abort) — the group's single pre-snapshot stands for all of its edits; outside a group it
+    /// pushes `snap` as its own undo unit.
+    fn commit_snapshot(&mut self, snap: SemanticDoc) {
+        if let Some(g) = self.group.as_mut() {
+            if g.saved_redo.is_none() {
+                g.saved_redo = Some(std::mem::take(&mut self.redo));
+            }
+            self.redo.clear();
+            drop(snap);
+        } else {
+            self.push_undo(snap);
+            self.redo.clear(); // a new branch invalidates any redo future
+            self.top_key = None;
+        }
+        self.rev += 1;
     }
 
     /// Push a pre-mutation snapshot + trim by COUNT (`limit`) then by BYTES (`mem_budget`, 071).
@@ -2648,7 +2793,13 @@ impl EditSession {
     fn push_undo(&mut self, snap: SemanticDoc) {
         self.undo_est.push(snap.approx_heap_bytes());
         self.undo.push(snap);
-        if self.limit != 0 && self.undo.len() > self.limit {
+        self.trim_undo();
+    }
+
+    /// Evict the OLDEST snapshots until both the count `limit` and the byte `mem_budget` hold
+    /// (the budget never trims below [`MIN_UNDO_KEPT`]).
+    fn trim_undo(&mut self) {
+        while self.limit != 0 && self.undo.len() > self.limit {
             self.undo.remove(0);
             self.undo_est.remove(0);
         }
@@ -2704,9 +2855,7 @@ impl EditSession {
             self.doc = snap; // restore-on-Err: discard the partial mutation
             return Err(e);
         }
-        self.push_undo(snap);
-        self.redo.clear(); // a new branch invalidates any redo future
-        self.rev += 1;
+        self.commit_snapshot(snap);
         Ok(())
     }
 
@@ -2724,9 +2873,7 @@ impl EditSession {
                 return Err(e);
             }
         }
-        self.push_undo(snap);
-        self.redo.clear();
-        self.rev += 1;
+        self.commit_snapshot(snap);
         Ok(())
     }
 
@@ -2739,14 +2886,16 @@ impl EditSession {
     /// The Proposal builder must reject an unchanged scratch revision before reaching this boundary.
     pub fn commit_prevalidated(&mut self, next: SemanticDoc) -> bool {
         let snap = std::mem::replace(&mut self.doc, next);
-        self.push_undo(snap);
-        self.redo.clear();
-        self.rev += 1;
+        self.commit_snapshot(snap);
         true
     }
 
     /// Undo the last committed op (in-memory swap; emits no XML). Returns false if nothing to undo.
     pub fn undo(&mut self) -> bool {
+        if self.group.is_some() {
+            return false; // never walk history out from under an open group
+        }
+        self.top_key = None;
         let Some(prev) = self.undo.pop() else {
             return false;
         };
@@ -2758,6 +2907,10 @@ impl EditSession {
 
     /// Redo the last undone op. Returns false if nothing to redo.
     pub fn redo(&mut self) -> bool {
+        if self.group.is_some() {
+            return false;
+        }
+        self.top_key = None;
         let Some(next) = self.redo.pop() else {
             return false;
         };
@@ -6103,5 +6256,168 @@ mod tests {
         assert_eq!(texts_of(s.doc()), vec!["가나다"], "스냅샷 undo 하나로 복원");
         assert!(s.redo());
         assert_eq!(texts_of(s.doc()), vec!["가", "나다"]);
+    }
+
+    // ── undo groups (#371 atomic batch · #372 one snapshot per batch · #369 coalesced typing) ──────
+
+    fn set_text(s: &mut EditSession, text: &str) -> Result<()> {
+        s.do_op(&Op::SetParagraphRuns {
+            section: 0,
+            block: 0,
+            runs: vec![RunSpec {
+                text: text.into(),
+                ..Default::default()
+            }],
+        })
+    }
+
+    #[test]
+    fn group_is_one_undo_unit_and_one_snapshot() {
+        let mut s = EditSession::new(doc_with(vec![simple_para(1, "가")]));
+        s.begin_group(None).unwrap();
+        for t in ["a", "ab", "abc"] {
+            set_text(&mut s, t).unwrap();
+        }
+        assert_eq!(
+            s.undo_stats().0,
+            0,
+            "a group holds no per-edit snapshot while open"
+        );
+        let out = s.end_group(None);
+        assert_eq!(
+            out,
+            GroupOutcome {
+                changed: true,
+                joined: false
+            }
+        );
+        assert_eq!(s.undo_stats().0, 1, "one snapshot for the whole group");
+        assert_eq!(texts_of(s.doc()), vec!["abc"]);
+        assert!(s.undo());
+        assert_eq!(
+            texts_of(s.doc()),
+            vec!["가"],
+            "one undo reverts the whole group"
+        );
+        assert!(!s.can_undo());
+        assert!(s.redo());
+        assert_eq!(
+            texts_of(s.doc()),
+            vec!["abc"],
+            "one redo replays the whole group"
+        );
+    }
+
+    #[test]
+    fn aborted_group_leaves_doc_stacks_and_redo_untouched() {
+        let mut s = EditSession::new(doc_with(vec![simple_para(1, "가")]));
+        set_text(&mut s, "one").unwrap();
+        set_text(&mut s, "two").unwrap();
+        assert!(s.undo()); // redo stack now holds "two"
+        let undo_before = s.undo_stats();
+        s.begin_group(None).unwrap();
+        set_text(&mut s, "x").unwrap();
+        set_text(&mut s, "xy").unwrap();
+        assert!(
+            !s.can_redo(),
+            "a commit inside the group opens a new branch"
+        );
+        assert!(s.abort_group());
+        assert_eq!(texts_of(s.doc()), vec!["one"]);
+        assert_eq!(s.undo_stats(), undo_before);
+        assert!(s.redo(), "the redo branch survives an aborted group");
+        assert_eq!(texts_of(s.doc()), vec!["two"]);
+    }
+
+    #[test]
+    fn keyed_groups_join_the_top_unit_until_something_else_happens() {
+        let mut s = EditSession::new(doc_with(vec![simple_para(1, "")]));
+        for (t, key) in [("a", "w1"), ("ab", "w1"), ("ab ", "w2"), ("ab c", "w2")] {
+            s.begin_group(Some(key)).unwrap();
+            set_text(&mut s, t).unwrap();
+            s.end_group(Some(key));
+        }
+        assert_eq!(s.undo_stats().0, 2, "two words → two undo units");
+        assert!(s.undo());
+        assert_eq!(texts_of(s.doc()), vec!["ab"], "first undo removes ' c'");
+        assert!(s.undo());
+        assert_eq!(texts_of(s.doc()), vec![""], "second undo removes 'ab'");
+        assert!(s.redo());
+        assert!(s.redo());
+        assert_eq!(texts_of(s.doc()), vec!["ab c"]);
+
+        // After undo/redo the key is gone: the next keyed group starts a fresh unit.
+        s.begin_group(Some("w2")).unwrap();
+        set_text(&mut s, "ab cd").unwrap();
+        assert!(!s.end_group(Some("w2")).joined);
+        // An ungrouped commit also ends the run.
+        set_text(&mut s, "z").unwrap();
+        s.begin_group(Some("w2")).unwrap();
+        set_text(&mut s, "zz").unwrap();
+        assert!(!s.end_group(Some("w2")).joined);
+    }
+
+    #[test]
+    fn aborted_joined_group_keeps_the_unit_it_would_have_extended() {
+        let mut s = EditSession::new(doc_with(vec![simple_para(1, "")]));
+        s.begin_group(Some("k")).unwrap();
+        set_text(&mut s, "a").unwrap();
+        s.end_group(Some("k"));
+        s.begin_group(Some("k")).unwrap();
+        set_text(&mut s, "ab").unwrap();
+        assert!(s.abort_group());
+        assert_eq!(texts_of(s.doc()), vec!["a"]);
+        assert_eq!(s.undo_stats().0, 1);
+        assert!(s.undo());
+        assert_eq!(texts_of(s.doc()), vec![""]);
+    }
+
+    #[test]
+    fn empty_group_changes_nothing() {
+        let mut s = EditSession::new(doc_with(vec![simple_para(1, "가")]));
+        let rev = s.revision();
+        s.begin_group(None).unwrap();
+        assert!(s.begin_group(None).is_err(), "groups do not nest");
+        assert_eq!(
+            s.end_group(None),
+            GroupOutcome {
+                changed: false,
+                joined: false
+            }
+        );
+        assert_eq!(s.revision(), rev);
+        assert!(!s.can_undo());
+    }
+
+    #[test]
+    fn undo_and_redo_refuse_inside_a_group() {
+        let mut s = EditSession::new(doc_with(vec![simple_para(1, "가")]));
+        set_text(&mut s, "a").unwrap();
+        s.begin_group(None).unwrap();
+        assert!(!s.undo());
+        assert!(!s.redo());
+        s.end_group(None);
+        assert!(s.undo());
+    }
+
+    #[test]
+    fn set_undo_limits_trims_oldest_now() {
+        let mut s = EditSession::new(doc_with(vec![simple_para(1, "가")]));
+        for i in 0..15 {
+            set_text(&mut s, &format!("t{i}")).unwrap();
+        }
+        assert_eq!(s.undo_stats().0, 15);
+        s.set_undo_limits(10, 0);
+        assert_eq!(s.undo_stats().0, 10);
+        let mut undone = 0;
+        while s.undo() {
+            undone += 1;
+        }
+        assert_eq!(undone, 10);
+        assert_eq!(
+            texts_of(s.doc()),
+            vec!["t4"],
+            "the 5 oldest snapshots were evicted"
+        );
     }
 }

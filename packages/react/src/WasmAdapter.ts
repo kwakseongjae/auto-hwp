@@ -2,7 +2,7 @@ import { HwpDoc, initEngine, resetEngine } from "@auto-hwp/engine";
 import type { EngineLoadProgress } from "@auto-hwp/engine";
 import { EngineWorkerClient } from "@auto-hwp/engine/worker-client";
 import type { EngineAdapter } from "./EngineAdapter";
-import type { BlockHit, CaretRect, CellAddr, CellCaretRect, CellHit, CellTextHit, DocProfile, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, NormalizeReport, OpenResult, Outcome, OutlineItem, PageGeom, ProposalV1, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
+import type { BatchApplyOptions, BatchApplyResult, BlockHit, CaretRect, CellAddr, CellFit, HwpxExportOptions, PageUsage, UndoStats, CellCaretRect, CellHit, CellTextHit, DocProfile, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, NormalizeReport, OpenResult, Outcome, OutlineItem, PageGeom, ProposalV1, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
 
 type WasmInput = string | URL | Request | BufferSource | WebAssembly.Module;
 
@@ -91,12 +91,17 @@ interface EngineDoc {
   outline(): MaybePromise<unknown>;
   docProfile(): MaybePromise<unknown>;
   applyIntent(intent: object | string): MaybePromise<unknown>;
+  applyIntents(intents: Array<object | string>, options?: object): MaybePromise<unknown>;
+  tableCellFits(section: number, block: number): MaybePromise<unknown>;
+  pageUsage(): MaybePromise<unknown>;
+  setUndoLimits(depth: number, budgetBytes?: number): MaybePromise<void>;
+  undoStats(): MaybePromise<unknown>;
   undo(): MaybePromise<boolean>;
   redo(): MaybePromise<boolean>;
   registerFont(family: string, bytes: Uint8Array): MaybePromise<void>;
   exportPdf(): MaybePromise<Uint8Array>;
   exportHtml(): MaybePromise<string>;
-  toHwpx(): MaybePromise<Uint8Array>;
+  toHwpx(options?: HwpxExportOptions): MaybePromise<Uint8Array>;
   free(): void;
 }
 
@@ -230,6 +235,11 @@ export class WasmAdapter implements EngineAdapter {
       outline: call("outline"),
       docProfile: call("docProfile"),
       applyIntent: call("applyIntent") as EngineDoc["applyIntent"],
+      applyIntents: call("applyIntents") as EngineDoc["applyIntents"],
+      tableCellFits: call("tableCellFits"),
+      pageUsage: call("pageUsage"),
+      setUndoLimits: call("setUndoLimits") as EngineDoc["setUndoLimits"],
+      undoStats: call("undoStats"),
       undo: call("undo") as EngineDoc["undo"],
       redo: call("redo") as EngineDoc["redo"],
       registerFont: call("registerFont") as EngineDoc["registerFont"],
@@ -581,6 +591,46 @@ export class WasmAdapter implements EngineAdapter {
     return out;
   }
 
+  /** #371 — ATOMIC batch: one engine call, one reflow, ONE engine undo unit; on failure the engine
+   *  leaves the document and its undo/redo stacks untouched and this rejects (`batch_failed`).
+   *  `opts.coalesceKey` (#369) lets consecutive typing batches share one undo unit. */
+  async applyIntents(intents: Intent[], opts?: BatchApplyOptions): Promise<BatchApplyResult> {
+    const options: Record<string, unknown> = { atomic: true };
+    if (opts?.coalesceKey != null) {
+      options.coalesceKey = opts.coalesceKey;
+      options.coalesce = opts.coalesce !== false;
+    }
+    const out = await this.guard(async (d) => (await d.applyIntents(intents, options)) as Partial<BatchApplyResult>);
+    const res: BatchApplyResult = {
+      applied: out.applied ?? 0,
+      pages: out.pages ?? 0,
+      changed: out.changed ?? (out.applied ?? 0) > 0,
+      joined: out.joined ?? false,
+    };
+    if (res.changed) this.notifyMutation(); // issue 052: an effective batch is a content mutation
+    return res;
+  }
+
+  /** #347 parity (#371) — per-cell fit / overflow of the placed table, or null. Read-only. */
+  tableCellFits(section: number, block: number): Promise<CellFit[] | null> {
+    return this.guard(async (d) => ((await d.tableCellFits(section, block)) as CellFit[] | null) ?? null);
+  }
+
+  /** #347 parity (#371) — per-page body usage. Read-only. */
+  pageUsage(): Promise<PageUsage[]> {
+    return this.guard(async (d) => ((await d.pageUsage()) as PageUsage[]) ?? []);
+  }
+
+  /** #372 — engine undo depth + byte budget (`0` = unbounded). */
+  async setUndoLimits(depth: number, budgetBytes = 0): Promise<void> {
+    await this.guard((d) => d.setUndoLimits(depth, budgetBytes));
+  }
+
+  /** #372 — what the engine undo stack holds now. */
+  undoStats(): Promise<UndoStats> {
+    return this.guard(async (d) => (await d.undoStats()) as UndoStats);
+  }
+
   async proposeIntents(intents: Intent[]): Promise<ProposalV1> {
     const out = await this.applyIntent({ intent: "ProposeIntents", intents });
     if (out.kind !== "proposalV1") throw new Error(`engine returned ${out.kind}, expected proposalV1`);
@@ -628,8 +678,9 @@ export class WasmAdapter implements EngineAdapter {
     return this.guard((d) => d.exportHtml());
   }
 
-  toHwpx(): Promise<Uint8Array> {
-    return this.guard((d) => d.toHwpx());
+  /** `options` (#371 parity): `hwpRowHeights` for tables that came from a binary `.hwp`. */
+  toHwpx(options?: HwpxExportOptions): Promise<Uint8Array> {
+    return this.guard((d) => (options ? d.toHwpx(options) : d.toHwpx()));
   }
 
   dispose(): void {

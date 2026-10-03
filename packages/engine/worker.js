@@ -59,6 +59,8 @@ const METHODS = new Set([
   'docProfile',
   'applyIntent',
   'applyIntents',
+  'setUndoLimits',
+  'undoStats',
   'undo',
   'redo',
   'registerFont',

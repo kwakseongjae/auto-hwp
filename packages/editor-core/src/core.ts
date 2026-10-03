@@ -4,9 +4,15 @@ import { CaretRouter } from "./caretRouter";
 import { CellCaretController } from "./cellCaret";
 import { EditController } from "./edit";
 import { FindController } from "./find";
-import { DocSession } from "./session";
+import { DocSession, type DocSessionOptions } from "./session";
 import { SelectionModel } from "./selection";
 import { coreMessagesKoKR, type CoreMessages } from "./messages";
+
+/** `createEditorCore` options. */
+export interface EditorCoreOptions {
+  /** Document-session options (typing-undo coalesce window / clock — #369). */
+  session?: DocSessionOptions;
+}
 
 /// EditorCore — the one-object composition of the L2 pieces over a single EngineAdapter, so a host
 /// (React binding or a plain script) constructs the whole headless editor in one line and subscribes to
@@ -28,8 +34,11 @@ export class EditorCore {
   /** 살아 있는 캐럿 하나(셀 ∪ 본문) — 오버레이/타이핑이 구독하는 단일 표면. */
   readonly caret: CaretRouter;
 
-  constructor(readonly adapter: EngineAdapter) {
-    this.session = new DocSession(adapter);
+  constructor(
+    readonly adapter: EngineAdapter,
+    opts: EditorCoreOptions = {},
+  ) {
+    this.session = new DocSession(adapter, opts.session);
     this.selection = new SelectionModel(adapter);
     this.edit = new EditController(this.session, this.selection);
     this.find = new FindController(adapter, this.session);
@@ -49,6 +58,6 @@ export class EditorCore {
 }
 
 /** Construct an EditorCore over an EngineAdapter. */
-export function createEditorCore(adapter: EngineAdapter): EditorCore {
-  return new EditorCore(adapter);
+export function createEditorCore(adapter: EngineAdapter, opts?: EditorCoreOptions): EditorCore {
+  return new EditorCore(adapter, opts);
 }

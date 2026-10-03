@@ -36,6 +36,33 @@ packages are released in lockstep.)*
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+### 추가 (Added)
+
+- **원자적 일괄 적용 `HwpDoc.applyIntents(intents, { atomic: true })`(#371).** 묶음 전체가 실행취소 1칸이고 재조판은
+  1회다. 중간에 실패하면 문서 · 실행취소 · 다시 실행 스택이 묶음 전과 같다(리비전만 앞으로 간다). 옵션 없는
+  `applyIntents(intents)` 는 그대로(비원자, Intent 마다 1칸). Rust: `hwp_mcp::apply_intents_with` · `EditSession::begin_group`.
+  *(EN — atomic, single-undo-unit batches; the option-less call is unchanged.)*
+- **어댑터 기능 대등성(#371).** `EngineAdapter` 에 선택 메서드 `applyIntents`(원자 · 재조판 1회) · `tableCellFits` ·
+  `pageUsage` · `setUndoLimits` · `undoStats` 와 `toHwpx(options?)` 를 더했고 `WasmAdapter` 가 구현한다. 편집기를 쓰는
+  호스트가 같은 문서를 채우기용 `HwpDoc` 으로 한 번 더 열 필요가 없다. `DocSession` 에 `cellFits` · `pageUsage` ·
+  `setUndoLimits` 가 생겼다.
+  *(EN — adapter parity: batch/measurement/undo-limit methods and `toHwpx(options)` on `EngineAdapter`/`WasmAdapter`.)*
+- **실행취소 메모리 설정(#372).** `HwpDoc.setUndoLimits(depth, budgetBytes)` · `undoStats()`. 줄이면 오래된 스냅숏부터
+  즉시 버린다. 기본값(50개 · 128MiB)은 그대로다.
+  *(EN — host-settable engine undo depth/byte budget and stats.)*
+
+### 변경 (Changed)
+
+- **`DocSession.applyBatch` 가 어댑터의 원자 일괄 경로를 쓴다(#371).** `WasmAdapter` 에서는 묶음마다 엔진 호출 ·
+  재조판 · 스냅숏이 1개다(전에는 Intent 수만큼). 실패하면 엔진이 되돌리므로 JS 쪽 되감기가 없다. `applyIntents` 가
+  없는 어댑터(TauriAdapter 등)는 예전 경로(하나씩 + 실패 시 되감기)를 그대로 쓴다.
+  *(EN — `applyBatch` uses the adapter's atomic batch lane when available: one engine call/reflow/snapshot per batch.)*
+- **연속 입력이 단어 단위로 실행취소된다(#369).** 같은 칸 · 문단에 이어서 친 글자는 한 실행취소 단계로 묶이고, 공백으로
+  시작하는 새 단어 · 캐럿 이동 · 다른 편집 · 1초 넘는 멈춤에서 새 단계가 시작된다(「ab c」 → ⌘Z 1회에 「 c」, 2회에
+  「ab」). 엔진에서도 한 단계 = 스냅숏 1개다. 호스트는 `applyBatch(intents, { coalesceKey })` 와 `TypingCoalescer` 로 같은
+  묶음을 쓸 수 있고, `createEditorCore(adapter, { session: { coalesceWindowMs } })` 로 멈춤 기준을 바꾼다.
+  *(EN — consecutive typing undoes word by word instead of keystroke by keystroke.)*
+
 ---
 
 ## [0.0.8] — 2026-10-01

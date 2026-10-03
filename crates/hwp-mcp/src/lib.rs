@@ -2598,6 +2598,27 @@ pub fn apply_intent_json(session: &mut Session, value: &Value) -> Result<Outcome
 pub struct BatchOutcome {
     pub applied: usize,
     pub pages: u32,
+    /// The batch changed the document (its revision moved).
+    pub changed: bool,
+    /// Atomic batches only: the batch EXTENDED the previous undo unit (same coalesce key, #369)
+    /// instead of pushing a new one. Always `false` for the non-atomic lane.
+    pub joined: bool,
+}
+
+/// Options for [`apply_intents_with`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BatchOptions {
+    /// All-or-nothing + ONE undo unit (#371): on the first failing intent the document, the
+    /// undo/redo stacks and the content are exactly as before the batch. The default (`false`) is
+    /// the #350 lane — one undo unit per intent, earlier edits kept on failure.
+    pub atomic: bool,
+    /// Atomic only (#369): the coalesce key recorded on the batch's undo unit. When it equals the
+    /// key of the current top undo unit AND `coalesce` is set, the batch extends that unit instead
+    /// of pushing a new one (word-level typing undo; repeated streaming rewrites of one region).
+    pub coalesce_key: Option<String>,
+    /// Atomic only: allow joining the top unit with the same `coalesce_key` (the caller's
+    /// pause / word-boundary decision). `false` records the key but always starts a new unit.
+    pub coalesce: bool,
 }
 
 /// Apply MANY intents with ONE reflow (#350). Each intent goes through the exact [`apply_intent`]
@@ -2612,7 +2633,51 @@ pub fn apply_intents(
     session: &mut Session,
     intents: Vec<Intent>,
 ) -> Result<BatchOutcome, (usize, String)> {
+    apply_intents_with(session, intents, &BatchOptions::default())
+}
+
+/// Whether an intent may run inside an ATOMIC batch: history/lifecycle intents (open, undo/redo,
+/// proposal lifecycle, export to a path) would walk or replace the very state the batch is
+/// guarding, so they are refused up front.
+fn batchable(intent: &Intent) -> bool {
+    !matches!(
+        intent,
+        Intent::Open { .. }
+            | Intent::Undo
+            | Intent::Redo
+            | Intent::Export { .. }
+            | Intent::Propose { .. }
+            | Intent::ProposeIntents { .. }
+            | Intent::Commit
+            | Intent::CommitProposal { .. }
+            | Intent::DiscardProposal
+    )
+}
+
+/// [`apply_intents`] with options — the atomic, single-undo-unit lane (#371) and keyed undo
+/// coalescing (#369) live here. See [`BatchOptions`].
+pub fn apply_intents_with(
+    session: &mut Session,
+    intents: Vec<Intent>,
+    opts: &BatchOptions,
+) -> Result<BatchOutcome, (usize, String)> {
     let n = intents.len();
+    let rev_before = session.doc.as_ref().map(|d| d.revision());
+    if opts.atomic {
+        if let Some(i) = intents.iter().position(|it| !batchable(it)) {
+            return Err((i, "this intent cannot run inside an atomic batch".into()));
+        }
+        let sess = session
+            .doc
+            .as_mut()
+            .ok_or((0, "no document open (call open_document first)".to_string()))?;
+        let join = if opts.coalesce {
+            opts.coalesce_key.as_deref()
+        } else {
+            None
+        };
+        sess.begin_group(join).map_err(|e| (0, e.to_string()))?;
+    }
     session.defer_pages = true;
     let mut failed = None;
     for (i, intent) in intents.into_iter().enumerate() {
@@ -2622,6 +2687,16 @@ pub fn apply_intents(
         }
     }
     session.defer_pages = false;
+    let mut joined = false;
+    if opts.atomic {
+        if let Some(sess) = session.doc.as_mut() {
+            if failed.is_some() {
+                sess.abort_group();
+            } else {
+                joined = sess.end_group(opts.coalesce_key.as_deref()).joined;
+            }
+        }
+    }
     if let Some(err) = failed {
         return Err(err);
     }
@@ -2630,7 +2705,13 @@ pub fn apply_intents(
     } else {
         0
     };
-    Ok(BatchOutcome { applied: n, pages })
+    let changed = session.doc.as_ref().map(|d| d.revision()) != rev_before;
+    Ok(BatchOutcome {
+        applied: n,
+        pages,
+        changed,
+        joined,
+    })
 }
 
 /// JSON twin of [`apply_intents`]: `values` is an array of Intent envelopes (the same shape
@@ -2639,12 +2720,45 @@ pub fn apply_intents_json(
     session: &mut Session,
     values: &[Value],
 ) -> Result<BatchOutcome, (usize, String)> {
+    apply_intents_json_with(session, values, &BatchOptions::default())
+}
+
+/// JSON twin of [`apply_intents_with`]. A malformed envelope fails before ANY intent is applied.
+pub fn apply_intents_json_with(
+    session: &mut Session,
+    values: &[Value],
+    opts: &BatchOptions,
+) -> Result<BatchOutcome, (usize, String)> {
     let intents = values
         .iter()
         .enumerate()
         .map(|(i, v)| deserialize_intent(v).map_err(|e| (i, e)))
         .collect::<Result<Vec<_>, _>>()?;
-    apply_intents(session, intents)
+    apply_intents_with(session, intents, opts)
+}
+
+/// Change the live document's undo depth / byte budget (#372). `0` = unbounded for either. The
+/// defaults at open are [`LIVE_UNDO_LIMIT`] snapshots and [`LIVE_UNDO_MEM_BUDGET`] bytes.
+pub fn set_undo_limits(
+    session: &mut Session,
+    depth: usize,
+    budget_bytes: usize,
+) -> Result<(), String> {
+    session
+        .doc
+        .as_mut()
+        .ok_or("no document open (call open_document first)")?
+        .set_undo_limits(depth, budget_bytes);
+    Ok(())
+}
+
+/// `(snapshots, estimated bytes)` held by the live undo stack (#372).
+pub fn undo_stats(session: &Session) -> Result<(usize, usize), String> {
+    Ok(session
+        .doc
+        .as_ref()
+        .ok_or("no document open (call open_document first)")?
+        .undo_stats())
 }
 
 /// Apply a typed [`Intent`] against the session, returning a typed [`Outcome`] (no string parsing).
@@ -3627,6 +3741,183 @@ mod tests {
         do_close(&mut session);
         assert!(session.own_placed.is_none(), "close releases the placement");
         assert_eq!(session.own_place_builds, 0, "close resets test accounting");
+    }
+
+    /// #371 — the ATOMIC lane: all-or-nothing, ONE undo unit, still one reflow; a failure leaves the
+    /// serialized bytes and the undo/redo stacks exactly as before (revision only moves forward).
+    #[test]
+    fn atomic_batch_is_all_or_nothing_and_one_undo_unit() {
+        let open = || {
+            let mut s = Session::default();
+            apply_intent(&mut s, Intent::Open { path: showcase() }).unwrap();
+            s
+        };
+        let atomic = BatchOptions {
+            atomic: true,
+            ..Default::default()
+        };
+        let edits = |n: usize| {
+            (0..n)
+                .map(|i| Intent::SetParagraphText {
+                    section: 0,
+                    block: 1,
+                    text: format!("원자 {i}"),
+                })
+                .collect::<Vec<_>>()
+        };
+
+        // Success: one undo unit, one snapshot, one reflow.
+        let mut s = open();
+        let pristine = export_bytes(&s).unwrap();
+        s.own_place_builds = 0;
+        let out = apply_intents_with(&mut s, edits(5), &atomic).unwrap();
+        assert_eq!((out.applied, out.changed, out.joined), (5, true, false));
+        assert_eq!(s.own_place_builds, 1, "atomic batch still reflows once");
+        assert_eq!(undo_stats(&s).unwrap().0, 1, "one snapshot for five edits");
+        assert!(s
+            .doc
+            .as_ref()
+            .unwrap()
+            .doc()
+            .plain_text()
+            .contains("원자 4"));
+        assert!(s.doc.as_mut().unwrap().undo());
+        assert_eq!(
+            export_bytes(&s).unwrap(),
+            pristine,
+            "ONE undo reverts the batch"
+        );
+        assert!(!s.doc.as_ref().unwrap().can_undo());
+        assert!(s.doc.as_mut().unwrap().redo());
+        assert!(s
+            .doc
+            .as_ref()
+            .unwrap()
+            .doc()
+            .plain_text()
+            .contains("원자 4"));
+
+        // Failure at index 2: nothing changes (bytes, stacks); revision is monotonic.
+        let mut s = open();
+        apply_intent(
+            &mut s,
+            Intent::SetParagraphText {
+                section: 0,
+                block: 1,
+                text: "앞선 편집".into(),
+            },
+        )
+        .unwrap();
+        let before = export_bytes(&s).unwrap();
+        let stats_before = undo_stats(&s).unwrap();
+        let rev_before = s.doc.as_ref().unwrap().revision();
+        let mut bad = edits(4);
+        bad[2] = Intent::SetParagraphText {
+            section: 0,
+            block: 9999,
+            text: "없음".into(),
+        };
+        let (i, _) = apply_intents_with(&mut s, bad, &atomic).unwrap_err();
+        assert_eq!(i, 2);
+        assert_eq!(
+            export_bytes(&s).unwrap(),
+            before,
+            "failed batch leaves no trace"
+        );
+        assert_eq!(undo_stats(&s).unwrap(), stats_before);
+        assert!(!s.defer_pages);
+        assert!(
+            s.doc.as_ref().unwrap().revision() > rev_before,
+            "revision never rewinds"
+        );
+        assert!(
+            s.doc.as_mut().unwrap().undo(),
+            "the earlier edit is still the top unit"
+        );
+
+        // History intents are refused before anything runs.
+        let mut s = open();
+        let (i, _) = apply_intents_with(&mut s, vec![edits(1).remove(0), Intent::Undo], &atomic)
+            .unwrap_err();
+        assert_eq!(i, 1);
+        assert_eq!(undo_stats(&s).unwrap().0, 0);
+    }
+
+    /// #369 — keyed atomic batches coalesce into one undo unit; `coalesce: false` starts a new one.
+    #[test]
+    fn keyed_atomic_batches_coalesce() {
+        let mut s = Session::default();
+        apply_intent(&mut s, Intent::Open { path: showcase() }).unwrap();
+        let pristine = export_bytes(&s).unwrap();
+        let typing = |text: &str| {
+            vec![Intent::SetParagraphText {
+                section: 0,
+                block: 1,
+                text: text.into(),
+            }]
+        };
+        let keyed = |key: &str, coalesce: bool| BatchOptions {
+            atomic: true,
+            coalesce_key: Some(key.into()),
+            coalesce,
+        };
+        assert!(
+            !apply_intents_with(&mut s, typing("a"), &keyed("w1", true))
+                .unwrap()
+                .joined
+        );
+        assert!(
+            apply_intents_with(&mut s, typing("ab"), &keyed("w1", true))
+                .unwrap()
+                .joined
+        );
+        assert!(
+            !apply_intents_with(&mut s, typing("ab "), &keyed("w2", true))
+                .unwrap()
+                .joined
+        );
+        assert!(
+            apply_intents_with(&mut s, typing("ab c"), &keyed("w2", true))
+                .unwrap()
+                .joined
+        );
+        // A pause: same key but the caller says don't join.
+        assert!(
+            !apply_intents_with(&mut s, typing("ab cd"), &keyed("w2", false))
+                .unwrap()
+                .joined
+        );
+        assert_eq!(undo_stats(&s).unwrap().0, 3);
+        let doc = |s: &Session| s.doc.as_ref().unwrap().doc().plain_text();
+        assert!(s.doc.as_mut().unwrap().undo());
+        assert!(doc(&s).contains("ab c") && !doc(&s).contains("ab cd"));
+        assert!(s.doc.as_mut().unwrap().undo());
+        assert!(doc(&s).contains("ab") && !doc(&s).contains("ab c"));
+        assert!(s.doc.as_mut().unwrap().undo());
+        assert_eq!(export_bytes(&s).unwrap(), pristine);
+    }
+
+    /// #372 — host-set undo limits apply to the live session immediately.
+    #[test]
+    fn set_undo_limits_on_live_session() {
+        let mut s = Session::default();
+        apply_intent(&mut s, Intent::Open { path: showcase() }).unwrap();
+        for i in 0..12 {
+            apply_intent(
+                &mut s,
+                Intent::SetParagraphText {
+                    section: 0,
+                    block: 1,
+                    text: format!("t{i}"),
+                },
+            )
+            .unwrap();
+        }
+        let (n, bytes) = undo_stats(&s).unwrap();
+        assert_eq!(n, 12);
+        assert!(bytes > 0);
+        set_undo_limits(&mut s, 5, 0).unwrap();
+        assert_eq!(undo_stats(&s).unwrap().0, 5);
     }
 
     /// #350 — `apply_intents` reflows ONCE for N edits (single-lane `apply_intent` reflows per edit),

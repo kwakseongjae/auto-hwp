@@ -298,11 +298,31 @@ export interface HwpxExportOptions {
   hwpRowHeights?: 'exact' | 'auto';
 }
 
-/** Result of `applyIntents` (#350). `pages` is the page count after the single reflow. */
+/** Result of `applyIntents` (#350). `pages` is the page count after the single reflow. With options
+ *  (#371) the result also says whether the document `changed` and whether the batch `joined` (extended)
+ *  the previous undo unit. */
 export interface BatchOutcome {
   kind: 'Batch';
   applied: number;
   pages: number;
+  changed?: boolean;
+  joined?: boolean;
+}
+
+/** `applyIntents` options (#371 · #369). Unknown keys are refused. */
+export interface BatchOptions {
+  /** All-or-nothing + ONE undo unit. On failure the document and undo/redo stacks are unchanged. */
+  atomic?: boolean;
+  /** Atomic only: recorded on the batch's undo unit; a later batch with the same key extends it. */
+  coalesceKey?: string;
+  /** Allow extending the previous unit with the same `coalesceKey` (default true when a key is given). */
+  coalesce?: boolean;
+}
+
+/** What the undo stack holds (#372). `bytes` is an estimate. */
+export interface UndoStats {
+  snapshots: number;
+  bytes: number;
 }
 
 /** Tagged result of applyIntent (Intent schema v0). `kind` discriminates the payload. */
@@ -433,8 +453,14 @@ export class HwpDoc {
   applyIntent(intent: object | string): Outcome;
   /** Apply MANY intents with ONE reflow (#350): same op-bus, one undo unit per intent, but the
    *  whole-document re-typeset `applyIntent` does per edit runs once. Not atomic — throws
-   *  `{code:"batch_failed", message:"intent[i]: …"}` at the first failure; earlier edits stay applied. */
-  applyIntents(intents: Array<object | string>): BatchOutcome;
+   *  `{code:"batch_failed", message:"intent[i]: …"}` at the first failure; earlier edits stay applied.
+   *  With `{ atomic: true }` (#371) the batch is all-or-nothing and ONE undo unit; `coalesceKey` (#369)
+   *  lets consecutive atomic batches share one undo unit. */
+  applyIntents(intents: Array<object | string>, options?: BatchOptions): BatchOutcome;
+  /** Undo depth (snapshots) + byte budget of this document (#372). `0` = unbounded. Defaults 50 · 128 MiB. */
+  setUndoLimits(depth: number, budgetBytes?: number): void;
+  /** What the undo stack holds now (#372). */
+  undoStats(): UndoStats;
   undo(): boolean;
   redo(): boolean;
   /** Inject a single-face TTF/OTF font (R8 — fonts are never bundled). Used for BOTH the layout

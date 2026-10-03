@@ -1,6 +1,22 @@
 import type { EngineAdapter } from "./adapter";
 import { Emitter } from "./events";
-import type { Anchor, CellAddr, DocContext, ImageBox, Intent, NormalizeReport, OpenResult, OutlineItem, PageGeom, ProposalV1, RunSpec } from "./types";
+import type { Anchor, CellAddr, CellFit, DocContext, ImageBox, Intent, NormalizeReport, OpenResult, OutlineItem, PageGeom, PageUsage, ProposalV1, RunSpec } from "./types";
+
+/** Options for `DocSession.applyBatch`. */
+export interface ApplyBatchOptions {
+  /** Typing-coalescing key (#369): a batch with the SAME key as the previous batch, arriving within the
+   *  session's coalesce window with nothing else in between, EXTENDS the top undo step instead of
+   *  pushing a new one. Caret controllers derive it with `TypingCoalescer`. */
+  coalesceKey?: string;
+}
+
+/** `DocSession` construction options. */
+export interface DocSessionOptions {
+  /** A pause longer than this (ms) between two keyed batches starts a new undo step. Default 1000. */
+  coalesceWindowMs?: number;
+  /** Clock (tests inject a fake one). Default `Date.now`. */
+  now?: () => number;
+}
 
 /// DocSession — the document lifecycle facade over an EngineAdapter (SDK-LAYERS L2), DESCENDED from
 /// HwpWorkspace's document/undo/font state. It owns: the open-document metadata (`OpenResult`), the
@@ -18,11 +34,22 @@ export class DocSession {
   private undoBatches: number[] = []; // sizes (ops per applied proposal)
   private redoBatches: number[] = [];
   private fontFamily: string | null = null;
+  /** #369 — the coalesce key of the TOP undo batch + when it was last extended (null = not keyed). */
+  private topKey: string | null = null;
+  private topKeyAt = 0;
+  private readonly coalesceWindowMs: number;
+  private readonly now: () => number;
 
   private docChanged = new Emitter<OpenResult | null>();
   private layoutInvalidated = new Emitter<void>();
 
-  constructor(private adapter: EngineAdapter) {}
+  constructor(
+    private adapter: EngineAdapter,
+    opts: DocSessionOptions = {},
+  ) {
+    this.coalesceWindowMs = opts.coalesceWindowMs ?? 1000;
+    this.now = opts.now ?? Date.now;
+  }
 
   // ── getters ──────────────────────────────────────────────────────────────
   getMeta(): OpenResult | null {
@@ -74,6 +101,7 @@ export class DocSession {
     this.meta = r;
     this.undoBatches = [];
     this.redoBatches = [];
+    this.topKey = null;
     this.fontFamily = null;
     this.docChanged.emit(r);
     this.layoutInvalidated.emit();
@@ -85,6 +113,7 @@ export class DocSession {
     this.meta = null;
     this.undoBatches = [];
     this.redoBatches = [];
+    this.topKey = null;
     this.docChanged.emit(null);
   }
 
@@ -108,7 +137,34 @@ export class DocSession {
    *  so the engine's undo stack is empty and the rollback records a batch that undoes nothing. That is
    *  deliberately the safe side of the trade (a no-op undo entry vs. an untracked mutation); the UI's
    *  trap lane (`onTrap`) is what tells the user their last edit was rolled back. */
-  async applyBatch(intents: Intent[]): Promise<number> {
+  async applyBatch(intents: Intent[], opts: ApplyBatchOptions = {}): Promise<number> {
+    const key = opts.coalesceKey ?? null;
+    // #369 — may this batch EXTEND the top undo step? Same key, nothing in between (any other batch,
+    // undo, redo or external edit clears `topKey`), no redo branch, and within the pause window.
+    const join =
+      key !== null &&
+      key === this.topKey &&
+      this.undoBatches.length > 0 &&
+      this.redoBatches.length === 0 &&
+      this.now() - this.topKeyAt <= this.coalesceWindowMs;
+
+    // #371 — ATOMIC lane: one engine call, one reflow, one engine undo unit. The engine itself
+    // guarantees "failure = no change", so there is nothing to roll back here.
+    if (this.adapter.applyIntents) {
+      if (intents.length === 0) return 0;
+      const r = await this.adapter.applyIntents(intents, key !== null ? { coalesceKey: key, coalesce: join } : undefined);
+      if (r.changed) {
+        // An engine-joined batch extends the top unit, which is already ONE engine undo → nothing to push.
+        if (!r.joined) this.undoBatches.push(1);
+        this.redoBatches = [];
+        this.topKey = key;
+        this.topKeyAt = this.now();
+        await this.refreshPages();
+        this.layoutInvalidated.emit();
+      }
+      return r.applied;
+    }
+
     let applied = 0;
     try {
       for (const intent of intents) {
@@ -124,7 +180,10 @@ export class DocSession {
           rolledBack++;
         }
         const survived = applied - rolledBack;
-        if (survived > 0) this.undoBatches.push(survived); // still one-click undoable
+        if (survived > 0) {
+          this.undoBatches.push(survived); // still one-click undoable
+          this.topKey = null;
+        }
         this.redoBatches = [];
         await this.refreshPages();
         this.layoutInvalidated.emit();
@@ -134,8 +193,13 @@ export class DocSession {
     // An EMPTY proposal changed nothing — pushing a size-0 batch would leave a phantom the next `undo()`
     // pops and reports as "아무것도 되돌리지 않음"(⌘Z 무반응의 한 갈래). Record only real work.
     if (applied > 0) {
-      this.undoBatches.push(applied);
+      // #369 fallback lane (adapters without `applyIntents`): a coalesced batch grows the top batch's
+      // engine-unit count, so ONE `undo()` still replays exactly the units it covers.
+      if (join) this.undoBatches[this.undoBatches.length - 1] += applied;
+      else this.undoBatches.push(applied);
       this.redoBatches = [];
+      this.topKey = key;
+      this.topKeyAt = this.now();
       await this.refreshPages();
       this.layoutInvalidated.emit();
     }
@@ -154,6 +218,7 @@ export class DocSession {
     if (!this.adapter.commitProposal) throw new Error("canonical Proposal v1 is unsupported by this adapter");
     const applied = await this.adapter.commitProposal(proposal.proposal_id, proposal.base_revision);
     this.undoBatches.push(1);
+    this.topKey = null;
     this.redoBatches = [];
     await this.refreshPages();
     this.layoutInvalidated.emit();
@@ -169,6 +234,7 @@ export class DocSession {
    *  its matches went stale (refreshToken bump). */
   async recordExternalEdit(): Promise<void> {
     this.undoBatches.push(1);
+    this.topKey = null;
     this.redoBatches = [];
     await this.refreshPages();
     this.layoutInvalidated.emit();
@@ -179,6 +245,7 @@ export class DocSession {
   async undo(): Promise<boolean> {
     const n = this.undoBatches.pop();
     if (!n) return false;
+    this.topKey = null;
     for (let i = 0; i < n; i++) await this.adapter.undo().catch(() => false);
     this.redoBatches.push(n);
     await this.refreshPages();
@@ -190,6 +257,7 @@ export class DocSession {
   async redo(): Promise<boolean> {
     const n = this.redoBatches.pop();
     if (!n) return false;
+    this.topKey = null;
     for (let i = 0; i < n; i++) await this.adapter.redo().catch(() => false);
     this.undoBatches.push(n);
     await this.refreshPages();
@@ -216,6 +284,41 @@ export class DocSession {
     await this.refreshPages();
     this.layoutInvalidated.emit();
     return report;
+  }
+
+  /** End the current typing run (#369): the next keyed batch starts a new undo step even if its key
+   *  matches. Call on caret moves / blur when the controller cannot express it through the key. */
+  breakCoalescing(): void {
+    this.topKey = null;
+  }
+
+  /** Engine undo depth + byte budget (#372; `0` = unbounded). The engine evicts its OLDEST snapshots;
+   *  this session drops the matching oldest batches so the two stacks stay aligned (a dropped batch
+   *  could no longer be undone anyway). Resolves `false` when the backend can't set limits. */
+  async setUndoLimits(depth: number, budgetBytes = 0): Promise<boolean> {
+    if (!this.adapter.setUndoLimits) return false;
+    await this.adapter.setUndoLimits(depth, budgetBytes);
+    const stats = await this.adapter.undoStats?.();
+    // Each batch costs ≥1 engine unit; keep the newest batches whose units the engine still holds.
+    let units = stats ? stats.snapshots : depth > 0 ? depth : Infinity;
+    let keep = 0;
+    for (let i = this.undoBatches.length - 1; i >= 0 && units >= this.undoBatches[i]; i--) {
+      units -= this.undoBatches[i];
+      keep++;
+    }
+    if (keep < this.undoBatches.length) this.undoBatches = this.undoBatches.slice(this.undoBatches.length - keep);
+    return true;
+  }
+
+  /** Per-cell fit / overflow of the placed table at `(section, block)` (#347 via #371 parity), or
+   *  `null` (not a placed table / backend can't answer). Read-only — no undo unit. */
+  async cellFits(section: number, block: number): Promise<CellFit[] | null> {
+    return (await this.adapter.tableCellFits?.(section, block)) ?? null;
+  }
+
+  /** How full each page's body is (#347), or `[]` when the backend can't answer. Read-only. */
+  async pageUsage(): Promise<PageUsage[]> {
+    return (await this.adapter.pageUsage?.()) ?? [];
   }
 
   // ── read-only geometry / runs (issue 027 — optional adapter methods) ──────────────────────────────

@@ -7,9 +7,11 @@ export type { EngineAdapter } from "./adapter";
 
 // Composition
 export { EditorCore, createEditorCore } from "./core";
+export type { EditorCoreOptions } from "./core";
 
 // Document lifecycle / undo / font
 export { DocSession } from "./session";
+export type { ApplyBatchOptions, DocSessionOptions } from "./session";
 
 // Selection engine (issues 021 + 023) + its pure helpers (exported so hosts/tests can reuse them).
 export {
@@ -120,8 +122,15 @@ export type { Listener } from "./events";
 // Types
 export { canonicalProposalDigest } from "./proposal";
 export type { ProposalDigestMaterial } from "./proposal";
+export { TypingCoalescer } from "./coalesce";
 export type {
   AffectedAddress,
+  BatchApplyOptions,
+  BatchApplyResult,
+  CellFit,
+  HwpxExportOptions,
+  PageUsage,
+  UndoStats,
   AgentEvent,
   AiRequestOptions,
   Anchor,
