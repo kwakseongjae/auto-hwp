@@ -24,6 +24,17 @@ struct SynthPlan {
     char_ref: BTreeMap<usize, String>,
     /// para_shape index → synthesized `paraPrIDRef` (only NON-default shapes; default → base ref).
     para_ref: BTreeMap<usize, String>,
+    /// #356: POOL-resolved char_shape index (from the original header pool, [`SemanticDoc::
+    /// hwpx_pool_char_shapes`]) → an ORIGINAL `charPrIDRef` with that exact value. Pool shapes are
+    /// never synthesized (an unedited run keeps its own original ref), so a run WITHOUT an original
+    /// open tag — a new paragraph's run — needs this to avoid falling back to the section's plain ref.
+    pool_char_ref: BTreeMap<usize, String>,
+    /// #356: the paragraph twin of [`SynthPlan::pool_char_ref`]. A NEW paragraph (SplitParagraph
+    /// tail, InsertParagraphAt that inherits a neighbour's shape) carries a pool para_shape index but
+    /// no original `<hp:p>` open tag; without this it fell back to the section's LAST `paraPrIDRef`
+    /// (Hancom then drew it with an unrelated alignment / line spacing). NOT consulted when patching
+    /// an existing paragraph's original open tag (`patch_para_open_tag`) — that stays byte-verbatim.
+    pool_para_ref: BTreeMap<usize, String>,
     /// Canonical borderFill key ([`bf_key`]: 4 edges + optional shade) → synthesized (or reused)
     /// `borderFillIDRef`. Replaces the old shade-only map (issue 054, F2): a cell/table with real
     /// lifted borders gets a faithful borderFill, not just a background clone.
@@ -32,6 +43,105 @@ struct SynthPlan {
     style_map: BTreeMap<String, synth::StyleRef>,
     /// The fully-synthesized header.xml to emit, or None if nothing needed synthesizing.
     header_out: Option<String>,
+}
+
+impl SynthPlan {
+    /// IDRef for a char_shape index in EMITTED (new) content: synthesized id, else the original pool
+    /// id of an equal pool shape (#356), else `None` (caller falls back to its plain/style ref).
+    fn char_id(&self, idx: usize) -> Option<String> {
+        self.char_ref
+            .get(&idx)
+            .or_else(|| self.pool_char_ref.get(&idx))
+            .cloned()
+    }
+
+    /// IDRef for a para_shape index in EMITTED (new) content — see [`SynthPlan::char_id`].
+    fn para_id(&self, idx: usize) -> Option<String> {
+        self.para_ref
+            .get(&idx)
+            .or_else(|| self.pool_para_ref.get(&idx))
+            .cloned()
+    }
+}
+
+/// #356: map every POOL-resolved shape index to an ORIGINAL header id holding that exact value.
+/// Prefers, in document order, the id an existing paragraph/run actually references (so a new
+/// paragraph next to its source gets the same id the source has — not merely an equal-valued twin);
+/// falls back to the lowest pool id with an equal value.
+fn pool_origin_ids(doc: &SemanticDoc) -> (BTreeMap<usize, String>, BTreeMap<usize, String>) {
+    fn walk(
+        blocks: &[Block],
+        doc: &SemanticDoc,
+        chars: &mut BTreeMap<usize, String>,
+        paras: &mut BTreeMap<usize, String>,
+    ) {
+        for b in blocks {
+            match b {
+                Block::Paragraph(p) => {
+                    if doc.hwpx_pool_para_shapes.contains(&p.para_shape)
+                        && !paras.contains_key(&p.para_shape)
+                    {
+                        if let Some(r) = p.para_ref.as_deref().map(str::trim) {
+                            let same = r
+                                .parse::<u64>()
+                                .ok()
+                                .and_then(|id| doc.header_pools.para.get(&id))
+                                == doc.para_shapes.get(p.para_shape);
+                            if same {
+                                paras.insert(p.para_shape, r.to_string());
+                            }
+                        }
+                    }
+                    for run in &p.runs {
+                        if doc.hwpx_pool_char_shapes.contains(&run.char_shape)
+                            && !chars.contains_key(&run.char_shape)
+                        {
+                            if let Some(r) = run.char_ref.as_deref().map(str::trim) {
+                                let same = r
+                                    .parse::<u64>()
+                                    .ok()
+                                    .and_then(|id| doc.header_pools.char.get(&id))
+                                    == doc.char_shapes.get(run.char_shape);
+                                if same {
+                                    chars.insert(run.char_shape, r.to_string());
+                                }
+                            }
+                        }
+                        for inl in &run.content {
+                            if let Inline::Note(nr) = inl {
+                                walk(&nr.body, doc, chars, paras);
+                            }
+                        }
+                    }
+                }
+                Block::Table(t) => {
+                    for c in &t.cells {
+                        walk(&c.blocks, doc, chars, paras);
+                    }
+                }
+            }
+        }
+    }
+    let mut chars = BTreeMap::new();
+    let mut paras = BTreeMap::new();
+    for sec in &doc.sections {
+        walk(&sec.blocks, doc, &mut chars, &mut paras);
+    }
+    for &idx in &doc.hwpx_pool_char_shapes {
+        if let (false, Some(shape)) = (chars.contains_key(&idx), doc.char_shapes.get(idx)) {
+            if let Some((id, _)) = doc.header_pools.char.iter().find(|(_, s)| *s == shape) {
+                chars.insert(idx, id.to_string());
+            }
+        }
+    }
+    for &idx in &doc.hwpx_pool_para_shapes {
+        if let (false, Some(shape)) = (paras.contains_key(&idx), doc.para_shapes.get(idx)) {
+            if let Some((id, _)) = doc.header_pools.para.iter().find(|(_, s)| *s == shape) {
+                paras.insert(idx, id.to_string());
+            }
+        }
+    }
+    (chars, paras)
 }
 
 /// Serialize a `SemanticDoc` (parsed from HWPX) back to HWPX bytes.
@@ -454,6 +564,8 @@ fn build_synth_plan(
 
     // Read-only: the existing styles pool (so paragraphs can reference 바탕글/본문/개요 N by name).
     plan.style_map = synth::parse_styles(header0);
+    // #356: original ids for pool-resolved shapes, used only by NEW (emitted) content.
+    (plan.pool_char_ref, plan.pool_para_ref) = pool_origin_ids(doc);
 
     let mut chars = IdxSet::new();
     let mut paras = IdxSet::new();
@@ -812,21 +924,11 @@ fn patch_section_xml(
     let base_para_ref: &str = &base_para_ref;
     let plain_ref_owned = plain_ref.clone();
     // Resolve a run's interned char_shape index → charPrIDRef (synthesized id, or the plain ref).
-    let cref = |idx: usize| {
-        plan.char_ref
-            .get(&idx)
-            .cloned()
-            .unwrap_or_else(|| plain_ref_owned.clone())
-    };
+    let cref = |idx: usize| plan.char_id(idx).unwrap_or_else(|| plain_ref_owned.clone());
     // …and a paragraph's para_shape index → paraPrIDRef (synthesized id, or the base ref). Used by
     // cell/note-body paragraphs so their real line-spacing/문단간격 survive (054).
     let base_para_owned = base_para_ref.to_string();
-    let pref = |idx: usize| {
-        plan.para_ref
-            .get(&idx)
-            .cloned()
-            .unwrap_or_else(|| base_para_owned.clone())
-    };
+    let pref = |idx: usize| plan.para_id(idx).unwrap_or_else(|| base_para_owned.clone());
     let body_ctx = BodyCtx {
         cref: &cref,
         pref: &pref,
@@ -897,17 +999,16 @@ fn patch_section_xml(
                     .get(para_shape)
                     .cloned()
                     .or_else(|| style_ref.map(|s| s.para_pr.clone()))
+                    // #356: a pool shape (inherited by a new paragraph) → its ORIGINAL id. After
+                    // the style: a named style's paraPr is an explicit request that wins.
+                    .or_else(|| plan.pool_para_ref.get(para_shape).cloned())
                     .unwrap_or_else(|| base_para_ref.to_string());
                 // a run with no synthesized charPr falls back to the style's charPr, else plain.
                 let char_fallback = style_ref
                     .map(|s| s.char_pr.clone())
                     .unwrap_or_else(|| plain_ref.to_string());
-                let resolve = |idx: usize| {
-                    plan.char_ref
-                        .get(&idx)
-                        .cloned()
-                        .unwrap_or_else(|| char_fallback.clone())
-                };
+                let resolve =
+                    |idx: usize| plan.char_id(idx).unwrap_or_else(|| char_fallback.clone());
                 let ctx = BodyCtx {
                     cref: &resolve,
                     pref: &pref,
@@ -1473,15 +1574,11 @@ fn build_table_patch(
     // WHOLE-TABLE re-emit at the original anchor. The table stays inside its original wrapper
     // `<hp:p><hp:run>` (only the `<hp:tbl>` span is replaced), so document order is preserved.
     let cref = |idx: usize| {
-        plan.char_ref
-            .get(&idx)
-            .cloned()
+        plan.char_id(idx)
             .unwrap_or_else(|| sec_plain_ref.to_string())
     };
     let pref = |idx: usize| {
-        plan.para_ref
-            .get(&idx)
-            .cloned()
+        plan.para_id(idx)
             .unwrap_or_else(|| sec_para_ref.to_string())
     };
     let ctx = BodyCtx {
@@ -1574,18 +1671,8 @@ fn patch_cell_xml(
         let plain_ref = last_attr(inner, "charPrIDRef")
             .unwrap_or(sec_plain_ref)
             .to_string();
-        let cref = |idx: usize| {
-            plan.char_ref
-                .get(&idx)
-                .cloned()
-                .unwrap_or_else(|| plain_ref.clone())
-        };
-        let pref = |idx: usize| {
-            plan.para_ref
-                .get(&idx)
-                .cloned()
-                .unwrap_or_else(|| para_ref.clone())
-        };
+        let cref = |idx: usize| plan.char_id(idx).unwrap_or_else(|| plain_ref.clone());
+        let pref = |idx: usize| plan.para_id(idx).unwrap_or_else(|| para_ref.clone());
         let ctx = BodyCtx {
             cref: &cref,
             pref: &pref,
