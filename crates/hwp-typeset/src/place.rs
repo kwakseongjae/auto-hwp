@@ -2356,10 +2356,7 @@ fn place_cell_content(
     // caret geometry are untouched (LOCKSTEP).
     let clip_y = if clip { cy + ch + 0.5 } else { f64::INFINITY };
     // Total content height → start offset for vertical centering within the cell box.
-    let content_h: f64 = blocks
-        .iter()
-        .map(|b| block_height_for_place(b, doc, textw, fonts))
-        .sum();
+    let content_h = crate::cell_blocks_height(blocks, doc, textw, fonts);
     let mut vy = cy + ((ch - content_h) / 2.0).max(0.0);
     for (bi, b) in blocks.iter().enumerate() {
         let Block::Paragraph(p) = b else {
@@ -2443,6 +2440,11 @@ fn place_cell_content(
         // reserve already subtracts this leading, so trimming the DRAW makes drawn == reserved and the
         // content sits inside the box. The trimmed span is empty space below the last line's ink → no
         // glyph is clipped. Reserve-only (pagination) is untouched, so page counts stay in lockstep.
+        // #370: only the cell's LAST block trims — between paragraphs the leading stays (Hancom), the
+        // same rule `crate::cell_blocks_height` reserves.
+        if bi + 1 < blocks.len() {
+            continue;
+        }
         if let Some(last) = lines.last() {
             vy -= (last.vert_size * (ratio - 1.0)).max(0.0);
         }
@@ -2534,13 +2536,10 @@ fn walk_cell_lines(
     on_line: &mut dyn FnMut(&CellLineGeom) -> bool,
 ) {
     let textw = (cw - pad_left - pad_right).max(1.0);
-    let content_h: f64 = blocks
-        .iter()
-        .map(|b| block_height_for_place(b, doc, textw, fonts))
-        .sum();
+    let content_h = crate::cell_blocks_height(blocks, doc, textw, fonts);
     let mut vy = cy + ((ch - content_h) / 2.0).max(0.0);
     let mut seg_base = 0usize; // cell-global ordinal of this model paragraph's FIRST "\n"-segment
-    for b in blocks {
+    for (bi, b) in blocks.iter().enumerate() {
         let Block::Paragraph(p) = b else {
             vy += block_height_for_place(b, doc, textw, fonts);
             continue;
@@ -2630,9 +2629,11 @@ fn walk_cell_lines(
             }
             vy += ls.vert_size * ratio;
         }
-        // Trailing-leading trim — LOCKSTEP with place_cell_content (see its comment).
-        if let Some(last) = lines.last() {
-            vy -= (last.vert_size * (ratio - 1.0)).max(0.0);
+        // Trailing-leading trim — LOCKSTEP with place_cell_content (see its comment): last block only.
+        if bi + 1 == blocks.len() {
+            if let Some(last) = lines.last() {
+                vy -= (last.vert_size * (ratio - 1.0)).max(0.0);
+            }
         }
         seg_base += nl_pos.len() + 1;
     }
@@ -2931,11 +2932,7 @@ pub fn table_cell_fits(
         };
         let (pad_left, pad_right) = crate::cell_horizontal_padding(t, c);
         let text_width = (pc.w - pad_left - pad_right).max(1.0);
-        let content_height: f64 = c
-            .blocks
-            .iter()
-            .map(|b| block_height_for_place(b, doc, text_width, fonts))
-            .sum();
+        let content_height = crate::cell_blocks_height(&c.blocks, doc, text_width, fonts);
         let lines = c
             .blocks
             .iter()

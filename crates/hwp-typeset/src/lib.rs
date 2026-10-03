@@ -1168,6 +1168,50 @@ pub(crate) fn cell_paragraph_height(
     sb + (text - last_leading) + sa
 }
 
+/// The line-spacing leading BELOW a cell paragraph's last line (`vert_size_last × (ratio−1)`, ≥ 0) —
+/// the amount [`cell_paragraph_height`] trims.
+pub(crate) fn cell_paragraph_trailing_leading(
+    p: &Paragraph,
+    doc: &SemanticDoc,
+    width: f64,
+    fonts: &dyn FontMetricsProvider,
+) -> f64 {
+    let ratio = line_spacing_ratio(p, doc);
+    layout_cell_paragraph(p, doc, width, fonts)
+        .last()
+        .map(|l| (l.vert_size * (ratio - 1.0)).max(0.0))
+        .unwrap_or(0.0)
+}
+
+/// Stacked height (HWPUNIT) of a table cell's blocks at `width` (#370). Hancom trims the line-spacing
+/// leading only below the cell's LAST line: between two paragraphs of the same cell the leading stays
+/// (stored `linesegarray` in a 160% cell: paragraph-to-paragraph pitch = 1600 for a 10pt line, the
+/// same as the pitch inside a paragraph). So every block except the last keeps its trailing leading;
+/// the last paragraph is trimmed exactly as [`cell_paragraph_height`] (issue 020). A one-paragraph
+/// cell is unchanged. Shared by the row reserve ([`table_row_heights`]) and every cell placer in
+/// [`crate::place`] (LOCKSTEP: reserve == drawn stack).
+pub(crate) fn cell_blocks_height(
+    blocks: &[Block],
+    doc: &SemanticDoc,
+    width: f64,
+    fonts: &dyn FontMetricsProvider,
+) -> f64 {
+    let last = blocks.len().saturating_sub(1);
+    blocks
+        .iter()
+        .enumerate()
+        .map(|(i, b)| {
+            block_height(b, doc, width, fonts)
+                + match b {
+                    Block::Paragraph(p) if i < last => {
+                        cell_paragraph_trailing_leading(p, doc, width, fonts)
+                    }
+                    _ => 0.0,
+                }
+        })
+        .sum()
+}
+
 /// Laid-out height of one block (HWPUNIT) at the given content width — paragraph (lines×spacing +
 /// 위/아래 간격, trailing leading trimmed per [`cell_paragraph_height`]) or a nested table (recursive).
 /// Drives table-row sizing + pagination accounting.
@@ -1339,11 +1383,7 @@ pub(crate) fn table_row_heights(
         // the exact text width. Using the old fixed 80+80 inset made 510+510-margin cells up to
         // 860 HWPUNIT too wide, hiding Hancom-authored wraps from the row reservation.
         let tw = table_cell_text_width(t, avail_w, i);
-        c.blocks
-            .iter()
-            .map(|b| block_height(b, doc, tw, fonts))
-            .sum::<f64>()
-            + CELL_PAD
+        cell_blocks_height(&c.blocks, doc, tw, fonts) + CELL_PAD
     };
     // ① 한 행짜리 셀만으로 각 행 높이를 정한다.
     for (i, c) in t.cells.iter().enumerate() {
@@ -1666,7 +1706,8 @@ fn cell_term_breakdown(
         ..Default::default()
     };
     let mut first_ratio: Option<f64> = None;
-    for blk in &c.blocks {
+    let last_block = c.blocks.len().saturating_sub(1);
+    for (bi, blk) in c.blocks.iter().enumerate() {
         match blk {
             Block::Paragraph(p) => {
                 let ps = doc.para_shapes.get(p.para_shape);
@@ -1686,7 +1727,8 @@ fn cell_term_breakdown(
                     .max(0.0);
                 b.lines += lines.len();
                 b.raw_em += raw;
-                b.spaced += spaced - last_leading;
+                // #370: only the cell's last block trims (LOCKSTEP with `cell_blocks_height`).
+                b.spaced += spaced - if bi == last_block { last_leading } else { 0.0 };
             }
             // Nested table: fold its whole height into `spaced` as one "line" so the totals reconcile
             // (it is measured, not text — the audit flags it via a jump in raw_em vs spaced).
