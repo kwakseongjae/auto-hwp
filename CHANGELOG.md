@@ -72,6 +72,12 @@ packages are released in lockstep.)*
   묶음을 쓸 수 있고, `createEditorCore(adapter, { session: { coalesceWindowMs } })` 로 멈춤 기준을 바꾼다.
   *(EN — consecutive typing undoes word by word instead of keystroke by keystroke.)*
 
+### 수정 (Fixed)
+
+- **`MergeParagraph` 뒤 HWPX 내보내기에 합쳐진 문단이 다시 나타나지 않는다(#379).** 합쳐져 사라진 문단이 `DeleteBlock`
+  처럼 원본 스팬 묘비를 남긴다 — 다시 열면 중복 문단이 생기고 뒤 문단이 한 칸씩 밀리던 문제.
+  *(EN — merged-away paragraphs no longer reappear in HWPX export.)*
+
 ---
 
 ## [0.0.8] — 2026-10-01

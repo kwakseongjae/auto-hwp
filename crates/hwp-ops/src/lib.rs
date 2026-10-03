@@ -2109,7 +2109,14 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                 Block::Paragraph(p) => std::mem::take(&mut p.runs),
                 _ => unreachable!("검사됨"),
             };
-            sec.blocks.remove(*block);
+            // The HWPX serializer patches the ORIGINAL section XML: the merged-away paragraph must leave
+            // a tombstone exactly like `DeleteBlock` (#342), or its source bytes ride along verbatim —
+            // on reopen it came back as a duplicate and every later paragraph shifted by one.
+            if let Block::Paragraph(p) = sec.blocks.remove(*block) {
+                if let Some(src) = &p.source {
+                    sec.removed_spans.push(src.span);
+                }
+            }
             let Block::Paragraph(prev) = &mut sec.blocks[*block - 1] else {
                 unreachable!("검사됨")
             };
