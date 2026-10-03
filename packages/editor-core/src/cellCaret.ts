@@ -22,6 +22,7 @@
 import type { EngineAdapter } from "./adapter";
 import { clampOffset } from "./caret";
 import { type RangeRect, rectsByProbe, selRange } from "./caretRange";
+import { TypingCoalescer } from "./coalesce";
 import { Emitter } from "./events";
 import type { RunStyle } from "./runs";
 import type { DocSession } from "./session";
@@ -255,6 +256,8 @@ export class CellCaretController {
    *  훑어야 해서 생긴 캐시. */
   private rectMemo = new Map<number, CellCaretRect | null>();
   private memoKey = "";
+  /** #369 — groups consecutive keystrokes into word-level undo steps. */
+  private typing = new TypingCoalescer();
 
   constructor(
     private adapter: EngineAdapter,
@@ -437,7 +440,7 @@ export class CellCaretController {
    *  A "\n" in `text` splits the paragraph (Enter). 범위가 살아 있으면 그 범위를 **대체**한다.
    *  Resolves false when no caret is active. */
   insertText(text: string): Promise<boolean> {
-    return this.enqueue(() => this.splice(text, 0));
+    return this.enqueue(() => this.splice(text, 0, true));
   }
 
   /** Backspace: 범위가 있으면 그 범위를 지우고, 없으면 캐럿 **앞** 한 글자(또는 문단 구분자 — 문단 병합)를
@@ -461,6 +464,7 @@ export class CellCaretController {
       const g1 = cellGlobalOffset(joined, a.para, end);
       const on = !rangeHasStyle(runs, g0, g1, key);
       const nextRuns = styleRunRange(runs, g0, g1, key, on);
+      this.typing.reset();
       await this.session.applyBatch([this.commitIntent(a, nextRuns)]);
       this.rectMemo.clear(); // 서식은 글자 폭을 바꾼다 — 캐시된 기하는 버린다
       await this.publish({ ...a });
@@ -538,7 +542,7 @@ export class CellCaretController {
 
   /** The shared read → splice → commit → re-anchor lane behind insertText/deleteBack. 범위가 살아 있으면
    *  `del` 은 그 범위 길이로 갈음된다(범위 위 타이핑 = 대체 · Backspace = 범위 삭제). */
-  private async splice(insert: string, del: number): Promise<boolean> {
+  private async splice(insert: string, del: number, typing = false): Promise<boolean> {
     const a = this.state?.anchor;
     if (!a || !this.supported) return false;
     const runs = await this.readRuns(a);
@@ -552,7 +556,11 @@ export class CellCaretController {
     if (delChars > 0 && global === 0) return false; // Backspace at the cell start — graceful no-op
     if (!ranged && delChars === 0 && insert.length === 0) return false;
     const nextRuns = spliceRuns(runs, global, delChars, insert);
-    await this.session.applyBatch([this.commitIntent(a, nextRuns)]);
+    // #369 — plain typing (no range, no delete) coalesces into word-level undo steps; anything else
+    // ends the typing run.
+    const target = isNestedPath(a.path) ? `cell:${a.section}/${pathKey(a.path)}` : `cell:${a.section}/${a.block}/${a.row}/${a.col}`;
+    const coalesceKey = typing && !ranged && delChars === 0 ? this.typing.keyFor(target, global, insert) : (this.typing.reset(), undefined);
+    await this.session.applyBatch([this.commitIntent(a, nextRuns)], { coalesceKey });
     // Re-anchor in the NEW text (the splice math is pure, so this needs no second read), then
     // re-resolve the rect against the post-edit geometry (the row may have grown/wrapped).
     const nextJoined = joined.slice(0, Math.max(0, global - delChars)) + insert + joined.slice(global);

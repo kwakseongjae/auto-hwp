@@ -363,11 +363,26 @@ export class HwpDoc {
    *  takes (objects or JSON strings). Same op-bus and one undo unit per intent, but the whole-document
    *  re-typeset `applyIntent` runs per edit happens once. Returns `{kind:"Batch", applied, pages}`.
    *  Not atomic: throws `{code:"batch_failed", message:"intent[i]: …"}` at the first failure and the
-   *  earlier edits stay applied. */
-  applyIntents(intents) {
+   *  earlier edits stay applied.
+   *  `options.atomic: true` (#371): all-or-nothing and ONE undo unit — on failure the document and the
+   *  undo/redo stacks are exactly as before. `options.coalesceKey` (atomic only, #369): a later
+   *  atomic batch with the same key EXTENDS this batch's undo unit (word-level typing undo) unless
+   *  `options.coalesce === false`. The result then also carries `changed` and `joined`. */
+  applyIntents(intents, options) {
     const arr = (intents ?? []).map((i) => (typeof i === 'string' ? JSON.parse(i) : i));
     const s = JSON.stringify(arr);
-    return this.#call((r) => JSON.parse(r.applyIntents(s)));
+    if (options == null) return this.#call((r) => JSON.parse(r.applyIntents(s)));
+    const o = JSON.stringify(options);
+    return this.#call((r) => JSON.parse(r.applyIntentsWith(s, o)));
+  }
+  /** Set the undo depth (snapshots) and byte budget of this document (#372). `0` = unbounded.
+   *  Defaults: 50 snapshots · 128 MiB. Tightening evicts the oldest snapshots immediately. */
+  setUndoLimits(depth, budgetBytes) {
+    return this.#call((r) => r.setUndoLimits(depth, budgetBytes ?? 0));
+  }
+  /** What the undo stack holds now: `{snapshots, bytes}` (`bytes` is an estimate) (#372). */
+  undoStats() {
+    return this.#call((r) => JSON.parse(r.undoStats()));
   }
   undo() {
     return this.#call((r) => r.undo());

@@ -771,6 +771,62 @@ impl HwpDoc {
         .map_err(|e| js_err("serialize", &e.to_string()))
     }
 
+    /// [`Self::apply_intents`] with options (#371 · #369). `options_json` is an object with only
+    /// these keys (unknown keys are refused):
+    /// - `atomic: bool` — all-or-nothing + ONE undo unit; on failure the document and the undo/redo
+    ///   stacks are exactly as before (`batch_failed` is still thrown).
+    /// - `coalesceKey: string` (atomic only) — recorded on the batch's undo unit; a later batch with
+    ///   the same key EXTENDS that unit when `coalesce` is true (word-level typing undo).
+    /// - `coalesce: bool` (default `true` when `coalesceKey` is given).
+    ///
+    /// Returns `{"kind":"Batch","applied":N,"pages":P,"changed":bool,"joined":bool}`.
+    #[wasm_bindgen(js_name = applyIntentsWith)]
+    pub fn apply_intents_with(
+        &mut self,
+        intents_json: &str,
+        options_json: &str,
+    ) -> Result<String, JsValue> {
+        let value: serde_json::Value = serde_json::from_str(intents_json)
+            .map_err(|e| js_err("bad_json", &format!("intents is not valid JSON: {e}")))?;
+        let arr = value
+            .as_array()
+            .ok_or_else(|| js_err("bad_json", "intents must be a JSON array"))?;
+        let opts = batch_options(options_json)?;
+        let out = hwp_mcp::apply_intents_json_with(&mut self.session, arr, &opts)
+            .map_err(|(i, e)| js_err("batch_failed", &format!("intent[{i}]: {e}")))?;
+        serde_json::to_string(&serde_json::json!({
+            "kind": "Batch",
+            "applied": out.applied,
+            "pages": out.pages,
+            "changed": out.changed,
+            "joined": out.joined,
+        }))
+        .map_err(|e| js_err("serialize", &e.to_string()))
+    }
+
+    /// Set the undo depth (`depth`, snapshots) and byte budget (`budgetBytes`) of the open document
+    /// (#372). `0` = unbounded for either. Tightening evicts the oldest snapshots immediately.
+    /// Defaults at open: 50 snapshots · 128 MiB.
+    #[wasm_bindgen(js_name = setUndoLimits)]
+    pub fn set_undo_limits(&mut self, depth: u32, budget_bytes: f64) -> Result<(), JsValue> {
+        let budget = if budget_bytes.is_finite() && budget_bytes > 0.0 {
+            budget_bytes as usize
+        } else {
+            0
+        };
+        hwp_mcp::set_undo_limits(&mut self.session, depth as usize, budget)
+            .map_err(|e| js_err("no_document", &e))
+    }
+
+    /// `{"snapshots":N,"bytes":B}` — what the undo stack holds now (#372; `bytes` is an estimate).
+    #[wasm_bindgen(js_name = undoStats)]
+    pub fn undo_stats(&self) -> Result<String, JsValue> {
+        let (snapshots, bytes) =
+            hwp_mcp::undo_stats(&self.session).map_err(|e| js_err("no_document", &e))?;
+        serde_json::to_string(&serde_json::json!({ "snapshots": snapshots, "bytes": bytes }))
+            .map_err(|e| js_err("serialize", &e.to_string()))
+    }
+
     /// Apply one Intent-JSON envelope (schema v0, issue 008) via the SAME op-bus the desktop uses
     /// ([`hwp_mcp::apply_intent_json`]) — Propose/Commit/Undo/Redo and every edit variant included.
     /// Returns a JSON `Outcome` (`{kind, …}`). Throws a `{code, message}` error on a bad envelope or a
@@ -916,4 +972,55 @@ impl HwpDoc {
         let opts = hwp_mcp::HwpxExportOptions { hwp_row_heights };
         hwp_mcp::export_bytes_with(&self.session, &opts).map_err(engine_err)
     }
+}
+
+/// Parse `applyIntentsWith` options (#371 · #369) — only `atomic`, `coalesceKey`, `coalesce`.
+fn batch_options(options_json: &str) -> Result<hwp_mcp::BatchOptions, JsValue> {
+    let v: serde_json::Value = serde_json::from_str(options_json)
+        .map_err(|e| js_err("bad_options", &format!("applyIntents options: {e}")))?;
+    let obj = v
+        .as_object()
+        .ok_or_else(|| js_err("bad_options", "applyIntents options must be an object"))?;
+    if let Some(k) = obj
+        .keys()
+        .find(|k| !matches!(k.as_str(), "atomic" | "coalesceKey" | "coalesce"))
+    {
+        return Err(js_err(
+            "bad_options",
+            &format!("unknown applyIntents option {k:?}"),
+        ));
+    }
+    let flag = |key: &str| -> Result<Option<bool>, JsValue> {
+        match obj.get(key) {
+            None | Some(serde_json::Value::Null) => Ok(None),
+            Some(serde_json::Value::Bool(b)) => Ok(Some(*b)),
+            Some(other) => Err(js_err(
+                "bad_options",
+                &format!("{key} must be a boolean, got {other}"),
+            )),
+        }
+    };
+    let atomic = flag("atomic")?.unwrap_or(false);
+    let coalesce_key = match obj.get("coalesceKey") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::String(s)) => Some(s.clone()),
+        Some(other) => {
+            return Err(js_err(
+                "bad_options",
+                &format!("coalesceKey must be a string, got {other}"),
+            ))
+        }
+    };
+    if coalesce_key.is_some() && !atomic {
+        return Err(js_err(
+            "bad_options",
+            "coalesceKey requires atomic: true (only an atomic batch is one undo unit)",
+        ));
+    }
+    let coalesce = flag("coalesce")?.unwrap_or(coalesce_key.is_some());
+    Ok(hwp_mcp::BatchOptions {
+        atomic,
+        coalesce_key,
+        coalesce,
+    })
 }

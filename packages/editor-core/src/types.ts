@@ -610,3 +610,68 @@ export interface PointerInput {
   mod: boolean;
   client?: { x: number; y: number };
 }
+
+/** Per-cell fit / overflow report of a placed table (#347) — mirrors @auto-hwp/engine `CellFit`. */
+export interface CellFit {
+  row: number;
+  col: number;
+  row_span: number;
+  col_span: number;
+  /** 0-based page of the fragment that draws the cell's text. */
+  page: number;
+  width: number;
+  height: number;
+  /** Box width minus the cell's horizontal inner margins (the text wrap width). */
+  text_width: number;
+  /** Height the content may use. */
+  available_height: number;
+  /** Laid-out height of the current content. */
+  content_height: number;
+  lines: number;
+  line_advance: number;
+  /** Lines of the first-paragraph style that fit in `available_height`. */
+  line_capacity: number;
+  /** Full-width characters per line at `text_width`. */
+  chars_per_line: number;
+  /** Fixed-height row (`noAdjust="1"`): overflow is clipped instead of growing the row. */
+  fixed: boolean;
+  overflow: boolean;
+}
+
+/** Per-page body usage (#347), own-render px — mirrors @auto-hwp/engine `PageUsage`. */
+export interface PageUsage {
+  page: number;
+  body_height: number;
+  used_height: number;
+}
+
+/** `toHwpx` options — mirrors @auto-hwp/engine `HwpxExportOptions` (`hwpRowHeights` only affects
+ *  tables that came from a binary `.hwp`). */
+export interface HwpxExportOptions {
+  hwpRowHeights?: "exact" | "auto";
+}
+
+/** Options for an atomic batch (#371 · #369). */
+export interface BatchApplyOptions {
+  /** Recorded on the batch's undo unit; a later batch with the same key may EXTEND that unit. */
+  coalesceKey?: string;
+  /** Allow extending the previous unit with the same key (default true when a key is given). */
+  coalesce?: boolean;
+}
+
+/** Result of `EngineAdapter.applyIntents` (#371). */
+export interface BatchApplyResult {
+  applied: number;
+  /** Page count after the batch's single reflow. */
+  pages: number;
+  /** The document changed (a new or extended undo unit exists). */
+  changed: boolean;
+  /** The batch extended the previous undo unit (same coalesce key) instead of adding one. */
+  joined: boolean;
+}
+
+/** What the engine undo stack holds (#372). `bytes` is an estimate. */
+export interface UndoStats {
+  snapshots: number;
+  bytes: number;
+}

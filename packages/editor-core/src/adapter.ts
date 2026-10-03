@@ -1,4 +1,4 @@
-import type { BlockHit, CaretRect, CellAddr, CellCaretRect, CellHit, CellTextHit, DocProfile, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, NormalizeReport, OpenResult, Outcome, OutlineItem, PageGeom, ProposalV1, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
+import type { BatchApplyOptions, BatchApplyResult, BlockHit, CaretRect, CellAddr, CellCaretRect, CellFit, CellHit, CellTextHit, DocProfile, HwpxExportOptions, PageUsage, UndoStats, FindMatch, FindOptions, FindReplaceOptions, HitResult, ImageBox, Intent, NormalizeReport, OpenResult, Outcome, OutlineItem, PageGeom, ProposalV1, ReplaceResult, RunSpec, TableBox, TableGrid } from "./types";
 
 /// EngineAdapter — the backend seam (SDK-LAYERS L1↔L2). It abstracts the ACTUAL surface a backend
 /// exposes (open / page SVG / hit-test·tableAt / applyIntent / undo·redo / export) so the SAME
@@ -194,6 +194,29 @@ export interface EngineAdapter {
   /** Apply an Intent (schema v0). One undo unit per accepted Intent. */
   applyIntent(intent: Intent): Promise<Outcome>;
 
+  /** OPTIONAL — apply MANY Intents ATOMICALLY with ONE reflow and ONE engine undo unit (#371). On any
+   *  failure the backend MUST leave the document and its undo/redo stacks exactly as before and reject.
+   *  `opts.coalesceKey` (#369): when it equals the key the current top undo unit was recorded with and
+   *  `opts.coalesce !== false`, the batch EXTENDS that unit (`joined: true`) instead of adding one.
+   *  `DocSession.applyBatch` uses this lane when present (otherwise it applies one by one and rolls back
+   *  with N undos). Reference impl: `WasmAdapter` via `HwpDoc.applyIntents(…, { atomic: true })`. */
+  applyIntents?(intents: Intent[], opts?: BatchApplyOptions): Promise<BatchApplyResult>;
+
+  /** OPTIONAL — per-cell fit / overflow of the placed table at `(section, block)` (#347), or `null` when
+   *  the block is not a placed table. Read-only. Reference impl: `WasmAdapter` via `tableCellFits`. */
+  tableCellFits?(section: number, block: number): Promise<CellFit[] | null>;
+
+  /** OPTIONAL — how full each page's body is (#347). Read-only. Reference impl: `WasmAdapter`. */
+  pageUsage?(): Promise<PageUsage[]>;
+
+  /** OPTIONAL — engine undo depth (snapshots) + byte budget for this document (#372); `0` = unbounded.
+   *  Tightening evicts the oldest engine snapshots immediately — callers that keep their own undo
+   *  bookkeeping (`DocSession`) must trim it the same way (`DocSession.setUndoLimits` does). */
+  setUndoLimits?(depth: number, budgetBytes?: number): Promise<void>;
+
+  /** OPTIONAL — what the engine undo stack holds now (#372 diagnostics). */
+  undoStats?(): Promise<UndoStats>;
+
   /** Canonical AI transaction lane. Preview is scratch-only; commit is revision-bound and one undo. */
   proposeIntents?(intents: Intent[]): Promise<ProposalV1>;
   commitProposal?(proposalId: string, expectedRevision: number): Promise<number>;
@@ -215,8 +238,9 @@ export interface EngineAdapter {
   /** Export the live doc to a self-contained HTML string. */
   exportHtml(): Promise<string>;
 
-  /** Serialize the live doc to round-trip-safe HWPX bytes. */
-  toHwpx(): Promise<Uint8Array>;
+  /** Serialize the live doc to round-trip-safe HWPX bytes. `options` (#371 parity with
+   *  `HwpDoc.toHwpx`) — a backend that has no export options ignores them. */
+  toHwpx(options?: HwpxExportOptions): Promise<Uint8Array>;
 
   /** Release backend resources (wasm allocation / session). Idempotent. Called on document swap. */
   dispose(): void;
