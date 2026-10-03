@@ -64,84 +64,16 @@ impl SynthPlan {
     }
 }
 
-/// #356: map every POOL-resolved shape index to an ORIGINAL header id holding that exact value.
-/// Prefers, in document order, the id an existing paragraph/run actually references (so a new
-/// paragraph next to its source gets the same id the source has — not merely an equal-valued twin);
-/// falls back to the lowest pool id with an equal value.
+/// #356 · #387: map every POOL-resolved shape index to the ORIGINAL header id it was parsed from.
+///
+/// The parser gives each original id its own index ([`SemanticDoc::hwpx_pool_para_ids`]), so this is
+/// an exact inverse — no value comparison. (#356 first compared the parsed `ParaShape`/`CharShape`
+/// values, which are lossy: ids that differ only in `<hh:heading>` 글머리표/번호/개요 수준, `condense`,
+/// `lineWrap`, `autoSpacing`, 글자 `symMark` · `<hh:shadow>` … were interchangeable, and a rebuilt
+/// table cell's ☐ bullet paragraphs came out as their bullet-less twin.)
 fn pool_origin_ids(doc: &SemanticDoc) -> (BTreeMap<usize, String>, BTreeMap<usize, String>) {
-    fn walk(
-        blocks: &[Block],
-        doc: &SemanticDoc,
-        chars: &mut BTreeMap<usize, String>,
-        paras: &mut BTreeMap<usize, String>,
-    ) {
-        for b in blocks {
-            match b {
-                Block::Paragraph(p) => {
-                    if doc.hwpx_pool_para_shapes.contains(&p.para_shape)
-                        && !paras.contains_key(&p.para_shape)
-                    {
-                        if let Some(r) = p.para_ref.as_deref().map(str::trim) {
-                            let same = r
-                                .parse::<u64>()
-                                .ok()
-                                .and_then(|id| doc.header_pools.para.get(&id))
-                                == doc.para_shapes.get(p.para_shape);
-                            if same {
-                                paras.insert(p.para_shape, r.to_string());
-                            }
-                        }
-                    }
-                    for run in &p.runs {
-                        if doc.hwpx_pool_char_shapes.contains(&run.char_shape)
-                            && !chars.contains_key(&run.char_shape)
-                        {
-                            if let Some(r) = run.char_ref.as_deref().map(str::trim) {
-                                let same = r
-                                    .parse::<u64>()
-                                    .ok()
-                                    .and_then(|id| doc.header_pools.char.get(&id))
-                                    == doc.char_shapes.get(run.char_shape);
-                                if same {
-                                    chars.insert(run.char_shape, r.to_string());
-                                }
-                            }
-                        }
-                        for inl in &run.content {
-                            if let Inline::Note(nr) = inl {
-                                walk(&nr.body, doc, chars, paras);
-                            }
-                        }
-                    }
-                }
-                Block::Table(t) => {
-                    for c in &t.cells {
-                        walk(&c.blocks, doc, chars, paras);
-                    }
-                }
-            }
-        }
-    }
-    let mut chars = BTreeMap::new();
-    let mut paras = BTreeMap::new();
-    for sec in &doc.sections {
-        walk(&sec.blocks, doc, &mut chars, &mut paras);
-    }
-    for &idx in &doc.hwpx_pool_char_shapes {
-        if let (false, Some(shape)) = (chars.contains_key(&idx), doc.char_shapes.get(idx)) {
-            if let Some((id, _)) = doc.header_pools.char.iter().find(|(_, s)| *s == shape) {
-                chars.insert(idx, id.to_string());
-            }
-        }
-    }
-    for &idx in &doc.hwpx_pool_para_shapes {
-        if let (false, Some(shape)) = (paras.contains_key(&idx), doc.para_shapes.get(idx)) {
-            if let Some((id, _)) = doc.header_pools.para.iter().find(|(_, s)| *s == shape) {
-                paras.insert(idx, id.to_string());
-            }
-        }
-    }
-    (chars, paras)
+    let ids = |m: &BTreeMap<usize, u64>| m.iter().map(|(&i, id)| (i, id.to_string())).collect();
+    (ids(&doc.hwpx_pool_char_ids), ids(&doc.hwpx_pool_para_ids))
 }
 
 /// Serialize a `SemanticDoc` (parsed from HWPX) back to HWPX bytes.

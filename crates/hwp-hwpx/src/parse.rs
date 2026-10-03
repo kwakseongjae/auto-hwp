@@ -212,14 +212,22 @@ fn assign_node_ids(doc: &mut SemanticDoc) {
 
 /// Batch A (#196): wire the already-parsed `header.xml` charPr/paraPr POOLS into the IR. For every
 /// run (all sections + nested cells) resolve its `charPrIDRef` against `header_pools.char`, and for
-/// every paragraph resolve its `paraPrIDRef` against `header_pools.para`; intern the resolved shape
-/// into `doc.char_shapes`/`doc.para_shapes` (dedup by value) and point the run/paragraph at it, so
-/// layout/render read the REAL size/color/bold/align/indent/spacing (before: every run rendered
-/// 10pt black + every paragraph left-aligned/no-indent → wrong layout AND pagination).
+/// every paragraph resolve its `paraPrIDRef` against `header_pools.para`; give the resolved shape an
+/// index in `doc.char_shapes`/`doc.para_shapes` and point the run/paragraph at it, so layout/render
+/// read the REAL size/color/bold/align/indent/spacing (before: every run rendered 10pt black + every
+/// paragraph left-aligned/no-indent → wrong layout AND pagination).
 ///
-/// Each interned index is recorded in `hwpx_pool_{char,para}_shapes`; the serializer consults these
-/// to re-emit an UNEDITED run/paragraph's ORIGINAL IDRef instead of a lossy re-synthesized copy
-/// (round-trip moat). A run/paragraph whose ref is absent from the pool keeps index 0 (the default).
+/// #387: ONE index per ORIGINAL header id — never merged by value. The parsed value is lossy (no
+/// `<hh:heading>` 글머리표/번호/개요 수준, `condense`, `snapToGrid`, `lineWrap`, `autoSpacing`, 글자
+/// `symMark` · `<hh:shadow>` …), so two ids that differ only there used to collapse onto one index, and
+/// the serializer — which maps a pool index back to ONE original id for newly emitted content (#356) —
+/// then turned a bulleted paragraph into its bullet-less twin. The id itself is the full-fidelity key
+/// (the header entry stays byte-verbatim), so it is what identifies a pool shape.
+///
+/// Each index is recorded in `hwpx_pool_{char,para}_shapes` and its id in `hwpx_pool_{char,para}_ids`;
+/// the serializer consults these to re-emit an UNEDITED run/paragraph's ORIGINAL IDRef instead of a
+/// lossy re-synthesized copy (round-trip moat). A run/paragraph whose ref is absent from the pool keeps
+/// index 0 (the default).
 fn resolve_shape_pools(doc: &mut SemanticDoc) {
     // Distinct-field borrows: the walk mutates blocks + the shape pools while READING header_pools.
     let SemanticDoc {
@@ -229,91 +237,92 @@ fn resolve_shape_pools(doc: &mut SemanticDoc) {
         header_pools,
         hwpx_pool_char_shapes,
         hwpx_pool_para_shapes,
+        hwpx_pool_char_ids,
+        hwpx_pool_para_ids,
         ..
     } = doc;
+    let mut pools = PoolIntern {
+        char_shapes,
+        para_shapes,
+        char_pool: &header_pools.char,
+        para_pool: &header_pools.para,
+        char_idx: std::collections::BTreeMap::new(),
+        para_idx: std::collections::BTreeMap::new(),
+    };
     for sec in sections.iter_mut() {
-        resolve_blocks(
-            &mut sec.blocks,
-            char_shapes,
-            para_shapes,
-            &header_pools.char,
-            &header_pools.para,
-            hwpx_pool_char_shapes,
-            hwpx_pool_para_shapes,
-        );
+        resolve_blocks(&mut sec.blocks, &mut pools);
+    }
+    for (id, idx) in pools.char_idx {
+        hwpx_pool_char_shapes.insert(idx);
+        hwpx_pool_char_ids.insert(idx, id);
+    }
+    for (id, idx) in pools.para_idx {
+        hwpx_pool_para_shapes.insert(idx);
+        hwpx_pool_para_ids.insert(idx, id);
     }
 }
 
-/// Intern `shape` into `pool` (reusing an equal existing entry), returning its index.
-fn intern_shape<T: Clone + PartialEq>(pool: &mut Vec<T>, shape: T) -> usize {
-    if let Some(i) = pool.iter().position(|s| *s == shape) {
-        return i;
-    }
-    pool.push(shape);
-    pool.len() - 1
+/// The resolve walk's state: the IR shape vectors it appends to, the header pools it reads, and the
+/// original id → index maps (#387: one index per id).
+struct PoolIntern<'a> {
+    char_shapes: &'a mut Vec<CharShape>,
+    para_shapes: &'a mut Vec<ParaShape>,
+    char_pool: &'a std::collections::BTreeMap<u64, CharShape>,
+    para_pool: &'a std::collections::BTreeMap<u64, ParaShape>,
+    char_idx: std::collections::BTreeMap<u64, usize>,
+    para_idx: std::collections::BTreeMap<u64, usize>,
 }
 
-#[allow(clippy::too_many_arguments)]
-fn resolve_blocks(
-    blocks: &mut [Block],
-    char_shapes: &mut Vec<CharShape>,
-    para_shapes: &mut Vec<ParaShape>,
-    char_pool: &std::collections::BTreeMap<u64, CharShape>,
-    para_pool: &std::collections::BTreeMap<u64, ParaShape>,
-    pool_c: &mut std::collections::BTreeSet<usize>,
-    pool_p: &mut std::collections::BTreeSet<usize>,
-) {
+impl PoolIntern<'_> {
+    /// Index for original paraPr `id` (allocated on first sight), or `None` when the id is not in the pool.
+    fn para(&mut self, id: u64) -> Option<usize> {
+        if let Some(&i) = self.para_idx.get(&id) {
+            return Some(i);
+        }
+        let shape = self.para_pool.get(&id)?.clone();
+        self.para_shapes.push(shape);
+        let i = self.para_shapes.len() - 1;
+        self.para_idx.insert(id, i);
+        Some(i)
+    }
+
+    /// Index for original charPr `id` — see [`PoolIntern::para`].
+    fn char(&mut self, id: u64) -> Option<usize> {
+        if let Some(&i) = self.char_idx.get(&id) {
+            return Some(i);
+        }
+        let shape = self.char_pool.get(&id)?.clone();
+        self.char_shapes.push(shape);
+        let i = self.char_shapes.len() - 1;
+        self.char_idx.insert(id, i);
+        Some(i)
+    }
+}
+
+fn resolve_blocks(blocks: &mut [Block], pools: &mut PoolIntern) {
+    let id_of = |r: Option<&str>| r.and_then(|r| r.trim().parse::<u64>().ok());
     for b in blocks.iter_mut() {
         match b {
             Block::Paragraph(p) => {
-                if let Some(shape) = p
-                    .para_ref
-                    .as_deref()
-                    .and_then(|r| r.trim().parse::<u64>().ok())
-                    .and_then(|id| para_pool.get(&id))
-                {
-                    let idx = intern_shape(para_shapes, shape.clone());
+                if let Some(idx) = id_of(p.para_ref.as_deref()).and_then(|id| pools.para(id)) {
                     p.para_shape = idx;
-                    pool_p.insert(idx);
                 }
                 for run in &mut p.runs {
-                    if let Some(shape) = run
-                        .char_ref
-                        .as_deref()
-                        .and_then(|r| r.trim().parse::<u64>().ok())
-                        .and_then(|id| char_pool.get(&id))
+                    if let Some(idx) = id_of(run.char_ref.as_deref()).and_then(|id| pools.char(id))
                     {
-                        let idx = intern_shape(char_shapes, shape.clone());
                         run.char_shape = idx;
-                        pool_c.insert(idx);
                     }
                     // Recurse into any note bodies (defensive — HWPX-in has none today).
                     for inl in &mut run.content {
                         if let Inline::Note(nr) = inl {
-                            resolve_blocks(
-                                &mut nr.body,
-                                char_shapes,
-                                para_shapes,
-                                char_pool,
-                                para_pool,
-                                pool_c,
-                                pool_p,
-                            );
+                            resolve_blocks(&mut nr.body, pools);
                         }
                     }
                 }
             }
             Block::Table(t) => {
                 for c in &mut t.cells {
-                    resolve_blocks(
-                        &mut c.blocks,
-                        char_shapes,
-                        para_shapes,
-                        char_pool,
-                        para_pool,
-                        pool_c,
-                        pool_p,
-                    );
+                    resolve_blocks(&mut c.blocks, pools);
                 }
             }
         }

@@ -72,3 +72,5 @@ hwp-model = { workspace = true }
 # `binaryItemIDRef`) to PROVE the inserted image is embedded. Dev-only (no impact on the wasm lib / ship).
 hwp-hwpx = { workspace = true }
 base64 = "0.21"
+# pool_shape_identity: rebuilds a corpus package with variant header entries (dev-only).
+zip = { workspace = true }
