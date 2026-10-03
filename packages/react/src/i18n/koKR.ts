@@ -356,6 +356,7 @@ export const koKR: WorkspaceMessages = {
     textEdited: "텍스트를 수정했습니다",
     textEditFailed: (error) => `텍스트 수정 실패: ${error}`,
     inputFailed: (error) => `입력 실패: ${error}`,
+    editVetoed: "이 부분은 고칠 수 없습니다(읽기 전용)",
     formatFailed: (error) => `서식 적용 실패: ${error}`,
     runDesignApplied: "선택한 글자 범위의 디자인을 적용했습니다",
     paragraphDesignApplied: "선택한 문단의 디자인을 적용했습니다",

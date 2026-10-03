@@ -131,6 +131,8 @@ export class FindController {
 
   private async doReplace(replacement: string, all: boolean): Promise<ReplaceResult> {
     if (!this._query || !this.adapter.replace) return { replaced: 0, pages: 0 };
+    // #368 — replace mutates through the adapter's native lane, so run the edit policy here.
+    this.session.checkIntents([{ intent: "Replace", query: this._query, replacement, all }]);
     const res = await this.adapter.replace(this._query, replacement, { ...this._opts, all });
     // Only a real mutation records an undo unit + re-flows (a 0-count replace is a no-op — no undo, no
     // refresh), matching the no-op discipline the manual editor uses (issue 040 §no-op guard).

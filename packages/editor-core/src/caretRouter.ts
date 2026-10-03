@@ -97,8 +97,21 @@ export class CaretRouter {
     this.endDrag();
     const inCell = await this.cell.clickAt(page, x, y, extend);
     if (inCell) return this.state;
+    // #368 — a click on READ-ONLY text (cell or paragraph) dismisses whatever caret is alive, so the
+    // next keystroke can never leak into the previously focused target.
+    if (this.cell.lastClickVetoed) {
+      this.clear();
+      return null;
+    }
     const inBody = await this.body.clickAt(page, x, y, extend);
+    if (!inBody && this.body.lastClickVetoed) this.clear();
     return inBody ? this.state : null;
+  }
+
+  /** #368 — re-check the live caret against the host's edit policy (dynamic predicates). */
+  revalidate(): void {
+    this.cell.revalidate();
+    this.body.revalidate();
   }
 
   /** 현재 캐럿과 같은 문단에서 시작한 마우스 드래그만 텍스트 레인이 소유한다. */

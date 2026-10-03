@@ -450,6 +450,8 @@ export interface WorkspaceShellMessages {
   textEdited: string;
   textEditFailed: (error: string) => string;
   inputFailed: (error: string) => string;
+  /** #368 — a host edit policy refused the edit (nothing changed). */
+  editVetoed: string;
   formatFailed: (error: string) => string;
   runDesignApplied: string;
   paragraphDesignApplied: string;

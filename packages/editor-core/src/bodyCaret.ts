@@ -340,6 +340,8 @@ export class BodyCaretController {
   private state: BodyCaretState | null = null;
   /** #369 — groups consecutive keystrokes into word-level undo steps. */
   private typing = new TypingCoalescer();
+  /** #368 — the last `clickAt` landed on a body paragraph the host's edit policy refuses. */
+  lastClickVetoed = false;
   private changed = new Emitter<BodyCaretState | null>();
   private chain: Promise<unknown> = Promise.resolve();
   /** 마우스 글자 드래그가 이 문단을 소유하는 동안 true. 포인터 이동은 React state 없이 여기로 온다. */
@@ -380,6 +382,12 @@ export class BodyCaretController {
     }
   }
 
+  /** #368 — drop the caret when the host's edit policy no longer allows its paragraph. */
+  revalidate(): void {
+    const a = this.state?.anchor;
+    if (a && !this.session.canEdit({ kind: "paragraph", section: a.section, block: a.block, intent: "SetParagraphRuns" })) this.clear();
+  }
+
   private enqueue<T>(fn: () => Promise<T>): Promise<T> {
     const p = this.chain.then(fn);
     this.chain = p.catch(() => undefined);
@@ -417,8 +425,14 @@ export class BodyCaretController {
   clickAt(page: number, x: number, y: number, extend = false): Promise<BodyCaretState | null> {
     if (!this.supported) return Promise.resolve(null);
     return this.enqueue(async () => {
+      this.lastClickVetoed = false;
       const band = this.bandFor((await this.adapter.hitTest(page, x, y)) ?? null, y);
       if (!band) {
+        this.clear();
+        return null;
+      }
+      if (!this.session.canEdit({ kind: "paragraph", section: band.section, block: band.block, intent: "SetParagraphRuns" })) {
+        this.lastClickVetoed = true; // #368 — read-only paragraph: no caret, and drop the old one
         this.clear();
         return null;
       }

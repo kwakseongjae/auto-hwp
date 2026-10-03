@@ -13,6 +13,10 @@ export type { EditorCoreOptions } from "./core";
 export { DocSession } from "./session";
 export type { ApplyBatchOptions, DocSessionOptions } from "./session";
 
+// Host-defined editable regions + intent veto (#368)
+export { EditVetoedError, intentTargets } from "./editPolicy";
+export type { EditPolicy, EditTarget } from "./editPolicy";
+
 // Selection engine (issues 021 + 023) + its pure helpers (exported so hosts/tests can reuse them).
 export {
   SelectionModel,

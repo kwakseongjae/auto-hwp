@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { Anchor, Box, CellAddr, CellDir, DocContext, EngineAdapter, ImageBox, Intent, IntentCard, MatchBox, OutlineItem, PageGeom, PointerInput, RunSpec, Selection, TableBox, XYWH } from "@auto-hwp/editor-core";
+import type { Anchor, Box, CellAddr, CellDir, DocContext, EditTarget as PolicyTarget, EngineAdapter, ImageBox, Intent, IntentCard, MatchBox, OutlineItem, PageGeom, PointerInput, RunSpec, Selection, TableBox, XYWH } from "@auto-hwp/editor-core";
 import { boundariesToRatios, remapFragmentHeights, appliedReflectsDrag, firstRunStyle, columnWidthMm, setColumnWidthMm, equalizeColumns, imageInsertSize, imageSizeToHwpunit, appliedReflectsResize, DRAG_THRESHOLD_PX, intentGhosts } from "@auto-hwp/editor-core";
 import { OutlinePanel } from "./OutlinePanel";
 import { StatusBar } from "./StatusBar";
@@ -285,6 +285,17 @@ export interface HwpWorkspaceProps {
    *  더블클릭 텍스트 팝오버 · 선택 서식 툴바). Default OFF — the workspace behaves exactly as before
    *  (chat-only) when omitted, so existing hosts/tests are unaffected. */
   enableEditing?: boolean;
+  /** #368 — host-defined editable regions. Called with a typed target (`cell` · `paragraph` · `block` ·
+   *  `document`); `false` makes it read-only: no caret is placed there (and a live caret is dismissed),
+   *  the inline editors don't open, structural handles (column/row resize, margins, image handles) are
+   *  hidden, and any Intent touching it is refused before it reaches the engine (a calm toast, the
+   *  undo stack untouched). Omit = everything editable (the pre-#368 behavior). The predicate is read
+   *  live; when its answers change without a new function identity (e.g. a collaborator's lock), call
+   *  `core.invalidateEditability()` (`useHwpEditor`) to re-check the caret and handles. */
+  editable?: (target: PolicyTarget) => boolean;
+  /** #368 — last-line veto: sees every batch (typing, menus, shortcuts, AI proposals) after `editable`
+   *  passed. `false` refuses it, `true` lets it through, an `Intent[]` replaces it (re-checked). */
+  onBeforeApply?: (intents: Intent[]) => boolean | Intent[];
   /** Prefer the engine glyph-caret for double-click/Enter/context-menu text editing. The rendered SVG
    *  remains visible, so alignment and typography do not jump while editing. Default false preserves
    *  the legacy SDK contract; the reference app enables it for the Figma-style editing experience. */
@@ -425,6 +436,31 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // editor-core, which has no React context — hand it the merged catalog. useLayoutEffect (not render) so
   // the assignment stays out of the render pass; labels are only produced later, on a click/proposal.
   useLayoutEffect(() => core.setMessages(msg.core), [core, msg]);
+  // #368 — host edit policy. The latest callbacks ride refs so a new function identity per render costs
+  // nothing; installing/replacing the policy re-checks the live caret (EditorCore.revalidate). A policy
+  // change (or `invalidateEditability()`) re-renders the workspace ONCE so handles re-evaluate.
+  const editableRef = useRef(props.editable);
+  const beforeApplyRef = useRef(props.onBeforeApply);
+  editableRef.current = props.editable;
+  beforeApplyRef.current = props.onBeforeApply;
+  const hasEditable = !!props.editable;
+  const hasBeforeApply = !!props.onBeforeApply;
+  useLayoutEffect(() => {
+    core.setEditPolicy(
+      hasEditable || hasBeforeApply
+        ? {
+            editable: hasEditable ? (t) => editableRef.current?.(t) ?? true : undefined,
+            beforeApply: hasBeforeApply ? (intents) => beforeApplyRef.current?.(intents) ?? true : undefined,
+          }
+        : null,
+    );
+  }, [core, hasEditable, hasBeforeApply]);
+  useLayoutEffect(() => {
+    if (props.editable) core.invalidateEditability(); // a NEW predicate may answer differently
+  }, [core, props.editable]);
+  const [, setEditabilityEpoch] = useState(0);
+  useEffect(() => core.session.onEditabilityChange(() => setEditabilityEpoch((n) => n + 1)), [core]);
+  const canEditTarget = (t: PolicyTarget): boolean => core.session.canEdit(t);
   const [zoom, setZoom] = useState(0.9);
   const [status, setStatus] = useState<string>("");
   // ── issue 046: outline panel + status bar (leftbar/bottombar layout only — 045 owns keydown/toolbar) ──
@@ -948,9 +984,16 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
   // FIRST (`wasm_trap` | `worker_dead` — the worker-death errors say "engine worker died: …", which the
   // old message match missed, leaving the recovery toast/refresh dead); the message match is only a
   // fallback for stringified/legacy errors that lost their code.
+  const editVetoedMsg = msg.workspace.editVetoed;
   const onTrap = useCallback(
     (e: unknown, msg: string): boolean => {
       const code = (e as { code?: string } | null | undefined)?.code;
+      if (code === "edit_vetoed") {
+        // #368 — a host policy refused the edit BEFORE it reached the engine: nothing changed, so this
+        // is a calm read-only notice, not a failure.
+        toast(editVetoedMsg);
+        return true;
+      }
       const poisoned = code ? code === "wasm_trap" || code === "worker_dead" : /wasm_trap|engine worker died/i.test(String(e));
       if (poisoned) {
         toast(msg);
@@ -959,7 +1002,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       }
       return false;
     },
-    [toast, bumpRefresh, msg],
+    [toast, bumpRefresh, editVetoedMsg],
   );
 
   // issue 059: commit a completed IME composition as ONE SetTableCellRuns undo unit (the SAME lane as typed
@@ -1664,6 +1707,8 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         if (!isCurrent()) return;
         if (cell) {
           const path: CellAddr[] = cell.path && cell.path.length > 0 ? cell.path : [{ block: cell.block, row: cell.row, col: cell.col }];
+          const leaf = path[path.length - 1];
+          if (!core.session.canEdit({ kind: "cell", section: cell.section, block: cell.block, row: leaf.row, col: leaf.col, ...(path.length > 1 ? { path } : {}), intent: "SetTableCellRuns" })) return; // #368
           const runs = await core.session.runsAtPath(cell.section, path);
           if (!isCurrent()) return;
           setEditor({
@@ -1685,7 +1730,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         if (!isCurrent()) return;
         const hit = await adapter.hitTest(c.page, c.x, c.y);
         if (!isCurrent()) return;
-        if (hit && hit.kind === "paragraph" && hit.editable) {
+        if (hit && hit.kind === "paragraph" && hit.editable && core.session.canEdit({ kind: "paragraph", section: hit.section, block: hit.block, intent: "SetParagraphRuns" })) {
           const runs = await core.session.runsAt(hit.section, hit.block);
           if (!isCurrent()) return;
           setEditor({
@@ -1719,6 +1764,8 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
         // issue 064 Tier-2: prefill via the anchor's descending CellPath so a NESTED selected cell edits
         // its LEAF (a length-1 path falls back to the flat read).
         const path: CellAddr[] = anchor.path && anchor.path.length > 0 ? anchor.path : [{ block: anchor.block, row, col }];
+        const leaf = path[path.length - 1];
+        if (!core.session.canEdit({ kind: "cell", section: anchor.section, block: anchor.block, row: leaf.row, col: leaf.col, ...(path.length > 1 ? { path } : {}), intent: "SetTableCellRuns" })) return; // #368
         const runs = await core.session.runsAtPath(anchor.section, path);
         setEditor({ page: mark.page, box: mark.box, section: anchor.section, block: anchor.block, kind: "cell", rows: [row, row], cols: [col, col], text: anchor.text ?? "", runs, fontSizePt: firstRunStyle(runs).size_pt, path });
       } catch (e) {
@@ -3858,7 +3905,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                   vertical fixed point hold exactly (the ruler height cancels out of the pages layer's top). */}
               {editingOn && pageGeom0 && (
                 <div className="hw-ruler-wrap" style={{ width: A4_W * zoom }}>
-                  <Ruler geom={pageGeom0} scale={(A4_W * zoom) / pageGeom0.w} onCommitMargins={canEdit ? onMarginsCommit : undefined} />
+                  <Ruler geom={pageGeom0} scale={(A4_W * zoom) / pageGeom0.w} onCommitMargins={canEdit && canEditTarget({ kind: "document", section: 0, intent: "SetPageMargins" }) ? onMarginsCommit : undefined} />
                 </div>
               )}
               {/* issue 035: the zoom TRANSFORM layer wraps ONLY the pages — continuous ⌘/pinch zoom scales
@@ -3902,7 +3949,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                     {editingOn && canEdit && (
                       <ImeCompositionLayer core={core} page={page} scale={scale} store={compositionStore} commit={commitComposition} />
                     )}
-                    {editingOn && editTarget && editTarget.page === page && editTarget.boundaries && editTarget.tableBox && (
+                    {editingOn && editTarget && editTarget.page === page && editTarget.boundaries && editTarget.tableBox && canEditTarget({ kind: "block", section: editTarget.section, block: editTarget.block, intent: "SetTableColWidths" }) && (
                       <ColumnResizeOverlay
                         boundaries={editTarget.boundaries}
                         top={editTarget.tableBox.y}
@@ -3911,7 +3958,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                         onCommit={(b) => void onColCommit(b)}
                       />
                     )}
-                    {editingOn && editTarget && editTarget.page === page && editTarget.rowBoundaries && editTarget.tableBox && (
+                    {editingOn && editTarget && editTarget.page === page && editTarget.rowBoundaries && editTarget.tableBox && canEditTarget({ kind: "block", section: editTarget.section, block: editTarget.block, intent: "SetTableRowHeights" }) && (
                       <RowResizeOverlay
                         boundaries={editTarget.rowBoundaries}
                         left={editTarget.tableBox.x}
@@ -3946,7 +3993,7 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
                         never promise an edit the backend will refuse. */}
                     {/* issue 06x: hide the 8-handle overlay while the inline-edit panel is open (one image
                         surface at a time — the panel owns the interaction, the stale handles would confuse). */}
-                    {editingOn && canEdit && imageSel && imageSel.page === page && !inlineEdit && (
+                    {editingOn && canEdit && imageSel && imageSel.page === page && !inlineEdit && canEditTarget({ kind: "block", section: imageSel.box.section, block: imageSel.box.block, intent: "SetImageSize" }) && (
                       <ImageOverlay
                         box={imageSel.box}
                         scale={scale}

@@ -4,13 +4,14 @@ import { CaretRouter } from "./caretRouter";
 import { CellCaretController } from "./cellCaret";
 import { EditController } from "./edit";
 import { FindController } from "./find";
+import type { EditPolicy } from "./editPolicy";
 import { DocSession, type DocSessionOptions } from "./session";
 import { SelectionModel } from "./selection";
 import { coreMessagesKoKR, type CoreMessages } from "./messages";
 
 /** `createEditorCore` options. */
 export interface EditorCoreOptions {
-  /** Document-session options (typing-undo coalesce window / clock — #369). */
+  /** Document-session options (typing-undo coalesce window / clock — #369 · edit policy — #368). */
   session?: DocSessionOptions;
 }
 
@@ -45,6 +46,19 @@ export class EditorCore {
     this.cellCaret = new CellCaretController(adapter, this.session);
     this.bodyCaret = new BodyCaretController(adapter, this.session);
     this.caret = new CaretRouter(this.cellCaret, this.bodyCaret);
+    // #368 — a new/changed edit policy re-checks the live caret.
+    this.session.onEditabilityChange(() => this.caret.revalidate());
+  }
+
+  /** #368 — install (or clear) the host edit policy. Re-checks the live caret. */
+  setEditPolicy(policy: EditPolicy | null): void {
+    this.session.setEditPolicy(policy);
+  }
+
+  /** #368 — the host's `editable` answers changed (dynamic locks): drop a caret that is no longer
+   *  allowed and notify subscribers of `session.onEditabilityChange`. */
+  invalidateEditability(): void {
+    this.session.invalidateEditability();
   }
 
   /** issue 077 — swap the string catalog the headless layer produces (selection ANCHOR labels + Intent
