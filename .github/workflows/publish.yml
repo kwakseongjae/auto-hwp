@@ -74,6 +74,19 @@ jobs:
             echo "$PACKAGE@$VERSION already published; skipping publish"
             exit 0
           fi
+          # #364 — wasm-opt 결과가 Node 에서 안 열리는 사고(로컬 binaryen 132)를 발행 전에 막는다: 빌드만 먼저 하고
+          # Node 로 컴파일 · 인스턴스화해 본 뒤 크기(cdn.js WASM_BYTES 와 같아야 한다)를 찍는다. 실패하면 발행하지 않는다
+          npm run build
+          node --input-type=module -e "
+            import { readFileSync } from 'node:fs';
+            const bytes = readFileSync('pkg/hwp_wasm_bg.wasm');
+            await WebAssembly.compile(bytes);
+            const glue = await import(process.cwd() + '/pkg/hwp_wasm.js');
+            glue.initSync({ module: bytes });
+            const declared = Number(readFileSync('cdn.js', 'utf8').match(/export const WASM_BYTES = (\d+)/)[1]);
+            console.log('wasm compiles + instantiates in Node; WASM_BYTES=' + bytes.length + ' (cdn.js ' + declared + ')');
+            if (declared !== bytes.length) console.log('::warning::cdn.js WASM_BYTES ' + declared + ' != built ' + bytes.length);
+          "
           PUBLISH_ARGS=(--access public)
           [ "$DRY_RUN" = "true" ] && PUBLISH_ARGS+=(--dry-run)
           npm publish "${PUBLISH_ARGS[@]}"

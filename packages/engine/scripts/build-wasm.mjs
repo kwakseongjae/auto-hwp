@@ -120,10 +120,14 @@ run("wasm-bindgen", [
   "target/wasm32-unknown-unknown/wasm-size/hwp_wasm.wasm",
 ]);
 // 3) wasm-opt -Oz — 동작하는 binaryen 후보만 채택, 전부 실패하면 미적용(기능 동일).
+// #364: `--all-features` 를 주면 binaryen 이 GC · stringref 같은 제안 단계 기능으로 다시 써서 Node(20 · 22 · 24)가 못 연다
+// (119: `invalid value type 'stringref'`, 132: `unknown import kind 0x7f`). 기능은 rustc 가 남긴 target_features 를 따르게
+// 하고(기본값), 최적화 결과를 **Node 에서 컴파일해 본 뒤에만** 채택한다 — 종료 코드 0 은 열린다는 뜻이 아니다.
 let opted = false;
 for (const wo of ["wasm-opt", "/opt/homebrew/bin/wasm-opt", "/usr/local/bin/wasm-opt"]) {
   try {
-    execFileSync(wo, ["-Oz", "--all-features", pkgWasm, "-o", `${pkgWasm}.opt`], { stdio: "ignore" });
+    execFileSync(wo, ["-Oz", pkgWasm, "-o", `${pkgWasm}.opt`], { stdio: "ignore" });
+    new WebAssembly.Module(readFileSync(`${pkgWasm}.opt`)); // 못 열면 던진다 → 다음 후보 / 미적용
     renameSync(`${pkgWasm}.opt`, pkgWasm);
     console.log(`[build-wasm] wasm-opt -Oz 적용 → ${Math.round(statSync(pkgWasm).size / 1024)} KB`);
     opted = true;

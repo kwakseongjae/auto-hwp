@@ -160,7 +160,9 @@ if [ "$MODE" = "--full" ]; then
   WASM_PKG=packages/engine/pkg/hwp_wasm_bg.wasm
   WASM_OPTED=0
   for WO in wasm-opt /opt/homebrew/bin/wasm-opt /usr/local/bin/wasm-opt; do
-    if command -v "$WO" >/dev/null 2>&1 && "$WO" -Oz --all-features "$WASM_PKG" -o "$WASM_PKG.opt" 2>/dev/null; then
+    # #364: --all-features 는 GC · stringref 로 다시 써 Node 가 못 연다 — target_features(기본값)를 따르고, 열리는지 확인한 뒤에만 채택
+    if command -v "$WO" >/dev/null 2>&1 && "$WO" -Oz "$WASM_PKG" -o "$WASM_PKG.opt" 2>/dev/null \
+      && node -e 'new WebAssembly.Module(require("fs").readFileSync(process.argv[1]))' "$WASM_PKG.opt" 2>/dev/null; then
       mv "$WASM_PKG.opt" "$WASM_PKG"
       WASM_OPTED=1
       echo "wasm-opt -Oz 적용 ($("$WO" --version 2>/dev/null | head -1)) → $(wc -c <"$WASM_PKG" | tr -d ' ') bytes"
