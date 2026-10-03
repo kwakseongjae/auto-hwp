@@ -1785,6 +1785,16 @@ pub(crate) fn old_hangul_cluster(ch: char) -> Option<String> {
     old_hangul::map_pua_old_hangul(ch).map(|jamos| jamos.iter().collect())
 }
 
+/// 내어쓰기 width (HWPUNIT, ≥ 0) of a paragraph: `|indent|` when its shape's `indent` is negative.
+/// HWP hangs every line AFTER the first by this much (the first line stays at the left inset); the
+/// line breaker narrows those lines and the placers shift them right by the same amount (#370).
+pub(crate) fn paragraph_hang(p: &Paragraph, doc: &SemanticDoc) -> f64 {
+    doc.para_shapes
+        .get(p.para_shape)
+        .map(|s| (-(s.indent as f64)).max(0.0))
+        .unwrap_or(0.0)
+}
+
 /// Lay out a single paragraph into [`LineSeg`]s (vert_pos left at 0 — the caller stacks them). Greedy
 /// break: fill the line, then for a Latin word that straddles the edge back up to the last space;
 /// Hangul/CJK break anywhere. Exposed for per-paragraph `linesegarray` emission.
@@ -1878,9 +1888,20 @@ pub fn layout_paragraph(
         return lines;
     }
 
+    // 내어쓰기 (#370): a NEGATIVE `indent` keeps the first line at the block's left inset and moves
+    // every LATER line in by |indent| (Hancom/HWP semantics — not Word's "first line sticks out"),
+    // so those lines are |indent| narrower. Applied here, at the single line breaker, so every
+    // consumer (body/cell reserve, placers, caret twins, lineseg oracle) sees the same break.
+    let hang = paragraph_hang(p, doc);
+    let first_width = line_width;
     let mut lines = Vec::new();
     let mut start = 0usize;
     while start < n {
+        let line_width = if lines.is_empty() {
+            first_width
+        } else {
+            (first_width - hang).max(1.0)
+        };
         let mut w = 0.0;
         let mut end = start;
         let mut last_space: Option<usize> = None; // index AFTER a space within this line

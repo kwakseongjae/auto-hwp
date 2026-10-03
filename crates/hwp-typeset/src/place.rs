@@ -1280,14 +1280,27 @@ fn block_pages_columns(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> Ve
 /// 문단 들여쓰기/여백 (paragraph indent geometry) resolved from a [`ParaShape`].
 ///
 /// `left` is the block left inset (`ParaShape.left_margin`, clamped ≥0) applied to EVERY line;
-/// `first_extra` is the additional offset on the FIRST line only (positive = 들여쓰기, negative =
-/// 내어쓰기/hanging — clamped so the first line never crosses left of the block's left inset);
-/// `wrap_w` is the line-break width shrunk by the block's left+right margins (so wrapping stays
-/// correct under the inset). The first-line indent is a positional x-shift, not a width change.
+/// `first_extra` is the additional offset on the FIRST line (positive `indent` = 들여쓰기);
+/// `rest_extra` is the offset on every LATER line (negative `indent` = 내어쓰기, #370: HWP keeps the
+/// first line at the inset and hangs the rest by |indent| — the line breaker narrows those lines by
+/// the same amount, see `crate::paragraph_hang`). `wrap_w` is the line-break width shrunk by the
+/// block's left+right margins. A positive first-line indent is a positional x-shift, not a width change.
 struct Indent {
     left: f64,
     first_extra: f64,
+    rest_extra: f64,
     wrap_w: f64,
+}
+
+impl Indent {
+    /// Offset (beyond `left`) of line `li` — also the width that line gives up from its slack.
+    fn line_extra(&self, li: usize) -> f64 {
+        if li == 0 {
+            self.first_extra
+        } else {
+            self.rest_extra
+        }
+    }
 }
 
 /// Resolve indent geometry for a paragraph against an available width (body width or cell text width).
@@ -1296,17 +1309,13 @@ fn indent_of(p: &Paragraph, doc: &SemanticDoc, avail_w: f64) -> Indent {
     let left = ps.map(|s| s.left_margin).unwrap_or(0).max(0) as f64;
     let right = ps.map(|s| s.right_margin).unwrap_or(0).max(0) as f64;
     let indent = ps.map(|s| s.indent).unwrap_or(0) as f64;
-    // First-line indent: positive shifts in (들여쓰기); negative is hanging (내어쓰기) — clamp so the
-    // first line's start never crosses left of the block left inset (i.e. first_extra >= -left… but
-    // since `left` is the new origin, the clamp is first_extra >= -0 relative to that origin → ≥ -left
-    // in absolute terms; we apply it relative to `left`, so clamp to ≥ -left is the same as the line
-    // not going past the page/body left). Hanging text simply starts back at the block left edge.
-    let first_extra = indent.max(-left);
     // Wrap width shrinks by left+right block margins so line breaking respects the inset. Keep ≥1.
     let wrap_w = (avail_w - left - right).max(1.0);
     Indent {
         left,
-        first_extra,
+        first_extra: indent.max(0.0),
+        // Clamp so a hung line keeps ≥1 unit of room (mirrors the breaker's `max(1.0)`).
+        rest_extra: crate::paragraph_hang(p, doc).min((wrap_w - 1.0).max(0.0)),
         wrap_w,
     }
 }
@@ -1361,14 +1370,10 @@ fn place_paragraph(
         let line_top = mt + *vert;
         let line_w = ls.horz_size;
         // First-line indent only shifts (and narrows the usable slack of) line 0.
-        let line_indent = ind.left + if li == 0 { ind.first_extra } else { 0.0 };
+        let line_indent = ind.left + ind.line_extra(li);
         // Alignment offset within the indented width (left/justify = 0, right = full slack, center = ½).
         let slack = (ind.wrap_w
-            - if li == 0 {
-                ind.first_extra.max(0.0)
-            } else {
-                0.0
-            }
+            - ind.line_extra(li)
             - line_w)
             .max(0.0);
         let x0 = ml
@@ -1446,19 +1451,10 @@ fn place_paragraph_columns(
             .unwrap_or(column.width)
             .max(1.0);
         let line_top = mt + flow.y();
-        let line_indent = ind.left
-            + if line_index == 0 {
-                ind.first_extra
-            } else {
-                0.0
-            };
+        let line_indent = ind.left + ind.line_extra(line_index);
         let slack = (effective_width
             - ind.left
-            - if line_index == 0 {
-                ind.first_extra.max(0.0)
-            } else {
-                0.0
-            }
+            - ind.line_extra(line_index)
             - line.horz_size)
             .max(0.0);
         let x0 = ml
@@ -2400,13 +2396,9 @@ fn place_cell_content(
         let ind = indent_of(p, doc, textw);
         let lines = layout_paragraph(p, doc, ind.wrap_w, fonts);
         for (li, ls) in lines.iter().enumerate() {
-            let line_indent = ind.left + if li == 0 { ind.first_extra } else { 0.0 };
+            let line_indent = ind.left + ind.line_extra(li);
             let slack = (ind.wrap_w
-                - if li == 0 {
-                    ind.first_extra.max(0.0)
-                } else {
-                    0.0
-                }
+                - ind.line_extra(li)
                 - ls.horz_size)
                 .max(0.0);
             let x0 = cx
@@ -2589,13 +2581,9 @@ fn walk_cell_lines(
         let ind = indent_of(p, doc, textw);
         let lines = layout_paragraph(p, doc, ind.wrap_w, fonts);
         for (li, ls) in lines.iter().enumerate() {
-            let line_indent = ind.left + if li == 0 { ind.first_extra } else { 0.0 };
+            let line_indent = ind.left + ind.line_extra(li);
             let slack = (ind.wrap_w
-                - if li == 0 {
-                    ind.first_extra.max(0.0)
-                } else {
-                    0.0
-                }
+                - ind.line_extra(li)
                 - ls.horz_size)
                 .max(0.0);
             let x0 = cx

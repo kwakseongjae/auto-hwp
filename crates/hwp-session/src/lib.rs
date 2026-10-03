@@ -1635,8 +1635,11 @@ fn body_paragraph_geom(
     let left = ps.map(|s| s.left_margin).unwrap_or(0).max(0) as f64;
     let right = ps.map(|s| s.right_margin).unwrap_or(0).max(0) as f64;
     let indent = ps.map(|s| s.indent).unwrap_or(0) as f64;
-    let first_extra = indent.max(-left);
+    // LOCKSTEP with `hwp_typeset::place::indent_of` (#370): positive indent shifts line 0; a negative
+    // indent (내어쓰기) leaves line 0 at the inset and hangs every later line by |indent|.
+    let first_extra = indent.max(0.0);
     let wrap_w = (body_w - left - right).max(1.0);
+    let rest_extra = (-indent).max(0.0).min((wrap_w - 1.0).max(0.0));
     let align = ps.map(|s| s.align).unwrap_or_default();
     let laid = hwp_typeset::layout_paragraph(p, doc, wrap_w, fonts);
     if laid.is_empty() {
@@ -1670,9 +1673,9 @@ fn body_paragraph_geom(
             return None;
         }
 
-        let line_indent = left + if li == 0 { first_extra } else { 0.0 };
-        let slack =
-            (wrap_w - if li == 0 { first_extra.max(0.0) } else { 0.0 } - ls.horz_size).max(0.0);
+        let extra = if li == 0 { first_extra } else { rest_extra };
+        let line_indent = left + extra;
+        let slack = (wrap_w - extra - ls.horz_size).max(0.0);
         let x0 = first_band.x
             + line_indent
             + match align {
@@ -2286,10 +2289,12 @@ fn para_style_dto(doc: &SemanticDoc, p: &hwp_model::prelude::Paragraph) -> ParaS
     let left = ps.map(|s| s.left_margin).unwrap_or(0).max(0);
     let right = ps.map(|s| s.right_margin).unwrap_or(0).max(0);
     let indent = ps.map(|s| s.indent).unwrap_or(0);
-    let first = indent.max(-left); // 들여(+)/내어(−)쓰기, clamped so line 0 never crosses the inset
+    // 들여(+)/내어(−)쓰기. HWP 내어쓰기 (#370) keeps line 0 at the inset and hangs the REST by
+    // |indent| — in CSS terms `padding-left = left + |indent|`, `text-indent = −|indent|`.
+    let hang = (-indent).max(0);
     ParaStyleDto {
-        indent_left: left,
-        indent_first: first,
+        indent_left: left + hang,
+        indent_first: if hang > 0 { -hang } else { indent },
         indent_right: right,
         align,
     }
