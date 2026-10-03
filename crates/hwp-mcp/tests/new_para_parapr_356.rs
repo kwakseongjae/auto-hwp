@@ -50,7 +50,9 @@ fn para_text(p: &Paragraph) -> String {
 
 /// The `<hp:p …>` open tag of the paragraph whose text contains `marker`.
 fn open_tag_of(xml: &str, marker: &str) -> String {
-    let at = xml.find(marker).unwrap_or_else(|| panic!("{marker} not in section XML"));
+    let at = xml
+        .find(marker)
+        .unwrap_or_else(|| panic!("{marker} not in section XML"));
     let start = xml[..at].rfind("<hp:p ").expect("enclosing <hp:p>");
     let end = start + xml[start..].find('>').unwrap();
     xml[start..=end].to_string()
@@ -58,7 +60,10 @@ fn open_tag_of(xml: &str, marker: &str) -> String {
 
 fn attr(tag: &str, name: &str) -> String {
     let key = format!(" {name}=\"");
-    let i = tag.find(&key).unwrap_or_else(|| panic!("{name} missing in {tag}")) + key.len();
+    let i = tag
+        .find(&key)
+        .unwrap_or_else(|| panic!("{name} missing in {tag}"))
+        + key.len();
     tag[i..i + tag[i..].find('"').unwrap()].to_string()
 }
 
@@ -75,7 +80,10 @@ fn split_tail_keeps_the_heads_original_para_pr_id() {
     let src = fixture("FormattingShowcase.hwpx");
     let mut s = open(&src);
     let head = para(&s, 1);
-    let head_ref = head.para_ref.clone().expect("head has an original paraPrIDRef");
+    let head_ref = head
+        .para_ref
+        .clone()
+        .expect("head has an original paraPrIDRef");
     let head_text = para_text(head);
     let head_len = head_text.chars().count();
     let section_last = {
@@ -83,7 +91,10 @@ fn split_tail_keeps_the_heads_original_para_pr_id() {
         let i = x.rfind("paraPrIDRef=\"").unwrap() + "paraPrIDRef=\"".len();
         x[i..i + x[i..].find('"').unwrap()].to_string()
     };
-    assert_ne!(head_ref, section_last, "fixture must distinguish the two refs");
+    assert_ne!(
+        head_ref, section_last,
+        "fixture must distinguish the two refs"
+    );
 
     apply_intent(
         &mut s,
@@ -108,9 +119,15 @@ fn split_tail_keeps_the_heads_original_para_pr_id() {
     .unwrap();
     let out = export_bytes(&s).unwrap();
     let xml = section0_xml(&out);
-    assert_eq!(attr(&open_tag_of(&xml, "TAILMARK"), "paraPrIDRef"), head_ref);
+    assert_eq!(
+        attr(&open_tag_of(&xml, "TAILMARK"), "paraPrIDRef"),
+        head_ref
+    );
     // The head (original open tag) is untouched.
-    assert_eq!(attr(&open_tag_of(&xml, &head_text), "paraPrIDRef"), head_ref);
+    assert_eq!(
+        attr(&open_tag_of(&xml, &head_text), "paraPrIDRef"),
+        head_ref
+    );
 }
 
 #[test]
