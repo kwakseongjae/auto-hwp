@@ -3,6 +3,17 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-10-03 · Claude Opus 5.5 — **HWP 편집기 P0 라운드: PR 3개 초록, 머지 대기** (main `f069f56`).
+  · **#374** (#356) 새 문단 · run 의 paraPrIDRef/charPrIDRef 를 원래 header id 로. 단독.
+  · **#375** (#371 · #369 · #372) 원자 일괄 `applyIntents(…, {atomic})` · 어댑터 대등성(`applyIntents` · `tableCellFits` ·
+    `pageUsage` · `setUndoLimits` · `toHwpx(options)`) · 단어 단위 실행취소(coalesceKey) · 묶음 = 스냅숏 1개.
+  · **#376** (#368) 편집 가능 영역 `editable(target)` · `onBeforeApply` — **#375 위에 쌓음**, #375 머지 뒤 리베이스(자기 커밋 `6e7df1b`).
+    hover 읽기 전용 커서는 후속.
+  · **#370** 진단만: 두 수정 모두 게이트/격차 악화 → PR 없음. 후보 브랜치 `fix/370-cell-para-spacing`(`40d6073` · `7e2e0f1`, 머지 금지).
+  · **#373** 블록 앵커: `<hp:p id>` 는 IR 에 없고 코퍼스에서도 유일하지 않다 → 엔진 발급 앵커로 가야 한다(미착수).
+  · **0.0.9 발행 차단: #364** — 로컬 dry-run 에서 binaryen 132 산출 wasm 이 Node 에서 `CompileError`. 발행은 워크플로로.
+    `cdn.js` `WASM_BYTES`(7,718,539)도 실제와 다르다(R-07).
+
 - 갱신: 2026-09-21 · Claude Opus 5 — **데스크톱은 별도 라운드로 뺀다** (main `d8221c8`).
   · **사용자 결정**: 데스크톱 앱은 **`astra` 와 함께 한번 대대적으로 손본다.** 그 전까지
     **데스크톱 이슈를 개별로 깊이 파지 않는다** — 하나씩 고치면 큰 재설계와 충돌한다.
