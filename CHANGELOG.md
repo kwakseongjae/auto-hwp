@@ -36,6 +36,14 @@ packages are released in lockstep.)*
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+---
+
+## [0.0.9] — 2026-10-03
+
+양식 채우기 · 편집 호스트를 위한 lockstep 릴리스다. 호스트가 편집 가능 영역을 정하고(#368), 편집기 어댑터로 원자 일괄 적용 ·
+측정 · 실행취소 한도를 쓸 수 있으며(#371 · #372), 연속 입력이 단어 단위로 실행취소된다(#369). HWPX 내보내기에서 새 문단의
+모양 id(#356) · 나눈 꼬리의 글자 모양(#380) · 병합 뒤 남던 문단(#379)을 고쳤다.
+
 ### 추가 (Added)
 
 - **원자적 일괄 적용 `HwpDoc.applyIntents(intents, { atomic: true })`(#371).** 묶음 전체가 실행취소 1칸이고 재조판은
@@ -74,9 +82,24 @@ packages are released in lockstep.)*
 
 ### 수정 (Fixed)
 
+- **새 문단의 문단 · 글자 모양 id 를 원래 것으로 내보낸다(#356).** HWPX 를 열어 새로 내보내는 문단(`SplitParagraph` 꼬리,
+  이웃 모양을 물려받는 `InsertParagraphAt`, 다시 쓴 칸 문단 · 늘린 행)의 `paraPrIDRef` 가 그 구역의 마지막 값으로, run 의
+  `charPrIDRef` 가 기본 글자 모양으로 떨어져 한컴에서 정렬 · 줄 간격 · 글자 모양이 달라 보였다. 이제 같은 값을 가진 원래
+  header id 를 쓴다. 편집하지 않은 문단의 바이트는 그대로다.
+  *(EN — newly emitted paragraphs/runs keep their original paraPr/charPr ids instead of the section's last/default ones.)*
+- **`SplitParagraph` 꼬리 문단의 글자 모양(굵게 · 색)이 내보내기에서 사라지지 않는다(#380).**
+  *(EN — the tail of a split paragraph keeps its bold/colour in HWPX export.)*
 - **`MergeParagraph` 뒤 HWPX 내보내기에 합쳐진 문단이 다시 나타나지 않는다(#379).** 합쳐져 사라진 문단이 `DeleteBlock`
   처럼 원본 스팬 묘비를 남긴다 — 다시 열면 중복 문단이 생기고 뒤 문단이 한 칸씩 밀리던 문제.
   *(EN — merged-away paragraphs no longer reappear in HWPX export.)*
+
+### 파괴 변경 (Breaking)
+
+- 없음. 새 API 는 전부 선택(optional)이고 옵션 없는 `HwpDoc.applyIntents(intents)` 의미는 그대로다. 동작 변화: 웹 편집기의
+  ⌘Z 가 연속 입력을 글자가 아니라 단어 단위로 되돌린다(위 「변경」). (CLI 는 여전히 소스 빌드 — Rust 워크스페이스 버전 변경 없음)
+
+*(EN — Lockstep 0.0.9: host edit policy, atomic batches/adapter parity/undo limits, word-level undo, and three HWPX
+export fixes (#356, #379, #380). No breaking API changes.)*
 
 ---
 
