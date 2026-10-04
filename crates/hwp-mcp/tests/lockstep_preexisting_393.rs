@@ -7,8 +7,10 @@
 //! `layout-lockstep-mismatch-preexisting` 으로 낮추고, 편집이 불일치를 새로 만들거나 바꾸면 그대로 막는다.
 //!
 //! 고정 파일 `fixtures/lockstep-preexisting-393.hwpx`(22 KB)는 공개 corpus `corpus/hwp/k-water-rfp.hwp`
-//! 에서 만들었다: `auto-hwp convert`(HWPX) → 쪽 수 불일치가 남는 블록 66개만 `DeleteBlock` 으로 남김 →
+//! 에서 만들었다: `auto-hwp convert`(HWPX) → 쪽 수 불일치가 남는 블록 68개만 `DeleteBlock` 으로 남김 →
 //! 참조되지 않는 BinData 제거. 원본 그대로 열어도 `place_doc` 5쪽 · `NaiveLayout` 4쪽이다.
+//! 글꼴 측정이 피처에 따라 달라 불일치 여부도 달라질 수 있으므로, `cargo test -p hwp-mcp` 와
+//! `cargo test --workspace`(피처 통합 — CI) **두 구성 모두에서** 불일치가 남는 것으로 골랐다.
 
 use hwp_mcp::{commit_proposal_v1, open_bytes, propose_intents_v1, Session};
 use hwp_model::prelude::*;
