@@ -36,6 +36,12 @@ packages are released in lockstep.)*
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+### 수정 (Fixed)
+
+- **`HwpWorkspace`: ⌘U / Ctrl+U 밑줄 단축키가 동작하지 않던 문제(#384).** ⌘B · ⌘I 와 같은 규칙(살아 있는 글자 캐럿 위에서만)으로
+  선택 범위를 밑줄로 토글한다. 서식 리본을 숨긴 구성(`formatSurface="inspector"`)에서도 밑줄을 넣을 수 있다.
+  *(EN — `HwpWorkspace`: ⌘U / Ctrl+U now toggles underline on the caret selection, like ⌘B / ⌘I.)*
+
 ---
 
 ## [0.0.10] — 2026-10-04

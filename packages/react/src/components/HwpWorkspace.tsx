@@ -3273,16 +3273,19 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
       const k = e.key.toLowerCase();
-      if (k !== "z" && k !== "y" && k !== "c" && k !== "a" && k !== "b" && k !== "i") return;
+      if (k !== "z" && k !== "y" && k !== "c" && k !== "a" && k !== "b" && k !== "i" && k !== "u") return;
       if (editorRef.current) return; // 제자리 에디터 열림 → 그 표면의 기본 동작이 주인
       if (isEditableTarget(e.target as Element | null) || isEditableTarget(document.activeElement)) return;
       if (compositionStore.get() != null) return; // 조합 중엔 IME 가 키의 주인
-      // ⌘A/⌘B/⌘I 는 **살아 있는 글자 캐럿 위에서만** 우리 것이다. 캐럿이 없으면 브라우저 기본동작(전체
+      // ⌘A/⌘B/⌘I/⌘U 는 **살아 있는 글자 캐럿 위에서만** 우리 것이다. 캐럿이 없으면 브라우저 기본동작(전체
       // 선택 등)을 그대로 둔다 — 문서를 통째로 굵게 만드는 사고가 없도록 범위가 없으면 토글도 no-op.
-      if (k === "a" || k === "b" || k === "i") {
+      if (k === "a" || k === "b" || k === "i" || k === "u") {
         if (!caretActiveRef.current || e.shiftKey) return;
         e.preventDefault();
-        const p = k === "a" ? core.caret.selectAll() : core.caret.toggleStyle(k === "b" ? "bold" : "italic");
+        const p =
+          k === "a"
+            ? core.caret.selectAll()
+            : core.caret.toggleStyle(k === "b" ? "bold" : k === "i" ? "italic" : "underline");
         void p.catch((err) => {
           if (!onTrap(err, msg.workspace.trapRecovered)) toast(msg.workspace.formatFailed(String(err)));
         });
