@@ -36,6 +36,13 @@ packages are released in lockstep.)*
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+---
+
+## [0.0.11] — 2026-10-05
+
+제안 확정 검증(#393)과 밑줄 단축키(#384)를 고치는 lockstep 패치 릴리스다. API 변경은 없다 — 검증 보고서 `advisories` 에
+`layout-lockstep-mismatch-preexisting` 코드가 하나 늘었을 뿐이다(문자열 배열, 추가만).
+
 ### 수정 (Fixed)
 
 - **제안 확정(`ProposeIntents` → `CommitProposal`)이 편집 전부터 있던 조판 쪽 수 불일치로 모든 편집을 막던 문제(#393).**
