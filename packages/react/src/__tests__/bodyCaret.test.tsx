@@ -396,6 +396,37 @@ describe("body paragraph caret", () => {
     } as Intent);
   });
 
+  it("⌘U / Ctrl+U 는 선택 범위만 밑줄로 커밋한다(#384)", async () => {
+    for (const mod of [{ metaKey: true }, { ctrlKey: true }]) {
+      const adapter = bodyAdapter({ runs: [{ text: "가나 다" }] });
+      const { container, unmount } = workspace(adapter);
+      await caretAt(container, 101, 45);
+      fireEvent.keyDown(window, { key: "a", ...mod });
+      await waitFor(() => expect(rangeBoxes(container)).toHaveLength(1));
+      const e = new KeyboardEvent("keydown", { key: "u", cancelable: true, bubbles: true, ...mod });
+      window.dispatchEvent(e);
+      expect(e.defaultPrevented).toBe(true); // 브라우저 기본 동작(소스 보기 등)으로 새지 않는다
+      await waitFor(() => expect(adapter.applied).toHaveLength(1));
+      expect(adapter.applied[0]).toEqual({
+        intent: "SetParagraphRuns",
+        section: 0,
+        block: 3,
+        runs: [{ text: "가나 다", underline: true }],
+      } as Intent);
+      unmount();
+    }
+  });
+
+  it("캐럿이 없으면 ⌘U 도 우리 것이 아니다(인텐트 0 · 기본 동작 유지)", async () => {
+    const adapter = bodyAdapter();
+    workspace(adapter);
+    const e = new KeyboardEvent("keydown", { key: "u", metaKey: true, cancelable: true, bubbles: true });
+    window.dispatchEvent(e);
+    await flush();
+    expect(e.defaultPrevented).toBe(false);
+    expect(adapter.applied).toHaveLength(0);
+  });
+
   it("캐럿이 없으면 ⌘A/⌘B는 우리 것이 아니다(브라우저 기본동작 유지 · 인텐트 0)", async () => {
     const adapter = bodyAdapter();
     workspace(adapter);
