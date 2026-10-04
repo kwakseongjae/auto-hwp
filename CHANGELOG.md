@@ -38,6 +38,13 @@ packages are released in lockstep.)*
 
 ### 수정 (Fixed)
 
+- **제안 확정(`ProposeIntents` → `CommitProposal`)이 편집 전부터 있던 조판 쪽 수 불일치로 모든 편집을 막던 문제(#393).**
+  검증이 편집 **전** 문서의 `place_doc` ↔ `NaiveLayout` 쪽 수 차이만으로도 `layout-lockstep-mismatch` 를 구조 실패로 넣어,
+  원래 두 조판 결과가 다른 문서에서는 칸 글 한 글자 제안도 확정되지 않았다(같은 편집을 `applyIntents` 로 보내면 적용됐다).
+  이제 **편집이 만든 차이**만 본다 — 편집 전 · 뒤 차이(부호 포함)가 같으면 `advisories` 에
+  `layout-lockstep-mismatch-preexisting` 을 남기고 확정을 허용한다. 편집이 불일치를 새로 만들거나 크기 · 방향을 바꾸면 그대로 막는다.
+  *(EN — Proposal verification now blocks only a layout-lockstep page-count mismatch the edit itself introduces or changes;
+  an identical pre-existing mismatch is reported as the `layout-lockstep-mismatch-preexisting` advisory instead.)*
 - **`HwpWorkspace`: ⌘U / Ctrl+U 밑줄 단축키가 동작하지 않던 문제(#384).** ⌘B · ⌘I 와 같은 규칙(살아 있는 글자 캐럿 위에서만)으로
   선택 범위를 밑줄로 토글한다. 서식 리본을 숨긴 구성(`formatSurface="inspector"`)에서도 밑줄을 넣을 수 있다.
   *(EN — `HwpWorkspace`: ⌘U / Ctrl+U now toggles underline on the caret selection, like ⌘B / ⌘I.)*

@@ -2337,6 +2337,33 @@ fn pdf_evidence(
     Err("pdf verification is unavailable in this build".into())
 }
 
+/// How the edit relates to a `place_doc` ↔ `NaiveLayout` page-count mismatch (#393).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LockstepVerdict {
+    /// The edited document's two layouts agree.
+    InStep,
+    /// The edited document disagrees by exactly the same signed amount as the unedited one — the
+    /// mismatch predates the edit, so it must not veto it (advisory only).
+    Preexisting,
+    /// The edit created the mismatch or changed its size/direction — a structural failure.
+    Introduced,
+}
+
+/// Judge only the **delta caused by the edit**: compare the signed `pages - lockstep_pages` gap before
+/// and after. `18/17 → 18/17` (or `→ 19/18`) is pre-existing; `18/18 → 19/18`, `18/17 → 19/17` and
+/// `18/17 → 17/18` are introduced by the edit and still block the commit.
+fn lockstep_verdict(before: &LayoutEvidence, after: &LayoutEvidence) -> LockstepVerdict {
+    let gap = |l: &LayoutEvidence| l.pages as i64 - l.lockstep_pages as i64;
+    let (before_gap, after_gap) = (gap(before), gap(after));
+    if after_gap == 0 {
+        LockstepVerdict::InStep
+    } else if after_gap == before_gap {
+        LockstepVerdict::Preexisting
+    } else {
+        LockstepVerdict::Introduced
+    }
+}
+
 fn verify_proposal(
     before: &hwp_model::prelude::SemanticDoc,
     after: &hwp_model::prelude::SemanticDoc,
@@ -2381,9 +2408,8 @@ fn verify_proposal(
     if !semantic.unexpected_changes.is_empty() {
         structural_failures.push("declared-unaffected-semantic-change".into());
     }
-    if before_layout.pages != before_layout.lockstep_pages
-        || after_layout.pages != after_layout.lockstep_pages
-    {
+    let lockstep = lockstep_verdict(&before_layout, &after_layout);
+    if lockstep == LockstepVerdict::Introduced {
         structural_failures.push("layout-lockstep-mismatch".into());
     }
     if after_placeholders > before_placeholders {
@@ -2405,6 +2431,9 @@ fn verify_proposal(
     let mut advisories = Vec::new();
     if pdf.is_none() {
         advisories.push("pdf-evidence-unavailable".into());
+    }
+    if lockstep == LockstepVerdict::Preexisting {
+        advisories.push("layout-lockstep-mismatch-preexisting".into());
     }
     if page_artifacts
         .iter()
@@ -5384,6 +5413,41 @@ mod tests {
             "one undo reverts the whole proposal"
         );
         assert_eq!(export_bytes(&s).unwrap(), before_bytes);
+    }
+
+    #[test]
+    fn lockstep_verdict_judges_only_the_delta_caused_by_the_edit() {
+        // #393: (pages, lockstep_pages) before → after.
+        let l = |pages: usize, lockstep_pages: usize| LayoutEvidence {
+            pages,
+            lockstep_pages,
+            lines: 0,
+            glyphs: 0,
+            blocks: 0,
+            tables: 0,
+            images: 0,
+        };
+        use LockstepVerdict::*;
+        let cases = [
+            ((5, 5), (5, 5), InStep),
+            ((5, 5), (6, 6), InStep),
+            ((18, 17), (18, 18), InStep), // the edit healed it — never a failure
+            ((18, 17), (18, 17), Preexisting),
+            ((18, 17), (19, 18), Preexisting), // both layouts grew together
+            ((17, 18), (17, 18), Preexisting),
+            ((5, 5), (6, 5), Introduced), // the edit created the mismatch
+            ((5, 5), (5, 6), Introduced),
+            ((18, 17), (19, 17), Introduced), // the edit widened it
+            ((18, 17), (17, 18), Introduced), // the edit flipped it
+            ((18, 16), (18, 17), Introduced), // changed size → still the edit's doing
+        ];
+        for ((bp, bl), (ap, al), want) in cases {
+            assert_eq!(
+                lockstep_verdict(&l(bp, bl), &l(ap, al)),
+                want,
+                "{bp}/{bl} → {ap}/{al}"
+            );
+        }
     }
 
     #[test]
