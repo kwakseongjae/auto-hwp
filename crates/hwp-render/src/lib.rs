@@ -49,8 +49,9 @@ pub fn page_count(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> usize {
 /// Lower one positioned page into the paint IR. Order matters for correct overdraw: cell fills/image
 /// brushes first, borders next, then normal images and glyphs.
 fn lower_page(pg: &PlacedPage) -> PageLayerTree {
-    let mut ops: Vec<PaintOp> =
-        Vec::with_capacity(pg.rects.len() + pg.lines.len() + pg.images.len() + pg.glyphs.len());
+    let mut ops: Vec<PaintOp> = Vec::with_capacity(
+        pg.rects.len() + pg.lines.len() + pg.images.len() + pg.glyphs.len() + pg.underlines.len(),
+    );
 
     // 1) Fills (shading) first so borders/text sit above them.
     for r in pg.rects.iter().filter(|r| r.fill.is_some()) {
@@ -119,6 +120,19 @@ fn lower_page(pg: &PlacedPage) -> PageLayerTree {
             italic: g.italic,
             font: g.font.clone(),
             cluster: g.cluster.clone(),
+        });
+    }
+    // 5) Text underline rules (#405) — after the glyphs, through the same styled-line op the cell borders
+    // use, so the SVG and PDF backends both draw them with no schema change.
+    for l in &pg.underlines {
+        ops.push(PaintOp::Line {
+            x1: l.x1,
+            y1: l.y1,
+            x2: l.x2,
+            y2: l.y2,
+            color: l.color,
+            style: l.style,
+            width: l.width,
         });
     }
 
@@ -802,6 +816,94 @@ mod tests {
             svg[0].contains("fill=\"#C00000\""),
             "glyph fill carries the run's text color"
         );
+    }
+
+    /// `(x, y)` of every `<text>` and `(x1, y1, x2)` of every `<line>` in an SVG page.
+    type TextsAndLines = (Vec<(f64, f64)>, Vec<(f64, f64, f64)>);
+
+    fn texts_and_lines(svg: &str) -> TextsAndLines {
+        let attr = |tag: &str, name: &str| -> f64 {
+            let k = format!(" {name}=\"");
+            let i = tag.find(&k).expect("attr") + k.len();
+            tag[i..i + tag[i..].find('"').unwrap()].parse().unwrap()
+        };
+        let mut texts = Vec::new();
+        let mut lines = Vec::new();
+        for (i, _) in svg.match_indices('<') {
+            let tag = &svg[i..i + svg[i..].find('>').unwrap()];
+            if tag.starts_with("<text ") {
+                texts.push((attr(tag, "x"), attr(tag, "y")));
+            } else if tag.starts_with("<line ") {
+                lines.push((attr(tag, "x1"), attr(tag, "y1"), attr(tag, "x2")));
+            }
+        }
+        (texts, lines)
+    }
+
+    #[test]
+    fn underline_run_draws_one_line_below_the_baseline() {
+        // #405: an underlined run (⌘U, or an underlined source run) must SHOW its rule. The typesetter
+        // carried `underline` per glyph but the paint lowering dropped it — no op drew the rule.
+        let mut doc = doc_with(vec![Block::Paragraph(para("가나 다"))]);
+        doc.char_shapes[0] = CharShape {
+            underline: true,
+            ..Default::default()
+        };
+        let svg = render_doc_svg(&doc, &ApproxFontMetrics);
+        let (texts, lines) = texts_and_lines(&svg[0]);
+        assert_eq!(texts.len(), 3, "가 · 나 · 다 (the space draws no <text>)");
+        assert_eq!(
+            lines.len(),
+            1,
+            "one continuous rule — the space between words is underlined too"
+        );
+        let (x1, y1, x2) = lines[0];
+        let baseline = texts[0].1;
+        assert!(
+            y1 > baseline && y1 < baseline + 5.0,
+            "rule just below the baseline: {y1} vs {baseline}"
+        );
+        assert!(
+            (x1 - texts[0].0).abs() < 0.01,
+            "starts at the first glyph's left edge"
+        );
+        assert!(x2 > texts[2].0 + 1.0, "covers the last glyph's advance");
+    }
+
+    #[test]
+    fn underline_stops_where_the_underlined_run_stops() {
+        let mut doc = doc_with(vec![Block::Paragraph(Paragraph {
+            runs: vec![
+                Run {
+                    char_shape: 1,
+                    content: vec![Inline::Text("가나".into())],
+                    ..Default::default()
+                },
+                Run {
+                    char_shape: 0,
+                    content: vec![Inline::Text("다라".into())],
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        })]);
+        doc.char_shapes.push(CharShape {
+            underline: true,
+            ..Default::default()
+        });
+        let svg = render_doc_svg(&doc, &ApproxFontMetrics);
+        let (texts, lines) = texts_and_lines(&svg[0]);
+        assert_eq!(lines.len(), 1);
+        assert!(
+            lines[0].2 <= texts[2].0 + 0.01,
+            "the rule ends at 다's left edge, not under it"
+        );
+        // A document without underline paints no rule at all (byte-identical to before).
+        let plain = render_doc_svg(
+            &doc_with(vec![Block::Paragraph(para("가나 다"))]),
+            &ApproxFontMetrics,
+        );
+        assert!(!plain[0].contains("<line "), "no underline → no <line>");
     }
 
     #[test]
