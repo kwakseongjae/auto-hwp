@@ -18,7 +18,7 @@
 
 /** The version this build of the JS ships with — the CDN pin. Kept in lockstep with package.json by
  *  `scripts/build-wasm.mjs` (the prepack hook), which fails the pack when the two disagree. */
-export const ENGINE_VERSION = '0.0.11';
+export const ENGINE_VERSION = '0.0.12';
 
 /** UNCOMPRESSED size of `pkg/hwp_wasm_bg.wasm` as published in ENGINE_VERSION (measured: 0.0.11 publish workflow,
  *  binaryen 119 `wasm-opt -Oz` with the binary's own target_features — #364 → 8,633,716 B).
