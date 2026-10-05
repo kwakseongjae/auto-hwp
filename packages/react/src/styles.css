@@ -254,9 +254,16 @@ button > .hw-icon:only-child { margin: 0 auto; }
    (the real .hw-caret is hidden meanwhile, so this is the only caret). pointer-events:none — purely visual. */
 .hw-ime-preview {
   position: absolute; z-index: 8; pointer-events: none; white-space: pre; color: #111;
-  background: rgba(37, 99, 235, 0.12); border-radius: 1px;
+  /* #403: OPAQUE (page colour under the tint) — the overlay sits on top of the committed line, so a translucent
+     box let the glyphs after a mid-line caret show through the composing text (「완칭도」 겹침). It now covers
+     them until the commit reflows the line. */
+  background: linear-gradient(rgba(37, 99, 235, 0.12), rgba(37, 99, 235, 0.12)), var(--hw-ime-preview-bg, #fff);
+  border-radius: 1px;
 }
-.hw-ime-text { text-decoration: underline; text-underline-offset: 2px; }
+.hw-ime-text { position: relative; text-decoration: underline; text-underline-offset: 2px; }
+/* #403: zero-size marker on the text baseline — ImeCompositionLayer measures it to align the composing glyph's
+   baseline with the rendered neighbours'. */
+.hw-ime-baseline { display: inline-block; width: 0; height: 0; vertical-align: baseline; }
 .hw-ime-caret {
   display: inline-block; width: 1.6px; margin-left: -0.8px; vertical-align: top; background: #111;
   animation: hw-caret-blink 1.06s step-end infinite;

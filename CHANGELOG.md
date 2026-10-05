@@ -43,6 +43,12 @@ packages are released in lockstep.)*
   캐럿을 확인하지 않아 타이핑 중 ⌫ 가 글자 대신 문단을 지웠고, Enter 는 빈 문단을 두 개 만든 뒤 이어진 ⌫ 가 앞 문단을 지웠다.
   이제 글자 캐럿이 살아 있으면 블록 편집은 양보한다 — ⌫ 는 한 글자(맨 앞이면 앞 문단과 병합), Enter 는 문단 분리 하나다.
   *(EN — `HwpWorkspace`: with a live text caret, Backspace/Enter no longer also delete the selected paragraph / insert a blank line.)*
+- **`HwpWorkspace`: 한글 조합 미리보기가 주변 글자보다 크게 보이고, 줄 중간에서는 뒤 글자와 겹쳐 보이던 문제(#403).**
+  미리보기가 런의 원래 글꼴 이름(예: `휴먼명조`)을 그대로 써 설치되지 않은 글꼴 대신 브라우저 기본 글꼴로 그려졌다. 이제 캐럿 줄의
+  **렌더된 글자**(페이지 SVG)에서 글꼴 · 크기 · 기준선을 가져와 같은 모양으로 그린다. 미리보기 배경은 불투명(`--hw-ime-preview-bg`,
+  기본 흰색 + 파란 틴트)이라 줄 중간 조합이 뒤 글자를 가린다(확정되면 줄이 다시 흐른다).
+  *(EN — `HwpWorkspace`: the IME composition preview now copies face/size/baseline from the rendered glyph on the caret line and
+  has an opaque background, so it no longer looks larger than its neighbours or overlaps the text after a mid-line caret.)*
 
 ---
 

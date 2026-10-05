@@ -4,6 +4,51 @@ import type { CompositionStore } from "../composition";
 import { isEditableTarget } from "../viewport";
 import { PAGE_PX_PER_PT } from "./InPlaceCellEditor";
 
+/** The rendered glyph next to the caret — the face/size/baseline the preview must match (#403). */
+export interface CaretGlyph {
+  /** SVG `font-family` as the renderer emitted it (already the display-mapped face, e.g. a 명조 → Nanum Myeongjo). */
+  family: string | null;
+  /** Glyph EM in page (viewBox) px. */
+  size: number;
+  /** Baseline y in page (viewBox) px. */
+  baseline: number;
+}
+
+/// #403 — find the page-SVG glyph the composing text sits beside: the nearest `<text>` whose baseline falls in the
+/// caret's line box, preferring the glyph just LEFT of the caret (the run the typed text inherits), else the
+/// nearest one to the right (caret at line start). The renderer maps document faces (휴먼명조 …) to display faces;
+/// copying its `font-family` instead of the run's raw face name keeps the preview in the SAME face/size as the
+/// line (the raw name is usually not installed → the browser fell back to a different, larger-looking face).
+export function findCaretGlyph(
+  svg: Element | null | undefined,
+  caret: { x: number; top: number; height: number },
+): CaretGlyph | null {
+  if (!svg) return null;
+  const lo = caret.top - 0.5;
+  const hi = caret.top + caret.height + 0.5;
+  let left: { el: Element; x: number } | null = null;
+  let right: { el: Element; x: number } | null = null;
+  for (const el of Array.from(svg.querySelectorAll("text"))) {
+    const y = parseFloat(el.getAttribute("y") ?? "");
+    const x = parseFloat(el.getAttribute("x") ?? "");
+    if (!Number.isFinite(x) || !Number.isFinite(y) || y < lo || y > hi) continue;
+    if (x <= caret.x + 0.01) {
+      if (!left || x > left.x) left = { el, x };
+    } else if (!right || x < right.x) {
+      right = { el, x };
+    }
+  }
+  const pick = (left ?? right)?.el;
+  if (!pick) return null;
+  const size = parseFloat(pick.getAttribute("font-size") ?? "");
+  if (!Number.isFinite(size) || size <= 0) return null;
+  return {
+    family: pick.getAttribute("font-family"),
+    size,
+    baseline: parseFloat(pick.getAttribute("y") ?? "0"),
+  };
+}
+
 export interface ImeCompositionLayerProps {
   /** The headless editor core — the layer subscribes to `core.caret` DIRECTLY (030 isolation): 셀
    *  캐럿이든 본문 문단 캐럿이든 조합 표면은 하나다. */
@@ -50,10 +95,12 @@ export function ImeCompositionLayer({ core, page, scale, store, commit }: ImeCom
   const pendingRef = useRef<ActiveCaret | null>(null); // latest caret state for this page
   const pendingTextRef = useRef(""); // latest composing string (applied to the preview by ref)
   const styleRef = useRef<RunStyle>({}); // run style at the caret (059 스타일 소스)
+  const glyphRef = useRef<CaretGlyph | null>(null); // rendered glyph beside the caret (#403 face/size/baseline)
 
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const previewRef = useRef<HTMLSpanElement | null>(null);
   const textRef = useRef<HTMLSpanElement | null>(null);
+  const baselineRef = useRef<HTMLSpanElement | null>(null); // zero-size inline marker sitting ON the text baseline
   const barRef = useRef<HTMLSpanElement | null>(null);
 
   // Position the textarea + preview at the caret px and (re)apply the run style — a pure DOM write, no
@@ -74,7 +121,10 @@ export function ImeCompositionLayer({ core, page, scale, store, commit }: ImeCom
     const pv = previewRef.current;
     if (pv) {
       const st = styleRef.current;
-      const sizePx = st.size_pt && st.size_pt > 0 ? st.size_pt * PAGE_PX_PER_PT * scale : h * 0.82;
+      const g = glyphRef.current;
+      // #403: the rendered glyph beside the caret is the truth for face + size (the renderer already mapped the
+      // document face to a display face); the run style is the fallback when the line has no glyph yet.
+      const sizePx = g ? g.size * scale : st.size_pt && st.size_pt > 0 ? st.size_pt * PAGE_PX_PER_PT * scale : h * 0.82;
       pv.style.left = `${left}px`;
       pv.style.top = `${top}px`;
       pv.style.height = `${h}px`;
@@ -83,7 +133,20 @@ export function ImeCompositionLayer({ core, page, scale, store, commit }: ImeCom
       pv.style.fontWeight = st.bold ? "700" : "400";
       pv.style.fontStyle = st.italic ? "italic" : "normal";
       if (st.color) pv.style.color = st.color;
-      if (st.font) pv.style.fontFamily = st.font;
+      const family = g?.family || st.font;
+      if (family) pv.style.fontFamily = family;
+      // Baseline: the line box centres the text, the SVG glyph sits on its own baseline — shift the text by the
+      // difference so the composing glyph shares the neighbours' baseline (measured with a zero-size marker).
+      const tx = textRef.current;
+      const mk = baselineRef.current;
+      if (tx) {
+        tx.style.top = "0px";
+        if (g && mk) {
+          const at = mk.getBoundingClientRect().bottom - pv.getBoundingClientRect().top;
+          const want = g.baseline * scale - top;
+          if (Number.isFinite(at) && at > 0) tx.style.top = `${want - at}px`;
+        }
+      }
     }
     if (barRef.current) barRef.current.style.height = `${h}px`;
   };
@@ -166,6 +229,14 @@ export function ImeCompositionLayer({ core, page, scale, store, commit }: ImeCom
     composingRef.current = true;
     pendingTextRef.current = "";
     styleRef.current = {};
+    const s = pendingRef.current;
+    glyphRef.current = s
+      ? findCaretGlyph(taRef.current?.closest(".hw-sheet-wrap")?.querySelector(".hw-sheet svg"), {
+          x: s.rect.x,
+          top: s.rect.top,
+          height: s.rect.height,
+        })
+      : null;
     setComposing(true);
     store.set({ page, text: "" }); // CaretLayer hides its bar while this is live
     // Fetch the run style at the caret ONCE per session (read-only; no undo unit). Ignore a late resolve
@@ -223,6 +294,7 @@ export function ImeCompositionLayer({ core, page, scale, store, commit }: ImeCom
       {composing && (
         <span ref={previewRef} className="hw-ime-preview" data-testid="hw-ime-preview" aria-hidden>
           <span ref={textRef} className="hw-ime-text" />
+          <span ref={baselineRef} className="hw-ime-baseline" />
           <span ref={barRef} className="hw-ime-caret" />
         </span>
       )}
