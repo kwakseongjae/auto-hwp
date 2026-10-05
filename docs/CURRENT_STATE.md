@@ -3,6 +3,15 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-10-05 · Claude Opus 5.5 — **0.0.11 발행 — 제안 확정 lockstep 검증(#393) · ⌘U 밑줄(#384)** (main `ced930e`).
+  · **#393 → #395 머지**: `verify_proposal` 이 편집 전 문서의 `place_doc` ≠ `NaiveLayout` 쪽 수만으로도 확정을 막았다 →
+    `lockstep_verdict` 가 부호 있는 차이를 편집 전 · 뒤로 비교, 같으면 advisory `layout-lockstep-mismatch-preexisting`,
+    만들거나 바꾸면 그대로 구조 실패. 고정 파일 `hwp-mcp/tests/fixtures/lockstep-preexisting-393.hwpx`(k-water-rfp 파생, 5 대 4) —
+    **`-p hwp-mcp` 와 `--workspace`(피처 통합) 에서 글꼴 측정이 달라** 한쪽에서만 불일치하는 파일이 있다. 두 구성 모두 확인할 것.
+  · **#384 → #396 머지**: `HwpWorkspace` ⌘U / Ctrl+U → `toggleStyle("underline")`.
+  · **#398 머지 → publish 워크플로 발행 0.0.11**: wasm 8,633,716 B · sha256 `b0de243f…b615`, Node 20/22/24 · chromium 145 · webkit 26 확인.
+  · 남은 것: LOCKSTEP 불변식 자체는 여전히 깨진 문서가 있다(k-water-rfp 28 대 27 등) — 고정 파일이 재현본. #394(편집 정책 묶음 안 주소 이동) 미착수.
+
 - 갱신: 2026-10-04 · Claude Opus 5.5 — **0.0.10 발행 — 0.0.9 회귀(#387) 수정** (main `a69f4f2`).
   · **#387 → #388 머지**: HWPX 파서가 header 풀 paraPr/charPr 를 손실 있는 값으로 합쳐 인덱싱 → #356 이 새로 내보낸 문단에
     「값 같은 쌍둥이 id」를 써서 글머리표 · 번호 · widowOrphan 등이 바뀌었다. 이제 **원래 id 마다 인덱스 하나**
