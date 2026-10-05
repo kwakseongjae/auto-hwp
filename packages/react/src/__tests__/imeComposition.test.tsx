@@ -191,3 +191,57 @@ describe("issue 059 — IME inline composition", () => {
     expect(container.querySelector('[data-testid="hw-ime-input"]')).toBeNull(); // textarea gone (blur + unmount)
   });
 });
+
+// #403 — the composing glyph must look like its rendered neighbours: the renderer maps document faces
+// (휴먼명조 …) to display faces, so the preview copies the page-SVG glyph's face/size rather than the run's raw
+// face name (not installed → browser fallback face that looked bigger). The overlay is opaque so a mid-line
+// composition covers, rather than overlaps, the committed glyphs underneath.
+describe("#403 — composition preview matches the rendered line", () => {
+  const LINE_SVG =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 794 1123" width="794" height="1123">` +
+    `<text x="80.00" y="50.00" font-size="11.00" font-family="Nanum Myeongjo, NanumGothic, sans-serif" fill="#000000">완</text>` +
+    `<text x="91.00" y="50.00" font-size="11.00" font-family="Nanum Myeongjo, NanumGothic, sans-serif" fill="#000000">성</text>` +
+    `<text x="400.00" y="200.00" font-size="30.00" font-family="Other Face" fill="#000000">X</text>` +
+    `</svg>`;
+
+  it("findCaretGlyph picks the glyph LEFT of the caret on the caret's line (else the nearest right)", async () => {
+    const { findCaretGlyph } = await import("../components/ImeCompositionLayer");
+    const host = document.createElement("div");
+    host.innerHTML = LINE_SVG;
+    const svg = host.querySelector("svg");
+    expect(findCaretGlyph(svg, { x: 100, top: 40, height: 13 })).toEqual({
+      family: "Nanum Myeongjo, NanumGothic, sans-serif",
+      size: 11,
+      baseline: 50,
+    });
+    // line start (no glyph to the left) → nearest to the right on the same line
+    expect(findCaretGlyph(svg, { x: 70, top: 40, height: 13 })?.size).toBe(11);
+    // a line with no glyph → null (run-style fallback)
+    expect(findCaretGlyph(svg, { x: 100, top: 600, height: 13 })).toBeNull();
+    expect(findCaretGlyph(null, { x: 100, top: 40, height: 13 })).toBeNull();
+  });
+
+  it("preview uses the rendered glyph's face + size, not the run's raw face name", async () => {
+    const runs: RunSpec[] = [{ text: "AB", font: "휴먼명조", size_pt: 20 }];
+    const { container } = workspace(imeAdapter({ svg: () => LINE_SVG, runs }));
+    const { ta } = await caretWithTextarea(container);
+    const caret = container.querySelector(".hw-caret") as HTMLElement;
+    const s = parseFloat(caret.style.height) / 13;
+    fireEvent.compositionStart(ta, { data: "" });
+    fireEvent.compositionUpdate(ta, { data: "하" });
+    await waitFor(() => {
+      const pv = container.querySelector('[data-testid="hw-ime-preview"]') as HTMLElement | null;
+      expect(pv?.textContent).toContain("하");
+      expect(pv!.style.fontFamily).toContain("Nanum Myeongjo");
+      expect(parseFloat(pv!.style.fontSize)).toBeCloseTo(11 * s, 3);
+    });
+  });
+
+  it("the preview box is opaque (covers the glyphs after a mid-line caret)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    const rule = css.slice(css.indexOf(".hw-ime-preview {"), css.indexOf("}", css.indexOf(".hw-ime-preview {")));
+    expect(rule).toMatch(/background:[^;]*var\(--hw-ime-preview-bg, #fff\)/);
+  });
+});
