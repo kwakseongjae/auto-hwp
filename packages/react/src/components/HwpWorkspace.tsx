@@ -2504,6 +2504,9 @@ export function HwpWorkspace(props: HwpWorkspaceProps) {
       if (!canEdit) return;
       if (editorRef.current || inlineEditRef.current) return;
       if (compositionStore.get() != null) return;
+      // #401: 살아 있는 글자 캐럿이 Enter/⌫/Delete 의 주인이다(053 타이핑 리스너). 본문 클릭은 문단 마크와 캐럿을
+      // 함께 세우므로, 여기서 양보하지 않으면 같은 키에 글자 삭제 + 블록 삭제(Enter = 분리 + 빈 줄)가 둘 다 돈다.
+      if (caretActiveRef.current) return;
       if (isEditableTarget(e.target as Element | null) || isEditableTarget(document.activeElement)) return;
       const sels = selectionRef.current;
       if (sels.length !== 1) return;

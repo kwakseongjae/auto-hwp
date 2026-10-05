@@ -36,6 +36,14 @@ packages are released in lockstep.)*
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+### 수정 (Fixed)
+
+- **`HwpWorkspace`: 글자 캐럿 위 Backspace / Enter 가 문단 삭제 · 빈 줄 삽입까지 함께 실행되던 문제(#401).**
+  본문 클릭은 문단 선택과 글자 캐럿을 함께 세우는데, 「키보드 블록 편집」(선택 블록 위 Enter = 아래 빈 줄, ⌫ · Delete = 블록 삭제)이
+  캐럿을 확인하지 않아 타이핑 중 ⌫ 가 글자 대신 문단을 지웠고, Enter 는 빈 문단을 두 개 만든 뒤 이어진 ⌫ 가 앞 문단을 지웠다.
+  이제 글자 캐럿이 살아 있으면 블록 편집은 양보한다 — ⌫ 는 한 글자(맨 앞이면 앞 문단과 병합), Enter 는 문단 분리 하나다.
+  *(EN — `HwpWorkspace`: with a live text caret, Backspace/Enter no longer also delete the selected paragraph / insert a blank line.)*
+
 ---
 
 ## [0.0.11] — 2026-10-05

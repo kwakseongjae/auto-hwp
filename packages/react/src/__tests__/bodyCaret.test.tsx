@@ -467,6 +467,61 @@ describe("body paragraph caret", () => {
     expect(adapter.applied[0]).toEqual({ intent: "MergeParagraph", section: 0, block: 3 } as Intent);
   });
 
+  /** 실제 문서처럼 문단 밴드가 줄 전체를 덮는다 — 클릭이 밴드 **안**이라 문단 선택(마크)도 함께 선다. */
+  const wideBand: BlockHit = { ...BAND, w: 400 };
+  const wideAdapter = () => bodyAdapter({ hit: (_p, _x, y) => (y >= 40 && y <= 60 ? wideBand : null), blocks: [wideBand] });
+
+  // #401 — 본문 클릭은 문단 선택(마크)과 글자 캐럿을 함께 세운다. 「키보드 블록 편집」 리스너(선택 블록 위 Enter =
+  // 빈 줄, Backspace = 블록 삭제)가 캐럿을 보지 않아 같은 키에 두 레인이 함께 돌았다 — 타이핑 중 ⌫ 가 문단을 지웠다.
+  it("#401 캐럿 위 Backspace는 글자 하나만 지운다 — 선택 문단 DeleteBlock 0", async () => {
+    const adapter = wideAdapter();
+    const { container } = engineCaretWorkspace(adapter);
+    await caretAt(container);
+    await waitFor(() => expect(container.querySelector(".hw-mark-paragraph")).toBeTruthy()); // 마크 + 캐럿 공존(실제 앱과 같은 상태)
+    fireEvent.keyDown(window, { key: "Backspace" });
+    await waitFor(() => expect(adapter.applied.length).toBeGreaterThan(0));
+    for (let i = 0; i < 5; i++) await flush();
+    expect(adapter.applied.map((a) => a.intent)).toEqual(["SetParagraphRuns"]);
+    expect(container.querySelector(".hw-caret")).toBeTruthy();
+  });
+
+  it("#401 캐럿 위 Enter · Shift+Enter 는 SplitParagraph 하나씩 — 빈 줄 InsertParagraphAt 0", async () => {
+    for (const shiftKey of [false, true]) {
+      const adapter = wideAdapter();
+      const { container, unmount } = engineCaretWorkspace(adapter);
+      await caretAt(container);
+      await waitFor(() => expect(container.querySelector(".hw-mark-paragraph")).toBeTruthy());
+      fireEvent.keyDown(window, { key: "Enter", shiftKey });
+      await waitFor(() => expect(adapter.applied.length).toBeGreaterThan(0));
+      for (let i = 0; i < 5; i++) await flush();
+      expect(adapter.applied.map((a) => a.intent)).toEqual(["SplitParagraph"]);
+      unmount();
+    }
+  });
+
+  it("#401 캐럿 위 맨 앞 Backspace 는 MergeParagraph 하나 — 앞 문단을 지우지 않는다", async () => {
+    const adapter = wideAdapter();
+    const { container } = engineCaretWorkspace(adapter);
+    await caretAt(container, 101, 45); // offset 0
+    await waitFor(() => expect(container.querySelector(".hw-mark-paragraph")).toBeTruthy());
+    fireEvent.keyDown(window, { key: "Backspace" });
+    await waitFor(() => expect(adapter.applied.length).toBeGreaterThan(0));
+    for (let i = 0; i < 5; i++) await flush();
+    expect(adapter.applied).toEqual([{ intent: "MergeParagraph", section: 0, block: 3 } as Intent]);
+  });
+
+  it("#401 캐럿이 없는 문단 선택의 Backspace 는 여전히 블록을 지운다(키보드 블록 편집 무회귀)", async () => {
+    const adapter = wideAdapter();
+    const { container } = engineCaretWorkspace(adapter);
+    await caretAt(container);
+    await waitFor(() => expect(container.querySelector(".hw-mark-paragraph")).toBeTruthy());
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(container.querySelector(".hw-caret")).toBeNull());
+    expect(container.querySelector(".hw-mark-paragraph")).toBeTruthy(); // 캐럿만 내려가고 문단 선택은 남는다
+    fireEvent.keyDown(window, { key: "Backspace" });
+    await waitFor(() => expect(adapter.applied.map((a) => a.intent)).toContain("DeleteBlock"));
+  });
+
   it("페이지 SVG에 글리프가 없으면(정렬 불가) 캐럿을 만들지 않는다 — 틀린 자리보다 무캐럿", async () => {
     const adapter = bodyAdapter({ svg: () => `<svg viewBox="0 0 794 1123" width="794" height="1123"></svg>` });
     const { container } = workspace(adapter);
