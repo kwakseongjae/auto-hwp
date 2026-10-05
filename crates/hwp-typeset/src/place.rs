@@ -253,6 +253,51 @@ pub struct PlacedPage {
     /// Per-edge cell borders + cell diagonals (styled lines). Drawn after `rects` (which now only
     /// carry shading + the LEGACY uniform box for cells without per-edge data).
     pub lines: Vec<PlacedLine>,
+    /// Text underline rules (#405) — one segment per contiguous underlined stretch of a line (the
+    /// spaces between underlined words included), just below the baseline. Painted after the glyphs.
+    /// Empty for a document without underlined runs, so its paint output is unchanged.
+    pub underlines: Vec<PlacedLine>,
+}
+
+/// Underline offset below the baseline, as a fraction of the glyph EM (#405).
+const UNDERLINE_OFFSET_EM: f64 = 0.12;
+/// Underline stroke width as a fraction of the glyph EM in device px (#405); the SVG sink clamps to
+/// its hairline floor.
+const UNDERLINE_WIDTH_EM: f64 = 0.06;
+/// HWPUNIT per device px — the same factor the renderer divides by (`hwp-render::HWPUNIT_PER_PX`).
+const UNDERLINE_HWPUNIT_PER_PX: f64 = 75.0;
+
+/// Add `[x, x + advance]` of an underlined glyph to `page.underlines`, extending the previous segment
+/// when this glyph continues it on the same line (same rule y and color, abutting x).
+fn push_underline(
+    page: &mut PlacedPage,
+    x: f64,
+    advance: f64,
+    baseline: f64,
+    size: f64,
+    color: Color,
+) {
+    if advance.is_nan() || size.is_nan() || advance <= 0.0 || size <= 0.0 {
+        return;
+    }
+    let y = baseline + UNDERLINE_OFFSET_EM * size;
+    let x2 = x + advance;
+    if let Some(last) = page.underlines.last_mut() {
+        if (last.y1 - y).abs() < 0.5 && last.color == color && (last.x2 - x).abs() < 1.0 {
+            last.x2 = x2;
+            last.y2 = y;
+            return;
+        }
+    }
+    page.underlines.push(PlacedLine {
+        x1: x,
+        y1: y,
+        x2,
+        y2: y,
+        color,
+        style: LineStyle::Solid,
+        width: size / UNDERLINE_HWPUNIT_PER_PX * UNDERLINE_WIDTH_EM,
+    });
 }
 
 impl PlacedPage {
@@ -3400,6 +3445,10 @@ fn place_atom(
 ) -> f64 {
     match atom {
         ParagraphAtom::Glyph(glyph) => {
+            let advance = atom.advance(fonts);
+            if glyph.underline && glyph.ch != '\n' {
+                push_underline(page, x, advance, baseline, glyph.size, glyph.color);
+            }
             if glyph.ch != ' ' && glyph.ch != '\t' && glyph.ch != '\n' {
                 page.glyphs.push(PlacedGlyph {
                     x,
@@ -3415,7 +3464,7 @@ fn place_atom(
                     origin: PlacedGlyphOrigin::SourceText,
                 });
             }
-            atom.advance(fonts)
+            advance
         }
         ParagraphAtom::Object {
             width,

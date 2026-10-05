@@ -49,6 +49,11 @@ packages are released in lockstep.)*
   기본 흰색 + 파란 틴트)이라 줄 중간 조합이 뒤 글자를 가린다(확정되면 줄이 다시 흐른다).
   *(EN — `HwpWorkspace`: the IME composition preview now copies face/size/baseline from the rendered glyph on the caret line and
   has an opaque background, so it no longer looks larger than its neighbours or overlaps the text after a mid-line caret.)*
+- **엔진: 밑줄 글자가 화면(SVG) · PDF 에 밑줄 없이 그려지던 문제(#405).** 조판은 글자마다 밑줄 여부를 실었지만 paint 변환이
+  그 값을 버려, ⌘U 로 넣은 밑줄도 원본 문서의 밑줄도 보이지 않았다(HWPX 내보내기에는 들어갔다). 이제 이어진 밑줄 구간(사이 공백 포함)마다
+  기준선 아래 선 하나를 기존 `PaintOp::Line` 으로 그린다 — paint 스키마 · 조판(쪽 수 · 줄바꿈) 변경 없음, 밑줄 없는 문서는 출력 동일.
+  *(EN — Engine: underlined text now paints its rule in SVG and PDF (one `PaintOp::Line` per contiguous underlined stretch); no
+  paint-schema or layout change.)*
 
 ---
 
