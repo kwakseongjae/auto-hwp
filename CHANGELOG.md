@@ -36,6 +36,14 @@ packages are released in lockstep.)*
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+---
+
+## [0.0.13] — 2026-10-06
+
+호스트 앱이 서술 영역에 **사용자 표**와 **글자 음영(형광)** 을 넣을 수 있게 하는 엔진 선행 lockstep 패치 릴리스다. Intent 는 선택 필드만
+늘었다(`InsertTableAt` 의 `border` · `col_widths` · `header_row`) — 파괴 변경은 없다. 새 표의 칸 글자 모양 · 머리 행 반복 기본값이
+바뀌었다(아래 「변경」).
+
 ### 추가 (Added)
 
 - **Intent `InsertTableAt` — 표 서식 지정(#419, additive).** `border`(`{type,width_mm,color}` — 모든 칸 변 + 외곽),
