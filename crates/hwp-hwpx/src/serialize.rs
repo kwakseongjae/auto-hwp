@@ -1297,9 +1297,10 @@ fn anchor_mark(bi: usize) -> String {
 /// `<hp:p><hp:run>` — tables are skipped and their host paragraph (the very next block, since
 /// `</hp:tbl>` closes first) supplies the anchor instead.
 ///
-/// Only paragraphs are anchored. A dirty TABLE that missed the in-place lane (stale/absent span)
-/// keeps the legacy end-append: its stale original is still sitting in the bytes, so moving the
-/// duplicate next to it would be a different bug, not a fix.
+/// Fresh tables (`src_span: None` — `InsertTableAt`, or such a table moved by `MoveBlock`) are
+/// anchored the same way (#409); they used to fall to the section-end append. A PARSED table that
+/// missed the in-place lane (stale span) keeps the legacy end-append: its stale original is still
+/// sitting in the bytes, so moving the duplicate next to it would be a different bug, not a fix.
 fn anchor_new_paragraphs(
     original: &str,
     sec: &Section,
@@ -1319,16 +1320,40 @@ fn anchor_new_paragraphs(
         .then_some((a, b))
     };
 
+    // #409: a PARSED table's `src_span` sits inside its host `<hp:p>` (the model keeps the host as
+    // the zero-line paragraph right after the table). A fresh block whose backward neighbour is such
+    // a table must land AFTER that host — anchoring at an earlier paragraph's end would put it
+    // before the table it follows in the model.
+    let host_end_of_table = |bi: usize| -> Option<usize> {
+        let Some(Block::Table(t)) = sec.blocks.get(bi) else {
+            return None;
+        };
+        let (ts, te) = t.src_span?;
+        // The host follows the table in the model, possibly after other fresh blocks inserted
+        // between them — so search forward for the paragraph whose span CONTAINS the table's.
+        (bi + 1..sec.blocks.len())
+            .find_map(|k| span_of(k).filter(|&(a, b)| a <= ts && te <= b))
+            .map(|(_, end)| end)
+    };
+
     let mut plan = AnchorPlan::default();
     let mut grouped: BTreeMap<usize, String> = BTreeMap::new();
     for (bi, _) in dirty {
-        // Fresh paragraphs only (`source: None`); everything else keeps its existing lane.
-        if !matches!(sec.blocks.get(*bi), Some(Block::Paragraph(p)) if p.source.is_none()) {
+        // Fresh blocks only: a paragraph with no `source`, or a table with no `src_span` (#409 —
+        // `InsertTableAt` / a fresh table moved by `MoveBlock`). A parsed table that missed the
+        // in-place lane is NOT in `dirty`'s anchorable set: its stale original still sits in the
+        // bytes, so it keeps the legacy end-append (see above).
+        let fresh = match sec.blocks.get(*bi) {
+            Some(Block::Paragraph(p)) => p.source.is_none(),
+            Some(Block::Table(t)) => t.src_span.is_none(),
+            None => false,
+        };
+        if !fresh {
             continue;
         }
         let at = (0..*bi)
             .rev()
-            .find_map(|j| span_of(j).map(|(_, end)| end))
+            .find_map(|j| host_end_of_table(j).or_else(|| span_of(j).map(|(_, end)| end)))
             .or_else(|| {
                 (*bi + 1..sec.blocks.len()).find_map(|j| span_of(j).map(|(start, _)| start))
             });
