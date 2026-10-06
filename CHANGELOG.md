@@ -36,6 +36,15 @@ packages are released in lockstep.)*
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+### 바뀜
+
+- **`InsertTableAt` 새 표 칸 글은 이웃 문단의 글자 색을 따르지 않는다 (#431).** #419(A-3)의 「글꼴 · 크기 · 색 상속」에서
+  **색을 뺐다** — 칸 글은 글꼴 · 크기만 이웃 본문을 따르고 색은 문서 기본 본문 색(검정)이다. 색 있는 제목 · 강조 줄 다음에 넣은 표가
+  통째로 그 색이 되던 동작이 바뀐다. 강조(굵게 · 기울임 · 밑줄 · 취소선 · 음영)는 전처럼 따르지 않는다. 칸 색이 필요하면 표를 넣은 뒤
+  `SetTableCellRuns` 의 run `color` 로 지정한다.
+  *(EN — New `InsertTableAt` table cells inherit only the neighbouring body paragraph's font face and size; their text
+  color is now the document's default body color (black) instead of the neighbour's color.)*
+
 ### 고침
 
 - **`InsertTableAt` 새 표의 칸 문단이 이웃 본문 문단의 문단 모양(위 · 아래 간격)을 쓰던 문제 (#430).**
