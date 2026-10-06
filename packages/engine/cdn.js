@@ -18,15 +18,15 @@
 
 /** The version this build of the JS ships with — the CDN pin. Kept in lockstep with package.json by
  *  `scripts/build-wasm.mjs` (the prepack hook), which fails the pack when the two disagree. */
-export const ENGINE_VERSION = '0.0.12';
+export const ENGINE_VERSION = '0.0.13';
 
-/** UNCOMPRESSED size of `pkg/hwp_wasm_bg.wasm` as published in ENGINE_VERSION (measured: 0.0.12 publish workflow,
- *  binaryen 119 `wasm-opt -Oz` with the binary's own target_features — #364 → 8,634,322 B).
+/** UNCOMPRESSED size of `pkg/hwp_wasm_bg.wasm` as published in ENGINE_VERSION (measured: 0.0.13 publish workflow,
+ *  binaryen 119 `wasm-opt -Oz` with the binary's own target_features — #364 → 8,649,909 B).
  *  Used ONLY as the progress denominator when the transfer is content-encoded — a compressed response
  *  reports the COMPRESSED byte count in `Content-Length` while `response.body` yields DECOMPRESSED
  *  bytes, so the header cannot be the denominator (progress is then flagged `estimated`).
  *  `scripts/build-wasm.mjs` warns when the local artifact drifts from this number. */
-export const WASM_BYTES = 8634322;
+export const WASM_BYTES = 8649909;
 
 const CDN_ORIGIN = 'https://cdn.jsdelivr.net';
 
