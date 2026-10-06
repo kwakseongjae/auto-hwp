@@ -3,6 +3,20 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-10-06 · Claude Opus 5.5 — **0.0.13 발행 — 호스트 사용자 표 · 글자 음영의 엔진 선행 + 합성 메타데이터** (main `33afb67`).
+  · **#409 → #414**: W4.1 앵커 레인이 새 **문단**만 원본 스팬에 앵커 → 새 **표**(`src_span: None`)도 앵커. 뒤 이웃이 원본 표면 그
+    표를 담은 호스트 `<hp:p>` 끝에 앵커(모델은 `[표, 호스트]`, 표 스팬은 호스트 안 — 전엔 표 앞으로 뒤집혔다).
+  · **#410 · #415 → #416**: `push_para_runs` 가 `highlight: None` 하드코딩 → `CharShape::highlight()`(없음 · **흰색**은 None — 자체 HWP5
+    파서는 음영 없음을 흰색으로 싣는다, benchmark.hwp 85/86). 조판이 음영 글자 EM 상자를 `PlacedPage.text_shades` 로 모아
+    칸 음영 다음 · 테두리/글자 앞에 `PaintOp::Rect` 로(스키마 · 조판 무변경).
+  · **#417 → #418**: 빌릴 `<hp:tbl>` 이 없으면 header 의 「가장 큰 borderFill」(대개 선없음)로 넘어갔다 → 기본 실선 0.12 mm borderFill 합성.
+  · **#419 → #420**: `InsertTableAt` 칸 글 = 이웃 본문 글꼴 · 크기 · 색(강조 제외), 선택 필드 `border` · `col_widths` · `header_row`,
+    새 표 열 너비 = 본문 폭 HWPUNIT(전엔 `[1;n]` 이 그대로 나가 폭 n HWPUNIT 표), 머리 행 기본 켬(`Table.repeat_header_off`).
+  · **#421 → #424**: 합성 HWPX `content.hpf` 의 바탕 작성자 · 작성일을 비운다(시계 없는 wasm · 결정적 출력이라 「지금」 아님).
+  · **#423 → publish 발행 0.0.13**: wasm 8,649,909 B · sha256 `d028932e…aa79` · SRI `sha384-eLRIg3fA…uL+S`, Node 20/22/24 · chromium 145 · webkit 26.
+  · 함정: **CARGO_TARGET_DIR 를 워크트리끼리 나누면** 파이썬으로 고친 파일이 낡은 산출물로 빌드될 때가 있다 — 이상한 「없는 필드」
+    오류면 `touch` 후 다시. 열린 것: #413(원본 블록 `MoveBlock` 이 내보내기에서 원래 자리로 — 원본 바이트 이동 클래스).
+
 - 갱신: 2026-10-06 · Claude Opus 5.5 — **0.0.12 발행 — 호스트 편집기 직접 입력 제보(캐럿 키 · 조합 미리보기 · 밑줄 렌더)** (main `7953656`).
   · **#401 → #402 머지**: 본문 클릭 = 문단 마크 + 글자 캐럿. 「키보드 블록 편집」 리스너가 `caretActiveRef` 를 안 봐서 캐럿 위 ⌫ 가
     `deleteBack` + `DeleteBlock`, Enter 가 `SplitParagraph` + `InsertParagraphAt` 를 함께 냈다(사용자 글 유실). 리스너가 캐럿에 양보.
