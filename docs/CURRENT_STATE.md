@@ -3,6 +3,17 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-10-06 · Claude Opus 5.5 — **0.0.12 발행 — 호스트 편집기 직접 입력 제보(캐럿 키 · 조합 미리보기 · 밑줄 렌더)** (main `7953656`).
+  · **#401 → #402 머지**: 본문 클릭 = 문단 마크 + 글자 캐럿. 「키보드 블록 편집」 리스너가 `caretActiveRef` 를 안 봐서 캐럿 위 ⌫ 가
+    `deleteBack` + `DeleteBlock`, Enter 가 `SplitParagraph` + `InsertParagraphAt` 를 함께 냈다(사용자 글 유실). 리스너가 캐럿에 양보.
+  · **#403 → #404 머지**: 조합 미리보기가 런의 원래 글꼴 이름(설치 안 된 `휴먼명조` → 대체 고딕)을 썼다 → 캐럿 줄의 **렌더된 SVG 글자**에서
+    `font-family` · `font-size` · 기준선을 가져온다(글꼴 매핑을 TS 에 다시 쓰지 않음). 배경 불투명(`--hw-ime-preview-bg`) — 줄 중간은 가린다.
+  · **#405 → #406 머지**: `lower_page` 가 `PlacedGlyph.underline` 을 버려 밑줄이 화면 · PDF 에 없었다 → `place_atom` 이 밑줄 구간을
+    `PlacedPage.underlines` 에 모으고 기존 `PaintOp::Line` 으로 그린다(스키마 · 조판 무변경, 밑줄 없는 문서 출력 동일).
+  · **#408 머지 → publish 워크플로 발행 0.0.12**: wasm 8,634,322 B · sha256 `349fdf6d…0f56`, Node 20/22/24 · chromium 145 · webkit 26 확인.
+  · 함정: 이 머신 bpk 워크트리의 편집 훅이 auto-hwp 파일을 bpk prettier 로 통째 재포맷한다 — auto-hwp 파일은 스크립트로 고칠 것.
+  · 남은 것: 문단 안 줄바꿈(Shift+Enter 는 지금 Enter 와 같음) · 줄 중간 조합 시 뒤 글자 밀기 · 접힌 캐럿 서식 래치 — 모두 기능 후보.
+
 - 갱신: 2026-10-05 · Claude Opus 5.5 — **0.0.11 발행 — 제안 확정 lockstep 검증(#393) · ⌘U 밑줄(#384)** (main `ced930e`).
   · **#393 → #395 머지**: `verify_proposal` 이 편집 전 문서의 `place_doc` ≠ `NaiveLayout` 쪽 수만으로도 확정을 막았다 →
     `lockstep_verdict` 가 부호 있는 차이를 편집 전 · 뒤로 비교, 같으면 advisory `layout-lockstep-mismatch-preexisting`,
