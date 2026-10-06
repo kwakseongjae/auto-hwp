@@ -1716,7 +1716,9 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             let text_w = section_text_width(doc, *section)?;
             block_insert_index(section_ref(doc, *section)?, *index)?;
             let body = body_cell_shapes(doc, *section, *index);
+            let cell_para = cell_para_shape(doc, *section, *index);
             let mut table = build_rich_table(doc, rows, body, text_w)?;
+            set_cell_para_shape(&mut table.cells, cell_para);
             if let Some(ratios) = &opts.col_widths {
                 table.col_widths = scale_col_widths(ratios, table.cols, text_w)?;
             }
@@ -2688,6 +2690,90 @@ fn body_cell_shapes(doc: &mut SemanticDoc, section: usize, at: usize) -> Option<
         },
     );
     Some((plain, bold))
+}
+
+/// The paragraph shape for the cells of a table inserted at `(section, at)` (#430). A new table's cell
+/// paragraph must NOT take the neighbouring body paragraph's shape: a body/list paragraph's 위 · 아래
+/// 간격 (e.g. 12pt above / 3pt below) inside a cell makes Hancom grow the row and sit the text on the
+/// bottom border. Before this the cell paragraph carried the engine-default index 0, which the HWPX
+/// export resolves to the section's last `paraPrIDRef` — i.e. exactly such a body shape.
+///
+/// 1. **Reuse** the document's own table-cell paragraph shape: the most frequent shape among existing
+///    table cells (every section, nested tables included) that is a plain cell shape — no 위 · 아래
+///    간격, no indent / left / right margin, no numbering, no page break, and
+///    left / justified alignment (a centred header-cell shape would centre every new cell).
+/// 2. Else **synthesize** one: 0 spacing above / below, the nearest body paragraph's PERCENT line
+///    spacing (160% when it has none), nothing else — a list's hanging indent does not belong in a
+///    cell either. Never the default shape, which the export would map back to a body `paraPrIDRef`.
+fn cell_para_shape(doc: &mut SemanticDoc, section: usize, at: usize) -> usize {
+    fn walk(blocks: &[Block], out: &mut Vec<usize>, in_cell: bool) {
+        for b in blocks {
+            match b {
+                Block::Paragraph(p) if in_cell => out.push(p.para_shape),
+                Block::Paragraph(_) => {}
+                Block::Table(t) => {
+                    for c in &t.cells {
+                        walk(&c.blocks, out, true);
+                    }
+                }
+            }
+        }
+    }
+    let mut seen = Vec::new();
+    for sec in &doc.sections {
+        walk(&sec.blocks, &mut seen, false);
+    }
+    let plain_cell = |s: &ParaShape| {
+        s.space_before == 0
+            && s.space_after == 0
+            && s.indent == 0
+            && s.left_margin == 0
+            && s.right_margin == 0
+            && s.numbering_id == 0
+            && !s.page_break_before
+            && matches!(s.align, HorizontalAlign::Justify | HorizontalAlign::Left)
+    };
+    // Most frequent qualifying shape; ties go to the one seen first (document order).
+    let mut best: Option<(usize, usize)> = None; // (count, index)
+    for (i, &idx) in seen.iter().enumerate() {
+        if seen[..i].contains(&idx) || !doc.para_shapes.get(idx).is_some_and(plain_cell) {
+            continue;
+        }
+        let n = seen.iter().filter(|&&x| x == idx).count();
+        if best.is_none_or(|(bn, _)| n > bn) {
+            best = Some((n, idx));
+        }
+    }
+    if let Some((_, idx)) = best {
+        return idx;
+    }
+    let (_, nb_para) = neighbour_shapes(doc, section, at);
+    let body = nb_para.and_then(|i| doc.para_shapes.get(i));
+    let line_spacing_value = match body {
+        Some(b) if b.line_spacing_type == LineSpacingType::Percent && b.line_spacing_value > 0 => {
+            b.line_spacing_value
+        }
+        _ => 160,
+    };
+    intern_para_shape(
+        doc,
+        ParaShape {
+            line_spacing_type: LineSpacingType::Percent,
+            line_spacing_value,
+            ..Default::default()
+        },
+    )
+}
+
+/// Point every cell paragraph of a freshly built table at `para_shape` (#430).
+fn set_cell_para_shape(cells: &mut [Cell], para_shape: usize) {
+    for c in cells {
+        for b in &mut c.blocks {
+            if let Block::Paragraph(p) = b {
+                p.para_shape = para_shape;
+            }
+        }
+    }
 }
 
 /// Build a rich table node from per-row cell specs (shared by `AppendRichTable`/`InsertTableAt`).
@@ -4214,6 +4300,53 @@ mod tests {
                 );
             }
             _ => panic!("expected a table"),
+        }
+    }
+
+    #[test]
+    fn insert_table_at_cells_get_a_spacing_free_non_default_para_shape_430() {
+        // A body on the engine-default para shape (no line spacing at all) + a spaced list paragraph.
+        // The new cells must get a NON-default shape (the default one is what the HWPX export maps back
+        // to the section's last body paraPr) with 0 spacing and the 160% fallback line spacing, and
+        // never the spaced neighbour's shape.
+        let mut doc = doc_with(vec![simple_para(1, "앞"), simple_para(2, "뒤")]);
+        doc.para_shapes.push(ParaShape {
+            space_before: 1200,
+            space_after: 300,
+            indent: -6014,
+            ..Default::default()
+        });
+        if let Block::Paragraph(p) = &mut doc.sections[0].blocks[1] {
+            p.para_shape = 1;
+        }
+        let cell = |t: &str| CellSpec {
+            text: t.into(),
+            ..Default::default()
+        };
+        apply(
+            &mut doc,
+            &Op::InsertTableAt {
+                opts: Default::default(),
+                section: 0,
+                index: 1,
+                rows: vec![vec![cell("가"), cell("나")]],
+            },
+        )
+        .unwrap();
+        let Block::Table(t) = &doc.sections[0].blocks[1] else {
+            panic!("table")
+        };
+        for c in &t.cells {
+            let Block::Paragraph(p) = &c.blocks[0] else {
+                panic!("cell paragraph")
+            };
+            let ps = &doc.para_shapes[p.para_shape];
+            assert!(!ps.is_default(), "never the default (export → body paraPr)");
+            assert_eq!((ps.space_before, ps.space_after, ps.indent), (0, 0, 0));
+            assert_eq!(
+                (ps.line_spacing_type, ps.line_spacing_value),
+                (LineSpacingType::Percent, 160)
+            );
         }
     }
 

@@ -36,6 +36,17 @@ packages are released in lockstep.)*
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+### 고침
+
+- **`InsertTableAt` 새 표의 칸 문단이 이웃 본문 문단의 문단 모양(위 · 아래 간격)을 쓰던 문제 (#430).**
+  칸 문단이 엔진 기본 문단 모양이라 HWPX 내보내기가 구역의 본문 `paraPrIDRef`(예: 위 12pt · 아래 3pt)로 썼고,
+  한/글이 칸 안에서도 위 간격을 적용해 칸이 늘고 글이 아래 선에 붙었다. 이제 새 표 칸 문단은 **칸용 문단 모양**을 쓴다 —
+  문서에 이미 있는 표 칸 문단 모양(간격 · 들여쓰기 · 번호 없음, 왼쪽/양쪽 정렬) 중 가장 많이 쓰인 것을 그대로 참조하고,
+  없으면 위 · 아래 간격 0 · 본문과 같은 줄 간격(퍼센트, 없으면 160%)으로 하나 만든다. 문단 모양은 여전히 상속하지 않는다.
+  *(EN — Cells of a table inserted with `InsertTableAt` no longer pick up the neighbouring body paragraph's
+  spacing in the HWPX export; they reuse the document's own plain table-cell paragraph shape, or a synthesized
+  one with zero spacing and the body's line spacing.)*
+
 ---
 
 ## [0.0.13] — 2026-10-06
