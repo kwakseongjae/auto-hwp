@@ -257,6 +257,43 @@ pub struct PlacedPage {
     /// spaces between underlined words included), just below the baseline. Painted after the glyphs.
     /// Empty for a document without underlined runs, so its paint output is unchanged.
     pub underlines: Vec<PlacedLine>,
+    /// Text background boxes (글자 음영 — charPr `shadeColor`, A-1) — one rect per contiguous shaded
+    /// stretch of a line, covering the glyph EM box. Painted above cell fills, below borders and
+    /// glyphs. Empty for a document without shaded runs, so its paint output is unchanged.
+    pub text_shades: Vec<PlacedRect>,
+}
+
+/// Add `[x, x + advance]` of a shaded glyph's EM box to `page.text_shades`, extending the previous
+/// box when this glyph continues it on the same line (same top/height/color, abutting x).
+fn push_text_shade(
+    page: &mut PlacedPage,
+    x: f64,
+    advance: f64,
+    baseline: f64,
+    size: f64,
+    color: Color,
+) {
+    if advance.is_nan() || size.is_nan() || advance <= 0.0 || size <= 0.0 {
+        return;
+    }
+    let y = baseline - crate::BASELINE_RATIO * size;
+    if let Some(last) = page.text_shades.last_mut() {
+        if (last.y - y).abs() < 0.5
+            && (last.h - size).abs() < 0.5
+            && last.fill == Some(color)
+            && (last.x + last.w - x).abs() < 1.0
+        {
+            last.w = x + advance - last.x;
+            return;
+        }
+    }
+    page.text_shades.push(PlacedRect {
+        x,
+        y,
+        w: advance,
+        h: size,
+        fill: Some(color),
+    });
 }
 
 /// Underline offset below the baseline, as a fraction of the glyph EM (#405).
@@ -3380,6 +3417,8 @@ struct GlyphInfo {
     size: f64,
     color: Color,
     underline: bool,
+    /// Visible text background (글자 음영, A-1) — [`CharShape::highlight`].
+    shade: Option<Color>,
     bold: bool,
     italic: bool,
     /// Requested font family (CharShape.font_family) — display only (the SVG/text font-family); advances
@@ -3446,6 +3485,9 @@ fn place_atom(
     match atom {
         ParagraphAtom::Glyph(glyph) => {
             let advance = atom.advance(fonts);
+            if let Some(shade) = glyph.shade.filter(|_| glyph.ch != '\n') {
+                push_text_shade(page, x, advance, baseline, glyph.size, shade);
+            }
             if glyph.underline && glyph.ch != '\n' {
                 push_underline(page, x, advance, baseline, glyph.size, glyph.color);
             }
@@ -3500,6 +3542,7 @@ fn paragraph_atoms(
         let size = cs.map(|c| c.height).filter(|&h| h > 0).unwrap_or(1000) as f64;
         let color = cs.map(|c| c.text_color).unwrap_or_default();
         let underline = cs.map(|c| c.underline).unwrap_or(false);
+        let shade = cs.and_then(CharShape::highlight);
         let bold = cs.map(|c| c.bold).unwrap_or(false);
         let italic = cs.map(|c| c.italic).unwrap_or(false);
         // Per-run memo keyed by script slot: the metric key and display face depend only on (char
@@ -3539,6 +3582,7 @@ fn paragraph_atoms(
                             size,
                             color,
                             underline,
+                            shade,
                             bold,
                             italic,
                             font,

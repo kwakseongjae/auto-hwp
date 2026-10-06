@@ -44,6 +44,17 @@ packages are released in lockstep.)*
   기존 표 바로 뒤에 넣은 블록은 그 표를 담은 호스트 문단 **뒤**에 앵커한다(전에는 표 앞 문단 끝에 붙어 순서가 뒤집혔다).
   *(EN — Engine: a table inserted with `InsertTableAt` (or such a table moved with `MoveBlock`) now serializes at its block
   position in `toHwpx` instead of the section end.)*
+- **엔진: `blockRuns` 가 글자 배경(`highlight`)을 늘 `null` 로 돌려주던 문제(#410).** 쓰기(`RunSpec.highlight` → charPr
+  `shadeColor`)와 다시 열기 파싱은 됐지만 읽기가 값을 하드코딩해 버렸다 — 값으로 되읽어 다시 저장하면 형광이 사라졌다. 이제 run
+  글자 모양의 `shadeColor` 를 `#RRGGBB` 로 돌려준다(없음 · 흰색은 `null`). 원본 문서에 이미 있던 글자 음영도 읽힌다.
+  *(EN — Engine: `blockRuns` now reports each run's text background (`highlight`) from its charPr `shadeColor`, so it
+  round-trips with `RunSpec.highlight`.)*
+- **엔진: 글자 배경(글자 음영)이 화면(SVG) · PDF 에 그려지지 않던 문제(#415).** 조판이 칸 음영만 칠하고 run 의
+  `shadeColor` 는 읽지 않았다. 이제 이어진 음영 구간마다 글자 상자 뒤에 그 색 상자 하나를 기존 `PaintOp::Rect` 로 칠한다
+  (칸 음영 위 · 테두리와 글자 아래). 흰색은 칠하지 않는다(바이너리 HWP 의 「음영 없음」 기본값). paint 스키마 · 조판(줄바꿈 ·
+  쪽 수) 변경 없음, 글자 음영이 없는 문서는 출력 동일.
+  *(EN — Engine: a run's text background (charPr `shadeColor`) is now painted behind its glyphs in SVG and PDF via the
+  existing filled `PaintOp::Rect`; white counts as none; no layout change.)*
 
 ---
 
