@@ -53,6 +53,11 @@ packages are released in lockstep.)*
 
 ### 수정 (Fixed)
 
+- **엔진: 처음부터 합성한 HWPX(`.hwp → .hwpx` 변환 등)가 내장 바탕의 작성자 · 작성일을 싣던 문제(#421).** `content.hpf` 의
+  `creator` · `lastsaveby` 가 바탕 파일을 저장한 계정 이름, `CreatedDate` · `ModifiedDate` · `date` 가 바탕을 만든 날이었다 — 변환한
+  모든 문서가 같은 작성자 · 작성일을 가졌다. 이제 이 값들을 비운다(빈 `<opf:meta/>`). HWPX 입력 문서의 메타데이터는 그대로다.
+  *(EN — Engine: from-scratch HWPX (e.g. `.hwp` → `.hwpx`) no longer carries the built-in template's author and dates in
+  `content.hpf`; those entries are now empty. HWPX input keeps its own metadata.)*
 - **엔진: `InsertTableAt` 으로 넣은 표가 `toHwpx` 에서 구역 끝으로 나가던 문제(#409).** HWPX 직렬화기의 앵커 레인이 새
   **문단**만 원본 바이트의 제자리에 끼우고, 원본 스팬이 없는 새 **표**는 구역 끝 append 로 보냈다 — 편집기에서는 제자리였지만
   내려받은 파일을 다시 열면 표가 문서 끝에 있었다(`MoveBlock` 으로 옮긴 뒤에도). 이제 새 표도 이웃 문단의 원본 스팬에 앵커한다.
