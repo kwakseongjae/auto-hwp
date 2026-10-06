@@ -105,6 +105,9 @@ pub fn serialize(doc: &SemanticDoc) -> Result<Vec<u8>> {
         })?;
 
     let pkg = Package::open(&src.bytes)?;
+    // #421: seeded from the built-in SKELETON (the from-scratch path) → its document metadata is the
+    // template author's, not the user's, and must not ride along.
+    let from_skeleton = src.bytes.as_slice() == SKELETON;
     let section_names = pkg.section_part_names();
     let header_name = pkg
         .part_names
@@ -178,7 +181,7 @@ pub fn serialize(doc: &SemanticDoc) -> Result<Vec<u8>> {
             .filter(|s| s.dirty.is_dirty());
 
         let is_content_hpf = content_hpf_name.as_deref() == Some(name.as_str())
-            && (!new_section_items.is_empty() || !image_items.is_empty());
+            && (from_skeleton || !new_section_items.is_empty() || !image_items.is_empty());
 
         if is_header && plan.header_out.is_some() {
             // PASS 2a — emit the fully-synthesized header.xml (fonts + charPr + paraPr pools).
@@ -190,11 +193,14 @@ pub fn serialize(doc: &SemanticDoc) -> Result<Vec<u8>> {
         } else if is_content_hpf {
             // PASS 2c — register the appended section/image parts in the package manifest + spine.
             let orig = pkg.read_part(name).unwrap_or_default();
-            let patched = patch_content_hpf(
+            let mut patched = patch_content_hpf(
                 &String::from_utf8_lossy(&orig),
                 &new_section_items,
                 &image_items,
             );
+            if from_skeleton {
+                patched = clear_template_metadata(&patched);
+            }
             out.start_file(name, deflate)
                 .map_err(|e| Error::Serialize(e.to_string()))?;
             out.write_all(patched.as_bytes())
@@ -388,6 +394,35 @@ fn image_media_type(kind: &str) -> String {
         other => return format!("image/{other}"),
     }
     .to_string()
+}
+
+/// #421: empty the template's personal/dated document metadata (`creator` · `lastsaveby` ·
+/// `CreatedDate` · `ModifiedDate` · `date`) in a from-scratch package's `content.hpf`, leaving each
+/// `<opf:meta>` in place as an empty element — the same shape the template already uses for its
+/// empty `subject`/`keyword`. Without this every converted document carried the template author's
+/// account name and the template's creation date. Empty, not "now": the wasm target has no clock
+/// and the output stays deterministic.
+fn clear_template_metadata(hpf: &str) -> String {
+    let mut s = hpf.to_string();
+    for name in [
+        "creator",
+        "lastsaveby",
+        "CreatedDate",
+        "ModifiedDate",
+        "date",
+    ] {
+        let open = format!("<opf:meta name=\"{name}\" content=\"text\">");
+        if let Some(a) = s.find(&open) {
+            if let Some(rel) = s[a..].find("</opf:meta>") {
+                let end = a + rel + "</opf:meta>".len();
+                s.replace_range(
+                    a..end,
+                    &format!("<opf:meta name=\"{name}\" content=\"text\"/>"),
+                );
+            }
+        }
+    }
+    s
 }
 
 /// Register appended parts in `content.hpf`: each new section → a `<opf:item media-type=
