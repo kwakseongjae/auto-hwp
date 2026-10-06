@@ -42,7 +42,7 @@ packages are released in lockstep.)*
 
 호스트 앱이 서술 영역에 **사용자 표**와 **글자 음영(형광)** 을 넣을 수 있게 하는 엔진 선행 lockstep 패치 릴리스다. Intent 는 선택 필드만
 늘었다(`InsertTableAt` 의 `border` · `col_widths` · `header_row`) — 파괴 변경은 없다. 새 표의 칸 글자 모양 · 머리 행 반복 기본값이
-바뀌었다(아래 「변경」).
+바뀌었다(아래 「변경」). 처음부터 합성한 HWPX 는 이제 내장 바탕의 작성자 · 작성일을 싣지 않는다(#421).
 
 ### 추가 (Added)
 
