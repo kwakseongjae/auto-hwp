@@ -50,7 +50,12 @@ pub fn page_count(doc: &SemanticDoc, fonts: &dyn FontMetricsProvider) -> usize {
 /// brushes first, borders next, then normal images and glyphs.
 fn lower_page(pg: &PlacedPage) -> PageLayerTree {
     let mut ops: Vec<PaintOp> = Vec::with_capacity(
-        pg.rects.len() + pg.lines.len() + pg.images.len() + pg.glyphs.len() + pg.underlines.len(),
+        pg.rects.len()
+            + pg.lines.len()
+            + pg.images.len()
+            + pg.glyphs.len()
+            + pg.underlines.len()
+            + pg.text_shades.len(),
     );
 
     // 1) Fills (shading) first so borders/text sit above them.
@@ -73,6 +78,17 @@ fn lower_page(pg: &PlacedPage) -> PageLayerTree {
             h: im.h,
             bin_ref: im.bin_ref.clone(),
             svg: im.svg.clone(),
+        });
+    }
+    // 1c) Text backgrounds (글자 음영, A-1) — above cell fills/brushes, below borders and glyphs, through
+    // the same filled-rect op the cell shading uses, so the SVG and PDF backends both draw them.
+    for r in &pg.text_shades {
+        ops.push(PaintOp::Rect {
+            x: r.x,
+            y: r.y,
+            w: r.w,
+            h: r.h,
+            fill: r.fill,
         });
     }
     // 2) Stroked boxes (LEGACY uniform cell borders for cells without per-edge data).
@@ -904,6 +920,100 @@ mod tests {
             &ApproxFontMetrics,
         );
         assert!(!plain[0].contains("<line "), "no underline → no <line>");
+    }
+
+    /// `(x, y, w, h)` of every `<rect>` filled with `fill` in an SVG page (the page background is
+    /// `#FFFFFF`, so a non-white fill isolates the shade rects).
+    fn filled_rects(svg: &str, fill: &str) -> Vec<(f64, f64, f64, f64)> {
+        let attr = |tag: &str, name: &str| -> f64 {
+            let k = format!(" {name}=\"");
+            let i = tag.find(&k).expect("attr") + k.len();
+            tag[i..i + tag[i..].find('"').unwrap()].parse().unwrap()
+        };
+        let needle = format!("fill=\"{fill}\"");
+        svg.match_indices("<rect ")
+            .map(|(i, _)| &svg[i..i + svg[i..].find('>').unwrap()])
+            .filter(|tag| tag.contains(&needle))
+            .map(|tag| {
+                (
+                    attr(tag, "x"),
+                    attr(tag, "y"),
+                    attr(tag, "width"),
+                    attr(tag, "height"),
+                )
+            })
+            .collect()
+    }
+
+    fn shaded_doc(shade: Color) -> SemanticDoc {
+        // 「가나」 shaded, then 「다라」 plain.
+        let mut doc = doc_with(vec![Block::Paragraph(Paragraph {
+            runs: vec![
+                Run {
+                    char_shape: 1,
+                    content: vec![Inline::Text("가나".into())],
+                    ..Default::default()
+                },
+                Run {
+                    char_shape: 0,
+                    content: vec![Inline::Text("다라".into())],
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        })]);
+        doc.char_shapes.push(CharShape {
+            shade_color: shade,
+            ..Default::default()
+        });
+        doc
+    }
+
+    #[test]
+    fn shaded_run_paints_one_background_box_behind_its_glyphs() {
+        // A-1: charPr `shadeColor` (글자 음영 / RunSpec.highlight) was written and read but never
+        // painted — the run looked plain on screen and in the PDF.
+        let doc = shaded_doc(Color::from_hex("#FFF2A8").unwrap());
+        let svg = render_doc_svg(&doc, &ApproxFontMetrics);
+        let (texts, _) = texts_and_lines(&svg[0]);
+        assert_eq!(texts.len(), 4);
+        let rects = filled_rects(&svg[0], "#FFF2A8");
+        assert_eq!(rects.len(), 1, "one box for the contiguous shaded stretch");
+        let (x, y, w, h) = rects[0];
+        assert!((x - texts[0].0).abs() < 0.01, "starts at 가's left edge");
+        assert!(
+            (x + w - texts[2].0).abs() < 0.01,
+            "ends at 다's left edge — the plain run is not shaded"
+        );
+        let baseline = texts[0].1;
+        assert!(y < baseline && baseline < y + h, "box spans the baseline");
+        // Behind the text: the rect precedes the first glyph in paint order.
+        let rect_at = svg[0].find("fill=\"#FFF2A8\"").unwrap();
+        let text_at = svg[0].find("<text ").unwrap();
+        assert!(rect_at < text_at, "background painted before the glyphs");
+    }
+
+    #[test]
+    fn unset_or_white_shade_paints_nothing_and_layout_is_unchanged() {
+        let plain = render_doc_svg(&shaded_doc(Color::default()), &ApproxFontMetrics);
+        let white = render_doc_svg(
+            &shaded_doc(Color::from_hex("#FFFFFF").unwrap()),
+            &ApproxFontMetrics,
+        );
+        let yellow = render_doc_svg(
+            &shaded_doc(Color::from_hex("#FFF2A8").unwrap()),
+            &ApproxFontMetrics,
+        );
+        assert_eq!(
+            plain, white,
+            "white = 음영 없음 (binary HWP's default) — identical output"
+        );
+        // Shading is paint-only: every glyph sits exactly where it did without it.
+        assert_eq!(texts_and_lines(&plain[0]).0, texts_and_lines(&yellow[0]).0);
+        assert_eq!(
+            plain[0].matches("<rect ").count() + 1,
+            yellow[0].matches("<rect ").count()
+        );
     }
 
     #[test]

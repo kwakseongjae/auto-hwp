@@ -108,6 +108,18 @@ impl CharShape {
     pub fn is_default(&self) -> bool {
         *self == CharShape::default()
     }
+
+    /// The run's VISIBLE text background (글자 음영 — HWPX charPr `shadeColor`), or `None` when it
+    /// paints nothing: unset (`Color::default()`, i.e. `shadeColor="none"`) or plain white. White is
+    /// treated as "no shade" because binary HWP stores its 음영 없음 as white (`0xFFFFFFFF`), and the
+    /// page itself is white — painting it would only cover a table cell's own fill under the text.
+    /// The single source for both the readback (`highlight` of a styled run) and the renderer.
+    pub fn highlight(&self) -> Option<Color> {
+        let c = self.shade_color;
+        let unset = c == Color::default();
+        let white = c.r == 0xFF && c.g == 0xFF && c.b == 0xFF;
+        (!unset && !white).then_some(c)
+    }
 }
 
 /// 정렬 — three full-width modes (배분/나눔) are NOT reducible to CSS text-align.

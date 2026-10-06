@@ -2161,7 +2161,8 @@ fn push_para_runs(doc: &SemanticDoc, p: &hwp_model::prelude::Paragraph, out: &mu
             } else {
                 Some(sh.text_color.to_hex())
             },
-            highlight: None,
+            // #410: the run's 글자 음영 (charPr `shadeColor`) — symmetric with `RunSpec.highlight`.
+            highlight: sh.highlight().map(|c| c.to_hex()),
             font: sh.font_family.clone(),
         });
     }
