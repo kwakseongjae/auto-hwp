@@ -518,6 +518,10 @@ pub struct Table {
     /// RENDER-IR ONLY: HWPX `repeatHeader="1"`. The first table row is repeated before a
     /// continued `pageBreak="CELL"` slice and consumes flow height on every continuation page.
     pub repeat_first_row: bool,
+    /// An op explicitly turned the header row OFF (A-3 `InsertTableAt.header_row: false`). The HWPX
+    /// serializer then writes `repeatHeader="0"` and no header cells for a (re-)emitted table; every
+    /// other table keeps the legacy `repeatHeader="1"` + header first row. Parsed tables leave it false.
+    pub repeat_header_off: bool,
     /// Per-column widths (HWPUNIT), `cols` entries — for faithful column proportions on render.
     /// Empty when unknown (then the renderer falls back to auto-layout).
     pub col_widths: Vec<HwpUnit>,

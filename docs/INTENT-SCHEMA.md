@@ -695,6 +695,13 @@ visual affinity**를 쓴다. 반면 아래 `CaretRectBody`는 주소의 canonica
 | `section` | integer | 구역 인덱스 | ● |
 | `index` | integer\|null | 블록 인덱스(`==len`=끝-append, 범위 밖=에러), `null`/생략=구역 끝 | ○(없으면 구역 끝) |
 | `rows` | CellSpec[][] | 행별 셀 그리드(아래 CellSpec; HTML-table 커버리지 — 각 논리 행은 *덮이지 않은* 셀만 나열) | ● |
+| `border` | object/null | **A-3 추가.** 모든 칸 변 + 표 외곽에 한 테두리: `{"type":"solid"\|"dash"\|"dot"\|"double"\|"none","width_mm":0.12,"color":"#RRGGBB"}`(모두 선택 — 기본 solid · 0.12 mm · 검정; 굵기는 HWP 선 굵기 0.1–5.0 mm 중 가장 가까운 값). 생략 = 문서 표 테두리(없으면 기본 실선) | ○ |
+| `col_widths` | number[]/null | **A-3 추가.** 열 너비 비율(열 수만큼, 모두 양수) → 구역 본문 폭에 맞춰 HWPUNIT 로 환산. 생략 = 같은 너비 | ○ |
+| `header_row` | bool/null | **A-3 추가.** 첫 행을 머리 행으로 — 다음 쪽으로 이어지면 반복(HWPX `repeatHeader`). 생략 = 켬, `false` = 끔 | ○ |
+
+**서식 상속(A-3).** 칸 글은 가장 가까운 본문 문단(`InsertParagraphAt` 서식 상속과 같은 이웃 규칙)의 글꼴 · 크기 · 색을
+따른다. 강조(굵게 · 기울임 · 밑줄 · 취소선 · 음영)는 따르지 않는다 — 굵게는 `CellSpec.bold` 로만. 문단 모양(들여쓰기 등)은
+상속하지 않는다(글머리표 문단의 내어쓰기가 칸 안에서 어긋나므로).
 
 **`CellSpec` (중첩 오브젝트)** — `#[serde(default, deny_unknown_fields)]`. 모든 필드 선택
 (`{}` = 빈 일반 셀). 알 수 없는 셀 키는 거부.
@@ -707,7 +714,8 @@ visual affinity**를 쓴다. 반면 아래 `CaretRectBody`는 주소의 canonica
 | `bold` | bool | 기본 `false` | ○ |
 | `shade` | string/null | 셀 배경 `"#RRGGBB"`(기본 없음) | ○ |
 
-실패: `rich table needs at least one row`(빈 rows), `insert index {i} out of range ...`(범위 밖).
+실패: `rich table needs at least one row`(빈 rows), `insert index {i} out of range ...`(범위 밖),
+`col_widths: expected {n} positive numbers …`, `border.type …` · `border.color …` · `border.width_mm …`(A-3 — 문서는 바뀌지 않는다).
 
 #### `SplitParagraph` — 캐럿 위치에서 문단을 둘로 나눔(1 undo 단위)
 ```json

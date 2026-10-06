@@ -2746,6 +2746,7 @@ mod tests {
         hwp_ops::apply(
             &mut doc,
             &Op::InsertTableAt {
+                opts: Default::default(),
                 section: 0,
                 index: 1,
                 rows: vec![
@@ -2943,6 +2944,7 @@ mod tests {
         hwp_ops::apply(
             &mut doc,
             &Op::InsertTableAt {
+                opts: Default::default(),
                 section: 0,
                 index: 1,
                 rows: vec![
@@ -3755,6 +3757,7 @@ mod tests {
         hwp_ops::apply(
             &mut doc,
             &Op::InsertTableAt {
+                opts: Default::default(),
                 section: 0,
                 index: 1,
                 rows: vec![

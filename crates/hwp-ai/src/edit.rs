@@ -402,6 +402,7 @@ pub fn compile_edits(
                     return Err(Error::Other("insert_table: 표에 행이 없습니다".into()));
                 }
                 ops.push(Op::InsertTableAt {
+                    opts: Default::default(),
                     section: *section,
                     index,
                     rows: grid,
@@ -797,6 +798,7 @@ mod tests {
         hwp_ops::apply(
             &mut doc,
             &Op::InsertTableAt {
+                opts: Default::default(),
                 section: 0,
                 index: 1,
                 rows: vec![vec![cell("번호"), cell("이름"), cell("역할")]],

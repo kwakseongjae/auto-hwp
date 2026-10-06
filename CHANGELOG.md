@@ -36,6 +36,21 @@ packages are released in lockstep.)*
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+### 추가 (Added)
+
+- **Intent `InsertTableAt` — 표 서식 지정(#419, additive).** `border`(`{type,width_mm,color}` — 모든 칸 변 + 외곽),
+  `col_widths`(열 너비 비율 → 본문 폭으로 환산), `header_row`(머리 행 반복, 생략 = 켬 · `false` = 끔)를 선택 필드로 받는다.
+  잘못된 값은 오류이고 문서는 바뀌지 않으며, 모르는 키는 거부한다.
+  *(EN — `InsertTableAt` gains optional `border`, `col_widths` (ratios) and `header_row`; additive, strict.)*
+
+### 변경 (Changed)
+
+- **엔진: `InsertTableAt` 칸 글이 이웃 본문 문단의 글꼴 · 크기 · 색을 따른다(#419).** 전에는 엔진 기본(10pt)이라 큰 본문 사이에
+  넣은 표만 작은 글씨였다. 강조(굵게 · 기울임 · 밑줄 · 취소선 · 음영)는 따르지 않는다 — 굵게는 `CellSpec.bold` 로만.
+  새 표는 화면에서도 머리 행을 반복한다(HWPX 내보내기는 원래 `repeatHeader="1"` 이었다).
+  *(EN — Engine: `InsertTableAt` cell text now inherits the nearest body paragraph's face/size/color (not its emphasis);
+  new tables repeat their header row in the render too, matching the export.)*
+
 ### 수정 (Fixed)
 
 - **엔진: `InsertTableAt` 으로 넣은 표가 `toHwpx` 에서 구역 끝으로 나가던 문제(#409).** HWPX 직렬화기의 앵커 레인이 새
@@ -61,6 +76,9 @@ packages are released in lockstep.)*
   표가 있는 문서 · 표를 내보내지 않는 편집은 출력 동일.
   *(EN — Engine: a table exported into a document that had no table now gets a synthesized thin-solid borderFill (and
   shaded cells clone it) instead of borrowing an unrelated no-line fill.)*
+- **엔진: 새 표(`InsertTableAt` · `AppendRichTable`)가 HWPX 로 폭 n HWPUNIT(≈0)의 표로 나가던 문제(#419).** 모델의 열 너비
+  `[1; n]` 비율을 내보내기가 실제 폭으로 썼다. 이제 새 표의 열 너비는 본문 폭을 나눈 실제 HWPUNIT 이다(화면은 그대로).
+  *(EN — Engine: new tables now export real column widths spanning the text width instead of `n` HWPUNIT.)*
 
 ---
 

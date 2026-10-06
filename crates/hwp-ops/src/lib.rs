@@ -144,10 +144,15 @@ pub enum Op {
         para: ParaSpec,
     },
     /// Insert a rich table at block `index` (same coverage semantics as `AppendRichTable`).
+    ///
+    /// 서식 (A-3): cell text inherits the font/size/color of the nearest text-bearing body paragraph
+    /// (the `InsertParagraphAt` 서식 상속 rule, minus emphasis — bold comes only from `CellSpec.bold`).
+    /// `opts` adds an explicit border, column-width ratios and the repeated header row.
     InsertTableAt {
         section: usize,
         index: usize,
         rows: Vec<Vec<CellSpec>>,
+        opts: TableInsertOpts,
     },
     /// Insert an embedded image at block `index`: `bytes`/`kind` (e.g. "png") become a `BinData`,
     /// referenced by a fresh paragraph holding an `Inline::Image`. `width`/`height` in HWPUNIT.
@@ -428,6 +433,103 @@ impl Default for CellSpec {
             bold: false,
             shade: None,
         }
+    }
+}
+
+/// Optional presentation of an `InsertTableAt` table (A-3). Every field is optional; `{}` keeps the
+/// defaults (the document's table border, equal columns over the text width, header row on).
+#[derive(Clone, Debug, Default, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TableInsertOpts {
+    /// One border for every cell edge and the table outline. Absent = the document's table border.
+    pub border: Option<TableBorderSpec>,
+    /// Relative column widths (any positive numbers, one per column), scaled to the section's text
+    /// width. Absent = equal columns.
+    pub col_widths: Option<Vec<f64>>,
+    /// Repeat the first row as a header on every page the table continues to (HWPX `repeatHeader`).
+    /// Absent = on (what the HWPX export has always written); `false` turns it off in the render
+    /// and the export.
+    pub header_row: Option<bool>,
+}
+
+/// A uniform table border (A-3): `type` = `solid` | `dash` | `dot` | `double` | `none` (default
+/// `solid`), `width_mm` snapped to the nearest HWP line width 0.1–5.0 (default 0.12), `color`
+/// `#RRGGBB` (default black).
+#[derive(Clone, Debug, Default, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TableBorderSpec {
+    #[serde(rename = "type")]
+    pub kind: Option<String>,
+    pub width_mm: Option<f64>,
+    pub color: Option<String>,
+}
+
+impl TableBorderSpec {
+    /// Validate and resolve to a cell edge. Unknown type / bad color / non-positive width → error.
+    pub fn to_edge(&self) -> Result<CellEdge> {
+        let style = match self
+            .kind
+            .as_deref()
+            .unwrap_or("solid")
+            .trim()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "solid" => LineStyle::Solid,
+            "dash" | "dashed" => LineStyle::Dashed,
+            "dot" | "dotted" => LineStyle::Dotted,
+            "double" => LineStyle::Double,
+            "none" => LineStyle::None,
+            other => {
+                return Err(Error::Other(format!(
+                    "border.type {other:?}: expected solid | dash | dot | double | none"
+                )))
+            }
+        };
+        let color = match self.color.as_deref() {
+            None => Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
+            Some(c) => Color::from_hex(c)
+                .ok_or_else(|| Error::Other(format!("border.color {c:?}: expected #RRGGBB")))?,
+        };
+        let mm = self.width_mm.unwrap_or(0.12);
+        if !(mm.is_finite() && mm > 0.0) {
+            return Err(Error::Other(format!("border.width_mm {mm}: must be > 0")));
+        }
+        // The 16 HWP line widths (mm) and the device-px stroke the lift/serializer pair with them
+        // (`hwp-hwpx::synth::border_width_token` is the inverse).
+        const WIDTHS: [(f64, f64); 16] = [
+            (0.1, 0.4),
+            (0.12, 0.5),
+            (0.15, 0.6),
+            (0.2, 0.75),
+            (0.25, 1.0),
+            (0.3, 1.1),
+            (0.4, 1.5),
+            (0.5, 1.9),
+            (0.6, 2.3),
+            (0.7, 2.6),
+            (1.0, 3.8),
+            (1.5, 5.7),
+            (2.0, 7.6),
+            (3.0, 11.3),
+            (4.0, 15.1),
+            (5.0, 18.9),
+        ];
+        let width_px = WIDTHS
+            .iter()
+            .min_by(|a, b| (a.0 - mm).abs().total_cmp(&(b.0 - mm).abs()))
+            .map(|w| w.1)
+            .unwrap_or(0.5);
+        Ok(CellEdge {
+            color,
+            style,
+            width_px,
+        })
     }
 }
 
@@ -1436,7 +1538,8 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             Ok(())
         }
         Op::AppendRichTable { section, rows } => {
-            let table = build_rich_table(doc, rows)?;
+            let text_w = section_text_width(doc, *section)?;
+            let table = build_rich_table(doc, rows, None, text_w)?;
             let sec = section_mut(doc, *section)?;
             sec.blocks.push(Block::Table(table));
             sec.dirty.mark();
@@ -1607,8 +1710,28 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             sec.dirty.mark();
             Ok(())
         }
-        Op::InsertTableAt { section, index, rows } => {
-            let table = build_rich_table(doc, rows)?;
+        Op::InsertTableAt { section, index, rows, opts } => {
+            // Validate everything BEFORE touching the doc — a bad option is an honest no-op error.
+            let edge = opts.border.as_ref().map(TableBorderSpec::to_edge).transpose()?;
+            let text_w = section_text_width(doc, *section)?;
+            block_insert_index(section_ref(doc, *section)?, *index)?;
+            let body = body_cell_shapes(doc, *section, *index);
+            let mut table = build_rich_table(doc, rows, body, text_w)?;
+            if let Some(ratios) = &opts.col_widths {
+                table.col_widths = scale_col_widths(ratios, table.cols, text_w)?;
+            }
+            if let Some(edge) = edge {
+                table.borders = [Some(edge); 4];
+                for c in &mut table.cells {
+                    c.borders = [Some(edge); 4];
+                }
+            }
+            match opts.header_row {
+                Some(false) => table.repeat_header_off = true,
+                // The export has always written `repeatHeader="1"` + a header first row for a new
+                // table; the render now agrees (the row repeats on continuation pages).
+                _ => table.repeat_first_row = true,
+            }
             let sec = section_mut(doc, *section)?;
             let at = block_insert_index(sec, *index)?;
             sec.blocks.insert(at, Block::Table(table));
@@ -1812,7 +1935,8 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                 return Err(Error::Other("TableInsertRows: no rows to insert".into()));
             }
             // Build the new cells (interning shades/shapes) BEFORE the mutable table borrow.
-            let new_cells = build_rich_table(doc, rows)?.cells;
+            let text_w = section_text_width(doc, *section)?;
+            let new_cells = build_rich_table(doc, rows, None, text_w)?.cells;
             let n = rows.len();
             let at = *at;
             let sec = section_mut(doc, *section)?;
@@ -2499,20 +2623,99 @@ fn build_chart_ref(spec: &ChartSpec) -> Result<ChartRef> {
     })
 }
 
-/// Build a rich table node from per-row cell specs (shared by `AppendRichTable`/`InsertTableAt`).
-/// Cells use HTML-table coverage: each logical row lists only the *uncovered* cells.
-fn build_rich_table(doc: &mut SemanticDoc, rows: &[Vec<CellSpec>]) -> Result<Table> {
-    if rows.is_empty() {
-        return Err(Error::Other("rich table needs at least one row".into()));
+/// The section's text width (page width minus left/right/gutter margins), HWPUNIT — what a new
+/// table spans. Falls back to A4 with 1-inch margins for a degenerate page.
+fn section_text_width(doc: &SemanticDoc, section: usize) -> Result<i32> {
+    let page = section_ref(doc, section)?.page;
+    let w = page.width - page.margin_left - page.margin_right - page.margin_gutter;
+    Ok(if w > 0 { w } else { 59528 - 2 * 7200 })
+}
+
+fn section_ref(doc: &SemanticDoc, section: usize) -> Result<&Section> {
+    doc.sections
+        .get(section)
+        .ok_or_else(|| Error::Other(format!("section {section} out of range")))
+}
+
+/// Column-width ratios → HWPUNIT widths summing to `text_w` (A-3). One positive finite ratio per
+/// column, else an honest error.
+fn scale_col_widths(ratios: &[f64], cols: usize, text_w: i32) -> Result<Vec<HwpUnit>> {
+    if ratios.len() != cols || !ratios.iter().all(|r| r.is_finite() && *r > 0.0) {
+        return Err(Error::Other(format!(
+            "col_widths: expected {cols} positive numbers, got {ratios:?}"
+        )));
     }
+    let total: f64 = ratios.iter().sum();
+    let mut out: Vec<HwpUnit> = ratios
+        .iter()
+        .map(|r| ((r / total) * text_w as f64).round().max(1.0) as HwpUnit)
+        .collect();
+    // Rounding remainder goes to the last column so the table spans exactly the text width.
+    let sum: HwpUnit = out.iter().sum();
+    if let Some(last) = out.last_mut() {
+        *last = (*last + text_w - sum).max(1);
+    }
+    Ok(out)
+}
+
+/// Cell char shapes for a table inserted at `(section, at)` (A-3): the nearest text-bearing body
+/// paragraph's face/size/color ([`neighbour_shapes`]) WITHOUT its emphasis — a table after a bold or
+/// highlighted line must not turn every cell bold. `(plain, bold)`, or `None` when the section has no
+/// text to inherit from (then the engine default shape, as before).
+fn body_cell_shapes(doc: &mut SemanticDoc, section: usize, at: usize) -> Option<(usize, usize)> {
+    let (nb_char, _) = neighbour_shapes(doc, section, at);
+    let idx = nb_char?;
+    let shape = doc.char_shapes.get(idx)?.clone();
+    let plain_shape = CharShape {
+        bold: false,
+        italic: false,
+        underline: false,
+        strikeout: false,
+        shade_color: Color::default(),
+        ..shape.clone()
+    };
+    // Unchanged → keep the pool index itself (the export then references the original charPr id).
+    let plain = if plain_shape == shape {
+        idx
+    } else {
+        intern_char_shape(doc, plain_shape.clone())
+    };
     let bold = intern_char_shape(
         doc,
         CharShape {
             bold: true,
-            ..Default::default()
+            ..plain_shape
         },
     );
-    let plain = intern_char_shape(doc, CharShape::default());
+    Some((plain, bold))
+}
+
+/// Build a rich table node from per-row cell specs (shared by `AppendRichTable`/`InsertTableAt`).
+/// Cells use HTML-table coverage: each logical row lists only the *uncovered* cells. `body` =
+/// the `(plain, bold)` cell char shapes (else the engine default); `text_w` = the width the equal
+/// default columns split (HWPUNIT).
+fn build_rich_table(
+    doc: &mut SemanticDoc,
+    rows: &[Vec<CellSpec>],
+    body: Option<(usize, usize)>,
+    text_w: i32,
+) -> Result<Table> {
+    if rows.is_empty() {
+        return Err(Error::Other("rich table needs at least one row".into()));
+    }
+    let (plain, bold) = match body {
+        Some(shapes) => shapes,
+        None => {
+            let bold = intern_char_shape(
+                doc,
+                CharShape {
+                    bold: true,
+                    ..Default::default()
+                },
+            );
+            (intern_char_shape(doc, CharShape::default()), bold)
+        }
+    };
     let mut covered: std::collections::BTreeSet<(usize, usize)> = Default::default();
     let mut cells = Vec::new();
     let mut ncols = 0usize;
@@ -2557,10 +2760,11 @@ fn build_rich_table(doc: &mut SemanticDoc, rows: &[Vec<CellSpec>]) -> Result<Tab
     Ok(Table {
         rows: rows.len(),
         cols,
-        // Explicit equal-split proportions so the renderer doesn't fall back to auto-layout (which
-        // made inserted tables reflow to a different grid than the doc's parsed tables). The renderer
-        // scales these to the body width, so equal values = equal columns.
-        col_widths: vec![1; cols],
+        // Explicit equal columns over the text width (HWPUNIT) so the renderer doesn't fall back to
+        // auto-layout. The renderer scales these to the body width (same picture as the old `[1; n]`
+        // proportions), and the HWPX export writes them as the real `<hp:sz>`/`<hp:cellSz>` widths
+        // — `[1; n]` exported a table n HWPUNIT wide (A-3).
+        col_widths: scale_col_widths(&vec![1.0; cols], cols, text_w)?,
         // A small outer gap so a chat-inserted table doesn't abut the block above/below it (the
         // "tables stuck together" artifact). ~1mm; parsed tables carry their real 바깥 여백 instead.
         outer_margin_top: 280,
@@ -3955,6 +4159,7 @@ mod tests {
         apply(
             &mut doc,
             &Op::InsertTableAt {
+                opts: Default::default(),
                 section: 0,
                 index: 1,
                 rows: vec![vec![cell("항목"), cell("내용")], vec![cell("A"), cell("B")]],
@@ -3984,6 +4189,7 @@ mod tests {
         apply(
             &mut doc,
             &Op::InsertTableAt {
+                opts: Default::default(),
                 section: 0,
                 index: 1,
                 rows: vec![vec![cell("번호"), cell("이름"), cell("역할"), cell("비고")]],
@@ -4275,6 +4481,7 @@ mod tests {
         let mut s = EditSession::new(doc_with(vec![simple_para(1, "앞"), simple_para(2, "뒤")]));
         // Seed a table at the end (index 2), as its own undo step.
         s.do_op(&Op::InsertTableAt {
+            opts: Default::default(),
             section: 0,
             index: 2,
             rows: vec![vec![cell("표")]],
@@ -4428,6 +4635,7 @@ mod tests {
         apply(
             &mut doc,
             &Op::InsertTableAt {
+                opts: Default::default(),
                 section: 0,
                 index: 1,
                 rows: vec![
@@ -4498,6 +4706,7 @@ mod tests {
         apply(
             &mut doc,
             &Op::InsertTableAt {
+                opts: Default::default(),
                 section: 0,
                 index: 1,
                 rows: vec![row(), row(), row()],
@@ -4657,6 +4866,7 @@ mod tests {
         apply(
             &mut doc,
             &Op::InsertTableAt {
+                opts: Default::default(),
                 section: 0,
                 index: 1,
                 rows: vec![vec![cell("항목"), cell("내용")], vec![cell(""), cell("")]],
@@ -4729,6 +4939,7 @@ mod tests {
         apply(
             &mut doc,
             &Op::InsertTableAt {
+                opts: Default::default(),
                 section: 0,
                 index: 1,
                 rows: vec![
@@ -4796,6 +5007,7 @@ mod tests {
         apply(
             &mut doc,
             &Op::InsertTableAt {
+                opts: Default::default(),
                 section: 0,
                 index: 1,
                 rows: vec![vec![cell("원본1")]],
@@ -4907,6 +5119,7 @@ mod tests {
         apply(
             &mut doc,
             &Op::InsertTableAt {
+                opts: Default::default(),
                 section: 0,
                 index: 1,
                 rows: vec![vec![cell("")], vec![cell("아래")]],
@@ -5035,6 +5248,7 @@ mod tests {
         apply(
             &mut doc,
             &Op::InsertTableAt {
+                opts: Default::default(),
                 section: 0,
                 index: 1,
                 rows: vec![vec![cell("바깥")]],
@@ -5120,6 +5334,7 @@ mod tests {
         apply(
             &mut doc,
             &Op::InsertTableAt {
+                opts: Default::default(),
                 section: 0,
                 index: 1,
                 rows: vec![vec![cell("a"), cell("b")]],
@@ -5176,6 +5391,7 @@ mod tests {
         apply(
             &mut doc,
             &Op::InsertTableAt {
+                opts: Default::default(),
                 section: 0,
                 index: 1,
                 rows: vec![vec![cell("예시")]],
@@ -5322,6 +5538,7 @@ mod tests {
         apply(
             &mut doc,
             &Op::InsertTableAt {
+                opts: Default::default(),
                 section: 0,
                 index: 1,
                 rows: vec![vec![cell("a")]],
@@ -5416,6 +5633,7 @@ mod tests {
         apply(
             &mut doc,
             &Op::InsertTableAt {
+                opts: Default::default(),
                 section: 0,
                 index: 1,
                 rows: vec![vec![cell("번호"), cell("이름"), cell("역할")]],
@@ -5457,6 +5675,7 @@ mod tests {
         apply(
             &mut doc,
             &Op::InsertTableAt {
+                opts: Default::default(),
                 section: 0,
                 index: 1,
                 rows: vec![vec![cell("머리")], vec![cell("끝")]],
@@ -5533,6 +5752,7 @@ mod tests {
         apply(
             &mut doc,
             &Op::InsertTableAt {
+                opts: Default::default(),
                 section: 0,
                 index: 1,
                 rows: vec![vec![cell("A"), wide("B")]],
@@ -5585,6 +5805,7 @@ mod tests {
         apply(
             &mut doc,
             &Op::InsertTableAt {
+                opts: Default::default(),
                 section: 0,
                 index: 1,
                 rows: vec![vec![tall("L"), cell("R0")], vec![cell("R1")]],
@@ -5625,6 +5846,7 @@ mod tests {
         apply(
             &mut doc,
             &Op::InsertTableAt {
+                opts: Default::default(),
                 section: 0,
                 index: 1,
                 rows: vec![vec![cell("a"), cell("b"), cell("c")]],
@@ -5677,6 +5899,7 @@ mod tests {
         apply(
             &mut doc,
             &Op::InsertTableAt {
+                opts: Default::default(),
                 section: 0,
                 index: 1,
                 rows: vec![vec![cell("a")], vec![cell("b")]],
@@ -5817,6 +6040,7 @@ mod tests {
         apply(
             &mut doc,
             &Op::InsertTableAt {
+                opts: Default::default(),
                 section: 0,
                 index: 1,
                 rows: vec![vec![cell("ABCDEF")]],

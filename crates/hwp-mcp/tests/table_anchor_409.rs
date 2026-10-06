@@ -116,6 +116,9 @@ fn insert_table(s: &mut Session, index: usize) {
                     ..Default::default()
                 },
             ]],
+            border: None,
+            col_widths: None,
+            header_row: None,
         },
     )
     .expect("InsertTableAt applies");
