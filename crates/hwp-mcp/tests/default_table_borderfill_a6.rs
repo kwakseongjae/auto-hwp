@@ -32,6 +32,9 @@ fn insert_and_export(name: &str) -> (String, String) {
             section: 0,
             index: None,
             rows: vec![vec![cell("A6표", None), cell("음영", Some("#FFCC00"))]],
+            border: None,
+            col_widths: None,
+            header_row: None,
         },
     )
     .expect("InsertTableAt applies");

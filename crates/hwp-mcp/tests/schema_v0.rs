@@ -47,6 +47,7 @@ fn synthetic_session() -> Session {
         ..Default::default()
     };
     es.do_op(&Op::InsertTableAt {
+        opts: Default::default(),
         section: 0,
         index: 1,
         rows: vec![

@@ -1625,10 +1625,21 @@ pub enum Intent {
     /// appends; PAST the end is an honest op-bus error, never a clamp), `None` (absent/null) appends at
     /// the section END — the dispatcher resolves `None` to `len` so the op's own `index == len` append
     /// semantics absorb the end-append (no separate append op).
+    ///
+    /// 서식 (A-3, additive): cell text inherits the nearest body paragraph's face/size/color (not its
+    /// emphasis). Optional `border` (`{type,width_mm,color}` on every cell edge + the outline),
+    /// `col_widths` (relative ratios, one per column, scaled to the text width) and `header_row`
+    /// (repeat the first row on continuation pages — default on; `false` turns it off).
     InsertTableAt {
         section: usize,
         index: Option<usize>,
         rows: Vec<Vec<hwp_ops::CellSpec>>,
+        #[serde(default)]
+        border: Option<hwp_ops::TableBorderSpec>,
+        #[serde(default)]
+        col_widths: Option<Vec<f64>>,
+        #[serde(default)]
+        header_row: Option<bool>,
     },
     /// Structural insert (issue 051) — insert a rich paragraph AT block `index` of `section` as ONE undo
     /// unit (the existing `InsertParagraphAt` op, exposed to the Intent lane). `runs` are styled
@@ -3384,6 +3395,9 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
             section,
             index,
             rows,
+            border,
+            col_widths,
+            header_row,
         } => {
             // `None` → the section END (resolved here so the op's `index == len` append semantics
             // absorb the end-append); `Some(i)` passes through — past-end stays an honest op error.
@@ -3396,6 +3410,11 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
                 section,
                 index,
                 rows,
+                opts: hwp_ops::TableInsertOpts {
+                    border,
+                    col_widths,
+                    header_row,
+                },
             })
             .map_err(|e| e.to_string())?;
             let pages = page_count_u32(session).unwrap_or(0);

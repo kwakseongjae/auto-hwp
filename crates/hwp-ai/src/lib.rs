@@ -437,6 +437,7 @@ fn op_summary(op: &Op) -> String {
             section,
             index,
             rows,
+            ..
         } => {
             format!("＋ 표 {}행 @[s{section}/b{index}]", rows.len())
         }
@@ -671,6 +672,7 @@ mod tests {
             rationale: "x".into(),
             ops: vec![
                 Op::InsertTableAt {
+                    opts: Default::default(),
                     section: 0,
                     index: 3,
                     rows: vec![],
