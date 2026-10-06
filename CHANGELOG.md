@@ -36,6 +36,13 @@ packages are released in lockstep.)*
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+---
+
+## [0.0.14] — 2026-10-07
+
+4패키지(`@auto-hwp/engine` · `editor-core` · `ai-protocol` · `react`) lockstep 패치. `InsertTableAt` 새 표의 칸 서식 후속(#419 A-3). Intent 표면은 그대로다 —
+새 표 칸 글의 색 기본값(이웃 색 → 기본 검정)과 칸 문단 모양이 바뀌었다(아래 「바뀜」 · 「고침」).
+
 ### 바뀜
 
 - **`InsertTableAt` 새 표 칸 글은 이웃 문단의 글자 색을 따르지 않는다 (#431).** #419(A-3)의 「글꼴 · 크기 · 색 상속」에서
