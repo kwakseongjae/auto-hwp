@@ -36,6 +36,15 @@ packages are released in lockstep.)*
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+### 수정 (Fixed)
+
+- **엔진: `InsertTableAt` 으로 넣은 표가 `toHwpx` 에서 구역 끝으로 나가던 문제(#409).** HWPX 직렬화기의 앵커 레인이 새
+  **문단**만 원본 바이트의 제자리에 끼우고, 원본 스팬이 없는 새 **표**는 구역 끝 append 로 보냈다 — 편집기에서는 제자리였지만
+  내려받은 파일을 다시 열면 표가 문서 끝에 있었다(`MoveBlock` 으로 옮긴 뒤에도). 이제 새 표도 이웃 문단의 원본 스팬에 앵커한다.
+  기존 표 바로 뒤에 넣은 블록은 그 표를 담은 호스트 문단 **뒤**에 앵커한다(전에는 표 앞 문단 끝에 붙어 순서가 뒤집혔다).
+  *(EN — Engine: a table inserted with `InsertTableAt` (or such a table moved with `MoveBlock`) now serializes at its block
+  position in `toHwpx` instead of the section end.)*
+
 ---
 
 ## [0.0.12] — 2026-10-06
