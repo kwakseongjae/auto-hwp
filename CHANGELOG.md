@@ -55,6 +55,12 @@ packages are released in lockstep.)*
   쪽 수) 변경 없음, 글자 음영이 없는 문서는 출력 동일.
   *(EN — Engine: a run's text background (charPr `shadeColor`) is now painted behind its glyphs in SVG and PDF via the
   existing filled `PaintOp::Rect`; white counts as none; no layout change.)*
+- **엔진: 표가 없는 문서에 넣은 표가 한/글에서 선 없이 나가던 문제(#417).** 새 표의 테두리를 「문서 첫 표의 borderFill」에서
+  빌리는데, 표가 없으면 header 의 가장 큰 borderFill(대개 쪽 · 글자 테두리용 선없음)으로 넘어가 표와 칸 음영이 선 없이 저장됐다.
+  이제 빌릴 표가 없으면 기본 표 테두리(네 변 실선 0.12 mm 검정) borderFill 을 합성해 쓰고, 칸 음영도 그것을 복제해 합성한다.
+  표가 있는 문서 · 표를 내보내지 않는 편집은 출력 동일.
+  *(EN — Engine: a table exported into a document that had no table now gets a synthesized thin-solid borderFill (and
+  shaded cells clone it) instead of borrowing an unrelated no-line fill.)*
 
 ---
 

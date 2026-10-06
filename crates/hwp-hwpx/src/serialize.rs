@@ -43,6 +43,10 @@ struct SynthPlan {
     style_map: BTreeMap<String, synth::StyleRef>,
     /// The fully-synthesized header.xml to emit, or None if nothing needed synthesizing.
     header_out: Option<String>,
+    /// A-6: the document had NO table to borrow a borderFill from, but the emitted content contains
+    /// one — the id of the synthesized (or reused) default thin-solid table borderFill. Becomes the
+    /// table ref for emission and the base clone for per-cell border/shade synthesis.
+    default_table_bf: Option<String>,
 }
 
 impl SynthPlan {
@@ -111,12 +115,18 @@ pub fn serialize(doc: &SemanticDoc) -> Result<Vec<u8>> {
         .read_header()
         .map(|b| String::from_utf8_lossy(&b).into_owned());
 
-    let table_ref = find_table_borderfill(&pkg);
+    let source_table_ref = find_table_borderfill(&pkg);
 
     // PASS 1 — synthesis plan: turn the dirty content's interned non-default Char/ParaShapes,
     // fonts, and cell shades into new header pool entries (ids above the existing max), so the
     // body can reference real, valid pool entries instead of reusing existing (mismatched) ones.
-    let mut plan = build_synth_plan(doc, header_xml.as_deref(), table_ref.as_deref());
+    let mut plan = build_synth_plan(doc, header_xml.as_deref(), source_table_ref.as_deref());
+    // A-6: no table in the document → the synthesized default table borderFill (when any table is
+    // emitted). Only when the header has no borderFill pool at all does the legacy "highest id"
+    // guess remain (that fill is usually 선없음, so the table had no visible lines in Hancom).
+    let table_ref = source_table_ref
+        .or_else(|| plan.default_table_bf.clone())
+        .or_else(|| header_borderfill_fallback(&pkg));
 
     let mut zin = ZipArchive::new(Cursor::new(src.bytes.clone()))
         .map_err(|e| Error::Serialize(format!("reopen source: {e}")))?;
@@ -592,10 +602,42 @@ fn build_synth_plan(
     // old "clone + fillBrush" output, so pre-F2 documents synthesize byte-identically.
     let mut bf_fragments = String::new();
     let mut bf_count = 0;
+    let mut next_bf_id = synth::max_pool_id(header0, "borderFills") + 1;
+    // A-6: with no table to borrow from, synthesize the default table borderFill (thin solid black,
+    // no fill) once — it is the emitted tables' ref AND the clone base for per-cell synthesis below.
+    let mut default_base: Option<String> = None;
+    if table_ref.is_none() && emits_table(doc) && header0.contains("<hh:borderFills") {
+        let template = plain_border_fill_template(header0);
+        let frag = synth::synthesize_border_fill_full(
+            &template,
+            next_bf_id,
+            &[Some(DEFAULT_TABLE_EDGE); 4],
+            None,
+        );
+        let id = match synth::existing_equivalent_id(
+            header0,
+            "<hh:borderFill ",
+            "</hh:borderFill>",
+            &frag,
+        ) {
+            Some(existing) => existing,
+            None => {
+                bf_fragments.push_str(&frag);
+                bf_count += 1;
+                next_bf_id += 1;
+                (next_bf_id - 1).to_string()
+            }
+        };
+        plan.default_table_bf = Some(id);
+        default_base = Some(frag);
+    }
     let specs = collect_bf_specs(doc);
     if !specs.is_empty() {
-        if let Some(base) = table_ref.and_then(|id| synth::border_fill_by_id(header0, id)) {
-            let mut next_id = synth::max_pool_id(header0, "borderFills") + 1;
+        let base = table_ref
+            .and_then(|id| synth::border_fill_by_id(header0, id))
+            .or(default_base);
+        if let Some(base) = base {
+            let mut next_id = next_bf_id;
             for (key, spec) in specs {
                 let frag =
                     synth::synthesize_border_fill_full(&base, next_id, &spec.borders, spec.shade);
@@ -715,6 +757,83 @@ fn collect_bf_specs(doc: &SemanticDoc) -> BTreeMap<String, BfSpec> {
         }
     }
     out
+}
+
+/// A-6: the edge a table gets when the document has no table to borrow a borderFill from — the
+/// thin solid black line (0.12 mm) Hancom gives a new table by default.
+const DEFAULT_TABLE_EDGE: CellEdge = CellEdge {
+    color: Color {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 255,
+    },
+    style: hwp_model::document::LineStyle::Solid,
+    width_px: 0.5,
+};
+
+/// A-6: a borderFill element to clone for the default table fill — the first pool entry WITHOUT a
+/// real background (so the clone carries no stray fill), else a built-in Hancom-shaped entry.
+fn plain_border_fill_template(header: &str) -> String {
+    let mut idx = 0;
+    while let Some(p) = header[idx..].find("<hh:borderFill ") {
+        let start = idx + p;
+        let Some(rel) = header[start..].find("</hh:borderFill>") else {
+            break;
+        };
+        let end = start + rel + "</hh:borderFill>".len();
+        let elem = &header[start..end];
+        let face = elem
+            .find("faceColor=\"")
+            .map(|i| &elem[i + 11..i + 11 + elem[i + 11..].find('"').unwrap_or(0)]);
+        if face.is_none_or(|f| f == "none")
+            && !elem.contains("<hc:gradation")
+            && !elem.contains("<hc:imgBrush")
+        {
+            // Drop an empty `faceColor="none"` brush too — the default table fill has no background.
+            let mut e = elem.to_string();
+            if let (Some(a), Some(b)) = (e.find("<hc:fillBrush"), e.find("</hc:fillBrush>")) {
+                e.replace_range(a..b + "</hc:fillBrush>".len(), "");
+            }
+            return e;
+        }
+        idx = end;
+    }
+    "<hh:borderFill id=\"0\" threeD=\"0\" shadow=\"0\" centerLine=\"NONE\" breakCellSeparateLine=\"0\">\
+<hh:slash type=\"NONE\" Crooked=\"0\" isCounter=\"0\"/><hh:backSlash type=\"NONE\" Crooked=\"0\" isCounter=\"0\"/>\
+<hh:leftBorder type=\"NONE\" width=\"0.1 mm\" color=\"#000000\"/><hh:rightBorder type=\"NONE\" width=\"0.1 mm\" color=\"#000000\"/>\
+<hh:topBorder type=\"NONE\" width=\"0.1 mm\" color=\"#000000\"/><hh:bottomBorder type=\"NONE\" width=\"0.1 mm\" color=\"#000000\"/>\
+<hh:diagonal type=\"SOLID\" width=\"0.1 mm\" color=\"#000000\"/></hh:borderFill>"
+        .to_string()
+}
+
+/// Whether the EMITTED content contains any table (top-level, nested, in a note body or a
+/// decoration) — the same gating as [`collect_bf_specs`], so a default table borderFill is only
+/// synthesized when some emitted `<hp:tbl>`/`<hp:tc>` can reference it.
+fn emits_table(doc: &SemanticDoc) -> bool {
+    fn walk(blocks: &[Block]) -> bool {
+        blocks.iter().any(|b| match b {
+            Block::Table(_) => true,
+            Block::Paragraph(p) => p
+                .runs
+                .iter()
+                .flat_map(|r| &r.content)
+                .any(|i| matches!(i, Inline::Note(nr) if walk(&nr.body))),
+        })
+    }
+    doc.sections
+        .iter()
+        .filter(|s| s.dirty.is_dirty())
+        .any(|sec| {
+            sec.blocks
+                .iter()
+                .any(|b| b.any_dirty() && walk(std::slice::from_ref(b)))
+                || sec
+                    .decorations
+                    .iter()
+                    .filter(|d| !d.from_source)
+                    .any(|d| walk(&d.blocks))
+        })
 }
 
 /// Surgically append new (dirty) paragraphs to a section's original XML, before its root
@@ -2675,9 +2794,8 @@ fn xml_escape(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
-/// Find a valid `borderFillIDRef` for an emitted table: reuse an existing table's borderFill
-/// (known-good for tables) if any, else the highest borderFill id in the header pool. Returns
-/// None only if the doc has no borderFill at all (then the serializer falls back to "1").
+/// The borderFill of the document's first existing table (known-good for tables), or `None` when the
+/// document has no table — then [`build_synth_plan`] synthesizes a default one (A-6).
 fn find_table_borderfill(pkg: &Package) -> Option<String> {
     for name in pkg.section_part_names() {
         if let Ok(bytes) = pkg.read_part(&name) {
@@ -2689,6 +2807,12 @@ fn find_table_borderfill(pkg: &Package) -> Option<String> {
             }
         }
     }
+    None
+}
+
+/// Last resort when neither a table nor a synthesized default exists (a header WITHOUT a
+/// `<hh:borderFills>` pool): the highest borderFill id, else `None` (the emitter then uses "1").
+fn header_borderfill_fallback(pkg: &Package) -> Option<String> {
     let hdr = pkg.read_header()?;
     let s = String::from_utf8_lossy(&hdr);
     max_numeric_attr(&s, "borderFill id=\"")
