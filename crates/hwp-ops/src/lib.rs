@@ -145,8 +145,9 @@ pub enum Op {
     },
     /// Insert a rich table at block `index` (same coverage semantics as `AppendRichTable`).
     ///
-    /// 서식 (A-3): cell text inherits the font/size/color of the nearest text-bearing body paragraph
-    /// (the `InsertParagraphAt` 서식 상속 rule, minus emphasis — bold comes only from `CellSpec.bold`).
+    /// 서식 (A-3): cell text inherits the font/size of the nearest text-bearing body paragraph (the
+    /// `InsertParagraphAt` 서식 상속 rule, minus emphasis — bold comes only from `CellSpec.bold` — and
+    /// minus its color: cell text is the document's default body color, #431).
     /// `opts` adds an explicit border, column-width ratios and the repeated header row.
     InsertTableAt {
         section: usize,
@@ -2661,8 +2662,9 @@ fn scale_col_widths(ratios: &[f64], cols: usize, text_w: i32) -> Result<Vec<HwpU
 }
 
 /// Cell char shapes for a table inserted at `(section, at)` (A-3): the nearest text-bearing body
-/// paragraph's face/size/color ([`neighbour_shapes`]) WITHOUT its emphasis — a table after a bold or
-/// highlighted line must not turn every cell bold. `(plain, bold)`, or `None` when the section has no
+/// paragraph's face/size ([`neighbour_shapes`]) WITHOUT its emphasis or its color — a table after a
+/// bold, highlighted or coloured line must not turn every cell bold / coloured (#431: the color is the
+/// default body color, black). `(plain, bold)`, or `None` when the section has no
 /// text to inherit from (then the engine default shape, as before).
 fn body_cell_shapes(doc: &mut SemanticDoc, section: usize, at: usize) -> Option<(usize, usize)> {
     let (nb_char, _) = neighbour_shapes(doc, section, at);
@@ -2674,6 +2676,7 @@ fn body_cell_shapes(doc: &mut SemanticDoc, section: usize, at: usize) -> Option<
         underline: false,
         strikeout: false,
         shade_color: Color::default(),
+        text_color: Color::default(),
         ..shape.clone()
     };
     // Unchanged → keep the pool index itself (the export then references the original charPr id).

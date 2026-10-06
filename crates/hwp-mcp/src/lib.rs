@@ -1626,8 +1626,8 @@ pub enum Intent {
     /// the section END — the dispatcher resolves `None` to `len` so the op's own `index == len` append
     /// semantics absorb the end-append (no separate append op).
     ///
-    /// 서식 (A-3, additive): cell text inherits the nearest body paragraph's face/size/color (not its
-    /// emphasis). Optional `border` (`{type,width_mm,color}` on every cell edge + the outline),
+    /// 서식 (A-3, additive): cell text inherits the nearest body paragraph's face/size (not its
+    /// emphasis, not its color — the default body color, #431). Optional `border` (`{type,width_mm,color}` on every cell edge + the outline),
     /// `col_widths` (relative ratios, one per column, scaled to the text width) and `header_row`
     /// (repeat the first row on continuation pages — default on; `false` turns it off).
     InsertTableAt {
