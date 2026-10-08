@@ -486,6 +486,10 @@ pub struct TableInsertOpts {
     /// Absent = on (what the HWPX export has always written); `false` turns it off in the render
     /// and the export.
     pub header_row: Option<bool>,
+    /// #441 — HWPX `<hp:pos treatAsChar>`. Absent/`true` = the table sits in its paragraph like one
+    /// character (the legacy export; Hancom then never splits it across pages). `false` = a normal
+    /// paragraph-anchored table that Hancom splits between pages at row (`pageBreak="CELL"`) bounds.
+    pub treat_as_char: Option<bool>,
 }
 
 /// A uniform table border (A-3): `type` = `solid` | `dash` | `dot` | `double` | `none` (default
@@ -2103,6 +2107,7 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             let mut table = build_rich_table(doc, rows, body, text_w)?;
             set_cell_para_shape(&mut table.cells, cell_para);
             table.holder_para_shape = Some(holder_para_shape(doc));
+            table.treat_as_char = opts.treat_as_char;
             if let Some(ratios) = &opts.col_widths {
                 table.col_widths = scale_col_widths(ratios, table.cols, text_w)?;
             }
@@ -3279,15 +3284,25 @@ fn build_rich_table(
                 row_span: rs,
                 col_span: cs,
                 shade_color: spec.shade.as_deref().and_then(Color::from_hex),
-                blocks: vec![Block::Paragraph(Paragraph {
-                    runs: vec![Run {
-                        char_shape: if spec.bold { bold } else { plain },
-                        content: vec![Inline::Text(spec.text.clone())],
-                        ..Default::default()
-                    }],
-                    dirty: Dirty(true),
-                    ..Default::default()
-                })],
+                // #441: a line break in the cell text starts a new cell PARAGRAPH (a literal "\n"
+                // inside one <hp:t> is not a line break in Hancom).
+                blocks: spec
+                    .text
+                    .split('\n')
+                    .map(|line| {
+                        Block::Paragraph(Paragraph {
+                            runs: vec![Run {
+                                char_shape: if spec.bold { bold } else { plain },
+                                content: vec![Inline::Text(
+                                    line.trim_end_matches('\r').to_string(),
+                                )],
+                                ..Default::default()
+                            }],
+                            dirty: Dirty(true),
+                            ..Default::default()
+                        })
+                    })
+                    .collect(),
                 dirty: Dirty(true),
                 ..Default::default()
             });

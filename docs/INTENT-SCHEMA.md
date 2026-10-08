@@ -722,6 +722,7 @@ visual affinity**를 쓴다. 반면 아래 `CaretRectBody`는 주소의 canonica
 | `border` | object/null | **A-3 추가.** 모든 칸 변 + 표 외곽에 한 테두리: `{"type":"solid"\|"dash"\|"dot"\|"double"\|"none","width_mm":0.12,"color":"#RRGGBB"}`(모두 선택 — 기본 solid · 0.12 mm · 검정; 굵기는 HWP 선 굵기 0.1–5.0 mm 중 가장 가까운 값). 생략 = 문서 표 테두리(없으면 기본 실선) | ○ |
 | `col_widths` | number[]/null | **A-3 추가.** 열 너비 비율(열 수만큼, 모두 양수) → 구역 본문 폭에 맞춰 HWPUNIT 로 환산. 생략 = 같은 너비 | ○ |
 | `header_row` | bool/null | **A-3 추가.** 첫 행을 머리 행으로 — 다음 쪽으로 이어지면 반복(HWPX `repeatHeader`). 생략 = 켬, `false` = 끔 | ○ |
+| `treat_as_char` | bool/null | **#441 추가(0.0.15).** HWPX `<hp:pos treatAsChar>`. 생략/`true` = 글자처럼 취급(지금까지와 같음 — 한/글은 쪽에서 나누지 않는다), `false` = 문단 기준 표 — 한/글이 행 경계에서 쪽을 나눈다(`pageBreak="CELL"`) | ○ |
 
 **서식 상속(A-3).** 칸 글은 가장 가까운 본문 문단(`InsertParagraphAt` 서식 상속과 같은 이웃 규칙)의 글꼴 · 크기를
 따른다. 강조(굵게 · 기울임 · 밑줄 · 취소선 · 음영)는 따르지 않는다 — 굵게는 `CellSpec.bold` 로만. **글자 색도 따르지 않는다** —
@@ -740,7 +741,7 @@ visual affinity**를 쓴다. 반면 아래 `CaretRectBody`는 주소의 canonica
 
 | 필드 | 타입 | 단위/값 | 필수 |
 |------|------|---------|------|
-| `text` | string | 셀 텍스트(생략 시 `""`) | ○ |
+| `text` | string | 셀 텍스트(생략 시 `""`). **`\n`(또는 `\r\n`)은 칸 안 새 문단**(#441, 0.0.15 — 전에는 한 `<hp:t>` 안 글자로 들어갔다) | ○ |
 | `col_span` | integer | 열 병합 폭(기본 1) | ○ |
 | `row_span` | integer | 행 병합 높이(기본 1) | ○ |
 | `bold` | bool | 기본 `false` | ○ |

@@ -534,6 +534,9 @@ pub struct Table {
     /// section-fallback `paraPrIDRef` (parsed tables keep their original holder byte-verbatim and never
     /// read this). Fixed at insert time, so the holder's look does not depend on what else was edited.
     pub holder_para_shape: Option<usize>,
+    /// EXPORT ONLY (#441): `<hp:pos treatAsChar>` for a table the serializer synthesizes. `None` = the
+    /// legacy `"1"`; parsed tables keep their original `<hp:pos>` byte-verbatim and never read this.
+    pub treat_as_char: Option<bool>,
     /// Per-column widths (HWPUNIT), `cols` entries — for faithful column proportions on render.
     /// Empty when unknown (then the renderer falls back to auto-layout).
     pub col_widths: Vec<HwpUnit>,

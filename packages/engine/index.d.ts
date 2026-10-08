@@ -199,8 +199,19 @@ export interface DocProfile {
   chart_count: number;
   equation_count: number;
   headings: ProfileHeading[];
+  /** The first 20 top-level tables (AI context budget). */
   tables: ProfileTable[];
+  /** #441 — more top-level tables exist than `tables` lists; `tableBlocks()` lists them all. */
+  tables_truncated: boolean;
   excerpt: string;
+}
+
+/** #441 — one top-level table block: address + shape (`tableBlocks()`). */
+export interface TableBlock {
+  section: number;
+  block: number;
+  rows: number;
+  cols: number;
 }
 
 /** One ACTIVE (uncovered) cell of a table's grid (issue 066): its MODEL-GLOBAL `(row, col)` + current
@@ -209,6 +220,13 @@ export interface GridCell {
   row: number;
   col: number;
   text: string;
+  /** #441 — merge extent (1 = not merged). */
+  row_span: number;
+  col_span: number;
+  /** #441 — cell background `#RRGGBB`, `null` when none. */
+  fill: string | null;
+  /** #441 — stored cell width in HWPUNIT, `null` when unknown. */
+  width: number | null;
 }
 
 /** The cell grid of a table block (issue 066) — its `rows`×`cols` plus every ACTIVE cell's address +
@@ -220,6 +238,8 @@ export interface TableGrid {
   rows: number;
   cols: number;
   cells: GridCell[];
+  /** #441 — per-column widths in HWPUNIT (`cols` entries), empty when unknown. */
+  col_widths: number[];
 }
 
 /** Per-cell fit / overflow report (#347). Lengths are own-render px (HWPUNIT ÷ 75). */
@@ -450,6 +470,8 @@ export class HwpDoc {
   /** The deterministic document profile (issue 067) — title candidate + structure counts + headings +
    *  table inventory + body excerpt, for the chat doc-context. Pure model read (no typeset, no LLM). */
   docProfile(): DocProfile;
+  /** #441 — every top-level table block, no cap (see `DocProfile.tables_truncated`). */
+  tableBlocks(): TableBlock[];
   applyIntent(intent: object | string): Outcome;
   /** Apply MANY intents with ONE reflow (#350): same op-bus, one undo unit per intent, but the
    *  whole-document re-typeset `applyIntent` does per edit runs once. Not atomic — throws

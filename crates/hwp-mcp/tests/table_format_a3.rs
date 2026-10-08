@@ -49,6 +49,7 @@ fn insert(
             border,
             col_widths,
             header_row,
+            treat_as_char: None,
         },
     )
     .map(|_| ())

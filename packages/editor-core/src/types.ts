@@ -199,6 +199,11 @@ export interface GridCell {
   row: number;
   col: number;
   text: string;
+  /** #441 (engine 0.0.15+) — merge extent, cell background `#RRGGBB`, stored width (HWPUNIT). */
+  row_span?: number;
+  col_span?: number;
+  fill?: string | null;
+  width?: number | null;
 }
 
 /** The cell GRID of a marked table block (issue 066) — `rows`×`cols` plus every ACTIVE cell's address +
@@ -212,6 +217,8 @@ export interface TableGrid {
   rows: number;
   cols: number;
   cells: GridCell[];
+  /** #441 (engine 0.0.15+) — per-column widths in HWPUNIT, empty when unknown. */
+  col_widths?: number[];
 }
 
 /** One heading in the document outline (issue 046) — the left nav panel's item. `section`/`block` are the
@@ -263,6 +270,8 @@ export interface DocProfile {
   equation_count: number;
   headings: ProfileHeading[];
   tables: ProfileTable[];
+  /** #441 (engine 0.0.15+) — more top-level tables exist than `tables` lists (it stops at 20). */
+  tables_truncated?: boolean;
   excerpt: string;
 }
 

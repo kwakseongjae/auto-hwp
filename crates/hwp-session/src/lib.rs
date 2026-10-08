@@ -340,6 +340,9 @@ pub struct DocProfileDto {
     pub equation_count: usize,
     pub headings: Vec<ProfileHeading>,
     pub tables: Vec<ProfileTable>,
+    /// #441 — `tables` stops at 20 (the AI context budget); `true` when more top-level tables exist.
+    /// Use [`table_blocks`] (wasm `tableBlocks`) for every table's address.
+    pub tables_truncated: bool,
     pub excerpt: String,
 }
 
@@ -399,6 +402,7 @@ pub fn doc_profile(doc: &SemanticDoc) -> DocProfileDto {
     let mut headings = Vec::new();
     let mut tables = Vec::new();
     let mut first_para_text: Option<String> = None;
+    let mut top_tables = 0usize;
     for (si, sec) in doc.sections.iter().enumerate() {
         walk(
             &sec.blocks,
@@ -438,6 +442,7 @@ pub fn doc_profile(doc: &SemanticDoc) -> DocProfileDto {
                     }
                 }
                 Block::Table(t) => {
+                    top_tables += 1;
                     if tables.len() < PROFILE_TABLES_MAX {
                         let t = t.edit_target(); // SAME coordinate frame as tableGrid/SetTableCell
                         let (rows, cols) = (t.rows.max(1), t.cols.max(1));
@@ -490,9 +495,47 @@ pub fn doc_profile(doc: &SemanticDoc) -> DocProfileDto {
         chart_count: charts,
         equation_count: equations,
         headings,
+        tables_truncated: top_tables > tables.len(),
         tables,
         excerpt,
     }
+}
+
+/// #441 — one top-level table's address and shape (`edit_target` frame: the SAME `(section, block)`
+/// and `rows`×`cols` `tableGrid` / `SetTableCell` use).
+#[derive(serde::Serialize)]
+pub struct TableBlockDto {
+    pub section: usize,
+    pub block: usize,
+    pub rows: usize,
+    pub cols: usize,
+}
+
+/// #441 — EVERY top-level table block of the document, in order (no cap — unlike
+/// [`DocProfileDto::tables`], which stops at 20 for the AI budget). Pure model read.
+pub fn table_blocks(doc: &SemanticDoc) -> Vec<TableBlockDto> {
+    use hwp_model::prelude::Block;
+    doc.sections
+        .iter()
+        .enumerate()
+        .flat_map(|(si, sec)| {
+            sec.blocks
+                .iter()
+                .enumerate()
+                .filter_map(move |(bi, b)| match b {
+                    Block::Table(t) => {
+                        let t = t.edit_target();
+                        Some(TableBlockDto {
+                            section: si,
+                            block: bi,
+                            rows: t.rows.max(1),
+                            cols: t.cols.max(1),
+                        })
+                    }
+                    _ => None,
+                })
+        })
+        .collect()
 }
 
 // ---- Image move/resize overlay geometry -------------------------------------------------------
@@ -1016,6 +1059,14 @@ pub struct GridCellDto {
     pub row: usize,
     pub col: usize,
     pub text: String,
+    /// #441 — merge extent (1 = not merged).
+    pub row_span: usize,
+    pub col_span: usize,
+    /// #441 — the cell background `#RRGGBB` (its borderFill brush / an op-set shade), `None` = none.
+    pub fill: Option<String>,
+    /// #441 — the cell's stored width in HWPUNIT (`<hp:cellSz width>`), `None` = unknown (a cell
+    /// an op created without a width — the table's `col_widths` grid applies).
+    pub width: Option<i32>,
 }
 
 /// The full cell grid of the table BLOCK at `(section, block)` — its `rows`×`cols` plus every ACTIVE
@@ -1038,6 +1089,8 @@ pub struct TableGridDto {
     pub rows: usize,
     pub cols: usize,
     pub cells: Vec<GridCellDto>,
+    /// #441 — per-column widths in HWPUNIT (`cols` entries), empty when unknown.
+    pub col_widths: Vec<i32>,
 }
 
 /// Read the cell grid of the table block at `(section, block)` for the AI doc-context (issue 066). See
@@ -1059,6 +1112,10 @@ pub fn table_grid(doc: &SemanticDoc, section: usize, block: usize) -> Option<Tab
             row: c.row,
             col: c.col,
             text: cell_plain_text(c),
+            row_span: c.row_span.max(1),
+            col_span: c.col_span.max(1),
+            fill: c.shade_color.map(|col| col.to_hex()),
+            width: c.width.filter(|&w| w > 0),
         })
         .collect();
     Some(TableGridDto {
@@ -1067,6 +1124,11 @@ pub fn table_grid(doc: &SemanticDoc, section: usize, block: usize) -> Option<Tab
         rows,
         cols,
         cells,
+        col_widths: if t.col_widths.len() == cols {
+            t.col_widths.clone()
+        } else {
+            Vec::new()
+        },
     })
 }
 

@@ -354,6 +354,11 @@ export class HwpDoc {
   docProfile() {
     return this.#call((r) => JSON.parse(r.docProfile()));
   }
+  /** #441 — EVERY top-level table block `[{section, block, rows, cols}]` in document order (no cap —
+   *  `docProfile().tables` stops at 20 and sets `tables_truncated`). Same addresses as `tableGrid`. */
+  tableBlocks() {
+    return this.#call((r) => JSON.parse(r.tableBlocks()));
+  }
   /** Apply an Intent (schema v0). Accepts an object or a JSON string; returns the parsed Outcome. */
   applyIntent(intent) {
     const s = typeof intent === 'string' ? intent : JSON.stringify(intent);

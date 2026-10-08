@@ -710,7 +710,9 @@ impl HwpDoc {
     }
 
     /// The cell GRID of the table block at `(section, block)` — a JSON **string** of `{section, block,
-    /// rows, cols, cells:[{row, col, text}]}` (only ACTIVE/uncovered cells), or **JS `null`** when the
+    /// rows, cols, col_widths, cells:[{row, col, text, row_span, col_span, fill, width}]}` (only
+    /// ACTIVE/uncovered cells; #441 added the spans, `fill` `#RRGGBB`/null, `width` HWPUNIT/null and the
+    /// table's `col_widths`), or **JS `null`** when the
     /// block isn't a table (an `Option<String>` → `null`, never the literal `"null"` — bindings policy
     /// 018). The vibe-editing doc-context source (issue 066): the AI reads each cell's MODEL address +
     /// current text so "표 채워줘"/라벨-기반 셀 지정이 정확해진다. Coordinates are the SAME `(row, col)`
@@ -747,6 +749,15 @@ impl HwpDoc {
     pub fn doc_profile(&self) -> Result<String, JsValue> {
         let p = hwp_session::doc_profile(self.doc()?);
         serde_json::to_string(&p).map_err(|e| js_err("serialize", &e.to_string()))
+    }
+
+    /// #441 — EVERY top-level table block, as a JSON **string** of `[{section, block, rows, cols}]`
+    /// (document order, no cap — `docProfile().tables` stops at 20 and says so in
+    /// `tables_truncated`). Addresses are the SAME `(section, block)` `tableGrid` / `SetTableCell` use.
+    #[wasm_bindgen(js_name = tableBlocks)]
+    pub fn table_blocks(&self) -> Result<String, JsValue> {
+        let t = hwp_session::table_blocks(self.doc()?);
+        serde_json::to_string(&t).map_err(|e| js_err("serialize", &e.to_string()))
     }
 
     /// Apply MANY Intent envelopes with ONE reflow (#350) — `intents_json` is a JSON **array** of the

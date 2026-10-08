@@ -69,6 +69,7 @@ fn new_table_cells_take_the_body_face_and_size_but_the_default_color() {
             border: None,
             col_widths: None,
             header_row: None,
+            treat_as_char: None,
         },
     )
     .unwrap();
