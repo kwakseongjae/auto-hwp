@@ -80,6 +80,9 @@ fn grid(t: &Table) -> Grid {
     (t.rows, t.cols, cells)
 }
 
+/// An exported table: its open tag, every cell's (row, col, rowSpan, colSpan), its whole XML.
+type Exported = (String, Vec<(usize, usize, usize, usize)>, String);
+
 fn attr<'a>(s: &'a str, name: &str) -> &'a str {
     let k = format!(" {name}=\"");
     let i = s.find(&k).unwrap_or_else(|| panic!("{name} in {s:.200}")) + k.len();
@@ -87,7 +90,7 @@ fn attr<'a>(s: &'a str, name: &str) -> &'a str {
 }
 
 /// The exported section's (only) table: its open tag + every cell's (row, col, rowSpan, colSpan).
-fn exported_table(bytes: &[u8]) -> (String, Vec<(usize, usize, usize, usize)>, String) {
+fn exported_table(bytes: &[u8]) -> Exported {
     assert!(
         hwp_hwpx::export::validate_open_safety(bytes).ok,
         "open-safe"
@@ -118,14 +121,7 @@ fn exported_table(bytes: &[u8]) -> (String, Vec<(usize, usize, usize, usize)>, S
 }
 
 /// Apply `intent`, export, reopen → (memory grid, reopened grid, exported table).
-fn roundtrip(
-    intent: impl Fn(usize) -> Intent,
-) -> (
-    Grid,
-    Grid,
-    (String, Vec<(usize, usize, usize, usize)>, String),
-    Session,
-) {
+fn roundtrip(intent: impl Fn(usize) -> Intent) -> (Grid, Grid, Exported, Session) {
     let src = simple_table();
     let mut s = open(&src);
     let i = table_index(&s);
@@ -137,11 +133,7 @@ fn roundtrip(
     (mem, back, exported_table(&out), s)
 }
 
-fn assert_consistent(
-    mem: &Grid,
-    back: &Grid,
-    x: &(String, Vec<(usize, usize, usize, usize)>, String),
-) {
+fn assert_consistent(mem: &Grid, back: &Grid, x: &Exported) {
     assert_eq!(mem, back, "memory grid == reopened grid");
     let (open, cells, tbl) = x;
     assert_eq!(attr(open, "rowCnt"), mem.0.to_string(), "rowCnt");

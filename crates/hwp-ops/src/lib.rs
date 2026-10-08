@@ -1186,8 +1186,9 @@ fn table_insert_cols(t: &mut Table, at: usize, count: usize) -> Result<()> {
             c.col += count;
         } else if at < c.col + c.col_span.max(1) {
             c.col_span = c.col_span.max(1) + count;
-            for r in c.row..(c.row + c.row_span.max(1)).min(t.rows) {
-                absorbed[r] = true;
+            let end = (c.row + c.row_span.max(1)).min(t.rows);
+            for slot in absorbed.iter_mut().take(end).skip(c.row) {
+                *slot = true;
             }
         }
         if widths_ok {
