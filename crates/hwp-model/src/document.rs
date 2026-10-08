@@ -522,6 +522,13 @@ pub struct Table {
     /// serializer then writes `repeatHeader="0"` and no header cells for a (re-)emitted table; every
     /// other table keeps the legacy `repeatHeader="1"` + header first row. Parsed tables leave it false.
     pub repeat_header_off: bool,
+    /// EXPORT PROVENANCE (never serialized itself): an op deleted rows or inserted/deleted columns
+    /// (#442 `TableDeleteRows` · `TableInsertCols` · `TableDeleteCols`), so the cells' grid addresses no
+    /// longer match their original `<hp:tc>` XML. The HWPX serializer then rebuilds the `<hp:tr>` rows
+    /// from each cell's ORIGINAL `<hp:tc>` (byte-verbatim body) with re-addressed
+    /// `cellAddr`/`cellSpan`/`cellSz`, instead of the per-cell patch (stale addresses) or the lossy
+    /// whole-table re-emit. Parsed/lifted tables leave it false.
+    pub structure_edited: bool,
     /// Per-column widths (HWPUNIT), `cols` entries — for faithful column proportions on render.
     /// Empty when unknown (then the renderer falls back to auto-layout).
     pub col_widths: Vec<HwpUnit>,

@@ -1656,6 +1656,24 @@ fn build_table_patch(
             })
         });
 
+    // #442 — rows deleted / columns inserted or deleted: the cells' grid addresses changed, so the
+    // per-cell patch below would leave stale `cellAddr`s. Rebuild the rows from each cell's ORIGINAL
+    // `<hp:tc>` (body verbatim, addresses re-written) — the whole-table re-emit is the fallback only.
+    if t.structure_edited {
+        if let Some(xml) = structural_table_xml(
+            original,
+            (s0, e0),
+            open_end,
+            t,
+            plan,
+            bf,
+            sec_para_ref,
+            sec_plain_ref,
+            next_id,
+        ) {
+            return TablePatch::Whole(s0, e0, xml);
+        }
+    }
     if same_rows && same_cols && geometry_untouched && cell_spans_ok {
         let mut cell_edits = Vec::new();
         let mut ok = true;
@@ -1725,6 +1743,198 @@ fn build_table_patch(
     let mut xml = String::new();
     emit_table(&mut xml, tid, &et, &ctx, next_id);
     TablePatch::Whole(s0, e0, xml)
+}
+
+/// The byte range of a cell's OWN `<hp:{name} …/>` element inside its `<hp:tc>` XML — searched
+/// OUTSIDE the cell's `<hp:subList>` (a nested table's cells carry their own `cellAddr`/…).
+fn own_cell_elem(tc: &str, name: &str) -> Option<(usize, usize)> {
+    let pat = format!("<hp:{name} ");
+    let sub_open = tc.find("<hp:subList");
+    let sub_close = tc.rfind("</hp:subList>").map(|i| i + "</hp:subList>".len());
+    let after = sub_close.unwrap_or(0);
+    let at = tc[after..].find(&pat).map(|i| after + i).or_else(|| {
+        let before = sub_open.unwrap_or(tc.len());
+        tc[..before].find(&pat)
+    })?;
+    let end = at + tc[at..].find('>')? + 1;
+    Some((at, end))
+}
+
+/// Set attributes on a cell's own `<hp:{name}>` element (see [`own_cell_elem`]). `None` when absent.
+fn set_cell_elem_attrs(tc: &str, name: &str, attrs: &[(&str, String)]) -> Option<String> {
+    let (a, b) = own_cell_elem(tc, name)?;
+    let mut el = tc[a..b].to_string();
+    for (k, v) in attrs {
+        el = synth::set_attr(&el, k, v);
+    }
+    Some(format!("{}{el}{}", &tc[..a], &tc[b..]))
+}
+
+/// A cell's ORIGINAL `<hp:tc>` slice when its span is valid inside this table's XML.
+fn valid_cell_span(original: &str, open_end: usize, e0: usize, c: &Cell) -> Option<(usize, usize)> {
+    c.src_span.filter(|&(cs, ce)| {
+        cs >= open_end
+            && ce <= e0
+            && cs < ce
+            && original.is_char_boundary(cs)
+            && original.is_char_boundary(ce)
+            && original[cs..].starts_with("<hp:tc")
+    })
+}
+
+/// #442 — re-emit a table whose ROW/COLUMN STRUCTURE an op changed (`Table::structure_edited`) from
+/// its ORIGINAL XML: the `<hp:tbl>` open tag (rowCnt/colCnt patched), every table-level child before
+/// the first `<hp:tr>` (sz height/width patched, pos/margins/caption verbatim), then fresh `<hp:tr>`
+/// rows whose `<hp:tc>`s are each cell's original XML (body byte-verbatim unless its content was
+/// edited) with `cellAddr`/`cellSpan`/`cellSz` re-written. A NEW cell (inserted column) borrows the
+/// nearest same-row cell's `<hp:tc>` as its template (look + fallback shape refs), body rebuilt
+/// empty and `name` cleared. `None` (→ whole-table re-emit) when the XML doesn't match expectations.
+#[allow(clippy::too_many_arguments)]
+fn structural_table_xml(
+    original: &str,
+    (s0, e0): (usize, usize),
+    open_end: usize,
+    t: &Table,
+    plan: &SynthPlan,
+    bf: &str,
+    sec_para_ref: &str,
+    sec_plain_ref: &str,
+    next_id: &mut u64,
+) -> Option<String> {
+    let close = e0.checked_sub("</hp:tbl>".len())?;
+    let body = original.get(open_end..close)?;
+    let first_tr = body.find("<hp:tr")?;
+    let last_tr = body.rfind("</hp:tr>")? + "</hp:tr>".len();
+    let (prefix, tail) = (&body[..first_tr], &body[last_tr..]);
+    let (rows, cols) = (t.rows.max(1), t.cols.max(1));
+
+    // Per-row heights: the fixed floors, else the stored auto-fit floors (the parser keeps one per row).
+    let rh: Option<&[HwpUnit]> = if t.fixed_row_heights && t.row_heights.len() == rows {
+        Some(&t.row_heights)
+    } else if t.stored_row_heights.len() == rows {
+        Some(&t.stored_row_heights)
+    } else if t.row_heights.len() == rows {
+        Some(&t.row_heights)
+    } else {
+        None
+    };
+    let span_h = |r: usize, n: usize| -> Option<i64> {
+        rh.map(|h| {
+            h[r.min(rows)..(r + n.max(1)).min(rows)]
+                .iter()
+                .map(|&x| i64::from(x.max(0)))
+                .sum()
+        })
+    };
+    let widths_ok = t.col_widths.len() == cols && t.col_widths.iter().all(|&w| w > 0);
+    let span_w = |c: usize, n: usize| -> i64 {
+        t.col_widths[c.min(cols)..(c + n.max(1)).min(cols)]
+            .iter()
+            .map(|&w| i64::from(w))
+            .sum()
+    };
+
+    let mut open = synth::set_attr(&original[s0..open_end], "rowCnt", &rows.to_string());
+    open = synth::set_attr(&open, "colCnt", &cols.to_string());
+    let mut head = prefix.to_string();
+    if let Some(i) = head.find("<hp:sz ") {
+        let j = i + head[i..].find('>')? + 1;
+        let mut el = head[i..j].to_string();
+        if let Some(h) = span_h(0, rows) {
+            el = synth::set_attr(&el, "height", &h.to_string());
+        }
+        if widths_ok {
+            el = synth::set_attr(&el, "width", &span_w(0, cols).to_string());
+        }
+        head = format!("{}{el}{}", &head[..i], &head[j..]);
+    }
+
+    let spanned: Vec<(&Cell, (usize, usize))> = t
+        .cells
+        .iter()
+        .filter(|c| c.active)
+        .filter_map(|c| valid_cell_span(original, open_end, e0, c).map(|sp| (c, sp)))
+        .collect();
+    let mut out = String::with_capacity(e0 - s0 + 256);
+    out.push_str(&open);
+    out.push_str(&head);
+    for r in 0..rows {
+        let mut row_cells: Vec<&Cell> = t
+            .cells
+            .iter()
+            .filter(|c| c.active && c.row == r && c.col < cols)
+            .collect();
+        if row_cells.is_empty() {
+            continue; // fully covered by row-spans from above (same rule as emit_table)
+        }
+        row_cells.sort_by_key(|c| c.col);
+        out.push_str("<hp:tr>");
+        for cell in row_cells {
+            let own = valid_cell_span(original, open_end, e0, cell);
+            let (cs, ce) = match own {
+                Some(sp) => sp,
+                // A new cell: the nearest same-row cell, else the nearest row's, as the template.
+                None => spanned
+                    .iter()
+                    .min_by_key(|(c, _)| (c.row.abs_diff(r), c.col.abs_diff(cell.col)))
+                    .map(|(_, sp)| *sp)?,
+            };
+            let mut tc = patch_cell_xml(
+                &original[cs..ce],
+                cell,
+                plan,
+                bf,
+                sec_para_ref,
+                sec_plain_ref,
+                next_id,
+            )?;
+            if own.is_none() {
+                let tc_open_end = tc.find('>')? + 1;
+                let opened = synth::set_attr(&tc[..tc_open_end], "name", "");
+                tc = format!("{opened}{}", &tc[tc_open_end..]);
+            }
+            let (row_span, col_span) = (cell.row_span.max(1), cell.col_span.max(1));
+            tc = set_cell_elem_attrs(
+                &tc,
+                "cellAddr",
+                &[
+                    ("colAddr", cell.col.to_string()),
+                    ("rowAddr", r.to_string()),
+                ],
+            )?;
+            // The original span (before the op) decides whether the stored height is still right.
+            let orig_row_span = own_cell_elem(&tc, "cellSpan")
+                .and_then(|(a, b)| first_attr(&tc[a..b], "rowSpan"))
+                .and_then(|v| v.trim().parse::<usize>().ok());
+            tc = set_cell_elem_attrs(
+                &tc,
+                "cellSpan",
+                &[
+                    ("colSpan", col_span.to_string()),
+                    ("rowSpan", row_span.to_string()),
+                ],
+            )?;
+            let mut sz: Vec<(&str, String)> = Vec::new();
+            if let Some(w) = cell.width.filter(|&w| w > 0) {
+                sz.push(("width", w.to_string()));
+            } else if widths_ok {
+                sz.push(("width", span_w(cell.col, col_span).to_string()));
+            }
+            if own.is_none() || orig_row_span != Some(row_span) {
+                if let Some(h) = span_h(r, row_span) {
+                    sz.push(("height", h.to_string()));
+                }
+            }
+            if !sz.is_empty() {
+                tc = set_cell_elem_attrs(&tc, "cellSz", &sz).unwrap_or(tc);
+            }
+            out.push_str(&tc);
+        }
+        out.push_str("</hp:tr>");
+    }
+    out.push_str(tail);
+    out.push_str("</hp:tbl>");
+    Some(out)
 }
 
 /// True when any block in a cell's body tree is dirty — i.e. the cell's CONTENT was actually

@@ -36,6 +36,17 @@ packages are released in lockstep.)*
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+### 추가 (Added)
+
+- **표 행 지우기 · 열 넣기 · 열 지우기 Intent — `TableDeleteRows` · `TableInsertCols` · `TableDeleteCols` (#442, R-04).**
+  `{section, index, at, count, path?}`. 지우는 범위를 가로지르는 병합은 줄고, 범위 안에서 시작한 병합은 내용을 지킨 채
+  `at` 으로 옮긴다. 열 넣기/지우기는 표 너비를 그대로 두고 열 너비를 비율로 다시 나눈다. 실행취소 한 칸. HWPX 내보내기는
+  원본 칸 XML 을 그대로 두고 `cellAddr` · `cellSpan` · `cellSz` · `rowCnt` · `colCnt` 만 고친다 — 표 위치(글자처럼 취급 · 정렬) ·
+  칸 이름 · 세로 정렬이 남는다. 사람용 편집 동사라 AI 프롬프트 허용목록에는 넣지 않았다.
+  *(EN — New `TableDeleteRows` / `TableInsertCols` / `TableDeleteCols` intents. Merges crossing a deleted range
+  shrink; column edits keep the table width. The HWPX export keeps every original `<hp:tc>` and rewrites only the
+  addresses, spans, sizes and row/column counts.)*
+
 ---
 
 ## [0.0.14] — 2026-10-07

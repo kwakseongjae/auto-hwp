@@ -1457,6 +1457,40 @@ pub enum Intent {
         section: usize,
         index: usize,
     },
+    /// #442 (R-04) — delete rows `[at, at+count)` of the `index`-th table as ONE undo unit
+    /// (`TableDeleteRows`). Merges crossing the range shrink; a merge starting inside it keeps its
+    /// content and moves to `at`. `path` (optional) = the descending `CellPath` to the PARENT cell of a
+    /// nested table; `index` is then the table's block index inside that cell (`DeleteNestedBlock`'s
+    /// address). Refuses deleting every row. Manual edit verb — not in the AI prompt whitelist.
+    TableDeleteRows {
+        section: usize,
+        index: usize,
+        at: usize,
+        count: usize,
+        #[serde(default)]
+        path: Option<Vec<hwp_ops::CellStep>>,
+    },
+    /// #442 (R-04) — insert `count` empty columns before column `at` (`at == cols` appends) as ONE
+    /// undo unit (`TableInsertCols`). The table keeps its total width (columns rescaled); a merge
+    /// straddling the boundary widens. Same `path` addressing as `TableDeleteRows`.
+    TableInsertCols {
+        section: usize,
+        index: usize,
+        at: usize,
+        count: usize,
+        #[serde(default)]
+        path: Option<Vec<hwp_ops::CellStep>>,
+    },
+    /// #442 (R-04) — delete columns `[at, at+count)` as ONE undo unit (`TableDeleteCols`). The table
+    /// keeps its total width (remaining columns rescaled). Refuses deleting every column.
+    TableDeleteCols {
+        section: usize,
+        index: usize,
+        at: usize,
+        count: usize,
+        #[serde(default)]
+        path: Option<Vec<hwp_ops::CellStep>>,
+    },
     /// Inline edit — replace a SIMPLE paragraph's text (the `block`-th block of `section`), preserving
     /// its char/para shape, as ONE undo unit (`SetParagraphText`). Refuses a structural paragraph.
     SetParagraphText {
@@ -1978,6 +2012,9 @@ fn proposal_intent_allowed(kind: &str) -> bool {
             | "TableInsertRows"
             | "SetTableCell"
             | "TableAppendRow"
+            | "TableDeleteRows"
+            | "TableInsertCols"
+            | "TableDeleteCols"
             | "SetParagraphText"
             | "SetTableColWidths"
             | "SetTableRowHeights"
@@ -3074,6 +3111,63 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
             text,
         } => {
             do_set_table_cell(session, section, index, row, col, &text)?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::TableDeleteRows {
+            section,
+            index,
+            at,
+            count,
+            path,
+        } => {
+            let doc = session.doc.as_mut().ok_or("no document open")?;
+            doc.do_op(&hwp_ops::Op::TableDeleteRows {
+                section,
+                index,
+                path: path.unwrap_or_default(),
+                at,
+                count,
+            })
+            .map_err(|e| e.to_string())?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::TableInsertCols {
+            section,
+            index,
+            at,
+            count,
+            path,
+        } => {
+            let doc = session.doc.as_mut().ok_or("no document open")?;
+            doc.do_op(&hwp_ops::Op::TableInsertCols {
+                section,
+                index,
+                path: path.unwrap_or_default(),
+                at,
+                count,
+            })
+            .map_err(|e| e.to_string())?;
+            let pages = page_count_u32(session).unwrap_or(0);
+            Ok(Outcome::Edited { pages })
+        }
+        Intent::TableDeleteCols {
+            section,
+            index,
+            at,
+            count,
+            path,
+        } => {
+            let doc = session.doc.as_mut().ok_or("no document open")?;
+            doc.do_op(&hwp_ops::Op::TableDeleteCols {
+                section,
+                index,
+                path: path.unwrap_or_default(),
+                at,
+                count,
+            })
+            .map_err(|e| e.to_string())?;
             let pages = page_count_u32(session).unwrap_or(0);
             Ok(Outcome::Edited { pages })
         }
