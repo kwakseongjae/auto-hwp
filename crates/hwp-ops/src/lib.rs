@@ -253,6 +253,41 @@ pub enum Op {
         section: usize,
         index: usize,
     },
+    /// #442 (R-04) — delete rows `[at, at+count)` of an EXISTING table. `path` empty = the `index`-th
+    /// top-level block; otherwise `path` walks to the PARENT cell and `index` is the table's block
+    /// index inside it (the `DeleteNestedBlock` address). A merge crossing the range SHRINKS
+    /// (`row_span` − overlap); a merge whose origin lies in the range but extends past it keeps its
+    /// content and moves its origin to `at`; a cell wholly inside the range is removed. Row-height slots
+    /// go with their rows. Refuses an out-of-range span or deleting every row.
+    TableDeleteRows {
+        section: usize,
+        index: usize,
+        path: Vec<CellStep>,
+        at: usize,
+        count: usize,
+    },
+    /// #442 (R-04) — insert `count` empty columns BEFORE column `at` (`at == cols` appends). A merge
+    /// straddling the insertion boundary WIDENS (`col_span` + count) instead of getting new cells in
+    /// its rows; every other row gets `count` empty 1×1 cells styled like their left (else right)
+    /// neighbour. The table keeps its total width: the new columns take the neighbour column's width
+    /// and every column is rescaled proportionally. Same `path` addressing as `TableDeleteRows`.
+    TableInsertCols {
+        section: usize,
+        index: usize,
+        path: Vec<CellStep>,
+        at: usize,
+        count: usize,
+    },
+    /// #442 (R-04) — delete columns `[at, at+count)`; the column twin of `TableDeleteRows` (merges
+    /// shrink, origins move to `at`, wholly-covered cells go). The table keeps its total width: the
+    /// remaining columns are rescaled proportionally. Refuses deleting every column.
+    TableDeleteCols {
+        section: usize,
+        index: usize,
+        path: Vec<CellStep>,
+        at: usize,
+        count: usize,
+    },
     /// Replace the text of a SIMPLE top-level paragraph (the `block`-th block of `section`) with one run
     /// of `text`, PRESERVING the paragraph's existing first-run char shape + para shape (so inline
     /// editing keeps the cell/paragraph's color/italic/alignment). Refuses a structural paragraph
@@ -896,6 +931,353 @@ fn delete_nested_block(
     }
     cell.blocks.remove(index);
     cell.dirty.mark();
+    Ok(())
+}
+
+/// #442 — run a structural table edit on the table at `index` (top-level when `path` is empty, else
+/// the `index`-th block of the parent cell `path` reaches). Resolves a 1×1 frame wrapper to its inner
+/// table (the SAME `edit_target` every table edit uses) and marks the section (and the parent cell)
+/// dirty so the serializer re-emits the change.
+fn with_table_at(
+    doc: &mut SemanticDoc,
+    section: usize,
+    path: &[CellStep],
+    index: usize,
+    verb: &str,
+    f: impl FnOnce(&mut Table) -> Result<()>,
+) -> Result<()> {
+    if path.is_empty() {
+        let sec = section_mut(doc, section)?;
+        let block = sec
+            .blocks
+            .get_mut(index)
+            .ok_or_else(|| Error::Other(format!("{verb}: block index {index} out of range")))?;
+        let Block::Table(t) = block else {
+            return Err(Error::Other(format!(
+                "{verb}: block {index} is not a table"
+            )));
+        };
+        f(t.edit_target_mut())?;
+        sec.dirty.mark();
+        return Ok(());
+    }
+    let cell = resolve_cell_mut(doc, section, path)
+        .ok_or_else(|| Error::Other(format!("{verb}: parent cell path not found")))?;
+    let Some(Block::Table(t)) = cell.blocks.get_mut(index) else {
+        return Err(Error::Other(format!(
+            "{verb}: block {index} of the parent cell is not a table"
+        )));
+    };
+    f(t.edit_target_mut())?;
+    cell.dirty.mark();
+    if let Some(sec) = doc.sections.get_mut(section) {
+        sec.dirty.mark();
+    }
+    Ok(())
+}
+
+/// The span `[at, at+count)` a row/column delete removes, validated against `n` lines (`what` =
+/// "row"/"column" for the message). At least one line must remain.
+fn delete_range(verb: &str, what: &str, n: usize, at: usize, count: usize) -> Result<usize> {
+    if count == 0 {
+        return Err(Error::Other(format!("{verb}: count must be ≥ 1")));
+    }
+    let end = at.checked_add(count).filter(|&e| e <= n).ok_or_else(|| {
+        Error::Other(format!(
+            "{verb}: {what}s {at}..{} out of range (table has {n} {what}s)",
+            at.saturating_add(count)
+        ))
+    })?;
+    if count >= n {
+        return Err(Error::Other(format!(
+            "{verb}: cannot delete every {what} (table has {n})"
+        )));
+    }
+    Ok(end)
+}
+
+/// Re-address one cell's `(origin, span)` along an axis after deleting lines `[at, end)`. `None` =
+/// the cell lies wholly inside the range (remove it). A span crossing the range shrinks by the
+/// overlap; an origin inside the range (span extending past it) moves to `at`; an origin after the
+/// range shifts back by the deleted count.
+fn shrink_axis(origin: usize, span: usize, at: usize, end: usize) -> Option<(usize, usize)> {
+    let span = span.max(1);
+    let last = origin + span;
+    let overlap = last.min(end).saturating_sub(origin.max(at));
+    if overlap >= span {
+        return None;
+    }
+    let count = end - at;
+    let new_origin = if origin < at {
+        origin
+    } else if origin >= end {
+        origin - count
+    } else {
+        at
+    };
+    Some((new_origin, span - overlap))
+}
+
+/// Column boundaries `[0, w0, w0+w1, …]` of a width vector.
+fn boundaries(widths: &[HwpUnit]) -> Vec<i64> {
+    let mut b = Vec::with_capacity(widths.len() + 1);
+    let mut acc = 0i64;
+    b.push(0);
+    for &w in widths {
+        acc += i64::from(w.max(0));
+        b.push(acc);
+    }
+    b
+}
+
+/// Rescale `widths` so they sum to `total`, rounding the CUMULATIVE boundaries (so the sum is exact
+/// and shared column edges stay shared). Returns the rescaled boundaries.
+fn rescale_boundaries(widths: &[HwpUnit], total: i64) -> Vec<i64> {
+    let b = boundaries(widths);
+    let raw = *b.last().unwrap_or(&0);
+    if raw <= 0 {
+        return b;
+    }
+    b.iter().map(|&x| (x * total + raw / 2) / raw).collect()
+}
+
+/// A cell's stored width matches its grid span (within rounding) — i.e. it is NOT a ragged-row cell
+/// (issue 074) whose real width differs from the column grid.
+fn width_on_grid(w: HwpUnit, b: &[i64], col: usize, span: usize) -> bool {
+    let (s, e) = (col.min(b.len() - 1), (col + span).min(b.len() - 1));
+    (i64::from(w) - (b[e] - b[s])).abs() <= 2
+}
+
+/// #442 — delete rows `[at, at+count)` (see [`Op::TableDeleteRows`]).
+fn table_delete_rows(t: &mut Table, at: usize, count: usize) -> Result<()> {
+    let end = delete_range("TableDeleteRows", "row", t.rows, at, count)?;
+    let cells = std::mem::take(&mut t.cells);
+    for mut c in cells {
+        match shrink_axis(c.row, c.row_span, at, end) {
+            None => {}
+            Some((row, span)) => {
+                if (row, span) != (c.row, c.row_span.max(1)) {
+                    c.row = row;
+                    c.row_span = span;
+                    c.dirty.mark();
+                }
+                t.cells.push(c);
+            }
+        }
+    }
+    if t.row_heights.len() == t.rows {
+        t.row_heights.drain(at..end);
+    }
+    if t.stored_row_heights.len() == t.rows {
+        t.stored_row_heights.drain(at..end);
+    }
+    t.rows -= count;
+    t.structure_edited = true;
+    t.dirty.mark();
+    Ok(())
+}
+
+/// #442 — delete columns `[at, at+count)` (see [`Op::TableDeleteCols`]).
+fn table_delete_cols(t: &mut Table, at: usize, count: usize) -> Result<()> {
+    let end = delete_range("TableDeleteCols", "column", t.cols, at, count)?;
+    // Width plan: the table keeps its total width; the remaining columns grow proportionally.
+    let widths_ok = t.col_widths.len() == t.cols && t.col_widths.iter().all(|&w| w > 0);
+    let old_b = boundaries(&t.col_widths);
+    let total = *old_b.last().unwrap_or(&0);
+    let mut kept = t.col_widths.clone();
+    if widths_ok {
+        kept.drain(at..end);
+    }
+    let new_b = rescale_boundaries(&kept, total);
+    let kept_raw = boundaries(&kept).last().copied().unwrap_or(0);
+    let cells = std::mem::take(&mut t.cells);
+    for mut c in cells {
+        let old = (c.col, c.col_span.max(1));
+        let Some((col, span)) = shrink_axis(c.col, c.col_span, at, end) else {
+            continue;
+        };
+        if widths_ok {
+            if let Some(w) = c.width {
+                c.width = Some(if width_on_grid(w, &old_b, old.0, old.1) {
+                    (new_b[col + span] - new_b[col]) as HwpUnit
+                } else {
+                    // Ragged-row cell (074): drop the removed columns' grid share, then rescale.
+                    let removed: i64 = (old.0..old.0 + old.1)
+                        .filter(|&k| k >= at && k < end)
+                        .map(|k| i64::from(t.col_widths[k]))
+                        .sum();
+                    let base = (i64::from(w) - removed).max(1);
+                    ((base * total + kept_raw / 2) / kept_raw.max(1)) as HwpUnit
+                });
+            }
+        }
+        if (col, span) != old || widths_ok {
+            c.col = col;
+            c.col_span = span;
+            c.dirty.mark();
+        }
+        t.cells.push(c);
+    }
+    if widths_ok {
+        t.col_widths = new_b.windows(2).map(|w| (w[1] - w[0]) as HwpUnit).collect();
+    } else if t.col_widths.len() == t.cols {
+        t.col_widths.drain(at..end);
+    }
+    t.cols -= count;
+    t.structure_edited = true;
+    t.dirty.mark();
+    Ok(())
+}
+
+/// Upper bound on a table's column count after [`Op::TableInsertCols`] (HWP's own table limit is
+/// far above any readable table; this only stops a runaway count from allocating millions of cells).
+const MAX_TABLE_COLS: usize = 256;
+
+/// #442 — insert `count` empty columns before column `at` (see [`Op::TableInsertCols`]).
+fn table_insert_cols(t: &mut Table, at: usize, count: usize) -> Result<()> {
+    if count == 0 {
+        return Err(Error::Other("TableInsertCols: count must be ≥ 1".into()));
+    }
+    if at > t.cols {
+        return Err(Error::Other(format!(
+            "TableInsertCols: column {at} out of range (table has {} columns)",
+            t.cols
+        )));
+    }
+    if t.cols + count > MAX_TABLE_COLS {
+        return Err(Error::Other(format!(
+            "TableInsertCols: at most {MAX_TABLE_COLS} columns"
+        )));
+    }
+    // Width plan: the new columns copy the neighbour column's width, then every column is rescaled
+    // so the table keeps its total width.
+    let widths_ok =
+        t.cols > 0 && t.col_widths.len() == t.cols && t.col_widths.iter().all(|&w| w > 0);
+    let old_b = boundaries(&t.col_widths);
+    let total = *old_b.last().unwrap_or(&0);
+    let mut grown = t.col_widths.clone();
+    if widths_ok {
+        let ref_w = t.col_widths[if at == t.cols { at - 1 } else { at }];
+        for _ in 0..count {
+            grown.insert(at, ref_w);
+        }
+    }
+    let grown_raw = boundaries(&grown).last().copied().unwrap_or(0);
+    let new_b = rescale_boundaries(&grown, total);
+    let scale = |w: i64| ((w * total + grown_raw / 2) / grown_raw.max(1)) as HwpUnit;
+
+    // Rows whose insertion boundary is covered by a straddling merge — those rows get no new cells.
+    let mut absorbed = vec![false; t.rows];
+    let template_of = |cells: &[Cell], r: usize, col: usize| -> Option<Cell> {
+        cells.iter().find(|c| cell_covers(c, r, col)).cloned()
+    };
+    // Templates are read on the PRE-edit grid: left neighbour (col at-1), else right (col at).
+    let templates: Vec<Option<Cell>> = (0..t.rows)
+        .map(|r| {
+            (at > 0)
+                .then(|| template_of(&t.cells, r, at - 1))
+                .flatten()
+                .or_else(|| template_of(&t.cells, r, at))
+        })
+        .collect();
+    for c in &mut t.cells {
+        let old = (c.col, c.col_span.max(1));
+        if c.col >= at {
+            c.col += count;
+        } else if at < c.col + c.col_span.max(1) {
+            c.col_span = c.col_span.max(1) + count;
+            let end = (c.row + c.row_span.max(1)).min(t.rows);
+            for slot in absorbed.iter_mut().take(end).skip(c.row) {
+                *slot = true;
+            }
+        }
+        if widths_ok {
+            if let Some(w) = c.width {
+                let grid = width_on_grid(w, &old_b, old.0, old.1);
+                c.width = Some(if grid {
+                    (new_b[c.col + c.col_span.max(1)] - new_b[c.col]) as HwpUnit
+                } else {
+                    let added = if c.col_span.max(1) != old.1 {
+                        i64::from(grown[at]) * count as i64
+                    } else {
+                        0
+                    };
+                    scale(i64::from(w) + added)
+                });
+            }
+        }
+        if (c.col, c.col_span.max(1)) != old || widths_ok {
+            c.dirty.mark();
+        }
+    }
+    let empty_para = |cs: usize, ps: usize| {
+        vec![Block::Paragraph(Paragraph {
+            runs: vec![Run {
+                char_shape: cs,
+                content: vec![Inline::Text(String::new())],
+                ..Default::default()
+            }],
+            para_shape: ps,
+            dirty: Dirty(true),
+            ..Default::default()
+        })]
+    };
+    for (r, tpl) in templates.into_iter().enumerate() {
+        if absorbed[r] {
+            continue;
+        }
+        let (cs, ps) = tpl
+            .as_ref()
+            .and_then(|tc| {
+                tc.blocks.iter().find_map(|b| match b {
+                    Block::Paragraph(p) => Some((
+                        p.runs.first().map(|r| r.char_shape).unwrap_or(0),
+                        p.para_shape,
+                    )),
+                    _ => None,
+                })
+            })
+            .unwrap_or((0, 0));
+        for k in 0..count {
+            let col = at + k;
+            let width = widths_ok.then(|| (new_b[col + 1] - new_b[col]) as HwpUnit);
+            let base = tpl.clone().unwrap_or_else(|| Cell {
+                row: r,
+                col,
+                ..Default::default()
+            });
+            t.cells.push(Cell {
+                row: r,
+                col,
+                row_span: 1,
+                col_span: 1,
+                blocks: empty_para(cs, ps),
+                active: true,
+                shade_color: None, // a fresh column — no header tint / banner fill copied
+                fill_image: None,
+                diagonal: None,
+                src_span: None, // never inherit the neighbour's original XML span (057)
+                width,
+                source_page_segments: 0,
+                dirty: Dirty(true),
+                ..base
+            });
+        }
+    }
+    t.cells.sort_by_key(|c| (c.row, c.col));
+    if widths_ok {
+        t.col_widths = new_b.windows(2).map(|w| (w[1] - w[0]) as HwpUnit).collect();
+    } else if t.col_widths.len() == t.cols {
+        // Partly-unknown widths (a 0 slot = auto): keep them, the new columns are auto too.
+        for _ in 0..count {
+            t.col_widths.insert(at, 0);
+        }
+    } else {
+        t.col_widths.clear();
+    }
+    t.cols += count;
+    t.structure_edited = true;
+    t.dirty.mark();
     Ok(())
 }
 
@@ -2042,6 +2424,21 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             t.dirty.mark();
             sec.dirty.mark();
             Ok(())
+        }
+        Op::TableDeleteRows { section, index, path, at, count } => {
+            with_table_at(doc, *section, path, *index, "TableDeleteRows", |t| {
+                table_delete_rows(t, *at, *count)
+            })
+        }
+        Op::TableInsertCols { section, index, path, at, count } => {
+            with_table_at(doc, *section, path, *index, "TableInsertCols", |t| {
+                table_insert_cols(t, *at, *count)
+            })
+        }
+        Op::TableDeleteCols { section, index, path, at, count } => {
+            with_table_at(doc, *section, path, *index, "TableDeleteCols", |t| {
+                table_delete_cols(t, *at, *count)
+            })
         }
         Op::SetParagraphText { section, block, text } => {
             // (b) 이웃 문단 rung of the 서식 상속 규칙 — used ONLY when the paragraph itself carries no

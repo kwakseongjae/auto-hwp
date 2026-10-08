@@ -499,6 +499,30 @@ visual affinity**를 쓴다. 반면 아래 `CaretRectBody`는 주소의 canonica
 | `section` | integer | 구역 인덱스 | ● |
 | `index` | integer | 표 블록 인덱스 | ● |
 
+
+#### `TableDeleteRows` · `TableInsertCols` · `TableDeleteCols` — 행 지우기 · 열 넣기 · 열 지우기(1 undo 단위, #442)
+```json
+{ "intent": "TableDeleteRows", "section": 0, "index": 1, "at": 2, "count": 1 }
+{ "intent": "TableInsertCols", "section": 0, "index": 1, "at": 1, "count": 1 }
+{ "intent": "TableDeleteCols", "section": 0, "index": 1, "at": 1, "count": 1, "path": [{ "block": 3, "row": 0, "col": 0 }] }
+```
+| 필드 | 타입 | 단위/값 | 필수 |
+|------|------|---------|------|
+| `section` | integer | 구역 인덱스 | ● |
+| `index` | integer | 표 블록 인덱스(`path` 가 있으면 그 칸 안 블록 인덱스) | ● |
+| `at` | integer | 첫 행/열(`TableInsertCols` 는 이 열 **앞**에, `==cols`=끝) | ● |
+| `count` | integer | 행/열 수(>0) | ● |
+| `path` | CellStep[] | 칸 안 표: 표를 품은 칸까지의 내림 `CellPath`(`DeleteNestedBlock` 과 같은 주소) | |
+
+- 병합: 지우는 범위를 가로지르는 병합은 줄고(rowSpan/colSpan − 겹친 수), 범위 안에서 시작해 밖으로 이어지는
+  병합은 내용을 지키며 `at` 으로 옮긴다. 범위 안에 통째 들어간 칸은 지운다. 넣는 경계에 걸친 병합은 넓어진다.
+- 너비: 열 넣기/지우기는 **표 너비를 그대로** 둔다 — 새 열은 이웃 열 너비를 받고, 모든 열이 비율로 다시 나뉜다.
+- 거절: 범위 밖 · `count` 0 · 행/열을 모두 지우기 · 열 256 초과.
+- HWPX 내보내기: 원본 `<hp:tc>` 를 그대로 두고 `cellAddr`/`cellSpan`/`cellSz` · `rowCnt`/`colCnt` · 표 `sz` 만
+  고친다(표 위치 · 칸 이름 · 세로 정렬 보존). 새 칸은 같은 행 이웃 칸을 본뜬다(이름은 비움).
+  `path` 로 고친 칸 안 표는 바깥 칸을 다시 쓰는 기존 경로를 탄다.
+- 사람용 편집 동사 — AI 프롬프트 허용목록(`DEFAULT_ALLOWED_INTENTS`)에는 없다.
+
 #### `SetParagraphText` — 단순 문단 텍스트 교체(char/para shape 보존, 1 undo 단위)
 ```json
 { "intent": "SetParagraphText", "section": 0, "block": 0, "text": "바뀐 문단" }

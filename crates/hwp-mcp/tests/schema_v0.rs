@@ -212,6 +212,21 @@ fn examples() -> Vec<Example> {
             Synthetic,
         ),
         e(
+            "TableDeleteRows",
+            r#"{"intent":"TableDeleteRows","section":0,"index":1,"at":1,"count":1}"#,
+            Synthetic,
+        ),
+        e(
+            "TableInsertCols",
+            r#"{"intent":"TableInsertCols","section":0,"index":1,"at":1,"count":1}"#,
+            Synthetic,
+        ),
+        e(
+            "TableDeleteCols",
+            r#"{"intent":"TableDeleteCols","section":0,"index":1,"at":1,"count":1}"#,
+            Synthetic,
+        ),
+        e(
             "SetParagraphText",
             r#"{"intent":"SetParagraphText","section":0,"block":0,"text":"바뀐 문단"}"#,
             Synthetic,
@@ -370,7 +385,7 @@ fn de_err(v: Value) -> String {
 fn every_intent_variant_has_a_documented_example() {
     assert_eq!(
         examples().len(),
-        52,
+        55,
         "one JSON example per Intent variant (see INTENT-SCHEMA.md)"
     );
 }

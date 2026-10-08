@@ -168,8 +168,8 @@ export class EditController {
 
   /** 행 삽입 (issue 039): insert `count` empty rows at logical row `at` (whole-table index, `0..=rowCount`)
    *  of the `index`-th table, delegating to the EXISTING `TableInsertRows` op — NO new intent is introduced
-   *  (§함정 실측: `TableInsertRows`/`TableAppendRow` exist; row-DELETE and column insert/delete do NOT, so
-   *  those verbs are OUT of scope — the menu must not offer them). `cols` = the table's column count so each
+   *  (§함정 실측 당시 row-DELETE and column insert/delete did not exist; #442 added `TableDeleteRows` ·
+   *  `TableInsertCols` · `TableDeleteCols` as engine Intents — this menu still offers insert only). `cols` = the table's column count so each
    *  new row stays rectangular. `at == row` inserts ABOVE that row, `at == row + 1` inserts BELOW it (the
    *  engine shifts every cell whose `row >= at` down by `count`). The op-bus REFUSES an out-of-range `at`
    *  or a non-table block, so a mistargeted insert surfaces an error rather than a silent no-op (031

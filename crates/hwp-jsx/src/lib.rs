@@ -1175,6 +1175,7 @@ fn parse_table(el: &JsxElement) -> Result<Table> {
         split_over_tall_cells: false,
         repeat_first_row: false,
         repeat_header_off: false,
+        structure_edited: false,
         col_widths,
         row_heights,
         // Render-IR only (HWPX auto-fit floor) — the JSX surface never carries it (defaults empty).
