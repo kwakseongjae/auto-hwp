@@ -2102,6 +2102,7 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
             let cell_para = cell_para_shape(doc, *section, *index);
             let mut table = build_rich_table(doc, rows, body, text_w)?;
             set_cell_para_shape(&mut table.cells, cell_para);
+            table.holder_para_shape = Some(holder_para_shape(doc));
             if let Some(ratios) = &opts.col_widths {
                 table.col_widths = scale_col_widths(ratios, table.cols, text_w)?;
             }
@@ -3163,6 +3164,57 @@ fn cell_para_shape(doc: &mut SemanticDoc, section: usize, at: usize) -> usize {
             ..Default::default()
         },
     )
+}
+
+/// The paragraph shape of the `<hp:p>` holding a table inserted by `InsertTableAt` (#440). Before this
+/// the holder had no shape of its own: the HWPX export wrote the section's LAST `paraPrIDRef`, which
+/// changed with unrelated edits (editing a table further down re-serialized the section and the holder
+/// picked up the previous paragraph's shape — e.g. one with 「다음 문단과 함께」, pushing the table onto
+/// the next page in Hancom).
+///
+/// 1. The document's **default paragraph shape** — HWPX `paraPr id="0"` (the 바탕글 shape every
+///    Hancom document has), referenced by its original id.
+/// 2. If that shape keeps with the next paragraph or breaks the page before, a copy without those two
+///    flags — a table's holder must not glue the table to its neighbour.
+/// 3. A document without an HWPX shape pool (lifted from `.hwp` / built from scratch) gets a plain
+///    synthesized shape: 160% line spacing, nothing else.
+fn holder_para_shape(doc: &mut SemanticDoc) -> usize {
+    let pooled = doc
+        .hwpx_pool_para_ids
+        .iter()
+        .find(|(_, &id)| id == 0)
+        .map(|(&idx, _)| idx);
+    let idx = match pooled {
+        Some(idx) => Some(idx),
+        None => doc.header_pools.para.get(&0).cloned().map(|shape| {
+            // Register paraPr 0 as a POOL shape (as the parser does for every referenced id), so the
+            // export references the original id instead of synthesizing a copy.
+            doc.para_shapes.push(shape);
+            let idx = doc.para_shapes.len() - 1;
+            doc.hwpx_pool_para_shapes.insert(idx);
+            doc.hwpx_pool_para_ids.insert(idx, 0);
+            idx
+        }),
+    };
+    match idx.and_then(|i| doc.para_shapes.get(i).cloned().map(|s| (i, s))) {
+        Some((i, s)) if !s.keep_with_next && !s.page_break_before => i,
+        Some((_, s)) => intern_para_shape(
+            doc,
+            ParaShape {
+                keep_with_next: false,
+                page_break_before: false,
+                ..s
+            },
+        ),
+        None => intern_para_shape(
+            doc,
+            ParaShape {
+                line_spacing_type: LineSpacingType::Percent,
+                line_spacing_value: 160,
+                ..Default::default()
+            },
+        ),
+    }
 }
 
 /// Point every cell paragraph of a freshly built table at `para_shape` (#430).

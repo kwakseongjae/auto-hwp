@@ -500,6 +500,10 @@ fn collect_used_shapes(doc: &SemanticDoc, chars: &mut IdxSet, paras: &mut IdxSet
                     }
                 }
                 Block::Table(t) => {
+                    // #440: the holder <hp:p> the serializer synthesizes references this shape.
+                    if let Some(h) = t.holder_para_shape {
+                        paras.insert(h);
+                    }
                     for c in &t.cells {
                         walk_all(&c.blocks, chars, paras);
                     }
@@ -1122,8 +1126,14 @@ fn patch_section_xml(
                 let tid = next_id + 1;
                 next_id += 2;
                 let pb = if tbl.page_break { "1" } else { "0" };
+                // #440: the holder's own shape (fixed at insert) — never the section's last ref,
+                // which moves with unrelated edits.
+                let holder_ref = tbl
+                    .holder_para
+                    .and_then(|i| plan.para_id(i))
+                    .unwrap_or_else(|| base_para_ref.to_string());
                 piece.push_str(&format!(
-                    "<hp:p id=\"{pid}\" paraPrIDRef=\"{base_para_ref}\" styleIDRef=\"0\" pageBreak=\"{pb}\" columnBreak=\"0\" merged=\"0\"><hp:run charPrIDRef=\"{plain_ref}\">"
+                    "<hp:p id=\"{pid}\" paraPrIDRef=\"{holder_ref}\" styleIDRef=\"0\" pageBreak=\"{pb}\" columnBreak=\"0\" merged=\"0\"><hp:run charPrIDRef=\"{plain_ref}\">"
                 ));
                 emit_table(&mut piece, tid, tbl, &body_ctx, &mut next_id);
                 piece.push_str("<hp:t></hp:t></hp:run></hp:p>");
@@ -1737,6 +1747,7 @@ fn build_table_patch(
         page_break: false, // in-place re-emit stays inside the original wrapper <hp:p>
         fixed_row_heights: t.fixed_row_heights,
         header_off: t.repeat_header_off,
+        holder_para: None, // in-place re-emit stays inside the original holder <hp:p>
     };
     let tid = *next_id;
     *next_id += 1;
@@ -2345,6 +2356,9 @@ struct EmitTable {
     /// A-3: the header row was explicitly turned off (`Table::repeat_header_off`) → `repeatHeader="0"`
     /// and no `header="1"` cells. False keeps the legacy header first row.
     header_off: bool,
+    /// #440 — the holder `<hp:p>`'s paragraph shape (`Table::holder_para_shape`); `None` ⇒ the
+    /// section fallback `paraPrIDRef` (legacy).
+    holder_para: Option<usize>,
 }
 
 /// A dirty block ready to serialize: a paragraph, a table, or an embedded image.
@@ -2476,6 +2490,7 @@ fn project_block(b: &Block) -> EmitBlock {
             page_break: false, // set by emit_blocks when an elided anchor carried a break
             fixed_row_heights: t.fixed_row_heights,
             header_off: t.repeat_header_off,
+            holder_para: t.holder_para_shape,
         }),
     }
 }
@@ -2688,8 +2703,12 @@ fn emit_cell_content(out: &mut String, blocks: &[EmitBlock], ctx: &BodyCtx, next
                 let tid = *next_id + 1;
                 *next_id += 2;
                 let pb = if tbl.page_break { "1" } else { "0" };
+                let holder_ref = tbl
+                    .holder_para
+                    .map(|i| (ctx.pref)(i))
+                    .unwrap_or_else(|| base_para_ref.to_string());
                 out.push_str(&format!(
-                    "<hp:p id=\"{pid}\" paraPrIDRef=\"{base_para_ref}\" styleIDRef=\"0\" pageBreak=\"{pb}\" columnBreak=\"0\" merged=\"0\"><hp:run charPrIDRef=\"{}\">",
+                    "<hp:p id=\"{pid}\" paraPrIDRef=\"{holder_ref}\" styleIDRef=\"0\" pageBreak=\"{pb}\" columnBreak=\"0\" merged=\"0\"><hp:run charPrIDRef=\"{}\">",
                     ctx.plain_ref
                 ));
                 emit_table(out, tid, tbl, ctx, next_id);
