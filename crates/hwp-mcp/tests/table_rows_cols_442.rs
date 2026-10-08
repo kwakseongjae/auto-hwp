@@ -379,3 +379,41 @@ fn nested_path_must_reach_a_table() {
     };
     assert!(err.contains("not a table"), "{err}");
 }
+
+/// A merge whose origin lies strictly INSIDE the deleted range (not at its start) moves to `at`.
+#[test]
+fn merge_origin_strictly_inside_range_moves_to_at() {
+    let mut s = open(&simple_table());
+    let i = table_index(&s);
+    // Push the 2×2 merge down to rows 1–2, then delete rows 0–1: its origin (row 1) is inside the range.
+    apply_intent(
+        &mut s,
+        Intent::TableInsertRows {
+            section: 0,
+            index: i,
+            at: 0,
+            count: 1,
+            cols: 3,
+        },
+    )
+    .unwrap();
+    apply_intent(
+        &mut s,
+        Intent::TableDeleteRows {
+            section: 0,
+            index: i,
+            at: 0,
+            count: 2,
+            path: None,
+        },
+    )
+    .unwrap();
+    let mem = grid(&table(&s));
+    assert_eq!(mem.0, 2);
+    assert!(
+        mem.2.contains(&(0, 0, 1, 2, "1".into())),
+        "origin row 1 → 0, span 2 → 1: {mem:?}"
+    );
+    let out = export_bytes(&s).unwrap();
+    assert_consistent(&mem, &grid(&table(&open(&out))), &exported_table(&out));
+}
