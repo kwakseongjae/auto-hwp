@@ -36,6 +36,14 @@ packages are released in lockstep.)*
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+---
+
+## [0.0.15] — 2026-10-10
+
+4패키지(`@auto-hwp/engine` · `editor-core` · `ai-protocol` · `react`) lockstep 패치. 표 편집 API — 행 지우기 · 열 넣기/지우기(#442),
+넣은 표를 담는 문단 모양(#440), 표 읽기 · 넣기 옵션 빈칸(#441). Intent 는 추가만 했다(새 동사 3개 · `InsertTableAt.treat_as_char`) —
+`CellSpec.text` 의 줄바꿈 처리가 바뀌었다(아래 「바뀜」).
+
 ### 추가 (Added)
 
 - **표 행 지우기 · 열 넣기 · 열 지우기 Intent — `TableDeleteRows` · `TableInsertCols` · `TableDeleteCols` (#442, R-04).**
