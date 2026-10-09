@@ -576,6 +576,12 @@ visual affinity**를 쓴다. 반면 아래 `CaretRectBody`는 주소의 canonica
 | `section` | integer | 구역 인덱스 | ● |
 | `index` | integer | 블록 인덱스 | ● |
 
+> **표 블록의 담는 문단(#439).** 파싱한 HWPX 표는 「표 + 담는 문단(`is_table_anchor`)」 **두 블록**이다. 표 블록을 지우면 메모리에는
+> 담는 문단 블록이 남지만, 저장 → 다시 열면 그 담는 문단도 사라진다(표와 함께 담는 `<hp:p>` 가 빠진다) — 다시 연 문서의 그 뒤 블록
+> 순번은 1 당겨진다. 반대 방향(`InsertTableAt` 은 1블록, 다시 열면 2블록)은 §InsertTableAt 「담는 문단」. 표를 같은 자리에서
+> 바꾸는 묶음 `[DeleteBlock(표), InsertTableAt(같은 index)]` 은 새 표가 남은 담는 문단을 다시 쓰므로 메모리 = 다시 연 문서이고,
+> 저장 → 다시 열기를 되풀이해도 블록 순번 · 쪽 수가 그대로다(`crates/hwp-mcp/tests/table_replace_roundtrip_439.rs`).
+
 #### `DeleteNestedBlock` — 셀 안의 중첩 블록 삭제(1 undo 단위, 수동 UI 전용)
 ```json
 { "intent": "DeleteNestedBlock", "section": 0, "path": [{"block": 1, "row": 3, "col": 1}], "index": 2 }
@@ -734,7 +740,7 @@ visual affinity**를 쓴다. 반면 아래 `CaretRectBody`는 주소의 canonica
 모양)을 넣을 때 정해 갖는다 — 다른 편집과 무관하게 같다(0.0.14 까지는 구역의 마지막 `paraPrIDRef` 를 써서 뒤쪽 표를 고치면 바뀌었다).
 메모리에서 넣은 표는 **한 블록**이다. 저장 → 다시 열면 파싱한 모든 표처럼 표 뒤에 담는 문단 블록(`is_table_anchor`, 글 없음)이
 붙어 **그 뒤 블록 순번이 1 밀린다** — 한/글 XML 에 빈 문단이 더 생기는 것은 아니고(담는 문단 하나), 쪽 수도 같다. 다시 연 문서의
-주소는 다시 읽어 쓴다.
+주소는 다시 읽어 쓴다. 파싱한 표를 지울 때의 반대 방향 비대칭과 「표 통째 바꾸기」 묶음은 §DeleteBlock 주.
 
 **`CellSpec` (중첩 오브젝트)** — `#[serde(default, deny_unknown_fields)]`. 모든 필드 선택
 (`{}` = 빈 일반 셀). 알 수 없는 셀 키는 거부.
