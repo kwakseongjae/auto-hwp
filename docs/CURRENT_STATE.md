@@ -3,6 +3,20 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-10-10 · Claude Opus 5.5 — **0.0.15 발행 — 표 행/열 지우기 · 담는 문단 모양 · 표 API** (main `74dee93`).
+  · **#442 → #443 (R-04)**: `TableDeleteRows` · `TableInsertCols` · `TableDeleteCols` `{section, index, at, count, path?}`. 병합은 줄이고(가로지름)
+    범위 안 시작은 `at` 으로, 열 편집은 표 너비 유지(누적 경계 반올림). `Table::structure_edited` → 직렬화기 `structural_table_xml` 이 **원본
+    `<hp:tc>` 를 그대로 두고** `cellAddr`/`cellSpan`/`cellSz` · `rowCnt`/`colCnt` · `sz` 만 고친다(통째 재생성 `emit_table` 은 treatAsChar ·
+    정렬 · 칸 이름 · 자동 맞춤 행 높이를 하드코딩해 양식 표에 부적합). 새 칸은 같은 행 이웃 `<hp:tc>` 를 본뜸. 기존 `TableInsertRows` 경로는 그대로.
+  · **#440 → #444**: 넣은 표 담는 문단이 `base_para_ref`(구역 XML **마지막** `paraPrIDRef`)라 뒤쪽 표 편집에 따라 바뀜 → `Table::holder_para_shape`
+    = paraPr id 0(keepWithNext · pageBreakBefore 켜져 있으면 끈 사본). **#439**: 파싱한 표는 늘 「표 + 담는 문단(`is_table_anchor`)」 두 블록,
+    넣은 표만 메모리 1블록 — 넣기를 2블록으로 바꾸면 Intent 의미 변경(intent_version)이라 문서화 + 쪽 수 같음 테스트로 닫음.
+  · **#441 → #445**: `InsertTableAt.treat_as_char` · `tableGrid` 칸 `row_span/col_span/fill/width` + 표 `col_widths` · `CellSpec.text` `\n` =
+    칸 문단(바뀜) · `docProfile.tables_truncated` + 새 `tableBlocks()`.
+  · **#447 → publish 발행 0.0.15**(2026-10-09 15:59Z = KST 10-10 00:59): wasm 8,694,759 B · sha256 `b700dc7e…375c` ·
+    SRI `sha384-Zu5Ss7w8…oN2S`, Node 20/22/24 · chromium 145 · webkit 26.
+  · 한계: `path` 로 고친 칸 안 표는 바깥 칸 재작성(통째) 경로. 열 넣기의 새 열은 행마다 1×1(세로 병합을 복제하지 않음).
+
 - 갱신: 2026-10-07 · Claude Opus 5.5 — **0.0.14 발행 — `InsertTableAt` 새 표 칸 문단 모양 · 칸 글 색** (main `2180ff0`).
   · **#430 → #433**: 새 표 칸 문단이 `para_shape` 0(엔진 기본)이라 직렬화기가 구역 마지막 `paraPrIDRef`(이웃 본문 · 목록, 예: 위 12pt ·
     아래 3pt)로 썼다 → 한/글이 칸을 늘리고 글을 아래 선에 붙였다. `cell_para_shape`: 문서 표 칸 문단 모양 중 간격 · 들여쓰기 · 번호 없고
