@@ -57,6 +57,7 @@ const METHODS = new Set([
   'tableGrid',
   'outline',
   'docProfile',
+  'tableBlocks',
   'applyIntent',
   'applyIntents',
   'setUndoLimits',

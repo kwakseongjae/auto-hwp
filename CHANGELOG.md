@@ -47,6 +47,19 @@ packages are released in lockstep.)*
   shrink; column edits keep the table width. The HWPX export keeps every original `<hp:tc>` and rewrites only the
   addresses, spans, sizes and row/column counts.)*
 
+- **표 API 빈칸 (#441).** ① `InsertTableAt.treat_as_char`(선택) — `false` 면 HWPX `treatAsChar="0"` 문단 기준 표라 한/글이 행 경계에서
+  쪽을 나눈다(생략 = 지금처럼 글자처럼 취급). ② `tableGrid` 칸에 `row_span` · `col_span` · `fill`(`#RRGGBB`/null) · `width`(HWPUNIT/null),
+  표에 `col_widths` — 칸 음영 · 열 너비를 XML 을 직접 읽지 않고 되읽는다. ③ `docProfile` 에 `tables_truncated`(표 목록은 AI 예산 때문에
+  20개에서 멈춘다), 새 `tableBlocks()` — 모든 최상위 표의 `{section, block, rows, cols}`.
+  *(EN — `InsertTableAt.treat_as_char` option; `tableGrid` now reports spans, cell fill and width plus the table's
+  `col_widths`; `docProfile.tables_truncated` and a new uncapped `tableBlocks()` read.)*
+
+### 바뀜
+
+- **`CellSpec.text` 의 줄바꿈은 칸 안 새 문단이다 (#441).** `"줄1\n줄2"` 가 칸 문단 두 개가 된다(`\r\n` 도). 전에는 한 `<hp:t>` 안에
+  줄바꿈 글자로 들어가 한/글에서 줄이 나뉘지 않을 수 있었다. `InsertTableAt` · `TableInsertRows` · 리치 표 공통.
+  *(EN — A line break in `CellSpec.text` now starts a new paragraph in the cell instead of a raw newline inside one run.)*
+
 ### 고침
 
 - **`InsertTableAt` 표를 담는 문단의 문단 모양이 다른 편집에 따라 바뀌던 문제 (#440).** 담는 문단은 모양이 없어 HWPX 내보내기가

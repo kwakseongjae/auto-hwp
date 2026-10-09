@@ -1748,6 +1748,7 @@ fn build_table_patch(
         fixed_row_heights: t.fixed_row_heights,
         header_off: t.repeat_header_off,
         holder_para: None, // in-place re-emit stays inside the original holder <hp:p>
+        treat_as_char: t.treat_as_char.unwrap_or(true),
     };
     let tid = *next_id;
     *next_id += 1;
@@ -2359,6 +2360,8 @@ struct EmitTable {
     /// #440 — the holder `<hp:p>`'s paragraph shape (`Table::holder_para_shape`); `None` ⇒ the
     /// section fallback `paraPrIDRef` (legacy).
     holder_para: Option<usize>,
+    /// #441 — `<hp:pos treatAsChar>`; `true` = the legacy inline table.
+    treat_as_char: bool,
 }
 
 /// A dirty block ready to serialize: a paragraph, a table, or an embedded image.
@@ -2491,6 +2494,7 @@ fn project_block(b: &Block) -> EmitBlock {
             fixed_row_heights: t.fixed_row_heights,
             header_off: t.repeat_header_off,
             holder_para: t.holder_para_shape,
+            treat_as_char: t.treat_as_char.unwrap_or(true),
         }),
     }
 }
@@ -2999,6 +3003,7 @@ fn emit_table(out: &mut String, tid: u64, t: &EmitTable, ctx: &BodyCtx, next_id:
     // 이슈 247: 저장 높이가 정확값이면 HWPX 에도 그렇게 적는다(자동 맞춤 안 함).
     let no_adjust = u8::from(t.fixed_row_heights);
     let repeat = u8::from(!t.header_off);
+    let tac = u8::from(t.treat_as_char);
     let tbl_bf = t
         .bf_key
         .as_deref()
@@ -3008,7 +3013,7 @@ fn emit_table(out: &mut String, tid: u64, t: &EmitTable, ctx: &BodyCtx, next_id:
     out.push_str(&format!(
         "<hp:tbl id=\"{tid}\" zOrder=\"0\" numberingType=\"TABLE\" textWrap=\"TOP_AND_BOTTOM\" textFlow=\"BOTH_SIDES\" lock=\"0\" dropcapstyle=\"None\" pageBreak=\"CELL\" repeatHeader=\"{repeat}\" rowCnt=\"{rows}\" colCnt=\"{cols}\" cellSpacing=\"0\" borderFillIDRef=\"{tbl_bf}\" noAdjust=\"{no_adjust}\">\
 <hp:sz width=\"{w}\" widthRelTo=\"ABSOLUTE\" height=\"{height}\" heightRelTo=\"ABSOLUTE\" protect=\"0\"/>\
-<hp:pos treatAsChar=\"1\" affectLSpacing=\"0\" flowWithText=\"1\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PARA\" horzRelTo=\"COLUMN\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"0\" horzOffset=\"0\"/>\
+<hp:pos treatAsChar=\"{tac}\" affectLSpacing=\"0\" flowWithText=\"1\" allowOverlap=\"0\" holdAnchorAndSO=\"0\" vertRelTo=\"PARA\" horzRelTo=\"COLUMN\" vertAlign=\"TOP\" horzAlign=\"LEFT\" vertOffset=\"0\" horzOffset=\"0\"/>\
 <hp:outMargin left=\"{oml}\" right=\"{omr}\" top=\"{omt}\" bottom=\"{omb}\"/>\
 <hp:inMargin left=\"{iml}\" right=\"{imr}\" top=\"{imt}\" bottom=\"{imb}\"/>"
     ));

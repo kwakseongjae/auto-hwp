@@ -1674,6 +1674,10 @@ pub enum Intent {
         col_widths: Option<Vec<f64>>,
         #[serde(default)]
         header_row: Option<bool>,
+        /// #441 — `false` = a paragraph-anchored table Hancom splits between pages at row bounds;
+        /// absent/`true` = the legacy inline (글자처럼 취급) table.
+        #[serde(default)]
+        treat_as_char: Option<bool>,
     },
     /// Structural insert (issue 051) — insert a rich paragraph AT block `index` of `section` as ONE undo
     /// unit (the existing `InsertParagraphAt` op, exposed to the Intent lane). `runs` are styled
@@ -3492,6 +3496,7 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
             border,
             col_widths,
             header_row,
+            treat_as_char,
         } => {
             // `None` → the section END (resolved here so the op's `index == len` append semantics
             // absorb the end-append); `Some(i)` passes through — past-end stays an honest op error.
@@ -3508,6 +3513,7 @@ pub fn apply_intent(session: &mut Session, intent: Intent) -> Result<Outcome, St
                     border,
                     col_widths,
                     header_row,
+                    treat_as_char,
                 },
             })
             .map_err(|e| e.to_string())?;

@@ -35,6 +35,7 @@ fn insert_and_export(name: &str) -> (String, String) {
             border: None,
             col_widths: None,
             header_row: None,
+            treat_as_char: None,
         },
     )
     .expect("InsertTableAt applies");

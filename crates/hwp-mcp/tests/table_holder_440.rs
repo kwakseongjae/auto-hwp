@@ -39,6 +39,7 @@ fn insert(s: &mut Session, index: usize) {
             border: None,
             col_widths: None,
             header_row: None,
+            treat_as_char: None,
         },
     )
     .expect("insert");
