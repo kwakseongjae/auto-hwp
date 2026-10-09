@@ -529,6 +529,11 @@ pub struct Table {
     /// `cellAddr`/`cellSpan`/`cellSz`, instead of the per-cell patch (stale addresses) or the lossy
     /// whole-table re-emit. Parsed/lifted tables leave it false.
     pub structure_edited: bool,
+    /// EXPORT ONLY: the paragraph shape of the `<hp:p>` that HOLDS this table when the serializer
+    /// synthesizes that wrapper (a table an op inserted — `InsertTableAt`, #440). `None` = the legacy
+    /// section-fallback `paraPrIDRef` (parsed tables keep their original holder byte-verbatim and never
+    /// read this). Fixed at insert time, so the holder's look does not depend on what else was edited.
+    pub holder_para_shape: Option<usize>,
     /// Per-column widths (HWPUNIT), `cols` entries — for faithful column proportions on render.
     /// Empty when unknown (then the renderer falls back to auto-layout).
     pub col_widths: Vec<HwpUnit>,

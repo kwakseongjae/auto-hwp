@@ -47,6 +47,18 @@ packages are released in lockstep.)*
   shrink; column edits keep the table width. The HWPX export keeps every original `<hp:tc>` and rewrites only the
   addresses, spans, sizes and row/column counts.)*
 
+### 고침
+
+- **`InsertTableAt` 표를 담는 문단의 문단 모양이 다른 편집에 따라 바뀌던 문제 (#440).** 담는 문단은 모양이 없어 HWPX 내보내기가
+  구역의 마지막 `paraPrIDRef` 를 썼고, 넣은 자리 뒤의 표 칸을 고치면 앞 문단 모양(예: 「다음 문단과 함께」)으로 바뀌어 한/글에서 표가
+  다음 쪽으로 밀렸다. 이제 담는 문단은 넣을 때 정한 **문서 기본 문단 모양(`paraPr id="0"`)** 을 쓴다(「다음 문단과 함께」 · 「쪽 나누기
+  앞」 이 켜져 있으면 끈 사본). 저장 → 다시 열면 넣은 표 뒤에 담는 문단 블록이 생기는 것(#439)은 파싱한 모든 표와 같은 모델이라
+  그대로 두고 문서화했다 — 빈 문단이 더 생기지 않고 쪽 수가 같음을 테스트로 고정했다.
+  *(EN — The paragraph holding an `InsertTableAt` table now gets the document's default paragraph shape (paraPr 0,
+  without keep-with-next / page-break-before) at insert time instead of the section's last `paraPrIDRef`, which
+  changed with unrelated edits. After save → reopen the holder shows up as the table's anchor block, like every
+  parsed table (#439, documented).)*
+
 ---
 
 ## [0.0.14] — 2026-10-07
