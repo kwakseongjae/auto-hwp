@@ -1697,6 +1697,7 @@ fn build_table_patch(
                 sec_para_ref,
                 sec_plain_ref,
                 next_id,
+                true,
             ) {
                 Some(xml) => cell_edits.push((cs, ce, xml)),
                 None => {
@@ -1798,9 +1799,13 @@ fn valid_cell_span(original: &str, open_end: usize, e0: usize, c: &Cell) -> Opti
 /// its ORIGINAL XML: the `<hp:tbl>` open tag (rowCnt/colCnt patched), every table-level child before
 /// the first `<hp:tr>` (sz height/width patched, pos/margins/caption verbatim), then fresh `<hp:tr>`
 /// rows whose `<hp:tc>`s are each cell's original XML (body byte-verbatim unless its content was
-/// edited) with `cellAddr`/`cellSpan`/`cellSz` re-written. A NEW cell (inserted column) borrows the
-/// nearest same-row cell's `<hp:tc>` as its template (look + fallback shape refs), body rebuilt
-/// empty and `name` cleared. `None` (→ whole-table re-emit) when the XML doesn't match expectations.
+/// edited) with `cellAddr`/`cellSpan`/`cellSz` re-written. A NEW cell copies a template `<hp:tc>`
+/// (look + fallback shape refs), body rebuilt from its own content and `name` cleared: a cloned row's
+/// cell (#457 row append/insert) its `Cell::template_span` — the template row's cell, height and
+/// borders included — else (an inserted column) the nearest same-row cell. Heights: a cell whose rows
+/// changed writes its ORIGINAL height ± `Cell::height_delta`, the table's `<hp:sz height>` its
+/// original ± `Table::height_delta` (#457 — re-summing derived floors moved untouched heights).
+/// `None` (→ whole-table re-emit) when the XML doesn't match expectations.
 #[allow(clippy::too_many_arguments)]
 fn structural_table_xml(
     original: &str,
@@ -1852,8 +1857,12 @@ fn structural_table_xml(
     if let Some(i) = head.find("<hp:sz ") {
         let j = i + head[i..].find('>')? + 1;
         let mut el = head[i..j].to_string();
-        if let Some(h) = span_h(0, rows) {
-            el = synth::set_attr(&el, "height", &h.to_string());
+        // #457 — ORIGINAL height + the rows the ops added/removed. Re-summing the derived per-row
+        // floors would rewrite the height of a table whose stored `height` differs from that sum.
+        if t.height_delta != 0 {
+            if let Some(h) = first_attr(&el, "height").and_then(|v| v.trim().parse::<i64>().ok()) {
+                el = synth::set_attr(&el, "height", &(h + t.height_delta).max(0).to_string());
+            }
         }
         if widths_ok {
             el = synth::set_attr(&el, "width", &span_w(0, cols).to_string());
@@ -1883,23 +1892,52 @@ fn structural_table_xml(
         out.push_str("<hp:tr>");
         for cell in row_cells {
             let own = valid_cell_span(original, open_end, e0, cell);
+            let in_table = |sp: (usize, usize)| {
+                let (cs, ce) = sp;
+                cs >= open_end
+                    && ce <= e0
+                    && cs < ce
+                    && original.is_char_boundary(cs)
+                    && original.is_char_boundary(ce)
+                    && original[cs..].starts_with("<hp:tc")
+            };
             let (cs, ce) = match own {
                 Some(sp) => sp,
-                // A new cell: the nearest same-row cell, else the nearest row's, as the template.
-                None => spanned
-                    .iter()
-                    .min_by_key(|(c, _)| (c.row.abs_diff(r), c.col.abs_diff(cell.col)))
-                    .map(|(_, sp)| *sp)?,
+                // #457 — a cloned row's cell copies the template row's cell it was made from.
+                None => match cell.template_span.filter(|&sp| in_table(sp)) {
+                    Some(sp) => sp,
+                    // Else (#442 inserted column): the nearest same-row cell, else the nearest row's.
+                    None => spanned
+                        .iter()
+                        .min_by_key(|(c, _)| (c.row.abs_diff(r), c.col.abs_diff(cell.col)))
+                        .map(|(_, sp)| *sp)?,
+                },
             };
-            let mut tc = patch_cell_xml(
-                &original[cs..ce],
-                cell,
-                plan,
-                bf,
-                sec_para_ref,
-                sec_plain_ref,
-                next_id,
-            )?;
+            // #457 — only an op-edited cell is rebuilt: a cell the row/column op merely MOVED (or a
+            // merge it extended) keeps its `<hp:tc>` byte-verbatim. Running it through the patch would
+            // re-point a parsed shade at a synthesized fill (the parser fills `shade_color` from the
+            // original borderFill) and lose what that fill alone carries (dotted edges, ids).
+            let mut tc = if own.is_some() && !cell.dirty.is_dirty() {
+                original[cs..ce].to_string()
+            } else {
+                // A cloned row's cell keeps its template's fill unless an op changed the shade.
+                let repoint = own.is_some()
+                    || cell.template_span.is_none()
+                    || t.cells
+                        .iter()
+                        .find(|c| c.src_span == cell.template_span)
+                        .is_none_or(|tpl| tpl.shade_color != cell.shade_color);
+                patch_cell_xml(
+                    &original[cs..ce],
+                    cell,
+                    plan,
+                    bf,
+                    sec_para_ref,
+                    sec_plain_ref,
+                    next_id,
+                    repoint,
+                )?
+            };
             if own.is_none() {
                 let tc_open_end = tc.find('>')? + 1;
                 let opened = synth::set_attr(&tc[..tc_open_end], "name", "");
@@ -1918,6 +1956,9 @@ fn structural_table_xml(
             let orig_row_span = own_cell_elem(&tc, "cellSpan")
                 .and_then(|(a, b)| first_attr(&tc[a..b], "rowSpan"))
                 .and_then(|v| v.trim().parse::<usize>().ok());
+            let orig_h = own_cell_elem(&tc, "cellSz")
+                .and_then(|(a, b)| first_attr(&tc[a..b], "height"))
+                .and_then(|v| v.trim().parse::<i64>().ok());
             tc = set_cell_elem_attrs(
                 &tc,
                 "cellSpan",
@@ -1932,7 +1973,14 @@ fn structural_table_xml(
             } else if widths_ok {
                 sz.push(("width", span_w(cell.col, col_span).to_string()));
             }
-            if own.is_none() || orig_row_span != Some(row_span) {
+            // #457 — a cell whose rows changed keeps its ORIGINAL height ± the rows added/removed
+            // (`Cell::height_delta`); a fresh cell spanning as many rows as its template keeps the
+            // template's height. Only without either does the derived per-row sum decide.
+            let keeps_shape = orig_row_span == Some(row_span);
+            if cell.height_delta != 0 && orig_h.is_some() {
+                let h = orig_h.unwrap_or(0) + cell.height_delta;
+                sz.push(("height", h.max(0).to_string()));
+            } else if !keeps_shape {
                 if let Some(h) = span_h(r, row_span) {
                     sz.push(("height", h.to_string()));
                 }
@@ -1972,7 +2020,9 @@ fn cell_content_dirty(blocks: &[Block]) -> bool {
 /// (shade) keeps its whole body byte-verbatim and patches just the open tag's `borderFillIDRef`.
 /// Falls back to the cell's own original paraPr/charPr refs so a centered/styled cell keeps its
 /// look. Returns None when the segment doesn't parse as `<hp:tc>…<hp:subList>…</hp:subList>…` —
-/// the caller then re-emits the whole table instead (never a half-patch).
+/// the caller then re-emits the whole table instead (never a half-patch). `repoint_shade` = false keeps the
+/// `<hp:tc>` fill as is (#457 — a cloned row's cell keeps its template's fill).
+#[allow(clippy::too_many_arguments)]
 fn patch_cell_xml(
     cell_orig: &str,
     cell: &Cell,
@@ -1981,6 +2031,7 @@ fn patch_cell_xml(
     sec_para_ref: &str,
     sec_plain_ref: &str,
     next_id: &mut u64,
+    repoint_shade: bool,
 ) -> Option<String> {
     if !cell_orig.starts_with("<hp:tc") {
         return None;
@@ -2036,6 +2087,7 @@ fn patch_cell_xml(
     // shade_color gate is load-bearing — only op-set shades may re-point a verbatim cell's fill.)
     if let Some(id) = cell
         .shade_color
+        .filter(|_| repoint_shade)
         .and_then(|_| bf_spec(&cell.borders, cell.shade_color))
         .map(|s| bf_key(&s))
         .and_then(|k| plan.bf_ref.get(&k))

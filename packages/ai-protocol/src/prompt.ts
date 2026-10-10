@@ -123,7 +123,7 @@ const INTENT_BLOCKS: Record<string, string[]> = {
     '  { "intent": "TableInsertRows", "section": <int>, "index": <int table-block>, "at": <int row, ==rows appends>, "count": <int ≥1>, "cols": <int ≥1 — the table\'s column count> }',
   ],
   TableAppendRow: [
-    "# TableAppendRow — append ONE empty body row replicating the last row's column layout (merge-safe) (docs/INTENT-SCHEMA.md §6.6, L373-380)",
+    "# TableAppendRow — append ONE empty body row replicating the last row (merge-safe: a vertical merge covering the last row extends over it) (docs/INTENT-SCHEMA.md §6.6, L373-380)",
     '  { "intent": "TableAppendRow", "section": <int>, "index": <int table-block> }',
   ],
   DeleteBlock: [
