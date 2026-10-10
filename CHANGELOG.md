@@ -36,14 +36,22 @@ packages are released in lockstep.)*
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+---
+
+## [0.0.16] — 2026-10-10
+
+4패키지(`@auto-hwp/engine` · `editor-core` · `ai-protocol` · `react`) lockstep 패치. 표 행 붙이기 · 넣기 뒤 HWPX 내보내기가 표를 통째로
+다시 만들던 문제(#457)를 고쳤다 — 원본 행 높이 · 세로 병합 · 표 제목 · 점선 유지. Intent 표면은 그대로다(필드 추가 · 변경 없음) —
+`TableAppendRow` 의 병합 늘림 · `TableInsertRows` 의 가로지르는 병합 늘림은 아래 「바뀜」.
+
 ### 바뀜
 
 - **`TableAppendRow` — 마지막 행을 덮는 세로 병합은 붙인 행까지 늘어난다 (#457).** 반복 행 묶음 왼쪽에 세로로 병합한 묶음 제목 칸
   (예: 「정부/공공기관 창업지원사업 수료 이력*」)처럼 마지막 행에서 끝나는 병합은 `rowSpan` 이 늘어 새 행을 덮는다. 전에는 그 열에 빈
   칸을 새로 만들어 묶음 제목 아래가 갈라졌다. 기본 동작이다(끄는 옵션 없음). 새 행은 마지막 행의 칸을 그대로 본뜬다 — 열 구성 ·
-  테두리 · 음영 · 칸 모양 · 행 높이(글은 비움).
+  테두리 · 음영 · 대각선 · 칸 모양 · 행 높이(글은 비움).
   *(EN — `TableAppendRow` now extends a vertical merge that covers the last row over the new row instead of creating a blank
-  cell under it; the new row replicates the last row's cells — layout, borders, shade, cell shape, height — with empty text.)*
+  cell under it; the new row replicates the last row's cells — layout, borders, shade, diagonal, cell shape, height — with empty text.)*
 - **`TableInsertRows` — 넣는 자리를 가로지르는 세로 병합은 새 행까지 늘어난다 (#457).** 그 열에는 새 칸을 만들지 않는다(전에는 병합과
   겹친 칸이 생겼다). 새 칸은 바로 위 행(맨 위에 넣으면 첫 행) 칸의 모양 · 높이를 따른다. `cols` 칸 계약은 그대로다 — 위 행에서 끝나기만
   하는 병합은 늘리지 않는다.
