@@ -90,7 +90,9 @@ fn table(s: &Session, (si, bi): (usize, usize)) -> Table {
 }
 
 /// `(rows, cols, [(row, col, row_span, col_span)])` of the active cells, sorted.
-fn grid(t: &Table) -> (usize, usize, Vec<(usize, usize, usize, usize)>) {
+type Grid = (usize, usize, Vec<(usize, usize, usize, usize)>);
+
+fn grid(t: &Table) -> Grid {
     let mut v: Vec<_> = t
         .cells
         .iter()
@@ -589,9 +591,9 @@ fn insert_rows_inside_a_merge_extends_it_and_round_trips() {
     // 겹치는 칸 없음: 모든 격자 칸이 정확히 한 번 덮인다.
     let mut cover = vec![vec![0u8; 3]; 11];
     for t in &got {
-        for r in t.row..t.row + t.row_span {
-            for k in t.col..t.col + t.col_span {
-                cover[r][k] += 1;
+        for row in cover.iter_mut().skip(t.row).take(t.row_span) {
+            for slot in row.iter_mut().skip(t.col).take(t.col_span) {
+                *slot += 1;
             }
         }
     }

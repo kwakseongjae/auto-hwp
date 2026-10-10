@@ -6586,9 +6586,9 @@ mod tests {
         );
         let mut cover = [[0u8; 2]; 3];
         for c in t.cells.iter().filter(|c| c.active) {
-            for r in c.row..c.row + c.row_span.max(1) {
-                for k in c.col..c.col + c.col_span.max(1) {
-                    cover[r][k] += 1;
+            for row in cover.iter_mut().skip(c.row).take(c.row_span.max(1)) {
+                for slot in row.iter_mut().skip(c.col).take(c.col_span.max(1)) {
+                    *slot += 1;
                 }
             }
         }
