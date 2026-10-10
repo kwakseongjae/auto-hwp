@@ -238,17 +238,27 @@ pub enum Op {
     },
     /// Insert one or more BODY rows into the EXISTING `index`-th table at logical row `at`
     /// (`at == t.rows` appends). Existing cells at row >= `at` shift down by `rows.len()`; the new
-    /// cells take `col_span`/`shade`/`bold` from each `CellSpec` (HTML-table coverage per row).
+    /// cells take `col_span`/`shade`/`bold`/text from each `CellSpec` (HTML-table coverage per row).
+    /// #457: the new cells borrow the look of the template row's cell above them (the row `at − 1`,
+    /// row 0 when `at == 0`) and its height slot; a vertical merge CROSSING the insertion row extends
+    /// over the new rows, and a spec cell that would land under it is dropped (it used to overlap the
+    /// merge). A merge that merely ENDS on the template row is not extended (the spec row is a full
+    /// row of its own) — [`Op::TableAppendEmptyRow`] is the verb that replicates the template row.
     TableInsertRows {
         section: usize,
         index: usize,
         at: usize,
         rows: Vec<Vec<CellSpec>>,
     },
-    /// Append ONE empty BODY row to the `index`-th table that REPLICATES the column layout of the
-    /// table's last active row (same per-cell `col`/`col_span` + borders, empty text). The interactive
-    /// "+행" verb: a naive `cols`-single-cell row breaks tables with merged columns (the 보유역량-spans-3
-    /// case → a misaligned grid), so we clone the existing column structure instead.
+    /// Append ONE empty BODY row to the `index`-th table that REPLICATES the table's last row — the
+    /// template row (same per-cell `col`/`col_span` + borders/shade/cell shape, empty text). The
+    /// interactive "+행" verb: a naive `cols`-single-cell row breaks tables with merged columns (the
+    /// 보유역량-spans-3 case → a misaligned grid), so we clone the existing column structure instead.
+    /// #457: a vertical merge covering the last row (ending on it) EXTENDS over the new row instead
+    /// of getting a blank cell under it — the default, so a group label merged down the left of a
+    /// repeat-row group keeps covering the rows added to it. The new row takes the last row's height
+    /// slot, and the HWPX structural re-emit clones each template cell's `<hp:tc>` (height, borders,
+    /// cell shape) while every original cell and the table caption stay byte-verbatim.
     TableAppendEmptyRow {
         section: usize,
         index: usize,
@@ -1052,23 +1062,172 @@ fn width_on_grid(w: HwpUnit, b: &[i64], col: usize, span: usize) -> bool {
     (i64::from(w) - (b[e] - b[s])).abs() <= 2
 }
 
+/// #457 — row `r`'s height slot as the HWPX structural re-emit reads it (fixed floors, else the
+/// stored auto-fit floors, else the override floors); 0 when the table tracks no per-row heights.
+fn row_slot(t: &Table, r: usize) -> i64 {
+    let v = if t.fixed_row_heights && t.row_heights.len() == t.rows {
+        &t.row_heights
+    } else if t.stored_row_heights.len() == t.rows {
+        &t.stored_row_heights
+    } else if t.row_heights.len() == t.rows {
+        &t.row_heights
+    } else {
+        return 0;
+    };
+    v.get(r).map(|&h| i64::from(h.max(0))).unwrap_or(0)
+}
+
+/// #457 — insert `n` height slots copying row `tpl`'s at `at` in every per-row vector that tracks
+/// the rows (call BEFORE `t.rows` grows; mirrors `table_delete_rows`' drain).
+fn insert_height_slots(t: &mut Table, at: usize, tpl: usize, n: usize) {
+    let rows = t.rows;
+    for v in [&mut t.row_heights, &mut t.stored_row_heights] {
+        if v.len() == rows {
+            let h = v.get(tpl).copied().unwrap_or(0);
+            v.splice(at..at, std::iter::repeat_n(h, n));
+        }
+    }
+}
+
+/// #457 — the original `<hp:tc>` a fresh cell clones: the cell's own span, else the span it was
+/// itself cloned from (a row appended twice copies the same original).
+fn template_of_cell(c: &Cell) -> Option<(usize, usize)> {
+    c.src_span.or(c.template_span)
+}
+
+/// An empty body paragraph carrying a template cell's first char/para shape (typing inherits the look).
+fn empty_cell_body(template: &Cell) -> Vec<Block> {
+    let (cs, ps) = template
+        .blocks
+        .iter()
+        .find_map(|b| match b {
+            Block::Paragraph(p) => Some((
+                p.runs.first().map(|r| r.char_shape).unwrap_or(0),
+                p.para_shape,
+            )),
+            _ => None,
+        })
+        .unwrap_or((0, 0));
+    vec![Block::Paragraph(Paragraph {
+        runs: vec![Run {
+            char_shape: cs,
+            content: vec![Inline::Text(String::new())],
+            ..Default::default()
+        }],
+        para_shape: ps,
+        dirty: Dirty(true),
+        ..Default::default()
+    })]
+}
+
+/// #457 — insert `count` empty rows at `at` that each REPLICATE the template row — the row just above
+/// (`at − 1`; row 0 when `at == 0`): every cell anchored on it is cloned (column layout, borders/shade,
+/// cell shape, height slot) with empty text, and a vertical merge covering it (ending on it, or
+/// crossing into row `at`) extends its `row_span` instead (see [`Op::TableAppendEmptyRow`]).
+fn table_insert_empty_rows(t: &mut Table, at: usize, count: usize, verb: &str) -> Result<()> {
+    if count == 0 {
+        return Err(Error::Other(format!("{verb}: count must be ≥ 1")));
+    }
+    if t.rows == 0 || t.cols == 0 {
+        return Err(Error::Other(format!("{verb}: empty table")));
+    }
+    if at > t.rows {
+        return Err(Error::Other(format!(
+            "{verb}: row {at} out of range (table has {} rows)",
+            t.rows
+        )));
+    }
+    let ncols = t.cols;
+    let tpl = at.saturating_sub(1); // the row being duplicated (row 0 for an insert at the top)
+    let row_h = row_slot(t, tpl);
+    let grow = row_h * count as i64;
+    let mut covered = vec![false; ncols];
+    let mut clones: Vec<Cell> = Vec::new();
+    for c in t.cells.iter_mut().filter(|c| c.active && c.col < ncols) {
+        let span = c.row_span.max(1);
+        let cspan = c.col_span.max(1).min(ncols - c.col);
+        if !(c.row <= tpl && tpl < c.row + span) {
+            continue;
+        }
+        for slot in covered.iter_mut().skip(c.col).take(cspan) {
+            *slot = true;
+        }
+        if at > 0 && span > 1 {
+            // A vertical merge over the template row (ending on it, or crossing into row `at`):
+            // extend it over the new rows instead of giving them cells under it. (Not a content
+            // edit — the structural re-emit re-addresses it; no dirty mark.)
+            c.row_span = span + count;
+            c.height_delta += grow;
+        } else {
+            clones.push(Cell {
+                col_span: cspan,
+                row_span: 1,
+                blocks: empty_cell_body(c),
+                src_span: None, // fresh — never claim the template's own XML span as ours (057)
+                template_span: template_of_cell(c),
+                height_delta: 0,
+                dirty: Dirty(true),
+                ..c.clone()
+            });
+        }
+    }
+    for c in &mut t.cells {
+        if c.row >= at {
+            c.row += count; // a move — re-addressed on export, not a content edit (no dirty mark)
+        }
+    }
+    for k in 0..count {
+        for tc in &clones {
+            t.cells.push(Cell {
+                row: at + k,
+                ..tc.clone()
+            });
+        }
+        // A column the template row leaves uncovered (a hole in the source grid) still gets a cell,
+        // so the new row has no hole.
+        for (col, _) in covered.iter().enumerate().filter(|(_, &c)| !c) {
+            t.cells.push(Cell {
+                row: at + k,
+                col,
+                blocks: empty_cell_body(&Cell::default()),
+                dirty: Dirty(true),
+                ..Default::default()
+            });
+        }
+    }
+    insert_height_slots(t, at, tpl, count);
+    t.rows += count;
+    t.height_delta += grow;
+    t.structure_edited = true;
+    t.dirty.mark();
+    Ok(())
+}
+
 /// #442 — delete rows `[at, at+count)` (see [`Op::TableDeleteRows`]).
 fn table_delete_rows(t: &mut Table, at: usize, count: usize) -> Result<()> {
     let end = delete_range("TableDeleteRows", "row", t.rows, at, count)?;
+    // #457: the removed rows' height slots — a shrunk merge and the table lose exactly these.
+    let removed_h: Vec<i64> = (at..end).map(|r| row_slot(t, r)).collect();
     let cells = std::mem::take(&mut t.cells);
     for mut c in cells {
         match shrink_axis(c.row, c.row_span, at, end) {
             None => {}
             Some((row, span)) => {
                 if (row, span) != (c.row, c.row_span.max(1)) {
+                    let lost: i64 = (c.row.max(at)..(c.row + c.row_span.max(1)).min(end))
+                        .map(|r| removed_h[r - at])
+                        .sum();
+                    c.height_delta -= lost;
+                    // A move/shrink is re-addressed by the structural re-emit; NOT a content/shade
+                    // edit — a dirty mark would make the export rebuild the cell (#457).
                     c.row = row;
                     c.row_span = span;
-                    c.dirty.mark();
                 }
                 t.cells.push(c);
             }
         }
     }
+    t.height_delta -= removed_h.iter().sum::<i64>();
     if t.row_heights.len() == t.rows {
         t.row_heights.drain(at..end);
     }
@@ -1261,6 +1420,8 @@ fn table_insert_cols(t: &mut Table, at: usize, count: usize) -> Result<()> {
                 fill_image: None,
                 diagonal: None,
                 src_span: None, // never inherit the neighbour's original XML span (057)
+                template_span: None, // the serializer borrows the nearest same-row cell (#442)
+                height_delta: 0,
                 width,
                 source_page_segments: 0,
                 dirty: Dirty(true),
@@ -2344,19 +2505,49 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                     t.rows
                 )));
             }
-            // Shift every existing cell at or below the insertion row down by N (keeps merges sane).
+            // #457 — the template row (the row above; row 0 at the top) lends each new cell the look
+            // of the cell over it and its height slot. Read on the PRE-edit grid.
+            let tpl = at.saturating_sub(1);
+            let row_h = row_slot(t, tpl);
+            let grow = row_h * n as i64;
+            let looks: Vec<Option<(usize, usize)>> = (0..t.cols)
+                .map(|col| {
+                    t.cells
+                        .iter()
+                        .find(|c| cell_covers(c, tpl, col))
+                        .and_then(template_of_cell)
+                })
+                .collect();
+            // Shift every existing cell at or below the insertion row down by N; a vertical merge
+            // CROSSING the insertion row extends over the new rows (it used to keep its span and
+            // overlap them).
+            let mut under_merge = vec![false; t.cols];
             for c in &mut t.cells {
                 if c.row >= at {
-                    c.row += n;
-                    c.dirty.mark();
+                    c.row += n; // a move — re-addressed on export (no dirty mark, #457)
+                } else if c.active && at < c.row + c.row_span.max(1) {
+                    c.row_span = c.row_span.max(1) + n;
+                    c.height_delta += grow;
+                    for slot in under_merge.iter_mut().skip(c.col).take(c.col_span.max(1)) {
+                        *slot = true;
+                    }
                 }
             }
-            // Rebase the freshly-built rows (which start at row 0) to begin at `at`, then add them.
+            // Rebase the freshly-built rows (which start at row 0) to begin at `at`, then add them —
+            // except a spec cell that would sit under an extended merge.
             for mut c in new_cells {
+                let cols = c.col..c.col + c.col_span.max(1);
+                if cols.clone().any(|k| under_merge.get(k).copied().unwrap_or(false)) {
+                    continue;
+                }
                 c.row += at;
+                c.template_span = looks.get(c.col).copied().flatten();
                 t.cells.push(c);
             }
+            insert_height_slots(t, at, tpl, n);
             t.rows += n;
+            t.height_delta += grow;
+            t.structure_edited = true;
             t.dirty.mark();
             sec.dirty.mark();
             Ok(())
@@ -2370,64 +2561,8 @@ pub fn apply(doc: &mut SemanticDoc, op: &Op) -> Result<()> {
                 return Err(Error::Other(format!("TableAppendEmptyRow: block {index} is not a table")));
             };
             let t = t.edit_target_mut(); // a 1×1 frame wrapper (자가진단표) → edit the inner table
-            if t.rows == 0 || t.cols == 0 {
-                return Err(Error::Other("TableAppendEmptyRow: empty table".into()));
-            }
             let at = t.rows;
-            let ncols = t.cols;
-            // Clone the LAST anchored row's cells so the new row matches the table's column structure
-            // (col positions + col_span + borders), blanking the text + shade + diagonal. This keeps a
-            // merged-column table (보유역량 spans 3) from collapsing to a uniform `cols`-cell grid.
-            let last = t.cells.iter().filter(|c| c.active).map(|c| c.row).max().unwrap_or(0);
-            let template: Vec<Cell> = t.cells.iter().filter(|c| c.active && c.row == last).cloned().collect();
-            // An empty body paragraph carrying the body cell's char/para shape (so typing inherits the look).
-            let empty_para = |cs: usize, ps: usize| vec![Block::Paragraph(Paragraph {
-                runs: vec![Run { char_shape: cs, content: vec![Inline::Text(String::new())], ..Default::default() }],
-                para_shape: ps,
-                dirty: Dirty(true),
-                ..Default::default()
-            })];
-            let mut covered = vec![false; ncols];
-            let mut new_cells: Vec<Cell> = Vec::new();
-            for tc in template {
-                if tc.col >= ncols {
-                    continue;
-                }
-                let cspan = tc.col_span.max(1).min(ncols - tc.col);
-                for dc in 0..cspan {
-                    covered[tc.col + dc] = true;
-                }
-                let (cs, ps) = tc.blocks.iter().find_map(|b| match b {
-                    Block::Paragraph(p) => Some((p.runs.first().map(|r| r.char_shape).unwrap_or(0), p.para_shape)),
-                    _ => None,
-                }).unwrap_or((0, 0));
-                let blocks = empty_para(cs, ps);
-                new_cells.push(Cell {
-                    row: at,
-                    col: tc.col,
-                    col_span: cspan,
-                    row_span: 1,    // a new appended row is a single row, even if the template cell spanned
-                    blocks,
-                    shade_color: None, // fresh body row — don't copy a header tint
-                    diagonal: None,    // …or a banner/N-A slash
-                    src_span: None,    // fresh cell — never inherit the template's original XML span (057)
-                    dirty: Dirty(true),
-                    ..tc
-                });
-            }
-            // Fill any column NOT covered by the template — e.g. a vertical merge from an earlier row
-            // crosses the last row, so that column has no origin cell at `last`. Without this the new
-            // row would have a hole (the vertical analogue of the bug we're fixing).
-            for (col, &cov) in covered.iter().enumerate() {
-                if !cov {
-                    new_cells.push(Cell { row: at, col, blocks: empty_para(0, 0), dirty: Dirty(true), ..Default::default() });
-                }
-            }
-            for c in new_cells {
-                t.cells.push(c);
-            }
-            t.rows += 1;
-            t.dirty.mark();
+            table_insert_empty_rows(t, at, 1, "TableAppendEmptyRow")?;
             sec.dirty.mark();
             Ok(())
         }
@@ -6388,9 +6523,10 @@ mod tests {
     }
 
     #[test]
-    fn table_append_empty_row_fills_columns_under_a_vertical_merge() {
-        // A vertical merge from an earlier row crossing the LAST row leaves that column with no origin
-        // cell at `last` — the appended row must still cover ALL columns (no hole).
+    fn table_append_empty_row_extends_a_vertical_merge_over_the_last_row() {
+        // #457 — a vertical merge covering the LAST (template) row extends over the appended row
+        // instead of leaving a blank cell under it (the group label merged down a repeat-row group).
+        // Every grid slot of the grown table is covered exactly once.
         let mut doc = doc_with(vec![simple_para(1, "앞")]);
         let cell = |t: &str| CellSpec {
             text: t.into(),
@@ -6424,16 +6560,39 @@ mod tests {
             panic!("expected table")
         };
         assert_eq!(t.rows, 3);
-        let new_cols: std::collections::BTreeSet<usize> = t
+        assert!(
+            t.structure_edited,
+            "row append rides the structural export (#457)"
+        );
+        let l = t
+            .cells
+            .iter()
+            .find(|c| c.active && c.row == 0 && c.col == 0)
+            .unwrap();
+        assert_eq!(
+            l.row_span, 3,
+            "the merge over the last row extends over the new row"
+        );
+        let new_cols: Vec<usize> = t
             .cells
             .iter()
             .filter(|c| c.active && c.row == 2)
             .map(|c| c.col)
             .collect();
-        assert!(
-            new_cols.contains(&0) && new_cols.contains(&1),
-            "appended row covers BOTH columns (no hole), got {new_cols:?}"
+        assert_eq!(
+            new_cols,
+            vec![1],
+            "the new row has cells only beside the merge"
         );
+        let mut cover = [[0u8; 2]; 3];
+        for c in t.cells.iter().filter(|c| c.active) {
+            for r in c.row..c.row + c.row_span.max(1) {
+                for k in c.col..c.col + c.col_span.max(1) {
+                    cover[r][k] += 1;
+                }
+            }
+        }
+        assert_eq!(cover, [[1; 2]; 3], "grid covered exactly once");
     }
 
     #[test]

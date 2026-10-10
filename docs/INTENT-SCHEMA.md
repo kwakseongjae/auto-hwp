@@ -475,6 +475,10 @@ visual affinity**를 쓴다. 반면 아래 `CaretRectBody`는 주소의 canonica
 | `count` | integer | 삽입 행 수(>0) | ● |
 | `cols` | integer | 행당 셀 수(>0) | ● |
 
+> #457: 새 칸은 바로 위 행(`at == 0` 이면 첫 행) 칸의 모양 · 높이를 따르고, HWPX 내보내기는 원본 칸 · 표 제목을 그대로 둔다.
+> `at` 을 **가로지르는** 세로 병합은 새 행까지 늘어나고 그 열에는 새 칸을 만들지 않는다(겹침 방지). 위 행에서 끝나기만 하는
+> 병합은 늘리지 않는다 — 행 복제는 `TableAppendRow`.
+
 #### `SetTableCell` — 셀 텍스트 교체(단일 평문 run, 1 undo 단위)
 ```json
 { "intent": "SetTableCell", "section": 0, "index": 1, "row": 0, "col": 0, "text": "셀 값" }
@@ -498,6 +502,11 @@ visual affinity**를 쓴다. 반면 아래 `CaretRectBody`는 주소의 canonica
 |------|------|---------|------|
 | `section` | integer | 구역 인덱스 | ● |
 | `index` | integer | 표 블록 인덱스 | ● |
+
+> #457: 마지막 행이 기준 행이다 — 그 행의 칸을 본떠(열 구성 · 테두리 · 음영 · 칸 모양 · 높이, 글은 비움) 새 행을 만들고,
+> 마지막 행을 덮는 세로 병합(마지막 행에서 끝나는 묶음 제목 칸 등)은 **`rowSpan` 을 늘려 새 행을 덮는다**(기본 동작, 옵션 없음).
+> HWPX 내보내기는 원본 칸 `<hp:tc>` · 표 제목 · 바깥 속성을 바이트 그대로 두고 새 칸은 기준 칸 `<hp:tc>` 를 복제한다.
+> `TableDeleteRows` 로 붙인 행을 지우면 원본 표 XML 로 돌아온다.
 
 
 #### `TableDeleteRows` · `TableInsertCols` · `TableDeleteCols` — 행 지우기 · 열 넣기 · 열 지우기(1 undo 단위, #442)

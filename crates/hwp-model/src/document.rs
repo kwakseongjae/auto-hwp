@@ -522,13 +522,20 @@ pub struct Table {
     /// serializer then writes `repeatHeader="0"` and no header cells for a (re-)emitted table; every
     /// other table keeps the legacy `repeatHeader="1"` + header first row. Parsed tables leave it false.
     pub repeat_header_off: bool,
-    /// EXPORT PROVENANCE (never serialized itself): an op deleted rows or inserted/deleted columns
-    /// (#442 `TableDeleteRows` · `TableInsertCols` · `TableDeleteCols`), so the cells' grid addresses no
+    /// EXPORT PROVENANCE (never serialized itself): an op inserted/deleted rows or columns
+    /// (#442 `TableDeleteRows` · `TableInsertCols` · `TableDeleteCols`; #457 `TableAppendEmptyRow` ·
+    /// `TableInsertRows`), so the cells' grid addresses no
     /// longer match their original `<hp:tc>` XML. The HWPX serializer then rebuilds the `<hp:tr>` rows
     /// from each cell's ORIGINAL `<hp:tc>` (byte-verbatim body) with re-addressed
     /// `cellAddr`/`cellSpan`/`cellSz`, instead of the per-cell patch (stale addresses) or the lossy
     /// whole-table re-emit. Parsed/lifted tables leave it false.
     pub structure_edited: bool,
+    /// EXPORT PROVENANCE (#457, never serialized itself): the net HWPUNIT height row-structure ops
+    /// added (+, `TableAppendEmptyRow`/`TableInsertRows`) or removed (−,
+    /// `TableDeleteRows`) since parse. The structural re-emit ([`Table::structure_edited`]) patches the
+    /// table's `<hp:sz height>` as ORIGINAL + this delta — the stored attribute does not always equal
+    /// the sum of the derived per-row floors, so re-summing would rewrite an untouched table's height.
+    pub height_delta: i64,
     /// EXPORT ONLY: the paragraph shape of the `<hp:p>` that HOLDS this table when the serializer
     /// synthesizes that wrapper (a table an op inserted — `InsertTableAt`, #440). `None` = the legacy
     /// section-fallback `paraPrIDRef` (parsed tables keep their original holder byte-verbatim and never
@@ -770,6 +777,17 @@ pub struct Cell {
     /// `pageBreak="CELL"` continuation; cell/table dirtiness or table geometry edits discard this
     /// stale cache and return pagination to live measurement.
     pub source_page_segments: usize,
+    /// EXPORT PROVENANCE (#457, never serialized itself): a FRESH cell a row op cloned from an
+    /// original cell (the template row's cell) — that cell's `<hp:tc>` byte range in
+    /// `Section.provenance.raw`. The structural re-emit copies that XML (height · borders · cell
+    /// shape) with the address re-written. `None` = no original to copy (the serializer then borrows
+    /// the nearest cell's XML, the #442 rule). Parsed cells leave it `None` (they have `src_span`).
+    pub template_span: Option<(usize, usize)>,
+    /// EXPORT PROVENANCE (#457, never serialized itself): the net HWPUNIT height row ops added to (+)
+    /// or removed from (−) this cell's row span — a vertical merge extended over appended rows, or
+    /// shrunk by deleted rows. The structural re-emit writes the cell's `<hp:cellSz height>` as its
+    /// ORIGINAL height + this delta.
+    pub height_delta: i64,
     pub dirty: Dirty,
 }
 
@@ -891,6 +909,8 @@ impl Default for Cell {
             padding: None,
             width: None,
             source_page_segments: 0,
+            template_span: None,
+            height_delta: 0,
             dirty: Dirty::default(),
         }
     }

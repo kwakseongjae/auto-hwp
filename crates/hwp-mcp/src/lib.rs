@@ -1236,8 +1236,11 @@ fn do_move_block(
         .map_err(|e| e.to_string()) // one undo unit
 }
 
-/// Append `count` empty BODY rows to the `index`-th table at logical row `at` as ONE undo unit
-/// (`TableInsertRows`). Each new row gets `cols` empty cells so the grid stays rectangular.
+/// Insert `count` empty BODY rows of `cols` cells into the `index`-th table at logical row `at` as
+/// ONE undo unit (`TableInsertRows`). #457: each new cell borrows the look and height of the template
+/// row's cell above it (the row `at − 1`; row 0 at the top) and the table rides the structural HWPX
+/// re-emit (original cells, caption verbatim); a vertical merge CROSSING row `at` extends over the
+/// new rows (its columns get no new cell).
 fn do_table_insert_rows(
     session: &mut Session,
     section: usize,
@@ -1434,7 +1437,7 @@ pub enum Intent {
         to: usize,
     },
     /// Table quick-edit — append `count` empty BODY rows of `cols` cells at logical row `at` of the
-    /// `index`-th table as ONE undo unit (`TableInsertRows`).
+    /// `index`-th table as ONE undo unit (`TableInsertRows`). #457: new cells look like the cell above.
     TableInsertRows {
         section: usize,
         index: usize,
@@ -1452,7 +1455,9 @@ pub enum Intent {
         text: String,
     },
     /// Table quick-edit — append ONE empty body row to the `index`-th table that REPLICATES the last
-    /// row's column layout as ONE undo unit (`TableAppendEmptyRow`). The "+행" verb (merge-safe).
+    /// row as ONE undo unit (`TableAppendEmptyRow`). The "+행" verb (merge-safe). #457: a vertical
+    /// merge covering the last row extends over the new row; HWPX export clones the last row's
+    /// `<hp:tc>` (height, borders, cell shape) and keeps every original cell and the caption verbatim.
     TableAppendRow {
         section: usize,
         index: usize,

@@ -36,6 +36,34 @@ packages are released in lockstep.)*
 
 아직 릴리스되지 않은 사용자 가시 변경은 여기에 기록한다.
 
+### 바뀜
+
+- **`TableAppendRow` — 마지막 행을 덮는 세로 병합은 붙인 행까지 늘어난다 (#457).** 반복 행 묶음 왼쪽에 세로로 병합한 묶음 제목 칸
+  (예: 「정부/공공기관 창업지원사업 수료 이력*」)처럼 마지막 행에서 끝나는 병합은 `rowSpan` 이 늘어 새 행을 덮는다. 전에는 그 열에 빈
+  칸을 새로 만들어 묶음 제목 아래가 갈라졌다. 기본 동작이다(끄는 옵션 없음). 새 행은 마지막 행의 칸을 그대로 본뜬다 — 열 구성 ·
+  테두리 · 음영 · 칸 모양 · 행 높이(글은 비움).
+  *(EN — `TableAppendRow` now extends a vertical merge that covers the last row over the new row instead of creating a blank
+  cell under it; the new row replicates the last row's cells — layout, borders, shade, cell shape, height — with empty text.)*
+- **`TableInsertRows` — 넣는 자리를 가로지르는 세로 병합은 새 행까지 늘어난다 (#457).** 그 열에는 새 칸을 만들지 않는다(전에는 병합과
+  겹친 칸이 생겼다). 새 칸은 바로 위 행(맨 위에 넣으면 첫 행) 칸의 모양 · 높이를 따른다. `cols` 칸 계약은 그대로다 — 위 행에서 끝나기만
+  하는 병합은 늘리지 않는다.
+  *(EN — `TableInsertRows` extends a vertical merge crossing the insertion row over the new rows (no overlapping cell);
+  new cells borrow the look and height of the cell above. The `cols`-cells contract is unchanged.)*
+
+### 고침
+
+- **행을 붙이거나 넣은 표를 HWPX 로 내보내면 표가 통째로 다시 만들어지던 문제 (#457).** `TableAppendRow` · `TableInsertRows` 뒤 내보내기가
+  #442 구조 경로를 타지 않아 표 전체를 새로 썼다 — 원본 행 높이가 22pt 대체값으로 바뀌고(한/글 실측 47.5→31.5pt 등), 표 제목
+  (`<hp:caption>`)이 사라지고, 붙인 행 위 선이 원본 점선 대신 실선이 됐다. 그 뒤 붙인 행을 지워도 바뀐 높이가 남았다. 이제 원본 칸
+  `<hp:tc>` · 표 제목 · 바깥 속성은 바이트 그대로 두고, 새 칸은 기준 칸의 `<hp:tc>` 를 복제하며(높이 · 테두리 포함), 표 · 병합 칸의
+  높이는 **원본 값 ± 붙이거나 지운 행 높이**로 쓴다. 붙이기 → 지우기 왕복(같은 세션, 저장 → 다시 열기 둘 다)은 원본 표 XML 과 같다.
+  행 지우기(#442)도 표 높이를 원본 기준으로 고치고, 옮기기만 한 칸은 다시 만들지 않는다(파서가 채운 음영으로 칸 테두리 채우기를
+  합성 채우기로 바꾸던 것 — 점선 등 — 도 함께 막힘).
+  *(EN — Exporting a table after `TableAppendRow`/`TableInsertRows` no longer re-emits the whole table (row heights reset to a
+  22pt fallback, caption lost, dotted lines turned solid). Original cells, the caption and outer props stay byte-verbatim; new
+  cells clone their template cell's `<hp:tc>`; table/merge heights are written as original ± the rows added/removed, so
+  append → delete round-trips to the original table XML.)*
+
 ---
 
 ## [0.0.15] — 2026-10-10
