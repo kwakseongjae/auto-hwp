@@ -3,6 +3,21 @@
 > 새 세션·compact 후 **이 파일 하나만 읽으면 재개할 수 있어야 한다.**
 > 갱신 시점: 작업 단위 완료 · 결정 확정 · 머지 직후 (보고보다 먼저). 프로토콜: `AGENTS.md` §세션 연속성.
 
+- 갱신: 2026-10-10 · Claude Opus 5.5 — **0.0.16 발행 — 행 붙이기 · 넣기 구조 경로** (main `7360736`).
+  · **#457 → #458**: `TableAppendEmptyRow`(Intent `TableAppendRow`) · `TableInsertRows` 가 `structure_edited` 를 세우지 않아 내보내기가 표를 통째로
+    다시 만들었다(`emit_table` — 원본 행 높이 22pt · 표 제목 `<hp:caption>` 소실 · 점선 → 실선 · 병합 갈라짐, 지워도 높이 남음). 이제 구조 경로:
+    원본 `<hp:tc>` · 캡션 · 바깥 속성 바이트 그대로, 새 칸 = 기준 칸 `<hp:tc>` 복제(`Cell::template_span`), `TableAppendRow` 는 마지막 행을 덮는
+    세로 병합을 늘림(기본), `TableInsertRows` 는 넣는 자리를 **가로지르는** 병합만 늘리고 `cols` 계약 유지. 높이 = 원본 ± 붙이거나 지운 행 높이
+    (`Table/Cell::height_delta` — 파생 행 바닥 합 ≠ 원본 `sz height` 인 표가 흔함). 행 op 가 옮기기만 한 칸은 dirty 안 찍음 → 파서 음영 칸이 합성
+    채우기로 바뀌던 것도 막힘. 붙이기 → 지우기(같은 세션 · 저장 → 다시 열기) = 원본 표 XML. 공개 코퍼스 `20251107/test.hwpx` · SimpleTable+캡션 6건,
+    커밋 뒤 주입 8종 전부 red.
+  · **#463 → publish 발행 0.0.16**(2026-10-10 14:01Z = KST 23:01, run 38057369004 · headSha = 머지 커밋): wasm 8,699,274 B · sha256 `07e50c08…dbc8` ·
+    SRI `sha384-nw5lDRF/…nMH`, Node 20/22/24 · chromium 145 · webkit 26.
+  · 한계: 칸 안 표(`path`) · 1×1 틀 안쪽 표의 행 붙이기는 바깥 칸 재작성 경로. 병합 칸 높이가 행 높이 합과 원래 다른 표는 저장 → 다시 열기 → 지우기
+    왕복에서 병합 칸 높이가 다를 수 있음(같은 세션은 정확). 열 넣기/지우기는 여전히 옮긴 칸을 dirty 로 찍는다(음영 칸 채우기 재지정).
+  · 후속 이슈: #460(platform 테스트가 워크트리에서 뿌리 못 찾음) · #461(hwp-lab lock 불일치 · verify --full 이 hwp-lab 의존성 미설치) ·
+    #462(e2e cell-caret-053 붙여넣기 둘째 줄 — 0.0.15 에서도 재현).
+
 - 갱신: 2026-10-10 · Claude Opus 5.5 — **0.0.15 발행 — 표 행/열 지우기 · 담는 문단 모양 · 표 API** (main `74dee93`).
   · **#442 → #443 (R-04)**: `TableDeleteRows` · `TableInsertCols` · `TableDeleteCols` `{section, index, at, count, path?}`. 병합은 줄이고(가로지름)
     범위 안 시작은 `at` 으로, 열 편집은 표 너비 유지(누적 경계 반올림). `Table::structure_edited` → 직렬화기 `structural_table_xml` 이 **원본
