@@ -2020,7 +2020,9 @@ fn cell_content_dirty(blocks: &[Block]) -> bool {
 /// (shade) keeps its whole body byte-verbatim and patches just the open tag's `borderFillIDRef`.
 /// Falls back to the cell's own original paraPr/charPr refs so a centered/styled cell keeps its
 /// look. Returns None when the segment doesn't parse as `<hp:tc>…<hp:subList>…</hp:subList>…` —
-/// the caller then re-emits the whole table instead (never a half-patch).
+/// the caller then re-emits the whole table instead (never a half-patch). `repoint_shade` = false keeps the
+/// `<hp:tc>` fill as is (#457 — a cloned row's cell keeps its template's fill).
+#[allow(clippy::too_many_arguments)]
 fn patch_cell_xml(
     cell_orig: &str,
     cell: &Cell,
